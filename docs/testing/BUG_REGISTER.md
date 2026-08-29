@@ -2940,3 +2940,17 @@ All listed Stage 4 defects are locally closed. S4-BUG-008 also passed its exact-
 | 提交 | `main@2166f0321265eeeb2aed7985084ca5a090e43a7a`，tree `fd261545f428d5b632c5c97c449256c85abf062f`；`stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 未触碰。 |
 | 当前状态 | **本地已修复 / 云端待验证。** 需证明 Coze 请求体实际携带上述精确 pair，真实任务进入 Pear 异步阶段并消费 ZIP/PSD，而不是再次本地回退。 |
 | 证据 | `docs/testing/evidence/v588-stability-002-2166f032-element-layer-routing-local-2026-08-29.json`。 |
+
+### V588-STABILITY-002-BUG-012：受保护源码授权引用不可从干净 main 追溯（2026-08-29）
+
+| 字段 | 内容 |
+|---|---|
+| 严重等级 | P1（发布门禁）：运行时代码可构建启动，但 Coze 干净检出无法完成全量自动化验收。 |
+| 稳定复现 | Coze 精确检出 `main@89c2f12c8e544cdc0193e4b64cb98bb1c6932563` 后，全量测试为 `571 passed / 1 failed / 122 skipped`；失败点为 `protected-baseline-gate.spec.ts` 无法解析仅存在于开发侧分支的来源提交 `9a9fb8b`。 |
+| 根因 | `protected-source-authorizations.json` 中 30 条来源记录指向不属于当前 `main` 祖先链的提交。29 条在 `main` 上存在文件 blob 完全相同的等价提交；`generation-panel.tsx` 对应同作者时间、同标题的合并提交 `cce434a1`。授权路径本身未扩大，但来源不可在干净仓库独立审计。 |
+| RED | 在既有来源授权单测中新增“每个来源提交必须可从 HEAD 追溯”的断言；修复前稳定失败于 `9a9fb8b`，逐项替换后又继续识别 `9c3f52f` 等剩余不可达来源。 |
+| 最小修复 | 将 30 条来源 SHA 改为当前 `main` 祖先链上的等价提交，并用单次 `git rev-list HEAD` 建立可达集合；保持精确路径白名单、授权数量和业务源码不变。 |
+| 回归 | 聚焦门禁 `7/7`，来源不可达计数 `0`；V5.8.8 清单/证据门禁 `8/8`；TypeScript、构建版 Lint 通过；全仓 `572 files / 4159 passed / 122 PostgreSQL-gated skipped / 0 failed`。 |
+| 独立阻断 | `pnpm check:protected-baseline` 仍按既有发布政策阻止 41 个未加入精确授权表的业务文件。该结果不是本次修复新增，也未通过扩大白名单隐藏。 |
+| 提交与状态 | `main@128ec13bf9e24b46a7d3dcfc1c2bfeba81adea38`，tree `73fbe6056296852cf815f3871b8dc3a1e0a3ca96`；**本地已修复 / Coze 干净检出待复验**。`stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 未触碰。 |
+| 证据 | `docs/testing/evidence/v588-stability-002-128ec13b-provenance-main-reachability-2026-08-29.json`。 |

@@ -2058,6 +2058,15 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - **回归判定：Pear ZIP/主 PSD 消费 PASS；远程完成、图层编辑、成功扣费 FAIL/UNVERIFIED；旧结果串用本地 GREEN、云端待验。**
 - 机器证据：`docs/testing/evidence/v588-stability-002-pear-audit-correction-2026-08-29.json`。
 
+## 2026-08-29 `128ec13b` 干净 main 来源追溯回归
+
+- Coze 在 `89c2f12c` 的干净检出中真实复现唯一全量失败：来源授权引用的 `9a9fb8b` 不在 `main` 历史；同轮专项 `96/96`、TypeScript、Lint、生产构建和健康检查均通过。
+- 本地 RED 增加来源必须属于 `HEAD` 祖先链的永久断言，随后识别出共 30 条不可达记录；29 条按相同文件 blob 映射，`generation-panel.tsx` 映射到同作者时间和标题的 `cce434a1`。
+- 修复后来源不可达计数为 `0`，聚焦门禁 `7/7`，V5.8.8 清单与证据测试 `8/8`；全仓 `572` 个文件通过、`4159` 项通过、`122` 项 PostgreSQL 专项明确跳过、`0` 失败。
+- TypeScript 与构建版 Lint 通过。业务源码、数据库、账号、供应商配置和 `stable` 均未修改。
+- `check:protected-baseline` 仍报告 41 个既有未授权业务漂移，维持阻止发布；该项必须按路径审计，不能通过本次来源修复顺带放行。
+- **本地判定：BUG-012 PASS；Coze 干净检出回归 PENDING。**
+
 ## 2026-08-29 V588-STABILITY-002 `90231c70` 云端增量
 
 - Coze 已精确运行 `main@90231c70f7dacca43eb5e8ccd688c8204d12f3fe`，tree `a6dbe58d477112b7f2d0df205892efb0b34b428e`，Build ID `6-RXcDf1VQ8054PNXPhF5`；`stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 未触碰。

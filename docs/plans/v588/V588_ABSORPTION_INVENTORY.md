@@ -640,3 +640,11 @@ No item is “absorbed” merely because its source file exists or a unit test p
 - `main@2166f0321265eeeb2aed7985084ca5a090e43a7a` 已按 TDD 最小接入：父请求提交前从 `/api/workflow/models?type=layer` 解析当前用户获授权的 `Image-Layered`；显式目标保持不变，`board`/`local` 不查询，smart 模式目录短暂故障仍保留本地回退，cloud 模式与取消错误继续失败关闭。
 - 本地门禁：聚焦 Pear/分层 10 文件 `98/98`；全仓 `572` 文件、`4159` 项通过、`122` 项因本轮缺少隔离 PostgreSQL 测试库明确跳过、`0` 失败；TypeScript 与构建版 Lint 通过。12 GiB Node 堆下生产构建完成，webpack 编译 `16.9` 分钟、TypeScript 通过、静态页面 `117/117`，Build ID `BEGTUtSa2MLS18fd4_yW6`；默认/8 GiB 资源边界仍保留为部署容量风险。
 - **状态：精确目标路由本地关闭 / 云端未吸收。** 下一步只让 Coze 精确拉取本提交并验证请求体、异步阶段、ZIP/主 PSD、远程图层编辑/保存/刷新、PSD 导出及账务矩阵；完成前不进入 `V588-ADMIN-004`。
+
+## 2026-08-29 V588-STABILITY-002 干净 main 来源追溯检查点
+
+- Coze 精确运行 `89c2f12c` 时，专项 `96/96`、TypeScript、Lint、生产构建、三个健康端点和 `11/11` 静态资源均通过；全量测试唯一失败来自受保护来源授权引用了干净 `main` 不包含的侧分支提交。
+- `128ec13b` 仅修复测试与授权来源元数据：30 条来源改为 `main` 祖先链上的等价提交，并新增来源必须从 `HEAD` 可追溯的永久门禁；没有修改任何业务功能、管理员配置、数据库或账务逻辑。
+- 本地聚焦门禁 `7/7`，全仓 `4159` 项通过、`122` 项 PostgreSQL 专项明确跳过、`0` 失败，TypeScript 与构建版 Lint 通过。
+- `check:protected-baseline` 仍阻止 41 个既有未授权业务文件，保持发布阻断；不得把本次来源可达修复解释成这些业务漂移已获准。
+- **状态：BUG-012 本地关闭 / 云端待验；V588-STABILITY-002 仍未整体吸收。** 下一步先完成 Coze 干净检出零失败回归，再继续 Pear 远程与账务闭环；不进入 `V588-ADMIN-004`。

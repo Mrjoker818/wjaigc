@@ -1791,3 +1791,10 @@ Stage 3 remains in Task 10. Stage 4/5 are not authorized.
 - 必须证明任务进入 `submitting-pear -> waiting-for-pear -> downloading-psd -> extracting-psd -> checking-quality -> ready`；如供应商失败，应保留结构化原因并正确退款，不能用本地 fallback 结果标记 Pear 通过。
 - 成功路径仍需：真实 ZIP、唯一非 `_depth.psd` 主 PSD、`8BPS`、至少 2 个 `source=pear-psd` 可编辑图层、移动/显隐、保存刷新恢复和 PSD 导出文件检查。
 - 账务仍需：成功任务一次扣费且不退款；同键重放不新增任务或扣费；失败/取消最多一次退款；迟到完成不覆盖终态。
+
+## 2026-08-29 `128ec13b` 来源门禁后的剩余验证
+
+- Coze 干净检出尚未精确拉取 `128ec13b`；必须复跑 `protected-baseline-gate.spec.ts` 和全量 Vitest，确认不再依赖本机侧分支对象。
+- `pnpm check:protected-baseline` 当前仍阻止 41 个既有业务文件。每个文件需按实际来源、测试证据和发布边界单独审计；不得批量加入宽泛白名单。
+- `122` 项 PostgreSQL 专项在本轮本机环境因缺少隔离测试库跳过，继续保持未验证；不得指向生产数据库补跑。
+- Pear 远程成功终态、真实图层编辑/保存/刷新、PSD 导出、一次扣费及失败/取消一次退款仍未关闭。

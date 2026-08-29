@@ -1693,3 +1693,11 @@ The focused gate test passes `7/7`; the actual protected-baseline command passes
 - 当前提交以共享模型目录解析器补齐精确目标，没有修改管理员授权、供应商配置、积分价格、ZIP 下载、PSD 解析或终态转换；聚焦 `98/98`、全仓 `4159 passed / 122 skipped / 0 failed`、TypeScript 和 Lint 通过。
 - 本机 12 GiB Node 堆生产构建已完成，webpack `16.9` 分钟、TypeScript 通过、静态页面 `117/117`，Build ID `BEGTUtSa2MLS18fd4_yW6`；默认/8 GiB 内存边界仍是部署容量风险。Coze 尚未拉取本候选，因此不得宣称 Pear 已调用或 ZIP/PSD 编辑链路已通过。
 - **发布结论维持“有条件通过”。** 先完成 Coze exact-SHA、生产构建和现有 Google Chrome 的请求路由/远程图层/导出/账务闭环，再判断 `V588-STABILITY-002` 是否可以吸收；当前不得进入 `V588-ADMIN-004`。
+
+## 2026-08-29 `128ec13b` 来源可追溯门禁发布增量
+
+- Coze 已证明 `89c2f12c` 的功能专项、类型、Lint、构建、启动和静态资源健康，但全量测试因受保护来源提交不属于干净 `main` 历史而出现 1 项失败；因此该版本不能声明全量门禁通过。
+- `128ec13b` 将 30 条来源授权迁移到 `main` 可达的等价提交，并新增永久可达性断言。授权路径数量未增加，业务代码和 `stable` 未修改。
+- 本地全量测试恢复为 `4159 passed / 122 PostgreSQL-gated skipped / 0 failed`，TypeScript 与 Lint 通过；Coze 仍需精确拉取该提交并证明干净检出全量零失败。
+- 独立的受保护基线发布脚本仍阻止 41 个未授权业务文件；它们不能因来源可达性修复而自动获准。
+- **发布结论保持“有条件通过”。** 在 Coze 干净检出回归、41 条业务漂移审计、Pear 远程编辑/保存/导出和真实账务矩阵完成前，不关闭 `V588-STABILITY-002`，不进入 `V588-ADMIN-004`。
