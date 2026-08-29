@@ -2119,6 +2119,13 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - 8 GiB 首轮在工作集约 `8.17 GB` 时未完成；使用 12 GiB Node 堆重新执行同一 `pnpm build` 后，webpack `16.9` 分钟编译成功，TypeScript 通过，静态页面 `117/117`，Build ID `BEGTUtSa2MLS18fd4_yW6`。**本地功能与生产构建 PASS；云端行为 PENDING。**
 - 云端验收必须在同一次操作中区分：请求目标路由、Pear 异步任务、ZIP/主 PSD、编辑器图层和账务；本地两层 fallback 不得冒充 Pear 成功。
 
+## 2026-08-29 `51a31371` 最终本地生产构建
+
+- 在保护基线精确授权和中文证据均进入 `main` 后，对精确提交 `51a313717df4edb30dc4758b78c476242b7667cf` 使用 12 GiB Node 堆执行完整 `pnpm build`。
+- webpack `14.0` 分钟编译成功，TypeScript `65` 秒通过，静态页面 `117/117`，最终退出码 `0`，Build ID `I9uo73xu5yg9CivYsHhRj`。
+- 构建期间峰值工作集约 `9.35 GB`，证明默认较小内存仍属于部署容量风险；不应通过缩小检查范围掩盖。
+- **最终本地构建 PASS；Coze 干净检出、构建和健康检查仍 PENDING。**
+
 ## 2026-08-29 `bf8d8623` 保护基线精确授权回归
 
 - RED 测试先从固定保护基线到 `HEAD` 枚举生产源码漂移，稳定返回 41 个未授权路径。

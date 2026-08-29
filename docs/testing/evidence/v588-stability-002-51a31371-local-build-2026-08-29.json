@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "capturedAt": "2026-08-29T14:48:00+08:00",
+  "scope": "V588-STABILITY-002 final local production build",
+  "commit": "51a313717df4edb30dc4758b78c476242b7667cf",
+  "tree": "c06168ccf61f289cda5f80abaa75ee0730d57f0d",
+  "stableCommit": "52f7c601ed150769e15d06fb435c6e360e28c9e7",
+  "command": "NODE_OPTIONS=--max-old-space-size=12288 pnpm build",
+  "webpackDurationMinutes": 14,
+  "typeScriptDurationSeconds": 65,
+  "staticPagesGenerated": 117,
+  "staticPagesExpected": 117,
+  "buildId": "I9uo73xu5yg9CivYsHhRj",
+  "peakWorkingSetGiB": 9.35,
+  "exitCode": 0,
+  "stableMutated": false,
+  "businessSourceModifiedByEvidenceCommit": false,
+  "cloudVerification": "pending",
+  "verdict": "local production build passed; cloud clean-checkout validation pending"
+}

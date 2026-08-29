@@ -1708,3 +1708,7 @@ The focused gate test passes `7/7`; the actual protected-baseline command passes
 - 本地 `check:protected-baseline` 已从 41 个阻断恢复为未授权漂移 `0`、警告 `0`；聚焦测试 `16/16`，全量测试 `4160 passed / 122 PostgreSQL-gated skipped / 0 failed`，TypeScript 与 Lint 通过。
 - 业务源码树未变化，`stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 未触碰。
 - **发布结论仍为“有条件通过”。** 保护基线本地阻断已关闭，但 Coze 必须对最终提交完成干净检出、全量测试、生产构建和健康检查；隔离 PostgreSQL 专项及 Pear 远程编辑/保存/导出和真实账务矩阵仍未关闭。
+
+### 最终本地构建补充
+
+`main@51a313717df4edb30dc4758b78c476242b7667cf` 已完成 12 GiB 堆生产构建：webpack `14.0` 分钟、TypeScript `65` 秒、静态页面 `117/117`、Build ID `I9uo73xu5yg9CivYsHhRj`、退出码 `0`。该证据关闭本地构建缺口，但不能替代 Coze 最终提交验证或 PostgreSQL/Pear 真实链路。

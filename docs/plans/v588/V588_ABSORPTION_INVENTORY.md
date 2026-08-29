@@ -655,3 +655,7 @@ No item is “absorbed” merely because its source file exists or a unit test p
 - `main@bf8d86230f6a4fc41c3ed788f633aa3ab5ed1b6f` 为 41 个路径建立精确授权：来源提交均在 `HEAD` 祖先链，均修改对应路径，且来源 blob 与当前 blob 相同；验证 `41/41`、失败 `0`。
 - 本地聚焦门禁 `16/16`，保护基线未授权漂移 `0`、警告 `0`；全仓 `4160` 项通过、`122` 项 PostgreSQL 专项明确跳过、`0` 失败，TypeScript 与构建版 Lint 通过。业务源码与 `stable` 均未修改。
 - **状态：BUG-012/013 本地关闭 / Coze 最终提交待验；V588-STABILITY-002 仍未整体吸收。** 下一步只做 Coze 干净检出全量回归、生产构建和健康检查，随后继续 Pear 远程与账务闭环；不进入 `V588-ADMIN-004`。
+
+### 最终本地构建证据
+
+精确提交 `51a313717df4edb30dc4758b78c476242b7667cf` 已完成 12 GiB 堆生产构建，webpack `14.0` 分钟、TypeScript `65` 秒、静态页面 `117/117`、Build ID `I9uo73xu5yg9CivYsHhRj`、退出码 `0`。下一动作不变：Coze 干净检出并复跑相同门禁；不得跳到 `V588-ADMIN-004`。
