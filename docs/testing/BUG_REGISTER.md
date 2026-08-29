@@ -2936,7 +2936,7 @@ All listed Stage 4 defects are locally closed. S4-BUG-008 also passed its exact-
 | 根因 | `infinite-canvas.tsx` 使用同步 `createElementDecompositionRequest()` 创建父请求，只传 `boardProviderId/boardModelId`；现有 `resolveDefaultLayerTarget()` 仅被独立分层客户端调用，没有进入元素拆解父链路。 |
 | RED | 新增“提交图层分支前解析获授权 Pear 目标”和 UI 必须调用异步解析请求的契约。修复前 `6 failed / 9 passed`，其中本缺陷对应 2 项稳定失败。 |
 | 最小修复 | 导出并复用 `resolveDefaultLayerTarget()`；新增 `createResolvedElementDecompositionRequest()`，在需要 layers 且未显式指定目标时解析精确 pair，并在父请求提交前完成解析。smart 模式目录故障保留本地回退；cloud/abort 继续失败关闭。 |
-| 回归 | Pear/分层聚焦 10 文件 `98/98`；全仓 `4159 passed / 122 PostgreSQL-gated skipped / 0 failed`；TypeScript 与 Lint 通过。本机生产构建受约 `8.17 GB` 内存边界未取得终态。 |
+| 回归 | Pear/分层聚焦 10 文件 `98/98`；全仓 `4159 passed / 122 PostgreSQL-gated skipped / 0 failed`；TypeScript 与 Lint 通过。12 GiB Node 堆生产构建完成，webpack `16.9` 分钟、静态页面 `117/117`、Build ID `BEGTUtSa2MLS18fd4_yW6`。 |
 | 提交 | `main@2166f0321265eeeb2aed7985084ca5a090e43a7a`，tree `fd261545f428d5b632c5c97c449256c85abf062f`；`stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 未触碰。 |
 | 当前状态 | **本地已修复 / 云端待验证。** 需证明 Coze 请求体实际携带上述精确 pair，真实任务进入 Pear 异步阶段并消费 ZIP/PSD，而不是再次本地回退。 |
 | 证据 | `docs/testing/evidence/v588-stability-002-2166f032-element-layer-routing-local-2026-08-29.json`。 |

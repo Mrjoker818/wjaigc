@@ -25,7 +25,8 @@
     "full": "572 files passed; 4159 tests passed; 122 PostgreSQL-gated skipped; 0 failed",
     "typecheck": "passed",
     "lintBuild": "passed",
-    "productionBuild": "not completed; webpack optimization reached approximately 8.17 GB working set and was stopped"
+    "productionBuild": "passed with NODE_OPTIONS=--max-old-space-size=12288; webpack compiled in 16.9 minutes; 117/117 static pages; Build ID BEGTUtSa2MLS18fd4_yW6",
+    "productionBuildResourceNote": "the earlier 8 GiB run did not reach a terminal result; default/8 GiB capacity remains a deployment risk"
   },
   "safety": {
     "stableTouched": false,

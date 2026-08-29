@@ -1691,5 +1691,5 @@ The focused gate test passes `7/7`; the actual protected-baseline command passes
 
 - 已关闭一个新的 P1 本地缺陷：元素拆解父请求此前未携带用户获授权的 Pear `providerId + Image-Layered`，导致所有“可编辑图层”测试都可能静默使用本地 fallback，历史两层完成态不能作为 Pear 成功证据。
 - 当前提交以共享模型目录解析器补齐精确目标，没有修改管理员授权、供应商配置、积分价格、ZIP 下载、PSD 解析或终态转换；聚焦 `98/98`、全仓 `4159 passed / 122 skipped / 0 failed`、TypeScript 和 Lint 通过。
-- 本机 8 GiB 构建未完成，且 Coze 尚未拉取 `2166f032`。因此不得宣称本提交已部署、Pear 已调用或 ZIP/PSD 编辑链路已通过。
+- 本机 12 GiB Node 堆生产构建已完成，webpack `16.9` 分钟、TypeScript 通过、静态页面 `117/117`，Build ID `BEGTUtSa2MLS18fd4_yW6`；默认/8 GiB 内存边界仍是部署容量风险。Coze 尚未拉取本候选，因此不得宣称 Pear 已调用或 ZIP/PSD 编辑链路已通过。
 - **发布结论维持“有条件通过”。** 先完成 Coze exact-SHA、生产构建和现有 Google Chrome 的请求路由/远程图层/导出/账务闭环，再判断 `V588-STABILITY-002` 是否可以吸收；当前不得进入 `V588-ADMIN-004`。

@@ -2107,5 +2107,5 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - RED 先证明元素拆解父请求不会为 layers 分支解析当前用户获授权的 Pear `Image-Layered`，UI 也没有等待解析后再提交。
 - GREEN 后，`createResolvedElementDecompositionRequest()` 在需要远程图层且缺少显式目标时只读 `/api/workflow/models?type=layer`，并把解析到的 `providerId + modelId` 冻结进父请求；显式 pair、仅物料板、本地引擎和 smart 回退边界均有回归。
 - 聚焦回归共 10 文件 `98/98`；全仓 `572` 个文件、`4159` 项通过、`122` 项因缺少隔离 PostgreSQL 测试库跳过、`0` 失败；TypeScript 和构建版 Lint 通过。
-- 8 GiB 本地生产构建在 webpack 优化阶段工作集约 `8.17 GB` 时仍未返回成功终态并被人工终止。**本地功能回归 PASS；生产构建与云端行为 PENDING。**
+- 8 GiB 首轮在工作集约 `8.17 GB` 时未完成；使用 12 GiB Node 堆重新执行同一 `pnpm build` 后，webpack `16.9` 分钟编译成功，TypeScript 通过，静态页面 `117/117`，Build ID `BEGTUtSa2MLS18fd4_yW6`。**本地功能与生产构建 PASS；云端行为 PENDING。**
 - 云端验收必须在同一次操作中区分：请求目标路由、Pear 异步任务、ZIP/主 PSD、编辑器图层和账务；本地两层 fallback 不得冒充 Pear 成功。

@@ -638,5 +638,5 @@ No item is “absorbed” merely because its source file exists or a unit test p
 - 云端只读模型目录已确认当前用户获授权的分层目标为 `providerId=api_1785190544435_1heimk6`、`modelId=Image-Layered`，协议为 `pearapi-layer`，执行模式为异步，输出类型包含 ZIP 与 PSD。
 - 稳定根因是元素拆解父请求仅传递物料板的图像 provider/model，没有为 `layers` 分支解析并传递上述 Pear 精确目标；因此“可编辑图层”会稳定落到 smart 本地回退，并出现 `No exact Pear provider/model was selected`，不能据此判断 Pear ZIP 链路通过或失败。
 - `main@2166f0321265eeeb2aed7985084ca5a090e43a7a` 已按 TDD 最小接入：父请求提交前从 `/api/workflow/models?type=layer` 解析当前用户获授权的 `Image-Layered`；显式目标保持不变，`board`/`local` 不查询，smart 模式目录短暂故障仍保留本地回退，cloud 模式与取消错误继续失败关闭。
-- 本地门禁：聚焦 Pear/分层 10 文件 `98/98`；全仓 `572` 文件、`4159` 项通过、`122` 项因本轮缺少隔离 PostgreSQL 测试库明确跳过、`0` 失败；TypeScript 与构建版 Lint 通过。本机 8 GiB 构建在 webpack 优化阶段工作集约 `8.17 GB` 后未完成并人工终止，不能记为构建通过，必须由 Coze 提供本提交的生产构建终态。
+- 本地门禁：聚焦 Pear/分层 10 文件 `98/98`；全仓 `572` 文件、`4159` 项通过、`122` 项因本轮缺少隔离 PostgreSQL 测试库明确跳过、`0` 失败；TypeScript 与构建版 Lint 通过。12 GiB Node 堆下生产构建完成，webpack 编译 `16.9` 分钟、TypeScript 通过、静态页面 `117/117`，Build ID `BEGTUtSa2MLS18fd4_yW6`；默认/8 GiB 资源边界仍保留为部署容量风险。
 - **状态：精确目标路由本地关闭 / 云端未吸收。** 下一步只让 Coze 精确拉取本提交并验证请求体、异步阶段、ZIP/主 PSD、远程图层编辑/保存/刷新、PSD 导出及账务矩阵；完成前不进入 `V588-ADMIN-004`。

@@ -1786,7 +1786,7 @@ Stage 3 remains in Task 10. Stage 4/5 are not authorized.
 
 ## 2026-08-29 `2166f032` 精确目标路由后的剩余云端证据
 
-- Coze 尚未精确拉取并构建 `2166f032`；本机 8 GiB 构建也没有成功终态，因此生产构建保持 `UNVERIFIED`。
+- 本机 12 GiB Node 堆生产构建已通过，Build ID `BEGTUtSa2MLS18fd4_yW6`；Coze 仍未精确拉取并构建包含修复的最新 `main`，因此只保留 Coze 部署构建为 `UNVERIFIED`。默认/8 GiB 构建容量继续作为资源风险记录，不再误记为代码构建失败。
 - 真实元素拆解请求必须包含 `layerProviderId=api_1785190544435_1heimk6` 与 `layerModelId=Image-Layered`，并确认用户授权接口在提交时仍允许该 pair。
 - 必须证明任务进入 `submitting-pear -> waiting-for-pear -> downloading-psd -> extracting-psd -> checking-quality -> ready`；如供应商失败，应保留结构化原因并正确退款，不能用本地 fallback 结果标记 Pear 通过。
 - 成功路径仍需：真实 ZIP、唯一非 `_depth.psd` 主 PSD、`8BPS`、至少 2 个 `source=pear-psd` 可编辑图层、移动/显隐、保存刷新恢复和 PSD 导出文件检查。
