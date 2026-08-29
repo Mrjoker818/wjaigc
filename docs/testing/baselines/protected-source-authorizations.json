@@ -1,6 +1,6 @@
 {
-  "authorizationId": "stage-4-v588-chat-002-reviewed-source-integration-2026-08-26",
-  "approvedAt": "2026-08-26",
+  "authorizationId": "v588-stability-002-layer-documents-reviewed-source-integration-2026-08-29",
+  "approvedAt": "2026-08-29",
   "scope": "Exact paths only; directory-prefix authorization is prohibited.",
   "stableBranchMutationAllowed": false,
   "authorizations": [
@@ -134,6 +134,12 @@
     { "path": "src/components/psd-editor/LayerInspector.tsx", "sourceCommit": "34c8980d" },
     { "path": "src/components/psd-editor/PsdCanvas.tsx", "sourceCommit": "34c8980d" },
     { "path": "src/components/psd-editor/PsdLayerEditor.tsx", "sourceCommit": "a50fcbeb" },
+    { "path": "src/app/api/layer-documents/route.ts", "sourceCommit": "5dfa1f0c" },
+    { "path": "src/lib/layer-documents/client.ts", "sourceCommit": "68242e43" },
+    { "path": "src/lib/layer-documents/service.ts", "sourceCommit": "5dfa1f0c" },
+    { "path": "src/lib/layer-documents/storage.ts", "sourceCommit": "f8c9bf44" },
+    { "path": "src/lib/layer-documents/types.ts", "sourceCommit": "ca6858f6" },
+    { "path": "src/lib/layer-documents/validation.ts", "sourceCommit": "ca6858f6" },
     { "path": "src/components/workspace-source-trace.tsx", "sourceCommit": "09e2b0c0" },
     { "path": "src/lib/asset-core/source-trace.ts", "sourceCommit": "496d7892" },
     { "path": "src/lib/asset-core/types.ts", "sourceCommit": "27c625ca" },
