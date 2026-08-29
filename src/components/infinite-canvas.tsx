@@ -8867,7 +8867,6 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
     if (!activateCanvasToolSession('element-decompose', 'image-toolbar', [img.id])) return;
     contextMenuTargetRef.current = null; // 使用后清空，避免影响下次工具栏触发
     setEditImageId(img.id);
-    setElementDecomposeTask(null);
     setShowDisplayDecomposePanel(true);
     setShowToolbarCustomize(false);
   }, [activateCanvasToolSession, editImageId, selectedIds, selectedImageData]);

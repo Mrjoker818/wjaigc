@@ -33,6 +33,22 @@ describe('dual-output element decomposition canvas wiring', () => {
     expect(canvasSource).toContain('{elementDecomposeTask && (');
   });
 
+  it('preserves the latest task when reopening the panel and resets it only for a new submission', () => {
+    const openStart = canvasSource.indexOf('const handleOpenDisplayDecompose = useCallback');
+    const openEnd = canvasSource.indexOf('const handleDisplayDecomposeLegacy = useCallback', openStart);
+    const openBlock = canvasSource.slice(openStart, openEnd);
+    const submitStart = canvasSource.indexOf('const handleDisplayDecomposeConfirm = useCallback');
+    const submitEnd = canvasSource.indexOf('const handleCancelElementDecomposition = useCallback', submitStart);
+    const submitBlock = canvasSource.slice(submitStart, submitEnd);
+
+    expect(openStart).toBeGreaterThanOrEqual(0);
+    expect(openEnd).toBeGreaterThan(openStart);
+    expect(openBlock).not.toContain('setElementDecomposeTask(null)');
+    expect(submitStart).toBeGreaterThanOrEqual(0);
+    expect(submitEnd).toBeGreaterThan(submitStart);
+    expect(submitBlock).toContain('setElementDecomposeTask(null)');
+  });
+
   it('supports cancelling the active parent task', () => {
     expect(canvasSource).toContain('handleCancelElementDecomposition');
     expect(canvasSource).toContain('cancelElementDecomposition(elementDecomposeTask.taskId)');
