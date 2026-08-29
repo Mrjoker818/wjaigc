@@ -1,0 +1,45 @@
+{
+  "testId": "V588-STABILITY-002-002-C-CLOUD",
+  "testedAt": "2026-08-30T03:58:20+08:00",
+  "browser": "Google Chrome",
+  "deploymentUrl": "https://62afe49a-716e-4d9e-99cd-a0be49c4794c-5000.dev.coze.site/",
+  "runtimeGitCommit": "8cd07e1fcc00b93d683783318148ea54f5cd3827",
+  "runtimeGitTree": "40f3d6ffea93b46ae7da0bd6a10082a2b6c4a62d",
+  "document": {
+    "source": "canvas image",
+    "engineDisclosure": "local fallback",
+    "canvas": { "width": 3504, "height": 2336 },
+    "layerCount": 5,
+    "finalVisibleOrderTopToBottom": [
+      "reconstruction/correction",
+      "元素 2",
+      "元素 1",
+      "主体",
+      "背景"
+    ],
+    "temporaryOrderPersistedAfterCloseReopen": true,
+    "originalOrderRestoredAfterFullPageReload": true,
+    "temporaryExportMode": "pro",
+    "temporaryExportModePersistedAfterCloseReopen": true,
+    "finalExportMode": "studio",
+    "finalExportModeRestoredAfterFullPageReload": true,
+    "element2": { "left": 589, "top": 416, "right": 2668, "bottom": 1890 },
+    "reconstructionCorrection": { "left": 0, "top": 0, "right": 3504, "bottom": 2336 }
+  },
+  "export": {
+    "fileName": "图片_studio_edited.psd",
+    "localPath": "C:/Users/Administrator/Downloads/图片_studio_edited.psd",
+    "bytes": 14089648,
+    "signature": "8BPS",
+    "sha256": "6264C9B75597CD437732CFC339AE28DEEB36467851F52BB9766075187B3379E0",
+    "parsedWith": "ag-psd",
+    "parsedCanvas": { "width": 3504, "height": 2336 },
+    "parsedEditableLayerCount": 5
+  },
+  "toolingObservation": "Chrome extension download event timed out after 120 seconds, while the application reached completed state and the file was present on disk with a valid signature.",
+  "providerTaskCreatedByThisRun": false,
+  "paidOperationPerformed": false,
+  "result": "PASS",
+  "scopeLimit": "This closes layer document persistence and local-fallback PSD export only; it does not prove Pear remote quality or billing.",
+  "screenshot": "docs/testing/evidence/v588-stability-002-8cd07e1f-layer-document-export-cloud-2026-08-30.png"
+}

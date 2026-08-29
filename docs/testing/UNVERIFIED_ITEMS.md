@@ -1874,8 +1874,8 @@ Stage 3 remains in Task 10. Stage 4/5 are not authorized.
 | 项目 | 最新状态 | 关闭条件 |
 |---|---|---|
 | `002-C` 创建/更新 | `CLOUD PARTIAL PASS` | 重命名、隐藏、锁定和“已保存”已通过；不再重复这四项。 |
-| `002-C` 恢复 | `UNVERIFIED` | 完成移动、排序、导出模式后关闭重开与整页刷新，逐项核对同一 revision。 |
-| `002-C` PSD 导出 | `UNVERIFIED` | 下载文件签名 `8BPS`，图层数、顺序和坐标与最终保存文档一致。 |
+| `002-C` 恢复 | `CLOUD PASS` | 移动、排序、导出模式、关闭重开与整页刷新均已逐项通过；测试变更已还原并再次恢复确认。 |
+| `002-C` PSD 导出 | `CLOUD PASS` | `图片_studio_edited.psd` 为 `14,089,648` 字节、`8BPS`，解析后的 5 层顺序和坐标与最终文档一致。 |
 | Pear 图像专用请求 | `LOCAL PASS / CLOUD PENDING` | Coze 精确部署 `9e4d945e` 或后续 main，并证明真实请求不再携带 prompt。 |
 | Pear 远程质量 | `FAILED / OPEN` | 使用模型适用、内容可核对的源图取得 `engine=pear`、2+ 合格图层；不能降低门禁或使用本地 fallback 冒充。 |
 | Chrome 预览标签控制 | `TEST TOOL BLOCKED` | 在不新建标签、不切换 360 的前提下恢复同一 Google Chrome 预览标签控制，然后继续剩余 UI 动作。 |
@@ -1888,8 +1888,8 @@ Stage 3 remains in Task 10. Stage 4/5 are not authorized.
 |---|---|---|
 | 完成态重新打开 PSD 编辑器 | `CLOUD PARTIAL PASS` | 整页刷新后已从图片工具栏重开同一 5 层文档；仍需在一个新完成态父任务中验证状态卡“打开编辑器”按钮，并采集零新增任务、零扣费/退款证据。 |
 | 重叠图层精确拖动 | `CLOUD PASS` | `8cd07e1f` 当前资源包中，元素层 `589,416 → 745,520` 时校正层保持 `0,0`；位移已还原并保存。隐藏、锁定和越界 fallback 由永久自动化覆盖。 |
-| 图层文档完整恢复 | `CLOUD PARTIAL PASS` | 已通过重命名、隐藏、锁定、移动、自动保存、关闭重开和整页刷新恢复；仍需完成排序与导出模式逐项一致。 |
-| PSD 最终导出 | `UNVERIFIED` | 下载文件存在，前四字节为 `8BPS`，图层数、顺序和坐标与最终保存 revision 一致。 |
+| 图层文档完整恢复 | `CLOUD PASS` | 重命名、隐藏、锁定、移动、排序、导出模式、自动保存、关闭重开和整页刷新恢复均已通过。跨浏览器同账号读取保留为独立增强验证。 |
+| PSD 最终导出 | `CLOUD PASS` | 下载文件签名 `8BPS`，`ag-psd` 解析为 3504×2336、5 个编辑图层；顺序、坐标与最终保存 revision 一致。 |
 | Pear 远程成功与账务 | `FAILED / UNVERIFIED` | 合适素材取得 `engine=pear`、2+ 合格远程图层、一次扣费零退款；不得以本地 fallback 或本轮非付费重开验证替代。 |
 
 云端执行顺序固定为：Coze 拉取最终 `main` exact-SHA，确认 `stable` 未变；沙箱完全重启；强制刷新既有 Google Chrome 预览标签；最后开始验证。不得新建 Chrome 标签，也不得在旧沙箱进程上得出通过结论。
