@@ -271,9 +271,6 @@ async function submitAtEndpoint(
       body: JSON.stringify({
         model: 'image-layered',
         image: input.image,
-        // PearAPI schema requires `prompt` (minLength: 1) even though the
-        // image-layered model ignores it. Send a minimal placeholder.
-        prompt: '.',
         task_type: 'async',
         response_format: 'url',
       }),

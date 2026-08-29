@@ -30,7 +30,7 @@ describe('Pear layered image adapter', () => {
     fetchMock.mockReset();
   });
 
-  it('uses edits and never calls generations after a task id exists', async () => {
+  it('uses the Image-Layered image-only contract and never calls generations after a task id exists', async () => {
     fetchMock.mockResolvedValueOnce(jsonResponse({ task_id: 'pear-1' }));
 
     await expect(submitPearLayerTask(input)).resolves.toEqual({
@@ -50,7 +50,6 @@ describe('Pear layered image adapter', () => {
     expect(JSON.parse(String(init?.body))).toEqual({
       model: 'image-layered',
       image: 'https://media.example.com/source.png',
-      prompt: '.',
       task_type: 'async',
       response_format: 'url',
     });
