@@ -164,6 +164,47 @@ const historicalSourceAuthorizations = [
   ['src/lib/task-events-client.ts', 'b0cd946f'],
   ['src/lib/universal-api-manager.ts', '96c1907b'],
   ['src/lib/universal-api-types.ts', '1798d252'],
+  ['src/app/api/analyze-psd/route.ts', 'f7883f96'],
+  ['src/app/api/assets/transfer/route.ts', 'b3fe71b4'],
+  ['src/app/api/brand-ecommerce/result-store.ts', '6a9efa5e'],
+  ['src/app/api/brand-ecommerce/route.ts', '6a9efa5e'],
+  ['src/app/api/font-design/plan/constants.ts', 'c4b49293'],
+  ['src/app/api/font-design/plan/route.ts', 'c4b49293'],
+  ['src/app/api/font-design/prompt/route.ts', 'c4b49293'],
+  ['src/app/api/refine-engine/result-store.ts', '6a9efa5e'],
+  ['src/app/api/refine-engine/route.ts', '6a9efa5e'],
+  ['src/app/api/simple-chat/workspace-handoff/route.ts', 'b67930cf'],
+  ['src/components/psd-editor/LayerInspector.tsx', '34c8980d'],
+  ['src/components/psd-editor/PsdCanvas.tsx', '34c8980d'],
+  ['src/components/psd-editor/PsdLayerEditor.tsx', 'a50fcbeb'],
+  ['src/components/workspace-source-trace.tsx', '09e2b0c0'],
+  ['src/lib/asset-core/source-trace.ts', '496d7892'],
+  ['src/lib/asset-core/types.ts', '27c625ca'],
+  ['src/lib/canvas-kernel/selection.ts', '6bea240f'],
+  ['src/lib/editable-layer-adapter.ts', '34c8980d'],
+  ['src/lib/element-decomposition/client.ts', '2166f032'],
+  ['src/lib/element-decomposition/reconstruction.ts', '940a0b7f'],
+  ['src/lib/layer-decomposition-client.ts', '2166f032'],
+  ['src/lib/layer-decomposition/layer-stack-order.ts', '940a0b7f'],
+  ['src/lib/layer-decomposition/pear-adapter.ts', 'ca356477'],
+  ['src/lib/layer-decomposition/quality-gate.ts', '940a0b7f'],
+  ['src/lib/layer-decomposition/service.ts', 'ca356477'],
+  ['src/lib/layer-decomposition/source-image.ts', 'ac8e826b'],
+  ['src/lib/layer-decomposition/types.ts', 'ca356477'],
+  ['src/lib/model-defaults.ts', '0a36aefd'],
+  ['src/lib/project-workspace-url.ts', 'cdded1e2'],
+  ['src/lib/psd-analysis/contracts.ts', 'f7883f96'],
+  ['src/lib/psd-analysis/media.ts', 'f7883f96'],
+  ['src/lib/psd-analysis/model-router.ts', '1b0996ad'],
+  ['src/lib/psd-analysis/service.ts', 'f7883f96'],
+  ['src/lib/psd-canvas-surface.ts', '34c8980d'],
+  ['src/lib/psd-export.ts', '34c8980d'],
+  ['src/lib/safe-image-download.ts', 'ac8e826b'],
+  ['src/lib/safe-image-input.ts', 'bc1ee2b0'],
+  ['src/lib/simple-chat-workspace-handoff-client.ts', '3f056442'],
+  ['src/lib/simple-chat-workspace-handoff-server.ts', '496d7892'],
+  ['src/lib/simple-chat-workspace-handoff.ts', '3f056442'],
+  ['src/lib/user-types.ts', '250d7cf1'],
 ] as const;
 
 describe('protected baseline release gate', () => {
@@ -215,6 +256,34 @@ describe('protected baseline release gate', () => {
     ]) {
       expect(allowedPaths).toContain(path);
     }
+  });
+
+  it('requires exact authorization for every committed production source drift', async () => {
+    const allowedPaths = JSON.parse(await readFile(
+      resolve(process.cwd(), 'docs/testing/baselines/protected-baseline-allowed-paths.json'),
+      'utf8',
+    )) as string[];
+    const changedProductionPaths = execFileSync('git', [
+      'diff',
+      '--name-only',
+      '7fdc0108952fb3a68415ca3a2a26b5d33641dc6b',
+      'HEAD',
+      '--',
+      'src',
+    ], {
+      cwd: process.cwd(),
+      encoding: 'utf8',
+    }).trim().split(/\r?\n/).filter((path) => (
+      path
+      && !path.startsWith('src/__tests__/')
+      && !path.startsWith('src/tests/')
+    ));
+    const unapprovedPaths = changedProductionPaths.filter((path) => !allowedPaths.includes(path));
+
+    expect(
+      unapprovedPaths,
+      'Every committed production source drift must have one exact reviewed authorization path',
+    ).toEqual([]);
   });
 
   it('authorizes reviewed historical source drift by exact path with provenance', async () => {
