@@ -1783,3 +1783,11 @@ Stage 3 remains in Task 10. Stage 4/5 are not authorized.
 - Coze 原生环境复验已完成，`auth-login-configuration` `37/37`、构建与三个健康端点通过；该项从未验证表移除。
 - 保留：Pear 远程 `completed/ready` 与真实 ZIP/主 PSD、至少两个远程可编辑图层、图层移动/保存/刷新、PSD 导出 `8BPS` 与图层校验。
 - 保留：成功任务恰好一次扣费且不退款；失败和显式取消任务最多一次退款，迟到完成不得覆盖终态。
+
+## 2026-08-29 `2166f032` 精确目标路由后的剩余云端证据
+
+- Coze 尚未精确拉取并构建 `2166f032`；本机 8 GiB 构建也没有成功终态，因此生产构建保持 `UNVERIFIED`。
+- 真实元素拆解请求必须包含 `layerProviderId=api_1785190544435_1heimk6` 与 `layerModelId=Image-Layered`，并确认用户授权接口在提交时仍允许该 pair。
+- 必须证明任务进入 `submitting-pear -> waiting-for-pear -> downloading-psd -> extracting-psd -> checking-quality -> ready`；如供应商失败，应保留结构化原因并正确退款，不能用本地 fallback 结果标记 Pear 通过。
+- 成功路径仍需：真实 ZIP、唯一非 `_depth.psd` 主 PSD、`8BPS`、至少 2 个 `source=pear-psd` 可编辑图层、移动/显隐、保存刷新恢复和 PSD 导出文件检查。
+- 账务仍需：成功任务一次扣费且不退款；同键重放不新增任务或扣费；失败/取消最多一次退款；迟到完成不覆盖终态。

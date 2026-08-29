@@ -2926,3 +2926,17 @@ All listed Stage 4 defects are locally closed. S4-BUG-008 also passed its exact-
 | 层级证据 | 初始态和完成态重开均完整无遮挡；浮层父节点为 `BODY`，不在 `data-canvas-viewport` 内，计算层级为 `z-index: 200`。 |
 | 控制台边界 | 服务切换期间曾出现 8 条项目同步 `502` 警告；服务恢复后本功能流程没有新增 error/warning。账务只读探针超时，本条不扩张为扣费结论。 |
 | 状态 | **已修复并完成云端关闭。** 机器证据及三张原始 PNG：`docs/testing/evidence/v588-stability-002-b0eefdf4-bug-010-cloud-2026-08-29.json`。 |
+
+### V588-STABILITY-002-BUG-011：元素拆解图层分支未携带获授权的 Pear 精确目标（2026-08-29）
+
+| 字段 | 内容 |
+|---|---|
+| 严重等级 | P1：元素拆解界面可完成，但可编辑图层分支不会调用管理员为当前用户授权的 Pear `Image-Layered`，结果被静默降级为本地两层。 |
+| 稳定复现 | 云端模型目录返回 `api_1785190544435_1heimk6 / Image-Layered`；元素拆解请求构造只包含 board provider/model，layers provider/model 为空，服务端记录 `No exact Pear provider/model was selected`。 |
+| 根因 | `infinite-canvas.tsx` 使用同步 `createElementDecompositionRequest()` 创建父请求，只传 `boardProviderId/boardModelId`；现有 `resolveDefaultLayerTarget()` 仅被独立分层客户端调用，没有进入元素拆解父链路。 |
+| RED | 新增“提交图层分支前解析获授权 Pear 目标”和 UI 必须调用异步解析请求的契约。修复前 `6 failed / 9 passed`，其中本缺陷对应 2 项稳定失败。 |
+| 最小修复 | 导出并复用 `resolveDefaultLayerTarget()`；新增 `createResolvedElementDecompositionRequest()`，在需要 layers 且未显式指定目标时解析精确 pair，并在父请求提交前完成解析。smart 模式目录故障保留本地回退；cloud/abort 继续失败关闭。 |
+| 回归 | Pear/分层聚焦 10 文件 `98/98`；全仓 `4159 passed / 122 PostgreSQL-gated skipped / 0 failed`；TypeScript 与 Lint 通过。本机生产构建受约 `8.17 GB` 内存边界未取得终态。 |
+| 提交 | `main@2166f0321265eeeb2aed7985084ca5a090e43a7a`，tree `fd261545f428d5b632c5c97c449256c85abf062f`；`stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 未触碰。 |
+| 当前状态 | **本地已修复 / 云端待验证。** 需证明 Coze 请求体实际携带上述精确 pair，真实任务进入 Pear 异步阶段并消费 ZIP/PSD，而不是再次本地回退。 |
+| 证据 | `docs/testing/evidence/v588-stability-002-2166f032-element-layer-routing-local-2026-08-29.json`。 |

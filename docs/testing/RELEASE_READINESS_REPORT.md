@@ -1686,3 +1686,10 @@ The focused gate test passes `7/7`; the actual protected-baseline command passes
 - Coze 原生环境已证明登录域名契约 `37/37`、TypeScript、Lint、生产构建、健康端点和静态资源全部通过；此前环境域名断言失败不再是发布阻塞。
 - Google Chrome 预览页在新 Build ID 上完成强制刷新；本轮未修改业务源码、数据库、账号、环境变量或供应商配置，也未创建付费任务。
 - **发布结论仍为“有条件通过”。** `V588-STABILITY-002` 还必须取得 Pear 远程 PSD 制品、编辑/保存/刷新、导出文件和真实一次扣费/退款证据，完成前不进入 `V588-ADMIN-004`。
+
+## 2026-08-29 `2166f032` Pear 精确目标路由发布增量
+
+- 已关闭一个新的 P1 本地缺陷：元素拆解父请求此前未携带用户获授权的 Pear `providerId + Image-Layered`，导致所有“可编辑图层”测试都可能静默使用本地 fallback，历史两层完成态不能作为 Pear 成功证据。
+- 当前提交以共享模型目录解析器补齐精确目标，没有修改管理员授权、供应商配置、积分价格、ZIP 下载、PSD 解析或终态转换；聚焦 `98/98`、全仓 `4159 passed / 122 skipped / 0 failed`、TypeScript 和 Lint 通过。
+- 本机 8 GiB 构建未完成，且 Coze 尚未拉取 `2166f032`。因此不得宣称本提交已部署、Pear 已调用或 ZIP/PSD 编辑链路已通过。
+- **发布结论维持“有条件通过”。** 先完成 Coze exact-SHA、生产构建和现有 Google Chrome 的请求路由/远程图层/导出/账务闭环，再判断 `V588-STABILITY-002` 是否可以吸收；当前不得进入 `V588-ADMIN-004`。
