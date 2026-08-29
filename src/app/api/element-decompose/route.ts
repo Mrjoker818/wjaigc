@@ -6,6 +6,7 @@ import { DISPLAY_DECOMPOSE_SUPPORTED_RATIOS } from '@/lib/display-decompose';
 import {
   cancelElementDecomposition,
   ElementDecompositionError,
+  findLatestElementDecompositionForProject,
   getElementDecomposition,
   retryElementBranch,
   submitElementDecomposition,
@@ -223,8 +224,20 @@ export async function GET(request: NextRequest) {
   const auth = await requireApiAuthOrReject(request);
   if (auth instanceof NextResponse) return auth;
   try {
-    const taskId = stringField(request.nextUrl.searchParams.get('taskId'), 'taskId', 256)!;
-    return NextResponse.json(await getElementDecomposition({ taskId, userId: auth.userId, userRole: auth.userRole }));
+    const taskId = request.nextUrl.searchParams.get('taskId')?.trim();
+    const projectId = request.nextUrl.searchParams.get('projectId')?.trim();
+    if (Boolean(taskId) === Boolean(projectId)) {
+      return badRequest('ELEMENT_QUERY_INVALID', 'Exactly one of taskId or projectId is required');
+    }
+    if (projectId) {
+      const normalizedProjectId = stringField(projectId, 'projectId', 256)!;
+      return NextResponse.json(await findLatestElementDecompositionForProject({
+        userId: auth.userId,
+        projectId: normalizedProjectId,
+      }));
+    }
+    const normalizedTaskId = stringField(taskId, 'taskId', 256)!;
+    return NextResponse.json(await getElementDecomposition({ taskId: normalizedTaskId, userId: auth.userId, userRole: auth.userRole }));
   } catch (error) {
     return errorResponse(error);
   }

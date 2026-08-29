@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   findOwnedAnnotationSource: vi.fn(),
   submit: vi.fn(),
   get: vi.fn(),
+  recover: vi.fn(),
   retry: vi.fn(),
   cancel: vi.fn(),
 }));
@@ -17,6 +18,7 @@ vi.mock('@/lib/annotation-project-source', () => ({
 vi.mock('@/lib/element-decomposition/service', () => ({
   submitElementDecomposition: mocks.submit,
   getElementDecomposition: mocks.get,
+  findLatestElementDecompositionForProject: mocks.recover,
   retryElementBranch: mocks.retry,
   cancelElementDecomposition: mocks.cancel,
   ElementDecompositionError: class ElementDecompositionError extends Error {
@@ -57,6 +59,7 @@ describe('/api/element-decompose', () => {
     });
     mocks.submit.mockResolvedValue({ taskId: 'parent-1', status: 'processing' });
     mocks.get.mockResolvedValue({ taskId: 'parent-1', status: 'processing' });
+    mocks.recover.mockResolvedValue({ taskId: 'parent-recovered', status: 'completed' });
     mocks.retry.mockResolvedValue({ taskId: 'parent-1', status: 'processing' });
     mocks.cancel.mockResolvedValue({ taskId: 'parent-1', status: 'cancelled' });
   });
@@ -240,5 +243,26 @@ describe('/api/element-decompose', () => {
     expect(mocks.get).toHaveBeenCalledWith(expect.objectContaining({ taskId: 'parent-1', userId: 'user-1' }));
     expect(mocks.retry).toHaveBeenCalledWith(expect.objectContaining({ taskId: 'parent-1', branch: 'board', userId: 'user-1' }));
     expect(mocks.cancel).toHaveBeenCalledWith(expect.objectContaining({ taskId: 'parent-1', userId: 'user-1' }));
+  });
+
+  it('recovers by project through the authenticated identity', async () => {
+    const { GET } = await import('@/app/api/element-decompose/route');
+    const response = await GET(new NextRequest('http://localhost/api/element-decompose?projectId=project-1'));
+
+    expect(response.status).toBe(200);
+    expect(mocks.recover).toHaveBeenCalledWith({ userId: 'user-1', projectId: 'project-1' });
+    expect(mocks.get).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    'http://localhost/api/element-decompose',
+    'http://localhost/api/element-decompose?taskId=parent-1&projectId=project-1',
+  ])('rejects an ambiguous or missing GET selector: %s', async (url) => {
+    const { GET } = await import('@/app/api/element-decompose/route');
+    const response = await GET(new NextRequest(url));
+
+    expect(response.status).toBe(400);
+    expect(mocks.get).not.toHaveBeenCalled();
+    expect(mocks.recover).not.toHaveBeenCalled();
   });
 });

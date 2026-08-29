@@ -188,6 +188,7 @@ import {
   createResolvedElementDecompositionRequest,
   getRefundedLocalLayerFallbackMessage,
   pollElementDecomposition,
+  recoverElementDecomposition,
   resolveCompletedElementLayersEditorPayload,
   retryElementDecompositionBranch,
   submitElementDecomposition,
@@ -8863,6 +8864,48 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
     }
     setIsEditProcessing(false);
   }, [removeBgTargetImage, getActiveImageData, createProcessingFrameRightOf, getCurrentModel, updateProcessingFrame, getCurrentProviderId, removeBgModelId, removeBgEngine, addRemoveBgMaskToCanvas, completeProcessingFrame, onImagesChange, toast]);
+
+  const elementDecomposeRecoveryRef = useRef<{ projectId: string | null; requestId: number }>({
+    projectId: null,
+    requestId: 0,
+  });
+  const activeCanvasToolProjectIdRef = useRef(activeCanvasToolProjectId);
+
+  useEffect(() => {
+    activeCanvasToolProjectIdRef.current = activeCanvasToolProjectId;
+    if (elementDecomposeProjectId && elementDecomposeProjectId !== activeCanvasToolProjectId) {
+      setElementDecomposeTask(null);
+      setElementDecomposeProjectId(null);
+    }
+  }, [activeCanvasToolProjectId, elementDecomposeProjectId]);
+
+  useEffect(() => {
+    if (!showDisplayDecomposePanel) {
+      elementDecomposeRecoveryRef.current = {
+        projectId: null,
+        requestId: elementDecomposeRecoveryRef.current.requestId + 1,
+      };
+      return;
+    }
+    if (!showDisplayDecomposePanel || elementDecomposeTask || !activeCanvasToolProjectId) return;
+    const recoveryProjectId = activeCanvasToolProjectId;
+    if (elementDecomposeRecoveryRef.current.projectId === recoveryProjectId) return;
+
+    const requestId = elementDecomposeRecoveryRef.current.requestId + 1;
+    elementDecomposeRecoveryRef.current = { projectId: recoveryProjectId, requestId };
+    const controller = new AbortController();
+    void recoverElementDecomposition(recoveryProjectId, controller.signal).then((recovered) => {
+      if (!recovered) return;
+      if (elementDecomposeRecoveryRef.current.requestId !== requestId) return;
+      if (activeCanvasToolProjectIdRef.current !== recoveryProjectId) return;
+      setElementDecomposeProjectId(recoveryProjectId);
+      setElementDecomposeTask(recovered);
+    }).catch((error: unknown) => {
+      if (error instanceof DOMException && error.name === 'AbortError') return;
+      console.warn('[element-decompose] Failed to restore completed task:', error);
+    });
+    return () => controller.abort();
+  }, [activeCanvasToolProjectId, elementDecomposeTask, showDisplayDecomposePanel]);
 
   const handleOpenDisplayDecompose = useCallback(() => {
     // 优先使用右键时记录的命中图片 id（通过 ref 规避 React 批量更新时序问题），

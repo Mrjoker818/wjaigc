@@ -235,6 +235,19 @@ export async function submitElementDecomposition(
   return parseResponse(response);
 }
 
+export async function recoverElementDecomposition(
+  projectId: string,
+  signal?: AbortSignal,
+): Promise<ElementDecomposeTaskResponse | null> {
+  const response = await fetch(`/api/element-decompose?projectId=${encodeURIComponent(projectId)}`, {
+    method: 'GET',
+    signal,
+    cache: 'no-store',
+  });
+  if (response.status === 404) return null;
+  return parseResponse(response);
+}
+
 export async function pollElementDecomposition(
   taskId: string,
   onUpdate: (task: ElementDecomposeTaskResponse) => void,

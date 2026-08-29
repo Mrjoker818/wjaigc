@@ -4,6 +4,7 @@ import {
   createCloudTask,
   getCloudTaskForUser,
   getCloudTaskForUserByIdempotencyKey,
+  listCloudTasks,
   updateCloudTask,
   type CloudTask,
   type CloudTaskCreditStatus,
@@ -172,6 +173,7 @@ export async function submitElementDecomposition(input: {
   const inserted = await createCloudTask({
     id: parentId,
     userId: input.userId,
+    projectId: input.request.projectId,
     type: 'element-decompose-parent',
     status: 'processing',
     progress: 0,
@@ -257,6 +259,31 @@ export async function submitElementDecomposition(input: {
     throw new ElementDecompositionError('ELEMENT_TASK_STATE_CONFLICT', 'Element decomposition state changed before child submissions were committed', 409, true);
   }
   return parentResponse({ id: parentId, userId: input.userId, type: 'element-decompose-parent', status: 'processing', progress: 0, creditStatus: 'not-applicable', createdAt: Date.now(), updatedAt: Date.now(), result });
+}
+
+export async function findLatestElementDecompositionForProject(input: {
+  userId: string;
+  projectId: string;
+}): Promise<ElementParentState> {
+  const tasks = await listCloudTasks({ userId: input.userId, limit: 500 });
+  const task = tasks.find((candidate) => {
+    if (candidate.type !== 'element-decompose-parent') return false;
+    if (candidate.projectId) return candidate.projectId === input.projectId;
+    const request = resultOf(candidate).request;
+    return Boolean(
+      request
+      && typeof request === 'object'
+      && (request as Record<string, unknown>).projectId === input.projectId,
+    );
+  });
+  if (!task) {
+    throw new ElementDecompositionError(
+      'ELEMENT_TASK_NOT_FOUND',
+      'Element decomposition parent task was not found',
+      404,
+    );
+  }
+  return parentResponse(task);
 }
 
 export async function getElementDecomposition(input: { taskId: string; userId: string; userRole: string }): Promise<ElementParentState> {

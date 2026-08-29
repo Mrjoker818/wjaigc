@@ -61,6 +61,23 @@ describe('dual-output element decomposition canvas wiring', () => {
     expect(submitBlock).toContain('setElementDecomposeTask(null)');
   });
 
+  it('lazily restores one owned project task without submitting and rejects stale project responses', () => {
+    const recoveryStart = canvasSource.indexOf('const elementDecomposeRecoveryRef = useRef');
+    const recoveryEnd = canvasSource.indexOf('const handleDisplayDecomposeLegacy = useCallback', recoveryStart);
+    const recoveryBlock = canvasSource.slice(recoveryStart, recoveryEnd);
+
+    expect(recoveryStart).toBeGreaterThanOrEqual(0);
+    expect(recoveryEnd).toBeGreaterThan(recoveryStart);
+    expect(recoveryBlock).toContain('if (!showDisplayDecomposePanel || elementDecomposeTask || !activeCanvasToolProjectId) return;');
+    expect(recoveryBlock).toContain('recoverElementDecomposition(recoveryProjectId, controller.signal)');
+    expect(recoveryBlock).toContain('elementDecomposeRecoveryRef.current.requestId !== requestId');
+    expect(recoveryBlock).toContain('activeCanvasToolProjectIdRef.current !== recoveryProjectId');
+    expect(recoveryBlock).toContain('setElementDecomposeProjectId(recoveryProjectId)');
+    expect(recoveryBlock).not.toContain('submitElementDecomposition(');
+    expect(recoveryBlock).not.toContain('pollElementDecomposition(');
+    expect(recoveryBlock).not.toContain('retryElementDecompositionBranch(');
+  });
+
   it('supports cancelling the active parent task', () => {
     expect(canvasSource).toContain('handleCancelElementDecomposition');
     expect(canvasSource).toContain('cancelElementDecomposition(elementDecomposeTask.taskId)');

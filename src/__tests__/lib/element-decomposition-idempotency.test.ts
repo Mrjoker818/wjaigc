@@ -21,6 +21,7 @@ const storage = vi.hoisted(() => ({
   createCloudTask: vi.fn(),
   getCloudTaskForUser: vi.fn(),
   getCloudTaskForUserByIdempotencyKey: vi.fn(),
+  listCloudTasks: vi.fn(),
   updateCloudTask: vi.fn(),
 }));
 
@@ -144,6 +145,13 @@ describe('element decomposition parent idempotency', () => {
       const task = storage.tasks.get(taskId);
       return task?.userId === userId ? structuredClone(task) : null;
     });
+    storage.listCloudTasks.mockImplementation(async ({ userId, limit = 100 }: { userId?: string; limit?: number }) => (
+      [...storage.tasks.values()]
+        .filter(task => !userId || task.userId === userId)
+        .sort((a, b) => b.updatedAt - a.updatedAt)
+        .slice(0, limit)
+        .map(task => structuredClone(task))
+    ));
     storage.updateCloudTask.mockImplementation(async (taskId: string, patch: UpdateCloudTaskInput) => {
       const task = storage.tasks.get(taskId);
       if (!task) return false;
@@ -195,6 +203,56 @@ describe('element decomposition parent idempotency', () => {
         requireTransparentSubject: true,
       }),
     }));
+  });
+
+  it('persists the project binding on a new parent task', async () => {
+    const { submitElementDecomposition } = await import('@/lib/element-decomposition/service');
+    await submitElementDecomposition({
+      userId: 'user-1', userRole: 'user', idempotencyKey: 'element-project-binding', request: request(),
+    });
+
+    expect(storage.createCloudTask).toHaveBeenCalledWith(expect.objectContaining({
+      userId: 'user-1',
+      projectId: 'project-1',
+      type: 'element-decompose-parent',
+    }));
+  });
+
+  it('recovers only the latest owned parent for the requested project', async () => {
+    const now = Date.now();
+    const makeTask = (overrides: Partial<CloudTask>): CloudTask => ({
+      id: 'task', userId: 'user-1', projectId: 'project-1', type: 'element-decompose-parent',
+      status: 'completed', progress: 100, creditStatus: 'not-applicable', createdAt: now, updatedAt: now,
+      revision: 0, result: { source: {}, branches: {} }, ...overrides,
+    });
+    storage.tasks.set('older-owned', makeTask({ id: 'older-owned', updatedAt: now - 10 }));
+    storage.tasks.set('newer-owned', makeTask({ id: 'newer-owned', updatedAt: now - 5 }));
+    storage.tasks.set('other-user', makeTask({ id: 'other-user', userId: 'user-2', updatedAt: now }));
+    storage.tasks.set('other-project', makeTask({ id: 'other-project', projectId: 'project-2', updatedAt: now + 1 }));
+    storage.tasks.set('other-type', makeTask({ id: 'other-type', type: 'image-generation', updatedAt: now + 2 }));
+
+    const { findLatestElementDecompositionForProject } = await import('@/lib/element-decomposition/service');
+    const recovered = await findLatestElementDecompositionForProject({ userId: 'user-1', projectId: 'project-1' });
+
+    expect(recovered.taskId).toBe('newer-owned');
+    expect(storage.listCloudTasks).toHaveBeenCalledWith({ userId: 'user-1', limit: 500 });
+    expect(layers.get).not.toHaveBeenCalled();
+    expect(board.poll).not.toHaveBeenCalled();
+    expect(storage.updateCloudTask).not.toHaveBeenCalled();
+  });
+
+  it('recovers a legacy parent whose persisted request contains the project binding', async () => {
+    const now = Date.now();
+    storage.tasks.set('legacy-parent', {
+      id: 'legacy-parent', userId: 'user-1', type: 'element-decompose-parent', status: 'completed',
+      progress: 100, creditStatus: 'not-applicable', createdAt: now, updatedAt: now, revision: 0,
+      result: { request: { projectId: 'project-1' }, source: {}, branches: {} },
+    });
+
+    const { findLatestElementDecompositionForProject } = await import('@/lib/element-decomposition/service');
+    await expect(findLatestElementDecompositionForProject({
+      userId: 'user-1', projectId: 'project-1',
+    })).resolves.toMatchObject({ taskId: 'legacy-parent', overallStatus: 'processing' });
   });
 
   it('rejects one key reused for a different normalized request', async () => {

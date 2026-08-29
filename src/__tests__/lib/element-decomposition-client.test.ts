@@ -6,6 +6,7 @@ import {
   createResolvedElementDecompositionRequest,
   getRefundedLocalLayerFallbackMessage,
   pollElementDecomposition,
+  recoverElementDecomposition,
   resolveCompletedElementLayersEditorPayload,
   retryElementDecompositionBranch,
   submitElementDecomposition,
@@ -278,6 +279,35 @@ describe('element decomposition client', () => {
     expect(result.branches.board?.status).toBe('completed');
     expect(result.branches.layers?.status).toBe('failed');
     expect(updates).toHaveLength(2);
+  });
+
+  it('recovers a project parent with one read-only GET', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(response({
+      taskId: 'parent-recovered', status: 'completed', overallStatus: 'completed', progress: 100,
+      source: {}, branches: {},
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(recoverElementDecomposition('project/one')).resolves.toMatchObject({ taskId: 'parent-recovered' });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/element-decompose?projectId=project%2Fone',
+      expect.objectContaining({ method: 'GET', cache: 'no-store' }),
+    );
+    expect(fetchMock.mock.calls[0][1]).not.toHaveProperty('body');
+  });
+
+  it('maps a missing recovery to null and preserves other structured errors', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(response({ success: false, code: 'ELEMENT_TASK_NOT_FOUND', message: 'missing' }, 404))
+      .mockResolvedValueOnce(response({ success: false, code: 'ELEMENT_INTERNAL_ERROR', message: 'offline', retryable: true }, 503));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(recoverElementDecomposition('project-1')).resolves.toBeNull();
+    await expect(recoverElementDecomposition('project-1')).rejects.toMatchObject({
+      code: 'ELEMENT_INTERNAL_ERROR', status: 503, retryable: true,
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   it('retries only the requested failed branch and can cancel the parent', async () => {
