@@ -3048,3 +3048,15 @@ All listed Stage 4 defects are locally closed. S4-BUG-008 also passed its exact-
 | 二次复核修复 | 新增永久测试覆盖历史终态读取不推进子任务、拆解板重试仍披露既有退款回退，以及保护脚本面对超过 1 MiB 的未跟踪文件清单不再因 `ENOBUFS` 假通过。 |
 | 自动化回归 | 最终聚焦 `3 files / 41 tests`；扩展 Pear/ZIP/PSD、元素拆解、编辑器与保护门禁矩阵 `30 files / 227 tests`；全仓 `572 files / 4171 passed / 122 PostgreSQL-gated skipped / 0 failed`；TypeScript、完整 Lint `0 errors / 961 historical warnings` 与构建版 Lint通过。12 GiB 构建 webpack `9.9` 分钟、TypeScript `45` 秒、静态页面 `117/117`、Build ID `ZJo5NS6MxxuKE1ppzZHNq`。保护门禁对当前脏工作树诚实报告既有未跟踪工具产物，提交后的干净检出结果单独记录。 |
 | 状态 | **本地关闭 / Coze exact-SHA 与现有 Chrome 标签待验。** 云端只验证部署、界面披露和既有回退任务展示，不重复付费任务。 |
+
+#### BUG-015 Coze exact-SHA 与 Chrome 非付费回归（2026-08-29）
+
+| 字段 | 内容 |
+|---|---|
+| 精确部署 | Coze `HEAD=origin/main=2d3c258202dec59bdfea9aa36f5df16319f7468d`，tree `3d6fa270832e0bfde8e3e0082abaa0409afddfa2`；`origin/stable=52f7c601ed150769e15d06fb435c6e360e28c9e7` 未触碰，工作区干净。 |
+| 云端门禁 | 12 文件 `131 passed / 0 failed / 0 skipped`；保护基线 38 项完整、未授权漂移 0、警告 0；TypeScript、构建版 Lint 和 12 GiB 生产构建均退出 0。Build ID `m5wMb_9pluExcucjbglti`，单一 5000 PID `4147`。 |
+| 运行健康 | `/`、`/simple-chat`、`/api/auth/me` 均 HTTP 200，静态资源 `11/11`。未创建真实 Pear 任务、扣费或退款。 |
+| Chrome 冒烟 | 复用既有 Google Chrome 标签，保持管理员登录；紫色立方体选图正确，元素拆解配置面板可打开，Console error/warning `0/0`，无原生弹窗，截图无明显错位或遮挡。 |
+| 未闭环边界 | 新任务配置面板不会自动恢复旧父任务，因此未出现历史退款回退文案；Chrome 扩展拦截直接任务 JSON 导航。本轮没有通过新建付费任务绕过该限制。 |
+| 当前状态 | **应用代码、Coze exact-SHA、运行健康和非付费 Chrome 冒烟已通过；历史 completed 父任务的真实界面披露仍为未验证。** BUG-015 不标记云端完全关闭。 |
+| 证据 | `docs/testing/evidence/v588-stability-002-2d3c2582-cloud-2026-08-29.json` 及同目录两张 `2d3c2582` PNG。 |

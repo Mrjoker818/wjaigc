@@ -1,0 +1,51 @@
+{
+  "recordedAt": "2026-08-29T21:20:00+08:00",
+  "candidate": {
+    "commit": "2d3c258202dec59bdfea9aa36f5df16319f7468d",
+    "tree": "3d6fa270832e0bfde8e3e0082abaa0409afddfa2",
+    "stable": "52f7c601ed150769e15d06fb435c6e360e28c9e7",
+    "cozeWorkspaceClean": true
+  },
+  "coze": {
+    "focusedFiles": 12,
+    "focusedTestsPassed": 131,
+    "focusedTestsFailed": 0,
+    "focusedTestsSkipped": 0,
+    "protectedFeatureIds": 38,
+    "protectedWarnings": 0,
+    "protectedUnauthorizedDrift": 0,
+    "typecheckExitCode": 0,
+    "lintBuildExitCode": 0,
+    "buildExitCode": 0,
+    "buildId": "m5wMb_9pluExcucjbglti",
+    "port5000Pid": 4147,
+    "http": {
+      "/": 200,
+      "/simple-chat": 200,
+      "/api/auth/me": 200,
+      "staticAssetsTotal": 11,
+      "staticAssetsFailed": 0
+    },
+    "paidProviderTasksCreated": 0,
+    "chargesCreated": 0,
+    "refundsCreated": 0
+  },
+  "chrome": {
+    "browser": "Google Chrome",
+    "usedExistingTabsOnly": true,
+    "authenticated": true,
+    "selectedSource": "退款一致性测试：一个紫色立方体，纯白背景，产品摄影，无文字",
+    "elementDecompositionPanelOpened": true,
+    "sourceSelectionCorrect": true,
+    "consoleErrors": 0,
+    "consoleWarnings": 0,
+    "nativeDialogs": 0,
+    "fallbackDisclosureObserved": false,
+    "fallbackDisclosureReason": "元素拆解入口打开的是新任务配置面板，不自动恢复旧父任务；Chrome 扩展拦截了直接导航到历史任务 JSON 的请求。本轮遵守零付费约束，没有创建新任务来制造完成态。"
+  },
+  "screenshots": [
+    "docs/testing/evidence/v588-stability-002-coze-exact-sha-2d3c2582.png",
+    "docs/testing/evidence/v588-stability-002-cloud-preview-2d3c2582.png"
+  ],
+  "verdict": "COZE_RUNTIME_PASS_CHROME_SMOKE_PASS_HISTORICAL_DISCLOSURE_UNVERIFIED"
+}

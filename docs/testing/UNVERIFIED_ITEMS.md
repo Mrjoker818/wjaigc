@@ -1846,3 +1846,14 @@ Stage 3 remains in Task 10. Stage 4/5 are not authorized.
 - 优先复用既有回退任务或非付费合同验证；不得为了文案再次触发付费 Pear 任务。
 - 升级前已完成且缺少披露字段的父任务应在第一次查询时通过纯存储快照从既有终态子任务补齐证据；若子任务已过期或仍为非终态，应保留原完成结果而不是推进子任务或返回错误。验证所有路径都没有新的 Pear taskId、worker lease、扣费或退款记录。
 - 本项云端关闭不代表 Pear 远程制品质量成功，也不关闭图层文档保存、刷新恢复、成功账务或 PSD 导出。
+
+### `2d3c2582` 云端部署后的剩余项
+
+| 项目 | 最新状态 | 关闭条件 |
+|---|---|---|
+| Coze exact-SHA、构建与健康 | `VERIFIED` | `HEAD=origin/main=2d3c2582...`，131/131 专项、Build ID `m5wMb_9pluExcucjbglti`、三个 HTTP 200、静态资源 11/11。 |
+| 元素拆解基础 UI | `VERIFIED` | 既有 Chrome 登录态下选图正确、面板可打开、Console 0/0、无原生弹窗。 |
+| 历史退款回退文案 | `UNVERIFIED` | 让既有 completed 父任务在真实 UI 中恢复，观察“实际引擎：本地分层”及中性退款回退说明；不得创建新的付费失败任务。 |
+| 图层文档持久化 | `DESIGN ONLY` | 实施 `002-C`，完成用户/项目/源版本绑定、乐观锁、保存、刷新和跨设备恢复。 |
+| Pear 远程成功与成功账务 | `FAILED / UNVERIFIED` | 合适素材取得 `engine=pear`、2+ 远程图层、一次扣费零退款；不得以本地 fallback 替代。 |
+| PSD 导出 | `UNVERIFIED` | 下载并验证 `8BPS`、图层数、顺序、位置与持久化文档一致。 |

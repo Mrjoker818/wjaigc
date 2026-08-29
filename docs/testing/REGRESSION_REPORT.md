@@ -2181,3 +2181,11 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - `pnpm ts-check`、完整 `pnpm lint`（`0 errors / 961 historical warnings`）和 `pnpm lint:build` 通过。保护脚本已修复默认约 1 MiB 缓冲溢出被吞掉的问题；当前包含既有 `.playwright-cli`、参考仓库和 SDD 文档的脏工作树会如实阻断，不能再写成“0 未授权漂移”。提交后的干净候选门禁另行执行。
 - 二次复核后的 12 GiB 生产构建通过：webpack `9.9` 分钟、TypeScript `45` 秒、静态页面 `117/117`、Build ID `ZJo5NS6MxxuKE1ppzZHNq`、退出码 `0`。
 - **本地判定：BUG-015 PASS。** 不降低质量阈值、不改变账务状态机、不重复付费；Coze exact-SHA、现有 Google Chrome 界面文案与既有回退任务展示仍待验。
+
+## 2026-08-29 `2d3c2582` smart 回退披露云端回归
+
+- Coze 已精确运行 `main@2d3c258202dec59bdfea9aa36f5df16319f7468d`、tree `3d6fa270832e0bfde8e3e0082abaa0409afddfa2`；`stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 未变。
+- 云端专项 `131/131`、保护基线 38 项/0 警告/0 未授权、TypeScript、构建版 Lint 和 12 GiB 生产构建通过；Build ID `m5wMb_9pluExcucjbglti`，PID `4147`，三个健康端点 200，静态资源 `11/11`。
+- Google Chrome 复用既有标签且保持登录，正确选择历史紫色立方体并打开元素拆解配置面板；Console error/warning `0/0`，没有原生弹窗或明显布局异常。
+- 旧任务披露文案没有在新任务配置面板自动出现；直接历史任务 JSON 导航被 Chrome 扩展拦截。本轮未触发付费任务，因此不把该项写成通过。
+- **回归判定：Coze 运行与非付费 Chrome 冒烟 PASS；BUG-015 历史终态 UI 披露仍 UNVERIFIED。**

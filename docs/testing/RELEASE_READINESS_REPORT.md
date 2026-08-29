@@ -1750,3 +1750,10 @@ The focused gate test passes `7/7`; the actual protected-baseline command passes
 - 最终聚焦 `3 files / 41 tests`、扩展 `30 files / 227 tests`、全仓 `4171 passed / 122 PostgreSQL-gated skipped / 0 failed` 通过；TypeScript、完整 Lint `0 errors / 961 historical warnings` 与构建版 Lint通过。旧版终态父任务只通过纯存储快照投影已终态子任务证据，不领取 lease、不推进任务、不回写不可变终态；子任务过期或仍在处理时保留原完成结果。初次执行、部分完成、状态卡和任一分支重试统一显示中性退款回退说明。
 - 保护脚本已修复大规模未跟踪文件导致的 `ENOBUFS` 假通过；当前脏工作树会诚实阻断既有工具产物，发布判断必须采用提交后的干净候选门禁。二次复核后的 12 GiB 生产构建通过：webpack `9.9` 分钟、TypeScript `45` 秒、静态页面 `117/117`、Build ID `ZJo5NS6MxxuKE1ppzZHNq`。
 - **发布结论仍为“有条件通过”。** BUG-015 还需 Coze exact-SHA 与 Google Chrome 界面验收；Pear 远程质量成功、图层文档持久化、成功不退款账务和 PSD 导出继续开放。
+
+## 2026-08-29 `2d3c2582` 云端发布判定增量
+
+- Coze exact-SHA、干净工作区、131 项专项、保护基线、TypeScript、Lint、生产构建、单实例启动、三个健康端点与 `11/11` 静态资源均通过。
+- Google Chrome 非付费冒烟确认登录、选图、元素拆解面板和稳定态 Console；没有创建 Pear 任务或账务流水。
+- 历史 completed 父任务的退款回退文案尚未在真实 UI 中观察到，原因是入口默认打开新任务配置面板且直接任务 JSON 被扩展拦截。此项保持未验证，不以自动化合同替代真实界面证据。
+- **发布结论继续为“有条件通过”。** `V588-STABILITY-002` 尚未整体完成；下一业务项仍为 `002-C` 数据库图层文档持久化，同时保留历史披露 UI、Pear 远程成功、成功不退款账务和 PSD 导出门禁。
