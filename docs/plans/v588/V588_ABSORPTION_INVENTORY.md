@@ -677,8 +677,15 @@ No item is “absorbed” merely because its source file exists or a unit test p
 | `002-B` | Pear 精确 provider/model、异步任务、ZIP 安全下载、主 PSD 提取、质量合格的远程成功终态 | **部分通过** | 异步、ZIP、主 PSD `8BPS` 与 6 个像素图层已有真实证据；尚需使用自然 1:1 原图取得一次 `completed` 远程终态，禁止放宽质量门禁 |
 | `002-C` | 远程图层选择、显隐、移动、保存、刷新恢复、PSD 导出 | **未关闭** | 必须基于 `002-B` 的同一真实成功任务，证明刷新后状态保留，导出文件头为 `8BPS` 且图层数不少于 2 |
 | `002-D` | 成功任务账务一致性 | **未关闭** | 只读核对同一应用 taskId、唯一扣费流水、当前定价、余额变化和无退款；不得以 UI 文案代替管理员任务与积分流水 |
-| `002-E` | 失败/取消、迟到终态、一次退款和 PostgreSQL 多实例并发 | **未关闭** | 需要失败与取消各一次的任务级证据，并在隔离 `POSTGRES_TEST_DATABASE_URL` 运行真实并发用例；迟到完成不得覆盖 `failed/cancelled/timeout` |
+| `002-E` | 失败/取消、迟到终态、一次退款和 PostgreSQL 多实例并发 | **部分通过** | 临时隔离 PostgreSQL 18 已完成 4 文件/5 项真实并发用例；仍需云端失败与取消各一次的任务级证据，迟到完成不得覆盖 `failed/cancelled/timeout` |
 
 执行顺序固定为 `002-B -> 002-C -> 002-D -> 002-E`。`002-A` 永久关闭；在 `002-B` 完成前不得启动新的付费失败/取消实验，也不得进入 `V588-ADMIN-004`。
 
 本轮只读预检时，Google Chrome“用户1”仍能枚举既有 Coze 项目页和预览页，但对预览页的 DOM 读取及同源只读 API 调用均持续超时。该现象记为**浏览器控制/沙箱可用性阻塞**，不能记为 Pear、ZIP、PSD 或账务失败；本轮未提交任务、未调用供应商、未产生积分变化。
+
+### `002-E` 本地 PostgreSQL 并发证据
+
+- 在不修改本机既有 PostgreSQL 服务认证配置的前提下，于临时目录启动隔离 PostgreSQL `18.4`、独立端口和独立 `wujie_test` 数据库；测试结束后已正常停止临时实例。
+- `task-billing-concurrency`、`task-state-postgres`、`task-entry-rollback-postgres` 与 `layered-decompose-postgres-concurrency` 共 `4/4` 文件、`5/5` 用例通过，退出码 `0`。
+- 已证明：20 路相同幂等请求只创建一个任务、只扣费一次；失败/取消/超时竞争只允许一个终态和一次退款；8 路迟到完成全部被拒绝；积分账户并发删除时任务不会被错误标记为已退款。
+- 机器证据：`docs/testing/evidence/v588-stability-002e-postgres-concurrency-2026-08-29.json`。这关闭了 `002-E` 的本地数据库部分，不替代云端真实供应商失败/取消与账务流水验证。

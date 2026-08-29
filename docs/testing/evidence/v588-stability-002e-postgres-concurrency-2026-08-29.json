@@ -1,0 +1,37 @@
+{
+  "gate": "V588-STABILITY-002-E",
+  "scope": "isolated PostgreSQL concurrency, idempotency, billing, refund, and terminal-state verification",
+  "testedCommit": "1addd70a9c4ef24f6f3c5a35817d6f5d609e6f81",
+  "date": "2026-08-29",
+  "database": {
+    "engine": "PostgreSQL",
+    "version": "18.4",
+    "isolation": "temporary data directory, dedicated port, dedicated wujie_test database",
+    "existingServiceModified": false,
+    "temporaryServerStopped": true
+  },
+  "command": "pnpm exec vitest run tests/integration/task-billing-concurrency.test.ts tests/integration/task-state-postgres.test.ts tests/integration/task-entry-rollback-postgres.test.ts src/__tests__/api/layered-decompose-postgres-concurrency.test.ts --reporter=verbose",
+  "result": {
+    "exitCode": 0,
+    "testFilesPassed": 4,
+    "testFilesFailed": 0,
+    "testsPassed": 5,
+    "testsFailed": 0,
+    "durationSeconds": 5.01
+  },
+  "proved": [
+    "concurrent duplicate requests create one authoritative task",
+    "concurrent charge attempts create one consume transaction",
+    "failed/cancelled/timeout competition permits one terminal transition",
+    "terminal settlement creates at most one refund transaction",
+    "late completion cannot resurrect failed, cancelled, or timeout tasks",
+    "missing credit account cannot be mislabeled as refunded",
+    "core-v2 tasks remain authoritative after new admissions roll back to legacy"
+  ],
+  "remaining": [
+    "real cloud Pear success accounting",
+    "real cloud failure accounting",
+    "real cloud cancellation accounting",
+    "provider late-completion rejection evidence in the deployed environment"
+  ]
+}
