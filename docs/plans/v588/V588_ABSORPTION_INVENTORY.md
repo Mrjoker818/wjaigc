@@ -675,7 +675,7 @@ No item is “absorbed” merely because its source file exists or a unit test p
 |---|---|---|---|
 | `002-A` | 干净 `main`、来源追溯、保护基线、全量测试、生产构建、Coze 健康检查 | **已关闭** | `main@c3bfc812` 云端全量 `4160 passed / 0 failed`、生产构建及健康路由通过；后续提交只需执行增量回归，不再重做历史来源授权 |
 | `002-B` | Pear 精确 provider/model、异步任务、ZIP 安全下载、主 PSD 提取、质量合格的远程成功终态 | **部分通过** | 异步、ZIP、主 PSD `8BPS` 与 6 个像素图层已有真实证据；尚需使用自然 1:1 原图取得一次 `completed` 远程终态，禁止放宽质量门禁 |
-| `002-C` | 远程图层选择、显隐、移动、保存、刷新恢复、PSD 导出 | **未关闭** | 必须基于 `002-B` 的同一真实成功任务，证明刷新后状态保留，导出文件头为 `8BPS` 且图层数不少于 2 |
+| `002-C` | 远程图层选择、显隐、移动、保存、刷新恢复、PSD 导出 | **实现缺口已确认** | 当前编辑器只在 React 内存保存移动/显隐状态，现有 E2E 只恢复父任务而非编辑结果；需先补项目级持久化合同，再基于 `002-B` 同一真实成功任务验证刷新恢复和 `8BPS` 多图层导出 |
 | `002-D` | 成功任务账务一致性 | **未关闭** | 只读核对同一应用 taskId、唯一扣费流水、当前定价、余额变化和无退款；不得以 UI 文案代替管理员任务与积分流水 |
 | `002-E` | 失败/取消、迟到终态、一次退款和 PostgreSQL 多实例并发 | **部分通过** | 临时隔离 PostgreSQL 18 已完成 4 文件/5 项真实并发用例；仍需云端失败与取消各一次的任务级证据，迟到完成不得覆盖 `failed/cancelled/timeout` |
 
@@ -689,3 +689,9 @@ No item is “absorbed” merely because its source file exists or a unit test p
 - `task-billing-concurrency`、`task-state-postgres`、`task-entry-rollback-postgres` 与 `layered-decompose-postgres-concurrency` 共 `4/4` 文件、`5/5` 用例通过，退出码 `0`。
 - 已证明：20 路相同幂等请求只创建一个任务、只扣费一次；失败/取消/超时竞争只允许一个终态和一次退款；8 路迟到完成全部被拒绝；积分账户并发删除时任务不会被错误标记为已退款。
 - 机器证据：`docs/testing/evidence/v588-stability-002e-postgres-concurrency-2026-08-29.json`。这关闭了 `002-E` 的本地数据库部分，不替代云端真实供应商失败/取消与账务流水验证。
+
+### `002-C` 图层编辑持久化审计
+
+- `PsdLayerEditor` 的 `layers`、选择、位移和显隐状态均为组件内 `useState`；关闭编辑器会清空 `psdEditorInitialResult`，没有项目级保存回调或服务端编辑状态写入。
+- 现有 `dual-element-decomposition.spec.ts` 已验证选择、显隐、移动和导出，也验证父任务及分支 taskId 刷新后可查询，但没有断言用户编辑后的图层几何与显隐状态在刷新后恢复。
+- 因此不得把“任务刷新可恢复”写成“图层编辑刷新可恢复”。`002-C` 需要先建立项目/源版本绑定的编辑状态合同，再按失败测试、最小接入、全量回归、云端验证执行。
