@@ -1648,3 +1648,10 @@ The focused gate test passes `7/7`; the actual protected-baseline command passes
 - ZIP 下载、主 PSD 选择和 PSD 解析已通过，但 Pear 将 `3504x2336` 输入输出为 `1280x1280`，生产质量门禁正确拒绝，远程完整还原尚未通过。
 - 已定位并最小修复旧 `psdEditorInitialResult` 串用问题；专项 `8/8`、分层聚焦矩阵 `44/44`、全仓 `4155 passed / 122 PostgreSQL-gated skipped / 0 failed`，TypeScript、零错误 ESLint 与 `117/117` 生产构建均通过。云端回归仍未完成。
 - **发布结论仍为“有条件通过”，V588-STABILITY-002 不得关闭，也不得进入 V588-ADMIN-004。**
+
+## 2026-08-29 V588-STABILITY-002 `90231c70` 发布判定增量
+
+- **通过：** BUG-009 已在 Coze Google Chrome 真实图片入口关闭，旧 PSD 分层结果不会串入新图片编辑器。
+- **未验证：** BUG-008 仍缺“完成父任务存在时关闭浮层、任务对象不丢失、重新打开可读状态”的云端证据。
+- **成本边界：** 当前管理员定价为 Pear `Image-Layered=60`、Pear `gpt-image-2=60` 积分/图；未沿用历史 15 积分假设，也未为补证据擅自提交新任务。
+- **结论不变：** V588-STABILITY-002 尚不能标记整体吸收，暂不得进入 `V588-ADMIN-004`。

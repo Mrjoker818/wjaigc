@@ -1745,3 +1745,9 @@ Stage 3 remains in Task 10. Stage 4/5 are not authorized.
 本节位于文件末尾并覆盖上方所有历史检查点。管理员云任务确认 `layer_be958ed4-b5d4-4afa-865d-f960a4fd8c85` 的权威终态为 `failed / checking-quality / refunded`；此前 UI 显示的 5 层不能归因于该任务。当前仅可确认 ZIP、主 PSD 与图层解析通过，Pear 远程成功、远程图层编辑、成功账务仍为 `UNVERIFIED`。本地 BUG-009 修复已通过 `4155` 项全仓测试、TypeScript、零错误 ESLint 和 `117/117` 生产构建，云端部署回归仍待执行。
 
 最终机器证据：`docs/testing/evidence/v588-stability-002-pear-audit-correction-2026-08-29.json`。
+
+## 2026-08-29 V588-STABILITY-002 `90231c70` 未验证项增量
+
+- `V588-STABILITY-002-BUG-009` 已移出未验证：Coze Google Chrome 已证明新图片“编辑元素”只进入干净初始态，证据见 `docs/testing/evidence/v588-stability-002-90231c70-bug-009-cloud-2026-08-29.json`。
+- `V588-STABILITY-002-BUG-008` 保留：必须使用真实 `completed` 的 `element-decompose-parent` 驱动前端状态，验证关闭后浮层隐藏、父任务仍保留、重新打开仍能查看状态；空面板关闭不算通过。
+- 当前配置成本为 Pear `Image-Layered=60`、Pear `gpt-image-2=60` 积分/图。历史 15 积分授权与当前定价不一致，因此本轮未发起新付费任务。

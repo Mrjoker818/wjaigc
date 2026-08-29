@@ -592,3 +592,10 @@ No item is “absorbed” merely because its source file exists or a unit test p
 - 同时确认前端状态污染：全局关闭 PSD 编辑器未清空 `psdEditorInitialResult`，从另一张图片直接打开“编辑元素”也会沿用旧分层结果。RED 后仅在这两个边界清空旧结果，专项 `8/8` 转绿。
 - **状态：撤销“远程 Pear 成功路径已关闭”的结论。** V588-STABILITY-002 继续未吸收；下一步是完成本地全量门禁、推送 `main`、Coze 精确部署并验证旧结果不串用。新的付费 Pear 成功测试必须使用可证明保持尺寸/比例的输入或先取得供应商能力说明，不能重复消费积分碰运气。
 - 机器证据：`docs/testing/evidence/v588-stability-002-pear-audit-correction-2026-08-29.json`。
+
+## 2026-08-29 V588-STABILITY-002 `90231c70` 云端回归检查点
+
+- Coze 精确运行 `main@90231c70f7dacca43eb5e8ccd688c8204d12f3fe`、tree `a6dbe58d477112b7f2d0df205892efb0b34b428e`、Build ID `6-RXcDf1VQ8054PNXPhF5`；`stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 未触碰。
+- Google Chrome 真实图片入口证明 BUG-009 已关闭：单图项目先复验，随后在 7 图项目依次从 `3504 x 2336` 蓝色杯子切换到 `1254 x 1254` 紫色立方体；两次打开“编辑元素”都只显示“选择分层引擎 / 开始分层”，旧图层计数为 `0`。Console error/warning `0/0`，无原生弹窗，且没有供应商调用或积分变化。
+- 管理员只读任务接口确认数据库已有完成父任务，但刷新后的 UI 不会自动恢复父任务为当前面板状态；空面板关闭不能替代 BUG-008 完成态验收。管理员只读定价显示 Pear `Image-Layered` 和 Pear `gpt-image-2` 当前均为 `60` 积分/图。
+- **状态：BUG-009 云端关闭；BUG-008 继续未验证；V588-STABILITY-002 仍未整体吸收。** 下一步只关闭完成态面板显隐门禁，完成前不进入 `V588-ADMIN-004`，不重复 Stage 4。

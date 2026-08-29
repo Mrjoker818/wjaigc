@@ -1,0 +1,49 @@
+{
+  "recordedAt": "2026-08-29T08:53:35+08:00",
+  "environment": {
+    "deployment": "Coze preview",
+    "url": "https://62afe49a-716e-4d9e-99cd-a0be49c4794c-5000.dev.coze.site/",
+    "browser": "Google Chrome",
+    "gitCommit": "90231c70f7dacca43eb5e8ccd688c8204d12f3fe",
+    "gitTree": "a6dbe58d477112b7f2d0df205892efb0b34b428e",
+    "buildId": "6-RXcDf1VQ8054PNXPhF5",
+    "projectIds": [
+      "project_1787549625844_nfmso3ts9",
+      "project_1786500304299_8vix1z45f"
+    ]
+  },
+  "case": "V588-STABILITY-002-BUG-009",
+  "actions": [
+    "在已登录的现有 Chrome 标签中选择一张 1024 x 1024 画布图片并打开编辑元素",
+    "切换到包含 7 张真实图片的项目，先选择 3504 x 2336 蓝色杯子并打开编辑元素",
+    "关闭编辑器后选择 1254 x 1254 紫色立方体，再次打开编辑元素",
+    "检查两次 PSD 分层编辑器初始状态、旧图层文本和浏览器控制台"
+  ],
+  "observed": {
+    "editorTitle": "PSD 分层编辑器",
+    "initialHeading": "选择分层引擎",
+    "initialAction": "开始分层",
+    "selectedEngine": "云端",
+    "testedDistinctImages": 3,
+    "multiImageProjectImageCount": 7,
+    "staleLayerCountOnFirstMultiImageTarget": 0,
+    "staleLayerCountOnSecondMultiImageTarget": 0,
+    "staleCompletedResultVisible": false,
+    "consoleErrors": 0,
+    "consoleWarnings": 0,
+    "nativeDialog": false
+  },
+  "result": "passed",
+  "scope": "证明直接打开编辑元素时不会继承上一任务的 initialResult；未发起供应商任务，未扣积分。",
+  "screenshot": "docs/testing/evidence/v588-stability-002-90231c70-bug-009-cloud-2026-08-29.png",
+  "remaining": {
+    "case": "V588-STABILITY-002-BUG-008",
+    "status": "unverified",
+    "reason": "需要完成态 element-decompose-parent 驱动真实面板状态后验证关闭与重新打开；空面板关闭不作为证据。",
+    "currentConfiguredCost": {
+      "pearImageLayered": 60,
+      "pearGptImage2": 60,
+      "unit": "credits per image"
+    }
+  }
+}

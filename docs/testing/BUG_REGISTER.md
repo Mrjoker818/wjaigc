@@ -2875,4 +2875,13 @@ All listed Stage 4 defects are locally closed. S4-BUG-008 also passed its exact-
 | 根因 | `closeCanvasToolPanels()` 只执行 `setShowPsdEditor(false)`；`handleEditElements()` 只替换图片 URL，二者都未清空 `psdEditorInitialResult`。 |
 | RED | `element-decomposition-ui.test.ts` 精确截取两个回调块，修复前 `1 failed / 7 passed`，同时证明关闭和重新打开两个边界缺少清理。 |
 | 最小修复 | 全局关闭 PSD 编辑器以及直接打开“编辑元素”时分别执行 `setPsdEditorInitialResult(null)`；完成的元素拆解分支仍可显式设置新结果，不改变 Pear、积分、任务或导出逻辑。 |
-| 当前状态 | **本地已关闭 / Coze 云端待验。** 专项 `8/8`，分层聚焦矩阵 `44/44`，全仓 `4155 passed / 122 PostgreSQL-gated skipped / 0 failed`；TypeScript、零错误 ESLint 和 `117/117` 生产构建通过。 |
+| 当前状态 | **已关闭 / Coze Google Chrome 云端通过。** `main@90231c70f7dacca43eb5e8ccd688c8204d12f3fe`、tree `a6dbe58d477112b7f2d0df205892efb0b34b428e`、Build ID `6-RXcDf1VQ8054PNXPhF5` 下，先在单图项目复验，再进入 7 图项目依次选择 `3504 x 2336` 蓝色杯子和 `1254 x 1254` 紫色立方体；两次从展开后的浮动工具栏打开“编辑元素”都只显示“选择分层引擎 / 开始分层”，旧图层与旧完成结果计数均为 `0`。Console error/warning 为 `0/0`，无原生弹窗。本次未发起供应商任务、未扣积分。证据：`docs/testing/evidence/v588-stability-002-90231c70-bug-009-cloud-2026-08-29.json` 与同名前缀 PNG。 |
+
+#### BUG-008 云端验收边界补充（2026-08-29）
+
+| 字段 | 内容 |
+|---|---|
+| 已确认事实 | 云端数据库存在完成父任务 `element_69c2af1b-7108-4554-bd1d-9491982c383c`，但刷新后的前端不会自动把历史父任务恢复为当前 `elementDecomposeTask`。 |
+| 不采用的伪证据 | 关闭未提交的空面板只能证明普通显隐，不能证明完成态任务对象仍在时面板可关闭，因此不计为 BUG-008 通过。 |
+| 当前成本 | 管理员只读定价接口显示 Pear `Image-Layered` 与 Pear `gpt-image-2` 当前均为 `60` 积分/图；此前 `15` 积分记录不再代表当前配置。 |
+| 状态 | **本地已修复 / 云端完成态仍未验证。** 在取得明确的 60 积分动作许可或可由真实历史任务无副作用恢复 UI 状态前，继续保留为未验证，不发起猜测性付费任务。 |

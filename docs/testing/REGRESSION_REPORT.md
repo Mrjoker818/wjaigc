@@ -2057,3 +2057,10 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - 新增 BUG-009 RED：全局关闭和直接重新打开 PSD 编辑器时会残留旧 `initialResult`。仅补两处清理后单文件 `8/8`、分层聚焦矩阵 `44/44`、全仓 `4155 passed / 122 PostgreSQL-gated skipped / 0 failed`；TypeScript、零错误 ESLint 和 `117/117` 生产构建通过。
 - **回归判定：Pear ZIP/主 PSD 消费 PASS；远程完成、图层编辑、成功扣费 FAIL/UNVERIFIED；旧结果串用本地 GREEN、云端待验。**
 - 机器证据：`docs/testing/evidence/v588-stability-002-pear-audit-correction-2026-08-29.json`。
+
+## 2026-08-29 V588-STABILITY-002 `90231c70` 云端增量
+
+- Coze 已精确运行 `main@90231c70f7dacca43eb5e8ccd688c8204d12f3fe`，tree `a6dbe58d477112b7f2d0df205892efb0b34b428e`，Build ID `6-RXcDf1VQ8054PNXPhF5`；`stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 未触碰。
+- Google Chrome 先在单图项目复验，再进入 7 图项目依次选择 `3504 x 2336` 蓝色杯子和 `1254 x 1254` 紫色立方体。两次打开“编辑元素”均只显示干净初始态，旧图层计数为 `0`；Console error/warning `0/0`，无原生弹窗。BUG-009 云端关闭。
+- 本次未调用供应商、未创建新任务、未扣积分。机器证据：`docs/testing/evidence/v588-stability-002-90231c70-bug-009-cloud-2026-08-29.json` 与同名前缀 PNG。
+- BUG-008 仍未关闭：验收必须由真实完成态父任务驱动；空面板关闭不计。当前 Pear 分层与 Pear GPT Image 2 定价均为 `60` 积分/图。
