@@ -675,7 +675,7 @@ No item is “absorbed” merely because its source file exists or a unit test p
 |---|---|---|---|
 | `002-A` | 干净 `main`、来源追溯、保护基线、全量测试、生产构建、Coze 健康检查 | **已关闭** | `main@c3bfc812` 云端全量 `4160 passed / 0 failed`、生产构建及健康路由通过；后续提交只需执行增量回归，不再重做历史来源授权 |
 | `002-B` | Pear 精确 provider/model、异步任务、ZIP 安全下载、主 PSD 提取、质量合格的远程成功终态 | **部分通过** | 异步、ZIP、主 PSD `8BPS` 与 6 个像素图层已有真实证据；尚需使用自然 1:1 原图取得一次 `completed` 远程终态，禁止放宽质量门禁 |
-| `002-C` | 远程图层选择、显隐、移动、保存、刷新恢复、PSD 导出 | **实现缺口已确认** | 当前编辑器只在 React 内存保存移动/显隐状态，现有 E2E 只恢复父任务而非编辑结果；需先补项目级持久化合同，再基于 `002-B` 同一真实成功任务验证刷新恢复和 `8BPS` 多图层导出 |
+| `002-C` | 图层选择、显隐、移动、保存、刷新恢复、PSD 导出 | **核心云端门禁已关闭** | Coze 运行 `8cd07e1f`；Google Chrome 已验证 5 层文档移动、排序、显隐、锁定、重命名、导出模式、关闭重开、整页刷新恢复，并导出可由 `ag-psd` 解析的 `8BPS` PSD。该证据来自明确披露的本地 fallback，不替代 `002-B` 的 Pear 远程质量或 `002-D` 的成功账务证据 |
 | `002-D` | 成功任务账务一致性 | **未关闭** | 只读核对同一应用 taskId、唯一扣费流水、当前定价、余额变化和无退款；不得以 UI 文案代替管理员任务与积分流水 |
 | `002-E` | 失败/取消、迟到终态、一次退款和 PostgreSQL 多实例并发 | **部分通过** | 临时隔离 PostgreSQL 18 已完成 4 文件/5 项真实并发用例；仍需云端失败与取消各一次的任务级证据，迟到完成不得覆盖 `failed/cancelled/timeout` |
 
@@ -747,3 +747,14 @@ No item is “absorbed” merely because its source file exists or a unit test p
 - Pear 当前 Image-Layered 专页明确写明“只需传图，无需 prompt 与任何其他参数”，请求示例只有 `model + image`。`main@9e4d945e` 按 RED -> GREEN 移除 8 月 6 日旧通用 Schema 引入的 `prompt: "."`，保留异步和 URL 制品字段；聚焦分层矩阵 `85/85`、TypeScript、精确 Lint 与保护基线通过。
 - `9e4d945e` 后新鲜全仓回归为 `4225 passed / 123 PostgreSQL-gated skipped / 0 failed`，完整 Lint 为 `0 errors / 961 historical warnings`；默认 4 GiB Node 堆构建 OOM，8 GiB 堆下生产构建与 `118/118` 静态页面通过。该结果允许进入 Coze 候选验收，但不能替代隔离 PostgreSQL 零跳过门禁。
 - **状态：`002-C` 云端部分通过，不能关闭；`002-B` 仍受远程制品质量阻塞。** 浏览器标签控制超时单独记录为验收工具阻塞，不改写产品结论，不进入 `V588-ADMIN-004`。证据：`docs/testing/evidence/v588-stability-002-18adea-layer-documents-cloud-partial-2026-08-29.json`。
+
+## 2026-08-30 `002-C` 图层文档与 PSD 导出云端关闭检查点
+
+- Coze 业务运行代码为 `8cd07e1fcc00b93d683783318148ea54f5cd3827`。首次观察到旧拖动行为时，服务器已返回 `webpack-5a113952c3414a17.js`，现有 Chrome 标签仍运行旧 `webpack-a832e364079383cd.js`；使用同一标签页执行真实重载后切换到当前资源，因此旧包结果不计为新代码回归。
+- Google Chrome 从图片工具栏重新打开同一 5 层文档，侧栏选择“元素 2”后在重叠区域拖动，只有该层从 `589,416` 移至 `745,520`，`reconstruction/correction` 保持 `0,0`；测试位移随后还原并保存，整页刷新后坐标仍一致。`V588-STABILITY-002-BUG-019` 云端关闭。
+- 图层顺序和导出模式分别临时改为新顺序与 `pro`，关闭重开后准确恢复；还原原顺序与 `studio` 后再次整页刷新仍保持最终值。图层移动、排序、显隐、锁定、重命名、导出模式、自动保存、关闭重开与刷新恢复均已取得云端证据。
+- 最终文件 `图片_studio_edited.psd` 为 `14,089,648` 字节，签名 `8BPS`，SHA-256 `6264C9B75597CD437732CFC339AE28DEEB36467851F52BB9766075187B3379E0`；`ag-psd` 解析为 `3504x2336` 与 5 个编辑图层，顺序及关键坐标与保存文档一致。
+- 本轮没有新建供应商任务或执行付费操作。该文档来自界面已明确披露的本地 fallback，因此只关闭 `002-C` 核心云端门禁；不证明 `002-B` 的 Pear 远程质量成功、`002-D` 的一次扣费零退款，也不替代 `002-E` 的云端失败/取消账务矩阵。完成态父任务卡“打开编辑器”仍保留为独立云端补证项。
+- 证据：`docs/testing/evidence/v588-stability-002-8cd07e1f-psd-selected-layer-cloud-2026-08-30.json`、`docs/testing/evidence/v588-stability-002-8cd07e1f-layer-document-export-cloud-2026-08-30.json` 及同名 PNG。后续文档提交 `af2132de`、`1dab4e3f` 不改变上述运行时代码。
+
+**当前唯一顺序：** `002-B` Pear 远程质量成功 -> `002-D` 同一成功任务一次扣费且零退款 -> 完成态任务卡入口补证 -> `002-E` 云端失败/取消账务矩阵。上述门禁关闭前不进入 `V588-ADMIN-004`，已经关闭的 `002-A`、`002-C` 与 Stage 4 不得重复执行。
