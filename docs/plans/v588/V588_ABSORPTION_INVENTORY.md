@@ -702,4 +702,5 @@ No item is “absorbed” merely because its source file exists or a unit test p
 - API 管理确认 `pear分层` 已启用，类型为“图片分层模型”，基础地址为 `https://api.pearapi.ai`，唯一启用模型为 `Image Layered / Image-Layered`。
 - 云端任务监控刷新后可见的最近元素拆解与图层任务均为 `completed` 的 legacy/零积分任务，没有正在运行的同类任务。
 - 当前画布已选中自然 `800 x 800` 紫色立方体，元素拆解面板已切换到“可编辑图层”；生成按钮尚未点击，未调用供应商、未扣积分。
+- 源图已进一步锁定为受控媒体 `/api/serve-upload/uploads/gen-1786870726496-j7ht8e.png`；源图可见，提交按钮可见且可用。证据明确区分云端运行提交 `c3bfc812` 与后续仅修改文档的 `main` 提交。
 - 机器证据：`docs/testing/evidence/v588-stability-002bd-paid-preflight-2026-08-29.json`。下一动作必须取得本次 `60` 积分的动作时确认后，才允许提交一次。
