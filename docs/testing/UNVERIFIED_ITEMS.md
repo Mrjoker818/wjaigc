@@ -1886,10 +1886,12 @@ Stage 3 remains in Task 10. Stage 4/5 are not authorized.
 
 | 项目 | 最新状态 | 关闭条件 |
 |---|---|---|
-| 完成态重新打开 PSD 编辑器 | `LOCAL PASS / CLOUD PENDING` | 完成态关闭编辑器后，状态卡出现“打开编辑器”；重开同一文档且不产生 `/api/element-decompose`、`/api/layered-decompose`、新 taskId、扣费或退款。 |
-| 重叠图层精确拖动 | `LOCAL PASS / CLOUD PENDING` | 侧栏选中可见未锁定底层后拖动重叠区域，只有该层坐标变化；隐藏、锁定或点在范围外时回退到原顶层语义。 |
-| 图层文档完整恢复 | `CLOUD PARTIAL PASS` | 已通过重命名、隐藏、锁定和自动保存；仍需完成移动、排序、导出模式、关闭重开与整页刷新逐项一致。 |
+| 完成态重新打开 PSD 编辑器 | `CLOUD PARTIAL PASS` | 整页刷新后已从图片工具栏重开同一 5 层文档；仍需在一个新完成态父任务中验证状态卡“打开编辑器”按钮，并采集零新增任务、零扣费/退款证据。 |
+| 重叠图层精确拖动 | `CLOUD PASS` | `8cd07e1f` 当前资源包中，元素层 `589,416 → 745,520` 时校正层保持 `0,0`；位移已还原并保存。隐藏、锁定和越界 fallback 由永久自动化覆盖。 |
+| 图层文档完整恢复 | `CLOUD PARTIAL PASS` | 已通过重命名、隐藏、锁定、移动、自动保存、关闭重开和整页刷新恢复；仍需完成排序与导出模式逐项一致。 |
 | PSD 最终导出 | `UNVERIFIED` | 下载文件存在，前四字节为 `8BPS`，图层数、顺序和坐标与最终保存 revision 一致。 |
 | Pear 远程成功与账务 | `FAILED / UNVERIFIED` | 合适素材取得 `engine=pear`、2+ 合格远程图层、一次扣费零退款；不得以本地 fallback 或本轮非付费重开验证替代。 |
 
 云端执行顺序固定为：Coze 拉取最终 `main` exact-SHA，确认 `stable` 未变；沙箱完全重启；强制刷新既有 Google Chrome 预览标签；最后开始验证。不得新建 Chrome 标签，也不得在旧沙箱进程上得出通过结论。
+
+补充门禁：刷新后必须核对浏览器已加载的 webpack/page chunk 与服务器当前 HTML 一致。仅发送 `Ctrl+Shift+R` 不再作为“新构建已加载”的充分证据。

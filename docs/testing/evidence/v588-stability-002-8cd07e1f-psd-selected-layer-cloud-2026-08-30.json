@@ -1,0 +1,34 @@
+{
+  "testId": "V588-STABILITY-002-BUG-019-CLOUD",
+  "testedAt": "2026-08-30T03:55:52+08:00",
+  "browser": "Google Chrome",
+  "deploymentUrl": "https://62afe49a-716e-4d9e-99cd-a0be49c4794c-5000.dev.coze.site/",
+  "gitCommit": "8cd07e1fcc00b93d683783318148ea54f5cd3827",
+  "gitTree": "40f3d6ffea93b46ae7da0bd6a10082a2b6c4a62d",
+  "staleAssetObserved": "webpack-a832e364079383cd.js",
+  "currentServerAsset": "webpack-5a113952c3414a17.js",
+  "refreshMethod": "existing Chrome tab-level reload; no new tab",
+  "document": {
+    "source": "canvas image",
+    "canvasSize": "3504x2336",
+    "layerCount": 5,
+    "selectedLayer": "元素 2",
+    "selectedLayerId": "local-decoration-3",
+    "selectedLayerBefore": "589,416",
+    "selectedLayerDuringTest": "745,520",
+    "selectedLayerRestored": "589,416",
+    "correctionLayerBefore": "0,0",
+    "correctionLayerAfter": "0,0",
+    "finalSaveStatus": "已保存"
+  },
+  "providerTaskCreatedByThisRun": false,
+  "paidOperationPerformed": false,
+  "result": "PASS",
+  "notes": [
+    "旧资源包上的首次失败不作为 8cd07e1f 的失败证据。",
+    "真实重载后侧栏选中层优先命中，未移动重叠的整图校正层。",
+    "测试位移已还原，刷新后从图片工具栏可重新打开同一 5 层文档。",
+    "完成态父任务卡自身的打开编辑器按钮仍需单独云端证据。"
+  ],
+  "screenshot": "docs/testing/evidence/v588-stability-002-8cd07e1f-psd-selected-layer-cloud-2026-08-30.png"
+}

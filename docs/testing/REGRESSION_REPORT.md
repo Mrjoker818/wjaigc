@@ -2215,3 +2215,12 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - 最终聚焦回归 `45/45`；全仓为 `577 files passed / 23 PostgreSQL-gated skipped / 0 failed`、`4230 tests passed / 123 skipped / 0 failed`。跳过项不计作通过。
 - TypeScript、完整 ESLint、保护基线和 8 GiB 生产构建通过；构建生成 `118/118` 静态页面。独立复审未发现 Critical、Important 或 P2 问题。
 - **本地判定：BUG-018/019 PASS；云端判定：PENDING。** 必须按“Coze 拉取 exact-SHA → 沙箱重启 → 既有 Chrome 预览标签强制刷新”的顺序验证，且重开不得产生新的 Pear 任务或账务。
+
+## 2026-08-30 `8cd07e1f` PSD 真实重载与拖动云端回归
+
+- Coze 已按 exact-SHA 运行 `8cd07e1f`，源代码树为 `40f3d6ffea93b46ae7da0bd6a10082a2b6c4a62d`；`stable` 未修改。
+- 首轮拖动看似仍命中整图校正层，但资源核对证明服务器新入口使用 `webpack-5a113952c3414a17.js`，Chrome 标签实际仍运行旧 `webpack-a832e364079383cd.js`。此前快捷键刷新未让该标签切换构建，因此该结果不作为新代码失败证据。
+- 使用现有 Chrome 标签执行标签页级真实重载后，加载资源切换到 `webpack-5a113952c3414a17.js`。从图片工具栏重新打开已保存的 5 层文档，证明整页刷新后的文档恢复路径可用。
+- 在重载后的编辑器中选择“元素 2”，于整图校正层重叠区域拖动：元素坐标 `589,416 → 745,520`，整图校正层保持 `0,0`。随后反向拖动将元素恢复到 `589,416`，等待状态回到“已保存”，再次选择整图校正层仍为 `0,0`。
+- 本轮没有启动新的 Pear/供应商任务，也没有执行付费操作。BUG-019 云端关闭；BUG-018 的“工具栏重开已保存文档”通过，但完成态任务卡按钮仍因父任务状态未跨整页水合而保留为未验证。
+- **回归判定：BUG-019 CLOUD PASS；BUG-018 CLOUD PARTIAL。** 后续部署验收必须核对浏览器实际资源哈希，不能只依赖快捷键刷新动画或页面肉眼变化。

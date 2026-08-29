@@ -3107,7 +3107,7 @@ All listed Stage 4 defects are locally closed. S4-BUG-008 also passed its exact-
 | 修复 | 新增纯解析 `resolveCompletedElementLayersEditorPayload`，完成态卡片显示“打开编辑器”；复用同一父任务、源图版本和既有结果，不请求元素拆解接口、不新建供应商任务、不触发扣费。 |
 | 永久回归 | 非完成态、非 layers 分支和空图层均拒绝重开；真实编辑器挂载测试确认直接使用 `initialResult`，`runLayerDecomposition` 调用次数为 `0`。 |
 | 本地状态 | **已修复。** 最终聚焦 `45/45`，全仓 `4230 passed / 123 PostgreSQL-gated skipped / 0 failed`；TypeScript、完整 Lint、保护基线和 8 GiB 生产构建通过。 |
-| 云端状态 | **待验证。** Coze 拉取最终 exact-SHA、沙箱重启并强制刷新既有 Chrome 预览标签后，验证关闭、重开、刷新恢复及零新增任务/零新增账务。 |
+| 云端状态 | **部分通过。** Coze 已精确运行 `8cd07e1f`。真实整页重载后，从图片工具栏“编辑元素”重新打开同一 5 层文档，已保存坐标仍可恢复且没有发起新的付费分层操作；但完成态任务卡自身的“打开编辑器”按钮因页面重载后父任务 React 状态不再水合，仍需一条新完成态父任务证据，不能合并标记为全部通过。 |
 
 ### V588-STABILITY-002-BUG-019：PSD 重叠图层拖动忽略侧栏当前选择（2026-08-30）
 
@@ -3119,4 +3119,4 @@ All listed Stage 4 defects are locally closed. S4-BUG-008 also passed its exact-
 | RED | 指针目标测试先稳定证明当前选择被顶层覆盖；同时覆盖选择隐藏、锁定、越界和未选择时的旧顶层语义。 |
 | 修复 | 新增统一 `resolvePsdLayerPointerTarget`：合法当前选择优先，否则保持原顶层命中规则；锁定顶层仍阻挡下层，未扩大既有交互边界。 |
 | 本地状态 | **已修复。** 图层命中与持久化聚焦测试通过，独立复审未发现 Critical、Important 或 P2 遗留。 |
-| 云端状态 | **待验证。** 在同一完成态文档中选中重叠底层并拖动，确认只有选中层坐标变化，关闭/刷新后仍恢复相同结果。 |
+| 云端状态 | **已通过。** 首次观察到旧行为时，服务器入口已返回 `webpack-5a113952c3414a17.js`，Chrome 标签仍运行旧 `webpack-a832e364079383cd.js`，属于旧构建未真正刷新的假回归。使用标签页级真实重载后，侧栏选择“元素 2”，在与整图校正层重叠区域拖动，坐标仅从 `589,416` 变为 `745,520`，`reconstruction/correction` 保持 `0,0`；随后已将元素层还原为 `589,416` 并等待“已保存”。再次整页恢复和重开文档后坐标一致。证据见 `docs/testing/evidence/v588-stability-002-8cd07e1f-psd-selected-layer-cloud-2026-08-30.json` 与同名 PNG。 |
