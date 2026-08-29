@@ -1,0 +1,74 @@
+{
+  "evidenceId": "v588-stability-002-b0eefdf4-bug-010-cloud-2026-08-29",
+  "capturedAt": "2026-08-29T10:36:34+08:00",
+  "environment": "Coze preview in existing Google Chrome tab",
+  "previewUrl": "https://62afe49a-716e-4d9e-99cd-a0be49c4794c-5000.dev.coze.site/?projectId=project_1786500304299_8vix1z45f",
+  "git": {
+    "head": "b0eefdf4cfc4c8e8ca9ef0ae2c4e236d26100f0e",
+    "tree": "85358ca47fd0dfee0f469800bd2643574498503f",
+    "originMain": "b0eefdf4cfc4c8e8ca9ef0ae2c4e236d26100f0e",
+    "originStable": "52f7c601ed150769e15d06fb435c6e360e28c9e7"
+  },
+  "coze": {
+    "buildId": "72AxKgi4YmnIHZAbqBwoJ",
+    "port5000Pid": 41392,
+    "focusedTests": "46 passed, 0 failed",
+    "typecheck": "passed",
+    "lintBuild": "passed",
+    "productionBuild": "passed",
+    "health": {
+      "/": 200,
+      "/simple-chat": 200,
+      "/api/auth/me": 200,
+      "staticAssets": "11 passed, 0 failed"
+    }
+  },
+  "scenario": {
+    "projectImage": "退款一致性测试：一个紫色立方体，纯白背景，产品摄影，无文字",
+    "outputMode": "可编辑图层",
+    "steps": [
+      "打开初始态元素拆解面板并验证完整显示",
+      "关闭并重开初始态面板",
+      "经用户确认提交一次可编辑图层任务",
+      "等待 completed · 100% 并验证 PSD 编辑器主体/背景两层",
+      "关闭元素拆解面板并确认 PSD 编辑器保持",
+      "关闭 PSD 编辑器后重开元素拆解面板",
+      "验证 completed · 100% 保留且面板无遮挡"
+    ]
+  },
+  "layoutAssertions": {
+    "portalParent": "BODY",
+    "insideCanvasViewport": false,
+    "computedZIndex": "200",
+    "panelWidth": 288,
+    "panelHeight": 415.125,
+    "completedStateRetained": true,
+    "psdLayerCount": 2,
+    "psdLayerNames": ["主体", "背景"]
+  },
+  "console": {
+    "newErrorsDuringFeatureFlow": 0,
+    "newWarningsDuringFeatureFlow": 0,
+    "restartTransient": "Eight loadProjectsFromServer 502 warnings were captured between 02:29:38Z and 02:31:09Z while the old service was stopped and the new build was starting; no later warning was captured after the service recovered."
+  },
+  "billingBoundary": "The visual gate did not obtain a fresh authoritative credit response because the read-only /api/credits probe timed out. No billing conclusion is claimed by this evidence.",
+  "screenshots": [
+    {
+      "path": "docs/testing/evidence/v588-stability-002-b0eefdf4-bug-010-cloud-initial-2026-08-29.png",
+      "bytes": 171944,
+      "sha256": "c16b4e67b15e5d59a103e7ed16ab6bd0df2ae5516740e114365753da1a6c2857"
+    },
+    {
+      "path": "docs/testing/evidence/v588-stability-002-b0eefdf4-bug-010-cloud-completed-2026-08-29.png",
+      "bytes": 137674,
+      "sha256": "d7e80104d0111b253043e9623b46201932cdb557eceeb75b6870e75b9fa30d5a"
+    },
+    {
+      "path": "docs/testing/evidence/v588-stability-002-b0eefdf4-bug-010-cloud-reopened-2026-08-29.png",
+      "bytes": 173559,
+      "sha256": "37307c65a0bd0f71d7600466f9f8cf41073d07a0404016945ead6685a86ec229"
+    }
+  ],
+  "result": "PASS",
+  "closedBug": "V588-STABILITY-002-BUG-010"
+}

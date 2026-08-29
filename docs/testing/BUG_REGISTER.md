@@ -2915,3 +2915,14 @@ All listed Stage 4 defects are locally closed. S4-BUG-008 also passed its exact-
 | 永久回归 | `src/__tests__/components/element-decomposition-ui.test.ts` 新增面板必须脱离画布裁剪上下文的结构契约；该文件 `10/10` 通过，元素拆解专项 `46/46` 通过。 |
 | 全量门禁 | `pnpm ts-check`、`pnpm lint:build`、`pnpm build` 通过；`pnpm test` 为 `572` 个文件通过、`4157` 项通过、`122` 项因缺少隔离 PostgreSQL 测试库明确跳过、`0` 失败。 |
 | 状态 | **本地已修复 / 云端视觉待验证。** 新提交部署后必须在既有 Google Chrome 标签重开完成态面板，补齐无遮挡截图、关闭行为与 Console/网络证据，方可最终关闭。 |
+
+#### BUG-010 Coze Google Chrome 关闭增量（2026-08-29）
+
+| 字段 | 内容 |
+|---|---|
+| 精确版本 | Coze `HEAD=origin/main=b0eefdf4cfc4c8e8ca9ef0ae2c4e236d26100f0e`，tree `85358ca47fd0dfee0f469800bd2643574498503f`，Build ID `72AxKgi4YmnIHZAbqBwoJ`；`origin/stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 未触碰。 |
+| 云端门禁 | 元素拆解专项 `46/46`，TypeScript、构建版 Lint、生产构建、三个健康端点及 `11/11` 静态资源通过。 |
+| 真实回归 | Google Chrome 选择 `800 x 800` 紫色立方体，完成“可编辑图层”至 `completed · 100%`，PSD 编辑器显示 `主体/背景` 两层；关闭元素面板后编辑器保持，关闭编辑器后重开面板仍保留完成状态。 |
+| 层级证据 | 初始态和完成态重开均完整无遮挡；浮层父节点为 `BODY`，不在 `data-canvas-viewport` 内，计算层级为 `z-index: 200`。 |
+| 控制台边界 | 服务切换期间曾出现 8 条项目同步 `502` 警告；服务恢复后本功能流程没有新增 error/warning。账务只读探针超时，本条不扩张为扣费结论。 |
+| 状态 | **已修复并完成云端关闭。** 机器证据及三张原始 PNG：`docs/testing/evidence/v588-stability-002-b0eefdf4-bug-010-cloud-2026-08-29.json`。 |

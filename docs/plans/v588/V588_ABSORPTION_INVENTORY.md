@@ -612,3 +612,9 @@ No item is “absorbed” merely because its source file exists or a unit test p
 - 已用失败测试确认元素拆解面板被挂在画布 `overflow-clip` 层叠上下文内，随后最小改为 `createPortal(..., document.body)`；任务、供应商、图层和账务代码未改。
 - 元素拆解专项 `46/46`，全量 `4157` 项通过、`122` 项 PostgreSQL 专项明确跳过、`0` 失败；TypeScript、Lint 与生产构建通过。
 - **状态：本地候选修复完成，尚未计为吸收。** 下一步推送精确 SHA，由 Coze 拉取后在既有 Google Chrome 标签完成无遮挡视觉回归，再处理域名测试合同和远程 Pear 矩阵；不进入 `V588-ADMIN-004`。
+
+## 2026-08-29 V588-STABILITY-002 BUG-010 云端关闭检查点
+
+- Coze 已精确运行 `main@b0eefdf4`，tree `85358ca4`，Build ID `72AxKgi4YmnIHZAbqBwoJ`；专项 `46/46`、TypeScript、Lint、构建和健康检查通过，`stable` 未触碰。
+- Google Chrome 三轮证据确认元素拆解面板初始态、完成态和完成态重开均完整无遮挡；`completed · 100%`、PSD 两层和编辑器独立关闭行为保留。
+- **BUG-010 已云端关闭，V588-STABILITY-002 仍未整体吸收。** 下一步只处理 Coze 域名测试合同与远程 Pear/账务矩阵，完成前不进入 `V588-ADMIN-004`，不重复已关闭的 Stage 4 工作。

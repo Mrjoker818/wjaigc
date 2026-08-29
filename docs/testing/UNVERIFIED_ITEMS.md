@@ -1764,3 +1764,9 @@ Stage 3 remains in Task 10. Stage 4/5 are not authorized.
 - 本地代码和自动化门禁已通过；仍需部署新 SHA 后，在既有 Google Chrome 预览标签验证完成态元素拆解面板完整位于画布媒体之上。
 - 云端证据必须包含本地存在的 PNG 截图、面板关闭/重开状态、PSD 编辑器独立关闭行为、Console error/warning 与网络摘要。
 - 此视觉回归不应创建新的供应商任务或扣除积分；远程 Pear 与账务验证仍按独立未验证项处理。
+
+## 2026-08-29 `b0eefdf4` 未验证项收敛
+
+- `V588-STABILITY-002-BUG-010` 已移出未验证：Coze Google Chrome 已证明初始态、完成态和完成态重开均无遮挡，Portal 层级、状态保留及 PSD 编辑器独立关闭均通过。
+- 保留：Coze `auth-login-configuration` 域名环境合同、Pear 远程 `completed/ready`、远程图层编辑/保存/刷新、PSD 导出、成功一次扣费以及失败/取消一次退款。
+- 本轮积分只读查询超时，因此没有把 BUG-010 的视觉关闭解释为账务关闭。

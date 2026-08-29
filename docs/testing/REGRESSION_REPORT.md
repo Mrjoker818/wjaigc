@@ -2079,3 +2079,11 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - `element-decomposition-ui`：`10/10`；元素拆解专项：`46/46`；全量 Vitest：`572` 个文件、`4157` 项通过、`122` 项 PostgreSQL 专项明确跳过、`0` 失败。
 - TypeScript、构建版 Lint、生产构建均通过；`git diff --check` 通过。
 - **本地判定：PASS。云端判定：PENDING。** 尚需新 SHA 部署后的 Google Chrome 无遮挡截图、关闭/重开与 Console/网络回归。
+
+## 2026-08-29 `b0eefdf4` BUG-010 云端回归
+
+- Coze 精确对齐 `main@b0eefdf4cfc4c8e8ca9ef0ae2c4e236d26100f0e`，tree `85358ca47fd0dfee0f469800bd2643574498503f`；`stable@52f7c601` 未变。
+- 云端专项 `46/46`、TypeScript、Lint、生产构建、`/`、`/simple-chat`、`/api/auth/me` 和 `11/11` 静态资源通过。
+- Google Chrome 初始态、完成态和完成态重开三轮视觉检查均完整无遮挡；完成状态 `completed · 100%` 保留，PSD 编辑器保持独立关闭行为并显示 `主体/背景` 两层。
+- DOM 实测浮层父节点为 `BODY`、不在画布 viewport 内、`z-index=200`。**BUG-010 云端回归 PASS。**
+- 证据：`docs/testing/evidence/v588-stability-002-b0eefdf4-bug-010-cloud-2026-08-29.json` 及同前缀三张 PNG。账务探针超时，未把视觉通过扩张为账务通过。
