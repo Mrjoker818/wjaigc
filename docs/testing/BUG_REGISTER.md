@@ -2979,3 +2979,47 @@ All listed Stage 4 defects are locally closed. S4-BUG-008 also passed its exact-
 | Chrome 回归 | Google Chrome“用户1”既有预览标签强制刷新后工作台、项目媒体、模型和图像生成面板完整加载；重启窗口曾记录 8 条同时间戳同步 `502` 警告，稳定态二次刷新新时间边界后 Console `error/warning=0/0`，无原生弹窗。 |
 | 状态 | **BUG-012 与 BUG-013 已完成本地和 Coze 双端关闭。** 本次未修改数据库、账号、模型、供应商或积分配置，未发起付费任务。 |
 | 证据 | `docs/testing/evidence/v588-stability-002-c3bfc812-clean-main-cloud-2026-08-29.json`。 |
+
+### V588-STABILITY-002-BUG-007 最新真实 1:1 Pear 复验增量（2026-08-29）
+
+| 字段 | 内容 |
+|---|---|
+| 真实动作 | 经明确授权，Google Chrome“用户1”在既有标签对紫色立方体只提交一次 `Pear / Image-Layered`。初始 UI 为 `processing · 27%`，没有重复点击。 |
+| 权威任务 | 应用任务 `layer_a328d329-ebcb-45f1-8098-53ff27b5a139`，Pear 任务 `5b395ce3-37fb-4eab-b968-586a8db367e0`，耗时 `268555 ms`。 |
+| ZIP/PSD 链路 | Pear 返回 `.zip` 制品；任务已越过安全下载、ZIP MIME、主 PSD 提取和 PSD 解析并进入质量门禁。由此关闭“ZIP 不能下载/解压/解析”的剩余疑点。 |
+| 权威终态 | 整体任务为 `completed/ready/100%`，但 `request.engine=smart`、`decomposition.engine=local`；Pear 结果因 `RECONSTRUCTION_ERROR_HIGH, DUPLICATE_LAYER_RATIO_HIGH, OUT_OF_BOUNDS_LAYERS_PRESENT` 被拒绝，最终交付本地 `背景/主体` 两层。 |
+| 离线根因拆分 | ZIP 含主 PSD 与 `_depth.psd`，主 PSD 为 `1280x1280 / 29` 层。源图 `1254x1254` 直接比较时越界率为 `1`，把源图归一到 PSD 坐标后越界率归零，证明该告警来自坐标空间未对齐；但重建 MAE 仍为 `0.7125`、重复率 `0.8621`，且图层名为 `front hair/face/eyewear/topwear` 等人物部件，与紫色立方体不符，远程内容本身也不可接受。 |
+| 账务 | 恰好一笔 `-15` 与一笔 `+15`，余额 `403 -> 388 -> 403`；净积分 `0`，没有重复扣费或重复退款。 |
+| 状态 | **ZIP/主 PSD 消费通过；Pear 远程可编辑成功仍失败。** 应分别修复应用侧坐标归一化，并在再次付费前确认 Image-Layered 的适用素材范围；不得降低 MAE/重复层质量阈值来放行本次错误制品。 |
+| 证据 | `docs/testing/evidence/v588-stability-002-pear-smart-fallback-2026-08-29.json`。 |
+
+### V588-STABILITY-002-BUG-014：管理员显示积分与真实任务结算价格不一致（2026-08-29）
+
+| 字段 | 内容 |
+|---|---|
+| 严重等级 | P1（计费配置一致性）：管理员预检显示 `Image-Layered=60` 积分/图，真实权威任务却只预扣 `15`。 |
+| 稳定复现 | 同一管理员、同一 provider/model、同一次真实任务；预检可见价格为 60，数据库任务 `creditCost=15`，流水为 `-15/+15`。 |
+| 根因 | `credit_pricing_config` 中既没有 `api_1785190544435_1heimk6::Image-Layered`，也没有 `Image-Layered`；服务端 `calculateConfiguredCreditCost('segment', ...)` 因而回退到 `OTHER_OPERATION_CREDITS.segment=15`。管理员模型目录显示的 60 不是任务结算权威来源。 |
+| 风险 | 用户确认的预计成本、管理员配置与实际扣费不同；即使本次失败后全额退款，成功任务仍可能按错误价格结算。 |
+| 当前状态 | **已复现 / 未修复。** 修复前必须先建立“管理员显示价 = 服务端权威结算价”的失败测试，并明确价格的单一权威来源。 |
+
+### V588-STABILITY-002-BUG-015：smart 回退完成态掩盖 Pear 质量失败（2026-08-29）
+
+| 字段 | 内容 |
+|---|---|
+| 严重等级 | P2：用户得到可用本地两层，但界面整体可显示 `completed/ready`，容易误认为 Pear 远程图层成功。 |
+| 稳定复现 | 本次任务 Pear ZIP 已返回但质量门禁失败；数据库同时出现 `status=completed`、`phase=ready`、`creditStatus=refunded`、`decomposition.engine=local` 与非空 `fallbackReason`。 |
+| 根因 | smart 模式把“远程失败并退款 + 本地 fallback 成功”映射为父任务完成，但前端完成态没有强制展示实际引擎、退款和回退原因。 |
+| 风险 | 测试人员和用户会把本地两层误判为 Pear 成功，历史上已真实发生过同类错误结论。 |
+| 当前状态 | **已复现 / 未修复。** 应保留整体成功语义，同时明确显示“Pear 未通过质量门禁，已退款并使用本地分层”，并让自动化断言实际引擎。 |
+
+### V588-STABILITY-002-BUG-007/014 本地修复增量（2026-08-29）
+
+| 字段 | 内容 |
+|---|---|
+| RED 证据 | 管理员计价测试先稳定证明 layer 模型错误进入普通 image 价格分支；质量门禁测试先稳定证明缺少源图到 PSD 文档坐标的归一化函数。修复前聚焦结果为 `6 failed / 9 passed`。 |
+| BUG-014 根因修复 | 管理员价格目录对 `modelType=layer` 现在与权威结算相同，统一使用 `OTHER_OPERATION_CREDITS.segment` 与 `per-call`；不再让 `Image-Layered` 因名称包含 `image` 而模糊命中 `gpt-image-2` 的 60 积分默认值。 |
+| BUG-007 应用侧修复 | 仅当源图与 PSD 文档宽高比误差不超过 1% 时，把源图归一到 PSD 坐标空间，并将同一归一化缓冲同时用于质量门禁和重建检查；尺寸、像素上限与不同宽高比拒绝拉伸均有测试。 |
+| 不变边界 | 没有降低 MAE、重复层、空层或越界阈值；本次紫色立方体制品在坐标归一后仍因 `MAE=0.7125`、重复率 `0.8621` 和人物部件图层名被拒绝，不能标记 Pear 远程成功。 |
+| 自动化回归 | 分层/计价聚焦 `7 files / 58 tests` 全通过；全仓 Vitest `572 files / 4163 passed / 122 PostgreSQL-gated skipped / 0 failed`；TypeScript 与 ESLint 均退出 `0`，ESLint 保留 `961` 条历史 warning、无 error。 |
+| 当前状态 | **BUG-014 本地已修复、BUG-007 的应用坐标误报本地已修复；云端待验证。** BUG-015 仍开放；Pear 供应商返回不匹配素材、远程成功态、成功不退款账务、图层文档保存/刷新和 PSD 导出均未关闭。 |

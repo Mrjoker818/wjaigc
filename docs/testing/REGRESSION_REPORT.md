@@ -2142,3 +2142,24 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - 12 GiB 堆生产构建退出 `0`，Build ID `SuXRLPDiMNsGcudgsyzah`；`scripts/coze-start.sh` 启动单一 5000 PID `17019`。
 - `/`、`/simple-chat`、`/api/auth/me` 均为 `200`，静态资源 `11/11`。Google Chrome 稳定态二次刷新后完整工作台可见，边界后 Console `0/0`，无原生弹窗。
 - **干净 main 来源追溯与保护基线云端回归 PASS。** PostgreSQL 隔离并发与 Pear 付费编辑/保存/导出账务矩阵仍保持独立未验证，不被本结论扩大覆盖。
+
+## 2026-08-29 唯一 Pear 付费任务与 smart 回退权威回归
+
+- Google Chrome“用户1”在既有标签只提交一次 `Pear / Image-Layered`；任务 `layer_a328d329-ebcb-45f1-8098-53ff27b5a139` 快速进入 `processing · 27%`，没有重复提交。
+- Pear 用时 `268555 ms` 返回真实 ZIP；安全下载、ZIP MIME、非 depth 主 PSD 提取和 PSD 解析均已越过。Pear 图层随后因 `RECONSTRUCTION_ERROR_HIGH, DUPLICATE_LAYER_RATIO_HIGH, OUT_OF_BOUNDS_LAYERS_PRESENT` 未通过质量门禁。
+- 离线复现将应用问题与供应商问题拆开：源图 `1254x1254` 对 PSD `1280x1280` 造成越界率 `1`，归一到 PSD 坐标后越界率为 `0`；但 MAE 仍为 `0.7125`、重复率为 `0.8621`，29 层大量使用人物部件名，不能通过放宽质量门禁解决。
+- smart 模式自动退款并执行本地回退，父任务最终为 `completed/ready/100%`，但实际交付引擎为 `local`、图层为 `背景/主体` 两层；不得把该终态表述为 Pear 远程成功。
+- 账务为唯一 `-15` 和唯一 `+15`，余额 `403 -> 388 -> 403`，净积分 0；本轮关闭真实失败退款的一次性证据。
+- 新发现价格不一致：管理员预检显示 60，权威任务实际按 15 结算。数据库配置没有 provider/model 专属价格，服务端回退固定 `segment=15`。
+- **回归判定：ZIP/PSD 消费 PASS，失败退款 PASS；Pear 远程可编辑成功 FAIL，成功不退款账务与编辑/保存/刷新/导出仍 UNVERIFIED。**
+- 机器证据：`docs/testing/evidence/v588-stability-002-pear-smart-fallback-2026-08-29.json`。
+
+## 2026-08-29 Pear 坐标与管理员计价本地回归
+
+- 计价 RED 证明 `Image-Layered` 被管理员目录按普通图片模型显示为 60，而权威 `segment` 结算为 15；GREEN 后 layer 模型目录统一返回 `billingCategory=edit`、`credits=15`、`unit=per-call`。
+- 坐标 RED 证明质量门禁缺少源图到 PSD 文档坐标空间的归一化；GREEN 后，同宽高比的 `1254x1254 -> 1280x1280` 会在安全像素限制内归一，不同宽高比不会被强制拉伸。
+- 服务层永久回归确认质量门禁与重建检查使用同一归一化源图，避免一个阶段修复、另一个阶段继续误报。
+- 聚焦回归 `7 files / 58 tests`；全量 Vitest `572 files / 4163 passed / 122 PostgreSQL-gated skipped / 0 failed`；`pnpm ts-check` 与 `pnpm lint` 均退出 `0`，Lint 为 `0 error / 961 warning`。
+- 默认约 4 GiB Node 堆按预期 OOM，8 GiB 在高内存回收阶段停止；按仓库既有 12 GiB 基线重跑后 webpack `14.3` 分钟、TypeScript `65` 秒、静态页面 `117/117`、Build ID `WijIlExen98XOqjcSti5T`、退出码 `0`。
+- 受保护计价路由只增加单文件精确来源授权；永久门禁 `8/8`，`pnpm check:protected-baseline` 为未授权漂移 `0`、警告 `0`。
+- **本地判定：应用侧坐标误报与管理员价格不一致 PASS。** 远程 Pear 制品质量仍 FAIL；本轮没有再次创建付费任务，也没有把本地 fallback 当作 Pear 成功。

@@ -704,3 +704,12 @@ No item is “absorbed” merely because its source file exists or a unit test p
 - 当前画布已选中自然 `800 x 800` 紫色立方体，元素拆解面板已切换到“可编辑图层”；生成按钮尚未点击，未调用供应商、未扣积分。
 - 源图已进一步锁定为受控媒体 `/api/serve-upload/uploads/gen-1786870726496-j7ht8e.png`；源图可见，提交按钮可见且可用。证据明确区分云端运行提交 `c3bfc812` 与后续仅修改文档的 `main` 提交。
 - 机器证据：`docs/testing/evidence/v588-stability-002bd-paid-preflight-2026-08-29.json`。下一动作必须取得本次 `60` 积分的动作时确认后，才允许提交一次。
+
+## 2026-08-29 V588-STABILITY-002 唯一付费任务与根因拆分检查点
+
+- 经明确授权只提交一次 `Pear / Image-Layered`：应用任务 `layer_a328d329-ebcb-45f1-8098-53ff27b5a139`，Pear 任务 `5b395ce3-37fb-4eab-b968-586a8db367e0`。真实 ZIP 已通过安全下载、主 PSD 提取与解析，关闭“沙箱不能解压 ZIP/解析 PSD”的疑点。
+- 源图为 `1254x1254`，PSD 为 `1280x1280 / 29` 层。直接比较造成越界率 `1`，归一到 PSD 坐标后越界率为 `0`；但 MAE 仍为 `0.7125`、重复率 `0.8621`，图层名为人物部件，与紫色立方体不符，因此远程制品仍必须被质量门禁拒绝。
+- smart 模式交付本地 `背景/主体` 两层，并产生唯一 `-15` 与唯一 `+15`，余额 `403 -> 388 -> 403`、净积分 `0`。这证明失败退款，不证明 Pear 远程成功或成功不退款账务。
+- 同轮确认管理员预检错误显示 60，而权威任务按 `OTHER_OPERATION_CREDITS.segment=15` 结算。`main@2c25af5937b0c69e91e55d15291378edbb7901ac` 已按 TDD 最小修复计价目录与同宽高比坐标归一，质量阈值未改变。
+- 本地门禁：聚焦 `7 files / 58 tests`、全仓 `572 files / 4163 passed / 122 PostgreSQL-gated skipped / 0 failed`、TypeScript、ESLint `0 error / 961 warnings`；受保护计价路由采用单文件精确来源授权，门禁 `8/8`、未授权漂移 `0`、警告 `0`。
+- `002-C` 的数据库图层文档持久化仅完成规格 `docs/superpowers/specs/2026-08-29-layer-document-persistence-design.md`，尚未实施。**当前状态：应用侧坐标与计价本地修复，Coze 待验证；Pear 远程成功、smart 回退提示、图层保存/刷新与 PSD 导出仍开放，不进入 `V588-ADMIN-004`。**

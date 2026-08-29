@@ -109,6 +109,7 @@ const historicalSourceAuthorizations = [
   ['scripts/v588-auth-fixture.mjs', '02a3bd3d'],
   ['scripts/verify-v588-auth-stable-contract.mjs', '02a3bd3d'],
   ['src/app/api/admin/apis/route.ts', '96c1907b'],
+  ['src/app/api/admin/credits/pricing/route.ts', '2c25af59'],
   ['src/app/api/auth/login/route.ts', '9c693b1d'],
   ['src/app/api/auth/me/route.ts', '9c693b1d'],
   ['src/app/api/simple-chat/deep-research/route.ts', '3773f66c'],

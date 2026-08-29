@@ -1811,3 +1811,30 @@ Stage 3 remains in Task 10. Stage 4/5 are not authorized.
 - Coze 干净检出、保护基线、全量测试、生产构建、5000 单实例、健康端点、静态资源与 Google Chrome 稳定态冒烟均已关闭，不再列为未验证。
 - `22` 个文件内的 PostgreSQL 专项仍因未提供隔离测试库而跳过；本轮 Coze 虽配置业务 PostgreSQL，但按安全约束没有把生产/业务库当测试库使用。
 - Pear 真实远程完成态、图层编辑/保存/刷新、PSD 导出、成功一次扣费、失败/取消最多一次退款及迟到完成拒绝仍未关闭。
+
+## 2026-08-29 唯一 Pear 付费任务后的剩余项
+
+| 项目 | 最新状态 | 关闭条件 |
+|---|---|---|
+| ZIP MIME、安全下载、主 PSD 提取与解析 | `VERIFIED` | 真实任务已返回 ZIP 并进入质量门禁；不再列为沙箱能力阻断。 |
+| 真实失败一次退款 | `VERIFIED` | 任务恰好一笔 `-15`、一笔 `+15`，余额恢复 403。 |
+| Pear 远程可编辑成功 | `FAILED / OPEN` | `decomposition.engine` 必须为 `pear`，至少 2 个 `source=pear-psd` 图层通过质量门禁；不得由本地 fallback 代替。 |
+| 本次 1:1 PSD 几何根因 | `PARTIALLY VERIFIED` | 坐标差已定位为 `1254 -> 1280` 未归一；远程内容仍有 `MAE=0.7125`、重复率 `0.8621` 和人物部件层名。下一次付费前确认模型适用素材范围，并为坐标归一化建立 RED。 |
+| 成功账务 | `UNVERIFIED` | 成功任务恰好一次扣费、零退款，provider/model/价格与管理员展示一致。 |
+| 计费价格单一权威源 | `FAILED / OPEN` | 管理员展示、预检、任务 `creditCost` 和流水必须一致；当前为 60 对 15。 |
+| smart 回退终态说明 | `FAILED / OPEN` | UI 明确显示 Pear 失败原因、已退款、实际使用本地引擎，自动化不得把父任务 completed 误判为 Pear 成功。 |
+| 图层编辑文档持久化 | `UNVERIFIED / IMPLEMENTATION GAP` | 使用已批准的数据库专用文档，绑定用户、项目、源图版本与任务；移动、显隐、重命名、顺序跨刷新和设备恢复。 |
+| PSD 导出 | `UNVERIFIED` | 下载文件存在、`8BPS`、图层数/顺序/位置与保存文档一致。 |
+
+权威证据：`docs/testing/evidence/v588-stability-002-pear-smart-fallback-2026-08-29.json`。
+
+## 2026-08-29 坐标与计价本地修复后的剩余项
+
+| 项目 | 最新状态 | 关闭条件 |
+|---|---|---|
+| 管理员 Image-Layered 价格 | `LOCAL PASS / CLOUD PENDING` | Coze 部署候选提交后，管理员页面与 `/api/admin/credits/pricing` 均显示 15 积分/次，并与新任务 `creditCost`、流水一致。 |
+| 源图到 PSD 坐标归一 | `LOCAL PASS / CLOUD PENDING` | 云端质量记录不再因同宽高比 `1254 -> 1280` 产生越界误报；不同宽高比仍不得拉伸放行。 |
+| Pear 远程制品质量 | `FAILED / OPEN` | 获得与源素材匹配、通过既有 MAE/重复层/空层/越界门禁的远程图层；不得降低阈值。 |
+| smart 回退终态说明 | `FAILED / OPEN` | UI 清楚显示远程失败原因、退款与实际本地引擎，父任务 completed 不得被误读为 Pear 成功。 |
+| 图层文档持久化 | `DESIGN ONLY` | 审阅并实施 `docs/superpowers/specs/2026-08-29-layer-document-persistence-design.md`，完成用户/项目/源版本绑定、乐观锁、刷新和跨设备恢复。 |
+| 通用 PostgreSQL 套件 | `122 TESTS SKIPPED` | 使用专用 `POSTGRES_TEST_DATABASE_URL` 执行，不得指向 Coze 业务库或生产库。 |

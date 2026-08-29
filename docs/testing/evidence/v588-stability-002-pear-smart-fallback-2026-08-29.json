@@ -1,0 +1,157 @@
+{
+  "gate": "V588-STABILITY-002-B/D/E",
+  "kind": "single authorized paid Pear Image-Layered run",
+  "date": "2026-08-29",
+  "deployment": "https://62afe49a-716e-4d9e-99cd-a0be49c4794c-5000.dev.coze.site/",
+  "observedRuntimeCommit": "c3bfc8123c956b186d0b61beb0bbdc72e92ee673",
+  "localMainAtTest": "849772e91b0f8fa4268c8dc4c5c93837ead2bf8e",
+  "browser": {
+    "family": "Google Chrome",
+    "profile": "用户1",
+    "existingTabReused": true,
+    "submittedExactlyOnce": true,
+    "submittedAt": "2026-08-29T07:40:48.393Z",
+    "initialVisibleState": "processing · 27%"
+  },
+  "task": {
+    "id": "layer_a328d329-ebcb-45f1-8098-53ff27b5a139",
+    "remoteTaskId": "5b395ce3-37fb-4eab-b968-586a8db367e0",
+    "providerId": "api_1785190544435_1heimk6",
+    "providerName": "pear分层",
+    "modelId": "Image-Layered",
+    "status": "completed",
+    "resultPhase": "ready",
+    "progress": 100,
+    "durationMs": 268555,
+    "requestedEngine": "smart",
+    "resultEngine": "local",
+    "sourceUrl": "/api/serve-upload/element-sources/453966395d63e0c84d034938248b4431658d6354928e65598c19afc5eb0d1b86.png",
+    "remoteArtifactUrl": "https://cdn.pearapi.ai/apiservers/cache/files/2026-08-29/6d6e9277-9597-423f-8b80-8946db961e67.zip",
+    "fallbackReason": "RECONSTRUCTION_ERROR_HIGH, DUPLICATE_LAYER_RATIO_HIGH, OUT_OF_BOUNDS_LAYERS_PRESENT",
+    "localFallbackLayers": 2,
+    "localFallbackLayerNames": [
+      "背景",
+      "主体"
+    ],
+    "localFallbackReconstruction": {
+      "ssim": 1,
+      "rgbMae": 0,
+      "alphaMae": 0,
+      "mismatchedPixelRatio": 0
+    }
+  },
+  "artifactPathVerdict": {
+    "zipReturned": true,
+    "zipAcceptedBySafeDownloader": true,
+    "primaryPsdExtractedAndParsed": true,
+    "pearLayerQualityGatePassed": false,
+    "pearRemoteEditableResultAccepted": false,
+    "localFallbackCompleted": true
+  },
+  "offlineArtifactAudit": {
+    "zipBytes": 15880313,
+    "zipSha256": "D871B675E89AF34B767779ED74313411F4553A42ADF0D46A2B000BE060734763",
+    "entries": [
+      "Image-Layered_00002.psd",
+      "Image-Layered_00002_depth.psd"
+    ],
+    "primaryPsdBytes": 112647948,
+    "primaryPsdSha256": "76E2FF04AA89C3B7FBF4C8FEEDEE952714396B2B0404AB8C2601566129AA60B2",
+    "sourceCanvas": "1254x1254",
+    "psdCanvas": "1280x1280",
+    "extractedLayerCount": 29,
+    "representativeLayerNames": [
+      "front hair",
+      "back hair",
+      "neckwear",
+      "face",
+      "eyewear",
+      "topwear",
+      "objects"
+    ],
+    "sourceCoordinateMetrics": {
+      "reconstructionMae": 0.7089230003283361,
+      "duplicateRatio": 0.8620689655172413,
+      "emptyRatio": 0,
+      "outOfBoundsRatio": 1
+    },
+    "psdCoordinateMetrics": {
+      "reconstructionMae": 0.7125244707095078,
+      "duplicateRatio": 0.8620689655172413,
+      "emptyRatio": 0,
+      "outOfBoundsRatio": 0
+    },
+    "rootCauseSplit": [
+      "the 1254-to-1280 coordinate mismatch alone produces the out-of-bounds warning",
+      "resizing the source into PSD coordinates does not improve reconstruction error",
+      "the 86.2 percent duplicate ratio and human-part layer names are provider artifact content problems for the cube source"
+    ]
+  },
+  "billing": {
+    "visibleBalanceBefore": 403,
+    "chargedTransactionId": "ctx_1787989248227_jzqsrgu0",
+    "chargedCredits": 15,
+    "balanceAfterCharge": 388,
+    "refundedTransactionId": "ctx_1787989514839_4ehpuo4a",
+    "refundedCredits": 15,
+    "balanceAfterRefund": 403,
+    "chargeCount": 1,
+    "refundCount": 1,
+    "netCredits": 0,
+    "taskCreditStatus": "refunded"
+  },
+  "pricingAudit": {
+    "administratorUiPreflightCredits": 60,
+    "actualTaskCredits": 15,
+    "providerScopedPricingKeyPresent": false,
+    "modelOnlyPricingKeyPresent": false,
+    "actualFallbackSource": "OTHER_OPERATION_CREDITS.segment",
+    "actualFallbackCredits": 15,
+    "verdict": "UI/catalog pricing and authoritative billing pricing are inconsistent"
+  },
+  "localRemediation": {
+    "pricingCatalog": "layer models now use OTHER_OPERATION_CREDITS.segment and per-call, matching authoritative billing",
+    "coordinateNormalization": "same-aspect source images are normalized into the PSD document coordinate space before quality and reconstruction checks",
+    "qualityThresholdsChanged": false,
+    "focusedTests": {
+      "filesPassed": 7,
+      "testsPassed": 58,
+      "failed": 0
+    },
+    "fullVitest": {
+      "filesPassed": 572,
+      "filesSkipped": 22,
+      "testsPassed": 4163,
+      "testsSkipped": 122,
+      "failed": 0
+    },
+    "typecheck": "PASS",
+    "eslint": {
+      "errors": 0,
+      "warnings": 961
+    },
+    "protectedBaseline": {
+      "focusedTestsPassed": 8,
+      "unapprovedSourceDrift": 0,
+      "warnings": 0,
+      "pricingRouteSourceCommit": "2c25af5937b0c69e91e55d15291378edbb7901ac"
+    },
+    "productionBuild": {
+      "nodeHeapMb": 12288,
+      "webpackMinutes": 14.3,
+      "typescriptSeconds": 65,
+      "staticPages": "117/117",
+      "buildId": "WijIlExen98XOqjcSti5T",
+      "exitCode": 0
+    },
+    "cloudVerification": "PENDING"
+  },
+  "verdict": {
+    "zipMimeDownloadAndPsdExtraction": "PASS",
+    "singleChargeSingleRefund": "PASS",
+    "pearSuccessfulEditableTerminal": "FAIL",
+    "successfulNoRefundBilling": "UNVERIFIED",
+    "layerEditSaveRefreshExport": "UNVERIFIED",
+    "overallGate": "OPEN"
+  }
+}

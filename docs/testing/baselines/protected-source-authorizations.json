@@ -65,6 +65,7 @@
     { "path": "scripts/v588-auth-fixture.mjs", "sourceCommit": "02a3bd3d" },
     { "path": "scripts/verify-v588-auth-stable-contract.mjs", "sourceCommit": "02a3bd3d" },
     { "path": "src/app/api/admin/apis/route.ts", "sourceCommit": "96c1907b" },
+    { "path": "src/app/api/admin/credits/pricing/route.ts", "sourceCommit": "2c25af59" },
     { "path": "src/app/api/auth/login/route.ts", "sourceCommit": "9c693b1d" },
     { "path": "src/app/api/auth/me/route.ts", "sourceCommit": "9c693b1d" },
     { "path": "src/app/api/simple-chat/deep-research/route.ts", "sourceCommit": "3773f66c" },
