@@ -1770,3 +1770,10 @@ Stage 3 remains in Task 10. Stage 4/5 are not authorized.
 - `V588-STABILITY-002-BUG-010` 已移出未验证：Coze Google Chrome 已证明初始态、完成态和完成态重开均无遮挡，Portal 层级、状态保留及 PSD 编辑器独立关闭均通过。
 - 保留：Coze `auth-login-configuration` 域名环境合同、Pear 远程 `completed/ready`、远程图层编辑/保存/刷新、PSD 导出、成功一次扣费以及失败/取消一次退款。
 - 本轮积分只读查询超时，因此没有把 BUG-010 的视觉关闭解释为账务关闭。
+
+## 2026-08-29 Coze 域名测试合同未验证项收敛
+
+- `auth-login-configuration` 的宿主域名污染已在本地注入 Coze 风格变量后复现并修复，同环境 `37/37` 通过；从功能缺陷清单移除。
+- 保留部署证据：Coze 拉取本提交后，需在其原生环境至少运行登录契约测试并证明不再出现域名断言失败。
+- 保留发布证据：本机生产构建因 4 GB OOM、8 GB 资源异常终止而未完成；仍须由 Coze 构建或具备足够内存的干净环境提供成功终态。
+- Pear 远程 `completed/ready`、图层移动/保存/刷新、PSD 导出、成功一次扣费及失败/取消一次退款继续保持 `UNVERIFIED`。

@@ -2087,3 +2087,10 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - Google Chrome 初始态、完成态和完成态重开三轮视觉检查均完整无遮挡；完成状态 `completed · 100%` 保留，PSD 编辑器保持独立关闭行为并显示 `主体/背景` 两层。
 - DOM 实测浮层父节点为 `BODY`、不在画布 viewport 内、`z-index=200`。**BUG-010 云端回归 PASS。**
 - 证据：`docs/testing/evidence/v588-stability-002-b0eefdf4-bug-010-cloud-2026-08-29.json` 及同前缀三张 PNG。账务探针超时，未把视觉通过扩张为账务通过。
+
+## 2026-08-29 Coze 域名测试合同本地回归
+
+- 使用外部 `COZE_PROJECT_DOMAIN_DEFAULT=preview.example.dev.coze.site` 运行登录契约测试，修复前稳定得到 `3 failed / 34 passed`，失败均为测试硬编码 localhost 与正确公网重定向不一致。
+- `beforeEach` 隔离宿主域名后，同一命令 `37/37` 通过；专用公网域名与 Secure Cookie 用例仍通过，没有修改登录路由、凭据、Cookie 或会话逻辑。
+- 仓库回归：Vitest `572` 个文件、`4157` 项通过、`122` 项 PostgreSQL 专项跳过；TypeScript、构建版 Lint、`git diff --check` 通过。
+- 生产构建第一次在约 4 GB Node 堆上限 OOM；8 GB 重试在约 7.74 GB 工作集仍未完成并被人工终止。**本地测试合同判定 PASS；生产构建与 Coze 原生环境复验仍 PENDING。**

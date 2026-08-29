@@ -207,6 +207,7 @@ function expectRequestId(response: Response, expected?: string): string {
 
 describe('authentication route contracts', () => {
   beforeEach(() => {
+    vi.stubEnv('COZE_PROJECT_DOMAIN_DEFAULT', '');
     mocks.authenticateUser.mockReset();
     mocks.createSessionToken.mockReset();
     mocks.createSessionToken.mockResolvedValue('session-token');

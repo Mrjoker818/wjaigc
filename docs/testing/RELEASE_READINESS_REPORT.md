@@ -1674,3 +1674,9 @@ The focused gate test passes `7/7`; the actual protected-baseline command passes
 - BUG-010 已通过 Coze Google Chrome 初始态、完成态和完成态重开视觉验收，任务状态、PSD 编辑器独立性和 Portal 层级均有原始截图与结构化证据，现可从开放缺陷移除。
 - 本次关闭不包含 Pear 远程成功、真实扣费/退款、远程图层编辑/保存/刷新或 PSD 导出；积分只读探针超时，未作账务通过声明。
 - **发布结论维持“有条件通过”。** `V588-STABILITY-002` 仍需关闭 Coze 域名测试合同与远程 Pear/账务矩阵后才能整体吸收。
+
+## 2026-08-29 Coze 域名测试合同发布增量
+
+- 已确认失败来自测试继承 `COZE_PROJECT_DOMAIN_DEFAULT`，而不是登录业务退化；测试隔离后，在外部注入 Coze 风格域名的环境中 `37/37` 通过，公网 HTTPS 跳转契约仍保留。
+- 全量测试、TypeScript 和 Lint 通过；本机生产构建受 Node 堆内存限制未取得成功终态，不能表述为完整构建门禁通过。Coze 仍需在自身环境运行该测试后才能关闭部署侧证据。
+- **发布结论保持“有条件通过”。** 该测试修复不需要改变运行时代码，但 `V588-STABILITY-002` 仍受远程 Pear 成功、图层编辑/保存/刷新、PSD 导出与真实账务矩阵阻塞。

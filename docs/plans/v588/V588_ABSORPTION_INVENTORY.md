@@ -618,3 +618,10 @@ No item is “absorbed” merely because its source file exists or a unit test p
 - Coze 已精确运行 `main@b0eefdf4`，tree `85358ca4`，Build ID `72AxKgi4YmnIHZAbqBwoJ`；专项 `46/46`、TypeScript、Lint、构建和健康检查通过，`stable` 未触碰。
 - Google Chrome 三轮证据确认元素拆解面板初始态、完成态和完成态重开均完整无遮挡；`completed · 100%`、PSD 两层和编辑器独立关闭行为保留。
 - **BUG-010 已云端关闭，V588-STABILITY-002 仍未整体吸收。** 下一步只处理 Coze 域名测试合同与远程 Pear/账务矩阵，完成前不进入 `V588-ADMIN-004`，不重复已关闭的 Stage 4 工作。
+
+## 2026-08-29 V588-STABILITY-002 Coze 域名测试合同本地关闭
+
+- 在进程外注入 `COZE_PROJECT_DOMAIN_DEFAULT=preview.example.dev.coze.site` 后稳定复现 `auth-login-configuration` 的 3 项重定向断言失败；实际响应使用配置的公开域名，登录路由行为正确，根因是测试继承宿主部署环境。
+- 测试 `beforeEach` 现显式清空该变量，专用公网域名用例继续单独注入并验证 HTTPS 重定向；同一注入环境下由 `3 failed / 34 passed` 恢复为 `37/37`。
+- 全量 Vitest `4157` 项通过、`122` 项 PostgreSQL 专项明确跳过，TypeScript、Lint、`git diff --check` 通过。生产构建在本机 4 GB 堆上限 OOM，8 GB 重试持续占用约 7.74 GB 后为避免系统失稳人工终止，不计为构建通过。
+- **状态：域名测试合同本地关闭、Coze 原生环境复验待执行；V588-STABILITY-002 仍未整体吸收。** 后续仅剩 Coze 测试确认与远程 Pear 编辑/保存/导出及账务矩阵，不进入 `V588-ADMIN-004`。
