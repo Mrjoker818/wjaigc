@@ -25,6 +25,7 @@ const mocks = vi.hoisted(() => ({
   downloadPearPsd: vi.fn(),
   extractEditableLayersFromPsd: vi.fn(),
   refineLayerAssets: vi.fn(),
+  normalizeLayerSourceCanvas: vi.fn(),
   evaluateLayerQuality: vi.fn(),
   evaluateAndCorrectReconstruction: vi.fn(),
   runLocalLayerPipeline: vi.fn(),
@@ -89,6 +90,7 @@ vi.mock('@/lib/layer-decomposition/post-process', () => ({
 }));
 
 vi.mock('@/lib/layer-decomposition/quality-gate', () => ({
+  normalizeLayerSourceCanvas: mocks.normalizeLayerSourceCanvas,
   evaluateLayerQuality: mocks.evaluateLayerQuality,
 }));
 
@@ -284,6 +286,18 @@ describe('layer decomposition service concurrency', () => {
     mocks.resolveLayerSourceImage.mockResolvedValue({
       buffer: Buffer.from('source'), mimeType: 'image/png', width: 4, height: 4,
     });
+    mocks.normalizeLayerSourceCanvas.mockImplementation(async (
+      buffer: Buffer,
+      targetWidth: number,
+      targetHeight: number,
+    ) => ({
+      buffer,
+      normalized: false,
+      sourceWidth: targetWidth,
+      sourceHeight: targetHeight,
+      targetWidth,
+      targetHeight,
+    }));
     mocks.submitPearLayerTask.mockResolvedValue({
       kind: 'async', remoteTaskId: 'pear-task-1', endpoint: '/v1/images/edits',
     });
@@ -755,6 +769,7 @@ describe('layer decomposition service concurrency', () => {
   });
 
   it('attaches reconstruction metrics and correction assets to a completed Pear result', async () => {
+    const normalizedSource = Buffer.from('normalized-source');
     const correctionLayer: EditableLayerAsset = {
       ...layer,
       id: 'reconstruction-correction',
@@ -799,6 +814,14 @@ describe('layer decomposition service concurrency', () => {
       layers: [layer], buffers: new Map([[layer.id, Buffer.from('layer')]]),
       metrics: { edgeContamination: 0, alphaCoverage: { [layer.id]: 1 }, removedFragments: 0 },
     });
+    mocks.normalizeLayerSourceCanvas.mockResolvedValue({
+      buffer: normalizedSource,
+      normalized: true,
+      sourceWidth: 3,
+      sourceHeight: 3,
+      targetWidth: 4,
+      targetHeight: 4,
+    });
     mocks.evaluateLayerQuality.mockResolvedValue({
       status: 'pass', score: 96, warnings: [], metrics: {},
     });
@@ -811,6 +834,19 @@ describe('layer decomposition service concurrency', () => {
     expect(status.status).toBe('completed');
     expect(status.result?.reconstruction).toEqual(reconstruction);
     expect(status.result?.layers).toContainEqual(correctionLayer);
+    expect(mocks.normalizeLayerSourceCanvas).toHaveBeenCalledWith(
+      Buffer.from('source'),
+      4,
+      4,
+    );
+    expect(mocks.evaluateLayerQuality).toHaveBeenCalledWith(
+      normalizedSource,
+      [layer],
+      expect.any(Object),
+    );
+    expect(mocks.evaluateAndCorrectReconstruction).toHaveBeenCalledWith(
+      expect.objectContaining({ source: normalizedSource }),
+    );
     expect(mocks.evaluateAndCorrectReconstruction).toHaveBeenCalledTimes(1);
   });
 

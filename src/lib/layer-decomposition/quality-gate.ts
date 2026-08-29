@@ -5,6 +5,17 @@ import type { EditableLayerAsset } from '@/lib/layer-decomposition/types';
 
 const MAX_PIXELS = 67_108_864;
 const MAX_AGGREGATE_PIXELS = 256_000_000;
+const MAX_DIMENSION = 8_192;
+const ASPECT_RATIO_TOLERANCE = 0.01;
+
+export interface NormalizedLayerSourceCanvas {
+  buffer: Buffer;
+  normalized: boolean;
+  sourceWidth: number;
+  sourceHeight: number;
+  targetWidth: number;
+  targetHeight: number;
+}
 
 export interface LayerQualityEvaluation {
   status: 'pass' | 'warning' | 'fail';
@@ -22,6 +33,60 @@ export interface LayerQualityEvaluation {
 export interface LayerQualityOptions {
   loadLayer: (layer: EditableLayerAsset) => Promise<Buffer>;
   edgeContamination?: number;
+}
+
+export async function normalizeLayerSourceCanvas(
+  sourceBuffer: Buffer,
+  targetWidth: number,
+  targetHeight: number,
+): Promise<NormalizedLayerSourceCanvas> {
+  if (
+    !Number.isInteger(targetWidth)
+    || !Number.isInteger(targetHeight)
+    || targetWidth <= 0
+    || targetHeight <= 0
+    || targetWidth > MAX_DIMENSION
+    || targetHeight > MAX_DIMENSION
+    || targetWidth * targetHeight > MAX_PIXELS
+  ) {
+    throw new RangeError('Layer document dimensions exceed the safety limit');
+  }
+
+  const metadata = await sharp(sourceBuffer, {
+    failOn: 'error',
+    limitInputPixels: MAX_PIXELS,
+  }).metadata();
+  const sourceWidth = metadata.width || 0;
+  const sourceHeight = metadata.height || 0;
+  if (sourceWidth <= 0 || sourceHeight <= 0) {
+    throw new Error('Layer source dimensions are unavailable');
+  }
+
+  const base = {
+    sourceWidth,
+    sourceHeight,
+    targetWidth,
+    targetHeight,
+  };
+  if (sourceWidth === targetWidth && sourceHeight === targetHeight) {
+    return { buffer: sourceBuffer, normalized: false, ...base };
+  }
+
+  const sourceAspect = sourceWidth / sourceHeight;
+  const targetAspect = targetWidth / targetHeight;
+  const relativeAspectDifference = Math.abs(sourceAspect - targetAspect) / targetAspect;
+  if (relativeAspectDifference > ASPECT_RATIO_TOLERANCE) {
+    return { buffer: sourceBuffer, normalized: false, ...base };
+  }
+
+  const buffer = await sharp(sourceBuffer, {
+    failOn: 'error',
+    limitInputPixels: MAX_PIXELS,
+  }).resize(targetWidth, targetHeight, {
+    fit: 'fill',
+    kernel: sharp.kernel.lanczos3,
+  }).png().toBuffer();
+  return { buffer, normalized: true, ...base };
 }
 
 function alphaSignature(raw: Buffer): string {

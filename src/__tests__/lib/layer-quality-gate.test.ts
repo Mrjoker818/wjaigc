@@ -1,10 +1,37 @@
 import { describe, expect, it } from 'vitest';
 import sharp from 'sharp';
 
-import { evaluateLayerQuality } from '@/lib/layer-decomposition/quality-gate';
+import {
+  evaluateLayerQuality,
+  normalizeLayerSourceCanvas,
+} from '@/lib/layer-decomposition/quality-gate';
 import type { EditableLayerAsset } from '@/lib/layer-decomposition/types';
 
 describe('layer reconstruction quality gate', () => {
+  it('normalizes a same-aspect source into the PSD document coordinate space', async () => {
+    const source = await sharp({
+      create: { width: 8, height: 8, channels: 4, background: '#ef1f1f' },
+    }).png().toBuffer();
+
+    const normalized = await normalizeLayerSourceCanvas(source, 10, 10);
+    const metadata = await sharp(normalized.buffer).metadata();
+
+    expect(normalized.normalized).toBe(true);
+    expect(metadata).toMatchObject({ width: 10, height: 10 });
+  });
+
+  it('does not stretch a source whose aspect ratio differs from the PSD document', async () => {
+    const source = await sharp({
+      create: { width: 12, height: 8, channels: 4, background: '#ef1f1f' },
+    }).png().toBuffer();
+
+    const normalized = await normalizeLayerSourceCanvas(source, 10, 10);
+    const metadata = await sharp(normalized.buffer).metadata();
+
+    expect(normalized.normalized).toBe(false);
+    expect(metadata).toMatchObject({ width: 12, height: 8 });
+  });
+
   it('reconstructs Pear PSD layers from Photoshop top-to-bottom order', async () => {
     const background = await sharp({
       create: { width: 8, height: 8, channels: 4, background: '#ffffff' },

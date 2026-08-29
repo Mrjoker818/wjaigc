@@ -27,6 +27,7 @@ vi.mock('@/lib/credits', () => ({
   getChatModelCredits: () => 3,
   getImageModelCredits: () => 8,
   getVideoModelCreditsPerSecond: () => 2,
+  getOtherOperationCredits: (operation: string) => operation === 'segment' ? 15 : 10,
 }));
 
 import { GET } from '@/app/api/admin/credits/pricing/route';
@@ -76,6 +77,51 @@ describe('admin credit pricing model classification', () => {
     expect(body.models[0]).toMatchObject({
       modelType: 'chat',
       billingCategory: 'llm',
+      unit: 'per-call',
+    });
+  });
+
+  it('uses the segment operation fallback for layer models', async () => {
+    const provider = {
+      id: 'pear-layer-provider',
+      displayName: 'Pear Layer',
+      modelType: 'layer',
+      selectedModels: ['Image-Layered'],
+      isEnabled: true,
+    };
+    const model = {
+      id: 'Image-Layered',
+      name: 'Image Layered',
+      providerId: provider.id,
+      type: 'layer',
+    };
+    mocks.getPublicModelCatalogSnapshot.mockResolvedValue({
+      configuredProviders: [provider],
+      providers: [{ id: provider.id, name: provider.displayName }],
+      models: [model],
+    });
+    mocks.resolveTaskModelCatalogResultFromSnapshot.mockReturnValue({
+      taskModelCatalog: [],
+      authorizedModelKeys: new Set([`${provider.id}::${model.id}`]),
+      effectiveModelTypes: new Map([[`${provider.id}::${model.id}`, 'layer']]),
+      modelAuthorizationMigration: { resolved: [], required: [] },
+    });
+
+    const response = await GET(new NextRequest('http://localhost/api/admin/credits/pricing'));
+    const body = await response.json() as {
+      models: Array<{
+        modelType: string;
+        billingCategory: string;
+        credits: number;
+        unit: string;
+      }>;
+    };
+
+    expect(response.status).toBe(200);
+    expect(body.models[0]).toMatchObject({
+      modelType: 'layer',
+      billingCategory: 'edit',
+      credits: 15,
       unit: 'per-call',
     });
   });

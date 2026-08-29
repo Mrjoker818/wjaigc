@@ -30,7 +30,10 @@ import {
 import { refineLayerAssets } from '@/lib/layer-decomposition/post-process';
 import { extractEditableLayersFromPsd } from '@/lib/layer-decomposition/psd-extractor';
 import { resolveLayerProvider, LayerProviderError } from '@/lib/layer-decomposition/provider';
-import { evaluateLayerQuality } from '@/lib/layer-decomposition/quality-gate';
+import {
+  evaluateLayerQuality,
+  normalizeLayerSourceCanvas,
+} from '@/lib/layer-decomposition/quality-gate';
 import { evaluateTransparentSubject } from '@/lib/layer-decomposition/transparency-gate';
 import {
   downloadPearPsd,
@@ -715,7 +718,12 @@ async function processPearArtifact(
       });
       const source = await resolveLayerSourceImage(request.imageUrl, { signal });
       await assertTaskActive(task.id, task.userId, signal, attemptId);
-      const quality = await evaluateLayerQuality(source.buffer, refined.layers, {
+      const normalizedSource = await normalizeLayerSourceCanvas(
+        source.buffer,
+        extracted.width,
+        extracted.height,
+      );
+      const quality = await evaluateLayerQuality(normalizedSource.buffer, refined.layers, {
         loadLayer: async (layer) => refined.buffers.get(layer.id)!,
         edgeContamination: refined.metrics.edgeContamination,
       });
@@ -771,7 +779,7 @@ async function processPearArtifact(
       }
 
       const reconstruction = await evaluateAndCorrectReconstruction({
-        source: source.buffer,
+        source: normalizedSource.buffer,
         layers: refined.layers,
         loadLayer: async (layer) => {
           const buffer = refined.buffers.get(layer.id);

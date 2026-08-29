@@ -1,7 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAdminUser } from '@/lib/server-auth';
 import { getPublicModelCatalogSnapshot } from '@/lib/server-api-config';
-import { getChatModelCredits, getImageModelCredits, getVideoModelCreditsPerSecond } from '@/lib/credits';
+import {
+  getChatModelCredits,
+  getImageModelCredits,
+  getOtherOperationCredits,
+  getVideoModelCreditsPerSecond,
+} from '@/lib/credits';
 import { loadCreditPricingConfig, saveCreditPricingConfig, buildPricingKey, type ModelCreditEntry } from '@/lib/credit-pricing';
 import { getBillingModelCategory } from '@/lib/billing-model-category';
 import { IMAGE_MODEL_CREDITS } from '@/lib/credits-constants';
@@ -12,6 +17,7 @@ export const dynamic = 'force-dynamic';
 function defaultCredits(modelType: string, model: string): { credits: number; unit: 'per-image' | 'per-second' | 'per-call' } {
   if (modelType === 'video') return { credits: getVideoModelCreditsPerSecond(model), unit: 'per-second' };
   if (modelType === 'chat') return { credits: getChatModelCredits(model), unit: 'per-call' };
+  if (modelType === 'layer') return { credits: getOtherOperationCredits('segment'), unit: 'per-call' };
   return { credits: getImageModelCredits(model), unit: 'per-image' };
 }
 
