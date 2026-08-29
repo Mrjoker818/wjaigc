@@ -1,0 +1,52 @@
+{
+  "gates": [
+    "V588-STABILITY-002-B",
+    "V588-STABILITY-002-D"
+  ],
+  "kind": "paid-action preflight",
+  "testedCommit": "ae7c5821e565af85f69f4f3d5c7d2a594a51af9e",
+  "date": "2026-08-29",
+  "deployment": "https://62afe49a-716e-4d9e-99cd-a0be49c4794c-5000.dev.coze.site/",
+  "browser": {
+    "family": "Google Chrome",
+    "profile": "用户1",
+    "existingTabReused": true,
+    "newTabCreated": false
+  },
+  "account": {
+    "role": "administrator",
+    "visibleBalance": 403
+  },
+  "provider": {
+    "name": "pear分层",
+    "category": "图片分层模型",
+    "baseUrl": "https://api.pearapi.ai",
+    "enabled": true,
+    "enabledModelCount": 1
+  },
+  "model": {
+    "displayName": "Image Layered",
+    "modelId": "Image-Layered",
+    "enabled": true,
+    "billingUnit": "每张",
+    "creditCost": 60
+  },
+  "source": {
+    "description": "退款一致性测试：一个紫色立方体，纯白背景，产品摄影，无文字",
+    "width": 800,
+    "height": 800,
+    "naturalAspectRatio": "1:1"
+  },
+  "taskMonitor": {
+    "refreshed": true,
+    "activeLayerTasksObserved": 0,
+    "recentVisibleLayerTasks": "completed legacy / zero-credit"
+  },
+  "stagedAction": {
+    "outputMode": "layers",
+    "submitted": false,
+    "providerCalled": false,
+    "creditsChanged": false,
+    "requiredActionTimeConfirmation": "one Image-Layered request costing 60 credits"
+  }
+}

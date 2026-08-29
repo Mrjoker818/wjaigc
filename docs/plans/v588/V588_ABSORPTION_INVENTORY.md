@@ -681,7 +681,7 @@ No item is “absorbed” merely because its source file exists or a unit test p
 
 执行顺序固定为 `002-B -> 002-C -> 002-D -> 002-E`。`002-A` 永久关闭；在 `002-B` 完成前不得启动新的付费失败/取消实验，也不得进入 `V588-ADMIN-004`。
 
-本轮只读预检时，Google Chrome“用户1”仍能枚举既有 Coze 项目页和预览页，但对预览页的 DOM 读取及同源只读 API 调用均持续超时。该现象记为**浏览器控制/沙箱可用性阻塞**，不能记为 Pear、ZIP、PSD 或账务失败；本轮未提交任务、未调用供应商、未产生积分变化。
+本轮早期只读预检曾把页面执行超时暂记为浏览器控制/沙箱阻塞；恢复连接后确认真实原因是浏览器只读执行环境不提供 `fetch/XMLHttpRequest`，直接 API 导航又被客户端策略拦截。现有 Google Chrome 页面和云端 UI 实际可交互，该早期现象不得登记为 Pear、ZIP、PSD、账务或沙箱失败。
 
 ### `002-E` 本地 PostgreSQL 并发证据
 
@@ -695,3 +695,11 @@ No item is “absorbed” merely because its source file exists or a unit test p
 - `PsdLayerEditor` 的 `layers`、选择、位移和显隐状态均为组件内 `useState`；关闭编辑器会清空 `psdEditorInitialResult`，没有项目级保存回调或服务端编辑状态写入。
 - 现有 `dual-element-decomposition.spec.ts` 已验证选择、显隐、移动和导出，也验证父任务及分支 taskId 刷新后可查询，但没有断言用户编辑后的图层几何与显隐状态在刷新后恢复。
 - 因此不得把“任务刷新可恢复”写成“图层编辑刷新可恢复”。`002-C` 需要先建立项目/源版本绑定的编辑状态合同，再按失败测试、最小接入、全量回归、云端验证执行。
+
+### `002-B/002-D` 云端付费前预检
+
+- Google Chrome“用户1”现有预览标签已恢复可交互；管理员积分页显示当前余额 `403`，模型计费页显示 `pear分层 / Image-Layered / 60 积分每张`。
+- API 管理确认 `pear分层` 已启用，类型为“图片分层模型”，基础地址为 `https://api.pearapi.ai`，唯一启用模型为 `Image Layered / Image-Layered`。
+- 云端任务监控刷新后可见的最近元素拆解与图层任务均为 `completed` 的 legacy/零积分任务，没有正在运行的同类任务。
+- 当前画布已选中自然 `800 x 800` 紫色立方体，元素拆解面板已切换到“可编辑图层”；生成按钮尚未点击，未调用供应商、未扣积分。
+- 机器证据：`docs/testing/evidence/v588-stability-002bd-paid-preflight-2026-08-29.json`。下一动作必须取得本次 `60` 积分的动作时确认后，才允许提交一次。
