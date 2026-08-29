@@ -1757,3 +1757,9 @@ The focused gate test passes `7/7`; the actual protected-baseline command passes
 - Google Chrome 非付费冒烟确认登录、选图、元素拆解面板和稳定态 Console；没有创建 Pear 任务或账务流水。
 - 历史 completed 父任务的退款回退文案尚未在真实 UI 中观察到，原因是入口默认打开新任务配置面板且直接任务 JSON 被扩展拦截。此项保持未验证，不以自动化合同替代真实界面证据。
 - **发布结论继续为“有条件通过”。** `V588-STABILITY-002` 尚未整体完成；下一业务项仍为 `002-C` 数据库图层文档持久化，同时保留历史披露 UI、Pear 远程成功、成功不退款账务和 PSD 导出门禁。
+
+## 2026-08-29 `002-C` 本地发布判定增量
+
+- 数据库图层文档已完成 schema、存储、鉴权 API、浏览器客户端、编辑器接线和元素拆解冻结来源；不再是设计文档或 React 内存临时状态。
+- 本地候选 `245517c1` 已通过隔离 PostgreSQL CAS、全仓 `4348/4348` 零跳过、TypeScript、双 Lint、118 页生产构建和干净保护基线，独立终审 APPROVED。
+- **专项发布结论：本地通过、云端待验。全平台仍为有条件通过。** 在 Coze exact-SHA、Chrome 保存/刷新恢复、真实 `8BPS` 导出及 Pear 成功账务闭环前，不关闭 `V588-STABILITY-002`，不进入 `V588-ADMIN-004`。

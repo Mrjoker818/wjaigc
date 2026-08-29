@@ -2189,3 +2189,12 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - Google Chrome 复用既有标签且保持登录，正确选择历史紫色立方体并打开元素拆解配置面板；Console error/warning `0/0`，没有原生弹窗或明显布局异常。
 - 旧任务披露文案没有在新任务配置面板自动出现；直接历史任务 JSON 导航被 Chrome 扩展拦截。本轮未触发付费任务，因此不把该项写成通过。
 - **回归判定：Coze 运行与非付费 Chrome 冒烟 PASS；BUG-015 历史终态 UI 披露仍 UNVERIFIED。**
+
+## 2026-08-29 `002-C` 图层文档持久化本地回归
+
+- RED 稳定复现保存中再编辑丢失、旧来源完成污染、创建/恢复失败静默丢失、409 重载失效、导出旧快照、外部卸载绕过保存和非 keepalive 在途请求风险；均以最小实现转为 GREEN。
+- 隔离 PostgreSQL 18.4 在 `127.0.0.1:55434` 新建一次性测试库；相同 revision 的两个并发 PATCH 恰好一个成功。生产数据库未使用。
+- 分层专项 `94/94`；图层文档 API/客户端/验证 `47/47`；全仓带两类 PostgreSQL 变量运行 `600 files / 4348 tests / 0 failed / 0 skipped`。
+- `pnpm ts-check`、`pnpm lint:build`、完整 ESLint `0 errors / 961 historical warnings`、Next.js 16.2.11 生产构建及静态页面 `118/118` 通过。
+- 干净提交 `245517c1` 保护基线为 `38/38` 功能、0 未授权漂移、0 warning；独立终审为 APPROVED，Critical/Important/Minor 均为 0。
+- **回归判定：`002-C` 本地 PASS，云端 UNVERIFIED。** 不把本地通过扩大为 Pear 成功、真实账务或全阶段发布通过。

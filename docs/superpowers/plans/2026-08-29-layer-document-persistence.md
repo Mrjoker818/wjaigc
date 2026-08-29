@@ -12,7 +12,7 @@
 
 - V5.8.8 donor 只读，`stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 永久不动，只向 `main` 提交。
 - 不修改 Pear/local/smart 分层算法、质量阈值、账务状态机或 `cloud_tasks.result`。
-- JSON 请求体上限 256 KiB、最多 64 层、名称 128 字符、ID 256 字符；拒绝 data/blob/任意外部 URL 和非有限坐标。
+- JSON 请求体上限 60 KiB（适配浏览器 keepalive 安全预算）、最多 64 层、名称 128 字符、ID 256 字符；拒绝 data/blob/任意外部 URL 和非有限坐标。
 - 数据库失败必须显式失败；revision 冲突返回 409，禁止最后写入覆盖。
 - 所有生产行为遵循 RED -> 最小实现 -> GREEN -> 扩展回归。
 
@@ -28,11 +28,11 @@
 **Interfaces:**
 - Produces: `LayerDocumentSource`、`LayerDocumentContent`、`LayerDocumentRecord`、`LayerDocumentError`、`readLayerDocumentContent()`。
 
-- [ ] **Step 1: 写入失败测试**，覆盖 64 层、字符串、URL、有限数值、顺序唯一性、256 KiB 请求体和 schema version 1。
-- [ ] **Step 2: 运行 RED**：`pnpm exec vitest run src/__tests__/lib/layer-document-validation.test.ts`，预期因模块缺失失败。
-- [ ] **Step 3: 最小实现**：只接受受管 `/api/serve-upload/`、`/uploads/`、`/api/media/` 等现有媒体引用，并输出规范化完整文档。
-- [ ] **Step 4: 运行 GREEN**：同一命令全部通过。
-- [ ] **Step 5: 提交**：`git commit -m "feat: validate layer documents"`。
+- [x] **Step 1: 写入失败测试**，覆盖 64 层、字符串、URL、有限数值、顺序唯一性、60 KiB 请求体和 schema version 1。
+- [x] **Step 2: 运行 RED**：`pnpm exec vitest run src/__tests__/lib/layer-document-validation.test.ts`，预期因模块缺失失败。
+- [x] **Step 3: 最小实现**：只接受受管 `/api/serve-upload/`、`/uploads/`、`/api/media/` 等现有媒体引用，并输出规范化完整文档。
+- [x] **Step 4: 运行 GREEN**：同一命令全部通过。
+- [x] **Step 5: 提交**：`ca6858f6 feat: validate layer documents`。
 
 ### Task 2: PostgreSQL 独立存储与乐观锁
 
@@ -45,11 +45,11 @@
 - Consumes: Task 1 types。
 - Produces: `ensureLayerDocumentTables()`、`createLayerDocument()`、`findLatestLayerDocument()`、`updateLayerDocument()`、`deleteLayerDocumentsForProject()`。
 
-- [ ] **Step 1: 写入失败测试**，断言表/索引/唯一键 SQL、同 task 幂等、用户隔离与 revision 条件更新。
-- [ ] **Step 2: 运行 RED**，预期存储模块缺失。
-- [ ] **Step 3: 最小实现**：独立幂等建表；创建使用 `(user_id, task_id)` 唯一键；PATCH 使用 `WHERE id=$1 AND user_id=$2 AND revision=$3 RETURNING *`。
-- [ ] **Step 4: 在隔离 PostgreSQL 中并发 PATCH**，预期一个成功、一个 `LAYER_DOCUMENT_REVISION_CONFLICT`。
-- [ ] **Step 5: 运行 GREEN 并提交**：`git commit -m "feat: persist layer documents"`。
+- [x] **Step 1: 写入失败测试**，断言表/索引/唯一键 SQL、同 task 幂等、用户隔离与 revision 条件更新。
+- [x] **Step 2: 运行 RED**，预期存储模块缺失。
+- [x] **Step 3: 最小实现**：独立幂等建表；创建使用 `(user_id, task_id)` 唯一键；PATCH 使用 `WHERE id=$1 AND user_id=$2 AND revision=$3 RETURNING *`。
+- [x] **Step 4: 在隔离 PostgreSQL 18 中并发 PATCH**，已证明一个成功、一个 `LAYER_DOCUMENT_REVISION_CONFLICT`。
+- [x] **Step 5: 运行 GREEN 并提交**：`f8c9bf44 feat: persist layer documents`。
 
 ### Task 3: 鉴权 API、来源与任务验证
 
@@ -62,11 +62,11 @@
 - Consumes: `findOwnedAnnotationSource()`、`getCloudTaskForUser()`、Task 1/2 API。
 - Produces: GET/POST/PATCH `/api/layer-documents`，统一 `{success,code,message,requestId,retryable}` 错误结构。
 
-- [ ] **Step 1: 写入失败 API 测试**，覆盖未登录、跨用户/项目、旧版本、伪造/非终态 task、404、幂等 POST、409 PATCH 和数据库失败。
-- [ ] **Step 2: 运行 RED**，预期路由不存在。
-- [ ] **Step 3: 最小实现**：严格匹配项目、图片、版本、URL；只接受已完成 `layer-decomposition` 或元素拆解图层分支任务；管理员也按自身 userId 隔离。
-- [ ] **Step 4: 运行 GREEN 与相关鉴权/任务回归**。
-- [ ] **Step 5: 提交**：`git commit -m "feat: add layer document api"`。
+- [x] **Step 1: 写入失败 API 测试**，覆盖未登录、跨用户/项目、旧版本、伪造/非终态 task、404、幂等 POST、409 PATCH 和数据库失败。
+- [x] **Step 2: 运行 RED**，预期路由不存在。
+- [x] **Step 3: 最小实现**：严格匹配项目、图片、版本、URL；只接受已完成 `layer-decomposition` 或元素拆解图层分支任务；管理员也按自身 userId 隔离。
+- [x] **Step 4: 运行 GREEN 与相关鉴权/任务回归**。
+- [x] **Step 5: 提交**：`5dfa1f0c feat: add layer document api`。
 
 ### Task 4: 编辑器恢复、保存、冲突与关闭 flush
 
@@ -81,11 +81,11 @@
 - `PsdLayerEditor` 新增可选 `source: LayerDocumentSource`；无 source 时继续临时编辑。
 - 客户端提供 `loadLayerDocument/createLayerDocument/saveLayerDocument`。
 
-- [ ] **Step 1: 写入失败组件测试**，覆盖恢复、dirty、保存中/成功/失败、关闭 flush、导出前 flush、409 服务器版本选择和源版本变化不恢复。
-- [ ] **Step 2: 运行 RED**，预期 UI/客户端合同缺失。
-- [ ] **Step 3: 最小实现**：编辑变化短防抖；关闭、visibilitychange 和导出前显式 flush；失败保留本地状态，409 停止自动覆盖。
-- [ ] **Step 4: `InfiniteCanvas` 用当前项目、图片 ID、`buildAnnotationSourceVersionId` 和 taskId 构造 source；不向大型项目 JSON 写图层内容。
-- [ ] **Step 5: 运行 GREEN、PSD 导出与取消回归**，提交 `git commit -m "feat: restore layer editing documents"`。
+- [x] **Step 1: 写入失败组件测试**，覆盖恢复、dirty、保存中再编辑、保存/创建失败、关闭守卫、导出最终快照、409 显式选择、来源切换和卸载 keepalive。
+- [x] **Step 2: 运行 RED**，确认旧实现存在导出旧快照、外部卸载和创建失败丢失边界。
+- [x] **Step 3: 最小实现**：串行追赶新编辑；关闭、visibilitychange、beforeunload 和导出前显式 flush；失败保留本地状态，409 停止自动覆盖；所有写请求使用 keepalive。
+- [x] **Step 4: `InfiniteCanvas` 使用冻结的项目、图片 ID、sourceVersionId、canonical URL 和 taskId 构造 source；不向大型项目 JSON 写图层内容。
+- [x] **Step 5: 运行 GREEN、PSD 导出与取消回归**，提交 `68242e43 feat: restore durable layer editing`。
 
 ### Task 5: 全量门禁、文档与云端验收
 
@@ -96,8 +96,8 @@
 - Modify: `docs/testing/RELEASE_READINESS_REPORT.md`
 - Modify: `docs/testing/UNVERIFIED_ITEMS.md`
 
-- [ ] **Step 1: 运行 focused Vitest 和隔离 PostgreSQL 并发套件**，失败不得跳过。
-- [ ] **Step 2: 运行完整门禁**：`pnpm ts-check`、`pnpm lint:build`、`pnpm lint`、`pnpm test`、12 GiB `pnpm build` 和保护基线干净候选门禁。
-- [ ] **Step 3: 更新中文报告和 Obsidian 看板**，逐项记录已通过与未验证边界。
+- [x] **Step 1: 运行 focused Vitest 和隔离 PostgreSQL 并发套件**，失败不得跳过。
+- [x] **Step 2: 运行完整门禁**：`pnpm ts-check`、`pnpm lint:build`、`pnpm lint`、带隔离 PostgreSQL 的 `pnpm test`、8 GiB `pnpm build` 和保护基线干净候选门禁。
+- [x] **Step 3: 更新中文报告和 Obsidian 看板**，逐项记录已通过与未验证边界。
 - [ ] **Step 4: 仅推送 `main`**，核对 `stable` 未变。
 - [ ] **Step 5: 执行 Coze 与 Chrome 验收**：exact-SHA 后复用现有 Google Chrome 标签验证创建、移动、显隐、锁定、重命名、排序、刷新恢复、冲突和导出 `8BPS`；不新建标签。

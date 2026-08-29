@@ -68,7 +68,7 @@ interface LayerDocumentSource {
 - `PATCH`：请求携带 `documentId`、`expectedRevision` 和完整规范化 `content`。SQL 使用 `WHERE id = ? AND user_id = ? AND revision = ?` 条件更新并 `revision = revision + 1`。
 - `DELETE` 本轮不开放；删除项目时由项目清理流程级联或显式清理。
 
-统一错误格式包含 `success/code/message/requestId/retryable`。校验边界：请求体不超过 256 KiB；最多 64 层；名称 128 字符；ID 256 字符；仅接受受管媒体 URL；坐标、尺寸、不透明度和顺序必须为有限值并在安全范围内。
+统一错误格式包含 `success/code/message/requestId/retryable`。校验边界：请求体不超过 60 KiB，以保证所有写请求都可安全使用浏览器 `keepalive`；最多 64 层；名称 128 字符；ID 256 字符；仅接受受管媒体 URL；坐标、尺寸、不透明度和顺序必须为有限值并在安全范围内。
 
 ## 编辑器数据流
 
@@ -77,7 +77,7 @@ interface LayerDocumentSource {
 3. 没有文档时执行现有分层流程。任务完成后立即创建初始文档，然后进入编辑态。
 4. 移动、显隐、锁定、重命名、排序和导出模式变化后标记 `dirty`。短防抖用于合并连续拖动，关闭、页面隐藏和导出前必须主动 flush，不能依赖长时间等待。
 5. 保存中显示状态；失败保留本地编辑并提供重试。关闭时仍有未保存修改则阻止静默丢失。
-6. `409 LAYER_DOCUMENT_REVISION_CONFLICT` 时停止自动覆盖，重新读取服务器版本并让用户选择“使用服务器版本”或“另存为当前新文档”。首版不做字段级自动合并。
+6. `409 LAYER_DOCUMENT_REVISION_CONFLICT` 时停止自动覆盖，重新读取服务器版本并让用户选择“使用服务器版本”或“保留当前修改并基于最新 revision 重试”。首版不做字段级自动合并。
 7. 导出前等待当前保存完成；导出的图层顺序与该保存成功 revision 必须一致。
 
 ## 回退结果表达

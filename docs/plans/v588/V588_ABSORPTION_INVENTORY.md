@@ -729,3 +729,12 @@ No item is “absorbed” merely because its source file exists or a unit test p
 - RED 为 `2 failed / 27 passed`；初次 GREEN 为 `29/29`。两轮独立复核继续发现旧版终态兼容、非质量失败误报、重试提示绕过、历史读取可推进子任务、拆解板重试漏披露和保护脚本大输出假通过等缺口，均先补 RED 再最小修复。最终聚焦 `3 files / 41 tests`；扩展 Pear/ZIP/PSD、元素拆解、编辑器与保护门禁矩阵 `30 files / 227 tests` 通过。
 - 历史 `completed` 父任务仅在 `creditStatus` 缺失时通过纯存储快照读取既有终态子任务，并在本次响应中投影退款/回退证据；不领取 worker lease、不推进子任务、不回写不可变终态。子任务过期或仍在处理时保留原完成结果。不重新提交 Pear、不创建新任务、不重复扣费。全仓 `572 files / 4171 passed / 122 PostgreSQL-gated skipped / 0 failed`；TypeScript、完整 Lint `0 errors / 961 historical warnings` 与构建版 Lint通过。12 GiB 构建 webpack `9.9` 分钟、TypeScript `45` 秒、静态页面 `117/117`、Build ID `ZJo5NS6MxxuKE1ppzZHNq`。保护脚本已修复 1 MiB 输出溢出假通过，当前含既有工具产物的脏工作树会诚实阻断，提交后的干净检出门禁单独记录。
 - 未降低任何质量阈值，未改变扣费退款状态机，未新建付费任务。**状态：BUG-015 本地关闭 / Coze 待验；V588-STABILITY-002 仍开放。下一项仍是已批准的 `002-C` 图层文档持久化，云端验收后再进入，不重复已关闭的计价、坐标或 Stage 4 工作。**
+
+## 2026-08-29 V588-STABILITY-002 `002-C` 图层文档持久化本地关闭
+
+- 已新增按 `userId + projectId + sourceImageId + sourceVersionId + taskId` 绑定的独立 PostgreSQL 图层文档；同任务幂等创建，PATCH 使用 revision CAS，跨用户、跨项目、旧版本和伪造任务均拒绝。
+- 编辑器持久化移动、显隐、锁定、重命名、顺序和导出模式；保存中发生的新编辑会串行追赶，来源切换隔离旧请求，创建/恢复失败保留 dirty，409 只允许显式选择服务器版本或基于最新 revision 重试。
+- 关闭、外部画布面板切换、页面隐藏和导出均先 flush；导出读取最终保存 refs。所有 POST/PATCH 使用 keepalive，请求体上限收紧为 60 KiB，卸载补偿处理 rejection。
+- 元素拆解重试只使用冻结的项目、源版本、canonical URL 和最终 taskId，不回退到当前选图或当前项目。
+- 隔离 PostgreSQL 18 CAS `1/1`、分层专项 `94/94`、全仓 `600 files / 4348 tests / 0 skipped`、TypeScript、Lint、118 页构建和干净保护基线 `38/38 / 0 drift / 0 warnings` 通过；独立终审 `APPROVED`，0 Critical / 0 Important / 0 Minor。
+- **状态：`002-C` 本地关闭、Coze/Chrome 待验；`V588-STABILITY-002` 整体仍开放。** 不进入 `V588-ADMIN-004`，不重复已关闭的 Stage 4、计价、坐标或 smart 披露工作。证据：`docs/testing/evidence/v588-stability-002-layer-documents-local-2026-08-29.json`。

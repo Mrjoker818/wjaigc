@@ -1857,3 +1857,14 @@ Stage 3 remains in Task 10. Stage 4/5 are not authorized.
 | 图层文档持久化 | `DESIGN ONLY` | 实施 `002-C`，完成用户/项目/源版本绑定、乐观锁、保存、刷新和跨设备恢复。 |
 | Pear 远程成功与成功账务 | `FAILED / UNVERIFIED` | 合适素材取得 `engine=pear`、2+ 远程图层、一次扣费零退款；不得以本地 fallback 替代。 |
 | PSD 导出 | `UNVERIFIED` | 下载并验证 `8BPS`、图层数、顺序、位置与持久化文档一致。 |
+
+### `002-C` 本地实现后的剩余验证
+
+| 项目 | 最新状态 | 关闭条件 |
+|---|---|---|
+| 图层文档代码与 PostgreSQL CAS | `VERIFIED LOCALLY` | `245517c1`，全仓 4348/4348、隔离 PostgreSQL 唯一 winner、保护基线 38/38。 |
+| Coze exact-SHA | `UNVERIFIED` | Coze `HEAD`、`origin/main` 与 `245517c1` 或后续仅文档提交精确一致。 |
+| 编辑状态刷新恢复 | `UNVERIFIED` | Chrome 完成移动、显隐、锁定、重命名、排序、关闭、刷新和重开，状态逐项一致。 |
+| 跨设备恢复 | `UNVERIFIED` | 同账号第二浏览器读取同一源版本文档，不读取其他用户或其他源版本。 |
+| PSD 最终导出 | `UNVERIFIED` | 文件签名为 `8BPS`，图层数、顺序、坐标与最终保存 revision 一致。 |
+| Pear 成功账务 | `FAILED / UNVERIFIED` | 真实 `engine=pear`、2+ 可编辑层、一次扣费、零退款；不得以本地 fallback 替代。 |

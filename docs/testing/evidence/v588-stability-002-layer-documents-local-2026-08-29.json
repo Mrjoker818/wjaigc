@@ -1,0 +1,40 @@
+{
+  "evidenceId": "v588-stability-002-layer-documents-local-2026-08-29",
+  "date": "2026-08-29",
+  "scope": "V588-STABILITY-002/002-C PSD 图层文档持久化本地候选",
+  "branch": "main",
+  "candidateCommit": "245517c18a17212010f588b9e9b204b3ccb050d0",
+  "implementationCommit": "68242e43",
+  "stableCommit": "52f7c601ed150769e15d06fb435c6e360e28c9e7",
+  "tests": {
+    "focusedLayerSuite": "94 passed / 0 failed / 0 skipped",
+    "layerDocumentApiAndClient": "47 passed / 0 failed / 0 skipped",
+    "isolatedPostgresCas": "1 passed / 0 failed / 0 skipped",
+    "fullVitestWithPostgres": "600 files / 4348 tests passed / 0 failed / 0 skipped",
+    "typescript": "passed",
+    "lintBuild": "passed",
+    "eslint": "0 errors / 961 historical warnings",
+    "productionBuild": "passed / Next.js 16.2.11 / 118 static pages",
+    "protectedBaseline": "38/38 present / 0 drift / 0 warnings"
+  },
+  "postgres": {
+    "version": "18.4",
+    "isolation": "fresh disposable cluster bound only to 127.0.0.1:55434",
+    "productionDatabaseUsed": false,
+    "result": "two concurrent writes at the same revision produced exactly one winner"
+  },
+  "review": {
+    "independentResult": "APPROVED",
+    "critical": 0,
+    "important": 0,
+    "minor": 0
+  },
+  "status": "LOCAL_PASS_CLOUD_UNVERIFIED",
+  "remaining": [
+    "Coze exact-SHA deployment",
+    "Google Chrome create/edit/close/refresh/reopen recovery",
+    "PSD export 8BPS and layer order/position verification",
+    "same-account second-browser recovery",
+    "real Pear success billing evidence"
+  ]
+}

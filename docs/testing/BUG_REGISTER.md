@@ -3060,3 +3060,15 @@ All listed Stage 4 defects are locally closed. S4-BUG-008 also passed its exact-
 | 未闭环边界 | 新任务配置面板不会自动恢复旧父任务，因此未出现历史退款回退文案；Chrome 扩展拦截直接任务 JSON 导航。本轮没有通过新建付费任务绕过该限制。 |
 | 当前状态 | **应用代码、Coze exact-SHA、运行健康和非付费 Chrome 冒烟已通过；历史 completed 父任务的真实界面披露仍为未验证。** BUG-015 不标记云端完全关闭。 |
 | 证据 | `docs/testing/evidence/v588-stability-002-2d3c2582-cloud-2026-08-29.json` 及同目录两张 `2d3c2582` PNG。 |
+
+### V588-STABILITY-002-BUG-016：PSD 图层编辑仅存于 React 内存（2026-08-29）
+
+| 字段 | 内容 |
+|---|---|
+| 严重等级 | P1 |
+| 稳定复现 | 关闭或刷新编辑器后，移动、显隐、锁定、重命名、顺序和导出模式无法恢复；保存中继续编辑、切换来源或导出还可能丢失最新快照。 |
+| 根因 | 缺少用户/项目/源版本绑定的图层文档存储；旧编辑器只有组件状态，关闭路径可直接卸载，且没有 revision CAS、来源 epoch 或串行 flush。 |
+| 修复 | 新增独立 PostgreSQL 文档、鉴权 API、浏览器客户端和关闭守卫；CAS 冲突显式处理，所有写请求 keepalive，60 KiB 安全预算；元素拆解来源身份冻结。 |
+| 永久回归 | 创建/恢复失败、保存中再编辑、来源切换、409 重载、外部关闭、beforeunload、最终快照导出、PostgreSQL 并发唯一 winner。 |
+| 本地结果 | **已关闭。** `600/600` 文件、`4348/4348` 测试且 0 跳过；独立审查 APPROVED。 |
+| 云端结果 | **未验证。** 需 exact-SHA 后在 Google Chrome 完成编辑、关闭、刷新恢复与 PSD 导出。 |
