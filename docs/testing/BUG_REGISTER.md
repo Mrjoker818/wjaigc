@@ -2967,3 +2967,15 @@ All listed Stage 4 defects are locally closed. S4-BUG-008 also passed its exact-
 | 回归 | 聚焦门禁 `16/16`；`check:protected-baseline` 为 38 个特征 ID 完整、未授权漂移 `0`、警告 `0`；TypeScript、构建版 Lint 通过；全仓 `572 files / 4160 passed / 122 PostgreSQL-gated skipped / 0 failed`。 |
 | 提交与状态 | `main@bf8d86230f6a4fc41c3ed788f633aa3ab5ed1b6f`，tree `0c1df7274f650e672904d22d549fcadb5133ce3e`；**本地已关闭 / Coze 干净检出待复验**。`stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 未触碰。 |
 | 证据 | `docs/testing/evidence/v588-stability-002-bf8d8623-protected-baseline-authorizations-2026-08-29.json`。 |
+
+#### BUG-012/013 Coze 干净检出关闭增量（2026-08-29）
+
+| 字段 | 内容 |
+|---|---|
+| 精确版本 | Coze `HEAD=origin/main=c3bfc8123c956b186d0b61beb0bbdc72e92ee673`，tree `b3180959aa35518c013f67409b94339b8619d1a3`；`origin/stable=52f7c601ed150769e15d06fb435c6e360e28c9e7` 未触碰。 |
+| 云端门禁 | 聚焦测试 `16/16`；保护基线未授权漂移 `0`、警告 `0`；TypeScript、Lint 通过；全量 `572 files passed / 0 failed / 22 skipped files / 4160 passed tests`。 |
+| 构建与启动 | 12 GiB 堆生产构建退出 `0`，Build ID `SuXRLPDiMNsGcudgsyzah`；单一 5000 服务 PID `17019`。 |
+| 健康检查 | `/`、`/simple-chat`、`/api/auth/me` 均为 HTTP `200`；首页引用静态资源 `11/11` 可访问。 |
+| Chrome 回归 | Google Chrome“用户1”既有预览标签强制刷新后工作台、项目媒体、模型和图像生成面板完整加载；重启窗口曾记录 8 条同时间戳同步 `502` 警告，稳定态二次刷新新时间边界后 Console `error/warning=0/0`，无原生弹窗。 |
+| 状态 | **BUG-012 与 BUG-013 已完成本地和 Coze 双端关闭。** 本次未修改数据库、账号、模型、供应商或积分配置，未发起付费任务。 |
+| 证据 | `docs/testing/evidence/v588-stability-002-c3bfc812-clean-main-cloud-2026-08-29.json`。 |

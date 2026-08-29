@@ -659,3 +659,10 @@ No item is “absorbed” merely because its source file exists or a unit test p
 ### 最终本地构建证据
 
 精确提交 `51a313717df4edb30dc4758b78c476242b7667cf` 已完成 12 GiB 堆生产构建，webpack `14.0` 分钟、TypeScript `65` 秒、静态页面 `117/117`、Build ID `I9uo73xu5yg9CivYsHhRj`、退出码 `0`。下一动作不变：Coze 干净检出并复跑相同门禁；不得跳到 `V588-ADMIN-004`。
+
+## 2026-08-29 V588-STABILITY-002 干净 main 云端关闭检查点
+
+- Coze 已精确运行 `main@c3bfc8123c956b186d0b61beb0bbdc72e92ee673`、tree `b3180959aa35518c013f67409b94339b8619d1a3`，`stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 未触碰。
+- 聚焦测试 `16/16`、保护基线 `0` 未授权/`0` 警告、TypeScript/Lint、全量 `572 files / 4160 passed / 0 failed / 22 skipped files`、生产构建、5000 单实例、三个健康端点和 `11/11` 静态资源均通过。
+- Google Chrome“用户1”复用既有标签，稳定态二次刷新后完整工作台加载，Console `error/warning=0/0`，无原生弹窗；没有新建标签或发起付费任务。
+- **BUG-012/013 已云端关闭，V588-STABILITY-002 仍未整体吸收。** 下一项继续 Pear 远程图层编辑/保存/刷新、PSD 导出及账务矩阵；不进入 `V588-ADMIN-004`，不重复已关闭的保护基线工作。

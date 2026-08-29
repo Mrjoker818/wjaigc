@@ -1712,3 +1712,9 @@ The focused gate test passes `7/7`; the actual protected-baseline command passes
 ### 最终本地构建补充
 
 `main@51a313717df4edb30dc4758b78c476242b7667cf` 已完成 12 GiB 堆生产构建：webpack `14.0` 分钟、TypeScript `65` 秒、静态页面 `117/117`、Build ID `I9uo73xu5yg9CivYsHhRj`、退出码 `0`。该证据关闭本地构建缺口，但不能替代 Coze 最终提交验证或 PostgreSQL/Pear 真实链路。
+
+## 2026-08-29 Coze 最终发布门禁增量
+
+- `c3bfc812` 已在 Coze 干净检出中完成精确 SHA/tree/stable 校验、聚焦测试、保护基线、TypeScript、Lint、全量 Vitest、生产构建、单实例启动、三个健康端点、静态资源和 Google Chrome 稳定态回归。
+- 保护基线相关 BUG-012/013 已从“本地通过、云端待验”更新为双端关闭；没有通过跳过失败测试、扩大白名单或修改 `stable` 制造通过。
+- **发布结论仍为“有条件通过”。** 当前剩余条件是隔离 PostgreSQL 专项，以及 `V588-STABILITY-002` 中 Pear 真实远程图层编辑/保存/刷新、PSD 导出和成功/失败/取消账务一致性；完成前不进入 `V588-ADMIN-004`。

@@ -1805,3 +1805,9 @@ Stage 3 remains in Task 10. Stage 4/5 are not authorized.
 - Coze 最终提交尚未完成全量 Vitest、生产构建、单实例 5000 启动、`/`、`/simple-chat`、`/api/auth/me` 与静态资源健康检查。
 - `122` 项 PostgreSQL 专项仍因缺少 `POSTGRES_TEST_DATABASE_URL` 隔离库未执行；禁止使用生产数据库代替。
 - Pear 远程成功终态、真实图层编辑/保存/刷新、PSD 导出、一次扣费及失败/取消一次退款继续保持未验证。
+
+## 2026-08-29 `c3bfc812` 云端门禁后的剩余验证
+
+- Coze 干净检出、保护基线、全量测试、生产构建、5000 单实例、健康端点、静态资源与 Google Chrome 稳定态冒烟均已关闭，不再列为未验证。
+- `22` 个文件内的 PostgreSQL 专项仍因未提供隔离测试库而跳过；本轮 Coze 虽配置业务 PostgreSQL，但按安全约束没有把生产/业务库当测试库使用。
+- Pear 真实远程完成态、图层编辑/保存/刷新、PSD 导出、成功一次扣费、失败/取消最多一次退款及迟到完成拒绝仍未关闭。

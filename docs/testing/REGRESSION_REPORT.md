@@ -2134,3 +2134,11 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - TypeScript 与构建版 Lint 通过；全量 Vitest 为 `572` 个文件、`4160` 项通过、`122` 项 PostgreSQL 专项因缺少隔离测试库明确跳过、`0` 失败。
 - 本次没有生产源码变化，因此复用此前相同业务源码树的本地与 Coze 构建证据；最终发布提交仍必须在 Coze 干净检出中重新执行生产构建和健康检查。
 - **本地发布门禁 PASS；Coze 最终提交 PENDING。**
+
+## 2026-08-29 `c3bfc812` Coze 干净 main 完整回归
+
+- Coze 精确对齐 `HEAD=origin/main=c3bfc8123c956b186d0b61beb0bbdc72e92ee673`、tree `b3180959aa35518c013f67409b94339b8619d1a3`，工作区干净，`origin/stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 未变化。
+- 聚焦门禁 `16/16`，保护基线未授权漂移 `0`、警告 `0`；TypeScript 与 Lint 退出 `0`；全量 Vitest `572` 个文件通过、`0` 失败、`22` 个 PostgreSQL 门禁文件跳过、`4160` 项通过。
+- 12 GiB 堆生产构建退出 `0`，Build ID `SuXRLPDiMNsGcudgsyzah`；`scripts/coze-start.sh` 启动单一 5000 PID `17019`。
+- `/`、`/simple-chat`、`/api/auth/me` 均为 `200`，静态资源 `11/11`。Google Chrome 稳定态二次刷新后完整工作台可见，边界后 Console `0/0`，无原生弹窗。
+- **干净 main 来源追溯与保护基线云端回归 PASS。** PostgreSQL 隔离并发与 Pear 付费编辑/保存/导出账务矩阵仍保持独立未验证，不被本结论扩大覆盖。
