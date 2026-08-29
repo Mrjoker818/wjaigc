@@ -194,6 +194,7 @@ import {
 } from '@/lib/element-decomposition/client';
 import type { ElementDecomposeOutputMode } from '@/lib/element-decomposition/types';
 import type { LayerDecompositionResult } from '@/lib/layer-decomposition/types';
+import type { LayerDocumentSource } from '@/lib/layer-documents/types';
 import type { EffectReverseTaskResult } from '@/lib/effect-reverse-engineering/types';
 const BrandEcommercePanel = lazy(() => import('@/components/brand-ecommerce-panel').then(m => ({ default: m.BrandEcommercePanel })));
 const RefineEnginePanel = lazy(() => import('@/components/refine-engine-panel'));
@@ -814,6 +815,7 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
   const [aspectRecomposeProcessing, setAspectRecomposeProcessing] = useState(false);
   const [elementDecomposeOutputMode, setElementDecomposeOutputMode] = useState<ElementDecomposeOutputMode>('both');
   const [elementDecomposeTask, setElementDecomposeTask] = useState<ElementDecomposeTaskResponse | null>(null);
+  const [elementDecomposeProjectId, setElementDecomposeProjectId] = useState<string | null>(null);
   const elementDecomposeControllerRef = useRef<AbortController | null>(null);
   const elementDecomposePlaceholderRef = useRef<string | null>(null);
 
@@ -1515,8 +1517,10 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
   const [videoExtractFrameCount, setVideoExtractFrameCount] = useState(12);
   const [videoExtractProcessing, setVideoExtractProcessing] = useState(false);
   const [showPsdEditor, setShowPsdEditor] = useState(false);
+  const psdEditorCloseGuardRef = useRef<(() => Promise<boolean>) | null>(null);
   const [psdEditorImageUrl, setPsdEditorImageUrl] = useState<string>('');
   const [psdEditorInitialResult, setPsdEditorInitialResult] = useState<LayerDecompositionResult | null>(null);
+  const [psdEditorSource, setPsdEditorSource] = useState<LayerDocumentSource | null>(null);
   const [, ] = useState<PsdLayerItem[]>([]);
   const [psdEditorMode, setPsdEditorMode] = useState<'basic' | 'standard' | 'advanced' | 'studio'>('standard');
   const [showRemoveBgPicker, setShowRemoveBgPicker] = useState(false);
@@ -2280,8 +2284,13 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
     setEffectReverseSource(null);
     setShowCanvasGenerator(false);
     setShowVideoExtractPanel(false);
-    setShowPsdEditor(false);
-    setPsdEditorInitialResult(null);
+    if (psdEditorCloseGuardRef.current) {
+      void psdEditorCloseGuardRef.current();
+    } else {
+      setShowPsdEditor(false);
+      setPsdEditorInitialResult(null);
+      setPsdEditorSource(null);
+    }
     setShowRemoveBgPicker(false);
     setShow3DModal(false);
     setShow3DViewer(false);
@@ -9052,6 +9061,7 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
       width: img.originalWidth || Math.round(img.width),
       height: img.originalHeight || Math.round(img.height),
     });
+    setElementDecomposeProjectId(sourceSnapshot.projectId);
     const modelInfo = getCurrentModel();
     const randomPart = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
       ? crypto.randomUUID()
@@ -9111,6 +9121,13 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
       if (layerResult?.layers?.length) {
         setPsdEditorImageUrl(sourceSnapshot.imageUrl);
         setPsdEditorInitialResult(layerResult);
+        setPsdEditorSource({
+          projectId: sourceSnapshot.projectId,
+          sourceImageId: sourceSnapshot.sourceImageId,
+          sourceVersionId: sourceSnapshot.sourceVersionId,
+          imageUrl: sourceSnapshot.imageUrl,
+          taskId: finalTask.taskId,
+        });
         setPsdEditorMode('studio');
         setShowPsdEditor(true);
       }
@@ -9200,8 +9217,17 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
       const layerResult = finalTask.branches.layers?.result as LayerDecompositionResult | undefined;
       const layerFallbackMessage = getRefundedLocalLayerFallbackMessage(finalTask.branches.layers);
       if (branch === 'layers' && layerResult?.layers?.length) {
-        setPsdEditorImageUrl(elementDecomposeTask.source.managedUrl || elementDecomposeTask.source.canonicalUrl);
+        const effectiveProjectId = elementDecomposeProjectId;
+        const sourceVersionId = finalTask.source.sourceVersionId;
+        setPsdEditorImageUrl(finalTask.source.canonicalUrl);
         setPsdEditorInitialResult(layerResult);
+        setPsdEditorSource(effectiveProjectId && sourceVersionId ? {
+          projectId: effectiveProjectId,
+          sourceImageId: finalTask.source.sourceImageId,
+          sourceVersionId,
+          imageUrl: finalTask.source.canonicalUrl,
+          taskId: finalTask.taskId,
+        } : null);
         setShowPsdEditor(true);
       }
       if (layerFallbackMessage) {
@@ -9216,7 +9242,7 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
     } catch (error) {
       toast.error(error instanceof Error ? error.message : '分支重试失败');
     }
-  }, [completeElementBoardResult, elementDecomposeTask]);
+  }, [completeElementBoardResult, elementDecomposeProjectId, elementDecomposeTask]);
 
   const handleCancelElementDecomposition = useCallback(async () => {
     if (!elementDecomposeTask) return;
@@ -9598,9 +9624,20 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
     // Directly open the PSD layer editor with AI semantic analysis
     setPsdEditorImageUrl(img.url);
     setPsdEditorInitialResult(null);
+    const effectiveProjectId = projectId || brandProject?.id;
+    setPsdEditorSource(effectiveProjectId ? {
+      projectId: effectiveProjectId,
+      sourceImageId: img.id,
+      sourceVersionId: img.annotationVersionId || buildAnnotationSourceVersionId(
+        img.id,
+        img.createdAt,
+        img.url,
+      ),
+      imageUrl: img.url,
+    } : null);
     setPsdEditorMode('studio');
     setShowPsdEditor(true);
-  }, [activateCanvasToolSession, getActiveImageData]);
+  }, [activateCanvasToolSession, brandProject?.id, getActiveImageData, projectId]);
 
   const handleOpen3D = useCallback((fromToolbar?: boolean) => {
     const sourceImageIds = selectedImageData ? [selectedImageData.id] : [];
@@ -15965,11 +16002,16 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
           >
             <PsdLayerEditor
               imageUrl={psdEditorImageUrl}
+              source={psdEditorSource || undefined}
               mode={psdEditorMode}
               initialResult={psdEditorInitialResult || undefined}
+              registerCloseGuard={(guard) => {
+                psdEditorCloseGuardRef.current = guard;
+              }}
               onClose={() => {
                 setShowPsdEditor(false);
                 setPsdEditorInitialResult(null);
+                setPsdEditorSource(null);
               }}
             />
           </div>

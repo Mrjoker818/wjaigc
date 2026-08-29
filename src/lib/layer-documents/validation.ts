@@ -5,7 +5,8 @@ import {
   type LayerDocumentLayer,
 } from './types';
 
-const MAX_BODY_BYTES = 256 * 1024;
+// Fetch keepalive payloads are capped at roughly 64 KiB across browsers.
+const MAX_BODY_BYTES = 60 * 1024;
 const MAX_LAYERS = 64;
 const MAX_ID_LENGTH = 256;
 const MAX_NAME_LENGTH = 128;
@@ -129,7 +130,7 @@ export function validateLayerDocumentRequestSize(rawBody: string): void {
   if (new TextEncoder().encode(rawBody).byteLength > MAX_BODY_BYTES) {
     throw new LayerDocumentError(
       'LAYER_DOCUMENT_BODY_TOO_LARGE',
-      '图层文档请求体超过 256 KiB',
+      '图层文档请求体超过 60 KiB',
       413,
     );
   }

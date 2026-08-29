@@ -12,6 +12,19 @@ import {
   runLayerDecomposition,
 } from '@/lib/layer-decomposition-client';
 import type { LayerDecompositionResult, LayerEngineMode, LayerTaskPhase } from '@/lib/layer-decomposition/types';
+import {
+  createLayerDocument,
+  layerDocumentContentFromDesignLayers,
+  layerDocumentScene,
+  LayerDocumentClientError,
+  loadLayerDocument,
+  saveLayerDocument,
+} from '@/lib/layer-documents/client';
+import type {
+  LayerDocumentContent,
+  LayerDocumentRecord,
+  LayerDocumentSource,
+} from '@/lib/layer-documents/types';
 import { PsdCanvas } from './PsdCanvas';
 import { LayerPanel } from './LayerPanel';
 import { LayerInspector } from './LayerInspector';
@@ -19,16 +32,19 @@ import { ExportToolbar } from './ExportToolbar';
 
 interface PsdLayerEditorProps {
   imageUrl: string;
+  source?: LayerDocumentSource;
   prompt?: string;
   mode?: 'basic' | 'standard' | 'advanced' | 'studio';
   providerId?: string;
   modelId?: string;
   initialResult?: LayerDecompositionResult;
   onClose: () => void;
+  registerCloseGuard?: (guard: (() => Promise<boolean>) | null) => void;
 }
 
 type EditorStage = 'choosing' | 'loading' | 'cancelling' | 'editing' | 'exporting' | 'done' | 'error';
 type LayerErrorAction = 'layering' | 'cancelling' | 'terminal';
+type LayerDocumentStatus = 'temporary' | 'loading' | 'creating' | 'saved' | 'dirty' | 'saving' | 'error' | 'conflict';
 
 interface LayerAttemptSnapshot {
   imageUrl: string;
@@ -40,6 +56,18 @@ interface LayerAttemptSnapshot {
 }
 
 const DETACHED_CANCEL_ATTEMPTS = 3;
+const LAYER_DOCUMENT_SAVE_DELAY_MS = 800;
+
+const LAYER_DOCUMENT_STATUS_LABELS: Record<LayerDocumentStatus, string> = {
+  temporary: '未保存到项目',
+  loading: '正在恢复',
+  creating: '正在创建',
+  saved: '已保存',
+  dirty: '未保存',
+  saving: '保存中',
+  error: '保存失败',
+  conflict: '保存冲突',
+};
 
 function isUncertainLayerResponse(error: unknown): boolean {
   if (!(error instanceof LayerClientError)) return true;
@@ -133,12 +161,14 @@ function initialExportMode(mode: PsdLayerEditorProps['mode']): PSDExportMode {
 
 export default function PsdLayerEditor({
   imageUrl,
+  source,
   prompt = '图片',
   mode = 'standard',
   providerId,
   modelId,
   initialResult,
   onClose,
+  registerCloseGuard,
 }: PsdLayerEditorProps) {
   const [stage, setStage] = useState<EditorStage>(initialResult ? 'editing' : 'choosing');
   const [layerEngine, setLayerEngine] = useState<LayerEngineMode>(() => {
@@ -159,6 +189,9 @@ export default function PsdLayerEditor({
   const [qualityWarnings, setQualityWarnings] = useState<string[]>([]);
   const [showLayerPanel, setShowLayerPanel] = useState(true);
   const [showInspector, setShowInspector] = useState(true);
+  const [documentStatus, setDocumentStatus] = useState<LayerDocumentStatus>(source ? 'loading' : 'temporary');
+  const [documentError, setDocumentError] = useState('');
+  const [conflictDocument, setConflictDocument] = useState<LayerDocumentRecord | null>(null);
   const taskIdRef = useRef<string | null>(null);
   const taskControllerRef = useRef<AbortController | null>(null);
   const layeringInFlightRef = useRef(false);
@@ -168,6 +201,22 @@ export default function PsdLayerEditor({
   const cancelPromiseRef = useRef<Promise<void> | null>(null);
   const attemptSnapshotRef = useRef<LayerAttemptSnapshot | null>(null);
   const mountedRef = useRef(true);
+  const documentRef = useRef<LayerDocumentRecord | null>(null);
+  const layersRef = useRef<DesignLayer[]>([]);
+  const sceneResultRef = useRef<SceneBuildResult | null>(null);
+  const exportModeRef = useRef<PSDExportMode>(initialExportMode(mode));
+  const dirtyRef = useRef(false);
+  const savePromiseRef = useRef<Promise<boolean> | null>(null);
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const persistenceAbortRef = useRef<AbortController | null>(null);
+  const saveAbortRef = useRef<AbortController | null>(null);
+  const sourceRef = useRef<LayerDocumentSource | undefined>(source);
+  const sourceEpochRef = useRef(0);
+  const editGenerationRef = useRef(0);
+  const pendingCreateTaskIdRef = useRef<string | null>(null);
+  const conflictActiveRef = useRef(false);
+  const promptRef = useRef(prompt);
+  promptRef.current = prompt;
 
   const startDetachedCancellation = useCallback((taskId: string): Promise<void> => {
     if (cancelPromiseRef.current) return cancelPromiseRef.current;
@@ -184,16 +233,20 @@ export default function PsdLayerEditor({
     return promise;
   }, []);
 
-  const applyLayerResult = useCallback((result: LayerDecompositionResult) => {
-    const scene = buildSceneFromEditableLayerAssets(result);
+  const applyScene = useCallback((scene: SceneBuildResult, nextExportMode?: PSDExportMode) => {
     const editableLayers = scene.layers.map((layer) => ({
       ...layer,
       offsetX: layer.offsetX ?? 0,
       offsetY: layer.offsetY ?? 0,
     }));
+    sceneResultRef.current = scene;
+    layersRef.current = editableLayers;
     setSceneResult(scene);
     setLayers(editableLayers);
-    setQualityWarnings(result.quality.warnings);
+    if (nextExportMode) {
+      exportModeRef.current = nextExportMode;
+      setExportMode(nextExportMode);
+    }
     setSelectedLayerId(
       editableLayers.find((layer) => layer.visible)?.id
       ?? editableLayers[0]?.id
@@ -201,6 +254,145 @@ export default function PsdLayerEditor({
     );
     setStage('editing');
   }, []);
+
+  const applyLayerResult = useCallback((result: LayerDecompositionResult): SceneBuildResult => {
+    const scene = buildSceneFromEditableLayerAssets(result);
+    applyScene(scene);
+    setQualityWarnings(result.quality.warnings);
+    return scene;
+  }, [applyScene]);
+
+  const documentContent = useCallback((): LayerDocumentContent | null => {
+    const scene = sceneResultRef.current;
+    if (!scene || layersRef.current.length === 0) return null;
+    return layerDocumentContentFromDesignLayers(
+      layersRef.current,
+      scene.width,
+      scene.height,
+      promptRef.current,
+      exportModeRef.current,
+    );
+  }, []);
+
+  const flushLayerDocument = useCallback(async (keepalive = false): Promise<boolean> => {
+    if (saveTimerRef.current) {
+      clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+    }
+    const sourceEpoch = sourceEpochRef.current;
+    const activeSource = sourceRef.current;
+    if (!activeSource || !dirtyRef.current) return true;
+    if (conflictActiveRef.current) return false;
+    if (savePromiseRef.current) {
+      const saved = await savePromiseRef.current;
+      if (!saved || sourceEpoch !== sourceEpochRef.current) return false;
+      return dirtyRef.current ? flushLayerDocument(keepalive) : true;
+    }
+
+    const currentDocument = documentRef.current;
+    const pendingTaskId = pendingCreateTaskIdRef.current;
+    const content = documentContent();
+    if ((!currentDocument && !pendingTaskId) || !content) return false;
+
+    const editGeneration = editGenerationRef.current;
+    const controller = new AbortController();
+    saveAbortRef.current = controller;
+
+    if (mountedRef.current) {
+      setDocumentStatus(currentDocument ? 'saving' : 'creating');
+      setDocumentError('');
+    }
+    const request = currentDocument
+      ? saveLayerDocument(currentDocument, content, { keepalive: true, signal: controller.signal })
+      : createLayerDocument(activeSource, pendingTaskId!, content, {
+        keepalive: true,
+        signal: controller.signal,
+      });
+    const savePromise = request
+      .then((saved) => {
+        if (sourceEpoch !== sourceEpochRef.current) return false;
+        documentRef.current = saved;
+        pendingCreateTaskIdRef.current = null;
+        if (editGenerationRef.current === editGeneration) {
+          if (!currentDocument) {
+            applyScene(layerDocumentScene(saved.content), saved.content.exportMode);
+          }
+          dirtyRef.current = false;
+          if (mountedRef.current) setDocumentStatus('saved');
+        } else if (mountedRef.current) {
+          setDocumentStatus('dirty');
+        }
+        return true;
+      })
+      .catch(async (error: unknown) => {
+        if (sourceEpoch !== sourceEpochRef.current || controller.signal.aborted) return false;
+        if (
+          error instanceof LayerDocumentClientError
+          && error.status === 409
+          && error.code === 'LAYER_DOCUMENT_REVISION_CONFLICT'
+        ) {
+          conflictActiveRef.current = true;
+          let latest: LayerDocumentRecord | null = null;
+          try {
+            latest = await loadLayerDocument(activeSource, { signal: controller.signal });
+          } catch {
+            latest = null;
+          }
+          if (sourceEpoch !== sourceEpochRef.current || controller.signal.aborted) return false;
+          if (mountedRef.current) {
+            setConflictDocument(latest);
+            setDocumentStatus('conflict');
+            setDocumentError(latest
+              ? '该图层文档已在其他窗口更新，请选择保留版本。'
+              : '检测到版本冲突，但服务器版本加载失败，请重新加载。');
+          }
+          return false;
+        }
+        if (mountedRef.current) {
+          setDocumentStatus('error');
+          setDocumentError(error instanceof Error ? error.message : '保存图层文档失败');
+        }
+        return false;
+      })
+      .finally(() => {
+        if (saveAbortRef.current === controller) saveAbortRef.current = null;
+        if (savePromiseRef.current === savePromise) savePromiseRef.current = null;
+      });
+    savePromiseRef.current = savePromise;
+    const saved = await savePromise;
+    if (!saved || sourceEpoch !== sourceEpochRef.current) return false;
+    return dirtyRef.current ? flushLayerDocument(keepalive) : true;
+  }, [applyScene, documentContent]);
+
+  const createDocumentFromScene = useCallback(async (
+    taskId: string,
+  ): Promise<LayerDocumentRecord | null> => {
+    if (!sourceRef.current) return null;
+    pendingCreateTaskIdRef.current = taskId;
+    dirtyRef.current = true;
+    editGenerationRef.current += 1;
+    conflictActiveRef.current = false;
+    setConflictDocument(null);
+    setDocumentStatus('dirty');
+    setDocumentError('');
+    const saved = await flushLayerDocument();
+    return saved ? documentRef.current : null;
+  }, [flushLayerDocument]);
+
+  const markDocumentDirty = useCallback(() => {
+    if (!sourceRef.current) return;
+    dirtyRef.current = true;
+    editGenerationRef.current += 1;
+    conflictActiveRef.current = false;
+    setConflictDocument(null);
+    setDocumentStatus('dirty');
+    setDocumentError('');
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = setTimeout(() => {
+      saveTimerRef.current = null;
+      void flushLayerDocument();
+    }, LAYER_DOCUMENT_SAVE_DELAY_MS);
+  }, [flushLayerDocument]);
 
   // Drag state for floating panel
   const [panelPos, setPanelPos] = useState({ x: 0, y: 0 });
@@ -247,8 +439,120 @@ export default function PsdLayerEditor({
   }, [layerEngine]);
 
   useEffect(() => {
-    if (initialResult) applyLayerResult(initialResult);
-  }, [applyLayerResult, initialResult]);
+    persistenceAbortRef.current?.abort();
+    saveAbortRef.current?.abort();
+    const controller = new AbortController();
+    persistenceAbortRef.current = controller;
+    sourceEpochRef.current += 1;
+    const sourceEpoch = sourceEpochRef.current;
+    sourceRef.current = source;
+    saveAbortRef.current = null;
+    savePromiseRef.current = null;
+    documentRef.current = null;
+    dirtyRef.current = false;
+    editGenerationRef.current = 0;
+    pendingCreateTaskIdRef.current = null;
+    conflictActiveRef.current = false;
+    if (saveTimerRef.current) {
+      clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+    }
+    setConflictDocument(null);
+    setDocumentError('');
+
+    if (!source) {
+      setDocumentStatus('temporary');
+      if (initialResult) applyLayerResult(initialResult);
+      return () => controller.abort();
+    }
+
+    setDocumentStatus('loading');
+    void loadLayerDocument(source, { signal: controller.signal })
+      .then(async (storedDocument) => {
+        if (
+          controller.signal.aborted
+          || sourceEpoch !== sourceEpochRef.current
+          || !mountedRef.current
+        ) return;
+        if (storedDocument) {
+          documentRef.current = storedDocument;
+          const restoredScene = layerDocumentScene(storedDocument.content);
+          applyScene(restoredScene, storedDocument.content.exportMode);
+          setQualityWarnings([]);
+          setDocumentStatus('saved');
+          return;
+        }
+
+        if (!initialResult) {
+          setDocumentStatus('dirty');
+          return;
+        }
+        applyLayerResult(initialResult);
+        if (source.taskId) await createDocumentFromScene(source.taskId);
+        else setDocumentStatus('dirty');
+      })
+      .catch((error: unknown) => {
+        if (
+          controller.signal.aborted
+          || sourceEpoch !== sourceEpochRef.current
+          || !mountedRef.current
+        ) return;
+        if (initialResult) {
+          applyLayerResult(initialResult);
+          if (source.taskId) {
+            pendingCreateTaskIdRef.current = source.taskId;
+            dirtyRef.current = true;
+            editGenerationRef.current += 1;
+          }
+        }
+        setDocumentError(error instanceof Error ? error.message : '恢复图层文档失败');
+        setDocumentStatus('error');
+      });
+
+    return () => controller.abort();
+  }, [
+    applyLayerResult,
+    applyScene,
+    createDocumentFromScene,
+    initialResult,
+    source,
+  ]);
+
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') void flushLayerDocument(true);
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, [flushLayerDocument]);
+
+  useEffect(() => () => {
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    const activeSource = sourceRef.current;
+    const currentDocument = documentRef.current;
+    const pendingTaskId = pendingCreateTaskIdRef.current;
+    const content = documentContent();
+    if (!activeSource || !content || !dirtyRef.current || savePromiseRef.current) return;
+    if (currentDocument) {
+      void saveLayerDocument(currentDocument, content, { keepalive: true }).catch((error: unknown) => {
+        console.warn('[PsdLayerEditor] 卸载时保存图层文档失败', error);
+      });
+    } else if (pendingTaskId) {
+      void createLayerDocument(activeSource, pendingTaskId, content, { keepalive: true }).catch((error: unknown) => {
+        console.warn('[PsdLayerEditor] 卸载时创建图层文档失败', error);
+      });
+    }
+  }, [documentContent]);
+
+  useEffect(() => {
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (!dirtyRef.current && !savePromiseRef.current) return;
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, []);
 
   const handleTitleMouseDown = useCallback((e: React.MouseEvent) => {
     if ((e.target as HTMLElement).closest('button')) return;
@@ -407,10 +711,14 @@ export default function PsdLayerEditor({
         },
       });
       if (controller.signal.aborted || cancelIntentRef.current) return;
+      const completedTaskId = taskIdRef.current;
       taskIdRef.current = null;
       idempotencyKeyRef.current = null;
       attemptSnapshotRef.current = null;
       applyLayerResult(result);
+      if (source && completedTaskId) {
+        await createDocumentFromScene(completedTaskId);
+      }
     } catch (error) {
       if (controller.signal.aborted) return;
       if (cancelIntentRef.current) {
@@ -453,6 +761,8 @@ export default function PsdLayerEditor({
     layerEngine,
     modelId,
     providerId,
+    createDocumentFromScene,
+    source,
     startDetachedCancellation,
   ]);
 
@@ -483,7 +793,7 @@ export default function PsdLayerEditor({
     void startLayering({ cancellationRecovery: true, idempotencyKey });
   }, [errorAction, finishLayerCancellation, handleCancelLayering, startLayering]);
 
-  const handleClose = useCallback(() => {
+  const requestClose = useCallback(async (): Promise<boolean> => {
     if (layeringInFlightRef.current || cancelIntentRef.current) {
       closeAfterCancelRef.current = true;
       cancelIntentRef.current = true;
@@ -491,49 +801,102 @@ export default function PsdLayerEditor({
       const taskId = taskIdRef.current;
       if (taskId) {
         void cancelRegisteredTask(taskId);
-        return;
+        return false;
       }
       const idempotencyKey = idempotencyKeyRef.current;
       if (!layeringInFlightRef.current && idempotencyKey) {
         void startLayering({ cancellationRecovery: true, idempotencyKey });
       }
-      return;
+      return false;
     }
     taskControllerRef.current?.abort(new Error('图片分层窗口已关闭'));
-    onClose();
-  }, [cancelRegisteredTask, onClose, startLayering]);
+    if (source && documentStatus === 'error' && dirtyRef.current) return false;
+    if (!source || !dirtyRef.current) {
+      onClose();
+      return true;
+    }
+    const saved = await flushLayerDocument();
+    if (saved && mountedRef.current) onClose();
+    return saved;
+  }, [cancelRegisteredTask, documentStatus, flushLayerDocument, onClose, source, startLayering]);
+
+  const handleClose = useCallback(() => {
+    void requestClose();
+  }, [requestClose]);
+
+  useEffect(() => {
+    registerCloseGuard?.(requestClose);
+    return () => registerCloseGuard?.(null);
+  }, [registerCloseGuard, requestClose]);
 
   const handleLayerMove = useCallback((id: string, x: number, y: number) => {
-    setLayers(prev => prev.map(layer => layer.id === id ? { ...layer, offsetX: x, offsetY: y } : layer));
-  }, []);
+    setLayers(prev => {
+      const next = prev.map(layer => layer.id === id ? { ...layer, offsetX: x, offsetY: y } : layer);
+      layersRef.current = next;
+      return next;
+    });
+    markDocumentDirty();
+  }, [markDocumentDirty]);
 
   const toggleVisibility = useCallback((id: string) => {
-    setLayers(prev => prev.map(layer => layer.id === id ? { ...layer, visible: !layer.visible } : layer));
-  }, []);
+    setLayers(prev => {
+      const next = prev.map(layer => layer.id === id ? { ...layer, visible: !layer.visible } : layer);
+      layersRef.current = next;
+      return next;
+    });
+    markDocumentDirty();
+  }, [markDocumentDirty]);
 
   const toggleLock = useCallback((id: string) => {
-    setLayers(prev => prev.map(layer => layer.id === id ? { ...layer, locked: !layer.locked } : layer));
-  }, []);
+    setLayers(prev => {
+      const next = prev.map(layer => layer.id === id ? { ...layer, locked: !layer.locked } : layer);
+      layersRef.current = next;
+      return next;
+    });
+    markDocumentDirty();
+  }, [markDocumentDirty]);
 
   const renameLayer = useCallback((id: string, newName: string) => {
-    setLayers(prev => prev.map(layer => layer.id === id ? { ...layer, name: newName } : layer));
-  }, []);
+    setLayers(prev => {
+      const next = prev.map(layer => layer.id === id ? { ...layer, name: newName } : layer);
+      layersRef.current = next;
+      return next;
+    });
+    markDocumentDirty();
+  }, [markDocumentDirty]);
 
   const reorderLayers = useCallback((fromIdx: number, toIdx: number) => {
     setLayers(prev => {
       const next = [...prev];
       const [moved] = next.splice(fromIdx, 1);
       next.splice(toIdx, 0, moved);
+      layersRef.current = next;
       return next;
     });
-  }, []);
+    markDocumentDirty();
+  }, [markDocumentDirty]);
+
+  const handleExportModeChange = useCallback((nextMode: PSDExportMode) => {
+    exportModeRef.current = nextMode;
+    setExportMode(nextMode);
+    markDocumentDirty();
+  }, [markDocumentDirty]);
 
   const handleExport = useCallback(async () => {
     try {
+      const saved = await flushLayerDocument();
+      if (!saved) return;
       setStage('exporting');
       setProgress(15);
       setProgressMessage('正在写入当前编辑后的图层栈...');
-      await downloadEditedPSD(layers, canvasWidth, canvasHeight, prompt, exportMode);
+      const finalScene = sceneResultRef.current;
+      await downloadEditedPSD(
+        layersRef.current,
+        finalScene?.width ?? canvasWidth,
+        finalScene?.height ?? canvasHeight,
+        promptRef.current,
+        exportModeRef.current,
+      );
       setProgress(100);
       setProgressMessage('导出完成');
       setStage('done');
@@ -541,7 +904,52 @@ export default function PsdLayerEditor({
       setErrorMessage(err instanceof Error ? err.message : 'PSD 导出失败');
       setStage('error');
     }
-  }, [layers, canvasWidth, canvasHeight, prompt, exportMode]);
+  }, [canvasWidth, canvasHeight, flushLayerDocument]);
+
+  const applyServerDocument = useCallback(() => {
+    if (!conflictDocument) return;
+    documentRef.current = conflictDocument;
+    dirtyRef.current = false;
+    editGenerationRef.current += 1;
+    conflictActiveRef.current = false;
+    applyScene(layerDocumentScene(conflictDocument.content), conflictDocument.content.exportMode);
+    setConflictDocument(null);
+    setDocumentError('');
+    setDocumentStatus('saved');
+  }, [applyScene, conflictDocument]);
+
+  const keepLocalDocument = useCallback(() => {
+    const latestDocument = conflictDocument;
+    if (!latestDocument || savePromiseRef.current) return;
+    documentRef.current = latestDocument;
+    dirtyRef.current = true;
+    editGenerationRef.current += 1;
+    conflictActiveRef.current = false;
+    setConflictDocument(null);
+    setDocumentError('');
+    setDocumentStatus('dirty');
+    void flushLayerDocument();
+  }, [conflictDocument, flushLayerDocument]);
+
+  const reloadConflictDocument = useCallback(async () => {
+    const activeSource = sourceRef.current;
+    if (!activeSource) return;
+    const sourceEpoch = sourceEpochRef.current;
+    setDocumentError('正在重新加载服务器版本...');
+    try {
+      const latest = await loadLayerDocument(activeSource);
+      if (sourceEpoch !== sourceEpochRef.current || !mountedRef.current) return;
+      if (!latest) throw new Error('服务器版本不存在，请刷新项目后重试');
+      setConflictDocument(latest);
+      setDocumentError('服务器版本已重新加载，请选择保留版本。');
+      setDocumentStatus('conflict');
+    } catch (error) {
+      if (sourceEpoch !== sourceEpochRef.current || !mountedRef.current) return;
+      setConflictDocument(null);
+      setDocumentError(error instanceof Error ? error.message : '服务器版本加载失败，请重试');
+      setDocumentStatus('conflict');
+    }
+  }, []);
 
   const selectedLayer = layers.find(layer => layer.id === selectedLayerId) || null;
 
@@ -583,6 +991,19 @@ export default function PsdLayerEditor({
                 </span>
               </span>
             )}
+            <span
+              data-testid="layer-document-status"
+              className={`rounded-md px-2 py-0.5 text-xs ${
+                documentStatus === 'conflict' || documentStatus === 'error'
+                  ? 'bg-red-500/15 text-red-300'
+                  : documentStatus === 'saved'
+                    ? 'bg-emerald-500/15 text-emerald-300'
+                    : 'bg-white/10 text-white/60'
+              }`}
+              title={documentError || undefined}
+            >
+              {LAYER_DOCUMENT_STATUS_LABELS[documentStatus]}
+            </span>
             {stage !== 'editing' && stage !== 'loading' && stage !== 'choosing' && (
               <span className="text-xs text-amber-400 bg-amber-400/10 px-2 py-0.5 rounded-full">
                 {stage === 'exporting' ? '导出中...' : stage === 'done' ? '导出完成' : stage === 'cancelling' ? '取消中...' : stage === 'error' ? '错误' : ''}
@@ -639,6 +1060,59 @@ export default function PsdLayerEditor({
 
         {/* Main content area - three-column layout */}
         <div className="flex-1 flex min-h-0 relative">
+          {documentStatus === 'error' && documentError && (
+            <div
+              data-testid="layer-document-save-error"
+              className="absolute inset-x-0 top-0 z-30 flex items-center justify-center gap-3 border-b border-red-500/30 bg-neutral-950/95 px-4 py-3 text-xs text-red-200 shadow-lg"
+              role="alert"
+            >
+              <span>{documentError}</span>
+              {dirtyRef.current && (
+                <button
+                  type="button"
+                  onClick={() => { void flushLayerDocument(); }}
+                  className="h-8 rounded-md bg-red-400 px-3 font-medium text-neutral-950 hover:bg-red-300"
+                >
+                  重试保存
+                </button>
+              )}
+            </div>
+          )}
+          {documentStatus === 'conflict' && (
+            <div
+              data-testid="layer-document-conflict"
+              className="absolute inset-x-0 top-0 z-30 flex items-center justify-center gap-3 border-b border-red-500/30 bg-neutral-950/95 px-4 py-3 text-xs text-red-200 shadow-lg"
+              role="alert"
+            >
+              <span>{documentError || '该图层文档已在其他窗口更新。'}</span>
+              {conflictDocument ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={applyServerDocument}
+                    className="h-8 rounded-md bg-red-400 px-3 font-medium text-neutral-950 hover:bg-red-300"
+                  >
+                    使用服务器版本
+                  </button>
+                  <button
+                    type="button"
+                    onClick={keepLocalDocument}
+                    className="h-8 rounded-md bg-neutral-700 px-3 text-white hover:bg-neutral-600"
+                  >
+                    保留当前修改并重试
+                  </button>
+                </>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => { void reloadConflictDocument(); }}
+                  className="h-8 rounded-md bg-red-400 px-3 font-medium text-neutral-950 hover:bg-red-300"
+                >
+                  重新加载服务器版本
+                </button>
+              )}
+            </div>
+          )}
           {/* Left sidebar: Layer panel */}
           {showLayerPanel && (stage === 'editing' || stage === 'exporting') && (
             <div className="w-56 shrink-0 flex flex-col bg-neutral-900/95 border-r border-neutral-700 overflow-hidden">
@@ -753,7 +1227,7 @@ export default function PsdLayerEditor({
                     <button onClick={() => setStage('editing')} className="px-4 py-2 bg-neutral-700 text-white rounded text-sm hover:bg-neutral-600 transition-colors">
                       继续编辑
                     </button>
-                    <button onClick={onClose} className="px-4 py-2 bg-neutral-700 text-white rounded text-sm hover:bg-neutral-600 transition-colors">
+                    <button onClick={handleClose} className="px-4 py-2 bg-neutral-700 text-white rounded text-sm hover:bg-neutral-600 transition-colors">
                       关闭
                     </button>
                   </div>
@@ -785,7 +1259,7 @@ export default function PsdLayerEditor({
                 <div className="bg-neutral-800/90 rounded-lg border border-neutral-700 px-3 py-2 shadow-xl">
                   <ExportToolbar
                     mode={exportMode}
-                    onModeChange={setExportMode}
+                    onModeChange={handleExportModeChange}
                     onExport={handleExport}
                     isExporting={stage === 'exporting'}
                     progress={progress}
@@ -821,7 +1295,7 @@ export default function PsdLayerEditor({
               <div className="border-t border-neutral-700 p-2 shrink-0">
                 <ExportToolbar
                   mode={exportMode}
-                  onModeChange={setExportMode}
+                  onModeChange={handleExportModeChange}
                   onExport={handleExport}
                   isExporting={stage === 'exporting'}
                   progress={progress}

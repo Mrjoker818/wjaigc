@@ -80,14 +80,26 @@ describe('dual-output element decomposition canvas wiring', () => {
     const openBlock = canvasSource.slice(openStart, openEnd);
 
     expect(closeBlock).toMatch(/setShowPsdEditor\(false\);\s*setPsdEditorInitialResult\(null\);/);
-    expect(openBlock).toMatch(
-      /setPsdEditorImageUrl\(img\.url\);\s*setPsdEditorInitialResult\(null\);\s*setPsdEditorMode\('studio'\);/,
-    );
+    expect(closeBlock).toContain('setPsdEditorSource(null)');
+    expect(openBlock).toContain('setPsdEditorImageUrl(img.url)');
+    expect(openBlock).toContain('setPsdEditorInitialResult(null)');
+    expect(openBlock).toContain('setPsdEditorSource(effectiveProjectId ? {');
+    expect(openBlock).toContain("setPsdEditorMode('studio')");
   });
 
   it('consumes a retried board result and opens retried layers from the frozen source', () => {
+    const retryStart = canvasSource.indexOf('const handleRetryElementBranch = useCallback');
+    const retryEnd = canvasSource.indexOf('const handleCancelElementDecomposition = useCallback', retryStart);
+    const retryBlock = canvasSource.slice(retryStart, retryEnd);
+
     expect(canvasSource).toContain('completeElementBoardResult(finalTask, branch)');
-    expect(canvasSource).toContain('setPsdEditorImageUrl(elementDecomposeTask.source.managedUrl');
+    expect(canvasSource).toContain('const [elementDecomposeProjectId, setElementDecomposeProjectId] = useState<string | null>(null)');
+    expect(canvasSource).toContain('setElementDecomposeProjectId(sourceSnapshot.projectId)');
+    expect(retryBlock).toContain('const effectiveProjectId = elementDecomposeProjectId');
+    expect(retryBlock).toContain('const sourceVersionId = finalTask.source.sourceVersionId');
+    expect(retryBlock).toContain('setPsdEditorImageUrl(finalTask.source.canonicalUrl)');
+    expect(retryBlock).not.toContain('imagesRef.current.find');
+    expect(retryBlock).not.toContain('projectId || brandProject?.id');
   });
 
   it('discloses refunded local fallback consistently for initial, retry, and status paths', () => {

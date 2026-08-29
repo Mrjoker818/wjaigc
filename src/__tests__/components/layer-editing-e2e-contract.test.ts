@@ -48,4 +48,21 @@ describe('layer editing browser contract', () => {
     expect(editor).toContain('layeringInFlightRef.current = true;');
     expect(editor).toContain('layeringInFlightRef.current = false;');
   });
+
+  it('freezes the exact project image version and completed task for persistent layer documents', () => {
+    const canvas = source('src/components/infinite-canvas.tsx');
+
+    expect(canvas).toContain('useState<LayerDocumentSource | null>(null)');
+    expect(canvas).toContain('source={psdEditorSource || undefined}');
+    expect(canvas).toContain('sourceVersionId: sourceSnapshot.sourceVersionId');
+    expect(canvas).toContain('taskId: finalTask.taskId');
+    expect(canvas).toContain('setElementDecomposeProjectId(sourceSnapshot.projectId)');
+    expect(canvas).toContain('const effectiveProjectId = elementDecomposeProjectId');
+    expect(canvas).toContain('const sourceVersionId = finalTask.source.sourceVersionId');
+    expect(canvas).toContain('sourceVersionId: img.annotationVersionId || buildAnnotationSourceVersionId(');
+    expect(canvas).toContain('setPsdEditorSource(null)');
+    expect(canvas).toContain('psdEditorCloseGuardRef.current');
+    expect(canvas).toContain('registerCloseGuard={(guard) =>');
+    expect(canvas).toContain('void psdEditorCloseGuardRef.current()');
+  });
 });

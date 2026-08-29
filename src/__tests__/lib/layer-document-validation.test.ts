@@ -91,7 +91,7 @@ describe('layer document validation', () => {
       expect.objectContaining({ code: 'LAYER_DOCUMENT_STRING_TOO_LONG' }),
     );
 
-    expect(() => validateLayerDocumentRequestSize('x'.repeat(256 * 1024 + 1))).toThrowError(
+    expect(() => validateLayerDocumentRequestSize('x'.repeat(60 * 1024 + 1))).toThrowError(
       expect.objectContaining({ code: 'LAYER_DOCUMENT_BODY_TOO_LARGE' }),
     );
   });
