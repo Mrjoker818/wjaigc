@@ -122,6 +122,7 @@
     { "path": "src/lib/universal-api-manager.ts", "sourceCommit": "96c1907b" },
     { "path": "src/lib/universal-api-types.ts", "sourceCommit": "1798d252" },
     { "path": "src/app/api/analyze-psd/route.ts", "sourceCommit": "f7883f96" },
+    { "path": "src/app/api/element-decompose/route.ts", "sourceCommit": "8d01e9ca" },
     { "path": "src/app/api/assets/transfer/route.ts", "sourceCommit": "b3fe71b4" },
     { "path": "src/app/api/brand-ecommerce/result-store.ts", "sourceCommit": "6a9efa5e" },
     { "path": "src/app/api/brand-ecommerce/route.ts", "sourceCommit": "6a9efa5e" },

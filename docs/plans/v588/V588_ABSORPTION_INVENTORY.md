@@ -758,3 +758,11 @@ No item is “absorbed” merely because its source file exists or a unit test p
 - 证据：`docs/testing/evidence/v588-stability-002-8cd07e1f-psd-selected-layer-cloud-2026-08-30.json`、`docs/testing/evidence/v588-stability-002-8cd07e1f-layer-document-export-cloud-2026-08-30.json` 及同名 PNG。后续文档提交 `af2132de`、`1dab4e3f` 不改变上述运行时代码。
 
 **当前唯一顺序：** `002-B` Pear 远程质量成功 -> `002-D` 同一成功任务一次扣费且零退款 -> 完成态任务卡入口补证 -> `002-E` 云端失败/取消账务矩阵。上述门禁关闭前不进入 `V588-ADMIN-004`，已经关闭的 `002-A`、`002-C` 与 Stage 4 不得重复执行。
+
+## 2026-08-30 完成态任务卡父任务水合本地关闭检查点
+
+- 刷新后卡片丢失的根因已定位为父任务缺少 `projectId` 和前端只持有 React 内存状态；不是图层文档、Pear ZIP 或 PSD 解析回退。
+- 当前实现持久化新父任务项目身份，并以用户 + 项目 + `element-decompose-parent` 精确查询恢复；旧任务只在 `project_id` 为空且 `result.request.projectId` 精确匹配时兼容。稳定排序和 `LIMIT 1` 避免全局 500 条扫描遗漏。
+- 项目切换、新提交与卸载会中止恢复并提升请求代次，迟到响应不能覆盖新任务或写入其他项目。恢复只读，不提交供应商、不创建任务、不产生账务。
+- 首轮审查的 3 项 Important 与 1 项 Minor 均补 RED 后关闭，终审 APPROVED。聚焦 `175/175`、全仓 `4244 passed / 123 PostgreSQL-gated skipped / 0 failed`、TypeScript、零错误 ESLint、干净候选保护基线和生产构建 `118/118` 通过。
+- **状态：本地关闭、Coze 非付费验收待执行。** 当前顺序不变：`002-B -> 002-D -> 完成态任务卡云端补证 -> 002-E`；本地卡片水合不得重复实施，也不进入 `V588-ADMIN-004`。

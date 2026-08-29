@@ -166,6 +166,7 @@ const historicalSourceAuthorizations = [
   ['src/lib/universal-api-manager.ts', '96c1907b'],
   ['src/lib/universal-api-types.ts', '1798d252'],
   ['src/app/api/analyze-psd/route.ts', 'f7883f96'],
+  ['src/app/api/element-decompose/route.ts', '8d01e9ca'],
   ['src/app/api/assets/transfer/route.ts', 'b3fe71b4'],
   ['src/app/api/brand-ecommerce/result-store.ts', '6a9efa5e'],
   ['src/app/api/brand-ecommerce/route.ts', '6a9efa5e'],
@@ -233,6 +234,9 @@ describe('protected baseline release gate', () => {
     expect(allowedPaths).toContain('.superpowers/sdd/task-simple-chat-4-report.md');
     expect(allowedPaths).toContain('.superpowers/sdd/task-simple-chat-5-report.md');
     expect(allowedPaths).toContain('.superpowers/sdd/task-simple-chat-7-report.md');
+    expect(allowedPaths).toContain(
+      '.superpowers/sdd/task-v588-stability-002-completed-task-hydration-report.md',
+    );
     expect(allowedPaths).toContain('src/lib/simple-chat-model-menu-position.ts');
     expect(allowedPaths).toContain('src/lib/simple-chat-request-context.ts');
     expect(allowedPaths).toContain('src/lib/element-decomposition/service.ts');

@@ -2233,3 +2233,11 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - `ag-psd` 实际解析文件：画布 `3504×2336`，编辑组 5 层，元素 2 为 `left=589, top=416, right=2668, bottom=1890`，校正层为 `0,0,3504,2336`，顺序和最终持久化文档一致。
 - Chrome 下载事件捕获等待 120 秒未返回，但 UI 已完成且文件在 `03:58:20+08:00` 实际落盘，因此登记为测试工具事件漏报，不登记为产品导出失败。
 - **回归判定：`002-C` 云端核心闭环 PASS。** 当前证据来自本地 fallback 图层文档，只关闭持久化与导出，不证明 Pear 远程质量或成功账务。
+
+## 2026-08-30 完成态元素拆解父任务水合本地回归
+
+- RED 先稳定复现刷新后完成卡片丢失、旧任务项目身份不可恢复、迟到恢复覆盖新提交和项目切换污染。
+- 修复只增加项目绑定的父任务持久化与精确只读恢复；兼容旧任务 `result.request.projectId`，使用稳定数据库排序，并通过 AbortController 与请求代次隔离切换、新提交和卸载竞态。恢复不提交供应商、不创建任务、不触发积分。
+- 首轮独立审查的 3 项 Important 与 1 项 Minor 均补回归后关闭，终审 APPROVED；聚焦 `12 files / 175 tests` 通过。
+- 新鲜全仓为 `577 files passed / 23 skipped`、`4244 tests passed / 123 PostgreSQL-gated skipped / 0 failed`；跳过项不计作通过。TypeScript、零错误 ESLint、干净候选保护基线 `38/38 / 0 drift / 0 warnings` 及 8 GiB 生产构建 `118/118` 均通过。
+- **回归判定：BUG-018 父任务水合 LOCAL PASS / CLOUD PENDING。** 云端需要复用历史 completed 任务验证卡片和按钮，不得用新付费任务代替。

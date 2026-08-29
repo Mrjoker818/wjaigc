@@ -1892,6 +1892,16 @@ Stage 3 remains in Task 10. Stage 4/5 are not authorized.
 | PSD 最终导出 | `CLOUD PASS` | 下载文件签名 `8BPS`，`ag-psd` 解析为 3504×2336、5 个编辑图层；顺序、坐标与最终保存 revision 一致。 |
 | Pear 远程成功与账务 | `FAILED / UNVERIFIED` | 合适素材取得 `engine=pear`、2+ 合格远程图层、一次扣费零退款；不得以本地 fallback 或本轮非付费重开验证替代。 |
 
+### 2026-08-30 完成态父任务水合候选剩余验证
+
+| 项目 | 最新状态 | 关闭条件 |
+|---|---|---|
+| 父任务项目绑定与竞态隔离 | `LOCAL PASS` | 聚焦 175/175、终审 APPROVED；不得重复改造。 |
+| 完成卡片刷新恢复 | `CLOUD PENDING` | Coze exact-SHA 后整页真实重载，打开元素拆解浮层，历史 completed 父任务卡及“打开编辑器”必须出现。 |
+| 同任务编辑器载荷 | `CLOUD PENDING` | 按钮打开的 taskId、source image/version 和 layers 与历史任务一致。 |
+| 零副作用证明 | `CLOUD PENDING` | 浏览器网络中无新的 `/api/element-decompose` POST，管理员任务与积分流水无新增供应商任务、扣费或退款。 |
+| PostgreSQL 全仓专项 | `123 TESTS SKIPPED / OPEN` | 使用隔离 `POSTGRES_TEST_DATABASE_URL` 复跑；不得指向 Coze 业务库或生产库。 |
+
 云端执行顺序固定为：Coze 拉取最终 `main` exact-SHA，确认 `stable` 未变；沙箱完全重启；强制刷新既有 Google Chrome 预览标签；最后开始验证。不得新建 Chrome 标签，也不得在旧沙箱进程上得出通过结论。
 
 补充门禁：刷新后必须核对浏览器已加载的 webpack/page chunk 与服务器当前 HTML 一致。仅发送 `Ctrl+Shift+R` 不再作为“新构建已加载”的充分证据。
