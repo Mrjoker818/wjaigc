@@ -228,6 +228,7 @@
   "src/lib/editable-layer-adapter.ts",
   "src/lib/element-decomposition/client.ts",
   "src/lib/element-decomposition/reconstruction.ts",
+  "src/lib/element-decomposition/service.ts",
   "src/lib/layer-decomposition-client.ts",
   "src/lib/layer-decomposition/layer-stack-order.ts",
   "src/lib/layer-decomposition/pear-adapter.ts",

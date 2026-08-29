@@ -1835,6 +1835,14 @@ Stage 3 remains in Task 10. Stage 4/5 are not authorized.
 | 管理员 Image-Layered 价格 | `CLOUD UI PASS` | `c79cd0fe` 管理员页面已显示 15 积分/次并与既有权威任务结算一致；后续 provider/model 自定义价格仍需在成功任务矩阵中复核。 |
 | 源图到 PSD 坐标归一 | `CLOUD CODE/TEST PASS` | 云端同提交专项已覆盖 `1254 -> 1280` 同宽高比归一与不同宽高比拒绝拉伸；本轮未再次付费，历史错误制品仍保持失败。 |
 | Pear 远程制品质量 | `FAILED / OPEN` | 获得与源素材匹配、通过既有 MAE/重复层/空层/越界门禁的远程图层；不得降低阈值。 |
-| smart 回退终态说明 | `FAILED / OPEN` | UI 清楚显示远程失败原因、退款与实际本地引擎，父任务 completed 不得被误读为 Pear 成功。 |
+| smart 回退终态说明 | `LOCAL PASS / CLOUD PENDING` | 本地已由持久化退款事实驱动披露；Coze exact-SHA 后在现有 Chrome 标签确认分支卡片和完成提示明确显示实际本地引擎与退款，且普通本地执行不误报退款。 |
 | 图层文档持久化 | `DESIGN ONLY` | 审阅并实施 `docs/superpowers/specs/2026-08-29-layer-document-persistence-design.md`，完成用户/项目/源版本绑定、乐观锁、刷新和跨设备恢复。 |
 | 通用 PostgreSQL 套件 | `122 TESTS SKIPPED` | 使用专用 `POSTGRES_TEST_DATABASE_URL` 执行，不得指向 Coze 业务库或生产库。 |
+
+### BUG-015 本地关闭后的云端验证点
+
+- Coze 必须精确拉取本轮最终 `main` 提交，`origin/stable` 保持 `52f7c601ed150769e15d06fb435c6e360e28c9e7`。
+- 复用已有 Google Chrome 项目页和预览页，不创建新标签；验证完成态可编辑图层分支显示“实际引擎：本地分层”和“Pear 云端分层未完成，已退款并使用本地分层”。
+- 优先复用既有回退任务或非付费合同验证；不得为了文案再次触发付费 Pear 任务。
+- 升级前已完成且缺少披露字段的父任务应在第一次查询时通过纯存储快照从既有终态子任务补齐证据；若子任务已过期或仍为非终态，应保留原完成结果而不是推进子任务或返回错误。验证所有路径都没有新的 Pear taskId、worker lease、扣费或退款记录。
+- 本项云端关闭不代表 Pear 远程制品质量成功，也不关闭图层文档保存、刷新恢复、成功账务或 PSD 导出。

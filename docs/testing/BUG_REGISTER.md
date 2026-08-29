@@ -3011,7 +3011,7 @@ All listed Stage 4 defects are locally closed. S4-BUG-008 also passed its exact-
 | 稳定复现 | 本次任务 Pear ZIP 已返回但质量门禁失败；数据库同时出现 `status=completed`、`phase=ready`、`creditStatus=refunded`、`decomposition.engine=local` 与非空 `fallbackReason`。 |
 | 根因 | smart 模式把“远程失败并退款 + 本地 fallback 成功”映射为父任务完成，但前端完成态没有强制展示实际引擎、退款和回退原因。 |
 | 风险 | 测试人员和用户会把本地两层误判为 Pear 成功，历史上已真实发生过同类错误结论。 |
-| 当前状态 | **已复现 / 未修复。** 应保留整体成功语义，同时明确显示“Pear 未通过质量门禁，已退款并使用本地分层”，并让自动化断言实际引擎。 |
+| 当前状态 | **本地已修复 / 云端待验。** 子任务现在从持久化任务返回真实 `creditStatus`，父任务完整投影 `fallbackReason/providerError/creditStatus`；UI 仅在 `engine=local + fallbackReason + creditStatus=refunded` 三项同时成立时显示“Pear 云端分层未完成，已退款并使用本地分层”，普通本地执行不会误报退款，也不会把超时等原因写成质量门禁失败。 |
 
 ### V588-STABILITY-002-BUG-007/014 本地修复增量（2026-08-29）
 
@@ -3035,3 +3035,16 @@ All listed Stage 4 defects are locally closed. S4-BUG-008 also passed its exact-
 | 浏览器观察 | 稳定服务后的刷新完整加载画布、工作台与计费表；新时间边界 `0` error、`1` 条 `[Sync] syncToServer: server returned 502` warning，单独保留为项目同步可靠性观察，不归因于本次计费/PSD 修复。 |
 | 状态 | **BUG-014 云端关闭；BUG-007 的应用侧坐标误报云端关闭。** BUG-015、Pear 远程可编辑成功、成功不退款账务、图层文档持久化与 PSD 导出继续开放。 |
 | 证据 | `docs/testing/evidence/v588-stability-002-c79cd0fe-pricing-coordinate-cloud-2026-08-29.json` 与同前缀计费页面 PNG。 |
+
+#### BUG-015 本地修复增量（2026-08-29）
+
+| 字段 | 内容 |
+|---|---|
+| RED 证据 | 新增服务投影与 UI 披露测试后，稳定得到 `2 failed / 27 passed`：父任务缺少 `creditStatus/fallbackReason/providerError`，画布缺少回退文案与实际引擎判断。 |
+| 根因修复 | `LayerTaskResponse` 显式返回数据库 `CloudTask.creditStatus`；元素拆解父分支在提交、轮询和重试时完整维护回退证据；重试会清除上一轮诊断，避免旧状态污染。 |
+| UI 约束 | 只有本地结果、回退原因和已退款同时成立时才显示退款文案；分支卡片额外显示实际引擎，完成 Toast 不再把本地 fallback 泛化成 Pear 成功。 |
+| 不变边界 | 未修改 MAE、重复层、空层、越界层阈值，未修改扣费/退款/取消/终态状态机，也未创建新的付费 Pear 任务。 |
+| 旧任务兼容 | 历史 `completed` 父任务缺少 `creditStatus` 时，只通过纯存储快照读取既有终态分层子任务并在当前响应中投影证据，不领取 worker lease、不推进子任务、不写入不可变终态；子任务过期或仍为非终态时继续返回原完成结果。所有路径都不重新提交、不新建任务、不重复扣费或退款。 |
+| 二次复核修复 | 新增永久测试覆盖历史终态读取不推进子任务、拆解板重试仍披露既有退款回退，以及保护脚本面对超过 1 MiB 的未跟踪文件清单不再因 `ENOBUFS` 假通过。 |
+| 自动化回归 | 最终聚焦 `3 files / 41 tests`；扩展 Pear/ZIP/PSD、元素拆解、编辑器与保护门禁矩阵 `30 files / 227 tests`；全仓 `572 files / 4171 passed / 122 PostgreSQL-gated skipped / 0 failed`；TypeScript、完整 Lint `0 errors / 961 historical warnings` 与构建版 Lint通过。12 GiB 构建 webpack `9.9` 分钟、TypeScript `45` 秒、静态页面 `117/117`、Build ID `ZJo5NS6MxxuKE1ppzZHNq`。保护门禁对当前脏工作树诚实报告既有未跟踪工具产物，提交后的干净检出结果单独记录。 |
+| 状态 | **本地关闭 / Coze exact-SHA 与现有 Chrome 标签待验。** 云端只验证部署、界面披露和既有回退任务展示，不重复付费任务。 |

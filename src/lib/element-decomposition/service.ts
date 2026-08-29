@@ -6,9 +6,11 @@ import {
   getCloudTaskForUserByIdempotencyKey,
   updateCloudTask,
   type CloudTask,
+  type CloudTaskCreditStatus,
 } from '@/lib/cloud-task-storage';
 import {
   cancelLayerTask,
+  getLayerTaskSnapshot,
   getLayerTaskStatus,
   submitLayerDecomposition,
 } from '@/lib/layer-decomposition/service';
@@ -25,6 +27,7 @@ import type {
   ElementBranchStatus,
   ElementDecomposeRequest,
 } from '@/lib/element-decomposition/types';
+import type { LayerUpstreamError } from '@/lib/layer-decomposition/types';
 
 type ElementBranch = 'board' | 'layers';
 
@@ -36,6 +39,9 @@ export interface ElementBranchState {
   progress: number;
   result?: Record<string, unknown>;
   error?: string;
+  creditStatus?: CloudTaskCreditStatus;
+  fallbackReason?: string;
+  providerError?: LayerUpstreamError;
   attempt?: number;
   previousTaskIds?: string[];
   submissionPending?: boolean;
@@ -198,7 +204,19 @@ export async function submitElementDecomposition(input: {
           idempotencyKey: key,
           request: layerRequestForElement(input.request, persistedSource.managedUrl),
         });
-        branches.layers = { branch, taskId: child.taskId, idempotencyKey: key, status: mapStatus(child.status), progress: child.progress, result: child.result as Record<string, unknown> | undefined, attempt: 1, previousTaskIds: [] };
+        branches.layers = {
+          branch,
+          taskId: child.taskId,
+          idempotencyKey: key,
+          status: mapStatus(child.status),
+          progress: child.progress,
+          creditStatus: child.creditStatus,
+          result: child.result as Record<string, unknown> | undefined,
+          fallbackReason: child.fallbackReason,
+          providerError: child.providerError,
+          attempt: 1,
+          previousTaskIds: [],
+        };
       } else {
         const child = await submitElementBoard({
           userId: input.userId,
@@ -246,23 +264,56 @@ export async function getElementDecomposition(input: { taskId: string; userId: s
   if (!task || task.type !== 'element-decompose-parent') throw new ElementDecompositionError('ELEMENT_TASK_NOT_FOUND', 'Element decomposition parent task was not found', 404);
   const result = resultOf(task);
   const branches = { ...(result.branches as Partial<Record<ElementBranch, ElementBranchState>> || {}) };
+  let branchesChanged = false;
   for (const branch of Object.keys(branches) as ElementBranch[]) {
     const current = branches[branch];
-    if (!current || terminal(current.status) || current.submissionPending) continue;
+    if (!current || current.submissionPending) continue;
+    const needsLegacyLayerHydration = branch === 'layers'
+      && terminal(current.status)
+      && current.creditStatus === undefined;
+    if (terminal(current.status) && !needsLegacyLayerHydration) continue;
     if (branch === 'layers') {
-      const child = await getLayerTaskStatus({ taskId: current.taskId, userId: input.userId, userRole: input.userRole });
-      branches[branch] = { ...current, status: mapStatus(child.status), progress: child.progress, result: child.result as Record<string, unknown> | undefined, error: child.error?.message };
+      let child: Awaited<ReturnType<typeof getLayerTaskStatus>>;
+      try {
+        child = needsLegacyLayerHydration
+          ? await getLayerTaskSnapshot({ taskId: current.taskId, userId: input.userId, userRole: input.userRole })
+          : await getLayerTaskStatus({ taskId: current.taskId, userId: input.userId, userRole: input.userRole });
+      } catch (error) {
+        if (needsLegacyLayerHydration) continue;
+        throw error;
+      }
+      if (needsLegacyLayerHydration && !terminal(mapStatus(child.status))) continue;
+      branches[branch] = {
+        ...current,
+        status: mapStatus(child.status),
+        progress: child.progress,
+        creditStatus: child.creditStatus,
+        result: child.result as Record<string, unknown> | undefined,
+        error: child.error?.message,
+        fallbackReason: child.fallbackReason,
+        providerError: child.providerError,
+      };
+      branchesChanged = true;
     } else {
       const child = await pollElementBoard({ taskId: current.taskId, userId: input.userId, userRole: input.userRole });
       branches[branch] = { ...current, status: mapStatus(child.status), progress: child.progress, result: child.result, error: child.error };
+      branchesChanged = true;
     }
   }
+  if (!branchesChanged) return parentResponse(task);
   const derived = deriveElementParentState(branches);
+  if (terminal(task.status)) {
+    return parentResponse({
+      ...task,
+      progress: derived.progress,
+      result: { ...result, branches, overallStatus: derived.overallStatus },
+    });
+  }
   const committed = await updateCloudTask(task.id, {
-    status: derived.status,
+    ...(derived.status === task.status ? {} : { status: derived.status }),
     progress: derived.progress,
     result: { ...result, branches, overallStatus: derived.overallStatus },
-    expectedStatuses: ['processing'],
+    expectedStatuses: [task.status],
     expectedRevision: task.revision || 0,
   });
   if (!committed) {
@@ -293,6 +344,9 @@ export async function retryElementBranch(input: { taskId: string; branch: Elemen
     progress: 0,
     result: undefined,
     error: undefined,
+    creditStatus: undefined,
+    fallbackReason: undefined,
+    providerError: undefined,
     attempt,
     previousTaskIds: [...(branch.previousTaskIds || []), branch.taskId],
     submissionPending: true,
@@ -322,7 +376,17 @@ export async function retryElementBranch(input: { taskId: string; branch: Elemen
         idempotencyKey: attemptKey,
         request: layerRequestForElement(request, source.managedUrl),
       });
-      updated = { ...reserved, taskId: child.taskId, status: mapStatus(child.status), progress: child.progress, result: child.result as Record<string, unknown> | undefined, submissionPending: false };
+      updated = {
+        ...reserved,
+        taskId: child.taskId,
+        status: mapStatus(child.status),
+        progress: child.progress,
+        creditStatus: child.creditStatus,
+        result: child.result as Record<string, unknown> | undefined,
+        fallbackReason: child.fallbackReason,
+        providerError: child.providerError,
+        submissionPending: false,
+      };
     } else {
       const child = await submitElementBoard({ userId: input.userId, userRole: input.userRole, idempotencyKey: attemptKey, sourceUrl: source.managedUrl, sourceHash: source.sha256, aspectRatio: request.board.aspectRatio, background: request.board.background, providerId: request.board.providerId, modelId: request.board.modelId });
       updated = { ...reserved, taskId: child.taskId, status: mapStatus(child.status), progress: child.progress, result: child.result, error: child.error, submissionPending: false };

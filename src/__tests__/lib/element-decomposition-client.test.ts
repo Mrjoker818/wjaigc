@@ -4,6 +4,7 @@ import {
   cancelElementDecomposition,
   createElementDecompositionRequest,
   createResolvedElementDecompositionRequest,
+  getRefundedLocalLayerFallbackMessage,
   pollElementDecomposition,
   retryElementDecompositionBranch,
   submitElementDecomposition,
@@ -47,6 +48,31 @@ describe('element decomposition client', () => {
       board: { aspectRatio: '16:9', background: 'transparent' },
       layers: { engine: 'smart', requireTransparentSubject: true },
     });
+  });
+
+  it('describes any refunded local layer fallback without inventing a quality-gate cause', () => {
+    expect(getRefundedLocalLayerFallbackMessage({
+      branch: 'layers',
+      taskId: 'layer-1',
+      status: 'completed',
+      progress: 100,
+      creditStatus: 'refunded',
+      fallbackReason: 'Pear provider timed out',
+      providerError: { code: 'PEAR_TIMEOUT', message: 'Pear provider timed out' },
+      result: { engine: 'local' },
+    })).toBe('Pear 云端分层未完成，已退款并使用本地分层');
+  });
+
+  it('does not report a refunded local fallback when the branch did not use local output', () => {
+    expect(getRefundedLocalLayerFallbackMessage({
+      branch: 'layers',
+      taskId: 'layer-1',
+      status: 'completed',
+      progress: 100,
+      creditStatus: 'refunded',
+      fallbackReason: 'Pear provider timed out',
+      result: { engine: 'pear' },
+    })).toBeNull();
   });
 
   it('keeps the board image model separate from the layer model', () => {

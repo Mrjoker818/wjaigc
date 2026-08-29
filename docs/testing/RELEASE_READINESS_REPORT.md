@@ -1743,3 +1743,10 @@ The focused gate test passes `7/7`; the actual protected-baseline command passes
 - `Image-Layered` 管理员显示价已在真实云端 UI 与权威结算统一为 `15/次`；应用侧 PSD 坐标归一也已进入云端构建并由专项覆盖。
 - 本增量结论为 **有条件通过**，不是全平台发布通过：Pear 远程制品仍未取得可接受成功态，smart 回退披露、图层文档持久化、成功不退款账务和 PSD 导出仍开放。
 - 稳定刷新仍记录 1 条项目同步 `502` warning，需要归入既有同步可靠性治理，不得写成“没有 Console warning”。
+
+## 2026-08-29 smart 回退披露候选发布增量
+
+- BUG-015 已在本地按 RED -> GREEN 关闭：退款事实来自持久化 `creditStatus`，父任务不再丢失回退诊断，UI 同时校验实际本地引擎、回退原因和已退款状态后才显示退款文案。
+- 最终聚焦 `3 files / 41 tests`、扩展 `30 files / 227 tests`、全仓 `4171 passed / 122 PostgreSQL-gated skipped / 0 failed` 通过；TypeScript、完整 Lint `0 errors / 961 historical warnings` 与构建版 Lint通过。旧版终态父任务只通过纯存储快照投影已终态子任务证据，不领取 lease、不推进任务、不回写不可变终态；子任务过期或仍在处理时保留原完成结果。初次执行、部分完成、状态卡和任一分支重试统一显示中性退款回退说明。
+- 保护脚本已修复大规模未跟踪文件导致的 `ENOBUFS` 假通过；当前脏工作树会诚实阻断既有工具产物，发布判断必须采用提交后的干净候选门禁。二次复核后的 12 GiB 生产构建通过：webpack `9.9` 分钟、TypeScript `45` 秒、静态页面 `117/117`、Build ID `ZJo5NS6MxxuKE1ppzZHNq`。
+- **发布结论仍为“有条件通过”。** BUG-015 还需 Coze exact-SHA 与 Google Chrome 界面验收；Pear 远程质量成功、图层文档持久化、成功不退款账务和 PSD 导出继续开放。

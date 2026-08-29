@@ -229,6 +229,7 @@ describe('protected baseline release gate', () => {
     expect(allowedPaths).toContain('.superpowers/sdd/task-simple-chat-7-report.md');
     expect(allowedPaths).toContain('src/lib/simple-chat-model-menu-position.ts');
     expect(allowedPaths).toContain('src/lib/simple-chat-request-context.ts');
+    expect(allowedPaths).toContain('src/lib/element-decomposition/service.ts');
     expect(allowedPaths).toContain('migrations/20260816_wj_stable_s4_agent_events.sql');
     expect(allowedPaths).toContain('scripts/run-migrations.mjs');
     expect(allowedPaths).not.toContain('src/app/api/agent-runs/');
@@ -257,6 +258,16 @@ describe('protected baseline release gate', () => {
     ]) {
       expect(allowedPaths).toContain(path);
     }
+  });
+
+  it('does not silently truncate a large untracked-file inventory', async () => {
+    const gateSource = await readFile(
+      resolve(process.cwd(), 'scripts/check-protected-baseline.mjs'),
+      'utf8',
+    );
+
+    expect(gateSource).toContain('maxBuffer: 64 * 1024 * 1024');
+    expect(gateSource).toContain("git(root, ['status', '--porcelain', '--untracked-files=all'])");
   });
 
   it('requires exact authorization for every committed production source drift', async () => {

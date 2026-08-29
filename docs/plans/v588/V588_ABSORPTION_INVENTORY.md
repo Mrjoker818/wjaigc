@@ -721,3 +721,11 @@ No item is “absorbed” merely because its source file exists or a unit test p
 - Google Chrome 管理员模型计费表真实显示 `pear分层 / Image-Layered / 每次 / 15`，因此 BUG-014 云端关闭；同提交的坐标归一专项通过，因此 BUG-007 的应用侧越界误报云端关闭。
 - 本轮没有创建第二个付费 Pear 任务。历史 29 层错误制品仍因高 MAE、高重复率和素材语义不匹配而失败；不降低质量阈值，不把本地 fallback 当作远程成功。
 - 稳定刷新有 1 条 `[Sync] syncToServer: server returned 502` warning，保留为独立项目同步可靠性观察。`V588-STABILITY-002` 整体仍开放，下一顺序不变：先解决 smart 回退披露，再实施已批准的图层文档持久化，随后用合适素材验证远程成功/保存/导出与成功账务。
+
+## 2026-08-29 V588-STABILITY-002 smart 回退披露本地关闭检查点
+
+- 根因不是 Pear ZIP 或 PSD 解析，而是元素拆解父任务投影丢失子任务持久化的 `creditStatus/fallbackReason/providerError`，前端只能看到笼统的 `completed`。
+- 已按批准规格 `docs/superpowers/specs/2026-08-29-v588-stability-002-fallback-disclosure-design.md` 实施：分层响应返回真实账务状态，父分支完整透传，重试清除旧诊断；UI 仅在 `engine=local + fallbackReason + creditStatus=refunded` 同时成立时显示“Pear 云端分层未完成，已退款并使用本地分层”。该中性文案适用于质量拒绝、供应商超时等回退原因，不虚构具体根因，详细诊断保留在提示标题中。
+- RED 为 `2 failed / 27 passed`；初次 GREEN 为 `29/29`。两轮独立复核继续发现旧版终态兼容、非质量失败误报、重试提示绕过、历史读取可推进子任务、拆解板重试漏披露和保护脚本大输出假通过等缺口，均先补 RED 再最小修复。最终聚焦 `3 files / 41 tests`；扩展 Pear/ZIP/PSD、元素拆解、编辑器与保护门禁矩阵 `30 files / 227 tests` 通过。
+- 历史 `completed` 父任务仅在 `creditStatus` 缺失时通过纯存储快照读取既有终态子任务，并在本次响应中投影退款/回退证据；不领取 worker lease、不推进子任务、不回写不可变终态。子任务过期或仍在处理时保留原完成结果。不重新提交 Pear、不创建新任务、不重复扣费。全仓 `572 files / 4171 passed / 122 PostgreSQL-gated skipped / 0 failed`；TypeScript、完整 Lint `0 errors / 961 historical warnings` 与构建版 Lint通过。12 GiB 构建 webpack `9.9` 分钟、TypeScript `45` 秒、静态页面 `117/117`、Build ID `ZJo5NS6MxxuKE1ppzZHNq`。保护脚本已修复 1 MiB 输出溢出假通过，当前含既有工具产物的脏工作树会诚实阻断，提交后的干净检出门禁单独记录。
+- 未降低任何质量阈值，未改变扣费退款状态机，未新建付费任务。**状态：BUG-015 本地关闭 / Coze 待验；V588-STABILITY-002 仍开放。下一项仍是已批准的 `002-C` 图层文档持久化，云端验收后再进入，不重复已关闭的计价、坐标或 Stage 4 工作。**

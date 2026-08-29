@@ -3,6 +3,8 @@ import type {
   ElementDecomposeOutputMode,
   ElementDecomposeRequest,
 } from '@/lib/element-decomposition/types';
+import type { CloudTaskCreditStatus } from '@/lib/cloud-task-storage';
+import type { LayerUpstreamError } from '@/lib/layer-decomposition/types';
 import {
   resolveDefaultLayerTarget,
   type LayerFetchLike,
@@ -17,6 +19,9 @@ export interface ElementDecomposeBranchResponse {
   progress: number;
   result?: Record<string, unknown>;
   error?: string;
+  creditStatus?: CloudTaskCreditStatus;
+  fallbackReason?: string;
+  providerError?: LayerUpstreamError;
 }
 
 export interface ElementDecomposeTaskResponse {
@@ -35,6 +40,21 @@ export interface ElementDecomposeTaskResponse {
     mimeType: string;
   };
   branches: Partial<Record<ElementBranch, ElementDecomposeBranchResponse>>;
+}
+
+const REFUNDED_LOCAL_LAYER_FALLBACK_MESSAGE = 'Pear 云端分层未完成，已退款并使用本地分层';
+
+export function getRefundedLocalLayerFallbackMessage(
+  branch?: ElementDecomposeBranchResponse,
+): string | null {
+  const engine = branch?.result && typeof branch.result.engine === 'string'
+    ? branch.result.engine
+    : undefined;
+  return engine === 'local'
+    && branch?.creditStatus === 'refunded'
+    && Boolean(branch.fallbackReason)
+    ? REFUNDED_LOCAL_LAYER_FALLBACK_MESSAGE
+    : null;
 }
 
 export interface ElementDecomposeSourceInput {

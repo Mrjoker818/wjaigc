@@ -89,4 +89,21 @@ describe('dual-output element decomposition canvas wiring', () => {
     expect(canvasSource).toContain('completeElementBoardResult(finalTask, branch)');
     expect(canvasSource).toContain('setPsdEditorImageUrl(elementDecomposeTask.source.managedUrl');
   });
+
+  it('discloses refunded local fallback consistently for initial, retry, and status paths', () => {
+    const submitStart = canvasSource.indexOf('const handleDisplayDecomposeConfirm = useCallback');
+    const retryStart = canvasSource.indexOf('const handleRetryElementBranch = useCallback');
+    const retryEnd = canvasSource.indexOf('const handleCancelElementDecomposition = useCallback', retryStart);
+    const submitBlock = canvasSource.slice(submitStart, retryStart);
+    const retryBlock = canvasSource.slice(retryStart, retryEnd);
+
+    expect(canvasSource).toContain('getRefundedLocalLayerFallbackMessage');
+    expect(submitBlock).toContain('getRefundedLocalLayerFallbackMessage(layerBranch)');
+    expect(submitBlock).toContain('toast.warning(`${layerFallbackMessage}；其他分支未完成，可在状态面板重试`)');
+    expect(retryBlock).toContain('getRefundedLocalLayerFallbackMessage(finalTask.branches.layers)');
+    expect(retryBlock).toContain('toast.warning(layerFallbackMessage)');
+    expect(retryBlock).toContain('toast.warning(`${layerFallbackMessage}；拆解板分支重试完成`)');
+    expect(canvasSource).not.toContain('Pear 未通过质量门禁，已退款并使用本地分层');
+    expect(canvasSource).toContain('data-layer-fallback="refunded-local"');
+  });
 });

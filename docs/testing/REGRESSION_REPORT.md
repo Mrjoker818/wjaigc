@@ -2171,3 +2171,13 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - Google Chrome 管理员页面真实显示 `pear分层 / Image-Layered / 每次 / 15`，关闭管理员目录 60 与权威任务 15 不一致的问题。
 - 坐标归一逻辑已在云端同一提交的专项测试通过；本轮不重复付费，因此只证明应用侧误报已部署，不能把历史 Pear 错误制品改写为远程成功。
 - 稳定刷新后出现 `0` error、`1` 条项目同步 `502` warning，作为独立可靠性观察保留。证据：`docs/testing/evidence/v588-stability-002-c79cd0fe-pricing-coordinate-cloud-2026-08-29.json`。
+
+## 2026-08-29 Pear smart 回退披露本地回归
+
+- 服务与 UI 两个 RED 先稳定复现父任务丢失退款/回退证据以及完成态无披露，结果为 `2 failed / 27 passed`；初次最小实现后同组 `29/29` 通过。
+- 两轮独立复核共发现六项兼容与治理缺口：升级前终态父任务缺少披露元数据、非质量失败误报、分支重试提示绕过、历史读取可推进子任务、拆解板重试漏披露，以及保护脚本在大输出时可能假通过。每项均先补 RED 再最小修复。历史终态改用纯存储快照，只投影已终态子任务；子任务过期或仍在处理时保留原父任务结果。最终聚焦 `3 files / 41 tests` 通过。
+- 重新执行的扩展 Pear、ZIP/PSD、元素拆解、客户端、UI、PSD 编辑器与保护门禁矩阵共 `30 files / 227 tests` 全通过。
+- 全量 Vitest 为 `572 files passed / 22 skipped`、`4171 tests passed / 122 PostgreSQL-gated skipped / 0 failed`；本轮没有配置隔离 PostgreSQL 测试库，跳过项不计作通过。
+- `pnpm ts-check`、完整 `pnpm lint`（`0 errors / 961 historical warnings`）和 `pnpm lint:build` 通过。保护脚本已修复默认约 1 MiB 缓冲溢出被吞掉的问题；当前包含既有 `.playwright-cli`、参考仓库和 SDD 文档的脏工作树会如实阻断，不能再写成“0 未授权漂移”。提交后的干净候选门禁另行执行。
+- 二次复核后的 12 GiB 生产构建通过：webpack `9.9` 分钟、TypeScript `45` 秒、静态页面 `117/117`、Build ID `ZJo5NS6MxxuKE1ppzZHNq`、退出码 `0`。
+- **本地判定：BUG-015 PASS。** 不降低质量阈值、不改变账务状态机、不重复付费；Coze exact-SHA、现有 Google Chrome 界面文案与既有回退任务展示仍待验。

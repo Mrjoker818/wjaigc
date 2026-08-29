@@ -38,6 +38,7 @@ const board = vi.hoisted(() => ({
 const layers = vi.hoisted(() => ({
   submit: vi.fn(),
   get: vi.fn(),
+  snapshot: vi.fn(),
   cancel: vi.fn(),
 }));
 
@@ -49,6 +50,7 @@ vi.mock('@/lib/element-decomposition/source-snapshot', () => ({
 vi.mock('@/lib/layer-decomposition/service', () => ({
   submitLayerDecomposition: layers.submit,
   getLayerTaskStatus: layers.get,
+  getLayerTaskSnapshot: layers.snapshot,
   cancelLayerTask: layers.cancel,
 }));
 vi.mock('@/lib/element-decomposition/board-executor', () => ({
@@ -118,6 +120,7 @@ describe('element decomposition parent idempotency', () => {
       progress: 10,
     }));
     layers.get.mockResolvedValue({ taskId: 'layer-task', status: 'completed', progress: 100, result: { layers: [] } });
+    layers.snapshot.mockResolvedValue({ taskId: 'layer-task', status: 'completed', progress: 100, result: { layers: [] } });
     layers.cancel.mockResolvedValue({ taskId: 'layer-task', status: 'cancelled', progress: 10 });
     storage.createCloudTask.mockImplementation(async (task: CreateCloudTaskInput) => {
       const existing = [...storage.tasks.values()].find(
@@ -276,6 +279,152 @@ describe('element decomposition parent idempotency', () => {
 
     expect(board.poll).toHaveBeenCalledWith(expect.objectContaining({ taskId: submitted.branches.board?.taskId }));
     expect(response.branches.board).toMatchObject({ status: 'completed', result: { imageUrl: '/board.png' } });
+  });
+
+  it('preserves refunded Pear fallback evidence on the completed layers branch', async () => {
+    const providerError = {
+      code: 'LAYER_QUALITY_GATE_FAILED',
+      message: 'Pear PSD did not pass the reconstruction quality gate',
+      type: 'quality_error',
+    };
+    layers.get.mockResolvedValueOnce({
+      taskId: 'layer-task',
+      status: 'completed',
+      progress: 100,
+      creditStatus: 'refunded',
+      fallbackReason: providerError.message,
+      providerError,
+      result: { engine: 'local', layers: [{ id: 'local-layer' }] },
+    });
+
+    const { getElementDecomposition, submitElementDecomposition } = await import('@/lib/element-decomposition/service');
+    const submitted = await submitElementDecomposition({
+      userId: 'user-1', userRole: 'user', idempotencyKey: 'element-refunded-fallback', request: request(),
+    });
+    const response = await getElementDecomposition({
+      taskId: submitted.taskId, userId: 'user-1', userRole: 'user',
+    });
+
+    expect(response.branches.layers).toMatchObject({
+      status: 'completed',
+      creditStatus: 'refunded',
+      fallbackReason: providerError.message,
+      providerError,
+      result: { engine: 'local', layers: [{ id: 'local-layer' }] },
+    });
+  });
+
+  it('hydrates fallback evidence for a legacy completed parent without resubmitting', async () => {
+    const { getElementDecomposition, submitElementDecomposition } = await import('@/lib/element-decomposition/service');
+    const submitted = await submitElementDecomposition({
+      userId: 'user-1', userRole: 'user', idempotencyKey: 'element-legacy-fallback', request: request(),
+    });
+    const stored = parentTask(submitted.taskId);
+    stored.status = 'completed';
+    stored.result.branches = {
+      board: { ...parentBranch(stored, 'board'), status: 'completed', progress: 100 },
+      layers: {
+        ...parentBranch(stored, 'layers'),
+        status: 'completed',
+        progress: 100,
+        result: { engine: 'local', layers: [{ id: 'legacy-local-layer' }] },
+      },
+    };
+    layers.snapshot.mockResolvedValueOnce({
+      taskId: submitted.branches.layers?.taskId,
+      status: 'completed',
+      progress: 100,
+      creditStatus: 'refunded',
+      fallbackReason: 'Pear reconstruction failed',
+      providerError: { code: 'LAYER_QUALITY_FAILED', message: 'Pear reconstruction failed' },
+      result: { engine: 'local', layers: [{ id: 'legacy-local-layer' }] },
+    });
+    storage.updateCloudTask.mockClear();
+
+    const response = await getElementDecomposition({
+      taskId: submitted.taskId, userId: 'user-1', userRole: 'user',
+    });
+
+    expect(layers.submit).toHaveBeenCalledTimes(1);
+    expect(layers.snapshot).toHaveBeenCalledTimes(1);
+    expect(layers.get).not.toHaveBeenCalled();
+    expect(storage.updateCloudTask).not.toHaveBeenCalled();
+    expect(response.branches.layers).toMatchObject({
+      status: 'completed',
+      creditStatus: 'refunded',
+      fallbackReason: 'Pear reconstruction failed',
+      result: { engine: 'local' },
+    });
+  });
+
+  it('keeps a legacy completed parent readable when its child evidence is no longer available', async () => {
+    const { getElementDecomposition, submitElementDecomposition } = await import('@/lib/element-decomposition/service');
+    const submitted = await submitElementDecomposition({
+      userId: 'user-1', userRole: 'user', idempotencyKey: 'element-legacy-missing-child', request: request(),
+    });
+    const stored = parentTask(submitted.taskId);
+    stored.status = 'completed';
+    stored.result.branches = {
+      board: { ...parentBranch(stored, 'board'), status: 'completed', progress: 100 },
+      layers: {
+        ...parentBranch(stored, 'layers'),
+        status: 'completed',
+        progress: 100,
+        result: { engine: 'local', layers: [{ id: 'legacy-local-layer' }] },
+      },
+    };
+    layers.snapshot.mockRejectedValueOnce(new Error('legacy child task expired'));
+
+    const response = await getElementDecomposition({
+      taskId: submitted.taskId, userId: 'user-1', userRole: 'user',
+    });
+
+    expect(layers.submit).toHaveBeenCalledTimes(1);
+    expect(layers.snapshot).toHaveBeenCalledTimes(1);
+    expect(layers.get).not.toHaveBeenCalled();
+    expect(response.status).toBe('completed');
+    expect(response.branches.layers).toMatchObject({
+      status: 'completed',
+      result: { engine: 'local' },
+    });
+  });
+
+  it('does not advance a nonterminal child while reading a legacy completed parent', async () => {
+    const { getElementDecomposition, submitElementDecomposition } = await import('@/lib/element-decomposition/service');
+    const submitted = await submitElementDecomposition({
+      userId: 'user-1', userRole: 'user', idempotencyKey: 'element-legacy-live-child', request: request(),
+    });
+    const stored = parentTask(submitted.taskId);
+    stored.status = 'completed';
+    stored.result.branches = {
+      board: { ...parentBranch(stored, 'board'), status: 'completed', progress: 100 },
+      layers: {
+        ...parentBranch(stored, 'layers'),
+        status: 'completed',
+        progress: 100,
+        result: { engine: 'local', layers: [{ id: 'legacy-local-layer' }] },
+      },
+    };
+    layers.snapshot.mockResolvedValueOnce({
+      taskId: submitted.branches.layers?.taskId,
+      status: 'processing',
+      progress: 65,
+    });
+    storage.updateCloudTask.mockClear();
+
+    const response = await getElementDecomposition({
+      taskId: submitted.taskId, userId: 'user-1', userRole: 'user',
+    });
+
+    expect(layers.snapshot).toHaveBeenCalledTimes(1);
+    expect(layers.get).not.toHaveBeenCalled();
+    expect(storage.updateCloudTask).not.toHaveBeenCalled();
+    expect(response.status).toBe('completed');
+    expect(response.branches.layers).toMatchObject({
+      status: 'completed',
+      progress: 100,
+      result: { engine: 'local' },
+    });
   });
 
   it('does not overwrite a newer retry branch with a stale polling result', async () => {

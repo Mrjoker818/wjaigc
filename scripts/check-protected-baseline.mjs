@@ -120,6 +120,7 @@ function git(root, args, { allowFailure = false } = {}) {
       cwd: root,
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'pipe'],
+      maxBuffer: 64 * 1024 * 1024,
     }).trim();
   } catch (error) {
     if (allowFailure) return '';
@@ -234,7 +235,7 @@ export async function runProtectedBaselineGate({
     git(root, ['diff', '--cached', '--name-only'], { allowFailure: true }),
   );
   const untrackedPaths = parseUntracked(
-    git(root, ['status', '--porcelain', '--untracked-files=all'], { allowFailure: true }),
+    git(root, ['status', '--porcelain', '--untracked-files=all']),
   );
 
   const missingEvidenceContracts = [];

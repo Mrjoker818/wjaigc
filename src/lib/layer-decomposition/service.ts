@@ -171,6 +171,7 @@ function toTaskResponse(task: CloudTask): LayerTaskResponse {
     status: task.status === 'queued' ? 'pending' : task.status,
     phase: phaseFromTask(task),
     progress: task.progress,
+    creditStatus: task.creditStatus,
     ...(result ? { result } : {}),
     ...(providerError ? { providerError } : {}),
     ...(fallbackReason ? { fallbackReason } : {}),
@@ -972,6 +973,12 @@ export async function getLayerTaskStatus(
     unregisterActiveController(task.id, controller);
     await releaseCloudTaskLease(task.id, lease.owner);
   }
+  return toTaskResponse(await freshTask(identity.taskId, identity.userId));
+}
+
+export async function getLayerTaskSnapshot(
+  identity: LayerTaskIdentity,
+): Promise<LayerTaskResponse> {
   return toTaskResponse(await freshTask(identity.taskId, identity.userId));
 }
 

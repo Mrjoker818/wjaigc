@@ -1,3 +1,5 @@
+import type { CloudTaskCreditStatus } from '@/lib/cloud-task-storage';
+
 export type LayerEngineMode = 'smart' | 'cloud' | 'local';
 
 export type LayerTaskPhase =
@@ -93,6 +95,7 @@ export interface LayerTaskResponse {
   status: 'pending' | 'processing' | 'completed' | 'failed' | 'cancelled' | 'timeout';
   phase?: LayerTaskPhase;
   progress: number;
+  creditStatus: CloudTaskCreditStatus;
   result?: LayerDecompositionResult;
   error?: { code: string; message: string; retryable: boolean };
   providerError?: LayerUpstreamError;

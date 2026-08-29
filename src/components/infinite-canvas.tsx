@@ -186,6 +186,7 @@ import { AspectRecomposePanel } from '@/components/aspect-recompose-panel';
 import {
   cancelElementDecomposition,
   createResolvedElementDecompositionRequest,
+  getRefundedLocalLayerFallbackMessage,
   pollElementDecomposition,
   retryElementDecompositionBranch,
   submitElementDecomposition,
@@ -9104,7 +9105,9 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
         elementDecomposePlaceholderRef.current = null;
       }
 
-      const layerResult = finalTask.branches.layers?.result as LayerDecompositionResult | undefined;
+      const layerBranch = finalTask.branches.layers;
+      const layerResult = layerBranch?.result as LayerDecompositionResult | undefined;
+      const layerFallbackMessage = getRefundedLocalLayerFallbackMessage(layerBranch);
       if (layerResult?.layers?.length) {
         setPsdEditorImageUrl(sourceSnapshot.imageUrl);
         setPsdEditorInitialResult(layerResult);
@@ -9112,9 +9115,17 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
         setShowPsdEditor(true);
       }
       if (finalTask.overallStatus === 'partial') {
-        toast.warning('元素拆解部分完成，可在状态面板重试失败分支');
+        if (layerFallbackMessage) {
+          toast.warning(`${layerFallbackMessage}；其他分支未完成，可在状态面板重试`);
+        } else {
+          toast.warning('元素拆解部分完成，可在状态面板重试失败分支');
+        }
       } else if (finalTask.overallStatus === 'completed') {
-        toast.success('元素拆解完成');
+        if (layerFallbackMessage) {
+          toast.warning(layerFallbackMessage);
+        } else {
+          toast.success('元素拆解完成');
+        }
       } else {
         toast.error('元素拆解未完成，请查看分支状态');
       }
@@ -9187,12 +9198,21 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
       setElementDecomposeTask(finalTask);
       completeElementBoardResult(finalTask, branch);
       const layerResult = finalTask.branches.layers?.result as LayerDecompositionResult | undefined;
+      const layerFallbackMessage = getRefundedLocalLayerFallbackMessage(finalTask.branches.layers);
       if (branch === 'layers' && layerResult?.layers?.length) {
         setPsdEditorImageUrl(elementDecomposeTask.source.managedUrl || elementDecomposeTask.source.canonicalUrl);
         setPsdEditorInitialResult(layerResult);
         setShowPsdEditor(true);
       }
-      toast.success(branch === 'board' ? '拆解板分支重试完成' : '可编辑图层分支重试完成');
+      if (layerFallbackMessage) {
+        if (branch === 'board') {
+          toast.warning(`${layerFallbackMessage}；拆解板分支重试完成`);
+        } else {
+          toast.warning(layerFallbackMessage);
+        }
+      } else {
+        toast.success(branch === 'board' ? '拆解板分支重试完成' : '可编辑图层分支重试完成');
+      }
     } catch (error) {
       toast.error(error instanceof Error ? error.message : '分支重试失败');
     }
@@ -16715,6 +16735,12 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
                     const state = elementDecomposeTask.branches[branch];
                     if (!state) return null;
                     const retryable = ['failed', 'cancelled', 'timeout'].includes(state.status);
+                    const layerResult = branch === 'layers'
+                      ? state.result as LayerDecompositionResult | undefined
+                      : undefined;
+                    const layerFallbackMessage = branch === 'layers'
+                      ? getRefundedLocalLayerFallbackMessage(state)
+                      : null;
                     return (
                       <div
                         key={branch}
@@ -16728,6 +16754,20 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
                         <div className={`mt-1 h-1 overflow-hidden rounded ${isMonochrome ? 'bg-gray-200' : 'bg-white/10'}`}>
                           <div className="h-full bg-emerald-500" style={{ width: `${Math.max(0, Math.min(100, state.progress))}%` }} />
                         </div>
+                        {branch === 'layers' && layerResult?.engine && (
+                          <div className={`mt-1.5 text-[10px] ${isMonochrome ? 'text-gray-500' : 'text-gold-muted'}`}>
+                            实际引擎：{layerResult.engine === 'pear' ? 'Pear 云端分层' : '本地分层'}
+                          </div>
+                        )}
+                        {layerFallbackMessage && (
+                          <div
+                            data-layer-fallback="refunded-local"
+                            title={state.providerError?.message || state.fallbackReason}
+                            className="mt-1.5 text-[10px] leading-4 text-amber-500"
+                          >
+                            {layerFallbackMessage}
+                          </div>
+                        )}
                         {retryable && (
                           <button
                             type="button"
