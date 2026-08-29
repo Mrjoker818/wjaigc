@@ -819,6 +819,7 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
   const [elementDecomposeTask, setElementDecomposeTask] = useState<ElementDecomposeTaskResponse | null>(null);
   const [elementDecomposeProjectId, setElementDecomposeProjectId] = useState<string | null>(null);
   const elementDecomposeControllerRef = useRef<AbortController | null>(null);
+  const elementDecomposeRecoveryControllerRef = useRef<AbortController | null>(null);
   const elementDecomposePlaceholderRef = useRef<string | null>(null);
 
   // Image compare state
@@ -8871,13 +8872,33 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
   });
   const activeCanvasToolProjectIdRef = useRef(activeCanvasToolProjectId);
 
+  const abortElementDecomposeRequests = useCallback(() => {
+    elementDecomposeRecoveryRef.current = {
+      projectId: null,
+      requestId: elementDecomposeRecoveryRef.current.requestId + 1,
+    };
+    elementDecomposeRecoveryControllerRef.current?.abort();
+    elementDecomposeRecoveryControllerRef.current = null;
+    elementDecomposeControllerRef.current?.abort();
+    elementDecomposeControllerRef.current = null;
+  }, []);
+
   useEffect(() => {
+    const previousProjectId = activeCanvasToolProjectIdRef.current;
     activeCanvasToolProjectIdRef.current = activeCanvasToolProjectId;
-    if (elementDecomposeProjectId && elementDecomposeProjectId !== activeCanvasToolProjectId) {
+    if (previousProjectId !== activeCanvasToolProjectId) {
+      abortElementDecomposeRequests();
+      setElementDecomposeTask(null);
+      setElementDecomposeProjectId(null);
+    } else if (elementDecomposeProjectId && elementDecomposeProjectId !== activeCanvasToolProjectId) {
       setElementDecomposeTask(null);
       setElementDecomposeProjectId(null);
     }
-  }, [activeCanvasToolProjectId, elementDecomposeProjectId]);
+  }, [abortElementDecomposeRequests, activeCanvasToolProjectId, elementDecomposeProjectId]);
+
+  useEffect(() => () => {
+    abortElementDecomposeRequests();
+  }, [abortElementDecomposeRequests]);
 
   useEffect(() => {
     if (!showDisplayDecomposePanel) {
@@ -8893,7 +8914,9 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
 
     const requestId = elementDecomposeRecoveryRef.current.requestId + 1;
     elementDecomposeRecoveryRef.current = { projectId: recoveryProjectId, requestId };
+    elementDecomposeRecoveryControllerRef.current?.abort();
     const controller = new AbortController();
+    elementDecomposeRecoveryControllerRef.current = controller;
     void recoverElementDecomposition(recoveryProjectId, controller.signal).then((recovered) => {
       if (!recovered) return;
       if (elementDecomposeRecoveryRef.current.requestId !== requestId) return;
@@ -8904,7 +8927,12 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
       if (error instanceof DOMException && error.name === 'AbortError') return;
       console.warn('[element-decompose] Failed to restore completed task:', error);
     });
-    return () => controller.abort();
+    return () => {
+      if (elementDecomposeRecoveryControllerRef.current === controller) {
+        elementDecomposeRecoveryControllerRef.current = null;
+      }
+      controller.abort();
+    };
   }, [activeCanvasToolProjectId, elementDecomposeTask, showDisplayDecomposePanel]);
 
   const handleOpenDisplayDecompose = useCallback(() => {
@@ -9093,6 +9121,10 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
       return;
     }
 
+    elementDecomposeRecoveryRef.current = { projectId: null, requestId: elementDecomposeRecoveryRef.current.requestId + 1 };
+    elementDecomposeRecoveryControllerRef.current?.abort();
+    elementDecomposeRecoveryControllerRef.current = null;
+
     const sourceSnapshot = Object.freeze({
       projectId: effectiveProjectId,
       sourceImageId: img.id,
@@ -9135,9 +9167,13 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
         boardProviderId: modelInfo.providerId || getCurrentProviderId() || undefined,
         boardModelId: modelInfo.model || undefined,
       }, { signal: controller.signal });
+      controller.signal.throwIfAborted();
       const parent = await submitElementDecomposition(elementRequest, idempotencyKey, controller.signal);
+      controller.signal.throwIfAborted();
+      if (activeCanvasToolProjectIdRef.current !== sourceSnapshot.projectId) return;
       setElementDecomposeTask(parent);
       const finalTask = await pollElementDecomposition(parent.taskId, (task) => {
+        if (controller.signal.aborted || activeCanvasToolProjectIdRef.current !== sourceSnapshot.projectId) return;
         setElementDecomposeTask(task);
         if (placeholderId) {
           updateProcessingFrame(placeholderId, {
@@ -9148,6 +9184,8 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
           });
         }
       }, controller.signal);
+      controller.signal.throwIfAborted();
+      if (activeCanvasToolProjectIdRef.current !== sourceSnapshot.projectId) return;
       setElementDecomposeTask(finalTask);
 
       const boardResult = finalTask.branches.board?.result;
@@ -9198,10 +9236,12 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
       }
       toast.error(message);
     } finally {
-      if (elementDecomposeControllerRef.current === controller) elementDecomposeControllerRef.current = null;
-      setDisplayDecomposeProcessing(false);
-      setIsEditProcessing(false);
-      setActiveTool('none');
+      if (elementDecomposeControllerRef.current === controller) {
+        elementDecomposeControllerRef.current = null;
+        setDisplayDecomposeProcessing(false);
+        setIsEditProcessing(false);
+        setActiveTool('none');
+      }
     }
   }, [brandProject?.id, completeElementBoardResult, createProcessingFrameRightOf, displayDecomposeAutoRemoveBg, elementDecomposeOutputMode, displayDecomposeProcessing, displayDecomposeRatio, getActiveImageData, getCurrentModel, getCurrentProviderId, projectId, removeProcessingFrame, updateProcessingFrame]);
 

@@ -21,6 +21,7 @@ const storage = vi.hoisted(() => ({
   createCloudTask: vi.fn(),
   getCloudTaskForUser: vi.fn(),
   getCloudTaskForUserByIdempotencyKey: vi.fn(),
+  getLatestElementDecomposeParentForProject: vi.fn(),
   listCloudTasks: vi.fn(),
   updateCloudTask: vi.fn(),
 }));
@@ -152,6 +153,14 @@ describe('element decomposition parent idempotency', () => {
         .slice(0, limit)
         .map(task => structuredClone(task))
     ));
+    storage.getLatestElementDecomposeParentForProject.mockImplementation(async (userId: string, projectId: string) => (
+      [...storage.tasks.values()]
+        .filter(task => task.userId === userId && task.type === 'element-decompose-parent')
+        .filter(task => task.projectId === projectId || (!task.projectId
+          && (task.result?.request as Record<string, unknown> | undefined)?.projectId === projectId))
+        .sort((a, b) => b.updatedAt - a.updatedAt || b.createdAt - a.createdAt || b.id.localeCompare(a.id))[0]
+        || null
+    ));
     storage.updateCloudTask.mockImplementation(async (taskId: string, patch: UpdateCloudTaskInput) => {
       const task = storage.tasks.get(taskId);
       if (!task) return false;
@@ -235,7 +244,8 @@ describe('element decomposition parent idempotency', () => {
     const recovered = await findLatestElementDecompositionForProject({ userId: 'user-1', projectId: 'project-1' });
 
     expect(recovered.taskId).toBe('newer-owned');
-    expect(storage.listCloudTasks).toHaveBeenCalledWith({ userId: 'user-1', limit: 500 });
+    expect(storage.getLatestElementDecomposeParentForProject).toHaveBeenCalledWith('user-1', 'project-1');
+    expect(storage.listCloudTasks).not.toHaveBeenCalled();
     expect(layers.get).not.toHaveBeenCalled();
     expect(board.poll).not.toHaveBeenCalled();
     expect(storage.updateCloudTask).not.toHaveBeenCalled();

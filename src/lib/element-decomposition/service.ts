@@ -4,7 +4,7 @@ import {
   createCloudTask,
   getCloudTaskForUser,
   getCloudTaskForUserByIdempotencyKey,
-  listCloudTasks,
+  getLatestElementDecomposeParentForProject,
   updateCloudTask,
   type CloudTask,
   type CloudTaskCreditStatus,
@@ -265,17 +265,7 @@ export async function findLatestElementDecompositionForProject(input: {
   userId: string;
   projectId: string;
 }): Promise<ElementParentState> {
-  const tasks = await listCloudTasks({ userId: input.userId, limit: 500 });
-  const task = tasks.find((candidate) => {
-    if (candidate.type !== 'element-decompose-parent') return false;
-    if (candidate.projectId) return candidate.projectId === input.projectId;
-    const request = resultOf(candidate).request;
-    return Boolean(
-      request
-      && typeof request === 'object'
-      && (request as Record<string, unknown>).projectId === input.projectId,
-    );
-  });
+  const task = await getLatestElementDecomposeParentForProject(input.userId, input.projectId);
   if (!task) {
     throw new ElementDecompositionError(
       'ELEMENT_TASK_NOT_FOUND',

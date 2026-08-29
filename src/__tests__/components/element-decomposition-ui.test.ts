@@ -78,6 +78,43 @@ describe('dual-output element decomposition canvas wiring', () => {
     expect(recoveryBlock).not.toContain('retryElementDecompositionBranch(');
   });
 
+  it('invalidates and aborts an older recovery before starting a new decomposition', () => {
+    const submitStart = canvasSource.indexOf('const handleDisplayDecomposeConfirm = useCallback');
+    const submitEnd = canvasSource.indexOf('const handleOpenAspectRecompose = useCallback', submitStart);
+    const submitBlock = canvasSource.slice(submitStart, submitEnd);
+    const invalidateIndex = submitBlock.indexOf('elementDecomposeRecoveryRef.current = { projectId: null, requestId:');
+    const abortIndex = submitBlock.indexOf('elementDecomposeRecoveryControllerRef.current?.abort()');
+    const submitIndex = submitBlock.indexOf('submitElementDecomposition(elementRequest, idempotencyKey, controller.signal)');
+
+    expect(canvasSource).toContain('const elementDecomposeRecoveryControllerRef = useRef<AbortController | null>(null)');
+    expect(invalidateIndex).toBeGreaterThanOrEqual(0);
+    expect(abortIndex).toBeGreaterThan(invalidateIndex);
+    expect(submitIndex).toBeGreaterThan(abortIndex);
+  });
+
+  it('aborts recovery and submit polling on project change and unmount', () => {
+    const lifecycleStart = canvasSource.indexOf('const abortElementDecomposeRequests = useCallback');
+    const lifecycleEnd = canvasSource.indexOf('const handleOpenDisplayDecompose = useCallback', lifecycleStart);
+    const lifecycleBlock = canvasSource.slice(lifecycleStart, lifecycleEnd);
+
+    expect(lifecycleStart).toBeGreaterThanOrEqual(0);
+    expect(lifecycleBlock).toContain('elementDecomposeRecoveryControllerRef.current?.abort()');
+    expect(lifecycleBlock).toContain('elementDecomposeControllerRef.current?.abort()');
+    expect(lifecycleBlock).toContain('if (previousProjectId !== activeCanvasToolProjectId)');
+    expect(lifecycleBlock).toMatch(/useEffect\(\(\) => \(\) => \{\s*abortElementDecomposeRequests\(\);\s*\}, \[abortElementDecomposeRequests\]\)/);
+  });
+
+  it('prevents aborted or stale submit callbacks from mutating the current project', () => {
+    const submitStart = canvasSource.indexOf('const handleDisplayDecomposeConfirm = useCallback');
+    const submitEnd = canvasSource.indexOf('const handleOpenAspectRecompose = useCallback', submitStart);
+    const submitBlock = canvasSource.slice(submitStart, submitEnd);
+
+    expect(submitBlock).toContain('controller.signal.throwIfAborted()');
+    expect(submitBlock).toContain('if (activeCanvasToolProjectIdRef.current !== sourceSnapshot.projectId) return;');
+    expect(submitBlock).toContain('if (elementDecomposeControllerRef.current === controller) {');
+    expect(submitBlock).not.toMatch(/finally \{\s*if \(elementDecomposeControllerRef\.current === controller\) elementDecomposeControllerRef\.current = null;\s*setDisplayDecomposeProcessing/);
+  });
+
   it('supports cancelling the active parent task', () => {
     expect(canvasSource).toContain('handleCancelElementDecomposition');
     expect(canvasSource).toContain('cancelElementDecomposition(elementDecomposeTask.taskId)');

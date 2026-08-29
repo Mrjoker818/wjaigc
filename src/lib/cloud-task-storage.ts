@@ -1380,6 +1380,28 @@ export async function getCloudTaskForUserByIdempotencyKey(userId: string, idempo
   return result.rows.length > 0 ? rowToCloudTask(result.rows[0]) : null;
 }
 
+export async function getLatestElementDecomposeParentForProject(
+  userId: string,
+  projectId: string,
+): Promise<CloudTask | null> {
+  await ensureCloudTaskTables();
+  const result = await execSql(`
+    SELECT * FROM cloud_tasks
+    WHERE user_id = $1
+      AND type = 'element-decompose-parent'
+      AND (
+        project_id = $2
+        OR (
+          (project_id IS NULL OR project_id = '')
+          AND result->'request'->>'projectId' = $2
+        )
+      )
+    ORDER BY updated_at DESC, created_at DESC, id DESC
+    LIMIT 1
+  `, [userId, projectId]);
+  return result.rows.length > 0 ? rowToCloudTask(result.rows[0]) : null;
+}
+
 export async function listCloudTasks(filters: CloudTaskListFilters = {}): Promise<CloudTask[]> {
   await ensureCloudTaskTables();
   const clauses: string[] = [];
@@ -1407,7 +1429,7 @@ export async function listCloudTasks(filters: CloudTaskListFilters = {}): Promis
   }
   params.push(Math.min(Math.max(filters.limit || 100, 1), 500));
   const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
-  const result = await execSql(`SELECT * FROM cloud_tasks ${where} ORDER BY updated_at DESC LIMIT $${params.length}`, params);
+  const result = await execSql(`SELECT * FROM cloud_tasks ${where} ORDER BY updated_at DESC, created_at DESC, id DESC LIMIT $${params.length}`, params);
   return result.rows.map(rowToCloudTask);
 }
 

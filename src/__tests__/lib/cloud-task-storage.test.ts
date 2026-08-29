@@ -13,6 +13,7 @@ import {
   getCloudTaskById,
   getCloudTaskForUser,
   getCloudTaskForUserByIdempotencyKey,
+  getLatestElementDecomposeParentForProject,
   listCloudTasks,
   getCloudTaskProviderSummary,
   refundCloudTaskCredits,
@@ -511,6 +512,33 @@ describe('cloud-task-storage', () => {
     expect(select?.[0]).toContain('provider_id = $1');
     expect(select?.[0]).toContain('status = $2');
     expect(select?.[1]).toEqual(['provider-a', 'failed', 25]);
+  });
+
+  it('finds the latest element parent with exact owner, type, and project SQL filters', async () => {
+    execSql.mockResolvedValueOnce({ rows: [], rowCount: 0 });
+
+    await getLatestElementDecomposeParentForProject('user-a', 'project-a');
+
+    const select = execSql.mock.calls.find(([sql]) => String(sql).includes("type = 'element-decompose-parent'"));
+    const normalizedSql = String(select?.[0]).replace(/\s+/g, ' ').trim();
+    expect(normalizedSql).toContain('user_id = $1');
+    expect(normalizedSql).toContain("type = 'element-decompose-parent'");
+    expect(normalizedSql).toContain('project_id = $2');
+    expect(normalizedSql).toContain("project_id IS NULL OR project_id = ''");
+    expect(normalizedSql).toContain("result->'request'->>'projectId' = $2");
+    expect(normalizedSql).toContain('ORDER BY updated_at DESC, created_at DESC, id DESC LIMIT 1');
+    expect(select?.[1]).toEqual(['user-a', 'project-a']);
+  });
+
+  it('uses stable newest-first ordering for the generic cloud task list', async () => {
+    execSql.mockResolvedValueOnce({ rows: [], rowCount: 0 });
+
+    await listCloudTasks({ userId: 'user-a' });
+
+    const select = execSql.mock.calls.find(([sql]) => String(sql).includes('FROM cloud_tasks'));
+    expect(String(select?.[0]).replace(/\s+/g, ' ')).toContain(
+      'ORDER BY updated_at DESC, created_at DESC, id DESC',
+    );
   });
 
   it.each([
