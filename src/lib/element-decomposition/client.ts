@@ -4,7 +4,8 @@ import type {
   ElementDecomposeRequest,
 } from '@/lib/element-decomposition/types';
 import type { CloudTaskCreditStatus } from '@/lib/cloud-task-storage';
-import type { LayerUpstreamError } from '@/lib/layer-decomposition/types';
+import type { LayerDecompositionResult, LayerUpstreamError } from '@/lib/layer-decomposition/types';
+import type { LayerDocumentSource } from '@/lib/layer-documents/types';
 import {
   resolveDefaultLayerTarget,
   type LayerFetchLike,
@@ -40,6 +41,37 @@ export interface ElementDecomposeTaskResponse {
     mimeType: string;
   };
   branches: Partial<Record<ElementBranch, ElementDecomposeBranchResponse>>;
+}
+
+export interface CompletedElementLayersEditorPayload {
+  imageUrl: string;
+  initialResult: LayerDecompositionResult;
+  source: LayerDocumentSource | null;
+  mode: 'studio';
+}
+
+export function resolveCompletedElementLayersEditorPayload(
+  task: ElementDecomposeTaskResponse,
+  projectId: string | null,
+): CompletedElementLayersEditorPayload | null {
+  const branch = task.branches.layers;
+  if (branch?.status !== 'completed') return null;
+  const initialResult = branch.result as LayerDecompositionResult | undefined;
+  if (!initialResult?.layers?.length) return null;
+
+  const sourceVersionId = task.source.sourceVersionId;
+  return {
+    imageUrl: task.source.canonicalUrl,
+    initialResult,
+    source: projectId && sourceVersionId ? {
+      projectId,
+      sourceImageId: task.source.sourceImageId,
+      sourceVersionId,
+      imageUrl: task.source.canonicalUrl,
+      taskId: task.taskId,
+    } : null,
+    mode: 'studio',
+  };
 }
 
 const REFUNDED_LOCAL_LAYER_FALLBACK_MESSAGE = 'Pear 云端分层未完成，已退款并使用本地分层';

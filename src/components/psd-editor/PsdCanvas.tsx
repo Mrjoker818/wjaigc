@@ -5,6 +5,7 @@ import type { DesignLayer } from '@/lib/psd-export';
 import {
   drawPsdCanvasSurface,
   resolvePsdLayerBounds,
+  resolvePsdLayerPointerTarget,
 } from '@/lib/psd-canvas-surface';
 
 interface PsdCanvasProps {
@@ -220,26 +221,41 @@ export function PsdCanvas({
       return;
     }
 
-    // Check if clicking on a layer (top to bottom)
-    for (let i = layers.length - 1; i >= 0; i--) {
-      const layer = layers[i];
+    const pointerTargets = layers.flatMap((layer) => {
       const state = layerStates.get(layer.id);
-      if (!state || !state.visible) continue;
+      if (!state) return [];
 
       const bounds = resolvePsdLayerBounds(
         { ...layer, offsetX: state.x, offsetY: state.y },
         state.image?.naturalWidth || state.image?.width || 0,
         state.image?.naturalHeight || state.image?.height || 0,
       );
-      const { x: bx, y: by, width: bw, height: bh } = bounds;
-
-      if (mx >= bx && mx <= bx + bw && my >= by && my <= by + bh) {
-        if (!layer.locked) {
-          onSelectLayer(layer.id);
-          setDragState({ layerId: layer.id, startX: mx, startY: my, origX: state.x, origY: state.y });
-        }
-        return;
+      return [{
+        id: layer.id,
+        visible: state.visible,
+        locked: Boolean(layer.locked),
+        bounds,
+      }];
+    });
+    const pointerTarget = resolvePsdLayerPointerTarget(
+      pointerTargets,
+      selectedLayerId,
+      mx,
+      my,
+    );
+    if (pointerTarget) {
+      const state = layerStates.get(pointerTarget.id);
+      if (!pointerTarget.locked && state) {
+        onSelectLayer(pointerTarget.id);
+        setDragState({
+          layerId: pointerTarget.id,
+          startX: mx,
+          startY: my,
+          origX: state.x,
+          origY: state.y,
+        });
       }
+      return;
     }
 
     // Clicked on empty area - start panning

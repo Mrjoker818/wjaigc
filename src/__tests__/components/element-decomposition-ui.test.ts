@@ -71,6 +71,27 @@ describe('dual-output element decomposition canvas wiring', () => {
     expect(canvasSource).toContain('initialResult={psdEditorInitialResult || undefined}');
   });
 
+  it('reopens a completed editable-layer result from the frozen parent task without resubmitting', () => {
+    const openStart = canvasSource.indexOf('const handleOpenCompletedElementLayers = useCallback');
+    const openEnd = canvasSource.indexOf('const handleCancelElementDecomposition = useCallback', openStart);
+    const openBlock = canvasSource.slice(openStart, openEnd);
+
+    expect(openStart).toBeGreaterThanOrEqual(0);
+    expect(openEnd).toBeGreaterThan(openStart);
+    expect(openBlock).toContain('resolveCompletedElementLayersEditorPayload(');
+    expect(openBlock).toContain('elementDecomposeTask,');
+    expect(openBlock).toContain('elementDecomposeProjectId,');
+    expect(openBlock).toContain('setPsdEditorImageUrl(editorPayload.imageUrl)');
+    expect(openBlock).toContain('setPsdEditorInitialResult(editorPayload.initialResult)');
+    expect(openBlock).toContain('setPsdEditorSource(editorPayload.source)');
+    expect(openBlock).toContain('setPsdEditorMode(editorPayload.mode)');
+    expect(openBlock).toContain('setShowPsdEditor(true)');
+    expect(openBlock).not.toContain('submitElementDecomposition(');
+    expect(canvasSource).toContain('data-action="open-layer-editor"');
+    expect(canvasSource).toContain('onClick={handleOpenCompletedElementLayers}');
+    expect(canvasSource).toContain('打开编辑器');
+  });
+
   it('clears a previous decomposition before hiding or directly reopening the PSD editor', () => {
     const closeStart = canvasSource.indexOf('const closeCanvasToolPanels = useCallback');
     const closeEnd = canvasSource.indexOf('const activateCanvasToolSession = useCallback', closeStart);

@@ -10,6 +10,12 @@ const persistence = vi.hoisted(() => ({
   save: vi.fn(),
 }));
 const psd = vi.hoisted(() => ({ download: vi.fn() }));
+const layering = vi.hoisted(() => ({ run: vi.fn() }));
+
+vi.mock('@/lib/layer-decomposition-client', async (importOriginal) => {
+  const original = await importOriginal<typeof import('@/lib/layer-decomposition-client')>();
+  return { ...original, runLayerDecomposition: layering.run };
+});
 
 vi.mock('@/lib/layer-documents/client', async (importOriginal) => {
   const original = await importOriginal<typeof import('@/lib/layer-documents/client')>();
@@ -199,6 +205,7 @@ describe('PsdLayerEditor layer document persistence', () => {
       expect.objectContaining({ title: '图片', layers: expect.any(Array) }),
       expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
+    expect(layering.run).not.toHaveBeenCalled();
     expect(screen.getByTestId('layer-document-status').textContent).toContain('已保存');
   });
 

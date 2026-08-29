@@ -1771,3 +1771,9 @@ The focused gate test passes `7/7`; the actual protected-baseline command passes
 - `9e4d945e` 已按当前 Pear 模型专页删除过期 `prompt: "."`，相关 85 项测试通过；该修复降低协议偏差，但尚未部署、尚未证明远程制品质量成功。
 - `9e4d945e` 后新鲜全仓门禁为 `4225 passed / 123 PostgreSQL-gated skipped / 0 failed`、完整 ESLint `0 errors / 961 historical warnings`。生产构建在默认 4 GiB Node 堆上 OOM，改用 `NODE_OPTIONS=--max-old-space-size=8192` 后完整通过（webpack `10.7` 分钟、TypeScript `47` 秒、静态页面 `118/118`）。因此代码候选可进入 Coze 验收，但默认本地构建内存需求必须保留为工程约束，PostgreSQL 跳过项仍不能计作本轮通过。
 - **发布结论保持“有条件通过”。** `002-B` 远程质量、`002-C` 恢复/导出、`002-D` 成功账务和 `002-E` 云端取消/失败仍是进入 `V588-ADMIN-004` 前的阻塞项。
+
+## 2026-08-30 BUG-018/019 发布判定增量
+
+- 已在本地关闭完成态 PSD 编辑器无重开入口，以及侧栏已选重叠图层拖动错误对象两项缺陷；实现不创建任务、不调用供应商、不改变积分、退款或质量门禁。
+- 聚焦 `45/45`、全仓 `4230 passed / 123 PostgreSQL-gated skipped / 0 failed`、TypeScript、完整 Lint、保护基线与 8 GiB 生产构建均通过；PostgreSQL 跳过项仍保持未验证。
+- **发布结论仍为“有条件通过”。** BUG-018/019 需完成 Coze exact-SHA、沙箱重启后的既有 Chrome 标签强制刷新与真实交互回归；Pear 远程质量成功、成功一次扣费零退款、最终 PSD `8BPS` 和取消账务矩阵均未关闭。

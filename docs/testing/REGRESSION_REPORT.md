@@ -2207,3 +2207,11 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - Pear 专用文档与旧请求体对比形成 RED：`1 failed / 8 passed`，只因多出 `prompt: "."`。`9e4d945e` 删除该字段后单文件 `9/9`、分层矩阵 `85/85`，TypeScript、精确 Lint和保护基线通过。
 - 新鲜全仓回归为 `600 files`：`577 passed / 23 PostgreSQL-gated skipped / 0 failed`，共 `4225 passed / 123 skipped / 0 failed`；跳过项不计作通过。完整 ESLint 为 `0 errors / 961 historical warnings`。默认 4 GiB Node 堆的生产构建因 OOM 退出 `134`，仅提高到 8 GiB 后同一 `pnpm build` 完整通过，Next.js 编译 `10.7` 分钟、TypeScript `47` 秒、静态页面 `118/118`、最终退出码 `0`。
 - **回归判定：`002-C` CLOUD PARTIAL；BUG-017 LOCAL PASS；`002-B/D/E` 不变。**
+
+## 2026-08-30 PSD 完成态重开与精确图层拖动本地回归
+
+- Chrome 真实缺陷证据表明：完成态元素拆解关闭 PSD 编辑器后没有恢复入口；侧栏选中重叠底层后，画布仍拖动视觉顶层。
+- 两项均先建立失败测试。完成态重开通过纯客户端载荷解析恢复同一父任务、源图版本和既有图层，不调用拆解服务；图层命中只在当前选择可见、未锁定且包含指针时优先，否则保持旧顶层与锁定阻挡语义。
+- 最终聚焦回归 `45/45`；全仓为 `577 files passed / 23 PostgreSQL-gated skipped / 0 failed`、`4230 tests passed / 123 skipped / 0 failed`。跳过项不计作通过。
+- TypeScript、完整 ESLint、保护基线和 8 GiB 生产构建通过；构建生成 `118/118` 静态页面。独立复审未发现 Critical、Important 或 P2 问题。
+- **本地判定：BUG-018/019 PASS；云端判定：PENDING。** 必须按“Coze 拉取 exact-SHA → 沙箱重启 → 既有 Chrome 预览标签强制刷新”的顺序验证，且重开不得产生新的 Pear 任务或账务。

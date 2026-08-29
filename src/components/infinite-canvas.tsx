@@ -188,6 +188,7 @@ import {
   createResolvedElementDecompositionRequest,
   getRefundedLocalLayerFallbackMessage,
   pollElementDecomposition,
+  resolveCompletedElementLayersEditorPayload,
   retryElementDecompositionBranch,
   submitElementDecomposition,
   type ElementDecomposeTaskResponse,
@@ -9244,6 +9245,21 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
     }
   }, [completeElementBoardResult, elementDecomposeProjectId, elementDecomposeTask]);
 
+  const handleOpenCompletedElementLayers = useCallback(() => {
+    if (!elementDecomposeTask) return;
+    const editorPayload = resolveCompletedElementLayersEditorPayload(
+      elementDecomposeTask,
+      elementDecomposeProjectId,
+    );
+    if (!editorPayload) return;
+
+    setPsdEditorImageUrl(editorPayload.imageUrl);
+    setPsdEditorInitialResult(editorPayload.initialResult);
+    setPsdEditorSource(editorPayload.source);
+    setPsdEditorMode(editorPayload.mode);
+    setShowPsdEditor(true);
+  }, [elementDecomposeProjectId, elementDecomposeTask]);
+
   const handleCancelElementDecomposition = useCallback(async () => {
     if (!elementDecomposeTask) return;
     elementDecomposeControllerRef.current?.abort(new Error('用户取消元素拆解'));
@@ -16809,6 +16825,20 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
                           >
                             {layerFallbackMessage}
                           </div>
+                        )}
+                        {branch === 'layers' && state.status === 'completed' && Boolean(layerResult?.layers?.length) && (
+                          <button
+                            type="button"
+                            data-action="open-layer-editor"
+                            onClick={handleOpenCompletedElementLayers}
+                            className={`mt-2 rounded-md border px-2 py-1 text-[11px] font-medium transition-colors ${
+                              isMonochrome
+                                ? 'border-gray-300 bg-white text-gray-700 hover:bg-gray-100'
+                                : 'border-gold/40 bg-gold/10 text-gold hover:bg-gold/20'
+                            }`}
+                          >
+                            打开编辑器
+                          </button>
                         )}
                         {retryable && (
                           <button

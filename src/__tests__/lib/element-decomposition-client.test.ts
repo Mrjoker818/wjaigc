@@ -6,8 +6,10 @@ import {
   createResolvedElementDecompositionRequest,
   getRefundedLocalLayerFallbackMessage,
   pollElementDecomposition,
+  resolveCompletedElementLayersEditorPayload,
   retryElementDecompositionBranch,
   submitElementDecomposition,
+  type ElementDecomposeTaskResponse,
 } from '@/lib/element-decomposition/client';
 
 const source = {
@@ -73,6 +75,86 @@ describe('element decomposition client', () => {
       fallbackReason: 'Pear provider timed out',
       result: { engine: 'pear' },
     })).toBeNull();
+  });
+
+  it('resolves a completed layer result into editor state without making a second request', () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    const layerResult = {
+      width: 800,
+      height: 600,
+      engine: 'pear',
+      layers: [{ id: 'layer-1', name: '主体' }],
+    };
+    const task: ElementDecomposeTaskResponse = {
+      taskId: 'parent-task-1',
+      status: 'completed',
+      overallStatus: 'completed',
+      progress: 100,
+      source: {
+        sourceImageId: 'image-1',
+        sourceVersionId: 'version-1',
+        canonicalUrl: '/api/serve-upload/source.png',
+        managedUrl: '/api/serve-upload/source.png',
+        sha256: 'sha256',
+        width: 800,
+        height: 600,
+        mimeType: 'image/png',
+      },
+      branches: {
+        layers: {
+          branch: 'layers',
+          taskId: 'layer-task-1',
+          status: 'completed',
+          progress: 100,
+          result: layerResult,
+        },
+      },
+    };
+
+    expect(resolveCompletedElementLayersEditorPayload(task, 'project-1')).toEqual({
+      imageUrl: '/api/serve-upload/source.png',
+      initialResult: layerResult,
+      source: {
+        projectId: 'project-1',
+        sourceImageId: 'image-1',
+        sourceVersionId: 'version-1',
+        imageUrl: '/api/serve-upload/source.png',
+        taskId: 'parent-task-1',
+      },
+      mode: 'studio',
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('does not expose an editor payload for a non-completed layer branch', () => {
+    const task = {
+      taskId: 'parent-task-1',
+      status: 'processing',
+      overallStatus: 'processing',
+      progress: 50,
+      source: {
+        sourceImageId: 'image-1',
+        sourceVersionId: 'version-1',
+        canonicalUrl: '/api/serve-upload/source.png',
+        managedUrl: '/api/serve-upload/source.png',
+        sha256: 'sha256',
+        width: 800,
+        height: 600,
+        mimeType: 'image/png',
+      },
+      branches: {
+        layers: {
+          branch: 'layers',
+          taskId: 'layer-task-1',
+          status: 'processing',
+          progress: 50,
+          result: { width: 800, height: 600, engine: 'pear', layers: [{ id: 'layer-1' }] },
+        },
+      },
+    } as ElementDecomposeTaskResponse;
+
+    expect(resolveCompletedElementLayersEditorPayload(task, 'project-1')).toBeNull();
   });
 
   it('keeps the board image model separate from the layer model', () => {

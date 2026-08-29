@@ -15,6 +15,45 @@ interface PositionedPsdLayer {
   boundingBox?: { x?: number; y?: number; width: number; height: number };
 }
 
+export interface PsdLayerPointerTarget {
+  id: string;
+  visible: boolean;
+  locked: boolean;
+  bounds: { x: number; y: number; width: number; height: number };
+}
+
+function containsPsdLayerPoint(
+  target: PsdLayerPointerTarget,
+  x: number,
+  y: number,
+): boolean {
+  const { bounds } = target;
+  return x >= bounds.x
+    && x <= bounds.x + bounds.width
+    && y >= bounds.y
+    && y <= bounds.y + bounds.height;
+}
+
+export function resolvePsdLayerPointerTarget(
+  targets: PsdLayerPointerTarget[],
+  selectedLayerId: string | null,
+  x: number,
+  y: number,
+): PsdLayerPointerTarget | null {
+  const selected = selectedLayerId
+    ? targets.find(target => target.id === selectedLayerId)
+    : undefined;
+  if (selected?.visible && !selected.locked && containsPsdLayerPoint(selected, x, y)) {
+    return selected;
+  }
+
+  for (let index = targets.length - 1; index >= 0; index -= 1) {
+    const target = targets[index];
+    if (target.visible && containsPsdLayerPoint(target, x, y)) return target;
+  }
+  return null;
+}
+
 export function resolvePsdLayerBounds(
   layer: PositionedPsdLayer,
   fallbackWidth: number,

@@ -1881,3 +1881,15 @@ Stage 3 remains in Task 10. Stage 4/5 are not authorized.
 | Chrome 预览标签控制 | `TEST TOOL BLOCKED` | 在不新建标签、不切换 360 的前提下恢复同一 Google Chrome 预览标签控制，然后继续剩余 UI 动作。 |
 | 本轮全仓 PostgreSQL 专项 | `SKIPPED / OPEN` | 新鲜全仓运行 `4225 passed / 123 skipped / 0 failed`；需重新提供隔离 PostgreSQL 测试库，复跑至 `4348/4348` 零跳过。 |
 | 本地生产构建内存 | `PASS WITH 8 GIB HEAP` | 默认 4 GiB 堆 OOM；8 GiB 堆构建通过。后续 CI/Coze 构建环境需显式提供足够 Node 堆，不能把默认堆失败隐藏为业务编译错误。 |
+
+### 2026-08-30 BUG-018/019 本地修复后的云端验证点
+
+| 项目 | 最新状态 | 关闭条件 |
+|---|---|---|
+| 完成态重新打开 PSD 编辑器 | `LOCAL PASS / CLOUD PENDING` | 完成态关闭编辑器后，状态卡出现“打开编辑器”；重开同一文档且不产生 `/api/element-decompose`、`/api/layered-decompose`、新 taskId、扣费或退款。 |
+| 重叠图层精确拖动 | `LOCAL PASS / CLOUD PENDING` | 侧栏选中可见未锁定底层后拖动重叠区域，只有该层坐标变化；隐藏、锁定或点在范围外时回退到原顶层语义。 |
+| 图层文档完整恢复 | `CLOUD PARTIAL PASS` | 已通过重命名、隐藏、锁定和自动保存；仍需完成移动、排序、导出模式、关闭重开与整页刷新逐项一致。 |
+| PSD 最终导出 | `UNVERIFIED` | 下载文件存在，前四字节为 `8BPS`，图层数、顺序和坐标与最终保存 revision 一致。 |
+| Pear 远程成功与账务 | `FAILED / UNVERIFIED` | 合适素材取得 `engine=pear`、2+ 合格远程图层、一次扣费零退款；不得以本地 fallback 或本轮非付费重开验证替代。 |
+
+云端执行顺序固定为：Coze 拉取最终 `main` exact-SHA，确认 `stable` 未变；沙箱完全重启；强制刷新既有 Google Chrome 预览标签；最后开始验证。不得新建 Chrome 标签，也不得在旧沙箱进程上得出通过结论。
