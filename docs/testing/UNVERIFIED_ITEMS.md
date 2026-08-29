@@ -1868,3 +1868,16 @@ Stage 3 remains in Task 10. Stage 4/5 are not authorized.
 | 跨设备恢复 | `UNVERIFIED` | 同账号第二浏览器读取同一源版本文档，不读取其他用户或其他源版本。 |
 | PSD 最终导出 | `UNVERIFIED` | 文件签名为 `8BPS`，图层数、顺序、坐标与最终保存 revision 一致。 |
 | Pear 成功账务 | `FAILED / UNVERIFIED` | 真实 `engine=pear`、2+ 可编辑层、一次扣费、零退款；不得以本地 fallback 替代。 |
+
+### `18adea/9e4d945e` 后的最新剩余项
+
+| 项目 | 最新状态 | 关闭条件 |
+|---|---|---|
+| `002-C` 创建/更新 | `CLOUD PARTIAL PASS` | 重命名、隐藏、锁定和“已保存”已通过；不再重复这四项。 |
+| `002-C` 恢复 | `UNVERIFIED` | 完成移动、排序、导出模式后关闭重开与整页刷新，逐项核对同一 revision。 |
+| `002-C` PSD 导出 | `UNVERIFIED` | 下载文件签名 `8BPS`，图层数、顺序和坐标与最终保存文档一致。 |
+| Pear 图像专用请求 | `LOCAL PASS / CLOUD PENDING` | Coze 精确部署 `9e4d945e` 或后续 main，并证明真实请求不再携带 prompt。 |
+| Pear 远程质量 | `FAILED / OPEN` | 使用模型适用、内容可核对的源图取得 `engine=pear`、2+ 合格图层；不能降低门禁或使用本地 fallback 冒充。 |
+| Chrome 预览标签控制 | `TEST TOOL BLOCKED` | 在不新建标签、不切换 360 的前提下恢复同一 Google Chrome 预览标签控制，然后继续剩余 UI 动作。 |
+| 本轮全仓 PostgreSQL 专项 | `SKIPPED / OPEN` | 新鲜全仓运行 `4225 passed / 123 skipped / 0 failed`；需重新提供隔离 PostgreSQL 测试库，复跑至 `4348/4348` 零跳过。 |
+| 本地生产构建内存 | `PASS WITH 8 GIB HEAP` | 默认 4 GiB 堆 OOM；8 GiB 堆构建通过。后续 CI/Coze 构建环境需显式提供足够 Node 堆，不能把默认堆失败隐藏为业务编译错误。 |

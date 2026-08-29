@@ -2198,3 +2198,12 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - `pnpm ts-check`、`pnpm lint:build`、完整 ESLint `0 errors / 961 historical warnings`、Next.js 16.2.11 生产构建及静态页面 `118/118` 通过。
 - 干净提交 `245517c1` 保护基线为 `38/38` 功能、0 未授权漂移、0 warning；独立终审为 APPROVED，Critical/Important/Minor 均为 0。
 - **回归判定：`002-C` 本地 PASS，云端 UNVERIFIED。** 不把本地通过扩大为 Pear 成功、真实账务或全阶段发布通过。
+
+## 2026-08-29 `18adea` 图层文档云端部分回归与 `9e4d945e` Pear 合同回归
+
+- Coze exact-SHA、生产构建、单实例启动和健康路由均通过；Google Chrome 已在真实编辑器完成图层重命名、隐藏、锁定和自动保存。
+- 本次 Pear 任务快速返回应用 taskId，供应商执行期间保持异步进度，最终远程制品被质量门禁拒绝并退款，本地 fallback 打开 5 层编辑器；UI 正确披露实际本地引擎和退款。不能把 5 层写成远程 Pear 成功。
+- Chrome 控制通道随后在同一预览标签持续超时，因此移动、排序、关闭重开、刷新恢复和 PSD 导出保留为未验证，不以已有自动化替代真实浏览器证据。
+- Pear 专用文档与旧请求体对比形成 RED：`1 failed / 8 passed`，只因多出 `prompt: "."`。`9e4d945e` 删除该字段后单文件 `9/9`、分层矩阵 `85/85`，TypeScript、精确 Lint和保护基线通过。
+- 新鲜全仓回归为 `600 files`：`577 passed / 23 PostgreSQL-gated skipped / 0 failed`，共 `4225 passed / 123 skipped / 0 failed`；跳过项不计作通过。完整 ESLint 为 `0 errors / 961 historical warnings`。默认 4 GiB Node 堆的生产构建因 OOM 退出 `134`，仅提高到 8 GiB 后同一 `pnpm build` 完整通过，Next.js 编译 `10.7` 分钟、TypeScript `47` 秒、静态页面 `118/118`、最终退出码 `0`。
+- **回归判定：`002-C` CLOUD PARTIAL；BUG-017 LOCAL PASS；`002-B/D/E` 不变。**

@@ -1763,3 +1763,11 @@ The focused gate test passes `7/7`; the actual protected-baseline command passes
 - 数据库图层文档已完成 schema、存储、鉴权 API、浏览器客户端、编辑器接线和元素拆解冻结来源；不再是设计文档或 React 内存临时状态。
 - 本地候选 `245517c1` 已通过隔离 PostgreSQL CAS、全仓 `4348/4348` 零跳过、TypeScript、双 Lint、118 页生产构建和干净保护基线，独立终审 APPROVED。
 - **专项发布结论：本地通过、云端待验。全平台仍为有条件通过。** 在 Coze exact-SHA、Chrome 保存/刷新恢复、真实 `8BPS` 导出及 Pear 成功账务闭环前，不关闭 `V588-STABILITY-002`，不进入 `V588-ADMIN-004`。
+
+## 2026-08-29 `002-C` 云端部分验收与 Pear 请求合同发布增量
+
+- `18adea` 已完成 Coze exact-SHA、构建和健康门禁；真实 Chrome 证明图层文档可创建，并可保存重命名、显隐和锁定修改。
+- 关闭重开、页面刷新、移动、排序、导出模式与最终 `8BPS` 文件仍无完整浏览器证据，因此 `002-C` 不能关闭。
+- `9e4d945e` 已按当前 Pear 模型专页删除过期 `prompt: "."`，相关 85 项测试通过；该修复降低协议偏差，但尚未部署、尚未证明远程制品质量成功。
+- `9e4d945e` 后新鲜全仓门禁为 `4225 passed / 123 PostgreSQL-gated skipped / 0 failed`、完整 ESLint `0 errors / 961 historical warnings`。生产构建在默认 4 GiB Node 堆上 OOM，改用 `NODE_OPTIONS=--max-old-space-size=8192` 后完整通过（webpack `10.7` 分钟、TypeScript `47` 秒、静态页面 `118/118`）。因此代码候选可进入 Coze 验收，但默认本地构建内存需求必须保留为工程约束，PostgreSQL 跳过项仍不能计作本轮通过。
+- **发布结论保持“有条件通过”。** `002-B` 远程质量、`002-C` 恢复/导出、`002-D` 成功账务和 `002-E` 云端取消/失败仍是进入 `V588-ADMIN-004` 前的阻塞项。

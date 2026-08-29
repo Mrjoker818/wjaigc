@@ -738,3 +738,12 @@ No item is “absorbed” merely because its source file exists or a unit test p
 - 元素拆解重试只使用冻结的项目、源版本、canonical URL 和最终 taskId，不回退到当前选图或当前项目。
 - 隔离 PostgreSQL 18 CAS `1/1`、分层专项 `94/94`、全仓 `600 files / 4348 tests / 0 skipped`、TypeScript、Lint、118 页构建和干净保护基线 `38/38 / 0 drift / 0 warnings` 通过；独立终审 `APPROVED`，0 Critical / 0 Important / 0 Minor。
 - **状态：`002-C` 本地关闭、Coze/Chrome 待验；`V588-STABILITY-002` 整体仍开放。** 不进入 `V588-ADMIN-004`，不重复已关闭的 Stage 4、计价、坐标或 smart 披露工作。证据：`docs/testing/evidence/v588-stability-002-layer-documents-local-2026-08-29.json`。
+
+## 2026-08-29 `002-C` 云端部分验收与 Pear 合同纠正
+
+- Coze 已精确运行 `main@18adea660eaccc66797a17cbbef9a0f1ac45da3c`，专项、保护基线、TypeScript、Lint、生产构建、5000 单实例、三个健康端点和静态资源均通过；`stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 未触碰。
+- Google Chrome 对蓝色杯子提交一次 smart 分层，Pear 远程结果未通过质量门禁并已退款，界面明确显示“Pear 云端分层未完成，已退款并使用本地分层”。这证明异步提交、失败披露、退款回退及本地图层编辑入口可用，不证明 Pear 远程成功。
+- 同一本地回退图层文档已真实完成重命名为“元素 1-云端持久化验收”、隐藏、锁定，并多次显示“已保存”。`002-C` 的创建/更新已取得云端证据；移动、排序、导出模式、关闭重开、整页刷新恢复及 PSD `8BPS` 导出仍未验证。
+- Pear 当前 Image-Layered 专页明确写明“只需传图，无需 prompt 与任何其他参数”，请求示例只有 `model + image`。`main@9e4d945e` 按 RED -> GREEN 移除 8 月 6 日旧通用 Schema 引入的 `prompt: "."`，保留异步和 URL 制品字段；聚焦分层矩阵 `85/85`、TypeScript、精确 Lint 与保护基线通过。
+- `9e4d945e` 后新鲜全仓回归为 `4225 passed / 123 PostgreSQL-gated skipped / 0 failed`，完整 Lint 为 `0 errors / 961 historical warnings`；默认 4 GiB Node 堆构建 OOM，8 GiB 堆下生产构建与 `118/118` 静态页面通过。该结果允许进入 Coze 候选验收，但不能替代隔离 PostgreSQL 零跳过门禁。
+- **状态：`002-C` 云端部分通过，不能关闭；`002-B` 仍受远程制品质量阻塞。** 浏览器标签控制超时单独记录为验收工具阻塞，不改写产品结论，不进入 `V588-ADMIN-004`。证据：`docs/testing/evidence/v588-stability-002-18adea-layer-documents-cloud-partial-2026-08-29.json`。

@@ -3072,3 +3072,26 @@ All listed Stage 4 defects are locally closed. S4-BUG-008 also passed its exact-
 | 永久回归 | 创建/恢复失败、保存中再编辑、来源切换、409 重载、外部关闭、beforeunload、最终快照导出、PostgreSQL 并发唯一 winner。 |
 | 本地结果 | **已关闭。** `600/600` 文件、`4348/4348` 测试且 0 跳过；独立审查 APPROVED。 |
 | 云端结果 | **未验证。** 需 exact-SHA 后在 Google Chrome 完成编辑、关闭、刷新恢复与 PSD 导出。 |
+
+#### BUG-016 云端部分验收增量（2026-08-29）
+
+| 字段 | 内容 |
+|---|---|
+| 精确部署 | Coze `HEAD=origin/main=18adea660eaccc66797a17cbbef9a0f1ac45da3c`，生产构建与健康检查通过；`stable@52f7c601...` 未变。 |
+| 已通过动作 | Google Chrome 真实图层文档创建、图层重命名、隐藏、锁定与自动保存；界面多次显示“已保存”。 |
+| 未通过动作 | 图层移动、排序、导出模式、关闭重开、整页刷新恢复和最终 PSD `8BPS` 尚未执行完成；原因是现有预览标签的 Chrome 控制通道持续超时，不是已复现的产品错误。 |
+| 结果来源 | 本次编辑器内容来自 Pear 质量失败后的本地回退 5 层；界面已正确披露退款与实际本地引擎。不得将其登记为 Pear 远程成功。 |
+| 当前状态 | **部分通过 / 继续开放。** 创建与更新云端证据成立，恢复和导出证据不足。 |
+
+### V588-STABILITY-002-BUG-017：Pear Image-Layered 请求残留过期 prompt（2026-08-29）
+
+| 字段 | 内容 |
+|---|---|
+| 严重等级 | P1：模型专用合同偏差可能使请求进入通用编辑语义，增加返回错误制品的风险。 |
+| 稳定复现 | 当前 Pear 专页写明“只需传图，无需 prompt 与任何其他参数”，示例仅含 `model + image`；旧适配器实际发送 `prompt: "."`。 |
+| 根因 | `02becc59` 曾依据旧通用 Schema 的 `prompt minLength=1` 添加占位提示词，后续模型专用文档已明确取消该要求，代码未同步。 |
+| RED | 请求合同测试先稳定失败，唯一差异为收到额外 `prompt: "."`；结果 `1 failed / 8 passed`。 |
+| 修复 | `9e4d945e` 仅删除占位 prompt，保留 `model/image/task_type/response_format`、幂等键和异步状态机。 |
+| 回归 | 单文件 `9/9`；分层相关 8 文件 `85/85`；TypeScript、精确 Lint、保护基线 `38/38 / 0 drift / 0 warnings`。新鲜全仓 `4225 passed / 123 PostgreSQL-gated skipped / 0 failed`，完整 Lint `0 errors / 961 historical warnings`；8 GiB Node 堆生产构建通过，默认 4 GiB 堆 OOM 已如实记录。 |
+| 不变边界 | 不放宽 MAE、重复层、空层、越界或透明度门禁；历史错误人物 PSD 仍必须失败并退款。 |
+| 状态 | **本地已修复 / Coze 与真实 Pear 待验。** 不能据此宣布远程制品质量已恢复。 |

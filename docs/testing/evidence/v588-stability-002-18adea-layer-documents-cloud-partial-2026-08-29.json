@@ -1,0 +1,77 @@
+{
+  "evidenceId": "v588-stability-002-18adea-layer-documents-cloud-partial-2026-08-29",
+  "date": "2026-08-29",
+  "scope": "V588-STABILITY-002/002-C 云端部分验收与 Pear Image-Layered 请求合同纠正",
+  "branch": "main",
+  "cloudCommit": "18adea660eaccc66797a17cbbef9a0f1ac45da3c",
+  "protocolFixCommit": "9e4d945e",
+  "stableCommit": "52f7c601ed150769e15d06fb435c6e360e28c9e7",
+  "cloudGate": {
+    "exactSha": true,
+    "productionBuild": "passed",
+    "singleProcessPort5000": true,
+    "health": {
+      "/": 200,
+      "/simple-chat": 200,
+      "/api/auth/me": 200
+    },
+    "staticAssets": "11/11"
+  },
+  "realTask": {
+    "source": "blue cup, 3504x2336",
+    "mode": "smart",
+    "submission": "application task returned before provider completion",
+    "pearOutcome": "quality gate rejected remote artifact",
+    "creditOutcome": "refunded",
+    "deliveredEngine": "local",
+    "deliveredLayers": 5,
+    "disclosure": "Pear 云端分层未完成，已退款并使用本地分层"
+  },
+  "layerDocument": {
+    "created": true,
+    "renamedLayer": "元素 1-云端持久化验收",
+    "visibilitySaved": true,
+    "lockSaved": true,
+    "saveIndicatorObserved": "已保存",
+    "moveVerified": false,
+    "reorderVerified": false,
+    "exportModeVerified": false,
+    "closeReopenVerified": false,
+    "refreshRecoveryVerified": false,
+    "psd8BpsVerified": false
+  },
+  "pearContract": {
+    "documentation": "https://pearapi.apifox.cn/api-493268181",
+    "currentStatement": "只需传图，无需 prompt 与任何其他参数",
+    "red": "1 failed / 8 passed; extra prompt was the only request-body mismatch",
+    "green": "9 passed / 0 failed",
+    "relatedRegression": "8 files / 85 tests passed",
+    "fullRegression": "600 files: 577 passed / 23 PostgreSQL-gated skipped / 0 failed; 4225 tests passed / 123 skipped / 0 failed",
+    "typescript": "passed",
+    "eslint": "full repository: 0 errors / 961 historical warnings",
+    "productionBuild": {
+      "defaultHeap": "failed with exit 134: JavaScript heap out of memory near the 4 GiB limit",
+      "retry": "NODE_OPTIONS=--max-old-space-size=8192 pnpm build",
+      "result": "passed",
+      "webpack": "10.7min",
+      "typescript": "47s",
+      "staticPages": "118/118"
+    },
+    "protectedBaseline": "38/38 present / 0 drift / 0 warnings"
+  },
+  "browserControl": {
+    "browser": "Google Chrome",
+    "newTabCreated": false,
+    "failure": "existing preview tab content operations timed out after the partial evidence was captured",
+    "classification": "test tooling blocker, not a proven product defect"
+  },
+  "status": "CLOUD_PARTIAL_PROTOCOL_FIX_LOCAL_PASS",
+  "remaining": [
+    "move and reorder a layer",
+    "persist export mode",
+    "close, reopen and full-page refresh recovery",
+    "export PSD and verify 8BPS/layer order/coordinates",
+    "deploy protocol fix and inspect real request",
+    "obtain one quality-approved remote Pear result and successful billing evidence"
+  ]
+}
