@@ -2265,3 +2265,10 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - 两项 RED 测试先得到 `2 failed / 3 passed`。最小修复后，同一制品按透明 contain 归一并在白色底比较，得到 23 层、score `98`、MAE `0.01583404022`、越界率 `0`、零告警；没有放宽质量阈值。
 - 聚焦分层 `12 files / 128 passed`；全仓 `577 files passed / 23 PostgreSQL-gated skipped`、`4246 tests passed / 123 skipped / 0 failed`；TypeScript、构建版 Lint、空白检查和生产构建 `118/118` 全部通过。
 - **回归判定：本地候选 PASS / Coze PENDING。** `002-B/002-D` 只有在新提交部署后，同类肖像真实得到 `engine=pear`、23+ 图层、唯一扣费且零退款时才能关闭。证据：`docs/testing/evidence/v588-stability-002-pear-portrait-audit-20260830.json`。
+
+## 2026-08-30 `a2b1a850` 元素拆解动作文案回归
+
+- RED 契约先证明“可编辑图层”模式仍使用“生成拆解板”静态文案；修复前 `1 failed / 16 passed`。
+- 三种模式现在分别显示“生成拆解板 / 生成可编辑图层 / 生成拆解板与图层”，处理中分别显示对应状态；按钮新增稳定 `data-action`，E2E 不再依赖可变中文文案。
+- 单文件 `17/17`、TypeScript、构建版 Lint 和空白检查通过。该改动不修改 `outputMode`、供应商请求、质量门禁、任务状态或积分。
+- **回归判定：本地 PASS / Coze 非付费 UI 待验。** 不需要为本项单独创建 Pear 任务。
