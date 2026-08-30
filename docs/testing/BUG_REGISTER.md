@@ -3299,3 +3299,16 @@ All listed Stage 4 defects are locally closed. S4-BUG-008 also passed its exact-
 | 本地回归 | 聚焦 `20/20`；全仓 `582 files passed / 23 skipped`、`4276 passed / 123 PostgreSQL-gated skipped / 0 failed`；TypeScript、零错误 Lint、8 GiB 生产构建 `118/118` 和干净候选保护基线 `38/38 / 0 drift / 0 warnings` 通过。 |
 | 当前状态 | **LOCAL PASS / CLOUD PENDING**。候选 `95b489be40bf3bc01dfad1a35da7dffa0d2aba4a`；部署后必须重做可逆单模型授权并恢复“不限”，再验证普通用户可见性。 |
 | 证据 | `docs/testing/evidence/v588-provider-002-disabled-catalog-20260830.json`。 |
+
+### V588-PROVIDER-002-BUG-003：历史 JSONB 用户模型列使有效授权保存返回 500（2026-08-30）
+
+| 字段 | 内容 |
+|---|---|
+| 严重等级 | P1：管理员无法持久化普通用户模型白名单，导致授权管理不可用。 |
+| 云端复现 | Coze `main@580a3701`、Build ID `pjLqt6FapOC4Jyt-kB35u`。停用供应商已从界面消失；对 `canvas-user` 取消一个有效 Pear 图像模型后，真实 `POST /api/admin/users` 越过模型目录校验但返回 500 / `Authentication persistence is unavailable.`。 |
+| 根因 | 当前 Coze 历史表的 `chat_models/image_models` 为 JSONB；新建表契约为 TEXT[]。node-postgres 把 JavaScript 数组编码成 PostgreSQL 数组字面量，写入 JSONB 时触发 `22P02`，随后被认证仓库统一包装为持久化不可用。 |
+| RED | 历史 JSONB 类型错误测试修复前失败；证明原仓库只执行数组写入，没有兼容路径。 |
+| 最小修复 | 保留 TEXT[] 原生数组为首选；仅当 PostgreSQL 返回 `22P02/42804` 时，以同一 SQL、同一用户和同一 `updated_at` CAS 条件重试 JSON 编码。普通数据库错误不重试，凭证更新使用同样兼容边界。 |
+| 回归 | 聚焦 `46/46`；全仓 `582 files passed / 23 skipped`、`4278 passed / 123 PostgreSQL-gated skipped / 0 failed`；TypeScript、构建版 Lint、8 GiB 生产构建 `118/118`、保护基线 `38/38 / 0 warning` 和空白检查通过。 |
+| 当前状态 | **LOCAL PASS / CLOUD PENDING**。必须部署候选后用同一管理员会话完成可逆单模型保存、关闭重开确认持久化，再恢复“不限”；普通用户模型可见性仍需独立验证。 |
+| 证据 | `docs/testing/evidence/v588-provider-002-model-storage-compat-local-20260830.json`。 |

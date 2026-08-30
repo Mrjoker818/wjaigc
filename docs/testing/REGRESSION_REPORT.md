@@ -2334,3 +2334,10 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - 最终全仓为 `582 files passed / 23 PostgreSQL-gated skipped`、`4276 passed / 123 skipped / 0 failed`；TypeScript、零错误构建版 Lint、8 GiB 生产构建 `118/118` 通过。
 - 干净 detached 工作树在 `95b489be` 通过保护基线：`38/38`、`0` 未授权漂移、`0` 警告。原工作目录中的历史 `.playwright-cli` 与两个只读参考仓库未删除、未纳入候选。
 - **回归判定：LOCAL PASS / CLOUD PENDING。** 旧云端失败不冒充新候选通过；必须 exact-SHA 部署后重做可逆授权保存和普通用户可见性。
+
+## 2026-08-30 `V588-PROVIDER-002` 历史模型列兼容回归
+
+- Google Chrome 在 `main@580a3701` 真实证明停用供应商已从授权目录移除；有效 Pear 精确授权请求不再被 400 拒绝，但在历史 JSONB 用户列写入时返回 500。
+- RED/GREEN 测试覆盖 JSONB 类型不匹配的一次兼容重试，并新增无关数据库错误绝不重试的边界；现代 TEXT[] 首选路径及原子 CAS 条件保持不变。
+- 聚焦 `46/46`；新鲜全仓 `4278 passed / 123 PostgreSQL-gated skipped / 0 failed`；TypeScript、零错误构建版 Lint、8 GiB 生产构建 `118/118`、保护功能 `38/38` 与空白检查通过。
+- **回归判定：LOCAL PASS / CLOUD PENDING。** 缺少隔离 PostgreSQL 库和新候选云端真实 200/持久化证据，不能提前关闭。

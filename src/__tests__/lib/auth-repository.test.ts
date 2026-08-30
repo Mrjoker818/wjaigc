@@ -720,6 +720,43 @@ describe('atomic managed-user repository updates', () => {
     ]);
   });
 
+  it('retries managed-user model assignments as JSON for historical JSONB columns', async () => {
+    const jsonbMismatch = Object.assign(
+      new Error('invalid input syntax for type json'),
+      { code: '22P02' },
+    );
+    const client = useClient(vi.fn()
+      .mockRejectedValueOnce(jsonbMismatch)
+      .mockResolvedValueOnce({ rows: [{ id: 'user-1' }], rowCount: 1 }));
+
+    await expect(updateUserProfileFields({
+      userId: 'user-1',
+      expectedUpdatedAt: now,
+      updatedAt: now + 1,
+      profile,
+    })).resolves.toBe('updated');
+
+    expect(client.query).toHaveBeenCalledTimes(2);
+    expect(client.query.mock.calls[0]?.[1]?.[7]).toEqual(profile.chatModels);
+    expect(client.query.mock.calls[0]?.[1]?.[8]).toEqual(profile.imageModels);
+    expect(client.query.mock.calls[1]?.[1]?.[7]).toBe(JSON.stringify(profile.chatModels));
+    expect(client.query.mock.calls[1]?.[1]?.[8]).toBe(JSON.stringify(profile.imageModels));
+  });
+
+  it('does not retry managed-user updates for unrelated database failures', async () => {
+    const databaseFailure = Object.assign(new Error('database unavailable'), { code: '57P01' });
+    const client = useClient(vi.fn().mockRejectedValue(databaseFailure));
+
+    await expect(updateUserProfileFields({
+      userId: 'user-1',
+      expectedUpdatedAt: now,
+      updatedAt: now + 1,
+      profile,
+    })).rejects.toMatchObject({ code: 'AUTH_PERSISTENCE_UNAVAILABLE' });
+
+    expect(client.query).toHaveBeenCalledTimes(1);
+  });
+
   it('atomically writes both credentials with password and version CAS conditions', async () => {
     const client = useClient(vi.fn().mockResolvedValue({
       rows: [{ id: 'user-1' }],

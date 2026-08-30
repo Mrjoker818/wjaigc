@@ -1,0 +1,33 @@
+{
+  "issue": "V588-PROVIDER-002-BUG-003",
+  "date": "2026-08-30",
+  "baseCommit": "580a3701c9fd59c46b4779bc26db7a70a3ffbdff",
+  "cloudBuildId": "pjLqt6FapOC4Jyt-kB35u",
+  "cloudObservation": {
+    "disabledProvidersAbsent": ["虚宝图像", "虚宝LLM"],
+    "request": "POST /api/admin/users",
+    "userId": "user_1784777366175_f40u6h",
+    "responseStatus": 500,
+    "responseBody": {
+      "success": false,
+      "error": "Authentication persistence is unavailable."
+    },
+    "schema": {
+      "chat_models": "jsonb",
+      "image_models": "jsonb",
+      "updated_at": "bigint"
+    }
+  },
+  "rootCause": "node-postgres serializes JavaScript arrays as PostgreSQL array literals, while the historical Coze columns are JSONB. Fresh schemas use TEXT[], so the repository must support both storage contracts.",
+  "fix": "Attempt the existing native-array atomic update first; retry once with JSON-encoded model assignments only for PostgreSQL datatype errors 22P02 or 42804. Preserve the same user and CAS predicates for both attempts.",
+  "verification": {
+    "focused": "3 files / 46 tests passed / 0 failed",
+    "full": "582 files passed / 23 skipped; 4278 tests passed / 123 skipped / 0 failed",
+    "typecheck": "passed",
+    "lintBuild": "passed with zero errors",
+    "protectedBaseline": "38/38 features, 0 unapproved drift, 0 warnings after exact exclusion of untracked local evidence/reference directories",
+    "productionBuild": "118/118 static pages; Node heap 8 GiB; exit 0"
+  },
+  "postgresIsolation": "POSTGRES_TEST_DATABASE_URL is not configured; 123 PostgreSQL-gated tests remain skipped and are not counted as passed.",
+  "status": "LOCAL PASS / CLOUD PENDING"
+}

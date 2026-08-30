@@ -1879,3 +1879,10 @@ The focused gate test passes `7/7`; the actual protected-baseline command passes
 - `95b489be` 只让管理员授权选项排除停用供应商，不改 API Key、启停状态、用户持久化、模型路由、任务或积分。
 - 本地全仓 `4276 passed / 123 PostgreSQL-gated skipped / 0 failed`，TypeScript、零错误 Lint、8 GiB 构建 `118/118` 和干净保护基线通过。
 - **发布结论保持“有条件通过”。** 候选可推送 `main` 进入 Coze 复验；部署前不得把管理员有效保存或普通用户模型可见性标记为云端通过，`stable@52f7c60` 保持只读。
+
+## 2026-08-30 `V588-PROVIDER-002` 历史存储兼容候选增量
+
+- 旧云端有效授权请求已经越过模型目录门禁，但历史 JSONB 模型列使认证仓库返回 500；该问题与供应商模型可用性无关。
+- 候选仅在 PostgreSQL 明确的数据类型错误时执行一次 JSON 编码兼容写入，未更改登录、角色、密码、任务、供应商调用或积分账务。
+- 本地全量自动化为 `4278 passed / 123 PostgreSQL-gated skipped / 0 failed`，生产构建 `118/118`，保护功能 `38/38`。
+- **发布结论仍为“有条件通过”。** 可以推送 `main` 进入 Coze 精确 SHA 复验；新版本返回 200、刷新持久化和恢复“不限”完成前，不得把管理员授权或普通用户可见性标记为通过。`stable` 保持只读。

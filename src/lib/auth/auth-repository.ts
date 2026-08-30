@@ -1,4 +1,4 @@
-import type { PoolClient } from 'pg';
+import type { PoolClient, QueryResult } from 'pg';
 
 import { getPool } from '../db-client';
 import { AuthServiceError } from './auth-errors';
@@ -326,15 +326,21 @@ async function atomicUpdateStatus(
   return existing.rows[0]?.exists === true ? 'conflict' : 'user-missing';
 }
 
-function profileParameters(profile: AuthUserProfileFields): unknown[] {
+function profileParameters(
+  profile: AuthUserProfileFields,
+  jsonModelAssignments = false,
+): unknown[] {
+  const encodeModels = (models: string[] | null): string[] | string | null => (
+    jsonModelAssignments && models !== null ? JSON.stringify(models) : models
+  );
   return [
     profile.name,
     profile.role,
     profile.status,
     profile.productType,
     profile.groupId,
-    profile.chatModels,
-    profile.imageModels,
+    encodeModels(profile.chatModels),
+    encodeModels(profile.imageModels),
     profile.dailyTokenLimit,
     profile.monthlyTokenLimit,
     profile.dailyImageLimit,
@@ -346,6 +352,26 @@ function profileParameters(profile: AuthUserProfileFields): unknown[] {
   ];
 }
 
+function isModelAssignmentStorageMismatch(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null || !('code' in error)) return false;
+  const code = (error as { code?: unknown }).code;
+  return code === '22P02' || code === '42804';
+}
+
+async function updateUserRowWithModelStorageFallback(
+  client: PoolClient,
+  sql: string,
+  nativeParameters: unknown[],
+  jsonParameters: unknown[],
+): Promise<QueryResult<{ id: string }>> {
+  try {
+    return await client.query<{ id: string }>(sql, nativeParameters);
+  } catch (error) {
+    if (!isModelAssignmentStorageMismatch(error)) throw error;
+    return await client.query<{ id: string }>(sql, jsonParameters);
+  }
+}
+
 export async function updateUserProfileFields(input: {
   userId: string;
   expectedUpdatedAt: number;
@@ -355,8 +381,7 @@ export async function updateUserProfileFields(input: {
   let client: PoolClient | undefined;
   try {
     client = await getPool().connect();
-    const updated = await client.query<{ id: string }>(
-      `UPDATE wujie_users
+    const updateSql = `UPDATE wujie_users
        SET name = $3,
            role = $4,
            status = $5,
@@ -374,11 +399,20 @@ export async function updateUserProfileFields(input: {
            email = $17,
            updated_at = $18
        WHERE id = $1 AND updated_at = $2
-       RETURNING id`,
+       RETURNING id`;
+    const updated = await updateUserRowWithModelStorageFallback(
+      client,
+      updateSql,
       [
         input.userId,
         input.expectedUpdatedAt,
         ...profileParameters(input.profile),
+        input.updatedAt,
+      ],
+      [
+        input.userId,
+        input.expectedUpdatedAt,
+        ...profileParameters(input.profile, true),
         input.updatedAt,
       ],
     );
@@ -406,8 +440,7 @@ export async function updateUserCredentials(input: {
   let client: PoolClient | undefined;
   try {
     client = await getPool().connect();
-    const updated = await client.query<{ id: string }>(
-      `UPDATE wujie_users
+    const updateSql = `UPDATE wujie_users
        SET password_hash = $3,
            credential_hash = $4,
            name = $6,
@@ -427,7 +460,10 @@ export async function updateUserCredentials(input: {
            email = $20,
            updated_at = $21
        WHERE id = $1 AND updated_at = $2 AND password_hash = $5
-       RETURNING id`,
+       RETURNING id`;
+    const updated = await updateUserRowWithModelStorageFallback(
+      client,
+      updateSql,
       [
         input.userId,
         input.expectedUpdatedAt,
@@ -435,6 +471,15 @@ export async function updateUserCredentials(input: {
         input.credentialHash,
         input.expectedPasswordHash,
         ...profileParameters(input.profile),
+        input.updatedAt,
+      ],
+      [
+        input.userId,
+        input.expectedUpdatedAt,
+        input.passwordHash,
+        input.credentialHash,
+        input.expectedPasswordHash,
+        ...profileParameters(input.profile, true),
         input.updatedAt,
       ],
     );
