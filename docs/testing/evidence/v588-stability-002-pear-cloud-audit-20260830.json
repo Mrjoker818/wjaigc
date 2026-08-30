@@ -1,0 +1,113 @@
+{
+  "evidenceId": "v588-stability-002-pear-cloud-audit-20260830",
+  "recordedAt": "2026-08-30T10:30:00+08:00",
+  "git": {
+    "branch": "main",
+    "head": "5f6e84b11d08e462805292f07c76c2c772fb0edf",
+    "originMain": "5f6e84b11d08e462805292f07c76c2c772fb0edf",
+    "originStable": "52f7c601ed150769e15d06fb435c6e360e28c9e7",
+    "stableTouched": false
+  },
+  "environment": {
+    "deployment": "Coze sandbox preview",
+    "previewUrl": "https://62afe49a-716e-4d9e-99cd-a0be49c4794c-5000.dev.coze.site/",
+    "browser": "Google Chrome profile 用户1",
+    "provider": "PearAPI",
+    "model": "Image-Layered"
+  },
+  "officialContract": {
+    "documentation": "https://pearapi.apifox.cn/api-493268181",
+    "endpoint": "POST https://api.pearapi.ai/v1/images/edits",
+    "documentedModel": "image-layered",
+    "requiredFields": ["model", "image"],
+    "taskType": "async",
+    "responseFormat": "url",
+    "pollEndpoint": "GET /v1/images/tasks/{id}",
+    "adapterContractMatchesDocumentation": true
+  },
+  "runs": [
+    {
+      "source": "turquoise ring on white background",
+      "parentTaskId": "element_37e6b280-35eb-48e5-a012-603c97e0cb2a",
+      "childTaskId": "layer_8da575d6-e3df-47d4-8bba-26ceea4ab2d6",
+      "remoteTaskId": "88c4e0ac-d083-4416-b042-73bf0fa972d0",
+      "artifactUrl": "https://cdn.pearapi.ai/apiservers/cache/files/2026-08-30/608dd6f4-6edb-4666-8152-8abb0e20cef1.zip",
+      "zipAndPrimaryPsdParsed": true,
+      "psdSignature": "8BPS",
+      "remoteLayerCount": 1,
+      "remoteLayerNames": ["front hair"],
+      "qualityScore": 14,
+      "reconstructionMae": 0.8628688676,
+      "qualityWarnings": ["RECONSTRUCTION_ERROR_HIGH"],
+      "remoteAccepted": false,
+      "finalEngine": "local",
+      "credit": {
+        "cost": 15,
+        "chargeTransactionId": "ctx_1788050027783_v00rr0eg",
+        "refundTransactionId": "ctx_1788055391116_ilxdyae2",
+        "balanceBefore": 403,
+        "balanceAfterCharge": 388,
+        "balanceAfterRefund": 403,
+        "net": 0
+      }
+    },
+    {
+      "source": "turquoise ring on white background",
+      "parentTaskId": "element_a40eb12d-7e0a-4c65-bc89-5cd0307aa38c",
+      "childTaskId": "layer_11ce2d56-fba8-49c2-b8ba-6a5b248c493e",
+      "remoteTaskId": "0b61fcfd-7eb3-4689-a05c-eceaba47ec8c",
+      "artifactUrl": "https://cdn.pearapi.ai/apiservers/cache/files/2026-08-30/4ad3d238-92b5-4aca-bbc3-a6eb9b61a66e.zip",
+      "requireTransparentSubject": true,
+      "zipAndPrimaryPsdParsed": true,
+      "remoteAccepted": false,
+      "fallbackReason": "Pear output did not contain a subject layer with real transparency",
+      "finalEngine": "local",
+      "credit": {
+        "cost": 15,
+        "chargeTransactionId": "ctx_1788056263913_kc8m4gnr",
+        "refundTransactionId": "ctx_1788056415387_4p0aqo62",
+        "balanceBefore": 403,
+        "balanceAfterCharge": 388,
+        "balanceAfterRefund": 403,
+        "net": 0
+      }
+    },
+    {
+      "source": "orange cone product image",
+      "parentTaskId": "element_3e6841ad-f467-4744-99f2-d4d71d7ee7c0",
+      "childTaskId": "layer_309e87ae-5d10-406c-ad9f-4d46ec8788d0",
+      "remoteTaskId": "d8fa4227-4a52-444e-be82-d04dcf5a9f84",
+      "artifactUrl": "https://cdn.pearapi.ai/apiservers/cache/files/2026-08-30/8c2d862e-74f4-48e1-938b-724df8bf8741.zip",
+      "requireTransparentSubject": false,
+      "zipAndPrimaryPsdParsed": true,
+      "psdSignature": "8BPS",
+      "remoteLayerCount": 1,
+      "remoteLayerNames": ["topwear"],
+      "qualityScore": 55,
+      "reconstructionMae": 0.454911387,
+      "qualityWarnings": ["RECONSTRUCTION_ERROR_HIGH", "OUT_OF_BOUNDS_LAYERS_PRESENT"],
+      "remoteAccepted": false,
+      "finalEngine": "local",
+      "credit": {
+        "cost": 15,
+        "chargeCount": 1,
+        "refundCount": 1,
+        "net": 0,
+        "transactionIdsCaptured": false
+      }
+    }
+  ],
+  "verdict": {
+    "asyncSubmission": "VERIFIED",
+    "zipSafeDownload": "VERIFIED",
+    "primaryPsdExtraction": "VERIFIED",
+    "psdParsing": "VERIFIED",
+    "qualityGate": "VERIFIED",
+    "failureRefund": "VERIFIED",
+    "remoteQualitySuccess": "FAILED_OPEN",
+    "successfulTaskOneChargeZeroRefund": "UNVERIFIED",
+    "explicitCancelAccounting": "UNVERIFIED",
+    "remoteSuccess": false
+  },
+  "screenshot": "docs/testing/evidence/v588-stability-002-pear-quality-fallback-20260830.png"
+}

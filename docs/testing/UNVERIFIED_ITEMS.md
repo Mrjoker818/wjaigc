@@ -1918,3 +1918,17 @@ Stage 3 remains in Task 10. Stage 4/5 are not authorized.
 | PostgreSQL 全仓专项 | `123 TESTS SKIPPED / OPEN` | 使用隔离 `POSTGRES_TEST_DATABASE_URL` 复跑；不得指向 Coze 业务库或生产库。 |
 
 BUG-018 已从未验证项移除。剩余顺序为 `002-B -> 002-D -> 002-E`；证据：`docs/testing/evidence/v588-stability-002-3b47dfb7-completed-parent-cloud-2026-08-30.json`。
+
+### 2026-08-30 `5f6e84b1` Pear 三组真实制品后的剩余项
+
+| 项目 | 最新状态 | 关闭条件 |
+|---|---|---|
+| 异步提交、ZIP/MIME、安全下载、主 PSD、`8BPS` 与解析 | `CLOUD PASS` | 三组真实任务均已越过这些阶段，不再作为沙箱阻塞重复验证。 |
+| 质量门禁与 smart 回退披露 | `CLOUD PASS` | 错误单层、缺透明主体和高重建误差均被拒绝；最终实际引擎为本地并披露退款。 |
+| 云端失败退款 | `CLOUD PASS` | 两组精确一扣一退、第三组一扣一退计数，净积分均为 `0`；不再重复付费验证普通质量失败。 |
+| Pear 远程质量成功 `002-B` | `FAILED / OPEN` | 使用官方示例类型的受控肖像取得 `engine=pear`、至少 2 个语义正确且通过现有质量门禁的图层。 |
+| 成功账务 `002-D` | `UNVERIFIED` | 仅在上述同一成功任务中证明唯一扣费、零退款、余额变化与管理员 15 积分定价一致。 |
+| 显式取消 `002-E` | `UNVERIFIED` | 提交后立即取消，数据库终态保持 cancelled，迟到完成被拒绝，最多一次退款。 |
+| 受控肖像 Chrome 上传 | `TEST TOOL BLOCKED` | 合成非敏感测试图已准备好；Google Chrome 标签可发现但因上次文件选择器超时残留控制占用，尚未完成上传。不得切换 360 或新建标签。 |
+
+证据：`docs/testing/evidence/v588-stability-002-pear-cloud-audit-20260830.json` 与 `docs/testing/evidence/v588-stability-002-pear-quality-fallback-20260830.png`。

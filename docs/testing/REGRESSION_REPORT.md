@@ -2249,3 +2249,11 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - “打开编辑器”恢复同一 5 层、同一来源尺寸、同一历史重命名“元素 1-云端持久化验收”和“已保存”；第二次打开的 `0 层/正在恢复` 仅为约 6 秒的明确加载态，最终终态稳定为 5 层。验证窗口 Console error/warning `0/0`。
 - 云端只读审计确认窗口内新父任务 `0`、积分流水 `0`、扣费 `0`、退款 `0`，也未观察到供应商调用。`app.log` 不含 HTTP path/method，故不能直接声称捕获到“只有 GET、没有 POST”；本报告只据数据库、账务与未点击生成按钮判定恢复链路零业务副作用。
 - **回归判定：BUG-018 云端 PASS；V588-STABILITY-002 继续 CONDITIONAL。** 剩余顺序为 `002-B` Pear 远程质量成功、`002-D` 成功一次扣费零退款、`002-E` 云端失败/取消账务矩阵。证据：`docs/testing/evidence/v588-stability-002-3b47dfb7-completed-parent-cloud-2026-08-30.json` 与同前缀两张 PNG。
+
+## 2026-08-30 `5f6e84b1` Pear 三组真实制品回归
+
+- Coze 沙箱运行 `main@5f6e84b1`；元素拆解恢复专项 `138/138`、全仓 `4245 passed / 123 PostgreSQL-gated skipped / 0 failed`、TypeScript、构建版 Lint、保护基线和生产构建通过。
+- 三个真实 Pear 任务均进入异步轮询并返回 ZIP；主 PSD 已安全下载、排除 `_depth.psd`、通过 `8BPS` 校验并被解析。ZIP/MIME/下载器/解压/PSD 解析不再是阻塞项。
+- 青绿色圆环两次与橙色锥体一次均未得到合格远程层：`front hair`、缺透明主体、`topwear` 单层分别触发质量拒绝。现有质量门禁正确阻止错误制品进入编辑器。
+- 两组任务取得精确一扣一退流水，第三组确认一扣一退计数，全部净积分 `0`；未观察到重复任务、重复扣费或重复退款。显式取消仍未执行。
+- **回归判定：应用 ZIP/PSD/质量/失败退款 PASS；Pear 远程质量 FAILED/OPEN；成功账务 UNVERIFIED。** 不能把本地 fallback 的 `completed` 作为 Pear 远程成功。机器证据：`docs/testing/evidence/v588-stability-002-pear-cloud-audit-20260830.json`。

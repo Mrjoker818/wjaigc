@@ -774,3 +774,12 @@ No item is “absorbed” merely because its source file exists or a unit test p
 - 首次及再次整页重载后的“打开编辑器”均恢复同一 5 层文档、同一 `3504x2336` 来源和历史重命名“元素 1-云端持久化验收”；二次打开先出现正常的“正在恢复 / 0 层”中间态，约 6 秒后稳定为 5 层和“已保存”。Console 新增 error/warning 为 `0/0`。
 - 云端只读数据库审计确认窗口内新建元素拆解父任务 `0`、积分流水 `0`、扣费 `0`、退款 `0`；原有 6 个父任务均早于窗口且为 `completed / credit_status=not-applicable / credit_cost=0`。服务日志不记录 path/method，因此 HTTP 方法本身标记为“日志不可直接验证”，不虚构网络证据；零新任务与零账务证明恢复没有业务副作用。
 - **BUG-018 完成态父任务水合已云端关闭。** `V588-STABILITY-002` 仍为有条件通过；后续唯一顺序更新为 `002-B -> 002-D -> 002-E`，不再重复 `002-C`、完成态卡片或 Stage 4，也不进入 `V588-ADMIN-004`。证据：`docs/testing/evidence/v588-stability-002-3b47dfb7-completed-parent-cloud-2026-08-30.json`。
+
+## 2026-08-30 `5f6e84b1` Pear 三组真实制品审计检查点
+
+- Coze、本地与 GitHub `main` 精确一致为 `5f6e84b11d08e462805292f07c76c2c772fb0edf`；`stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 未触碰。聚焦 `138/138`、全仓 `4245 passed / 123 PostgreSQL-gated skipped / 0 failed`、TypeScript、构建版 Lint、保护基线与生产构建均通过。
+- 三个真实 Pear 任务均按异步模式返回 ZIP；无界成功经过安全下载、非 depth 主 PSD 选择、`8BPS` 校验、PSD 解析和质量门禁。由此确认沙箱可以下载 ZIP、解压并解析 PSD，旧“沙箱能力不足”假设正式撤销。
+- 两次青绿色圆环任务分别返回仅含 `front hair` 的单层 PSD，或缺少真实透明主体；橙色锥体任务返回仅含 `topwear` 的单层 PSD。三组制品都与源图语义不匹配或重建误差过高，均被现有质量门禁拒绝，未降低任何阈值。
+- smart 回退均交付本地结果并退款。前两组取得精确流水：每组恰好一笔 `-15` 与一笔 `+15`，余额 `403 -> 388 -> 403`；第三组也确认一扣一退、净额 `0`。这关闭失败退款证据，不证明成功任务一次扣费零退款。
+- Pear 官方专页确认当前合同为 `POST /v1/images/edits`、`model + image`、异步任务、URL 结果和 `GET /v1/images/tasks/{id}` 轮询；当前适配器合同与文档一致，不通过改端点、改大小写或放宽质量门禁掩盖供应商制品问题。
+- **状态：`002-B` 仍为部分通过，`002-D` 仍未关闭，`002-E` 的云端失败退款部分通过、显式取消仍未验证。** 下一动作仅使用官方示例类型的受控肖像再做一次远程质量成功验证；成功前不进入 `V588-ADMIN-004`。证据：`docs/testing/evidence/v588-stability-002-pear-cloud-audit-20260830.json` 与同前缀 PNG。
