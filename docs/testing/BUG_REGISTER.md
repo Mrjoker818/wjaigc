@@ -3219,5 +3219,5 @@ All listed Stage 4 defects are locally closed. S4-BUG-008 also passed its exact-
 | 稳定复现 | Google Chrome 选择“可编辑图层”后，主按钮仍显示“生成拆解板”；同轮真实请求已确认 `outputMode=layers`。 |
 | RED | UI 契约先要求稳定 `data-action`、三种空闲文案和两种新增处理文案；修复前 `1 failed / 16 passed`。 |
 | 最小修复 | 提交按钮新增 `data-action=submit-element-decompose`；拆解板、可编辑图层、双输出分别显示对应生成与处理中动作。真实 E2E 改用动作标识提交，不再把中文文案当作协议。 |
-| 本地回归 | 单文件 `17/17`、TypeScript、构建版 Lint 与空白检查通过。 |
+| 本地回归 | 单文件 `17/17`；最终全仓 `577 files passed / 23 PostgreSQL-gated skipped`、`4247 passed / 123 skipped / 0 failed`；TypeScript、构建版 Lint、空白检查、干净候选保护基线 `38/38 / 0 drift / 0 warnings` 与 12 GiB 生产构建 `118/118` 均通过。 |
 | 当前状态 | **本地已修复 / Coze 云端待验。** 提交 `a2b1a850c6c49b7bf9eadf30d3aa33872bbb7821`；部署后只需非付费切换三种模式核对文案和请求体，不重复 Pear 付费任务。 |

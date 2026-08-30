@@ -1824,3 +1824,10 @@ The focused gate test passes `7/7`; the actual protected-baseline command passes
 - 已关闭“可编辑图层模式仍显示生成拆解板”的本地 P3；改动仅涉及显示文案、稳定动作标识与 E2E 定位，不触碰任务和账务链路。
 - 本地契约、TypeScript、构建版 Lint 与空白检查通过；完整生产构建沿用前一 P1 候选结果，推送前仍需在最终 tree 上重跑。
 - **发布结论不变：有条件通过。** Coze 拉取后先做三模式非付费文案冒烟，再执行 `002-B/002-D/002-E`。
+
+## 2026-08-30 `d9b9c402` 最终本地候选发布增量
+
+- 最终代码树已执行新鲜全仓回归：`4247 passed / 123 PostgreSQL-gated skipped / 0 failed`；跳过的隔离 PostgreSQL 专项不计入通过。
+- TypeScript、构建版 Lint、空白检查、12 GiB 生产构建 `118/118` 与干净候选保护基线 `38/38 / 0 drift / 0 warnings` 均退出 `0`。生产构建耗时为 Webpack `11.6` 分钟、TypeScript `53` 秒。
+- `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 仍为受保护稳定基线；本候选仅准备推送 `main`。
+- **发布结论仍为“有条件通过”。** 本地门禁允许进入 Coze 验收，但不替代 `002-B` Pear 远程成功、`002-D` 一扣零退和 `002-E` 显式取消/迟到终态证据。

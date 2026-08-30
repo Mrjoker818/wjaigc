@@ -2272,3 +2272,11 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - 三种模式现在分别显示“生成拆解板 / 生成可编辑图层 / 生成拆解板与图层”，处理中分别显示对应状态；按钮新增稳定 `data-action`，E2E 不再依赖可变中文文案。
 - 单文件 `17/17`、TypeScript、构建版 Lint 和空白检查通过。该改动不修改 `outputMode`、供应商请求、质量门禁、任务状态或积分。
 - **回归判定：本地 PASS / Coze 非付费 UI 待验。** 不需要为本项单独创建 Pear 任务。
+
+## 2026-08-30 `d9b9c402` 最终候选门禁
+
+- 最终候选包含 Pear 肖像质量归一修复与元素拆解三模式动作文案修复；没有修改质量阈值、任务状态机、供应商账务或 `stable`。
+- 全仓 Vitest 为 `577 files passed / 23 PostgreSQL-gated skipped / 0 failed`、`4247 tests passed / 123 skipped / 0 failed`；跳过项继续明确记为未验证。
+- 12 GiB Node 堆生产构建退出 `0`：Webpack `11.6` 分钟、TypeScript `53` 秒、静态页面 `118/118`。
+- 干净 detached 候选的受保护基线为 `38/38`、未授权漂移 `0`、警告 `0`；主工作树保留的 `.playwright-cli` 与两个只读参考仓库未删除、未提交。
+- **回归判定：本地候选 PASS / 云端业务验收 PENDING。** 下一步固定为推送 `main`、Coze 拉取精确 SHA、沙箱重启、现有 Google Chrome 预览页真实重载，然后执行非付费文案检查和 Pear 成功/取消账务验证。

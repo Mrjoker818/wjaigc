@@ -1945,3 +1945,5 @@ BUG-018 已从未验证项移除。剩余顺序为 `002-B -> 002-D -> 002-E`；�
 | 可编辑图层按钮文案 | `LOCAL PASS / CLOUD PENDING` | `a2b1a850` 已完成三模式动作文案与稳定 E2E 标识；Coze 部署后非付费切换三模式核对，不创建供应商任务。 |
 
 证据：`docs/testing/evidence/v588-stability-002-pear-portrait-audit-20260830.json` 与 `docs/testing/evidence/v588-stability-002-pear-portrait-fallback-20260830.png`。
+
+最终本地候选补充：`d9b9c402` 已完成 `4247 passed / 123 PostgreSQL-gated skipped / 0 failed`、生产构建 `118/118`、保护基线 `38/38 / 0 drift / 0 warnings`。这些证据只关闭本地发布门禁，不改变上表四项云端待验证状态。
