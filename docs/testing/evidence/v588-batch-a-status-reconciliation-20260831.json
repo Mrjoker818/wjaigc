@@ -1,0 +1,94 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-08-31",
+  "scope": "V5.8.8 批次 A 当前状态与既有证据去重校正",
+  "baseCommit": "121b05620809e24a13777bc3f5291b9da9203e89",
+  "sourceTree": "82eb573b0928058be0894b3d495841b28fc74575",
+  "productionSourceChanged": false,
+  "stableCommit": "52f7c601ed150769e15d06fb435c6e360e28c9e7",
+  "donorLockSha256": "CC9E5E848BDB4CEC6AEB394B086F8FE3015BE9888787D350815C8B06B62F00E0",
+  "donorChanged": false,
+  "decision": "只校正证据索引与已实现状态；云端缺口保持未验证，不开始批次 B，不重开 Stage 4",
+  "corrections": [
+    {
+      "item": "V588-STABILITY-001",
+      "legacyEvidenceId": "V588-SAFETY-001",
+      "verifiedScope": "同步 WASM 描摹像素预算、真实大图成功终态、SVG 文件及并发健康",
+      "evidence": "docs/testing/evidence/v588-safety-001-wasm-svg-budget-2026-08-23.json",
+      "evidenceSha256": "F95ED64C51CAC23FE980344352ADEB1E2FD54D491F68686D7B59FF0DC3E3F298",
+      "cloudCommit": "d968ad3448c9a3202f462959baaa89dab5f471cd",
+      "currentBudgetPixels": 262144,
+      "cloudObservedPixels": 262086,
+      "notProvenByThisEvidence": ["压缩炸弹", "其他矢量引擎", "未覆盖异常分支"]
+    },
+    {
+      "item": "V588-AUTH-001",
+      "verifiedScope": "同 secret 管理员既有会话在 Coze 冷启动与刷新后保持；session/admin/projects 业务成功",
+      "evidence": "docs/testing/evidence/v588-auth-001-coze-2026-08-24.json",
+      "evidenceSha256": "BC91791FBFB0EB3687BFBFC9FAC3ABC520FEEE119717F366A779D37C5DBB6EED",
+      "cloudCommit": "42e540bd5aa552f10af0e12240546993bda3e91a",
+      "remaining": ["普通用户 Coze 重启前后会话矩阵", "真实 secret 轮换需独立批准，不在本次执行"]
+    },
+    {
+      "item": "V588-ADMIN-003",
+      "verifiedScope": "回填与影子对账已验证；四个不可恢复版本和对应 placement 已完成可审计软归档，原版本行保留",
+      "evidence": "docs/testing/evidence/s4-bug-014-cloud-archive-2026-08-22.json",
+      "evidenceSha256": "CBDA94FE678DD7907D338C425E4A4A34275FB66F0251864B9966666B2C30F232",
+      "repeatArchiveAllowed": false,
+      "remaining": ["缩略图交付与刷新", "原图回退", "S3 恢复"],
+      "runtimeModeChangedInThisReview": false
+    },
+    {
+      "item": "V588-PROVIDER-003",
+      "verifiedScope": "既有结果存储与常量拆分已进入 main；当前路由仅导出合法 HTTP/Next 配置",
+      "implementationCommits": ["6a9efa5ed7d5554fbd77914671b1a3b06ecd6e39", "c4b49293e5ba7cbdc84e4f235cd62d8b58e2cd33"],
+      "contractCommit": "1fe54ffcba5fe9388d8475b4ac8dc21025e7ff76",
+      "implementationCommitsAreAncestorsOf": "fa857e44328cb20f80cf2ab6194d0c1db127283b",
+      "cloudBuildEvidence": "docs/testing/evidence/v588-admin-004-fa857e44-cloud-20260831.json",
+      "routeTsCount": 193,
+      "fontResultStoreDecision": "继续使用当前 src/lib/font-design-task-store.ts，不复制 donor 的第二个结果 Map",
+      "currentTests": [
+        {
+          "scope": "所有 route.ts 的 TypeScript AST 导出检查",
+          "passed": 1,
+          "failed": 0,
+          "skipped": 0,
+          "report": ".playwright-cli/v588-provider-003-route-recheck-20260831.json",
+          "sha256": "E4D8E724EE31BB4DF67BDAB4F5A9CFCA785BE688738FB39663D5AD6405730E6C"
+        },
+        {
+          "scope": "既有缓存键、过期/容量/定时器、字境提示词字节一致及权威轮询",
+          "files": 3,
+          "passed": 10,
+          "failed": 0,
+          "skipped": 0,
+          "report": ".playwright-cli/v588-provider-003-extraction-recheck-20260831.json",
+          "sha256": "2CBE7E08DDA251C5E83D48E7D4BDD28A24579F89668FB0E7653FA385E6041469"
+        }
+      ],
+      "remaining": ["原始 RED 日志未在公开证据中定位", "品牌电商/精修/字境相关云端业务调用与结果证据尚未关联或补验"],
+      "fullAbsorptionClaimed": false
+    }
+  ],
+  "previousLocalGatesNotRerun": {
+    "evidence": "docs/testing/evidence/v588-admin-provider-postgres-20260831.json",
+    "testsPassed": 4413,
+    "testsSkipped": 0,
+    "productionBuildPages": 118,
+    "protectedFeatures": 38
+  },
+  "chrome": {
+    "correctExistingProjectListed": true,
+    "projectAlreadyInControlledTabList": true,
+    "directVisibleDomRead": "25 秒超时",
+    "chromeRunningCheck": "通过",
+    "extensionInstalledAndEnabled": true,
+    "nativeHostManifestValid": true,
+    "recoveryRequiresExternalPluginReconnect": true,
+    "cozeNewPullSent": false,
+    "previewRefreshed": false,
+    "newTabsCreated": 0,
+    "used360": false,
+    "paidTasksCreated": 0
+  }
+}
