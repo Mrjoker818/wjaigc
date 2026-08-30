@@ -1,0 +1,133 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-08-31",
+  "items": ["V588-ADMIN-004", "V588-PROVIDER-002"],
+  "status": "ADMIN_004_CLOUD_VERIFIED_PROVIDER_002_ORDINARY_LOGIN_PENDING",
+  "conclusion": "新源码构建重启和 Chrome 管理员只读投影验收通过，ADMIN-004 关闭；PROVIDER-002 普通用户三个工作区目录仍未验证，不能关闭整个吸收批次。",
+  "environment": {
+    "browser": "Google Chrome",
+    "projectUrl": "https://code.coze.cn/p/7671964106919837702/preview",
+    "previewOrigin": "https://62afe49a-716e-4d9e-99cd-a0be49c4794c-5000.dev.coze.site",
+    "main": "f91ada6b3a292d9f392270cd6bdad4cd11568d5d",
+    "tree": "7782f66d3f1e1c305083c54e0e768b8f5e04dccd",
+    "srcTree": "82eb573b0928058be0894b3d495841b28fc74575",
+    "sourceFix": "bd9655b88ec037a0ebb6891addaba19a8280240f",
+    "stable": "52f7c601ed150769e15d06fb435c6e360e28c9e7"
+  },
+  "observed": {
+    "source": "Google Chrome 既有 Coze 项目页的可见执行过程与报告，不是本地结果冒充云端。",
+    "existingTabsReused": true,
+    "newTabsCreated": 0,
+    "used360": false,
+    "cozeSyncInstructionSent": true,
+    "cozeReportedHeadAndTreesMatch": true,
+    "cozeReportedWorktreeClean": true,
+    "cozeReportedStableUnchanged": true,
+    "focused": {"filesPassed": 4, "testsPassed": 50, "testsFailed": 0},
+    "full": {
+      "filesTotal": 606,
+      "filesPassed": 582,
+      "filesSkipped": 24,
+      "testsTotal": 4413,
+      "testsPassed": 4281,
+      "testsSkipped": 132,
+      "testsFailed": 0,
+      "reportedExitCode": 0,
+      "reportedDurationSeconds": 159,
+      "skipReason": "云端未配置隔离 POSTGRES_TEST_DATABASE_URL；没有使用业务库进行集成测试。"
+    },
+    "protectedBaseline": {"featuresPresent": 38, "unauthorizedDrift": 0, "warnings": 0},
+    "typecheck": "reported-passed",
+    "lintBuild": "reported-passed",
+    "newProductionBuild": "reported-passed-118-pages-exit-0",
+    "newServiceRestart": "reported-completed",
+    "newBuildId": "7y0nSmEYApVG3YwpZQeRI",
+    "newPort5000Pid": 36266,
+    "postRestartHardRefresh": "performed-twice",
+    "administratorFreshAcceptance": "passed",
+    "ordinaryUserThreeWorkspaceAcceptance": "unverified"
+  },
+  "finalCloudReport": {
+    "verifiedHead": "735a4152bdcdc1fafb5d4f71ffef5a9824c3b27c",
+    "verifiedTree": "7782f66d3f1e1c305083c54e0e768b8f5e04dccd",
+    "verifiedSrcTree": "82eb573b0928058be0894b3d495841b28fc74575",
+    "worktreeClean": true,
+    "platformAutomaticRebuildObserved": true,
+    "agentStartedConcurrentBuild": false,
+    "rootStatus": 200,
+    "simpleChatStatus": 200,
+    "authMe": {"status": 200, "success": true, "user": null},
+    "staticAssets": {"js": 10, "css": 1, "allStatus200": true},
+    "laterPlatformMetadataShortId": "0fb594d",
+    "metadataBoundary": "最终报告后页面又展示一条 Coze 元数据版本 0fb594d；未读取该短版本的完整 SHA/tree，不将其冒充已核对 SHA，也不为追逐元数据反复发送指令、重建服务。上列为实际取得的最后完整版本报告。"
+  },
+  "browserAcceptance": {
+    "firstHardRefreshAt": "2026-08-30T23:47:32.932Z",
+    "finalHardRefreshAt": "2026-08-30T23:51:35.995Z",
+    "timezone": "Asia/Shanghai",
+    "authenticatedSession": {"status": 200, "success": true, "role": "admin", "chromeRequestId": "24252.11687"},
+    "userCountByPage": {"users": 6, "credits": 6, "data": 6, "dashboard": 6},
+    "perUserComparisons": {"usersChecked": 6, "creditMatches": 6, "projectCountMatches": 6, "validActivityDates": 6},
+    "totals": {"balance": 388, "recharged": 4320, "consumed": 3932, "images": 454, "generatedImages": 453, "uploadedImages": 1},
+    "businessResponses": [
+      {"path": "/api/admin/users", "chromeRequestId": "24252.11587", "success": true, "users": 6},
+      {"path": "/api/admin/credits/overview", "chromeRequestId": "24252.11594", "success": true, "users": 6},
+      {"path": "/api/credits?action=admin-overview", "chromeRequestId": "24252.11597", "success": true, "users": 6},
+      {"path": "/api/admin/user-images?page=1&pageSize=24", "chromeRequestId": "24252.11600", "users": 6, "images": 454},
+      {"path": "/api/admin/dashboard-stats?period=7", "chromeRequestId": "24252.11601", "success": true, "users": 6},
+      {"path": "/api/admin/dashboard-stats", "chromeRequestId": "24252.11602", "success": true, "users": 6},
+      {"path": "/api/admin/users", "chromeRequestId": "24252.11779", "success": true, "users": 6, "afterFinalRefresh": true}
+    ],
+    "afterFinalRefresh": {"allSixBalancesAndProjectCountsStable": true, "allSixDatesValid": true, "consoleErrorsWarnings": 0, "uncaughtExceptions": 0, "nativeDialogs": 0},
+    "networkCoverage": {"firstCaptureTruncated": true, "finalCaptureTruncated": false, "knownInjectedScriptsBlockedByCsp": 3, "cspWeakened": false},
+    "logout": "退出管理员后真实回到入口选择，点击无限画布正常进入登录表单；没有创建或重置账号。",
+    "ordinaryLoginBoundary": "当前 Chrome 自动填充管理员账号，未取得普通账号登录状态；已请用户在同一现有标签登录 canvas-user，不读取密码存储、不猜密码。",
+    "newFinding": {"id": "V588-CREDITS-OBS-001", "severity": "P2", "status": "open", "summary": "消耗分类总额与占比分母口径不同，图像显示 137%；仅证明只读投影问题，不推断实际错误扣费。"}
+  },
+  "wrapperCaveat": {
+    "expectedStderrMisclassified": true,
+    "cozeStartedAdditionalWrapperRunAfterRawFullResult": true,
+    "instructionToAvoidFurtherRerunsQueued": true,
+    "queuedMessageObserved": true,
+    "queuedMessageConsumption": "confirmed-visible-final-report",
+    "rule": "以真实退出码和结构化统计为依据，不因包装器误判修改源码，也不再次补跑已完成全量。"
+  },
+  "connection": {
+    "restoredInitially": true,
+    "projectAndPreviewInitiallyReadable": true,
+    "laterFailure": "读取后续 Coze 状态时控制超时；重连可枚举相同正确 Chrome 标签，但接管再次超时，随后显式 Browser is not available。",
+    "recoveryAttempted": true,
+    "finalRecoverySucceeded": true,
+    "otherBrowserFallback": false,
+    "newTabFallback": false,
+    "sandboxFailureProven": false
+  },
+  "rawEvidenceScope": "原始 Coze DOM、五张管理页截图、真实业务响应和网络日志保存在本地；含账号信息，禁止提交原件。公开记录只包含汇总和 SHA-256，不伪造录像或 Trace。",
+  "rawLocalEvidence": [
+    {"path": ".playwright-cli/v588-f91ada6b-coze-final-20260831.txt", "bytes": 53046, "sha256": "e69324a0c3e53d7b4b4c0eee8bb305ee18ebdfc06b46cf3273273ba0319fc50b"},
+    {"path": ".playwright-cli/v588-f91ada6b-admin-users-20260831.png", "bytes": 76631, "sha256": "78729e9e47c6c16b353b359ec9ad3c569aa6edd6f556d1cdc0b6b5cce0b082bf"},
+    {"path": ".playwright-cli/v588-f91ada6b-admin-credits-20260831.png", "bytes": 76809, "sha256": "701c4e756ce0cba8d91bab809473822f870a5fb3d839dcf93e5bb234fcad689a"},
+    {"path": ".playwright-cli/v588-f91ada6b-admin-data-20260831.png", "bytes": 67289, "sha256": "164ac996ac8759e8cd3ea900fc1ffa72df23dc62a7dd3377522281b7ea820ed1"},
+    {"path": ".playwright-cli/v588-f91ada6b-admin-dashboard-20260831.png", "bytes": 89768, "sha256": "45fc1a3f76288aadacdd386f55efc64d66007354e33461b99de81b9127285edc"},
+    {"path": ".playwright-cli/v588-f91ada6b-admin-users-final-20260831.png", "bytes": 76631, "sha256": "78729e9e47c6c16b353b359ec9ad3c569aa6edd6f556d1cdc0b6b5cce0b082bf"},
+    {"path": ".playwright-cli/v588-f91ada6b-admin-business-20260831.json", "bytes": 23003, "sha256": "b174facb6ead00820462f122fd4db2c18c9ea26871b769953c2e038a84d6cd96"},
+    {"path": ".playwright-cli/v588-f91ada6b-admin-final-20260831.json", "bytes": 10598, "sha256": "034880b9e6eff4f3e5786b076ec518933458617ff564336d629b55914ad22caa"},
+    {"path": ".playwright-cli/v588-f91ada6b-admin-network-20260831.json", "bytes": 211196, "sha256": "d79355523569518605ca65dbea8117b770b11e33a3030a17db9c9e4053911e23"},
+    {"path": ".playwright-cli/v588-credit-distribution-137-20260831.png", "bytes": 74604, "sha256": "119313022e8c9e26a9d7e62f1a4f7028f55d0aaa78599549bf7be6d606c81d3f"}
+  ],
+  "previousCloudCheckpoint": "docs/testing/evidence/v588-admin-004-fa857e44-cloud-20260831.json",
+  "localDatabaseEvidence": "docs/testing/evidence/v588-admin-provider-postgres-20260831.json",
+  "sideEffects": {
+    "newBusinessSourceChanges": false,
+    "userOrPermissionChanges": false,
+    "paidProviderTasksRequested": 0,
+    "pearTasksRequested": 0,
+    "stableChanged": false
+  },
+  "resumeBoundary": [
+    "ADMIN-004 已关闭，不重做四页统计、构建重启或最后刷新。",
+    "继续普通用户真实登录后的 /api/models 及三个工作区目录证据，不能用管理员或模拟身份代替。",
+    "积分分类口径另记 V588-CREDITS-OBS-001，尚未修复，不将其混为用户字段或实际扣费缺陷。",
+    "本地 4413 项及云端已取得的门禁不重跑；Pear 后期项继续延期，Stage 4 不重开。"
+  ]
+}

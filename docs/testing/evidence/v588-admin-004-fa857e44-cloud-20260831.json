@@ -45,9 +45,20 @@
     "authMeAnonymousBusinessResponse": {"success": true, "user": null},
     "testRunWrapperCaveat": "包装器将 fail-closed 测试预期 stderr 判为 failed；真实 Vitest 汇总为零失败、退出 0。没有删除错误日志或失败测试。",
     "platformCommitDisplayedAfterDone": "afe133a",
-    "finalPostDoneHeadAndTree": null,
+    "finalPostDoneHeadAndTree": {
+      "capturedAt": "2026-08-31T07:33:00+08:00",
+      "source": "Chrome 恢复后读取已完成的 Coze 只读报告，未重复拉取、构建或重启。",
+      "head": "afe133afa5f5dffdf220cec31362f71f3f592934",
+      "tree": "9a36bd1ec23f73d6d02381ddc63e5ad7c8e789a5",
+      "matchesExpectedTree": true,
+      "buildId": "X9j0MRzpVB9QTLorkoG1v",
+      "port5000Pid": 30660,
+      "stableUnchanged": true,
+      "worktreeClean": true,
+      "health": {"root": 200, "simpleChat": 200, "authMe": 200}
+    },
     "finalReadOnlyCheckMessageSent": true,
-    "finalReadOnlyCheckResultCaptured": false
+    "finalReadOnlyCheckResultCaptured": true
   },
   "browserObserved": {
     "hardRefreshMethod": "Page.reload(ignoreCache=true)",
@@ -150,7 +161,6 @@
     }
   ],
   "remaining": [
-    "Coze post-done 完整 HEAD、tree、Build ID、PID 的只读结果",
     "运营总览 dashboard-stats 真实响应正文及四接口最终比对",
     "再次刷新后字段稳定与完整新鲜 Console、异常、原生弹窗证据"
   ],
