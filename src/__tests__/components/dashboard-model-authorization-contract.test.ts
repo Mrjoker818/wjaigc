@@ -217,4 +217,41 @@ describe('dashboard model authorization contract', () => {
       'layer-provider::layer-model',
     ]);
   });
+
+  it('omits disabled providers from the model authorization options', () => {
+    const enabledProvider = provider(
+      'enabled-provider',
+      'image',
+      ['enabled-image'],
+      [{
+        id: 'enabled-image',
+        name: 'Enabled Image',
+        providerId: 'enabled-provider',
+        type: 'image',
+      }],
+    );
+    const disabledProvider = {
+      ...provider(
+        'disabled-provider',
+        'image',
+        ['disabled-image'],
+        [{
+          id: 'disabled-image',
+          name: 'Disabled Image',
+          providerId: 'disabled-provider',
+          type: 'image',
+        }],
+      ),
+      isEnabled: false,
+    };
+
+    const options = dashboardHelpers.buildDashboardModelAuthorizationOptions?.([
+      enabledProvider,
+      disabledProvider,
+    ]);
+
+    expect(options?.imageModels.map(option => option.id)).toEqual([
+      'enabled-provider::enabled-image',
+    ]);
+  });
 });

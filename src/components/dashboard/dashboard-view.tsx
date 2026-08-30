@@ -178,6 +178,7 @@ export function buildDashboardModelAuthorizationOptions(
   const chatModels: DashboardModelOption[] = [];
   const imageModels: DashboardModelOption[] = [];
   for (const provider of providers) {
+    if (provider.isEnabled === false) continue;
     const providerName = provider.displayName || provider.name || provider.id;
     for (const model of getConfiguredModelsForProvider(provider)) {
       const option = providerModelOptions([model.id], provider.id, providerName)[0];
