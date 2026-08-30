@@ -4,6 +4,7 @@
   "candidate": {
     "branch": "main",
     "baseCommit": "d4b1debd9cacc2f2606b24c45337e91b845d688b",
+    "implementationCommit": "dd2b28a4c458aa13438faff9bf7131d7fee92037",
     "stableCommit": "52f7c601ed150769e15d06fb435c6e360e28c9e7",
     "cloudStatus": "pending"
   },

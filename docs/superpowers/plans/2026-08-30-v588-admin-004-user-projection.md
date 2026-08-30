@@ -234,7 +234,7 @@ Expected: 已执行测试 0 failed；PostgreSQL 跳过项单独报告；TypeScri
 
 记录 RED、GREEN、固定 SQL 次数、完整门禁、未验证项和当前提交；不得把本地测试写成云端通过。
 
-- [ ] **Step 3: 只提交并推送 `main`**
+- [x] **Step 3: 只提交并推送 `main`**
 
 ```bash
 git add src/lib/admin-user-projection.ts src/app/api/admin/users/route.ts src/components/dashboard/admin-tabs.tsx src/lib/user-types.ts src/__tests__/lib/admin-user-projection.test.ts src/__tests__/api/admin-user-projection.test.ts src/__tests__/api/admin-users-password-audit.test.ts src/__tests__/components/admin-user-projection-contract.test.ts docs/plans/v588/V588_ABSORPTION_INVENTORY.md docs/testing/BUG_REGISTER.md docs/testing/REGRESSION_REPORT.md docs/testing/RELEASE_READINESS_REPORT.md docs/testing/UNVERIFIED_ITEMS.md docs/testing/evidence/v588-stability-002-pear-final-defer-20260830.json docs/superpowers/plans/2026-08-30-v588-admin-004-user-projection.md
