@@ -1959,3 +1959,18 @@ BUG-018 已从未验证项移除。剩余顺序为 `002-B -> 002-D -> 002-E`；�
 | PostgreSQL 全仓专项 | `123 TESTS SKIPPED / OPEN` | 提供隔离 `POSTGRES_TEST_DATABASE_URL` 后复跑；严禁使用业务库或生产库。 |
 
 当前本地候选已通过 `4248 passed / 123 skipped / 0 failed`、`118/118` 构建和保护功能 `38/38`。这些只证明候选可部署，不关闭上述云端验证项。
+
+### 2026-08-30 `c15ba26a` 云端复验后的剩余项
+
+| 项目 | 最新状态 | 关闭条件 |
+|---|---|---|
+| 三模式动作文案 | `CLOUD PASS` | “拆解板 / 可编辑图层 / 双输出”存在；可编辑图层动作显示“生成可编辑图层”。 |
+| 应用任务快速建立 | `CLOUD PASS` | 单次提交快速进入 `processing · 27%`，没有浏览器同步等待断线。 |
+| 普通供应商失败退款 | `CLOUD PASS` | “当前服务暂不可用”只产生一笔 `-15` 与一笔 `+15`，余额 `388 → 373 → 388`。 |
+| 瞬时 ZIP 下载重试 | `NOT EXERCISED` | Pear 成功返回可下载 ZIP，且首个 Range 请求出现瞬时中断时由同参数单次重试恢复。不得人为破坏安全配置制造失败。 |
+| Pear 远程质量成功 `002-B` | `UNVERIFIED / PROVIDER UNAVAILABLE THIS RUN` | 同类受控肖像最终为 `engine=pear`、23+ 合格图层；不得以本地 3 层替代。 |
+| 成功账务 `002-D` | `UNVERIFIED` | 同一远程成功任务只有一笔 15 积分扣费且零退款。 |
+| 显式取消 `002-E` | `UNVERIFIED` | 单独授权后提交并立即取消，数据库保持 cancelled，迟到完成不覆盖，退款最多一次。 |
+| 精确 taskId/providerError 审计 | `OBSERVABILITY GAP` | 当前管理员页面未展示 taskId、Pear taskId、requestId 或结构化 providerError；需 Coze 只读数据库/服务日志审计补全。 |
+
+证据：`docs/testing/evidence/v588-stability-002-c15ba26a-pear-cloud-20260830.json`。

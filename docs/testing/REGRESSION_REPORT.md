@@ -2287,3 +2287,11 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - RED 测试先稳定证明一次瞬时超时会直接失败；最小修复仅对 `timeout/ECONNRESET/ETIMEDOUT/socket hang up` 重试一次，并保留取消、安全下载、MIME、体积、ZIP 路径和 PSD 签名门禁。
 - 聚焦下载回归 `47/47`、分层矩阵 `98/98`；全仓 `4248 passed / 123 PostgreSQL-gated skipped / 0 failed`，TypeScript、ESLint 零错误、12 GiB 构建 `118/118`、保护功能 `38/38` 与空白检查通过。
 - **回归判定：本地 PASS / Coze PENDING。** 本轮修复只提高瞬时网络故障恢复能力；尚未证明新版本真实 Pear 成功、一次扣费零退款或显式取消终态。
+
+## 2026-08-30 `c15ba26a` Pear 云端复验
+
+- Coze 精确部署 `c15ba26a`（tree `a9ab5756`，Build ID `PuHHsUcTBLF7Ysrso9BjH`），预览页静态资源已与新构建一致；`stable` 未触碰。
+- Google Chrome 在现有项目中选择 `768×1152` 受控肖像，切换“可编辑图层”后动作按钮正确显示“生成可编辑图层”，只提交一次。任务快速进入 `processing · 27%`，证明初始应用请求不再同步阻塞至浏览器断线。
+- 本轮 Pear 在返回制品前报告“当前服务暂不可用，请稍后重试”。应用完成原子退款并回退本地 3 层，UI 正确披露实际引擎和失败原因；没有伪装为 Pear 成功。
+- 管理员流水证明 15:28 唯一扣除 `15`，15:29 唯一退回 `15`，余额 `388 → 373 → 388`，净变化 `0`。普通失败退款一致性再次通过。
+- **回归判定：动作文案 PASS、异步提交 PASS、失败回退及一扣一退 PASS；Pear 远程成功 UNVERIFIED。** 因为没有生成远程制品，本轮没有执行 ZIP 下载重试、主 PSD 提取或远程图层编辑；显式取消也未执行。证据：`docs/testing/evidence/v588-stability-002-c15ba26a-pear-cloud-20260830.json`。

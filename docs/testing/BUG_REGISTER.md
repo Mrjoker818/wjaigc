@@ -3234,3 +3234,15 @@ All listed Stage 4 defects are locally closed. S4-BUG-008 also passed its exact-
 | 最小修复 | 只对明确的瞬时网络中断进行一次同参数重试；重试前检查取消信号。DNS/私网、MIME、体积、路径、ZIP/PSD 签名及解析错误不重试，第二次失败继续进入既有退款与本地回退。没有延长超时、放宽安全门禁或改动账务状态机。 |
 | 本地回归 | 下载与安全下载器 `47/47`，分层相关 `98/98`；全仓 `577 files passed / 23 PostgreSQL-gated skipped`、`4248 passed / 123 skipped / 0 failed`；TypeScript、ESLint `0 errors / 961 historical warnings`、12 GiB 生产构建 `118/118`、保护功能 `38/38 / 0 warning` 和空白检查通过。 |
 | 当前状态 | **本地已修复 / 云端待部署复验。** 必须在新提交部署后证明 Pear ZIP 下载成功、`engine=pear`、23+ 图层、唯一扣费且零退款；显式取消仍需独立验证。 |
+
+#### `c15ba26a` 云端复验增量（2026-08-30）
+
+| 字段 | 内容 |
+|---|---|
+| 部署与入口 | Coze 已精确部署 `c15ba26ad8c95025da5bf6221a19065da144add1`，Build ID `PuHHsUcTBLF7Ysrso9BjH`。Google Chrome 在既有标签对 `768×1152` 受控肖像只提交一次“可编辑图层”。 |
+| 非付费 UI | 三种模式均存在；切换“可编辑图层”后主动作准确显示“生成可编辑图层”，关闭 BUG-025 的云端文案验证。 |
+| 状态机 | 提交后快速进入 `processing · 27%`，未再出现初始 POST 同步等待约 4 分 30 秒后 `Failed to fetch`。最终父任务为 `completed · 100%`，但实际引擎为本地。 |
+| 本轮 Pear 终态 | Pear 在制品下载前返回“当前服务暂不可用，请稍后重试”；应用明确披露“已退款并使用本地分层”，PSD 编辑器显示本地 `reconstruction/correction / 主体 / 背景` 共 3 层。不得把该结果登记为 Pear 远程成功。 |
+| 账务 | 余额 `388 → 373 → 388`；15:28 唯一一笔 `-15`，15:29 唯一一笔 `+15`，净变化 `0`，未观察到重复扣费或重复退款。 |
+| BUG-026 判定 | **本次未覆盖下载重试。** 失败发生在生成可下载 ZIP 之前，不是 `Remote image download timed out`；因此本地瞬时下载重试保持通过，但云端 ZIP 成功仍开放。 |
+| 证据 | `docs/testing/evidence/v588-stability-002-c15ba26a-pear-cloud-20260830.json`。 |

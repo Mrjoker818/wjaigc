@@ -1,0 +1,79 @@
+{
+  "recordedAt": "2026-08-30T15:30:26+08:00",
+  "environment": {
+    "deploymentUrl": "https://62afe49a-716e-4d9e-99cd-a0be49c4794c-5000.dev.coze.site/",
+    "gitCommit": "c15ba26ad8c95025da5bf6221a19065da144add1",
+    "gitTree": "a9ab5756f382d2c8bdb4ee6d8dbaab65ff421008",
+    "buildId": "PuHHsUcTBLF7Ysrso9BjH",
+    "browser": "Google Chrome 用户1"
+  },
+  "testInput": {
+    "projectId": "project_1787549625844_nfmso3ts9",
+    "imageUrl": "/api/serve-upload/uploads/gen-1788058497271-n7j4fq.jpg",
+    "displayedDimensions": "768x1152",
+    "outputMode": "layers",
+    "provider": "PearAPI",
+    "model": "Image-Layered",
+    "submitCount": 1
+  },
+  "uiEvidence": {
+    "modeLabels": [
+      "拆解板",
+      "可编辑图层",
+      "双输出"
+    ],
+    "selectedSubmitLabel": "生成可编辑图层",
+    "firstObservedTaskState": "processing",
+    "firstObservedProgress": 27,
+    "terminalParentState": "completed",
+    "terminalParentProgress": 100,
+    "actualEngine": "local",
+    "fallbackReason": "当前服务暂不可用，请稍后重试",
+    "fallbackDisclosure": "Pear 云端分层未完成，已退款并使用本地分层",
+    "editorLayerCount": 3,
+    "editorLayers": [
+      "reconstruction/correction",
+      "主体",
+      "背景"
+    ]
+  },
+  "billingEvidence": {
+    "balanceBefore": 388,
+    "debit": {
+      "time": "2026-08-30 15:28",
+      "amount": -15,
+      "description": "Pear 图片分层 [Image-Layered]"
+    },
+    "refund": {
+      "time": "2026-08-30 15:29",
+      "amount": 15,
+      "description": "Pear 图片分层失败退款: 当前服务暂不可用，请稍后重试"
+    },
+    "balanceAfter": 388,
+    "netChange": 0,
+    "duplicateDebitObserved": false,
+    "duplicateRefundObserved": false
+  },
+  "operationLog": {
+    "time": "2026-08-30 15:28:57",
+    "user": "Mr.joker",
+    "userId": "admin_mr_joker",
+    "method": "POST",
+    "path": "/api/element-decompose"
+  },
+  "limitations": [
+    "当前管理员页面未展示本次应用 taskId、Pear taskId、requestId 或 providerError 结构化字段。",
+    "Pear 在返回可下载制品前进入服务不可用终态，因此本次没有覆盖 ZIP 下载重试、主 PSD 提取、8BPS 解析或远程图层编辑。",
+    "本轮没有执行显式取消测试。"
+  ],
+  "verdict": {
+    "asyncApplicationSubmission": "PASS",
+    "modeSpecificCallToAction": "PASS",
+    "singleDebitSingleRefund": "PASS",
+    "pearRemoteSuccess": "UNVERIFIED_PROVIDER_UNAVAILABLE",
+    "zipDownloadRetry": "NOT_EXERCISED",
+    "remotePsdLayers": "NOT_PRODUCED",
+    "explicitCancellation": "NOT_EXECUTED",
+    "overall": "CONDITIONAL"
+  }
+}
