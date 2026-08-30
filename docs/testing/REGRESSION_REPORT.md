@@ -2356,3 +2356,11 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - RED 为 `3 passed / 1 failed`；最小渲染修复后聚焦 `3 files / 12 tests` 通过。最终全仓为 `582 files passed / 23 skipped`、`4279 tests passed / 123 PostgreSQL-gated skipped / 0 failed`。
 - TypeScript、构建版 Lint、精确保护基线和 8 GiB 生产构建 `118/118` 均通过；代码已进入 `main@a9956bc5`，`stable` 未变化。
 - **回归判定：统计/积分/项目 CLOUD PASS；最后活动 LOCAL + GITHUB PASS / COZE PENDING。** 必须部署精确提交并在真实管理员用户列表看到日期后才能关闭本项。Pear 后期项保持 `DEFERRED / UNVERIFIED`。
+
+## 2026-08-31 `V588-ADMIN-004` 仪表盘边界回归
+
+- 在 Coze 旧候选中进一步确认，缺陷不只影响最后活动：管理员用户列表的积分、项目数和最后登录全部退化为回退值，而 API 与其他管理页仍保持真实数据。
+- 新增组件边界 RED 后，证明 `dashboard-view.tsx` 的用户映射丢弃三个权威字段；最小 GREEN 仅透传 `credits / project_count / last_login`，没有扩大到业务重构。
+- 聚焦 `13/13`；新鲜全仓 `4280 passed / 123 PostgreSQL-gated skipped / 0 failed`；TypeScript、构建版 Lint、8 GiB 生产构建 `118/118` 和干净保护基线均退出 `0`。
+- 候选 `main@a27e33be` 已推送，`stable@52f7c601` 未变化。Google Chrome 安装、扩展启用、原生通信和进程诊断通过，但既有 Coze 标签的页面交互仍超时；按约束未新建标签或窗口。
+- **回归判定：LOCAL + GITHUB PASS / COZE PENDING。** 只有 Coze exact-SHA、真实 UI 数值、刷新恢复与 Console 健康全部取得证据后，才能将 BUG-003 和 `V588-ADMIN-004` 整体关闭。

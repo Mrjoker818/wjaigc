@@ -56,7 +56,7 @@ These are the only authorized first absorption targets. Every row remains unimpl
 | V588-CHAT-003 | 项目同步合并、离页冲刷和可诊断失败 | **已吸收 / Coze Google Chrome 云端验证通过。** 版本化快照、CAS 冲突重放、冲突副本、删除不复活、用户隔离、离页冲刷和可诊断同步状态均已闭环；保留当前登录、注销、用户数据 API 和前台流式生成边界 | 真实 PostgreSQL `4030/4030`、Coze 冷启动、项目/任务 CRUD、刷新恢复、双标签合并/冲突副本、离页、账号切换、布局及浏览器健康证据 | P1 |
 | V588-CHAT-004 | 聊天结果来源追踪与发送到无限画布/节点模式 | **已吸收 / Coze Google Chrome 云端验证通过。** 已保留 `AssetVersion -> /api/assets/transfer` 安全链路并补齐节点模式转交与来源追踪；普通用户正向、跨用户 403、URL-only 未托管媒体跳过、不远程读取、重复消费与刷新恢复均已闭环 | 跨项目资产归属、来源可追踪、刷新恢复、文本节点、图片节点、非法 URL、重复消费与普通用户权限 | P1 |
 | V588-AUTH-001 | 数据库唯一/数据库加文件两种持久化模式 | **本地候选已完成。** 只吸收显式持久化模式与启动诊断；继续使用当前认证密钥和密码校验，拒绝 donor 弱口令恢复 | 真实 PostgreSQL、普通用户/管理员多浏览器会话、退出后数据隔离和全量门禁已通过；Coze 精确 SHA 待验 | P1 |
-| V588-ADMIN-004 | 用户积分、项目数和最后活动时间的真实投影 | **云端只读数据与四接口/三页面总数、积分、项目一致；最后活动 UI 缺陷已在 `main@a9956bc5` 本地修复，Coze 精确候选待验。** 接入当前管理员查询和统一用户身份，不复制 donor 用户存储 | 新增用户、删除用户、批量操作、积分、项目、聊天记录、最后活动显示与统计一致性 | P1 |
+| V588-ADMIN-004 | 用户积分、项目数和最后活动时间的真实投影 | **云端只读接口数据已一致；旧云端 UI 仍因仪表盘组件边界丢字段而显示 `0 / - / 从未`。边界修复已进入 `main@a27e33be`，Coze 精确候选待验。** 接入当前管理员查询和统一用户身份，不复制 donor 用户存储 | 新增用户、删除用户、批量操作、积分、项目、聊天记录、最后活动显示与统计一致性 | P1 |
 | V588-PROVIDER-005 | 图像比例/尺寸/质量与视频时长/模式能力矩阵 | **已吸收 / Coze Google Chrome 云端验证通过。** 保留 `providerId + modelId` 精确目录；管理员持久化、普通用户五入口、真实透明双图、真实视频和非法能力前置拒绝均已闭环 | 本地自动化、真实 PostgreSQL 专项、Coze exact SHA、Pear/APIMART 五入口、透明 Alpha、逐张回填、视频终态与零任务/零扣费拒绝证据均已保存；供应商后台独立计数未在本轮 Chrome 标签中直接读取 | P1 |
 
 本次归档不能独立证明完整发布质量：它不是完整源码，不含锁定后的全量测试环境；归档声明的 donor source commit 在当前仓库不可解析；部分报告混有不同日期状态；AGENTS 对 SVG 预算写为 `256x256`，而实现/测试为 `512x512`。以上矛盾必须以 RED、当前架构实现和云端机器证据重新闭环，不能把归档报告直接当作通过证据。
@@ -812,3 +812,12 @@ No item is “absorbed” merely because its source file exists or a unit test p
 - 修复已推送 `main@a9956bc5bc74e861e0ceeb78a345a4a3cd7c251a`；`stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 未触碰。Coze 尚未证明拉取该精确提交，故“最后活动真实日期显示、刷新恢复和 Console 健康”仍为云端待验。
 - 推送后的只读运行探针显示首页、`/simple-chat` 与创意健康端点均为 HTTP 200，但本地候选应用块为 `page-c5c96a8ca2ca24c1.js`，云端仍提供不同的 `page-e644bf085753358b.js`；两者 SHA-256 也不同。因此当前是“旧构建健康”，不是新候选已部署，禁止直接在该页面关闭验收。
 - **状态：总数/积分/项目的云端只读链路通过；最后活动 UI 为本地与 GitHub main 通过、Coze 待验。** 证据：`docs/testing/evidence/v588-admin-004-last-activity-local-20260830.json`。Pear `002-B/002-D/002-E` 继续保持 `DEFERRED / UNVERIFIED`，不重复测试也不冒充通过。
+
+## 2026-08-31 `V588-ADMIN-004` 仪表盘组件边界投影候选
+
+- Coze 旧候选 `3135679e51532fae899514f87f849d68f7c9e54f` 的管理员用户页真实显示 6 名用户，但积分全部为 `0`、项目全部为 `-`、最后登录全部为“从未”；这与同轮已验证的权威接口和其他管理页数据矛盾。
+- 根因位于 `dashboard-view.tsx`：`adminUsers -> AdminTabsUser` 映射保留了身份字段，却遗漏 `credits`、`project_count` 和 `last_login`。`admin-tabs.tsx` 已具备正确格式化逻辑，但接收到 `undefined` 后只能显示回退值。
+- 按 TDD 先增加组件边界合同，修复前 `4 passed / 1 failed`；最小修复只透传三个字段，聚焦投影矩阵随后为 `3 files / 13 tests / 0 failed`。
+- 新鲜本地门禁：TypeScript 与构建版 Lint 退出 `0`；全仓 `582 files passed / 23 PostgreSQL-gated skipped`、`4280 tests passed / 123 skipped / 0 failed`；8 GiB 生产构建完成 `118/118` 页面，Webpack `13.4` 分钟、TypeScript `55` 秒；干净候选保护基线为 `38/38 / 0 drift / 0 warnings`。
+- 修复已推送 `main@a27e33be0f6d3359cfac84f2ef2f6415c5bcd776`；`stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 未变化。Google Chrome 扩展、原生通信和浏览器进程诊断均正常，但现有 Coze 标签的读取、刷新、截图和底层页面指令持续超时；遵守约束未创建新标签或窗口。
+- **状态：LOCAL + GITHUB PASS / COZE PENDING / 未吸收。** Coze 必须精确拉取 `a27e33be`，强制刷新既有预览页后证明逐用户积分、项目数和最后登录均为真实值，刷新恢复且 Console 无新增错误，才能关闭本项。证据：`docs/testing/evidence/v588-admin-004-dashboard-boundary-local-20260831.json`。

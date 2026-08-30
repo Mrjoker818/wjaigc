@@ -2035,3 +2035,16 @@ BUG-018 已从未验证项移除。剩余顺序为 `002-B -> 002-D -> 002-E`；�
 | 最后活动 UI 候选 | `LOCAL + GITHUB PASS / COZE UNVERIFIED` | Coze 拉取精确 `a9956bc5`，既有 Google Chrome 预览标签强制刷新后，6 行显示真实时间而不是 `-`；刷新恢复且 Console error/warning 为 0。 |
 | 隔离 PostgreSQL 全仓门禁 | `123 TESTS SKIPPED / OPEN` | 配置专用 `POSTGRES_TEST_DATABASE_URL` 后运行；严禁使用 Coze 业务库。 |
 | Pear `002-B/002-D/002-E` | `DEFERRED / UNVERIFIED` | 按后期验证点单独关闭，不因管理员投影通过而改变状态。 |
+
+### 2026-08-31 `V588-ADMIN-004` 仪表盘边界候选后的剩余项
+
+| 项目 | 最新状态 | 关闭条件 |
+|---|---|---|
+| 三字段组件边界 | `LOCAL + GITHUB PASS` | `main@a27e33be` 已有 RED/GREEN、全量门禁、构建和保护基线证据。 |
+| Coze exact-SHA | `CLOUD PENDING` | Coze 工作区必须精确对齐 `a27e33be0f6d3359cfac84f2ef2f6415c5bcd776`，并完成生产重建与单一 5000 服务健康检查。 |
+| 用户列表真实显示 | `CLOUD PENDING` | 同一管理员会话中，积分、项目数和最后登录必须与 `/api/admin/users` 及积分/数据页面逐 userId 一致，不得继续出现全员 `0 / - / 从未`。 |
+| 刷新恢复与 Console | `CLOUD PENDING` | 既有 Google Chrome 预览标签强制刷新后数据保持一致，新增 console error/warning 和未处理 Promise 均为 0。 |
+| Chrome 控制通道 | `TEST TOOL BLOCKED` | 标签可枚举，扩展/原生通信/进程诊断通过，但所有页面指令超时；恢复现有标签控制后继续，禁止改用 360 或新建标签冒充验收。 |
+| 隔离 PostgreSQL 全仓门禁 | `123 TESTS SKIPPED / OPEN` | 配置专用 `POSTGRES_TEST_DATABASE_URL` 后运行；严禁使用 Coze 业务库。 |
+
+上述云端证据完成前，`V588-ADMIN-004-BUG-003` 和 `V588-ADMIN-004` 整体均不得标记为关闭或已吸收。

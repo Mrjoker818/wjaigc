@@ -1,0 +1,63 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-08-31T00:16:31+08:00",
+  "scope": "V588-ADMIN-004 管理员用户权威字段在 dashboard-view 组件边界丢失的云端旧版复现与本地候选修复",
+  "cloudPreDeploymentReproduction": {
+    "runtimeCommit": "3135679e51532fae899514f87f849d68f7c9e54f",
+    "authenticatedChromeSession": true,
+    "readOnly": true,
+    "userCount": 6,
+    "renderedFallbacks": {
+      "creditsAllZero": true,
+      "projectCountAllDash": true,
+      "lastLoginAllNever": true
+    },
+    "contradictsAuthoritativeApiAndAdminPages": true,
+    "mutationPerformed": false
+  },
+  "rootCause": {
+    "file": "src/components/dashboard/dashboard-view.tsx",
+    "boundary": "adminUsers -> AdminTabsUser",
+    "omittedFields": ["credits", "project_count", "last_login"],
+    "description": "下游 admin-tabs 已具备正确格式化函数，但仪表盘映射丢弃三个权威字段，导致 UI 只能显示回退值。"
+  },
+  "tdd": {
+    "red": { "passed": 4, "failed": 1 },
+    "greenFocused": { "files": 3, "passed": 13, "failed": 0 },
+    "full": { "filesPassed": 582, "filesSkipped": 23, "testsPassed": 4280, "testsSkipped": 123, "testsFailed": 0 },
+    "typescript": "passed",
+    "lintBuild": "passed-with-zero-errors",
+    "protectedBaseline": { "contracts": 38, "drift": 0, "warnings": 0 },
+    "productionBuild": {
+      "nodeHeapGiB": 8,
+      "webpackMinutes": 13.4,
+      "typescriptSeconds": 55,
+      "staticPages": 118,
+      "exitCode": 0
+    }
+  },
+  "candidate": {
+    "branch": "main",
+    "commit": "a27e33be0f6d3359cfac84f2ef2f6415c5bcd776",
+    "pushedToOriginMain": true,
+    "stableCommit": "52f7c601ed150769e15d06fb435c6e360e28c9e7",
+    "stableChanged": false
+  },
+  "chromeControl": {
+    "browser": "Google Chrome",
+    "profile": "用户1",
+    "existingTabsEnumerated": true,
+    "extensionInstalled": true,
+    "extensionEnabled": true,
+    "nativeHostManifestValid": true,
+    "chromeRunning": true,
+    "pageReadRefreshScreenshotAndCdpTimedOut": true,
+    "newTabOrWindowCreated": false
+  },
+  "limitations": {
+    "cozePulledCandidate": false,
+    "cozeCandidateUiVerified": false,
+    "isolatedPostgresSuites": "123 tests skipped",
+    "status": "LOCAL_PASS_GITHUB_MAIN_CLOUD_PENDING"
+  }
+}

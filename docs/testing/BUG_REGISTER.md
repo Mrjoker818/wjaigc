@@ -3333,3 +3333,16 @@ All listed Stage 4 defects are locally closed. S4-BUG-008 also passed its exact-
 | 回归 | 聚焦 `3 files / 12 tests`；全仓 `582 files passed / 23 PostgreSQL-gated skipped`、`4279 passed / 123 skipped / 0 failed`；TypeScript、构建版 Lint、保护基线 `38/38 / 0 drift / 0 warnings` 和 8 GiB 构建 `118/118` 通过。 |
 | 当前状态 | **LOCAL PASS / GITHUB MAIN PASS / COZE PENDING。** 修复提交 `a9956bc5bc74e861e0ceeb78a345a4a3cd7c251a` 已推送；必须在 Coze 拉取精确 SHA 后验证 6 行真实时间、刷新恢复与 Console 零新增错误，才能云端关闭。 |
 | 证据 | `docs/testing/evidence/v588-admin-004-last-activity-local-20260830.json`。 |
+
+### V588-ADMIN-004-BUG-003：仪表盘组件边界丢失积分、项目数和最后登录（2026-08-31）
+
+| 字段 | 内容 |
+|---|---|
+| 严重等级 | P1：权威 API 正确但管理员用户表展示伪造的 `0 / - / 从未`，管理员无法依据页面进行用户、积分和项目管理。 |
+| 云端稳定复现 | Coze `main@3135679e` 已登录管理员用户页显示 6 人；全部积分为 `0`、项目数为 `-`、最后登录为“从未”，与同一管理员会话的权威接口和积分/数据页面矛盾。 |
+| 根因 | `dashboard-view.tsx` 把 `adminUsers` 映射为 `AdminTabsUser` 时遗漏 `credits`、`project_count`、`last_login`；下游格式化函数只能对 `undefined` 使用回退值。 |
+| RED | 在 `admin-user-projection-contract.test.ts` 增加组件边界字段保持合同；修复前 `4 passed / 1 failed`，失败点为缺少 `credits: u.credits`。 |
+| 最小修复 | 仅在既有映射中透传三个权威字段；未修改认证、用户写入、积分、项目、供应商、任务、支付或账务链路。 |
+| 回归 | 聚焦 `3 files / 13 tests`；全仓 `582 files passed / 23 skipped`、`4280 passed / 123 PostgreSQL-gated skipped / 0 failed`；TypeScript、构建版 Lint、`118/118` 生产构建和干净保护基线 `38/38 / 0 drift / 0 warnings` 通过。 |
+| 当前状态 | **LOCAL PASS / GITHUB MAIN PASS / COZE PENDING。** 修复提交 `a27e33be0f6d3359cfac84f2ef2f6415c5bcd776` 已推送；Chrome 页面控制当前超时，尚未完成 Coze exact-SHA 拉取和 UI 回归，不得提前关闭。 |
+| 证据 | `docs/testing/evidence/v588-admin-004-dashboard-boundary-local-20260831.json`。 |

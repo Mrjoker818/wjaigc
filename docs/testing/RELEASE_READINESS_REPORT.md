@@ -1900,3 +1900,10 @@ The focused gate test passes `7/7`; the actual protected-baseline command passes
 - 同轮发现并稳定复现 P2：API 的有效 `last_login` 被 UI 硬编码 `-` 覆盖。候选只恢复权威字段显示，未改认证、用户写入、项目、积分、任务或账务。
 - `main@a9956bc5` 已通过 `4279 passed / 123 PostgreSQL-gated skipped / 0 failed`、TypeScript、零错误 Lint、保护基线和 `118/118` 构建，并已推送 GitHub；Coze 精确 SHA 尚未确认。
 - **全平台结论仍为“有条件通过”。** `V588-ADMIN-004` 只有在 Coze 真实显示最后活动日期、刷新恢复且 Console 无新增错误后才能完整关闭；隔离 PostgreSQL 与 Pear 后期验证项继续明确开放。
+
+## 2026-08-31 `V588-ADMIN-004` 仪表盘边界候选增量
+
+- 旧云端 UI 的 `0 / - / 从未` 已定位为组件边界丢字段，而非管理员 API、数据库投影或认证回归；候选只恢复三个权威字段的传递。
+- `main@a27e33be` 已通过 `4280 passed / 123 PostgreSQL-gated skipped / 0 failed`、TypeScript、零错误构建版 Lint、`118/118` 生产构建和保护基线 `38/38 / 0 drift / 0 warnings`，并已推送 GitHub；`stable` 与 donor 均未触碰。
+- Chrome 自动化当前只能枚举现有标签，任何页面读取或刷新均超时；扩展、原生通信、Chrome 进程诊断均通过。由于禁止创建新标签或窗口，本轮没有 Coze 拉取、沙箱重启或云端 UI 结果。
+- **全平台结论继续为“有条件通过”。** 本地候选具备部署资格，但 `V588-ADMIN-004-BUG-003` 与整项吸收仍为 Coze 待验；隔离 PostgreSQL 和 Pear 后期项继续开放。
