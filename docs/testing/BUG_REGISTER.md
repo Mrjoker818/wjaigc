@@ -3268,3 +3268,21 @@ All listed Stage 4 defects are locally closed. S4-BUG-008 also passed its exact-
 | 失败策略 | 数据库未配置返回 `projectionCoverage=unavailable`；数据库已配置但查询失败返回 500 / `ADMIN_USER_PROJECTION_FAILED`，不再输出假 0。 |
 | 永久测试 | 新增投影单元、API、UI 合同；保留密码审计、用户数量与仪表盘合同。100 个用户仍只允许 3 次 SQL。 |
 | 当前状态 | `LOCAL PASS / CLOUD PENDING`。聚焦 `21/21`；最终全仓 `4259 passed / 123 PostgreSQL-gated skipped / 0 failed`；TypeScript、零错误 Lint、保护基线和 8 GiB 构建 `118/118` 通过。真实 PostgreSQL 数据和 Coze 四接口逐用户一致性仍待验证。证据：`docs/testing/evidence/v588-admin-004-local-20260830.json`。 |
+
+#### `3bded1de` Coze 验收补充
+
+- Coze 已精确对齐 `main@3bded1de`，专项 `28/28`、全仓 `4259 passed / 123 skipped / 0 failed`、保护基线、TypeScript、构建版 Lint、8 GiB 构建和单一 5000 服务均通过；`stable@52f7c60` 未触碰。
+- 只读数据库投影核对得到用户总数 6，逐用户积分、项目数组长度和最大活动时间与新投影规则一致。
+- 管理员 Cookie 下四个真实 HTTP 响应未取得，因此当前状态更新为 **CLOUD DATA PASS / AUTHENTICATED HTTP UNVERIFIED**，不得把数据库复算冒充四接口真实调用。证据：`docs/testing/evidence/v588-admin-004-cloud-20260830.json`。
+
+### V588-PROVIDER-002-BUG-001：管理员 API 可写入模糊或无效模型授权（2026-08-30）
+
+| 字段 | 内容 |
+|---|---|
+| 严重等级 | P1：普通用户可能突然看不到管理员已授权模型，或授权落到错误供应商。 |
+| 稳定复现 | 旧 `POST /api/admin/users action=update` 直接接受 `chatModels/imageModels` 数组；多供应商同名裸键和不存在精确键均返回 200 并调用用户写入。 |
+| 根因 | 当前读取端已有精确目录、权限过滤和歧义诊断，但管理员写入边界仍信任前端规范化，API 客户端可绕过。 |
+| RED | 纯模块缺失；API 的歧义请求期望 409 实得 200、无效请求期望 400 实得 200、目录快照调用为 0；UI 保存失败后仍刷新。 |
+| 最小修复 | 新增纯规范化器；服务端一次读取公开目录，唯一裸键迁移为 `providerId::modelId`，歧义 409、无效/错误命名空间 400，失败零用户写入和零成功审计；UI 明确提示，只有成功才刷新。 |
+| 回归 | 专项 `59/59`；全仓 `582 files passed / 23 skipped`、`4275 passed / 123 PostgreSQL-gated skipped / 0 failed`；TypeScript、构建版 Lint、8 GiB 构建 `118/118` 通过。 |
+| 当前状态 | **LOCAL PASS / CLOUD PENDING**。实现来源提交 `e455ea8c`；待治理提交、推送及 Coze 管理员真实保存/拒绝/普通用户可见性验证。 |

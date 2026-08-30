@@ -120,6 +120,7 @@
   "src/components/dashboard/admin-tabs.tsx",
   "src/lib/admin-dashboard-projection.ts",
   "src/lib/admin-user-projection.ts",
+  "src/lib/admin-model-authorization.ts",
   "src/lib/asset-core/asset-release-readiness.ts",
   "src/lib/asset-core/canvas-adapter.ts",
   "src/lib/asset-core/canvas-placement-snapshot.ts",

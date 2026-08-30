@@ -1860,3 +1860,15 @@ The focused gate test passes `7/7`; the actual protected-baseline command passes
 - **本地候选可进入 Coze 验收，但发布结论保持“有条件通过”。** 关闭本项还需要 exact-SHA 部署后，在同一管理员会话中证明四处总用户数一致、逐用户积分/项目一致、真实活动时间可刷新恢复且 Console 无新增错误。
 - Pear `002-B/002-D/002-E` 保持后期 `DEFERRED / UNVERIFIED`，不再阻断本项，也没有被本项误标为通过。`stable` 和 donor 未触碰。
 - 最终全仓复跑 `4259 passed / 123 PostgreSQL-gated skipped / 0 failed`；跳过项仍不计作通过。机器证据：`docs/testing/evidence/v588-admin-004-local-20260830.json`。
+
+## 2026-08-30 `V588-ADMIN-004` 云端候选补充
+
+- Coze exact-SHA、测试、构建、单实例与健康检查通过；底层数据库投影一致。
+- 因未取得管理员 Cookie 下四接口真实响应，本项不能标记完整云端关闭，当前为 **数据层通过 / HTTP 与 UI 待补证**。
+
+## 2026-08-30 `V588-PROVIDER-002` 候选判定增量
+
+- 管理员授权写入已补服务端精确目录门禁，歧义和无效授权在任何用户写入或成功审计前失败；普通非模型更新不读取目录。
+- UI 明确区分保存失败与保存后刷新失败；未改变选择器布局、空数组“不限”语义、任务路由、供应商调用或积分账务。
+- 本地 `4275 passed / 123 PostgreSQL-gated skipped / 0 failed`、TypeScript、零错误构建版 Lint和 `118/118` 生产构建通过。
+- **发布结论仍为“有条件通过”。** 候选完成治理和推送后，必须在 Coze 管理员会话验证唯一裸键迁移、歧义/无效拒绝、普通用户模型可见与刷新恢复；`stable` 保持只读。

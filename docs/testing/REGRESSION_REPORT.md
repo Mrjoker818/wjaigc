@@ -2312,3 +2312,17 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - 默认 4 GiB Node 堆在 Webpack 阶段 OOM；同一代码以 8 GiB 堆完成编译、TypeScript、`118/118` 静态页面和路由收集。该资源事实单独记录，不归因于管理员投影或 Pear。
 - 隔离 PostgreSQL 测试没有 `POSTGRES_TEST_DATABASE_URL` 时继续列为跳过，不能写成通过。
 - 最终全仓复跑为 `580 files passed / 23 skipped`、`4259 tests passed / 123 skipped / 0 failed`，耗时 `400.39s`。机器证据：`docs/testing/evidence/v588-admin-004-local-20260830.json`。
+
+## 2026-08-30 `V588-ADMIN-004` Coze exact-SHA 增量
+
+- `main@3bded1de` 在 Coze 精确对齐，tree `827d0e20`；`stable@52f7c60` 未变化。专项 `28/28`、全仓 `4259 passed / 123 skipped / 0 failed`、保护基线、TypeScript、构建版 Lint、生产构建与三个健康端点通过。
+- 数据库只读复算确认总用户数 6，积分、项目数组长度和活动最大值与投影逻辑一致；没有修改数据制造通过。
+- **回归判定：CLOUD DATA PASS / AUTHENTICATED HTTP UNVERIFIED。** 缺少同一管理员 Cookie 对四接口的真实响应，因此管理员 UI 与 HTTP 合同仍保留补证项。
+
+## 2026-08-30 `V588-PROVIDER-002` 精确授权写入门禁本地回归
+
+- 保留当前更先进的 `task-core/model-catalog` 和 `/api/models`，没有复制 donor 目录或执行器。
+- RED 稳定证明旧 API 会接受歧义裸键和无效精确键，且管理员界面不检查失败响应。最小实现后，唯一裸键升级为精确键；歧义返回 409，无效/错误命名空间返回 400，失败零写入、零成功审计。
+- 管理员界面仅在保存成功后刷新；保存成功但刷新失败使用独立警告，不再误报保存失败。
+- 专项 `59/59`；新鲜全仓 `582 files passed / 23 PostgreSQL-gated skipped`、`4275 passed / 123 skipped / 0 failed`；TypeScript、构建版 Lint、空白检查和 8 GiB 生产构建 `118/118` 通过。
+- **回归判定：LOCAL PASS / CLOUD PENDING。** 新生产文件将以实现提交 `e455ea8c` 的精确路径登记保护来源；云端真实管理员保存与普通用户可见性尚未执行。

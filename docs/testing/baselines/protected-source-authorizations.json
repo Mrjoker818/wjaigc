@@ -168,6 +168,7 @@
     { "path": "src/lib/simple-chat-workspace-handoff-client.ts", "sourceCommit": "3f056442" },
     { "path": "src/lib/simple-chat-workspace-handoff-server.ts", "sourceCommit": "496d7892" },
     { "path": "src/lib/simple-chat-workspace-handoff.ts", "sourceCommit": "3f056442" },
-    { "path": "src/lib/user-types.ts", "sourceCommit": "250d7cf1" }
+    { "path": "src/lib/user-types.ts", "sourceCommit": "250d7cf1" },
+    { "path": "src/lib/admin-model-authorization.ts", "sourceCommit": "e455ea8c" }
   ]
 }

@@ -2000,3 +2000,22 @@ BUG-018 已从未验证项移除。剩余顺序为 `002-B -> 002-D -> 002-E`；�
 | Google Chrome UI 回归 | `CLOUD PENDING` | exact-SHA 部署、沙箱重启、既有预览标签强制刷新后，管理员用户列表、详情、积分与数据页无新增 Console error/warning。 |
 
 上述云端证据完成前，`V588-ADMIN-004` 只能标记本地通过，不能写成完整吸收关闭。
+
+### 2026-08-30 `V588-ADMIN-004` Coze 补证后剩余项
+
+| 项目 | 最新状态 | 关闭条件 |
+|---|---|---|
+| exact-SHA 测试/构建/服务 | `CLOUD PASS` | `main@3bded1de`、全仓零失败、构建与单实例健康已取得证据。 |
+| 数据库投影一致性 | `CLOUD DATA PASS` | 只读复算的用户数、积分、项目数组与活动时间一致。 |
+| 四接口同会话响应 | `AUTHENTICATED HTTP UNVERIFIED` | 使用现有管理员 Cookie 真实请求 users/credits/user-images/dashboard-stats，并逐 userId 比对；不得用 SQL 复算替代。 |
+| 管理员 UI | `CLOUD PENDING` | 真实打开用户、积分、数据与仪表盘页面，刷新恢复且 Console 无新增错误。 |
+
+### 2026-08-30 `V588-PROVIDER-002` 云端待验证项
+
+| 项目 | 最新状态 | 关闭条件 |
+|---|---|---|
+| 唯一裸键迁移 | `LOCAL PASS / CLOUD PENDING` | 管理员保存历史唯一裸模型后，服务端持久化精确 `providerId::modelId`。 |
+| 歧义裸键拒绝 | `LOCAL PASS / CLOUD PENDING` | 同名多供应商裸键返回 409、明确提示、用户记录与成功审计均不变化。 |
+| 无效/错误类型拒绝 | `LOCAL PASS / CLOUD PENDING` | 不存在、禁用、畸形或错误命名空间返回 400 且零写入。 |
+| 普通用户模型可见性 | `LOCAL PASS / CLOUD PENDING` | 保存精确授权后，普通用户 `/api/models` 与三个工作区只显示被授权模型。 |
+| 隔离 PostgreSQL | `123 TESTS SKIPPED / OPEN` | 配置专用 `POSTGRES_TEST_DATABASE_URL` 后复跑；严禁使用业务库。 |

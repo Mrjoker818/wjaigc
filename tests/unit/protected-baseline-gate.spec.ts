@@ -89,6 +89,7 @@ const historicalSourceAuthorizations = [
   ['src/components/canvas/CanvasImageActionToolbar.tsx', '69d3466'],
   ['src/components/canvas/CanvasZoomCluster.tsx', 'c808e50'],
   ['src/lib/admin-dashboard-projection.ts', '1ba98f7'],
+  ['src/lib/admin-model-authorization.ts', 'e455ea8c'],
   ['src/lib/asset-core/asset-release-readiness.ts', 'e809f5c'],
   ['src/lib/asset-core/canvas-adapter.ts', '5a35b98'],
   ['src/lib/asset-core/canvas-placement-snapshot.ts', '69479f7'],

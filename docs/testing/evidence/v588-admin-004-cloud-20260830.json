@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-08-30T17:59:22+08:00",
+  "candidate": {
+    "branch": "main",
+    "commit": "3bded1dec29733140d3c92cfab17d27ead238a75",
+    "tree": "827d0e209d20846cfa16135a67925218fdca87ee",
+    "stableCommit": "52f7c601ed150769e15d06fb435c6e360e28c9e7",
+    "buildId": "jSeNxNYhIDIqt04cN0JSE"
+  },
+  "verification": {
+    "focusedTestsPassed": 28,
+    "fullTestsPassed": 4259,
+    "fullTestsSkipped": 123,
+    "fullTestsFailed": 0,
+    "protectedBaseline": "passed",
+    "typescript": "passed",
+    "lintBuild": "passed",
+    "productionBuild": "passed",
+    "httpHealth": { "root": 200, "simpleChat": 200, "authMe": 200 },
+    "staticAssets": { "total": 11, "failed": 0 }
+  },
+  "dataProjection": {
+    "mode": "read-only database projection replay",
+    "totalUsers": 6,
+    "creditsAndProjectCountsConsistent": true,
+    "lastActivityProjectionConsistent": true,
+    "databaseMutated": false
+  },
+  "limitations": {
+    "authenticatedAdminHttpResponsesCaptured": false,
+    "adminUiCaptured": false,
+    "claim": "CLOUD_DATA_PASS_AUTHENTICATED_HTTP_UNVERIFIED"
+  }
+}
