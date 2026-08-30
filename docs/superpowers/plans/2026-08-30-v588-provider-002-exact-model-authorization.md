@@ -58,7 +58,7 @@ pnpm exec vitest run src/__tests__/api/admin-model-authorization.test.ts
 - [x] 回归管理员用户投影、密码审计、模型目录、普通用户目录、生成面板授权合同与任务精确路由。
 - [x] 运行 TypeScript、构建版 Lint、全仓测试与 8 GiB 生产构建。
 - [x] 披露所有跳过项；失败不得删除、屏蔽或扩大白名单。
-- [ ] 以实现提交为来源登记新生产文件的精确路径后，在干净候选工作树重跑保护基线。
+- [x] 以实现提交为来源登记新生产文件的精确路径后，在干净候选工作树重跑保护基线。
 
 ```powershell
 pnpm exec vitest run src/__tests__/lib/admin-model-authorization.test.ts src/__tests__/api/admin-model-authorization.test.ts src/__tests__/components/dashboard-model-authorization-contract.test.ts src/__tests__/api/admin-user-projection.test.ts src/__tests__/api/admin-users-password-audit.test.ts src/__tests__/api/models-configured-catalog.test.ts src/__tests__/api/models-defaults.test.ts src/__tests__/lib/task-model-catalog.test.ts
@@ -72,8 +72,8 @@ git diff --check
 
 ## 任务 7：记录、提交与云端真实验收
 
-- [ ] 更新 V5.8.8 吸收清单、Bug 登记、回归报告、发布准备报告和未验证项。
-- [ ] 创建本地机器可读证据，包含 base/head/tree、测试统计、构建、保护基线和 `stable` 哈希。
+- [x] 更新 V5.8.8 吸收清单、Bug 登记、回归报告、发布准备报告和未验证项。
+- [x] 创建本地机器可读证据，包含 base/head/tree、测试统计、构建、保护基线和 `stable` 哈希。
 - [ ] 只提交并推送 `main`，复核 `origin/stable` 未变化。
 - [ ] Coze 精确拉取该 SHA，重启单一 5000 服务并强制刷新现有 Google Chrome 预览页。
 - [ ] 同一管理员会话验证：唯一裸键迁移、歧义拒绝、无效拒绝、普通用户模型可见、刷新/重启保持、Console 零新增错误。

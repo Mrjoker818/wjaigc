@@ -6,6 +6,8 @@
     "baseCommit": "3bded1dec29733140d3c92cfab17d27ead238a75",
     "implementationCommit": "e455ea8c46615b4e7734761d74ae1cc048068027",
     "implementationTree": "3af9f864714aa72a26d70e6f71154ced07a36b64",
+    "verificationCommit": "cb5da811f1eadef2fd316191c7e447ccb21b302f",
+    "verificationTree": "68d16910e0405aeee5cbb9a66d53d200a687dec6",
     "stableCommit": "52f7c601ed150769e15d06fb435c6e360e28c9e7",
     "cloudStatus": "pending"
   },
@@ -28,6 +30,12 @@
     "typescript": "passed",
     "lintBuild": "passed",
     "diffCheck": "passed",
+    "protectedBaseline": {
+      "featureIds": "38/38",
+      "unapprovedSourceDrift": 0,
+      "warnings": 0,
+      "status": "passed"
+    },
     "productionBuild": { "heap": "8 GiB", "staticPages": "118/118", "status": "passed" }
   },
   "behavior": {
@@ -39,7 +47,6 @@
     "uiRefreshFailureAfterSave": "saved-but-refresh-failed warning"
   },
   "deferred": [
-    "clean-candidate protected-baseline verification after provenance commit",
     "Coze exact-SHA administrator save and ordinary-user visibility verification",
     "isolated PostgreSQL integration suite"
   ]
