@@ -2019,3 +2019,4 @@ BUG-018 已从未验证项移除。剩余顺序为 `002-B -> 002-D -> 002-E`；�
 | 无效/错误类型拒绝 | `LOCAL PASS / CLOUD PENDING` | 不存在、禁用、畸形或错误命名空间返回 400 且零写入。 |
 | 普通用户模型可见性 | `LOCAL PASS / CLOUD PENDING` | 保存精确授权后，普通用户 `/api/models` 与三个工作区只显示被授权模型。 |
 | 隔离 PostgreSQL | `123 TESTS SKIPPED / OPEN` | 配置专用 `POSTGRES_TEST_DATABASE_URL` 后复跑；严禁使用业务库。 |
+| 停用供应商目录过滤 | `OLD CLOUD FAIL / LOCAL PASS` | Coze 部署 `95b489be` 或后续提交后，停用供应商不得出现在聊天/图像授权选项；可逆单模型保存必须返回 200，并恢复原“不限”状态。 |

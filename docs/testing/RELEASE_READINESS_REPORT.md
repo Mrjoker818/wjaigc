@@ -1872,3 +1872,10 @@ The focused gate test passes `7/7`; the actual protected-baseline command passes
 - UI 明确区分保存失败与保存后刷新失败；未改变选择器布局、空数组“不限”语义、任务路由、供应商调用或积分账务。
 - 本地 `4275 passed / 123 PostgreSQL-gated skipped / 0 failed`、TypeScript、零错误构建版 Lint和 `118/118` 生产构建通过。
 - **发布结论仍为“有条件通过”。** 候选完成治理和推送后，必须在 Coze 管理员会话验证唯一裸键迁移、歧义/无效拒绝、普通用户模型可见与刷新恢复；`stable` 保持只读。
+
+## 2026-08-30 `V588-PROVIDER-002` 停用目录候选增量
+
+- 旧云端的真实管理员保存仍失败：停用供应商模型被前端列出并随整批提交，后端 400 拒绝后界面回滚。该结果证明原写入门禁有效，同时暴露前后端目录不一致。
+- `95b489be` 只让管理员授权选项排除停用供应商，不改 API Key、启停状态、用户持久化、模型路由、任务或积分。
+- 本地全仓 `4276 passed / 123 PostgreSQL-gated skipped / 0 failed`，TypeScript、零错误 Lint、8 GiB 构建 `118/118` 和干净保护基线通过。
+- **发布结论保持“有条件通过”。** 候选可推送 `main` 进入 Coze 复验；部署前不得把管理员有效保存或普通用户模型可见性标记为云端通过，`stable@52f7c60` 保持只读。

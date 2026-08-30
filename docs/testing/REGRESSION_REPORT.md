@@ -2326,3 +2326,11 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - 管理员界面仅在保存成功后刷新；保存成功但刷新失败使用独立警告，不再误报保存失败。
 - 专项 `59/59`；新鲜全仓 `582 files passed / 23 PostgreSQL-gated skipped`、`4275 passed / 123 skipped / 0 failed`；TypeScript、构建版 Lint、空白检查和 8 GiB 生产构建 `118/118` 通过。
 - **回归判定：LOCAL PASS / CLOUD PENDING。** 新生产文件将以实现提交 `e455ea8c` 的精确路径登记保护来源；云端真实管理员保存与普通用户可见性尚未执行。
+
+## 2026-08-30 `V588-PROVIDER-002` 停用供应商目录对齐回归
+
+- Google Chrome 真实网络证据证明，旧云端点击事件和 POST 均正常；失败来自停用供应商模型仍被前端加入整批授权，后端按公开目录正确返回 400 / `MODEL_ASSIGNMENT_INVALID`。
+- 新测试先以 `1 failed / 4 passed` 复现目录不一致；最小实现仅过滤 `isEnabled === false` 的授权选项，随后专项 `20/20` 通过。
+- 最终全仓为 `582 files passed / 23 PostgreSQL-gated skipped`、`4276 passed / 123 skipped / 0 failed`；TypeScript、零错误构建版 Lint、8 GiB 生产构建 `118/118` 通过。
+- 干净 detached 工作树在 `95b489be` 通过保护基线：`38/38`、`0` 未授权漂移、`0` 警告。原工作目录中的历史 `.playwright-cli` 与两个只读参考仓库未删除、未纳入候选。
+- **回归判定：LOCAL PASS / CLOUD PENDING。** 旧云端失败不冒充新候选通过；必须 exact-SHA 部署后重做可逆授权保存和普通用户可见性。

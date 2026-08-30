@@ -1,0 +1,42 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-08-30T20:15:52+08:00",
+  "scope": "V588-PROVIDER-002 disabled-provider authorization catalog alignment",
+  "cloudReproduction": {
+    "deployedCommit": "cdfb47a7edb28dfe3c6d0bea35c9536078cb7ac3",
+    "browser": "Google Chrome existing signed-in tab",
+    "user": "canvas-user",
+    "action": "remove one enabled Pear image model from an unrestricted model set",
+    "requestPath": "/api/admin/users",
+    "requestMethod": "POST",
+    "responseStatus": 400,
+    "responseCode": "MODEL_ASSIGNMENT_INVALID",
+    "rejectedAssignment": "api_1782185653250_5i3bdx2::gpt-image-2",
+    "providerState": "disabled",
+    "uiAfterResponse": "checkbox reverted to checked and no authorization state was written"
+  },
+  "rootCause": "The dashboard authorization options included disabled providers while the server public catalog intentionally excludes them.",
+  "candidate": {
+    "branch": "main",
+    "commit": "95b489be40bf3bc01dfad1a35da7dffa0d2aba4a",
+    "stableCommit": "52f7c601ed150769e15d06fb435c6e360e28c9e7",
+    "productionChange": "Skip providers whose isEnabled value is false when building administrator model authorization options.",
+    "testChange": "A disabled-provider authorization option regression test was added after a verified RED failure."
+  },
+  "verification": {
+    "red": "1 failed / 4 passed; disabled-provider::disabled-image remained visible",
+    "focused": "20 passed / 0 failed",
+    "full": "582 files passed / 23 skipped; 4276 tests passed / 123 skipped / 0 failed",
+    "skipReason": "POSTGRES_TEST_DATABASE_URL is not configured.",
+    "typescript": "passed",
+    "lintBuild": "passed",
+    "productionBuild": "8 GiB heap; webpack 13.6 minutes; 118/118 static pages; passed",
+    "protectedBaseline": "clean detached worktree; 38/38 features; 0 unapproved drift; 0 warnings"
+  },
+  "cloudStatus": "candidate not yet deployed",
+  "deferred": [
+    "Deploy commit 95b489be or a descendant to Coze and repeat the reversible administrator save.",
+    "Verify ordinary-user model visibility and refresh recovery.",
+    "Run the isolated PostgreSQL suite with POSTGRES_TEST_DATABASE_URL."
+  ]
+}

@@ -3286,3 +3286,16 @@ All listed Stage 4 defects are locally closed. S4-BUG-008 also passed its exact-
 | 最小修复 | 新增纯规范化器；服务端一次读取公开目录，唯一裸键迁移为 `providerId::modelId`，歧义 409、无效/错误命名空间 400，失败零用户写入和零成功审计；UI 明确提示，只有成功才刷新。 |
 | 回归 | 专项 `59/59`；全仓 `582 files passed / 23 skipped`、`4275 passed / 123 PostgreSQL-gated skipped / 0 failed`；TypeScript、构建版 Lint、8 GiB 构建 `118/118` 通过。 |
 | 当前状态 | **LOCAL PASS / CLOUD PENDING**。实现来源提交 `e455ea8c`；待治理提交、推送及 Coze 管理员真实保存/拒绝/普通用户可见性验证。 |
+
+### V588-PROVIDER-002-BUG-002：停用供应商仍出现在授权选项并使整批保存失败（2026-08-30）
+
+| 字段 | 内容 |
+|---|---|
+| 严重等级 | P1：管理员无法把“不限”切换为精确白名单，普通用户模型授权无法可靠维护。 |
+| 云端复现 | `main@cdfb47a7` 的已登录 Google Chrome 管理员页中，对 `canvas-user` 取消一个 Pear 图像模型。浏览器真实发出 `POST /api/admin/users`，服务端返回 400 / `MODEL_ASSIGNMENT_INVALID`，界面随后回滚。 |
+| 根因 | 前端授权选项遍历全部管理员供应商；后端公开模型目录只接受启用且配置完整的供应商。停用的“虚宝图像”仍被前端自动加入整批精确键，导致合法变更被同批旧键拒绝。 |
+| RED | 新增停用供应商目录测试；修复前收到 `enabled-provider` 与 `disabled-provider` 两项，期望仅一项，结果 `1 failed / 4 passed`。 |
+| 最小修复 | `buildDashboardModelAuthorizationOptions()` 只跳过 `isEnabled === false` 的供应商，使前端授权目录与服务端公开目录保持一致；未修改供应商配置、用户既有授权、生成、任务或账务。 |
+| 本地回归 | 聚焦 `20/20`；全仓 `582 files passed / 23 skipped`、`4276 passed / 123 PostgreSQL-gated skipped / 0 failed`；TypeScript、零错误 Lint、8 GiB 生产构建 `118/118` 和干净候选保护基线 `38/38 / 0 drift / 0 warnings` 通过。 |
+| 当前状态 | **LOCAL PASS / CLOUD PENDING**。候选 `95b489be40bf3bc01dfad1a35da7dffa0d2aba4a`；部署后必须重做可逆单模型授权并恢复“不限”，再验证普通用户可见性。 |
+| 证据 | `docs/testing/evidence/v588-provider-002-disabled-catalog-20260830.json`。 |
