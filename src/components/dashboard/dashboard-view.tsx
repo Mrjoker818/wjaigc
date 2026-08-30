@@ -2918,8 +2918,31 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                 imageModels,
                 adminImageModelOptions,
               );
-              await fetch('/api/admin/users', { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include', body: JSON.stringify({ action: 'update', userId, updates: { chatModels: normalizedChatModels, imageModels: normalizedImageModels } }) });
-              await refreshAdmin();
+              try {
+                const response = await fetch('/api/admin/users', { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include', body: JSON.stringify({ action: 'update', userId, updates: { chatModels: normalizedChatModels, imageModels: normalizedImageModels } }) });
+                const data = await response.json().catch(() => ({ success: false, error: '模型授权保存响应无效' })) as {
+                  success?: boolean;
+                  code?: string;
+                  error?: string;
+                };
+                if (!response.ok || !data.success) {
+                  if (data.code === 'MODEL_ASSIGNMENT_AMBIGUOUS') {
+                    toast.error('存在同名模型，请重新选择具体供应商模型');
+                  } else {
+                    toast.error(data.error || '模型授权保存失败，请稍后重试');
+                  }
+                  return;
+                }
+              } catch {
+                toast.error('模型授权保存失败，请检查网络后重试');
+                return;
+              }
+              try {
+                await refreshAdmin();
+                toast.success('模型授权已保存');
+              } catch {
+                toast.warning('模型授权已保存，但列表刷新失败');
+              }
             }}
             adminChatModels={adminChatModelOptions}
             adminImageModels={adminImageModelOptions}

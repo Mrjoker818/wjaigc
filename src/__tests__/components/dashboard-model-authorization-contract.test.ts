@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import * as dashboardModule from '@/components/dashboard/dashboard-view';
 import type { ApiProvider } from '@/lib/universal-api-types';
+
+const dashboardSource = readFileSync(
+  resolve(process.cwd(), 'src/components/dashboard/dashboard-view.tsx'),
+  'utf8',
+);
 
 interface ModelOption {
   id: string;
@@ -49,6 +56,21 @@ function provider(
 }
 
 describe('dashboard model authorization contract', () => {
+  it('does not silently refresh after a failed model-authorization save', () => {
+    const callbackStart = dashboardSource.indexOf('onUpdateUserModels={async');
+    const callbackEnd = dashboardSource.indexOf('adminChatModels=', callbackStart);
+    const callbackSource = dashboardSource.slice(callbackStart, callbackEnd);
+
+    expect(callbackStart).toBeGreaterThan(-1);
+    expect(callbackSource).toContain('response.ok');
+    expect(callbackSource).toContain('data.success');
+    expect(callbackSource).toContain('toast.error');
+    expect(callbackSource).toContain("toast.warning('模型授权已保存，但列表刷新失败')");
+    expect(callbackSource.indexOf('if (!response.ok || !data.success)')).toBeLessThan(
+      callbackSource.indexOf('await refreshAdmin()'),
+    );
+  });
+
   it('labels duplicate model ids with their provider while keeping exact assignment ids', () => {
     const options = dashboardHelpers.providerModelOptions?.(
       ['shared-model'],

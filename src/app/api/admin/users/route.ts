@@ -19,6 +19,8 @@ import {
   type ProjectProjectionRow,
   type ProjectionCoverage,
 } from '@/lib/admin-user-projection';
+import { normalizeAdminModelAssignments } from '@/lib/admin-model-authorization';
+import { getPublicModelCatalogSnapshot } from '@/lib/server-api-config';
 
 export const dynamic = 'force-dynamic';
 
@@ -147,6 +149,57 @@ export async function POST(request: NextRequest) {
       if (!body.userId) {
         return NextResponse.json({ success: false, error: 'Missing userId' }, { status: 400 });
       }
+      const hasChatModelUpdate = body.updates?.chatModels !== undefined;
+      const hasImageModelUpdate = body.updates?.imageModels !== undefined;
+      let normalizedChatModels: string[] | undefined;
+      let normalizedImageModels: string[] | undefined;
+      const modelAuthorizationMigrations = { chat: 0, image: 0 };
+
+      if (hasChatModelUpdate || hasImageModelUpdate) {
+        const snapshot = await getPublicModelCatalogSnapshot();
+        if (hasChatModelUpdate) {
+          const result = normalizeAdminModelAssignments({
+            assignments: body.updates?.chatModels,
+            namespace: 'chat',
+            models: snapshot.models,
+          });
+          if (!result.ok) {
+            return NextResponse.json({
+              success: false,
+              code: result.code,
+              error: result.code === 'MODEL_ASSIGNMENT_AMBIGUOUS'
+                ? '模型授权存在多个供应商，请选择具体供应商模型'
+                : '模型授权无效或不属于当前模型类型',
+              field: 'chatModels',
+              assignment: result.assignment,
+              candidateCount: result.candidateCount,
+            }, { status: result.code === 'MODEL_ASSIGNMENT_AMBIGUOUS' ? 409 : 400 });
+          }
+          normalizedChatModels = result.assignments;
+          modelAuthorizationMigrations.chat = result.migrated.length;
+        }
+        if (hasImageModelUpdate) {
+          const result = normalizeAdminModelAssignments({
+            assignments: body.updates?.imageModels,
+            namespace: 'image',
+            models: snapshot.models,
+          });
+          if (!result.ok) {
+            return NextResponse.json({
+              success: false,
+              code: result.code,
+              error: result.code === 'MODEL_ASSIGNMENT_AMBIGUOUS'
+                ? '模型授权存在多个供应商，请选择具体供应商模型'
+                : '模型授权无效或不属于当前模型类型',
+              field: 'imageModels',
+              assignment: result.assignment,
+              candidateCount: result.candidateCount,
+            }, { status: result.code === 'MODEL_ASSIGNMENT_AMBIGUOUS' ? 409 : 400 });
+          }
+          normalizedImageModels = result.assignments;
+          modelAuthorizationMigrations.image = result.migrated.length;
+        }
+      }
       const user = await updateManagedUser(body.userId, {
         ...(typeof body.updates?.name === 'string' ? { name: body.updates.name } : {}),
         ...(typeof body.updates?.email === 'string' ? { email: body.updates.email } : {}),
@@ -156,8 +209,8 @@ export async function POST(request: NextRequest) {
           ? { apiPermissions: body.updates.apiPermissions as User['apiPermissions'] }
           : {}),
         ...(body.updates?.productType !== undefined ? { productType: String(body.updates.productType || '') || undefined } : {}),
-        ...(body.updates?.chatModels !== undefined ? { chatModels: Array.isArray(body.updates.chatModels) ? body.updates.chatModels as string[] : undefined } : {}),
-        ...(body.updates?.imageModels !== undefined ? { imageModels: Array.isArray(body.updates.imageModels) ? body.updates.imageModels as string[] : undefined } : {}),
+        ...(hasChatModelUpdate ? { chatModels: normalizedChatModels } : {}),
+        ...(hasImageModelUpdate ? { imageModels: normalizedImageModels } : {}),
         ...(body.updates?.dailyTokenLimit !== undefined ? { dailyTokenLimit: Number(body.updates.dailyTokenLimit) || undefined } : {}),
         ...(body.updates?.monthlyTokenLimit !== undefined ? { monthlyTokenLimit: Number(body.updates.monthlyTokenLimit) || undefined } : {}),
         ...(body.updates?.dailyImageLimit !== undefined ? { dailyImageLimit: Number(body.updates.dailyImageLimit) || undefined } : {}),
@@ -166,6 +219,11 @@ export async function POST(request: NextRequest) {
       const auditUpdates = { ...body.updates };
       if (auditUpdates.password) {
         auditUpdates.password = '[REDACTED]';
+      }
+      if (hasChatModelUpdate) auditUpdates.chatModels = normalizedChatModels;
+      if (hasImageModelUpdate) auditUpdates.imageModels = normalizedImageModels;
+      if (modelAuthorizationMigrations.chat > 0 || modelAuthorizationMigrations.image > 0) {
+        auditUpdates.modelAuthorizationMigrations = modelAuthorizationMigrations;
       }
       await dbAddAuditLog({ user_id: admin.id, user_name: admin.name, action: 'user_update', target_type: 'user', target_id: body.userId, detail: `更新用户 ${body.userId}: ${JSON.stringify(auditUpdates)}`, ip_address: null, created_at: Date.now() });
       return NextResponse.json({ success: Boolean(user), user });

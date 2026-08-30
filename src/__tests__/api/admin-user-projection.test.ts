@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   listManagedUsers: vi.fn(),
   isDatabaseConfigured: vi.fn(),
   execSql: vi.fn(),
+  getPublicModelCatalogSnapshot: vi.fn(),
 }));
 
 vi.mock('server-only', () => ({}));
@@ -28,6 +29,10 @@ vi.mock('@/lib/db-storage', () => ({
 vi.mock('@/lib/db-client', () => ({
   isDatabaseConfigured: mocks.isDatabaseConfigured,
   execSql: mocks.execSql,
+}));
+
+vi.mock('@/lib/server-api-config', () => ({
+  getPublicModelCatalogSnapshot: mocks.getPublicModelCatalogSnapshot,
 }));
 
 import { GET } from '@/app/api/admin/users/route';
