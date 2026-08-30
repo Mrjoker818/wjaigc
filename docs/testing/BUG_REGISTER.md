@@ -3320,3 +3320,16 @@ All listed Stage 4 defects are locally closed. S4-BUG-008 also passed its exact-
 - **BUG-003 管理员保存与历史 JSONB 持久化已云端关闭。** 普通用户实际登录后的 `/api/models` 与三个工作区可见性仍是独立未验证项。
 - 首次进入仪表盘曾遇到延迟分块 `5504` HTTP 500；服务稳定后清缓存强刷恢复，随后 Google Chrome 检查的 34 个 JS/CSS 均为 200。该部署缓存现象不归入认证持久化通过项。
 - 证据：`docs/testing/evidence/v588-provider-002-model-storage-compat-cloud-20260830.json`。
+
+### V588-ADMIN-004-BUG-002：用户列表忽略权威最后活动时间（2026-08-30）
+
+| 字段 | 内容 |
+|---|---|
+| 严重等级 | P2：管理员能看到用户，但无法判断真实活跃时间，影响用户运营、异常账号排查和跨页面数据核对。 |
+| 云端稳定复现 | 已登录 Google Chrome 中，`/api/admin/users` 为 6 个用户返回有效 `last_login`；用户列表对应 6 行却全部显示 `-`。同期 users/credits/user-images/dashboard-stats 四接口均为 200，总用户数均为 6，排除数据库无数据和认证失败。 |
+| 根因 | `src/components/dashboard/admin-tabs.tsx` 已定义 `getUserLastLogin(user)`，但最后活动单元格仍硬编码 `-`，权威字段从未进入渲染。 |
+| RED | 在 `admin-user-projection-contract.test.ts` 增加“必须渲染活动投影函数、不得硬编码占位符”的合同；修复前 `3 passed / 1 failed`。 |
+| 最小修复 | 只把单元格从 `-` 替换为 `{getUserLastLogin(u)}`；不修改用户、认证、积分、项目、审计、供应商、任务或账务逻辑。 |
+| 回归 | 聚焦 `3 files / 12 tests`；全仓 `582 files passed / 23 PostgreSQL-gated skipped`、`4279 passed / 123 skipped / 0 failed`；TypeScript、构建版 Lint、保护基线 `38/38 / 0 drift / 0 warnings` 和 8 GiB 构建 `118/118` 通过。 |
+| 当前状态 | **LOCAL PASS / GITHUB MAIN PASS / COZE PENDING。** 修复提交 `a9956bc5bc74e861e0ceeb78a345a4a3cd7c251a` 已推送；必须在 Coze 拉取精确 SHA 后验证 6 行真实时间、刷新恢复与 Console 零新增错误，才能云端关闭。 |
+| 证据 | `docs/testing/evidence/v588-admin-004-last-activity-local-20260830.json`。 |

@@ -2024,3 +2024,14 @@ BUG-018 已从未验证项移除。剩余顺序为 `002-B -> 002-D -> 002-E`；�
 | 普通用户模型可见性 | `UNVERIFIED` | 使用安全的普通用户会话验证 `/api/models`、无限画布、节点模式和独立智能对话仅展示管理员授权模型；不得使用管理员会话替代。 |
 | 模型列 PostgreSQL 双契约 | `123 TESTS SKIPPED / OPEN` | 在专用隔离库分别建立 JSONB 与 TEXT[] 模式执行真实写入测试；严禁使用 Coze 业务库作为测试库。 |
 | 服务替换后的延迟分块一致性 | `INTERMITTENT / OPEN` | 首次导航曾请求 `5504` 并返回 500；服务稳定后清缓存强刷恢复且 34 个资源全 200。需由部署流程确保构建目录切换与服务启动原子一致。 |
+
+### 2026-08-30 `V588-ADMIN-004` 最后活动候选后的剩余项
+
+| 项目 | 最新状态 | 关闭条件 |
+|---|---|---|
+| 四接口与三页面用户总数 | `CLOUD PASS` | 已登录管理员会话中 users/credits/user-images/dashboard-stats 均为 200，四处总数均为 6。 |
+| 逐用户积分与项目数 | `CLOUD PASS` | `admin_mr_joker=388/10`、`canvas-user=0/1`，其余 4 用户为 `0/0`，与积分和数据页一致。 |
+| 最后活动 API 数据 | `CLOUD PASS ON PREVIOUS UI` | 6 个用户均有有效 `last_login`；未修改云端数据制造结果。 |
+| 最后活动 UI 候选 | `LOCAL + GITHUB PASS / COZE UNVERIFIED` | Coze 拉取精确 `a9956bc5`，既有 Google Chrome 预览标签强制刷新后，6 行显示真实时间而不是 `-`；刷新恢复且 Console error/warning 为 0。 |
+| 隔离 PostgreSQL 全仓门禁 | `123 TESTS SKIPPED / OPEN` | 配置专用 `POSTGRES_TEST_DATABASE_URL` 后运行；严禁使用 Coze 业务库。 |
+| Pear `002-B/002-D/002-E` | `DEFERRED / UNVERIFIED` | 按后期验证点单独关闭，不因管理员投影通过而改变状态。 |

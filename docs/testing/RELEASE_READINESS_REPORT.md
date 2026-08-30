@@ -1893,3 +1893,10 @@ The focused gate test passes `7/7`; the actual protected-baseline command passes
 - Coze 全仓 `4278 passed / 123 PostgreSQL-gated skipped / 0 failed`，Build ID `lEWsTeQvojTosQpVCD7M6`，服务 PID `8185`；首页、独立聊天和认证端点为 200。
 - **本项发布状态升级为管理员链路通过。全平台结论仍为“有条件通过”**，因为普通用户实际可见性、隔离 PostgreSQL 套件及既有 Pear 后期验证项仍开放。
 - 首次服务替换后的延迟分块 500 需要继续作为部署可靠性问题观察；稳定后强刷和 34 个静态资源检查均通过。
+
+## 2026-08-30 `V588-ADMIN-004` 最后活动候选增量
+
+- 四个管理员业务接口与三个页面的用户总数、积分和项目投影已在真实管理员会话中只读一致，先前“只做数据库复算、没有认证 HTTP”的证据缺口已经关闭。
+- 同轮发现并稳定复现 P2：API 的有效 `last_login` 被 UI 硬编码 `-` 覆盖。候选只恢复权威字段显示，未改认证、用户写入、项目、积分、任务或账务。
+- `main@a9956bc5` 已通过 `4279 passed / 123 PostgreSQL-gated skipped / 0 failed`、TypeScript、零错误 Lint、保护基线和 `118/118` 构建，并已推送 GitHub；Coze 精确 SHA 尚未确认。
+- **全平台结论仍为“有条件通过”。** `V588-ADMIN-004` 只有在 Coze 真实显示最后活动日期、刷新恢复且 Console 无新增错误后才能完整关闭；隔离 PostgreSQL 与 Pear 后期验证项继续明确开放。

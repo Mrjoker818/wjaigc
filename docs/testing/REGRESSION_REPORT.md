@@ -2348,3 +2348,11 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - 管理员有效单模型授权保存返回 200，关闭重开后持久化为未选；恢复“不限”再次返回 200，关闭重开后全部模型恢复选中，测试未留下权限变更。
 - **回归判定：管理员授权写入 CLOUD PASS。** 普通用户实际模型可见性和隔离 PostgreSQL 双模式测试仍保持 UNVERIFIED。
 - 首次仪表盘导航的 `5504` 分块 500 在服务稳定后强刷恢复，作为部署缓存可靠性证据保留，不冒充认证回归失败或完整关闭。
+
+## 2026-08-30 `V588-ADMIN-004` 最后活动显示回归
+
+- 已登录 Google Chrome 的真实只读补证关闭了原四接口缺口：认证、用户、积分、用户数据和仪表盘接口均为 HTTP 200，四处用户总数均为 6；`admin_mr_joker=388 积分/10 项目`、`canvas-user=0/1` 与各管理页面一致。
+- API 为 6 个用户返回有效 `last_login`，但旧界面 6 行均显示 `-`。这稳定复现了独立的前端投影缺陷，未把它误判为数据库无数据。
+- RED 为 `3 passed / 1 failed`；最小渲染修复后聚焦 `3 files / 12 tests` 通过。最终全仓为 `582 files passed / 23 skipped`、`4279 tests passed / 123 PostgreSQL-gated skipped / 0 failed`。
+- TypeScript、构建版 Lint、精确保护基线和 8 GiB 生产构建 `118/118` 均通过；代码已进入 `main@a9956bc5`，`stable` 未变化。
+- **回归判定：统计/积分/项目 CLOUD PASS；最后活动 LOCAL + GITHUB PASS / COZE PENDING。** 必须部署精确提交并在真实管理员用户列表看到日期后才能关闭本项。Pear 后期项保持 `DEFERRED / UNVERIFIED`。
