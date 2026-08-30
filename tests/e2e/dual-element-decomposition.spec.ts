@@ -164,7 +164,7 @@ async function submitFromPanel(page: Page, panel: Locator): Promise<Submission> 
     && response.request().method() === 'POST'
     && response.request().postDataJSON()?.action !== 'retry'
   ));
-  await panel.getByRole('button', { name: /生成拆解板/ }).click();
+  await panel.locator('[data-action="submit-element-decompose"]').click();
   const [request, response] = await Promise.all([requestPromise, responsePromise]);
   expect(response.ok(), `Element decomposition submission failed with ${response.status()}`).toBeTruthy();
   const task = await response.json() as ElementTask;

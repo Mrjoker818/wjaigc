@@ -22,6 +22,15 @@ describe('dual-output element decomposition canvas wiring', () => {
     expect(canvasSource).toContain('data-element-branch={branch}');
   });
 
+  it('labels the submit action from the selected output mode', () => {
+    expect(canvasSource).toContain('data-action="submit-element-decompose"');
+    expect(canvasSource).toContain("elementDecomposeOutputMode === 'layers'");
+    expect(canvasSource).toContain("? '生成可编辑图层'");
+    expect(canvasSource).toContain("? '生成拆解板与图层'");
+    expect(canvasSource).toContain("? '图层拆解中...'");
+    expect(canvasSource).toContain("? '双输出拆解中...'");
+  });
+
   it('renders partial success and retries only the failed branch', () => {
     expect(canvasSource).toContain("elementDecomposeTask.overallStatus === 'partial'");
     expect(canvasSource).toContain('handleRetryElementBranch');

@@ -16869,6 +16869,7 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
                 ))}
               </div>
               <button
+                data-action="submit-element-decompose"
                 onClick={handleDisplayDecomposeConfirm}
                 disabled={displayDecomposeProcessing}
                 className={`w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold transition-all ${
@@ -16878,7 +16879,17 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
                 }`}
               >
                 <Sparkles size={13} />
-                {displayDecomposeProcessing ? '拆解中...' : '生成拆解板'}
+                {displayDecomposeProcessing
+                  ? elementDecomposeOutputMode === 'layers'
+                    ? '图层拆解中...'
+                    : elementDecomposeOutputMode === 'both'
+                      ? '双输出拆解中...'
+                      : '拆解板生成中...'
+                  : elementDecomposeOutputMode === 'layers'
+                    ? '生成可编辑图层'
+                    : elementDecomposeOutputMode === 'both'
+                      ? '生成拆解板与图层'
+                      : '生成拆解板'}
               </button>
               {elementDecomposeTask && (
                 <div className="mt-3 space-y-2" data-element-status={elementDecomposeTask.overallStatus}>
