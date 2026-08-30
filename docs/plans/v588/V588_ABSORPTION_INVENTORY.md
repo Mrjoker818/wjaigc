@@ -810,4 +810,5 @@ No item is “absorbed” merely because its source file exists or a unit test p
 - 新的真实缺陷是用户 API 已为 6 个用户返回有效 `last_login`，但用户列表 6 行全部显示 `-`。根因不是数据库投影，而是 `admin-tabs.tsx` 单元格硬编码占位符，没有调用已经存在的 `getUserLastLogin(user)`。
 - TDD 先得到 `3 passed / 1 failed`，最小修复后管理员投影相关 `3 files / 12 tests` 通过；最终全仓 `582 files passed / 23 skipped`、`4279 tests passed / 123 skipped / 0 failed`，TypeScript、零错误构建版 Lint、保护基线 `38/38 / 0 drift / 0 warnings` 与 8 GiB 生产构建 `118/118` 通过。
 - 修复已推送 `main@a9956bc5bc74e861e0ceeb78a345a4a3cd7c251a`；`stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 未触碰。Coze 尚未证明拉取该精确提交，故“最后活动真实日期显示、刷新恢复和 Console 健康”仍为云端待验。
+- 推送后的只读运行探针显示首页、`/simple-chat` 与创意健康端点均为 HTTP 200，但本地候选应用块为 `page-c5c96a8ca2ca24c1.js`，云端仍提供不同的 `page-e644bf085753358b.js`；两者 SHA-256 也不同。因此当前是“旧构建健康”，不是新候选已部署，禁止直接在该页面关闭验收。
 - **状态：总数/积分/项目的云端只读链路通过；最后活动 UI 为本地与 GitHub main 通过、Coze 待验。** 证据：`docs/testing/evidence/v588-admin-004-last-activity-local-20260830.json`。Pear `002-B/002-D/002-E` 继续保持 `DEFERRED / UNVERIFIED`，不重复测试也不冒充通过。

@@ -60,6 +60,24 @@
     "stableCommit": "52f7c601ed150769e15d06fb435c6e360e28c9e7",
     "stableChanged": false
   },
+  "cloudRuntimeProbeAfterPush": {
+    "readOnly": true,
+    "root": 200,
+    "simpleChat": 200,
+    "creativeHealth": 200,
+    "localCandidateAppChunk": {
+      "name": "page-c5c96a8ca2ca24c1.js",
+      "bytes": 3115,
+      "sha256": "B5DD0392CE1018690B43C67295E27A1B1B983743CD98F589AD8CBF6F5114E054"
+    },
+    "servedCloudAppChunk": {
+      "name": "page-e644bf085753358b.js",
+      "bytes": 3115,
+      "sha256": "20E89002B9DA33E05B62571FAB6FA0FDD75B56120B9B69A0E9465F60A12F40EF"
+    },
+    "sameBuildArtifact": false,
+    "conclusion": "预览服务健康，但仍提供不同构建产物，不能据此验收 a9956bc5/56d6a98c。"
+  },
   "limitations": {
     "cozePulledCandidate": false,
     "cozeCandidateUiVerified": false,
