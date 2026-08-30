@@ -10,8 +10,11 @@ import {
   readDatabaseSecretRing,
   readSystemSettingStrict,
   resolveDatabaseSecretRing,
+  updateUserCredentials,
   updateUserCredentialSidecar,
+  updateUserProfileFields,
   withDatabaseAuthReplicaLock,
+  type AuthUserProfileFields,
 } from '@/lib/auth/auth-repository';
 import { refreshAuthJsonFileAtomic } from '@/lib/auth/auth-persistence';
 import { deriveAuthSecretKid, type AuthSecretRingV1 } from '@/lib/auth/auth-secret-ring';
@@ -71,6 +74,7 @@ async function withAuthPostgres<T>(
 
 async function createAuthTables(
   query: Parameters<Parameters<typeof withIsolatedPostgres>[1]>[0]['query'],
+  modelStorage: 'TEXT[]' | 'JSONB' = 'TEXT[]',
 ): Promise<void> {
   await query(`
     CREATE TABLE wujie_users (
@@ -81,8 +85,8 @@ async function createAuthTables(
       role TEXT NOT NULL DEFAULT 'user',
       status TEXT NOT NULL DEFAULT 'active',
       product_type TEXT,
-      chat_models TEXT[],
-      image_models TEXT[],
+      chat_models ${modelStorage},
+      image_models ${modelStorage},
       daily_token_limit INTEGER,
       monthly_token_limit INTEGER,
       daily_image_limit INTEGER,
@@ -104,6 +108,158 @@ async function createAuthTables(
     )
   `);
 }
+
+describe.each(['TEXT[]', 'JSONB'] as const)('managed-user model storage: %s', modelStorage => {
+  const profile: AuthUserProfileFields = {
+    name: 'Storage compatibility user',
+    role: 'user',
+    status: 'active',
+    productType: 'canvas,chat',
+    groupId: null,
+    chatModels: ['provider-chat::model-1'],
+    imageModels: ['provider-image::model-2', 'provider-image::model-3'],
+    dailyTokenLimit: 100,
+    monthlyTokenLimit: 1000,
+    dailyImageLimit: 10,
+    avatar: null,
+    nickname: 'Storage test',
+    apiPermissions: { chat: true, image: true },
+    storageFolder: 'data/users/model-storage-test',
+    email: 'model-storage@example.test',
+  };
+
+  async function seedUser(query: QueryFn): Promise<void> {
+    await createAuthTables(query, modelStorage);
+    await query(
+      `INSERT INTO wujie_users (id, name, password_hash, credential_hash, created_at, updated_at)
+       VALUES ('model-storage-test', 'Original', 'legacy-password', $1, $2, $2)`,
+      [credentialHash, now],
+    );
+  }
+
+  postgresIt('persists model arrays, empty lists and null without changing credentials', async () => {
+    await withAuthPostgres('model_storage_profile', async ({ query }) => {
+      await seedUser(query);
+      const assignments = [
+        { chatModels: profile.chatModels, imageModels: profile.imageModels },
+        { chatModels: [], imageModels: [] },
+        { chatModels: null, imageModels: null },
+      ];
+      for (const [index, models] of assignments.entries()) {
+        await expect(updateUserProfileFields({
+          userId: 'model-storage-test',
+          expectedUpdatedAt: now + index,
+          updatedAt: now + index + 1,
+          profile: { ...profile, ...models },
+        })).resolves.toBe('updated');
+
+        const stored = await query(
+          `SELECT chat_models, image_models, password_hash, credential_hash, updated_at
+           FROM wujie_users WHERE id = 'model-storage-test'`,
+        );
+        expect(stored.rows).toEqual([{
+          chat_models: models.chatModels,
+          image_models: models.imageModels,
+          password_hash: 'legacy-password',
+          credential_hash: credentialHash,
+          updated_at: String(now + index + 1),
+        }]);
+      }
+    });
+  });
+
+  postgresIt('allows only one concurrent profile update for the same version', async () => {
+    await withAuthPostgres('model_storage_cas', async ({ query }) => {
+      await seedUser(query);
+      const results = await Promise.all(Array.from({ length: 8 }, (_, index) => (
+        updateUserProfileFields({
+          userId: 'model-storage-test',
+          expectedUpdatedAt: now,
+          updatedAt: now + index + 1,
+          profile: { ...profile, name: `Concurrent ${index}` },
+        })
+      )));
+      expect(results.filter(result => result === 'updated')).toHaveLength(1);
+      expect(results.filter(result => result === 'conflict')).toHaveLength(7);
+      const winner = results.indexOf('updated');
+      const stored = await query(
+        `SELECT name, chat_models, image_models, password_hash, updated_at
+         FROM wujie_users WHERE id = 'model-storage-test'`,
+      );
+      expect(stored.rows).toEqual([{
+        name: `Concurrent ${winner}`,
+        chat_models: profile.chatModels,
+        image_models: profile.imageModels,
+        password_hash: 'legacy-password',
+        updated_at: String(now + winner + 1),
+      }]);
+    });
+  });
+
+  postgresIt('atomically changes credentials and models while rejecting stale updates', async () => {
+    await withAuthPostgres('model_storage_credentials', async ({ query }) => {
+      await seedUser(query);
+      const replacementCredential = credentialHash.replace(
+        Buffer.alloc(32, 4).toString('base64url'),
+        Buffer.alloc(32, 5).toString('base64url'),
+      );
+      const request = {
+        userId: 'model-storage-test',
+        expectedUpdatedAt: now,
+        expectedPasswordHash: 'legacy-password',
+        passwordHash: 'replacement-password-hash',
+        credentialHash: replacementCredential,
+        updatedAt: now + 1,
+        profile,
+      };
+      await expect(updateUserCredentials(request)).resolves.toBe('updated');
+      await expect(updateUserCredentials({
+        ...request,
+        passwordHash: 'stale-password-must-not-win',
+        profile: { ...profile, imageModels: [] },
+      })).resolves.toBe('conflict');
+      await expect(updateUserCredentials({
+        ...request,
+        expectedUpdatedAt: now + 1,
+        expectedPasswordHash: 'wrong-password-with-current-version',
+        passwordHash: 'wrong-password-must-not-win',
+        profile: { ...profile, imageModels: [] },
+      })).resolves.toBe('conflict');
+      const stored = await query(
+        `SELECT chat_models, image_models, password_hash, credential_hash, updated_at
+         FROM wujie_users WHERE id = 'model-storage-test'`,
+      );
+      expect(stored.rows).toEqual([{
+        chat_models: profile.chatModels,
+        image_models: profile.imageModels,
+        password_hash: 'replacement-password-hash',
+        credential_hash: replacementCredential,
+        updated_at: String(now + 1),
+      }]);
+
+      for (const [index, models] of [[], null].entries()) {
+        await expect(updateUserCredentials({
+          ...request,
+          expectedUpdatedAt: now + index + 1,
+          expectedPasswordHash: request.passwordHash,
+          updatedAt: now + index + 2,
+          profile: { ...profile, chatModels: models, imageModels: models },
+        })).resolves.toBe('updated');
+        const cleared = await query(
+          `SELECT chat_models, image_models, password_hash, credential_hash, updated_at
+           FROM wujie_users WHERE id = 'model-storage-test'`,
+        );
+        expect(cleared.rows).toEqual([{
+          chat_models: models,
+          image_models: models,
+          password_hash: request.passwordHash,
+          credential_hash: replacementCredential,
+          updated_at: String(now + index + 2),
+        }]);
+      }
+    });
+  });
+});
 
 function withApplicationName(databaseUrl: string, applicationName: string): string {
   const parsed = new URL(databaseUrl);

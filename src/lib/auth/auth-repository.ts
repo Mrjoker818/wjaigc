@@ -365,10 +365,11 @@ async function updateUserRowWithModelStorageFallback(
   jsonParameters: unknown[],
 ): Promise<QueryResult<{ id: string }>> {
   try {
-    return await client.query<{ id: string }>(sql, nativeParameters);
+    // A native empty array becomes '{}', which JSONB silently accepts as an object.
+    return await client.query<{ id: string }>(sql, jsonParameters);
   } catch (error) {
     if (!isModelAssignmentStorageMismatch(error)) throw error;
-    return await client.query<{ id: string }>(sql, jsonParameters);
+    return await client.query<{ id: string }>(sql, nativeParameters);
   }
 }
 

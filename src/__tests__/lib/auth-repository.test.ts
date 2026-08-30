@@ -706,8 +706,8 @@ describe('atomic managed-user repository updates', () => {
       profile.status,
       profile.productType,
       profile.groupId,
-      profile.chatModels,
-      profile.imageModels,
+      JSON.stringify(profile.chatModels),
+      JSON.stringify(profile.imageModels),
       profile.dailyTokenLimit,
       profile.monthlyTokenLimit,
       profile.dailyImageLimit,
@@ -720,13 +720,13 @@ describe('atomic managed-user repository updates', () => {
     ]);
   });
 
-  it('retries managed-user model assignments as JSON for historical JSONB columns', async () => {
-    const jsonbMismatch = Object.assign(
-      new Error('invalid input syntax for type json'),
+  it('retries managed-user model assignments as native arrays for TEXT[] columns', async () => {
+    const arrayMismatch = Object.assign(
+      new Error('malformed array literal'),
       { code: '22P02' },
     );
     const client = useClient(vi.fn()
-      .mockRejectedValueOnce(jsonbMismatch)
+      .mockRejectedValueOnce(arrayMismatch)
       .mockResolvedValueOnce({ rows: [{ id: 'user-1' }], rowCount: 1 }));
 
     await expect(updateUserProfileFields({
@@ -737,10 +737,22 @@ describe('atomic managed-user repository updates', () => {
     })).resolves.toBe('updated');
 
     expect(client.query).toHaveBeenCalledTimes(2);
-    expect(client.query.mock.calls[0]?.[1]?.[7]).toEqual(profile.chatModels);
-    expect(client.query.mock.calls[0]?.[1]?.[8]).toEqual(profile.imageModels);
-    expect(client.query.mock.calls[1]?.[1]?.[7]).toBe(JSON.stringify(profile.chatModels));
-    expect(client.query.mock.calls[1]?.[1]?.[8]).toBe(JSON.stringify(profile.imageModels));
+    expect(client.query.mock.calls[0]?.[1]?.[7]).toBe(JSON.stringify(profile.chatModels));
+    expect(client.query.mock.calls[0]?.[1]?.[8]).toBe(JSON.stringify(profile.imageModels));
+    expect(client.query.mock.calls[1]?.[1]?.[7]).toEqual(profile.chatModels);
+    expect(client.query.mock.calls[1]?.[1]?.[8]).toEqual(profile.imageModels);
+  });
+
+  it('encodes unrestricted model lists as JSON arrays before any native-array fallback', async () => {
+    const client = useClient(vi.fn().mockResolvedValue({ rows: [{ id: 'user-1' }], rowCount: 1 }));
+    await expect(updateUserProfileFields({
+      userId: 'user-1',
+      expectedUpdatedAt: now,
+      updatedAt: now + 1,
+      profile: { ...profile, chatModels: [], imageModels: [] },
+    })).resolves.toBe('updated');
+    expect(client.query).toHaveBeenCalledTimes(1);
+    expect(client.query.mock.calls[0]?.[1]?.slice(7, 9)).toEqual(['[]', '[]']);
   });
 
   it('does not retry managed-user updates for unrelated database failures', async () => {
