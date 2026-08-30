@@ -3221,3 +3221,16 @@ All listed Stage 4 defects are locally closed. S4-BUG-008 also passed its exact-
 | 最小修复 | 提交按钮新增 `data-action=submit-element-decompose`；拆解板、可编辑图层、双输出分别显示对应生成与处理中动作。真实 E2E 改用动作标识提交，不再把中文文案当作协议。 |
 | 本地回归 | 单文件 `17/17`；最终全仓 `577 files passed / 23 PostgreSQL-gated skipped`、`4247 passed / 123 skipped / 0 failed`；TypeScript、构建版 Lint、空白检查、干净候选保护基线 `38/38 / 0 drift / 0 warnings` 与 12 GiB 生产构建 `118/118` 均通过。 |
 | 当前状态 | **本地已修复 / Coze 云端待验。** 提交 `a2b1a850c6c49b7bf9eadf30d3aa33872bbb7821`；部署后只需非付费切换三种模式核对文案和请求体，不重复 Pear 付费任务。 |
+
+### V588-STABILITY-002-BUG-026：Pear 远程 ZIP 分块下载单次瞬时超时即触发退款与本地回退（2026-08-30）
+
+| 字段 | 内容 |
+|---|---|
+| 严重等级 | P1：Pear 已完成远程分层，但应用在下载制品时因一次瞬时网络超时提前退款并降级，无法交付远程 PSD 图层。 |
+| 云端复现 | `main@022428f7` 的双输出父任务 `element_30fcfd88-8520-4ec4-bf0f-8206b0f6d5c1` 最终完成；拆解板分支成功，图层分支 `layer_a7c1765f-f0ba-4b0b-84b3-7737c3ae4111` 在 Pear 制品下载阶段报 `Remote image download timed out`，随后退款并使用本地 3 层回退。 |
+| 账务证据 | 用户积分 `403 → 388`，净扣 `15` 只对应拆解板分支；图层分支 `creditStatus=refunded`。没有把本地回退误写成 Pear 成功，也没有观察到图层分支重复扣费。 |
+| 根因 | `downloadPearPsd()` 使用安全下载器按 1 MiB 分块读取最多 128 MiB 制品；任一分块的瞬时 `timeout/ECONNRESET/ETIMEDOUT/socket hang up` 会直接终止整次下载。安全限制、MIME、ZIP/PSD 校验和退款逻辑本身没有失效。 |
+| RED | 新增“第一次瞬时超时、第二次成功”测试；修复前 `1 failed / 16 passed`，证明旧实现不会恢复。 |
+| 最小修复 | 只对明确的瞬时网络中断进行一次同参数重试；重试前检查取消信号。DNS/私网、MIME、体积、路径、ZIP/PSD 签名及解析错误不重试，第二次失败继续进入既有退款与本地回退。没有延长超时、放宽安全门禁或改动账务状态机。 |
+| 本地回归 | 下载与安全下载器 `47/47`，分层相关 `98/98`；全仓 `577 files passed / 23 PostgreSQL-gated skipped`、`4248 passed / 123 skipped / 0 failed`；TypeScript、ESLint `0 errors / 961 historical warnings`、12 GiB 生产构建 `118/118`、保护功能 `38/38 / 0 warning` 和空白检查通过。 |
+| 当前状态 | **本地已修复 / 云端待部署复验。** 必须在新提交部署后证明 Pear ZIP 下载成功、`engine=pear`、23+ 图层、唯一扣费且零退款；显式取消仍需独立验证。 |

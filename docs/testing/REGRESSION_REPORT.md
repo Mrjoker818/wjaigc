@@ -2280,3 +2280,10 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - 12 GiB Node 堆生产构建退出 `0`：Webpack `11.6` 分钟、TypeScript `53` 秒、静态页面 `118/118`。
 - 干净 detached 候选的受保护基线为 `38/38`、未授权漂移 `0`、警告 `0`；主工作树保留的 `.playwright-cli` 与两个只读参考仓库未删除、未提交。
 - **回归判定：本地候选 PASS / 云端业务验收 PENDING。** 下一步固定为推送 `main`、Coze 拉取精确 SHA、沙箱重启、现有 Google Chrome 预览页真实重载，然后执行非付费文案检查和 Pear 成功/取消账务验证。
+
+## 2026-08-30 Pear ZIP 瞬时超时恢复回归
+
+- `main@022428f7` 云端真实双输出任务中，拆解板成功，Pear 图层分支在远程制品分块下载阶段因 `Remote image download timed out` 退款并回退本地；积分 `403 → 388` 只保留拆解板分支的 15 积分成本。
+- RED 测试先稳定证明一次瞬时超时会直接失败；最小修复仅对 `timeout/ECONNRESET/ETIMEDOUT/socket hang up` 重试一次，并保留取消、安全下载、MIME、体积、ZIP 路径和 PSD 签名门禁。
+- 聚焦下载回归 `47/47`、分层矩阵 `98/98`；全仓 `4248 passed / 123 PostgreSQL-gated skipped / 0 failed`，TypeScript、ESLint 零错误、12 GiB 构建 `118/118`、保护功能 `38/38` 与空白检查通过。
+- **回归判定：本地 PASS / Coze PENDING。** 本轮修复只提高瞬时网络故障恢复能力；尚未证明新版本真实 Pear 成功、一次扣费零退款或显式取消终态。

@@ -1831,3 +1831,10 @@ The focused gate test passes `7/7`; the actual protected-baseline command passes
 - TypeScript、构建版 Lint、空白检查、12 GiB 生产构建 `118/118` 与干净候选保护基线 `38/38 / 0 drift / 0 warnings` 均退出 `0`。生产构建耗时为 Webpack `11.6` 分钟、TypeScript `53` 秒。
 - `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 仍为受保护稳定基线；本候选仅准备推送 `main`。
 - **发布结论仍为“有条件通过”。** 本地门禁允许进入 Coze 验收，但不替代 `002-B` Pear 远程成功、`002-D` 一扣零退和 `002-E` 显式取消/迟到终态证据。
+
+## 2026-08-30 Pear ZIP 瞬时超时修复发布增量
+
+- 最新云端真实任务证明业务请求、异步 Pear 任务、拆解板分支和退款回退均可运行，但图层分支因单次远程 ZIP 下载超时未取得 Pear 成功终态。
+- 本地候选只增加一次受限的瞬时网络重试；不调整 60 秒单次超时、128 MiB 上限、安全下载规则、质量阈值、扣费或退款状态机。
+- 新鲜门禁为 `4248 passed / 123 PostgreSQL-gated skipped / 0 failed`、TypeScript 通过、ESLint `0 errors / 961 warnings`、生产构建 `118/118`、保护功能 `38/38`、空白检查通过。
+- **发布结论保持“有条件通过”。** 可以推送 `main` 并进入 Coze 真实复验；`002-B`、`002-D` 与 `002-E` 在取得新云端证据前继续开放，`stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 不得触碰。

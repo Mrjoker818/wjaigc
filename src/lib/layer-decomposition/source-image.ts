@@ -401,13 +401,30 @@ export async function downloadPearPsd(
   options: { signal?: AbortSignal; download?: DownloadFunction } = {},
 ): Promise<DownloadedPublicImage> {
   return withLayerPsdMemorySlot(options.signal, async () => {
-    const downloaded = await (options.download || downloadPublicImage)(artifactUrl, {
+    const download = options.download || downloadPublicImage;
+    const downloadOptions = {
       maxBytes: MAX_ARTIFACT_BYTES,
       timeoutMs: 60_000,
       rangeChunkBytes: 1024 * 1024,
       signal: options.signal,
       allowedMimeTypes: LAYER_ARTIFACT_MIME_TYPES,
-    });
+    } as const;
+    let downloaded: DownloadedPublicImage;
+    try {
+      downloaded = await download(artifactUrl, downloadOptions);
+    } catch (error) {
+      options.signal?.throwIfAborted();
+      const messages: string[] = [];
+      let current: unknown = error;
+      for (let depth = 0; depth < 3 && current instanceof Error; depth += 1) {
+        messages.push(current.message);
+        current = current.cause;
+      }
+      if (!/download timed out|download was interrupted|ECONNRESET|ETIMEDOUT|socket hang up/i.test(messages.join(' '))) {
+        throw error;
+      }
+      downloaded = await download(artifactUrl, downloadOptions);
+    }
     if (downloaded.buffer.length <= 0 || downloaded.buffer.length > MAX_ARTIFACT_BYTES) {
       throw new LayerSourceImageError(
         'LAYER_ARTIFACT_TOO_LARGE',

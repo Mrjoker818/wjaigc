@@ -1947,3 +1947,15 @@ BUG-018 已从未验证项移除。剩余顺序为 `002-B -> 002-D -> 002-E`；�
 证据：`docs/testing/evidence/v588-stability-002-pear-portrait-audit-20260830.json` 与 `docs/testing/evidence/v588-stability-002-pear-portrait-fallback-20260830.png`。
 
 最终本地候选补充：`d9b9c402` 已完成 `4247 passed / 123 PostgreSQL-gated skipped / 0 failed`、生产构建 `118/118`、保护基线 `38/38 / 0 drift / 0 warnings`。这些证据只关闭本地发布门禁，不改变上表四项云端待验证状态。
+
+### 2026-08-30 Pear ZIP 瞬时超时修复后的剩余项
+
+| 项目 | 最新状态 | 关闭条件 |
+|---|---|---|
+| 瞬时下载超时单次恢复 | `LOCAL PASS / CLOUD PENDING` | 新提交部署后，真实 Pear ZIP 首次中断可恢复；若第二次仍失败，应维持原子退款与本地回退。 |
+| Pear 远程质量成功 `002-B` | `UNVERIFIED ON NEW BUILD` | 同类受控肖像最终为 `engine=pear`、23+ 合格图层，不得以本地 3 层回退替代。 |
+| 成功账务 `002-D` | `UNVERIFIED` | 同一成功任务只有一笔图层费用、零退款，余额、流水和管理员价格一致。 |
+| 显式取消 `002-E` | `UNVERIFIED` | 提交后立即取消，数据库保持 cancelled，迟到完成不得覆盖终态，退款最多一次。 |
+| PostgreSQL 全仓专项 | `123 TESTS SKIPPED / OPEN` | 提供隔离 `POSTGRES_TEST_DATABASE_URL` 后复跑；严禁使用业务库或生产库。 |
+
+当前本地候选已通过 `4248 passed / 123 skipped / 0 failed`、`118/118` 构建和保护功能 `38/38`。这些只证明候选可部署，不关闭上述云端验证项。

@@ -121,6 +121,22 @@ describe('layer source image loading', () => {
     );
   });
 
+  it('retries one transient Pear artifact download timeout before falling back', async () => {
+    const psd = Buffer.from('8BPS-recovered-after-timeout');
+    const download = vi.fn()
+      .mockRejectedValueOnce(new Error('Remote image download timed out'))
+      .mockResolvedValueOnce({
+        buffer: psd,
+        mimeType: 'image/vnd.adobe.photoshop',
+      });
+
+    await expect(downloadPearPsd(
+      'https://cdn.pearapi.ai/result.psd',
+      { download },
+    )).resolves.toMatchObject({ buffer: psd });
+    expect(download).toHaveBeenCalledTimes(2);
+  });
+
   it('serializes concurrent Pear artifact downloads under one memory budget', async () => {
     let releaseFirst!: () => void;
     let markFirstStarted!: () => void;

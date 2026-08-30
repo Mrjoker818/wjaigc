@@ -1,0 +1,62 @@
+{
+  "scope": "V588-STABILITY-002 Pear ZIP transient download recovery",
+  "date": "2026-08-30",
+  "cloudBaseline": {
+    "mainCommit": "022428f770c80ae32931a449ea9f6da2c6724595",
+    "parentTaskId": "element_30fcfd88-8520-4ec4-bf0f-8206b0f6d5c1",
+    "boardTaskId": "board_679a0536-739f-4c15-b52a-9514dd65e422",
+    "layerTaskId": "layer_a7c1765f-f0ba-4b0b-84b3-7737c3ae4111",
+    "source": {
+      "width": 768,
+      "height": 1152,
+      "sha256": "b8f2cbab5bfff022470db6b0c8a54af679c3ae4e2f3a147be9ce82648c62acf4"
+    },
+    "boardBranch": {
+      "status": "completed",
+      "progress": 100,
+      "model": "gpt-image-2"
+    },
+    "layerBranch": {
+      "status": "completed",
+      "actualEngine": "local",
+      "remotePearResult": "fallback",
+      "fallbackReason": "Remote image download timed out",
+      "creditStatus": "refunded",
+      "localLayerCount": 3
+    },
+    "credits": {
+      "before": 403,
+      "after": 388,
+      "netCost": 15,
+      "interpretation": "board branch retained its charge; layer branch refunded"
+    }
+  },
+  "tdd": {
+    "red": "1 failed / 16 passed",
+    "focusedGreen": "47 passed",
+    "layerGreen": "98 passed"
+  },
+  "implementation": {
+    "file": "src/lib/layer-decomposition/source-image.ts",
+    "behavior": "retry exactly once only for transient timeout or connection interruption",
+    "unchangedGuards": [
+      "abort signal",
+      "DNS and private address rejection",
+      "MIME allowlist",
+      "128 MiB artifact limit",
+      "ZIP path validation",
+      "PSD 8BPS signature",
+      "quality thresholds",
+      "billing and refund state machine"
+    ]
+  },
+  "localVerification": {
+    "typecheck": "passed",
+    "lint": "0 errors / 961 historical warnings",
+    "vitest": "577 files passed / 23 PostgreSQL-gated skipped; 4248 passed / 123 skipped / 0 failed",
+    "build": "118/118 pages, exit 0 with 12 GiB Node heap",
+    "protectedBaseline": "38/38 features, 0 warnings, 0 unapproved drift with exact local exclusions",
+    "whitespace": "passed"
+  },
+  "verdict": "local pass; Coze Pear success, success accounting and explicit cancellation remain unverified"
+}
