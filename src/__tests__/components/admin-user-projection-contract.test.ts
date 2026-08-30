@@ -31,4 +31,15 @@ describe('admin user projection UI contract', () => {
     expect(source).toContain('function getUserCredits(u: AdminUser): number { return u.credits ?? 0; }');
     expect(source).toContain('function getUserProjects(u: AdminUser): number { return u.project_count ?? 0; }');
   });
+
+  it('renders the projected last activity instead of a hard-coded placeholder', () => {
+    const source = fs.readFileSync(
+      path.join(root, 'src/components/dashboard/admin-tabs.tsx'),
+      'utf8',
+    );
+
+    expect(source).toContain(
+      '<span className="text-xs text-muted-foreground">{getUserLastLogin(u)}</span>',
+    );
+  });
 });

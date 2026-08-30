@@ -891,7 +891,7 @@ export default function AdminTabs(props: AdminTabsProps) {
                   <span className="text-sm font-medium text-foreground">{getUserCredits(u).toLocaleString('zh-CN')}</span>
                   <span className="text-sm text-muted-foreground">{getUserProjects(u) || '-'}</span>
                   <span className="text-xs text-muted-foreground">{formatDate(getUserCreated(u))}</span>
-                  <span className="text-xs text-muted-foreground">-</span>
+                  <span className="text-xs text-muted-foreground">{getUserLastLogin(u)}</span>
                   <div className="flex items-center justify-end gap-1">
                     <button onClick={() => setUserDetailId(u.id)} className="p-1.5 rounded-md hover:bg-muted transition-colors text-muted-foreground hover:text-foreground" title="详情"><Eye className="w-3.5 h-3.5" /></button>
                     <button onClick={() => setUserDetailId(u.id)} className="p-1.5 rounded-md hover:bg-muted transition-colors text-primary" title="编辑"><Pencil className="w-3.5 h-3.5" /></button>
