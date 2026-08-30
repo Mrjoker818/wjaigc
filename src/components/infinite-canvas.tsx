@@ -8917,15 +8917,28 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
     elementDecomposeRecoveryControllerRef.current?.abort();
     const controller = new AbortController();
     elementDecomposeRecoveryControllerRef.current = controller;
-    void recoverElementDecomposition(recoveryProjectId, controller.signal).then((recovered) => {
+    void recoverElementDecomposition(recoveryProjectId, controller.signal).then(async (recovered) => {
       if (!recovered) return;
       if (elementDecomposeRecoveryRef.current.requestId !== requestId) return;
       if (activeCanvasToolProjectIdRef.current !== recoveryProjectId) return;
       setElementDecomposeProjectId(recoveryProjectId);
-      setElementDecomposeTask(recovered);
+      if (!['pending', 'processing'].includes(recovered.overallStatus)) {
+        setElementDecomposeTask(recovered);
+        return;
+      }
+
+      setDisplayDecomposeProcessing(true);
+      const finalTask = await pollElementDecomposition(recovered.taskId, () => {}, controller.signal);
+      if (elementDecomposeRecoveryRef.current.requestId !== requestId) return;
+      if (activeCanvasToolProjectIdRef.current !== recoveryProjectId) return;
+      setElementDecomposeTask(finalTask);
     }).catch((error: unknown) => {
       if (error instanceof DOMException && error.name === 'AbortError') return;
-      console.warn('[element-decompose] Failed to restore completed task:', error);
+      console.warn('[element-decompose] Failed to restore or resume task:', error);
+    }).finally(() => {
+      if (elementDecomposeRecoveryRef.current.requestId === requestId) {
+        setDisplayDecomposeProcessing(false);
+      }
     });
     return () => {
       if (elementDecomposeRecoveryControllerRef.current === controller) {

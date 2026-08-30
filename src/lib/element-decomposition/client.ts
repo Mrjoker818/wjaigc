@@ -254,14 +254,29 @@ export async function pollElementDecomposition(
   signal?: AbortSignal,
   intervalMs = 800,
 ): Promise<ElementDecomposeTaskResponse> {
+  let consecutiveFailures = 0;
   while (true) {
     signal?.throwIfAborted();
-    const response = await fetch(`/api/element-decompose?taskId=${encodeURIComponent(taskId)}`, {
-      method: 'GET',
-      signal,
-      cache: 'no-store',
-    });
-    const task = await parseResponse(response);
+    let task: ElementDecomposeTaskResponse;
+    try {
+      const response = await fetch(`/api/element-decompose?taskId=${encodeURIComponent(taskId)}`, {
+        method: 'GET',
+        signal,
+        cache: 'no-store',
+      });
+      task = await parseResponse(response);
+      consecutiveFailures = 0;
+    } catch (error) {
+      if (signal?.aborted) throw error;
+      const retryable = error instanceof ElementDecompositionClientError
+        ? error.retryable
+        : error instanceof TypeError;
+      if (!retryable) throw error;
+      consecutiveFailures += 1;
+      const retryDelay = Math.min(5_000, intervalMs * (2 ** Math.min(consecutiveFailures - 1, 4)));
+      await wait(retryDelay, signal);
+      continue;
+    }
     onUpdate(task);
     if (!['pending', 'processing'].includes(task.overallStatus)) return task;
     await wait(intervalMs, signal);

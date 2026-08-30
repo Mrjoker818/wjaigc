@@ -61,7 +61,7 @@ describe('dual-output element decomposition canvas wiring', () => {
     expect(submitBlock).toContain('setElementDecomposeTask(null)');
   });
 
-  it('lazily restores one owned project task without submitting and rejects stale project responses', () => {
+  it('lazily restores one owned project task, resumes an active task, and rejects stale project responses', () => {
     const recoveryStart = canvasSource.indexOf('const elementDecomposeRecoveryRef = useRef');
     const recoveryEnd = canvasSource.indexOf('const handleDisplayDecomposeLegacy = useCallback', recoveryStart);
     const recoveryBlock = canvasSource.slice(recoveryStart, recoveryEnd);
@@ -74,7 +74,8 @@ describe('dual-output element decomposition canvas wiring', () => {
     expect(recoveryBlock).toContain('activeCanvasToolProjectIdRef.current !== recoveryProjectId');
     expect(recoveryBlock).toContain('setElementDecomposeProjectId(recoveryProjectId)');
     expect(recoveryBlock).not.toContain('submitElementDecomposition(');
-    expect(recoveryBlock).not.toContain('pollElementDecomposition(');
+    expect(recoveryBlock).toContain("['pending', 'processing'].includes(recovered.overallStatus)");
+    expect(recoveryBlock).toContain('pollElementDecomposition(recovered.taskId');
     expect(recoveryBlock).not.toContain('retryElementDecompositionBranch(');
   });
 

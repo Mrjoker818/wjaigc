@@ -281,6 +281,32 @@ describe('element decomposition client', () => {
     expect(updates).toHaveLength(2);
   });
 
+  it('continues polling after transient network and retryable API failures', async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi.fn()
+      .mockRejectedValueOnce(new TypeError('Failed to fetch'))
+      .mockResolvedValueOnce(response({
+        success: false,
+        code: 'ELEMENT_INTERNAL_ERROR',
+        message: 'temporary gateway failure',
+        retryable: true,
+      }, 503))
+      .mockResolvedValueOnce(response({
+        taskId: 'parent-resumed', status: 'completed', overallStatus: 'completed', progress: 100,
+        source: {}, branches: {},
+      }));
+    vi.stubGlobal('fetch', fetchMock);
+    const updates: unknown[] = [];
+
+    const pending = pollElementDecomposition('parent-resumed', update => updates.push(update), undefined, 25);
+    await vi.advanceTimersByTimeAsync(75);
+    const result = await pending;
+
+    expect(result.overallStatus).toBe('completed');
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(updates).toHaveLength(1);
+  });
+
   it('recovers a project parent with one read-only GET', async () => {
     const fetchMock = vi.fn().mockResolvedValue(response({
       taskId: 'parent-recovered', status: 'completed', overallStatus: 'completed', progress: 100,
