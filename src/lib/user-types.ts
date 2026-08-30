@@ -38,6 +38,9 @@ export interface User {
   email?: string;
   createdAt: number;
   updatedAt: number;
+  credits?: number;
+  project_count?: number;
+  last_login?: string | number;
 }
 
 export interface UserUsageRecord {

@@ -2295,3 +2295,20 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - 本轮 Pear 在返回制品前报告“当前服务暂不可用，请稍后重试”。应用完成原子退款并回退本地 3 层，UI 正确披露实际引擎和失败原因；没有伪装为 Pear 成功。
 - 管理员流水证明 15:28 唯一扣除 `15`，15:29 唯一退回 `15`，余额 `388 → 373 → 388`，净变化 `0`。普通失败退款一致性再次通过。
 - **回归判定：动作文案 PASS、异步提交 PASS、失败回退及一扣一退 PASS；Pear 远程成功 UNVERIFIED。** 因为没有生成远程制品，本轮没有执行 ZIP 下载重试、主 PSD 提取或远程图层编辑；显式取消也未执行。证据：`docs/testing/evidence/v588-stability-002-c15ba26a-pear-cloud-20260830.json`。
+
+## 2026-08-30 Pear 最终复验中止与后续顺序
+
+- 官方文档和当前适配器合同一致；本轮没有发现可通过修改请求体解决的新问题。
+- Google Chrome 控制在读取现有预览页时持续断开；独立 API 探针因登录 HTTP 401 在提交前停止。本轮零应用任务、零 Pear 任务、零扣费、零退款。
+- **回归判定：Pear 远程成功仍为 UNVERIFIED / DEFERRED。** 不把测试工具或登录阻塞误写成供应商失败，也不把历史本地制品回放扩大为云端通过。
+- 按用户决定解除其对后续吸收项的顺序阻断，下一项进入 `V588-ADMIN-004`；Pear 保留为后期验证点。
+
+## 2026-08-30 `V588-ADMIN-004` 本地回归增量
+
+- 首轮 RED：投影模块不存在；API 未执行权威 SQL、没有覆盖状态、查询失败仍返回 200；共享类型不接受毫秒活动时间。共 7 个预期失败，既有密码审计保持通过。
+- 规格复核 RED：第三条活动查询只覆盖审计表，没有覆盖全部 `wujie_user_data.updated_at`；新增断言稳定复现后改为单条 UNION 聚合，查询总数仍为 3。
+- 最终聚焦回归：`6 files / 21 tests / 0 failed`。覆盖项目数据形状、缺行用户、最大活动时间、100 用户固定查询数、403 无查询、数据库未配置与查询失败关闭。
+- TypeScript 通过；完整 ESLint 为 `0 errors / 961 historical warnings`；保护基线 `38/38`、未授权漂移 `0`、warning `0`；`git diff --check` 通过。
+- 默认 4 GiB Node 堆在 Webpack 阶段 OOM；同一代码以 8 GiB 堆完成编译、TypeScript、`118/118` 静态页面和路由收集。该资源事实单独记录，不归因于管理员投影或 Pear。
+- 隔离 PostgreSQL 测试没有 `POSTGRES_TEST_DATABASE_URL` 时继续列为跳过，不能写成通过。
+- 最终全仓复跑为 `580 files passed / 23 skipped`、`4259 tests passed / 123 skipped / 0 failed`，耗时 `400.39s`。机器证据：`docs/testing/evidence/v588-admin-004-local-20260830.json`。

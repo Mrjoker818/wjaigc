@@ -3246,3 +3246,25 @@ All listed Stage 4 defects are locally closed. S4-BUG-008 also passed its exact-
 | 账务 | 余额 `388 → 373 → 388`；15:28 唯一一笔 `-15`，15:29 唯一一笔 `+15`，净变化 `0`，未观察到重复扣费或重复退款。 |
 | BUG-026 判定 | **本次未覆盖下载重试。** 失败发生在生成可下载 ZIP 之前，不是 `Remote image download timed out`；因此本地瞬时下载重试保持通过，但云端 ZIP 成功仍开放。 |
 | 证据 | `docs/testing/evidence/v588-stability-002-c15ba26a-pear-cloud-20260830.json`。 |
+
+#### Pear 最终复验延后增量（2026-08-30）
+
+| 字段 | 内容 |
+|---|---|
+| 官方合同 | 当前 Pear 专页与适配器均为 `POST /v1/images/edits`、`model=image-layered`、必传 `image`、异步任务、URL 制品和任务轮询；未发现新的接口偏差。 |
+| 本次动作 | Google Chrome 现有预览页可枚举，但页面读取时控制连接持续断开；独立云端 API 探针在登录 HTTP 401 后停止。 |
+| 副作用 | 没有调用 `/api/layered-decompose`，没有创建应用/Pear 任务，没有扣费或退款，没有修改业务源码。 |
+| 判定 | **延后验证，不关闭、不删除。** `002-B/002-D/002-E` 保持未验证并移为后期验证点；按用户决定继续其余 V5.8.8 吸收。 |
+| 证据 | `docs/testing/evidence/v588-stability-002-pear-final-defer-20260830.json`。 |
+
+### V588-ADMIN-004-BUG-001：管理员用户列表伪造积分/项目 0 且缺失活动时间（2026-08-30）
+
+| 字段 | 内容 |
+|---|---|
+| 严重等级 | P1：管理员无法依据用户列表核对积分、项目和真实活动，且错误被伪装成正常的 0。 |
+| 稳定复现 | 旧 `GET /api/admin/users` 对 `dbGetUserData()` 的返回契约理解错误；积分管理显示真实余额时，用户管理仍可显示 0，项目管理与用户管理也可不一致。 |
+| 根因 | 积分读取错误数据源；项目返回值被二次寻找不存在的 `data_value`；异常被空 `catch` 吞掉；没有活动聚合；逐用户读取形成 N+1。 |
+| 修复方案 | 身份沿用 `listManagedUsers()`；余额从 `wujie_credits`、项目从 `wujie_user_data/projects`、活动从审计与全部用户数据更新时间批量读取；固定三次 SQL 后由纯函数合并。 |
+| 失败策略 | 数据库未配置返回 `projectionCoverage=unavailable`；数据库已配置但查询失败返回 500 / `ADMIN_USER_PROJECTION_FAILED`，不再输出假 0。 |
+| 永久测试 | 新增投影单元、API、UI 合同；保留密码审计、用户数量与仪表盘合同。100 个用户仍只允许 3 次 SQL。 |
+| 当前状态 | `LOCAL PASS / CLOUD PENDING`。聚焦 `21/21`；最终全仓 `4259 passed / 123 PostgreSQL-gated skipped / 0 failed`；TypeScript、零错误 Lint、保护基线和 8 GiB 构建 `118/118` 通过。真实 PostgreSQL 数据和 Coze 四接口逐用户一致性仍待验证。证据：`docs/testing/evidence/v588-admin-004-local-20260830.json`。 |

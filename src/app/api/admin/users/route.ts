@@ -11,6 +11,14 @@ import {
 } from '@/lib/server-auth';
 import type { User } from '@/lib/user-types';
 import { dbListUserData, dbGetUserData, dbDeleteUserData, dbAddAuditLog } from '@/lib/db-storage';
+import { execSql, isDatabaseConfigured } from '@/lib/db-client';
+import {
+  projectAdminUsers,
+  type ActivityProjectionRow,
+  type CreditProjectionRow,
+  type ProjectProjectionRow,
+  type ProjectionCoverage,
+} from '@/lib/admin-user-projection';
 
 export const dynamic = 'force-dynamic';
 
@@ -26,33 +34,68 @@ export async function GET(request: NextRequest) {
     }
 
     const users = await listManagedUsers();
-    // Enrich users with credits and project count from user_data
-    const enrichedUsers = await Promise.all((users || []).map(async (u: User) => {
-      let credits = 0;
-      let projectCount = 0;
-      try {
-        const ud = await dbGetUserData(u.id, 'credits') as Record<string, unknown> | null;
-        if (ud && typeof ud === 'object' && 'data_value' in ud) {
-          const dv = (ud as Record<string, unknown>).data_value;
-          const parsed = typeof dv === 'string' ? JSON.parse(dv) : dv;
-          credits = Number((parsed as Record<string, unknown>)?.balance ?? (parsed as Record<string, unknown>)?.credits ?? 0) || 0;
-        }
-      } catch {}
-      try {
-        const pd = await dbGetUserData(u.id, 'projects') as Record<string, unknown> | null;
-        if (pd && typeof pd === 'object' && 'data_value' in pd) {
-          const dv = (pd as Record<string, unknown>).data_value;
-          const parsed = typeof dv === 'string' ? JSON.parse(dv) : dv;
-          projectCount = Array.isArray(parsed) ? parsed.length : (typeof parsed === 'object' ? Object.keys(parsed as Record<string, unknown>).length : 0);
-        }
-      } catch {}
-      return {
-        ...u,
-        credits,
-        project_count: projectCount,
-      };
-    }));
-    return NextResponse.json({ success: true, users: enrichedUsers });
+    const databaseAvailable = isDatabaseConfigured();
+    const projectionCoverage: ProjectionCoverage = {
+      identity: 'available',
+      credits: databaseAvailable ? 'available' : 'unavailable',
+      projects: databaseAvailable ? 'available' : 'unavailable',
+      activity: databaseAvailable ? 'available' : 'unavailable',
+    };
+
+    if (!databaseAvailable || users.length === 0) {
+      return NextResponse.json({
+        success: true,
+        users: projectAdminUsers({ users, creditRows: [], projectRows: [], activityRows: [] }),
+        projectionCoverage,
+      });
+    }
+
+    const userIds = users.map(user => user.id);
+    try {
+      const [creditsResult, projectsResult, activityResult] = await Promise.all([
+        execSql(
+          'SELECT user_id, balance FROM wujie_credits WHERE user_id = ANY($1::text[])',
+          [userIds],
+        ),
+        execSql(
+          "SELECT user_id, data_value, updated_at FROM wujie_user_data WHERE data_key = 'projects' AND user_id = ANY($1::text[])",
+          [userIds],
+        ),
+        execSql(
+          `SELECT user_id, MAX(last_activity) AS last_activity
+             FROM (
+               SELECT user_id, MAX(created_at) AS last_activity
+                 FROM wujie_audit_log
+                WHERE user_id = ANY($1::text[])
+                GROUP BY user_id
+               UNION ALL
+               SELECT user_id, MAX(updated_at) AS last_activity
+                 FROM wujie_user_data
+                WHERE user_id = ANY($1::text[])
+                GROUP BY user_id
+             ) activity
+            GROUP BY user_id`,
+          [userIds],
+        ),
+      ]);
+      const enrichedUsers = projectAdminUsers({
+        users,
+        creditRows: creditsResult.rows as CreditProjectionRow[],
+        projectRows: projectsResult.rows as ProjectProjectionRow[],
+        activityRows: activityResult.rows as ActivityProjectionRow[],
+      });
+      return NextResponse.json({ success: true, users: enrichedUsers, projectionCoverage });
+    } catch (error) {
+      console.error({
+        code: 'ADMIN_USER_PROJECTION_FAILED',
+        message: error instanceof Error ? error.message : String(error),
+      });
+      return NextResponse.json({
+        success: false,
+        code: 'ADMIN_USER_PROJECTION_FAILED',
+        error: 'Failed to load authoritative user metrics',
+      }, { status: 500 });
+    }
   } catch (error) {
     console.error('[admin/users] GET error:', error);
     return NextResponse.json({ success: false, error: 'Failed to load users', users: [] }, { status: 500 });

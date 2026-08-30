@@ -1,0 +1,37 @@
+{
+  "recordedAt": "2026-08-30T16:30:34+08:00",
+  "repository": {
+    "branch": "main",
+    "commit": "d4b1debd9cacc2f2606b24c45337e91b845d688b",
+    "stableCommit": "52f7c601ed150769e15d06fb435c6e360e28c9e7"
+  },
+  "officialContract": {
+    "documentation": "https://pearapi.apifox.cn/api-493268181",
+    "submit": "POST /v1/images/edits",
+    "model": "image-layered",
+    "requiredImage": true,
+    "taskType": "async",
+    "responseFormat": "url",
+    "poll": "GET /v1/images/tasks/{id}",
+    "adapterMatches": true
+  },
+  "attempt": {
+    "browser": "Google Chrome profile 用户1",
+    "existingTabsOnly": true,
+    "newTabCreated": false,
+    "browserControlResult": "The existing preview tab could be enumerated, but the control connection disconnected on page inspection.",
+    "apiFallbackResult": "A separate authenticated cloud API probe stopped at HTTP 401 before task submission.",
+    "pearTaskCreated": false,
+    "applicationTaskCreated": false,
+    "creditsCharged": false,
+    "creditsRefunded": false
+  },
+  "disposition": {
+    "status": "DEFERRED_EXTERNAL_BLOCKER",
+    "featurePassClaimed": false,
+    "providerFailureClaimed": false,
+    "businessCodeChanged": false,
+    "qualityThresholdChanged": false,
+    "nextAction": "Preserve the existing smart/local fallback and continue the remaining V5.8.8 absorption inventory. Revisit Pear only when a stable authenticated browser session and provider availability are both present."
+  }
+}

@@ -783,3 +783,22 @@ No item is “absorbed” merely because its source file exists or a unit test p
 - smart 回退均交付本地结果并退款。前两组取得精确流水：每组恰好一笔 `-15` 与一笔 `+15`，余额 `403 -> 388 -> 403`；第三组也确认一扣一退、净额 `0`。这关闭失败退款证据，不证明成功任务一次扣费零退款。
 - Pear 官方专页确认当前合同为 `POST /v1/images/edits`、`model + image`、异步任务、URL 结果和 `GET /v1/images/tasks/{id}` 轮询；当前适配器合同与文档一致，不通过改端点、改大小写或放宽质量门禁掩盖供应商制品问题。
 - **状态：`002-B` 仍为部分通过，`002-D` 仍未关闭，`002-E` 的云端失败退款部分通过、显式取消仍未验证。** 下一动作仅使用官方示例类型的受控肖像再做一次远程质量成功验证；成功前不进入 `V588-ADMIN-004`。证据：`docs/testing/evidence/v588-stability-002-pear-cloud-audit-20260830.json` 与同前缀 PNG。
+
+## 2026-08-30 Pear 最终复验中止与顺序解锁
+
+- 再次核对 Pear 当前专页：`POST /v1/images/edits`、`model=image-layered`、必传 `image`、异步任务、URL 制品和 `GET /v1/images/tasks/{id}` 轮询；当前适配器合同一致，没有发现新的接口偏差。
+- Google Chrome“用户1”现有项目页与预览页均可枚举，但接管预览页进行页面读取时控制连接连续断开；没有切换 360、没有新建标签页。
+- 独立云端 API 复验在 `/api/auth/login` 返回 HTTP 401 后立即停止，未进入 `/api/layered-decompose`，因此本次没有应用任务、Pear 任务、扣费或退款。该结果既不是 Pear 失败，也不是功能通过。
+- 按用户决定，`002-B/002-D/002-E` 改为后期验证点，保留 smart/local 回退、质量门禁和既有账务保护，不删除功能、不降低阈值、不继续重复付费实验。
+- **吸收顺序已解锁：下一项进入 `V588-ADMIN-004`。** Pear 只有在稳定登录会话和供应商可用同时成立时才复验；此前始终保持 `UNVERIFIED / DEFERRED`，不得写成已吸收。
+- 证据：`docs/testing/evidence/v588-stability-002-pear-final-defer-20260830.json`。
+
+## 2026-08-30 `V588-ADMIN-004` 管理员用户权威投影本地关闭
+
+- 旧 `GET /api/admin/users` 把 `dbGetUserData()` 返回值误当成包含 `data_value` 的行对象，又从非权威 `user_data/credits` 读取余额；异常被空 `catch` 吞掉，最终把真实积分和项目数伪装为 `0`，并且没有最后活动时间。
+- 当前保留 `listManagedUsers()` 作为身份权威源，只执行三条批量 SQL：积分余额、项目 JSON、审计与全部用户数据更新时间聚合。用户数量从 1 增加到 100 时查询数仍为 3，不复制 donor 的逐用户 N+1 查询。
+- 新增纯投影模块安全处理数组、对象、JSON 字符串与畸形项目数据；最后活动取审计、任意用户数据更新时间和用户记录更新时间的最大有效值。历史投影字段会在重建前丢弃。
+- 数据库未配置时仍返回身份，但以 `projectionCoverage` 明确标记三项投影不可用；数据库已配置而任一权威查询失败时返回 `ADMIN_USER_PROJECTION_FAILED`，不再静默伪装为全员 0。
+- TDD 首轮 RED 为 7 个预期失败；规格复核又以独立 RED 锁定“全部用户数据更新时间”合同。最终聚焦 `6 files / 21 tests`、TypeScript、ESLint `0 errors / 961 historical warnings`、保护基线 `38/38 / 0 drift / 0 warnings` 通过。
+- **状态：本地实现完成，Coze/Google Chrome 待验。** 云端必须对比 `/api/admin/users`、`/api/admin/credits/overview`、`/api/admin/user-images` 与 `/api/admin/dashboard-stats`；不得把本地 mock 数据写成云端一致性通过。`stable` 与 V5.8.8 donor 保持只读。
+- 最终全仓门禁为 `580 files passed / 23 PostgreSQL-gated skipped`、`4259 tests passed / 123 skipped / 0 failed`；8 GiB Node 堆生产构建完成 `118/118` 页面。机器证据：`docs/testing/evidence/v588-admin-004-local-20260830.json`。

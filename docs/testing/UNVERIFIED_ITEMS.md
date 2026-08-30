@@ -1974,3 +1974,29 @@ BUG-018 已从未验证项移除。剩余顺序为 `002-B -> 002-D -> 002-E`；�
 | 精确 taskId/providerError 审计 | `OBSERVABILITY GAP` | 当前管理员页面未展示 taskId、Pear taskId、requestId 或结构化 providerError；需 Coze 只读数据库/服务日志审计补全。 |
 
 证据：`docs/testing/evidence/v588-stability-002-c15ba26a-pear-cloud-20260830.json`。
+
+### 2026-08-30 Pear 后期验证点
+
+| 项目 | 最新状态 | 后期关闭条件 |
+|---|---|---|
+| Pear 远程质量成功 `002-B` | `DEFERRED / UNVERIFIED` | 稳定登录会话和供应商可用同时成立时，单次受控肖像任务得到 `engine=pear` 与 23+ 合格图层。 |
+| 成功账务 `002-D` | `DEFERRED / UNVERIFIED` | 与同一成功任务绑定的唯一 15 积分扣费、零退款及余额一致。 |
+| 显式取消与迟到终态 `002-E` | `DEFERRED / UNVERIFIED` | 单次取消保持 `cancelled`，迟到完成被拒绝，退款最多一次。 |
+| 本轮 Chrome 控制 | `TEST TOOL BLOCKED` | 用户1现有预览页可枚举，但页面读取时控制连接断开；不得改用 360 或新建标签页冒充复验。 |
+| 本轮 API 探针 | `AUTH BLOCKED BEFORE SUBMIT` | 独立登录 HTTP 401，未创建任何任务或账务；该结果不是 Pear 失败。 |
+
+这些项目不再阻断其余 V5.8.8 吸收，但始终保留在未验证表中，直到取得对应真实证据。
+
+### 2026-08-30 `V588-ADMIN-004` 云端待验证项
+
+| 项目 | 最新状态 | 关闭条件 |
+|---|---|---|
+| 管理员四处总用户数 | `LOCAL PASS / CLOUD PENDING` | 同一管理员会话对比 `/api/admin/users`、积分总览、用户数据与仪表盘，四处总数必须一致。 |
+| 逐用户积分余额 | `LOCAL PASS / CLOUD PENDING` | 用户管理的 `credits` 与积分管理同一 userId 的权威余额一致，缺少积分行的真实用户才显示 0。 |
+| 逐用户项目数 | `LOCAL PASS / CLOUD PENDING` | 用户管理的 `project_count` 与数据管理中同一 userId 的项目数组长度一致。 |
+| 最后活动时间 | `LOCAL PASS / CLOUD PENDING` | 有审计、用户数据更新或用户记录更新时间时显示最大真实时间；无证据时显示“从未”。 |
+| 数据库查询失败披露 | `AUTOMATED PASS / CLOUD NOT FORCED` | 自动化已验证 500 / `ADMIN_USER_PROJECTION_FAILED`；禁止在生产库人为制造故障。 |
+| 隔离 PostgreSQL 查询验证 | `BLOCKED / OPEN` | 提供专用 `POSTGRES_TEST_DATABASE_URL` 后执行真实三查询与数据形状测试；严禁使用 Coze 业务库或生产库。 |
+| Google Chrome UI 回归 | `CLOUD PENDING` | exact-SHA 部署、沙箱重启、既有预览标签强制刷新后，管理员用户列表、详情、积分与数据页无新增 Console error/warning。 |
+
+上述云端证据完成前，`V588-ADMIN-004` 只能标记本地通过，不能写成完整吸收关闭。

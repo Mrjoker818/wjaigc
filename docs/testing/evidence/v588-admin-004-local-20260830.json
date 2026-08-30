@@ -1,0 +1,61 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-08-30T17:17:12.9265890+08:00",
+  "candidate": {
+    "branch": "main",
+    "baseCommit": "d4b1debd9cacc2f2606b24c45337e91b845d688b",
+    "stableCommit": "52f7c601ed150769e15d06fb435c6e360e28c9e7",
+    "cloudStatus": "pending"
+  },
+  "scope": "V588-ADMIN-004 administrator user authoritative projection",
+  "verification": {
+    "focusedTests": {
+      "files": 6,
+      "passed": 21,
+      "failed": 0
+    },
+    "fullTests": {
+      "filesPassed": 580,
+      "filesSkipped": 23,
+      "testsPassed": 4259,
+      "testsSkipped": 123,
+      "testsFailed": 0,
+      "durationSeconds": 400.39,
+      "skipReason": "POSTGRES_TEST_DATABASE_URL is not configured; isolated PostgreSQL tests remain unverified."
+    },
+    "typescript": "passed",
+    "eslint": {
+      "errors": 0,
+      "historicalWarnings": 961
+    },
+    "protectedBaseline": {
+      "featuresPassed": 38,
+      "unauthorizedDrift": 0,
+      "warnings": 0
+    },
+    "diffCheck": "passed",
+    "productionBuild": {
+      "defaultHeap": "failed: JavaScript heap out of memory at 4 GiB",
+      "eightGiBHeap": "passed",
+      "staticPages": "118/118"
+    }
+  },
+  "dataContract": {
+    "identitySource": "listManagedUsers",
+    "databaseQueryCount": 3,
+    "creditsSource": "wujie_credits",
+    "projectsSource": "wujie_user_data/projects",
+    "activitySources": [
+      "wujie_audit_log.created_at",
+      "wujie_user_data.updated_at",
+      "managed user updatedAt"
+    ],
+    "configuredDatabaseFailure": "HTTP 500 / ADMIN_USER_PROJECTION_FAILED",
+    "unconfiguredDatabase": "identity list with projectionCoverage=unavailable"
+  },
+  "deferred": [
+    "Coze exact-SHA deployment and Google Chrome UI verification",
+    "isolated PostgreSQL integration suite",
+    "Pear Image-Layered remote success, success billing, and explicit cancellation"
+  ]
+}

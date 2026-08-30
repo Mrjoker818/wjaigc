@@ -9,6 +9,8 @@ const mocks = vi.hoisted(() => ({
   updateManagedUser: vi.fn(),
   repairDuplicateUserIds: vi.fn(),
   dbAddAuditLog: vi.fn(),
+  isDatabaseConfigured: vi.fn(),
+  execSql: vi.fn(),
 }));
 
 vi.mock('@/lib/server-auth', () => ({
@@ -29,6 +31,11 @@ vi.mock('@/lib/db-storage', () => ({
   dbAddAuditLog: mocks.dbAddAuditLog,
 }));
 
+vi.mock('@/lib/db-client', () => ({
+  isDatabaseConfigured: mocks.isDatabaseConfigured,
+  execSql: mocks.execSql,
+}));
+
 import { GET, POST } from '@/app/api/admin/users/route';
 
 describe('POST /api/admin/users password audit', () => {
@@ -40,6 +47,7 @@ describe('POST /api/admin/users password audit', () => {
     mocks.listManagedUsers.mockResolvedValue([]);
     mocks.deleteManagedUsers.mockResolvedValue({ deletedIds: ['user-1', 'user-2'], skippedIds: [] });
     mocks.repairDuplicateUserIds.mockResolvedValue({ repaired: 1, users: [] });
+    mocks.isDatabaseConfigured.mockReturnValue(false);
   });
 
   it('redacts passwords from update audit logs', async () => {
