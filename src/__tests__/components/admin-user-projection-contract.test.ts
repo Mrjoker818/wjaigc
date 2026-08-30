@@ -42,4 +42,15 @@ describe('admin user projection UI contract', () => {
       '<span className="text-xs text-muted-foreground">{getUserLastLogin(u)}</span>',
     );
   });
+
+  it('preserves authoritative projection fields across the dashboard view boundary', () => {
+    const source = fs.readFileSync(
+      path.join(root, 'src/components/dashboard/dashboard-view.tsx'),
+      'utf8',
+    );
+
+    expect(source).toContain('credits: u.credits,');
+    expect(source).toContain('project_count: u.project_count,');
+    expect(source).toContain('last_login: u.last_login,');
+  });
 });
