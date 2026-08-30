@@ -1932,3 +1932,16 @@ BUG-018 已从未验证项移除。剩余顺序为 `002-B -> 002-D -> 002-E`；�
 | 受控肖像 Chrome 上传 | `TEST TOOL BLOCKED` | 合成非敏感测试图已准备好；Google Chrome 标签可发现但因上次文件选择器超时残留控制占用，尚未完成上传。不得切换 360 或新建标签。 |
 
 证据：`docs/testing/evidence/v588-stability-002-pear-cloud-audit-20260830.json` 与 `docs/testing/evidence/v588-stability-002-pear-quality-fallback-20260830.png`。
+
+### 2026-08-30 `c5d39b11` 受控肖像候选后的剩余项
+
+| 项目 | 最新状态 | 关闭条件 |
+|---|---|---|
+| 不同宽高比坐标与透明底比较 | `LOCAL PASS / CLOUD PENDING` | Coze 精确部署 `c5d39b11` 或后续同 tree；同类肖像真实任务不得再因 `RECONSTRUCTION_ERROR_HIGH` 或越界误报回退。 |
+| Pear 远程质量成功 `002-B` | `LOCAL ARTIFACT REPLAY PASS / CLOUD PENDING` | 同一或同类受控肖像取得 `engine=pear`、23+ 可编辑图层、质量 score 接近本地重放结果；不得以本地 fallback 替代。 |
+| 成功账务 `002-D` | `UNVERIFIED` | 上述同一成功任务只有一笔 15 积分扣费、零退款，余额变化与管理员价格一致。 |
+| 显式取消 `002-E` | `UNVERIFIED` | 提交后立即取消，数据库最终为 cancelled，迟到完成不能覆盖终态，最多一笔退款。 |
+| PostgreSQL 全仓专项 | `123 TESTS SKIPPED / OPEN` | 提供隔离 `POSTGRES_TEST_DATABASE_URL` 后重跑；严禁使用业务库或生产库。 |
+| 可编辑图层按钮文案 | `P3 OPEN` | “可编辑图层”模式下按钮改为对应动作文案，并用 UI 契约永久覆盖；当前请求体功能正确。 |
+
+证据：`docs/testing/evidence/v588-stability-002-pear-portrait-audit-20260830.json` 与 `docs/testing/evidence/v588-stability-002-pear-portrait-fallback-20260830.png`。

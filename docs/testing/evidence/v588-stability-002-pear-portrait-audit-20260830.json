@@ -1,0 +1,102 @@
+{
+  "schemaVersion": 1,
+  "title": "V588-STABILITY-002 受控肖像 Pear 分层质量门禁审计",
+  "testDate": "2026-08-30",
+  "baseCommit": "e1a814d4f7cc0bf3e6a9a2e632cd038e46909734",
+  "candidateCommit": "c5d39b113fad07a320ae8b30c0b97dac3eed86ae",
+  "stableCommit": "52f7c601ed150769e15d06fb435c6e360e28c9e7",
+  "cloudPreview": "https://62afe49a-716e-4d9e-99cd-a0be49c4794c-5000.dev.coze.site/",
+  "source": {
+    "kind": "controlled-synthetic-portrait",
+    "canvasImageId": "ref-1788058498488-p409ga6yh",
+    "sourceVersionId": "ref-1788058498488-p409ga6yh:1788058498489:b8wtic",
+    "mediaUrl": "/api/serve-upload/uploads/gen-1788058497271-n7j4fq.jpg",
+    "width": 768,
+    "height": 1152,
+    "bytes": 37750,
+    "sha256": "B8F2CBAB5BFFF022470DB6B0C8A54AF679C3AE4E2F3A147BE9CE82648C62ACF4"
+  },
+  "cloudRunBeforeFix": {
+    "parentTaskId": "element_35c77bb0-9afa-402f-a043-6ca4261e7c13",
+    "layerTaskId": "layer_307de5a3-5f60-4753-9c16-5f0f323f22db",
+    "remoteTaskId": "10b3251c-0022-4d4d-a3a0-73279bdd0acc",
+    "provider": "pear分层",
+    "model": "Image-Layered",
+    "durationMs": 173080,
+    "applicationStatus": "completed",
+    "actualEngine": "local",
+    "fallbackWarnings": [
+      "RECONSTRUCTION_ERROR_HIGH",
+      "OUT_OF_BOUNDS_LAYERS_PRESENT"
+    ],
+    "creditCost": 15,
+    "chargeTransactions": ["ctx_1788058693985_aenkd0nd"],
+    "refundTransactions": ["ctx_1788058865729_a3n326fg"],
+    "netCreditCost": 0
+  },
+  "artifact": {
+    "url": "https://cdn.pearapi.ai/apiservers/cache/files/2026-08-30/e3744fdd-c03b-4ecf-bd42-22c715538ffd.zip",
+    "zipBytes": 1542280,
+    "zipSha256": "9A972E5D778D75AA5384B5F8255CD4DAF69BE6C630D0753BC65D15333289AF42",
+    "primaryPsd": {
+      "name": "Image-Layered_00008.psd",
+      "bytes": 8642120,
+      "sha256": "EDE86322FC01E7716588EFFA615A0CDAD60748D173C97D2E294D6F4FE756FB04",
+      "signature": "8BPS",
+      "width": 1280,
+      "height": 1280,
+      "editableLayerCount": 23
+    },
+    "depthPsd": {
+      "name": "Image-Layered_00008_depth.psd",
+      "bytes": 8642120,
+      "sha256": "A476039FB31E400CEE6E887381C6791EC92CEC8D6AF3185526607ED10D1B1DE6"
+    }
+  },
+  "qualityReplay": {
+    "beforeFix": {
+      "status": "fail",
+      "score": 22,
+      "reconstructionMae": 0.78438576795,
+      "outOfBoundsRatio": 0.17391304348,
+      "warnings": [
+        "RECONSTRUCTION_ERROR_HIGH",
+        "OUT_OF_BOUNDS_LAYERS_PRESENT"
+      ]
+    },
+    "afterFix": {
+      "status": "pass",
+      "score": 98,
+      "reconstructionMae": 0.01583404022,
+      "outOfBoundsRatio": 0,
+      "warnings": [],
+      "sourceNormalized": true,
+      "normalization": "transparent-contain-768x1152-to-1280x1280",
+      "comparisonMatte": "white"
+    },
+    "transparentSubjectGate": {
+      "status": "pass",
+      "transparentRatio": 0.6421759259,
+      "foregroundRatio": 0.2896527778,
+      "checkedLayerId": "layer-9"
+    }
+  },
+  "localVerification": {
+    "focusedLayerTests": "12 files, 128 passed, 0 failed",
+    "fullTests": "577 files passed, 23 PostgreSQL-gated files skipped; 4246 tests passed, 123 skipped, 0 failed",
+    "typescript": "pass",
+    "lintBuild": "pass",
+    "productionBuild": "pass, webpack 10.4 min, TypeScript 49 s, 118/118 pages",
+    "diffCheck": "pass"
+  },
+  "evidence": {
+    "screenshot": "docs/testing/evidence/v588-stability-002-pear-portrait-fallback-20260830.png"
+  },
+  "status": {
+    "localCandidate": "pass",
+    "cloudCandidateDeployment": "pending",
+    "remotePearSuccess": "pending",
+    "successBilling": "pending",
+    "explicitCancellation": "pending"
+  }
+}

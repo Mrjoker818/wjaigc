@@ -2257,3 +2257,11 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - 青绿色圆环两次与橙色锥体一次均未得到合格远程层：`front hair`、缺透明主体、`topwear` 单层分别触发质量拒绝。现有质量门禁正确阻止错误制品进入编辑器。
 - 两组任务取得精确一扣一退流水，第三组确认一扣一退计数，全部净积分 `0`；未观察到重复任务、重复扣费或重复退款。显式取消仍未执行。
 - **回归判定：应用 ZIP/PSD/质量/失败退款 PASS；Pear 远程质量 FAILED/OPEN；成功账务 UNVERIFIED。** 不能把本地 fallback 的 `completed` 作为 Pear 远程成功。机器证据：`docs/testing/evidence/v588-stability-002-pear-cloud-audit-20260830.json`。
+
+## 2026-08-30 `c5d39b11` 受控肖像质量坐标修复回归
+
+- Google Chrome 真实提交受控肖像后，Pear 异步任务返回 ZIP；主 PSD 为 `1280×1280`、23 个语义图层，ZIP、主/深度 PSD 哈希及 `8BPS` 均已记录。旧云端版本最终错误回退为本地 3 层并产生一扣一退，净积分 `0`。
+- 同一真实制品经旧生产门禁重放为 score `22`、MAE `0.78438576795`、越界率 `0.17391304348`；根因是不同宽高比源图未归一到 PSD 坐标，以及透明缺口未在共同底色上比较。
+- 两项 RED 测试先得到 `2 failed / 3 passed`。最小修复后，同一制品按透明 contain 归一并在白色底比较，得到 23 层、score `98`、MAE `0.01583404022`、越界率 `0`、零告警；没有放宽质量阈值。
+- 聚焦分层 `12 files / 128 passed`；全仓 `577 files passed / 23 PostgreSQL-gated skipped`、`4246 tests passed / 123 skipped / 0 failed`；TypeScript、构建版 Lint、空白检查和生产构建 `118/118` 全部通过。
+- **回归判定：本地候选 PASS / Coze PENDING。** `002-B/002-D` 只有在新提交部署后，同类肖像真实得到 `engine=pear`、23+ 图层、唯一扣费且零退款时才能关闭。证据：`docs/testing/evidence/v588-stability-002-pear-portrait-audit-20260830.json`。

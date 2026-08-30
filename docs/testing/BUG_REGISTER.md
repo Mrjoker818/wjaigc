@@ -3195,3 +3195,26 @@ All listed Stage 4 defects are locally closed. S4-BUG-008 also passed its exact-
 | 稳定复现 | 可见自定义开关渲染为普通 `button` 且无 `role=switch/aria-checked`；DOM 中另有无关隐藏 switch，自动化容易读错状态。 |
 | 修复要求 | 可见控件使用原生 checkbox 或 `role=switch`，同步 `aria-checked`、可见标签和键盘交互；删除重复隐藏语义节点。 |
 | 状态 | **开放，非当前发布阻断。** |
+
+### V588-STABILITY-002-BUG-024：不同宽高比源图与方形 Pear PSD 被错误判为重建失败（2026-08-30）
+
+| 字段 | 内容 |
+|---|---|
+| 严重等级 | P1：Pear 已返回 23 个语义正确的可编辑图层，应用却退款并降级为本地 3 层，阻断 `002-B/002-D`。 |
+| 稳定复现 | 受控肖像源图 `768×1152`，Pear 主 PSD `1280×1280`、23 层；旧质量门禁得到 score `22`、MAE `0.78438576795`、越界率 `0.17391304348`，触发 `RECONSTRUCTION_ERROR_HIGH` 与 `OUT_OF_BOUNDS_LAYERS_PRESENT`。 |
+| 排除项 | 真实异步任务、ZIP 下载、主 PSD 选择、`8BPS`、PSD 解析和透明主体门禁均通过；透明主体比例 `0.6422`、前景比例 `0.2897`。故障不是 Pear ZIP、MIME、安全下载器或 PSD 解压。 |
+| 根因 | `normalizeLayerSourceCanvas()` 遇到不同宽高比时拒绝归一，后续却用 PSD 的 `1280×1280` 坐标评价原始 `768×1152` 像素；同时质量比较把透明缺口的 RGB 黑值与源图白底直接比较，产生虚假大误差。 |
+| RED | 先增加“不同宽高比必须透明留白适配，不得拉伸”和“源图白底与透明图层缺口应在同一白色底比较”两项测试；修复前 `2 failed / 3 passed`。 |
+| 最小修复 | 所有尺寸不一致源图统一使用 Sharp `fit=contain`、透明留白归一到 PSD 坐标；源图和重建画布按各自 Alpha 合成到同一白色底再计算 MAE。没有调整任何 MAE、透明度、空层、重复层或越界阈值。 |
+| 真实制品重放 | 同一 ZIP/PSD 经生产函数重放后为 23 层、score `98`、MAE `0.01583404022`、越界率 `0`、零告警，透明主体门禁仍通过。 |
+| 本地回归 | 聚焦分层 `12 files / 128 passed`；全仓 `577 files passed / 23 PostgreSQL-gated skipped`、`4246 passed / 123 skipped / 0 failed`；TypeScript、构建版 Lint、空白检查和生产构建 `118/118` 通过。 |
+| 当前状态 | **本地已修复 / Coze 云端待验。** 必须部署 `c5d39b11` 或后续同 tree 提交，使用同类受控肖像取得 `engine=pear`、23+ 可编辑层、唯一扣费且零退款，才能关闭。 |
+| 证据 | `docs/testing/evidence/v588-stability-002-pear-portrait-audit-20260830.json` 与同名前缀 fallback PNG。 |
+
+### V588-STABILITY-002-BUG-025：可编辑图层模式的提交按钮仍显示“生成拆解板”（2026-08-30）
+
+| 字段 | 内容 |
+|---|---|
+| 严重等级 | P3：不影响请求体，实际仍发送 `outputMode=layers`，但文案会让用户误以为当前模式未生效。 |
+| 稳定复现 | Google Chrome 选择“可编辑图层”后，主按钮仍显示“生成拆解板”；同轮真实请求已确认 `outputMode=layers`。 |
+| 当前状态 | **已登记 / 尚未修改。** 本轮保持 P1 质量修复最小范围，待 `002-B/002-D/002-E` 关闭后按 RED -> 最小 UI 修复处理。 |
