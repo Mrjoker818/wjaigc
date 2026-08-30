@@ -20,16 +20,51 @@ describe('layer reconstruction quality gate', () => {
     expect(metadata).toMatchObject({ width: 10, height: 10 });
   });
 
-  it('does not stretch a source whose aspect ratio differs from the PSD document', async () => {
+  it('letterboxes a different-aspect source into the PSD coordinate space without stretching', async () => {
     const source = await sharp({
       create: { width: 12, height: 8, channels: 4, background: '#ef1f1f' },
     }).png().toBuffer();
 
     const normalized = await normalizeLayerSourceCanvas(source, 10, 10);
-    const metadata = await sharp(normalized.buffer).metadata();
+    const decoded = await sharp(normalized.buffer)
+      .ensureAlpha()
+      .raw()
+      .toBuffer({ resolveWithObject: true });
 
-    expect(normalized.normalized).toBe(false);
-    expect(metadata).toMatchObject({ width: 12, height: 8 });
+    expect(normalized.normalized).toBe(true);
+    expect(decoded.info).toMatchObject({ width: 10, height: 10, channels: 4 });
+    expect(decoded.data[(0 * 10 + 0) * 4 + 3]).toBe(0);
+    expect(decoded.data[(5 * 10 + 5) * 4 + 3]).toBe(255);
+  });
+
+  it('compares transparent Pear gaps and opaque source backgrounds on the same white matte', async () => {
+    const subject = await sharp({
+      create: { width: 4, height: 4, channels: 4, background: '#ef1f1f' },
+    }).png().toBuffer();
+    const source = await sharp({
+      create: { width: 8, height: 8, channels: 4, background: '#ffffff' },
+    }).composite([{ input: subject, left: 2, top: 2 }]).png().toBuffer();
+    const layer: EditableLayerAsset = {
+      id: 'subject',
+      name: '主体',
+      role: 'subject',
+      imageUrl: '/subject.png',
+      width: 4,
+      height: 4,
+      offsetX: 2,
+      offsetY: 2,
+      opacity: 1,
+      blendMode: 'normal',
+      visible: true,
+      source: 'pear-psd',
+    };
+
+    const quality = await evaluateLayerQuality(source, [layer], {
+      loadLayer: async () => subject,
+    });
+
+    expect(quality.status).toBe('pass');
+    expect(quality.metrics.reconstructionMae).toBe(0);
   });
 
   it('reconstructs Pear PSD layers from Photoshop top-to-bottom order', async () => {

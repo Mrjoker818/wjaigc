@@ -6,7 +6,7 @@ import type { EditableLayerAsset } from '@/lib/layer-decomposition/types';
 const MAX_PIXELS = 67_108_864;
 const MAX_AGGREGATE_PIXELS = 256_000_000;
 const MAX_DIMENSION = 8_192;
-const ASPECT_RATIO_TOLERANCE = 0.01;
+const QUALITY_MATTE_CHANNEL = 255;
 
 export interface NormalizedLayerSourceCanvas {
   buffer: Buffer;
@@ -72,19 +72,13 @@ export async function normalizeLayerSourceCanvas(
     return { buffer: sourceBuffer, normalized: false, ...base };
   }
 
-  const sourceAspect = sourceWidth / sourceHeight;
-  const targetAspect = targetWidth / targetHeight;
-  const relativeAspectDifference = Math.abs(sourceAspect - targetAspect) / targetAspect;
-  if (relativeAspectDifference > ASPECT_RATIO_TOLERANCE) {
-    return { buffer: sourceBuffer, normalized: false, ...base };
-  }
-
   const buffer = await sharp(sourceBuffer, {
     failOn: 'error',
     limitInputPixels: MAX_PIXELS,
   }).resize(targetWidth, targetHeight, {
-    fit: 'fill',
+    fit: 'contain',
     kernel: sharp.kernel.lanczos3,
+    background: { r: 0, g: 0, b: 0, alpha: 0 },
   }).png().toBuffer();
   return { buffer, normalized: true, ...base };
 }
@@ -182,11 +176,20 @@ export async function evaluateLayerQuality(
   let absoluteError = 0;
   let comparedChannels = 0;
   for (let offset = 0; offset < source.data.length; offset += 4) {
-    if (source.data[offset + 3] === 0) continue;
-    absoluteError += Math.abs(source.data[offset] - canvas[offset]);
-    absoluteError += Math.abs(source.data[offset + 1] - canvas[offset + 1]);
-    absoluteError += Math.abs(source.data[offset + 2] - canvas[offset + 2]);
-    comparedChannels += 3;
+    const sourceAlpha = source.data[offset + 3] / 255;
+    const canvasAlpha = canvas[offset + 3] / 255;
+    for (let channel = 0; channel < 3; channel += 1) {
+      const sourceOnMatte = Math.round(
+        source.data[offset + channel] * sourceAlpha
+        + QUALITY_MATTE_CHANNEL * (1 - sourceAlpha),
+      );
+      const canvasOnMatte = Math.round(
+        canvas[offset + channel] * canvasAlpha
+        + QUALITY_MATTE_CHANNEL * (1 - canvasAlpha),
+      );
+      absoluteError += Math.abs(sourceOnMatte - canvasOnMatte);
+      comparedChannels += 1;
+    }
   }
   const reconstructionMae = comparedChannels === 0
     ? 1
