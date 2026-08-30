@@ -766,3 +766,11 @@ No item is “absorbed” merely because its source file exists or a unit test p
 - 项目切换、新提交与卸载会中止恢复并提升请求代次，迟到响应不能覆盖新任务或写入其他项目。恢复只读，不提交供应商、不创建任务、不产生账务。
 - 首轮审查的 3 项 Important 与 1 项 Minor 均补 RED 后关闭，终审 APPROVED。聚焦 `175/175`、全仓 `4244 passed / 123 PostgreSQL-gated skipped / 0 failed`、TypeScript、零错误 ESLint、干净候选保护基线和生产构建 `118/118` 通过。
 - **状态：本地关闭、Coze 非付费验收待执行。** 当前顺序不变：`002-B -> 002-D -> 完成态任务卡云端补证 -> 002-E`；本地卡片水合不得重复实施，也不进入 `V588-ADMIN-004`。
+
+## 2026-08-30 完成态父任务水合云端关闭检查点
+
+- Coze 业务 tree 已精确对齐 `origin/main@3b47dfb75d1b1413d7691306c6ae700d9e39f4c4` 的 `eeabd8124a4580e1a5548e79d31cfc544d58bec0`；`origin/stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 未触碰。专项 `151/151`、全量 `4244 passed / 123 skipped / 0 failed`、保护基线 `0/0`、TypeScript、Lint、生产构建和健康端点通过。
+- 既有 Google Chrome 标签真实重载后，选择 `canvas image / 3504x2336` 并打开元素拆解，历史父任务卡恢复为 `completed · 100%`，显示实际本地引擎、退款回退说明和“打开编辑器”。
+- 首次及再次整页重载后的“打开编辑器”均恢复同一 5 层文档、同一 `3504x2336` 来源和历史重命名“元素 1-云端持久化验收”；二次打开先出现正常的“正在恢复 / 0 层”中间态，约 6 秒后稳定为 5 层和“已保存”。Console 新增 error/warning 为 `0/0`。
+- 云端只读数据库审计确认窗口内新建元素拆解父任务 `0`、积分流水 `0`、扣费 `0`、退款 `0`；原有 6 个父任务均早于窗口且为 `completed / credit_status=not-applicable / credit_cost=0`。服务日志不记录 path/method，因此 HTTP 方法本身标记为“日志不可直接验证”，不虚构网络证据；零新任务与零账务证明恢复没有业务副作用。
+- **BUG-018 完成态父任务水合已云端关闭。** `V588-STABILITY-002` 仍为有条件通过；后续唯一顺序更新为 `002-B -> 002-D -> 002-E`，不再重复 `002-C`、完成态卡片或 Stage 4，也不进入 `V588-ADMIN-004`。证据：`docs/testing/evidence/v588-stability-002-3b47dfb7-completed-parent-cloud-2026-08-30.json`。

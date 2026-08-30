@@ -3143,3 +3143,15 @@ All listed Stage 4 defects are locally closed. S4-BUG-008 also passed its exact-
 | 无副作用边界 | 恢复路径只读取既有父任务，不调用供应商、不创建新任务、不扣费、不退款；新提交优先于旧恢复，旧项目结果不能写入当前项目。 |
 | 审查与回归 | 首轮独立审查发现 3 项 Important 和 1 项 Minor，均补 RED 后关闭；终审 APPROVED。聚焦分层矩阵 `12 个文件 / 175 项测试` 通过；全仓 `577 个文件 / 4244 项通过 / 23 个文件、123 项 PostgreSQL 专项跳过 / 0 失败`；TypeScript、零错误 ESLint、干净候选保护基线 `38/38 / 0 漂移 / 0 警告` 与 8 GiB 生产构建 `118/118` 通过。 |
 | 当前状态 | **本地关闭 / Coze 云端待验。** 云端必须从历史 completed 父任务恢复卡片，点击“打开编辑器”后仍为同一 task/source/layers，并证明没有新的 `/api/element-decompose` POST、供应商任务或账务流水。 |
+
+#### BUG-018 完成态父任务水合云端关闭增量（2026-08-30）
+
+| 字段 | 内容 |
+|---|---|
+| 运行版本 | Coze 业务 tree `eeabd8124a4580e1a5548e79d31cfc544d58bec0`，对应 `origin/main@3b47dfb75d1b1413d7691306c6ae700d9e39f4c4`；`origin/stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 未触碰。 |
+| 浏览器复现 | Google Chrome 现有标签执行整页真实重载；`canvas image / 3504x2336` 的历史卡恢复为 `completed · 100%`，显示实际本地引擎、退款回退说明和“打开编辑器”。 |
+| 同任务恢复 | 首次与再次重载后的按钮均进入 5 层文档，来源尺寸、重命名“元素 1-云端持久化验收”、背景/主体和“已保存”一致。二次打开短暂显示“正在恢复 / 0 层”，约 6 秒后稳定完成，不是永久空文档。 |
+| 副作用审计 | 2026-08-30T00:16:19.166Z 起的窗口内，数据库新增父任务 `0`，积分流水 `0`，扣费 `0`，退款 `0`；原有 6 个父任务均早于窗口、`completed`、`credit_status=not-applicable`、`credit_cost=0`。Console error/warning `0/0`。 |
+| 观测限制 | `app.log` 不记录 path/method，无法用服务日志直接证明 `/api/element-decompose` 的 GET/POST 方法；因此只关闭“零新任务、零供应商、零账务副作用”，不伪造 HTTP 方法抓包证据。 |
+| 云端状态 | **已关闭。** 完成态父任务水合与同任务编辑器重开真实通过。该关闭不证明 Pear 远程质量成功、成功一次扣费零退款或失败/取消账务矩阵。 |
+| 证据 | `docs/testing/evidence/v588-stability-002-3b47dfb7-completed-parent-cloud-2026-08-30.json` 及同前缀两张 PNG。 |

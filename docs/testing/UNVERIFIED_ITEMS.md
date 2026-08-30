@@ -1905,3 +1905,16 @@ Stage 3 remains in Task 10. Stage 4/5 are not authorized.
 云端执行顺序固定为：Coze 拉取最终 `main` exact-SHA，确认 `stable` 未变；沙箱完全重启；强制刷新既有 Google Chrome 预览标签；最后开始验证。不得新建 Chrome 标签，也不得在旧沙箱进程上得出通过结论。
 
 补充门禁：刷新后必须核对浏览器已加载的 webpack/page chunk 与服务器当前 HTML 一致。仅发送 `Ctrl+Shift+R` 不再作为“新构建已加载”的充分证据。
+
+### 2026-08-30 完成态父任务水合云端状态（覆盖上一节）
+
+| 项目 | 最新状态 | 证据 / 剩余边界 |
+|---|---|---|
+| 父任务项目绑定与竞态隔离 | `LOCAL PASS` | 聚焦 `175/175`、终审 APPROVED；不重复改造。 |
+| 完成卡片刷新恢复 | `CLOUD PASS` | Google Chrome 两次整页重载均恢复 `completed · 100%` 卡片及“打开编辑器”。 |
+| 同任务编辑器载荷 | `CLOUD PASS` | 两次均恢复 5 层、`3504x2336` 来源、历史重命名和“已保存”。 |
+| 零业务副作用 | `CLOUD PASS` | 验证窗口内新任务 `0`、积分流水 `0`、扣费 `0`、退款 `0`，Console `0/0`。 |
+| HTTP 方法直接抓取 | `OBSERVABILITY GAP` | `app.log` 不含 path/method，无法单独证明请求方法；不得把这一限制写成网络抓包通过。 |
+| PostgreSQL 全仓专项 | `123 TESTS SKIPPED / OPEN` | 使用隔离 `POSTGRES_TEST_DATABASE_URL` 复跑；不得指向 Coze 业务库或生产库。 |
+
+BUG-018 已从未验证项移除。剩余顺序为 `002-B -> 002-D -> 002-E`；证据：`docs/testing/evidence/v588-stability-002-3b47dfb7-completed-parent-cloud-2026-08-30.json`。

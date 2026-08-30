@@ -1,0 +1,100 @@
+{
+  "evidenceId": "v588-stability-002-3b47dfb7-completed-parent-cloud-2026-08-30",
+  "recordedAt": "2026-08-30T00:18:33.899Z",
+  "environment": {
+    "url": "https://62afe49a-716e-4d9e-99cd-a0be49c4794c-5000.dev.coze.site/",
+    "projectId": "project_1786500304299_8vix1z45f",
+    "browser": "Google Chrome",
+    "profile": "用户1"
+  },
+  "source": {
+    "originMain": "3b47dfb75d1b1413d7691306c6ae700d9e39f4c4",
+    "tree": "eeabd8124a4580e1a5548e79d31cfc544d58bec0",
+    "cozeMetadataHead": "68b35013",
+    "originStable": "52f7c601ed150769e15d06fb435c6e360e28c9e7",
+    "stableTouched": false
+  },
+  "cozeGate": {
+    "focused": { "files": 10, "passed": 151, "failed": 0 },
+    "protectedBaseline": { "unauthorized": 0, "warnings": 0 },
+    "fullTest": { "total": 4367, "passed": 4244, "failed": 0, "skipped": 123 },
+    "typecheck": "pass",
+    "lintBuild": "pass",
+    "build": { "exitCode": 0, "buildId": "CM0KUE0QU2Gj8zQ4GIuYr" },
+    "service": {
+      "pid": 16945,
+      "root": 200,
+      "simpleChat": 200,
+      "authMe": 200,
+      "staticAssetsTotal": 11,
+      "staticAssetsFailed": 0
+    }
+  },
+  "interaction": {
+    "verificationWindowStart": "2026-08-30T00:16:19.166Z",
+    "sourceImageAlt": "canvas image",
+    "sourceSize": "3504x2336",
+    "parentCard": {
+      "status": "completed",
+      "progress": 100,
+      "actualEngine": "local",
+      "fallbackDisclosure": "Pear 云端分层未完成，已退款并使用本地分层",
+      "openEditorVisible": true
+    },
+    "firstOpen": {
+      "layerCount": 5,
+      "saved": true,
+      "renamedLayer": "元素 1-云端持久化验收"
+    },
+    "reloadReopen": {
+      "parentCardRecovered": true,
+      "sameSourceSize": true,
+      "sameLayerCount": 5,
+      "sameRenamedLayer": true,
+      "saved": true,
+      "transientState": "打开后短暂显示正在恢复/0层，约6秒后稳定恢复5层"
+    },
+    "console": { "recentEntries": 28, "errors": 0, "warnings": 0 }
+  },
+  "readOnlyAudit": {
+    "userId": "admin_mr_joker",
+    "preexistingElementDecomposeParentTasks": 6,
+    "newTasksInWindow": 0,
+    "taskIds": [
+      "element_69c2af1b-7108-4554-bd1d-9491982c383c",
+      "element_9fabca9f-54b2-486f-b6be-735f082154c1",
+      "element_82f1b60e-672c-46b7-92e2-5122b62cbbaf",
+      "element_18d84d90-5566-4ce1-b804-95571e9df8f4",
+      "element_c626fa3a-948a-4b8b-8a12-e4f57d6c9095",
+      "element_b7f82685-fbe3-4095-a8b1-51d8d79aebd9"
+    ],
+    "allPreexistingTasksCompleted": true,
+    "allPreexistingTasksCreditStatus": "not-applicable",
+    "allPreexistingTasksCreditCost": 0,
+    "newCreditTransactionsInWindow": 0,
+    "newChargesInWindow": 0,
+    "newRefundsInWindow": 0,
+    "lastCreditTransactionAt": "2026-08-29T15:03:22Z",
+    "providerCallsObserved": 0,
+    "serverLogRowsInWindow": 609,
+    "serverLogElementDecomposeRows": 0,
+    "httpMethodDirectlyVerifiable": false,
+    "httpMethodLimitation": "app.log 不记录 path/method，无法单独证明 GET/POST 方法；数据库零新任务、账务零新增和 UI 未点击生成共同证明本轮没有业务副作用。",
+    "legacyProjectIdentityNote": "旧 cloud_tasks 的 project_id 为空，恢复通过 result.request.projectId 精确兼容；本次 SQL 同时核对该用户全部 element-decompose-parent 任务。"
+  },
+  "screenshots": [
+    "docs/testing/evidence/v588-stability-002-3b47dfb7-completed-parent-first-open-cloud-2026-08-30.png",
+    "docs/testing/evidence/v588-stability-002-3b47dfb7-completed-parent-reload-cloud-2026-08-30.png"
+  ],
+  "verdict": {
+    "bug018ParentHydration": "cloud-pass",
+    "zeroSideEffects": "cloud-pass",
+    "directHttpMethodCapture": "unavailable",
+    "v588Stability002": "conditional",
+    "remainingOrder": [
+      "002-B Pear 远程质量成功",
+      "002-D 成功任务一次扣费且零退款",
+      "002-E 云端失败/取消账务矩阵"
+    ]
+  }
+}

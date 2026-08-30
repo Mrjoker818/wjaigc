@@ -1797,3 +1797,10 @@ The focused gate test passes `7/7`; the actual protected-baseline command passes
 - 恢复链路为只读：不调用 Pear、不新建元素拆解任务、不产生扣费或退款。首轮独立审查的 3 项 Important 与 1 项 Minor 已全部关闭，终审 APPROVED。
 - 聚焦 `175/175`、全仓 `4244 passed / 123 PostgreSQL-gated skipped / 0 failed`、TypeScript、零错误 ESLint、干净候选保护基线和 8 GiB 生产构建 `118/118` 通过。PostgreSQL 跳过项仍不得计作本轮通过。
 - **发布结论维持“有条件通过”。** 候选可推送 `main` 进入 Coze 非付费验收；只有历史 completed 父任务卡片、同任务编辑器重开及零新请求/零账务证据成立后，BUG-018 才能云端关闭。`002-B`、`002-D`、`002-E` 状态不变。
+
+## 2026-08-30 完成态父任务水合发布判定增量
+
+- `origin/main@3b47dfb7` 的业务 tree 已在 Coze 通过专项、全量、保护基线、TypeScript、Lint、生产构建、单实例和健康检查；`stable@52f7c60` 未触碰。
+- Google Chrome 已证明历史 completed 父任务卡在整页重载后恢复，“打开编辑器”两次进入同一 5 层、同一来源和同一已保存文档。控制台新增 error/warning 为 `0/0`。
+- 只读数据库与积分流水审计证明窗口内新任务、扣费和退款均为 `0`。由于服务日志不记录 path/method，HTTP 方法级网络证据仍明确写为不可直接验证；该观测限制不推翻零业务副作用证据，也不扩张成供应商链路通过。
+- **BUG-018 可以云端关闭，整体发布结论仍为“有条件通过”。** `002-B` Pear 远程质量、`002-D` 成功任务一次扣费零退款和 `002-E` 云端失败/取消账务仍未关闭；完成前不得进入 `V588-ADMIN-004`。

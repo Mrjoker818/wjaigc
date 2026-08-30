@@ -2241,3 +2241,11 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - 首轮独立审查的 3 项 Important 与 1 项 Minor 均补回归后关闭，终审 APPROVED；聚焦 `12 files / 175 tests` 通过。
 - 新鲜全仓为 `577 files passed / 23 skipped`、`4244 tests passed / 123 PostgreSQL-gated skipped / 0 failed`；跳过项不计作通过。TypeScript、零错误 ESLint、干净候选保护基线 `38/38 / 0 drift / 0 warnings` 及 8 GiB 生产构建 `118/118` 均通过。
 - **回归判定：BUG-018 父任务水合 LOCAL PASS / CLOUD PENDING。** 云端需要复用历史 completed 任务验证卡片和按钮，不得用新付费任务代替。
+
+## 2026-08-30 `3b47dfb7` 完成态父任务水合云端回归
+
+- Coze 运行 tree `eeabd8124a4580e1a5548e79d31cfc544d58bec0` 与 `origin/main@3b47dfb75d1b1413d7691306c6ae700d9e39f4c4` 一致；专项 `151/151`、全量 `4244 passed / 123 skipped / 0 failed`、保护基线 `0` 未授权/`0` 警告、TypeScript、构建版 Lint 和生产构建均通过，Build ID `CM0KUE0QU2Gj8zQ4GIuYr`。
+- Google Chrome 在同一预览标签真实整页重载两次。每次选择 `canvas image / 3504x2336` 并打开元素拆解后，均出现历史 `completed · 100%` 父任务卡、“实际引擎：本地分层”、退款回退说明和“打开编辑器”。
+- “打开编辑器”恢复同一 5 层、同一来源尺寸、同一历史重命名“元素 1-云端持久化验收”和“已保存”；第二次打开的 `0 层/正在恢复` 仅为约 6 秒的明确加载态，最终终态稳定为 5 层。验证窗口 Console error/warning `0/0`。
+- 云端只读审计确认窗口内新父任务 `0`、积分流水 `0`、扣费 `0`、退款 `0`，也未观察到供应商调用。`app.log` 不含 HTTP path/method，故不能直接声称捕获到“只有 GET、没有 POST”；本报告只据数据库、账务与未点击生成按钮判定恢复链路零业务副作用。
+- **回归判定：BUG-018 云端 PASS；V588-STABILITY-002 继续 CONDITIONAL。** 剩余顺序为 `002-B` Pear 远程质量成功、`002-D` 成功一次扣费零退款、`002-E` 云端失败/取消账务矩阵。证据：`docs/testing/evidence/v588-stability-002-3b47dfb7-completed-parent-cloud-2026-08-30.json` 与同前缀两张 PNG。
