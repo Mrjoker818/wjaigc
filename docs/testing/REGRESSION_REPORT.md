@@ -2364,3 +2364,12 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - 聚焦 `13/13`；新鲜全仓 `4280 passed / 123 PostgreSQL-gated skipped / 0 failed`；TypeScript、构建版 Lint、8 GiB 生产构建 `118/118` 和干净保护基线均退出 `0`。
 - 候选 `main@a27e33be` 已推送，`stable@52f7c601` 未变化。Google Chrome 安装、扩展启用、原生通信和进程诊断通过，但既有 Coze 标签的页面交互仍超时；按约束未新建标签或窗口。
 - **回归判定：LOCAL + GITHUB PASS / COZE PENDING。** 只有 Coze exact-SHA、真实 UI 数值、刷新恢复与 Console 健康全部取得证据后，才能将 BUG-003 和 `V588-ADMIN-004` 整体关闭。
+
+## 2026-08-31 `fa857e44` 云端 UI 正向验收
+
+- Coze 已执行本次精确 main 候选的专项 `13/13`、全仓 `4280 passed / 123 PostgreSQL-gated skipped / 0 failed`、TypeScript、构建版 Lint、38 项保护门禁和 `118/118` 生产构建。`test_run` 对预期 stderr 的误判与 Vitest 实际退出 0、零失败统计分开记录；没有删测试或吞异常。
+- 同一个 Google Chrome 预览标签已在服务重启后清缓存强刷并保持管理员登录。用户管理的三字段恢复；积分、数据和运营总览均能真实打开并显示 6 个用户。
+- users / credits overview / user-images 已取得真实 HTTP 200 和业务内容；逐用户余额、项目与日期通过页面和接口人工逐行核对。运营总览 UI 总数为 6，但响应正文采集时连接断开，不伪造该响应证据或自动比对结果。
+- 首次强刷后的网络事件另有 3 个 Coze 注入脚本 CSP 拦截。已定位外部脚本来源，未放宽安全策略，也不将其混入应用 API 失败。
+- **回归判定：有条件通过，尚未完整关闭。** 只剩最终再次刷新、运营总览响应正文、完整新鲜浏览器日志及 Coze post-done tree 补证。已完成的云端拉取、全量测试和构建不重做；没有业务代码变更时不重复本地全仓构建。
+- 证据：`docs/testing/evidence/v588-admin-004-fa857e44-cloud-20260831.json`。截图含用户资料，仅保留本地，公开证据使用匿名序号与核对结论。

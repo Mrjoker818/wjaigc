@@ -2041,10 +2041,14 @@ BUG-018 已从未验证项移除。剩余顺序为 `002-B -> 002-D -> 002-E`；�
 | 项目 | 最新状态 | 关闭条件 |
 |---|---|---|
 | 三字段组件边界 | `LOCAL + GITHUB PASS` | `main@a27e33be` 已有 RED/GREEN、全量门禁、构建和保护基线证据。 |
-| Coze exact-SHA | `CLOUD PENDING` | Coze 工作区必须精确对齐 `a27e33be0f6d3359cfac84f2ef2f6415c5bcd776`，并完成生产重建与单一 5000 服务健康检查。 |
-| 用户列表真实显示 | `CLOUD PENDING` | 同一管理员会话中，积分、项目数和最后登录必须与 `/api/admin/users` 及积分/数据页面逐 userId 一致，不得继续出现全员 `0 / - / 从未`。 |
-| 刷新恢复与 Console | `CLOUD PENDING` | 既有 Google Chrome 预览标签强制刷新后数据保持一致，新增 console error/warning 和未处理 Promise 均为 0。 |
-| Chrome 控制通道 | `TEST TOOL BLOCKED` | 标签可枚举，扩展/原生通信/进程诊断通过，但所有页面指令超时；恢复现有标签控制后继续，禁止改用 360 或新建标签冒充验收。 |
+| Coze exact-SHA 与构建 | `CLOUD PASS / POST-DONE TREE OPEN` | `fa857e44` 与目标 tree 已对齐、测试构建重启已通过；只缺 Coze 自动元数据提交后的最终只读 tree 复核，不重新拉取或构建。 |
+| 用户列表真实显示 | `CLOUD UI POSITIVE PASS` | 服务重启后 Chrome 首次强刷已显示真实三字段；积分、数据、运营总览 UI 总数均为 6。保留最后刷新补证，不将已完成正向测试重新列为未执行。 |
+| 四接口机器证据 | `3 RESPONSES CAPTURED / 1 OPEN` | users、credits overview、user-images 正文与 HTTP 200 已取得；运营总览 UI 已核对，dashboard-stats 正文采集时断线，尚待补齐。 |
+| 再次刷新与完整日志 | `FINAL CHECK UNVERIFIED` | 首次强刷已成功；最终再次刷新后字段、完整新鲜 Console/未捕获异常和原生弹窗仍需收集，不根据先前日志推断为零。 |
+| Coze 注入脚本 CSP | `OBSERVED / SEPARATE` | 3 个外部编辑器和 bridge 脚本被 CSP 拦截；业务页面已正常加载。保持安全策略，后续明确是否影响预览编辑器桥接，不冒充应用接口失败。 |
+| Chrome 控制通道 | `INTERRUPTED AFTER UI VERIFICATION` | 本轮曾完整控制现有 Chrome 并取得正向结果；采集运营总览响应时中断，诊断正常但重新接管失败。只恢复原标签，不进入 360 或新建窗口。 |
 | 隔离 PostgreSQL 全仓门禁 | `123 TESTS SKIPPED / OPEN` | 配置专用 `POSTGRES_TEST_DATABASE_URL` 后运行；严禁使用 Coze 业务库。 |
 
 上述云端证据完成前，`V588-ADMIN-004-BUG-003` 和 `V588-ADMIN-004` 整体均不得标记为关闭或已吸收。
+
+本检查点证据：`docs/testing/evidence/v588-admin-004-fa857e44-cloud-20260831.json`。Pear 延后状态和普通用户模型可见性不因管理员页面正向验证而改变。

@@ -1907,3 +1907,11 @@ The focused gate test passes `7/7`; the actual protected-baseline command passes
 - `main@a27e33be` 已通过 `4280 passed / 123 PostgreSQL-gated skipped / 0 failed`、TypeScript、零错误构建版 Lint、`118/118` 生产构建和保护基线 `38/38 / 0 drift / 0 warnings`，并已推送 GitHub；`stable` 与 donor 均未触碰。
 - Chrome 自动化当前只能枚举现有标签，任何页面读取或刷新均超时；扩展、原生通信、Chrome 进程诊断均通过。由于禁止创建新标签或窗口，本轮没有 Coze 拉取、沙箱重启或云端 UI 结果。
 - **全平台结论继续为“有条件通过”。** 本地候选具备部署资格，但 `V588-ADMIN-004-BUG-003` 与整项吸收仍为 Coze 待验；隔离 PostgreSQL 和 Pear 后期项继续开放。
+
+## 2026-08-31 `fa857e44` 云端验收检查点
+
+- **当前结论：有条件通过，不是全平台发布通过。** 云端精确候选构建成功，Chrome 首次强刷后的管理员三字段实际恢复，四管理页面总用户数一致，积分与项目数据未改变。
+- 本轮已完成 Coze 同步、测试、构建、单一服务启动和首次真实 UI 验证，不再沿用上轮“未拉取、没有云端 UI 结果”的状态。业务实现仍为 `a27e33be`，运行候选为 `fa857e44328cb20f80cf2ab6194d0c1db127283b`。
+- Chrome 采集最后一组网络正文时断线。运营总览响应正文、再次刷新持久显示、完整新鲜日志和 post-done 最终 tree 尚未取得，因此 `V588-ADMIN-004` 不提前关闭。3 个 Coze 注入脚本的 CSP 拦截单独保留，不以放宽 CSP 消除告警。
+- 隔离 PostgreSQL 的 123 个跳过测试、普通用户模型可见性、Pear `002-B/002-D/002-E` 后期验证项保持开放。管理员正向显示不能代替这些证据。
+- `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 未触碰；本轮仅新增报告，不需要为了文档提交重复云端构建。证据：`docs/testing/evidence/v588-admin-004-fa857e44-cloud-20260831.json`。

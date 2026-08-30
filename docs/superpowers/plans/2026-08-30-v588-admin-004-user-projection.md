@@ -244,6 +244,8 @@ git push origin main
 
 - [ ] **Step 4: Coze 与 Google Chrome 验收**
 
+2026-08-31 检查点：Coze 已同步 `fa857e44` 并通过测试、构建与重启；既有 Chrome 预览首次强刷后真实显示积分、项目数和日期，四管理页面总数均为 6。只剩运营总览响应正文、最终再次刷新、完整新鲜日志和 post-done tree 补证；因 Chrome 控制中断，此步暂不勾选。已完成的拉取、全量测试和构建不重复执行。证据：`docs/testing/evidence/v588-admin-004-fa857e44-cloud-20260831.json`。
+
 Coze 拉取 exact SHA、重启沙箱、强制刷新既有 Google Chrome 预览标签后，使用同一管理员会话对比：
 
 ```text

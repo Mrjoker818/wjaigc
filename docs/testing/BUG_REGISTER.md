@@ -3344,5 +3344,15 @@ All listed Stage 4 defects are locally closed. S4-BUG-008 also passed its exact-
 | RED | 在 `admin-user-projection-contract.test.ts` 增加组件边界字段保持合同；修复前 `4 passed / 1 failed`，失败点为缺少 `credits: u.credits`。 |
 | 最小修复 | 仅在既有映射中透传三个权威字段；未修改认证、用户写入、积分、项目、供应商、任务、支付或账务链路。 |
 | 回归 | 聚焦 `3 files / 13 tests`；全仓 `582 files passed / 23 skipped`、`4280 passed / 123 PostgreSQL-gated skipped / 0 failed`；TypeScript、构建版 Lint、`118/118` 生产构建和干净保护基线 `38/38 / 0 drift / 0 warnings` 通过。 |
-| 当前状态 | **LOCAL PASS / GITHUB MAIN PASS / COZE PENDING。** 修复提交 `a27e33be0f6d3359cfac84f2ef2f6415c5bcd776` 已推送；Chrome 页面控制当前超时，尚未完成 Coze exact-SHA 拉取和 UI 回归，不得提前关闭。 |
+| 当前状态 | **云端 UI 正向通过 / 最终只读补证待完成。** Coze `fa857e44` 已同步、构建、重启，Chrome 首次强刷后积分、项目和日期已恢复；最后再次刷新、完整日志和交付后最终 tree 尚未取得，整项不提前关闭。 |
 | 证据 | `docs/testing/evidence/v588-admin-004-dashboard-boundary-local-20260831.json`。 |
+
+#### `fa857e44` Google Chrome 云端增量（2026-08-31）
+
+- Coze 在 `main` 对齐完整 SHA `fa857e44328cb20f80cf2ab6194d0c1db127283b` 和 tree `9a36bd1ec23f73d6d02381ddc63e5ad7c8e789a5`；专项 `13/13`，全仓 `4280 passed / 123 skipped / 0 failed`，生产构建 `118/118`，保护功能 `38/38`。Build ID `X9j0MRzpVB9QTLorkoG1v`，5000 PID `30660`。这些执行结果来自本轮 Coze 可见日志。
+- Chrome 仅使用原项目和预览标签，首次以 `Page.reload(ignoreCache=true)` 强刷。实际加载 `webpack-aa8560c6ff6982e5.js` 为 200，已不同于旧 `webpack-c032477aff2edf3d.js`。
+- 旧 UI 的全员 `0 / - / 从未` 不再出现：6 行中非零余额和项目数恢复，6 行均显示真实日期。users 接口为 200，`projectionCoverage` 四项均为 `available`；积分与数据接口为 200，四个管理页面总用户数均为 6，页面逐用户余额和项目一致。
+- 本轮只读操作没有点击新增、删除、编辑、充值或供应商任务。不能据此宣称后台完全没有自动保存或审计写入。
+- 3 个 Coze 注入脚本被 CSP 拦截，已识别为编辑器、console bridge 和 history bridge；没有放宽 CSP。它们与管理员业务接口的成功分开记录，不隐藏网络失败。
+- Chrome 控制在读取运营总览响应正文时断开；进程、扩展启用和原生通信配置诊断正常，但原标签重新接管仍失败。最后刷新、完整新鲜 Console/异常计数、运营总览响应正文及 Coze 自动元数据提交后的最终 tree 均保留未验证。**BUG-002/003 的页面正向证据已取得，严格收口仍未完成。**
+- 机器证据：`docs/testing/evidence/v588-admin-004-fa857e44-cloud-20260831.json`。原始截图含用户资料，仅存本地 `.playwright-cli/`，不推送公共仓库。

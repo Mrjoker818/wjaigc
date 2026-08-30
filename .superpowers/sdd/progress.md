@@ -1,5 +1,16 @@
 # WJ-STABLE-001 Stage 2 Progress
 
+## 当前检查点（2026-08-31）
+
+当前是 V5.8.8 选择性吸收中的 `V588-ADMIN-004` 云端只读验收；下方 Stage 2/3/4 和旧日期“下一步”仅为历史记录，不得据此重做已完成阶段。
+
+- `main@fa857e44328cb20f80cf2ab6194d0c1db127283b` 已拉取 Coze，tree `9a36bd1ec23f73d6d02381ddc63e5ad7c8e789a5`；云端 `4280 passed / 123 skipped / 0 failed`、保护 `38/38`、构建 `118/118` 和服务重启完成。
+- Google Chrome 原预览标签已强刷，管理员积分/项目/日期真实显示已恢复，四管理页面总数均为 6。运营总览响应采集时控制断开，因此最终再次刷新、完整新鲜日志和 post-done tree 尚待补证；整项不提前关闭。
+- 只补未完成只读证据，不重跑拉取/全仓测试/构建，不新建标签或进入 360。Pear `002-B/002-D/002-E` 延后，不发起新付费任务；随后回到 `V588-PROVIDER-002` 普通用户可见性与隔离 PostgreSQL 双结构验证。
+- 权威记录：`docs/testing/evidence/v588-admin-004-fa857e44-cloud-20260831.json`，并已同步 Obsidian 无界目录。`stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 和 donor 未触碰。
+
+## Stage 2 历史基线
+
 Baseline: `origin/main@ffe810939a446bbf7288d177b95040b36a05484c`  
 Branch: `codex/wj-stable-s2`  
 Plan: `docs/superpowers/plans/2026-08-10-wujie-stable-asset-version-graph-stage-2.md`  

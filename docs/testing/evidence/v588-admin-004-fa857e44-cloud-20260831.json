@@ -1,0 +1,162 @@
+{
+  "schemaVersion": 1,
+  "item": "V588-ADMIN-004",
+  "relatedBugs": ["V588-ADMIN-004-BUG-002", "V588-ADMIN-004-BUG-003"],
+  "recordedAt": "2026-08-31T06:21:25+08:00",
+  "result": "conditional",
+  "conclusion": "云端构建和管理员三字段正向 UI 验证通过，最终只读补证尚未完成。",
+  "environment": {
+    "githubMain": "fa857e44328cb20f80cf2ab6194d0c1db127283b",
+    "implementationCommit": "a27e33be0f6d3359cfac84f2ef2f6415c5bcd776",
+    "expectedTree": "9a36bd1ec23f73d6d02381ddc63e5ad7c8e789a5",
+    "stableCommit": "52f7c601ed150769e15d06fb435c6e360e28c9e7",
+    "projectUrl": "https://code.coze.cn/p/7671964106919837702/preview",
+    "previewOrigin": "https://62afe49a-716e-4d9e-99cd-a0be49c4794c-5000.dev.coze.site",
+    "browser": "Google Chrome",
+    "reusedExistingTabs": true,
+    "newTabsCreated": 0,
+    "newWindowsCreated": 0,
+    "firstHardRefreshAt": "2026-08-30T22:14:43.737Z"
+  },
+  "cozeExecution": {
+    "evidenceSource": "本轮 Coze 项目页可见执行日志与最终报告，不是本地测试冒充云端执行。",
+    "headBeforeDone": "fa857e44328cb20f80cf2ab6194d0c1db127283b",
+    "treeBeforeDone": "9a36bd1ec23f73d6d02381ddc63e5ad7c8e789a5",
+    "worktreeCleanBeforeDone": true,
+    "stableUnchanged": true,
+    "focused": {"filesPassed": 3, "testsPassed": 13, "failed": 0},
+    "fullSuite": {
+      "filesPassed": 582,
+      "filesSkipped": 23,
+      "testsPassed": 4280,
+      "testsSkipped": 123,
+      "testsFailed": 0,
+      "durationSeconds": 152.86,
+      "exitCode": 0,
+      "skipReason": "未配置专用 POSTGRES_TEST_DATABASE_URL，跳过项不计为通过。"
+    },
+    "protectedBaseline": {"featuresPresent": 38, "unauthorizedDrift": 0, "warnings": 0},
+    "typecheck": "passed",
+    "lintBuild": "passed",
+    "build": {"exitCode": 0, "staticPages": 118, "heapMiB": 8192},
+    "buildIdBeforeDone": "X9j0MRzpVB9QTLorkoG1v",
+    "port5000PidBeforeDone": 30660,
+    "healthBeforeDone": {"root": 200, "simpleChat": 200, "authMe": 200, "staticAssets200": 11},
+    "authMeAnonymousBusinessResponse": {"success": true, "user": null},
+    "testRunWrapperCaveat": "包装器将 fail-closed 测试预期 stderr 判为 failed；真实 Vitest 汇总为零失败、退出 0。没有删除错误日志或失败测试。",
+    "platformCommitDisplayedAfterDone": "afe133a",
+    "finalPostDoneHeadAndTree": null,
+    "finalReadOnlyCheckMessageSent": true,
+    "finalReadOnlyCheckResultCaptured": false
+  },
+  "browserObserved": {
+    "hardRefreshMethod": "Page.reload(ignoreCache=true)",
+    "administratorSessionPreserved": true,
+    "oldWebpackChunk": "webpack-c032477aff2edf3d.js",
+    "loadedWebpackChunk": "webpack-aa8560c6ff6982e5.js",
+    "loadedWebpackHttpStatus": 200,
+    "loadedPageChunk": "app/page-e644bf085753358b.js",
+    "loadedPageHttpStatus": 200,
+    "userManagementTotal": 6,
+    "creditsManagementTotal": 6,
+    "dataManagementTotal": 6,
+    "operationsDashboardTotal": 6,
+    "userRowsWithDate": 6,
+    "allRowsFallbackBugAbsent": true,
+    "perUserComparisonMethod": "以真实 users 响应及四管理页面 DOM 人工逐行核对；断线前没有完成自动逐用户比较脚本，不声称该脚本通过。",
+    "perUserCreditAndProjectUiMatch": true,
+    "lastLoginDateUiMatchesResponse": true,
+    "zeroProjectDisplay": "-（既有展示语义）；有项目的用户显示真实项目数。",
+    "finalSecondHardRefresh": "unverified",
+    "nativeDialogFinalCheck": "unverified"
+  },
+  "network": {
+    "requestIdKind": "Chrome DevTools 请求标识，不是伪造的服务端 requestId。",
+    "responses": [
+      {
+        "path": "/api/admin/users",
+        "browserRequestId": "24252.8810",
+        "status": 200,
+        "success": true,
+        "users": 6,
+        "projectionCoverage": {"identity": "available", "credits": "available", "projects": "available", "activity": "available"},
+        "validLastLoginCount": 6
+      },
+      {
+        "path": "/api/admin/credits/overview",
+        "browserRequestId": "24252.8817",
+        "status": 200,
+        "totalUsers": 6,
+        "bodyCaptured": true
+      },
+      {
+        "path": "/api/credits?action=admin-overview",
+        "browserRequestId": "24252.8820",
+        "status": 200,
+        "bodyCaptured": true,
+        "userFieldsObserved": ["userId", "userName", "balance", "totalRecharged", "totalUsed"]
+      },
+      {
+        "path": "/api/admin/user-images",
+        "browserRequestId": "24252.8824",
+        "status": 200,
+        "bodyCaptured": true,
+        "statsFieldsObserved": ["totalUsers", "filteredUsers", "totalImages", "generated", "uploaded", "edited", "userStats"]
+      },
+      {
+        "path": "/api/admin/dashboard-stats",
+        "browserRequestId": null,
+        "status": null,
+        "bodyCaptured": false,
+        "reason": "UI 已显示总用户 6；采集响应正文时 Chrome native pipe 中断，不能推断 HTTP 或 JSON。"
+      }
+    ],
+    "blockedExternalScripts": [
+      {"browserRequestId": "24252.8701", "reason": "csp", "url": "https://lf-cdn.coze.cn/obj/unpkg/coze-space/page-editor-general-web/0.1.0-alpha.274555/dist/umd/index.js"},
+      {"browserRequestId": "24252.8702", "reason": "csp", "url": "https://lf-cdn.coze.cn/obj/unpkg/coze-webapp/console-bridge/0.0.1-alpha.22488f/dist/index.js"},
+      {"browserRequestId": "24252.8703", "reason": "csp", "url": "https://lf-cdn.coze.cn/obj/unpkg/coze-webapp/history-bridge/0.0.1-alpha.10bbfe/dist/index.min.js"}
+    ],
+    "cspWeakened": false
+  },
+  "browserHealth": {
+    "completeFreshConsoleErrors": null,
+    "completeFreshConsoleWarnings": null,
+    "completeUnhandledExceptions": null,
+    "reason": "日志返回的历史 Sync 404/500/502 时间早于首次强刷，不混算为新版本失败，也不据有限样本宣称本轮完整零错误。",
+    "interruption": "运营总览响应读取时控制连接中断；扩展已安装启用、原生 host 清单正确、Chrome 运行检查通过，但原标签重新接管超时。",
+    "fallbackTo360": false
+  },
+  "sideEffects": {
+    "businessSourceChanged": false,
+    "userCrudClicked": false,
+    "permissionChangesRequested": false,
+    "rechargeClicked": false,
+    "paidProviderTasksRequested": 0,
+    "pearTasksRequested": 0,
+    "automaticPersistenceAndAuditWrites": "未作零写入保证；画布正常自动保存和只读审计可能发生。"
+  },
+  "privateArtifacts": [
+    {
+      "path": ".playwright-cli/v588-admin-004-old-ui-20260831.png",
+      "sha256": "3cfdd18ffea69baa51422f5e3be73f4ee10a8e122251bba62e716a7a86f09d31",
+      "committed": false,
+      "reason": "原始截图含用户资料，仅本地保留。"
+    },
+    {
+      "path": ".playwright-cli/v588-admin-004-new-ui-local-20260831.jpg",
+      "sha256": "4148166a21624f7d3e0175f196650fdbe47edc290328c540a3ea640465dc90bd",
+      "committed": false,
+      "reason": "原始截图含用户资料，仅本地保留。"
+    }
+  ],
+  "remaining": [
+    "Coze post-done 完整 HEAD、tree、Build ID、PID 的只读结果",
+    "运营总览 dashboard-stats 真实响应正文及四接口最终比对",
+    "再次刷新后字段稳定与完整新鲜 Console、异常、原生弹窗证据"
+  ],
+  "separateOpenItems": [
+    "V588-PROVIDER-002 普通用户模型可见性与隔离 PostgreSQL 双结构",
+    "123 个 PostgreSQL-gated 测试未执行",
+    "Pear 002-B/002-D/002-E 延后验证，不新建付费任务"
+  ]
+}

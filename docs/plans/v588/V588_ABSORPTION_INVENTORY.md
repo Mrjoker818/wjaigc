@@ -1,5 +1,14 @@
 # V5.8.8 Selective Absorption Inventory
 
+## 当前检查点：2026-08-31
+
+- 当前工作为 `V588-ADMIN-004` 云端只读投影验收，不重开已归档的 Stage 4。
+- Coze 已同步 `main@fa857e44328cb20f80cf2ab6194d0c1db127283b`，tree `9a36bd1ec23f73d6d02381ddc63e5ad7c8e789a5`，完成生产构建和单一 5000 服务重启。云端全仓 `4280 passed / 123 PostgreSQL-gated skipped / 0 failed`，功能保护 `38/38`。
+- 既有 Google Chrome 预览标签已强刷；用户列表三字段真实显示恢复。用户管理、积分管理、数据管理和运营总览均显示 6 个用户，逐用户积分、项目和日期已通过页面与已捕获接口数据核对。
+- **状态：云端 UI 正向验证通过，整项有条件、尚未关闭。** Chrome 控制在读取运营总览响应正文时断开；最终再次刷新、完整新鲜日志和 Coze 自动元数据提交后的最终 tree 仍须补证。禁止重新执行拉取、测试、构建来代替这几个只读补证。
+- `V588-STABILITY-002` 的 Pear `002-B/002-D/002-E` 按用户决定延后；不新建付费任务，不阻挡其他已授权吸收。管理员项收口后仍回到 `V588-PROVIDER-002` 普通用户模型可见性与隔离 PostgreSQL 双结构验证。
+- 权威证据：`docs/testing/evidence/v588-admin-004-fa857e44-cloud-20260831.json`。后文较早日期的“下一动作”仅为历史，不能覆盖本检查点。
+
 ## Decision
 
 Continue the current GitHub `main` line and selectively absorb proven V5.8.8 improvements. Do not migrate the current product onto the V5.8.8 tree and do not copy either tree wholesale into the other.
@@ -50,13 +59,13 @@ These are the only authorized first absorption targets. Every row remains unimpl
 | ID | 归档能力 | 调整后的吸收结论 | 强制门禁 | 优先级 |
 |---|---|---|---|---|
 | V588-STABILITY-001 | SVG/WASM 像素预算与超大输入保护 | 在当前 `/api/svg-trace` 架构内重实现预算门禁；不得复制旧路由控制器 | 边界像素、压缩炸弹、内存上限、失败终态、全仓与云端大图验证 | P0 |
-| V588-STABILITY-002 | PSD 分析的受控本地媒体解析、VLM 回退与输出预算 | **本地候选已修复 / 云端成功终态待验。** 受控肖像真实返回 `1280x1280`、23 个语义图层；旧质量门禁把 `768x1152` 源图直接与方形 PSD 坐标比较，并把透明缺口当黑色，造成应用误拒绝。`c5d39b11` 已采用透明 contain 坐标归一与统一白色底比较，真实制品离线重放由 score `22` / MAE `0.7844` 变为 score `98` / MAE `0.0158`，未放宽阈值 | 异步、ZIP/主 PSD、失败退款、同键重放、图层文档和导出已关闭；仍须部署候选并以同类肖像证明 `engine=pear`、23+ 图层、一次扣费零退款，再完成显式取消与迟到终态拒绝 | P0 |
+| V588-STABILITY-002 | PSD 分析的受控本地媒体解析、VLM 回退与输出预算 | **Pear 后期项延后 / 未验证，不阻挡其余吸收。** 本地质量与安全修复、已闭环图层文档保持；`002-B/002-D/002-E` 按 2026-08-30 用户决定单独保留，不再反复创建付费任务 | 后期仍需 Pear 远程成功、ZIP 下载、质量、取消与迟到终态等独立证据；不能把本地回退成功冒充 Pear 成功。见 `v588-stability-002-pear-final-defer-20260830.json` | P0 |
 | V588-CHAT-001 | `simple-chat` 普通对话、画布修图和 Deep Research 共用严格 SSE 分块解析 | **已吸收 / Coze 云端验证通过。** 三条流式链路共用严格解析器，并已关闭 CanvasEditor 参数错位与正文事件名不匹配；未复制 donor 会话、任务、同步或原始 URL 桥接 | RED/GREEN、分块/CRLF/UTF-8/多行/尾事件/畸形事件/取消、三入口真实 APImart 流式终态及零 Console/原生弹窗证据 | P1 |
 | V588-CHAT-002 | 失败消息状态与原位确定性重试 | **已吸收 / 云端通过。** 普通与联网原位重试、CanvasEditor 精确选区、刷新精确任务恢复、服务器终态持久化及 Deep Research 单 Artifact 均取得 Coze 证据 | `main-fix@1572a222` 的 Deep Research 任务刷新前后 UI 与服务器均严格保持同一个 `msg_1787715525319-research` Artifact；Console/原生弹窗为 0。第三方 exactly-once 仅保留为供应商能力边界 | P1 |
 | V588-CHAT-003 | 项目同步合并、离页冲刷和可诊断失败 | **已吸收 / Coze Google Chrome 云端验证通过。** 版本化快照、CAS 冲突重放、冲突副本、删除不复活、用户隔离、离页冲刷和可诊断同步状态均已闭环；保留当前登录、注销、用户数据 API 和前台流式生成边界 | 真实 PostgreSQL `4030/4030`、Coze 冷启动、项目/任务 CRUD、刷新恢复、双标签合并/冲突副本、离页、账号切换、布局及浏览器健康证据 | P1 |
 | V588-CHAT-004 | 聊天结果来源追踪与发送到无限画布/节点模式 | **已吸收 / Coze Google Chrome 云端验证通过。** 已保留 `AssetVersion -> /api/assets/transfer` 安全链路并补齐节点模式转交与来源追踪；普通用户正向、跨用户 403、URL-only 未托管媒体跳过、不远程读取、重复消费与刷新恢复均已闭环 | 跨项目资产归属、来源可追踪、刷新恢复、文本节点、图片节点、非法 URL、重复消费与普通用户权限 | P1 |
 | V588-AUTH-001 | 数据库唯一/数据库加文件两种持久化模式 | **本地候选已完成。** 只吸收显式持久化模式与启动诊断；继续使用当前认证密钥和密码校验，拒绝 donor 弱口令恢复 | 真实 PostgreSQL、普通用户/管理员多浏览器会话、退出后数据隔离和全量门禁已通过；Coze 精确 SHA 待验 | P1 |
-| V588-ADMIN-004 | 用户积分、项目数和最后活动时间的真实投影 | **云端只读接口数据已一致；旧云端 UI 仍因仪表盘组件边界丢字段而显示 `0 / - / 从未`。边界修复已进入 `main@a27e33be`，Coze 精确候选待验。** 接入当前管理员查询和统一用户身份，不复制 donor 用户存储 | 新增用户、删除用户、批量操作、积分、项目、聊天记录、最后活动显示与统计一致性 | P1 |
+| V588-ADMIN-004 | 用户积分、项目数和最后活动时间的真实投影 | **Coze 构建与首次强刷 UI 通过 / 最终只读补证待完成。** `fa857e44` 已在 Chrome 显示真实积分、项目和日期，四页面总数一致；没有修改用户或账务 | 按已批准规格仅核对四接口、逐用户字段、刷新及日志；不扩大为用户 CRUD、权限、扣费或支付改造。剩余运营总览响应正文、再次刷新、完整日志与 post-done tree | P1 |
 | V588-PROVIDER-005 | 图像比例/尺寸/质量与视频时长/模式能力矩阵 | **已吸收 / Coze Google Chrome 云端验证通过。** 保留 `providerId + modelId` 精确目录；管理员持久化、普通用户五入口、真实透明双图、真实视频和非法能力前置拒绝均已闭环 | 本地自动化、真实 PostgreSQL 专项、Coze exact SHA、Pear/APIMART 五入口、透明 Alpha、逐张回填、视频终态与零任务/零扣费拒绝证据均已保存；供应商后台独立计数未在本轮 Chrome 标签中直接读取 | P1 |
 
 本次归档不能独立证明完整发布质量：它不是完整源码，不含锁定后的全量测试环境；归档声明的 donor source commit 在当前仓库不可解析；部分报告混有不同日期状态；AGENTS 对 SVG 预算写为 `256x256`，而实现/测试为 `512x512`。以上矛盾必须以 RED、当前架构实现和云端机器证据重新闭环，不能把归档报告直接当作通过证据。
