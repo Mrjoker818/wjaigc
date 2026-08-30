@@ -1886,3 +1886,10 @@ The focused gate test passes `7/7`; the actual protected-baseline command passes
 - 候选仅在 PostgreSQL 明确的数据类型错误时执行一次 JSON 编码兼容写入，未更改登录、角色、密码、任务、供应商调用或积分账务。
 - 本地全量自动化为 `4278 passed / 123 PostgreSQL-gated skipped / 0 failed`，生产构建 `118/118`，保护功能 `38/38`。
 - **发布结论仍为“有条件通过”。** 可以推送 `main` 进入 Coze 精确 SHA 复验；新版本返回 200、刷新持久化和恢复“不限”完成前，不得把管理员授权或普通用户可见性标记为通过。`stable` 保持只读。
+
+## 2026-08-30 `318fe2d7` 云端验收增量
+
+- 管理员模型授权对历史 JSONB 用户列的写入、刷新持久化和恢复“不限”均已在真实 Google Chrome 中闭环，两个 POST 均为 200。
+- Coze 全仓 `4278 passed / 123 PostgreSQL-gated skipped / 0 failed`，Build ID `lEWsTeQvojTosQpVCD7M6`，服务 PID `8185`；首页、独立聊天和认证端点为 200。
+- **本项发布状态升级为管理员链路通过。全平台结论仍为“有条件通过”**，因为普通用户实际可见性、隔离 PostgreSQL 套件及既有 Pear 后期验证项仍开放。
+- 首次服务替换后的延迟分块 500 需要继续作为部署可靠性问题观察；稳定后强刷和 34 个静态资源检查均通过。

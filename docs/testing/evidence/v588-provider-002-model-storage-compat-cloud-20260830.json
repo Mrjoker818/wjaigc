@@ -1,0 +1,48 @@
+{
+  "issue": "V588-PROVIDER-002-BUG-003",
+  "date": "2026-08-30",
+  "deployment": {
+    "commit": "318fe2d78f6f3e5b26963d0a49b0c11245a9c006",
+    "tree": "8523c10ee2f1b8c4d68722c48d6f4d1b707d7c09",
+    "stable": "52f7c601ed150769e15d06fb435c6e360e28c9e7",
+    "buildId": "lEWsTeQvojTosQpVCD7M6",
+    "pid": 8185,
+    "port": 5000
+  },
+  "cloudGates": {
+    "focused": "46 passed / 0 failed",
+    "full": "582 files passed / 23 skipped; 4278 tests passed / 123 skipped / 0 failed",
+    "typecheck": "passed",
+    "lintBuild": "passed",
+    "protectedBaseline": "38/38; 0 unapproved drift; 0 warnings",
+    "productionBuild": "118/118 static pages; exit 0"
+  },
+  "health": {
+    "/": 200,
+    "/simple-chat": 200,
+    "/api/auth/me": 200,
+    "chromeStaticResources": "34 JS/CSS resources checked after hard reload; 34 returned HTTP 200"
+  },
+  "browserValidation": {
+    "browser": "Google Chrome, existing authenticated tab",
+    "userId": "user_1784777366175_f40u6h",
+    "disabledProvidersAbsent": ["虚宝图像", "虚宝LLM"],
+    "restrictedSave": {
+      "request": "POST /api/admin/users",
+      "requestId": "26568.1866",
+      "status": 200,
+      "target": "api_1780630178347_rjqlmam::nano-banana-2-lite",
+      "reopenedState": "unchecked"
+    },
+    "restoreUnlimited": {
+      "request": "POST /api/admin/users",
+      "requestId": "26568.1872",
+      "status": 200,
+      "payload": { "chatModels": [], "imageModels": [] },
+      "reopenedState": "all model options checked"
+    }
+  },
+  "deploymentObservation": "The first dashboard navigation immediately after service replacement requested stale lazy chunk 5504 and received HTTP 500. Clearing the Chrome cache and reloading after the service stabilized restored the dashboard; the subsequent 34 loaded static resources all returned 200. This remains deployment/cache reliability evidence, not an authentication persistence failure.",
+  "residual": "Ordinary-user /api/models and three-workspace visibility remain unverified because no ordinary-user credential was used.",
+  "status": "CLOUD PASS FOR ADMIN SAVE AND RESTORE / ORDINARY USER VISIBILITY UNVERIFIED"
+}

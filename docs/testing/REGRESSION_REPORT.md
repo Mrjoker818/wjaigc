@@ -2341,3 +2341,10 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - RED/GREEN 测试覆盖 JSONB 类型不匹配的一次兼容重试，并新增无关数据库错误绝不重试的边界；现代 TEXT[] 首选路径及原子 CAS 条件保持不变。
 - 聚焦 `46/46`；新鲜全仓 `4278 passed / 123 PostgreSQL-gated skipped / 0 failed`；TypeScript、零错误构建版 Lint、8 GiB 生产构建 `118/118`、保护功能 `38/38` 与空白检查通过。
 - **回归判定：LOCAL PASS / CLOUD PENDING。** 缺少隔离 PostgreSQL 库和新候选云端真实 200/持久化证据，不能提前关闭。
+
+## 2026-08-30 `318fe2d7` 历史模型列云端回归
+
+- Coze exact-SHA、全仓零失败、保护门禁、生产构建和三个健康端点通过；Google Chrome 强刷后检查 34 个已加载 JS/CSS，全部返回 200。
+- 管理员有效单模型授权保存返回 200，关闭重开后持久化为未选；恢复“不限”再次返回 200，关闭重开后全部模型恢复选中，测试未留下权限变更。
+- **回归判定：管理员授权写入 CLOUD PASS。** 普通用户实际模型可见性和隔离 PostgreSQL 双模式测试仍保持 UNVERIFIED。
+- 首次仪表盘导航的 `5504` 分块 500 在服务稳定后强刷恢复，作为部署缓存可靠性证据保留，不冒充认证回归失败或完整关闭。

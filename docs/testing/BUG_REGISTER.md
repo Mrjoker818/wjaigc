@@ -3312,3 +3312,11 @@ All listed Stage 4 defects are locally closed. S4-BUG-008 also passed its exact-
 | 回归 | 聚焦 `46/46`；全仓 `582 files passed / 23 skipped`、`4278 passed / 123 PostgreSQL-gated skipped / 0 failed`；TypeScript、构建版 Lint、8 GiB 生产构建 `118/118`、保护基线 `38/38 / 0 warning` 和空白检查通过。 |
 | 当前状态 | **LOCAL PASS / CLOUD PENDING**。必须部署候选后用同一管理员会话完成可逆单模型保存、关闭重开确认持久化，再恢复“不限”；普通用户模型可见性仍需独立验证。 |
 | 证据 | `docs/testing/evidence/v588-provider-002-model-storage-compat-local-20260830.json`。 |
+
+#### `318fe2d7` Coze 云端闭环补充
+
+- Coze 精确部署 `318fe2d78f6f3e5b26963d0a49b0c11245a9c006`，tree `8523c10e`，Build ID `lEWsTeQvojTosQpVCD7M6`；全仓 `4278 passed / 123 skipped / 0 failed`，`stable@52f7c60` 未触碰。
+- Google Chrome 已登录管理员对 `canvas-user` 执行可逆授权：移除一个有效 Pear 模型的 POST 返回 200，关闭并重开后保持未选；恢复图像模型“不限”的 POST 再次返回 200，重开后全部模型恢复选中。
+- **BUG-003 管理员保存与历史 JSONB 持久化已云端关闭。** 普通用户实际登录后的 `/api/models` 与三个工作区可见性仍是独立未验证项。
+- 首次进入仪表盘曾遇到延迟分块 `5504` HTTP 500；服务稳定后清缓存强刷恢复，随后 Google Chrome 检查的 34 个 JS/CSS 均为 200。该部署缓存现象不归入认证持久化通过项。
+- 证据：`docs/testing/evidence/v588-provider-002-model-storage-compat-cloud-20260830.json`。
