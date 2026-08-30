@@ -2,11 +2,12 @@
 
 ## 当前检查点：2026-08-31
 
-- 当前工作为 `V588-ADMIN-004` 云端只读投影验收，不重开已归档的 Stage 4。
+- 当前工作为 `V588-ADMIN-004` 云端只读收口及 `V588-PROVIDER-002` 真数据库补证，不重开已归档的 Stage 4。
+- **本轮真库增量：606 文件 / 4413 测试通过，0 失败、0 跳过。** 原 123 项本地数据库跳过解除；JSONB/TEXT[]、管理员只读 SQL 与并发 CAS 已验证。源码 `bd9655b88ec037a0ebb6891addaba19a8280240f` 最小修复原 BUG-003 的空数组存成对象边界；构建 118/118、干净保护 38/38 均通过，云端新补丁仍未验证。临时 PostgreSQL 已停止，未连接业务数据库。证据：`docs/testing/evidence/v588-admin-provider-postgres-20260831.json`。
 - Coze 已同步 `main@fa857e44328cb20f80cf2ab6194d0c1db127283b`，tree `9a36bd1ec23f73d6d02381ddc63e5ad7c8e789a5`，完成生产构建和单一 5000 服务重启。云端全仓 `4280 passed / 123 PostgreSQL-gated skipped / 0 failed`，功能保护 `38/38`。
 - 既有 Google Chrome 预览标签已强刷；用户列表三字段真实显示恢复。用户管理、积分管理、数据管理和运营总览均显示 6 个用户，逐用户积分、项目和日期已通过页面与已捕获接口数据核对。
 - **状态：云端 UI 正向验证通过，整项有条件、尚未关闭。** Chrome 控制在读取运营总览响应正文时断开；最终再次刷新、完整新鲜日志和 Coze 自动元数据提交后的最终 tree 仍须补证。禁止重新执行拉取、测试、构建来代替这几个只读补证。
-- `V588-STABILITY-002` 的 Pear `002-B/002-D/002-E` 按用户决定延后；不新建付费任务，不阻挡其他已授权吸收。管理员项收口后仍回到 `V588-PROVIDER-002` 普通用户模型可见性与隔离 PostgreSQL 双结构验证。
+- `V588-STABILITY-002` 的 Pear `002-B/002-D/002-E` 按用户决定延后；不新建付费任务，不阻挡其他已授权吸收。`V588-PROVIDER-002` 隔离 PostgreSQL 双结构已完成，普通用户模型可见性仍需云端证据。
 - 权威证据：`docs/testing/evidence/v588-admin-004-fa857e44-cloud-20260831.json`。后文较早日期的“下一动作”仅为历史，不能覆盖本检查点。
 
 ## Decision
@@ -48,7 +49,7 @@ These are the only authorized first absorption targets. Every row remains unimpl
 | V588-ADMIN-002 | Repository-wide admin-route authorization contract | Current 24 admin routes use both `requireAdminUser` and explicit `getRequestUser + role` patterns; donor test recognizes only one manual exception | **ABSORBED / CLOUD VERIFIED.** The current architecture is retained; an exact 24-route manifest accepts only the reviewed shared and explicit guard forms | Local RED/GREEN and full gates passed; exact-candidate Coze returned unauthenticated 401 and authenticated Chrome refreshed the administrator dashboard with zero fresh Console errors/warnings | Medium |
 | V588-ADMIN-003 | Thumbnail backfill endpoint and idempotent worker | Current asset recovery/health subsystem is newer; donor route is absent | **BACKFILL + SHADOW RECONCILIATION CLOUD VERIFIED / THUMBNAIL PROJECTION CONDITIONAL.** Migration, dry-run, durable batches and `6/6` shadow project parity pass on `99d226a4` | Resolve 2 explicit missing versions plus 1 false-ready 404 asset before `asset-v3`; then prove thumbnail delivery/reload, original fallback and S3 recovery | High |
 | V588-PROVIDER-001 | New display mappings such as Nano Banana Lite, GPT Image 2 2K/4K, FLUX 2 Klein, Grok Imagine video/image, HappyHorse, Gemini Omni and Seedance/Seedream variants | Current map already contains several newer Pear/Seedance entries; blind copy would duplicate or reorder wildcard matches | **已吸收 / Coze 云端验证通过。** 仅补齐缺失精确模式，统一采用最长匹配，继续保持管理员/供应商显示名优先 | 表驱动 RED/GREEN、通配碰撞、管理员显示名优先、全量回归、Coze exact SHA 与普通用户图像/视频目录证据 | Low |
-| V588-PROVIDER-002 | Explicit `providerId::modelId` catalog and ambiguous legacy-ID rejection | Current `task-core/model-catalog` is more advanced and already includes authorization migration, effective type and configured-provider snapshots | **管理员授权写入云端通过 / 整项有条件。** 精确授权保存、历史 JSONB 持久化、关闭重开与恢复“不限”已通过；普通用户 `/api/models` 和三个工作区可见性、隔离 PostgreSQL 双结构仍未验证 | 保留现有目录；补普通用户真实会话与隔离 PostgreSQL 证据后才能完整关闭 | High |
+| V588-PROVIDER-002 | Explicit `providerId::modelId` catalog and ambiguous legacy-ID rejection | Current `task-core/model-catalog` is more advanced and already includes authorization migration, effective type and configured-provider snapshots | **管理员 UI 保存云端通过 / 真库双结构已补 / 整项有条件。** 真库复现并最小修复 JSONB 空列表变对象的残余边界；全量 4413/4413，0 跳过。普通用户三个工作区可见性及新补丁部署仍未验证 | 保留现有目录；不能把旧“不限”UI 通过当作底层原值已正确，需新补丁云端与普通用户证据后关闭 | High |
 | V588-PROVIDER-003 | Route export cleanup into `result-store.ts` / `constants.ts` | Donor extracted non-route exports for Next route-module compatibility | **ABSORB WHERE CURRENT ROUTES STILL EXPORT NON-HTTP SYMBOLS.** Pure mechanical extraction with unchanged imports | Route manifest/build contract must identify exact illegal exports before any move | Low |
 | V588-PROVIDER-004 | Unified generation tool metadata and document-tool execution | Donor executor uses localhost fetches, an internal user header, process-memory source edges and a separate poll lifecycle; current task/asset/accounting runtime is authoritative | **DO NOT ABSORB THE EXECUTOR.** Consider only declarative tool metadata after a current-runtime adapter design | Security/identity, idempotency, cancellation, task ownership, billing and asset projection contracts | Critical |
 

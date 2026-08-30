@@ -1,5 +1,14 @@
 # 无界AI — 回归测试报告 (REGRESSION REPORT)
 
+## 当前增量：2026-08-31 真 PostgreSQL 补证
+
+- 范围为 `V588-ADMIN-004` 与 `V588-PROVIDER-002-BUG-003`，不是重开 Stage 4。
+- 两次 RED 均证明 JSONB 空模型列表被存为对象：全量 `4408 passed / 1 failed`，聚焦 `18 passed / 1 failed`。
+- 仅交换模型数组编码尝试顺序后，最终完整 Vitest 为 **606 文件 / 4413 测试通过，0 失败、0 跳过**；19 项本专项真库测试包含 JSONB/TEXT[]、空/NULL、并发 CAS、密码条件独立拒绝和管理员只读查询边界。
+- TypeScript、构建版 Lint 和最终变更文件 Lint 均退出 0。临时 PostgreSQL 已停止，随机测试 schema 剩余 0；没有使用业务库。
+- 生产构建退出 0，118/118 页面生成；干净候选 `bd9655b88ec037a0ebb6891addaba19a8280240f` 的保护基线 38/38、0 漂移、0 warning。云端管理员最后只读证据、新编码补丁与普通用户可见性仍未验证。本地真库测试不替代这些证据。
+- 机器记录：`docs/testing/evidence/v588-admin-provider-postgres-20260831.json`。下方旧日期“最新状态”均为历史，不覆盖本增量。
+
 > [!IMPORTANT]
 > **2026-08-08 最新回归状态：全量测试仍有 5 个历史失败，不能视为全量通过。**
 > Stage 0 新增专项测试 15/15 通过，没有新增全量测试失败；详细证据见 `docs/testing/STAGE_0_COMPLETION_REPORT.md`。

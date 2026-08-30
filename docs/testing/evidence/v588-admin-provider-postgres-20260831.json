@@ -1,0 +1,124 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-08-31",
+  "scope": ["V588-ADMIN-004", "V588-PROVIDER-002-BUG-003"],
+  "result": "有条件通过：本地完整门禁通过，云端未验证项保留",
+  "baseCommit": "bb3bfc700c392cdafca2853b93fb6923d0e78158",
+  "sourceCommit": "bd9655b88ec037a0ebb6891addaba19a8280240f",
+  "software": {"appVersion": "4.0.0", "next": "16.2.11", "vitest": "3.2.4", "node": "25.2.1", "platform": "Windows"},
+  "stableCommit": "52f7c601ed150769e15d06fb435c6e360e28c9e7",
+  "productionFilesChanged": ["src/lib/auth/auth-repository.ts"],
+  "testedFileSha256": {
+    "src/lib/auth/auth-repository.ts": "81501497130A1AC90483D6A5372DA61EB8F88A1FE8F1472A7601A82690B51FE1",
+    "src/__tests__/lib/auth-repository.test.ts": "277B63E32885FC8E735B3C6B2CA00D9A2EE1EA01DBB03E9928B9074CB48A2573",
+    "tests/integration/v588-auth-postgres.test.ts": "38B791CCF888D2F64166AC37183040E84871BA5F859C97C6C7882A24CB2E25AF",
+    "tests/integration/v588-admin-user-projection-postgres.test.ts": "ED0AA7DC93E6B94B5E4E37EE6594E1EB5BAEE310AEC330E8DDEA6C6E139EC63B"
+  },
+  "fix": "仅交换既有 SQL 双编码尝试顺序：JSON 编码优先，22P02/42804 时使用 TEXT[] 原生数组回退；相同 SQL、用户、版本和密码 CAS 条件保持不变。",
+  "rootCause": "node-postgres 将 JavaScript 空数组编码为 '{}'，JSONB 把它作为合法对象接受，旧错误驱动回退不会触发。",
+  "database": {
+    "engine": "PostgreSQL 18.4",
+    "host": "127.0.0.1",
+    "port": 55439,
+    "name": "wujie_test_20260831",
+    "isolation": "全新临时集群；每例随机 schema；仅使用测试环境变量；未连接 Coze 或任何业务数据库",
+    "environmentNames": ["POSTGRES_TEST_DATABASE_URL", "TEST_POSTGRES_URL"],
+    "remainingTestSchemas": 0,
+    "temporaryServerStopped": true,
+    "existingDatabaseServiceChanged": false
+  },
+  "red": [
+    {
+      "kind": "全量 Vitest：当前生产代码加新增回归",
+      "startedAt": "2026-08-30T22:28:07.134Z",
+      "files": 605,
+      "passed": 4408,
+      "failed": 1,
+      "skipped": 0,
+      "report": ".playwright-cli/v588-admin-full-postgres-20260831.json",
+      "sha256": "D10C55B9FFA93AF6EFF78D15659A955CF46D10BE86CA19805B3F56FEA10F3D89"
+    },
+    {
+      "kind": "独立重复复现",
+      "startedAt": "2026-08-30T22:37:26.224Z",
+      "files": 2,
+      "passed": 18,
+      "failed": 1,
+      "skipped": 0,
+      "report": ".playwright-cli/v588-admin-model-pg-red-20260831.json",
+      "sha256": "AD983CB9AFF2A295F72719B735DF222306E11914D6E97CAD95F317828292BE5C"
+    }
+  ],
+  "failure": {
+    "test": "managed-user model storage: JSONB > persists model arrays, empty lists and null without changing credentials",
+    "expected": {"chat_models": [], "image_models": []},
+    "actual": {"chat_models": {}, "image_models": {}}
+  },
+  "green": {
+    "focused": {
+      "files": 8,
+      "passed": 85,
+      "failed": 0,
+      "skipped": 0,
+      "report": ".playwright-cli/v588-admin-model-pg-green-20260831.json",
+      "sha256": "349026C5EBFCB1C7F6D867C7D3CBBDAE7C05870D375FE80967126B7C36F2299A"
+    },
+    "full": {
+      "startedAt": "2026-08-30T22:40:42.959Z",
+      "durationSeconds": 585.53,
+      "files": 606,
+      "passed": 4413,
+      "failed": 0,
+      "skipped": 0,
+      "report": ".playwright-cli/v588-admin-model-full-green-20260831.json",
+      "sha256": "B488F8FD915D72C71064051AAFE4BAD82C6157C1533AA20F77FEB8E7DB2D5959",
+      "note": "包含最终补充的独立密码 CAS 和凭据路径空/NULL 模型断言。原 123 项数据库环境跳过已在本机执行，不能替代云端浏览器或真实供应商证据。"
+    },
+    "typecheck": {"exitCode": 0, "log": ".playwright-cli/v588-admin-model-tscheck-final-20260831.log"},
+    "lintBuild": {"exitCode": 0, "log": ".playwright-cli/v588-admin-model-lint-20260831.log", "note": "构建版 Lint 零错误，不声明历史 warning 清零"},
+    "finalChangedFileLint": {"exitCode": 0, "log": ".playwright-cli/v588-admin-model-lint-final-20260831.log"},
+    "productionBuild": {"exitCode": 0, "webpackMinutes": 11.5, "typescriptSeconds": 51, "staticPages": 118, "nodeHeapGiB": 8, "localBuildId": "Fkd1oAbatWR-GqZSc-JYF", "log": ".playwright-cli/v588-admin-model-build-20260831.log"},
+    "protectedBaseline": {"exitCode": 0, "features": 38, "unapprovedDrift": 0, "warnings": 0, "cleanDetachedWorktree": true, "candidate": "bd9655b88ec037a0ebb6891addaba19a8280240f", "log": ".playwright-cli/v588-admin-model-protected-20260831.log"},
+    "finalGovernanceContracts": {"files": 3, "passed": 25, "failed": 0, "skipped": 0}
+  },
+  "newDatabaseCoverage": {
+    "authRepositoryTests": 16,
+    "adminProjectionTests": 3,
+    "modelStorageTypes": ["TEXT[]", "JSONB"],
+    "cases": [
+      "非空数组、空数组、NULL 原值往返",
+      "资料更新不改变密码与凭据字段",
+      "8 个并发同版本更新仅一个成功",
+      "凭据与模型原子写入，旧版本拒绝",
+      "版本匹配但密码条件错误时拒绝且数据不变",
+      "凭据更新路径成功写入空数组与 NULL",
+      "管理员指标读取保持三张业务表原值不变",
+      "无指标新用户保留，孤立统计数据不扩充用户集合",
+      "缺表返回业务失败，不伪装成全零成功"
+    ],
+    "identityBoundary": "管理员投影测试模拟身份；SQL、数据库和投影逻辑为真实实现，不是完整登录 E2E"
+  },
+  "review": {
+    "model": "gpt-5.6-sol",
+    "reasoningEffort": "medium",
+    "critical": 0,
+    "important": 0,
+    "minorSuggestions": 2,
+    "minorSuggestionsAddressed": 2,
+    "agentClosed": true
+  },
+  "cloud": {
+    "lastVerifiedCodeCommit": "fa857e44328cb20f80cf2ab6194d0c1db127283b",
+    "priorEvidence": "docs/testing/evidence/v588-admin-004-fa857e44-cloud-20260831.json",
+    "newPatchDeployed": false,
+    "chromeReconnect": "正确 Google Chrome 原标签列表可读取，但项目原标签接管超时；未进入 360，未新开标签，未重复发送旧拉取指令",
+    "paidProviderTasksCreated": 0,
+    "realAccountsOrBalancesChanged": false
+  },
+  "unverified": [
+    "ADMIN-004：Coze post-done tree、运营总览响应正文、最后强刷及完整新鲜浏览器日志",
+    "PROVIDER-002：新编码补丁部署后原值/保存复核及普通用户三个工作区真实模型可见性",
+    "Pear 002-B/002-D/002-E：按用户决定延后，不新建付费任务",
+    "本次未执行新的跨浏览器 E2E，不能将 Vitest 全绿解释为全平台真实验证完成"
+  ]
+}
