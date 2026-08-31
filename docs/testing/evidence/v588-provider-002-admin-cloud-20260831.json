@@ -1,0 +1,137 @@
+{
+  "schemaVersion": 1,
+  "item": "V588-PROVIDER-002",
+  "recordedAt": "2026-08-31T10:25:00+08:00",
+  "conclusion": "管理员三项服务端边界通过；整个吸收项仍有条件，普通用户与界面反馈未完成",
+  "scope": "真实 Google Chrome 管理员 UI 发起请求，验证授权迁移、拒绝、持久化与审计；不是供应商生成或全平台验收",
+  "environment": {
+    "browser": "Google Chrome",
+    "projectUrl": "https://code.coze.cn/p/7671964106919837702/preview",
+    "previewUrl": "https://62afe49a-716e-4d9e-99cd-a0be49c4794c-5000.dev.coze.site/",
+    "existingTabsOnly": true,
+    "used360Browser": false,
+    "sourceBaseline": "f91ada6b3a292d9f392270cd6bdad4cd11568d5d",
+    "localHead": "0f6f7037bf78f63142ae4eca7d3894d749660ffb",
+    "cozeReportedHead": "0fb594d8adf3f1b4397af489227355d0a5dfe9a7",
+    "cozeReportedTree": "7782f66d3f1e1c305083c54e0e768b8f5e04dccd",
+    "sourceTree": "82eb573b0928058be0894b3d495841b28fc74575",
+    "stable": "52f7c601ed150769e15d06fb435c6e360e28c9e7",
+    "buildIdAfterRecovery": "zumr8lQmGFdKeQvwxfbT6",
+    "serverPidAfterRecovery": 2704,
+    "hardRefreshAt": "2026-08-31T02:14:39.061Z",
+    "metadataCaveat": "Coze 完整报告后又显示元数据短版本 f1ca9a2；未把这个短版本当作已独立核对完整 SHA，不因此重复构建。"
+  },
+  "method": {
+    "endpoint": "POST /api/admin/users",
+    "action": "update",
+    "realServerResponses": true,
+    "mockedServerResponses": false,
+    "requestMutation": "在现有管理员 UI 请求中只替换 updates.imageModels，以覆盖 UI 不会自然产生的旧裸键和非法键；其他字段保持原请求。",
+    "requestIdMeaning": "下列 ID 是 Chrome 网络请求 ID，不是服务端 requestId；本轮未取得服务端 requestId。",
+    "readback": "关闭用户详情、点击刷新，读取页面真实 GET /api/admin/users 返回并核对同一现有用户。",
+    "audit": "通过操作日志 UI 的 user_update 筛选触发 GET /api/admin/op-log?page=1&limit=20&action=user_update；两次响应均覆盖该筛选全部记录。"
+  },
+  "checks": [
+    {
+      "id": "invalid-assignment",
+      "status": "通过",
+      "requestId": "24252.14237",
+      "httpStatus": 400,
+      "businessSuccess": false,
+      "code": "MODEL_ASSIGNMENT_INVALID",
+      "field": "imageModels",
+      "candidateCount": 0,
+      "readbackRequestId": "24252.14420",
+      "readbackSuccess": true,
+      "entireUserUnchanged": true,
+      "newSuccessAuditCount": 0
+    },
+    {
+      "id": "ambiguous-assignment",
+      "status": "通过",
+      "startedAt": "2026-08-31T02:15:26.231Z",
+      "requestId": "24252.14445",
+      "assignment": "gpt-image-2",
+      "httpStatus": 409,
+      "businessSuccess": false,
+      "code": "MODEL_ASSIGNMENT_AMBIGUOUS",
+      "candidateCount": 6,
+      "readbackRequestId": "24252.14474",
+      "readbackSuccess": true,
+      "entireUserUnchanged": true,
+      "newSuccessAuditCount": 0
+    },
+    {
+      "id": "unique-legacy-assignment",
+      "status": "通过",
+      "startedAt": "2026-08-31T02:17:06.036Z",
+      "requestId": "24252.14545",
+      "assignment": "nano-banana-2-lite",
+      "providerDisplayName": "PearAPI 图像",
+      "httpStatus": 200,
+      "businessSuccess": true,
+      "exactProviderModelKeyReturned": true,
+      "readbackRequestId": "24252.14624",
+      "exactProviderModelKeyPersisted": true,
+      "imageMigrationAuditCount": 1,
+      "chatMigrationAuditCount": 0
+    }
+  ],
+  "retainedFailedAttempt": {
+    "startedAt": "2026-08-31T02:11:04.605Z",
+    "requestId": "24252.14271",
+    "httpStatus": 500,
+    "response": { "BaseResp": { "StatusMessage": "no sandbox ID found for taskID", "StatusCode": 1 } },
+    "classification": "Coze 沙箱基础设施中断，不是应用授权歧义响应；失败证据保留。",
+    "recovery": "项目页确认已有平台构建正在运行，只观察同一进程，没有启动第二次构建；平台完成服务恢复后，强刷原预览标签再验。"
+  },
+  "restoration": {
+    "requestId": "24252.14660",
+    "businessSuccess": true,
+    "readbackRequestId": "24252.14684",
+    "readbackHttpStatus": 200,
+    "readbackSuccess": true,
+    "imageModels": [],
+    "chatModels": [],
+    "restoredOriginalUnrestrictedSemantics": true,
+    "unchangedFields": ["id", "name", "role", "status", "productType", "apiPermissions", "credits", "project_count"],
+    "accountCreatedOrPasswordReset": false,
+    "supplierTaskCreated": false,
+    "creditBalanceChanged": false
+  },
+  "audit": {
+    "afterRejectionsRequestId": "24252.14490",
+    "afterRejectionsTotal": 2,
+    "afterRejectionsReturnedRows": 2,
+    "newSuccessRecordsForRejections": 0,
+    "afterMigrationAndRestoreRequestId": "24252.14708",
+    "finalTotal": 4,
+    "finalReturnedRows": 4,
+    "expectedNewSuccessRecords": 2,
+    "actualNewSuccessRecords": 2,
+    "newActions": ["唯一裸键迁移并持久化", "恢复原有不限权限"]
+  },
+  "interceptionCleanup": {
+    "method": "Fetch.enable",
+    "params": { "patterns": [] },
+    "confirmed": true,
+    "allPausedRequestsContinued": true,
+    "note": "本运行时不支持 Fetch.disable；清空 patterns 是工具明确提供的清理方式，已暂停请求另行继续。"
+  },
+  "unverified": [
+    "真实普通用户的无限画布、节点模式、独立智能对话两个模型菜单，以及刷新/重启保持",
+    "成功/歧义/无效/网络失败 toast 与即时勾选状态的视觉断言",
+    "本轮完整新鲜 Console/原生弹窗矩阵；不沿用前一轮零错误结果",
+    "本轮未生成录像和 Playwright Trace，不声称具备完整 E2E 证据包",
+    "操作日志统计卡片与日志列表计数的一致性未专项复验"
+  ],
+  "artifacts": [
+    { "path": ".playwright-cli/v588-provider-002-cloud-20260831-1011.json", "sha256": "bc8e4ac3ac58af04eb90545563672a1012524f662e31cf90fa72dc1263d633b5", "visibility": "仅本地，含账号响应和原始 DOM" },
+    { "path": ".playwright-cli/v588-provider-002-cloud-20260831-1011.png", "sha256": "e0cbe94ebe08ec37e5c2efb77de792729b449576b3fa97df2ba0b084381f70d9", "visibility": "仅本地，管理员界面截图，不替代全部终态视觉证明" },
+    { "path": ".playwright-cli/v588-provider-002-coze-recovery-20260831.txt", "sha256": "d2d0558309c4e0737609bc904ec22a6ed81faaf580470f33f5d3161ae4246a10", "visibility": "仅本地，Coze 可见恢复报告" }
+  ],
+  "productionCodeChanged": false,
+  "fullLocalSuiteRerun": false,
+  "previousLocalEvidence": "docs/testing/evidence/v588-admin-provider-postgres-20260831.json",
+  "releaseApproved": false
+}

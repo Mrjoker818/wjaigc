@@ -1,5 +1,19 @@
 # 无界AI — 回归测试报告 (REGRESSION REPORT)
 
+## 2026-08-31 管理员通知漏挂载修复增量
+
+`V588-PROVIDER-002-BUG-004` 云端 RED：无效授权请求 `24252.15195` 返回 400，歧义请求 `24252.15247` 返回 409，均无可见提示；原勾选保持，刷新复读仍是不限。没有模拟服务器响应。原始证据含账号资料仅本地保存，哈希和范围见 `docs/testing/evidence/v588-provider-002-toast-20260831.json`。
+
+仪表盘通知容器 AST 合同先失败（5 通过/1 失败），补挂与画布一致的 Toaster 后专项 8 文件/61 测试通过。新源码 `da6c036c` 全量 606 文件/4414 测试通过，0 失败、0 跳过；隔离 PostgreSQL 测试残留 0 且已停止，TypeScript、lint:build、保护 38/38 通过，独立审查无发现。生产构建退出 0、118/118，Build ID `dNZjIQhoe13uW-4oz8Ubf`；两条 Node localstorage 路径 warning 保留。云端修复后未验证，Chrome 在构建结束后的重试仍接管超时。没有改认证、授权规则、供应商或账务。下方 10:25“无源码修改”只描述当时的服务端补证，不覆盖本次新修复。
+
+## 2026-08-31 10:25 管理员模型授权边界增量
+
+基线 `f91ada6b`，Google Chrome 既有正确 Coze 标签，未新建标签或操作 360。三个服务端检查通过：非法键 400/`MODEL_ASSIGNMENT_INVALID`、歧义裸键 409/`MODEL_ASSIGNMENT_AMBIGUOUS`、唯一裸键迁移为 Pear 精确键并持久化。前两项刷新复读整个用户完全不变，成功审计新增 0；迁移与恢复不限各新增 1 条成功审计。已恢复原用户图像/聊天不限，账号、角色、功能权限、积分和项目数不变。
+
+这是真实 UI 请求加边界载荷替换后的真实云端响应，不是 Mock；只替换 `updates.imageModels`，没有代登录。期间一次 Coze `500 no sandbox ID found for taskID` 保留为基础设施失败，平台自动恢复后于 10:14:39 强刷原预览再验。完整 Coze 报告 HEAD `0fb594d8adf3f1b4397af489227355d0a5dfe9a7`，src tree 与基线一致，恢复后 Build ID `zumr8lQmGFdKeQvwxfbT6`、PID `2704`；没有人工重复构建。
+
+**仍未验证：** 普通用户三工作区模型目录、刷新/重启保持；管理员 toast/即时勾选状态；本轮完整新鲜 Console/原生弹窗矩阵。未生成录像/Trace，因此不宣布完整 E2E 或整个吸收项通过。临时请求拦截已清空、暂停请求已继续。脱敏明细与三份本地原件哈希：`docs/testing/evidence/v588-provider-002-admin-cloud-20260831.json`。本轮仅更新记录，未修改业务源码、未重跑已完成全量门禁。
+
 ## 2026-08-31 07:55 Chrome 管理员投影验收完成
 
 - `main@f91ada6b` 已完成生产构建 118/118 和重启。最后完整 Coze 报告 HEAD `735a4152bdcdc1fafb5d4f71ffef5a9824c3b27c` 的 tree/src tree 与 GitHub 目标匹配；Build ID `7y0nSmEYApVG3YwpZQeRI`、5000 PID `36266`。报告后出现的元数据短版本 `0fb594d` 如实记录，不将未读取的完整 SHA 冒充已核对版本，也不追逐元数据重复重建。

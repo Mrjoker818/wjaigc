@@ -1,0 +1,56 @@
+{
+  "schemaVersion": 1,
+  "item": "V588-PROVIDER-002-BUG-004",
+  "date": "2026-08-31",
+  "status": "本地修复与门禁通过，云端修复后未验证",
+  "repositoryBase": "0f6f7037bf78f63142ae4eca7d3894d749660ffb",
+  "sourceCommit": "da6c036cea442d54bccbf32d17fd53be14dc94d5",
+  "sourceTree": "6c677248b7e241f4b9d6b87b32b8a36e8e37b98a",
+  "cloudRedSourceBaseline": "f91ada6b3a292d9f392270cd6bdad4cd11568d5d",
+  "browser": {
+    "family": "Google Chrome",
+    "projectUrl": "https://code.coze.cn/p/7671964106919837702/preview",
+    "previewUrl": "https://62afe49a-716e-4d9e-99cd-a0be49c4794c-5000.dev.coze.site/",
+    "existingTabsOnly": true,
+    "used360": false
+  },
+  "red": {
+    "method": "页面真实提交，仅替换待验证的模型授权字段；未模拟服务器响应",
+    "invalid": { "chromeNetworkRequestId": "24252.15195", "httpStatus": 400, "code": "MODEL_ASSIGNMENT_INVALID", "toastVisible": false },
+    "ambiguous": { "chromeNetworkRequestId": "24252.15247", "httpStatus": 409, "code": "MODEL_ASSIGNMENT_AMBIGUOUS", "toastVisible": false, "consecutiveDomSamples": 4 },
+    "originalCheckboxPreserved": true,
+    "readbackUnrestrictedImageAndChatModels": true,
+    "interceptionCleared": true,
+    "unit": { "passed": 5, "failed": 1, "skipped": 0 }
+  },
+  "fix": {
+    "source": "src/components/canvas-workspace.tsx",
+    "description": "dashboard 提前返回分支补挂与画布一致的通知容器；两个分支互斥",
+    "addedProductionLines": 12,
+    "unchanged": ["登录与退出流程", "模型授权规则", "供应商配置", "任务状态", "积分与账务"],
+    "permanentTest": "src/__tests__/components/dashboard-model-authorization-contract.test.ts"
+  },
+  "localVerification": {
+    "focused": { "files": 8, "passed": 61, "failed": 0, "skipped": 0 },
+    "typecheck": { "exitCode": 0 },
+    "independentReview": "未发现 Critical、Important 或 Minor 问题",
+    "fullSuite": { "files": 606, "passed": 4414, "failed": 0, "skipped": 0, "durationSeconds": 587.16 },
+    "postgres": { "isolated": true, "businessDatabaseUsed": false, "remainingTestSchemas": 0, "stopped": true },
+    "lint": { "exitCode": 0, "command": "pnpm lint:build", "note": "Babel 对超过 500KB 的既有 infinite-canvas 文件提示代码生成降级，不是 Lint 错误" },
+    "build": { "exitCode": 0, "generatedPages": 118, "expectedPages": 118, "buildId": "dNZjIQhoe13uW-4oz8Ubf", "compilationMinutes": 11.1, "nodeOptions": "--max-old-space-size=8192", "warnings": ["两个 Node 进程提示 --localstorage-file 没有有效路径；保留日志，未关闭检查"] },
+    "protectedBaseline": { "features": 38, "missing": 0, "unapprovedDrift": 0, "warnings": 0, "cleanDetachedCandidate": "da6c036cea442d54bccbf32d17fd53be14dc94d5" }
+  },
+  "rawEvidence": [
+    { "localPath": ".playwright-cli/v588-provider-002-admin-ui-feedback-red-20260831.json", "sha256": "8046fbe1571b513fd55c219bf34ca0cf475d6e6a454cbc6030596b9ed28d09f9" },
+    { "localPath": ".playwright-cli/v588-provider-002-admin-ui-missing-feedback-20260831.jpg", "sha256": "1c6cb0bd9b239e7161ac5294a5e4dd84191064c63b43d03d850450217701ebb4" },
+    { "localPath": ".playwright-cli/v588-provider-002-toast-red-20260831.json", "sha256": "4b456fa8fdcae9db638c2b79d47d6ab2a652b81e3c95522aa493051ba94db54f" },
+    { "localPath": ".playwright-cli/v588-provider-002-toast-focused-20260831.json", "sha256": "ee3cc16f4a37d5facd9ffb580e248b73874d30c1300f644fadea45da039b376b" },
+    { "localPath": ".playwright-cli/v588-provider-002-toast-full-20260831.json", "sha256": "e70f5fced9e642b92eda4c93159d39015afd54646099e7123a2c18a9a750b66c" },
+    { "localPath": ".playwright-cli/v588-provider-002-toast-lint-20260831.log", "sha256": "0ece6ec2e81062f38cc9eaa9014a13619de9b16452a2796996f2b7a28f3b8fb5" },
+    { "localPath": ".playwright-cli/v588-provider-002-toast-protected-20260831.log", "sha256": "d06c83c084098183d3cc38b1f2d4bfea5b5b552f09804ce4285e8b13678ebe77" },
+    { "localPath": ".playwright-cli/v588-provider-002-toast-build-20260831.log", "sha256": "fbcbb8a067046789a7307bf602f9d3aef6c8c7863e06626d47533dcd44254ace" }
+  ],
+  "privacy": "原始截图和响应含用户资料，仅本地保存，不提交 GitHub",
+  "unverified": ["修复后云端成功/无效/歧义/网络失败提示", "云端失败勾选与恢复不限", "本轮完整浏览器健康", "普通用户三工作区目录及刷新/重启保持", "本轮录像与 Trace"],
+  "scope": { "stage4Reopened": false, "pearPaidTasksCreated": 0, "stableModified": false }
+}
