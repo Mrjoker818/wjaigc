@@ -263,5 +263,7 @@
   "src/lib/simple-chat-workspace-handoff-server.ts",
   "src/lib/simple-chat-workspace-handoff.ts",
   "src/lib/user-types.ts",
-  "tsconfig.json"
+  "tsconfig.json",
+  "src/components/brand-ecommerce/BrandResultGallery.tsx",
+  "src/types/brand-ecommerce.ts"
 ]

@@ -51,6 +51,49 @@ interface Props {
   referenceImageUrl?: string;
 }
 
+interface BrandRun {
+  controller: AbortController;
+  templateIds: string[];
+  taskId: string | null;
+  pollTimer?: ReturnType<typeof setTimeout>;
+  cancelling?: boolean;
+}
+
+class BrandResponseError extends Error {
+  constructor(message: string, readonly retryable = false) {
+    super(message);
+  }
+}
+
+function brandErrorMessage(value: unknown, fallback: string): string {
+  if (typeof value === 'string' && value.trim()) return value;
+  if (value && typeof value === 'object' && 'message' in value && typeof value.message === 'string') return value.message;
+  return fallback;
+}
+
+async function readBrandResponse(response: Response, acceptTerminalStatus = false): Promise<Record<string, unknown>> {
+  let data: unknown;
+  try {
+    data = await response.json();
+  } catch {
+    throw new BrandResponseError(response.ok ? '响应解析失败，请检查原任务状态后再重试' : `请求失败（HTTP ${response.status}），请稍后检查原任务状态`, response.status >= 500);
+  }
+  if (!data || typeof data !== 'object' || Array.isArray(data)) throw new BrandResponseError('API返回格式异常');
+  const body = data as Record<string, unknown>;
+  const terminalFailure = acceptTerminalStatus && ['failed', 'cancelled', 'timeout'].includes(String(body.status));
+  if (!response.ok || (body.success === false && !terminalFailure) || (body.error && !body.status)) {
+    throw new BrandResponseError(brandErrorMessage(body.error, brandErrorMessage(body.message, `请求失败（HTTP ${response.status}）`)), response.status >= 500 || response.status === 429);
+  }
+  return body;
+}
+
+function brandResults(value: unknown): GenerateResult[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((result): result is GenerateResult => Boolean(result && typeof result === 'object'
+    && typeof result.templateId === 'string' && typeof result.templateName === 'string'
+    && (typeof result.imageUrl === 'string' || typeof result.error === 'string')));
+}
+
 // ─── Component ────────────────────────────────────────────────────
 
 export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages, referenceImageUrl }: Props) {
@@ -108,6 +151,13 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
   const [progress, setProgress] = useState(0);
   const [progressLabel, setProgressLabel] = useState('');
   const [results, setResults] = useState<GenerateResult[]>([]);
+  const activeRunRef = useRef<BrandRun | null>(null);
+  useEffect(() => () => {
+    const run = activeRunRef.current;
+    activeRunRef.current = null;
+    if (run?.pollTimer) clearTimeout(run.pollTimer);
+    run?.controller.abort();
+  }, []);
   const [showModelDropdown, setShowModelDropdown] = useState(false);
   const [activeTab, setActiveTab] = useState<'template' | 'settings' | 'results'>('template');
   const [showLlmDropdown, setShowLlmDropdown] = useState(false);
@@ -339,257 +389,203 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
 
   // ─── Generate (async submit + poll with incremental results) ──
 
-  const handleGenerate = useCallback(async () => {
-    if (!selectedTemplates.size || !productDesc.trim()) return;
-    if (!selectedModel) {
+  const stopGeneration = useCallback((run: BrandRun) => {
+    if (activeRunRef.current !== run) return;
+    activeRunRef.current = null;
+    if (run.pollTimer) clearTimeout(run.pollTimer);
+    run.controller.abort();
+    setTaskId(null);
+    setIsGenerating(false);
+    setProgressLabel('');
+    stopTimer();
+  }, [stopTimer]);
+
+  const reportGenerationError = useCallback((run: BrandRun, message: string) => {
+    if (activeRunRef.current !== run) return;
+    const ids = new Set(run.templateIds);
+    setResults(previous => [
+      ...previous.filter(result => result.imageUrl || !ids.has(result.templateId)),
+      ...run.templateIds.map(id => ({
+        templateId: id,
+        templateName: templates.find(template => template.id === id)?.name || id,
+        error: message,
+      })),
+    ]);
+  }, [templates]);
+
+  const submitGeneration = useCallback(async (templateIds: string[], retry = false) => {
+    if (activeRunRef.current || !templateIds.length || !productDesc.trim()) return;
+    if (!selectedModel || !selectedImageProviderId) {
       setActiveTab('settings');
       return;
     }
+    const run: BrandRun = { controller: new AbortController(), templateIds, taskId: null };
+    activeRunRef.current = run;
     setIsGenerating(true);
     startTimer();
-    setResults([]);
+    if (!retry) setResults([]);
     setProgress(0);
+    setProgressLabel(retry ? '重新生成...' : '正在提交...');
     setActiveTab('results');
 
-    try {
-      // ★ Simulated progress while waiting
-      let simProgress = 5;
-      const progressInterval = setInterval(() => {
-        simProgress = Math.min(simProgress + Math.random() * 5, 90);
-        setProgress(Math.round(simProgress));
-      }, 3000);
+    const applyResults = (incoming: GenerateResult[], complete = false) => {
+      if (activeRunRef.current !== run) return;
+      const ids = new Set(templateIds);
+      setResults(previous => {
+        const otherTemplates = retry ? previous.filter(result => !ids.has(result.templateId)) : [];
+        const current = complete ? [] : previous.filter(result => ids.has(result.templateId));
+        const byVariant = new Map(current.map(result => [`${result.templateId}:${result.variantIndex ?? 0}`, result]));
+        for (const result of incoming) {
+          const key = `${result.templateId}:${result.variantIndex ?? 0}`;
+          const existing = byVariant.get(key);
+          const imageResult = result.imageUrl ? result : existing?.imageUrl ? existing : result;
+          byVariant.set(key, {
+            ...imageResult,
+            error: result.error || existing?.error,
+          });
+        }
+        return [...otherTemplates, ...byVariant.values()];
+      });
+    };
 
-      const resp = await fetch('/api/brand-ecommerce', {
+    try {
+      const response = await fetch('/api/brand-ecommerce', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          action: 'generate',
-          templateIds: Array.from(selectedTemplates),
-          productDesc: productDesc.trim(),
-          styleExtra: styleExtra.trim(),
-          sceneDesc: sceneDesc.trim(),
-          model: selectedModel,
-          providerId: selectedImageProviderId,
-          llmModel: selectedLlmModel,
-          llmProviderId: selectedLlmProviderId,
-          referenceImageUrl: refImage,
-          productImageUrl: productImage,
+          action: 'generate', templateIds,
+          productDesc: productDesc.trim(), styleExtra: styleExtra.trim(), sceneDesc: sceneDesc.trim(),
+          model: selectedModel, providerId: selectedImageProviderId,
+          llmModel: selectedLlmModel, llmProviderId: selectedLlmProviderId,
+          referenceImageUrl: refImage, productImageUrl: productImage,
           productConsistencyMode: productImage ? productConsistencyMode : undefined,
           productConsistencyStrength: productImage ? productConsistencyStrength : undefined,
-          brandColors,
-          variantCount: 2, // ★ Request 2 variants per template
-          templateFieldValues,
+          brandColors, variantCount: 2, templateFieldValues,
         }),
-        signal: AbortSignal.timeout(600000),
+        signal: AbortSignal.any([run.controller.signal, AbortSignal.timeout(retry ? 300000 : 600000)]),
       });
-      clearInterval(progressInterval);
-
-      if (!resp.ok) {
-        const errText = await resp.text().catch(() => '');
-        console.error('[brand-ecommerce-panel] HTTP error:', resp.status, errText);
-        setResults([{ templateId: 'error', templateName: '生成失败', error: `HTTP ${resp.status}: ${errText.slice(0, 200)}` }]);
-        setIsGenerating(false);
-        stopTimer();
+      const data = await readBrandResponse(response);
+      if (activeRunRef.current !== run) return;
+      const synchronous = brandResults(data.results);
+      if (synchronous.length) {
+        applyResults(synchronous, true);
+        setProgress(100);
+        stopGeneration(run);
         return;
       }
+      if (typeof data.taskId !== 'string' || !data.taskId) throw new BrandResponseError('API返回格式异常：没有结果或任务编号');
+      run.taskId = data.taskId;
+      setTaskId(run.taskId);
+      setProgressLabel('正在生成...');
+      let attempts = 0;
+      const maxAttempts = 120;
+      const timeoutMessage = `任务状态查询超时，后台任务可能仍在处理，请查询原任务（${run.taskId}）后再决定是否重试`;
 
-      let data: Record<string, unknown>;
-      try {
-        data = await resp.json();
-      } catch {
-        setResults([{ templateId: 'error', templateName: '生成失败', error: '响应解析失败' }]);
-        setIsGenerating(false);
-        stopTimer();
-        return;
-      }
-
-      if (data.error) {
-        setResults([{ templateId: 'error', templateName: '生成失败', error: String(data.error) }]);
-        setIsGenerating(false);
-        stopTimer();
-        return;
-      }
-
-      // ★ Sync mode: results returned directly
-      const syncResults = data.results as GenerateResult[] | undefined;
-      if (syncResults && syncResults.length > 0) {
-        setResults(syncResults);
-        setIsGenerating(false);
-        stopTimer();
-        return;
-      }
-
-      // ★ Fallback: poll mode (async task)
-      const respTaskId = data.taskId as string | undefined;
-      if (respTaskId) {
-        setTaskId(respTaskId);
-        let pollAttempts = 0;
-        const maxPollAttempts = 120;
-
-        const poll = async () => {
-          if (pollAttempts >= maxPollAttempts) {
-            setResults(prev => prev.length ? prev : [{ templateId: 'error', templateName: '生成失败', error: '轮询超时' }]);
-            setIsGenerating(false);
-            stopTimer();
-            setTaskId(null);
+      const poll = async (): Promise<void> => {
+        if (activeRunRef.current !== run) return;
+        if (attempts >= maxAttempts) {
+          reportGenerationError(run, timeoutMessage);
+          stopGeneration(run);
+          return;
+        }
+        attempts++;
+        try {
+          const response = await fetch('/api/poll-task', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ taskId: run.taskId, model: selectedModel, providerId: selectedImageProviderId }),
+            signal: AbortSignal.any([run.controller.signal, AbortSignal.timeout(30000)]),
+          });
+          const data = await readBrandResponse(response, true);
+          if (activeRunRef.current !== run) return;
+          const partial = brandResults(data.partialResults);
+          if (partial.length) applyResults(partial);
+          if (data.status === 'completed') {
+            const result = data.result && typeof data.result === 'object' ? data.result as Record<string, unknown> : {};
+            const completed = brandResults(result.results);
+            if (!completed.length) throw new BrandResponseError('任务已结束但没有返回有效结果，请检查原任务');
+            applyResults(completed, true);
+            setProgress(100);
+            stopGeneration(run);
             return;
           }
-          pollAttempts++;
-          try {
-            const pollResp = await fetch('/api/poll-task', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ taskId: respTaskId, model: selectedModel, providerId: selectedImageProviderId }),
-            });
-            const pollData = await pollResp.json();
-
-            // ★ Incremental: if partial results available, append them
-            if (pollData.partialResults && Array.isArray(pollData.partialResults)) {
-              setResults(prev => {
-                const existingIds = new Set(prev.map(r => `${r.templateId}-v${r.variantIndex ?? 0}`));
-                const newResults = (pollData.partialResults as GenerateResult[]).filter(
-                  (r: GenerateResult) => !existingIds.has(`${r.templateId}-v${r.variantIndex ?? 0}`)
-                );
-                return [...prev, ...newResults];
-              });
-            }
-
-            if (pollData.status === 'completed' && pollData.result?.results) {
-              setResults(pollData.result.results);
-              setIsGenerating(false);
-              stopTimer();
-              setTaskId(null);
-              return;
-            }
-            if (pollData.status === 'failed' || pollData.status === 'cancelled') {
-              setResults(prev => prev.length ? prev : [{ templateId: 'error', templateName: '生成失败', error: pollData.error || '任务失败' }]);
-              setIsGenerating(false);
-              stopTimer();
-              setTaskId(null);
-              return;
-            }
-            if (pollData.progress !== undefined) setProgress(pollData.progress);
-            if (pollData.label) setProgressLabel(pollData.label);
-            const getPollDelay = () => pollAttempts <= 10 ? 1000 : pollAttempts <= 25 ? 1500 : 2000;
-            setTimeout(poll, getPollDelay());
-          } catch {
-            const getPollDelay = () => pollAttempts <= 10 ? 1000 : pollAttempts <= 25 ? 1500 : 2000;
-            setTimeout(poll, getPollDelay());
+          if (data.status === 'failed' || data.status === 'cancelled' || data.status === 'timeout') {
+            reportGenerationError(run, brandErrorMessage(data.error, data.status === 'cancelled' ? '任务已取消' : data.status === 'timeout' ? '任务超时' : '任务失败'));
+            stopGeneration(run);
+            return;
           }
-        };
-        setTimeout(poll, 1000);
-      } else {
-        setResults([{ templateId: 'error', templateName: '生成失败', error: 'API返回格式异常' }]);
-        setIsGenerating(false);
-        stopTimer();
-      }
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : '网络错误';
-      setResults([{ templateId: 'error', templateName: '生成失败', error: msg }]);
-      setIsGenerating(false);
-      stopTimer();
+          if (typeof data.progress === 'number') setProgress(data.progress);
+          if (typeof data.label === 'string') setProgressLabel(data.label);
+        } catch (error) {
+          if (activeRunRef.current !== run) return;
+          if (error instanceof BrandResponseError && !error.retryable) {
+            reportGenerationError(run, `${error.message}。请检查原任务（${run.taskId}）状态后再重试`);
+            stopGeneration(run);
+            return;
+          }
+        }
+        if (activeRunRef.current === run) {
+          const delay = attempts <= 10 ? 1000 : attempts <= 25 ? 1500 : 2000;
+          run.pollTimer = setTimeout(poll, delay);
+        }
+      };
+      run.pollTimer = setTimeout(poll, 1000);
+    } catch (error) {
+      if (activeRunRef.current !== run) return;
+      const message = error instanceof Error ? error.message : '网络错误';
+      reportGenerationError(run, message);
+      stopGeneration(run);
     }
-  }, [selectedTemplates, productDesc, styleExtra, sceneDesc, selectedModel, selectedImageProviderId, selectedLlmModel, selectedLlmProviderId, refImage, brandColors, productImage, productConsistencyMode, productConsistencyStrength, templateFieldValues, startTimer, stopTimer]);
+  }, [productDesc, selectedModel, selectedImageProviderId, startTimer, styleExtra, sceneDesc, selectedLlmModel, selectedLlmProviderId, refImage, productImage, productConsistencyMode, productConsistencyStrength, brandColors, templateFieldValues, stopGeneration, reportGenerationError]);
 
-  // ─── Add to canvas ────────────────────────────────────────────
+  const handleGenerate = useCallback(() => submitGeneration(Array.from(selectedTemplates)), [selectedTemplates, submitGeneration]);
 
+  // Result provenance belongs to each generation, never to the current dropdown.
   const handleAddToCanvas = useCallback((urls?: string[]) => {
-    const targetUrls = urls || results.filter(r => r.imageUrl).map(r => r.imageUrl!);
-    if (targetUrls.length && onAddImages) {
-      // ★ 传递模型信息
+    if (!onAddImages) return;
+    const groups = new Map<string, { urls: string[]; meta: { modelName?: string; apiProvider?: string } }>();
+    for (const result of results) {
+      if (!result.imageUrl || (urls && !urls.includes(result.imageUrl))) continue;
       const meta: { modelName?: string; apiProvider?: string } = {};
-      if (selectedModel) {
-        const pureModelId = selectedModel.includes('::') ? selectedModel.split('::').pop()! : selectedModel;
-        meta.modelName = pureModelId;
-        if (selectedModel.includes('::')) meta.apiProvider = selectedModel.split('::')[0];
-      }
-      onAddImages(targetUrls, meta);
+      if (typeof result.modelName === 'string' && result.modelName) meta.modelName = result.modelName;
+      if (typeof result.providerId === 'string' && result.providerId) meta.apiProvider = result.providerId;
+      const key = JSON.stringify(meta);
+      const group = groups.get(key) || { urls: [], meta };
+      if (!group.urls.includes(result.imageUrl)) group.urls.push(result.imageUrl);
+      groups.set(key, group);
     }
-  }, [results, onAddImages, selectedModel]);
-
-  // ─── Cancel ──────────────────────────────────────────────────
+    for (const group of groups.values()) onAddImages(group.urls, group.meta);
+  }, [results, onAddImages]);
 
   const handleCancel = useCallback(async () => {
-    if (taskId) {
-      try {
-        await fetch('/api/cancel-task', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ taskId }),
-        });
-      } catch { /* ignore */ }
-      setTaskId(null);
+    const run = activeRunRef.current;
+    if (!run || run.cancelling) return;
+    if (!run.taskId) {
+      reportGenerationError(run, '已停止本地等待，后台提交状态未知，请检查任务记录后再重试');
+      stopGeneration(run);
+      return;
     }
-    setIsGenerating(false);
-    stopTimer();
-  }, [taskId]);
-
-  // ─── Regenerate single template ──────────────────────────────
+    run.cancelling = true;
+    try {
+      const response = await fetch('/api/cancel-task', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ taskId: run.taskId || taskId }),
+        signal: AbortSignal.timeout(30000),
+      });
+      const data = await readBrandResponse(response);
+      if (data.success !== true && data.cancelled !== true) throw new BrandResponseError('取消未确认，仍在查询原任务');
+      stopGeneration(run);
+    } catch (error) {
+      reportGenerationError(run, `取消失败：${error instanceof Error ? error.message : '网络错误'}`);
+    } finally {
+      run.cancelling = false;
+    }
+  }, [taskId, reportGenerationError, stopGeneration]);
 
   const handleRegenerateTemplate = useCallback((templateId: string) => {
-    // Remove results for this template and re-generate just it
-    setResults(prev => prev.filter(r => r.templateId !== templateId));
-    // Trigger generation for just this template
-    if (!selectedModel || !productDesc.trim()) return;
-
-    setIsGenerating(true);
-    startTimer();
-    setProgress(0);
-    setProgressLabel('重新生成...');
-
-    fetch('/api/brand-ecommerce', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        action: 'generate',
-        templateIds: [templateId],
-        productDesc: productDesc.trim(),
-        styleExtra: styleExtra.trim(),
-        sceneDesc: sceneDesc.trim(),
-        model: selectedModel,
-        providerId: selectedImageProviderId,
-        llmModel: selectedLlmModel,
-        llmProviderId: selectedLlmProviderId,
-        referenceImageUrl: refImage,
-        productImageUrl: productImage,
-        brandColors,
-        variantCount: 2,
-      }),
-      signal: AbortSignal.timeout(300000),
-    })
-      .then(r => r.json())
-      .then(data => {
-        if (data.results) {
-          setResults(prev => [...prev.filter(r => r.templateId !== templateId), ...data.results]);
-        } else if (data.taskId) {
-          // Poll for single template
-          const pollId = data.taskId;
-          let pollCount = 0;
-          const poll = async () => {
-            pollCount++;
-            try {
-              const pr = await fetch('/api/poll-task', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ taskId: pollId, model: selectedModel, providerId: selectedImageProviderId }) });
-              const pd = await pr.json();
-              if (pd.status === 'completed' && pd.result?.results) {
-                setResults(prev => [...prev.filter(r => r.templateId !== templateId), ...pd.result.results]);
-                setIsGenerating(false);
-                stopTimer();
-                return;
-              }
-              if (pd.status === 'failed' || pd.status === 'cancelled') {
-                setIsGenerating(false);
-                stopTimer();
-                return;
-              }
-              const delay = pollCount <= 10 ? 1000 : pollCount <= 25 ? 1500 : 2000;
-              setTimeout(poll, delay);
-            } catch { setTimeout(poll, 1000); }
-          };
-          setTimeout(poll, 1000);
-        }
-      })
-      .catch(() => { setIsGenerating(false); stopTimer(); });
-  }, [selectedModel, selectedImageProviderId, selectedLlmModel, selectedLlmProviderId, productDesc, styleExtra, sceneDesc, refImage, productImage, brandColors, startTimer, stopTimer]);
+    if (!templates.some(template => template.id === templateId) && !results.some(result => result.templateId === templateId)) return;
+    void submitGeneration([templateId], true);
+  }, [templates, results, submitGeneration]);
 
   // ─── AI Assist ────────────────────────────────────────────────
 

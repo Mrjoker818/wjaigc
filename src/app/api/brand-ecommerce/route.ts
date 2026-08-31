@@ -12,6 +12,7 @@ import sharp from 'sharp';
 import { validateApiInputs } from '@/lib/api-validator';
 import { logOperation, logError, OP_ACTIONS, startTimer } from '@/lib/op-log';
 import { setBrandResult } from './result-store';
+import type { BrandGenerationResult } from '@/types/brand-ecommerce';
 
 export const dynamic = 'force-dynamic';
 
@@ -511,6 +512,11 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: '未指定模型' }, { status: 400 });
       }
       const { apiModelName: selectedModel } = normalizeModelForApi(rawSelectedModel);
+      const resultIdentity = {
+        providerId: provider.id,
+        providerName: provider.displayName || provider.name,
+        modelName: selectedModel,
+      };
       if (selectedModel !== rawSelectedModel) {
         console.log(`[brand-ecommerce] Model normalized: ${rawSelectedModel} → ${selectedModel}`);
       }
@@ -674,7 +680,7 @@ export async function POST(request: NextRequest) {
       // 使用 after() 确保响应返回后 IIFE 仍可运行
       after(async () => {
         try {
-          const results: Array<{ templateId: string; templateName: string; imageUrl?: string; error?: string; variantIndex?: number; aspectRatio?: string }> = [];
+          const results: BrandGenerationResult[] = [];
           let completedCount = 0;
 
           // Pre-compute product mask for mask-composite mode (inside async so POST returns immediately)
@@ -798,7 +804,7 @@ export async function POST(request: NextRequest) {
 
                 if (!resp.ok) {
                   const errText = await resp.text().catch(() => '');
-                  results.push({ templateId: tpl.id, templateName: `${tpl.name} V${v + 1}`, error: `API错误: ${errText.slice(0, 200)}`, variantIndex: v, aspectRatio: tpl.aspectRatio });
+                  results.push({ ...resultIdentity, templateId: tpl.id, templateName: `${tpl.name} V${v + 1}`, error: `API错误: ${errText.slice(0, 200)}`, variantIndex: v, aspectRatio: tpl.aspectRatio });
                   completedCount++;
                   continue;
                 }
@@ -828,7 +834,7 @@ export async function POST(request: NextRequest) {
                   }
 
                   const persistedUrl = await persistResultImage(resultImageUrl);
-                  results.push({ templateId: tpl.id, templateName: `${tpl.name} V${v + 1}`, imageUrl: persistedUrl || resultImageUrl, variantIndex: v, aspectRatio: tpl.aspectRatio });
+                  results.push({ ...resultIdentity, templateId: tpl.id, templateName: `${tpl.name} V${v + 1}`, imageUrl: persistedUrl || resultImageUrl, variantIndex: v, aspectRatio: tpl.aspectRatio });
                 } else if (parsed.taskIds?.length) {
                   const remoteTaskId = parsed.taskIds[0];
                   let pollAttempts = 0;
@@ -839,7 +845,7 @@ export async function POST(request: NextRequest) {
                     pollAttempts++;
                     try {
                       const pollUrl = buildPollUrl(provider.baseUrl, remoteTaskId, compatProfile);
-                      if (!pollUrl) { results.push({ templateId: tpl.id, templateName: `${tpl.name} V${v + 1}`, error: '无法构建轮询URL', variantIndex: v }); break; }
+                      if (!pollUrl) { results.push({ ...resultIdentity, templateId: tpl.id, templateName: `${tpl.name} V${v + 1}`, error: '无法构建轮询URL', variantIndex: v }); break; }
                       const pollResp = await fetch(pollUrl, {
                         method: 'GET',
                         headers: { 'Authorization': `Bearer ${provider.apiKey}` },
@@ -869,12 +875,12 @@ export async function POST(request: NextRequest) {
                           }
 
                           const persistedUrl = await persistResultImage(resultImageUrl);
-                          results.push({ templateId: tpl.id, templateName: `${tpl.name} V${v + 1}`, imageUrl: persistedUrl || resultImageUrl, variantIndex: v, aspectRatio: tpl.aspectRatio });
+                          results.push({ ...resultIdentity, templateId: tpl.id, templateName: `${tpl.name} V${v + 1}`, imageUrl: persistedUrl || resultImageUrl, variantIndex: v, aspectRatio: tpl.aspectRatio });
                           break;
                         }
                         const status = pollData?.status || pollData?.data?.status;
                         if (status === 'failed' || status === 'error') {
-                          results.push({ templateId: tpl.id, templateName: `${tpl.name} V${v + 1}`, error: '异步任务失败', variantIndex: v });
+                          results.push({ ...resultIdentity, templateId: tpl.id, templateName: `${tpl.name} V${v + 1}`, error: '异步任务失败', variantIndex: v });
                           break;
                         }
                       }
@@ -883,14 +889,14 @@ export async function POST(request: NextRequest) {
                     }
                   }
                   if (pollAttempts >= maxPollAttempts) {
-                    results.push({ templateId: tpl.id, templateName: `${tpl.name} V${v + 1}`, error: '生成超时', variantIndex: v });
+                    results.push({ ...resultIdentity, templateId: tpl.id, templateName: `${tpl.name} V${v + 1}`, error: '生成超时', variantIndex: v });
                   }
                 } else {
-                  results.push({ templateId: tpl.id, templateName: `${tpl.name} V${v + 1}`, error: 'API未返回图片', variantIndex: v });
+                  results.push({ ...resultIdentity, templateId: tpl.id, templateName: `${tpl.name} V${v + 1}`, error: 'API未返回图片', variantIndex: v });
                 }
               } catch (err: unknown) {
                 const msg = err instanceof Error ? err.message : '未知错误';
-                results.push({ templateId: selectedTemplates[t].id, templateName: `${selectedTemplates[t].name} V${v + 1}`, error: msg, variantIndex: v });
+                results.push({ ...resultIdentity, templateId: selectedTemplates[t].id, templateName: `${selectedTemplates[t].name} V${v + 1}`, error: msg, variantIndex: v });
               }
 
               completedCount++;

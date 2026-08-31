@@ -1,17 +1,11 @@
 'use client';
 
 import { Loader2, X, Image as ImageIcon, Sparkles, Download, RotateCw, Plus } from 'lucide-react';
+import type { BrandGenerationResult } from '@/types/brand-ecommerce';
 
 // ─── Types ────────────────────────────────────────────────────────
 
-export interface GenerateResult {
-  templateId: string;
-  templateName: string;
-  imageUrl?: string;
-  error?: string;
-  aspectRatio?: string;
-  variantIndex?: number; // 0 or 1 for 2-variant mode
-}
+export type GenerateResult = BrandGenerationResult;
 
 interface Props {
   results: GenerateResult[];
@@ -124,6 +118,7 @@ export function BrandResultGallery({
                   {onRegenerateTemplate && (
                     <button
                       onClick={() => onRegenerateTemplate(templateId)}
+                      disabled={isGenerating}
                       className={`flex items-center gap-1 text-xs ${textMuted} hover:${accentText} transition-colors cursor-pointer`}
                       title="重新生成"
                     >
@@ -168,11 +163,13 @@ export function BrandResultGallery({
                 )}
 
                 {/* Error states */}
-                {failedVariants.length > 0 && successVariants.length === 0 && (
+                {failedVariants.length > 0 && (
                   <div className={`flex items-center justify-center py-6 ${isMonochrome ? 'bg-gray-50' : 'bg-[#222]'}`}>
                     <div className="text-center px-4">
                       <X size={20} className="text-red-400 mx-auto mb-1" />
-                      <p className="text-xs text-red-400">{failedVariants[0].error?.slice(0, 60) || '生成失败'}</p>
+                      {Array.from(new Set(failedVariants.map(r => r.error || '生成失败'))).map(error => (
+                        <p key={error} role="alert" className="text-xs text-red-400 whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{error}</p>
+                      ))}
                     </div>
                   </div>
                 )}
