@@ -344,8 +344,13 @@ export default function ChatArea({
 
   // Image model
   const [imageModels, setImageModels] = useState<Array<ChatModelInfo>>([]);
-  const [selectedImageModel, setSelectedImageModel] = useState('');
-  const [selectedImageProviderId, setSelectedImageProviderId] = useState('');
+  const [tempChat, setTempChat] = useState(false);
+  const [temporaryImageSelection, setTemporaryImageSelection] = useState<(SimpleChatModelSelection & { taskId: string }) | null>(null);
+  // Only a new, unconfigured task may adopt the catalog default.
+  const defaultImageModel = !task?.imageModel && !task?.imageProviderId ? imageModels[0] : undefined;
+  const temporaryImageModel = tempChat && temporaryImageSelection?.taskId === task?.id ? temporaryImageSelection : null;
+  const selectedImageModel = temporaryImageModel?.modelId || task?.imageModel || defaultImageModel?.modelId || '';
+  const selectedImageProviderId = temporaryImageModel?.providerId || task?.imageProviderId || defaultImageModel?.providerId || '';
   const [canvasProjects, setCanvasProjects] = useState<CanvasProjectOption[]>([]);
   const [selectedCanvasProjectId, setSelectedCanvasProjectId] = useState('');
   const [canvasTransferMessageId, setCanvasTransferMessageId] = useState<string | null>(null);
@@ -382,6 +387,18 @@ export default function ChatArea({
     setOpenModelMenu(null);
   }, [onUpdateTask, task]);
 
+  const handleImageModelSelect = useCallback((selection: SimpleChatModelSelection) => {
+    if (!task) return;
+    if (tempChat) {
+      setTemporaryImageSelection({ ...selection, taskId: task.id });
+    } else {
+      onUpdateTask({ ...task, imageModel: selection.modelId, imageProviderId: selection.providerId });
+    }
+    setOpenModelMenu(null);
+  }, [onUpdateTask, task, tempChat]);
+
+  useEffect(() => { setTemporaryImageSelection(null); }, [task?.id, tempChat]);
+
   // ===== 新增升级功能状态 =====
   // 图片灯箱预览
   const [lightbox, setLightbox] = useState<{ images: string[]; index: number } | null>(null);
@@ -395,8 +412,6 @@ export default function ChatArea({
   // 全局对话搜索
   const [showGlobalSearch, setShowGlobalSearch] = useState(false);
   const [showQuickCommands, setShowQuickCommands] = useState(false);
-  // 临时聊天（无痕模式）
-  const [tempChat, setTempChat] = useState(false);
   // 回复评分
   const [messageRatings, setMessageRatings] = useState<Record<string, 'up' | 'down'>>({});
   // 消息编辑
@@ -614,10 +629,6 @@ export default function ChatArea({
         models.push({ id: m.providerId ? `${m.providerId}::${m.id}` : m.id, modelId: m.id, name: m.name || m.id, providerId: m.providerId, providerName });
       }
       setImageModels(models);
-      if (models.length > 0 && !selectedImageModel) {
-        setSelectedImageModel(models[0].modelId);
-        setSelectedImageProviderId(models[0].providerId);
-      }
     }).catch(() => {});
   }, []);
 
@@ -721,8 +732,8 @@ export default function ChatArea({
   // Sync task to parent（临时聊天模式下跳过保存）
   useEffect(() => {
     if (!task || !project || tempChat || messagesTaskId !== task.id) return;
-    onUpdateTask({ ...task, messages, model: selectedModel, providerId: selectedProviderId, imageModel: selectedImageModel, imageProviderId: selectedImageProviderId, reasoningEffort, responseSpeed, appliedChatControls, updatedAt: Date.now() });
-  }, [messages, messagesTaskId, selectedModel, selectedProviderId, selectedImageModel, selectedImageProviderId, reasoningEffort, responseSpeed, appliedChatControls, tempChat]);
+    onUpdateTask({ ...task, messages, model: selectedModel, providerId: selectedProviderId, reasoningEffort, responseSpeed, appliedChatControls, updatedAt: Date.now() });
+  }, [messages, messagesTaskId, selectedModel, selectedProviderId, reasoningEffort, responseSpeed, appliedChatControls, tempChat]);
 
   // Sync knowledge
   useEffect(() => {
@@ -1973,7 +1984,7 @@ export default function ChatArea({
           <div className={`absolute bg-card border border-border rounded-xl shadow-xl z-[100] overflow-y-auto p-1 transition-opacity ${openModelMenu === 'image' ? 'opacity-100 visible pointer-events-auto' : 'hidden'}`} style={modelMenuStyle} role="listbox">
             <div className="px-3 py-1.5 text-[11px] text-muted-foreground/60 font-medium">图像生成模型</div>
             {imageModels.map(m => (
-              <button key={m.id} type="button" role="option" aria-selected={m.providerId === selectedImageProviderId && m.modelId === selectedImageModel} onClick={() => { setSelectedImageModel(m.modelId); setSelectedImageProviderId(m.providerId); setOpenModelMenu(null); }}
+              <button key={m.id} type="button" role="option" aria-selected={m.providerId === selectedImageProviderId && m.modelId === selectedImageModel} onClick={() => handleImageModelSelect({ modelId: m.modelId, providerId: m.providerId })}
                 className={`w-full text-left px-3 py-2 rounded-lg hover:bg-muted transition-colors cursor-pointer ${m.providerId === selectedImageProviderId && m.modelId === selectedImageModel ? 'bg-primary/10' : ''}`}>
                 <div className="flex items-center gap-2">
                   <span className={`text-sm font-medium ${m.providerId === selectedImageProviderId && m.modelId === selectedImageModel ? 'text-primary' : ''}`}>{m.name}</span>

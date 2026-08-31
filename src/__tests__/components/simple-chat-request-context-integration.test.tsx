@@ -213,8 +213,13 @@ function mockStartupRequests(
   chatResponse: Response | Response[] = streamResponse(),
   models = [{ id: 'chat-model', name: 'Chat model', providerId: 'provider-1' }],
   deepResearchResponses: Response[] = [streamResponse()],
+  imageCatalog: Response | Promise<Response> = jsonResponse({ models: [], providers: [] }),
 ): void {
   installLocalStorage();
+  Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
+    configurable: true,
+    value: vi.fn(),
+  });
   vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL, options?: RequestInit) => {
     const url = String(input);
     if (url === '/api/models?type=chat') {
@@ -223,7 +228,7 @@ function mockStartupRequests(
         providers: models.map(model => ({ id: model.providerId, name: model.providerId })),
       }));
     }
-    if (url === '/api/models?type=image') return Promise.resolve(jsonResponse({ models: [], providers: [] }));
+    if (url === '/api/models?type=image') return Promise.resolve(imageCatalog);
     if (url === '/api/user-data/sync?key=projects') {
       return Promise.resolve(jsonResponse({
         success: true,
@@ -275,6 +280,137 @@ describe('simple-chat request context integration', () => {
     vi.mocked(toast.success).mockClear();
     vi.mocked(toast.error).mockClear();
     vi.restoreAllMocks();
+  });
+
+  function imageCatalogResponse(): Response {
+    return jsonResponse({
+      models: ['ailink', 'pear', 'apimart'].map(providerId => ({
+        id: 'gpt-image-2', name: 'GPT Image 2', providerId,
+      })),
+      providers: ['ailink', 'pear', 'apimart'].map(id => ({ id, name: id })),
+    });
+  }
+
+  function openImageMenu(container: HTMLElement): void {
+    fireEvent.click(container.querySelectorAll('header button[aria-haspopup="listbox"]')[1]);
+  }
+
+  it('restores the saved exact image provider without overwriting it during catalog loading', async () => {
+    const onUpdateTask = vi.fn();
+    const deferred = createDeferred<Response>();
+    mockStartupRequests(undefined, undefined, undefined, deferred.promise);
+    const task = { ...createTask(), imageModel: 'gpt-image-2', imageProviderId: 'pear' };
+    const { container } = render(<ChatAreaHarness initialTask={task} onUpdateTask={onUpdateTask} />);
+
+    await act(async () => deferred.resolve(imageCatalogResponse()));
+    openImageMenu(container);
+    expect((await screen.findByRole('option', { name: /pear/u })).getAttribute('aria-selected')).toBe('true');
+    expect(onUpdateTask.mock.calls.every(([updated]) => (
+      updated.imageModel === task.imageModel && updated.imageProviderId === 'pear'
+    ))).toBe(true);
+  });
+
+  it('persists a same-name image provider selection across a full component remount', async () => {
+    const onUpdateTask = vi.fn();
+    mockStartupRequests(undefined, undefined, undefined, imageCatalogResponse());
+    const first = render(<ChatAreaHarness initialTask={createTask()} onUpdateTask={onUpdateTask} />);
+    openImageMenu(first.container);
+    fireEvent.click(await screen.findByRole('option', { name: /apimart/u }));
+    await waitFor(() => expect(onUpdateTask.mock.lastCall?.[0].imageProviderId).toBe('apimart'));
+    const savedTask = onUpdateTask.mock.lastCall![0] as SimpleChatTask;
+    first.unmount();
+
+    const restored = render(<ChatAreaHarness initialTask={savedTask} onUpdateTask={onUpdateTask} />);
+    openImageMenu(restored.container);
+    expect((await screen.findByRole('option', { name: /apimart/u })).getAttribute('aria-selected')).toBe('true');
+    expect(onUpdateTask.mock.lastCall?.[0]).toMatchObject({
+      model: savedTask.model, providerId: savedTask.providerId,
+      imageModel: 'gpt-image-2', imageProviderId: 'apimart', messages: savedTask.messages,
+    });
+  });
+
+  it('switches to the next task image selection without carrying over the previous provider', async () => {
+    const onUpdateTask = vi.fn();
+    mockStartupRequests(undefined, undefined, undefined, imageCatalogResponse());
+    const first = { ...createTask(), imageModel: 'gpt-image-2', imageProviderId: 'pear' };
+    const next = { ...first, id: 'task-2', imageProviderId: 'apimart' };
+    const { container } = render(<TaskSwitchingChatAreaHarness initialTask={first} nextTask={next} onUpdateTask={onUpdateTask} />);
+    openImageMenu(container);
+    fireEvent.click(await screen.findByRole('option', { name: /pear/u }));
+    fireEvent.click(screen.getByRole('button', { name: '切换任务' }));
+    openImageMenu(container);
+
+    expect((await screen.findByRole('option', { name: /apimart/u })).getAttribute('aria-selected')).toBe('true');
+    expect(onUpdateTask.mock.calls.filter(([updated]) => updated.id === next.id).every(([updated]) => (
+      updated.imageProviderId === 'apimart'
+    ))).toBe(true);
+  });
+
+  it('does not replace the new task image provider when an older catalog request finishes late', async () => {
+    const onUpdateTask = vi.fn();
+    const deferred = createDeferred<Response>();
+    mockStartupRequests(undefined, undefined, undefined, deferred.promise);
+    const first = { ...createTask(), imageModel: 'gpt-image-2', imageProviderId: 'pear' };
+    const next = { ...first, id: 'task-2', imageProviderId: 'apimart' };
+    const { container } = render(<TaskSwitchingChatAreaHarness initialTask={first} nextTask={next} onUpdateTask={onUpdateTask} />);
+    fireEvent.click(screen.getByRole('button', { name: '切换任务' }));
+    await act(async () => deferred.resolve(imageCatalogResponse()));
+    openImageMenu(container);
+
+    expect((await screen.findByRole('option', { name: /apimart/u })).getAttribute('aria-selected')).toBe('true');
+    expect(onUpdateTask.mock.calls.filter(([updated]) => updated.id === next.id).every(([updated]) => (
+      updated.imageProviderId === 'apimart'
+    ))).toBe(true);
+  });
+
+  it('does not silently replace an unavailable explicit image provider with a same-name model', async () => {
+    const onUpdateTask = vi.fn();
+    mockStartupRequests(undefined, undefined, undefined, imageCatalogResponse());
+    const task = { ...createTask(), imageModel: 'gpt-image-2', imageProviderId: 'removed-provider' };
+    const { container } = render(<ChatAreaHarness initialTask={task} onUpdateTask={onUpdateTask} />);
+    openImageMenu(container);
+    await screen.findByRole('option', { name: /pear/u });
+
+    const imageOptions = container.querySelectorAll('header [role="listbox"]')[1].querySelectorAll('[role="option"]');
+    expect(Array.from(imageOptions).every(option => option.getAttribute('aria-selected') !== 'true')).toBe(true);
+    expect(onUpdateTask.mock.calls.every(([updated]) => updated.imageProviderId === task.imageProviderId)).toBe(true);
+  });
+
+  it('keeps a temporary chat image selection out of the persisted task', async () => {
+    const onUpdateTask = vi.fn();
+    mockStartupRequests(undefined, undefined, undefined, imageCatalogResponse());
+    const task = { ...createTask(), imageModel: 'gpt-image-2', imageProviderId: 'pear' };
+    const { container } = render(<ChatAreaHarness initialTask={task} onUpdateTask={onUpdateTask} />);
+    openImageMenu(container);
+    await screen.findByRole('option', { name: /pear/u });
+    openImageMenu(container);
+    fireEvent.click(screen.getByTitle('开启临时聊天'));
+    onUpdateTask.mockClear();
+    openImageMenu(container);
+    fireEvent.click(await screen.findByRole('option', { name: /apimart/u }));
+    openImageMenu(container);
+    expect(screen.getByRole('option', { name: /apimart/u }).getAttribute('aria-selected')).toBe('true');
+    expect(onUpdateTask).not.toHaveBeenCalled();
+  });
+
+  it('does not overwrite synced messages when the same task receives a new image provider', async () => {
+    const onUpdateTask = vi.fn();
+    mockStartupRequests(undefined, undefined, undefined, imageCatalogResponse());
+    const first = { ...createTask(), imageModel: 'gpt-image-2', imageProviderId: 'pear' };
+    const next = {
+      ...first, imageProviderId: 'apimart',
+      messages: [{ id: 'remote-message', role: 'user' as const, content: 'Synced message', createdAt: 2 }],
+    };
+    const { container } = render(<TaskSwitchingChatAreaHarness initialTask={first} nextTask={next} onUpdateTask={onUpdateTask} />);
+    openImageMenu(container);
+    await screen.findByRole('option', { name: /pear/u });
+    onUpdateTask.mockClear();
+    fireEvent.click(screen.getByRole('button', { name: '切换任务' }));
+
+    expect(screen.getByRole('option', { name: /apimart/u }).getAttribute('aria-selected')).toBe('true');
+    expect(onUpdateTask.mock.calls.every(([updated]) => updated.messages.some(
+      (message: SimpleChatTask['messages'][number]) => message.id === 'remote-message',
+    ))).toBe(true);
   });
 
   it('captures a task model selection snapshot for all three request paths', () => {

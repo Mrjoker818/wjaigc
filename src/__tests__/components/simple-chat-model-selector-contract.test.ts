@@ -40,6 +40,9 @@ describe('simple-chat model selector contract', () => {
   });
 
   it('applies the image model and provider before closing the selected menu', () => {
-    expect(source).toContain('setSelectedImageModel(m.modelId); setSelectedImageProviderId(m.providerId); setOpenModelMenu(null);');
+    expect(source).toContain('handleImageModelSelect({ modelId: m.modelId, providerId: m.providerId })');
+    expect(source).toContain('onUpdateTask({ ...task, imageModel: selection.modelId, imageProviderId: selection.providerId });');
+    expect(source).not.toContain('setSelectedImageModel');
+    expect(source).not.toContain('setSelectedImageProviderId');
   });
 });
