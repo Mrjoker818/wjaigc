@@ -1,0 +1,175 @@
+{
+  "recordedAt": "2026-08-31T21:07:00+08:00",
+  "scope": "PROVIDER-003 品牌电商BUG-002/003/004最小修复，本地交付证据",
+  "baseCommit": "98b6505d81bd43df99268a911ca363031e3398ff",
+  "sourceCommit": "9b2e8d5f4f986a1379d1ad623e64dd5247937495",
+  "sourceTree": "cdbb004d11b5f710a7a6fb0327bd641dbbd74cd6",
+  "stableRef": "52f7c601ed150769e15d06fb435c6e360e28c9e7",
+  "verificationWorktree": ".worktrees/v588-bug006-release-gate",
+  "sourceEquivalence": "四个生产文件、两测试与保护清单的Git规范化blob均与主目录一致；原始SHA差异仅CRLF/LF，不宣称字节一致。",
+  "changes": [
+    "品牌首次/重试共用生命周期，保留真实模板ID，统一终态清理",
+    "完整结构化错误，部分成功保留失败原因",
+    "服务端实际provider/model随每张结果保存，前端按固定结果身份入画布",
+    "保留图片时保留同一记录来源，重试不依赖当前模板勾选"
+  ],
+  "unchanged": [
+    "认证/账号",
+    "权限",
+    "积分扣费退款",
+    "供应商解析策略",
+    "模板布局",
+    "全局画布",
+    "数据库结构",
+    "依赖",
+    "云端启动方式",
+    "stable",
+    "V5.8.8只读目录"
+  ],
+  "tdd": {
+    "baseline": {
+      "total": 20,
+      "failed": 18,
+      "passed": 2,
+      "skipped": 0
+    },
+    "review": {
+      "findings": 3,
+      "additionalRedTests": 4,
+      "allFixed": true,
+      "finalReadOnlyReview": "无新增发现"
+    },
+    "finalFocused": {
+      "files": 5,
+      "total": 60,
+      "passed": 60,
+      "failed": 0,
+      "skipped": 0
+    }
+  },
+  "localGates": {
+    "typecheck": {
+      "exitCode": 0
+    },
+    "lintBuild": {
+      "exitCode": 0,
+      "scope": "eslint --quiet，不声明历史warnings为0"
+    },
+    "fullVitest": {
+      "files": 610,
+      "total": 4470,
+      "passed": 4470,
+      "failed": 0,
+      "skipped": 0,
+      "todo": 0,
+      "exitCode": 0
+    },
+    "build": {
+      "exitCode": 0,
+      "pages": 118,
+      "buildId": "dNGo__zwtAR9eRFCqW_sO",
+      "warnings": [
+        "既有Node --localstorage-file警告"
+      ]
+    },
+    "protectedFeatures": {
+      "present": 38,
+      "missing": 0,
+      "unapprovedPaths": 0,
+      "warnings": 0,
+      "exitCode": 0
+    }
+  },
+  "postgres": {
+    "version": "18",
+    "host": "127.0.0.1",
+    "port": 55443,
+    "database": "wujie_brand_lifecycle_test",
+    "requiredVariables": [
+      "POSTGRES_TEST_DATABASE_URL",
+      "TEST_POSTGRES_URL"
+    ],
+    "businessDatabaseUsed": false,
+    "remainingCredits": 0,
+    "remainingTasks": 0,
+    "remainingTransactions": 0,
+    "interruptedRunSchemasFound": 2,
+    "interruptedRunSchemasCleaned": 2,
+    "remainingTestSchemas": 0,
+    "stopped": true
+  },
+  "retainedFailures": [
+    "首次候选全量4455通过/11环境跳过/0失败；因遗漏旧TEST_POSTGRES_URL，不能算零跳过通过",
+    "两个中间全量运行因环境补齐或候选审查修正主动中止，退出1，不计通过",
+    "主目录保护检查把本地原件/参考库识别为未批准漂移；不放宽目录规则，改在同源码独立检出验证",
+    "先前模型定位和定时器测试夹具调整、复审RED记录全部保留"
+  ],
+  "browser": {
+    "family": "Google Chrome",
+    "projectUrl": "https://code.coze.cn/p/7671964106919837702/preview",
+    "previewUrl": "https://62afe49a-716e-4d9e-99cd-a0be49c4794c-5000.dev.coze.site/",
+    "originalTabsOnly": true,
+    "used360": false,
+    "projectDisconnectedPopupObserved": true,
+    "originalProjectRefreshClicked": true,
+    "previewReadyReverified": false,
+    "lastClaimTimedOut": true,
+    "newCandidateSyncSent": false,
+    "newPaidTasks": 0,
+    "newPasswordResets": 0,
+    "newTopups": 0,
+    "lastVerifiedBalance": 4940,
+    "newCandidateCloudAcceptance": "未验证",
+    "fullVideoSaved": false,
+    "fullTraceSaved": false
+  },
+  "artifacts": [
+    {
+      "path": ".playwright-cli/brand-lifecycle-verification-initial-20260831/brand-lifecycle-baseline-red-20260831.json",
+      "bytes": 138438,
+      "sha256": "b0bcef4d75c9d98c2d3ca899d841278cffdbd38bd768711460a530bf23e20d70"
+    },
+    {
+      "path": ".playwright-cli/brand-lifecycle-verification-initial-20260831/brand-lifecycle-full-20260831.json",
+      "bytes": 1604872,
+      "sha256": "e46b52a012a566a78814f8bb92bcfd2757c25bc0cbfc5f0b42cd2c060a62f9ec"
+    },
+    {
+      "path": ".playwright-cli/brand-lifecycle-review-red-20260831.json",
+      "bytes": 45040,
+      "sha256": "54c9e5e53c9d4f076b999878ffd61435ec77e3d58a4aaf6f365ec5e3bd253bd3"
+    },
+    {
+      "path": ".playwright-cli/brand-lifecycle-detail-ui-red-20260831.json",
+      "bytes": 7888,
+      "sha256": "6fb7effa30f9376f97b157804dd3f2a0f2f057e547374154091b439764090e7e"
+    },
+    {
+      "path": ".playwright-cli/brand-lifecycle-retry-identity-red-20260831.json",
+      "bytes": 8522,
+      "sha256": "81acd46b418089bcc98b331c221acf39105629b2b636ff0f7baffbfe8630a7de"
+    },
+    {
+      "path": ".playwright-cli/brand-lifecycle-final-sixty-20260831.json",
+      "bytes": 21248,
+      "sha256": "f7f06fe1b043cee37a0d0db3d438dde25429ae19f2dd259043743694c801a078"
+    },
+    {
+      "path": ".playwright-cli/brand-lifecycle-approved-build-20260831.log",
+      "bytes": 7975,
+      "sha256": "f975b3167de0318e582ebf2b9dac5180ee72791f0a511d798c58a6cb64dda85e"
+    },
+    {
+      "path": ".playwright-cli/brand-lifecycle-approved-lint-20260831.log",
+      "bytes": 363,
+      "sha256": "dbdd10dc4bfc412d9e86a0d1d83cfe3ef6f136b14e89fd81d0229f552b1f2c69"
+    },
+    {
+      "path": ".playwright-cli/brand-lifecycle-approved-full-20260831.json",
+      "bytes": 1606850,
+      "sha256": "0f4d8a4caf10b45f154e1376f97e0d7670b027d3bc2d28207c2617ab807d0f05"
+    }
+  ],
+  "artifactPolicy": "原始日志和截图仅本地保存，仓库只提交脱敏索引与哈希；新增供应商结果不以组件夹具冒充。",
+  "result": "有条件通过（仅本地候选可进入云端验收）；PROVIDER-003与全平台发布仍不通过"
+}

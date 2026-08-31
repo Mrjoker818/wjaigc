@@ -1,0 +1,85 @@
+{
+  "recordedAt": "2026-08-31T20:03:00+08:00",
+  "scope": "PROVIDER-003 品牌验收的充值前置条件，只读核验",
+  "browser": "Google Chrome，既有预览标签",
+  "previewUrl": "https://62afe49a-716e-4d9e-99cd-a0be49c4794c-5000.dev.coze.site/",
+  "candidateCommit": "98b6505d81bd43df99268a911ca363031e3398ff",
+  "candidateSourceTree": "1a96fb9ab3e68243c53055ee963dee7e3ed5bf80",
+  "cloudVersionRecheckedThisSession": false,
+  "checks": [
+    {
+      "name": "管理员正常登录后进入仪表盘",
+      "result": "通过",
+      "requestId": "23152.73",
+      "httpStatus": 200,
+      "businessEvidence": "登录成功后 UI 显示管理员身份，不能替代普通用户验收"
+    },
+    {
+      "name": "测试账号积分到账",
+      "result": "通过",
+      "requestId": "23152.126",
+      "route": "/api/credits?action=admin-overview",
+      "httpStatus": 200,
+      "businessSuccess": true,
+      "testAccountAlias": "canvas-user",
+      "balance": 5000,
+      "totalRecharged": 5000,
+      "totalUsed": 0,
+      "businessEvidence": "筛选后的积分管理 UI 与同一账号 API 结果一致"
+    },
+    {
+      "name": "充值流水",
+      "result": "通过",
+      "displayedTime": "08/31 19:32",
+      "type": "管理员充值",
+      "amount": 5000,
+      "status": "已完成",
+      "businessEvidence": "消耗明细仅筛选测试账号后可见的真实记录；未独立获取流水响应体"
+    }
+  ],
+  "mutations": {
+    "agentCreditTopUps": 0,
+    "accountOrPasswordChanges": 0,
+    "providerGenerationSubmissions": 0,
+    "newTabs": 0,
+    "sourceCodeChanges": 0
+  },
+  "currentCheckpoint": "管理员已退出；原预览登录框自动填充管理员，待用户登录测试账号。不重复充值或提交已知失败凭据。",
+  "unverified": [
+    "充值后普通用户会话",
+    "Pear/APImart 品牌生成结果及结果入画布",
+    "结果保存、刷新恢复与真实消费/退款",
+    "精修与字境真实链路",
+    "完整录像和 Trace"
+  ],
+  "newSuccessfulGenerations": 0,
+  "overallProvider003Result": "不通过",
+  "artifacts": [
+    {
+      "path": ".playwright-cli/v588-provider-003-credit-confirmed-20260831.txt",
+      "type": "DOM",
+      "sha256": "157f88c7ee3e64c496a6c06022c997d1f7f7c7e7fbc278e3543ebf9f768971ed"
+    },
+    {
+      "path": ".playwright-cli/v588-provider-003-credit-confirmed-20260831.jpg",
+      "type": "截图",
+      "sha256": "916772ccf9ba2e59e340b2c457b95ef2d35044684e68baeccf457b0330a6850f"
+    },
+    {
+      "path": ".playwright-cli/v588-provider-003-credit-response-20260831.json",
+      "type": "已筛选测试账号的真实响应",
+      "sha256": "c2ad26d3fd04e3cf213016849e1ae9c6be149db90203748dc813271cb3a209fb"
+    },
+    {
+      "path": ".playwright-cli/v588-provider-003-credit-ledger-20260831.txt",
+      "type": "DOM",
+      "sha256": "3b2a00136596969324588e9aafccb0b3acd515d18d0f804f2ed229cfbeb8d0a0"
+    },
+    {
+      "path": ".playwright-cli/v588-provider-003-credit-ledger-20260831.jpg",
+      "type": "截图",
+      "sha256": "b1692fc95e2f8fe08a75f82cd26dfb2c048f591d0c0cc6d9b2f9f8064c562cf9"
+    }
+  ],
+  "artifactPolicy": "原始截图、DOM 及账号响应仅保存在本地，不提交 GitHub。"
+}

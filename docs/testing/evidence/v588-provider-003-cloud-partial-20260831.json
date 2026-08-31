@@ -1,0 +1,193 @@
+{
+  "记录时间": "2026-08-31T18:10:00+08:00",
+  "范围": "V588-PROVIDER-003云端部分验收，非全平台通过",
+  "结论": "不通过",
+  "结论原因": "品牌精确提交和APImart强刷字段已验证，但新请求均402积分不足；重试生命周期2/2失败及截断错误未修复。三个入口正向结果和账务未闭环。旧未知提交单独保留，不归因于供应商。",
+  "候选": {
+    "main": "98b6505d81bd43df99268a911ca363031e3398ff",
+    "tree": "3e72b56066ee99e4d0c40139ec2888f64ff44178",
+    "srcTree": "1a96fb9ab3e68243c53055ee963dee7e3ed5bf80",
+    "stable只读": "52f7c601ed150769e15d06fb435c6e360e28c9e7"
+  },
+  "环境": {
+    "浏览器": "Google Chrome原有标签页",
+    "项目页": "https://code.coze.cn/p/7671964106919837702/preview",
+    "预览": "https://62afe49a-716e-4d9e-99cd-a0be49c4794c-5000.dev.coze.site/",
+    "账号类别": "已登录普通用户",
+    "新建标签": false,
+    "使用360": false
+  },
+  "Coze完成报告": {
+    "证据性质": "真实项目页显示的Coze执行报告，非助手直接执行云端终端；业务验收另列",
+    "HEAD": "2a0b61e0ae59fa2f8d795894ac84bfa327bb272c",
+    "tree匹配": true,
+    "srcTree匹配": true,
+    "专项通过": 8,
+    "保护通过": 38,
+    "构建静态页": 118,
+    "三个命令退出码": [0, 0, 0],
+    "BuildID": "-RKRR5RMVc7od3z2_TDDr",
+    "端口": 5000,
+    "PID": 4014,
+    "首页引用资源200": 11,
+    "后续平台短版本": "ffd8a4b",
+    "认证健康检查限制": "user:null不是登录证明",
+    "再次同步或构建": false
+  },
+  "18时真实增量": {
+    "连接": "Google Chrome原标签真实控制恢复，未新建标签或使用360",
+    "只读审计": {
+      "已读取此前回复": true,
+      "当前短HEAD": "ffd8a4ba",
+      "tree仍匹配候选": true,
+      "BuildID": "prPBC-WqUj6VbG503mNY9",
+      "PID": 2940,
+      "变化来源": "Coze报告平台同源码自动重建；本轮未重复同步或要求构建",
+      "旧提交结论": "未知。15:50至16:00日志已轮换，品牌任务采用内存存储；空任务表、零流水、品牌配置表空不能证明未提交。",
+      "证据性质": "实际项目页的只读核验回复，不是助手直接执行云端数据库；不采纳超出数据支持的推断"
+    },
+    "计数": {"检查项": 8, "通过": 5, "失败": 2, "阻塞": 1, "新增修复": 0},
+    "检查": [
+      {"项目": "普通用户重启后强刷会话与原图", "结论": "通过", "依据": "/api/session返回role=user/status=active，原600x450图片仍在"},
+      {"项目": "Pear精确提交", "结论": "通过", "限制": "仅UI至应用API请求契约，非供应商生成成功", "requestId": "25904.2601", "providerId": "api_1780630178347_rjqlmam", "model": "gpt-image-2"},
+      {"项目": "APImart精确提交及重试身份", "结论": "通过", "限制": "仅请求身份，不证明重试生命周期正确", "requestId": "25904.2917", "providerId": "api_1778430731224_533e09a", "model": "gpt-image-2"},
+      {"项目": "APImart强刷字段保持", "结论": "通过", "依据": "当前生成设置DOM和apimart-field-visible截图目视确认；after-refresh旧截图合成帧仍为模板页，不用作视觉证据"},
+      {"项目": "首次积分不足拒绝收尾", "结论": "通过", "依据": "真实402、success=false、无taskId，生成按钮恢复；提示可读性单独失败"},
+      {"项目": "重试错误生命周期及模板身份", "结论": "失败", "次数": "2/2", "bug": "V588-PROVIDER-003-BUG-002", "旧观察": "OBS-004", "依据": "已402仍计时/按钮禁用，重试templateIds由white-bg变error"},
+      {"项目": "完整错误可读性", "结论": "失败", "bug": "V588-PROVIDER-003-BUG-003", "依据": "原始JSON截断60字符，余额缺失"},
+      {"项目": "品牌真实结果入画布与保存刷新/账务", "结论": "阻塞", "依据": "当前账号余额0，白底模板2变体需要60积分；没有生成结果，不修改积分绕过"}
+    ],
+    "请求": [
+      {"requestId": "25904.2601", "种类": "Pear首次", "templateIds": ["white-bg"], "HTTP": 402, "success": false, "taskId": null},
+      {"requestId": "25904.2917", "种类": "APImart首次", "templateIds": ["white-bg"], "HTTP": 402, "success": false, "taskId": null},
+      {"requestId": "25904.2965", "种类": "APImart重试1", "templateIds": ["error"], "HTTP": 402, "success": false, "taskId": null, "UI": "11秒DOM/22秒截图仍生成中"},
+      {"requestId": "25904.3033", "种类": "APImart复现前置", "templateIds": ["white-bg"], "HTTP": 402, "success": false, "taskId": null},
+      {"requestId": "25904.3047", "种类": "APImart重试2", "templateIds": ["error"], "HTTP": 402, "success": false, "taskId": null, "UI": "32秒DOM仍生成中"}
+    ],
+    "响应共同错误": "积分不足，需要60积分，当前余额0积分",
+    "网络": {"去重事件数": 1027, "已捕获HTTP错误": 5, "Coze注入资源加载失败": 3, "任务SSE被取消": 1, "未捕获异常记录": 0, "限制": "注入资源失败原errorText为空，未保存blockedReason，不强认定为CSP"},
+    "后段Console": {"网络402错误": 2, "应用402错误": 1, "原生弹窗记录": 0, "hasMore": false, "限制": "专门采集在首次402之后开始，不宣称全程零Console错误；历史chunk失败另列"},
+    "测试清理": "两次点击已有取消按钮结束假加载，最终尚未生成结果且批量生成按钮可用；不等同于远端任务取消或退款验证",
+    "账号积分配置变更": false,
+    "供应商后台和实际账务复读": "未验证",
+    "业务源码修改": false,
+    "工具限制": ["两次截图捕获5000ms超时，未写出成功图片", "一次取旧响应正文缓存缺失；未重发请求，改用已观察requestId关联", "游标筛选包含旧事件，最终按requestId关联并按sequence/method去重", "图片文件扩展名不是视觉验收依据，保留合成帧落后截图不算字段证明"]
+  },
+  "16时历史浏览器观察": [
+    {"检查": "品牌模型菜单", "状态": "已验证", "证据": "brand-model-menu DOM含Pear/APImart同名模型和当前Pear身份标签；不证明实际请求供应商"},
+    {"检查": "APImart选择强刷保持并改回Pear", "状态": "已操作观察，归档证据不完整", "证据限制": "两份按apimart-restored/pear-before-submit命名的截图实际显示模板页，不能单独证明设置字段；不得按文件名计为验收通过"},
+    {"检查": "普通用户积分基线", "状态": "UI已读取", "余额": 0, "累计获得": 0, "累计消费": 0, "记录": 0, "限制": "未校验数据库，不证明模型收费或本次请求402；未调整积分"},
+    {"检查": "品牌首次打开", "状态": "失败，证据保留", "requestId": "25904.281", "资源": "/_next/static/chunks/7295.fa0ffc6de1cb2f26.js", "HTTP": 500, "MIME": "text/plain", "ConsoleError数": 2, "异常": "ChunkLoadError", "发生时间": "2026-08-31T07:54:14.661Z", "响应正文": "未取得"},
+    {"检查": "品牌强刷后重新打开", "状态": "恢复观察", "requestId": "25904.392", "HTTP": 200, "归档限制": "200网络事件仅有本轮工具观察，未保存原始JSON；不能证明根因已修复"},
+    {"检查": "批量生成", "状态": "未知", "POST是否发出": null, "taskId": null, "结果": null, "扣费": null, "原因": "读取网络、点击、读取DOM在同一调用内超时，不能定位中断步骤", "重复提交": false},
+    {"检查": "精修引擎和字境大师", "状态": "本候选未完成真实业务验收"}
+  ],
+  "恢复断点": "Chrome控制已恢复、旧审计已读；品牌失败重试BUG-002和错误提示BUG-003未修复。当前账号无积分，品牌正向与精修/字境未完成；不重跑已有同步/本地门禁，不改账号积分或stable，不提前批次B。",
+  "录像": null,
+  "Trace": null,
+  "原件说明": "以下原件位于本地.playwright-cli，不上传截图、账号原件。哈希经本轮读取核验；原件文件名不自动代表其中断言成立。",
+  "18时新增原件": [
+    {
+      "path": ".playwright-cli/v588-provider-003-readonly-task-audit-result-20260831.txt",
+      "bytes": 5773,
+      "sha256": "8d6870d9426bd86cfccd582ea2cef6cf179fdcf19cd6997d7d11f0dd18c186f7"
+    },
+    {
+      "path": ".playwright-cli/v588-provider-003-current-session-summary-20260831.json",
+      "bytes": 82,
+      "sha256": "3452593c8c020ce5d6b90206ac4a02e8c42d725780734f92359667fb286a3be0"
+    },
+    {
+      "path": ".playwright-cli/v588-provider-003-pear-fresh-before-20260831.txt",
+      "bytes": 6049,
+      "sha256": "ee8233e7f409dde6f0924b8b312baafb1152297a66992fb3f33a579d28b5ab1e"
+    },
+    {
+      "path": ".playwright-cli/v588-provider-003-pear-fresh-response-20260831.json",
+      "bytes": 122,
+      "sha256": "4c2328a464c2d9e13d9bba8f0cd9a031501ed76505e43f9c05856bee31ef5e08"
+    },
+    {
+      "path": ".playwright-cli/v588-provider-003-pear-fresh-rejected-20260831.txt",
+      "bytes": 4071,
+      "sha256": "ac5485c37d60cd6ba487589e5e10b39dc3db47c147567bee6c7e6412adfcd0f6"
+    },
+    {
+      "path": ".playwright-cli/v588-provider-003-apimart-field-after-refresh-20260831.txt",
+      "bytes": 6598,
+      "sha256": "a708aa7cef43fc7e6e3292f631d65fe6a2e7005924d6695dfc6cf0a4cb9607fc"
+    },
+    {
+      "path": ".playwright-cli/v588-provider-003-apimart-field-visible-20260831.jpg",
+      "bytes": 144839,
+      "sha256": "e80346308edf755fdb89217c22e8333c6bc031fd2b6e84998e0e850174e25d4f"
+    },
+    {
+      "path": ".playwright-cli/v588-provider-003-apimart-fresh-response-20260831.json",
+      "bytes": 1007,
+      "sha256": "7bef6b45b31fdf7b9b8273cadaec01f0003f8bc67990ea94e5d5af033d31694a"
+    },
+    {
+      "path": ".playwright-cli/v588-provider-003-apimart-retry-response-20260831.json",
+      "bytes": 1005,
+      "sha256": "5b277779c62c049016cb2084b2fbeb78dde729f143c951241a6c01e017e6afaf"
+    },
+    {
+      "path": ".playwright-cli/v588-provider-003-apimart-retry-state-20260831.txt",
+      "bytes": 3974,
+      "sha256": "1c1600d574fb67a3f5da1714fe0181ac19248473a386be6b8f8ba79b5b88b5f1"
+    },
+    {
+      "path": ".playwright-cli/v588-provider-003-apimart-retry-stuck-20260831.jpg",
+      "bytes": 147350,
+      "sha256": "baee81a286074fee6d87d03d0bdc9fd2d988a34820ea63af3f52c5737d0aded9"
+    },
+    {
+      "path": ".playwright-cli/v588-provider-003-apimart-rejected-message-20260831.jpg",
+      "bytes": 145738,
+      "sha256": "74f0f28822be3a1876e79fd9bf46390e60ee65297eb3312b12173e81649f1aac"
+    },
+    {
+      "path": ".playwright-cli/v588-provider-003-retry-reproduction2-response-20260831.json",
+      "bytes": 2152,
+      "sha256": "a717ef2943aa9b1dbcdfb2018a0a2042340c10033510a7e2981b79601553824c"
+    },
+    {
+      "path": ".playwright-cli/v588-provider-003-retry-reproduction2-stuck-20260831.txt",
+      "bytes": 3974,
+      "sha256": "456d5f333cad50dd05b634069a8d177ed6e0e374f194822e5c96e16ed4f7ec0b"
+    },
+    {
+      "path": ".playwright-cli/v588-provider-003-final-ui-20260831.txt",
+      "bytes": 3959,
+      "sha256": "fb2b0c6043da6e5531d3a3601145818d57376405a4e37bb0a709d77a607df960"
+    },
+    {
+      "path": ".playwright-cli/v588-provider-003-live-network-20260831.json",
+      "bytes": 279794,
+      "sha256": "4e51d964564ecb8c151d1ecdb257c6e0d2097d1fcf8ec8faf31da9109c63361b"
+    },
+    {
+      "path": ".playwright-cli/v588-provider-003-live-console-20260831.json",
+      "bytes": 4551,
+      "sha256": "39319cad59468677441579485fa36e0a8ff953994ba467b00cdf76f4e5423479"
+    }
+  ],
+  "原件": [
+    {"path": ".playwright-cli/v588-provider-003-coze-sync-submitted-20260831.txt", "bytes": 39665, "sha256": "8224ec1af6a48f6981fdb8ae0011dd24d1673e9261049c53665d0c5bdb4509df"},
+    {"path": ".playwright-cli/v588-provider-003-coze-sync-submitted-20260831.png", "bytes": 192635, "sha256": "4dedd381e55e4adc33cfedbac346488cf15b536e6cea7afaf2a4374632acff3e"},
+    {"path": ".playwright-cli/v588-provider-003-coze-sync-result-20260831.txt", "bytes": 42820, "sha256": "9c4d4a4e97b0201471853f3161c506f3c8e7a463ab1871caf1fff00fe0db61cc"},
+    {"path": ".playwright-cli/v588-provider-003-coze-sync-result-20260831.png", "bytes": 182357, "sha256": "7262f43cc47ad47330ffa29dcabe02d56ee2bc7dfbbbf0934649006c5e4c932c"},
+    {"path": ".playwright-cli/v588-provider-003-credit-before-20260831.txt", "bytes": 1068, "sha256": "1048db39ca4ac63fd010919c7b535a50b44f78cc9cf05fdf8fb7ff8f5301acef"},
+    {"path": ".playwright-cli/v588-provider-003-credit-before-20260831.png", "bytes": 39406, "sha256": "551ad2be0d44ad5e049b0a3fd2053f3db0bd7179cb3337ef02cc6a08e5c8ae16"},
+    {"path": ".playwright-cli/v588-provider-003-brand-open-failure-20260831.txt", "bytes": 132, "sha256": "159d60234246095a9d05f8ffaf065781e27f442d60b7c21805553a0f70f534a1"},
+    {"path": ".playwright-cli/v588-provider-003-brand-open-failure-20260831.png", "bytes": 17564, "sha256": "b7b728d0ebe2854a5105f8d731fac560f65c55f5775dbec9b8db859f012d7e08"},
+    {"path": ".playwright-cli/v588-provider-003-brand-open-failure-console-20260831.json", "bytes": 3246, "sha256": "f3dca382d6f83907577231e08149904e7089f29dbe8222f6f00eacf1f96c0ddb"},
+    {"path": ".playwright-cli/v588-provider-003-brand-open-failure-network-20260831.json", "bytes": 127969, "sha256": "a17e70a3cbbc063c372fcaf1925642659b806dae403d89188a17dbed4bc1ccad"},
+    {"path": ".playwright-cli/v588-provider-003-brand-model-menu-20260831.txt", "bytes": 8329, "sha256": "97d5a5543cce736cda487d230ade9098b17638ba4c72d8bf51b15742e528f38c"},
+    {"path": ".playwright-cli/v588-provider-003-brand-model-menu-20260831.png", "bytes": 140903, "sha256": "7bd5c67d88ea992d4137294665cca669550007461a252ca6caca4e95cd66a3c8"},
+    {"path": ".playwright-cli/v588-provider-003-brand-apimart-selected-20260831.png", "bytes": 145193, "sha256": "78e9f64182d366b3f5cbe921dc82da654fa7f10d1a49b2ec2bc986e76bb9139b"},
+    {"path": ".playwright-cli/v588-provider-003-brand-apimart-restored-20260831.png", "bytes": 149059, "sha256": "8adea1da2f665e513ec359211372bacac5456d284b235217a9c5f6cd85f2c373"},
+    {"path": ".playwright-cli/v588-provider-003-brand-pear-before-submit-20260831.png", "bytes": 148999, "sha256": "054f40185599c7073771355eb29c9c4057d81c2e2d605e857104a193858a6bb5"}
+  ]
+}

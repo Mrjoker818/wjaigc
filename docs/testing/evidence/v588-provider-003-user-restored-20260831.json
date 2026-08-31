@@ -1,0 +1,60 @@
+{
+  "recordedAt": "2026-08-31T20:10:40+08:00",
+  "scope": "测试凭据交付与普通用户会话恢复",
+  "browser": "Google Chrome，既有预览标签",
+  "previewUrl": "https://62afe49a-716e-4d9e-99cd-a0be49c4794c-5000.dev.coze.site/",
+  "candidateCommit": "98b6505d81bd43df99268a911ca363031e3398ff",
+  "cloudVersionRecheckedThisSession": false,
+  "credentialHandling": "仅重置专用测试用户一次，随后正常登录成功。新密码已直接交付当前对话，不写入本文件或仓库；未记录密码请求体。",
+  "verifiedUi": {
+    "testAccount": "canvas-user",
+    "ordinaryUserDashboard": true,
+    "projectCount": 1,
+    "imageCount": 1,
+    "chatCount": 3,
+    "ownBalance": 5000,
+    "totalReceived": 5000,
+    "totalSpent": 0,
+    "modelAuthorizationCheckboxesUnchanged": true,
+    "fullDatabaseInvariantAudit": false
+  },
+  "mutations": {
+    "testAccountPasswordResets": 1,
+    "otherAccountEdits": 0,
+    "permissionOrRoleEdits": 0,
+    "creditTopUps": 0,
+    "providerSubmissions": 0,
+    "sourceCodeChanges": 0,
+    "newTabs": 0
+  },
+  "currentCheckpoint": "测试用户已登录，原项目仪表盘可用，不再等待登录、重置密码或充值。品牌真实生成/入画布/保存刷新/账务验收仍待执行。",
+  "observations": [
+    {
+      "id": "V588-CREDITS-OBS-002",
+      "description": "普通用户积分流水时间显示 NaN/NaN NaN:NaN，余额与流水金额正常；根因未定位。"
+    }
+  ],
+  "artifacts": [
+    {
+      "path": ".playwright-cli/v588-provider-003-user-restored-20260831.txt",
+      "type": "DOM",
+      "sha256": "c3b8bff4bfe298289992b834e35c113b5fd3e83820f5bdca246629976fc9927a"
+    },
+    {
+      "path": ".playwright-cli/v588-provider-003-user-restored-20260831.jpg",
+      "type": "截图",
+      "sha256": "08e68ad99ee9bf75dc7a595879629fc3935b4c6d318bfbbb9c1d419cc23a3133"
+    },
+    {
+      "path": ".playwright-cli/v588-provider-003-user-credit-restored-20260831.txt",
+      "type": "DOM",
+      "sha256": "ba4f25a60cf90bef7da161ddcac636808954c5e9d009328110dee2fed3820042"
+    },
+    {
+      "path": ".playwright-cli/v588-provider-003-user-credit-restored-20260831.jpg",
+      "type": "截图",
+      "sha256": "1883a21210b5189230fd3243b096a4e8733da8e8f520ade915305c3068a5f5b3"
+    }
+  ],
+  "artifactPolicy": "原始截图和 DOM 只留本地，不提交 GitHub。无完整录像或 Trace，不计为供应商生成成功。"
+}

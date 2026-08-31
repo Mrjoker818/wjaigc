@@ -1,0 +1,51 @@
+{
+  "recordedAt": "2026-08-31T19:36:30+08:00",
+  "timeMeaning": "记录时间，非精确请求发送时间",
+  "localCommit": "98b6505d81bd43df99268a911ca363031e3398ff",
+  "cloudCommitReverifiedThisRun": false,
+  "stableRef": "52f7c601ed150769e15d06fb435c6e360e28c9e7",
+  "browser": "Google Chrome",
+  "previewUrl": "https://62afe49a-716e-4d9e-99cd-a0be49c4794c-5000.dev.coze.site/",
+  "displayedVersion": "v4.1.0",
+  "creditStatus": {
+    "userReportedRecharged": true,
+    "balanceIndependentlyVerified": false,
+    "plannedAdditional300Cancelled": true,
+    "agentCreditMutations": 0
+  },
+  "observedPrecondition": {
+    "page": "登录页",
+    "username": "canvas-user",
+    "password": "未读取；仅截图确认掩码输入存在",
+    "errorVisibleBeforeAgentSubmission": true
+  },
+  "loginAttempt": {
+    "count": 1,
+    "action": "点击现有登录按钮，未修改填充凭据",
+    "requestId": "25904.4841",
+    "endpoint": "/api/auth/login",
+    "httpStatus": 401,
+    "response": {
+      "success": false,
+      "code": "AUTH_INVALID_CREDENTIALS",
+      "error": "Invalid username or password."
+    },
+    "requestBodyAndHeadersSaved": false,
+    "interpretation": "本次提交凭据被服务器拒绝；根因未确定，不能归因为代码回归"
+  },
+  "browserControl": {
+    "originalPreviewClaimedAndRead": true,
+    "originalCozeProjectClaimTimedOut": true,
+    "newTabsCreated": 0,
+    "used360": false
+  },
+  "supplierTasksSubmitted": 0,
+  "evidenceLimits": {
+    "domAndResponseObservedInToolOutput": true,
+    "screenshotVisibleInConversation": true,
+    "screenshotSavedToFile": false,
+    "videoSaved": false,
+    "fullTraceSaved": false
+  },
+  "acceptance": "未完成：等待测试账号登录后只读核对到账，继续原品牌正向验收"
+}

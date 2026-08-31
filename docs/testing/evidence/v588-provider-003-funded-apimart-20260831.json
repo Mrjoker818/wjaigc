@@ -1,0 +1,193 @@
+{
+  "recordedAt": "2026-08-31T20:19:51+08:00",
+  "scope": "PROVIDER-003 充值后的 APImart 品牌真实生成验收",
+  "candidateCommit": "98b6505d81bd43df99268a911ca363031e3398ff",
+  "previewUrl": "https://62afe49a-716e-4d9e-99cd-a0be49c4794c-5000.dev.coze.site/",
+  "browser": "Google Chrome 原标签",
+  "testAccountAlias": "canvas-user",
+  "cloudVersionRecheckedThisRun": false,
+  "task": {
+    "submitRequestId": "23152.614",
+    "taskId": "ecom-1788178465802-0cblix",
+    "providerId": "api_1778430731224_533e09a",
+    "selectedProviderName": "APImart imgae",
+    "model": "gpt-image-2",
+    "templateIds": [
+      "white-bg"
+    ],
+    "variantCount": 2,
+    "submitBusinessSuccess": true,
+    "terminalPollRequestId": "23152.704",
+    "terminalStatus": "completed",
+    "progress": 100,
+    "uiDurationSeconds": 54,
+    "completedResponseModelName": "",
+    "completedResponseProviderName": ""
+  },
+  "checks": [
+    {
+      "name": "选择的模型/供应商正确提交",
+      "result": "通过"
+    },
+    {
+      "name": "提交返回真实任务ID",
+      "result": "通过"
+    },
+    {
+      "name": "第二变体生成时第一张结果已显示",
+      "result": "通过"
+    },
+    {
+      "name": "完成态返回2张可加载1254x1254图片",
+      "result": "通过"
+    },
+    {
+      "name": "两张结果一次添加到画布并保留原图",
+      "result": "通过"
+    },
+    {
+      "name": "服务器保存3张图片，强刷后全部恢复",
+      "result": "通过"
+    },
+    {
+      "name": "单次测试60积分消费与余额变化相符",
+      "result": "通过"
+    },
+    {
+      "name": "落图供应商标签",
+      "result": "失败",
+      "bugId": "V588-PROVIDER-003-BUG-004",
+      "actual": "两张均显示 AILINK 图像，保存的结果图片缺少 apiProvider"
+    }
+  ],
+  "countPolicy": "本次8项断言7通过1失败，含已有契约的复验，不与18:10的检查数简单累加为独立功能数。",
+  "results": [
+    {
+      "url": "/api/serve-upload/uploads/gen-1788178491617-gc0yzo.png",
+      "width": 1254,
+      "height": 1254
+    },
+    {
+      "url": "/api/serve-upload/uploads/gen-1788178517749-79n8y4.png",
+      "width": 1254,
+      "height": 1254
+    }
+  ],
+  "persistence": {
+    "projectId": "project_1787842745990_5xjlt4q7h",
+    "readbackRequestId": "23152.907",
+    "businessSuccess": true,
+    "serverImageCount": 3,
+    "hardRefreshSameTab": true,
+    "allThreeImagesLoaded": true,
+    "initialEarlierReadback": "23152.759 仍是旧1张快照，没有将其误计为新结果保存证据"
+  },
+  "credits": {
+    "before": 5000,
+    "after": 4940,
+    "totalUsed": 60,
+    "consumeRecordsObserved": 1,
+    "consumeAmount": -60,
+    "transactionId": "ctx_1788178465769_dltgfhag",
+    "transactionReadRequestId": "23152.962",
+    "refundOrConcurrencyVerified": false,
+    "upstreamBillingIndependentlyVerified": false
+  },
+  "runtime": {
+    "capturedNetworkEvents": 580,
+    "httpErrorResponsesCaptured": 0,
+    "loadingFailuresCaptured": 3,
+    "loadingFailureErrorText": "原始记录为空，未确定根因",
+    "capturedConsoleOrRuntimeErrors": 0,
+    "jsDialogAtCheck": false,
+    "fullVideo": false,
+    "fullTrace": false,
+    "limitation": "仅已采集窗口，不声称整站Console零错误。一次工具栏点击在派发前超时、一次终态UI等待超时保留为观察限制；均未重复生成。"
+  },
+  "remaining": [
+    "Pear品牌正向链路",
+    "供应商真实上游身份审计，终态响应供应商字段为空",
+    "品牌单模板重试BUG-002与错误提示BUG-003",
+    "落图供应商元数据BUG-004",
+    "精修与字境真实链路",
+    "取消、退款与并发扣费"
+  ],
+  "sourceFinding": {
+    "brandFile": "src/components/brand-ecommerce-panel.tsx:500",
+    "canvasFile": "src/components/infinite-canvas.tsx:12515",
+    "description": "加入画布仅从复合selectedModel提取供应商，当前裸模型未使用selectedImageProviderId；画布无身份时以同名模型映射猜测。",
+    "blame": "dc5983d9"
+  },
+  "artifactPolicy": "原件只留本地，提交的索引不含密码、Cookie、Token或API Key。",
+  "artifacts": [
+    {
+      "path": ".playwright-cli/v588-provider-003-funded-apimart-before-20260831.jpg",
+      "sha256": "5f47313da7a0f5c21bdb33eb2eb046ccb7391a846ad3ccbcb75191cd5d0d39c2"
+    },
+    {
+      "path": ".playwright-cli/v588-provider-003-funded-apimart-before-20260831.txt",
+      "sha256": "590bb6bd55e2044ee287e1cab1b254624f917528355e3f2992085f852e46a71a"
+    },
+    {
+      "path": ".playwright-cli/v588-provider-003-funded-apimart-canvas-20260831.jpg",
+      "sha256": "b0fc0836a88b9bf3a3d40c09edea165fdcfbefc756ae0af314859f7bfda3289d"
+    },
+    {
+      "path": ".playwright-cli/v588-provider-003-funded-apimart-canvas-20260831.txt",
+      "sha256": "fb146356479276c5ab4fff5b5b482960592771805faaed47eed91d3f7679c111"
+    },
+    {
+      "path": ".playwright-cli/v588-provider-003-funded-apimart-completed-20260831.jpg",
+      "sha256": "0e2e97a0fe6737193cefc578be6f5f5e2cb3722fe2fefed16842a7133a0a7317"
+    },
+    {
+      "path": ".playwright-cli/v588-provider-003-funded-apimart-completed-20260831.json",
+      "sha256": "bfe2d53ddf963f9cb0c0ba500d5b2499574a8d981719c4b2a82d702a6cc68a07"
+    },
+    {
+      "path": ".playwright-cli/v588-provider-003-funded-apimart-completed-20260831.txt",
+      "sha256": "76c883a2f77d2135bc2932f62161782dec71bf5c6df2a95c730b088352b73817"
+    },
+    {
+      "path": ".playwright-cli/v588-provider-003-funded-apimart-credits-20260831.jpg",
+      "sha256": "c89f0038493fba2531814dafd3df53961004bd6a049b516a2b27c2bc6fafd71e"
+    },
+    {
+      "path": ".playwright-cli/v588-provider-003-funded-apimart-credits-20260831.json",
+      "sha256": "d84c3d0361d8eca1f60280b1764147cd5cfb627c8eab330f570af84573f56821"
+    },
+    {
+      "path": ".playwright-cli/v588-provider-003-funded-apimart-credits-20260831.txt",
+      "sha256": "a5d13a8eab972d30b00adb39244e5d3f1d631df8e87b0ac3c17b4370509f643a"
+    },
+    {
+      "path": ".playwright-cli/v588-provider-003-funded-apimart-first-20260831.jpg",
+      "sha256": "ac750510f09ca0f3467e5dc0a17d87268c89770207cc819d3f9401dc5aada056"
+    },
+    {
+      "path": ".playwright-cli/v588-provider-003-funded-apimart-first-20260831.txt",
+      "sha256": "76bef321da00191a702375872a1c33c7e662ceaaad01677ebb837e8d380d4bc2"
+    },
+    {
+      "path": ".playwright-cli/v588-provider-003-funded-apimart-network-20260831.json",
+      "sha256": "ff9b1ab376c75ff247c73dca7440e1dd59ee5b02d629408bdc60f8d3bec53507"
+    },
+    {
+      "path": ".playwright-cli/v588-provider-003-funded-apimart-project-20260831.json",
+      "sha256": "fe8352db55ae75d22d687b1e489fe1a7b3e7bcce8a991753fb512de857892339"
+    },
+    {
+      "path": ".playwright-cli/v588-provider-003-funded-apimart-restored-20260831.jpg",
+      "sha256": "2613c7d77a7e62e06bd5cc4a2e7ef4d04f801b75c9fc212f9818442c165c0a12"
+    },
+    {
+      "path": ".playwright-cli/v588-provider-003-funded-apimart-restored-20260831.txt",
+      "sha256": "8428220ffeed661b63a91df135e50e3e3a60f78dd201c38d1b89c3a1a166be7d"
+    },
+    {
+      "path": ".playwright-cli/v588-provider-003-funded-apimart-runtime-20260831.json",
+      "sha256": "d9c80f0ed92549f974ba09646b564f7bc58594afd9f34e14dc00d416765f1149"
+    }
+  ],
+  "overallResult": "不通过"
+}

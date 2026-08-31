@@ -2,7 +2,11 @@
 
 ## 当前检查点：2026-08-31
 
-- **最新增量：PROVIDER-003 品牌图像请求契约已完成本地 RED/GREEN。** 仅两个品牌组件修复精确 provider/model 选择、请求和历史设置/品牌方案读写；8 项业务 RED 后专项 36/36。OBS-001 升格 BUG-001；原重试收尾及 LLM 选择另列 OBS-004/005，字境/精修回退观察不自动关闭。完整本地门禁与云端断点集中于 `docs/testing/V588_PROVIDER_003_ACCEPTANCE.md` 和对应机器证据。原 Chrome 不可用，尚无新云端业务证据；不重复搬运路由、不重开 PROVIDER-002/Stage 4、不提前批次 B。以下 15:02 为修复前历史记录。
+**当前覆盖：** 品牌BUG-002/003/004本地修复源码9b2e8d5f，四个生产文件；3处审查回归均RED后修正。专项60/60、全量610文件4470/4470零跳过、类型/Lint/保护38/构建118及复审完成，测试库已清理停止。本候选Coze同步尚未发送、云端待验，PROVIDER-003未整体完成；不重开Stage4/PROVIDER-002，不测试延期Pear分层，stable/donor只读。唯一断点：`docs/testing/V588_PROVIDER_003_ACCEPTANCE.md`；历史失败与完整哈希见同目录evidence/v588-provider-003-brand-lifecycle-20260831.json。下方待批准/无源码变化为历史。
+
+**20:20当前：** 测试密码已直接交付且普通用户已登录，不再等待凭据。APImart品牌单次真实任务ecom-1788178465802-0cblix在54秒完成两张1254×1254图片，第一张先行显示；入画布、服务端3张保存、强刷恢复及一次60积分扣费已验证。新增BUG-004：缺失结果供应商身份导致两张误标AILINK，刷新仍错；未据此判定实际上游调用错误。Pear结果、品牌BUG-002/003/004、精修/字境仍未闭环。证据：`docs/testing/evidence/v588-provider-003-funded-apimart-20260831.json`。源码未改，main候选98b6505d、stable/donor不动，不重做已过阶段/门禁/部署。下方登录等待和余额0均为历史。
+
+- **20:03当前：PROVIDER-003候选98b6505d已同步，充值前置条件已通过，业务验收未完成。** Chrome 原预览可控制；管理员正常登录后，只读核实测试账号余额/累计充值均为5,000、累计消耗0，19:32充值流水+5,000已完成。代理未充值，旧加300动作取消。当前已退出管理员，等待同一原预览登录测试账号；不重复失败凭据、不修改认证。18:10的Pear/APImart精确提交与APImart刷新字段已补证，但5次响应均402、无生成结果；重试2/2假加载及错误模板升格BUG-002，截断JSON为BUG-003，均未修复。结果入画布/保存刷新/账务、精修/字境未验。集中断点为 `docs/testing/V588_PROVIDER_003_ACCEPTANCE.md`，到账证据为 `docs/testing/evidence/v588-provider-003-credit-confirmed-20260831.json`。本地4446项、构建及Coze同步不重复，不重开PROVIDER-002/Stage4或提前批次B。以下均为历史记录。
 
 - **15:02 增量：PROVIDER-003 只读核对完成，三个业务入口仍未云端验收。** 拆分前/后/当前 5 个路由的 7 个处理函数 AST 内容一致；不重复搬运或重跑旧门禁。品牌供应商字段不一致、字境/精修回退为待复现观察，不计作已验证 Bug。正确 Chrome 列表读取后连接失效，扩展和连接组件检查正常，本轮新增云端业务测试为 0。详见 `docs/testing/V588_PROVIDER_003_ACCEPTANCE.md`；恢复原 Chrome 后直接续品牌/精修/字境，不重开 PROVIDER-002、Stage4 或 Pear 延期项。不为纯文档部署。
 
@@ -68,7 +72,7 @@ These are the only authorized first absorption targets. Every row remains unimpl
 | V588-ADMIN-003 | 缩略图回填与幂等 worker | 复用当前资产恢复/健康子系统，不导入 donor 第二套媒体真相 | **回填、影子对账、历史媒体软归档已云端验证；缩略图投影仍有条件。** 2026-08-22 的四个不可恢复版本已软归档、原行保留，旧缺失阻塞不能再次作为归档任务执行 | 只保留缩略图交付/刷新、原图回退和 S3 恢复独立证据；不重做归档、不重开已归档 Stage 4，不擅自切换运行模式 | 高 |
 | V588-PROVIDER-001 | New display mappings such as Nano Banana Lite, GPT Image 2 2K/4K, FLUX 2 Klein, Grok Imagine video/image, HappyHorse, Gemini Omni and Seedance/Seedream variants | Current map already contains several newer Pear/Seedance entries; blind copy would duplicate or reorder wildcard matches | **已吸收 / Coze 云端验证通过。** 仅补齐缺失精确模式，统一采用最长匹配，继续保持管理员/供应商显示名优先 | 表驱动 RED/GREEN、通配碰撞、管理员显示名优先、全量回归、Coze exact SHA 与普通用户图像/视频目录证据 | Low |
 | V588-PROVIDER-002 | Explicit `providerId::modelId` catalog and ambiguous legacy-ID rejection | 保留当前task-core目录、精确键授权迁移与管理员配置快照，未导入donor第二套状态 | **已吸收 / 云端专项通过。** 管理员拒绝/迁移/反馈、普通用户三个工作区精确目录与保存刷新均已闭环；10bcc899关闭BUG-006，临时选择不持久化，未改配置重启保持会话与模型 | 原RED与本地4438/4438门禁保留，9项Chrome云端检查及16份原件哈希已记录；无供应商任务/扣费，不代表完整全平台E2E或真实secret轮换 | 高 |
-| V588-PROVIDER-003 | 非路由导出拆至 `result-store.ts` / `constants.ts` | `6a9efa5e`、`c4b49293` 已进入 main；`1fe54ffc` 的 AST 合同扫描当前 193 个 route.ts，字境结果继续使用当前 `lib/font-design-task-store.ts` | **拆分不重复搬运。** 品牌新增BUG-001已8项组件RED复现并最小修复；专项36/36、新全量4446/4446零跳过、同src树独立检出118/118构建及38保护通过，详见PROVIDER-003验收断点 | 品牌/精修/字境真实任务和结果、保存刷新及账务仍未云端验收；品牌重试收尾和LLM配对等遗留观察未关闭。拆分原始RED关联缺口保留，不宣称完整吸收 | 低 |
+| V588-PROVIDER-003 | 非路由导出拆至 `result-store.ts` / `constants.ts` | `6a9efa5e`、`c4b49293` 已进入 main；`1fe54ffc` 的 AST 合同扫描当前 193 个 route.ts，字境结果继续使用当前 `lib/font-design-task-store.ts` | **拆分不重复搬运。** 品牌BUG-001本地4446/4446等门禁完成，98b6505d已同步构建；Chrome真实Pear/APImart精确POST及APImart强刷字段已验 | 5次新请求402无taskId，正向结果/保存/账务阻塞；重试2/2失败升格BUG-002，截断提示BUG-003未修复。旧提交仍未知，精修/字境、LLM配对、资源500及原始RED关联缺口保留；不宣称完整吸收 | 低 |
 | V588-PROVIDER-004 | Unified generation tool metadata and document-tool execution | Donor executor uses localhost fetches, an internal user header, process-memory source edges and a separate poll lifecycle; current task/asset/accounting runtime is authoritative | **DO NOT ABSORB THE EXECUTOR.** Consider only declarative tool metadata after a current-runtime adapter design | Security/identity, idempotency, cancellation, task ownership, billing and asset projection contracts | Critical |
 
 ### 2026-08-23 月度归档补充审计
