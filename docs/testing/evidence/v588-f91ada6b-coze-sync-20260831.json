@@ -2,8 +2,8 @@
   "schemaVersion": 1,
   "date": "2026-08-31",
   "items": ["V588-ADMIN-004", "V588-PROVIDER-002"],
-  "status": "ADMIN_004_CLOUD_VERIFIED_PROVIDER_002_ORDINARY_LOGIN_PENDING",
-  "conclusion": "新源码构建重启和 Chrome 管理员只读投影验收通过，ADMIN-004 关闭；PROVIDER-002 普通用户三个工作区目录仍未验证，不能关闭整个吸收批次。",
+  "status": "ADMIN_004_CLOUD_VERIFIED_PROVIDER_002_ACCEPTANCE_PENDING",
+  "conclusion": "新源码构建重启和 Chrome 管理员只读投影验收通过，ADMIN-004 关闭；PROVIDER-002 普通用户目录及规格要求的迁移/拒绝云端边界证据尚未齐，不能关闭整个吸收批次。",
   "environment": {
     "browser": "Google Chrome",
     "projectUrl": "https://code.coze.cn/p/7671964106919837702/preview",
@@ -124,9 +124,20 @@
     "pearTasksRequested": 0,
     "stableChanged": false
   },
+  "acceptanceAudit": {
+    "spec": "docs/superpowers/specs/2026-08-30-v588-provider-002-exact-model-authorization-design.md",
+    "plan": "docs/superpowers/plans/2026-08-30-v588-provider-002-exact-model-authorization.md",
+    "adminExactSaveAndRestoreUnlimited": "cloud-evidence-recorded-on-318fe2d7",
+    "adminUniqueLegacyIdMigration": "cloud-request-and-persistence-readback-not-located",
+    "adminAmbiguousIdRejection": "cloud-409-original-value-and-audit-evidence-not-located",
+    "adminInvalidIdRejection": "historical-400-red-exists-post-fix-acceptance-pending",
+    "ordinaryThreeWorkspaceCatalogs": "pending-real-ordinary-login",
+    "catalogReadOnlyCodeFinding": "画布图像入口请求 type=image，节点实际消费父级 type=all，独立聊天分别请求 type=chat 和 type=image；[] 不限仍受功能权限约束，不能简单要求普通用户等于管理员全目录。",
+    "boundary": "静态接线复核不是新增真实浏览器通过项；未重跑本地全量、未修改业务代码或账号。"
+  },
   "resumeBoundary": [
     "ADMIN-004 已关闭，不重做四页统计、构建重启或最后刷新。",
-    "继续普通用户真实登录后的 /api/models 及三个工作区目录证据，不能用管理员或模拟身份代替。",
+    "继续普通用户真实登录后的 /api/models 及三个工作区目录证据，不能用管理员或模拟身份代替；迁移、歧义拒绝和无效拒绝按已批准规格单独补证，不用有效精确键保存代替。",
     "积分分类口径另记 V588-CREDITS-OBS-001，尚未修复，不将其混为用户字段或实际扣费缺陷。",
     "本地 4413 项及云端已取得的门禁不重跑；Pear 后期项继续延期，Stage 4 不重开。"
   ]
