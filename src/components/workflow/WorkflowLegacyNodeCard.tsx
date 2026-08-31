@@ -15,6 +15,7 @@ import {
 
 import type { NodePort, NodeType, WorkflowNode } from '@/lib/workflow-engine';
 import { getModelDisplayName } from '@/lib/model-name-map';
+import { parseExactModelKey, resolvePersistedModelSelection } from '@/lib/model-defaults';
 import {
   getWorkflowRenderNodeCategory,
   WORKFLOW_RENDER_NODE_COLORS,
@@ -29,6 +30,20 @@ export interface WorkflowLegacyModelOption {
   provider: string;
   providerId?: string;
   apiDisplayName?: string;
+}
+
+function resolveInlineModelValue(
+  selection: string,
+  models: WorkflowLegacyModelOption[],
+  providerId?: string,
+): string {
+  const persistedKey = selection && providerId && !parseExactModelKey(selection)
+    ? `${providerId}::${selection}`
+    : selection;
+  return resolvePersistedModelSelection(
+    persistedKey,
+    models.filter(model => model.providerId).map(model => ({ id: model.id, providerId: model.providerId! })),
+  ).compositeKey || '';
 }
 
 export interface WorkflowLegacyCanvasImageRef {
@@ -279,7 +294,8 @@ export const WorkflowLegacyNodeCard = React.memo(function WorkflowLegacyNodeCard
 
   // P0: input-text 节点内嵌功能状态
   const llmEnabled = node.config?.llmEnabled as boolean ?? false;
-  const llmModel = node.config?.llmModel as string ?? '';
+  const llmModel = resolveInlineModelValue(String(node.config?.llmModel || ''), llmModels ?? []);
+  const imageModel = resolveInlineModelValue(String(node.config?.model || ''), imageModels ?? [], node.config?.providerId as string | undefined);
   const llmInstruction = node.config?.llmInstruction as string ?? '';
   const llmSystemEnabled = node.config?.llmSystemEnabled as boolean ?? false;
   const llmSystemPrompt = node.config?.llmSystemPrompt as string ?? '';
@@ -586,14 +602,14 @@ export const WorkflowLegacyNodeCard = React.memo(function WorkflowLegacyNodeCard
                 <div className="mt-1 flex flex-col gap-1 p-1.5 rounded" style={{ background: T.inputBg, border: `1px solid ${T.border}` }}>
                   <select className="w-full text-[9px] rounded px-1 py-0.5 outline-none" style={{ background: T.nodeBody, color: T.text, border: `1px solid ${T.border}` }} value={llmModel} onChange={(e) => { e.stopPropagation(); onNodeFieldChange?.(node.id, 'llmModel', e.target.value); }} onMouseDown={(e) => e.stopPropagation()}>
                     <option value="">选择模型</option>
-                    {(llmModels ?? []).map(m => <option key={m.id} value={m.id} style={{ background: T.optionBg, color: T.optionText }}>{m.apiDisplayName || m.name || getModelDisplayName(m.id)}{m.provider ? ` (${m.provider})` : ''}</option>)}
+                    {(llmModels ?? []).map(m => <option key={`${m.providerId}::${m.id}`} value={`${m.providerId}::${m.id}`} style={{ background: T.optionBg, color: T.optionText }}>{m.apiDisplayName || m.name || getModelDisplayName(m.id)}{m.provider ? ` (${m.provider})` : ''}</option>)}
                   </select>
                   <input type="text" className="w-full text-[9px] rounded px-1 py-0.5 outline-none" style={{ background: T.nodeBody, color: T.text, border: `1px solid ${T.border}` }} placeholder="优化指令 (如: 优化为英文)" value={llmInstruction} onChange={(e) => { e.stopPropagation(); onNodeFieldChange?.(node.id, 'llmInstruction', e.target.value); }} onMouseDown={(e) => e.stopPropagation()} />
                   <div className="flex items-center gap-1">
                     <button className={`text-[8px] cursor-pointer ${llmSystemEnabled ? 'text-primary' : 'text-muted-foreground'}`} onClick={(e) => { e.stopPropagation(); onNodeFieldChange?.(node.id, 'llmSystemEnabled', !llmSystemEnabled); }}>
                       {llmSystemEnabled ? '●' : '○'} 系统提示
                     </button>
-                    <button className="ml-auto px-1.5 py-0.5 rounded text-[9px] font-medium cursor-pointer bg-primary text-white hover:opacity-80 flex items-center gap-0.5 disabled:opacity-50 disabled:cursor-not-allowed" onClick={(e) => { e.stopPropagation(); onLlmOptimize?.(node.id, String(node.config?.textContent || ''), String(node.config?.llmModel || ''), String(node.config?.llmSystemPrompt || ''), String(node.config?.llmInstruction || '')); }} disabled={isRunning || !!node.config?.llmOptimizing} title="运行 LLM 优化">
+                    <button className="ml-auto px-1.5 py-0.5 rounded text-[9px] font-medium cursor-pointer bg-primary text-white hover:opacity-80 flex items-center gap-0.5 disabled:opacity-50 disabled:cursor-not-allowed" onClick={(e) => { e.stopPropagation(); onLlmOptimize?.(node.id, String(node.config?.textContent || ''), llmModel, String(node.config?.llmSystemPrompt || ''), String(node.config?.llmInstruction || '')); }} disabled={isRunning || !!node.config?.llmOptimizing || !llmModel} title="运行 LLM 优化">
                       {node.config?.llmOptimizing ? <Loader2 size={9} className="animate-spin" /> : <Sparkles size={9} />} {node.config?.llmOptimizing ? '优化中...' : '优化'}
                     </button>
                   </div>
@@ -722,9 +738,9 @@ export const WorkflowLegacyNodeCard = React.memo(function WorkflowLegacyNodeCard
               {/* 模型选择 */}
               {node.type === 'ai-generate' && (
                 <div style={{ marginBottom: 6 }}>
-                  <select className="node-select" value={String(node.config?.model || '')} onChange={(e) => { e.stopPropagation(); onNodeFieldChange?.(node.id, 'model', e.target.value); }} onMouseDown={(e) => e.stopPropagation()}>
+                  <select className="node-select" value={imageModel} onChange={(e) => { e.stopPropagation(); onNodeFieldChange?.(node.id, 'model', e.target.value); }} onMouseDown={(e) => e.stopPropagation()}>
                     <option value="">选择模型</option>
-                    {(imageModels ?? []).map(m => <option key={m.id} value={m.id} style={{ background: '#2a2a2a', color: '#e0e0e0' }}>{m.apiDisplayName || m.name || m.id}{m.provider ? ` (${m.provider})` : ''}</option>)}
+                    {(imageModels ?? []).map(m => <option key={`${m.providerId}::${m.id}`} value={`${m.providerId}::${m.id}`} style={{ background: '#2a2a2a', color: '#e0e0e0' }}>{m.apiDisplayName || m.name || m.id}{m.provider ? ` (${m.provider})` : ''}</option>)}
                   </select>
                 </div>
               )}

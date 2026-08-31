@@ -32,6 +32,7 @@ import { WorkflowLegacySurface, type WorkflowLegacyCardCallbacks } from '@/compo
 import { WorkflowReactFlowSurface } from '@/components/workflow/WorkflowReactFlowSurface';
 import { WorkflowShadowProbe } from '@/components/workflow/WorkflowShadowProbe';
 import { getModelDisplayName } from '@/lib/model-name-map';
+import { parseExactModelKey, resolvePersistedModelSelection } from '@/lib/model-defaults';
 import { computePortPosition } from '@/lib/node-port-position';
 import {
   createTaskModelCatalogIndex,
@@ -1946,6 +1947,8 @@ ${contextInfo}
     if (!currentText.trim()) return; // 空文本不优化
     handleNodeUpdate(nodeId, { config: { ...node.config, llmOptimizing: true } });
     try {
+      const exactModel = parseExactModelKey(model || String(node.config?.llmModel || ''));
+      if (!exactModel) throw new Error('请重新选择提示词优化模型及供应商');
       const res = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1954,7 +1957,8 @@ ${contextInfo}
             { role: 'system', content: systemPrompt || instruction || '你是一个专业的AI图像提示词优化助手。请优化用户提供的提示词，使其更加详细、精确，适合AI图像生成。请用中文输出优化后的提示词，不要添加任何解释。' },
             { role: 'user', content: currentText },
           ],
-          model: model || node.config?.llmModel || '',
+          model: exactModel.modelId,
+          providerId: exactModel.providerId,
           stream: false, // 非流式请求，直接获取JSON结果
         }),
       });
@@ -1975,6 +1979,27 @@ ${contextInfo}
     startNodeId?: string;
     tailNodeId?: string;
   }) => {
+    const executionNodes: WorkflowNode[] = [];
+    for (const node of payload.nodes) {
+      if (node.type !== 'ai-generate') {
+        executionNodes.push(node);
+        continue;
+      }
+      const model = String(node.config?.model || '');
+      const providerId = String(node.config?.providerId || '');
+      const persistedKey = model && providerId && !parseExactModelKey(model) ? `${providerId}::${model}` : model;
+      const selection = resolvePersistedModelSelection(
+        persistedKey,
+        imageModels.filter(item => item.providerId).map(item => ({ id: item.id, providerId: item.providerId! })),
+      );
+      if (!selection.compositeKey) {
+        setExecStatus('failed');
+        setExecLogs([{ time: Date.now(), nodeId: node.id, label: node.label, status: 'error', message: '请重新选择明确的图像模型及供应商' }]);
+        setShowExecLog(true);
+        return;
+      }
+      executionNodes.push({ ...node, config: { ...node.config, model: selection.compositeKey, providerId: selection.providerId } });
+    }
     setExecStatus('running');
     setExecutionId(null);
     setExecResults({});
@@ -1983,7 +2008,7 @@ ${contextInfo}
       const res = await fetch('/api/workflow/execute', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'start', projectId, ...payload }),
+        body: JSON.stringify({ action: 'start', projectId, ...payload, nodes: executionNodes }),
       });
       const data = await res.json();
       if (!res.ok || !data.executionId) {
@@ -2000,7 +2025,7 @@ ${contextInfo}
     } catch {
       setExecStatus('failed');
     }
-  }, [projectId]);
+  }, [projectId, imageModels]);
 
   // P0: 级联一键运行 — 找到当前节点的整条链，从上游到下游依次执行
   const handleCascadeRun = useCallback(async (startNodeId: string) => {
@@ -4135,16 +4160,15 @@ function PropertyPanel({ node, models, modelCatalogIndex, modelsLoading, onUpdat
         const modelFilterType = field.modelFilter || 'image'; // 默认只显示图像模型
         // 支持复合键 providerId::modelId 和纯 modelId
         const currentModelId = String(externalValue || '');
-        const currentCompositeValue = (() => {
-          if (!currentModelId) return '';
-          if (currentModelId.includes('::')) return currentModelId;
-          // 如果config中有providerId，用复合键匹配
-          const cfgProviderId = node.config?.providerId as string | undefined;
-          if (cfgProviderId) return `${cfgProviderId}::${currentModelId}`;
-          // 否则只用modelId匹配
-          const match = models.find(m => m.id === currentModelId && m.type === modelFilterType);
-          return match && match.providerId ? `${match.providerId}::${match.id}` : currentModelId;
-        })();
+        const cfgProviderId = node.config?.providerId as string | undefined;
+        const persistedKey = currentModelId && cfgProviderId && !parseExactModelKey(currentModelId)
+          ? `${cfgProviderId}::${currentModelId}`
+          : currentModelId;
+        const currentCompositeValue = resolvePersistedModelSelection(
+          persistedKey,
+          models.filter(m => m.type === modelFilterType && m.providerId)
+            .map(m => ({ id: m.id, providerId: m.providerId! })),
+        ).compositeKey || '';
         return (
           <select
             value={currentCompositeValue}
