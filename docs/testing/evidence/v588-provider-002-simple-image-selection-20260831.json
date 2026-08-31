@@ -1,0 +1,179 @@
+{
+  "检查日期": "2026-08-31",
+  "事项": "V588-PROVIDER-002：节点云端闭环与独立聊天BUG-006",
+  "当前结论": "节点菜单缺陷云端通过；独立聊天BUG-006最小补丁本地门禁通过，云端复验未完成",
+  "云端基线": {
+    "main": "88e77ed686cadbce9e32be19841b31c4b1252d06",
+    "tree": "48c3a1683be68d279e0c83110c5bdce2f55c1c91",
+    "srcTree": "e6055e9dd3d45aadfbb8f4e6393518d77fec2da4",
+    "buildId": "BVKiKpGenK8DxHL6o_4cP",
+    "pid": 4427,
+    "项目": "https://code.coze.cn/p/7671964106919837702",
+    "预览": "https://62afe49a-716e-4d9e-99cd-a0be49c4794c-5000.dev.coze.site/",
+    "浏览器": "Google Chrome现有标签",
+    "身份": "真实普通用户，role=user/status=active；无令牌注入",
+    "stable": "52f7c601ed150769e15d06fb435c6e360e28c9e7",
+    "Coze报告": {
+      "专项通过": 17,
+      "保护功能": 38,
+      "构建静态页面": 118,
+      "静态资源200": 11
+    }
+  },
+  "真实验收": {
+    "网络请求ID说明": "浏览器Network requestId，不是服务端requestId",
+    "sessionRequest": "22420.492",
+    "catalogRequest": "22420.487",
+    "workflowSaveRequest": "22420.562",
+    "目录": {
+      "全部精确键": 57,
+      "与预期缺失": 0,
+      "与预期多出": 0
+    },
+    "节点": {
+      "结论": "通过菜单选择与保存刷新范围，关闭BUG-005",
+      "图像菜单数": 2,
+      "每菜单精确项": 23,
+      "LLM菜单项": 4,
+      "行为": [
+        "卡片选择Pear，属性面板同步",
+        "卡片选择APImart，属性面板同步",
+        "属性选择Pear，卡片同步",
+        "LLM选择Deepseek精确provider/model",
+        "保存success=true，刷新后4节点1连线与模型选择保持"
+      ],
+      "刷新时间": "2026-08-31T05:10:50.756Z",
+      "未做": "未点击RUN或优化，未验证付费工作流执行"
+    },
+    "独立聊天": {
+      "聊天菜单项": 4,
+      "图像菜单项": 23,
+      "聊天选择": "Gemini2.5Pro，刷新保持",
+      "图像选择": [
+        {
+          "刷新时间": "2026-08-31T05:13:35.437Z",
+          "刷新前": "APImart / gpt-image-2",
+          "刷新后": "AILINK / gpt-image-2"
+        },
+        {
+          "刷新时间": "2026-08-31T05:14:26.790Z",
+          "刷新前": "Pear / gpt-image-2",
+          "刷新后": "AILINK / gpt-image-2"
+        }
+      ],
+      "结论": "BUG-006稳定复现；不是供应商任务失败"
+    },
+    "账务": "未提交真实供应商任务，未扣费或退款",
+    "限制": [
+      "初始网络事件批次被截断，不能宣称全程零错误",
+      "没有录像或完整Trace",
+      "两次刷新后的截图字节一致，不重复计唯一图像证据",
+      "同secret独立重启仍待补证",
+      "Coze报告的未登录user:null不作为登录成功证据"
+    ]
+  },
+  "本地修复": {
+    "生产文件": [
+      "src/components/simple-chat/chat-area.tsx"
+    ],
+    "内容": [
+      "当前task成对图像模型字段作为持久化选择来源",
+      "仅未配置任务采用目录默认项",
+      "显式选择单独保存，不触发通用消息回写",
+      "临时选择绑定taskId，仅在内存中，不持久化"
+    ],
+    "新增行为测试": 7,
+    "专项": {
+      "文件": 4,
+      "通过": 54,
+      "失败": 0,
+      "跳过": 0
+    },
+    "审查": "gpt-5.6-sol/medium/priority只读复审，两个Important经RED测试修复后，无保留Critical/Important；审查智能体已关闭",
+    "完整门禁": {
+      "源码提交": "6f653d3bf574c9586a9c1b4dd139e912817c3810",
+      "源码交付": "已推送GitHub main并复读匹配；stable仍为52f7c601，未修改",
+      "srcTree": "36cd4c05b00de577eb2a61a7996802e7ff683368",
+      "全量文件": 607,
+      "全量通过": 4438,
+      "全量失败": 0,
+      "全量跳过": 0,
+      "直接Vitest进程退出码": 0,
+      "类型检查": "通过；最终生产构建亦完成TypeScript检查",
+      "lintBuild退出码": 0,
+      "变更文件Lint": "0错误；chat-area既有warning由基线40变为39，两测试文件0warning",
+      "生产构建退出码": 0,
+      "构建静态页面": 118,
+      "buildId": "uqfJ0pErfsr9BNlyeVuFb",
+      "干净候选保护": "38/38，0未批准漂移，0warning；未修改白名单",
+      "隔离PostgreSQL": "18.4，仅本地55441；测试残留schema为0，已正常停止，不接触业务数据库",
+      "云端新候选": "尚未同步；Chrome可枚举原标签，但接管先失联后超时，未发送重复同步指令"
+    },
+    "失败记录": [
+      "首次jsdom缺scrollIntoView，修正夹具后才取得断言RED",
+      "临时聊天测试按钮歧义，精确定位后取得回调次数RED",
+      "pnpm test参数解析失败，未启动测试；改用pnpm exec vitest run执行同一完整测试套件",
+      "原工作区保护扫描包含既有未跟踪证据/参考库，41513项漂移，38个功能ID仍在；保留用户文件与原白名单，改在干净候选检查并通过",
+      "首轮全量JSON为4438通过且success=true，但外层进程退出1，原因未确认；未修改测试或跳过，直接运行同一Vitest全套复验为4438通过且进程退出0，两份结果均保留"
+    ]
+  },
+  "原始证据说明": "原件位于本地.playwright-cli，含用户画面不提交GitHub。以下哈希用于复核。",
+  "原始证据": [
+    {
+      "file": "v588-provider-002-bug006-full-direct-20260831.json",
+      "sha256": "E583F82EF25BF80066890944553B0DF54DE86C9DEB6E6C531F97608D4A6A7C1D"
+    },
+    {
+      "file": "v588-provider-002-bug006-full-final-20260831.json",
+      "sha256": "65AF8AC8ABCC9A1D830B9EEF4013CA71191BB80C2DF926A2B55C521CD3A284D6"
+    },
+    {
+      "file": "v588-provider-002-bug006-build-20260831.log",
+      "sha256": "3B4B130DD4D6B668DEB9DFF50E56A3F7BAB08A7C6BC5B7FED2C7464695A878CF"
+    },
+    {
+      "file": "v588-provider-002-bug006-lint-20260831.json",
+      "sha256": "5E3FA4B326C741B019D59692041BAE6B5DA7A117DF70729D9B1849D76DB1AA5C"
+    },
+    {
+      "file": "v588-provider-002-88e77ed6-cloud-result-20260831.json",
+      "sha256": "2DC5F1360355E0D2084B0E6E34C63985E58F8F99453E0991F8759B2A17188AE7"
+    },
+    {
+      "file": "v588-provider-002-88e77ed6-coze-final-20260831.txt",
+      "sha256": "C3D2C2F21F6289383B0B999A3E7FCEE629A7CC133DB49A81AD953DCFE099FDB2"
+    },
+    {
+      "file": "v588-provider-002-88e77ed6-node-pear-20260831.png",
+      "sha256": "AC378B583FCFA0DB6CADEEC3043B922179A0BECFB12DD623B87F2DDFFB0D047A"
+    },
+    {
+      "file": "v588-provider-002-88e77ed6-node-apimart-20260831.png",
+      "sha256": "5112805E45560BDB1E49CB9FC87D65DE56292025F977AF9729355E68120C5F52"
+    },
+    {
+      "file": "v588-provider-002-88e77ed6-node-restored-20260831.png",
+      "sha256": "A01706F51A3A0622E502DA0D7EDA68D2348C1D580C2AF7EFB04A416B1D9EF030"
+    },
+    {
+      "file": "v588-provider-002-88e77ed6-simple-chat-menu-20260831.png",
+      "sha256": "3D8A687C5CFB7334517320CDEFDFEE907581A541026D60EF256C29D5CA0886C0"
+    },
+    {
+      "file": "v588-provider-002-88e77ed6-simple-pear-before-refresh-20260831.png",
+      "sha256": "8DC6FFA71C060C9AD9F4BFB68AFF2AC1383D2203D3D3149C122E4C4935DBD573"
+    },
+    {
+      "file": "v588-provider-002-88e77ed6-simple-pear-after-refresh-20260831.png",
+      "sha256": "92DD78D2E7631CE4EB5E7A47CA3613CF06797482B99D02CE94D476F9B72FE11A"
+    },
+    {
+      "file": "v588-provider-002-bug006-final-focused-20260831.json",
+      "sha256": "FF31EDE59F613B5F8D3B9C40072269BD379199B52D323817B9A104E5C201B463"
+    },
+    {
+      "file": "v588-provider-002-bug006-review-red-corrected-20260831.json",
+      "sha256": "4E05347E850EDD8A67471C6BC38A2C4EF894AA0C5898B42AB539BC116BC5AA76"
+    }
+  ]
+}
