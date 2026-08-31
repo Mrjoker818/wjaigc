@@ -1,0 +1,321 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-08-31T21:28:23+08:00",
+  "timezone": "Asia/Shanghai",
+  "scope": "PROVIDER-003 品牌结果来源修复云端增量，不是全平台验收",
+  "source": {
+    "targetCommit": "fac43cbfe9256aa1ba6f9e54e765c17b32445dba",
+    "sourceCommit": "9b2e8d5f4f986a1379d1ad623e64dd5247937495",
+    "tree": "4a016b9eb00c7acffa8b74dbd37d7a0f7139abf3",
+    "srcTree": "cdbb004d11b5f710a7a6fb0327bd641dbbd74cd6",
+    "stableUntouched": "52f7c601ed150769e15d06fb435c6e360e28c9e7"
+  },
+  "deployment": {
+    "projectUrl": "https://code.coze.cn/p/7671964106919837702/preview",
+    "previewUrl": "https://62afe49a-716e-4d9e-99cd-a0be49c4794c-5000.dev.coze.site/",
+    "browser": "Google Chrome，仅复用原标签",
+    "cozeReportedHead": "c6b8cabb89f64896992295859d7ad69d348bdd72",
+    "cozeMetadataShortCommit": "fc984a9",
+    "treeAndSrcTreeMatch": true,
+    "buildId": "D12Ets9rxSINh8SeuecwS",
+    "port": 5000,
+    "pid": 3768,
+    "syncCount": 1,
+    "buildCount": 1,
+    "hardRefreshAfterRestart": true,
+    "cozeReportedGates": {
+      "testFiles": 3,
+      "testsPassed": 32,
+      "protectedPassed": 38,
+      "protectedTotal": 38,
+      "buildPages": 118,
+      "exitCodes": 0,
+      "staticAssets200": 11
+    },
+    "cozeReportedStartupWarnings": "13条error级启动记录涉及缺少本地图像/Python依赖；Coze报告为既有环境问题，不能宣称全服务零错误",
+    "notUsedAsLoginProof": "/api/auth/me HTTP200且user=null"
+  },
+  "task": {
+    "requestId": "23152.1486",
+    "taskId": "ecom-1788182668572-7rblj5",
+    "submitCount": 1,
+    "providerId": "api_1778430731224_533e09a",
+    "providerName": "APImart imgae",
+    "model": "gpt-image-2",
+    "templateIds": [
+      "white-bg"
+    ],
+    "variantCount": 2,
+    "uiDurationSeconds": 47,
+    "partialRequestId": "23152.1546",
+    "partialStatus": "processing",
+    "partialProgress": 50,
+    "partialImages": 1,
+    "terminalRequestId": "23152.1560",
+    "terminalStatus": "completed",
+    "terminalProgress": 100,
+    "terminalImages": 2,
+    "imageDimensions": [
+      1254,
+      1254
+    ],
+    "resultNames": [
+      "白底主图 V1",
+      "白底主图 V2"
+    ],
+    "outerLegacyIdentity": "终态包装层modelName/providerName仍为空；本次验证每条结果的固定身份，不以外层字段推断上游"
+  },
+  "checks": [
+    {
+      "item": "普通用户会话",
+      "status": "通过",
+      "evidence": "/api/session 23152.1310，role=user/status=active；未改账号"
+    },
+    {
+      "item": "APImart模型精确提交",
+      "status": "通过",
+      "evidence": "23152.1486携带正确model/providerId，仅一次POST"
+    },
+    {
+      "item": "逐张真实显示",
+      "status": "通过",
+      "evidence": "第二变体生成中第一图已显示；23152.1546 processing/50%"
+    },
+    {
+      "item": "两张结果终态与按钮恢复",
+      "status": "通过",
+      "evidence": "23152.1560 completed/100%；UI47秒，两图且按钮恢复"
+    },
+    {
+      "item": "运行中禁用重试",
+      "status": "通过",
+      "evidence": "brand-generating.png和原UI观察；未重复提交"
+    },
+    {
+      "item": "改选菜单不污染既有结果",
+      "status": "通过",
+      "evidence": "完成后改Pear同名模型再入画布，两新图仍APImart；未提交Pear任务，随后恢复APImart选择"
+    },
+    {
+      "item": "真实服务端保存",
+      "status": "通过",
+      "evidence": "projects GET 23152.1691，原3图加新2图；两新记录apiProvider为APImart"
+    },
+    {
+      "item": "原预览强刷恢复",
+      "status": "通过",
+      "evidence": "5图均可加载，新2图身份保持，naturalWidth/Height均为正"
+    },
+    {
+      "item": "单次消费观察",
+      "status": "通过",
+      "evidence": "credits GET 23152.1839；新增一条-60，余额4940→4880；不是并发或退款验证"
+    }
+  ],
+  "billing": {
+    "newTransactionId": "ctx_1788182668538_dylfks17",
+    "amount": -60,
+    "balanceBefore": 4940,
+    "balanceAfter": 4880,
+    "totalTransactions": 3,
+    "totalConsumed": 120,
+    "totalGained": 5000,
+    "topupsPerformed": 0,
+    "refundsPerformed": 0,
+    "limitations": "流水无taskId字段，按本轮唯一提交、时间和余额关联；未读取供应商账单或执行数据库taskId联查，不证明幂等并发/退款",
+    "existingObservation": "V588-CREDITS-OBS-002：时间为毫秒数字字符串，UI仍NaN/NaN NaN:NaN；不新增重复Bug"
+  },
+  "defects": {
+    "V588-PROVIDER-003-BUG-004": "新结果来源、改选、入画布、保存和强刷已云端通过并关闭；历史缺失身份图不回填",
+    "V588-PROVIDER-003-BUG-002": "本地修复通过，新版云端失败重试负向场景未验证",
+    "V588-PROVIDER-003-BUG-003": "本地修复通过，新版云端完整错误提示负向场景未验证"
+  },
+  "observability": {
+    "fromCursor": 1879,
+    "toCursor": 3751,
+    "batches": 6,
+    "batchesTruncated": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ],
+    "filteredEvents": 586,
+    "httpErrorResponses": 0,
+    "consoleErrorsAndWarnings": 0,
+    "runtimeExceptionEvents": 0,
+    "nativeDialogEvents": 0,
+    "networkLoadingFailures": 3,
+    "failedRequestIds": [
+      "23152.1740",
+      "23152.1741",
+      "23152.1742"
+    ],
+    "failedResources": "lf-cdn.coze.cn：page-editor-general-web、console-bridge、history-bridge；原errorText为空，不自行归因为CSP",
+    "initialLoadCaptureTruncated": true,
+    "scope": "零错误仅指已采集业务窗口，不含完整首次加载和所有服务日志"
+  },
+  "limitations": [
+    "未生成完整录像或Trace",
+    "第一次入画布点击在派发前工具超时；确认仍3图后才执行一次有效点击，未形成重复入图",
+    "Coze隐藏的生成中占位元素visible=false，不视为未完成任务",
+    "历史两张AILINK误标图仍保留，不声称旧数据已迁移",
+    "不证明真实上游账单、并发幂等、失败补偿或取消退款",
+    "Pear品牌、精修/字境等PROVIDER-003剩余项仍待验；Pear分层延期，不提前批次B"
+  ],
+  "conclusion": {
+    "increment": "通过：BUG-004限定范围",
+    "provider003": "不通过：仍有未验证项",
+    "platform": "不通过：本记录不提供全平台发布批准"
+  },
+  "rawArtifactDirectory": ".playwright-cli/brand-fac43cbf-cloud-20260831/",
+  "artifactHandling": "24份原件仅本地，公开记录仅汇总及哈希；无凭据、密码请求体或图片内容入库",
+  "artifacts": [
+    {
+      "file": "brand-added-to-canvas.png",
+      "bytes": 143768,
+      "modified": "2026-08-31T21:25:58.8808241+08:00",
+      "sha256": "4ab13f39c73b701ee6654d5273bd55a2aaa6aae44e7c48a2a88cc2c3b32a2109"
+    },
+    {
+      "file": "brand-before-submit.png",
+      "bytes": 164221,
+      "modified": "2026-08-31T21:22:32.1840151+08:00",
+      "sha256": "770b91d6c2b768bdc419c4e60bd8469ad3ab9e742425f09926214b87ac1a2e43"
+    },
+    {
+      "file": "brand-completed.png",
+      "bytes": 146338,
+      "modified": "2026-08-31T21:25:29.4057088+08:00",
+      "sha256": "076d2c53c60c8405be651722e92b73b88c2f63c3a86935814e7fbd636d717f16"
+    },
+    {
+      "file": "brand-console.json",
+      "bytes": 2,
+      "modified": "2026-08-31T21:28:23.2242037+08:00",
+      "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    {
+      "file": "brand-first-image.png",
+      "bytes": 136712,
+      "modified": "2026-08-31T21:25:04.0411334+08:00",
+      "sha256": "2814dfe2194d14211e1dc5ebca347e2450cb99d18ead3208f72563d91151aada"
+    },
+    {
+      "file": "brand-generating.png",
+      "bytes": 217918,
+      "modified": "2026-08-31T21:24:51.0969281+08:00",
+      "sha256": "839b7de18824c83a2dc15fe4058e7163d958daf97d59c0b7ba5c3ca79193f347"
+    },
+    {
+      "file": "brand-menu-changed-pear.png",
+      "bytes": 153302,
+      "modified": "2026-08-31T21:25:36.7102699+08:00",
+      "sha256": "4836e0ad1198c741cd20a339098c64d1b0bcc75a4bc0daf5b749059bb68c3255"
+    },
+    {
+      "file": "brand-network.json",
+      "bytes": 141893,
+      "modified": "2026-08-31T21:28:23.2242037+08:00",
+      "sha256": "b99ca826fc405f4c87e4cdf03a97fd97c42e2bd3b91c77c2bc0b1b2c8f15f88f"
+    },
+    {
+      "file": "brand-partial-result.json",
+      "bytes": 560,
+      "modified": "2026-08-31T21:25:04.2079473+08:00",
+      "sha256": "8ffca48f76de96a046db4e98787e3f5d7b375d1edcf96f270e697f3413672208"
+    },
+    {
+      "file": "brand-poll-1522.json",
+      "bytes": 116,
+      "modified": "2026-08-31T21:24:56.5925449+08:00",
+      "sha256": "b10e11dc59847eac33c4f68019180d8a5c8299f9754afa942c9645f2ba4acb7a"
+    },
+    {
+      "file": "brand-submit.json",
+      "bytes": 349,
+      "modified": "2026-08-31T21:24:47.6255909+08:00",
+      "sha256": "6b643b1396c70a13142ce8768d028b448b26e4dc08315c93b9dd6594ed4805fc"
+    },
+    {
+      "file": "brand-terminal.json",
+      "bytes": 966,
+      "modified": "2026-08-31T21:25:19.8624370+08:00",
+      "sha256": "4350f35aa4a6d0f58a9f4e60bb049f6098e6b696d3ae8a74229853101b28a2f0"
+    },
+    {
+      "file": "canvas-restored-dom.txt",
+      "bytes": 3950,
+      "modified": "2026-08-31T21:27:09.5481387+08:00",
+      "sha256": "4695fd3665a5d0723882f514ca81e50a0b588748eb4093c808aaa3259b943846"
+    },
+    {
+      "file": "canvas-restored-images.json",
+      "bytes": 1008,
+      "modified": "2026-08-31T21:27:09.5491389+08:00",
+      "sha256": "02ff4070c8cb7c712495349bc76a0d3fcfccfd3a34e6e2a4263820f2284c6c53"
+    },
+    {
+      "file": "canvas-restored.png",
+      "bytes": 133867,
+      "modified": "2026-08-31T21:27:09.7879882+08:00",
+      "sha256": "0306430d40b5e490284e5569fa22f83965e37d8526baf3b8f9c792e80db57f33"
+    },
+    {
+      "file": "coze-final-dom.txt",
+      "bytes": 13967,
+      "modified": "2026-08-31T21:24:04.5472616+08:00",
+      "sha256": "c751565f7d49c5f9b21ee2aef5a620ec141310dc987f64013387a11b80a8d607"
+    },
+    {
+      "file": "coze-final.png",
+      "bytes": 192404,
+      "modified": "2026-08-31T21:24:04.6811135+08:00",
+      "sha256": "02f04bc8da8b2447e791ec3e73ee7a0b2ea96068256c9f4d6f6ab0dbd35dc4bd"
+    },
+    {
+      "file": "coze-sync-sent-dom.txt",
+      "bytes": 9505,
+      "modified": "2026-08-31T21:16:58.4566836+08:00",
+      "sha256": "9290c158846cbb8f6531cf9ef08f1c1e4f89b519dc03c7d4a6e89609db4092b7"
+    },
+    {
+      "file": "coze-sync-sent.png",
+      "bytes": 169532,
+      "modified": "2026-08-31T21:17:00.0094142+08:00",
+      "sha256": "b4933cf03fced1655f57f72516f6f68b326533b14847e3dcb66e641328d10a02"
+    },
+    {
+      "file": "credits-dom.txt",
+      "bytes": 1425,
+      "modified": "2026-08-31T21:28:23.6216891+08:00",
+      "sha256": "f9e444aadd40e1046b337a17d99a45ba64a001724964aa76427799c656baf335"
+    },
+    {
+      "file": "credits.json",
+      "bytes": 655,
+      "modified": "2026-08-31T21:28:23.2252015+08:00",
+      "sha256": "7522bb8e46e9bc80380442895fdc5c5c684fe6c7a296ed4ca492019286264046"
+    },
+    {
+      "file": "credits.png",
+      "bytes": 53454,
+      "modified": "2026-08-31T21:28:23.5755482+08:00",
+      "sha256": "6fd5bbf69a2d12fab4975b35177bbda6c4f3d72c023836b1d44a6903f26fc019"
+    },
+    {
+      "file": "preview-hard-refresh.png",
+      "bytes": 153908,
+      "modified": "2026-08-31T21:21:34.6669634+08:00",
+      "sha256": "0f0220e017b510136fc72e0ce7125f534ba21a55f94c7e9ebd706e9a7d4de369"
+    },
+    {
+      "file": "server-project-images.json",
+      "bytes": 1239,
+      "modified": "2026-08-31T21:27:01.7310248+08:00",
+      "sha256": "f27336363e0dd5da30547f296a0f57c00676758510b1c7b9ff2306b6c464f75e"
+    }
+  ]
+}

@@ -24,15 +24,20 @@
 
 | 字段 | 内容 |
 |---|---|
-| 状态/级别 | P2，源码9b2e8d5f本地修复、专项与4470项全量零跳过通过，云端待验；不以标签错误直接判定上游调用错误 |
+| 状态/级别 | P2，源码9b2e8d5f本地修复并于2026-08-31 21:28完成云端新结果来源验收，已关闭；不以标签错误直接判定上游调用错误 |
 | 环境 | 2026-08-31，Google Chrome原62afe49a预览，已同步候选98b6505d；本轮未独立复读部署SHA |
 | 前置/步骤 | 普通测试用户选择APImart imgae的gpt-image-2，单白底模板2变体；提交一次，等待完成，全部添加画布，再强刷 |
 | 预期/实际 | 结果应携带并显示真实供应商；实际两张1254×1254图片均标AILINK，项目持久化记录缺少apiProvider |
 | 网络证据 | 提交23152.614携带正确providerId；taskId ecom-1788178465802-0cblix；23152.704终态completed/两张结果，modelName/providerName为空；23152.907服务端复读3张图片 |
 | 根因 | brand-ecommerce-panel.tsx:500只从复合selectedModel取供应商，未使用独立selectedImageProviderId；infinite-canvas.tsx:12515在身份缺失时按同名模型映射猜测。前者blame为dc5983d9旧基线 |
 | 批准修复 | 服务端每张结果携带实际provider/model；前端按固定结果来源分组入画布，后续改选不污染旧图，旧无来源不猜测。不修改认证、权限或账务 |
-| 永久回归与缺口 | brand-ecommerce-result-identity.test.ts与brand-ecommerce-lifecycle.test.tsx覆盖同步/异步、部分/最终结果、混合来源和旧数据；云端新候选及实际上游日志仍待验 |
+| 永久回归与缺口 | brand-ecommerce-result-identity.test.ts与brand-ecommerce-lifecycle.test.tsx覆盖同步/异步、部分/最终结果、混合来源和旧数据；新候选逐结果来源、改选菜单后入图及保存强刷已云端通过，实际上游日志/历史数据回填不在关闭证据内 |
 | 原件/索引 | evidence/v588-provider-003-funded-apimart-20260831.json，17份本地原件哈希；无完整录像/Trace |
+| 修复验收环境 | fac43cbf含源码9b2e8d5f；Coze合并c6b8cabb，src tree cdbb004d11b5f710a7a6fb0327bd641dbbd74cd6；Build ID D12Ets9rxSINh8SeuecwS；Google Chrome原预览，普通用户 |
+| 云端回归结果 | 新任务ecom-1788182668572-7rblj5仅一次提交，47秒两图；每结果APImart身份正确。完成后改Pear再入图，新2图仍APImart；服务端5图保存与强刷恢复通过。旧缺失来源图不补造身份 |
+| 新证据与限制 | evidence/v588-provider-003-brand-cloud-20260831.json，24份原件哈希；586条采集事件，3条平台脚本加载失败保留，无完整录像/Trace。单次-60/余额4880不证明并发与退款 |
+
+**当前范围：** 仅关闭BUG-004。BUG-002/003新版失败重试与完整错误提示负向场景仍待云端验证，不以本次正向完成代替。以下原98b6505d失败记录及20:10前置状态为历史。
 
 同次正向链路已验证：两张逐次返回、一次加入画布、服务端保存/强刷恢复，余额5,000→4,940且只有一条-60消费。只关闭这些具体验收断言，不关闭整个PROVIDER-003或并发/退款边界。
 

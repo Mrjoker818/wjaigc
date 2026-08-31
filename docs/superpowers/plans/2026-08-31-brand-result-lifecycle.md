@@ -62,8 +62,12 @@ expect(partial.results[0]).toMatchObject(result.results[0]);
 - [x] pnpm ts-check、pnpm lint:build、全仓Vitest（隔离PostgreSQL且零跳过）、pnpm build与保护38项通过；失败原件保留，不调低门禁。
 - [x] 检查git diff与认证/账务/模板/全局画布零变更，独立源码复审完成，源码提交9b2e8d5f只含批准文件。
 - [x] 更新BUG_REGISTER/回归/发布/未验证/吸收清单与Obsidian，区分本地修复和云端待验。
-- [ ] push origin main后复读远端SHA并确认stable不变；实际推送回执记录于Obsidian当前检查点。
-- [ ] Chrome恢复后只在原Coze项目同步新源码一次、重启强刷原预览，验证真实结果/元数据/重试和账务；未取到证据不标通过。
+- [x] push origin main后复读fac43cbf及stable不变；源码9b2e8d5f已包含，实际回执记录于Obsidian。
+- [x] 原Coze同步一次并完成构建/单服务重启；合并c6b8cabb的tree/src tree匹配，Build ID D12Ets9rxSINh8SeuecwS，随后强刷原Chrome预览。
+- [x] APImart真实单次任务ecom-1788182668572-7rblj5完成两图；部分/最终身份、改选Pear不污染、入画布/服务端保存/强刷恢复通过，BUG-004关闭。新增一笔-60，余额4880；不扩展为并发/退款通过。
+- [ ] 新版云端失败重试收尾/真实模板ID与完整错误提示负向验收（BUG-002/003）；本次正向任务不替代，未人为变更权限/余额或重复消耗强造失败。
+
+云端证据索引：docs/testing/evidence/v588-provider-003-brand-cloud-20260831.json。24份原件仅本地；未生成完整录像/Trace，3条Coze注入脚本加载失败与积分日期NaN保留。没有重跑本地门禁或改业务源码。
 
 ## 计划自查
 

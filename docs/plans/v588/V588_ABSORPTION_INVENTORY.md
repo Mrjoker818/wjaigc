@@ -2,7 +2,7 @@
 
 ## 当前检查点：2026-08-31
 
-**当前覆盖：** 品牌BUG-002/003/004本地修复源码9b2e8d5f，四个生产文件；3处审查回归均RED后修正。专项60/60、全量610文件4470/4470零跳过、类型/Lint/保护38/构建118及复审完成，测试库已清理停止。本候选Coze同步尚未发送、云端待验，PROVIDER-003未整体完成；不重开Stage4/PROVIDER-002，不测试延期Pear分层，stable/donor只读。唯一断点：`docs/testing/V588_PROVIDER_003_ACCEPTANCE.md`；历史失败与完整哈希见同目录evidence/v588-provider-003-brand-lifecycle-20260831.json。下方待批准/无源码变化为历史。
+**当前覆盖（21:28）：** fac43cbf含源码9b2e8d5f已在正确Coze同步并重启，合并c6b8cabb的tree/src tree匹配；Build ID D12Ets9rxSINh8SeuecwS。Google Chrome原预览强刷后，APImart一次真实品牌任务47秒两图、逐张回显、改选Pear后来源不变、服务端5图保存与再次强刷恢复通过，BUG-004关闭；单次-60、余额4880已核实。BUG-002/003新版负向场景与PROVIDER-003其余入口仍待验，不关闭整项、不提前批次B。既有60专项/4470全量/构建门禁不重跑，Stage4/PROVIDER-002不重开、Pear分层延期、stable/donor只读。唯一断点`docs/testing/V588_PROVIDER_003_ACCEPTANCE.md`；24份云端原件哈希见同目录evidence/v588-provider-003-brand-cloud-20260831.json。3条平台资源失败、积分日期NaN与录像/Trace缺失均保留。下方未同步/待批准为历史，不重复操作。
 
 **20:20当前：** 测试密码已直接交付且普通用户已登录，不再等待凭据。APImart品牌单次真实任务ecom-1788178465802-0cblix在54秒完成两张1254×1254图片，第一张先行显示；入画布、服务端3张保存、强刷恢复及一次60积分扣费已验证。新增BUG-004：缺失结果供应商身份导致两张误标AILINK，刷新仍错；未据此判定实际上游调用错误。Pear结果、品牌BUG-002/003/004、精修/字境仍未闭环。证据：`docs/testing/evidence/v588-provider-003-funded-apimart-20260831.json`。源码未改，main候选98b6505d、stable/donor不动，不重做已过阶段/门禁/部署。下方登录等待和余额0均为历史。
 
@@ -72,7 +72,7 @@ These are the only authorized first absorption targets. Every row remains unimpl
 | V588-ADMIN-003 | 缩略图回填与幂等 worker | 复用当前资产恢复/健康子系统，不导入 donor 第二套媒体真相 | **回填、影子对账、历史媒体软归档已云端验证；缩略图投影仍有条件。** 2026-08-22 的四个不可恢复版本已软归档、原行保留，旧缺失阻塞不能再次作为归档任务执行 | 只保留缩略图交付/刷新、原图回退和 S3 恢复独立证据；不重做归档、不重开已归档 Stage 4，不擅自切换运行模式 | 高 |
 | V588-PROVIDER-001 | New display mappings such as Nano Banana Lite, GPT Image 2 2K/4K, FLUX 2 Klein, Grok Imagine video/image, HappyHorse, Gemini Omni and Seedance/Seedream variants | Current map already contains several newer Pear/Seedance entries; blind copy would duplicate or reorder wildcard matches | **已吸收 / Coze 云端验证通过。** 仅补齐缺失精确模式，统一采用最长匹配，继续保持管理员/供应商显示名优先 | 表驱动 RED/GREEN、通配碰撞、管理员显示名优先、全量回归、Coze exact SHA 与普通用户图像/视频目录证据 | Low |
 | V588-PROVIDER-002 | Explicit `providerId::modelId` catalog and ambiguous legacy-ID rejection | 保留当前task-core目录、精确键授权迁移与管理员配置快照，未导入donor第二套状态 | **已吸收 / 云端专项通过。** 管理员拒绝/迁移/反馈、普通用户三个工作区精确目录与保存刷新均已闭环；10bcc899关闭BUG-006，临时选择不持久化，未改配置重启保持会话与模型 | 原RED与本地4438/4438门禁保留，9项Chrome云端检查及16份原件哈希已记录；无供应商任务/扣费，不代表完整全平台E2E或真实secret轮换 | 高 |
-| V588-PROVIDER-003 | 非路由导出拆至 `result-store.ts` / `constants.ts` | `6a9efa5e`、`c4b49293` 已进入 main；`1fe54ffc` 的 AST 合同扫描当前 193 个 route.ts，字境结果继续使用当前 `lib/font-design-task-store.ts` | **拆分不重复搬运。** 品牌BUG-001本地4446/4446等门禁完成，98b6505d已同步构建；Chrome真实Pear/APImart精确POST及APImart强刷字段已验 | 5次新请求402无taskId，正向结果/保存/账务阻塞；重试2/2失败升格BUG-002，截断提示BUG-003未修复。旧提交仍未知，精修/字境、LLM配对、资源500及原始RED关联缺口保留；不宣称完整吸收 | 低 |
+| V588-PROVIDER-003 | 非路由导出拆至 `result-store.ts` / `constants.ts` | `6a9efa5e`、`c4b49293` 已进入 main；`1fe54ffc` AST扫描193路由；字境沿用当前任务存储。品牌源码9b2e8d5f随fac43cbf同步 | **拆分不重复搬运。** 本地4470/4470门禁完成；云端APImart两图逐次显示、改选后来源不变、保存强刷与单次-60已验，BUG-004关闭 | BUG-002/003本地修复，新版失败重试与错误全文云端待验；Pear品牌、精修/字境、LLM配对、上游账单/并发退款、资源500与录像/Trace缺口保留；不宣称完整吸收 | 低 |
 | V588-PROVIDER-004 | Unified generation tool metadata and document-tool execution | Donor executor uses localhost fetches, an internal user header, process-memory source edges and a separate poll lifecycle; current task/asset/accounting runtime is authoritative | **DO NOT ABSORB THE EXECUTOR.** Consider only declarative tool metadata after a current-runtime adapter design | Security/identity, idempotency, cancellation, task ownership, billing and asset projection contracts | Critical |
 
 ### 2026-08-23 月度归档补充审计
