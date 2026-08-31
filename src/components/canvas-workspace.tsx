@@ -5962,6 +5962,18 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
           onLoggedOut();
         }}
       />
+      <Toaster
+        position="top-center"
+        toastOptions={{
+          className: themeStyle === 'monochrome'
+            ? 'bg-white border border-gray-200 text-gray-900 shadow-lg shadow-gray-200/50'
+            : 'bg-[#1a1a1a] border border-[#2a2a2a] text-white shadow-lg shadow-black/30',
+          style: {
+            borderRadius: '12px',
+            fontSize: '13px',
+          },
+        }}
+      />
     </>
     );
   }

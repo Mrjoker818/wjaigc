@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import ts from 'typescript';
 import * as dashboardModule from '@/components/dashboard/dashboard-view';
 import type { ApiProvider } from '@/lib/universal-api-types';
 
@@ -56,6 +57,50 @@ function provider(
 }
 
 describe('dashboard model authorization contract', () => {
+  it('mounts the existing themed toast host in the dashboard return branch', () => {
+    const workspaceSource = ts.createSourceFile(
+      'canvas-workspace.tsx',
+      readFileSync(resolve(process.cwd(), 'src/components/canvas-workspace.tsx'), 'utf8'),
+      ts.ScriptTarget.Latest,
+      true,
+      ts.ScriptKind.TSX,
+    );
+    const workspace = workspaceSource.statements.find(
+      (node): node is ts.FunctionDeclaration => ts.isFunctionDeclaration(node)
+        && node.name?.text === 'CanvasWorkspace',
+    );
+    const dashboardBranch = workspace?.body?.statements.find(
+      (node): node is ts.IfStatement => ts.isIfStatement(node)
+        && ts.isBinaryExpression(node.expression)
+        && ts.isIdentifier(node.expression.left)
+        && node.expression.left.text === 'appMode'
+        && ts.isStringLiteral(node.expression.right)
+        && node.expression.right.text === 'dashboard',
+    );
+    const canvasReturn = workspace?.body?.statements.find(ts.isReturnStatement);
+    const collectToastHosts = (node: ts.Node | undefined): ts.JsxSelfClosingElement[] => {
+      const hosts: ts.JsxSelfClosingElement[] = [];
+      const visit = (child: ts.Node): void => {
+        if (ts.isJsxSelfClosingElement(child)
+          && ts.isIdentifier(child.tagName) && child.tagName.text === 'Toaster') {
+          hosts.push(child);
+        }
+        ts.forEachChild(child, visit);
+      };
+      if (node) visit(node);
+      return hosts;
+    };
+    const dashboardHosts = collectToastHosts(dashboardBranch?.thenStatement);
+    const canvasHosts = collectToastHosts(canvasReturn);
+
+    expect(dashboardBranch).toBeDefined();
+    expect(canvasHosts).toHaveLength(1);
+    expect(dashboardHosts).toHaveLength(1);
+    const printer = ts.createPrinter({ newLine: ts.NewLineKind.LineFeed });
+    expect(printer.printNode(ts.EmitHint.Unspecified, dashboardHosts[0].attributes, workspaceSource))
+      .toBe(printer.printNode(ts.EmitHint.Unspecified, canvasHosts[0].attributes, workspaceSource));
+  });
+
   it('does not silently refresh after a failed model-authorization save', () => {
     const callbackStart = dashboardSource.indexOf('onUpdateUserModels={async');
     const callbackEnd = dashboardSource.indexOf('adminChatModels=', callbackStart);
