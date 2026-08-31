@@ -1,7 +1,7 @@
 {
   "检查日期": "2026-08-31",
   "事项": "V588-PROVIDER-002：节点云端闭环与独立聊天BUG-006",
-  "当前结论": "节点菜单缺陷云端通过；独立聊天BUG-006最小补丁本地门禁通过，云端复验未完成",
+  "当前结论": "本文保留旧版RED和本地门禁；新候选云端已通过并关闭BUG-006，见v588-provider-002-selection-cloud-20260831.json",
   "云端基线": {
     "main": "88e77ed686cadbce9e32be19841b31c4b1252d06",
     "tree": "48c3a1683be68d279e0c83110c5bdce2f55c1c91",
@@ -107,7 +107,7 @@
       "buildId": "uqfJ0pErfsr9BNlyeVuFb",
       "干净候选保护": "38/38，0未批准漂移，0warning；未修改白名单",
       "隔离PostgreSQL": "18.4，仅本地55441；测试残留schema为0，已正常停止，不接触业务数据库",
-      "云端新候选": "尚未同步；Chrome可枚举原标签，但接管先失联后超时，未发送重复同步指令"
+      "云端新候选": "后续10bcc899已完成Coze同步与Google Chrome原标签验收，见v588-provider-002-selection-cloud-20260831.json；下方失败记录仍保留"
     },
     "失败记录": [
       "首次jsdom缺scrollIntoView，修正夹具后才取得断言RED",

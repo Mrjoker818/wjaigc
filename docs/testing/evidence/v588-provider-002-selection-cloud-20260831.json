@@ -1,0 +1,86 @@
+{
+  "日期": "2026-08-31",
+  "事项": "V588-PROVIDER-002普通用户选择、持久化与重启验收",
+  "专项结论": "通过；关闭BUG-006，PROVIDER-002按已批准范围完成吸收",
+  "全平台结论": "不通过；其他未关闭项及完整跨浏览器、录像和Trace门禁保持",
+  "运行来源": {
+    "项目": "https://code.coze.cn/p/7671964106919837702/preview",
+    "预览": "https://62afe49a-716e-4d9e-99cd-a0be49c4794c-5000.dev.coze.site/",
+    "浏览器": "Google Chrome原有项目与预览标签，未新建标签或操作360",
+    "main": "10bcc899612f3bb2122913b8191bf1f0b70744f4",
+    "源码提交": "6f653d3bf574c9586a9c1b4dd139e912817c3810",
+    "tree": "cd2771b4dc1d07a6b8e3863a8b245965bc1f8ea7",
+    "srcTree": "36cd4c05b00de577eb2a61a7996802e7ff683368",
+    "stable只读": "52f7c601ed150769e15d06fb435c6e360e28c9e7",
+    "Coze报告BuildId": "4OF-bNvWAYIDbN_rSX47M",
+    "Coze报告PID": 4223,
+    "Coze门禁": "专项54/54、保护38/38、构建118/118，报告退出码均0；没有重复全仓测试",
+    "后续平台短版本": "e14ea0e；未追逐纯元数据SHA重复构建，其完整SHA未独立复读"
+  },
+  "时间UTC": {
+    "重启前强刷": "2026-08-31T06:28:46.676Z",
+    "同步指令发送": "2026-08-31T06:31:41.537Z",
+    "新服务首次强刷": "2026-08-31T06:38:50.457Z",
+    "APImart强刷": "2026-08-31T06:39:42.572Z",
+    "Pear强刷": "2026-08-31T06:40:53.976Z",
+    "临时模式强刷": "2026-08-31T06:42:06.848Z",
+    "最终强刷": "2026-08-31T06:43:55.756Z"
+  },
+  "真实检查": [
+    {"项目": "普通用户重启会话", "结果": "通过", "证据": "重启前后真实/api/session均success=true、role=user、status=active；未重置密码、注入令牌或修改认证配置"},
+    {"项目": "独立聊天模型目录", "结果": "通过", "证据": "图像23项、聊天4项，providerId::modelId集合与重启前逐项一致"},
+    {"项目": "APImart图像选择刷新", "结果": "通过", "证据": "UI仍选APImart；真实恢复GET 22420.1276的任务为api_1778430731224_533e09a + gpt-image-2"},
+    {"项目": "Pear图像选择刷新", "结果": "通过", "证据": "保存请求22420.1292业务success=true；刷新GET 22420.1349仍为api_1780630178347_rjqlmam + gpt-image-2"},
+    {"项目": "临时选择退出", "结果": "通过", "证据": "临时改选APImart后退出，恢复持久化Pear；该窗口没有user-data/sync响应，未保存临时选择"},
+    {"项目": "临时选择直接刷新", "结果": "通过", "证据": "临时改选APImart后直接强刷，仍恢复Pear；GET 22420.1413及最终22420.1509确认服务端原值"},
+    {"项目": "消息与聊天模型保持", "结果": "通过", "证据": "Gemini 2.5 Pro保持；同一对话6条消息与选择前逐条JSON相同"},
+    {"项目": "画布重启恢复", "结果": "通过", "证据": "原项目1张图片正常显示；快速创作仍为PearAPI图像的Gpt Image 2，未提交生成"},
+    {"项目": "节点重启恢复", "结果": "通过", "证据": "原4节点1连线恢复；图像精确键api_1780630178347_rjqlmam::gpt-image-2，LLM精确键api_1778428130626_2qpg71v::deepseek-v4-flash，菜单23/4项，不含占位项"}
+  ],
+  "最终健康": {
+    "应用静态资源200": 15,
+    "HTTP大于等于400": 0,
+    "ConsoleError": 0,
+    "ConsoleWarning": 0,
+    "未捕获异常": 0,
+    "原生弹窗": 0,
+    "本窗口事件截断": false,
+    "CSP拦截": "3条Coze注入脚本，分别为page-editor-general-web、console-bridge、history-bridge；保留原安全策略，不写成网络零失败",
+    "跨工作区补查异常": 0
+  },
+  "认证证据边界": "Coze仅比较7个配置来源维度，报告WUJIE_AUTH_SECRET来源、DB_ONLY与legacy-secret文件状态前后一致；Chrome证明未改配置重启后旧普通用户会话有效。未做密钥内容逐字节比较或真实轮换，不把来源一致当成密码学证明。",
+  "测试工具与证据限制": [
+    "一次菜单点击在CDP派发前超时；先只读确认菜单未打开，再重试成功，单独记录为控制故障",
+    "旧保存请求正文跨刷新后不在CDP缓存；使用当前真实恢复GET复读，不伪造旧响应业务成功",
+    "14:28基线事件缓冲截断；新候选各验证窗口均未截断，不扩称全程零错误",
+    "未生成录像或完整Playwright Trace；当前不是全平台完整E2E证据包",
+    "两个Pear恢复截图字节一致，不能计为两个不同画面",
+    "原始截图含历史对话，仅在本地保存；公开文件不包含账号凭据、提示词或图片内容"
+  ],
+  "操作边界": "本轮业务源码零变更；未运行工作流、提交供应商任务、扣费、退款、修改账号/角色/授权/供应商/积分；stable与V5.8.8参考目录未动。Stage4仍归档，Pear后期项仍延期，批次B未开始。",
+  "前序证据": [
+    "v588-provider-002-admin-cloud-20260831.json",
+    "v588-provider-002-toast-cloud-20260831.json",
+    "v588-provider-002-node-selection-20260831.json",
+    "v588-provider-002-simple-image-selection-20260831.json"
+  ],
+  "原件目录": ".playwright-cli（本地，不提交）",
+  "原始证据": [
+    {"file":"v588-bug006-cloud-apimart-after-20260831.png","sha256":"DAFA3455EE4076C269A693DF3588B6C386ADB520DF2E3DBE419B6AD14CD91B5D"},
+    {"file":"v588-bug006-cloud-apimart-before-20260831.png","sha256":"063EDE61CEA27B0A109E0A45C7A7A77E8D0EFE2512BDAD65ECE73115BD45A1CA"},
+    {"file":"v588-bug006-cloud-before-20260831.json","sha256":"B1CB03173ABA2F7B486BDBED7FAE9E285787E11ED800B7C626E9D2F58F43645D"},
+    {"file":"v588-bug006-cloud-before-20260831.png","sha256":"2EBD650890D3AECBA2319F451B5F71BDE6E0DF0AEADA29E78589D7CDB36C1D52"},
+    {"file":"v588-bug006-cloud-final-layout-20260831.png","sha256":"2EEADE2CB2AF5E98F4CE9D4FC5517A0CA8AE22768D1D837CCEB99075CE26E54B"},
+    {"file":"v588-bug006-cloud-network-console-20260831.json","sha256":"BA14756AA570033E8D259D262A0717F5A1B8273E8FB80EB84103159CF46059CE"},
+    {"file":"v588-bug006-cloud-pear-after-20260831.png","sha256":"EE9BB77719866F5A00E5030B2B856A5681F6FED7710120EE6FBCDF1777B31E2E"},
+    {"file":"v588-bug006-cloud-pear-before-20260831.png","sha256":"F4A23D6E9FB326E7194B4C0383727355609EF1FAEBDB8CF6D57206D273A4A0E5"},
+    {"file":"v588-bug006-cloud-restored-pear-20260831.png","sha256":"B78BBAAF92497477F45D2C4D62C46EAAD3DC4CCB790D7A1CAD89B2CF3FF8507A"},
+    {"file":"v588-bug006-cloud-result-20260831.json","sha256":"E28581C37C3850B31223D0BABA515FB719CB9E718BB9EAF34C840E101E83B90A"},
+    {"file":"v588-bug006-cloud-temp-apimart-20260831.png","sha256":"A1A46AAB2AF309C979495F81FB99C9E0AA3E404B1E6432A173831C5D49BEF903"},
+    {"file":"v588-bug006-cloud-temp-exit-20260831.png","sha256":"BA2AB3D70669847D7CE4D97E7557C9D2B5FC1DD244DA33C79A3A64FC0AFF2371"},
+    {"file":"v588-bug006-cloud-temp-refresh-20260831.png","sha256":"B78BBAAF92497477F45D2C4D62C46EAAD3DC4CCB790D7A1CAD89B2CF3FF8507A"},
+    {"file":"v588-bug006-coze-final-20260831.txt","sha256":"972F528D262CA0DC378EA8B5B49F8899686F4DF2DEEA2137AE306A4CEB215747"},
+    {"file":"v588-bug006-restart-canvas-20260831.png","sha256":"98D58BF0069554D37F37AC8BAFDBC13AB6516230A5C23BA340A9E91C3DC66CD2"},
+    {"file":"v588-bug006-restart-nodes-20260831.png","sha256":"8C58E2BE3CD16835AC4A7F822B1CF0284DFFFA30117E0174286062A3E10EF842"}
+  ]
+}
