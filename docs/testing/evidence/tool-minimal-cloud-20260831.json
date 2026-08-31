@@ -1,0 +1,301 @@
+{
+  "recordedAt": "2026-08-31T23:48:00+08:00",
+  "candidateCommit": "3daa1043968cd0d7144699b67b7c797656c7d525",
+  "candidateTree": "5a52b8f54f71bcdb598aff108186adcf6d400718",
+  "candidateSourceTree": "5840f447852a191ff3c836c9b99cdd9e8e0917c8",
+  "projectUrl": "https://code.coze.cn/p/7671964106919837702/preview",
+  "previewUrl": "https://62afe49a-716e-4d9e-99cd-a0be49c4794c-5000.dev.coze.site/",
+  "browser": "Google Chrome",
+  "projectTabId": "1727124834",
+  "syncRequestsSent": 1,
+  "cozeReported": {
+    "mergeShortCommit": "8efd37e1",
+    "treeMatches": true,
+    "focusedTestsPassed": 92,
+    "protectedFeaturesPassed": 38,
+    "buildStarted": true,
+    "buildCompleted": true,
+    "restarted": true,
+    "staticAssetsPassed": 11
+  },
+  "buildFinalExitCode": 0,
+  "buildId": "ia5t_kyC-OeVhTnPNgwxL",
+  "serverPid": 3826,
+  "fullMergeCommit": "8efd37e1a90e927d14d7e06e7ef81d3174714df7",
+  "cloudBusinessAcceptanceCompleted": false,
+  "authenticatedBillingVerified": "partial: real ledger checked, refund consistency not verified",
+  "supplierTasksSubmitted": null,
+  "limitations": [
+    "精修有效异步任务失败，扣12积分待准确环境核账；没有执行退款",
+    "Coze只读诊断最终结果待读；不以空库否认浏览器流水",
+    "字境/放大成功及所有真实退款、节点/Agent全链路尚未验收",
+    "初始网络采集truncated；后续部分窗口完整；无完整录像/Trace和最终Console",
+    "首次精修自动点击未捕获请求，可见按钮提交后才取得taskId；不计两次任务",
+    "最后同一任务复读超时，不重试生成、不认定服务停止",
+    "仅文档更新，不改业务源码、认证、用户、供应商或stable"
+  ],
+  "artifacts": [
+    {
+      "path": ".playwright-cli/tool-minimal-cloud-20260831/brand-before-submit.txt",
+      "bytes": 6404,
+      "sha256": "21c35b31a3578a9a6c1ebc91f46e870c430cede79cd091fce230e2139d71281a"
+    },
+    {
+      "path": ".playwright-cli/tool-minimal-cloud-20260831/brand-canvas-after-add.json",
+      "bytes": 6535,
+      "sha256": "acbcdc3748f1afd227b82fb167670f43a3347d6da0adc6473524b4cf9c1fd82e"
+    },
+    {
+      "path": ".playwright-cli/tool-minimal-cloud-20260831/brand-completed.png",
+      "bytes": 148494,
+      "sha256": "c71d321077b62e7a3392ffc147ea07c2025634e610c35e76b4be88bd1f46f0ac"
+    },
+    {
+      "path": ".playwright-cli/tool-minimal-cloud-20260831/brand-completed.txt",
+      "bytes": 4661,
+      "sha256": "505b4ee68d11ee557e0347e7dc405900572c1ce87d5367e67b1ceee8146e21a1"
+    },
+    {
+      "path": ".playwright-cli/tool-minimal-cloud-20260831/brand-latest-poll.json",
+      "bytes": 754,
+      "sha256": "aa05298c420316d16e3724accd0e590be24a445e8db5d544776cb82273c9878f"
+    },
+    {
+      "path": ".playwright-cli/tool-minimal-cloud-20260831/brand-progress.png",
+      "bytes": 141630,
+      "sha256": "320d079ea3a762c98435b4282da046e00da3d64824f3f8778630fa2f72f043be"
+    },
+    {
+      "path": ".playwright-cli/tool-minimal-cloud-20260831/brand-progress.txt",
+      "bytes": 4345,
+      "sha256": "e30846aae87765ae269dab5a2111b6293a16922ef2aa3489bdb6411be1a05184"
+    },
+    {
+      "path": ".playwright-cli/tool-minimal-cloud-20260831/brand-project-saved.txt",
+      "bytes": 1120,
+      "sha256": "8e91d14b471a970d6d5c1d00477c565e6f3ebf0193a2fbad635f9767e29be09a"
+    },
+    {
+      "path": ".playwright-cli/tool-minimal-cloud-20260831/brand-refreshed-images.json",
+      "bytes": 962,
+      "sha256": "db1af5bad6eca76e2c6ac459f27043ce8229e09e35aa80e4cec29d7390e29a45"
+    },
+    {
+      "path": ".playwright-cli/tool-minimal-cloud-20260831/brand-refreshed.txt",
+      "bytes": 4093,
+      "sha256": "4ea019d7db4e16db194d08cba425239ddd6eb843820a4d4103f2ded4f20f94f4"
+    },
+    {
+      "path": ".playwright-cli/tool-minimal-cloud-20260831/brand-submit-network.json",
+      "bytes": 1038,
+      "sha256": "2d3d783b654e909c5ab342f782ff4ba539262f18ca6d9a2b5a14915850795294"
+    },
+    {
+      "path": ".playwright-cli/tool-minimal-cloud-20260831/brand-task-response.json",
+      "bytes": 171,
+      "sha256": "f0c9378b1a60f4ce405ac373eaf71f347d7dcd0e0ee9471b5aa06343a3112e0d"
+    },
+    {
+      "path": ".playwright-cli/tool-minimal-cloud-20260831/coze-after-send.txt",
+      "bytes": 45481,
+      "sha256": "bf7f7a626ea3f4721b55d27bf4f2fea3f5874ce15831e26a273d5873bd42d60a"
+    },
+    {
+      "path": ".playwright-cli/tool-minimal-cloud-20260831/coze-before.txt",
+      "bytes": 42469,
+      "sha256": "f526e3b370535239401da70c798744a9aa260beb150e39daae34404fb76d075a"
+    },
+    {
+      "path": ".playwright-cli/tool-minimal-cloud-20260831/coze-build-progress.txt",
+      "bytes": 46079,
+      "sha256": "3815410ed36f76623a3c093c1352246f171a8c8d4ab2d2761d22fcbf4de02457"
+    },
+    {
+      "path": ".playwright-cli/tool-minimal-cloud-20260831/coze-send-confirmed.png",
+      "bytes": 183968,
+      "sha256": "143e37dfe94d11e2d34c7c07260a75566a6fce2a84352300b954a0ea07ad3aee"
+    },
+    {
+      "path": ".playwright-cli/tool-minimal-cloud-20260831/coze-send-confirmed.txt",
+      "bytes": 45729,
+      "sha256": "811667432c24d773672d3fad36fec072424a3559d41c2e575e3d99348dafcd8a"
+    },
+    {
+      "path": ".playwright-cli/tool-minimal-cloud-20260831/coze-sync-final.txt",
+      "bytes": 51000,
+      "sha256": "1a7df861465c9818f5e6ad7165ffd6f43ba9f6ce0733c5bd75e5a04718269ae4"
+    },
+    {
+      "path": ".playwright-cli/tool-minimal-cloud-20260831/credit-baseline.txt",
+      "bytes": 1430,
+      "sha256": "15697787251ba26957485cceaf818403d2aef60d8053046a98a636b8e88260a9"
+    },
+    {
+      "path": ".playwright-cli/tool-minimal-cloud-20260831/credits-after-negative.json",
+      "bytes": 978,
+      "sha256": "9774275b55e648ea4e8ac397fcc80e03ba1c6f1a783a0c4d182a97594a451005"
+    },
+    {
+      "path": ".playwright-cli/tool-minimal-cloud-20260831/credits-after-refine-optimize.json",
+      "bytes": 1709,
+      "sha256": "0c1696a2ef436f4ad906efe28a4861ecaaef20f0e31cc0022568668673dee6a2"
+    },
+    {
+      "path": ".playwright-cli/tool-minimal-cloud-20260831/font-empty-input.txt",
+      "bytes": 4896,
+      "sha256": "bb8b69eeac76ebc976e01da659747b1844de739161086f5c1a1d1130b0f3f53e"
+    },
+    {
+      "path": ".playwright-cli/tool-minimal-cloud-20260831/font-open-empty.txt",
+      "bytes": 4887,
+      "sha256": "07f39429eb2e3ea5ba1a1b7182c8d8d4287e4ecd3dc68ca24b76ac038527e97e"
+    },
+    {
+      "path": ".playwright-cli/tool-minimal-cloud-20260831/negative-network.json",
+      "bytes": 29323,
+      "sha256": "b3b130674c454d2d5b6b929e1f4ceb27918680936c8a75daa432581fa13eacac"
+    },
+    {
+      "path": ".playwright-cli/tool-minimal-cloud-20260831/optimize-completed.png",
+      "bytes": 147768,
+      "sha256": "7fac74df730f0b49ccd1d4999ff11a1c1ad43c5f66e3cb39627fe058e065f2aa"
+    },
+    {
+      "path": ".playwright-cli/tool-minimal-cloud-20260831/optimize-completed.txt",
+      "bytes": 3518,
+      "sha256": "b038fb0115cae09228ba6f7b3d70f16031131ff18f223146bc805807679040fb"
+    },
+    {
+      "path": ".playwright-cli/tool-minimal-cloud-20260831/optimize-response.json",
+      "bytes": 1752,
+      "sha256": "bffa2cad7c1d7bd5244f103b52874f2f9c3bc2f5d326a7318a6a816cd8883391"
+    },
+    {
+      "path": ".playwright-cli/tool-minimal-cloud-20260831/preview-initial-events.json",
+      "bytes": 28233,
+      "sha256": "48c4daced53bd8051a5eb36694794f489f22bb9b7ead2d3f1a13660a7b38b81e"
+    },
+    {
+      "path": ".playwright-cli/tool-minimal-cloud-20260831/real-api-negative.json",
+      "bytes": 3343,
+      "sha256": "86dfae728e636b4aec8a1493dd35e36456243ebd8fb06eb8b32bbb6e5742c4b4"
+    },
+    {
+      "path": ".playwright-cli/tool-minimal-cloud-20260831/refine-before.txt",
+      "bytes": 5914,
+      "sha256": "eae247d59f9798648d28be4fc7fb122b486e9bd111aea58d3ae46da2406908ad"
+    },
+    {
+      "path": ".playwright-cli/tool-minimal-cloud-20260831/refine-first-click-no-submit.json",
+      "bytes": 2408,
+      "sha256": "5b1a9ae3ca21a27f0671701c628386931e7886f769424c98632ff4f8f0aaa6da"
+    },
+    {
+      "path": ".playwright-cli/tool-minimal-cloud-20260831/refine-readonly-audit-request.txt",
+      "bytes": 1463,
+      "sha256": "98667debcb8c5344b68ffcb63217324471e8a02eefa6d99c2e28c516b66e5038"
+    },
+    {
+      "path": ".playwright-cli/tool-minimal-cloud-20260831/refine-readonly-audit-sent.txt",
+      "bytes": 52508,
+      "sha256": "f38089e53b99de1351b927128ee50645288fc3cb90856c53374d290c87621f20"
+    },
+    {
+      "path": ".playwright-cli/tool-minimal-cloud-20260831/refine-readonly-scope-correction.txt",
+      "bytes": 648,
+      "sha256": "e475ef9e86aa2c0e575b0c9952462d09074db41d728ecffba1739f92c508d57e"
+    },
+    {
+      "path": ".playwright-cli/tool-minimal-cloud-20260831/refine-request.json",
+      "bytes": 2,
+      "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    {
+      "path": ".playwright-cli/tool-minimal-cloud-20260831/refine-response.json",
+      "bytes": 203,
+      "sha256": "bf8eab6ed94c49e13ca70dbebfd50cb65407866e4350c4590ede8af1971247b7"
+    },
+    {
+      "path": ".playwright-cli/tool-minimal-cloud-20260831/refine-submitted.json",
+      "bytes": 712,
+      "sha256": "9de5ed00e3d5a7d94822440e917559287e17441757522daad1ac3ba330092147"
+    },
+    {
+      "path": ".playwright-cli/tool-minimal-cloud-20260831/refine-task-after-panel-closed.json",
+      "bytes": 255,
+      "sha256": "4e037c19465f6bd6525c6374c52e67f8d9c482b342f47bf7bc8ef500ddbfdf8e"
+    },
+    {
+      "path": ".playwright-cli/tool-minimal-cloud-20260831/sync-request.txt",
+      "bytes": 2994,
+      "sha256": "7ae4a3d6a2ffeca7670129a0bb767465819d3f8ac8cba59f74be518a5e9ff799"
+    }
+  ],
+  "previewTabId": "1727124839",
+  "cozeMetadataShortCommit": "bc61017",
+  "applicationPaidRequestsSubmitted": 3,
+  "supplierSubmissionScope": "Brand generation 1 application batch / 2 variants; refine 1 application request; optimize 1 request. Exact upstream task count not independently audited.",
+  "balanceBefore": 4880,
+  "balanceAfter": 4806,
+  "newTransactions": [
+    {
+      "operation": "brand",
+      "amount": -60,
+      "transactionId": "ctx_1788190740370_x3rq4sy8"
+    },
+    {
+      "operation": "refine",
+      "amount": -12,
+      "transactionId": "ctx_1788190957378_rk3dmrsv"
+    },
+    {
+      "operation": "optimize",
+      "amount": -2,
+      "transactionId": "ctx_1788191004068_8teka4p5"
+    }
+  ],
+  "realNegativeCases": {
+    "executed": 7,
+    "passed": 7,
+    "mocked": false,
+    "ledgerCountBefore": 3,
+    "ledgerCountAfter": 3,
+    "newTransactions": 0
+  },
+  "brand": {
+    "taskId": "ecom-1788190740378-a0mn5e",
+    "browserRequestId": "36948.702",
+    "status": "completed",
+    "resultCount": 2,
+    "uiDurationSeconds": 55,
+    "partialResultObserved": true,
+    "canvasSaved": true,
+    "refreshRestored": true,
+    "projectImageCountBefore": 5,
+    "projectImageCountAfter": 7
+  },
+  "refine": {
+    "taskId": "refine-1788190957385-3l3pji",
+    "browserRequestId": "36948.1086",
+    "httpStatus": 200,
+    "businessStatus": "error",
+    "message": "任务终态已变更",
+    "progress": 30,
+    "resultDelivered": false,
+    "refundObserved": false,
+    "bugId": "V588-TOOLS-BUG-002"
+  },
+  "optimize": {
+    "browserRequestId": "36948.1135",
+    "httpStatus": 200,
+    "nonemptyResultRendered": true,
+    "provider": "APImartLLM",
+    "model": "gemini-3.1-flash-lite-preview"
+  },
+  "conclusion": "不通过",
+  "readonlyDiagnosis": {
+    "sent": true,
+    "scopeCorrectionSent": true,
+    "finalResultRead": false
+  }
+}

@@ -8,7 +8,7 @@ import { getInternalRequestHeaders } from '@/lib/api-auth';
 import { translateApiError } from '@/lib/api-error-translate';
 import { registerTask, updateTaskProgress } from '@/lib/task-registry';
 import { getSessionUser } from '@/lib/server-auth';
-import { consumeCredits, refundCredits } from '@/lib/credits';
+import { createRefineTask, reconcileRefineTask, refineTaskResponse, settleRefineTask } from '@/lib/refine-task-lifecycle';
 import { identifyImageSubject } from '@/lib/identify-subject';
 import { normalizeModelForApi } from '@/lib/model-capabilities';
 import { validateApiInputs } from '@/lib/api-validator';
@@ -644,10 +644,8 @@ async function submitRefineToApi(
         console.info(`[refine-engine] Gemini image route: extracted ${extractedImageUrls.length} images`);
         updateTaskProgress(taskId, { progress: 90, label: '保存精修结果...' });
         const persistedUrls = await Promise.all(extractedImageUrls.map(persistResultImage));
-        setRefineResult(taskId, { directImageUrls: persistedUrls, completedAt: Date.now() });
         updateTaskProgress(taskId, {
-          status: 'completed',
-          progress: 100,
+          progress: 95,
           label: '精修完成',
           result: { directImageUrls: persistedUrls },
         });
@@ -733,10 +731,8 @@ async function submitRefineToApi(
               console.log(`[refine-engine] /chat/completions fallback succeeded (after generations timeout), got ${chatImageUrls.length} images`);
               updateTaskProgress(taskId, { progress: 90, label: '保存精修结果...' });
               const persistedUrls = await Promise.all(chatImageUrls.map(persistResultImage));
-              setRefineResult(taskId, { directImageUrls: persistedUrls, completedAt: Date.now() });
               updateTaskProgress(taskId, {
-                status: 'completed',
-                progress: 100,
+                progress: 95,
                 label: '精修完成',
                 result: { directImageUrls: persistedUrls },
               });
@@ -774,10 +770,8 @@ async function submitRefineToApi(
               console.log(`[refine-engine] /chat/completions fallback succeeded, got ${chatImageUrls.length} images`);
               updateTaskProgress(taskId, { progress: 90, label: '保存精修结果...' });
               const persistedUrls = await Promise.all(chatImageUrls.map(persistResultImage));
-              setRefineResult(taskId, { directImageUrls: persistedUrls, completedAt: Date.now() });
               updateTaskProgress(taskId, {
-                status: 'completed',
-                progress: 100,
+                progress: 95,
                 label: '精修完成',
                 result: { directImageUrls: persistedUrls },
               });
@@ -820,10 +814,8 @@ async function handleApiResponse(
     updateTaskProgress(taskId, { progress: 90, label: '保存精修结果...' });
     const persistedUrls = await Promise.all(parsed.directImageUrls.map(persistResultImage));
     console.log(`[refine-engine] Persisted ${persistedUrls.length} direct URLs for taskId=${taskId}:`, persistedUrls);
-    setRefineResult(taskId, { directImageUrls: persistedUrls, completedAt: Date.now() });
     updateTaskProgress(taskId, {
-      status: 'completed',
-      progress: 100,
+      progress: 95,
       label: '精修完成',
       result: { directImageUrls: persistedUrls },
     });
@@ -859,7 +851,9 @@ async function handleApiResponse(
 // ─── POST: Generate refined image ───
 export async function POST(request: NextRequest) {
   const startTime = Date.now();
-  let deductedCredits = 0;
+  let durableTaskId: string | undefined;
+  let providerAccepted = false;
+  let settlementAttempted = false;
   let sessionUser: import('@/lib/user-types').User | null = null;
   const refineModel = '';
   const refineProviderId = '';
@@ -976,16 +970,15 @@ export async function POST(request: NextRequest) {
 
       // 模型、供应商和提示词准备完成后才扣费。
       sessionUser = await getSessionUser(request).catch(() => null);
-      if (sessionUser) {
-        const creditResult = await consumeCredits(sessionUser.id, 'image_retouch', undefined, undefined, model, { providerId: (providerId as string) || undefined });
-        if (!creditResult.success) {
-          return NextResponse.json({ success: false, error: creditResult.message || '积分不足' }, { status: 402 });
-        }
-        deductedCredits = creditResult.cost;
-      }
-
+      if (!sessionUser) return NextResponse.json({ success: false, error: '未登录，请先登录' }, { status: 401 });
       const taskId = `refine-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-      registerTask(taskId, 'refine-engine', `精修: ${productName || MODE_LABELS[refineMode] || '产品'}`, sessionUser?.id);
+      const label = `精修: ${productName || MODE_LABELS[refineMode] || '产品'}`;
+      const creditCost = await createRefineTask({ taskId, userId: sessionUser.id, label,
+        providerId: provider.id, model: selectedModel, pricingModel: model,
+        pricingProviderId: (providerId as string) || undefined });
+      durableTaskId = taskId;
+      registerTask(taskId, 'refine-engine', label, sessionUser.id, 'durable');
+      updateTaskProgress(taskId, { creditCost, result: { providerId: provider.id, usedModel: selectedModel } });
 
       try {
         const apiResult = await submitRefineToApi(taskId, {
@@ -996,8 +989,12 @@ export async function POST(request: NextRequest) {
           aspectRatio: aspectRatio || '1:1',
           quality: body.quality || 'standard',
         });
+        providerAccepted = true;
 
         if (apiResult.directImageUrls && apiResult.directImageUrls.length > 0) {
+          const terminal = await reconcileRefineTask(taskId);
+          if (terminal.status !== 'completed') return NextResponse.json(refineTaskResponse(terminal));
+          setRefineResult(taskId, { directImageUrls: apiResult.directImageUrls, completedAt: Date.now() });
           // ★ Synchronous provider: images returned directly
           console.log(`[refine-engine] Direct result for taskId=${taskId}, urls:`, apiResult.directImageUrls.length);
           return NextResponse.json({
@@ -1015,14 +1012,13 @@ export async function POST(request: NextRequest) {
           progress: 30,
           label: '已提交到API，等待结果...',
           result: {
-            apiBaseUrl: provider.baseUrl,
-            apiKey: provider.apiKey,
-            advancedParams: provider.advancedParams || {},
             usedModel: selectedModel,
             providerId: provider.id,
             remoteTaskId: apiResult.remoteTaskId,
           },
         });
+        const persisted = await reconcileRefineTask(taskId);
+        if (persisted.status !== 'processing') return NextResponse.json(refineTaskResponse(persisted));
 
         // 记录成功日志
         logOperation({
@@ -1046,15 +1042,22 @@ export async function POST(request: NextRequest) {
       } catch (procErr) {
         const errMsg = procErr instanceof Error ? procErr.message : String(procErr);
         console.error(`[refine-engine] submitRefineToApi FAILED taskId=${taskId}:`, errMsg);
-        updateTaskProgress(taskId, { status: 'failed', error: translateApiError(errMsg), creditCost: deductedCredits });
-        // 退款：精修失败时退还积分
-        if (deductedCredits > 0 && sessionUser) {
-          const amount = deductedCredits;
-          deductedCredits = 0;
+        if (providerAccepted) {
+          // Keep accepted work recoverable. A storage interruption must not trigger another provider job or a premature refund.
+          return NextResponse.json({ success: true, taskId, status: 'processing', recoveryPending: true,
+            label: '供应商已接收任务，正在恢复状态保存，请勿重复生成' });
+        }
+        if (!settlementAttempted) {
+          settlementAttempted = true;
+          updateTaskProgress(taskId, { result: { providerId: provider.id, usedModel: selectedModel, refineSubmissionError: translateApiError(errMsg) } });
           try {
-            const refund = await refundCredits(sessionUser.id, amount, `精修失败退款: ${errMsg.substring(0, 100)}`);
-            if (!refund.success) console.error('[refine-engine] Refund failed:', { userId: sessionUser.id, amount });
-          } catch (refundErr) { console.error('[refine-engine] Refund failed:', refundErr); }
+            const settled = await settleRefineTask(taskId, 'failed', translateApiError(errMsg));
+            if (settled.status === 'completed') return NextResponse.json(refineTaskResponse(settled));
+          } catch (refundErr) {
+            console.error('[refine-engine] Refund failed:', refundErr);
+            return NextResponse.json({ success: true, taskId, status: 'processing', recoveryPending: true,
+              label: '生成失败，正在恢复任务结算，请勿重复生成' });
+          }
         }
         return NextResponse.json({
           success: false,
@@ -1077,14 +1080,13 @@ export async function POST(request: NextRequest) {
       detail: `精修引擎失败: provider=${refineProviderId}, model=${refineModel}`,
     });
     // 退款：精修失败时退还积分
-    if (deductedCredits > 0 && sessionUser) {
-      const amount = deductedCredits;
-      deductedCredits = 0;
+    if (durableTaskId && !providerAccepted && !settlementAttempted) {
+      settlementAttempted = true;
       try {
-        const refund = await refundCredits(sessionUser.id, amount, `精修失败退款: ${message.substring(0, 100)}`);
-        if (!refund.success) console.error('[refine-engine] Refund failed:', { userId: sessionUser.id, amount });
+        await settleRefineTask(durableTaskId, 'failed', message);
       } catch (refundErr) { console.error('[refine-engine] Refund failed:', refundErr); }
     }
-    return NextResponse.json({ error: message }, { status: 500 });
+    const status = err && typeof err === 'object' && 'statusCode' in err && err.statusCode === 402 ? 402 : 500;
+    return NextResponse.json({ error: message, ...(durableTaskId ? { taskId: durableTaskId } : {}) }, { status });
   }
 }

@@ -4,10 +4,19 @@ import { NextRequest, NextResponse } from 'next/server';
 const mocks = vi.hoisted(() => ({
   charge: vi.fn(), refund: vi.fn(), provider: vi.fn(), providers: vi.fn(), register: vi.fn(),
   after: vi.fn(), submit: vi.fn(), session: vi.fn(),
+  quote: vi.fn(), atomic: vi.fn(), settle: vi.fn(),
+  tasks: new Map<string, Record<string, unknown>>(),
 }));
 vi.mock('next/server', async original => ({ ...await original<typeof import('next/server')>(), after: mocks.after }));
 vi.mock('@/lib/server-auth', () => ({ getSessionUser: mocks.session }));
-vi.mock('@/lib/credits', () => ({ consumeCredits: mocks.charge, refundCredits: mocks.refund }));
+vi.mock('@/lib/credits', () => ({ consumeCredits: mocks.charge, refundCredits: mocks.refund, calculateConfiguredCreditCost: mocks.quote }));
+vi.mock('@/lib/task-core/billing-service', () => ({ createBillableTask: mocks.atomic }));
+vi.mock('@/lib/cloud-task-storage', () => ({
+  getCloudTaskById: vi.fn(async (id: string) => mocks.tasks.get(id)),
+  terminateCloudTaskAndRefund: mocks.settle,
+  updateCloudTask: vi.fn(),
+}));
+vi.mock('@/lib/cloud-task-persistence', () => ({ recordImageTaskTerminal: vi.fn() }));
 vi.mock('@/lib/server-api-config', () => ({ findProviderById: mocks.provider, findProviderForModel: mocks.provider, getApiProviders: mocks.providers, getPublicModels: vi.fn(), getPublicApiProviders: vi.fn() }));
 vi.mock('@/lib/task-registry', () => ({ registerTask: mocks.register, updateTaskProgress: vi.fn(), isTaskCancelled: vi.fn(() => false), getTaskInfo: vi.fn() }));
 vi.mock('@/lib/db-storage', () => ({ dbGetEcomTemplate: vi.fn(async () => null) }));
@@ -37,6 +46,17 @@ beforeEach(() => {
   vi.resetAllMocks();
   mocks.session.mockResolvedValue({ id: 'billing-test-user' });
   mocks.charge.mockResolvedValue({ success: true, cost: 12 });
+  mocks.tasks.clear();
+  mocks.quote.mockResolvedValue(12);
+  mocks.atomic.mockImplementation(async (input: { creditCost: number; task: Record<string, unknown> }) => {
+    const task = { ...input.task, creditCost: input.creditCost, creditStatus: 'pending' };
+    mocks.tasks.set(String(input.task.id), task);
+    return { task, reused: false, charged: true };
+  });
+  mocks.settle.mockImplementation(async (id: string, status: string, error: string) => {
+    mocks.tasks.set(id, { ...mocks.tasks.get(id), status, error, creditStatus: 'refunded' });
+    return { transitioned: true, refunded: true };
+  });
   mocks.refund.mockResolvedValue({ success: true, balance: 1000 });
   mocks.provider.mockResolvedValue(provider);
   mocks.providers.mockResolvedValue([provider]);
@@ -49,11 +69,15 @@ describe('image tool preflight rejects without charging', () => {
   it.each(['returns-false', 'throws'])('logs refine inner refund failure %s and preserves the provider error', async failure => {
     const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
     mocks.submit.mockRejectedValue(new Error('Provider connection failed'));
-    if (failure === 'throws') mocks.refund.mockRejectedValue(new Error('Refund database unavailable'));
-    else mocks.refund.mockResolvedValue({ success: false, balance: 988 });
+    if (failure === 'throws') mocks.settle.mockRejectedValue(new Error('Refund database unavailable'));
+    else mocks.settle.mockResolvedValue({ transitioned: false, refunded: false });
     const response = await refine(request(refineBody));
-    expect(await response.json()).toMatchObject({ success: false, error: expect.stringContaining('Provider connection failed') });
-    expect(mocks.refund).toHaveBeenCalledExactlyOnceWith('billing-test-user', 12, expect.any(String));
+    const payload = await response.json();
+    expect(response.status).toBe(200);
+    expect(payload).toMatchObject({ success: true, status: 'processing', recoveryPending: true });
+    expect(payload.error).toBeUndefined();
+    expect(mocks.settle).toHaveBeenCalledExactlyOnceWith(expect.stringMatching(/^refine-/), 'failed', expect.stringContaining('Provider connection failed'));
+    expect(mocks.refund).not.toHaveBeenCalled();
     expect(errors.mock.calls.some(args => /Refund failed/.test(String(args[0])))).toBe(true);
   });
   it('does not refund again when refine inner failure response enters the outer catch', async () => {
@@ -62,13 +86,15 @@ describe('image tool preflight rejects without charging', () => {
     const response = await refine(request(refineBody));
     expect(response.status).toBe(500);
     expect(await response.json()).toMatchObject({ error: 'Response serialization failed' });
-    expect(mocks.refund).toHaveBeenCalledExactlyOnceWith('billing-test-user', 12, expect.any(String));
+    expect(mocks.settle).toHaveBeenCalledExactlyOnceWith(expect.stringMatching(/^refine-/), 'failed', expect.any(String));
+    expect(mocks.refund).not.toHaveBeenCalled();
   });
   it('refunds refine synchronous provider failure once without hiding the business error', async () => {
     mocks.submit.mockRejectedValue(new Error('Provider connection failed'));
     const response = await refine(request(refineBody));
     expect(await response.json()).toMatchObject({ success: false, error: expect.stringContaining('Provider connection failed') });
-    expect(mocks.refund).toHaveBeenCalledExactlyOnceWith('billing-test-user', 12, expect.any(String));
+    expect(mocks.settle).toHaveBeenCalledExactlyOnceWith(expect.stringMatching(/^refine-/), 'failed', expect.any(String));
+    expect(mocks.refund).not.toHaveBeenCalled();
   });
   it.each([
     ['brand', brand, brandBody], ['refine', refine, refineBody], ['font', font, fontBody],
@@ -79,6 +105,7 @@ describe('image tool preflight rejects without charging', () => {
     expect(response.status).toBe(400);
     expect(await response.json()).toMatchObject({ error: expect.any(String) });
     expect(mocks.charge).not.toHaveBeenCalled();
+    expect(mocks.atomic).not.toHaveBeenCalled();
     expect(mocks.refund).not.toHaveBeenCalled();
     expect(mocks.register).not.toHaveBeenCalled();
   });
@@ -92,6 +119,7 @@ describe('image tool preflight rejects without charging', () => {
     const response = await handler(request(body));
     expect(response.status).toBe(400);
     expect(mocks.charge).not.toHaveBeenCalled();
+    expect(mocks.atomic).not.toHaveBeenCalled();
     expect(mocks.refund).not.toHaveBeenCalled();
     expect(mocks.register).not.toHaveBeenCalled();
   });
@@ -106,7 +134,11 @@ describe.each([
     const response = await handler(request({ ...body, model }));
     expect(response.status).toBe(200);
     expect((await response.json()).error).toBeUndefined();
-    expect(mocks.charge).toHaveBeenCalledExactlyOnceWith('billing-test-user', operation, undefined, undefined, model, { providerId: provider.id });
+    if (_name === 'refine') {
+      expect(mocks.quote).toHaveBeenCalledExactlyOnceWith(operation, model, { providerId: provider.id });
+      expect(mocks.atomic).toHaveBeenCalledWith(expect.objectContaining({ creditCost: 12, userId: 'billing-test-user' }));
+      expect(mocks.charge).not.toHaveBeenCalled();
+    } else expect(mocks.charge).toHaveBeenCalledExactlyOnceWith('billing-test-user', operation, undefined, undefined, model, { providerId: provider.id });
     expect(mocks.refund).not.toHaveBeenCalled();
   });
   it('preserves successful task creation and charge arguments', async () => {
@@ -116,11 +148,16 @@ describe.each([
     expect(data).toMatchObject({ taskId: expect.any(String) });
     expect(data.error).toBeUndefined();
     expect(mocks.register).toHaveBeenCalledTimes(1);
-    expect(mocks.charge).toHaveBeenCalledExactlyOnceWith('billing-test-user', operation, undefined, undefined, 'gpt-image-2', { providerId: provider.id });
+    if (_name === 'refine') {
+      expect(mocks.quote).toHaveBeenCalledExactlyOnceWith(operation, 'gpt-image-2', { providerId: provider.id });
+      expect(mocks.atomic).toHaveBeenCalledTimes(1);
+      expect(mocks.charge).not.toHaveBeenCalled();
+    } else expect(mocks.charge).toHaveBeenCalledExactlyOnceWith('billing-test-user', operation, undefined, undefined, 'gpt-image-2', { providerId: provider.id });
     expect(mocks.refund).not.toHaveBeenCalled();
   });
   it('does not create a task or refund an unsuccessful charge', async () => {
     mocks.charge.mockResolvedValue({ success: false, cost: 12 });
+    mocks.atomic.mockRejectedValue(Object.assign(new Error('积分不足'), { statusCode: 402 }));
     expect((await handler(request(body))).status).toBe(402);
     expect(mocks.register).not.toHaveBeenCalled();
     expect(mocks.refund).not.toHaveBeenCalled();
@@ -128,14 +165,21 @@ describe.each([
   it('refunds a synchronous task registration exception once', async () => {
     mocks.register.mockImplementation(() => { throw new Error('Registration unavailable'); });
     expect((await handler(request(body))).status).toBe(500);
-    expect(mocks.refund).toHaveBeenCalledExactlyOnceWith('billing-test-user', 12, expect.any(String));
+    if (_name === 'refine') {
+      expect(mocks.settle).toHaveBeenCalledExactlyOnceWith(expect.stringMatching(/^refine-/), 'failed', expect.any(String));
+      expect(mocks.refund).not.toHaveBeenCalled();
+    } else expect(mocks.refund).toHaveBeenCalledExactlyOnceWith('billing-test-user', 12, expect.any(String));
   });
   it('logs a refund business failure rather than treating it as success', async () => {
     const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
     mocks.register.mockImplementation(() => { throw new Error('Registration unavailable'); });
     mocks.refund.mockResolvedValue({ success: false, balance: 988 });
+    mocks.settle.mockResolvedValue({ transitioned: false, refunded: false });
     expect((await handler(request(body))).status).toBe(500);
-    expect(mocks.refund).toHaveBeenCalledTimes(1);
+    if (_name === 'refine') {
+      expect(mocks.settle).toHaveBeenCalledTimes(1);
+      expect(mocks.refund).not.toHaveBeenCalled();
+    } else expect(mocks.refund).toHaveBeenCalledTimes(1);
     expect(errors.mock.calls.some(args => /Refund failed/.test(String(args[0])))).toBe(true);
   });
 });

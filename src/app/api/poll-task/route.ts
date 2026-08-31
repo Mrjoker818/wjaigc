@@ -26,6 +26,7 @@ import { translateApiError } from '@/lib/api-error-translate';
 import { classifyApiError, type ClassifiedError, isCloudflareTimeoutError } from '@/lib/api-error-translator';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
 import { getRefineResult } from '@/app/api/refine-engine/result-store';
+import { reconcileRefineTask, refineTaskResponse, settleRefineTask } from '@/lib/refine-task-lifecycle';
 import { getBrandResult } from '@/app/api/brand-ecommerce/result-store';
 import { getFontDesignResult } from '@/lib/font-design-task-store';
 import { unwrapFontDesignTaskResult } from '@/lib/font-design-task-result';
@@ -42,6 +43,7 @@ import {
   completeCloudTask,
   deferCloudTaskRecovery,
   getCloudTaskForUser,
+  getCloudTaskById,
   refundCloudTaskCredits,
   terminateCloudTaskAndRefund,
   updateCloudTask,
@@ -1153,6 +1155,13 @@ export async function POST(request: NextRequest) {
     if (registryTask && !sessionUser && registryTask.userId !== 'anonymous') {
       return NextResponse.json({ success: false, status: 'error', error: '任务不存在' }, { status: 404 });
     }
+    if (registryTask?.type === 'refine-engine' && registryTask.persistence === 'durable') {
+      const authoritative = await reconcileRefineTask(taskId);
+      if (['completed', 'failed', 'cancelled', 'timeout'].includes(authoritative.status)) {
+        return NextResponse.json(refineTaskResponse(authoritative));
+      }
+      registryTask = getTaskInfo(taskId);
+    }
     // ★ 防重复扣费：按 submissionPayload.workerMode 判断任务是否已有活着的提交者。
     // - 'recovery'（默认）：本进程没有后台提交者，poll-task 就是唯一提交方，立即恢复提交；
     //   租约（不允许 owner 自匹配重复 claim）保证租约期内只提交一次。
@@ -1181,6 +1190,9 @@ export async function POST(request: NextRequest) {
     if ((!registryTask || shouldResumeExistingAsync) && sessionUser) {
       const persistedTask = await getCloudTaskForUser(taskId, sessionUser.id);
       if (persistedTask) {
+        if (persistedTask.type === 'refine-engine' && ['completed', 'failed', 'cancelled', 'timeout'].includes(persistedTask.status)) {
+          return NextResponse.json(refineTaskResponse(persistedTask));
+        }
         if (persistedTask.status === 'completed' && persistedTask.result?.imageUrl) {
           const completedResult = await getAuthoritativeCompletedImageResult(
             taskId,
@@ -1236,6 +1248,15 @@ export async function POST(request: NextRequest) {
           }, persistedTask.result, taskId), { status: 200 });
         }
 
+        if (persistedTask.type === 'refine-engine' && !persistedTask.remoteTaskId) {
+          // Submission outcome is unknown after a restart; never resubmit or poll a local ID upstream.
+          if (Date.now() - persistedTask.createdAt > SUBMISSION_STALE_MS) {
+            const settled = await settleRefineTask(taskId, 'timeout', '精修提交中断，未取得供应商任务编号，请重新提交');
+            return NextResponse.json(refineTaskResponse(settled));
+          }
+          return NextResponse.json({ success: true, taskId, status: 'processing', progress: persistedTask.progress,
+            label: '精修提交状态待确认，请勿重复生成', recoveryPending: true });
+        }
         const recovery = buildRecoveredTaskContext(persistedTask);
         const persistedResult = (persistedTask.result as Record<string, unknown>) || {};
         const submissionPayload = persistedResult.submissionPayload;
@@ -2440,7 +2461,18 @@ export async function POST(request: NextRequest) {
     let profile: ApiCompatProfile;
     let providerName = 'unknown';
 
-    if (regApiBaseUrl && regApiKey) {
+    if (regInfoForProvider?.type === 'refine-engine') {
+      const persistedRefine = await getCloudTaskById(taskId);
+      const provider = persistedRefine?.providerId ? await findProviderById(persistedRefine.providerId) : null;
+      if (!provider?.isEnabled || !provider.apiKey || !provider.baseUrl) {
+        return NextResponse.json({ success: true, taskId, status: 'processing', recoveryPending: true,
+          progress: persistedRefine?.progress || 30, label: '原供应商暂不可用，等待恢复后查询，请勿重复生成' });
+      }
+      apiKey = provider.apiKey;
+      apiBaseUrl = normalizeApiBaseUrl(provider.baseUrl);
+      profile = resolveCompatProfile(provider);
+      providerName = provider.name;
+    } else if (regApiBaseUrl && regApiKey) {
       // ★ 从 task-registry 获取的提供商信息（最准确，由 image-edit 提交时保存）
       apiKey = regApiKey;
       apiBaseUrl = normalizeApiBaseUrl(regApiBaseUrl);
@@ -3023,6 +3055,10 @@ export async function POST(request: NextRequest) {
           || translateApiError(errorDetail)
           || '模型返回了文本而不是生成图像，请尝试重新措辞提示';
 
+        if (regInfo?.type === 'refine-engine') {
+          return NextResponse.json(refineTaskResponse(await settleRefineTask(taskId, 'failed', terminalError)));
+        }
+
         const durableTermination = durableGenerationSlot
           ? await terminateCloudTaskAndRefund(taskId, 'failed', terminalError)
           : null;
@@ -3228,6 +3264,9 @@ export async function POST(request: NextRequest) {
       const classifiedErr = classifyApiError(rawError);
       const translatedError = classifiedErr.friendlyMessage + (classifiedErr.suggestion ? ' — ' + classifiedErr.suggestion : '');
       const isCfTimeout = isCloudflareTimeoutError(rawError);
+      if (getTaskInfo(taskId)?.type === 'refine-engine') {
+        return NextResponse.json(refineTaskResponse(await settleRefineTask(taskId, 'failed', translatedError)));
+      }
       const durableTermination = durableGenerationSlot
         ? await terminateCloudTaskAndRefund(taskId, 'failed', translatedError)
         : null;
@@ -3269,6 +3308,9 @@ export async function POST(request: NextRequest) {
       (pollResult as Record<string, unknown>).isRetryable = classifiedErr.isRetryable;
       (pollResult as Record<string, unknown>).isCfTimeout = isCfTimeout;
     } else if (normalizedStatus === 'cancelled') {
+      if (getTaskInfo(taskId)?.type === 'refine-engine') {
+        return NextResponse.json(refineTaskResponse(await settleRefineTask(taskId, 'cancelled', '任务已被取消')));
+      }
       const durableCancelledResult = (getTaskInfo(taskId)?.result as Record<string, unknown>) || {};
       const durableGenerationSlot = isDurableGenerationSlot(durableCancelledResult);
       const durableTermination = durableGenerationSlot

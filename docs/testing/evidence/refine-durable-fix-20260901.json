@@ -1,0 +1,258 @@
+{
+  "recordedAt": "2026-09-01T00:39:48.6804297+08:00",
+  "bugId": "V588-TOOLS-BUG-002",
+  "baseCommit": "3daa1043968cd0d7144699b67b7c797656c7d525",
+  "stableCommit": "52f7c601ed150769e15d06fb435c6e360e28c9e7",
+  "stableTouched": false,
+  "donorReadOnly": true,
+  "implementationApproval": "方案A已批准",
+  "conclusion": "不通过：本地修复及门禁完成，云端闭环未完成",
+  "appVersion": "4.1.0",
+  "packageVersion": "4.0.0",
+  "localChecks": {
+    "fullVitest": {
+      "tests": 4569,
+      "passed": 4569,
+      "failed": 0,
+      "skipped": 0,
+      "files": 614,
+      "success": true,
+      "startTime": 1788193819264
+    },
+    "focusedTests": 53,
+    "postgresTests": 12,
+    "postgresSkipped": 0,
+    "typescriptExitCode": 0,
+    "lintErrors": 0,
+    "lintWarnings": 956,
+    "protectedFeatures": 38,
+    "protectedWarnings": 0,
+    "buildExitCode": 0,
+    "staticPages": 118,
+    "buildId": "IIxqG8mHSineTweQjXWsg",
+    "review": "独立只读审查完成，已报告问题均已修复；限定范围未发现剩余明确阻断"
+  },
+  "cloud": {
+    "projectUrl": "https://code.coze.cn/p/7671964106919837702/preview",
+    "previewUrl": "https://62afe49a-716e-4d9e-99cd-a0be49c4794c-5000.dev.coze.site/",
+    "browser": "Google Chrome",
+    "correctTabsListed": true,
+    "projectClaimTimeoutSeconds": 35,
+    "syncSentThisTurn": false,
+    "paidRequestsThisTurn": 0,
+    "newCandidateVerified": false,
+    "historicalTaskId": "refine-1788190957385-3l3pji",
+    "historical12CreditsSettled": false
+  },
+  "limits": [
+    "本地路由测试中供应商I/O为替身；PostgreSQL专项连接真实本地隔离库，不是云端账务",
+    "中间全量运行的11项TEST_POSTGRES_URL缺失跳过已补跑，并在最终全量4569项中全部执行；旧结果保留",
+    "记录所有中间RED/兼容失败/类型失败，不按断言数重复登记Bug",
+    "本轮未取得云端新版截图、录像、Trace、出图与积分流水证据",
+    "任务级幂等不等于任意新POST的业务去重",
+    "上游受理后remoteTaskId持久化前重启仍有不确定窗口；不重发，采用提交超时结算",
+    "原始本地证据不上传；本索引记录其SHA256供复核"
+  ],
+  "artifacts": [
+    {
+      "path": "src/app/api/refine-engine/route.ts",
+      "bytes": 51100,
+      "sha256": "9db76899b6d01eec92278eb8ffb279b1da5da5eaa5bc87d5181aaea7c1c6557e"
+    },
+    {
+      "path": "src/app/api/poll-task/route.ts",
+      "bytes": 170544,
+      "sha256": "5cf4502c36a850932a0a44b6b16c230850eb6d162fe127d3bd821bc8bb41106a"
+    },
+    {
+      "path": "src/app/api/cancel-task/route.ts",
+      "bytes": 10279,
+      "sha256": "9bf66206052f86c58fdc70e2096e9d512baa8a0854b48cef5b5a84097aa375f1"
+    },
+    {
+      "path": "src/lib/refine-task-lifecycle.ts",
+      "bytes": 4559,
+      "sha256": "6da68239195c0dd1d8605d8ed2f2556a936085951f83b2ab11b283681ec9cea8"
+    },
+    {
+      "path": "src/__tests__/api/refine-async-terminal-contract.test.ts",
+      "bytes": 21101,
+      "sha256": "1b5dd0de90fa44a4fc23d7d645105b78518ffb0efebf651a14494c3e6e455737"
+    },
+    {
+      "path": "src/__tests__/api/tool-image-preflight-billing.test.ts",
+      "bytes": 12623,
+      "sha256": "eb9d5009681a6d7211fed4a2a414907b7f323ab71d426de23b971b0aab1c6047"
+    },
+    {
+      "path": "tests/integration/refine-settlement-postgres.test.ts",
+      "bytes": 5281,
+      "sha256": "ada1768d2659ff429aab8b83e5cba5e5f05e36bbc6ddca3a0065efa3dca4f2da"
+    },
+    {
+      "path": "docs/testing/baselines/protected-baseline-allowed-paths.json",
+      "bytes": 11980,
+      "sha256": "71dfe7993550852b3099d6f109d5582a11059e8347de66b92618bc12a1abf0a1"
+    },
+    {
+      "path": ".playwright-cli/tool-minimal-cloud-20260831/refine-scheme-a-build-final.log",
+      "bytes": 8111,
+      "sha256": "37f7cbc3dd35308a0208b34798e5db991c2440e8799f213064d75f9410d66baf"
+    },
+    {
+      "path": ".playwright-cli/tool-minimal-cloud-20260831/refine-scheme-a-build-release.log",
+      "bytes": 8199,
+      "sha256": "1365673dcdd1c0591b128a921a0a8c544553745d07b498ea9d9b9013b4bdcfa8"
+    },
+    {
+      "path": ".playwright-cli/tool-minimal-cloud-20260831/refine-scheme-a-build-verified.log",
+      "bytes": 8111,
+      "sha256": "7cd5ced04b922fa10a8ee14e5d3d40bbde800cf0ae94cfd33029561bae59fabb"
+    },
+    {
+      "path": ".playwright-cli/tool-minimal-cloud-20260831/refine-scheme-a-build.log",
+      "bytes": 8289,
+      "sha256": "0e8b5f864e616770e4602d8eb760dd4dfc2918e9ee88f2c72f424558090e1321"
+    },
+    {
+      "path": ".playwright-cli/tool-minimal-cloud-20260831/refine-scheme-a-compat.json",
+      "bytes": 15293,
+      "sha256": "bdde9d4f4383d8081bea58154c7b27a1247a16ec589dbb6f94932b215f4918e0"
+    },
+    {
+      "path": ".playwright-cli/tool-minimal-cloud-20260831/refine-scheme-a-consumer-final.json",
+      "bytes": 17960,
+      "sha256": "0f6d8643af9c2c0df634bdc53dd560b662105ac7f7ce4aaef16d328a050a6e0d"
+    },
+    {
+      "path": ".playwright-cli/tool-minimal-cloud-20260831/refine-scheme-a-consumer-green.json",
+      "bytes": 27408,
+      "sha256": "456071f4781c1a7136f4a63c5424b81be740e983aff88a5f162bdbd7adde1628"
+    },
+    {
+      "path": ".playwright-cli/tool-minimal-cloud-20260831/refine-scheme-a-consumer-red.json",
+      "bytes": 12089,
+      "sha256": "4205608bb876b3d6b74ac2b87abeeecc5d165bd16055dbeb6e5a47f6dc0d918e"
+    },
+    {
+      "path": ".playwright-cli/tool-minimal-cloud-20260831/refine-scheme-a-first.json",
+      "bytes": 5482,
+      "sha256": "d15caa6a3c7e0abdd147488ca6480aa441dabfb95dfaaec74fd8f7f35b5b1667"
+    },
+    {
+      "path": ".playwright-cli/tool-minimal-cloud-20260831/refine-scheme-a-full-final.json",
+      "bytes": 1627513,
+      "sha256": "383a647310a7a6c37a16dc20c23148328cd3f95a0f6483166df19ade78306be4"
+    },
+    {
+      "path": ".playwright-cli/tool-minimal-cloud-20260831/refine-scheme-a-full.json",
+      "bytes": 1616889,
+      "sha256": "9634b85236a85567eb3c86d085ae09f2c140e893ec65a351d19e0a774198feaf"
+    },
+    {
+      "path": ".playwright-cli/tool-minimal-cloud-20260831/refine-scheme-a-lint-all-release.json",
+      "bytes": 7949734,
+      "sha256": "9c5b29d1ed2abff762bff80cdd7dcdfbfed011fbe5cbd9bce547a85ac4ce12d5"
+    },
+    {
+      "path": ".playwright-cli/tool-minimal-cloud-20260831/refine-scheme-a-lint-final-focused.json",
+      "bytes": 234821,
+      "sha256": "d47ec91f6b29478b14673f7a06471850ce648178d23e92ffa1795af3d4e8662f"
+    },
+    {
+      "path": ".playwright-cli/tool-minimal-cloud-20260831/refine-scheme-a-lint-release.json",
+      "bytes": 235803,
+      "sha256": "9f66a4bd680c14f2b725a3699e208d0a19bcd8a007c91b4b519a24b109db128a"
+    },
+    {
+      "path": ".playwright-cli/tool-minimal-cloud-20260831/refine-scheme-a-lint.json",
+      "bytes": 7948556,
+      "sha256": "894ccdf1ba3266f04e0fc16270285798a67465aaa4cd3731768215304d2cbc06"
+    },
+    {
+      "path": ".playwright-cli/tool-minimal-cloud-20260831/refine-scheme-a-postgres-final.json",
+      "bytes": 6023,
+      "sha256": "9d8761d937e41900f336b3a157301ff89feb6e7227f6f1928bf790a83a5604b9"
+    },
+    {
+      "path": ".playwright-cli/tool-minimal-cloud-20260831/refine-scheme-a-postgres.json",
+      "bytes": 1104,
+      "sha256": "7cce13580daab0a422156db275efb66b13155837d942ef60678c7328187cb1a6"
+    },
+    {
+      "path": ".playwright-cli/tool-minimal-cloud-20260831/refine-scheme-a-protected-release.log",
+      "bytes": 757,
+      "sha256": "64f37959e08855099e15cd2572dcb8b5e8e37eba20bc3f4aaffbbb94382fa561"
+    },
+    {
+      "path": ".playwright-cli/tool-minimal-cloud-20260831/refine-scheme-a-protected-verified.log",
+      "bytes": 757,
+      "sha256": "64f37959e08855099e15cd2572dcb8b5e8e37eba20bc3f4aaffbbb94382fa561"
+    },
+    {
+      "path": ".playwright-cli/tool-minimal-cloud-20260831/refine-scheme-a-protected.log",
+      "bytes": 757,
+      "sha256": "64f37959e08855099e15cd2572dcb8b5e8e37eba20bc3f4aaffbbb94382fa561"
+    },
+    {
+      "path": ".playwright-cli/tool-minimal-cloud-20260831/refine-scheme-a-recovery-green.json",
+      "bytes": 17210,
+      "sha256": "000f9609b7945ef9ff7724ec368a7cf64ee0b23914b4806bff8bcdad32a49b5a"
+    },
+    {
+      "path": ".playwright-cli/tool-minimal-cloud-20260831/refine-scheme-a-recovery-red.json",
+      "bytes": 9403,
+      "sha256": "9119a0e1ec5a1bff50f0a2f3acc9b3d2183955de3f917e1ec5eaa958077e769c"
+    },
+    {
+      "path": ".playwright-cli/tool-minimal-cloud-20260831/refine-scheme-a-red.json",
+      "bytes": 14300,
+      "sha256": "96ab22f7a082e8e3cd8a2c1e81e7cd0799144a5a7db02350cabae0d5c50df6a4"
+    },
+    {
+      "path": ".playwright-cli/tool-minimal-cloud-20260831/refine-scheme-a-release-full.json",
+      "bytes": 1618584,
+      "sha256": "921c7c604ee422e858bf46932a43a3664852df5baa9c5c2f3a433ced0e179db5"
+    },
+    {
+      "path": ".playwright-cli/tool-minimal-cloud-20260831/refine-scheme-a-restart-green.json",
+      "bytes": 18666,
+      "sha256": "ff4203c83a5177eb6eb65dfa8e13d98f94dd71ddbac4a3f77924b316a0f542cd"
+    },
+    {
+      "path": ".playwright-cli/tool-minimal-cloud-20260831/refine-scheme-a-restart-red.json",
+      "bytes": 10854,
+      "sha256": "fe169b70362ca9745e67e6197a777009e6a5faa359c91cccdeac57a4478ba5a9"
+    },
+    {
+      "path": ".playwright-cli/tool-minimal-cloud-20260831/refine-scheme-a-review-green.json",
+      "bytes": 17202,
+      "sha256": "1ed6322e45442523795f1d0869aa89c998cf345ec1f1e0160f0b8de392c62c25"
+    },
+    {
+      "path": ".playwright-cli/tool-minimal-cloud-20260831/refine-scheme-a-review-red.json",
+      "bytes": 7812,
+      "sha256": "2e28fe3bc5f43a094937dc9edf63a12863c27f6bbedb61294ff60e48b4129268"
+    },
+    {
+      "path": ".playwright-cli/tool-minimal-cloud-20260831/refine-scheme-a-typecheck-final.log",
+      "bytes": 3007,
+      "sha256": "d226586dd4a6ae20beca650d8f8afcee6d071e6ba8f2024a76515e4dd5d03446"
+    },
+    {
+      "path": ".playwright-cli/tool-minimal-cloud-20260831/refine-scheme-a-typecheck-release.log",
+      "bytes": 559,
+      "sha256": "40eba521b9896c1e7a70b896c66b834889cb1549e0030cd9e044a4b459e08fea"
+    },
+    {
+      "path": ".playwright-cli/tool-minimal-cloud-20260831/refine-scheme-a-typecheck-verified.log",
+      "bytes": 185,
+      "sha256": "e9fcac6c85a98654110661707b89c6f676f91ba145cc31cec6ebe37624a66a35"
+    },
+    {
+      "path": ".playwright-cli/tool-minimal-cloud-20260831/refine-scheme-a-typecheck.log",
+      "bytes": 185,
+      "sha256": "e9fcac6c85a98654110661707b89c6f676f91ba145cc31cec6ebe37624a66a35"
+    }
+  ]
+}

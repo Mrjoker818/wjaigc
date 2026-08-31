@@ -1,0 +1,101 @@
+{
+  "recordedAt": "2026-09-01T00:01:00+08:00",
+  "candidateCommit": "3daa1043968cd0d7144699b67b7c797656c7d525",
+  "remoteMainVerified": true,
+  "bugId": "V588-TOOLS-BUG-002",
+  "productionCodeChanged": false,
+  "stableTouched": false,
+  "donorReadOnly": true,
+  "realPaidRequestsThisTurn": 0,
+  "cloudDiagnosisFinalRead": false,
+  "conclusion": "不通过：根因已隔离复现，业务尚未修复",
+  "testFile": "src/__tests__/api/refine-async-terminal-contract.test.ts",
+  "runs": [
+    {
+      "name": "首次RED",
+      "tests": 4,
+      "passed": 1,
+      "failed": 3,
+      "skipped": 0
+    },
+    {
+      "name": "持久化对照",
+      "tests": 5,
+      "passed": 2,
+      "failed": 3,
+      "skipped": 0
+    },
+    {
+      "name": "最终含取消保护",
+      "tests": 6,
+      "passed": 3,
+      "failed": 3,
+      "skipped": 0
+    }
+  ],
+  "eslintExitCode": 0,
+  "typecheckExitCode": 0,
+  "fullSuiteRerun": false,
+  "buildRerun": false,
+  "implementationApproval": "pending",
+  "limitations": [
+    "供应商与数据库I/O为隔离替身，登录和积分为测试上下文，不是真实账务验证",
+    "原POST/原poll/原注册中心/原持久化业务层及task-service均实际执行",
+    "云端同任务供应商最终状态、准确数据库与12积分补偿仍待核查",
+    "V5.8.8仅源码只读比较，未执行其完整应用"
+  ],
+  "artifacts": [
+    {
+      "path": "src/__tests__/api/refine-async-terminal-contract.test.ts",
+      "sha256": "181c66e4283b36adc3b0118cee86a79b769374d6ba326fddba602f0f6895885c"
+    },
+    {
+      "path": "src/app/api/refine-engine/route.ts",
+      "sha256": "fdcaf215a96c7c63452bf24728466d3cfede4675961488f229544470d75370b3"
+    },
+    {
+      "path": "src/app/api/poll-task/route.ts",
+      "sha256": "25a90dac84faed8970ceeec499ffa7211ed5c9a9d868bd895dc1cc2fc6d6f064"
+    },
+    {
+      "path": "src/lib/cloud-task-persistence.ts",
+      "sha256": "76e5a1ef8061a7f841e3f3d52cbf54c128614faff530c2d062fd735b7261a0c5"
+    },
+    {
+      "path": "src/lib/task-core/task-service.ts",
+      "sha256": "6d9058ff50bfeffa7e16f49f9177b8b7371182490920ab901dc5fe42db0303ae"
+    },
+    {
+      "path": "J:/无界云端0820/src/app/api/refine-engine/route.ts",
+      "sha256": "3f8f9b0983c805069b23539b6d8ae077a9b334049b28d5b5d8eb708394c35264"
+    },
+    {
+      "path": "J:/无界云端0820/src/app/api/poll-task/route.ts",
+      "sha256": "14965897405dfb1ba9a6b8806eb98831c0a963163d7d7f86c44c79715e80cccd"
+    },
+    {
+      "path": ".playwright-cli/tool-minimal-cloud-20260831/refine-async-red.json",
+      "sha256": "c55af198e1ad5c80d3087f912f1d6a88f259d2202310ec991407683b078f3bd1"
+    },
+    {
+      "path": ".playwright-cli/tool-minimal-cloud-20260831/refine-async-red.txt",
+      "sha256": "f82d8a4d067403acbd12fce5e689ba9c03e69ef4fe444acd3eaf5cca1aca84e1"
+    },
+    {
+      "path": ".playwright-cli/tool-minimal-cloud-20260831/refine-async-red-control.json",
+      "sha256": "6a2b1d37659595a428e20ab12ee108691fcfd395dfc10726d4f98c94454401fc"
+    },
+    {
+      "path": ".playwright-cli/tool-minimal-cloud-20260831/refine-async-red-control.txt",
+      "sha256": "c426dcb19e0930304a6596f093279120a872d1fdf57495b6f853c9bfbd79daf0"
+    },
+    {
+      "path": ".playwright-cli/tool-minimal-cloud-20260831/refine-async-red-final.json",
+      "sha256": "949b1e569b133f4385ac75ca97e2f7cc12860203edc25d91168a6d5a5f2a09d1"
+    },
+    {
+      "path": ".playwright-cli/tool-minimal-cloud-20260831/refine-async-red-final.txt",
+      "sha256": "5b2b6d764f9cb5f98e24a0506908b6317a3d2b861c4f48eeb810ffcf0c78ae2d"
+    }
+  ]
+}

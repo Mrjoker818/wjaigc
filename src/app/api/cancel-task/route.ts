@@ -43,6 +43,7 @@ function requiresAtomicTerminalSettlement(task: AtomicTerminalTaskCandidate | nu
     || task?.type === 'video-extend'
     || task?.type === 'edit'
     || task?.type === 'annotation-edit'
+    || task?.type === 'refine-engine'
   ) return true;
 
   return hasDurableGenerationSlotIdentity(task);
