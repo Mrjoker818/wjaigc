@@ -2,6 +2,8 @@
 
 ## 当前检查点：2026-08-31
 
+**21:53实际推进：** Chrome恢复，品牌首次/重试402、非JSON 502和连接中断4项已部署前端注入回归通过；BUG-002/003仅前端有条件通过，真实后端负向/退款继续待验。BUG-004保持关闭，BUG-005规格待批准，新OBS-007仅记录英文网络提示。清除拦截、强刷与真实积分核对后，5图/4880积分/3条流水不变，无新增付费任务。唯一断点`docs/testing/V588_PROVIDER_003_ACCEPTANCE.md`及negative证据索引。没有源码修改或重开Stage4/PROVIDER-002，不提前后续批次，不重复已完成生成/4470门禁，stable/donor不动。
+
 **21:41增量：** 原PROVIDER-003观察按当前源码与只读donor各运行7项隔离行为探针，两次完整结果一致，各6失败/1对照通过。BUG-005由OBS-005升格：品牌辅助菜单/请求丢供应商；OBS-002字境候选、OBS-003精修回退取得函数级复现，并补OBS-006品牌选择器回退。同样存在于donor，禁止直接覆盖。只有行为证据，没有生产代码改动；品牌辅助两个前端组件的独立最小规格待批准。证据见`docs/testing/evidence/v588-provider-003-selection-probes-20260831.json`。Chrome原页再次接管超时，BUG-002/003云端负向项未执行；BUG-004已关闭状态保留。当前目标active，后续批次不提前。
 
 **当前覆盖（21:28）：** fac43cbf含源码9b2e8d5f已在正确Coze同步并重启，合并c6b8cabb的tree/src tree匹配；Build ID D12Ets9rxSINh8SeuecwS。Google Chrome原预览强刷后，APImart一次真实品牌任务47秒两图、逐张回显、改选Pear后来源不变、服务端5图保存与再次强刷恢复通过，BUG-004关闭；单次-60、余额4880已核实。BUG-002/003新版负向场景与PROVIDER-003其余入口仍待验，不关闭整项、不提前批次B。既有60专项/4470全量/构建门禁不重跑，Stage4/PROVIDER-002不重开、Pear分层延期、stable/donor只读。唯一断点`docs/testing/V588_PROVIDER_003_ACCEPTANCE.md`；24份云端原件哈希见同目录evidence/v588-provider-003-brand-cloud-20260831.json。3条平台资源失败、积分日期NaN与录像/Trace缺失均保留。下方未同步/待批准为历史，不重复操作。

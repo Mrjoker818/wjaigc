@@ -1,0 +1,187 @@
+{
+  "title": "品牌电商已部署前端异常注入验收",
+  "recordedAt": "2026-08-31T13:53:00.638Z",
+  "repositoryCommit": "33341393620a32f205cc84b10383a01205aba5a2",
+  "sourceCommit": "9b2e8d5f4f986a1379d1ad623e64dd5247937495",
+  "sourceTree": "cdbb004d11b5f710a7a6fb0327bd641dbbd74cd6",
+  "preview": "https://62afe49a-716e-4d9e-99cd-a0be49c4794c-5000.dev.coze.site/",
+  "browser": "Google Chrome，原有标签页",
+  "environment": "已部署前端，Request阶段注入，不转发后台",
+  "lastVerifiedBuildId": "D12Ets9rxSINh8SeuecwS",
+  "buildIdRecheckedThisRun": false,
+  "scopeConclusion": "前端异常回归有条件通过；真实后端失败/退款未验证；PROVIDER-003整项不通过",
+  "testCases": 4,
+  "frontendCasesPassed": 4,
+  "checks": {
+    "recordedAt": "2026-08-31T13:53:00.638Z",
+    "testKind": "deployed-frontend-fault-injection",
+    "first402": {
+      "fullErrorVisible": true,
+      "retryEnabled": true,
+      "generationEnabled": true,
+      "source": "first-402-dom.txt and subsequent locator assertions"
+    },
+    "retry402": {
+      "fullErrorVisible": true,
+      "retryEnabled": true,
+      "generationEnabled": true,
+      "templateIds": [
+        "white-bg"
+      ],
+      "pendingRetryDisabled": true,
+      "screenshotNote": "retry-402.png captured transient state; not terminal evidence; terminal established by later locator assertions"
+    },
+    "nonJson502": {
+      "retryEnabled": true,
+      "generationEnabled": true,
+      "safeMessage": true
+    },
+    "networkFailure": {
+      "retryEnabled": true,
+      "generationEnabled": true,
+      "errorVisible": true,
+      "elapsed": [
+        "总耗时 4s"
+      ]
+    },
+    "timerStoppedAt": "总耗时 4s",
+    "interceptionCleared": {
+      "method": "Fetch.enable",
+      "patterns": [],
+      "at": "2026-08-31T13:51:11.676Z"
+    },
+    "finalCanvasCheck": {
+      "imageCount": 5,
+      "apimartLabels": 2
+    },
+    "creditsAfter": {
+      "balance": 4880,
+      "totalUsed": 120,
+      "totalRecharged": 5000,
+      "transactions": 3,
+      "requestIds": [
+        "23152.3147",
+        "23152.3150"
+      ]
+    },
+    "chargeDelta": 0,
+    "providerSubmissions": 0,
+    "networkCaptureTruncated": true,
+    "video": false,
+    "trace": false
+  },
+  "newObservation": "V588-PROVIDER-003-OBS-007：连接失败只显示英文Failed to fetch",
+  "limits": [
+    "不是供应商真实失败或退款测试",
+    "没有录像/完整Trace",
+    "网络环形缓冲截断，仅保留后段1000事件，不能宣称全程零异常",
+    "四个拦截请求独立保存完整，无凭据Header",
+    "retry-402.png为短暂状态；终态依后续定位器断言，不冒充终态截图",
+    "手工拦截停留时间不代表后台耗时",
+    "Fetch.disable工具拒绝后改用受支持的Fetch.enable空patterns清除规则",
+    "一次回画布点击派发前超时，读取页面确认仍在仪表盘后重试成功"
+  ],
+  "artifactDirectory": "J:/无界本地版/projects/_upstream-wjaigc-restore/.playwright-cli/brand-negative-cloud-20260831",
+  "artifacts": [
+    {
+      "file": "before-submit.png",
+      "bytes": 156077,
+      "sha256": "1a1ad5622dbd228d3ade84b8b2ebe325c2a6b7c8453a0229dc47da480e281e8d"
+    },
+    {
+      "file": "checks.json",
+      "bytes": 1385,
+      "sha256": "94330e31a547d264cbe851eca4a1cd30d4cfa7090d5b0bd37317ec812ff3c9df"
+    },
+    {
+      "file": "console.json",
+      "bytes": 4298,
+      "sha256": "e453db2101f310f18bf4dde06ccf7c6ef4f3eb1e41ad3c8de271a19f613e5b84"
+    },
+    {
+      "file": "credits-after-dom.txt",
+      "bytes": 1425,
+      "sha256": "f9e444aadd40e1046b337a17d99a45ba64a001724964aa76427799c656baf335"
+    },
+    {
+      "file": "credits-after-response.json",
+      "bytes": 858,
+      "sha256": "a167f809364928134b01e9e766089edf2acd9f379d098500721efadf9e37493a"
+    },
+    {
+      "file": "credits-after.png",
+      "bytes": 54061,
+      "sha256": "455ea2b9e9ed44b6801eea932b945a18ced063955501939502d79cbad554eeca"
+    },
+    {
+      "file": "final-canvas-dom.txt",
+      "bytes": 4038,
+      "sha256": "fb490e6f8163d847b58d30a8ad619ce916833a0f4b08bc9b7843ae87752d3238"
+    },
+    {
+      "file": "final-canvas.png",
+      "bytes": 144104,
+      "sha256": "907ef4d7c113e9b4d1cd60766e3aa8e2f8dbdd60472d6ac798b1bff01f7b5857"
+    },
+    {
+      "file": "first-402-dom.txt",
+      "bytes": 4644,
+      "sha256": "4d883ba65b902e589bb65d8907c076b48b3cc1a68f3a846e3785f0146a7ce256"
+    },
+    {
+      "file": "first-402.png",
+      "bytes": 155302,
+      "sha256": "926fec19bcb93c138df43a86e9fc3c1ffcd993b1aa748fd9a8a3a7b1bd32a28b"
+    },
+    {
+      "file": "intercepted-requests.json",
+      "bytes": 3284,
+      "sha256": "91dd25f25925ee99da11a6f2003ed6b19e4754e0b5fa63a9e2a4991accd75855"
+    },
+    {
+      "file": "network.json",
+      "bytes": 97714,
+      "sha256": "8f7384a478f06460f6f6cc1d5dfaf05121e8784e40b273866379b457ab7fd8fb"
+    },
+    {
+      "file": "restored-canvas-dom.txt",
+      "bytes": 3950,
+      "sha256": "4695fd3665a5d0723882f514ca81e50a0b588748eb4093c808aaa3259b943846"
+    },
+    {
+      "file": "restored-canvas.png",
+      "bytes": 142618,
+      "sha256": "9d497b12082c43b159eaf26f1bbd1e2de860e3af040bd9ffa7f630dfbec8d735"
+    },
+    {
+      "file": "retry-402-dom.txt",
+      "bytes": 4643,
+      "sha256": "31986782dffa237f9e930ca8cab563fdd61e8529a752f594757c1665fb72bcbf"
+    },
+    {
+      "file": "retry-402.png",
+      "bytes": 155532,
+      "sha256": "25958121a7613363722cbabc28ef18eb6eee867215a6769172fc8cae7f64bc6b"
+    },
+    {
+      "file": "retry-502-dom.txt",
+      "bytes": 4399,
+      "sha256": "dd736b61dfd5b3c3e3b652f12980e53ddbcc821938f351708543efc4949f30cf"
+    },
+    {
+      "file": "retry-502.png",
+      "bytes": 148728,
+      "sha256": "1dbdd11aa39cdc2aa753485045c1f329c8a5094203c0ba559641b5d66c537d7f"
+    },
+    {
+      "file": "retry-network-dom.txt",
+      "bytes": 4355,
+      "sha256": "cfceff31e630e1953557ae04e0fdf2f2be86b60a779702e201688f782e074d9c"
+    },
+    {
+      "file": "retry-network.png",
+      "bytes": 147524,
+      "sha256": "ba236d727525406784bedf24f2019ddc024e15e22773222bdfa47c0827a21ed9"
+    }
+  ]
+}

@@ -65,7 +65,8 @@ expect(partial.results[0]).toMatchObject(result.results[0]);
 - [x] push origin main后复读fac43cbf及stable不变；源码9b2e8d5f已包含，实际回执记录于Obsidian。
 - [x] 原Coze同步一次并完成构建/单服务重启；合并c6b8cabb的tree/src tree匹配，Build ID D12Ets9rxSINh8SeuecwS，随后强刷原Chrome预览。
 - [x] APImart真实单次任务ecom-1788182668572-7rblj5完成两图；部分/最终身份、改选Pear不污染、入画布/服务端保存/强刷恢复通过，BUG-004关闭。新增一笔-60，余额4880；不扩展为并发/退款通过。
-- [ ] 新版云端失败重试收尾/真实模板ID与完整错误提示负向验收（BUG-002/003）；本次正向任务不替代，未人为变更权限/余额或重复消耗强造失败。
+- [x] 新版已部署前端异常注入：首次/重试402、非JSON 502、连接中断4项实际UI操作，收尾/真实模板ID/完整错误提示通过；浏览器截断请求，无后台任务或扣费。清除拦截后强刷，5图/4880积分/3条流水保持。
+- [ ] 真实后端拒绝/失败的严格负向验收（BUG-002/003）；前端注入与既有正向任务均不替代，未人为变更权限/余额或重复消耗强造失败。索引evidence/v588-provider-003-brand-negative-20260831.json。
 
 云端证据索引：docs/testing/evidence/v588-provider-003-brand-cloud-20260831.json。24份原件仅本地；未生成完整录像/Trace，3条Coze注入脚本加载失败与积分日期NaN保留。没有重跑本地门禁或改业务源码。
 
