@@ -1,5 +1,6 @@
 {
   "recordedAt": "2026-09-01T00:39:48.6804297+08:00",
+  "latestCloudEvidence": "refine-scheme-a-cloud-20260901.json",
   "bugId": "V588-TOOLS-BUG-002",
   "codeCommit": "bf2b8ec529112e7df29219600cbe5d7dedaad5bb",
   "sourceTree": "352efb3bcbc3fbc5d615da87dd31a6902d0d5a58",

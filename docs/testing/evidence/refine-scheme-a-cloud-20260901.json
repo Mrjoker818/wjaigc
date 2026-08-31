@@ -1,0 +1,177 @@
+{
+  "recordedAt": "2026-09-01T00:58:00+08:00",
+  "bugId": "V588-TOOLS-BUG-002",
+  "conclusion": "不通过：同步已完成，平台交付后静态资源500和Chrome断连阻止真实精修提交",
+  "sourceCommit": "b8b090f0a96559fd9a8f78cb68c181f05981c974",
+  "sourceTree": "352efb3bcbc3fbc5d615da87dd31a6902d0d5a58",
+  "cozeMergeCommit": "e79b57bf087751d5b34d1460909a8466440add93",
+  "fullTree": "e7a670dd25c87f461182cb86e7062ad9a53a14ba",
+  "platformDeliveryVersion": "e1f69b0",
+  "platformDeliverySourceTreeIndependentlyRead": false,
+  "environment": {
+    "browser": "Google Chrome",
+    "projectUrl": "https://code.coze.cn/p/7671964106919837702/preview",
+    "previewUrl": "https://62afe49a-716e-4d9e-99cd-a0be49c4794c-5000.dev.coze.site/",
+    "appVersion": "4.1.0",
+    "packageVersion": "4.0.0",
+    "stableTouched": false,
+    "newTabsOpened": 0
+  },
+  "sync": {
+    "instructionsSent": 1,
+    "treeOutputRead": true,
+    "focusedTestsPassed": 53,
+    "focusedFiles": 2,
+    "protectedFeatures": 38,
+    "protectedWarnings": 0,
+    "reportedBuildPages": 118,
+    "reportedBuildId": "XsOly39bCTPJQIRFTZhV-",
+    "reportedServerPid": 3730,
+    "reportedAnonymousAuthResponse": {
+      "success": true,
+      "user": null
+    },
+    "anonymousProbeIsLoginProof": false
+  },
+  "browserEvidence": {
+    "account": "canvas-user",
+    "balance": 4806,
+    "ledgerEntries": 6,
+    "loadedCanvasImages": 6,
+    "imageWidth": 1254,
+    "imageHeight": 1254,
+    "source": "/api/serve-upload/uploads/gen-1788190766553-hmtu57.png",
+    "selectedProvider": "APImart imgae",
+    "model": "gpt-image-2",
+    "ratio": "1:1",
+    "quality": "中",
+    "paidRequests": 0,
+    "generatedResults": 0,
+    "newCreditsConsumed": 0
+  },
+  "historicalDiagnosis": {
+    "taskId": "refine-1788190957385-3l3pji",
+    "remoteTaskId": "task_01M1C7SFPS5H6KPZD05EZ7TMPJ",
+    "evidence": "Coze开发库限定查询与精确任务日志",
+    "remoteCompleted": true,
+    "cloudTaskRowMissing": true,
+    "creditsCharged": 12,
+    "creditsRefunded": false,
+    "compensationPerformed": false
+  },
+  "observations": [
+    {
+      "id": "browser-inspector",
+      "error": "ERR_BLOCKED_BY_CLIENT",
+      "blockedReason": "inspector",
+      "recoveredBy": "原标签正常导航",
+      "securityDisabled": false
+    },
+    {
+      "id": "post-delivery-static-assets",
+      "status": 500,
+      "paths": [
+        "/_next/static/chunks/4bd1b696-e356ca5ba0218e27.js",
+        "/_next/static/chunks/app/layout-04dc5d5d171b6d4a.js",
+        "/_next/static/chunks/main-app-97f5a3d94717ba17.js",
+        "/_next/static/chunks/app/page-e644bf085753358b.js"
+      ],
+      "authRequestObserved": false,
+      "rootCause": "未确定：自动构建与运行服务衔接待核实",
+      "diagnosticInstructionSent": false
+    },
+    {
+      "id": "chrome-transport",
+      "runningCheck": 0,
+      "extensionCheck": 0,
+      "nativeHostCheck": 0,
+      "connection": "重连能枚举原标签，接管时再次断开"
+    }
+  ],
+  "limits": [
+    "未完成本候选真实精修结果、保存恢复、下载与账务验收",
+    "无本轮完整录像或Trace，不以截图代替",
+    "首次网络缓冲truncated=true，交付后500窗口truncated=false",
+    "原始页面/日志只在本地保留，不上传潜在私有信息",
+    "未重复本地4569项、品牌成功任务或Coze同步",
+    "平台e1f69b0元数据之后的最终源码/Build ID/服务仍待读取，不根据同源页面臆断"
+  ],
+  "artifactRoot": ".playwright-cli/refine-scheme-a-cloud-20260901",
+  "artifacts": [
+    {
+      "file": "coze-focused-tests.txt",
+      "bytes": 2043,
+      "sha256": "a852fb022f3f5a2b3041875a54e2cd9bea58348e3858beec8a6a66a4429a3524"
+    },
+    {
+      "file": "coze-protected-baseline.txt",
+      "bytes": 705,
+      "sha256": "01965221e2fefc4da782c1e3231462cc4d6e03537aa5b879b1978457b150325a"
+    },
+    {
+      "file": "coze-refine-diagnosis.txt",
+      "bytes": 4381,
+      "sha256": "13b8d23bc946f8e692eee3cec8d0a86123f2733bb7519444ce4dbd62968813ee"
+    },
+    {
+      "file": "coze-source-tree.txt",
+      "bytes": 2164,
+      "sha256": "a74f12a303522ae0986d4a1ac2e614e0f968b1f590bd8e7f9f2ec8d675ea38a5"
+    },
+    {
+      "file": "coze-sync-after-send.txt",
+      "bytes": 3796,
+      "sha256": "0e61dac9b878c66a83422c1eba99c1ca0cf9ca9fec1a35c50825f078e9d0b46a"
+    },
+    {
+      "file": "coze-sync-final.txt",
+      "bytes": 36173,
+      "sha256": "da77b3665a28baf6c9878a9be59aeb694c3095b8b83ab42e81f1e27cdce72cf4"
+    },
+    {
+      "file": "coze-sync-instruction.txt",
+      "bytes": 2981,
+      "sha256": "c87aef921b6c31bc5252ddc0eabcd7565a9e2f0bd83379a9ddab60f33749392a"
+    },
+    {
+      "file": "credits-before.png",
+      "bytes": 70373,
+      "sha256": "ac3ec6b7e93c4d854dd0b5bc8dfb2175bf52a032075ebf3b09c79d570594f088"
+    },
+    {
+      "file": "credits-before.txt",
+      "bytes": 1844,
+      "sha256": "833ca2e449263a6e70be1a9906f5c90b09fba5041586c61ee79b32917a7054db"
+    },
+    {
+      "file": "post-delivery-chunk-errors.json",
+      "bytes": 3908,
+      "sha256": "d79f3ab90c22b8bba8a486289487ca4785b9a7c69a64e2552edff66be384d0e0"
+    },
+    {
+      "file": "preview-first-refresh-network.json",
+      "bytes": 22184,
+      "sha256": "3b3c6670a99159b422ec32b566d3039e1744eec05a8a47ff67e909680a0d4969"
+    },
+    {
+      "file": "preview-first-refresh.png",
+      "bytes": 23238,
+      "sha256": "db1ae66175677e255b0c028d8928144ba6610e7c1090b6cfc3120dbe802a0a35"
+    },
+    {
+      "file": "preview-navigation-recovered.png",
+      "bytes": 135517,
+      "sha256": "a6294fcdf02413776ce2775e8492200004c9f9478a669fea6ccc519a895d8a79"
+    },
+    {
+      "file": "refine-before-submit.png",
+      "bytes": 145704,
+      "sha256": "a2ccdfad481362fb8fa08bcc62b674e0f1dadb28848284834d4bd2ebaeb77fd4"
+    },
+    {
+      "file": "sandbox-disconnected.png",
+      "bytes": 137229,
+      "sha256": "4ab529bd4e3934befab365aa3c171c21b66c2ee5f1bdc5dc1aaa39183ddcf9af"
+    }
+  ]
+}
