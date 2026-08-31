@@ -1,0 +1,200 @@
+{
+  "记录日期": "2026-08-31",
+  "时区": "Asia/Shanghai",
+  "范围": "V588-PROVIDER-003 品牌图像供应商请求契约；不代表整项或全平台通过",
+  "基线提交": "05e8e721a01aa0378c672a5118937bb778d7f16a",
+  "候选源码树": "1a96fb9ab3e68243c53055ee963dee7e3ed5bf80",
+  "候选提交定位": "以包含本文件且src树匹配的main提交为准",
+  "稳定分支": "52f7c601ed150769e15d06fb435c6e360e28c9e7",
+  "应用版本": "4.1.0",
+  "package版本": "4.0.0",
+  "环境": {
+    "平台": "Windows",
+    "Next.js": "16.2.11",
+    "React": "19.2.3",
+    "Vitest": "3.2.4"
+  },
+  "缺陷": {
+    "编号": "V588-PROVIDER-003-BUG-001",
+    "来源": "OBS-001升格，去重计数；原基线已有，不由路由拆分引入",
+    "级别": "P1",
+    "状态": "本地修复，云端未验证",
+    "根因": "前端传imageProviderId但API读取providerId；同名模型菜单只更新裸模型，旧设置和品牌方案未完整保持供应商",
+    "修改范围": [
+      "src/components/brand-ecommerce-panel.tsx",
+      "src/components/brand-ecommerce/BrandSettingsForm.tsx"
+    ],
+    "未修改": [
+      "后端执行器",
+      "认证和登录",
+      "用户权限",
+      "供应商配置",
+      "扣费退款",
+      "模板和布局",
+      "stable",
+      "V5.8.8 donor"
+    ]
+  },
+  "专项": {
+    "测试文件": "src/__tests__/components/brand-ecommerce-provider-selection.test.tsx",
+    "边界": "渲染真实React父子组件；网络和存储隔离；没有模拟供应商生成成功",
+    "新增测试": 8,
+    "业务RED": {
+      "通过": 0,
+      "失败": 8,
+      "跳过": 0
+    },
+    "GREEN": {
+      "文件": 3,
+      "通过": 36,
+      "失败": 0,
+      "跳过": 0
+    },
+    "用例": [
+      "默认providerId字段",
+      "同名跨供应商切换",
+      "旧model/providerId恢复",
+      "React选项唯一键",
+      "单模板重试请求",
+      "歧义旧裸键拒绝猜测",
+      "品牌方案精确键加载",
+      "品牌方案精确键保存"
+    ]
+  },
+  "完整回归": {
+    "命令": "node node_modules/vitest/vitest.mjs run --reporter=default --reporter=json --outputFile=.playwright-cli/v588-provider-003-brand-full-20260831.json",
+    "开始": "2026-08-31T15:13:50+08:00",
+    "耗时秒": 599.67,
+    "文件": 608,
+    "通过": 4446,
+    "失败": 0,
+    "跳过": 0,
+    "todo": 0,
+    "退出码": 0,
+    "解释": "包括真实隔离PostgreSQL测试，不等同于真实供应商或浏览器E2E"
+  },
+  "类型检查": {
+    "最终退出码": 0,
+    "首次失败": "测试ByRoleOptions不支持exact，移除该测试参数后通过"
+  },
+  "Lint": {
+    "lintBuild退出码": 0,
+    "变更文件错误": 0,
+    "变更文件警告": 11,
+    "相同文件基线警告": 13,
+    "规则修改": false
+  },
+  "PostgreSQL": {
+    "版本": "18.4",
+    "监听": "127.0.0.1:55442",
+    "全新独立测试库": true,
+    "残留testSchema": 0,
+    "服务已停止": true,
+    "访问业务库": false
+  },
+  "保护门禁": {
+    "受保护功能ID": 38,
+    "缺失": 0,
+    "首次阻断": [
+      "src/components/brand-ecommerce-panel.tsx",
+      "src/components/brand-ecommerce/BrandSettingsForm.tsx"
+    ],
+    "处置": "只登记本次已批准两个精确路径，没有目录通配或规则放宽",
+    "最终未批准漂移": 0,
+    "最终警告": 0
+  },
+  "独立审查": {
+    "模型": "gpt-5.6-sol",
+    "推理": "medium",
+    "服务": "priority",
+    "只读": true,
+    "本次新增可证实缺陷": 0,
+    "审查智能体已关闭": true,
+    "遗留观察": [
+      "OBS-004 单模板同步重试或业务错误不完整收尾",
+      "OBS-005 品牌LLM菜单未成对切换供应商"
+    ],
+    "覆盖限制": [
+      "没有运行测试",
+      "缺重新挂载和旧唯一裸键的组件级专用覆盖",
+      "缺异步轮询期间切换供应商的组件级专用覆盖"
+    ]
+  },
+  "保留失败": [
+    "初始localStorage夹具缺clear，不算业务RED",
+    "测试exact选项导致首次TypeScript失败",
+    "保护门禁首次两个组件未登记，记录精确范围后通过",
+    "原工作目录默认约4GB Node堆构建OOM，退出134",
+    "原工作目录8GB构建被主动终止，未通过；改用同src树的独立检出构建，不能抹掉此前结果"
+  ],
+  "云端": {
+    "项目": "https://code.coze.cn/p/7671964106919837702/preview",
+    "预览": "https://62afe49a-716e-4d9e-99cd-a0be49c4794c-5000.dev.coze.site/",
+    "状态": "未验证",
+    "连接": "原Google Chrome实例不可用，未切换其他浏览器，未新建标签",
+    "Coze拉取发送": false,
+    "新增业务测试": 0,
+    "截图": 0,
+    "录像": 0,
+    "Trace": 0,
+    "真实供应商任务": 0,
+    "积分消耗": 0,
+    "未验证": [
+      "品牌真实生成及重试终态",
+      "结果供应商身份、画布落图、保存刷新及账务",
+      "精修引擎和字境大师真实链路",
+      "字境与精修显式供应商回退观察"
+    ]
+  },
+  "原件目录": ".playwright-cli（本地保留，不提交GitHub）",
+  "原件哈希": [
+    {
+      "文件": "v588-provider-003-brand-red-eight-20260831.json",
+      "sha256": "BB219087A5258A1B1590352276F2423DCB60D886A00461496F92D8CA076FAF36"
+    },
+    {
+      "文件": "v588-provider-003-brand-green-20260831.json",
+      "sha256": "6A34CA1B8501051055AED12743F412AFC7F2858093A7B638B29F6F95C5C55DA3"
+    },
+    {
+      "文件": "v588-provider-003-brand-full-20260831.json",
+      "sha256": "73714EBE6C3D38F53BD237351D27B5EBA26DA7F8B6612B20643CB67894C126DB"
+    },
+    {
+      "文件": "v588-provider-003-brand-typecheck-20260831.log",
+      "sha256": "E9FCAC6C85A98654110661707B89C6F676F91BA145CC31CEC6EBE37624A66A35"
+    },
+    {
+      "文件": "v588-provider-003-brand-lint-build-20260831.log",
+      "sha256": "0ECE6EC2E81062F38CC9EAA9014A13619DE9B16452A2796996F2B7A28F3B8FB5"
+    },
+    {
+      "文件": "v588-provider-003-brand-changed-lint-20260831.json",
+      "sha256": "9ED8A118B2D3B73EAA808A43A03209F9FA73F8089D1E992F98C6F8521BF3E0E1"
+    },
+    {
+      "文件": "v588-provider-003-brand-build-20260831.log",
+      "sha256": "2C189EE8D808BB54199B3CC01D093C27CDE77CC9200F05F0A052CA1D6BB443D6"
+    },
+    {
+      "文件": "v588-provider-003-brand-build-8gb-20260831.log",
+      "sha256": "99622252E64C32F9B6E88511927DDF368845BE96521EBFCF8B45D1B28D881479"
+    },
+    {
+      "文件": "v588-provider-003-brand-build-clean-20260831.log",
+      "sha256": "400E4F713A4509AF9D529A6D6E011EB999911BA3BDA90CCE08C0583AC6A36616"
+    }
+  ],
+  "生产构建": {
+    "命令": "pnpm build",
+    "目录": ".worktrees/v588-bug006-release-gate（已有独立检出）",
+    "源码校验": "独立检出与主工作区src树均为1a96fb9ab3e68243c53055ee963dee7e3ed5bf80",
+    "依赖": "复用相同本地node_modules，没有改依赖或锁文件",
+    "额外Node堆配置": false,
+    "编译秒": 64,
+    "静态页面": "118/118",
+    "退出码": 0,
+    "buildId": "WijQX292REV_i-p1mFp2L",
+    "边界": "原工作目录构建失败与干净部署检出通过分别保留；未唯一定位具体参考材料影响，不修改云端配置或构建规则"
+  }
+}

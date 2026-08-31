@@ -2,6 +2,8 @@
 
 ## 当前检查点：2026-08-31
 
+- **最新增量：PROVIDER-003 品牌图像请求契约已完成本地 RED/GREEN。** 仅两个品牌组件修复精确 provider/model 选择、请求和历史设置/品牌方案读写；8 项业务 RED 后专项 36/36。OBS-001 升格 BUG-001；原重试收尾及 LLM 选择另列 OBS-004/005，字境/精修回退观察不自动关闭。完整本地门禁与云端断点集中于 `docs/testing/V588_PROVIDER_003_ACCEPTANCE.md` 和对应机器证据。原 Chrome 不可用，尚无新云端业务证据；不重复搬运路由、不重开 PROVIDER-002/Stage 4、不提前批次 B。以下 15:02 为修复前历史记录。
+
 - **15:02 增量：PROVIDER-003 只读核对完成，三个业务入口仍未云端验收。** 拆分前/后/当前 5 个路由的 7 个处理函数 AST 内容一致；不重复搬运或重跑旧门禁。品牌供应商字段不一致、字境/精修回退为待复现观察，不计作已验证 Bug。正确 Chrome 列表读取后连接失效，扩展和连接组件检查正常，本轮新增云端业务测试为 0。详见 `docs/testing/V588_PROVIDER_003_ACCEPTANCE.md`；恢复原 Chrome 后直接续品牌/精修/字境，不重开 PROVIDER-002、Stage4 或 Pear 延期项。不为纯文档部署。
 
 - **最新检查点：PROVIDER-002专项已吸收，BUG-006云端关闭。** 10bcc899在正确Coze项目完成54/54专项、38/38保护、118/118构建，Build ID 4OF-bNvWAYIDbN_rSX47M、PID4223。原Google Chrome完成普通用户未改配置重启会话、23/4精确目录、Pear/APImart保存刷新、临时选择退出/强刷不保存、6条消息不变，以及画布Pear和节点4节点1连线、Pear/Deepseek精确键重启恢复。最后15应用资源200、Console错误/警告/异常/弹窗0；3条平台CSP拦截保留。证据`docs/testing/evidence/v588-provider-002-selection-cloud-20260831.json`。不再重跑登录、节点、已完4438项门禁或部署纯文档；下一项先核对PROVIDER-003既有实现的业务验收缺口，不重复搬运、不提前批次B。ADMIN-003缩略图交付边界、完整录像/Trace等仍保留，Stage4归档、Pear延期、stable只读不变。以下旧断点均为历史。
@@ -66,7 +68,7 @@ These are the only authorized first absorption targets. Every row remains unimpl
 | V588-ADMIN-003 | 缩略图回填与幂等 worker | 复用当前资产恢复/健康子系统，不导入 donor 第二套媒体真相 | **回填、影子对账、历史媒体软归档已云端验证；缩略图投影仍有条件。** 2026-08-22 的四个不可恢复版本已软归档、原行保留，旧缺失阻塞不能再次作为归档任务执行 | 只保留缩略图交付/刷新、原图回退和 S3 恢复独立证据；不重做归档、不重开已归档 Stage 4，不擅自切换运行模式 | 高 |
 | V588-PROVIDER-001 | New display mappings such as Nano Banana Lite, GPT Image 2 2K/4K, FLUX 2 Klein, Grok Imagine video/image, HappyHorse, Gemini Omni and Seedance/Seedream variants | Current map already contains several newer Pear/Seedance entries; blind copy would duplicate or reorder wildcard matches | **已吸收 / Coze 云端验证通过。** 仅补齐缺失精确模式，统一采用最长匹配，继续保持管理员/供应商显示名优先 | 表驱动 RED/GREEN、通配碰撞、管理员显示名优先、全量回归、Coze exact SHA 与普通用户图像/视频目录证据 | Low |
 | V588-PROVIDER-002 | Explicit `providerId::modelId` catalog and ambiguous legacy-ID rejection | 保留当前task-core目录、精确键授权迁移与管理员配置快照，未导入donor第二套状态 | **已吸收 / 云端专项通过。** 管理员拒绝/迁移/反馈、普通用户三个工作区精确目录与保存刷新均已闭环；10bcc899关闭BUG-006，临时选择不持久化，未改配置重启保持会话与模型 | 原RED与本地4438/4438门禁保留，9项Chrome云端检查及16份原件哈希已记录；无供应商任务/扣费，不代表完整全平台E2E或真实secret轮换 | 高 |
-| V588-PROVIDER-003 | 非路由导出拆至 `result-store.ts` / `constants.ts` | `6a9efa5e`、`c4b49293` 已进入 main；`1fe54ffc` 的 AST 合同扫描当前 193 个 route.ts，字境结果继续使用当前 `lib/font-design-task-store.ts` | **实现和本地门禁已完成，不重复搬运。** 本轮只读复核 11/11；原 4413 全量、118/118 构建及已部署祖先包含这些提交。未把构建成功扩大为业务成功 | 品牌电商/精修/字境受影响入口的专项云端请求与结果证据仍待关联或补验；合并过程的原始 RED 日志未在公开证据中定位，保留缺口，不宣称完整吸收 | 低 |
+| V588-PROVIDER-003 | 非路由导出拆至 `result-store.ts` / `constants.ts` | `6a9efa5e`、`c4b49293` 已进入 main；`1fe54ffc` 的 AST 合同扫描当前 193 个 route.ts，字境结果继续使用当前 `lib/font-design-task-store.ts` | **拆分不重复搬运。** 品牌新增BUG-001已8项组件RED复现并最小修复；专项36/36、新全量4446/4446零跳过、同src树独立检出118/118构建及38保护通过，详见PROVIDER-003验收断点 | 品牌/精修/字境真实任务和结果、保存刷新及账务仍未云端验收；品牌重试收尾和LLM配对等遗留观察未关闭。拆分原始RED关联缺口保留，不宣称完整吸收 | 低 |
 | V588-PROVIDER-004 | Unified generation tool metadata and document-tool execution | Donor executor uses localhost fetches, an internal user header, process-memory source edges and a separate poll lifecycle; current task/asset/accounting runtime is authoritative | **DO NOT ABSORB THE EXECUTOR.** Consider only declarative tool metadata after a current-runtime adapter design | Security/identity, idempotency, cancellation, task ownership, billing and asset projection contracts | Critical |
 
 ### 2026-08-23 月度归档补充审计

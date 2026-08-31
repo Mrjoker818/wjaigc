@@ -8,6 +8,7 @@ import { BrandSettingsForm } from './brand-ecommerce/BrandSettingsForm';
 import { BrandResultGallery, type GenerateResult } from './brand-ecommerce/BrandResultGallery';
 import { BrandAssetManager, type BrandAssetData } from './brand-ecommerce/BrandAssetManager';
 import { useProgressTimer } from '@/hooks/useProgressTimer';
+import { resolvePersistedModelSelection } from '@/lib/model-defaults';
 
 // ─── Types ────────────────────────────────────────────────────────
 
@@ -185,32 +186,25 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
           });
           setModels(mapped);
           const saved = localStorage.getItem('wujie_selected_model');
-          let resolvedProviderId = '';
-          let resolvedModel = '';
           if (saved) {
+            let selection = saved;
             try {
-              const parsed = JSON.parse(saved);
-              const compositeKey = parsed?.modelId || saved;
-              if (compositeKey.includes('::')) {
-                const [pid, mid] = compositeKey.split('::');
-                resolvedProviderId = pid;
-                resolvedModel = mid;
-              } else {
-                resolvedModel = compositeKey;
+              const parsed: unknown = JSON.parse(saved);
+              if (typeof parsed === 'string') {
+                selection = parsed;
+              } else if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+                const value = parsed as Record<string, unknown>;
+                const model = typeof value.modelId === 'string' ? value.modelId
+                  : typeof value.model === 'string' ? value.model : '';
+                const providerId = typeof value.providerId === 'string' ? value.providerId : '';
+                selection = model.includes('::') || !providerId ? model : `${providerId}::${model}`;
               }
             } catch {
-              if (saved.includes('::')) {
-                const [pid, mid] = saved.split('::');
-                resolvedProviderId = pid;
-                resolvedModel = mid;
-              } else {
-                resolvedModel = saved;
-              }
+              // Older clients stored an unquoted model key instead of JSON.
             }
-          }
-          if (resolvedModel && mapped.some((m: ImageModel) => m.id === resolvedModel)) {
-            setSelectedModel(resolvedModel);
-            if (resolvedProviderId) setSelectedImageProviderId(resolvedProviderId);
+            const resolved = resolvePersistedModelSelection(selection, mapped);
+            setSelectedModel(resolved.compositeKey ? resolved.modelId : '');
+            setSelectedImageProviderId(resolved.providerId || '');
           } else if (mapped.length) {
             setSelectedModel(mapped[0].id);
             if (mapped[0].providerId) setSelectedImageProviderId(mapped[0].providerId);
@@ -375,7 +369,7 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
           styleExtra: styleExtra.trim(),
           sceneDesc: sceneDesc.trim(),
           model: selectedModel,
-          imageProviderId: selectedImageProviderId,
+          providerId: selectedImageProviderId,
           llmModel: selectedLlmModel,
           llmProviderId: selectedLlmProviderId,
           referenceImageUrl: refImage,
@@ -495,7 +489,7 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
       setIsGenerating(false);
       stopTimer();
     }
-  }, [selectedTemplates, productDesc, styleExtra, sceneDesc, selectedModel, refImage, brandColors, productImage]);
+  }, [selectedTemplates, productDesc, styleExtra, sceneDesc, selectedModel, selectedImageProviderId, selectedLlmModel, selectedLlmProviderId, refImage, brandColors, productImage, productConsistencyMode, productConsistencyStrength, templateFieldValues, startTimer, stopTimer]);
 
   // ─── Add to canvas ────────────────────────────────────────────
 
@@ -553,7 +547,7 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
         styleExtra: styleExtra.trim(),
         sceneDesc: sceneDesc.trim(),
         model: selectedModel,
-        imageProviderId: selectedImageProviderId,
+        providerId: selectedImageProviderId,
         llmModel: selectedLlmModel,
         llmProviderId: selectedLlmProviderId,
         referenceImageUrl: refImage,
@@ -595,7 +589,7 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
         }
       })
       .catch(() => { setIsGenerating(false); stopTimer(); });
-  }, [selectedModel, productDesc, styleExtra, sceneDesc, refImage, productImage, brandColors]);
+  }, [selectedModel, selectedImageProviderId, selectedLlmModel, selectedLlmProviderId, productDesc, styleExtra, sceneDesc, refImage, productImage, brandColors, startTimer, stopTimer]);
 
   // ─── AI Assist ────────────────────────────────────────────────
 
@@ -715,8 +709,10 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
     if (asset.mainText) setMainText(asset.mainText);
     if (asset.secondaryText) setSecondaryText(asset.secondaryText);
     if (asset.accentSymbol) setAccentSymbol(asset.accentSymbol);
-    if (asset.selectedModel && models.some(m => m.id === asset.selectedModel)) {
-      setSelectedModel(asset.selectedModel);
+    if (asset.selectedModel) {
+      const resolved = resolvePersistedModelSelection(asset.selectedModel, models);
+      setSelectedModel(resolved.compositeKey ? resolved.modelId : '');
+      setSelectedImageProviderId(resolved.providerId || '');
     }
     // Switch to settings tab so user can review
     setActiveTab('settings');
@@ -798,7 +794,7 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
               brandColors,
               refImage,
               productImage,
-              selectedModel,
+              selectedModel: selectedImageProviderId && selectedModel ? `${selectedImageProviderId}::${selectedModel}` : selectedModel,
               mainText,
               secondaryText,
               accentSymbol,
@@ -872,7 +868,11 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
             <BrandSettingsForm
               models={models}
               selectedModel={selectedModel}
-              onSelectModel={setSelectedModel}
+              selectedProviderId={selectedImageProviderId}
+              onSelectModel={(modelId, providerId) => {
+                setSelectedModel(modelId);
+                setSelectedImageProviderId(providerId);
+              }}
               showModelDropdown={showModelDropdown}
               onToggleModelDropdown={() => setShowModelDropdown(v => !v)}
               modelDropdownRef={modelDropdownRef}

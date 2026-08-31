@@ -6,6 +6,29 @@
 
 ---
 
+## 2026-08-31 PROVIDER-003 品牌请求契约增量
+
+### V588-PROVIDER-003-BUG-001：品牌图像选择未传递精确供应商
+
+| 字段 | 内容 |
+|---|---|
+| 状态/级别 | P1，本地已复现并最小修复，云端未验证；由下方历史 OBS-001 升格，不重复计数 |
+| 基线/环境 | main@05e8e721a01aa0378c672a5118937bb778d7f16a；2026-08-31，Vitest 3.2.4/jsdom，真实品牌父子组件；网络边界隔离，不能计为真实生图 |
+| 复现 | 两供应商配置同名 gpt-image-2，打开品牌电商并切换供应商，批量提交及单模板重试；分别恢复旧 model/providerId 设置及品牌方案 |
+| 预期/实际 | 请求 model/providerId 与选择一致；旧实现提交 imageProviderId 而服务端读取 providerId，同名切换未更新供应商，菜单 key 重复，部分旧设置恢复及方案保存丢失精确身份 |
+| 根因归属 | 原基线既有问题，不由 PROVIDER-003 路由导出拆分引入 |
+| 最小修复 | 仅品牌面板与设置子组件成对选择、回显、回调依赖和持久化，批量/重试改传 providerId；复用现有精确键解析器，歧义不猜测、不覆盖旧值；不改后端、登录、权限、账务或布局 |
+| 生产文件 | src/components/brand-ecommerce-panel.tsx；src/components/brand-ecommerce/BrandSettingsForm.tsx |
+| 永久回归 | src/__tests__/components/brand-ecommerce-provider-selection.test.tsx，8 项组件请求契约测试；无生成图片的模拟成功响应 |
+| RED/GREEN | 8 项业务断言全部 RED；最小修改后与解析器/结果存储专项合计 36/36。初始 localStorage 夹具失败及 TypeScript 定位参数不兼容均保留，不当作业务 RED |
+| 证据 | .playwright-cli/v588-provider-003-brand-red-eight-20260831.json、.playwright-cli/v588-provider-003-brand-green-20260831.json；完整门禁以 V588_PROVIDER_003_ACCEPTANCE.md 和本轮独立机器记录为准 |
+| 云端边界 | 原 Google Chrome 连接不可用，新增截图/录像/Trace/真实任务/扣费均为 0；不是登录或供应商故障。未伪造 requestId/taskId，不将本地通过记作云端关闭 |
+
+独立只读审查未发现本次引入的可证实缺陷；另外两项原有静态问题保留，不扩大本次关闭范围：
+
+- **V588-PROVIDER-003-OBS-004（P2待复现）：** 单模板重试的同步 results 或普通业务错误分支没有完整退出 isGenerating/进度计时。当前请求边界测试不覆盖最终收尾，不能说连续重试已验收。
+- **V588-PROVIDER-003-OBS-005（P2待复现）：** 品牌 LLM 菜单只回传裸模型 ID，未成对更新 selectedLlmProviderId；聊天目录同名供应商切换需另行 RED 验证。当前八项测试只针对图像目录。
+
 ## 2026-08-31 新增只读统计观察
 
 15:02：新增 `V588-PROVIDER-003-OBS-001/002/003` 三个**静态观察**，分别是品牌前后端供应商字段不一致、字境显式供应商后仍跨供应商回退、精修指定供应商失配回退。尚未取得本轮云端复现，不增加已验证 Bug/已修复计数，不归因于路由拆分。证据、代码位置和触发边界统一见 [PROVIDER-003 验收断点](V588_PROVIDER_003_ACCEPTANCE.md)，不在多份报告重复展开。当前 Chrome 控制断开不当作程序登录或生成失败。

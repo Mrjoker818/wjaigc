@@ -24,7 +24,8 @@ interface Props {
   // Models
   models: ImageModel[];
   selectedModel: string;
-  onSelectModel: (id: string) => void;
+  selectedProviderId: string;
+  onSelectModel: (id: string, providerId: string) => void;
   showModelDropdown: boolean;
   onToggleModelDropdown: () => void;
   modelDropdownRef: React.RefObject<HTMLDivElement | null>;
@@ -118,6 +119,7 @@ function FormSection({
 export function BrandSettingsForm({
   models,
   selectedModel,
+  selectedProviderId,
   onSelectModel,
   showModelDropdown,
   onToggleModelDropdown,
@@ -372,7 +374,10 @@ export function BrandSettingsForm({
             className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg border text-sm ${inputBg} ${text} transition-colors cursor-pointer`}
           >
             <span className="truncate">
-              {selectedModel ? (models.find(m => m.id === selectedModel)?.name || selectedModel) : '选择模型...'}
+              {selectedModel ? (() => {
+                const selected = models.find(m => m.id === selectedModel && m.providerId === selectedProviderId);
+                return [selected?.name || selectedModel, selected?.providerName].filter(Boolean).join(' · ');
+              })() : '选择模型...'}
             </span>
             <ChevronDown size={14} className={textMuted} />
           </button>
@@ -382,10 +387,32 @@ export function BrandSettingsForm({
             }`}>
               {models.length ? models.map(m => (
                 <button
-                  key={m.id}
-                  onClick={() => { onSelectModel(m.id); onToggleModelDropdown(); try { const existing = JSON.parse(localStorage.getItem('wujie_selected_model') || '{}'); localStorage.setItem('wujie_selected_model', JSON.stringify({ ...existing, model: m.id.split('::').pop() || m.id, providerId: m.providerId || '' })); } catch {} }}
+                  key={`${m.providerId}::${m.id}`}
+                  onClick={() => {
+                    onSelectModel(m.id, m.providerId);
+                    onToggleModelDropdown();
+                    try {
+                      const previous = localStorage.getItem('wujie_selected_model');
+                      let existing: Record<string, unknown> = {};
+                      if (previous) {
+                        try {
+                          const parsed: unknown = JSON.parse(previous);
+                          if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+                            existing = parsed as Record<string, unknown>;
+                          }
+                        } catch {
+                          // A legacy bare model key has no additional settings to retain.
+                        }
+                      }
+                      localStorage.setItem('wujie_selected_model', JSON.stringify({
+                        ...existing, model: m.id, providerId: m.providerId, modelId: `${m.providerId}::${m.id}`,
+                      }));
+                    } catch (error) {
+                      console.warn('[brand-ecommerce] Model selection could not be saved', error);
+                    }
+                  }}
                   className={`w-full text-left px-3 py-2.5 text-sm transition-colors cursor-pointer ${
-                    m.id === selectedModel
+                    m.id === selectedModel && m.providerId === selectedProviderId
                       ? isMonochrome ? 'bg-blue-50 text-blue-600' : 'bg-[#d4af37]/10 text-[#d4af37]'
                       : isMonochrome ? 'text-gray-700 hover:bg-gray-50' : 'text-gray-300 hover:bg-[#2a2a2a]'
                   }`}

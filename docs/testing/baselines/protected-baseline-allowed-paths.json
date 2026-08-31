@@ -45,6 +45,8 @@
   "src/app/globals.css",
   "src/app/simple-chat/page.tsx",
   "src/components/agent-editor.tsx",
+  "src/components/brand-ecommerce-panel.tsx",
+  "src/components/brand-ecommerce/BrandSettingsForm.tsx",
   "src/components/agent-runtime/AgentProgressTimeline.tsx",
   "src/components/agent-runtime/use-agent-run-events.ts",
   "src/components/canvas/CanvasCommandPalette.tsx",
