@@ -2,6 +2,8 @@
 
 ## 当前检查点：2026-08-31
 
+**新增吸收判断：** 原PROVIDER-003账务前置边界发现BUG-006：当前5个预校验拒绝场景扣费未补偿，donor4个同类场景仍失败。donor视觉合同可借鉴“字境空输入在扣费前检查”，不可照搬throw→500行为；品牌原有400也不能退化。详细原路由隔离执行证据见`docs/testing/V588_PROVIDER_003_PREFLIGHT_AUDIT.md`，两次18项7通过/11失败，不是真实数据库测试。推荐优先三个路由预校验前置，方案待批准；无生产源码改动，不扩大到全局账务或后续批次。
+
 **21:53实际推进：** Chrome恢复，品牌首次/重试402、非JSON 502和连接中断4项已部署前端注入回归通过；BUG-002/003仅前端有条件通过，真实后端负向/退款继续待验。BUG-004保持关闭，BUG-005规格待批准，新OBS-007仅记录英文网络提示。清除拦截、强刷与真实积分核对后，5图/4880积分/3条流水不变，无新增付费任务。唯一断点`docs/testing/V588_PROVIDER_003_ACCEPTANCE.md`及negative证据索引。没有源码修改或重开Stage4/PROVIDER-002，不提前后续批次，不重复已完成生成/4470门禁，stable/donor不动。
 
 **21:41增量：** 原PROVIDER-003观察按当前源码与只读donor各运行7项隔离行为探针，两次完整结果一致，各6失败/1对照通过。BUG-005由OBS-005升格：品牌辅助菜单/请求丢供应商；OBS-002字境候选、OBS-003精修回退取得函数级复现，并补OBS-006品牌选择器回退。同样存在于donor，禁止直接覆盖。只有行为证据，没有生产代码改动；品牌辅助两个前端组件的独立最小规格待批准。证据见`docs/testing/evidence/v588-provider-003-selection-probes-20260831.json`。Chrome原页再次接管超时，BUG-002/003云端负向项未执行；BUG-004已关闭状态保留。当前目标active，后续批次不提前。
@@ -76,7 +78,7 @@ These are the only authorized first absorption targets. Every row remains unimpl
 | V588-ADMIN-003 | 缩略图回填与幂等 worker | 复用当前资产恢复/健康子系统，不导入 donor 第二套媒体真相 | **回填、影子对账、历史媒体软归档已云端验证；缩略图投影仍有条件。** 2026-08-22 的四个不可恢复版本已软归档、原行保留，旧缺失阻塞不能再次作为归档任务执行 | 只保留缩略图交付/刷新、原图回退和 S3 恢复独立证据；不重做归档、不重开已归档 Stage 4，不擅自切换运行模式 | 高 |
 | V588-PROVIDER-001 | New display mappings such as Nano Banana Lite, GPT Image 2 2K/4K, FLUX 2 Klein, Grok Imagine video/image, HappyHorse, Gemini Omni and Seedance/Seedream variants | Current map already contains several newer Pear/Seedance entries; blind copy would duplicate or reorder wildcard matches | **已吸收 / Coze 云端验证通过。** 仅补齐缺失精确模式，统一采用最长匹配，继续保持管理员/供应商显示名优先 | 表驱动 RED/GREEN、通配碰撞、管理员显示名优先、全量回归、Coze exact SHA 与普通用户图像/视频目录证据 | Low |
 | V588-PROVIDER-002 | Explicit `providerId::modelId` catalog and ambiguous legacy-ID rejection | 保留当前task-core目录、精确键授权迁移与管理员配置快照，未导入donor第二套状态 | **已吸收 / 云端专项通过。** 管理员拒绝/迁移/反馈、普通用户三个工作区精确目录与保存刷新均已闭环；10bcc899关闭BUG-006，临时选择不持久化，未改配置重启保持会话与模型 | 原RED与本地4438/4438门禁保留，9项Chrome云端检查及16份原件哈希已记录；无供应商任务/扣费，不代表完整全平台E2E或真实secret轮换 | 高 |
-| V588-PROVIDER-003 | 非路由导出拆至 `result-store.ts` / `constants.ts` | `6a9efa5e`、`c4b49293` 已进入 main；`1fe54ffc` AST扫描193路由；字境沿用当前任务存储。品牌源码9b2e8d5f随fac43cbf同步 | **拆分不重复搬运。** 本地4470/4470门禁完成；云端APImart两图逐次显示、改选后来源不变、保存强刷与单次-60已验，BUG-004关闭 | BUG-002/003本地修复，新版失败重试与错误全文云端待验；Pear品牌、精修/字境、LLM配对、上游账单/并发退款、资源500与录像/Trace缺口保留；不宣称完整吸收 | 低 |
+| V588-PROVIDER-003 | 非路由导出拆至 `result-store.ts` / `constants.ts` | 拆分已进入main，品牌源码9b2e8d5f已同步；不重复搬运。donor预校验思想仅选择性参考 | BUG-004真实正向关闭；BUG-002/003已部署前端异常注入通过但严格后端负向未闭环；BUG-005配对未修复 | BUG-006预校验拒绝扣费已原路由隔离复现，优先收口；Pear品牌、精修/字境、上游账单/并发退款与完整录像/Trace仍未验；不宣称完整吸收 | 高，含P0候选账务风险 |
 | V588-PROVIDER-004 | Unified generation tool metadata and document-tool execution | Donor executor uses localhost fetches, an internal user header, process-memory source edges and a separate poll lifecycle; current task/asset/accounting runtime is authoritative | **DO NOT ABSORB THE EXECUTOR.** Consider only declarative tool metadata after a current-runtime adapter design | Security/identity, idempotency, cancellation, task ownership, billing and asset projection contracts | Critical |
 
 ### 2026-08-23 月度归档补充审计

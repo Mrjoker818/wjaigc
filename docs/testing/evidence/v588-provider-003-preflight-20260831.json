@@ -1,0 +1,434 @@
+{
+  "title": "品牌、精修与字境预校验扣费隔离审计",
+  "recordedAt": "2026-08-31T13:58:47.015Z",
+  "repositoryCommit": "9f4a8f481519a6969e1347fd5a97a32b81298ec7",
+  "sourceTree": "cdbb004d11b5f710a7a6fb0327bd641dbbd74cd6",
+  "donorDirectory": "J:/无界云端0820",
+  "donorReadOnly": true,
+  "productionFilesModified": 0,
+  "liveProviderRequests": 0,
+  "liveDatabaseConnections": 0,
+  "browserTest": false,
+  "summary": {
+    "total": 18,
+    "passed": 7,
+    "failed": 11,
+    "harnessErrors": 0
+  },
+  "repeatOutcomesIdentical": true,
+  "breakdown": {
+    "main": {
+      "cases": 9,
+      "passed": 4,
+      "debitLeftOnReject": 5,
+      "statusOnlyFailures": 0
+    },
+    "donor": {
+      "cases": 9,
+      "passed": 3,
+      "debitLeftOnReject": 4,
+      "statusOnlyFailures": 2
+    }
+  },
+  "bugId": "V588-PROVIDER-003-BUG-006",
+  "status": "P0候选，原控制流隔离复现，未修复；真实数据库及线上影响未验证",
+  "limits": [
+    "SQL边界在内存中模拟成功扣费/退款，不证明PostgreSQL事务或并发正确",
+    "认证和供应商查找隔离；中间件授权不在本次范围",
+    "当前版及donor的POST、积分辅助、校验和定价模块均执行原文件转译结果",
+    "首轮donor的9项未批准导入工具错误单独保留，不算9个业务错误",
+    "完整18项7通过11失败，两次一致；不是11个独立Bug",
+    "没有浏览器截图、录像、Trace或真实账户操作"
+  ],
+  "sources": [
+    {
+      "version": "main",
+      "file": "src/app/api/brand-ecommerce/route.ts",
+      "sha256": "d3f70f926ae13c283e18ee620dda2d0fe342fc8ebe4efc386705a2cacfb2fbea"
+    },
+    {
+      "version": "main",
+      "file": "src/lib/credits.ts",
+      "sha256": "e65faf30187aa7205279e9e5c517ddd771eb8172569e8f03e168f000086eedde"
+    },
+    {
+      "version": "main",
+      "file": "src/lib/credits-constants.ts",
+      "sha256": "40b2243318134b8bf41652a4abcadd0e9af42a5df59f7b051469fd4cf3e52dc0"
+    },
+    {
+      "version": "main",
+      "file": "src/lib/credit-pricing.ts",
+      "sha256": "c12b8b59679af65f5abc4324e1e9e787868858480c35cd5f544c16decf7a9e5b"
+    },
+    {
+      "version": "main",
+      "file": "src/lib/model-capabilities.ts",
+      "sha256": "e10c01ad353cb7c6122e47a71e6254b44f3f5020ff4169791d9ea2f008600ff8"
+    },
+    {
+      "version": "main",
+      "file": "src/lib/api-validator.ts",
+      "sha256": "7dcd0dcf415b32bd41bce0564d07be3d1bb9306d5a0d10a73bb96fadb58a0c56"
+    },
+    {
+      "version": "main",
+      "file": "src/app/api/refine-engine/route.ts",
+      "sha256": "78d5b5910bbff06bdf0f19e83dd4a4aa5073f25f9292307c680fce37fa79726e"
+    },
+    {
+      "version": "main",
+      "file": "src/app/api/font-design/generate-image/route.ts",
+      "sha256": "e9baa43c72eaea5217fdf63fce9b30e107385a35890472f695559015c83db7d8"
+    },
+    {
+      "version": "main",
+      "file": "src/app/api/font-design/plan/constants.ts",
+      "sha256": "f704b9d5a0b53b548664ef7c88695cd06e94ca6fb9efd3f7d6416a71f58fe97c"
+    },
+    {
+      "version": "donor",
+      "file": "src/app/api/brand-ecommerce/route.ts",
+      "sha256": "61fcaea9d49f50af826966ecb4b40c317ae8836043aec8a84806ef82b4c3352b"
+    },
+    {
+      "version": "donor",
+      "file": "src/lib/credits.ts",
+      "sha256": "d96e1b2d82198a1cdd11078ee9b0716c7d05edcf6f1da8452db4746e3c0f4823"
+    },
+    {
+      "version": "donor",
+      "file": "src/lib/credits-constants.ts",
+      "sha256": "d8ebfeb5486ab0b706de5b7e10931d25c2a300c6c9214f0256f508648757a589"
+    },
+    {
+      "version": "donor",
+      "file": "src/lib/credit-pricing.ts",
+      "sha256": "e144f160299fc591884c3154e32a1a68fa711809b12a09a8acc701368b645031"
+    },
+    {
+      "version": "donor",
+      "file": "src/lib/model-capabilities.ts",
+      "sha256": "091e449e06c1b19502f12cfcdc10e6b83bc21319d7b1b18c042786fe8c3ce326"
+    },
+    {
+      "version": "donor",
+      "file": "src/lib/api-validator.ts",
+      "sha256": "6bb2aa60550cac14200ab4057c0b7e9bb535b675cd2ca71f139aeac16a7462db"
+    },
+    {
+      "version": "donor",
+      "file": "src/lib/visual-design-tools-contract.ts",
+      "sha256": "4e396dcafbaa7bfae0d0f4ed320fb989ab1f4d913e869c0eb53d482b6bbd7c66"
+    },
+    {
+      "version": "donor",
+      "file": "src/app/api/refine-engine/route.ts",
+      "sha256": "3f8f9b0983c805069b23539b6d8ae077a9b334049b28d5b5d8eb708394c35264"
+    },
+    {
+      "version": "donor",
+      "file": "src/app/api/font-design/generate-image/route.ts",
+      "sha256": "948d20f481c51527f0660141efa7dc6d43a879387c6089f965344c724551c18c"
+    },
+    {
+      "version": "donor",
+      "file": "src/app/api/font-design/plan/constants.ts",
+      "sha256": "73349d8a61ececd6abe8a3e313583f6d9a356627be5deee8646659cdf1aede16"
+    }
+  ],
+  "results": [
+    {
+      "version": "main",
+      "id": "brand-no-provider",
+      "route": "src/app/api/brand-ecommerce/route.ts",
+      "pass": false,
+      "status": 400,
+      "balance": 940,
+      "error": "未找到可用的图像模型，请在管理员后台配置",
+      "sqlKinds": [
+        "debit",
+        "consume-history"
+      ],
+      "tasks": 0,
+      "networkCalls": 0,
+      "unexpectedCalls": []
+    },
+    {
+      "version": "main",
+      "id": "brand-missing-description-control",
+      "route": "src/app/api/brand-ecommerce/route.ts",
+      "pass": true,
+      "status": 400,
+      "balance": 1000,
+      "error": "请输入商品描述",
+      "sqlKinds": [],
+      "tasks": 0,
+      "networkCalls": 0,
+      "unexpectedCalls": []
+    },
+    {
+      "version": "main",
+      "id": "brand-provider-throws-control",
+      "route": "src/app/api/brand-ecommerce/route.ts",
+      "pass": true,
+      "status": 500,
+      "balance": 1000,
+      "error": "服务器错误",
+      "sqlKinds": [
+        "debit",
+        "consume-history",
+        "refund"
+      ],
+      "tasks": 0,
+      "networkCalls": 0,
+      "unexpectedCalls": []
+    },
+    {
+      "version": "main",
+      "id": "refine-no-model",
+      "route": "src/app/api/refine-engine/route.ts",
+      "pass": false,
+      "status": 400,
+      "balance": 988,
+      "error": "请选择生图模型",
+      "sqlKinds": [
+        "debit",
+        "consume-history"
+      ],
+      "tasks": 0,
+      "networkCalls": 0,
+      "unexpectedCalls": []
+    },
+    {
+      "version": "main",
+      "id": "refine-no-provider",
+      "route": "src/app/api/refine-engine/route.ts",
+      "pass": false,
+      "status": 400,
+      "balance": 988,
+      "error": "未找到模型 gpt-image-2 对应的API提供商 (providerId: missing-provider)",
+      "sqlKinds": [
+        "debit",
+        "consume-history"
+      ],
+      "tasks": 0,
+      "networkCalls": 0,
+      "unexpectedCalls": []
+    },
+    {
+      "version": "main",
+      "id": "refine-invalid-image-control",
+      "route": "src/app/api/refine-engine/route.ts",
+      "pass": true,
+      "status": 400,
+      "balance": 1000,
+      "error": "imageUrl 格式不合法",
+      "sqlKinds": [],
+      "tasks": 0,
+      "networkCalls": 0,
+      "unexpectedCalls": []
+    },
+    {
+      "version": "main",
+      "id": "font-empty-input",
+      "route": "src/app/api/font-design/generate-image/route.ts",
+      "pass": false,
+      "status": 400,
+      "balance": 940,
+      "error": "缺少提示词或文字输入",
+      "sqlKinds": [
+        "debit",
+        "consume-history"
+      ],
+      "tasks": 0,
+      "networkCalls": 0,
+      "unexpectedCalls": []
+    },
+    {
+      "version": "main",
+      "id": "font-no-provider",
+      "route": "src/app/api/font-design/generate-image/route.ts",
+      "pass": false,
+      "status": 400,
+      "balance": 940,
+      "error": "未找到可用的图像生成模型，请在管理员后台配置",
+      "sqlKinds": [
+        "debit",
+        "consume-history"
+      ],
+      "tasks": 0,
+      "networkCalls": 0,
+      "unexpectedCalls": []
+    },
+    {
+      "version": "main",
+      "id": "font-oversized-prompt-control",
+      "route": "src/app/api/font-design/generate-image/route.ts",
+      "pass": true,
+      "status": 400,
+      "balance": 1000,
+      "error": "prompt 长度超出限制",
+      "sqlKinds": [],
+      "tasks": 0,
+      "networkCalls": 0,
+      "unexpectedCalls": []
+    },
+    {
+      "version": "donor",
+      "id": "brand-no-provider",
+      "route": "src/app/api/brand-ecommerce/route.ts",
+      "pass": false,
+      "status": 400,
+      "balance": 940,
+      "error": "未找到可用的图像模型，请在管理员后台配置",
+      "sqlKinds": [
+        "debit",
+        "consume-history"
+      ],
+      "tasks": 0,
+      "networkCalls": 0,
+      "unexpectedCalls": []
+    },
+    {
+      "version": "donor",
+      "id": "brand-missing-description-control",
+      "route": "src/app/api/brand-ecommerce/route.ts",
+      "pass": false,
+      "status": 500,
+      "balance": 1000,
+      "error": "服务器错误",
+      "sqlKinds": [],
+      "tasks": 0,
+      "networkCalls": 0,
+      "unexpectedCalls": []
+    },
+    {
+      "version": "donor",
+      "id": "brand-provider-throws-control",
+      "route": "src/app/api/brand-ecommerce/route.ts",
+      "pass": true,
+      "status": 500,
+      "balance": 1000,
+      "error": "服务器错误",
+      "sqlKinds": [
+        "debit",
+        "consume-history",
+        "refund"
+      ],
+      "tasks": 0,
+      "networkCalls": 0,
+      "unexpectedCalls": []
+    },
+    {
+      "version": "donor",
+      "id": "refine-no-model",
+      "route": "src/app/api/refine-engine/route.ts",
+      "pass": false,
+      "status": 400,
+      "balance": 988,
+      "error": "请选择生图模型",
+      "sqlKinds": [
+        "debit",
+        "consume-history"
+      ],
+      "tasks": 0,
+      "networkCalls": 0,
+      "unexpectedCalls": []
+    },
+    {
+      "version": "donor",
+      "id": "refine-no-provider",
+      "route": "src/app/api/refine-engine/route.ts",
+      "pass": false,
+      "status": 400,
+      "balance": 988,
+      "error": "未找到模型 gpt-image-2 对应的API提供商 (providerId: missing-provider)",
+      "sqlKinds": [
+        "debit",
+        "consume-history"
+      ],
+      "tasks": 0,
+      "networkCalls": 0,
+      "unexpectedCalls": []
+    },
+    {
+      "version": "donor",
+      "id": "refine-invalid-image-control",
+      "route": "src/app/api/refine-engine/route.ts",
+      "pass": true,
+      "status": 400,
+      "balance": 1000,
+      "error": "imageUrl 格式不合法",
+      "sqlKinds": [],
+      "tasks": 0,
+      "networkCalls": 0,
+      "unexpectedCalls": []
+    },
+    {
+      "version": "donor",
+      "id": "font-empty-input",
+      "route": "src/app/api/font-design/generate-image/route.ts",
+      "pass": false,
+      "status": 500,
+      "balance": 1000,
+      "error": "生成图片失败",
+      "sqlKinds": [],
+      "tasks": 0,
+      "networkCalls": 0,
+      "unexpectedCalls": []
+    },
+    {
+      "version": "donor",
+      "id": "font-no-provider",
+      "route": "src/app/api/font-design/generate-image/route.ts",
+      "pass": false,
+      "status": 400,
+      "balance": 940,
+      "error": "未找到可用的图像生成模型，请在管理员后台配置",
+      "sqlKinds": [
+        "debit",
+        "consume-history"
+      ],
+      "tasks": 0,
+      "networkCalls": 0,
+      "unexpectedCalls": []
+    },
+    {
+      "version": "donor",
+      "id": "font-oversized-prompt-control",
+      "route": "src/app/api/font-design/generate-image/route.ts",
+      "pass": true,
+      "status": 400,
+      "balance": 1000,
+      "error": "prompt 长度超出限制",
+      "sqlKinds": [],
+      "tasks": 0,
+      "networkCalls": 0,
+      "unexpectedCalls": []
+    }
+  ],
+  "artifactDirectory": "J:/无界本地版/projects/_upstream-wjaigc-restore/.playwright-cli/provider-preflight-audit-20260831",
+  "artifacts": [
+    {
+      "file": "complete-run.json",
+      "bytes": 21715,
+      "sha256": "de1f6a2acc2eb2fcda7a82cdcd2f563f3b0eb3580ef12cf8eec19a8b2ecfbb60"
+    },
+    {
+      "file": "first-run.json",
+      "bytes": 13786,
+      "sha256": "5328a2a66009f8b47113d364435339ee0ed7bc44e3f9e1ad2c9544f657472ba3"
+    },
+    {
+      "file": "probe.cjs",
+      "bytes": 9331,
+      "sha256": "1c21311f83dfd35db378f538453e73c031e899dd0e58a3d57e0dd44f50eea710"
+    },
+    {
+      "file": "repeat-run.json",
+      "bytes": 21715,
+      "sha256": "fb22a5ddf115222c5351986c67f24428b6ed22ab55836a66e034bdafe9edef67"
+    }
+  ]
+}
