@@ -265,5 +265,7 @@
   "src/lib/user-types.ts",
   "tsconfig.json",
   "src/components/brand-ecommerce/BrandResultGallery.tsx",
-  "src/types/brand-ecommerce.ts"
+  "src/types/brand-ecommerce.ts",
+  "src/app/api/image/upscale/route.ts",
+  "src/app/api/optimize-prompt/route.ts"
 ]

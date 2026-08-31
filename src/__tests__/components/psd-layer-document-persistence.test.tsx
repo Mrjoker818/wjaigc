@@ -476,7 +476,7 @@ describe('PsdLayerEditor layer document persistence', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '重试保存' }));
     await waitFor(() => expect(persistence.create).toHaveBeenCalledTimes(2));
-    expect(screen.getByTestId('layer-document-status').textContent).toContain('已保存');
+    await waitFor(() => expect(screen.getByTestId('layer-document-status').textContent).toContain('已保存'));
     fireEvent.click(screen.getByTitle('关闭 (Esc)'));
     await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
   });

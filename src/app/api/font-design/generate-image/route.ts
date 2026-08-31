@@ -130,17 +130,6 @@ export async function POST(request: NextRequest) {
       material: matStr, strokeOptions: strokes, graphicElements: graphics,
     });
 
-    // 积分检查与扣除
-    deductedCredits = 0;
-    sessionUser = await getSessionUser(request).catch(() => null);
-    if (sessionUser) {
-      const creditResult = await consumeCredits(sessionUser.id, 'image_generate', undefined, undefined, modelStr, { providerId: (providerId as string) || undefined });
-      if (!creditResult.success) {
-        return NextResponse.json({ success: false, error: creditResult.message || '积分不足' }, { status: 402 });
-      }
-      deductedCredits = creditResult.cost;
-    }
-
     let finalPrompt = '';
     if (prompt) {
       // When prompt is provided as override, still enforce user settings
@@ -214,6 +203,16 @@ export async function POST(request: NextRequest) {
     const usedModel = usedModelNorm.wasNormalized ? usedModelNorm.apiModelName : usedModelRaw;
     if (usedModelNorm.wasNormalized) {
       console.log(`[font-design/generate-image] Normalized model alias: "${usedModelRaw}" → "${usedModel}"`);
+    }
+
+    // 提示词与候选供应商预检通过后才扣费。
+    sessionUser = await getSessionUser(request).catch(() => null);
+    if (sessionUser) {
+      const creditResult = await consumeCredits(sessionUser.id, 'image_generate', undefined, undefined, modelStr, { providerId: (providerId as string) || undefined });
+      if (!creditResult.success) {
+        return NextResponse.json({ success: false, error: creditResult.message || '积分不足' }, { status: 402 });
+      }
+      deductedCredits = creditResult.cost;
     }
 
     const taskId = `font-design-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -418,8 +417,11 @@ export async function POST(request: NextRequest) {
     });
     // 退款：字体设计图片生成失败时退还积分
     if (deductedCredits > 0 && sessionUser) {
+      const amount = deductedCredits;
+      deductedCredits = 0;
       try {
-        await refundCredits(sessionUser.id, deductedCredits, `字体设计生成失败退款: ${(error instanceof Error ? error.message : 'Unknown').substring(0, 100)}`);
+        const refund = await refundCredits(sessionUser.id, amount, `字体设计生成失败退款: ${(error instanceof Error ? error.message : 'Unknown').substring(0, 100)}`);
+        if (!refund.success) console.error('[font-design/generate-image] Refund failed:', { userId: sessionUser.id, amount });
       } catch (refundErr) { console.error('[font-design/generate-image] Refund failed:', refundErr); }
     }
     return NextResponse.json({ error: error instanceof Error ? error.message : '生成图片失败' }, { status: 500 });

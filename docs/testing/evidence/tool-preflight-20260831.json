@@ -1,0 +1,1427 @@
+{
+  "generatedAt": "2026-08-31T14:16:33.230Z",
+  "gitCommit": "39cfcaea830ad01e0a335893f09d44c5e5a18604",
+  "sourceTree": "cdbb004d11b5f710a7a6fb0327bd641dbbd74cd6",
+  "status": "隔离控制流复现；不是浏览器、供应商、真实账务或修复通过",
+  "summary": {
+    "total": 36,
+    "passed": 12,
+    "failed": 24,
+    "harnessErrors": 0
+  },
+  "repeatEquivalent": true,
+  "twoTargetRoutesByteEqualBetweenVersions": false,
+  "twoTargetRoutesEqualAfterCRLFNormalization": true,
+  "bugLinks": {
+    "debitFailurePaths": "V588-PROVIDER-003-BUG-006（扩展覆盖原OBS-008/009，不重复计数）",
+    "workflowScaleType": "V588-TOOLS-BUG-001（新P1，尚未修复）"
+  },
+  "boundaries": [
+    "原完整POST及真实积分/校验/安全代码执行",
+    "原工作流buildNodeExecutionRequest接入原放大POST",
+    "无真实网络/数据库/浏览器/图像处理；响应与SQL边界隔离",
+    "放大引擎异常作为到达底层控制，不代表放大产物通过",
+    "只读V5.8.8；首次14个crypto导入错误和中间4个donor导入错误保留",
+    "Agent路径只查到静态调用与参数定义，尚未执行完整Agent或工作流调度器"
+  ],
+  "sources": [
+    {
+      "version": "main",
+      "file": "src/app/api/image/upscale/route.ts",
+      "sha256": "0eb0bbb5df8ef678419dbdaea81814e84d7924b4bb5d78fd15c86c0ea09f241d"
+    },
+    {
+      "version": "main",
+      "file": "src/lib/credits.ts",
+      "sha256": "e65faf30187aa7205279e9e5c517ddd771eb8172569e8f03e168f000086eedde"
+    },
+    {
+      "version": "main",
+      "file": "src/lib/credits-constants.ts",
+      "sha256": "40b2243318134b8bf41652a4abcadd0e9af42a5df59f7b051469fd4cf3e52dc0"
+    },
+    {
+      "version": "main",
+      "file": "src/lib/credit-pricing.ts",
+      "sha256": "c12b8b59679af65f5abc4324e1e9e787868858480c35cd5f544c16decf7a9e5b"
+    },
+    {
+      "version": "main",
+      "file": "src/lib/api-validator.ts",
+      "sha256": "7dcd0dcf415b32bd41bce0564d07be3d1bb9306d5a0d10a73bb96fadb58a0c56"
+    },
+    {
+      "version": "main",
+      "file": "src/app/api/optimize-prompt/route.ts",
+      "sha256": "791fcb81f39007812bb8da49e51fe2438778e8074dc35bae7cc6ca51912aad5c"
+    },
+    {
+      "version": "main",
+      "file": "src/lib/prompt-safety.ts",
+      "sha256": "f802ccabf24f932cc92d961dbf2054a7aaec1c88ca9a9408c15d319b21108c73"
+    },
+    {
+      "version": "main",
+      "file": "src/lib/model-capabilities.ts",
+      "sha256": "e10c01ad353cb7c6122e47a71e6254b44f3f5020ff4169791d9ea2f008600ff8"
+    },
+    {
+      "version": "main",
+      "file": "src/lib/workflow-engine.ts",
+      "sha256": "16dcda8d356958877393c9444e29dc46162e6b4cb1d48dbe3b770f2f0ab6d34d"
+    },
+    {
+      "version": "donor",
+      "file": "src/app/api/image/upscale/route.ts",
+      "sha256": "8c747430c45df6e3d6edd1c33cb17c1c5473bfa94600d343ab14dcccc696922f"
+    },
+    {
+      "version": "donor",
+      "file": "src/lib/credits.ts",
+      "sha256": "d96e1b2d82198a1cdd11078ee9b0716c7d05edcf6f1da8452db4746e3c0f4823"
+    },
+    {
+      "version": "donor",
+      "file": "src/lib/credits-constants.ts",
+      "sha256": "d8ebfeb5486ab0b706de5b7e10931d25c2a300c6c9214f0256f508648757a589"
+    },
+    {
+      "version": "donor",
+      "file": "src/lib/credit-pricing.ts",
+      "sha256": "e144f160299fc591884c3154e32a1a68fa711809b12a09a8acc701368b645031"
+    },
+    {
+      "version": "donor",
+      "file": "src/lib/api-validator.ts",
+      "sha256": "6bb2aa60550cac14200ab4057c0b7e9bb535b675cd2ca71f139aeac16a7462db"
+    },
+    {
+      "version": "donor",
+      "file": "src/app/api/optimize-prompt/route.ts",
+      "sha256": "f821dbf49e2954603a0e3f5ba938d4939a5845ec950b48dd76486788fbdd4ed2"
+    },
+    {
+      "version": "donor",
+      "file": "src/lib/prompt-safety.ts",
+      "sha256": "bd20b6db66ce599bd3ff89337664074b89af7dfd921dd6f8c3cde1e8c092124f"
+    },
+    {
+      "version": "donor",
+      "file": "src/lib/model-capabilities.ts",
+      "sha256": "091e449e06c1b19502f12cfcdc10e6b83bc21319d7b1b18c042786fe8c3ce326"
+    },
+    {
+      "version": "donor",
+      "file": "src/lib/workflow-engine.ts",
+      "sha256": "87b97cf604901ba218abd26cc53c63e7a9cca7f12ac186afaac38575e9482fb5"
+    }
+  ],
+  "artifacts": [
+    {
+      "file": ".playwright-cli/tool-preflight-audit-20260831/probe.cjs",
+      "sha256": "0810ed76106a134d827d7ae8e0500a1ae874c6a72aafb106abd20116f2c8222b",
+      "bytes": 11822
+    },
+    {
+      "file": ".playwright-cli/tool-preflight-audit-20260831/first-run.json",
+      "sha256": "c16b755d0cab52ea77b4b37fc3d763c2b1973090e4e639a9f0f63a400dadf636",
+      "bytes": 27513
+    },
+    {
+      "file": ".playwright-cli/tool-preflight-audit-20260831/complete-run.json",
+      "sha256": "13c0fd0bd6e853e2560123be52faea0e7c35762596366d7720863daf643f1927",
+      "bytes": 39900
+    },
+    {
+      "file": ".playwright-cli/tool-preflight-audit-20260831/contract-run.json",
+      "sha256": "1d75e0595bc3376d6cdad517aaed72745d0135daaa7cf0713fd49567ed21fb67",
+      "bytes": 49055
+    },
+    {
+      "file": ".playwright-cli/tool-preflight-audit-20260831/final-run.json",
+      "sha256": "cd02e3c6696f8c6b4cf2e4704f4fc878edc375b8347141a65c13bfee58ed8114",
+      "bytes": 53585
+    },
+    {
+      "file": ".playwright-cli/tool-preflight-audit-20260831/repeat-run.json",
+      "sha256": "09922c2f8a876b2a3b802d59417b574e54a35e8858c8efcc0b7bd8b7a66f1c6a",
+      "bytes": 53585
+    }
+  ],
+  "results": [
+    {
+      "version": "main",
+      "id": "upscale-missing-image-control",
+      "status": 400,
+      "body": {
+        "error": "imageUrl 不能为空"
+      },
+      "balance": 1000,
+      "sql": [],
+      "engineCalls": 0,
+      "isolatedCalls": 0,
+      "unexpected": [],
+      "assertions": {
+        "status": true,
+        "balanceRestored": true,
+        "expectedEngineCalls": true,
+        "expectedIsolatedCalls": true,
+        "noUnexpected": true,
+        "exceptionRefundControl": true
+      },
+      "pass": true
+    },
+    {
+      "version": "main",
+      "id": "upscale-invalid-scale",
+      "status": 400,
+      "body": {
+        "success": false,
+        "error": "不支持的放大倍率: 3，仅支持 2 和 4"
+      },
+      "balance": 992,
+      "sql": [
+        {
+          "kind": "debit",
+          "amount": 8,
+          "sql": "UPDATE wujie_credits SET balance = balance - $1, total_used = total_used + $2, updated_at = $3 WHERE user_id = $4 AND balance >= $1 RETURNING balance"
+        },
+        {
+          "kind": "consume-history",
+          "amount": -8,
+          "sql": "INSERT INTO wujie_credit_transactions (id, user_id, amount, type, balance_after, description, reference_id, created_at) VALUES ($1, $2, $3, 'consume', $4, $5, $6, $7)"
+        }
+      ],
+      "engineCalls": 0,
+      "isolatedCalls": 0,
+      "unexpected": [],
+      "assertions": {
+        "status": true,
+        "balanceRestored": false,
+        "expectedEngineCalls": true,
+        "expectedIsolatedCalls": true,
+        "noUnexpected": true,
+        "exceptionRefundControl": true
+      },
+      "pass": false
+    },
+    {
+      "version": "main",
+      "id": "upscale-invalid-format",
+      "status": 400,
+      "body": {
+        "success": false,
+        "error": "不支持的输出格式: gif，仅支持 png/jpg/webp"
+      },
+      "balance": 992,
+      "sql": [
+        {
+          "kind": "debit",
+          "amount": 8,
+          "sql": "UPDATE wujie_credits SET balance = balance - $1, total_used = total_used + $2, updated_at = $3 WHERE user_id = $4 AND balance >= $1 RETURNING balance"
+        },
+        {
+          "kind": "consume-history",
+          "amount": -8,
+          "sql": "INSERT INTO wujie_credit_transactions (id, user_id, amount, type, balance_after, description, reference_id, created_at) VALUES ($1, $2, $3, 'consume', $4, $5, $6, $7)"
+        }
+      ],
+      "engineCalls": 0,
+      "isolatedCalls": 0,
+      "unexpected": [],
+      "assertions": {
+        "status": true,
+        "balanceRestored": false,
+        "expectedEngineCalls": true,
+        "expectedIsolatedCalls": true,
+        "noUnexpected": true,
+        "exceptionRefundControl": true
+      },
+      "pass": false
+    },
+    {
+      "version": "main",
+      "id": "upscale-engine-failure",
+      "status": 500,
+      "body": {
+        "success": false,
+        "error": "isolated engine failure"
+      },
+      "balance": 992,
+      "sql": [
+        {
+          "kind": "debit",
+          "amount": 8,
+          "sql": "UPDATE wujie_credits SET balance = balance - $1, total_used = total_used + $2, updated_at = $3 WHERE user_id = $4 AND balance >= $1 RETURNING balance"
+        },
+        {
+          "kind": "consume-history",
+          "amount": -8,
+          "sql": "INSERT INTO wujie_credit_transactions (id, user_id, amount, type, balance_after, description, reference_id, created_at) VALUES ($1, $2, $3, 'consume', $4, $5, $6, $7)"
+        }
+      ],
+      "engineCalls": 1,
+      "isolatedCalls": 0,
+      "unexpected": [],
+      "assertions": {
+        "status": true,
+        "balanceRestored": false,
+        "expectedEngineCalls": true,
+        "expectedIsolatedCalls": true,
+        "noUnexpected": true,
+        "exceptionRefundControl": true
+      },
+      "pass": false
+    },
+    {
+      "version": "main",
+      "id": "upscale-engine-throws-control",
+      "status": 500,
+      "body": {
+        "success": false,
+        "error": "放大请求处理失败: Error: isolated engine exception"
+      },
+      "balance": 1000,
+      "sql": [
+        {
+          "kind": "debit",
+          "amount": 8,
+          "sql": "UPDATE wujie_credits SET balance = balance - $1, total_used = total_used + $2, updated_at = $3 WHERE user_id = $4 AND balance >= $1 RETURNING balance"
+        },
+        {
+          "kind": "consume-history",
+          "amount": -8,
+          "sql": "INSERT INTO wujie_credit_transactions (id, user_id, amount, type, balance_after, description, reference_id, created_at) VALUES ($1, $2, $3, 'consume', $4, $5, $6, $7)"
+        },
+        {
+          "kind": "refund",
+          "amount": 8,
+          "sql": "BEGIN; UPDATE wujie_credits SET balance = balance + $1, total_used = GREATEST(total_used - $2, 0), updated_at = $3 WHERE user_id = $4 RETURNING balance; INSERT INTO wujie_credit_transactions (id, user_id, amount, type, balance_after, description, reference_id, created_at) VALUES ($7, $4, $1, 'refund', (SELECT balance FROM wujie_credits WHERE user_id = $4), $5, $6, $3); COMMIT;"
+        }
+      ],
+      "engineCalls": 1,
+      "isolatedCalls": 0,
+      "unexpected": [],
+      "assertions": {
+        "status": true,
+        "balanceRestored": true,
+        "expectedEngineCalls": true,
+        "expectedIsolatedCalls": true,
+        "noUnexpected": true,
+        "exceptionRefundControl": true
+      },
+      "pass": true
+    },
+    {
+      "version": "main",
+      "id": "upscale-ai-delegate-reject",
+      "status": 401,
+      "body": {
+        "success": false,
+        "error": "AI放大失败: isolated unauthenticated delegate"
+      },
+      "balance": 992,
+      "sql": [
+        {
+          "kind": "debit",
+          "amount": 8,
+          "sql": "UPDATE wujie_credits SET balance = balance - $1, total_used = total_used + $2, updated_at = $3 WHERE user_id = $4 AND balance >= $1 RETURNING balance"
+        },
+        {
+          "kind": "consume-history",
+          "amount": -8,
+          "sql": "INSERT INTO wujie_credit_transactions (id, user_id, amount, type, balance_after, description, reference_id, created_at) VALUES ($1, $2, $3, 'consume', $4, $5, $6, $7)"
+        }
+      ],
+      "engineCalls": 0,
+      "isolatedCalls": 1,
+      "unexpected": [],
+      "assertions": {
+        "status": true,
+        "balanceRestored": false,
+        "expectedEngineCalls": true,
+        "expectedIsolatedCalls": true,
+        "noUnexpected": true,
+        "exceptionRefundControl": true
+      },
+      "pass": false
+    },
+    {
+      "version": "main",
+      "id": "optimize-empty-control",
+      "status": 400,
+      "body": {
+        "error": "prompt 不能为空"
+      },
+      "balance": 1000,
+      "sql": [],
+      "engineCalls": 0,
+      "isolatedCalls": 0,
+      "unexpected": [],
+      "assertions": {
+        "status": true,
+        "balanceRestored": true,
+        "expectedEngineCalls": true,
+        "expectedIsolatedCalls": true,
+        "noUnexpected": true,
+        "exceptionRefundControl": true
+      },
+      "pass": true
+    },
+    {
+      "version": "main",
+      "id": "optimize-missing-provider",
+      "status": 400,
+      "body": {
+        "error": "未找到可用的后台模型提供商配置"
+      },
+      "balance": 992,
+      "sql": [
+        {
+          "kind": "debit",
+          "amount": 8,
+          "sql": "UPDATE wujie_credits SET balance = balance - $1, total_used = total_used + $2, updated_at = $3 WHERE user_id = $4 AND balance >= $1 RETURNING balance"
+        },
+        {
+          "kind": "consume-history",
+          "amount": -8,
+          "sql": "INSERT INTO wujie_credit_transactions (id, user_id, amount, type, balance_after, description, reference_id, created_at) VALUES ($1, $2, $3, 'consume', $4, $5, $6, $7)"
+        }
+      ],
+      "engineCalls": 0,
+      "isolatedCalls": 0,
+      "unexpected": [],
+      "assertions": {
+        "status": true,
+        "balanceRestored": false,
+        "expectedEngineCalls": true,
+        "expectedIsolatedCalls": true,
+        "noUnexpected": true,
+        "exceptionRefundControl": true
+      },
+      "pass": false
+    },
+    {
+      "version": "main",
+      "id": "optimize-no-auto-provider",
+      "status": 400,
+      "body": {
+        "error": "请先在管理员后台配置可用的 LLM 模型 API"
+      },
+      "balance": 998,
+      "sql": [
+        {
+          "kind": "debit",
+          "amount": 2,
+          "sql": "UPDATE wujie_credits SET balance = balance - $1, total_used = total_used + $2, updated_at = $3 WHERE user_id = $4 AND balance >= $1 RETURNING balance"
+        },
+        {
+          "kind": "consume-history",
+          "amount": -2,
+          "sql": "INSERT INTO wujie_credit_transactions (id, user_id, amount, type, balance_after, description, reference_id, created_at) VALUES ($1, $2, $3, 'consume', $4, $5, $6, $7)"
+        }
+      ],
+      "engineCalls": 0,
+      "isolatedCalls": 0,
+      "unexpected": [],
+      "assertions": {
+        "status": true,
+        "balanceRestored": false,
+        "expectedEngineCalls": true,
+        "expectedIsolatedCalls": true,
+        "noUnexpected": true,
+        "exceptionRefundControl": true
+      },
+      "pass": false
+    },
+    {
+      "version": "main",
+      "id": "optimize-safety-reject",
+      "status": 400,
+      "body": {
+        "error": "内容包含违规关键词"
+      },
+      "balance": 998,
+      "sql": [
+        {
+          "kind": "debit",
+          "amount": 2,
+          "sql": "UPDATE wujie_credits SET balance = balance - $1, total_used = total_used + $2, updated_at = $3 WHERE user_id = $4 AND balance >= $1 RETURNING balance"
+        },
+        {
+          "kind": "consume-history",
+          "amount": -2,
+          "sql": "INSERT INTO wujie_credit_transactions (id, user_id, amount, type, balance_after, description, reference_id, created_at) VALUES ($1, $2, $3, 'consume', $4, $5, $6, $7)"
+        }
+      ],
+      "engineCalls": 0,
+      "isolatedCalls": 0,
+      "unexpected": [],
+      "assertions": {
+        "status": true,
+        "balanceRestored": false,
+        "expectedEngineCalls": true,
+        "expectedIsolatedCalls": true,
+        "noUnexpected": true,
+        "exceptionRefundControl": true
+      },
+      "pass": false
+    },
+    {
+      "version": "main",
+      "id": "optimize-upstream-429",
+      "status": 429,
+      "body": {
+        "error": "AI模型请求失败 (429)"
+      },
+      "balance": 992,
+      "sql": [
+        {
+          "kind": "debit",
+          "amount": 8,
+          "sql": "UPDATE wujie_credits SET balance = balance - $1, total_used = total_used + $2, updated_at = $3 WHERE user_id = $4 AND balance >= $1 RETURNING balance"
+        },
+        {
+          "kind": "consume-history",
+          "amount": -8,
+          "sql": "INSERT INTO wujie_credit_transactions (id, user_id, amount, type, balance_after, description, reference_id, created_at) VALUES ($1, $2, $3, 'consume', $4, $5, $6, $7)"
+        }
+      ],
+      "engineCalls": 0,
+      "isolatedCalls": 1,
+      "unexpected": [],
+      "assertions": {
+        "status": true,
+        "balanceRestored": false,
+        "expectedEngineCalls": true,
+        "expectedIsolatedCalls": true,
+        "noUnexpected": true,
+        "exceptionRefundControl": true
+      },
+      "pass": false
+    },
+    {
+      "version": "main",
+      "id": "optimize-empty-upstream",
+      "status": 500,
+      "body": {
+        "error": "AI模型返回了空结果，请重试"
+      },
+      "balance": 992,
+      "sql": [
+        {
+          "kind": "debit",
+          "amount": 8,
+          "sql": "UPDATE wujie_credits SET balance = balance - $1, total_used = total_used + $2, updated_at = $3 WHERE user_id = $4 AND balance >= $1 RETURNING balance"
+        },
+        {
+          "kind": "consume-history",
+          "amount": -8,
+          "sql": "INSERT INTO wujie_credit_transactions (id, user_id, amount, type, balance_after, description, reference_id, created_at) VALUES ($1, $2, $3, 'consume', $4, $5, $6, $7)"
+        }
+      ],
+      "engineCalls": 0,
+      "isolatedCalls": 1,
+      "unexpected": [],
+      "assertions": {
+        "status": true,
+        "balanceRestored": false,
+        "expectedEngineCalls": true,
+        "expectedIsolatedCalls": true,
+        "noUnexpected": true,
+        "exceptionRefundControl": true
+      },
+      "pass": false
+    },
+    {
+      "version": "main",
+      "id": "optimize-upstream-throws-control",
+      "status": 500,
+      "body": {
+        "error": "优化失败: 未知错误"
+      },
+      "balance": 1000,
+      "sql": [
+        {
+          "kind": "debit",
+          "amount": 8,
+          "sql": "UPDATE wujie_credits SET balance = balance - $1, total_used = total_used + $2, updated_at = $3 WHERE user_id = $4 AND balance >= $1 RETURNING balance"
+        },
+        {
+          "kind": "consume-history",
+          "amount": -8,
+          "sql": "INSERT INTO wujie_credit_transactions (id, user_id, amount, type, balance_after, description, reference_id, created_at) VALUES ($1, $2, $3, 'consume', $4, $5, $6, $7)"
+        },
+        {
+          "kind": "refund",
+          "amount": 8,
+          "sql": "BEGIN; UPDATE wujie_credits SET balance = balance + $1, total_used = GREATEST(total_used - $2, 0), updated_at = $3 WHERE user_id = $4 RETURNING balance; INSERT INTO wujie_credit_transactions (id, user_id, amount, type, balance_after, description, reference_id, created_at) VALUES ($7, $4, $1, 'refund', (SELECT balance FROM wujie_credits WHERE user_id = $4), $5, $6, $3); COMMIT;"
+        }
+      ],
+      "engineCalls": 0,
+      "isolatedCalls": 1,
+      "unexpected": [],
+      "assertions": {
+        "status": true,
+        "balanceRestored": true,
+        "expectedEngineCalls": true,
+        "expectedIsolatedCalls": true,
+        "noUnexpected": true,
+        "exceptionRefundControl": true
+      },
+      "pass": true
+    },
+    {
+      "version": "main",
+      "id": "optimize-invalid-json-control",
+      "status": 500,
+      "body": {
+        "error": "优化失败: 未知错误"
+      },
+      "balance": 1000,
+      "sql": [
+        {
+          "kind": "debit",
+          "amount": 8,
+          "sql": "UPDATE wujie_credits SET balance = balance - $1, total_used = total_used + $2, updated_at = $3 WHERE user_id = $4 AND balance >= $1 RETURNING balance"
+        },
+        {
+          "kind": "consume-history",
+          "amount": -8,
+          "sql": "INSERT INTO wujie_credit_transactions (id, user_id, amount, type, balance_after, description, reference_id, created_at) VALUES ($1, $2, $3, 'consume', $4, $5, $6, $7)"
+        },
+        {
+          "kind": "refund",
+          "amount": 8,
+          "sql": "BEGIN; UPDATE wujie_credits SET balance = balance + $1, total_used = GREATEST(total_used - $2, 0), updated_at = $3 WHERE user_id = $4 RETURNING balance; INSERT INTO wujie_credit_transactions (id, user_id, amount, type, balance_after, description, reference_id, created_at) VALUES ($7, $4, $1, 'refund', (SELECT balance FROM wujie_credits WHERE user_id = $4), $5, $6, $3); COMMIT;"
+        }
+      ],
+      "engineCalls": 0,
+      "isolatedCalls": 1,
+      "unexpected": [],
+      "assertions": {
+        "status": true,
+        "balanceRestored": true,
+        "expectedEngineCalls": true,
+        "expectedIsolatedCalls": true,
+        "noUnexpected": true,
+        "exceptionRefundControl": true
+      },
+      "pass": true
+    },
+    {
+      "version": "main",
+      "id": "workflow-upscale-default",
+      "status": 400,
+      "body": {
+        "success": false,
+        "error": "不支持的放大倍率: 2，仅支持 2 和 4"
+      },
+      "balance": 992,
+      "sql": [
+        {
+          "kind": "debit",
+          "amount": 8,
+          "sql": "UPDATE wujie_credits SET balance = balance - $1, total_used = total_used + $2, updated_at = $3 WHERE user_id = $4 AND balance >= $1 RETURNING balance"
+        },
+        {
+          "kind": "consume-history",
+          "amount": -8,
+          "sql": "INSERT INTO wujie_credit_transactions (id, user_id, amount, type, balance_after, description, reference_id, created_at) VALUES ($1, $2, $3, 'consume', $4, $5, $6, $7)"
+        }
+      ],
+      "engineCalls": 0,
+      "isolatedCalls": 0,
+      "unexpected": [],
+      "workflowRequest": {
+        "endpoint": "/api/image/upscale",
+        "method": "POST",
+        "body": {
+          "imageUrl": "/api/serve-upload/isolated-source.png",
+          "scale": "2",
+          "outputFormat": "png"
+        }
+      },
+      "assertions": {
+        "status": false,
+        "balanceRestored": false,
+        "expectedEngineCalls": false,
+        "expectedIsolatedCalls": true,
+        "noUnexpected": true,
+        "exceptionRefundControl": false
+      },
+      "pass": false
+    },
+    {
+      "version": "main",
+      "id": "workflow-upscale-select-2",
+      "status": 400,
+      "body": {
+        "success": false,
+        "error": "不支持的放大倍率: 2，仅支持 2 和 4"
+      },
+      "balance": 992,
+      "sql": [
+        {
+          "kind": "debit",
+          "amount": 8,
+          "sql": "UPDATE wujie_credits SET balance = balance - $1, total_used = total_used + $2, updated_at = $3 WHERE user_id = $4 AND balance >= $1 RETURNING balance"
+        },
+        {
+          "kind": "consume-history",
+          "amount": -8,
+          "sql": "INSERT INTO wujie_credit_transactions (id, user_id, amount, type, balance_after, description, reference_id, created_at) VALUES ($1, $2, $3, 'consume', $4, $5, $6, $7)"
+        }
+      ],
+      "engineCalls": 0,
+      "isolatedCalls": 0,
+      "unexpected": [],
+      "workflowRequest": {
+        "endpoint": "/api/image/upscale",
+        "method": "POST",
+        "body": {
+          "imageUrl": "/api/serve-upload/isolated-source.png",
+          "scale": "2",
+          "outputFormat": "png"
+        }
+      },
+      "assertions": {
+        "status": false,
+        "balanceRestored": false,
+        "expectedEngineCalls": false,
+        "expectedIsolatedCalls": true,
+        "noUnexpected": true,
+        "exceptionRefundControl": false
+      },
+      "pass": false
+    },
+    {
+      "version": "main",
+      "id": "workflow-upscale-select-4",
+      "status": 400,
+      "body": {
+        "success": false,
+        "error": "不支持的放大倍率: 4，仅支持 2 和 4"
+      },
+      "balance": 992,
+      "sql": [
+        {
+          "kind": "debit",
+          "amount": 8,
+          "sql": "UPDATE wujie_credits SET balance = balance - $1, total_used = total_used + $2, updated_at = $3 WHERE user_id = $4 AND balance >= $1 RETURNING balance"
+        },
+        {
+          "kind": "consume-history",
+          "amount": -8,
+          "sql": "INSERT INTO wujie_credit_transactions (id, user_id, amount, type, balance_after, description, reference_id, created_at) VALUES ($1, $2, $3, 'consume', $4, $5, $6, $7)"
+        }
+      ],
+      "engineCalls": 0,
+      "isolatedCalls": 0,
+      "unexpected": [],
+      "workflowRequest": {
+        "endpoint": "/api/image/upscale",
+        "method": "POST",
+        "body": {
+          "imageUrl": "/api/serve-upload/isolated-source.png",
+          "scale": "4",
+          "outputFormat": "png"
+        }
+      },
+      "assertions": {
+        "status": false,
+        "balanceRestored": false,
+        "expectedEngineCalls": false,
+        "expectedIsolatedCalls": true,
+        "noUnexpected": true,
+        "exceptionRefundControl": false
+      },
+      "pass": false
+    },
+    {
+      "version": "main",
+      "id": "workflow-upscale-number-control",
+      "status": 500,
+      "body": {
+        "success": false,
+        "error": "放大请求处理失败: Error: isolated engine exception"
+      },
+      "balance": 1000,
+      "sql": [
+        {
+          "kind": "debit",
+          "amount": 8,
+          "sql": "UPDATE wujie_credits SET balance = balance - $1, total_used = total_used + $2, updated_at = $3 WHERE user_id = $4 AND balance >= $1 RETURNING balance"
+        },
+        {
+          "kind": "consume-history",
+          "amount": -8,
+          "sql": "INSERT INTO wujie_credit_transactions (id, user_id, amount, type, balance_after, description, reference_id, created_at) VALUES ($1, $2, $3, 'consume', $4, $5, $6, $7)"
+        },
+        {
+          "kind": "refund",
+          "amount": 8,
+          "sql": "BEGIN; UPDATE wujie_credits SET balance = balance + $1, total_used = GREATEST(total_used - $2, 0), updated_at = $3 WHERE user_id = $4 RETURNING balance; INSERT INTO wujie_credit_transactions (id, user_id, amount, type, balance_after, description, reference_id, created_at) VALUES ($7, $4, $1, 'refund', (SELECT balance FROM wujie_credits WHERE user_id = $4), $5, $6, $3); COMMIT;"
+        }
+      ],
+      "engineCalls": 1,
+      "isolatedCalls": 0,
+      "unexpected": [],
+      "workflowRequest": {
+        "endpoint": "/api/image/upscale",
+        "method": "POST",
+        "body": {
+          "imageUrl": "/api/serve-upload/isolated-source.png",
+          "scale": 2,
+          "outputFormat": "png"
+        }
+      },
+      "assertions": {
+        "status": true,
+        "balanceRestored": true,
+        "expectedEngineCalls": true,
+        "expectedIsolatedCalls": true,
+        "noUnexpected": true,
+        "exceptionRefundControl": true
+      },
+      "pass": true
+    },
+    {
+      "version": "donor",
+      "id": "upscale-missing-image-control",
+      "status": 400,
+      "body": {
+        "error": "imageUrl 不能为空"
+      },
+      "balance": 1000,
+      "sql": [],
+      "engineCalls": 0,
+      "isolatedCalls": 0,
+      "unexpected": [],
+      "assertions": {
+        "status": true,
+        "balanceRestored": true,
+        "expectedEngineCalls": true,
+        "expectedIsolatedCalls": true,
+        "noUnexpected": true,
+        "exceptionRefundControl": true
+      },
+      "pass": true
+    },
+    {
+      "version": "donor",
+      "id": "upscale-invalid-scale",
+      "status": 400,
+      "body": {
+        "success": false,
+        "error": "不支持的放大倍率: 3，仅支持 2 和 4"
+      },
+      "balance": 992,
+      "sql": [
+        {
+          "kind": "debit",
+          "amount": 8,
+          "sql": "UPDATE wujie_credits SET balance = balance - $1, total_used = total_used + $2, updated_at = $3 WHERE user_id = $4 AND balance >= $1 RETURNING balance"
+        },
+        {
+          "kind": "consume-history",
+          "amount": -8,
+          "sql": "INSERT INTO wujie_credit_transactions (id, user_id, amount, type, balance_after, description, reference_id, created_at) VALUES ($1, $2, $3, 'consume', $4, $5, $6, $7)"
+        }
+      ],
+      "engineCalls": 0,
+      "isolatedCalls": 0,
+      "unexpected": [],
+      "assertions": {
+        "status": true,
+        "balanceRestored": false,
+        "expectedEngineCalls": true,
+        "expectedIsolatedCalls": true,
+        "noUnexpected": true,
+        "exceptionRefundControl": true
+      },
+      "pass": false
+    },
+    {
+      "version": "donor",
+      "id": "upscale-invalid-format",
+      "status": 400,
+      "body": {
+        "success": false,
+        "error": "不支持的输出格式: gif，仅支持 png/jpg/webp"
+      },
+      "balance": 992,
+      "sql": [
+        {
+          "kind": "debit",
+          "amount": 8,
+          "sql": "UPDATE wujie_credits SET balance = balance - $1, total_used = total_used + $2, updated_at = $3 WHERE user_id = $4 AND balance >= $1 RETURNING balance"
+        },
+        {
+          "kind": "consume-history",
+          "amount": -8,
+          "sql": "INSERT INTO wujie_credit_transactions (id, user_id, amount, type, balance_after, description, reference_id, created_at) VALUES ($1, $2, $3, 'consume', $4, $5, $6, $7)"
+        }
+      ],
+      "engineCalls": 0,
+      "isolatedCalls": 0,
+      "unexpected": [],
+      "assertions": {
+        "status": true,
+        "balanceRestored": false,
+        "expectedEngineCalls": true,
+        "expectedIsolatedCalls": true,
+        "noUnexpected": true,
+        "exceptionRefundControl": true
+      },
+      "pass": false
+    },
+    {
+      "version": "donor",
+      "id": "upscale-engine-failure",
+      "status": 500,
+      "body": {
+        "success": false,
+        "error": "isolated engine failure"
+      },
+      "balance": 992,
+      "sql": [
+        {
+          "kind": "debit",
+          "amount": 8,
+          "sql": "UPDATE wujie_credits SET balance = balance - $1, total_used = total_used + $2, updated_at = $3 WHERE user_id = $4 AND balance >= $1 RETURNING balance"
+        },
+        {
+          "kind": "consume-history",
+          "amount": -8,
+          "sql": "INSERT INTO wujie_credit_transactions (id, user_id, amount, type, balance_after, description, reference_id, created_at) VALUES ($1, $2, $3, 'consume', $4, $5, $6, $7)"
+        }
+      ],
+      "engineCalls": 1,
+      "isolatedCalls": 0,
+      "unexpected": [],
+      "assertions": {
+        "status": true,
+        "balanceRestored": false,
+        "expectedEngineCalls": true,
+        "expectedIsolatedCalls": true,
+        "noUnexpected": true,
+        "exceptionRefundControl": true
+      },
+      "pass": false
+    },
+    {
+      "version": "donor",
+      "id": "upscale-engine-throws-control",
+      "status": 500,
+      "body": {
+        "success": false,
+        "error": "放大请求处理失败: Error: isolated engine exception"
+      },
+      "balance": 1000,
+      "sql": [
+        {
+          "kind": "debit",
+          "amount": 8,
+          "sql": "UPDATE wujie_credits SET balance = balance - $1, total_used = total_used + $2, updated_at = $3 WHERE user_id = $4 AND balance >= $1 RETURNING balance"
+        },
+        {
+          "kind": "consume-history",
+          "amount": -8,
+          "sql": "INSERT INTO wujie_credit_transactions (id, user_id, amount, type, balance_after, description, reference_id, created_at) VALUES ($1, $2, $3, 'consume', $4, $5, $6, $7)"
+        },
+        {
+          "kind": "refund",
+          "amount": 8,
+          "sql": "BEGIN; UPDATE wujie_credits SET balance = balance + $1, total_used = GREATEST(total_used - $2, 0), updated_at = $3 WHERE user_id = $4 RETURNING balance; INSERT INTO wujie_credit_transactions (id, user_id, amount, type, balance_after, description, reference_id, created_at) VALUES ($7, $4, $1, 'refund', (SELECT balance FROM wujie_credits WHERE user_id = $4), $5, $6, $3); COMMIT;"
+        }
+      ],
+      "engineCalls": 1,
+      "isolatedCalls": 0,
+      "unexpected": [],
+      "assertions": {
+        "status": true,
+        "balanceRestored": true,
+        "expectedEngineCalls": true,
+        "expectedIsolatedCalls": true,
+        "noUnexpected": true,
+        "exceptionRefundControl": true
+      },
+      "pass": true
+    },
+    {
+      "version": "donor",
+      "id": "upscale-ai-delegate-reject",
+      "status": 401,
+      "body": {
+        "success": false,
+        "error": "AI放大失败: isolated unauthenticated delegate"
+      },
+      "balance": 992,
+      "sql": [
+        {
+          "kind": "debit",
+          "amount": 8,
+          "sql": "UPDATE wujie_credits SET balance = balance - $1, total_used = total_used + $2, updated_at = $3 WHERE user_id = $4 AND balance >= $1 RETURNING balance"
+        },
+        {
+          "kind": "consume-history",
+          "amount": -8,
+          "sql": "INSERT INTO wujie_credit_transactions (id, user_id, amount, type, balance_after, description, reference_id, created_at) VALUES ($1, $2, $3, 'consume', $4, $5, $6, $7)"
+        }
+      ],
+      "engineCalls": 0,
+      "isolatedCalls": 1,
+      "unexpected": [],
+      "assertions": {
+        "status": true,
+        "balanceRestored": false,
+        "expectedEngineCalls": true,
+        "expectedIsolatedCalls": true,
+        "noUnexpected": true,
+        "exceptionRefundControl": true
+      },
+      "pass": false
+    },
+    {
+      "version": "donor",
+      "id": "optimize-empty-control",
+      "status": 400,
+      "body": {
+        "error": "prompt 不能为空"
+      },
+      "balance": 1000,
+      "sql": [],
+      "engineCalls": 0,
+      "isolatedCalls": 0,
+      "unexpected": [],
+      "assertions": {
+        "status": true,
+        "balanceRestored": true,
+        "expectedEngineCalls": true,
+        "expectedIsolatedCalls": true,
+        "noUnexpected": true,
+        "exceptionRefundControl": true
+      },
+      "pass": true
+    },
+    {
+      "version": "donor",
+      "id": "optimize-missing-provider",
+      "status": 400,
+      "body": {
+        "error": "未找到可用的后台模型提供商配置"
+      },
+      "balance": 992,
+      "sql": [
+        {
+          "kind": "debit",
+          "amount": 8,
+          "sql": "UPDATE wujie_credits SET balance = balance - $1, total_used = total_used + $2, updated_at = $3 WHERE user_id = $4 AND balance >= $1 RETURNING balance"
+        },
+        {
+          "kind": "consume-history",
+          "amount": -8,
+          "sql": "INSERT INTO wujie_credit_transactions (id, user_id, amount, type, balance_after, description, reference_id, created_at) VALUES ($1, $2, $3, 'consume', $4, $5, $6, $7)"
+        }
+      ],
+      "engineCalls": 0,
+      "isolatedCalls": 0,
+      "unexpected": [],
+      "assertions": {
+        "status": true,
+        "balanceRestored": false,
+        "expectedEngineCalls": true,
+        "expectedIsolatedCalls": true,
+        "noUnexpected": true,
+        "exceptionRefundControl": true
+      },
+      "pass": false
+    },
+    {
+      "version": "donor",
+      "id": "optimize-no-auto-provider",
+      "status": 400,
+      "body": {
+        "error": "请先在管理员后台配置可用的 LLM 模型 API"
+      },
+      "balance": 998,
+      "sql": [
+        {
+          "kind": "debit",
+          "amount": 2,
+          "sql": "UPDATE wujie_credits SET balance = balance - $1, total_used = total_used + $2, updated_at = $3 WHERE user_id = $4 AND balance >= $1 RETURNING balance"
+        },
+        {
+          "kind": "consume-history",
+          "amount": -2,
+          "sql": "INSERT INTO wujie_credit_transactions (id, user_id, amount, type, balance_after, description, reference_id, created_at) VALUES ($1, $2, $3, 'consume', $4, $5, $6, $7)"
+        }
+      ],
+      "engineCalls": 0,
+      "isolatedCalls": 0,
+      "unexpected": [],
+      "assertions": {
+        "status": true,
+        "balanceRestored": false,
+        "expectedEngineCalls": true,
+        "expectedIsolatedCalls": true,
+        "noUnexpected": true,
+        "exceptionRefundControl": true
+      },
+      "pass": false
+    },
+    {
+      "version": "donor",
+      "id": "optimize-safety-reject",
+      "status": 400,
+      "body": {
+        "error": "内容包含违规关键词"
+      },
+      "balance": 998,
+      "sql": [
+        {
+          "kind": "debit",
+          "amount": 2,
+          "sql": "UPDATE wujie_credits SET balance = balance - $1, total_used = total_used + $2, updated_at = $3 WHERE user_id = $4 AND balance >= $1 RETURNING balance"
+        },
+        {
+          "kind": "consume-history",
+          "amount": -2,
+          "sql": "INSERT INTO wujie_credit_transactions (id, user_id, amount, type, balance_after, description, reference_id, created_at) VALUES ($1, $2, $3, 'consume', $4, $5, $6, $7)"
+        }
+      ],
+      "engineCalls": 0,
+      "isolatedCalls": 0,
+      "unexpected": [],
+      "assertions": {
+        "status": true,
+        "balanceRestored": false,
+        "expectedEngineCalls": true,
+        "expectedIsolatedCalls": true,
+        "noUnexpected": true,
+        "exceptionRefundControl": true
+      },
+      "pass": false
+    },
+    {
+      "version": "donor",
+      "id": "optimize-upstream-429",
+      "status": 429,
+      "body": {
+        "error": "AI模型请求失败 (429)"
+      },
+      "balance": 992,
+      "sql": [
+        {
+          "kind": "debit",
+          "amount": 8,
+          "sql": "UPDATE wujie_credits SET balance = balance - $1, total_used = total_used + $2, updated_at = $3 WHERE user_id = $4 AND balance >= $1 RETURNING balance"
+        },
+        {
+          "kind": "consume-history",
+          "amount": -8,
+          "sql": "INSERT INTO wujie_credit_transactions (id, user_id, amount, type, balance_after, description, reference_id, created_at) VALUES ($1, $2, $3, 'consume', $4, $5, $6, $7)"
+        }
+      ],
+      "engineCalls": 0,
+      "isolatedCalls": 1,
+      "unexpected": [],
+      "assertions": {
+        "status": true,
+        "balanceRestored": false,
+        "expectedEngineCalls": true,
+        "expectedIsolatedCalls": true,
+        "noUnexpected": true,
+        "exceptionRefundControl": true
+      },
+      "pass": false
+    },
+    {
+      "version": "donor",
+      "id": "optimize-empty-upstream",
+      "status": 500,
+      "body": {
+        "error": "AI模型返回了空结果，请重试"
+      },
+      "balance": 992,
+      "sql": [
+        {
+          "kind": "debit",
+          "amount": 8,
+          "sql": "UPDATE wujie_credits SET balance = balance - $1, total_used = total_used + $2, updated_at = $3 WHERE user_id = $4 AND balance >= $1 RETURNING balance"
+        },
+        {
+          "kind": "consume-history",
+          "amount": -8,
+          "sql": "INSERT INTO wujie_credit_transactions (id, user_id, amount, type, balance_after, description, reference_id, created_at) VALUES ($1, $2, $3, 'consume', $4, $5, $6, $7)"
+        }
+      ],
+      "engineCalls": 0,
+      "isolatedCalls": 1,
+      "unexpected": [],
+      "assertions": {
+        "status": true,
+        "balanceRestored": false,
+        "expectedEngineCalls": true,
+        "expectedIsolatedCalls": true,
+        "noUnexpected": true,
+        "exceptionRefundControl": true
+      },
+      "pass": false
+    },
+    {
+      "version": "donor",
+      "id": "optimize-upstream-throws-control",
+      "status": 500,
+      "body": {
+        "error": "优化失败: 未知错误"
+      },
+      "balance": 1000,
+      "sql": [
+        {
+          "kind": "debit",
+          "amount": 8,
+          "sql": "UPDATE wujie_credits SET balance = balance - $1, total_used = total_used + $2, updated_at = $3 WHERE user_id = $4 AND balance >= $1 RETURNING balance"
+        },
+        {
+          "kind": "consume-history",
+          "amount": -8,
+          "sql": "INSERT INTO wujie_credit_transactions (id, user_id, amount, type, balance_after, description, reference_id, created_at) VALUES ($1, $2, $3, 'consume', $4, $5, $6, $7)"
+        },
+        {
+          "kind": "refund",
+          "amount": 8,
+          "sql": "BEGIN; UPDATE wujie_credits SET balance = balance + $1, total_used = GREATEST(total_used - $2, 0), updated_at = $3 WHERE user_id = $4 RETURNING balance; INSERT INTO wujie_credit_transactions (id, user_id, amount, type, balance_after, description, reference_id, created_at) VALUES ($7, $4, $1, 'refund', (SELECT balance FROM wujie_credits WHERE user_id = $4), $5, $6, $3); COMMIT;"
+        }
+      ],
+      "engineCalls": 0,
+      "isolatedCalls": 1,
+      "unexpected": [],
+      "assertions": {
+        "status": true,
+        "balanceRestored": true,
+        "expectedEngineCalls": true,
+        "expectedIsolatedCalls": true,
+        "noUnexpected": true,
+        "exceptionRefundControl": true
+      },
+      "pass": true
+    },
+    {
+      "version": "donor",
+      "id": "optimize-invalid-json-control",
+      "status": 500,
+      "body": {
+        "error": "优化失败: 未知错误"
+      },
+      "balance": 1000,
+      "sql": [
+        {
+          "kind": "debit",
+          "amount": 8,
+          "sql": "UPDATE wujie_credits SET balance = balance - $1, total_used = total_used + $2, updated_at = $3 WHERE user_id = $4 AND balance >= $1 RETURNING balance"
+        },
+        {
+          "kind": "consume-history",
+          "amount": -8,
+          "sql": "INSERT INTO wujie_credit_transactions (id, user_id, amount, type, balance_after, description, reference_id, created_at) VALUES ($1, $2, $3, 'consume', $4, $5, $6, $7)"
+        },
+        {
+          "kind": "refund",
+          "amount": 8,
+          "sql": "BEGIN; UPDATE wujie_credits SET balance = balance + $1, total_used = GREATEST(total_used - $2, 0), updated_at = $3 WHERE user_id = $4 RETURNING balance; INSERT INTO wujie_credit_transactions (id, user_id, amount, type, balance_after, description, reference_id, created_at) VALUES ($7, $4, $1, 'refund', (SELECT balance FROM wujie_credits WHERE user_id = $4), $5, $6, $3); COMMIT;"
+        }
+      ],
+      "engineCalls": 0,
+      "isolatedCalls": 1,
+      "unexpected": [],
+      "assertions": {
+        "status": true,
+        "balanceRestored": true,
+        "expectedEngineCalls": true,
+        "expectedIsolatedCalls": true,
+        "noUnexpected": true,
+        "exceptionRefundControl": true
+      },
+      "pass": true
+    },
+    {
+      "version": "donor",
+      "id": "workflow-upscale-default",
+      "status": 400,
+      "body": {
+        "success": false,
+        "error": "不支持的放大倍率: 2，仅支持 2 和 4"
+      },
+      "balance": 992,
+      "sql": [
+        {
+          "kind": "debit",
+          "amount": 8,
+          "sql": "UPDATE wujie_credits SET balance = balance - $1, total_used = total_used + $2, updated_at = $3 WHERE user_id = $4 AND balance >= $1 RETURNING balance"
+        },
+        {
+          "kind": "consume-history",
+          "amount": -8,
+          "sql": "INSERT INTO wujie_credit_transactions (id, user_id, amount, type, balance_after, description, reference_id, created_at) VALUES ($1, $2, $3, 'consume', $4, $5, $6, $7)"
+        }
+      ],
+      "engineCalls": 0,
+      "isolatedCalls": 0,
+      "unexpected": [],
+      "workflowRequest": {
+        "endpoint": "/api/image/upscale",
+        "method": "POST",
+        "body": {
+          "imageUrl": "/api/serve-upload/isolated-source.png",
+          "scale": "2",
+          "outputFormat": "png"
+        }
+      },
+      "assertions": {
+        "status": false,
+        "balanceRestored": false,
+        "expectedEngineCalls": false,
+        "expectedIsolatedCalls": true,
+        "noUnexpected": true,
+        "exceptionRefundControl": false
+      },
+      "pass": false
+    },
+    {
+      "version": "donor",
+      "id": "workflow-upscale-select-2",
+      "status": 400,
+      "body": {
+        "success": false,
+        "error": "不支持的放大倍率: 2，仅支持 2 和 4"
+      },
+      "balance": 992,
+      "sql": [
+        {
+          "kind": "debit",
+          "amount": 8,
+          "sql": "UPDATE wujie_credits SET balance = balance - $1, total_used = total_used + $2, updated_at = $3 WHERE user_id = $4 AND balance >= $1 RETURNING balance"
+        },
+        {
+          "kind": "consume-history",
+          "amount": -8,
+          "sql": "INSERT INTO wujie_credit_transactions (id, user_id, amount, type, balance_after, description, reference_id, created_at) VALUES ($1, $2, $3, 'consume', $4, $5, $6, $7)"
+        }
+      ],
+      "engineCalls": 0,
+      "isolatedCalls": 0,
+      "unexpected": [],
+      "workflowRequest": {
+        "endpoint": "/api/image/upscale",
+        "method": "POST",
+        "body": {
+          "imageUrl": "/api/serve-upload/isolated-source.png",
+          "scale": "2",
+          "outputFormat": "png"
+        }
+      },
+      "assertions": {
+        "status": false,
+        "balanceRestored": false,
+        "expectedEngineCalls": false,
+        "expectedIsolatedCalls": true,
+        "noUnexpected": true,
+        "exceptionRefundControl": false
+      },
+      "pass": false
+    },
+    {
+      "version": "donor",
+      "id": "workflow-upscale-select-4",
+      "status": 400,
+      "body": {
+        "success": false,
+        "error": "不支持的放大倍率: 4，仅支持 2 和 4"
+      },
+      "balance": 992,
+      "sql": [
+        {
+          "kind": "debit",
+          "amount": 8,
+          "sql": "UPDATE wujie_credits SET balance = balance - $1, total_used = total_used + $2, updated_at = $3 WHERE user_id = $4 AND balance >= $1 RETURNING balance"
+        },
+        {
+          "kind": "consume-history",
+          "amount": -8,
+          "sql": "INSERT INTO wujie_credit_transactions (id, user_id, amount, type, balance_after, description, reference_id, created_at) VALUES ($1, $2, $3, 'consume', $4, $5, $6, $7)"
+        }
+      ],
+      "engineCalls": 0,
+      "isolatedCalls": 0,
+      "unexpected": [],
+      "workflowRequest": {
+        "endpoint": "/api/image/upscale",
+        "method": "POST",
+        "body": {
+          "imageUrl": "/api/serve-upload/isolated-source.png",
+          "scale": "4",
+          "outputFormat": "png"
+        }
+      },
+      "assertions": {
+        "status": false,
+        "balanceRestored": false,
+        "expectedEngineCalls": false,
+        "expectedIsolatedCalls": true,
+        "noUnexpected": true,
+        "exceptionRefundControl": false
+      },
+      "pass": false
+    },
+    {
+      "version": "donor",
+      "id": "workflow-upscale-number-control",
+      "status": 500,
+      "body": {
+        "success": false,
+        "error": "放大请求处理失败: Error: isolated engine exception"
+      },
+      "balance": 1000,
+      "sql": [
+        {
+          "kind": "debit",
+          "amount": 8,
+          "sql": "UPDATE wujie_credits SET balance = balance - $1, total_used = total_used + $2, updated_at = $3 WHERE user_id = $4 AND balance >= $1 RETURNING balance"
+        },
+        {
+          "kind": "consume-history",
+          "amount": -8,
+          "sql": "INSERT INTO wujie_credit_transactions (id, user_id, amount, type, balance_after, description, reference_id, created_at) VALUES ($1, $2, $3, 'consume', $4, $5, $6, $7)"
+        },
+        {
+          "kind": "refund",
+          "amount": 8,
+          "sql": "BEGIN; UPDATE wujie_credits SET balance = balance + $1, total_used = GREATEST(total_used - $2, 0), updated_at = $3 WHERE user_id = $4 RETURNING balance; INSERT INTO wujie_credit_transactions (id, user_id, amount, type, balance_after, description, reference_id, created_at) VALUES ($7, $4, $1, 'refund', (SELECT balance FROM wujie_credits WHERE user_id = $4), $5, $6, $3); COMMIT;"
+        }
+      ],
+      "engineCalls": 1,
+      "isolatedCalls": 0,
+      "unexpected": [],
+      "workflowRequest": {
+        "endpoint": "/api/image/upscale",
+        "method": "POST",
+        "body": {
+          "imageUrl": "/api/serve-upload/isolated-source.png",
+          "scale": 2,
+          "outputFormat": "png"
+        }
+      },
+      "assertions": {
+        "status": true,
+        "balanceRestored": true,
+        "expectedEngineCalls": true,
+        "expectedIsolatedCalls": true,
+        "noUnexpected": true,
+        "exceptionRefundControl": true
+      },
+      "pass": true
+    }
+  ]
+}

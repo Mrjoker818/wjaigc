@@ -1,7 +1,7 @@
 # 受保护功能清单
 
-- Git Commit：`cd19d88`
-- 生成时间：2026-08-08T06:07:28.098Z
+- Git Commit：`39cfcaea`
+- 生成时间：2026-08-31T14:04:18.277Z
 - 契约文件：`docs/testing/baselines/protected-features.json`
 - 条目数量：38
 

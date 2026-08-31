@@ -1,12 +1,12 @@
 # 无界 AI 功能盘点
 
-- Git Commit：`cd19d88`
+- Git Commit：`39cfcaea`
 - 软件版本：`4.0.0`
-- 生成时间：2026-08-08T06:07:28.098Z
+- 生成时间：2026-08-31T14:04:18.277Z
 - 受保护功能：38 项
 - 页面：4 项
-- API 路由：186 项
-- 组件源码：150 项
+- API 路由：202 项
+- 组件源码：175 项
 - 工作流节点类型：51 项
 - Agent 工具：7 项
 - 图片浮动工具动作：23 项
@@ -69,192 +69,576 @@
 
 | 路由 | 方法 | 文件 |
 | --- | --- | --- |
-| `/api/api/activity` | POST | `src/app/api/activity/route.ts` |
-| `/api/api/activity-venue/analyze` | POST | `src/app/api/activity-venue/analyze/route.ts` |
-| `/api/api/activity-venue/lock-design` | POST | `src/app/api/activity-venue/lock-design/route.ts` |
-| `/api/api/activity-venue/proposals` | POST | `src/app/api/activity-venue/proposals/route.ts` |
-| `/api/api/activity-venue/qc` | POST | `src/app/api/activity-venue/qc/route.ts` |
-| `/api/api/admin/api-balance` | GET, POST | `src/app/api/admin/api-balance/route.ts` |
-| `/api/api/admin/apis` | GET, POST | `src/app/api/admin/apis/route.ts` |
-| `/api/api/admin/audit` | GET, POST | `src/app/api/admin/audit/route.ts` |
-| `/api/api/admin/backups` | GET | `src/app/api/admin/backups/route.ts` |
-| `/api/api/admin/backups/:id` | DELETE | `src/app/api/admin/backups/[id]/route.ts` |
-| `/api/api/admin/backups/:id/download` | GET | `src/app/api/admin/backups/[id]/download/route.ts` |
-| `/api/api/admin/cloud-tasks` | GET | `src/app/api/admin/cloud-tasks/route.ts` |
-| `/api/api/admin/credits/overview` | GET | `src/app/api/admin/credits/overview/route.ts` |
-| `/api/api/admin/credits/pricing` | GET, POST | `src/app/api/admin/credits/pricing/route.ts` |
-| `/api/api/admin/credits/recharge` | POST | `src/app/api/admin/credits/recharge/route.ts` |
-| `/api/api/admin/dashboard-stats` | GET | `src/app/api/admin/dashboard-stats/route.ts` |
-| `/api/api/admin/desktop-devices` | GET | `src/app/api/admin/desktop-devices/route.ts` |
-| `/api/api/admin/desktop-update` | GET, POST | `src/app/api/admin/desktop-update/route.ts` |
-| `/api/api/admin/groups` | GET, POST | `src/app/api/admin/groups/route.ts` |
-| `/api/api/admin/local-generation-records` | GET | `src/app/api/admin/local-generation-records/route.ts` |
-| `/api/api/admin/op-log` | GET, POST | `src/app/api/admin/op-log/route.ts` |
-| `/api/api/admin/production-readiness` | GET | `src/app/api/admin/production-readiness/route.ts` |
-| `/api/api/admin/resources` | GET, POST | `src/app/api/admin/resources/route.ts` |
-| `/api/api/admin/settings` | GET, POST | `src/app/api/admin/settings/route.ts` |
-| `/api/api/admin/test-all-providers` | GET | `src/app/api/admin/test-all-providers/route.ts` |
-| `/api/api/admin/user-folder` | POST | `src/app/api/admin/user-folder/route.ts` |
-| `/api/api/admin/user-images` | GET | `src/app/api/admin/user-images/route.ts` |
-| `/api/api/admin/users` | GET, POST | `src/app/api/admin/users/route.ts` |
-| `/api/api/agent-edit` | GET, POST | `src/app/api/agent-edit/route.ts` |
-| `/api/api/ai-psd/create` | POST | `src/app/api/ai-psd/create/route.ts` |
-| `/api/api/ai-psd/result` | GET | `src/app/api/ai-psd/result/route.ts` |
-| `/api/api/ai-psd/status` | GET | `src/app/api/ai-psd/status/route.ts` |
-| `/api/api/analyze` | POST | `src/app/api/analyze/route.ts` |
-| `/api/api/analyze-psd` | POST | `src/app/api/analyze-psd/route.ts` |
-| `/api/api/annotations/execute` | POST | `src/app/api/annotations/execute/route.ts` |
-| `/api/api/annotations/resolve-target` | POST | `src/app/api/annotations/resolve-target/route.ts` |
-| `/api/api/announcement` | GET | `src/app/api/announcement/route.ts` |
-| `/api/api/artifacts` | GET, POST, DELETE | `src/app/api/artifacts/route.ts` |
-| `/api/api/aspect-recompose` | POST | `src/app/api/aspect-recompose/route.ts` |
-| `/api/api/audio/generate` | POST | `src/app/api/audio/generate/route.ts` |
-| `/api/api/auth/login` | POST | `src/app/api/auth/login/route.ts` |
-| `/api/api/auth/logout` | POST | `src/app/api/auth/logout/route.ts` |
-| `/api/api/auth/me` | GET | `src/app/api/auth/me/route.ts` |
-| `/api/api/auth/register` | GET, POST | `src/app/api/auth/register/route.ts` |
-| `/api/api/brand-assets` | GET, POST | `src/app/api/brand-assets/route.ts` |
-| `/api/api/brand-ecommerce` | POST | `src/app/api/brand-ecommerce/route.ts` |
-| `/api/api/brand-factory` | GET, POST | `src/app/api/brand-factory/route.ts` |
-| `/api/api/brand-ip/generate` | POST | `src/app/api/brand-ip/generate/route.ts` |
-| `/api/api/brand-ip/projects` | GET, POST, PATCH | `src/app/api/brand-ip/projects/route.ts` |
-| `/api/api/brand-ip/strategy` | POST | `src/app/api/brand-ip/strategy/route.ts` |
-| `/api/api/brand-ip/tasks` | GET | `src/app/api/brand-ip/tasks/route.ts` |
-| `/api/api/brand-kit` | GET, POST | `src/app/api/brand-kit/route.ts` |
-| `/api/api/brand-packaging/generate` | POST | `src/app/api/brand-packaging/generate/route.ts` |
-| `/api/api/brand-packaging/tasks` | GET | `src/app/api/brand-packaging/tasks/route.ts` |
-| `/api/api/cache-image` | POST | `src/app/api/cache-image/route.ts` |
-| `/api/api/cancel-task` | POST | `src/app/api/cancel-task/route.ts` |
-| `/api/api/chat` | POST | `src/app/api/chat/route.ts` |
-| `/api/api/chat-tasks` | GET | `src/app/api/chat-tasks/route.ts` |
-| `/api/api/client-error` | POST | `src/app/api/client-error/route.ts` |
-| `/api/api/connector/auth/login` | POST | `src/app/api/connector/auth/login/route.ts` |
-| `/api/api/connector/auth/me` | GET | `src/app/api/connector/auth/me/route.ts` |
-| `/api/api/creative/health` | GET | `src/app/api/creative/health/route.ts` |
-| `/api/api/creative/illustrator` | POST | `src/app/api/creative/illustrator/route.ts` |
-| `/api/api/creative/photoshop` | POST | `src/app/api/creative/photoshop/route.ts` |
-| `/api/api/creative/templates` | GET | `src/app/api/creative/templates/route.ts` |
-| `/api/api/credits` | GET, POST | `src/app/api/credits/route.ts` |
-| `/api/api/credits/pay-redirect` | GET | `src/app/api/credits/pay-redirect/route.ts` |
-| `/api/api/credits/payment-config` | GET, POST | `src/app/api/credits/payment-config/route.ts` |
-| `/api/api/credits/payment-notify` | GET, POST | `src/app/api/credits/payment-notify/route.ts` |
-| `/api/api/credits/payment-qr` | GET | `src/app/api/credits/payment-qr/route.ts` |
-| `/api/api/credits/payment-status` | GET | `src/app/api/credits/payment-status/route.ts` |
-| `/api/api/dcc/health` | GET | `src/app/api/dcc/health/route.ts` |
-| `/api/api/dcc/preflight` | GET | `src/app/api/dcc/preflight/route.ts` |
-| `/api/api/dcc/templates` | GET | `src/app/api/dcc/templates/route.ts` |
-| `/api/api/design/layer-split` | POST | `src/app/api/design/layer-split/route.ts` |
-| `/api/api/design/vectorize` | POST | `src/app/api/design/vectorize/route.ts` |
-| `/api/api/desktop/backup/download/:id` | GET | `src/app/api/desktop/backup/download/[id]/route.ts` |
-| `/api/api/desktop/backup/list` | GET | `src/app/api/desktop/backup/list/route.ts` |
-| `/api/api/desktop/backup/upload` | POST | `src/app/api/desktop/backup/upload/route.ts` |
-| `/api/api/desktop/config` | GET | `src/app/api/desktop/config/route.ts` |
-| `/api/api/desktop/device/heartbeat` | POST | `src/app/api/desktop/device/heartbeat/route.ts` |
-| `/api/api/desktop/generation-records` | POST | `src/app/api/desktop/generation-records/route.ts` |
-| `/api/api/desktop/login` | POST | `src/app/api/desktop/login/route.ts` |
-| `/api/api/desktop/resources` | GET | `src/app/api/desktop/resources/route.ts` |
-| `/api/api/desktop/update` | GET, POST | `src/app/api/desktop/update/route.ts` |
-| `/api/api/desktop/update/download/:id` | dynamic | `src/app/api/desktop/update/download/[id]/route.ts` |
-| `/api/api/diag/storage` | GET | `src/app/api/diag/storage/route.ts` |
-| `/api/api/diagnostics/export` | GET | `src/app/api/diagnostics/export/route.ts` |
-| `/api/api/display-3d/decompose` | POST | `src/app/api/display-3d/decompose/route.ts` |
-| `/api/api/display-3d/generate` | POST | `src/app/api/display-3d/generate/route.ts` |
-| `/api/api/ecom-templates` | GET, POST | `src/app/api/ecom-templates/route.ts` |
-| `/api/api/edit` | GET, POST | `src/app/api/edit/route.ts` |
-| `/api/api/effect-reverse-engineering` | GET, POST, DELETE | `src/app/api/effect-reverse-engineering/route.ts` |
-| `/api/api/element-decompose` | GET, POST, DELETE | `src/app/api/element-decompose/route.ts` |
-| `/api/api/excel/generate` | POST | `src/app/api/excel/generate/route.ts` |
-| `/api/api/export-project` | GET, POST | `src/app/api/export-project/route.ts` |
-| `/api/api/export/annotation-image` | POST | `src/app/api/export/annotation-image/route.ts` |
-| `/api/api/export/bom` | POST | `src/app/api/export/bom/route.ts` |
-| `/api/api/export/pdf` | POST | `src/app/api/export/pdf/route.ts` |
-| `/api/api/export/to-canvas` | POST | `src/app/api/export/to-canvas/route.ts` |
-| `/api/api/favorites` | GET, POST, DELETE | `src/app/api/favorites/route.ts` |
-| `/api/api/flowchart/generate` | POST | `src/app/api/flowchart/generate/route.ts` |
-| `/api/api/font-design/gallery` | GET | `src/app/api/font-design/gallery/route.ts` |
-| `/api/api/font-design/gallery-image` | GET | `src/app/api/font-design/gallery-image/route.ts` |
-| `/api/api/font-design/generate-image` | POST | `src/app/api/font-design/generate-image/route.ts` |
-| `/api/api/font-design/plan` | GET, POST | `src/app/api/font-design/plan/route.ts` |
-| `/api/api/font-design/prompt` | POST | `src/app/api/font-design/prompt/route.ts` |
-| `/api/api/generate` | POST | `src/app/api/generate/route.ts` |
-| `/api/api/help-image` | GET | `src/app/api/help-image/route.ts` |
-| `/api/api/human/analyze` | POST | `src/app/api/human/analyze/route.ts` |
-| `/api/api/human/repair` | POST | `src/app/api/human/repair/route.ts` |
-| `/api/api/human/select` | POST | `src/app/api/human/select/route.ts` |
-| `/api/api/human/task/:id` | GET | `src/app/api/human/task/[id]/route.ts` |
-| `/api/api/image-edit` | POST | `src/app/api/image-edit/route.ts` |
-| `/api/api/image-to-3d` | POST | `src/app/api/image-to-3d/route.ts` |
-| `/api/api/image-to-3d/auto-multi-view` | GET, POST | `src/app/api/image-to-3d/auto-multi-view/route.ts` |
-| `/api/api/image-to-3d/meshy-stream` | GET | `src/app/api/image-to-3d/meshy-stream/route.ts` |
-| `/api/api/image-to-3d/poll-post-process` | POST | `src/app/api/image-to-3d/poll-post-process/route.ts` |
-| `/api/api/image-to-3d/post-process` | GET, POST | `src/app/api/image-to-3d/post-process/route.ts` |
-| `/api/api/image/color-adjust` | POST | `src/app/api/image/color-adjust/route.ts` |
-| `/api/api/image/health` | GET | `src/app/api/image/health/route.ts` |
-| `/api/api/image/start-services` | POST | `src/app/api/image/start-services/route.ts` |
-| `/api/api/image/upscale` | POST | `src/app/api/image/upscale/route.ts` |
-| `/api/api/image/upscale-pro` | POST | `src/app/api/image/upscale-pro/route.ts` |
-| `/api/api/knowledge/extract-text` | POST | `src/app/api/knowledge/extract-text/route.ts` |
-| `/api/api/layered-decompose` | GET, POST, DELETE | `src/app/api/layered-decompose/route.ts` |
-| `/api/api/logo-skill` | GET, POST | `src/app/api/logo-skill/route.ts` |
-| `/api/api/mindmap/generate` | POST | `src/app/api/mindmap/generate/route.ts` |
-| `/api/api/models` | GET | `src/app/api/models/route.ts` |
-| `/api/api/omp-agent` | GET, POST | `src/app/api/omp-agent/route.ts` |
-| `/api/api/omp-resources` | GET | `src/app/api/omp-resources/route.ts` |
-| `/api/api/optimize-prompt` | POST | `src/app/api/optimize-prompt/route.ts` |
-| `/api/api/pdf/generate` | POST | `src/app/api/pdf/generate/route.ts` |
-| `/api/api/poll-3d-task` | POST | `src/app/api/poll-3d-task/route.ts` |
-| `/api/api/poll-task` | POST | `src/app/api/poll-task/route.ts` |
-| `/api/api/ppt/generate` | POST | `src/app/api/ppt/generate/route.ts` |
-| `/api/api/ppt/template/upload` | POST | `src/app/api/ppt/template/upload/route.ts` |
-| `/api/api/proxy-3d-model` | GET | `src/app/api/proxy-3d-model/route.ts` |
-| `/api/api/queue-position` | GET, POST | `src/app/api/queue-position/route.ts` |
-| `/api/api/quick-create/compile` | POST | `src/app/api/quick-create/compile/route.ts` |
-| `/api/api/recharge/:orderId` | GET, POST | `src/app/api/recharge/[orderId]/route.ts` |
-| `/api/api/recover-images` | GET, POST | `src/app/api/recover-images/route.ts` |
-| `/api/api/refine-engine` | GET, POST | `src/app/api/refine-engine/route.ts` |
-| `/api/api/save-image` | POST | `src/app/api/save-image/route.ts` |
-| `/api/api/scene-studio` | GET, POST | `src/app/api/scene-studio/route.ts` |
-| `/api/api/scene-studio/generate` | GET, POST | `src/app/api/scene-studio/generate/route.ts` |
-| `/api/api/segment-elements` | POST | `src/app/api/segment-elements/route.ts` |
-| `/api/api/serve-upload/:path*` | GET | `src/app/api/serve-upload/[...path]/route.ts` |
-| `/api/api/session` | dynamic | `src/app/api/session/route.ts` |
-| `/api/api/simple-chat/chat` | POST | `src/app/api/simple-chat/chat/route.ts` |
-| `/api/api/simple-chat/deep-research` | POST | `src/app/api/simple-chat/deep-research/route.ts` |
-| `/api/api/simple-chat/memory` | GET, POST, DELETE | `src/app/api/simple-chat/memory/route.ts` |
-| `/api/api/simple-chat/share` | POST | `src/app/api/simple-chat/share/route.ts` |
-| `/api/api/simple-chat/share/:shareId` | GET, DELETE | `src/app/api/simple-chat/share/[shareId]/route.ts` |
-| `/api/api/simple-chat/upload-file` | POST | `src/app/api/simple-chat/upload-file/route.ts` |
-| `/api/api/story-assets/plan` | POST | `src/app/api/story-assets/plan/route.ts` |
-| `/api/api/svg-convert` | POST | `src/app/api/svg-convert/route.ts` |
-| `/api/api/svg-trace` | POST | `src/app/api/svg-trace/route.ts` |
-| `/api/api/task-events` | GET, POST | `src/app/api/task-events/route.ts` |
-| `/api/api/tasks/recover` | GET | `src/app/api/tasks/recover/route.ts` |
-| `/api/api/test-provider-connection` | POST | `src/app/api/test-provider-connection/route.ts` |
-| `/api/api/universal-discover` | POST | `src/app/api/universal-discover/route.ts` |
-| `/api/api/universal-generate` | POST | `src/app/api/universal-generate/route.ts` |
-| `/api/api/upload` | POST | `src/app/api/upload/route.ts` |
-| `/api/api/upscayl` | GET, POST | `src/app/api/upscayl/route.ts` |
-| `/api/api/user-data/record` | POST | `src/app/api/user-data/record/route.ts` |
-| `/api/api/user-data/sync` | GET, POST | `src/app/api/user-data/sync/route.ts` |
-| `/api/api/user/change-password` | POST | `src/app/api/user/change-password/route.ts` |
-| `/api/api/vector-design` | POST | `src/app/api/vector-design/route.ts` |
-| `/api/api/verify-protocol` | POST | `src/app/api/verify-protocol/route.ts` |
-| `/api/api/video/director/diagnose` | POST | `src/app/api/video/director/diagnose/route.ts` |
-| `/api/api/video/director/prompt` | POST | `src/app/api/video/director/prompt/route.ts` |
-| `/api/api/video/director/shot-plan` | POST | `src/app/api/video/director/shot-plan/route.ts` |
-| `/api/api/video/download` | GET | `src/app/api/video/download/route.ts` |
-| `/api/api/video/extend` | GET, POST | `src/app/api/video/extend/route.ts` |
-| `/api/api/video/extract-frame` | POST | `src/app/api/video/extract-frame/route.ts` |
-| `/api/api/video/extract-frames` | POST | `src/app/api/video/extract-frames/route.ts` |
-| `/api/api/video/generate` | GET, POST | `src/app/api/video/generate/route.ts` |
-| `/api/api/video/tools` | POST | `src/app/api/video/tools/route.ts` |
-| `/api/api/vision-prompt` | POST | `src/app/api/vision-prompt/route.ts` |
-| `/api/api/wasm/vtracer` | GET | `src/app/api/wasm/vtracer/route.ts` |
-| `/api/api/word/generate` | POST | `src/app/api/word/generate/route.ts` |
-| `/api/api/workflow/ai-build` | POST | `src/app/api/workflow/ai-build/route.ts` |
-| `/api/api/workflow/execute` | POST | `src/app/api/workflow/execute/route.ts` |
-| `/api/api/workflow/models` | GET | `src/app/api/workflow/models/route.ts` |
-| `/api/api/workflow/save` | GET, POST | `src/app/api/workflow/save/route.ts` |
+| `/api/activity` | POST | `src/app/api/activity/route.ts` |
+| `/api/activity-venue/analyze` | POST | `src/app/api/activity-venue/analyze/route.ts` |
+| `/api/activity-venue/lock-design` | POST | `src/app/api/activity-venue/lock-design/route.ts` |
+| `/api/activity-venue/proposals` | POST | `src/app/api/activity-venue/proposals/route.ts` |
+| `/api/activity-venue/qc` | POST | `src/app/api/activity-venue/qc/route.ts` |
+| `/api/admin/api-balance` | GET, POST | `src/app/api/admin/api-balance/route.ts` |
+| `/api/admin/apis` | GET, POST | `src/app/api/admin/apis/route.ts` |
+| `/api/admin/assets/orphans` | GET, POST | `src/app/api/admin/assets/orphans/route.ts` |
+| `/api/admin/assets/remediation` | GET, POST | `src/app/api/admin/assets/remediation/route.ts` |
+| `/api/admin/audit` | GET, POST | `src/app/api/admin/audit/route.ts` |
+| `/api/admin/backfill-thumbnails` | GET, POST | `src/app/api/admin/backfill-thumbnails/route.ts` |
+| `/api/admin/backups` | GET | `src/app/api/admin/backups/route.ts` |
+| `/api/admin/backups/:id` | DELETE | `src/app/api/admin/backups/[id]/route.ts` |
+| `/api/admin/backups/:id/download` | GET | `src/app/api/admin/backups/[id]/download/route.ts` |
+| `/api/admin/cloud-tasks` | GET | `src/app/api/admin/cloud-tasks/route.ts` |
+| `/api/admin/credits/overview` | GET | `src/app/api/admin/credits/overview/route.ts` |
+| `/api/admin/credits/pricing` | GET, POST | `src/app/api/admin/credits/pricing/route.ts` |
+| `/api/admin/credits/recharge` | POST | `src/app/api/admin/credits/recharge/route.ts` |
+| `/api/admin/dashboard-stats` | GET | `src/app/api/admin/dashboard-stats/route.ts` |
+| `/api/admin/desktop-devices` | GET | `src/app/api/admin/desktop-devices/route.ts` |
+| `/api/admin/desktop-update` | GET, POST | `src/app/api/admin/desktop-update/route.ts` |
+| `/api/admin/groups` | GET, POST | `src/app/api/admin/groups/route.ts` |
+| `/api/admin/local-generation-records` | GET | `src/app/api/admin/local-generation-records/route.ts` |
+| `/api/admin/op-log` | GET, POST | `src/app/api/admin/op-log/route.ts` |
+| `/api/admin/production-readiness` | GET | `src/app/api/admin/production-readiness/route.ts` |
+| `/api/admin/resources` | GET, POST | `src/app/api/admin/resources/route.ts` |
+| `/api/admin/settings` | GET, POST | `src/app/api/admin/settings/route.ts` |
+| `/api/admin/test-all-providers` | GET | `src/app/api/admin/test-all-providers/route.ts` |
+| `/api/admin/user-folder` | POST | `src/app/api/admin/user-folder/route.ts` |
+| `/api/admin/user-images` | GET | `src/app/api/admin/user-images/route.ts` |
+| `/api/admin/users` | GET, POST | `src/app/api/admin/users/route.ts` |
+| `/api/agent-edit` | GET, POST | `src/app/api/agent-edit/route.ts` |
+| `/api/agent-runs` | GET, POST | `src/app/api/agent-runs/route.ts` |
+| `/api/agent-runs/:runId` | GET, DELETE | `src/app/api/agent-runs/[runId]/route.ts` |
+| `/api/agent-runs/:runId/events` | GET | `src/app/api/agent-runs/[runId]/events/route.ts` |
+| `/api/ai-psd/create` | POST | `src/app/api/ai-psd/create/route.ts` |
+| `/api/ai-psd/result` | GET | `src/app/api/ai-psd/result/route.ts` |
+| `/api/ai-psd/status` | GET | `src/app/api/ai-psd/status/route.ts` |
+| `/api/analyze` | POST | `src/app/api/analyze/route.ts` |
+| `/api/analyze-psd` | POST | `src/app/api/analyze-psd/route.ts` |
+| `/api/annotations/execute` | POST | `src/app/api/annotations/execute/route.ts` |
+| `/api/annotations/resolve-target` | POST | `src/app/api/annotations/resolve-target/route.ts` |
+| `/api/announcement` | GET | `src/app/api/announcement/route.ts` |
+| `/api/artifacts` | GET, POST, DELETE | `src/app/api/artifacts/route.ts` |
+| `/api/aspect-recompose` | POST | `src/app/api/aspect-recompose/route.ts` |
+| `/api/assets` | GET, POST | `src/app/api/assets/route.ts` |
+| `/api/assets/:assetId/purge` | POST | `src/app/api/assets/[assetId]/purge/route.ts` |
+| `/api/assets/:assetId/restore` | POST | `src/app/api/assets/[assetId]/restore/route.ts` |
+| `/api/assets/adopt-canvas-image` | POST | `src/app/api/assets/adopt-canvas-image/route.ts` |
+| `/api/assets/media/recover` | GET, POST | `src/app/api/assets/media/recover/route.ts` |
+| `/api/assets/placements/:placementId` | DELETE | `src/app/api/assets/placements/[placementId]/route.ts` |
+| `/api/assets/transfer` | POST | `src/app/api/assets/transfer/route.ts` |
+| `/api/audio/generate` | POST | `src/app/api/audio/generate/route.ts` |
+| `/api/auth/login` | POST | `src/app/api/auth/login/route.ts` |
+| `/api/auth/logout` | POST | `src/app/api/auth/logout/route.ts` |
+| `/api/auth/me` | GET | `src/app/api/auth/me/route.ts` |
+| `/api/auth/register` | GET, POST | `src/app/api/auth/register/route.ts` |
+| `/api/brand-assets` | GET, POST | `src/app/api/brand-assets/route.ts` |
+| `/api/brand-ecommerce` | POST | `src/app/api/brand-ecommerce/route.ts` |
+| `/api/brand-factory` | GET, POST | `src/app/api/brand-factory/route.ts` |
+| `/api/brand-ip/generate` | POST | `src/app/api/brand-ip/generate/route.ts` |
+| `/api/brand-ip/projects` | GET, POST, PATCH | `src/app/api/brand-ip/projects/route.ts` |
+| `/api/brand-ip/strategy` | POST | `src/app/api/brand-ip/strategy/route.ts` |
+| `/api/brand-ip/tasks` | GET | `src/app/api/brand-ip/tasks/route.ts` |
+| `/api/brand-kit` | GET, POST | `src/app/api/brand-kit/route.ts` |
+| `/api/brand-packaging/generate` | POST | `src/app/api/brand-packaging/generate/route.ts` |
+| `/api/brand-packaging/tasks` | GET | `src/app/api/brand-packaging/tasks/route.ts` |
+| `/api/cache-image` | POST | `src/app/api/cache-image/route.ts` |
+| `/api/cancel-task` | POST | `src/app/api/cancel-task/route.ts` |
+| `/api/chat` | POST | `src/app/api/chat/route.ts` |
+| `/api/chat-tasks` | GET | `src/app/api/chat-tasks/route.ts` |
+| `/api/client-error` | POST | `src/app/api/client-error/route.ts` |
+| `/api/connector/auth/login` | POST | `src/app/api/connector/auth/login/route.ts` |
+| `/api/connector/auth/me` | GET | `src/app/api/connector/auth/me/route.ts` |
+| `/api/creative/health` | GET | `src/app/api/creative/health/route.ts` |
+| `/api/creative/illustrator` | POST | `src/app/api/creative/illustrator/route.ts` |
+| `/api/creative/photoshop` | POST | `src/app/api/creative/photoshop/route.ts` |
+| `/api/creative/templates` | GET | `src/app/api/creative/templates/route.ts` |
+| `/api/credits` | GET, POST | `src/app/api/credits/route.ts` |
+| `/api/credits/pay-redirect` | GET | `src/app/api/credits/pay-redirect/route.ts` |
+| `/api/credits/payment-config` | GET, POST | `src/app/api/credits/payment-config/route.ts` |
+| `/api/credits/payment-notify` | GET, POST | `src/app/api/credits/payment-notify/route.ts` |
+| `/api/credits/payment-qr` | GET | `src/app/api/credits/payment-qr/route.ts` |
+| `/api/credits/payment-status` | GET | `src/app/api/credits/payment-status/route.ts` |
+| `/api/dcc/health` | GET | `src/app/api/dcc/health/route.ts` |
+| `/api/dcc/preflight` | GET | `src/app/api/dcc/preflight/route.ts` |
+| `/api/dcc/templates` | GET | `src/app/api/dcc/templates/route.ts` |
+| `/api/design/layer-split` | POST | `src/app/api/design/layer-split/route.ts` |
+| `/api/design/vectorize` | POST | `src/app/api/design/vectorize/route.ts` |
+| `/api/desktop/backup/download/:id` | GET | `src/app/api/desktop/backup/download/[id]/route.ts` |
+| `/api/desktop/backup/list` | GET | `src/app/api/desktop/backup/list/route.ts` |
+| `/api/desktop/backup/upload` | POST | `src/app/api/desktop/backup/upload/route.ts` |
+| `/api/desktop/config` | GET | `src/app/api/desktop/config/route.ts` |
+| `/api/desktop/device/heartbeat` | POST | `src/app/api/desktop/device/heartbeat/route.ts` |
+| `/api/desktop/generation-records` | POST | `src/app/api/desktop/generation-records/route.ts` |
+| `/api/desktop/login` | POST | `src/app/api/desktop/login/route.ts` |
+| `/api/desktop/resources` | GET | `src/app/api/desktop/resources/route.ts` |
+| `/api/desktop/update` | GET, POST | `src/app/api/desktop/update/route.ts` |
+| `/api/desktop/update/download/:id` | dynamic | `src/app/api/desktop/update/download/[id]/route.ts` |
+| `/api/diag/storage` | GET | `src/app/api/diag/storage/route.ts` |
+| `/api/diagnostics/export` | GET | `src/app/api/diagnostics/export/route.ts` |
+| `/api/display-3d/decompose` | POST | `src/app/api/display-3d/decompose/route.ts` |
+| `/api/display-3d/generate` | POST | `src/app/api/display-3d/generate/route.ts` |
+| `/api/ecom-templates` | GET, POST | `src/app/api/ecom-templates/route.ts` |
+| `/api/edit` | GET, POST | `src/app/api/edit/route.ts` |
+| `/api/effect-reverse-engineering` | GET, POST, DELETE | `src/app/api/effect-reverse-engineering/route.ts` |
+| `/api/element-decompose` | GET, POST, DELETE | `src/app/api/element-decompose/route.ts` |
+| `/api/excel/generate` | POST | `src/app/api/excel/generate/route.ts` |
+| `/api/export-project` | GET, POST | `src/app/api/export-project/route.ts` |
+| `/api/export/annotation-image` | POST | `src/app/api/export/annotation-image/route.ts` |
+| `/api/export/bom` | POST | `src/app/api/export/bom/route.ts` |
+| `/api/export/pdf` | POST | `src/app/api/export/pdf/route.ts` |
+| `/api/export/to-canvas` | POST | `src/app/api/export/to-canvas/route.ts` |
+| `/api/favorites` | GET, POST, DELETE | `src/app/api/favorites/route.ts` |
+| `/api/flowchart/generate` | POST | `src/app/api/flowchart/generate/route.ts` |
+| `/api/font-design/gallery` | GET | `src/app/api/font-design/gallery/route.ts` |
+| `/api/font-design/gallery-image` | GET | `src/app/api/font-design/gallery-image/route.ts` |
+| `/api/font-design/generate-image` | POST | `src/app/api/font-design/generate-image/route.ts` |
+| `/api/font-design/plan` | GET, POST | `src/app/api/font-design/plan/route.ts` |
+| `/api/font-design/prompt` | POST | `src/app/api/font-design/prompt/route.ts` |
+| `/api/generate` | POST | `src/app/api/generate/route.ts` |
+| `/api/help-image` | GET | `src/app/api/help-image/route.ts` |
+| `/api/human/analyze` | POST | `src/app/api/human/analyze/route.ts` |
+| `/api/human/repair` | POST | `src/app/api/human/repair/route.ts` |
+| `/api/human/select` | POST | `src/app/api/human/select/route.ts` |
+| `/api/human/task/:id` | GET | `src/app/api/human/task/[id]/route.ts` |
+| `/api/image-edit` | POST | `src/app/api/image-edit/route.ts` |
+| `/api/image-to-3d` | POST | `src/app/api/image-to-3d/route.ts` |
+| `/api/image-to-3d/auto-multi-view` | GET, POST | `src/app/api/image-to-3d/auto-multi-view/route.ts` |
+| `/api/image-to-3d/meshy-stream` | GET | `src/app/api/image-to-3d/meshy-stream/route.ts` |
+| `/api/image-to-3d/poll-post-process` | POST | `src/app/api/image-to-3d/poll-post-process/route.ts` |
+| `/api/image-to-3d/post-process` | GET, POST | `src/app/api/image-to-3d/post-process/route.ts` |
+| `/api/image/color-adjust` | POST | `src/app/api/image/color-adjust/route.ts` |
+| `/api/image/health` | GET | `src/app/api/image/health/route.ts` |
+| `/api/image/source` | GET | `src/app/api/image/source/route.ts` |
+| `/api/image/start-services` | POST | `src/app/api/image/start-services/route.ts` |
+| `/api/image/upscale` | POST | `src/app/api/image/upscale/route.ts` |
+| `/api/image/upscale-pro` | POST | `src/app/api/image/upscale-pro/route.ts` |
+| `/api/knowledge/extract-text` | POST | `src/app/api/knowledge/extract-text/route.ts` |
+| `/api/layer-documents` | GET, POST, PATCH | `src/app/api/layer-documents/route.ts` |
+| `/api/layered-decompose` | GET, POST, DELETE | `src/app/api/layered-decompose/route.ts` |
+| `/api/logo-skill` | GET, POST | `src/app/api/logo-skill/route.ts` |
+| `/api/mindmap/generate` | POST | `src/app/api/mindmap/generate/route.ts` |
+| `/api/models` | GET | `src/app/api/models/route.ts` |
+| `/api/omp-agent` | GET, POST | `src/app/api/omp-agent/route.ts` |
+| `/api/omp-resources` | GET | `src/app/api/omp-resources/route.ts` |
+| `/api/optimize-prompt` | POST | `src/app/api/optimize-prompt/route.ts` |
+| `/api/pdf/generate` | POST | `src/app/api/pdf/generate/route.ts` |
+| `/api/poll-3d-task` | POST | `src/app/api/poll-3d-task/route.ts` |
+| `/api/poll-task` | POST | `src/app/api/poll-task/route.ts` |
+| `/api/ppt/generate` | POST | `src/app/api/ppt/generate/route.ts` |
+| `/api/ppt/template/upload` | POST | `src/app/api/ppt/template/upload/route.ts` |
+| `/api/proxy-3d-model` | GET | `src/app/api/proxy-3d-model/route.ts` |
+| `/api/queue-position` | GET, POST | `src/app/api/queue-position/route.ts` |
+| `/api/quick-create/compile` | POST | `src/app/api/quick-create/compile/route.ts` |
+| `/api/recharge/:orderId` | GET, POST | `src/app/api/recharge/[orderId]/route.ts` |
+| `/api/recover-images` | GET, POST | `src/app/api/recover-images/route.ts` |
+| `/api/refine-engine` | GET, POST | `src/app/api/refine-engine/route.ts` |
+| `/api/save-image` | POST | `src/app/api/save-image/route.ts` |
+| `/api/scene-studio` | GET, POST | `src/app/api/scene-studio/route.ts` |
+| `/api/scene-studio/generate` | GET, POST | `src/app/api/scene-studio/generate/route.ts` |
+| `/api/segment-elements` | POST | `src/app/api/segment-elements/route.ts` |
+| `/api/serve-upload/:path*` | GET | `src/app/api/serve-upload/[...path]/route.ts` |
+| `/api/session` | dynamic | `src/app/api/session/route.ts` |
+| `/api/simple-chat/chat` | POST | `src/app/api/simple-chat/chat/route.ts` |
+| `/api/simple-chat/deep-research` | POST | `src/app/api/simple-chat/deep-research/route.ts` |
+| `/api/simple-chat/memory` | GET, POST, DELETE | `src/app/api/simple-chat/memory/route.ts` |
+| `/api/simple-chat/share` | POST | `src/app/api/simple-chat/share/route.ts` |
+| `/api/simple-chat/share/:shareId` | GET, DELETE | `src/app/api/simple-chat/share/[shareId]/route.ts` |
+| `/api/simple-chat/upload-file` | POST | `src/app/api/simple-chat/upload-file/route.ts` |
+| `/api/simple-chat/workspace-handoff` | POST | `src/app/api/simple-chat/workspace-handoff/route.ts` |
+| `/api/story-assets/plan` | POST | `src/app/api/story-assets/plan/route.ts` |
+| `/api/svg-convert` | POST | `src/app/api/svg-convert/route.ts` |
+| `/api/svg-trace` | POST | `src/app/api/svg-trace/route.ts` |
+| `/api/task-events` | GET, POST | `src/app/api/task-events/route.ts` |
+| `/api/tasks/recover` | GET | `src/app/api/tasks/recover/route.ts` |
+| `/api/test-provider-connection` | POST | `src/app/api/test-provider-connection/route.ts` |
+| `/api/universal-discover` | POST | `src/app/api/universal-discover/route.ts` |
+| `/api/universal-generate` | POST | `src/app/api/universal-generate/route.ts` |
+| `/api/upload` | POST | `src/app/api/upload/route.ts` |
+| `/api/upscayl` | GET, POST | `src/app/api/upscayl/route.ts` |
+| `/api/user-data/record` | POST | `src/app/api/user-data/record/route.ts` |
+| `/api/user-data/sync` | GET, POST | `src/app/api/user-data/sync/route.ts` |
+| `/api/user/change-password` | POST | `src/app/api/user/change-password/route.ts` |
+| `/api/vector-design` | POST | `src/app/api/vector-design/route.ts` |
+| `/api/verify-protocol` | POST | `src/app/api/verify-protocol/route.ts` |
+| `/api/video/director/diagnose` | POST | `src/app/api/video/director/diagnose/route.ts` |
+| `/api/video/director/prompt` | POST | `src/app/api/video/director/prompt/route.ts` |
+| `/api/video/director/shot-plan` | POST | `src/app/api/video/director/shot-plan/route.ts` |
+| `/api/video/download` | GET | `src/app/api/video/download/route.ts` |
+| `/api/video/extend` | GET, POST | `src/app/api/video/extend/route.ts` |
+| `/api/video/extract-frame` | POST | `src/app/api/video/extract-frame/route.ts` |
+| `/api/video/extract-frames` | POST | `src/app/api/video/extract-frames/route.ts` |
+| `/api/video/generate` | GET, POST | `src/app/api/video/generate/route.ts` |
+| `/api/video/tools` | POST | `src/app/api/video/tools/route.ts` |
+| `/api/vision-prompt` | POST | `src/app/api/vision-prompt/route.ts` |
+| `/api/wasm/vtracer` | GET | `src/app/api/wasm/vtracer/route.ts` |
+| `/api/word/generate` | POST | `src/app/api/word/generate/route.ts` |
+| `/api/workflow/ai-build` | POST | `src/app/api/workflow/ai-build/route.ts` |
+| `/api/workflow/execute` | POST | `src/app/api/workflow/execute/route.ts` |
+| `/api/workflow/models` | GET | `src/app/api/workflow/models/route.ts` |
+| `/api/workflow/save` | GET, POST | `src/app/api/workflow/save/route.ts` |
+
+## 源码引用 API 端点
+
+- `/api/:path*`
+- `/api/activity`
+- `/api/activity-venue/analyze`
+- `/api/activity-venue/lock-design`
+- `/api/activity-venue/proposals`
+- `/api/activity-venue/qc`
+- `/api/admin/api-balance`
+- `/api/admin/apis`
+- `/api/admin/audit?${params}`
+- `/api/admin/audit?stats=true`
+- `/api/admin/backups?limit=50`
+- `/api/admin/cloud-tasks?limit=20`
+- `/api/admin/cloud-tasks?view=provider-summary`
+- `/api/admin/credits/overview`
+- `/api/admin/credits/pricing`
+- `/api/admin/credits/recharge`
+- `/api/admin/dashboard-stats`
+- `/api/admin/dashboard-stats?period=${period}`
+- `/api/admin/desktop-devices`
+- `/api/admin/desktop-update`
+- `/api/admin/groups`
+- `/api/admin/local-generation-records?limit=200`
+- `/api/admin/local-generation-records?limit=50`
+- `/api/admin/op-log`
+- `/api/admin/op-log?${params}`
+- `/api/admin/production-readiness`
+- `/api/admin/resources`
+- `/api/admin/settings`
+- `/api/admin/user-folder`
+- `/api/admin/user-images?${params}`
+- `/api/admin/users`
+- `/api/agent-edit`
+- `/api/agent-edit?taskId=legacy-task-a`
+- `/api/agent-edit?taskId=missing-legacy-task`
+- `/api/agent-edit?taskId=missing-task-a`
+- `/api/agent-edit?taskId=new-legacy-task`
+- `/api/agent-edit?taskId=task-a`
+- `/api/agent-edit?taskId=task-a&action=cancel`
+- `/api/agent-edit?taskId=task-b`
+- `/api/agent-edit?taskId=task-timeout`
+- `/api/agent-runs/run-1`
+- `/api/agent-runs/run-1/events?after=0`
+- `/api/ai-psd/create`
+- `/api/ai-psd/status?taskId=${taskId}`
+- `/api/analyze`
+- `/api/analyze-psd`
+- `/api/annotations/execute`
+- `/api/annotations/resolve-target`
+- `/api/announcement`
+- `/api/aspect-recompose`
+- `/api/assets`
+- `/api/assets/adopt-canvas-image`
+- `/api/assets/media/content/version-a`
+- `/api/assets/media/recover`
+- `/api/assets/media/recover?`
+- `/api/assets/media/recover?${query}`
+- `/api/assets/placements/\${image.placementId}?`
+- `/api/assets/transfer`
+- `/api/audio/generate`
+- `/api/auth/`
+- `/api/auth/login`
+- `/api/auth/logout`
+- `/api/auth/register`
+- `/api/brand-assets`
+- `/api/brand-assets?`
+- `/api/brand-ecommerce`
+- `/api/brand-factory`
+- `/api/brand-ip/assets`
+- `/api/brand-ip/generate`
+- `/api/brand-ip/projects`
+- `/api/brand-ip/strategy`
+- `/api/brand-kit`
+- `/api/brand-packaging/generate`
+- `/api/cache-image`
+- `/api/cancel-task`
+- `/api/chat`
+- `/api/client-error`
+- `/api/cloud/resources?type=prompt-template`
+- `/api/connector/auth/`
+- `/api/creative/health`
+- `/api/creative/illustrator`
+- `/api/creative/photoshop`
+- `/api/creative/templates`
+- `/api/creative/templates?host=illustrator`
+- `/api/creative/templates?host=photoshop`
+- `/api/credits`
+- `/api/credits?action=admin-overview`
+- `/api/credits?action=audit-orders`
+- `/api/credits?action=transactions`
+- `/api/credits?action=transactions&userId=${userId}`
+- `/api/credits?transactions=true&limit=30`
+- `/api/credits/payment-config`
+- `/api/credits/payment-qr?method=${method}`
+- `/api/credits/payment-status`
+- `/api/dcc/health`
+- `/api/dcc/preflight`
+- `/api/dcc/templates`
+- `/api/design/layer-split`
+- `/api/design/vectorize`
+- `/api/desktop/update/download/${backup.id}`
+- `/api/display-3d/decompose`
+- `/api/display-3d/generate`
+- `/api/ecom-templates`
+- `/api/ecom-templates?enabled=true`
+- `/api/edit`
+- `/api/effect-reverse-engineering`
+- `/api/element-decompose`
+- `/api/element-decompose?projectId=project%2Fone`
+- `/api/element-decompose?taskId=parent-1`
+- `/api/excel/generate`
+- `/api/export/annotation-image`
+- `/api/export/bom`
+- `/api/export/pdf`
+- `/api/favorites`
+- `/api/flowchart/generate`
+- `/api/font-design/gallery-image?id=${inspirationRef.id}`
+- `/api/font-design/gallery-image?id=${item.id}`
+- `/api/font-design/generate-image`
+- `/api/font-design/plan`
+- `/api/font-design/prompt`
+- `/api/generate`
+- `/api/help-image?file=${file}`
+- `/api/help-image?file=${imageFile}`
+- `/api/human/analyze`
+- `/api/human/repair`
+- `/api/human/select`
+- `/api/human/task/`
+- `/api/image-edit`
+- `/api/image-to-3d`
+- `/api/image-to-3d/auto-multi-view`
+- `/api/image-to-3d/meshy-stream`
+- `/api/image-to-3d/post-process`
+- `/api/image/color-adjust`
+- `/api/image/upscale`
+- `/api/knowledge/extract-text`
+- `/api/layer-documents`
+- `/api/layer-documents?projectId=project-1&sourceImageId=image-1&sourceVersionId=version-1`
+- `/api/layered-decompose`
+- `/api/layered-decompose?taskId=layer-1`
+- `/api/layered-decompose?taskId=layer-resume-1`
+- `/api/logo-skill`
+- `/api/media/`
+- `/api/mindmap/generate`
+- `/api/models`
+- `/api/models?type=3d`
+- `/api/models?type=chat`
+- `/api/models?type=image`
+- `/api/models?type=removebg`
+- `/api/models?type=upscaler`
+- `/api/models?type=vectorize`
+- `/api/models?type=vlm`
+- `/api/optimize-prompt`
+- `/api/pdf/generate`
+- `/api/poll-`
+- `/api/poll-3d-task`
+- `/api/poll-task`
+- `/api/poll-task?taskId=${exTaskId}`
+- `/api/poll-task?taskId=${vTaskId}`
+- `/api/ppt/generate`
+- `/api/private/file.png`
+- `/api/quick-create/compile`
+- `/api/recharge/${orderId}`
+- `/api/refine-engine`
+- `/api/save-image`
+- `/api/scene-studio`
+- `/api/scene-studio?sceneId=${id}`
+- `/api/scene-studio?sceneId=${scene.id}`
+- `/api/scene-studio/generate`
+- `/api/segment-elements`
+- `/api/serve-upload`
+- `/api/serve-upload/`
+- `/api/serve-upload/../../secret.png`
+- `/api/serve-upload/../outside.png`
+- `/api/serve-upload/../private.png`
+- `/api/serve-upload/%`
+- `/api/serve-upload/%2e%2e/secret.png`
+- `/api/serve-upload/${candidatePath}`
+- `/api/serve-upload/${filename}`
+- `/api/serve-upload/${frameFilename}`
+- `/api/serve-upload/${normalizedPath}`
+- `/api/serve-upload/${relativePath}`
+- `/api/serve-upload/${subDir}/${filename}`
+- `/api/serve-upload/a.png`
+- `/api/serve-upload/async.png`
+- `/api/serve-upload/b.png`
+- `/api/serve-upload/board-concurrency.png`
+- `/api/serve-upload/canonical.png`
+- `/api/serve-upload/cat.png`
+- `/api/serve-upload/color-adjust/result.png`
+- `/api/serve-upload/completed.png`
+- `/api/serve-upload/concurrency.png`
+- `/api/serve-upload/direct.png`
+- `/api/serve-upload/e2e-progressive-slot-2.png`
+- `/api/serve-upload/element-sources/${`
+- `/api/serve-upload/first.png`
+- `/api/serve-upload/frozen-source.png`
+- `/api/serve-upload/gen-123.jpg`
+- `/api/serve-upload/generate/crane.png`
+- `/api/serve-upload/generate/source.png`
+- `/api/serve-upload/generated-before-logout.png`
+- `/api/serve-upload/generated-before-server-logout.png`
+- `/api/serve-upload/generated-videos`
+- `/api/serve-upload/generated.png`
+- `/api/serve-upload/generated/file.png`
+- `/api/serve-upload/generated/image.png`
+- `/api/serve-upload/generated/source.png`
+- `/api/serve-upload/image.png`
+- `/api/serve-upload/layer-1.png`
+- `/api/serve-upload/layer-decomposition/${filename}`
+- `/api/serve-upload/layer-decomposition/background.png`
+- `/api/serve-upload/layer-decomposition/correction.png`
+- `/api/serve-upload/layer-decomposition/layer-task-1.psd`
+- `/api/serve-upload/layer.png`
+- `/api/serve-upload/layers/background.png`
+- `/api/serve-upload/layers/forged.png`
+- `/api/serve-upload/layers/layer-${order}.png`
+- `/api/serve-upload/layers/result.psd`
+- `/api/serve-upload/layers/subject-1.png`
+- `/api/serve-upload/layers/subject.png`
+- `/api/serve-upload/legacy.png`
+- `/api/serve-upload/local.png`
+- `/api/serve-upload/managed.png`
+- `/api/serve-upload/mask.png`
+- `/api/serve-upload/other.png`
+- `/api/serve-upload/projected.png`
+- `/api/serve-upload/recovery/${versionId}/${attemptId}.${extension}`
+- `/api/serve-upload/recovery/version-a/attempt-a.png`
+- `/api/serve-upload/recovery/version-a/recovered.mp4`
+- `/api/serve-upload/recovery/version-source/attempt-new.png`
+- `/api/serve-upload/recovery/version-source/attempt-old.png`
+- `/api/serve-upload/recovery/version-source/attempt-source.png`
+- `/api/serve-upload/recovery/version-source/previous-attempt.png`
+- `/api/serve-upload/reference.png`
+- `/api/serve-upload/result.psd`
+- `/api/serve-upload/second.png`
+- `/api/serve-upload/server.png`
+- `/api/serve-upload/source-2.png`
+- `/api/serve-upload/source.png`
+- `/api/serve-upload/subject.png`
+- `/api/serve-upload/system/private.png`
+- `/api/serve-upload/test.png`
+- `/api/serve-upload/thumbnails/version-a/256.webp`
+- `/api/serve-upload/thumbnails/version-a/512.webp`
+- `/api/serve-upload/uploads`
+- `/api/serve-upload/uploads/%2e%2e/%2e%2e/.env`
+- `/api/serve-upload/uploads/${localSuffix}-v2.png`
+- `/api/serve-upload/uploads/${localSuffix}.png`
+- `/api/serve-upload/uploads/${subdir}`
+- `/api/serve-upload/uploads/${value.slice(`
+- `/api/serve-upload/uploads/a.png`
+- `/api/serve-upload/uploads/aaaa.png`
+- `/api/serve-upload/uploads/alias.png`
+- `/api/serve-upload/uploads/bbbb.png`
+- `/api/serve-upload/uploads/canonical.png`
+- `/api/serve-upload/uploads/cccc.png`
+- `/api/serve-upload/uploads/changed.png`
+- `/api/serve-upload/uploads/checksum.png`
+- `/api/serve-upload/uploads/clip.mp4`
+- `/api/serve-upload/uploads/complete.png`
+- `/api/serve-upload/uploads/deadline.png`
+- `/api/serve-upload/uploads/diffuse.png`
+- `/api/serve-upload/uploads/ephemeral.png`
+- `/api/serve-upload/uploads/example.png`
+- `/api/serve-upload/uploads/existing.png`
+- `/api/serve-upload/uploads/first.png`
+- `/api/serve-upload/uploads/from-s3.png`
+- `/api/serve-upload/uploads/frozen-provider.png`
+- `/api/serve-upload/uploads/generated.png`
+- `/api/serve-upload/uploads/generation-race.png`
+- `/api/serve-upload/uploads/image-1.png`
+- `/api/serve-upload/uploads/image-a.png`
+- `/api/serve-upload/uploads/incomplete.png`
+- `/api/serve-upload/uploads/job/image.png`
+- `/api/serve-upload/uploads/layers.psd`
+- `/api/serve-upload/uploads/legacy.png`
+- `/api/serve-upload/uploads/local-only.png`
+- `/api/serve-upload/uploads/mismatch.jpg`
+- `/api/serve-upload/uploads/missing.png`
+- `/api/serve-upload/uploads/model.glb`
+- `/api/serve-upload/uploads/new-operation-after-success.png`
+- `/api/serve-upload/uploads/not-image.txt`
+- `/api/serve-upload/uploads/original.png`
+- `/api/serve-upload/uploads/other.png`
+- `/api/serve-upload/uploads/persisted.jpg`
+- `/api/serve-upload/uploads/persisted.png`
+- `/api/serve-upload/uploads/preview.png`
+- `/api/serve-upload/uploads/provider-retry.png`
+- `/api/serve-upload/uploads/recovered.png`
+- `/api/serve-upload/uploads/recovery.png`
+- `/api/serve-upload/uploads/reference.png`
+- `/api/serve-upload/uploads/result-1.png`
+- `/api/serve-upload/uploads/result-2.png`
+- `/api/serve-upload/uploads/result-3.png`
+- `/api/serve-upload/uploads/retry-source.png`
+- `/api/serve-upload/uploads/saved.png`
+- `/api/serve-upload/uploads/second.png`
+- `/api/serve-upload/uploads/source-a.png`
+- `/api/serve-upload/uploads/source-b.png`
+- `/api/serve-upload/uploads/source.png`
+- `/api/serve-upload/uploads/source.webp`
+- `/api/serve-upload/uploads/storage-required.png`
+- `/api/serve-upload/uploads/thumb.png`
+- `/api/serve-upload/uploads/vector.svg`
+- `/api/serve-upload/uploads/wrong.png`
+- `/api/serve-upload/users/a/late.png`
+- `/api/serve-upload/users/a/recovery.png`
+- `/api/serve-upload/users/a/same.png`
+- `/api/serve-upload/users/private.png`
+- `/api/serve-upload/users/secret.png`
+- `/api/serve-upload/vector-design/${previewFilename}`
+- `/api/serve-upload/vector-design/${svgFilename}`
+- `/api/serve-upload/vector-design/vector-preview.png`
+- `/api/serve-upload/video-frames/${destName}`
+- `/api/serve-upload/video/${taskId}/${filename}`
+- `/api/serve-upload/video/poster.jpg`
+- `/api/serve-upload/video/result.mp4`
+- `/api/serve-upload/video/task-1/poster.jpg`
+- `/api/serve-upload/video/task-1/result.mp4`
+- `/api/serve-upload/video/task-legacy/result.mp4`
+- `/api/serve-upload/video/video-task-1/cover.png`
+- `/api/serve-upload/video/video-task-1/result.mp4`
+- `/api/serve-upload${img.url}`
+- `/api/session`
+- `/api/simple-chat/chat`
+- `/api/simple-chat/deep-research`
+- `/api/simple-chat/memory`
+- `/api/simple-chat/memory?id=${id}`
+- `/api/simple-chat/share`
+- `/api/simple-chat/share/${shareId}`
+- `/api/simple-chat/workspace-handoff`
+- `/api/story-assets/plan`
+- `/api/svg-trace`
+- `/api/task-events`
+- `/api/task-events?taskId=abc`
+- `/api/test-provider-connection`
+- `/api/universal-discover`
+- `/api/universal-generate`
+- `/api/unknown`
+- `/api/upload`
+- `/api/upscayl`
+- `/api/user-data/`
+- `/api/user-data/record`
+- `/api/user-data/sync`
+- `/api/user-data/sync?key=chat_simple_projects`
+- `/api/user-data/sync?key=projects`
+- `/api/user/change-password`
+- `/api/user/login`
+- `/api/user/self`
+- `/api/v1/health`
+- `/api/vector-design`
+- `/api/verify-protocol`
+- `/api/video/director/diagnose`
+- `/api/video/director/prompt`
+- `/api/video/director/shot-plan`
+- `/api/video/extend`
+- `/api/video/extract-frame`
+- `/api/video/generate`
+- `/api/video/tools`
+- `/api/vision-prompt`
+- `/api/word/generate`
+- `/api/workflow/ai-build`
+- `/api/workflow/execute`
+- `/api/workflow/models?type=all`
+- `/api/workflow/models?type=layer`
+- `/api/workflow/save`
 
 ## 工作流节点类型
 
@@ -326,6 +710,7 @@
 - `移除背景`
 - `SVG智能描摹`
 - `元素拆解`
+- `横竖重组`
 - `擦除`
 - `蒙版`
 - `调色`
@@ -340,7 +725,6 @@
 - `语言修图`
 - `Agent编排`
 - `下载`
-- `横竖重组`
 - `视频抽帧`
 - `AI配音`
 - `转 GIF`
@@ -349,6 +733,8 @@
 ## 组件源文件
 
 - `src/components/agent-editor.tsx`
+- `src/components/agent-runtime/AgentProgressTimeline.tsx`
+- `src/components/agent-runtime/use-agent-run-events.ts`
 - `src/components/ai-psd/ai-psd-panel.tsx`
 - `src/components/app-error-boundary.tsx`
 - `src/components/aspect-recompose-panel.tsx`
@@ -366,8 +752,22 @@
 - `src/components/brand-kit-panel.tsx`
 - `src/components/brand-packaging-panel.tsx`
 - `src/components/canvas-workspace.tsx`
+- `src/components/canvas/CanvasCommandPalette.tsx`
+- `src/components/canvas/CanvasEditColorRemoveBgPanel.tsx`
+- `src/components/canvas/CanvasEditEraseMaskPanel.tsx`
+- `src/components/canvas/CanvasEditExpandCropPanel.tsx`
+- `src/components/canvas/CanvasEditUpscaleSvgPanel.tsx`
+- `src/components/canvas/CanvasEmptyState.tsx`
 - `src/components/canvas/CanvasHelpModal.tsx`
+- `src/components/canvas/CanvasImageActionToolbar.tsx`
+- `src/components/canvas/CanvasMediaNode.tsx`
+- `src/components/canvas/CanvasMinimap.tsx`
+- `src/components/canvas/CanvasSurface.tsx`
+- `src/components/canvas/CanvasToolHost.tsx`
+- `src/components/canvas/CanvasZoomCluster.tsx`
 - `src/components/canvas/MultiAngleSpherePreview.tsx`
+- `src/components/canvas/use-canvas-selection.ts`
+- `src/components/canvas/use-canvas-viewport.ts`
 - `src/components/chat-panel.tsx`
 - `src/components/chat/AgentBuilderDialog.tsx`
 - `src/components/custom-dialogs.tsx`
@@ -377,6 +777,7 @@
 - `src/components/dashboard/data-manager-tab.tsx`
 - `src/components/dashboard/desktop-admin-tab.tsx`
 - `src/components/dashboard/login-panel.tsx`
+- `src/components/dashboard/model-capability-editor.tsx`
 - `src/components/dashboard/user-credits-tab.tsx`
 - `src/components/dashboard/user-settings-tab.tsx`
 - `src/components/display3d-panel.tsx`
@@ -388,6 +789,7 @@
 - `src/components/engine-select-dialog.tsx`
 - `src/components/favorites-panel.tsx`
 - `src/components/font-design-panel.tsx`
+- `src/components/generation-background-control.tsx`
 - `src/components/generation-panel.tsx`
 - `src/components/global-error-monitor.tsx`
 - `src/components/help-guide.tsx`
@@ -429,6 +831,7 @@
 - `src/components/simple-chat/report-export.tsx`
 - `src/components/simple-chat/share-dialog.tsx`
 - `src/components/simple-chat/sidebar.tsx`
+- `src/components/simple-chat/simple-chat-sync-status.tsx`
 - `src/components/simple-chat/simple-chat-types.ts`
 - `src/components/simple-chat/theme-script.tsx`
 - `src/components/simple-chat/theme-toggle.tsx`
@@ -498,3 +901,9 @@
 - `src/components/video-generation-panel.tsx`
 - `src/components/video-player.tsx`
 - `src/components/workflow-hub.tsx`
+- `src/components/workflow/WorkflowLegacyNodeCard.tsx`
+- `src/components/workflow/WorkflowLegacySurface.tsx`
+- `src/components/workflow/WorkflowNodeCard.tsx`
+- `src/components/workflow/WorkflowReactFlowSurface.tsx`
+- `src/components/workflow/WorkflowShadowProbe.tsx`
+- `src/components/workspace-source-trace.tsx`

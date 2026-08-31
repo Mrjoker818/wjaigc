@@ -930,17 +930,6 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: '请提供产品图片' }, { status: 400 });
       }
 
-      // 积分检查与扣除
-      deductedCredits = 0;
-      sessionUser = await getSessionUser(request).catch(() => null);
-      if (sessionUser) {
-        const creditResult = await consumeCredits(sessionUser.id, 'image_retouch', undefined, undefined, model, { providerId: (providerId as string) || undefined });
-        if (!creditResult.success) {
-          return NextResponse.json({ success: false, error: creditResult.message || '积分不足' }, { status: 402 });
-        }
-        deductedCredits = creditResult.cost;
-      }
-
       if (!model) {
         return NextResponse.json({ error: '请选择生图模型' }, { status: 400 });
       }
@@ -984,6 +973,16 @@ export async function POST(request: NextRequest) {
         customInstructions: customInstructions || '',
         mode: refineMode,
       });
+
+      // 模型、供应商和提示词准备完成后才扣费。
+      sessionUser = await getSessionUser(request).catch(() => null);
+      if (sessionUser) {
+        const creditResult = await consumeCredits(sessionUser.id, 'image_retouch', undefined, undefined, model, { providerId: (providerId as string) || undefined });
+        if (!creditResult.success) {
+          return NextResponse.json({ success: false, error: creditResult.message || '积分不足' }, { status: 402 });
+        }
+        deductedCredits = creditResult.cost;
+      }
 
       const taskId = `refine-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       registerTask(taskId, 'refine-engine', `精修: ${productName || MODE_LABELS[refineMode] || '产品'}`, sessionUser?.id);
@@ -1050,8 +1049,11 @@ export async function POST(request: NextRequest) {
         updateTaskProgress(taskId, { status: 'failed', error: translateApiError(errMsg), creditCost: deductedCredits });
         // 退款：精修失败时退还积分
         if (deductedCredits > 0 && sessionUser) {
+          const amount = deductedCredits;
+          deductedCredits = 0;
           try {
-            await refundCredits(sessionUser.id, deductedCredits, `精修失败退款: ${errMsg.substring(0, 100)}`);
+            const refund = await refundCredits(sessionUser.id, amount, `精修失败退款: ${errMsg.substring(0, 100)}`);
+            if (!refund.success) console.error('[refine-engine] Refund failed:', { userId: sessionUser.id, amount });
           } catch (refundErr) { console.error('[refine-engine] Refund failed:', refundErr); }
         }
         return NextResponse.json({
@@ -1076,8 +1078,11 @@ export async function POST(request: NextRequest) {
     });
     // 退款：精修失败时退还积分
     if (deductedCredits > 0 && sessionUser) {
+      const amount = deductedCredits;
+      deductedCredits = 0;
       try {
-        await refundCredits(sessionUser.id, deductedCredits, `精修失败退款: ${message.substring(0, 100)}`);
+        const refund = await refundCredits(sessionUser.id, amount, `精修失败退款: ${message.substring(0, 100)}`);
+        if (!refund.success) console.error('[refine-engine] Refund failed:', { userId: sessionUser.id, amount });
       } catch (refundErr) { console.error('[refine-engine] Refund failed:', refundErr); }
     }
     return NextResponse.json({ error: message }, { status: 500 });

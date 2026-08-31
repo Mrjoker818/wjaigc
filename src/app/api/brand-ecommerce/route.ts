@@ -491,17 +491,6 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: '请输入商品描述' }, { status: 400 });
       }
 
-      // 积分检查与扣除
-      deductedCredits = 0;
-      sessionUser = await getSessionUser(request).catch(() => null);
-      if (sessionUser) {
-        const creditResult = await consumeCredits(sessionUser.id, 'image_generate', undefined, undefined, model, { providerId: providerId || undefined });
-        if (!creditResult.success) {
-          return NextResponse.json({ success: false, error: creditResult.message || '积分不足' }, { status: 402 });
-        }
-        deductedCredits = creditResult.cost;
-      }
-
       const provider = await getImageProvider(model, providerId);
       if (!provider) {
         return NextResponse.json({ error: '未找到可用的图像模型，请在管理员后台配置' }, { status: 400 });
@@ -671,6 +660,16 @@ export async function POST(request: NextRequest) {
       const consistencyStrength = typeof productConsistencyStrength === 'number'
         ? Math.max(0, Math.min(1, productConsistencyStrength))
         : consistencyMode === 'text-only' ? 0 : consistencyMode === 'img2img-fusion' ? 0.5 : 0.85;
+
+      // 无副作用预检完成后扣费，随后才创建任务。
+      sessionUser = await getSessionUser(request).catch(() => null);
+      if (sessionUser) {
+        const creditResult = await consumeCredits(sessionUser.id, 'image_generate', undefined, undefined, model, { providerId: providerId || undefined });
+        if (!creditResult.success) {
+          return NextResponse.json({ success: false, error: creditResult.message || '积分不足' }, { status: 402 });
+        }
+        deductedCredits = creditResult.cost;
+      }
 
       // Register a task for tracking
       const taskId = `ecom-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -1091,8 +1090,11 @@ ${effectiveStyle ? `风格修饰: ${effectiveStyle}` : ''}
     });
     // 退款：品牌电商生成失败时退还积分
     if (deductedCredits > 0 && sessionUser) {
+      const amount = deductedCredits;
+      deductedCredits = 0;
       try {
-        await refundCredits(sessionUser.id, deductedCredits, `品牌电商生成失败退款: ${msg.substring(0, 100)}`);
+        const refund = await refundCredits(sessionUser.id, amount, `品牌电商生成失败退款: ${msg.substring(0, 100)}`);
+        if (!refund.success) console.error('[brand-ecommerce] Refund failed:', { userId: sessionUser.id, amount });
       } catch (refundErr) { console.error('[brand-ecommerce] Refund failed:', refundErr); }
     }
     return NextResponse.json({ error: msg }, { status: 500 });

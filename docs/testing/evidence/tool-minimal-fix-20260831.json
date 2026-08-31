@@ -1,0 +1,286 @@
+{
+  "title": "五接口预检与同步补偿最小修复",
+  "recordedAt": "2026-08-31T14:59:06.804Z",
+  "baseline": "39cfcaea830ad01e0a335893f09d44c5e5a18604",
+  "candidateSourceTree": "5840f447852a191ff3c836c9b99cdd9e8e0917c8",
+  "stable": "52f7c601ed150769e15d06fb435c6e360e28c9e7",
+  "issueIds": [
+    "V588-PROVIDER-003-BUG-006",
+    "V588-TOOLS-BUG-001"
+  ],
+  "appVersion": "4.1.0",
+  "packageVersion": "4.0.0",
+  "build": {
+    "command": "pnpm build",
+    "exitCode": 0,
+    "candidateDirectory": ".worktrees/tool-minimal-gate-20260831",
+    "buildId": "mt6ApWr8Wdb4UjAatKMyl",
+    "copiedSourceHashesVerified": true,
+    "staticPages": 118,
+    "firstWorkspaceBuildStopped": true
+  },
+  "tests": {
+    "red": {
+      "total": 59,
+      "passed": 22,
+      "failed": 37,
+      "skipped": 0,
+      "todo": 0,
+      "files": 2,
+      "suiteErrors": 0,
+      "startedAt": "2026-08-31T14:31:40.250Z"
+    },
+    "green": {
+      "total": 59,
+      "passed": 59,
+      "failed": 0,
+      "skipped": 0,
+      "todo": 0,
+      "files": 2,
+      "suiteErrors": 0,
+      "startedAt": "2026-08-31T14:32:55.588Z"
+    },
+    "focused": {
+      "total": 121,
+      "passed": 121,
+      "failed": 0,
+      "skipped": 0,
+      "todo": 0,
+      "files": 6,
+      "suiteErrors": 0,
+      "startedAt": "2026-08-31T14:34:31.056Z"
+    },
+    "fullFirst": {
+      "total": 4533,
+      "passed": 4532,
+      "failed": 1,
+      "skipped": 0,
+      "todo": 0,
+      "files": 612,
+      "suiteErrors": 0,
+      "startedAt": "2026-08-31T14:34:47.653Z"
+    },
+    "psdRecheck": {
+      "total": 16,
+      "passed": 16,
+      "failed": 0,
+      "skipped": 0,
+      "todo": 0,
+      "files": 1,
+      "suiteErrors": 0,
+      "startedAt": "2026-08-31T14:45:29.390Z"
+    },
+    "reviewSupplement": {
+      "total": 92,
+      "passed": 92,
+      "failed": 0,
+      "skipped": 0,
+      "todo": 0,
+      "files": 3,
+      "suiteErrors": 0,
+      "startedAt": "2026-08-31T14:46:07.518Z"
+    },
+    "full": {
+      "total": 4546,
+      "passed": 4546,
+      "failed": 0,
+      "skipped": 0,
+      "todo": 0,
+      "files": 612,
+      "suiteErrors": 0,
+      "startedAt": "2026-08-31T14:47:01.755Z"
+    }
+  },
+  "lint": {
+    "errors": 0,
+    "warnings": 956
+  },
+  "boundary": {
+    "protectedFeatures": 38,
+    "sourceChanges": [
+      "src/app/api/brand-ecommerce/route.ts",
+      "src/app/api/font-design/generate-image/route.ts",
+      "src/app/api/image/upscale/route.ts",
+      "src/app/api/optimize-prompt/route.ts",
+      "src/app/api/refine-engine/route.ts"
+    ],
+    "pass": [
+      "All 38 baseline feature IDs remain present.",
+      "No unapproved source drift was detected.",
+      "All literal protected component paths are present.",
+      "All required evidence contracts are present.",
+      "Base and candidate Git refs are confirmed."
+    ],
+    "block": [],
+    "scope": "Explicit staged candidate and all tracked changes; unrelated untracked evidence/reference directories are not part of the release candidate."
+  },
+  "sources": [
+    {
+      "path": "src/app/api/brand-ecommerce/route.ts",
+      "sha256": "abbbe582e44cd8b2f604a2d3d39ff646686b1a56a0ea6fe559c9ebfd3a3d9a23"
+    },
+    {
+      "path": "src/app/api/refine-engine/route.ts",
+      "sha256": "fdcaf215a96c7c63452bf24728466d3cfede4675961488f229544470d75370b3"
+    },
+    {
+      "path": "src/app/api/font-design/generate-image/route.ts",
+      "sha256": "692e8a1507239afdf3384de1e67a9fabc116f2b2614d5954d7084d8564ed1719"
+    },
+    {
+      "path": "src/app/api/image/upscale/route.ts",
+      "sha256": "ce27a54993ae4067121278e24c4b38031880f2ee852f3aca8e5f5852680aeab7"
+    },
+    {
+      "path": "src/app/api/optimize-prompt/route.ts",
+      "sha256": "a17118d71f5a5eec9d959e49d581fb9a6afc083ea43e5c20e6423033285ce960"
+    },
+    {
+      "path": "src/__tests__/api/tool-image-preflight-billing.test.ts",
+      "sha256": "8922042ae5e1739812384333784622cf138bee2fdc45e48cd6765301a1c4fc6e"
+    },
+    {
+      "path": "src/__tests__/api/tool-sync-failure-billing.test.ts",
+      "sha256": "628ea2747fae7755d8cd47d9ed73f805ebabbfa669c7f1ac0709e8a3a3016129"
+    },
+    {
+      "path": "src/__tests__/components/psd-layer-document-persistence.test.tsx",
+      "sha256": "4c7a7e594195cb88a58155558e4df4c5f0cdd834e58cf90fe8bd4762f464a7cf"
+    }
+  ],
+  "artifacts": [
+    {
+      "path": ".playwright-cli/tool-minimal-fix-20260831/red.json",
+      "bytes": 37032,
+      "sha256": "913d9b70ce64a19de56d462c78557ddbcb9923af4276f996c8bdd2023c7109e9"
+    },
+    {
+      "path": ".playwright-cli/tool-minimal-fix-20260831/red-complete.json",
+      "bytes": 51985,
+      "sha256": "02d80ac83b136afeda8e2d51a9020d7433a0c608d5406cc0449fb5fe5525459b"
+    },
+    {
+      "path": ".playwright-cli/tool-minimal-fix-20260831/green.json",
+      "bytes": 19345,
+      "sha256": "037f0216e7a0171d5e706af76d6f09a070280e17e2d7c53f88c42bc7de028c33"
+    },
+    {
+      "path": ".playwright-cli/tool-minimal-fix-20260831/focused.json",
+      "bytes": 44261,
+      "sha256": "f1f6a564bc4ac0f1e24acd581878765c54d67cc5470744fcc856e52d52c4fbb1"
+    },
+    {
+      "path": ".playwright-cli/tool-minimal-fix-20260831/focused-final.json",
+      "bytes": 39958,
+      "sha256": "491d3a2ba52800da767cec9f1fc1834c82ccc9ca712443c765fc28cc314ee937"
+    },
+    {
+      "path": ".playwright-cli/tool-minimal-fix-20260831/full.json",
+      "bytes": 1605162,
+      "sha256": "dead9b1cfca12162ff304d25e4febdd8950915e6b2670c333598d99b7a68054f"
+    },
+    {
+      "path": ".playwright-cli/tool-minimal-fix-20260831/full.log",
+      "bytes": 697,
+      "sha256": "ebc568978218a19e4fb147f4e5a2a3c53b36929f3d95cfb5a9ccef4f77b2c388"
+    },
+    {
+      "path": ".playwright-cli/tool-minimal-fix-20260831/full-final.json",
+      "bytes": 1609512,
+      "sha256": "ececccaa5a5d9e6bac4737e8fdd868fd5402b052e9b012f87d11961bb076261e"
+    },
+    {
+      "path": ".playwright-cli/tool-minimal-fix-20260831/full-final.log",
+      "bytes": 703,
+      "sha256": "459280d4442018f5a9d7bcf16a0c2e3d15edae7c9296b0fd36934c59a30adb34"
+    },
+    {
+      "path": ".playwright-cli/tool-minimal-fix-20260831/psd-recheck.json",
+      "bytes": 6351,
+      "sha256": "3e299fe48471b5b99ed33a7e72e3ed71ba71a7a2cdd10418fe76306c348c34ae"
+    },
+    {
+      "path": ".playwright-cli/tool-minimal-fix-20260831/review-supplement.json",
+      "bytes": 31150,
+      "sha256": "2f761616884daac39263327a40b2812c80b944dd739544f32739a1d7c0b75ae8"
+    },
+    {
+      "path": ".playwright-cli/tool-minimal-fix-20260831/review-test-lint.json",
+      "bytes": 881,
+      "sha256": "2ced17f7015be8b46424c33957b63eb9f60c12e8c440d2d35ef4d3a3ec5e66f3"
+    },
+    {
+      "path": ".playwright-cli/tool-minimal-fix-20260831/lint.json",
+      "bytes": 7945686,
+      "sha256": "33021d237b838d3410d5eb34041bba5e717664331ccaa70fc902e2a3d81a4f5d"
+    },
+    {
+      "path": ".playwright-cli/tool-minimal-fix-20260831/typecheck-final.log",
+      "bytes": 185,
+      "sha256": "e9fcac6c85a98654110661707b89c6f676f91ba145cc31cec6ebe37624a66a35"
+    },
+    {
+      "path": ".playwright-cli/tool-minimal-fix-20260831/typecheck-clean.log",
+      "bytes": 223,
+      "sha256": "8460ab3f41c19ed47f913f499ec0dff46f84dd1208e95480bddfcca1b4551bca"
+    },
+    {
+      "path": ".playwright-cli/tool-minimal-fix-20260831/build.log",
+      "bytes": 343,
+      "sha256": "99622252e64c32f9b6e88511927ddf368845be96521ebfcf8b45d1b28d881479"
+    },
+    {
+      "path": ".playwright-cli/tool-minimal-fix-20260831/build-clean.log",
+      "bytes": 8241,
+      "sha256": "7d2f596b190c12cd23d56e9dd457602f00ccb97c78fbe284b786094e55aa655e"
+    },
+    {
+      "path": ".playwright-cli/tool-minimal-fix-20260831/protected-clean.log",
+      "bytes": 469,
+      "sha256": "445c368a68fd9c0e3e68ce3424d6c259dac20f98aef8ac36758d05be9733c558"
+    },
+    {
+      "path": ".playwright-cli/tool-minimal-fix-20260831/protected-standard.log",
+      "bytes": 779,
+      "sha256": "4a801f7cf472d0e6d6b635e4d9e5476bd4a10d86c8582fa054a32d73e602b785"
+    },
+    {
+      "path": ".playwright-cli/tool-minimal-fix-20260831/protected-tests.json",
+      "bytes": 3492,
+      "sha256": "0df4ea911a44e13dba9c99e514a95f417dcf67352789029f8645ca60ab01404a"
+    },
+    {
+      "path": ".playwright-cli/tool-minimal-fix-20260831/boundary.json",
+      "bytes": 2296,
+      "sha256": "b8628172fafacee8b3b733bf6a04026589ccd12b0da75835d81c00c78cb36c12"
+    },
+    {
+      "path": ".playwright-cli/tool-minimal-fix-20260831/postgres.log",
+      "bytes": 116260,
+      "sha256": "c7a7cc10416df3e930a66e53025002e7d0f7decbbe30e8c4b770c01b5ab2d95b"
+    }
+  ],
+  "browser": {
+    "performed": false,
+    "reason": "Chrome selector did not expose the correct project/preview; no unrelated tab was claimed and no new tab was opened.",
+    "target": "https://62afe49a-716e-4d9e-99cd-a0be49c4794c-5000.dev.coze.site/"
+  },
+  "localDatabase": {
+    "host": "127.0.0.1",
+    "port": 55443,
+    "database": "wujie_brand_lifecycle_test",
+    "usedByExistingFullSuite": true,
+    "newRouteBillingUsesMocks": true,
+    "remainingNonSystemSchemas": [
+      "public"
+    ],
+    "stoppedAfterTests": true
+  },
+  "limits": [
+    "本次五接口收费边界使用测试替身，不证明真实余额退款。",
+    "单请求至多一次补偿调用不等同全局数据库原子幂等。",
+    "后台异步任务终态/取消/重启不在此次批准边界。",
+    "本轮无真实供应商请求、无云端账户变更。",
+    "全平台仍不通过，云端验收待完成。"
+  ]
+}

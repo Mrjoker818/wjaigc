@@ -1,0 +1,637 @@
+{
+  "generatedAt": "2026-08-31T14:08:18.037Z",
+  "gitCommit": "39cfcaea830ad01e0a335893f09d44c5e5a18604",
+  "sourceTree": "cdbb004d11b5f710a7a6fb0327bd641dbbd74cd6",
+  "stableCommit": "52f7c601ed150769e15d06fb435c6e360e28c9e7",
+  "method": "只读TypeScript AST与既有仓库发现器；没有浏览器、网络、供应商任务、积分写入或业务源码修改",
+  "counts": {
+    "drawer": 19,
+    "mediaActions": 23,
+    "nodes": 51,
+    "agentTools": 7,
+    "pages": 4,
+    "apiRoutes": 202,
+    "components": 175,
+    "directDebitCallsites": 17
+  },
+  "drawer": [
+    {
+      "section": "ai-creation",
+      "label": "图转3D工厂",
+      "line": 17675
+    },
+    {
+      "section": "ai-creation",
+      "label": "语言修图",
+      "line": 17686
+    },
+    {
+      "section": "ai-creation",
+      "label": "Agent编排",
+      "line": 17697
+    },
+    {
+      "section": "ai-creation",
+      "label": "视频生成",
+      "line": 17708
+    },
+    {
+      "section": "brand-design",
+      "label": "品牌电商",
+      "line": 17731
+    },
+    {
+      "section": "brand-design",
+      "label": "精修引擎",
+      "line": 17742
+    },
+    {
+      "section": "brand-design",
+      "label": "人物精修大师",
+      "line": 17752
+    },
+    {
+      "section": "brand-design",
+      "label": "字境大师",
+      "line": 17763
+    },
+    {
+      "section": "brand-design",
+      "label": "品牌工厂",
+      "line": 17774
+    },
+    {
+      "section": "brand-design",
+      "label": "品牌IP设计工场",
+      "line": 17784
+    },
+    {
+      "section": "brand-design",
+      "label": "Logo生成器 Pro",
+      "line": 17794
+    },
+    {
+      "section": "pro-tools",
+      "label": "3D构图画布 Pro",
+      "line": 17810
+    },
+    {
+      "section": "pro-tools",
+      "label": "品牌包装系统 Pro",
+      "line": 17820
+    },
+    {
+      "section": "pro-tools",
+      "label": "3D展陈系统 Pro",
+      "line": 17830
+    },
+    {
+      "section": "pro-tools",
+      "label": "效果图反向拆图 Pro",
+      "line": 17840
+    },
+    {
+      "section": "pro-tools",
+      "label": "AI PSD生成器",
+      "line": 17850
+    },
+    {
+      "section": "pro-tools",
+      "label": "表情助手",
+      "line": 17860
+    },
+    {
+      "section": "canvas-tools",
+      "label": "六面体",
+      "line": 17882
+    },
+    {
+      "section": "canvas-tools",
+      "label": "ChatCanvas 批注 (C)",
+      "line": 17896
+    }
+  ],
+  "toolRows": [
+    {
+      "label": "图转3D工厂",
+      "component": "src/components/infinite-canvas.tsx",
+      "componentSha256": "86dbb3eb6833cec7ff3b13d3bfed90a005f80bf5ce39beeee6da0e9c8a44019b",
+      "apiReferences": [
+        "/api/image-to-3d",
+        "/api/poll-3d-task"
+      ],
+      "apiReferenceScope": "人工定位的主链路；六面体及批注由画布/外部hook处理，空列表不表示无接口",
+      "relatedTestFiles": [
+        "src/__tests__/components/infinite-canvas-direct-generation-contract.test.ts",
+        "src/__tests__/components/infinite-canvas-drag-throttle-wiring.test.ts",
+        "src/__tests__/components/infinite-canvas-generation-cancel-contract.test.ts",
+        "src/__tests__/components/infinite-canvas-provider-capabilities.test.ts",
+        "src/__tests__/components/infinite-canvas-split-wiring.test.ts"
+      ],
+      "testStatus": "静态存在不等于已执行；按中文矩阵保留历史专项边界"
+    },
+    {
+      "label": "语言修图",
+      "component": "src/components/image-editor.tsx",
+      "componentSha256": "c4517dec22ee4e25622c7c737f8cec8a4d70baa003f0fc76fe3eaf1a19678a08",
+      "apiReferences": [
+        "/api/cancel-task",
+        "/api/edit",
+        "/api/models?type=chat",
+        "/api/poll-task",
+        "/api/save-image"
+      ],
+      "apiReferenceScope": "仅入口组件AST字符串引用；不包含所有依赖传递调用，不是网络证据",
+      "relatedTestFiles": [],
+      "testStatus": "静态存在不等于已执行；按中文矩阵保留历史专项边界"
+    },
+    {
+      "label": "Agent编排",
+      "component": "src/components/agent-editor.tsx",
+      "componentSha256": "a3960e920d525a5bad1d839b012f4d152a77a9c208a91b2cf4e3507a54467163",
+      "apiReferences": [
+        "/api/agent-edit",
+        "/api/agent-edit?taskId={dynamic}",
+        "/api/models?type=chat"
+      ],
+      "apiReferenceScope": "仅入口组件AST字符串引用；不包含所有依赖传递调用，不是网络证据",
+      "relatedTestFiles": [
+        "src/__tests__/components/agent-editor-run-scope.test.tsx"
+      ],
+      "testStatus": "静态存在不等于已执行；按中文矩阵保留历史专项边界"
+    },
+    {
+      "label": "视频生成",
+      "component": "src/components/video-generation-panel.tsx",
+      "componentSha256": "7334538d73e909d07d98b699de0bc16de196f1a2f069d9c23a4bfcb6536f5292",
+      "apiReferences": [
+        "/api/generate",
+        "/api/optimize-prompt",
+        "/api/poll-task",
+        "/api/save-image",
+        "/api/story-assets/plan",
+        "/api/video/director/diagnose",
+        "/api/video/director/prompt",
+        "/api/video/director/shot-plan",
+        "/api/video/extract-frame",
+        "/api/video/tools"
+      ],
+      "apiReferenceScope": "仅入口组件AST字符串引用；不包含所有依赖传递调用，不是网络证据",
+      "relatedTestFiles": [],
+      "testStatus": "静态存在不等于已执行；按中文矩阵保留历史专项边界"
+    },
+    {
+      "label": "品牌电商",
+      "component": "src/components/brand-ecommerce-panel.tsx",
+      "componentSha256": "e768e4961d660ae824dd3f5ad0bc3cdf7a6fd9bd2209a5fac5b340eabd01be19",
+      "apiReferences": [
+        "/api/brand-ecommerce",
+        "/api/cancel-task",
+        "/api/models?type=chat",
+        "/api/models?type=image",
+        "/api/poll-task",
+        "/api/save-image"
+      ],
+      "apiReferenceScope": "仅入口组件AST字符串引用；不包含所有依赖传递调用，不是网络证据",
+      "relatedTestFiles": [
+        "src/__tests__/api/brand-ecommerce-result-identity.test.ts",
+        "src/__tests__/components/brand-ecommerce-lifecycle.test.tsx",
+        "src/__tests__/components/brand-ecommerce-provider-selection.test.tsx"
+      ],
+      "testStatus": "静态存在不等于已执行；按中文矩阵保留历史专项边界"
+    },
+    {
+      "label": "精修引擎",
+      "component": "src/components/refine-engine-panel.tsx",
+      "componentSha256": "2434919bb60c1890a8d1ebf1a8d5e9425012a2a6ea2cdf29ad58d24c3132dc07",
+      "apiReferences": [
+        "/api/cancel-task",
+        "/api/poll-task",
+        "/api/refine-engine",
+        "/api/save-image"
+      ],
+      "apiReferenceScope": "仅入口组件AST字符串引用；不包含所有依赖传递调用，不是网络证据",
+      "relatedTestFiles": [],
+      "testStatus": "静态存在不等于已执行；按中文矩阵保留历史专项边界"
+    },
+    {
+      "label": "人物精修大师",
+      "component": "src/components/human-repair-panel.tsx",
+      "componentSha256": "ea409886c16dfa17b0cb8f19ded368b9d6628889cefcc930b1c5c2d6f2f0cef3",
+      "apiReferences": [
+        "/api/human/analyze",
+        "/api/human/repair",
+        "/api/human/select",
+        "/api/human/task/",
+        "/api/models?type=image"
+      ],
+      "apiReferenceScope": "仅入口组件AST字符串引用；不包含所有依赖传递调用，不是网络证据",
+      "relatedTestFiles": [
+        "src/__tests__/api/human-repair-api-wiring.test.ts",
+        "src/__tests__/components/human-repair-entry-wiring.test.ts"
+      ],
+      "testStatus": "静态存在不等于已执行；按中文矩阵保留历史专项边界"
+    },
+    {
+      "label": "字境大师",
+      "component": "src/components/font-design-panel.tsx",
+      "componentSha256": "c48aa27cb0a078e769f9a002447d55fb860c5594ecbcd1efd86ff8a5af0987fe",
+      "apiReferences": [
+        "/api/cancel-task",
+        "/api/font-design/gallery-image?id={dynamic}",
+        "/api/font-design/gallery?{dynamic}",
+        "/api/font-design/generate-image",
+        "/api/font-design/plan",
+        "/api/font-design/prompt",
+        "/api/models?type=image",
+        "/api/poll-task"
+      ],
+      "apiReferenceScope": "仅入口组件AST字符串引用；不包含所有依赖传递调用，不是网络证据",
+      "relatedTestFiles": [
+        "src/__tests__/api/font-design-plan-constants.test.ts",
+        "src/__tests__/lib/font-design-task-result.test.ts"
+      ],
+      "testStatus": "静态存在不等于已执行；按中文矩阵保留历史专项边界"
+    },
+    {
+      "label": "品牌工厂",
+      "component": "src/components/brand-factory-panel.tsx",
+      "componentSha256": "5bcb506eeb9830ec520e300c8050a895ee0f7d83478d5e7f5f9699239e3c4b62",
+      "apiReferences": [
+        "/api/brand-factory",
+        "/api/models?type=chat",
+        "/api/models?type=image",
+        "/api/poll-task",
+        "/api/save-image"
+      ],
+      "apiReferenceScope": "仅入口组件AST字符串引用；不包含所有依赖传递调用，不是网络证据",
+      "relatedTestFiles": [
+        "src/__tests__/lib/brand-factory-image-url.test.ts"
+      ],
+      "testStatus": "静态存在不等于已执行；按中文矩阵保留历史专项边界"
+    },
+    {
+      "label": "品牌IP设计工场",
+      "component": "src/components/brand-ip-panel.tsx",
+      "componentSha256": "baa6950b1c217210ff01b70776c76a965237767068166dfe10e403286539d6b3",
+      "apiReferences": [
+        "/api/brand-ip/assets",
+        "/api/brand-ip/assets?projectId={dynamic}",
+        "/api/brand-ip/generate",
+        "/api/brand-ip/projects",
+        "/api/brand-ip/projects?projectId={dynamic}",
+        "/api/brand-ip/strategy",
+        "/api/brand-ip/tasks?projectId={dynamic}",
+        "/api/brand-ip/tasks?taskId={dynamic}",
+        "/api/cancel-task",
+        "/api/models?type=chat",
+        "/api/models?type=image"
+      ],
+      "apiReferenceScope": "仅入口组件AST字符串引用；不包含所有依赖传递调用，不是网络证据",
+      "relatedTestFiles": [
+        "src/__tests__/api/brand-ip-generation-ownership.test.ts",
+        "src/__tests__/api/brand-ip-project-ownership.test.ts",
+        "src/__tests__/api/brand-ip-project-update.test.ts",
+        "src/__tests__/api/brand-ip-strategy.test.ts",
+        "src/__tests__/lib/brand-ip-state.test.ts"
+      ],
+      "testStatus": "静态存在不等于已执行；按中文矩阵保留历史专项边界"
+    },
+    {
+      "label": "Logo生成器 Pro",
+      "component": "src/components/logo-skill-panel.tsx",
+      "componentSha256": "8392013deba09e15b82b0855815d25f0b7cd0d81b8be9b5e676e9dbebd4cdb90",
+      "apiReferences": [
+        "/api/brand-factory",
+        "/api/logo-skill",
+        "/api/models?type=chat",
+        "/api/models?type=image",
+        "/api/poll-task"
+      ],
+      "apiReferenceScope": "仅入口组件AST字符串引用；不包含所有依赖传递调用，不是网络证据",
+      "relatedTestFiles": [],
+      "testStatus": "静态存在不等于已执行；按中文矩阵保留历史专项边界"
+    },
+    {
+      "label": "3D构图画布 Pro",
+      "component": "src/components/scene-studio-panel.tsx",
+      "componentSha256": "eb0b4c22591e8c8b6636a09b310f39272b104bcf64aab9d339166cf23e60fc18",
+      "apiReferences": [
+        "/api/chat",
+        "/api/generate",
+        "/api/models?type=chat",
+        "/api/models?type=image",
+        "/api/poll-task",
+        "/api/scene-studio",
+        "/api/scene-studio/generate",
+        "/api/scene-studio?sceneId={dynamic}"
+      ],
+      "apiReferenceScope": "仅入口组件AST字符串引用；不包含所有依赖传递调用，不是网络证据",
+      "relatedTestFiles": [],
+      "testStatus": "静态存在不等于已执行；按中文矩阵保留历史专项边界"
+    },
+    {
+      "label": "品牌包装系统 Pro",
+      "component": "src/components/brand-packaging-panel.tsx",
+      "componentSha256": "2c805886cd8d7a793829d4423a3c8a31a813c6182760dc013f5e5b2046430655",
+      "apiReferences": [
+        "/api/brand-packaging/generate",
+        "/api/chat",
+        "/api/models?type=chat",
+        "/api/models?type=image",
+        "/api/poll-task"
+      ],
+      "apiReferenceScope": "仅入口组件AST字符串引用；不包含所有依赖传递调用，不是网络证据",
+      "relatedTestFiles": [
+        "src/__tests__/api/brand-packaging-auth.test.ts",
+        "src/__tests__/api/brand-packaging-task-ownership.test.ts"
+      ],
+      "testStatus": "静态存在不等于已执行；按中文矩阵保留历史专项边界"
+    },
+    {
+      "label": "3D展陈系统 Pro",
+      "component": "src/components/display3d-panel.tsx",
+      "componentSha256": "c1d2b02d2eb24841d7b12af9bf041c5672722bc62f5317582393cc7858779bd5",
+      "apiReferences": [
+        "/api/activity-venue/analyze",
+        "/api/activity-venue/lock-design",
+        "/api/activity-venue/proposals",
+        "/api/activity-venue/qc",
+        "/api/display-3d/decompose",
+        "/api/display-3d/generate",
+        "/api/export/annotation-image",
+        "/api/export/bom",
+        "/api/export/pdf",
+        "/api/models?type=chat",
+        "/api/models?type=image",
+        "/api/poll-task"
+      ],
+      "apiReferenceScope": "仅入口组件AST字符串引用；不包含所有依赖传递调用，不是网络证据",
+      "relatedTestFiles": [],
+      "testStatus": "静态存在不等于已执行；按中文矩阵保留历史专项边界"
+    },
+    {
+      "label": "效果图反向拆图 Pro",
+      "component": "src/components/effect-reverse-engineering-panel.tsx",
+      "componentSha256": "93ac0258885f5219aa16989b13cc8ef6822575346a7bcb8a9b52d4bd9fcf198f",
+      "apiReferences": [
+        "/api/effect-reverse-engineering",
+        "/api/effect-reverse-engineering?taskId={dynamic}"
+      ],
+      "apiReferenceScope": "仅入口组件AST字符串引用；不包含所有依赖传递调用，不是网络证据",
+      "relatedTestFiles": [
+        "src/__tests__/api/effect-reverse-engineering.test.ts",
+        "src/__tests__/components/effect-reverse-engineering-layout.test.ts",
+        "src/__tests__/components/effect-reverse-engineering-panel.test.ts"
+      ],
+      "testStatus": "静态存在不等于已执行；按中文矩阵保留历史专项边界"
+    },
+    {
+      "label": "AI PSD生成器",
+      "component": "src/components/ai-psd/ai-psd-panel.tsx",
+      "componentSha256": "92077991a717c7a5e9b1114ba0d99e5ae1a87f7948b059f94332adc8092e093b",
+      "apiReferences": [
+        "/api/ai-psd/create",
+        "/api/ai-psd/status?taskId={dynamic}",
+        "/api/cancel-task",
+        "/api/models?type=chat",
+        "/api/models?type=image",
+        "/api/save-image"
+      ],
+      "apiReferenceScope": "仅入口组件AST字符串引用；不包含所有依赖传递调用，不是网络证据",
+      "relatedTestFiles": [
+        "src/__tests__/api/ai-psd-task-ownership.test.ts"
+      ],
+      "testStatus": "静态存在不等于已执行；按中文矩阵保留历史专项边界"
+    },
+    {
+      "label": "表情助手",
+      "component": "src/components/sticker-assistant-panel.tsx",
+      "componentSha256": "1f9783d8d7d0494a1d81b372533eda78be931ab1944bc87686ead0c0e27ed5f3",
+      "apiReferences": [
+        "/api/chat",
+        "/api/generate",
+        "/api/image-edit",
+        "/api/models?type=chat",
+        "/api/models?type=image",
+        "/api/poll-task",
+        "/api/save-image"
+      ],
+      "apiReferenceScope": "仅入口组件AST字符串引用；不包含所有依赖传递调用，不是网络证据",
+      "relatedTestFiles": [
+        "src/__tests__/components/sticker-assistant-batch.test.ts"
+      ],
+      "testStatus": "静态存在不等于已执行；按中文矩阵保留历史专项边界"
+    },
+    {
+      "label": "六面体",
+      "component": "src/components/infinite-canvas.tsx",
+      "componentSha256": "86dbb3eb6833cec7ff3b13d3bfed90a005f80bf5ce39beeee6da0e9c8a44019b",
+      "apiReferences": [],
+      "apiReferenceScope": "人工定位的主链路；六面体及批注由画布/外部hook处理，空列表不表示无接口",
+      "relatedTestFiles": [
+        "src/__tests__/components/infinite-canvas-direct-generation-contract.test.ts",
+        "src/__tests__/components/infinite-canvas-drag-throttle-wiring.test.ts",
+        "src/__tests__/components/infinite-canvas-generation-cancel-contract.test.ts",
+        "src/__tests__/components/infinite-canvas-provider-capabilities.test.ts",
+        "src/__tests__/components/infinite-canvas-split-wiring.test.ts"
+      ],
+      "testStatus": "静态存在不等于已执行；按中文矩阵保留历史专项边界"
+    },
+    {
+      "label": "ChatCanvas 批注 (C)",
+      "component": "src/components/infinite-canvas.tsx",
+      "componentSha256": "86dbb3eb6833cec7ff3b13d3bfed90a005f80bf5ce39beeee6da0e9c8a44019b",
+      "apiReferences": [],
+      "apiReferenceScope": "人工定位的主链路；六面体及批注由画布/外部hook处理，空列表不表示无接口",
+      "relatedTestFiles": [
+        "src/__tests__/components/infinite-canvas-direct-generation-contract.test.ts",
+        "src/__tests__/components/infinite-canvas-drag-throttle-wiring.test.ts",
+        "src/__tests__/components/infinite-canvas-generation-cancel-contract.test.ts",
+        "src/__tests__/components/infinite-canvas-provider-capabilities.test.ts",
+        "src/__tests__/components/infinite-canvas-split-wiring.test.ts"
+      ],
+      "testStatus": "静态存在不等于已执行；按中文矩阵保留历史专项边界"
+    }
+  ],
+  "mediaActions": [
+    "放大",
+    "移除背景",
+    "SVG智能描摹",
+    "元素拆解",
+    "横竖重组",
+    "擦除",
+    "蒙版",
+    "调色",
+    "编辑元素",
+    "多角度",
+    "图转3D工厂",
+    "扩展",
+    "裁切",
+    "全景生成",
+    "精修引擎",
+    "人物精修大师",
+    "语言修图",
+    "Agent编排",
+    "下载",
+    "视频抽帧",
+    "AI配音",
+    "转 GIF",
+    "视频压缩"
+  ],
+  "nodeTypes": [
+    "agent-auto",
+    "agent-chat",
+    "ai-3d-model",
+    "ai-analyze",
+    "ai-annotation-edit",
+    "ai-audio",
+    "ai-brand-ecommerce",
+    "ai-color-adjust",
+    "ai-edit",
+    "ai-font-design",
+    "ai-generate",
+    "ai-human-repair",
+    "ai-llm",
+    "ai-multi-angle",
+    "ai-panorama",
+    "ai-refine-engine",
+    "ai-removebg",
+    "ai-retouch",
+    "ai-segment",
+    "ai-style-transfer",
+    "ai-upscale",
+    "ai-vectorize",
+    "ai-video-generate",
+    "ai-video-i2v",
+    "audio-input",
+    "condition-if",
+    "condition-switch",
+    "group",
+    "input-image",
+    "input-param",
+    "input-text",
+    "input-video",
+    "loop-each",
+    "loop-for",
+    "loop-while",
+    "manual-color-adjust",
+    "output-audio",
+    "output-export",
+    "output-image",
+    "output-image-group",
+    "output-save",
+    "output-video",
+    "parallel",
+    "storyboard-sequence",
+    "subgraph",
+    "video-compose",
+    "video-concat",
+    "video-extract-frames",
+    "video-filter",
+    "video-speed-change",
+    "video-trim"
+  ],
+  "agentTools": [
+    "extend_video",
+    "generate_image",
+    "generate_video",
+    "image_edit",
+    "remove_background",
+    "svg_trace",
+    "upscale"
+  ],
+  "pages": [
+    {
+      "route": "/",
+      "file": "src/app/page.tsx"
+    },
+    {
+      "route": "/recharge/:orderId",
+      "file": "src/app/recharge/[orderId]/page.tsx"
+    },
+    {
+      "route": "/shared/:shareId",
+      "file": "src/app/shared/[shareId]/page.tsx"
+    },
+    {
+      "route": "/simple-chat",
+      "file": "src/app/simple-chat/page.tsx"
+    }
+  ],
+  "debitCalls": [
+    {
+      "file": "src/app/api/agent-edit/route.ts",
+      "line": 507
+    },
+    {
+      "file": "src/app/api/brand-ecommerce/route.ts",
+      "line": 498
+    },
+    {
+      "file": "src/app/api/chat/route.ts",
+      "line": 335
+    },
+    {
+      "file": "src/app/api/design/vectorize/route.ts",
+      "line": 781
+    },
+    {
+      "file": "src/app/api/edit/route.ts",
+      "line": 558
+    },
+    {
+      "file": "src/app/api/font-design/generate-image/route.ts",
+      "line": 137
+    },
+    {
+      "file": "src/app/api/generate/route.ts",
+      "line": 532
+    },
+    {
+      "file": "src/app/api/generate/route.ts",
+      "line": 1475
+    },
+    {
+      "file": "src/app/api/image-edit/route.ts",
+      "line": 1733
+    },
+    {
+      "file": "src/app/api/image-to-3d/route.ts",
+      "line": 1193
+    },
+    {
+      "file": "src/app/api/image/upscale/route.ts",
+      "line": 42
+    },
+    {
+      "file": "src/app/api/omp-agent/route.ts",
+      "line": 264
+    },
+    {
+      "file": "src/app/api/optimize-prompt/route.ts",
+      "line": 76
+    },
+    {
+      "file": "src/app/api/refine-engine/route.ts",
+      "line": 937
+    },
+    {
+      "file": "src/app/api/svg-trace/route.ts",
+      "line": 2066
+    },
+    {
+      "file": "src/app/api/vision-prompt/route.ts",
+      "line": 281
+    },
+    {
+      "file": "src/lib/credits.ts",
+      "line": 280
+    }
+  ],
+  "checks": {
+    "uniqueDrawerLabels": true,
+    "missingLabels": [],
+    "unmatchedMap": []
+  }
+}

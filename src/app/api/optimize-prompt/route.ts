@@ -45,6 +45,15 @@ function normalizeChatBaseUrl(baseUrl: string): string {
 export async function POST(request: NextRequest) {
   let deductedCredits = 0;
   let sessionUser: import('@/lib/user-types').User | null = null;
+  async function refundFailure(reason: string): Promise<void> {
+    if (deductedCredits <= 0 || !sessionUser) return;
+    const amount = deductedCredits;
+    deductedCredits = 0;
+    try {
+      const refund = await refundCredits(sessionUser.id, amount, `提示词优化失败退款: ${reason.substring(0, 100)}`);
+      if (!refund.success) console.error('[optimize-prompt] Refund failed:', { userId: sessionUser.id, amount });
+    } catch (refundErr) { console.error('[optimize-prompt] Refund failed:', refundErr); }
+  }
   try {
     const {
       prompt,
@@ -68,16 +77,6 @@ export async function POST(request: NextRequest) {
 
     if (!prompt) {
       return NextResponse.json({ error: '缺少必要参数：prompt' }, { status: 400 });
-    }
-
-    // 积分检查与扣除
-    deductedCredits = 0;
-    if (sessionUser) {
-      const creditResult = await consumeCredits(sessionUser.id, 'chat', undefined, undefined, model);
-      if (!creditResult.success) {
-        return NextResponse.json({ success: false, error: creditResult.message || '积分不足' }, { status: 402 });
-      }
-      deductedCredits = creditResult.cost;
     }
 
     // Content safety check
@@ -140,6 +139,15 @@ export async function POST(request: NextRequest) {
     const systemPrompt = customSystemPrompt || OPTIMIZE_SYSTEM_PROMPT;
     const userMessage = `请优化以下图像生成提示词：\n\n${prompt}`;
 
+    // 安全检查与供应商准备完成后才扣费，保留原计价参数。
+    if (sessionUser) {
+      const creditResult = await consumeCredits(sessionUser.id, 'chat', undefined, undefined, model);
+      if (!creditResult.success) {
+        return NextResponse.json({ success: false, error: creditResult.message || '积分不足' }, { status: 402 });
+      }
+      deductedCredits = creditResult.cost;
+    }
+
     const response = await fetchWithV1Retry(
       baseUrl,
       '/chat/completions',
@@ -166,6 +174,7 @@ export async function POST(request: NextRequest) {
     if (!response.ok) {
       const errorText = await response.text();
       console.error('Optimize prompt API error:', response.status, errorText);
+      await refundFailure(`AI模型请求失败 (${response.status})`);
       return NextResponse.json(
         { error: `AI模型请求失败 (${response.status})` },
         { status: response.status },
@@ -180,6 +189,7 @@ export async function POST(request: NextRequest) {
     const optimizedText = data.choices?.[0]?.message?.content || '';
 
     if (!optimizedText.trim()) {
+      await refundFailure('AI模型返回了空结果');
       return NextResponse.json({ error: 'AI模型返回了空结果，请重试' }, { status: 500 });
     }
 
@@ -199,11 +209,7 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     console.error('Optimize prompt error:', error);
     // 退款：提示词优化失败时退还积分
-    if (deductedCredits > 0 && sessionUser) {
-      try {
-        await refundCredits(sessionUser.id, deductedCredits, `提示词优化失败退款: ${(error instanceof Error ? error.message : 'Unknown').substring(0, 100)}`);
-      } catch (refundErr) { console.error('[optimize-prompt] Refund failed:', refundErr); }
-    }
+    await refundFailure(error instanceof Error ? error.message : 'Unknown');
     return NextResponse.json(
       { error: `优化失败: ${error instanceof Error ? error.message : '未知错误'}` },
       { status: 500 },
