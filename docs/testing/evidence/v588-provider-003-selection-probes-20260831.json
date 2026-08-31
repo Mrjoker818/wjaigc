@@ -1,0 +1,328 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-08-31T13:40:49.254Z",
+  "timezone": "Asia/Shanghai",
+  "baseCommit": "4885136e5b8d404305e8a47eabae7dae2757dba9",
+  "srcTree": "cdbb004d11b5f710a7a6fb0327bd641dbbd74cd6",
+  "donor": "J:/无界云端0820，仅只读",
+  "purpose": "PROVIDER-003既有观察的源码行为验证，不代替云端端到端测试",
+  "method": "使用TypeScript AST精确提取现有函数/回调/候选选择语句并在无网络无数据库的隔离上下文执行；没有复制改写业务算法。",
+  "firstRun": {
+    "time": "2026-08-31T13:40:49.254Z",
+    "total": 14,
+    "failed": 12,
+    "passed": 2,
+    "exitCode": 1
+  },
+  "repeatRun": {
+    "time": "2026-08-31T13:41:19.099Z",
+    "total": 14,
+    "failed": 12,
+    "passed": 2,
+    "exitCode": 1,
+    "sameFindings": true
+  },
+  "attemptLimitations": "中间一次重复运行输出因工具max_output_tokens过小被截断，JSON解析失败；未计为新业务失败，随后用完整输出确认相同结论。",
+  "businessChanges": 0,
+  "providerTasks": 0,
+  "chargedCredits": 0,
+  "networkCalls": 0,
+  "databaseCalls": 0,
+  "findings": [
+    {
+      "version": "main",
+      "id": "BRAND-ASSIST-PAIR",
+      "status": "失败",
+      "expected": [
+        "api_pear_fixture",
+        "api_pear_fixture",
+        "api_pear_fixture"
+      ],
+      "actual": [
+        null,
+        null,
+        null
+      ],
+      "file": "src/components/brand-ecommerce-panel.tsx",
+      "line": 592,
+      "note": "执行现有handleAiAssist，3类辅助请求均缺llmProviderId。只隔离fetch边界，不生成任何结果。"
+    },
+    {
+      "version": "main",
+      "id": "BRAND-MENU-PAIR",
+      "status": "失败",
+      "expected": [
+        [
+          "shared-chat-model",
+          "api_pear_fixture"
+        ]
+      ],
+      "actual": [
+        [
+          "shared-chat-model"
+        ]
+      ],
+      "file": "src/components/brand-ecommerce/BrandSettingsForm.tsx",
+      "line": 456,
+      "note": "执行现有菜单onClick，仅传裸modelId，没有providerId；不是完整DOM渲染验收。"
+    },
+    {
+      "version": "main",
+      "id": "REFINE-EXPLICIT-MISSING",
+      "status": "失败",
+      "expected": null,
+      "actual": "api_apimart_fixture",
+      "file": "src/app/api/refine-engine/route.ts",
+      "line": 388,
+      "note": "指定不存在供应商，现有选择器仍返回另一供应商；依赖为内存夹具。"
+    },
+    {
+      "version": "main",
+      "id": "REFINE-LEGACY-CONTROL",
+      "status": "通过",
+      "expected": "api_apimart_fixture",
+      "actual": "api_apimart_fixture",
+      "file": "src/app/api/refine-engine/route.ts",
+      "line": 388,
+      "note": "对照用例：未指定供应商时保留现有自动查找。"
+    },
+    {
+      "version": "main",
+      "id": "BRAND-EXPLICIT-MISSING",
+      "status": "失败",
+      "expected": null,
+      "actual": "api_apimart_fixture",
+      "file": "src/app/api/brand-ecommerce/route.ts",
+      "line": 403,
+      "note": "品牌图像选择器同样在显式供应商缺失后选择另一供应商；未执行路由或扣费。"
+    },
+    {
+      "version": "main",
+      "id": "FONT-EXPLICIT-EXCLUSIVE",
+      "status": "失败",
+      "expected": [
+        "api_pear_fixture"
+      ],
+      "actual": [
+        "api_pear_fixture",
+        "api_apimart_fixture"
+      ],
+      "file": "src/app/api/font-design/generate-image/route.ts",
+      "line": 177,
+      "note": "显式选中Pear夹具后，候选仍包含APImart夹具。"
+    },
+    {
+      "version": "main",
+      "id": "FONT-EXPLICIT-MISSING",
+      "status": "失败",
+      "expected": [],
+      "actual": [
+        "api_pear_fixture",
+        "api_apimart_fixture"
+      ],
+      "file": "src/app/api/font-design/generate-image/route.ts",
+      "line": 177,
+      "note": "显式供应商不存在时，候选仍为全部匹配供应商。"
+    },
+    {
+      "version": "donor",
+      "id": "BRAND-ASSIST-PAIR",
+      "status": "失败",
+      "expected": [
+        "api_pear_fixture",
+        "api_pear_fixture",
+        "api_pear_fixture"
+      ],
+      "actual": [
+        null,
+        null,
+        null
+      ],
+      "file": "src/components/brand-ecommerce-panel.tsx",
+      "line": 602,
+      "note": "执行现有handleAiAssist，3类辅助请求均缺llmProviderId。只隔离fetch边界，不生成任何结果。"
+    },
+    {
+      "version": "donor",
+      "id": "BRAND-MENU-PAIR",
+      "status": "失败",
+      "expected": [
+        [
+          "shared-chat-model",
+          "api_pear_fixture"
+        ]
+      ],
+      "actual": [
+        [
+          "shared-chat-model"
+        ]
+      ],
+      "file": "src/components/brand-ecommerce/BrandSettingsForm.tsx",
+      "line": 429,
+      "note": "执行现有菜单onClick，仅传裸modelId，没有providerId；不是完整DOM渲染验收。"
+    },
+    {
+      "version": "donor",
+      "id": "REFINE-EXPLICIT-MISSING",
+      "status": "失败",
+      "expected": null,
+      "actual": "api_apimart_fixture",
+      "file": "src/app/api/refine-engine/route.ts",
+      "line": 388,
+      "note": "指定不存在供应商，现有选择器仍返回另一供应商；依赖为内存夹具。"
+    },
+    {
+      "version": "donor",
+      "id": "REFINE-LEGACY-CONTROL",
+      "status": "通过",
+      "expected": "api_apimart_fixture",
+      "actual": "api_apimart_fixture",
+      "file": "src/app/api/refine-engine/route.ts",
+      "line": 388,
+      "note": "对照用例：未指定供应商时保留现有自动查找。"
+    },
+    {
+      "version": "donor",
+      "id": "BRAND-EXPLICIT-MISSING",
+      "status": "失败",
+      "expected": null,
+      "actual": "api_apimart_fixture",
+      "file": "src/app/api/brand-ecommerce/route.ts",
+      "line": 403,
+      "note": "品牌图像选择器同样在显式供应商缺失后选择另一供应商；未执行路由或扣费。"
+    },
+    {
+      "version": "donor",
+      "id": "FONT-EXPLICIT-EXCLUSIVE",
+      "status": "失败",
+      "expected": [
+        "api_pear_fixture"
+      ],
+      "actual": [
+        "api_pear_fixture",
+        "api_apimart_fixture"
+      ],
+      "file": "src/app/api/font-design/generate-image/route.ts",
+      "line": 180,
+      "note": "显式选中Pear夹具后，候选仍包含APImart夹具。"
+    },
+    {
+      "version": "donor",
+      "id": "FONT-EXPLICIT-MISSING",
+      "status": "失败",
+      "expected": [],
+      "actual": [
+        "api_pear_fixture",
+        "api_apimart_fixture"
+      ],
+      "file": "src/app/api/font-design/generate-image/route.ts",
+      "line": 180,
+      "note": "显式供应商不存在时，候选仍为全部匹配供应商。"
+    }
+  ],
+  "sources": [
+    {
+      "version": "main",
+      "file": "src/components/brand-ecommerce-panel.tsx",
+      "sha256": "e768e4961d660ae824dd3f5ad0bc3cdf7a6fd9bd2209a5fac5b340eabd01be19"
+    },
+    {
+      "version": "main",
+      "file": "src/components/brand-ecommerce/BrandSettingsForm.tsx",
+      "sha256": "ec4738b1fe83550a5ec194f100dc72d9956717f457d19f8dc8e8f3d03b49724a"
+    },
+    {
+      "version": "main",
+      "file": "src/app/api/refine-engine/route.ts",
+      "sha256": "78d5b5910bbff06bdf0f19e83dd4a4aa5073f25f9292307c680fce37fa79726e"
+    },
+    {
+      "version": "main",
+      "file": "src/app/api/brand-ecommerce/route.ts",
+      "sha256": "d3f70f926ae13c283e18ee620dda2d0fe342fc8ebe4efc386705a2cacfb2fbea"
+    },
+    {
+      "version": "main",
+      "file": "src/app/api/font-design/generate-image/route.ts",
+      "sha256": "e9baa43c72eaea5217fdf63fce9b30e107385a35890472f695559015c83db7d8"
+    },
+    {
+      "version": "donor",
+      "file": "src/components/brand-ecommerce-panel.tsx",
+      "sha256": "daa96d002ca43df4f34bf34bdfaebae68f3d2a8ef0399c4c81fb26804991f5d2"
+    },
+    {
+      "version": "donor",
+      "file": "src/components/brand-ecommerce/BrandSettingsForm.tsx",
+      "sha256": "5e199d8ecd7d40856add2608442f2cbf702de5d990f4be7a5d29a64a31ac261a"
+    },
+    {
+      "version": "donor",
+      "file": "src/app/api/refine-engine/route.ts",
+      "sha256": "3f8f9b0983c805069b23539b6d8ae077a9b334049b28d5b5d8eb708394c35264"
+    },
+    {
+      "version": "donor",
+      "file": "src/app/api/brand-ecommerce/route.ts",
+      "sha256": "61fcaea9d49f50af826966ecb4b40c317ae8836043aec8a84806ef82b4c3352b"
+    },
+    {
+      "version": "donor",
+      "file": "src/app/api/font-design/generate-image/route.ts",
+      "sha256": "948d20f481c51527f0660141efa7dc6d43a879387c6089f965344c724551c18c"
+    }
+  ],
+  "rootCauseGroups": [
+    {
+      "id": "V588-PROVIDER-003-BUG-005",
+      "from": "V588-PROVIDER-003-OBS-005",
+      "status": "本地隔离源码复现，未修复，云端未验证",
+      "scope": "品牌LLM菜单和辅助请求未成对传递供应商",
+      "severity": "P2"
+    },
+    {
+      "id": "V588-PROVIDER-003-OBS-002",
+      "status": "本地候选选择复现，未修复，真实路由/云端待验",
+      "scope": "字境显式供应商选择仍允许跨供应商候选"
+    },
+    {
+      "id": "V588-PROVIDER-003-OBS-003",
+      "status": "本地选择器复现，未修复，真实权限入口待验",
+      "scope": "精修显式供应商缺失后回退"
+    },
+    {
+      "id": "V588-PROVIDER-003-OBS-006",
+      "status": "本地选择器复现，未修复，完整路由待验",
+      "scope": "品牌图像显式供应商缺失后回退；不同于已关闭结果标签BUG-004"
+    }
+  ],
+  "browser": {
+    "family": "Google Chrome",
+    "originalTabsListed": true,
+    "domRead": "超时并重置控制会话",
+    "freshOriginalTabClaim": "再次超时",
+    "diagnostics": {
+      "running": true,
+      "extensionEnabled": true,
+      "nativeHostManifestValid": true
+    },
+    "actions": "没有新增标签、切换360、刷新/重新部署、登录或新业务提交",
+    "negativeCloudTests": "BUG-002/003仍未执行，不重新打开BUG-004"
+  },
+  "artifactDirectory": ".playwright-cli/v588-provider-003-selection-probes-20260831/",
+  "artifacts": [
+    {
+      "file": "first-run.json",
+      "sha256": "a1807cddefd82fd6592b24013e30ae6931f1bfaffd98eab341bb6997be64f835"
+    },
+    {
+      "file": "probe.cjs",
+      "sha256": "d4635678c77b304d362eec2d6e9d8239d0a6cd4714f18e230766a19f3c25da55"
+    },
+    {
+      "file": "repeat-run.json",
+      "sha256": "218934459b2cc1fa8bf7617afdf703c2782be0a344a56a0066ebaf4c705249e4"
+    }
+  ],
+  "conclusion": "不通过：V5.8.8同样包含这些行为，不能直接覆盖；应保留当前已验证改动，按独立最小范围修复。Stage4与PROVIDER-002不重开，Pear分层延期，stable不变。"
+}
