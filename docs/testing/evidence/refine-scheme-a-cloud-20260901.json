@@ -1,7 +1,7 @@
 {
-  "recordedAt": "2026-09-01T00:58:00+08:00",
+  "recordedAt": "2026-09-01T01:15:00+08:00",
   "bugId": "V588-TOOLS-BUG-002",
-  "conclusion": "不通过：同步已完成，平台交付后静态资源500和Chrome断连阻止真实精修提交",
+  "conclusion": "正向精修链路有条件通过；完整方案与全平台不通过，失败结算/原始数据库/下载等未闭环",
   "sourceCommit": "b8b090f0a96559fd9a8f78cb68c181f05981c974",
   "sourceTree": "352efb3bcbc3fbc5d615da87dd31a6902d0d5a58",
   "cozeMergeCommit": "e79b57bf087751d5b34d1460909a8466440add93",
@@ -35,8 +35,8 @@
   },
   "browserEvidence": {
     "account": "canvas-user",
-    "balance": 4806,
-    "ledgerEntries": 6,
+    "balance": 4794,
+    "ledgerEntries": 7,
     "loadedCanvasImages": 6,
     "imageWidth": 1254,
     "imageHeight": 1254,
@@ -45,9 +45,9 @@
     "model": "gpt-image-2",
     "ratio": "1:1",
     "quality": "中",
-    "paidRequests": 0,
-    "generatedResults": 0,
-    "newCreditsConsumed": 0
+    "paidRequests": 1,
+    "generatedResults": 1,
+    "newCreditsConsumed": 12
   },
   "historicalDiagnosis": {
     "taskId": "refine-1788190957385-3l3pji",
@@ -77,25 +77,91 @@
         "/_next/static/chunks/app/page-e644bf085753358b.js"
       ],
       "authRequestObserved": false,
-      "rootCause": "未确定：自动构建与运行服务衔接待核实",
-      "diagnosticInstructionSent": false
+      "rootCause": "未确定；原页强刷后恢复，不等于交付时序已修复",
+      "diagnosticInstructionSent": false,
+      "recoveredInLiveBrowser": true
     },
     {
       "id": "chrome-transport",
       "runningCheck": 0,
       "extensionCheck": 0,
       "nativeHostCheck": 0,
-      "connection": "重连能枚举原标签，接管时再次断开"
+      "connection": "恢复后完成精修正向测试；下载等待和后续项目接管超时"
+    },
+    {
+      "id": "V588-TOOLS-BUG-003",
+      "severity": "P2",
+      "status": "真实复现、未修复",
+      "viewport": {
+        "width": 2048,
+        "height": 935
+      },
+      "button": {
+        "y": 915.61,
+        "height": 44
+      },
+      "workaround": "标题栏上移110px后按钮可操作",
+      "rootCauseConfirmed": false
     }
   ],
   "limits": [
-    "未完成本候选真实精修结果、保存恢复、下载与账务验收",
+    "新版精修正向出图/入画布/刷新/重开及唯一扣费已验证；数据库原始行、失败取消超时结算仍未验证",
     "无本轮完整录像或Trace，不以截图代替",
-    "首次网络缓冲truncated=true，交付后500窗口truncated=false",
+    "本次付费任务请求采集truncated=false；更早一次资源缓冲存在截断，不混用范围",
     "原始页面/日志只在本地保留，不上传潜在私有信息",
-    "未重复本地4569项、品牌成功任务或Coze同步",
-    "平台e1f69b0元数据之后的最终源码/Build ID/服务仍待读取，不根据同源页面臆断"
+    "未重复本地4569项、品牌成功任务、Coze同步或历史精修；旧12积分未补偿",
+    "平台e1f69b0元数据后的源码/Build ID/服务仍待读，不据同源页面臆断",
+    "只读Coze核验点击发送后没有接收确认，必须先查原草稿/消息",
+    "精修浮窗越界未修复；PNG下载文件落盘未验证"
   ],
+  "startupPreflightProbe": {
+    "recordedAt": "2026-09-01T01:02:08+08:00",
+    "type": "隔离Bash执行，不是真实Next服务或云端复现",
+    "result": {
+      "cases": 2,
+      "passed": 1,
+      "failed": 1,
+      "probeExitCode": 1,
+      "toolError": false,
+      "repeatConsistent": true
+    },
+    "facts": [
+      "旧BUILD_ID且无锁时正常调用Next替身",
+      "旧BUILD_ID与模拟构建锁共存时仍立即调用Next替身，未调用进程检查",
+      "实际安装的Next.js构建源码先取得distDir锁，再清理相同输出目录；默认distDir=.next、cleanDistDir=true、lockDistDir=true"
+    ],
+    "limits": [
+      "只证明脚本分支次序，不能据此断言当前云端实际有并发构建",
+      "未运行Next服务、未监听端口、未安装依赖或执行构建、未连接网络/数据库",
+      "没有修改生产启动脚本、构建配置或认证"
+    ],
+    "files": [
+      {
+        "path": ".playwright-cli/refine-scheme-a-cloud-20260901/startup-overlap-probe.mjs",
+        "sha256": "87120cb88225ca9e9926d03ffa642cf7f07c8062a8a2fa4ca5b08f2bbc6078bf"
+      },
+      {
+        "path": ".playwright-cli/refine-scheme-a-cloud-20260901/startup-overlap-probe.json",
+        "sha256": "e23ae63e5f8a6c02e5330ad80f682b5ae44be6c2fc7269438ae4d34a23826c1d"
+      },
+      {
+        "path": "scripts/coze-start.sh",
+        "sha256": "c095410a3705abad49391b35ba8263457df81c6d5a32606daf4b134cd7cc6af6"
+      },
+      {
+        "path": "scripts/coze-preview-build.sh",
+        "sha256": "3e9a1c28f3507e57c16e2c67fff119fd50d890451889da7ab319e75868e844cc"
+      },
+      {
+        "path": "node_modules/next/dist/build/index.js",
+        "sha256": "a40fdcfd74b40fca55658497677ff37cf975b12a7650c4ecc23ac91170cc3539"
+      },
+      {
+        "path": "node_modules/next/dist/server/config-shared.js",
+        "sha256": "22c01427abe01cdd1e087816cd8b45f561468b9a3607103d9e7176d9a174e248"
+      }
+    ]
+  },
   "artifactRoot": ".playwright-cli/refine-scheme-a-cloud-20260901",
   "artifacts": [
     {
@@ -172,6 +238,135 @@
       "file": "sandbox-disconnected.png",
       "bytes": 137229,
       "sha256": "4ab529bd4e3934befab365aa3c171c21b66c2ee5f1bdc5dc1aaa39183ddcf9af"
+    }
+  ],
+  "browserEvidenceBeforeLive": {
+    "account": "canvas-user",
+    "balance": 4806,
+    "ledgerEntries": 6,
+    "loadedCanvasImages": 6,
+    "imageWidth": 1254,
+    "imageHeight": 1254,
+    "source": "/api/serve-upload/uploads/gen-1788190766553-hmtu57.png",
+    "selectedProvider": "APImart imgae",
+    "model": "gpt-image-2",
+    "ratio": "1:1",
+    "quality": "中",
+    "paidRequests": 0,
+    "generatedResults": 0,
+    "newCreditsConsumed": 0
+  },
+  "liveAcceptance": {
+    "startedAt": "2026-09-01T01:08:36.539+08:00",
+    "taskId": "refine-1788196115652-yk8ie0",
+    "postRequestId": "36860.1152",
+    "terminalRequestId": "36860.1213",
+    "providerId": "api_1778430731224_533e09a",
+    "model": "gpt-image-2",
+    "uiElapsedSeconds": 46,
+    "terminalStatus": "completed",
+    "businessSuccess": true,
+    "width": 1254,
+    "height": 1254,
+    "savedImage": "/api/serve-upload/uploads/gen-1788196179948-mbb2b0.png",
+    "savedBytes": 1185536,
+    "canvasAdd": true,
+    "refreshRestore": true,
+    "reopenProjectRestore": true,
+    "projectAssetCountBefore": 7,
+    "projectAssetCountAfter": 8,
+    "newLedgerId": "ctx_charge_bca231a2697ae476c7db93beb9de493d",
+    "newConsumptionEntries": 1,
+    "newRefundEntries": 0,
+    "databaseRowIndependentlyVerified": false,
+    "download": "尝试后控制超时，落盘未验证",
+    "cozeReadOnlyCheck": {
+      "filled": true,
+      "sendButtonClickedOnce": true,
+      "acceptanceReceiptConfirmed": false,
+      "resultRead": false,
+      "instruction": "恢复后先检查已有消息与草稿，不盲目重发"
+    },
+    "console": "过程中一次error/warn读取为空，未取得整轮完整最终Console",
+    "networkTruncated": false,
+    "video": false,
+    "trace": false
+  },
+  "liveArtifacts": [
+    {
+      "file": "post-reconnect-refresh-network.json",
+      "bytes": 22587,
+      "sha256": "af88a06d35486c4a5d4889c0c56d34837fb994835a7fdb72fa8aa7d5ae6deded"
+    },
+    {
+      "file": "refine-live-after-refresh.png",
+      "bytes": 143562,
+      "sha256": "dd64208cf44e717af487cec71edee84c4afac600fa13344134e27c75f91df8f1"
+    },
+    {
+      "file": "refine-live-before-submit.png",
+      "bytes": 145942,
+      "sha256": "30a4c2ec0da9b09326a52b1b1069710695a88daebb2c0fe897a6f033c5657011"
+    },
+    {
+      "file": "refine-live-completed-response.json",
+      "bytes": 516,
+      "sha256": "3824b099fe82b01fa71f7c7e8f4b0cfc5bf9636fe89c88c461ae440b8c8dfd9a"
+    },
+    {
+      "file": "refine-live-completed.png",
+      "bytes": 143134,
+      "sha256": "12e063bd1ab32b71b04147d5dc4b73cb0c065a73dd6b7dbff2c506a6bb474889"
+    },
+    {
+      "file": "refine-live-coze-acceptance-sent.txt",
+      "bytes": 18955,
+      "sha256": "24625b1b6bfb2e01fd2c28b270e7a2ce38a38b7118c89f4d5872d16303b9d7d3"
+    },
+    {
+      "file": "refine-live-credits-after.json",
+      "bytes": 8438,
+      "sha256": "5f2c16ec740030541b85aa61bb7d5115f234349740455a7248c08a5e0ea8e12e"
+    },
+    {
+      "file": "refine-live-credits-after.png",
+      "bytes": 77430,
+      "sha256": "3d7ff81de54fcc9178d04f451c3452d1589cc5374f53d64ea53d64183f792d55"
+    },
+    {
+      "file": "refine-live-first-poll.json",
+      "bytes": 123,
+      "sha256": "fc6104b4383a53ac257a2b0b9bbb9b6081762ba1261b6a9d4e0b3f1a7a702bd8"
+    },
+    {
+      "file": "refine-live-network.json",
+      "bytes": 57873,
+      "sha256": "10df9f88f3d47a9639434d08c4dafe9e6fcffa3f9c0d8bc9cdd77868c129a0cb"
+    },
+    {
+      "file": "refine-live-on-canvas.png",
+      "bytes": 149617,
+      "sha256": "c106c01e6a81b1c358d660d4cf0cd261ebf7435d5a45815cdb99222408430ef2"
+    },
+    {
+      "file": "refine-live-processing.png",
+      "bytes": 143129,
+      "sha256": "580204c589d4f531e14a95ed099382212fac2c21f0f5752d8900a81dba7bed08"
+    },
+    {
+      "file": "refine-live-save-responses.json",
+      "bytes": 596,
+      "sha256": "269a24f38932d8986fc5e29aa885e5f87b601ef6fdb3542d15b81c3b7acac3a4"
+    },
+    {
+      "file": "refine-live-submit-response.json",
+      "bytes": 203,
+      "sha256": "e67e1677e643689993cd71f6384dd8fe29104e7ed5bc12d5f74913fb899ffe28"
+    },
+    {
+      "file": "refine-live-visible-submit.png",
+      "bytes": 147520,
+      "sha256": "4acca6698382bde3d5f734b503ce01181b462915b72895206c7c1a7c8949cea2"
     }
   ]
 }
