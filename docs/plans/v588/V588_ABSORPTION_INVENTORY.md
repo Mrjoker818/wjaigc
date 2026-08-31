@@ -2,6 +2,8 @@
 
 ## 当前检查点：2026-08-31
 
+- **15:02 增量：PROVIDER-003 只读核对完成，三个业务入口仍未云端验收。** 拆分前/后/当前 5 个路由的 7 个处理函数 AST 内容一致；不重复搬运或重跑旧门禁。品牌供应商字段不一致、字境/精修回退为待复现观察，不计作已验证 Bug。正确 Chrome 列表读取后连接失效，扩展和连接组件检查正常，本轮新增云端业务测试为 0。详见 `docs/testing/V588_PROVIDER_003_ACCEPTANCE.md`；恢复原 Chrome 后直接续品牌/精修/字境，不重开 PROVIDER-002、Stage4 或 Pear 延期项。不为纯文档部署。
+
 - **最新检查点：PROVIDER-002专项已吸收，BUG-006云端关闭。** 10bcc899在正确Coze项目完成54/54专项、38/38保护、118/118构建，Build ID 4OF-bNvWAYIDbN_rSX47M、PID4223。原Google Chrome完成普通用户未改配置重启会话、23/4精确目录、Pear/APImart保存刷新、临时选择退出/强刷不保存、6条消息不变，以及画布Pear和节点4节点1连线、Pear/Deepseek精确键重启恢复。最后15应用资源200、Console错误/警告/异常/弹窗0；3条平台CSP拦截保留。证据`docs/testing/evidence/v588-provider-002-selection-cloud-20260831.json`。不再重跑登录、节点、已完4438项门禁或部署纯文档；下一项先核对PROVIDER-003既有实现的业务验收缺口，不重复搬运、不提前批次B。ADMIN-003缩略图交付边界、完整录像/Trace等仍保留，Stage4归档、Pear延期、stable只读不变。以下旧断点均为历史。
 
 - **12:30检查点：普通用户密码恢复和真实登录已完成。** 用户亲自确认重置后，已在正确 Google Chrome 原预览正常登录 `canvas-user`；登录请求 `24252.18503` 成功，session `24252.18528` 确认为 `role=user/status=active`。不再等待密码、重置或登录确认，不把此前凭据交接缺失认定为程序认证故障。密码不写入仓库、报告或 Obsidian。

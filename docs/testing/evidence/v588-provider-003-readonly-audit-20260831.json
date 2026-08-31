@@ -1,0 +1,64 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-08-31",
+  "timezone": "Asia/Shanghai",
+  "scope": "V588-PROVIDER-003 既有拆分与云端验收断点核对",
+  "baseCommit": "84b7ef35a92aa343d2fe910d935eeae3e637f674",
+  "sourceTree": "36cd4c05b00de577eb2a61a7996802e7ff683368",
+  "stableCommit": "52f7c601ed150769e15d06fb435c6e360e28c9e7",
+  "productionSourceChanged": false,
+  "newCloudBusinessTestsExecuted": 0,
+  "paidTasksCreated": 0,
+  "astComparison": {
+    "method": "TypeScript AST 函数体打印，统一 CRLF/LF，比对拆分前、拆分后及当前工作区",
+    "files": 5,
+    "handlers": 7,
+    "allExtractionBodiesUnchanged": true,
+    "allCurrentBodiesEqualExtracted": true,
+    "exitCode": 0,
+    "initialComparisonLimitation": "首轮未统一换行，将品牌当前函数误判为不同；git diff 为空，统一换行后通过，不是业务测试通过",
+    "hashes": {
+      "brand-ecommerce.POST": "fef63e99e0f393c10ae6e4a90af131a7f0a6b191bd9f2419e4c8638e72bd4bd1",
+      "refine-engine.GET": "bfafc0ff11b42e9211c19c06e50c939cf85f9615a9d6935ca7d5529912ef3844",
+      "refine-engine.POST": "848809ff804b196d2b6af6d3de0ef0fa6a5092a0732fb65af4f668018c5c2623",
+      "font-design/plan.GET": "93e4a202e5349ab4be89965215df099c1b3fc98a12820f340c95195e7aa39239",
+      "font-design/plan.POST": "c09e929bb5cb1fdb3409b87ba3c7882ac7a5f8b373915d28fbf30e9bd6bbd583",
+      "font-design/prompt.POST": "9e8955b283438c2cb696a57b6c5cfb434c99436d5582910db740d26d5b290a33",
+      "font-design/generate-image.POST": "901f5c792191165440b18ca774cf690412c0fbf4de02b9ed29bd7cce35dda062"
+    }
+  },
+  "existingTestsNotRerun": {
+    "reference": "docs/testing/evidence/v588-batch-a-status-reconciliation-20260831.json",
+    "focusedPassed": 11,
+    "routeCount": 193,
+    "newAutomatedBusinessTestCount": 0
+  },
+  "chrome": {
+    "correctExistingTabsListed": true,
+    "previewClaimHandleReturned": true,
+    "currentPageReadSucceeded": false,
+    "correctConnectionDisappeared": true,
+    "chromeRunning": true,
+    "extensionInstalledAndEnabled": true,
+    "nativeHostManifestValid": true,
+    "newTabsCreated": 0,
+    "used360": false,
+    "cozeSyncSent": false,
+    "previewRefreshed": false,
+    "newScreenshotCount": 0,
+    "newVideoCount": 0,
+    "newTraceCount": 0
+  },
+  "staticObservationsNotCloudReproduced": [
+    "V588-PROVIDER-003-OBS-001: 品牌前端 imageProviderId 与后端 providerId 不一致",
+    "V588-PROVIDER-003-OBS-002: 字境明确供应商后仍保留跨供应商回退",
+    "V588-PROVIDER-003-OBS-003: 精修指定供应商无匹配时回退"
+  ],
+  "cloudAcceptance": {
+    "brandEcommerce": "未验证",
+    "refineEngine": "未验证",
+    "fontDesign": "未验证"
+  },
+  "report": "docs/testing/V588_PROVIDER_003_ACCEPTANCE.md",
+  "fullAbsorptionClaimed": false
+}

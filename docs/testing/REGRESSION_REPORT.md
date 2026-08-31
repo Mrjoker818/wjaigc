@@ -1,5 +1,9 @@
 # 无界AI — 回归测试报告 (REGRESSION REPORT)
 
+## 2026-08-31 15:02 只读核对
+
+PROVIDER-003 的 5 个路由、7 个 GET/POST 处理函数在拆分前、拆分后和当前源码间 AST 内容一致；首轮换行差异误判已单列。没有重跑旧全量门禁，新增云端业务测试数为 0，三个业务入口均未验证。Chrome 原连接失效，不把连接错误计作业务失败。完整断点及三个静态观察见 `V588_PROVIDER_003_ACCEPTANCE.md`，机器记录见 `evidence/v588-provider-003-readonly-audit-20260831.json`。没有修改业务源码或发起付费任务，以下 PROVIDER-002 验收结果继续有效。
+
 ## 2026-08-31 14:44 最新验收
 
 - **PROVIDER-002专项通过，BUG-006关闭。** 新候选10bcc899已在正确Coze项目完成一次同步、54项专项、38项保护和118页构建；Build ID 4OF-bNvWAYIDbN_rSX47M、PID4223，未重复本地4438项全量门禁。
