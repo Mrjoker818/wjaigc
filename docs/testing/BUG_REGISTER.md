@@ -8,6 +8,32 @@
 
 ## 2026-08-31 新增只读统计观察
 
+### V588-PROVIDER-002-BUG-005：节点内嵌模型菜单丢失供应商标识
+
+| 字段 | 内容 |
+|---|---|
+| 级别与状态 | P1，云端稳定复现；源码042356cb本地最小修复、专项/全量/构建/保护通过，新候选云端待验，不关闭 |
+| 环境 | 2026-08-31，Google Chrome原测试预览，普通用户真实登录；云端候选865f61b7，本地/远端main基线447c66d2 |
+| 前置条件 | 多个已授权供应商配置同名gpt-image-2；进入节点模式并添加未执行的图像生成节点 |
+| 复现 | 节点卡片下拉选择“Gpt Image 2 (PearAPI 图像)”；观察卡片/属性面板；再从属性面板选Pear，再从卡片选APImart |
+| 预期/实际 | 应始终保留所选供应商；实际卡片跳到AILINK同名项，或卡片AILINK与属性Pear不同。未发起生成，不推断实际供应商扣费 |
+| 原因 | WorkflowLegacyNodeCard的option key/value均为裸modelId；属性面板使用复合键，旧裸键还会find首项；LLM优化同类菜单及请求未携带精确供应商 |
+| 修复范围 | 仅WorkflowLegacyNodeCard.tsx与node-editor.tsx，复用现有model-defaults规范化器；两个渲染器共用卡片，旧明确provider/唯一裸键可回显，歧义不自动选第一项；LLM请求拆分model/providerId |
+| 永久测试 | src/__tests__/components/workflow-inline-model-selection.test.tsx：菜单唯一值、跨供应商切换、执行请求、旧项目回显、歧义、LLM回调与API体、卡片/属性一致性 |
+| RED/GREEN | 初始8失败1通过；属性面板补证1失败9通过；执行副本补证3失败12通过；最终节点专项6文件89通过。测试夹具模拟供应商目录不算真实供应商成功 |
+| 浏览器证据 | 本地.playwright-cli/v588-provider-002-ordinary-20260831-catalog-progress.json及节点冲突截图；node-inline-wrong-provider-2与node-selector-disagreement为相同原件，不重复计证据；公开脱敏证据docs/testing/evidence/v588-provider-002-node-selection-20260831.json |
+| 最终本地门禁 | 607文件4431测试通过、0失败/跳过；TypeScript、lint:build、构建118/118和保护38/38通过。保留15条既有node-editor lint警告、Node localstorage警告；隔离PostgreSQL残留0且停止，未连接业务数据库 |
+| 任务/账务 | 无供应商请求，无taskId，无扣费；当前普通用户0积分，不影响目录测试 |
+| 环境中断 | 后续返回画布遇Coze断线弹窗与模型/session 404，单独记录，不将此404当作模型授权或密码故障 |
+| 尚缺 | 新候选云端选择与保存刷新、完整录像/Trace；不可用本地绿灯替代 |
+
+### V588-NODE-OBS-001：节点RUN执行范围与当前链提示不一致（历史观察）
+
+- 暂列P1待验证，不计为已修复或云端稳定复现。代码显示节点RUN发送全部`wf.nodes`和`startNodeId/tailNodeId`，但`workflow/execute/route.ts`未消费这两个范围字段，按全部节点进行拓扑执行。
+- 发现于BUG-005独立审查；不是本次新增执行语义。未创建真实工作流或供应商任务来验证其他链是否会执行，不推断已发生跨链扣费。
+- 本次保留对全部提交节点的精确模型守卫，不能只验当前链却把未验证节点一并送往服务端。独立多链执行范围、上游依赖与循环/子图应另建失败测试后处理，不在本次静默改图。
+- 定位：`src/components/node-editor.tsx`的`handleCascadeRun/startWorkflowExecution`、`src/app/api/workflow/execute/route.ts`的start分支和`executeWorkflow`。尚无专用截图、taskId或供应商响应，未验证项明确保留。
+
 ### V588-PROVIDER-002-BUG-004：仪表盘通知容器漏挂载，授权成功或失败无可见提示
 
 | 字段 | 内容 |

@@ -1,0 +1,216 @@
+{
+  "schemaVersion": 1,
+  "日期": "2026-08-31",
+  "时区": "Asia/Shanghai",
+  "范围": "V588-PROVIDER-002 普通用户目录与BUG-005节点精确模型选择",
+  "整体结论": "不通过：云端节点选择已复现失败，新修复待云端验收",
+  "基线提交": "447c66d253b10f2c4833a3e45aa495bd281277c8",
+  "复现云端候选": "865f61b75c9418c9560d0c40bca90395ca1dcaf9",
+  "浏览器": "Google Chrome；只复用原项目和预览标签，不操作360",
+  "项目页": "https://code.coze.cn/p/7671964106919837702/preview",
+  "预览页": "https://62afe49a-716e-4d9e-99cd-a0be49c4794c-5000.dev.coze.site/",
+  "真实登录": {
+    "状态": "通过",
+    "账号类别": "现有普通用户",
+    "角色": "user",
+    "用户状态": "active",
+    "浏览器登录请求ID": "24252.18503",
+    "浏览器会话请求ID": "24252.18528",
+    "边界": "用户自行完成密码重置；正常登录，不注入身份，不保存凭据；网络ID不是服务端requestId"
+  },
+  "真实目录": {
+    "普通用户响应": "24252.18509",
+    "总数": 57,
+    "匹配预期": 57,
+    "缺失": 0,
+    "额外": 0,
+    "分类": {
+      "image": 23,
+      "chat": 4,
+      "vlm": 2,
+      "upscaler": 4,
+      "layer": 1,
+      "vectorize": 3,
+      "video": 16,
+      "3d": 4
+    },
+    "画布图像": {
+      "状态": "目录及当次选择通过，刷新持久化未验",
+      "数量": 23,
+      "供应商": "PearAPI 图像",
+      "模型": "gpt-image-2"
+    },
+    "节点聊天": {
+      "状态": "4项显示已检查，精确选择和刷新待修复后验收",
+      "数量": 4
+    },
+    "节点图像": {
+      "状态": "失败",
+      "数量": 23,
+      "预期": "选择Pear/APImart保持供应商",
+      "实际": "裸modelId重复，卡片显示AILINK；属性显示Pear时可与卡片不一致"
+    },
+    "独立聊天": "聊天和图像两个菜单均未完成本轮真实验收"
+  },
+  "修复": {
+    "文件": [
+      "src/components/workflow/WorkflowLegacyNodeCard.tsx",
+      "src/components/node-editor.tsx"
+    ],
+    "内容": [
+      "两个内嵌菜单采用providerId::modelId",
+      "卡片和属性面板均拒绝歧义及已撤销选择",
+      "旧明确供应商或唯一裸键兼容回显",
+      "LLM应用请求拆分model和providerId",
+      "执行副本冻结精确模型，未解决选择时阻止请求；不改写原项目"
+    ],
+    "非修改范围": [
+      "认证代码",
+      "数据库结构",
+      "账号与权限",
+      "供应商配置",
+      "积分与支付",
+      "RUN实际执行图范围",
+      "stable",
+      "V5.8.8 donor"
+    ]
+  },
+  "测试": {
+    "RED": [
+      {
+        "范围": "菜单与LLM请求",
+        "通过": 1,
+        "失败": 8
+      },
+      {
+        "范围": "属性面板",
+        "通过": 9,
+        "失败": 1
+      },
+      {
+        "范围": "执行副本",
+        "通过": 12,
+        "失败": 3
+      }
+    ],
+    "聚焦": {
+      "文件": 6,
+      "通过": 89,
+      "失败": 0,
+      "跳过": 0
+    },
+    "中间全量": {
+      "通过": 4429,
+      "失败": 0,
+      "跳过": 0,
+      "说明": "运行期间新增执行守卫，不作为冻结候选最终证明"
+    },
+    "最终全量": {
+      "文件": 607,
+      "通过": 4431,
+      "失败": 0,
+      "跳过": 0,
+      "退出码": 0
+    },
+    "TypeScript": "最终源码检查退出0；后续仅测试覆盖和文档变化",
+    "Lint": "构建版退出0；变更三文件直接检查0错误/15条既有node-editor警告，未关闭规则",
+    "生产构建": {
+      "退出码": 0,
+      "页面": "118/118",
+      "BuildID": "YDFfcIfnEmvlYYqVKDr4r",
+      "TypeScript": "通过",
+      "警告": "2条Node localstorage路径警告保留",
+      "诊断备注": "辅助进程观察器无法读取非子进程退出码而退出2；已恢复原构建会话，确认pnpm build真实退出0，没有重复构建"
+    },
+    "保护基线": "042356cb干净只读候选：38/38、0漂移、0警告、退出0；未扩展白名单，临时工作树已清理",
+    "数据库": "仅本机临时PostgreSQL18.4，127.0.0.1:55439，未连接云端或业务库；测试schema残留0，服务已停止"
+  },
+  "审查": {
+    "模型": "gpt-5.6-sol",
+    "推理": "medium",
+    "服务": "priority",
+    "结果": "最终无保留Critical/Important；已撤销模型执行阻断覆盖已补齐并通过。审查先根据前端RUN标注误判范围，读取真实后端后撤回该finding，历史语义风险独立登记",
+    "独立观察": "V588-NODE-OBS-001：后端未消费startNodeId/tailNodeId，按全部请求节点执行；不是本次引入，不缩小校验范围"
+  },
+  "环境中断": {
+    "时间": "2026-08-31 12:25左右",
+    "现象": "Coze沙箱连接已断开；模型和session返回404",
+    "归类": "环境中断，不认定账号密码或模型不可用",
+    "恢复": "已点击原项目刷新；Chrome随后接管标签持续超时，扩展/本地连接清单检查通过；未打开新窗口或360"
+  },
+  "云端新修复": "未部署验收",
+  "GitHub交付": "源码042356cb已推送origin/main并复读确认；stable保持52f7c601。后续中文证据提交不改变该源码树，不要求为文档重复构建。",
+  "约束": {
+    "真实供应商任务": 0,
+    "真实扣费": 0,
+    "Pear分层": "继续延期",
+    "Stage4": "不重开",
+    "普通用户刷新及同密钥重启": "未验证",
+    "录像": "未生成",
+    "Trace": "未生成"
+  },
+  "原件": [
+    {
+      "路径": ".playwright-cli/v588-provider-002-ordinary-20260831-catalog-progress.json",
+      "SHA256": "ddf984e954034baa11dfee343153b6f86d1d0e698de1a029b12cfb4ce2fe5698"
+    },
+    {
+      "路径": ".playwright-cli/v588-provider-002-ordinary-20260831-canvas-image.jpg",
+      "SHA256": "8ed6619f9458f9a2866f9f56d36f088e1ff4e480ce55295cd112a799534fda43"
+    },
+    {
+      "路径": ".playwright-cli/v588-provider-002-ordinary-20260831-node-chat.jpg",
+      "SHA256": "a33ae70a7c125f12c6dae5256ea3709ddbb087731d8c0b8bf33d596741f8b902"
+    },
+    {
+      "路径": ".playwright-cli/v588-provider-002-ordinary-20260831-node-inline-wrong-provider-1.jpg",
+      "SHA256": "748d5a5afbfee9b1efd7118f3b71f83c8dd4775ae582c76ec800ae0d0772f74c"
+    },
+    {
+      "路径": ".playwright-cli/v588-provider-002-ordinary-20260831-node-selector-disagreement.jpg",
+      "SHA256": "0d3e6accfe3f3ef90c41ed2de2dc8d63548dd29397a1707396c2432d733e2d5d",
+      "说明": "与node-inline-wrong-provider-2.jpg相同原件，不重复计独立证据"
+    },
+    {
+      "路径": ".playwright-cli/v588-provider-002-node-selection-red-20260831.json",
+      "SHA256": "ab9cc4074329e84cca5dbe7c0023405fcf4341de7803a70b21d0689ca6abf207"
+    },
+    {
+      "路径": ".playwright-cli/v588-provider-002-node-property-red-20260831.json",
+      "SHA256": "a5ad0adbb187c5b1c752caef5bf9985c773b3f870067c631362694fc3b059f52"
+    },
+    {
+      "路径": ".playwright-cli/v588-provider-002-node-execution-red-20260831.json",
+      "SHA256": "28c54ea288a4def5a4e91003554d96cf8e1bf57b25dff568a1cdf462cc5b8a1e"
+    },
+    {
+      "路径": ".playwright-cli/v588-provider-002-node-selection-frozen-green-20260831.json",
+      "SHA256": "1c3989392a9c15d6a5b092b90ed4200a53ec4b4c242df898387478c4970b2864"
+    },
+    {
+      "路径": ".playwright-cli/v588-provider-002-node-full-final-20260831.json",
+      "SHA256": "56fa44799443d75002966b2fb51c91101794e2151ceb8712c3207883e558b2b3"
+    },
+    {
+      "路径": ".playwright-cli/v588-provider-002-node-build-20260831.log",
+      "SHA256": "5c6adb37b45ab6cb0f23db23d6526b986f1de575720532c691c5fc79ba573f9a"
+    },
+    {
+      "路径": ".playwright-cli/v588-provider-002-node-lint-final-20260831.log",
+      "SHA256": "0ece6ec2e81062f38cc9eaa9014a13619de9b16452a2796996f2b7a28f3b8fb5"
+    },
+    {
+      "路径": ".playwright-cli/v588-provider-002-node-tscheck-final-20260831.log",
+      "SHA256": "e9fcac6c85a98654110661707b89c6f676f91ba145cc31cec6ebe37624a66a35"
+    },
+    {
+      "路径": ".playwright-cli/v588-provider-002-node-protected-final-20260831.log",
+      "SHA256": "e7051de369cbc373e9e5fe635e83cc9153d2647c08faace6e20c8fd97322ef0a"
+    }
+  ],
+  "隐私": "原始账号截图与响应只保留本地；本文件不包含密码、Cookie、Token、API Key或用户图片。",
+  "stable只读哈希": "52f7c601ed150769e15d06fb435c6e360e28c9e7",
+  "修复源码提交": "042356cb5359a674134505dad5eeeef0f1f82b1a",
+  "修复源码树": "e6055e9dd3d45aadfbb8f4e6393518d77fec2da4",
+  "应用版本": "package.json 4.0.0 / Next.js 16.2.11 / React 19.2.3"
+}
