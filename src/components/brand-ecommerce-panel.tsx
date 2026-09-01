@@ -604,7 +604,13 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
               assistType: type,
               ...assistTarget,
             }),
-          }).then(r => r.json())
+          }).then(async (response) => {
+            const data = await response.json() as { success?: boolean; content?: string; error?: string };
+            if (!response.ok || !data.success) {
+              throw new Error(data.error || `AI辅助请求失败 (HTTP ${response.status})`);
+            }
+            return data;
+          })
         )
       );
 
@@ -680,6 +686,13 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
             if (!mainText && !mainMatch) setMainText(textContent.slice(0, 30));
           }
         }
+      }
+
+      const failedResult = results.find(result => result.status === 'rejected');
+      if (failedResult?.status === 'rejected') {
+        setAssistError(failedResult.reason instanceof Error
+          ? failedResult.reason.message
+          : '部分AI辅助请求失败，请稍后重试');
       }
     } catch (err) {
       console.error('AI assist failed:', err);

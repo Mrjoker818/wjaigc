@@ -46,6 +46,7 @@ describe('brand ecommerce provider selection request contract', () => {
   let assets: Array<Record<string, unknown>>;
   let assetRequests: Array<Record<string, unknown>>;
   let assistRequests: Array<Record<string, unknown>>;
+  let assistResponse: { status: number; body: Record<string, unknown> };
   let availableChatProviders: typeof chatProviders;
   let availableChatModels: Array<{ id: string; name: string; providerId?: string; type: string }>;
 
@@ -64,6 +65,7 @@ describe('brand ecommerce provider selection request contract', () => {
     assets = [];
     assetRequests = [];
     assistRequests = [];
+    assistResponse = { status: 200, body: { success: true, content: '' } };
     availableChatProviders = chatProviders;
     availableChatModels = chatModels;
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
@@ -93,7 +95,7 @@ describe('brand ecommerce provider selection request contract', () => {
         }
         if (body.action === 'assist') {
           assistRequests.push(body);
-          return Response.json({ success: true, content: '' });
+          return Response.json(assistResponse.body, { status: assistResponse.status });
         }
       }
       throw new Error(`Unexpected test request: ${url}`);
@@ -144,6 +146,17 @@ describe('brand ecommerce provider selection request contract', () => {
       { assistType: 'suggest-style', llmModel: 'shared-chat-model', llmProviderId: 'apimart-chat' },
       { assistType: 'suggest-text', llmModel: 'shared-chat-model', llmProviderId: 'apimart-chat' },
     ]);
+  });
+
+  it('shows the upstream error when AI assist requests fail', async () => {
+    assistResponse = {
+      status: 502,
+      body: { success: false, error: '云端服务暂时不可用' },
+    };
+    await openConfiguredPanel();
+    selectLlmProvider('APImart Chat');
+    fireEvent.click(screen.getByRole('button', { name: 'AI 辅助优化设计' }));
+    expect(await screen.findByText('云端服务暂时不可用')).toBeTruthy();
   });
 
   it('restores an exact persisted LLM provider-model pair', async () => {
