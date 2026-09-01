@@ -41,6 +41,11 @@ vi.mock('@/lib/server-auth', () => ({
   getSessionUser: vi.fn(async () => ({ id: 'test-user' })),
 }));
 vi.mock('@/lib/credits', () => ({
+  InsufficientCreditsError: class InsufficientCreditsError extends Error {
+    code = 'INSUFFICIENT_CREDITS';
+    statusCode = 402;
+  },
+  calculateConfiguredCreditCost: vi.fn(async () => 0),
   consumeCredits: vi.fn(async () => ({ success: true, cost: 0 })),
   refundCredits: vi.fn(),
 }));
@@ -87,6 +92,37 @@ describe('brand ecommerce assist provider route', () => {
     expect(JSON.parse(state.submit.mock.calls[0][2].body as string)).toMatchObject({
       model: 'gemini-3.1-flash-lite-preview',
     });
+    await expect(response.json()).resolves.toMatchObject({
+      success: true,
+      content: '优化后的提示词',
+    });
+  });
+
+  it('accepts an APImart SSE response and joins streamed content', async () => {
+    state.submit.mockResolvedValue(new Response([
+      'data: {"choices":[{"delta":{"content":"优化后的"}}]}',
+      '',
+      'data: {"choices":[{"delta":{"content":"提示词"}}]}',
+      '',
+      'data: [DONE]',
+      '',
+    ].join('\n'), {
+      headers: { 'Content-Type': 'text/event-stream' },
+    }));
+
+    const response = await POST(new NextRequest('http://localhost/api/brand-ecommerce', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'assist',
+        assistType: 'optimize-prompt',
+        productDesc: '白色陶瓷咖啡杯',
+        llmModel: 'gemini-3.1-flash-lite-preview',
+        llmProviderId: 'apimart-chat',
+      }),
+    }));
+
+    expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({
       success: true,
       content: '优化后的提示词',

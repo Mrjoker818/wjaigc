@@ -437,6 +437,73 @@ function resolveDimensions(aspectRatio: string): { width: number; height: number
 
 // ─── POST Handler ──────────────────────────────────────────────────
 
+function unwrapAssistPayload(value: unknown): Record<string, unknown> {
+  let current = value;
+  for (let depth = 0; depth < 3; depth += 1) {
+    if (!current || typeof current !== 'object' || Array.isArray(current)) return {};
+    const record = current as Record<string, unknown>;
+    if (!record.data || typeof record.data !== 'object' || Array.isArray(record.data)) return record;
+    current = record.data;
+  }
+  return current && typeof current === 'object' && !Array.isArray(current)
+    ? current as Record<string, unknown>
+    : {};
+}
+
+function extractAssistContent(value: unknown): string {
+  const payload = unwrapAssistPayload(value);
+  const choices = Array.isArray(payload.choices) ? payload.choices : [];
+  const firstChoice = choices[0] && typeof choices[0] === 'object'
+    ? choices[0] as Record<string, unknown>
+    : {};
+  const delta = firstChoice.delta && typeof firstChoice.delta === 'object'
+    ? firstChoice.delta as Record<string, unknown>
+    : {};
+  const message = firstChoice.message && typeof firstChoice.message === 'object'
+    ? firstChoice.message as Record<string, unknown>
+    : {};
+  if (typeof delta.content === 'string') return delta.content;
+  if (typeof message.content === 'string') return message.content;
+
+  const output = payload.output && typeof payload.output === 'object'
+    ? payload.output as Record<string, unknown>
+    : {};
+  if (typeof output.text === 'string') return output.text;
+
+  const candidates = Array.isArray(payload.candidates) ? payload.candidates : [];
+  const candidate = candidates[0] && typeof candidates[0] === 'object'
+    ? candidates[0] as Record<string, unknown>
+    : {};
+  const candidateContent = candidate.content && typeof candidate.content === 'object'
+    ? candidate.content as Record<string, unknown>
+    : {};
+  const parts = Array.isArray(candidateContent.parts) ? candidateContent.parts : [];
+  const part = parts[0] && typeof parts[0] === 'object' ? parts[0] as Record<string, unknown> : {};
+  if (typeof part.text === 'string') return part.text;
+  return typeof payload.result === 'string' ? payload.result : '';
+}
+
+async function parseAssistResponse(response: Response): Promise<string> {
+  const text = await response.text();
+  const isSse = response.headers.get('content-type')?.includes('text/event-stream')
+    || text.trimStart().startsWith('data:');
+  if (!isSse) return extractAssistContent(JSON.parse(text));
+
+  let content = '';
+  for (const line of text.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed.startsWith('data:')) continue;
+    const data = trimmed.slice(5).trim();
+    if (!data || data === '[DONE]') continue;
+    try {
+      content += extractAssistContent(JSON.parse(data));
+    } catch {
+      // Ignore malformed provider heartbeat chunks; valid content chunks still complete the response.
+    }
+  }
+  return content;
+}
+
 export async function POST(request: NextRequest) {
   const startTime = Date.now();
   let durableTaskId: string | undefined;
@@ -1210,12 +1277,7 @@ ${effectiveStyle ? `风格修饰: ${effectiveStyle}` : ''}
         return NextResponse.json({ error: `LLM API 错误 (${chatResp.status}): ${errText.slice(0, 200)}` }, { status: 500 });
       }
 
-      const chatData = await chatResp.json();
-      const content = chatData?.choices?.[0]?.message?.content
-        || chatData?.output?.text
-        || chatData?.candidates?.[0]?.content?.parts?.[0]?.text
-        || chatData?.result
-        || '';
+      const content = await parseAssistResponse(chatResp);
 
       return NextResponse.json({ success: true, content, assistType });
     }
