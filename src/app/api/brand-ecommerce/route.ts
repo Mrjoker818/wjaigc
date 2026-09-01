@@ -485,9 +485,18 @@ function extractAssistContent(value: unknown): string {
 
 async function parseAssistResponse(response: Response): Promise<string> {
   const text = await response.text();
+  const responsePreview = text.trim().replace(/\s+/g, ' ').slice(0, 200);
   const isSse = response.headers.get('content-type')?.includes('text/event-stream')
     || text.trimStart().startsWith('data:');
-  if (!isSse) return extractAssistContent(JSON.parse(text));
+  if (!isSse) {
+    try {
+      const content = extractAssistContent(JSON.parse(text));
+      if (content) return content;
+    } catch {
+      // Report the bounded upstream body below so the caller can distinguish provider data from transport failure.
+    }
+    throw new Error(`LLM API 响应无法解析: ${responsePreview || '(empty response)'}`);
+  }
 
   let content = '';
   for (const line of text.split(/\r?\n/)) {
@@ -501,7 +510,8 @@ async function parseAssistResponse(response: Response): Promise<string> {
       // Ignore malformed provider heartbeat chunks; valid content chunks still complete the response.
     }
   }
-  return content;
+  if (content) return content;
+  throw new Error(`LLM API 响应无法解析: ${responsePreview || '(empty response)'}`);
 }
 
 export async function POST(request: NextRequest) {

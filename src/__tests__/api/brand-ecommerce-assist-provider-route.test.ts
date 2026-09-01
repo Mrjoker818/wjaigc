@@ -128,4 +128,27 @@ describe('brand ecommerce assist provider route', () => {
       content: '优化后的提示词',
     });
   });
+
+  it('preserves an invalid upstream SSE body instead of reporting an empty success', async () => {
+    state.submit.mockResolvedValue(new Response('data: upstream-not-json\n\ndata: [DONE]\n\n', {
+      headers: { 'Content-Type': 'text/event-stream' },
+    }));
+
+    const response = await POST(new NextRequest('http://localhost/api/brand-ecommerce', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'assist',
+        assistType: 'optimize-prompt',
+        productDesc: '白色陶瓷咖啡杯',
+        llmModel: 'gemini-3.1-flash-lite-preview',
+        llmProviderId: 'apimart-chat',
+      }),
+    }));
+
+    expect(response.status).toBe(500);
+    await expect(response.json()).resolves.toMatchObject({
+      error: expect.stringContaining('upstream-not-json'),
+    });
+  });
 });
