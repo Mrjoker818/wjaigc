@@ -26,6 +26,11 @@ export interface AssetGraphReleaseReadiness {
     graphProjects: number;
     matchingProjects: number;
     mismatchedProjects: number;
+    mismatchedProjectDetails: Array<{
+      ownerId: string;
+      projectId: string;
+      reasons: string[];
+    }>;
     unmigratedProjects: number;
     orphanGraphProjects: number;
     nonV3GraphProjects: number;
@@ -134,6 +139,7 @@ export function createUnavailableAssetGraphReleaseReadiness(
       graphProjects: 0,
       matchingProjects: 0,
       mismatchedProjects: 0,
+      mismatchedProjectDetails: [],
       unmigratedProjects: 0,
       orphanGraphProjects: 0,
       nonV3GraphProjects: 0,

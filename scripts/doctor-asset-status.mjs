@@ -96,6 +96,48 @@ function comparableLegacyProjects(rows) {
   return { projects, invalidLegacyRecords };
 }
 
+function projectMismatchReasons(project, placements, checkpoint) {
+  const reasons = [];
+  const mappings = checkpoint?.checkpoint?.legacyImageMappings;
+  const mappingsAreValid = Boolean(
+    mappings
+    && typeof mappings === 'object'
+    && !Array.isArray(mappings),
+  );
+
+  if (!checkpoint) reasons.push('checkpoint-missing');
+  else if (Number(checkpoint.checkpoint?.sourceSchemaVersion) !== project.sourceSchemaVersion) {
+    reasons.push('checkpoint-schema-mismatch');
+  }
+  if (checkpoint && !mappingsAreValid) reasons.push('checkpoint-mappings-invalid');
+  if (placements.size !== project.images.length) reasons.push('placement-count-mismatch');
+
+  if (mappingsAreValid) {
+    for (const image of project.images) {
+      const placement = placements.get(image.imageId);
+      const mapping = mappings[image.imageId];
+      if (!placement || !mapping || typeof mapping !== 'object' || Array.isArray(mapping)) {
+        reasons.push('image-identity-mismatch');
+        continue;
+      }
+      if (placement.placementId !== mapping.placementId
+        || placement.assetId !== mapping.assetId
+        || placement.assetVersionId !== mapping.versionId) {
+        reasons.push('image-identity-mismatch');
+      }
+      if (!image.url.startsWith('data:') && !image.url.startsWith('blob:')
+        && placement.fileUrl !== image.url) {
+        reasons.push('image-url-mismatch');
+      }
+      if (JSON.stringify(comparableTransform(placement.transform)) !== JSON.stringify(image.transform)) {
+        reasons.push('image-transform-mismatch');
+      }
+    }
+  }
+
+  return [...new Set(reasons)];
+}
+
 export function resolveDoctorDatabaseUrl(environment) {
   return environment.DATABASE_URL || environment.PGDATABASE_URL || '';
 }
@@ -133,6 +175,7 @@ export function summarizeAssetGraphDoctor(input) {
   let matchingProjects = 0;
   let mismatchedProjects = 0;
   let unmigratedProjects = 0;
+  const mismatchedProjectDetails = [];
   for (const [key, project] of legacyProjects) {
     if (!activeGraphProjects.has(key)) {
       unmigratedProjects += 1;
@@ -140,29 +183,19 @@ export function summarizeAssetGraphDoctor(input) {
     }
     const placements = placementsByProject.get(key) ?? new Map();
     const checkpoint = validCheckpoints.get(key);
-    const mappings = checkpoint?.checkpoint?.legacyImageMappings;
-    const matches = Boolean(
-      checkpoint
-      && Number(checkpoint.checkpoint?.sourceSchemaVersion) === project.sourceSchemaVersion
-      && mappings
-      && typeof mappings === 'object'
-      && !Array.isArray(mappings),
-    )
-      && placements.size === project.images.length
-      && project.images.every(image => {
-        const placement = placements.get(image.imageId);
-        const mapping = mappings[image.imageId];
-        if (!placement || !mapping || typeof mapping !== 'object' || Array.isArray(mapping)) return false;
-        const identityMatches = placement.placementId === mapping.placementId
-          && placement.assetId === mapping.assetId
-          && placement.assetVersionId === mapping.versionId;
-        const urlMatches = image.url.startsWith('data:') || image.url.startsWith('blob:')
-          || placement.fileUrl === image.url;
-        return identityMatches && urlMatches
-          && JSON.stringify(comparableTransform(placement.transform)) === JSON.stringify(image.transform);
-      });
+    const mismatchReasons = projectMismatchReasons(project, placements, checkpoint);
+    const matches = mismatchReasons.length === 0;
     if (matches) matchingProjects += 1;
-    else mismatchedProjects += 1;
+    else {
+      mismatchedProjects += 1;
+      if (mismatchedProjectDetails.length < 20) {
+        mismatchedProjectDetails.push({
+          ownerId: project.ownerId,
+          projectId: project.projectId,
+          reasons: mismatchReasons,
+        });
+      }
+    }
   }
   const failedCheckpoints = input.checkpoints.filter(row => row.status !== 'completed' || row.errorCode).length;
   const missingCheckpoints = [...legacyProjects.keys()].filter(key => activeGraphProjects.has(key) && !validCheckpoints.has(key)).length;
@@ -230,6 +263,7 @@ export function summarizeAssetGraphDoctor(input) {
       graphProjects: activeGraphProjects.size,
       matchingProjects,
       mismatchedProjects,
+      mismatchedProjectDetails,
       unmigratedProjects,
       orphanGraphProjects,
       nonV3GraphProjects,

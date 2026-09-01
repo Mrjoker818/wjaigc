@@ -74,6 +74,24 @@ describe('Stage 2 Doctor asset graph release gate', () => {
     expect(summary.shadowComparison).toMatchObject({ mismatchedProjects: 1, failedCheckpoints: 1 });
   });
 
+  it('reports admin-safe project identities and reason codes for shadow mismatches', () => {
+    const input = healthyInput();
+    const summary = summarizeAssetGraphDoctor({
+      ...input,
+      placements: [{
+        ...input.placements[0],
+        fileUrl: '/api/serve-upload/uploads/wrong.png',
+        transform: { ...input.placements[0].transform, x: 999 },
+      }],
+    });
+
+    expect(summary.shadowComparison.mismatchedProjectDetails).toEqual([{
+      ownerId: 'user-a',
+      projectId: 'project-a',
+      reasons: ['image-url-mismatch', 'image-transform-mismatch'],
+    }]);
+  });
+
   it('blocks asset-v3 when a project checkpoint is missing', () => {
     const input = healthyInput();
     const summary = summarizeAssetGraphDoctor({ ...input, checkpoints: [] });

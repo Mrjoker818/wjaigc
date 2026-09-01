@@ -33,6 +33,7 @@ const readySummary = {
     graphProjects: 2,
     matchingProjects: 2,
     mismatchedProjects: 0,
+    mismatchedProjectDetails: [],
     unmigratedProjects: 0,
     orphanGraphProjects: 0,
     nonV3GraphProjects: 0,
