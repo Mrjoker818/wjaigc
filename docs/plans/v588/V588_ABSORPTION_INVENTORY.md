@@ -1,5 +1,13 @@
 # V5.8.8 选择性吸收清单
 
+## 2026-09-01 V588-PROVIDER-003 精确供应商路由本地检查点
+
+`main@14b058fce595711cbdad8d6823b8c22699b759c1` 已在当前权威主线上最小修复品牌电商、精修引擎和字境大师的显式供应商路由：显式 `providerId + modelId` 不再跨供应商回退；供应商缺失、模型不属于该供应商或复合模型中的供应商冲突均在任务创建和扣费前返回 `MODEL_PROVIDER_MISMATCH`。复合模型键、4K 别名和未显式选择模型时采用当前供应商默认模型的兼容行为保留。
+
+本轮先取得 7 项稳定 RED，再完成聚焦 `62/62`、全仓 `593 files / 4466 passed / 133 PostgreSQL-gated skipped / 0 failed`、TypeScript、ESLint `0 errors / 951 historical warnings`、8 GiB 生产构建 `118/118` 和干净保护基线 `38/38`。只修改三个现有路由和三个永久回归测试；V5.8.8 donor 与 `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 未触碰。
+
+**边界不扩大：** 品牌和字境仍在 `after()` 后台任务开始前扣费，后台供应商最终失败仅写内存任务失败，尚未使用数据库任务级原子结算；这属于独立 `V588-PROVIDER-003-BUG-010`，仍为 P0 候选。Coze 当前 `instance_not_found`，因此 exact-SHA、真实 Pear/APImart 失败、一次退款、结果入画布和 Console 仍未验证。`V588-PROVIDER-003` 整体继续开放，下一步先补持久化结算，不提前进入 ADMIN 或 Skills。
+
 ## 当前权威检查点：2026-09-01
 
 品牌辅助端点修复 `f290a94d` 已存在于 GitHub/Coze 源码，后续真实点击揭示 `V588-PROVIDER-003-BUG-008`：前端把 HTTP 502 当成已兑现 Promise，并由 `Promise.allSettled` 静默忽略，用户看不到失败原因。已按 RED→GREEN 在 `main@1e58c84e` 最小修复：三类辅助请求统一检查 HTTP 与业务 `success`，保留后端原始错误；部分成功内容继续写入，至少一项失败时显示第一条真实原因。专项组件 `14/14`、品牌回归 `39/39`、全仓 `592 files / 4459 passed / 133 PostgreSQL-gated skipped / 0 failed`，TypeScript 通过，Lint `0 errors / 956 historical warnings`，8 GiB 构建 `118/118`，干净保护 `38/38`、0 漂移、0 warning。候选和证据已推送 `origin/main@2ff2ce4a`，`stable@52f7c601` 未变化。推送后按用户确认发出三类请求，但 Coze 网关对根页、`/api/auth/me` 和三类 POST 统一返回 `404 instance_not_found`，请求未到达无界或 APImart；此前 502 与一次 HEAD 200 均不能冒充沙箱运行成功。故只判定**本地修复并已推送，Coze 拉取/重启及真实辅助内容仍未验证**；Chrome 扩展接管不稳定是测试工具阻塞，不记作应用 Bug。证据：`docs/testing/evidence/v588-provider-003-brand-assist-error-surface-local-20260901.json`。

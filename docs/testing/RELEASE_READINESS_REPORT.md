@@ -1,5 +1,11 @@
 # 无界AI — 发布就绪报告 (RELEASE READINESS REPORT)
 
+## 2026-09-01 PROVIDER-003 精确路由候选
+
+总体结论保持**不通过**。`main@14b058fc` 已在本地关闭品牌、精修、字境显式供应商跨路由问题，并通过 4466 项全仓测试、TypeScript、零错误 Lint、118/118 构建和干净保护基线 38/38；`stable@52f7c601` 未触碰。
+
+发布仍被两类证据阻断：品牌和字境后台任务最终失败尚未接入数据库任务级原子终态/一次退款（`V588-PROVIDER-003-BUG-010`）；133 项隔离 PostgreSQL 测试未执行。Coze 当前返回 `404 instance_not_found`，本候选没有真实 Chrome、Pear/APImart、计费、结果入画布或 Console 证据。不得把本地路由回归扩大为 `V588-PROVIDER-003` 或全平台可发布。
+
 ## 2026-09-01 品牌辅助失败提示候选
 
 总体结论保持**不通过**。`main@1e58c84e` 已在本地修复品牌 AI 辅助 HTTP/业务失败被静默吞掉的问题，证据已随 `origin/main@2ff2ce4a` 推送，并通过 `4459` 项全仓测试、TypeScript、零错误 Lint、`118/118` 构建及干净保护 `38/38`。但 133 项真实 PostgreSQL 专项仍因无隔离库跳过；云端先整体 502，推送后三类确认请求、根页和认证端点又统一为 `404 instance_not_found`，请求未到应用或供应商。候选尚未取得 Coze 拉取/重启后的 Google Chrome 三类真实辅助内容、可见失败提示与 Console 证据。`stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 保持未触碰。

@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "capturedAt": "2026-09-01T18:07:13+08:00",
+  "scope": "V588-PROVIDER-003 exact provider routing local candidate",
+  "repository": "J:/无界本地版/projects/_upstream-wjaigc-restore",
+  "branch": "main",
+  "codeCommit": "14b058fce595711cbdad8d6823b8c22699b759c1",
+  "originMainBeforeDelivery": "dba95dfdd1aed3b62a350bff9914b846b765130e",
+  "stableCommit": "52f7c601ed150769e15d06fb435c6e360e28c9e7",
+  "changedProductionFiles": [
+    "src/app/api/brand-ecommerce/route.ts",
+    "src/app/api/refine-engine/route.ts",
+    "src/app/api/font-design/generate-image/route.ts"
+  ],
+  "changedTestFiles": [
+    "src/__tests__/api/brand-ecommerce-result-identity.test.ts",
+    "src/__tests__/api/refine-async-terminal-contract.test.ts",
+    "src/__tests__/api/font-design-exact-provider.test.ts"
+  ],
+  "tdd": {
+    "initialRed": { "failed": 7, "passed": 24 },
+    "focusedGreen": { "files": 4, "passed": 62, "failed": 0 },
+    "firstFullRegression": { "filesPassed": 592, "testsPassed": 4463, "testsFailed": 3, "testsSkipped": 133 },
+    "finalFullRegression": { "filesPassed": 593, "filesSkipped": 25, "testsPassed": 4466, "testsSkipped": 133, "testsFailed": 0 }
+  },
+  "gates": {
+    "typecheck": "passed",
+    "lint": { "errors": 0, "warnings": 951 },
+    "build": { "status": "passed", "staticPages": 118, "nodeHeapMiB": 8192 },
+    "protectedBaseline": { "status": "passed", "featureIds": 38, "warnings": 0, "unapprovedDrift": 0 }
+  },
+  "fixedBoundary": [
+    "explicit provider and model mismatch fails before task creation and billing",
+    "explicit provider failure does not switch to another provider",
+    "compound provider model keys and configured aliases remain compatible",
+    "omitted model selects the explicit provider default"
+  ],
+  "openBoundary": [
+    "brand and font background failure lacks durable task-level atomic settlement and refund",
+    "real PostgreSQL concurrency suite is not executed without POSTGRES_TEST_DATABASE_URL",
+    "Coze exact-SHA and real Chrome provider execution are not verified because the sandbox returned instance_not_found"
+  ],
+  "cloudRequestsCreated": 0,
+  "creditsConsumed": 0,
+  "verdict": "local candidate passed; V588-PROVIDER-003 remains not passed"
+}

@@ -1,5 +1,31 @@
 # 无界AI — 缺陷登记表 (BUG REGISTER)
 
+## 2026-09-01 V588-PROVIDER-003 精确路由与后台结算
+
+### V588-PROVIDER-003-BUG-009：显式供应商失配时跨供应商回退
+
+| 字段 | 内容 |
+|---|---|
+| 等级/状态 | P1；`main@14b058fc` 本地已修复，Coze/Google Chrome 待验 |
+| 稳定复现 | 品牌、精修和字境分别传入不存在的显式供应商、供应商目录外模型；字境所选供应商返回 503。修复前 7 项失败，其中字境会继续调用第二个供应商 |
+| 根因 | 三个路由把显式供应商当成“优先候选”而非冻结身份；品牌/精修查找失败后按模型或任意图像供应商回退，字境把其余供应商追加到候选列表 |
+| 最小修复 | 统一用精确目录解析显式 `providerId + modelId`；错配在任务/扣费前返回 `MODEL_PROVIDER_MISMATCH`；只有未指定供应商时保留自动发现和切换 |
+| 兼容边界 | 保留 `providerId::modelId`、`gpt-image-2-4k` 等别名，以及显式供应商但未提供模型时采用该供应商默认模型；复合键与请求 providerId 冲突时拒绝 |
+| 永久回归 | `brand-ecommerce-result-identity.test.ts`、`refine-async-terminal-contract.test.ts`、`font-design-exact-provider.test.ts`，并由既有 `tool-image-preflight-billing.test.ts` 覆盖别名和默认模型 |
+| 验证 | 聚焦 62/62；全仓 4466 通过、133 PostgreSQL 专项跳过；TypeScript 通过；Lint 0 错误/951 警告；构建 118/118；保护基线 38/38 |
+| 未验证 | Coze exact-SHA、真实 Pear/APImart 供应商失败时零跨路由、真实结果身份、截图/网络/Console/Trace |
+
+### V588-PROVIDER-003-BUG-010：品牌和字境后台失败缺少持久化任务级退款结算
+
+| 字段 | 内容 |
+|---|---|
+| 等级/状态 | P0 候选；已定位，未修复，发布阻断 |
+| 静态复现 | 品牌和字境在返回 taskId 前完成扣费，随后由 `after()` 执行供应商调用；后台 catch 只把内存任务标记为 failed，未执行数据库条件式终态和一次性退款 |
+| 预期/实际 | 后台最终 failed/timeout/cancelled 应按同一持久化 taskId 原子结算且最多退款一次；当前实现不能证明进程重启、并发回调或后台失败后的退款一致性 |
+| 与 BUG-006 的关系 | BUG-006 是任务创建前预校验与同步异常补偿；本项是已返回 taskId 后的后台最终失败，属于不同生命周期，不重复计数 |
+| 修复约束 | 先建立真实任务级 RED；复用 `cloud_tasks`/条件式终态，不以进程内 Map 或普通 `refundCredits` 代替；同键重放必须返回同一任务，失败退款只允许一次 |
+| 阻塞证据 | 133 项隔离 PostgreSQL 测试因无 `POSTGRES_TEST_DATABASE_URL` 跳过；Coze 当前 `instance_not_found`，未执行真实失败或扣费任务 |
+
 ## 2026-09-01 V588-PROVIDER-003 品牌辅助失败提示
 
 ### V588-PROVIDER-003-BUG-008：品牌 AI 辅助请求失败被前端静默吞掉

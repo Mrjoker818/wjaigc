@@ -1,5 +1,11 @@
 # 无界AI — 未验证项目清单 (UNVERIFIED ITEMS)
 
+## 2026-09-01 PROVIDER-003 精确路由后的剩余证据
+
+`V588-PROVIDER-003-BUG-009` 已完成本地 RED→GREEN、4466 项全仓回归、118/118 构建和干净保护门禁，不再列为“未开发”。仍未验证：Coze exact-SHA；品牌、精修、字境在真实 Pear/APImart 下保持选定 `providerId + modelId`；供应商失败时不调用其他供应商；真实结果身份、画布保存刷新、截图、网络、Console、录像和 Trace。
+
+`V588-PROVIDER-003-BUG-010` 仍未修复：品牌与字境后台 failed/timeout/cancelled 的数据库条件式终态、一次退款、并发重放、进程重启恢复。133 项 PostgreSQL 专项因缺少隔离库未执行，禁止使用业务库替代。Coze 当前 `instance_not_found`，本轮没有创建真实任务或消耗积分。
+
 ## 2026-09-01 品牌辅助失败提示剩余云端证据
 
 `V588-PROVIDER-003-BUG-008` 已完成本地 RED→GREEN、全仓门禁和干净保护，不再列为“未开发”。仍未验证：Coze 拉取 `main@1e58c84e` 或其后续文档提交并成功重建后，Google Chrome 现有预览标签中三类辅助真实返回内容；任一 HTTP/业务失败时页面显示后端原始原因；部分成功时成功字段保留；精确 `llmProviderId + llmModel` 不漂移；Console 无新增未处理异常。
