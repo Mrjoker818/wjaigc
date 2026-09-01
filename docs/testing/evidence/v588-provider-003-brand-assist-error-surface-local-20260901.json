@@ -3,7 +3,8 @@
   "date": "2026-09-01",
   "baselineCommit": "f290a94d9da6465305f8702c8ca3d96d07e9796e",
   "candidateCommit": "1e58c84e5e8d5e6f4a7a17255206ef2ef2be619c",
-  "status": "local-fixed-cloud-environment-blocked",
+  "githubMainAtPush": "2ff2ce4a5098a4ac417044478365db752d0e29c7",
+  "status": "github-pushed-cloud-sandbox-missing",
   "rootCause": {
     "component": "src/components/brand-ecommerce-panel.tsx",
     "behavior": "HTTP and business failures were parsed as fulfilled JSON and ignored after Promise.allSettled",
@@ -24,12 +25,17 @@
     "diffCheck": "passed"
   },
   "cloudObservation": {
-    "previewRootStatus": 502,
+    "initialPreviewRootStatus": 502,
+    "transientHeadStatusAfterPush": 200,
+    "finalPreviewRootStatus": 404,
+    "finalAuthStatus": 404,
     "assistTypes": ["optimize-prompt", "suggest-style", "suggest-text"],
-    "assistStatuses": [502, 502, 502],
+    "initialAssistStatuses": [502, 502, 502],
+    "confirmedPostPushAssistStatuses": [404, 404, 404],
+    "gatewayErrorCode": "instance_not_found",
     "providerId": "api_1778428130626_2qpg71v",
     "modelId": "gemini-3.1-flash-lite-preview",
-    "interpretation": "Coze root and business routes were unavailable; no APImart or candidate success conclusion is permitted",
+    "interpretation": "The Coze sandbox instance was missing; confirmed POSTs did not reach the application or APImart, so no provider, content, billing, or candidate success conclusion is permitted",
     "chromeControl": "extension tab claim became unavailable; treated as test-tool blocker, not application evidence"
   },
   "scope": {
@@ -41,7 +47,7 @@
     "stableBranchChanged": false
   },
   "remaining": [
-    "push candidate and let Coze fetch the exact main commit",
+    "let Coze fetch origin/main containing candidate 1e58c84e and evidence commit 2ff2ce4a",
     "restart sandbox and hard-refresh the existing Google Chrome preview tab",
     "verify three real assist responses and visible failure feedback",
     "retain 133 PostgreSQL-gated tests as unverified until an isolated database exists"

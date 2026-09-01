@@ -6,7 +6,7 @@
 
 Fresh 全量门禁为 `592` 个测试文件、`4459` 项通过、0 失败；25 个文件中的 133 项 PostgreSQL 专项因未配置隔离测试库跳过。`pnpm ts-check` 通过；ESLint `0 errors / 956 historical warnings`；8 GiB 生产构建 `118/118`；提交 `1e58c84e` 的干净隔离工作树保护门禁 `38/38`、0 未批准漂移、0 warning。脏工作区首次保护检查被既有 `.playwright-cli` 与两个只读参考仓库拦截，该失败未隐藏，未删除或放宽这些文件；干净候选结果才作为有效门禁。
 
-云端真实点击只证明修复前失败无提示。随后根 URL 与三类品牌辅助直连探针均返回 HTTP 502，因此当时属于 Coze 整体不可用，不能归因 APImart，也不能冒充候选云端通过。证据：[v588-provider-003-brand-assist-error-surface-local-20260901.json](evidence/v588-provider-003-brand-assist-error-surface-local-20260901.json)。
+云端真实点击只证明修复前失败无提示。随后根 URL 与三类品牌辅助探针先返回 HTTP 502；`origin/main@2ff2ce4a` 推送后，用户确认的三类请求及根页、`/api/auth/me` 又统一返回 Coze 网关 `404 instance_not_found`，没有进入应用，更没有访问 APImart 或产生扣费。因此不能归因 APImart，也不能冒充候选云端通过。证据：[v588-provider-003-brand-assist-error-surface-local-20260901.json](evidence/v588-provider-003-brand-assist-error-surface-local-20260901.json)。
 
 ## 2026-09-01 品牌辅助聊天端点本地回归
 

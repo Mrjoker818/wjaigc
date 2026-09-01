@@ -4,7 +4,7 @@
 
 `V588-PROVIDER-003-BUG-008` 已完成本地 RED→GREEN、全仓门禁和干净保护，不再列为“未开发”。仍未验证：Coze 拉取 `main@1e58c84e` 或其后续文档提交并成功重建后，Google Chrome 现有预览标签中三类辅助真实返回内容；任一 HTTP/业务失败时页面显示后端原始原因；部分成功时成功字段保留；精确 `llmProviderId + llmModel` 不漂移；Console 无新增未处理异常。
 
-本轮根页与三类直连请求全部 HTTP 502，属于整个 Coze 服务不可用的环境阻塞；Chrome 扩展在 `claimTab` 后连接失效属于自动化控制阻塞。二者均不能写成 APImart 失败、应用通过或应用新缺陷。133 项 PostgreSQL 专项仍因缺少隔离测试库保持未验证。
+本轮根页与三类探针先全部 HTTP 502；候选推送后，按用户确认发出的三类 POST 以及根页、`/api/auth/me` 又统一返回 Coze 网关 `404 instance_not_found`，证明沙箱实例不存在，请求未到应用或 APImart。Chrome 扩展在 `claimTab` 后连接失效属于自动化控制阻塞。以上均不能写成 APImart 失败、应用通过或应用新缺陷。133 项 PostgreSQL 专项仍因缺少隔离测试库保持未验证。
 
 ## 2026-09-01 品牌辅助聊天端点剩余证据
 
