@@ -1,14 +1,20 @@
 # 无界AI — 未验证项目清单 (UNVERIFIED ITEMS)
 
+## 2026-09-01 PROVIDER-003 业务关闭后的剩余发布证据
+
+真实 HTTP 非 JSON和真实首字节超时不再列为未验证：两者均有 taskId、终态、唯一扣费/退款、余额恢复和无图片结果证据；超时还完成了 45 秒迟到结果隔离复读。`V588-PROVIDER-003` 业务验收关闭。
+
+仍未验证的只保留为全平台发布级证据：隔离 `POSTGRES_TEST_DATABASE_URL` 下 133 项并发/终态测试；字境大师完整 Google Chrome UI、Console、网络、录像与 Trace。它们不阻止进入 `V588-ADMIN-003`，但继续阻止全平台发布判定为“通过”。
+
 ## 2026-09-01 PROVIDER-003 受控故障增量后的剩余项
 
-真实 HTTP 非 JSON/HTML 响应已不再列为未验证：字境任务失败、原始错误摘要、一扣一退和余额恢复均有云端证据。超时仍未验证；本次超时准备在临时供应商创建阶段遇到 Coze `instance_not_found`，没有可确认的 providerId/taskId。恢复后先检查并删除全部 `CODEx-FAULT-*`，确认没有未知任务或积分变化，再重新执行一次真实 HTTP 超时。平台 502 不得冒充模型超时。机器证据：[v588-provider-003-controlled-fault-cloud-20260901.json](evidence/v588-provider-003-controlled-fault-cloud-20260901.json)。
+真实 HTTP 非 JSON/HTML 响应已不再列为未验证：字境任务失败、原始错误摘要、一扣一退和余额恢复均有云端证据。第一次超时准备在临时供应商创建阶段遇到 Coze `instance_not_found`，没有可确认 taskId，因此只作为环境中断保留；后续真实超时样本已由上方检查点关闭。机器证据：[v588-provider-003-controlled-fault-cloud-20260901.json](evidence/v588-provider-003-controlled-fault-cloud-20260901.json)。
 
 ## 2026-09-01 PROVIDER-003 云端增量后的精确剩余项
 
 以下内容已取得真实云端证据，不再列为未验证：品牌辅助 APImart LLM 精确路由和正向内容；缺失供应商/未授权模型在扣费前拒绝；字境 APImart 成功任务单次扣费；同键重放同任务且不重复扣费；字境取消后一扣一退、60 秒迟到结果拒绝；精修完成与取消终态的身份和账务复核。
 
-剩余未验证仅保留：当前品牌/字境/精修路由遇到真实上游超时时的 `timeout` 终态和一次退款；真实上游非 JSON/畸形响应的错误映射和一次退款；隔离 `POSTGRES_TEST_DATABASE_URL` 下 133 项并发/终态测试；Google Chrome 中字境大师完整 UI、Console、网络、录像与 Trace。Google Chrome 能列出正确标签，但接管时控制通道中断；这不是产品缺陷，也不能用 API 或 360 浏览器代替 UI 证据。
+剩余未验证仅保留：隔离 `POSTGRES_TEST_DATABASE_URL` 下 133 项并发/终态测试；Google Chrome 中字境大师完整 UI、Console、网络、录像与 Trace。Google Chrome 能列出正确标签，但接管时控制通道中断；这不是产品缺陷，也不能用 API 或 360 浏览器代替 UI 证据。
 
 ## 2026-09-01 PROVIDER-003 精确路由后的剩余证据
 

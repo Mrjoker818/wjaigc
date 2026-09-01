@@ -1,10 +1,16 @@
 # V5.8.8 选择性吸收清单
 
+## 2026-09-01 V588-PROVIDER-003 业务吸收完成
+
+当前权威主线已完成品牌、精修、字境的精确供应商路由和后台任务结算，并在 Coze 真实覆盖正向任务、同键重放、取消、非 JSON、15 秒首字节超时、一次扣费/退款及迟到终态隔离。`V588-PROVIDER-003` 标记为**业务吸收完成**，不再重复实施或付费验证；`stable@52f7c601` 与 donor 均保持只读。
+
+全平台发布仍保留 133 项隔离 PostgreSQL 和字境完整 Chrome 制品门禁。按去重后的唯一顺序，下一项进入 `V588-ADMIN-003` 缩略图/S3 交付边界，随后处理 `V588-CREDITS-OBS-001`；不得返回重做 Stage 4 或已关闭的 PROVIDER-003。
+
 ## 2026-09-01 V588-PROVIDER-003 云端真实结算检查点
 
 `main@f02550ba` 已同步到 Coze，云端 tree 与 `origin/main` 完全一致。品牌辅助精确 APImart LLM 配对、缺失/未授权显式选择零回退零扣费、字境成功只扣一次、幂等重放不重复扣费、取消只退一次及迟到完成拒绝均取得真实证据；精修既有完成和取消任务也已重新读取终态确认。`stable@52f7c601` 保持未触碰。
 
-本检查点不标记阶段完成：真实上游超时和非 JSON 失败、133 项隔离 PostgreSQL 专项、字境 Google Chrome UI/网络/Console/Trace 仍未验证。下一步仍只处理这些 PROVIDER-003 剩余证据；完成前不进入 ADMIN、Skills 或重复已冻结阶段。机器证据：`docs/testing/evidence/v588-provider-003-f02550ba-cloud-api-20260901.json`。
+本检查点当时尚未标记阶段完成；其后的受控非 JSON 和真实首字节超时证据已由上方最新检查点关闭。133 项隔离 PostgreSQL 与字境完整 Chrome 制品继续作为发布级未验证项，不再阻止进入 ADMIN-003。机器证据：`docs/testing/evidence/v588-provider-003-f02550ba-cloud-api-20260901.json`、`docs/testing/evidence/v588-provider-003-controlled-fault-cloud-20260901.json`。
 
 ## 2026-09-01 V588-PROVIDER-003 精确供应商路由本地检查点
 

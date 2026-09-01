@@ -1,8 +1,14 @@
 # 无界AI — 缺陷登记表 (BUG REGISTER)
 
+## 2026-09-01 V588-PROVIDER-003 业务验收关闭
+
+`V588-PROVIDER-003-BUG-010` 已补齐最后的真实故障边界。受控公网非 JSON 样本进入 `failed/ALL_PROVIDERS_FAILED`；真实 30 秒首字节延迟探针在应用 15 秒截止时间进入 `timeout/MODEL_TIMEOUT`。两条任务均只扣一次、只退一次、余额和累计消耗恢复，无图片结果；超时任务在 45 秒迟到复核时仍保持 `timeout/refunded/revision=1`，没有被迟到结果覆盖。全部 `CODEx-FAULT-*` 临时供应商已删除。
+
+因此本项的精确供应商路由、正向任务、幂等重放、取消、非 JSON、超时、一次退款和迟到终态业务边界关闭，允许按计划进入 `V588-ADMIN-003`。隔离 PostgreSQL 的 133 项测试和字境完整 Chrome 录像/Trace 继续作为全平台发布门禁，不回写为本业务 Bug 未修复。证据：[v588-provider-003-controlled-fault-cloud-20260901.json](evidence/v588-provider-003-controlled-fault-cloud-20260901.json)。
+
 ## 2026-09-01 V588-PROVIDER-003 受控故障复现增量
 
-`V588-PROVIDER-003-BUG-010` 的非 JSON 边界已取得真实云端证据：显式字境供应商收到公网 HTML 404 后，任务进入 `failed`，保留原始错误摘要，60 积分只有一扣一退且余额恢复，无图片结果。超时边界仍开放；准备超时探针时 Coze 实例在供应商创建阶段消失，没有 providerId/taskId，不能登记成模型超时。恢复后必须先审计 `CODEx-FAULT-*` 残留和账务，再继续该 Bug 的超时验收。证据：[v588-provider-003-controlled-fault-cloud-20260901.json](evidence/v588-provider-003-controlled-fault-cloud-20260901.json)。
+`V588-PROVIDER-003-BUG-010` 的非 JSON 边界已取得真实云端证据：显式字境供应商收到公网 HTML 404 后，任务进入 `failed`，保留原始错误摘要，60 积分只有一扣一退且余额恢复，无图片结果。第一次超时准备期间发生的 Coze `instance_not_found` 仍保留为环境中断，不冒充模型超时；其后真正的首字节超时样本已在上方关闭记录中补齐。
 
 ## 2026-09-01 V588-PROVIDER-003 云端真实结算增量
 

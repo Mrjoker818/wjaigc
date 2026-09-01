@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "recordedAt": "2026-09-01T23:25:00+08:00",
+  "recordedAt": "2026-09-01T23:58:00+08:00",
   "timezone": "Asia/Shanghai",
   "scope": "V588-PROVIDER-003 受控真实 HTTP 故障增量；临时供应商只用于错误边界，不代表 APImart 或 Pear 自身故障",
   "source": {
@@ -43,21 +43,69 @@
     }
   },
   "timeout": {
-    "status": "未验证",
-    "attemptedProviderNamePrefix": "CODEx-FAULT-TIMEOUT-",
-    "attemptedBaseUrl": "https://httpstat.us",
-    "failurePoint": "POST /api/admin/apis 创建临时供应商时客户端等待 30 秒后取消",
-    "authoritativeFollowUp": "随后 /api/auth/login 返回 instance_not_found，根页连续 12 次为 502；说明 Coze 实例消失，不能归因模型端点",
-    "businessTaskCreated": "未知；没有 providerId 或 taskId，禁止按模型超时计数",
-    "billingChanged": "未验证；恢复后必须先按 CODEx-FAULT-* 列目录、清理残留并核对余额/流水",
-    "browserRecovery": "在正确 Google Chrome 项目页点击沙箱断开弹窗的刷新按钮，弹窗消失；应用健康端点仍未恢复"
+    "status": "通过",
+    "transport": "真实公网 HTTP 首字节延迟探针",
+    "probe": {
+      "implementation": "本机 Node HTTP 服务对每个请求延迟 30 秒，Cloudflare Quick Tunnel 暴露为公网 HTTPS；curl 复核 18 秒内零字节返回",
+      "cloudflaredBinary": "J:\\无界本地版\\projects\\cloudflared-timeout-probe.exe",
+      "cloudflaredVersion": "2026.7.3",
+      "cloudflaredSha256": "8635DA433B6DF8194746E88ED9D2589566C20E38BFC2A80E431A348B7C765841",
+      "cleanup": "测试结束后 Node 与 cloudflared 进程均已停止"
+    },
+    "temporaryProvider": {
+      "id": "api_1788276597161_jqamz1c",
+      "namePrefix": "CODEx-FAULT-TIMEOUT-",
+      "model": "gpt-image-2",
+      "explicitProviderFrozen": true,
+      "cleanup": "删除接口返回 success=true；45 秒迟到结果复核时临时供应商数量为 0"
+    },
+    "task": {
+      "taskId": "font-design-1788276674834-20fbur",
+      "idempotencyKey": "font-real-timeout-1788276674724",
+      "status": "timeout",
+      "errorCode": "MODEL_TIMEOUT",
+      "error": "所有提供商均超时不可达",
+      "durationMs": 15078,
+      "revision": 1,
+      "createdImage": false
+    },
+    "billing": {
+      "creditCost": 60,
+      "creditStatus": "refunded",
+      "chargedTransactionId": "ctx_charge_1864e44cdbb4822153a6cc52d09244b6",
+      "refundedTransactionId": "ctx_refund_00fbfca21e5a5612c370f68a1d7abc57",
+      "chargeCount": 1,
+      "refundCount": 1,
+      "balanceBefore": 328,
+      "balanceAfterCharge": 268,
+      "balanceAfterRefund": 328,
+      "totalUsedBefore": 3992,
+      "totalUsedAfter": 3992
+    },
+    "lateResultRecheck": {
+      "delaySeconds": 45,
+      "status": "timeout",
+      "revision": 1,
+      "creditStatus": "refunded",
+      "imageResultPresent": false,
+      "chargeCount": 1,
+      "refundCount": 1,
+      "balance": 328,
+      "totalUsed": 3992
+    },
+    "discardedAttempt": {
+      "baseUrl": "https://httpstat.us",
+      "result": "供应商任务在约 15.4 秒返回 failed/502，不是 timeout，因此未计入超时通过样本",
+      "billing": "一次扣费、一次退款、余额恢复",
+      "cleanup": "临时供应商已删除"
+    },
+    "interruptedAttempt": {
+      "result": "更早一次临时供应商创建后 Coze 出现 instance_not_found；没有可确认 taskId，继续保持平台中断记录，不计入模型超时"
+    }
   },
   "remaining": [
-    "Coze 恢复后审计并清理所有 CODEx-FAULT-* 临时供应商",
-    "确认超时尝试没有创建任务或改变积分；若有任务，先只读取得终态和流水",
-    "重新执行一次可确认 providerId/taskId 的真实 HTTP 超时并验证 timeout + 一扣一退",
     "字境 Google Chrome UI、Console、网络、录像与 Trace",
     "隔离 PostgreSQL 133 项并发和终态测试"
   ],
-  "conclusion": "非 JSON 故障边界真实通过；超时仍未验证。V588-PROVIDER-003 保持开放。"
+  "conclusion": "非 JSON 与真实首字节超时故障边界均通过；任务终态、一次扣费/退款、余额恢复及迟到结果隔离成立。V588-PROVIDER-003 的业务验收关闭并允许进入 ADMIN-003；全平台发布门禁仍因隔离 PostgreSQL 与完整浏览器制品保持不通过。"
 }

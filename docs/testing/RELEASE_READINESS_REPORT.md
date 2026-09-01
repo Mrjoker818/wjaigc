@@ -1,8 +1,14 @@
 # 无界AI — 发布就绪报告 (RELEASE READINESS REPORT)
 
+## 2026-09-01 PROVIDER-003 业务关闭后的发布判定
+
+`V588-PROVIDER-003` 已取得正向任务、精确路由、同键重放、取消、真实非 JSON、真实首字节超时、一次退款和迟到完成拒绝的云端证据，业务验收关闭，允许进入 `V588-ADMIN-003`。超时任务在 45 秒后仍保持不可逆 `timeout/refunded/revision=1`，临时供应商和本地探针均已清理，`stable@52f7c601` 未触碰。
+
+全平台发布结论仍为**不通过**，不是因为 PROVIDER-003 业务边界仍失败，而是 133 项隔离 PostgreSQL 并发/终态测试和字境完整 Google Chrome 录像/Trace 尚未补齐，且后续 ADMIN、Skills 等计划项尚未完成。不得把阶段关闭扩大为平台可发布。机器证据：[v588-provider-003-controlled-fault-cloud-20260901.json](evidence/v588-provider-003-controlled-fault-cloud-20260901.json)。
+
 ## 2026-09-01 PROVIDER-003 受控故障判定
 
-总体结论仍为**不通过**。真实公网非 JSON/HTML 响应已经证明字境失败终态、原始错误保留和一次退款成立；但超时探针尚未进入业务任务，Coze 在临时供应商创建时发生 `instance_not_found`。平台实例故障不能替代模型超时证据。恢复后还需先清理可能的临时供应商残留、核对任务/流水，再取得带 providerId/taskId 的真实超时终态。隔离 PostgreSQL 与字境 Chrome UI 仍保持未验证，`stable` 未触碰。
+总体结论仍为**不通过**。真实公网非 JSON/HTML 响应已经证明字境失败终态、原始错误保留和一次退款成立。此处记录的第一次超时准备曾遇到 Coze `instance_not_found`，该环境中断没有被冒充模型超时；后续真正的业务超时已由上方新检查点闭环。隔离 PostgreSQL 与字境完整 Chrome 制品仍保持未验证，`stable` 未触碰。
 
 ## 2026-09-01 PROVIDER-003 云端增量判定
 

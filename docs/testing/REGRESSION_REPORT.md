@@ -1,10 +1,16 @@
 # 无界AI — 回归测试报告 (REGRESSION REPORT)
 
+## 2026-09-01 PROVIDER-003 真实超时与阶段关闭
+
+Coze `f02550ba` 源码树使用受控公网 HTTPS 首字节延迟探针执行真实字境请求。任务 `font-design-1788276674834-20fbur` 在 `15078ms` 后稳定进入 `timeout/MODEL_TIMEOUT/refunded`；60 积分恰好一扣一退，余额 `328 -> 268 -> 328`，累计消耗保持 `3992`。45 秒后复读仍为 `timeout/revision=1`，无图片、无新增流水，证明迟到结果不能覆盖终态。临时供应商已删除，探针进程已停止。
+
+结合已记录的真实非 JSON、正向生成、同键重放、取消和精确路由证据，`V588-PROVIDER-003` 的业务验收关闭并进入 `V588-ADMIN-003`。这不等于全平台发布通过：133 项隔离 PostgreSQL 测试、字境完整 Chrome 录像/Trace 仍在发布级未验证清单。证据：[v588-provider-003-controlled-fault-cloud-20260901.json](evidence/v588-provider-003-controlled-fault-cloud-20260901.json)。
+
 ## 2026-09-01 PROVIDER-003 受控真实 HTTP 非 JSON 增量
 
 在 Coze `f02550ba` 源码树上创建一次可清理的临时图像供应商，显式冻结 `providerId + gpt-image-2` 并让真实公网 HTTP 端点返回 HTML 404。字境任务 `font-design-1788275881139-boz4vr` 最终为 `failed/ALL_PROVIDERS_FAILED/refunded`，保留上游 HTML 错误摘要；60 积分恰好一扣一退，余额 `328 -> 268 -> 328`，`totalUsed` 保持 3992，无图片结果。该临时供应商的删除请求无异常完成。
 
-随后准备超时探针时，创建临时供应商请求等待 30 秒后取消；紧接着认证返回 `instance_not_found`，根页连续 12 次 502。没有 providerId/taskId，不能把平台实例消失写成模型超时。恢复后必须先清理 `CODEx-FAULT-*` 残留和核对流水，再重做一次可确认任务身份的超时验证。证据：[v588-provider-003-controlled-fault-cloud-20260901.json](evidence/v588-provider-003-controlled-fault-cloud-20260901.json)。
+随后第一次准备超时探针时，创建临时供应商请求遇到 Coze `instance_not_found`。该次没有可确认 taskId，仍只作为环境中断；后续使用可审计的公网首字节延迟探针取得了上方真实超时闭环。
 
 ## 2026-09-01 PROVIDER-003 Coze 真实路由与结算增量
 
