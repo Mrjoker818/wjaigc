@@ -1,6 +1,6 @@
 {
-  "authorizationId": "v588-stability-002-layer-documents-reviewed-source-integration-2026-08-29",
-  "approvedAt": "2026-08-29",
+  "authorizationId": "v588-credits-observability-reviewed-source-integration-2026-09-02",
+  "approvedAt": "2026-09-02",
   "scope": "Exact paths only; directory-prefix authorization is prohibited.",
   "stableBranchMutationAllowed": false,
   "authorizations": [
@@ -35,7 +35,7 @@
     { "path": "src/app/api/admin/production-readiness/route.ts", "sourceCommit": "05f6717" },
     { "path": "src/app/api/assets/[assetId]/restore/route.ts", "sourceCommit": "0756f71" },
     { "path": "src/app/api/assets/adopt-canvas-image/route.ts", "sourceCommit": "c99fb72" },
-    { "path": "src/components/dashboard/admin-tabs.tsx", "sourceCommit": "1ba98f7" },
+    { "path": "src/components/dashboard/admin-tabs.tsx", "sourceCommit": "795d3fe3" },
     { "path": "src/components/canvas/CanvasCommandPalette.tsx", "sourceCommit": "8acb3c9" },
     { "path": "src/components/canvas/CanvasEditColorRemoveBgPanel.tsx", "sourceCommit": "2fc5c83" },
     { "path": "src/components/canvas/CanvasEditEraseMaskPanel.tsx", "sourceCommit": "e3991f3" },
@@ -65,6 +65,7 @@
     { "path": "scripts/v588-auth-fixture.mjs", "sourceCommit": "02a3bd3d" },
     { "path": "scripts/verify-v588-auth-stable-contract.mjs", "sourceCommit": "02a3bd3d" },
     { "path": "src/app/api/admin/apis/route.ts", "sourceCommit": "96c1907b" },
+    { "path": "src/app/api/admin/credits/overview/route.ts", "sourceCommit": "795d3fe3" },
     { "path": "src/app/api/admin/credits/pricing/route.ts", "sourceCommit": "2c25af59" },
     { "path": "src/app/api/auth/login/route.ts", "sourceCommit": "9c693b1d" },
     { "path": "src/app/api/auth/me/route.ts", "sourceCommit": "9c693b1d" },

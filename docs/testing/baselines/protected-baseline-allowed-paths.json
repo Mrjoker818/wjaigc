@@ -152,6 +152,7 @@
   "scripts/v588-auth-fixture.mjs",
   "scripts/verify-v588-auth-stable-contract.mjs",
   "src/app/api/admin/apis/route.ts",
+  "src/app/api/admin/credits/overview/route.ts",
   "src/app/api/admin/credits/pricing/route.ts",
   "src/app/api/auth/login/route.ts",
   "src/app/api/auth/me/route.ts",
