@@ -92,6 +92,31 @@ describe('Stage 2 Doctor asset graph release gate', () => {
     }]);
   });
 
+  it('compares video placements against videoUrl instead of the poster url field', () => {
+    const input = healthyInput();
+    const videoUrl = '/api/serve-upload/video/task-a/output.mp4';
+    const videoImage = {
+      ...input.legacyProjectRows[0].projects[0].canvasImages[0],
+      url: '',
+      videoUrl,
+      mediaType: 'video',
+    };
+    const summary = summarizeAssetGraphDoctor({
+      ...input,
+      legacyProjectRows: [{
+        userId: 'user-a',
+        projects: [{
+          ...input.legacyProjectRows[0].projects[0],
+          canvasImages: [videoImage],
+        }],
+      }],
+      placements: [{ ...input.placements[0], fileUrl: videoUrl }],
+    });
+
+    expect(summary.releaseReady).toBe(true);
+    expect(summary.shadowComparison.mismatchedProjectDetails).toEqual([]);
+  });
+
   it('blocks asset-v3 when a project checkpoint is missing', () => {
     const input = healthyInput();
     const summary = summarizeAssetGraphDoctor({ ...input, checkpoints: [] });

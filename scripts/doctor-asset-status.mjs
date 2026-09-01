@@ -29,6 +29,15 @@ function normalizeLegacyUrl(value) {
     : value;
 }
 
+function comparableLegacyMediaUrl(image) {
+  const isVideo = image.mediaType === 'video'
+    || (typeof image.videoUrl === 'string' && image.videoUrl.length > 0);
+  const mediaUrl = isVideo && typeof image.videoUrl === 'string' && image.videoUrl.length > 0
+    ? image.videoUrl
+    : image.url;
+  return normalizeLegacyUrl(mediaUrl);
+}
+
 function comparableTransform(value) {
   const source = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
   return Object.fromEntries(TRANSFORM_KEYS
@@ -78,7 +87,7 @@ function comparableLegacyProjects(rows) {
         if (image.isProcessingPlaceholder !== true) {
           comparableImages.push({
             imageId: image.id,
-            url: normalizeLegacyUrl(image.url),
+            url: comparableLegacyMediaUrl(image),
             transform: comparableTransform(image),
           });
         }
