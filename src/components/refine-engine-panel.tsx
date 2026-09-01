@@ -186,6 +186,17 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
+  useLayoutEffect(() => {
+    const panel = panelRef.current;
+    if (!panel || typeof ResizeObserver === 'undefined') return;
+
+    const observer = new ResizeObserver(() => {
+      setPosition((current) => constrainPanelPosition(current));
+    });
+    observer.observe(panel);
+    return () => observer.disconnect();
+  }, [constrainPanelPosition]);
+
   // ─── Panel state ───
   const [refineMode, setRefineMode] = useState<'standard' | 'expert'>('standard');
   const [sourceImage, setSourceImage] = useState<string>(initialImageUrl || '');

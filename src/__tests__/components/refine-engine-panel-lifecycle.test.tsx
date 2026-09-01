@@ -272,6 +272,68 @@ describe('RefineEnginePanel lifecycle', () => {
     expect(panel?.style.maxHeight).toBe('536px');
   });
 
+  it('re-clamps when asynchronous panel content grows after the initial layout', async () => {
+    let panelHeight = 795;
+    let resizeCallback: ResizeObserverCallback | null = null;
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function mockRect(this: HTMLElement) {
+      if (this.hasAttribute('data-floating-panel')) {
+        return {
+          x: 794,
+          y: 70,
+          left: 794,
+          top: 70,
+          right: 1254,
+          bottom: 70 + panelHeight,
+          width: 460,
+          height: panelHeight,
+          toJSON: () => ({}),
+        };
+      }
+      return {
+        x: 0,
+        y: 0,
+        left: 0,
+        top: 0,
+        right: 0,
+        bottom: 0,
+        width: 0,
+        height: 0,
+        toJSON: () => ({}),
+      };
+    });
+    vi.stubGlobal('ResizeObserver', class ResizeObserverMock {
+      constructor(callback: ResizeObserverCallback) {
+        resizeCallback = callback;
+      }
+
+      observe(): void {}
+      unobserve(): void {}
+      disconnect(): void {}
+    });
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === '/api/refine-engine' && !init?.method) {
+        return Response.json({ success: true, categories: [], lightings: [], viewAngles: [] });
+      }
+      if (url === '/api/refine-engine' && parseBody(init).action === 'models') return Response.json(modelCatalog);
+      throw new Error(`Unexpected request: ${url}`);
+    }));
+
+    await renderReadyPanel();
+    const panel = document.querySelector<HTMLElement>('[data-floating-panel]');
+    expect(panel).not.toBeNull();
+    await waitFor(() => expect(panel?.style.top).toBe('70px'));
+    expect(resizeCallback).not.toBeNull();
+
+    panelHeight = 903;
+    await act(async () => {
+      resizeCallback?.([], {} as ResizeObserver);
+    });
+
+    await waitFor(() => expect(panel?.style.top).toBe('16px'));
+    expect(Number.parseFloat(panel?.style.top || '0') + panelHeight).toBeLessThanOrEqual(window.innerHeight - 16);
+  });
+
   it('clears the simulated progress interval after submit transport failure', async () => {
     const intervals = vi.spyOn(globalThis, 'setInterval');
     const cleared = vi.spyOn(globalThis, 'clearInterval');
