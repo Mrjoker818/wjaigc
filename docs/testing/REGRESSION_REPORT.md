@@ -1,5 +1,11 @@
 # 无界AI — 回归测试报告 (REGRESSION REPORT)
 
+## 2026-09-01 方案A前端取消与浮窗本地回归
+
+新增7项精修组件生命周期和8项浮窗纯函数测试，均按RED→GREEN执行；与精修异步终态、取消API合并后52/52通过。最终全仓为591个测试文件通过、4451项通过、0失败；25个文件中的133项因未配置隔离`POSTGRES_TEST_DATABASE_URL`而明确跳过，不计作通过。TypeScript通过；ESLint为0错误、956条历史warning；生产构建首次在默认4GB Node堆OOM，使用8GB后编译成功并生成118/118页面。
+
+本地已验证：提交期取消只补发一次、服务端确认前不伪报取消、取消拒绝后继续真实终态、取消后迟到完成不覆盖、嵌套错误可见、模拟进度定时器清理、浮窗桌面/窄屏/缩放/拖动约束及非数值比例无`NaN`。尚未验证：新提交在Coze的真实取消、数据库终态、一次退款和迟到供应商结果；因此本节是本地候选，不替代云端证据。
+
 ## 2026-09-01 精修取消云端尝试
 
 真实Chrome只提交一次APImart `gpt-image-2`精修；`/api/refine-engine`立即HTTP 500并返回Coze平台结构`no sandbox ID found for taskID`。未取得应用taskId、未出现取消按钮、未调用`/api/cancel-task`，所以本次结果为`BLOCKED_NOT_EXECUTED`，不是取消成功或失败。UI错误呈现同时失败：面板跳到空结果页，未显示可理解错误，Console出现`Unexpected response: Object`。刷新项目页触发沙箱启动，随后按规则强刷原预览页却稳定复现`ERR_BLOCKED_BY_CLIENT`。没有重复任务或业务代码修改；权威扣费/退款证据仍待可用云端环境。机器证据见`evidence/refine-cancel-cloud-20260901.json`。

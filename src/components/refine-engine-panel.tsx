@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react';
 import {
   X, Upload, Sparkles, Image as ImageIcon,
   Scan, Loader2, ChevronDown,
@@ -16,6 +16,10 @@ import {
   findModelConfig as sharedFindModelConfig,
 } from '@/lib/canvas-generation-group';
 import { useProgressTimer } from '@/hooks/useProgressTimer';
+import {
+  constrainFloatingPanelPosition,
+  getCenteredFloatingPanelPosition,
+} from '@/lib/floating-panel-position';
 
 /* ─── types ─── */
 interface ImageModel {
@@ -50,6 +54,39 @@ interface RefineResult {
   label: string;
 }
 
+type RefineRunPhase = 'idle' | 'submitting' | 'processing' | 'cancelling' | 'completed' | 'failed' | 'cancelled';
+
+function isTerminalRefinePhase(phase: RefineRunPhase): boolean {
+  return phase === 'completed' || phase === 'failed' || phase === 'cancelled';
+}
+
+function extractRefineError(payload: unknown, status?: number, fallback = '精修失败，请重试'): string {
+  if (typeof payload === 'string' && payload.trim()) return payload.trim();
+  if (payload && typeof payload === 'object') {
+    const record = payload as Record<string, unknown>;
+    if (typeof record.error === 'string' && record.error.trim()) return record.error.trim();
+    if (record.error && typeof record.error === 'object') {
+      const nestedError = record.error as Record<string, unknown>;
+      if (typeof nestedError.message === 'string' && nestedError.message.trim()) return nestedError.message.trim();
+    }
+    if (typeof record.message === 'string' && record.message.trim()) return record.message.trim();
+    if (record.BaseResp && typeof record.BaseResp === 'object') {
+      const baseResp = record.BaseResp as Record<string, unknown>;
+      if (typeof baseResp.StatusMessage === 'string' && baseResp.StatusMessage.trim()) {
+        return baseResp.StatusMessage.trim();
+      }
+    }
+  }
+  return status ? `请求失败（HTTP ${status}）` : fallback;
+}
+
+function getCssAspectRatioParts(value: string): [number, number] {
+  const [rawWidth, rawHeight] = value.split(':').map(Number);
+  const width = Number.isFinite(rawWidth) && rawWidth > 0 ? rawWidth : 1;
+  const height = Number.isFinite(rawHeight) && rawHeight > 0 ? rawHeight : 1;
+  return [width, height];
+}
+
 interface Props {
   isMonochrome?: boolean;
   onClose: () => void;
@@ -80,15 +117,74 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
   // ─── Drag state ───
   const [position, setPosition] = useState(() => {
     if (typeof window !== 'undefined') {
-      return { x: (window.innerWidth - 460) / 2, y: (window.innerHeight - 580) / 2 };
+      return getCenteredFloatingPanelPosition({
+        viewportWidth: window.innerWidth,
+        viewportHeight: window.innerHeight,
+        panelWidth: Math.min(460, Math.max(0, window.innerWidth - 32)),
+        panelHeight: Math.min(580, Math.max(0, window.innerHeight - 32)),
+      });
     }
     return { x: 0, y: 0 };
   });
+  const [viewport, setViewport] = useState(() => ({
+    width: typeof window === 'undefined' ? 492 : window.innerWidth,
+    height: typeof window === 'undefined' ? 612 : window.innerHeight,
+  }));
   const [hasPosition, setHasPosition] = useState(true);
   const isDragging = useRef(false);
   const [isDraggingState, setIsDraggingState] = useState(false);
   const dragStart = useRef({ x: 0, y: 0 });
   const panelRef = useRef<HTMLDivElement>(null);
+  const panelWidth = Math.min(460, Math.max(0, viewport.width - 32));
+  const panelMaxHeight = Math.max(0, viewport.height - 32);
+
+  const constrainPanelPosition = useCallback((next: { x: number; y: number }) => {
+    const viewportWidth = window.innerWidth;
+    const viewportHeight = window.innerHeight;
+    const width = Math.min(460, Math.max(0, viewportWidth - 32));
+    const measuredHeight = panelRef.current?.getBoundingClientRect().height || 580;
+    const height = Math.min(measuredHeight, Math.max(0, viewportHeight - 32));
+    return constrainFloatingPanelPosition({
+      ...next,
+      viewportWidth,
+      viewportHeight,
+      panelWidth: width,
+      panelHeight: height,
+    });
+  }, []);
+
+  useLayoutEffect(() => {
+    const updateViewport = (center: boolean) => {
+      const viewportWidth = window.innerWidth;
+      const viewportHeight = window.innerHeight;
+      const width = Math.min(460, Math.max(0, viewportWidth - 32));
+      const measuredHeight = panelRef.current?.getBoundingClientRect().height || 580;
+      const height = Math.min(measuredHeight, Math.max(0, viewportHeight - 32));
+      setViewport({ width: viewportWidth, height: viewportHeight });
+      setPosition((current) => {
+        const next = center
+          ? getCenteredFloatingPanelPosition({
+              viewportWidth,
+              viewportHeight,
+              panelWidth: width,
+              panelHeight: height,
+            })
+          : current;
+        return constrainFloatingPanelPosition({
+          ...next,
+          viewportWidth,
+          viewportHeight,
+          panelWidth: width,
+          panelHeight: height,
+        });
+      });
+    };
+
+    updateViewport(true);
+    const handleResize = () => updateViewport(false);
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
 
   // ─── Panel state ───
   const [refineMode, setRefineMode] = useState<'standard' | 'expert'>('standard');
@@ -96,10 +192,17 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
   const [selectedModel, setSelectedModel] = useState('');
   const [models, setModels] = useState<ImageModel[]>([]);
   const [showModelDropdown, setShowModelDropdown] = useState(false);
-  const [isProcessing, setIsProcessing] = useState(false);
+  const [runPhase, setRunPhaseState] = useState<RefineRunPhase>('idle');
+  const runPhaseRef = useRef<RefineRunPhase>('idle');
+  const setRunPhase = useCallback((phase: RefineRunPhase) => {
+    runPhaseRef.current = phase;
+    setRunPhaseState(phase);
+  }, []);
+  const isProcessing = runPhase === 'submitting' || runPhase === 'processing' || runPhase === 'cancelling';
   const { elapsed, totalTime, startTimer, stopTimer, resetTimer, formatTime } = useProgressTimer();
   const [progress, setProgress] = useState(0);
   const [progressLabel, setProgressLabel] = useState('');
+  const [errorMessage, setErrorMessage] = useState('');
   const [results, setResults] = useState<RefineResult[]>([]);
   const [activeTab, setActiveTab] = useState<'upload' | 'settings' | 'results'>(
     initialImageUrl ? 'settings' : 'upload'
@@ -185,6 +288,9 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
   const pollAttemptRef = useRef(0);
   const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const currentTaskIdRef = useRef<string | null>(null);
+  const runTokenRef = useRef(0);
+  const cancelRequestedRef = useRef(false);
+  const cancelPromiseRef = useRef<Promise<boolean> | null>(null);
   const isMountedRef = useRef(true);
 
   // ─── Cleanup polling timer on unmount ───
@@ -192,6 +298,7 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
     isMountedRef.current = true;
     return () => {
       isMountedRef.current = false;
+      runTokenRef.current += 1;
       if (pollTimerRef.current) {
         clearTimeout(pollTimerRef.current);
         pollTimerRef.current = null;
@@ -254,7 +361,10 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
     const onMouseMove = (ev: MouseEvent) => {
       if (!isDragging.current) return;
       ev.stopPropagation();
-      setPosition({ x: ev.clientX - dragStart.current.x, y: ev.clientY - dragStart.current.y });
+      setPosition(constrainPanelPosition({
+        x: ev.clientX - dragStart.current.x,
+        y: ev.clientY - dragStart.current.y,
+      }));
     };
     const onMouseUp = (ev: MouseEvent) => {
       ev.stopPropagation();
@@ -295,15 +405,83 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
     }
   };
 
+  const requestTaskCancellation = useCallback(async (taskId: string, runToken: number): Promise<boolean> => {
+    if (cancelPromiseRef.current) return cancelPromiseRef.current;
+
+    const cancelPromise = (async () => {
+      try {
+        const response = await fetch('/api/cancel-task', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ taskId }),
+        });
+        const payload = await response.json().catch(() => null) as Record<string, unknown> | null;
+        if (!isMountedRef.current || runTokenRef.current !== runToken) return false;
+        const cancelled = response.ok && Boolean(
+          payload?.success === true || payload?.cancelled === true || payload?.status === 'cancelled',
+        );
+        if (cancelled) {
+          if (pollTimerRef.current) {
+            clearTimeout(pollTimerRef.current);
+            pollTimerRef.current = null;
+          }
+          currentTaskIdRef.current = null;
+          setResults([]);
+          setProgressLabel('任务已取消');
+          setRunPhase('cancelled');
+          stopTimer();
+          return true;
+        }
+
+        const reason = extractRefineError(payload, response.status, '取消失败');
+        setProgressLabel(`取消失败：${reason}，正在确认任务状态`);
+        setRunPhase('processing');
+        return false;
+      } catch (error) {
+        if (!isMountedRef.current || runTokenRef.current !== runToken) return false;
+        const reason = error instanceof Error && error.message ? error.message : '网络请求失败';
+        setProgressLabel(`取消失败：${reason}，正在确认任务状态`);
+        setRunPhase('processing');
+        return false;
+      }
+    })();
+
+    cancelPromiseRef.current = cancelPromise;
+    return cancelPromise;
+  }, [setRunPhase, stopTimer]);
+
+  const handleCancelRefine = useCallback(async () => {
+    if (runPhaseRef.current !== 'submitting' && runPhaseRef.current !== 'processing' && runPhaseRef.current !== 'cancelling') {
+      return;
+    }
+    cancelRequestedRef.current = true;
+    setRunPhase('cancelling');
+    const taskId = currentTaskIdRef.current;
+    setProgressLabel(taskId ? '正在取消任务...' : '正在确认任务并取消...');
+    if (taskId) await requestTaskCancellation(taskId, runTokenRef.current);
+  }, [requestTaskCancellation, setRunPhase]);
+
   // ─── Handle refine ───
   const handleRefine = async () => {
-    if (!sourceImage || !selectedModel) return;
-    setIsProcessing(true);
+    if (!sourceImage || !selectedModel || isProcessing) return;
+    const runToken = runTokenRef.current + 1;
+    runTokenRef.current = runToken;
+    cancelRequestedRef.current = false;
+    cancelPromiseRef.current = null;
+    currentTaskIdRef.current = null;
+    pollAttemptRef.current = 0;
+    if (pollTimerRef.current) {
+      clearTimeout(pollTimerRef.current);
+      pollTimerRef.current = null;
+    }
+    setRunPhase('submitting');
     startTimer();
     setProgress(10);
     setProgressLabel('提交任务...');
+    setErrorMessage('');
     setResults([]);
     setActiveTab('results');
+    let progressInterval: ReturnType<typeof setInterval> | null = null;
 
     try {
       const body: Record<string, unknown> = {
@@ -330,7 +508,8 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
       // ★ Show simulated progress while waiting for sync POST response
       // Server processes synchronously and returns result directly
       let simProgress = 10;
-      const progressInterval = setInterval(() => {
+      progressInterval = setInterval(() => {
+        if (runTokenRef.current !== runToken || runPhaseRef.current === 'cancelling') return;
         simProgress = Math.min(simProgress + Math.random() * 3, 90);
         setProgress(Math.round(simProgress));
       }, 2000);
@@ -341,17 +520,27 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
         body: JSON.stringify(body),
         signal: AbortSignal.timeout(600000), // 10 minutes timeout for sync processing
       });
-      clearInterval(progressInterval); // Stop simulated progress
       const data = await resp.json();
+      if (!isMountedRef.current || runTokenRef.current !== runToken) return;
       console.log('[refine-engine-panel] POST response:', JSON.stringify(data).slice(0, 300));
 
       // Handle error responses
-      if (!data.success && data.error) {
-        console.error('[refine-engine-panel] API error:', data.error);
-        setProgressLabel('精修失败: ' + data.error);
-        setIsProcessing(false);
+      if (!resp.ok || !data?.success) {
+        const reason = extractRefineError(data, resp.status);
+        console.error('[refine-engine-panel] API error:', reason);
+        setProgressLabel(reason);
+        setErrorMessage(reason);
+        setRunPhase('failed');
         stopTimer();
         return;
+      }
+
+      if (data.taskId) {
+        currentTaskIdRef.current = String(data.taskId);
+        if (cancelRequestedRef.current) {
+          const cancelled = await requestTaskCancellation(String(data.taskId), runToken);
+          if (cancelled || runTokenRef.current !== runToken) return;
+        }
       }
 
       // ★ Sync mode: result returned directly from POST
@@ -362,7 +551,7 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
         setProgressLabel('精修完成');
         const label = refineMode === 'expert' ? '专家精修' : '标准精修';
         setResults(directUrls.map((url: string) => ({ imageUrl: url, label })));
-        setIsProcessing(false);
+        setRunPhase('completed');
         stopTimer();
         return;
       }
@@ -371,7 +560,8 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
       if (data.success && !data.taskId) {
         console.error('[refine-engine-panel] Sync mode returned success but no images');
         setProgressLabel('精修完成但未返回图片');
-        setIsProcessing(false);
+        setErrorMessage('精修完成但未返回图片');
+        setRunPhase('failed');
         stopTimer();
         return;
       }
@@ -379,17 +569,21 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
       // ★ Fallback: poll mode (if backend returns taskId without directImageUrls)
       if (data.taskId) {
         console.log('[refine-engine-panel] No directImageUrls, falling back to poll mode with taskId:', data.taskId);
-        setProgressLabel('精修处理中...');
-        currentTaskIdRef.current = data.taskId;
+        if (!cancelRequestedRef.current) setProgressLabel('精修处理中...');
+        setRunPhase('processing');
+        currentTaskIdRef.current = String(data.taskId);
         pollAttemptRef.current = 0;
         setProgress(30);
         const pollRefine = async () => {
-          if (!isMountedRef.current) return; // 组件已卸载，停止轮询
+          if (!isMountedRef.current || runTokenRef.current !== runToken) return;
+          if (runPhaseRef.current === 'cancelling' || isTerminalRefinePhase(runPhaseRef.current)) return;
+          pollTimerRef.current = null;
           pollAttemptRef.current++;
           // Safety: stop polling after 10 minutes (300+ dynamic attempts)
           if (pollAttemptRef.current > 300) {
             setProgressLabel('超时，请重试');
-            setIsProcessing(false);
+            setErrorMessage('精修任务超时，请重试');
+            setRunPhase('failed');
             stopTimer();
             return;
           }
@@ -400,6 +594,7 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
               body: JSON.stringify({ taskId: data.taskId, model: selectedModel.includes('::') ? selectedModel.split('::').pop()! : selectedModel, providerId: selectedModel.includes('::') ? selectedModel.split('::')[0] : undefined }),
             });
             const pollData = await pollResp.json();
+            if (!isMountedRef.current || runTokenRef.current !== runToken || isTerminalRefinePhase(runPhaseRef.current)) return;
             console.log(`[refine-engine-panel] Poll #${pollAttemptRef.current}: status=${pollData.status}, progress=${pollData.progress}, hasResult=${!!pollData.result}`);
 
             if (pollData.status === 'completed') {
@@ -429,18 +624,25 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
               } else {
                 setProgressLabel('精修完成但未获取到图片');
               }
-              setIsProcessing(false);
+              currentTaskIdRef.current = null;
+              setRunPhase(resultUrls.length > 0 ? 'completed' : 'failed');
               stopTimer();
+              return;
             } else if (pollData.status === 'failed') {
-              setProgressLabel(pollData.error || '精修失败');
-              setIsProcessing(false);
+              setProgressLabel(extractRefineError(pollData, pollResp.status, '精修失败'));
+              setErrorMessage(extractRefineError(pollData, pollResp.status, '精修失败'));
+              currentTaskIdRef.current = null;
+              setRunPhase('failed');
               stopTimer();
               setResults([]);
+              return;
             } else if (pollData.status === 'cancelled') {
               setProgressLabel('任务已取消');
-              setIsProcessing(false);
+              currentTaskIdRef.current = null;
+              setRunPhase('cancelled');
               stopTimer();
               setResults([]);
+              return;
             } else {
               // Still processing — update progress but don't stop polling
               setProgress(prev => Math.min(prev + 2, 95));
@@ -450,7 +652,9 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
               }
               // Dynamic interval: first 10 polls 800ms, 10-25 1.2s, 25+ 2s
               const delay = pollAttemptRef.current <= 10 ? 800 : pollAttemptRef.current <= 25 ? 1200 : 2000;
-              if (isMountedRef.current) pollTimerRef.current = setTimeout(pollRefine, delay);
+              if (isMountedRef.current && runTokenRef.current === runToken && runPhaseRef.current === 'processing') {
+                pollTimerRef.current = setTimeout(pollRefine, delay);
+              }
               return; // Don't schedule another poll below
             }
           } catch (pollErr) {
@@ -459,7 +663,9 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
           }
           // Schedule next poll with dynamic interval
           const delay = pollAttemptRef.current <= 10 ? 800 : pollAttemptRef.current <= 25 ? 1200 : 2000;
-          if (isMountedRef.current) pollTimerRef.current = setTimeout(pollRefine, delay);
+          if (isMountedRef.current && runTokenRef.current === runToken && runPhaseRef.current === 'processing') {
+            pollTimerRef.current = setTimeout(pollRefine, delay);
+          }
         };
         // Start first poll immediately
         pollRefine();
@@ -467,18 +673,24 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
         // No taskId and no directImageUrls — unknown response
         console.error('[refine-engine-panel] Unexpected response:', data);
         setProgressLabel('精修失败：未知响应');
-        setIsProcessing(false);
+        setErrorMessage('精修失败：未知响应');
+        setRunPhase('failed');
         stopTimer();
       }
     } catch (err) {
       console.error('Refine failed:', err);
       if (err instanceof DOMException && err.name === 'TimeoutError') {
         setProgressLabel('精修超时，请重试');
+        setErrorMessage('精修超时，请重试');
       } else {
-        setProgressLabel('精修失败，请重试');
+        const reason = err instanceof Error && err.message ? err.message : '精修失败，请重试';
+        setProgressLabel(reason);
+        setErrorMessage(reason);
       }
-      setIsProcessing(false);
+      setRunPhase('failed');
       stopTimer();
+    } finally {
+      if (progressInterval) clearInterval(progressInterval);
     }
   };
 
@@ -500,8 +712,8 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
       style={{
         left: position.x,
         top: position.y,
-        width: 460,
-        maxHeight: '85vh',
+        width: panelWidth,
+        maxHeight: panelMaxHeight,
         borderRadius: 12,
         backgroundColor: bgPanel,
         border: isDraggingState
@@ -1144,13 +1356,12 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
                         className="rounded-[1px]"
                         style={{
                           width: (() => {
-                            const [w] = ratio.split(':').map(Number);
-                            const h = Number(ratio.split(':')[1]);
+                            const [w, h] = getCssAspectRatioParts(ratio);
                             const maxDim = 10;
                             return Math.max(4, (w / Math.max(w, h)) * maxDim);
                           })(),
                           height: (() => {
-                            const [w, h] = ratio.split(':').map(Number);
+                            const [w, h] = getCssAspectRatioParts(ratio);
                             const maxDim = 10;
                             return Math.max(4, (h / Math.max(w, h)) * maxDim);
                           })(),
@@ -1205,7 +1416,7 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
                   className="w-full rounded-lg overflow-hidden flex items-center justify-center"
                   style={{
                     aspectRatio: (() => {
-                      const [w, h] = aspectRatio.split(':').map(Number);
+                      const [w, h] = getCssAspectRatioParts(aspectRatio);
                       return `${w} / ${h}`;
                     })(),
                     background: isMonochrome ? 'rgba(0,0,0,0.03)' : 'rgba(255,255,255,0.04)',
@@ -1233,21 +1444,43 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
                   <span className="text-[11px]" style={{ color: textMutedColor }}>已用 {formatTime(elapsed)}</span>
                 )}
                 <button
-                  onClick={async () => {
-                    if (currentTaskIdRef.current) {
-                      try {
-                        await fetch('/api/cancel-task', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ taskId: currentTaskIdRef.current }) });
-                      } catch { /* ignore */ }
-                      currentTaskIdRef.current = null;
-                    }
-                    setIsProcessing(false);
-                    stopTimer();
-                    setProgressLabel('已取消');
-                  }}
+                  onClick={handleCancelRefine}
+                  disabled={runPhase === 'cancelling'}
                   className="text-[11px] px-2 py-0.5 rounded transition-colors cursor-pointer"
                   style={{ color: textMutedColor, border: `1px solid ${borderColor}` }}
                 >
-                  取消
+                  {runPhase === 'cancelling' ? '取消中...' : '取消'}
+                </button>
+              </div>
+            ) : runPhase === 'cancelled' ? (
+              <div className="flex flex-col items-center justify-center py-10 gap-3">
+                <BadgeCheck size={36} style={{ color: textMutedColor }} />
+                <p className="text-sm" style={{ color: textSubColor }}>任务已取消</p>
+                <button
+                  onClick={() => setActiveTab('settings')}
+                  className="text-xs px-3 py-1.5 rounded-md transition-colors"
+                  style={{ color: accentColor, border: `1px solid ${accentBorder}` }}
+                >
+                  返回精修设置
+                </button>
+              </div>
+            ) : runPhase === 'failed' ? (
+              <div className="flex flex-col items-center justify-center py-10 px-4 gap-3 text-center">
+                <Scan size={36} style={{ color: textMutedColor }} />
+                <p className="text-sm font-medium" style={{ color: textSubColor }}>精修失败</p>
+                <p className="text-xs break-words max-w-full" style={{ color: textMutedColor }}>
+                  {errorMessage || progressLabel || '精修失败，请重试'}
+                </p>
+                <button
+                  onClick={() => {
+                    setErrorMessage('');
+                    setRunPhase('idle');
+                    setActiveTab('settings');
+                  }}
+                  className="text-xs px-3 py-1.5 rounded-md transition-colors"
+                  style={{ color: accentColor, border: `1px solid ${accentBorder}` }}
+                >
+                  返回精修设置
                 </button>
               </div>
             ) : results.length > 0 ? (
@@ -1278,7 +1511,7 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
                         className="w-full rounded-lg overflow-hidden"
                         style={{
                           aspectRatio: (() => {
-                            const [w, h] = aspectRatio.split(':').map(Number);
+                            const [w, h] = getCssAspectRatioParts(aspectRatio);
                             return `${w} / ${h}`;
                           })(),
                           border: `2px solid ${i === 0 ? accentBorder : borderColor}`,
