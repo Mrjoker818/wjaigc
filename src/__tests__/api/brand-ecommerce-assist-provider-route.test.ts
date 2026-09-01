@@ -98,6 +98,47 @@ describe('brand ecommerce assist provider route', () => {
     });
   });
 
+  it('does not switch providers when an explicit provider id is unavailable', async () => {
+    state.findProviderById.mockResolvedValue(null);
+    state.findProviderForModel.mockResolvedValue({
+      ...state.provider,
+      id: 'fallback-provider',
+    });
+
+    const response = await POST(new NextRequest('http://localhost/api/brand-ecommerce', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'assist',
+        assistType: 'optimize-prompt',
+        productDesc: '白色陶瓷咖啡杯',
+        llmModel: 'gemini-3.1-flash-lite-preview',
+        llmProviderId: 'missing-provider',
+      }),
+    }));
+
+    expect(response.status).toBe(400);
+    expect(state.findProviderForModel).not.toHaveBeenCalled();
+    expect(state.submit).not.toHaveBeenCalled();
+  });
+
+  it('rejects a model that is not authorized by the explicit provider', async () => {
+    const response = await POST(new NextRequest('http://localhost/api/brand-ecommerce', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'assist',
+        assistType: 'optimize-prompt',
+        productDesc: '白色陶瓷咖啡杯',
+        llmModel: 'model-from-another-provider',
+        llmProviderId: 'apimart-chat',
+      }),
+    }));
+
+    expect(response.status).toBe(400);
+    expect(state.submit).not.toHaveBeenCalled();
+  });
+
   it('accepts an APImart SSE response and joins streamed content', async () => {
     state.submit.mockResolvedValue(new Response([
       'data: {"choices":[{"delta":{"content":"优化后的"}}]}',

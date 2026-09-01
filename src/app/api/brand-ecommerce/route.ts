@@ -1189,9 +1189,18 @@ export async function POST(request: NextRequest) {
       let provider: ApiProvider | null = null;
       if (llmProviderId) {
         provider = await findProviderById(llmProviderId);
-        if (provider) console.log(`[brand-ecommerce] assist: 通过 llmProviderId="${llmProviderId}" 匹配到LLM提供商 "${provider.name}"`);
-      }
-      if (!provider) {
+        if (!provider) {
+          return NextResponse.json({ error: '所选LLM提供商不存在或已停用' }, { status: 400 });
+        }
+        const authorizedModels = new Set([
+          ...(provider.selectedModels || []),
+          ...(provider.selectedModel ? [provider.selectedModel] : []),
+        ]);
+        if (!authorizedModels.has(llmModel)) {
+          return NextResponse.json({ error: '所选LLM模型未获得该提供商授权' }, { status: 400 });
+        }
+        console.log(`[brand-ecommerce] assist: 通过 llmProviderId="${llmProviderId}" 匹配到LLM提供商 "${provider.name}"`);
+      } else {
         provider = await findProviderForModel(llmModel);
       }
       if (!provider) return NextResponse.json({ error: '未找到该模型的API提供商配置' }, { status: 400 });
