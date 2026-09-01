@@ -1,5 +1,9 @@
 # 无界AI — 未验证项目清单 (UNVERIFIED ITEMS)
 
+## 2026-09-01 品牌辅助聊天端点剩余证据
+
+BUG-005 的三请求精确配对不再列为未验证。BUG-007 仍需在 Coze exact-SHA 上证明：`optimize-prompt`、`suggest-style`、`suggest-text` 均请求 `/chat/completions`；三者保持同一 `llmProviderId + llmModel`；APImart 返回可用辅助内容；刷新后配对不漂移；Console 无新增未处理异常。当前本地回归不替代真实供应商响应，也不扩大为后端显式供应商失配回退、授权或账务观察已经关闭。
+
 ## 2026-09-01 品牌 AI 辅助配对剩余云端证据
 
 `V588-PROVIDER-003-BUG-005` 的本地源码、组件和全仓门禁已经通过，不再列为“未修复”；缺少 `providerId` 的目录项也已在前端禁用辅助入口。仍未验证：Coze 拉取本轮 exact SHA 后，Google Chrome 中选择 Pear/APImart 可用聊天模型，三类 `/api/brand-ecommerce` 辅助请求均携带同一精确 `llmProviderId + llmModel`；真实辅助内容正常返回；刷新后仍恢复精确配对；Console 无重复 key 或新增未处理错误。后端显式供应商失配回退、授权与账务观察仍按 OBS-002/003/006 独立保留，不能被本前端通过覆盖。

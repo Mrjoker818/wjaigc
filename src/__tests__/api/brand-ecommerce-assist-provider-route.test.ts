@@ -1,0 +1,95 @@
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { NextRequest } from 'next/server';
+
+const state = vi.hoisted(() => ({
+  submit: vi.fn(),
+  findProviderById: vi.fn(),
+  findProviderForModel: vi.fn(),
+  provider: {
+    id: 'apimart-chat',
+    name: 'APImartLLM',
+    displayName: 'APImartLLM',
+    baseUrl: 'https://api.apib.ai/v1',
+    apiKey: 'local-test-key',
+    isEnabled: true,
+    modelType: 'chat',
+    requestStyle: 'chat-completions',
+    selectedModels: ['gemini-3.1-flash-lite-preview'],
+  },
+}));
+
+vi.mock('next/server', async importOriginal => ({
+  ...await importOriginal<typeof import('next/server')>(),
+  after: vi.fn(),
+}));
+vi.mock('@/lib/server-api-config', () => ({
+  findProviderById: state.findProviderById,
+  findProviderForModel: state.findProviderForModel,
+  getPublicModels: vi.fn(),
+}));
+vi.mock('@/lib/api-helpers', () => ({
+  fetchWithV1Retry: state.submit,
+  getInternalApiUrl: (path: string) => path,
+}));
+vi.mock('@/lib/api-auth', () => ({ getInternalRequestHeaders: vi.fn(async () => ({})) }));
+vi.mock('@/lib/task-registry', () => ({
+  registerTask: vi.fn(),
+  updateTaskProgress: vi.fn(),
+  isTaskCancelled: vi.fn(() => false),
+}));
+vi.mock('@/lib/server-auth', () => ({
+  getSessionUser: vi.fn(async () => ({ id: 'test-user' })),
+}));
+vi.mock('@/lib/credits', () => ({
+  consumeCredits: vi.fn(async () => ({ success: true, cost: 0 })),
+  refundCredits: vi.fn(),
+}));
+vi.mock('@/lib/db-storage', () => ({ dbGetEcomTemplate: vi.fn(async () => null) }));
+vi.mock('@/lib/op-log', () => ({
+  logOperation: vi.fn(),
+  logError: vi.fn(),
+  OP_ACTIONS: {},
+  startTimer: vi.fn(),
+}));
+vi.mock('@/app/api/brand-ecommerce/result-store', () => ({ setBrandResult: vi.fn() }));
+
+import { POST } from '@/app/api/brand-ecommerce/route';
+
+describe('brand ecommerce assist provider route', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    state.findProviderById.mockResolvedValue(state.provider);
+    state.findProviderForModel.mockResolvedValue(null);
+    state.submit.mockResolvedValue(Response.json({
+      choices: [{ message: { content: '优化后的提示词' } }],
+    }));
+  });
+
+  it('uses the selected APImart chat provider through chat/completions', async () => {
+    const response = await POST(new NextRequest('http://localhost/api/brand-ecommerce', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'assist',
+        assistType: 'optimize-prompt',
+        productDesc: '白色陶瓷咖啡杯',
+        llmModel: 'gemini-3.1-flash-lite-preview',
+        llmProviderId: 'apimart-chat',
+      }),
+    }));
+
+    expect(response.status).toBe(200);
+    expect(state.findProviderById).toHaveBeenCalledWith('apimart-chat');
+    expect(state.findProviderForModel).not.toHaveBeenCalled();
+    expect(state.submit).toHaveBeenCalledTimes(1);
+    expect(state.submit.mock.calls[0][0]).toBe('https://api.apib.ai/v1');
+    expect(state.submit.mock.calls[0][1]).toBe('/chat/completions');
+    expect(JSON.parse(state.submit.mock.calls[0][2].body as string)).toMatchObject({
+      model: 'gemini-3.1-flash-lite-preview',
+    });
+    await expect(response.json()).resolves.toMatchObject({
+      success: true,
+      content: '优化后的提示词',
+    });
+  });
+});

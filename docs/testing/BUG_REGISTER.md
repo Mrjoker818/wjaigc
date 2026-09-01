@@ -1,5 +1,21 @@
 # 无界AI — 缺陷登记表 (BUG REGISTER)
 
+## 2026-09-01 V588-PROVIDER-003 品牌辅助聊天端点
+
+### V588-PROVIDER-003-BUG-007：APImart 聊天模型被发送到图像生成端点
+
+| 字段 | 内容 |
+|---|---|
+| 等级/状态 | P1；本地已修复，Coze/Google Chrome 真实辅助返回待验 |
+| 云端稳定复现 | 品牌电商生成设置选择 `APImartLLM / gemini-3.1-flash-lite-preview`，三类辅助请求均携带精确 `llmProviderId + llmModel`，但全部 HTTP 500；上游原始 400 明确指出该模型不支持 `/v1/images/generations` |
+| 根因 | `brand-ecommerce` 的辅助分支复用了图像兼容解析器；`resolveCompatProfile()` 先按 `api.apib.ai` 域名命中 APImart 图像协议，覆盖供应商的 `modelType=chat` 与 `requestStyle=chat-completions` |
+| RED | 路由级测试使用真实兼容解析，稳定得到 `Expected /chat/completions, Received /images/generations` |
+| 最小修复 | 仅品牌辅助的 OpenAI 兼容聊天请求固定走 `/chat/completions`；继续使用前端冻结的精确供应商和模型，不回退其他供应商；品牌图像生成仍使用原 APImart 图像兼容路径 |
+| GREEN/回归 | 路由与品牌相关 `38/38`；全仓 `592 files / 4458 passed / 133 PostgreSQL-gated skipped / 0 failed`；TypeScript 通过；Lint `0 errors / 956 warnings`；生产构建 `118/118`；干净保护 `38/38`、0 漂移、0 警告 |
+| 账务边界 | 品牌辅助分支未调用积分扣除；本次云端失败没有品牌生成任务或辅助扣费证据，不扩大为账务通过 |
+| 未关闭条件 | Coze 精确拉取候选后，三类辅助请求必须走 `/chat/completions`、返回真实内容、保持同一精确配对，且无新增 Console 错误；完成前不关闭整项 PROVIDER-003 |
+| 证据 | `docs/testing/evidence/v588-provider-003-brand-assist-chat-route-local-20260901.json` |
+
 ## 2026-09-01 精修浮窗与取消链路云端闭环
 
 `main@6256612113ce46a9a747f96c98dc7997c3601e9b` 已在正确 Coze 项目完成同源码树构建，Google Chrome 原预览页强刷后实际验收通过。视口为 `2048×991`，异步内容加载后的“开始精修”按钮矩形为 `x=810.8, y=918.2, w=426.4, h=44, bottom=962.2`，按钮完整位于视口内，`V588-TOOLS-BUG-003` 关闭。

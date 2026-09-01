@@ -1,0 +1,42 @@
+{
+  "id": "V588-PROVIDER-003-BUG-007",
+  "date": "2026-09-01",
+  "baselineCommit": "c51177b07a8bdb638f63b4be613eab29b7f6ef9f",
+  "status": "local-fixed-cloud-pending",
+  "cloudReproduction": {
+    "providerId": "api_1778428130626_2qpg71v",
+    "providerName": "APImartLLM",
+    "modelId": "gemini-3.1-flash-lite-preview",
+    "configuredModelType": "chat",
+    "configuredRequestStyle": "chat-completions",
+    "observedWrongEndpoint": "/v1/images/generations",
+    "upstreamStatus": 400,
+    "applicationStatus": 500,
+    "requestIds": ["21312.6449", "21312.6450", "21312.6451"],
+    "exactProviderModelPairPresent": true,
+    "creditChargeObserved": false
+  },
+  "tdd": {
+    "red": "1 failed: expected /chat/completions, received /images/generations",
+    "greenFocused": "4 files, 38 passed, 0 failed",
+    "full": "592 files passed, 4458 tests passed, 25 files and 133 PostgreSQL-gated tests skipped, 0 failed"
+  },
+  "gates": {
+    "typescript": "passed",
+    "eslint": "0 errors, 956 historical warnings",
+    "build": "passed, 118/118 pages, NODE_OPTIONS=--max-old-space-size=8192",
+    "protectedBaseline": "38/38, 0 unapproved drift, 0 warnings in clean candidate",
+    "diffCheck": "passed"
+  },
+  "scope": {
+    "changedProductionPath": "src/app/api/brand-ecommerce/route.ts",
+    "newRegression": "src/__tests__/api/brand-ecommerce-assist-provider-route.test.ts",
+    "imageGenerationCompatibilityChanged": false,
+    "stableBranchChanged": false
+  },
+  "remaining": [
+    "Coze exact-SHA sync and rebuild",
+    "Google Chrome proof that all three assist requests use /chat/completions",
+    "real APImart assist content and console verification"
+  ]
+}

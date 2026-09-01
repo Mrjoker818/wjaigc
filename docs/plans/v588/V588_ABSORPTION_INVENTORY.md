@@ -2,6 +2,8 @@
 
 ## 当前权威检查点：2026-09-01
 
+品牌辅助的云端检查已把 `V588-PROVIDER-003-BUG-005` 推进为“精确配对已验证”：三类请求都携带同一 APImart `providerId + gemini-3.1-flash-lite-preview`。同时稳定复现独立的 `V588-PROVIDER-003-BUG-007`：后端按 APImart 域名套用图像兼容配置，把聊天请求发送到 `/images/generations`，上游明确返回“不是受支持的图像生成模型”。当前候选仅将品牌辅助的聊天调用固定到 `/chat/completions`，没有改变品牌生图和全局 APImart 图像协议。新增路由 RED 精确得到 `/images/generations`，GREEN 后品牌相关 `38/38`、全仓 `4458` 项、TypeScript、Lint `0 errors / 956 warnings`、8 GiB 构建 `118/118` 和干净保护 `38/38` 通过；133 项 PostgreSQL 测试继续因缺少隔离库跳过。状态为**本地修复、云端辅助内容待验**。
+
 `V588-PROVIDER-003-BUG-005` 已完成前端最小修复和本地门禁：品牌 LLM 同名模型以 `providerId::modelId` 唯一标识，三类 AI 辅助请求冻结并成对提交同一 `llmProviderId + llmModel`，精确存储可恢复，歧义旧裸键不再猜测；目录项没有 `providerId` 时不再暴露可触发后端隐式回退的辅助入口。专项 `13/13`、品牌回归 `68/68`、全仓 `4457` 项通过，TypeScript、零错误 Lint、`118/118` 构建和干净保护 `38/38` 通过；25 个 PostgreSQL 文件中的 133 项因未配置隔离库跳过。首次全仓运行仅 PSD 竞态用例发生一次 5 秒调度超时，随后单项通过、整文件连续三次通过，第二次完整全仓也通过，失败证据未隐藏。状态仅为**本地通过、Coze/Google Chrome 待验**，不扩大为后端回退、授权或账务关闭。证据：`docs/testing/evidence/v588-provider-003-brand-assist-pair-local-20260901.json`。
 
 `main@6256612113ce46a9a747f96c98dc7997c3601e9b` 已在正确 Coze 项目与 Google Chrome 完成精修浮窗和单次取消闭环：提交按钮完整位于视口内，任务 `refine-1788241634736-ob26or` 最终为 `cancelled/refunded`，12 积分一扣一退，取消后超过 90 秒无迟到结果覆盖或入画布。对应 `V588-TOOLS-BUG-003/004` 不再重复验证。

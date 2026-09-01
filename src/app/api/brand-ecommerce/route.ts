@@ -1047,17 +1047,13 @@ ${effectiveStyle ? `风格修饰: ${effectiveStyle}` : ''}
         max_tokens: 2000,
       };
 
-      const profile = resolveCompatProfile(provider as Parameters<typeof resolveCompatProfile>[0]);
-      const adjusted = adjustRequestForProfile(chatBody, profile, { hasImage: false });
-      const finalBody = adjusted.body;
-
-      const chatResp = await fetchWithV1Retry(provider.baseUrl, adjusted.endpoint, {
+      const chatResp = await fetchWithV1Retry(provider.baseUrl, '/chat/completions', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${provider.apiKey}`,
         },
-        body: JSON.stringify(finalBody),
+        body: JSON.stringify(chatBody),
       }, true, 30000);
 
       if (!chatResp.ok) {
