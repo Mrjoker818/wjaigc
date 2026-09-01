@@ -1,0 +1,63 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-09-01T23:25:00+08:00",
+  "timezone": "Asia/Shanghai",
+  "scope": "V588-PROVIDER-003 受控真实 HTTP 故障增量；临时供应商只用于错误边界，不代表 APImart 或 Pear 自身故障",
+  "source": {
+    "deployedSourceCommit": "f02550bac37b8c44732fb6a9c850db97cb461a25",
+    "localEvidenceCommitBeforeThisRecord": "6440e485",
+    "stableUntouched": "52f7c601ed150769e15d06fb435c6e360e28c9e7"
+  },
+  "nonJson": {
+    "status": "通过",
+    "transport": "真实公网 HTTP 请求",
+    "temporaryProvider": {
+      "id": "api_1788275874676_c1av3m6",
+      "namePrefix": "CODEx-FAULT-NONJSON-",
+      "baseUrl": "https://httpbin.org",
+      "model": "gpt-image-2",
+      "explicitProviderFrozen": true,
+      "cleanup": "finally 删除请求无异常完成；沙箱随后掉线，未再次列目录复核"
+    },
+    "task": {
+      "taskId": "font-design-1788275881139-boz4vr",
+      "idempotencyKey": "font-real-nonjson-1788275874600",
+      "status": "failed",
+      "errorCode": "ALL_PROVIDERS_FAILED",
+      "upstreamStatus": 404,
+      "rawErrorPreserved": "保留了上游 HTML 404 摘要，未伪造为 JSON 或成功结果",
+      "createdImage": false
+    },
+    "billing": {
+      "creditCost": 60,
+      "creditStatus": "refunded",
+      "chargedTransactionId": "ctx_charge_a380b3721d4907d6d4e727fa1bcea1de",
+      "refundedTransactionId": "ctx_refund_8056f65c2d97896abc3b773243527e7e",
+      "chargeCount": 1,
+      "refundCount": 1,
+      "balanceBefore": 328,
+      "balanceAfterCharge": 268,
+      "balanceAfterRefund": 328,
+      "totalUsedBefore": 3992,
+      "totalUsedAfter": 3992
+    }
+  },
+  "timeout": {
+    "status": "未验证",
+    "attemptedProviderNamePrefix": "CODEx-FAULT-TIMEOUT-",
+    "attemptedBaseUrl": "https://httpstat.us",
+    "failurePoint": "POST /api/admin/apis 创建临时供应商时客户端等待 30 秒后取消",
+    "authoritativeFollowUp": "随后 /api/auth/login 返回 instance_not_found，根页连续 12 次为 502；说明 Coze 实例消失，不能归因模型端点",
+    "businessTaskCreated": "未知；没有 providerId 或 taskId，禁止按模型超时计数",
+    "billingChanged": "未验证；恢复后必须先按 CODEx-FAULT-* 列目录、清理残留并核对余额/流水",
+    "browserRecovery": "在正确 Google Chrome 项目页点击沙箱断开弹窗的刷新按钮，弹窗消失；应用健康端点仍未恢复"
+  },
+  "remaining": [
+    "Coze 恢复后审计并清理所有 CODEx-FAULT-* 临时供应商",
+    "确认超时尝试没有创建任务或改变积分；若有任务，先只读取得终态和流水",
+    "重新执行一次可确认 providerId/taskId 的真实 HTTP 超时并验证 timeout + 一扣一退",
+    "字境 Google Chrome UI、Console、网络、录像与 Trace",
+    "隔离 PostgreSQL 133 项并发和终态测试"
+  ],
+  "conclusion": "非 JSON 故障边界真实通过；超时仍未验证。V588-PROVIDER-003 保持开放。"
+}

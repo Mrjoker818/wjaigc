@@ -1,5 +1,11 @@
 # 无界AI — 回归测试报告 (REGRESSION REPORT)
 
+## 2026-09-01 PROVIDER-003 受控真实 HTTP 非 JSON 增量
+
+在 Coze `f02550ba` 源码树上创建一次可清理的临时图像供应商，显式冻结 `providerId + gpt-image-2` 并让真实公网 HTTP 端点返回 HTML 404。字境任务 `font-design-1788275881139-boz4vr` 最终为 `failed/ALL_PROVIDERS_FAILED/refunded`，保留上游 HTML 错误摘要；60 积分恰好一扣一退，余额 `328 -> 268 -> 328`，`totalUsed` 保持 3992，无图片结果。该临时供应商的删除请求无异常完成。
+
+随后准备超时探针时，创建临时供应商请求等待 30 秒后取消；紧接着认证返回 `instance_not_found`，根页连续 12 次 502。没有 providerId/taskId，不能把平台实例消失写成模型超时。恢复后必须先清理 `CODEx-FAULT-*` 残留和核对流水，再重做一次可确认任务身份的超时验证。证据：[v588-provider-003-controlled-fault-cloud-20260901.json](evidence/v588-provider-003-controlled-fault-cloud-20260901.json)。
+
 ## 2026-09-01 PROVIDER-003 Coze 真实路由与结算增量
 
 Coze HEAD `ff0b5042` 与 `origin/main@f02550ba` 的 tree 完全一致，构建 ID `MTObh3wZMhxo-_4Q_hSBy`。云端门禁为 595 个测试文件、4492 项通过；25 个文件中的 133 项 PostgreSQL 专项明确跳过；TypeScript、Lint `0/0`、保护基线和 `118/118` 构建通过。

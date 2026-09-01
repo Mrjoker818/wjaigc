@@ -1,5 +1,9 @@
 # 无界AI — 缺陷登记表 (BUG REGISTER)
 
+## 2026-09-01 V588-PROVIDER-003 受控故障复现增量
+
+`V588-PROVIDER-003-BUG-010` 的非 JSON 边界已取得真实云端证据：显式字境供应商收到公网 HTML 404 后，任务进入 `failed`，保留原始错误摘要，60 积分只有一扣一退且余额恢复，无图片结果。超时边界仍开放；准备超时探针时 Coze 实例在供应商创建阶段消失，没有 providerId/taskId，不能登记成模型超时。恢复后必须先审计 `CODEx-FAULT-*` 残留和账务，再继续该 Bug 的超时验收。证据：[v588-provider-003-controlled-fault-cloud-20260901.json](evidence/v588-provider-003-controlled-fault-cloud-20260901.json)。
+
 ## 2026-09-01 V588-PROVIDER-003 云端真实结算增量
 
 `main@f02550ba` 对应 Coze 构建已取得真实正向和负向证据：品牌辅助冻结 APImart LLM 精确配对并返回完整内容；字境 APImart 图像任务完成且只扣 60 积分，同键重放复用同一任务且不重复扣费；另一个字境任务真实取消后只有一扣一退，60 秒后迟到结果没有覆盖 `cancelled/refunded/revision=1`；不存在的显式供应商在任务和扣费前返回 `MODEL_PROVIDER_MISMATCH`。精修既有完成与取消任务的供应商身份、单次扣费/退款和终态也已重新读取确认。
