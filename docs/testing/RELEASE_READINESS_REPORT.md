@@ -1,5 +1,9 @@
 # 无界AI — 发布就绪报告 (RELEASE READINESS REPORT)
 
+## 2026-09-01 品牌辅助失败提示候选
+
+总体结论保持**不通过**。`main@1e58c84e` 已在本地修复品牌 AI 辅助 HTTP/业务失败被静默吞掉的问题，并通过 `4459` 项全仓测试、TypeScript、零错误 Lint、`118/118` 构建及干净保护 `38/38`。但 133 项真实 PostgreSQL 专项仍因无隔离库跳过，且云端根服务在验收窗口整体返回 HTTP 502，候选尚未取得恢复后的 Google Chrome 三类真实辅助内容、可见失败提示与 Console 证据。`stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 保持未触碰。
+
 ## 2026-09-01 品牌辅助端点候选
 
 结论保持**不通过**。BUG-005 的 `providerId + modelId` 云端请求配对已经取得正向证据，但 BUG-007 使三个辅助请求在上游图像端点失败。本地最小修复和全部静态/测试/构建门禁已通过；只有 Coze 精确拉取候选并由 Google Chrome 证明三个请求走 `/chat/completions` 且返回真实内容后，才可关闭该子项。133 项隔离 PostgreSQL 测试仍明确未验证，`stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 未触碰。

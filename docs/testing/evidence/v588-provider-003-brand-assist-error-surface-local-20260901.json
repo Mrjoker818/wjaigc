@@ -1,0 +1,49 @@
+{
+  "id": "V588-PROVIDER-003-BUG-008",
+  "date": "2026-09-01",
+  "baselineCommit": "f290a94d9da6465305f8702c8ca3d96d07e9796e",
+  "candidateCommit": "1e58c84e5e8d5e6f4a7a17255206ef2ef2be619c",
+  "status": "local-fixed-cloud-environment-blocked",
+  "rootCause": {
+    "component": "src/components/brand-ecommerce-panel.tsx",
+    "behavior": "HTTP and business failures were parsed as fulfilled JSON and ignored after Promise.allSettled",
+    "userImpact": "AI assist stopped without changing fields or showing an error"
+  },
+  "tdd": {
+    "red": "1 failed, 13 passed; expected upstream error text was absent",
+    "greenComponent": "14 passed, 0 failed",
+    "brandRegression": "4 files, 39 passed, 0 failed",
+    "full": "592 files passed, 4459 tests passed, 25 files and 133 PostgreSQL-gated tests skipped, 0 failed"
+  },
+  "gates": {
+    "typescript": "passed",
+    "eslint": "0 errors, 956 historical warnings",
+    "build": "passed, 118/118 pages, NODE_OPTIONS=--max-old-space-size=8192",
+    "protectedBaselineCleanWorktree": "38/38, 0 unapproved drift, 0 warnings",
+    "dirtyWorktreeAttempt": "blocked by existing untracked .playwright-cli and read-only reference repositories; no files deleted and no allowlist broadened",
+    "diffCheck": "passed"
+  },
+  "cloudObservation": {
+    "previewRootStatus": 502,
+    "assistTypes": ["optimize-prompt", "suggest-style", "suggest-text"],
+    "assistStatuses": [502, 502, 502],
+    "providerId": "api_1778428130626_2qpg71v",
+    "modelId": "gemini-3.1-flash-lite-preview",
+    "interpretation": "Coze root and business routes were unavailable; no APImart or candidate success conclusion is permitted",
+    "chromeControl": "extension tab claim became unavailable; treated as test-tool blocker, not application evidence"
+  },
+  "scope": {
+    "changedProductionPath": "src/components/brand-ecommerce-panel.tsx",
+    "changedRegressionPath": "src/__tests__/components/brand-ecommerce-provider-selection.test.tsx",
+    "providerRoutingChanged": false,
+    "imageGenerationChanged": false,
+    "billingChanged": false,
+    "stableBranchChanged": false
+  },
+  "remaining": [
+    "push candidate and let Coze fetch the exact main commit",
+    "restart sandbox and hard-refresh the existing Google Chrome preview tab",
+    "verify three real assist responses and visible failure feedback",
+    "retain 133 PostgreSQL-gated tests as unverified until an isolated database exists"
+  ]
+}

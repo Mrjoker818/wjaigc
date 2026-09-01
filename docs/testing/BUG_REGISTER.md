@@ -1,5 +1,20 @@
 # 无界AI — 缺陷登记表 (BUG REGISTER)
 
+## 2026-09-01 V588-PROVIDER-003 品牌辅助失败提示
+
+### V588-PROVIDER-003-BUG-008：品牌 AI 辅助请求失败被前端静默吞掉
+
+| 字段 | 内容 |
+|---|---|
+| 等级/状态 | P2；`main@1e58c84e` 本地已修复，Coze/Google Chrome 待验 |
+| 稳定复现 | 品牌面板三类辅助响应返回 HTTP 502、`success:false` 时，按钮结束加载但字段不变，页面无错误提示；RED 组件测试为 `1 failed / 13 passed` |
+| 根因 | `brand-ecommerce-panel.tsx` 只执行 `response.json()`，未检查 `response.ok` 或业务 `success`；`Promise.allSettled` 后只消费 fulfilled 内容，所有 rejected 结果也未写入 `assistError` |
+| 最小修复 | 每项请求解析后检查 HTTP/业务状态并抛出保留原始后端错误的异常；三项完成后显示第一条失败原因，部分成功结果仍可应用 |
+| GREEN/回归 | 组件 `14/14`；品牌相关 `39/39`；全仓 `592 files / 4459 passed / 133 PostgreSQL-gated skipped / 0 failed`；TypeScript 通过；Lint `0 errors / 956 warnings`；生产构建 `118/118`；干净保护 `38/38`、0 漂移、0 warning |
+| 云端边界 | 实际点击时修复前界面无提示；随后根页与三类直连探针均 HTTP 502，证明当时是整个 Coze 服务不可用，不能据此判定 APImart 或新路由失败。候选尚未在恢复后的云端复验 |
+| 账务边界 | 品牌辅助不扣积分；本轮未创建品牌生图任务，不能扩展为生成账务或退款通过 |
+| 证据 | `docs/testing/evidence/v588-provider-003-brand-assist-error-surface-local-20260901.json` |
+
 ## 2026-09-01 V588-PROVIDER-003 品牌辅助聊天端点
 
 ### V588-PROVIDER-003-BUG-007：APImart 聊天模型被发送到图像生成端点

@@ -1,5 +1,11 @@
 # 无界AI — 未验证项目清单 (UNVERIFIED ITEMS)
 
+## 2026-09-01 品牌辅助失败提示剩余云端证据
+
+`V588-PROVIDER-003-BUG-008` 已完成本地 RED→GREEN、全仓门禁和干净保护，不再列为“未开发”。仍未验证：Coze 拉取 `main@1e58c84e` 或其后续文档提交并成功重建后，Google Chrome 现有预览标签中三类辅助真实返回内容；任一 HTTP/业务失败时页面显示后端原始原因；部分成功时成功字段保留；精确 `llmProviderId + llmModel` 不漂移；Console 无新增未处理异常。
+
+本轮根页与三类直连请求全部 HTTP 502，属于整个 Coze 服务不可用的环境阻塞；Chrome 扩展在 `claimTab` 后连接失效属于自动化控制阻塞。二者均不能写成 APImart 失败、应用通过或应用新缺陷。133 项 PostgreSQL 专项仍因缺少隔离测试库保持未验证。
+
 ## 2026-09-01 品牌辅助聊天端点剩余证据
 
 BUG-005 的三请求精确配对不再列为未验证。BUG-007 仍需在 Coze exact-SHA 上证明：`optimize-prompt`、`suggest-style`、`suggest-text` 均请求 `/chat/completions`；三者保持同一 `llmProviderId + llmModel`；APImart 返回可用辅助内容；刷新后配对不漂移；Console 无新增未处理异常。当前本地回归不替代真实供应商响应，也不扩大为后端显式供应商失配回退、授权或账务观察已经关闭。

@@ -1,5 +1,13 @@
 # 无界AI — 回归测试报告 (REGRESSION REPORT)
 
+## 2026-09-01 品牌辅助失败提示本地回归
+
+`V588-PROVIDER-003-BUG-008` 已完成可重复 RED→GREEN：HTTP 502 且业务 `success:false` 的三类辅助响应在旧代码中无可见提示，新增回归首先稳定失败；最小实现同时检查 HTTP 与业务状态、保留后端错误，并允许并发三项中的部分成功继续落入字段。修复后组件 `14/14`、品牌相关 `39/39` 通过。
+
+Fresh 全量门禁为 `592` 个测试文件、`4459` 项通过、0 失败；25 个文件中的 133 项 PostgreSQL 专项因未配置隔离测试库跳过。`pnpm ts-check` 通过；ESLint `0 errors / 956 historical warnings`；8 GiB 生产构建 `118/118`；提交 `1e58c84e` 的干净隔离工作树保护门禁 `38/38`、0 未批准漂移、0 warning。脏工作区首次保护检查被既有 `.playwright-cli` 与两个只读参考仓库拦截，该失败未隐藏，未删除或放宽这些文件；干净候选结果才作为有效门禁。
+
+云端真实点击只证明修复前失败无提示。随后根 URL 与三类品牌辅助直连探针均返回 HTTP 502，因此当时属于 Coze 整体不可用，不能归因 APImart，也不能冒充候选云端通过。证据：[v588-provider-003-brand-assist-error-surface-local-20260901.json](evidence/v588-provider-003-brand-assist-error-surface-local-20260901.json)。
+
 ## 2026-09-01 品牌辅助聊天端点本地回归
 
 云端真实网络体已经证明 BUG-005 的精确配对生效，同时揭示 BUG-007：APImart 聊天模型被错误送到 `/images/generations`。新增路由级 RED 稳定复现端点错误；最小实现只把品牌辅助请求改为 `/chat/completions`，不触碰品牌生图或全局 APImart 图像协议。GREEN 后相关 `38/38`，全仓 `592` 个文件、`4458` 项通过，0 失败；25 个文件中的 133 项因缺少 `POSTGRES_TEST_DATABASE_URL` 跳过。TypeScript 通过，Lint 为 `0 errors / 956 historical warnings`，8 GiB 生产构建生成 `118/118` 页面，干净候选保护基线 `38/38`、0 漂移、0 警告。真实辅助成功响应仍待云端部署复验。

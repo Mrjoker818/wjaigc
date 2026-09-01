@@ -2,6 +2,8 @@
 
 ## 当前权威检查点：2026-09-01
 
+品牌辅助端点修复 `f290a94d` 已存在于 GitHub/Coze 源码，后续真实点击揭示 `V588-PROVIDER-003-BUG-008`：前端把 HTTP 502 当成已兑现 Promise，并由 `Promise.allSettled` 静默忽略，用户看不到失败原因。已按 RED→GREEN 在 `main@1e58c84e` 最小修复：三类辅助请求统一检查 HTTP 与业务 `success`，保留后端原始错误；部分成功内容继续写入，至少一项失败时显示第一条真实原因。专项组件 `14/14`、品牌回归 `39/39`、全仓 `592 files / 4459 passed / 133 PostgreSQL-gated skipped / 0 failed`，TypeScript 通过，Lint `0 errors / 956 historical warnings`，8 GiB 构建 `118/118`，干净保护 `38/38`、0 漂移、0 warning。当前云端根页和三类直连探针全部 HTTP 502，故只判定**本地修复，云端真实辅助内容仍未验证**；Chrome 扩展接管不稳定是测试工具阻塞，不记作应用 Bug。证据：`docs/testing/evidence/v588-provider-003-brand-assist-error-surface-local-20260901.json`。
+
 品牌辅助的云端检查已把 `V588-PROVIDER-003-BUG-005` 推进为“精确配对已验证”：三类请求都携带同一 APImart `providerId + gemini-3.1-flash-lite-preview`。同时稳定复现独立的 `V588-PROVIDER-003-BUG-007`：后端按 APImart 域名套用图像兼容配置，把聊天请求发送到 `/images/generations`，上游明确返回“不是受支持的图像生成模型”。当前候选仅将品牌辅助的聊天调用固定到 `/chat/completions`，没有改变品牌生图和全局 APImart 图像协议。新增路由 RED 精确得到 `/images/generations`，GREEN 后品牌相关 `38/38`、全仓 `4458` 项、TypeScript、Lint `0 errors / 956 warnings`、8 GiB 构建 `118/118` 和干净保护 `38/38` 通过；133 项 PostgreSQL 测试继续因缺少隔离库跳过。状态为**本地修复、云端辅助内容待验**。
 
 `V588-PROVIDER-003-BUG-005` 已完成前端最小修复和本地门禁：品牌 LLM 同名模型以 `providerId::modelId` 唯一标识，三类 AI 辅助请求冻结并成对提交同一 `llmProviderId + llmModel`，精确存储可恢复，歧义旧裸键不再猜测；目录项没有 `providerId` 时不再暴露可触发后端隐式回退的辅助入口。专项 `13/13`、品牌回归 `68/68`、全仓 `4457` 项通过，TypeScript、零错误 Lint、`118/118` 构建和干净保护 `38/38` 通过；25 个 PostgreSQL 文件中的 133 项因未配置隔离库跳过。首次全仓运行仅 PSD 竞态用例发生一次 5 秒调度超时，随后单项通过、整文件连续三次通过，第二次完整全仓也通过，失败证据未隐藏。状态仅为**本地通过、Coze/Google Chrome 待验**，不扩大为后端回退、授权或账务关闭。证据：`docs/testing/evidence/v588-provider-003-brand-assist-pair-local-20260901.json`。
