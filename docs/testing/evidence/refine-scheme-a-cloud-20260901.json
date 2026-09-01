@@ -1,5 +1,71 @@
 {
   "recordedAt": "2026-09-01T01:15:00+08:00",
+  "continuationAt": "2026-09-01T01:23:00+08:00",
+  "resumedAcceptanceAt": "2026-09-01T08:25:00+08:00",
+  "databaseAcceptance": {
+    "environment": "develop，与当前预览余额及流水一致；product空库未重复查询",
+    "taskId": "refine-1788196115652-yk8ie0",
+    "status": "completed",
+    "progress": 100,
+    "creditStatus": "charged",
+    "creditCost": 12,
+    "remoteTaskId": "task_01M1CCQ0J0DBCPM88KS91ENEY7",
+    "chargedTransactionId": "ctx_charge_bca231a2697ae476c7db93beb9de493d",
+    "refundCount": 0,
+    "balance": 4794,
+    "sourceArtifact": {
+      "file": "refine-live-coze-readonly-result.txt",
+      "bytes": 31010,
+      "sha256": "72aff5c37542a07d424cbbfe7d7c003d2618b2ae32541a0d0dee3a864f3650fa"
+    }
+  },
+  "downloadAcceptance": {
+    "selectedCanvasArtifact": "gen-1788196179948-mbb2b0.png",
+    "action": "图片浮动工具栏 > 下载 > PNG > 确认下载",
+    "downloadEventObserved": false,
+    "downloadEventLimitation": "8秒事件监听未捕获，但弹窗关闭且本机文件真实产生",
+    "file": "C:/Users/Administrator/Downloads/wujie_20260901_751_image.png",
+    "bytes": 1185536,
+    "format": "png",
+    "width": 1254,
+    "height": 1254,
+    "sha256": "b41a24e048e37e87d6e91b77090df3ef677cca9ebee0f546e706686872b62e16",
+    "consoleErrorWarningCountAfterAction": 0,
+    "screenshot": {
+      "file": "refine-live-download-completed.png",
+      "bytes": 152923,
+      "sha256": "860e018ee41906fdcbf3bef4791365a6da1fc8fa34d3d34912e2c4c0dcc53b62"
+    }
+  },
+  "viewportProbe": {
+    "bugId": "V588-TOOLS-BUG-003",
+    "commit": "65c595bf05432735575fed5e92ba59f7fbf1671a",
+    "scope": "原源码几何复现，不是浏览器布局测试；生产代码未改",
+    "passed": 2,
+    "failed": 4,
+    "exitCode": 1,
+    "sourceSha256": "2434919bb60c1890a8d1ebf1a8d5e9425012a2a6ea2cdf29ad58d24c3132dc07",
+    "artifacts": [
+      { "file": "refine-viewport-probe.cjs", "sha256": "e463d3395f4fad9c9e049632af4550dbea92bd7ce7f5f8b9a33bd575b295c4e7" },
+      { "file": "refine-viewport-probe.json", "sha256": "607c5c29d2724c0e6d01bdf421ab3e18254a4b5d8defe8616c81fd4eadd8781d" }
+    ]
+  },
+  "continuationBrowserState": {
+    "correctChromeTabsListed": true,
+    "projectClaimTimedOut": true,
+    "runningExtensionNativeHostChecksPassed": true,
+    "newCozeReceiptRead": false,
+    "newPaidGeneration": false,
+    "newSyncOrBuild": false
+  },
+  "blockedAudit": {
+    "recordedAt": "2026-09-01T01:27:00+08:00",
+    "consecutiveAffectedGoalTurns": 3,
+    "sameBlocker": "正确Google Chrome可枚举，但原项目和原预览无法接管",
+    "latestPreviewClaimTimedOut": true,
+    "completedObjective": false,
+    "resumeAt": "先读原Coze只读核验消息及草稿，不重复成功生成；再补原始数据库、下载和失败结算证据"
+  },
   "bugId": "V588-TOOLS-BUG-002",
   "conclusion": "正向精修链路有条件通过；完整方案与全平台不通过，失败结算/原始数据库/下载等未闭环",
   "sourceCommit": "b8b090f0a96559fd9a8f78cb68c181f05981c974",
