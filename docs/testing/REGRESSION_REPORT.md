@@ -1,5 +1,9 @@
 # 无界AI — 回归测试报告 (REGRESSION REPORT)
 
+## 2026-09-01 精修取消云端尝试
+
+真实Chrome只提交一次APImart `gpt-image-2`精修；`/api/refine-engine`立即HTTP 500并返回Coze平台结构`no sandbox ID found for taskID`。未取得应用taskId、未出现取消按钮、未调用`/api/cancel-task`，所以本次结果为`BLOCKED_NOT_EXECUTED`，不是取消成功或失败。UI错误呈现同时失败：面板跳到空结果页，未显示可理解错误，Console出现`Unexpected response: Object`。刷新项目页触发沙箱启动，随后按规则强刷原预览页却稳定复现`ERR_BLOCKED_BY_CLIENT`。没有重复任务或业务代码修改；权威扣费/退款证据仍待可用云端环境。机器证据见`evidence/refine-cancel-cloud-20260901.json`。
+
 ## 2026-09-01 方案A修复回归
 
 **08:25真实增量：** Coze develop库原始行确认新精修为`completed/100`、charged 12、远端ID及扣费事务精确关联，退款0、余额4794；原只读消息未重发。原1254×1254成品仍在画布，PNG实际下载落盘1185536字节，哈希已记录，操作后Console错误/警告0。方案A正向链路通过；真实失败/取消/超时退款及竞争、远端原始响应、录像Trace仍未验，浮窗越界BUG-003未修复。未新增模型任务、扣费、构建或业务修改，最新证据见[方案A报告](REFINE_DURABLE_FIX_2026-09-01.md)。

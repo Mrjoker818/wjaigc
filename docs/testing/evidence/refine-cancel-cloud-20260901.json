@@ -1,0 +1,75 @@
+{
+  "test": "V588-TOOLS-BUG-002 refine cancellation and settlement cloud attempt",
+  "testedAt": "2026-09-01T09:39:20+08:00",
+  "browser": "Google Chrome profile 用户1",
+  "previewUrl": "https://62afe49a-716e-4d9e-99cd-a0be49c4794c-5000.dev.coze.site/",
+  "git": {
+    "localHead": "a864dfd344d6796fb49fb1cf0c2317575394904c",
+    "localOriginMain": "a864dfd344d6796fb49fb1cf0c2317575394904c",
+    "branch": "main",
+    "stableTouched": false
+  },
+  "request": {
+    "method": "POST",
+    "path": "/api/refine-engine",
+    "action": "refine",
+    "providerId": "api_1778430731224_533e09a",
+    "model": "gpt-image-2",
+    "sourceImage": "/api/serve-upload/uploads/gen-1788196179948-mbb2b0.png",
+    "submittedCount": 1
+  },
+  "response": {
+    "httpStatus": 500,
+    "body": {
+      "BaseResp": {
+        "StatusMessage": "no sandbox ID found for taskID",
+        "StatusCode": 1
+      }
+    },
+    "applicationTaskIdReturned": false,
+    "cancelControlAppeared": false,
+    "cancelRequestSent": false
+  },
+  "ui": {
+    "actual": "面板自动切换到精修结果页并显示暂无精修结果，页面无可见错误说明；Console记录Unexpected response: Object。",
+    "expected": "平台或应用提交失败时停留在设置页，显示可理解且可重试的错误；只有取得应用taskId后才进入处理中并允许取消。"
+  },
+  "billing": {
+    "authoritativeDatabaseVerified": false,
+    "note": "该500未返回应用taskId。故本次不能执行真实取消，也不能以积分页异常显示的0余额/0记录替代数据库结算证据。"
+  },
+  "environment": {
+    "projectPageAfterReload": "沙箱启动中",
+    "previewAfterRequiredReload": "ERR_BLOCKED_BY_CLIENT",
+    "retryReloadResult": "ERR_BLOCKED_BY_CLIENT",
+    "conclusion": "Coze/Chrome环境阻塞；本次不是业务取消通过证据。"
+  },
+  "artifacts": [
+    {
+      "path": ".playwright-cli/refine-cancel-cloud-20260901/refine-submit-response.json",
+      "bytes": 128,
+      "sha256": "bd1e128f2d1c83df90b82bacb52507ce9ec85dc0dc34b4b7cc4ba744eb8bc878"
+    },
+    {
+      "path": ".playwright-cli/refine-cancel-cloud-20260901/submit-500-no-cancel.png",
+      "bytes": 145097,
+      "sha256": "4f1ab86ba9de6c66dfe9329a96bd1d92d2602658b0177e99e65bbc5683b7a10d"
+    },
+    {
+      "path": ".playwright-cli/refine-cancel-cloud-20260901/coze-project-state.png",
+      "bytes": 196952,
+      "sha256": "f8d7df1e679edc6eb1c9bd7e570c2a0420e20aa367c603f69eadbc9079a7c1a7"
+    },
+    {
+      "path": ".playwright-cli/refine-cancel-cloud-20260901/coze-project-after-reload.png",
+      "bytes": 176484,
+      "sha256": "96685a128af53008d2dfcb3cf9ed27d2966ac021e9dee86acc06afa57d307938"
+    },
+    {
+      "path": ".playwright-cli/refine-cancel-cloud-20260901/preview-err-blocked-by-client.png",
+      "bytes": 23238,
+      "sha256": "db1ae66175677e255b0c028d8928144ba6610e7c1090b6cfc3120dbe802a0a35"
+    }
+  ],
+  "result": "BLOCKED_NOT_EXECUTED"
+}

@@ -1,5 +1,11 @@
 # 无界AI — 缺陷登记表 (BUG REGISTER)
 
+## 2026-09-01 云端取消测试环境阻塞与错误呈现缺陷
+
+**取消链路未执行，不能标记通过。** 已登录Google Chrome中仅点击一次“开始精修”，真实POST `/api/refine-engine` 携带APImart `gpt-image-2`及当前蓝杯源图；接口立即返回HTTP 500：`no sandbox ID found for taskID`，没有应用taskId、没有取消按钮，也没有发送`/api/cancel-task`。面板却自动切换到“精修结果/暂无精修结果”，页面没有可见错误，Console仅记录`Unexpected response: Object`。这是提交失败错误呈现缺陷，暂按P2并入`V588-TOOLS-BUG-002`验收阻塞，不把Coze平台500误判为供应商或取消状态机故障。
+
+按既定规则刷新Coze项目页后可见“沙箱启动中”；沙箱恢复后强刷原预览标签，Chrome变为`ERR_BLOCKED_BY_CLIENT`，再次重新加载仍相同。积分页曾显示0余额/0流水，与此前权威4794余额矛盾，不能作为本次未扣费证明；本次结算仍须后续通过限定taskId的真实数据库证据核对。证据索引：`evidence/refine-cancel-cloud-20260901.json`。本轮未修改业务源码、未重复提交、未触碰stable。
+
 ## 2026-09-01 当前状态：V588-TOOLS-BUG-002
 
 **方案A正向链路真实通过，完整缺陷不关闭。** 08:24恢复原Chrome后已读取Coze原始只读回执：新任务 `refine-1788196115652-yk8ie0` 的 `cloud_tasks` 为 `completed/100`、`credit_status=charged`、`credit_cost=12`，关联远端任务、供应商、模型及唯一扣费事务；退款0、余额4794。原1254×1254成品通过图片工具栏实际下载到本机，PNG 1185536字节且哈希与尺寸已记录，页面无Console错误。正向数据库及下载不再列为未验证。真实失败/取消/超时退款、远端APImart原始响应、完整录像Trace仍未验证；旧12积分未补偿。未重复生成/同步/构建，本轮无业务代码改动，原本地4569门禁不重跑。详见[实施记录](REFINE_DURABLE_FIX_2026-09-01.md)。
