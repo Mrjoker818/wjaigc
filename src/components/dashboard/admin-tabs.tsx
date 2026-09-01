@@ -123,6 +123,42 @@ interface SystemSettings {
   announcementExpiry?: string; announcement?: string;
 }
 
+const CREDIT_TRANSACTION_LABELS: Record<string, string> = {
+  recharge: '充值',
+  refund: '退款',
+  compensation: '补偿',
+  adjustment: '扣减',
+  image: '图像生成',
+  video: '视频生成',
+  chat: 'AI 对话',
+  other: '其他消费',
+};
+
+interface CreditTransactionView {
+  id?: string;
+  user: string;
+  type: string;
+  typeLabel?: string;
+  direction?: 'credit' | 'debit';
+  amount: number;
+  desc: string;
+  time: string;
+}
+
+function normalizeCreditTransaction(transaction: CreditTransactionView): CreditTransactionView & {
+  typeLabel: string;
+  direction: 'credit' | 'debit';
+} {
+  const direction = transaction.direction === 'credit' || transaction.direction === 'debit'
+    ? transaction.direction
+    : transaction.amount >= 0 ? 'credit' : 'debit';
+  return {
+    ...transaction,
+    typeLabel: transaction.typeLabel || CREDIT_TRANSACTION_LABELS[transaction.type] || transaction.type,
+    direction,
+  };
+}
+
 interface AdminTabsProps {
   activeTab: string;
   adminUsers: AdminUser[];
@@ -297,9 +333,10 @@ export default function AdminTabs(props: AdminTabsProps) {
   /* ── Credits state ── */
   const [creditsOverview, setCreditsOverview] = useState<{
     totalBalance: number; totalRecharged: number; totalConsumed: number; totalUsers: number; avgPerUser: number;
+    flows: { consumed: number; refunded: number; recharged: number; compensated: number };
     distribution: { label: string; value: number; color: string; pct: string }[];
     topUsers: { userId?: string; name: string; consumed: number; totalConsumed: number; balance: number; totalRecharged: number; pct?: string }[];
-    recentTransactions: { id: string; user: string; type: string; amount: number; desc: string; time: string }[];
+    recentTransactions: { id: string; user: string; type: string; typeLabel: string; direction: 'credit' | 'debit'; amount: number; desc: string; time: string }[];
   } | null>(null);
   const [rechargeUserId, setRechargeUserId] = useState<string | null>(null);
   const [rechargeAmount, setRechargeAmount] = useState(100);
@@ -359,7 +396,14 @@ export default function AdminTabs(props: AdminTabsProps) {
   const loadCreditsOverview = useCallback(async () => {
     try {
       const res = await fetch('/api/admin/credits/overview');
-      if (res.ok) { const data = await res.json(); setCreditsOverview(data); }
+      if (res.ok) {
+        const data = await res.json();
+        setCreditsOverview({
+          ...data,
+          flows: data.flows || { consumed: data.totalConsumed || 0, refunded: 0, recharged: data.totalRecharged || 0, compensated: 0 },
+          recentTransactions: (data.recentTransactions || []).map((transaction: CreditTransactionView) => normalizeCreditTransaction(transaction)),
+        });
+      }
     } catch {}
   }, []);
 
@@ -1397,11 +1441,14 @@ export default function AdminTabs(props: AdminTabsProps) {
                   onChange={e => setFilterConsumptionType(e.target.value)}
                   className="bg-background border border-border rounded-md px-3 py-1.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 cursor-pointer">
                   <option value="">全部类型</option>
-                  <option value="image">生图</option>
+                  <option value="image">图像生成/编辑</option>
+                  <option value="chat">AI 对话</option>
                   <option value="video">视频</option>
-                  <option value="edit">编辑</option>
-                  <option value="3d">3D</option>
-                  <option value="vectorize">矢量化</option>
+                  <option value="other">其他消费</option>
+                  <option value="recharge">充值</option>
+                  <option value="refund">退款</option>
+                  <option value="compensation">补偿</option>
+                  <option value="adjustment">扣减</option>
                 </select>
               </div>
               <button
@@ -1414,9 +1461,9 @@ export default function AdminTabs(props: AdminTabsProps) {
                   const rows = transactions.map(t => [
                     t.time,
                     t.user,
-                    t.type === 'recharge' ? '充值' : t.type === 'image' ? '生图' : t.type === 'video' ? '视频' : t.type === 'edit' ? '编辑' : t.type,
+                    t.typeLabel,
                     t.desc || '-',
-                    (t.type === 'recharge' ? '+' : '-') + Math.abs(t.amount),
+                    (t.direction === 'credit' ? '+' : '-') + Math.abs(t.amount),
                     '已完成',
                   ]);
                   const csvContent = [header, ...rows].map(row => row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(',')).join('\n');
@@ -1434,7 +1481,7 @@ export default function AdminTabs(props: AdminTabsProps) {
             </div>
             <div className="bg-card rounded-lg shadow-card overflow-hidden border border-border/50">
               <div className="grid grid-cols-6 px-5 py-3 bg-muted text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                <span>时间</span><span>用户</span><span>类型</span><span>模型</span><span>消耗积分</span><span>状态</span>
+                <span>时间</span><span>用户</span><span>类型</span><span>说明</span><span>积分变化</span><span>状态</span>
               </div>
               <div className="divide-y divide-border/30">
                 {(co?.recentTransactions || [])
@@ -1444,9 +1491,9 @@ export default function AdminTabs(props: AdminTabsProps) {
                   <div key={i} className="grid grid-cols-6 px-5 py-3 hover:bg-muted/30 transition-colors items-center">
                     <span className="text-sm text-muted-foreground font-mono">{t.time}</span>
                     <span className="text-sm font-medium text-foreground">{t.user}</span>
-                    <span className={`inline-flex items-center px-2 py-0.5 rounded-sm text-xs font-medium w-fit ${t.type === 'recharge' ? 'bg-primary/15 text-primary' : t.type === 'image' ? 'bg-primary/15 text-primary' : t.type === 'video' ? 'bg-blue-500/15 text-blue-500' : 'bg-green-500/15 text-green-500'}`}>{t.type === 'recharge' ? '充值' : t.type === 'image' ? '生图' : t.type === 'video' ? '视频' : t.type === 'edit' ? '编辑' : t.desc || t.type}</span>
+                    <span className={`inline-flex items-center px-2 py-0.5 rounded-sm text-xs font-medium w-fit ${t.type === 'recharge' || t.type === 'compensation' ? 'bg-primary/15 text-primary' : t.type === 'refund' ? 'bg-blue-500/15 text-blue-500' : t.type === 'video' ? 'bg-blue-500/15 text-blue-500' : 'bg-green-500/15 text-green-500'}`}>{t.typeLabel}</span>
                     <span className="text-sm text-muted-foreground">{t.desc || '-'}</span>
-                    <span className={`text-sm font-bold font-mono ${t.type === 'recharge' ? 'text-green-500' : 'text-foreground'}`}>{t.type === 'recharge' ? '+' : '-'}{Math.abs(t.amount).toLocaleString('zh-CN')}</span>
+                    <span className={`text-sm font-bold font-mono ${t.direction === 'credit' ? 'text-green-500' : 'text-foreground'}`}>{t.direction === 'credit' ? '+' : '-'}{Math.abs(t.amount).toLocaleString('zh-CN')}</span>
                     <span className="inline-flex items-center px-2 py-0.5 rounded-sm text-xs font-medium bg-green-500/15 text-green-500 w-fit">已完成</span>
                   </div>
                 ))}
@@ -1467,6 +1514,12 @@ export default function AdminTabs(props: AdminTabsProps) {
                 { label: '视频生成', value: 18, color: '#3b82f6', pct: '18%' },
                 { label: '其他', value: 12, color: '#a1a1aa', pct: '12%' },
               ]} />
+              <div className="grid grid-cols-2 gap-x-5 gap-y-2 mt-5 pt-4 border-t border-border/40 text-xs">
+                <div className="flex justify-between gap-3"><span className="text-muted-foreground">毛消费</span><span className="font-mono text-foreground">{formatNumber(co?.flows?.consumed ?? 0)}</span></div>
+                <div className="flex justify-between gap-3"><span className="text-muted-foreground">退款</span><span className="font-mono text-blue-500">{formatNumber(co?.flows?.refunded ?? 0)}</span></div>
+                <div className="flex justify-between gap-3"><span className="text-muted-foreground">充值</span><span className="font-mono text-green-500">{formatNumber(co?.flows?.recharged ?? 0)}</span></div>
+                <div className="flex justify-between gap-3"><span className="text-muted-foreground">补偿</span><span className="font-mono text-primary">{formatNumber(co?.flows?.compensated ?? 0)}</span></div>
+              </div>
             </div>
             <div className="bg-card rounded-lg shadow-card p-5 border border-border/50">
               <h2 className="text-base font-semibold text-foreground mb-4">消耗排行 Top 10</h2>
