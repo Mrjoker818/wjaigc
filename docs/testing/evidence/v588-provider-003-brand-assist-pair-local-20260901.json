@@ -1,0 +1,63 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-09-01T15:00:00+08:00",
+  "scope": "V588-PROVIDER-003-BUG-005 brand assist exact provider-model pair",
+  "baselineCommit": "6256612113ce46a9a747f96c98dc7997c3601e9b",
+  "branch": "main",
+  "stableTouched": false,
+  "productionFiles": [
+    "src/components/brand-ecommerce-panel.tsx",
+    "src/components/brand-ecommerce/BrandSettingsForm.tsx"
+  ],
+  "testFiles": [
+    "src/__tests__/components/brand-ecommerce-provider-selection.test.tsx"
+  ],
+  "verifiedBehavior": [
+    "same-name LLM options use providerId::modelId identity",
+    "all three assist requests submit one frozen llmProviderId and llmModel pair",
+    "exact persisted composite selection restores",
+    "ambiguous legacy bare model requires reselection and is not silently rewritten",
+    "a new selection persists the exact composite pair",
+    "providerless catalog entries do not expose the assist action",
+    "existing image-provider selection and brand generation contracts remain green"
+  ],
+  "commands": {
+    "focused": {
+      "command": "pnpm exec vitest run src/__tests__/components/brand-ecommerce-provider-selection.test.tsx",
+      "result": "13 passed, 0 failed"
+    },
+    "brandRegression": {
+      "command": "pnpm exec vitest run src/__tests__/components/brand-ecommerce-provider-selection.test.tsx src/__tests__/components/brand-ecommerce-lifecycle.test.tsx src/__tests__/api/brand-ecommerce-result-identity.test.ts src/__tests__/api/tool-image-preflight-billing.test.ts",
+      "result": "68 passed, 0 failed"
+    },
+    "fullTest": {
+      "command": "pnpm test",
+      "result": "second full run: 591 files passed, 4457 tests passed, 25 files and 133 PostgreSQL-gated tests skipped, 0 failed",
+      "retainedFirstRunFailure": "first full run timed out once in psd-export-layer-decomposition at 5000 ms; the exact test then passed, the complete 15-test file passed three consecutive runs, and the second full run passed"
+    },
+    "typecheck": {
+      "command": "pnpm ts-check",
+      "result": "passed"
+    },
+    "lint": {
+      "command": "pnpm lint",
+      "result": "0 errors, 956 historical warnings"
+    },
+    "build": {
+      "command": "$env:NODE_OPTIONS='--max-old-space-size=8192'; pnpm build",
+      "result": "passed; 118 of 118 pages generated"
+    },
+    "protectedBaseline": {
+      "command": "node scripts/check-protected-baseline.mjs --base 7fdc0108952fb3a68415ca3a2a26b5d33641dc6b --allow-path-file docs/testing/baselines/protected-baseline-allowed-paths.json",
+      "result": "passed in a clean detached worktree; 38 feature IDs present; 0 unapproved drift; 0 warnings"
+    }
+  },
+  "blockedOrPending": [
+    "Coze exact-SHA deployment and Google Chrome real assist response",
+    "network proof that each of the three cloud assist requests carries the selected exact pair",
+    "cloud reload proof for exact pair persistence",
+    "PostgreSQL-gated suites because POSTGRES_TEST_DATABASE_URL is not configured",
+    "backend explicit-provider rejection and accounting observations tracked separately as OBS-002, OBS-003 and OBS-006"
+  ],
+  "conclusion": "local_pass_cloud_pending"
+}

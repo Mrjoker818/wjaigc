@@ -33,7 +33,8 @@ interface Props {
   // LLM
   llmModels: LlmModel[];
   selectedLlmModel: string;
-  onSelectLlmModel: (id: string) => void;
+  selectedLlmProviderId: string;
+  onSelectLlmModel: (id: string, providerId: string) => void;
   showLlmDropdown: boolean;
   onToggleLlmDropdown: () => void;
   llmDropdownRef: React.RefObject<HTMLDivElement | null>;
@@ -127,6 +128,7 @@ export function BrandSettingsForm({
 
   llmModels,
   selectedLlmModel,
+  selectedLlmProviderId,
   onSelectLlmModel,
   showLlmDropdown,
   onToggleLlmDropdown,
@@ -442,7 +444,7 @@ export function BrandSettingsForm({
             className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg border text-sm ${inputBg} ${text} transition-colors cursor-pointer`}
           >
             <span className="truncate">
-              {selectedLlmModel ? (llmModels.find(m => m.id === selectedLlmModel)?.name || selectedLlmModel) : '选择LLM模型...'}
+              {selectedLlmModel ? (llmModels.find(m => m.id === selectedLlmModel && m.providerId === selectedLlmProviderId)?.name || selectedLlmModel) : '选择LLM模型...'}
             </span>
             <ChevronDown size={14} className={textMuted} />
           </button>
@@ -452,10 +454,10 @@ export function BrandSettingsForm({
             }`}>
               {llmModels.length ? llmModels.map(m => (
                 <button
-                  key={m.id}
-                  onClick={() => { onSelectLlmModel(m.id); onToggleLlmDropdown(); }}
+                  key={`${m.providerId}::${m.id}`}
+                  onClick={() => { onSelectLlmModel(m.id, m.providerId); onToggleLlmDropdown(); }}
                   className={`w-full text-left px-3 py-2.5 text-sm transition-colors cursor-pointer ${
-                    m.id === selectedLlmModel
+                    m.id === selectedLlmModel && m.providerId === selectedLlmProviderId
                       ? isMonochrome ? 'bg-blue-50 text-blue-600' : 'bg-[#d4af37]/10 text-[#d4af37]'
                       : isMonochrome ? 'text-gray-700 hover:bg-gray-50' : 'text-gray-300 hover:bg-[#2a2a2a]'
                   }`}
@@ -479,7 +481,7 @@ export function BrandSettingsForm({
       </FormSection>
 
       {/* AI Assist */}
-      {selectedLlmModel && (
+      {selectedLlmModel && selectedLlmProviderId && (
         <div>
           <button
             onClick={onAiAssist}

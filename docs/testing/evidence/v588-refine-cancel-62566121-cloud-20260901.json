@@ -1,0 +1,47 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-09-01",
+  "environment": {
+    "projectId": "7671964106919837702",
+    "previewOrigin": "https://62afe49a-716e-4d9e-99cd-a0be49c4794c-5000.dev.coze.site",
+    "githubMain": "6256612113ce46a9a747f96c98dc7997c3601e9b",
+    "cozeHead": "7a346a7e683e4a8a3e0566a7fc42b61ca732097a",
+    "srcTree": "3724394a119bd88add5c12860e021d578b3ff48f",
+    "buildId": "PMkNKUEGZAzQrFZK4IUh8",
+    "webpack": "webpack-ccb680defb694564.js"
+  },
+  "panel": {
+    "viewport": { "width": 2048, "height": 991 },
+    "startButton": { "x": 810.8, "y": 918.2, "width": 426.4, "height": 44, "bottom": 962.2 },
+    "fullyVisible": true
+  },
+  "task": {
+    "taskId": "refine-1788241634736-ob26or",
+    "remoteTaskId": "task_01M1DR40HJTK2ECKZ635G071GC",
+    "providerId": "api_1778430731224_533e09a",
+    "model": "gpt-image-2",
+    "source": "gen-1788190766553-hmtu57.png",
+    "finalStatus": "cancelled",
+    "progress": 30,
+    "creditStatus": "refunded",
+    "creditCost": 12,
+    "chargedTransactionId": "ctx_charge_fcf8ec794f7b73083da89b611d588606",
+    "refundedTransactionId": "ctx_1788241645215_nc5x2dc7",
+    "createdAt": 1788241634741,
+    "updatedAt": 1788241645215
+  },
+  "lateResultCheck": {
+    "delaySeconds": 90,
+    "uiStatus": "cancelled",
+    "completedVisible": false,
+    "canvasImageCount": 8,
+    "newResultInserted": false
+  },
+  "verification": {
+    "focusedTests": "53/53",
+    "protectedBaseline": "38/38",
+    "buildRoutes": "118/118",
+    "result": "pass",
+    "cancelRequestCount": "not-independently-machine-counted"
+  }
+}

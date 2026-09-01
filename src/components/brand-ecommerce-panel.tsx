@@ -277,15 +277,9 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
           setLlmModels(mapped);
           const saved = localStorage.getItem('wujie_selected_llm_model');
           if (saved) {
-            const pureLlmModel = saved.includes('::') ? saved.split('::')[1] : saved;
-            const savedLlmProvId = saved.includes('::') ? saved.split('::')[0] : '';
-            if (mapped.some((m: LlmModel) => m.id === pureLlmModel)) {
-              setSelectedLlmModel(pureLlmModel);
-              setSelectedLlmProviderId(savedLlmProvId || mapped.find((m: LlmModel) => m.id === pureLlmModel)?.providerId || '');
-            } else if (mapped.length) {
-              setSelectedLlmModel(mapped[0].id);
-              setSelectedLlmProviderId(mapped[0].providerId);
-            }
+            const resolved = resolvePersistedModelSelection(saved, mapped);
+            setSelectedLlmModel(resolved.compositeKey ? resolved.modelId : '');
+            setSelectedLlmProviderId(resolved.providerId || '');
           } else if (mapped.length) {
             setSelectedLlmModel(mapped[0].id);
             setSelectedLlmProviderId(mapped[0].providerId);
@@ -590,7 +584,8 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
   // ─── AI Assist ────────────────────────────────────────────────
 
   const handleAiAssist = useCallback(async () => {
-    if (!selectedLlmModel || !productDesc.trim()) return;
+    if (!selectedLlmModel || !selectedLlmProviderId || !productDesc.trim()) return;
+    const assistTarget = { llmModel: selectedLlmModel, llmProviderId: selectedLlmProviderId };
     setIsAssisting(true);
     setAssistError('');
     try {
@@ -607,7 +602,7 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
               sceneDesc: sceneDesc.trim(),
               templateId: Array.from(selectedTemplates)[0] || 'white-bg',
               assistType: type,
-              llmModel: selectedLlmModel,
+              ...assistTarget,
             }),
           }).then(r => r.json())
         )
@@ -691,7 +686,7 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
       setAssistError(err instanceof Error ? err.message : 'AI辅助优化失败，请稍后重试');
     }
     setIsAssisting(false);
-  }, [selectedLlmModel, productDesc, sceneDesc, selectedTemplates, mainText, secondaryText, accentSymbol, styleExtra]);
+  }, [selectedLlmModel, selectedLlmProviderId, productDesc, sceneDesc, selectedTemplates, mainText, secondaryText, accentSymbol, styleExtra]);
 
   // ─── Apply loaded brand asset ────────────────────────────────────
 
@@ -874,7 +869,12 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
               modelDropdownRef={modelDropdownRef}
               llmModels={llmModels}
               selectedLlmModel={selectedLlmModel}
-              onSelectLlmModel={setSelectedLlmModel}
+              selectedLlmProviderId={selectedLlmProviderId}
+              onSelectLlmModel={(modelId, providerId) => {
+                setSelectedLlmModel(modelId);
+                setSelectedLlmProviderId(providerId);
+                localStorage.setItem('wujie_selected_llm_model', `${providerId}::${modelId}`);
+              }}
               showLlmDropdown={showLlmDropdown}
               onToggleLlmDropdown={() => setShowLlmDropdown(v => !v)}
               llmDropdownRef={llmDropdownRef}

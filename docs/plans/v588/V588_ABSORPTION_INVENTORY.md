@@ -1,5 +1,13 @@
 # V5.8.8 选择性吸收清单
 
+## 当前权威检查点：2026-09-01
+
+`V588-PROVIDER-003-BUG-005` 已完成前端最小修复和本地门禁：品牌 LLM 同名模型以 `providerId::modelId` 唯一标识，三类 AI 辅助请求冻结并成对提交同一 `llmProviderId + llmModel`，精确存储可恢复，歧义旧裸键不再猜测；目录项没有 `providerId` 时不再暴露可触发后端隐式回退的辅助入口。专项 `13/13`、品牌回归 `68/68`、全仓 `4457` 项通过，TypeScript、零错误 Lint、`118/118` 构建和干净保护 `38/38` 通过；25 个 PostgreSQL 文件中的 133 项因未配置隔离库跳过。首次全仓运行仅 PSD 竞态用例发生一次 5 秒调度超时，随后单项通过、整文件连续三次通过，第二次完整全仓也通过，失败证据未隐藏。状态仅为**本地通过、Coze/Google Chrome 待验**，不扩大为后端回退、授权或账务关闭。证据：`docs/testing/evidence/v588-provider-003-brand-assist-pair-local-20260901.json`。
+
+`main@6256612113ce46a9a747f96c98dc7997c3601e9b` 已在正确 Coze 项目与 Google Chrome 完成精修浮窗和单次取消闭环：提交按钮完整位于视口内，任务 `refine-1788241634736-ob26or` 最终为 `cancelled/refunded`，12 积分一扣一退，取消后超过 90 秒无迟到结果覆盖或入画布。对应 `V588-TOOLS-BUG-003/004` 不再重复验证。
+
+批次 A 仍未整体关闭。当前唯一继续项保持 `V588-PROVIDER-003`：先部署并云端验收品牌辅助 `BUG-005`，随后仅补其余真实负向/账务证据；完成前不进入批次 B，不重开 Stage 4、精修浮窗或本次取消测试。精修机器证据：`docs/testing/evidence/v588-refine-cancel-62566121-cloud-20260901.json`。
+
 ## 当前检查点：2026-08-31
 
 **已批准并实施：** 五原路由最小修复已落在当前main工作区，BUG-006同步预检/补偿与节点BUG-001倍率契约新增76项永久用例。最终全仓612文件4546/4546通过、0跳过，类型/118页构建/38类保护通过，Lint 0错误/956历史警告。没有复制donor相同缺陷代码，没有修改Stage4/认证/全局账务/UI或stable。继续全工具质量范围，不限于品牌/精修/字境；新版真实云端验收待完成，BUG-005保持独立。当前唯一实施报告：`docs/testing/TOOL_MINIMAL_FIX_2026-08-31.md`；下方“尚未实施/待批准”是历史。
@@ -82,7 +90,7 @@ These are the only authorized first absorption targets. Every row remains unimpl
 | V588-ADMIN-003 | 缩略图回填与幂等 worker | 复用当前资产恢复/健康子系统，不导入 donor 第二套媒体真相 | **回填、影子对账、历史媒体软归档已云端验证；缩略图投影仍有条件。** 2026-08-22 的四个不可恢复版本已软归档、原行保留，旧缺失阻塞不能再次作为归档任务执行 | 只保留缩略图交付/刷新、原图回退和 S3 恢复独立证据；不重做归档、不重开已归档 Stage 4，不擅自切换运行模式 | 高 |
 | V588-PROVIDER-001 | New display mappings such as Nano Banana Lite, GPT Image 2 2K/4K, FLUX 2 Klein, Grok Imagine video/image, HappyHorse, Gemini Omni and Seedance/Seedream variants | Current map already contains several newer Pear/Seedance entries; blind copy would duplicate or reorder wildcard matches | **已吸收 / Coze 云端验证通过。** 仅补齐缺失精确模式，统一采用最长匹配，继续保持管理员/供应商显示名优先 | 表驱动 RED/GREEN、通配碰撞、管理员显示名优先、全量回归、Coze exact SHA 与普通用户图像/视频目录证据 | Low |
 | V588-PROVIDER-002 | Explicit `providerId::modelId` catalog and ambiguous legacy-ID rejection | 保留当前task-core目录、精确键授权迁移与管理员配置快照，未导入donor第二套状态 | **已吸收 / 云端专项通过。** 管理员拒绝/迁移/反馈、普通用户三个工作区精确目录与保存刷新均已闭环；10bcc899关闭BUG-006，临时选择不持久化，未改配置重启保持会话与模型 | 原RED与本地4438/4438门禁保留，9项Chrome云端检查及16份原件哈希已记录；无供应商任务/扣费，不代表完整全平台E2E或真实secret轮换 | 高 |
-| V588-PROVIDER-003 | 非路由导出拆至 `result-store.ts` / `constants.ts` | 拆分已进入main，品牌源码9b2e8d5f已同步；不重复搬运。donor预校验思想仅选择性参考 | BUG-004真实正向关闭；BUG-002/003已部署前端异常注入通过但严格后端负向未闭环；BUG-005配对未修复 | BUG-006预校验拒绝扣费已原路由隔离复现，优先收口；Pear品牌、精修/字境、上游账单/并发退款与完整录像/Trace仍未验；不宣称完整吸收 | 高，含P0候选账务风险 |
+| V588-PROVIDER-003 | 非路由导出拆至 `result-store.ts` / `constants.ts` | 拆分已进入main，品牌源码9b2e8d5f已同步；不重复搬运。donor预校验思想仅选择性参考 | BUG-004真实正向关闭；BUG-002/003已部署前端异常注入通过但严格后端负向未闭环；BUG-005本地配对修复通过、云端待验 | BUG-006预校验拒绝扣费已原路由隔离复现，优先收口；Pear品牌、精修/字境、上游账单/并发退款与完整录像/Trace仍未验；不宣称完整吸收 | 高，含P0候选账务风险 |
 | V588-PROVIDER-004 | Unified generation tool metadata and document-tool execution | Donor executor uses localhost fetches, an internal user header, process-memory source edges and a separate poll lifecycle; current task/asset/accounting runtime is authoritative | **DO NOT ABSORB THE EXECUTOR.** Consider only declarative tool metadata after a current-runtime adapter design | Security/identity, idempotency, cancellation, task ownership, billing and asset projection contracts | Critical |
 
 ### 2026-08-23 月度归档补充审计

@@ -17,6 +17,18 @@ const imageModels = providers.map(provider => ({
   type: 'image',
 }));
 
+const chatProviders = [
+  { id: 'pear-chat', name: 'Pear Chat', displayName: 'Pear Chat', modelType: 'chat', isEnabled: true },
+  { id: 'apimart-chat', name: 'APImart Chat', displayName: 'APImart Chat', modelType: 'chat', isEnabled: true },
+];
+
+const chatModels = chatProviders.map(provider => ({
+  id: 'shared-chat-model',
+  name: 'Shared Chat Model',
+  providerId: provider.id,
+  type: 'chat',
+}));
+
 const template = {
   id: 'white-bg',
   name: 'Contract White Background',
@@ -33,6 +45,9 @@ describe('brand ecommerce provider selection request contract', () => {
   let generateResponse: Record<string, unknown>;
   let assets: Array<Record<string, unknown>>;
   let assetRequests: Array<Record<string, unknown>>;
+  let assistRequests: Array<Record<string, unknown>>;
+  let availableChatProviders: typeof chatProviders;
+  let availableChatModels: Array<{ id: string; name: string; providerId?: string; type: string }>;
 
   beforeEach(() => {
     const storage = new Map<string, string>();
@@ -48,13 +63,16 @@ describe('brand ecommerce provider selection request contract', () => {
     generateResponse = { success: false, error: 'LOCAL_CONTRACT_ONLY' };
     assets = [];
     assetRequests = [];
+    assistRequests = [];
+    availableChatProviders = chatProviders;
+    availableChatModels = chatModels;
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
       const url = String(input);
       if (url === '/api/models?type=image') {
         return Response.json({ success: true, providers, models: imageModels });
       }
       if (url === '/api/models?type=chat') {
-        return Response.json({ success: true, providers: [], models: [] });
+        return Response.json({ success: true, providers: availableChatProviders, models: availableChatModels });
       }
       if (url.startsWith('/api/brand-assets?')) {
         return Response.json({ success: true, assets });
@@ -72,6 +90,10 @@ describe('brand ecommerce provider selection request contract', () => {
           generateRequests.push(body);
           // The test ends at the request boundary; it never simulates a generated image.
           return Response.json(generateResponse);
+        }
+        if (body.action === 'assist') {
+          assistRequests.push(body);
+          return Response.json({ success: true, content: '' });
         }
       }
       throw new Error(`Unexpected test request: ${url}`);
@@ -100,6 +122,60 @@ describe('brand ecommerce provider selection request contract', () => {
     fireEvent.click(within(section).getByRole('button'));
     fireEvent.click(within(section).getByRole('button', { name: new RegExp(`Gpt Image 2.*${name}`) }));
   }
+
+  function selectLlmProvider(name: string): void {
+    const section = screen.getByText('LLM 辅助模型').parentElement;
+    if (!section) throw new Error('Missing LLM selection section');
+    fireEvent.click(within(section).getByRole('button'));
+    fireEvent.click(within(section).getByRole('button', { name: new RegExp(`Shared Chat Model.*${name}`) }));
+  }
+
+  it('submits one exact LLM provider-model pair for all AI assist requests', async () => {
+    await openConfiguredPanel();
+    selectLlmProvider('APImart Chat');
+    fireEvent.click(screen.getByRole('button', { name: 'AI 辅助优化设计' }));
+    await waitFor(() => expect(assistRequests).toHaveLength(3));
+    expect(assistRequests.map(request => ({
+      assistType: request.assistType,
+      llmModel: request.llmModel,
+      llmProviderId: request.llmProviderId,
+    }))).toEqual([
+      { assistType: 'optimize-prompt', llmModel: 'shared-chat-model', llmProviderId: 'apimart-chat' },
+      { assistType: 'suggest-style', llmModel: 'shared-chat-model', llmProviderId: 'apimart-chat' },
+      { assistType: 'suggest-text', llmModel: 'shared-chat-model', llmProviderId: 'apimart-chat' },
+    ]);
+  });
+
+  it('restores an exact persisted LLM provider-model pair', async () => {
+    localStorage.setItem('wujie_selected_llm_model', 'apimart-chat::shared-chat-model');
+    await openConfiguredPanel();
+    fireEvent.click(screen.getByRole('button', { name: 'AI 辅助优化设计' }));
+    await waitFor(() => expect(assistRequests).toHaveLength(3));
+    expect(assistRequests.every(request => request.llmProviderId === 'apimart-chat')).toBe(true);
+  });
+
+  it('requires reselection instead of guessing an ambiguous legacy LLM provider', async () => {
+    localStorage.setItem('wujie_selected_llm_model', 'shared-chat-model');
+    await openConfiguredPanel();
+    const section = screen.getByText('LLM 辅助模型').parentElement;
+    if (!section) throw new Error('Missing LLM selection section');
+    expect(within(section).getByRole('button').textContent).toContain('选择LLM模型...');
+    expect(screen.queryByRole('button', { name: 'AI 辅助优化设计' })).toBeNull();
+    expect(localStorage.getItem('wujie_selected_llm_model')).toBe('shared-chat-model');
+  });
+
+  it('persists an exact LLM provider-model pair after selection', async () => {
+    await openConfiguredPanel();
+    selectLlmProvider('APImart Chat');
+    expect(localStorage.getItem('wujie_selected_llm_model')).toBe('apimart-chat::shared-chat-model');
+  });
+
+  it('does not expose AI assist when the catalog omits the LLM provider id', async () => {
+    availableChatProviders = [];
+    availableChatModels = [{ id: 'providerless-chat', name: 'Providerless Chat', type: 'chat' }];
+    await openConfiguredPanel();
+    expect(screen.queryByRole('button', { name: 'AI 辅助优化设计' })).toBeNull();
+  });
 
   it('submits the API providerId field for the initial exact provider', async () => {
     await openConfiguredPanel();

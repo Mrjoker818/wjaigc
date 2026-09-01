@@ -1,5 +1,13 @@
 # 无界AI — 缺陷登记表 (BUG REGISTER)
 
+## 2026-09-01 精修浮窗与取消链路云端闭环
+
+`main@6256612113ce46a9a747f96c98dc7997c3601e9b` 已在正确 Coze 项目完成同源码树构建，Google Chrome 原预览页强刷后实际验收通过。视口为 `2048×991`，异步内容加载后的“开始精修”按钮矩形为 `x=810.8, y=918.2, w=426.4, h=44, bottom=962.2`，按钮完整位于视口内，`V588-TOOLS-BUG-003` 关闭。
+
+本轮仅点击一次取消。应用任务 `refine-1788241634736-ob26or` 已先取得远端任务 `task_01M1DR40HJTK2ECKZ635G071GC`，最终数据库状态为 `cancelled`、`credit_status=refunded`、`credit_cost=12`；存在一条扣费事务和一条退款事务。取消后等待超过 90 秒，界面仍为“任务已取消”，未显示“精修完成”，画布图片数保持 8，迟到供应商结果未插入画布或覆盖取消终态。因此 `V588-TOOLS-BUG-004` 的单次真实取消、退款和迟到结果隔离关闭。
+
+浏览器侧实际只触发一次取消点击；Coze 最终报告因上下文压缩未给出 `/api/cancel-task` 的独立网络计数，因此不把“网络层恰好一次”写成已机器证明。该观测缺口不改变数据库单次退款与最终取消状态的证据。机器记录：[v588-refine-cancel-62566121-cloud-20260901.json](evidence/v588-refine-cancel-62566121-cloud-20260901.json)。整个平台仍有其他未关闭项，本段只关闭精修浮窗与本次取消链路。
+
 ## 2026-09-01 精修浮窗异步增高复现与最小修复
 
 `V588-TOOLS-BUG-003` 在 `main@dc701c57` 的 Coze 预览中再次稳定复现。Google Chrome 视口为 `2048×935`；模型与预设异步加载后，浮窗矩形为 `left=794, top=76, width=460, height=903, bottom=979`，开始按钮中心点 `y=944.2` 已在视口外。CDP 证明点击未命中按钮，网络仅有会话和任务事件重连，没有 `POST /api/refine-engine`，因此没有任务、取消请求或积分变化。
@@ -131,14 +139,15 @@
 
 | 字段 | 内容 |
 |---|---|
-| 状态/级别 | P2，本地原源码片段隔离复现2/2；未修复，完整组件和云端待验。由OBS-005升格，不重复计数 |
+| 状态/级别 | P2；前端最小修复和完整组件回归本地通过，Coze/Google Chrome 待验。由OBS-005升格，不重复计数 |
 | 基线 | main 4885136e，src tree cdbb004d11b5f710a7a6fb0327bd641dbbd74cd6；只读V5.8.8同样存在 |
 | 复现 | 用TypeScript AST提取现有菜单onClick和handleAiAssist；提供同名模型及Pear供应商状态，调用回调并捕获网络边界请求体，无真实网络 |
-| 预期/实际 | 菜单应传model/provider配对，三个辅助请求应携带选定llmProviderId；实际菜单只有裸模型，三请求供应商均缺失 |
-| 位置/根因 | BrandSettingsForm.tsx:456回调只传m.id；brand-ecommerce-panel.tsx:592回调构造assist请求时遗漏llmProviderId；当前恢复旧LLM选择也按裸模型查找。接口assist分支本来支持llmProviderId |
-| 证据 | evidence/v588-provider-003-selection-probes-20260831.json；两次完整14项探针均12失败/2对照通过，涵盖两个版本4组根因，不能按12个Bug计数 |
-| 修复边界 | 待批准的brand-assist-provider-pair-design.md：优先两个现有前端组件精确选择、恢复与请求快照，不修改账务/认证/后端执行器 |
-| 未覆盖 | 非真实浏览器测试；没有上游请求、taskId、扣费、截图/录像/Trace。不能据此认定云端越权或错误扣费 |
+| 预期/实际 | 修复前菜单只有裸模型，三请求供应商均缺失；修复后菜单身份、高亮、存储和三类辅助请求均使用同一精确配对；缺少 providerId 的目录项不再显示辅助入口 |
+| 位置/根因 | BrandSettingsForm.tsx 原回调只传 m.id；brand-ecommerce-panel.tsx 原辅助请求遗漏 llmProviderId，旧恢复也按裸模型猜测。现复用精确恢复器、成对状态和一次点击快照 |
+| 证据 | 修复前：evidence/v588-provider-003-selection-probes-20260831.json；修复后：evidence/v588-provider-003-brand-assist-pair-local-20260901.json |
+| 修复边界 | 仅两个既有前端组件及永久组件测试；不修改账务、认证、后端执行器、图像模型选择、stable 或 donor |
+| 本地回归 | 专项13/13、品牌回归68/68、第二次全仓4457通过/0失败；TypeScript、Lint 0错误、118/118构建、干净保护38/38通过。首次全仓仅 PSD 竞态用例发生一次5秒超时，随后单项通过、整文件连续3次通过且第二次全仓通过，失败证据保留 |
+| 未覆盖 | Coze exact-SHA、真实 Chrome 三请求网络体、真实辅助响应和刷新恢复仍待验；后端显式供应商回退及账务观察独立保留 |
 
 **既有观察证据升级（不重复登记）：** OBS-002字境候选在显式选择后包含别家、显式缺失后仍回退；OBS-003精修选择器在显式缺失后返回另一供应商，均已通过现有源码隔离执行复现。保持未修复，真实路由/授权/账务影响待验。
 
