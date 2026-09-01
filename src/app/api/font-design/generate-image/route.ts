@@ -1,15 +1,15 @@
 import { NextRequest, NextResponse, after } from 'next/server';
-import { findProviderForModel, findProviderById } from '@/lib/server-api-config';
 import { normalizeModelForApi, filterRequestForModel } from '@/lib/model-capabilities';
+import { normalizeProviderModelSelection } from '@/lib/task-core/exact-model-selection';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
 import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile, tryChatCompletionsImageFallback, isChannelUnavailableError } from '@/lib/api-compatibility';
 import { persistResultImage } from '@/lib/persist-result-image';
-import { registerTask, updateTaskProgress, isTaskCancelled, getTaskInfo } from '@/lib/task-registry';
+import { registerTask, updateTaskProgress, isTaskCancelled } from '@/lib/task-registry';
 import { buildJimengPrompt, buildBlackOnWhitePrompt, buildTransparentLogoPrompt, FONT_STYLE_CATEGORIES, SCENE_MAP, STROKE_MAP, GRAPHIC_MAP, MATERIAL_MAP } from '../plan/constants';
 import { getSessionUser } from '@/lib/server-auth';
 import { consumeCredits, refundCredits } from '@/lib/credits';
 import { validateApiInputs } from '@/lib/api-validator';
-import { logOperation, logError, OP_ACTIONS, startTimer } from '@/lib/op-log';
+import { logError, OP_ACTIONS } from '@/lib/op-log';
 import { setFontDesignResult } from '@/lib/font-design-task-store';
 
 export const maxDuration = 600;
@@ -118,7 +118,19 @@ export async function POST(request: NextRequest) {
     const ratioStr = String(ratio || '横版16:9');
     const modelStr = model ? String(model) : '';
     // ★ 去除 providerId:: 前缀
+    const embeddedProviderId = modelStr.includes('::') ? modelStr.split('::')[0] : '';
     const pureModelStr = modelStr.includes('::') ? modelStr.split('::').pop()! : modelStr;
+    const effectiveProviderId = String(providerId || embeddedProviderId || '');
+    if (providerId && embeddedProviderId && providerId !== embeddedProviderId) {
+      return NextResponse.json({
+        success: false,
+        code: 'MODEL_PROVIDER_MISMATCH',
+        error: '模型所属供应商与当前选择的供应商不一致，请刷新模型列表后重新选择',
+        retryable: false,
+        providerId,
+        model: pureModelStr,
+      }, { status: 400 });
+    }
     const numCount = Math.min(Number(count) || 1, 4);
     const isJimeng = jimengEnhanced !== false;
     const strokes: string[] = Array.isArray(strokeOptions) ? strokeOptions.map(String) : [];
@@ -162,33 +174,37 @@ export async function POST(request: NextRequest) {
       return mt === 'image' || mt === 'universal' || mt === 'general';
     });
 
-    // 按 providerId 精确匹配优先 → 包含目标模型的提供商 → 任意 image 提供商
+    // 显式 providerId 是冻结路由；仅未指定供应商时允许自动发现和切换。
     let providerCandidates: typeof enabledImageProviders = [];
-    if (providerId) {
-      const preferred = enabledImageProviders.find(p => p.id === providerId);
-      if (preferred) {
-        providerCandidates = [preferred, ...enabledImageProviders.filter(p => p.id !== providerId)];
-      } else {
-        console.warn(`[font-design/generate-image] providerId="${providerId}" 未找到匹配提供商`);
+    let exactModelId = '';
+    if (effectiveProviderId) {
+      const preferred = enabledImageProviders.find(p => p.id === effectiveProviderId);
+      const providerDefaultModel = preferred?.selectedModels?.[0] || preferred?.discoveredModels?.[0]?.id || '';
+      const selection = normalizeProviderModelSelection({
+        requestedModelId: pureModelStr || providerDefaultModel,
+        selectedModels: preferred?.selectedModels,
+        discoveredModels: preferred?.discoveredModels,
+      });
+      if (!preferred || !selection.matched) {
+        return NextResponse.json({
+          success: false,
+          code: 'MODEL_PROVIDER_MISMATCH',
+          error: '所选模型已不在当前供应商的可用列表中，请刷新模型列表后重新选择',
+          retryable: false,
+          providerId: effectiveProviderId,
+          model: pureModelStr,
+        }, { status: 400 });
       }
+      providerCandidates = [preferred];
+      exactModelId = selection.modelId;
     }
-    if (providerCandidates.length === 0 && modelStr) {
+    if (!effectiveProviderId && providerCandidates.length === 0 && modelStr) {
       const modelProviders = enabledImageProviders.filter(p =>
         (p.selectedModels || []).some(m => m === pureModelStr || m === modelStr)
       );
-      // preferredProviderId（非精确id格式）优先
-      if (providerId && typeof providerId === 'string' && !providerId.startsWith('api_')) {
-        const prefMatch = modelProviders.find(p => p.id === providerId);
-        if (prefMatch) {
-          providerCandidates = [prefMatch, ...modelProviders.filter(p => p.id !== providerId)];
-        } else {
-          providerCandidates = modelProviders;
-        }
-      } else {
-        providerCandidates = modelProviders;
-      }
+      providerCandidates = modelProviders;
     }
-    if (providerCandidates.length === 0) {
+    if (!effectiveProviderId && providerCandidates.length === 0) {
       providerCandidates = enabledImageProviders;
     }
     if (providerCandidates.length === 0) {
@@ -197,7 +213,7 @@ export async function POST(request: NextRequest) {
 
     console.log(`[font-design/generate-image] ${providerCandidates.length} 个候选提供商: [${providerCandidates.map(p => `"${p.displayName || p.name}"`).join(', ')}]`);
 
-    const usedModelRaw = pureModelStr || (providerCandidates[0]?.selectedModels?.[0] || '');
+    const usedModelRaw = exactModelId || pureModelStr || (providerCandidates[0]?.selectedModels?.[0] || '');
     // ★ 规范化模型名（如 gpt-image-2-2k → gpt-image-2）
     const usedModelNorm = normalizeModelForApi(usedModelRaw);
     const usedModel = usedModelNorm.wasNormalized ? usedModelNorm.apiModelName : usedModelRaw;
@@ -208,7 +224,7 @@ export async function POST(request: NextRequest) {
     // 提示词与候选供应商预检通过后才扣费。
     sessionUser = await getSessionUser(request).catch(() => null);
     if (sessionUser) {
-      const creditResult = await consumeCredits(sessionUser.id, 'image_generate', undefined, undefined, modelStr, { providerId: (providerId as string) || undefined });
+      const creditResult = await consumeCredits(sessionUser.id, 'image_generate', undefined, undefined, modelStr, { providerId: effectiveProviderId || undefined });
       if (!creditResult.success) {
         return NextResponse.json({ success: false, error: creditResult.message || '积分不足' }, { status: 402 });
       }
@@ -242,7 +258,7 @@ export async function POST(request: NextRequest) {
         const pProviderName = provider.displayName || provider.name;
 
         // 每个提供商可能支持不同的模型名，重新计算
-        const pModelRaw = pureModelStr || (provider.selectedModels?.includes(usedModel) ? usedModel : provider.selectedModels?.[0]) || usedModel;
+        const pModelRaw = exactModelId || pureModelStr || (provider.selectedModels?.includes(usedModel) ? usedModel : provider.selectedModels?.[0]) || usedModel;
         const pModelNorm = normalizeModelForApi(pModelRaw);
         const pModel = pModelNorm.wasNormalized ? pModelNorm.apiModelName : pModelRaw;
 
@@ -403,7 +419,7 @@ export async function POST(request: NextRequest) {
       }
     });
 
-    return NextResponse.json({ taskId, prompt: finalPrompt, model: usedModel });
+    return NextResponse.json({ taskId, prompt: finalPrompt, model: usedModel, providerId: providerCandidates[0]?.id });
   } catch (error: unknown) {
     const durationMs = Date.now() - startTime;
     console.error('[font-design/generate-image] Error:', error);

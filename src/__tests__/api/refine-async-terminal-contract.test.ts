@@ -158,6 +158,28 @@ afterEach(() => {
 });
 
 describe('refine async submission to authoritative completion', () => {
+  it.each([
+    ['missing provider', null, input.model],
+    ['model outside provider catalog', { ...provider, selectedModels: ['other-image-model'] }, input.model],
+  ])('rejects an explicit provider/model mismatch before durable task creation: %s', async (_label, resolvedProvider, model) => {
+    io.provider.mockResolvedValueOnce(resolvedProvider);
+
+    const response = await refine(request('/api/refine-engine', { ...input, model }));
+    const payload = await response.json();
+    if (typeof payload.taskId === 'string') taskIds.push(payload.taskId);
+
+    expect(response.status).toBe(400);
+    expect(payload).toMatchObject({
+      success: false,
+      code: 'MODEL_PROVIDER_MISMATCH',
+      providerId: provider.id,
+      model,
+    });
+    expect(io.fallbackProvider).not.toHaveBeenCalled();
+    expect(io.atomic).not.toHaveBeenCalled();
+    expect(io.submit).not.toHaveBeenCalled();
+  });
+
   it('control: submits once and retains the selected provider and remote task', async () => {
     const taskId = await submitRefine();
     expect(io.submit).toHaveBeenCalledTimes(1);

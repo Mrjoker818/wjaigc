@@ -8,6 +8,7 @@ import { registerTask, updateTaskProgress, isTaskCancelled } from '@/lib/task-re
 import { getSessionUser } from '@/lib/server-auth';
 import { consumeCredits, refundCredits } from '@/lib/credits';
 import { normalizeModelForApi } from '@/lib/model-capabilities';
+import { normalizeProviderModelSelection } from '@/lib/task-core/exact-model-selection';
 import sharp from 'sharp';
 import { validateApiInputs } from '@/lib/api-validator';
 import { logOperation, logError, OP_ACTIONS, startTimer } from '@/lib/op-log';
@@ -400,18 +401,9 @@ const ECOM_TEMPLATES: EcomTemplate[] = [
 
 // ─── Helper: Get image provider ────────────────────────────────────
 
-async function getImageProvider(model?: string, providerId?: string) {
-  // 优先使用前端传递的 providerId 精确匹配
-  if (providerId) {
-    const p = await findProviderById(providerId);
-    if (p) {
-      console.log(`[brand-ecommerce] getImageProvider: 通过 providerId="${providerId}" 匹配到提供商 "${p.name}"`);
-      return p;
-    }
-    console.warn(`[brand-ecommerce] getImageProvider: providerId="${providerId}" 未匹配到提供商，回退到模型匹配`);
-  }
+async function getImageProvider(model?: string) {
   if (model) {
-    const p = await findProviderForModel(model, 'image', providerId);
+    const p = await findProviderForModel(model, 'image');
     if (p) return p;
   }
   // fallback: find any image provider
@@ -491,12 +483,52 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: '请输入商品描述' }, { status: 400 });
       }
 
-      const provider = await getImageProvider(model, providerId);
+      const rawModelId = String(model || '');
+      const embeddedProviderId = rawModelId.includes('::') ? rawModelId.split('::')[0] : '';
+      const requestedModelId = rawModelId.includes('::') ? rawModelId.split('::').pop()! : rawModelId;
+      const effectiveProviderId = String(providerId || embeddedProviderId || '');
+      if (providerId && embeddedProviderId && providerId !== embeddedProviderId) {
+        return NextResponse.json({
+          success: false,
+          code: 'MODEL_PROVIDER_MISMATCH',
+          error: '模型所属供应商与当前选择的供应商不一致，请刷新模型列表后重新选择',
+          retryable: false,
+          providerId,
+          model,
+        }, { status: 400 });
+      }
+
+      let provider: ApiProvider | null = null;
+      let exactModelId = '';
+      if (effectiveProviderId) {
+        provider = await findProviderById(effectiveProviderId);
+        const providerDefaultModel = provider?.selectedModels?.[0] || provider?.discoveredModels?.[0]?.id || '';
+        const selection = normalizeProviderModelSelection({
+          requestedModelId: requestedModelId || providerDefaultModel,
+          selectedModels: provider?.selectedModels,
+          discoveredModels: provider?.discoveredModels,
+        });
+        const providerKind = provider?.modelType || provider?.type || '';
+        const supportsImage = ['image', 'universal', 'general', 'imageEdit'].includes(providerKind);
+        if (!provider || !supportsImage || !selection.matched) {
+          return NextResponse.json({
+            success: false,
+            code: 'MODEL_PROVIDER_MISMATCH',
+            error: '所选模型已不在当前供应商的可用列表中，请刷新模型列表后重新选择',
+            retryable: false,
+            providerId: effectiveProviderId,
+            model,
+          }, { status: 400 });
+        }
+        exactModelId = selection.modelId;
+      } else {
+        provider = await getImageProvider(requestedModelId);
+      }
       if (!provider) {
         return NextResponse.json({ error: '未找到可用的图像模型，请在管理员后台配置' }, { status: 400 });
       }
 
-      const rawSelectedModel = model || provider.selectedModels?.[0];
+      const rawSelectedModel = exactModelId || requestedModelId || provider.selectedModels?.[0];
       if (!rawSelectedModel) {
         return NextResponse.json({ error: '未指定模型' }, { status: 400 });
       }

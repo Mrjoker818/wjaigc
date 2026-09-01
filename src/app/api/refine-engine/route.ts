@@ -11,6 +11,7 @@ import { getSessionUser } from '@/lib/server-auth';
 import { createRefineTask, reconcileRefineTask, refineTaskResponse, settleRefineTask } from '@/lib/refine-task-lifecycle';
 import { identifyImageSubject } from '@/lib/identify-subject';
 import { normalizeModelForApi } from '@/lib/model-capabilities';
+import { normalizeProviderModelSelection } from '@/lib/task-core/exact-model-selection';
 import { validateApiInputs } from '@/lib/api-validator';
 import { logOperation, logError, OP_ACTIONS, startTimer } from '@/lib/op-log';
 import { setRefineResult } from './result-store';
@@ -385,16 +386,7 @@ export async function GET() {
 }
 
 // ─── Helper: Get image provider ───
-async function getImageProvider(model?: string, providerId?: string): Promise<ApiProvider | null> {
-  // providerId 优先匹配
-  if (providerId) {
-    const p = await findProviderById(providerId);
-    if (p) {
-      console.log(`[refine-engine] 提供商选择: providerId="${providerId}", 匹配="${p.displayName || p.name}" (id=${p.id}), baseUrl="${p.baseUrl}"`);
-      return p;
-    }
-    console.warn(`[refine-engine] ⚠️ providerId="${providerId}" 未找到匹配的提供商，回退到模型匹配`);
-  }
+async function getImageProvider(model?: string): Promise<ApiProvider | null> {
   if (model) {
     // 先用原始别名查找，再用规范化后的基础模型名查找
     const p = await findProviderForModel(model, 'image');
@@ -942,13 +934,38 @@ export async function POST(request: NextRequest) {
       const apiModelName = normalized.apiModelName; // 发送给第三方 API 的实际模型名
       const displayName = pureModel; // 用于日志和用户展示的原始模型名
 
-      const provider = await getImageProvider(normalized.wasNormalized ? pureModel : apiModelName, effectiveProviderId);
+      let provider: ApiProvider | null = null;
+      let exactModelId = '';
+      if (effectiveProviderId) {
+        provider = await findProviderById(effectiveProviderId);
+        const selection = normalizeProviderModelSelection({
+          requestedModelId: pureModel,
+          selectedModels: provider?.selectedModels,
+          discoveredModels: provider?.discoveredModels,
+        });
+        const providerKind = provider?.modelType || provider?.type || '';
+        const supportsImage = ['image', 'universal', 'general', 'imageEdit'].includes(providerKind);
+        if (!provider || !supportsImage || !selection.matched) {
+          return NextResponse.json({
+            success: false,
+            code: 'MODEL_PROVIDER_MISMATCH',
+            error: '所选模型已不在当前供应商的可用列表中，请刷新模型列表后重新选择',
+            retryable: false,
+            providerId: effectiveProviderId,
+            model: pureModel,
+          }, { status: 400 });
+        }
+        exactModelId = selection.modelId;
+        console.log(`[refine-engine] 提供商选择: providerId="${effectiveProviderId}", 匹配="${provider.displayName || provider.name}" (id=${provider.id}), baseUrl="${provider.baseUrl}"`);
+      } else {
+        provider = await getImageProvider(normalized.wasNormalized ? pureModel : apiModelName);
+      }
       if (!provider) {
         return NextResponse.json({ error: `未找到模型 ${model} 对应的API提供商${providerId ? ` (providerId: ${providerId})` : ''}` }, { status: 400 });
       }
 
       // selectedModel 用于发送给第三方 API，必须是 API 可识别的基础模型名
-      const selectedModel = apiModelName || provider.selectedModels?.[0] || model;
+      const selectedModel = exactModelId || apiModelName || provider.selectedModels?.[0] || model;
 
       if (normalized.wasNormalized) {
         console.log(`[refine-engine] 模型别名规范化: "${displayName}" → API模型名 "${selectedModel}"`);

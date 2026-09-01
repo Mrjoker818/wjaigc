@@ -6,10 +6,14 @@ const state = vi.hoisted(() => ({
   updates: vi.fn(),
   cached: vi.fn(),
   submit: vi.fn(),
-  provider: { id: 'resolved-provider', name: 'Provider internal', displayName: 'Verified Provider', baseUrl: 'https://provider.example/v1', apiKey: 'local-test-key', selectedModels: ['gpt-image-2'] },
+  findProviderById: vi.fn(),
+  findProviderForModel: vi.fn(),
+  consumeCredits: vi.fn(),
+  registerTask: vi.fn(),
+  provider: { id: 'resolved-provider', name: 'Provider internal', displayName: 'Verified Provider', baseUrl: 'https://provider.example/v1', apiKey: 'local-test-key', isEnabled: true, modelType: 'image', selectedModels: ['gpt-image-2'], discoveredModels: [] },
 }));
 vi.mock('next/server', async importOriginal => ({ ...await importOriginal<typeof import('next/server')>(), after: (worker: () => Promise<void>) => state.workers.push(worker) }));
-vi.mock('@/lib/server-api-config', () => ({ findProviderById: vi.fn(async () => state.provider), findProviderForModel: vi.fn(async () => state.provider), getPublicModels: vi.fn() }));
+vi.mock('@/lib/server-api-config', () => ({ findProviderById: state.findProviderById, findProviderForModel: state.findProviderForModel, getPublicModels: vi.fn() }));
 vi.mock('@/lib/api-compatibility', () => ({
   resolveCompatProfile: vi.fn(() => ({})),
   adjustRequestForProfile: (body: unknown) => ({ body, endpoint: '/images/generations' }),
@@ -19,9 +23,9 @@ vi.mock('@/lib/api-compatibility', () => ({
 }));
 vi.mock('@/lib/api-helpers', () => ({ fetchWithV1Retry: state.submit, getInternalApiUrl: (path: string) => path }));
 vi.mock('@/lib/api-auth', () => ({ getInternalRequestHeaders: vi.fn(async () => ({})) }));
-vi.mock('@/lib/task-registry', () => ({ registerTask: vi.fn(), updateTaskProgress: state.updates, isTaskCancelled: vi.fn(() => false) }));
+vi.mock('@/lib/task-registry', () => ({ registerTask: state.registerTask, updateTaskProgress: state.updates, isTaskCancelled: vi.fn(() => false) }));
 vi.mock('@/lib/server-auth', () => ({ getSessionUser: vi.fn(async () => ({ id: 'test-user' })) }));
-vi.mock('@/lib/credits', () => ({ consumeCredits: vi.fn(async () => ({ success: true, cost: 60 })), refundCredits: vi.fn() }));
+vi.mock('@/lib/credits', () => ({ consumeCredits: state.consumeCredits, refundCredits: vi.fn() }));
 vi.mock('@/lib/db-storage', () => ({ dbGetEcomTemplate: vi.fn(async () => null) }));
 vi.mock('@/lib/op-log', () => ({ logOperation: vi.fn(), logError: vi.fn(), OP_ACTIONS: {}, startTimer: vi.fn() }));
 vi.mock('@/app/api/brand-ecommerce/result-store', () => ({ setBrandResult: state.cached }));
@@ -31,6 +35,9 @@ describe('brand ecommerce server result identity', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     state.workers.length = 0;
+    state.findProviderById.mockResolvedValue(state.provider);
+    state.findProviderForModel.mockResolvedValue(state.provider);
+    state.consumeCredits.mockResolvedValue({ success: true, cost: 60 });
     vi.useFakeTimers();
   });
   afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
@@ -71,5 +78,32 @@ describe('brand ecommerce server result identity', () => {
     await vi.advanceTimersByTimeAsync(7000);
     await worker;
     assertIdentity();
+  });
+
+  it.each([
+    ['missing provider', null, 'gpt-image-2'],
+    ['model outside provider catalog', state.provider, 'other-image-model'],
+  ])('rejects an explicit provider/model mismatch before task creation or billing: %s', async (_label, resolvedProvider, model) => {
+    state.findProviderById.mockResolvedValueOnce(resolvedProvider);
+
+    const response = await POST(new NextRequest('http://localhost/api/brand-ecommerce', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'generate', templateIds: ['white-bg'], productDesc: 'Local test cup',
+        model, providerId: 'requested-provider', variantCount: 1,
+      }),
+    }));
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({
+      success: false,
+      code: 'MODEL_PROVIDER_MISMATCH',
+      providerId: 'requested-provider',
+      model,
+    });
+    expect(state.findProviderForModel).not.toHaveBeenCalled();
+    expect(state.consumeCredits).not.toHaveBeenCalled();
+    expect(state.registerTask).not.toHaveBeenCalled();
+    expect(state.workers).toHaveLength(0);
   });
 });
