@@ -4,7 +4,7 @@
 
 `V588-PROVIDER-003-BUG-009` 已完成本地 RED→GREEN、4466 项全仓回归、118/118 构建和干净保护门禁，不再列为“未开发”。仍未验证：Coze exact-SHA；品牌、精修、字境在真实 Pear/APImart 下保持选定 `providerId + modelId`；供应商失败时不调用其他供应商；真实结果身份、画布保存刷新、截图、网络、Console、录像和 Trace。
 
-`V588-PROVIDER-003-BUG-010` 仍未修复：品牌与字境后台 failed/timeout/cancelled 的数据库条件式终态、一次退款、并发重放、进程重启恢复。133 项 PostgreSQL 专项因缺少隔离库未执行，禁止使用业务库替代。Coze 当前 `instance_not_found`，本轮没有创建真实任务或消耗积分。
+`V588-PROVIDER-003-BUG-010` 已完成本地实现、独立复审修正和非真库回归，不再列为“未开发”。最终本地为 `595` 个测试文件、`4488` 项通过、0 失败；精确模型配对、凭据不进入任务结果、重放不重置状态和共享终态策略已有永久合同。仍未验证：隔离 PostgreSQL 中同一用户同键并发只创建一个任务并只扣一次、同键不同请求摘要返回冲突、failed/cancelled/timeout 只退款一次、终态后迟到 completed 被拒绝、进程重启后无远端 taskId 的孤儿任务可安全结算；Coze exact-SHA 下品牌与字境真实任务、供应商身份、积分流水、刷新恢复、Console、网络、截图/录像/Trace。133 项 PostgreSQL 专项因缺少隔离库未执行，禁止使用业务库替代。
 
 ## 2026-09-01 品牌辅助失败提示剩余云端证据
 

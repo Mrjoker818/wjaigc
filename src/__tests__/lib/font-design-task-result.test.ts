@@ -15,4 +15,13 @@ describe('unwrapFontDesignTaskResult', () => {
       prompt: 'font image',
     });
   });
+
+  it('never unwraps a failed cache entry as a completed image result', () => {
+    expect(unwrapFontDesignTaskResult({
+      status: 'failed',
+      result: { remoteTaskId: 'remote-failed' },
+      error: 'Provider failed',
+      updatedAt: Date.now(),
+    })).toBeUndefined();
+  });
 });

@@ -481,6 +481,32 @@ describe('cloud-task-persistence', () => {
     expect(JSON.stringify(context)).not.toContain('apiKey');
   });
 
+  it('prefers the provider and model that actually accepted the remote task during recovery', () => {
+    const context = buildRecoveredTaskContext({
+      id: 'font-task-1',
+      userId: 'user-a',
+      type: 'font-design',
+      status: 'processing',
+      providerId: 'initial-provider',
+      model: 'initial-model',
+      remoteTaskId: 'remote-font-1',
+      progress: 30,
+      creditStatus: 'pending',
+      createdAt: 1,
+      updatedAt: 2,
+      result: {
+        providerId: 'accepted-provider',
+        usedModel: 'accepted-model',
+      },
+    });
+
+    expect(context).toMatchObject({
+      providerId: 'accepted-provider',
+      model: 'accepted-model',
+      remoteTaskId: 'remote-font-1',
+    });
+  });
+
   it('records video submission and completion without provider credentials', async () => {
     await recordVideoTaskSubmitted({
       taskId: 'video-task-1',

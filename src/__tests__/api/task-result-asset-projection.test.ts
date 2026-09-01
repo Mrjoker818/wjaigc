@@ -92,7 +92,7 @@ describe('task result asset projection wiring', () => {
 
   it('checks the durable terminal winner before publishing a non-slot image completion', () => {
     const route = source('src/app/api/poll-task/route.ts');
-    const terminalWrite = route.indexOf('if (!durableGenerationSlot) {', route.indexOf('const completedTaskResult'));
+    const terminalWrite = route.indexOf('if (!durableAtomicTask) {', route.indexOf('const completedTaskResult'));
     const auditWrite = route.indexOf("await appendUserJsonl(userId, 'images'");
     const completion = route.slice(terminalWrite, route.indexOf('updateTaskProgress(taskId', terminalWrite));
     expect(completion).toContain('const imageTerminal = await recordImageTaskTerminal(taskId, {');

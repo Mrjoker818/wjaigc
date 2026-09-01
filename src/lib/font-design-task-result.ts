@@ -7,6 +7,7 @@ type UnknownRecord = Record<string, unknown>;
 export function unwrapFontDesignTaskResult(value: unknown): UnknownRecord | undefined {
   if (!value || typeof value !== 'object') return undefined;
   const cached = value as UnknownRecord;
+  if (cached.status !== 'completed') return undefined;
   if (!cached.result || typeof cached.result !== 'object' || Array.isArray(cached.result)) {
     return undefined;
   }

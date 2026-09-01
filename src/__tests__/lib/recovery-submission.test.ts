@@ -5,6 +5,7 @@ import {
   getRecoverySubmissionDeadline,
   RECOVERY_SUBMISSION_TIMEOUT_MS,
 } from '@/lib/task-core/recovery-submission';
+import * as recoverySubmission from '@/lib/task-core/recovery-submission';
 
 describe('recovery submission failure policy', () => {
   it('uses one absolute deadline across every recovery attempt', () => {
@@ -116,5 +117,41 @@ describe('recovery submission failure policy', () => {
     expect(first.taskError.code).toBe('TASK_RECOVERY_NETWORK_ERROR');
     expect(first.taskError.message).not.toContain('10.0.0.5');
     expect(third.defer).toBe(false);
+  });
+});
+
+describe('local background task recovery', () => {
+  const decision = () => (
+    recoverySubmission as unknown as {
+      getLocalBackgroundTaskRecoveryDecision?: (input: Record<string, unknown>) => Record<string, unknown>;
+    }
+  ).getLocalBackgroundTaskRecoveryDecision;
+
+  it('waits for a recent brand worker without resubmitting it', () => {
+    expect(typeof decision()).toBe('function');
+    expect(decision()!({
+      type: 'brand-ecommerce', status: 'processing', remoteTaskId: '',
+      updatedAt: 1_000, now: 2_000, staleAfterMs: 10_000,
+    })).toMatchObject({ action: 'wait', retryAfterMs: 9_000 });
+  });
+
+  it('expires an orphaned font worker so the caller can atomically refund it', () => {
+    expect(typeof decision()).toBe('function');
+    expect(decision()!({
+      type: 'font-design', status: 'processing', remoteTaskId: '',
+      updatedAt: 1_000, now: 12_000, staleAfterMs: 10_000,
+    })).toMatchObject({ action: 'terminate', terminalStatus: 'timeout' });
+  });
+
+  it('does not intercept a provider-backed font task or unrelated task type', () => {
+    expect(typeof decision()).toBe('function');
+    expect(decision()!({
+      type: 'font-design', status: 'processing', remoteTaskId: 'remote-1',
+      updatedAt: 1_000, now: 12_000, staleAfterMs: 10_000,
+    })).toEqual({ action: 'ignore' });
+    expect(decision()!({
+      type: 'video', status: 'processing', remoteTaskId: '',
+      updatedAt: 1_000, now: 12_000, staleAfterMs: 10_000,
+    })).toEqual({ action: 'ignore' });
   });
 });

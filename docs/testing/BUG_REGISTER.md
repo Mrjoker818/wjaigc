@@ -19,12 +19,16 @@
 
 | 字段 | 内容 |
 |---|---|
-| 等级/状态 | P0 候选；已定位，未修复，发布阻断 |
+| 等级/状态 | P0 候选；本地已按持久化任务边界修复，Coze/隔离 PostgreSQL 真库验收前仍为发布阻断 |
 | 静态复现 | 品牌和字境在返回 taskId 前完成扣费，随后由 `after()` 执行供应商调用；后台 catch 只把内存任务标记为 failed，未执行数据库条件式终态和一次性退款 |
-| 预期/实际 | 后台最终 failed/timeout/cancelled 应按同一持久化 taskId 原子结算且最多退款一次；当前实现不能证明进程重启、并发回调或后台失败后的退款一致性 |
+| 根因 | 两条路由使用普通扣费后启动进程内后台任务；幂等键、请求摘要、任务终态、退款与完成发布没有由同一 `cloud_tasks` 记录约束，进程重启还会留下无远端 taskId 的孤儿任务 |
+| 最小修复 | 品牌/字境统一通过 `createBillableTask` 原子创建或重放任务；同一用户同一幂等键绑定规范化请求摘要；完成仅由 `processing -> completed` CAS 发布，失败/取消/超时统一走 `settleFailedTask`；轮询对近期本地后台任务等待、对超时孤儿任务做一次终态结算；客户端每次用户操作生成稳定幂等键 |
+| 数据与身份边界 | 字境持久化结果保留真实 `providerId + modelId`，不落盘 API Key；旧 `remotePsdUrl` 等历史字段兼容不受影响。计价使用用户原始模型 ID，供应商调用仍使用规范化模型，避免 `gpt-image-2-4k` 被按基础模型计价 |
 | 与 BUG-006 的关系 | BUG-006 是任务创建前预校验与同步异常补偿；本项是已返回 taskId 后的后台最终失败，属于不同生命周期，不重复计数 |
-| 修复约束 | 先建立真实任务级 RED；复用 `cloud_tasks`/条件式终态，不以进程内 Map 或普通 `refundCredits` 代替；同键重放必须返回同一任务，失败退款只允许一次 |
-| 阻塞证据 | 133 项隔离 PostgreSQL 测试因无 `POSTGRES_TEST_DATABASE_URL` 跳过；Coze 当前 `instance_not_found`，未执行真实失败或扣费任务 |
+| 永久回归 | `brand-ecommerce-result-identity.test.ts`、`font-design-exact-provider.test.ts`、`tool-image-preflight-billing.test.ts`、`brand-ecommerce-lifecycle.test.tsx`、`font-design-client-idempotency-contract.test.ts`、`font-design-task-result.test.ts`、`recovery-submission.test.ts` |
+| 独立复审补充 | 复审发现字境任务曾把 API 凭据放入公开任务结果、品牌/字境未完全进入共享原子终态策略、请求摘要字段不足、幂等重放会重新注册内存任务、字境前端只保存裸模型 ID、超长幂等键可落入 500。均已先增加失败合同，再最小修复：任务结果不含凭据；共享终态策略覆盖品牌/字境并保留精修专用成功结算；摘要包含实际任务/模板/原始模型；重放不重置内存状态；字境使用精确 `providerId::modelId`；非法幂等键返回 400。 |
+| 本地验证 | 最终全仓 `595` 个测试文件、`4488` 项通过、0 失败；`25` 个文件中的 `133` 项 PostgreSQL 专项明确跳过。TypeScript 通过；ESLint `0 errors / 951 warnings`；8 GiB 生产构建退出 0并生成 `118/118` 页面。聚焦复审套件 `67/67`、受影响矩阵 `308/308`、精修防回归 `68/68`；过程中失败均保留并修正，未隐藏。 |
+| 剩余阻塞 | 缺少 `POSTGRES_TEST_DATABASE_URL`，尚未取得真实并发重放只建一任务/只扣一次、failed/cancelled/timeout 只退一次、迟到 completed 被拒绝、进程重启孤儿结算及 Coze Chrome 网络/流水证据；不得使用业务库替代隔离测试库 |
 
 ## 2026-09-01 V588-PROVIDER-003 品牌辅助失败提示
 

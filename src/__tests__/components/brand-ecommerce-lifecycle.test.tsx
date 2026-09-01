@@ -23,6 +23,7 @@ describe('brand ecommerce generation lifecycle', () => {
   let requests: Array<Record<string, unknown>>;
   let polls: Array<Record<string, unknown>>;
   let cancelRequests: Array<Record<string, unknown>>;
+  let generationIdempotencyKeys: string[];
   let addImages: ReturnType<typeof vi.fn>;
   let availableTemplates: typeof templates;
 
@@ -38,6 +39,7 @@ describe('brand ecommerce generation lifecycle', () => {
     requests = [];
     polls = [];
     cancelRequests = [];
+    generationIdempotencyKeys = [];
     addImages = vi.fn();
     availableTemplates = templates;
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
@@ -49,6 +51,7 @@ describe('brand ecommerce generation lifecycle', () => {
       if (url === '/api/brand-ecommerce' && body.action === 'templates') return Response.json({ success: true, templates: availableTemplates });
       if (url === '/api/brand-ecommerce' && body.action === 'generate') {
         requests.push(body);
+        generationIdempotencyKeys.push(new Headers(init?.headers).get('idempotency-key') || '');
         const reply = replies.shift();
         if (!reply) throw new Error('Unexpected extra generation');
         return reply();
@@ -108,6 +111,8 @@ describe('brand ecommerce generation lifecycle', () => {
     expectIdle();
     await act(async () => { fireEvent.click(screen.getAllByRole('button', { name: '重新生成' })[0]); });
     expect(requests[1].templateIds).toEqual(['white-bg']);
+    expect(generationIdempotencyKeys.every(Boolean)).toBe(true);
+    expect(new Set(generationIdempotencyKeys).size).toBe(2);
   });
 
   it('ends repeated HTTP failures on a single-template retry', async () => {

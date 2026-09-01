@@ -56,11 +56,13 @@ import { projectCanonicalGenerationSlot } from '@/lib/task-core/generation-batch
 import { createTaskAbortScope, getTaskRecoveryBackoff } from '@/lib/task-core/task-abort';
 import {
   classifyRecoverySubmissionFailure,
+  getLocalBackgroundTaskRecoveryDecision,
   getRecoverySubmissionDeadline,
 } from '@/lib/task-core/recovery-submission';
 import {
   normalizeTaskError,
 } from '@/lib/task-core/task-error';
+import { requiresAtomicTerminalSettlement } from '@/lib/task-core/terminal-settlement';
 import { getRequestId } from '@/lib/request-id';
 import type { GenerationRouteAudit } from '@/lib/generation-route-audit';
 import { STRICT_AGENT_GENERATE_HEADER } from '@/lib/agent-runtime/generate-image-adapter';
@@ -163,16 +165,6 @@ async function resolveCanonicalTaskProviderName(
 }
 
 // 定期清理过期缓存（5分钟以上的缓存清除）
-function isDurableGenerationSlot(taskResult: Record<string, unknown>): boolean {
-  const submissionPayload = taskResult.submissionPayload as Record<string, unknown> | undefined;
-  return Boolean(
-    submissionPayload
-    && typeof submissionPayload.batchId === 'string'
-    && typeof submissionPayload.slotId === 'string'
-    && typeof submissionPayload.slotIndex === 'number',
-  );
-}
-
 function sanitizeCompletedTaskResult(result: Record<string, unknown>): Record<string, unknown> {
   const {
     apiKey: _apiKey,
@@ -1246,6 +1238,51 @@ export async function POST(request: NextRequest) {
             error: persistedTask.error || '任务未完成',
             retryable: persistedTask.status === 'failed',
           }, persistedTask.result, taskId), { status: 200 });
+        }
+
+        const localBackgroundRecovery = getLocalBackgroundTaskRecoveryDecision({
+          type: persistedTask.type,
+          status: persistedTask.status,
+          remoteTaskId: persistedTask.remoteTaskId,
+          updatedAt: persistedTask.updatedAt,
+        });
+        if (localBackgroundRecovery.action === 'wait') {
+          return NextResponse.json({
+            success: true,
+            taskId,
+            status: 'processing',
+            progress: persistedTask.progress,
+            label: persistedTask.label || '后台任务正在执行',
+            recoveryPending: true,
+            retryAfterMs: localBackgroundRecovery.retryAfterMs,
+          });
+        }
+        if (localBackgroundRecovery.action === 'terminate') {
+          await terminateCloudTaskAndRefund(
+            taskId,
+            localBackgroundRecovery.terminalStatus,
+            localBackgroundRecovery.message,
+          );
+          const authoritative = await getCloudTaskForUser(taskId, sessionUser.id);
+          if (authoritative?.status === 'completed') {
+            return NextResponse.json({
+              success: true,
+              taskId,
+              status: 'completed',
+              progress: 100,
+              result: sanitizeCompletedTaskResult(authoritative.result || {}),
+              imageUrl: authoritative.result?.imageUrl,
+              imageUrls: authoritative.result?.imageUrls,
+            });
+          }
+          return NextResponse.json({
+            success: false,
+            taskId,
+            status: authoritative?.status || localBackgroundRecovery.terminalStatus,
+            progress: 0,
+            error: authoritative?.error || localBackgroundRecovery.message,
+            retryable: true,
+          });
         }
 
         if (persistedTask.type === 'refine-engine' && !persistedTask.remoteTaskId) {
@@ -2363,6 +2400,15 @@ export async function POST(request: NextRequest) {
       const fontDesignCached = getFontDesignResult(taskId);
       if (fontDesignCached) {
         console.log(`[poll-task] task-registry 未找到，从 globalThis 缓存返回 font-design 结果: ${taskId}`);
+        if (fontDesignCached.status === 'failed') {
+          return NextResponse.json({
+            success: false,
+            status: 'failed',
+            progress: 0,
+            error: fontDesignCached.error || '字体设计生成失败',
+            retryable: true,
+          }, { status: 200 });
+        }
         const fontDesignResult = unwrapFontDesignTaskResult(fontDesignCached);
         return NextResponse.json({
           success: true,
@@ -2488,7 +2534,7 @@ export async function POST(request: NextRequest) {
       console.log(`[poll-task] Using bgPoll-provided credentials for taskId=${taskId}, model=${model || 'unknown'}, baseUrl=${apiBaseUrl}`);
     } else {
       // 降级：从管理员配置查找提供商（优先使用 providerId 精确匹配）
-      const recoveredProviderId = effectiveProviderId || regProviderId;
+      const recoveredProviderId = regProviderId || effectiveProviderId;
       const provider = await findProviderForModel(model || regUsedModel || '', 'image', recoveredProviderId || undefined)
         || await findProviderForModel(model || regUsedModel || '', 'universal', recoveredProviderId || undefined);
       apiKey = provider?.apiKey;
@@ -3039,7 +3085,11 @@ export async function POST(request: NextRequest) {
         finalProviderId,
         (existingResult.providerName as string) || regProviderName || '',
       );
-      const durableGenerationSlot = isDurableGenerationSlot(existingResult);
+      const durableAtomicTask = regInfo?.type !== 'refine-engine'
+        && requiresAtomicTerminalSettlement({
+          type: regInfo?.type,
+          result: existingResult,
+        });
 
       if (!pollResult.imageUrl) {
         const taskError = taskData?.error as Record<string, unknown> | undefined;
@@ -3059,10 +3109,10 @@ export async function POST(request: NextRequest) {
           return NextResponse.json(refineTaskResponse(await settleRefineTask(taskId, 'failed', terminalError)));
         }
 
-        const durableTermination = durableGenerationSlot
+        const durableTermination = durableAtomicTask
           ? await terminateCloudTaskAndRefund(taskId, 'failed', terminalError)
           : null;
-        if (durableGenerationSlot && !durableTermination?.transitioned) {
+        if (durableAtomicTask && !durableTermination?.transitioned) {
           const persistedResponse = await getDurableGenerationSlotResponse(taskId, userId);
           if (persistedResponse) return persistedResponse;
           return NextResponse.json({
@@ -3080,7 +3130,7 @@ export async function POST(request: NextRequest) {
             `图像生成无结果退款 (taskId: ${taskId})`,
           );
         updateTaskProgress(taskId, { status: 'failed', progress: 100, error: terminalError });
-        if (!durableGenerationSlot) {
+        if (!durableAtomicTask) {
           await recordImageTaskTerminal(taskId, { status: 'failed', error: terminalError, creditStatus });
         }
         failedTaskCache.set(taskId, {
@@ -3142,7 +3192,7 @@ export async function POST(request: NextRequest) {
         providerName: finalProviderName,
         generationRouteAudit: existingResult.generationRouteAudit,
       });
-      if (durableGenerationSlot) {
+      if (durableAtomicTask) {
         const generationCompletion = await completeCloudTask(taskId, completedTaskResult);
         if (!generationCompletion) {
           const persistedResponse = await getDurableGenerationSlotResponse(taskId, userId);
@@ -3158,7 +3208,7 @@ export async function POST(request: NextRequest) {
           await projectPersistedCompletedTask(taskId, userId);
         }
       }
-      if (!durableGenerationSlot) {
+      if (!durableAtomicTask) {
         const imageTerminal = await recordImageTaskTerminal(taskId, {
           status: 'completed',
           imageUrl: imageUrls[0],
@@ -3254,7 +3304,10 @@ export async function POST(request: NextRequest) {
       }
     } else if (normalizedStatus === 'failed') {
       const durableFailureResult = (getTaskInfo(taskId)?.result as Record<string, unknown>) || {};
-      const durableGenerationSlot = isDurableGenerationSlot(durableFailureResult);
+      const durableAtomicTask = requiresAtomicTerminalSettlement({
+        type: getTaskInfo(taskId)?.type,
+        result: durableFailureResult,
+      });
       const taskError = taskData?.error as Record<string, unknown> | undefined;
       const rawError = (taskData?.fail_reason as string)
         || (taskData?.failReason as string)
@@ -3267,10 +3320,10 @@ export async function POST(request: NextRequest) {
       if (getTaskInfo(taskId)?.type === 'refine-engine') {
         return NextResponse.json(refineTaskResponse(await settleRefineTask(taskId, 'failed', translatedError)));
       }
-      const durableTermination = durableGenerationSlot
+      const durableTermination = durableAtomicTask
         ? await terminateCloudTaskAndRefund(taskId, 'failed', translatedError)
         : null;
-      if (durableGenerationSlot && !durableTermination?.transitioned) {
+      if (durableAtomicTask && !durableTermination?.transitioned) {
         const persistedResponse = await getDurableGenerationSlotResponse(taskId, userId);
         if (persistedResponse) return persistedResponse;
         return NextResponse.json({
@@ -3288,7 +3341,7 @@ export async function POST(request: NextRequest) {
           `图像生成失败退款 (taskId: ${taskId})`,
         );
       updateTaskProgress(taskId, { status: 'failed', error: translatedError });
-      if (!durableGenerationSlot) {
+      if (!durableAtomicTask) {
         await recordImageTaskTerminal(taskId, {
           status: 'failed',
           error: translatedError,
@@ -3312,11 +3365,14 @@ export async function POST(request: NextRequest) {
         return NextResponse.json(refineTaskResponse(await settleRefineTask(taskId, 'cancelled', '任务已被取消')));
       }
       const durableCancelledResult = (getTaskInfo(taskId)?.result as Record<string, unknown>) || {};
-      const durableGenerationSlot = isDurableGenerationSlot(durableCancelledResult);
-      const durableTermination = durableGenerationSlot
+      const durableAtomicTask = requiresAtomicTerminalSettlement({
+        type: getTaskInfo(taskId)?.type,
+        result: durableCancelledResult,
+      });
+      const durableTermination = durableAtomicTask
         ? await terminateCloudTaskAndRefund(taskId, 'cancelled', '任务已被取消')
         : null;
-      if (durableGenerationSlot && !durableTermination?.transitioned) {
+      if (durableAtomicTask && !durableTermination?.transitioned) {
         const persistedResponse = await getDurableGenerationSlotResponse(taskId, userId);
         if (persistedResponse) return persistedResponse;
         return NextResponse.json({
@@ -3334,7 +3390,7 @@ export async function POST(request: NextRequest) {
           `图像生成取消退款 (taskId: ${taskId})`,
         );
       updateTaskProgress(taskId, { status: 'cancelled', progress: 100, error: '任务已被取消' });
-      if (!durableGenerationSlot) {
+      if (!durableAtomicTask) {
         await recordImageTaskTerminal(taskId, {
           status: 'cancelled',
           error: '任务已被取消',

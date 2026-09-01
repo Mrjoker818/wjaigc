@@ -561,11 +561,22 @@ export function buildRecoveredTaskContext(task: CloudTask): {
   label?: string;
   userId: string;
 } {
+  const result = task.result && typeof task.result === 'object'
+    ? task.result as Record<string, unknown>
+    : undefined;
+  const acceptedProviderId = typeof result?.providerId === 'string' && result.providerId.trim()
+    ? result.providerId
+    : task.providerId;
+  const acceptedModel = typeof result?.usedModel === 'string' && result.usedModel.trim()
+    ? result.usedModel
+    : typeof result?.modelName === 'string' && result.modelName.trim()
+      ? result.modelName
+      : task.model;
   return {
     taskId: task.id,
     remoteTaskId: task.remoteTaskId || task.id,
-    providerId: task.providerId,
-    model: task.model,
+    providerId: acceptedProviderId,
+    model: acceptedModel,
     type: task.type,
     progress: task.progress,
     label: task.label,

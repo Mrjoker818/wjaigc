@@ -25,6 +25,47 @@ export interface RecoverySubmissionDeadline {
 }
 
 export const RECOVERY_SUBMISSION_TIMEOUT_MS = 10 * 60_000;
+export const LOCAL_BACKGROUND_TASK_STALE_MS = 10 * 60_000;
+
+interface LocalBackgroundTaskRecoveryInput {
+  type: string;
+  status: string;
+  remoteTaskId?: string;
+  updatedAt: number;
+  now?: number;
+  staleAfterMs?: number;
+}
+
+export type LocalBackgroundTaskRecoveryDecision =
+  | { action: 'ignore' }
+  | { action: 'wait'; retryAfterMs: number }
+  | { action: 'terminate'; terminalStatus: 'timeout'; message: string };
+
+export function getLocalBackgroundTaskRecoveryDecision(
+  input: LocalBackgroundTaskRecoveryInput,
+): LocalBackgroundTaskRecoveryDecision {
+  if (
+    !['brand-ecommerce', 'font-design'].includes(input.type)
+    || !['pending', 'processing'].includes(input.status)
+    || Boolean(input.remoteTaskId)
+  ) {
+    return { action: 'ignore' };
+  }
+
+  const now = input.now ?? Date.now();
+  const staleAfterMs = Math.max(1, input.staleAfterMs ?? LOCAL_BACKGROUND_TASK_STALE_MS);
+  const updatedAt = Number.isFinite(input.updatedAt) ? input.updatedAt : now;
+  const retryAfterMs = Math.max(0, updatedAt + staleAfterMs - now);
+  if (retryAfterMs > 0) return { action: 'wait', retryAfterMs };
+
+  return {
+    action: 'terminate',
+    terminalStatus: 'timeout',
+    message: input.type === 'brand-ecommerce'
+      ? '品牌电商后台任务已中断，积分已自动退回，请重新提交'
+      : '字体设计后台任务已中断，积分已自动退回，请重新提交',
+  };
+}
 
 export interface RecoverySubmissionFailureDecision {
   defer: boolean;

@@ -25,6 +25,11 @@ export class IdempotencyConflictError extends Error {
   }
 }
 
+export function isIdempotencyValidationError(error: unknown): error is TypeError | RangeError {
+  return (error instanceof TypeError || error instanceof RangeError)
+    && /^(userId|idempotencyKey|requestDigest)\b/.test(error.message);
+}
+
 export function validateIdempotencyIdentity(
   identity: IdempotencyIdentity,
 ): IdempotencyIdentity {

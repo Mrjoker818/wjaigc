@@ -55,8 +55,15 @@ interface BrandRun {
   controller: AbortController;
   templateIds: string[];
   taskId: string | null;
+  idempotencyKey: string;
   pollTimer?: ReturnType<typeof setTimeout>;
   cancelling?: boolean;
+}
+
+function createBrandIdempotencyKey(): string {
+  const nonce = globalThis.crypto?.randomUUID?.()
+    || `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
+  return `brand-ecommerce:${nonce}`;
 }
 
 class BrandResponseError extends Error {
@@ -413,7 +420,12 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
       setActiveTab('settings');
       return;
     }
-    const run: BrandRun = { controller: new AbortController(), templateIds, taskId: null };
+    const run: BrandRun = {
+      controller: new AbortController(),
+      templateIds,
+      taskId: null,
+      idempotencyKey: createBrandIdempotencyKey(),
+    };
     activeRunRef.current = run;
     setIsGenerating(true);
     startTimer();
@@ -445,7 +457,7 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
     try {
       const response = await fetch('/api/brand-ecommerce', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': run.idempotencyKey },
         body: JSON.stringify({
           action: 'generate', templateIds,
           productDesc: productDesc.trim(), styleExtra: styleExtra.trim(), sceneDesc: sceneDesc.trim(),

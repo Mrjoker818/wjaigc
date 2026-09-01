@@ -346,6 +346,40 @@ describe('POST /api/cancel-task', () => {
     expect(mocks.recordCloudTaskCancelled).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ['brand-ecommerce', 'brand-task'],
+    ['font-design', 'font-task'],
+  ])('settles %s cancellation atomically before a late completion can win', async (type, taskId) => {
+    mocks.getSessionUser.mockResolvedValue({ id: 'user-a', role: 'user' });
+    mocks.getTaskInfo.mockReturnValue({
+      taskId,
+      userId: 'user-a',
+      type,
+      status: 'processing',
+      creditCost: 12,
+      persistence: 'durable',
+    });
+    mocks.getCloudTaskForUser.mockResolvedValue({
+      id: taskId,
+      userId: 'user-a',
+      type,
+      status: 'processing',
+      creditCost: 12,
+      creditStatus: 'pending',
+    });
+
+    const response = await POST(request(taskId));
+
+    expect(response.status).toBe(200);
+    expect(mocks.terminateCloudTaskAndRefund).toHaveBeenCalledWith(
+      taskId,
+      'cancelled',
+      expect.stringContaining(taskId),
+    );
+    expect(mocks.refundCloudTaskCredits).not.toHaveBeenCalled();
+    expect(mocks.recordCloudTaskCancelled).not.toHaveBeenCalled();
+  });
+
   it('does not report a durable edit cancelled when completion already won', async () => {
     mocks.getSessionUser.mockResolvedValue({ id: 'user-a', role: 'user' });
     mocks.getTaskInfo.mockReturnValue({

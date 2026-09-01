@@ -15,39 +15,12 @@ import {
 } from '@/lib/cloud-task-storage';
 import { errorResponse, getRequestId } from '@/lib/request-id';
 import { inferTaskErrorSource } from '@/lib/task-core/task-error';
+import {
+  hasDurableGenerationSlotIdentity,
+  requiresAtomicTerminalSettlement,
+} from '@/lib/task-core/terminal-settlement';
 
 export const dynamic = 'force-dynamic';
-
-interface AtomicTerminalTaskCandidate {
-  type?: string;
-  result?: unknown;
-}
-
-function hasDurableGenerationSlotIdentity(
-  task: AtomicTerminalTaskCandidate | null | undefined,
-): boolean {
-  const result = task?.result;
-  if (!result || typeof result !== 'object') return false;
-  const submissionPayload = (result as Record<string, unknown>).submissionPayload;
-  if (!submissionPayload || typeof submissionPayload !== 'object') return false;
-
-  const payload = submissionPayload as Record<string, unknown>;
-  return typeof payload.batchId === 'string'
-    && typeof payload.slotId === 'string'
-    && typeof payload.slotIndex === 'number';
-}
-
-function requiresAtomicTerminalSettlement(task: AtomicTerminalTaskCandidate | null | undefined): boolean {
-  if (
-    task?.type === 'video'
-    || task?.type === 'video-extend'
-    || task?.type === 'edit'
-    || task?.type === 'annotation-edit'
-    || task?.type === 'refine-engine'
-  ) return true;
-
-  return hasDurableGenerationSlotIdentity(task);
-}
 
 /**
  * POST /api/cancel-task
@@ -80,7 +53,9 @@ export async function POST(request: NextRequest) {
 
     // 检查任务是否存在于注册中心
     const taskInfo = getTaskInfo(taskId);
-    const registryRequiresAtomicSettlement = hasDurableGenerationSlotIdentity(taskInfo);
+    const registryRequiresAtomicSettlement = taskInfo?.persistence === 'durable'
+      ? requiresAtomicTerminalSettlement(taskInfo)
+      : hasDurableGenerationSlotIdentity(taskInfo);
     if (
       taskInfo
       && taskInfo.persistence !== 'durable'

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse, after } from 'next/server';
+import { createHash } from 'node:crypto';
 import { findProviderForModel, findProviderById, getPublicModels } from '@/lib/server-api-config';
 import type { ApiProvider } from '@/lib/universal-api-types';
 import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile, buildPollUrl, extractImageUrl } from '@/lib/api-compatibility';
@@ -6,7 +7,14 @@ import { fetchWithV1Retry, getInternalApiUrl } from '@/lib/api-helpers';
 import { getInternalRequestHeaders } from '@/lib/api-auth';
 import { registerTask, updateTaskProgress, isTaskCancelled } from '@/lib/task-registry';
 import { getSessionUser } from '@/lib/server-auth';
-import { consumeCredits, refundCredits } from '@/lib/credits';
+import { calculateConfiguredCreditCost, InsufficientCreditsError } from '@/lib/credits';
+import { createBillableTask, settleFailedTask } from '@/lib/task-core/billing-service';
+import { completeCloudTask, updateCloudTask } from '@/lib/cloud-task-storage';
+import {
+  IdempotencyConflictError,
+  isIdempotencyValidationError,
+  validateIdempotencyIdentity,
+} from '@/lib/task-core/idempotency';
 import { normalizeModelForApi } from '@/lib/model-capabilities';
 import { normalizeProviderModelSelection } from '@/lib/task-core/exact-model-selection';
 import sharp from 'sharp';
@@ -431,7 +439,7 @@ function resolveDimensions(aspectRatio: string): { width: number; height: number
 
 export async function POST(request: NextRequest) {
   const startTime = Date.now();
-  let deductedCredits = 0;
+  let durableTaskId: string | undefined;
   let sessionUser: import('@/lib/user-types').User | null = null;
   const selectedModel = '';
   const providerIdUsed = '';
@@ -693,19 +701,82 @@ export async function POST(request: NextRequest) {
         ? Math.max(0, Math.min(1, productConsistencyStrength))
         : consistencyMode === 'text-only' ? 0 : consistencyMode === 'img2img-fusion' ? 0.5 : 0.85;
 
-      // 无副作用预检完成后扣费，随后才创建任务。
+      // 无副作用预检完成后，以同一数据库事务创建任务并扣费。
       sessionUser = await getSessionUser(request).catch(() => null);
-      if (sessionUser) {
-        const creditResult = await consumeCredits(sessionUser.id, 'image_generate', undefined, undefined, model, { providerId: providerId || undefined });
-        if (!creditResult.success) {
-          return NextResponse.json({ success: false, error: creditResult.message || '积分不足' }, { status: 402 });
-        }
-        deductedCredits = creditResult.cost;
-      }
+      if (!sessionUser) return NextResponse.json({ success: false, error: '未登录，请先登录' }, { status: 401 });
 
-      // Register a task for tracking
-      const taskId = `ecom-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-      registerTask(taskId, 'brand-ecommerce', `品牌电商生成 (${selectedTemplates.length}模板×${variantsPerTemplate}变体)`, sessionUser?.id);
+      const candidateTaskId = `ecom-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const idempotencyKey = request.headers.get('idempotency-key')?.trim()
+        || request.headers.get('x-idempotency-key')?.trim()
+        || candidateTaskId;
+      const requestDigest = createHash('sha256').update(JSON.stringify({
+        action: 'generate',
+        tasks: tasks.map(task => ({
+          templateId: task.template.id,
+          prompt: task.prompt,
+          negativePrompt: task.negPrompt,
+          dimensions: task.dims,
+        })),
+        requestedModel: rawModelId || rawSelectedModel,
+        mainText,
+        secondaryText,
+        subjectAction,
+        backgroundElements,
+        location,
+        productOrProp,
+        accentSymbol,
+        templateFieldValues: tfv,
+        providerId: provider.id, referenceImageUrl, productImageUrl, brandColors,
+        variantsPerTemplate, consistencyMode, consistencyStrength,
+      })).digest('hex');
+      const billableIdentity = validateIdempotencyIdentity({
+        userId: sessionUser.id,
+        idempotencyKey,
+        requestDigest,
+      });
+      const pricingModel = rawModelId || rawSelectedModel;
+      const creditCost = await calculateConfiguredCreditCost('image_generate', pricingModel, {
+        providerId: provider.id,
+      });
+      const label = `品牌电商生成 (${selectedTemplates.length}模板×${variantsPerTemplate}变体)`;
+      const admission = await createBillableTask({
+        ...billableIdentity,
+        creditCost,
+        task: {
+          id: candidateTaskId,
+          type: 'brand-ecommerce',
+          status: 'processing',
+          progress: 0,
+          providerId: provider.id,
+          model: selectedModel,
+          label,
+          result: {
+            submissionPayload: {
+              workerMode: 'local',
+              taskKind: 'brand-ecommerce',
+              totalTasks,
+            },
+          },
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+        },
+      });
+      const taskId = admission.task.id;
+      durableTaskId = taskId;
+      if (admission.reused) {
+        return NextResponse.json({
+          success: true,
+          taskId,
+          reused: true,
+          status: admission.task.status,
+          message: '已恢复同一生成请求',
+        });
+      }
+      registerTask(taskId, 'brand-ecommerce', label, sessionUser.id, 'durable');
+      updateTaskProgress(taskId, {
+        creditCost: admission.task.creditCost || 0,
+        result: admission.task.result,
+      });
 
       // ★ Async mode: return taskId immediately, process in background
       // 使用 after() 确保响应返回后 IIFE 仍可运行
@@ -733,8 +804,13 @@ export async function POST(request: NextRequest) {
           for (let t = 0; t < selectedTemplates.length; t++) {
             for (let v = 0; v < variantsPerTemplate; v++) {
               if (isTaskCancelled(taskId)) {
-                updateTaskProgress(taskId, { status: 'cancelled', progress: completedCount / totalTasks * 100 });
-                break;
+                await settleFailedTask({
+                  taskId,
+                  status: 'cancelled',
+                  error: { code: 'USER_CANCELLED', message: '用户已取消品牌电商生成任务' },
+                  result: { partialResults: results },
+                });
+                return;
               }
 
               const tpl = selectedTemplates[t];
@@ -938,24 +1014,65 @@ export async function POST(request: NextRequest) {
                 label: `已完成 ${completedCount}/${totalTasks}`,
                 partialResults: [...results], // ★ Frontend can read partial results via poll-task
               });
+              await updateCloudTask(taskId, {
+                progress: Math.round((completedCount / totalTasks) * 100),
+                label: `已完成 ${completedCount}/${totalTasks}`,
+                result: { partialResults: [...results] },
+                mergeResult: true,
+                expectedStatuses: ['processing'],
+              });
             }
           }
 
           const taskResult = { results };
+          const successfulResults = results.filter(result => Boolean(result.imageUrl));
+          if (successfulResults.length === 0) {
+            const timedOut = results.length > 0 && results.every(result => /超时|timeout/i.test(result.error || ''));
+            const message = results.find(result => result.error)?.error || '所有品牌电商生成变体均失败';
+            await settleFailedTask({
+              taskId,
+              status: timedOut ? 'timeout' : 'failed',
+              error: {
+                code: timedOut ? 'MODEL_TIMEOUT' : 'ALL_VARIANTS_FAILED',
+                message,
+              },
+              result: taskResult,
+            });
+            return;
+          }
+          const completedResult = {
+            ...taskResult,
+            imageUrl: successfulResults[0].imageUrl,
+            imageUrls: successfulResults.map(result => result.imageUrl).filter((url): url is string => Boolean(url)),
+            providerId: provider.id,
+            providerName: provider.displayName || provider.name,
+            usedModel: selectedModel,
+            modelName: selectedModel,
+          };
+          const committed = await completeCloudTask(taskId, completedResult);
+          if (!committed) {
+            console.info('[brand-ecommerce] Late completion ignored', { taskId });
+            return;
+          }
           updateTaskProgress(taskId, {
             status: 'completed',
             progress: 100,
-            result: taskResult,
+            result: completedResult,
           });
           setBrandResult(taskId, taskResult);
           console.log(`[brand-ecommerce] Background task completed taskId=${taskId}, results=${results.length}, success=${results.filter(r => r.imageUrl).length}`);
         } catch (procErr) {
           const errMsg = procErr instanceof Error ? procErr.message : String(procErr);
           console.error(`[brand-ecommerce] Background task FAILED taskId=${taskId}:`, errMsg);
-          updateTaskProgress(taskId, {
-            status: 'failed',
-            error: errMsg,
-          });
+          try {
+            await settleFailedTask({
+              taskId,
+              status: 'failed',
+              error: { code: 'BACKGROUND_EXECUTION_FAILED', message: errMsg },
+            });
+          } catch (settlementError) {
+            console.error('[brand-ecommerce] Durable settlement failed:', settlementError);
+          }
         }
       });
       // Return taskId immediately for frontend polling
@@ -1116,15 +1233,21 @@ ${effectiveStyle ? `风格修饰: ${effectiveStyle}` : ''}
       durationMs,
       detail: `品牌电商图片生成失败: ${msg.substring(0, 100)}`,
     });
-    // 退款：品牌电商生成失败时退还积分
-    if (deductedCredits > 0 && sessionUser) {
-      const amount = deductedCredits;
-      deductedCredits = 0;
+    if (durableTaskId) {
       try {
-        const refund = await refundCredits(sessionUser.id, amount, `品牌电商生成失败退款: ${msg.substring(0, 100)}`);
-        if (!refund.success) console.error('[brand-ecommerce] Refund failed:', { userId: sessionUser.id, amount });
-      } catch (refundErr) { console.error('[brand-ecommerce] Refund failed:', refundErr); }
+        await settleFailedTask({
+          taskId: durableTaskId,
+          status: 'failed',
+          error: { code: 'REQUEST_SETUP_FAILED', message: msg },
+        });
+      } catch (settlementError) { console.error('[brand-ecommerce] Durable settlement failed:', settlementError); }
     }
-    return NextResponse.json({ error: msg }, { status: 500 });
+    if (isIdempotencyValidationError(err)) {
+      return NextResponse.json({ success: false, code: 'INVALID_IDEMPOTENCY_KEY', error: err.message }, { status: 400 });
+    }
+    if (err instanceof InsufficientCreditsError || err instanceof IdempotencyConflictError) {
+      return NextResponse.json({ success: false, code: err.code, error: err.message }, { status: err.statusCode });
+    }
+    return NextResponse.json({ error: msg, ...(durableTaskId ? { taskId: durableTaskId } : {}) }, { status: 500 });
   }
 }

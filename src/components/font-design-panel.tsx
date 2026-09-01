@@ -84,12 +84,22 @@ function translateErrorFrontend(msg: string): string {
   return msg;
 }
 
+function fontDesignRequestHeaders(scope: string): Record<string, string> {
+  const nonce = globalThis.crypto?.randomUUID?.()
+    || `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
+  return {
+    'Content-Type': 'application/json',
+    'Idempotency-Key': `font-design:${scope}:${nonce}`,
+  };
+}
+
 export default function FontDesignPanel({ isMonochrome = false, onClose, onAddImages }: FontDesignPanelProps) {
   const [text, setText] = useState('好好养自己');
   const [scene, setScene] = useState('KV主标题');
   const [primaryStyleCategory, setPrimaryStyleCategory] = useState('smart-recommend');
   const [secondaryStyle, setSecondaryStyle] = useState('');
   const [selectedModel, setSelectedModel] = useState('');
+  const [selectedProviderId, setSelectedProviderId] = useState('');
   const [ratio, setRatio] = useState('16:9');
   const [color, setColor] = useState('黑金');
   const [background, setBackground] = useState('高级留白');
@@ -139,8 +149,10 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
   const activeTasksRef = useRef<Map<string, { planIndex: number; variant: number; planTitle: string }>>(new Map());
   const pollingTimerRef = useRef<NodeJS.Timeout | null>(null);
   const selectedModelRef = useRef(selectedModel);
+  const selectedProviderIdRef = useRef(selectedProviderId);
   // Keep selectedModelRef in sync
   useEffect(() => { selectedModelRef.current = selectedModel; }, [selectedModel]);
+  useEffect(() => { selectedProviderIdRef.current = selectedProviderId; }, [selectedProviderId]);
 
   const [styleCategories, setStyleCategories] = useState<StyleCategory[]>([]);
   const [scenes, setScenes] = useState<SceneOption[]>([]);
@@ -148,6 +160,9 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
   const [graphicOptionList, setGraphicOptionList] = useState<{ id: string; name: string }[]>([]);
   const [materialList, setMaterialList] = useState<{ id: string; name: string }[]>([]);
   const [imageModels, setImageModels] = useState<ImageModel[]>([]);
+  const selectedImageModel = imageModels.find(
+    model => model.id === selectedModel && model.providerId === selectedProviderId,
+  );
   const [showModelDropdown, setShowModelDropdown] = useState(false);
   const [copiedToast, setCopiedToast] = useState<string | null>(null);
   const [isMinimized, setIsMinimized] = useState(false);
@@ -233,7 +248,10 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
           providerName: providerMap.get(m.providerId) || m.providerId,
         }));
         setImageModels(models);
-        if (models.length > 0 && !selectedModel) setSelectedModel(models[0].id);
+        if (models.length > 0 && !selectedModel) {
+          setSelectedModel(models[0].id);
+          setSelectedProviderId(models[0].providerId);
+        }
       })
       .catch(() => {});
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -269,7 +287,7 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
           const res = await fetch('/api/poll-task', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ taskId: tid, model: selectedModelRef.current, providerId: imageModels.find(m => m.id === selectedModelRef.current)?.providerId }),
+            body: JSON.stringify({ taskId: tid, model: selectedModelRef.current, providerId: selectedProviderIdRef.current }),
           });
           const data = await res.json();
           if (data.status === 'completed') {
@@ -412,13 +430,13 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
     try {
       const res = await fetch('/api/font-design/generate-image', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: fontDesignRequestHeaders(`single-${mode}`),
         body: JSON.stringify({
           text, scene, primaryStyleCategory, secondaryStyle,
           ratio: mode === 'transparent-logo' ? '1:1' : ratio,
           color, background, strokeOptions, graphicElements, material, jimengEnhanced,
           model: selectedModel, mode, count: 1,
-          providerId: imageModels.find(m => m.id === selectedModel)?.providerId,
+          providerId: selectedProviderIdRef.current,
         }),
       });
       const data = await res.json();
@@ -457,11 +475,12 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
           : `${planPrompt}，丰富装饰构图，文字与图形元素交织，满版布局，视觉冲击力强`;
         const res = await fetch('/api/font-design/generate-image', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: fontDesignRequestHeaders(`plan-${planIndex}-${v}`),
           body: JSON.stringify({
             text, scene, primaryStyleCategory, secondaryStyle,
             ratio, color, background, strokeOptions, graphicElements, material, jimengEnhanced,
             model: selectedModel, mode: 'full', count: 1,
+            providerId: selectedProviderIdRef.current,
             prompt: variantPrompt,
           }),
         });
@@ -503,11 +522,12 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
             : `${planPrompt}，丰富装饰构图，文字与图形元素交织，满版布局，视觉冲击力强`;
           const res = await fetch('/api/font-design/generate-image', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: fontDesignRequestHeaders(`all-${pi}-${v}`),
             body: JSON.stringify({
               text, scene, primaryStyleCategory, secondaryStyle,
               ratio, color, background, strokeOptions, graphicElements, material, jimengEnhanced,
               model: selectedModel, mode: 'full', count: 1,
+              providerId: selectedProviderIdRef.current,
               prompt: variantPrompt,
             }),
           });
@@ -549,8 +569,8 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
             : '，丰富装饰构图，满版布局，文字与装饰元素交织';
           const blackOnWhitePrompt = `黑底白字测试: ${planPrompt}${variantDesc}, pure black background, white text only, high contrast, clear letterforms, no decorative elements, no colors, stark monochrome, crisp edges`;
           const resp = await fetch('/api/font-design/generate-image', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ text, prompt: blackOnWhitePrompt, model: selectedModel, ratio, count: 1, color: '白色', background: '纯黑背景' }),
+            method: 'POST', headers: fontDesignRequestHeaders(`mono-${i}-${v}`),
+            body: JSON.stringify({ text, prompt: blackOnWhitePrompt, model: selectedModel, providerId: selectedProviderIdRef.current, ratio, count: 1, color: '白色', background: '纯黑背景' }),
           });
           const data = await resp.json();
           if (data.taskId) {
@@ -567,13 +587,12 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
   const handleAddToCanvas = useCallback((url: string) => {
     // ★ 传递模型信息
     const meta: { modelName?: string; apiProvider?: string } = {};
-    if (selectedModel) {
-      const pureModelId = selectedModel.includes('::') ? selectedModel.split('::').pop()! : selectedModel;
-      meta.modelName = pureModelId;
-      if (selectedModel.includes('::')) meta.apiProvider = selectedModel.split('::')[0];
+    if (selectedModel && selectedProviderId) {
+      meta.modelName = selectedModel;
+      meta.apiProvider = selectedProviderId;
     }
     onAddImages?.([url], meta);
-  }, [onAddImages, selectedModel]);
+  }, [onAddImages, selectedModel, selectedProviderId]);
 
   // Gallery: load data from API
   const loadGalleryData = useCallback(async (category?: string, page?: number, search?: string) => {
@@ -650,9 +669,10 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
       const finalPrompt = finalPromptBase + variationHint;
       fetch('/api/font-design/generate-image', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: fontDesignRequestHeaders(`inspiration-${vIdx}`),
         body: JSON.stringify({
           prompt: finalPrompt, model, ratio, mode: 'standard',
+          providerId: selectedProviderIdRef.current,
           text: text || inspirationRef?.displayText || '',
           scene: '文化艺术',
           primaryStyleCategory: primaryStyleCategory,
@@ -918,9 +938,9 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
                         style={inputStyle}
                       >
                         <div className="truncate flex items-center gap-1.5">
-                          <span>{imageModels.find(m => m.id === selectedModel)?.name || selectedModel || '选择模型'}</span>
-                          {imageModels.find(m => m.id === selectedModel)?.providerName && (
-                            <span style={{ color: `${subTextColor}99`, fontSize: '10px' }}>· {imageModels.find(m => m.id === selectedModel)?.providerName}</span>
+                          <span>{selectedImageModel?.name || selectedModel || '选择模型'}</span>
+                          {selectedImageModel?.providerName && (
+                            <span style={{ color: `${subTextColor}99`, fontSize: '10px' }}>· {selectedImageModel.providerName}</span>
                           )}
                         </div>
                         <ChevronDown size={14} className="shrink-0 ml-2" style={{ color: mutedColor, transition: 'transform 0.2s', transform: showModelDropdown ? 'rotate(180deg)' : 'none' }} />
@@ -933,15 +953,15 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
                           {imageModels.length === 0 && <div className="px-3 py-2 text-xs" style={{ color: subTextColor }}>暂无可用模型，请在管理员后台配置</div>}
                           {imageModels.map((m) => (
                             <button
-                              key={m.id}
-                              onClick={() => { setSelectedModel(m.id); setShowModelDropdown(false); const supportedRatios = findModelConfig(MODEL_ASPECT_RATIOS, m.id) || DEFAULT_ASPECT_RATIOS; if (!supportedRatios.includes(ratio) && ratio !== 'logo') setRatio(supportedRatios[0]); }}
+                              key={`${m.providerId}::${m.id}`}
+                              onClick={() => { setSelectedModel(m.id); setSelectedProviderId(m.providerId); setShowModelDropdown(false); const supportedRatios = findModelConfig(MODEL_ASPECT_RATIOS, m.id) || DEFAULT_ASPECT_RATIOS; if (!supportedRatios.includes(ratio) && ratio !== 'logo') setRatio(supportedRatios[0]); }}
                               className="w-full px-3 py-2.5 text-left text-xs flex items-center gap-2 transition-colors"
                               style={{
-                                borderLeft: selectedModel === m.id ? `2px solid ${accentColor}` : '2px solid transparent',
-                                background: selectedModel === m.id ? (isMonochrome ? 'rgba(59,130,246,0.06)' : 'rgba(212,175,55,0.08)') : 'transparent',
+                                borderLeft: selectedModel === m.id && selectedProviderId === m.providerId ? `2px solid ${accentColor}` : '2px solid transparent',
+                                background: selectedModel === m.id && selectedProviderId === m.providerId ? (isMonochrome ? 'rgba(59,130,246,0.06)' : 'rgba(212,175,55,0.08)') : 'transparent',
                               }}
-                              onMouseEnter={e => { if (selectedModel !== m.id) e.currentTarget.style.background = isMonochrome ? 'rgba(59,130,246,0.04)' : 'rgba(212,175,55,0.05)'; }}
-                              onMouseLeave={e => { if (selectedModel !== m.id) e.currentTarget.style.background = 'transparent'; }}
+                              onMouseEnter={e => { if (selectedModel !== m.id || selectedProviderId !== m.providerId) e.currentTarget.style.background = isMonochrome ? 'rgba(59,130,246,0.04)' : 'rgba(212,175,55,0.05)'; }}
+                              onMouseLeave={e => { if (selectedModel !== m.id || selectedProviderId !== m.providerId) e.currentTarget.style.background = 'transparent'; }}
                             >
                               <div className="flex-1 min-w-0">
                                 <div className="truncate" style={{ color: textColor }}>{m.name}</div>
@@ -1084,9 +1104,9 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
                     style={inputStyle}
                   >
                     <div className="truncate flex items-center gap-1.5">
-                      <span>{imageModels.find(m => m.id === selectedModel)?.name || selectedModel || '选择模型'}</span>
-                      {imageModels.find(m => m.id === selectedModel)?.providerName && (
-                        <span style={{ color: `${subTextColor}99`, fontSize: '10px' }}>· {imageModels.find(m => m.id === selectedModel)?.providerName}</span>
+                      <span>{selectedImageModel?.name || selectedModel || '选择模型'}</span>
+                      {selectedImageModel?.providerName && (
+                        <span style={{ color: `${subTextColor}99`, fontSize: '10px' }}>· {selectedImageModel.providerName}</span>
                       )}
                     </div>
                     <ChevronDown size={14} className="shrink-0 ml-2" style={{ color: mutedColor, transition: 'transform 0.2s', transform: showModelDropdown ? 'rotate(180deg)' : 'none' }} />
@@ -1099,15 +1119,15 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
                       {imageModels.length === 0 && <div className="px-3 py-2 text-xs" style={{ color: subTextColor }}>暂无可用模型，请在管理员后台配置</div>}
                       {imageModels.map((m) => (
                         <button
-                          key={m.id}
-                          onClick={() => { setSelectedModel(m.id); setShowModelDropdown(false); }}
+                          key={`${m.providerId}::${m.id}`}
+                          onClick={() => { setSelectedModel(m.id); setSelectedProviderId(m.providerId); setShowModelDropdown(false); }}
                           className="w-full px-3 py-2.5 text-left text-xs flex items-center gap-2 transition-colors"
                           style={{
-                            borderLeft: selectedModel === m.id ? `2px solid ${accentColor}` : '2px solid transparent',
-                            background: selectedModel === m.id ? (isMonochrome ? 'rgba(59,130,246,0.06)' : 'rgba(212,175,55,0.08)') : 'transparent',
+                            borderLeft: selectedModel === m.id && selectedProviderId === m.providerId ? `2px solid ${accentColor}` : '2px solid transparent',
+                            background: selectedModel === m.id && selectedProviderId === m.providerId ? (isMonochrome ? 'rgba(59,130,246,0.06)' : 'rgba(212,175,55,0.08)') : 'transparent',
                           }}
-                          onMouseEnter={e => { if (selectedModel !== m.id) e.currentTarget.style.background = isMonochrome ? 'rgba(59,130,246,0.04)' : 'rgba(212,175,55,0.05)'; }}
-                          onMouseLeave={e => { if (selectedModel !== m.id) e.currentTarget.style.background = 'transparent'; }}
+                          onMouseEnter={e => { if (selectedModel !== m.id || selectedProviderId !== m.providerId) e.currentTarget.style.background = isMonochrome ? 'rgba(59,130,246,0.04)' : 'rgba(212,175,55,0.05)'; }}
+                          onMouseLeave={e => { if (selectedModel !== m.id || selectedProviderId !== m.providerId) e.currentTarget.style.background = 'transparent'; }}
                         >
                           <div className="flex-1 min-w-0">
                             <div className="truncate" style={{ color: textColor }}>{m.name}</div>

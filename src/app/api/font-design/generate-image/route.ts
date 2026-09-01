@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse, after } from 'next/server';
+import { createHash } from 'node:crypto';
 import { normalizeModelForApi, filterRequestForModel } from '@/lib/model-capabilities';
 import { normalizeProviderModelSelection } from '@/lib/task-core/exact-model-selection';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
@@ -7,7 +8,14 @@ import { persistResultImage } from '@/lib/persist-result-image';
 import { registerTask, updateTaskProgress, isTaskCancelled } from '@/lib/task-registry';
 import { buildJimengPrompt, buildBlackOnWhitePrompt, buildTransparentLogoPrompt, FONT_STYLE_CATEGORIES, SCENE_MAP, STROKE_MAP, GRAPHIC_MAP, MATERIAL_MAP } from '../plan/constants';
 import { getSessionUser } from '@/lib/server-auth';
-import { consumeCredits, refundCredits } from '@/lib/credits';
+import { calculateConfiguredCreditCost, InsufficientCreditsError } from '@/lib/credits';
+import { createBillableTask, settleFailedTask } from '@/lib/task-core/billing-service';
+import { completeCloudTask, updateCloudTask } from '@/lib/cloud-task-storage';
+import {
+  IdempotencyConflictError,
+  isIdempotencyValidationError,
+  validateIdempotencyIdentity,
+} from '@/lib/task-core/idempotency';
 import { validateApiInputs } from '@/lib/api-validator';
 import { logError, OP_ACTIONS } from '@/lib/op-log';
 import { setFontDesignResult } from '@/lib/font-design-task-store';
@@ -87,7 +95,7 @@ function buildUserSettingsSuffix(params: {
 
 export async function POST(request: NextRequest) {
   const startTime = Date.now();
-  let deductedCredits = 0;
+  let durableTaskId: string | undefined;
   let sessionUser: import('@/lib/user-types').User | null = null;
   const selectedModel = '';
   const providerIdUsed = '';
@@ -221,18 +229,65 @@ export async function POST(request: NextRequest) {
       console.log(`[font-design/generate-image] Normalized model alias: "${usedModelRaw}" → "${usedModel}"`);
     }
 
-    // 提示词与候选供应商预检通过后才扣费。
+    // 提示词与候选供应商预检通过后，以同一数据库事务创建任务并扣费。
     sessionUser = await getSessionUser(request).catch(() => null);
-    if (sessionUser) {
-      const creditResult = await consumeCredits(sessionUser.id, 'image_generate', undefined, undefined, modelStr, { providerId: effectiveProviderId || undefined });
-      if (!creditResult.success) {
-        return NextResponse.json({ success: false, error: creditResult.message || '积分不足' }, { status: 402 });
-      }
-      deductedCredits = creditResult.cost;
-    }
+    if (!sessionUser) return NextResponse.json({ success: false, error: '未登录，请先登录' }, { status: 401 });
 
-    const taskId = `font-design-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    registerTask(taskId, 'font-design', `字体设计: ${textStr || '生成图片'}`, sessionUser?.id);
+    const candidateTaskId = `font-design-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const idempotencyKey = request.headers.get('idempotency-key')?.trim()
+      || request.headers.get('x-idempotency-key')?.trim()
+      || candidateTaskId;
+    const pricingModel = modelStr || usedModelRaw;
+    const requestDigest = createHash('sha256').update(JSON.stringify({
+      prompt: finalPrompt,
+      model: pricingModel,
+      providerId: providerCandidates[0]?.id,
+      ratio: ratioStr,
+      count: numCount,
+    })).digest('hex');
+    const billableIdentity = validateIdempotencyIdentity({
+      userId: sessionUser.id,
+      idempotencyKey,
+      requestDigest,
+    });
+    const creditCost = await calculateConfiguredCreditCost('image_generate', pricingModel, {
+      providerId: providerCandidates[0]?.id,
+    });
+    const label = `字体设计: ${textStr || '生成图片'}`;
+    const admission = await createBillableTask({
+      ...billableIdentity,
+      creditCost,
+      task: {
+        id: candidateTaskId,
+        type: 'font-design',
+        status: 'processing',
+        progress: 0,
+        providerId: providerCandidates[0]?.id,
+        model: usedModel,
+        label,
+        result: {
+          submissionPayload: {
+            workerMode: 'local',
+            taskKind: 'font-design',
+          },
+        },
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      },
+    });
+    const taskId = admission.task.id;
+    durableTaskId = taskId;
+    if (admission.reused) {
+      return NextResponse.json({
+        taskId,
+        prompt: finalPrompt,
+        model: admission.task.model || usedModel,
+        providerId: admission.task.providerId || providerCandidates[0]?.id,
+        reused: true,
+        status: admission.task.status,
+      });
+    }
+    registerTask(taskId, 'font-design', label, sessionUser.id, 'durable');
     updateTaskProgress(taskId, { status: 'processing', progress: 0, label: '正在生成字体设计图片...' });
 
     // ★ 判断是否为可重试错误（429限流/502网关/503服务不可用）
@@ -249,6 +304,38 @@ export async function POST(request: NextRequest) {
     after(async () => {
       const MAX_PROVIDERS_TO_TRY = Math.min(providerCandidates.length, 6); // 最多尝试6个提供商
       let lastError = '';
+      const failTask = async (
+        status: 'failed' | 'cancelled' | 'timeout',
+        code: string,
+        message: string,
+      ): Promise<void> => {
+        const settled = await settleFailedTask({ taskId, status, error: { code, message } });
+        if (settled.transitioned) {
+          setFontDesignResult(taskId, { status: 'failed', error: message, updatedAt: Date.now() });
+        }
+      };
+      const completeTask = async (
+        completedResult: Record<string, unknown>,
+        completedProvider: (typeof providerCandidates)[number],
+      ): Promise<boolean> => {
+        const imageUrls = Array.isArray(completedResult.directImageUrls)
+          ? completedResult.directImageUrls.filter((url): url is string => typeof url === 'string' && url.length > 0)
+          : [];
+        const durableResult = {
+          ...completedResult,
+          imageUrl: imageUrls[0] || '',
+          imageUrls,
+          providerId: completedProvider.id,
+          providerName: completedProvider.displayName || completedProvider.name,
+          usedModel: completedResult.model || usedModel,
+          modelName: completedResult.model || usedModel,
+        };
+        const committed = await completeCloudTask(taskId, durableResult);
+        if (!committed) return false;
+        updateTaskProgress(taskId, { status: 'completed', progress: 100, result: durableResult });
+        setFontDesignResult(taskId, { status: 'completed', result: durableResult, updatedAt: Date.now() });
+        return true;
+      };
 
       for (let pi = 0; pi < MAX_PROVIDERS_TO_TRY; pi++) {
         const provider = providerCandidates[pi];
@@ -268,7 +355,10 @@ export async function POST(request: NextRequest) {
         }
 
         try {
-          if (isTaskCancelled(taskId)) { updateTaskProgress(taskId, { status: 'cancelled' }); return; }
+          if (isTaskCancelled(taskId)) {
+            await failTask('cancelled', 'USER_CANCELLED', '用户已取消字体设计生成任务');
+            return;
+          }
 
           const requestBody: Record<string, unknown> = {
             model: pModel,
@@ -324,11 +414,7 @@ export async function POST(request: NextRequest) {
                   console.log(`[font-design] /chat/completions fallback succeeded via ${pProviderName}, got`, chatImageUrls.length, 'images');
                   const persistedUrls = await Promise.all(chatImageUrls.map(persistResultImage));
                   const completedResult = { directImageUrls: persistedUrls, prompt: finalPrompt, model: pModel };
-                  updateTaskProgress(taskId, {
-                    status: 'completed', progress: 100,
-                    result: completedResult,
-                  });
-                  setFontDesignResult(taskId, { status: 'completed', result: completedResult, updatedAt: Date.now() });
+                  await completeTask(completedResult, provider);
                   return;
                 }
               } catch (chatErr) {
@@ -343,7 +429,7 @@ export async function POST(request: NextRequest) {
             }
             // 所有提供商都失败了
             console.error(`[font-design] All ${MAX_PROVIDERS_TO_TRY} providers failed. Last error:`, lastError);
-            updateTaskProgress(taskId, { status: 'failed', error: lastError });
+            await failTask('failed', 'ALL_PROVIDERS_FAILED', lastError);
             return;
           }
 
@@ -354,22 +440,29 @@ export async function POST(request: NextRequest) {
             // 持久化图片到本地
             const persistedUrls = await Promise.all(parsed.directImageUrls.map(persistResultImage));
             const completedResult = { directImageUrls: persistedUrls, prompt: finalPrompt, model: pModel };
-            updateTaskProgress(taskId, {
-              status: 'completed', progress: 100,
-              result: completedResult,
-            });
-            setFontDesignResult(taskId, { status: 'completed', result: completedResult, updatedAt: Date.now() });
+            await completeTask(completedResult, provider);
           } else if (parsed.taskIds && parsed.taskIds.length > 0) {
-            const asyncResult = {
+            const durableAsyncResult = {
               remoteTaskId: parsed.taskIds[0],
-              apiBaseUrl: pBaseUrl, apiKey: pApiKey, usedModel: pModel, compatProfile: pCompatProfile, prompt: finalPrompt,
+              usedModel: pModel,
+              modelName: pModel,
+              providerId: provider.id,
+              providerName: pProviderName,
+              prompt: finalPrompt,
             };
             updateTaskProgress(taskId, {
               status: 'processing', progress: 30,
               label: '图片生成中，等待远程API返回...',
-              result: asyncResult,
+              result: durableAsyncResult,
             });
-            setFontDesignResult(taskId, { status: 'completed' as const, result: asyncResult, updatedAt: Date.now() });
+            await updateCloudTask(taskId, {
+              remoteTaskId: parsed.taskIds[0],
+              progress: 30,
+              label: '图片生成中，等待远程API返回...',
+              result: durableAsyncResult,
+              mergeResult: true,
+              expectedStatuses: ['processing'],
+            });
           } else {
             // API返回200但无有效结果，尝试下一个提供商
             lastError = 'API未返回有效结果';
@@ -377,7 +470,7 @@ export async function POST(request: NextRequest) {
               console.warn(`[font-design/generate-image] 提供商 ${pProviderName} 返回空结果，尝试下一个`);
               continue;
             }
-            updateTaskProgress(taskId, { status: 'failed', error: lastError });
+            await failTask('failed', 'EMPTY_PROVIDER_RESULT', lastError);
           }
           return; // 成功或最终失败，退出循环
         } catch (err: unknown) {
@@ -392,8 +485,7 @@ export async function POST(request: NextRequest) {
               continue; // 直接尝试下一个提供商
             }
             // 最后一个提供商也超时，整体失败
-            updateTaskProgress(taskId, { status: 'failed', error: '所有提供商均超时不可达' });
-            setFontDesignResult(taskId, { status: 'failed' as const, error: '所有提供商均超时不可达', updatedAt: Date.now() });
+            await failTask('timeout', 'MODEL_TIMEOUT', '所有提供商均超时不可达');
             return;
           }
 
@@ -405,8 +497,7 @@ export async function POST(request: NextRequest) {
 
           if (!isTaskCancelled(taskId)) {
             const failErr = `所有提供商均失败，最后错误: ${lastError}`;
-            updateTaskProgress(taskId, { status: 'failed', error: failErr });
-            setFontDesignResult(taskId, { status: 'failed' as const, error: failErr, updatedAt: Date.now() });
+            await failTask('failed', 'ALL_PROVIDERS_FAILED', failErr);
           }
         }
       }
@@ -414,8 +505,7 @@ export async function POST(request: NextRequest) {
       // 所有提供商都尝试过了
       if (!isTaskCancelled(taskId)) {
         const failErr = `所有 ${MAX_PROVIDERS_TO_TRY} 个提供商均失败: ${lastError}`;
-        updateTaskProgress(taskId, { status: 'failed', error: failErr });
-        setFontDesignResult(taskId, { status: 'failed' as const, error: failErr, updatedAt: Date.now() });
+        await failTask('failed', 'ALL_PROVIDERS_FAILED', failErr);
       }
     });
 
@@ -431,14 +521,20 @@ export async function POST(request: NextRequest) {
       durationMs,
       detail: `字体设计图片生成失败`,
     });
-    // 退款：字体设计图片生成失败时退还积分
-    if (deductedCredits > 0 && sessionUser) {
-      const amount = deductedCredits;
-      deductedCredits = 0;
+    if (durableTaskId) {
       try {
-        const refund = await refundCredits(sessionUser.id, amount, `字体设计生成失败退款: ${(error instanceof Error ? error.message : 'Unknown').substring(0, 100)}`);
-        if (!refund.success) console.error('[font-design/generate-image] Refund failed:', { userId: sessionUser.id, amount });
-      } catch (refundErr) { console.error('[font-design/generate-image] Refund failed:', refundErr); }
+        await settleFailedTask({
+          taskId: durableTaskId,
+          status: 'failed',
+          error: { code: 'REQUEST_SETUP_FAILED', message: error instanceof Error ? error.message : '生成图片失败' },
+        });
+      } catch (settlementError) { console.error('[font-design/generate-image] Durable settlement failed:', settlementError); }
+    }
+    if (isIdempotencyValidationError(error)) {
+      return NextResponse.json({ success: false, code: 'INVALID_IDEMPOTENCY_KEY', error: error.message }, { status: 400 });
+    }
+    if (error instanceof InsufficientCreditsError || error instanceof IdempotencyConflictError) {
+      return NextResponse.json({ success: false, code: error.code, error: error.message }, { status: error.statusCode });
     }
     return NextResponse.json({ error: error instanceof Error ? error.message : '生成图片失败' }, { status: 500 });
   }
