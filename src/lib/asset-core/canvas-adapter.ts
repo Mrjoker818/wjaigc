@@ -5,7 +5,7 @@ import type { CanvasImage as PersistedCanvasImage } from '@/lib/user-types';
 import type { AssetGraphMode, MediaAvailability } from './types';
 
 export type AssetGraphReadStrategy = 'legacy-authoritative' | 'asset-authoritative';
-export type CanvasMediaFailureAction = 'fallback-original' | 'fallback-video' | 'mark-missing' | 'legacy-fallback' | 'ignore';
+export type CanvasMediaFailureAction = 'retry-thumbnail' | 'fallback-original' | 'fallback-video' | 'mark-missing' | 'legacy-fallback' | 'ignore';
 export type CanvasMediaRenderDecision = 'broken-media' | 'image' | 'video' | 'none';
 
 type CanvasPlacementImage = PersistedCanvasImage | CanvasViewImage;
@@ -73,11 +73,17 @@ export function shouldRetainCanvasPlacementDuringMerge(image: CanvasPlacementIma
 
 export function getCanvasMediaFailureAction(
   image: CanvasPlacementImage,
-  state: { failedSource: 'thumbnail' | 'original'; legacyRetryAttempted: boolean },
+  state: {
+    failedSource: 'thumbnail' | 'original';
+    legacyRetryAttempted: boolean;
+    thumbnailRetryAttempted?: boolean;
+  },
 ): CanvasMediaFailureAction {
   if (image.mediaAvailability === 'unrecoverable') return 'ignore';
   if (image.mediaType === 'video' && image.videoUrl) return 'fallback-video';
-  if (state.failedSource === 'thumbnail') return 'fallback-original';
+  if (state.failedSource === 'thumbnail') {
+    return state.thumbnailRetryAttempted ? 'fallback-original' : 'retry-thumbnail';
+  }
   if (
     isManagedCanvasMedia(image)
     || image.mediaAvailability === 'missing'
@@ -95,8 +101,14 @@ export function handleCanvasMediaElementFailure(input: {
   const action = getCanvasMediaFailureAction(input.image, {
     failedSource: input.element.dataset.canvasMediaSource === 'thumbnail' ? 'thumbnail' : 'original',
     legacyRetryAttempted: input.element.dataset.retried === '1',
+    thumbnailRetryAttempted: input.element.dataset.thumbnailRetried === '1',
   });
-  if (action === 'fallback-original') {
+  if (action === 'retry-thumbnail') {
+    input.element.dataset.thumbnailRetried = '1';
+    const [sourceWithoutHash, hash] = input.element.src.split('#', 2);
+    const separator = sourceWithoutHash.includes('?') ? '&' : '?';
+    input.element.src = `${sourceWithoutHash}${separator}__wujie_thumbnail_retry=1${hash ? `#${hash}` : ''}`;
+  } else if (action === 'fallback-original') {
     input.element.dataset.canvasMediaSource = 'original';
     input.element.src = input.image.url;
   } else if (action === 'mark-missing') {

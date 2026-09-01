@@ -58,7 +58,7 @@ describe('canvas asset adapter', () => {
     expect(legacyMergeCalls).toBe(2);
   });
 
-  it('drives thumbnail then original failure into managed missing state without a legacy retry', () => {
+  it('retries a failed thumbnail once before falling back to the original and managed recovery', () => {
     const handleFailure = Reflect.get(canvasAdapter, 'handleCanvasMediaElementFailure') as undefined | ((input: {
       image: CanvasImage;
       element: { src: string; dataset: Record<string, string | undefined> };
@@ -81,10 +81,15 @@ describe('canvas asset adapter', () => {
       state = { ...state, mediaAvailability: 'missing', mediaErrorCode: code };
     };
 
+    expect(handleFailure!({ image: state, element, markMissing })).toBe('retry-thumbnail');
+    expect(element).toEqual({
+      src: '/media/thumb.png?__wujie_thumbnail_retry=1',
+      dataset: { canvasMediaSource: 'thumbnail', thumbnailRetried: '1' },
+    });
     expect(handleFailure!({ image: state, element, markMissing })).toBe('fallback-original');
     expect(element).toEqual({
       src: state.url,
-      dataset: { canvasMediaSource: 'original' },
+      dataset: { canvasMediaSource: 'original', thumbnailRetried: '1' },
     });
     expect(handleFailure!({ image: state, element, markMissing })).toBe('mark-missing');
     expect(state).toMatchObject({
@@ -154,10 +159,16 @@ describe('canvas asset adapter', () => {
     ]);
   });
 
-  it('falls back from a thumbnail once, then marks final managed-original failure missing', () => {
+  it('retries a thumbnail once, then falls back to the original before marking managed media missing', () => {
     expect(getCanvasMediaFailureAction(persistedImage, {
       failedSource: 'thumbnail',
       legacyRetryAttempted: false,
+      thumbnailRetryAttempted: false,
+    })).toBe('retry-thumbnail');
+    expect(getCanvasMediaFailureAction(persistedImage, {
+      failedSource: 'thumbnail',
+      legacyRetryAttempted: false,
+      thumbnailRetryAttempted: true,
     })).toBe('fallback-original');
     expect(getCanvasMediaFailureAction(persistedImage, {
       failedSource: 'original',
