@@ -1,0 +1,150 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-09-01T22:55:00+08:00",
+  "timezone": "Asia/Shanghai",
+  "scope": "V588-PROVIDER-003 在 f02550ba 对应 Coze 构建上的真实品牌辅助、字境与精修供应商路由和结算增量；不是全平台发布验收",
+  "source": {
+    "mainCommit": "f02550bac37b8c44732fb6a9c850db97cb461a25",
+    "cozeHead": "ff0b5042ac30a3dd6ca9dbc444069d121a13039d",
+    "tree": "d5dbbc05d08f6ee9cc79d719a0b3018cb830d289",
+    "treeMatchesOriginMain": true,
+    "stableUntouched": "52f7c601ed150769e15d06fb435c6e360e28c9e7",
+    "buildId": "MTObh3wZMhxo-_4Q_hSBy"
+  },
+  "deployment": {
+    "projectUrl": "https://code.coze.cn/p/7671964106919837702/preview",
+    "previewUrl": "https://62afe49a-716e-4d9e-99cd-a0be49c4794c-5000.dev.coze.site/",
+    "browser": "Google Chrome 用户1；只复用既有标签",
+    "gates": {
+      "testsPassed": 4492,
+      "testFilesPassed": 595,
+      "postgresTestsSkipped": 133,
+      "postgresFilesSkipped": 25,
+      "typecheck": "通过",
+      "lint": "0 errors / 0 warnings",
+      "protectedBaseline": "6 checks / 0 warnings",
+      "build": "118/118",
+      "health": "GET /、/simple-chat、/api/auth/me 均为 200"
+    }
+  },
+  "providers": {
+    "assist": {
+      "providerId": "api_1778428130626_2qpg71v",
+      "providerName": "APImartLLM",
+      "modelId": "gemini-3.1-flash-lite-preview"
+    },
+    "image": {
+      "providerId": "api_1778430731224_533e09a",
+      "providerName": "APImart imgae",
+      "modelId": "gpt-image-2"
+    }
+  },
+  "brandAssist": {
+    "ui": {
+      "status": "通过",
+      "entry": "底部工具栏 > 品牌电商 > 生成设置",
+      "selectedImageModel": "Gpt Image 2 · APImart imgae",
+      "selectedLlmModel": "Gemini 3.1 Flash Lite Preview · APImartLLM",
+      "action": "AI 辅助优化设计",
+      "result": "返回完整优化提示词、标题、副标题、CTA、风格与三种品牌色；无空响应或可见错误"
+    },
+    "api": {
+      "status": "通过",
+      "endpoint": "/api/brand-ecommerce",
+      "assistType": "optimize-prompt",
+      "httpStatus": 200,
+      "success": true,
+      "contentLength": 511,
+      "balanceBefore": 328,
+      "balanceAfter": 328,
+      "billingNote": "辅助请求不扣费"
+    },
+    "negative": [
+      {
+        "case": "不存在的显式供应商",
+        "httpStatus": 400,
+        "message": "所选LLM提供商不存在或已停用",
+        "balanceChanged": false
+      },
+      {
+        "case": "供应商目录外模型",
+        "httpStatus": 400,
+        "message": "所选LLM模型未获得该提供商授权",
+        "balanceChanged": false
+      }
+    ]
+  },
+  "fontDesign": {
+    "success": {
+      "taskId": "font-design-1788274843777-yyq6wa",
+      "idempotencyKey": "font-cloud-exact-20260901-1788274843830",
+      "status": "completed",
+      "durationSeconds": 27,
+      "providerId": "api_1778430731224_533e09a",
+      "modelId": "gpt-image-2",
+      "remoteTaskId": "task_01M1EQS8QTST7WH0Q1TQSPHCER",
+      "balanceBefore": 388,
+      "balanceAfter": 328,
+      "charged": 60,
+      "chargeTransactionId": "ctx_charge_60e5b91aba6b39ba9867bd5bc8b6c8ad",
+      "refundTransactionId": null,
+      "replay": "相同请求和幂等键返回同一 taskId、reused=true，余额不变且只有一条扣费"
+    },
+    "cancelRefund": {
+      "taskId": "font-design-1788274964978-be45id",
+      "idempotencyKey": "font-mismatch-1788274964922",
+      "note": "gpt-image-2-4k 被既有兼容规则规范化为 gpt-image-2；这不是模型失配失败",
+      "remoteTaskId": "task_01M1EQWYT7QZZ15MXVMKSA7YEQ",
+      "status": "cancelled",
+      "creditStatus": "refunded",
+      "revision": 1,
+      "balanceBeforeCharge": 328,
+      "balanceAfterCharge": 268,
+      "balanceAfterRefund": 328,
+      "chargeTransactionId": "ctx_charge_66e4ec835a36250ad636ce3e909388606",
+      "refundTransactionId": "ctx_1788274993569_mxdrrv7r",
+      "lateResultCheck": "取消后 60 秒仍为 cancelled/refunded/revision=1，无 imageUrl/imageUrls，只有一扣一退"
+    },
+    "missingProvider": {
+      "idempotencyKey": "font-missing-provider-1788275087582",
+      "httpStatus": 400,
+      "code": "MODEL_PROVIDER_MISMATCH",
+      "retryable": false,
+      "createdTaskCount": 0,
+      "balanceChanged": false
+    },
+    "chromeUiStatus": "未验证：Google Chrome 标签能列出，但正式接管时控制通道中断；没有用 360 或 API 证据冒充 UI"
+  },
+  "refineRecheck": {
+    "completedTask": {
+      "taskId": "refine-1788196115652-yk8ie0",
+      "status": "completed",
+      "providerId": "api_1778430731224_533e09a",
+      "modelId": "gpt-image-2",
+      "remoteTaskId": "task_01M1CCQ0J0DBCPM88KS91ENEY7",
+      "cost": 12,
+      "chargeTransactionId": "ctx_charge_bca231a2697ae476c7db93beb9de493d",
+      "refundTransactionId": null
+    },
+    "cancelledTask": {
+      "taskId": "refine-1788241634736-ob26or",
+      "status": "cancelled",
+      "creditStatus": "refunded",
+      "revision": 1,
+      "providerId": "api_1778430731224_533e09a",
+      "modelId": "gpt-image-2",
+      "remoteTaskId": "task_01M1DR40HJTK2ECKZ635G071GC",
+      "chargeTransactionId": "ctx_charge_fcf8ec794f7b73083da89b611d588606",
+      "refundTransactionId": "ctx_1788241645215_nc5x2dc7",
+      "lateResultOverwroteTerminal": false
+    }
+  },
+  "remainingUnverified": [
+    "真实上游供应商超时在当前品牌/字境/精修路由中的终态与一次退款",
+    "真实上游非 JSON 或畸形响应在当前路由中的错误映射与一次退款",
+    "POSTGRES_TEST_DATABASE_URL 隔离库中的 133 项并发、终态和退款测试",
+    "Google Chrome 中字境大师完整 UI 提交、进度、结果和 Console/网络证据",
+    "完整录像与 Trace"
+  ],
+  "conclusion": "有条件增量通过：精确路由、正向结果、幂等重放、取消一次退款和迟到完成拒绝已有真实云端证据；V588-PROVIDER-003 整体仍开放，不得宣布发布通过"
+}

@@ -1,5 +1,11 @@
 # V5.8.8 选择性吸收清单
 
+## 2026-09-01 V588-PROVIDER-003 云端真实结算检查点
+
+`main@f02550ba` 已同步到 Coze，云端 tree 与 `origin/main` 完全一致。品牌辅助精确 APImart LLM 配对、缺失/未授权显式选择零回退零扣费、字境成功只扣一次、幂等重放不重复扣费、取消只退一次及迟到完成拒绝均取得真实证据；精修既有完成和取消任务也已重新读取终态确认。`stable@52f7c601` 保持未触碰。
+
+本检查点不标记阶段完成：真实上游超时和非 JSON 失败、133 项隔离 PostgreSQL 专项、字境 Google Chrome UI/网络/Console/Trace 仍未验证。下一步仍只处理这些 PROVIDER-003 剩余证据；完成前不进入 ADMIN、Skills 或重复已冻结阶段。机器证据：`docs/testing/evidence/v588-provider-003-f02550ba-cloud-api-20260901.json`。
+
 ## 2026-09-01 V588-PROVIDER-003 精确供应商路由本地检查点
 
 `main@14b058fce595711cbdad8d6823b8c22699b759c1` 已在当前权威主线上最小修复品牌电商、精修引擎和字境大师的显式供应商路由：显式 `providerId + modelId` 不再跨供应商回退；供应商缺失、模型不属于该供应商或复合模型中的供应商冲突均在任务创建和扣费前返回 `MODEL_PROVIDER_MISMATCH`。复合模型键、4K 别名和未显式选择模型时采用当前供应商默认模型的兼容行为保留。

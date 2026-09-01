@@ -1,5 +1,11 @@
 # 无界AI — 缺陷登记表 (BUG REGISTER)
 
+## 2026-09-01 V588-PROVIDER-003 云端真实结算增量
+
+`main@f02550ba` 对应 Coze 构建已取得真实正向和负向证据：品牌辅助冻结 APImart LLM 精确配对并返回完整内容；字境 APImart 图像任务完成且只扣 60 积分，同键重放复用同一任务且不重复扣费；另一个字境任务真实取消后只有一扣一退，60 秒后迟到结果没有覆盖 `cancelled/refunded/revision=1`；不存在的显式供应商在任务和扣费前返回 `MODEL_PROVIDER_MISMATCH`。精修既有完成与取消任务的供应商身份、单次扣费/退款和终态也已重新读取确认。
+
+本增量没有关闭 `V588-PROVIDER-003-BUG-010`：当前品牌/字境/精修尚未制造真实上游超时或非 JSON 响应；133 项隔离 PostgreSQL 测试仍未执行；字境 Google Chrome UI 因标签接管通道中断保持未验证。浏览器控制故障不登记为产品 Bug，也没有改用 360。机器证据：[v588-provider-003-f02550ba-cloud-api-20260901.json](evidence/v588-provider-003-f02550ba-cloud-api-20260901.json)。
+
 ## 2026-09-01 V588-PROVIDER-003 精确路由与后台结算
 
 ### V588-PROVIDER-003-BUG-009：显式供应商失配时跨供应商回退
