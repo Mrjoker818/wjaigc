@@ -26,9 +26,71 @@ function extractTaskTypes(source) {
   );
 }
 
-function extractSkillIds(source) {
+function extractNamedArray(source, arrayName) {
+  const escapedName = arrayName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const declaration = new RegExp(`\\b(?:export\\s+)?const\\s+${escapedName}\\b[^=]*=\\s*\\[`).exec(source);
+  if (!declaration) return '';
+
+  const start = declaration.index + declaration[0].lastIndexOf('[');
+  let depth = 0;
+  let quote = null;
+  let escaped = false;
+  let lineComment = false;
+  let blockComment = false;
+
+  for (let index = start; index < source.length; index += 1) {
+    const character = source[index];
+    const next = source[index + 1];
+
+    if (lineComment) {
+      if (character === '\n') lineComment = false;
+      continue;
+    }
+    if (blockComment) {
+      if (character === '*' && next === '/') {
+        blockComment = false;
+        index += 1;
+      }
+      continue;
+    }
+    if (quote) {
+      if (escaped) {
+        escaped = false;
+      } else if (character === '\\') {
+        escaped = true;
+      } else if (character === quote) {
+        quote = null;
+      }
+      continue;
+    }
+    if (character === '/' && next === '/') {
+      lineComment = true;
+      index += 1;
+      continue;
+    }
+    if (character === '/' && next === '*') {
+      blockComment = true;
+      index += 1;
+      continue;
+    }
+    if (character === "'" || character === '"' || character === '`') {
+      quote = character;
+      continue;
+    }
+    if (character === '[') depth += 1;
+    if (character === ']') {
+      depth -= 1;
+      if (depth === 0) return source.slice(start, index + 1);
+    }
+  }
+
+  return '';
+}
+
+export function extractSkillIds(source, arrayName) {
+  const arraySource = extractNamedArray(source, arrayName);
   return uniqueSorted(
-    [...source.matchAll(/\bid:\s*['"]([^'"]+)['"]/g)].map(match => match[1]),
+    [...arraySource.matchAll(/\bid:\s*['"]([^'"]+)['"]/g)].map(match => match[1]),
   );
 }
 
@@ -186,8 +248,8 @@ export async function collectStage4Inventory(root = process.cwd()) {
   const nodeTypes = extractObjectKeys(workflowSource, 'NODE_TYPE_LABELS');
   const portTypes = extractObjectKeys(workflowSource, 'PORT_COMPATIBILITY');
   const skills = uniqueSorted([
-    ...extractSkillIds(canvasSkillsSource),
-    ...extractSkillIds(simpleChatSkillsSource),
+    ...extractSkillIds(canvasSkillsSource, 'RAW_CANVAS_PRESET_SKILLS'),
+    ...extractSkillIds(simpleChatSkillsSource, 'RAW_SIMPLE_CHAT_PRESET_SKILLS'),
   ]);
   const agentTools = extractAgentTools(agentSource);
 

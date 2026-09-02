@@ -50,3 +50,37 @@
 - 21 项原始画布对象只存在于 `canvas-presets.ts`；目录定义和 `chat-panel.tsx` 兼容消费均由同一数组派生。
 - `simple-chat-types.ts` 保留 `PresetSkill` 接口，并通过 `export { SIMPLE_CHAT_PRESET_SKILLS as PRESET_SKILLS }` 维持现有导入名。
 - 未修改 `stable`，未推送，未修改或删除任务开始前存在的未跟踪保护项，也未暂存用户已修改的 `task-1-brief.md`。
+
+## 独立审查 Important findings 修复（2026-09-02）
+
+### RED
+
+- 初始命令：`pnpm exec vitest run src/__tests__/lib/skill-runtime-catalog.test.ts src/__tests__/scripts/stage-4-inventory.test.ts src/__tests__/components/simple-chat-model-selector-contract.test.ts`
+- 初始结果：exit 1；3 个测试文件中 1 个失败，新增 inventory 提取器合同因现有函数未导出而失败（`extractSkillIds is not a function`）。
+- 有效行为 RED 命令：`pnpm exec vitest run src/__tests__/scripts/stage-4-inventory.test.ts`
+- 有效行为 RED 结果：exit 1；现有全文件正则错误返回 `outside-before`、`outside-after`，精确复现“扫描指定 RAW 数组之外 ID”的审查问题。
+
+### 最小实现
+
+- `extractSkillIds(source, arrayName)` 先以命名声明定位数组，再用字符串/模板字符串/注释感知的括号扫描截取数组边界；两个生产调用点分别固定到 `RAW_CANVAS_PRESET_SKILLS` 和 `RAW_SIMPLE_CHAT_PRESET_SKILLS`。
+- inventory 断言改为完整且精确的 37 个预期 ID，不再使用数量下限。
+- 新增从迁移前提交 `2faeec0b` 机械生成的独立 baseline fixture。目录测试对完整 21/16 ID 以及每项原始 `name/category/description/systemPrompt`、画布 `paramSlots`（含 `defaultValue/placeholder`）与 `steps`（含文字/role）、Simple Chat `icon/tags` 做逐字段比较，不与生产代码自身互比。
+- 403/404 测试完整锁定错误类及构造器、`code`、`status`、`message`。
+
+### GREEN 与验证
+
+- GREEN 命令：`pnpm exec vitest run src/__tests__/lib/skill-runtime-catalog.test.ts src/__tests__/scripts/stage-4-inventory.test.ts src/__tests__/components/simple-chat-model-selector-contract.test.ts`
+- GREEN 结果：exit 0；3 个测试文件通过，14 个测试通过，0 个失败。
+- `pnpm exec tsc -p tsconfig.json --noEmit`：exit 0。
+- 限定 ESLint：exit 0，0 errors；仅 `scripts/stage-4-inventory.mjs` 的既有 `appFileToRoute` 未使用 warning。
+- `git diff --check`：exit 0；仅 Git 的 LF/CRLF 提示，无空白错误。
+
+### 本轮修改文件
+
+- `scripts/stage-4-inventory.mjs`
+- `src/__tests__/scripts/stage-4-inventory.test.ts`
+- `src/__tests__/lib/skill-runtime-catalog.test.ts`
+- `src/__tests__/fixtures/skill-runtime-presets.baseline.json`
+- `.superpowers/sdd/task-1-report.md`
+
+本轮未修改 `stable`，未推送，未触碰或暂存任务开始前已有的未跟踪项，也未暂存用户已修改的 `.superpowers/sdd/task-1-brief.md`。
