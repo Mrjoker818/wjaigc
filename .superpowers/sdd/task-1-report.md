@@ -1,187 +1,45 @@
-# WJ-STABLE Stage 4 Task 1 Report
+# Task 1 实现报告
 
-## Status
+## RED
 
-DONE LOCALLY / INDEPENDENT REVIEW FINDINGS REMEDIATED
+- 命令：`pnpm exec vitest run src/__tests__/lib/skill-runtime-catalog.test.ts`
+- 结果：exit 1，1 个测试文件在收集阶段失败。
+- 预期失败原因：`@/lib/skill-runtime/catalog` 不存在（`Cannot find module '@/lib/skill-runtime/catalog'`）。
+- 判定：失败来自 catalog 尚未实现，不是测试语法错误，符合 TDD RED 要求。
+- 澄清后新增契约 RED 命令：`pnpm exec vitest run src/__tests__/lib/skill-runtime-catalog.test.ts`。
+- 澄清后 RED 结果：exit 1；3 个测试中 2 个通过，新增的“画布聊天面板复用唯一目录”失败，因为 `chat-panel.tsx` 尚未导入 `CANVAS_PRESET_CHAT_SKILLS`。
 
-- Task 1 base: `255a8b6fe20924ae30ab8fd99a98393f2bcd1a52`
-- Initial Task 1 commit: `0c5c1adfe3e09eab87a81900a09f33bf789f7881`
-- First review-fix commit: `ae8d46082f2f77e815eafb4ca94d02ab4bce098f`
-- Second review-fix commit: `53b5f3d739da495c3ecd434ffb3b04f2554041dc`
-- Final review-fix commit: `62e916c5a8eb21a5c89a5d704c62bcd9e842e9e9`
-- Immutable baseline: `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7`
+## 修改文件
 
-## Delivered
+- `src/lib/skill-runtime/types.ts`
+- `src/lib/skill-runtime/canvas-presets.ts`
+- `src/lib/skill-runtime/simple-chat-presets.ts`
+- `src/lib/skill-runtime/catalog.ts`
+- `src/components/chat-panel.tsx`
+- `src/components/simple-chat/simple-chat-types.ts`
+- `src/__tests__/lib/skill-runtime-catalog.test.ts`
+- `.superpowers/sdd/task-1-report.md`（用户明确要求的交付报告）
 
-- Added checksum-managed `wujie_agent_events` storage with ordered, owner/project-scoped streams.
-- Added shared Agent contracts, deterministic projection, context authorization, tool registry,
-  authenticated run APIs, current-user listing and existing task/billing integration.
-- Added explicit model `sourceType` to preserve the real `vlm` catalog distinction. Reference-image
-  input support no longer grants `analyze_image` authorization.
-- Hardened initialization retries: a reused terminal task returns `AGENT_RUN_TERMINAL` and can never
-  append `run.created`, become active again or execute without a charge.
-- Hardened terminal ordering: authoritative task completion/failure/cancellation/timeout settlement
-  must succeed, or already match the requested terminal state, before the terminal event is written.
-  A losing terminal race returns `AGENT_RUN_TERMINAL_CONFLICT` without persisting the losing event.
-- Terminal-event retries still pass through event-storage request-digest validation. Nonterminal work
-  is rejected when the authoritative task is already terminal.
-- Nonterminal acceptance is based on whether the appended event was reduced, not whether it remains
-  the latest sequence after a concurrent append.
-- Malformed JSON at `POST /api/agent-runs` now returns safe HTTP 400.
-- Bound each authoritative terminal transition to a durable event ID, canonical request digest and
-  terminal event type in `cloud_tasks`. Task result, billing state and this identity now change in
-  the existing atomic task settlement path before event persistence.
-- Agent event storage verifies terminal events against that durable identity and advances the owning
-  task revision in the same transaction as every new event insert.
-- Initialization failure settlement now uses the pre-append revision. A committed `run.created`
-  whose response is lost advances the revision, prevents refund and is reconciled by the exact
-  deterministic event retry; a true append failure is failed/refunded once and cannot resurrect.
-- Added one shared pure Agent event prevalidation contract for identifiers, workspace/type, sensitive
-  fields, JSON-safe values, the 256 KiB payload ceiling and canonical request digest. The service
-  validates and snapshots terminal payloads before settlement; storage repeats validation inside its
-  transaction before any event write.
-- Agent run workspace recovery now comes only from the immutable authorized `run.created` event, so
-  a business result containing its own `workspace` field cannot alter exact-retry identity.
+## GREEN
 
-## RED Evidence
+- 命令：`pnpm exec vitest run src/__tests__/lib/skill-runtime-catalog.test.ts src/__tests__/components/simple-chat-model-selector-contract.test.ts`
+- 结果：exit 0；2 个测试文件通过，8 个测试通过，0 个失败。
+- 附加检查：限定文件 ESLint，exit 0、0 errors；`chat-panel.tsx` 报告 55 条既有 warnings，未做范围外清理。
+- 附加检查：`pnpm exec tsc -p tsconfig.json --noEmit`，exit 0。
+- 迁移核验：HEAD 中画布原始对象块与 `RAW_CANVAS_PRESET_SKILLS` 逐字符相等；Simple Chat 的 HEAD 原始对象块与 `RAW_SIMPLE_CHAT_PRESET_SKILLS` 逐字符相等。
+- 唯一来源核验：`chat-panel.tsx` 不再包含内联画布目录或 `preset-ecommerce-listing`，只导入 `CANVAS_PRESET_CHAT_SKILLS`；该 ID 在 `canvas-presets.ts` 原始对象块中只出现一次。
+- 工作树核验：`git diff --check` exit 0，仅有 Git 的 LF/CRLF 提示，无空白错误。
 
-Initial review-regression command:
+## 风险
 
-```powershell
-$env:POSTGRES_TEST_DATABASE_URL='postgresql://postgres@127.0.0.1:55433/postgres'
-pnpm exec vitest run src/__tests__/lib/agent-runtime-state.test.ts src/__tests__/lib/agent-runtime-tools.test.ts src/__tests__/api/agent-runs.test.ts tests/integration/stage-4-agent-events-postgres.test.ts --reporter=verbose
-```
+- 附加运行 `pnpm exec vitest run src/__tests__/scripts/stage-4-inventory.test.ts` 时失败：`inventory.skills.length` 为 0。模块对 `PRESET_SKILLS` 的导入已成功，失败原因是该 inventory 生成器硬编码静态扫描 `simple-chat-types.ts` 中的内联数组；本任务按 brief 将数组迁移并改为重导出后，它尚未跟随新目录位置。该生成器及其测试不在 Task 1 允许修改文件内，因此未越界修复。
+- `Date.now()` 字段按原对象机械保留；不同模块加载时刻会产生运行期时间差，这是原有行为，不影响固定 ID、文案、参数默认值或步骤文字。
 
-Observed: `8 failed / 54 passed`. Six intended unit failures proved reference-image/VLM confusion,
-terminal settlement after event persistence, ignored losing settlement, non-latest event rejection,
-terminal initialization resurrection and malformed JSON 500. Two PostgreSQL cases initially failed
-for a test-isolation module-cache setup error and were not counted as valid business RED evidence.
+## 自审
 
-After correcting only the PostgreSQL fixture isolation:
-
-- Initialization retry RED: the second same-key call resolved as a reused active projection instead
-  of rejecting; the real task had already been failed and refunded.
-- Terminal race RED: `1 failed / 12 skipped`; a real PostgreSQL task settled as cancelled still
-  persisted and reported `run.completed` on two losing retries.
-- Catalog RED: `1 failed / 16 skipped`; descriptors did not expose `sourceType` and therefore could
-  not preserve a real VLM distinction.
-- Defensive terminal retry RED: `2 failed / 24 skipped`; same-ID terminal retries bypassed canonical
-  digest validation and a terminal task without its recovery event accepted nonterminal progress.
-
-Second-review RED evidence:
-
-- Unit command:
-  `pnpm exec vitest run src/__tests__/api/agent-runs.test.ts -t "binds a completion result" --reporter=verbose`
-  produced `1 failed / 26 skipped`: after completion A settled and its append response failed, a
-  same-ID retry carrying result B did not produce the required conflict.
-- Real PostgreSQL command:
-  `$env:POSTGRES_TEST_DATABASE_URL='postgresql://postgres@127.0.0.1:55433/postgres'; pnpm exec vitest run tests/integration/stage-4-agent-events-postgres.test.ts -t "binds concurrent same-status|reconciles run.created" --reporter=verbose`
-  produced `2 failed / 13 skipped`: no durable terminal identity columns existed, and a committed
-  `run.created` followed by a lost response was incorrectly surfaced as initialization failure.
-- The pre-existing real PostgreSQL case `never resurrects a refunded initialization failure on
-  idempotent retry` remains the RED/GREEN guard for a true append failure and one-time refund.
-
-## GREEN Evidence
-
-First-review final focused command:
-
-```powershell
-$env:POSTGRES_TEST_DATABASE_URL='postgresql://postgres@127.0.0.1:55433/postgres'
-pnpm exec vitest run src/__tests__/lib/agent-runtime-state.test.ts src/__tests__/lib/agent-runtime-tools.test.ts src/__tests__/api/agent-runs.test.ts src/__tests__/lib/task-model-catalog.test.ts tests/integration/stage-4-agent-events-postgres.test.ts --reporter=verbose
-```
-
-Observed: `5 files / 81 tests passed`, including `13/13` real PostgreSQL tests with zero Task 1 skips.
-The database evidence covers 20 concurrent ordered appends, same-ID idempotency conflict, ownership
-isolation, 20 concurrent cancellations, one consume/one refund, failed initialization retry, losing
-terminal race, repeated losing retry and absence of a losing result/event.
-
-Static verification:
-
-- `pnpm ts-check`: exit 0.
-- `pnpm lint -- --quiet`: zero ESLint errors.
-- `git diff --check`: exit 0; only Git line-ending notices were emitted.
-
-## Concerns And Follow-up Evidence
-
-- The safe recovery direction is task-first: if event persistence fails after authoritative terminal
-  settlement, the event projection can temporarily lag the task. Retrying the identical terminal
-  request repairs the event after request-digest verification; it cannot reverse or replace the task
-  terminal state. This avoids the unsafe inverse state found by review.
-- Exact-SHA cloud deployment and real browser integration remain Stage 4 follow-up evidence and are
-  not represented as passed by these local tests.
-- This remediation did not modify `stable` or `.superpowers/sdd/task-1-brief.md`.
-
-## Second Review GREEN Evidence
-
-Final combined command:
-
-```powershell
-$env:POSTGRES_TEST_DATABASE_URL='postgresql://postgres@127.0.0.1:55433/postgres'
-pnpm exec vitest run src/__tests__/lib/agent-runtime-state.test.ts src/__tests__/lib/agent-runtime-tools.test.ts src/__tests__/api/agent-runs.test.ts src/__tests__/lib/task-model-catalog.test.ts src/__tests__/lib/task-state.test.ts src/__tests__/lib/task-billing.test.ts tests/integration/stage-4-agent-events-postgres.test.ts --reporter=verbose
-```
-
-Observed: `7 files / 202 tests passed`, including all `15/15` Stage 4 real PostgreSQL
-migration/event tests with zero skips. The PostgreSQL evidence includes concurrent different-result
-completion claims producing one durable terminal identity, one terminal event and a task result equal
-to the event projection; committed-then-thrown `run.created` recovery without refund or second charge;
-and true initialization append failure with one refund and no resurrection.
-
-Second-review static verification:
-
-- `pnpm ts-check`: exit 0.
-- `pnpm lint -- --quiet`: exit 0, zero ESLint errors.
-- `git diff --check`: run immediately before commit; result recorded in the commit evidence.
-
-## Final Review RED Evidence
-
-Unit command:
-
-```powershell
-pnpm exec vitest run src/__tests__/api/agent-runs.test.ts -t "rejects .* before terminal settlement|uses the immutable run.created workspace" --reporter=verbose
-```
-
-Observed: `3 failed / 1 passed / 27 skipped`. Secret-bearing completion and oversized failure
-resolved after invoking settlement instead of rejecting, while an exact terminal retry used the
-mutable business result workspace (`workflow`) instead of the authorized run workspace (`canvas`).
-The unserializable BigInt case already threw before settlement and was retained as a permanent guard.
-
-Real PostgreSQL command:
-
-```powershell
-$env:POSTGRES_TEST_DATABASE_URL='postgresql://postgres@127.0.0.1:55433/postgres'
-pnpm exec vitest run tests/integration/stage-4-agent-events-postgres.test.ts -t "rejects an invalid terminal payload" --reporter=verbose
-```
-
-Observed: `1 failed / 15 skipped`. The rejected secret-bearing completion changed the durable task
-from `processing/pending` to `completed/charged`, persisted the secret in `cloud_tasks.result`, and
-wrote terminal identity while no matching terminal event existed.
-
-## Final Review GREEN Evidence
-
-Focused regression command:
-
-```powershell
-$env:POSTGRES_TEST_DATABASE_URL='postgresql://postgres@127.0.0.1:55433/postgres'
-pnpm exec vitest run src/__tests__/lib/agent-runtime-state.test.ts src/__tests__/lib/agent-runtime-tools.test.ts src/__tests__/api/agent-runs.test.ts src/__tests__/lib/task-model-catalog.test.ts src/__tests__/lib/task-state.test.ts src/__tests__/lib/task-billing.test.ts tests/integration/stage-4-agent-events-postgres.test.ts --reporter=verbose
-```
-
-Observed: `7 files / 207 tests passed`, including all `16/16` Stage 4 real PostgreSQL tests with zero
-skips. The new database assertion compares task status/result, credit status/balance, consume/refund
-ledger counts, terminal identity and event count before and after rejection; every field is unchanged.
-
-Final-review static verification:
-
-- `pnpm ts-check`: exit 0.
-- `pnpm lint -- --quiet`: exit 0, zero ESLint errors.
-- Intended-file `git diff --check`: exit 0. The controller subsequently normalized the generated
-  Task 2 brief EOF, so the final unscoped whitespace check also exits 0.
-
-## Controller Final Verification
-
-- Independent task review approved Task 1 with Critical/Important findings `0/0`; its only Minor was
-  this report's pending final commit reference, corrected to `62e916c5a8eb21a5c89a5d704c62bcd9e842e9e9`.
-- Focused Task 1 regression: `7 files / 207 tests passed`, including `16/16` real PostgreSQL tests.
-- PostgreSQL-enabled full Vitest: `446 files / 2628 tests passed`, with four unrelated tests initially
-  skipped because they use `TEST_POSTGRES_URL`; those four then passed separately as `3 files / 4 tests`.
-- `pnpm ts-check`, `pnpm lint -- --quiet`, production build `113/113`, protected baseline `38/38`
-  with zero warnings, and whitespace checks passed on the final Task 1 candidate.
+- 21 个画布 Skill ID 和顺序与 brief 完全一致，只授权 `canvas,workflow`。
+- 16 个 Simple Chat Skill 只授权 `simple-chat`，未混入任何画布 ID。
+- 画布 Skill 的 ID、名称、描述、`systemPrompt`、参数默认值、步骤文字均通过原始对象块逐字符对比确认未改动。
+- 21 项原始画布对象只存在于 `canvas-presets.ts`；目录定义和 `chat-panel.tsx` 兼容消费均由同一数组派生。
+- `simple-chat-types.ts` 保留 `PresetSkill` 接口，并通过 `export { SIMPLE_CHAT_PRESET_SKILLS as PRESET_SKILLS }` 维持现有导入名。
+- 未修改 `stable`，未推送，未修改或删除任务开始前存在的未跟踪保护项，也未暂存用户已修改的 `task-1-brief.md`。
