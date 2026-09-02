@@ -16,7 +16,10 @@ import {
 import { abortTaskExecution, createTaskAbortScope } from '@/lib/task-core/task-abort';
 import { transitionTask } from '@/lib/task-core/task-service';
 import type { User } from '@/lib/user-types';
+import { estimateSkillRunCost } from '@/lib/skill-runtime/cost-estimator';
+import { authorizeSkillAgentRunRequest } from '@/lib/skill-runtime/run-request';
 import { authorizeAgentContext } from './context-adapters';
+import { readAgentPrompt } from './request-validation';
 import {
   AgentEventConflictError,
   AgentEventNotFoundError,
@@ -338,7 +341,7 @@ export function parseAgentRunRequest(value: unknown): AgentRunRequest {
     mode: input.mode as AgentMode,
     providerId: readString(input.providerId, 'providerId'),
     modelId: readString(input.modelId, 'modelId'),
-    prompt: readString(input.prompt, 'prompt', 32_000),
+    prompt: readAgentPrompt(input.prompt),
     sourceVersionIds: readStringArray(input.sourceVersionIds, 'sourceVersionIds'),
     allowedToolIds: readStringArray(input.allowedToolIds, 'allowedToolIds', 64),
     idempotencyKey: readString(input.idempotencyKey, 'idempotencyKey'),
@@ -695,14 +698,19 @@ export function createAgentRuntimeService(
       request: AgentRunRequest;
       billingQuote?: AgentRunBillingQuote;
     }): Promise<AgentRunCreateResult> {
+      readAgentPrompt(input.request.prompt);
+      const skillAdmission = input.request.skill
+        ? await authorizeSkillAgentRunRequest(input.request, {
+            actorUserId: input.actor.id,
+            resolveTaskModel: dependencies.resolveTaskModel,
+          })
+        : null;
       await dependencies.authorizeContext({
         actorUserId: input.actor.id,
         request: input.request,
       });
-      const model = await dependencies.resolveTaskModel(
-        input.request.providerId,
-        input.request.modelId,
-        input.actor.id,
+      const model = skillAdmission?.orchestratorModel ?? await dependencies.resolveTaskModel(
+        input.request.providerId, input.request.modelId, input.actor.id,
       );
       const authorization = authorizeAgentTools({
         requestedToolIds: input.request.allowedToolIds,
@@ -726,12 +734,20 @@ export function createAgentRuntimeService(
       ) {
         throw new AgentRunRequestError('billingQuote is invalid');
       }
-      const creditCost = input.billingQuote?.creditCost
+      const skillEstimate = skillAdmission
+        ? await estimateSkillRunCost(
+            skillAdmission.skill,
+            skillAdmission.modelBindings,
+            { calculateCreditCost: dependencies.calculateCreditCost },
+          )
+        : null;
+      const creditCost = skillEstimate?.maximum
+        ?? input.billingQuote?.creditCost
         ?? await dependencies.calculateCreditCost(
-          'agent_edit',
-          input.request.modelId,
-          { providerId: input.request.providerId },
-        );
+            'agent_edit',
+            input.request.modelId,
+            { providerId: input.request.providerId },
+          );
       const now = dependencies.now();
       const created = await dependencies.createBillableTask({
         userId: input.actor.id,

@@ -77,3 +77,91 @@ pnpm exec vitest run src/__tests__/lib/skill-runtime-catalog.test.ts src/__tests
 - 新模块未导入或调用 `createBillableTask`、积分流水或任务状态迁移；唯一创建调用是 `createAgentRun(...billingQuote)`。
 - 请求构建顺序为 surface/version/input 校验、逐角色模型授权、资产授权、报价、Agent Runtime 创建；所有可预见的权限和能力错误都发生在扣费前。
 - 未修改 `stable`，未 push，未触碰或暂存任务开始前已有的四个保护未跟踪项：`.playwright-cli/`、`_refs-asui-canvas/`、`_refs-hero-infinite-canvas/`、`docs/superpowers/plans/2026-08-02-provider-generation-video-reliability.md`。
+
+## 独立复审修复（2026-09-02）
+
+### RED
+
+在任何生产代码修改前新增复审覆盖并运行：
+
+```text
+pnpm exec vitest run src/__tests__/api/agent-runs.test.ts src/__tests__/lib/skill-runtime-run-request.test.ts src/__tests__/api/skill-run-estimate.test.ts src/__tests__/lib/agent-runtime-tools.test.ts
+```
+
+结果：退出 1；4 个文件均正常收集，88 项中 78 项通过、10 项按预期失败：
+
+- 公共 Agent Runtime service 接受了映射到 `chat` 的画布 Skill，且已经走到任务创建。
+- 公共 service 接受额外 `video` binding，并接受与服务端 Skill 定义不一致的 prompt 快照。
+- 直接 service 调用接受 UTF-8 体积超过 32,000 bytes 的 prompt。
+- `buildSkillAgentRunRequest` 接受实际角色集合之外的已知额外角色。
+- 同项目但仅放置于另一 workspace 的 source Asset Version 被授权。
+- 零步骤 Simple Chat Skill 的 estimate/create 报价为 0，没有调用 orchestrator 基础费用计算。
+- estimate 未知异常响应没有 `x-request-id`，仍返回内部异常消息结构。
+
+所有失败都来自复审指出的行为缺失，不是测试语法、模块加载或环境错误。
+
+实现首轮 GREEN 后又补了两次窄 RED：
+
+- estimate 已知 `SKILL_INPUT_REQUIRED` 异常仍返回 500；单文件运行 8 项中 7 通过、1 失败。修复为按既有业务 code 返回统一 400 envelope。
+- 合法 Skill 可直接通过公共 Agent Runtime 使用普通 `agent_edit` 单价，绕过 Skill 同一报价；定向运行 54 项中 1 失败、53 跳过，实际调用为 `agent_edit` 而预期为 orchestrator `chat`。随后把 Skill 重报价收口到 Agent Runtime service。
+
+### GREEN
+
+最终复审聚焦命令：
+
+```text
+pnpm exec vitest run src/__tests__/api/agent-runs.test.ts src/__tests__/lib/skill-runtime-run-request.test.ts src/__tests__/api/skill-run-estimate.test.ts src/__tests__/lib/agent-runtime-tools.test.ts src/__tests__/lib/agent-runtime-admission-gate.test.ts
+```
+
+结果：退出 0；5 个文件、96 项全部通过。
+
+关键修复：
+
+- 所有携带 `request.skill` 的请求在 Agent Runtime service 统一执行目录 surface/version、规范化 inputs/prompt/tools、精确 model role 集合及逐角色模型能力授权，早于上下文授权、报价和 `createBillableTask`。
+- `chat` 只映射 16 个 `simple-chat` Skills；`canvas/workflow` 只接受 21 个画布 Skills。公共 Agent 请求伪造画布 Skill 到 chat 时，模型解析、费用计算和任务创建调用均为 0。
+- model bindings 缺失、额外、未知角色均通过精确集合 fail closed；服务端授权结果与请求冻结快照不一致时拒绝。
+- source Asset Version 除 actor/project 外，还必须存在匹配 workspace kind、workspaceId、versionId 的 active placement；同项目跨 workspace 拒绝发生在报价和任务创建前。
+- 零步骤 Simple Chat Skill 合成且仅合成一个 orchestrator `chat` 计费步骤；若未来目录已有 orchestrator step，则不重复合成。estimate、Skill create 与公共 Agent service 均使用同一估价器；客户端费用字段无效。
+- compile 后 prompt 与直接 service prompt 均按 UTF-8 32,000 bytes 上限拒绝，且发生在授权、报价、任务创建前。
+- estimate 未知异常固定返回 `SKILL_RUN_ERROR / Skill run request failed`、`requestId`、`x-request-id` 与统一错误结构，不泄漏内部消息；已知业务 code/status 保留。
+
+### 回归
+
+brief 指定聚焦命令：
+
+```text
+pnpm exec vitest run src/__tests__/lib/skill-runtime-run-request.test.ts src/__tests__/api/skill-run-estimate.test.ts src/__tests__/lib/agent-runtime-admission-gate.test.ts
+```
+
+结果：退出 0；3 个文件、22 项全部通过。
+
+Task 1-4、21/16 目录隔离、Asset/Agent Runtime 与 Task 4 pause/resume/retry fences 回归：
+
+```text
+pnpm exec vitest run src/__tests__/lib/skill-runtime-catalog.test.ts src/__tests__/scripts/stage-4-inventory.test.ts src/__tests__/components/simple-chat-model-selector-contract.test.ts src/__tests__/lib/skill-runtime-inputs.test.ts src/__tests__/lib/skill-runtime-quality.test.ts src/__tests__/lib/skill-runtime-storage.test.ts src/__tests__/api/skills.test.ts src/__tests__/integration/skill-runtime-storage-postgres.test.ts src/__tests__/lib/agent-runtime-state.test.ts src/__tests__/api/agent-runs.test.ts src/__tests__/components/use-agent-run-events.test.ts src/__tests__/lib/agent-runtime-tools.test.ts
+```
+
+结果：退出 0；11 个文件通过、1 个文件跳过；193 项通过、2 项 PostgreSQL 测试跳过。
+
+其他验证：
+
+- `pnpm ts-check`：退出 0。
+- 目标 ESLint（11 个本次 TypeScript 改动文件）：退出 0，0 error，0 warning。
+- `git diff --check`：退出 0；仅 LF/CRLF 转换提示，无 whitespace error。
+
+### 风险
+
+- Skill create 入口先生成服务端报价，Agent Runtime service 在唯一账务边界前再次按冻结 Skill 快照重算并采用该报价；这是有意的双重只读计算，用于阻断公共入口和内部调用绕过，代价是 create 路径会重复执行费用配置读取。
+- Asset workspace 授权新增 active placement 查询；真实数据库索引和查询计划未在本地无 PG 环境下测量。
+- 未进行真实供应商调用或真实积分扣费；模型授权、报价与唯一 `createBillableTask` 边界由依赖注入测试验证。
+
+### 未验证项
+
+- `PGDATABASE_URL`、`DATABASE_URL`、`POSTGRES_TEST_DATABASE_URL` 均未设置；2 项 PostgreSQL 集成测试明确 SKIP，未验证真实数据库 placement 查询。
+- 未执行 Task 6 执行器、Skill UI、21 个 Skills 执行迁移或云端端到端流程，符合本次边界。
+
+### 复审自审
+
+- 未新增第二套任务、扣费或状态机；Skill 报价最终仍只进入既有 Agent Runtime `createBillableTask`。
+- pause/resume/retry 路径未增加费用计算或扣费；Task 4 fences 回归通过。
+- 未修改 `stable`，未 push，未触碰或暂存四个保护未跟踪项。

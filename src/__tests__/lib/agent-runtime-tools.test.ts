@@ -302,6 +302,13 @@ describe('Agent context ownership adapter', () => {
         _workspaceId: string,
         entityId: string,
       ) => entityId === 'image-1' ? { id: 'placement-1', assetVersionId: 'version-1' } : null),
+      findVersionPlacement: vi.fn(async (
+        _ownerId: string,
+        _projectId: string,
+        _workspace: string,
+        _workspaceId: string,
+        versionId: string,
+      ) => versionId === 'version-1' ? { id: 'placement-1', assetVersionId: versionId } : null),
     };
     const storage = {
       transaction: async <T>(callback: (value: typeof transaction) => Promise<T>): Promise<T> => (
@@ -339,6 +346,37 @@ describe('Agent context ownership adapter', () => {
     expect(transaction.findEntityPlacement).toHaveBeenCalledWith(
       'owner-1', 'project-1', 'canvas', 'canvas-1', 'image-1',
     );
+    expect(transaction.findVersionPlacement).toHaveBeenCalledWith(
+      'owner-1', 'project-1', 'canvas', 'canvas-1', 'version-1',
+    );
+  });
+
+  it('rejects a source version placed only in another workspace of the same project', async () => {
+    const storage = {
+      transaction: async <T>(callback: (value: {
+        findProject: () => Promise<boolean>;
+        findVersion: () => Promise<{ id: string; file: { url: string } }>;
+        findVersionPlacement: () => Promise<null>;
+      }) => Promise<T>): Promise<T> => callback({
+        findProject: async () => true,
+        findVersion: async () => ({
+          id: 'version-workflow-only',
+          file: { url: 'https://media.example.com/workflow.png' },
+        }),
+        findVersionPlacement: async () => null,
+      }),
+    };
+
+    await expect(authorizeAgentContext({
+      actorUserId: 'owner-1',
+      request: request({
+        workspace: 'canvas',
+        workspaceId: 'canvas-1',
+        sourceVersionIds: ['version-workflow-only'],
+        context: { selectedEntityIds: [], visibleVersionIds: [], locale: 'zh-CN' },
+      }),
+      storage,
+    })).rejects.toMatchObject({ code: 'AGENT_CONTEXT_NOT_FOUND', status: 404 });
   });
 
   it('rejects a placement/version mismatch instead of authorizing an unrelated URL', async () => {
@@ -347,10 +385,12 @@ describe('Agent context ownership adapter', () => {
       transaction: async <T>(callback: (value: {
         findProject: () => Promise<boolean>;
         findVersion: () => Promise<{ id: string; file: { url: string } }>;
+        findVersionPlacement: () => Promise<{ id: string; assetVersionId: string }>;
         findEntityPlacement: () => Promise<{ id: string; assetVersionId: string }>;
       }) => Promise<T>): Promise<T> => callback({
         findProject: async () => true,
         findVersion: async () => ({ id: 'version-1', file: { url: 'https://media.example.com/v1.png' } }),
+        findVersionPlacement: async () => ({ id: 'placement-1', assetVersionId: 'version-1' }),
         findEntityPlacement: async () => ({ id: 'placement-1', assetVersionId: 'foreign-version' }),
       }),
     };
@@ -366,10 +406,12 @@ describe('Agent context ownership adapter', () => {
       transaction: async <T>(callback: (value: {
         findProject: () => Promise<boolean>;
         findVersion: () => Promise<{ id: string }>;
+        findVersionPlacement: () => Promise<{ id: string; assetVersionId: string }>;
         findEntityPlacement: () => Promise<null>;
       }) => Promise<T>): Promise<T> => callback({
         findProject: async () => true,
         findVersion: async () => ({ id: 'version-1' }),
+        findVersionPlacement: async () => ({ id: 'placement-1', assetVersionId: 'version-1' }),
         findEntityPlacement: async () => null,
       }),
     };
@@ -392,9 +434,11 @@ describe('Agent context ownership adapter', () => {
       transaction: async <T>(callback: (value: {
         findProject: () => Promise<boolean>;
         findVersion: () => Promise<null | { id: string }>;
+        findVersionPlacement: () => Promise<null>;
       }) => Promise<T>): Promise<T> => callback({
         findProject: async () => projectOwned,
         findVersion: async () => missingVersion ? null : { id: 'version-1' },
+        findVersionPlacement: async () => null,
       }),
     };
 

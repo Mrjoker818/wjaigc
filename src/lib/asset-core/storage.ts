@@ -105,6 +105,13 @@ export interface AssetStorageTransaction {
     entityType: string,
     entityId: string,
   ): Promise<WorkspacePlacement | null>;
+  findActivePlacementForVersion(
+    ownerId: string,
+    projectId: string,
+    workspace: WorkspaceKind,
+    workspaceId: string,
+    assetVersionId: string,
+  ): Promise<WorkspacePlacement | null>;
   insertPlacement(placement: WorkspacePlacement): Promise<boolean>;
   lockTransferIdempotency(ownerId: string, idempotencyKey: string): Promise<void>;
   findTransfersByIdempotency(ownerId: string, idempotencyKey: string): Promise<StoredTransfer[]>;
@@ -455,6 +462,23 @@ class PostgresAssetStorageTransaction implements AssetStorageTransaction {
        WHERE owner_id = $1 AND project_id = $2 AND workspace_kind = $3 AND workspace_id = $4
          AND entity_type = $5 AND entity_id = $6 AND status = 'active'`,
       [ownerId, projectId, workspace, workspaceId, entityType, entityId],
+    );
+    return result.rows[0] ? mapPlacement(result.rows[0]) : null;
+  }
+
+  async findActivePlacementForVersion(
+    ownerId: string,
+    projectId: string,
+    workspace: WorkspaceKind,
+    workspaceId: string,
+    assetVersionId: string,
+  ): Promise<WorkspacePlacement | null> {
+    const result = await this.client.query<PlacementRow>(
+      `SELECT * FROM wujie_workspace_placements
+       WHERE owner_id = $1 AND project_id = $2 AND workspace_kind = $3 AND workspace_id = $4
+         AND asset_version_id = $5 AND status = 'active'
+       ORDER BY created_at, id LIMIT 1`,
+      [ownerId, projectId, workspace, workspaceId, assetVersionId],
     );
     return result.rows[0] ? mapPlacement(result.rows[0]) : null;
   }

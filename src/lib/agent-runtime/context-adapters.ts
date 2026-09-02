@@ -11,6 +11,13 @@ export interface AgentContextTransaction {
     projectId: string,
     versionId: string,
   ): Promise<{ id: string; file?: { url?: string } } | null>;
+  findVersionPlacement(
+    ownerId: string,
+    projectId: string,
+    workspace: AgentRunRequest['workspace'],
+    workspaceId: string,
+    versionId: string,
+  ): Promise<{ id: string; assetVersionId?: string } | null>;
   findEntityPlacement?(
     ownerId: string,
     projectId: string,
@@ -65,6 +72,7 @@ function defaultStorage(): AgentContextStorage {
     transaction: callback => storage.read(transaction => callback({
       findProject: transaction.findProject.bind(transaction),
       findVersion: transaction.findVersion.bind(transaction),
+      findVersionPlacement: transaction.findActivePlacementForVersion.bind(transaction),
       async findEntityPlacement(ownerId, projectId, workspace, workspaceId, entityId) {
         const entityTypes = workspace === 'canvas'
           ? ['canvas-image']
@@ -106,6 +114,18 @@ export async function authorizeAgentContext({
       );
       if (!version || !version.file?.url) throw new AgentContextNotFoundError();
       mediaByVersionId[versionId] = version.file.url;
+    }
+    for (const versionId of new Set(request.sourceVersionIds)) {
+      const placement = await transaction.findVersionPlacement(
+        actorUserId,
+        request.projectId,
+        request.workspace,
+        request.workspaceId,
+        versionId,
+      );
+      if (!placement || placement.assetVersionId !== versionId) {
+        throw new AgentContextNotFoundError();
+      }
     }
     const selectedEntityVersionIds: Record<string, string> = {};
     for (const entityId of new Set(request.context.selectedEntityIds)) {

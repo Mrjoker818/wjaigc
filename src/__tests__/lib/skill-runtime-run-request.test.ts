@@ -169,6 +169,22 @@ describe('Skill runtime run requests', () => {
     expect(calculateCreditCost).not.toHaveBeenCalled();
   });
 
+  it('rejects an extra known role before resolving any model', async () => {
+    const dependencies = runtimeDependencies();
+
+    await expect(buildSkillAgentRunRequest({
+      ...input,
+      modelBindings: {
+        ...input.modelBindings,
+        video: { providerId: 'pear-video', modelId: 'video-model' },
+      },
+    }, { actorUserId: actor.id, ...dependencies })).rejects.toMatchObject({
+      code: 'SKILL_MODEL_BINDINGS_INVALID',
+      status: 400,
+    });
+    expect(dependencies.resolveTaskModel).not.toHaveBeenCalled();
+  });
+
   it('fails closed on provider/model rejection or insufficient role capability', async () => {
     const rejected = runtimeDependencies();
     rejected.resolveTaskModel.mockRejectedValueOnce(new Error('not authorized'));
@@ -227,5 +243,38 @@ describe('Skill runtime run requests', () => {
       request: expect.objectContaining({ idempotencyKey: 'skill-run-1' }),
     }));
     expect(result).toMatchObject({ runId: 'run-1' });
+  });
+
+  it('charges one orchestrator base step for a zero-step simple-chat Skill on estimate and create', async () => {
+    const dependencies = runtimeDependencies();
+    const calculateCreditCost = vi.fn(async () => 3);
+    const createAgentRun = vi.fn(async () => ({
+      runId: 'run-chat', reused: false, charged: true,
+      event: {} as never, projection: {} as never, tools: [],
+    }));
+    const request: SkillRunRequest = {
+      ...input,
+      skillId: 'ppt-master',
+      surface: 'simple-chat',
+      inputValues: {},
+      sourceVersionIds: [],
+      modelBindings: { orchestrator: input.modelBindings.orchestrator },
+    };
+
+    await createSkillRun({ actor, request }, {
+      ...dependencies,
+      calculateCreditCost,
+      createAgentRun,
+    });
+
+    expect(calculateCreditCost).toHaveBeenCalledOnce();
+    expect(calculateCreditCost).toHaveBeenCalledWith(
+      'chat',
+      'gemini-3.1-flash',
+      { providerId: 'pear-chat' },
+    );
+    expect(createAgentRun).toHaveBeenCalledWith(expect.objectContaining({
+      billingQuote: { creditCost: 3, label: 'PPT大师' },
+    }));
   });
 });

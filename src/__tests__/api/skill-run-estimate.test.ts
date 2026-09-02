@@ -147,6 +147,28 @@ describe('POST /api/skill-runs/estimate', () => {
     expect(await response.json()).toMatchObject({ minimum: 12, maximum: 12 });
   });
 
+  it('returns a nonzero orchestrator estimate for a zero-step simple-chat Skill', async () => {
+    mocks.calculateConfiguredCreditCost.mockResolvedValue(3);
+    const response = await POST(request(body({
+      skillId: 'ppt-master',
+      surface: 'simple-chat',
+      inputValues: {},
+      sourceVersionIds: [],
+      modelBindings: {
+        orchestrator: { providerId: 'pear-chat', modelId: 'gemini-3.1-flash' },
+      },
+      creditCost: 0,
+      billingQuote: { creditCost: 0 },
+    })));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      minimum: 3,
+      maximum: 3,
+      steps: [{ stepId: 'orchestrator', cost: 3 }],
+    });
+  });
+
   it('rejects a forged surface before asset authorization, costing, or task creation', async () => {
     const response = await POST(request(body({ surface: 'simple-chat' })));
 
@@ -179,5 +201,52 @@ describe('POST /api/skill-runs/estimate', () => {
 
     expect(response).toBe(rejection);
     expect(mocks.resolveTaskModel).not.toHaveBeenCalled();
+  });
+
+  it('uses a request ID and a fixed generic envelope for unknown failures', async () => {
+    mocks.calculateConfiguredCreditCost.mockRejectedValue(
+      new Error('database password=do-not-leak'),
+    );
+    const response = await POST(new NextRequest('http://localhost/api/skill-runs/estimate', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-request-id': 'review-request-1',
+      },
+      body: JSON.stringify(body()),
+    }));
+    const payload = await response.json();
+
+    expect(response.status).toBe(500);
+    expect(response.headers.get('x-request-id')).toBe('review-request-1');
+    expect(payload).toMatchObject({
+      success: false,
+      code: 'SKILL_RUN_ERROR',
+      message: 'Skill run request failed',
+      requestId: 'review-request-1',
+      retryable: true,
+    });
+    expect(JSON.stringify(payload)).not.toContain('password');
+  });
+
+  it('preserves a known Skill input code as a request error in the unified envelope', async () => {
+    const response = await POST(new NextRequest('http://localhost/api/skill-runs/estimate', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-request-id': 'review-request-2',
+      },
+      body: JSON.stringify(body({ inputValues: { features: '只有卖点' } })),
+    }));
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({
+      success: false,
+      code: 'SKILL_INPUT_REQUIRED',
+      requestId: 'review-request-2',
+      retryable: false,
+    });
+    expect(mocks.resolveTaskModel).not.toHaveBeenCalled();
+    expect(mocks.calculateConfiguredCreditCost).not.toHaveBeenCalled();
   });
 });

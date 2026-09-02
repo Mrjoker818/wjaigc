@@ -1,9 +1,7 @@
-import {
-  createAgentRun,
-  type AgentRunCreateResult,
-} from '@/lib/agent-runtime/service';
+import type { AgentRunCreateResult } from '@/lib/agent-runtime/service';
 import { authorizeAgentContext } from '@/lib/agent-runtime/context-adapters';
 import { toAgentModelCapabilitySet } from '@/lib/agent-runtime/model-capability-set';
+import { readAgentPrompt } from '@/lib/agent-runtime/request-validation';
 import { calculateConfiguredCreditCost } from '@/lib/credits';
 import type {
   AgentRunBillingQuote,
@@ -47,9 +45,21 @@ export interface SkillRunRequestDependencies {
   resolveTaskModel: typeof resolveTaskModel;
 }
 
+export interface AuthorizedSkillAgentRun {
+  skill: SkillDefinition;
+  modelBindings: FrozenBindings;
+  orchestratorModel: TaskModelDescriptor;
+}
+
+type CreateAgentRun = (input: {
+  actor: User;
+  request: AgentRunRequest;
+  billingQuote?: AgentRunBillingQuote;
+}) => Promise<AgentRunCreateResult>;
+
 export interface CreateSkillRunDependencies extends SkillRunRequestDependencies, SkillCostEstimatorDependencies {
   authorizeContext: typeof authorizeAgentContext;
-  createAgentRun: typeof createAgentRun;
+  createAgentRun: CreateAgentRun;
 }
 
 export class SkillRunVersionError extends Error {
@@ -64,7 +74,10 @@ export class SkillRunVersionError extends Error {
 
 export class SkillModelBindingError extends Error {
   constructor(
-    readonly code: 'SKILL_MODEL_BINDING_REQUIRED' | 'SKILL_MODEL_CAPABILITY_REQUIRED',
+    readonly code:
+      | 'SKILL_MODEL_BINDING_REQUIRED'
+      | 'SKILL_MODEL_BINDINGS_INVALID'
+      | 'SKILL_MODEL_CAPABILITY_REQUIRED',
     readonly status: 400 | 422,
     message: string,
   ) {
@@ -82,10 +95,49 @@ const roleCapabilities: Record<SkillModelRole, readonly string[]> = {
   'three-d': ['3d'],
 };
 
-function requiredRoles(skill: SkillDefinition): SkillModelRole[] {
+export function requiredSkillModelRoles(skill: SkillDefinition): SkillModelRole[] {
   const roles = new Set<SkillModelRole>(['orchestrator']);
   for (const step of skill.steps) roles.add(step.modelRole);
   return [...roles];
+}
+
+function sameStringSet(actual: readonly string[], expected: readonly string[]): boolean {
+  return actual.length === expected.length
+    && actual.every(value => expected.includes(value));
+}
+
+function canonicalize(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonicalize);
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(Object.entries(value as Record<string, unknown>)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, child]) => [key, canonicalize(child)]));
+  }
+  return value;
+}
+
+function sameJson(left: unknown, right: unknown): boolean {
+  return JSON.stringify(canonicalize(left)) === JSON.stringify(canonicalize(right));
+}
+
+function assertExactBindingRoles(requested: FrozenBindings, skill: SkillDefinition): void {
+  const actual = Object.keys(requested);
+  const expected = requiredSkillModelRoles(skill);
+  if (!sameStringSet(actual, expected)) {
+    const missing = expected.find(role => !actual.includes(role));
+    if (missing) {
+      throw new SkillModelBindingError(
+        'SKILL_MODEL_BINDING_REQUIRED',
+        400,
+        `Missing model binding for role: ${missing}`,
+      );
+    }
+    throw new SkillModelBindingError(
+      'SKILL_MODEL_BINDINGS_INVALID',
+      400,
+      'Skill model bindings do not match the required roles',
+    );
+  }
 }
 
 function assertRoleCapabilities(
@@ -107,18 +159,22 @@ export async function authorizeAndFreezeBindings(
   skill: SkillDefinition,
   dependencies: SkillRunRequestDependencies,
 ): Promise<FrozenBindings> {
-  const roles = requiredRoles(skill);
-  for (const role of roles) {
-    if (!requested[role]) {
-      throw new SkillModelBindingError(
-        'SKILL_MODEL_BINDING_REQUIRED',
-        400,
-        `Missing model binding for role: ${role}`,
-      );
-    }
-  }
+  return (await authorizeBindingModels(requested, skill, dependencies)).frozen;
+}
+
+async function authorizeBindingModels(
+  requested: FrozenBindings,
+  skill: SkillDefinition,
+  dependencies: SkillRunRequestDependencies,
+): Promise<{
+  frozen: FrozenBindings;
+  models: Partial<Record<SkillModelRole, TaskModelDescriptor>>;
+}> {
+  assertExactBindingRoles(requested, skill);
+  const roles = requiredSkillModelRoles(skill);
 
   const frozen: FrozenBindings = {};
+  const models: Partial<Record<SkillModelRole, TaskModelDescriptor>> = {};
   for (const role of roles) {
     const binding = requested[role]!;
     const model = await dependencies.resolveTaskModel(
@@ -128,8 +184,80 @@ export async function authorizeAndFreezeBindings(
     );
     assertRoleCapabilities(role, model);
     frozen[role] = { providerId: model.providerId, modelId: model.modelId };
+    models[role] = model;
   }
-  return frozen;
+  return { frozen, models };
+}
+
+export async function authorizeSkillAgentRunRequest(
+  request: AgentRunRequest,
+  dependencies: SkillRunRequestDependencies,
+): Promise<AuthorizedSkillAgentRun> {
+  const invocation = request.skill;
+  if (!invocation) {
+    throw new SkillModelBindingError(
+      'SKILL_MODEL_BINDINGS_INVALID',
+      400,
+      'Skill invocation is required',
+    );
+  }
+  const surface: SkillSurface = request.workspace === 'chat'
+    ? 'simple-chat'
+    : request.workspace;
+  const skill = requireSkillForSurface(invocation.skillId, surface);
+  if (skill.version !== invocation.skillVersion) throw new SkillRunVersionError();
+
+  const resolved = resolveSkillInputs(skill, invocation.inputValues);
+  if (!sameJson(resolved, invocation.inputValues)) {
+    throw new SkillModelBindingError(
+      'SKILL_MODEL_BINDINGS_INVALID',
+      400,
+      'Skill input snapshot is not canonical',
+    );
+  }
+  const prompt = readAgentPrompt(compileSkillPrompt(skill.systemPrompt, resolved));
+  if (request.prompt !== prompt) {
+    throw Object.assign(new Error('Skill prompt does not match the server definition'), {
+      code: 'SKILL_PROMPT_MISMATCH',
+      status: 400,
+    });
+  }
+  const toolIds = [...new Set(skill.steps.map(step => step.toolId))];
+  if (!sameStringSet(request.allowedToolIds, toolIds)) {
+    throw Object.assign(new Error('Skill tools do not match the server definition'), {
+      code: 'SKILL_TOOLS_MISMATCH',
+      status: 400,
+    });
+  }
+
+  const { frozen, models } = await authorizeBindingModels(
+    invocation.modelBindings,
+    skill,
+    dependencies,
+  );
+  if (!sameJson(frozen, invocation.modelBindings)) {
+    throw new SkillModelBindingError(
+      'SKILL_MODEL_BINDINGS_INVALID',
+      400,
+      'Skill model bindings are not server-authorized canonical bindings',
+    );
+  }
+  const orchestrator = frozen.orchestrator!;
+  if (
+    request.providerId !== orchestrator.providerId
+    || request.modelId !== orchestrator.modelId
+  ) {
+    throw new SkillModelBindingError(
+      'SKILL_MODEL_BINDINGS_INVALID',
+      400,
+      'Agent model does not match the Skill orchestrator binding',
+    );
+  }
+  return {
+    skill,
+    modelBindings: frozen,
+    orchestratorModel: models.orchestrator!,
+  };
 }
 
 export async function buildSkillAgentRunRequest(
@@ -156,7 +284,7 @@ export async function buildSkillAgentRunRequest(
     mode: 'agent',
     providerId: orchestrator.providerId,
     modelId: orchestrator.modelId,
-    prompt: compileSkillPrompt(skill.systemPrompt, resolved),
+    prompt: readAgentPrompt(compileSkillPrompt(skill.systemPrompt, resolved)),
     sourceVersionIds,
     allowedToolIds: [...new Set(skill.steps.map(step => step.toolId))],
     idempotencyKey: input.idempotencyKey,
@@ -179,7 +307,7 @@ const defaultCreateDependencies: CreateSkillRunDependencies = {
   resolveTaskModel,
   calculateCreditCost: calculateConfiguredCreditCost,
   authorizeContext: authorizeAgentContext,
-  createAgentRun,
+  createAgentRun: async input => (await import('@/lib/agent-runtime/service')).createAgentRun(input),
 };
 
 export async function createSkillRun(

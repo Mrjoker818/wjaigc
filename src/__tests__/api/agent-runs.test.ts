@@ -7,6 +7,9 @@ import { AgentEventConflictError } from '@/lib/agent-runtime/event-storage';
 import type { AgentEvent, AgentRunRequest } from '@/lib/agent-runtime/types';
 import type { CloudTask } from '@/lib/cloud-task-storage';
 import type { User } from '@/lib/user-types';
+import { requireSkillForSurface } from '@/lib/skill-runtime/catalog';
+import { resolveSkillInputs } from '@/lib/skill-runtime/input-resolver';
+import { compileSkillPrompt } from '@/lib/skill-runtime/prompt-compiler';
 
 const authMocks = vi.hoisted(() => ({
   requireApiAuthOrReject: vi.fn(),
@@ -138,6 +141,51 @@ function serviceDependencies() {
       started: true,
     })),
   } satisfies AgentRuntimeDependencies;
+}
+
+function canvasSkillRequest(
+  overrides: Partial<AgentRunRequest> = {},
+  bindingOverrides: Record<string, { providerId: string; modelId: string }> = {},
+): AgentRunRequest {
+  const definition = requireSkillForSurface('preset-ecommerce-listing', 'canvas');
+  const inputValues = resolveSkillInputs(definition, {
+    product: '耳机',
+    features: '降噪，长续航',
+  });
+  return request({
+    prompt: compileSkillPrompt(definition.systemPrompt, inputValues),
+    allowedToolIds: ['generate_image'],
+    skill: {
+      skillId: definition.id,
+      skillVersion: definition.version,
+      inputValues,
+      modelBindings: {
+        orchestrator: { providerId: 'provider-exact', modelId: 'model-exact' },
+        image: { providerId: 'provider-image', modelId: 'model-image' },
+        ...bindingOverrides,
+      },
+    },
+    ...overrides,
+  });
+}
+
+function simpleChatSkillRequest(): AgentRunRequest {
+  const definition = requireSkillForSurface('ppt-master', 'simple-chat');
+  const inputValues = resolveSkillInputs(definition, {});
+  return request({
+    workspace: 'chat',
+    workspaceId: 'chat-1',
+    prompt: compileSkillPrompt(definition.systemPrompt, inputValues),
+    allowedToolIds: [],
+    skill: {
+      skillId: definition.id,
+      skillVersion: definition.version,
+      inputValues,
+      modelBindings: {
+        orchestrator: { providerId: 'provider-exact', modelId: 'model-exact' },
+      },
+    },
+  });
 }
 
 describe('Agent runtime service', () => {
@@ -937,6 +985,114 @@ describe('Agent runtime service', () => {
     expect(dependencies.appendEvent).not.toHaveBeenCalled();
     expect(dependencies.transitionTask).not.toHaveBeenCalled();
     expect(dependencies.settleFailedTask).not.toHaveBeenCalled();
+  });
+
+  it('rejects a public Agent request that maps a canvas Skill onto chat before any admission side effect', async () => {
+    const dependencies = serviceDependencies();
+    const service = agentRuntime.createAgentRuntimeService(dependencies);
+    const forged = agentRuntime.parseAgentRunRequest(
+      canvasSkillRequest({ workspace: 'chat', workspaceId: 'chat-1' }),
+    );
+
+    await expect(service.createRun({ actor: user, request: forged })).rejects.toMatchObject({
+      code: 'SKILL_SURFACE_FORBIDDEN',
+      status: 403,
+    });
+    expect(dependencies.authorizeContext).not.toHaveBeenCalled();
+    expect(dependencies.resolveTaskModel).not.toHaveBeenCalled();
+    expect(dependencies.calculateCreditCost).not.toHaveBeenCalled();
+    expect(dependencies.createBillableTask).not.toHaveBeenCalled();
+  });
+
+  it('admits a server-canonical canvas Skill request into the existing billing boundary', async () => {
+    const dependencies = serviceDependencies();
+    dependencies.resolveTaskModel.mockImplementation(async (providerId, modelId) => ({
+      providerId,
+      modelId,
+      kind: providerId === 'provider-image' ? 'image' : 'chat',
+      sourceType: providerId === 'provider-image' ? 'image' : 'chat',
+      protocol: providerId === 'provider-image' ? 'images-generations' : 'chat-completions',
+      executionMode: 'sync',
+      allowedRatios: [],
+      allowedSizes: [],
+      qualityOptions: [],
+      maxOutputs: 1,
+      supportsReferenceImages: false,
+      supportsMask: false,
+      outputKinds: providerId === 'provider-image' ? ['image'] : ['text'],
+      capabilitySources: {},
+    }));
+    const service = agentRuntime.createAgentRuntimeService(dependencies);
+
+    await expect(service.createRun({
+      actor: user,
+      request: agentRuntime.parseAgentRunRequest(canvasSkillRequest()),
+    })).resolves.toMatchObject({ reused: false });
+    expect(dependencies.calculateCreditCost).toHaveBeenCalledTimes(2);
+    expect(dependencies.createBillableTask).toHaveBeenCalledTimes(1);
+  });
+
+  it('prices a public zero-step simple-chat Skill with one orchestrator base charge', async () => {
+    const dependencies = serviceDependencies();
+    dependencies.calculateCreditCost.mockResolvedValue(3);
+    const service = agentRuntime.createAgentRuntimeService(dependencies);
+
+    await service.createRun({
+      actor: user,
+      request: agentRuntime.parseAgentRunRequest(simpleChatSkillRequest()),
+    });
+
+    expect(dependencies.calculateCreditCost).toHaveBeenCalledOnce();
+    expect(dependencies.calculateCreditCost).toHaveBeenCalledWith(
+      'chat',
+      'model-exact',
+      { providerId: 'provider-exact' },
+    );
+    expect(dependencies.createBillableTask).toHaveBeenCalledWith(expect.objectContaining({
+      creditCost: 3,
+    }));
+  });
+
+  it('rejects extra Skill model roles before resolving any model', async () => {
+    const dependencies = serviceDependencies();
+    const service = agentRuntime.createAgentRuntimeService(dependencies);
+
+    await expect(service.createRun({
+      actor: user,
+      request: canvasSkillRequest({}, {
+        video: { providerId: 'provider-video', modelId: 'model-video' },
+      }),
+    })).rejects.toMatchObject({ code: 'SKILL_MODEL_BINDINGS_INVALID', status: 400 });
+    expect(dependencies.resolveTaskModel).not.toHaveBeenCalled();
+    expect(dependencies.calculateCreditCost).not.toHaveBeenCalled();
+    expect(dependencies.createBillableTask).not.toHaveBeenCalled();
+  });
+
+  it('rejects a forged Skill prompt snapshot before resolving any model', async () => {
+    const dependencies = serviceDependencies();
+    const service = agentRuntime.createAgentRuntimeService(dependencies);
+
+    await expect(service.createRun({
+      actor: user,
+      request: canvasSkillRequest({ prompt: 'attacker supplied prompt' }),
+    })).rejects.toMatchObject({ code: 'SKILL_PROMPT_MISMATCH', status: 400 });
+    expect(dependencies.resolveTaskModel).not.toHaveBeenCalled();
+    expect(dependencies.calculateCreditCost).not.toHaveBeenCalled();
+    expect(dependencies.createBillableTask).not.toHaveBeenCalled();
+  });
+
+  it('enforces the 32000-byte UTF-8 prompt limit on direct service calls before authorization', async () => {
+    const dependencies = serviceDependencies();
+    const service = agentRuntime.createAgentRuntimeService(dependencies);
+
+    await expect(service.createRun({
+      actor: user,
+      request: request({ prompt: '界'.repeat(10_667) }),
+    })).rejects.toMatchObject({ code: 'AGENT_RUN_REQUEST_INVALID', status: 400 });
+    expect(dependencies.authorizeContext).not.toHaveBeenCalled();
+    expect(dependencies.resolveTaskModel).not.toHaveBeenCalled();
+    expect(dependencies.calculateCreditCost).not.toHaveBeenCalled();
+    expect(dependencies.createBillableTask).not.toHaveBeenCalled();
   });
 
   it('uses only a server billing quote and does not recalculate it inside the billing boundary', async () => {

@@ -55,7 +55,21 @@ export async function estimateSkillRunCost(
   bindings: FrozenBindings,
   dependencies: SkillCostEstimatorDependencies = defaultDependencies,
 ): Promise<SkillRunCostEstimate> {
-  const steps = await Promise.all(skill.steps.map(async step => {
+  const definitions = skill.steps.some(step => step.modelRole === 'orchestrator')
+    ? skill.steps.map(step => ({
+        stepId: step.id,
+        toolId: step.toolId,
+        modelRole: step.modelRole,
+      }))
+    : [
+        { stepId: 'orchestrator', toolId: 'chat', modelRole: 'orchestrator' as const },
+        ...skill.steps.map(step => ({
+          stepId: step.id,
+          toolId: step.toolId,
+          modelRole: step.modelRole,
+        })),
+      ];
+  const steps = await Promise.all(definitions.map(async step => {
     const binding = bindings[step.modelRole];
     if (!binding) {
       throw new SkillCostEstimateError(
@@ -64,9 +78,9 @@ export async function estimateSkillRunCost(
       );
     }
     return {
-      stepId: step.id,
+      stepId: step.stepId,
       cost: await dependencies.calculateCreditCost(
-        toolCostType(step.toolId),
+        step.toolId === 'chat' ? 'chat' : toolCostType(step.toolId),
         binding.modelId,
         { providerId: binding.providerId },
       ),

@@ -15,8 +15,8 @@ import {
   parseBoundedString,
   readStrictJsonObject,
   SkillRequestError,
-  skillHttpError,
 } from '@/app/api/skills/http';
+import { errorResponse, getRequestId } from '@/lib/request-id';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -73,19 +73,52 @@ function parseEstimateRequest(body: Record<string, unknown>): SkillRunRequest {
   };
 }
 
-function skillRunHttpError(error: unknown): NextResponse {
-  if (error instanceof SkillRequestError) return skillHttpError(error);
+function skillRunHttpError(error: unknown, requestId: string): NextResponse {
+  if (error instanceof SkillRequestError) {
+    return errorResponse(error.status, error.code, error.message, requestId);
+  }
   const candidate = isPlainObject(error) ? error : {};
-  const code = typeof candidate.code === 'string' ? candidate.code : 'SKILL_RUN_ERROR';
-  let status = typeof candidate.status === 'number' ? candidate.status : 500;
-  if (code === 'MODEL_NOT_AUTHORIZED') status = 403;
-  if (code === 'MODEL_NOT_CONFIGURED') status = 400;
-  if (code === 'MODEL_CAPABILITY_UNAVAILABLE' || code === 'MODEL_CAPABILITY_MISMATCH') status = 422;
-  const message = error instanceof Error ? error.message : 'Skill run request failed';
-  return NextResponse.json({ code, error: message }, { status });
+  const candidateCode = typeof candidate.code === 'string' ? candidate.code : '';
+  const candidateStatus = typeof candidate.status === 'number'
+    && Number.isInteger(candidate.status)
+    && candidate.status >= 400
+    && candidate.status <= 599
+    ? candidate.status
+    : null;
+  let known = candidateStatus !== null && candidateCode.length > 0;
+  let code = known ? candidateCode : 'SKILL_RUN_ERROR';
+  let status = known ? candidateStatus! : 500;
+  if (candidateCode.startsWith('SKILL_INPUT_') || candidateCode.startsWith('SKILL_PROMPT_')) {
+    known = true;
+    code = candidateCode;
+    status = 400;
+  } else if (candidateCode === 'MODEL_NOT_AUTHORIZED') {
+    known = true;
+    code = candidateCode;
+    status = 403;
+  } else if (candidateCode === 'MODEL_NOT_CONFIGURED') {
+    known = true;
+    code = candidateCode;
+    status = 400;
+  } else if (
+    candidateCode === 'MODEL_CAPABILITY_UNAVAILABLE'
+    || candidateCode === 'MODEL_CAPABILITY_MISMATCH'
+  ) {
+    known = true;
+    code = candidateCode;
+    status = 422;
+  }
+  return errorResponse(
+    status,
+    code,
+    known && error instanceof Error ? error.message : 'Skill run request failed',
+    requestId,
+    !known,
+  );
 }
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
+  const requestId = getRequestId(request);
   const auth = await requireApiAuthOrReject(request);
   if (auth instanceof NextResponse) return auth;
 
@@ -103,6 +136,6 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       modelBindings: agentRequest.skill!.modelBindings,
     });
   } catch (error) {
-    return skillRunHttpError(error);
+    return skillRunHttpError(error, requestId);
   }
 }
