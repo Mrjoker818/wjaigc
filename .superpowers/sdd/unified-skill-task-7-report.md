@@ -134,3 +134,44 @@
 
 - 本轮修复尚未取得全新独立评审的 `APPROVED 0/0/0`；实现与用户指定本地门禁均已完成，Task 7
   的最终独立复审仍由后续控制端执行。
+
+## 2026-09-02 第二轮审查修复：TDD RED
+
+1. 在 `skill-runtime-controls.test.tsx` 先加入以下确定性回归：旧 estimate 被新 estimate 或 start
+   取代时 Promise 必须解析为 `undefined`；dataset 在对象/数组任意嵌套层级拒绝 `__proto__`、
+   `prototype`、`constructor` 且保留可访问 alert、禁止 `onChange`；Agent pause 事件 GET 失败
+   暴露独立 retryability 错误；进度组件可访问地显示该受控错误。
+2. 运行：
+   `pnpm exec vitest run src/__tests__/components/skill-runtime-controls.test.tsx`
+   结果：RED，`7 failed / 17 passed`。三个 dataset 参数化用例未产生 alert；进度组件未显示
+   retryability 错误；两类旧 estimate Promise 仍返回过期估价；事件 GET 失败仍被静默吞掉。
+
+## 2026-09-02 第二轮审查修复：GREEN 与说明
+
+- estimate 竞态：`estimateRun` 仅在自己的 generation 仍为当前 generation 时写入并返回估价；
+  被新 estimate 或 start 取代的旧 Promise 统一返回 `undefined`，避免调用方消费过期报价。
+- dataset 安全验证：既有 input resolver 的严格 JSON 验证器未导出，因此未扩大服务端改动范围，
+  在组件内加入最小等价递归保留键检查。它遍历嵌套对象和数组，拒绝 `__proto__`、`prototype`、
+  `constructor`，沿用字段级 `role="alert"`、`aria-describedby`，验证失败不调用 `onChange`。
+- retryability 查询失败：历史 GET 的网络/HTTP 失败不再静默永久隐藏重试语义，而是写入独立、
+  generation 与 AbortController 保护的 `retryabilityError`；它不污染通用 run error、不使用 sleep、
+  不改变 Agent 轮询。`SkillRunProgress` 在 paused 状态通过 `role="alert"` 显示受控错误。
+- 单文件 GREEN：再次运行同一 Vitest 命令，结果 `24/24 passed`。
+
+## 2026-09-02 第二轮最终验证
+
+- 8 文件聚焦回归：
+  `pnpm exec vitest run src/__tests__/components/skill-runtime-controls.test.tsx src/__tests__/components/agent-progress-timeline.test.tsx src/__tests__/components/use-agent-run-events.test.ts src/__tests__/lib/skill-runtime-inputs.test.ts src/__tests__/lib/skill-runtime-run-request.test.ts src/__tests__/api/skills.test.ts src/__tests__/api/skill-run-estimate.test.ts src/__tests__/api/skill-runs.test.ts`
+  结果：`8 files / 113 tests passed`；受控 dispatch rejection 用例保留一条设计内 stderr。
+- `pnpm ts-check`：exit 0，Next route typegen 与 TypeScript 均通过。
+- 目标 ESLint：
+  `pnpm exec eslint src/components/skill-runtime/SkillInputFields.tsx src/components/skill-runtime/SkillRunProgress.tsx src/components/skill-runtime/use-skill-run.ts src/__tests__/components/skill-runtime-controls.test.tsx --max-warnings 0`
+  结果：exit 0，0 warning。
+- 保护基线：
+  `pnpm check:protected-baseline -- --allow-path .playwright-cli/ --allow-path _refs-asui-canvas/ --allow-path _refs-hero-infinite-canvas/`
+  结果：38/38 feature ID、受保护路径和证据合同保留，无未授权 source drift，0 warning；三个临时
+  许可仅对应任务前既有目录。
+- `git diff --check`：exit 0；仅有工作区 LF 到 CRLF 提示。
+- 修改范围仍严格限于四个授权源码/测试文件和本报告，未 push。
+- 关注项：尚未取得本轮修复后的全新独立 `APPROVED 0/0/0`，因此状态保持
+  `DONE_WITH_CONCERNS`，等待独立复审。

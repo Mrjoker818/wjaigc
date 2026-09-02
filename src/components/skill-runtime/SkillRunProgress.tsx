@@ -7,6 +7,7 @@ interface SkillRunProgressProps {
   estimate?: SkillRunCostEstimate;
   projection?: AgentRunProjection;
   retryableStepId?: string;
+  retryabilityError?: string;
   stale?: boolean;
   busy?: boolean;
   onPause?: (stepId: string) => void;
@@ -47,6 +48,7 @@ export function SkillRunProgress({
   estimate,
   projection,
   retryableStepId,
+  retryabilityError,
   stale = false,
   busy = false,
   onPause,
@@ -84,6 +86,9 @@ export function SkillRunProgress({
               <div>{projection.error.code}</div>
               <div>{projection.error.message}</div>
             </div>
+          )}
+          {projection.status === 'paused' && retryabilityError && (
+            <div role="alert" className="text-destructive">{retryabilityError}</div>
           )}
           <div className="flex gap-2">
             {projection.status === 'paused' && onResume && (

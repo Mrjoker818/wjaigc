@@ -16,6 +16,7 @@ interface UseSkillRunResult {
   estimate?: SkillRunCostEstimate;
   projection?: AgentRunProjection;
   retryableStepId?: string;
+  retryabilityError?: string;
   stale: boolean;
   busy: boolean;
   error?: string;
@@ -55,6 +56,7 @@ export function useSkillRun({ fetcher = fetch }: UseSkillRunOptions = {}): UseSk
   const [eventRunId, setEventRunId] = useState<string>();
   const [estimate, setEstimate] = useState<SkillRunCostEstimate>();
   const [retryableStepId, setRetryableStepId] = useState<string>();
+  const [retryabilityError, setRetryabilityError] = useState<string>();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
   const mounted = useRef(true);
@@ -128,6 +130,7 @@ export function useSkillRun({ fetcher = fetch }: UseSkillRunOptions = {}): UseSk
     historyController.current?.abort();
     const generation = ++historyGeneration.current;
     setRetryableStepId(undefined);
+    setRetryabilityError(undefined);
     if (projection?.status !== 'paused' || !projection.resumeFromStepId) return;
 
     const expectedRunId = projection.runId;
@@ -153,7 +156,15 @@ export function useSkillRun({ fetcher = fetch }: UseSkillRunOptions = {}): UseSk
       ) {
         setRetryableStepId(expectedStepId);
       }
-    }).catch(() => undefined);
+    }).catch(() => {
+      if (
+        !controller.signal.aborted
+        && mounted.current
+        && historyGeneration.current === generation
+      ) {
+        setRetryabilityError('无法确认失败步骤是否可重试');
+      }
+    });
     return () => controller.abort();
   }, [projection, request]);
 
@@ -177,8 +188,9 @@ export function useSkillRun({ fetcher = fetch }: UseSkillRunOptions = {}): UseSk
       }, controller);
       if (result && mounted.current && estimateGeneration.current === generation) {
         setEstimate(result);
+        return result;
       }
-      return result;
+      return undefined;
     } catch (requestError) {
       if (
         mounted.current
@@ -209,6 +221,7 @@ export function useSkillRun({ fetcher = fetch }: UseSkillRunOptions = {}): UseSk
       setEstimate(undefined);
       setEventRunId(undefined);
       setRetryableStepId(undefined);
+      setRetryabilityError(undefined);
     }
     try {
       const result = await request<{ runId?: string }>('/api/skill-runs', {
@@ -345,6 +358,7 @@ export function useSkillRun({ fetcher = fetch }: UseSkillRunOptions = {}): UseSk
     setEventRunId(undefined);
     setEstimate(undefined);
     setRetryableStepId(undefined);
+    setRetryabilityError(undefined);
     setError(undefined);
     setBusy(false);
   }, []);
@@ -354,6 +368,7 @@ export function useSkillRun({ fetcher = fetch }: UseSkillRunOptions = {}): UseSk
     estimate,
     projection,
     retryableStepId,
+    retryabilityError,
     stale: projection ? events.stale : false,
     busy,
     error,

@@ -5,6 +5,8 @@ import { useEffect, useId, useRef, useState } from 'react';
 import { SKILL_INPUT_LIMITS } from '@/lib/skill-runtime/input-resolver';
 import type { SkillInputField } from '@/lib/skill-runtime/types';
 
+const FORBIDDEN_DATASET_KEYS = new Set(['__proto__', 'prototype', 'constructor']);
+
 interface SkillInputFieldsProps {
   fields: readonly SkillInputField[];
   values: Record<string, unknown>;
@@ -45,6 +47,20 @@ function structuredDrafts(
 
 function fieldDefinitionSignature(fields: readonly SkillInputField[]): string {
   return JSON.stringify(fields);
+}
+
+function assertDatasetKeys(value: unknown): void {
+  if (!value || typeof value !== 'object') return;
+  if (Array.isArray(value)) {
+    for (const item of value) assertDatasetKeys(item);
+    return;
+  }
+  for (const [key, nested] of Object.entries(value)) {
+    if (FORBIDDEN_DATASET_KEYS.has(key)) {
+      throw new Error(`数据集不能包含保留键 ${key}`);
+    }
+    assertDatasetKeys(nested);
+  }
 }
 
 function serializedBytes(values: Record<string, unknown>): number {
@@ -237,6 +253,7 @@ export function SkillInputFields({
                   if (parsed.some(row => !row || typeof row !== 'object' || Array.isArray(row))) {
                     throw new Error('数据集每一行必须是对象');
                   }
+                  assertDatasetKeys(parsed);
                   return parsed;
                 })}
               />

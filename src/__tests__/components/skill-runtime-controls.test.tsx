@@ -123,6 +123,22 @@ describe('SkillInputFields', () => {
     expect(screen.getByRole('alert').textContent).toContain('输入内容超过 512 KiB');
   });
 
+  it.each([
+    ['__proto__', '[{"__proto__":{"polluted":true}}]'],
+    ['prototype', '[{"nested":{"prototype":true}}]'],
+    ['constructor', '[{"nested":[{"constructor":"blocked"}]}]'],
+  ])('rejects reserved dataset key %s recursively', (key, draft) => {
+    const onChange = vi.fn();
+    render(<SkillInputFields fields={fields} values={{}} onChange={onChange} />);
+
+    fireEvent.change(screen.getByLabelText('数据集'), { target: { value: draft } });
+
+    const alert = screen.getByRole('alert');
+    expect(alert.textContent).toContain(key);
+    expect(screen.getByLabelText('数据集').getAttribute('aria-describedby')).toContain(alert.id);
+    expect(onChange).not.toHaveBeenCalledWith('rows', expect.anything());
+  });
+
   it('enforces the serialized UTF-8 limit when a plain field crosses the combined boundary', () => {
     const onChange = vi.fn();
     render(<SkillInputFields
@@ -304,6 +320,15 @@ describe('SkillRunProgress', () => {
     expect(screen.queryByRole('button', { name: '从失败步骤重试' })).toBeNull();
     expect(screen.queryByRole('button', { name: '取消' })).toBeNull();
   });
+
+  it('renders retryability lookup failures as an accessible controlled error', () => {
+    render(<SkillRunProgress
+      projection={projection({ status: 'paused', resumeFromStepId: 'render' })}
+      retryabilityError="无法确认失败步骤是否可重试"
+    />);
+
+    expect(screen.getByRole('alert').textContent).toContain('无法确认失败步骤是否可重试');
+  });
 });
 
 describe('useSkillRun', () => {
@@ -457,7 +482,7 @@ describe('useSkillRun', () => {
     act(() => { pendingStart = result.current.startRun(request); });
     await act(async () => {
       resolveEstimate(jsonResponse({ minimum: 99, maximum: 99, steps: [] }));
-      await pendingEstimate;
+      await expect(pendingEstimate).resolves.toBeUndefined();
     });
     expect(result.current.estimate).toBeUndefined();
     expect(result.current.busy).toBe(true);
@@ -467,6 +492,48 @@ describe('useSkillRun', () => {
       await pendingStart;
     });
     expect(result.current.busy).toBe(false);
+  });
+
+  it('returns undefined from an estimate superseded by a newer estimate', async () => {
+    let resolveOld!: (response: Response) => void;
+    const fetcher = vi.fn()
+      .mockImplementationOnce(() => new Promise<Response>(resolve => { resolveOld = resolve; }))
+      .mockResolvedValueOnce(jsonResponse({ minimum: 2, maximum: 3, steps: [] }));
+    const { result } = renderHook(() => useSkillRun({ fetcher: fetcher as typeof fetch }));
+
+    let oldEstimate!: Promise<unknown>;
+    act(() => { oldEstimate = result.current.estimateRun(request); });
+    await act(async () => {
+      await expect(result.current.estimateRun({
+        ...request,
+        idempotencyKey: 'request-2',
+      })).resolves.toMatchObject({ minimum: 2, maximum: 3 });
+    });
+    await act(async () => {
+      resolveOld(jsonResponse({ minimum: 99, maximum: 99, steps: [] }));
+      await expect(oldEstimate).resolves.toBeUndefined();
+    });
+    expect(result.current.estimate).toMatchObject({ minimum: 2, maximum: 3 });
+  });
+
+  it('exposes an isolated retryability error when the pause-event lookup fails', async () => {
+    const pausedProjection = projection({ status: 'paused', resumeFromStepId: 'render' });
+    agentEvents.useAgentRunEvents.mockImplementation((eventRunId: string | undefined) => ({
+      projection: eventRunId ? pausedProjection : undefined,
+      stale: false,
+      cancel: vi.fn(), pause: vi.fn(), resume: vi.fn(),
+    }));
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ runId: 'run-1', reused: false }))
+      .mockRejectedValueOnce(new Error('events unavailable'));
+    const { result } = renderHook(() => useSkillRun({ fetcher: fetcher as typeof fetch }));
+
+    await act(async () => { await result.current.startRun(request); });
+    await waitFor(() => {
+      expect(result.current.retryabilityError).toBe('无法确认失败步骤是否可重试');
+    });
+    expect(result.current.error).toBeUndefined();
+    expect(result.current.retryableStepId).toBeUndefined();
   });
 
   it('remains mounted through the Strict Mode effect replay', async () => {
