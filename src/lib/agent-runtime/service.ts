@@ -361,7 +361,7 @@ function canonicalize(value: unknown): unknown {
   return value;
 }
 
-function requestDigest(request: AgentRunRequest): string {
+export function agentRunRequestDigest(request: AgentRunRequest): string {
   return createHash('sha256')
     .update(JSON.stringify(canonicalize(request)))
     .digest('hex');
@@ -755,7 +755,7 @@ export function createAgentRuntimeService(
       const created = await dependencies.createBillableTask({
         userId: input.actor.id,
         idempotencyKey: request.idempotencyKey,
-        requestDigest: requestDigest(request),
+        requestDigest: agentRunRequestDigest(request),
         creditCost,
         task: {
           id: dependencies.randomUUID(),
@@ -799,6 +799,18 @@ export function createAgentRuntimeService(
           sourceVersionIds: request.sourceVersionIds,
           allowedToolIds: authorization.tools.map(tool => tool.toolId),
           context: request.context,
+          requestDigest: agentRunRequestDigest(request),
+          ...(skillAdmission ? {
+            skillSnapshot: {
+              id: skillAdmission.skill.id,
+              version: skillAdmission.skill.version,
+              name: skillAdmission.skill.name,
+              steps: skillAdmission.skill.steps.map(step => ({
+                id: step.id,
+                label: step.label,
+              })),
+            },
+          } : {}),
           ...(request.skill ? { skill: request.skill } : {}),
         },
       };

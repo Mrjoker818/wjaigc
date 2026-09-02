@@ -713,4 +713,80 @@ export function adoptAndExecuteExistingAgentTask<T>(
 ): Promise<AdoptAndExecuteSameTaskResult<T>> {
   return defaultSameTaskAgentAdapter().then(adapter => adapter.adoptAndExecute(input));
 }
+
+export async function executeExistingSkillAgentTask(input: {
+  actor: User;
+  taskId: string;
+  request: import('@/lib/skill-runtime/run-request').SkillRunRequest;
+  stepAdapters: Readonly<Record<string, import('@/lib/skill-runtime/service').SkillStepAdapter>>;
+  stepRecoveries?: Readonly<Record<string, import('@/lib/skill-runtime/service').SkillStepRecoveryFactory>>;
+  resumeFromStepId?: string;
+  expectedGeneration?: number;
+  leaseOwner?: string;
+  signal?: AbortSignal;
+}): Promise<AdoptAndExecuteSameTaskResult<import('@/lib/skill-runtime/executor').ExecuteSkillRunResult>> {
+  const [taskStorage, eventStorage, runRequest, catalog, modelCatalog, skillService, agentService] = await Promise.all([
+    import('@/lib/cloud-task-storage'),
+    import('./event-storage'),
+    import('@/lib/skill-runtime/run-request'),
+    import('@/lib/skill-runtime/catalog'),
+    import('@/lib/task-core/model-catalog'),
+    import('@/lib/skill-runtime/service'),
+    import('./service'),
+  ]);
+  const agentRequest = await runRequest.buildSkillAgentRunRequest(input.request, {
+    actorUserId: input.actor.id,
+    resolveTaskModel: modelCatalog.resolveTaskModel,
+  });
+  const [task, events] = await Promise.all([
+    taskStorage.getCloudTaskForUser(input.taskId, input.actor.id),
+    eventStorage.listAgentEventsForActor({
+      actorUserId: input.actor.id,
+      projectId: input.request.projectId,
+      runId: input.taskId,
+    }),
+  ]);
+  const created = events.find(event => event.type === 'run.created');
+  const definition = catalog.requireSkillForSurface(input.request.skillId, input.request.surface);
+  const toolId = definition.steps[0]?.toolId;
+  if (
+    !task
+    || task.type !== 'agent-run'
+    || task.projectId !== input.request.projectId
+    || !created
+    || !toolId
+    || created.payload.requestDigest !== task.requestDigest
+    || agentService.agentRunRequestDigest(agentRequest) !== task.requestDigest
+  ) {
+    throw new SameTaskAgentRunNotFoundError();
+  }
+  const adoption: SameTaskAgentAdoption = {
+    runId: input.taskId,
+    reused: true,
+    claimed: true,
+    projection: reduceAgentEvents(events),
+    tools: [],
+    actorUserId: input.actor.id,
+    projectId: input.request.projectId,
+    workspace: agentRequest.workspace,
+    toolId,
+    requestDigest: task.requestDigest || '',
+  };
+  return executeAdoptedAgentTask({
+    adoption,
+    execute: operationContext => skillService.executeSkillRun({
+      actor: input.actor,
+      request: input.request,
+      runId: input.taskId,
+      operationContext,
+      stepAdapters: input.stepAdapters,
+      stepRecoveries: input.stepRecoveries,
+      resumeFromStepId: input.resumeFromStepId,
+    }),
+    resumeFromStepId: input.resumeFromStepId,
+    expectedGeneration: input.expectedGeneration,
+    leaseOwner: input.leaseOwner,
+    signal: input.signal,
+  });
+}
 import { createHash } from 'node:crypto';
