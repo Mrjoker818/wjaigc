@@ -49,6 +49,7 @@ import type {
   AgentEventType,
   AgentMode,
   AgentRunProjection,
+  AgentRunBillingQuote,
   AgentRunRequest,
   AgentSkillInvocation,
   AgentWorkspace,
@@ -692,6 +693,7 @@ export function createAgentRuntimeService(
     async createRun(input: {
       actor: User;
       request: AgentRunRequest;
+      billingQuote?: AgentRunBillingQuote;
     }): Promise<AgentRunCreateResult> {
       await dependencies.authorizeContext({
         actorUserId: input.actor.id,
@@ -713,11 +715,23 @@ export function createAgentRuntimeService(
         throw new AgentToolAuthorizationError(authorization.denials);
       }
 
-      const creditCost = await dependencies.calculateCreditCost(
-        'agent_edit',
-        input.request.modelId,
-        { providerId: input.request.providerId },
-      );
+      if (
+        input.billingQuote
+        && (
+          !Number.isSafeInteger(input.billingQuote.creditCost)
+          || input.billingQuote.creditCost < 0
+          || typeof input.billingQuote.label !== 'string'
+          || !input.billingQuote.label.trim()
+        )
+      ) {
+        throw new AgentRunRequestError('billingQuote is invalid');
+      }
+      const creditCost = input.billingQuote?.creditCost
+        ?? await dependencies.calculateCreditCost(
+          'agent_edit',
+          input.request.modelId,
+          { providerId: input.request.providerId },
+        );
       const now = dependencies.now();
       const created = await dependencies.createBillableTask({
         userId: input.actor.id,
@@ -956,6 +970,7 @@ const runtimeService = createAgentRuntimeService();
 export function createAgentRun(input: {
   actor: User;
   request: AgentRunRequest;
+  billingQuote?: AgentRunBillingQuote;
 }): Promise<AgentRunCreateResult> {
   return runtimeService.createRun(input);
 }

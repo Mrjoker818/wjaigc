@@ -68,6 +68,11 @@ export interface AgentRunRequest {
   skill?: AgentSkillInvocation;
 }
 
+export interface AgentRunBillingQuote {
+  creditCost: number;
+  label: string;
+}
+
 export interface AgentEvent {
   eventId: string;
   runId: string;

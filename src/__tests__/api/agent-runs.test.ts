@@ -939,6 +939,22 @@ describe('Agent runtime service', () => {
     expect(dependencies.settleFailedTask).not.toHaveBeenCalled();
   });
 
+  it('uses only a server billing quote and does not recalculate it inside the billing boundary', async () => {
+    const dependencies = serviceDependencies();
+    const service = agentRuntime.createAgentRuntimeService(dependencies);
+
+    await service.createRun({
+      actor: user,
+      request: request(),
+      billingQuote: { creditCost: 13, label: 'Skill quote' },
+    });
+
+    expect(dependencies.calculateCreditCost).not.toHaveBeenCalled();
+    expect(dependencies.createBillableTask).toHaveBeenCalledWith(expect.objectContaining({
+      creditCost: 13,
+    }));
+  });
+
   it('ignores a late failure while paused without refunding the pending charge', async () => {
     const dependencies = serviceDependencies();
     dependencies.listEvents.mockResolvedValue([
