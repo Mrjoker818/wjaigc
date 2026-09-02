@@ -35,6 +35,13 @@
 - 附加运行 `pnpm exec vitest run src/__tests__/scripts/stage-4-inventory.test.ts` 时失败：`inventory.skills.length` 为 0。模块对 `PRESET_SKILLS` 的导入已成功，失败原因是该 inventory 生成器硬编码静态扫描 `simple-chat-types.ts` 中的内联数组；本任务按 brief 将数组迁移并改为重导出后，它尚未跟随新目录位置。该生成器及其测试不在 Task 1 允许修改文件内，因此未越界修复。
 - `Date.now()` 字段按原对象机械保留；不同模块加载时刻会产生运行期时间差，这是原有行为，不影响固定 ID、文案、参数默认值或步骤文字。
 
+## 控制器修复补充
+
+- 已稳定复现 Stage 4 inventory 回归：旧脚本只扫描 `simple-chat-types.ts` 的内联 `PRESET_SKILLS`，迁移后得到 0 项。
+- 先扩充既有 inventory 测试，明确要求同时发现独立对话 `ppt-master` 与画布 `preset-ecommerce-listing`，RED 仍为 `inventory.skills.length === 0`。
+- 最小修复 `scripts/stage-4-inventory.mjs`：改为扫描两份唯一目录文件并合并去重，不修改 Skill 数据和业务 UI。
+- GREEN：`skill-runtime-catalog`、`simple-chat-model-selector-contract`、`stage-4-inventory` 共 3 文件 / 9 测试通过；限定 ESLint 为 0 errors，新增 warning 为 0。
+
 ## 自审
 
 - 21 个画布 Skill ID 和顺序与 brief 完全一致，只授权 `canvas,workflow`。
