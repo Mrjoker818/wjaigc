@@ -842,14 +842,17 @@ export async function POST(request: NextRequest) {
                 );
               } else if (imgData.success && imgData.taskIds?.length) {
                 const taskId = imgData.taskIds[0];
-                const pollExistingTask = async (): Promise<void> => {
+                const pollExistingTask = async (signal?: AbortSignal): Promise<void> => {
                   let attempts = 0;
                   while (attempts < 100) {
+                    signal?.throwIfAborted();
                     await new Promise(r => setTimeout(r, 3000));
+                    signal?.throwIfAborted();
                     const pollRes = await fetch(getInternalApiUrl('/api/poll-task'), {
                       method: 'POST',
                       headers: { 'Content-Type': 'application/json', ...internalHeaders },
                       body: JSON.stringify({ taskId, model: imageModel, providerId: imageProviderId }),
+                      signal,
                     });
                     const pollData = await pollRes.json() as {
                       status?: string;
@@ -904,16 +907,16 @@ export async function POST(request: NextRequest) {
                           userRole: user.role === 'admin' ? 'admin' : 'user',
                         },
                       }),
-                      execute: async () => {
+                      execute: async context => {
                         if (agentRuntimeMode === 'agent-v2') {
                           await executeAdmittedToolCall({
                             kind: 'generation',
                             taskIds: [taskId],
                             userId: user.id,
                             userRole: user.role === 'admin' ? 'admin' : 'user',
-                          });
+                          }, context?.signal);
                         }
-                        await pollExistingTask();
+                        await pollExistingTask(context?.signal);
                       },
                     })
                   : { execute: pollExistingTask, runId: undefined };

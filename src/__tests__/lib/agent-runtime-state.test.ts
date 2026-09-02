@@ -228,6 +228,9 @@ describe('Agent event payload safety', () => {
     { prompt: 'Use sk-abcdefghijklmnopqrstuvwxyz123456 for this request' },
     { prompt: 'Authorization: Bearer abcdefghijklmnopqrstuvwxyz' },
     { prompt: 'password = never-persist-this-value' },
+    { prompt: 'token=abcdefghijklmnopqrstuvwxyz' },
+    { prompt: 'token: abcdefghijklmnopqrstuvwxyz' },
+    { prompt: 'continue?mode=agent&token=abcdefghijklmnopqrstuvwxyz' },
   ])('rejects credential material embedded in free-form text', (payload) => {
     expect(() => assertAgentEventPayloadSafe(payload)).toThrowError(
       'Agent event payload contains sensitive data',
@@ -249,6 +252,14 @@ describe('Agent event payload safety', () => {
       prompt: '设计一个“API 密钥管理”和“访问令牌说明”的中文帮助页面，不要展示真实凭据。',
     })).toEqual({
       prompt: '设计一个“API 密钥管理”和“访问令牌说明”的中文帮助页面，不要展示真实凭据。',
+    });
+  });
+
+  it('allows the ordinary word token when it is not assigned a credential value', () => {
+    expect(assertAgentEventPayloadSafe({
+      prompt: 'Explain what the token word means in this interface.',
+    })).toEqual({
+      prompt: 'Explain what the token word means in this interface.',
     });
   });
 

@@ -374,7 +374,7 @@ vi.mock('@/lib/agent-runtime/event-storage', () => ({
   claimAdoptedAgentExecution: vi.fn(async () => {
     if (state.parentLeaseClaimed || state.parentLeaseCompleted) return { claimed: false, leaseOwner: '' };
     state.parentLeaseClaimed = true;
-    return { claimed: true, leaseOwner: 'parent-route-lease' };
+    return { claimed: true, leaseOwner: 'parent-route-lease', generation: 0 };
   }),
   completeAdoptedAgentExecution: vi.fn(async () => {
     state.parentLeaseClaimed = false;

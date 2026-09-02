@@ -33,6 +33,7 @@ describe('agent-edit durable continuation contract', () => {
   it('does not treat an absent process-local task entry as cancellation', () => {
     expect(serviceSource).not.toMatch(/return\s+!task\s*\|\|\s*task\.status\s*===\s*['"]cancelled['"]/);
     expect(serviceSource).toContain("agentRuntimeMode === 'agent-v2'");
-    expect(serviceSource).toContain('executionSignal.aborted');
+    expect(serviceSource).toContain('operationSignal.aborted');
+    expect(serviceSource).toContain('const operationSignal = operationContext.signal || executionSignal;');
   });
 });

@@ -8,6 +8,7 @@ interface DurableGenerationKickoffInput {
   userId: string;
   userRole: 'user' | 'admin';
   fetchImpl?: typeof fetch;
+  signal?: AbortSignal;
 }
 
 interface DurableGenerationKickoffFailure {
@@ -34,8 +35,22 @@ const DEFAULT_POLL_INTERVAL_MS = 2_000;
 const MAX_POLL_INTERVAL_MS = 3_000;
 const MAX_MONITORING_MS = 25 * 60_000;
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(signal.reason);
+      return;
+    }
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(signal?.reason);
+    };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    signal?.addEventListener('abort', onAbort, { once: true });
+  });
 }
 
 function nextPollDelay(data: Record<string, unknown>): number {
@@ -71,7 +86,7 @@ export async function kickoffDurableGenerationTasks(
           },
           body: JSON.stringify({ taskId }),
           cache: 'no-store',
-          signal: AbortSignal.timeout(15_000),
+          signal: input.signal ?? AbortSignal.timeout(15_000),
         });
         const data = await response.json().catch(() => null) as Record<string, unknown> | null;
         if (!response.ok || data?.status === 'error') {
@@ -84,7 +99,7 @@ export async function kickoffDurableGenerationTasks(
 
         const status = typeof data?.status === 'string' ? data.status.toLowerCase() : '';
         if (!status || TERMINAL_STATUSES.has(status)) return null;
-        await sleep(nextPollDelay(data || {}));
+        await sleep(nextPollDelay(data || {}), input.signal);
       }
       throw new Error('Durable task monitoring timed out before reaching a terminal state');
     } catch (error) {

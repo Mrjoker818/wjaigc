@@ -295,6 +295,7 @@ export type { AgentAdmittedExecution as AdmittedToolExecution } from '@/lib/agen
 
 export async function executeAdmittedToolCall(
   input: ToolCallResult | AdmittedToolExecution,
+  signal?: AbortSignal,
 ): Promise<void> {
   const execution = 'kind' in input ? input : input.admittedExecution;
   if (!execution) return;
@@ -304,6 +305,7 @@ export async function executeAdmittedToolCall(
       taskIds: execution.taskIds,
       userId: execution.userId,
       userRole: execution.userRole,
+      ...(signal ? { signal } : {}),
     });
     if (result.failed.length > 0) {
       throw new Error(`Generation continuation was rejected for ${result.failed.join(', ')}`);
@@ -320,6 +322,7 @@ export async function executeAdmittedToolCall(
       'x-wujie-agent-resume-execution': 'true',
     },
     body: JSON.stringify(execution.requestBody),
+    signal,
   });
   if (!response.ok) {
     throw new Error(`Edit continuation failed: ${response.status}`);

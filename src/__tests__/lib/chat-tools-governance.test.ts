@@ -117,6 +117,27 @@ describe('chat tool governance', () => {
       .toBeUndefined();
   });
 
+  it('passes the initial execution AbortSignal unchanged into edit fetch and generation polling', async () => {
+    const controller = new AbortController();
+    const fetcher = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
+      success: true, mode: 'polling', taskId: 'edit-signal', replayed: true,
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+
+    await executeAdmittedToolCall({
+      kind: 'edit',
+      requestBody: { image: '/uploads/source.png', prompt: 'Retouch' },
+      userId: 'user-1', userRole: 'user', idempotencyKey: 'edit-signal-key',
+    }, controller.signal);
+    expect(fetcher.mock.calls[0]?.[1]?.signal).toBe(controller.signal);
+
+    await executeAdmittedToolCall({
+      kind: 'generation', taskIds: ['task-1'], userId: 'user-1', userRole: 'user',
+    }, controller.signal);
+    expect(kickoffDurableGenerationTasks).toHaveBeenLastCalledWith(expect.objectContaining({
+      signal: controller.signal,
+    }));
+  });
+
   it('uses the exact selected chat provider and model for agent-v2 image analysis', async () => {
     const fetcher = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
       choices: [{ message: { content: 'exact analysis' } }],

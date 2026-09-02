@@ -39,6 +39,9 @@ describe('Agent edit execution descriptor', () => {
     ['authorization value', { prompt: 'Authorization: Bearer abcdefghijklmnopqrstuvwxyz' }],
     ['api key value', { imagePrompt: 'x-api-key: abcdefghijklmnop' }],
     ['token value', { prompt: 'access_token=abcdefghijklmnopqrstuvwxyz' }],
+    ['generic token assignment', { prompt: 'token=abcdefghijklmnopqrstuvwxyz' }],
+    ['generic token label', { prompt: 'token: abcdefghijklmnopqrstuvwxyz' }],
+    ['query token', { imagePrompt: 'continue?mode=agent&token=abcdefghijklmnopqrstuvwxyz' }],
     ['secret key', { apiKey: 'sk-secret' }],
     ['unknown field', { unexpected: 'value' }],
   ])('rejects a descriptor containing %s', (_label, patch) => {
@@ -53,6 +56,13 @@ describe('Agent edit execution descriptor', () => {
       ...descriptorInput,
       prompt: '设计一个API密钥管理页面，并增加访问令牌的中文使用说明，不展示真实凭据。',
     }).prompt).toContain('API密钥管理页面');
+  });
+
+  it('accepts the ordinary word token without a credential assignment', () => {
+    expect(createAgentEditExecutionDescriptorV1({
+      ...descriptorInput,
+      prompt: 'Explain the token label in ordinary product copy.',
+    }).prompt).toContain('token label');
   });
 
   it('fails closed for an unknown continuation version or mismatched canonical digest', () => {

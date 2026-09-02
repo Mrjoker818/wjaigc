@@ -12,6 +12,7 @@ import {
   createAgentEditExecutionDescriptorV1,
   digestAgentEditExecutionDescriptor,
 } from '@/lib/agent-runtime/agent-edit-execution-descriptor';
+import { abortTaskExecution } from '@/lib/task-core/task-abort';
 
 const actor: User = {
   id: 'user-1',
@@ -105,7 +106,9 @@ function dependencies(
     }),
     observeTerminal: vi.fn().mockResolvedValue([]),
     listEvents: vi.fn().mockImplementation(async () => [...events]),
-    claimExecution: vi.fn().mockResolvedValue({ claimed: true, leaseOwner: 'lease-1' }),
+    claimExecution: vi.fn().mockResolvedValue({
+      claimed: true, leaseOwner: 'lease-1', generation: 0,
+    }),
     completeExecution: vi.fn().mockResolvedValue(true),
     releaseExecution: vi.fn().mockResolvedValue(true),
     ...overrides,
@@ -113,6 +116,66 @@ function dependencies(
 }
 
 describe('same-task Agent adoption adapter', () => {
+  it('preserves database generation zero across the public adapter used by every Agent surface', async () => {
+    const deps = dependencies();
+    let executionSignal: AbortSignal | undefined;
+
+    const execution = createSameTaskAgentAdapter(deps).adoptAndExecute({
+      actor, taskId: 'task-1', request: request(), toolId: 'generate_image',
+      execute: async context => {
+        executionSignal = context.signal;
+        return 'done';
+      },
+    });
+
+    await expect(execution).resolves.toMatchObject({ executed: true, value: 'done' });
+    expect(executionSignal).toBeInstanceOf(AbortSignal);
+    expect(deps.appendAdoptedEvent).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'tool.started',
+      payload: expect.objectContaining({ generation: 0 }),
+      executionFence: expect.objectContaining({ generation: 0 }),
+    }));
+    expect(deps.observeTerminal).toHaveBeenCalledWith(expect.objectContaining({ generation: 0 }));
+  });
+
+  it('registers the initial execution signal for pause and cleans the scope afterward', async () => {
+    const deps = dependencies();
+    let receivedSignal: AbortSignal | undefined;
+    let releaseProvider: (() => void) | undefined;
+    const provider = new Promise<void>(resolve => { releaseProvider = resolve; });
+
+    const execution = createSameTaskAgentAdapter(deps).adoptAndExecute({
+      actor, taskId: 'task-1', request: request(), toolId: 'generate_image',
+      execute: async context => {
+        receivedSignal = context.signal;
+        await provider;
+        return 'stopped';
+      },
+    });
+    await vi.waitFor(() => expect(receivedSignal).toBeInstanceOf(AbortSignal));
+
+    expect(abortTaskExecution('task-1', 'replaced')).toBe(true);
+    expect(receivedSignal?.aborted).toBe(true);
+    releaseProvider?.();
+    await execution;
+    expect(abortTaskExecution('task-1', 'replaced')).toBe(false);
+  });
+
+  it('fails closed when a claimed lease omits the database generation', async () => {
+    const deps = dependencies({
+      claimExecution: vi.fn().mockResolvedValue({ claimed: true, leaseOwner: 'lease-missing' }),
+    });
+    const execute = vi.fn();
+
+    await expect(createSameTaskAgentAdapter(deps).adoptAndExecute({
+      actor, taskId: 'task-1', request: request(), toolId: 'generate_image', execute,
+    })).resolves.toMatchObject({ executed: false });
+
+    expect(execute).not.toHaveBeenCalled();
+    expect(deps.releaseExecution).toHaveBeenCalledWith(expect.objectContaining({
+      leaseOwner: 'lease-missing',
+    }));
+  });
   it('persists only an Agent edit continuation reference and canonical digest in run.created', async () => {
     const descriptor = createAgentEditExecutionDescriptorV1({
       sourceVersionId: 'version-source-1', prompt: 'Retouch',
@@ -264,7 +327,7 @@ describe('same-task Agent adoption adapter', () => {
       claimExecution: vi.fn().mockImplementation(async () => {
         if (claimed) return { claimed: false, leaseOwner: '' };
         claimed = true;
-        return { claimed: true, leaseOwner: 'lease-1' };
+        return { claimed: true, leaseOwner: 'lease-1', generation: 0 };
       }),
     });
     let releaseExecution!: () => void;
@@ -298,6 +361,7 @@ describe('same-task Agent adoption adapter', () => {
       claimExecution: vi.fn().mockImplementation(async () => ({
         claimed: true,
         leaseOwner: `lease-${++attempts}`,
+        generation: 0,
       })),
     });
     const adapter = createSameTaskAgentAdapter(deps);
@@ -484,7 +548,7 @@ describe('same-task Agent adoption adapter', () => {
       claimExecution: vi.fn(async () => {
         if (parentClaimed || parentCompleted) return { claimed: false, leaseOwner: '' };
         parentClaimed = true;
-        return { claimed: true, leaseOwner: 'parent-lease' };
+        return { claimed: true, leaseOwner: 'parent-lease', generation: 0 };
       }),
       releaseExecution: vi.fn(async () => {
         parentClaimed = false;

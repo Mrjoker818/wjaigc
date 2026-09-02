@@ -355,7 +355,7 @@ function validateEventExecutionFence(
   if (
     fence.runId !== runId
     || !Number.isSafeInteger(fence.generation)
-    || fence.generation < 1
+    || fence.generation < 0
   ) {
     throw new TypeError('Agent event execution fence is invalid');
   }
@@ -891,7 +891,7 @@ export async function claimAdoptedAgentExecution(
       claimed: (claimed.rowCount ?? 0) === 1,
       leaseOwner: (claimed.rowCount ?? 0) === 1 ? input.leaseOwner : '',
       generation: (claimed.rowCount ?? 0) === 1
-        ? Number((claimed.rows[0] as { generation?: number } | undefined)?.generation || 0)
+        ? Number((claimed.rows[0] as { generation?: number } | undefined)?.generation ?? 0)
         : undefined,
     };
   } catch (error) {

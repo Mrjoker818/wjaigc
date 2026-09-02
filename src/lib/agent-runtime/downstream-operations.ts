@@ -62,6 +62,7 @@ export interface AgentDownstreamExecutionContext {
   recovery: boolean;
   resumeFromStepId?: string;
   executionFence?: AgentExecutionFence;
+  signal?: AbortSignal;
   beginSubmission(): Promise<void>;
   recordAccepted(providerTaskId: string): Promise<void>;
   executeOperation<T>(
@@ -154,7 +155,7 @@ export function createAgentDownstreamOperationIdentity(
     || executionFence.runId !== input.runId
     || !executionFence.leaseOwner
     || !Number.isSafeInteger(executionFence.generation)
-    || executionFence.generation < 1
+    || executionFence.generation < 0
   ) {
     throw new Error('Agent execution fence is required');
   }

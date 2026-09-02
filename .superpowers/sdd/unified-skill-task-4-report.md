@@ -316,3 +316,51 @@ not an in-memory fallback and not reported as passing.
   were updated to inspect the shared agent-edit execution service after the
   route became a thin adapter. The authentication, ownership, allowlist, and
   round-limit assertions themselves were retained unchanged.
+
+## Fifth Review Hardening
+
+### RED Evidence
+
+- Added generation-zero, initial abort-scope, continuation signal, pause
+  persistence failure, and generic token-assignment tests before changing
+  production code.
+- The focused RED run covered 7 files and failed 11 assertions: the public
+  same-task adapter omitted an execution signal, event storage rejected the
+  database's initial generation `0`, chat continuations did not forward an
+  `AbortSignal`, and `token=`, `token:`, and query-token values were accepted.
+- The existing pause-persistence failure assertion passed during RED, proving
+  the service already avoided aborting an execution when the database control
+  transition failed.
+
+### GREEN
+
+- The database lease generation is now authoritative. Initial generation `0`
+  is preserved through claim, event storage, downstream identity, terminal
+  observation, and completion. A claimed lease with an absent, negative, or
+  non-integer generation releases its lease and does not execute provider work.
+  A combined test drives the public adapter with a generation-zero claim into
+  the real fenced event writer and persists the first `tool.started` event.
+- Initial adopted executions now register a task abort scope after a valid
+  lease claim. The exact scope signal reaches canvas chat, simple-chat,
+  agent-edit provider fetches, durable generation polling, and reconciliation.
+  Resumed executions reuse the service-owned signal instead of replacing its
+  scope. Initial scopes are disposed in `finally`; abortable polling removes
+  listeners after normal delay completion.
+- Pause still aborts only after its durable control transition succeeds. Tests
+  prove an active initial signal becomes aborted and reaches the same bottom
+  fetch, while failed pause persistence leaves abort untouched.
+- Descriptor and event payloads share the same sensitive-value validator and
+  now reject generic `token=...`, `token: ...`, and query-token assignments.
+  Ordinary Chinese credential-help copy and the standalone word `token` remain
+  accepted.
+- Focused command: 8 files, 140 tests passed.
+- Related Agent Runtime, agent-edit recovery, cloud-task/billing/cancel,
+  Task 1-3, and Skill isolation regression: 31 files passed, 440 tests passed;
+  one database-concurrency file/test was explicitly skipped without its
+  PostgreSQL environment.
+- `pnpm ts-check` passed. Targeted ESLint passed with zero errors and reported
+  three pre-existing unused-symbol warnings in legacy chat files.
+  `git diff --check` passed with only line-ending conversion notices.
+- PostgreSQL Agent/Skill suites were discovered, but all 29 tests in 4 files
+  were explicitly skipped because `POSTGRES_TEST_DATABASE_URL` is absent. No
+  ambient database or in-memory replacement was used.

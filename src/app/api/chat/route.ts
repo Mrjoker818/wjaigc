@@ -154,7 +154,7 @@ async function executeCanvasChatTool(input: {
         ...(toolResult.admittedExecution ? { resumeExecution: toolResult.admittedExecution } : {}),
       }),
       execute: input.agentRuntimeMode === 'agent-v2'
-        ? () => executeAdmittedToolCall(toolResult)
+        ? context => executeAdmittedToolCall(toolResult, context?.signal)
         : async () => undefined,
     });
     await preparedAgentTask.execute();

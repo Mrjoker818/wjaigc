@@ -168,17 +168,21 @@ async function pollAcceptedAgentGeneration(input: {
   userId: string;
   userRole: 'user' | 'admin';
   isCancelled: () => boolean;
+  signal?: AbortSignal;
 }): Promise<string> {
   const internalHeaders = await getInternalRequestHeaders(input.userId, input.userRole);
   for (let poll = 0; poll < 120; poll++) {
     if (input.isCancelled()) throw new Error('Agent task was cancelled');
+    input.signal?.throwIfAborted();
     await new Promise(resolve => setTimeout(resolve, 2000));
+    input.signal?.throwIfAborted();
     const response = await fetch(
       getInternalApiUrl('/api/poll-task'),
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...internalHeaders },
         body: JSON.stringify({ taskId: input.providerTaskId }),
+        signal: input.signal,
       },
     );
     const data = await response.json().catch(() => null) as Record<string, unknown> | null;
@@ -202,15 +206,19 @@ async function pollAcceptedAgentVideo(input: {
   userId: string;
   userRole: 'user' | 'admin';
   isCancelled: () => boolean;
+  signal?: AbortSignal;
 }): Promise<Record<string, unknown>> {
   const internalHeaders = await getInternalRequestHeaders(input.userId, input.userRole);
   for (let poll = 0; poll < 180; poll++) {
     if (input.isCancelled()) throw new Error('Agent task was cancelled');
+    input.signal?.throwIfAborted();
     await new Promise(resolve => setTimeout(resolve, 2000));
+    input.signal?.throwIfAborted();
     const response = await fetch(getInternalApiUrl('/api/poll-task'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...internalHeaders },
       body: JSON.stringify({ taskId: input.providerTaskId }),
+      signal: input.signal,
     });
     const data = await response.json().catch(() => null) as Record<string, unknown> | null;
     const status = String(data?.status || '').toLowerCase();
@@ -249,6 +257,7 @@ async function reconcileAcceptedAgentProviderTask(input: {
   userRole: 'user' | 'admin';
   imageProviderId: string;
   isCancelled: () => boolean;
+  signal?: AbortSignal;
 }): Promise<string> {
   const durableTask = await getCloudTaskForUser(input.providerTaskId, input.userId);
   if (durableTask) return pollAcceptedAgentGeneration(input);
@@ -266,7 +275,7 @@ async function reconcileAcceptedAgentProviderTask(input: {
     await new Promise(resolve => setTimeout(resolve, 5000));
     const response = await fetchWithV1Retry(baseUrl, pollUrl, {
       headers: { 'Authorization': `Bearer ${provider.apiKey}` },
-      signal: AbortSignal.timeout(30000),
+      signal: input.signal ?? AbortSignal.timeout(30000),
     });
     if (!response.ok) continue;
     const data = await response.json().catch(() => null) as Record<string, unknown> | null;
@@ -863,11 +872,14 @@ async function handleAgentEditRequest(
 
     const runtimeRequest = () => buildRuntimeRequest(taskId);
     const executionSignal = resumeContext?.signal || request.signal;
+    let activeExecutionSignal = executionSignal;
     const executeAgentEditTask = async (
       operationContext: AgentDownstreamExecutionContext = createNonDurableAgentOperationContext(
         `agent-provider:${taskId}`,
       ),
     ): Promise<void> => {
+      const operationSignal = operationContext.signal || executionSignal;
+      activeExecutionSignal = operationSignal;
       const EDIT_GLOBAL_TIMEOUT_MS = 5 * 60 * 1000;
       const timeout = setTimeout(() => {
         void (async () => {
@@ -884,7 +896,7 @@ async function handleAgentEditRequest(
       // Durable execution is cancelled by its fresh AbortSignal. Legacy modes
       // retain their registry compatibility path.
       const isCancelled = () => {
-        if (agentRuntimeMode === 'agent-v2') return executionSignal.aborted;
+        if (agentRuntimeMode === 'agent-v2') return operationSignal.aborted;
         const task = localTaskStore.get(taskId);
         return task?.status === 'cancelled' || isRegistryCancelled(taskId);
       };
@@ -1044,7 +1056,7 @@ async function handleAgentEditRequest(
               method: 'POST',
               headers,
               body: JSON.stringify(requestBody),
-              signal: AbortSignal.timeout(60000),
+              signal: operationSignal,
               skipV1Retry: agentRuntimeMode === 'agent-v2',
             });
 
@@ -1164,6 +1176,7 @@ async function handleAgentEditRequest(
                 stepContext.idempotencyKey,
                 stepContext.recordAccepted,
                 stepContext.beginSubmission,
+                operationSignal,
               ), {
                 reconcile: async providerTaskId => ({
                   success: true,
@@ -1219,6 +1232,7 @@ async function handleAgentEditRequest(
                     'idempotency-key': stepContext.idempotencyKey,
                   },
                   body: JSON.stringify(upscaleRequest),
+                  signal: operationSignal,
                 });
                 return response.json();
               });
@@ -1244,6 +1258,7 @@ async function handleAgentEditRequest(
                   userId: authResult.userId,
                   userRole: authResult.userRole === 'admin' ? 'admin' : 'user',
                   isCancelled,
+                  signal: operationSignal,
                 }),
               });
               const rbData = await operationContext.executeOperation({
@@ -1260,6 +1275,7 @@ async function handleAgentEditRequest(
                     'idempotency-key': stepContext.idempotencyKey,
                   },
                   body: JSON.stringify(removeBackgroundRequest),
+                  signal: operationSignal,
                 });
                 const data = await response.json() as Record<string, unknown>;
                 if (data.success && data.taskId) {
@@ -1296,6 +1312,7 @@ async function handleAgentEditRequest(
                     'idempotency-key': stepContext.idempotencyKey,
                   },
                   body: JSON.stringify(svgRequest),
+                  signal: operationSignal,
                 });
                 return response.json();
               });
@@ -1341,7 +1358,8 @@ async function handleAgentEditRequest(
                     providerTaskId: genTaskId,
                     userId: authResult.userId,
                     userRole: authResult.userRole === 'admin' ? 'admin' : 'user',
-                    isCancelled,
+                  isCancelled,
+                  signal: operationSignal,
                   }),
                 };
               }, {
@@ -1352,6 +1370,7 @@ async function handleAgentEditRequest(
                     userId: authResult.userId,
                     userRole: authResult.userRole === 'admin' ? 'admin' : 'user',
                     isCancelled,
+                    signal: operationSignal,
                   }),
                 }),
               });
@@ -1373,6 +1392,7 @@ async function handleAgentEditRequest(
                 userId: authResult.userId,
                 userRole: authResult.userRole === 'admin' ? 'admin' : 'user',
                 isCancelled,
+                signal: operationSignal,
               });
               const pollData = await operationContext.executeOperation({
                 stepId: stepKey,
@@ -1388,6 +1408,7 @@ async function handleAgentEditRequest(
                     'idempotency-key': stepContext.idempotencyKey,
                   },
                   body: JSON.stringify(videoRequest),
+                  signal: operationSignal,
                 });
                 const data = await response.json() as Record<string, unknown>;
                 if (!data.success || !data.taskId) throw new Error(String(data.error || 'Video generation was not accepted'));
@@ -1414,6 +1435,7 @@ async function handleAgentEditRequest(
                 userId: authResult.userId,
                 userRole: authResult.userRole === 'admin' ? 'admin' : 'user',
                 isCancelled,
+                signal: operationSignal,
               });
               await operationContext.executeOperation({
                 stepId: stepKey,
@@ -1429,6 +1451,7 @@ async function handleAgentEditRequest(
                     'idempotency-key': stepContext.idempotencyKey,
                   },
                   body: JSON.stringify(extendRequest),
+                  signal: operationSignal,
                 });
                 const data = await response.json() as Record<string, unknown>;
                 if (!data.success || !data.taskId) throw new Error(String(data.error || 'Video extension was not accepted'));
@@ -1463,6 +1486,7 @@ async function handleAgentEditRequest(
                 ...(await getInternalRequestHeaders(authResult.userId, authResult.userRole === 'admin' ? 'admin' : 'user')),
               },
               body: JSON.stringify({ imageData: finalImageUrl }),
+              signal: operationSignal,
             });
             if (saveResp.ok) {
               const saveData = await saveResp.json();
@@ -1575,7 +1599,8 @@ async function handleAgentEditRequest(
               userId: authResult.userId,
               userRole: authResult.userRole === 'admin' ? 'admin' : 'user',
               imageProviderId: String(imageProviderId),
-              isCancelled: () => executionSignal.aborted,
+              isCancelled: () => activeExecutionSignal.aborted,
+              signal: activeExecutionSignal,
             });
             await recordAgentTaskTerminal(taskId, {
               status: 'completed', imageUrl, steps: [], finalResponse: 'Recovered accepted generation',
@@ -1788,6 +1813,7 @@ async function performImageEdit(
   providerIdempotencyKey?: string,
   recordAccepted?: (providerTaskId: string) => Promise<void>,
   beginSubmission?: () => Promise<void>,
+  signal?: AbortSignal,
 ): Promise<{ success: boolean; imageUrl?: string; error?: string }> {
   // 优先使用前端传递的图像模型和提供商，遵循用户在图像生成面板的选择
   console.log('[agent-edit] performImageEdit called, model:', imageModelFromFrontend, 'providerId:', imageProviderIdFromFrontend);
@@ -1854,7 +1880,7 @@ async function performImageEdit(
         formData.append('image', blob, 'image.png');
       } else {
         const imgResp = await fetch(imageUrl.startsWith('/') ? `http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}${imageUrl}` : imageUrl, {
-          signal: AbortSignal.timeout(30000),
+          signal: signal ?? AbortSignal.timeout(30000),
         });
         if (!imgResp.ok) return { success: false, error: `无法下载图片: ${imgResp.status}` };
         const imgBlob = await imgResp.blob();
@@ -1876,7 +1902,7 @@ async function performImageEdit(
         exactModel: imageModel,
         headers,
         body: formData,
-        signal: AbortSignal.timeout(120000),
+        signal: signal ?? AbortSignal.timeout(120000),
         strictProviderModel,
       });
 
@@ -1986,7 +2012,7 @@ async function performImageEdit(
         imageBase64 = imageUrl.substring(commaIdx + 1);
       } else {
         const imgResp = await fetch(imageUrl.startsWith('/') ? `http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}${imageUrl}` : imageUrl, {
-          signal: AbortSignal.timeout(30000),
+          signal: signal ?? AbortSignal.timeout(30000),
         });
         if (!imgResp.ok) return { success: false, error: `无法下载图片: ${imgResp.status}` };
         const imgBuffer = Buffer.from(await imgResp.arrayBuffer());
@@ -2026,7 +2052,7 @@ async function performImageEdit(
         exactModel: imageModel,
         headers: genHeaders,
         body: genBody,
-        signal: AbortSignal.timeout(120000),
+        signal: signal ?? AbortSignal.timeout(120000),
         strictProviderModel,
       });
 
@@ -2082,7 +2108,7 @@ async function performImageEdit(
 
           const pollResp = await fetchWithV1Retry(baseUrl, pollUrl, {
             headers: { 'Authorization': `Bearer ${apiKey}` },
-            signal: AbortSignal.timeout(30000),
+            signal: signal ?? AbortSignal.timeout(30000),
           });
 
           if (!pollResp.ok) continue;
@@ -2189,7 +2215,7 @@ async function performImageEdit(
     } else {
       // 下载图片
       const imgResp = await fetch(imageUrl.startsWith('/') ? `http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}${imageUrl}` : imageUrl, {
-        signal: AbortSignal.timeout(30000),
+        signal: signal ?? AbortSignal.timeout(30000),
       });
       if (!imgResp.ok) return { success: false, error: `无法下载图片: ${imgResp.status}` };
       const imgBuffer = Buffer.from(await imgResp.arrayBuffer());
@@ -2242,7 +2268,7 @@ async function performImageEdit(
       exactModel: imageModel,
       headers: chatHeaders,
       body: chatBody,
-      signal: AbortSignal.timeout(120000),
+      signal: signal ?? AbortSignal.timeout(120000),
       strictProviderModel,
     });
 

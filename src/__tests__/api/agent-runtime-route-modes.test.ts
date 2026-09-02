@@ -128,6 +128,20 @@ describe('Agent runtime route rollout modes', () => {
     expect(standalone).toContain('executeAdmittedToolCall');
   });
 
+  it('propagates the shared execution signal through chat, simple-chat, and agent-edit continuations', () => {
+    const canvas = routeSource('src/app/api/chat/route.ts');
+    expect(canvas).toContain('executeAdmittedToolCall(toolResult, context?.signal)');
+
+    const standalone = routeSource('src/app/api/simple-chat/chat/route.ts');
+    expect(standalone).toContain('executeAdmittedToolCall({');
+    expect(standalone).toContain('}, context?.signal)');
+    expect(standalone).toContain('pollExistingTask(context?.signal)');
+
+    const agentEdit = agentEditExecutionSource();
+    expect(agentEdit).toContain('const operationSignal = operationContext.signal || executionSignal;');
+    expect(agentEdit).toContain('signal: operationSignal');
+  });
+
   it('resolves exact paid pairs before provider calls and disables agent-v2 fallback', () => {
     for (const path of ['src/app/api/chat/route.ts', 'src/app/api/simple-chat/chat/route.ts']) {
       const source = routeSource(path);

@@ -92,6 +92,7 @@ export async function dispatchResumedAgentExecution(
       resumeFromStepId: input.nextStepId,
       expectedGeneration: input.generation,
       leaseOwner: input.leaseOwner,
+      signal: input.signal,
     }).then(() => undefined).catch(async error => {
       const persisted = await failResumedAgentExecutionDispatch({
         ...input,

@@ -111,4 +111,27 @@ describe('durable generation server kickoff', () => {
       vi.useRealTimers();
     }
   });
+
+  it('passes the initial execution signal unchanged to polling and stops when pause aborts it', async () => {
+    const controller = new AbortController();
+    let receivedSignal: AbortSignal | null | undefined;
+    const fetchImpl = vi.fn((_url: string | URL | Request, init?: RequestInit) => {
+      receivedSignal = init?.signal;
+      return new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => reject(init.signal?.reason), { once: true });
+      });
+    });
+
+    const kickoff = kickoffDurableGenerationTasks({
+      taskIds: ['task-1'], userId: 'user-a', userRole: 'user', fetchImpl, signal: controller.signal,
+    });
+    await vi.waitFor(() => expect(receivedSignal).toBe(controller.signal));
+    controller.abort(new Error('paused'));
+
+    await expect(kickoff).resolves.toEqual({
+      attempted: 1,
+      accepted: 0,
+      failed: [{ taskId: 'task-1', error: 'paused' }],
+    });
+  });
 });

@@ -45,6 +45,7 @@ const SENSITIVE_VALUE_PATTERNS = [
   /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/,
   /\b[A-Za-z0-9_-]{16,}\.[A-Za-z0-9_-]{16,}\.[A-Za-z0-9_-]{16,}\b/,
   /\b(?:x[ _-]?api[ _-]?key|api[ _-]?key|access[ _-]?token|client[ _-]?secret|authorization|password)\s*[:=]\s*\S{4,}/i,
+  /(?:^|[?&;\s])token\s*[:=]\s*\S{4,}/i,
 ] as const;
 
 const GENERATION_OWNED_EVENT_TYPES = new Set<AgentEvent['type']>([

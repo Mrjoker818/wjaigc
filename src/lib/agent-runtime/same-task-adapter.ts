@@ -31,6 +31,7 @@ import type {
 import { withAgentExecutionFence, type AgentExecutionFence } from './execution-fence';
 import type { AgentEditExecutionContinuationV1 } from './agent-edit-execution-descriptor';
 import { AgentModelRouteMismatchError } from './model-route-error';
+import { createTaskAbortScope } from '@/lib/task-core/task-abort';
 
 export { AgentModelRouteMismatchError } from './model-route-error';
 
@@ -180,6 +181,7 @@ export interface ExecuteSameTaskAdoptionInput<T> {
   resumeFromStepId?: string;
   expectedGeneration?: number;
   leaseOwner?: string;
+  signal?: AbortSignal;
 }
 
 export interface AdoptAndExecuteSameTaskResult<T> {
@@ -357,6 +359,7 @@ export function createSameTaskAgentAdapter(
     resumeFromStepId,
     expectedGeneration,
     leaseOwner,
+    signal,
   }: ExecuteSameTaskAdoptionInput<T>): Promise<AdoptAndExecuteSameTaskResult<T>> {
       let value: T | undefined;
       let executed = false;
@@ -369,11 +372,13 @@ export function createSameTaskAgentAdapter(
         leaseOwner,
         expectedGeneration,
       });
-      if (
-        lease.claimed
-        && expectedGeneration !== undefined
-        && lease.generation !== expectedGeneration
-      ) {
+      const claimedGenerationIsValid = lease.generation !== undefined
+        && Number.isSafeInteger(lease.generation)
+        && lease.generation >= 0;
+      if (lease.claimed && (
+        !claimedGenerationIsValid
+        || (expectedGeneration !== undefined && lease.generation !== expectedGeneration)
+      )) {
         await dependencies.releaseExecution({
           actorUserId: adoption.actorUserId,
           projectId: adoption.projectId,
@@ -382,7 +387,11 @@ export function createSameTaskAgentAdapter(
           leaseOwner: lease.leaseOwner,
         }).catch(() => false);
       }
-      if (lease.claimed && (expectedGeneration === undefined || lease.generation === expectedGeneration)) {
+      if (
+        lease.claimed
+        && claimedGenerationIsValid
+        && (expectedGeneration === undefined || lease.generation === expectedGeneration)
+      ) {
         const admittedTask = await dependencies.getTaskForUser(
           adoption.runId,
           adoption.actorUserId,
@@ -393,131 +402,139 @@ export function createSameTaskAgentAdapter(
           && !TERMINAL_TASK_STATUSES.has(admittedTask.status)
         ) {
           executed = true;
-          const executionGeneration = lease.generation || 1;
+          const executionGeneration = lease.generation!;
           const executionFence = {
             runId: adoption.runId,
             leaseOwner: lease.leaseOwner,
             generation: executionGeneration,
           };
+          const initialScope = signal ? undefined : createTaskAbortScope(adoption.runId);
+          const executionSignal = signal ?? initialScope!.signal;
           try {
-            if (expectedGeneration === undefined) {
-              await dependencies.appendAdoptedEvent({
-                actorUserId: adoption.actorUserId,
-                projectId: adoption.projectId,
-                runId: adoption.runId,
-                workspace: adoption.workspace,
-                eventId: eventId(adoption.runId, `tool:${adoption.toolId}:started`),
-                type: 'tool.started',
-                payload: { toolId: adoption.toolId, generation: executionGeneration },
-                executionFence,
-              });
-            }
-            if (dependencies.downstreamOperations) {
-              const downstreamOperations = dependencies.downstreamOperations;
-              value = await withAgentExecutionFence({
-                ...executionFence,
-              }, () => executeDurableAgentDownstreamOperation({
-                actorUserId: adoption.actorUserId,
-                projectId: adoption.projectId,
-                runId: adoption.runId,
-                toolId: adoption.toolId,
-                requestDigest: adoption.requestDigest,
-                executionFence,
-              }, context => execute({
-                ...context,
-                ...(resumeFromStepId ? { resumeFromStepId } : {}),
-                executionFence,
-              }), downstreamOperations, recovery));
-            } else {
-              value = await withAgentExecutionFence(executionFence, () => execute({
-                ...createPassthroughContext({
+            try {
+              if (expectedGeneration === undefined) {
+                await dependencies.appendAdoptedEvent({
+                  actorUserId: adoption.actorUserId,
+                  projectId: adoption.projectId,
+                  runId: adoption.runId,
+                  workspace: adoption.workspace,
+                  eventId: eventId(adoption.runId, `tool:${adoption.toolId}:started`),
+                  type: 'tool.started',
+                  payload: { toolId: adoption.toolId, generation: executionGeneration },
+                  executionFence,
+                });
+              }
+              if (dependencies.downstreamOperations) {
+                const downstreamOperations = dependencies.downstreamOperations;
+                value = await withAgentExecutionFence({
+                  ...executionFence,
+                }, () => executeDurableAgentDownstreamOperation({
                   actorUserId: adoption.actorUserId,
                   projectId: adoption.projectId,
                   runId: adoption.runId,
                   toolId: adoption.toolId,
                   requestDigest: adoption.requestDigest,
                   executionFence,
-                }),
-                ...(resumeFromStepId ? { resumeFromStepId } : {}),
+                }, context => execute({
+                  ...context,
+                  ...(resumeFromStepId ? { resumeFromStepId } : {}),
+                  executionFence,
+                  signal: executionSignal,
+                }), downstreamOperations, recovery));
+              } else {
+                value = await withAgentExecutionFence(executionFence, () => execute({
+                  ...createPassthroughContext({
+                    actorUserId: adoption.actorUserId,
+                    projectId: adoption.projectId,
+                    runId: adoption.runId,
+                    toolId: adoption.toolId,
+                    requestDigest: adoption.requestDigest,
+                    executionFence,
+                  }),
+                  ...(resumeFromStepId ? { resumeFromStepId } : {}),
+                  executionFence,
+                  signal: executionSignal,
+                }));
+              }
+            } catch (error) {
+              if (
+                error instanceof AgentDownstreamProviderRejectedError
+                && dependencies.terminalizeProviderRejection
+              ) {
+                await dependencies.terminalizeProviderRejection({
+                  taskId: adoption.runId,
+                  actorUserId: adoption.actorUserId,
+                  code: 'AGENT_DOWNSTREAM_PROVIDER_REJECTED',
+                  message: error.message,
+                });
+                await dependencies.completeExecution({
+                  actorUserId: adoption.actorUserId,
+                  projectId: adoption.projectId,
+                  runId: adoption.runId,
+                  toolId: adoption.toolId,
+                  leaseOwner: lease.leaseOwner,
+                });
+                throw error;
+              }
+              if (
+                error instanceof AgentDownstreamSubmissionUnknownError
+                && dependencies.terminalizeSubmissionUnknown
+              ) {
+                await dependencies.terminalizeSubmissionUnknown({
+                  taskId: adoption.runId,
+                  actorUserId: adoption.actorUserId,
+                  code: 'AGENT_DOWNSTREAM_SUBMISSION_UNKNOWN',
+                  message: error.message,
+                });
+                await dependencies.completeExecution({
+                  actorUserId: adoption.actorUserId,
+                  projectId: adoption.projectId,
+                  runId: adoption.runId,
+                  toolId: adoption.toolId,
+                  leaseOwner: lease.leaseOwner,
+                });
+                throw error;
+              }
+              await dependencies.releaseExecution({
+                actorUserId: adoption.actorUserId,
+                projectId: adoption.projectId,
+                runId: adoption.runId,
+                toolId: adoption.toolId,
+                leaseOwner: lease.leaseOwner,
+              }).catch(() => false);
+              throw error;
+            }
+            const terminalEvents = await dependencies.observeTerminal({
+              actorUserId: adoption.actorUserId,
+              projectId: adoption.projectId,
+              runId: adoption.runId,
+              workspace: adoption.workspace,
+              toolId: adoption.toolId,
+              leaseOwner: lease.leaseOwner,
+              generation: executionGeneration,
+            });
+            if (!terminalEvents.some(event => event.type.startsWith('run.'))) {
+              await dependencies.appendAdoptedEvent({
+                actorUserId: adoption.actorUserId,
+                projectId: adoption.projectId,
+                runId: adoption.runId,
+                workspace: adoption.workspace,
+                eventId: eventId(adoption.runId, `tool:${adoption.toolId}:completed`),
+                type: 'tool.completed',
+                payload: { toolId: adoption.toolId, generation: executionGeneration },
                 executionFence,
-              }));
+              });
             }
-          } catch (error) {
-            if (
-              error instanceof AgentDownstreamProviderRejectedError
-              && dependencies.terminalizeProviderRejection
-            ) {
-              await dependencies.terminalizeProviderRejection({
-                taskId: adoption.runId,
-                actorUserId: adoption.actorUserId,
-                code: 'AGENT_DOWNSTREAM_PROVIDER_REJECTED',
-                message: error.message,
-              });
-              await dependencies.completeExecution({
-                actorUserId: adoption.actorUserId,
-                projectId: adoption.projectId,
-                runId: adoption.runId,
-                toolId: adoption.toolId,
-                leaseOwner: lease.leaseOwner,
-              });
-              throw error;
-            }
-            if (
-              error instanceof AgentDownstreamSubmissionUnknownError
-              && dependencies.terminalizeSubmissionUnknown
-            ) {
-              await dependencies.terminalizeSubmissionUnknown({
-                taskId: adoption.runId,
-                actorUserId: adoption.actorUserId,
-                code: 'AGENT_DOWNSTREAM_SUBMISSION_UNKNOWN',
-                message: error.message,
-              });
-              await dependencies.completeExecution({
-                actorUserId: adoption.actorUserId,
-                projectId: adoption.projectId,
-                runId: adoption.runId,
-                toolId: adoption.toolId,
-                leaseOwner: lease.leaseOwner,
-              });
-              throw error;
-            }
-            await dependencies.releaseExecution({
+            await dependencies.completeExecution({
               actorUserId: adoption.actorUserId,
               projectId: adoption.projectId,
               runId: adoption.runId,
               toolId: adoption.toolId,
               leaseOwner: lease.leaseOwner,
-            }).catch(() => false);
-            throw error;
-          }
-          const terminalEvents = await dependencies.observeTerminal({
-            actorUserId: adoption.actorUserId,
-            projectId: adoption.projectId,
-            runId: adoption.runId,
-            workspace: adoption.workspace,
-            toolId: adoption.toolId,
-            leaseOwner: lease.leaseOwner,
-            generation: executionGeneration,
-          });
-          if (!terminalEvents.some(event => event.type.startsWith('run.'))) {
-            await dependencies.appendAdoptedEvent({
-              actorUserId: adoption.actorUserId,
-              projectId: adoption.projectId,
-              runId: adoption.runId,
-              workspace: adoption.workspace,
-              eventId: eventId(adoption.runId, `tool:${adoption.toolId}:completed`),
-              type: 'tool.completed',
-              payload: { toolId: adoption.toolId, generation: executionGeneration },
-              executionFence,
             });
+          } finally {
+            initialScope?.dispose();
           }
-          await dependencies.completeExecution({
-            actorUserId: adoption.actorUserId,
-            projectId: adoption.projectId,
-            runId: adoption.runId,
-            toolId: adoption.toolId,
-            leaseOwner: lease.leaseOwner,
-          });
         }
       }
 
@@ -685,7 +702,7 @@ export async function loadResumableAdoptedAgentTask(input: {
           operationContext: context,
         });
       } else {
-        await chatTools.executeAdmittedToolCall(resumeExecution!);
+        await chatTools.executeAdmittedToolCall(resumeExecution!, context.signal);
       }
     },
   };

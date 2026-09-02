@@ -61,6 +61,7 @@ import {
   type AppendAgentEventInput,
 } from '@/lib/agent-runtime/event-storage';
 import type { AgentDownstreamOperationIdentity } from '@/lib/agent-runtime/downstream-operations';
+import { createSameTaskAgentAdapter } from '@/lib/agent-runtime/same-task-adapter';
 
 const executionFence = {
   runId: 'run-1', leaseOwner: 'agent-lease-7', generation: 7,
@@ -121,5 +122,61 @@ describe('Agent event and downstream storage execution fences', () => {
     expect(taskRead?.params).toEqual(expect.arrayContaining([
       executionFence.runId, executionFence.leaseOwner, executionFence.generation,
     ]));
+  });
+
+  it('accepts the database initial generation zero for the first tool.started event', async () => {
+    const initialFence = { runId: 'run-1', leaseOwner: 'agent-lease-initial', generation: 0 };
+
+    await expect(appendAdoptedAgentEvent({
+      actorUserId: 'user-1', projectId: 'project-1', runId: 'run-1',
+      eventId: 'agent:run-1:tool:image-edit:initial', workspace: 'canvas',
+      type: 'tool.started', payload: { toolId: 'image_edit', generation: 0 },
+      executionFence: initialFence,
+    } as AppendAgentEventInput)).resolves.toMatchObject({ inserted: true });
+
+    const taskRead = mocks.queries.find(({ sql, params }) => (
+      sql.includes('FROM cloud_tasks')
+      && sql.includes('FOR UPDATE')
+      && params.includes('agent-lease-initial')
+    ));
+    expect(taskRead?.params).toEqual(expect.arrayContaining(['agent-lease-initial', 0]));
+  });
+
+  it('combines a generation-zero claim with the real fenced event writer', async () => {
+    const execute = vi.fn().mockResolvedValue('complete');
+    const adapter = createSameTaskAgentAdapter({
+      getTaskForUser: vi.fn().mockResolvedValue({
+        id: 'run-1', userId: 'user-1', projectId: 'project-1', type: 'generate-async',
+        status: 'processing', providerId: 'provider-image', model: 'model-image', progress: 5,
+        creditStatus: 'pending', creditCost: 1, createdAt: 1, updatedAt: 1, revision: 0,
+      }),
+      resolveTaskModel: vi.fn(),
+      authorizeContext: vi.fn(),
+      appendAdoptedEvent: appendAdoptedAgentEvent,
+      observeTerminal: vi.fn().mockResolvedValue([]),
+      listEvents: vi.fn().mockResolvedValue([]),
+      claimExecution: vi.fn().mockResolvedValue({
+        claimed: true, leaseOwner: 'agent-lease-initial', generation: 0,
+      }),
+      completeExecution: vi.fn().mockResolvedValue(true),
+      releaseExecution: vi.fn().mockResolvedValue(true),
+    });
+
+    await expect(adapter.executeAdoption({
+      adoption: {
+        runId: 'run-1', reused: false, claimed: true, projection: {
+          runId: 'run-1', status: 'planning', lastSequence: 0, plan: [], assetVersionIds: [],
+          qualityChecks: [], missingSequences: [], ignoredEventIds: [],
+        },
+        tools: [], actorUserId: 'user-1', projectId: 'project-1', workspace: 'canvas',
+        toolId: 'generate_image', requestDigest: 'a'.repeat(64),
+      },
+      execute,
+    })).resolves.toMatchObject({ executed: true, value: 'complete' });
+
+    expect(execute).toHaveBeenCalledWith(expect.objectContaining({
+      executionFence: { runId: 'run-1', leaseOwner: 'agent-lease-initial', generation: 0 },
+      signal: expect.any(AbortSignal),
+    }));
   });
 });

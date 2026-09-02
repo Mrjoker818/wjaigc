@@ -186,6 +186,20 @@ describe('Agent runtime service', () => {
     expect(dependencies.settleFailedTask).not.toHaveBeenCalled();
   });
 
+  it('does not abort an initial execution when pause persistence fails', async () => {
+    const dependencies = serviceDependencies();
+    dependencies.transitionControl = vi.fn().mockRejectedValue(new Error('database unavailable'));
+    const service = agentRuntime.createAgentRuntimeService(dependencies);
+
+    await expect(service.pauseRun({
+      actorUserId: user.id,
+      runId: 'run-1',
+      nextStepId: 'generate-2',
+    })).rejects.toThrow('database unavailable');
+
+    expect(dependencies.abortTaskExecution).not.toHaveBeenCalled();
+  });
+
   it('resumes with a new durable lease and dispatches a fresh execution from the persisted next step', async () => {
     const dependencies = serviceDependencies();
     const paused = event(2, 'run.paused', { nextStepId: 'generate-2' });
