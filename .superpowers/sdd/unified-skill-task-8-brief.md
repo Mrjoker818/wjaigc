@@ -23,6 +23,10 @@
 - Test: `src/__tests__/components/chat-panel-skill-runtime.test.tsx`
 - Test: `src/__tests__/components/chat-panel-skill-catalog-contract.test.ts`
 - Update: `src/__tests__/lib/skill-runtime-catalog.test.ts`（将 Task 1 的旧直接导入断言迁移为 Task 8 的 API 唯一目录合同）
+- Fix: `src/lib/skill-runtime/step-registry.ts`（把运行开始时冻结的 `sourceVersionIds` 传入权威资产投影父链）
+- Fix: `src/components/canvas-workspace.tsx`（以稳定的 `runId + assetVersionId` 接收结果，保留来源追踪并阻止迟到/重复 placement）
+- Fix: `src/lib/skill-runtime/storage.ts`、`src/app/api/skills/route.ts`、`src/app/api/skills/[skillId]/route.ts`（恢复独立保存对话 Skill、可管理 disabled 项和真实删除/批量一致性）
+- Test: 可新增或更新对应组件、API、storage、step-registry 行为测试；源码字符串断言只能作为架构辅助，不能替代交互、竞态、持久化和 lineage 行为证据
 - Report: `.superpowers/sdd/unified-skill-task-8-report.md`
 
 ## TDD 与验收
@@ -39,3 +43,10 @@
    - 更新后的旧目录合同不得要求 `chat-panel.tsx` 直接导入预设；必须验证 Canvas API 客户端和 21/16 surface 隔离
 5. TypeScript、目标 ESLint、保护基线和 diff-check 通过。
 6. 全新独立评审 `APPROVED` 且 Critical/Important/Minor `0/0/0` 后才标记 Task 8 完成。
+
+## 独立审查修复门禁
+
+- 输出资产版本必须在服务端权威投影中保存冻结的 `parentVersionIds`；画布 placement 与 CanvasImage 必须保留可恢复的来源追踪。
+- 关闭/切换 Skill、切换项目或 effect 重入后，已发出的旧投影不得插入；同一 `runId + assetVersionId` 只能产生一个 placement/节点。
+- “保存当前对话为 Skill”不得依赖先选择模板，不得覆盖同一模板的旧副本；连续保存必须得到两个可持久恢复的独立 Skill。
+- disabled 用户 Skill 刷新后仍须在管理目录可见并可重新启用；删除必须有明确服务端合同；批量清空不得以高并发 CAS 留下本地与服务器不一致。
