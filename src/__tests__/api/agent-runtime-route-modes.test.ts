@@ -12,6 +12,10 @@ function routeSource(path: string): string {
   return readFileSync(resolve(process.cwd(), path), 'utf8');
 }
 
+function agentEditExecutionSource(): string {
+  return routeSource('src/lib/agent-runtime/agent-edit-execution-service.ts');
+}
+
 function dependencies(): AdmittedAgentTaskExecutionDependencies {
   return {
     observeShadow: vi.fn().mockResolvedValue(undefined),
@@ -105,13 +109,13 @@ describe('Agent runtime route rollout modes', () => {
   });
 
   it('wires all three public routes to the same admitted-task dispatcher', () => {
-    for (const path of [
-      'src/app/api/chat/route.ts',
-      'src/app/api/simple-chat/chat/route.ts',
-      'src/app/api/agent-edit/route.ts',
-    ]) {
+    for (const path of ['src/app/api/chat/route.ts', 'src/app/api/simple-chat/chat/route.ts']) {
       expect(routeSource(path)).toContain('prepareAdmittedAgentTaskExecution({');
     }
+    expect(routeSource('src/app/api/agent-edit/route.ts')).toContain(
+      '@/lib/agent-runtime/agent-edit-execution-service',
+    );
+    expect(agentEditExecutionSource()).toContain('prepareAdmittedAgentTaskExecution({');
   });
 
   it('requires admission before paid continuation in both chat routes', () => {
@@ -136,7 +140,7 @@ describe('Agent runtime route rollout modes', () => {
       expect(exactResolution).toBeLessThan(firstProviderCall);
     }
 
-    const agentEdit = routeSource('src/app/api/agent-edit/route.ts');
+    const agentEdit = agentEditExecutionSource();
     expect(agentEdit).toContain("agentRuntimeMode !== 'agent-v2'");
     const agentEditResolution = agentEdit.indexOf('resolveTaskModel(');
     expect(agentEditResolution).toBeGreaterThan(0);

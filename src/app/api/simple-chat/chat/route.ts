@@ -897,6 +897,12 @@ export async function POST(request: NextRequest) {
                         taskId,
                         request: runtimeRequest(),
                         toolId: 'generate_image',
+                        resumeExecution: {
+                          kind: 'generation',
+                          taskIds: [taskId],
+                          userId: user.id,
+                          userRole: user.role === 'admin' ? 'admin' : 'user',
+                        },
                       }),
                       execute: async () => {
                         if (agentRuntimeMode === 'agent-v2') {

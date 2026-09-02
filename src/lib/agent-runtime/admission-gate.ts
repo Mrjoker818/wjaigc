@@ -7,9 +7,9 @@ import {
   type AuthorizedAgentContext,
 } from './context-adapters';
 import {
-  AgentModelRouteMismatchError,
   SameTaskAgentToolError,
 } from './same-task-adapter';
+import { AgentModelRouteMismatchError } from './model-route-error';
 import { toAgentModelCapabilitySet } from './model-capability-set';
 import { authorizeAgentTools } from './tool-registry';
 import type { AgentRunRequest } from './types';

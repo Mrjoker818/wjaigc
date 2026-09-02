@@ -96,12 +96,19 @@ export interface AgentExecutionLeaseInput {
   leaseOwner?: string;
   now?: number;
   leaseDurationMs?: number;
+  expectedGeneration?: number;
 }
 
 export interface AgentExecutionLeaseClaim {
   claimed: boolean;
   leaseOwner: string;
   generation?: number;
+}
+
+export interface AgentExecutionDispatchClaim {
+  claimed: boolean;
+  dispatchLeaseOwner: string;
+  attempt: number;
 }
 
 export async function claimResumedAgentExecutionDispatch(input: {
@@ -111,19 +118,124 @@ export async function claimResumedAgentExecutionDispatch(input: {
   leaseOwner: string;
   generation: number;
   now?: number;
+  dispatchLeaseDurationMs?: number;
+}): Promise<AgentExecutionDispatchClaim> {
+  const now = input.now ?? Date.now();
+  const dispatchLeaseOwner = randomUUID();
+  const dispatchLeaseExpiresAt = now + (input.dispatchLeaseDurationMs ?? 60_000);
+  const result = await getPool().query(
+    `UPDATE wujie_agent_execution_leases
+     SET dispatch_started_at = $6,
+         dispatch_lease_owner = $7,
+         dispatch_lease_expires_at = $8,
+         dispatch_attempt_count = dispatch_attempt_count + 1,
+         dispatch_error = '',
+         updated_at = $6
+     WHERE task_id = $1 AND owner_id = $2 AND project_id = $3
+       AND lease_owner = $4 AND generation = $5
+       AND paused_at = 0 AND completed_at = 0
+       AND (dispatch_lease_owner = '' OR dispatch_lease_expires_at <= $6)
+     RETURNING dispatch_attempt_count`,
+    [input.runId, input.actorUserId, input.projectId, input.leaseOwner,
+      input.generation, now, dispatchLeaseOwner, dispatchLeaseExpiresAt],
+  );
+  const claimed = (result.rowCount ?? 0) === 1;
+  return {
+    claimed,
+    dispatchLeaseOwner: claimed ? dispatchLeaseOwner : '',
+    attempt: claimed ? Number(result.rows[0]?.dispatch_attempt_count || 0) : 0,
+  };
+}
+
+export async function releaseResumedAgentExecutionDispatch(input: {
+  actorUserId: string;
+  projectId: string;
+  runId: string;
+  leaseOwner: string;
+  generation: number;
+  dispatchLeaseOwner: string;
+  error: string;
+  now?: number;
 }): Promise<boolean> {
   const now = input.now ?? Date.now();
   const result = await getPool().query(
     `UPDATE wujie_agent_execution_leases
-     SET dispatch_started_at = $6, updated_at = $6
+     SET dispatch_lease_owner = '', dispatch_lease_expires_at = 0,
+         dispatch_error = $7, updated_at = $8
      WHERE task_id = $1 AND owner_id = $2 AND project_id = $3
        AND lease_owner = $4 AND generation = $5
-       AND paused_at = 0 AND completed_at = 0 AND dispatch_started_at = 0
+       AND dispatch_lease_owner = $6 AND completed_at = 0
      RETURNING task_id`,
     [input.runId, input.actorUserId, input.projectId, input.leaseOwner,
-      input.generation, now],
+      input.generation, input.dispatchLeaseOwner, input.error, now],
   );
   return (result.rowCount ?? 0) === 1;
+}
+
+export async function failResumedAgentExecutionDispatch(input: {
+  actorUserId: string;
+  projectId: string;
+  runId: string;
+  leaseOwner: string;
+  generation: number;
+  dispatchLeaseOwner: string;
+  workspace: AgentWorkspace;
+  nextStepId: string;
+  error: string;
+  now?: number;
+}): Promise<boolean> {
+  const now = input.now ?? Date.now();
+  const eventInput = validateAgentEventAppendInput({
+    actorUserId: input.actorUserId,
+    projectId: input.projectId,
+    runId: input.runId,
+    workspace: input.workspace,
+    eventId: `agent:${input.runId}:resumed:${input.generation}:step:${input.nextStepId}:retrying:${input.dispatchLeaseOwner}`,
+    type: 'step.retrying',
+    payload: {
+      stepId: input.nextStepId,
+      generation: input.generation,
+      error: {
+        code: 'AGENT_RESUME_DISPATCH_FAILED',
+        message: input.error,
+        retryable: true,
+      },
+    },
+  });
+  const client = await getPool().connect();
+  try {
+    await client.query('BEGIN');
+    const released = await client.query(
+      `UPDATE wujie_agent_execution_leases
+       SET dispatch_lease_owner = '', dispatch_lease_expires_at = 0,
+           dispatch_error = $7, updated_at = $8
+       WHERE task_id = $1 AND owner_id = $2 AND project_id = $3
+         AND lease_owner = $4 AND generation = $5
+         AND dispatch_lease_owner = $6 AND completed_at = 0
+       RETURNING task_id`,
+      [input.runId, input.actorUserId, input.projectId, input.leaseOwner,
+        input.generation, input.dispatchLeaseOwner, input.error, now],
+    );
+    if ((released.rowCount ?? 0) !== 1) {
+      await client.query('COMMIT');
+      return false;
+    }
+    const appended = await insertValidatedEvent(client, eventInput);
+    if (appended.inserted) {
+      await client.query(
+        `UPDATE cloud_tasks SET revision = revision + 1, updated_at = GREATEST(updated_at, $2)
+         WHERE id = $1`,
+        [input.runId, now],
+      );
+    }
+    await client.query('COMMIT');
+    return true;
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => undefined);
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 interface AgentDownstreamOperationRow {
@@ -529,7 +641,9 @@ export async function transitionAgentRunControl(
       await client.query(
         `UPDATE wujie_agent_execution_leases
          SET lease_owner = '', lease_expires_at = 0, paused_at = $4,
-             next_step_id = $5, dispatch_started_at = 0, updated_at = $4
+             next_step_id = $5, dispatch_started_at = 0,
+             dispatch_lease_owner = '', dispatch_lease_expires_at = 0,
+             dispatch_error = '', updated_at = $4
          WHERE task_id = $1 AND owner_id = $2 AND project_id = $3 AND completed_at = 0`,
         [input.runId, input.actorUserId, input.projectId, now, nextStepId],
       );
@@ -562,6 +676,9 @@ export async function transitionAgentRunControl(
              paused_at = 0,
              next_step_id = EXCLUDED.tool_id,
              dispatch_started_at = 0,
+             dispatch_lease_owner = '',
+             dispatch_lease_expires_at = 0,
+             dispatch_error = '',
              attempt_count = wujie_agent_execution_leases.attempt_count + 1,
              completed_at = 0,
              updated_at = EXCLUDED.updated_at`,
@@ -679,6 +796,7 @@ export async function claimAdoptedAgentExecution(
     leaseOwner: rawInput.leaseOwner || randomUUID(),
     now: rawInput.now ?? Date.now(),
     leaseDurationMs: rawInput.leaseDurationMs ?? 10 * 60_000,
+    expectedGeneration: rawInput.expectedGeneration,
   };
   const client = await getPool().connect();
   try {
@@ -704,14 +822,18 @@ export async function claimAdoptedAgentExecution(
       `UPDATE wujie_agent_execution_leases
        SET lease_owner = $5,
            lease_expires_at = $6,
-           attempt_count = attempt_count + 1,
+           attempt_count = attempt_count + CASE
+             WHEN lease_owner = $5 AND generation = $8 THEN 0 ELSE 1 END,
            paused_at = 0,
            updated_at = $7
        WHERE task_id = $1 AND owner_id = $2 AND project_id = $3 AND tool_id = $4
-         AND completed_at = 0 AND paused_at = 0 AND lease_expires_at <= $7
+         AND completed_at = 0 AND paused_at = 0
+         AND ($8::integer IS NULL OR generation = $8)
+         AND (lease_expires_at <= $7 OR (lease_owner = $5 AND generation = $8))
        RETURNING generation`,
       [input.runId, input.actorUserId, input.projectId, input.toolId,
-        input.leaseOwner, input.now + input.leaseDurationMs, input.now],
+        input.leaseOwner, input.now + input.leaseDurationMs, input.now,
+        input.expectedGeneration ?? null],
     );
     await client.query('COMMIT');
     return {

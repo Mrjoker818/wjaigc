@@ -197,7 +197,10 @@ describe('agent task persistence', () => {
   });
 
   it('wires agent-edit task lifecycle through persistent storage', () => {
-    const source = readFileSync(path.resolve(process.cwd(), 'src/app/api/agent-edit/route.ts'), 'utf8');
+    const source = readFileSync(
+      path.resolve(process.cwd(), 'src/lib/agent-runtime/agent-edit-execution-service.ts'),
+      'utf8',
+    );
     expect(source).toContain('recordAgentTaskSubmitted');
     expect(source).toContain('recordAgentTaskProgress');
     expect(source).toContain('recordAgentTaskTerminal');

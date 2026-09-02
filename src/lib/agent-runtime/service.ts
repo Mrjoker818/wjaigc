@@ -38,7 +38,11 @@ import {
   type AuthorizedAgentTool,
 } from './tool-registry';
 import { toAgentModelCapabilitySet } from './model-capability-set';
-import { dispatchResumedAgentExecution, type AgentExecutionDispatchStart } from './execution-dispatch';
+import {
+  dispatchResumedAgentExecution,
+  recordResumedAgentExecutionCompletionFailure,
+  type AgentExecutionDispatchStart,
+} from './execution-dispatch';
 import type {
   AgentContextSnapshot,
   AgentEvent,
@@ -181,6 +185,10 @@ export interface AgentRuntimeDependencies {
   settleFailedTask: typeof settleFailedTask;
   abortTaskExecution: typeof abortTaskExecution;
   dispatchExecution?: (input: AgentRunExecutionDispatchInput) => Promise<AgentExecutionDispatchStart>;
+  recordDispatchCompletionFailure?: (
+    input: AgentRunExecutionDispatchInput,
+    error: unknown,
+  ) => Promise<void>;
 }
 
 const defaultDependencies: AgentRuntimeDependencies = {
@@ -200,6 +208,7 @@ const defaultDependencies: AgentRuntimeDependencies = {
   settleFailedTask,
   abortTaskExecution,
   dispatchExecution: dispatchResumedAgentExecution,
+  recordDispatchCompletionFailure: recordResumedAgentExecutionCompletionFailure,
 };
 
 function readString(
@@ -591,6 +600,7 @@ export function createAgentRuntimeService(
         error,
         expectedRevision: run.task.revision ?? 0,
         terminalIdentity,
+        ...(validated.type === 'run.cancelled' ? { allowPausedAgentSettlement: true } : {}),
       });
       if (!settlement.transitioned) {
         const authoritative = await dependencies.getTaskForUser(
@@ -638,7 +648,7 @@ export function createAgentRuntimeService(
     if (!input.leaseOwner || !dependencies.dispatchExecution) return { started: false };
     const scope = createTaskAbortScope(input.runId);
     try {
-      const started = await dependencies.dispatchExecution({
+      const dispatchInput: AgentRunExecutionDispatchInput = {
         actorUserId: input.actorUserId,
         projectId: input.run.projectId,
         runId: input.runId,
@@ -647,9 +657,15 @@ export function createAgentRuntimeService(
         generation: input.generation,
         leaseOwner: input.leaseOwner,
         signal: scope.signal,
-      });
+      };
+      const started = await dependencies.dispatchExecution(dispatchInput);
       if (started.completion) {
-        void started.completion.catch(() => undefined).finally(scope.dispose);
+        void started.completion.catch(async error => {
+          if (!dependencies.recordDispatchCompletionFailure) throw error;
+          await dependencies.recordDispatchCompletionFailure(dispatchInput, error);
+        }).catch(error => {
+          console.error('[agent-runtime] failed to persist resumed execution failure', error);
+        }).finally(scope.dispose);
       } else {
         scope.dispose();
       }

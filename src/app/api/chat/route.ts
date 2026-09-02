@@ -151,6 +151,7 @@ async function executeCanvasChatTool(input: {
         taskId: task.taskId,
         request,
         toolId,
+        ...(toolResult.admittedExecution ? { resumeExecution: toolResult.admittedExecution } : {}),
       }),
       execute: input.agentRuntimeMode === 'agent-v2'
         ? () => executeAdmittedToolCall(toolResult)

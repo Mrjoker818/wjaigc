@@ -66,7 +66,6 @@ import { requiresAtomicTerminalSettlement } from '@/lib/task-core/terminal-settl
 import { getRequestId } from '@/lib/request-id';
 import type { GenerationRouteAudit } from '@/lib/generation-route-audit';
 import { STRICT_AGENT_GENERATE_HEADER } from '@/lib/agent-runtime/generate-image-adapter';
-import { withAgentExecutionFence } from '@/lib/agent-runtime/execution-fence';
 
 export const dynamic = 'force-dynamic';
 
@@ -296,22 +295,6 @@ if (typeof setInterval !== 'undefined') {
 // 轮询异步任务状态 - 由前端调用
 // 通用化设计：支持不同提供商的任务状态查询格式
 export async function POST(request: NextRequest): Promise<NextResponse> {
-  const runId = request.headers.get('x-wujie-agent-run-id') || '';
-  const leaseOwner = request.headers.get('x-wujie-agent-lease-owner') || '';
-  const generation = Number(request.headers.get('x-wujie-agent-generation'));
-  if (
-    request.headers.get('x-wujie-agent-resume-execution') === 'true'
-    && runId
-    && leaseOwner
-    && Number.isSafeInteger(generation)
-    && generation >= 0
-  ) {
-    return withAgentExecutionFence({ runId, leaseOwner, generation }, () => handlePost(request));
-  }
-  return handlePost(request);
-}
-
-async function handlePost(request: NextRequest): Promise<NextResponse> {
   const requestId = getRequestId(request);
   try {
     const { taskId, model: rawModel, userId: requestUserId, providerId, engine: requestEngine, apiKey: bodyApiKey, apiBaseUrl: bodyApiBaseUrl } = await request.json();

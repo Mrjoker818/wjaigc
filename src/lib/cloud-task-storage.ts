@@ -20,6 +20,51 @@ import {
 } from '@/lib/task-core/task-state';
 import { getAgentExecutionFence, type AgentExecutionFence } from '@/lib/agent-runtime/execution-fence';
 
+interface AgentSqlFence {
+  condition: string;
+  params: unknown[];
+  nextIndex: number;
+}
+
+function buildAgentSqlFence(
+  taskExpression: string,
+  startIndex: number,
+  fence: AgentExecutionFence | undefined = getAgentExecutionFence(),
+): AgentSqlFence {
+  let nextIndex = startIndex;
+  const params: unknown[] = [];
+  const activeGeneration = fence
+    ? `AND EXISTS (
+        SELECT 1 FROM wujie_agent_execution_leases agent_lease
+        WHERE agent_lease.task_id = ${taskExpression}
+          AND agent_lease.task_id = $${nextIndex++}
+          AND agent_lease.lease_owner = $${nextIndex++}
+          AND agent_lease.generation = $${nextIndex++}
+          AND agent_lease.paused_at = 0
+          AND agent_lease.completed_at = 0
+      )`
+    : '';
+  if (fence) params.push(fence.runId, fence.leaseOwner, fence.generation);
+  return {
+    condition: `AND NOT EXISTS (
+        SELECT 1 FROM wujie_agent_execution_leases paused_agent
+        WHERE paused_agent.task_id = ${taskExpression} AND paused_agent.paused_at > 0
+      )
+      AND (
+        NOT EXISTS (
+          SELECT 1 FROM wujie_agent_execution_leases agent_control
+          WHERE agent_control.task_id = ${taskExpression}
+        )
+        OR EXISTS (
+          SELECT 1 FROM wujie_agent_execution_leases active_agent
+          WHERE active_agent.task_id = ${taskExpression} AND active_agent.paused_at = 0
+        )
+      ) ${activeGeneration}`,
+    params,
+    nextIndex,
+  };
+}
+
 export type CloudTaskStatus = 'queued' | 'pending' | 'processing' | 'completed' | 'failed' | 'cancelled' | 'timeout';
 export type CloudTaskCreditStatus = 'pending' | 'charged' | 'refunded' | 'not-applicable';
 
@@ -187,6 +232,7 @@ export interface SettleFailedCloudTaskInput {
   lockTimeoutMs?: number;
   statementTimeoutMs?: number;
   agentExecutionFence?: AgentExecutionFence;
+  allowPausedAgentSettlement?: boolean;
 }
 
 export interface CompleteCloudTaskOptions {
@@ -274,6 +320,7 @@ async function initializeCloudTaskTables(): Promise<void> {
   await execSql("ALTER TABLE cloud_tasks ADD COLUMN IF NOT EXISTS terminal_event_type TEXT NOT NULL DEFAULT ''");
   await execSql('ALTER TABLE cloud_tasks ADD COLUMN IF NOT EXISTS credit_cost NUMERIC NOT NULL DEFAULT 0');
   await execSql('ALTER TABLE cloud_tasks ADD COLUMN IF NOT EXISTS revision INTEGER NOT NULL DEFAULT 0');
+  await execSql('ALTER TABLE cloud_tasks ADD COLUMN IF NOT EXISTS agent_execution_descriptor JSONB');
   await execSql("CREATE UNIQUE INDEX IF NOT EXISTS idx_cloud_tasks_user_idempotency ON cloud_tasks(user_id, idempotency_key) WHERE idempotency_key <> ''");
   await execSql("CREATE UNIQUE INDEX IF NOT EXISTS idx_cloud_tasks_charged_transaction ON cloud_tasks(charged_transaction_id) WHERE charged_transaction_id <> ''");
   await execSql("CREATE UNIQUE INDEX IF NOT EXISTS idx_cloud_tasks_refunded_transaction ON cloud_tasks(refunded_transaction_id) WHERE refunded_transaction_id <> ''");
@@ -545,7 +592,7 @@ export async function settleFailedCloudTask(
     );
     const control = controlFence.rows[0];
     if (
-      Number(control?.paused_at || 0) > 0
+      (!input.allowPausedAgentSettlement && Number(control?.paused_at || 0) > 0)
       || (agentFence && (
         agentFence.runId !== input.taskId
         || !control
@@ -737,9 +784,7 @@ export async function updateCloudTask(taskId: string, input: UpdateCloudTaskInpu
   if (input.remoteTaskId !== undefined) { sets.push(`remote_task_id = $${index++}`); params.push(input.remoteTaskId); }
 
   const conditions = ['id = $1'];
-  const agentFence = input.status && isTerminalTaskStatus(normalizeDurableTaskStatus(input.status))
-    ? getAgentExecutionFence()
-    : undefined;
+  const agentFence = getAgentExecutionFence();
   const hasBusinessFieldUpdate = input.progress !== undefined
     || input.result !== undefined
     || input.error !== undefined
@@ -761,22 +806,11 @@ export async function updateCloudTask(taskId: string, input: UpdateCloudTaskInpu
     conditions.push(`revision = $${index++}`);
     params.push(expectedRevision);
   }
-  if (agentFence) {
-    conditions.push(`EXISTS (
-      SELECT 1 FROM wujie_agent_execution_leases agent_lease
-      WHERE agent_lease.task_id = $${index++}
-        AND agent_lease.lease_owner = $${index++}
-        AND agent_lease.generation = $${index++}
-        AND agent_lease.paused_at = 0
-        AND agent_lease.completed_at = 0
-    )`);
-    params.push(agentFence.runId, agentFence.leaseOwner, agentFence.generation);
-  }
-  if (input.status && isTerminalTaskStatus(normalizeDurableTaskStatus(input.status))) {
-    conditions.push(`NOT EXISTS (
-      SELECT 1 FROM wujie_agent_execution_leases paused_agent
-      WHERE paused_agent.task_id = $1 AND paused_agent.paused_at > 0
-    )`);
+  if (input.status !== undefined || hasBusinessFieldUpdate) {
+    const executionFence = buildAgentSqlFence('$1', index, agentFence);
+    conditions.push(executionFence.condition.replace(/^AND\s+/, ''));
+    params.push(...executionFence.params);
+    index = executionFence.nextIndex;
   }
   const result = await execSql(`UPDATE cloud_tasks SET ${sets.join(', ')}
     WHERE ${conditions.join(' AND ')}
@@ -1109,6 +1143,7 @@ export async function refundCloudTaskCredits(
   await ensureCloudTaskTables();
   const now = Date.now();
   const transactionId = `ctx_${now}_${Math.random().toString(36).slice(2, 10)}`;
+  const agentFence = buildAgentSqlFence('task.id', 6);
   const result = await execSql(`
     WITH refundable AS (
       SELECT task.id, task.user_id, task.credit_cost
@@ -1117,6 +1152,7 @@ export async function refundCloudTaskCredits(
       WHERE task.id = $1
         AND task.credit_status = 'pending'
         AND task.credit_cost > 0
+        ${agentFence.condition}
         AND ($5::text IS NULL OR (
           task.status = 'processing'
           AND task.lease_owner = $5
@@ -1147,7 +1183,8 @@ export async function refundCloudTaskCredits(
       RETURNING user_id
     )
     SELECT user_id, credit_cost, balance FROM settled_task
-  `, [taskId, now, transactionId, reason, options.leaseOwner || null]);
+  `, [taskId, now, transactionId, reason, options.leaseOwner || null,
+    ...agentFence.params]);
   const row = result.rows[0] as Record<string, unknown> | undefined;
   if (!row) return { refunded: false, creditCost: 0 };
   return {
@@ -1172,6 +1209,7 @@ export async function transitionCloudTaskToLocalFallbackAndRefund(
   await ensureCloudTaskTables();
   const now = Date.now();
   const transactionId = `ctx_${now}_${Math.random().toString(36).slice(2, 10)}`;
+  const agentFence = buildAgentSqlFence('task.id', 7);
   const transition = await execSql(`
     WITH candidate AS (
       SELECT task.id,
@@ -1182,6 +1220,7 @@ export async function transitionCloudTaskToLocalFallbackAndRefund(
       WHERE task.id = $1
         AND task.status = 'processing'
         AND task.lease_owner = $6
+        ${agentFence.condition}
       FOR UPDATE
     ), locked_credit AS (
       SELECT credit.user_id
@@ -1265,6 +1304,7 @@ export async function transitionCloudTaskToLocalFallbackAndRefund(
     transactionId,
     reason,
     leaseOwner,
+    ...agentFence.params,
   ]);
   const row = transition.rows[0] as Record<string, unknown> | undefined;
   if (!row) {
@@ -1308,6 +1348,7 @@ export async function chargeCloudTaskCredits(
 
   const now = Date.now();
   const transactionId = `ctx_${now}_${Math.random().toString(36).slice(2, 10)}`;
+  const agentFence = buildAgentSqlFence('task.id', 8);
   const result = await execSql(`
     WITH chargeable AS (
       SELECT task.id, task.user_id, $3::numeric AS credit_cost
@@ -1317,6 +1358,7 @@ export async function chargeCloudTaskCredits(
         AND task.status = 'pending'
         AND task.credit_status = 'not-applicable'
         AND ($7::text IS NULL OR task.lease_owner = $7)
+        ${agentFence.condition}
       FOR UPDATE
     ), deducted AS (
       UPDATE wujie_credits credit
@@ -1356,6 +1398,7 @@ export async function chargeCloudTaskCredits(
     transactionId,
     description,
     leaseOwner || null,
+    ...agentFence.params,
   ]);
   const row = result.rows[0] as Record<string, unknown> | undefined;
   if (!row) return { charged: false, creditCost: normalizedCost };
@@ -1376,6 +1419,7 @@ export async function claimCloudTaskLease(
 ): Promise<CloudTaskLease | null> {
   await ensureCloudTaskTables();
   const expiresAt = now + Math.max(1_000, ttlMs);
+  const agentFence = buildAgentSqlFence('$1', 5);
   const result = await execSql(`
     UPDATE cloud_tasks
     SET lease_owner = $2,
@@ -1384,12 +1428,13 @@ export async function claimCloudTaskLease(
         updated_at = $4
     WHERE id = $1
       AND status IN ('created', 'queued', 'submitting', 'pending', 'processing', 'uploading')
+      ${agentFence.condition}
       -- No same-owner bypass: an unexpired lease blocks everyone, including the
       -- current owner. Otherwise every poll re-claims and re-submits the task,
       -- billing the provider once per poll tick.
       AND (lease_expires_at = 0 OR lease_expires_at < $4)
     RETURNING id, lease_owner, lease_expires_at, attempt_count
-  `, [taskId, owner, expiresAt, now]);
+  `, [taskId, owner, expiresAt, now, ...agentFence.params]);
   const row = result.rows[0];
   if (!row) return null;
   return {
@@ -1408,6 +1453,7 @@ export async function renewCloudTaskLease(
   now: number = Date.now(),
 ): Promise<boolean> {
   await ensureCloudTaskTables();
+  const agentFence = buildAgentSqlFence('$1', 5);
   const result = await execSql(`
     UPDATE cloud_tasks
     SET lease_expires_at = $3,
@@ -1415,8 +1461,9 @@ export async function renewCloudTaskLease(
     WHERE id = $1
       AND lease_owner = $2
       AND status IN ('created', 'queued', 'submitting', 'pending', 'processing', 'uploading')
+      ${agentFence.condition}
     RETURNING id
-  `, [taskId, owner, now + Math.max(1_000, ttlMs), now]);
+  `, [taskId, owner, now + Math.max(1_000, ttlMs), now, ...agentFence.params]);
   return (result.rowCount ?? result.rows.length) > 0;
 }
 
@@ -1426,6 +1473,7 @@ export async function releaseCloudTaskLease(
   owner: string,
 ): Promise<boolean> {
   await ensureCloudTaskTables();
+  const agentFence = buildAgentSqlFence('$1', 4);
   const result = await execSql(`
     UPDATE cloud_tasks
     SET lease_owner = '',
@@ -1433,8 +1481,9 @@ export async function releaseCloudTaskLease(
         updated_at = $3
     WHERE id = $1
       AND lease_owner = $2
+      ${agentFence.condition}
     RETURNING id
-  `, [taskId, owner, Date.now()]);
+  `, [taskId, owner, Date.now(), ...agentFence.params]);
   return (result.rowCount ?? result.rows.length) > 0;
 }
 
@@ -1452,6 +1501,7 @@ export async function deferCloudTaskRecovery(
 ): Promise<boolean> {
   await ensureCloudTaskTables();
   const retryAt = now + Math.max(1_000, delayMs);
+  const agentFence = buildAgentSqlFence('$1', 6);
   const result = await execSql(`
     UPDATE cloud_tasks
     SET lease_owner = '',
@@ -1461,8 +1511,9 @@ export async function deferCloudTaskRecovery(
     WHERE id = $1
       AND lease_owner = $2
       AND status IN ('created', 'queued', 'submitting', 'pending', 'processing', 'uploading')
+      ${agentFence.condition}
     RETURNING id
-  `, [taskId, owner, retryAt, now, label]);
+  `, [taskId, owner, retryAt, now, label, ...agentFence.params]);
   return (result.rowCount ?? result.rows.length) > 0;
 }
 
@@ -1484,6 +1535,83 @@ export async function getCloudTaskForUserByIdempotencyKey(userId: string, idempo
   await ensureCloudTaskTables();
   const result = await execSql('SELECT * FROM cloud_tasks WHERE user_id = $1 AND idempotency_key = $2', [userId, idempotencyKey]);
   return result.rows.length > 0 ? rowToCloudTask(result.rows[0]) : null;
+}
+
+export interface PersistPrivateAgentExecutionDescriptorInput {
+  taskId: string;
+  userId: string;
+  descriptor: Record<string, unknown>;
+  descriptorDigest: string;
+}
+
+export interface PersistPrivateAgentExecutionDescriptorResult {
+  persisted: boolean;
+  reused: boolean;
+}
+
+export async function persistPrivateAgentExecutionDescriptor(
+  input: PersistPrivateAgentExecutionDescriptorInput,
+): Promise<PersistPrivateAgentExecutionDescriptorResult> {
+  await ensureCloudTaskTables();
+  if (!/^[a-f0-9]{64}$/.test(input.descriptorDigest)) {
+    throw new TypeError('descriptorDigest must be a SHA-256 digest');
+  }
+  const privateRecord = {
+    descriptorDigest: input.descriptorDigest,
+    descriptor: input.descriptor,
+  };
+  const serialized = JSON.stringify(privateRecord);
+  if (Buffer.byteLength(serialized, 'utf8') > 64 * 1024) {
+    throw new TypeError('Agent execution descriptor exceeds 64 KiB');
+  }
+  const result = await execSql(`
+    WITH candidate AS (
+      SELECT id, agent_execution_descriptor IS NULL AS inserted
+      FROM cloud_tasks
+      WHERE id = $1 AND user_id = $2 AND type = 'agent-edit'
+        AND (
+          agent_execution_descriptor IS NULL
+          OR agent_execution_descriptor->>'descriptorDigest' = $3
+        )
+      FOR UPDATE
+    ), persisted AS (
+      UPDATE cloud_tasks task
+      SET agent_execution_descriptor = CASE
+            WHEN task.agent_execution_descriptor IS NULL THEN $4::jsonb
+            ELSE task.agent_execution_descriptor
+          END,
+          updated_at = GREATEST(task.updated_at, $5)
+      FROM candidate
+      WHERE task.id = candidate.id
+      RETURNING candidate.inserted
+    )
+    SELECT inserted FROM persisted
+  `, [input.taskId, input.userId, input.descriptorDigest, serialized, Date.now()]);
+  const row = result.rows[0] as { inserted?: boolean } | undefined;
+  return {
+    persisted: Boolean(row),
+    reused: Boolean(row && !row.inserted),
+  };
+}
+
+export async function getPrivateAgentExecutionDescriptor(
+  taskId: string,
+  userId: string,
+): Promise<Record<string, unknown> | null> {
+  await ensureCloudTaskTables();
+  const result = await execSql(
+    `SELECT agent_execution_descriptor
+     FROM cloud_tasks
+     WHERE id = $1 AND user_id = $2 AND type = 'agent-edit'`,
+    [taskId, userId],
+  );
+  const privateRecord = result.rows[0]?.agent_execution_descriptor as
+    | { descriptor?: unknown }
+    | undefined;
+  if (!privateRecord || !privateRecord.descriptor || typeof privateRecord.descriptor !== 'object') {
+    return null;
+  }
+  return privateRecord.descriptor as Record<string, unknown>;
 }
 
 export async function getLatestElementDecomposeParentForProject(

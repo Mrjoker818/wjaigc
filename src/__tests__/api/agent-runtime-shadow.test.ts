@@ -5,10 +5,12 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { observeLegacyAgentRun } from '@/lib/agent-runtime/legacy-observer';
 
+const agentEditExecutionPath = 'src/lib/agent-runtime/agent-edit-execution-service.ts';
+
 describe('legacy Agent runtime shadow observation', () => {
   it('observes an admitted image-Agent task only in shadow mode', () => {
     const routeSource = readFileSync(
-      resolve(process.cwd(), 'src/app/api/agent-edit/route.ts'),
+      resolve(process.cwd(), agentEditExecutionPath),
       'utf8',
     );
 
@@ -23,7 +25,7 @@ describe('legacy Agent runtime shadow observation', () => {
     for (const path of [
       'src/app/api/chat/route.ts',
       'src/app/api/simple-chat/chat/route.ts',
-      'src/app/api/agent-edit/route.ts',
+      agentEditExecutionPath,
     ]) {
       const routeSource = readFileSync(resolve(process.cwd(), path), 'utf8');
       expect(routeSource).toContain('resolveAgentRuntimeMode(process.env.WUJIE_AGENT_RUNTIME_MODE)');

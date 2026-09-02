@@ -8,6 +8,10 @@ import type { AgentDownstreamOperation } from '@/lib/agent-runtime/downstream-op
 import type { AgentEvent, AgentRunRequest } from '@/lib/agent-runtime/types';
 import type { CloudTask } from '@/lib/cloud-task-storage';
 import type { User } from '@/lib/user-types';
+import {
+  createAgentEditExecutionDescriptorV1,
+  digestAgentEditExecutionDescriptor,
+} from '@/lib/agent-runtime/agent-edit-execution-descriptor';
 
 const actor: User = {
   id: 'user-1',
@@ -109,6 +113,46 @@ function dependencies(
 }
 
 describe('same-task Agent adoption adapter', () => {
+  it('persists only an Agent edit continuation reference and canonical digest in run.created', async () => {
+    const descriptor = createAgentEditExecutionDescriptorV1({
+      sourceVersionId: 'version-source-1', prompt: 'Retouch',
+      providerId: 'provider-chat', modelId: 'model-chat',
+      imageProviderId: 'provider-image', imageModelId: 'model-image', maxRounds: 3,
+    });
+    const descriptorDigest = digestAgentEditExecutionDescriptor(descriptor);
+    const deps = dependencies({
+      getTaskForUser: vi.fn().mockResolvedValue(task({
+        type: 'agent-edit', providerId: 'provider-chat', model: 'model-chat',
+      })),
+      resolveTaskModel: vi.fn().mockResolvedValue({
+        providerId: 'provider-chat', modelId: 'model-chat', kind: 'chat',
+        sourceType: 'chat', protocol: 'chat-completions', executionMode: 'sync',
+        allowedRatios: [], allowedSizes: [], qualityOptions: [], maxOutputs: 1,
+        supportsReferenceImages: true, supportsMask: true, outputKinds: ['text'],
+        capabilitySources: {},
+      }),
+    });
+    await createSameTaskAgentAdapter(deps).adopt({
+      actor, taskId: 'task-1',
+      request: request({
+        providerId: 'provider-chat', modelId: 'model-chat',
+        allowedToolIds: ['agent_edit'], sourceVersionIds: ['version-source-1'],
+      }),
+      toolId: 'agent_edit',
+      agentEditContinuation: { kind: 'agent-edit', version: 1, descriptorDigest },
+    });
+
+    expect(deps.appendAdoptedEvent).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'run.created',
+      payload: expect.objectContaining({
+        rootToolId: 'agent_edit',
+        continuation: { kind: 'agent-edit', version: 1, descriptorDigest },
+      }),
+    }));
+    const createdPayload = vi.mocked(deps.appendAdoptedEvent).mock.calls[0][0].payload;
+    expect(JSON.stringify(createdPayload)).not.toContain('version-source-1');
+    expect(JSON.stringify(createdPayload)).not.toMatch(/data:image|apiKey|token|baseUrl/i);
+  });
   it.each([
     ['another owner', null],
     ['another project', task({ projectId: 'project-other' })],
@@ -509,6 +553,7 @@ describe('same-task Agent adoption adapter', () => {
       execute,
       resumeFromStepId: 'generate-2',
       expectedGeneration: 4,
+      leaseOwner: 'lease-resume',
     });
 
     expect(execute).toHaveBeenCalledWith(expect.objectContaining({
@@ -516,6 +561,9 @@ describe('same-task Agent adoption adapter', () => {
       executionFence: {
         runId: 'task-1', leaseOwner: 'lease-resume', generation: 4,
       },
+    }));
+    expect(deps.claimExecution).toHaveBeenCalledWith(expect.objectContaining({
+      leaseOwner: 'lease-resume', expectedGeneration: 4,
     }));
     expect(deps.observeTerminal).toHaveBeenCalledWith(expect.objectContaining({
       leaseOwner: 'lease-resume', generation: 4,

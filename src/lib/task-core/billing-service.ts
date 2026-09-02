@@ -48,6 +48,7 @@ export interface SettleFailedTaskInput {
   leaseOwner?: string;
   lockTimeoutMs?: number;
   statementTimeoutMs?: number;
+  allowPausedAgentSettlement?: boolean;
 }
 
 export interface SettleFailedTaskResult {

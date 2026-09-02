@@ -2,6 +2,7 @@ import { calculateActualPixels } from './canvas-generation-group';
 import { getInternalRequestHeaders } from './api-auth';
 import { fetchWithV1Retry } from './api-helpers';
 import { STRICT_AGENT_GENERATE_HEADER } from './agent-runtime/generate-image-adapter';
+import type { AgentAdmittedExecution as AdmittedToolExecution } from './agent-runtime/types';
 import {
   detectTransparentBackgroundIntent,
   withImageOutputPreference,
@@ -290,20 +291,7 @@ export interface ToolCallResult {
   admittedExecution?: AdmittedToolExecution;
 }
 
-export type AdmittedToolExecution =
-  | {
-      kind: 'generation';
-      taskIds: string[];
-      userId: string;
-      userRole: 'user' | 'admin';
-    }
-  | {
-      kind: 'edit';
-      requestBody: Record<string, unknown>;
-      idempotencyKey: string;
-      userId: string;
-      userRole: 'user' | 'admin';
-    };
+export type { AgentAdmittedExecution as AdmittedToolExecution } from '@/lib/agent-runtime/types';
 
 export async function executeAdmittedToolCall(
   input: ToolCallResult | AdmittedToolExecution,

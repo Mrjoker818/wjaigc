@@ -14,9 +14,11 @@ import {
   getCloudTaskForUser,
   getCloudTaskForUserByIdempotencyKey,
   getLatestElementDecomposeParentForProject,
+  getPrivateAgentExecutionDescriptor,
   listCloudTasks,
   getCloudTaskProviderSummary,
   refundCloudTaskCredits,
+  persistPrivateAgentExecutionDescriptor,
   releaseCloudTaskLease,
   renewCloudTaskLease,
   terminateCloudTaskAndRefund,
@@ -514,6 +516,54 @@ describe('cloud-task-storage', () => {
     expect(select?.[1]).toEqual(['provider-a', 'failed', 25]);
   });
 
+  it('atomically persists an immutable private Agent execution descriptor', async () => {
+    execSql.mockResolvedValueOnce({
+      rows: [{ inserted: true, agent_execution_descriptor: { version: 1 } }],
+      rowCount: 1,
+    });
+
+    await expect(persistPrivateAgentExecutionDescriptor({
+      taskId: 'task-agent-edit', userId: 'user-a',
+      descriptor: { version: 1, sourceVersionId: 'version-1' },
+      descriptorDigest: 'a'.repeat(64),
+    })).resolves.toEqual({ persisted: true, reused: false });
+
+    const statement = execSql.mock.calls.at(-1);
+    expect(statement?.[0]).toContain('agent_execution_descriptor IS NULL');
+    expect(statement?.[0]).toContain("agent_execution_descriptor->>'descriptorDigest'");
+    expect(statement?.[0]).toContain('FOR UPDATE');
+    expect(statement?.[1]).toEqual(expect.arrayContaining([
+      'task-agent-edit', 'user-a', 'a'.repeat(64),
+    ]));
+  });
+
+  it('does not overwrite a private descriptor on an idempotency conflict', async () => {
+    execSql.mockResolvedValueOnce({ rows: [], rowCount: 0 });
+    await expect(persistPrivateAgentExecutionDescriptor({
+      taskId: 'task-agent-edit', userId: 'user-a',
+      descriptor: { version: 1, sourceVersionId: 'version-other' },
+      descriptorDigest: 'b'.repeat(64),
+    })).resolves.toEqual({ persisted: false, reused: false });
+  });
+
+  it('keeps the private descriptor out of public CloudTask reads', async () => {
+    const row = {
+      id: 'task-agent-edit', user_id: 'user-a', type: 'agent-edit', status: 'processing',
+      progress: 5, credit_status: 'pending', created_at: 1, updated_at: 1,
+      agent_execution_descriptor: {
+        descriptorDigest: 'a'.repeat(64), descriptor: { version: 1 },
+      },
+    };
+    execSql.mockResolvedValueOnce({ rows: [row], rowCount: 1 });
+    const publicTask = await getCloudTaskForUser('task-agent-edit', 'user-a');
+    expect(publicTask).not.toHaveProperty('agentExecutionDescriptor');
+    expect(publicTask).not.toHaveProperty('agent_execution_descriptor');
+
+    execSql.mockResolvedValueOnce({ rows: [row], rowCount: 1 });
+    await expect(getPrivateAgentExecutionDescriptor('task-agent-edit', 'user-a'))
+      .resolves.toEqual({ version: 1 });
+  });
+
   it('finds the latest element parent with exact owner, type, and project SQL filters', async () => {
     execSql.mockResolvedValueOnce({ rows: [], rowCount: 0 });
 
@@ -588,6 +638,17 @@ describe('cloud-task-storage', () => {
     expect(update?.[0]).toContain('lease_expires_at < $');
     expect(update?.[1]).toEqual(expect.arrayContaining(['task-lease', 'worker-a', 5000, 1000]));
     expect(lease).toEqual({ taskId: 'task-lease', owner: 'worker-a', expiresAt: 5000, attemptCount: 2 });
+  });
+
+  it('prevents a paused Agent task from claiming a cloud lease', async () => {
+    execSql.mockResolvedValueOnce({ rows: [], rowCount: 0 });
+
+    await expect(claimCloudTaskLease('task-paused', 'worker-a', 4000, 1000))
+      .resolves.toBeNull();
+
+    const update = execSql.mock.calls.at(-1)?.[0];
+    expect(update).toContain('wujie_agent_execution_leases');
+    expect(update).toContain('paused_at = 0');
   });
 
   it('guards completion with the active lease and database wall-clock deadline', async () => {
@@ -707,6 +768,28 @@ describe('cloud-task-storage', () => {
     expect(settlement?.[0]).toContain('refunded_transaction_id = $3');
     expect(settlement?.[0]).toMatch(/description,\s*task_id,\s*reference_id,\s*created_at/i);
     expect(refund).toEqual({ refunded: true, creditCost: 6, balance: 94, userId: 'user-a' });
+  });
+
+  it('fences direct refund and local fallback against paused or stale Agent generations', async () => {
+    execSql.mockResolvedValue({ rows: [], rowCount: 0 });
+    const fence = { runId: 'task-fenced', leaseOwner: 'lease-new', generation: 5 };
+
+    const { withAgentExecutionFence } = await import('@/lib/agent-runtime/execution-fence');
+    await withAgentExecutionFence(fence, async () => {
+      await refundCloudTaskCredits('task-fenced', 'refund');
+      await cloudTaskStorage.transitionCloudTaskToLocalFallbackAndRefund(
+        'task-fenced', { fallback: true }, 'fallback', 'worker-a',
+      );
+    });
+
+    const guarded = execSql.mock.calls.slice(-2).map(([sql]) => String(sql));
+    expect(guarded).toHaveLength(2);
+    for (const sql of guarded) {
+      expect(sql).toContain('wujie_agent_execution_leases');
+      expect(sql).toContain('paused_at = 0');
+      expect(sql).toContain('generation');
+      expect(sql).toContain('lease_owner');
+    }
   });
 
   it('switches to local fallback and refunds in one owner-fenced statement', async () => {

@@ -125,3 +125,137 @@ not an in-memory fallback and not reported as passing.
   pre-existing unused-symbol warnings; the strict `--max-warnings 0` invocation
   therefore exits nonzero without any new lint error.
 - `git diff --check` passed with only line-ending conversion notices.
+
+## Second Review Follow-up
+
+> Status: BLOCKED before commit. Chat and simple-chat adopted continuations are
+> durable and directly resumable, but the existing `/api/agent-edit` same-task
+> adoption still stores only its process-local executor closure. A cross-instance
+> resume of that surface therefore has no durable request descriptor yet. The
+> remaining work is to persist the validated agent-edit request on the existing
+> cloud task, reference it from `run.created`, and have the adopted adapter invoke
+> the same idempotent agent-edit execution entry. No poll or in-memory substitute
+> has been added.
+
+### RED
+
+- Added direct resume-dispatch, same-task re-entry, cloud-task fence, recoverable
+  dispatch-claim, and background rejection tests before completing the storage
+  and service changes.
+- The focused RED run failed 6 assertions: resume still reached
+  `/api/poll-task`, the dispatch claim was one-way, adopted execution omitted
+  generation/owner re-entry, and claim/refund/fallback SQL lacked the Agent
+  control fence.
+
+### Changes
+
+- Resume now loads the adopted run's durable continuation and directly invokes
+  `executeAdoptedAgentTask`. Generation/edit continuations are persisted in
+  `run.created`; execution receives the persisted `nextStepId`, new generation,
+  lease owner, and fresh abort signal. The obsolete poll-route resume-header
+  path was removed.
+- `claimAdoptedAgentExecution` permits only the preallocated same-owner,
+  same-generation lease to re-enter before expiry. Stale generations and other
+  owners still lose the database CAS.
+- Replaced the one-way `dispatch_started_at` gate with a recoverable dispatch
+  lease: owner, expiry, attempt counter, and durable error. Same-generation
+  concurrent dispatches remain singular; timeout or atomic failure release lets
+  an exact resume retry claim again. Migration:
+  `20260903_unified_skill_task4_dispatch_lease.sql`.
+- Dispatch failure release and `step.retrying` append now occur in one database
+  transaction. Service-level background rejection handling also persists a
+  stable retry-visible event instead of swallowing the Promise rejection.
+- Added one centralized cloud-task Agent SQL fence and applied it to generic
+  business updates, cloud lease claim/renew/release/defer, charge, direct refund,
+  local fallback, and terminal paths. Paused tasks cannot be reclaimed,
+  progressed, refunded, or moved to fallback; an active fence requires exact
+  run, generation, and owner. Explicit cancellation from paused remains allowed
+  through the existing revision-CAS, single-settlement path.
+
+### Verification
+
+- Focused second-review set: 4 files, 111 tests passed.
+- Agent runtime/storage/service/cancel/recovery plus Task 1-3 compatibility:
+  16 files, 256 tests passed.
+- TypeScript: `pnpm ts-check`, exit 0.
+- Limited ESLint over all touched TypeScript files: exit 0 with 0 errors. It
+  reports 14 pre-existing unused-symbol warnings in legacy chat, poll-task, and
+  chat-tools files.
+- PostgreSQL: the discovered isolated suite was run and skipped 2 tests because
+  `POSTGRES_TEST_DATABASE_URL` is not configured. No ambient or in-memory
+  substitute was used.
+- `git diff --check`: exit 0; only line-ending conversion notices.
+
+## Agent Edit Cross-Instance Recovery Follow-up
+
+> Status: DONE. The remaining `/api/agent-edit` adopted-run recovery gap is
+> closed without an HTTP re-entry or process-local task dependency.
+
+### RED
+
+- Descriptor/storage RED:
+  `pnpm exec vitest run src/__tests__/lib/agent-edit-execution-descriptor.test.ts src/__tests__/lib/cloud-task-storage.test.ts`
+  failed because the bounded descriptor module and private atomic storage APIs
+  did not exist.
+- Continuation RED:
+  `pnpm exec vitest run src/__tests__/lib/agent-edit-continuation.test.ts src/__tests__/lib/agent-runtime-same-task-adapter.test.ts`
+  failed because agent-edit had no durable continuation loader/executor.
+- Route recovery RED:
+  `pnpm exec vitest run src/__tests__/api/agent-edit-production-recovery.test.ts -t "resumes from the private descriptor"`
+  first failed with `selectedEntityIds is required`, proving the persisted
+  descriptor could not reconstruct execution after process-local state loss.
+- Dependency-direction RED:
+  `pnpm exec vitest run src/__tests__/api/agent-edit-durable-continuation-contract.test.ts`
+  failed 2/2 because the executor imported the API route and no stable lib
+  execution service existed. A final cycle audit added a stricter contract that
+  failed 1/2 while the service still imported the adapter's error class.
+
+### Implementation
+
+- Added private `cloud_tasks.agent_execution_descriptor` JSONB storage with a
+  64 KiB database constraint and an owner/type/digest-guarded row-lock CTE.
+  Exact retries preserve the first descriptor; conflicting digests fail closed.
+  The public `CloudTask` mapper and GET responses do not select or expose it.
+- Added strict `AgentEditExecutionDescriptorV1` validation and canonical SHA-256
+  digesting. It stores only immutable version IDs, prompts, exact model/provider
+  IDs, bounded rounds, quality, and aspect ratio. URLs, data URLs, credentials,
+  base URLs, headers, roles, generations, and lease owners are rejected.
+- `run.created` now contains only the agent-edit continuation reference, digest,
+  and `rootToolId`. Resume reloads and revalidates both event and private
+  descriptor, accepts only `nextStepId=agent_edit`, and fails closed for missing,
+  mismatched, or unknown versions.
+- Moved the stable executor to
+  `src/lib/agent-runtime/agent-edit-execution-service.ts`. The Next.js route is
+  now a thin POST/GET adapter, while the resume dispatcher dynamically imports
+  the same lib service directly. There is no `lib -> API route` dependency.
+  The shared model-route error lives in an independent module, so the execution
+  service also has no direct or indirect dependency back through the adapter.
+- Resume reconstructs authorization from immutable Asset Version IDs, forwards
+  the fresh generation, lease owner, operation context, and AbortSignal, and
+  executes on the already billed parent task. Missing process-local task state
+  is not cancellation; no second `createBillableTask` call occurs.
+
+### GREEN And Regression
+
+- Focused descriptor/continuation/adapter/dispatch/route/recovery set:
+  7 files, 108 tests passed.
+- Full relevant Agent Runtime, event/task storage, billing/cancel, adopted
+  execution, client controls, and Task 1-3 compatibility:
+  23 files, 324 tests passed.
+- Skill Runtime compatibility and isolation:
+  5 files, 67 tests passed, including 21 built-ins for canvas/workflow and 16
+  for simple-chat.
+- TypeScript: `pnpm ts-check`, exit 0.
+- Limited ESLint over all 30 changed TypeScript/TSX files: exit 0, 0 errors and
+  14 pre-existing unused-symbol warnings in chat, poll-task, and chat-tools.
+- `git diff --check`: exit 0; only LF/CRLF conversion notices.
+- PostgreSQL: `src/__tests__/integration/skill-runtime-storage-postgres.test.ts`
+  explicitly skipped 2 tests because `POSTGRES_TEST_DATABASE_URL` is absent.
+  The descriptor CTE/migration was therefore not claimed as real-database
+  verified; no ambient database or in-memory substitute was used.
+
+### Delivery
+
+- No commit or push was created, as requested. All intended Task 4 changes are
+  left staged for review. `stable` and the protected untracked paths remain
+  untouched.

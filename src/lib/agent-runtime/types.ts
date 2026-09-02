@@ -38,6 +38,13 @@ export interface AgentSkillInvocation {
   modelBindings: Record<string, { providerId: string; modelId: string }>;
 }
 
+export type AgentAdmittedExecution =
+  | { kind: 'generation'; taskIds: string[]; userId: string; userRole: 'user' | 'admin' }
+  | {
+      kind: 'edit'; requestBody: Record<string, unknown>; idempotencyKey: string;
+      userId: string; userRole: 'user' | 'admin';
+    };
+
 export interface AgentContextSnapshot {
   selectedEntityIds: string[];
   visibleVersionIds: string[];

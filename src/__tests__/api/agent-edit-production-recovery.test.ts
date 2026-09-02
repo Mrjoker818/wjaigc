@@ -71,7 +71,10 @@ vi.mock('@/lib/api-auth', () => ({
     'x-wujie-internal-secret': 'test-internal-secret',
   }),
 }));
-vi.mock('@/lib/server-auth', () => ({ getSessionUser: vi.fn().mockResolvedValue(fixtures.user) }));
+vi.mock('@/lib/server-auth', () => ({
+  getSessionUser: vi.fn().mockResolvedValue(fixtures.user),
+  listManagedUsers: vi.fn().mockResolvedValue([fixtures.user]),
+}));
 vi.mock('@/lib/server-api-config', () => ({
   findProviderById: vi.fn(async (id: string) => (
     id === fixtures.chatProvider.id
@@ -132,7 +135,11 @@ vi.mock('@/lib/task-core/model-catalog', () => ({
   })),
 }));
 vi.mock('@/lib/agent-runtime/context-adapters', () => ({
-  authorizeAgentContext: vi.fn(async ({ request }: { request: Record<string, unknown> }) => request.context),
+  authorizeAgentContext: vi.fn(async ({ request }: { request: Record<string, unknown> }) => ({
+    ...(request.context as Record<string, unknown>),
+    mediaByVersionId: { 'version-1': '/source.png' },
+    selectedEntityVersionIds: {},
+  })),
   resolveSelectedAgentMediaUrl: vi.fn().mockReturnValue('/source.png'),
 }));
 vi.mock('@/lib/agent-runtime/admission-gate', () => ({
@@ -281,6 +288,10 @@ vi.mock('@/lib/cloud-task-persistence', () => ({
   projectPersistedCompletedTask: vi.fn(),
 }));
 vi.mock('@/lib/cloud-task-storage', () => ({
+  persistPrivateAgentExecutionDescriptor: vi.fn().mockResolvedValue({
+    persisted: true, reused: false,
+  }),
+  getPrivateAgentExecutionDescriptor: vi.fn().mockResolvedValue(null),
   getCloudTaskForUser: vi.fn(async (taskId: string, userId: string) => {
     if (state.hiddenCloudTaskIds.has(taskId)) return null;
     const task = state.tasks.get(taskId);
@@ -445,7 +456,11 @@ vi.mock('@/lib/op-log', () => ({
   sanitizeRequestData: vi.fn((value: unknown) => value), OP_ACTIONS: new Proxy({}, { get: () => 'test' }),
 }));
 
-import { GET as agentGet, POST as agentPost } from '@/app/api/agent-edit/route';
+import {
+  GET as agentGet,
+  POST as agentPost,
+} from '@/app/api/agent-edit/route';
+import { executePersistedAgentEditDescriptor } from '@/lib/agent-runtime/agent-edit-execution-service';
 import { POST as generatePost } from '@/app/api/generate/route';
 import { POST as pollPost } from '@/app/api/poll-task/route';
 
@@ -663,6 +678,52 @@ describe('Agent route default-adapter production recovery', () => {
       }
       return nativeSetTimeout(callback, delay, ...args);
     }) as typeof setTimeout);
+  });
+
+  it('resumes from the private descriptor without a process-local task entry or another charge', async () => {
+    state.crashedPoll = true;
+    state.tasks.set('persisted-agent-edit', {
+      id: 'persisted-agent-edit', userId: fixtures.user.id, projectId: 'project-route',
+      type: 'agent-edit', status: 'processing', progress: 25,
+      creditCost: 7, creditStatus: 'charged',
+    });
+    const signal = new AbortController().signal;
+    const operationContext = {
+      idempotencyKey: 'resume-root', operationKey: 'resume-root', recovery: true,
+      beginSubmission: vi.fn(async () => undefined),
+      recordAccepted: vi.fn(async () => undefined),
+      executeOperation: vi.fn(async (
+        step: Record<string, unknown>,
+        execute: (context: Record<string, unknown>) => Promise<unknown>,
+      ) => execute({
+        idempotencyKey: `resume-child:${String(step.stepId)}`,
+        operationKey: `resume-child:${String(step.stepId)}`,
+        recovery: true,
+        beginSubmission: vi.fn(async () => undefined),
+        recordAccepted: vi.fn(async () => undefined),
+      })),
+    };
+
+    await executePersistedAgentEditDescriptor({
+      actorUserId: fixtures.user.id,
+      projectId: 'project-route',
+      runId: 'persisted-agent-edit',
+      nextStepId: 'agent_edit',
+      generation: 8,
+      leaseOwner: 'lease-8',
+      signal,
+      operationContext: operationContext as never,
+      descriptor: {
+        version: 1, sourceVersionId: 'version-1', prompt: 'Resume edit',
+        providerId: fixtures.chatProvider.id, modelId: 'Chat::Exact',
+        imageProviderId: fixtures.imageProvider.id, imageModelId: 'Exact::Model',
+        maxRounds: 2,
+      },
+    });
+
+    expect(state.registry.has('persisted-agent-edit')).toBe(false);
+    expect(state.parentCharges).toBe(0);
+    expect(state.tasks.get('persisted-agent-edit')).toMatchObject({ status: 'completed' });
   });
 
   it('cancels a persisted processing task after a route restart through durable settlement', async () => {

@@ -22,12 +22,17 @@ import {
 } from './tool-registry';
 import { toAgentModelCapabilitySet } from './model-capability-set';
 import type {
+  AgentAdmittedExecution,
   AgentEvent,
   AgentEventType,
   AgentRunProjection,
   AgentRunRequest,
 } from './types';
 import { withAgentExecutionFence } from './execution-fence';
+import type { AgentEditExecutionContinuationV1 } from './agent-edit-execution-descriptor';
+import { AgentModelRouteMismatchError } from './model-route-error';
+
+export { AgentModelRouteMismatchError } from './model-route-error';
 
 const TERMINAL_TASK_STATUSES = new Set([
   'completed',
@@ -43,16 +48,6 @@ export class SameTaskAgentRunNotFoundError extends Error {
   constructor() {
     super('Agent run not found');
     this.name = 'SameTaskAgentRunNotFoundError';
-  }
-}
-
-export class AgentModelRouteMismatchError extends Error {
-  readonly code = 'MODEL_ROUTE_MISMATCH';
-  readonly status = 409;
-
-  constructor() {
-    super('The admitted task provider and model do not match the requested route');
-    this.name = 'AgentModelRouteMismatchError';
   }
 }
 
@@ -128,6 +123,7 @@ export interface SameTaskAgentAdapterDependencies {
   }): Promise<AgentEvent[]>;
   claimExecution(input: {
     actorUserId: string; projectId: string; runId: string; toolId: string;
+    leaseOwner?: string; expectedGeneration?: number;
   }): Promise<{ claimed: boolean; leaseOwner: string; generation?: number }>;
   completeExecution(input: {
     actorUserId: string; projectId: string; runId: string; toolId: string; leaseOwner: string;
@@ -157,6 +153,8 @@ export interface AdoptAndExecuteSameTaskInput<T> {
   toolId: string;
   execute: (context: AgentDownstreamExecutionContext) => Promise<T>;
   recovery?: AgentDownstreamRecovery<T>;
+  resumeExecution?: AgentAdmittedExecution;
+  agentEditContinuation?: AgentEditExecutionContinuationV1;
 }
 
 export type AdoptSameTaskInput = Omit<AdoptAndExecuteSameTaskInput<never>, 'execute' | 'recovery'>;
@@ -180,6 +178,7 @@ export interface ExecuteSameTaskAdoptionInput<T> {
   recovery?: AgentDownstreamRecovery<T>;
   resumeFromStepId?: string;
   expectedGeneration?: number;
+  leaseOwner?: string;
 }
 
 export interface AdoptAndExecuteSameTaskResult<T> {
@@ -295,7 +294,13 @@ export function createSameTaskAgentAdapter(
         ...eventBase,
         eventId: eventId(input.taskId, 'created'),
         type: 'run.created',
-        payload: {
+        payload: input.agentEditContinuation ? {
+          adopted: true,
+          workspace: input.request.workspace,
+          rootToolId: 'agent_edit',
+          continuation: input.agentEditContinuation,
+          requestDigest: input.agentEditContinuation.descriptorDigest,
+        } : {
           adopted: true,
           workspace: input.request.workspace,
           workspaceId: input.request.workspaceId,
@@ -306,6 +311,8 @@ export function createSameTaskAgentAdapter(
           sourceVersionIds: input.request.sourceVersionIds,
           allowedToolIds: authorization.tools.map(tool => tool.toolId),
           context: input.request.context,
+          requestDigest: createHash('sha256').update(JSON.stringify(input.request)).digest('hex'),
+          ...(input.resumeExecution ? { resumeExecution: input.resumeExecution } : {}),
         },
       });
       await dependencies.appendAdoptedEvent({
@@ -352,6 +359,7 @@ export function createSameTaskAgentAdapter(
     recovery,
     resumeFromStepId,
     expectedGeneration,
+    leaseOwner,
   }: ExecuteSameTaskAdoptionInput<T>): Promise<AdoptAndExecuteSameTaskResult<T>> {
       let value: T | undefined;
       let executed = false;
@@ -361,6 +369,8 @@ export function createSameTaskAgentAdapter(
         projectId: adoption.projectId,
         runId: adoption.runId,
         toolId: adoption.toolId,
+        leaseOwner,
+        expectedGeneration,
       });
       if (
         lease.claimed
@@ -599,6 +609,82 @@ export function executeAdoptedAgentTask<T>(
   input: ExecuteSameTaskAdoptionInput<T>,
 ): Promise<AdoptAndExecuteSameTaskResult<T>> {
   return defaultSameTaskAgentAdapter().then(adapter => adapter.executeAdoption(input));
+}
+
+export async function loadResumableAdoptedAgentTask(input: {
+  actorUserId: string;
+  projectId: string;
+  runId: string;
+  nextStepId: string;
+}): Promise<{
+  adoption: SameTaskAgentAdoption;
+  execute: (context: AgentDownstreamExecutionContext) => Promise<void>;
+}> {
+  const [taskStorage, eventStorage, chatTools] = await Promise.all([
+    import('@/lib/cloud-task-storage'),
+    import('./event-storage'),
+    import('@/lib/chat-tools'),
+  ]);
+  const [task, events] = await Promise.all([
+    taskStorage.getCloudTaskForUser(input.runId, input.actorUserId),
+    eventStorage.listAgentEventsForActor(input),
+  ]);
+  const created = events.find(event => event.type === 'run.created');
+  if (!task || task.projectId !== input.projectId || created?.payload.adopted !== true) {
+    throw new SameTaskAgentRunNotFoundError();
+  }
+  const resumeExecution = created.payload.resumeExecution as AgentAdmittedExecution | undefined;
+  const isAgentEdit = created.payload.rootToolId === 'agent_edit';
+  const agentEditDescriptor = isAgentEdit
+    ? await (await import('./agent-edit-continuation')).loadAgentEditContinuation(input)
+    : undefined;
+  if (!resumeExecution && !agentEditDescriptor) {
+    throw new Error('Adopted Agent execution has no durable continuation');
+  }
+  const workspace = created.payload.workspace as AgentRunRequest['workspace'];
+  const requestDigest = typeof created.payload.requestDigest === 'string'
+    ? created.payload.requestDigest
+    : createHash('sha256').update(JSON.stringify(created.payload)).digest('hex');
+  return {
+    adoption: {
+      runId: input.runId,
+      reused: true,
+      claimed: true,
+      projection: reduceAgentEvents(events),
+      tools: [],
+      actorUserId: input.actorUserId,
+      projectId: input.projectId,
+      workspace,
+      toolId: input.nextStepId,
+      requestDigest,
+    },
+    execute: async context => {
+      context.resumeFromStepId = input.nextStepId;
+      if (agentEditDescriptor) {
+        const resumed = context as AgentDownstreamExecutionContext & {
+          generation?: number;
+          leaseOwner?: string;
+          signal?: AbortSignal;
+        };
+        if (!Number.isSafeInteger(resumed.generation) || !resumed.leaseOwner || !resumed.signal) {
+          throw new Error('Agent edit resume context is incomplete');
+        }
+        await (await import('./agent-edit-continuation')).executeAgentEditContinuation({
+          actorUserId: input.actorUserId,
+          projectId: input.projectId,
+          runId: input.runId,
+          nextStepId: input.nextStepId,
+          descriptor: agentEditDescriptor,
+          generation: resumed.generation!,
+          leaseOwner: resumed.leaseOwner,
+          signal: resumed.signal,
+          operationContext: context,
+        });
+      } else {
+        await chatTools.executeAdmittedToolCall(resumeExecution!);
+      }
+    },
+  };
 }
 
 export function adoptAndExecuteExistingAgentTask<T>(

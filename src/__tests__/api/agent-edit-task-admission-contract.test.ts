@@ -4,7 +4,7 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 const routeSource = readFileSync(
-  resolve(process.cwd(), 'src/app/api/agent-edit/route.ts'),
+  resolve(process.cwd(), 'src/lib/agent-runtime/agent-edit-execution-service.ts'),
   'utf8',
 );
 const persistenceSource = readFileSync(
