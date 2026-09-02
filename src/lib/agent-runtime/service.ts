@@ -24,6 +24,7 @@ import {
   listAgentEventStreamsForActor,
   listAgentEventsForActor,
   observeAdoptedAgentTaskTerminal,
+  transitionAgentRunControl,
   validateAgentEventAppendInput,
 } from './event-storage';
 import {
@@ -44,6 +45,7 @@ import type {
   AgentMode,
   AgentRunProjection,
   AgentRunRequest,
+  AgentSkillInvocation,
   AgentWorkspace,
 } from './types';
 
@@ -138,6 +140,10 @@ export interface AgentEventAppendResult {
   projection: AgentRunProjection;
 }
 
+export interface AgentRunControlResult extends AgentEventAppendResult {
+  leaseOwner: string;
+}
+
 interface OwnedAgentRun {
   task: CloudTask;
   projectId: string;
@@ -153,6 +159,7 @@ export interface AgentRuntimeDependencies {
   calculateCreditCost: typeof calculateConfiguredCreditCost;
   createBillableTask: typeof createBillableTask;
   appendEvent: typeof appendAgentEvent;
+  transitionControl?: typeof transitionAgentRunControl;
   listEvents: typeof listAgentEventsForActor;
   observeAdoptedTerminal?: typeof observeAdoptedAgentTaskTerminal;
   listRunEventStreams: typeof listAgentEventStreamsForActor;
@@ -170,6 +177,7 @@ const defaultDependencies: AgentRuntimeDependencies = {
   calculateCreditCost: calculateConfiguredCreditCost,
   createBillableTask,
   appendEvent: appendAgentEvent,
+  transitionControl: transitionAgentRunControl,
   listEvents: listAgentEventsForActor,
   observeAdoptedTerminal: observeAdoptedAgentTaskTerminal,
   listRunEventStreams: listAgentEventStreamsForActor,
@@ -245,6 +253,40 @@ function readContext(value: unknown): AgentContextSnapshot {
   };
 }
 
+function readSkill(value: unknown): AgentSkillInvocation | undefined {
+  if (value === undefined) return undefined;
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new AgentRunRequestError('skill is invalid');
+  }
+  const skill = value as Record<string, unknown>;
+  if (!Number.isSafeInteger(skill.skillVersion) || Number(skill.skillVersion) < 1) {
+    throw new AgentRunRequestError('skill.skillVersion is invalid');
+  }
+  if (!skill.inputValues || typeof skill.inputValues !== 'object' || Array.isArray(skill.inputValues)) {
+    throw new AgentRunRequestError('skill.inputValues is invalid');
+  }
+  if (!skill.modelBindings || typeof skill.modelBindings !== 'object' || Array.isArray(skill.modelBindings)) {
+    throw new AgentRunRequestError('skill.modelBindings is invalid');
+  }
+  const modelBindings: AgentSkillInvocation['modelBindings'] = {};
+  for (const [bindingId, value] of Object.entries(skill.modelBindings)) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      throw new AgentRunRequestError('skill.modelBindings is invalid');
+    }
+    const binding = value as Record<string, unknown>;
+    modelBindings[readString(bindingId, 'skill binding ID')] = {
+      providerId: readString(binding.providerId, 'skill binding providerId'),
+      modelId: readString(binding.modelId, 'skill binding modelId'),
+    };
+  }
+  return {
+    skillId: readString(skill.skillId, 'skill.skillId'),
+    skillVersion: Number(skill.skillVersion),
+    inputValues: skill.inputValues as Record<string, unknown>,
+    modelBindings,
+  };
+}
+
 export function parseAgentRunRequest(value: unknown): AgentRunRequest {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw new AgentRunRequestError();
@@ -276,6 +318,7 @@ export function parseAgentRunRequest(value: unknown): AgentRunRequest {
     allowedToolIds: readStringArray(input.allowedToolIds, 'allowedToolIds', 64),
     idempotencyKey: readString(input.idempotencyKey, 'idempotencyKey'),
     context: readContext(input.context),
+    skill: readSkill(input.skill),
   };
 }
 
@@ -469,6 +512,22 @@ export function createAgentRuntimeService(
       };
     }
 
+    if (
+      beforeProjection.status === 'paused'
+      && validated.type !== 'run.cancelled'
+      && validated.type !== 'run.resumed'
+    ) {
+      const pauseEvent = [...beforeEvents].reverse().find(event => (
+        event.type === 'run.paused'
+      ));
+      if (!pauseEvent) throw new AgentRunTerminalConflictError();
+      return {
+        accepted: false,
+        event: pauseEvent,
+        projection: beforeProjection,
+      };
+    }
+
     const requestedTerminalStatus = taskStatusForTerminalEvent(validated.type);
     const terminalIdentity = requestedTerminalStatus
       ? {
@@ -491,6 +550,7 @@ export function createAgentRuntimeService(
         taskId: validated.runId,
         from: [...LIVE_TASK_STATUSES],
         to: 'completed',
+        revision: run.task.revision ?? 0,
         creditStatus: 'charged',
         result: result && typeof result === 'object' && !Array.isArray(result)
           ? result as Record<string, unknown>
@@ -514,6 +574,7 @@ export function createAgentRuntimeService(
         taskId: validated.runId,
         status: requestedTerminalStatus,
         error,
+        expectedRevision: run.task.revision ?? 0,
         terminalIdentity,
       });
       if (!settlement.transitioned) {
@@ -636,6 +697,7 @@ export function createAgentRuntimeService(
           sourceVersionIds: input.request.sourceVersionIds,
           allowedToolIds: authorization.tools.map(tool => tool.toolId),
           context: input.request.context,
+          ...(input.request.skill ? { skill: input.request.skill } : {}),
         },
       };
       try {
@@ -678,13 +740,102 @@ export function createAgentRuntimeService(
       return reduceAgentEvents(await listEvents(input));
     },
     appendEvent,
+    async pauseRun(input: {
+      actorUserId: string;
+      runId: string;
+      nextStepId: string;
+    }): Promise<AgentRunControlResult> {
+      const run = await ownedRun(input.actorUserId, input.runId);
+      const projection = reduceAgentEvents(run.events);
+      const existing = [...run.events].reverse().find(event => event.type === 'run.paused');
+      if (projection.status === 'paused' && existing) {
+        return { accepted: true, event: existing, projection, leaseOwner: '' };
+      }
+      if (TERMINAL_TASK_STATUSES.has(projection.status)) {
+        throw new AgentRunTerminalError(projection.status);
+      }
+      const nextStepId = readString(input.nextStepId, 'nextStepId');
+      const pauseCount = run.events.filter(event => event.type === 'run.paused').length + 1;
+      const transitioned = await (dependencies.transitionControl || transitionAgentRunControl)({
+        actorUserId: input.actorUserId,
+        projectId: run.projectId,
+        runId: input.runId,
+        eventId: `agent:${input.runId}:paused:${pauseCount}`,
+        workspace: run.workspace,
+        type: 'run.paused',
+        payload: { nextStepId },
+        expectedRevision: run.task.revision ?? 0,
+      });
+      const nextProjection = reduceAgentEvents(transitioned.events);
+      if (transitioned.accepted && nextProjection.status === 'paused') {
+        dependencies.abortTaskExecution(input.runId, 'replaced');
+      }
+      return {
+        accepted: transitioned.accepted,
+        event: transitioned.event,
+        projection: nextProjection,
+        leaseOwner: '',
+      };
+    },
+    async resumeRun(input: {
+      actorUserId: string;
+      runId: string;
+    }): Promise<AgentRunControlResult> {
+      const run = await ownedRun(input.actorUserId, input.runId);
+      const projection = reduceAgentEvents(run.events);
+      const existing = [...run.events].reverse().find(event => event.type === 'run.resumed');
+      if (projection.status !== 'paused') {
+        if (existing && !TERMINAL_TASK_STATUSES.has(projection.status)) {
+          const retried = await (dependencies.transitionControl || transitionAgentRunControl)({
+            actorUserId: input.actorUserId,
+            projectId: run.projectId,
+            runId: input.runId,
+            eventId: existing.eventId,
+            workspace: run.workspace,
+            type: 'run.resumed',
+            payload: existing.payload,
+            expectedRevision: run.task.revision ?? 0,
+          });
+          return {
+            accepted: true,
+            event: retried.event,
+            projection: reduceAgentEvents(retried.events),
+            leaseOwner: retried.leaseOwner,
+          };
+        }
+        if (TERMINAL_TASK_STATUSES.has(projection.status)) {
+          throw new AgentRunTerminalError(projection.status);
+        }
+        throw new AgentRunRequestError('Agent run is not paused');
+      }
+      const nextStepId = projection.resumeFromStepId;
+      if (!nextStepId) throw new AgentRunRequestError('Paused run has no next step');
+      const generation = run.events.filter(event => event.type === 'run.resumed').length + 1;
+      const leaseOwner = dependencies.randomUUID();
+      const transitioned = await (dependencies.transitionControl || transitionAgentRunControl)({
+        actorUserId: input.actorUserId,
+        projectId: run.projectId,
+        runId: input.runId,
+        eventId: `agent:${input.runId}:resumed:${generation}`,
+        workspace: run.workspace,
+        type: 'run.resumed',
+        payload: { nextStepId, generation },
+        expectedRevision: run.task.revision ?? 0,
+        leaseOwner,
+      });
+      return {
+        accepted: transitioned.accepted,
+        event: transitioned.event,
+        projection: reduceAgentEvents(transitioned.events),
+        leaseOwner: transitioned.leaseOwner,
+      };
+    },
     async cancelRun(input: {
       actorUserId: string;
       runId: string;
     }): Promise<AgentEventAppendResult> {
       const run = await ownedRun(input.actorUserId, input.runId);
-      dependencies.abortTaskExecution(input.runId, 'cancelled');
-      return appendEvent({
+      const result = await appendEvent({
         actorUserId: input.actorUserId,
         runId: input.runId,
         eventId: `agent:${input.runId}:cancelled`,
@@ -697,6 +848,8 @@ export function createAgentRuntimeService(
           },
         },
       }, run);
+      dependencies.abortTaskExecution(input.runId, 'cancelled');
+      return result;
     },
   };
 }
@@ -743,6 +896,21 @@ export function cancelAgentRun(input: {
   runId: string;
 }): Promise<AgentEventAppendResult> {
   return runtimeService.cancelRun(input);
+}
+
+export function pauseAgentRun(input: {
+  actorUserId: string;
+  runId: string;
+  nextStepId: string;
+}): Promise<AgentRunControlResult> {
+  return runtimeService.pauseRun(input);
+}
+
+export function resumeAgentRun(input: {
+  actorUserId: string;
+  runId: string;
+}): Promise<AgentRunControlResult> {
+  return runtimeService.resumeRun(input);
 }
 
 export function agentRuntimeHttpError(error: unknown): {

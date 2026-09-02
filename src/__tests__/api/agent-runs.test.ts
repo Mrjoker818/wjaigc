@@ -116,6 +116,12 @@ function serviceDependencies() {
       charged: true,
     })),
     appendEvent: vi.fn<AgentRuntimeDependencies['appendEvent']>(async () => created),
+    transitionControl: vi.fn<NonNullable<AgentRuntimeDependencies['transitionControl']>>(async () => ({
+      accepted: false,
+      event: created,
+      events: [created],
+      leaseOwner: '',
+    })),
     listEvents: vi.fn<AgentRuntimeDependencies['listEvents']>(async () => [created]),
     listRunEventStreams: vi.fn<AgentRuntimeDependencies['listRunEventStreams']>(async () => [[created]]),
     getTaskForUser: vi.fn<AgentRuntimeDependencies['getTaskForUser']>(async () => task),
@@ -132,6 +138,138 @@ function serviceDependencies() {
 }
 
 describe('Agent runtime service', () => {
+  it('parses a versioned Skill invocation into the durable run request', () => {
+    const skill = {
+      skillId: 'skill-poster',
+      skillVersion: 3,
+      inputValues: { headline: 'Launch' },
+      modelBindings: {
+        image: { providerId: 'provider-exact', modelId: 'model-exact' },
+      },
+    };
+
+    expect(agentRuntime.parseAgentRunRequest(request({ skill }))).toMatchObject({ skill });
+    expect(() => agentRuntime.parseAgentRunRequest(request({
+      skill: { ...skill, skillVersion: 0 },
+    }))).toThrowError('skill.skillVersion is invalid');
+  });
+
+  it('persists pause before aborting and does not settle credits', async () => {
+    const dependencies = serviceDependencies();
+    const paused = event(2, 'run.paused', { nextStepId: 'generate-2' });
+    dependencies.transitionControl = vi.fn(async () => ({
+      accepted: true,
+      event: paused,
+      events: [event(1, 'run.created'), paused],
+      leaseOwner: '',
+    }));
+    const service = agentRuntime.createAgentRuntimeService(dependencies);
+
+    const result = await service.pauseRun({
+      actorUserId: user.id,
+      runId: 'run-1',
+      nextStepId: 'generate-2',
+    });
+
+    expect(result.projection.status).toBe('paused');
+    expect(dependencies.transitionControl).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'run.paused',
+      expectedRevision: 0,
+    }));
+    expect(dependencies.transitionControl.mock.invocationCallOrder[0]).toBeLessThan(
+      dependencies.abortTaskExecution.mock.invocationCallOrder[0],
+    );
+    expect(dependencies.transitionTask).not.toHaveBeenCalled();
+    expect(dependencies.settleFailedTask).not.toHaveBeenCalled();
+  });
+
+  it('resumes with a new durable lease from the persisted next step', async () => {
+    const dependencies = serviceDependencies();
+    const paused = event(2, 'run.paused', { nextStepId: 'generate-2' });
+    const resumed = event(3, 'run.resumed', {
+      nextStepId: 'generate-2', generation: 2,
+    });
+    dependencies.listEvents.mockResolvedValue([event(1, 'run.created'), paused]);
+    dependencies.transitionControl = vi.fn(async () => ({
+      accepted: true,
+      event: resumed,
+      events: [event(1, 'run.created'), paused, resumed],
+      leaseOwner: 'lease-new',
+    }));
+    const service = agentRuntime.createAgentRuntimeService(dependencies);
+
+    const result = await service.resumeRun({ actorUserId: user.id, runId: 'run-1' });
+
+    expect(result).toMatchObject({
+      accepted: true,
+      leaseOwner: 'lease-new',
+      projection: { status: 'queued', resumeFromStepId: 'generate-2' },
+    });
+    expect(dependencies.transitionControl).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'run.resumed',
+      payload: expect.objectContaining({ nextStepId: 'generate-2' }),
+    }));
+  });
+
+  it('keeps repeated pause idempotent without aborting or writing again', async () => {
+    const dependencies = serviceDependencies();
+    const paused = event(2, 'run.paused', { nextStepId: 'generate-2' });
+    dependencies.listEvents.mockResolvedValue([event(1, 'run.created'), paused]);
+    const service = agentRuntime.createAgentRuntimeService(dependencies);
+
+    await expect(service.pauseRun({
+      actorUserId: user.id, runId: 'run-1', nextStepId: 'generate-2',
+    })).resolves.toMatchObject({ accepted: true, event: paused, projection: { status: 'paused' } });
+    expect(dependencies.transitionControl).not.toHaveBeenCalled();
+    expect(dependencies.abortTaskExecution).not.toHaveBeenCalled();
+  });
+
+  it('retries resume against the persisted event without replacing its lease', async () => {
+    const dependencies = serviceDependencies();
+    const resumed = event(3, 'run.resumed', { nextStepId: 'generate-2', generation: 1 });
+    dependencies.listEvents.mockResolvedValue([
+      event(1, 'run.created'),
+      event(2, 'run.paused', { nextStepId: 'generate-2' }),
+      resumed,
+    ]);
+    dependencies.transitionControl = vi.fn(async () => ({
+      accepted: true,
+      event: resumed,
+      events: await dependencies.listEvents({
+        actorUserId: user.id, projectId: 'project-1', runId: 'run-1',
+      }),
+      leaseOwner: 'lease-existing',
+    }));
+    const service = agentRuntime.createAgentRuntimeService(dependencies);
+
+    await expect(service.resumeRun({ actorUserId: user.id, runId: 'run-1' }))
+      .resolves.toMatchObject({ accepted: true, leaseOwner: 'lease-existing' });
+    expect(dependencies.transitionControl).toHaveBeenCalledWith(expect.objectContaining({
+      eventId: resumed.eventId,
+      payload: resumed.payload,
+    }));
+  });
+
+  it('cancels a paused run through the single terminal refund settlement', async () => {
+    const dependencies = serviceDependencies();
+    const paused = event(2, 'run.paused', { nextStepId: 'generate-2' });
+    const cancelled = event(3, 'run.cancelled');
+    dependencies.appendEvent.mockResolvedValue(cancelled);
+    dependencies.listEvents
+      .mockResolvedValueOnce([event(1, 'run.created'), paused])
+      .mockResolvedValueOnce([event(1, 'run.created'), paused, cancelled]);
+    const service = agentRuntime.createAgentRuntimeService(dependencies);
+
+    await expect(service.cancelRun({ actorUserId: user.id, runId: 'run-1' }))
+      .resolves.toMatchObject({ accepted: true, projection: { status: 'cancelled' } });
+    expect(dependencies.settleFailedTask).toHaveBeenCalledTimes(1);
+    expect(dependencies.settleFailedTask).toHaveBeenCalledWith(expect.objectContaining({
+      taskId: 'run-1', status: 'cancelled', expectedRevision: 0,
+    }));
+    expect(dependencies.abortTaskExecution).toHaveBeenCalledTimes(1);
+  });
+
+
   it('does not expose a shadow-observed durable task as a cancellable Agent run', async () => {
     const dependencies = {
       ...serviceDependencies(),
@@ -417,6 +555,7 @@ describe('Agent runtime service', () => {
     expect(dependencies.transitionTask).toHaveBeenCalledWith(expect.objectContaining({
       taskId: 'run-1',
       to: 'completed',
+      revision: 0,
       creditStatus: 'charged',
       result: { imageUrl: '/winner.png' },
     }));
@@ -701,6 +840,30 @@ describe('Agent runtime service', () => {
     expect(dependencies.settleFailedTask).not.toHaveBeenCalled();
   });
 
+  it('ignores a late failure while paused without refunding the pending charge', async () => {
+    const dependencies = serviceDependencies();
+    dependencies.listEvents.mockResolvedValue([
+      event(1, 'run.created'),
+      event(2, 'run.paused', { nextStepId: 'generate-2' }),
+    ]);
+    const service = agentRuntime.createAgentRuntimeService(dependencies);
+
+    const result = await service.appendEvent({
+      actorUserId: user.id,
+      runId: 'run-1',
+      eventId: 'late-failure',
+      type: 'run.failed',
+      payload: {
+        error: { code: 'ABORTED_OLD_WORK', message: 'late', retryable: true },
+      },
+    });
+
+    expect(result).toMatchObject({ accepted: false, projection: { status: 'paused' } });
+    expect(dependencies.appendEvent).not.toHaveBeenCalled();
+    expect(dependencies.transitionTask).not.toHaveBeenCalled();
+    expect(dependencies.settleFailedTask).not.toHaveBeenCalled();
+  });
+
   it('still validates the canonical request when retrying the accepted terminal event ID', async () => {
     const dependencies = serviceDependencies();
     dependencies.listEvents.mockResolvedValue([
@@ -791,6 +954,7 @@ describe('Agent run API routes', () => {
         assetVersionIds: [],
         ignoredEventIds: [],
         missingSequences: [],
+        qualityChecks: [],
       },
       tools: [],
     });
@@ -846,6 +1010,7 @@ describe('Agent run API routes', () => {
         assetVersionIds: [],
         ignoredEventIds: [],
         missingSequences: [],
+        qualityChecks: [],
       },
     ]);
     const route = await import('@/app/api/agent-runs/route');
@@ -911,6 +1076,7 @@ describe('Agent run API routes', () => {
         assetVersionIds: [],
         ignoredEventIds: [],
         missingSequences: [],
+        qualityChecks: [],
       },
     });
     const { DELETE } = await import('@/app/api/agent-runs/[runId]/route');
@@ -921,6 +1087,61 @@ describe('Agent run API routes', () => {
 
     expect(response.status).toBe(200);
     expect(cancelRun).toHaveBeenCalledWith({ actorUserId: user.id, runId: 'run-1' });
+  });
+
+  it.each([
+    ['pause', { action: 'pause', nextStepId: 'generate-2' }],
+    ['resume', { action: 'resume' }],
+  ] as const)('routes the %s action through PATCH on the existing run resource', async (
+    action,
+    body,
+  ) => {
+    const control = action === 'pause'
+      ? vi.spyOn(agentRuntime, 'pauseAgentRun')
+      : vi.spyOn(agentRuntime, 'resumeAgentRun');
+    control.mockResolvedValue({
+      accepted: true,
+      event: event(2, action === 'pause' ? 'run.paused' : 'run.resumed'),
+      projection: {
+        ...({
+          runId: 'run-1', lastSequence: 2, plan: [], assetVersionIds: [],
+          ignoredEventIds: [], missingSequences: [], qualityChecks: [],
+        }),
+        status: action === 'pause' ? 'paused' : 'queued',
+      },
+      leaseOwner: action === 'resume' ? 'lease-new' : '',
+    });
+    const { PATCH } = await import('@/app/api/agent-runs/[runId]/route');
+    const response = await PATCH(
+      new NextRequest('http://localhost/api/agent-runs/run-1', {
+        method: 'PATCH',
+        body: JSON.stringify(body),
+      }),
+      { params: Promise.resolve({ runId: 'run-1' }) },
+    );
+
+    expect(response.status).toBe(200);
+    expect(control).toHaveBeenCalledWith({
+      actorUserId: user.id,
+      runId: 'run-1',
+      ...(action === 'pause' ? { nextStepId: 'generate-2' } : {}),
+    });
+  });
+
+  it('returns a safe 400 for malformed PATCH JSON without invoking controls', async () => {
+    const pauseRun = vi.spyOn(agentRuntime, 'pauseAgentRun');
+    const resumeRun = vi.spyOn(agentRuntime, 'resumeAgentRun');
+    const { PATCH } = await import('@/app/api/agent-runs/[runId]/route');
+    const response = await PATCH(
+      new NextRequest('http://localhost/api/agent-runs/run-1', {
+        method: 'PATCH', body: '{',
+      }),
+      { params: Promise.resolve({ runId: 'run-1' }) },
+    );
+
+    expect(response.status).toBe(400);
+    expect(pauseRun).not.toHaveBeenCalled();
+    expect(resumeRun).not.toHaveBeenCalled();
   });
 
   it('returns the same generic 404 for an unowned events request', async () => {

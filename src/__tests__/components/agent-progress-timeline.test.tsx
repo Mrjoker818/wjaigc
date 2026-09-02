@@ -7,7 +7,7 @@ import type { AgentRunProjection } from '@/lib/agent-runtime/types';
 const planningProjection: AgentRunProjection = {
   runId: 'run-1', status: 'planning', lastSequence: 2,
   plan: [{ id: 'plan-1', label: '正在规划', status: 'active' }],
-  assetVersionIds: [], ignoredEventIds: [], missingSequences: [],
+  assetVersionIds: [], ignoredEventIds: [], missingSequences: [], qualityChecks: [],
 };
 
 describe('Agent progress timeline', () => {

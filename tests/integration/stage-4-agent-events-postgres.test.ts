@@ -13,6 +13,7 @@ import {
   createAgentEventRequestDigest,
   listAgentEventStreamsForActor,
   listAgentEventsForActor,
+  transitionAgentRunControl,
 } from '@/lib/agent-runtime/event-storage';
 import { withIsolatedPostgres } from '../helpers/postgres-test-database';
 
@@ -230,6 +231,93 @@ describe('Stage 4 Agent event migration', () => {
 });
 
 describe('Stage 4 Agent event storage on real PostgreSQL', () => {
+  postgresIt('persists pause before releasing the old lease and resumes with a new lease', async () => {
+    await withIsolatedPostgres('stage-4-agent-control-transition', async ({ databaseUrl, query }) => {
+      expect(runMigrations(databaseUrl).status).toBe(0);
+      const ownerId = randomUUID();
+      const projectId = randomUUID();
+      const runId = randomUUID();
+      await query(
+        'INSERT INTO wujie_projects(id, owner_id, name, status) VALUES ($1, $2, $3, $4)',
+        [projectId, ownerId, 'Agent controls', 'active'],
+      );
+      await createScopedRun({ ownerId, projectId, runId });
+      await query("UPDATE cloud_tasks SET credit_status = 'pending' WHERE id = $1", [runId]);
+      await appendAgentEvent({
+        actorUserId: ownerId,
+        projectId,
+        runId,
+        eventId: 'control-created',
+        workspace: 'canvas',
+        type: 'run.created',
+        payload: { workspace: 'canvas' },
+      });
+      await query(
+        `INSERT INTO wujie_agent_execution_leases(
+           task_id, owner_id, project_id, tool_id, lease_owner,
+           lease_expires_at, attempt_count, completed_at, updated_at
+         ) VALUES ($1, $2, $3, 'generate-1', 'lease-old', $4, 1, 0, $5)`,
+        [runId, ownerId, projectId, Date.now() + 60_000, Date.now()],
+      );
+
+      const paused = await transitionAgentRunControl({
+        actorUserId: ownerId,
+        projectId,
+        runId,
+        eventId: 'control-paused-1',
+        workspace: 'canvas',
+        type: 'run.paused',
+        payload: { nextStepId: 'generate-2' },
+        expectedRevision: 1,
+      });
+      expect(paused.accepted).toBe(true);
+      const afterPause = await query<{
+        status: string; credit_status: string; revision: number; lease_owner: string;
+      }>(
+        `SELECT task.status, task.credit_status, task.revision, lease.lease_owner
+         FROM cloud_tasks task
+         JOIN wujie_agent_execution_leases lease ON lease.task_id = task.id
+         WHERE task.id = $1`,
+        [runId],
+      );
+      expect(afterPause.rows).toEqual([{
+        status: 'processing', credit_status: 'pending', revision: 2, lease_owner: '',
+      }]);
+
+      const resumedInput = {
+        actorUserId: ownerId,
+        projectId,
+        runId,
+        eventId: 'control-resumed-1',
+        workspace: 'canvas' as const,
+        type: 'run.resumed' as const,
+        payload: { nextStepId: 'generate-2', generation: 1 },
+        expectedRevision: 2,
+        leaseOwner: 'lease-new',
+      };
+      const resumed = await transitionAgentRunControl(resumedInput);
+      const retried = await transitionAgentRunControl({
+        ...resumedInput,
+        leaseOwner: 'must-not-replace-existing-lease',
+      });
+      expect(resumed).toMatchObject({ accepted: true, leaseOwner: 'lease-new' });
+      expect(retried).toMatchObject({ accepted: true, leaseOwner: 'lease-new' });
+      const afterResume = await query<{
+        credit_status: string; revision: number; lease_owner: string; tool_id: string;
+      }>(
+        `SELECT task.credit_status, task.revision, lease.lease_owner, lease.tool_id
+         FROM cloud_tasks task
+         JOIN wujie_agent_execution_leases lease ON lease.task_id = task.id
+         WHERE task.id = $1`,
+        [runId],
+      );
+      expect(afterResume.rows).toEqual([{
+        credit_status: 'pending', revision: 3,
+        lease_owner: 'lease-new', tool_id: 'generate-2',
+      }]);
+    });
+  });
+
   postgresIt('assigns twenty concurrent appends one contiguous unique sequence', async () => {
     await withIsolatedPostgres('stage-4-agent-event-concurrency', async ({ databaseUrl, query }) => {
       expect(runMigrations(databaseUrl).status).toBe(0);

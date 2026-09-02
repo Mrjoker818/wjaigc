@@ -13,6 +13,16 @@ const TERMINAL_EVENT_STATUSES = new Map<AgentEvent['type'], AgentRunStatus>([
   ['run.timeout', 'timeout'],
 ]);
 
+const EVENT_TYPE_PRIORITY: readonly AgentEvent['type'][] = [
+  'run.created', 'plan.updated', 'tool.started', 'tool.progress',
+  'tool.completed', 'asset.created', 'run.paused', 'run.resumed',
+  'step.retrying', 'quality.checked', 'run.completed', 'run.failed',
+  'run.cancelled', 'run.timeout',
+];
+const EVENT_TYPE_ORDER = new Map<AgentEvent['type'], number>(
+  EVENT_TYPE_PRIORITY.map((type, index) => [type, index]),
+);
+
 const SENSITIVE_KEY_PARTS = [
   'apikey',
   'authorization',
@@ -139,10 +149,31 @@ function readResult(
     : undefined;
 }
 
+function readPayloadString(
+  payload: Record<string, unknown>,
+  key: string,
+): string | undefined {
+  const value = payload[key];
+  return typeof value === 'string' && value.length > 0 ? value : undefined;
+}
+
+function readProgress(payload: Record<string, unknown>): number | undefined {
+  const value = payload.progress;
+  return typeof value === 'number' && Number.isFinite(value)
+    ? Math.max(0, Math.min(100, value))
+    : undefined;
+}
+
 export function reduceAgentEvents(events: readonly AgentEvent[]): AgentRunProjection {
-  const ordered = [...events].sort((left, right) => (
-    left.sequence - right.sequence
-  ));
+  const ordered = [...events].sort((left, right) => {
+    const sequenceOrder = left.sequence - right.sequence;
+    if (sequenceOrder !== 0) return sequenceOrder;
+    const typeOrder = (EVENT_TYPE_ORDER.get(left.type) ?? Number.MAX_SAFE_INTEGER)
+      - (EVENT_TYPE_ORDER.get(right.type) ?? Number.MAX_SAFE_INTEGER);
+    if (typeOrder !== 0) return typeOrder;
+    if (left.eventId === right.eventId) return 0;
+    return left.eventId > right.eventId ? -1 : 1;
+  });
   const projection: AgentRunProjection = {
     runId: ordered[0]?.runId || '',
     status: 'created',
@@ -151,6 +182,7 @@ export function reduceAgentEvents(events: readonly AgentEvent[]): AgentRunProjec
     assetVersionIds: [],
     ignoredEventIds: [],
     missingSequences: [],
+    qualityChecks: [],
   };
   const eventIds = new Set<string>();
   const sequences = new Set<number>();
@@ -164,6 +196,11 @@ export function reduceAgentEvents(events: readonly AgentEvent[]): AgentRunProjec
       || duplicateEventId
       || sequences.has(current.sequence)
       || terminal
+      || (
+        projection.status === 'paused'
+        && current.type !== 'run.resumed'
+        && current.type !== 'run.cancelled'
+      )
     ) {
       projection.ignoredEventIds.push(current.eventId);
       continue;
@@ -195,9 +232,14 @@ export function reduceAgentEvents(events: readonly AgentEvent[]): AgentRunProjec
       }
       case 'tool.started':
       case 'tool.progress':
-      case 'tool.completed':
+      case 'tool.completed': {
         projection.status = 'executing';
+        const stepId = readPayloadString(current.payload, 'stepId');
+        const progress = readProgress(current.payload);
+        if (stepId) projection.currentStepId = stepId;
+        if (progress !== undefined) projection.progress = progress;
         break;
+      }
       case 'asset.created': {
         projection.status = 'uploading';
         const versionId = current.payload.assetVersionId;
@@ -206,6 +248,40 @@ export function reduceAgentEvents(events: readonly AgentEvent[]): AgentRunProjec
           && !projection.assetVersionIds.includes(versionId)
         ) {
           projection.assetVersionIds.push(versionId);
+        }
+        break;
+      }
+      case 'run.paused': {
+        projection.status = 'paused';
+        const nextStepId = readPayloadString(current.payload, 'nextStepId');
+        if (nextStepId) projection.resumeFromStepId = nextStepId;
+        break;
+      }
+      case 'run.resumed': {
+        projection.status = 'queued';
+        const nextStepId = readPayloadString(current.payload, 'nextStepId');
+        if (nextStepId) projection.resumeFromStepId = nextStepId;
+        break;
+      }
+      case 'step.retrying': {
+        projection.status = 'executing';
+        const stepId = readPayloadString(current.payload, 'stepId');
+        const progress = readProgress(current.payload);
+        if (stepId) projection.currentStepId = stepId;
+        if (progress !== undefined) projection.progress = progress;
+        break;
+      }
+      case 'quality.checked': {
+        const stepId = readPayloadString(current.payload, 'stepId');
+        const gateId = readPayloadString(current.payload, 'gateId');
+        const passed = current.payload.passed;
+        if (stepId && gateId && typeof passed === 'boolean') {
+          const existing = projection.qualityChecks.findIndex(check => (
+            check.stepId === stepId && check.gateId === gateId
+          ));
+          const check = { stepId, gateId, passed };
+          if (existing === -1) projection.qualityChecks.push(check);
+          else projection.qualityChecks[existing] = check;
         }
         break;
       }

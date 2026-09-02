@@ -9,6 +9,7 @@ export type AgentRunStatus =
   | 'awaiting-confirmation'
   | 'executing'
   | 'uploading'
+  | 'paused'
   | 'completed'
   | 'failed'
   | 'cancelled'
@@ -24,7 +25,18 @@ export type AgentEventType =
   | 'run.completed'
   | 'run.failed'
   | 'run.cancelled'
-  | 'run.timeout';
+  | 'run.timeout'
+  | 'run.paused'
+  | 'run.resumed'
+  | 'step.retrying'
+  | 'quality.checked';
+
+export interface AgentSkillInvocation {
+  skillId: string;
+  skillVersion: number;
+  inputValues: Record<string, unknown>;
+  modelBindings: Record<string, { providerId: string; modelId: string }>;
+}
 
 export interface AgentContextSnapshot {
   selectedEntityIds: string[];
@@ -46,6 +58,7 @@ export interface AgentRunRequest {
   allowedToolIds: string[];
   idempotencyKey: string;
   context: AgentContextSnapshot;
+  skill?: AgentSkillInvocation;
 }
 
 export interface AgentEvent {
@@ -79,4 +92,8 @@ export interface AgentRunProjection {
   error?: AgentRunError;
   ignoredEventIds: string[];
   missingSequences: number[];
+  currentStepId?: string;
+  resumeFromStepId?: string;
+  progress?: number;
+  qualityChecks: Array<{ stepId: string; gateId: string; passed: boolean }>;
 }

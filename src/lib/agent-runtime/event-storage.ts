@@ -1,9 +1,9 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 
 import type { PoolClient } from 'pg';
 
 import { getPool } from '@/lib/db-client';
-import { assertAgentEventPayloadSafe } from './event-reducer';
+import { assertAgentEventPayloadSafe, reduceAgentEvents } from './event-reducer';
 import type {
   AgentDownstreamOperation,
   AgentDownstreamOperationIdentity,
@@ -28,6 +28,10 @@ const AGENT_EVENT_TYPES = new Set<AgentEventType>([
   'run.failed',
   'run.cancelled',
   'run.timeout',
+  'run.paused',
+  'run.resumed',
+  'step.retrying',
+  'quality.checked',
 ]);
 
 const AGENT_WORKSPACES = new Set<AgentWorkspace>([
@@ -57,6 +61,21 @@ export interface ValidatedAgentEventInput extends AppendAgentEventInput {
 export interface AppendAdoptedAgentEventResult {
   event: AgentEvent;
   inserted: boolean;
+}
+
+export interface TransitionAgentRunControlInput extends AppendAgentEventInput {
+  type: Extract<AgentEventType, 'run.paused' | 'run.resumed'>;
+  expectedRevision: number;
+  leaseOwner?: string;
+  leaseDurationMs?: number;
+  now?: number;
+}
+
+export interface TransitionAgentRunControlResult {
+  accepted: boolean;
+  event: AgentEvent;
+  events: AgentEvent[];
+  leaseOwner: string;
 }
 
 export interface ObserveAdoptedAgentTaskTerminalInput {
@@ -246,6 +265,20 @@ function mapEvent(row: AgentEventRow): AgentEvent {
   };
 }
 
+async function readEventStream(
+  client: PoolClient,
+  input: Pick<AppendAgentEventInput, 'actorUserId' | 'projectId' | 'runId'>,
+): Promise<AgentEvent[]> {
+  const result = await client.query<AgentEventRow>(
+    `SELECT event_id, task_id, sequence, event_type, request_digest, payload, created_at
+     FROM wujie_agent_events
+     WHERE task_id = $1 AND owner_id = $2 AND project_id = $3
+     ORDER BY sequence`,
+    [input.runId, input.actorUserId, input.projectId],
+  );
+  return result.rows.map(mapEvent);
+}
+
 function isUniqueViolation(error: unknown): boolean {
   return Boolean(
     error
@@ -328,7 +361,7 @@ export async function appendAgentEvent(
   try {
     await client.query('BEGIN');
     const input = validateAgentEventAppendInput(rawInput);
-    const { requestDigest, serializedPayload } = input;
+    const { requestDigest } = input;
     const task = await client.query<{
       id: string;
       status: string;
@@ -379,6 +412,127 @@ export async function appendAgentEvent(
     );
     await client.query('COMMIT');
     return appended.event;
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => undefined);
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+export async function transitionAgentRunControl(
+  rawInput: TransitionAgentRunControlInput,
+): Promise<TransitionAgentRunControlResult> {
+  const client = await getPool().connect();
+  try {
+    await client.query('BEGIN');
+    const initialInput = validateAgentEventAppendInput(rawInput);
+    const expectedRevision = rawInput.expectedRevision;
+    if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0) {
+      throw new TypeError('expectedRevision must be a non-negative integer');
+    }
+    const now = rawInput.now ?? Date.now();
+    const leaseDurationMs = rawInput.leaseDurationMs ?? 10 * 60_000;
+    const requestedLeaseOwner = rawInput.type === 'run.resumed'
+      ? validateIdentifier('leaseOwner', rawInput.leaseOwner || randomUUID())
+      : '';
+    const task = await client.query<{ status: string; revision: number }>(
+      `SELECT status, revision FROM cloud_tasks
+       WHERE id = $1 AND user_id = $2 AND project_id = $3 FOR UPDATE`,
+      [initialInput.runId, initialInput.actorUserId, initialInput.projectId],
+    );
+    if ((task.rowCount ?? 0) !== 1) throw new AgentEventNotFoundError();
+
+    const existing = await findExistingEvent(client, initialInput);
+    if (existing) {
+      if (existing.request_digest !== initialInput.requestDigest) {
+        throw new AgentEventConflictError();
+      }
+      const events = await readEventStream(client, initialInput);
+      let existingLeaseOwner = '';
+      if (initialInput.type === 'run.resumed') {
+        const lease = await client.query<{ lease_owner: string }>(
+          `SELECT lease_owner FROM wujie_agent_execution_leases
+           WHERE task_id = $1 AND owner_id = $2 AND project_id = $3`,
+          [initialInput.runId, initialInput.actorUserId, initialInput.projectId],
+        );
+        existingLeaseOwner = lease.rows[0]?.lease_owner || '';
+      }
+      await client.query('COMMIT');
+      return {
+        accepted: true,
+        event: mapEvent(existing),
+        events,
+        leaseOwner: existingLeaseOwner,
+      };
+    }
+
+    const events = await readEventStream(client, initialInput);
+    const projection = reduceAgentEvents(events);
+    const controlAlreadyApplied = initialInput.type === 'run.paused'
+      ? projection.status === 'paused'
+      : projection.status !== 'paused';
+    const taskRow = task.rows[0];
+    if (
+      ['completed', 'failed', 'cancelled', 'timeout'].includes(taskRow.status)
+      || controlAlreadyApplied
+      || Number(taskRow.revision) !== expectedRevision
+    ) {
+      const fallback = [...events].reverse().find(event => (
+        event.type === initialInput.type
+      )) || events[events.length - 1];
+      if (!fallback) throw new AgentEventConflictError();
+      await client.query('COMMIT');
+      return { accepted: false, event: fallback, events, leaseOwner: '' };
+    }
+
+    const input = initialInput;
+    const appended = await insertValidatedEvent(client, input);
+    const revisionUpdate = await client.query(
+      `UPDATE cloud_tasks
+       SET revision = revision + 1, updated_at = GREATEST(updated_at, $5)
+       WHERE id = $1 AND user_id = $2 AND project_id = $3 AND revision = $4`,
+      [input.runId, input.actorUserId, input.projectId, expectedRevision, now],
+    );
+    if ((revisionUpdate.rowCount ?? 0) !== 1) throw new AgentEventConflictError();
+
+    if (input.type === 'run.paused') {
+      await client.query(
+        `UPDATE wujie_agent_execution_leases
+         SET lease_owner = '', lease_expires_at = 0, updated_at = $4
+         WHERE task_id = $1 AND owner_id = $2 AND project_id = $3 AND completed_at = 0`,
+        [input.runId, input.actorUserId, input.projectId, now],
+      );
+    } else {
+      const nextStepId = input.payload.nextStepId;
+      if (typeof nextStepId !== 'string' || !nextStepId) {
+        throw new TypeError('nextStepId must not be empty');
+      }
+      await client.query(
+        `INSERT INTO wujie_agent_execution_leases(
+           task_id, owner_id, project_id, tool_id, lease_owner,
+           lease_expires_at, attempt_count, completed_at, updated_at
+         ) VALUES ($1, $2, $3, $4, $5, $6, 1, 0, $7)
+         ON CONFLICT (task_id) DO UPDATE
+         SET tool_id = EXCLUDED.tool_id,
+             lease_owner = EXCLUDED.lease_owner,
+             lease_expires_at = EXCLUDED.lease_expires_at,
+             attempt_count = wujie_agent_execution_leases.attempt_count + 1,
+             completed_at = 0,
+             updated_at = EXCLUDED.updated_at`,
+        [input.runId, input.actorUserId, input.projectId, nextStepId,
+          requestedLeaseOwner, now + leaseDurationMs, now],
+      );
+    }
+
+    const nextEvents = [...events, appended.event];
+    await client.query('COMMIT');
+    return {
+      accepted: appended.inserted,
+      event: appended.event,
+      events: nextEvents,
+      leaseOwner: requestedLeaseOwner,
+    };
   } catch (error) {
     await client.query('ROLLBACK').catch(() => undefined);
     throw error;

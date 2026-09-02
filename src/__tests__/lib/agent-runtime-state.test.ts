@@ -26,6 +26,66 @@ function event(
 }
 
 describe('shared Agent runtime projection', () => {
+  it('does not let a late completion cross a persisted pause', () => {
+    const projection = reduceAgentEvents([
+      event(1, 'run.created'),
+      event(2, 'tool.started', { stepId: 'generate-1' }),
+      event(3, 'run.paused', { nextStepId: 'generate-2' }),
+      event(4, 'run.completed', { result: { imageUrl: '/late.png' } }),
+    ]);
+
+    expect(projection.status).toBe('paused');
+    expect(projection.resumeFromStepId).toBe('generate-2');
+    expect(projection.ignoredEventIds).toContain('event-4');
+  });
+
+  it('resumes from the persisted next step and returns to queued', () => {
+    const projection = reduceAgentEvents([
+      event(1, 'run.created'),
+      event(2, 'run.paused', { nextStepId: 'generate-2' }),
+      event(3, 'run.resumed', { nextStepId: 'generate-2', generation: 2 }),
+    ]);
+
+    expect(projection.resumeFromStepId).toBe('generate-2');
+    expect(projection.status).toBe('queued');
+  });
+
+  it('projects retry and quality events deterministically across disorder and duplicates', () => {
+    const projection = reduceAgentEvents([
+      event(7, 'quality.checked', {
+        stepId: 'generate-2', gateId: 'composition', passed: true,
+      }),
+      event(1, 'run.created'),
+      event(5, 'step.retrying', { stepId: 'generate-2', progress: 40 }),
+      event(7, 'quality.checked', {
+        stepId: 'generate-2', gateId: 'composition', passed: true,
+      }),
+    ]);
+
+    expect(projection.currentStepId).toBe('generate-2');
+    expect(projection.progress).toBe(40);
+    expect(projection.qualityChecks).toEqual([
+      { stepId: 'generate-2', gateId: 'composition', passed: true },
+    ]);
+    expect(projection.missingSequences).toEqual([2, 3, 4, 6]);
+    expect(projection.ignoredEventIds).toEqual(['event-7']);
+  });
+
+  it('uses a stable event ID tie-breaker for conflicting duplicate sequences', () => {
+    const events = [
+      event(1, 'run.created'),
+      event(5, 'quality.checked', {
+        stepId: 'generate-2', gateId: 'composition', passed: true,
+      }, 'quality-a'),
+      event(5, 'quality.checked', {
+        stepId: 'generate-2', gateId: 'composition', passed: false,
+      }, 'quality-b'),
+    ];
+
+    expect(reduceAgentEvents(events)).toEqual(reduceAgentEvents([...events].reverse()));
+  });
+
+
   it('locks the first terminal event and ignores all later terminal, tool, and asset facts', () => {
     const projection = reduceAgentEvents([
       event(1, 'run.created'),
