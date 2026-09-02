@@ -4,6 +4,7 @@ import {
   createSkillExecutor,
   SkillQualityFailedError,
   skillStepRequestDigest,
+  type SkillExecutorEventInput,
   type ExecuteSkillStepInput,
 } from '@/lib/skill-runtime/executor';
 import type { AgentDownstreamExecutionContext } from '@/lib/agent-runtime/downstream-operations';
@@ -352,6 +353,69 @@ describe('durable Skill executor', () => {
     expect(completeRun).toHaveBeenCalledWith(expect.objectContaining({
       result: expect.objectContaining({ outputs: execution.outputs }),
     }));
+  });
+
+  it('sanitizes current and historical HTML before merge and final persistence', async () => {
+    const completeRun = vi.fn(async () => true);
+    const appendedEvents: SkillExecutorEventInput[] = [];
+    const appendEvent = vi.fn(async (event: SkillExecutorEventInput) => {
+      appendedEvents.push(event);
+      return true;
+    });
+    const executor = createSkillExecutor({
+      appendEvent, completeRun,
+      executeStep: vi.fn(async ({ step }) => ({
+        assetVersionIds: [`version-${step.id}`], media: [{}],
+        ...(step.id === 'generate-4' ? {
+          html: [
+            '<div onload="steal()">current</div>',
+            '<style>body{display:none}</style>',
+            '<iframe src="https://attacker.example"></iframe>',
+            '<embed src="https://attacker.example">',
+            '<template><p>hidden attack</p></template>',
+            '<a href="javascript:steal()">unsafe link</a>',
+            '<a href="data:text/html,steal()">unsafe data</a>',
+            '<a href="/safe/path">safe link</a>',
+            '<img src="https://cdn.example/safe.png" onerror="steal()">',
+          ].join(''),
+        } : {}),
+      })),
+    });
+
+    const execution = await executor.execute({
+      actorUserId: 'user-1', projectId: 'project-1', runId: 'run-1', workspace: 'canvas',
+      definition, inputValues: {}, modelBindings: {}, operationContext: operationContext(),
+      completedStepIds: ['plan'], resumeFromStepId: 'generate-3',
+      existingOutputs: [{
+        stepId: 'plan', kind: 'html',
+        content: [
+          '<p onload="steal()">historical</p>',
+          '<script>steal()</script>',
+          '<object data="https://attacker.example"></object>',
+          '<img src="javascript:steal()" onerror="steal()">',
+          '<img src="vbscript:steal()">',
+          '<a href="mailto:safe@example.com">mail</a>',
+        ].join(''),
+      }],
+    });
+
+    const historical = execution.outputs.find(output => output.stepId === 'plan');
+    const current = execution.outputs.find(output => output.stepId === 'generate-4');
+    expect(historical?.content).toContain('<p>historical</p>');
+    expect(historical?.content).toContain('href="mailto:safe@example.com"');
+    expect(current?.content).toContain('href="/safe/path"');
+    expect(current?.content).toContain('src="https://cdn.example/safe.png"');
+    for (const output of [historical, current]) {
+      expect(output?.content).not.toMatch(/<(?:script|style|iframe|object|embed|template)\b/i);
+      expect(output?.content).not.toMatch(/\son(?:error|load)\s*=/i);
+      expect(output?.content).not.toMatch(/(?:href|src)\s*=\s*["'](?:javascript|data|vbscript):/i);
+    }
+    expect(completeRun).toHaveBeenCalledWith(expect.objectContaining({
+      result: expect.objectContaining({ outputs: execution.outputs }),
+    }));
+    const completedEvent = appendedEvents
+      .find(event => event.type === 'tool.completed' && event.payload.stepId === 'generate-4');
+    expect(completedEvent?.payload.outputs).toEqual([current]);
   });
 });
 

@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { DOMParser, XMLSerializer } from '@xmldom/xmldom';
 
 import type {
   AgentDownstreamExecutionContext,
@@ -190,13 +191,108 @@ function abortError(signal: AbortSignal): Error {
     : new DOMException('The Skill run was aborted', 'AbortError');
 }
 
+const SAFE_HTML_ELEMENTS = new Set([
+  'a', 'b', 'blockquote', 'br', 'caption', 'code', 'del', 'div', 'em', 'h1', 'h2', 'h3',
+  'h4', 'h5', 'h6', 'hr', 'i', 'img', 'li', 'ol', 'p', 'pre', 's', 'span', 'strong',
+  'sub', 'sup', 'table', 'tbody', 'td', 'tfoot', 'th', 'thead', 'tr', 'u', 'ul',
+]);
+const DROP_HTML_WITH_CONTENT = new Set([
+  'embed', 'iframe', 'object', 'script', 'style', 'template',
+]);
+const SAFE_HTML_GLOBAL_ATTRIBUTES = new Set(['class', 'dir', 'lang', 'title']);
+const SAFE_HTML_ELEMENT_ATTRIBUTES: Record<string, ReadonlySet<string>> = {
+  a: new Set(['href']),
+  img: new Set(['alt', 'height', 'src', 'width']),
+  ol: new Set(['start']),
+  td: new Set(['colspan', 'rowspan']),
+  th: new Set(['colspan', 'rowspan', 'scope']),
+};
+
+function isSafeHtmlUrl(value: string, attribute: 'href' | 'src'): boolean {
+  const trimmed = value.trim();
+  if (!trimmed) return false;
+  const compact = trimmed.replace(/[\u0000-\u0020\u007f]+/g, '');
+  if (/^(?:javascript|data|vbscript):/i.test(compact)) return false;
+  if (trimmed.startsWith('#')) return attribute === 'href';
+  if (trimmed.startsWith('//')) return false;
+  if (/^(?:\/|\.\/|\.\.\/|\?)/.test(trimmed)) return true;
+  if (!/^[a-z][a-z\d+.-]*:/i.test(trimmed)) return true;
+  try {
+    const protocol = new URL(trimmed).protocol.toLowerCase();
+    return protocol === 'http:'
+      || protocol === 'https:'
+      || (attribute === 'href' && protocol === 'mailto:');
+  } catch {
+    return false;
+  }
+}
+
+function sanitizeHtmlElement(element: Element): void {
+  for (let child = element.firstChild; child;) {
+    const next = child.nextSibling;
+    if (child.nodeType === child.ELEMENT_NODE) {
+      const childElement = child as Element;
+      const name = childElement.tagName.toLowerCase();
+      if (DROP_HTML_WITH_CONTENT.has(name)) {
+        element.removeChild(childElement);
+      } else if (!SAFE_HTML_ELEMENTS.has(name)) {
+        sanitizeHtmlElement(childElement);
+        while (childElement.firstChild) element.insertBefore(childElement.firstChild, childElement);
+        element.removeChild(childElement);
+      } else {
+        sanitizeHtmlElement(childElement);
+      }
+    } else if (child.nodeType !== child.TEXT_NODE) {
+      element.removeChild(child);
+    }
+    child = next;
+  }
+
+  const name = element.tagName.toLowerCase();
+  for (let index = element.attributes.length - 1; index >= 0; index -= 1) {
+    const attribute = element.attributes.item(index);
+    if (!attribute) continue;
+    const attributeName = attribute.name.toLowerCase();
+    const allowed = SAFE_HTML_GLOBAL_ATTRIBUTES.has(attributeName)
+      || SAFE_HTML_ELEMENT_ATTRIBUTES[name]?.has(attributeName) === true;
+    if (
+      !allowed
+      || attributeName.startsWith('on')
+      || ((attributeName === 'href' || attributeName === 'src')
+        && !isSafeHtmlUrl(attribute.value, attributeName))
+    ) {
+      element.removeAttribute(attribute.name);
+    }
+  }
+}
+
+function sanitizeDurableSkillHtml(html: string): string {
+  const document = new DOMParser({
+    errorHandler: {
+      warning: () => undefined,
+      error: () => undefined,
+      fatalError: () => undefined,
+    },
+  }).parseFromString(`<skill-output>${html}</skill-output>`, 'text/html');
+  const root = document.documentElement;
+  if (!root || root.tagName.toLowerCase() !== 'skill-output') return '';
+
+  sanitizeHtmlElement(root);
+  const serializer = new XMLSerializer();
+  let sanitized = '';
+  for (let child = root.firstChild; child; child = child.nextSibling) {
+    sanitized += serializer.serializeToString(child);
+  }
+  return sanitized.replace(/ xmlns="http:\/\/www\.w3\.org\/1999\/xhtml"/g, '');
+}
+
 function durableOutputs(stepId: string, result: SkillStepResult): DurableSkillOutput[] {
   return [
     ...(typeof result.text === 'string' && result.text
       ? [{ stepId, kind: 'text' as const, content: result.text }]
       : []),
     ...(typeof result.html === 'string' && result.html
-      ? [{ stepId, kind: 'html' as const, content: result.html }]
+      ? [{ stepId, kind: 'html' as const, content: sanitizeDurableSkillHtml(result.html) }]
       : []),
   ];
 }
@@ -208,7 +304,14 @@ export function mergeDurableSkillOutputs(
   const unique = new Map<string, DurableSkillOutput>();
   for (const output of outputs) {
     const key = `${output.stepId}\u0000${output.kind}`;
-    if (!unique.has(key)) unique.set(key, { ...output });
+    if (!unique.has(key)) {
+      unique.set(key, {
+        ...output,
+        content: output.kind === 'html'
+          ? sanitizeDurableSkillHtml(output.content)
+          : output.content,
+      });
+    }
   }
   const stepOrder = new Map(steps.map((step, index) => [step.id, index]));
   return [...unique.values()].sort((left, right) => (
