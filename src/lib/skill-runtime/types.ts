@@ -49,6 +49,8 @@ export interface SkillDefinition {
   enabled: boolean;
   builtIn: boolean;
   ownerId?: string;
+  sourceSkillId?: string;
+  sourceAllowedSurfaces?: readonly SkillSurface[];
   createdAt: number;
   updatedAt: number;
   usageCount: number;

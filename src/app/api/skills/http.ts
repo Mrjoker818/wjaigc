@@ -26,9 +26,50 @@ export async function readStrictJsonObject(request: Request): Promise<Record<str
       'Content-Type must be application/json',
     );
   }
-  const text = await request.text();
-  if (text.length === 0 || text.length > MAX_BODY_LENGTH) {
+  const contentLength = request.headers.get('content-length');
+  if (contentLength !== null) {
+    if (!/^[0-9]+$/.test(contentLength)) {
+      throw new SkillRequestError('INVALID_REQUEST_BODY', 400, 'Invalid Content-Length');
+    }
+    const declaredBytes = Number(contentLength);
+    if (!Number.isSafeInteger(declaredBytes) || declaredBytes > MAX_BODY_LENGTH) {
+      throw new SkillRequestError('INVALID_REQUEST_BODY', 400, 'Request body is too large');
+    }
+  }
+  if (!request.body) {
     throw new SkillRequestError('INVALID_REQUEST_BODY', 400, 'Invalid request body');
+  }
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let totalBytes = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      totalBytes += value.byteLength;
+      if (totalBytes > MAX_BODY_LENGTH) {
+        await reader.cancel('Request body is too large');
+        throw new SkillRequestError('INVALID_REQUEST_BODY', 400, 'Request body is too large');
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  if (totalBytes === 0) {
+    throw new SkillRequestError('INVALID_REQUEST_BODY', 400, 'Invalid request body');
+  }
+  const bytes = new Uint8Array(totalBytes);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  let text: string;
+  try {
+    text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+  } catch {
+    throw new SkillRequestError('INVALID_REQUEST_BODY', 400, 'Invalid UTF-8 body');
   }
   let value: unknown;
   try {

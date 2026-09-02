@@ -7,6 +7,7 @@ import {
   createSkillStore,
   SkillRevisionConflictError,
   SKILL_CATALOG_KEY,
+  SkillStorageError,
 } from '@/lib/skill-runtime/storage';
 
 function legacySkill(id: string) {
@@ -41,6 +42,8 @@ describe('versioned user skill storage', () => {
       allowedSurfaces: ['canvas', 'workflow'],
       createdAt: 100,
       updatedAt: 100,
+      sourceSkillId: 'preset-ecommerce-listing',
+      sourceAllowedSurfaces: ['canvas', 'workflow'],
     });
     expect(copy.id).not.toBe('preset-ecommerce-listing');
     const stored = adapter.inspect('user-1', SKILL_CATALOG_KEY) as { skills: Array<{ id: string }> };
@@ -101,9 +104,10 @@ describe('versioned user skill storage', () => {
   });
 
   it('migrates only owner-authored legacy chat skills once', async () => {
+    const customId = 'skill-1700000000000';
     const adapter = createMemorySkillStorageAdapter({
       'user-1': {
-        chat_skills: [legacySkill('legacy-custom'), legacySkill('preset-ecommerce-listing')],
+        chat_skills: [legacySkill(customId), legacySkill('preset-ecommerce-listing')],
       },
     });
     const store = createSkillStore(adapter, { now: () => 100 });
@@ -119,15 +123,17 @@ describe('versioned user skill storage', () => {
       builtIn: false,
       version: 1,
       allowedSurfaces: ['canvas', 'workflow'],
+      sourceSkillId: customId,
+      sourceAllowedSurfaces: ['canvas', 'workflow'],
     });
-    expect(second.migratedLegacyIds).toEqual(['legacy-custom']);
+    expect(second.migratedLegacyIds).toEqual([customId]);
   });
 
   it('derives distinct stable ids for multiple legacy skills even with a long owner id', async () => {
     const userId = `user-${'x'.repeat(100)}`;
     const adapter = createMemorySkillStorageAdapter({
       [userId]: {
-        chat_skills: [legacySkill('custom-a'), legacySkill('custom-b')],
+        chat_skills: [legacySkill('skill-1700000000001'), legacySkill('skill-1700000000002')],
       },
     });
     const store = createSkillStore(adapter, { now: () => 100 });
@@ -136,6 +142,110 @@ describe('versioned user skill storage', () => {
 
     expect(migrated.skills).toHaveLength(2);
     expect(new Set(migrated.skills.map(skill => skill.id))).toHaveLength(2);
+  });
+
+  it('skips legacy records that do not prove the historical skill-Date.now custom id shape', async () => {
+    const adapter = createMemorySkillStorageAdapter({
+      'user-1': { chat_skills: [legacySkill('legacy-custom')] },
+    });
+    const store = createSkillStore(adapter);
+
+    const migrated = await store.migrateLegacy('user-1');
+
+    expect(migrated.skills).toEqual([]);
+    expect(migrated.migratedLegacyIds).toEqual([]);
+  });
+
+  it('does not let oversized or excessive legacy records block catalog reads', async () => {
+    const oversized = {
+      ...legacySkill('skill-1700000000100'),
+      systemPrompt: 'x'.repeat(2_000_000),
+    };
+    const many = Array.from({ length: 205 }, (_, index) =>
+      legacySkill(`skill-${1700000001000 + index}`));
+    const adapter = createMemorySkillStorageAdapter({
+      'user-1': { chat_skills: [oversized, ...many] },
+    });
+    const store = createSkillStore(adapter);
+
+    await expect(store.load('user-1', 'canvas')).resolves.toHaveLength(21 + 199);
+    const stored = adapter.inspect('user-1', SKILL_CATALOG_KEY) as { skills: unknown[] };
+    expect(stored.skills).toHaveLength(199);
+    expect(new TextEncoder().encode(JSON.stringify(stored)).byteLength).toBeLessThanOrEqual(1_048_576);
+  });
+
+  it('skips partial historical timestamp records without blocking catalog reads', async () => {
+    const partial = legacySkill('skill-1700000000200') as Record<string, unknown>;
+    delete partial.createdAt;
+    const adapter = createMemorySkillStorageAdapter({
+      'user-1': { chat_skills: [partial] },
+    });
+    const store = createSkillStore(adapter);
+
+    await expect(store.load('user-1', 'canvas')).resolves.toHaveLength(21);
+    const stored = adapter.inspect('user-1', SKILL_CATALOG_KEY) as {
+      skills: unknown[];
+      migratedLegacyIds: string[];
+    };
+    expect(stored.skills).toEqual([]);
+    expect(stored.migratedLegacyIds).toEqual(['skill-1700000000200']);
+  });
+
+  async function overwriteFirstStoredSkill(
+    mutation: (skill: {
+      allowedSurfaces: string[];
+      sourceAllowedSurfaces: string[];
+      steps: Array<{ modelRole: string }>;
+    }) => void,
+  ) {
+    const adapter = createMemorySkillStorageAdapter();
+    const store = createSkillStore(adapter);
+    await store.copy({ actorUserId: 'user-1', sourceSkillId: 'preset-storyboard' });
+    const envelope = adapter.inspect('user-1', SKILL_CATALOG_KEY) as {
+      revision: number;
+      skills: Array<{
+        allowedSurfaces: string[];
+        sourceAllowedSurfaces: string[];
+        steps: Array<{ modelRole: string }>;
+      }>;
+    };
+    mutation(envelope.skills[0]!);
+    await adapter.compareAndSet('user-1', SKILL_CATALOG_KEY, envelope.revision, {
+      ...envelope,
+      revision: envelope.revision + 1,
+    } as never);
+    return store;
+  }
+
+  it('rejects recursively forged stored step enums', async () => {
+    const store = await overwriteFirstStoredSkill(skill => {
+      skill.steps[0]!.modelRole = 'root';
+    });
+
+    await expect(store.loadEnvelope('user-1')).rejects.toBeInstanceOf(SkillStorageError);
+  });
+
+  it('rejects allowed surfaces expanded beyond persisted source permissions', async () => {
+    const store = await overwriteFirstStoredSkill(skill => {
+      skill.allowedSurfaces.push('simple-chat');
+      expect(skill.sourceAllowedSurfaces).toEqual(['canvas', 'workflow']);
+    });
+
+    await expect(store.loadEnvelope('user-1')).rejects.toBeInstanceOf(SkillStorageError);
+  });
+
+  it('does not treat a damaged existing in-memory revision as missing revision zero', async () => {
+    const adapter = createMemorySkillStorageAdapter({
+      'user-1': { [SKILL_CATALOG_KEY]: { revision: '0', attacker: true } },
+    });
+
+    await expect(adapter.compareAndSet('user-1', SKILL_CATALOG_KEY, 0, {
+      schemaVersion: 1,
+      revision: 1,
+      skills: [],
+      migratedLegacyIds: [],
+    })).resolves.toBe(false);
+    expect(adapter.inspect('user-1', SKILL_CATALOG_KEY)).toEqual({ revision: '0', attacker: true });
   });
 
   it('allows only one in-memory writer to claim the same envelope revision', async () => {

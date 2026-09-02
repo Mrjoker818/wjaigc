@@ -593,6 +593,9 @@ export async function dbCompareAndSetUserDataRevision(
   expectedRevision: number,
   value: unknown,
 ): Promise<boolean> {
+  if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0) {
+    throw new Error('Invalid expected revision');
+  }
   const result = await execSql(`
     WITH updated AS (
       UPDATE wujie_user_data
@@ -601,9 +604,16 @@ export async function dbCompareAndSetUserDataRevision(
         AND data_key = $2
         AND CASE
           WHEN jsonb_typeof(data_value) = 'object'
-            AND COALESCE(data_value ->> 'revision', '') ~ '^[0-9]+$'
-          THEN (data_value ->> 'revision')::numeric
-          ELSE 0
+            AND jsonb_typeof(data_value -> 'revision') = 'number'
+          THEN CASE
+            WHEN (data_value ->> 'revision')::numeric >= 0
+              AND (data_value ->> 'revision')::numeric <= 9007199254740991
+              AND trunc((data_value ->> 'revision')::numeric)
+                = (data_value ->> 'revision')::numeric
+            THEN (data_value ->> 'revision')::numeric
+            ELSE NULL
+          END
+          ELSE NULL
         END = $5
       RETURNING 1
     ), inserted AS (

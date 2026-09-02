@@ -18,6 +18,7 @@ vi.mock('@/lib/skill-runtime/storage', () => ({
 
 import { GET, POST } from '@/app/api/skills/route';
 import { PATCH } from '@/app/api/skills/[skillId]/route';
+import { readStrictJsonObject, SkillRequestError } from '@/app/api/skills/http';
 
 const auth = {
   authenticated: true as const,
@@ -102,6 +103,70 @@ describe('/api/skills', () => {
     }));
     expect(overlong.status).toBe(400);
     expect(mocks.copySkillForUser).not.toHaveBeenCalledWith('user-1', expect.stringContaining('x'.repeat(200)));
+  });
+
+  it('enforces the body limit in UTF-8 bytes for Unicode JSON', async () => {
+    const text = JSON.stringify({ value: '界'.repeat(2_800) });
+    expect(text.length).toBeLessThan(8_192);
+    expect(new TextEncoder().encode(text).byteLength).toBeGreaterThan(8_192);
+
+    await expect(readStrictJsonObject(new Request('http://localhost/api/skills', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: text,
+    }))).rejects.toMatchObject({ code: 'INVALID_REQUEST_BODY' });
+  });
+
+  it('rejects oversized Content-Length before pulling the request body', async () => {
+    const getReader = vi.fn();
+    const request = {
+      headers: new Headers({
+        'content-type': 'application/json',
+        'content-length': '8193',
+      }),
+      body: { getReader },
+    } as unknown as Request;
+
+    await expect(readStrictJsonObject(request)).rejects.toMatchObject({
+      code: 'INVALID_REQUEST_BODY',
+    });
+    expect(getReader).not.toHaveBeenCalled();
+  });
+
+  it('cancels streaming reads immediately after the byte limit is exceeded', async () => {
+    let pull = 0;
+    const cancelled = vi.fn();
+    const stream = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        pull += 1;
+        controller.enqueue(new Uint8Array(5_000).fill(0x20));
+        if (pull === 3) controller.close();
+      },
+      cancel: cancelled,
+    });
+    const request = new Request('http://localhost/api/skills', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: stream,
+      duplex: 'half',
+    } as RequestInit & { duplex: 'half' });
+
+    await expect(readStrictJsonObject(request)).rejects.toBeInstanceOf(SkillRequestError);
+    expect(pull).toBe(2);
+    expect(cancelled).toHaveBeenCalledOnce();
+  });
+
+  it('rejects malformed UTF-8 with a stable encoding error', async () => {
+    const request = new Request('http://localhost/api/skills', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: new Uint8Array([0xff]),
+    });
+
+    await expect(readStrictJsonObject(request)).rejects.toMatchObject({
+      code: 'INVALID_REQUEST_BODY',
+      message: 'Invalid UTF-8 body',
+    });
   });
 
   it('patches only enabled, name, and description and maps hidden ownership to 404', async () => {
