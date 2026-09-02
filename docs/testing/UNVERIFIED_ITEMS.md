@@ -2159,3 +2159,14 @@ BUG-018 已从未验证项移除。剩余顺序为 `002-B -> 002-D -> 002-E`；�
 | 缺失缩略图的浏览器原图回退 | `UNVERIFIED` | 在不修改业务数据的受控夹具中证明 variant 404 时自动加载原图。 |
 | S3 真实媒体恢复 | `UNVERIFIED` | 配置测试对象存储凭据后验证缺失本地文件可从 S3 恢复；当前仅有自动化测试。 |
 | 资产 PostgreSQL 并发套件 | `133 TESTS SKIPPED / OPEN` | 配置专用 `POSTGRES_TEST_DATABASE_URL` 后执行，严禁使用业务库。 |
+
+## 2026-09-02 Unified Skill Runtime Task 6 条件项
+
+| 项目 | 当前状态 | 关闭条件 |
+|---|---|---|
+| Skill PostgreSQL 并发与租约 | `6 TESTS BLOCKED` | 配置专用 `POSTGRES_TEST_DATABASE_URL`，验证 20 并发同键一次 run、一次高层 dispatch、一次供应商提交、一次扣费及过期租约实际回收。 |
+| 终态与退款真库竞态 | `BLOCKED` | 在隔离 PostgreSQL 中验证取消、失败、迟到完成、旧 generation 与一次退款，不得使用业务库。 |
+| 默认构建内存 | `4 GiB OOM / 8 GiB PASS` | 部署环境为 Next 生产构建提供至少 8 GiB Node heap，或后续拆分超大画布模块后重新验证默认堆。 |
+| Coze 与 Google Chrome | `UNVERIFIED` | 推送 exact SHA 后由 Coze 拉取、构建、重启并强刷现有 Chrome 预览页，验证 Skill 首次执行、进度、刷新恢复、重试、取消及持久结果。 |
+
+本地自动化与独立评审允许 Task 6 标记为“本地完成，数据库条件保留”，不允许标记为数据库并发通过、云端通过或发布完成。

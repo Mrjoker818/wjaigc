@@ -2646,3 +2646,12 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - 修复后的 shadow 首检、asset-v3 切换、最终 shadow 回滚三次均保持 `11/11`，462 个媒体全部 ready，0 missing/recovering/unrecoverable；历史 `checkpoint-schema-mismatch` 未复发。
 - Google Chrome 两次刷新均加载画布，6 个 Stage 1 媒体和 2 个金色透明资产计数一致，刷新后新增 Console error/warning 为 0。
 - **判定：CHECKPOINT DRIFT CLOUD PASS / ADMIN-003 CONDITIONAL。** S3 真实恢复、缺失缩略图浏览器原图回退与隔离 PostgreSQL 并发仍未验证，不得写为整个 ADMIN-003 或全平台通过。
+
+## 2026-09-02 Unified Skill Runtime Task 6 持久调度纠偏
+
+- 候选：`main@3de4b08e`；`stable@52f7c601` 未变化。
+- 组合专项 `127/127`；全仓 Vitest `4744 passed / 142 skipped / 0 failed`；TypeScript 通过；ESLint `0 errors / 950 warnings`；保护基线 `38/38 / 0 warnings`。
+- 默认约 4 GiB Node 堆生产构建 OOM；8 GiB 重跑成功并生成 `119/119` 静态页。该环境差异已保留，不掩盖首次失败。
+- 步骤计费、持久文本/净化 HTML/资产、并行重试集合、首次与恢复 DB 租约、受控 `dispatch_error`、取消和旧 generation 围栏均通过本地回归。
+- 最终独立评审：Critical/Important/Minor `0/0/0`，结论 `APPROVED`。
+- **判定：LOCAL PASS WITH DATABASE CONDITION。** 6 项新增 PostgreSQL 竞态测试及其他数据库环境套件因缺少专用测试库跳过；未做云端真实执行与浏览器验收。

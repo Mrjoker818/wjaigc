@@ -267,6 +267,20 @@ git diff --check                      PASS
 
 未切换或修改 `stable`，未触碰四个受保护未跟踪项，未 push。
 
+## 2026-09-02 持久调度纠偏最终验收
+
+- 实现证据提交：`3de4b08ecf729c8fbce16f59d235e632135b0e88`；`origin/stable` 保持 `52f7c601ed150769e15d06fb435c6e360e28c9e7`。
+- Task 1：步骤操作与计费类型对齐；文本、经净化 HTML 与资产版本进入持久终态，当前及历史 HTML 均在最终边界净化。
+- Task 2：`startedStepIds` 仅表示本次真正取得恢复权和 dispatch claim 后启动的首批步骤；`scheduledStepIds` 表示完整计划。
+- Task 3：首次与恢复执行统一复用数据库 execution fence 和 dispatch lease；create replay、单项 GET、列表 GET 可有界恢复，列表最多 20 项；取消、终态与旧 generation 不可逆。
+- 专项回归：`7 files / 127 tests / 0 failed`。
+- 全仓 Vitest：`642 files total / 615 passed / 27 skipped`；`4886 tests total / 4744 passed / 142 skipped / 0 failed`。
+- TypeScript：通过。ESLint：`0 errors / 950 historical warnings`。保护基线：`38/38 / 0 warnings`。
+- 默认约 4 GiB Node 堆构建因 OOM 退出；使用 8 GiB Node 堆后生产构建成功，静态页 `119/119`。
+- 最终独立组合评审：Critical/Important/Minor `0/0/0`，Spec compliance 与 Code quality 均 PASS，结论 `APPROVED`。
+- 结论：Unified Skill Runtime Task 6 **本地完成，数据库条件保留**。未推送、未做 Coze/Chrome 云端验收，不得写为发布完成。
+- 未验证：缺少专用 `POSTGRES_TEST_DATABASE_URL`，新增 6 项 Skill 并发/租约/账务真库测试及全仓其他 PostgreSQL 套件继续 BLOCKED；未使用生产库或 Mock 冒充。
+
 ## 二次独立评审修复：simple-chat 执行真相、retry 计划与跨代资产（基线 d8abeaf4）
 
 ### RED
