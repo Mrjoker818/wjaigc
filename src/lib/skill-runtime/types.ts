@@ -53,3 +53,28 @@ export interface SkillDefinition {
   updatedAt: number;
   usageCount: number;
 }
+
+export interface SkillResultMedia {
+  hasTransparency?: boolean;
+}
+
+export interface SkillStepResult {
+  assetVersionIds: readonly string[];
+  media: readonly SkillResultMedia[];
+  html?: string;
+}
+
+export interface SkillQualityContext {
+  expectedCount?: number;
+}
+
+export interface SkillQualityResult {
+  id: string;
+  passed: boolean;
+  error?: string;
+}
+
+export type SkillQualityGate = (
+  result: SkillStepResult,
+  context: SkillQualityContext,
+) => boolean;
