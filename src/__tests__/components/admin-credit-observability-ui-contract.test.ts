@@ -32,4 +32,9 @@ describe('admin credit observability UI contract', () => {
     expect(source).toContain('co?.flows?.recharged');
     expect(source).toContain('co?.flows?.compensated');
   });
+
+  it('describes system balance as the authoritative balance sum instead of recharge minus consumption', () => {
+    expect(source).toContain('sub="当前用户余额合计"');
+    expect(source).not.toContain('sub="充值 − 消耗"');
+  });
 });

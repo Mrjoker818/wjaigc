@@ -1356,7 +1356,7 @@ export default function AdminTabs(props: AdminTabsProps) {
           <StatCard icon={Users} label="总用户数" value={formatNumber(co?.totalUsers ?? adminUsers.length)} colorClass="text-blue-500" iconBg="bg-blue-500/15" />
           <StatCard icon={Wallet} label="总充值积分" value={co ? formatNumber(co.totalRecharged) : '-'} colorClass="text-primary" iconBg="bg-primary/15" />
           <StatCard icon={TrendingUp} label="总消耗积分" value={co ? formatNumber(co.totalConsumed) : '-'} colorClass="text-destructive" iconBg="bg-destructive/15" />
-          <StatCard icon={BarChart3} label="系统结余" value={co ? formatNumber(co.totalBalance) : '-'} sub="充值 − 消耗" colorClass="text-green-500" iconBg="bg-green-500/15" />
+          <StatCard icon={BarChart3} label="系统结余" value={co ? formatNumber(co.totalBalance) : '-'} sub="当前用户余额合计" colorClass="text-green-500" iconBg="bg-green-500/15" />
         </div>
 
         {/* Tab 切换 */}

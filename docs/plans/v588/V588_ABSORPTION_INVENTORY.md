@@ -1,5 +1,9 @@
 # V5.8.8 选择性吸收清单
 
+## 2026-09-02 V588-CREDITS-OBS-001 积分可观测性进度
+
+云端真实管理页已证明历史 137% 分类问题关闭：四类合计 100%，总消费、退款、净消费及最近流水方向一致。新增残余仅为系统结余副标题错误，本地已用 RED→GREEN 最小改为“当前用户余额合计”，账务读写未变；待 Coze 拉取和 Google Chrome 强刷后关闭。本地门禁为 4505 项通过、133 项隔离 PostgreSQL 跳过、生产构建 118/118。
+
 ## 2026-09-02 V588-ADMIN-003 检查点漂移云端闭环
 
 `main@3cf87dc8` 已在 Coze 真实完成 `shadow -> asset-v3 -> shadow` 受控循环，三次均保持 11/11 项目匹配、462 个媒体 ready；Google Chrome 两次刷新画布媒体计数一致且无新增 Console error/warning。历史 9/11 checkpoint schema 漂移关闭，不再重复修复。ADMIN-003 只剩缺失缩略图原图回退、真实 S3 恢复和隔离 PostgreSQL 并发边界；完成可执行项后进入 `V588-CREDITS-OBS-001`。

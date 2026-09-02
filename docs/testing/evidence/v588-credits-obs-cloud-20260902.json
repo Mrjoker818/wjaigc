@@ -1,0 +1,51 @@
+{
+  "recordedAt": "2026-09-02T10:20:00+08:00",
+  "scope": "V588-CREDITS-OBS-001",
+  "environment": {
+    "browser": "Google Chrome existing authenticated tab",
+    "cloudSourceCommit": "3cf87dc83850874919fbe23a77538279633438f4",
+    "githubBaselineCommit": "97ae9eb8951a81ea03ab911d4835084d32969e7c",
+    "branch": "main",
+    "stableTouched": false
+  },
+  "observed": {
+    "totalUsers": 6,
+    "totalRecharged": 8560,
+    "grossConsumed": 6408,
+    "refunded": 2198,
+    "netConsumed": 4210,
+    "compensated": 760,
+    "totalBalance": 5110,
+    "distributionPercent": {
+      "image": 90,
+      "chat": 0,
+      "video": 4,
+      "other": 6,
+      "sum": 100
+    },
+    "recentTransactionLabelsAndSigns": "pass",
+    "consoleErrors": 0,
+    "consoleWarnings": 0
+  },
+  "finding": {
+    "historical137PercentReproduced": false,
+    "accountingValueErrorObserved": false,
+    "residual": "The system balance subtitle said recharge minus consumption although the value is the authoritative sum of current user balances and includes compensation."
+  },
+  "localFix": {
+    "productionFile": "src/components/dashboard/admin-tabs.tsx",
+    "testFile": "src/__tests__/components/admin-credit-observability-ui-contract.test.ts",
+    "oldSubtitle": "充值 − 消耗",
+    "newSubtitle": "当前用户余额合计",
+    "accountingLogicChanged": false
+  },
+  "verification": {
+    "focusedTests": "8 passed",
+    "typecheck": "passed",
+    "targetedLint": "passed",
+    "fullTests": "598 files passed, 4505 tests passed, 25 files and 133 PostgreSQL-gated tests skipped, 0 failed",
+    "productionBuild": "118/118 passed",
+    "cloudSubtitle": "pending deployment"
+  },
+  "verdict": "classification and transaction projection cloud pass; subtitle local pass and cloud pending"
+}
