@@ -61,6 +61,7 @@ import {
 import type { ExecuteAgentEditContinuationInput } from '@/lib/agent-runtime/agent-edit-continuation';
 import type { AgentRunRequest } from '@/lib/agent-runtime/types';
 import type { User } from '@/lib/user-types';
+import { runWithAbortSignalTimeout } from '@/lib/abort-signal';
 const MAX_AGENT_EDIT_ROUNDS = 8;
 const AGENT_EDIT_ALLOWED_TOOLS = [
   'image_edit',
@@ -273,10 +274,12 @@ async function reconcileAcceptedAgentProviderTask(input: {
   for (let attempt = 0; attempt < 60; attempt++) {
     if (input.isCancelled()) throw new Error('Agent task was cancelled');
     await new Promise(resolve => setTimeout(resolve, 5000));
-    const response = await fetchWithV1Retry(baseUrl, pollUrl, {
-      headers: { 'Authorization': `Bearer ${provider.apiKey}` },
-      signal: input.signal ?? AbortSignal.timeout(30000),
-    });
+    const response = await runWithAbortSignalTimeout(input.signal, 30_000, requestSignal => (
+      fetchWithV1Retry(baseUrl, pollUrl, {
+        headers: { 'Authorization': `Bearer ${provider.apiKey}` },
+        signal: requestSignal,
+      })
+    ));
     if (!response.ok) continue;
     const data = await response.json().catch(() => null) as Record<string, unknown> | null;
     const status = String(data?.status || '').toLowerCase();
@@ -1052,13 +1055,15 @@ async function handleAgentEditRequest(
             }, async stepContext => {
             headers['Idempotency-Key'] = stepContext.idempotencyKey;
             await stepContext.beginSubmission();
-            const resp = await fetchWithV1Retry(baseUrl, '/chat/completions', {
-              method: 'POST',
-              headers,
-              body: JSON.stringify(requestBody),
-              signal: operationSignal,
-              skipV1Retry: agentRuntimeMode === 'agent-v2',
-            });
+            const resp = await runWithAbortSignalTimeout(operationSignal, 60_000, requestSignal => (
+              fetchWithV1Retry(baseUrl, '/chat/completions', {
+                method: 'POST',
+                headers,
+                body: JSON.stringify(requestBody),
+                signal: requestSignal,
+                skipV1Retry: agentRuntimeMode === 'agent-v2',
+              })
+            ));
 
             if (!resp.ok) {
               const errText = await resp.text().catch(() => '');
@@ -1879,9 +1884,11 @@ async function performImageEdit(
         const blob = dataUrlToBlob(imageUrl);
         formData.append('image', blob, 'image.png');
       } else {
-        const imgResp = await fetch(imageUrl.startsWith('/') ? `http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}${imageUrl}` : imageUrl, {
-          signal: signal ?? AbortSignal.timeout(30000),
-        });
+        const imgResp = await runWithAbortSignalTimeout(signal, 30_000, requestSignal => (
+          fetch(imageUrl.startsWith('/') ? `http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}${imageUrl}` : imageUrl, {
+            signal: requestSignal,
+          })
+        ));
         if (!imgResp.ok) return { success: false, error: `无法下载图片: ${imgResp.status}` };
         const imgBlob = await imgResp.blob();
         formData.append('image', imgBlob, 'image.png');
@@ -1896,15 +1903,17 @@ async function performImageEdit(
       console.log('[agent-edit] Path A: sending request to', `${baseUrl}/images/edits`);
       await beginSubmission?.();
       providerSubmissionStarted = true;
-      const resp = await submitAgentImageProviderRequest({
-        baseUrl,
-        path: '/images/edits',
-        exactModel: imageModel,
-        headers,
-        body: formData,
-        signal: signal ?? AbortSignal.timeout(120000),
-        strictProviderModel,
-      });
+      const resp = await runWithAbortSignalTimeout(signal, 120_000, requestSignal => (
+        submitAgentImageProviderRequest({
+          baseUrl,
+          path: '/images/edits',
+          exactModel: imageModel,
+          headers,
+          body: formData,
+          signal: requestSignal,
+          strictProviderModel,
+        })
+      ));
 
       if (!resp.ok) {
         const errText = await resp.text().catch(() => '');
@@ -2011,9 +2020,11 @@ async function performImageEdit(
         imageMimeType = mimeMatch?.[1] || 'image/png';
         imageBase64 = imageUrl.substring(commaIdx + 1);
       } else {
-        const imgResp = await fetch(imageUrl.startsWith('/') ? `http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}${imageUrl}` : imageUrl, {
-          signal: signal ?? AbortSignal.timeout(30000),
-        });
+        const imgResp = await runWithAbortSignalTimeout(signal, 30_000, requestSignal => (
+          fetch(imageUrl.startsWith('/') ? `http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}${imageUrl}` : imageUrl, {
+            signal: requestSignal,
+          })
+        ));
         if (!imgResp.ok) return { success: false, error: `无法下载图片: ${imgResp.status}` };
         const imgBuffer = Buffer.from(await imgResp.arrayBuffer());
         imageBase64 = imgBuffer.toString('base64');
@@ -2046,15 +2057,17 @@ async function performImageEdit(
       console.log('[agent-edit] Path B: sending request to', `${baseUrl}/images/generations`, 'with image_urls');
       await beginSubmission?.();
       providerSubmissionStarted = true;
-      const genResp = await submitAgentImageProviderRequest({
-        baseUrl,
-        path: '/images/generations',
-        exactModel: imageModel,
-        headers: genHeaders,
-        body: genBody,
-        signal: signal ?? AbortSignal.timeout(120000),
-        strictProviderModel,
-      });
+      const genResp = await runWithAbortSignalTimeout(signal, 120_000, requestSignal => (
+        submitAgentImageProviderRequest({
+          baseUrl,
+          path: '/images/generations',
+          exactModel: imageModel,
+          headers: genHeaders,
+          body: genBody,
+          signal: requestSignal,
+          strictProviderModel,
+        })
+      ));
 
       if (!genResp.ok) {
         const errText = await genResp.text().catch(() => '');
@@ -2106,10 +2119,12 @@ async function performImageEdit(
           await new Promise(r => setTimeout(r, pollInterval));
           pollAttempts++;
 
-          const pollResp = await fetchWithV1Retry(baseUrl, pollUrl, {
-            headers: { 'Authorization': `Bearer ${apiKey}` },
-            signal: signal ?? AbortSignal.timeout(30000),
-          });
+          const pollResp = await runWithAbortSignalTimeout(signal, 30_000, requestSignal => (
+            fetchWithV1Retry(baseUrl, pollUrl, {
+              headers: { 'Authorization': `Bearer ${apiKey}` },
+              signal: requestSignal,
+            })
+          ));
 
           if (!pollResp.ok) continue;
 
@@ -2214,9 +2229,11 @@ async function performImageEdit(
       imageBase64 = imageUrl.substring(commaIdx + 1);
     } else {
       // 下载图片
-      const imgResp = await fetch(imageUrl.startsWith('/') ? `http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}${imageUrl}` : imageUrl, {
-        signal: signal ?? AbortSignal.timeout(30000),
-      });
+      const imgResp = await runWithAbortSignalTimeout(signal, 30_000, requestSignal => (
+        fetch(imageUrl.startsWith('/') ? `http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}${imageUrl}` : imageUrl, {
+          signal: requestSignal,
+        })
+      ));
       if (!imgResp.ok) return { success: false, error: `无法下载图片: ${imgResp.status}` };
       const imgBuffer = Buffer.from(await imgResp.arrayBuffer());
       imageBase64 = imgBuffer.toString('base64');
@@ -2262,15 +2279,17 @@ async function performImageEdit(
     console.log('[agent-edit] Path C: sending request to', `${baseUrl}/chat/completions`);
     await beginSubmission?.();
     providerSubmissionStarted = true;
-    const chatResp = await submitAgentImageProviderRequest({
-      baseUrl,
-      path: '/chat/completions',
-      exactModel: imageModel,
-      headers: chatHeaders,
-      body: chatBody,
-      signal: signal ?? AbortSignal.timeout(120000),
-      strictProviderModel,
-    });
+    const chatResp = await runWithAbortSignalTimeout(signal, 120_000, requestSignal => (
+      submitAgentImageProviderRequest({
+        baseUrl,
+        path: '/chat/completions',
+        exactModel: imageModel,
+        headers: chatHeaders,
+        body: chatBody,
+        signal: requestSignal,
+        strictProviderModel,
+      })
+    ));
 
     if (!chatResp.ok) {
       const errText = await chatResp.text().catch(() => '');

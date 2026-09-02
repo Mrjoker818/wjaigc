@@ -33,6 +33,7 @@ import { executeAdmittedToolCall } from '@/lib/chat-tools';
 import { resolveTaskModel } from '@/lib/task-core/model-catalog';
 import { STRICT_AGENT_GENERATE_HEADER } from '@/lib/agent-runtime/generate-image-adapter';
 import { resolveSimpleChatRequestIdempotencyKey } from '@/lib/simple-chat-retry';
+import { runWithAbortSignalTimeout } from '@/lib/abort-signal';
 
 const DEFAULT_SYSTEM_PROMPT = `你是无界AI的智能助手。你可以：
 1. 回答用户的各种问题
@@ -848,12 +849,14 @@ export async function POST(request: NextRequest) {
                     signal?.throwIfAborted();
                     await new Promise(r => setTimeout(r, 3000));
                     signal?.throwIfAborted();
-                    const pollRes = await fetch(getInternalApiUrl('/api/poll-task'), {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json', ...internalHeaders },
-                      body: JSON.stringify({ taskId, model: imageModel, providerId: imageProviderId }),
-                      signal,
-                    });
+                    const pollRes = await runWithAbortSignalTimeout(signal, 30_000, requestSignal => (
+                      fetch(getInternalApiUrl('/api/poll-task'), {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', ...internalHeaders },
+                        body: JSON.stringify({ taskId, model: imageModel, providerId: imageProviderId }),
+                        signal: requestSignal,
+                      })
+                    ));
                     const pollData = await pollRes.json() as {
                       status?: string;
                       imageUrl?: string;

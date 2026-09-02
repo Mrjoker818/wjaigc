@@ -142,6 +142,20 @@ describe('Agent runtime route rollout modes', () => {
     expect(agentEdit).toContain('signal: operationSignal');
   });
 
+  it('combines execution cancellation with each existing downstream request timeout', () => {
+    const chatTools = routeSource('src/lib/chat-tools.ts');
+    expect(chatTools).toContain('runWithAbortSignalTimeout(signal, 120_000');
+
+    const standalone = routeSource('src/app/api/simple-chat/chat/route.ts');
+    expect(standalone).toContain('runWithAbortSignalTimeout(signal, 30_000');
+
+    const agentEdit = agentEditExecutionSource();
+    expect(agentEdit).toContain('runWithAbortSignalTimeout(operationSignal, 60_000');
+    expect(agentEdit).toContain('runWithAbortSignalTimeout(signal, 30_000');
+    expect(agentEdit).toContain('runWithAbortSignalTimeout(signal, 120_000');
+    expect(agentEdit).not.toMatch(/signal:\s*(?:input\.signal|signal)\s*\?\?\s*AbortSignal\.timeout/);
+  });
+
   it('resolves exact paid pairs before provider calls and disables agent-v2 fallback', () => {
     for (const path of ['src/app/api/chat/route.ts', 'src/app/api/simple-chat/chat/route.ts']) {
       const source = routeSource(path);

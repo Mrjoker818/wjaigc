@@ -364,3 +364,52 @@ not an in-memory fallback and not reported as passing.
 - PostgreSQL Agent/Skill suites were discovered, but all 29 tests in 4 files
   were explicitly skipped because `POSTGRES_TEST_DATABASE_URL` is absent. No
   ambient database or in-memory replacement was used.
+
+## Sixth Review Hardening
+
+### RED Evidence
+
+- Added punctuation-boundary credential cases for Agent event payloads and
+  durable agent-edit descriptors. `(token=...)`, comma-prefixed `token:`, and
+  Chinese comma/colon forms were accepted by the previous boundary expression,
+  while the existing ordinary-English `token` and ordinary-Chinese prompt
+  controls continued to pass.
+- Added a shared abort/timeout scope contract plus continuation and durable
+  generation assertions before production changes. The first RED command
+  reported 10 expected assertion failures with 50 existing tests passing: the
+  shared module did not exist, a supplied pause signal replaced the 15-second
+  generation request timeout, and all eight punctuation cases were accepted.
+- A second route/continuation RED run reported 2 expected failures with 21
+  existing tests passing. It proved the chat edit continuation forwarded the
+  pause signal unchanged and the affected chat, simple-chat, and agent-edit
+  request sites did not use a combined signal scope.
+
+### GREEN And Regression
+
+- Added one runtime-compatible abort scope that forwards execution pause,
+  enforces the request timeout with its own controller, and always clears the
+  timer and source listener in `finally`. Tests independently prove pause and
+  timeout abort the downstream signal, and normal completion leaves no timer or
+  listener behind.
+- Agent-edit LLM calls retain 60 seconds, source-image downloads and provider
+  polling retain 30 seconds, and image submissions retain 120 seconds while
+  also observing the execution pause signal. Durable generation polling retains
+  its 15-second request timeout. Canvas/standalone chat continuations use the
+  same helper; generation still passes the execution signal into the durable
+  kickoff, the edit continuation has a 120-second bound, and simple-chat task
+  polling has a 30-second bound.
+- The shared descriptor/event validator now treats a non-letter, non-number,
+  non-underscore delimiter as the boundary for an assigned generic token and
+  supports ASCII and full-width assignment punctuation. It does not reject the
+  standalone word `token` or ordinary Chinese text.
+- Focused Agent/adoption/descriptor/continuation command: 11 files and 180
+  tests passed.
+- Related Agent Runtime, agent-edit recovery, cloud-task/billing/cancel,
+  Task 1-3, and 21/16 Skill isolation regression: 32 files and 453 tests passed;
+  one database-only concurrency file/test was explicitly skipped.
+- `pnpm ts-check` passed. Targeted ESLint over 12 changed TypeScript files
+  passed with zero errors and two pre-existing unused-symbol warnings in
+  `src/lib/chat-tools.ts`.
+- Four PostgreSQL suites were discovered, but all 29 tests were explicitly
+  skipped because `POSTGRES_TEST_DATABASE_URL` is absent. No substitute
+  database was used, so real PostgreSQL concurrency remains unverified.

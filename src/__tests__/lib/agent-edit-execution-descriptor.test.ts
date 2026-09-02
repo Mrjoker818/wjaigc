@@ -42,6 +42,10 @@ describe('Agent edit execution descriptor', () => {
     ['generic token assignment', { prompt: 'token=abcdefghijklmnopqrstuvwxyz' }],
     ['generic token label', { prompt: 'token: abcdefghijklmnopqrstuvwxyz' }],
     ['query token', { imagePrompt: 'continue?mode=agent&token=abcdefghijklmnopqrstuvwxyz' }],
+    ['parenthesized token', { prompt: '(token=abcdefghijklmnopqrstuvwxyz)' }],
+    ['comma-prefixed token', { prompt: ',token: abcdefghijklmnopqrstuvwxyz' }],
+    ['Chinese comma-prefixed token', { prompt: '凭据，token=abcdefghijklmnopqrstuvwxyz' }],
+    ['Chinese colon token', { imagePrompt: '凭据：token：abcdefghijklmnopqrstuvwxyz' }],
     ['secret key', { apiKey: 'sk-secret' }],
     ['unknown field', { unexpected: 'value' }],
   ])('rejects a descriptor containing %s', (_label, patch) => {

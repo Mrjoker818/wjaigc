@@ -117,7 +117,7 @@ describe('chat tool governance', () => {
       .toBeUndefined();
   });
 
-  it('passes the initial execution AbortSignal unchanged into edit fetch and generation polling', async () => {
+  it('combines the initial execution AbortSignal with the edit timeout and forwards it to generation polling', async () => {
     const controller = new AbortController();
     const fetcher = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
       success: true, mode: 'polling', taskId: 'edit-signal', replayed: true,
@@ -128,7 +128,8 @@ describe('chat tool governance', () => {
       requestBody: { image: '/uploads/source.png', prompt: 'Retouch' },
       userId: 'user-1', userRole: 'user', idempotencyKey: 'edit-signal-key',
     }, controller.signal);
-    expect(fetcher.mock.calls[0]?.[1]?.signal).toBe(controller.signal);
+    expect(fetcher.mock.calls[0]?.[1]?.signal).toBeTruthy();
+    expect(fetcher.mock.calls[0]?.[1]?.signal).not.toBe(controller.signal);
 
     await executeAdmittedToolCall({
       kind: 'generation', taskIds: ['task-1'], userId: 'user-1', userRole: 'user',

@@ -112,7 +112,7 @@ describe('durable generation server kickoff', () => {
     }
   });
 
-  it('passes the initial execution signal unchanged to polling and stops when pause aborts it', async () => {
+  it('combines the initial execution signal with the poll timeout and stops when pause aborts it', async () => {
     const controller = new AbortController();
     let receivedSignal: AbortSignal | null | undefined;
     const fetchImpl = vi.fn((_url: string | URL | Request, init?: RequestInit) => {
@@ -125,7 +125,8 @@ describe('durable generation server kickoff', () => {
     const kickoff = kickoffDurableGenerationTasks({
       taskIds: ['task-1'], userId: 'user-a', userRole: 'user', fetchImpl, signal: controller.signal,
     });
-    await vi.waitFor(() => expect(receivedSignal).toBe(controller.signal));
+    await vi.waitFor(() => expect(receivedSignal).toBeTruthy());
+    expect(receivedSignal).not.toBe(controller.signal);
     controller.abort(new Error('paused'));
 
     await expect(kickoff).resolves.toEqual({
@@ -133,5 +134,32 @@ describe('durable generation server kickoff', () => {
       accepted: 0,
       failed: [{ taskId: 'task-1', error: 'paused' }],
     });
+  });
+
+  it('aborts a pending poll at the existing 15 second request timeout', async () => {
+    vi.useFakeTimers();
+    try {
+      let receivedSignal: AbortSignal | null | undefined;
+      const fetchImpl = vi.fn((_url: string | URL | Request, init?: RequestInit) => {
+        receivedSignal = init?.signal;
+        return new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () => reject(init.signal?.reason), { once: true });
+        });
+      });
+
+      const kickoff = kickoffDurableGenerationTasks({
+        taskIds: ['task-timeout'], userId: 'user-a', userRole: 'user', fetchImpl,
+      });
+      await vi.waitFor(() => expect(receivedSignal).toBeTruthy());
+      await vi.advanceTimersByTimeAsync(15_000);
+
+      const result = await kickoff;
+      expect(receivedSignal?.aborted).toBe(true);
+      expect(result.attempted).toBe(1);
+      expect(result.accepted).toBe(0);
+      expect(result.failed).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

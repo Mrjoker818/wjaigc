@@ -231,6 +231,10 @@ describe('Agent event payload safety', () => {
     { prompt: 'token=abcdefghijklmnopqrstuvwxyz' },
     { prompt: 'token: abcdefghijklmnopqrstuvwxyz' },
     { prompt: 'continue?mode=agent&token=abcdefghijklmnopqrstuvwxyz' },
+    { prompt: '(token=abcdefghijklmnopqrstuvwxyz)' },
+    { prompt: ',token: abcdefghijklmnopqrstuvwxyz' },
+    { prompt: '凭据，token=abcdefghijklmnopqrstuvwxyz' },
+    { prompt: '凭据：token：abcdefghijklmnopqrstuvwxyz' },
   ])('rejects credential material embedded in free-form text', (payload) => {
     expect(() => assertAgentEventPayloadSafe(payload)).toThrowError(
       'Agent event payload contains sensitive data',

@@ -1,6 +1,7 @@
 import { calculateActualPixels } from './canvas-generation-group';
 import { getInternalRequestHeaders } from './api-auth';
 import { fetchWithV1Retry } from './api-helpers';
+import { runWithAbortSignalTimeout } from './abort-signal';
 import { STRICT_AGENT_GENERATE_HEADER } from './agent-runtime/generate-image-adapter';
 import type { AgentAdmittedExecution as AdmittedToolExecution } from './agent-runtime/types';
 import {
@@ -313,17 +314,19 @@ export async function executeAdmittedToolCall(
     return;
   }
 
-  const response = await fetch(`http://localhost:${SERVER_PORT}/api/edit`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(await getInternalRequestHeaders(execution.userId, execution.userRole)),
-      'idempotency-key': execution.idempotencyKey,
-      'x-wujie-agent-resume-execution': 'true',
-    },
-    body: JSON.stringify(execution.requestBody),
-    signal,
-  });
+  const response = await runWithAbortSignalTimeout(signal, 120_000, async requestSignal => (
+    fetch(`http://localhost:${SERVER_PORT}/api/edit`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(await getInternalRequestHeaders(execution.userId, execution.userRole)),
+        'idempotency-key': execution.idempotencyKey,
+        'x-wujie-agent-resume-execution': 'true',
+      },
+      body: JSON.stringify(execution.requestBody),
+      signal: requestSignal,
+    })
+  ));
   if (!response.ok) {
     throw new Error(`Edit continuation failed: ${response.status}`);
   }

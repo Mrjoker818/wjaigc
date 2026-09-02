@@ -2,6 +2,7 @@ import 'server-only';
 
 import { getInternalRequestHeaders } from '@/lib/api-auth';
 import { getInternalApiUrl } from '@/lib/api-helpers';
+import { runWithAbortSignalTimeout } from '@/lib/abort-signal';
 
 interface DurableGenerationKickoffInput {
   taskIds: readonly string[];
@@ -78,17 +79,24 @@ export async function kickoffDurableGenerationTasks(
     const deadline = Date.now() + MAX_MONITORING_MS;
     try {
       while (Date.now() < deadline) {
-        const response = await fetchImpl(pollUrl, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            ...internalHeaders,
+        const { response, data } = await runWithAbortSignalTimeout(
+          input.signal,
+          15_000,
+          async requestSignal => {
+            const response = await fetchImpl(pollUrl, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                ...internalHeaders,
+              },
+              body: JSON.stringify({ taskId }),
+              cache: 'no-store',
+              signal: requestSignal,
+            });
+            const data = await response.json().catch(() => null) as Record<string, unknown> | null;
+            return { response, data };
           },
-          body: JSON.stringify({ taskId }),
-          cache: 'no-store',
-          signal: input.signal ?? AbortSignal.timeout(15_000),
-        });
-        const data = await response.json().catch(() => null) as Record<string, unknown> | null;
+        );
         if (!response.ok || data?.status === 'error') {
           throw new Error(
             typeof data?.error === 'string'
