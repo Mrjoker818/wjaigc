@@ -2634,4 +2634,7 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - 显式回滚 shadow 后用户数据哈希仍一致，但门禁由 `11/11` 降为 `9/11`，两个压力项目出现 `checkpoint-schema-mismatch`。媒体仍为 `462 ready / 0 missing`，因此这是检查点一致性回归，不是图片丢失。
 - TDD 最小修复将项目有效 schema 与 completed checkpoint schema 纳入快速路径校验，可使下一次保存走既有原子 reconciliation 并修复旧检查点。
 - 验证：专项 `68/68`；全仓 `4504 passed / 133 PostgreSQL-gated skipped / 0 failed`；TypeScript、0-error Lint、保护基线和生产构建 `118/118` 通过。
-- **判定：LOCAL PASS / CLOUD PENDING。** S3 真实恢复、缺失缩略图浏览器回退与隔离 PostgreSQL 并发仍未验证，不得写为通过。
+- 云端已部署 `main@3cf87dc8`；Coze `HEAD 8a280f15` 与目标 tree `0f56f794` 精确一致，工作区干净，`stable@52f7c601` 未变化。
+- 修复后的 shadow 首检、asset-v3 切换、最终 shadow 回滚三次均保持 `11/11`，462 个媒体全部 ready，0 missing/recovering/unrecoverable；历史 `checkpoint-schema-mismatch` 未复发。
+- Google Chrome 两次刷新均加载画布，6 个 Stage 1 媒体和 2 个金色透明资产计数一致，刷新后新增 Console error/warning 为 0。
+- **判定：CHECKPOINT DRIFT CLOUD PASS / ADMIN-003 CONDITIONAL。** S3 真实恢复、缺失缩略图浏览器原图回退与隔离 PostgreSQL 并发仍未验证，不得写为整个 ADMIN-003 或全平台通过。

@@ -1,5 +1,11 @@
 # 无界AI — 缺陷登记表 (BUG REGISTER)
 
+## 2026-09-02 V588-ADMIN-003 检查点漂移云端关闭
+
+`main@3cf87dc8` 已同步到 Coze，Coze 元数据提交 `8a280f15` 的整树与目标提交完全一致，`stable@52f7c601` 未触碰。真实数据库在修复部署后的 shadow 首次检查即从历史 `9/11` 恢复为 `11/11`；随后完成 `shadow -> asset-v3 -> shadow` 受控循环，三次均为 `matching=11 / mismatched=0 / failedCheckpoints=0 / missingCheckpoints=0`，462 个媒体全部 ready。
+
+同一 Google Chrome 现有预览标签在 asset-v3 与回滚 shadow 后均成功恢复画布，6 个 Stage 1 媒体和 2 个金色透明资产保持可见，刷新后新增 Console error/warning 为 0。由此关闭“回滚后 checkpoint schema 漂移”缺陷，不扩大为整个 `V588-ADMIN-003` 已完成：缺失缩略图浏览器原图回退、真实 S3 恢复和隔离 PostgreSQL 并发仍未验证。机器证据：[v588-admin-003-asset-gate-cloud-2026-09-02.json](evidence/v588-admin-003-asset-gate-cloud-2026-09-02.json)。
+
 ## 2026-09-01 V588-PROVIDER-003 业务验收关闭
 
 `V588-PROVIDER-003-BUG-010` 已补齐最后的真实故障边界。受控公网非 JSON 样本进入 `failed/ALL_PROVIDERS_FAILED`；真实 30 秒首字节延迟探针在应用 15 秒截止时间进入 `timeout/MODEL_TIMEOUT`。两条任务均只扣一次、只退一次、余额和累计消耗恢复，无图片结果；超时任务在 45 秒迟到复核时仍保持 `timeout/refunded/revision=1`，没有被迟到结果覆盖。全部 `CODEx-FAULT-*` 临时供应商已删除。

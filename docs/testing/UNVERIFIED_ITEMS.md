@@ -2154,8 +2154,8 @@ BUG-018 已从未验证项移除。剩余顺序为 `002-B -> 002-D -> 002-E`；�
 
 | 项目 | 最新状态 | 关闭条件 |
 |---|---|---|
-| 既有 checkpoint 漂移自愈 | `LOCAL PASS / CLOUD PENDING` | 部署候选后在 shadow 触发项目保存，doctor 恢复 `11/11` 且用户数据哈希不变。 |
-| 第二次 asset-v3 切换与回滚 | `UNVERIFIED` | asset-v3 和回滚后均保持 `11/11`，项目 9 节点哈希、缩略图和 Console 健康不变。 |
+| 既有 checkpoint 漂移自愈 | `CLOUD PASS` | `main@3cf87dc8` 部署后 shadow 已恢复 `11/11`，历史 `checkpoint-schema-mismatch` 未复发。 |
+| 第二次 asset-v3 切换与回滚 | `CLOUD PASS` | asset-v3 和回滚 shadow 均保持 `11/11`、462 ready；画布媒体计数一致且新增 Console error/warning 为 0。 |
 | 缺失缩略图的浏览器原图回退 | `UNVERIFIED` | 在不修改业务数据的受控夹具中证明 variant 404 时自动加载原图。 |
 | S3 真实媒体恢复 | `UNVERIFIED` | 配置测试对象存储凭据后验证缺失本地文件可从 S3 恢复；当前仅有自动化测试。 |
 | 资产 PostgreSQL 并发套件 | `133 TESTS SKIPPED / OPEN` | 配置专用 `POSTGRES_TEST_DATABASE_URL` 后执行，严禁使用业务库。 |

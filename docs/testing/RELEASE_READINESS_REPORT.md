@@ -1,5 +1,11 @@
 # 无界AI — 发布就绪报告 (RELEASE READINESS REPORT)
 
+## 2026-09-02 ADMIN-003 检查点漂移云端判定
+
+`main@3cf87dc8` 已在 Coze 完成 `shadow -> asset-v3 -> shadow` 受控循环。三次数据库诊断均为 11/11 项目匹配、0 检查点失败/缺失、462 个媒体 ready；Google Chrome 两次刷新后的画布媒体计数一致，新增 Console error/warning 为 0。历史回滚后降为 9/11 的缺陷已关闭。
+
+总体发布结论仍为**不通过**。缺失缩略图原图回退、真实 S3 恢复、隔离 PostgreSQL 并发套件，以及后续 `V588-CREDITS-OBS-001` 和 Skills 阶段尚未闭环。该结果只授权继续剩余 ADMIN-003 边界及积分可观测性，不授权修改 `stable@52f7c601` 或宣布全平台可发布。
+
 ## 2026-09-01 PROVIDER-003 业务关闭后的发布判定
 
 `V588-PROVIDER-003` 已取得正向任务、精确路由、同键重放、取消、真实非 JSON、真实首字节超时、一次退款和迟到完成拒绝的云端证据，业务验收关闭，允许进入 `V588-ADMIN-003`。超时任务在 45 秒后仍保持不可逆 `timeout/refunded/revision=1`，临时供应商和本地探针均已清理，`stable@52f7c601` 未触碰。

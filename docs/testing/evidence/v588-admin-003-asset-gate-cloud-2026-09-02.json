@@ -192,7 +192,7 @@
     "freshConsoleErrors": 0
   },
   "rollback": {
-    "status": "data-pass-gate-regression",
+    "status": "pass-after-checkpoint-reconciliation-fix",
     "targetMode": "shadow",
     "projectRead": "pass: project media, placement geometry and URLs retained the exact pre-rollback hash",
     "projectCount": 10,
@@ -215,7 +215,56 @@
     "eslintErrors": 0,
     "productionBuild": "pass: 118/118 static pages",
     "protectedBaseline": "pass: 38/38 protected feature ids, no unapproved drift",
-    "cloudVerification": "pending deployment"
+    "cloudVerification": "pass: Coze source tree matched main@3cf87dc8; shadow, asset-v3 and final shadow all remained 11/11 with 462 ready media and zero missing/recovering/unrecoverable records"
+  },
+  "cloudCandidate": {
+    "checkedAt": "2026-09-02T09:43:27+08:00",
+    "githubCommit": "3cf87dc83850874919fbe23a77538279633438f4",
+    "cozeHead": "8a280f15f47f152b05bcd0f96b93ee13db3eebb1",
+    "sourceTree": "0f56f7949da8618fe7178bd3643957093e585d16",
+    "sourceTreeMatches": true,
+    "stableCommit": "52f7c601ed150769e15d06fb435c6e360e28c9e7",
+    "focusedGate": "pass: canvas-shadow-sync, typecheck, protected baseline and 118/118 production build completed before restart",
+    "shadowBefore": {
+      "servicePid": 54926,
+      "rootStatus": 200,
+      "matchingProjects": 11,
+      "mismatchedProjects": 0,
+      "failedCheckpoints": 0,
+      "missingCheckpoints": 0,
+      "readyMedia": 462
+    },
+    "assetV3": {
+      "servicePid": 55060,
+      "rootStatus": 200,
+      "matchingProjects": 11,
+      "mismatchedProjects": 0,
+      "failedCheckpoints": 0,
+      "missingCheckpoints": 0,
+      "readyMedia": 462,
+      "canvasLoaded": true,
+      "visibleStageOneMedia": 6,
+      "visibleGoldenAssets": 2,
+      "freshConsoleErrorsOrWarnings": 0
+    },
+    "shadowAfterRollback": {
+      "servicePid": 55152,
+      "rootStatus": 200,
+      "matchingProjects": 11,
+      "mismatchedProjects": 0,
+      "failedCheckpoints": 0,
+      "missingCheckpoints": 0,
+      "readyMedia": 462,
+      "canvasLoaded": true,
+      "visibleStageOneMedia": 6,
+      "visibleGoldenAssets": 2,
+      "freshConsoleErrorsOrWarnings": 0
+    },
+    "remainingUnverified": [
+      "browser fallback from a missing thumbnail variant to the original media",
+      "real S3 media recovery",
+      "isolated PostgreSQL concurrency suite"
+    ]
   },
   "verdict": "conditional-pass"
 }
