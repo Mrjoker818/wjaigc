@@ -190,3 +190,79 @@ git diff --check：PASS。
 ```
 
 PostgreSQL 的五项 Task6 并发验证仍是环境阻塞项，未用 Mock 结果冒充真实数据库证据。
+
+## 独立评审修复：并行恢复、错误暂停 fence 与暂停历史（基线 668bcb7a）
+
+### RED
+
+本轮先只修改测试，并运行：
+
+```text
+pnpm exec vitest run src/__tests__/lib/skill-runtime-executor.test.ts src/__tests__/api/agent-runs.test.ts src/__tests__/lib/agent-runtime-event-storage-fence.test.ts
+```
+
+首次结果为 3 个文件失败，71 项通过、5 项失败。失败分别证明：
+
+- 从并行组的后置步骤 `generate-4` 恢复时，尚未完成的前置 sibling `generate-3` 被遗漏；
+- 普通执行错误调用 `pauseForRetry` 时没有携带 generation/lease fence；
+- Task4 `pauseRun` 没有把执行 fence 传入原子控制转换；
+- 用户显式暂停被错误投影为失败步骤；
+- 数据库暂停 fence 测试首次暴露测试桩的事件流/`revision` 数据不完整。修正测试夹具后单独复跑，稳定失败于生产 SQL 缺少 `wujie_agent_execution_leases` 条件，而不是夹具异常。
+
+测试进一步模拟新 generation 已取得 lease：旧 generation 的暂停必须被拒绝，且不得插入 `run.paused` 事件或清空新 lease。
+
+### GREEN 与最小实现
+
+- 恢复步骤位于并行组时，执行起点回溯到该连续并行组首项，再用持久 `tool.completed` 集合过滤；因此所有未完成 sibling 都会执行，已完成 sibling 不会重复执行。
+- executor 的错误恢复回调强制携带 active execution fence；Skill service 以 `pauseReason=execution-error` 复用 Task4 `pauseAgentRun`。
+- Task4 暂停转换在锁定 `cloud_tasks` 的同一事务中，用 `runId + actor + project + leaseOwner + generation + paused_at=0 + completed_at=0` 校验当前执行所有权。新 generation 接管后，旧 generation 无法写暂停事件、清空 lease 或中断新执行。
+- 用户暂停写入 `pauseReason=user`。历史仅把 `execution-error` 暂停的恢复步骤标为 `failed`；用户暂停的未完成步骤保持 `pending`。质量失败仍由 `quality.checked(passed=false)` 独立投影为失败。
+- 没有新增任务、计费或退款状态机，也没有改变 chat/simple-chat/agent-edit 的恢复分支。
+
+### 生产 Registry 审计
+
+新增机械覆盖测试扫描当前全部 37 个内置 Skill：21 个 canvas/workflow Skill 的执行步骤当前只使用 `generate_image`，16 个 simple-chat Skill 为零步骤定义。生产 registry 同时提供 `generate_image` adapter 与 recovery，当前没有遗漏 toolId，因此无需扩张 registry 或增加虚假适配器。
+
+### 验证结果
+
+三项修复与竞态证据：
+
+```text
+3 个文件通过，77 项通过。
+```
+
+Task6 focused 5 文件：
+
+```text
+4 个文件通过、1 个 PostgreSQL 文件跳过；99 项通过、5 项跳过。
+```
+
+Task4 pause/resume/fence 回归：
+
+```text
+6 个文件通过、1 个 PostgreSQL 文件跳过；125 项通过、19 项跳过。
+```
+
+工程门禁：
+
+```text
+pnpm ts-check                         PASS
+目标 ESLint（7 个本轮源码/测试文件） PASS，0 error / 0 warning
+git diff --check                      PASS
+```
+
+### 环境跳过项
+
+本机仍未设置 `POSTGRES_TEST_DATABASE_URL`。Task6 的 5 项和 Task4 的 19 项真实 PostgreSQL 测试均输出明确 `BLOCKED` 后跳过；本轮通过 SQL 所有权测试和 service 竞态测试验证逻辑，但没有把测试桩结果冒充真实 PostgreSQL 并发证据。配置隔离数据库后仍需补跑这 24 项。
+
+### 修改范围
+
+- `src/lib/skill-runtime/executor.ts`
+- `src/lib/skill-runtime/service.ts`
+- `src/lib/agent-runtime/service.ts`
+- `src/lib/agent-runtime/event-storage.ts`
+- `src/__tests__/lib/skill-runtime-executor.test.ts`
+- `src/__tests__/api/agent-runs.test.ts`
+- `src/__tests__/lib/agent-runtime-event-storage-fence.test.ts`
+
+未切换或修改 `stable`，未触碰四个受保护未跟踪项，未 push。

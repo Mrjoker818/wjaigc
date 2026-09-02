@@ -607,10 +607,25 @@ export async function transitionAgentRunControl(
     const requestedLeaseOwner = rawInput.type === 'run.resumed'
       ? validateIdentifier('leaseOwner', rawInput.leaseOwner || randomUUID())
       : '';
+    const executionFence = initialInput.type === 'run.paused'
+      ? initialInput.executionFence
+      : undefined;
     const task = await client.query<{ status: string; revision: number }>(
       `SELECT status, revision FROM cloud_tasks
-       WHERE id = $1 AND user_id = $2 AND project_id = $3 FOR UPDATE`,
-      [initialInput.runId, initialInput.actorUserId, initialInput.projectId],
+       WHERE id = $1 AND user_id = $2 AND project_id = $3
+         ${executionFence ? `AND EXISTS (
+           SELECT 1 FROM wujie_agent_execution_leases agent_lease
+           WHERE agent_lease.task_id = $1
+             AND agent_lease.owner_id = $2
+             AND agent_lease.project_id = $3
+             AND agent_lease.lease_owner = $4
+             AND agent_lease.generation = $5
+             AND agent_lease.paused_at = 0
+             AND agent_lease.completed_at = 0
+         )` : ''}
+       FOR UPDATE`,
+      [initialInput.runId, initialInput.actorUserId, initialInput.projectId,
+        ...(executionFence ? [executionFence.leaseOwner, executionFence.generation] : [])],
     );
     if ((task.rowCount ?? 0) !== 1) throw new AgentEventNotFoundError();
 

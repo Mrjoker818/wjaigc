@@ -234,6 +234,32 @@ describe('Agent runtime service', () => {
     expect(dependencies.settleFailedTask).not.toHaveBeenCalled();
   });
 
+  it('passes an execution-error pause fence into the atomic control transition', async () => {
+    const dependencies = serviceDependencies();
+    const fence = { runId: 'run-1', leaseOwner: 'lease-old', generation: 7 };
+    const paused = event(2, 'run.paused', {
+      nextStepId: 'generate-2', pauseReason: 'execution-error',
+    });
+    dependencies.transitionControl = vi.fn(async input => {
+      expect(input.executionFence).toEqual(fence);
+      return {
+        accepted: true, event: paused,
+        events: [event(1, 'run.created'), paused], leaseOwner: '',
+      };
+    });
+    const service = agentRuntime.createAgentRuntimeService(dependencies);
+
+    await service.pauseRun({
+      actorUserId: user.id, runId: 'run-1', nextStepId: 'generate-2',
+      pauseReason: 'execution-error', executionFence: fence,
+    });
+
+    expect(dependencies.transitionControl).toHaveBeenCalledWith(expect.objectContaining({
+      executionFence: fence,
+      payload: { nextStepId: 'generate-2', pauseReason: 'execution-error' },
+    }));
+  });
+
   it('does not abort an initial execution when pause persistence fails', async () => {
     const dependencies = serviceDependencies();
     dependencies.transitionControl = vi.fn().mockRejectedValue(new Error('database unavailable'));

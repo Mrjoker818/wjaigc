@@ -57,6 +57,7 @@ import type {
   AgentSkillInvocation,
   AgentWorkspace,
 } from './types';
+import type { AgentExecutionFence } from './execution-fence';
 
 const WORKSPACES = new Set<AgentWorkspace>(['canvas', 'workflow', 'chat']);
 const MODES = new Set<AgentMode>(['conversation', 'vision', 'agent']);
@@ -868,6 +869,8 @@ export function createAgentRuntimeService(
       actorUserId: string;
       runId: string;
       nextStepId: string;
+      pauseReason?: 'user' | 'execution-error';
+      executionFence?: AgentExecutionFence;
     }): Promise<AgentRunControlResult> {
       const run = await ownedRun(input.actorUserId, input.runId);
       const projection = reduceAgentEvents(run.events);
@@ -884,6 +887,7 @@ export function createAgentRuntimeService(
         throw new AgentRunTerminalError(projection.status);
       }
       const nextStepId = readString(input.nextStepId, 'nextStepId');
+      const pauseReason = input.pauseReason || 'user';
       const pauseCount = run.events.filter(event => event.type === 'run.paused').length + 1;
       const transitioned = await (dependencies.transitionControl || transitionAgentRunControl)({
         actorUserId: input.actorUserId,
@@ -892,8 +896,9 @@ export function createAgentRuntimeService(
         eventId: `agent:${input.runId}:paused:${pauseCount}`,
         workspace: run.workspace,
         type: 'run.paused',
-        payload: { nextStepId },
+        payload: { nextStepId, pauseReason },
         expectedRevision: run.task.revision ?? 0,
+        executionFence: input.executionFence,
       });
       const nextProjection = reduceAgentEvents(transitioned.events);
       if (transitioned.accepted && nextProjection.status === 'paused') {
@@ -1055,6 +1060,8 @@ export function pauseAgentRun(input: {
   actorUserId: string;
   runId: string;
   nextStepId: string;
+  pauseReason?: 'user' | 'execution-error';
+  executionFence?: AgentExecutionFence;
 }): Promise<AgentRunControlResult> {
   return runtimeService.pauseRun(input);
 }

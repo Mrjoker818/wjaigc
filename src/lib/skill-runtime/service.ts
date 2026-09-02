@@ -231,7 +231,12 @@ function history(task: CloudTask, events: readonly AgentEvent[], projection: Age
   const failed = new Set(projection.qualityChecks
     .filter(check => !check.passed)
     .map(check => check.stepId));
-  if (projection.status === 'paused' && projection.resumeFromStepId) {
+  const activePause = [...events].reverse().find(event => event.type === 'run.paused');
+  if (
+    projection.status === 'paused'
+    && projection.resumeFromStepId
+    && activePause?.payload.pauseReason === 'execution-error'
+  ) {
     failed.add(projection.resumeFromStepId);
   }
   const terminalFailure = [...events].reverse().find(event => event.type === 'run.failed');
@@ -249,7 +254,9 @@ function history(task: CloudTask, events: readonly AgentEvent[], projection: Age
         ? 'completed'
         : failed.has(step.id)
           ? 'failed'
-          : projection.currentStepId === step.id ? 'processing' : 'pending',
+          : projection.status !== 'paused' && projection.currentStepId === step.id
+            ? 'processing'
+            : 'pending',
     })),
     qualityEvents: projection.qualityChecks.map(check => ({ ...check })),
     assetVersionIds: [...projection.assetVersionIds],
@@ -304,7 +311,7 @@ export function createSkillRuntimeService(
       const nextStepId = run.projection.currentStepId
         || run.history.steps.find(step => step.status !== 'completed')?.id;
       if (!nextStepId) throw new SkillRunRequestError('Skill run has no resumable step');
-      return dependencies.pauseRun({ ...input, nextStepId });
+      return dependencies.pauseRun({ ...input, nextStepId, pauseReason: 'user' });
     },
     async resume(input: { actorUserId: string; runId: string }) {
       const run = await owned(input);
@@ -411,10 +418,12 @@ export async function executeSkillRun(input: {
       },
       executionFence,
     }),
-    pauseForRetry: ({ stepId }) => pauseAgentRun({
+    pauseForRetry: ({ stepId, executionFence }) => pauseAgentRun({
       actorUserId: input.actor.id,
       runId: input.runId,
       nextStepId: stepId,
+      pauseReason: 'execution-error',
+      executionFence,
     }),
   });
   return executor.execute({

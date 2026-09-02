@@ -56,7 +56,13 @@ export interface SkillExecutorDependencies {
     error: SkillQualityFailedError;
     executionFence: NonNullable<AgentDownstreamExecutionContext['executionFence']>;
   }): Promise<unknown>;
-  pauseForRetry?(input: { actorUserId: string; runId: string; stepId: string; error: unknown }): Promise<unknown>;
+  pauseForRetry?(input: {
+    actorUserId: string;
+    runId: string;
+    stepId: string;
+    error: unknown;
+    executionFence: NonNullable<AgentDownstreamExecutionContext['executionFence']>;
+  }): Promise<unknown>;
 }
 
 export interface ExecuteSkillRunInput {
@@ -168,7 +174,18 @@ export function createSkillExecutor(dependencies: SkillExecutorDependencies) {
       if (input.resumeFromStepId && resumeIndex < 0) {
         throw new TypeError('resumeFromStepId is not a Skill step');
       }
-      const eligible = input.definition.steps.slice(Math.max(0, resumeIndex))
+      const resumeStep = input.definition.steps[resumeIndex];
+      let resumeGroupIndex = Math.max(0, resumeIndex);
+      if (resumeStep?.execution === 'parallel' && resumeStep.parallelGroup) {
+        while (
+          resumeGroupIndex > 0
+          && input.definition.steps[resumeGroupIndex - 1]?.execution === 'parallel'
+          && input.definition.steps[resumeGroupIndex - 1]?.parallelGroup === resumeStep.parallelGroup
+        ) {
+          resumeGroupIndex -= 1;
+        }
+      }
+      const eligible = input.definition.steps.slice(resumeGroupIndex)
         .filter(step => !completed.has(step.id));
       const startedStepIds: string[] = [];
       const assetVersionIds: string[] = [];
@@ -310,6 +327,7 @@ export function createSkillExecutor(dependencies: SkillExecutorDependencies) {
               runId: input.runId,
               stepId,
               error: (error as Partial<SkillStepExecutionError>)?.cause || error,
+              executionFence,
             });
           }
         }

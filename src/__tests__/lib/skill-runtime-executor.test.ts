@@ -17,6 +17,8 @@ import {
 import { agentRunRequestDigest } from '@/lib/agent-runtime/service';
 import type { AgentEvent, AgentRunProjection, AgentRunRequest } from '@/lib/agent-runtime/types';
 import type { CloudTask } from '@/lib/cloud-task-storage';
+import { CANVAS_PRESET_SKILLS, SIMPLE_CHAT_PRESET_SKILLS } from '@/lib/skill-runtime/catalog';
+import { createProductionSkillStepRegistry } from '@/lib/skill-runtime/step-registry';
 
 vi.mock('server-only', () => ({}));
 
@@ -87,6 +89,33 @@ describe('durable Skill executor', () => {
       runId: 'run-1', definition, step: definition.steps[1], inputValues: {},
     })).toBe(expectedDigest);
     expect(firstStep.operation.idempotencyKey).toBe('provider:generate-3');
+  });
+
+  it('resumes every unfinished sibling in the failed parallel group without rerunning completed siblings', async () => {
+    const executeStep = vi.fn(async ({ step }: ExecuteSkillStepInput) => result(`version-${step.id}`));
+    const executor = createSkillExecutor({
+      executeStep,
+      appendEvent: vi.fn(async () => true),
+    });
+
+    await executor.execute({
+      actorUserId: 'user-1', projectId: 'project-1', runId: 'run-1', workspace: 'canvas',
+      definition, inputValues: {}, modelBindings: {}, operationContext: operationContext(),
+      completedStepIds: ['plan'], resumeFromStepId: 'generate-4',
+    });
+    expect(executeStep.mock.calls.map(call => call[0].step.id)).toEqual([
+      'generate-3', 'generate-4', 'quality-3',
+    ]);
+
+    executeStep.mockClear();
+    await executor.execute({
+      actorUserId: 'user-1', projectId: 'project-1', runId: 'run-1', workspace: 'canvas',
+      definition, inputValues: {}, modelBindings: {}, operationContext: operationContext(),
+      completedStepIds: ['plan', 'generate-3'], resumeFromStepId: 'generate-4',
+    });
+    expect(executeStep.mock.calls.map(call => call[0].step.id)).toEqual([
+      'generate-4', 'quality-3',
+    ]);
   });
 
   it('aborts parallel siblings, records quality failure, and does not execute later groups', async () => {
@@ -162,8 +191,34 @@ describe('durable Skill executor', () => {
       definition, inputValues: {}, modelBindings: {}, operationContext: operationContext(),
     })).rejects.toThrow('temporary provider failure');
 
-    expect(pauseForRetry).toHaveBeenCalledWith(expect.objectContaining({ stepId: 'generate-3' }));
+    expect(pauseForRetry).toHaveBeenCalledWith(expect.objectContaining({
+      stepId: 'generate-3',
+      executionFence: { runId: 'run-1', leaseOwner: 'lease-1', generation: 9 },
+    }));
     expect(failRun).not.toHaveBeenCalled();
+  });
+
+  it('registers production adapters for every tool used by all 37 built-in Skills', () => {
+    const skills = [...CANVAS_PRESET_SKILLS, ...SIMPLE_CHAT_PRESET_SKILLS];
+    const registry = createProductionSkillStepRegistry({
+      actor: {
+        id: 'user-1', name: 'User', role: 'user', status: 'active',
+        productType: 'canvas,chat', createdAt: 1, updatedAt: 1,
+      },
+      request: {
+        skillId: definition.id, skillVersion: definition.version, surface: 'canvas',
+        projectId: 'project-1', workspaceId: 'canvas-1', inputValues: {},
+        sourceVersionIds: [], modelBindings: {}, idempotencyKey: 'registry-audit',
+      },
+    });
+    const toolIds = new Set(skills.flatMap(skill => skill.steps.map(step => step.toolId)));
+
+    expect(skills).toHaveLength(37);
+    expect([...toolIds].sort()).toEqual(['generate_image']);
+    for (const toolId of toolIds) {
+      expect(registry.stepAdapters).toHaveProperty(toolId);
+      expect(registry.stepRecoveries).toHaveProperty(toolId);
+    }
   });
 });
 
@@ -304,6 +359,76 @@ describe('Skill run history', () => {
       runId: task.id, status: 'paused', lastSequence: 3, plan: [], currentStepId: 'generate-3',
       resumeFromStepId: 'generate-3', assetVersionIds: [], ignoredEventIds: [], missingSequences: [],
       qualityChecks: [{ stepId: 'generate-3', gateId: 'output-present', passed: false }],
+    };
+    const dependencies: SkillRuntimeServiceDependencies = {
+      createAuthorizedSkillRun: vi.fn(), getTaskForUser: vi.fn(async () => task),
+      listTasks: vi.fn(async () => [task]), listEvents: vi.fn(async () => events),
+      getProjection: vi.fn(async () => projection), pauseRun: vi.fn(), resumeRun: vi.fn(), cancelRun: vi.fn(),
+    };
+
+    await expect(createSkillRuntimeService(dependencies).get({
+      actorUserId: 'user-1', runId: task.id,
+    })).resolves.toMatchObject({
+      steps: expect.arrayContaining([expect.objectContaining({ id: 'generate-3', status: 'failed' })]),
+    });
+  });
+
+  it('keeps a user-paused unfinished step pending instead of projecting it as failed', async () => {
+    const task: CloudTask = {
+      id: 'run-user-paused', userId: 'user-1', projectId: 'project-1', type: 'agent-run',
+      status: 'processing', progress: 20, creditStatus: 'charged', creditCost: 3,
+      createdAt: 10, updatedAt: 20,
+    };
+    const events: AgentEvent[] = [{
+      eventId: 'created', runId: task.id, sequence: 1, type: 'run.created', timestamp: 'now',
+      payload: {
+        workspace: 'canvas',
+        skill: { skillId: definition.id, skillVersion: 1, inputValues: {}, modelBindings: {} },
+        skillSnapshot: { id: definition.id, version: 1, name: definition.name, steps: definition.steps },
+      },
+    }, {
+      eventId: 'paused', runId: task.id, sequence: 2, type: 'run.paused', timestamp: 'now',
+      payload: { nextStepId: 'generate-3', pauseReason: 'user' },
+    }];
+    const projection: AgentRunProjection = {
+      runId: task.id, status: 'paused', lastSequence: 2, plan: [], currentStepId: 'generate-3',
+      resumeFromStepId: 'generate-3', assetVersionIds: [], ignoredEventIds: [],
+      missingSequences: [], qualityChecks: [],
+    };
+    const dependencies: SkillRuntimeServiceDependencies = {
+      createAuthorizedSkillRun: vi.fn(), getTaskForUser: vi.fn(async () => task),
+      listTasks: vi.fn(async () => [task]), listEvents: vi.fn(async () => events),
+      getProjection: vi.fn(async () => projection), pauseRun: vi.fn(), resumeRun: vi.fn(), cancelRun: vi.fn(),
+    };
+
+    await expect(createSkillRuntimeService(dependencies).get({
+      actorUserId: 'user-1', runId: task.id,
+    })).resolves.toMatchObject({
+      steps: expect.arrayContaining([expect.objectContaining({ id: 'generate-3', status: 'pending' })]),
+    });
+  });
+
+  it('projects only an execution-error pause resume step as failed', async () => {
+    const task: CloudTask = {
+      id: 'run-error-paused', userId: 'user-1', projectId: 'project-1', type: 'agent-run',
+      status: 'processing', progress: 20, creditStatus: 'charged', creditCost: 3,
+      createdAt: 10, updatedAt: 20,
+    };
+    const events: AgentEvent[] = [{
+      eventId: 'created', runId: task.id, sequence: 1, type: 'run.created', timestamp: 'now',
+      payload: {
+        workspace: 'canvas',
+        skill: { skillId: definition.id, skillVersion: 1, inputValues: {}, modelBindings: {} },
+        skillSnapshot: { id: definition.id, version: 1, name: definition.name, steps: definition.steps },
+      },
+    }, {
+      eventId: 'paused', runId: task.id, sequence: 2, type: 'run.paused', timestamp: 'now',
+      payload: { nextStepId: 'generate-3', pauseReason: 'execution-error' },
+    }];
+    const projection: AgentRunProjection = {
+      runId: task.id, status: 'paused', lastSequence: 2, plan: [], currentStepId: 'generate-3',
+      resumeFromStepId: 'generate-3', assetVersionIds: [], ignoredEventIds: [],
+      missingSequences: [], qualityChecks: [],
     };
     const dependencies: SkillRuntimeServiceDependencies = {
       createAuthorizedSkillRun: vi.fn(), getTaskForUser: vi.fn(async () => task),
