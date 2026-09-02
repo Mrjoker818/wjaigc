@@ -204,6 +204,47 @@ describe('Skill runtime PostgreSQL concurrency', () => {
       );
       expect(ledger.rows).toEqual([{ type: 'consume' }]);
 
+      const eventStorage = await import('@/lib/agent-runtime/event-storage');
+      const executionClaims = await Promise.all(Array.from({ length: 20 }, () => (
+        eventStorage.claimAdoptedAgentExecution({
+          actorUserId: userId,
+          projectId: input.request.projectId,
+          runId,
+          toolId: 'plan',
+        })
+      )));
+      const executionWinner = executionClaims.find(claim => claim.claimed)!;
+      expect(executionClaims.filter(claim => claim.claimed)).toHaveLength(1);
+      const dispatchClaims = await Promise.all(Array.from({ length: 20 }, () => (
+        eventStorage.claimResumedAgentExecutionDispatch({
+          actorUserId: userId,
+          projectId: input.request.projectId,
+          runId,
+          leaseOwner: executionWinner.leaseOwner,
+          generation: executionWinner.generation!,
+        })
+      )));
+      expect(dispatchClaims.filter(claim => claim.claimed)).toHaveLength(1);
+      const dispatchState = await query<{ dispatch_attempt_count: number }>(
+        'SELECT dispatch_attempt_count FROM wujie_agent_execution_leases WHERE task_id = $1',
+        [runId],
+      );
+      expect(Number(dispatchState.rows[0]?.dispatch_attempt_count)).toBe(1);
+
+      await query(
+        'UPDATE wujie_agent_execution_leases SET dispatch_lease_expires_at = 0 WHERE task_id = $1',
+        [runId],
+      );
+      await expect(eventStorage.getRecoverableAgentExecutionDispatch({
+        actorUserId: userId,
+        projectId: input.request.projectId,
+        runId,
+      })).resolves.toMatchObject({
+        leaseOwner: executionWinner.leaseOwner,
+        generation: executionWinner.generation,
+        toolId: 'plan',
+      });
+
       await expect(createThroughSkillService({
         ...input,
         request: { ...input.request, inputValues: { product: '不同请求', features: '冲突' } },

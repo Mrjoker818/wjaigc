@@ -3,10 +3,10 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireApiAuthOrReject } from '@/lib/api-auth';
 import {
   createSkillRun,
-  failSkillRunExecution,
+  dispatchSkillRunExecution,
   listSkillRuns,
   parseSkillRunRequest,
-  startSkillRunExecution,
+  recoverLiveSkillRunExecution,
   skillRuntimeHttpError,
 } from '@/lib/skill-runtime/service';
 import { assertSkillRunFields, readBoundedSkillRunJson } from './http';
@@ -25,7 +25,13 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         code: 'SKILL_RUN_REQUEST_INVALID', status: 400,
       });
     }
-    return NextResponse.json({ runs: await listSkillRuns({ actorUserId: auth.user.id, limit }) });
+    const runs = await listSkillRuns({ actorUserId: auth.user.id, limit });
+    await Promise.allSettled(runs.slice(0, 20).map(run => recoverLiveSkillRunExecution({
+      actorUserId: auth.user.id,
+      runId: run.runId,
+      recoveryOnly: true,
+    })));
+    return NextResponse.json({ runs });
   } catch (error) {
     const response = skillRuntimeHttpError(error);
     return NextResponse.json(response.body, { status: response.status });
@@ -45,19 +51,16 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       actor: auth.user,
       request: parseSkillRunRequest(body),
     });
-    if (!result.reused) {
-      const execution = startSkillRunExecution({ actor: auth.user, runId: result.runId });
-      void execution.completion.catch(async error => {
-        await failSkillRunExecution({
-          actorUserId: auth.user.id,
+    const execution = await dispatchSkillRunExecution({
+      actorUserId: auth.user.id,
+      runId: result.runId,
+      recoveryOnly: result.reused,
+    });
+    if (execution.completion) {
+      void execution.completion.catch(error => {
+        console.error('[skill-runtime] controlled dispatch completion failed', {
           runId: result.runId,
-          error,
-        });
-        console.error('[skill-runtime] background execution failed', {
-          runId: result.runId,
-          code: error && typeof error === 'object' && 'code' in error
-            ? String(error.code)
-            : 'SKILL_EXECUTION_FAILED',
+          code: error instanceof Error ? error.name : 'UNKNOWN',
         });
       });
     }

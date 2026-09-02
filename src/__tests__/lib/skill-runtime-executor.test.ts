@@ -11,9 +11,11 @@ import type { AgentDownstreamExecutionContext } from '@/lib/agent-runtime/downst
 import type { SkillDefinition, SkillStepResult } from '@/lib/skill-runtime/types';
 import {
   createSkillRuntimeService,
+  dispatchSkillRunExecution,
   parseSkillRunRequest,
   SkillRunRequestError,
   type SkillRuntimeServiceDependencies,
+  type SkillRunExecutionDispatchDependencies,
 } from '@/lib/skill-runtime/service';
 import { agentRunRequestDigest } from '@/lib/agent-runtime/service';
 import type { AgentEvent, AgentRunProjection, AgentRunRequest } from '@/lib/agent-runtime/types';
@@ -67,6 +69,113 @@ function result(id: string): SkillStepResult {
 }
 
 describe('durable Skill executor', () => {
+  function dispatchDependencies(overrides: Partial<SkillRunExecutionDispatchDependencies> = {}): SkillRunExecutionDispatchDependencies {
+    const task: CloudTask = {
+      id: 'run-dispatch', userId: 'user-1', projectId: 'project-1', type: 'agent-run',
+      status: 'processing', progress: 0, creditStatus: 'charged', creditCost: 3,
+      createdAt: 1, updatedAt: 1,
+    };
+    return {
+      getTaskForUser: vi.fn(async () => task),
+      getRecoverableDispatch: vi.fn(async () => null),
+      loadContinuation: vi.fn(async () => ({
+        actor: { id: 'user-1' } as never,
+        request: {} as never,
+        definition,
+        workspace: 'canvas' as const,
+        requestDigest: 'digest-1',
+        toolId: 'plan',
+        execute: vi.fn(async () => undefined),
+      })),
+      claimExecution: vi.fn(async () => ({ claimed: true, leaseOwner: 'lease-1', generation: 1 })),
+      claimDispatch: vi.fn(async () => ({ claimed: true, dispatchLeaseOwner: 'dispatch-1', attempt: 1 })),
+      getProjection: vi.fn(async () => ({
+        runId: task.id, status: 'executing', lastSequence: 1, plan: [], assetVersionIds: [],
+        ignoredEventIds: [], missingSequences: [], qualityChecks: [],
+      } as AgentRunProjection)),
+      executeAdopted: vi.fn(async () => ({
+        runId: task.id, reused: false, executed: true,
+        projection: {} as AgentRunProjection, tools: [],
+      })),
+      failDispatch: vi.fn(async () => true),
+      ...overrides,
+    };
+  }
+
+  it('coalesces twenty replay wakeups through the existing database dispatch claim', async () => {
+    let claimed = false;
+    const dependencies = dispatchDependencies({
+      claimDispatch: vi.fn(async () => {
+        if (claimed) return { claimed: false, dispatchLeaseOwner: '', attempt: 0 };
+        claimed = true;
+        return { claimed: true, dispatchLeaseOwner: 'dispatch-1', attempt: 1 };
+      }),
+    });
+
+    const attempts = await Promise.all(Array.from({ length: 20 }, () => dispatchSkillRunExecution({
+      actorUserId: 'user-1', runId: 'run-dispatch', recoveryOnly: true,
+    }, dependencies)));
+    await Promise.all(attempts.flatMap(attempt => attempt.completion ? [attempt.completion] : []));
+
+    expect(attempts.filter(attempt => attempt.started)).toHaveLength(1);
+    expect(dependencies.executeAdopted).toHaveBeenCalledTimes(1);
+    expect(dependencies.claimDispatch).toHaveBeenCalledTimes(20);
+  });
+
+  it('recovers an expired dispatch generation and persists a retryable dispatch_error', async () => {
+    const executionError = new Error('worker disappeared after dispatch');
+    const dependencies = dispatchDependencies({
+      getRecoverableDispatch: vi.fn(async () => ({
+        leaseOwner: 'lease-2', generation: 2, toolId: 'generate-3', nextStepId: 'generate-3',
+      })),
+      loadContinuation: vi.fn(async () => ({
+        actor: { id: 'user-1' } as never, request: {} as never, definition,
+        workspace: 'canvas' as const, requestDigest: 'digest-1', toolId: 'generate-3',
+        execute: vi.fn(async () => undefined),
+      })),
+      claimExecution: vi.fn(async () => ({ claimed: true, leaseOwner: 'lease-2', generation: 2 })),
+      executeAdopted: vi.fn(async () => { throw executionError; }),
+    });
+
+    const dispatched = await dispatchSkillRunExecution({
+      actorUserId: 'user-1', runId: 'run-dispatch', recoveryOnly: true,
+    }, dependencies);
+    await expect(dispatched.completion).resolves.toBeUndefined();
+
+    expect(dependencies.claimExecution).toHaveBeenCalledWith(expect.objectContaining({
+      leaseOwner: 'lease-2', expectedGeneration: 2, toolId: 'generate-3',
+    }));
+    expect(dependencies.failDispatch).toHaveBeenCalledWith(expect.objectContaining({
+      generation: 2, dispatchLeaseOwner: 'dispatch-1', nextStepId: 'generate-3',
+      error: executionError.message,
+    }));
+  });
+
+  it('does not execute a cancelled run or an execution generation that lost its fence', async () => {
+    const cancelled = dispatchDependencies({
+      getTaskForUser: vi.fn(async (): Promise<CloudTask> => ({
+        id: 'run-dispatch', userId: 'user-1', projectId: 'project-1', type: 'agent-run',
+        status: 'cancelled', progress: 0, creditStatus: 'refunded', createdAt: 1, updatedAt: 1,
+      })),
+    });
+    await expect(dispatchSkillRunExecution({
+      actorUserId: 'user-1', runId: 'run-dispatch', recoveryOnly: true,
+    }, cancelled)).resolves.toEqual({ started: false });
+    expect(cancelled.claimExecution).not.toHaveBeenCalled();
+
+    const stale = dispatchDependencies({
+      getRecoverableDispatch: vi.fn(async () => ({
+        leaseOwner: 'old-lease', generation: 1, toolId: 'plan',
+      })),
+      claimExecution: vi.fn(async () => ({ claimed: false, leaseOwner: '' })),
+    });
+    await expect(dispatchSkillRunExecution({
+      actorUserId: 'user-1', runId: 'run-dispatch', recoveryOnly: true,
+    }, stale)).resolves.toEqual({ started: false });
+    expect(stale.claimDispatch).not.toHaveBeenCalled();
+    expect(stale.executeAdopted).not.toHaveBeenCalled();
+  });
+
   it('keeps step operation identity stable across generations and skips completed steps on retry', async () => {
     const executeStep = vi.fn(async ({ step }: ExecuteSkillStepInput) => result(`version-${step.id}`));
     const appendEvent = vi.fn(async () => true);

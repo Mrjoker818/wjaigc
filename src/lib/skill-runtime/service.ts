@@ -7,6 +7,12 @@ import {
   resumeAgentRun,
 } from '@/lib/agent-runtime/service';
 import { appendAdoptedAgentEvent } from '@/lib/agent-runtime/event-storage';
+import {
+  claimAdoptedAgentExecution,
+  claimResumedAgentExecutionDispatch,
+  failResumedAgentExecutionDispatch,
+  getRecoverableAgentExecutionDispatch,
+} from '@/lib/agent-runtime/event-storage';
 import type { AgentDownstreamExecutionContext } from '@/lib/agent-runtime/downstream-operations';
 import type { AgentDownstreamRecovery } from '@/lib/agent-runtime/downstream-operations';
 import type { AgentEvent, AgentRunProjection } from '@/lib/agent-runtime/types';
@@ -565,62 +571,136 @@ export async function executeSkillRun(input: {
   });
 }
 
-export async function failSkillRunExecution(input: {
-  actorUserId: string;
-  runId: string;
-  error: unknown;
-}) {
-  const executionFence = input.error && typeof input.error === 'object'
-    ? (input.error as { executionFence?: import('@/lib/agent-runtime/execution-fence').AgentExecutionFence }).executionFence
-    : undefined;
-  return appendAgentRunEvent({
-    actorUserId: input.actorUserId,
-    runId: input.runId,
-    eventId: `skill:${input.runId}:kickoff-failed`,
-    type: 'run.failed',
-    payload: {
-      ...(executionFence ? { generation: executionFence.generation } : {}),
-      error: {
-        code: 'SKILL_EXECUTION_KICKOFF_FAILED',
-        message: 'Skill execution failed to start',
-        retryable: true,
-      },
-    },
-    executionFence,
-  });
+export interface SkillRunExecutionDispatchResult {
+  started: boolean;
+  completion?: Promise<void>;
 }
 
-export function startSkillRunExecution(input: {
-  actor: User;
+export interface SkillRunExecutionDispatchDependencies {
+  getTaskForUser: typeof getCloudTaskForUser;
+  getRecoverableDispatch: typeof getRecoverableAgentExecutionDispatch;
+  loadContinuation: typeof import('./continuation').loadPersistedSkillContinuation;
+  claimExecution: typeof claimAdoptedAgentExecution;
+  claimDispatch: typeof claimResumedAgentExecutionDispatch;
+  getProjection: typeof getAgentRunProjection;
+  executeAdopted: typeof import('@/lib/agent-runtime/same-task-adapter').executeAdoptedAgentTask;
+  failDispatch: typeof failResumedAgentExecutionDispatch;
+}
+
+const defaultSkillRunExecutionDispatchDependencies: SkillRunExecutionDispatchDependencies = {
+  getTaskForUser: getCloudTaskForUser,
+  getRecoverableDispatch: getRecoverableAgentExecutionDispatch,
+  loadContinuation: input => import('./continuation').then(module => (
+    module.loadPersistedSkillContinuation(input)
+  )),
+  claimExecution: claimAdoptedAgentExecution,
+  claimDispatch: claimResumedAgentExecutionDispatch,
+  getProjection: getAgentRunProjection,
+  executeAdopted: input => import('@/lib/agent-runtime/same-task-adapter').then(module => (
+    module.executeAdoptedAgentTask(input)
+  )),
+  failDispatch: failResumedAgentExecutionDispatch,
+};
+
+export async function dispatchSkillRunExecution(input: {
+  actorUserId: string;
   runId: string;
-}): { started: true; completion: Promise<void> } {
-  const completion = (async () => {
-    const task = await getCloudTaskForUser(input.runId, input.actor.id);
-    if (!task?.projectId) throw new SkillRunNotFoundError();
-    const continuation = await (await import('./continuation')).loadPersistedSkillContinuation({
-      actorUserId: input.actor.id,
+  recoveryOnly?: boolean;
+}, dependencies: SkillRunExecutionDispatchDependencies = defaultSkillRunExecutionDispatchDependencies): Promise<SkillRunExecutionDispatchResult> {
+  const task = await dependencies.getTaskForUser(input.runId, input.actorUserId);
+  if (!task?.projectId || task.type !== 'agent-run') throw new SkillRunNotFoundError();
+  if (['completed', 'failed', 'cancelled', 'timeout'].includes(task.status)) {
+    return { started: false };
+  }
+
+  const recovery = input.recoveryOnly
+    ? await dependencies.getRecoverableDispatch({
+      actorUserId: input.actorUserId,
       projectId: task.projectId,
       runId: input.runId,
-      task,
-    });
-    const { executeAdoptedAgentTask } = await import('@/lib/agent-runtime/same-task-adapter');
-    await executeAdoptedAgentTask({
-      adoption: {
+    })
+    : null;
+
+  const continuation = await dependencies.loadContinuation({
+    actorUserId: input.actorUserId,
+    projectId: task.projectId,
+    runId: input.runId,
+    ...(recovery?.nextStepId ? { nextStepId: recovery.nextStepId } : {}),
+    task,
+  });
+  const execution = await dependencies.claimExecution({
+    actorUserId: input.actorUserId,
+    projectId: task.projectId,
+    runId: input.runId,
+    toolId: continuation.toolId,
+    ...(recovery?.leaseOwner ? { leaseOwner: recovery.leaseOwner } : {}),
+    ...(recovery ? { expectedGeneration: recovery.generation } : {}),
+  });
+  if (!execution.claimed || execution.generation === undefined) return { started: false };
+
+  const dispatch = await dependencies.claimDispatch({
+    actorUserId: input.actorUserId,
+    projectId: task.projectId,
+    runId: input.runId,
+    leaseOwner: execution.leaseOwner,
+    generation: execution.generation,
+  });
+  if (!dispatch.claimed) return { started: false };
+
+  const completion = dependencies.executeAdopted({
+    adoption: {
+      runId: input.runId,
+      reused: input.recoveryOnly === true,
+      claimed: true,
+      projection: await dependencies.getProjection({ actorUserId: input.actorUserId, runId: input.runId }),
+      tools: [],
+      actorUserId: input.actorUserId,
+      projectId: task.projectId,
+      workspace: continuation.workspace,
+      toolId: continuation.toolId,
+      requestDigest: continuation.requestDigest,
+    },
+    execute: continuation.execute,
+    ...(recovery?.nextStepId ? { resumeFromStepId: recovery.nextStepId } : {}),
+    expectedGeneration: execution.generation,
+    leaseOwner: execution.leaseOwner,
+  }).then(() => undefined).catch(async error => {
+    try {
+      await dependencies.failDispatch({
+        actorUserId: input.actorUserId,
+        projectId: task.projectId!,
         runId: input.runId,
-        reused: false,
-        claimed: true,
-        projection: await getAgentRunProjection({ actorUserId: input.actor.id, runId: input.runId }),
-        tools: [],
-        actorUserId: input.actor.id,
-        projectId: task.projectId,
+        leaseOwner: execution.leaseOwner,
+        generation: execution.generation!,
+        dispatchLeaseOwner: dispatch.dispatchLeaseOwner,
         workspace: continuation.workspace,
-        toolId: continuation.toolId,
-        requestDigest: continuation.requestDigest,
-      },
-      execute: continuation.execute,
-    });
-  })();
+        nextStepId: recovery?.nextStepId || continuation.toolId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    } catch (persistenceError) {
+      console.error('[skill-runtime] failed to persist dispatch_error', {
+        runId: input.runId,
+        code: persistenceError instanceof Error ? persistenceError.name : 'UNKNOWN',
+      });
+    }
+  });
   return { started: true, completion };
+}
+
+export async function recoverLiveSkillRunExecution(input: {
+  actorUserId: string;
+  runId: string;
+  recoveryOnly?: true;
+}): Promise<SkillRunExecutionDispatchResult> {
+  try {
+    return await dispatchSkillRunExecution({ ...input, recoveryOnly: true });
+  } catch (error) {
+    console.error('[skill-runtime] bounded recovery skipped', {
+      runId: input.runId,
+      code: error instanceof Error ? error.name : 'UNKNOWN',
+    });
+    return { started: false };
+  }
 }
 
 const runtimeService = createSkillRuntimeService();

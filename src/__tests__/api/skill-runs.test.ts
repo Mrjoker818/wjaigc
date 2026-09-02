@@ -5,8 +5,8 @@ const mocks = vi.hoisted(() => ({
   requireApiAuthOrReject: vi.fn(), createSkillRun: vi.fn(), listSkillRuns: vi.fn(),
   getSkillRun: vi.fn(), pauseSkillRun: vi.fn(), resumeSkillRun: vi.fn(),
   cancelSkillRun: vi.fn(), retrySkillStep: vi.fn(), skillRuntimeHttpError: vi.fn(),
-  startSkillRunExecution: vi.fn(),
-  failSkillRunExecution: vi.fn(),
+  dispatchSkillRunExecution: vi.fn(),
+  recoverLiveSkillRunExecution: vi.fn(),
   parseSkillRunRequest: vi.fn((value: unknown) => value),
 }));
 
@@ -20,6 +20,8 @@ describe('Skill run API', () => {
   beforeEach(() => {
     vi.resetAllMocks();
     mocks.requireApiAuthOrReject.mockResolvedValue({ user, userId: user.id });
+    mocks.dispatchSkillRunExecution.mockResolvedValue({ started: false });
+    mocks.recoverLiveSkillRunExecution.mockResolvedValue({ started: false });
     mocks.skillRuntimeHttpError.mockImplementation((error: { status?: number; code?: string; message?: string }) => ({
       status: error.status || 500,
       body: { error: { code: error.code || 'SKILL_RUN_ERROR', message: error.message || 'Skill run request failed' } },
@@ -28,7 +30,8 @@ describe('Skill run API', () => {
 
   it('creates and lists only through the authenticated actor', async () => {
     mocks.createSkillRun.mockResolvedValue({ runId: 'run-1', reused: false });
-    mocks.startSkillRunExecution.mockReturnValue({ started: true, completion: Promise.resolve() });
+    mocks.dispatchSkillRunExecution.mockResolvedValue({ started: true, completion: Promise.resolve() });
+    mocks.recoverLiveSkillRunExecution.mockResolvedValue({ started: false });
     mocks.listSkillRuns.mockResolvedValue([{ runId: 'run-1', skillId: 'preset-ecommerce-listing', skillVersion: 1 }]);
     const route = await import('@/app/api/skill-runs/route');
     const body = {
@@ -44,12 +47,14 @@ describe('Skill run API', () => {
 
     expect(created.status).toBe(201);
     expect(mocks.createSkillRun).toHaveBeenCalledWith({ actor: user, request: body });
-    expect(mocks.startSkillRunExecution).toHaveBeenCalledWith({ actor: user, runId: 'run-1' });
+    expect(mocks.dispatchSkillRunExecution).toHaveBeenCalledWith({
+      actorUserId: user.id, runId: 'run-1', recoveryOnly: false,
+    });
     expect(mocks.listSkillRuns).toHaveBeenCalledWith({ actorUserId: user.id, limit: 20 });
     expect(await listed.json()).toEqual({ runs: [expect.objectContaining({ runId: 'run-1', skillVersion: 1 })] });
   });
 
-  it('does not start provider work again for an idempotent create replay', async () => {
+  it('uses the durable recovery claim for an idempotent create replay', async () => {
     mocks.createSkillRun.mockResolvedValue({ runId: 'run-1', reused: true });
     const route = await import('@/app/api/skill-runs/route');
     const body = {
@@ -64,16 +69,17 @@ describe('Skill run API', () => {
     }));
 
     expect(response.status).toBe(200);
-    expect(mocks.startSkillRunExecution).not.toHaveBeenCalled();
+    expect(mocks.dispatchSkillRunExecution).toHaveBeenCalledWith({
+      actorUserId: user.id, runId: 'run-1', recoveryOnly: true,
+    });
   });
 
-  it('persists and settles a background kickoff failure instead of only logging it', async () => {
+  it('controls a rejected dispatch completion without writing a second terminal state', async () => {
     const kickoffError = new Error('continuation failed to load');
     mocks.createSkillRun.mockResolvedValue({ runId: 'run-chat', reused: false, charged: true });
-    mocks.startSkillRunExecution.mockReturnValue({
+    mocks.dispatchSkillRunExecution.mockResolvedValue({
       started: true, completion: Promise.reject(kickoffError),
     });
-    mocks.failSkillRunExecution.mockResolvedValue({ accepted: true });
     const route = await import('@/app/api/skill-runs/route');
     const body = {
       skillId: 'ppt-master', skillVersion: 1, surface: 'simple-chat',
@@ -87,11 +93,43 @@ describe('Skill run API', () => {
     }));
 
     expect(response.status).toBe(201);
-    await vi.waitFor(() => expect(mocks.failSkillRunExecution).toHaveBeenCalledWith({
-      actorUserId: user.id, runId: 'run-chat', error: kickoffError,
-    }));
-    expect(mocks.startSkillRunExecution).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() => expect(mocks.dispatchSkillRunExecution).toHaveBeenCalledTimes(1));
+    await new Promise(resolve => setTimeout(resolve, 0));
     expect(mocks.createSkillRun).toHaveBeenCalledTimes(1);
+  });
+
+  it('bounds list recovery to the first 20 owned runs', async () => {
+    mocks.listSkillRuns.mockResolvedValue(Array.from({ length: 25 }, (_, index) => ({
+      runId: `run-${index + 1}`, skillId: 'preset-ecommerce-listing', skillVersion: 1,
+    })));
+    const route = await import('@/app/api/skill-runs/route');
+
+    const response = await route.GET(new NextRequest('http://localhost/api/skill-runs?limit=25'));
+
+    expect(response.status).toBe(200);
+    expect(mocks.recoverLiveSkillRunExecution).toHaveBeenCalledTimes(20);
+    expect(mocks.recoverLiveSkillRunExecution).toHaveBeenNthCalledWith(1, {
+      actorUserId: user.id, runId: 'run-1', recoveryOnly: true,
+    });
+    expect(mocks.recoverLiveSkillRunExecution).toHaveBeenLastCalledWith({
+      actorUserId: user.id, runId: 'run-20', recoveryOnly: true,
+    });
+  });
+
+  it('attempts one bounded recovery for an owned single-run GET', async () => {
+    mocks.getSkillRun.mockResolvedValue({ runId: 'run-1', skillId: 'preset-ecommerce-listing', skillVersion: 1 });
+    const route = await import('@/app/api/skill-runs/[runId]/route');
+
+    const response = await route.GET(
+      new NextRequest('http://localhost/api/skill-runs/run-1'),
+      { params: Promise.resolve({ runId: 'run-1' }) },
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.recoverLiveSkillRunExecution).toHaveBeenCalledOnce();
+    expect(mocks.recoverLiveSkillRunExecution).toHaveBeenCalledWith({
+      actorUserId: user.id, runId: 'run-1', recoveryOnly: true,
+    });
   });
 
   it.each(['pause', 'resume', 'cancel'] as const)('authorizes %s control by actor', async action => {

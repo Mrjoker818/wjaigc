@@ -122,6 +122,53 @@ export interface AgentExecutionDispatchClaim {
   attempt: number;
 }
 
+export interface RecoverableAgentExecutionDispatch {
+  leaseOwner: string;
+  generation: number;
+  toolId: string;
+  nextStepId?: string;
+}
+
+export async function getRecoverableAgentExecutionDispatch(input: {
+  actorUserId: string;
+  projectId: string;
+  runId: string;
+  now?: number;
+}): Promise<RecoverableAgentExecutionDispatch | null> {
+  const actorUserId = validateIdentifier('actorUserId', input.actorUserId);
+  const projectId = validateIdentifier('projectId', input.projectId);
+  const runId = validateIdentifier('runId', input.runId);
+  const now = input.now ?? Date.now();
+  const result = await getPool().query<{
+    lease_owner: string;
+    generation: number;
+    tool_id: string;
+    next_step_id: string;
+  }>(
+    `SELECT lease.lease_owner, lease.generation, lease.tool_id, lease.next_step_id
+     FROM wujie_agent_execution_leases lease
+     JOIN cloud_tasks task
+       ON task.id = lease.task_id
+      AND task.user_id = lease.owner_id
+      AND task.project_id = lease.project_id
+     WHERE lease.task_id = $1 AND lease.owner_id = $2 AND lease.project_id = $3
+       AND task.type = 'agent-run'
+       AND task.status NOT IN ('completed', 'failed', 'cancelled', 'timeout')
+       AND lease.completed_at = 0 AND lease.paused_at = 0
+       AND (lease.dispatch_lease_owner = '' OR lease.dispatch_lease_expires_at <= $4)
+     LIMIT 1`,
+    [runId, actorUserId, projectId, now],
+  );
+  const row = result.rows[0];
+  if (!row) return null;
+  return {
+    leaseOwner: row.lease_owner || '',
+    generation: Number(row.generation),
+    toolId: row.tool_id,
+    ...(row.next_step_id ? { nextStepId: row.next_step_id } : {}),
+  };
+}
+
 export async function claimResumedAgentExecutionDispatch(input: {
   actorUserId: string;
   projectId: string;
@@ -221,8 +268,15 @@ export async function failResumedAgentExecutionDispatch(input: {
        SET dispatch_lease_owner = '', dispatch_lease_expires_at = 0,
            dispatch_error = $7, updated_at = $8
        WHERE task_id = $1 AND owner_id = $2 AND project_id = $3
-         AND lease_owner = $4 AND generation = $5
+         AND generation = $5
          AND dispatch_lease_owner = $6 AND completed_at = 0
+         AND EXISTS (
+           SELECT 1 FROM cloud_tasks task
+           WHERE task.id = wujie_agent_execution_leases.task_id
+             AND task.user_id = wujie_agent_execution_leases.owner_id
+             AND task.project_id = wujie_agent_execution_leases.project_id
+             AND task.status NOT IN ('completed', 'failed', 'cancelled', 'timeout')
+         )
        RETURNING task_id`,
       [input.runId, input.actorUserId, input.projectId, input.leaseOwner,
         input.generation, input.dispatchLeaseOwner, input.error, now],

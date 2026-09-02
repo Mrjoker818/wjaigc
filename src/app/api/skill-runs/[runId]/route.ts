@@ -5,6 +5,7 @@ import {
   cancelSkillRun,
   getSkillRun,
   pauseSkillRun,
+  recoverLiveSkillRunExecution,
   resumeSkillRun,
   SkillRunRequestError,
   skillRuntimeHttpError,
@@ -20,7 +21,13 @@ export async function GET(request: NextRequest, context: SkillRunRouteContext): 
   if (auth instanceof NextResponse) return auth;
   try {
     const { runId } = await context.params;
-    return NextResponse.json({ run: await getSkillRun({ actorUserId: auth.user.id, runId }) });
+    const run = await getSkillRun({ actorUserId: auth.user.id, runId });
+    await recoverLiveSkillRunExecution({
+      actorUserId: auth.user.id,
+      runId,
+      recoveryOnly: true,
+    });
+    return NextResponse.json({ run });
   } catch (error) {
     const response = skillRuntimeHttpError(error);
     return NextResponse.json(response.body, { status: response.status });
