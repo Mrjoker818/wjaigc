@@ -47,3 +47,33 @@
 - 模板使用 `Object.prototype.hasOwnProperty.call`，不会从对象原型链取值；替换完成后再次扫描占位符，避免占位符注入残留。
 - 质量门禁无网络、时间、随机数或外部状态依赖；未知门禁不可能静默通过。
 - 修改未接入任何运行表面，未修改 `stable`，未推送，也未触碰任务开始前已有的未跟踪项。
+
+## 审查修复：4 Important + 1 Minor（2026-09-02）
+
+### RED
+
+- 先仅扩充 `src/__tests__/lib/skill-runtime-inputs.test.ts`，未修改生产实现。
+- 命令：`pnpm exec vitest run src/__tests__/lib/skill-runtime-inputs.test.ts src/__tests__/lib/skill-runtime-quality.test.ts`
+- 结果：exit 1；31 个测试中 15 个失败、16 个通过。
+- 失败准确覆盖：定制原型 raw 被接受、非法 `maximumItems` 静默绕过、默认值未参与 512 KiB 门禁、循环/BigInt/function/symbol/undefined 被 JSON.stringify 丢弃或泄漏无字段错误、模板值泄漏原生 TypeError/输出 undefined、`{{}}` 与 `{{product` 未被识别。
+
+### 最小实现
+
+- `resolveSkillInputs()` 仅接受 `Object.prototype` 或 null prototype 的普通对象；字段读取改用 `Object.hasOwn()`，定制原型值不能满足必填。
+- 新增 `SKILL_INPUT_INVALID_DEFINITION`；`maximumItems` 只有有限非负整数合法，最终图片上限始终取其与全局 16 的较小值。
+- 对每个实际解析值执行严格 JSON 树遍历：拒绝循环、BigInt、function、symbol、非有限数字、undefined 容器成员、稀疏数组、访问器、非普通对象及会被 JSON 静默忽略的自有键；共享但不循环的引用保持合法。
+- 缺席 optional 仍作为输出顶层 `undefined` 保留；完整解析输出（包括默认值）重新 JSON 序列化并执行 512 KiB UTF-8 门禁。
+- `compileSkillPrompt()` 新增 `SKILL_PROMPT_INVALID_VALUE`，所有不可严格 JSON 序列化的模板值统一抛 `SkillPromptError`；占位符改为顺序扫描，拒绝空占位符、未闭合占位符和替换后残留。
+
+### GREEN 与验证
+
+- Task 2：`pnpm exec vitest run src/__tests__/lib/skill-runtime-inputs.test.ts src/__tests__/lib/skill-runtime-quality.test.ts`，exit 0；2 个文件、31 个测试通过。
+- Task 1 兼容：`pnpm exec vitest run src/__tests__/lib/skill-runtime-catalog.test.ts src/__tests__/scripts/stage-4-inventory.test.ts src/__tests__/components/simple-chat-model-selector-contract.test.ts`，exit 0；3 个文件、14 个测试通过。
+- TypeScript：`pnpm exec tsc -p tsconfig.json --noEmit`，exit 0。
+- 限定 ESLint：原 Task 2 六个源码/测试文件，exit 0，0 errors，0 warnings。
+
+### 本轮风险与自审
+
+- 严格 JSON 合同刻意拒绝 Date、Map、Set、类实例、访问器和带额外自有属性的数组；这些值不是 JSON 数据模型，调用方需先归一化。
+- 512 KiB 检查现在针对最终输出，替代初版仅检查 raw 的说明；因此默认值不能再扩大绕过总量门禁。
+- 未修改质量门禁、catalog、inventory、UI、API、Agent、节点或 `stable`；任务开始前已有的四个未跟踪保护项保持未暂存、未修改。

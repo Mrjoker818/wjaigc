@@ -4,7 +4,10 @@ import {
   SkillInputError,
   resolveSkillInputs,
 } from '@/lib/skill-runtime/input-resolver';
-import { compileSkillPrompt } from '@/lib/skill-runtime/prompt-compiler';
+import {
+  compileSkillPrompt,
+  SkillPromptError,
+} from '@/lib/skill-runtime/prompt-compiler';
 import type { SkillDefinition, SkillInputField } from '@/lib/skill-runtime/types';
 
 function createDefinition(inputs: readonly SkillInputField[]): SkillDefinition {
@@ -120,6 +123,19 @@ describe('resolveSkillInputs', () => {
     );
   });
 
+  it('顶层 raw 必须是普通对象且继承属性不能满足必填字段', () => {
+    const inherited = Object.create({ product: '继承耳机' }) as Record<string, unknown>;
+
+    expectInputError(
+      () => resolveSkillInputs(definition, inherited),
+      'SKILL_INPUT_INVALID_TYPE',
+    );
+    expectInputError(
+      () => resolveSkillInputs(definition, [] as unknown as Record<string, unknown>),
+      'SKILL_INPUT_INVALID_TYPE',
+    );
+  });
+
   it('限制文本为 16384 字符并拒绝非有限数字', () => {
     expect(resolveSkillInputs(definition, { product: 'x'.repeat(16_384) }).product)
       .toHaveLength(16_384);
@@ -153,6 +169,43 @@ describe('resolveSkillInputs', () => {
       }),
       'SKILL_INPUT_LIMIT_EXCEEDED',
       'imageVersionIds',
+    );
+  });
+
+  it.each([
+    Number.NaN,
+    '3',
+    2.5,
+    -1,
+  ])('拒绝非法 maximumItems 定义 %p', maximumItems => {
+    const invalidDefinition = createDefinition([{
+      key: 'images',
+      label: 'Images',
+      kind: 'images',
+      required: true,
+      maximumItems: maximumItems as number,
+    }]);
+
+    expectInputError(
+      () => resolveSkillInputs(invalidDefinition, { images: ['ver-1'] }),
+      'SKILL_INPUT_INVALID_DEFINITION',
+      'images',
+    );
+  });
+
+  it('maximumItems 大于全局上限时仍限制为 16', () => {
+    const looseDefinition = createDefinition([{
+      key: 'images',
+      label: 'Images',
+      kind: 'images',
+      required: true,
+      maximumItems: 100,
+    }]);
+
+    expectInputError(
+      () => resolveSkillInputs(looseDefinition, { images: Array(17).fill('ver') }),
+      'SKILL_INPUT_LIMIT_EXCEEDED',
+      'images',
     );
   });
 
@@ -190,6 +243,68 @@ describe('resolveSkillInputs', () => {
         payload: [{ value: `${exact[0].value}x` }],
       }),
       'SKILL_INPUT_SERIALIZED_LIMIT_EXCEEDED',
+    );
+  });
+
+  it('默认值也必须重新执行 512 KiB UTF-8 门禁', () => {
+    const oversizedDefault = createDefinition([{
+      key: 'dataset',
+      label: 'Dataset',
+      kind: 'dataset',
+      required: false,
+      defaultValue: [{ value: '界'.repeat(180_000) }],
+    }]);
+
+    expectInputError(
+      () => resolveSkillInputs(oversizedDefault, {}),
+      'SKILL_INPUT_SERIALIZED_LIMIT_EXCEEDED',
+    );
+  });
+
+  it('拒绝输出内部无法严格 JSON 序列化的值并保留缺席 optional 的 undefined', () => {
+    const circular: Record<string, unknown> = {};
+    circular.self = circular;
+    const invalidValues: unknown[] = [
+      circular,
+      { value: BigInt(1) },
+      { value: () => 'hidden' },
+      { value: Symbol('hidden') },
+      { value: undefined },
+      { value: [undefined] },
+    ];
+
+    for (const row of invalidValues) {
+      expectInputError(
+        () => resolveSkillInputs(definition, { product: '耳机', dataset: [row] }),
+        'SKILL_INPUT_INVALID_VALUE',
+        'dataset',
+      );
+    }
+
+    const optionalDefinition = createDefinition([{
+      key: 'image',
+      label: 'Image',
+      kind: 'image',
+      required: false,
+    }]);
+    const resolved = resolveSkillInputs(optionalDefinition, {});
+    expect(Object.hasOwn(resolved, 'image')).toBe(true);
+    expect(resolved.image).toBeUndefined();
+  });
+
+  it('默认值内部的非 JSON 值也返回稳定输入错误', () => {
+    const invalidDefault = createDefinition([{
+      key: 'dataset',
+      label: 'Dataset',
+      kind: 'dataset',
+      required: false,
+      defaultValue: [{ value: () => 'hidden' }],
+    }]);
+
+    expectInputError(
+      () => resolveSkillInputs(invalidDefault, {}),
+      'SKILL_INPUT_INVALID_VALUE',
+      'dataset',
     );
   });
 
@@ -248,5 +363,37 @@ describe('compileSkillPrompt', () => {
       code: 'SKILL_PROMPT_UNRESOLVED',
       field: 'injected',
     }));
+  });
+
+  it.each([
+    ['circular', (() => {
+      const value: Record<string, unknown> = {};
+      value.self = value;
+      return value;
+    })()],
+    ['bigint', BigInt(1)],
+    ['function', () => 'hidden'],
+    ['symbol', Symbol('hidden')],
+    ['undefined', undefined],
+  ])('对 %s 模板值返回稳定 SkillPromptError', (_label, value) => {
+    try {
+      compileSkillPrompt('值：{{value}}', { value });
+      throw new Error('Expected compileSkillPrompt to throw');
+    } catch (error) {
+      expect(error).toBeInstanceOf(SkillPromptError);
+      expect(error).toMatchObject({
+        code: 'SKILL_PROMPT_INVALID_VALUE',
+        field: 'value',
+      });
+    }
+  });
+
+  it.each([
+    '空占位符 {{}}',
+    '缺少闭合 {{product',
+  ])('拒绝残缺占位符：%s', template => {
+    expect(() => compileSkillPrompt(template, { product: '耳机' })).toThrowError(
+      expect.objectContaining({ code: 'SKILL_PROMPT_UNRESOLVED' }),
+    );
   });
 });
