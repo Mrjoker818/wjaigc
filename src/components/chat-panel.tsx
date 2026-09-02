@@ -43,23 +43,19 @@ import {
 } from '@/lib/asset-core/workspace-transfer';
 import { AgentProgressTimeline } from '@/components/agent-runtime/AgentProgressTimeline';
 import { useAgentRunEvents } from '@/components/agent-runtime/use-agent-run-events';
-import { CANVAS_PRESET_CHAT_SKILLS } from '@/lib/skill-runtime/canvas-presets';
+import { SkillInputFields } from '@/components/skill-runtime/SkillInputFields';
+import { SkillRunProgress } from '@/components/skill-runtime/SkillRunProgress';
+import { useSkillRun } from '@/components/skill-runtime/use-skill-run';
+import {
+  copyCanvasSkill,
+  loadCanvasSkillCatalog,
+  loadCompletedCanvasSkillAssets,
+  updateCanvasSkill,
+} from '@/lib/skill-runtime/canvas-client';
+import type { SkillRunRequest } from '@/lib/skill-runtime/run-request';
+import type { SkillDefinition, SkillModelBinding } from '@/lib/skill-runtime/types';
 
 const CHAT_RENDER_WINDOW = 80;
-
-interface ChatSkill {
-  id: string;
-  name: string;
-  category: string; // 'image' | 'design' | 'brand' | 'editing' | 'custom'
-  description: string;
-  systemPrompt: string;
-  agentId?: string; // 关联的智能体ID
-  paramSlots: { name: string; label: string; defaultValue?: string; placeholder?: string }[];
-  steps: { role: 'user' | 'assistant'; content: string }[];
-  createdAt: number;
-  updatedAt: number;
-  usageCount: number;
-}
 
 interface Message {
   id: string;
@@ -1333,15 +1329,34 @@ export function ChatPanel({ themeStyle, projectId, onAddToPrompt, onAddImages, o
   const [showAgentBuilder, setShowAgentBuilder] = useState(false);
   const [editingAgent, setEditingAgent] = useState<typeof AGENTS[0] | null>(null);
   // Skills 相关状态
-  const [chatSkills, setChatSkills] = useState<ChatSkill[]>([]);
+  const [chatSkills, setChatSkills] = useState<SkillDefinition[]>([]);
+  const [skillCatalogError, setSkillCatalogError] = useState<string>();
   const [showSkillSaveDialog, setShowSkillSaveDialog] = useState(false);
   const [skillSaveName, setSkillSaveName] = useState('');
-  const [skillSaveCategory, setSkillSaveCategory] = useState<string>('custom');
   const [skillSaveDescription, setSkillSaveDescription] = useState('');
   const [skillSearchQuery, setSkillSearchQuery] = useState('');
   const [skillCategoryFilter, setSkillCategoryFilter] = useState('');
-  const [activeSkill, setActiveSkill] = useState<ChatSkill | null>(null);
-  const [skillParamValues, setSkillParamValues] = useState<Record<string, string>>({});
+  const [activeSkill, setActiveSkill] = useState<SkillDefinition | null>(null);
+  const [skillParamValues, setSkillParamValues] = useState<Record<string, unknown>>({});
+  const skillRun = useSkillRun();
+  const resetSkillRun = skillRun.reset;
+  const activeCanvasSkillRunRef = useRef<{
+    runId: string;
+    projectId: string;
+    sourceVersionIds: string[];
+    sourceImageId?: string;
+  } | null>(null);
+  const projectedCanvasSkillRunIdsRef = useRef<Set<string>>(new Set());
+  const projectedCanvasSkillAssetVersionIdsRef = useRef<Set<string>>(new Set());
+  const skillProjectionAttemptCountsRef = useRef<Map<string, number>>(new Map());
+  const [skillProjectionRetry, setSkillProjectionRetry] = useState(0);
+  const skillProjectionControllerRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    skillProjectionControllerRef.current?.abort();
+    activeCanvasSkillRunRef.current = null;
+    resetSkillRun();
+  }, [projectId, resetSkillRun]);
 
   // ===== 聊天数据跨设备持久化（服务器同步，避免换电脑/换浏览器后数据丢失） =====
   const isChatUserLoggedIn = useCallback(() => {
@@ -1746,97 +1761,95 @@ export function ChatPanel({ themeStyle, projectId, onAddToPrompt, onAddImages, o
     return () => { cancelled = true; };
   }, [loadChatKeyFromServer]);
 
-  // ===== Lovart 风格预设 Skills =====
-  const LOVART_PRESET_SKILLS: ChatSkill[] = useMemo(() => CANVAS_PRESET_CHAT_SKILLS, []);
-
-  // 加载 Skills（合并预置+用户自定义，登录用户优先从服务器恢复自定义技能）
-  useEffect(() => {
-    let cancelled = false;
-    const init = async () => {
-      let userSkills: ChatSkill[] = [];
-      try {
-        const stored = localStorage.getItem('chat-skills');
-        if (stored) userSkills = JSON.parse(stored);
-      } catch {
-        // ignore
-      }
-      try {
-        const serverSkills = await loadChatKeyFromServer('chat_skills');
-        if (!cancelled && Array.isArray(serverSkills) && serverSkills.length > 0) {
-          userSkills = serverSkills as ChatSkill[];
-          try { localStorage.setItem('chat-skills', JSON.stringify(userSkills)); } catch {}
-        }
-      } catch {
-        // 服务器不可用时保留本地技能
-      }
-      if (cancelled) return;
-      const userSkillIds = new Set(userSkills.map(s => s.id));
-      const merged = [...LOVART_PRESET_SKILLS.filter(s => !userSkillIds.has(s.id)), ...userSkills];
-      setChatSkills(merged);
-    };
-    void init();
-    return () => { cancelled = true; };
-  }, [LOVART_PRESET_SKILLS, loadChatKeyFromServer]);
-
-  // 保存 Skills
-  const saveSkills = useCallback((skills: ChatSkill[]) => {
-    setChatSkills(skills);
+  const loadCanvasSkills = useCallback(async (signal?: AbortSignal): Promise<void> => {
     try {
-      localStorage.setItem('chat-skills', JSON.stringify(skills));
-    } catch {}
-    scheduleChatSync('chat_skills', skills);
-  }, [scheduleChatSync]);
-
-  // 保存当前对话为 Skill
-  const handleSaveAsSkill = useCallback(() => {
-    if (!skillSaveName.trim()) return;
-    const agent = allAgents.find(a => a.id === systemPrompt);
-    const steps = messages
-      .filter(m => m.role === 'user' || m.role === 'assistant')
-      .slice(-6) // 取最近6条作为步骤参考
-      .map(m => ({ role: m.role, content: m.content.substring(0, 200) }));
-
-    // 自动提取参数槽位 - 从用户消息中提取变量模式
-    const paramSlots: ChatSkill['paramSlots'] = [];
-    const userMessages = messages.filter(m => m.role === 'user');
-    if (userMessages.length > 0) {
-      const firstMsg = userMessages[0].content;
-      // 如果第一条消息包含具体描述，将其标记为主题参数
-      if (firstMsg.length > 4) {
-        paramSlots.push({
-          name: 'topic',
-          label: '主题内容',
-          defaultValue: firstMsg.substring(0, 50),
-          placeholder: '输入新的主题内容...',
-        });
+      const skills = await loadCanvasSkillCatalog(fetch, signal);
+      if (!signal?.aborted) {
+        setChatSkills(skills);
+        setSkillCatalogError(undefined);
+      }
+    } catch (error) {
+      if (!signal?.aborted) {
+        setSkillCatalogError(error instanceof Error ? error.message : 'Canvas Skill 目录加载失败');
       }
     }
+  }, []);
 
-    const newSkill: ChatSkill = {
-      id: `skill-${Date.now()}`,
-      name: skillSaveName.trim(),
-      category: skillSaveCategory,
-      description: skillSaveDescription.trim() || `从对话"${currentSessionId}"提炼的技能`,
-      systemPrompt: agent?.prompt || systemPrompt,
-      agentId: agent?.id,
-      paramSlots,
-      steps,
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-      usageCount: 0,
-    };
-    saveSkills([...chatSkills, newSkill]);
-    setShowSkillSaveDialog(false);
-    setSkillSaveName('');
-    setSkillSaveCategory('custom');
-    setSkillSaveDescription('');
-  }, [skillSaveName, skillSaveCategory, skillSaveDescription, messages, systemPrompt, allAgents, chatSkills, saveSkills, currentSessionId]);
+  // Canvas 目录以统一 Skill API 为唯一真相；兼容迁移由服务端负责。
+  useEffect(() => {
+    const controller = new AbortController();
+    void loadCanvasSkills(controller.signal);
+    return () => controller.abort();
+  }, [loadCanvasSkills]);
+
+  // 保存当前对话为 Skill
+  const handleSaveAsSkill = useCallback(async (): Promise<void> => {
+    if (!skillSaveName.trim() || !activeSkill) {
+      toast.error('请先选择一个 Canvas Skill 作为保存模板');
+      return;
+    }
+    try {
+      const conversationSummary = messages.slice(-6)
+        .map(message => `${message.role === 'user' ? '用户' : '助手'}：${message.content}`)
+        .join('\n')
+        .slice(0, 2_000);
+      const copy = await copyCanvasSkill(activeSkill.id);
+      await updateCanvasSkill(copy.id, {
+        enabled: true,
+        name: skillSaveName.trim(),
+        description: skillSaveDescription.trim() || conversationSummary || activeSkill.description,
+      });
+      await loadCanvasSkills();
+      setShowSkillSaveDialog(false);
+      setSkillSaveName('');
+      setSkillSaveDescription('');
+      toast.success('Skill 已同步到服务器');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '保存 Skill 失败');
+    }
+  }, [activeSkill, loadCanvasSkills, messages, skillSaveDescription, skillSaveName]);
 
   // 使用 Skill 创建新对话
   // 删除 Skill
-  const handleDeleteSkill = useCallback((skillId: string) => {
-    saveSkills(chatSkills.filter(s => s.id !== skillId));
-  }, [chatSkills, saveSkills]);
+  const handleDeleteSkill = useCallback(async (skillId: string): Promise<void> => {
+    try {
+      await updateCanvasSkill(skillId, { enabled: false });
+      setChatSkills(current => current.filter(skill => skill.id !== skillId));
+      if (activeSkill?.id === skillId) {
+        skillProjectionControllerRef.current?.abort();
+        activeCanvasSkillRunRef.current = null;
+        setActiveSkill(null);
+        skillRun.reset();
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '删除 Skill 失败');
+    }
+  }, [activeSkill?.id, skillRun]);
+
+  const handleToggleSkill = useCallback(async (skill: SkillDefinition): Promise<void> => {
+    try {
+      const updated = await updateCanvasSkill(skill.id, { enabled: !skill.enabled });
+      setChatSkills(current => current.map(item => item.id === skill.id ? updated : item));
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '更新 Skill 失败');
+    }
+  }, []);
+
+  const handleClearUserSkills = useCallback(async (): Promise<void> => {
+    try {
+      const userSkills = chatSkills.filter(skill => !skill.builtIn && skill.enabled);
+      await Promise.all(userSkills.map(skill => updateCanvasSkill(skill.id, { enabled: false })));
+      setChatSkills(current => current.filter(skill => skill.builtIn));
+      if (activeSkill && !activeSkill.builtIn) {
+        skillProjectionControllerRef.current?.abort();
+        activeCanvasSkillRunRef.current = null;
+        setActiveSkill(null);
+        skillRun.reset();
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '清空 Skills 失败');
+    }
+  }, [activeSkill, chatSkills, skillRun]);
   const [showHistoryPanel, setShowHistoryPanel] = useState(false);
   const [showFilePanel, setShowFilePanel] = useState(false);
   const [showImagePicker, setShowImagePicker] = useState(false);
@@ -2577,16 +2590,6 @@ export function ChatPanel({ themeStyle, projectId, onAddToPrompt, onAddImages, o
 3. **自动规划**：用户说"帮我做一套电商主图"，你应该自动规划生成多张不同角度/场景的图片
 4. **生成优先**：当用户意图是创作类（画图、做视频、修图），优先调用工具，不要只给文字建议
 5. **结果导向**：完成工具调用后，简短说明已完成的操作，引导用户继续指令`;
-      }
-
-      // ★ Lovart 风格：Skill 上下文注入到 systemPrompt（不污染用户消息显示）
-      if (activeSkill && messages.length === 0) {
-        const paramParts = activeSkill.paramSlots
-          ?.filter(p => skillParamValues[p.name])
-          .map(p => `${p.label}: ${skillParamValues[p.name]}`)
-          .filter(Boolean);
-        const paramStr = paramParts && paramParts.length > 0 ? `\n用户填写的参数：${paramParts.join('、')}` : '';
-        enhancedSystemPrompt += `\n\n【当前激活技能：${activeSkill.name}】${activeSkill.description ? `\n技能说明：${activeSkill.description}` : ''}${paramStr}\n\n你是专业设计总监。请按以下流程引导用户：\n1. 先分析用户需求，理解核心意图\n2. 输出专业设计方案和风格方向建议，等用户确认\n3. 确认后再执行生成，不要直接开始生成图片`;
       }
 
       // P0-3: 注入智能体能力信息（工具+配方）
@@ -3524,7 +3527,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
             }
           })();
         }
-      } else if (!hasToolGeneratedImages && (pendingImages.length > 0 || (activeSkill && ['image', 'design'].includes(activeSkill.category)))) {
+      } else if (!hasToolGeneratedImages && pendingImages.length > 0) {
         // ====== 兜底：意图检测（既无工具调用也无 [GENERATE] 标签，但用户意图明确） ======
         const userWantsImage = isImageGenerationIntent(trimmedInput);
         if (userWantsImage) {
@@ -3753,52 +3756,159 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
       setIsLoading(false);
       abortControllerRef.current = null;
     }
-  }, [input, isLoading, isChatModelReady, messages, model, systemPrompt, isThinkingMode, saveSession, persistMessageUpdate, pendingImages, allAgents, activeMentions, brandDna, tuneContextString, activeSkill, skillParamValues, onAddImages, currentSessionId, projectId]);
+  }, [input, isLoading, isChatModelReady, messages, model, systemPrompt, isThinkingMode, saveSession, persistMessageUpdate, pendingImages, allAgents, activeMentions, brandDna, tuneContextString, onAddImages, currentSessionId, projectId]);
 
-  // Lovart 风格 Skill 调用：点击 Skill 直接创建对话并自动发送，AI 按 Skill 方法论引导用户
-  const handleUseSkill = useCallback((skill: ChatSkill) => {
-    // 1. 设置 activeSkill 标记
+  const handleUseSkill = useCallback((skill: SkillDefinition) => {
+    skillProjectionControllerRef.current?.abort();
+    activeCanvasSkillRunRef.current = null;
+    skillRun.reset();
     setActiveSkill(skill);
+    setSkillParamValues(Object.fromEntries(skill.inputs.flatMap(field => (
+      field.defaultValue === undefined ? [] : [[field.key, field.defaultValue]]
+    ))));
+  }, [skillRun]);
 
-    // 2. 构建最终 systemPrompt（优先 agentId，其次 skill.systemPrompt）
-    let skillSystemPrompt = skill.systemPrompt || '';
-    // 如果 Skill 关联了智能体，使用该智能体的 prompt
-    if (skill.agentId) {
-      const matchedAgent = allAgents.find(a => a.id === skill.agentId);
-      if (matchedAgent) {
-        skillSystemPrompt = matchedAgent.prompt;
+  const handleCloseSkill = useCallback((): void => {
+    skillProjectionControllerRef.current?.abort();
+    activeCanvasSkillRunRef.current = null;
+    skillRun.reset();
+    setActiveSkill(null);
+    setSkillParamValues({});
+  }, [skillRun]);
+
+  const buildCanvasSkillRequest = useCallback((): SkillRunRequest | null => {
+    if (!activeSkill || !projectId) return null;
+    const executionSkill = activeSkill.builtIn
+      ? activeSkill
+      : chatSkills.find(skill => skill.id === activeSkill.sourceSkillId && skill.builtIn);
+    if (!executionSkill) return null;
+    const chatSelection = availableChatModels.find(candidate => candidate.id === model);
+    const imageSelection = discoveredImageModels.find(candidate => candidate.id === imageModel);
+    const chatProviderId = chatSelection?.providerId || (model.includes('::') ? model.split('::')[0] : '');
+    const chatModelId = model.includes('::') ? model.split('::').slice(1).join('::') : model;
+    const imageProviderId = imageSelection?.providerId
+      || imageModelProviderId
+      || (imageModel.includes('::') ? imageModel.split('::')[0] : '');
+    const imageModelId = imageModel.includes('::')
+      ? imageModel.split('::').slice(1).join('::')
+      : imageModel;
+    const modelBindings: SkillRunRequest['modelBindings'] = {};
+    const roles = new Set<SkillModelBinding['role']>(executionSkill.steps.map(step => step.modelRole));
+    roles.add('orchestrator');
+    for (const role of roles) {
+      if (role === 'orchestrator' && chatProviderId && chatModelId) {
+        modelBindings.orchestrator = { providerId: chatProviderId, modelId: chatModelId };
+      } else if (role === 'image' && imageProviderId && imageModelId) {
+        modelBindings.image = { providerId: imageProviderId, modelId: imageModelId };
+      } else {
+        return null;
       }
     }
-    // 如果没有 agentId，检查是否有智能体的 skillIds 包含此 Skill
-    if (!skill.agentId) {
-      const matchedAgent = allAgents.find(a => a.skillIds?.includes(skill.id));
-      if (matchedAgent) {
-        skillSystemPrompt = matchedAgent.prompt;
+    const skillSourceVersionIds = [...new Set([
+      selectedCanvasImage?.assetVersionId,
+      ...pendingImages.map(image => image.assetVersionId),
+      ...activeMentions.map(mention => mention.assetVersionId),
+    ].filter((value): value is string => typeof value === 'string' && Boolean(value)))];
+    const contextualInputs = { ...skillParamValues };
+    for (const field of activeSkill.inputs) {
+      if (contextualInputs[field.key] !== undefined) continue;
+      if (field.kind === 'image' && skillSourceVersionIds[0]) {
+        contextualInputs[field.key] = skillSourceVersionIds[0];
+      } else if (field.kind === 'images' && skillSourceVersionIds.length > 0) {
+        contextualInputs[field.key] = skillSourceVersionIds;
       }
     }
-    // 同步更新 systemPrompt 状态
-    setSystemPrompt(skillSystemPrompt);
+    return {
+      skillId: executionSkill.id,
+      skillVersion: executionSkill.version,
+      surface: 'canvas',
+      projectId,
+      workspaceId: currentSessionId || `canvas:${projectId}`,
+      inputValues: contextualInputs,
+      sourceVersionIds: skillSourceVersionIds,
+      modelBindings,
+      idempotencyKey: typeof crypto.randomUUID === 'function'
+        ? `canvas-skill:${crypto.randomUUID()}`
+        : `canvas-skill:${Date.now()}`,
+    };
+  }, [activeMentions, activeSkill, availableChatModels, chatSkills, currentSessionId, discoveredImageModels, imageModel, imageModelProviderId, model, pendingImages, projectId, selectedCanvasImage?.assetVersionId, skillParamValues]);
 
-    // 3. 切换到聊天 tab
-    setActiveTab('chat');
+  const handleEstimateSkill = useCallback(async (): Promise<void> => {
+    const request = buildCanvasSkillRequest();
+    if (!request) {
+      toast.error('请先选择项目，并配置此 Skill 所需的聊天与图像模型');
+      return;
+    }
+    await skillRun.estimateRun(request);
+  }, [buildCanvasSkillRequest, skillRun]);
 
-    // 4. 更新使用计数
-    saveSkills(chatSkills.map(s => s.id === skill.id ? { ...s, usageCount: s.usageCount + 1, updatedAt: Date.now() } : s));
+  const handleStartSkill = useCallback(async (): Promise<void> => {
+    const request = buildCanvasSkillRequest();
+    if (!request) {
+      toast.error('请先选择项目，并配置此 Skill 所需的聊天与图像模型');
+      return;
+    }
+    skillProjectionControllerRef.current?.abort();
+    activeCanvasSkillRunRef.current = null;
+    const sourceImageId = selectedCanvasImage?.id;
+    const runId = await skillRun.startRun(request);
+    if (runId) {
+      activeCanvasSkillRunRef.current = {
+        runId,
+        projectId: request.projectId,
+        sourceVersionIds: [...request.sourceVersionIds],
+        sourceImageId,
+      };
+    }
+  }, [buildCanvasSkillRequest, selectedCanvasImage?.id, skillRun]);
 
-    // 5. 清空当前对话，创建新会话
-    setMessages([]);
-    setCurrentSessionId(`session-${Date.now()}`);
-
-    // 6. 不自动发送，而是设置输入框占位提示，等待用户描述需求
-    setInput('');
-
-    // 7. 初始化参数默认值
-    const defaultParams: Record<string, string> = {};
-    skill.paramSlots?.forEach(p => {
-      if (p.defaultValue) defaultParams[p.name] = p.defaultValue;
+  useEffect(() => {
+    const projection = skillRun.projection;
+    if (!projection || projection.status !== 'completed') return;
+    if (projection.runId !== activeCanvasSkillRunRef.current?.runId) return;
+    const context = activeCanvasSkillRunRef.current;
+    if (!context || context.projectId !== projectId || projectedCanvasSkillRunIdsRef.current.has(context.runId)) return;
+    if (!onAddGeneratedImage) {
+      toast.error('画布暂时无法接收 Skill 资产版本');
+      return;
+    }
+    const attempt = skillProjectionAttemptCountsRef.current.get(context.runId) ?? 0;
+    if (attempt >= 2) return;
+    skillProjectionAttemptCountsRef.current.set(context.runId, attempt + 1);
+    const controller = new AbortController();
+    skillProjectionControllerRef.current?.abort();
+    skillProjectionControllerRef.current = controller;
+    void loadCompletedCanvasSkillAssets({
+      projectId: context.projectId,
+      runId: context.runId,
+      sourceVersionIds: context.sourceVersionIds,
+      signal: controller.signal,
+    }).then(async references => {
+      if (
+        controller.signal.aborted
+        || activeCanvasSkillRunRef.current?.runId !== context.runId
+        || activeCanvasSkillRunRef.current.projectId !== projectId
+      ) return;
+      for (const reference of references) {
+        const assetVersionId = reference.assetVersionId;
+        if (!assetVersionId || projectedCanvasSkillAssetVersionIdsRef.current.has(assetVersionId)) continue;
+        if (controller.signal.aborted || activeCanvasSkillRunRef.current?.runId !== context.runId) return;
+        await onAddGeneratedImage(reference, { sourceImageId: context.sourceImageId });
+        projectedCanvasSkillAssetVersionIdsRef.current.add(assetVersionId);
+      }
+      projectedCanvasSkillRunIdsRef.current.add(context.runId);
+    }).catch(error => {
+      if (!controller.signal.aborted && activeCanvasSkillRunRef.current?.runId === context.runId) {
+        toast.error(error instanceof Error ? error.message : 'Skill 结果加入画布失败');
+        if ((skillProjectionAttemptCountsRef.current.get(context.runId) ?? 0) < 2) {
+          setSkillProjectionRetry(value => value + 1);
+        }
+      }
     });
-    setSkillParamValues(defaultParams);
-  }, [chatSkills, saveSkills, allAgents]);
+    return () => controller.abort();
+  }, [onAddGeneratedImage, projectId, skillProjectionRetry, skillRun.projection]);
+
+  useEffect(() => () => skillProjectionControllerRef.current?.abort(), []);
 
   // 提示词大师功能 - Agent智能体化
   const handleOptimizePrompt = useCallback(async () => {
@@ -4049,7 +4159,6 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                 onClick={() => {
                   if (messages.length >= 2) {
                     setSkillSaveName('');
-                    setSkillSaveCategory('custom');
                     setSkillSaveDescription('');
                     setShowSkillSaveDialog(!showSkillSaveDialog);
                   }
@@ -4448,7 +4557,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
               </>
             )}
             <button
-              onClick={() => { setActiveSkill(null); setSystemPrompt(''); }}
+              onClick={handleCloseSkill}
               className={`ml-auto p-0.5 rounded transition-colors ${isGold ? 'hover:bg-[#333] text-gold-muted' : 'hover:bg-gray-200 text-gray-400'}`}
               title="退出技能模式"
             >
@@ -4501,10 +4610,9 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                   );
                 }
                 return (
-                  // ★ Skill 激活状态：Lovart 风格 — 技能标签 + 引导输入
+                  // Skill 的输入和运行留在 Skills 面板，普通聊天保持独立。
                   activeSkill ? (
                     <div className="flex flex-col items-center w-full max-w-[280px]">
-                      {/* 技能图标 + 名称 */}
                       <div className={`w-12 h-12 rounded-xl mb-2 flex items-center justify-center text-xl ${
                         isGold ? 'bg-gold/10 border border-gold/20' : 'bg-blue-50 border border-blue-100'
                       }`}>
@@ -4514,39 +4622,13 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                       {activeSkill.category && (
                         <span className={`text-[10px] mb-1.5 ${themeClasses.textMuted} opacity-60`}>{activeSkill.category}</span>
                       )}
-
-                      {/* 引导提示 - Lovart 风格：告诉用户输入什么 */}
                       <div className={`w-full rounded-lg p-2.5 mb-3 text-center ${
                         isGold ? 'bg-white/[0.03] border border-white/[0.06]' : 'bg-gray-50 border border-gray-100'
                       }`}>
                         <p className={`text-xs leading-relaxed ${themeClasses.textMuted}`}>
-                          {activeSkill.paramSlots && activeSkill.paramSlots.length > 0
-                            ? activeSkill.paramSlots[0].placeholder || `输入你的需求，AI 会先分析规划再生成`
-                            : `描述你的需求，AI 会先分析规划再生成`}
+                          请在 Skills 面板填写结构化输入并运行；这里仍是普通聊天。
                         </p>
                       </div>
-
-                      {/* 参数输入 - Lovart 风格：紧凑内联 */}
-                      {activeSkill.paramSlots && activeSkill.paramSlots.length > 0 && (
-                        <div className="w-full space-y-1.5 mb-2">
-                          {activeSkill.paramSlots.map((slot) => (
-                            <div key={slot.name} className="text-left">
-                              <label className={`text-[10px] font-medium ${themeClasses.textMuted} mb-0.5 block`}>{slot.label}</label>
-                              <input
-                                type="text"
-                                value={skillParamValues[slot.name] || ''}
-                                placeholder={slot.placeholder || ''}
-                                onChange={(e) => setSkillParamValues(prev => ({ ...prev, [slot.name]: e.target.value }))}
-                                className={`w-full text-xs px-2.5 py-1.5 rounded-lg border transition-colors ${
-                                  isGold
-                                    ? 'bg-white/[0.04] border-white/[0.08] text-white placeholder:text-white/20 focus:border-gold/40 focus:outline-none'
-                                    : 'bg-white border-gray-200 text-gray-800 placeholder:text-gray-400 focus:border-blue-300 focus:outline-none'
-                                }`}
-                              />
-                            </div>
-                          ))}
-                        </div>
-                      )}
                     </div>
                   ) : (
                   <>
@@ -5883,21 +5965,6 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                   placeholder="Skill 名称..."
                   className={`w-full px-2.5 py-1.5 rounded-md text-xs mb-2 ${isGold ? 'bg-[#0d0d0d] border border-white/[0.06] text-text-bright placeholder:text-gold-muted/40' : 'bg-white border border-gray-200 text-gray-900 placeholder:text-gray-400'} focus:outline-none`}
                 />
-                <div className="flex gap-1.5 mb-2">
-                  {(['image', 'design', 'brand', 'editing', 'custom'] as const).map(cat => (
-                    <button
-                      key={cat}
-                      onClick={() => setSkillSaveCategory(cat)}
-                      className={`px-2 py-1 rounded text-[10px] font-medium transition-all ${
-                        skillSaveCategory === cat
-                          ? isGold ? 'bg-gold text-black' : 'bg-blue-500 text-white'
-                          : isGold ? 'bg-white/[0.04] text-gold-muted/60 border border-white/[0.04]' : 'bg-white text-gray-500 border border-gray-200'
-                      }`}
-                    >
-                      {{image: '图像', design: '设计', brand: '品牌', editing: '编辑', custom: '自定义'}[cat]}
-                    </button>
-                  ))}
-                </div>
                 <textarea
                   value={skillSaveDescription}
                   onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setSkillSaveDescription(e.target.value)}
@@ -5951,6 +6018,62 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
               ))}
             </div>
 
+            {skillCatalogError && (
+              <div role="alert" className="text-xs text-red-500 flex items-center justify-between gap-2">
+                <span>{skillCatalogError}</span>
+                <button type="button" onClick={() => { void loadCanvasSkills(); }}>重试</button>
+              </div>
+            )}
+
+            {activeSkill && (
+              <div className={`rounded-lg p-3 space-y-3 ${
+                isGold ? 'bg-white/[0.03] border border-gold/20' : 'bg-white border border-blue-200'
+              }`}>
+                <div className="flex items-start justify-between gap-2">
+                  <div>
+                    <div className={`text-xs font-medium ${themeClasses.text}`}>{activeSkill.name}</div>
+                    <div className={`text-[10px] mt-0.5 ${themeClasses.textMuted}`}>{activeSkill.description}</div>
+                  </div>
+                  <button
+                    type="button"
+                    title="关闭 Skill"
+                    onClick={handleCloseSkill}
+                    className={`p-1 rounded ${themeClasses.textMuted}`}
+                  >
+                    <X size={12} />
+                  </button>
+                </div>
+                <SkillInputFields
+                  fields={activeSkill.inputs}
+                  values={skillParamValues}
+                  onChange={(key, value) => setSkillParamValues(current => ({ ...current, [key]: value }))}
+                  disabled={skillRun.busy || Boolean(skillRun.runId && skillRun.projection?.status !== 'completed' && skillRun.projection?.status !== 'failed' && skillRun.projection?.status !== 'cancelled' && skillRun.projection?.status !== 'timeout')}
+                />
+                <div className="flex gap-2">
+                  <Button type="button" variant="outline" className="h-8 flex-1 text-xs" onClick={() => { void handleEstimateSkill(); }} disabled={skillRun.busy}>
+                    估算积分
+                  </Button>
+                  <Button type="button" className="h-8 flex-1 text-xs" onClick={() => { void handleStartSkill(); }} disabled={skillRun.busy}>
+                    运行 Skill
+                  </Button>
+                </div>
+                {skillRun.error && <div role="alert" className="text-xs text-red-500">{skillRun.error}</div>}
+                <SkillRunProgress
+                  estimate={skillRun.estimate}
+                  projection={skillRun.projection}
+                  retryableStepId={skillRun.retryableStepId}
+                  retryabilityError={skillRun.retryabilityError}
+                  stale={skillRun.stale}
+                  busy={skillRun.busy}
+                  onPause={() => { void skillRun.pause(); }}
+                  onResume={() => { void skillRun.resume(); }}
+                  onCancel={() => { void skillRun.cancel(); }}
+                  onRetry={stepId => { void skillRun.retry(stepId); }}
+                  onRefreshRetryability={skillRun.refreshRetryability}
+                />
+              </div>
+            )}
+
             {/* 推荐技能 — 来自 Lovart 设计方法论 */}
             {(!skillCategoryFilter || ['image', 'design', 'brand', 'storyboard'].includes(skillCategoryFilter)) && (
               <div className="space-y-1.5">
@@ -5962,11 +6085,11 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                 {(() => {
                   const categoryEmoji: Record<string, string> = { image: '🖼', design: '🎨', brand: '🏢', storyboard: '🎬', editing: '✏️', custom: '⚡' };
                   const categoryLabel: Record<string, string> = { image: '图像', design: '设计', brand: '品牌', storyboard: '分镜', editing: '编辑', custom: '自定义' };
-                  return LOVART_PRESET_SKILLS
-                    .filter((s: ChatSkill) => !skillCategoryFilter || s.category === skillCategoryFilter)
-                    .filter((s: ChatSkill) => !skillSearchQuery || s.name.includes(skillSearchQuery) || s.description.includes(skillSearchQuery))
-                    .map((skill: ChatSkill) => {
-                    const isActive = activeSkill?.id === skill.id;
+                  return chatSkills
+                    .filter(skill => skill.builtIn && skill.enabled && skill.allowedSurfaces.includes('canvas'))
+                    .filter((s: SkillDefinition) => !skillCategoryFilter || s.category === skillCategoryFilter)
+                    .filter((s: SkillDefinition) => !skillSearchQuery || s.name.includes(skillSearchQuery) || s.description.includes(skillSearchQuery))
+                    .map((skill: SkillDefinition) => {
                     return (
                       <div
                         key={skill.id}
@@ -6005,6 +6128,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
 
             {/* 我的 Skills */}
             {chatSkills
+              .filter(s => !s.builtIn)
               .filter(s => !skillCategoryFilter || s.category === skillCategoryFilter)
               .filter(s => !skillSearchQuery || s.name.includes(skillSearchQuery) || s.description.includes(skillSearchQuery))
               .length > 0 && (
@@ -6014,13 +6138,14 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                     我的 Skills
                   </div>
                   <button
-                    onClick={() => { if (confirm('确认清空所有自定义 Skills？')) saveSkills([]); }}
+                    onClick={() => { if (confirm('确认清空所有自定义 Skills？')) void handleClearUserSkills(); }}
                     className={`text-[10px] ${themeClasses.textMuted} hover:text-red-400 transition-colors`}
                   >
                     清空
                   </button>
                 </div>
                 {chatSkills
+                  .filter(s => !s.builtIn)
                   .filter(s => !skillCategoryFilter || s.category === skillCategoryFilter)
                   .filter(s => !skillSearchQuery || s.name.includes(skillSearchQuery) || s.description.includes(skillSearchQuery))
                   .map(skill => (
@@ -6054,7 +6179,20 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                       </div>
                       <div className="flex items-center gap-1 shrink-0">
                         <button
+                          type="button"
+                          onClick={() => { void handleToggleSkill(skill); }}
+                          className={`p-1 rounded transition-colors ${
+                            skill.enabled
+                              ? isGold ? 'text-green-400 hover:bg-green-400/10' : 'text-green-600 hover:bg-green-50'
+                              : themeClasses.textMuted
+                          }`}
+                          title={skill.enabled ? '停用' : '启用'}
+                        >
+                          {skill.enabled ? <Eye size={11} /> : <EyeOff size={11} />}
+                        </button>
+                        <button
                           onClick={() => handleUseSkill(skill)}
+                          disabled={!skill.enabled}
                           className={`p-1 rounded transition-colors ${
                             isGold ? 'text-gold/70 hover:text-gold hover:bg-gold/10' : 'text-blue-400 hover:text-blue-600 hover:bg-blue-50'
                           }`}
@@ -6079,7 +6217,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
             )}
 
             {/* 空状态 */}
-            {chatSkills.length === 0 && (!skillCategoryFilter || !['image', 'design', 'brand', 'storyboard'].includes(skillCategoryFilter)) && (
+            {chatSkills.every(skill => skill.builtIn) && (!skillCategoryFilter || !['image', 'design', 'brand', 'storyboard'].includes(skillCategoryFilter)) && (
               <div className={`text-center py-6 ${themeClasses.textMuted}`}>
                 <Bookmark size={20} className="mx-auto mb-2 opacity-30" />
                 <div className="text-xs">暂无自定义 Skills</div>
