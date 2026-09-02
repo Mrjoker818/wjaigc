@@ -534,3 +534,6 @@ Protected stable branch: read-only and untouched
 - Unified Skill Runtime Task 1: complete (commits `2faeec0b..1f8645cb`, review clean, Critical/Important/Minor `0/0/0`).
 - 21 个画布 Skills 已建立唯一目录并仅授权 `canvas + workflow`；16 个独立智能对话 Skills 仅授权 `simple-chat`。迁移前内容、完整 ID、403/404 合同及 Stage 4 精确 37 项清单均有永久回归测试。
 - 下一唯一动作：Task 2，建立结构化输入解析、提示词编译与确定性质量门禁；不得提前接 UI、执行器或节点模式。
+- Unified Skill Runtime Task 2: complete (commits `896fd337..50888daa`, review clean, Critical/Important/Minor `0/0/0`).
+- 八类结构化输入、默认值、UTF-8 容量、原型/访问器/非枚举/Symbol 边界、模板编译和四项确定性质量门禁已受 51 项聚焦及兼容回归保护。
+- 下一唯一动作：Task 3，用户 Skill 副本、版本、启停、权限和旧 `chat_skills` 兼容持久化；不得提前修改 Agent Runtime 或 UI。
