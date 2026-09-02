@@ -1095,6 +1095,58 @@ describe('Agent runtime service', () => {
     expect(dependencies.createBillableTask).not.toHaveBeenCalled();
   });
 
+  it('does not persist an oversized raw prompt when its normalized value is within the limit', async () => {
+    const rawDependencies = serviceDependencies();
+    const normalizedDependencies = serviceDependencies();
+    const rawRequest = request({ prompt: `${' '.repeat(40_001)}x` });
+
+    await agentRuntime.createAgentRuntimeService(rawDependencies).createRun({
+      actor: user,
+      request: rawRequest,
+    });
+    await agentRuntime.createAgentRuntimeService(normalizedDependencies).createRun({
+      actor: user,
+      request: request({ prompt: 'x' }),
+    });
+
+    expect(rawDependencies.createBillableTask.mock.calls[0]?.[0].requestDigest).toBe(
+      normalizedDependencies.createBillableTask.mock.calls[0]?.[0].requestDigest,
+    );
+    expect(rawDependencies.appendEvent).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'run.created',
+      payload: expect.objectContaining({ prompt: 'x' }),
+    }));
+    expect(JSON.stringify(rawDependencies.appendEvent.mock.calls[0]?.[0])).not.toContain(
+      rawRequest.prompt,
+    );
+  });
+
+  it('uses one normalized prompt for context authorization, digest, and run.created execution data', async () => {
+    const rawDependencies = serviceDependencies();
+    const normalizedDependencies = serviceDependencies();
+    const normalizedPrompt = 'Create a poster';
+
+    await agentRuntime.createAgentRuntimeService(rawDependencies).createRun({
+      actor: user,
+      request: request({ prompt: ` \r\n${normalizedPrompt}\t ` }),
+    });
+    await agentRuntime.createAgentRuntimeService(normalizedDependencies).createRun({
+      actor: user,
+      request: request({ prompt: normalizedPrompt }),
+    });
+
+    expect(rawDependencies.authorizeContext).toHaveBeenCalledWith(expect.objectContaining({
+      request: expect.objectContaining({ prompt: normalizedPrompt }),
+    }));
+    expect(rawDependencies.createBillableTask.mock.calls[0]?.[0].requestDigest).toBe(
+      normalizedDependencies.createBillableTask.mock.calls[0]?.[0].requestDigest,
+    );
+    expect(rawDependencies.appendEvent).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'run.created',
+      payload: expect.objectContaining({ prompt: normalizedPrompt }),
+    }));
+  });
+
   it('uses only a server billing quote and does not recalculate it inside the billing boundary', async () => {
     const dependencies = serviceDependencies();
     const service = agentRuntime.createAgentRuntimeService(dependencies);

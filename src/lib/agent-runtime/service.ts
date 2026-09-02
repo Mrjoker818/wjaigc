@@ -698,23 +698,26 @@ export function createAgentRuntimeService(
       request: AgentRunRequest;
       billingQuote?: AgentRunBillingQuote;
     }): Promise<AgentRunCreateResult> {
-      readAgentPrompt(input.request.prompt);
-      const skillAdmission = input.request.skill
-        ? await authorizeSkillAgentRunRequest(input.request, {
+      const request: AgentRunRequest = {
+        ...input.request,
+        prompt: readAgentPrompt(input.request.prompt),
+      };
+      const skillAdmission = request.skill
+        ? await authorizeSkillAgentRunRequest(request, {
             actorUserId: input.actor.id,
             resolveTaskModel: dependencies.resolveTaskModel,
           })
         : null;
       await dependencies.authorizeContext({
         actorUserId: input.actor.id,
-        request: input.request,
+        request,
       });
       const model = skillAdmission?.orchestratorModel ?? await dependencies.resolveTaskModel(
-        input.request.providerId, input.request.modelId, input.actor.id,
+        request.providerId, request.modelId, input.actor.id,
       );
       const authorization = authorizeAgentTools({
-        requestedToolIds: input.request.allowedToolIds,
-        workspace: input.request.workspace,
+        requestedToolIds: request.allowedToolIds,
+        workspace: request.workspace,
         userProductTypes: userProductTypes(input.actor),
         modelCapabilities: [...toAgentModelCapabilitySet(model)],
         capabilityScope: 'orchestrator',
@@ -745,29 +748,29 @@ export function createAgentRuntimeService(
         ?? input.billingQuote?.creditCost
         ?? await dependencies.calculateCreditCost(
             'agent_edit',
-            input.request.modelId,
-            { providerId: input.request.providerId },
+            request.modelId,
+            { providerId: request.providerId },
           );
       const now = dependencies.now();
       const created = await dependencies.createBillableTask({
         userId: input.actor.id,
-        idempotencyKey: input.request.idempotencyKey,
-        requestDigest: requestDigest(input.request),
+        idempotencyKey: request.idempotencyKey,
+        requestDigest: requestDigest(request),
         creditCost,
         task: {
           id: dependencies.randomUUID(),
-          projectId: input.request.projectId,
+          projectId: request.projectId,
           type: 'agent-run',
           status: 'processing',
-          providerId: input.request.providerId,
-          model: input.request.modelId,
+          providerId: request.providerId,
+          model: request.modelId,
           progress: 0,
           label: 'Agent run',
           result: {
-            workspace: input.request.workspace,
-            workspaceId: input.request.workspaceId,
-            mode: input.request.mode,
-            context: input.request.context,
+            workspace: request.workspace,
+            workspaceId: request.workspaceId,
+            mode: request.mode,
+            context: request.context,
             allowedToolIds: authorization.tools.map(tool => tool.toolId),
           },
           createdAt: now,
@@ -781,22 +784,22 @@ export function createAgentRuntimeService(
       let createdEvent: AgentEvent;
       const createdEventInput = {
         actorUserId: input.actor.id,
-        projectId: input.request.projectId,
+        projectId: request.projectId,
         runId,
         eventId: `agent:${runId}:created`,
-        workspace: input.request.workspace,
+        workspace: request.workspace,
         type: 'run.created' as const,
         payload: {
-          workspace: input.request.workspace,
-          workspaceId: input.request.workspaceId,
-          mode: input.request.mode,
-          providerId: input.request.providerId,
-          modelId: input.request.modelId,
-          prompt: input.request.prompt,
-          sourceVersionIds: input.request.sourceVersionIds,
+          workspace: request.workspace,
+          workspaceId: request.workspaceId,
+          mode: request.mode,
+          providerId: request.providerId,
+          modelId: request.modelId,
+          prompt: request.prompt,
+          sourceVersionIds: request.sourceVersionIds,
           allowedToolIds: authorization.tools.map(tool => tool.toolId),
-          context: input.request.context,
-          ...(input.request.skill ? { skill: input.request.skill } : {}),
+          context: request.context,
+          ...(request.skill ? { skill: request.skill } : {}),
         },
       };
       try {
@@ -819,7 +822,7 @@ export function createAgentRuntimeService(
       }
       const events = await dependencies.listEvents({
         actorUserId: input.actor.id,
-        projectId: input.request.projectId,
+        projectId: request.projectId,
         runId,
       });
       return {

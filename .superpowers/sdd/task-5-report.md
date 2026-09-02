@@ -165,3 +165,66 @@ pnpm exec vitest run src/__tests__/lib/skill-runtime-catalog.test.ts src/__tests
 - 未新增第二套任务、扣费或状态机；Skill 报价最终仍只进入既有 Agent Runtime `createBillableTask`。
 - pause/resume/retry 路径未增加费用计算或扣费；Task 4 fences 回归通过。
 - 未修改 `stable`，未 push，未触碰或暂存四个保护未跟踪项。
+
+## 第二轮复审修复（2026-09-02）
+
+### RED
+
+先仅新增直接 service 回归测试并运行：
+
+```text
+pnpm exec vitest run src/__tests__/api/agent-runs.test.ts -t "normalized|oversized raw prompt"
+```
+
+结果：退出 1；2 项执行、2 项按预期失败，54 项跳过：
+
+- `40,001` 个空格加 `x` 与规范化 `x` 产生不同 `requestDigest`，证明原始超限 prompt 仍进入任务幂等身份。
+- 正常前后空白 prompt 原样进入上下文授权，且未统一为后续 `run.created` 执行数据使用的规范化值。
+
+失败来自 `createRun()` 调用 `readAgentPrompt()` 后丢弃返回值，符合本轮问题，不是测试或环境错误。
+
+### GREEN
+
+最小实现是在 `createRun()` 入口构造一次规范化 `AgentRunRequest`，随后 Skill 准入、上下文授权、模型与工具授权、费用、`requestDigest`、任务字段和 `run.created` 均只使用该对象。未改变摘要算法，也未创建第二种幂等身份。
+
+定向 GREEN：
+
+```text
+pnpm exec vitest run src/__tests__/api/agent-runs.test.ts -t "normalized|oversized raw prompt"
+```
+
+结果：退出 0；2 项通过，54 项跳过。
+
+Task 5 最终聚焦：
+
+```text
+pnpm exec vitest run src/__tests__/api/agent-runs.test.ts src/__tests__/lib/skill-runtime-run-request.test.ts src/__tests__/api/skill-run-estimate.test.ts src/__tests__/lib/agent-runtime-tools.test.ts src/__tests__/lib/agent-runtime-admission-gate.test.ts
+```
+
+结果：退出 0；5 个文件、98 项全部通过。
+
+### 回归
+
+Task 1-4、21/16 隔离和 Task 4 pause/resume/retry fences 回归：退出 0；11 个文件通过、1 个 PostgreSQL 文件跳过；195 项通过、2 项跳过。
+
+其他验证：
+
+- `pnpm ts-check`：退出 0。
+- 目标 ESLint（`service.ts` 与 `agent-runs.test.ts`）：退出 0，0 error，0 warning。
+- `git diff --check`：退出 0；仅 LF/CRLF 转换提示，无 whitespace error。
+
+### 风险
+
+- `readAgentPrompt()` 的既有语义仍是先 trim 再按规范化 UTF-8 bytes 校验；原始超长空白输入会被接受为短规范化 prompt，但原始值不再进入授权、摘要或持久事件。这是本轮明确要求的统一规范化行为。
+- 未执行真实 Agent 执行器或供应商调用；`run.created` 是当前后续执行使用的持久请求数据，本轮通过其 payload 与 digest 一致性验证。
+
+### 未验证项
+
+- `PGDATABASE_URL`、`DATABASE_URL`、`POSTGRES_TEST_DATABASE_URL` 均未设置；2 项 PostgreSQL 集成测试明确 SKIP。
+- 未扩展 Task 6、UI 或 Skill 迁移范围。
+
+### 自审
+
+- 调用方传入对象未被修改；`createRun()` 内部只生成一个规范化请求对象。
+- 相同规范化 prompt 生成相同 `requestDigest`，`run.created` 和上下文授权均使用同一 prompt。
+- 未修改 `stable`，未 push，未触碰或暂存四个保护未跟踪项。
