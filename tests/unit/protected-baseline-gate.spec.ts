@@ -68,6 +68,10 @@ const exactAgentRuntimeAuthorizations = [
 
 const historicalSourceAuthorizations = [
   ...exactAgentRuntimeAuthorizations,
+  ['migrations/20260902_unified_skill_task4_agent_controls.sql', '9226821e'],
+  ['migrations/20260902_unified_skill_task4_execution_fence.sql', '2bbd6851'],
+  ['migrations/20260903_unified_skill_task4_dispatch_lease.sql', 'b8c687d3'],
+  ['migrations/20260904_unified_skill_task4_agent_edit_descriptor.sql', 'b8c687d3'],
   ['migrations/20260821_v588_admin_thumbnail_variants.sql', 'd941384'],
   ['migrations/20260821_wj_stable_s4_historical_media_remediations.sql', 'bc74b89'],
   ['scripts/coze-deploy-build.sh', '172f38c'],
@@ -250,7 +254,30 @@ const historicalSourceAuthorizations = [
   ['src/lib/task-core/durable-generation-kickoff.ts', 'd0bf0dc3'],
 ] as const;
 
+const unifiedSkillRuntimeArtifactPaths = [
+  '.superpowers/sdd/task-5-report.md',
+  '.superpowers/sdd/task-6-report.md',
+  '.superpowers/sdd/unified-skill-task-2-report.md',
+  '.superpowers/sdd/unified-skill-task-3-report.md',
+  '.superpowers/sdd/unified-skill-task-4-report.md',
+  'migrations/20260902_unified_skill_task4_agent_controls.sql',
+  'migrations/20260902_unified_skill_task4_execution_fence.sql',
+  'migrations/20260903_unified_skill_task4_dispatch_lease.sql',
+  'migrations/20260904_unified_skill_task4_agent_edit_descriptor.sql',
+] as const;
+
 describe('protected baseline release gate', () => {
+  it('authorizes the nine reviewed unified Skill runtime artifacts by exact path', async () => {
+    const allowedPaths = JSON.parse(await readFile(
+      resolve(process.cwd(), 'docs/testing/baselines/protected-baseline-allowed-paths.json'),
+      'utf8',
+    )) as string[];
+
+    expect(unifiedSkillRuntimeArtifactPaths.filter(path => !allowedPaths.includes(path))).toEqual([]);
+    expect(allowedPaths).not.toContain('.superpowers/');
+    expect(allowedPaths).not.toContain('migrations/');
+  });
+
   it('pins the Stage 4 gate and permits only the declared Stage 4 task surfaces', async () => {
     const packageJson = JSON.parse(await readFile(resolve(process.cwd(), 'package.json'), 'utf8')) as {
       scripts: Record<string, string>;
