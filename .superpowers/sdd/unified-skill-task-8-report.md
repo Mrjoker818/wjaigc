@@ -95,3 +95,50 @@ Task 7 目录测试 `src/__tests__/lib/skill-runtime-catalog.test.ts` 的 21/16 
 - 未运行全仓 Vitest 或 build，未推送远端。
 - 已检查组件中不存在 `CANVAS_PRESET_CHAT_SKILLS`、`SIMPLE_CHAT_PRESET_SKILLS`、`chat_skills`、`surface=simple-chat` 或节点模式接线。
 - 已知关注项：最终独立复审未完成；最后两处修复后没有再次执行整组限定回归与 TypeScript 检查。
+
+## 旧目录合同迁移（HEAD 09ad037c）
+
+控制端更新 Task 8 简报后，精确授权迁移 `src/__tests__/lib/skill-runtime-catalog.test.ts` 中遗留的 Task 1 组件接线断言。本次只修改该测试并追加本报告，没有修改生产代码。
+
+### RED
+
+在修改测试前运行：
+
+```text
+pnpm exec vitest run src/__tests__/lib/skill-runtime-catalog.test.ts --reporter=verbose
+```
+
+结果：`1 file failed / 1 failed / 6 passed`。唯一失败项要求 `chat-panel.tsx` 直接导入 `CANVAS_PRESET_CHAT_SKILLS` 并声明 `LOVART_PRESET_SKILLS`；其余 21 个 Canvas、16 个 Simple Chat、surface 隔离、预设基线和 403/404 合同全部通过。
+
+### GREEN
+
+将最后一项迁移为 Task 8 API 唯一目录合同后，再次运行同一命令：`1 file passed / 7 tests passed`。新断言验证：
+
+- `chat-panel.tsx` 通过 `@/lib/skill-runtime/canvas-client` 接入目录。
+- 客户端使用精确路径 `/api/skills?surface=canvas`。
+- `chat-panel.tsx` 不直接包含 `CANVAS_PRESET_CHAT_SKILLS`。
+- `chat-panel.tsx` 不包含 `LOVART_PRESET_SKILLS` 内嵌目录。
+
+完整限定回归：
+
+```text
+pnpm exec vitest run src/__tests__/components/chat-panel-skill-runtime.test.tsx src/__tests__/components/chat-panel-skill-catalog-contract.test.ts src/__tests__/components/chat-panel-generation-recovery-contract.test.ts src/__tests__/components/agent-runtime-surface-wiring.test.ts src/__tests__/components/skill-runtime-controls.test.tsx src/__tests__/api/skills.test.ts src/__tests__/lib/skill-runtime-catalog.test.ts --reporter=verbose
+```
+
+结果：`7 files passed / 61 tests passed`。
+
+附加验收结果：
+
+- `pnpm ts-check`：通过。
+- 目标 ESLint（`chat-panel.tsx`、`canvas-client.ts`、两份 Task 8 测试及迁移后的旧目录测试）：零 error；仅 `chat-panel.tsx` 保留 50 条既有 warning。
+- `pnpm exec eslint src/__tests__/lib/skill-runtime-catalog.test.ts --max-warnings 0`：通过，零 warning。
+- `git diff --check`：通过。
+- `git diff --name-only HEAD`：仅本次授权的旧目录测试与本报告。
+- 保护基线：`HEAD` 起点为 `09ad037cde057dca4887673a08e912476d538f3a`；四个既有未跟踪项仍保持未跟踪且未纳入变更。
+
+### 范围与待审
+
+- 本次变更文件仅为 `src/__tests__/lib/skill-runtime-catalog.test.ts` 与本报告。
+- 四个既有未跟踪保护项保持不变。
+- 未运行全仓 Vitest 或 build，未推送远端。
+- 状态保持 `DONE_WITH_CONCERNS`，等待全新独立审查。

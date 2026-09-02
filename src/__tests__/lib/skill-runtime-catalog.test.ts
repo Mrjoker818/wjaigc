@@ -34,6 +34,10 @@ const chatPanelSource = readFileSync(
   resolve(process.cwd(), 'src/components/chat-panel.tsx'),
   'utf8',
 );
+const canvasClientSource = readFileSync(
+  resolve(process.cwd(), 'src/lib/skill-runtime/canvas-client.ts'),
+  'utf8',
+);
 
 describe('skill runtime catalog', () => {
   it('保留 21 个画布 Skill 并只授权 canvas/workflow', () => {
@@ -114,15 +118,14 @@ describe('skill runtime catalog', () => {
     });
   });
 
-  it('画布聊天面板复用唯一的 21 项兼容目录', () => {
+  it('画布聊天面板通过唯一的 canvas API 目录客户端加载 Skills', () => {
     expect(chatPanelSource).toContain(
-      "import { CANVAS_PRESET_CHAT_SKILLS } from '@/lib/skill-runtime/canvas-presets';",
+      "from '@/lib/skill-runtime/canvas-client';",
     );
-    expect(chatPanelSource).toContain(
-      'const LOVART_PRESET_SKILLS: ChatSkill[] = useMemo(() => CANVAS_PRESET_CHAT_SKILLS, []);',
+    expect(canvasClientSource).toContain(
+      "'/api/skills?surface=canvas'",
     );
-    expect(chatPanelSource).not.toContain(
-      'const LOVART_PRESET_SKILLS: ChatSkill[] = useMemo(() => [',
-    );
+    expect(chatPanelSource).not.toContain('CANVAS_PRESET_CHAT_SKILLS');
+    expect(chatPanelSource).not.toContain('LOVART_PRESET_SKILLS');
   });
 });
