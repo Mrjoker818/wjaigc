@@ -28,6 +28,8 @@
   ".superpowers/sdd/unified-skill-task-4-report.md",
   ".superpowers/sdd/unified-skill-task-7-brief.md",
   ".superpowers/sdd/unified-skill-task-7-report.md",
+  ".superpowers/sdd/unified-skill-task-8-brief.md",
+  ".superpowers/sdd/unified-skill-task-8-report.md",
   ".superpowers/sdd/task-simple-chat-4-report.md",
   ".superpowers/sdd/task-simple-chat-5-report.md",
   ".superpowers/sdd/task-simple-chat-7-report.md",
@@ -316,6 +318,7 @@
   "src/lib/agent-runtime/request-validation.ts",
   "src/lib/skill-runtime/canvas-presets.ts",
   "src/lib/skill-runtime/catalog.ts",
+  "src/lib/skill-runtime/canvas-client.ts",
   "src/lib/skill-runtime/continuation.ts",
   "src/lib/skill-runtime/cost-estimator.ts",
   "src/lib/skill-runtime/executor.ts",
@@ -330,5 +333,7 @@
   "src/lib/skill-runtime/storage.ts",
   "src/lib/skill-runtime/types.ts",
   "src/lib/task-core/durable-generation-kickoff.ts",
-  "src/__tests__/components/skill-runtime-controls.test.tsx"
+  "src/__tests__/components/skill-runtime-controls.test.tsx",
+  "src/__tests__/components/chat-panel-skill-runtime.test.tsx",
+  "src/__tests__/components/chat-panel-skill-catalog-contract.test.ts"
 ]
