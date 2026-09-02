@@ -540,3 +540,6 @@ Protected stable branch: read-only and untouched
 - Unified Skill Runtime Task 3: complete (commits `04206487..e196d039`, review clean, Critical/Important/Minor `0/0/0`).
 - 用户副本、版本、启停、跨用户隐藏、旧 `skill-<13位时间戳>` 幂等迁移、深度 schema、来源 surface 约束、JSONB 原子 CAS 与 8192-byte 流式 API 门禁已完成；72 项本地回归通过。
 - PostgreSQL CAS 两项因缺少 `POSTGRES_TEST_DATABASE_URL` 明确未验证；下一唯一动作：Task 4，扩展现有 Agent Runtime 的暂停、恢复、重试与进度事件，不建立第二状态机。
+- Unified Skill Runtime Task 4: complete (commits `fde1bc70..d0bf0dc3`, independent review clean, Critical/Important/Minor `0/0/0`).
+- 现有 Agent Runtime 已具备持久暂停、恢复、重试、进度事件与 chat/simple-chat/agent-edit 跨实例续跑；cloud task、downstream operation、生命周期事件均受 run generation/lease fence 保护，首次执行和恢复执行共享可中止 scope，并保留原请求超时。敏感 URL、凭据和 token 不能进入 descriptor/event。
+- 本地聚焦与相关回归、TypeScript、目标 ESLint 和 diff-check 通过；真实 PostgreSQL 迁移、CAS 与并发因缺少 `POSTGRES_TEST_DATABASE_URL` 继续明确未验证。下一唯一动作：Task 5，模型冻结、费用预估与 Skill Run 请求；不得提前接 UI 或迁移 21 个 Skills。
