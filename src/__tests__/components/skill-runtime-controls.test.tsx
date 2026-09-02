@@ -10,8 +10,16 @@ import { useSkillRun } from '@/components/skill-runtime/use-skill-run';
 import type { AgentRunProjection } from '@/lib/agent-runtime/types';
 import type { SkillDefinition, SkillInputField } from '@/lib/skill-runtime/types';
 
+interface MockAgentEventsResult {
+  projection: AgentRunProjection | undefined;
+  stale: boolean;
+  cancel: ReturnType<typeof vi.fn>;
+  pause: ReturnType<typeof vi.fn>;
+  resume: ReturnType<typeof vi.fn>;
+}
+
 const agentEvents = vi.hoisted(() => ({
-  useAgentRunEvents: vi.fn((runId: string | undefined) => {
+  useAgentRunEvents: vi.fn((runId: string | undefined): MockAgentEventsResult => {
     void runId;
     return {
       projection: undefined,
@@ -131,6 +139,79 @@ describe('SkillInputFields', () => {
     expect(onChange).not.toHaveBeenCalledWith('prompt', expect.anything());
   });
 
+  it('preserves invalid structured drafts across unrelated value updates and resets them on definition changes', () => {
+    const onChange = vi.fn();
+    const { rerender } = render(<SkillInputFields
+      fields={fields}
+      values={{ prompt: 'old', references: ['old'], rows: [{ sku: 'old' }] }}
+      onChange={onChange}
+    />);
+
+    fireEvent.change(screen.getByLabelText('参考图'), { target: { value: 'a\nb\nc' } });
+    fireEvent.change(screen.getByLabelText('数据集'), { target: { value: '{' } });
+    expect(screen.getAllByRole('alert')).toHaveLength(2);
+
+    rerender(<SkillInputFields
+      fields={[...fields]}
+      values={{ prompt: 'new', references: ['old'], rows: [{ sku: 'old' }] }}
+      onChange={onChange}
+    />);
+    expect((screen.getByLabelText('参考图') as HTMLTextAreaElement).value).toBe('a\nb\nc');
+    expect((screen.getByLabelText('数据集') as HTMLTextAreaElement).value).toBe('{');
+    expect(screen.getAllByRole('alert')).toHaveLength(2);
+
+    const nextDefinitionFields = fields.map(field => (
+      field.key === 'prompt' ? { ...field, label: '新创意描述' } : field
+    ));
+    rerender(<SkillInputFields
+      fields={nextDefinitionFields}
+      values={{ prompt: 'new', references: ['external'], rows: [{ sku: 'external' }] }}
+      onChange={onChange}
+    />);
+    expect((screen.getByLabelText('参考图') as HTMLTextAreaElement).value).toBe('external');
+    expect((screen.getByLabelText('数据集') as HTMLTextAreaElement).value)
+      .toBe(JSON.stringify([{ sku: 'external' }], null, 2));
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('shows and emits defaults for all eight field kinds', async () => {
+    const defaults: readonly SkillInputField[] = [
+      { ...fields[0], defaultValue: '默认文案' },
+      { ...fields[1], defaultValue: 'version-default' },
+      { ...fields[2], defaultValue: ['version-a', 'version-b'] },
+      { ...fields[3], defaultValue: 'brand-default' },
+      { ...fields[4], defaultValue: [{ sku: 'DEFAULT' }] },
+      { ...fields[5], defaultValue: '明亮' },
+      { ...fields[6], defaultValue: 3 },
+      { ...fields[7], defaultValue: true },
+    ];
+    const onChange = vi.fn();
+    render(<SkillInputFields fields={defaults} values={{}} onChange={onChange} />);
+
+    expect((screen.getByLabelText('创意描述') as HTMLTextAreaElement).value).toBe('默认文案');
+    expect((screen.getByLabelText('主图') as HTMLInputElement).value).toBe('version-default');
+    expect((screen.getByLabelText('参考图') as HTMLTextAreaElement).value)
+      .toBe('version-a\nversion-b');
+    expect((screen.getByLabelText('品牌套件') as HTMLInputElement).value).toBe('brand-default');
+    expect((screen.getByLabelText('数据集') as HTMLTextAreaElement).value)
+      .toBe(JSON.stringify([{ sku: 'DEFAULT' }], null, 2));
+    expect((screen.getByLabelText('风格') as HTMLSelectElement).value).toBe('明亮');
+    expect((screen.getByLabelText('数量') as HTMLInputElement).valueAsNumber).toBe(3);
+    expect((screen.getByLabelText('透明背景') as HTMLInputElement).checked).toBe(true);
+    await waitFor(() => {
+      expect(onChange.mock.calls).toEqual(expect.arrayContaining([
+        ['prompt', '默认文案'],
+        ['hero', 'version-default'],
+        ['references', ['version-a', 'version-b']],
+        ['brand', 'brand-default'],
+        ['rows', [{ sku: 'DEFAULT' }]],
+        ['style', '明亮'],
+        ['count', 3],
+        ['transparent', true],
+      ]));
+    });
+  });
+
   it('enforces object rows, row limits, finite numbers, and external draft resets', () => {
     const onChange = vi.fn();
     const { rerender } = render(<SkillInputFields
@@ -182,7 +263,7 @@ describe('SkillRunProgress', () => {
     expect(onCancel).toHaveBeenCalledOnce();
   });
 
-  it('shows persisted paused-step controls and terminal errors only when applicable', () => {
+  it('only offers failed-step retry for a retryable execution-error pause', () => {
     const onResume = vi.fn();
     const onRetry = vi.fn();
     const { rerender } = render(<SkillRunProgress
@@ -191,8 +272,16 @@ describe('SkillRunProgress', () => {
       onRetry={onRetry}
     />);
     fireEvent.click(screen.getByRole('button', { name: '继续' }));
-    fireEvent.click(screen.getByRole('button', { name: '从失败步骤重试' }));
     expect(onResume).toHaveBeenCalledOnce();
+    expect(screen.queryByRole('button', { name: '从失败步骤重试' })).toBeNull();
+
+    rerender(<SkillRunProgress
+      projection={projection({ status: 'paused', resumeFromStepId: 'render' })}
+      retryableStepId="render"
+      onResume={onResume}
+      onRetry={onRetry}
+    />);
+    fireEvent.click(screen.getByRole('button', { name: '从失败步骤重试' }));
     expect(onRetry).toHaveBeenCalledWith('render');
 
     rerender(<SkillRunProgress
@@ -207,12 +296,12 @@ describe('SkillRunProgress', () => {
         plan: [{ id: 'render', label: '生成画面', status: 'failed' }],
         error: { code: 'RENDER_FAILED', message: '生成失败', retryable: true },
       })}
+      retryableStepId="render"
       onRetry={onRetry}
     />);
     expect(screen.getByRole('alert').textContent).toContain('RENDER_FAILED');
     expect(screen.getByText('执行失败')).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: '从失败步骤重试' }));
-    expect(onRetry).toHaveBeenCalledWith('render');
+    expect(screen.queryByRole('button', { name: '从失败步骤重试' })).toBeNull();
     expect(screen.queryByRole('button', { name: '取消' })).toBeNull();
   });
 });
@@ -301,6 +390,59 @@ describe('useSkillRun', () => {
     expect(result.current.runId).toBe('run-new');
   });
 
+  it('never exposes an old or mismatched event projection during a new submission', async () => {
+    let resolveNew!: (response: Response) => void;
+    agentEvents.useAgentRunEvents.mockImplementation((eventRunId: string | undefined) => ({
+      projection: eventRunId ? projection({ runId: 'run-old' }) : undefined,
+      stale: false,
+      cancel: vi.fn(), pause: vi.fn(), resume: vi.fn(),
+    }));
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ runId: 'run-old', reused: false }))
+      .mockImplementationOnce(() => new Promise<Response>(resolve => { resolveNew = resolve; }));
+    const { result } = renderHook(() => useSkillRun({ fetcher: fetcher as typeof fetch }));
+
+    await act(async () => { await result.current.startRun(request); });
+    expect(result.current.projection?.runId).toBe('run-old');
+
+    let pending!: Promise<string | undefined>;
+    act(() => {
+      pending = result.current.startRun({ ...request, idempotencyKey: 'request-2' });
+    });
+    expect(result.current.projection).toBeUndefined();
+
+    await act(async () => {
+      resolveNew(jsonResponse({ runId: 'run-new', reused: false }));
+      await pending;
+    });
+    expect(result.current.runId).toBe('run-new');
+    expect(result.current.projection).toBeUndefined();
+  });
+
+  it('derives retryability from the exact persisted execution-error pause event', async () => {
+    const pausedProjection = projection({ status: 'paused', resumeFromStepId: 'render' });
+    agentEvents.useAgentRunEvents.mockImplementation((eventRunId: string | undefined) => ({
+      projection: eventRunId ? pausedProjection : undefined,
+      stale: false,
+      cancel: vi.fn(), pause: vi.fn(), resume: vi.fn(),
+    }));
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ runId: 'run-1', reused: false }))
+      .mockResolvedValueOnce(jsonResponse({
+        events: [{
+          eventId: 'pause-2', runId: 'run-1', sequence: 2, type: 'run.paused', timestamp: 'now',
+          payload: { nextStepId: 'render', pauseReason: 'execution-error' },
+        }],
+      }));
+    const { result } = renderHook(() => useSkillRun({ fetcher: fetcher as typeof fetch }));
+
+    await act(async () => { await result.current.startRun(request); });
+    await waitFor(() => expect(result.current.retryableStepId).toBe('render'));
+    expect(fetcher).toHaveBeenCalledWith('/api/agent-runs/run-1/events?after=0', expect.objectContaining({
+      method: 'GET',
+    }));
+  });
+
   it('isolates estimates and keeps busy true while a newer start is pending', async () => {
     let resolveEstimate!: (response: Response) => void;
     let resolveStart!: (response: Response) => void;
@@ -360,6 +502,23 @@ describe('useSkillRun', () => {
     expect(result.current.runId).toBe('run-new');
     expect(result.current.error).toBeUndefined();
     expect(result.current.busy).toBe(false);
+  });
+
+  it('treats accepted false and a missing accepted field as rejected controls', async () => {
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ runId: 'run-1', reused: false }))
+      .mockResolvedValueOnce(jsonResponse({ accepted: false }))
+      .mockResolvedValueOnce(jsonResponse({}));
+    const { result } = renderHook(() => useSkillRun({ fetcher: fetcher as typeof fetch }));
+
+    await act(async () => { await result.current.startRun(request); });
+    const callsBeforeControls = agentEvents.useAgentRunEvents.mock.calls.length;
+    await act(async () => { await expect(result.current.resume()).resolves.toBe(false); });
+    await act(async () => { await expect(result.current.retry('render')).resolves.toBe(false); });
+    const runIds = agentEvents.useAgentRunEvents.mock.calls
+      .slice(callsBeforeControls)
+      .map(call => call[0]);
+    expect(runIds).not.toContain(undefined);
   });
 
   it('aborts in-flight requests and ignores late state writes after unmount', async () => {

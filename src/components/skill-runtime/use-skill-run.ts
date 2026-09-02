@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { useAgentRunEvents } from '@/components/agent-runtime/use-agent-run-events';
-import type { AgentRunProjection } from '@/lib/agent-runtime/types';
+import type { AgentEvent, AgentRunProjection } from '@/lib/agent-runtime/types';
 import type { SkillRunCostEstimate } from '@/lib/skill-runtime/cost-estimator';
 import type { SkillRunRequest } from '@/lib/skill-runtime/run-request';
 
@@ -15,6 +15,7 @@ interface UseSkillRunResult {
   runId?: string;
   estimate?: SkillRunCostEstimate;
   projection?: AgentRunProjection;
+  retryableStepId?: string;
   stale: boolean;
   busy: boolean;
   error?: string;
@@ -30,6 +31,10 @@ interface UseSkillRunResult {
 interface ErrorPayload {
   error?: string | { message?: string };
   message?: string;
+}
+
+interface AgentEventsResponse {
+  events?: AgentEvent[];
 }
 
 function errorMessage(payload: ErrorPayload, fallback: string): string {
@@ -49,6 +54,7 @@ export function useSkillRun({ fetcher = fetch }: UseSkillRunOptions = {}): UseSk
   const [runId, setRunId] = useState<string>();
   const [eventRunId, setEventRunId] = useState<string>();
   const [estimate, setEstimate] = useState<SkillRunCostEstimate>();
+  const [retryableStepId, setRetryableStepId] = useState<string>();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
   const mounted = useRef(true);
@@ -58,6 +64,8 @@ export function useSkillRun({ fetcher = fetch }: UseSkillRunOptions = {}): UseSk
   const controllers = useRef(new Set<AbortController>());
   const startController = useRef<AbortController | undefined>(undefined);
   const estimateController = useRef<AbortController | undefined>(undefined);
+  const historyController = useRef<AbortController | undefined>(undefined);
+  const historyGeneration = useRef(0);
   const eventRefreshTimer = useRef<number | undefined>(undefined);
   const events = useAgentRunEvents(eventRunId);
 
@@ -68,6 +76,7 @@ export function useSkillRun({ fetcher = fetch }: UseSkillRunOptions = {}): UseSk
       mounted.current = false;
       startGeneration.current += 1;
       estimateGeneration.current += 1;
+      historyGeneration.current += 1;
       busyGeneration.current += 1;
       if (eventRefreshTimer.current !== undefined) {
         window.clearTimeout(eventRefreshTimer.current);
@@ -109,6 +118,45 @@ export function useSkillRun({ fetcher = fetch }: UseSkillRunOptions = {}): UseSk
     }
   }, [fetcher]);
 
+  const projection = runId
+    && eventRunId === runId
+    && events.projection?.runId === runId
+    ? events.projection
+    : undefined;
+
+  useEffect(() => {
+    historyController.current?.abort();
+    const generation = ++historyGeneration.current;
+    setRetryableStepId(undefined);
+    if (projection?.status !== 'paused' || !projection.resumeFromStepId) return;
+
+    const expectedRunId = projection.runId;
+    const expectedStepId = projection.resumeFromStepId;
+    const controller = new AbortController();
+    historyController.current = controller;
+    void request<AgentEventsResponse>(
+      `/api/agent-runs/${encodeURIComponent(expectedRunId)}/events?after=0`,
+      { method: 'GET' },
+      controller,
+    ).then(payload => {
+      const executionErrorPause = payload?.events?.some(event => (
+        event.runId === expectedRunId
+        && event.sequence === projection.lastSequence
+        && event.type === 'run.paused'
+        && event.payload.nextStepId === expectedStepId
+        && event.payload.pauseReason === 'execution-error'
+      ));
+      if (
+        mounted.current
+        && historyGeneration.current === generation
+        && executionErrorPause
+      ) {
+        setRetryableStepId(expectedStepId);
+      }
+    }).catch(() => undefined);
+    return () => controller.abort();
+  }, [projection, request]);
+
   const estimateRun = useCallback(async (
     input: SkillRunRequest,
   ): Promise<SkillRunCostEstimate | undefined> => {
@@ -148,7 +196,9 @@ export function useSkillRun({ fetcher = fetch }: UseSkillRunOptions = {}): UseSk
   const startRun = useCallback(async (input: SkillRunRequest): Promise<string | undefined> => {
     startController.current?.abort();
     estimateController.current?.abort();
+    historyController.current?.abort();
     estimateGeneration.current += 1;
+    historyGeneration.current += 1;
     const controller = new AbortController();
     startController.current = controller;
     const generation = ++startGeneration.current;
@@ -157,6 +207,8 @@ export function useSkillRun({ fetcher = fetch }: UseSkillRunOptions = {}): UseSk
       setBusy(true);
       setError(undefined);
       setEstimate(undefined);
+      setEventRunId(undefined);
+      setRetryableStepId(undefined);
     }
     try {
       const result = await request<{ runId?: string }>('/api/skill-runs', {
@@ -207,8 +259,7 @@ export function useSkillRun({ fetcher = fetch }: UseSkillRunOptions = {}): UseSk
         },
         controller,
       );
-      const accepted = result?.accepted !== false
-        && result !== undefined
+      const accepted = result?.accepted === true
         && startGeneration.current === expectedGeneration;
       if (accepted && action !== 'pause') {
         refreshEventProjection(expectedRunId, expectedGeneration);
@@ -254,8 +305,7 @@ export function useSkillRun({ fetcher = fetch }: UseSkillRunOptions = {}): UseSk
         },
         controller,
       );
-      const accepted = result?.accepted !== false
-        && result !== undefined
+      const accepted = result?.accepted === true
         && startGeneration.current === expectedGeneration;
       if (accepted) refreshEventProjection(expectedRunId, expectedGeneration);
       return accepted;
@@ -282,8 +332,10 @@ export function useSkillRun({ fetcher = fetch }: UseSkillRunOptions = {}): UseSk
   const reset = useCallback((): void => {
     startController.current?.abort();
     estimateController.current?.abort();
+    historyController.current?.abort();
     startGeneration.current += 1;
     estimateGeneration.current += 1;
+    historyGeneration.current += 1;
     busyGeneration.current += 1;
     if (eventRefreshTimer.current !== undefined) {
       window.clearTimeout(eventRefreshTimer.current);
@@ -292,6 +344,7 @@ export function useSkillRun({ fetcher = fetch }: UseSkillRunOptions = {}): UseSk
     setRunId(undefined);
     setEventRunId(undefined);
     setEstimate(undefined);
+    setRetryableStepId(undefined);
     setError(undefined);
     setBusy(false);
   }, []);
@@ -299,8 +352,9 @@ export function useSkillRun({ fetcher = fetch }: UseSkillRunOptions = {}): UseSk
   return {
     runId,
     estimate,
-    projection: events.projection,
-    stale: events.stale,
+    projection,
+    retryableStepId,
+    stale: projection ? events.stale : false,
     busy,
     error,
     estimateRun,

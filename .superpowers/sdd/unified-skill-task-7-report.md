@@ -69,3 +69,68 @@
 - `src/components/skill-runtime/use-skill-run.ts`
 - `src/__tests__/components/skill-runtime-controls.test.tsx`
 - `.superpowers/sdd/unified-skill-task-7-report.md`
+
+## 2026-09-02 审查修复：TDD RED
+
+1. 在 `skill-runtime-controls.test.tsx` 新增 5 组审查回归后运行：
+   `pnpm exec vitest run src/__tests__/components/skill-runtime-controls.test.tsx`
+   结果：RED，`6 failed / 12 passed`。六个失败分别证明：无关 `values` 更新会清除
+   非法结构化草稿、八类默认值未完整显示/回写、普通暂停误显示重试、提交期间暴露旧
+   projection、未从真实执行错误中得出重试语义、缺失 `accepted` 被误判为成功。
+2. 首轮最小实现后同命令结果为 `1 failed / 17 passed`。剩余失败来自测试 mock 每次渲染
+   构造新 projection，和真实 `useAgentRunEvents` 的稳定 state 引用不符；改用稳定 fixture 后
+   达到 `18/18`。
+3. 将草稿测试进一步收紧为“父组件重建语义相同的 `fields` 数组仍保留草稿，只有字段定义
+   语义变化才同步”后运行：
+   `pnpm exec vitest run src/__tests__/components/skill-runtime-controls.test.tsx -t "preserves invalid structured drafts"`
+   结果：RED，`1 failed / 17 skipped`，确认数组引用判断仍会误清除草稿。
+4. 将重试语义收紧为权威 `run.paused` 事件合同后运行：
+   `pnpm exec vitest run src/__tests__/components/skill-runtime-controls.test.tsx -t "exact persisted execution-error pause event"`
+   结果：RED，`1 failed / 17 skipped`，确认此前 Skill 历史近似判断没有精确消费
+   `pauseReason`。
+5. 首次运行 `pnpm ts-check` 结果：RED，2 个 TS2345；测试 hoisted mock 把 projection
+   推断为字面量 `undefined`。补充显式 `AgentRunProjection | undefined` 测试类型后修复。
+
+## 2026-09-02 审查修复：GREEN 与说明
+
+- 重试合同：核对既有 Agent reducer、pause 服务与 Skill retry 服务后，确认 projection 仅保留
+  `resumeFromStepId`，`run.paused` 事件保留 `pauseReason`，retry 只接受 paused 的持久化步骤。
+  Hook 现在读取既有 Agent events API，并要求 `runId`、`lastSequence`、`nextStepId` 全部匹配且
+  `pauseReason === 'execution-error'` 才暴露 `retryableStepId`。UI 仅在 paused 且该步骤与
+  `resumeFromStepId` 相等时显示重试；普通用户暂停和 failed 终态均不显示必然返回 400 的按钮。
+- projection 隔离：新提交开始即断开 `eventRunId`；返回值仅在 `runId === eventRunId ===
+  events.projection.runId` 时暴露 projection。历史重试语义请求也由 AbortController、generation、
+  runId 和 sequence 精确隔离。
+- 结构化草稿：images/dataset 只在对应外部有效值变化或字段定义签名变化时同步；无关字段更新、
+  语义相同字段数组的新引用不会清除未提交草稿和本地错误，真实外部字段值/定义变化仍会同步。
+- 默认值：text、image、images、brand-kit、dataset、select、number、boolean 八类统一采用与服务端
+  resolver 相同的 `value ?? defaultValue` 有效值语义，并通过 `onChange` 初始化缺失默认值，避免
+  展示、估价和执行输入分叉。
+- accepted 合同：control/retry 现在仅在 `result.accepted === true` 时成功和刷新事件订阅；测试分别
+  覆盖 `accepted: false` 与字段缺失。
+- 收紧草稿同步后的定向 GREEN：`1 passed / 17 skipped`。
+- 权威 pause 事件语义定向 GREEN：`1 passed / 17 skipped`。
+- 最终单文件 GREEN：`18/18`。
+
+## 2026-09-02 最终验证
+
+- 8 文件聚焦回归：
+  `pnpm exec vitest run src/__tests__/components/skill-runtime-controls.test.tsx src/__tests__/components/agent-progress-timeline.test.tsx src/__tests__/components/use-agent-run-events.test.ts src/__tests__/lib/skill-runtime-inputs.test.ts src/__tests__/lib/skill-runtime-run-request.test.ts src/__tests__/api/skills.test.ts src/__tests__/api/skill-run-estimate.test.ts src/__tests__/api/skill-runs.test.ts`
+  结果：`8 files / 107 tests passed`。`skill-runs` 的受控 dispatch rejection 用例保留一条设计内
+  stderr。
+- `pnpm ts-check`：exit 0，Next route typegen 与 TypeScript 均通过。
+- 目标 ESLint：
+  `pnpm exec eslint src/components/skill-runtime/SkillInputFields.tsx src/components/skill-runtime/SkillRunProgress.tsx src/components/skill-runtime/use-skill-run.ts src/__tests__/components/skill-runtime-controls.test.tsx --max-warnings 0`
+  结果：exit 0，0 warning。
+- 保护基线：
+  `pnpm check:protected-baseline -- --allow-path .playwright-cli/ --allow-path _refs-asui-canvas/ --allow-path _refs-hero-infinite-canvas/`
+  结果：`38/38` feature ID、全部受保护路径及证据合同保留，无未授权 source drift，0 warning。
+  三个临时许可精确对应任务前既有未跟踪目录，没有修改永久 allowlist。
+- `git diff --check`：exit 0；仅输出工作区既有 LF→CRLF 提示。
+- 修改范围仍严格限于四个授权源码/测试文件与本报告；未修改业务接线、Agent Runtime、服务端、
+  数据库、账务、simple-chat、chat-panel、node-editor 或 stable，未 push。
+
+## 2026-09-02 剩余关注
+
+- 本轮修复尚未取得全新独立评审的 `APPROVED 0/0/0`；实现与用户指定本地门禁均已完成，Task 7
+  的最终独立复审仍由后续控制端执行。

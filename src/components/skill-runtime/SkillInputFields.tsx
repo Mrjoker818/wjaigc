@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useId, useMemo, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 
 import { SKILL_INPUT_LIMITS } from '@/lib/skill-runtime/input-resolver';
 import type { SkillInputField } from '@/lib/skill-runtime/types';
@@ -26,6 +26,27 @@ function datasetValue(value: unknown): string {
   return JSON.stringify(value, null, 2);
 }
 
+function effectiveValue(field: SkillInputField, values: Record<string, unknown>): unknown {
+  return values[field.key] ?? field.defaultValue;
+}
+
+function structuredDrafts(
+  fields: readonly SkillInputField[],
+  values: Record<string, unknown>,
+): Record<string, string> {
+  const drafts: Record<string, string> = {};
+  for (const field of fields) {
+    const value = effectiveValue(field, values);
+    if (field.kind === 'images') drafts[field.key] = stringListValue(value);
+    if (field.kind === 'dataset') drafts[field.key] = datasetValue(value);
+  }
+  return drafts;
+}
+
+function fieldDefinitionSignature(fields: readonly SkillInputField[]): string {
+  return JSON.stringify(fields);
+}
+
 function serializedBytes(values: Record<string, unknown>): number {
   try {
     return new TextEncoder().encode(JSON.stringify(values)).byteLength;
@@ -42,21 +63,59 @@ export function SkillInputFields({
   disabled = false,
 }: SkillInputFieldsProps): React.ReactElement {
   const instanceId = useId();
-  const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const initialDrafts = structuredDrafts(fields, values);
+  const definitionSignature = fieldDefinitionSignature(fields);
+  const [drafts, setDrafts] = useState<Record<string, string>>(initialDrafts);
   const [localErrors, setLocalErrors] = useState<Record<string, string | undefined>>({});
-  const synchronizedDrafts = useMemo(() => {
-    const nextDrafts: Record<string, string> = {};
-    for (const field of fields) {
-      if (field.kind === 'images') nextDrafts[field.key] = stringListValue(values[field.key]);
-      if (field.kind === 'dataset') nextDrafts[field.key] = datasetValue(values[field.key]);
-    }
-    return nextDrafts;
-  }, [fields, values]);
+  const previousDefinitionSignature = useRef(definitionSignature);
+  const previousExternalDrafts = useRef(initialDrafts);
+  const emittedDefaults = useRef<Record<string, string>>({});
 
   useEffect(() => {
-    setDrafts(synchronizedDrafts);
-    setLocalErrors({});
-  }, [synchronizedDrafts]);
+    const nextExternalDrafts = structuredDrafts(fields, values);
+    const definitionChanged = previousDefinitionSignature.current !== definitionSignature;
+    const synchronizedKeys = new Set<string>();
+    for (const [key, draft] of Object.entries(nextExternalDrafts)) {
+      if (definitionChanged || previousExternalDrafts.current[key] !== draft) {
+        synchronizedKeys.add(key);
+      }
+    }
+    setDrafts(current => {
+      const next: Record<string, string> = {};
+      for (const [key, draft] of Object.entries(nextExternalDrafts)) {
+        next[key] = synchronizedKeys.has(key) ? draft : (current[key] ?? draft);
+      }
+      return next;
+    });
+    if (definitionChanged) {
+      setLocalErrors({});
+    } else if (synchronizedKeys.size > 0) {
+      setLocalErrors(current => {
+        const next = { ...current };
+        for (const key of synchronizedKeys) next[key] = undefined;
+        return next;
+      });
+    }
+    previousDefinitionSignature.current = definitionSignature;
+    previousExternalDrafts.current = nextExternalDrafts;
+  }, [definitionSignature, fields, values]);
+
+  useEffect(() => {
+    const declaredKeys = new Set(fields.map(field => field.key));
+    for (const key of Object.keys(emittedDefaults.current)) {
+      if (!declaredKeys.has(key)) delete emittedDefaults.current[key];
+    }
+    for (const field of fields) {
+      if (values[field.key] != null || field.defaultValue === undefined) {
+        delete emittedDefaults.current[field.key];
+        continue;
+      }
+      const fingerprint = JSON.stringify([field.kind, field.defaultValue]);
+      if (emittedDefaults.current[field.key] === fingerprint) continue;
+      emittedDefaults.current[field.key] = fingerprint;
+      onChange(field.key, field.defaultValue);
+    }
+  }, [fields, onChange, values]);
 
   const commitValue = (field: SkillInputField, value: unknown): boolean => {
     if (serializedBytes({ ...values, [field.key]: value }) > SKILL_INPUT_LIMITS.serialized) {
@@ -93,6 +152,7 @@ export function SkillInputFields({
   return (
     <div className="space-y-3">
       {fields.map(field => {
+        const value = effectiveValue(field, values);
         const inputId = `${instanceId}-${field.key}`;
         const hintId = `${inputId}-hint`;
         const errorId = `${inputId}-error`;
@@ -117,7 +177,7 @@ export function SkillInputFields({
               <textarea
                 {...common}
                 maxLength={SKILL_INPUT_LIMITS.text}
-                value={textValue(values[field.key])}
+                value={textValue(value)}
                 onChange={event => commitValue(field, event.target.value)}
               />
             );
@@ -129,7 +189,7 @@ export function SkillInputFields({
                 {...common}
                 type="text"
                 maxLength={SKILL_INPUT_LIMITS.text}
-                value={textValue(values[field.key])}
+                value={textValue(value)}
                 onChange={event => commitValue(field, event.target.value)}
               />
             );
@@ -143,7 +203,7 @@ export function SkillInputFields({
               <>
                 <textarea
                   {...common}
-                  value={drafts[field.key] ?? stringListValue(values[field.key])}
+                  value={drafts[field.key] ?? stringListValue(value)}
                   onChange={event => {
                     const draft = event.target.value;
                     setDrafts(current => ({ ...current, [field.key]: draft }));
@@ -167,7 +227,7 @@ export function SkillInputFields({
             control = (
               <textarea
                 {...common}
-                value={drafts[field.key] ?? datasetValue(values[field.key])}
+                value={drafts[field.key] ?? datasetValue(value)}
                 onChange={event => updateStructuredValue(field, event.target.value, () => {
                   const parsed: unknown = JSON.parse(event.target.value || '[]');
                   if (!Array.isArray(parsed)) throw new Error('请输入有效的 JSON 数组');
@@ -186,7 +246,7 @@ export function SkillInputFields({
             control = (
               <select
                 {...common}
-                value={textValue(values[field.key] ?? field.defaultValue)}
+                value={textValue(value)}
                 onChange={event => commitValue(field, event.target.value)}
               >
                 {!field.required && <option value="">请选择</option>}
@@ -201,7 +261,7 @@ export function SkillInputFields({
               <input
                 {...common}
                 type="number"
-                value={typeof values[field.key] === 'number' ? String(values[field.key]) : ''}
+                value={typeof value === 'number' ? String(value) : ''}
                 onChange={event => {
                   if (event.target.value === '') {
                     commitValue(field, undefined);
@@ -223,7 +283,7 @@ export function SkillInputFields({
                 id={inputId}
                 type="checkbox"
                 disabled={disabled}
-                checked={values[field.key] === true}
+                checked={value === true}
                 aria-label={field.label}
                 aria-invalid={error ? true : undefined}
                 aria-describedby={describedBy}

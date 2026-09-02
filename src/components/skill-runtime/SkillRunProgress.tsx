@@ -6,6 +6,7 @@ import type { SkillRunCostEstimate } from '@/lib/skill-runtime/cost-estimator';
 interface SkillRunProgressProps {
   estimate?: SkillRunCostEstimate;
   projection?: AgentRunProjection;
+  retryableStepId?: string;
   stale?: boolean;
   busy?: boolean;
   onPause?: (stepId: string) => void;
@@ -45,6 +46,7 @@ function estimateLabel(estimate: SkillRunCostEstimate): string {
 export function SkillRunProgress({
   estimate,
   projection,
+  retryableStepId,
   stale = false,
   busy = false,
   onPause,
@@ -54,8 +56,10 @@ export function SkillRunProgress({
 }: SkillRunProgressProps): React.ReactElement | null {
   if (!estimate && !projection) return null;
   const terminal = projection ? terminalStatuses.has(projection.status) : false;
-  const failedStep = projection?.plan.find(step => step.status === 'failed')?.id
-    || projection?.currentStepId;
+  const retryablePausedStep = projection?.status === 'paused'
+    && projection.resumeFromStepId === retryableStepId
+    ? retryableStepId
+    : undefined;
 
   return (
     <div className="space-y-2 text-sm" aria-live="polite">
@@ -98,21 +102,13 @@ export function SkillRunProgress({
               <button type="button" disabled={busy} onClick={onCancel}>取消</button>
             )}
             {projection.status === 'paused'
-              && projection.resumeFromStepId
+              && retryablePausedStep
               && onRetry && (
                 <button
                   type="button"
                   disabled={busy}
-                  onClick={() => onRetry(projection.resumeFromStepId!)}
+                  onClick={() => onRetry(retryablePausedStep)}
                 >
-                  从失败步骤重试
-                </button>
-              )}
-            {projection.status === 'failed'
-              && projection.error?.retryable
-              && failedStep
-              && onRetry && (
-                <button type="button" disabled={busy} onClick={() => onRetry(failedStep)}>
                   从失败步骤重试
                 </button>
               )}
