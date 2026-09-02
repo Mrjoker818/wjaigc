@@ -543,3 +543,6 @@ Protected stable branch: read-only and untouched
 - Unified Skill Runtime Task 4: complete (commits `fde1bc70..d0bf0dc3`, independent review clean, Critical/Important/Minor `0/0/0`).
 - 现有 Agent Runtime 已具备持久暂停、恢复、重试、进度事件与 chat/simple-chat/agent-edit 跨实例续跑；cloud task、downstream operation、生命周期事件均受 run generation/lease fence 保护，首次执行和恢复执行共享可中止 scope，并保留原请求超时。敏感 URL、凭据和 token 不能进入 descriptor/event。
 - 本地聚焦与相关回归、TypeScript、目标 ESLint 和 diff-check 通过；真实 PostgreSQL 迁移、CAS 与并发因缺少 `POSTGRES_TEST_DATABASE_URL` 继续明确未验证。下一唯一动作：Task 5，模型冻结、费用预估与 Skill Run 请求；不得提前接 UI 或迁移 21 个 Skills。
+- Unified Skill Runtime Task 5: complete (commits `1fd49be8..eb053968`, independent review clean, Critical/Important/Minor `0/0/0`).
+- Skill Run 请求已在服务端完成 surface/version/input/prompt/tools/modelBindings、精确 providerId+modelId、workspace active Asset Version 和 UTF-8 prompt 门禁；estimate 只读，create 在既有 Agent Runtime 唯一账务边界前重算报价，零步骤 simple-chat 只合成一次 orchestrator 费用，客户端费用字段无效。
+- 本地聚焦 `98/98`、Task 1-4 与 21/16 隔离回归、Task 4 fence/恢复回归、TypeScript、目标 ESLint 和 diff-check 通过；真实 PostgreSQL placement 查询因缺少隔离库明确未验证。下一唯一动作：Task 6，建立数据库幂等的 Skill 执行器；不得提前接 UI 或迁移 21 个 Skills。
