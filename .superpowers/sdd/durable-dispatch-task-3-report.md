@@ -96,4 +96,4 @@ pnpm exec vitest run src/__tests__/integration/skill-runtime-concurrency-postgre
 - 未修改 UI、21/16 Skill 目录、模型目录或供应商业务适配。
 - 未新增迁移、表、账务逻辑或进程内锁。
 - 未推送 GitHub。
-- 首轮评审的两个 Important 已修复，但尚未取得新的独立评审结论，因此本报告不宣称 `APPROVED`。
+- 首轮评审的两个 Important 已修复；全新独立复审为 Critical/Important/Minor `0/0/0`，Spec compliance 与 Code quality 均为 PASS，最终结论 `APPROVED`。
