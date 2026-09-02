@@ -335,5 +335,6 @@
   "src/lib/task-core/durable-generation-kickoff.ts",
   "src/__tests__/components/skill-runtime-controls.test.tsx",
   "src/__tests__/components/chat-panel-skill-runtime.test.tsx",
-  "src/__tests__/components/chat-panel-skill-catalog-contract.test.ts"
+  "src/__tests__/components/chat-panel-skill-catalog-contract.test.ts",
+  "src/__tests__/lib/skill-runtime-catalog.test.ts"
 ]

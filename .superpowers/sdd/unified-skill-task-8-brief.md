@@ -22,6 +22,7 @@
 - Create: `src/lib/skill-runtime/canvas-client.ts`
 - Test: `src/__tests__/components/chat-panel-skill-runtime.test.tsx`
 - Test: `src/__tests__/components/chat-panel-skill-catalog-contract.test.ts`
+- Update: `src/__tests__/lib/skill-runtime-catalog.test.ts`（将 Task 1 的旧直接导入断言迁移为 Task 8 的 API 唯一目录合同）
 - Report: `.superpowers/sdd/unified-skill-task-8-report.md`
 
 ## TDD 与验收
@@ -35,5 +36,6 @@
    - `chat-panel-generation-recovery-contract.test.ts`
    - `agent-runtime-surface-wiring.test.ts`
    - Task 7 共享控件测试和 21/16 目录隔离测试
+   - 更新后的旧目录合同不得要求 `chat-panel.tsx` 直接导入预设；必须验证 Canvas API 客户端和 21/16 surface 隔离
 5. TypeScript、目标 ESLint、保护基线和 diff-check 通过。
 6. 全新独立评审 `APPROVED` 且 Critical/Important/Minor `0/0/0` 后才标记 Task 8 完成。
