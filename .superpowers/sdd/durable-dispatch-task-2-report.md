@@ -81,4 +81,4 @@ pnpm exec vitest run src/__tests__/lib/skill-runtime-executor.test.ts src/__test
 - 新一轮复审继续发现一项 Important：幂等恢复事件可能返回 `accepted:true`，但当前请求未取得 dispatch claim，表现为 `dispatch.started:false`。
 - 为该场景建立第二个 RED：`1 failed / 33 passed`，证明仅检查 `accepted` 仍会误报首批启动。
 - 最终最小修复以 `accepted && dispatch.started === true` 作为非空 `startedStepIds` 的必要条件；未实际调度的请求继续保留完整 `scheduledStepIds`。
-- 第二项修复后的独立复审尚未进行，Task 2 继续保持“修复后待复审”。
+- 第二项修复后的全新独立复审已通过：Critical/Important/Minor 为 `0/0/0`，Spec compliance 与 Code quality 均为 PASS，最终结论为 `APPROVED`。
