@@ -546,3 +546,4 @@ Protected stable branch: read-only and untouched
 - Unified Skill Runtime Task 5: complete (commits `1fd49be8..eb053968`, independent review clean, Critical/Important/Minor `0/0/0`).
 - Skill Run 请求已在服务端完成 surface/version/input/prompt/tools/modelBindings、精确 providerId+modelId、workspace active Asset Version 和 UTF-8 prompt 门禁；estimate 只读，create 在既有 Agent Runtime 唯一账务边界前重算报价，零步骤 simple-chat 只合成一次 orchestrator 费用，客户端费用字段无效。
 - 本地聚焦 `98/98`、Task 1-4 与 21/16 隔离回归、Task 4 fence/恢复回归、TypeScript、目标 ESLint 和 diff-check 通过；真实 PostgreSQL placement 查询因缺少隔离库明确未验证。下一唯一动作：Task 6，建立数据库幂等的 Skill 执行器；不得提前接 UI 或迁移 21 个 Skills。
+- Skill durable-dispatch correction Task 1: complete (`99846fe5..dd8005f5`, independent review clean, Critical/Important/Minor `0/0/0`). 步骤操作与计费类型已对齐，文本、经净化 HTML 与资产结果可持久恢复；当前及历史 HTML 均在最终持久化边界净化，21 个 Canvas Skills 与 16 个 Simple Chat Skills 继续隔离。控制端聚焦回归 `64/64`、TypeScript、目标 ESLint、保护基线通过；下一唯一动作是 correction Task 2，纠正重试返回合同，不提前实现持久调度。
