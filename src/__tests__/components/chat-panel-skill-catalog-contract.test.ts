@@ -4,8 +4,12 @@ import { resolve } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 
 import {
+  createCanvasSkillProjectionCoordinator,
+  canvasSkillProjectionIdentity,
+  deleteCanvasSkillsSequentially,
   loadCanvasSkillCatalog,
   loadCompletedCanvasSkillAssets,
+  transferCanvasSkillAsset,
 } from '@/lib/skill-runtime/canvas-client';
 import type { SkillDefinition } from '@/lib/skill-runtime/types';
 
@@ -128,5 +132,93 @@ describe('canvas chat Skill catalog contract', () => {
       sourceVersionIds: [],
     })).resolves.toEqual([]);
     expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  it('claims a stable run and asset identity before projection and suppresses effect reentry', async () => {
+    let release!: () => void;
+    const deferred = new Promise<void>(resolve => { release = resolve; });
+    const project = vi.fn(async () => deferred);
+    const coordinator = createCanvasSkillProjectionCoordinator();
+    coordinator.activate('run-1', 'project-1');
+
+    const first = coordinator.project({
+      runId: 'run-1', projectId: 'project-1', assetVersionId: 'asset-version-1', project,
+    });
+    const duplicate = await coordinator.project({
+      runId: 'run-1', projectId: 'project-1', assetVersionId: 'asset-version-1', project,
+    });
+
+    expect(canvasSkillProjectionIdentity('run-1', 'asset-version-1'))
+      .toBe('canvas-skill:run-1:asset-version-1');
+    expect(project).toHaveBeenCalledTimes(1);
+    expect(duplicate).toBe(false);
+    release();
+    await expect(first).resolves.toBe(true);
+  });
+
+  it('releases a failed claim for retry and aborts late work when the run is closed or switched', async () => {
+    const coordinator = createCanvasSkillProjectionCoordinator();
+    const failed = vi.fn().mockRejectedValueOnce(new Error('transfer failed')).mockResolvedValue(undefined);
+    coordinator.activate('run-1', 'project-1');
+
+    await expect(coordinator.project({
+      runId: 'run-1', projectId: 'project-1', assetVersionId: 'asset-version-1', project: failed,
+    })).rejects.toThrow('transfer failed');
+    await expect(coordinator.project({
+      runId: 'run-1', projectId: 'project-1', assetVersionId: 'asset-version-1', project: failed,
+    })).resolves.toBe(true);
+    expect(failed).toHaveBeenCalledTimes(2);
+
+    let observedSignal: AbortSignal | undefined;
+    let release!: () => void;
+    const deferred = new Promise<void>(resolve => { release = resolve; });
+    const late = coordinator.project({
+      runId: 'run-1', projectId: 'project-1', assetVersionId: 'asset-version-2',
+      project: async signal => { observedSignal = signal; await deferred; },
+    });
+    coordinator.activate('run-2', 'project-1');
+    expect(observedSignal?.aborted).toBe(true);
+    release();
+    await expect(late).resolves.toBe(false);
+  });
+
+  it('uses the stable identity at the transfer API and carries lineage trace into the placement', async () => {
+    const transferred = {
+      assetId: 'asset-1', assetVersionId: 'version-1', placementId: 'placement-1', url: '/output.png',
+    };
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify(transferred), { status: 200 }));
+
+    await expect(transferCanvasSkillAsset({
+      reference: { assetId: 'asset-1', assetVersionId: 'version-1', url: '/output.png' },
+      projectId: 'project-1', runId: 'run-1', sourceVersionIds: ['source-1'], fetcher,
+    })).resolves.toEqual(transferred);
+
+    const [, init] = fetcher.mock.calls[0]!;
+    expect(JSON.parse(String(init?.body))).toEqual({
+      sourceVersion: 'version-1',
+      targetProject: 'project-1',
+      targetWorkspace: 'canvas:project-1',
+      entityType: 'canvas-image',
+      entityId: 'canvas-skill:run-1:version-1',
+      idempotencyKey: 'canvas-skill:run-1:version-1',
+      metadata: { source: 'canvas-skill', runId: 'run-1', sourceVersionIds: ['source-1'] },
+    });
+  });
+
+  it('clears user Skills serially and stops at the first server failure', async () => {
+    let release!: () => void;
+    const first = new Promise<void>(resolve => { release = resolve; });
+    const remove = vi.fn((skillId: string) => skillId === 'skill-a' ? first : Promise.resolve());
+    const clearing = deleteCanvasSkillsSequentially(['skill-a', 'skill-b'], remove);
+
+    expect(remove).toHaveBeenCalledTimes(1);
+    release();
+    await clearing;
+    expect(remove.mock.calls.map(call => call[0])).toEqual(['skill-a', 'skill-b']);
+
+    const failing = vi.fn().mockRejectedValueOnce(new Error('server conflict'));
+    await expect(deleteCanvasSkillsSequentially(['skill-c', 'skill-d'], failing))
+      .rejects.toThrow('server conflict');
+    expect(failing).toHaveBeenCalledTimes(1);
   });
 });

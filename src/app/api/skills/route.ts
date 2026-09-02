@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireApiAuthOrReject } from '@/lib/api-auth';
 import {
   copySkillForUser,
+  createConversationSkillForUser,
   loadUserSkillCatalog,
 } from '@/lib/skill-runtime/storage';
 import type { SkillSurface } from '@/lib/skill-runtime/types';
@@ -44,12 +45,21 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   try {
     const body = await readStrictJsonObject(request);
-    assertOnlyFields(body, ['sourceSkillId']);
-    const sourceSkillId = parseBoundedString(body.sourceSkillId, 'sourceSkillId', 128);
-    if (!/^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(sourceSkillId)) {
-      throw new SkillRequestError('INVALID_REQUEST_BODY', 400, 'sourceSkillId is invalid');
+    if ('sourceSkillId' in body) {
+      assertOnlyFields(body, ['sourceSkillId']);
+      const sourceSkillId = parseBoundedString(body.sourceSkillId, 'sourceSkillId', 128);
+      if (!/^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(sourceSkillId)) {
+        throw new SkillRequestError('INVALID_REQUEST_BODY', 400, 'sourceSkillId is invalid');
+      }
+      const skill = await copySkillForUser(auth.userId, sourceSkillId);
+      return NextResponse.json({ skill }, { status: 201 });
     }
-    const skill = await copySkillForUser(auth.userId, sourceSkillId);
+    assertOnlyFields(body, ['name', 'description', 'conversation']);
+    const skill = await createConversationSkillForUser(auth.userId, {
+      name: parseBoundedString(body.name, 'name', 120),
+      description: parseBoundedString(body.description, 'description', 2_000),
+      conversation: parseBoundedString(body.conversation, 'conversation', 6_000),
+    });
     return NextResponse.json({ skill }, { status: 201 });
   } catch (error) {
     return skillHttpError(error);

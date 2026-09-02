@@ -83,6 +83,7 @@ import { Toaster } from '@/components/ui/sonner';
 import { toast } from 'sonner';
 import { Image as ImageIcon, MessageSquare, Sparkles, ChevronLeft, ChevronRight, X, Bell } from 'lucide-react';
 import { type Workflow, type WorkspaceAssetReference } from '@/lib/workflow-engine';
+import type { WorkspaceAssetReference as CoreWorkspaceAssetReference } from '@/lib/asset-core/types';
 import {
   createSimpleChatImportWorkflow,
   parseSimpleChatWorkspaceHandoffIntent,
@@ -100,6 +101,7 @@ import {
 import { taskEventsClient } from '@/lib/task-events-client';
 import { waitForTaskPollInterval } from '@/lib/task-polling-wait';
 import type { WorkflowCanvasInsertionItem } from '@/lib/asset-core/workspace-transfer';
+import { transferCanvasSkillAsset } from '@/lib/skill-runtime/canvas-client';
 import {
   buildSimpleChatCanvasBridgeImages,
   consumeSimpleChatCanvasBridge,
@@ -3413,7 +3415,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
 
   // 加载图片真实尺寸
   // 添加多张图片到画布（自动排列布局）
-  const handleAddImages = useCallback(async (imageInputs: Array<string | WorkflowCanvasInsertionItem>, sourceImageId?: string, meta?: { modelName?: string; apiProvider?: string; relationType?: ConnectionRelationType }) => {
+  const handleAddImages = useCallback(async (imageInputs: Array<string | WorkflowCanvasInsertionItem>, sourceImageId?: string, meta?: { modelName?: string; apiProvider?: string; relationType?: ConnectionRelationType; signal?: AbortSignal }) => {
     const expectedProjectId = currentProjectRef.current?.id;
     const newImages: CanvasImage[] = [];
     const nextWorkflowImageZIndex = Math.max(
@@ -3429,11 +3431,12 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
     const effectiveApiProvider = meta?.apiProvider || sourceImg?.apiProvider || '';
 
     for (let i = 0; i < imageInputs.length; i++) {
+      if (meta?.signal?.aborted) return;
       const insertionItem = typeof imageInputs[i] === 'string'
         ? undefined
         : imageInputs[i] as WorkflowCanvasInsertionItem;
       let rawUrl = insertionItem?.url || imageInputs[i] as string;
-      const transferredReference = insertionItem?.assetReference;
+      const transferredReference = insertionItem?.assetReference as CoreWorkspaceAssetReference | undefined;
       if (transferredReference) rawUrl = transferredReference.url;
       // 将 blob: URL 转为 data URL（blob: 在页面刷新后失效）
       if (rawUrl.startsWith('blob:')) {
@@ -3505,6 +3508,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
         ...(transferredReference?.assetId ? { assetId: transferredReference.assetId } : {}),
         ...(transferredReference?.assetVersionId ? { assetVersionId: transferredReference.assetVersionId } : {}),
         ...(transferredReference?.placementId ? { placementId: transferredReference.placementId } : {}),
+        ...(transferredReference?.sourceTrace ? { sourceTrace: transferredReference.sourceTrace } : {}),
         // ★ 保留模型信息和API提供商信息
         ...(effectiveModelName ? { modelName: effectiveModelName } : {}),
         ...(effectiveApiProvider ? { apiProvider: effectiveApiProvider } : {}),
@@ -3513,6 +3517,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
 
     if (
       newImages.length > 0
+      && !meta?.signal?.aborted
       && isWorkspaceResultScopeCurrent(expectedProjectId, currentProjectRef.current?.id)
     ) {
       const previousImages = latestImagesRef.current;
@@ -3575,34 +3580,56 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
   }, [images, currentUser?.id, setImages, autoLayoutImages, stabilizeCanvasImages, persistCanvasImagesNow]);
 
   const handleAddEmbeddedChatImage = useCallback(async (
-    reference: WorkspaceAssetReference,
-    meta?: { modelName?: string; apiProvider?: string; sourceImageId?: string },
+    reference: CoreWorkspaceAssetReference,
+    meta?: {
+      modelName?: string;
+      apiProvider?: string;
+      sourceImageId?: string;
+      runId?: string;
+      sourceVersionIds?: readonly string[];
+      signal?: AbortSignal;
+    },
   ) => {
     if (!currentProject?.id || !reference.assetVersionId) {
       await handleAddImages([reference.url], meta?.sourceImageId, meta);
       return;
     }
     const expectedProjectId = currentProject.id;
-    const requestNonce = Date.now();
-    const response = await fetch('/api/assets/transfer', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        sourceVersion: reference.assetVersionId,
-        targetProject: currentProject.id,
-        targetWorkspace: `canvas:${currentProject.id}`,
-        entityType: 'canvas-image',
-        entityId: `embedded-chat:${requestNonce}`,
-        idempotencyKey: `embedded-chat-canvas:${currentProject.id}:${reference.assetVersionId}:${requestNonce}`,
-        metadata: { source: 'embedded-chat' },
-      }),
-    });
-    if (!response.ok) throw new Error(`Asset transfer failed (${response.status})`);
-    const transferred = await response.json() as WorkspaceAssetReference;
-    if (!transferred.assetVersionId || !transferred.placementId) {
-      throw new Error('Asset transfer returned an incomplete reference');
+    let transferred: CoreWorkspaceAssetReference;
+    if (meta?.runId) {
+      transferred = await transferCanvasSkillAsset({
+          reference,
+          projectId: currentProject.id,
+          runId: meta.runId,
+          sourceVersionIds: meta.sourceVersionIds ?? [],
+          signal: meta.signal,
+        });
+    } else {
+      const requestNonce = Date.now();
+      const response = await fetch('/api/assets/transfer', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sourceVersion: reference.assetVersionId,
+          targetProject: currentProject.id,
+          targetWorkspace: `canvas:${currentProject.id}`,
+          entityType: 'canvas-image',
+          entityId: `embedded-chat:${requestNonce}`,
+          idempotencyKey: `embedded-chat-canvas:${currentProject.id}:${reference.assetVersionId}:${requestNonce}`,
+          metadata: {
+            source: 'embedded-chat',
+            ...(reference.sourceTrace ? { sourceTrace: reference.sourceTrace } : {}),
+          },
+        }),
+        signal: meta?.signal,
+      });
+      if (!response.ok) throw new Error(`Asset transfer failed (${response.status})`);
+      transferred = await response.json() as CoreWorkspaceAssetReference;
+      if (!transferred.assetVersionId || !transferred.placementId) {
+        throw new Error('Asset transfer returned an incomplete reference');
+      }
     }
-    if (!isWorkspaceResultScopeCurrent(expectedProjectId, currentProjectRef.current?.id)) return;
+    if (meta?.signal?.aborted || !isWorkspaceResultScopeCurrent(expectedProjectId, currentProjectRef.current?.id)) return;
     await handleAddImages([{
       outputNodeId: `embedded-chat:${transferred.placementId}`,
       url: transferred.url,

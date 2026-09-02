@@ -111,6 +111,117 @@ export async function copyCanvasSkill(
   return payload.skill;
 }
 
+export async function createConversationCanvasSkill(
+  input: { name: string; description: string; conversation: string },
+  fetcher: typeof fetch = fetch,
+): Promise<SkillDefinition> {
+  const payload = await readJson<SkillMutationResponse>(await fetcher('/api/skills', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  }), '保存 Skill 失败');
+  if (!isCanvasSkill(payload.skill)) throw new Error('保存 Skill 返回格式无效');
+  return payload.skill;
+}
+
+export async function deleteCanvasSkill(
+  skillId: string,
+  fetcher: typeof fetch = fetch,
+): Promise<void> {
+  const response = await fetcher(`/api/skills/${encodeURIComponent(skillId)}`, { method: 'DELETE' });
+  if (!response.ok) throw new Error('删除 Skill 失败');
+}
+
+export async function deleteCanvasSkillsSequentially(
+  skillIds: readonly string[],
+  remove: (skillId: string) => Promise<void> = deleteCanvasSkill,
+): Promise<void> {
+  for (const skillId of skillIds) await remove(skillId);
+}
+
+export function canvasSkillProjectionIdentity(runId: string, assetVersionId: string): string {
+  return `canvas-skill:${runId}:${assetVersionId}`;
+}
+
+export async function transferCanvasSkillAsset(input: {
+  reference: WorkspaceAssetReference;
+  projectId: string;
+  runId: string;
+  sourceVersionIds: readonly string[];
+  fetcher?: typeof fetch;
+  signal?: AbortSignal;
+}): Promise<WorkspaceAssetReference> {
+  if (!input.reference.assetVersionId) throw new Error('Skill 资产版本无效');
+  const identity = canvasSkillProjectionIdentity(input.runId, input.reference.assetVersionId);
+  const response = await (input.fetcher ?? fetch)('/api/assets/transfer', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      sourceVersion: input.reference.assetVersionId,
+      targetProject: input.projectId,
+      targetWorkspace: `canvas:${input.projectId}`,
+      entityType: 'canvas-image',
+      entityId: identity,
+      idempotencyKey: identity,
+      metadata: {
+        source: 'canvas-skill',
+        runId: input.runId,
+        sourceVersionIds: [...input.sourceVersionIds],
+        ...(input.reference.sourceTrace ? { sourceTrace: input.reference.sourceTrace } : {}),
+      },
+    }),
+    signal: input.signal,
+  });
+  const transferred = await readJson<WorkspaceAssetReference>(response, 'Skill 资产加入画布失败');
+  if (!isWorkspaceAssetReference(transferred) || !transferred.placementId) {
+    throw new Error('Skill 资产加入画布返回格式无效');
+  }
+  return transferred;
+}
+
+export function createCanvasSkillProjectionCoordinator() {
+  let active: { runId: string; projectId: string; controller: AbortController } | null = null;
+  const pending = new Set<string>();
+  const completed = new Set<string>();
+
+  const isActive = (runId: string, projectId: string): boolean => (
+    active?.runId === runId && active.projectId === projectId && !active.controller.signal.aborted
+  );
+
+  return {
+    activate(runId: string, projectId: string): void {
+      if (isActive(runId, projectId)) return;
+      active?.controller.abort();
+      active = { runId, projectId, controller: new AbortController() };
+    },
+    cancel(): void {
+      active?.controller.abort();
+      active = null;
+    },
+    isActive,
+    async project(input: {
+      runId: string;
+      projectId: string;
+      assetVersionId: string;
+      project: (signal: AbortSignal) => Promise<void>;
+    }): Promise<boolean> {
+      if (!isActive(input.runId, input.projectId) || !active) return false;
+      const identity = canvasSkillProjectionIdentity(input.runId, input.assetVersionId);
+      if (pending.has(identity) || completed.has(identity)) return false;
+      pending.add(identity);
+      const signal = active.controller.signal;
+      try {
+        await input.project(signal);
+        if (!isActive(input.runId, input.projectId) || signal.aborted) return false;
+        completed.add(identity);
+        return true;
+      } finally {
+        pending.delete(identity);
+      }
+    },
+  };
+}
+
 export async function updateCanvasSkill(
   skillId: string,
   patch: { enabled?: boolean; name?: string; description?: string },

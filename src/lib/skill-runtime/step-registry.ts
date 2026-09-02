@@ -5,7 +5,7 @@ import {
   AgentDownstreamProviderRejectedError,
   type AgentDownstreamRecovery,
 } from '@/lib/agent-runtime/downstream-operations';
-import { getCloudTaskForUser, type CloudTask } from '@/lib/cloud-task-storage';
+import { getCloudTaskForUser, updateCloudTask, type CloudTask } from '@/lib/cloud-task-storage';
 import { executeAdmittedToolCall, executeToolCall } from '@/lib/chat-tools';
 import { getApiProviders } from '@/lib/server-api-config';
 import type { User } from '@/lib/user-types';
@@ -143,6 +143,24 @@ async function executeGenerationStep(
   if (!taskId || !result.admittedExecution) {
     throw new AgentDownstreamProviderRejectedError(undefined, {
       message: 'Skill image generation did not return a durable task',
+    });
+  }
+  const task = await getCloudTaskForUser(taskId, actor.id);
+  const submissionPayload = task?.result?.submissionPayload;
+  const updated = task && await updateCloudTask(taskId, {
+    result: {
+      ...task.result,
+      submissionPayload: {
+        ...(submissionPayload && typeof submissionPayload === 'object' && !Array.isArray(submissionPayload)
+          ? submissionPayload
+          : {}),
+        assetParentVersionIds: [...request.sourceVersionIds],
+      },
+    },
+  });
+  if (!updated) {
+    throw new AgentDownstreamProviderRejectedError(undefined, {
+      message: 'Skill generation lineage could not be persisted',
     });
   }
   await input.operation.recordAccepted(taskId);

@@ -1,6 +1,6 @@
 import 'server-only';
 
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 
 import {
   dbCompareAndSetUserDataRevision,
@@ -383,9 +383,10 @@ async function saveEnvelope(
 
 export function createSkillStore(
   adapter: SkillStorageAdapter,
-  options: { now?: () => number } = {},
+  options: { now?: () => number; createId?: () => string } = {},
 ) {
   const now = options.now ?? Date.now;
+  const createId = options.createId ?? (() => `skill-${randomUUID().replaceAll('-', '').slice(0, 24)}`);
 
   const migrateLegacy = async (userId: string): Promise<LegacyMigrationResult> => {
     for (let attempt = 0; attempt < 5; attempt += 1) {
@@ -424,10 +425,73 @@ export function createSkillStore(
       const envelope = await readEnvelope(adapter, userId);
       const userSkills = envelope.skills.filter(skill =>
         skill.ownerId === userId
-        && skill.enabled
         && skill.allowedSurfaces.includes(surface),
       );
       return [...cloneBuiltIns(surface), ...structuredClone(userSkills)];
+    },
+    async createConversation(input: {
+      actorUserId: string;
+      name: string;
+      description: string;
+      conversation: string;
+    }): Promise<SkillDefinition> {
+      const source = CANVAS_PRESET_SKILLS.find(skill => skill.id === 'preset-concept-art');
+      if (!source) throw new SkillStorageError();
+      for (let attempt = 0; attempt < 5; attempt += 1) {
+        const envelope = await readEnvelope(adapter, input.actorUserId);
+        const timestamp = now();
+        const id = createId();
+        if (!GENERATED_SKILL_ID.test(id) || envelope.skills.some(skill => skill.id === id)) {
+          if (attempt === 4) throw new SkillRevisionConflictError();
+          continue;
+        }
+        const skill: SkillDefinition = {
+          id,
+          version: 1,
+          name: input.name,
+          category: source.category,
+          description: input.description,
+          systemPrompt: `${source.systemPrompt}\n\nSaved conversation context:\n${input.conversation}`,
+          allowedSurfaces: [...source.allowedSurfaces],
+          inputs: source.inputs.map(field => ({
+            key: field.key,
+            label: field.label,
+            kind: field.kind,
+            required: field.required,
+            ...(field.defaultValue === undefined ? {} : { defaultValue: structuredClone(field.defaultValue) }),
+            ...(field.options === undefined ? {} : { options: [...field.options] }),
+            ...(field.maximumItems === undefined ? {} : { maximumItems: field.maximumItems }),
+          })),
+          steps: source.steps.map(step => ({
+            id: step.id,
+            label: step.label,
+            toolId: step.toolId,
+            execution: step.execution,
+            ...(step.parallelGroup === undefined ? {} : { parallelGroup: step.parallelGroup }),
+            promptTemplate: step.promptTemplate,
+            modelRole: step.modelRole,
+            qualityGateIds: [...step.qualityGateIds],
+          })),
+          enabled: true,
+          builtIn: false,
+          ownerId: input.actorUserId,
+          sourceSkillId: source.id,
+          sourceAllowedSurfaces: [...source.allowedSurfaces],
+          createdAt: timestamp,
+          updatedAt: timestamp,
+          usageCount: 0,
+        };
+        try {
+          await saveEnvelope(adapter, input.actorUserId, envelope.revision, {
+            ...envelope,
+            skills: [...envelope.skills, skill],
+          });
+          return structuredClone(skill);
+        } catch (error) {
+          if (!(error instanceof SkillRevisionConflictError) || attempt === 4) throw error;
+        }
+      }
+      throw new SkillRevisionConflictError();
     },
     async copy(input: { actorUserId: string; sourceSkillId: string }): Promise<SkillDefinition> {
       for (let attempt = 0; attempt < 5; attempt += 1) {
@@ -524,6 +588,23 @@ export function createSkillStore(
       }
       throw new SkillRevisionConflictError();
     },
+    async remove(input: { actorUserId: string; skillId: string }): Promise<void> {
+      for (let attempt = 0; attempt < 5; attempt += 1) {
+        const envelope = await readEnvelope(adapter, input.actorUserId);
+        const index = envelope.skills.findIndex(skill => (
+          skill.id === input.skillId && skill.ownerId === input.actorUserId
+        ));
+        if (index < 0) throw new UserSkillNotFoundError();
+        const skills = envelope.skills.filter((_, candidateIndex) => candidateIndex !== index);
+        try {
+          await saveEnvelope(adapter, input.actorUserId, envelope.revision, { ...envelope, skills });
+          return;
+        } catch (error) {
+          if (!(error instanceof SkillRevisionConflictError) || attempt === 4) throw error;
+        }
+      }
+      throw new SkillRevisionConflictError();
+    },
     migrateLegacy,
     loadEnvelope: (userId: string) => readEnvelope(adapter, userId),
     saveEnvelope: (
@@ -541,11 +622,19 @@ export const copySkillForUser = (
   actorUserId: string,
   sourceSkillId: string,
 ): Promise<SkillDefinition> => defaultStore.copy({ actorUserId, sourceSkillId });
+export const createConversationSkillForUser = (
+  actorUserId: string,
+  input: { name: string; description: string; conversation: string },
+): Promise<SkillDefinition> => defaultStore.createConversation({ actorUserId, ...input });
 export const updateUserSkill = (
   actorUserId: string,
   skillId: string,
   patch: { enabled?: boolean; name?: string; description?: string },
 ): Promise<SkillDefinition> => defaultStore.update({ actorUserId, skillId, ...patch });
+export const deleteUserSkill = (
+  actorUserId: string,
+  skillId: string,
+): Promise<void> => defaultStore.remove({ actorUserId, skillId });
 export const migrateLegacyChatSkillsForUser = defaultStore.migrateLegacy;
 export const loadUserSkillEnvelope = defaultStore.loadEnvelope;
 export const saveUserSkillEnvelope = defaultStore.saveEnvelope;

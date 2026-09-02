@@ -78,6 +78,43 @@ describe('versioned user skill storage', () => {
     expect(updated.allowedSurfaces).toEqual(['canvas', 'workflow']);
   });
 
+  it('creates independent persisted conversation Skills and keeps disabled records manageable', async () => {
+    const adapter = createMemorySkillStorageAdapter();
+    let sequence = 0;
+    const store = createSkillStore(adapter, {
+      now: () => 100 + sequence,
+      createId: () => `skill-${String(++sequence).padStart(24, '0')}`,
+    });
+
+    const first = await store.createConversation({
+      actorUserId: 'user-1', name: 'First', description: 'One', conversation: 'User: first',
+    });
+    const second = await store.createConversation({
+      actorUserId: 'user-1', name: 'Second', description: 'Two', conversation: 'User: second',
+    });
+    await store.update({ actorUserId: 'user-1', skillId: first.id, enabled: false });
+
+    expect(first.id).not.toBe(second.id);
+    expect((await store.load('user-1', 'canvas')).filter(skill => !skill.builtIn)).toEqual([
+      expect.objectContaining({ id: first.id, enabled: false, systemPrompt: expect.stringContaining('User: first') }),
+      expect.objectContaining({ id: second.id, enabled: true, systemPrompt: expect.stringContaining('User: second') }),
+    ]);
+    expect((adapter.inspect('user-1', SKILL_CATALOG_KEY) as { skills: unknown[] }).skills).toHaveLength(2);
+  });
+
+  it('deletes an owned Skill from durable storage without exposing another owner', async () => {
+    const adapter = createMemorySkillStorageAdapter();
+    const store = createSkillStore(adapter, { createId: () => 'skill-000000000000000000000001' });
+    const skill = await store.createConversation({
+      actorUserId: 'user-1', name: 'Delete me', description: 'Disposable', conversation: 'User: delete',
+    });
+
+    await expect(store.remove({ actorUserId: 'user-2', skillId: skill.id }))
+      .rejects.toMatchObject({ code: 'SKILL_NOT_FOUND', status: 404 });
+    await expect(store.remove({ actorUserId: 'user-1', skillId: skill.id })).resolves.toBeUndefined();
+    expect((await store.load('user-1', 'canvas')).filter(item => !item.builtIn)).toEqual([]);
+  });
+
   it('does not reveal another user copy when it is updated', async () => {
     const adapter = createMemorySkillStorageAdapter();
     const store = createSkillStore(adapter);

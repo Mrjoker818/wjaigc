@@ -47,7 +47,10 @@ import { SkillInputFields } from '@/components/skill-runtime/SkillInputFields';
 import { SkillRunProgress } from '@/components/skill-runtime/SkillRunProgress';
 import { useSkillRun } from '@/components/skill-runtime/use-skill-run';
 import {
-  copyCanvasSkill,
+  createCanvasSkillProjectionCoordinator,
+  createConversationCanvasSkill,
+  deleteCanvasSkill,
+  deleteCanvasSkillsSequentially,
   loadCanvasSkillCatalog,
   loadCompletedCanvasSkillAssets,
   updateCanvasSkill,
@@ -520,7 +523,14 @@ interface ChatPanelProps {
 
   onAddToPrompt?: (prompt: string) => void;
   onAddImages?: (imageUrls: string[], sourceImageId?: string, meta?: { modelName?: string; apiProvider?: string }) => void;
-  onAddGeneratedImage?: (reference: WorkspaceAssetReference, meta?: { modelName?: string; apiProvider?: string; sourceImageId?: string }) => void | Promise<void>;
+  onAddGeneratedImage?: (reference: WorkspaceAssetReference, meta?: {
+    modelName?: string;
+    apiProvider?: string;
+    sourceImageId?: string;
+    runId?: string;
+    sourceVersionIds?: readonly string[];
+    signal?: AbortSignal;
+  }) => void | Promise<void>;
   canvasImages?: CanvasImage[];
   selectedCanvasImage?: CanvasImage | null;
   onResolveCanvasImageForChat?: (image: CanvasImage) => Promise<CanvasImage>;
@@ -544,6 +554,58 @@ interface ChatPanelProps {
   externalPrompt?: string;
   /** Called after the injected prompt is consumed */
   onExternalPromptConsumed?: () => void;
+}
+
+interface CanvasSkillSaveFormProps {
+  themeStyle: 'gold' | 'monochrome';
+  name: string;
+  description: string;
+  onNameChange: (value: string) => void;
+  onDescriptionChange: (value: string) => void;
+  onSave: () => void;
+  onCancel: () => void;
+}
+
+export function CanvasSkillSaveForm({
+  themeStyle,
+  name,
+  description,
+  onNameChange,
+  onDescriptionChange,
+  onSave,
+  onCancel,
+}: CanvasSkillSaveFormProps) {
+  const isGold = themeStyle === 'gold';
+  return (
+    <div className={`rounded-lg p-3 ${isGold ? 'bg-gold/8 border border-gold/20' : 'bg-blue-50 border border-blue-200'}`}>
+      <div className={`text-xs font-medium mb-2 flex items-center gap-1 ${isGold ? 'text-gold' : 'text-blue-600'}`}>
+        <BookmarkCheck size={13} />
+        保存为 Skill
+      </div>
+      <input
+        aria-label="Skill 名称"
+        value={name}
+        onChange={event => onNameChange(event.target.value)}
+        placeholder="Skill 名称..."
+        className={`w-full px-2.5 py-1.5 rounded-md text-xs mb-2 ${isGold ? 'bg-[#0d0d0d] border border-white/[0.06] text-text-bright placeholder:text-gold-muted/40' : 'bg-white border border-gray-200 text-gray-900 placeholder:text-gray-400'} focus:outline-none`}
+      />
+      <textarea
+        aria-label="Skill 描述"
+        value={description}
+        onChange={event => onDescriptionChange(event.target.value)}
+        placeholder="Skill 描述（可选）..."
+        className={`w-full px-2.5 py-1.5 rounded-md text-xs min-h-[48px] resize-none mb-2 ${isGold ? 'bg-[#0d0d0d] border border-white/[0.06] text-text-bright placeholder:text-gold-muted/40' : 'bg-white border border-gray-200 text-gray-900 placeholder:text-gray-400'} focus:outline-none`}
+      />
+      <div className="flex gap-1.5">
+        <Button onClick={onSave} disabled={!name.trim()} className="flex-1 h-7 text-xs font-medium rounded-md">
+          保存
+        </Button>
+        <Button onClick={onCancel} className="h-7 px-3 text-xs rounded-md">
+          取消
+        </Button>
+      </div>
+    </div>
+  );
 }
 
 function isImageUrl(url: string): boolean {
@@ -1346,14 +1408,14 @@ export function ChatPanel({ themeStyle, projectId, onAddToPrompt, onAddImages, o
     sourceVersionIds: string[];
     sourceImageId?: string;
   } | null>(null);
-  const projectedCanvasSkillRunIdsRef = useRef<Set<string>>(new Set());
-  const projectedCanvasSkillAssetVersionIdsRef = useRef<Set<string>>(new Set());
+  const skillProjectionCoordinatorRef = useRef(createCanvasSkillProjectionCoordinator());
   const skillProjectionAttemptCountsRef = useRef<Map<string, number>>(new Map());
   const [skillProjectionRetry, setSkillProjectionRetry] = useState(0);
   const skillProjectionControllerRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     skillProjectionControllerRef.current?.abort();
+    skillProjectionCoordinatorRef.current.cancel();
     activeCanvasSkillRunRef.current = null;
     resetSkillRun();
   }, [projectId, resetSkillRun]);
@@ -1784,8 +1846,8 @@ export function ChatPanel({ themeStyle, projectId, onAddToPrompt, onAddImages, o
 
   // 保存当前对话为 Skill
   const handleSaveAsSkill = useCallback(async (): Promise<void> => {
-    if (!skillSaveName.trim() || !activeSkill) {
-      toast.error('请先选择一个 Canvas Skill 作为保存模板');
+    if (!skillSaveName.trim()) {
+      toast.error('请输入 Skill 名称');
       return;
     }
     try {
@@ -1793,11 +1855,10 @@ export function ChatPanel({ themeStyle, projectId, onAddToPrompt, onAddImages, o
         .map(message => `${message.role === 'user' ? '用户' : '助手'}：${message.content}`)
         .join('\n')
         .slice(0, 2_000);
-      const copy = await copyCanvasSkill(activeSkill.id);
-      await updateCanvasSkill(copy.id, {
-        enabled: true,
+      await createConversationCanvasSkill({
         name: skillSaveName.trim(),
-        description: skillSaveDescription.trim() || conversationSummary || activeSkill.description,
+        description: skillSaveDescription.trim() || conversationSummary || '保存的画布对话',
+        conversation: conversationSummary,
       });
       await loadCanvasSkills();
       setShowSkillSaveDialog(false);
@@ -1807,49 +1868,54 @@ export function ChatPanel({ themeStyle, projectId, onAddToPrompt, onAddImages, o
     } catch (error) {
       toast.error(error instanceof Error ? error.message : '保存 Skill 失败');
     }
-  }, [activeSkill, loadCanvasSkills, messages, skillSaveDescription, skillSaveName]);
+  }, [loadCanvasSkills, messages, skillSaveDescription, skillSaveName]);
 
   // 使用 Skill 创建新对话
   // 删除 Skill
   const handleDeleteSkill = useCallback(async (skillId: string): Promise<void> => {
     try {
-      await updateCanvasSkill(skillId, { enabled: false });
+      await deleteCanvasSkill(skillId);
       setChatSkills(current => current.filter(skill => skill.id !== skillId));
       if (activeSkill?.id === skillId) {
         skillProjectionControllerRef.current?.abort();
+        skillProjectionCoordinatorRef.current.cancel();
         activeCanvasSkillRunRef.current = null;
         setActiveSkill(null);
         skillRun.reset();
       }
     } catch (error) {
+      await loadCanvasSkills();
       toast.error(error instanceof Error ? error.message : '删除 Skill 失败');
     }
-  }, [activeSkill?.id, skillRun]);
+  }, [activeSkill?.id, loadCanvasSkills, skillRun]);
 
   const handleToggleSkill = useCallback(async (skill: SkillDefinition): Promise<void> => {
     try {
       const updated = await updateCanvasSkill(skill.id, { enabled: !skill.enabled });
       setChatSkills(current => current.map(item => item.id === skill.id ? updated : item));
     } catch (error) {
+      await loadCanvasSkills();
       toast.error(error instanceof Error ? error.message : '更新 Skill 失败');
     }
-  }, []);
+  }, [loadCanvasSkills]);
 
   const handleClearUserSkills = useCallback(async (): Promise<void> => {
     try {
-      const userSkills = chatSkills.filter(skill => !skill.builtIn && skill.enabled);
-      await Promise.all(userSkills.map(skill => updateCanvasSkill(skill.id, { enabled: false })));
-      setChatSkills(current => current.filter(skill => skill.builtIn));
+      const userSkills = chatSkills.filter(skill => !skill.builtIn);
+      await deleteCanvasSkillsSequentially(userSkills.map(skill => skill.id));
+      await loadCanvasSkills();
       if (activeSkill && !activeSkill.builtIn) {
         skillProjectionControllerRef.current?.abort();
+        skillProjectionCoordinatorRef.current.cancel();
         activeCanvasSkillRunRef.current = null;
         setActiveSkill(null);
         skillRun.reset();
       }
     } catch (error) {
+      await loadCanvasSkills();
       toast.error(error instanceof Error ? error.message : '清空 Skills 失败');
     }
-  }, [activeSkill, chatSkills, skillRun]);
+  }, [activeSkill, chatSkills, loadCanvasSkills, skillRun]);
   const [showHistoryPanel, setShowHistoryPanel] = useState(false);
   const [showFilePanel, setShowFilePanel] = useState(false);
   const [showImagePicker, setShowImagePicker] = useState(false);
@@ -3760,6 +3826,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
 
   const handleUseSkill = useCallback((skill: SkillDefinition) => {
     skillProjectionControllerRef.current?.abort();
+    skillProjectionCoordinatorRef.current.cancel();
     activeCanvasSkillRunRef.current = null;
     skillRun.reset();
     setActiveSkill(skill);
@@ -3770,6 +3837,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
 
   const handleCloseSkill = useCallback((): void => {
     skillProjectionControllerRef.current?.abort();
+    skillProjectionCoordinatorRef.current.cancel();
     activeCanvasSkillRunRef.current = null;
     skillRun.reset();
     setActiveSkill(null);
@@ -3859,6 +3927,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
         sourceVersionIds: [...request.sourceVersionIds],
         sourceImageId,
       };
+      skillProjectionCoordinatorRef.current.activate(runId, request.projectId);
     }
   }, [buildCanvasSkillRequest, selectedCanvasImage?.id, skillRun]);
 
@@ -3867,7 +3936,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
     if (!projection || projection.status !== 'completed') return;
     if (projection.runId !== activeCanvasSkillRunRef.current?.runId) return;
     const context = activeCanvasSkillRunRef.current;
-    if (!context || context.projectId !== projectId || projectedCanvasSkillRunIdsRef.current.has(context.runId)) return;
+    if (!context || context.projectId !== projectId || !skillProjectionCoordinatorRef.current.isActive(context.runId, context.projectId)) return;
     if (!onAddGeneratedImage) {
       toast.error('画布暂时无法接收 Skill 资产版本');
       return;
@@ -3891,12 +3960,19 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
       ) return;
       for (const reference of references) {
         const assetVersionId = reference.assetVersionId;
-        if (!assetVersionId || projectedCanvasSkillAssetVersionIdsRef.current.has(assetVersionId)) continue;
-        if (controller.signal.aborted || activeCanvasSkillRunRef.current?.runId !== context.runId) return;
-        await onAddGeneratedImage(reference, { sourceImageId: context.sourceImageId });
-        projectedCanvasSkillAssetVersionIdsRef.current.add(assetVersionId);
+        if (!assetVersionId || controller.signal.aborted) continue;
+        await skillProjectionCoordinatorRef.current.project({
+          runId: context.runId,
+          projectId: context.projectId,
+          assetVersionId,
+          project: signal => Promise.resolve(onAddGeneratedImage(reference, {
+            sourceImageId: context.sourceImageId,
+            runId: context.runId,
+            sourceVersionIds: context.sourceVersionIds,
+            signal,
+          })),
+        });
       }
-      projectedCanvasSkillRunIdsRef.current.add(context.runId);
     }).catch(error => {
       if (!controller.signal.aborted && activeCanvasSkillRunRef.current?.runId === context.runId) {
         toast.error(error instanceof Error ? error.message : 'Skill 结果加入画布失败');
@@ -5954,43 +6030,15 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
 
             {/* Skill 保存对话框（内联） */}
             {showSkillSaveDialog && messages.length >= 2 && (
-              <div className={`rounded-lg p-3 ${isGold ? 'bg-gold/8 border border-gold/20' : 'bg-blue-50 border border-blue-200'}`}>
-                <div className={`text-xs font-medium mb-2 flex items-center gap-1 ${isGold ? 'text-gold' : 'text-blue-600'}`}>
-                  <BookmarkCheck size={13} />
-                  保存为 Skill
-                </div>
-                <input
-                  value={skillSaveName}
-                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSkillSaveName(e.target.value)}
-                  placeholder="Skill 名称..."
-                  className={`w-full px-2.5 py-1.5 rounded-md text-xs mb-2 ${isGold ? 'bg-[#0d0d0d] border border-white/[0.06] text-text-bright placeholder:text-gold-muted/40' : 'bg-white border border-gray-200 text-gray-900 placeholder:text-gray-400'} focus:outline-none`}
-                />
-                <textarea
-                  value={skillSaveDescription}
-                  onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setSkillSaveDescription(e.target.value)}
-                  placeholder="Skill 描述（可选）..."
-                  className={`w-full px-2.5 py-1.5 rounded-md text-xs min-h-[48px] resize-none mb-2 ${isGold ? 'bg-[#0d0d0d] border border-white/[0.06] text-text-bright placeholder:text-gold-muted/40' : 'bg-white border border-gray-200 text-gray-900 placeholder:text-gray-400'} focus:outline-none`}
-                />
-                <div className="flex gap-1.5">
-                  <Button
-                    onClick={handleSaveAsSkill}
-                    disabled={!skillSaveName.trim()}
-                    className={`flex-1 h-7 text-xs font-medium rounded-md ${
-                      isGold ? 'bg-gradient-to-r from-gold to-gold-dark text-black hover:opacity-90' : 'bg-blue-500 text-white hover:bg-blue-600'
-                    }`}
-                  >
-                    保存
-                  </Button>
-                  <Button
-                    onClick={() => setShowSkillSaveDialog(false)}
-                    className={`h-7 px-3 text-xs rounded-md ${
-                      isGold ? 'bg-white/[0.04] text-gold-muted/70 border border-white/[0.04]' : 'bg-white text-gray-500 border border-gray-200'
-                    }`}
-                  >
-                    取消
-                  </Button>
-                </div>
-              </div>
+              <CanvasSkillSaveForm
+                themeStyle={themeStyle}
+                name={skillSaveName}
+                description={skillSaveDescription}
+                onNameChange={setSkillSaveName}
+                onDescriptionChange={setSkillSaveDescription}
+                onSave={() => { void handleSaveAsSkill(); }}
+                onCancel={() => setShowSkillSaveDialog(false)}
+              />
             )}
 
             {/* 类别筛选 */}

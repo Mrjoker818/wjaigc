@@ -142,3 +142,72 @@ pnpm exec vitest run src/__tests__/components/chat-panel-skill-runtime.test.tsx 
 - 四个既有未跟踪保护项保持不变。
 - 未运行全仓 Vitest 或 build，未推送远端。
 - 状态保持 `DONE_WITH_CONCERNS`，等待全新独立审查。
+
+## 独立审查修复波次（HEAD 7195a739）
+
+### 审查结论与范围
+
+针对 `unified-skill-task-8-review.md` 的 `Important 4 / Minor 1` 完成修复。生产改动限于更新后简报授权的 ChatPanel、CanvasWorkspace、canvas-client、step-registry、Skill storage 与 Skills API；未修改 Simple Chat、node-editor/workflow、stable、账务、供应商和四个既有未跟踪保护项。
+
+### RED 证据
+
+先新增真实行为测试，再修改生产实现：
+
+```text
+pnpm exec vitest run src/__tests__/lib/skill-runtime-step-registry-lineage.test.ts src/__tests__/components/chat-panel-skill-catalog-contract.test.ts src/__tests__/lib/skill-runtime-storage.test.ts src/__tests__/api/skills.test.ts --reporter=verbose
+```
+
+结果：`4 files failed / 7 tests failed / 31 passed`。失败分别证明：生成任务没有冻结父版本、投影 pending/取消协调器不存在、对话 Skill 独立创建与持久删除不存在、POST 对话创建和 DELETE API 不存在。
+
+补充稳定 transfer 行为测试首次运行：`1 failed / 10 passed`，失败原因为 `transferCanvasSkillAsset` 不存在。补充串行批量删除 deferred 测试首次运行：`1 failed / 11 passed`，失败原因为 `deleteCanvasSkillsSequentially` 不存在。
+
+RTL 保存交互首次执行因项目未安装 jest-dom matcher 而失败（`Invalid Chai property: toBeDisabled`）；改为读取原生 `HTMLButtonElement.disabled` 后通过，该次失败属于测试写法而非产品 RED。
+
+### GREEN 实现
+
+- step-registry 在下游生成任务执行前，把运行开始时冻结的 `sourceVersionIds` 合并写入任务 `submissionPayload.assetParentVersionIds`；写入失败即终止，权威资产投影由此生成 `parentVersionIds`。
+- canvas-client 新增稳定身份 `canvas-skill:{runId}:{assetVersionId}`、服务端 `/api/assets/transfer` 调用和投影协调器。协调器在调用前登记 pending，重复 effect 不再发起第二次调用，失败释放 claim；关闭/切换 Skill、切换项目或新 run 会 abort 旧信号，迟到回调不能插入节点。
+- CanvasWorkspace 将同一稳定身份同时作为 transfer `entityId` 和 `idempotencyKey`，由资产服务端幂等合同保证单 placement；metadata 保存 `runId`、冻结的 `sourceVersionIds` 及已有 `sourceTrace`，CanvasImage 继续保存权威 reference 的 `sourceTrace`，项目和 abort 信号在插入前再次校验，不覆盖来源节点。
+- 保存当前对话不再要求 activeSkill；POST 创建新的随机 owner-scoped Skill，保存最近对话上下文，每次得到独立 ID，并通过版本化 Skill 信封持久化。
+- 目录读取保留 surface 隔离，同时返回 disabled 用户 Skill，刷新后仍能管理和重新启用；DELETE 真实移除服务端记录。批量清空严格串行，任一失败停止后续请求，并重新加载权威目录；单项启停/删除失败也重载。
+- 新增 RTL 保存表单交互、API POST/DELETE、storage 连续保存/disabled/删除、step-registry lineage、deferred pending/取消/重入、稳定 transfer 与串行删除行为测试。既有源码测试仅保留共享控件、目录边界和普通聊天隔离等架构辅助断言。
+
+### 验证结果
+
+最终 Task1-8 限定回归（17 个 Skill Runtime API/lib/component 文件，不含全仓测试）：
+
+```text
+pnpm exec vitest run [8 个 skill-runtime lib 测试] [3 个 Skill API 测试] [6 个目标组件测试] --reporter=dot
+```
+
+结果：`17 files passed / 180 tests passed`。其中包括 Task7 共享控件、21/16 catalog isolation、Task8 lineage/storage/API/RTL/deferred 竞态及普通聊天生成恢复回归。
+
+其他门禁：
+
+- `pnpm ts-check`：通过。
+- 非巨型目标文件 ESLint `--max-warnings 0`：通过，零 error、零 warning。
+- `chat-panel.tsx` 与 `canvas-workspace.tsx` 目标 ESLint：通过，零 error；共 57 条既有 warning。
+- `git diff --check`：通过。
+- 动态 PowerShell 文件数组首次被 Vitest 解析为单一 filter，返回 `No test files found`；随后改用显式 17 文件命令并取得 180/180 通过。
+- `pnpm check:protected-baseline`：38 个 feature IDs、组件路径、evidence contracts 和 Git refs 全部 PASS；最终被四个简报指定的既有未跟踪保护项扫描阻塞，共报告 42347 个 unapproved drift。未删除、修改或暂存这些保护项。
+
+### 本波改动文件
+
+- `src/components/chat-panel.tsx`
+- `src/components/canvas-workspace.tsx`
+- `src/lib/skill-runtime/canvas-client.ts`
+- `src/lib/skill-runtime/step-registry.ts`
+- `src/lib/skill-runtime/storage.ts`
+- `src/app/api/skills/route.ts`
+- `src/app/api/skills/[skillId]/route.ts`
+- `src/__tests__/components/chat-panel-skill-runtime.test.tsx`
+- `src/__tests__/components/chat-panel-skill-catalog-contract.test.ts`
+- `src/__tests__/components/chat-panel-skill-management.test.tsx`
+- `src/__tests__/lib/skill-runtime-step-registry-lineage.test.ts`
+- `src/__tests__/lib/skill-runtime-storage.test.ts`
+- `src/__tests__/api/skills.test.ts`
+- `.superpowers/sdd/unified-skill-task-8-report.md`
+
+### 自审与待审
+
+四项 Important 均有对应真实行为测试并转绿，Minor 的关键源码字符串断言已由 RTL/API/storage/step-registry/deferred 测试补强。未运行全仓 Vitest 或 build，未 push。交付仍标记 `DONE_WITH_CONCERNS`：保护基线脚本受既有未跟踪保护项阻塞，且按简报需等待新的独立复审结论。

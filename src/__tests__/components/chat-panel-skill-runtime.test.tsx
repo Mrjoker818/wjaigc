@@ -30,10 +30,10 @@ describe('canvas chat shared Skill runtime wiring', () => {
     const saveStart = source.indexOf('const handleSaveAsSkill =');
     const saveEnd = source.indexOf('const handleDeleteSkill =', saveStart);
     expect(source.slice(saveStart, saveEnd)).toContain('messages.slice(-6)');
-    expect(source.slice(saveStart, saveEnd)).toContain('copyCanvasSkill(activeSkill.id)');
-    expect(source.slice(saveStart, saveEnd)).not.toContain('activeSkill.builtIn');
+    expect(source.slice(saveStart, saveEnd)).toContain('createConversationCanvasSkill({');
+    expect(source.slice(saveStart, saveEnd)).not.toContain('activeSkill');
     expect(source.slice(saveStart, saveEnd)).not.toContain('chat_skills');
-    expect(source).toContain('setChatSkills(current => current.filter(skill => skill.id !== skillId))');
+    expect(source).toContain('await deleteCanvasSkill(skillId)');
   });
 
   it('starts a canvas run and only inserts authoritative completed output versions as new nodes', () => {
@@ -52,8 +52,9 @@ describe('canvas chat shared Skill runtime wiring', () => {
     expect(source).toContain('sourceImageId: context.sourceImageId');
     expect(source).toContain('onAddGeneratedImage(reference');
     expect(source).not.toContain('onAddImages?.(skill');
-    expect(source.indexOf('projectedCanvasSkillRunIdsRef.current.add(context.runId)'))
-      .toBeGreaterThan(source.indexOf('await onAddGeneratedImage(reference'));
-    expect(source).toContain('setChatSkills(current => current.filter(skill => skill.builtIn))');
+    expect(source).toContain('skillProjectionCoordinatorRef.current.project({');
+    expect(source).toContain('runId: context.runId');
+    expect(source).toContain('sourceVersionIds: context.sourceVersionIds');
+    expect(source).toContain('deleteCanvasSkillsSequentially(userSkills.map(skill => skill.id))');
   });
 });

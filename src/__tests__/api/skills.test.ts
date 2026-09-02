@@ -5,6 +5,8 @@ const mocks = vi.hoisted(() => ({
   requireApiAuthOrReject: vi.fn(),
   loadUserSkillCatalog: vi.fn(),
   copySkillForUser: vi.fn(),
+  createConversationSkillForUser: vi.fn(),
+  deleteUserSkill: vi.fn(),
   updateUserSkill: vi.fn(),
 }));
 
@@ -13,11 +15,13 @@ vi.mock('@/lib/api-auth', () => ({ requireApiAuthOrReject: mocks.requireApiAuthO
 vi.mock('@/lib/skill-runtime/storage', () => ({
   loadUserSkillCatalog: mocks.loadUserSkillCatalog,
   copySkillForUser: mocks.copySkillForUser,
+  createConversationSkillForUser: mocks.createConversationSkillForUser,
+  deleteUserSkill: mocks.deleteUserSkill,
   updateUserSkill: mocks.updateUserSkill,
 }));
 
 import { GET, POST } from '@/app/api/skills/route';
-import { PATCH } from '@/app/api/skills/[skillId]/route';
+import { DELETE, PATCH } from '@/app/api/skills/[skillId]/route';
 import { readStrictJsonObject, SkillRequestError } from '@/app/api/skills/http';
 
 const auth = {
@@ -81,6 +85,19 @@ describe('/api/skills', () => {
     }));
     expect(unknown.status).toBe(400);
     expect(await unknown.json()).toMatchObject({ code: 'INVALID_REQUEST_BODY' });
+  });
+
+  it('creates an independent conversation Skill without a selected template', async () => {
+    mocks.createConversationSkillForUser.mockResolvedValue({ id: 'skill-conversation-1', version: 1 });
+    const response = await POST(jsonRequest('http://localhost/api/skills', 'POST', {
+      name: 'Saved conversation', description: 'Reusable exchange', conversation: 'User: make a poster',
+    }));
+
+    expect(response.status).toBe(201);
+    expect(mocks.createConversationSkillForUser).toHaveBeenCalledWith('user-1', {
+      name: 'Saved conversation', description: 'Reusable exchange', conversation: 'User: make a poster',
+    });
+    expect(mocks.copySkillForUser).not.toHaveBeenCalled();
   });
 
   it('rejects malformed, non-JSON, and overlong copy requests', async () => {
@@ -199,6 +216,16 @@ describe('/api/skills', () => {
       allowedSurfaces: ['simple-chat'],
     }), context);
     expect(forbidden.status).toBe(400);
+  });
+
+  it('deletes an owned Skill through an explicit server contract', async () => {
+    const response = await DELETE(
+      new NextRequest('http://localhost/api/skills/skill-copy', { method: 'DELETE' }),
+      { params: Promise.resolve({ skillId: 'skill-copy' }) },
+    );
+
+    expect(response.status).toBe(204);
+    expect(mocks.deleteUserSkill).toHaveBeenCalledWith('user-1', 'skill-copy');
   });
 
   it('returns stable conflict and storage failure statuses', async () => {
