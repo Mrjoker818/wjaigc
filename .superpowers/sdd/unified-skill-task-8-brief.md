@@ -50,3 +50,6 @@
 - 关闭/切换 Skill、切换项目或 effect 重入后，已发出的旧投影不得插入；同一 `runId + assetVersionId` 只能产生一个 placement/节点。
 - “保存当前对话为 Skill”不得依赖先选择模板，不得覆盖同一模板的旧副本；连续保存必须得到两个可持久恢复的独立 Skill。
 - disabled 用户 Skill 刷新后仍须在管理目录可见并可重新启用；删除必须有明确服务端合同；批量清空不得以高并发 CAS 留下本地与服务器不一致。
+- `WorkspaceSourceTrace` 必须支持受校验的 Canvas Skill 来源（runId、Skill ID/版本、冻结的 sourceVersionIds、时间），并能经资产解析、transfer、CanvasImage 和刷新恢复往返；不得把私有 metadata 字段冒充公开可恢复 trace。
+- 开始新 Skill Run 时必须在等待 POST 之前取消旧投影；新 Run 启动成功或失败都不得让旧 Run 在等待窗口插入。
+- owner-scoped 用户 Skill 必须由服务端按真实用户、surface、enabled、version 授权并冻结其自身定义；不得在 ChatPanel 或服务端替换成内置 sourceSkill 模板执行。estimate、create、retry/restore 继续使用统一运行时和冻结快照。
