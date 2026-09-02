@@ -19,11 +19,9 @@ import {
 import type { User } from '@/lib/user-types';
 import { requireSkillForSurface } from './catalog';
 import {
-  buildSkillAgentRunRequest,
   createSkillRun as createAuthorizedSkillRun,
   type SkillRunRequest,
 } from './run-request';
-import { resolveTaskModel } from '@/lib/task-core/model-catalog';
 import { createSkillExecutor, type ExecuteSkillStepInput } from './executor';
 import type { SkillModelBinding, SkillSurface } from './types';
 
@@ -50,7 +48,7 @@ export class SkillRunNotFoundError extends Error {
 export interface SkillRunStepHistory {
   id: string;
   label: string;
-  status: 'pending' | 'processing' | 'completed';
+  status: 'pending' | 'processing' | 'completed' | 'failed';
 }
 
 export interface SkillRunHistory {
@@ -91,6 +89,12 @@ export interface SkillRuntimeServiceDependencies {
   pauseRun: typeof pauseAgentRun;
   resumeRun: typeof resumeAgentRun;
   cancelRun: typeof cancelAgentRun;
+  prepareResume?(input: {
+    actorUserId: string;
+    projectId: string;
+    runId: string;
+    nextStepId: string;
+  }): Promise<unknown>;
 }
 
 const defaultDependencies: SkillRuntimeServiceDependencies = {
@@ -102,6 +106,9 @@ const defaultDependencies: SkillRuntimeServiceDependencies = {
   pauseRun: pauseAgentRun,
   resumeRun: resumeAgentRun,
   cancelRun: cancelAgentRun,
+  prepareResume: input => import('./continuation').then(module => (
+    module.loadPersistedSkillContinuation(input)
+  )),
 };
 
 const surfaces = new Set<SkillSurface>(['canvas', 'workflow', 'simple-chat']);
@@ -221,6 +228,16 @@ function history(task: CloudTask, events: readonly AgentEvent[], projection: Age
     return requireSkillForSurface(invocation.skillId, surface).steps;
   })();
   const completed = completedStepIds(events);
+  const failed = new Set(projection.qualityChecks
+    .filter(check => !check.passed)
+    .map(check => check.stepId));
+  if (projection.status === 'paused' && projection.resumeFromStepId) {
+    failed.add(projection.resumeFromStepId);
+  }
+  const terminalFailure = [...events].reverse().find(event => event.type === 'run.failed');
+  if (typeof terminalFailure?.payload.stepId === 'string') {
+    failed.add(terminalFailure.payload.stepId);
+  }
   return {
     runId: task.id,
     ...invocation,
@@ -230,7 +247,9 @@ function history(task: CloudTask, events: readonly AgentEvent[], projection: Age
       label: step.label,
       status: completed.has(step.id)
         ? 'completed'
-        : projection.currentStepId === step.id ? 'processing' : 'pending',
+        : failed.has(step.id)
+          ? 'failed'
+          : projection.currentStepId === step.id ? 'processing' : 'pending',
     })),
     qualityEvents: projection.qualityChecks.map(check => ({ ...check })),
     assetVersionIds: [...projection.assetVersionIds],
@@ -287,7 +306,15 @@ export function createSkillRuntimeService(
       if (!nextStepId) throw new SkillRunRequestError('Skill run has no resumable step');
       return dependencies.pauseRun({ ...input, nextStepId });
     },
-    resume(input: { actorUserId: string; runId: string }) {
+    async resume(input: { actorUserId: string; runId: string }) {
+      const run = await owned(input);
+      const nextStepId = run.projection.resumeFromStepId;
+      if (!nextStepId) throw new SkillRunRequestError('Skill run has no persisted resume step');
+      await dependencies.prepareResume?.({
+        ...input,
+        projectId: run.task.projectId || '',
+        nextStepId,
+      });
       return dependencies.resumeRun(input);
     },
     cancel(input: { actorUserId: string; runId: string }) {
@@ -300,6 +327,12 @@ export function createSkillRuntimeService(
       if (run.projection.status !== 'paused' || run.projection.resumeFromStepId !== input.stepId) {
         throw new SkillRunRequestError('Only the persisted paused step can be retried');
       }
+      await dependencies.prepareResume?.({
+        actorUserId: input.actorUserId,
+        projectId: run.task.projectId || '',
+        runId: input.runId,
+        nextStepId: input.stepId,
+      });
       const resumed = await dependencies.resumeRun({
         actorUserId: input.actorUserId,
         runId: input.runId,
@@ -322,13 +355,15 @@ export async function executeSkillRun(input: {
   stepAdapters: Readonly<Record<string, SkillStepAdapter>>;
   stepRecoveries?: Readonly<Record<string, SkillStepRecoveryFactory>>;
   resumeFromStepId?: string;
+  definition?: import('./types').SkillDefinition;
 }): Promise<import('./executor').ExecuteSkillRunResult> {
-  const agentRequest = await buildSkillAgentRunRequest(input.request, {
-    actorUserId: input.actor.id,
-    resolveTaskModel,
-  });
-  const invocation = agentRequest.skill!;
-  const definition = requireSkillForSurface(input.request.skillId, input.request.surface);
+  const definition = input.definition
+    || requireSkillForSurface(input.request.skillId, input.request.surface);
+  const invocation = {
+    inputValues: input.request.inputValues,
+    modelBindings: input.request.modelBindings,
+  };
+  const workspace = input.request.surface === 'simple-chat' ? 'chat' : input.request.surface;
   const events = await listAgentRunEvents({ actorUserId: input.actor.id, runId: input.runId });
   const completed = completedStepIds(events);
   const fence = input.operationContext.executionFence;
@@ -349,25 +384,32 @@ export async function executeSkillRun(input: {
       ...event,
       eventId: `${event.eventId}:generation:${fence.generation}`,
       projectId: input.request.projectId,
-      workspace: agentRequest.workspace,
+      workspace,
       payload: { ...event.payload, generation: fence.generation },
       executionFence: fence,
     }),
-    completeRun: ({ result }) => appendAgentRunEvent({
+    completeRun: ({ result, executionFence }) => appendAgentRunEvent({
       actorUserId: input.actor.id,
       runId: input.runId,
-      eventId: `skill:${input.runId}:completed`,
+      eventId: `skill:${input.runId}:generation:${executionFence.generation}:completed`,
       type: 'run.completed',
-      payload: { result: { assetVersionIds: result.assetVersionIds } },
+      payload: {
+        generation: executionFence.generation,
+        result: { assetVersionIds: result.assetVersionIds },
+      },
+      executionFence,
     }),
-    failRun: ({ error }) => appendAgentRunEvent({
+    failRun: ({ error, executionFence }) => appendAgentRunEvent({
       actorUserId: input.actor.id,
       runId: input.runId,
-      eventId: `skill:${input.runId}:quality-failed`,
+      eventId: `skill:${input.runId}:generation:${executionFence.generation}:quality-failed`,
       type: 'run.failed',
       payload: {
+        generation: executionFence.generation,
+        stepId: error.stepId,
         error: { code: error.code, message: error.message, retryable: false },
       },
+      executionFence,
     }),
     pauseForRetry: ({ stepId }) => pauseAgentRun({
       actorUserId: input.actor.id,
@@ -379,7 +421,7 @@ export async function executeSkillRun(input: {
     actorUserId: input.actor.id,
     projectId: input.request.projectId,
     runId: input.runId,
-    workspace: agentRequest.workspace,
+    workspace,
     definition,
     inputValues: invocation.inputValues,
     modelBindings: invocation.modelBindings,
@@ -387,6 +429,39 @@ export async function executeSkillRun(input: {
     completedStepIds: [...completed],
     resumeFromStepId: input.resumeFromStepId,
   });
+}
+
+export function startSkillRunExecution(input: {
+  actor: User;
+  runId: string;
+}): { started: true; completion: Promise<void> } {
+  const completion = (async () => {
+    const task = await getCloudTaskForUser(input.runId, input.actor.id);
+    if (!task?.projectId) throw new SkillRunNotFoundError();
+    const continuation = await (await import('./continuation')).loadPersistedSkillContinuation({
+      actorUserId: input.actor.id,
+      projectId: task.projectId,
+      runId: input.runId,
+      task,
+    });
+    const { executeAdoptedAgentTask } = await import('@/lib/agent-runtime/same-task-adapter');
+    await executeAdoptedAgentTask({
+      adoption: {
+        runId: input.runId,
+        reused: false,
+        claimed: true,
+        projection: await getAgentRunProjection({ actorUserId: input.actor.id, runId: input.runId }),
+        tools: [],
+        actorUserId: input.actor.id,
+        projectId: task.projectId,
+        workspace: continuation.workspace,
+        toolId: continuation.toolId,
+        requestDigest: continuation.requestDigest,
+      },
+      execute: continuation.execute,
+    });
+  })();
+  return { started: true, completion };
 }
 
 const runtimeService = createSkillRuntimeService();

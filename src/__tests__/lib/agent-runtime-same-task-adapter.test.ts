@@ -1,10 +1,14 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import {
+  createResumableAgentTaskLoader,
   createSameTaskAgentAdapter,
   type SameTaskAgentAdapterDependencies,
 } from '@/lib/agent-runtime/same-task-adapter';
-import type { AgentDownstreamOperation } from '@/lib/agent-runtime/downstream-operations';
+import type {
+  AgentDownstreamExecutionContext,
+  AgentDownstreamOperation,
+} from '@/lib/agent-runtime/downstream-operations';
 import type { AgentEvent, AgentRunRequest } from '@/lib/agent-runtime/types';
 import type { CloudTask } from '@/lib/cloud-task-storage';
 import type { User } from '@/lib/user-types';
@@ -115,7 +119,54 @@ function dependencies(
   };
 }
 
+function operationContextForResume(): AgentDownstreamExecutionContext {
+  return {
+    idempotencyKey: 'resume-key', operationKey: 'resume-operation', recovery: true,
+    executionFence: { runId: 'skill-run-1', leaseOwner: 'lease-2', generation: 2 },
+    signal: new AbortController().signal,
+    beginSubmission: vi.fn(), recordAccepted: vi.fn(), executeOperation: vi.fn(),
+  };
+}
+
 describe('same-task Agent adoption adapter', () => {
+  it('loads a normal durable Skill run without requiring adopted=true', async () => {
+    const skillTask = task({ id: 'skill-run-1', type: 'agent-run' });
+    const skillEvents: AgentEvent[] = [{
+      eventId: 'created', runId: skillTask.id, sequence: 1, type: 'run.created', timestamp: 'now',
+      payload: {
+        workspace: 'canvas', requestDigest: 'digest-1',
+        skill: { skillId: 'preset-ecommerce-listing', skillVersion: 1 },
+      },
+    }];
+    const executeSkill = vi.fn(async () => undefined);
+    const loadSkillContinuation = vi.fn(async () => ({
+      workspace: 'canvas' as const,
+      requestDigest: 'digest-1',
+      toolId: 'conversation-2',
+      execute: executeSkill,
+    }));
+    const loader = createResumableAgentTaskLoader({
+      getTaskForUser: vi.fn(async () => skillTask),
+      listEvents: vi.fn(async () => skillEvents),
+      executeAdmittedToolCall: vi.fn(),
+      loadAgentEditContinuation: vi.fn(),
+      executeAgentEditContinuation: vi.fn(),
+      loadSkillContinuation,
+    });
+
+    const resumed = await loader({
+      actorUserId: actor.id, projectId: 'project-1', runId: skillTask.id,
+      nextStepId: 'conversation-2',
+    });
+    const context = operationContextForResume();
+    await resumed.execute(context);
+
+    expect(loadSkillContinuation).toHaveBeenCalledWith(expect.objectContaining({
+      runId: skillTask.id, nextStepId: 'conversation-2', task: skillTask, events: skillEvents,
+    }));
+    expect(executeSkill).toHaveBeenCalledWith(context);
+    expect(resumed.adoption).toMatchObject({ runId: skillTask.id, toolId: 'conversation-2' });
+  });
   it('preserves database generation zero across the public adapter used by every Agent surface', async () => {
     const deps = dependencies();
     let executionSignal: AbortSignal | undefined;

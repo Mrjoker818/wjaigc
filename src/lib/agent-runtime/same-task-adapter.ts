@@ -29,7 +29,10 @@ import type {
   AgentRunRequest,
 } from './types';
 import { withAgentExecutionFence, type AgentExecutionFence } from './execution-fence';
-import type { AgentEditExecutionContinuationV1 } from './agent-edit-execution-descriptor';
+import type {
+  AgentEditExecutionContinuationV1,
+  AgentEditExecutionDescriptorV1,
+} from './agent-edit-execution-descriptor';
 import { AgentModelRouteMismatchError } from './model-route-error';
 import { createTaskAbortScope } from '@/lib/task-core/task-abort';
 
@@ -632,6 +635,148 @@ export function executeAdoptedAgentTask<T>(
   return defaultSameTaskAgentAdapter().then(adapter => adapter.executeAdoption(input));
 }
 
+interface ResumableAgentTaskLoaderDependencies {
+  getTaskForUser(taskId: string, actorUserId: string): Promise<CloudTask | null>;
+  listEvents(input: {
+    actorUserId: string;
+    projectId: string;
+    runId: string;
+  }): Promise<AgentEvent[]>;
+  executeAdmittedToolCall(
+    execution: AgentAdmittedExecution,
+    signal?: AbortSignal,
+  ): Promise<unknown>;
+  loadAgentEditContinuation(input: {
+    actorUserId: string;
+    projectId: string;
+    runId: string;
+    nextStepId: string;
+  }): Promise<AgentEditExecutionDescriptorV1>;
+  executeAgentEditContinuation(input: {
+    actorUserId: string;
+    projectId: string;
+    runId: string;
+    nextStepId: string;
+    descriptor: AgentEditExecutionDescriptorV1;
+    generation: number;
+    leaseOwner: string;
+    signal: AbortSignal;
+    operationContext: AgentDownstreamExecutionContext;
+  }): Promise<unknown>;
+  loadSkillContinuation(input: {
+    actorUserId: string;
+    projectId: string;
+    runId: string;
+    nextStepId?: string;
+    task?: CloudTask;
+    events?: readonly AgentEvent[];
+  }): Promise<{
+    workspace: AgentRunRequest['workspace'];
+    requestDigest: string;
+    toolId: string;
+    execute(context: AgentDownstreamExecutionContext): Promise<void>;
+  }>;
+}
+
+export function createResumableAgentTaskLoader(
+  dependencies: ResumableAgentTaskLoaderDependencies,
+) {
+  return async function loadResumableAgentTask(input: {
+    actorUserId: string;
+    projectId: string;
+    runId: string;
+    nextStepId: string;
+  }): Promise<{
+    adoption: SameTaskAgentAdoption;
+    execute: (context: AgentDownstreamExecutionContext) => Promise<void>;
+  }> {
+    const [task, events] = await Promise.all([
+      dependencies.getTaskForUser(input.runId, input.actorUserId),
+      dependencies.listEvents(input),
+    ]);
+    const created = events.find(event => event.type === 'run.created');
+    if (!task || task.projectId !== input.projectId || !created) {
+      throw new SameTaskAgentRunNotFoundError();
+    }
+
+    if (created.payload.skill) {
+      const continuation = await dependencies.loadSkillContinuation({
+        ...input,
+        task,
+        events,
+      });
+      return {
+        adoption: {
+          runId: input.runId,
+          reused: true,
+          claimed: true,
+          projection: reduceAgentEvents(events),
+          tools: [],
+          actorUserId: input.actorUserId,
+          projectId: input.projectId,
+          workspace: continuation.workspace,
+          toolId: continuation.toolId,
+          requestDigest: continuation.requestDigest,
+        },
+        execute: continuation.execute,
+      };
+    }
+
+    if (created.payload.adopted !== true) {
+      throw new SameTaskAgentRunNotFoundError();
+    }
+    const resumeExecution = created.payload.resumeExecution as AgentAdmittedExecution | undefined;
+    const isAgentEdit = created.payload.rootToolId === 'agent_edit';
+    const agentEditDescriptor = isAgentEdit
+      ? await dependencies.loadAgentEditContinuation(input)
+      : undefined;
+    if (!resumeExecution && !agentEditDescriptor) {
+      throw new Error('Adopted Agent execution has no durable continuation');
+    }
+    const workspace = created.payload.workspace as AgentRunRequest['workspace'];
+    const requestDigest = typeof created.payload.requestDigest === 'string'
+      ? created.payload.requestDigest
+      : createHash('sha256').update(JSON.stringify(created.payload)).digest('hex');
+    return {
+      adoption: {
+        runId: input.runId,
+        reused: true,
+        claimed: true,
+        projection: reduceAgentEvents(events),
+        tools: [],
+        actorUserId: input.actorUserId,
+        projectId: input.projectId,
+        workspace,
+        toolId: input.nextStepId,
+        requestDigest,
+      },
+      execute: async context => {
+        context.resumeFromStepId = input.nextStepId;
+        if (agentEditDescriptor) {
+          const resumed = context as AgentDownstreamExecutionContext & {
+            generation?: number;
+            leaseOwner?: string;
+            signal?: AbortSignal;
+          };
+          if (!Number.isSafeInteger(resumed.generation) || !resumed.leaseOwner || !resumed.signal) {
+            throw new Error('Agent edit resume context is incomplete');
+          }
+          await dependencies.executeAgentEditContinuation({
+            ...input,
+            descriptor: agentEditDescriptor,
+            generation: resumed.generation!,
+            leaseOwner: resumed.leaseOwner,
+            signal: resumed.signal,
+            operationContext: context,
+          });
+        } else {
+          await dependencies.executeAdmittedToolCall(resumeExecution!, context.signal);
+        }
+      },
+    };
+  };
+}
+
 export async function loadResumableAdoptedAgentTask(input: {
   actorUserId: string;
   projectId: string;
@@ -646,66 +791,16 @@ export async function loadResumableAdoptedAgentTask(input: {
     import('./event-storage'),
     import('@/lib/chat-tools'),
   ]);
-  const [task, events] = await Promise.all([
-    taskStorage.getCloudTaskForUser(input.runId, input.actorUserId),
-    eventStorage.listAgentEventsForActor(input),
-  ]);
-  const created = events.find(event => event.type === 'run.created');
-  if (!task || task.projectId !== input.projectId || created?.payload.adopted !== true) {
-    throw new SameTaskAgentRunNotFoundError();
-  }
-  const resumeExecution = created.payload.resumeExecution as AgentAdmittedExecution | undefined;
-  const isAgentEdit = created.payload.rootToolId === 'agent_edit';
-  const agentEditDescriptor = isAgentEdit
-    ? await (await import('./agent-edit-continuation')).loadAgentEditContinuation(input)
-    : undefined;
-  if (!resumeExecution && !agentEditDescriptor) {
-    throw new Error('Adopted Agent execution has no durable continuation');
-  }
-  const workspace = created.payload.workspace as AgentRunRequest['workspace'];
-  const requestDigest = typeof created.payload.requestDigest === 'string'
-    ? created.payload.requestDigest
-    : createHash('sha256').update(JSON.stringify(created.payload)).digest('hex');
-  return {
-    adoption: {
-      runId: input.runId,
-      reused: true,
-      claimed: true,
-      projection: reduceAgentEvents(events),
-      tools: [],
-      actorUserId: input.actorUserId,
-      projectId: input.projectId,
-      workspace,
-      toolId: input.nextStepId,
-      requestDigest,
-    },
-    execute: async context => {
-      context.resumeFromStepId = input.nextStepId;
-      if (agentEditDescriptor) {
-        const resumed = context as AgentDownstreamExecutionContext & {
-          generation?: number;
-          leaseOwner?: string;
-          signal?: AbortSignal;
-        };
-        if (!Number.isSafeInteger(resumed.generation) || !resumed.leaseOwner || !resumed.signal) {
-          throw new Error('Agent edit resume context is incomplete');
-        }
-        await (await import('./agent-edit-continuation')).executeAgentEditContinuation({
-          actorUserId: input.actorUserId,
-          projectId: input.projectId,
-          runId: input.runId,
-          nextStepId: input.nextStepId,
-          descriptor: agentEditDescriptor,
-          generation: resumed.generation!,
-          leaseOwner: resumed.leaseOwner,
-          signal: resumed.signal,
-          operationContext: context,
-        });
-      } else {
-        await chatTools.executeAdmittedToolCall(resumeExecution!, context.signal);
-      }
-    },
-  };
+  const agentEdit = await import('./agent-edit-continuation');
+  const skillContinuation = await import('@/lib/skill-runtime/continuation');
+  return createResumableAgentTaskLoader({
+    getTaskForUser: taskStorage.getCloudTaskForUser,
+    listEvents: eventStorage.listAgentEventsForActor,
+    executeAdmittedToolCall: chatTools.executeAdmittedToolCall,
+    loadAgentEditContinuation: agentEdit.loadAgentEditContinuation,
+    executeAgentEditContinuation: agentEdit.executeAgentEditContinuation,
+    loadSkillContinuation: skillContinuation.loadPersistedSkillContinuation,
+  })(input);
 }
 
 export function adoptAndExecuteExistingAgentTask<T>(

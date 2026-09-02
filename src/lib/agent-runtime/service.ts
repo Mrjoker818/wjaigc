@@ -141,6 +141,7 @@ export interface AgentEventAppendRequest {
   eventId: string;
   type: AgentEventType;
   payload: Record<string, unknown>;
+  executionFence?: import('./execution-fence').AgentExecutionFence;
 }
 
 export interface AgentEventAppendResult {
@@ -512,6 +513,7 @@ export function createAgentRuntimeService(
       workspace: run.workspace,
       type: input.type,
       payload: input.payload,
+      executionFence: input.executionFence,
     });
     const beforeEvents = run.events;
     const beforeProjection = reduceAgentEvents(beforeEvents);
@@ -526,6 +528,7 @@ export function createAgentRuntimeService(
           workspace: run.workspace,
           type: validated.type,
           payload: validated.payload,
+          executionFence: validated.executionFence,
         });
         return {
           accepted: true,
@@ -630,6 +633,7 @@ export function createAgentRuntimeService(
       workspace: run.workspace,
       type: validated.type,
       payload: validated.payload,
+      executionFence: validated.executionFence,
     });
     const events = await dependencies.listEvents({
       actorUserId: validated.actorUserId,
@@ -808,6 +812,12 @@ export function createAgentRuntimeService(
               steps: skillAdmission.skill.steps.map(step => ({
                 id: step.id,
                 label: step.label,
+                toolId: step.toolId,
+                execution: step.execution,
+                ...(step.parallelGroup ? { parallelGroup: step.parallelGroup } : {}),
+                promptTemplate: step.promptTemplate,
+                modelRole: step.modelRole,
+                qualityGateIds: [...step.qualityGateIds],
               })),
             },
           } : {}),

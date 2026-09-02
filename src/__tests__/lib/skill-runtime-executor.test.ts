@@ -50,6 +50,10 @@ function operationContext(): AgentDownstreamExecutionContext {
   };
 }
 
+function operationContextWithSignal(signal: AbortSignal): AgentDownstreamExecutionContext {
+  return { ...operationContext(), signal };
+}
+
 function result(id: string): SkillStepResult {
   return { assetVersionIds: [id], media: [{}] };
 }
@@ -113,8 +117,32 @@ describe('durable Skill executor', () => {
       type: 'quality.checked', payload: expect.objectContaining({ stepId: 'generate-3', passed: false }),
     }));
     expect(failRun).toHaveBeenCalledTimes(1);
+    expect(failRun).toHaveBeenCalledWith(expect.objectContaining({
+      executionFence: { runId: 'run-1', leaseOwner: 'lease-1', generation: 9 },
+    }));
     expect(pauseForRetry).not.toHaveBeenCalled();
     expect(completeRun).not.toHaveBeenCalled();
+  });
+
+  it('refuses a late completion after the active execution signal is aborted', async () => {
+    const controller = new AbortController();
+    const completeRun = vi.fn(async () => true);
+    const failRun = vi.fn(async () => true);
+    const executor = createSkillExecutor({
+      appendEvent: vi.fn(async () => true), completeRun, failRun,
+      executeStep: vi.fn(async ({ step }) => {
+        if (step.id === 'quality-3') controller.abort(new DOMException('replaced', 'AbortError'));
+        return result(`version-${step.id}`);
+      }),
+    });
+
+    await expect(executor.execute({
+      actorUserId: 'user-1', projectId: 'project-1', runId: 'run-1', workspace: 'canvas',
+      definition, inputValues: {}, modelBindings: {},
+      operationContext: operationContextWithSignal(controller.signal),
+    })).rejects.toMatchObject({ name: 'AbortError' });
+    expect(completeRun).not.toHaveBeenCalled();
+    expect(failRun).not.toHaveBeenCalled();
   });
 
   it('persists a retry point for an execution error without settling or rerunning completed work', async () => {
@@ -140,6 +168,44 @@ describe('durable Skill executor', () => {
 });
 
 describe('Skill run history', () => {
+  it('validates the durable Skill continuation before changing a paused run to resumed', async () => {
+    const task: CloudTask = {
+      id: 'run-resume', userId: 'user-1', projectId: 'project-1', type: 'agent-run',
+      status: 'processing', progress: 40, creditStatus: 'charged', creditCost: 3,
+      createdAt: 10, updatedAt: 20,
+    };
+    const events: AgentEvent[] = [{
+      eventId: 'created', runId: task.id, sequence: 1, type: 'run.created', timestamp: 'now',
+      payload: {
+        workspace: 'canvas',
+        skill: { skillId: definition.id, skillVersion: 1, inputValues: {}, modelBindings: {} },
+        skillSnapshot: { id: definition.id, version: 1, name: definition.name, steps: definition.steps },
+      },
+    }];
+    const projection: AgentRunProjection = {
+      runId: task.id, status: 'paused', lastSequence: 2, plan: [],
+      resumeFromStepId: 'generate-3', assetVersionIds: [], ignoredEventIds: [],
+      missingSequences: [], qualityChecks: [],
+    };
+    const resumeRun = vi.fn();
+    const prepareResume = vi.fn(async () => { throw new Error('frozen continuation is invalid'); });
+    const dependencies: SkillRuntimeServiceDependencies = {
+      createAuthorizedSkillRun: vi.fn(), getTaskForUser: vi.fn(async () => task),
+      listTasks: vi.fn(async () => [task]), listEvents: vi.fn(async () => events),
+      getProjection: vi.fn(async () => projection), pauseRun: vi.fn(), resumeRun,
+      cancelRun: vi.fn(), prepareResume,
+    };
+
+    await expect(createSkillRuntimeService(dependencies).resume({
+      actorUserId: 'user-1', runId: task.id,
+    })).rejects.toThrow('frozen continuation is invalid');
+    expect(prepareResume).toHaveBeenCalledWith({
+      actorUserId: 'user-1', projectId: 'project-1', runId: task.id,
+      nextStepId: 'generate-3',
+    });
+    expect(resumeRun).not.toHaveBeenCalled();
+  });
+
   it('uses the frozen Skill step snapshot and exposes only lineage plus final credit state', async () => {
     const task: CloudTask = {
       id: 'run-1', userId: 'user-1', projectId: 'project-1', type: 'agent-run',
@@ -211,6 +277,44 @@ describe('Skill run history', () => {
     })).resolves.toMatchObject({
       skillId: 'removed-skill', skillVersion: 7,
       steps: [{ id: 'archived-step', label: 'Archived step', status: 'pending' }],
+    });
+  });
+
+  it('projects a quality-failed paused step as failed instead of processing', async () => {
+    const task: CloudTask = {
+      id: 'run-failed-step', userId: 'user-1', projectId: 'project-1', type: 'agent-run',
+      status: 'processing', progress: 20, creditStatus: 'charged', creditCost: 3,
+      createdAt: 10, updatedAt: 20,
+    };
+    const events: AgentEvent[] = [{
+      eventId: 'created', runId: task.id, sequence: 1, type: 'run.created', timestamp: 'now',
+      payload: {
+        workspace: 'canvas',
+        skill: { skillId: definition.id, skillVersion: 1, inputValues: {}, modelBindings: {} },
+        skillSnapshot: { id: definition.id, version: 1, name: definition.name, steps: definition.steps },
+      },
+    }, {
+      eventId: 'quality', runId: task.id, sequence: 2, type: 'quality.checked', timestamp: 'now',
+      payload: { stepId: 'generate-3', gateId: 'output-present', passed: false },
+    }, {
+      eventId: 'paused', runId: task.id, sequence: 3, type: 'run.paused', timestamp: 'now',
+      payload: { nextStepId: 'generate-3' },
+    }];
+    const projection: AgentRunProjection = {
+      runId: task.id, status: 'paused', lastSequence: 3, plan: [], currentStepId: 'generate-3',
+      resumeFromStepId: 'generate-3', assetVersionIds: [], ignoredEventIds: [], missingSequences: [],
+      qualityChecks: [{ stepId: 'generate-3', gateId: 'output-present', passed: false }],
+    };
+    const dependencies: SkillRuntimeServiceDependencies = {
+      createAuthorizedSkillRun: vi.fn(), getTaskForUser: vi.fn(async () => task),
+      listTasks: vi.fn(async () => [task]), listEvents: vi.fn(async () => events),
+      getProjection: vi.fn(async () => projection), pauseRun: vi.fn(), resumeRun: vi.fn(), cancelRun: vi.fn(),
+    };
+
+    await expect(createSkillRuntimeService(dependencies).get({
+      actorUserId: 'user-1', runId: task.id,
+    })).resolves.toMatchObject({
+      steps: expect.arrayContaining([expect.objectContaining({ id: 'generate-3', status: 'failed' })]),
     });
   });
 

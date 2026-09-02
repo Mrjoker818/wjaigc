@@ -5,6 +5,7 @@ import {
   createSkillRun,
   listSkillRuns,
   parseSkillRunRequest,
+  startSkillRunExecution,
   skillRuntimeHttpError,
 } from '@/lib/skill-runtime/service';
 import { assertSkillRunFields, readBoundedSkillRunJson } from './http';
@@ -43,6 +44,17 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       actor: auth.user,
       request: parseSkillRunRequest(body),
     });
+    if (!result.reused) {
+      const execution = startSkillRunExecution({ actor: auth.user, runId: result.runId });
+      void execution.completion.catch(error => {
+        console.error('[skill-runtime] background execution failed', {
+          runId: result.runId,
+          code: error && typeof error === 'object' && 'code' in error
+            ? String(error.code)
+            : 'SKILL_EXECUTION_FAILED',
+        });
+      });
+    }
     return NextResponse.json(result, { status: result.reused ? 200 : 201 });
   } catch (error) {
     const response = skillRuntimeHttpError(error);

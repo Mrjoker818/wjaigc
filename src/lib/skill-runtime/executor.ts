@@ -44,8 +44,18 @@ export interface SkillExecutorDependencies {
   ): AgentDownstreamRecovery<SkillStepResult> | undefined;
   appendEvent(input: SkillExecutorEventInput): Promise<unknown>;
   qualityContext?(input: ExecuteSkillStepInput): SkillQualityContext;
-  completeRun?(input: { actorUserId: string; runId: string; result: ExecuteSkillRunResult }): Promise<unknown>;
-  failRun?(input: { actorUserId: string; runId: string; error: SkillQualityFailedError }): Promise<unknown>;
+  completeRun?(input: {
+    actorUserId: string;
+    runId: string;
+    result: ExecuteSkillRunResult;
+    executionFence: NonNullable<AgentDownstreamExecutionContext['executionFence']>;
+  }): Promise<unknown>;
+  failRun?(input: {
+    actorUserId: string;
+    runId: string;
+    error: SkillQualityFailedError;
+    executionFence: NonNullable<AgentDownstreamExecutionContext['executionFence']>;
+  }): Promise<unknown>;
   pauseForRetry?(input: { actorUserId: string; runId: string; stepId: string; error: unknown }): Promise<unknown>;
 }
 
@@ -148,6 +158,10 @@ export function createSkillExecutor(dependencies: SkillExecutorDependencies) {
   return {
     async execute(input: ExecuteSkillRunInput): Promise<ExecuteSkillRunResult> {
       const completed = new Set(input.completedStepIds || []);
+      const executionFence = input.operationContext.executionFence;
+      if (!executionFence || executionFence.runId !== input.runId) {
+        throw new Error('A database execution fence is required');
+      }
       const resumeIndex = input.resumeFromStepId
         ? input.definition.steps.findIndex(step => step.id === input.resumeFromStepId)
         : 0;
@@ -279,11 +293,14 @@ export function createSkillExecutor(dependencies: SkillExecutorDependencies) {
         }
       } catch (error) {
         if (error instanceof SkillQualityFailedError) {
-          await dependencies.failRun?.({
-            actorUserId: input.actorUserId,
-            runId: input.runId,
-            error,
-          });
+          if (!input.operationContext.signal?.aborted) {
+            await dependencies.failRun?.({
+              actorUserId: input.actorUserId,
+              runId: input.runId,
+              error,
+              executionFence,
+            });
+          }
         } else if (!input.operationContext.signal?.aborted) {
           const stepId = (error as Partial<SkillStepExecutionError>)?.skillStepId
             || startedStepIds[startedStepIds.length - 1];
@@ -303,10 +320,14 @@ export function createSkillExecutor(dependencies: SkillExecutorDependencies) {
         completedStepIds: [...completed],
         assetVersionIds: [...new Set(assetVersionIds)],
       };
+      if (input.operationContext.signal?.aborted) {
+        throw abortError(input.operationContext.signal);
+      }
       await dependencies.completeRun?.({
         actorUserId: input.actorUserId,
         runId: input.runId,
         result: executionResult,
+        executionFence,
       });
       return executionResult;
     },

@@ -93,3 +93,66 @@ Task1-5、Agent Runtime 与生产恢复相关回归最终结果：28 个文件�
 
 - 未 push，未切换或修改 `stable`。
 - 未触碰或暂存任务开始前已有的四个保护未跟踪项：`.playwright-cli/`、`_refs-asui-canvas/`、`_refs-hero-infinite-canvas/`、`docs/superpowers/plans/2026-08-02-provider-generation-video-reliability.md`。
+
+## 独立复审补强（基线 d85a8b08）
+
+### 基线审计
+
+- 复审基线：`main@d85a8b0836bfc93cc24b8508a8cd45dd04d2c6f9`。
+- `d85a8b08` 完整包含 `9ea8b623`，晚到变更只增加 Task6 报告、executor 测试与 service 补强，没有丢失 `9ea` 的既有实现。
+- 本轮未重做已闭环的模型绑定未知字段拒绝和冻结历史独立于当前目录两项。
+
+### 本轮 RED
+
+先增加复审测试并执行：
+
+```text
+pnpm exec vitest run src/__tests__/api/skill-runs.test.ts src/__tests__/lib/skill-runtime-executor.test.ts src/__tests__/lib/agent-runtime-same-task-adapter.test.ts
+```
+
+首次结果：4 项失败、33 项通过。失败分别证明：
+
+- 新建 Skill Run 后生产 API 没有启动执行；
+- Task4 恢复 loader 拒绝没有 `adopted=true` 的普通 durable Skill Run；
+- 质量失败终态没有携带 execution generation/lease fence；
+- 质量失败步骤在历史中错误显示为 `processing`。
+
+另增加恢复前置校验，证明冻结 continuation 无效时不会先写 `run.resumed`。
+
+### 本轮 GREEN
+
+- `POST /api/skill-runs` 仅对 `reused=false` 的新 run 调用 `startSkillRunExecution()`，后台启动同一个已计费 run；幂等重放不启动、不提交、不再次扣费。
+- 新增生产 Skill step registry。步骤继续复用 Task4 durable downstream operation、数据库 operation lease 和 Task5 冻结 provider/model；没有进程内 Map、第二任务状态机或第二账务边界。
+- Task4 resumable loader 先识别持久 `run.created.skill`，从冻结 snapshot、inputs、modelBindings 和 resume step 重建 Skill continuation；原有 chat/simple-chat/agent-edit 的 `adopted=true` 分支保持不变。
+- resume/retry 在状态转换前验证持久 continuation；验证失败不会先进入 resumed 再由后台失败。
+- `tool.started/completed`、质量事件及 `run.completed/run.failed` 都携带 active generation fence；终态事件 ID 包含 generation，旧 generation 在 pause/resume/cancel 后不能写终态或触发退款。
+- 质量失败、普通步骤失败和持久 `resumeFromStepId` 均投影为 `failed`；冻结 Skill 版本从目录移除后仍可通过 snapshot 审计。
+- PostgreSQL 集成已提升为五组，其中新增高层链路直接经过 `createSkillRun`/Skill service、真实 Agent events、Skill executor、质量门禁和 generation fence；覆盖 20 并发同键、异 digest、质量失败、取消竞态、一扣一退和迟到 completed。
+
+### 本轮验证结果
+
+Task6 聚焦与 accounting：
+
+```text
+4 个文件通过，41 项通过；PostgreSQL 文件 5 项因环境未配置明确跳过。
+```
+
+Task1-6、Task4 Agent/accounting 精确回归：
+
+```text
+25 个文件通过，447 项通过；4 个 PostgreSQL 文件共 8 项明确跳过。
+```
+
+工程门禁：
+
+```text
+pnpm ts-check                         PASS
+目标 ESLint                           PASS（0 error / 0 warning）
+git diff --check                      PASS
+```
+
+完整 `pnpm test` 共执行 4,859 项：4,715 通过、140 跳过、4 失败。4 项失败均已存在于 `d85a8b08` 基线且不在本轮授权路径：保护基线授权清单漂移、`agent-edit` 路由迁移契约、`save-image` 调用契约、Agent 去背景请求源码契约。本轮没有修改这些模块，也未把它们伪报为通过。
+
+### 仍受阻项
+
+本机未设置 `POSTGRES_TEST_DATABASE_URL`，因此新增的五项真实 PostgreSQL 并发测试只完成了编译和显式 skip，尚无数据库运行证据。未用 Mock 或内存实现替代该证据；配置隔离测试库后必须补跑，才能对 PostgreSQL 并发验收给出通过结论。

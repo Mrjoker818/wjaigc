@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
   requireApiAuthOrReject: vi.fn(), createSkillRun: vi.fn(), listSkillRuns: vi.fn(),
   getSkillRun: vi.fn(), pauseSkillRun: vi.fn(), resumeSkillRun: vi.fn(),
   cancelSkillRun: vi.fn(), retrySkillStep: vi.fn(), skillRuntimeHttpError: vi.fn(),
+  startSkillRunExecution: vi.fn(),
   parseSkillRunRequest: vi.fn((value: unknown) => value),
 }));
 
@@ -26,6 +27,7 @@ describe('Skill run API', () => {
 
   it('creates and lists only through the authenticated actor', async () => {
     mocks.createSkillRun.mockResolvedValue({ runId: 'run-1', reused: false });
+    mocks.startSkillRunExecution.mockReturnValue({ started: true, completion: Promise.resolve() });
     mocks.listSkillRuns.mockResolvedValue([{ runId: 'run-1', skillId: 'preset-ecommerce-listing', skillVersion: 1 }]);
     const route = await import('@/app/api/skill-runs/route');
     const body = {
@@ -41,8 +43,27 @@ describe('Skill run API', () => {
 
     expect(created.status).toBe(201);
     expect(mocks.createSkillRun).toHaveBeenCalledWith({ actor: user, request: body });
+    expect(mocks.startSkillRunExecution).toHaveBeenCalledWith({ actor: user, runId: 'run-1' });
     expect(mocks.listSkillRuns).toHaveBeenCalledWith({ actorUserId: user.id, limit: 20 });
     expect(await listed.json()).toEqual({ runs: [expect.objectContaining({ runId: 'run-1', skillVersion: 1 })] });
+  });
+
+  it('does not start provider work again for an idempotent create replay', async () => {
+    mocks.createSkillRun.mockResolvedValue({ runId: 'run-1', reused: true });
+    const route = await import('@/app/api/skill-runs/route');
+    const body = {
+      skillId: 'preset-ecommerce-listing', skillVersion: 1, surface: 'canvas',
+      projectId: 'project-1', workspaceId: 'canvas-1', inputValues: {}, sourceVersionIds: [],
+      modelBindings: { orchestrator: { providerId: 'provider-1', modelId: 'chat-1' } },
+      idempotencyKey: 'skill-request-1',
+    };
+
+    const response = await route.POST(new NextRequest('http://localhost/api/skill-runs', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
+    }));
+
+    expect(response.status).toBe(200);
+    expect(mocks.startSkillRunExecution).not.toHaveBeenCalled();
   });
 
   it.each(['pause', 'resume', 'cancel'] as const)('authorizes %s control by actor', async action => {
