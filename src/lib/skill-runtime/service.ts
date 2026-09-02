@@ -465,7 +465,9 @@ export function createSkillRuntimeService(
       });
       return {
         accepted: resumed.accepted,
-        startedStepIds: selectInitialSkillStepIds(scheduledSteps),
+        startedStepIds: resumed.accepted && resumed.dispatch?.started === true
+          ? selectInitialSkillStepIds(scheduledSteps)
+          : [],
         scheduledStepIds: scheduledSteps.map(step => step.id),
       };
     },

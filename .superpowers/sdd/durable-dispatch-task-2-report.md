@@ -70,10 +70,15 @@ pnpm exec vitest run src/__tests__/lib/skill-runtime-executor.test.ts src/__test
 - `src/__tests__/api/skill-runs.test.ts`
 - `.superpowers/sdd/durable-dispatch-task-2-report.md`
 
-## 独立评审
+## 独立评审纠正
 
-- 模型：`gpt-5.6-sol`，推理强度 `medium`。
-- 范围：`c9d9b58465061cca0f3ddd9226e6543f902e2ee4..4cf6aa09d3b694d825356e4f5d52583d3307f747`。
-- 结论：`APPROVED`。
-- Critical / Important / Minor：`0 / 0 / 0`。
-- 评审只读沙箱无法创建 Vitest 临时目录；动态测试证据由控制端提交后新鲜运行的 `91/91` 结果提供。
+- 后续独立评审发现一项 Important：`resumeRun` 返回 `accepted:false` 时，响应仍错误报告非空 `startedStepIds`。
+- 新增并发重试失败回归后，RED 为 `1 failed / 33 passed`，实际值错误包含 `generate-3`、`generate-4`。
+- 最小修复要求：未接受恢复执行权的请求返回 `startedStepIds: []`，同时保留完整 `scheduledStepIds`。
+- 本报告原有 `APPROVED` 与 `0 / 0 / 0` 表述作废；新一轮独立复审完成前，Task 2 状态为“修复后待复审”。
+- 修复后聚焦及 Agent 恢复回归重新通过：`3/3` 测试文件、`91/91` 测试。
+- 修复后 `pnpm ts-check`、目标 ESLint、保护基线和 `git diff --check` 均通过；保护门禁为 `0` 阻断、`0` 警告。
+- 新一轮复审继续发现一项 Important：幂等恢复事件可能返回 `accepted:true`，但当前请求未取得 dispatch claim，表现为 `dispatch.started:false`。
+- 为该场景建立第二个 RED：`1 failed / 33 passed`，证明仅检查 `accepted` 仍会误报首批启动。
+- 最终最小修复以 `accepted && dispatch.started === true` 作为非空 `startedStepIds` 的必要条件；未实际调度的请求继续保留完整 `scheduledStepIds`。
+- 第二项修复后的独立复审尚未进行，Task 2 继续保持“修复后待复审”。

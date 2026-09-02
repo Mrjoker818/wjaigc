@@ -477,7 +477,10 @@ describe('Skill run history', () => {
       resumeFromStepId: 'generate-4', assetVersionIds: [], ignoredEventIds: [],
       missingSequences: [], qualityChecks: [],
     };
-    const makeService = (completedStepIds: string[]) => {
+    const makeService = (
+      completedStepIds: string[],
+      resumeResult = { accepted: true, dispatch: { started: true } },
+    ) => {
       const events: AgentEvent[] = [
         created,
         ...completedStepIds.map((stepId, index) => ({
@@ -494,7 +497,7 @@ describe('Skill run history', () => {
         createAuthorizedSkillRun: vi.fn(), getTaskForUser: vi.fn(async () => task),
         listTasks: vi.fn(async () => [task]), listEvents: vi.fn(async () => events),
         getProjection: vi.fn(async () => paused), pauseRun: vi.fn(),
-        resumeRun: vi.fn(async () => ({ accepted: true } as never)), cancelRun: vi.fn(),
+        resumeRun: vi.fn(async () => (resumeResult as never)), cancelRun: vi.fn(),
         prepareResume: vi.fn(async () => true),
       });
     };
@@ -512,6 +515,20 @@ describe('Skill run history', () => {
       accepted: true,
       startedStepIds: ['generate-4'],
       scheduledStepIds: ['generate-4', 'quality-3'],
+    });
+    await expect(makeService(['plan'], { accepted: false, dispatch: { started: false } }).retry({
+      actorUserId: 'user-1', runId: task.id, stepId: 'generate-4',
+    })).resolves.toEqual({
+      accepted: false,
+      startedStepIds: [],
+      scheduledStepIds: ['generate-3', 'generate-4', 'quality-3'],
+    });
+    await expect(makeService(['plan'], { accepted: true, dispatch: { started: false } }).retry({
+      actorUserId: 'user-1', runId: task.id, stepId: 'generate-4',
+    })).resolves.toEqual({
+      accepted: true,
+      startedStepIds: [],
+      scheduledStepIds: ['generate-3', 'generate-4', 'quality-3'],
     });
   });
 
@@ -541,7 +558,9 @@ describe('Skill run history', () => {
       createAuthorizedSkillRun: vi.fn(), getTaskForUser: vi.fn(async () => task),
       listTasks: vi.fn(async () => [task]), listEvents: vi.fn(async () => events),
       getProjection: vi.fn(async () => projection), pauseRun: vi.fn(),
-      resumeRun: vi.fn(async () => ({ accepted: true } as never)), cancelRun: vi.fn(),
+      resumeRun: vi.fn(async () => ({
+        accepted: true, dispatch: { started: true },
+      } as never)), cancelRun: vi.fn(),
       prepareResume: vi.fn(async () => true),
     });
 
