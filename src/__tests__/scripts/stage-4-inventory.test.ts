@@ -77,14 +77,21 @@ describe('Stage 4 inventory generator', () => {
   });
 
   it('extracts IDs only from the requested raw preset array', () => {
-    const source = `
-      const helper = { id: 'outside-before' };
-      const RAW_CANVAS_PRESET_SKILLS = [
-        { id: 'kept-second' },
-        { id: 'kept-first' },
-      ];
-      const unrelated = [{ id: 'outside-after' }];
-    `;
+    const source = [
+      "const helper = { id: 'outside-before' };",
+      'const RAW_CANVAS_PRESET_SKILLS = [',
+      '  {',
+      "    id: 'kept-second',",
+      "    nested: { id: 'nested-id' },",
+      `    systemPrompt: "text id: 'string-id'",`,
+      "    templatePrompt: `template id: 'template-id'`,",
+      "    // id: 'line-comment-id'",
+      "    /* id: 'block-comment-id' */",
+      '  },',
+      "  { id: 'kept-first' },",
+      '];',
+      "const unrelated = [{ id: 'outside-after' }];",
+    ].join('\n');
 
     expect(extractSkillIds(source, 'RAW_CANVAS_PRESET_SKILLS')).toEqual([
       'kept-first',

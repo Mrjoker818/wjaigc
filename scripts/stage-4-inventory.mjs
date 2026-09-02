@@ -89,9 +89,96 @@ function extractNamedArray(source, arrayName) {
 
 export function extractSkillIds(source, arrayName) {
   const arraySource = extractNamedArray(source, arrayName);
-  return uniqueSorted(
-    [...arraySource.matchAll(/\bid:\s*['"]([^'"]+)['"]/g)].map(match => match[1]),
-  );
+  const ids = [];
+  let objectDepth = 0;
+  let quote = null;
+  let escaped = false;
+  let lineComment = false;
+  let blockComment = false;
+
+  for (let index = 0; index < arraySource.length; index += 1) {
+    const character = arraySource[index];
+    const next = arraySource[index + 1];
+
+    if (lineComment) {
+      if (character === '\n') lineComment = false;
+      continue;
+    }
+    if (blockComment) {
+      if (character === '*' && next === '/') {
+        blockComment = false;
+        index += 1;
+      }
+      continue;
+    }
+    if (quote) {
+      if (escaped) {
+        escaped = false;
+      } else if (character === '\\') {
+        escaped = true;
+      } else if (character === quote) {
+        quote = null;
+      }
+      continue;
+    }
+    if (character === '/' && next === '/') {
+      lineComment = true;
+      index += 1;
+      continue;
+    }
+    if (character === '/' && next === '*') {
+      blockComment = true;
+      index += 1;
+      continue;
+    }
+    if (character === "'" || character === '"' || character === '`') {
+      quote = character;
+      continue;
+    }
+    if (character === '{') {
+      objectDepth += 1;
+      continue;
+    }
+    if (character === '}') {
+      objectDepth -= 1;
+      continue;
+    }
+    if (
+      objectDepth !== 1
+      || arraySource.slice(index, index + 2) !== 'id'
+      || /[A-Za-z0-9_$]/.test(arraySource[index - 1] || '')
+      || /[A-Za-z0-9_$]/.test(arraySource[index + 2] || '')
+    ) {
+      continue;
+    }
+
+    let cursor = index + 2;
+    while (/\s/.test(arraySource[cursor] || '')) cursor += 1;
+    if (arraySource[cursor] !== ':') continue;
+    cursor += 1;
+    while (/\s/.test(arraySource[cursor] || '')) cursor += 1;
+
+    const valueQuote = arraySource[cursor];
+    if (valueQuote !== "'" && valueQuote !== '"') continue;
+    const valueStart = cursor + 1;
+    cursor = valueStart;
+    let valueEscaped = false;
+    while (cursor < arraySource.length) {
+      const valueCharacter = arraySource[cursor];
+      if (valueEscaped) {
+        valueEscaped = false;
+      } else if (valueCharacter === '\\') {
+        valueEscaped = true;
+      } else if (valueCharacter === valueQuote) {
+        ids.push(arraySource.slice(valueStart, cursor));
+        index = cursor;
+        break;
+      }
+      cursor += 1;
+    }
+  }
+
+  return uniqueSorted(ids);
 }
 
 function extractObjectKeys(source, exportName) {

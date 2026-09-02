@@ -84,3 +84,27 @@
 - `.superpowers/sdd/task-1-report.md`
 
 本轮未修改 `stable`，未推送，未触碰或暂存任务开始前已有的未跟踪项，也未暂存用户已修改的 `.superpowers/sdd/task-1-brief.md`。
+
+## 第二次独立复审 Important 修复（2026-09-02）
+
+### RED
+
+- 命令：`pnpm exec vitest run src/__tests__/scripts/stage-4-inventory.test.ts`
+- 结果：exit 1；2 个测试中 1 个失败。旧实现除两个顶层 Skill ID 外，还错误返回 `nested-id`、`line-comment-id`、`block-comment-id`、`string-id`、`template-id`，精确覆盖嵌套对象、行/块注释、普通字符串和模板字符串误报。
+
+### 最小实现与 GREEN
+
+- 保留命名 RAW 数组边界解析；数组内部改为词法扫描，感知字符串/模板、转义、行/块注释和花括号深度，仅在顶层 Skill 对象深度为 1 时读取直接 `id` 属性。
+- GREEN 命令：`pnpm exec vitest run src/__tests__/lib/skill-runtime-catalog.test.ts src/__tests__/scripts/stage-4-inventory.test.ts src/__tests__/components/simple-chat-model-selector-contract.test.ts`
+- GREEN 结果：exit 0；3 个测试文件通过，14 个测试通过，0 个失败；真实 inventory 继续精确锁定 37 个 ID。
+- `pnpm exec tsc -p tsconfig.json --noEmit`：exit 0。
+- 限定 ESLint：exit 0，0 errors；仅既有 `appFileToRoute` 未使用 warning。
+- `git diff --check`：exit 0；仅 Git 的 LF/CRLF 提示，无空白错误。
+
+### 本轮修改文件
+
+- `scripts/stage-4-inventory.mjs`
+- `src/__tests__/scripts/stage-4-inventory.test.ts`
+- `.superpowers/sdd/task-1-report.md`
+
+本轮未修改 `stable`，未推送，未触碰或暂存用户修改的 brief 与既有未跟踪保护项。
