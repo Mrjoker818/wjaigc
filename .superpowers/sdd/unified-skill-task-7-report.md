@@ -175,3 +175,49 @@
 - 修改范围仍严格限于四个授权源码/测试文件和本报告，未 push。
 - 关注项：尚未取得本轮修复后的全新独立 `APPROVED 0/0/0`，因此状态保持
   `DONE_WITH_CONCERNS`，等待独立复审。
+
+## 2026-09-02 第三轮审查修复：TDD RED
+
+1. 先在 `skill-runtime-controls.test.tsx` 新增/收紧以下时序：`run-old` 已建立后启动 pending
+   `start-new`，此时 control/retry 必须同步拒绝且不得发送旧 run 请求；旧 control 已在途时，
+   `start-new` 成功后旧 accepted 响应不得改写新 run 的 projection/event subscription、busy 或
+   error；retryability 首次 GET 失败后可手动重新检查并恢复重试语义；切 run 后旧检查不得污染。
+   同时要求 `SkillRunProgress` 在 alert 旁提供可访问的“重新检查”按钮。
+2. 首次运行：
+   `pnpm exec vitest run src/__tests__/components/skill-runtime-controls.test.tsx`
+   结果：`5 failed / 23 passed`。其中 active run 与按钮失败准确；两个 retryability 用例因 mock
+   每次渲染创建新 projection，产生非真实 effect 重启和响应序列错位。仅将测试夹具改为按 run
+   复用固定 projection 后重新运行，仍为 RED：`5 failed / 23 passed`，且五项均精确来自缺少
+   同步 active identity fence、`refreshRetryability()` 和“重新检查”按钮。
+
+## 2026-09-02 第三轮审查修复：GREEN 与说明
+
+- active run 身份：Hook 新增同步 `{ runId, generation }` ref。新 start 开始即同时清空 active ref、
+  返回 `runId` state、event subscription 与重试状态，因此旧 run 在新请求 pending 期间既不暴露
+  也不可控制；成功响应再以同一 generation 同步建立 ref 与 state。
+- control/retry 隔离：发请求前从 active ref 捕获 runId+generation，响应、错误、finally 和事件
+  subscription 刷新前再次核对同一身份。旧 control 即使在新 run 成功后返回 accepted，也只返回
+  false，不会重置 `eventRunId`、busy/error 或影响新 run。
+- retryability 手动重查：`useSkillRun` 暴露 `refreshRetryability()`，只允许当前 active paused run
+  触发；它以用户动作递增检查代次并复用既有 GET effect。每次检查继续使用 AbortController、
+  history generation 和 active run identity，无固定 sleep、不改变 Agent 轮询。失败 alert 可通过
+  “重新检查”按钮显式恢复，切 run 后旧请求无法写回。
+- 单文件 GREEN：同一 Vitest 命令结果 `28/28 passed`。
+
+## 2026-09-02 第三轮最终验证
+
+- 8 文件聚焦回归：
+  `pnpm exec vitest run src/__tests__/components/skill-runtime-controls.test.tsx src/__tests__/components/agent-progress-timeline.test.tsx src/__tests__/components/use-agent-run-events.test.ts src/__tests__/lib/skill-runtime-inputs.test.ts src/__tests__/lib/skill-runtime-run-request.test.ts src/__tests__/api/skills.test.ts src/__tests__/api/skill-run-estimate.test.ts src/__tests__/api/skill-runs.test.ts`
+  结果：`8 files / 117 tests passed`；受控 dispatch rejection 用例保留一条设计内 stderr。
+- `pnpm ts-check`：exit 0，Next route typegen 与 TypeScript 均通过。
+- 目标 ESLint：
+  `pnpm exec eslint src/components/skill-runtime/SkillInputFields.tsx src/components/skill-runtime/SkillRunProgress.tsx src/components/skill-runtime/use-skill-run.ts src/__tests__/components/skill-runtime-controls.test.tsx --max-warnings 0`
+  结果：exit 0，0 warning。
+- 保护基线：
+  `pnpm check:protected-baseline -- --allow-path .playwright-cli/ --allow-path _refs-asui-canvas/ --allow-path _refs-hero-infinite-canvas/`
+  结果：38/38 feature ID、受保护路径和证据合同保留，无未授权 source drift，0 warning；三个临时
+  许可仅对应任务前既有目录。
+- `git diff --check`：exit 0；仅有工作区 LF 到 CRLF 提示。
+- 最终修改仅涉及 `SkillRunProgress.tsx`、`use-skill-run.ts`、授权测试和本报告；
+  `SkillInputFields.tsx` 无需变更。未扩域、未 push。
+- 关注项：本轮尚无全新独立 `APPROVED 0/0/0`，状态继续保持 `DONE_WITH_CONCERNS`。

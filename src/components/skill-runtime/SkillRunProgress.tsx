@@ -14,6 +14,7 @@ interface SkillRunProgressProps {
   onResume?: () => void;
   onCancel?: () => void;
   onRetry?: (stepId: string) => void;
+  onRefreshRetryability?: () => void;
 }
 
 const terminalStatuses = new Set(['completed', 'failed', 'cancelled', 'timeout']);
@@ -55,6 +56,7 @@ export function SkillRunProgress({
   onResume,
   onCancel,
   onRetry,
+  onRefreshRetryability,
 }: SkillRunProgressProps): React.ReactElement | null {
   if (!estimate && !projection) return null;
   const terminal = projection ? terminalStatuses.has(projection.status) : false;
@@ -115,6 +117,13 @@ export function SkillRunProgress({
                   onClick={() => onRetry(retryablePausedStep)}
                 >
                   从失败步骤重试
+                </button>
+              )}
+            {projection.status === 'paused'
+              && retryabilityError
+              && onRefreshRetryability && (
+                <button type="button" disabled={busy} onClick={onRefreshRetryability}>
+                  重新检查
                 </button>
               )}
           </div>

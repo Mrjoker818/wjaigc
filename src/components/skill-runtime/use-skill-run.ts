@@ -26,7 +26,13 @@ interface UseSkillRunResult {
   resume: () => Promise<boolean>;
   cancel: () => Promise<boolean>;
   retry: (stepId: string) => Promise<boolean>;
+  refreshRetryability: () => void;
   reset: () => void;
+}
+
+interface ActiveRunIdentity {
+  runId: string;
+  generation: number;
 }
 
 interface ErrorPayload {
@@ -57,9 +63,11 @@ export function useSkillRun({ fetcher = fetch }: UseSkillRunOptions = {}): UseSk
   const [estimate, setEstimate] = useState<SkillRunCostEstimate>();
   const [retryableStepId, setRetryableStepId] = useState<string>();
   const [retryabilityError, setRetryabilityError] = useState<string>();
+  const [retryabilityRefresh, setRetryabilityRefresh] = useState(0);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
   const mounted = useRef(true);
+  const activeRun = useRef<ActiveRunIdentity | undefined>(undefined);
   const startGeneration = useRef(0);
   const estimateGeneration = useRef(0);
   const busyGeneration = useRef(0);
@@ -76,6 +84,7 @@ export function useSkillRun({ fetcher = fetch }: UseSkillRunOptions = {}): UseSk
     mounted.current = true;
     return () => {
       mounted.current = false;
+      activeRun.current = undefined;
       startGeneration.current += 1;
       estimateGeneration.current += 1;
       historyGeneration.current += 1;
@@ -99,7 +108,10 @@ export function useSkillRun({ fetcher = fetch }: UseSkillRunOptions = {}): UseSk
     eventRefreshTimer.current = window.setTimeout(() => {
       eventRefreshTimer.current = undefined;
       if (mounted.current && startGeneration.current === expectedGeneration) {
-        setEventRunId(expectedRunId);
+        const active = activeRun.current;
+        if (active?.runId === expectedRunId && active.generation === expectedGeneration) {
+          setEventRunId(expectedRunId);
+        }
       }
     }, 0);
   }, []);
@@ -121,6 +133,8 @@ export function useSkillRun({ fetcher = fetch }: UseSkillRunOptions = {}): UseSk
   }, [fetcher]);
 
   const projection = runId
+    && activeRun.current?.runId === runId
+    && activeRun.current.generation === startGeneration.current
     && eventRunId === runId
     && events.projection?.runId === runId
     ? events.projection
@@ -133,8 +147,11 @@ export function useSkillRun({ fetcher = fetch }: UseSkillRunOptions = {}): UseSk
     setRetryabilityError(undefined);
     if (projection?.status !== 'paused' || !projection.resumeFromStepId) return;
 
+    const active = activeRun.current;
+    if (active?.runId !== projection.runId || active.generation !== startGeneration.current) return;
     const expectedRunId = projection.runId;
     const expectedStepId = projection.resumeFromStepId;
+    const expectedRunGeneration = active.generation;
     const controller = new AbortController();
     historyController.current = controller;
     void request<AgentEventsResponse>(
@@ -152,6 +169,8 @@ export function useSkillRun({ fetcher = fetch }: UseSkillRunOptions = {}): UseSk
       if (
         mounted.current
         && historyGeneration.current === generation
+        && activeRun.current?.runId === expectedRunId
+        && activeRun.current.generation === expectedRunGeneration
         && executionErrorPause
       ) {
         setRetryableStepId(expectedStepId);
@@ -161,12 +180,26 @@ export function useSkillRun({ fetcher = fetch }: UseSkillRunOptions = {}): UseSk
         !controller.signal.aborted
         && mounted.current
         && historyGeneration.current === generation
+        && activeRun.current?.runId === expectedRunId
+        && activeRun.current.generation === expectedRunGeneration
       ) {
         setRetryabilityError('无法确认失败步骤是否可重试');
       }
     });
     return () => controller.abort();
-  }, [projection, request]);
+  }, [projection, request, retryabilityRefresh]);
+
+  const refreshRetryability = useCallback((): void => {
+    const active = activeRun.current;
+    if (
+      projection?.status === 'paused'
+      && projection.resumeFromStepId
+      && active?.runId === projection.runId
+      && active.generation === startGeneration.current
+    ) {
+      setRetryabilityRefresh(value => value + 1);
+    }
+  }, [projection]);
 
   const estimateRun = useCallback(async (
     input: SkillRunRequest,
@@ -215,7 +248,9 @@ export function useSkillRun({ fetcher = fetch }: UseSkillRunOptions = {}): UseSk
     startController.current = controller;
     const generation = ++startGeneration.current;
     const operationGeneration = ++busyGeneration.current;
+    activeRun.current = undefined;
     if (mounted.current) {
+      setRunId(undefined);
       setBusy(true);
       setError(undefined);
       setEstimate(undefined);
@@ -231,6 +266,7 @@ export function useSkillRun({ fetcher = fetch }: UseSkillRunOptions = {}): UseSk
       }, controller);
       const nextRunId = result?.runId;
       if (nextRunId && mounted.current && startGeneration.current === generation) {
+        activeRun.current = { runId: nextRunId, generation };
         setRunId(nextRunId);
         setEventRunId(nextRunId);
         return nextRunId;
@@ -253,9 +289,10 @@ export function useSkillRun({ fetcher = fetch }: UseSkillRunOptions = {}): UseSk
   const control = useCallback(async (
     action: 'pause' | 'resume' | 'cancel',
   ): Promise<boolean> => {
-    if (!runId) return false;
-    const expectedRunId = runId;
-    const expectedGeneration = startGeneration.current;
+    const active = activeRun.current;
+    if (!runId || active?.runId !== runId || active.generation !== startGeneration.current) return false;
+    const expectedRunId = active.runId;
+    const expectedGeneration = active.generation;
     const operationGeneration = ++busyGeneration.current;
     const controller = new AbortController();
     if (mounted.current) {
@@ -273,7 +310,8 @@ export function useSkillRun({ fetcher = fetch }: UseSkillRunOptions = {}): UseSk
         controller,
       );
       const accepted = result?.accepted === true
-        && startGeneration.current === expectedGeneration;
+        && activeRun.current?.runId === expectedRunId
+        && activeRun.current.generation === expectedGeneration;
       if (accepted && action !== 'pause') {
         refreshEventProjection(expectedRunId, expectedGeneration);
       }
@@ -281,8 +319,8 @@ export function useSkillRun({ fetcher = fetch }: UseSkillRunOptions = {}): UseSk
     } catch (requestError) {
       if (
         mounted.current
-        && runId === expectedRunId
-        && startGeneration.current === expectedGeneration
+        && activeRun.current?.runId === expectedRunId
+        && activeRun.current.generation === expectedGeneration
         && busyGeneration.current === operationGeneration
       ) {
         setError(requestError instanceof Error ? requestError.message : '运行控制失败');
@@ -291,17 +329,18 @@ export function useSkillRun({ fetcher = fetch }: UseSkillRunOptions = {}): UseSk
     } finally {
       if (
         mounted.current
-        && runId === expectedRunId
-        && startGeneration.current === expectedGeneration
+        && activeRun.current?.runId === expectedRunId
+        && activeRun.current.generation === expectedGeneration
         && busyGeneration.current === operationGeneration
       ) setBusy(false);
     }
   }, [refreshEventProjection, request, runId]);
 
   const retry = useCallback(async (stepId: string): Promise<boolean> => {
-    if (!runId) return false;
-    const expectedRunId = runId;
-    const expectedGeneration = startGeneration.current;
+    const active = activeRun.current;
+    if (!runId || active?.runId !== runId || active.generation !== startGeneration.current) return false;
+    const expectedRunId = active.runId;
+    const expectedGeneration = active.generation;
     const operationGeneration = ++busyGeneration.current;
     const controller = new AbortController();
     if (mounted.current) {
@@ -319,14 +358,15 @@ export function useSkillRun({ fetcher = fetch }: UseSkillRunOptions = {}): UseSk
         controller,
       );
       const accepted = result?.accepted === true
-        && startGeneration.current === expectedGeneration;
+        && activeRun.current?.runId === expectedRunId
+        && activeRun.current.generation === expectedGeneration;
       if (accepted) refreshEventProjection(expectedRunId, expectedGeneration);
       return accepted;
     } catch (requestError) {
       if (
         mounted.current
-        && runId === expectedRunId
-        && startGeneration.current === expectedGeneration
+        && activeRun.current?.runId === expectedRunId
+        && activeRun.current.generation === expectedGeneration
         && busyGeneration.current === operationGeneration
       ) {
         setError(requestError instanceof Error ? requestError.message : '重试失败');
@@ -335,8 +375,8 @@ export function useSkillRun({ fetcher = fetch }: UseSkillRunOptions = {}): UseSk
     } finally {
       if (
         mounted.current
-        && runId === expectedRunId
-        && startGeneration.current === expectedGeneration
+        && activeRun.current?.runId === expectedRunId
+        && activeRun.current.generation === expectedGeneration
         && busyGeneration.current === operationGeneration
       ) setBusy(false);
     }
@@ -350,6 +390,7 @@ export function useSkillRun({ fetcher = fetch }: UseSkillRunOptions = {}): UseSk
     estimateGeneration.current += 1;
     historyGeneration.current += 1;
     busyGeneration.current += 1;
+    activeRun.current = undefined;
     if (eventRefreshTimer.current !== undefined) {
       window.clearTimeout(eventRefreshTimer.current);
       eventRefreshTimer.current = undefined;
@@ -378,6 +419,7 @@ export function useSkillRun({ fetcher = fetch }: UseSkillRunOptions = {}): UseSk
     resume: () => control('resume'),
     cancel: () => control('cancel'),
     retry,
+    refreshRetryability,
     reset,
   };
 }

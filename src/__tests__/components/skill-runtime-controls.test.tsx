@@ -322,12 +322,16 @@ describe('SkillRunProgress', () => {
   });
 
   it('renders retryability lookup failures as an accessible controlled error', () => {
+    const onRefreshRetryability = vi.fn();
     render(<SkillRunProgress
       projection={projection({ status: 'paused', resumeFromStepId: 'render' })}
       retryabilityError="无法确认失败步骤是否可重试"
+      onRefreshRetryability={onRefreshRetryability}
     />);
 
     expect(screen.getByRole('alert').textContent).toContain('无法确认失败步骤是否可重试');
+    fireEvent.click(screen.getByRole('button', { name: '重新检查' }));
+    expect(onRefreshRetryability).toHaveBeenCalledOnce();
   });
 });
 
@@ -444,6 +448,78 @@ describe('useSkillRun', () => {
     expect(result.current.projection).toBeUndefined();
   });
 
+  it.each([
+    ['control', (current: ReturnType<typeof useSkillRun>) => current.cancel()],
+    ['retry', (current: ReturnType<typeof useSkillRun>) => current.retry('render')],
+  ])('synchronously rejects an old run %s while a new start is pending', async (_label, invoke) => {
+    let resolveNew!: (response: Response) => void;
+    agentEvents.useAgentRunEvents.mockImplementation((eventRunId: string | undefined) => ({
+      projection: eventRunId ? projection({ runId: eventRunId }) : undefined,
+      stale: false,
+      cancel: vi.fn(), pause: vi.fn(), resume: vi.fn(),
+    }));
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ runId: 'run-old', reused: false }))
+      .mockImplementationOnce(() => new Promise<Response>(resolve => { resolveNew = resolve; }));
+    const { result } = renderHook(() => useSkillRun({ fetcher: fetcher as typeof fetch }));
+
+    await act(async () => { await result.current.startRun(request); });
+    expect(result.current.projection?.runId).toBe('run-old');
+
+    let pendingStart!: Promise<string | undefined>;
+    act(() => {
+      pendingStart = result.current.startRun({ ...request, idempotencyKey: 'request-2' });
+    });
+    expect(result.current.runId).toBeUndefined();
+    expect(result.current.projection).toBeUndefined();
+    await act(async () => { await expect(invoke(result.current)).resolves.toBe(false); });
+    expect(fetcher).toHaveBeenCalledTimes(2);
+
+    await act(async () => {
+      resolveNew(jsonResponse({ runId: 'run-new', reused: false }));
+      await pendingStart;
+    });
+  });
+
+  it('ignores an accepted old control response after a new run succeeds', async () => {
+    let resolveOldControl!: (response: Response) => void;
+    agentEvents.useAgentRunEvents.mockImplementation((eventRunId: string | undefined) => ({
+      projection: eventRunId ? projection({ runId: eventRunId }) : undefined,
+      stale: false,
+      cancel: vi.fn(), pause: vi.fn(), resume: vi.fn(),
+    }));
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ runId: 'run-old', reused: false }))
+      .mockImplementationOnce(() => new Promise<Response>(resolve => { resolveOldControl = resolve; }))
+      .mockResolvedValueOnce(jsonResponse({ runId: 'run-new', reused: false }));
+    const { result } = renderHook(() => useSkillRun({ fetcher: fetcher as typeof fetch }));
+
+    await act(async () => { await result.current.startRun(request); });
+    let oldControl!: Promise<boolean>;
+    act(() => { oldControl = result.current.resume(); });
+    await act(async () => {
+      await result.current.startRun({ ...request, idempotencyKey: 'request-2' });
+    });
+    const callsAfterNewRun = agentEvents.useAgentRunEvents.mock.calls.length;
+
+    await act(async () => {
+      resolveOldControl(jsonResponse({ accepted: true }));
+      await expect(oldControl).resolves.toBe(false);
+    });
+    await act(async () => { await new Promise(resolve => window.setTimeout(resolve, 0)); });
+
+    expect(result.current.runId).toBe('run-new');
+    expect(result.current.projection?.runId).toBe('run-new');
+    expect(result.current.busy).toBe(false);
+    expect(result.current.error).toBeUndefined();
+    expect(agentEvents.useAgentRunEvents.mock.calls
+      .slice(callsAfterNewRun)
+      .map(call => call[0])).not.toContain('run-old');
+    expect(agentEvents.useAgentRunEvents.mock.calls
+      .slice(callsAfterNewRun)
+      .map(call => call[0])).not.toContain(undefined);
+  });
+
   it('derives retryability from the exact persisted execution-error pause event', async () => {
     const pausedProjection = projection({ status: 'paused', resumeFromStepId: 'render' });
     agentEvents.useAgentRunEvents.mockImplementation((eventRunId: string | undefined) => ({
@@ -516,7 +592,7 @@ describe('useSkillRun', () => {
     expect(result.current.estimate).toMatchObject({ minimum: 2, maximum: 3 });
   });
 
-  it('exposes an isolated retryability error when the pause-event lookup fails', async () => {
+  it('manually rechecks retryability after a lookup failure and restores retry', async () => {
     const pausedProjection = projection({ status: 'paused', resumeFromStepId: 'render' });
     agentEvents.useAgentRunEvents.mockImplementation((eventRunId: string | undefined) => ({
       projection: eventRunId ? pausedProjection : undefined,
@@ -525,7 +601,13 @@ describe('useSkillRun', () => {
     }));
     const fetcher = vi.fn()
       .mockResolvedValueOnce(jsonResponse({ runId: 'run-1', reused: false }))
-      .mockRejectedValueOnce(new Error('events unavailable'));
+      .mockRejectedValueOnce(new Error('events unavailable'))
+      .mockResolvedValueOnce(jsonResponse({
+        events: [{
+          eventId: 'pause-2', runId: 'run-1', sequence: 2, type: 'run.paused', timestamp: 'now',
+          payload: { nextStepId: 'render', pauseReason: 'execution-error' },
+        }],
+      }));
     const { result } = renderHook(() => useSkillRun({ fetcher: fetcher as typeof fetch }));
 
     await act(async () => { await result.current.startRun(request); });
@@ -534,6 +616,56 @@ describe('useSkillRun', () => {
     });
     expect(result.current.error).toBeUndefined();
     expect(result.current.retryableStepId).toBeUndefined();
+
+    act(() => { result.current.refreshRetryability(); });
+    await waitFor(() => expect(result.current.retryableStepId).toBe('render'));
+    expect(result.current.retryabilityError).toBeUndefined();
+  });
+
+  it('does not let an old manual retryability check pollute a new run', async () => {
+    let resolveOldCheck!: (response: Response) => void;
+    const oldPausedProjection = projection({
+      runId: 'run-old', status: 'paused', resumeFromStepId: 'render',
+    });
+    const newPausedProjection = projection({
+      runId: 'run-new', status: 'paused', resumeFromStepId: 'render',
+    });
+    agentEvents.useAgentRunEvents.mockImplementation((eventRunId: string | undefined) => ({
+      projection: eventRunId === 'run-old'
+        ? oldPausedProjection
+        : eventRunId === 'run-new' ? newPausedProjection : undefined,
+      stale: false,
+      cancel: vi.fn(), pause: vi.fn(), resume: vi.fn(),
+    }));
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ runId: 'run-old', reused: false }))
+      .mockRejectedValueOnce(new Error('events unavailable'))
+      .mockImplementationOnce(() => new Promise<Response>(resolve => { resolveOldCheck = resolve; }))
+      .mockResolvedValueOnce(jsonResponse({ runId: 'run-new', reused: false }))
+      .mockResolvedValueOnce(jsonResponse({ events: [] }));
+    const { result } = renderHook(() => useSkillRun({ fetcher: fetcher as typeof fetch }));
+
+    await act(async () => { await result.current.startRun(request); });
+    await waitFor(() => expect(result.current.retryabilityError).toBeTruthy());
+    act(() => { result.current.refreshRetryability(); });
+    await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(3));
+
+    await act(async () => {
+      await result.current.startRun({ ...request, idempotencyKey: 'request-2' });
+    });
+    await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(5));
+    await act(async () => {
+      resolveOldCheck(jsonResponse({
+        events: [{
+          eventId: 'pause-2', runId: 'run-old', sequence: 2, type: 'run.paused', timestamp: 'now',
+          payload: { nextStepId: 'render', pauseReason: 'execution-error' },
+        }],
+      }));
+    });
+
+    expect(result.current.runId).toBe('run-new');
+    expect(result.current.retryableStepId).toBeUndefined();
+    expect(result.current.retryabilityError).toBeUndefined();
   });
 
   it('remains mounted through the Strict Mode effect replay', async () => {
