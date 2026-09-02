@@ -583,6 +583,48 @@ export async function dbSetUserData(userId: string, key: string, value: unknown)
   }
 }
 
+/**
+ * Atomically writes revisioned JSON stored in wujie_user_data.
+ * Missing and legacy non-envelope rows are treated as revision 0.
+ */
+export async function dbCompareAndSetUserDataRevision(
+  userId: string,
+  key: string,
+  expectedRevision: number,
+  value: unknown,
+): Promise<boolean> {
+  const result = await execSql(`
+    WITH updated AS (
+      UPDATE wujie_user_data
+      SET data_value = $3::jsonb, updated_at = $4
+      WHERE user_id = $1
+        AND data_key = $2
+        AND CASE
+          WHEN jsonb_typeof(data_value) = 'object'
+            AND COALESCE(data_value ->> 'revision', '') ~ '^[0-9]+$'
+          THEN (data_value ->> 'revision')::numeric
+          ELSE 0
+        END = $5
+      RETURNING 1
+    ), inserted AS (
+      INSERT INTO wujie_user_data (user_id, data_key, data_value, updated_at)
+      SELECT $1, $2, $3::jsonb, $4
+      WHERE $5 = 0
+        AND NOT EXISTS (
+          SELECT 1 FROM wujie_user_data WHERE user_id = $1 AND data_key = $2
+        )
+      ON CONFLICT (user_id, data_key) DO NOTHING
+      RETURNING 1
+    )
+    SELECT EXISTS(
+      SELECT 1 FROM updated
+      UNION ALL
+      SELECT 1 FROM inserted
+    ) AS saved
+  `, [userId, key, JSON.stringify(value), Date.now(), expectedRevision]);
+  return result.rows[0]?.saved === true;
+}
+
 export async function dbListUserData(userId: string): Promise<{ dataKey: string; updatedAt: number }[]> {
   try {
     const result = await execSql(
