@@ -26,6 +26,8 @@
   ".superpowers/sdd/unified-skill-task-2-report.md",
   ".superpowers/sdd/unified-skill-task-3-report.md",
   ".superpowers/sdd/unified-skill-task-4-report.md",
+  ".superpowers/sdd/unified-skill-task-7-brief.md",
+  ".superpowers/sdd/unified-skill-task-7-report.md",
   ".superpowers/sdd/task-simple-chat-4-report.md",
   ".superpowers/sdd/task-simple-chat-5-report.md",
   ".superpowers/sdd/task-simple-chat-7-report.md",
@@ -81,6 +83,9 @@
   "src/components/canvas-workspace.tsx",
   "src/components/simple-chat/chat-area.tsx",
   "src/components/simple-chat/simple-chat-types.ts",
+  "src/components/skill-runtime/SkillInputFields.tsx",
+  "src/components/skill-runtime/SkillRunProgress.tsx",
+  "src/components/skill-runtime/use-skill-run.ts",
   "src/components/workflow/WorkflowLegacyNodeCard.tsx",
   "src/components/workflow/WorkflowLegacySurface.tsx",
   "src/components/workflow/WorkflowNodeCard.tsx",
@@ -324,5 +329,6 @@
   "src/lib/skill-runtime/step-registry.ts",
   "src/lib/skill-runtime/storage.ts",
   "src/lib/skill-runtime/types.ts",
-  "src/lib/task-core/durable-generation-kickoff.ts"
+  "src/lib/task-core/durable-generation-kickoff.ts",
+  "src/__tests__/components/skill-runtime-controls.test.tsx"
 ]
