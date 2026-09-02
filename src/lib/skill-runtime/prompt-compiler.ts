@@ -19,6 +19,18 @@ function invalidPromptValue(field: string): never {
   throw new SkillPromptError('SKILL_PROMPT_INVALID_VALUE', field);
 }
 
+function forbiddenPromptKey(key: string): never {
+  throw new SkillPromptError('SKILL_PROMPT_FORBIDDEN_KEY', key);
+}
+
+function ownDescriptorSnapshot(value: object): {
+  descriptors: PropertyDescriptorMap;
+  keys: readonly PropertyKey[];
+} {
+  const descriptors = Object.getOwnPropertyDescriptors(value);
+  return { descriptors, keys: Reflect.ownKeys(value) };
+}
+
 function assertStrictJsonValue(
   value: unknown,
   field: string,
@@ -33,23 +45,33 @@ function assertStrictJsonValue(
   if (ancestors.has(value)) invalidPromptValue(field);
   ancestors.add(value);
 
+  const { descriptors, keys } = ownDescriptorSnapshot(value);
+  for (const key of keys) {
+    if (typeof key === 'string' && FORBIDDEN_KEYS.has(key)) forbiddenPromptKey(key);
+    if (typeof key === 'symbol') invalidPromptValue(field);
+    const descriptor = descriptors[key as keyof typeof descriptors];
+    if (!descriptor || !Object.hasOwn(descriptor, 'value')) invalidPromptValue(field);
+    if (!descriptor.enumerable && !(Array.isArray(value) && key === 'length')) {
+      invalidPromptValue(field);
+    }
+  }
+
   if (Array.isArray(value)) {
-    const ownKeys = Reflect.ownKeys(value);
-    if (ownKeys.some(key => (
-      typeof key === 'symbol'
-      || (key !== 'length' && !/^(0|[1-9]\d*)$/.test(key))
-    ))) invalidPromptValue(field);
-    for (let index = 0; index < value.length; index += 1) {
-      if (!Object.hasOwn(value, index)) invalidPromptValue(field);
-      assertStrictJsonValue(value[index], field, ancestors);
+    const length = descriptors.length?.value;
+    if (typeof length !== 'number') invalidPromptValue(field);
+    for (let index = 0; index < length; index += 1) {
+      const descriptor = descriptors[String(index)];
+      if (!descriptor) invalidPromptValue(field);
+      assertStrictJsonValue(descriptor.value, field, ancestors);
+    }
+    if (keys.length !== length + 1) {
+      invalidPromptValue(field);
     }
   } else {
     const prototype = Object.getPrototypeOf(value);
     if (prototype !== Object.prototype && prototype !== null) invalidPromptValue(field);
-    for (const key of Reflect.ownKeys(value)) {
-      if (typeof key === 'symbol') invalidPromptValue(field);
-      const descriptor = Object.getOwnPropertyDescriptor(value, key);
-      if (!descriptor || !Object.hasOwn(descriptor, 'value')) invalidPromptValue(field);
+    for (const key of keys) {
+      const descriptor = descriptors[key as keyof typeof descriptors];
       assertStrictJsonValue(descriptor.value, field, ancestors);
     }
   }
@@ -82,6 +104,24 @@ export function compileSkillPrompt(
   template: string,
   values: Readonly<Record<string, unknown>>,
 ): string {
+  if (values === null || typeof values !== 'object' || Array.isArray(values)) {
+    throw new SkillPromptError('SKILL_PROMPT_INVALID_VALUE', '');
+  }
+  const valuesSnapshot = ownDescriptorSnapshot(values);
+  const valuesPrototype = Object.getPrototypeOf(values);
+  if (valuesPrototype !== Object.prototype && valuesPrototype !== null) {
+    throw new SkillPromptError('SKILL_PROMPT_INVALID_VALUE', '');
+  }
+  for (const key of valuesSnapshot.keys) {
+    const label = String(key);
+    if (typeof key === 'string' && FORBIDDEN_KEYS.has(key)) forbiddenPromptKey(key);
+    if (typeof key === 'symbol') invalidPromptValue(label);
+    const descriptor = valuesSnapshot.descriptors[key];
+    if (!descriptor || !Object.hasOwn(descriptor, 'value') || !descriptor.enumerable) {
+      invalidPromptValue(label);
+    }
+  }
+
   let compiled = '';
   let cursor = 0;
 
@@ -107,10 +147,11 @@ export function compileSkillPrompt(
     if (FORBIDDEN_KEYS.has(key)) {
       throw new SkillPromptError('SKILL_PROMPT_FORBIDDEN_KEY', key);
     }
-    if (!Object.prototype.hasOwnProperty.call(values, key)) {
+    const valueDescriptor = valuesSnapshot.descriptors[key];
+    if (!valueDescriptor) {
       throw new SkillPromptError('SKILL_PROMPT_UNRESOLVED', key);
     }
-    compiled += formatPromptValue(values[key], key);
+    compiled += formatPromptValue(valueDescriptor.value, key);
     cursor = end + 2;
   }
 

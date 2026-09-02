@@ -77,3 +77,34 @@
 - 严格 JSON 合同刻意拒绝 Date、Map、Set、类实例、访问器和带额外自有属性的数组；这些值不是 JSON 数据模型，调用方需先归一化。
 - 512 KiB 检查现在针对最终输出，替代初版仅检查 raw 的说明；因此默认值不能再扩大绕过总量门禁。
 - 未修改质量门禁、catalog、inventory、UI、API、Agent、节点或 `stable`；任务开始前已有的四个未跟踪保护项保持未暂存、未修改。
+
+## 第二轮复审：2 Important + 1 Minor（2026-09-02）
+
+### RED
+
+- 先只修改 `src/__tests__/lib/skill-runtime-inputs.test.ts`，新增 getter、副作用计数、非枚举大值/污染键、Symbol 与非枚举未知字段合同。
+- 命令：`pnpm exec vitest run src/__tests__/lib/skill-runtime-inputs.test.ts src/__tests__/lib/skill-runtime-quality.test.ts`
+- 结果：exit 1；37 个测试中 6 个失败、31 个通过。
+- 失败证据：raw 与模板 values 的 getter 实际执行并泄漏原生 Error；dataset getter 被执行；非枚举声明/未知/污染键和 Symbol 未知键被忽略；模板结构中的非枚举大值被 JSON.stringify 静默丢弃。
+
+### 最小实现
+
+- input 与 prompt 各自新增内部 descriptor snapshot：先调用 `Object.getOwnPropertyDescriptors()` 与 `Reflect.ownKeys()`，之后才做原型判断、字段分类或值递归。
+- 所有递归只读取 data descriptor 的 `.value`；getter/setter 在读取前分别稳定抛 `SkillInputError` / `SkillPromptError`，测试中的 getter 调用计数均保持 0。
+- 除数组内建 `length` 外，统一拒绝非 enumerable 自有数据属性；原型污染键优先返回 forbidden-key 领域错误，不能通过非枚举隐藏。
+- raw unknown 检查改用 `Reflect.ownKeys()`：Symbol 键、非枚举未知字符串均拒绝；已声明但非枚举的字段按 strict value 合同拒绝。
+- 模板 values 容器及其结构值应用相同 descriptor 合同，编译器不再通过 `values[key]` 直接读取属性。
+
+### GREEN 与验证
+
+- Task 2 聚焦：2 个文件、37 个测试通过。
+- Task 1 兼容：3 个文件、14 个测试通过。
+- TypeScript：`pnpm exec tsc -p tsconfig.json --noEmit`，exit 0。
+- 限定 ESLint：原 Task 2 六个源码/测试文件，exit 0，0 errors，0 warnings。
+- 源码直读扫描确认 raw、template values 和递归对象不再使用属性索引读取；两处数组 `.some()` 只在 descriptor 校验确认所有元素均为 enumerable data descriptor 后执行。
+
+### 风险与自审
+
+- descriptor 合同针对普通对象/数组；恶意 Proxy 的 ownKeys/getOwnPropertyDescriptor trap 仍属于 JavaScript 元对象协议，无法承诺零副作用，本轮审查未要求接纳 Proxy。
+- 数组 `length` 是唯一允许的非 enumerable 自有数据属性；稀疏数组、额外属性、Symbol 属性和访问器元素继续拒绝。
+- 未修改 `stable`、质量门禁或 Task 1 文件，未推送；四个既有未跟踪保护项保持原样。

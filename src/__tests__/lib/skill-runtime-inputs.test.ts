@@ -136,6 +136,90 @@ describe('resolveSkillInputs', () => {
     );
   });
 
+  it('顶层 getter 在读取前被拒绝且不会执行', () => {
+    let getterCalls = 0;
+    const raw: Record<string, unknown> = {};
+    Object.defineProperty(raw, 'product', {
+      enumerable: true,
+      get: () => {
+        getterCalls += 1;
+        throw new Error('getter must not run');
+      },
+    });
+
+    expectInputError(
+      () => resolveSkillInputs(definition, raw),
+      'SKILL_INPUT_INVALID_VALUE',
+      'product',
+    );
+    expect(getterCalls).toBe(0);
+  });
+
+  it('dataset 内 getter 在读取前被拒绝且不会执行', () => {
+    let getterCalls = 0;
+    const row: Record<string, unknown> = {};
+    Object.defineProperty(row, 'sku', {
+      enumerable: true,
+      get: () => {
+        getterCalls += 1;
+        throw new Error('getter must not run');
+      },
+    });
+
+    expectInputError(
+      () => resolveSkillInputs(definition, { product: '耳机', dataset: [row] }),
+      'SKILL_INPUT_INVALID_VALUE',
+      'dataset',
+    );
+    expect(getterCalls).toBe(0);
+  });
+
+  it('拒绝非枚举声明字段、非枚举未知字段和 Symbol 未知字段', () => {
+    const hiddenDeclared: Record<string, unknown> = {};
+    Object.defineProperty(hiddenDeclared, 'product', {
+      value: '隐藏耳机',
+      enumerable: false,
+    });
+    expectInputError(
+      () => resolveSkillInputs(definition, hiddenDeclared),
+      'SKILL_INPUT_INVALID_VALUE',
+      'product',
+    );
+
+    const hiddenUnknown: Record<string, unknown> = { product: '耳机' };
+    Object.defineProperty(hiddenUnknown, 'hiddenPayload', {
+      value: '界'.repeat(180_000),
+      enumerable: false,
+    });
+    expectInputError(
+      () => resolveSkillInputs(definition, hiddenUnknown),
+      'SKILL_INPUT_UNKNOWN_FIELD',
+      'hiddenPayload',
+    );
+
+    const symbolKey = Symbol('hidden');
+    const symbolUnknown = { product: '耳机', [symbolKey]: 'secret' };
+    expectInputError(
+      () => resolveSkillInputs(definition, symbolUnknown),
+      'SKILL_INPUT_UNKNOWN_FIELD',
+      'Symbol(hidden)',
+    );
+  });
+
+  it('非枚举原型污染键不能被隐藏', () => {
+    const raw: Record<string, unknown> = { product: '耳机' };
+    Object.defineProperty(raw, '__proto__', {
+      value: { admin: true },
+      enumerable: false,
+    });
+
+    expectInputError(
+      () => resolveSkillInputs(definition, raw),
+      'SKILL_INPUT_FORBIDDEN_KEY',
+      '__proto__',
+    );
+  });
+
   it('限制文本为 16384 字符并拒绝非有限数字', () => {
     expect(resolveSkillInputs(definition, { product: 'x'.repeat(16_384) }).product)
       .toHaveLength(16_384);
@@ -386,6 +470,52 @@ describe('compileSkillPrompt', () => {
         field: 'value',
       });
     }
+  });
+
+  it('模板 values getter 在读取前被拒绝且不会执行', () => {
+    let getterCalls = 0;
+    const values: Record<string, unknown> = {};
+    Object.defineProperty(values, 'product', {
+      enumerable: true,
+      get: () => {
+        getterCalls += 1;
+        throw new Error('getter must not run');
+      },
+    });
+
+    expect(() => compileSkillPrompt('产品：{{product}}', values)).toThrowError(
+      expect.objectContaining({
+        code: 'SKILL_PROMPT_INVALID_VALUE',
+        field: 'product',
+      }),
+    );
+    expect(getterCalls).toBe(0);
+  });
+
+  it('模板结构值拒绝非枚举大数据和非枚举原型污染键', () => {
+    const hiddenLarge: Record<string, unknown> = { visible: 'ok' };
+    Object.defineProperty(hiddenLarge, 'hiddenPayload', {
+      value: '界'.repeat(180_000),
+      enumerable: false,
+    });
+    expect(() => compileSkillPrompt('数据：{{data}}', { data: hiddenLarge })).toThrowError(
+      expect.objectContaining({
+        code: 'SKILL_PROMPT_INVALID_VALUE',
+        field: 'data',
+      }),
+    );
+
+    const polluted: Record<string, unknown> = { visible: 'ok' };
+    Object.defineProperty(polluted, '__proto__', {
+      value: { admin: true },
+      enumerable: false,
+    });
+    expect(() => compileSkillPrompt('数据：{{data}}', { data: polluted })).toThrowError(
+      expect.objectContaining({
+        code: 'SKILL_PROMPT_FORBIDDEN_KEY',
+        field: '__proto__',
+      }),
+    );
   });
 
   it.each([

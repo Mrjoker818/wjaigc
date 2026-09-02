@@ -29,18 +29,6 @@ export class SkillInputError extends Error {
   }
 }
 
-function assertNoForbiddenKeys(value: unknown, seen = new Set<object>()): void {
-  if (value === null || typeof value !== 'object' || seen.has(value)) return;
-  seen.add(value);
-
-  for (const key of Object.keys(value)) {
-    if (FORBIDDEN_KEYS.has(key)) {
-      throw new SkillInputError('SKILL_INPUT_FORBIDDEN_KEY', key);
-    }
-    assertNoForbiddenKeys((value as Record<string, unknown>)[key], seen);
-  }
-}
-
 function assertSerializedBytes(value: Record<string, unknown>): void {
   let serialized: string;
   try {
@@ -64,6 +52,18 @@ function invalidValue(field: SkillInputField): never {
   throw new SkillInputError('SKILL_INPUT_INVALID_VALUE', field.key);
 }
 
+function forbiddenKey(key: string): never {
+  throw new SkillInputError('SKILL_INPUT_FORBIDDEN_KEY', key);
+}
+
+function ownDescriptorSnapshot(value: object): {
+  descriptors: PropertyDescriptorMap;
+  keys: readonly PropertyKey[];
+} {
+  const descriptors = Object.getOwnPropertyDescriptors(value);
+  return { descriptors, keys: Reflect.ownKeys(value) };
+}
+
 function assertStrictJsonValue(
   value: unknown,
   field: SkillInputField,
@@ -78,22 +78,32 @@ function assertStrictJsonValue(
   if (ancestors.has(value)) invalidValue(field);
   ancestors.add(value);
 
+  const { descriptors, keys } = ownDescriptorSnapshot(value);
+  for (const key of keys) {
+    if (typeof key === 'string' && FORBIDDEN_KEYS.has(key)) forbiddenKey(key);
+    if (typeof key === 'symbol') invalidValue(field);
+    const descriptor = descriptors[key as keyof typeof descriptors];
+    if (!descriptor || !Object.hasOwn(descriptor, 'value')) invalidValue(field);
+    if (!descriptor.enumerable && !(Array.isArray(value) && key === 'length')) {
+      invalidValue(field);
+    }
+  }
+
   if (Array.isArray(value)) {
-    const ownKeys = Reflect.ownKeys(value);
-    if (ownKeys.some(key => (
-      typeof key === 'symbol'
-      || (key !== 'length' && !/^(0|[1-9]\d*)$/.test(key))
-    ))) invalidValue(field);
-    for (let index = 0; index < value.length; index += 1) {
-      if (!Object.hasOwn(value, index)) invalidValue(field);
-      assertStrictJsonValue(value[index], field, ancestors);
+    const length = descriptors.length?.value;
+    if (typeof length !== 'number') invalidValue(field);
+    for (let index = 0; index < length; index += 1) {
+      const descriptor = descriptors[String(index)];
+      if (!descriptor) invalidValue(field);
+      assertStrictJsonValue(descriptor.value, field, ancestors);
+    }
+    if (keys.length !== length + 1) {
+      invalidValue(field);
     }
   } else {
     if (!isPlainObject(value)) invalidValue(field);
-    for (const key of Reflect.ownKeys(value)) {
-      if (typeof key === 'symbol') invalidValue(field);
-      const descriptor = Object.getOwnPropertyDescriptor(value, key);
-      if (!descriptor || !Object.hasOwn(descriptor, 'value')) invalidValue(field);
+    for (const key of keys) {
+      const descriptor = descriptors[key as keyof typeof descriptors];
       assertStrictJsonValue(descriptor.value, field, ancestors);
     }
   }
@@ -135,7 +145,9 @@ function validateImages(field: SkillInputField, value: unknown): readonly string
 }
 
 function validateDataset(field: SkillInputField, value: unknown): readonly Record<string, unknown>[] {
-  if (!Array.isArray(value) || value.some(row => !isPlainObject(row))) {
+  if (!Array.isArray(value) || value.some(row => (
+    row === null || typeof row !== 'object' || Array.isArray(row)
+  ))) {
     return invalidType(field);
   }
   if (value.length > SKILL_INPUT_LIMITS.datasetRows) {
@@ -179,15 +191,24 @@ export function resolveSkillInputs(
   definition: SkillDefinition,
   raw: Record<string, unknown>,
 ): Record<string, unknown> {
+  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new SkillInputError('SKILL_INPUT_INVALID_TYPE');
+  }
+
+  const fields = new Map(definition.inputs.map(field => [field.key, field]));
+  const rawSnapshot = ownDescriptorSnapshot(raw);
   if (!isPlainObject(raw)) {
     throw new SkillInputError('SKILL_INPUT_INVALID_TYPE');
   }
-  assertNoForbiddenKeys(raw);
-
-  const fields = new Map(definition.inputs.map(field => [field.key, field]));
-  for (const key of Object.keys(raw)) {
-    if (!fields.has(key)) {
-      throw new SkillInputError('SKILL_INPUT_UNKNOWN_FIELD', key);
+  for (const key of rawSnapshot.keys) {
+    const label = String(key);
+    if (typeof key === 'string' && FORBIDDEN_KEYS.has(key)) forbiddenKey(key);
+    if (typeof key !== 'string' || !fields.has(key)) {
+      throw new SkillInputError('SKILL_INPUT_UNKNOWN_FIELD', label);
+    }
+    const descriptor = rawSnapshot.descriptors[key];
+    if (!descriptor || !Object.hasOwn(descriptor, 'value') || !descriptor.enumerable) {
+      throw new SkillInputError('SKILL_INPUT_INVALID_VALUE', label);
     }
   }
 
@@ -204,14 +225,14 @@ export function resolveSkillInputs(
     )) {
       throw new SkillInputError('SKILL_INPUT_INVALID_DEFINITION', field.key);
     }
-    const rawValue = Object.hasOwn(raw, field.key) ? raw[field.key] : undefined;
+    const rawDescriptor = rawSnapshot.descriptors[field.key];
+    const rawValue = rawDescriptor?.value;
     const value = rawValue ?? field.defaultValue;
-    assertNoForbiddenKeys(value);
     if (field.required && isEmpty(value)) {
       throw new SkillInputError('SKILL_INPUT_REQUIRED', field.key);
     }
+    if (value !== undefined) assertStrictJsonValue(value, field);
     const resolved = validateField(field, value);
-    if (resolved !== undefined) assertStrictJsonValue(resolved, field);
     output[field.key] = resolved;
   }
   assertSerializedBytes(output);
