@@ -50,6 +50,24 @@ describe('shared Agent runtime projection', () => {
     expect(projection.status).toBe('queued');
   });
 
+  it('ignores execution events from a stale or missing generation after resume', () => {
+    const projection = reduceAgentEvents([
+      event(1, 'run.created'),
+      event(2, 'run.paused', { nextStepId: 'generate-2' }),
+      event(3, 'run.resumed', { nextStepId: 'generate-2', generation: 4 }),
+      event(4, 'tool.started', { toolId: 'generate-2', stepId: 'generate-2', generation: 3 }),
+      event(5, 'step.retrying', { stepId: 'generate-2', generation: 3, progress: 50 }),
+      event(6, 'tool.completed', { toolId: 'generate-2' }),
+      event(7, 'tool.started', { toolId: 'generate-2', stepId: 'generate-2', generation: 4 }),
+    ]);
+
+    expect(projection.status).toBe('executing');
+    expect(projection.currentStepId).toBe('generate-2');
+    expect(projection.ignoredEventIds).toEqual(expect.arrayContaining([
+      'event-4', 'event-5', 'event-6',
+    ]));
+  });
+
   it('projects retry and quality events deterministically across disorder and duplicates', () => {
     const projection = reduceAgentEvents([
       event(7, 'quality.checked', {
@@ -214,6 +232,24 @@ describe('Agent event payload safety', () => {
     expect(() => assertAgentEventPayloadSafe(payload)).toThrowError(
       'Agent event payload contains sensitive data',
     );
+  });
+
+  it.each([
+    { value: 'https://assets.example.com/private/source.png' },
+    { value: 'https://cdn.example.com/a.png?X-Amz-Signature=secret' },
+    { prompt: 'POST https://api.example.com with x-api-key: abcdefghijklmnop' },
+  ])('rejects remote or signed URLs and credential-shaped strings in events', (payload) => {
+    expect(() => assertAgentEventPayloadSafe(payload)).toThrowError(
+      'Agent event payload contains sensitive data',
+    );
+  });
+
+  it('does not mistake ordinary Chinese product copy for a credential', () => {
+    expect(assertAgentEventPayloadSafe({
+      prompt: '设计一个“API 密钥管理”和“访问令牌说明”的中文帮助页面，不要展示真实凭据。',
+    })).toEqual({
+      prompt: '设计一个“API 密钥管理”和“访问令牌说明”的中文帮助页面，不要展示真实凭据。',
+    });
   });
 
   it('accepts nested JSON payloads without credential material', () => {

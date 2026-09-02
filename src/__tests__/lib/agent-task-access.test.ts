@@ -15,7 +15,10 @@ describe('agent task access policy', () => {
   });
 
   it('requires authenticated ownership checks for agent task reads and cancellations', () => {
-    const source = readFileSync(path.resolve(process.cwd(), 'src/app/api/agent-edit/route.ts'), 'utf8');
+    const source = readFileSync(path.resolve(
+      process.cwd(),
+      'src/lib/agent-runtime/agent-edit-execution-service.ts',
+    ), 'utf8');
     const getHandler = source.indexOf('export async function GET');
     const auth = source.indexOf('requireApiAuthOrReject(request)', getHandler);
     const cancel = source.indexOf("action === 'cancel'", getHandler);
@@ -27,7 +30,10 @@ describe('agent task access policy', () => {
   });
 
   it('uses an explicit tool allowlist and bounded rounds for agent editing', () => {
-    const source = readFileSync(path.resolve(process.cwd(), 'src/app/api/agent-edit/route.ts'), 'utf8');
+    const source = readFileSync(path.resolve(
+      process.cwd(),
+      'src/lib/agent-runtime/agent-edit-execution-service.ts',
+    ), 'utf8');
 
     expect(source).toContain('const AGENT_EDIT_ALLOWED_TOOLS');
     expect(source).toContain('allowedTools: AGENT_EDIT_ALLOWED_TOOLS');

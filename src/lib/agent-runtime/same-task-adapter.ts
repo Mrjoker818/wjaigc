@@ -28,7 +28,7 @@ import type {
   AgentRunProjection,
   AgentRunRequest,
 } from './types';
-import { withAgentExecutionFence } from './execution-fence';
+import { withAgentExecutionFence, type AgentExecutionFence } from './execution-fence';
 import type { AgentEditExecutionContinuationV1 } from './agent-edit-execution-descriptor';
 import { AgentModelRouteMismatchError } from './model-route-error';
 
@@ -89,6 +89,7 @@ export interface AppendAdoptedAgentEventInput {
   workspace: AgentRunRequest['workspace'];
   type: AgentEventType;
   payload: Record<string, unknown>;
+  executionFence?: AgentExecutionFence;
 }
 
 export interface AppendAdoptedAgentEventResult {
@@ -212,12 +213,14 @@ export function createSameTaskAgentAdapter(
     toolId: string;
     stepId?: string;
     requestDigest: string;
+    executionFence: AgentExecutionFence;
   }): AgentDownstreamExecutionContext {
     const identity = createAgentDownstreamOperationIdentity(input);
     return {
       idempotencyKey: identity.idempotencyKey,
       operationKey: identity.operationKey,
       recovery: false,
+      executionFence: identity.executionFence,
       beginSubmission: async () => undefined,
       recordAccepted: async () => undefined,
       executeOperation: (step, execute) => execute(createPassthroughContext({
@@ -227,6 +230,7 @@ export function createSameTaskAgentAdapter(
         toolId: step.toolId,
         stepId: step.stepId,
         requestDigest: step.requestDigest,
+        executionFence: input.executionFence,
       })),
     };
   }
@@ -290,7 +294,7 @@ export function createSameTaskAgentAdapter(
         runId: input.taskId,
         workspace: input.request.workspace,
       };
-      await dependencies.appendAdoptedEvent({
+      const created = await dependencies.appendAdoptedEvent({
         ...eventBase,
         eventId: eventId(input.taskId, 'created'),
         type: 'run.created',
@@ -327,13 +331,6 @@ export function createSameTaskAgentAdapter(
           }],
         },
       });
-      const started = await dependencies.appendAdoptedEvent({
-        ...eventBase,
-        eventId: eventId(input.taskId, `tool:${input.toolId}:started`),
-        type: 'tool.started',
-        payload: { toolId: input.toolId },
-      });
-
       const events = await dependencies.listEvents({
         actorUserId: input.actor.id,
         projectId: input.request.projectId,
@@ -341,7 +338,7 @@ export function createSameTaskAgentAdapter(
       });
       return {
         runId: input.taskId,
-        reused: !started.inserted,
+        reused: !created.inserted,
         claimed: true,
         projection: reduceAgentEvents(events),
         tools: authorization.tools,
@@ -396,47 +393,53 @@ export function createSameTaskAgentAdapter(
           && !TERMINAL_TASK_STATUSES.has(admittedTask.status)
         ) {
           executed = true;
+          const executionGeneration = lease.generation || 1;
+          const executionFence = {
+            runId: adoption.runId,
+            leaseOwner: lease.leaseOwner,
+            generation: executionGeneration,
+          };
           try {
+            if (expectedGeneration === undefined) {
+              await dependencies.appendAdoptedEvent({
+                actorUserId: adoption.actorUserId,
+                projectId: adoption.projectId,
+                runId: adoption.runId,
+                workspace: adoption.workspace,
+                eventId: eventId(adoption.runId, `tool:${adoption.toolId}:started`),
+                type: 'tool.started',
+                payload: { toolId: adoption.toolId, generation: executionGeneration },
+                executionFence,
+              });
+            }
             if (dependencies.downstreamOperations) {
               const downstreamOperations = dependencies.downstreamOperations;
               value = await withAgentExecutionFence({
-                runId: adoption.runId,
-                leaseOwner: lease.leaseOwner,
-                generation: lease.generation || 0,
+                ...executionFence,
               }, () => executeDurableAgentDownstreamOperation({
                 actorUserId: adoption.actorUserId,
                 projectId: adoption.projectId,
                 runId: adoption.runId,
                 toolId: adoption.toolId,
                 requestDigest: adoption.requestDigest,
+                executionFence,
               }, context => execute({
                 ...context,
                 ...(resumeFromStepId ? { resumeFromStepId } : {}),
-                executionFence: {
-                  runId: adoption.runId,
-                  leaseOwner: lease.leaseOwner,
-                  generation: lease.generation || 0,
-                },
+                executionFence,
               }), downstreamOperations, recovery));
             } else {
-              value = await withAgentExecutionFence({
-                runId: adoption.runId,
-                leaseOwner: lease.leaseOwner,
-                generation: lease.generation || 0,
-              }, () => execute({
+              value = await withAgentExecutionFence(executionFence, () => execute({
                 ...createPassthroughContext({
                   actorUserId: adoption.actorUserId,
                   projectId: adoption.projectId,
                   runId: adoption.runId,
                   toolId: adoption.toolId,
                   requestDigest: adoption.requestDigest,
+                  executionFence,
                 }),
                 ...(resumeFromStepId ? { resumeFromStepId } : {}),
-                executionFence: {
-                  runId: adoption.runId,
-                  leaseOwner: lease.leaseOwner,
-                  generation: lease.generation || 0,
-                },
+                executionFence,
               }));
             }
           } catch (error) {
@@ -494,7 +497,7 @@ export function createSameTaskAgentAdapter(
             workspace: adoption.workspace,
             toolId: adoption.toolId,
             leaseOwner: lease.leaseOwner,
-            generation: lease.generation || 0,
+            generation: executionGeneration,
           });
           if (!terminalEvents.some(event => event.type.startsWith('run.'))) {
             await dependencies.appendAdoptedEvent({
@@ -504,7 +507,8 @@ export function createSameTaskAgentAdapter(
               workspace: adoption.workspace,
               eventId: eventId(adoption.runId, `tool:${adoption.toolId}:completed`),
               type: 'tool.completed',
-              payload: { toolId: adoption.toolId },
+              payload: { toolId: adoption.toolId, generation: executionGeneration },
+              executionFence,
             });
           }
           await dependencies.completeExecution({

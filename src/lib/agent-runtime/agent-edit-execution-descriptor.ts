@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { assertAgentEventPayloadSafe } from './event-reducer';
 
 const MAX_DESCRIPTOR_BYTES = 64 * 1024;
 const IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/;
@@ -93,6 +94,11 @@ export function createAgentEditExecutionDescriptorV1(
     ...(input.aspectRatio === undefined
       ? {} : { aspectRatio: requiredString(input.aspectRatio, 'aspectRatio', 32) }),
   };
+  try {
+    assertAgentEventPayloadSafe(descriptor as unknown as Record<string, unknown>);
+  } catch {
+    throw new AgentEditExecutionDescriptorError('Descriptor contains sensitive data');
+  }
   if (Buffer.byteLength(JSON.stringify(descriptor), 'utf8') > MAX_DESCRIPTOR_BYTES) {
     throw new AgentEditExecutionDescriptorError('Descriptor exceeds the size limit');
   }

@@ -223,7 +223,11 @@ describe('same-task Agent adoption adapter', () => {
   });
 
   it('authorizes Task 1 context, model, and tools before execution', async () => {
-    const deps = dependencies();
+    const deps = dependencies({
+      claimExecution: vi.fn().mockResolvedValue({
+        claimed: true, leaseOwner: 'agent-lease-3', generation: 3,
+      }),
+    });
     const execute = vi.fn().mockResolvedValue('ok');
 
     const result = await createSameTaskAgentAdapter(deps).adoptAndExecute({
@@ -244,6 +248,13 @@ describe('same-task Agent adoption adapter', () => {
       actor.id,
     );
     expect(execute).toHaveBeenCalledTimes(1);
+    expect(deps.appendAdoptedEvent).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'tool.started',
+      executionFence: {
+        runId: 'task-1', leaseOwner: 'agent-lease-3', generation: 3,
+      },
+      payload: expect.objectContaining({ generation: 3 }),
+    }));
     expect(result).toMatchObject({ runId: 'task-1', executed: true, value: 'ok' });
   });
 

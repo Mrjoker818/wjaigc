@@ -8,10 +8,23 @@ import {
 } from '@/lib/agent-runtime/downstream-operations';
 
 describe('durable Agent downstream operations', () => {
+  const executionFence = {
+    runId: 'run-1',
+    leaseOwner: 'agent-lease-3',
+    generation: 3,
+  };
+
+  it('rejects an unfenced operation before any downstream state can be prepared', () => {
+    expect(() => createAgentDownstreamOperationIdentity({
+      actorUserId: 'user-1', projectId: 'project-1', runId: 'run-1',
+      toolId: 'image_edit', requestDigest: 'a'.repeat(64),
+    })).toThrow('Agent execution fence is required');
+  });
+
   it('derives one stable provider idempotency key from actor/run/tool/request digest', () => {
     const input = {
       actorUserId: 'user-1', projectId: 'project-1', runId: 'run-1',
-      toolId: 'image_edit', requestDigest: 'a'.repeat(64),
+      toolId: 'image_edit', requestDigest: 'a'.repeat(64), executionFence,
     };
     const first = createAgentDownstreamOperationIdentity(input);
     const retry = createAgentDownstreamOperationIdentity(input);
@@ -28,7 +41,7 @@ describe('durable Agent downstream operations', () => {
   it('includes the exact tool-call step identity in the durable provider key', () => {
     const input = {
       actorUserId: 'user-1', projectId: 'project-1', runId: 'run-1',
-      toolId: 'image_edit', requestDigest: 'a'.repeat(64),
+      toolId: 'image_edit', requestDigest: 'a'.repeat(64), executionFence,
     };
 
     const first = createAgentDownstreamOperationIdentity({ ...input, stepId: 'image-edit:0' });
@@ -43,7 +56,7 @@ describe('durable Agent downstream operations', () => {
   it('preserves the pre-step root identity for already-durable operations', () => {
     const identity = createAgentDownstreamOperationIdentity({
       actorUserId: 'user-1', projectId: 'project-1', runId: 'run-1',
-      toolId: 'image_edit', requestDigest: 'a'.repeat(64),
+      toolId: 'image_edit', requestDigest: 'a'.repeat(64), executionFence,
     });
 
     expect(identity.stepId).toBe('root');
@@ -85,7 +98,7 @@ describe('durable Agent downstream operations', () => {
     };
     const input = {
       actorUserId: 'user-1', projectId: 'project-1', runId: 'run-1',
-      toolId: 'image_edit', requestDigest: 'a'.repeat(64),
+      toolId: 'image_edit', requestDigest: 'a'.repeat(64), executionFence,
     };
     const provider = vi.fn(async (stableKey: string) => {
       const taskId = providerTasks.get(stableKey) || 'provider-task-1';
@@ -138,6 +151,7 @@ describe('durable Agent downstream operations', () => {
     const input = {
       actorUserId: 'user-1', projectId: 'project-1', runId: 'run-unknown',
       toolId: 'image_edit', requestDigest: 'c'.repeat(64),
+      executionFence: { ...executionFence, runId: 'run-unknown' },
     };
 
     await expect(executeDurableAgentDownstreamOperation(input, async context => {
@@ -154,5 +168,30 @@ describe('durable Agent downstream operations', () => {
     expect(submit).toHaveBeenCalledTimes(1);
     expect((operation as unknown as AgentDownstreamOperation).status).toBe('submission_unknown');
     expect(dependencies.complete).not.toHaveBeenCalled();
+  });
+
+  it('propagates the same execution fence into nested downstream operations', async () => {
+    const seen: unknown[] = [];
+    const dependencies: AgentDownstreamOperationDependencies = {
+      prepare: vi.fn(async input => {
+        seen.push(input.executionFence);
+        return { ...input, status: 'prepared', attempts: 1, claimed: true };
+      }),
+      markSubmitted: vi.fn(async input => ({ ...input, status: 'submitted', attempts: 1 })),
+      markAccepted: vi.fn(async input => ({ ...input, status: 'accepted', attempts: 1 })),
+      markSubmissionUnknown: vi.fn(async input => ({ ...input, status: 'submission_unknown', attempts: 1 })),
+      complete: vi.fn(async input => ({
+        ...input, status: 'completed', attempts: 1, response: input.response,
+      })),
+    };
+
+    await executeDurableAgentDownstreamOperation({
+      actorUserId: 'user-1', projectId: 'project-1', runId: 'run-1',
+      toolId: 'agent_edit', requestDigest: 'd'.repeat(64), executionFence,
+    }, context => context.executeOperation({
+      stepId: 'image-edit:1', toolId: 'image_edit', requestDigest: 'e'.repeat(64),
+    }, async () => ({ imageUrl: '/result.png' })), dependencies);
+
+    expect(seen).toEqual([executionFence, executionFence]);
   });
 });

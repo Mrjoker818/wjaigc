@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
+import type { AgentExecutionFence } from './execution-fence';
 
 export interface AgentDownstreamOperationInput {
   actorUserId: string;
@@ -10,13 +11,18 @@ export interface AgentDownstreamOperationInput {
   leaseOwner?: string;
   now?: number;
   leaseDurationMs?: number;
+  executionFence?: AgentExecutionFence;
 }
 
-export interface AgentDownstreamOperationIdentity extends Omit<AgentDownstreamOperationInput, 'stepId'> {
+export interface AgentDownstreamOperationIdentity extends Omit<
+  AgentDownstreamOperationInput,
+  'stepId' | 'executionFence'
+> {
   stepId: string;
   operationKey: string;
   idempotencyKey: string;
   leaseOwner: string;
+  executionFence: AgentExecutionFence;
 }
 
 export interface AgentDownstreamOperation extends AgentDownstreamOperationIdentity {
@@ -55,11 +61,7 @@ export interface AgentDownstreamExecutionContext {
   operationKey: string;
   recovery: boolean;
   resumeFromStepId?: string;
-  executionFence?: {
-    runId: string;
-    leaseOwner: string;
-    generation: number;
-  };
+  executionFence?: AgentExecutionFence;
   beginSubmission(): Promise<void>;
   recordAccepted(providerTaskId: string): Promise<void>;
   executeOperation<T>(
@@ -146,6 +148,16 @@ function replayKnownProviderRejection(response: unknown): void {
 export function createAgentDownstreamOperationIdentity(
   input: AgentDownstreamOperationInput,
 ): AgentDownstreamOperationIdentity {
+  const executionFence = input.executionFence;
+  if (
+    !executionFence
+    || executionFence.runId !== input.runId
+    || !executionFence.leaseOwner
+    || !Number.isSafeInteger(executionFence.generation)
+    || executionFence.generation < 1
+  ) {
+    throw new Error('Agent execution fence is required');
+  }
   const stepId = input.stepId || 'root';
   const identityParts = [input.actorUserId, input.projectId, input.runId, input.toolId];
   if (stepId !== 'root') identityParts.push(stepId);
@@ -153,6 +165,7 @@ export function createAgentDownstreamOperationIdentity(
   const digest = createHash('sha256').update(identityParts.join('\0')).digest('hex');
   return {
     ...input,
+    executionFence,
     stepId,
     operationKey: `agent-op:${digest}`,
     idempotencyKey: `agent-provider:${digest}`,
@@ -197,6 +210,7 @@ export async function executeDurableAgentDownstreamOperation<T>(
     idempotencyKey: identity.idempotencyKey,
     operationKey: identity.operationKey,
     recovery: operation.attempts > 1,
+    executionFence: identity.executionFence,
     async beginSubmission() {
       if (submissionStarted) return;
       await dependencies.markSubmitted(identity);
@@ -217,6 +231,7 @@ export async function executeDurableAgentDownstreamOperation<T>(
         toolId: step.toolId,
         stepId: step.stepId,
         requestDigest: step.requestDigest,
+        executionFence: identity.executionFence,
       }, childExecute, dependencies, childRecovery);
     },
   };

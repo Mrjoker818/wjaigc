@@ -651,6 +651,28 @@ describe('cloud-task-storage', () => {
     expect(update).toContain('paused_at = 0');
   });
 
+  it('fails closed without an explicit fence when a cloud task is bound to an active Agent execution', async () => {
+    execSql.mockResolvedValue({ rows: [], rowCount: 0 });
+
+    await updateCloudTask('task-agent-bound', {
+      progress: 61,
+      expectedStatuses: ['processing'],
+    });
+    await claimCloudTaskLease('task-agent-bound', 'worker-unfenced', 4_000, 1_000);
+    await completeCloudTask('task-agent-bound', { done: true });
+    await refundCloudTaskCredits('task-agent-bound', 'must not bypass Agent lease');
+
+    const businessStatements = execSql.mock.calls
+      .map(([sql]) => String(sql))
+      .filter(sql => sql.includes('UPDATE cloud_tasks') || sql.includes('WITH refundable AS'));
+    expect(businessStatements.length).toBeGreaterThanOrEqual(4);
+    for (const sql of businessStatements.slice(-4)) {
+      expect(sql).toMatch(/NOT EXISTS\s*\([\s\S]*wujie_agent_execution_leases[\s\S]*completed_at\s*=\s*0/i);
+      expect(sql).not.toMatch(/OR EXISTS\s*\([\s\S]*active_agent/i);
+      expect(sql).not.toMatch(/\$\d+::(?:text|bigint) IS NULL\s+OR EXISTS\s*\([\s\S]*agent_lease/i);
+    }
+  });
+
   it('guards completion with the active lease and database wall-clock deadline', async () => {
     execSql.mockResolvedValueOnce({ rows: [{ id: 'task-guarded' }], rowCount: 1 });
 

@@ -11,6 +11,15 @@ export interface AgentExecutionDispatchStart {
   completion?: Promise<void>;
 }
 
+function markDispatchFailurePersisted(error: unknown): Error & {
+  dispatchFailurePersisted: true;
+} {
+  const persistedError = error instanceof Error
+    ? new Error(error.message, { cause: error })
+    : new Error(String(error), { cause: error });
+  return Object.assign(persistedError, { dispatchFailurePersisted: true as const });
+}
+
 export async function recordResumedAgentExecutionCompletionFailure(
   input: AgentRunExecutionDispatchInput,
 ): Promise<void> {
@@ -29,6 +38,11 @@ export async function recordResumedAgentExecutionCompletionFailure(
         message: 'Resumed Agent execution failed after dispatch',
         retryable: true,
       },
+    },
+    executionFence: {
+      runId: input.runId,
+      leaseOwner: input.leaseOwner,
+      generation: input.generation,
     },
   });
 }
@@ -60,6 +74,11 @@ export async function dispatchResumedAgentExecution(
       eventId: `agent:${input.runId}:resumed:${input.generation}:tool:${input.nextStepId}:started`,
       type: 'tool.started',
       payload: { toolId: input.nextStepId, stepId: input.nextStepId, generation: input.generation },
+      executionFence: {
+        runId: input.runId,
+        leaseOwner: input.leaseOwner,
+        generation: input.generation,
+      },
     });
 
     const completion = executeAdoptedAgentTask({
@@ -74,8 +93,12 @@ export async function dispatchResumedAgentExecution(
       expectedGeneration: input.generation,
       leaseOwner: input.leaseOwner,
     }).then(() => undefined).catch(async error => {
-      await recordResumedAgentExecutionDispatchFailure(input, claim.dispatchLeaseOwner, error);
-      throw error;
+      const persisted = await failResumedAgentExecutionDispatch({
+        ...input,
+        dispatchLeaseOwner: claim.dispatchLeaseOwner,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      throw persisted ? markDispatchFailurePersisted(error) : error;
     });
     return { started: true, completion };
   } catch (error) {

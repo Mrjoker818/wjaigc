@@ -251,6 +251,37 @@ describe('Agent runtime service', () => {
     ));
   });
 
+  it('does not append a second retry event when the dispatcher already persisted the failure', async () => {
+    const dependencies = serviceDependencies();
+    const paused = event(2, 'run.paused', { nextStepId: 'generate-2' });
+    const resumed = event(3, 'run.resumed', {
+      nextStepId: 'generate-2', generation: 1,
+    });
+    dependencies.listEvents.mockResolvedValue([event(1, 'run.created'), paused]);
+    dependencies.transitionControl = vi.fn(async () => ({
+      accepted: true, event: resumed,
+      events: [event(1, 'run.created'), paused, resumed],
+      leaseOwner: 'lease-new',
+    }));
+    const persistedFailure = Object.assign(new Error('background executor failed'), {
+      dispatchFailurePersisted: true as const,
+    });
+    dependencies.dispatchExecution.mockResolvedValue({
+      started: true,
+      completion: Promise.reject(persistedFailure),
+    });
+    const recordFailure = vi.fn(async () => undefined);
+    const service = agentRuntime.createAgentRuntimeService({
+      ...dependencies,
+      recordDispatchCompletionFailure: recordFailure,
+    });
+
+    await service.resumeRun({ actorUserId: user.id, runId: 'run-1' });
+    await new Promise(resolve => setTimeout(resolve, 0));
+
+    expect(recordFailure).not.toHaveBeenCalled();
+  });
+
   it('retries the abort for an identical repeated pause after a commit-before-abort crash', async () => {
     const dependencies = serviceDependencies();
     const paused = event(2, 'run.paused', { nextStepId: 'generate-2' });

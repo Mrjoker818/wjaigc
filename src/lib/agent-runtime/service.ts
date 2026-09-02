@@ -661,6 +661,11 @@ export function createAgentRuntimeService(
       const started = await dependencies.dispatchExecution(dispatchInput);
       if (started.completion) {
         void started.completion.catch(async error => {
+          if (
+            error
+            && typeof error === 'object'
+            && (error as { dispatchFailurePersisted?: unknown }).dispatchFailurePersisted === true
+          ) return;
           if (!dependencies.recordDispatchCompletionFailure) throw error;
           await dependencies.recordDispatchCompletionFailure(dispatchInput, error);
         }).catch(error => {

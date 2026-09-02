@@ -4,6 +4,7 @@ import type { PoolClient } from 'pg';
 
 import { getPool } from '@/lib/db-client';
 import { assertAgentEventPayloadSafe, reduceAgentEvents } from './event-reducer';
+import type { AgentExecutionFence } from './execution-fence';
 import type {
   AgentDownstreamOperation,
   AgentDownstreamOperationIdentity,
@@ -34,6 +35,15 @@ const AGENT_EVENT_TYPES = new Set<AgentEventType>([
   'quality.checked',
 ]);
 
+const EXECUTION_OWNED_EVENT_TYPES = new Set<AgentEventType>([
+  'tool.started',
+  'tool.progress',
+  'tool.completed',
+  'asset.created',
+  'step.retrying',
+  'quality.checked',
+]);
+
 const AGENT_WORKSPACES = new Set<AgentWorkspace>([
   'canvas',
   'workflow',
@@ -51,6 +61,7 @@ export interface AppendAgentEventInput {
   workspace: AgentWorkspace;
   type: AgentEventType;
   payload: Record<string, unknown>;
+  executionFence?: AgentExecutionFence;
 }
 
 export interface ValidatedAgentEventInput extends AppendAgentEventInput {
@@ -257,6 +268,7 @@ interface AgentDownstreamOperationRow {
 
 function mapDownstreamOperation(
   row: AgentDownstreamOperationRow,
+  executionFence: AgentDownstreamOperationIdentity['executionFence'],
   claimed?: boolean,
 ): AgentDownstreamOperation {
   return {
@@ -269,6 +281,7 @@ function mapDownstreamOperation(
     operationKey: row.operation_key,
     idempotencyKey: row.idempotency_key,
     leaseOwner: row.lease_owner,
+    executionFence,
     status: row.status,
     attempts: Number(row.attempt_count || 0),
     ...(claimed === undefined ? {} : { claimed }),
@@ -329,6 +342,26 @@ function validateIdentifier(name: string, value: string): string {
   return normalized;
 }
 
+function validateEventExecutionFence(
+  rawFence: AgentExecutionFence | undefined,
+  runId: string,
+): AgentExecutionFence | undefined {
+  if (!rawFence) return undefined;
+  const fence = {
+    runId: validateIdentifier('executionFence.runId', rawFence.runId),
+    leaseOwner: validateIdentifier('executionFence.leaseOwner', rawFence.leaseOwner),
+    generation: rawFence.generation,
+  };
+  if (
+    fence.runId !== runId
+    || !Number.isSafeInteger(fence.generation)
+    || fence.generation < 1
+  ) {
+    throw new TypeError('Agent event execution fence is invalid');
+  }
+  return fence;
+}
+
 function canonicalize(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(canonicalize);
   if (value && typeof value === 'object') {
@@ -371,6 +404,7 @@ export function validateAgentEventAppendInput(
     runId: validateIdentifier('runId', rawInput.runId),
     eventId: validateIdentifier('eventId', rawInput.eventId),
   };
+  input.executionFence = validateEventExecutionFence(rawInput.executionFence, input.runId);
   if (!AGENT_WORKSPACES.has(input.workspace)) {
     throw new TypeError('Unsupported Agent workspace');
   }
@@ -710,12 +744,29 @@ export async function appendAdoptedAgentEvent(
   try {
     await client.query('BEGIN');
     const input = validateAgentEventAppendInput(rawInput);
+    const executionFence = input.executionFence;
+    if (EXECUTION_OWNED_EVENT_TYPES.has(input.type)) {
+      if (!executionFence || input.payload.generation !== executionFence.generation) {
+        throw new TypeError('Execution-owned Agent event requires the active generation fence');
+      }
+    }
     const task = await client.query<{ status: string }>(
       `SELECT status
        FROM cloud_tasks
        WHERE id = $1 AND user_id = $2 AND project_id = $3
+         ${executionFence ? `AND EXISTS (
+           SELECT 1 FROM wujie_agent_execution_leases agent_lease
+           WHERE agent_lease.task_id = $1
+             AND agent_lease.owner_id = $2
+             AND agent_lease.project_id = $3
+             AND agent_lease.lease_owner = $4
+             AND agent_lease.generation = $5
+             AND agent_lease.paused_at = 0
+             AND agent_lease.completed_at = 0
+         )` : ''}
        FOR UPDATE`,
-      [input.runId, input.actorUserId, input.projectId],
+      [input.runId, input.actorUserId, input.projectId,
+        ...(executionFence ? [executionFence.leaseOwner, executionFence.generation] : [])],
     );
     if ((task.rowCount ?? 0) !== 1) throw new AgentEventNotFoundError();
 
@@ -887,6 +938,15 @@ export function releaseAdoptedAgentExecution(input: AgentExecutionLeaseInput): P
 function validateDownstreamIdentity(
   input: AgentDownstreamOperationIdentity,
 ): AgentDownstreamOperationIdentity {
+  const executionFence = input.executionFence;
+  if (
+    !executionFence
+    || executionFence.runId !== input.runId
+    || !Number.isSafeInteger(executionFence.generation)
+    || executionFence.generation < 0
+  ) {
+    throw new TypeError('Agent execution fence is required');
+  }
   return {
     ...input,
     actorUserId: validateIdentifier('actorUserId', input.actorUserId),
@@ -898,7 +958,31 @@ function validateDownstreamIdentity(
     operationKey: validateIdentifier('operationKey', input.operationKey),
     idempotencyKey: validateIdentifier('idempotencyKey', input.idempotencyKey),
     leaseOwner: validateIdentifier('leaseOwner', input.leaseOwner),
+    executionFence: {
+      runId: validateIdentifier('executionFence.runId', executionFence.runId),
+      leaseOwner: validateIdentifier('executionFence.leaseOwner', executionFence.leaseOwner),
+      generation: executionFence.generation,
+    },
   };
+}
+
+function downstreamFenceSql(
+  alias: string,
+  runIdIndex: number,
+  leaseOwnerIndex: number,
+  generationIndex: number,
+): string {
+  return `EXISTS (
+    SELECT 1 FROM wujie_agent_execution_leases agent_lease
+    WHERE agent_lease.task_id = ${alias}.task_id
+      AND agent_lease.task_id = $${runIdIndex}
+      AND agent_lease.owner_id = ${alias}.owner_id
+      AND agent_lease.project_id = ${alias}.project_id
+      AND agent_lease.lease_owner = $${leaseOwnerIndex}
+      AND agent_lease.generation = $${generationIndex}
+      AND agent_lease.paused_at = 0
+      AND agent_lease.completed_at = 0
+  )`;
 }
 
 export async function prepareAgentDownstreamOperation(
@@ -911,19 +995,42 @@ export async function prepareAgentDownstreamOperation(
   try {
     await client.query('BEGIN');
     const task = await client.query(
-      `SELECT id FROM cloud_tasks
-       WHERE id = $1 AND user_id = $2 AND project_id = $3 FOR UPDATE`,
-      [input.runId, input.actorUserId, input.projectId],
+      `SELECT task.id FROM cloud_tasks task
+       WHERE task.id = $1 AND task.user_id = $2 AND task.project_id = $3
+         AND EXISTS (
+           SELECT 1 FROM wujie_agent_execution_leases agent_lease
+           WHERE agent_lease.task_id = task.id
+             AND agent_lease.owner_id = task.user_id
+             AND agent_lease.project_id = task.project_id
+             AND agent_lease.lease_owner = $4
+             AND agent_lease.generation = $5
+             AND agent_lease.paused_at = 0
+             AND agent_lease.completed_at = 0
+         )
+       FOR UPDATE`,
+      [input.runId, input.actorUserId, input.projectId,
+        input.executionFence.leaseOwner, input.executionFence.generation],
     );
     if ((task.rowCount ?? 0) !== 1) throw new AgentEventNotFoundError();
     await client.query(
        `INSERT INTO wujie_agent_downstream_operations(
          operation_key, owner_id, project_id, task_id, tool_id, step_id, request_digest,
          idempotency_key, created_at, updated_at
-       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $9)
-       ON CONFLICT (operation_key) DO NOTHING`,
+        ) SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $9
+        WHERE EXISTS (
+          SELECT 1 FROM wujie_agent_execution_leases agent_lease
+          WHERE agent_lease.task_id = $4
+            AND agent_lease.owner_id = $2
+            AND agent_lease.project_id = $3
+            AND agent_lease.lease_owner = $10
+            AND agent_lease.generation = $11
+            AND agent_lease.paused_at = 0
+            AND agent_lease.completed_at = 0
+        )
+        ON CONFLICT (operation_key) DO NOTHING`,
       [input.operationKey, input.actorUserId, input.projectId, input.runId,
-        input.toolId, input.stepId, input.requestDigest, input.idempotencyKey, now],
+        input.toolId, input.stepId, input.requestDigest, input.idempotencyKey, now,
+        input.executionFence.leaseOwner, input.executionFence.generation],
     );
     const existing = await client.query<AgentDownstreamOperationRow>(
       `SELECT operation_key, owner_id, project_id, task_id, tool_id, step_id, request_digest,
@@ -931,8 +1038,11 @@ export async function prepareAgentDownstreamOperation(
               lease_owner, attempt_count
        FROM wujie_agent_downstream_operations
        WHERE operation_key = $1 AND owner_id = $2 AND project_id = $3 AND task_id = $4
+         AND ${downstreamFenceSql('wujie_agent_downstream_operations', 5, 6, 7)}
        FOR UPDATE`,
-      [input.operationKey, input.actorUserId, input.projectId, input.runId],
+      [input.operationKey, input.actorUserId, input.projectId, input.runId,
+        input.executionFence.runId, input.executionFence.leaseOwner,
+        input.executionFence.generation],
     );
     if ((existing.rowCount ?? 0) !== 1) throw new AgentEventNotFoundError();
     const current = existing.rows[0];
@@ -941,24 +1051,27 @@ export async function prepareAgentDownstreamOperation(
     }
     if (current.status === 'completed' || current.status === 'submission_unknown') {
       await client.query('COMMIT');
-      return mapDownstreamOperation(current, false);
+      return mapDownstreamOperation(current, input.executionFence, false);
     }
     const claimed = await client.query<AgentDownstreamOperationRow>(
-      `UPDATE wujie_agent_downstream_operations
+      `UPDATE wujie_agent_downstream_operations operation
        SET lease_owner = $2, lease_expires_at = $3,
            attempt_count = attempt_count + 1, updated_at = $4
        WHERE operation_key = $1
-         AND status IN ('prepared', 'submitted', 'accepted')
-         AND lease_expires_at <= $4
+          AND status IN ('prepared', 'submitted', 'accepted')
+          AND lease_expires_at <= $4
+          AND ${downstreamFenceSql('operation', 5, 6, 7)}
        RETURNING operation_key, owner_id, project_id, task_id, tool_id, step_id, request_digest,
                  idempotency_key, status, response, provider_task_id, submission_error,
                  lease_owner, attempt_count`,
-      [input.operationKey, input.leaseOwner, now + leaseDurationMs, now],
+      [input.operationKey, input.leaseOwner, now + leaseDurationMs, now,
+        input.executionFence.runId, input.executionFence.leaseOwner,
+        input.executionFence.generation],
     );
     await client.query('COMMIT');
     return claimed.rows[0]
-      ? mapDownstreamOperation(claimed.rows[0], true)
-      : mapDownstreamOperation(current, false);
+      ? mapDownstreamOperation(claimed.rows[0], input.executionFence, true)
+      : mapDownstreamOperation(current, input.executionFence, false);
   } catch (error) {
     await client.query('ROLLBACK').catch(() => undefined);
     throw error;
@@ -976,10 +1089,13 @@ export async function getAgentDownstreamOperation(
             idempotency_key, status, response, provider_task_id, submission_error,
             lease_owner, attempt_count
      FROM wujie_agent_downstream_operations
-     WHERE operation_key = $1 AND owner_id = $2 AND project_id = $3 AND task_id = $4`,
-    [input.operationKey, input.actorUserId, input.projectId, input.runId],
+     WHERE operation_key = $1 AND owner_id = $2 AND project_id = $3 AND task_id = $4
+       AND ${downstreamFenceSql('wujie_agent_downstream_operations', 5, 6, 7)}`,
+    [input.operationKey, input.actorUserId, input.projectId, input.runId,
+      input.executionFence.runId, input.executionFence.leaseOwner,
+      input.executionFence.generation],
   );
-  return result.rows[0] ? mapDownstreamOperation(result.rows[0]) : null;
+  return result.rows[0] ? mapDownstreamOperation(result.rows[0], input.executionFence) : null;
 }
 
 export async function completeAgentDownstreamOperation(
@@ -992,18 +1108,21 @@ export async function completeAgentDownstreamOperation(
     throw new RangeError('Agent downstream operation response exceeds its limit');
   }
   const result = await getPool().query<AgentDownstreamOperationRow>(
-    `UPDATE wujie_agent_downstream_operations
+    `UPDATE wujie_agent_downstream_operations operation
      SET status = 'completed', response = $3::jsonb, lease_owner = '',
          lease_expires_at = 0, completed_at = $4, updated_at = $4
      WHERE operation_key = $1 AND lease_owner = $2
        AND status IN ('prepared', 'submitted', 'accepted')
+       AND ${downstreamFenceSql('operation', 5, 6, 7)}
      RETURNING operation_key, owner_id, project_id, task_id, tool_id, step_id, request_digest,
                idempotency_key, status, response, provider_task_id, submission_error,
                lease_owner, attempt_count`,
-    [input.operationKey, input.leaseOwner, serialized, now],
+    [input.operationKey, input.leaseOwner, serialized, now,
+      input.executionFence.runId, input.executionFence.leaseOwner,
+      input.executionFence.generation],
   );
   if (!result.rows[0]) throw new Error('Agent downstream operation lease was lost');
-  return mapDownstreamOperation(result.rows[0], true);
+  return mapDownstreamOperation(result.rows[0], input.executionFence, true);
 }
 
 export async function markAgentDownstreamOperationSubmitted(
@@ -1012,16 +1131,19 @@ export async function markAgentDownstreamOperationSubmitted(
   const input = validateDownstreamIdentity(rawInput);
   const now = input.now ?? Date.now();
   const result = await getPool().query<AgentDownstreamOperationRow>(
-    `UPDATE wujie_agent_downstream_operations
+    `UPDATE wujie_agent_downstream_operations operation
      SET status = 'submitted', submitted_at = $3, updated_at = $3
      WHERE operation_key = $1 AND lease_owner = $2 AND status = 'prepared'
+       AND ${downstreamFenceSql('operation', 4, 5, 6)}
      RETURNING operation_key, owner_id, project_id, task_id, tool_id, step_id, request_digest,
                idempotency_key, status, response, provider_task_id, submission_error,
                lease_owner, attempt_count`,
-    [input.operationKey, input.leaseOwner, now],
+    [input.operationKey, input.leaseOwner, now,
+      input.executionFence.runId, input.executionFence.leaseOwner,
+      input.executionFence.generation],
   );
   if (!result.rows[0]) throw new Error('Agent downstream operation lease was lost');
-  return mapDownstreamOperation(result.rows[0], true);
+  return mapDownstreamOperation(result.rows[0], input.executionFence, true);
 }
 
 export async function markAgentDownstreamOperationAccepted(
@@ -1031,16 +1153,19 @@ export async function markAgentDownstreamOperationAccepted(
   const providerTaskId = validateIdentifier('providerTaskId', rawInput.providerTaskId);
   const now = input.now ?? Date.now();
   const result = await getPool().query<AgentDownstreamOperationRow>(
-    `UPDATE wujie_agent_downstream_operations
+    `UPDATE wujie_agent_downstream_operations operation
      SET status = 'accepted', provider_task_id = $3, accepted_at = $4, updated_at = $4
      WHERE operation_key = $1 AND lease_owner = $2 AND status = 'submitted'
+       AND ${downstreamFenceSql('operation', 5, 6, 7)}
      RETURNING operation_key, owner_id, project_id, task_id, tool_id, step_id, request_digest,
                idempotency_key, status, response, provider_task_id, submission_error,
                lease_owner, attempt_count`,
-    [input.operationKey, input.leaseOwner, providerTaskId, now],
+    [input.operationKey, input.leaseOwner, providerTaskId, now,
+      input.executionFence.runId, input.executionFence.leaseOwner,
+      input.executionFence.generation],
   );
   if (!result.rows[0]) throw new Error('Agent downstream operation lease was lost');
-  return mapDownstreamOperation(result.rows[0], true);
+  return mapDownstreamOperation(result.rows[0], input.executionFence, true);
 }
 
 export async function markAgentDownstreamSubmissionUnknown(
@@ -1050,17 +1175,20 @@ export async function markAgentDownstreamSubmissionUnknown(
   const reason = String(rawInput.reason || 'Provider submission outcome is unknown').slice(0, 2048);
   const now = input.now ?? Date.now();
   const result = await getPool().query<AgentDownstreamOperationRow>(
-    `UPDATE wujie_agent_downstream_operations
+    `UPDATE wujie_agent_downstream_operations operation
      SET status = 'submission_unknown', submission_error = $3,
          submission_unknown_at = $4, lease_owner = '', lease_expires_at = 0, updated_at = $4
      WHERE operation_key = $1 AND lease_owner = $2 AND status IN ('submitted', 'accepted')
+       AND ${downstreamFenceSql('operation', 5, 6, 7)}
      RETURNING operation_key, owner_id, project_id, task_id, tool_id, step_id, request_digest,
                idempotency_key, status, response, provider_task_id, submission_error,
                lease_owner, attempt_count`,
-    [input.operationKey, input.leaseOwner, reason, now],
+    [input.operationKey, input.leaseOwner, reason, now,
+      input.executionFence.runId, input.executionFence.leaseOwner,
+      input.executionFence.generation],
   );
   if (!result.rows[0]) throw new Error('Agent downstream operation lease was lost');
-  return mapDownstreamOperation(result.rows[0], true);
+  return mapDownstreamOperation(result.rows[0], input.executionFence, true);
 }
 
 export async function releaseAgentDownstreamOperation(
@@ -1068,10 +1196,13 @@ export async function releaseAgentDownstreamOperation(
 ): Promise<boolean> {
   const input = validateDownstreamIdentity(rawInput);
   const result = await getPool().query(
-    `UPDATE wujie_agent_downstream_operations
+    `UPDATE wujie_agent_downstream_operations operation
      SET lease_owner = '', lease_expires_at = 0, updated_at = $3
-     WHERE operation_key = $1 AND lease_owner = $2 AND status IN ('prepared', 'accepted')`,
-    [input.operationKey, input.leaseOwner, input.now ?? Date.now()],
+     WHERE operation_key = $1 AND lease_owner = $2 AND status IN ('prepared', 'accepted')
+       AND ${downstreamFenceSql('operation', 4, 5, 6)}`,
+    [input.operationKey, input.leaseOwner, input.now ?? Date.now(),
+      input.executionFence.runId, input.executionFence.leaseOwner,
+      input.executionFence.generation],
   );
   return (result.rowCount ?? 0) === 1;
 }

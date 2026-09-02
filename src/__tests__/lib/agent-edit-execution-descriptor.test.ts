@@ -34,6 +34,11 @@ describe('Agent edit execution descriptor', () => {
   it.each([
     ['image URL', { sourceVersionId: 'https://assets.example/source.png' }],
     ['data URL', { prompt: 'data:image/png;base64,AAAA' }],
+    ['ordinary remote URL', { prompt: 'Use https://assets.example/source.png' }],
+    ['signed URL', { imagePrompt: 'https://cdn.example/a.png?X-Amz-Signature=secret' }],
+    ['authorization value', { prompt: 'Authorization: Bearer abcdefghijklmnopqrstuvwxyz' }],
+    ['api key value', { imagePrompt: 'x-api-key: abcdefghijklmnop' }],
+    ['token value', { prompt: 'access_token=abcdefghijklmnopqrstuvwxyz' }],
     ['secret key', { apiKey: 'sk-secret' }],
     ['unknown field', { unexpected: 'value' }],
   ])('rejects a descriptor containing %s', (_label, patch) => {
@@ -41,6 +46,13 @@ describe('Agent edit execution descriptor', () => {
       ...descriptorInput,
       ...patch,
     })).toThrow(AgentEditExecutionDescriptorError);
+  });
+
+  it('accepts ordinary Chinese prompts that discuss credentials without containing any credential', () => {
+    expect(createAgentEditExecutionDescriptorV1({
+      ...descriptorInput,
+      prompt: '设计一个API密钥管理页面，并增加访问令牌的中文使用说明，不展示真实凭据。',
+    }).prompt).toContain('API密钥管理页面');
   });
 
   it('fails closed for an unknown continuation version or mismatched canonical digest', () => {

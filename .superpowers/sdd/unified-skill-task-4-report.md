@@ -259,3 +259,60 @@ not an in-memory fallback and not reported as passing.
 - No commit or push was created, as requested. All intended Task 4 changes are
   left staged for review. `stable` and the protected untracked paths remain
   untouched.
+
+## Fourth Review Hardening
+
+### RED Evidence
+
+- Command:
+  `pnpm exec vitest run src/__tests__/lib/cloud-task-storage.test.ts src/__tests__/lib/agent-runtime-downstream-operations.test.ts src/__tests__/lib/agent-runtime-event-storage-fence.test.ts src/__tests__/lib/agent-runtime-execution-dispatch.test.ts src/__tests__/lib/agent-runtime-same-task-adapter.test.ts src/__tests__/lib/agent-runtime-state.test.ts src/__tests__/lib/agent-edit-execution-descriptor.test.ts src/__tests__/api/agent-runs.test.ts`
+- Result: exit 1; 8 files failed with 17 expected assertion failures and 148
+  existing tests passed.
+- Cloud-task fence RED proved that an absent AsyncLocalStorage fence still
+  generated SQL that explicitly allowed any active Agent lease through.
+- Downstream RED proved that an unfenced operation was accepted, nested steps
+  dropped the parent execution fence, and every prepare/read/submitted/accepted/
+  completed/submission-unknown/release SQL path omitted the authoritative Agent
+  generation and lease-owner check.
+- Event RED proved that resumed `tool.started` and initial adopted
+  `tool.started` carried no claimed execution fence, stale/missing generations
+  changed reducer state, and an already persisted dispatch failure triggered a
+  second retry persistence callback.
+- Descriptor and event-payload RED proved that ordinary and signed HTTPS URLs,
+  Authorization/Bearer, API-key, and token-shaped strings could be persisted.
+  The companion Chinese prompt assertions passed, confirming the intended fix
+  must remain precise rather than reject ordinary Chinese product copy.
+
+### Fourth Review GREEN
+
+- Cloud-task business, lease, terminal, and refund writers now fail closed when
+  a live Agent execution lease exists without an explicit/ALS fence. An explicit
+  fence must match the authoritative run ID, generation, and lease owner while
+  the run is neither paused nor completed. Non-Agent tasks retain their existing
+  behavior, and the dedicated paused-run cancellation settlement remains the
+  only intentional bypass.
+- Every durable downstream prepare, read/reconcile, claim, submitted, accepted,
+  completed, submission-unknown, and release transition now checks the same
+  authoritative Agent lease. Nested child operations inherit the parent fence.
+- Initial and resumed `tool.started`, completion-failure `step.retrying`, and
+  adopted `tool.completed` events carry the claimed generation and owner. Event
+  storage rejects a stale lease, and the reducer ignores stale or missing
+  execution generations after resume. A dispatcher-persisted failure is marked
+  on a stable error object so the service cannot append a duplicate retry event.
+- Agent-edit descriptors and Agent event payloads reject HTTP(S)/signed URLs,
+  Authorization/Bearer material, API-key and token-shaped values, while ordinary
+  Chinese product copy about credential-management interfaces remains valid.
+- The requested eight-file command passed: 8 files, 165 tests.
+- Related Agent Runtime, adopted recovery, billing/cancel, Task 1-3, and 21/16
+  Skill isolation regression passed: 32 files, 428 tests.
+- `pnpm ts-check` passed. Targeted ESLint over all modified TypeScript/TSX files
+  passed with zero errors and zero warnings. `git diff --check` passed; only the
+  repository's existing LF/CRLF conversion notices were emitted.
+- Four PostgreSQL suites were discovered and executed, but all 29 tests were
+  explicitly skipped because `POSTGRES_TEST_DATABASE_URL` is absent. No ambient
+  or in-memory database was substituted, so real PostgreSQL concurrency remains
+  correctly reported as unverified.
+- The pre-existing source-location assertions in `agent-task-access.test.ts`
+  were updated to inspect the shared agent-edit execution service after the
+  route became a thin adapter. The authentication, ownership, allowlist, and
+  round-limit assertions themselves were retained unchanged.

@@ -53,6 +53,9 @@ describe('resumed Agent execution dispatcher', () => {
     expect(mocks.append).toHaveBeenCalledWith(expect.objectContaining({
       type: 'tool.started',
       payload: expect.objectContaining({ stepId: 'generate-2', generation: 3 }),
+      executionFence: {
+        runId: 'run-1', leaseOwner: 'lease-3', generation: 3,
+      },
     }));
     expect(mocks.executeAdoption).toHaveBeenCalledWith(expect.objectContaining({
       adoption: expect.objectContaining({ runId: 'run-1' }),
@@ -90,6 +93,9 @@ describe('resumed Agent execution dispatcher', () => {
     });
 
     await expect(started.completion).rejects.toThrow('executor unavailable');
+    await expect(started.completion).rejects.toMatchObject({
+      dispatchFailurePersisted: true,
+    });
     expect(mocks.fail).toHaveBeenCalledWith(expect.objectContaining({
       runId: 'run-1', generation: 3, dispatchLeaseOwner: 'dispatch-1',
       error: 'executor unavailable',

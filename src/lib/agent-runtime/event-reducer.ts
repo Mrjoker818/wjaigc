@@ -39,12 +39,22 @@ const SENSITIVE_KEY_PARTS = [
 ] as const;
 
 const SENSITIVE_VALUE_PATTERNS = [
+  /https?:\/\/\S+/i,
   /\bBearer\s+\S{12,}/i,
   /\bsk-[A-Za-z0-9_-]{20,}/,
   /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/,
   /\b[A-Za-z0-9_-]{16,}\.[A-Za-z0-9_-]{16,}\.[A-Za-z0-9_-]{16,}\b/,
-  /\b(?:api[ _-]?key|access[ _-]?token|client[ _-]?secret|password)\s*[:=]\s*\S{4,}/i,
+  /\b(?:x[ _-]?api[ _-]?key|api[ _-]?key|access[ _-]?token|client[ _-]?secret|authorization|password)\s*[:=]\s*\S{4,}/i,
 ] as const;
+
+const GENERATION_OWNED_EVENT_TYPES = new Set<AgentEvent['type']>([
+  'tool.started',
+  'tool.progress',
+  'tool.completed',
+  'asset.created',
+  'step.retrying',
+  'quality.checked',
+]);
 
 export class AgentEventPayloadError extends Error {
   readonly code = 'AGENT_EVENT_PAYLOAD_REJECTED';
@@ -187,6 +197,7 @@ export function reduceAgentEvents(events: readonly AgentEvent[]): AgentRunProjec
   const eventIds = new Set<string>();
   const sequences = new Set<number>();
   let terminal = false;
+  let activeGeneration: number | undefined;
 
   for (const current of ordered) {
     const duplicateEventId = eventIds.has(current.eventId);
@@ -204,6 +215,14 @@ export function reduceAgentEvents(events: readonly AgentEvent[]): AgentRunProjec
     ) {
       projection.ignoredEventIds.push(current.eventId);
       continue;
+    }
+
+    if (activeGeneration !== undefined && GENERATION_OWNED_EVENT_TYPES.has(current.type)) {
+      const eventGeneration = current.payload.generation;
+      if (eventGeneration !== activeGeneration) {
+        projection.ignoredEventIds.push(current.eventId);
+        continue;
+      }
     }
 
     sequences.add(current.sequence);
@@ -261,6 +280,10 @@ export function reduceAgentEvents(events: readonly AgentEvent[]): AgentRunProjec
         projection.status = 'queued';
         const nextStepId = readPayloadString(current.payload, 'nextStepId');
         if (nextStepId) projection.resumeFromStepId = nextStepId;
+        const generation = current.payload.generation;
+        if (Number.isSafeInteger(generation) && Number(generation) > 0) {
+          activeGeneration = Number(generation);
+        }
         break;
       }
       case 'step.retrying': {
