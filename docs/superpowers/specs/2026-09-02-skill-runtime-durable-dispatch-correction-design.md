@@ -31,7 +31,7 @@ Task 6 已建立数据库幂等的 Skill 执行器，但连续独立评审证明
 - 使用数据库 dispatch lease 保证同一 generation 只能由一个 worker 启动；
 - API 进程只负责唤醒，不作为执行存在性的唯一真相；
 - 幂等重放可以安全触发一次调度唤醒，但不能重复执行、重复创建任务或重复扣费；
-- 过期 dispatch lease 由既有 Agent 恢复扫描重新认领；
+- 过期 dispatch lease 由 Skill Run 的创建重放、详情读取和列表读取触发有界恢复扫描并重新认领；
 - 调度失败和执行失败均写入围栏保护的持久事件，并进入统一退款结算。
 
 不得通过延长请求等待时间掩盖调度问题。
@@ -98,7 +98,7 @@ interface SkillRetryResult {
 
 实施前必须新增并观察以下 RED：
 
-1. 创建成功后进程未执行 Promise，恢复扫描仍能认领同一 run。
+1. 创建成功后进程未执行 Promise，创建重放、详情读取或列表读取触发的有界恢复扫描仍能认领同一 run。
 2. 同键重放只唤醒，不重复扣费或执行。
 3. simple-chat 完成后可从 GET/list 读取持久文本结果。
 4. Canvas 编排步骤按 chat 计费，图片步骤按 image_generate 计费。
