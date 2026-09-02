@@ -60,9 +60,16 @@ export interface SkillResultMedia {
   hasTransparency?: boolean;
 }
 
+export interface DurableSkillOutput {
+  stepId: string;
+  kind: 'text' | 'html';
+  content: string;
+}
+
 export interface SkillStepResult {
   assetVersionIds: readonly string[];
   media: readonly SkillResultMedia[];
+  text?: string;
   html?: string;
 }
 

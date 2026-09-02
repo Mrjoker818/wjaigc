@@ -209,7 +209,7 @@ describe('Skill runtime run requests', () => {
   it('recalculates the quote on create and passes it through the Agent Runtime billing boundary', async () => {
     const dependencies = runtimeDependencies();
     const calculateCreditCost = vi.fn(async (operation: string) => (
-      operation === 'image_generate' ? 4 : 0
+      operation === 'image_generate' ? 4 : operation === 'chat' ? 2 : 0
     ));
     const createAgentRun = vi.fn(async (value: {
       actor: User;
@@ -232,6 +232,7 @@ describe('Skill runtime run requests', () => {
     });
 
     expect(calculateCreditCost).toHaveBeenCalledTimes(2);
+    expect(calculateCreditCost.mock.calls.map(call => call[0])).toEqual(['chat', 'image_generate']);
     expect(dependencies.authorizeContext).toHaveBeenCalledOnce();
     expect(dependencies.authorizeContext.mock.invocationCallOrder[0]).toBeLessThan(
       calculateCreditCost.mock.invocationCallOrder[0],
@@ -239,7 +240,7 @@ describe('Skill runtime run requests', () => {
     expect(createAgentRun).toHaveBeenCalledOnce();
     expect(createAgentRun).toHaveBeenCalledWith(expect.objectContaining({
       actor,
-      billingQuote: { creditCost: 8, label: '电商商品套图' },
+      billingQuote: { creditCost: 6, label: '电商商品套图' },
       request: expect.objectContaining({ idempotencyKey: 'skill-run-1' }),
     }));
     expect(result).toMatchObject({ runId: 'run-1' });

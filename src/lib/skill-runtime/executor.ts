@@ -7,6 +7,7 @@ import type {
 import type { AgentEventType, AgentWorkspace } from '@/lib/agent-runtime/types';
 import { runSkillQualityGates } from './quality-gates';
 import type {
+  DurableSkillOutput,
   SkillDefinition,
   SkillModelBinding,
   SkillQualityContext,
@@ -77,12 +78,14 @@ export interface ExecuteSkillRunInput {
   completedStepIds?: readonly string[];
   resumeFromStepId?: string;
   existingAssetVersionIds?: readonly string[];
+  existingOutputs?: readonly DurableSkillOutput[];
 }
 
 export interface ExecuteSkillRunResult {
   startedStepIds: string[];
   completedStepIds: string[];
   assetVersionIds: string[];
+  outputs: DurableSkillOutput[];
 }
 
 export function selectSkillStepsForExecution(input: {
@@ -187,6 +190,33 @@ function abortError(signal: AbortSignal): Error {
     : new DOMException('The Skill run was aborted', 'AbortError');
 }
 
+function durableOutputs(stepId: string, result: SkillStepResult): DurableSkillOutput[] {
+  return [
+    ...(typeof result.text === 'string' && result.text
+      ? [{ stepId, kind: 'text' as const, content: result.text }]
+      : []),
+    ...(typeof result.html === 'string' && result.html
+      ? [{ stepId, kind: 'html' as const, content: result.html }]
+      : []),
+  ];
+}
+
+export function mergeDurableSkillOutputs(
+  steps: readonly { id: string }[],
+  outputs: readonly DurableSkillOutput[],
+): DurableSkillOutput[] {
+  const unique = new Map<string, DurableSkillOutput>();
+  for (const output of outputs) {
+    const key = `${output.stepId}\u0000${output.kind}`;
+    if (!unique.has(key)) unique.set(key, { ...output });
+  }
+  const stepOrder = new Map(steps.map((step, index) => [step.id, index]));
+  return [...unique.values()].sort((left, right) => (
+    (stepOrder.get(left.stepId) ?? Number.MAX_SAFE_INTEGER)
+    - (stepOrder.get(right.stepId) ?? Number.MAX_SAFE_INTEGER)
+  ));
+}
+
 export function createSkillExecutor(dependencies: SkillExecutorDependencies) {
   return {
     async execute(input: ExecuteSkillRunInput): Promise<ExecuteSkillRunResult> {
@@ -202,6 +232,7 @@ export function createSkillExecutor(dependencies: SkillExecutorDependencies) {
       });
       const startedStepIds: string[] = [];
       const assetVersionIds: string[] = [...new Set(input.existingAssetVersionIds || [])];
+      const outputs: DurableSkillOutput[] = [...(input.existingOutputs || [])];
 
       try {
         for (const group of groupSkillSteps(eligible)) {
@@ -213,6 +244,7 @@ export function createSkillExecutor(dependencies: SkillExecutorDependencies) {
         input.operationContext.signal?.addEventListener('abort', onParentAbort, { once: true });
         let groupError: unknown;
         const groupAssets = new Map<string, readonly string[]>();
+        const groupOutputs = new Map<string, DurableSkillOutput[]>();
         try {
           const settled = await Promise.allSettled(group.steps.map(async step => {
             try {
@@ -286,6 +318,7 @@ export function createSkillExecutor(dependencies: SkillExecutorDependencies) {
               if (checks.some(check => !check.passed)) {
                 throw new SkillQualityFailedError(step.id);
               }
+              const resultOutputs = durableOutputs(step.id, result);
               for (const assetVersionId of result.assetVersionIds) {
                 await dependencies.appendEvent({
                 actorUserId: input.actorUserId,
@@ -300,10 +333,17 @@ export function createSkillExecutor(dependencies: SkillExecutorDependencies) {
               runId: input.runId,
               eventId: `skill:${input.runId}:step:${step.id}:completed`,
               type: 'tool.completed',
-              payload: { toolId: step.toolId, stepId: step.id },
+              payload: {
+                toolId: step.toolId,
+                stepId: step.id,
+                ...(resultOutputs.length > 0
+                  ? { outputs: resultOutputs }
+                  : {}),
+              },
               });
               completed.add(step.id);
               groupAssets.set(step.id, result.assetVersionIds);
+              groupOutputs.set(step.id, resultOutputs);
             } catch (error) {
               controller.abort(error);
               throw error;
@@ -315,6 +355,7 @@ export function createSkillExecutor(dependencies: SkillExecutorDependencies) {
           if (groupError) throw groupError;
           for (const step of group.steps) {
             assetVersionIds.push(...(groupAssets.get(step.id) || []));
+            outputs.push(...(groupOutputs.get(step.id) || []));
           }
         } catch (error) {
           groupError = error;
@@ -356,6 +397,7 @@ export function createSkillExecutor(dependencies: SkillExecutorDependencies) {
           .filter(step => completed.has(step.id))
           .map(step => step.id),
         assetVersionIds: [...new Set(assetVersionIds)],
+        outputs: mergeDurableSkillOutputs(input.definition.steps, outputs),
       };
       if (input.operationContext.signal?.aborted) {
         throw abortError(input.operationContext.signal);

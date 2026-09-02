@@ -89,7 +89,7 @@ async function executeOrchestratorStep(input: ExecuteSkillStepInput): Promise<Sk
   return {
     assetVersionIds: [],
     media: [],
-    ...(typeof content === 'string' && content ? { html: content } : {}),
+    ...(typeof content === 'string' && content ? { text: content } : {}),
   };
 }
 

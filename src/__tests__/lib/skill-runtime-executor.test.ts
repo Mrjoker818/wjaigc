@@ -253,12 +253,51 @@ describe('durable Skill executor', () => {
     expect(registry.stepRecoveries).toHaveProperty('generate_image');
   });
 
+  it('returns ordinary orchestrator chat content as text instead of html', async () => {
+    const apiHelpers = await import('@/lib/api-helpers');
+    const serverApiConfig = await import('@/lib/server-api-config');
+    const fetchSpy = vi.spyOn(apiHelpers, 'fetchWithV1Retry').mockResolvedValue(new Response(JSON.stringify({
+      choices: [{ message: { content: '完成内容' } }],
+    }), { status: 200 }));
+    const providersSpy = vi.spyOn(serverApiConfig, 'getApiProviders').mockResolvedValue([{
+      id: 'provider-1', name: 'Provider', baseUrl: 'https://example.test', apiKey: 'secret',
+      type: 'chat', isEnabled: true, selectedModels: ['chat-1'], createdAt: 1, updatedAt: 1,
+    }]);
+    const simpleChatSkill = requireSkillForSurface('ppt-master', 'simple-chat');
+    const normalized = { ...simpleChatSkill, steps: skillExecutionSteps(simpleChatSkill) };
+    const registry = createProductionSkillStepRegistry({
+      actor: {
+        id: 'user-1', name: 'User', role: 'user', status: 'active',
+        productType: 'canvas,chat', createdAt: 1, updatedAt: 1,
+      },
+      request: {
+        skillId: normalized.id, skillVersion: normalized.version, surface: 'simple-chat',
+        projectId: 'project-1', workspaceId: 'chat-1', inputValues: {}, sourceVersionIds: [],
+        modelBindings: {}, idempotencyKey: 'chat-adapter-test',
+      },
+    });
+    const operation = operationContext();
+
+    try {
+      await expect(registry.stepAdapters.chat({
+        actorUserId: 'user-1', projectId: 'project-1', runId: 'run-1',
+        definition: normalized, step: normalized.steps[0], inputValues: {},
+        modelBinding: { providerId: 'provider-1', modelId: 'chat-1' },
+        requestDigest: 'digest', operation, signal: operation.signal!,
+      })).resolves.toEqual({ assetVersionIds: [], media: [], text: '完成内容' });
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+    } finally {
+      fetchSpy.mockRestore();
+      providersSpy.mockRestore();
+    }
+  });
+
   it('executes a normalized simple-chat Skill through one shared orchestrator step and one terminal write', async () => {
     const simpleChatSkill = requireSkillForSurface('ppt-master', 'simple-chat');
     const normalized = { ...simpleChatSkill, steps: skillExecutionSteps(simpleChatSkill) };
     const executeStep = vi.fn(async ({ step }: ExecuteSkillStepInput) => {
       expect(step).toMatchObject({ id: 'orchestrator', toolId: 'chat', modelRole: 'orchestrator' });
-      return { assetVersionIds: [], media: [], html: 'completed response' };
+      return { assetVersionIds: [], media: [], text: '完成内容' };
     });
     const completeRun = vi.fn(async () => true);
     const executor = createSkillExecutor({
@@ -276,7 +315,43 @@ describe('durable Skill executor', () => {
     expect(completeRun).toHaveBeenCalledTimes(1);
     expect(execution).toMatchObject({
       startedStepIds: ['orchestrator'], completedStepIds: ['orchestrator'], assetVersionIds: [],
+      outputs: [{ stepId: 'orchestrator', kind: 'text', content: '完成内容' }],
     });
+    expect(completeRun).toHaveBeenCalledWith(expect.objectContaining({
+      result: expect.objectContaining({ outputs: execution.outputs }),
+    }));
+  });
+
+  it('merges historical and new outputs in definition order and deduplicates by stepId plus kind', async () => {
+    const completeRun = vi.fn(async () => true);
+    const executor = createSkillExecutor({
+      appendEvent: vi.fn(async () => true), completeRun,
+      executeStep: vi.fn(async ({ step }) => ({
+        assetVersionIds: [`version-${step.id}`], media: [{}],
+        ...(step.id === 'generate-3' ? { text: 'new image note' } : {}),
+        ...(step.id === 'generate-4' ? { html: '<p>new alternate</p>' } : {}),
+      })),
+    });
+
+    const execution = await executor.execute({
+      actorUserId: 'user-1', projectId: 'project-1', runId: 'run-1', workspace: 'canvas',
+      definition, inputValues: {}, modelBindings: {}, operationContext: operationContext(),
+      completedStepIds: ['plan'], resumeFromStepId: 'generate-3',
+      existingOutputs: [
+        { stepId: 'generate-4', kind: 'html', content: '<p>historical alternate</p>' },
+        { stepId: 'plan', kind: 'text', content: 'historical plan' },
+        { stepId: 'plan', kind: 'text', content: 'duplicate plan' },
+      ],
+    });
+
+    expect(execution.outputs).toEqual([
+      { stepId: 'plan', kind: 'text', content: 'historical plan' },
+      { stepId: 'generate-3', kind: 'text', content: 'new image note' },
+      { stepId: 'generate-4', kind: 'html', content: '<p>historical alternate</p>' },
+    ]);
+    expect(completeRun).toHaveBeenCalledWith(expect.objectContaining({
+      result: expect.objectContaining({ outputs: execution.outputs }),
+    }));
   });
 });
 
@@ -389,6 +464,11 @@ describe('Skill run history', () => {
       runId: 'run-1', status: 'completed', lastSequence: 4, plan: [],
       assetVersionIds: ['result-version-1'], ignoredEventIds: [], missingSequences: [],
       qualityChecks: [{ stepId: 'frozen-step', gateId: 'output-present', passed: true }],
+      result: {
+        assetVersionIds: ['result-version-1'],
+        outputs: [{ stepId: 'frozen-step', kind: 'text', content: 'durable response' }],
+        apiKey: 'must-not-leak', upstreamResponse: { choices: ['must-not-leak'] },
+      },
     };
     const dependencies: SkillRuntimeServiceDependencies = {
       createAuthorizedSkillRun: vi.fn(), getTaskForUser: vi.fn(async () => task),
@@ -400,11 +480,14 @@ describe('Skill run history', () => {
     expect(history).toMatchObject({
       skillId: definition.id, skillVersion: 1, creditStatus: 'charged', creditCost: 7,
       assetVersionIds: ['result-version-1'],
+      outputs: [{ stepId: 'frozen-step', kind: 'text', content: 'durable response' }],
       steps: [{ id: 'frozen-step', label: 'Frozen step', status: 'pending' }],
       qualityEvents: [{ stepId: 'frozen-step', gateId: 'output-present', passed: true }],
     });
     expect(history).not.toHaveProperty('modelBindings');
     expect(history).not.toHaveProperty('descriptor');
+    expect(history).not.toHaveProperty('apiKey');
+    expect(history).not.toHaveProperty('upstreamResponse');
   });
 
   it('keeps frozen history readable after the catalog no longer contains that Skill version', async () => {

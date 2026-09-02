@@ -65,16 +65,17 @@ export function skillExecutionSteps(skill: SkillDefinition): SkillStepDefinition
   }, ...skill.steps.map(step => ({ ...step }))];
 }
 
+export function skillStepCreditOperation(step: SkillStepDefinition): CreditOperation {
+  if (step.modelRole === 'orchestrator') return 'chat';
+  return toolCostType(step.toolId);
+}
+
 export async function estimateSkillRunCost(
   skill: SkillDefinition,
   bindings: FrozenBindings,
   dependencies: SkillCostEstimatorDependencies = defaultDependencies,
 ): Promise<SkillRunCostEstimate> {
-  const definitions = skillExecutionSteps(skill).map(step => ({
-    stepId: step.id,
-    toolId: step.toolId,
-    modelRole: step.modelRole,
-  }));
+  const definitions = skillExecutionSteps(skill);
   const steps = await Promise.all(definitions.map(async step => {
     const binding = bindings[step.modelRole];
     if (!binding) {
@@ -84,9 +85,9 @@ export async function estimateSkillRunCost(
       );
     }
     return {
-      stepId: step.stepId,
+      stepId: step.id,
       cost: await dependencies.calculateCreditCost(
-        step.toolId === 'chat' ? 'chat' : toolCostType(step.toolId),
+        skillStepCreditOperation(step),
         binding.modelId,
         { providerId: binding.providerId },
       ),

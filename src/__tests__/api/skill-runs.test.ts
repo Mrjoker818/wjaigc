@@ -124,6 +124,25 @@ describe('Skill run API', () => {
     expect(mocks.getSkillRun).toHaveBeenCalledWith({ actorUserId: user.id, runId: 'other' });
   });
 
+  it('returns durable text outputs from owned run history', async () => {
+    mocks.getSkillRun.mockResolvedValue({
+      runId: 'run-chat', skillId: 'ppt-master', skillVersion: 1,
+      outputs: [{ stepId: 'orchestrator', kind: 'text', content: '完成内容' }],
+    });
+    const route = await import('@/app/api/skill-runs/[runId]/route');
+    const response = await route.GET(
+      new NextRequest('http://localhost/api/skill-runs/run-chat'),
+      { params: Promise.resolve({ runId: 'run-chat' }) },
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      run: expect.objectContaining({
+        outputs: [{ stepId: 'orchestrator', kind: 'text', content: '完成内容' }],
+      }),
+    });
+  });
+
   it('returns authentication responses without invoking services', async () => {
     mocks.requireApiAuthOrReject.mockResolvedValue(NextResponse.json({ error: 'unauthorized' }, { status: 401 }));
     const route = await import('@/app/api/skill-runs/route');

@@ -24,11 +24,17 @@ import {
 } from './run-request';
 import {
   createSkillExecutor,
+  mergeDurableSkillOutputs,
   selectSkillStepsForExecution,
   type ExecuteSkillStepInput,
 } from './executor';
 import { skillExecutionSteps } from './cost-estimator';
-import type { SkillModelBinding, SkillStepDefinition, SkillSurface } from './types';
+import type {
+  DurableSkillOutput,
+  SkillModelBinding,
+  SkillStepDefinition,
+  SkillSurface,
+} from './types';
 
 export class SkillRunRequestError extends Error {
   readonly code = 'SKILL_RUN_REQUEST_INVALID';
@@ -64,6 +70,7 @@ export interface SkillRunHistory {
   steps: SkillRunStepHistory[];
   qualityEvents: Array<{ stepId: string; gateId: string; passed: boolean }>;
   assetVersionIds: string[];
+  outputs: DurableSkillOutput[];
   creditStatus: CloudTaskCreditStatus;
   creditCost: number;
   createdAt: number;
@@ -214,6 +221,37 @@ function completedAssetVersionIds(events: readonly AgentEvent[]): string[] {
     .filter((versionId): versionId is string => typeof versionId === 'string' && Boolean(versionId)))];
 }
 
+function readDurableSkillOutputs(value: unknown): DurableSkillOutput[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap(output => {
+    if (!output || typeof output !== 'object' || Array.isArray(output)) return [];
+    const candidate = output as Record<string, unknown>;
+    if (
+      typeof candidate.stepId !== 'string'
+      || (candidate.kind !== 'text' && candidate.kind !== 'html')
+      || typeof candidate.content !== 'string'
+      || !candidate.content
+    ) return [];
+    return [{
+      stepId: candidate.stepId,
+      kind: candidate.kind,
+      content: candidate.content,
+    }];
+  });
+}
+
+function completedSkillOutputs(events: readonly AgentEvent[]): DurableSkillOutput[] {
+  return events.flatMap(event => {
+    if (event.type === 'tool.completed') {
+      return readDurableSkillOutputs(event.payload.outputs);
+    }
+    if (event.type !== 'run.completed') return [];
+    const result = event.payload.result;
+    if (!result || typeof result !== 'object' || Array.isArray(result)) return [];
+    return readDurableSkillOutputs((result as Record<string, unknown>).outputs);
+  });
+}
+
 function frozenExecutionSteps(events: readonly AgentEvent[]): SkillStepDefinition[] | null {
   const snapshot = events.find(event => event.type === 'run.created')?.payload.skillSnapshot;
   if (!snapshot || typeof snapshot !== 'object' || Array.isArray(snapshot)) return null;
@@ -317,6 +355,10 @@ function history(task: CloudTask, events: readonly AgentEvent[], projection: Age
     })),
     qualityEvents: projection.qualityChecks.map(check => ({ ...check })),
     assetVersionIds: [...projection.assetVersionIds],
+    outputs: mergeDurableSkillOutputs(steps, [
+      ...completedSkillOutputs(events),
+      ...readDurableSkillOutputs(projection.result?.outputs),
+    ]),
     creditStatus: task.creditStatus,
     creditCost: task.creditCost || 0,
     createdAt: task.createdAt,
@@ -465,7 +507,10 @@ export async function executeSkillRun(input: {
       type: 'run.completed',
       payload: {
         generation: executionFence.generation,
-        result: { assetVersionIds: result.assetVersionIds },
+        result: {
+          assetVersionIds: result.assetVersionIds,
+          outputs: result.outputs,
+        },
       },
       executionFence,
     }),
@@ -501,6 +546,7 @@ export async function executeSkillRun(input: {
     completedStepIds: [...completed],
     resumeFromStepId: input.resumeFromStepId,
     existingAssetVersionIds: completedAssetVersionIds(events),
+    existingOutputs: completedSkillOutputs(events),
   });
 }
 
