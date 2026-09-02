@@ -151,6 +151,40 @@ describe('durable Skill executor', () => {
     }));
   });
 
+  it('persists dispatch_error when projection loading fails after the dispatch claim', async () => {
+    const projectionError = new Error('projection storage unavailable');
+    const dependencies = dispatchDependencies({
+      getProjection: vi.fn(async () => { throw projectionError; }),
+    });
+
+    await expect(dispatchSkillRunExecution({
+      actorUserId: 'user-1', runId: 'run-dispatch', recoveryOnly: false,
+    }, dependencies)).resolves.toEqual({ started: false });
+
+    expect(dependencies.failDispatch).toHaveBeenCalledOnce();
+    expect(dependencies.failDispatch).toHaveBeenCalledWith(expect.objectContaining({
+      generation: 1,
+      dispatchLeaseOwner: 'dispatch-1',
+      nextStepId: 'plan',
+      error: projectionError.message,
+    }));
+    expect(dependencies.executeAdopted).not.toHaveBeenCalled();
+  });
+
+  it('uses the same dispatch_error path when executeAdopted throws during startup', async () => {
+    const startupError = new Error('executor startup failed');
+    const dependencies = dispatchDependencies({
+      executeAdopted: vi.fn(() => { throw startupError; }) as never,
+    });
+
+    await expect(dispatchSkillRunExecution({
+      actorUserId: 'user-1', runId: 'run-dispatch', recoveryOnly: false,
+    }, dependencies)).resolves.toEqual({ started: false });
+    expect(dependencies.failDispatch).toHaveBeenCalledWith(expect.objectContaining({
+      dispatchLeaseOwner: 'dispatch-1', error: startupError.message,
+    }));
+  });
+
   it('does not execute a cancelled run or an execution generation that lost its fence', async () => {
     const cancelled = dispatchDependencies({
       getTaskForUser: vi.fn(async (): Promise<CloudTask> => ({

@@ -7,6 +7,7 @@ import type { AgentRunRequest } from '@/lib/agent-runtime/types';
 import type { TaskModelDescriptor } from '@/lib/task-core/model-catalog';
 import type { User } from '@/lib/user-types';
 import type { SkillRunRequest } from '@/lib/skill-runtime/run-request';
+import type { SkillRunExecutionDispatchDependencies } from '@/lib/skill-runtime/service';
 
 vi.mock('server-only', () => ({}));
 
@@ -204,51 +205,161 @@ describe('Skill runtime PostgreSQL concurrency', () => {
       );
       expect(ledger.rows).toEqual([{ type: 'consume' }]);
 
-      const eventStorage = await import('@/lib/agent-runtime/event-storage');
-      const executionClaims = await Promise.all(Array.from({ length: 20 }, () => (
-        eventStorage.claimAdoptedAgentExecution({
-          actorUserId: userId,
-          projectId: input.request.projectId,
-          runId,
+      const [eventStorage, taskStorage, agentService, skillService, catalog] = await Promise.all([
+        import('@/lib/agent-runtime/event-storage'),
+        import('@/lib/cloud-task-storage'),
+        import('@/lib/agent-runtime/service'),
+        import('@/lib/skill-runtime/service'),
+        import('@/lib/skill-runtime/catalog'),
+      ]);
+      const persistedTask = await taskStorage.getCloudTaskForUser(runId, userId);
+      expect(persistedTask).not.toBeNull();
+      let executeAdoptedCalls = 0;
+      let providerSubmissions = 0;
+      const dispatchDependencies: SkillRunExecutionDispatchDependencies = {
+        getTaskForUser: taskStorage.getCloudTaskForUser,
+        getRecoverableDispatch: eventStorage.getRecoverableAgentExecutionDispatch,
+        loadContinuation: async () => ({
+          actor: input.actor,
+          request: input.request,
+          definition: catalog.requireSkillForSurface(input.request.skillId, input.request.surface),
+          workspace: 'canvas',
+          requestDigest: persistedTask!.requestDigest!,
           toolId: 'plan',
-        })
-      )));
-      const executionWinner = executionClaims.find(claim => claim.claimed)!;
-      expect(executionClaims.filter(claim => claim.claimed)).toHaveLength(1);
-      const dispatchClaims = await Promise.all(Array.from({ length: 20 }, () => (
-        eventStorage.claimResumedAgentExecutionDispatch({
+          execute: async () => { providerSubmissions += 1; },
+        }),
+        claimExecution: eventStorage.claimAdoptedAgentExecution,
+        claimDispatch: eventStorage.claimResumedAgentExecutionDispatch,
+        getProjection: agentService.getAgentRunProjection,
+        executeAdopted: (async dispatchInput => {
+          executeAdoptedCalls += 1;
+          await dispatchInput.execute({} as never);
+          return {
+            runId, reused: false, executed: true,
+            projection: await agentService.getAgentRunProjection({ actorUserId: userId, runId }),
+            tools: [],
+          };
+        }) as SkillRunExecutionDispatchDependencies['executeAdopted'],
+        failDispatch: eventStorage.failResumedAgentExecutionDispatch,
+      };
+      const dispatches = await Promise.all(Array.from({ length: 20 }, () => (
+        skillService.dispatchSkillRunExecution({
           actorUserId: userId,
-          projectId: input.request.projectId,
           runId,
-          leaseOwner: executionWinner.leaseOwner,
-          generation: executionWinner.generation!,
-        })
+          recoveryOnly: true,
+        }, dispatchDependencies)
       )));
-      expect(dispatchClaims.filter(claim => claim.claimed)).toHaveLength(1);
+      await Promise.all(dispatches.flatMap(dispatch => dispatch.completion ? [dispatch.completion] : []));
+      expect(dispatches.filter(dispatch => dispatch.started)).toHaveLength(1);
+      expect(executeAdoptedCalls).toBe(1);
+      expect(providerSubmissions).toBe(1);
+
       const dispatchState = await query<{ dispatch_attempt_count: number }>(
         'SELECT dispatch_attempt_count FROM wujie_agent_execution_leases WHERE task_id = $1',
         [runId],
       );
       expect(Number(dispatchState.rows[0]?.dispatch_attempt_count)).toBe(1);
 
-      await query(
-        'UPDATE wujie_agent_execution_leases SET dispatch_lease_expires_at = 0 WHERE task_id = $1',
-        [runId],
-      );
-      await expect(eventStorage.getRecoverableAgentExecutionDispatch({
-        actorUserId: userId,
-        projectId: input.request.projectId,
-        runId,
-      })).resolves.toMatchObject({
-        leaseOwner: executionWinner.leaseOwner,
-        generation: executionWinner.generation,
-        toolId: 'plan',
-      });
-
       await expect(createThroughSkillService({
         ...input,
         request: { ...input.request, inputValues: { product: '不同请求', features: '冲突' } },
       })).rejects.toMatchObject({ code: 'IDEMPOTENCY_CONFLICT', status: 409 });
+    });
+  }, 60_000);
+
+  postgresIt('reclaims an expired dispatch through the high-level Skill dispatcher without duplicate submission or charge', async () => {
+    await withIsolatedPostgres('skill_runtime_expired_dispatch_recovery', async ({ query }) => {
+      const [core, taskStorage, eventStorage, agentService, skillService, catalog] = await Promise.all([
+        import('@/lib/db-storage'),
+        import('@/lib/cloud-task-storage'),
+        import('@/lib/agent-runtime/event-storage'),
+        import('@/lib/agent-runtime/service'),
+        import('@/lib/skill-runtime/service'),
+        import('@/lib/skill-runtime/catalog'),
+      ]);
+      await Promise.all([core.ensureCoreTables(), taskStorage.ensureCloudTaskTables()]);
+      const userId = `skill-recovery-${randomUUID()}`;
+      const now = Date.now();
+      await query(
+        `INSERT INTO wujie_credits(id, user_id, balance, total_recharged, total_used, created_at, updated_at)
+         VALUES ($1, $2, 100, 100, 0, $3, $3)`,
+        [`credits-${randomUUID()}`, userId, now],
+      );
+      const input = runtimeInput(userId, `skill-recovery-key-${randomUUID()}`);
+      const created = await createThroughSkillService(input);
+      const task = await taskStorage.getCloudTaskForUser(created.runId, userId);
+      expect(task).not.toBeNull();
+
+      const execution = await eventStorage.claimAdoptedAgentExecution({
+        actorUserId: userId,
+        projectId: input.request.projectId,
+        runId: created.runId,
+        toolId: 'plan',
+      });
+      expect(execution.claimed).toBe(true);
+      const lostDispatch = await eventStorage.claimResumedAgentExecutionDispatch({
+        actorUserId: userId,
+        projectId: input.request.projectId,
+        runId: created.runId,
+        leaseOwner: execution.leaseOwner,
+        generation: execution.generation!,
+      });
+      expect(lostDispatch.claimed).toBe(true);
+      await query(
+        'UPDATE wujie_agent_execution_leases SET dispatch_lease_expires_at = 0 WHERE task_id = $1',
+        [created.runId],
+      );
+
+      let executeAdoptedCalls = 0;
+      let providerSubmissions = 0;
+      const dependencies: SkillRunExecutionDispatchDependencies = {
+        getTaskForUser: taskStorage.getCloudTaskForUser,
+        getRecoverableDispatch: eventStorage.getRecoverableAgentExecutionDispatch,
+        loadContinuation: async () => ({
+          actor: input.actor,
+          request: input.request,
+          definition: catalog.requireSkillForSurface(input.request.skillId, input.request.surface),
+          workspace: 'canvas',
+          requestDigest: task!.requestDigest!,
+          toolId: 'plan',
+          execute: async () => { providerSubmissions += 1; },
+        }),
+        claimExecution: eventStorage.claimAdoptedAgentExecution,
+        claimDispatch: eventStorage.claimResumedAgentExecutionDispatch,
+        getProjection: agentService.getAgentRunProjection,
+        executeAdopted: (async dispatchInput => {
+          executeAdoptedCalls += 1;
+          await dispatchInput.execute({} as never);
+          return {
+            runId: created.runId, reused: true, executed: true,
+            projection: await agentService.getAgentRunProjection({ actorUserId: userId, runId: created.runId }),
+            tools: [],
+          };
+        }) as SkillRunExecutionDispatchDependencies['executeAdopted'],
+        failDispatch: eventStorage.failResumedAgentExecutionDispatch,
+      };
+      const recoveries = await Promise.all(Array.from({ length: 20 }, () => (
+        skillService.dispatchSkillRunExecution({
+          actorUserId: userId,
+          runId: created.runId,
+          recoveryOnly: true,
+        }, dependencies)
+      )));
+      await Promise.all(recoveries.flatMap(recovery => recovery.completion ? [recovery.completion] : []));
+
+      expect(recoveries.filter(recovery => recovery.started)).toHaveLength(1);
+      expect(executeAdoptedCalls).toBe(1);
+      expect(providerSubmissions).toBe(1);
+      const persistedLease = await query<{ dispatch_attempt_count: number }>(
+        'SELECT dispatch_attempt_count FROM wujie_agent_execution_leases WHERE task_id = $1',
+        [created.runId],
+      );
+      expect(Number(persistedLease.rows[0]?.dispatch_attempt_count)).toBe(2);
+      const ledger = await query<{ type: string }>(
+        'SELECT type FROM wujie_credit_transactions WHERE task_id = $1',
+        [created.runId],
+      );
+      expect(ledger.rows).toEqual([{ type: 'consume' }]);
     });
   }, 60_000);
 

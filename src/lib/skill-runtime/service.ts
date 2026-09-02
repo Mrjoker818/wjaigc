@@ -647,24 +647,7 @@ export async function dispatchSkillRunExecution(input: {
   });
   if (!dispatch.claimed) return { started: false };
 
-  const completion = dependencies.executeAdopted({
-    adoption: {
-      runId: input.runId,
-      reused: input.recoveryOnly === true,
-      claimed: true,
-      projection: await dependencies.getProjection({ actorUserId: input.actorUserId, runId: input.runId }),
-      tools: [],
-      actorUserId: input.actorUserId,
-      projectId: task.projectId,
-      workspace: continuation.workspace,
-      toolId: continuation.toolId,
-      requestDigest: continuation.requestDigest,
-    },
-    execute: continuation.execute,
-    ...(recovery?.nextStepId ? { resumeFromStepId: recovery.nextStepId } : {}),
-    expectedGeneration: execution.generation,
-    leaseOwner: execution.leaseOwner,
-  }).then(() => undefined).catch(async error => {
+  const persistDispatchFailure = async (error: unknown): Promise<void> => {
     try {
       await dependencies.failDispatch({
         actorUserId: input.actorUserId,
@@ -683,7 +666,38 @@ export async function dispatchSkillRunExecution(input: {
         code: persistenceError instanceof Error ? persistenceError.name : 'UNKNOWN',
       });
     }
-  });
+  };
+
+  let executionPromise: ReturnType<SkillRunExecutionDispatchDependencies['executeAdopted']>;
+  try {
+    const projection = await dependencies.getProjection({
+      actorUserId: input.actorUserId,
+      runId: input.runId,
+    });
+    executionPromise = dependencies.executeAdopted({
+      adoption: {
+        runId: input.runId,
+        reused: input.recoveryOnly === true,
+        claimed: true,
+        projection,
+        tools: [],
+        actorUserId: input.actorUserId,
+        projectId: task.projectId,
+        workspace: continuation.workspace,
+        toolId: continuation.toolId,
+        requestDigest: continuation.requestDigest,
+      },
+      execute: continuation.execute,
+      ...(recovery?.nextStepId ? { resumeFromStepId: recovery.nextStepId } : {}),
+      expectedGeneration: execution.generation,
+      leaseOwner: execution.leaseOwner,
+    });
+  } catch (error) {
+    await persistDispatchFailure(error);
+    return { started: false };
+  }
+
+  const completion = executionPromise.then(() => undefined).catch(persistDispatchFailure);
   return { started: true, completion };
 }
 
