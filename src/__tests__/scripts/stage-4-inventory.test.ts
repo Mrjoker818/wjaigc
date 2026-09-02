@@ -22,6 +22,8 @@ describe('Stage 4 inventory generator', () => {
     expect(inventory.agentTools.length).toBeGreaterThan(0);
     expect(inventory.skills.length).toBeGreaterThan(0);
     expect(inventory.skills.length).toBeGreaterThanOrEqual(PRESET_SKILLS.length);
+    expect(inventory.skills).toContain('ppt-master');
+    expect(inventory.skills).toContain('preset-ecommerce-listing');
 
     for (const workspace of inventory.workspaces) {
       expect(workspace.entryRoute.length).toBeGreaterThan(0);

@@ -27,12 +27,8 @@ function extractTaskTypes(source) {
 }
 
 function extractSkillIds(source) {
-  const start = source.indexOf('export const PRESET_SKILLS');
-  if (start === -1) return [];
-  const end = source.indexOf('];', start);
-  if (end === -1) return [];
   return uniqueSorted(
-    [...source.slice(start, end).matchAll(/id:\s*['"]([^'"]+)['"]/g)].map(match => match[1]),
+    [...source.matchAll(/\bid:\s*['"]([^'"]+)['"]/g)].map(match => match[1]),
   );
 }
 
@@ -125,7 +121,8 @@ async function collectWorkspaceSources(root) {
     readFile(join(root, 'src/components/chat-panel.tsx'), 'utf8'),
     readFile(join(root, 'src/lib/agent-engine.ts'), 'utf8'),
     readFile(join(root, 'src/lib/workflow-engine.ts'), 'utf8'),
-    readFile(join(root, 'src/components/simple-chat/simple-chat-types.ts'), 'utf8'),
+    readFile(join(root, 'src/lib/skill-runtime/canvas-presets.ts'), 'utf8'),
+    readFile(join(root, 'src/lib/skill-runtime/simple-chat-presets.ts'), 'utf8'),
   ]);
 
   return {
@@ -137,7 +134,8 @@ async function collectWorkspaceSources(root) {
     chatPanelSource: files[5],
     agentSource: files[6],
     workflowSource: files[7],
-    simpleChatTypesSource: files[8],
+    canvasSkillsSource: files[8],
+    simpleChatSkillsSource: files[9],
   };
 }
 
@@ -152,7 +150,8 @@ export async function collectStage4Inventory(root = process.cwd()) {
     chatPanelSource,
     agentSource,
     workflowSource,
-    simpleChatTypesSource,
+    canvasSkillsSource,
+    simpleChatSkillsSource,
   } = await collectWorkspaceSources(root);
 
   const testFiles = await walk(
@@ -186,7 +185,10 @@ export async function collectStage4Inventory(root = process.cwd()) {
 
   const nodeTypes = extractObjectKeys(workflowSource, 'NODE_TYPE_LABELS');
   const portTypes = extractObjectKeys(workflowSource, 'PORT_COMPATIBILITY');
-  const skills = extractSkillIds(simpleChatTypesSource);
+  const skills = uniqueSorted([
+    ...extractSkillIds(canvasSkillsSource),
+    ...extractSkillIds(simpleChatSkillsSource),
+  ]);
   const agentTools = extractAgentTools(agentSource);
 
   const workspaces = [
