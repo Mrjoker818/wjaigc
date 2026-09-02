@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireApiAuthOrReject } from '@/lib/api-auth';
 import {
   createSkillRun,
+  failSkillRunExecution,
   listSkillRuns,
   parseSkillRunRequest,
   startSkillRunExecution,
@@ -46,7 +47,12 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     });
     if (!result.reused) {
       const execution = startSkillRunExecution({ actor: auth.user, runId: result.runId });
-      void execution.completion.catch(error => {
+      void execution.completion.catch(async error => {
+        await failSkillRunExecution({
+          actorUserId: auth.user.id,
+          runId: result.runId,
+          error,
+        });
         console.error('[skill-runtime] background execution failed', {
           runId: result.runId,
           code: error && typeof error === 'object' && 'code' in error

@@ -16,7 +16,7 @@ import {
 import { abortTaskExecution, createTaskAbortScope } from '@/lib/task-core/task-abort';
 import { transitionTask } from '@/lib/task-core/task-service';
 import type { User } from '@/lib/user-types';
-import { estimateSkillRunCost } from '@/lib/skill-runtime/cost-estimator';
+import { estimateSkillRunCost, skillExecutionSteps } from '@/lib/skill-runtime/cost-estimator';
 import { authorizeSkillAgentRunRequest } from '@/lib/skill-runtime/run-request';
 import { authorizeAgentContext } from './context-adapters';
 import { readAgentPrompt } from './request-validation';
@@ -810,7 +810,7 @@ export function createAgentRuntimeService(
               id: skillAdmission.skill.id,
               version: skillAdmission.skill.version,
               name: skillAdmission.skill.name,
-              steps: skillAdmission.skill.steps.map(step => ({
+              steps: skillExecutionSteps(skillAdmission.skill).map(step => ({
                 id: step.id,
                 label: step.label,
                 toolId: step.toolId,

@@ -7,6 +7,7 @@ import { getCloudTaskForUser, type CloudTask } from '@/lib/cloud-task-storage';
 import { listManagedUsers } from '@/lib/server-auth';
 import type { User } from '@/lib/user-types';
 import { requireSkillForSurface } from './catalog';
+import { skillExecutionSteps } from './cost-estimator';
 import { parseSkillRunRequest, executeSkillRun, SkillRunRequestError } from './service';
 import { createProductionSkillStepRegistry } from './step-registry';
 import type { SkillDefinition, SkillStepDefinition, SkillSurface } from './types';
@@ -92,7 +93,7 @@ function frozenDefinition(
   if (current.version !== skillVersion) {
     throw new SkillRunRequestError('Frozen Skill definition is unavailable');
   }
-  return current;
+  return { ...current, steps: skillExecutionSteps(current) };
 }
 
 export interface PersistedSkillContinuation {
@@ -185,16 +186,27 @@ export async function loadPersistedSkillContinuation(input: {
     requestDigest,
     toolId,
     async execute(context) {
-      await executeSkillRun({
-        actor,
-        request,
-        runId: input.runId,
-        operationContext: context,
-        stepAdapters: registry.stepAdapters,
-        stepRecoveries: registry.stepRecoveries,
-        resumeFromStepId: input.nextStepId,
-        definition,
-      });
+      try {
+        await executeSkillRun({
+          actor,
+          request,
+          runId: input.runId,
+          operationContext: context,
+          stepAdapters: registry.stepAdapters,
+          stepRecoveries: registry.stepRecoveries,
+          resumeFromStepId: input.nextStepId,
+          definition,
+        });
+      } catch (error) {
+        if (error && typeof error === 'object' && context.executionFence) {
+          Object.defineProperty(error, 'executionFence', {
+            value: context.executionFence,
+            enumerable: false,
+            configurable: true,
+          });
+        }
+        throw error;
+      }
     },
   };
 }

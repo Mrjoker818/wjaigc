@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   getSkillRun: vi.fn(), pauseSkillRun: vi.fn(), resumeSkillRun: vi.fn(),
   cancelSkillRun: vi.fn(), retrySkillStep: vi.fn(), skillRuntimeHttpError: vi.fn(),
   startSkillRunExecution: vi.fn(),
+  failSkillRunExecution: vi.fn(),
   parseSkillRunRequest: vi.fn((value: unknown) => value),
 }));
 
@@ -64,6 +65,33 @@ describe('Skill run API', () => {
 
     expect(response.status).toBe(200);
     expect(mocks.startSkillRunExecution).not.toHaveBeenCalled();
+  });
+
+  it('persists and settles a background kickoff failure instead of only logging it', async () => {
+    const kickoffError = new Error('continuation failed to load');
+    mocks.createSkillRun.mockResolvedValue({ runId: 'run-chat', reused: false, charged: true });
+    mocks.startSkillRunExecution.mockReturnValue({
+      started: true, completion: Promise.reject(kickoffError),
+    });
+    mocks.failSkillRunExecution.mockResolvedValue({ accepted: true });
+    const route = await import('@/app/api/skill-runs/route');
+    const body = {
+      skillId: 'ppt-master', skillVersion: 1, surface: 'simple-chat',
+      projectId: 'project-1', workspaceId: 'chat-1', inputValues: {}, sourceVersionIds: [],
+      modelBindings: { orchestrator: { providerId: 'provider-1', modelId: 'chat-1' } },
+      idempotencyKey: 'simple-chat-request-1',
+    };
+
+    const response = await route.POST(new NextRequest('http://localhost/api/skill-runs', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
+    }));
+
+    expect(response.status).toBe(201);
+    await vi.waitFor(() => expect(mocks.failSkillRunExecution).toHaveBeenCalledWith({
+      actorUserId: user.id, runId: 'run-chat', error: kickoffError,
+    }));
+    expect(mocks.startSkillRunExecution).toHaveBeenCalledTimes(1);
+    expect(mocks.createSkillRun).toHaveBeenCalledTimes(1);
   });
 
   it.each(['pause', 'resume', 'cancel'] as const)('authorizes %s control by actor', async action => {

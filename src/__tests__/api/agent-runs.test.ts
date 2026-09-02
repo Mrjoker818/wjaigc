@@ -1077,6 +1077,21 @@ describe('Agent runtime service', () => {
     expect(dependencies.createBillableTask).toHaveBeenCalledWith(expect.objectContaining({
       creditCost: 3,
     }));
+    expect(dependencies.appendEvent).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'run.created',
+      payload: expect.objectContaining({
+        workspace: 'chat',
+        skillSnapshot: expect.objectContaining({
+          id: 'ppt-master',
+          steps: [{
+            id: 'orchestrator', label: '智能编排', toolId: 'chat', execution: 'sequential',
+            promptTemplate: requireSkillForSurface('ppt-master', 'simple-chat').systemPrompt,
+            modelRole: 'orchestrator', qualityGateIds: [],
+          }],
+        }),
+      }),
+    }));
+    expect(dependencies.createBillableTask).toHaveBeenCalledTimes(1);
   });
 
   it('rejects extra Skill model roles before resolving any model', async () => {

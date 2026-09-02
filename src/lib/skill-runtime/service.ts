@@ -22,8 +22,13 @@ import {
   createSkillRun as createAuthorizedSkillRun,
   type SkillRunRequest,
 } from './run-request';
-import { createSkillExecutor, type ExecuteSkillStepInput } from './executor';
-import type { SkillModelBinding, SkillSurface } from './types';
+import {
+  createSkillExecutor,
+  selectSkillStepsForExecution,
+  type ExecuteSkillStepInput,
+} from './executor';
+import { skillExecutionSteps } from './cost-estimator';
+import type { SkillModelBinding, SkillStepDefinition, SkillSurface } from './types';
 
 export class SkillRunRequestError extends Error {
   readonly code = 'SKILL_RUN_REQUEST_INVALID';
@@ -203,6 +208,58 @@ function completedStepIds(events: readonly AgentEvent[]): Set<string> {
     .filter((stepId): stepId is string => typeof stepId === 'string'));
 }
 
+function completedAssetVersionIds(events: readonly AgentEvent[]): string[] {
+  return [...new Set(events.filter(event => event.type === 'asset.created')
+    .map(event => event.payload.assetVersionId)
+    .filter((versionId): versionId is string => typeof versionId === 'string' && Boolean(versionId)))];
+}
+
+function frozenExecutionSteps(events: readonly AgentEvent[]): SkillStepDefinition[] | null {
+  const snapshot = events.find(event => event.type === 'run.created')?.payload.skillSnapshot;
+  if (!snapshot || typeof snapshot !== 'object' || Array.isArray(snapshot)) return null;
+  const steps = (snapshot as Record<string, unknown>).steps;
+  if (!Array.isArray(steps) || steps.length === 0) return null;
+  const parsed: SkillStepDefinition[] = [];
+  for (const raw of steps) {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+    const step = raw as Record<string, unknown>;
+    if (
+      typeof step.id !== 'string'
+      || typeof step.label !== 'string'
+      || typeof step.toolId !== 'string'
+      || (step.execution !== 'sequential' && step.execution !== 'parallel')
+      || typeof step.promptTemplate !== 'string'
+      || typeof step.modelRole !== 'string'
+      || !Array.isArray(step.qualityGateIds)
+      || !step.qualityGateIds.every(value => typeof value === 'string')
+    ) return null;
+    parsed.push({
+      id: step.id, label: step.label, toolId: step.toolId,
+      execution: step.execution,
+      ...(typeof step.parallelGroup === 'string' ? { parallelGroup: step.parallelGroup } : {}),
+      promptTemplate: step.promptTemplate,
+      modelRole: step.modelRole as SkillStepDefinition['modelRole'],
+      qualityGateIds: step.qualityGateIds as string[],
+    });
+  }
+  return parsed;
+}
+
+function executionStepsForRun(events: readonly AgentEvent[], invocation: {
+  skillId: string;
+  skillVersion: number;
+}): SkillStepDefinition[] {
+  const frozen = frozenExecutionSteps(events);
+  if (frozen) return frozen;
+  const workspace = events.find(event => event.type === 'run.created')?.payload.workspace;
+  const surface = workspace === 'chat' ? 'simple-chat' : workspace as SkillSurface;
+  const current = requireSkillForSurface(invocation.skillId, surface);
+  if (current.version !== invocation.skillVersion) {
+    throw new SkillRunRequestError('Frozen Skill definition is unavailable');
+  }
+  return skillExecutionSteps(current);
+}
+
 function frozenSteps(events: readonly AgentEvent[]): Array<{ id: string; label: string }> | null {
   const snapshot = events.find(event => event.type === 'run.created')?.payload.skillSnapshot;
   if (!snapshot || typeof snapshot !== 'object' || Array.isArray(snapshot)) return null;
@@ -329,8 +386,12 @@ export function createSkillRuntimeService(
     },
     async retry(input: { actorUserId: string; runId: string; stepId: string }) {
       const run = await owned(input);
-      const index = run.history.steps.findIndex(step => step.id === input.stepId);
-      if (index < 0) throw new SkillRunRequestError('stepId is invalid');
+      const invocation = skillInvocation(run.events);
+      if (!invocation) throw new SkillRunNotFoundError();
+      const executionSteps = executionStepsForRun(run.events, invocation);
+      if (!executionSteps.some(step => step.id === input.stepId)) {
+        throw new SkillRunRequestError('stepId is invalid');
+      }
       if (run.projection.status !== 'paused' || run.projection.resumeFromStepId !== input.stepId) {
         throw new SkillRunRequestError('Only the persisted paused step can be retried');
       }
@@ -346,9 +407,11 @@ export function createSkillRuntimeService(
       });
       return {
         ...resumed,
-        startedStepIds: run.history.steps.slice(index)
-          .filter(step => step.status !== 'completed')
-          .map(step => step.id),
+        startedStepIds: selectSkillStepsForExecution({
+          steps: executionSteps,
+          completedStepIds: [...completedStepIds(run.events)],
+          resumeFromStepId: input.stepId,
+        }).map(step => step.id),
       };
     },
   };
@@ -437,6 +500,32 @@ export async function executeSkillRun(input: {
     operationContext: input.operationContext,
     completedStepIds: [...completed],
     resumeFromStepId: input.resumeFromStepId,
+    existingAssetVersionIds: completedAssetVersionIds(events),
+  });
+}
+
+export async function failSkillRunExecution(input: {
+  actorUserId: string;
+  runId: string;
+  error: unknown;
+}) {
+  const executionFence = input.error && typeof input.error === 'object'
+    ? (input.error as { executionFence?: import('@/lib/agent-runtime/execution-fence').AgentExecutionFence }).executionFence
+    : undefined;
+  return appendAgentRunEvent({
+    actorUserId: input.actorUserId,
+    runId: input.runId,
+    eventId: `skill:${input.runId}:kickoff-failed`,
+    type: 'run.failed',
+    payload: {
+      ...(executionFence ? { generation: executionFence.generation } : {}),
+      error: {
+        code: 'SKILL_EXECUTION_KICKOFF_FAILED',
+        message: 'Skill execution failed to start',
+        retryable: true,
+      },
+    },
+    executionFence,
   });
 }
 

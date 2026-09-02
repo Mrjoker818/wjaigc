@@ -164,7 +164,7 @@ export function createProductionSkillStepRegistry(input: {
     reconcile: taskId => reconcileGeneration(taskId, input.actor, step.signal),
   } satisfies AgentDownstreamRecovery<SkillStepResult>);
   return {
-    stepAdapters: { generate_image: generate },
+    stepAdapters: { chat: executeOrchestratorStep, generate_image: generate },
     stepRecoveries: { generate_image: recoverGenerate },
   };
 }

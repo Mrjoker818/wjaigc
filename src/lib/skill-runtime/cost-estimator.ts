@@ -1,6 +1,6 @@
 import { calculateConfiguredCreditCost } from '@/lib/credits';
 import type { CreditOperation } from '@/lib/credits';
-import type { SkillDefinition, SkillModelBinding } from './types';
+import type { SkillDefinition, SkillModelBinding, SkillStepDefinition } from './types';
 
 export interface FrozenModelBinding {
   providerId: string;
@@ -50,25 +50,31 @@ export function toolCostType(toolId: string): CreditOperation {
   }
 }
 
+export function skillExecutionSteps(skill: SkillDefinition): SkillStepDefinition[] {
+  if (skill.steps.some(step => step.modelRole === 'orchestrator')) {
+    return skill.steps.map(step => ({ ...step }));
+  }
+  return [{
+    id: 'orchestrator',
+    label: '智能编排',
+    toolId: 'chat',
+    execution: 'sequential',
+    promptTemplate: skill.systemPrompt,
+    modelRole: 'orchestrator',
+    qualityGateIds: [],
+  }, ...skill.steps.map(step => ({ ...step }))];
+}
+
 export async function estimateSkillRunCost(
   skill: SkillDefinition,
   bindings: FrozenBindings,
   dependencies: SkillCostEstimatorDependencies = defaultDependencies,
 ): Promise<SkillRunCostEstimate> {
-  const definitions = skill.steps.some(step => step.modelRole === 'orchestrator')
-    ? skill.steps.map(step => ({
-        stepId: step.id,
-        toolId: step.toolId,
-        modelRole: step.modelRole,
-      }))
-    : [
-        { stepId: 'orchestrator', toolId: 'chat', modelRole: 'orchestrator' as const },
-        ...skill.steps.map(step => ({
-          stepId: step.id,
-          toolId: step.toolId,
-          modelRole: step.modelRole,
-        })),
-      ];
+  const definitions = skillExecutionSteps(skill).map(step => ({
+    stepId: step.id,
+    toolId: step.toolId,
+    modelRole: step.modelRole,
+  }));
   const steps = await Promise.all(definitions.map(async step => {
     const binding = bindings[step.modelRole];
     if (!binding) {

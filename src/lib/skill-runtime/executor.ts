@@ -76,12 +76,39 @@ export interface ExecuteSkillRunInput {
   operationContext: AgentDownstreamExecutionContext;
   completedStepIds?: readonly string[];
   resumeFromStepId?: string;
+  existingAssetVersionIds?: readonly string[];
 }
 
 export interface ExecuteSkillRunResult {
   startedStepIds: string[];
   completedStepIds: string[];
   assetVersionIds: string[];
+}
+
+export function selectSkillStepsForExecution(input: {
+  steps: readonly SkillStepDefinition[];
+  completedStepIds?: readonly string[];
+  resumeFromStepId?: string;
+}): SkillStepDefinition[] {
+  const completed = new Set(input.completedStepIds || []);
+  const resumeIndex = input.resumeFromStepId
+    ? input.steps.findIndex(step => step.id === input.resumeFromStepId)
+    : 0;
+  if (input.resumeFromStepId && resumeIndex < 0) {
+    throw new TypeError('resumeFromStepId is not a Skill step');
+  }
+  const resumeStep = input.steps[resumeIndex];
+  let resumeGroupIndex = Math.max(0, resumeIndex);
+  if (resumeStep?.execution === 'parallel' && resumeStep.parallelGroup) {
+    while (
+      resumeGroupIndex > 0
+      && input.steps[resumeGroupIndex - 1]?.execution === 'parallel'
+      && input.steps[resumeGroupIndex - 1]?.parallelGroup === resumeStep.parallelGroup
+    ) {
+      resumeGroupIndex -= 1;
+    }
+  }
+  return input.steps.slice(resumeGroupIndex).filter(step => !completed.has(step.id));
 }
 
 export class SkillQualityFailedError extends Error {
@@ -168,27 +195,13 @@ export function createSkillExecutor(dependencies: SkillExecutorDependencies) {
       if (!executionFence || executionFence.runId !== input.runId) {
         throw new Error('A database execution fence is required');
       }
-      const resumeIndex = input.resumeFromStepId
-        ? input.definition.steps.findIndex(step => step.id === input.resumeFromStepId)
-        : 0;
-      if (input.resumeFromStepId && resumeIndex < 0) {
-        throw new TypeError('resumeFromStepId is not a Skill step');
-      }
-      const resumeStep = input.definition.steps[resumeIndex];
-      let resumeGroupIndex = Math.max(0, resumeIndex);
-      if (resumeStep?.execution === 'parallel' && resumeStep.parallelGroup) {
-        while (
-          resumeGroupIndex > 0
-          && input.definition.steps[resumeGroupIndex - 1]?.execution === 'parallel'
-          && input.definition.steps[resumeGroupIndex - 1]?.parallelGroup === resumeStep.parallelGroup
-        ) {
-          resumeGroupIndex -= 1;
-        }
-      }
-      const eligible = input.definition.steps.slice(resumeGroupIndex)
-        .filter(step => !completed.has(step.id));
+      const eligible = selectSkillStepsForExecution({
+        steps: input.definition.steps,
+        completedStepIds: input.completedStepIds,
+        resumeFromStepId: input.resumeFromStepId,
+      });
       const startedStepIds: string[] = [];
-      const assetVersionIds: string[] = [];
+      const assetVersionIds: string[] = [...new Set(input.existingAssetVersionIds || [])];
 
       try {
         for (const group of groupSkillSteps(eligible)) {
@@ -199,6 +212,7 @@ export function createSkillExecutor(dependencies: SkillExecutorDependencies) {
         const onParentAbort = () => controller.abort(input.operationContext.signal?.reason);
         input.operationContext.signal?.addEventListener('abort', onParentAbort, { once: true });
         let groupError: unknown;
+        const groupAssets = new Map<string, readonly string[]>();
         try {
           const settled = await Promise.allSettled(group.steps.map(async step => {
             try {
@@ -289,7 +303,7 @@ export function createSkillExecutor(dependencies: SkillExecutorDependencies) {
               payload: { toolId: step.toolId, stepId: step.id },
               });
               completed.add(step.id);
-              assetVersionIds.push(...result.assetVersionIds);
+              groupAssets.set(step.id, result.assetVersionIds);
             } catch (error) {
               controller.abort(error);
               throw error;
@@ -299,6 +313,9 @@ export function createSkillExecutor(dependencies: SkillExecutorDependencies) {
             ? controller.signal.reason
             : settled.find(result => result.status === 'rejected')?.reason;
           if (groupError) throw groupError;
+          for (const step of group.steps) {
+            assetVersionIds.push(...(groupAssets.get(step.id) || []));
+          }
         } catch (error) {
           groupError = error;
           controller.abort(error);
@@ -335,7 +352,9 @@ export function createSkillExecutor(dependencies: SkillExecutorDependencies) {
       }
       const executionResult = {
         startedStepIds,
-        completedStepIds: [...completed],
+        completedStepIds: input.definition.steps
+          .filter(step => completed.has(step.id))
+          .map(step => step.id),
         assetVersionIds: [...new Set(assetVersionIds)],
       };
       if (input.operationContext.signal?.aborted) {

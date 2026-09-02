@@ -266,3 +266,78 @@ git diff --check                      PASS
 - `src/__tests__/lib/agent-runtime-event-storage-fence.test.ts`
 
 未切换或修改 `stable`，未触碰四个受保护未跟踪项，未 push。
+
+## 二次独立评审修复：simple-chat 执行真相、retry 计划与跨代资产（基线 d8abeaf4）
+
+### RED
+
+先只新增评审要求的测试并执行：
+
+```text
+pnpm exec vitest run src/__tests__/api/agent-runs.test.ts src/__tests__/api/skill-runs.test.ts src/__tests__/lib/skill-runtime-executor.test.ts
+```
+
+首次结果为 3 个文件失败，81 项通过、4 项失败：
+
+- simple-chat Skill 虽按唯一 orchestrator 步骤计费，但 `run.created.skillSnapshot.steps` 仍为空；
+- kickoff Promise 拒绝后没有调用持久失败终态，只输出控制台日志；
+- 从后置并行 sibling 重试时，API/service 返回遗漏同组较早的未完成 sibling；
+- 新 generation 的最终 `assetVersionIds` 丢失历史 generation 已持久化的资产。
+
+随后将 37 个内置 Skill 的 registry 审计切换到规范化执行步骤，独立 RED 为 1 项失败：`skillExecutionSteps` 尚不存在，且生产 registry 没有 `chat` adapter。这证明 simple-chat 不只是快照为空，执行入口也缺少共享 orchestrator adapter。
+
+### GREEN 与单一真相
+
+- 新增唯一 `skillExecutionSteps()`：当 Skill 自身没有 orchestrator 步骤时，合成唯一 `chat/orchestrator` 步骤。Task5 报价和 Task4 `run.created` 冻结快照都调用该函数，Task6 continuation 只执行冻结的同一规范化步骤。
+- 旧 simple-chat 空快照恢复时，在 Skill ID、版本和 surface 校验通过后使用同一规范化函数兼容恢复；不会将 21 个 Canvas Skills 暴露给 simple-chat。
+- production registry 新增真实 `chat` adapter，直接复用既有 orchestrator provider 路径；没有伪造异步 recovery，也没有新增任务或计费状态机。
+- simple-chat 规范化 executor 回归证明：只启动 `orchestrator` 一次、只写完成终态一次、没有画布资产；API 既有回归继续证明新建只 kickoff 一次，幂等重放不再次 kickoff；Agent Runtime 报价回归证明只计算一次 chat 费用、只创建一次计费任务。
+- 新增 `failSkillRunExecution()`，kickoff 异常通过 Task4 `appendAgentRunEvent(run.failed)` 的统一终态与退款边界持久化，不再只写日志。执行期异常会附带 active execution fence；执行前 continuation 加载异常没有 lease，因此通过同一原子终态边界结算但不伪造 fence。
+- `selectSkillStepsForExecution()` 成为 executor 和 retry 返回值的共同算法：回溯连续并行组首项，再过滤持久 completed sibling。
+- executor 接收按事件顺序恢复的历史 `asset.created` 版本；每个并行组按定义顺序汇总新资产，最终与历史资产稳定合并并去重。`run.completed.result.assetVersionIds` 因此不会丢失旧 generation 结果。
+
+### 验证结果
+
+新增专项：
+
+```text
+3 个文件通过，86 项通过。
+```
+
+Task6 focused：
+
+```text
+4 个文件通过、1 个 PostgreSQL 文件跳过；103 项通过、5 项跳过。
+```
+
+Task4 accounting/fence：
+
+```text
+5 个文件通过、1 个 PostgreSQL 文件跳过；76 项通过、19 项跳过。
+```
+
+simple-chat Skill 目录、请求与报价隔离：
+
+```text
+3 个文件通过，24 项通过。
+```
+
+工程门禁：
+
+```text
+pnpm ts-check                         PASS
+目标 ESLint（10 个本轮源码/测试文件）PASS，0 error / 0 warning
+git diff --check                      PASS
+```
+
+### 环境跳过项
+
+`POSTGRES_TEST_DATABASE_URL` 仍未配置。Task6 的 5 项和 Task4 的 19 项真实 PostgreSQL 测试明确输出 `BLOCKED` 并跳过；没有用内存或 Mock 冒充数据库并发证据。
+
+### 修改范围与保护项
+
+- 生产：`src/app/api/skill-runs/route.ts`、`src/lib/agent-runtime/service.ts`、`src/lib/skill-runtime/{continuation,cost-estimator,executor,service,step-registry}.ts`
+- 测试：`src/__tests__/api/{agent-runs,skill-runs}.test.ts`、`src/__tests__/lib/skill-runtime-executor.test.ts`
+- 报告：`.superpowers/sdd/task-6-report.md`
+
+未切换或修改 `stable`，未触碰四个受保护未跟踪项，未 push。
