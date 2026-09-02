@@ -537,3 +537,6 @@ Protected stable branch: read-only and untouched
 - Unified Skill Runtime Task 2: complete (commits `896fd337..50888daa`, review clean, Critical/Important/Minor `0/0/0`).
 - 八类结构化输入、默认值、UTF-8 容量、原型/访问器/非枚举/Symbol 边界、模板编译和四项确定性质量门禁已受 51 项聚焦及兼容回归保护。
 - 下一唯一动作：Task 3，用户 Skill 副本、版本、启停、权限和旧 `chat_skills` 兼容持久化；不得提前修改 Agent Runtime 或 UI。
+- Unified Skill Runtime Task 3: complete (commits `04206487..e196d039`, review clean, Critical/Important/Minor `0/0/0`).
+- 用户副本、版本、启停、跨用户隐藏、旧 `skill-<13位时间戳>` 幂等迁移、深度 schema、来源 surface 约束、JSONB 原子 CAS 与 8192-byte 流式 API 门禁已完成；72 项本地回归通过。
+- PostgreSQL CAS 两项因缺少 `POSTGRES_TEST_DATABASE_URL` 明确未验证；下一唯一动作：Task 4，扩展现有 Agent Runtime 的暂停、恢复、重试与进度事件，不建立第二状态机。
