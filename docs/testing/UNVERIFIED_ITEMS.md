@@ -2150,3 +2150,12 @@ BUG-018 已从未验证项移除。剩余顺序为 `002-B -> 002-D -> 002-E`；�
 上述云端证据完成前，`V588-ADMIN-004-BUG-003` 和 `V588-ADMIN-004` 整体均不得标记为关闭或已吸收。
 
 本检查点证据：`docs/testing/evidence/v588-admin-004-fa857e44-cloud-20260831.json`。Pear 延后状态和普通用户模型可见性不因管理员页面正向验证而改变。
+### 2026-09-02 `V588-ADMIN-003` 剩余验证项
+
+| 项目 | 最新状态 | 关闭条件 |
+|---|---|---|
+| 既有 checkpoint 漂移自愈 | `LOCAL PASS / CLOUD PENDING` | 部署候选后在 shadow 触发项目保存，doctor 恢复 `11/11` 且用户数据哈希不变。 |
+| 第二次 asset-v3 切换与回滚 | `UNVERIFIED` | asset-v3 和回滚后均保持 `11/11`，项目 9 节点哈希、缩略图和 Console 健康不变。 |
+| 缺失缩略图的浏览器原图回退 | `UNVERIFIED` | 在不修改业务数据的受控夹具中证明 variant 404 时自动加载原图。 |
+| S3 真实媒体恢复 | `UNVERIFIED` | 配置测试对象存储凭据后验证缺失本地文件可从 S3 恢复；当前仅有自动化测试。 |
+| 资产 PostgreSQL 并发套件 | `133 TESTS SKIPPED / OPEN` | 配置专用 `POSTGRES_TEST_DATABASE_URL` 后执行，严禁使用业务库。 |

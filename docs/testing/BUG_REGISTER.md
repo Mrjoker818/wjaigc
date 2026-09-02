@@ -3776,3 +3776,14 @@ All listed Stage 4 defects are locally closed. S4-BUG-008 also passed its exact-
 - 3 个 Coze 注入脚本被 CSP 拦截，已识别为编辑器、console bridge 和 history bridge；没有放宽 CSP。它们与管理员业务接口的成功分开记录，不隐藏网络失败。
 - Chrome 控制在读取运营总览响应正文时断开；进程、扩展启用和原生通信配置诊断正常，但原标签重新接管仍失败。最后刷新、完整新鲜 Console/异常计数、运营总览响应正文及 Coze 自动元数据提交后的最终 tree 均保留未验证。**BUG-002/003 的页面正向证据已取得，严格收口仍未完成。**
 - 机器证据：`docs/testing/evidence/v588-admin-004-fa857e44-cloud-20260831.json`。原始截图含用户资料，仅存本地 `.playwright-cli/`，不推送公共仓库。
+### V588-ASSET-004：asset-v3 回滚后迁移检查点 schema 漂移（2026-09-02）
+
+- **严重等级**：P1（发布门禁关闭；用户媒体未丢失）
+- **发现环境**：Coze 云端 `main@4aa200a0`，Google Chrome 受控 `shadow -> asset-v3 -> shadow` 切换
+- **稳定复现**：asset-v3 将两个未改变的 100/300 节点项目快照水合为 schema v3；快速路径只比较项目名、图数据和资产映射，跳过检查点同步。回滚后 doctor 报 `checkpoint-schema-mismatch`，匹配项目由 `11/11` 降为 `9/11`。
+- **数据影响**：10 个项目、453 张用户图片、目标项目 9 个媒体节点及坐标/尺寸/层级/URL 哈希完全一致；462 个媒体仍为 ready，未发生内容丢失。
+- **根因**：`hasUnchangedProjectGraph()` 未比较有效 schema；PostgreSQL `verifyProjectMappings()` 未核对 completed checkpoint 的 `sourceSchemaVersion`。
+- **修复**：仅在项目有效 schema 相同，且检查点已完成并与当前 schema 一致时复用映射；否则执行既有原子 reconciliation，刷新检查点而不重建重复资产。
+- **测试**：先新增 schema 变化 RED，再完成 GREEN；专项 `68/68`，全仓 `4504 passed / 133 skipped / 0 failed`，TypeScript、0-error Lint、保护基线、生产构建 `118/118` 通过。
+- **当前状态**：`LOCAL PASS / CLOUD PENDING`。部署后需在 shadow 保存触发自愈，确认 `11/11`；再执行一次受控 asset-v3 与回滚，证明不复发。
+- **证据**：`docs/testing/evidence/v588-admin-003-asset-gate-cloud-2026-09-02.json`、`docs/testing/evidence/v588-admin-003-asset-v3-cloud-2026-09-02.png`。

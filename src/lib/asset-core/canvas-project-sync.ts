@@ -175,6 +175,7 @@ function completeProjectMappings(project: Project): Record<string, LegacyImageMa
 
 function hasUnchangedProjectGraph(previous: Project, next: Project): boolean {
   if (previous.name !== next.name) return false;
+  if ((previous.schemaVersion ?? 1) !== (next.schemaVersion ?? 1)) return false;
   const previousImages = selectCanvasImagesForAssetGraph(previous.canvasImages);
   const nextImages = selectCanvasImagesForAssetGraph(next.canvasImages);
   return JSON.stringify(canonicalizeGraphSnapshot(previousImages))
@@ -207,12 +208,37 @@ interface ProjectMappingRow extends QueryResultRow {
   placement_id: string;
 }
 
+interface ProjectCheckpointRow extends QueryResultRow {
+  status: string;
+  checkpoint: unknown;
+}
+
+function checkpointSourceSchemaVersion(checkpoint: unknown): number | null {
+  if (!checkpoint || typeof checkpoint !== 'object' || Array.isArray(checkpoint)) return null;
+  const value = (checkpoint as Record<string, unknown>).sourceSchemaVersion;
+  return value === 1 || value === 2 || value === 3 ? value : null;
+}
+
 async function verifyProjectMappings(
   client: PoolClient,
   actorUserId: string,
   project: Project,
   mappings: Record<string, LegacyImageMapping>,
 ): Promise<boolean> {
+  const checkpoint = await client.query<ProjectCheckpointRow>(
+    `SELECT status, checkpoint
+       FROM wujie_asset_migration_checkpoints
+      WHERE owner_id = $1 AND project_id = $2 AND legacy_project_id = $2
+      FOR UPDATE`,
+    [actorUserId, project.id],
+  );
+  const checkpointRow = checkpoint.rows[0];
+  if (
+    checkpointRow?.status !== 'completed'
+    || checkpointSourceSchemaVersion(checkpointRow.checkpoint) !== (project.schemaVersion ?? 1)
+  ) {
+    return false;
+  }
   const result = await client.query<ProjectMappingRow>(
     `SELECT placement.entity_id, placement.asset_id, placement.asset_version_id,
             placement.id AS placement_id

@@ -458,6 +458,49 @@ describe('continuous canvas shadow synchronization', () => {
     });
   });
 
+  it('reconciles unchanged graph data when the project schema version changes', async () => {
+    const retained = image('retained', {
+      assetId: 'asset-retained',
+      assetVersionId: 'version-retained',
+      placementId: 'placement-retained',
+    });
+    const previousProject = { ...project([retained]), schemaVersion: 1 as const };
+    const nextProject = { ...project([retained]), schemaVersion: 3 as const };
+    const syncProject = vi.fn(async (candidate: Project) => ({
+      project: candidate,
+      sourceSchemaVersion: 3 as const,
+      migrated: false,
+      reused: true,
+      mappings: {
+        retained: {
+          assetId: 'asset-retained',
+          versionId: 'version-retained',
+          placementId: 'placement-retained',
+        },
+      },
+    }));
+    const storage: CanvasProjectSyncStorage = {
+      async transaction(callback) {
+        return callback({
+          claimRevision: async expectedRevision => expectedRevision + 1,
+          readProjects: async () => structuredClone([previousProject]),
+          verifyProjectMappings: async () => true,
+          writeProjects: async () => undefined,
+          syncProject,
+          reconcileDeletedProjects: async () => undefined,
+        });
+      },
+    };
+
+    await executeCanvasProjectSync({
+      actorUserId: 'user-1',
+      projects: [structuredClone(nextProject)],
+      expectedRevision: 13,
+    }, storage);
+
+    expect(syncProject).toHaveBeenCalledOnce();
+  });
+
   it('reconciles an unchanged snapshot when the batch graph integrity check fails', async () => {
     const retained = image('retained', {
       assetId: 'asset-retained',
@@ -498,6 +541,17 @@ describe('continuous canvas shadow synchronization', () => {
     }, storage);
 
     expect(syncProject).toHaveBeenCalledOnce();
+  });
+
+  it('keeps the PostgreSQL fast path gated by the completed checkpoint schema', () => {
+    const source = readFileSync(
+      resolve(process.cwd(), 'src/lib/asset-core/canvas-project-sync.ts'),
+      'utf8',
+    ).replace(/\r\n/g, '\n');
+
+    expect(source).toContain('FROM wujie_asset_migration_checkpoints');
+    expect(source).toContain("checkpointRow?.status !== 'completed'");
+    expect(source).toContain('checkpointSourceSchemaVersion(checkpointRow.checkpoint) !== (project.schemaVersion ?? 1)');
   });
 
   it('uses asset-version-placement lock order shared with task projection', () => {

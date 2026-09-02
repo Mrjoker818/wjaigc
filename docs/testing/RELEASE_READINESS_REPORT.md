@@ -2017,3 +2017,9 @@ The focused gate test passes `7/7`; the actual protected-baseline command passes
 - Chrome 采集最后一组网络正文时断线。运营总览响应正文、再次刷新持久显示、完整新鲜日志和 post-done 最终 tree 尚未取得，因此 `V588-ADMIN-004` 不提前关闭。3 个 Coze 注入脚本的 CSP 拦截单独保留，不以放宽 CSP 消除告警。
 - 隔离 PostgreSQL 的 123 个跳过测试、普通用户模型可见性、Pear `002-B/002-D/002-E` 后期验证项保持开放。管理员正向显示不能代替这些证据。
 - `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 未触碰；本轮仅新增报告，不需要为了文档提交重复云端构建。证据：`docs/testing/evidence/v588-admin-004-fa857e44-cloud-20260831.json`。
+## 2026-09-02 资产内核候选增量
+
+- asset-v3 的项目读取、真实缩略图投影、原图访问、刷新稳定性和 Chrome Console 健康已取得云端正向证据。
+- 回滚暴露 `V588-ASSET-004`：两个大项目的检查点 schema 未随快照升级，发布门禁正确关闭；用户数据与 462 个 ready 媒体未丢失。
+- 本地候选已通过专项 `68/68`、全仓 `4504/4504`（另有 133 项因无隔离 PostgreSQL 库跳过）、TypeScript、零错误 Lint、保护基线和 `118/118` 生产构建。
+- **当前发布结论仍为“有条件通过”。** 候选部署后必须先恢复 shadow `11/11`，再完成一次无漂移的 asset-v3 切换与回滚；`stable@52f7c601` 保持只读。

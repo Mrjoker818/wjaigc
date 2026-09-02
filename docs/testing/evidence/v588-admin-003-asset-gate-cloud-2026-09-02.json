@@ -1,0 +1,221 @@
+{
+  "item": "V588-ADMIN-003",
+  "commit": "4aa200a03cb4ec9fbeadb5b34913c55990062834",
+  "stableCommit": "52f7c601ed150769e15d06fb435c6e360e28c9e7",
+  "preSwitch": {
+    "checkedAt": "2026-09-02T07:38:03.9227950+08:00",
+    "baseUrl": "https://62afe49a-716e-4d9e-99cd-a0be49c4794c-5000.dev.coze.site",
+    "cozeSource": {
+      "originMain": "4aa200a03cb4ec9fbeadb5b34913c55990062834",
+      "sourceTreeMatches": true,
+      "servicePid": 48332,
+      "rootStatus": 200
+    },
+    "gates": {
+      "focused": {
+        "passed": 37,
+        "failed": 0
+      },
+      "full": {
+        "passed": 4502,
+        "skipped": 133,
+        "failed": 0
+      },
+      "protectedBaseline": "pass",
+      "typecheck": "pass",
+      "eslintErrors": 0,
+      "build": {
+        "status": "pass",
+        "buildId": "75bhc4hpWlT0HpoxqA-Hd"
+      },
+      "postgresqlIsolation": "unverified: POSTGRES_TEST_DATABASE_URL is not configured"
+    },
+    "unauthorizedReadiness": {
+      "status": 403,
+      "requestId": "365c0189-291b-9b0e-a9da-641202a783cf",
+      "assetGraphReturned": false
+    },
+    "authenticatedReadiness": {
+      "status": 200,
+      "requestId": "649bbb5a-8b84-9410-9cba-0b31328cf200",
+      "sensitiveFieldCount": 0,
+      "database": "pass",
+      "security": "pass",
+      "taskEvents": {
+        "status": "warn",
+        "issue": "Shared task event backend is not configured; clients use durable task polling across instances."
+      }
+    },
+    "mode": "shadow",
+    "releaseReady": true,
+    "switchAuthorized": true,
+    "blockers": [],
+    "migrations": {
+      "required": 6,
+      "verified": 6,
+      "missing": 0,
+      "checksumMismatches": 0
+    },
+    "shadowComparison": {
+      "legacyProjects": 11,
+      "graphProjects": 11,
+      "matchingProjects": 11,
+      "mismatchedProjects": 0,
+      "unmigratedProjects": 0,
+      "orphanGraphProjects": 0,
+      "failedCheckpoints": 0,
+      "missingCheckpoints": 0
+    },
+    "media": {
+      "ready": 462,
+      "pendingPersist": 0,
+      "missing": 0,
+      "recovering": 0,
+      "unrecoverable": 0,
+      "falseReadyCurrentVersions": 0,
+      "falseReadyActivePlacements": 0
+    },
+    "assets": {
+      "active": 462,
+      "trashed": 7
+    },
+    "gc": {
+      "pending": 0,
+      "deferred": 0,
+      "purged": 0,
+      "due": 0,
+      "physicalDeferred": 0,
+      "physicalFailed": 0,
+      "unregistered": 0
+    },
+    "thumbnailBackfill": {
+      "pending": 0,
+      "processing": 0,
+      "ready": 2,
+      "failed": 0
+    },
+    "projectBaseline": {
+      "assetGraphMode": "shadow",
+      "canvasKernelMode": "legacy",
+      "projectRevision": 7793,
+      "projectCount": 10,
+      "imageCount": 453,
+      "thumbnailCount": 0,
+      "sourceUrlCount": 429,
+      "emptyUrlCount": 1
+    }
+  },
+  "assetV3": {
+    "status": "partial-pass",
+    "switchAttempt": {
+      "checkedAt": "2026-09-02T08:38:41.8410000+08:00",
+      "authorized": true,
+      "executed": true,
+      "result": "asset-v3 remained active through authenticated project read, thumbnail decode, canvas rendering, selection, download-dialog entry and reload verification",
+      "reason": "The release gate passed and the existing Google Chrome tab completed the controlled acceptance flow before an explicit rollback to shadow.",
+      "browserDiagnostics": {
+        "chromeRunning": true,
+        "extensionInstalled": true,
+        "extensionEnabled": true,
+        "nativeHostCorrect": true
+      },
+      "doctor": {
+        "assetV3ReleaseGate": "pass",
+        "summary": {
+          "passed": 53,
+          "warnings": 5,
+          "failed": 1,
+          "blocked": 1
+        },
+        "objectStorage": "failed: credentials are not configured",
+        "postgresqlIsolation": "blocked: POSTGRES_TEST_DATABASE_URL is not configured"
+      },
+      "candidateObservation": {
+        "mode": "asset-v3",
+        "canvasKernelMode": "legacy",
+        "projectRevision": 7794,
+        "projectCount": 10,
+        "imageCount": 453,
+        "projectedThumbnailCount": 1,
+        "thumbnail512": {
+          "httpStatus": 200,
+          "mimeType": "image/webp",
+          "byteSize": 4008,
+          "decodedWidth": 512,
+          "decodedHeight": 512
+        },
+        "thumbnail256": {
+          "httpStatus": 200,
+          "mimeType": "image/webp",
+          "byteSize": 1922,
+          "decodedWidth": 256,
+          "decodedHeight": 256
+        },
+        "sourceImage": {
+          "httpStatus": 200,
+          "mimeType": "image/png",
+          "byteSize": 832311,
+          "decodedWidth": 1254,
+          "decodedHeight": 1254
+        },
+        "canvasProject": {
+          "projectId": "project_1786292967408_hvsznuh5k",
+          "mediaCount": 9,
+          "projectedThumbnailRendered": true,
+          "stateHashBeforeReload": "b24d287d681dfb4308160ddfb1684b61f9bafe50ec081f969944068d2711d91f",
+          "stateHashAfterReload": "b24d287d681dfb4308160ddfb1684b61f9bafe50ec081f969944068d2711d91f",
+          "selectionToolbarVisible": true,
+          "downloadDialogVisible": true
+        },
+        "freshConsoleErrors": 0,
+        "freshConsoleWarnings": 0
+      },
+      "cloudStateAfterAttempt": {
+        "mode": "shadow",
+        "releaseReady": false,
+        "switchAuthorized": false,
+        "projectRevision": 7794,
+        "canvasKernelMode": "legacy",
+        "matchingProjects": 9,
+        "mismatchedProjects": 2,
+        "mismatchReason": "checkpoint-schema-mismatch"
+      }
+    },
+    "projectRead": "pass: 10 projects and 453 images were returned while asset-v3 remained active",
+    "thumbnailProjection": "pass: a ready 512 WebP variant was rendered by the canvas img element",
+    "thumbnail512Delivery": "pass: HTTP 200 image/webp, 4008 bytes, decoded 512x512",
+    "thumbnail256Delivery": "pass: HTTP 200 image/webp, 1922 bytes, decoded 256x256",
+    "reloadStability": "pass: 9 media and the canonical state hash were unchanged after reload",
+    "originalAccess": "pass: HTTP 200 image/png, 832311 bytes, decoded 1254x1254; download dialog opened from the selected projected image",
+    "originalFallback": "unverified",
+    "s3Recovery": "unverified",
+    "freshConsoleErrors": 0
+  },
+  "rollback": {
+    "status": "data-pass-gate-regression",
+    "targetMode": "shadow",
+    "projectRead": "pass: project media, placement geometry and URLs retained the exact pre-rollback hash",
+    "projectCount": 10,
+    "imageCount": 453,
+    "freshConsoleErrors": 0,
+    "releaseGate": {
+      "releaseReady": false,
+      "matchingProjects": 9,
+      "mismatchedProjects": 2,
+      "reason": "Two unchanged 100/300-node projects retained sourceSchemaVersion 1 checkpoints after their legacy snapshots became schemaVersion 3."
+    }
+  },
+  "localCandidate": {
+    "checkedAt": "2026-09-02T09:10:04.0540247+08:00",
+    "baseCommit": "4aa200a03cb4ec9fbeadb5b34913c55990062834",
+    "fix": "The unchanged-graph fast path now requires both an equal effective project schema and a completed migration checkpoint with the same sourceSchemaVersion.",
+    "focusedTests": "68 passed, 0 failed",
+    "fullTests": "4504 passed, 133 skipped, 0 failed",
+    "typecheck": "pass",
+    "eslintErrors": 0,
+    "productionBuild": "pass: 118/118 static pages",
+    "protectedBaseline": "pass: 38/38 protected feature ids, no unapproved drift",
+    "cloudVerification": "pending deployment"
+  },
+  "verdict": "conditional-pass"
+}

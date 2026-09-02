@@ -2628,3 +2628,10 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - 首次强刷后的网络事件另有 3 个 Coze 注入脚本 CSP 拦截。已定位外部脚本来源，未放宽安全策略，也不将其混入应用 API 失败。
 - **回归判定：有条件通过，尚未完整关闭。** 只剩最终再次刷新、运营总览响应正文、完整新鲜浏览器日志及 Coze post-done tree 补证。已完成的云端拉取、全量测试和构建不重做；没有业务代码变更时不重复本地全仓构建。
 - 证据：`docs/testing/evidence/v588-admin-004-fa857e44-cloud-20260831.json`。截图含用户资料，仅保留本地，公开证据使用匿名序号与核对结论。
+## 2026-09-02 `V588-ADMIN-003` asset-v3 受控切换与回滚
+
+- Google Chrome 真实验证 asset-v3：10 个项目/453 张图片可读，512/256 WebP 与 1254 原图均能 HTTP 200 并解码；画布实际渲染缩略图，选择、下载入口和刷新恢复正常，9 节点状态哈希刷新前后一致，新鲜 Console error/warning 为 0。
+- 显式回滚 shadow 后用户数据哈希仍一致，但门禁由 `11/11` 降为 `9/11`，两个压力项目出现 `checkpoint-schema-mismatch`。媒体仍为 `462 ready / 0 missing`，因此这是检查点一致性回归，不是图片丢失。
+- TDD 最小修复将项目有效 schema 与 completed checkpoint schema 纳入快速路径校验，可使下一次保存走既有原子 reconciliation 并修复旧检查点。
+- 验证：专项 `68/68`；全仓 `4504 passed / 133 PostgreSQL-gated skipped / 0 failed`；TypeScript、0-error Lint、保护基线和生产构建 `118/118` 通过。
+- **判定：LOCAL PASS / CLOUD PENDING。** S3 真实恢复、缺失缩略图浏览器回退与隔离 PostgreSQL 并发仍未验证，不得写为通过。
