@@ -18,6 +18,7 @@ import {
   type DurableTaskStatus,
   type TaskErrorInput,
 } from '@/lib/task-core/task-state';
+import { getAgentExecutionFence, type AgentExecutionFence } from '@/lib/agent-runtime/execution-fence';
 
 export type CloudTaskStatus = 'queued' | 'pending' | 'processing' | 'completed' | 'failed' | 'cancelled' | 'timeout';
 export type CloudTaskCreditStatus = 'pending' | 'charged' | 'refunded' | 'not-applicable';
@@ -106,6 +107,7 @@ export interface TransitionCloudTaskStatusInput {
   error?: TaskErrorInput;
   creditStatus?: CloudTaskCreditStatus;
   terminalIdentity?: TaskTerminalIdentity;
+  agentExecutionFence?: AgentExecutionFence;
 }
 
 export interface TransitionCloudTaskStatusResult {
@@ -184,11 +186,13 @@ export interface SettleFailedCloudTaskInput {
   leaseOwner?: string;
   lockTimeoutMs?: number;
   statementTimeoutMs?: number;
+  agentExecutionFence?: AgentExecutionFence;
 }
 
 export interface CompleteCloudTaskOptions {
   leaseOwner?: string;
   deadlineAt?: number;
+  agentExecutionFence?: AgentExecutionFence;
 }
 
 export interface SettleFailedCloudTaskResult {
@@ -531,6 +535,28 @@ export async function settleFailedCloudTask(
     }
 
     const currentStatus = normalizeDurableTaskStatus(String(row.status));
+    const agentFence = input.agentExecutionFence || getAgentExecutionFence();
+    const controlFence = await client.query<{
+      lease_owner: string; generation: number; paused_at: string | number; completed_at: string | number;
+    }>(
+      `SELECT lease_owner, generation, paused_at, completed_at
+       FROM wujie_agent_execution_leases WHERE task_id = $1`,
+      [input.taskId],
+    );
+    const control = controlFence.rows[0];
+    if (
+      Number(control?.paused_at || 0) > 0
+      || (agentFence && (
+        agentFence.runId !== input.taskId
+        || !control
+        || control.lease_owner !== agentFence.leaseOwner
+        || Number(control.generation) !== agentFence.generation
+        || Number(control.completed_at) !== 0
+      ))
+    ) {
+      await client.query('COMMIT');
+      return { task: rowToPersistedCloudTask(row), transitioned: false, refunded: false };
+    }
     if (input.leaseOwner && String(row.lease_owner || '') !== input.leaseOwner) {
       await client.query('COMMIT');
       return {
@@ -711,6 +737,9 @@ export async function updateCloudTask(taskId: string, input: UpdateCloudTaskInpu
   if (input.remoteTaskId !== undefined) { sets.push(`remote_task_id = $${index++}`); params.push(input.remoteTaskId); }
 
   const conditions = ['id = $1'];
+  const agentFence = input.status && isTerminalTaskStatus(normalizeDurableTaskStatus(input.status))
+    ? getAgentExecutionFence()
+    : undefined;
   const hasBusinessFieldUpdate = input.progress !== undefined
     || input.result !== undefined
     || input.error !== undefined
@@ -731,6 +760,23 @@ export async function updateCloudTask(taskId: string, input: UpdateCloudTaskInpu
   if (expectedRevision !== undefined) {
     conditions.push(`revision = $${index++}`);
     params.push(expectedRevision);
+  }
+  if (agentFence) {
+    conditions.push(`EXISTS (
+      SELECT 1 FROM wujie_agent_execution_leases agent_lease
+      WHERE agent_lease.task_id = $${index++}
+        AND agent_lease.lease_owner = $${index++}
+        AND agent_lease.generation = $${index++}
+        AND agent_lease.paused_at = 0
+        AND agent_lease.completed_at = 0
+    )`);
+    params.push(agentFence.runId, agentFence.leaseOwner, agentFence.generation);
+  }
+  if (input.status && isTerminalTaskStatus(normalizeDurableTaskStatus(input.status))) {
+    conditions.push(`NOT EXISTS (
+      SELECT 1 FROM wujie_agent_execution_leases paused_agent
+      WHERE paused_agent.task_id = $1 AND paused_agent.paused_at > 0
+    )`);
   }
   const result = await execSql(`UPDATE cloud_tasks SET ${sets.join(', ')}
     WHERE ${conditions.join(' AND ')}
@@ -799,12 +845,32 @@ export async function transitionCloudTaskStatus(
     params.push(input.terminalIdentity.eventType);
   }
 
+  const agentFence = input.agentExecutionFence || getAgentExecutionFence();
+  const fenceCondition = agentFence
+    ? `AND EXISTS (
+        SELECT 1 FROM wujie_agent_execution_leases agent_lease
+        WHERE agent_lease.task_id = $${index++}
+          AND agent_lease.lease_owner = $${index++}
+          AND agent_lease.generation = $${index++}
+          AND agent_lease.paused_at = 0
+          AND agent_lease.completed_at = 0
+      )`
+    : '';
+  if (agentFence) {
+    params.push(agentFence.runId, agentFence.leaseOwner, agentFence.generation);
+  }
+
   const result = await execSql(`
     UPDATE cloud_tasks
     SET ${sets.join(', ')}
     WHERE id = $1
       AND status = ANY($2::text[])
       AND revision = $3
+      AND NOT EXISTS (
+        SELECT 1 FROM wujie_agent_execution_leases paused_agent
+        WHERE paused_agent.task_id = $1 AND paused_agent.paused_at > 0
+      )
+      ${fenceCondition}
     RETURNING *
   `, params);
   if (result.rows.length > 0) {
@@ -833,6 +899,7 @@ export async function completeCloudTask(
   const options = typeof leaseOwnerOrOptions === 'string'
     ? { leaseOwner: leaseOwnerOrOptions }
     : leaseOwnerOrOptions ?? {};
+  const agentFence = options.agentExecutionFence || getAgentExecutionFence();
   const completed = await execSql(`
     UPDATE cloud_tasks
     SET status = 'completed',
@@ -845,12 +912,27 @@ export async function completeCloudTask(
         END,
         updated_at = $3
     WHERE id = $1 AND status = 'processing'
+      AND NOT EXISTS (
+        SELECT 1 FROM wujie_agent_execution_leases paused_agent
+        WHERE paused_agent.task_id = $1 AND paused_agent.paused_at > 0
+      )
       AND ($4::text IS NULL OR lease_owner = $4)
       AND (
         $5::bigint IS NULL
         OR (
           (EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::bigint <= $5
           AND lease_expires_at >= (EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::bigint
+        )
+      )
+      AND (
+        $6::text IS NULL
+        OR EXISTS (
+          SELECT 1 FROM wujie_agent_execution_leases agent_lease
+          WHERE agent_lease.task_id = $6
+            AND agent_lease.lease_owner = $7
+            AND agent_lease.generation = $8
+            AND agent_lease.paused_at = 0
+            AND agent_lease.completed_at = 0
         )
       )
     RETURNING id
@@ -860,6 +942,9 @@ export async function completeCloudTask(
     Date.now(),
     options.leaseOwner || null,
     options.deadlineAt ?? null,
+    agentFence?.runId ?? null,
+    agentFence?.leaseOwner ?? null,
+    agentFence?.generation ?? null,
   ]);
   return (completed.rowCount ?? completed.rows.length) > 0;
 }
@@ -877,6 +962,7 @@ export async function terminateCloudTaskAndRefund(
   await ensureCloudTaskTables();
   const now = Date.now();
   const transactionId = `ctx_${now}_${Math.random().toString(36).slice(2, 10)}`;
+  const agentFence = getAgentExecutionFence();
   const result = await execSql(`
     WITH candidate AS (
       SELECT task.id,
@@ -886,7 +972,22 @@ export async function terminateCloudTaskAndRefund(
              task.credit_cost
       FROM cloud_tasks task
       WHERE task.id = $1
+        AND NOT EXISTS (
+          SELECT 1 FROM wujie_agent_execution_leases paused_agent
+          WHERE paused_agent.task_id = task.id AND paused_agent.paused_at > 0
+        )
         AND ($6::text IS NULL OR task.lease_owner = $6)
+        AND (
+          $7::text IS NULL
+          OR EXISTS (
+            SELECT 1 FROM wujie_agent_execution_leases agent_lease
+            WHERE agent_lease.task_id = $7
+              AND agent_lease.lease_owner = $8
+              AND agent_lease.generation = $9
+              AND agent_lease.paused_at = 0
+              AND agent_lease.completed_at = 0
+          )
+        )
         AND (
           task.status IN ('pending', 'processing')
           OR task.status IN ('failed', 'timeout', 'cancelled')
@@ -973,7 +1074,12 @@ export async function terminateCloudTaskAndRefund(
            ) AS balance
     FROM settled_task settled
     LIMIT 1
-  `, [taskId, status, reason, now, transactionId, leaseOwner || null]);
+  `, [
+    taskId, status, reason, now, transactionId, leaseOwner || null,
+    agentFence?.runId ?? null,
+    agentFence?.leaseOwner ?? null,
+    agentFence?.generation ?? null,
+  ]);
   const row = result.rows[0] as Record<string, unknown> | undefined;
   if (!row) {
     return { status: undefined, transitioned: false, refunded: false, creditCost: 0 };

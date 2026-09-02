@@ -83,3 +83,45 @@ not an in-memory fallback and not reported as passing.
   `_refs-hero-infinite-canvas/`, and
   `docs/superpowers/plans/2026-08-02-provider-generation-video-reliability.md`
   were not staged or modified.
+
+## Changes Requested Follow-up
+
+- Resume now commits `run.resumed`, allocates a new generation/lease, creates a
+  fresh AbortScope and background Promise, and invokes the existing durable
+  `/api/poll-task` recovery entry. A database CAS on `dispatch_started_at`
+  prevents duplicate resume requests from creating duplicate executions.
+  `tool.started` is persisted before recovery dispatch, so the event projection
+  advances from `queued` to `executing` instead of remaining parked.
+- PATCH responses retain `leaseOwner` and `dispatch.started`; the client keeps
+  this metadata on the controlled projection. Poll generation is invalidated
+  only after a successful control response. A failed pause/resume keeps the old
+  generation valid and immediately refreshes polling.
+- Adopted execution now carries `resumeFromStepId` plus a database generation
+  fence. Pause atomically marks the Agent lease paused and clears both the Agent
+  lease and underlying `cloud_tasks` lease. Cloud task completion, failure,
+  direct terminal update, and refund writers reject paused or stale-generation
+  workers. The terminal observer also checks the current generation/lease.
+- Identical repeated pause calls retry the idempotent abort, covering a crash
+  after the database commit but before local abort. A different `nextStepId`
+  conflicts with HTTP 409.
+- Added migration
+  `20260902_unified_skill_task4_execution_fence.sql` for generation, pause,
+  next-step, and dispatch-CAS fields on the existing execution lease table.
+
+## Follow-up Verification
+
+- RED run: 6 expected failures across service dispatch, pause retry/conflict,
+  client failure recovery, and adopted generation context.
+- Task 4/control unit set: 68 tests passed.
+- Agent runtime, event/task storage, billing/cancel, and Task 1-3 compatibility:
+  416 tests passed; 2 PostgreSQL Skill storage tests skipped.
+- Poll/recovery and adopted executor regressions: 68 tests passed.
+- PostgreSQL Agent suites: 25 tests skipped because
+  `POSTGRES_TEST_DATABASE_URL` is not configured. The new integration assertions
+  cover pause blocking late completion/failure and resume allowing only the new
+  generation; no in-memory substitute was used.
+- TypeScript: `pnpm exec tsc -p tsconfig.json --noEmit --pretty false` passed.
+- Limited ESLint: no errors. The touched legacy `poll-task/route.ts` reports 11
+  pre-existing unused-symbol warnings; the strict `--max-warnings 0` invocation
+  therefore exits nonzero without any new lint error.
+- `git diff --check` passed with only line-ending conversion notices.

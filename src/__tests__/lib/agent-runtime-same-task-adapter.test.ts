@@ -491,4 +491,34 @@ describe('same-task Agent adoption adapter', () => {
     ]);
     expect(providerOperations.every(operation => operation.status === 'completed')).toBe(true);
   });
+
+  it('passes the claimed generation fence to a resumed execution and terminal observer', async () => {
+    const deps = dependencies({
+      claimExecution: vi.fn(async () => ({
+        claimed: true, leaseOwner: 'lease-resume', generation: 4,
+      })),
+    });
+    const adapter = createSameTaskAgentAdapter(deps);
+    const adoption = await adapter.adopt({
+      actor, taskId: 'task-1', request: request(), toolId: 'generate_image',
+    });
+    const execute = vi.fn(async () => ({ ok: true }));
+
+    await adapter.executeAdoption({
+      adoption,
+      execute,
+      resumeFromStepId: 'generate-2',
+      expectedGeneration: 4,
+    });
+
+    expect(execute).toHaveBeenCalledWith(expect.objectContaining({
+      resumeFromStepId: 'generate-2',
+      executionFence: {
+        runId: 'task-1', leaseOwner: 'lease-resume', generation: 4,
+      },
+    }));
+    expect(deps.observeTerminal).toHaveBeenCalledWith(expect.objectContaining({
+      leaseOwner: 'lease-resume', generation: 4,
+    }));
+  });
 });

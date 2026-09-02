@@ -54,6 +54,12 @@ export interface AgentDownstreamExecutionContext {
   idempotencyKey: string;
   operationKey: string;
   recovery: boolean;
+  resumeFromStepId?: string;
+  executionFence?: {
+    runId: string;
+    leaseOwner: string;
+    generation: number;
+  };
   beginSubmission(): Promise<void>;
   recordAccepted(providerTaskId: string): Promise<void>;
   executeOperation<T>(

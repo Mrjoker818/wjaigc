@@ -7,6 +7,7 @@ import {
   loadAgentRunEvents,
   pauseAgentRunRequest,
   resumeAgentRunRequest,
+  runAgentControlRequest,
 } from '@/components/agent-runtime/use-agent-run-events';
 import type { AgentEvent, AgentRunProjection } from '@/lib/agent-runtime/types';
 
@@ -57,7 +58,11 @@ describe('shared Agent run event client', () => {
     };
     const fetcher = vi.fn().mockResolvedValue({
       ok: true,
-      json: async () => ({ projection }),
+      json: async () => ({
+        projection,
+        leaseOwner: body.action === 'resume' ? 'lease-new' : '',
+        dispatch: body.action === 'resume' ? { started: true } : undefined,
+      }),
     });
 
     const controlled = body.action === 'pause'
@@ -65,6 +70,9 @@ describe('shared Agent run event client', () => {
       : resumeAgentRunRequest('run-1', fetcher as unknown as typeof fetch);
     await expect(controlled).resolves.toMatchObject({
       runId: 'run-1', status: projection.status,
+      control: body.action === 'resume'
+        ? { leaseOwner: 'lease-new', dispatch: { started: true } }
+        : { leaseOwner: '' },
     });
     expect(fetcher).toHaveBeenCalledWith('/api/agent-runs/run-1', {
       method: 'PATCH',
@@ -87,6 +95,32 @@ describe('shared Agent run event client', () => {
 
     expect(load).toHaveBeenCalledTimes(1);
     expect(poller.isActive()).toBe(false);
+  });
+
+  it('keeps the live poll generation and refreshes immediately when pause fails', async () => {
+    const invalidate = vi.fn();
+    const refresh = vi.fn();
+    const request = vi.fn().mockRejectedValue(new Error('network down'));
+
+    await expect(runAgentControlRequest({ request, invalidate, refresh }))
+      .rejects.toThrow('network down');
+
+    expect(invalidate).not.toHaveBeenCalled();
+    expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it('invalidates the old poll generation only after resume succeeds', async () => {
+    const invalidate = vi.fn();
+    const refresh = vi.fn();
+    const projection = { ...initialAgentRunProjection('run-1'), status: 'queued' as const };
+
+    await expect(runAgentControlRequest({
+      request: vi.fn().mockResolvedValue(projection), invalidate, refresh,
+    })).resolves.toBe(projection);
+
+    expect(invalidate).toHaveBeenCalledTimes(1);
+    expect(refresh).toHaveBeenCalledTimes(1);
+    expect(invalidate.mock.invocationCallOrder[0]).toBeLessThan(refresh.mock.invocationCallOrder[0]);
   });
 
   it('serializes in-flight polling and stops permanently on a terminal projection', async () => {

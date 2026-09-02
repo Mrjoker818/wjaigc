@@ -284,6 +284,19 @@ describe('Stage 4 Agent event storage on real PostgreSQL', () => {
         status: 'processing', credit_status: 'pending', revision: 2, lease_owner: '',
       }]);
 
+      const { completeCloudTask, settleFailedCloudTask } = await import('@/lib/cloud-task-storage');
+      const { withAgentExecutionFence } = await import('@/lib/agent-runtime/execution-fence');
+      await expect(withAgentExecutionFence({
+        runId, leaseOwner: 'lease-old', generation: 0,
+      }, () => completeCloudTask(runId, { imageUrl: '/late.png' }))).resolves.toBe(false);
+      await expect(withAgentExecutionFence({
+        runId, leaseOwner: 'lease-old', generation: 0,
+      }, () => settleFailedCloudTask({
+        taskId: runId,
+        status: 'failed',
+        error: { code: 'LATE', message: 'late failure', source: 'provider', retryable: true },
+      }))).resolves.toMatchObject({ transitioned: false, refunded: false });
+
       const resumedInput = {
         actorUserId: ownerId,
         projectId,
@@ -315,6 +328,12 @@ describe('Stage 4 Agent event storage on real PostgreSQL', () => {
         credit_status: 'pending', revision: 3,
         lease_owner: 'lease-new', tool_id: 'generate-2',
       }]);
+      await expect(withAgentExecutionFence({
+        runId, leaseOwner: 'lease-old', generation: 0,
+      }, () => completeCloudTask(runId, { imageUrl: '/older.png' }))).resolves.toBe(false);
+      await expect(withAgentExecutionFence({
+        runId, leaseOwner: 'lease-new', generation: 1,
+      }, () => completeCloudTask(runId, { imageUrl: '/resumed.png' }))).resolves.toBe(true);
     });
   });
 

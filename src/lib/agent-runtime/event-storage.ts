@@ -84,6 +84,8 @@ export interface ObserveAdoptedAgentTaskTerminalInput {
   runId: string;
   workspace: AgentWorkspace;
   toolId: string;
+  leaseOwner?: string;
+  generation?: number;
 }
 
 export interface AgentExecutionLeaseInput {
@@ -99,6 +101,29 @@ export interface AgentExecutionLeaseInput {
 export interface AgentExecutionLeaseClaim {
   claimed: boolean;
   leaseOwner: string;
+  generation?: number;
+}
+
+export async function claimResumedAgentExecutionDispatch(input: {
+  actorUserId: string;
+  projectId: string;
+  runId: string;
+  leaseOwner: string;
+  generation: number;
+  now?: number;
+}): Promise<boolean> {
+  const now = input.now ?? Date.now();
+  const result = await getPool().query(
+    `UPDATE wujie_agent_execution_leases
+     SET dispatch_started_at = $6, updated_at = $6
+     WHERE task_id = $1 AND owner_id = $2 AND project_id = $3
+       AND lease_owner = $4 AND generation = $5
+       AND paused_at = 0 AND completed_at = 0 AND dispatch_started_at = 0
+     RETURNING task_id`,
+    [input.runId, input.actorUserId, input.projectId, input.leaseOwner,
+      input.generation, now],
+  );
+  return (result.rowCount ?? 0) === 1;
 }
 
 interface AgentDownstreamOperationRow {
@@ -497,31 +522,51 @@ export async function transitionAgentRunControl(
     if ((revisionUpdate.rowCount ?? 0) !== 1) throw new AgentEventConflictError();
 
     if (input.type === 'run.paused') {
+      const nextStepId = input.payload.nextStepId;
+      if (typeof nextStepId !== 'string' || !nextStepId) {
+        throw new TypeError('nextStepId must not be empty');
+      }
       await client.query(
         `UPDATE wujie_agent_execution_leases
-         SET lease_owner = '', lease_expires_at = 0, updated_at = $4
+         SET lease_owner = '', lease_expires_at = 0, paused_at = $4,
+             next_step_id = $5, dispatch_started_at = 0, updated_at = $4
          WHERE task_id = $1 AND owner_id = $2 AND project_id = $3 AND completed_at = 0`,
-        [input.runId, input.actorUserId, input.projectId, now],
+        [input.runId, input.actorUserId, input.projectId, now, nextStepId],
+      );
+      await client.query(
+        `UPDATE cloud_tasks
+         SET lease_owner = '', lease_expires_at = 0
+         WHERE id = $1 AND user_id = $2 AND project_id = $3`,
+        [input.runId, input.actorUserId, input.projectId],
       );
     } else {
       const nextStepId = input.payload.nextStepId;
       if (typeof nextStepId !== 'string' || !nextStepId) {
         throw new TypeError('nextStepId must not be empty');
       }
+      const generation = input.payload.generation;
+      if (!Number.isSafeInteger(generation) || Number(generation) < 1) {
+        throw new TypeError('generation must be a positive integer');
+      }
       await client.query(
         `INSERT INTO wujie_agent_execution_leases(
            task_id, owner_id, project_id, tool_id, lease_owner,
-           lease_expires_at, attempt_count, completed_at, updated_at
-         ) VALUES ($1, $2, $3, $4, $5, $6, 1, 0, $7)
+           lease_expires_at, attempt_count, completed_at, updated_at,
+           generation, paused_at, next_step_id, dispatch_started_at
+         ) VALUES ($1, $2, $3, $4, $5, $6, 1, 0, $7, $8, 0, $4, 0)
          ON CONFLICT (task_id) DO UPDATE
          SET tool_id = EXCLUDED.tool_id,
              lease_owner = EXCLUDED.lease_owner,
              lease_expires_at = EXCLUDED.lease_expires_at,
+             generation = wujie_agent_execution_leases.generation + 1,
+             paused_at = 0,
+             next_step_id = EXCLUDED.tool_id,
+             dispatch_started_at = 0,
              attempt_count = wujie_agent_execution_leases.attempt_count + 1,
              completed_at = 0,
              updated_at = EXCLUDED.updated_at`,
         [input.runId, input.actorUserId, input.projectId, nextStepId,
-          requestedLeaseOwner, now + leaseDurationMs, now],
+          requestedLeaseOwner, now + leaseDurationMs, now, Number(generation)],
       );
     }
 
@@ -660,9 +705,11 @@ export async function claimAdoptedAgentExecution(
        SET lease_owner = $5,
            lease_expires_at = $6,
            attempt_count = attempt_count + 1,
+           paused_at = 0,
            updated_at = $7
        WHERE task_id = $1 AND owner_id = $2 AND project_id = $3 AND tool_id = $4
-         AND completed_at = 0 AND lease_expires_at <= $7`,
+         AND completed_at = 0 AND paused_at = 0 AND lease_expires_at <= $7
+       RETURNING generation`,
       [input.runId, input.actorUserId, input.projectId, input.toolId,
         input.leaseOwner, input.now + input.leaseDurationMs, input.now],
     );
@@ -670,6 +717,9 @@ export async function claimAdoptedAgentExecution(
     return {
       claimed: (claimed.rowCount ?? 0) === 1,
       leaseOwner: (claimed.rowCount ?? 0) === 1 ? input.leaseOwner : '',
+      generation: (claimed.rowCount ?? 0) === 1
+        ? Number((claimed.rows[0] as { generation?: number } | undefined)?.generation || 0)
+        : undefined,
     };
   } catch (error) {
     await client.query('ROLLBACK').catch(() => undefined);
@@ -955,6 +1005,26 @@ export async function observeAdoptedAgentTaskTerminal(
     if ((task.rowCount ?? 0) !== 1) throw new AgentEventNotFoundError();
     const terminal = terminalObservation(task.rows[0].status);
     if (!terminal || task.rows[0].type === 'agent-run') {
+      await client.query('COMMIT');
+      return [];
+    }
+    const lease = await client.query<{
+      lease_owner: string; generation: number; paused_at: string | number;
+    }>(
+      `SELECT lease_owner, generation, paused_at
+       FROM wujie_agent_execution_leases
+       WHERE task_id = $1 AND owner_id = $2 AND project_id = $3`,
+      [runId, actorUserId, projectId],
+    );
+    const activeLease = lease.rows[0];
+    if (
+      activeLease
+      && (
+        Number(activeLease.paused_at) > 0
+        || (rawInput.leaseOwner !== undefined && activeLease.lease_owner !== rawInput.leaseOwner)
+        || (rawInput.generation !== undefined && Number(activeLease.generation) !== rawInput.generation)
+      )
+    ) {
       await client.query('COMMIT');
       return [];
     }

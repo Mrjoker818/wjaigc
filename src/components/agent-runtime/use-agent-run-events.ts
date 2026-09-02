@@ -13,6 +13,13 @@ interface AgentRunEventsResult {
   resume: () => Promise<AgentRunProjection | undefined>;
 }
 
+export type ControlledAgentRunProjection = AgentRunProjection & {
+  control?: {
+    leaseOwner: string;
+    dispatch?: { started: boolean };
+  };
+};
+
 const EVENT_POLL_INTERVAL_MS = 500;
 const EVENT_STALE_AFTER_MS = 1_000;
 const POLL_STOP_STATUSES = new Set([
@@ -63,30 +70,57 @@ async function controlAgentRunRequest(
   runId: string,
   body: { action: 'pause'; nextStepId: string } | { action: 'resume' },
   fetcher: typeof fetch,
-): Promise<AgentRunProjection | undefined> {
+): Promise<ControlledAgentRunProjection | undefined> {
   const response = await fetcher(`/api/agent-runs/${encodeURIComponent(runId)}`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   });
   if (!response.ok) throw new Error(`Agent ${body.action} failed`);
-  const payload = await response.json() as { projection?: AgentRunProjection };
-  return payload.projection;
+  const payload = await response.json() as {
+    projection?: AgentRunProjection;
+    leaseOwner?: string;
+    dispatch?: { started: boolean };
+  };
+  if (!payload.projection) return undefined;
+  return {
+    ...payload.projection,
+    control: {
+      leaseOwner: payload.leaseOwner || '',
+      ...(payload.dispatch ? { dispatch: payload.dispatch } : {}),
+    },
+  };
 }
 
 export function pauseAgentRunRequest(
   runId: string,
   nextStepId: string,
   fetcher: typeof fetch = fetch,
-): Promise<AgentRunProjection | undefined> {
+): Promise<ControlledAgentRunProjection | undefined> {
   return controlAgentRunRequest(runId, { action: 'pause', nextStepId }, fetcher);
 }
 
 export function resumeAgentRunRequest(
   runId: string,
   fetcher: typeof fetch = fetch,
-): Promise<AgentRunProjection | undefined> {
+): Promise<ControlledAgentRunProjection | undefined> {
   return controlAgentRunRequest(runId, { action: 'resume' }, fetcher);
+}
+
+export async function runAgentControlRequest(input: {
+  request: () => Promise<AgentRunProjection | undefined>;
+  invalidate: () => void;
+  refresh: () => void;
+}): Promise<AgentRunProjection | undefined> {
+  try {
+    const projection = await input.request();
+    input.invalidate();
+    input.refresh();
+    return projection;
+  } catch (error) {
+    input.refresh();
+    throw error;
+  }
 }
 
 interface AgentRunEventPollerOptions {
@@ -232,16 +266,16 @@ export function useAgentRunEvents(runId: string | null | undefined): AgentRunEve
   ): Promise<AgentRunProjection | undefined> => {
     if (!runId) return undefined;
     const expectedRunId = runId;
-    generation.current += 1;
-    const expectedGeneration = generation.current;
-    const paused = await pauseAgentRunRequest(runId, nextStepId);
+    const paused = await runAgentControlRequest({
+      request: () => pauseAgentRunRequest(runId, nextStepId),
+      invalidate: () => { generation.current += 1; },
+      refresh: () => { setPollGeneration(value => value + 1); },
+    });
     if (
       paused
-      && generation.current === expectedGeneration
       && paused.runId === expectedRunId
     ) {
       setProjection(paused);
-      setPollGeneration(value => value + 1);
     }
     return paused;
   }, [runId]);
@@ -249,17 +283,17 @@ export function useAgentRunEvents(runId: string | null | undefined): AgentRunEve
   const resume = useCallback(async (): Promise<AgentRunProjection | undefined> => {
     if (!runId) return undefined;
     const expectedRunId = runId;
-    generation.current += 1;
-    const expectedGeneration = generation.current;
-    const resumed = await resumeAgentRunRequest(runId);
+    const resumed = await runAgentControlRequest({
+      request: () => resumeAgentRunRequest(runId),
+      invalidate: () => { generation.current += 1; },
+      refresh: () => { setPollGeneration(value => value + 1); },
+    });
     if (
       resumed
-      && generation.current === expectedGeneration
       && resumed.runId === expectedRunId
     ) {
       setProjection(resumed);
       setStale(false);
-      setPollGeneration(value => value + 1);
     }
     return resumed;
   }, [runId]);

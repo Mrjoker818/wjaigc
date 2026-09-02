@@ -134,6 +134,9 @@ function serviceDependencies() {
       refunded: true,
     })),
     abortTaskExecution: vi.fn<AgentRuntimeDependencies['abortTaskExecution']>(() => true),
+    dispatchExecution: vi.fn<NonNullable<AgentRuntimeDependencies['dispatchExecution']>>(async () => ({
+      started: true,
+    })),
   } satisfies AgentRuntimeDependencies;
 }
 
@@ -183,7 +186,7 @@ describe('Agent runtime service', () => {
     expect(dependencies.settleFailedTask).not.toHaveBeenCalled();
   });
 
-  it('resumes with a new durable lease from the persisted next step', async () => {
+  it('resumes with a new durable lease and dispatches a fresh execution from the persisted next step', async () => {
     const dependencies = serviceDependencies();
     const paused = event(2, 'run.paused', { nextStepId: 'generate-2' });
     const resumed = event(3, 'run.resumed', {
@@ -209,9 +212,17 @@ describe('Agent runtime service', () => {
       type: 'run.resumed',
       payload: expect.objectContaining({ nextStepId: 'generate-2' }),
     }));
+    expect(dependencies.dispatchExecution).toHaveBeenCalledWith(expect.objectContaining({
+      runId: 'run-1',
+      nextStepId: 'generate-2',
+      generation: 1,
+      leaseOwner: 'lease-new',
+      signal: expect.any(AbortSignal),
+    }));
+    expect(result.dispatch).toEqual({ started: true });
   });
 
-  it('keeps repeated pause idempotent without aborting or writing again', async () => {
+  it('retries the abort for an identical repeated pause after a commit-before-abort crash', async () => {
     const dependencies = serviceDependencies();
     const paused = event(2, 'run.paused', { nextStepId: 'generate-2' });
     dependencies.listEvents.mockResolvedValue([event(1, 'run.created'), paused]);
@@ -221,6 +232,20 @@ describe('Agent runtime service', () => {
       actorUserId: user.id, runId: 'run-1', nextStepId: 'generate-2',
     })).resolves.toMatchObject({ accepted: true, event: paused, projection: { status: 'paused' } });
     expect(dependencies.transitionControl).not.toHaveBeenCalled();
+    expect(dependencies.abortTaskExecution).toHaveBeenCalledWith('run-1', 'replaced');
+  });
+
+  it('rejects a repeated pause with a different next step', async () => {
+    const dependencies = serviceDependencies();
+    dependencies.listEvents.mockResolvedValue([
+      event(1, 'run.created'),
+      event(2, 'run.paused', { nextStepId: 'generate-2' }),
+    ]);
+    const service = agentRuntime.createAgentRuntimeService(dependencies);
+
+    await expect(service.pauseRun({
+      actorUserId: user.id, runId: 'run-1', nextStepId: 'quality-3',
+    })).rejects.toMatchObject({ code: 'AGENT_EVENT_CONFLICT', status: 409 });
     expect(dependencies.abortTaskExecution).not.toHaveBeenCalled();
   });
 

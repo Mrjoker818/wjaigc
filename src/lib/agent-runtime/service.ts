@@ -13,7 +13,7 @@ import {
 import {
   resolveTaskModel,
 } from '@/lib/task-core/model-catalog';
-import { abortTaskExecution } from '@/lib/task-core/task-abort';
+import { abortTaskExecution, createTaskAbortScope } from '@/lib/task-core/task-abort';
 import { transitionTask } from '@/lib/task-core/task-service';
 import type { User } from '@/lib/user-types';
 import { authorizeAgentContext } from './context-adapters';
@@ -38,6 +38,7 @@ import {
   type AuthorizedAgentTool,
 } from './tool-registry';
 import { toAgentModelCapabilitySet } from './model-capability-set';
+import { dispatchResumedAgentExecution, type AgentExecutionDispatchStart } from './execution-dispatch';
 import type {
   AgentContextSnapshot,
   AgentEvent,
@@ -142,6 +143,18 @@ export interface AgentEventAppendResult {
 
 export interface AgentRunControlResult extends AgentEventAppendResult {
   leaseOwner: string;
+  dispatch?: { started: boolean };
+}
+
+export interface AgentRunExecutionDispatchInput {
+  actorUserId: string;
+  projectId: string;
+  runId: string;
+  workspace: AgentWorkspace;
+  nextStepId: string;
+  generation: number;
+  leaseOwner: string;
+  signal: AbortSignal;
 }
 
 interface OwnedAgentRun {
@@ -167,6 +180,7 @@ export interface AgentRuntimeDependencies {
   transitionTask: typeof transitionTask;
   settleFailedTask: typeof settleFailedTask;
   abortTaskExecution: typeof abortTaskExecution;
+  dispatchExecution?: (input: AgentRunExecutionDispatchInput) => Promise<AgentExecutionDispatchStart>;
 }
 
 const defaultDependencies: AgentRuntimeDependencies = {
@@ -185,6 +199,7 @@ const defaultDependencies: AgentRuntimeDependencies = {
   transitionTask,
   settleFailedTask,
   abortTaskExecution,
+  dispatchExecution: dispatchResumedAgentExecution,
 };
 
 function readString(
@@ -612,6 +627,39 @@ export function createAgentRuntimeService(
     return { accepted, event: appended, projection };
   }
 
+  async function dispatchResumedRun(input: {
+    actorUserId: string;
+    run: OwnedAgentRun;
+    runId: string;
+    nextStepId: string;
+    generation: number;
+    leaseOwner: string;
+  }): Promise<{ started: boolean }> {
+    if (!input.leaseOwner || !dependencies.dispatchExecution) return { started: false };
+    const scope = createTaskAbortScope(input.runId);
+    try {
+      const started = await dependencies.dispatchExecution({
+        actorUserId: input.actorUserId,
+        projectId: input.run.projectId,
+        runId: input.runId,
+        workspace: input.run.workspace,
+        nextStepId: input.nextStepId,
+        generation: input.generation,
+        leaseOwner: input.leaseOwner,
+        signal: scope.signal,
+      });
+      if (started.completion) {
+        void started.completion.catch(() => undefined).finally(scope.dispose);
+      } else {
+        scope.dispose();
+      }
+      return { started: started.started };
+    } catch (error) {
+      scope.dispose();
+      throw error;
+    }
+  }
+
   return {
     async listRuns(input: {
       actorUserId: string;
@@ -749,6 +797,11 @@ export function createAgentRuntimeService(
       const projection = reduceAgentEvents(run.events);
       const existing = [...run.events].reverse().find(event => event.type === 'run.paused');
       if (projection.status === 'paused' && existing) {
+        const nextStepId = readString(input.nextStepId, 'nextStepId');
+        if (existing.payload.nextStepId !== nextStepId) {
+          throw new AgentEventConflictError();
+        }
+        dependencies.abortTaskExecution(input.runId, 'replaced');
         return { accepted: true, event: existing, projection, leaseOwner: '' };
       }
       if (TERMINAL_TASK_STATUSES.has(projection.status)) {
@@ -796,11 +849,25 @@ export function createAgentRuntimeService(
             payload: existing.payload,
             expectedRevision: run.task.revision ?? 0,
           });
+          const nextStepId = readString(existing.payload.nextStepId, 'nextStepId');
+          const generation = Number(existing.payload.generation);
+          if (!Number.isSafeInteger(generation) || generation < 1) {
+            throw new AgentRunRequestError('Persisted resume generation is invalid');
+          }
+          const dispatch = await dispatchResumedRun({
+            actorUserId: input.actorUserId,
+            run,
+            runId: input.runId,
+            nextStepId,
+            generation,
+            leaseOwner: retried.leaseOwner,
+          });
           return {
             accepted: true,
             event: retried.event,
             projection: reduceAgentEvents(retried.events),
             leaseOwner: retried.leaseOwner,
+            dispatch,
           };
         }
         if (TERMINAL_TASK_STATUSES.has(projection.status)) {
@@ -823,11 +890,20 @@ export function createAgentRuntimeService(
         expectedRevision: run.task.revision ?? 0,
         leaseOwner,
       });
+      const dispatch = await dispatchResumedRun({
+        actorUserId: input.actorUserId,
+        run,
+        runId: input.runId,
+        nextStepId,
+        generation,
+        leaseOwner: transitioned.leaseOwner,
+      });
       return {
         accepted: transitioned.accepted,
         event: transitioned.event,
         projection: reduceAgentEvents(transitioned.events),
         leaseOwner: transitioned.leaseOwner,
+        dispatch,
       };
     },
     async cancelRun(input: {

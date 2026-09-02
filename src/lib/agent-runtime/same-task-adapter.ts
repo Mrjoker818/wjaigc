@@ -27,6 +27,7 @@ import type {
   AgentRunProjection,
   AgentRunRequest,
 } from './types';
+import { withAgentExecutionFence } from './execution-fence';
 
 const TERMINAL_TASK_STATUSES = new Set([
   'completed',
@@ -117,6 +118,8 @@ export interface SameTaskAgentAdapterDependencies {
     runId: string;
     workspace: AgentRunRequest['workspace'];
     toolId: string;
+    leaseOwner?: string;
+    generation?: number;
   }): Promise<AgentEvent[]>;
   listEvents(input: {
     actorUserId: string;
@@ -125,7 +128,7 @@ export interface SameTaskAgentAdapterDependencies {
   }): Promise<AgentEvent[]>;
   claimExecution(input: {
     actorUserId: string; projectId: string; runId: string; toolId: string;
-  }): Promise<{ claimed: boolean; leaseOwner: string }>;
+  }): Promise<{ claimed: boolean; leaseOwner: string; generation?: number }>;
   completeExecution(input: {
     actorUserId: string; projectId: string; runId: string; toolId: string; leaseOwner: string;
   }): Promise<boolean>;
@@ -175,6 +178,8 @@ export interface ExecuteSameTaskAdoptionInput<T> {
   adoption: SameTaskAgentAdoption;
   execute: (context: AgentDownstreamExecutionContext) => Promise<T>;
   recovery?: AgentDownstreamRecovery<T>;
+  resumeFromStepId?: string;
+  expectedGeneration?: number;
 }
 
 export interface AdoptAndExecuteSameTaskResult<T> {
@@ -345,6 +350,8 @@ export function createSameTaskAgentAdapter(
     adoption,
     execute,
     recovery,
+    resumeFromStepId,
+    expectedGeneration,
   }: ExecuteSameTaskAdoptionInput<T>): Promise<AdoptAndExecuteSameTaskResult<T>> {
       let value: T | undefined;
       let executed = false;
@@ -355,7 +362,20 @@ export function createSameTaskAgentAdapter(
         runId: adoption.runId,
         toolId: adoption.toolId,
       });
-      if (lease.claimed) {
+      if (
+        lease.claimed
+        && expectedGeneration !== undefined
+        && lease.generation !== expectedGeneration
+      ) {
+        await dependencies.releaseExecution({
+          actorUserId: adoption.actorUserId,
+          projectId: adoption.projectId,
+          runId: adoption.runId,
+          toolId: adoption.toolId,
+          leaseOwner: lease.leaseOwner,
+        }).catch(() => false);
+      }
+      if (lease.claimed && (expectedGeneration === undefined || lease.generation === expectedGeneration)) {
         const admittedTask = await dependencies.getTaskForUser(
           adoption.runId,
           adoption.actorUserId,
@@ -368,29 +388,47 @@ export function createSameTaskAgentAdapter(
           executed = true;
           try {
             if (dependencies.downstreamOperations) {
-              value = await executeDurableAgentDownstreamOperation({
+              const downstreamOperations = dependencies.downstreamOperations;
+              value = await withAgentExecutionFence({
+                runId: adoption.runId,
+                leaseOwner: lease.leaseOwner,
+                generation: lease.generation || 0,
+              }, () => executeDurableAgentDownstreamOperation({
                 actorUserId: adoption.actorUserId,
                 projectId: adoption.projectId,
                 runId: adoption.runId,
                 toolId: adoption.toolId,
                 requestDigest: adoption.requestDigest,
-              }, execute, dependencies.downstreamOperations, recovery);
+              }, context => execute({
+                ...context,
+                ...(resumeFromStepId ? { resumeFromStepId } : {}),
+                executionFence: {
+                  runId: adoption.runId,
+                  leaseOwner: lease.leaseOwner,
+                  generation: lease.generation || 0,
+                },
+              }), downstreamOperations, recovery));
             } else {
-              value = await execute(createPassthroughContext({
-                actorUserId: adoption.actorUserId,
-                projectId: adoption.projectId,
+              value = await withAgentExecutionFence({
                 runId: adoption.runId,
-                toolId: adoption.toolId,
-                requestDigest: adoption.requestDigest,
+                leaseOwner: lease.leaseOwner,
+                generation: lease.generation || 0,
+              }, () => execute({
+                ...createPassthroughContext({
+                  actorUserId: adoption.actorUserId,
+                  projectId: adoption.projectId,
+                  runId: adoption.runId,
+                  toolId: adoption.toolId,
+                  requestDigest: adoption.requestDigest,
+                }),
+                ...(resumeFromStepId ? { resumeFromStepId } : {}),
+                executionFence: {
+                  runId: adoption.runId,
+                  leaseOwner: lease.leaseOwner,
+                  generation: lease.generation || 0,
+                },
               }));
             }
-            await dependencies.completeExecution({
-              actorUserId: adoption.actorUserId,
-              projectId: adoption.projectId,
-              runId: adoption.runId,
-              toolId: adoption.toolId,
-              leaseOwner: lease.leaseOwner,
-            });
           } catch (error) {
             if (
               error instanceof AgentDownstreamProviderRejectedError
@@ -445,6 +483,8 @@ export function createSameTaskAgentAdapter(
             runId: adoption.runId,
             workspace: adoption.workspace,
             toolId: adoption.toolId,
+            leaseOwner: lease.leaseOwner,
+            generation: lease.generation || 0,
           });
           if (!terminalEvents.some(event => event.type.startsWith('run.'))) {
             await dependencies.appendAdoptedEvent({
@@ -457,6 +497,13 @@ export function createSameTaskAgentAdapter(
               payload: { toolId: adoption.toolId },
             });
           }
+          await dependencies.completeExecution({
+            actorUserId: adoption.actorUserId,
+            projectId: adoption.projectId,
+            runId: adoption.runId,
+            toolId: adoption.toolId,
+            leaseOwner: lease.leaseOwner,
+          });
         }
       }
 
