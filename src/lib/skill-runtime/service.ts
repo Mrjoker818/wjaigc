@@ -25,6 +25,7 @@ import {
 import {
   createSkillExecutor,
   mergeDurableSkillOutputs,
+  selectInitialSkillStepIds,
   selectSkillStepsForExecution,
   type ExecuteSkillStepInput,
 } from './executor';
@@ -75,6 +76,12 @@ export interface SkillRunHistory {
   creditCost: number;
   createdAt: number;
   updatedAt: number;
+}
+
+export interface SkillRetryResult {
+  accepted: boolean;
+  startedStepIds: string[];
+  scheduledStepIds: string[];
 }
 
 export type SkillStepAdapter = (input: ExecuteSkillStepInput) => Promise<import('./types').SkillStepResult>;
@@ -426,7 +433,11 @@ export function createSkillRuntimeService(
     cancel(input: { actorUserId: string; runId: string }) {
       return dependencies.cancelRun(input);
     },
-    async retry(input: { actorUserId: string; runId: string; stepId: string }) {
+    async retry(input: {
+      actorUserId: string;
+      runId: string;
+      stepId: string;
+    }): Promise<SkillRetryResult> {
       const run = await owned(input);
       const invocation = skillInvocation(run.events);
       if (!invocation) throw new SkillRunNotFoundError();
@@ -447,13 +458,15 @@ export function createSkillRuntimeService(
         actorUserId: input.actorUserId,
         runId: input.runId,
       });
+      const scheduledSteps = selectSkillStepsForExecution({
+        steps: executionSteps,
+        completedStepIds: [...completedStepIds(run.events)],
+        resumeFromStepId: input.stepId,
+      });
       return {
-        ...resumed,
-        startedStepIds: selectSkillStepsForExecution({
-          steps: executionSteps,
-          completedStepIds: [...completedStepIds(run.events)],
-          resumeFromStepId: input.stepId,
-        }).map(step => step.id),
+        accepted: resumed.accepted,
+        startedStepIds: selectInitialSkillStepIds(scheduledSteps),
+        scheduledStepIds: scheduledSteps.map(step => step.id),
       };
     },
   };

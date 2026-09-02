@@ -458,7 +458,7 @@ describe('Skill run history', () => {
     expect(resumeRun).not.toHaveBeenCalled();
   });
 
-  it('reports every unfinished step actually restarted from a later parallel sibling', async () => {
+  it('separates the initial parallel retry group from the complete retry schedule', async () => {
     const task: CloudTask = {
       id: 'run-parallel-retry', userId: 'user-1', projectId: 'project-1', type: 'agent-run',
       status: 'processing', progress: 40, creditStatus: 'charged', creditCost: 3,
@@ -501,10 +501,57 @@ describe('Skill run history', () => {
 
     await expect(makeService(['plan']).retry({
       actorUserId: 'user-1', runId: task.id, stepId: 'generate-4',
-    })).resolves.toMatchObject({ startedStepIds: ['generate-3', 'generate-4', 'quality-3'] });
+    })).resolves.toEqual({
+      accepted: true,
+      startedStepIds: ['generate-3', 'generate-4'],
+      scheduledStepIds: ['generate-3', 'generate-4', 'quality-3'],
+    });
     await expect(makeService(['plan', 'generate-3']).retry({
       actorUserId: 'user-1', runId: task.id, stepId: 'generate-4',
-    })).resolves.toMatchObject({ startedStepIds: ['generate-4', 'quality-3'] });
+    })).resolves.toEqual({
+      accepted: true,
+      startedStepIds: ['generate-4'],
+      scheduledStepIds: ['generate-4', 'quality-3'],
+    });
+  });
+
+  it('reports only the first sequential step as started while scheduling all unfinished work', async () => {
+    const task: CloudTask = {
+      id: 'run-sequential-retry', userId: 'user-1', projectId: 'project-1', type: 'agent-run',
+      status: 'processing', progress: 10, creditStatus: 'charged', creditCost: 3,
+      createdAt: 10, updatedAt: 20,
+    };
+    const events: AgentEvent[] = [{
+      eventId: 'created', runId: task.id, sequence: 1, type: 'run.created', timestamp: 'now',
+      payload: {
+        workspace: 'canvas', workspaceId: 'canvas-1',
+        skill: { skillId: definition.id, skillVersion: 1, inputValues: {}, modelBindings: {} },
+        skillSnapshot: { id: definition.id, version: 1, name: definition.name, steps: definition.steps },
+      },
+    }, {
+      eventId: 'paused', runId: task.id, sequence: 2, type: 'run.paused', timestamp: 'now',
+      payload: { nextStepId: 'plan', pauseReason: 'execution-error' },
+    }];
+    const projection: AgentRunProjection = {
+      runId: task.id, status: 'paused', lastSequence: 2, plan: [], currentStepId: 'plan',
+      resumeFromStepId: 'plan', assetVersionIds: [], ignoredEventIds: [],
+      missingSequences: [], qualityChecks: [],
+    };
+    const service = createSkillRuntimeService({
+      createAuthorizedSkillRun: vi.fn(), getTaskForUser: vi.fn(async () => task),
+      listTasks: vi.fn(async () => [task]), listEvents: vi.fn(async () => events),
+      getProjection: vi.fn(async () => projection), pauseRun: vi.fn(),
+      resumeRun: vi.fn(async () => ({ accepted: true } as never)), cancelRun: vi.fn(),
+      prepareResume: vi.fn(async () => true),
+    });
+
+    await expect(service.retry({
+      actorUserId: 'user-1', runId: task.id, stepId: 'plan',
+    })).resolves.toEqual({
+      accepted: true,
+      startedStepIds: ['plan'],
+      scheduledStepIds: ['plan', 'generate-3', 'generate-4', 'quality-3'],
+    });
   });
 
   it('uses the frozen Skill step snapshot and exposes only lineage plus final credit state', async () => {

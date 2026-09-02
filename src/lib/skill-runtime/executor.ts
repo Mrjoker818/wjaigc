@@ -115,6 +115,21 @@ export function selectSkillStepsForExecution(input: {
   return input.steps.slice(resumeGroupIndex).filter(step => !completed.has(step.id));
 }
 
+export function selectInitialSkillStepIds(
+  scheduledSteps: readonly SkillStepDefinition[],
+): string[] {
+  const first = scheduledSteps[0];
+  if (!first) return [];
+  if (first.execution !== 'parallel' || !first.parallelGroup) return [first.id];
+
+  const stepIds: string[] = [];
+  for (const step of scheduledSteps) {
+    if (step.execution !== 'parallel' || step.parallelGroup !== first.parallelGroup) break;
+    stepIds.push(step.id);
+  }
+  return stepIds;
+}
+
 export class SkillQualityFailedError extends Error {
   readonly code = 'SKILL_QUALITY_FAILED';
   readonly status = 422;

@@ -106,7 +106,11 @@ describe('Skill run API', () => {
   });
 
   it('retries an owned failed step with the authenticated actor', async () => {
-    mocks.retrySkillStep.mockResolvedValue({ accepted: true, startedStepIds: ['generate-3', 'quality-3'] });
+    mocks.retrySkillStep.mockResolvedValue({
+      accepted: true,
+      startedStepIds: ['generate-3'],
+      scheduledStepIds: ['generate-3', 'quality-3'],
+    });
     const route = await import('@/app/api/skill-runs/[runId]/retry/route');
     const response = await route.POST(new NextRequest('http://localhost/api/skill-runs/run-1/retry', {
       method: 'POST', headers: { 'content-type': 'application/json' },
@@ -114,6 +118,11 @@ describe('Skill run API', () => {
     }), { params: Promise.resolve({ runId: 'run-1' }) });
     expect(response.status).toBe(200);
     expect(mocks.retrySkillStep).toHaveBeenCalledWith({ actorUserId: user.id, runId: 'run-1', stepId: 'generate-3' });
+    await expect(response.json()).resolves.toEqual({
+      accepted: true,
+      startedStepIds: ['generate-3'],
+      scheduledStepIds: ['generate-3', 'quality-3'],
+    });
   });
 
   it('maps cross-user not-found and idempotency conflicts without leaking details', async () => {
