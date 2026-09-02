@@ -156,3 +156,37 @@ git diff --check                      PASS
 ### 仍受阻项
 
 本机未设置 `POSTGRES_TEST_DATABASE_URL`，因此新增的五项真实 PostgreSQL 并发测试只完成了编译和显式 skip，尚无数据库运行证据。未用 Mock 或内存实现替代该证据；配置隔离测试库后必须补跑，才能对 PostgreSQL 并发验收给出通过结论。
+
+## 全量 Vitest 四项失败闭环（基线 5d0f69d6）
+
+### RED 与根因
+
+先独立执行四个失败文件：
+
+```text
+pnpm exec vitest run tests/regression/task-entry-migration.test.ts tests/unit/protected-baseline-gate.spec.ts src/__tests__/api/save-image-auth-contract.test.ts src/__tests__/components/image-tool-request-integrity.test.ts
+```
+
+结果为 4 个文件失败、4 项失败、25 项通过。逐项追踪后确认：
+
+- `agent-edit` 的任务入口迁移、`/api/save-image` 持久化调用和 `remove_background` 请求已经迁到 `src/lib/agent-runtime/agent-edit-execution-service.ts`，生产实现仍完整携带迁移审计、签名内部请求头以及 `imageUrl/providerId/model`；三个源码契约仍读取薄路由，属于测试所有权陈旧，不是生产行为回归。
+- 保护基线缺少 Unified Skill Runtime Task1-6 已提交生产文件的来源授权。33 个漂移路径均逐文件核对最后内容提交，且提交可从当前 `HEAD` 到达；问题是授权记录未随 Task6 完成同步。
+
+### 最小修复
+
+- 将三个结构契约的读取目标改为真实执行服务，保留全部原断言，没有删除或弱化测试。
+- 为 33 个 Task1-6 生产文件分别补充精确路径和来源提交，并同步测试清单、允许路径清单及来源凭证清单。
+- 未增加目录授权或通配符，未修改生产代码、`stable` 或四个保护未跟踪项。
+
+### GREEN 与回归
+
+```text
+四个原失败文件：4 个文件通过，29 项通过。
+Task6 focused：4 个文件通过，41 项通过；PostgreSQL 文件 5 项因缺少 POSTGRES_TEST_DATABASE_URL 明确跳过。
+pnpm test：614 个文件通过，27 个文件跳过；4,719 项通过，141 项跳过，0 失败。
+pnpm ts-check：PASS。
+目标 ESLint：PASS（0 error / 0 warning）。
+git diff --check：PASS。
+```
+
+PostgreSQL 的五项 Task6 并发验证仍是环境阻塞项，未用 Mock 结果冒充真实数据库证据。

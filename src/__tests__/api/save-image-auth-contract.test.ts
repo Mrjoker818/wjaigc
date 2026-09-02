@@ -7,7 +7,7 @@ const routeFile = path.resolve(root, 'src/app/api/save-image/route.ts');
 const serverCallers = [
   'src/lib/persist-result-image.ts',
   'src/lib/quality-enhance.ts',
-  'src/app/api/agent-edit/route.ts',
+  'src/lib/agent-runtime/agent-edit-execution-service.ts',
   'src/app/api/generate/route.ts',
   'src/app/api/brand-ecommerce/route.ts',
   'src/app/api/workflow/execute/route.ts',

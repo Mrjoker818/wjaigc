@@ -6,7 +6,7 @@ const readSource = (path: string) => readFileSync(resolve(process.cwd(), path), 
 
 const canvasSource = readSource('src/components/infinite-canvas.tsx');
 const imageEditSource = readSource('src/app/api/image-edit/route.ts');
-const agentEditSource = readSource('src/app/api/agent-edit/route.ts');
+const agentEditExecutionSource = readSource('src/lib/agent-runtime/agent-edit-execution-service.ts');
 const imageTo3DSource = readSource('src/app/api/image-to-3d/route.ts');
 const refinePanelSource = readSource('src/components/refine-engine-panel.tsx');
 
@@ -25,9 +25,9 @@ describe('image tool request integrity', () => {
   });
 
   it('forwards the selected image provider to Agent background removal', () => {
-    const requestStart = agentEditSource.indexOf('const removeBackgroundRequest = {');
-    const requestEnd = agentEditSource.indexOf('};', requestStart);
-    const requestBlock = agentEditSource.slice(requestStart, requestEnd);
+    const requestStart = agentEditExecutionSource.indexOf('const removeBackgroundRequest = {');
+    const requestEnd = agentEditExecutionSource.indexOf('};', requestStart);
+    const requestBlock = agentEditExecutionSource.slice(requestStart, requestEnd);
 
     expect(requestStart).toBeGreaterThan(-1);
     expect(requestEnd).toBeGreaterThan(requestStart);

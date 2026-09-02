@@ -17,7 +17,7 @@ const migratedRoutes = [
   'src/app/api/edit/route.ts',
   'src/app/api/image-to-3d/route.ts',
   'src/app/api/layered-decompose/route.ts',
-  'src/app/api/agent-edit/route.ts',
+  'src/lib/agent-runtime/agent-edit-execution-service.ts',
 ];
 
 describe('task entry migration contract', () => {
