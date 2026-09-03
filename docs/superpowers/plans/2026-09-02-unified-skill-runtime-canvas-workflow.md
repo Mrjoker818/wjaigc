@@ -1054,7 +1054,7 @@ git commit -m "fix: isolate simple chat skill catalog"
 - Consumes: 两套目录、Canvas/Workflow/Simple Chat 入口、Playwright 证据配置。
 - Produces: 21/16 数量门禁和 Chromium/Firefox/WebKit 核心证据。
 
-- [ ] **Step 1: 写入保护清单 RED 测试**
+- [x] **Step 1: 写入保护清单 RED 测试**
 
 ```ts
 expect(inventory.skillCatalogs.canvas).toHaveLength(21);
@@ -1064,13 +1064,13 @@ expect(intersection(inventory.skillCatalogs.canvas, inventory.skillCatalogs.simp
 expect(inventory.nodeTypes).toContain('ai-skill');
 ```
 
-- [ ] **Step 2: 运行清单测试确认 RED**
+- [x] **Step 2: 运行清单测试确认 RED**
 
 Run: `pnpm exec vitest run src/__tests__/scripts/skill-runtime-inventory.test.ts`
 
 Expected: FAIL，清单尚未输出 Skill 作用域。
 
-- [ ] **Step 3: 增加 E2E 场景和失败证据**
+- [x] **Step 3: 增加 E2E 场景和失败证据**
 
 ```ts
 test('画布 Skill 与节点 Skill 共用同一任务和结果版本', async ({ page }) => {
@@ -1095,7 +1095,7 @@ test('独立智能对话无法检出画布 Skill', async ({ page }) => {
 
 Playwright 失败必须保留 screenshot、video、trace、console 和 network；不得用固定长 `sleep` 代替状态等待。
 
-- [ ] **Step 4: 运行完整本地门禁**
+- [ ] **Step 4: 运行完整本地门禁（代码门禁通过；隔离 PostgreSQL 与三浏览器业务断言受环境阻塞）**
 
 Run in order:
 
@@ -1111,7 +1111,7 @@ pnpm exec playwright test tests/e2e/skill-runtime-canvas-workflow.spec.ts tests/
 
 Expected: 0 failed；PostgreSQL 跳过项单独计数，不冒充通过；构建页数不得少于基线 118。
 
-- [ ] **Step 5: 提交测试门禁**
+- [x] **Step 5: 提交测试门禁**
 
 ```bash
 git add scripts/stage-4-inventory.mjs scripts/check-protected-baseline.mjs tests/e2e/skill-runtime-canvas-workflow.spec.ts tests/e2e/skill-runtime-simple-chat-isolation.spec.ts playwright.config.ts src/__tests__/scripts/skill-runtime-inventory.test.ts

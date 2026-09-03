@@ -181,6 +181,65 @@ export function extractSkillIds(source, arrayName) {
   return uniqueSorted(ids);
 }
 
+export function extractSkillIdsForSurface(
+  source,
+  arrayName,
+  surfacesVariableName,
+  surface,
+) {
+  const escapedSurfacesName = surfacesVariableName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  if (!new RegExp(`\\ballowedSurfaces\\s*:\\s*${escapedSurfacesName}\\b`).test(source)) {
+    return [];
+  }
+  const declaredSurfaces = extractNamedArray(source, surfacesVariableName);
+  const allowedSurfaces = [];
+  let quote = null;
+  let value = '';
+  let escaped = false;
+  let lineComment = false;
+  let blockComment = false;
+  for (let index = 0; index < declaredSurfaces.length; index += 1) {
+    const character = declaredSurfaces[index];
+    const next = declaredSurfaces[index + 1];
+    if (lineComment) {
+      if (character === '\n') lineComment = false;
+      continue;
+    }
+    if (blockComment) {
+      if (character === '*' && next === '/') {
+        blockComment = false;
+        index += 1;
+      }
+      continue;
+    }
+    if (quote) {
+      if (escaped) {
+        value += character;
+        escaped = false;
+      } else if (character === '\\') {
+        escaped = true;
+      } else if (character === quote) {
+        allowedSurfaces.push(value);
+        quote = null;
+        value = '';
+      } else {
+        value += character;
+      }
+      continue;
+    }
+    if (character === '/' && next === '/') {
+      lineComment = true;
+      index += 1;
+    } else if (character === '/' && next === '*') {
+      blockComment = true;
+      index += 1;
+    } else if (character === "'" || character === '"') {
+      quote = character;
+    }
+  }
+  return allowedSurfaces.includes(surface) ? extractSkillIds(source, arrayName) : [];
+}
+
 function extractObjectKeys(source, exportName) {
   const match = source.match(new RegExp(`export\\s+const\\s+${exportName}[^=]*=\\s*\\{([\\s\\S]*?)\\n\\};`));
   if (!match) return [];
@@ -230,6 +289,9 @@ function renderStage4InventoryMarkdown(inventory) {
 - Port types: ${inventory.portTypes.length}
 - Agent tools: ${inventory.agentTools.length}
 - Skills: ${inventory.skills.length}
+- Canvas Skills: ${inventory.skillCatalogs.canvas.length}
+- Workflow Skills: ${inventory.skillCatalogs.workflow.length}
+- Simple Chat Skills: ${inventory.skillCatalogs.simpleChat.length}
 - Routes: ${inventory.routes.length}
 
 ## Workspaces
@@ -334,10 +396,30 @@ export async function collectStage4Inventory(root = process.cwd()) {
 
   const nodeTypes = extractObjectKeys(workflowSource, 'NODE_TYPE_LABELS');
   const portTypes = extractObjectKeys(workflowSource, 'PORT_COMPATIBILITY');
-  const skills = uniqueSorted([
-    ...extractSkillIds(canvasSkillsSource, 'RAW_CANVAS_PRESET_SKILLS'),
-    ...extractSkillIds(simpleChatSkillsSource, 'RAW_SIMPLE_CHAT_PRESET_SKILLS'),
-  ]);
+  const canvasSkills = extractSkillIdsForSurface(
+    canvasSkillsSource,
+    'RAW_CANVAS_PRESET_SKILLS',
+    'canvasSurfaces',
+    'canvas',
+  );
+  const workflowSkills = extractSkillIdsForSurface(
+    canvasSkillsSource,
+    'RAW_CANVAS_PRESET_SKILLS',
+    'canvasSurfaces',
+    'workflow',
+  );
+  const simpleChatSkills = extractSkillIdsForSurface(
+    simpleChatSkillsSource,
+    'RAW_SIMPLE_CHAT_PRESET_SKILLS',
+    'simpleChatSurfaces',
+    'simple-chat',
+  );
+  const skillCatalogs = {
+    canvas: canvasSkills,
+    workflow: workflowSkills,
+    simpleChat: simpleChatSkills,
+  };
+  const skills = uniqueSorted([...canvasSkills, ...simpleChatSkills]);
   const agentTools = extractAgentTools(agentSource);
 
   const workspaces = [
@@ -453,6 +535,7 @@ export async function collectStage4Inventory(root = process.cwd()) {
     routes: routeSet,
     agentTools,
     skills,
+    skillCatalogs,
     taskTypes,
   };
 }

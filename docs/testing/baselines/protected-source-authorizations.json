@@ -207,6 +207,10 @@
     { "path": "migrations/20260902_unified_skill_task4_agent_controls.sql", "sourceCommit": "9226821e" },
     { "path": "migrations/20260902_unified_skill_task4_execution_fence.sql", "sourceCommit": "2bbd6851" },
     { "path": "migrations/20260903_unified_skill_task4_dispatch_lease.sql", "sourceCommit": "b8c687d3" },
-    { "path": "migrations/20260904_unified_skill_task4_agent_edit_descriptor.sql", "sourceCommit": "b8c687d3" }
+    { "path": "migrations/20260904_unified_skill_task4_agent_edit_descriptor.sql", "sourceCommit": "b8c687d3" },
+    { "path": "src/app/api/workflow/execute/route.ts", "sourceCommit": "347b0b21" },
+    { "path": "src/lib/skill-runtime/workflow-client.ts", "sourceCommit": "347b0b21" },
+    { "path": "src/lib/workflow-execution-context.ts", "sourceCommit": "347b0b21" },
+    { "path": "src/lib/workflow-skill-execution.ts", "sourceCommit": "347b0b21" }
   ]
 }

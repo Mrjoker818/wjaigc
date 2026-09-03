@@ -7,6 +7,12 @@ const chromiumLaunchOptions = process.env.CHROMIUM_PATH
 const stage3Run = process.env.npm_lifecycle_event === 'test:e2e:stage-3'
   || process.argv.some(argument => argument.includes('stage-3-canvas-kernel.spec.ts'))
   || Boolean(process.env.E2E_STAGE3_RUN_ID);
+const scopedSkillRuntimeRun = process.env.E2E_SKILL_RUNTIME_RUN === '1'
+  || process.argv.some(argument => (
+  argument.includes('skill-runtime-canvas-workflow.spec.ts')
+  || argument.includes('skill-runtime-simple-chat-isolation.spec.ts')
+  ));
+if (scopedSkillRuntimeRun) process.env.E2E_SKILL_RUNTIME_RUN = '1';
 if (stage3Run && !process.env.E2E_STAGE3_EVIDENCE_EXECUTION_ID) {
   process.env.E2E_STAGE3_EVIDENCE_EXECUTION_ID = `${Date.now()}-${process.pid}`;
 }
@@ -19,7 +25,9 @@ const stage3EvidenceScope = [
   .join('/');
 const outputDir = stage3Run
   ? `./test-results/stage-3-baseline/${stage3EvidenceScope}/playwright-output`
-  : './.playwright-output';
+  : scopedSkillRuntimeRun
+    ? './test-results/skill-runtime/playwright-output'
+    : './.playwright-output';
 const htmlOutput = stage3Run
   ? `test-results/stage-3-baseline/${stage3EvidenceScope}/playwright-report`
   : 'playwright-report';

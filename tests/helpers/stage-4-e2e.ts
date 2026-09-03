@@ -559,6 +559,14 @@ export async function seedStage4RuntimeDependencies(input: {
       [projectId, input.auth.userId, `Stage 4 ${profile}`],
     );
     await pool.query(
+      `INSERT INTO wujie_system_settings(key, value, updated_at)
+       VALUES ('defaultChatModel', $1::jsonb, $2)
+       ON CONFLICT (key) DO UPDATE SET
+         value = EXCLUDED.value,
+         updated_at = EXCLUDED.updated_at`,
+      [JSON.stringify('stage4-chat-provider::stage4-chat-model'), now],
+    );
+    await pool.query(
       `INSERT INTO wujie_credits(
          id, user_id, balance, total_recharged, total_used, created_at, updated_at
        ) VALUES ($1, $2, 10000, 10000, 0, $3, $3)
