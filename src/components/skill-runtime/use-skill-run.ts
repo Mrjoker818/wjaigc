@@ -76,8 +76,8 @@ export function useSkillRun({ fetcher = fetch }: UseSkillRunOptions = {}): UseSk
   const estimateController = useRef<AbortController | undefined>(undefined);
   const historyController = useRef<AbortController | undefined>(undefined);
   const historyGeneration = useRef(0);
-  const eventRefreshTimer = useRef<number | undefined>(undefined);
-  const events = useAgentRunEvents(eventRunId);
+  const [eventRefreshVersion, setEventRefreshVersion] = useState(0);
+  const events = useAgentRunEvents(eventRunId, eventRefreshVersion);
 
   useEffect(() => {
     const activeControllers = controllers.current;
@@ -89,9 +89,6 @@ export function useSkillRun({ fetcher = fetch }: UseSkillRunOptions = {}): UseSk
       estimateGeneration.current += 1;
       historyGeneration.current += 1;
       busyGeneration.current += 1;
-      if (eventRefreshTimer.current !== undefined) {
-        window.clearTimeout(eventRefreshTimer.current);
-      }
       for (const controller of activeControllers) controller.abort();
       activeControllers.clear();
     };
@@ -101,19 +98,12 @@ export function useSkillRun({ fetcher = fetch }: UseSkillRunOptions = {}): UseSk
     expectedRunId: string,
     expectedGeneration: number,
   ): void => {
-    if (eventRefreshTimer.current !== undefined) {
-      window.clearTimeout(eventRefreshTimer.current);
+    const active = activeRun.current;
+    if (mounted.current && startGeneration.current === expectedGeneration
+      && active?.runId === expectedRunId && active.generation === expectedGeneration) {
+      // A version change survives React batching with an unchanged run identity.
+      setEventRefreshVersion(value => value + 1);
     }
-    setEventRunId(undefined);
-    eventRefreshTimer.current = window.setTimeout(() => {
-      eventRefreshTimer.current = undefined;
-      if (mounted.current && startGeneration.current === expectedGeneration) {
-        const active = activeRun.current;
-        if (active?.runId === expectedRunId && active.generation === expectedGeneration) {
-          setEventRunId(expectedRunId);
-        }
-      }
-    }, 0);
   }, []);
 
   const request = useCallback(async <T,>(
@@ -391,10 +381,6 @@ export function useSkillRun({ fetcher = fetch }: UseSkillRunOptions = {}): UseSk
     historyGeneration.current += 1;
     busyGeneration.current += 1;
     activeRun.current = undefined;
-    if (eventRefreshTimer.current !== undefined) {
-      window.clearTimeout(eventRefreshTimer.current);
-      eventRefreshTimer.current = undefined;
-    }
     setRunId(undefined);
     setEventRunId(undefined);
     setEstimate(undefined);

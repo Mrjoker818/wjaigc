@@ -202,7 +202,7 @@ export function createAgentRunEventPoller({
   };
 }
 
-export function useAgentRunEvents(runId: string | null | undefined): AgentRunEventsResult {
+export function useAgentRunEvents(runId: string | null | undefined, refreshVersion = 0): AgentRunEventsResult {
   const [projection, setProjection] = useState<AgentRunProjection | undefined>(
     () => runId ? initialAgentRunProjection(runId) : undefined,
   );
@@ -242,7 +242,7 @@ export function useAgentRunEvents(runId: string | null | undefined): AgentRunEve
       poller.stop();
       if (timer !== undefined) window.clearTimeout(timer);
     };
-  }, [runId, pollGeneration]);
+  }, [runId, pollGeneration, refreshVersion]);
 
   const cancel = useCallback(async (): Promise<AgentRunProjection | undefined> => {
     if (!runId) return undefined;

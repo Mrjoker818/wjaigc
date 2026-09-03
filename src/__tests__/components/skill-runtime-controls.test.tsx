@@ -19,8 +19,9 @@ interface MockAgentEventsResult {
 }
 
 const agentEvents = vi.hoisted(() => ({
-  useAgentRunEvents: vi.fn((runId: string | undefined): MockAgentEventsResult => {
+  useAgentRunEvents: vi.fn((runId: string | undefined, refreshVersion?: number): MockAgentEventsResult => {
     void runId;
+    void refreshVersion;
     return {
       projection: undefined,
       stale: false,
@@ -382,20 +383,17 @@ describe('useSkillRun', () => {
     await act(async () => { await result.current.startRun(request); });
     await act(async () => { await result.current.resume(); });
     await waitFor(() => {
-      const runIds = agentEvents.useAgentRunEvents.mock.calls.map(call => call[0]);
-      expect(runIds.slice(-2)).toEqual([undefined, 'run-1']);
+      expect(agentEvents.useAgentRunEvents).toHaveBeenLastCalledWith('run-1', 1);
     });
 
     await act(async () => { await result.current.retry('render'); });
     await waitFor(() => {
-      const runIds = agentEvents.useAgentRunEvents.mock.calls.map(call => call[0]);
-      expect(runIds.slice(-2)).toEqual([undefined, 'run-1']);
+      expect(agentEvents.useAgentRunEvents).toHaveBeenLastCalledWith('run-1', 2);
     });
 
     await act(async () => { await result.current.cancel(); });
     await waitFor(() => {
-      const runIds = agentEvents.useAgentRunEvents.mock.calls.map(call => call[0]);
-      expect(runIds.slice(-2)).toEqual([undefined, 'run-1']);
+      expect(agentEvents.useAgentRunEvents).toHaveBeenLastCalledWith('run-1', 3);
     });
   });
 

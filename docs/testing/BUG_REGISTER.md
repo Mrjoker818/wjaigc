@@ -3869,3 +3869,15 @@ All listed Stage 4 defects are locally closed. S4-BUG-008 also passed its exact-
 | 修复 | 父 Run 进入终态时，活动步骤同步投影为 `cancelled/failed/timeout`；未开始步骤保持 `pending`。 |
 | 账务证据 | 实测 Run `14879240-7fd5-4a8d-9c50-16fabc06feb7` 取消被接受，62 积分一次退款，系统余额取消前后均为 5110。 |
 | 当前状态 | `LOCAL PASS / CLOUD REDEPLOY PENDING`。 |
+
+### TEST-SKILL-004：手动暂停后取消成功但界面仍显示暂停（2026-09-04）
+
+- 等级：P1，真实 Google Chrome 复现；项目 `project_1787549625844_nfmso3ts9`。
+- 任务：`c4c6ac10-a5ec-4ab2-ba19-1ce44ddde7fb`，服务端及第二步 cancelled，creditStatus refunded、62 积分；本轮未独立复核账本退款条目。
+- 步骤：美食 Skill 估算、运行、手动暂停、取消；实际页面一直保留已暂停和继续/取消。
+- 预期：读取服务器取消终态，撤掉继续与取消操作。
+- 根因：零延时清空/恢复同一 eventRunId 被 React 批处理合并，已暂停的事件订阅未重新启动；取消事件 sequence 6 已持久化。
+- 最小修复：useAgentRunEvents 接受显式刷新版本号；useSkillRun 递增版本，不依赖定时器与临时清空 ID；保留运行代际校验。
+- 永久测试：skill-cancel-subscription.test.tsx，真实 Hook 组合，RED paused → GREEN cancelled；旧控件测试仍保留。
+- 验证：29 项聚焦及全仓 4904 项通过，143 环境门禁项跳过；TypeScript、定点 Lint、38 项功能保护通过。生产构建默认 4GB 堆 OOM，进程级 8GB 重试退出 0、119/119 页面；云端验收仍未关闭。
+- 证据与限制：[续验记录](2026-09-04-skill-cancel-ui-followup.md)。Chrome 截图在对话工具输出中；首次取消 PATCH 原始响应未捕获，不声称有完整录像或 Trace。
