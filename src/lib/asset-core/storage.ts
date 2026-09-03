@@ -250,6 +250,7 @@ function mapVersion(row: VersionRow): AssetVersion {
     parentVersionIds: row.parent_version_ids ?? [],
     ...(row.task_id ? { taskId: row.task_id } : {}),
     ...(row.idempotency_key ? { idempotencyKey: row.idempotency_key } : {}),
+    ...(Object.keys(asRecord(row.metadata)).length > 0 ? { metadata: asRecord(row.metadata) } : {}),
     createdAt: toIso(row.created_at),
   };
 }

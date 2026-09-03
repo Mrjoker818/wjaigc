@@ -7,6 +7,7 @@ import {
   dbGetUserData,
 } from '@/lib/db-storage';
 import { CANVAS_PRESET_SKILLS, SIMPLE_CHAT_PRESET_SKILLS } from './catalog';
+import { requireSkillForSurface, SkillNotFoundError, SkillSurfaceForbiddenError } from './catalog';
 import { normalizeLegacyChatSkills, type LegacyMigrationResult } from './legacy-migration';
 import type { SkillDefinition, SkillSurface } from './types';
 
@@ -419,6 +420,26 @@ export function createSkillStore(
   };
 
   return {
+    async resolveExecutable(
+      userId: string,
+      skillId: string,
+      surface: SkillSurface,
+    ): Promise<SkillDefinition> {
+      if (!isSurface(surface)) throw new InvalidSkillSurfaceError();
+      try {
+        return structuredClone(requireSkillForSurface(skillId, surface));
+      } catch (error) {
+        if (!(error instanceof SkillNotFoundError)) throw error;
+      }
+      await migrateLegacy(userId);
+      const envelope = await readEnvelope(adapter, userId);
+      const skill = envelope.skills.find(candidate => candidate.id === skillId && candidate.ownerId === userId);
+      if (!skill || !skill.enabled) throw new UserSkillNotFoundError();
+      if (!skill.allowedSurfaces.includes(surface)) {
+        throw new SkillSurfaceForbiddenError('此 Skill 不适用于当前工作区');
+      }
+      return structuredClone(skill);
+    },
     async load(userId: string, surface: SkillSurface): Promise<SkillDefinition[]> {
       if (!isSurface(surface)) throw new InvalidSkillSurfaceError();
       await migrateLegacy(userId);
@@ -618,6 +639,7 @@ export function createSkillStore(
 const defaultStore = createSkillStore(databaseAdapter);
 
 export const loadUserSkillCatalog = defaultStore.load;
+export const resolveExecutableSkillForUser = defaultStore.resolveExecutable;
 export const copySkillForUser = (
   actorUserId: string,
   sourceSkillId: string,

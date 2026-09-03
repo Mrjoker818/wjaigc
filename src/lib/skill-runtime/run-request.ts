@@ -13,6 +13,7 @@ import {
 } from '@/lib/task-core/model-catalog';
 import type { User } from '@/lib/user-types';
 import { requireSkillForSurface } from './catalog';
+import { resolveExecutableSkillForUser } from './storage';
 import {
   estimateSkillRunCost,
   type FrozenBindings,
@@ -43,6 +44,26 @@ export interface SkillRunRequest {
 export interface SkillRunRequestDependencies {
   actorUserId: string;
   resolveTaskModel: typeof resolveTaskModel;
+  resolveSkill?: (
+    actorUserId: string,
+    skillId: string,
+    surface: SkillSurface,
+  ) => Promise<SkillDefinition>;
+}
+
+async function resolveExecutableSkill(
+  input: Pick<SkillRunRequest, 'skillId' | 'surface'>,
+  dependencies: SkillRunRequestDependencies,
+): Promise<SkillDefinition> {
+  if (dependencies.resolveSkill) {
+    return dependencies.resolveSkill(dependencies.actorUserId, input.skillId, input.surface);
+  }
+  try {
+    return requireSkillForSurface(input.skillId, input.surface);
+  } catch (error) {
+    if ((error as { code?: string }).code !== 'SKILL_NOT_FOUND') throw error;
+    return resolveExecutableSkillForUser(dependencies.actorUserId, input.skillId, input.surface);
+  }
 }
 
 export interface AuthorizedSkillAgentRun {
@@ -204,7 +225,7 @@ export async function authorizeSkillAgentRunRequest(
   const surface: SkillSurface = request.workspace === 'chat'
     ? 'simple-chat'
     : request.workspace;
-  const skill = requireSkillForSurface(invocation.skillId, surface);
+  const skill = await resolveExecutableSkill({ skillId: invocation.skillId, surface }, dependencies);
   if (skill.version !== invocation.skillVersion) throw new SkillRunVersionError();
 
   const resolved = resolveSkillInputs(skill, invocation.inputValues);
@@ -266,8 +287,9 @@ export async function buildSkillAgentRunRequest(
     actorUserId: '',
     resolveTaskModel,
   },
+  resolvedSkill?: SkillDefinition,
 ): Promise<AgentRunRequest> {
-  const skill = requireSkillForSurface(input.skillId, input.surface);
+  const skill = resolvedSkill ?? await resolveExecutableSkill(input, dependencies);
   if (skill.version !== input.skillVersion) throw new SkillRunVersionError();
   const resolved = resolveSkillInputs(skill, input.inputValues);
   const bindings = await authorizeAndFreezeBindings(
@@ -319,12 +341,12 @@ export async function createSkillRun(
     ...dependencies,
     actorUserId: input.actor.id,
   };
-  const agentRequest = await buildSkillAgentRunRequest(input.request, effective);
+  const skill = await resolveExecutableSkill(input.request, effective);
+  const agentRequest = await buildSkillAgentRunRequest(input.request, effective, skill);
   await effective.authorizeContext({
     actorUserId: input.actor.id,
     request: agentRequest,
   });
-  const skill = requireSkillForSurface(input.request.skillId, input.request.surface);
   const estimate = await estimateSkillRunCost(
     skill,
     agentRequest.skill!.modelBindings,

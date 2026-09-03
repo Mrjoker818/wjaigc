@@ -4,6 +4,7 @@ import type { PoolClient, QueryResultRow } from 'pg';
 import { getPool } from '@/lib/db-client';
 
 import { lockAssetGraphWriteGate } from './storage';
+import { parseWorkspaceSourceTrace, type WorkspaceSourceTrace } from './source-trace';
 import type {
   AssetFile,
   AssetKind,
@@ -38,6 +39,7 @@ export interface ProjectCompletedTaskInput {
   parentVersionIds: string[];
   projectionMode?: TaskProjectionMode;
   idempotencyKey?: string;
+  sourceTrace?: WorkspaceSourceTrace;
 }
 
 export interface TaskProjectionPendingInput {
@@ -82,6 +84,7 @@ export interface TaskProjectionCreateInput {
   billingTransactionId?: string;
   parentVersionIds: string[];
   projectionMode: TaskProjectionMode;
+  sourceTrace?: WorkspaceSourceTrace;
 }
 
 export interface TaskProjectionPlacementReference {
@@ -250,6 +253,7 @@ function mapVersion(row: ProjectionVersionRow, parentVersionIds: string[]): Asse
     parentVersionIds,
     ...(row.task_id ? { taskId: row.task_id } : {}),
     ...(row.idempotency_key ? { idempotencyKey: row.idempotency_key } : {}),
+    ...(Object.keys(row.metadata || {}).length > 0 ? { metadata: structuredClone(row.metadata) } : {}),
     createdAt: row.created_at.toISOString(),
   };
 }
@@ -397,6 +401,7 @@ class PostgresTaskProjectionTransaction implements TaskProjectionTransaction {
       lineageMode: lineageParentIds.length === input.parentVersionIds.length
         ? 'asset-parent'
         : 'ordered-source-metadata',
+      ...(input.sourceTrace ? { sourceTrace: input.sourceTrace } : {}),
     };
     const inserted = await this.client.query<ProjectionVersionRow>(
       `INSERT INTO wujie_asset_versions(
@@ -568,6 +573,7 @@ class PostgresTaskProjectionTransaction implements TaskProjectionTransaction {
           source: 'task-projection',
           taskId: input.taskId,
           outputIndex: input.outputIndex,
+          ...(input.sourceTrace ? { sourceTrace: input.sourceTrace } : {}),
           ...(input.placementIdempotencyKey
             ? { resultProjectionIdempotencyKey: input.placementIdempotencyKey }
             : {}),
@@ -611,6 +617,12 @@ export function createTaskAssetProjector(
         || !input.targetProjectId
         || input.parentVersionIds.length > 32
       ) {
+        throw new TaskProjectionError('TASK_PROJECTION_NOT_FOUND');
+      }
+      const sourceTrace = input.sourceTrace === undefined
+        ? undefined
+        : parseWorkspaceSourceTrace(input.sourceTrace);
+      if (input.sourceTrace !== undefined && !sourceTrace) {
         throw new TaskProjectionError('TASK_PROJECTION_NOT_FOUND');
       }
       return repository.transaction(async (transaction) => {
@@ -678,6 +690,7 @@ export function createTaskAssetProjector(
             outputDigest,
             parentVersionIds: input.parentVersionIds,
             projectionMode,
+            ...(sourceTrace ? { sourceTrace } : {}),
           });
           const placementIdempotencyKey = input.idempotencyKey
             ? `agent-result:${input.idempotencyKey}:${outputIndex}`
@@ -725,6 +738,7 @@ export function createTaskAssetProjector(
               : {}),
             parentVersionIds: [...input.parentVersionIds],
             projectionMode,
+            ...(sourceTrace ? { sourceTrace } : {}),
           });
           projected.push(created.version);
           placements.push(created.placement);

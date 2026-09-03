@@ -10,6 +10,7 @@ import {
   createSkillRun,
   type SkillRunRequest,
 } from '@/lib/skill-runtime/run-request';
+import { createMemorySkillStorageAdapter, createSkillStore } from '@/lib/skill-runtime/storage';
 
 function descriptor(
   providerId: string,
@@ -81,6 +82,31 @@ function runtimeDependencies() {
 }
 
 describe('Skill runtime run requests', () => {
+  it('executes two owner-scoped conversation Skills from their distinct frozen definitions', async () => {
+    let sequence = 0;
+    const store = createSkillStore(createMemorySkillStorageAdapter(), {
+      createId: () => `skill-${String(++sequence).padStart(24, '0')}`,
+    });
+    const first = await store.createConversation({ actorUserId: actor.id, name: 'First', description: 'One', conversation: 'FIRST PRIVATE DIALOGUE' });
+    const second = await store.createConversation({ actorUserId: actor.id, name: 'Second', description: 'Two', conversation: 'SECOND PRIVATE DIALOGUE' });
+    const dependencies = { actorUserId: actor.id, ...runtimeDependencies(), resolveSkill: store.resolveExecutable };
+    const requestFor = (skill: typeof first): SkillRunRequest => ({
+      ...input, skillId: skill.id, skillVersion: skill.version,
+      inputValues: { scene: 'city', project: 'film', mood: 'quiet', style: 'ink' },
+      modelBindings: input.modelBindings,
+    });
+    const [firstRun, secondRun] = await Promise.all([
+      buildSkillAgentRunRequest(requestFor(first), dependencies),
+      buildSkillAgentRunRequest(requestFor(second), dependencies),
+    ]);
+    expect(firstRun.prompt).toContain('FIRST PRIVATE DIALOGUE');
+    expect(firstRun.prompt).not.toContain('SECOND PRIVATE DIALOGUE');
+    expect(secondRun.prompt).toContain('SECOND PRIVATE DIALOGUE');
+    expect(firstRun.skill?.skillId).toBe(first.id);
+    expect(secondRun.skill?.skillId).toBe(second.id);
+    await expect(buildSkillAgentRunRequest({ ...requestFor(first), skillVersion: 2 }, dependencies))
+      .rejects.toMatchObject({ code: 'SKILL_VERSION_CONFLICT' });
+  });
   it('freezes the authorized provider and model for every model role', async () => {
     const dependencies = runtimeDependencies();
 

@@ -1,4 +1,4 @@
-import type { WorkspaceSourceTrace } from './asset-core/source-trace';
+import type { SimpleChatWorkspaceSourceTrace as WorkspaceSourceTrace } from './asset-core/source-trace';
 import type { WorkspaceAssetReference } from './asset-core/types';
 import {
   createEmptyWorkflow,

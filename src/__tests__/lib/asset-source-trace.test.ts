@@ -19,7 +19,47 @@ const sourceTraceFixture: WorkspaceSourceTrace = {
   createdAt: '2026-08-27T08:00:00.000Z',
 };
 
+const canvasSkillTraceFixture: WorkspaceSourceTrace = {
+  source: 'canvas-skill', runId: 'run-1', skillId: 'skill-000000000000000000000001',
+  skillVersion: 3, sourceVersionIds: ['source-a', 'source-b'],
+  modelBindings: {
+    orchestrator: { providerId: 'provider-chat', modelId: 'model-chat' },
+    image: { providerId: 'provider-image', modelId: 'model-image' },
+  },
+  createdAt: '2026-09-02T00:00:00.000Z',
+};
+
 describe('asset source trace propagation', () => {
+  it('strictly validates and freezes Canvas Skill traces while retaining simple-chat compatibility', () => {
+    const parsed = parseWorkspaceSourceTrace({
+      ...canvasSkillTraceFixture,
+      sourceVersionIds: ['source-a', 'source-a', 'source-b'],
+      privateValue: 'drop-me',
+    });
+    expect(parsed).toEqual(canvasSkillTraceFixture);
+    expect(Object.isFrozen(parsed)).toBe(true);
+    expect(Object.isFrozen(parsed && 'sourceVersionIds' in parsed ? parsed.sourceVersionIds : [])).toBe(true);
+    expect(parseWorkspaceSourceTrace({ ...canvasSkillTraceFixture, skillVersion: 0 })).toBeUndefined();
+    expect(parseWorkspaceSourceTrace({ ...canvasSkillTraceFixture, sourceVersionIds: ['bad id'] })).toBeUndefined();
+    expect(parseWorkspaceSourceTrace(sourceTraceFixture)).toEqual(sourceTraceFixture);
+  });
+
+  it('resolves Canvas Skill trace from authoritative version metadata without a placement id', async () => {
+    const transaction = {
+      findProject: vi.fn().mockResolvedValue(true),
+      findVersion: vi.fn().mockResolvedValue({
+        id: 'version-output', assetId: 'asset-output', ownerId: 'user-1', projectId: 'project-1',
+        file: { url: '/result.png', availability: 'ready' }, parentVersionIds: ['source-a', 'source-b'],
+        metadata: { sourceTrace: { ...canvasSkillTraceFixture, privateValue: 'drop-me' } },
+        createdAt: '2026-09-02T00:00:00.000Z',
+      }),
+    };
+    const storage = { read: async <T>(callback: (tx: typeof transaction) => Promise<T>) => callback(transaction) };
+    const service = new AssetService(storage as unknown as AssetStorage);
+    await expect(service.resolveAssetReference({
+      actorUserId: 'user-1', projectId: 'project-1', assetVersionId: 'version-output',
+    })).resolves.toMatchObject({ sourceTrace: canvasSkillTraceFixture });
+  });
   it('accepts bounded slash model IDs and rejects control characters', () => {
     const parsed = parseWorkspaceSourceTrace({
       ...sourceTraceFixture,

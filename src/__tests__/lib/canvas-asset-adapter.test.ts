@@ -135,6 +135,16 @@ describe('canvas asset adapter', () => {
     expect(serialized).toMatchObject({ rotation: 37, zIndex: 11 });
   });
 
+  it('round-trips Canvas Skill source trace through save and refresh hydration', () => {
+    const sourceTrace = {
+      source: 'canvas-skill' as const, runId: 'run-1', skillId: 'skill-000000000000000000000001',
+      skillVersion: 1, sourceVersionIds: ['source-a'], createdAt: '2026-09-02T00:00:00.000Z',
+    };
+    const [saved] = serializeCanvasWorkspacePlacements([{ ...persistedImage, sourceTrace }]);
+    const [restored] = hydrateCanvasPlacements([saved], 'asset-v3');
+    expect(restored.sourceTrace).toEqual(sourceTrace);
+  });
+
   it('retains managed and unmanaged empty/blob media as explicit broken placements', () => {
     const managedMissing = { ...persistedImage, url: '', mediaAvailability: 'missing' as const };
     const unmanagedMissing = {

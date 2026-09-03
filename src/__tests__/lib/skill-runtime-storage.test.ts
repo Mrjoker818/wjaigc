@@ -102,6 +102,20 @@ describe('versioned user skill storage', () => {
     expect((adapter.inspect('user-1', SKILL_CATALOG_KEY) as { skills: unknown[] }).skills).toHaveLength(2);
   });
 
+  it('authorizes executable user Skills by owner, surface and enabled state', async () => {
+    const store = createSkillStore(createMemorySkillStorageAdapter(), {
+      createId: () => 'skill-000000000000000000000001',
+    });
+    const skill = await store.createConversation({
+      actorUserId: 'user-1', name: 'Executable', description: 'Saved', conversation: 'User: private prompt',
+    });
+    await expect(store.resolveExecutable('user-1', skill.id, 'canvas')).resolves.toMatchObject({ id: skill.id });
+    await expect(store.resolveExecutable('user-2', skill.id, 'canvas')).rejects.toMatchObject({ code: 'SKILL_NOT_FOUND' });
+    await expect(store.resolveExecutable('user-1', skill.id, 'simple-chat')).rejects.toMatchObject({ code: 'SKILL_SURFACE_FORBIDDEN' });
+    await store.update({ actorUserId: 'user-1', skillId: skill.id, enabled: false });
+    await expect(store.resolveExecutable('user-1', skill.id, 'canvas')).rejects.toMatchObject({ code: 'SKILL_NOT_FOUND' });
+  });
+
   it('deletes an owned Skill from durable storage without exposing another owner', async () => {
     const adapter = createMemorySkillStorageAdapter();
     const store = createSkillStore(adapter, { createId: () => 'skill-000000000000000000000001' });

@@ -38,13 +38,15 @@ describe('canvas chat shared Skill runtime wiring', () => {
 
   it('starts a canvas run and only inserts authoritative completed output versions as new nodes', () => {
     expect(source).toContain("surface: 'canvas'");
-    expect(source).toContain('skill.id === activeSkill.sourceSkillId && skill.builtIn');
+    expect(source).toContain('const executionSkill = activeSkill;');
+    expect(source).not.toContain('skill.id === activeSkill.sourceSkillId && skill.builtIn');
     expect(source).toContain('skillId: executionSkill.id');
     expect(source).toContain('skillVersion: executionSkill.version');
     expect(source).toContain("roles.add('orchestrator')");
     expect(source).toContain('sourceVersionIds: skillSourceVersionIds');
     expect(source).toContain('await skillRun.estimateRun(request)');
-    expect(source).toContain('await skillRun.startRun(request)');
+    expect(source).toContain('await startCanvasSkillRun(');
+    expect(source).toContain('() => skillRun.startRun(request)');
     expect(source).toContain('loadCompletedCanvasSkillAssets');
     expect(source).toContain('projection.status !== \'completed\'');
     expect(source).toContain('projection.runId !== activeCanvasSkillRunRef.current?.runId');

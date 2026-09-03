@@ -124,6 +124,19 @@ describe('completed task asset projection', () => {
     });
   });
 
+  it('carries Canvas Skill trace into authoritative version and placement creation', async () => {
+    const repository = new MemoryProjectionRepository(task());
+    const sourceTrace = {
+      source: 'canvas-skill' as const, runId: 'run-1', skillId: 'preset-concept-art',
+      skillVersion: 1, sourceVersionIds: ['source-a'], createdAt: '2026-09-02T00:00:00.000Z',
+    };
+    await projector(repository).projectCompletedTaskToAssets({
+      actorUserId: 'user-1', taskId: 'task-1', targetProjectId: 'project-1', workspace: 'canvas',
+      parentVersionIds: ['source-a'], sourceTrace,
+    });
+    expect(repository.creates[0]).toMatchObject({ parentVersionIds: ['source-a'], sourceTrace });
+  });
+
   it.each(['failed', 'cancelled', 'timeout'] as const)(
     'does not create assets for %s and records a late-result audit when a URL exists',
     async (status) => {

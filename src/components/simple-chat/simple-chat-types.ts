@@ -5,6 +5,7 @@ import type { WorkspaceAssetReference } from '@/lib/asset-core/types';
 import {
   bindWorkspaceSourceTraceToChat,
   parseWorkspaceSourceTrace,
+  type SimpleChatWorkspaceSourceTrace,
   type WorkspaceSourceTrace,
 } from '@/lib/asset-core/source-trace';
 import type {
@@ -317,13 +318,16 @@ export function buildSimpleChatMessageSourceTrace(input: {
   project: SimpleChatProject;
   task: SimpleChatTask;
   message: SimpleChatMessage;
-}): WorkspaceSourceTrace | undefined {
+}): SimpleChatWorkspaceSourceTrace | undefined {
   const generationTaskIds = [...new Set(
     (input.message.imageRefs || []).flatMap(reference => (
-      parseWorkspaceSourceTrace(reference.sourceTrace)?.generationTaskIds || []
+      (() => {
+        const trace = parseWorkspaceSourceTrace(reference.sourceTrace);
+        return trace?.source === 'simple-chat' ? trace.generationTaskIds || [] : [];
+      })()
     )),
   )].slice(0, 16);
-  return parseWorkspaceSourceTrace({
+  const sourceTrace = parseWorkspaceSourceTrace({
     source: 'simple-chat',
     chatProjectId: input.project.id,
     chatTaskId: input.task.id,
@@ -334,6 +338,7 @@ export function buildSimpleChatMessageSourceTrace(input: {
     agentRunId: input.message.agentRunId,
     createdAt: new Date(input.message.createdAt).toISOString(),
   });
+  return sourceTrace?.source === 'simple-chat' ? sourceTrace : undefined;
 }
 
 function bridgeReferenceError(message: string, status?: number, code?: string): Error {
@@ -430,7 +435,7 @@ export async function sendSimpleChatMediaToCanvas(input: {
   images: string[];
   imageRefs: WorkspaceAssetReference[];
   targetProjectId: string;
-  sourceTrace: WorkspaceSourceTrace;
+  sourceTrace: SimpleChatWorkspaceSourceTrace;
   transfer: (input: {
     sourceVersionId: string;
     targetProjectId: string;
@@ -448,7 +453,8 @@ export async function sendSimpleChatMediaToCanvas(input: {
   }
 
   const references: WorkspaceAssetReference[] = [];
-  const sourceTrace = parseWorkspaceSourceTrace(input.sourceTrace);
+  const parsedSourceTrace = parseWorkspaceSourceTrace(input.sourceTrace);
+  const sourceTrace = parsedSourceTrace?.source === 'simple-chat' ? parsedSourceTrace : undefined;
   for (const [index, reference] of input.imageRefs.entries()) {
     if (!hasManagedAssetIdentity(reference)) {
       return { ok: false, references: [], reason: 'UNMANAGED_IMAGE_SLOT' };

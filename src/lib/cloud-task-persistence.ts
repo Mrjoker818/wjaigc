@@ -15,6 +15,7 @@ import {
 import type {
   DurableTaskStatus,
 } from '@/lib/task-core/task-state';
+import { parseWorkspaceSourceTrace, type WorkspaceSourceTrace } from '@/lib/asset-core/source-trace';
 import { normalizeTaskError } from '@/lib/task-core/task-error';
 import type { TaskEntryAudit } from '@/lib/task-core/entry-migration';
 import {
@@ -191,6 +192,7 @@ function taskProjectionTarget(task: ProjectableTask): {
   sourceEntityId: string;
   parentVersionIds: string[];
   projectionMode?: 'derived' | 'revision';
+  sourceTrace?: WorkspaceSourceTrace;
 } {
   const payload = task.result?.submissionPayload;
   const submission = payload && typeof payload === 'object' && !Array.isArray(payload)
@@ -221,12 +223,14 @@ function taskProjectionTarget(task: ProjectableTask): {
   const projectionMode = submission.assetProjectionMode === 'revision'
     ? 'revision' as const
     : undefined;
+  const sourceTrace = parseWorkspaceSourceTrace(submission.assetSourceTrace);
   return {
     workspace,
     ...(workspaceId ? { workspaceId } : {}),
     sourceEntityId,
     parentVersionIds,
     ...(projectionMode ? { projectionMode } : {}),
+    ...(sourceTrace ? { sourceTrace } : {}),
   };
 }
 

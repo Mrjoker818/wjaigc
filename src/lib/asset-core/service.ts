@@ -199,7 +199,9 @@ export class AssetService {
       const name = placement?.metadata && typeof placement.metadata.name === 'string'
         ? placement.metadata.name
         : undefined;
-      const sourceTrace = parseWorkspaceSourceTrace(placement?.metadata?.sourceTrace);
+      const sourceTrace = parseWorkspaceSourceTrace(
+        placement?.metadata?.sourceTrace ?? version.metadata?.sourceTrace,
+      );
       return {
         assetId: version.assetId,
         assetVersionId: version.id,

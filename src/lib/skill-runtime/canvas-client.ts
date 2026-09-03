@@ -222,6 +222,17 @@ export function createCanvasSkillProjectionCoordinator() {
   };
 }
 
+export async function startCanvasSkillRun(
+  coordinator: Pick<ReturnType<typeof createCanvasSkillProjectionCoordinator>, 'cancel' | 'activate'>,
+  startRun: () => Promise<string | null | undefined>,
+  projectId?: string,
+): Promise<string | null | undefined> {
+  coordinator.cancel();
+  const runId = await startRun();
+  if (runId && projectId) coordinator.activate(runId, projectId);
+  return runId;
+}
+
 export async function updateCanvasSkill(
   skillId: string,
   patch: { enabled?: boolean; name?: string; description?: string },

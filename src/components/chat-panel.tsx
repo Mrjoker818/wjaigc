@@ -53,6 +53,7 @@ import {
   deleteCanvasSkillsSequentially,
   loadCanvasSkillCatalog,
   loadCompletedCanvasSkillAssets,
+  startCanvasSkillRun,
   updateCanvasSkill,
 } from '@/lib/skill-runtime/canvas-client';
 import type { SkillRunRequest } from '@/lib/skill-runtime/run-request';
@@ -3846,10 +3847,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
 
   const buildCanvasSkillRequest = useCallback((): SkillRunRequest | null => {
     if (!activeSkill || !projectId) return null;
-    const executionSkill = activeSkill.builtIn
-      ? activeSkill
-      : chatSkills.find(skill => skill.id === activeSkill.sourceSkillId && skill.builtIn);
-    if (!executionSkill) return null;
+    const executionSkill = activeSkill;
     const chatSelection = availableChatModels.find(candidate => candidate.id === model);
     const imageSelection = discoveredImageModels.find(candidate => candidate.id === imageModel);
     const chatProviderId = chatSelection?.providerId || (model.includes('::') ? model.split('::')[0] : '');
@@ -3899,7 +3897,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
         ? `canvas-skill:${crypto.randomUUID()}`
         : `canvas-skill:${Date.now()}`,
     };
-  }, [activeMentions, activeSkill, availableChatModels, chatSkills, currentSessionId, discoveredImageModels, imageModel, imageModelProviderId, model, pendingImages, projectId, selectedCanvasImage?.assetVersionId, skillParamValues]);
+  }, [activeMentions, activeSkill, availableChatModels, currentSessionId, discoveredImageModels, imageModel, imageModelProviderId, model, pendingImages, projectId, selectedCanvasImage?.assetVersionId, skillParamValues]);
 
   const handleEstimateSkill = useCallback(async (): Promise<void> => {
     const request = buildCanvasSkillRequest();
@@ -3919,7 +3917,11 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
     skillProjectionControllerRef.current?.abort();
     activeCanvasSkillRunRef.current = null;
     const sourceImageId = selectedCanvasImage?.id;
-    const runId = await skillRun.startRun(request);
+    const runId = await startCanvasSkillRun(
+      skillProjectionCoordinatorRef.current,
+      () => skillRun.startRun(request),
+      request.projectId,
+    );
     if (runId) {
       activeCanvasSkillRunRef.current = {
         runId,
@@ -3927,7 +3929,6 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
         sourceVersionIds: [...request.sourceVersionIds],
         sourceImageId,
       };
-      skillProjectionCoordinatorRef.current.activate(runId, request.projectId);
     }
   }, [buildCanvasSkillRequest, selectedCanvasImage?.id, skillRun]);
 

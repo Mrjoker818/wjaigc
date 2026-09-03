@@ -70,6 +70,7 @@ export interface AssetVersion {
   parentVersionIds: string[];
   taskId?: string;
   idempotencyKey?: string;
+  metadata?: Record<string, unknown>;
   createdAt: string;
 }
 

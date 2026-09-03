@@ -24,6 +24,14 @@ function formatSourceTime(createdAt: string): string {
 }
 
 function sourceTraceTitle(trace: WorkspaceSourceTrace): string {
+  if (trace.source === 'canvas-skill') {
+    return [
+      '来源：Canvas Skill',
+      `run：${trace.runId}`,
+      `skill：${trace.skillId}@${trace.skillVersion}`,
+      `时间：${formatSourceTime(trace.createdAt)}`,
+    ].join('\n');
+  }
   return [
     '来源：智能对话',
     `chat project：${trace.chatProjectId}`,
@@ -36,6 +44,18 @@ function sourceTraceTitle(trace: WorkspaceSourceTrace): string {
 export function WorkspaceSourceTraceDetails({ sourceTrace }: WorkspaceSourceTraceProps): ReactElement | null {
   const trace = parseWorkspaceSourceTrace(sourceTrace);
   if (!trace) return null;
+  if (trace.source === 'canvas-skill') {
+    return (
+      <section className="mx-4 mb-2 rounded border border-border/60 bg-muted/40 px-3 py-2" aria-label="节点来源">
+        <div className="text-xs font-medium text-foreground">来源：Canvas Skill</div>
+        <dl className="mt-1.5 grid grid-cols-[auto_1fr] gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
+          <dt>run</dt><dd className="truncate" title={trace.runId}>{trace.runId}</dd>
+          <dt>skill</dt><dd className="truncate" title={trace.skillId}>{trace.skillId}@{trace.skillVersion}</dd>
+          <dt>时间</dt><dd>{formatSourceTime(trace.createdAt)}</dd>
+        </dl>
+      </section>
+    );
+  }
   return (
     <section className="mx-4 mb-2 rounded border border-border/60 bg-muted/40 px-3 py-2" aria-label="节点来源">
       <div className="text-xs font-medium text-foreground">来源：智能对话</div>
@@ -61,7 +81,7 @@ export function CanvasSourceTraceBadge({
       className="pointer-events-auto px-1.5 py-0.5 rounded text-[9px] font-medium whitespace-nowrap leading-tight bg-black/70 text-amber-200"
       title={sourceTraceTitle(trace)}
     >
-      智能对话
+      {trace.source === 'canvas-skill' ? 'Canvas Skill' : '智能对话'}
     </span>
   );
 }

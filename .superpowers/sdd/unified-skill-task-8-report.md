@@ -143,6 +143,48 @@ pnpm exec vitest run src/__tests__/components/chat-panel-skill-runtime.test.tsx 
 - 未运行全仓 Vitest 或 build，未推送远端。
 - 状态保持 `DONE_WITH_CONCERNS`，等待全新独立审查。
 
+## 第二轮独立审查修复波次（基于 HEAD 1cea42e2）
+
+### 审查发现
+
+第二轮复审仍报告 `Important 3 / Minor 1`：Canvas Skill 产物缺少公开且可恢复的来源追踪；新 Run 在等待创建请求期间仍可能接收旧 Run 的迟到投影；owner-scoped 对话 Skill 会被替换为来源内置模板执行；关键行为测试仍需补强。
+
+### RED 与最小修复
+
+- 新增 Canvas Skill `WorkspaceSourceTrace` 解析、拒绝非法输入、冻结来源版本及资产往返测试；修复前无法从权威资产版本、placement 和刷新恢复后的 CanvasImage 找回运行来源。
+- 新增启动竞态测试；修复前旧投影只在新 Run POST 返回后才取消，等待窗口内仍可能插入旧结果。
+- 新增 owner-scoped Skill 解析、估价与运行请求测试；修复前 ChatPanel 使用 `sourceSkillId` 对应的内置模板，用户保存的独立步骤定义不会执行。
+- 新增 Simple Chat 来源追踪兼容回归，确保扩展联合类型后，独立智能对话仍只接受 `simple-chat` 来源。
+
+实现保持最小边界：
+
+- 服务端按 `actorUserId + skillId + surface + enabled + version` 解析用户 Skill，估价、创建和恢复继续使用统一运行时及冻结快照。
+- ChatPanel 直接提交当前 owner-scoped Skill；不再把用户 Skill 映射回内置来源模板。
+- `startCanvasSkillRun` 在等待创建请求之前取消旧投影；成功后只激活新 Run，失败时旧 Run 也不能恢复插入。
+- Canvas Skill 来源追踪经任务提交、权威资产投影、版本 metadata、placement metadata、资产查询、transfer 与 CanvasImage 水合完整往返；Simple Chat 来源类型保持独立。
+
+### 最新验证证据
+
+Task 1-8 扩展回归覆盖 22 个测试文件：
+
+```text
+Test Files  22 passed (22)
+Tests       248 passed (248)
+```
+
+附加门禁：
+
+- `pnpm ts-check`：通过，零 TypeScript 错误。
+- 26 个新增/变更小文件 ESLint `--max-warnings=0`：通过，零 error、零 warning。
+- `src/components/chat-panel.tsx` ESLint：零 error；保留 50 条既有 warning。
+- `pnpm check:protected-baseline`（显式排除四个既有未跟踪保护项）：38 项能力、组件路径、证据合同和 Git refs 全部通过，零 warning。
+- `git diff --check 1cea42e2`：通过；仅报告 Windows 工作区 LF/CRLF 提示，无空白错误。
+- `origin/stable` 仍为 `52f7c601ed150769e15d06fb435c6e360e28c9e7`；未修改、未推送。
+
+### 当前状态
+
+三项 Important 已有对应行为测试并转绿，Minor 所指测试缺口已由运行竞态、用户 Skill 授权、来源追踪和 Simple Chat 隔离回归补齐。Task 8 在取得全新独立复审 `APPROVED / 0-0-0` 前仍保持 `DONE_WITH_CONCERNS`，不提前进入 Task 9。
+
 ## 独立审查修复波次（HEAD 7195a739）
 
 ### 审查结论与范围

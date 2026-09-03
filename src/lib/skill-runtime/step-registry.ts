@@ -9,6 +9,7 @@ import { getCloudTaskForUser, updateCloudTask, type CloudTask } from '@/lib/clou
 import { executeAdmittedToolCall, executeToolCall } from '@/lib/chat-tools';
 import { getApiProviders } from '@/lib/server-api-config';
 import type { User } from '@/lib/user-types';
+import { parseWorkspaceSourceTrace } from '@/lib/asset-core/source-trace';
 import { compileSkillPrompt } from './prompt-compiler';
 import type { SkillRunRequest } from './run-request';
 import type { ExecuteSkillStepInput } from './executor';
@@ -147,6 +148,16 @@ async function executeGenerationStep(
   }
   const task = await getCloudTaskForUser(taskId, actor.id);
   const submissionPayload = task?.result?.submissionPayload;
+  const assetSourceTrace = parseWorkspaceSourceTrace({
+    source: 'canvas-skill', runId: input.runId, skillId: request.skillId,
+    skillVersion: request.skillVersion, sourceVersionIds: request.sourceVersionIds,
+    modelBindings: request.modelBindings, createdAt: new Date().toISOString(),
+  });
+  if (!assetSourceTrace) {
+    throw new AgentDownstreamProviderRejectedError(undefined, {
+      message: 'Skill generation source trace could not be frozen',
+    });
+  }
   const updated = task && await updateCloudTask(taskId, {
     result: {
       ...task.result,
@@ -155,6 +166,7 @@ async function executeGenerationStep(
           ? submissionPayload
           : {}),
         assetParentVersionIds: [...request.sourceVersionIds],
+        assetSourceTrace,
       },
     },
   });

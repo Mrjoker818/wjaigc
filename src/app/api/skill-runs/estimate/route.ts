@@ -8,7 +8,7 @@ import {
   buildSkillAgentRunRequest,
   type SkillRunRequest,
 } from '@/lib/skill-runtime/run-request';
-import { requireSkillForSurface } from '@/lib/skill-runtime/catalog';
+import { resolveExecutableSkillForUser } from '@/lib/skill-runtime/storage';
 import type { SkillModelBinding, SkillSurface } from '@/lib/skill-runtime/types';
 import {
   isPlainObject,
@@ -124,12 +124,12 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   try {
     const input = parseEstimateRequest(await readStrictJsonObject(request));
+    const skill = await resolveExecutableSkillForUser(auth.userId, input.skillId, input.surface);
     const agentRequest = await buildSkillAgentRunRequest(input, {
       actorUserId: auth.userId,
       resolveTaskModel,
-    });
+    }, skill);
     await authorizeAgentContext({ actorUserId: auth.userId, request: agentRequest });
-    const skill = requireSkillForSurface(input.skillId, input.surface);
     const estimate = await estimateSkillRunCost(skill, agentRequest.skill!.modelBindings);
     return NextResponse.json({
       ...estimate,

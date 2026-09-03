@@ -82,6 +82,11 @@ describe('production Skill generation lineage', () => {
         submissionPayload: expect.objectContaining({
           prompt: 'render',
           assetParentVersionIds: ['source-a', 'source-b'],
+          assetSourceTrace: {
+            source: 'canvas-skill', runId: 'run-1', skillId: 'preset-concept-art', skillVersion: 1,
+            sourceVersionIds: ['source-a', 'source-b'], createdAt: expect.any(String),
+            modelBindings: {},
+          },
         }),
       }),
     });

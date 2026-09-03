@@ -15,6 +15,7 @@ import {
   recordTaskProjectionCompleted,
   recordTaskProjectionPending,
 } from '@/lib/asset-core/task-projector';
+import { parseWorkspaceSourceTrace } from '@/lib/asset-core/source-trace';
 
 interface AgentTaskSubmission {
   taskId: string;
@@ -146,6 +147,7 @@ export async function recordAgentTaskTerminal(taskId: string, input: AgentTaskTe
       const projectionMode = submission?.assetProjectionMode === 'revision'
         ? 'revision' as const
         : undefined;
+      const sourceTrace = parseWorkspaceSourceTrace(submission?.assetSourceTrace);
       try {
         const projected = await projectCompletedTaskToAssets({
           actorUserId: current.userId,
@@ -156,6 +158,7 @@ export async function recordAgentTaskTerminal(taskId: string, input: AgentTaskTe
           sourceEntityId: current.messageId || taskId,
           parentVersionIds,
           ...(projectionMode ? { projectionMode } : {}),
+          ...(sourceTrace ? { sourceTrace } : {}),
         });
         await recordTaskProjectionCompleted({
           actorUserId: current.userId,
@@ -175,6 +178,7 @@ export async function recordAgentTaskTerminal(taskId: string, input: AgentTaskTe
               sourceEntityId: current.messageId || taskId,
               parentVersionIds,
               projectionMode: projectionMode ?? 'derived',
+              ...(sourceTrace ? { sourceTrace } : {}),
             },
           });
         } catch (pendingError) {

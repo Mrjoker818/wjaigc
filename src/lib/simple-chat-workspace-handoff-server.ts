@@ -8,7 +8,7 @@ import type {
 import {
   bindWorkspaceSourceTraceToChat,
   parseWorkspaceSourceTrace,
-  type WorkspaceSourceTrace,
+  type SimpleChatWorkspaceSourceTrace,
 } from '@/lib/asset-core/source-trace';
 import { createPostgresAssetStorage } from '@/lib/asset-core/storage';
 import type { WorkspacePlacement } from '@/lib/asset-core/types';
@@ -67,7 +67,7 @@ function buildWorkspaceSourceTrace(
   project: SimpleChatProject,
   task: SimpleChatTask,
   message: SimpleChatMessage,
-): WorkspaceSourceTrace {
+): SimpleChatWorkspaceSourceTrace {
   const sourceTrace = parseWorkspaceSourceTrace({
     source: 'simple-chat',
     chatProjectId: project.id,
@@ -78,13 +78,15 @@ function buildWorkspaceSourceTrace(
     agentRunId: message.agentRunId,
     createdAt: new Date(message.createdAt).toISOString(),
   });
-  if (!sourceTrace) throw new Error('Invalid simple chat workspace source trace');
+  if (!sourceTrace || sourceTrace.source !== 'simple-chat') {
+    throw new Error('Invalid simple chat workspace source trace');
+  }
   return sourceTrace;
 }
 
 async function alignManagedMessageImages(
   message: SimpleChatMessage,
-  sourceTrace: WorkspaceSourceTrace,
+  sourceTrace: SimpleChatWorkspaceSourceTrace,
   actorUserId: string,
   dependencies: ResolverDependencies,
 ): Promise<SimpleChatWorkspaceHandoffImage[]> {

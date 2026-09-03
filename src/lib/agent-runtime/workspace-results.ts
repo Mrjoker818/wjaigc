@@ -51,6 +51,7 @@ export function createAgentWorkspaceResultProjector(
       placementId: projected.placements[index].id,
       entityId: projected.placements[index].entityId,
       url: version.file.url,
+      ...(input.sourceTrace ? { sourceTrace: input.sourceTrace } : {}),
     }));
     await recordCompletedProjection({
       actorUserId: input.actorUserId,

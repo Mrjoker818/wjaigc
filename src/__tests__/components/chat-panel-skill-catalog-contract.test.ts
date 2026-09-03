@@ -10,6 +10,7 @@ import {
   loadCanvasSkillCatalog,
   loadCompletedCanvasSkillAssets,
   transferCanvasSkillAsset,
+  startCanvasSkillRun,
 } from '@/lib/skill-runtime/canvas-client';
 import type { SkillDefinition } from '@/lib/skill-runtime/types';
 
@@ -50,6 +51,26 @@ function catalogSkill(id: string, allowedSurfaces: SkillDefinition['allowedSurfa
 }
 
 describe('canvas chat Skill catalog contract', () => {
+  it.each(['resolve', 'reject'] as const)('cancels an old projection before a new run POST can %s', async (outcome) => {
+    const coordinator = createCanvasSkillProjectionCoordinator();
+    coordinator.activate('old-run', 'project-1');
+    let settle!: (value: string) => void;
+    let fail!: (reason: Error) => void;
+    const started = new Promise<string>((resolve, reject) => { settle = resolve; fail = reject; });
+    const oldTransfer = coordinator.project({
+      runId: 'old-run', projectId: 'project-1', assetVersionId: 'asset-old',
+      project: signal => new Promise(resolve => signal.addEventListener('abort', () => resolve(), { once: true })),
+    });
+    const next = startCanvasSkillRun(coordinator, () => started);
+    await expect(oldTransfer).resolves.toBe(false);
+    if (outcome === 'resolve') {
+      settle('new-run');
+      await expect(next).resolves.toBe('new-run');
+    } else {
+      fail(new Error('start failed'));
+      await expect(next).rejects.toThrow('start failed');
+    }
+  });
   it('loads the canvas catalog from its scoped API instead of an embedded directory', () => {
     expect(chatPanelSource).toContain("loadCanvasSkillCatalog");
     expect(canvasClientSource).toContain("'/api/skills?surface=canvas'");

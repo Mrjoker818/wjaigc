@@ -12,6 +12,7 @@ import type {
   WorkspaceKind,
   WorkspacePlacement,
 } from '@/lib/asset-core/types';
+import type { WorkspaceSourceTrace } from '@/lib/asset-core/source-trace';
 
 type CreateAssetVersionInput = {
   actorUserId: string;
@@ -57,6 +58,7 @@ type TransferVersionInput = {
   entityId: string;
   idempotencyKey: string;
   requestDigest: string;
+  metadata?: Record<string, unknown>;
 };
 
 type AssetService = {
@@ -86,6 +88,7 @@ type AssetService = {
     placementId?: string;
     url: string;
     name?: string;
+    sourceTrace?: WorkspaceSourceTrace;
   }>;
   sendVersionToWorkspace(input: TransferVersionInput): Promise<{
     version: AssetVersion;
@@ -818,6 +821,30 @@ describe('asset graph service', () => {
       entityId: 'input-b',
       requestDigest: 'digest-workflow-b',
     })).rejects.toMatchObject({ code: 'ASSET_IDEMPOTENCY_CONFLICT' });
+  });
+
+  it('round-trips Canvas Skill trace through a real transfer placement and asset resolve', async () => {
+    const ownerId = randomUUID();
+    const projectId = randomUUID();
+    const storage = new MemoryStorage(ownerId, projectId);
+    const { createAssetService } = await loadService();
+    const service = createAssetService(storage);
+    const created = await service.createAssetVersion(createVersionInput(ownerId, projectId));
+    const sourceTrace: WorkspaceSourceTrace = {
+      source: 'canvas-skill', runId: 'run-1', skillId: 'preset-concept-art', skillVersion: 1,
+      sourceVersionIds: ['source-a'], createdAt: '2026-09-02T00:00:00.000Z',
+    };
+    const transferred = await service.sendVersionToWorkspace({
+      actorUserId: ownerId, sourceVersionId: created.version.id, targetProjectId: projectId,
+      targetWorkspaceId: projectId, entityType: 'canvas-image', entityId: 'skill-output',
+      idempotencyKey: 'canvas-skill:run-1:output', requestDigest: 'trace-transfer',
+      metadata: { sourceTrace },
+    });
+
+    await expect(service.resolveAssetReference({
+      actorUserId: ownerId, projectId, assetVersionId: created.version.id,
+      placementId: transferred.placement.id,
+    })).resolves.toMatchObject({ sourceTrace });
   });
 
   it('reuses the same version for the same idempotency key and request digest', async () => {
