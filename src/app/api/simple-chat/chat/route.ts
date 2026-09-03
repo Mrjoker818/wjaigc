@@ -34,6 +34,11 @@ import { resolveTaskModel } from '@/lib/task-core/model-catalog';
 import { STRICT_AGENT_GENERATE_HEADER } from '@/lib/agent-runtime/generate-image-adapter';
 import { resolveSimpleChatRequestIdempotencyKey } from '@/lib/simple-chat-retry';
 import { runWithAbortSignalTimeout } from '@/lib/abort-signal';
+import {
+  requireSkillForSurface,
+  SkillNotFoundError,
+  SkillSurfaceForbiddenError,
+} from '@/lib/skill-runtime/catalog';
 
 const DEFAULT_SYSTEM_PROMPT = `你是无界AI的智能助手。你可以：
 1. 回答用户的各种问题
@@ -309,6 +314,7 @@ export async function POST(request: NextRequest) {
     responseSpeed?: string;
     sourceVersionIds?: string[];
     selectedEntityIds?: string[];
+    skillId?: unknown;
   };
   try {
     body = parseBoundedAgentSurfaceBody(await request.text()) as typeof body;
@@ -346,6 +352,35 @@ export async function POST(request: NextRequest) {
       return Response.json(await registerStandaloneChatAsset(user, registration));
     } catch (error) {
       return assetRegistrationError(error);
+    }
+  }
+
+  const hasSkillId = Object.prototype.hasOwnProperty.call(body, 'skillId');
+  if (
+    hasSkillId
+    && (typeof body.skillId !== 'string' || !body.skillId.trim() || body.skillId.length > 256)
+  ) {
+    return Response.json(
+      {
+        success: false,
+        code: 'SKILL_ID_INVALID',
+        message: 'skillId must be a non-empty string of at most 256 characters',
+      },
+      { status: 400 },
+    );
+  }
+  const skillId = typeof body.skillId === 'string' ? body.skillId.trim() : undefined;
+  if (skillId) {
+    try {
+      requireSkillForSurface(skillId, 'simple-chat');
+    } catch (error) {
+      if (error instanceof SkillNotFoundError || error instanceof SkillSurfaceForbiddenError) {
+        return Response.json(
+          { success: false, code: error.code, message: error.message },
+          { status: error.status },
+        );
+      }
+      throw error;
     }
   }
 

@@ -996,7 +996,7 @@ git commit -m "feat: add shared skill workflow nodes"
 - Consumes: `SIMPLE_CHAT_PRESET_SKILLS`。
 - Produces: Simple Chat UI 只展示 16 个；后端拒绝画布 Skill ID。
 
-- [ ] **Step 1: 写入 UI 和服务端越权 RED 测试**
+- [x] **Step 1: 写入 UI 和服务端越权 RED 测试**
 
 ```ts
 it('独立智能对话只显示 16 个自身 Skill', () => {
@@ -1013,13 +1013,13 @@ it('伪造画布 Skill ID 返回稳定错误且不调用模型', async () => {
 });
 ```
 
-- [ ] **Step 2: 运行测试确认 RED**
+- [x] **Step 2: 运行测试确认 RED**
 
 Run: `pnpm exec vitest run src/__tests__/components/simple-chat-skill-isolation.test.tsx src/__tests__/api/simple-chat-skill-scope.test.ts`
 
 Expected: 至少服务端越权用例 FAIL。
 
-- [ ] **Step 3: 最小接入双层门禁**
+- [x] **Step 3: 最小接入双层门禁**
 
 ```ts
 if (body.skillId) {
@@ -1029,7 +1029,7 @@ if (body.skillId) {
 
 前端继续读取 `SIMPLE_CHAT_PRESET_SKILLS`，不请求 `surface=canvas` 或 `surface=workflow`。跨工作区资产发送功能保持显式操作，不据此共享 Skill 目录。
 
-- [ ] **Step 4: 运行 Simple Chat 全回归并提交**
+- [x] **Step 4: 运行 Simple Chat 全回归并提交**
 
 Run: `pnpm exec vitest run src/__tests__/components/simple-chat-skill-isolation.test.tsx src/__tests__/api/simple-chat-skill-scope.test.ts src/__tests__/components/simple-chat-model-selector-contract.test.ts src/__tests__/components/simple-chat-project-selection.test.ts src/__tests__/components/simple-chat-asset-transfer.test.ts src/__tests__/api/simple-chat-auth.test.ts`
 

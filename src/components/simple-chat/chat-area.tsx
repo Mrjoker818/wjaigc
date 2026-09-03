@@ -2917,7 +2917,7 @@ function SkillPanel({ skills, onSelect, onClose }: { skills: PresetSkill[]; onSe
         <ModalHeader title="Skill 书" onClose={onClose} />
         <div className="space-y-2">
           {skills.map(skill => (
-            <button key={skill.id} onClick={() => onSelect(skill)}
+            <button key={skill.id} data-simple-chat-skill-id={skill.id} onClick={() => onSelect(skill)}
               className="w-full text-left p-3 rounded-xl border border-border hover:bg-muted transition-colors flex items-start gap-3">
               <span className="text-2xl">{skill.icon}</span>
               <div>
