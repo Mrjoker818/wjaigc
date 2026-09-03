@@ -351,3 +351,13 @@ Tests       266 passed (266)
 ### 当前状态
 
 两项 Important 均有先失败后通过的永久回归测试。Task 8 继续保持 `DONE_WITH_CONCERNS`，等待基于本次修复提交的全新独立复审；只有 `APPROVED / 0-0-0` 才能同步阶段进度与 Obsidian 并进入 Task 9。
+
+## 最终独立复审与任务判定
+
+- 审查范围：`b25e76d1..2cdd5460`。
+- 审查结论：`APPROVED`，Critical/Important/Minor 为 `0/0/0`。
+- 审查者独立确认 transfer 真实服务会返回持久化 placement/version metadata；Skills POST 的 128 KiB 限制只作用于创建入口，PATCH 与估价等调用方仍保持默认 8 KiB。
+- 审查者的 Vitest 因只读 Windows 沙箱禁止创建临时 SSR 目录而未执行；控制端已在可写工作区完成同提交的 22 文件、266 项回归并全部通过，因此该环境限制不计为产品失败，也不替代控制端证据。
+- 实现提交：`2cdd5460`。未推送 GitHub，未进行 Coze/Chrome 云端验收，`stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 未触碰。
+
+**Task 8 判定：本地完成。** 下一唯一任务为 Task 9，只在节点模式增加同源 `ai-skill` 节点；不得重做 Task 8，不得把 Canvas 21 Skills 混入独立智能对话的 16 Skills。
