@@ -297,6 +297,7 @@ describe('SkillRunProgress', () => {
       onResume={onResume}
       onRetry={onRetry}
     />);
+    expect(screen.queryByRole('button', { name: '继续' })).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: '从失败步骤重试' }));
     expect(onRetry).toHaveBeenCalledWith('render');
 

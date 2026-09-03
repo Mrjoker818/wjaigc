@@ -66,7 +66,7 @@ export class SkillRunNotFoundError extends Error {
 export interface SkillRunStepHistory {
   id: string;
   label: string;
-  status: 'pending' | 'processing' | 'completed' | 'failed';
+  status: 'pending' | 'processing' | 'completed' | 'failed' | 'cancelled' | 'timeout';
 }
 
 export interface SkillRunHistory {
@@ -352,6 +352,16 @@ function history(task: CloudTask, events: readonly AgentEvent[], projection: Age
   if (typeof terminalFailure?.payload.stepId === 'string') {
     failed.add(terminalFailure.payload.stepId);
   }
+  const terminalStepStatusByRunStatus: Partial<Record<
+    AgentRunProjection['status'],
+    SkillRunStepHistory['status']
+  >> = {
+    completed: 'completed',
+    failed: 'failed',
+    cancelled: 'cancelled',
+    timeout: 'timeout',
+  };
+  const activeTerminalStatus = terminalStepStatusByRunStatus[projection.status];
   return {
     runId: task.id,
     ...invocation,
@@ -364,8 +374,8 @@ function history(task: CloudTask, events: readonly AgentEvent[], projection: Age
         ? 'completed'
         : failed.has(step.id)
           ? 'failed'
-          : projection.status !== 'paused' && projection.currentStepId === step.id
-            ? 'processing'
+          : projection.currentStepId === step.id
+            ? activeTerminalStatus || (projection.status === 'paused' ? 'pending' : 'processing')
             : 'pending',
     })),
     qualityEvents: projection.qualityChecks.map(check => ({ ...check })),
@@ -431,6 +441,12 @@ export function createSkillRuntimeService(
       const run = await owned(input);
       const nextStepId = run.projection.resumeFromStepId;
       if (!nextStepId) throw new SkillRunRequestError('Skill run has no persisted resume step');
+      const activePause = [...run.events].reverse().find(event => event.type === 'run.paused');
+      if (activePause?.payload.pauseReason === 'execution-error') {
+        throw new SkillRunRequestError(
+          'Execution-error pauses must be retried from the failed step',
+        );
+      }
       await dependencies.prepareResume?.({
         ...input,
         projectId: run.task.projectId || '',

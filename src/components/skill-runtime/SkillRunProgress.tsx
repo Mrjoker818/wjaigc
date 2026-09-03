@@ -93,7 +93,7 @@ export function SkillRunProgress({
             <div role="alert" className="text-destructive">{retryabilityError}</div>
           )}
           <div className="flex gap-2">
-            {projection.status === 'paused' && onResume && (
+            {projection.status === 'paused' && !retryablePausedStep && onResume && (
               <button type="button" disabled={busy} onClick={onResume}>继续</button>
             )}
             {!terminal && projection.status !== 'paused' && projection.currentStepId && onPause && (

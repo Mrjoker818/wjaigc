@@ -601,6 +601,43 @@ describe('Skill run history', () => {
     expect(resumeRun).not.toHaveBeenCalled();
   });
 
+  it('rejects generic resume for an execution-error pause so retry owns recovery', async () => {
+    const task: CloudTask = {
+      id: 'run-error-resume', userId: 'user-1', projectId: 'project-1', type: 'agent-run',
+      status: 'processing', progress: 40, creditStatus: 'charged', creditCost: 3,
+      createdAt: 10, updatedAt: 20,
+    };
+    const events: AgentEvent[] = [{
+      eventId: 'created', runId: task.id, sequence: 1, type: 'run.created', timestamp: 'now',
+      payload: {
+        workspace: 'canvas',
+        skill: { skillId: definition.id, skillVersion: 1, inputValues: {}, modelBindings: {} },
+        skillSnapshot: { id: definition.id, version: 1, name: definition.name, steps: definition.steps },
+      },
+    }, {
+      eventId: 'paused', runId: task.id, sequence: 2, type: 'run.paused', timestamp: 'now',
+      payload: { nextStepId: 'generate-3', pauseReason: 'execution-error' },
+    }];
+    const projection: AgentRunProjection = {
+      runId: task.id, status: 'paused', lastSequence: 2, plan: [],
+      resumeFromStepId: 'generate-3', assetVersionIds: [], ignoredEventIds: [],
+      missingSequences: [], qualityChecks: [],
+    };
+    const resumeRun = vi.fn();
+    const prepareResume = vi.fn();
+    const service = createSkillRuntimeService({
+      createAuthorizedSkillRun: vi.fn(), getTaskForUser: vi.fn(async () => task),
+      listTasks: vi.fn(async () => [task]), listEvents: vi.fn(async () => events),
+      getProjection: vi.fn(async () => projection), pauseRun: vi.fn(), resumeRun,
+      cancelRun: vi.fn(), prepareResume,
+    });
+
+    await expect(service.resume({ actorUserId: 'user-1', runId: task.id }))
+      .rejects.toThrow('Execution-error pauses must be retried from the failed step');
+    expect(prepareResume).not.toHaveBeenCalled();
+    expect(resumeRun).not.toHaveBeenCalled();
+  });
+
   it('separates the initial parallel retry group from the complete retry schedule', async () => {
     const task: CloudTask = {
       id: 'run-parallel-retry', userId: 'user-1', projectId: 'project-1', type: 'agent-run',
@@ -904,6 +941,44 @@ describe('Skill run history', () => {
       actorUserId: 'user-1', runId: task.id,
     })).resolves.toMatchObject({
       steps: expect.arrayContaining([expect.objectContaining({ id: 'generate-3', status: 'failed' })]),
+    });
+  });
+
+  it.each([
+    ['cancelled', 'cancelled'],
+    ['failed', 'failed'],
+    ['timeout', 'timeout'],
+  ] as const)('projects an active step as %s when the Skill run is terminal', async (status, stepStatus) => {
+    const task: CloudTask = {
+      id: `run-${status}`, userId: 'user-1', projectId: 'project-1', type: 'agent-run',
+      status, progress: 20, creditStatus: 'refunded', creditCost: 3,
+      createdAt: 10, updatedAt: 20,
+    };
+    const events: AgentEvent[] = [{
+      eventId: 'created', runId: task.id, sequence: 1, type: 'run.created', timestamp: 'now',
+      payload: {
+        workspace: 'canvas',
+        skill: { skillId: definition.id, skillVersion: 1, inputValues: {}, modelBindings: {} },
+        skillSnapshot: { id: definition.id, version: 1, name: definition.name, steps: definition.steps },
+      },
+    }];
+    const projection: AgentRunProjection = {
+      runId: task.id, status, lastSequence: 2, plan: [], currentStepId: 'generate-3',
+      assetVersionIds: [], ignoredEventIds: [], missingSequences: [], qualityChecks: [],
+    };
+    const dependencies: SkillRuntimeServiceDependencies = {
+      createAuthorizedSkillRun: vi.fn(), getTaskForUser: vi.fn(async () => task),
+      listTasks: vi.fn(async () => [task]), listEvents: vi.fn(async () => events),
+      getProjection: vi.fn(async () => projection), pauseRun: vi.fn(), resumeRun: vi.fn(), cancelRun: vi.fn(),
+    };
+
+    await expect(createSkillRuntimeService(dependencies).get({
+      actorUserId: 'user-1', runId: task.id,
+    })).resolves.toMatchObject({
+      status,
+      steps: expect.arrayContaining([
+        expect.objectContaining({ id: 'generate-3', status: stepStatus }),
+      ]),
     });
   });
 

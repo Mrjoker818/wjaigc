@@ -2682,3 +2682,12 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - 工程门禁：TypeScript 通过；ESLint `0 errors / 943 warnings`；保护基线 `38/38 / 0 drift / 0 warnings`；8 GiB 生产构建 `119/119` 通过。webpack 编译耗时 14.5 分钟，作为构建性能观察项保留。
 - 初次 E2E 启动曾分别因缺少隔离变量、错误管理员凭据而在前置门禁停止；改用既有 run-scoped 测试账号后重新执行并取得上述真实通过，前置失败没有被删除或伪装为产品失败。
 - **回归判定：本地、真库和跨浏览器通过；最新 Coze 候选待验。** Chrome 扩展当前只能枚举现有标签，页面接管返回 `Debugger unattached`。
+
+## 2026-09-03 统一 Skill 云端实跑与状态修复回归
+
+- Google Chrome 顶层预览真实确认 Canvas `21`、Workflow `21`、Simple Chat 独立 `16`；管理员积分页显示用户 6、充值 8560、消耗 4210、余额合计 5110，副标题为“当前用户余额合计”。`V588-CREDITS-OBS-001` 的 UI 剩余条件关闭。
+- “美食摄影风格图”真实估价为 62 积分。编排模型和图像模型的 requested/actual providerId、modelId 均一致；图像子任务因真实上游不可用失败，不是隐式换供应商。
+- 取消请求被接受，Run 为 `cancelled`、账务为 `refunded`，余额仍为 5110，证明本次真实取消没有净扣费；同时复现错误暂停通用恢复与终态步骤仍 processing 两项缺陷。
+- 两项修复均按 RED/GREEN 完成。聚焦 `58/58`，Skill 扩大回归 `298/298`，全仓 `626 files / 4903 tests` 通过；`27 files / 143 tests` 因缺少隔离 PostgreSQL 明确跳过，0 失败。
+- TypeScript、零错误 ESLint、保护门禁 `38/38 / 0 drift / 0 warnings` 通过。默认约 4 GiB Node 堆构建 OOM 被保留；8 GiB 重跑成功，生成 `119/119` 页面。
+- **回归判定：本地修复通过 / 新部署云端待验。** 真实 Skill 成功产出与 AssetVersion 仍受图像上游失败阻塞；PostgreSQL 跳过项不计为通过。

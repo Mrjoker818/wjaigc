@@ -2207,3 +2207,13 @@ BUG-018 已从未验证项移除。剩余顺序为 `002-B -> 002-D -> 002-E`；�
 - [ ] 沙箱重启后强制刷新既有 Chrome 预览页，执行真实 Skill、刷新恢复及 Console/Network 验收。
 - [ ] 观察部署切换后的旧 Chunk 首次加载风险是否复发。
 - 当前 Chrome 自动化阻塞：标签页可枚举，但 `getTab` 返回 `Debugger unattached`。在控制通道真正附着前，以上云端项保持未验证。
+
+## 2026-09-03 Skill 云端实跑后的权威剩余项
+
+- [x] Canvas / Workflow / Simple Chat 目录作用域：云端 Google Chrome 为 `21 / 21 / 16`。
+- [x] 管理员积分页“当前用户余额合计”与统计显示，关闭 `V588-CREDITS-OBS-001`。
+- [x] 真实 Skill 估价、精确 provider/model 冻结、取消接受及一次退款。
+- [ ] 部署本轮 `TEST-SKILL-002/003`，确认错误暂停只显示失败步骤重试，且取消、失败、超时后没有步骤停留在 processing。
+- [ ] 使用稳定图像供应商完成一个真实 Skill，生成新 AssetVersion，并验证刷新恢复、原素材不覆盖和最终一次扣费。
+- [ ] 配置专用隔离 PostgreSQL 后执行本轮默认环境跳过的 `27 files / 143 tests`；禁止使用业务库冒充隔离库。
+- [ ] 继续保留 Pear 延期验收与部署旧 Chunk 首次加载风险。

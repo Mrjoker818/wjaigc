@@ -2052,3 +2052,10 @@ The focused gate test passes `7/7`; the actual protected-baseline command passes
 - Canvas 与 Workflow 继续共享 21 Skills；独立 Simple Chat 保持 16 Skills，目录交集为 0，没有发生作用域回退。
 - `stable@52f7c601` 未修改。候选只允许推送 `main`。
 - **发布结论：有条件通过。** 条件仅针对最新候选的 Coze exact-SHA/tree、沙箱重启后预览强刷、真实 Chrome 运行/刷新恢复和 Console/Network 健康；旧 `366b90b2` 云端目录证据不能替代新候选。
+
+## 2026-09-03 Skill 真实运行发布判断更新
+
+- `V588-CREDITS-OBS-001` 已由最新云端管理员 UI 关闭：统计值与“当前用户余额合计”语义一致。
+- 统一 Skill 真实运行确认了 62 积分估价、精确供应商/模型冻结、取消一次退款；但真实图像子任务被上游服务拒绝，尚未取得成功 AssetVersion。
+- 本轮修复 `TEST-SKILL-002/003` 的本地门禁全部通过：4903 项已执行测试 0 失败、TypeScript、零错误 ESLint、保护门禁与 8 GiB `119/119` 构建通过。
+- **发布结论仍为有条件通过。** 新修复必须推送 `main`、由 Coze 拉取并强刷现有 Chrome 预览页，复验错误暂停只剩重试、取消后无 processing 步骤；隔离 PostgreSQL 143 项与成功图像资产链路仍开放。

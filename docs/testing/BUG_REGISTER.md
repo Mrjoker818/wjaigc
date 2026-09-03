@@ -3834,3 +3834,26 @@ All listed Stage 4 defects are locally closed. S4-BUG-008 also passed its exact-
 - **完整回归**：Vitest `653 files / 5042 tests / 0 failed / 0 skipped`；TypeScript 通过；ESLint `0 errors / 943 warnings`；保护基线 `38/38 / 0 drift / 0 warnings`；生产构建 `119/119`。
 - **浏览器证据**：Chromium、Chromium 1080p、Firefox、WebKit、Mobile Chromium 共 `10/10` 通过；Canvas/Workflow 为同源 21 Skills，Simple Chat 独立 16 Skills。
 - **当前状态**：`LOCAL + POSTGRESQL + CROSS-BROWSER PASS / COZE LATEST CANDIDATE PENDING`。现有 Chrome 标签可枚举，但调试接口返回 `Debugger unattached`，不得把旧云端证据冒充新候选验收。
+
+### TEST-SKILL-002：执行错误暂停仍提供通用“继续”（2026-09-03）
+
+| 字段 | 内容 |
+|---|---|
+| 严重等级 | P1：可把失败 Run 重新置为 `executing`，但没有合法子任务接管，形成僵尸状态。 |
+| 发现环境 | Coze 源码 tree 对应 `main@9794ad23`，Google Chrome 顶层预览页。 |
+| 稳定复现 | 运行“美食摄影风格图”，图像子任务失败并进入 `execution-error` 暂停；界面同时显示“继续”和“从失败步骤重试”。点击“继续”后父 Run 变为执行中，但没有新子任务。 |
+| 根因 | `SkillRunProgress` 对所有暂停状态显示通用恢复；`SkillRuntimeService.resume()` 也未拒绝错误暂停的通用恢复。 |
+| 修复 | 错误暂停只显示并只允许“从失败步骤重试”；服务端拒绝错误暂停的通用恢复，旧客户端也不能绕过。 |
+| 永久测试 | `skill-runtime-controls.test.tsx`、`skill-runtime-executor.test.ts` 先 RED 后 GREEN。 |
+| 当前状态 | `LOCAL PASS / CLOUD REDEPLOY PENDING`。 |
+
+### TEST-SKILL-003：父 Run 终态后活动步骤仍显示处理中（2026-09-03）
+
+| 字段 | 内容 |
+|---|---|
+| 严重等级 | P1：任务终态与步骤状态冲突，用户无法判断任务是否真正停止。 |
+| 发现环境 | 同上；取消 Run 后父状态为 `cancelled`、积分为 `refunded`，但活动步骤仍为 `processing`。 |
+| 根因 | Skill 历史汇总只排除了 `paused`，没有排除 `cancelled/failed/timeout`，因此沿用 `currentStepId` 投影为处理中。 |
+| 修复 | 父 Run 进入终态时，活动步骤同步投影为 `cancelled/failed/timeout`；未开始步骤保持 `pending`。 |
+| 账务证据 | 实测 Run `14879240-7fd5-4a8d-9c50-16fabc06feb7` 取消被接受，62 积分一次退款，系统余额取消前后均为 5110。 |
+| 当前状态 | `LOCAL PASS / CLOUD REDEPLOY PENDING`。 |
