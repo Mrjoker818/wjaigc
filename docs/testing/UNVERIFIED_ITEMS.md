@@ -1,13 +1,17 @@
 # 无界AI — 未验证项目清单 (UNVERIFIED ITEMS)
 
-## 2026-09-03 当前精确未验证边界
+## 2026-09-04 当前精确未验证边界
 
-- Skill 服务端不再未验证：`execution-error` 通用 resume 被拒绝，取消 run 无 processing 子步骤且已退款。仍缺 Google Chrome 可见断言：暂停态仅有“从失败步骤重试”、无“继续”；取消态无 processing 子步骤。
-- `V588-ADMIN-003` 不再把缩略图生成、基本交付和隔离 PostgreSQL 并发列为未验证：云端 41 个回填全部 completed，投影已有 20 个缩略图；缩略图、带重试参数 URL 和对应原图各 20/20 返回 200；本机隔离 PostgreSQL 2/2 通过。本项仍缺真实 Chrome 触发顺序，以及受控移除本地缓存后的 S3 恢复。
+本节覆盖下方同名历史未验证状态，但不删除历史失败证据。当前业务候选为 `main@e43a12fe`，尚未在 Coze 部署验收。
+
+- Skill 手动暂停后取消的父级 UI 终态已经真实通过，不再重复登记为未验证：run `67bfbf02-4b7c-4e13-9594-c7afec9648b0`，界面显示已取消，无继续/取消按钮，服务端事件序列4为run.cancelled。同时间窗管理员流水一笔-62和一笔+62，余额206；这是单样本正向证据，接口没有taskId，不能代替数据库并发或历史退款一致性证明。
+- Skill 新版冻结步骤与中文状态显示仍未验证：旧版事件包含冻结步骤但前端plan为空，修复已在e43a12fe完成本地37项专项、4912项全仓通过及生产构建。真实execution-error重试按钮、暂停恢复、失败重试、节点Skill成功运行、成功图像AssetVersion且不覆盖源图、刷新后的历史/进度/结果仍需按Task12取得云端证据；不能用父级已取消证明子步骤状态正确。
+- `V588-ADMIN-003` 的shadow模式单图失败重试和原图回退已真实通过：请求23628.5089失败后仅一次带`__wujie_thumbnail_retry=1`的23628.5099，最终原图1254×1254、ready；故障注入已清除。证据在`output/admin003-20260904/thumbnail-fallback.{json,png}`，它是请求摘要和截图，不是完整Trace，也不证明asset-v3或S3恢复。
+- `V588-ADMIN-003` 保留受控本地缓存缺失后的真实S3恢复未验证；需排除sourceUrl外部回退并核对对象身份。已完成41项回填、20张投影及本机隔离PostgreSQL2/2，不重新回填、不重新软归档。
 - 缩略图 dry-run 发现至少 100 个候选。是否执行剩余回填属于维护动作，本轮未执行；历史媒体软归档不得重跑。
 - Google Chrome 的正确现有项目页与预览页可枚举，但控制通道返回未附着。本轮没有改用 360、没有创建新标签，也没有把该自动化阻塞写成产品通过或失败。
 
-机器证据：[skill-admin003-cloud-followup-20260903.json](evidence/skill-admin003-cloud-followup-20260903.json)。
+历史机器证据：[skill-admin003-cloud-followup-20260903.json](evidence/skill-admin003-cloud-followup-20260903.json)。9月4日增量原始材料位于`output/skill-cancel-20260904/`，已复读network-evidence.json、cancelled-dom.txt和credits-ledger-dom.txt；仅本地保存，不提交含用户数据的原始截图。详细记录：[9月4日续验](2026-09-04-skill-cancel-ui-followup.md)。
 
 ## 2026-09-01 PROVIDER-003 业务关闭后的剩余发布证据
 
