@@ -2672,3 +2672,13 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - Google Chrome 真实验证：管理员仪表盘正常；已有 3 图片项目可加载；Canvas 为 21 Skills；Workflow 下拉为同一 21 Skills；`/simple-chat` 为独立 16 Skills，未出现 Canvas 目录项。
 - 服务切换后的首次项目进入出现一次 `Loading chunk 5900 failed`；重新加载当前构建后恢复。该现象保留为部署缓存风险。
 - **回归判定：DEPLOYMENT AND CATALOG SCOPE PASS / RUNTIME AND ACCOUNTING UNVERIFIED。** 未执行付费 Skill、暂停恢复、取消退款、失败重试、AssetVersion 与完整浏览器证据采集。
+
+## 2026-09-03 统一 Skill 真库与跨浏览器最终本地回归
+
+- 基于 `main@b81eb845` 的候选增量关闭了 Agent 父子任务围栏、Workflow 内部产品授权传递及移动端节点属性抽屉三项真实缺陷。
+- 隔离 PostgreSQL 已执行 Skill Runtime、Pear 分层、批注和元素拆解并发套件，覆盖 20 路同键请求、单任务/单扣费、一次退款、取消优先和迟到完成拒绝。
+- 全仓 Vitest：`653 files passed / 5042 tests passed / 0 failed / 0 skipped`。
+- 浏览器专项：Chromium、Chromium 1080p、Firefox、WebKit、Mobile Chromium 共 `10/10` 通过；证据保存在 `test-results/stage-4-baseline/evidence/` 和 Playwright 输出目录。
+- 工程门禁：TypeScript 通过；ESLint `0 errors / 943 warnings`；保护基线 `38/38 / 0 drift / 0 warnings`；8 GiB 生产构建 `119/119` 通过。webpack 编译耗时 14.5 分钟，作为构建性能观察项保留。
+- 初次 E2E 启动曾分别因缺少隔离变量、错误管理员凭据而在前置门禁停止；改用既有 run-scoped 测试账号后重新执行并取得上述真实通过，前置失败没有被删除或伪装为产品失败。
+- **回归判定：本地、真库和跨浏览器通过；最新 Coze 候选待验。** Chrome 扩展当前只能枚举现有标签，页面接管返回 `Debugger unattached`。

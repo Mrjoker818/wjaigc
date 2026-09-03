@@ -70,6 +70,7 @@ interface WorkflowExecutionState {
   projectId?: string;
   workflowId?: string;
   userRole?: 'user' | 'admin';
+  userProductType?: string;
   totalNodes: number;
   activeLayerTasks?: Record<string, string>;
   activeSkillRuns?: Record<string, string>;
@@ -477,6 +478,7 @@ export async function POST(request: NextRequest) {
           const internalHeaders = await getInternalRequestHeaders(
             auth.userId,
             auth.userRole === 'admin' ? 'admin' : 'user',
+            auth.user.productType,
           );
           const cancelResults = await Promise.allSettled(activeLayerTaskIds.map(taskId => (
             cancelLayerWorkflowTask(
@@ -495,6 +497,7 @@ export async function POST(request: NextRequest) {
           const internalHeaders = await getInternalRequestHeaders(
             auth.userId,
             auth.userRole === 'admin' ? 'admin' : 'user',
+            auth.user.productType,
           );
           const cancelResults = await Promise.allSettled(activeSkillRunIds.map(runId => (
             cancelWorkflowSkillRun({
@@ -598,6 +601,7 @@ export async function POST(request: NextRequest) {
           const retryHeaders = await getInternalRequestHeaders(
             auth.userId,
             auth.userRole === 'admin' ? 'admin' : 'user',
+            auth.user.productType,
           );
           const retryResult = await executeSkillWorkflowTask({
             apiUrl: `http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}/api/skill-runs`,
@@ -650,6 +654,7 @@ export async function POST(request: NextRequest) {
           ? await getInternalRequestHeaders(
               auth.userId,
               auth.userRole === 'admin' ? 'admin' : 'user',
+              auth.user.productType,
             )
           : (apiKey ? { 'Authorization': `Bearer ${apiKey}` } : {});
         if (retryNode.type === 'ai-skill') {
@@ -739,6 +744,7 @@ export async function POST(request: NextRequest) {
       projectId: typeof projectId === 'string' ? projectId : undefined,
       workflowId: typeof workflowId === 'string' ? workflowId : undefined,
       userRole: auth.userRole === 'admin' ? 'admin' : 'user',
+      userProductType: auth.user.productType,
       totalNodes: nodes.length,
       activeLayerTasks: {},
       activeSkillRuns: {},
@@ -1166,6 +1172,7 @@ async function executeWorkflow(
                     ? await getInternalRequestHeaders(
                         execState.userId!,
                         execState.userRole || 'user',
+                        execState.userProductType,
                       )
                     : (dsApiKey ? { 'Authorization': `Bearer ${dsApiKey}` } : {});
 
@@ -1265,6 +1272,7 @@ async function executeWorkflow(
         ? await getInternalRequestHeaders(
             execState.userId!,
             execState.userRole || 'user',
+            execState.userProductType,
           )
         : (apiKey ? { 'Authorization': `Bearer ${apiKey}` } : {});
 

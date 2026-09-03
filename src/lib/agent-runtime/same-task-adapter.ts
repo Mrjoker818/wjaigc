@@ -464,12 +464,14 @@ export function createSameTaskAgentAdapter(
                 error instanceof AgentDownstreamProviderRejectedError
                 && dependencies.terminalizeProviderRejection
               ) {
-                await dependencies.terminalizeProviderRejection({
-                  taskId: adoption.runId,
-                  actorUserId: adoption.actorUserId,
-                  code: 'AGENT_DOWNSTREAM_PROVIDER_REJECTED',
-                  message: error.message,
-                });
+                await withAgentExecutionFence(executionFence, () => (
+                  dependencies.terminalizeProviderRejection!({
+                    taskId: adoption.runId,
+                    actorUserId: adoption.actorUserId,
+                    code: 'AGENT_DOWNSTREAM_PROVIDER_REJECTED',
+                    message: error.message,
+                  })
+                ));
                 await dependencies.completeExecution({
                   actorUserId: adoption.actorUserId,
                   projectId: adoption.projectId,
@@ -483,12 +485,14 @@ export function createSameTaskAgentAdapter(
                 error instanceof AgentDownstreamSubmissionUnknownError
                 && dependencies.terminalizeSubmissionUnknown
               ) {
-                await dependencies.terminalizeSubmissionUnknown({
-                  taskId: adoption.runId,
-                  actorUserId: adoption.actorUserId,
-                  code: 'AGENT_DOWNSTREAM_SUBMISSION_UNKNOWN',
-                  message: error.message,
-                });
+                await withAgentExecutionFence(executionFence, () => (
+                  dependencies.terminalizeSubmissionUnknown!({
+                    taskId: adoption.runId,
+                    actorUserId: adoption.actorUserId,
+                    code: 'AGENT_DOWNSTREAM_SUBMISSION_UNKNOWN',
+                    message: error.message,
+                  })
+                ));
                 await dependencies.completeExecution({
                   actorUserId: adoption.actorUserId,
                   projectId: adoption.projectId,

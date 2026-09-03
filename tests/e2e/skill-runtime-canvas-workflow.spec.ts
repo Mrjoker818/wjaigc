@@ -129,6 +129,9 @@ test('画布与节点模式使用同一套 21 项 Skill 定义和版本', async 
     workflow: identity(workflowSkills),
   });
 
+  const expandPanel = page.getByRole('button', { name: '展开面板', exact: true });
+  if (await expandPanel.isVisible().catch(() => false)) await expandPanel.click();
+  await page.getByRole('button', { name: 'AI聊天', exact: true }).click();
   await page.getByRole('button', { name: 'Skills技能库' }).click();
   const canvasSkill = page.getByText('电商商品套图', { exact: true }).last();
   await expect(canvasSkill).toBeVisible();
@@ -159,20 +162,34 @@ test('画布与节点模式使用同一套 21 项 Skill 定义和版本', async 
     modelId: 'stage4-image-model',
   });
   expect(typeof canvasSubmissionPayload.runId).toBe('string');
+  const canvasAssetLoaded = page.waitForResponse(response => (
+    response.request().method() === 'GET'
+    && new URL(response.url()).pathname === '/api/assets'
+    && response.ok()
+  ));
   await expect(page.getByText('已完成', { exact: true })).toBeVisible({ timeout: 90_000 });
   const canvasRun = await readSkillRun(page, canvasSubmissionPayload.runId!);
   expect(canvasRun.status).toBe('completed');
   expect(canvasRun.skillId).toBe(canvasRequest.skillId);
   expect(canvasRun.skillVersion).toBe(canvasRequest.skillVersion);
   expect(canvasRun.assetVersionIds.length).toBeGreaterThan(0);
+  await canvasAssetLoaded;
 
+  const collapsePanel = page.getByRole('button', { name: '收起面板', exact: true });
+  if (await collapsePanel.isVisible().catch(() => false)) await collapsePanel.click();
   await page.getByTitle('节点模式').first().click();
   const skillNodeButton = page.locator('[data-node-type="ai-skill"]');
+  const nodeLibraryToggle = page.getByRole('button', { name: '切换节点库面板', exact: true });
+  if (await nodeLibraryToggle.getAttribute('aria-pressed') !== 'true') {
+    await nodeLibraryToggle.click();
+  }
   await expect(skillNodeButton).toBeVisible({ timeout: 20_000 });
   await skillNodeButton.click();
-  await page.getByLabel('Skill 执行').last().click();
 
   const skillSelect = page.getByRole('combobox', { name: 'Skill' });
+  if (!await skillSelect.isVisible().catch(() => false)) {
+    await page.getByLabel('Skill 执行').last().click();
+  }
   await expect(skillSelect).toBeVisible({ timeout: 20_000 });
   await expect(skillSelect.locator('option')).toHaveCount(22);
   await skillSelect.selectOption('preset-ecommerce-listing');
@@ -189,20 +206,20 @@ test('画布与节点模式使用同一套 21 项 Skill 定义和版本', async 
     response.request().method() === 'POST'
     && new URL(response.url()).pathname === '/api/workflow/execute'
     && Boolean(response.request().postData()?.includes('"action":"start"'))
-  ));
+  ), { timeout: 90_000 });
   await page.getByRole('button', { name: '执行工作流', exact: true }).click();
   const workflowSubmissionResponse = await workflowSubmission;
   expect(workflowSubmissionResponse.ok()).toBe(true);
   const workflowSubmissionPayload = await workflowSubmissionResponse.json() as { executionId?: string };
   expect(typeof workflowSubmissionPayload.executionId).toBe('string');
   const workflowRequest = workflowSubmissionResponse.request().postDataJSON() as {
-    workflow?: { nodes?: Array<{
+    nodes?: Array<{
       id?: string;
       type?: string;
       config?: { skillId?: string; version?: number };
-    }> };
+    }>;
   };
-  const workflowSkillNode = workflowRequest.workflow?.nodes?.find(node => node.type === 'ai-skill');
+  const workflowSkillNode = workflowRequest.nodes?.find(node => node.type === 'ai-skill');
   expect(workflowSkillNode?.config?.skillId).toBe(canvasRequest.skillId);
   expect(workflowSkillNode?.config?.version).toBe(canvasRequest.skillVersion);
   await expect(page.getByText('执行完成', { exact: true })).toBeVisible({ timeout: 90_000 });

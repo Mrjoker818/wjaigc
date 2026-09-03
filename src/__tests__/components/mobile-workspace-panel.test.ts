@@ -20,4 +20,10 @@ describe('mobile workspace panel and node controls', () => {
   it('does not render an inert node property header button', () => {
     expect(nodeSource).not.toContain('节点属性</span>\n          <button className="text-muted-foreground hover:text-foreground cursor-pointer"><Maximize2 size={12} /></button>');
   });
+
+  it('opens selected node properties as a closable overlay on narrow viewports', () => {
+    expect(nodeSource).toContain("selectedNode ? 'absolute inset-y-0 right-0 z-50 flex");
+    expect(nodeSource).toContain('aria-label="关闭节点属性"');
+    expect(nodeSource).toContain('md:relative md:inset-auto md:z-auto md:flex md:w-72');
+  });
 });

@@ -20,13 +20,17 @@ describe('node editor UI regressions', () => {
   it('keeps the mobile workflow canvas clear of permanent sidebars', () => {
     expect(source).toContain('overflow-x-auto');
     expect(source).toContain('md:relative');
-    expect(source).toContain('hidden md:flex w-72');
+    expect(source).toContain("selectedNode ? 'absolute inset-y-0 right-0 z-50 flex w-[min(20rem,90vw)] shadow-2xl' : 'hidden'");
+    expect(source).toContain('md:flex md:w-72 md:shadow-none');
+    expect(source).toContain('aria-label="关闭节点属性"');
+    expect(source).toContain('onClick={() => setSelectedNodeIds(new Set())}');
   });
 
   it('marks only known layout chrome as workflow canvas occlusion', () => {
     expect(source.match(/data-workflow-ui-occlusion/g)).toHaveLength(3);
     expect(source).toMatch(/data-workflow-minimap\s+data-workflow-ui-occlusion/);
-    expect(source).toMatch(/<aside data-workflow-ui-occlusion/);
+    expect(source).toContain('<aside');
+    expect(source).toContain('data-workflow-ui-occlusion');
     expect(source).toMatch(/<div data-workflow-ui-occlusion className="shrink-0 border-t/);
   });
 });

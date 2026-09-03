@@ -292,6 +292,25 @@ describe('Stage 4 workflow performance samples', () => {
     expect(stage4RuntimeEvidenceFailures([], [aborted]).networkFailures).toEqual([aborted]);
   });
 
+  it('allows an aborted idempotent GET only when the same URL later succeeds', () => {
+    const aborted = {
+      method: 'GET',
+      text: 'net::ERR_ABORTED',
+      url: 'http://127.0.0.1:5000/api/skills?surface=canvas',
+      occurredAt: 100,
+    };
+    const recovered = {
+      method: 'GET',
+      status: 200,
+      url: aborted.url,
+      occurredAt: 120,
+    };
+
+    expect(stage4RuntimeEvidenceFailures([], [aborted, recovered]).networkFailures).toEqual([]);
+    expect(stage4RuntimeEvidenceFailures([], [recovered, aborted]).networkFailures).toEqual([]);
+    expect(stage4RuntimeEvidenceFailures([], [aborted]).networkFailures).toEqual([aborted]);
+  });
+
   it('allows browser-cancelled Next.js chunks during an intentional route change', () => {
     const abortedChunk = {
       method: 'GET',

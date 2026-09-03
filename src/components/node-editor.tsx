@@ -3539,9 +3539,20 @@ ${contextInfo}
       </div>{/* 主画布 end */}
 
       {/* ═══ 右侧属性面板 - 与原型对齐: w-72, 始终可见 ═══ */}
-      <aside data-workflow-ui-occlusion className="hidden md:flex w-72 shrink-0 bg-card border-l border-border/20 flex-col overflow-hidden">
+      <aside
+        data-workflow-ui-occlusion
+        className={`${selectedNode ? 'absolute inset-y-0 right-0 z-50 flex w-[min(20rem,90vw)] shadow-2xl' : 'hidden'} shrink-0 flex-col overflow-hidden border-l border-border/20 bg-card md:relative md:inset-auto md:z-auto md:flex md:w-72 md:shadow-none`}
+      >
         <div className="flex items-center justify-between px-4 h-11 border-b border-border/10">
           <span className="text-[11px] uppercase tracking-[0.12em] font-bold text-muted-foreground">节点属性</span>
+          <button
+            type="button"
+            className="rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground md:hidden"
+            aria-label="关闭节点属性"
+            onClick={() => setSelectedNodeIds(new Set())}
+          >
+            <X size={16} />
+          </button>
         </div>
         <div className="flex-1 overflow-y-auto">
           {selectedNode ? (

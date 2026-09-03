@@ -158,4 +158,45 @@ describe('Stage 4 browser fixture auth isolation', () => {
     expect(get).not.toHaveBeenCalled();
     expect(post).not.toHaveBeenCalled();
   });
+
+  it('uses the server simple-chat revision when seeding the browser fixture', async () => {
+    const get = vi.fn(async (url: string) => {
+      if (url === '/api/user-data/sync?key=projects') {
+        return response(200, { value: [], projectRevision: 4 });
+      }
+      if (url === '/api/user-data/sync?key=chat_simple_projects') {
+        return response(200, { value: [], syncRevision: 7 });
+      }
+      throw new Error(`Unexpected GET ${url}`);
+    });
+    const post = vi.fn(async () => response(200, { success: true, projectRevision: 5 }));
+
+    await seedStage4Baseline({
+      request: { get, post },
+    } as never, {
+      browserProfile: 'chromium',
+      username: fixture.username,
+      canvasProject: { id: 'stage4-canvas-s4-run-chromium' },
+      chatProject: {
+        id: 'stage4-chat-s4-run-chromium',
+        name: 'Stage 4 chat',
+        tasks: [],
+        agents: [],
+        knowledgeItems: [],
+      },
+      nodeCount: 100,
+    }, {
+      userId: fixture.id,
+      username: fixture.username,
+      strategy: 'admin-provisioned-login',
+      disposable: true,
+    });
+
+    expect(post).toHaveBeenNthCalledWith(2, '/api/user-data/sync', {
+      data: expect.objectContaining({
+        key: 'chat_simple_projects',
+        expectedRevision: 7,
+      }),
+    });
+  });
 });

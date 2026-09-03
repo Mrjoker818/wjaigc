@@ -45,14 +45,21 @@ function buildAgentSqlFence(
       nextIndex,
     };
   }
-  const activeGeneration = `AND EXISTS (
-        SELECT 1 FROM wujie_agent_execution_leases agent_lease
-        WHERE agent_lease.task_id = ${taskExpression}
-          AND agent_lease.task_id = $${nextIndex++}
-          AND agent_lease.lease_owner = $${nextIndex++}
-          AND agent_lease.generation = $${nextIndex++}
-          AND agent_lease.paused_at = 0
-          AND agent_lease.completed_at = 0
+  const activeGeneration = `AND (
+        NOT EXISTS (
+          SELECT 1 FROM wujie_agent_execution_leases bound_agent
+          WHERE bound_agent.task_id = ${taskExpression}
+            AND bound_agent.completed_at = 0
+        )
+        OR EXISTS (
+          SELECT 1 FROM wujie_agent_execution_leases agent_lease
+          WHERE agent_lease.task_id = ${taskExpression}
+            AND agent_lease.task_id = $${nextIndex++}
+            AND agent_lease.lease_owner = $${nextIndex++}
+            AND agent_lease.generation = $${nextIndex++}
+            AND agent_lease.paused_at = 0
+            AND agent_lease.completed_at = 0
+        )
       )`;
   params.push(fence.runId, fence.leaseOwner, fence.generation);
   return {
@@ -319,6 +326,42 @@ async function initializeCloudTaskTables(): Promise<void> {
   await execSql('ALTER TABLE cloud_tasks ADD COLUMN IF NOT EXISTS credit_cost NUMERIC NOT NULL DEFAULT 0');
   await execSql('ALTER TABLE cloud_tasks ADD COLUMN IF NOT EXISTS revision INTEGER NOT NULL DEFAULT 0');
   await execSql('ALTER TABLE cloud_tasks ADD COLUMN IF NOT EXISTS agent_execution_descriptor JSONB');
+  await execSql(`
+    CREATE TABLE IF NOT EXISTS wujie_agent_execution_leases (
+      task_id TEXT PRIMARY KEY,
+      owner_id TEXT NOT NULL,
+      project_id TEXT NOT NULL,
+      tool_id TEXT NOT NULL,
+      lease_owner TEXT NOT NULL DEFAULT '',
+      lease_expires_at BIGINT NOT NULL DEFAULT 0,
+      attempt_count INTEGER NOT NULL DEFAULT 0 CHECK (attempt_count >= 0),
+      completed_at BIGINT NOT NULL DEFAULT 0,
+      updated_at BIGINT NOT NULL,
+      generation INTEGER NOT NULL DEFAULT 0 CHECK (generation >= 0),
+      paused_at BIGINT NOT NULL DEFAULT 0,
+      next_step_id TEXT NOT NULL DEFAULT '',
+      dispatch_started_at BIGINT NOT NULL DEFAULT 0,
+      dispatch_lease_owner TEXT NOT NULL DEFAULT '',
+      dispatch_lease_expires_at BIGINT NOT NULL DEFAULT 0,
+      dispatch_attempt_count INTEGER NOT NULL DEFAULT 0,
+      dispatch_error TEXT NOT NULL DEFAULT '',
+      CONSTRAINT wujie_agent_execution_lease_identity_nonempty CHECK (
+        task_id <> '' AND owner_id <> '' AND project_id <> '' AND tool_id <> ''
+      )
+    )
+  `);
+  await execSql(`
+    CREATE INDEX IF NOT EXISTS idx_agent_execution_leases_owner_project
+    ON wujie_agent_execution_leases(owner_id, project_id, task_id)
+  `);
+  await execSql('ALTER TABLE wujie_agent_execution_leases ADD COLUMN IF NOT EXISTS generation INTEGER NOT NULL DEFAULT 0');
+  await execSql('ALTER TABLE wujie_agent_execution_leases ADD COLUMN IF NOT EXISTS paused_at BIGINT NOT NULL DEFAULT 0');
+  await execSql("ALTER TABLE wujie_agent_execution_leases ADD COLUMN IF NOT EXISTS next_step_id TEXT NOT NULL DEFAULT ''");
+  await execSql('ALTER TABLE wujie_agent_execution_leases ADD COLUMN IF NOT EXISTS dispatch_started_at BIGINT NOT NULL DEFAULT 0');
+  await execSql("ALTER TABLE wujie_agent_execution_leases ADD COLUMN IF NOT EXISTS dispatch_lease_owner TEXT NOT NULL DEFAULT ''");
+  await execSql('ALTER TABLE wujie_agent_execution_leases ADD COLUMN IF NOT EXISTS dispatch_lease_expires_at BIGINT NOT NULL DEFAULT 0');
+  await execSql('ALTER TABLE wujie_agent_execution_leases ADD COLUMN IF NOT EXISTS dispatch_attempt_count INTEGER NOT NULL DEFAULT 0');
+  await execSql("ALTER TABLE wujie_agent_execution_leases ADD COLUMN IF NOT EXISTS dispatch_error TEXT NOT NULL DEFAULT ''");
   await execSql("CREATE UNIQUE INDEX IF NOT EXISTS idx_cloud_tasks_user_idempotency ON cloud_tasks(user_id, idempotency_key) WHERE idempotency_key <> ''");
   await execSql("CREATE UNIQUE INDEX IF NOT EXISTS idx_cloud_tasks_charged_transaction ON cloud_tasks(charged_transaction_id) WHERE charged_transaction_id <> ''");
   await execSql("CREATE UNIQUE INDEX IF NOT EXISTS idx_cloud_tasks_refunded_transaction ON cloud_tasks(refunded_transaction_id) WHERE refunded_transaction_id <> ''");

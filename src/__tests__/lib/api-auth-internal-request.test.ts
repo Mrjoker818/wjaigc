@@ -67,6 +67,23 @@ describe('internal request authentication', () => {
     });
   });
 
+  it('preserves the signed product scope for an internal user request', async () => {
+    const request = new NextRequest('http://localhost/api/skill-runs', {
+      headers: {
+        'x-internal-request': 'true',
+        'x-internal-user-id': 'canvas-user-1',
+        'x-internal-user-role': 'user',
+        'x-internal-user-product-type': 'canvas,chat',
+        'x-wujie-internal-secret': 'a'.repeat(32),
+      },
+    });
+
+    await expect(getRequestUser(request)).resolves.toMatchObject({
+      source: 'internal',
+      user: { id: 'canvas-user-1', role: 'user', productType: 'canvas,chat' },
+    });
+  });
+
   it('uses the persisted session-auth secret for asynchronous internal requests', async () => {
     delete process.env.INTERNAL_API_SECRET;
     delete process.env.WUJIE_AUTH_SECRET;

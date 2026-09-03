@@ -39,13 +39,20 @@ function secretsMatch(received: string, expected: string): boolean {
 }
 
 /** Build authenticated headers for server-to-server API calls within this application. */
-export async function getInternalRequestHeaders(userId: string, userRole: 'user' | 'admin' = 'user'): Promise<Record<string, string>> {
+export async function getInternalRequestHeaders(
+  userId: string,
+  userRole: 'user' | 'admin' = 'user',
+  userProductType?: string,
+): Promise<Record<string, string>> {
   const secret = await getInternalApiSecret();
 
   return {
     'x-internal-request': 'true',
     'x-internal-user-id': userId,
     'x-internal-user-role': userRole,
+    ...(userProductType?.trim()
+      ? { 'x-internal-user-product-type': userProductType.trim().slice(0, 256) }
+      : {}),
     'x-wujie-internal-secret': secret,
   };
 }
@@ -60,6 +67,7 @@ export async function getRequestUser(request: Request | NextRequest): Promise<{
   const internalUserId = request.headers.get('x-internal-user-id');
   const internalUserRoleRaw = request.headers.get('x-internal-user-role') || 'user';
   const internalUserRole: 'user' | 'admin' = internalUserRoleRaw === 'admin' ? 'admin' : 'user';
+  const internalUserProductType = request.headers.get('x-internal-user-product-type')?.trim().slice(0, 256);
   const receivedInternalSecret = request.headers.get('x-wujie-internal-secret') || '';
   if (isInternal && internalUserId) {
     try {
@@ -72,6 +80,7 @@ export async function getRequestUser(request: Request | NextRequest): Promise<{
             name: 'internal-user',
             role: internalUserRole,
             status: 'active',
+            ...(internalUserProductType ? { productType: internalUserProductType } : {}),
             apiPermissions: {
               image: true,
               chat: true,

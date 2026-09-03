@@ -3,6 +3,7 @@ export interface NestedWorkflowExecutionContext {
   projectId?: string;
   workflowId?: string;
   userRole?: 'user' | 'admin';
+  userProductType?: string;
   activeLayerTasks?: Record<string, string>;
   activeSkillRuns?: Record<string, string>;
   pendingSkillSubmissions?: Record<string, Promise<void>>;
@@ -26,6 +27,7 @@ export function inheritNestedWorkflowExecutionContext<T extends NestedWorkflowEx
     projectId: parent.projectId,
     workflowId: parent.workflowId,
     userRole: parent.userRole,
+    userProductType: parent.userProductType,
     activeLayerTasks,
     activeSkillRuns,
     pendingSkillSubmissions,

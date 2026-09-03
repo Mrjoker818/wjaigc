@@ -2196,3 +2196,14 @@ BUG-018 已从未验证项移除。剩余顺序为 `002-B -> 002-D -> 002-E`；�
 | 真实 Skill 任务与账务/资产闭环 | `UNVERIFIED` | 尚未执行付费任务、费用预估、一次扣退、暂停恢复、取消重试、迟到结果拒绝、AssetVersion 与刷新恢复。 |
 | 三浏览器和隔离 PostgreSQL | `BLOCKED / OPEN` | 仍缺 `E2E_STAGE4_DATABASE_URL` 与 `POSTGRES_TEST_DATABASE_URL`，不得使用业务库代替。 |
 | 部署 Chunk 缓存 | `OBSERVED / OPEN` | 服务切换后首次进入项目出现 `Loading chunk 5900 failed`，再次加载当前构建恢复；需后续部署策略永久消除。 |
+
+## 2026-09-03 统一 Skill 本地闭环后的剩余项
+
+- [x] 隔离 PostgreSQL：Skill、分层、批注、元素拆解并发幂等与扣退一致性。
+- [x] Chromium、1080p Chromium、Firefox、WebKit、Mobile Chromium 的 Canvas/Workflow 21 Skills 与 Simple Chat 16 Skills 隔离流程。
+- [x] 移动端节点属性抽屉可达、可编辑并可关闭。
+- [ ] 将本候选推送到 GitHub `main` 并复读 exact SHA；`stable` 禁止修改。
+- [ ] Coze 拉取该 exact SHA，确认运行 tree 一致并重启沙箱。
+- [ ] 沙箱重启后强制刷新既有 Chrome 预览页，执行真实 Skill、刷新恢复及 Console/Network 验收。
+- [ ] 观察部署切换后的旧 Chunk 首次加载风险是否复发。
+- 当前 Chrome 自动化阻塞：标签页可枚举，但 `getTab` 返回 `Debugger unattached`。在控制通道真正附着前，以上云端项保持未验证。

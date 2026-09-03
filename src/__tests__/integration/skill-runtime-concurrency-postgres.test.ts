@@ -1,4 +1,6 @@
+import { spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
+import { resolve } from 'node:path';
 
 import { describe, expect, it, vi } from 'vitest';
 
@@ -19,6 +21,23 @@ if (!hasPostgresTestDatabase) {
 }
 
 describe('Skill runtime PostgreSQL concurrency', () => {
+  function migrate(databaseUrl: string): void {
+    const result = spawnSync(
+      process.execPath,
+      [resolve(process.cwd(), 'scripts/run-migrations.mjs')],
+      {
+        cwd: process.cwd(),
+        encoding: 'utf8',
+        env: {
+          ...process.env,
+          DATABASE_URL: databaseUrl,
+          PGDATABASE_URL: databaseUrl,
+        },
+      },
+    );
+    expect(result.status, result.stderr || result.stdout).toBe(0);
+  }
+
   function descriptor(providerId: string, modelId: string, kind: 'chat' | 'image'): TaskModelDescriptor {
     return {
       providerId, modelId, kind, sourceType: kind,
@@ -53,23 +72,44 @@ describe('Skill runtime PostgreSQL concurrency', () => {
   }
 
   async function createThroughSkillService(input: ReturnType<typeof runtimeInput>) {
-    const [runRequest, skillService, agentService, taskStorage] = await Promise.all([
+    const [runRequest, skillService, agentService, eventStorage, taskStorage, billing, taskService] = await Promise.all([
       import('@/lib/skill-runtime/run-request'),
       import('@/lib/skill-runtime/service'),
       import('@/lib/agent-runtime/service'),
+      import('@/lib/agent-runtime/event-storage'),
       import('@/lib/cloud-task-storage'),
+      import('@/lib/task-core/billing-service'),
+      import('@/lib/task-core/task-service'),
     ]);
     const authorizeContext = async ({ request }: { request: AgentRunRequest }) => ({
       snapshot: request.context, mediaByVersionId: {}, selectedEntityVersionIds: {},
     });
+    const resolveTestModel = async (providerId: string, modelId: string) => descriptor(
+      providerId, modelId, providerId === 'pear-chat' ? 'chat' : 'image',
+    );
+    const runtime = agentService.createAgentRuntimeService({
+      randomUUID,
+      now: Date.now,
+      resolveTaskModel: resolveTestModel,
+      authorizeContext,
+      calculateCreditCost: async operation => operation === 'chat' ? 1 : 3,
+      createBillableTask: billing.createBillableTask,
+      appendEvent: eventStorage.appendAgentEvent,
+      transitionControl: eventStorage.transitionAgentRunControl,
+      listEvents: eventStorage.listAgentEventsForActor,
+      observeAdoptedTerminal: eventStorage.observeAdoptedAgentTaskTerminal,
+      listRunEventStreams: eventStorage.listAgentEventStreamsForActor,
+      getTaskForUser: taskStorage.getCloudTaskForUser,
+      transitionTask: taskService.transitionTask,
+      settleFailedTask: billing.settleFailedTask,
+      abortTaskExecution: () => false,
+    });
     const createAuthorizedSkillRun: typeof runRequest.createSkillRun = (value) => (
       runRequest.createSkillRun(value, {
-        resolveTaskModel: async (providerId, modelId) => descriptor(
-          providerId, modelId, providerId === 'pear-chat' ? 'chat' : 'image',
-        ),
+        resolveTaskModel: resolveTestModel,
         authorizeContext,
         calculateCreditCost: async operation => operation === 'chat' ? 1 : 3,
-        createAgentRun: agentService.createAgentRun,
+        createAgentRun: runtime.createRun,
       })
     );
     const service = skillService.createSkillRuntimeService({
@@ -86,11 +126,12 @@ describe('Skill runtime PostgreSQL concurrency', () => {
   }
 
   postgresIt('same actor and idempotency key creates one Skill run and one charge', async () => {
-    await withIsolatedPostgres('skill_runtime_create_concurrency', async ({ query }) => {
+    await withIsolatedPostgres('skill_runtime_create_concurrency', async ({ databaseUrl, query }) => {
       const { createBillableTask } = await import('@/lib/task-core/billing-service');
       const { ensureCoreTables } = await import('@/lib/db-storage');
       const { ensureCloudTaskTables } = await import('@/lib/cloud-task-storage');
       await Promise.all([ensureCoreTables(), ensureCloudTaskTables()]);
+      migrate(databaseUrl);
       const now = Date.now();
       const userId = `skill-user-${randomUUID()}`;
       const idempotencyKey = `skill-key-${randomUUID()}`;
@@ -133,11 +174,12 @@ describe('Skill runtime PostgreSQL concurrency', () => {
   }, 60_000);
 
   postgresIt('failure or cancellation refunds once and a late completion cannot cross the terminal state', async () => {
-    await withIsolatedPostgres('skill_runtime_terminal_race', async ({ query }) => {
+    await withIsolatedPostgres('skill_runtime_terminal_race', async ({ databaseUrl, query }) => {
       const { createBillableTask, settleFailedTask } = await import('@/lib/task-core/billing-service');
       const { completeCloudTask, ensureCloudTaskTables } = await import('@/lib/cloud-task-storage');
       const { ensureCoreTables } = await import('@/lib/db-storage');
       await Promise.all([ensureCoreTables(), ensureCloudTaskTables()]);
+      migrate(databaseUrl);
       const now = Date.now();
       const userId = `skill-terminal-${randomUUID()}`;
       await query(
@@ -181,10 +223,11 @@ describe('Skill runtime PostgreSQL concurrency', () => {
   }, 60_000);
 
   postgresIt('real Skill service coalesces 20 creates and rejects a different digest', async () => {
-    await withIsolatedPostgres('skill_runtime_service_concurrency', async ({ query }) => {
+    await withIsolatedPostgres('skill_runtime_service_concurrency', async ({ databaseUrl, query }) => {
       const { ensureCoreTables } = await import('@/lib/db-storage');
       const { ensureCloudTaskTables } = await import('@/lib/cloud-task-storage');
       await Promise.all([ensureCoreTables(), ensureCloudTaskTables()]);
+      migrate(databaseUrl);
       const userId = `skill-service-${randomUUID()}`;
       const idempotencyKey = `skill-service-key-${randomUUID()}`;
       const now = Date.now();
@@ -268,7 +311,7 @@ describe('Skill runtime PostgreSQL concurrency', () => {
   }, 60_000);
 
   postgresIt('reclaims an expired dispatch through the high-level Skill dispatcher without duplicate submission or charge', async () => {
-    await withIsolatedPostgres('skill_runtime_expired_dispatch_recovery', async ({ query }) => {
+    await withIsolatedPostgres('skill_runtime_expired_dispatch_recovery', async ({ databaseUrl, query }) => {
       const [core, taskStorage, eventStorage, agentService, skillService, catalog] = await Promise.all([
         import('@/lib/db-storage'),
         import('@/lib/cloud-task-storage'),
@@ -278,6 +321,7 @@ describe('Skill runtime PostgreSQL concurrency', () => {
         import('@/lib/skill-runtime/catalog'),
       ]);
       await Promise.all([core.ensureCoreTables(), taskStorage.ensureCloudTaskTables()]);
+      migrate(databaseUrl);
       const userId = `skill-recovery-${randomUUID()}`;
       const now = Date.now();
       await query(
@@ -364,13 +408,14 @@ describe('Skill runtime PostgreSQL concurrency', () => {
   }, 60_000);
 
   postgresIt('real Agent events and Skill executor settle one quality refund and fence late completion', async () => {
-    await withIsolatedPostgres('skill_runtime_executor_quality_fence', async ({ query }) => {
+    await withIsolatedPostgres('skill_runtime_executor_quality_fence', async ({ databaseUrl, query }) => {
       const { ensureCoreTables } = await import('@/lib/db-storage');
       const taskStorage = await import('@/lib/cloud-task-storage');
       const agentService = await import('@/lib/agent-runtime/service');
       const sameTask = await import('@/lib/agent-runtime/same-task-adapter');
       const skillService = await import('@/lib/skill-runtime/service');
       await Promise.all([ensureCoreTables(), taskStorage.ensureCloudTaskTables()]);
+      migrate(databaseUrl);
       const userId = `skill-quality-${randomUUID()}`;
       const now = Date.now();
       await query(
@@ -427,13 +472,14 @@ describe('Skill runtime PostgreSQL concurrency', () => {
   }, 60_000);
 
   postgresIt('real cancellation wins a concurrent late quality failure with one refund', async () => {
-    await withIsolatedPostgres('skill_runtime_cancel_quality_race', async ({ query }) => {
+    await withIsolatedPostgres('skill_runtime_cancel_quality_race', async ({ databaseUrl, query }) => {
       const { ensureCoreTables } = await import('@/lib/db-storage');
       const taskStorage = await import('@/lib/cloud-task-storage');
       const agentService = await import('@/lib/agent-runtime/service');
       const sameTask = await import('@/lib/agent-runtime/same-task-adapter');
       const skillService = await import('@/lib/skill-runtime/service');
       await Promise.all([ensureCoreTables(), taskStorage.ensureCloudTaskTables()]);
+      migrate(databaseUrl);
       const userId = `skill-cancel-${randomUUID()}`;
       const now = Date.now();
       await query(
@@ -485,6 +531,50 @@ describe('Skill runtime PostgreSQL concurrency', () => {
          WHERE task_id = $1 AND type = 'refund'`, [created.runId],
       );
       expect(refunds.rows[0]?.count).toBe('1');
+    });
+  }, 60_000);
+
+  postgresIt('an active Agent fence protects its run without blocking child task lineage updates', async () => {
+    await withIsolatedPostgres('skill_runtime_child_task_fence', async ({ databaseUrl, query }) => {
+      const { ensureCoreTables } = await import('@/lib/db-storage');
+      const taskStorage = await import('@/lib/cloud-task-storage');
+      const { withAgentExecutionFence } = await import('@/lib/agent-runtime/execution-fence');
+      await Promise.all([ensureCoreTables(), taskStorage.ensureCloudTaskTables()]);
+      migrate(databaseUrl);
+
+      const now = Date.now();
+      const ownerId = `skill-fence-${randomUUID()}`;
+      const projectId = `project-${randomUUID()}`;
+      const runId = `run-${randomUUID()}`;
+      const childTaskId = `child-${randomUUID()}`;
+      await query(
+        `INSERT INTO cloud_tasks(id, user_id, project_id, type, status, created_at, updated_at)
+         VALUES ($1, $2, $3, 'agent-run', 'processing', $5, $5),
+                ($4, $2, $3, 'generate-async', 'processing', $5, $5)`,
+        [runId, ownerId, projectId, childTaskId, now],
+      );
+      await query(
+        `INSERT INTO wujie_agent_execution_leases(
+           task_id, owner_id, project_id, tool_id, lease_owner, lease_expires_at,
+           completed_at, updated_at, generation, paused_at
+         ) VALUES ($1, $2, $3, 'generate_image', 'worker-current', $4, 0, $5, 2, 0)`,
+        [runId, ownerId, projectId, now + 60_000, now],
+      );
+
+      const fence = { runId, leaseOwner: 'worker-current', generation: 2 };
+      const [childUpdated, parentUpdated] = await withAgentExecutionFence(fence, () => Promise.all([
+        taskStorage.updateCloudTask(childTaskId, { result: { lineageFrozen: true } }),
+        taskStorage.updateCloudTask(runId, { progress: 40 }),
+      ]));
+
+      expect(childUpdated).toBe(true);
+      expect(parentUpdated).toBe(true);
+      const rows = await query<{ id: string; progress: number; result: Record<string, unknown> }>(
+        'SELECT id, progress, result FROM cloud_tasks WHERE id = ANY($1::text[]) ORDER BY id',
+        [[childTaskId, runId]],
+      );
+      expect(rows.rows.find(row => row.id === childTaskId)?.result).toMatchObject({ lineageFrozen: true });
+      expect(rows.rows.find(row => row.id === runId)?.progress).toBe(40);
     });
   }, 60_000);
 });

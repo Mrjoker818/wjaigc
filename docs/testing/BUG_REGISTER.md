@@ -3823,3 +3823,14 @@ All listed Stage 4 defects are locally closed. S4-BUG-008 also passed its exact-
 | 预期结果 | 部署切换后首次进入直接加载同一 Build ID 的 HTML 与 Chunk，不依赖用户二次刷新。 |
 | 当前状态 | `OPEN`。未通过延长等待或吞异常处理；后续需检查 HTML/静态资源缓存原子切换和旧构建保留策略。 |
 | 当前状态 | **LOCAL PASS / DATABASE AND CLOUD UNVERIFIED。** 不得标记发布通过；不得触碰 `stable`。 |
+
+### TEST-SKILL-001 本地真库与跨浏览器闭环补充（2026-09-03）
+
+- **已关闭的根因 1**：父 Agent 的活动执行围栏错误阻止子任务写入 lineage。现按子任务自身租约判定；有活动租约时仍要求 `runId + owner + generation` 精确匹配。
+- **已关闭的根因 2**：Workflow 内部签名请求未携带用户 `productType`，普通画布用户执行 Skill 时可能被误判为未授权。现将产品范围纳入签名头、请求用户上下文和工作流执行上下文。
+- **已关闭的根因 3**：移动端新增节点后属性区永久不可达。现选中节点时显示右侧受控抽屉，并提供“关闭节点属性”按钮；桌面仍保持固定属性栏。
+- **测试基础设施纠偏**：只忽略“同一 GET 已有 2xx 成功证据”的卸载 abort；POST、纯 abort、4xx/5xx 仍失败。节点库展开依据 `aria-pressed`，避免渲染竞态反向关闭面板。
+- **真库证据**：分层、批注、元素拆解和 Skill Runtime 的并发幂等、一次扣费/退款、取消与迟到完成围栏均在隔离 PostgreSQL 执行通过。
+- **完整回归**：Vitest `653 files / 5042 tests / 0 failed / 0 skipped`；TypeScript 通过；ESLint `0 errors / 943 warnings`；保护基线 `38/38 / 0 drift / 0 warnings`；生产构建 `119/119`。
+- **浏览器证据**：Chromium、Chromium 1080p、Firefox、WebKit、Mobile Chromium 共 `10/10` 通过；Canvas/Workflow 为同源 21 Skills，Simple Chat 独立 16 Skills。
+- **当前状态**：`LOCAL + POSTGRESQL + CROSS-BROWSER PASS / COZE LATEST CANDIDATE PENDING`。现有 Chrome 标签可枚举，但调试接口返回 `Debugger unattached`，不得把旧云端证据冒充新候选验收。

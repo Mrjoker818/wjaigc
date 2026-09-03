@@ -2044,3 +2044,11 @@ The focused gate test passes `7/7`; the actual protected-baseline command passes
 - 首次项目进入出现一次旧 Chunk 5900 加载失败，刷新后恢复；部署资产缓存风险仍开放。
 - 隔离 PostgreSQL、真实 Skill 任务、模型/供应商冻结、积分预估与一次扣退、暂停/恢复/取消/重试、AssetVersion、刷新恢复及 Chromium/Firefox/WebKit 完整证据仍未关闭。
 - **发布结论维持“有条件通过”。** 当前可以继续 Task 12 的真实运行验收，但不能宣布统一 Skill 或全平台发布通过。
+
+## 2026-09-03 统一 Skill 候选发布判断更新
+
+- Task 11/12 的本地发布门禁已从“数据库与浏览器未验证”升级为：隔离 PostgreSQL 真实并发通过，五个 Playwright 配置 `10/10` 通过。
+- 全仓为 `5042/5042`，无跳过、无失败；TypeScript、零错误 ESLint、38 项保护功能和 `119/119` 生产构建通过。
+- Canvas 与 Workflow 继续共享 21 Skills；独立 Simple Chat 保持 16 Skills，目录交集为 0，没有发生作用域回退。
+- `stable@52f7c601` 未修改。候选只允许推送 `main`。
+- **发布结论：有条件通过。** 条件仅针对最新候选的 Coze exact-SHA/tree、沙箱重启后预览强刷、真实 Chrome 运行/刷新恢复和 Console/Network 健康；旧 `366b90b2` 云端目录证据不能替代新候选。

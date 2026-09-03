@@ -504,6 +504,9 @@ export async function seedStage4Baseline(
     data: {
       key: 'chat_simple_projects',
       value: mergeById(existingChatProjects, chatProject),
+      expectedRevision: Number.isSafeInteger(chatPayload.syncRevision)
+        ? Number(chatPayload.syncRevision)
+        : 0,
     },
   });
   expect(saveChatProjects.ok(), `/api/user-data/sync chat_simple_projects save returned HTTP ${saveChatProjects.status()}`).toBe(true);
@@ -545,13 +548,29 @@ export async function seedStage4RuntimeDependencies(input: {
          ('stage4-chat-provider', 'Stage 4 Chat Provider', 'Stage 4 Chat Provider', $1, 'controlled-key', true,
           'general', 'general', 'chat-completions', $2::text[], '{}'::jsonb, true, $3, $3, 'connected', '[]'::jsonb, 1),
          ('stage4-image-provider', 'Stage 4 Image Provider', 'Stage 4 Image Provider', $1, 'controlled-key', true,
-          'image', 'image', 'images-generations', $4::text[], '{}'::jsonb, true, $3, $3, 'connected', '[]'::jsonb, 2)
+          'image', 'image', 'images-generations', $4::text[], '{}'::jsonb, true, $3, $3, 'connected', $5::jsonb, 2)
        ON CONFLICT (id) DO UPDATE SET
          base_url = EXCLUDED.base_url, api_key = EXCLUDED.api_key,
          type = EXCLUDED.type, model_type = EXCLUDED.model_type,
          selected_models = EXCLUDED.selected_models,
+         discovered_models = EXCLUDED.discovered_models,
          is_enabled = true, updated_at = EXCLUDED.updated_at`,
-      [input.providerBaseUrl, ['stage4-chat-model', 'stage4-gemini-vision-model'], now, ['stage4-image-model']],
+      [
+        input.providerBaseUrl,
+        ['stage4-chat-model', 'stage4-gemini-vision-model'],
+        now,
+        ['stage4-image-model'],
+        JSON.stringify([{
+          id: 'stage4-image-model',
+          name: 'Stage 4 Image Model',
+          type: 'image',
+          supportedAspectRatios: ['1:1'],
+          supportedQualities: ['1K'],
+          maxImages: 1,
+          capabilities: ['image'],
+          outputKinds: ['png'],
+        }]),
+      ],
     );
     await pool.query(
       `INSERT INTO wujie_projects(id, owner_id, name, status)
