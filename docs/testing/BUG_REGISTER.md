@@ -1,5 +1,17 @@
 # 无界AI — 缺陷登记表 (BUG REGISTER)
 
+## 2026-09-03 Skill 暂停与终态投影云端增量
+
+`8e997ebf` 的两处服务端行为已由现存真实云端 run 证明：`execution-error` 暂停步骤投影为 failed，通用 resume 被 400 拒绝且状态不变；取消任务投影为 `cancelled/refunded`，活动子步骤为 cancelled、无 processing 残留。对应本地永久回归 58/58 通过。
+
+本项不提前关闭 UI 边界。Google Chrome 仍需可见证明暂停态只显示“从失败步骤重试”、不显示“继续”，以及取消态没有 processing 子步骤。Chrome 扩展本轮能列出正确项目页和预览页，但调试通道未附着；这属于证据阻塞，不登记为产品缺陷。机器证据：[skill-admin003-cloud-followup-20260903.json](evidence/skill-admin003-cloud-followup-20260903.json)。
+
+## 2026-09-03 V588-ADMIN-003 缩略图交付增量
+
+本地缩略图生成、投影、失败后一次重试、原图回退及 `serve-upload` S3 精确路径恢复专项为 54/54 通过；2 项 PostgreSQL 用例因缺少隔离测试库跳过。云端 `asset-v3` 中 453 个受管图片均为 ready；5 个受控批次共回填 41 个变体，全部 completed、0 failed/0 skipped，后台 ready 从 2 增至 43，项目投影缩略图从 1 增至 20。20/20 缩略图、20/20 带重试参数 URL 和 20/20 对应原图均真实返回 200。
+
+仍不把整个 `V588-ADMIN-003` 标为完成：dry-run 显示至少 100 个候选尚未回填；浏览器实际触发缩略图失败重试/原图回退、受控移除本地缓存后的真实 S3 恢复和 PostgreSQL 并发尚无新证据。41 条为分批受控回填，不是全量维护；历史软归档未执行。
+
 ## 2026-09-02 V588-ADMIN-003 检查点漂移云端关闭
 
 `main@3cf87dc8` 已同步到 Coze，Coze 元数据提交 `8a280f15` 的整树与目标提交完全一致，`stable@52f7c601` 未触碰。真实数据库在修复部署后的 shadow 首次检查即从历史 `9/11` 恢复为 `11/11`；随后完成 `shadow -> asset-v3 -> shadow` 受控循环，三次均为 `matching=11 / mismatched=0 / failedCheckpoints=0 / missingCheckpoints=0`，462 个媒体全部 ready。

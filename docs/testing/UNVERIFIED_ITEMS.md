@@ -1,5 +1,14 @@
 # 无界AI — 未验证项目清单 (UNVERIFIED ITEMS)
 
+## 2026-09-03 当前精确未验证边界
+
+- Skill 服务端不再未验证：`execution-error` 通用 resume 被拒绝，取消 run 无 processing 子步骤且已退款。仍缺 Google Chrome 可见断言：暂停态仅有“从失败步骤重试”、无“继续”；取消态无 processing 子步骤。
+- `V588-ADMIN-003` 不再把缩略图生成和基本交付列为未开发：云端 41 个回填全部 completed，投影已有 20 个缩略图；缩略图、带重试参数 URL 和对应原图各 20/20 返回 200。本地重试、原图回退和 S3 路由专项通过。仍缺真实 Chrome 触发顺序、受控移除本地缓存后的 S3 恢复、隔离 PostgreSQL 两项并发测试。
+- 缩略图 dry-run 发现至少 100 个候选。是否执行剩余回填属于维护动作，本轮未执行；历史媒体软归档不得重跑。
+- Google Chrome 的正确现有项目页与预览页可枚举，但控制通道返回未附着。本轮没有改用 360、没有创建新标签，也没有把该自动化阻塞写成产品通过或失败。
+
+机器证据：[skill-admin003-cloud-followup-20260903.json](evidence/skill-admin003-cloud-followup-20260903.json)。
+
 ## 2026-09-01 PROVIDER-003 业务关闭后的剩余发布证据
 
 真实 HTTP 非 JSON和真实首字节超时不再列为未验证：两者均有 taskId、终态、唯一扣费/退款、余额恢复和无图片结果证据；超时还完成了 45 秒迟到结果隔离复读。`V588-PROVIDER-003` 业务验收关闭。

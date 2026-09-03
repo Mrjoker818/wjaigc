@@ -1,0 +1,128 @@
+{
+  "recordedAt": "2026-09-03T23:40:19+08:00",
+  "repositoryHead": "3ac51515288b569367753c11a65a191e6edb28cc",
+  "deployedBusinessCommit": "8e997ebf772d15510a85ef47d1a2b63be6b0a60c",
+  "baseUrl": "https://62afe49a-716e-4d9e-99cd-a0be49c4794c-5000.dev.coze.site",
+  "skillRuntime": {
+    "focusedLocalTests": {
+      "filesPassed": 2,
+      "testsPassed": 58,
+      "testsFailed": 0
+    },
+    "pausedRun": {
+      "runId": "dba325df-0466-4c14-b620-3a714b592bd7",
+      "requestId": "2effbb85-c961-9f9f-96b9-1789c5e86d28",
+      "status": "paused",
+      "resumeFromStepId": "conversation-2",
+      "steps": [
+        { "id": "conversation-1", "status": "completed" },
+        { "id": "conversation-2", "status": "failed" }
+      ],
+      "pauseEvent": {
+        "requestId": "928bee37-49e4-961a-b6f3-e93660ab421a",
+        "sequence": 5,
+        "type": "run.paused",
+        "pauseReason": "execution-error"
+      },
+      "genericResumeProbe": {
+        "status": 400,
+        "code": "SKILL_RUN_REQUEST_INVALID",
+        "message": "Execution-error pauses must be retried from the failed step",
+        "stateAfterProbe": "paused"
+      }
+    },
+    "cancelledRun": {
+      "runId": "14879240-7fd5-4a8d-9c50-16fabc06feb7",
+      "requestId": "9b03b3d5-e480-9648-9f11-a55601c67b69",
+      "status": "cancelled",
+      "creditStatus": "refunded",
+      "creditCost": 62,
+      "steps": [
+        { "id": "conversation-1", "status": "completed" },
+        { "id": "conversation-2", "status": "cancelled" }
+      ],
+      "processingChildCount": 0
+    },
+    "browserAssertion": {
+      "status": "unverified",
+      "reason": "Existing Google Chrome tabs were listed, but both returned Debugger unattached; no alternate browser or new tab was used.",
+      "remaining": [
+        "execution-error pause visibly shows only 从失败步骤重试",
+        "generic 继续 is absent",
+        "cancelled run visibly has no processing child"
+      ]
+    }
+  },
+  "admin003": {
+    "focusedLocalTests": {
+      "filesPassed": 8,
+      "testsPassed": 54,
+      "testsFailed": 0,
+      "postgresFilesSkipped": 1,
+      "postgresTestsSkipped": 2,
+      "skipReason": "POSTGRES_TEST_DATABASE_URL is not configured"
+    },
+    "cloud": {
+      "assetGraphMode": "asset-v3",
+      "canvasKernelMode": "legacy",
+      "projectCount": 10,
+      "managedImageCount": 453,
+      "readyManagedImageCount": 453,
+      "thumbnailBackfillStatus": {
+        "pending": 0,
+        "processing": 0,
+        "readyBefore": 2,
+        "readyAfter": 3,
+        "failed": 0
+      },
+      "dryRun": {
+        "limit": 100,
+        "discovered": 100,
+        "claimed": 0,
+        "completed": 0,
+        "failed": 0
+      },
+      "controlledBackfill": {
+        "batchSizes": [1, 10, 10, 10, 10],
+        "discovered": 41,
+        "claimed": 41,
+        "completed": 41,
+        "failed": 0,
+        "skipped": 0
+      },
+      "projectedThumbnailCountBefore": 1,
+      "projectedThumbnailCountAfter": 20,
+      "deliveryMatrix": {
+        "thumbnailUrls": { "tested": 20, "http200": 20, "contentType": "image/webp", "minBytes": 1056, "maxBytes": 5260 },
+        "cacheBustRetryUrls": { "tested": 20, "http200": 20 },
+        "originalFallbackUrls": { "tested": 20, "http200": 20, "contentType": "image/png", "minBytes": 776221, "maxBytes": 1340824 }
+      },
+      "thumbnailProbes": [
+        {
+          "path": "/api/serve-upload/thumbnails/27ff090c-84e5-5bdf-acf3-db497bf3acfa/512.webp",
+          "status": 200,
+          "contentType": "image/webp",
+          "byteSize": 4008
+        },
+        {
+          "path": "/api/serve-upload/thumbnails/51e0a30e-951f-5021-9992-968730b1ff34/256.webp",
+          "status": 200,
+          "contentType": "image/webp",
+          "byteSize": 2064
+        }
+      ]
+    },
+    "remaining": [
+      "Google Chrome thumbnail retry then original fallback visual evidence",
+      "controlled removal of local thumbnail cache followed by real S3 restore",
+      "isolated PostgreSQL thumbnail concurrency tests",
+      "remaining thumbnail backfill execution after an explicit maintenance decision"
+    ]
+  },
+  "mutationSummary": {
+    "businessCodeChanged": false,
+    "historicalSoftArchiveRepeated": false,
+    "thumbnailBackfillExecuted": "41 additive variants in five bounded batches",
+    "providerTaskCreated": false
+  }
+}
