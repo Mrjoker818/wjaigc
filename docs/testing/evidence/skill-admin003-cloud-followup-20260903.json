@@ -58,9 +58,22 @@
       "filesPassed": 8,
       "testsPassed": 54,
       "testsFailed": 0,
-      "postgresFilesSkipped": 1,
-      "postgresTestsSkipped": 2,
-      "skipReason": "POSTGRES_TEST_DATABASE_URL is not configured"
+      "initialPostgresFilesSkipped": 1,
+      "initialPostgresTestsSkipped": 2,
+      "isolatedPostgresRerun": {
+        "postgresVersion": "18",
+        "temporaryPort": 55433,
+        "database": "wujie_admin003_test",
+        "testsPassed": 2,
+        "testsFailed": 0,
+        "coverage": [
+          "checksum-managed migration and unique version-size constraint",
+          "concurrent claim serialization and stale lease finalization rejection"
+        ],
+        "businessDatabaseUsed": false,
+        "serverStopped": true,
+        "temporaryDirectoryRemoval": "blocked by local command safety policy; directory remains outside the repository under workspace .tmp"
+      }
     },
     "cloud": {
       "assetGraphMode": "asset-v3",
@@ -115,7 +128,6 @@
     "remaining": [
       "Google Chrome thumbnail retry then original fallback visual evidence",
       "controlled removal of local thumbnail cache followed by real S3 restore",
-      "isolated PostgreSQL thumbnail concurrency tests",
       "remaining thumbnail backfill execution after an explicit maintenance decision"
     ]
   },

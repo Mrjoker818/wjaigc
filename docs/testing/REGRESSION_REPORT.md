@@ -5,7 +5,7 @@
 - 当前 `main@3ac51515` 未覆盖 `8e997ebf` 的 Skill 修复；组件与服务专项重新执行为 `2 files / 58 tests passed / 0 failed`。
 - 云端暂停 run `dba325df-0466-4c14-b620-3a714b592bd7` 的事件明确为 `run.paused / execution-error`，失败步骤 `conversation-2` 投影为 `failed`。对该 run 发送通用 resume 得到 400 `SKILL_RUN_REQUEST_INVALID`，复读后仍为 paused，证明后端不会绕过“从失败步骤重试”。
 - 云端取消 run `14879240-7fd5-4a8d-9c50-16fabc06feb7` 为 `cancelled/refunded`，活动步骤投影为 `cancelled`，`processing` 子步骤数量为 0。
-- `V588-ADMIN-003` 聚焦回归为 `8 files / 54 tests passed`；2 项隔离 PostgreSQL 用例因未配置 `POSTGRES_TEST_DATABASE_URL` 明确跳过。云端运行 `asset-v3`，453 个受管图片均 ready。5 个受控批次共回填 41 个变体，全部 completed、0 failed/0 skipped，ready 从 2 增至 43，项目投影缩略图从 1 增至 20。20/20 缩略图、20/20 带重试参数的 URL、20/20 对应原图均返回 200，类型分别为 WebP 与 PNG。
+- `V588-ADMIN-003` 非数据库聚焦回归为 `8 files / 54 tests passed`。随后新建本机隔离 PostgreSQL 18 临时库，原跳过的 2 项真实通过：checksum migration 与 version-size 唯一约束成立，并发 claim 不重复且旧租约不能完成新租约持有的记录；未连接业务数据库。云端运行 `asset-v3`，453 个受管图片均 ready。5 个受控批次共回填 41 个变体，全部 completed、0 failed/0 skipped，ready 从 2 增至 43，项目投影缩略图从 1 增至 20。20/20 缩略图、20/20 带重试参数的 URL、20/20 对应原图均返回 200，类型分别为 WebP 与 PNG。
 - **判定：缩略图生成与基本交付 CLOUD PASS，Google Chrome UI 仍待验。** 现有正确 Chrome 标签可枚举，但控制通道未附着；没有改用 360 或新建标签，也没有执行批量回填、历史软归档或供应商任务。证据：[skill-admin003-cloud-followup-20260903.json](evidence/skill-admin003-cloud-followup-20260903.json)。
 
 ## 2026-09-02 `V588-CREDITS-OBS-001` 积分可观测性回归
