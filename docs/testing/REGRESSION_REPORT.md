@@ -2691,3 +2691,13 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - 两项修复均按 RED/GREEN 完成。聚焦 `58/58`，Skill 扩大回归 `298/298`，全仓 `626 files / 4903 tests` 通过；`27 files / 143 tests` 因缺少隔离 PostgreSQL 明确跳过，0 失败。
 - TypeScript、零错误 ESLint、保护门禁 `38/38 / 0 drift / 0 warnings` 通过。默认约 4 GiB Node 堆构建 OOM 被保留；8 GiB 重跑成功，生成 `119/119` 页面。
 - **回归判定：本地修复通过 / 新部署云端待验。** 真实 Skill 成功产出与 AssetVersion 仍受图像上游失败阻塞；PostgreSQL 跳过项不计为通过。
+
+## 2026-09-03 `8e997ebf` Coze 部署门禁
+
+- Coze 已普通合并 `origin/main@8e997ebf772d15510a85ef47d1a2b63be6b0a60c`；运行 `HEAD tree b2c1211c` 与目标提交 tree 精确一致，工作树 clean。
+- `origin/stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 未变化，未使用 `main-fix`，未修改业务源码或持久化数据。
+- 云端门禁通过：保护基线 `6/6`、Skill 聚焦 `272/272`、全量 `613` 文件与 `4345` 测试、补充长测试、TypeScript、零错误 ESLint、生产构建 `119/119`。
+- `17` 项 PostgreSQL 条件测试因没有隔离测试库明确跳过，未使用生产库冒充测试库。
+- 新 Build ID 为 `gZ8JEWqrmTL1DArgB7pSr`；唯一 5000 服务 PID `17363`，`WUJIE_ASSET_GRAPH_MODE=asset-v3`；`/`、`/simple-chat`、`/api/auth/me` 均为 HTTP 200。
+- Google Chrome 强制刷新后管理员会话和项目画布正常，Canvas Skills 入口可打开并进入真实 Skill 参数表单。填写参数时扩展控制连接脱离，尚未取得“错误暂停仅显示失败步骤重试”和“取消终态无 processing 步骤”的新部署 UI 证据。
+- **回归判定：COZE EXACT-TREE / BUILD / SERVICE PASS；CHROME STATE-MACHINE PENDING。** 不进入下一批开发，先补齐两个状态缺陷的云端真实复验。
