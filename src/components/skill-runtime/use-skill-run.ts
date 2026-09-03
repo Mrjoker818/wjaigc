@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { useAgentRunEvents } from '@/components/agent-runtime/use-agent-run-events';
+import { reduceSkillEvents } from './skill-event-projection';
 import type { AgentEvent, AgentRunProjection } from '@/lib/agent-runtime/types';
 import type { SkillRunCostEstimate } from '@/lib/skill-runtime/cost-estimator';
 import type { SkillRunRequest } from '@/lib/skill-runtime/run-request';
@@ -77,7 +78,7 @@ export function useSkillRun({ fetcher = fetch }: UseSkillRunOptions = {}): UseSk
   const historyController = useRef<AbortController | undefined>(undefined);
   const historyGeneration = useRef(0);
   const [eventRefreshVersion, setEventRefreshVersion] = useState(0);
-  const events = useAgentRunEvents(eventRunId, eventRefreshVersion);
+  const events = useAgentRunEvents(eventRunId, eventRefreshVersion, reduceSkillEvents);
 
   useEffect(() => {
     const activeControllers = controllers.current;

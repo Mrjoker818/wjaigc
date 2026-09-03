@@ -18,6 +18,10 @@ interface SkillRunProgressProps {
 }
 
 const terminalStatuses = new Set(['completed', 'failed', 'cancelled', 'timeout']);
+const stepStatusLabels: Record<string, string> = {
+  pending: '待执行', processing: '执行中', paused: '已暂停',
+  completed: '已完成', failed: '失败', cancelled: '已取消', timeout: '超时',
+};
 
 function phaseLabel(projection: AgentRunProjection, stale: boolean): string {
   if (stale && projection.status !== 'paused' && !terminalStatuses.has(projection.status)) {
@@ -81,7 +85,12 @@ export function SkillRunProgress({
             />
           )}
           <ol className="space-y-1">
-            {projection.plan.map(step => <li key={step.id}>{step.label}</li>)}
+            {projection.plan.map(step => (
+              <li key={step.id} className="flex items-start justify-between gap-3">
+                <span className="min-w-0 break-words">{step.label}</span>
+                <span className="shrink-0 text-muted-foreground">{stepStatusLabels[step.status] || '状态未知'}</span>
+              </li>
+            ))}
           </ol>
           {projection.error && (
             <div role="alert" className="text-destructive">

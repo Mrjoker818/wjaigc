@@ -125,6 +125,7 @@ export async function runAgentControlRequest(input: {
 
 interface AgentRunEventPollerOptions {
   runId: string;
+  project?: (events: readonly AgentEvent[]) => AgentRunProjection;
   load?: (runId: string, afterSequence: number, signal: AbortSignal) => Promise<AgentEvent[]>;
   onProjection(projection: AgentRunProjection): void;
   onStale(stale: boolean): void;
@@ -139,6 +140,7 @@ export interface AgentRunEventPoller {
 
 export function createAgentRunEventPoller({
   runId,
+  project = reduceAgentEvents,
   load = (id, after, signal) => loadAgentRunEvents(id, after, fetch, signal),
   onProjection,
   onStale,
@@ -168,7 +170,7 @@ export function createAgentRunEventPoller({
             ...received.map(event => event.sequence),
             lastSequence,
           );
-          const nextProjection = reduceAgentEvents(nextEvents);
+          const nextProjection = project(nextEvents);
           if (!active || requestController.signal.aborted) return;
           events = nextEvents;
           lastSequence = nextSequence;
@@ -202,7 +204,11 @@ export function createAgentRunEventPoller({
   };
 }
 
-export function useAgentRunEvents(runId: string | null | undefined, refreshVersion = 0): AgentRunEventsResult {
+export function useAgentRunEvents(
+  runId: string | null | undefined,
+  refreshVersion = 0,
+  project: (events: readonly AgentEvent[]) => AgentRunProjection = reduceAgentEvents,
+): AgentRunEventsResult {
   const [projection, setProjection] = useState<AgentRunProjection | undefined>(
     () => runId ? initialAgentRunProjection(runId) : undefined,
   );
@@ -223,6 +229,7 @@ export function useAgentRunEvents(runId: string | null | undefined, refreshVersi
     const expectedGeneration = generation.current;
     const poller = createAgentRunEventPoller({
       runId,
+      project,
       onProjection: next => {
         if (generation.current === expectedGeneration) setProjection(next);
       },
@@ -242,7 +249,7 @@ export function useAgentRunEvents(runId: string | null | undefined, refreshVersi
       poller.stop();
       if (timer !== undefined) window.clearTimeout(timer);
     };
-  }, [runId, pollGeneration, refreshVersion]);
+  }, [runId, pollGeneration, refreshVersion, project]);
 
   const cancel = useCallback(async (): Promise<AgentRunProjection | undefined> => {
     if (!runId) return undefined;

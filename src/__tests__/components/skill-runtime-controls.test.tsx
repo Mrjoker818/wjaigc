@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { SkillInputFields } from '@/components/skill-runtime/SkillInputFields';
 import { SkillRunProgress } from '@/components/skill-runtime/SkillRunProgress';
 import { useSkillRun } from '@/components/skill-runtime/use-skill-run';
+import { reduceSkillEvents } from '@/components/skill-runtime/skill-event-projection';
 import type { AgentRunProjection } from '@/lib/agent-runtime/types';
 import type { SkillDefinition, SkillInputField } from '@/lib/skill-runtime/types';
 
@@ -383,17 +384,17 @@ describe('useSkillRun', () => {
     await act(async () => { await result.current.startRun(request); });
     await act(async () => { await result.current.resume(); });
     await waitFor(() => {
-      expect(agentEvents.useAgentRunEvents).toHaveBeenLastCalledWith('run-1', 1);
+      expect(agentEvents.useAgentRunEvents).toHaveBeenLastCalledWith('run-1', 1, reduceSkillEvents);
     });
 
     await act(async () => { await result.current.retry('render'); });
     await waitFor(() => {
-      expect(agentEvents.useAgentRunEvents).toHaveBeenLastCalledWith('run-1', 2);
+      expect(agentEvents.useAgentRunEvents).toHaveBeenLastCalledWith('run-1', 2, reduceSkillEvents);
     });
 
     await act(async () => { await result.current.cancel(); });
     await waitFor(() => {
-      expect(agentEvents.useAgentRunEvents).toHaveBeenLastCalledWith('run-1', 3);
+      expect(agentEvents.useAgentRunEvents).toHaveBeenLastCalledWith('run-1', 3, reduceSkillEvents);
     });
   });
 
