@@ -74,6 +74,7 @@ export interface SkillRunHistory {
   skillId: string;
   skillVersion: number;
   status: AgentRunProjection['status'];
+  resumeFromStepId?: string;
   steps: SkillRunStepHistory[];
   qualityEvents: Array<{ stepId: string; gateId: string; passed: boolean }>;
   assetVersionIds: string[];
@@ -355,6 +356,7 @@ function history(task: CloudTask, events: readonly AgentEvent[], projection: Age
     runId: task.id,
     ...invocation,
     status: projection.status,
+    ...(projection.resumeFromStepId ? { resumeFromStepId: projection.resumeFromStepId } : {}),
     steps: steps.map(step => ({
       id: step.id,
       label: step.label,

@@ -15,7 +15,10 @@ import { SHARED_ASPECT_RATIOS, calculateActualPixels } from './canvas-generation
 
 /** getModelParamType: 判断模型的参数类型（resolution/quality/both/none） */
 import { getModelParamType } from './canvas-generation-group';
+import { toAgentModelCapabilitySet } from './agent-runtime/model-capability-set';
 import { withImageOutputPreference, type ImageBackgroundMode } from './image-generation-output';
+import type { SkillDefinition, SkillInputField, SkillModelBinding } from './skill-runtime/types';
+import type { TaskModelDescriptor } from './task-core/model-capability-contract';
 
 // ==================== 节点类型 ====================
 
@@ -24,7 +27,7 @@ export type NodeType =
   | 'ai-generate' | 'ai-edit' | 'ai-annotation-edit' | 'ai-retouch' | 'ai-upscale' | 'ai-removebg' | 'ai-vectorize' | 'ai-style-transfer' | 'ai-color-adjust' | 'ai-analyze'
   | 'ai-font-design' | 'ai-refine-engine' | 'ai-human-repair' | 'ai-brand-ecommerce' | 'ai-segment' | 'ai-multi-angle' | 'ai-3d-model' | 'ai-panorama'
   | 'ai-video-generate' | 'ai-video-i2v'
-  | 'ai-llm' | 'ai-audio'
+  | 'ai-llm' | 'ai-audio' | 'ai-skill'
   | 'video-speed-change' | 'video-filter' | 'video-concat' | 'video-trim'
   | 'video-extract-frames' | 'video-compose'
   | 'manual-color-adjust'
@@ -32,6 +35,35 @@ export type NodeType =
   | 'agent-auto' | 'agent-chat'
   | 'subgraph' | 'group' | 'storyboard-sequence'
   | 'output-image' | 'output-save' | 'output-export' | 'output-image-group' | 'output-video' | 'output-audio';
+
+const SKILL_ROLE_CAPABILITY: Record<SkillModelBinding['role'], string> = {
+  orchestrator: 'chat',
+  image: 'image',
+  video: 'video',
+  vision: 'vision',
+  edit: 'edit',
+  'three-d': '3d',
+};
+
+export function workflowModelSupportsSkillRole(
+  role: SkillModelBinding['role'],
+  descriptor: TaskModelDescriptor,
+): boolean {
+  return toAgentModelCapabilitySet(descriptor).has(SKILL_ROLE_CAPABILITY[role]);
+}
+
+type WorkflowSkillModelSelection = { providerId?: string; modelId?: string };
+
+export function updateWorkflowSkillModelBinding(
+  bindings: Record<string, WorkflowSkillModelSelection>,
+  role: SkillModelBinding['role'],
+  selection: WorkflowSkillModelSelection | null,
+): Record<string, WorkflowSkillModelSelection> {
+  const next = { ...bindings };
+  if (selection) next[role] = selection;
+  else delete next[role];
+  return next;
+}
 
 export type NodeCategory = 'input' | 'ai' | 'ai-video' | 'logic' | 'agent' | 'subgraph' | 'output' | 'video-tool' | 'tool';
 
@@ -154,6 +186,7 @@ export const NODE_TYPE_LABELS: Record<NodeType, string> = {
   'ai-panorama': '720全景',
   'manual-color-adjust': '参数调色',
   'ai-llm': 'AI文案',
+  'ai-skill': 'Skill 执行',
 };
 
 /** 节点类型 → 图标名 */
@@ -209,6 +242,7 @@ export const NODE_TYPE_ICONS: Record<NodeType, string> = {
   'ai-panorama': 'Globe',
   'manual-color-adjust': 'Palette',
   'ai-llm': 'Brain',
+  'ai-skill': 'Blocks',
 };
 
 // ==================== 端口类型 ====================
@@ -375,6 +409,7 @@ export const NODE_TEMPLATES: { type: NodeType; category: NodeCategory; label: st
   { type: 'input-video', category: 'input', label: '视频输入', desc: '上传视频或输入视频URL' },
   { type: 'audio-input', category: 'input', label: '音频输入', desc: '上传音频文件或引用AI生成配音' },
   { type: 'ai-llm', category: 'ai', label: 'AI文案策划', desc: 'LLM文本生成/文案策划/提示词优化' },
+  { type: 'ai-skill', category: 'ai', label: 'Skill 执行', desc: '运行画布与节点模式共享的 Skill' },
   { type: 'ai-generate', category: 'ai', label: '图像生成', desc: 'AI生成新图片' },
   { type: 'ai-edit', category: 'ai', label: '图像编辑', desc: '修图/擦除/扩展' },
   { type: 'ai-annotation-edit', category: 'ai', label: '批注修改', desc: '根据版本化批注精确修改图片' },
@@ -421,13 +456,31 @@ export const NODE_TEMPLATES: { type: NodeType; category: NodeCategory; label: st
   { type: 'video-trim', category: 'ai-video', label: '视频裁切', desc: '裁切视频指定时间段' },
 ];
 
+export function isWorkflowSkillNodeEnabled(
+  value = process.env.NEXT_PUBLIC_WUJIE_ENABLE_WORKFLOW_SKILL_NODE,
+): boolean {
+  return value !== 'false';
+}
+
+export function getWorkflowNodeTemplates(
+  workflowSkillEnabled = isWorkflowSkillNodeEnabled(),
+): typeof NODE_TEMPLATES {
+  return workflowSkillEnabled
+    ? NODE_TEMPLATES
+    : NODE_TEMPLATES.filter(template => template.type !== 'ai-skill');
+}
+
 /** 创建默认端口 */
 function createDefaultPorts(type: NodeType): NodePort[] {
   const cat = getNodeCategory(type);
   const ports: NodePort[] = [];
 
   if (cat !== 'input') {
-    if (type.startsWith('ai-')) {
+    if (type === 'ai-skill') {
+      ports.push({ id: 'in-prompt', label: '提示词', type: 'prompt', direction: 'in' });
+      ports.push({ id: 'in-image', label: '图片', type: 'image', direction: 'in' });
+      ports.push({ id: 'in-reference', label: '参考图', type: 'image', direction: 'in' });
+    } else if (type.startsWith('ai-')) {
       // AI节点都有图片输入和提示词输入
       if (type !== 'ai-llm' && type !== 'ai-audio') {
         ports.push({ id: 'in-image', label: '图片', type: 'image', direction: 'in' });
@@ -503,6 +556,10 @@ function createDefaultPorts(type: NodeType): NodePort[] {
           ports.push({ id: 'out-prompt', label: '提示词', type: 'prompt', direction: 'out' });
         }
       }
+    } else if (type === 'ai-skill') {
+      ports.push({ id: 'out-image', label: '图片', type: 'image', direction: 'out' });
+      ports.push({ id: 'out-prompt', label: '提示词', type: 'prompt', direction: 'out' });
+      ports.push({ id: 'out-task', label: '任务', type: 'data', direction: 'out' });
     } else if (type.startsWith('ai-')) {
       // 视频节点输出video端口
       if (type === 'ai-video-generate' || type === 'ai-video-i2v') {
@@ -684,7 +741,7 @@ export function getNodePropertyFields(type: NodeType): PropertyField[] {
   }
 
   // ─── AI节点 (通用) ───
-  if (cat === 'ai') {
+  if (cat === 'ai' && type !== 'ai-skill') {
     // 不为有专用model字段的节点添加通用model
     if (type !== 'ai-removebg' && type !== 'ai-font-design' && type !== 'ai-refine-engine' && type !== 'ai-brand-ecommerce' && type !== 'ai-segment') {
       fields.push({ key: 'model', label: '模型', type: 'model-select', modelFilter: 'image' });
@@ -1510,7 +1567,11 @@ export function getNodeInputs(
 
   // 从上游连线中获取输入 (按端口类型映射)
   const incomingConns = connections.filter(c => c.toNodeId === node.id);
-  const appendImageInputs = (output: Record<string, unknown>, sourceNodeId: string): void => {
+  const appendImageInputs = (
+    output: Record<string, unknown>,
+    sourceNodeId: string,
+    targetPortId?: string,
+  ): void => {
     const candidates = [
       typeof output.imageUrl === 'string' ? output.imageUrl : undefined,
       ...(Array.isArray(output.imageUrls) ? output.imageUrls.filter((url): url is string => typeof url === 'string') : []),
@@ -1522,10 +1583,18 @@ export function getNodeInputs(
       : (typeof inputs.imageUrl === 'string' ? [inputs.imageUrl] : []);
     const primaryCandidate = candidates[0];
     const imageUrls = Array.from(new Set([...current, ...candidates]));
-    const shouldAdoptAssetIdentity = !inputs.assetVersionId
+    const isSkillReference = node.type === 'ai-skill' && targetPortId === 'in-reference';
+    const shouldAdoptAssetIdentity = !isSkillReference && !inputs.assetVersionId
       && (!inputs.imageUrl || inputs.imageUrl === primaryCandidate);
     inputs.imageUrls = imageUrls;
-    if (!inputs.imageUrl) inputs.imageUrl = imageUrls[0];
+    if (isSkillReference) {
+      const currentReferences = Array.isArray(inputs.referenceImageUrls)
+        ? inputs.referenceImageUrls.filter((url): url is string => typeof url === 'string')
+        : [];
+      inputs.referenceImageUrls = Array.from(new Set([...currentReferences, ...candidates]));
+    } else if (!inputs.imageUrl) {
+      inputs.imageUrl = primaryCandidate;
+    }
     if (shouldAdoptAssetIdentity) {
       if (typeof output.assetVersionId === 'string') inputs.assetVersionId = output.assetVersionId;
       if (typeof output.assetId === 'string') inputs.assetId = output.assetId;
@@ -1588,7 +1657,7 @@ export function getNodeInputs(
     switch (conn.type) {
       case 'image':
         // 图片连线: 优先传递imageUrl
-        appendImageInputs(upstreamOutput, conn.fromNodeId);
+        appendImageInputs(upstreamOutput, conn.fromNodeId, conn.toPortId);
         if (conn.toPortId === 'in-image') {
           const upstreamSourceVersionId = typeof upstreamOutput.annotationVersionId === 'string'
             ? upstreamOutput.annotationVersionId
@@ -1710,6 +1779,102 @@ function getConfigNumber(config: Record<string, unknown>, key: string, fallback 
 function getConfigStringArray(config: Record<string, unknown>, key: string): string[] {
   const value = config[key];
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
+}
+
+export interface WorkflowSkillExecutionContext {
+  projectId: string;
+  workflowId: string;
+  executionId: string;
+  attempt?: number;
+  attemptKey?: string;
+}
+
+function skillInputValues(
+  fields: readonly SkillInputField[],
+  configured: Record<string, unknown>,
+  inputs: Record<string, unknown>,
+): Record<string, unknown> {
+  const values = { ...configured };
+  for (const field of fields) {
+    const value = values[field.key];
+    if ((typeof value === 'string' && value.trim() === '') || (Array.isArray(value) && value.length === 0)) {
+      delete values[field.key];
+    }
+  }
+  const prompt = typeof inputs.prompt === 'string'
+    ? inputs.prompt
+    : (typeof inputs.text === 'string' ? inputs.text : undefined);
+  const imageUrl = typeof inputs.imageUrl === 'string' ? inputs.imageUrl : undefined;
+  const imageUrls = Array.isArray(inputs.imageUrls)
+    ? inputs.imageUrls.filter((value): value is string => typeof value === 'string' && Boolean(value))
+    : (imageUrl ? [imageUrl] : []);
+  const referenceImageUrls = Array.isArray(inputs.referenceImageUrls)
+    ? inputs.referenceImageUrls.filter((value): value is string => typeof value === 'string' && Boolean(value))
+    : [];
+  const textField = fields.find(field => field.kind === 'text' && values[field.key] == null);
+  if (textField && prompt) values[textField.key] = prompt;
+  const imageFields = fields.filter(field => field.kind === 'image' || field.kind === 'brand-kit');
+  const primaryField = imageFields[0];
+  const primaryConfigured = Boolean(primaryField && values[primaryField.key] != null);
+  if (primaryField && !primaryConfigured && imageUrl) values[primaryField.key] = imageUrl;
+  for (let index = 1; index < imageFields.length; index += 1) {
+    if (values[imageFields[index].key] != null) continue;
+    const referenceImage = referenceImageUrls[index - 1];
+    if (referenceImage) values[imageFields[index].key] = referenceImage;
+  }
+  const imagesField = fields.find(field => field.kind === 'images' && values[field.key] == null);
+  if (imagesField && imageUrls.length > 0) values[imagesField.key] = imageUrls;
+  return values;
+}
+
+function workflowSourceVersionIds(inputs: Record<string, unknown>): string[] {
+  const ids: string[] = [];
+  if (typeof inputs.assetVersionId === 'string') ids.push(inputs.assetVersionId);
+  if (typeof inputs.sourceVersionId === 'string') ids.push(inputs.sourceVersionId);
+  if (Array.isArray(inputs.assetReferences)) {
+    for (const value of inputs.assetReferences) {
+      if (!value || typeof value !== 'object') continue;
+      const id = (value as Record<string, unknown>).assetVersionId;
+      if (typeof id === 'string') ids.push(id);
+    }
+  }
+  return [...new Set(ids.filter(Boolean))];
+}
+
+export function buildWorkflowSkillRunRequest(
+  node: WorkflowNode,
+  inputs: Record<string, unknown>,
+  skill: SkillDefinition,
+  context: WorkflowSkillExecutionContext,
+): { endpoint: string; method: 'POST'; body: Record<string, unknown> } {
+  if (node.type !== 'ai-skill') throw new Error('节点不是 Skill 节点');
+  if (node.config.skillId !== skill.id || Number(node.config.version) !== skill.version) {
+    throw new Error('Skill 版本已变化，请重新选择');
+  }
+  const configuredValues = node.config.inputValues && typeof node.config.inputValues === 'object'
+    && !Array.isArray(node.config.inputValues)
+    ? node.config.inputValues as Record<string, unknown>
+    : {};
+  const modelBindings = node.config.modelBindings && typeof node.config.modelBindings === 'object'
+    && !Array.isArray(node.config.modelBindings)
+    ? node.config.modelBindings as Record<string, unknown>
+    : {};
+  const attempt = Math.max(0, Math.floor(context.attempt ?? 0));
+  return {
+    endpoint: '/api/skill-runs',
+    method: 'POST',
+    body: {
+      skillId: skill.id,
+      skillVersion: skill.version,
+      surface: 'workflow',
+      projectId: context.projectId,
+      workspaceId: `workflow:${context.workflowId}`,
+      inputValues: skillInputValues(skill.inputs, configuredValues, inputs),
+      sourceVersionIds: workflowSourceVersionIds(inputs),
+      modelBindings,
+      idempotencyKey: `workflow:${context.executionId}:${node.id}:attempt:${context.attemptKey || attempt}`,
+    },
+  };
 }
 
 export function buildNodeExecutionRequest(

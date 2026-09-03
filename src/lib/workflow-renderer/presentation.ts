@@ -52,6 +52,7 @@ export const WORKFLOW_RENDER_NODE_ICONS: Readonly<Record<NodeType, string>> = {
   'ai-video-generate': 'Video',
   'ai-video-i2v': 'Video',
   'ai-llm': 'Brain',
+  'ai-skill': 'Blocks',
   'ai-audio': 'Volume2',
   'video-speed-change': 'Clock',
   'video-filter': 'Filter',

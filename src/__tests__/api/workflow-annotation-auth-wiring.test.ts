@@ -14,7 +14,7 @@ describe('workflow annotation internal authentication wiring', () => {
       /getInternalRequestHeaders\(\s*(?:auth|execState)\.userId!?/g,
     ) || [];
 
-    expect(signedHeaderCalls).toHaveLength(4);
+    expect(signedHeaderCalls).toHaveLength(6);
     expect(source).toMatch(
       /const internalHeaders = await getInternalRequestHeaders\(\s*auth\.userId/,
     );
@@ -22,10 +22,16 @@ describe('workflow annotation internal authentication wiring', () => {
       /const retryHeaders = isInternal\s+\? await getInternalRequestHeaders\(\s*auth\.userId/,
     );
     expect(source).toMatch(
+      /const retryHeaders = await getInternalRequestHeaders\(\s*auth\.userId/,
+    );
+    expect(source).toMatch(
       /const downstreamHeaders = isInternal\s+\? await getInternalRequestHeaders\(\s*execState\.userId!/,
     );
     expect(source).toMatch(
       /const workflowHeaders = isInternalApi\s+\? await getInternalRequestHeaders\(\s*execState\.userId!/,
+    );
+    expect(source).toMatch(
+      /activeSkillRunIds[\s\S]+?getInternalRequestHeaders\(\s*auth\.userId[\s\S]+?cancelWorkflowSkillRun\(\{[\s\S]+?submitUrl: getInternalApiUrl\('\/api\/skill-runs'\)/,
     );
   });
 

@@ -832,6 +832,7 @@ describe('Skill run history', () => {
     await expect(createSkillRuntimeService(dependencies).get({
       actorUserId: 'user-1', runId: task.id,
     })).resolves.toMatchObject({
+      resumeFromStepId: 'generate-3',
       steps: expect.arrayContaining([expect.objectContaining({ id: 'generate-3', status: 'failed' })]),
     });
   });

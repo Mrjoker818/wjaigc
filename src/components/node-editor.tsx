@@ -8,9 +8,10 @@ import {
   NODE_TYPE_COLORS, NODE_TYPE_LABELS, NODE_TYPE_ICONS, NODE_CATEGORY_LABELS,
   PORT_COLORS, NodePort, PortType, PropertyField,
   createWorkflowNode, createConnection, createEmptyWorkflow,
-  getNodePropertyFields, getNodeCategory, NODE_TEMPLATES,
+  getNodePropertyFields, getNodeCategory, NODE_TEMPLATES, getWorkflowNodeTemplates,
   canConnectPorts, autoLayoutWorkflow, parseComfyUIWorkflow, isImageGeneratingNode, getOutputNodeSize,
   mergeWorkflowNodeUpdate, resolveWorkflowOutputAssetReference, type WorkspaceAssetReference,
+  updateWorkflowSkillModelBinding, workflowModelSupportsSkillRole,
 } from '@/lib/workflow-engine';
 import {
   applyWorkflowCommand,
@@ -41,6 +42,9 @@ import {
 } from '@/lib/task-core/model-capability-contract';
 import type { TaskModelCatalogModel } from '@/hooks/use-task-model-catalog';
 import { WorkspaceSourceTraceDetails } from '@/components/workspace-source-trace';
+import { SkillInputFields } from '@/components/skill-runtime/SkillInputFields';
+import { loadWorkflowSkillCatalog } from '@/lib/skill-runtime/workflow-client';
+import type { SkillDefinition, SkillModelBinding } from '@/lib/skill-runtime/types';
 import { getPromptTemplates, addPromptTemplate, type PromptTemplate } from '@/lib/prompt-templates';
 import {
   getVisibleWorkflowNodeIds,
@@ -92,7 +96,7 @@ const ICON_MAP: Record<string, React.ComponentType<{ size?: number; className?: 
   PenTool, Palette, Sun, GitBranch, GitMerge, Repeat, RefreshCw, Layers,
   Bot, MessageSquare, ImageDown, Save, Download, BoxSelect, Group,
   ScanSearch, Sparkles, Rotate3d, Box, ShoppingBag, Film, Video, FileVideo,
-  Mic, Volume2, Music, Camera, Clapperboard, CutIcon, Globe, AudioLines, Brain,
+  Mic, Volume2, Music, Camera, Clapperboard, CutIcon, Globe, AudioLines, Brain, Blocks,
 };
 
 function getNodeIcon(type: NodeType, size = 14, className = '') {
@@ -1438,6 +1442,25 @@ ${contextInfo}
     apiDisplayName: model.displayName || model.name,
   })), [taskModelOptions]);
   const modelsLoading = catalogStatus.loading || Boolean(catalogStatus.error);
+  const [workflowSkills, setWorkflowSkills] = useState<SkillDefinition[]>([]);
+  const [workflowSkillsLoading, setWorkflowSkillsLoading] = useState(false);
+  const [workflowSkillsError, setWorkflowSkillsError] = useState<string | null>(null);
+  const hasWorkflowSkillNode = wf.nodes.some(node => node.type === 'ai-skill');
+  useEffect(() => {
+    if (!hasWorkflowSkillNode) return;
+    const controller = new AbortController();
+    setWorkflowSkillsLoading(true);
+    loadWorkflowSkillCatalog(fetch, controller.signal).then(skills => {
+      setWorkflowSkills(skills);
+      setWorkflowSkillsError(null);
+    }).catch(error => {
+      if (controller.signal.aborted) return;
+      setWorkflowSkillsError(error instanceof Error ? error.message : '节点 Skill 目录加载失败');
+    }).finally(() => {
+      if (!controller.signal.aborted) setWorkflowSkillsLoading(false);
+    });
+    return () => controller.abort();
+  }, [hasWorkflowSkillNode]);
   const chatModels = useMemo(() => models.filter(m => m.type === 'chat'), [models]);
   const imageModels = useMemo(() => models.filter(m => m.type === 'image'), [models]);
   const annotationModels = useMemo(() => imageModels
@@ -2008,7 +2031,7 @@ ${contextInfo}
       const res = await fetch('/api/workflow/execute', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'start', projectId, ...payload, nodes: executionNodes }),
+        body: JSON.stringify({ action: 'start', projectId, workflowId: wf.id, ...payload, nodes: executionNodes }),
       });
       const data = await res.json();
       if (!res.ok || !data.executionId) {
@@ -2025,7 +2048,7 @@ ${contextInfo}
     } catch {
       setExecStatus('failed');
     }
-  }, [projectId, imageModels]);
+  }, [projectId, imageModels, wf.id]);
 
   // P0: 级联一键运行 — 找到当前节点的整条链，从上游到下游依次执行
   const handleCascadeRun = useCallback(async (startNodeId: string) => {
@@ -2553,11 +2576,23 @@ ${contextInfo}
 
   const handleStopWorkflow = useCallback(async () => {
     if (executionId) {
-      await fetch('/api/workflow/execute', {
+      const response = await fetch('/api/workflow/execute', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'cancel', executionId }),
       });
+      const data = await response.json().catch(() => ({})) as { error?: string };
+      if (!response.ok) {
+        setExecStatus('running');
+        setExecLogs(previous => [...previous, {
+          time: Date.now(),
+          nodeId: 'workflow',
+          label: '工作流',
+          status: 'error',
+          message: data.error || '取消工作流失败',
+        }]);
+        return;
+      }
     }
     setExecStatus('idle');
     setExecutionId(null);
@@ -2602,6 +2637,20 @@ ${contextInfo}
         });
         const data = await res.json();
         if (!isWorkspaceResultScopeCurrent(executionProjectId, projectIdRef.current)) return;
+        if (data.results && typeof data.results === 'object') {
+          const results = data.results as Record<string, { output?: Record<string, unknown> }>;
+          updateWorkflowSystem(current => {
+            let changed = false;
+            const nodes = current.nodes.map(node => {
+              if (node.type !== 'ai-skill') return node;
+              const runId = results[node.id]?.output?.runId;
+              if (typeof runId !== 'string' || runId === node.config.runId) return node;
+              changed = true;
+              return { ...node, config: { ...node.config, runId } };
+            });
+            return changed ? { ...current, nodes } : current;
+          });
+        }
         if (data.status === 'completed' || data.status === 'failed') {
           setExecStatus(data.status === 'completed' ? 'completed' : 'failed');
           setExecResults(data.results || {});
@@ -2756,7 +2805,7 @@ ${contextInfo}
     };
     poll();
     return () => { if (timerId) clearTimeout(timerId); };
-  }, [execStatus, executionId, onAddImages, projectId, wf.connections, wf.id, wf.nodes]);
+  }, [execStatus, executionId, onAddImages, projectId, updateWorkflowSystem, wf.connections, wf.id, wf.nodes]);
 
   // ─── 保存工作流 ───
 
@@ -3007,9 +3056,10 @@ ${contextInfo}
   // ─── 过滤节点模板 ───
 
   const filteredTemplates = useMemo(() => {
-    if (!searchQuery) return NODE_TEMPLATES;
+    const templates = getWorkflowNodeTemplates();
+    if (!searchQuery) return templates;
     const q = searchQuery.toLowerCase();
-    return NODE_TEMPLATES.filter(t => t.label.includes(q) || t.desc.includes(q) || t.type.includes(q));
+    return templates.filter(t => t.label.includes(q) || t.desc.includes(q) || t.type.includes(q));
   }, [searchQuery]);
 
   const groupedTemplates = useMemo(() => {
@@ -3500,6 +3550,9 @@ ${contextInfo}
               models={models}
               modelCatalogIndex={modelCatalogIndex}
               modelsLoading={modelsLoading}
+              workflowSkills={workflowSkills}
+              workflowSkillsLoading={workflowSkillsLoading}
+              workflowSkillsError={workflowSkillsError}
               onUpdate={handleNodeUpdate}
               onDelete={handleDeleteNode}
               onImageUpload={handleImageUpload}
@@ -3885,6 +3938,9 @@ interface PropertyPanelProps {
   models: ModelOption[];
   modelCatalogIndex: Map<string, TaskModelDescriptor>;
   modelsLoading: boolean;
+  workflowSkills: SkillDefinition[];
+  workflowSkillsLoading: boolean;
+  workflowSkillsError: string | null;
   onUpdate: (nodeId: string, updates: Partial<WorkflowNode>) => void;
   onDelete: (nodeId: string) => void;
   onImageUpload: (nodeId: string, file: File) => void;
@@ -3893,7 +3949,7 @@ interface PropertyPanelProps {
   onCanvasImageSelect: (nodeId: string, image: CanvasImageRef) => Promise<void>;
 }
 
-function PropertyPanel({ node, models, modelCatalogIndex, modelsLoading, onUpdate, onDelete, onImageUpload, canvasImages, onCanvasImageSelect }: PropertyPanelProps) {
+function PropertyPanel({ node, models, modelCatalogIndex, modelsLoading, workflowSkills, workflowSkillsLoading, workflowSkillsError, onUpdate, onDelete, onImageUpload, canvasImages, onCanvasImageSelect }: PropertyPanelProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [localTextValues, setLocalTextValues] = useState<Record<string, string>>({});
   const [focusedField, setFocusedField] = useState<string | null>(null);
@@ -3923,6 +3979,28 @@ function PropertyPanel({ node, models, modelCatalogIndex, modelsLoading, onUpdat
     ? configuredModel.slice(configuredModelSeparator + 2)
     : configuredModel;
   const configuredDescriptor = modelCatalogIndex.get(taskModelKey(configuredProviderId, configuredModelId));
+  const selectedSkill = node.type === 'ai-skill'
+    ? workflowSkills.find(skill => skill.id === node.config.skillId && skill.version === Number(node.config.version))
+    : undefined;
+  const skillModelRoles = selectedSkill
+    ? [...new Set<SkillModelBinding['role']>(['orchestrator', ...selectedSkill.steps.map(step => step.modelRole)])]
+    : [];
+  const configuredSkillInputs = node.config.inputValues && typeof node.config.inputValues === 'object'
+    && !Array.isArray(node.config.inputValues)
+    ? node.config.inputValues as Record<string, unknown>
+    : {};
+  const configuredSkillBindings = node.config.modelBindings && typeof node.config.modelBindings === 'object'
+    && !Array.isArray(node.config.modelBindings)
+    ? node.config.modelBindings as Record<string, { providerId?: string; modelId?: string }>
+    : {};
+
+  const modelsForSkillRole = (role: SkillModelBinding['role']): ModelOption[] => {
+    return models.filter(model => {
+      if (!model.providerId) return false;
+      const descriptor = modelCatalogIndex.get(taskModelKey(model.providerId, model.id));
+      return descriptor ? workflowModelSupportsSkillRole(role, descriptor) : false;
+    });
+  };
 
   const renderField = (field: PropertyField) => {
     const externalValue = node.config?.[field.key] ?? (node as unknown as Record<string, unknown>)[field.key] ?? field.defaultValue ?? '';
@@ -4328,6 +4406,79 @@ function PropertyPanel({ node, models, modelCatalogIndex, modelsLoading, onUpdat
       </div>
 
       <WorkspaceSourceTraceDetails sourceTrace={node.config.sourceTrace} />
+
+      {node.type === 'ai-skill' && (
+        <div className="space-y-4 px-4 py-2">
+          <div>
+            <label htmlFor={`workflow-skill-${node.id}`} className="block text-xs font-medium text-muted-foreground mb-1.5">Skill</label>
+            <select
+              id={`workflow-skill-${node.id}`}
+              aria-label="Skill"
+              value={selectedSkill?.id || ''}
+              disabled={workflowSkillsLoading}
+              onChange={event => {
+                const skill = workflowSkills.find(item => item.id === event.target.value);
+                onUpdate(node.id, { config: {
+                  skillId: skill?.id,
+                  version: skill?.version,
+                  inputValues: {},
+                  modelBindings: {},
+                  runId: undefined,
+                } });
+              }}
+              className="w-full bg-muted border border-border rounded px-3 py-2 text-sm text-foreground focus:outline-none focus:border-primary/50"
+            >
+              <option value="">{workflowSkillsLoading ? '加载中...' : '选择 Skill'}</option>
+              {workflowSkills.map(skill => <option key={`${skill.id}:${skill.version}`} value={skill.id}>{skill.name}</option>)}
+            </select>
+            {workflowSkillsError && <p role="alert" className="mt-1 text-xs text-destructive">{workflowSkillsError}</p>}
+          </div>
+          {selectedSkill && (
+            <>
+              <SkillInputFields
+                fields={selectedSkill.inputs}
+                values={configuredSkillInputs}
+                onChange={(key, value) => onUpdate(node.id, { config: {
+                  inputValues: { ...configuredSkillInputs, [key]: value },
+                } })}
+              />
+              {skillModelRoles.map(role => {
+                const options = modelsForSkillRole(role).filter(model => model.providerId);
+                const binding = configuredSkillBindings[role];
+                const value = binding?.providerId && binding.modelId ? `${binding.providerId}::${binding.modelId}` : '';
+                return (
+                  <div key={role}>
+                    <label className="block text-xs font-medium text-muted-foreground mb-1.5">{role} 模型</label>
+                    <select
+                      aria-label={`${role} 模型`}
+                      value={value}
+                      disabled={modelsLoading}
+                      onChange={event => {
+                        const exact = parseExactModelKey(event.target.value);
+                        onUpdate(node.id, { config: {
+                          modelBindings: updateWorkflowSkillModelBinding(
+                            configuredSkillBindings,
+                            role,
+                            exact ? { providerId: exact.providerId, modelId: exact.modelId } : null,
+                          ),
+                        } });
+                      }}
+                      className="w-full bg-muted border border-border rounded px-3 py-2 text-sm text-foreground focus:outline-none focus:border-primary/50"
+                    >
+                      <option value="">选择模型</option>
+                      {options.map(model => (
+                        <option key={`${model.providerId}::${model.id}`} value={`${model.providerId}::${model.id}`}>
+                          {model.apiDisplayName || model.name} ({model.provider})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                );
+              })}
+            </>
+          )}
+        </div>
+      )}
 
       {/* 属性字段 — 与原型对齐: 逐字段垂直排列, px-4 py-2 间距 */}
       {fields.map(field => (

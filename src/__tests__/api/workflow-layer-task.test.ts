@@ -184,7 +184,7 @@ describe('workflow layered task execution', () => {
 
   it('preserves a cancelled workflow instead of overwriting its terminal state', () => {
     expect(workflowRouteSource).toMatch(
-      /if \(execState\.status === 'cancelled'\) \{\n\s+await persistWorkflowExecution\(executionId, execState\);\n\s+return;/,
+      /if \(execState\.status === 'cancelled' \|\| execState\.cancellationState\?\.cancelled\) \{\n\s+execState\.status = 'cancelled';\n\s+await persistWorkflowExecution\(executionId, execState\);\n\s+return;/,
     );
   });
 });

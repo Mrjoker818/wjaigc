@@ -917,7 +917,7 @@ git commit -m "feat: run canvas skills through shared runtime"
 - Consumes: `GET /api/skills?surface=workflow`、Skill Run 服务、Workflow 上游输入和资产版本。
 - Produces: `NodeType = 'ai-skill'`、Skill 节点配置与输出。
 
-- [ ] **Step 1: 写入节点目录、输入映射和输出 RED 测试**
+- [x] **Step 1: 写入节点目录、输入映射和输出 RED 测试**
 
 ```ts
 it('ai-skill 节点只列出 21 个 workflow Skill', async () => {
@@ -936,13 +936,13 @@ it('把上游文本和图片版本映射为 Skill 输入', () => {
 });
 ```
 
-- [ ] **Step 2: 运行测试确认 RED**
+- [x] **Step 2: 运行测试确认 RED**
 
 Run: `pnpm exec vitest run src/__tests__/lib/workflow-skill-node.test.ts src/__tests__/components/node-editor-skill-node.test.tsx src/__tests__/api/workflow-skill-execution.test.ts`
 
 Expected: FAIL，`ai-skill` 尚未定义。
 
-- [ ] **Step 3: 增加节点类型和标准端口**
+- [x] **Step 3: 增加节点类型和标准端口**
 
 ```ts
 // NodeType
@@ -969,11 +969,11 @@ case 'ai-skill':
 
 标准端口：`prompt`、`image`、`reference` 输入；`image`、`prompt`、`task` 输出。节点属性面板按选中 Skill 的 `inputs` 动态渲染，不在节点文件复制 21 份表单。
 
-- [ ] **Step 4: 复用运行投影并保持撤销重做**
+- [x] **Step 4: 复用运行投影并保持撤销重做**
 
 Skill 节点只保存 `skillId/version/inputValues/modelBindings/runId`；进度、错误和结果从 Skill Run 投影读取。创建、修改、删除 Skill 节点必须进入现有节点历史栈。
 
-- [ ] **Step 5: 运行节点回归并提交**
+- [x] **Step 5: 运行节点回归并提交**
 
 Run: `pnpm exec vitest run src/__tests__/lib/workflow-skill-node.test.ts src/__tests__/components/node-editor-skill-node.test.tsx src/__tests__/api/workflow-skill-execution.test.ts src/__tests__/components/node-editor-history-baseline-contract.test.ts src/__tests__/components/node-editor-execution-wiring.test.ts src/__tests__/lib/workflow-engine.test.ts`
 
