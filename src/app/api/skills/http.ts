@@ -17,7 +17,10 @@ export function isPlainObject(value: unknown): value is Record<string, unknown> 
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-export async function readStrictJsonObject(request: Request): Promise<Record<string, unknown>> {
+export async function readStrictJsonObject(
+  request: Request,
+  maximumBodyLength = MAX_BODY_LENGTH,
+): Promise<Record<string, unknown>> {
   const contentType = request.headers.get('content-type')?.split(';', 1)[0]?.trim().toLowerCase();
   if (contentType !== 'application/json') {
     throw new SkillRequestError(
@@ -32,7 +35,7 @@ export async function readStrictJsonObject(request: Request): Promise<Record<str
       throw new SkillRequestError('INVALID_REQUEST_BODY', 400, 'Invalid Content-Length');
     }
     const declaredBytes = Number(contentLength);
-    if (!Number.isSafeInteger(declaredBytes) || declaredBytes > MAX_BODY_LENGTH) {
+    if (!Number.isSafeInteger(declaredBytes) || declaredBytes > maximumBodyLength) {
       throw new SkillRequestError('INVALID_REQUEST_BODY', 400, 'Request body is too large');
     }
   }
@@ -47,7 +50,7 @@ export async function readStrictJsonObject(request: Request): Promise<Record<str
       const { done, value } = await reader.read();
       if (done) break;
       totalBytes += value.byteLength;
-      if (totalBytes > MAX_BODY_LENGTH) {
+      if (totalBytes > maximumBodyLength) {
         await reader.cancel('Request body is too large');
         throw new SkillRequestError('INVALID_REQUEST_BODY', 400, 'Request body is too large');
       }

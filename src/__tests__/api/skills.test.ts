@@ -102,6 +102,25 @@ describe('/api/skills', () => {
     expect(mocks.copySkillForUser).not.toHaveBeenCalled();
   });
 
+  it('accepts a bounded Chinese conversation together with its agent prompt', async () => {
+    mocks.createConversationSkillForUser.mockResolvedValue({ id: 'skill-conversation-cn', version: 1 });
+    const conversation = '用户：请继续完善当前画布设计。\n助手：我会保留现有元素并优化布局。'.repeat(70).slice(0, 2_000);
+    const systemPrompt = '你是画布中的品牌设计智能体，需要结合当前项目素材继续执行。'.repeat(50);
+    const body = {
+      name: '中文画布对话',
+      description: conversation,
+      category: '品牌视觉',
+      systemPrompt,
+      conversation,
+    };
+    expect(new TextEncoder().encode(JSON.stringify(body)).byteLength).toBeGreaterThan(8_192);
+
+    const response = await POST(jsonRequest('http://localhost/api/skills', 'POST', body));
+
+    expect(response.status).toBe(201);
+    expect(mocks.createConversationSkillForUser).toHaveBeenCalledWith('user-1', body);
+  });
+
   it('rejects malformed, non-JSON, and overlong copy requests', async () => {
     const malformed = await POST(new NextRequest('http://localhost/api/skills', {
       method: 'POST',

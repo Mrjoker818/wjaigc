@@ -49,14 +49,18 @@ function transferRequest(body: Record<string, unknown>): NextRequest {
   });
 }
 
-function transferResult(reused = false) {
+function transferResult(reused = false, placementMetadata?: Record<string, unknown>) {
   return {
     version: {
       id: 'version-a',
       assetId: 'asset-a',
       file: { url: '/api/serve-upload/source.png' },
     },
-    placement: { id: 'placement-a', entityId: 'message-image-a' },
+    placement: {
+      id: 'placement-a',
+      entityId: 'message-image-a',
+      ...(placementMetadata ? { metadata: placementMetadata } : {}),
+    },
     reused,
   };
 }
@@ -126,6 +130,7 @@ describe('POST /api/assets/transfer', () => {
   });
 
   it('persists and returns only a sanitized source trace while preserving unrelated metadata', async () => {
+    mocks.sendVersionToWorkspace.mockResolvedValue(transferResult(false, { sourceTrace }));
     const response = await POST(transferRequest({
       ...baseBody,
       metadata: {
@@ -143,6 +148,28 @@ describe('POST /api/assets/transfer', () => {
       },
     }));
     await expect(response.json()).resolves.toEqual(expect.objectContaining({ sourceTrace }));
+  });
+
+  it('returns the authoritative persisted placement trace on an idempotent replay', async () => {
+    const persistedTrace = {
+      ...sourceTrace,
+      chatTaskId: 'persisted-task',
+      messageId: 'persisted-message',
+    };
+    mocks.sendVersionToWorkspace.mockResolvedValue(transferResult(true, {
+      sourceTrace: { ...persistedTrace, privateValue: 'drop-me' },
+    }));
+
+    const response = await POST(transferRequest({
+      ...baseBody,
+      metadata: { ...baseBody.metadata, sourceTrace },
+    }));
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual(expect.objectContaining({
+      sourceTrace: persistedTrace,
+      reused: true,
+    }));
   });
 
   it('omits an invalid source trace before persistence and from the response', async () => {

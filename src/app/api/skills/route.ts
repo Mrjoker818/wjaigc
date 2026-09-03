@@ -18,6 +18,7 @@ import {
 export const runtime = 'nodejs';
 
 const SURFACES: readonly SkillSurface[] = ['canvas', 'workflow', 'simple-chat'];
+const CREATE_SKILL_MAX_BODY_LENGTH = 128 * 1_024;
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
   const auth = await requireApiAuthOrReject(request);
@@ -44,7 +45,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (auth instanceof NextResponse) return auth;
 
   try {
-    const body = await readStrictJsonObject(request);
+    const body = await readStrictJsonObject(request, CREATE_SKILL_MAX_BODY_LENGTH);
     if ('sourceSkillId' in body) {
       assertOnlyFields(body, ['sourceSkillId']);
       const sourceSkillId = parseBoundedString(body.sourceSkillId, 'sourceSkillId', 128);

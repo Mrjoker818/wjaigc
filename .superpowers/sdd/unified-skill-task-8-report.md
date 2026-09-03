@@ -304,3 +304,50 @@ Tests       267 passed (267)
 ### 当前状态
 
 三个 Important 均已有先失败后通过的行为测试。Task 8 仍保持 `DONE_WITH_CONCERNS`，必须取得基于本次新提交的独立复审 `APPROVED / 0-0-0` 后，才能更新阶段进度并进入 Task 9。
+
+## 第四轮独立审查修复波次（基于 HEAD b25e76d1）
+
+### 审查发现与核验
+
+全新独立复审返回 `Important 2 / Minor 0 / CHANGES_REQUESTED`。两项均经代码和行为核验确认属于 Task 8：
+
+1. `/api/assets/transfer` 响应从本次请求 metadata 回显 `sourceTrace`，幂等复用时可能与数据库中权威 placement 来源不一致。
+2. 保存中文画布对话时，合法的 2,000 字对话摘要、描述和智能体系统提示词叠加后会超过通用 8 KiB 请求体上限，在字段校验前被错误拒绝。
+
+### RED 与最小修复
+
+先新增两个行为测试并运行：
+
+```text
+Test Files  2 failed (2)
+Tests       2 failed / 19 passed
+```
+
+失败分别证明幂等复用响应返回了请求侧旧来源，以及合法中文对话创建返回 400。随后实施最小修复：
+
+- transfer 响应只读取服务返回的 `placement.metadata.sourceTrace`，并仅在 placement 未提供来源时兼容版本 metadata；继续通过统一解析器清洗来源。
+- `readStrictJsonObject` 保留默认 8 KiB 安全上限，仅允许 Skills POST 创建入口显式使用 128 KiB 上限，使总量边界与既有字段级上限一致；PATCH、DELETE 和其他调用方不放宽。
+- 未修改 Canvas 21 项目录、Simple Chat 16 项目录、运行器、节点模式、供应商、积分或稳定分支。
+
+聚焦回归转绿：`2 files / 21 tests passed`。
+
+### 扩大回归与门禁
+
+Task 1-8 的 22 文件扩大回归结果：
+
+```text
+Test Files  22 passed (22)
+Tests       266 passed (266)
+```
+
+附加门禁：
+
+- `pnpm ts-check`：通过。
+- 本波 5 个生产/测试文件 ESLint `--max-warnings 0`：通过，零 error、零 warning。
+- `pnpm check:protected-baseline` 显式允许四个既有未跟踪保护项后：38 项能力、组件路径、证据合同和 Git refs 全部通过，零 warning。
+- `git diff --check`：通过；仅报告 Windows 工作区 LF/CRLF 提示，无空白错误。
+- `origin/stable` 仍为 `52f7c601ed150769e15d06fb435c6e360e28c9e7`，未修改、未推送。
+
+### 当前状态
+
+两项 Important 均有先失败后通过的永久回归测试。Task 8 继续保持 `DONE_WITH_CONCERNS`，等待基于本次修复提交的全新独立复审；只有 `APPROVED / 0-0-0` 才能同步阶段进度与 Obsidian 并进入 Task 9。

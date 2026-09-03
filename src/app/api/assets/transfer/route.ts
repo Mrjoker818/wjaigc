@@ -163,7 +163,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     const name = metadata && typeof metadata.name === 'string'
       ? metadata.name
       : undefined;
-    const sourceTrace = parseWorkspaceSourceTrace(metadata?.sourceTrace);
+    const sourceTrace = parseWorkspaceSourceTrace(
+      result.placement.metadata?.sourceTrace ?? result.version.metadata?.sourceTrace,
+    );
     return NextResponse.json({
       assetId: result.version.assetId,
       assetVersionId: result.version.id,
