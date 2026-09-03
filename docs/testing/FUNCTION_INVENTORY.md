@@ -907,3 +907,17 @@
 - `src/components/workflow/WorkflowReactFlowSurface.tsx`
 - `src/components/workflow/WorkflowShadowProbe.tsx`
 - `src/components/workspace-source-trace.tsx`
+
+## 2026-09-03 统一 Skill 运行内核作用域增量
+
+| 工作区 | 入口 | Skill 数量 | 运行方式 | 目录边界 |
+|---|---|---:|---|---|
+| 无限画布 AI 对话 | `/` 内 `Skills技能库` | 21 | 共享 Skill Run、结构化输入、进度、暂停/恢复/取消/重试 | 仅 `canvas` |
+| 节点模式 | `/` 内 `ai-skill` 节点 | 21 | 同一 Skill 定义与版本，通过工作流投影运行 | 仅 `workflow` |
+| 独立智能对话 | `/simple-chat` 的 Skill 菜单 | 16 | 保留独立对话 Skill 目录和交互 | 仅 `simple-chat` |
+
+- Canvas 与 Workflow 的 `21` 项目录身份和版本一致；Simple Chat 的 `16` 项与前两者交集为 `0`。
+- 三个工作区共享认证、供应商目录、模型授权、任务、积分、项目和 AssetVersion 底座，但不混用面向不同用户群体的 Skill 业务入口。
+- 作用域清单由 `scripts/stage-4-inventory.mjs` 从实际 `allowedSurfaces` 绑定推导，注释或未接线变量不能形成虚假覆盖。
+- 当前本地候选：`main@366b90b2d66a2b1a524e11ad879a76ed82cf350c`；云端业务能力仍待 Task 12 真实验收。
+- 2026-09-03 Coze/Chrome 非付费目录验收：Canvas AI 对话展示 21 项；Workflow `Skill 执行`节点展示同一 21 项；独立 `/simple-chat` 展示自身 16 项且无 Canvas 目录项。该证据只证明入口和目录隔离，不证明真实任务、扣退、暂停恢复或资产版本链路。

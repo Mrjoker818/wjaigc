@@ -2029,3 +2029,18 @@ The focused gate test passes `7/7`; the actual protected-baseline command passes
 - 回滚暴露 `V588-ASSET-004`：两个大项目的检查点 schema 未随快照升级，发布门禁正确关闭；用户数据与 462 个 ready 媒体未丢失。
 - 本地候选已通过专项 `68/68`、全仓 `4504/4504`（另有 133 项因无隔离 PostgreSQL 库跳过）、TypeScript、零错误 Lint、保护基线和 `118/118` 生产构建。
 - **当前发布结论仍为“有条件通过”。** 候选部署后必须先恢复 shadow `11/11`，再完成一次无漂移的 asset-v3 切换与回滚；`stable@52f7c601` 保持只读。
+
+## 2026-09-03 统一 Skill 运行内核发布判断
+
+- 当前候选 `366b90b2` 已完成统一运行底座、Canvas 21 Skills、Workflow 同源 21 Skills 和 Simple Chat 独立 16 Skills 的本地实现与门禁；没有修改 `stable@52f7c601`。
+- 本地非数据库门禁全部通过：`4895` 项测试通过、`0` 失败，TypeScript、零错误 ESLint、`119/119` 构建和 `38/38` 保护功能通过。
+- `142` 项 PostgreSQL 专项和三浏览器 `6` 条业务用例没有执行到真实业务断言，原因分别为缺少 `POSTGRES_TEST_DATABASE_URL` 与 `E2E_STAGE4_DATABASE_URL`。这些项目不能归类为通过。
+- 尚缺 Coze exact-tree、真实 Skill 任务、精确模型/供应商、积分预估与最终一次扣退、暂停/恢复/取消/重试、迟到结果拒绝、新 AssetVersion、刷新恢复以及 Console/Network/Trace 证据。
+- **发布结论：有条件通过，仅允许进入 Task 12 验收，不建议以统一 Skill 功能完成为由发布。** 真库和云端 P1 门禁关闭前不得宣布商业级发布完成。
+
+### 2026-09-03 Task 12 云端目录验收补充
+
+- Coze exact-tree、构建、单实例 `asset-v3` 启动与三个 HTTP 健康入口通过；Chrome 证明 Canvas/Workflow `21/21` 同源目录与 Simple Chat 独立 `16` 目录边界生效。
+- 首次项目进入出现一次旧 Chunk 5900 加载失败，刷新后恢复；部署资产缓存风险仍开放。
+- 隔离 PostgreSQL、真实 Skill 任务、模型/供应商冻结、积分预估与一次扣退、暂停/恢复/取消/重试、AssetVersion、刷新恢复及 Chromium/Firefox/WebKit 完整证据仍未关闭。
+- **发布结论维持“有条件通过”。** 当前可以继续 Task 12 的真实运行验收，但不能宣布统一 Skill 或全平台发布通过。

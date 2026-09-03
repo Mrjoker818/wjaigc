@@ -39,4 +39,11 @@
 
 ## 结论
 
-Task 11 的代码和测试基础设施已经完成，本地非数据库门禁全部通过；完整 Task 11 仍为“有条件完成”，等待隔离 PostgreSQL 后执行三浏览器真实断言。Task 12 尚未开始。
+Task 11 的代码和测试基础设施已经完成，本地非数据库门禁全部通过；完整 Task 11 仍为“有条件完成”，等待隔离 PostgreSQL 后执行三浏览器真实断言。Task 12 已进入文档记录阶段，尚未推送或云端验收。
+
+## 2026-09-03 Task 12 云端增量
+
+- GitHub `main@366b90b2` 已由 Coze 普通合并；运行 tree 与目标 tree 精确一致，`stable@52f7c601` 未变化。
+- Coze 门禁通过：聚焦 `14/14`、保护基线 `6/6`、TypeScript、ESLint、Vitest `2785 + 1088`、构建 `119/119`；隔离 PostgreSQL 继续跳过。
+- 单一 5000 PID `41123` 以 `asset-v3` 运行，Build ID `Fy1oaJhiRjviq5WXmj4YR`，三个健康入口均为 200。
+- Chrome 已验证 Canvas 21、Workflow 21、Simple Chat 独立 16 的目录边界。真实 Skill 运行、账务、AssetVersion 和完整三浏览器证据仍未验证，不能把目录验收写成 Task 12 完成。

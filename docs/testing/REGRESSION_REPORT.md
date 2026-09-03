@@ -2655,3 +2655,20 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - 步骤计费、持久文本/净化 HTML/资产、并行重试集合、首次与恢复 DB 租约、受控 `dispatch_error`、取消和旧 generation 围栏均通过本地回归。
 - 最终独立评审：Critical/Important/Minor `0/0/0`，结论 `APPROVED`。
 - **判定：LOCAL PASS WITH DATABASE CONDITION。** 6 项新增 PostgreSQL 竞态测试及其他数据库环境套件因缺少专用测试库跳过；未做云端真实执行与浏览器验收。
+
+## 2026-09-03 Unified Skill Runtime Task 11 本地回归
+
+- 候选：`main@366b90b2d66a2b1a524e11ad879a76ed82cf350c`；远端推送前基线为 `origin/main@2faeec0b`；`stable@52f7c601` 未变化。
+- 目录门禁：Canvas `21`、Workflow `21`、Simple Chat `16`；Canvas/Workflow 身份与版本一致，Simple Chat 与画布目录交集为 `0`。
+- 四轮独立审查发现的七项测试可信度缺口均已按 RED/GREEN 关闭，包括真实 surface 接线、空工作流夹具、受控图像与编排模型、版本/AssetVersion 血缘及有效 origin 初始化。
+- 最终本地结果：清单与保护 `16/16`，运行时扩大回归 `148/148`，全仓 `626 files passed / 27 files skipped`、`4895 passed / 142 PostgreSQL-gated skipped / 0 failed`；TypeScript、零错误 ESLint、`git diff --check`、保护门禁 `38/38 / 0 drift / 0 warnings` 和 8 GiB 生产构建 `119/119` 通过。
+- 本地生产服务可以启动。Chromium、Firefox、WebKit 的 6 条专项用例均因缺少 `E2E_STAGE4_DATABASE_URL` 在隔离数据库门禁处停止，已保留截图、录像和错误上下文，未冒充业务通过。
+- **回归判定：LOCAL PASS / DATABASE AND CLOUD UNVERIFIED。** 下一步仅执行 Task 12 推送、Coze exact-tree、真库与 Google Chrome 验收，不重复 Task 8-11。
+
+## 2026-09-03 统一 Skill Task 12 Coze/Chrome 增量
+
+- Coze 已普通合并 `origin/main@366b90b2`；运行 tree `ee1648ca` 精确一致，`origin/stable@52f7c601` 未变化。
+- Coze 通过聚焦 `14/14`、保护基线 `6/6`、TypeScript、零错误 ESLint、Vitest `2785 + 1088` 与 `119/119` 构建；PostgreSQL 项因缺少隔离库继续跳过。Build ID `Fy1oaJhiRjviq5WXmj4YR`，唯一服务 PID `41123`，模式 `asset-v3`，三个 HTTP 入口均为 200。
+- Google Chrome 真实验证：管理员仪表盘正常；已有 3 图片项目可加载；Canvas 为 21 Skills；Workflow 下拉为同一 21 Skills；`/simple-chat` 为独立 16 Skills，未出现 Canvas 目录项。
+- 服务切换后的首次项目进入出现一次 `Loading chunk 5900 failed`；重新加载当前构建后恢复。该现象保留为部署缓存风险。
+- **回归判定：DEPLOYMENT AND CATALOG SCOPE PASS / RUNTIME AND ACCOUNTING UNVERIFIED。** 未执行付费 Skill、暂停恢复、取消退款、失败重试、AssetVersion 与完整浏览器证据采集。

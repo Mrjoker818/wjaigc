@@ -3795,3 +3795,31 @@ All listed Stage 4 defects are locally closed. S4-BUG-008 also passed its exact-
 - **测试**：先新增 schema 变化 RED，再完成 GREEN；专项 `68/68`，全仓 `4504 passed / 133 skipped / 0 failed`，TypeScript、0-error Lint、保护基线、生产构建 `118/118` 通过。
 - **当前状态**：`LOCAL PASS / CLOUD PENDING`。部署后需在 shadow 保存触发自愈，确认 `11/11`；再执行一次受控 asset-v3 与回滚，证明不复发。
 - **证据**：`docs/testing/evidence/v588-admin-003-asset-gate-cloud-2026-09-02.json`、`docs/testing/evidence/v588-admin-003-asset-v3-cloud-2026-09-02.png`。
+
+### TEST-SKILL-001：统一 Skill 运行内核缺少真库与三浏览器发布证据（2026-09-03）
+
+| 字段 | 内容 |
+|---|---|
+| 严重等级 | P1 发布阻断：本地逻辑无失败，但核心 Skill 运行、账务和资产链路尚不能用缺少隔离数据库的测试替代。 |
+| 当前候选 | `main@366b90b2d66a2b1a524e11ad879a76ed82cf350c`；`origin/main@2faeec0b632befdd6bb34319b15a2b131d9cbcb0`；`origin/stable@52f7c601ed150769e15d06fb435c6e360e28c9e7`。 |
+| 已有证据 | Canvas/Workflow/Simple Chat 目录 `21/21/16`；聚焦清单与保护测试 `16/16`、运行时扩大回归 `148/148`；全仓 `4895 passed / 142 skipped / 0 failed`；TypeScript、零错误 ESLint、`119/119` 构建和保护门禁 `38/38` 通过。 |
+| 阻塞复现 | Chromium、Firefox、WebKit 共 6 条专项用例在隔离前置条件处明确停止：缺少 `E2E_STAGE4_DATABASE_URL`。142 项 PostgreSQL 专项因缺少 `POSTGRES_TEST_DATABASE_URL` 跳过。 |
+| 风险 | 尚未用真库证明并发幂等、一扣一退、暂停恢复、取消/迟到终态围栏和结果 AssetVersion；尚未用云端 Chrome 证明真实模型精确路由、刷新恢复及 Console/Network 健康。 |
+| 修复范围 | 不修改业务代码猜测修复。先推送精确 `main`，由 Coze 同步并在隔离数据库与真实浏览器执行既有永久测试和验收步骤。 |
+
+#### 2026-09-03 云端增量
+
+- Coze exact-tree、测试、构建、单实例和健康入口已通过；Chrome 已证明 Canvas/Workflow/Simple Chat 的 `21/21/16` 目录作用域。
+- `TEST-SKILL-001` 不关闭：真实 Skill 任务、账务、AssetVersion、恢复/取消/重试和三浏览器/隔离 PostgreSQL 证据仍缺失。
+
+### DEPLOY-SKILL-001：服务切换后首次项目进入加载旧 Chunk 5900（2026-09-03）
+
+| 字段 | 内容 |
+|---|---|
+| 严重等级 | P2，部署可靠性与首次进入体验风险。 |
+| 环境 | Coze Build ID `Fy1oaJhiRjviq5WXmj4YR`，Google Chrome，既有预览标签。 |
+| 复现 | 服务重启后刷新入口，进入已有 3 图片项目。 |
+| 实际结果 | 首次显示“页面渲染出错”，详情为 `Loading chunk 5900 failed`；重新加载当前构建后画布恢复并显示 3 张图片。 |
+| 预期结果 | 部署切换后首次进入直接加载同一 Build ID 的 HTML 与 Chunk，不依赖用户二次刷新。 |
+| 当前状态 | `OPEN`。未通过延长等待或吞异常处理；后续需检查 HTML/静态资源缓存原子切换和旧构建保留策略。 |
+| 当前状态 | **LOCAL PASS / DATABASE AND CLOUD UNVERIFIED。** 不得标记发布通过；不得触碰 `stable`。 |

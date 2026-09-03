@@ -1133,7 +1133,7 @@ git commit -m "test: gate scoped skill runtime"
 - Consumes: 本地测试输出、Git SHA、Coze exact tree、Chrome 任务/积分/资产证据。
 - Produces: 阶段验收记录和下一阶段唯一断点。
 
-- [ ] **Step 1: 记录本地结果和未验证项**
+- [x] **Step 1: 记录本地结果和未验证项**
 
 报告必须包含：
 
@@ -1146,7 +1146,7 @@ Git HEAD / origin/main / origin/stable
 无法验证的真实供应商或隔离数据库项
 ```
 
-- [ ] **Step 2: 推送 `main` 并复读远端**
+- [x] **Step 2: 推送 `main` 并复读远端**
 
 ```bash
 git status --short
@@ -1159,9 +1159,13 @@ git rev-parse origin/stable
 
 Expected: `HEAD == origin/main`；`origin/stable` 仍为 `52f7c601ed150769e15d06fb435c6e360e28c9e7`；四个受保护未跟踪路径未提交。
 
-- [ ] **Step 3: Coze 同步和重启**
+实测：`HEAD == origin/main == 366b90b2d66a2b1a524e11ad879a76ed82cf350c`；`origin/stable == 52f7c601ed150769e15d06fb435c6e360e28c9e7`。仅 Task 12 报告与进度文档留在工作树，受保护未跟踪路径未提交或删除。
+
+- [x] **Step 3: Coze 同步和重启**
 
 在现有 Google Chrome 项目页发送一次精确同步指令：只普通合并 `origin/main`、证明 tree 一致、运行门禁、按现有脚本重启唯一 5000 服务。项目页出现沙箱断开弹窗时只刷新现有项目页；沙箱恢复后强刷现有预览页。
+
+实测：Coze 普通合并 `origin/main@366b90b2d66a2b1a524e11ad879a76ed82cf350c`，最终运行 merge commit `4d6d8ffa` 的源码 tree `ee1648ca` 与 `366b90b2^{tree}` 精确一致；`origin/stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 未变化。聚焦测试 `14/14`、保护基线 `6/6`、TypeScript、ESLint、分批全量 Vitest `2785 + 1088` 项和生产构建 `119/119` 通过；PostgreSQL 项因无隔离测试库保持跳过。唯一 5000 服务 PID 为 `41123`，进程环境 `WUJIE_ASSET_GRAPH_MODE=asset-v3`，Build ID `Fy1oaJhiRjviq5WXmj4YR`，`/`、`/simple-chat`、`/api/auth/me` 均为 HTTP 200。
 
 - [ ] **Step 4: Chrome 真实验收**
 
@@ -1176,6 +1180,8 @@ Expected: `HEAD == origin/main`；`origin/stable` 仍为 `52f7c601ed150769e15d06
 7. 结果创建新 AssetVersion，不覆盖原始素材；
 8. 刷新后运行历史、进度和结果恢复；
 9. Console error/warning、Network、taskId、requestId、积分前后值、截图和 Trace。
+
+2026-09-03 非付费目录验收已完成：管理员登录及项目仪表盘正常；一个 3 图片项目可加载；Canvas AI 对话显示并展开 21 项 Skills；Workflow `Skill 执行`节点下拉显示同一 21 项；独立 `/simple-chat` 的 Skill 书显示独立 16 项，未混入画布目录。服务切换后首次进入项目曾出现 `Loading chunk 5900 failed`，再次加载当前构建后恢复，作为部署缓存风险保留。真实 Skill 执行、模型/供应商冻结、积分预估与扣退、暂停/恢复/取消/重试、AssetVersion、刷新恢复和完整 Console/Network/Trace 仍未验证，因此 Step 4 不标记完成。
 
 - [ ] **Step 5: 更新 Obsidian 并提交最终证据**
 

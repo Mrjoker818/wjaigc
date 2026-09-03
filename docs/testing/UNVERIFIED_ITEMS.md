@@ -2170,3 +2170,29 @@ BUG-018 已从未验证项移除。剩余顺序为 `002-B -> 002-D -> 002-E`；�
 | Coze 与 Google Chrome | `UNVERIFIED` | 推送 exact SHA 后由 Coze 拉取、构建、重启并强刷现有 Chrome 预览页，验证 Skill 首次执行、进度、刷新恢复、重试、取消及持久结果。 |
 
 本地自动化与独立评审允许 Task 6 标记为“本地完成，数据库条件保留”，不允许标记为数据库并发通过、云端通过或发布完成。
+
+## 2026-09-03 Unified Skill Runtime Task 11/12 未验证项
+
+| 项目 | 当前状态 | 关闭条件 |
+|---|---|---|
+| PostgreSQL Skill 并发与幂等 | `142 TESTS SKIPPED / OPEN` | 在专用隔离库配置 `POSTGRES_TEST_DATABASE_URL`，执行全部数据库套件；禁止使用业务库。 |
+| 三浏览器核心链路 | `6 CASES BLOCKED / OPEN` | 配置 `E2E_STAGE4_DATABASE_URL`，在 Chromium、Firefox、WebKit 执行 Canvas/Workflow 同源及 Simple Chat 隔离业务断言。 |
+| Coze 代码身份 | `UNVERIFIED` | 推送后证明 Coze 工作树与 `origin/main` tree 一致，按现有脚本构建并重启唯一 5000 服务。 |
+| Canvas 带图 Skill | `UNVERIFIED` | Google Chrome 运行一个带图片 Skill，证明精确 provider/model、阶段进度和新 AssetVersion，原图不被覆盖。 |
+| Workflow Skill 节点 | `UNVERIFIED` | 节点模式选择同 ID/版本 Skill，完成运行并证明结果 Run 与 AssetVersion 血缘。 |
+| Simple Chat 目录隔离 | `LOCAL PASS / CLOUD UNVERIFIED` | `/simple-chat` 显示 16 项且无 21 项 Canvas Skill；服务端越权 ID 仍在供应商调用前拒绝。 |
+| 积分与终态 | `UNVERIFIED` | 执行前估价与最终一次扣费一致；取消/失败只退款一次；迟到完成不能覆盖失败或取消。 |
+| 暂停、恢复与重试 | `UNVERIFIED` | 云端分别验证暂停/恢复、取消、失败步骤重试及刷新后历史恢复，不产生重复供应商任务。 |
+| 浏览器运行健康 | `UNVERIFIED` | 保存截图、Trace、Console、Network、requestId、taskId 和积分前后值；应用 Console error/warning 为 0。 |
+
+上述项目关闭前，Task 12 和统一 Skill 运行内核整体不得标记为“通过”。
+
+### 2026-09-03 Task 12 云端验收后更新
+
+| 项目 | 状态 | 说明 |
+|---|---|---|
+| Coze exact-tree、构建、单实例和健康入口 | `VERIFIED` | `366b90b2^{tree}` 与运行 tree `ee1648ca` 一致；`stable` 未变；Build ID `Fy1oaJhiRjviq5WXmj4YR`；PID `41123`；`asset-v3`；三个 HTTP 200。 |
+| Canvas / Workflow / Simple Chat 目录作用域 | `CLOUD UI VERIFIED` | Google Chrome 真实看到 `21 / 21 / 16`，Simple Chat 未混入 Canvas 目录项。 |
+| 真实 Skill 任务与账务/资产闭环 | `UNVERIFIED` | 尚未执行付费任务、费用预估、一次扣退、暂停恢复、取消重试、迟到结果拒绝、AssetVersion 与刷新恢复。 |
+| 三浏览器和隔离 PostgreSQL | `BLOCKED / OPEN` | 仍缺 `E2E_STAGE4_DATABASE_URL` 与 `POSTGRES_TEST_DATABASE_URL`，不得使用业务库代替。 |
+| 部署 Chunk 缓存 | `OBSERVED / OPEN` | 服务切换后首次进入项目出现 `Loading chunk 5900 failed`，再次加载当前构建恢复；需后续部署策略永久消除。 |
