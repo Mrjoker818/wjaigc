@@ -21,6 +21,7 @@ const MAX_ENVELOPE_BYTES = 1_048_576;
 const LEGACY_CUSTOM_ID = /^skill-[1-9][0-9]{12}$/;
 const GENERATED_SKILL_ID = /^skill-[a-f0-9]{24}$/;
 const TOKEN_ID = /^[A-Za-z][A-Za-z0-9_-]*$/;
+const CONVERSATION_CANVAS_SOURCE_ID = 'conversation-canvas';
 
 export interface UserSkillEnvelope {
   schemaVersion: 1;
@@ -186,6 +187,7 @@ function sameSurfaces(left: readonly SkillSurface[], right: readonly SkillSurfac
 }
 
 function expectedSourceSurfaces(sourceSkillId: string): readonly SkillSurface[] | null {
+  if (sourceSkillId === CONVERSATION_CANVAS_SOURCE_ID) return ['canvas', 'workflow'];
   const builtIn = BUILT_INS.find(skill => skill.id === sourceSkillId);
   if (builtIn) return builtIn.allowedSurfaces;
   if (LEGACY_CUSTOM_ID.test(sourceSkillId)) return ['canvas', 'workflow'];
@@ -454,10 +456,10 @@ export function createSkillStore(
       actorUserId: string;
       name: string;
       description: string;
+      category: string;
+      systemPrompt: string;
       conversation: string;
     }): Promise<SkillDefinition> {
-      const source = CANVAS_PRESET_SKILLS.find(skill => skill.id === 'preset-concept-art');
-      if (!source) throw new SkillStorageError();
       for (let attempt = 0; attempt < 5; attempt += 1) {
         const envelope = await readEnvelope(adapter, input.actorUserId);
         const timestamp = now();
@@ -470,34 +472,25 @@ export function createSkillStore(
           id,
           version: 1,
           name: input.name,
-          category: source.category,
+          category: input.category,
           description: input.description,
-          systemPrompt: `${source.systemPrompt}\n\nSaved conversation context:\n${input.conversation}`,
-          allowedSurfaces: [...source.allowedSurfaces],
-          inputs: source.inputs.map(field => ({
-            key: field.key,
-            label: field.label,
-            kind: field.kind,
-            required: field.required,
-            ...(field.defaultValue === undefined ? {} : { defaultValue: structuredClone(field.defaultValue) }),
-            ...(field.options === undefined ? {} : { options: [...field.options] }),
-            ...(field.maximumItems === undefined ? {} : { maximumItems: field.maximumItems }),
-          })),
-          steps: source.steps.map(step => ({
-            id: step.id,
-            label: step.label,
-            toolId: step.toolId,
-            execution: step.execution,
-            ...(step.parallelGroup === undefined ? {} : { parallelGroup: step.parallelGroup }),
-            promptTemplate: step.promptTemplate,
-            modelRole: step.modelRole,
-            qualityGateIds: [...step.qualityGateIds],
-          })),
+          systemPrompt: `${input.systemPrompt}\n\n保存的对话上下文：\n${input.conversation}`,
+          allowedSurfaces: ['canvas', 'workflow'],
+          inputs: [{ key: 'request', label: '新需求', kind: 'text', required: true }],
+          steps: [{
+            id: 'respond',
+            label: '执行保存的对话 Skill',
+            toolId: 'chat',
+            execution: 'sequential',
+            promptTemplate: '{{request}}',
+            modelRole: 'orchestrator',
+            qualityGateIds: [],
+          }],
           enabled: true,
           builtIn: false,
           ownerId: input.actorUserId,
-          sourceSkillId: source.id,
-          sourceAllowedSurfaces: [...source.allowedSurfaces],
+          sourceSkillId: CONVERSATION_CANVAS_SOURCE_ID,
+          sourceAllowedSurfaces: ['canvas', 'workflow'],
           createdAt: timestamp,
           updatedAt: timestamp,
           usageCount: 0,
@@ -646,7 +639,7 @@ export const copySkillForUser = (
 ): Promise<SkillDefinition> => defaultStore.copy({ actorUserId, sourceSkillId });
 export const createConversationSkillForUser = (
   actorUserId: string,
-  input: { name: string; description: string; conversation: string },
+  input: { name: string; description: string; category: string; systemPrompt: string; conversation: string },
 ): Promise<SkillDefinition> => defaultStore.createConversation({ actorUserId, ...input });
 export const updateUserSkill = (
   actorUserId: string,

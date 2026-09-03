@@ -126,6 +126,30 @@ describe('readProjectSnapshot', () => {
     ]);
   });
 
+  it('sanitizes and freezes source trace while reading persisted projects', () => {
+    const validTrace = {
+      source: 'canvas-skill', runId: 'run-1', skillId: 'skill-000000000000000000000001',
+      skillVersion: 1, sourceVersionIds: ['version-a'], createdAt: '2026-09-02T00:00:00.000Z',
+    } as const;
+    const baseImage = (loadFixture('v1-images-alias.json').value as {
+      images: Record<string, unknown>[];
+    }).images[0]!;
+    const valid = readProjectSnapshot(deepFreeze({
+      id: 'project-valid-trace', schemaVersion: 3, settings: {},
+      canvasImages: [{ ...baseImage, sourceTrace: validTrace }],
+    }));
+    const invalid = readProjectSnapshot(deepFreeze({
+      id: 'project-invalid-trace', schemaVersion: 3, settings: {},
+      canvasImages: [{ ...baseImage, sourceTrace: { ...validTrace, runId: 'bad run id' } }],
+    }));
+
+    const restored = valid.project?.canvasImages[0]?.sourceTrace;
+    expect(restored).toEqual(validTrace);
+    expect(Object.isFrozen(restored)).toBe(true);
+    expect(Object.isFrozen(restored?.source === 'canvas-skill' ? restored.sourceVersionIds : [])).toBe(true);
+    expect(invalid.project?.canvasImages[0]).not.toHaveProperty('sourceTrace');
+  });
+
   it('keeps a video placement ready when it has a video URL but no poster image', () => {
     const result = readProjectSnapshot(deepFreeze({
       id: 'video-without-poster',

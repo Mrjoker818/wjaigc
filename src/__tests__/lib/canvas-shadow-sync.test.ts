@@ -1556,6 +1556,26 @@ describe('continuous canvas shadow synchronization', () => {
     expect(hydrated.canvasImages[0].thumbnailUrl).toBe('/media/thumbnails/legacy.webp');
   });
 
+  it('hydrates authoritative source trace from asset-v3 placement metadata', () => {
+    const sourceTrace = {
+      source: 'canvas-skill' as const, runId: 'run-1', skillId: 'skill-000000000000000000000001',
+      skillVersion: 2, sourceVersionIds: ['source-version-1'], createdAt: '2026-09-02T00:00:00.000Z',
+    };
+    const [hydrated] = hydrateAssetV3Projects([project([image('graph-image', {
+      sourceTrace: { ...sourceTrace, runId: 'stale-run' },
+    })])], {
+      'project-1': [{
+        entityId: 'graph-image', assetId: 'asset-graph', assetVersionId: 'version-graph',
+        placementId: 'placement-graph', kind: 'image', fileUrl: '/media/graph-image.png',
+        availability: 'ready', transform: { x: 10, y: 20, width: 300, height: 200 },
+        metadata: { sourceTrace },
+      }],
+    });
+
+    expect(hydrated.canvasImages[0].sourceTrace).toEqual(sourceTrace);
+    expect(Object.isFrozen(hydrated.canvasImages[0].sourceTrace)).toBe(true);
+  });
+
   it('hydrates an asset-v3 video with separate playable and poster URLs', () => {
     const [hydrated] = hydrateAssetV3Projects([project([])], {
       'project-1': [{

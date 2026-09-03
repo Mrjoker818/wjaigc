@@ -1,4 +1,5 @@
 import type { WorkspaceAssetReference } from '@/lib/asset-core/types';
+import { parseWorkspaceSourceTrace } from '@/lib/asset-core/source-trace';
 import type { SkillDefinition } from './types';
 
 interface SkillCatalogResponse {
@@ -74,6 +75,13 @@ function isWorkspaceAssetReference(value: unknown): value is WorkspaceAssetRefer
     && Boolean(value.assetVersionId);
 }
 
+function sanitizeWorkspaceAssetReference(value: WorkspaceAssetReference): WorkspaceAssetReference {
+  const sourceTrace = parseWorkspaceSourceTrace(value.sourceTrace);
+  const safe = { ...value };
+  delete safe.sourceTrace;
+  return { ...safe, ...(sourceTrace ? { sourceTrace } : {}) };
+}
+
 async function readJson<T>(response: Response, fallback: string): Promise<T> {
   const payload = await response.json().catch(() => null) as T | null;
   if (!response.ok || !payload) throw new Error(fallback);
@@ -112,7 +120,7 @@ export async function copyCanvasSkill(
 }
 
 export async function createConversationCanvasSkill(
-  input: { name: string; description: string; conversation: string },
+  input: { name: string; description: string; category: string; systemPrompt: string; conversation: string },
   fetcher: typeof fetch = fetch,
 ): Promise<SkillDefinition> {
   const payload = await readJson<SkillMutationResponse>(await fetcher('/api/skills', {
@@ -176,7 +184,7 @@ export async function transferCanvasSkillAsset(input: {
   if (!isWorkspaceAssetReference(transferred) || !transferred.placementId) {
     throw new Error('Skill 资产加入画布返回格式无效');
   }
-  return transferred;
+  return sanitizeWorkspaceAssetReference(transferred);
 }
 
 export function createCanvasSkillProjectionCoordinator() {

@@ -226,6 +226,26 @@ describe('canvas chat Skill catalog contract', () => {
     });
   });
 
+  it('sanitizes and freezes transfer response provenance before canvas hydration', async () => {
+    const sourceTrace = {
+      source: 'canvas-skill' as const, runId: 'run-1', skillId: 'skill-000000000000000000000001',
+      skillVersion: 1, sourceVersionIds: ['source-1'], createdAt: '2026-09-02T00:00:00.000Z',
+    };
+    const transfer = (trace: unknown) => transferCanvasSkillAsset({
+      reference: { assetId: 'asset-1', assetVersionId: 'version-1', url: '/output.png' },
+      projectId: 'project-1', runId: 'run-1', sourceVersionIds: ['source-1'],
+      fetcher: vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({
+        assetId: 'asset-1', assetVersionId: 'version-1', placementId: 'placement-1',
+        url: '/output.png', sourceTrace: trace,
+      }), { status: 200 })),
+    });
+
+    const valid = await transfer(sourceTrace);
+    expect(valid.sourceTrace).toEqual(sourceTrace);
+    expect(Object.isFrozen(valid.sourceTrace)).toBe(true);
+    await expect(transfer({ ...sourceTrace, runId: 'bad run id' })).resolves.not.toHaveProperty('sourceTrace');
+  });
+
   it('clears user Skills serially and stops at the first server failure', async () => {
     let release!: () => void;
     const first = new Promise<void>(resolve => { release = resolve; });

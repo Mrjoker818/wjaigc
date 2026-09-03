@@ -87,13 +87,13 @@ describe('Skill runtime run requests', () => {
     const store = createSkillStore(createMemorySkillStorageAdapter(), {
       createId: () => `skill-${String(++sequence).padStart(24, '0')}`,
     });
-    const first = await store.createConversation({ actorUserId: actor.id, name: 'First', description: 'One', conversation: 'FIRST PRIVATE DIALOGUE' });
-    const second = await store.createConversation({ actorUserId: actor.id, name: 'Second', description: 'Two', conversation: 'SECOND PRIVATE DIALOGUE' });
+    const first = await store.createConversation({ actorUserId: actor.id, name: 'First', description: 'One', category: 'First agent', systemPrompt: 'FIRST SYSTEM PROMPT', conversation: 'FIRST PRIVATE DIALOGUE' });
+    const second = await store.createConversation({ actorUserId: actor.id, name: 'Second', description: 'Two', category: 'Second agent', systemPrompt: 'SECOND SYSTEM PROMPT', conversation: 'SECOND PRIVATE DIALOGUE' });
     const dependencies = { actorUserId: actor.id, ...runtimeDependencies(), resolveSkill: store.resolveExecutable };
     const requestFor = (skill: typeof first): SkillRunRequest => ({
       ...input, skillId: skill.id, skillVersion: skill.version,
-      inputValues: { scene: 'city', project: 'film', mood: 'quiet', style: 'ink' },
-      modelBindings: input.modelBindings,
+      inputValues: { request: 'Continue this work' },
+      modelBindings: { orchestrator: input.modelBindings.orchestrator },
     });
     const [firstRun, secondRun] = await Promise.all([
       buildSkillAgentRunRequest(requestFor(first), dependencies),

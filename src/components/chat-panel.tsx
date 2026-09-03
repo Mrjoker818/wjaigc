@@ -1856,9 +1856,15 @@ export function ChatPanel({ themeStyle, projectId, onAddToPrompt, onAddImages, o
         .map(message => `${message.role === 'user' ? '用户' : '助手'}：${message.content}`)
         .join('\n')
         .slice(0, 2_000);
+      const selectedAgent = [...AGENTS, ...customAgents].find(agent => agent.id === systemPrompt);
+      const savedSystemPrompt = selectedAgent?.prompt
+        || systemPrompt
+        || '根据保存的对话上下文理解用户需求，并在当前工作区继续完成任务。';
       await createConversationCanvasSkill({
         name: skillSaveName.trim(),
         description: skillSaveDescription.trim() || conversationSummary || '保存的画布对话',
+        category: selectedAgent?.name || '保存对话',
+        systemPrompt: savedSystemPrompt,
         conversation: conversationSummary,
       });
       await loadCanvasSkills();
@@ -1869,7 +1875,7 @@ export function ChatPanel({ themeStyle, projectId, onAddToPrompt, onAddImages, o
     } catch (error) {
       toast.error(error instanceof Error ? error.message : '保存 Skill 失败');
     }
-  }, [loadCanvasSkills, messages, skillSaveDescription, skillSaveName]);
+  }, [customAgents, loadCanvasSkills, messages, skillSaveDescription, skillSaveName, systemPrompt]);
 
   // 使用 Skill 创建新对话
   // 删除 Skill

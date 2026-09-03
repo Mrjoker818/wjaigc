@@ -90,12 +90,14 @@ describe('/api/skills', () => {
   it('creates an independent conversation Skill without a selected template', async () => {
     mocks.createConversationSkillForUser.mockResolvedValue({ id: 'skill-conversation-1', version: 1 });
     const response = await POST(jsonRequest('http://localhost/api/skills', 'POST', {
-      name: 'Saved conversation', description: 'Reusable exchange', conversation: 'User: make a poster',
+      name: 'Saved conversation', description: 'Reusable exchange', category: '品牌视觉',
+      systemPrompt: 'You are a brand designer', conversation: 'User: make a poster',
     }));
 
     expect(response.status).toBe(201);
     expect(mocks.createConversationSkillForUser).toHaveBeenCalledWith('user-1', {
-      name: 'Saved conversation', description: 'Reusable exchange', conversation: 'User: make a poster',
+      name: 'Saved conversation', description: 'Reusable exchange', category: '品牌视觉',
+      systemPrompt: 'You are a brand designer', conversation: 'User: make a poster',
     });
     expect(mocks.copySkillForUser).not.toHaveBeenCalled();
   });

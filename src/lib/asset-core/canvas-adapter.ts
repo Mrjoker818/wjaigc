@@ -3,6 +3,7 @@ import { isTerminalGenerationStatus } from '@/lib/generation-batch';
 import type { CanvasImage as PersistedCanvasImage } from '@/lib/user-types';
 
 import type { AssetGraphMode, MediaAvailability } from './types';
+import { parseWorkspaceSourceTrace } from './source-trace';
 
 export type AssetGraphReadStrategy = 'legacy-authoritative' | 'asset-authoritative';
 export type CanvasMediaFailureAction = 'retry-thumbnail' | 'fallback-original' | 'fallback-video' | 'mark-missing' | 'legacy-fallback' | 'ignore';
@@ -161,29 +162,43 @@ export function hydrateCanvasPlacements(
   images: PersistedCanvasImage[],
   _mode: AssetGraphMode = 'legacy',
 ): CanvasViewImage[] {
-  return images.map((image) => ({
-    ...image,
-    width: image.width || 256,
-    height: image.height || 256,
-    originalWidth: image.originalWidth || image.width || 512,
-    originalHeight: image.originalHeight || image.height || 512,
-    mediaAvailability: mediaAvailabilityFor(image),
-  }));
+  void _mode;
+  return images.map((image) => {
+    const sourceTrace = parseWorkspaceSourceTrace(image.sourceTrace);
+    const safeImage = { ...image };
+    delete safeImage.sourceTrace;
+    return {
+      ...safeImage,
+      width: image.width || 256,
+      height: image.height || 256,
+      originalWidth: image.originalWidth || image.width || 512,
+      originalHeight: image.originalHeight || image.height || 512,
+      mediaAvailability: mediaAvailabilityFor(image),
+      ...(sourceTrace ? { sourceTrace } : {}),
+    };
+  });
 }
 
 export function serializeCanvasPlacements(
   images: CanvasViewImage[],
   _mode: AssetGraphMode = 'legacy',
 ): PersistedCanvasImage[] {
-  return images.map((image) => ({
-    ...image,
-    originalWidth: image.originalWidth || image.width,
-    originalHeight: image.originalHeight || image.height,
-    rotation: image.rotation ?? 0,
-    zIndex: image.zIndex ?? 0,
-    createdAt: image.createdAt || Date.now(),
-    mediaAvailability: mediaAvailabilityFor(image),
-  }));
+  void _mode;
+  return images.map((image) => {
+    const sourceTrace = parseWorkspaceSourceTrace(image.sourceTrace);
+    const safeImage = { ...image };
+    delete safeImage.sourceTrace;
+    return {
+      ...safeImage,
+      originalWidth: image.originalWidth || image.width,
+      originalHeight: image.originalHeight || image.height,
+      rotation: image.rotation ?? 0,
+      zIndex: image.zIndex ?? 0,
+      createdAt: image.createdAt || Date.now(),
+      mediaAvailability: mediaAvailabilityFor(image),
+      ...(sourceTrace ? { sourceTrace } : {}),
+    };
+  });
 }
 
 export function serializeCanvasWorkspacePlacements(

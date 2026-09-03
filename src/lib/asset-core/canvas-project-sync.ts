@@ -17,6 +17,7 @@ import {
 } from './legacy-migration';
 import { lockAssetGraphWriteGate } from './storage';
 import type { AssetKind, MediaAvailability } from './types';
+import { parseWorkspaceSourceTrace } from './source-trace';
 
 export type AssetGraphMappings = Record<string, Record<string, LegacyImageMapping>>;
 
@@ -515,6 +516,10 @@ export function hydrateAssetV3Projects(
       const metadataImage = asRecord(placement.metadata.legacyImage);
       const legacyImage = legacyById.get(placement.entityId);
       const base = { ...(legacyImage ?? {}), ...metadataImage } as Partial<CanvasImage>;
+      const sourceTrace = parseWorkspaceSourceTrace(
+        placement.metadata.sourceTrace ?? metadataImage.sourceTrace ?? legacyImage?.sourceTrace,
+      );
+      delete base.sourceTrace;
       const transform = asRecord(placement.transform);
       const width = numberOr(transform.width, base.width ?? 256);
       const height = numberOr(transform.height, base.height ?? 256);
@@ -547,6 +552,7 @@ export function hydrateAssetV3Projects(
         assetId: placement.assetId,
         assetVersionId: placement.assetVersionId,
         placementId: placement.placementId,
+        ...(sourceTrace ? { sourceTrace } : {}),
       } satisfies CanvasImage;
     });
     return { ...project, schemaVersion: 3, canvasImages };

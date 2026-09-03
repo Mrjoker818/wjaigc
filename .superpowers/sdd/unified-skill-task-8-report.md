@@ -253,3 +253,54 @@ pnpm exec vitest run [8 个 skill-runtime lib 测试] [3 个 Skill API 测试] [
 ### 自审与待审
 
 四项 Important 均有对应真实行为测试并转绿，Minor 的关键源码字符串断言已由 RTL/API/storage/step-registry/deferred 测试补强。未运行全仓 Vitest 或 build，未 push。交付仍标记 `DONE_WITH_CONCERNS`：保护基线脚本受既有未跟踪保护项阻塞，且按简报需等待新的独立复审结论。
+
+## 第三轮独立审查修复波次（基于 HEAD 418be6f6）
+
+### 审查发现
+
+全新独立复审返回 `Important 3 / Minor 0 / CHANGES_REQUESTED`，指出三个仍属于 Task 8 的验收缺口：
+
+1. Canvas 项目读取、placement 水合和 transfer 客户端未统一校验并冻结 `sourceTrace`。
+2. Asset-v3 刷新只合并 `metadata.legacyImage`，忽略 placement 顶层权威 `metadata.sourceTrace`。
+3. “保存当前对话为 Skill”仍复制 `preset-concept-art` 的输入和步骤，使品牌或产品对话错误执行概念场景工作流。
+
+### RED 证据
+
+先增加边界行为测试，再修改生产代码。首次运行 6 个聚焦文件得到：
+
+```text
+Test Files  6 failed (6)
+Tests       7 failed / 103 passed
+```
+
+七个失败分别证明：合法来源未冻结、非法来源穿透保存/水合、Asset-v3 顶层来源被旧快照覆盖、transfer 返回值未经校验、项目读取未经校验，以及保存对话错误继承概念场景类别、输入、步骤和来源 ID。
+
+### 最小修复
+
+- Canvas 序列化、水合、项目读取和 transfer 返回统一经过 `parseWorkspaceSourceTrace`；非法来源被移除，合法 Canvas Skill 来源及其 `sourceVersionIds` 被冻结。
+- Asset-v3 水合优先读取 placement 顶层 `metadata.sourceTrace`，其次才兼容 `legacyImage` 和旧画布快照；旧的非法或过时来源不会覆盖权威来源。
+- 保存对话 Skill 使用独立来源 `conversation-canvas`，固定只允许 `canvas/workflow`，保留用户当前选中智能体的类别和系统提示词，并创建通用 `request -> chat/orchestrator` 单步工作流，不再复制任何内置业务模板。
+- Skills POST 合同显式校验 `category` 和 `systemPrompt`，旧的 owner、版本、surface、启停和严格字段边界保持不变。
+- 扩大回归发现旧测试要求保存对话不得依赖 `activeSkill`；实现随即移除该依赖，只保留当前选中智能体/直接系统提示词，避免模板耦合重新出现。
+
+### GREEN 与门禁
+
+最终 Task 1-8 扩大回归：
+
+```text
+Test Files  22 passed (22)
+Tests       267 passed (267)
+```
+
+附加门禁：
+
+- `pnpm ts-check`：通过。
+- 13 个新增/变更小文件 ESLint `--max-warnings 0`：通过，零 error、零 warning。
+- `src/components/chat-panel.tsx` ESLint：零 error；保留 50 条既有 warning，本轮未新增 warning。
+- `pnpm check:protected-baseline` 显式允许四个既有未跟踪保护项后：38 项能力、组件路径、证据合同和 Git refs 全部通过，零 warning。
+- `git diff --check`：通过；仅有 Windows 工作区 LF/CRLF 提示。
+- `origin/stable` 仍为 `52f7c601ed150769e15d06fb435c6e360e28c9e7`，未修改、未推送。
+
+### 当前状态
+
+三个 Important 均已有先失败后通过的行为测试。Task 8 仍保持 `DONE_WITH_CONCERNS`，必须取得基于本次新提交的独立复审 `APPROVED / 0-0-0` 后，才能更新阶段进度并进入 Task 9。

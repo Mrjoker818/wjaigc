@@ -87,10 +87,12 @@ describe('versioned user skill storage', () => {
     });
 
     const first = await store.createConversation({
-      actorUserId: 'user-1', name: 'First', description: 'One', conversation: 'User: first',
+      actorUserId: 'user-1', name: 'First', description: 'One', category: '品牌视觉',
+      systemPrompt: '你是品牌视觉智能体', conversation: 'User: first',
     });
     const second = await store.createConversation({
-      actorUserId: 'user-1', name: 'Second', description: 'Two', conversation: 'User: second',
+      actorUserId: 'user-1', name: 'Second', description: 'Two', category: '产品设计',
+      systemPrompt: '你是产品设计智能体', conversation: 'User: second',
     });
     await store.update({ actorUserId: 'user-1', skillId: first.id, enabled: false });
 
@@ -100,6 +102,20 @@ describe('versioned user skill storage', () => {
       expect.objectContaining({ id: second.id, enabled: true, systemPrompt: expect.stringContaining('User: second') }),
     ]);
     expect((adapter.inspect('user-1', SKILL_CATALOG_KEY) as { skills: unknown[] }).skills).toHaveLength(2);
+    expect(first).toMatchObject({
+      category: '品牌视觉',
+      sourceSkillId: 'conversation-canvas',
+      allowedSurfaces: ['canvas', 'workflow'],
+      sourceAllowedSurfaces: ['canvas', 'workflow'],
+      inputs: [{ key: 'request', kind: 'text', required: true }],
+      steps: [{ toolId: 'chat', modelRole: 'orchestrator' }],
+    });
+    expect(first.systemPrompt).toContain('你是品牌视觉智能体');
+    expect(first.systemPrompt).toContain('User: first');
+    expect(first.systemPrompt).not.toContain('概念场景');
+    expect(second.category).toBe('产品设计');
+    expect(second.steps).toEqual(first.steps);
+    expect(second.systemPrompt).not.toBe(first.systemPrompt);
   });
 
   it('authorizes executable user Skills by owner, surface and enabled state', async () => {
@@ -107,7 +123,8 @@ describe('versioned user skill storage', () => {
       createId: () => 'skill-000000000000000000000001',
     });
     const skill = await store.createConversation({
-      actorUserId: 'user-1', name: 'Executable', description: 'Saved', conversation: 'User: private prompt',
+      actorUserId: 'user-1', name: 'Executable', description: 'Saved', category: '保存对话',
+      systemPrompt: 'Continue the saved conversation', conversation: 'User: private prompt',
     });
     await expect(store.resolveExecutable('user-1', skill.id, 'canvas')).resolves.toMatchObject({ id: skill.id });
     await expect(store.resolveExecutable('user-2', skill.id, 'canvas')).rejects.toMatchObject({ code: 'SKILL_NOT_FOUND' });
@@ -120,7 +137,8 @@ describe('versioned user skill storage', () => {
     const adapter = createMemorySkillStorageAdapter();
     const store = createSkillStore(adapter, { createId: () => 'skill-000000000000000000000001' });
     const skill = await store.createConversation({
-      actorUserId: 'user-1', name: 'Delete me', description: 'Disposable', conversation: 'User: delete',
+      actorUserId: 'user-1', name: 'Delete me', description: 'Disposable', category: '保存对话',
+      systemPrompt: 'Continue the saved conversation', conversation: 'User: delete',
     });
 
     await expect(store.remove({ actorUserId: 'user-2', skillId: skill.id }))

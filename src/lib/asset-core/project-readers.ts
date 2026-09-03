@@ -1,6 +1,7 @@
 import type { CanvasImage, Project } from '@/lib/user-types';
 
 import type { MediaAvailability } from './types';
+import { parseWorkspaceSourceTrace } from './source-trace';
 
 export type ProjectSchemaVersion = 1 | 2 | 3;
 
@@ -148,7 +149,13 @@ function prepareImages(
     if (imageIds.has(value.id)) return null;
     imageIds.add(value.id);
 
-    const normalizedImage = normalizeImageUrls(value) as unknown as CanvasImage;
+    const normalized = normalizeImageUrls(value);
+    const sourceTrace = parseWorkspaceSourceTrace(normalized.sourceTrace);
+    delete normalized.sourceTrace;
+    const normalizedImage = {
+      ...normalized,
+      ...(sourceTrace ? { sourceTrace } : {}),
+    } as unknown as CanvasImage;
     const image: CanvasImage = normalizedImage.videoUrl && !normalizedImage.mediaType
       ? { ...normalizedImage, mediaType: 'video' }
       : normalizedImage;

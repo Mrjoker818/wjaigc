@@ -54,10 +54,12 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       const skill = await copySkillForUser(auth.userId, sourceSkillId);
       return NextResponse.json({ skill }, { status: 201 });
     }
-    assertOnlyFields(body, ['name', 'description', 'conversation']);
+    assertOnlyFields(body, ['name', 'description', 'category', 'systemPrompt', 'conversation']);
     const skill = await createConversationSkillForUser(auth.userId, {
       name: parseBoundedString(body.name, 'name', 120),
       description: parseBoundedString(body.description, 'description', 2_000),
+      category: parseBoundedString(body.category, 'category', 64),
+      systemPrompt: parseBoundedString(body.systemPrompt, 'systemPrompt', 32_768),
       conversation: parseBoundedString(body.conversation, 'conversation', 6_000),
     });
     return NextResponse.json({ skill }, { status: 201 });

@@ -143,6 +143,28 @@ describe('canvas asset adapter', () => {
     const [saved] = serializeCanvasWorkspacePlacements([{ ...persistedImage, sourceTrace }]);
     const [restored] = hydrateCanvasPlacements([saved], 'asset-v3');
     expect(restored.sourceTrace).toEqual(sourceTrace);
+    expect(Object.isFrozen(restored.sourceTrace)).toBe(true);
+    expect(Object.isFrozen(restored.sourceTrace?.source === 'canvas-skill'
+      ? restored.sourceTrace.sourceVersionIds
+      : [])).toBe(true);
+  });
+
+  it('drops malformed source trace at canvas serialization and hydration boundaries', () => {
+    const malformed = {
+      source: 'canvas-skill', runId: 'bad run id', skillId: 'skill-1',
+      skillVersion: 0, sourceVersionIds: ['bad id'], createdAt: 'not-a-date',
+    };
+    const [saved] = serializeCanvasWorkspacePlacements([{
+      ...persistedImage,
+      sourceTrace: malformed as never,
+    }]);
+    const [restored] = hydrateCanvasPlacements([{
+      ...saved,
+      sourceTrace: malformed as never,
+    }], 'asset-v3');
+
+    expect(saved).not.toHaveProperty('sourceTrace');
+    expect(restored).not.toHaveProperty('sourceTrace');
   });
 
   it('retains managed and unmanaged empty/blob media as explicit broken placements', () => {
