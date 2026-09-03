@@ -85,7 +85,8 @@
         "pending": 0,
         "processing": 0,
         "readyBefore": 2,
-        "readyAfter": 3,
+        "readyAfterFirstBatch": 3,
+        "measurementScope": "首个单条回填批次后的状态；不是后续五批共 41 项回填后的最终快照。",
         "failed": 0
       },
       "dryRun": {
