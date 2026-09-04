@@ -100,6 +100,7 @@ export interface WorkspacePlacementFor<TWorkspace extends WorkspaceKind> {
   entityId: string;
   status: AssetStatus;
   deletedAt: string | null;
+  lifecycleRevision?: string;
   transform?: Record<string, unknown>;
   metadata?: Record<string, unknown>;
   createdAt: string;

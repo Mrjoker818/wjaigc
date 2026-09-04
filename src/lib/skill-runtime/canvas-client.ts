@@ -156,9 +156,10 @@ export async function transferCanvasSkillAsset(input: {
   projectId: string;
   runId: string;
   sourceVersionIds: readonly string[];
+  restoreDeletedPlacement?: boolean;
   fetcher?: typeof fetch;
   signal?: AbortSignal;
-}): Promise<WorkspaceAssetReference> {
+}): Promise<WorkspaceAssetReference & { projectRevision?: number }> {
   if (!input.reference.assetVersionId) throw new Error('Skill 资产版本无效');
   const identity = canvasSkillProjectionIdentity(input.runId, input.reference.assetVersionId);
   const response = await (input.fetcher ?? fetch)('/api/assets/transfer', {
@@ -180,11 +181,46 @@ export async function transferCanvasSkillAsset(input: {
     }),
     signal: input.signal,
   });
-  const transferred = await readJson<WorkspaceAssetReference>(response, 'Skill 资产加入画布失败');
-  if (!isWorkspaceAssetReference(transferred) || !transferred.placementId) {
+  const transferred = await readJson<WorkspaceAssetReference & { placementStatus?: string; placementRevision?: string; projectRevision?: number }>(response, 'Skill 资产加入画布失败');
+  if (!isWorkspaceAssetReference(transferred) || !transferred.assetId || !transferred.placementId) {
     throw new Error('Skill 资产加入画布返回格式无效');
   }
-  return sanitizeWorkspaceAssetReference(transferred);
+  if (transferred.placementStatus === 'trashed') {
+    if (!input.restoreDeletedPlacement) throw new Error('Skill 结果已删除，请从运行记录显式恢复');
+    if (!transferred.placementRevision || !/^\d{1,10}$/.test(transferred.placementRevision)) {
+      throw new Error('Skill 结果恢复缺少删除版本，请刷新后重试');
+    }
+    const restoreResponse = await (input.fetcher ?? fetch)(
+      `/api/assets/${encodeURIComponent(transferred.assetId)}/restore`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ projectId: input.projectId, placementId: transferred.placementId,
+          expectedPlacementRevision: transferred.placementRevision }),
+        signal: input.signal,
+      },
+    );
+    const restored: unknown = await restoreResponse.json().catch(() => null);
+    if (!restoreResponse.ok) {
+      const code = isRecord(restored) && typeof restored.error === 'string'
+        && /^ASSET_[A-Z_]{1,64}$/.test(restored.error) ? restored.error : '';
+      throw new Error(code ? `Skill 结果恢复失败：${code}` : 'Skill 结果恢复失败');
+    }
+    if (!isRecord(restored) || !isRecord(restored.placement)
+      || restored.placement.id !== transferred.placementId
+      || restored.placement.assetId !== transferred.assetId
+      || restored.placement.assetVersionId !== transferred.assetVersionId
+      || restored.placement.status !== 'active') {
+      throw new Error('Skill 结果恢复返回格式无效');
+    }
+    transferred.placementStatus = 'active';
+    if (typeof restored.projectRevision === 'number'
+      && Number.isSafeInteger(restored.projectRevision) && restored.projectRevision >= 0) {
+      transferred.projectRevision = restored.projectRevision;
+    }
+  }
+  return { ...sanitizeWorkspaceAssetReference(transferred),
+    ...(transferred.projectRevision === undefined ? {} : { projectRevision: transferred.projectRevision }) };
 }
 
 export function createCanvasSkillProjectionCoordinator() {

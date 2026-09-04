@@ -532,6 +532,7 @@ interface ChatPanelProps {
     sourceImageId?: string;
     runId?: string;
     sourceVersionIds?: readonly string[];
+    restoreDeletedPlacement?: boolean;
     signal?: AbortSignal;
   }) => void | Promise<void>;
   canvasImages?: CanvasImage[];
@@ -1412,6 +1413,7 @@ export function ChatPanel({ themeStyle, projectId, onAddToPrompt, onAddImages, o
     projectId: string;
     sourceVersionIds: string[];
     sourceImageId?: string;
+    restoreDeletedPlacement?: boolean;
   } | null>(null);
   const skillProjectionCoordinatorRef = useRef(createCanvasSkillProjectionCoordinator());
   const skillProjectionAttemptCountsRef = useRef<Map<string, number>>(new Map());
@@ -3931,7 +3933,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
     );
     if (runId) {
       skillProjectionAttemptCountsRef.current.delete(runId);
-      activeCanvasSkillRunRef.current = { runId, projectId, sourceVersionIds: [...record.sourceVersionIds] };
+      activeCanvasSkillRunRef.current = { runId, projectId, sourceVersionIds: [...record.sourceVersionIds], restoreDeletedPlacement: true };
       setSkillProjectionRetry(value => value + 1);
     }
   }, [activeSkill?.id, projectId, skillRun]);
@@ -3999,6 +4001,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
             sourceImageId: context.sourceImageId,
             runId: context.runId,
             sourceVersionIds: context.sourceVersionIds,
+            restoreDeletedPlacement: context.restoreDeletedPlacement,
             signal,
           })),
         });
@@ -4006,7 +4009,9 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
     }).catch(error => {
       if (!controller.signal.aborted && activeCanvasSkillRunRef.current?.runId === context.runId) {
         toast.error(error instanceof Error ? error.message : 'Skill 结果加入画布失败');
-        if ((skillProjectionAttemptCountsRef.current.get(context.runId) ?? 0) < 2) {
+        // A lost restore response may already have committed; retry needs a new history click.
+        if (!context.restoreDeletedPlacement
+          && (skillProjectionAttemptCountsRef.current.get(context.runId) ?? 0) < 2) {
           setSkillProjectionRetry(value => value + 1);
         }
       }

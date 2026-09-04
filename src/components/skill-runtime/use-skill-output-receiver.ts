@@ -7,6 +7,7 @@ export type SkillOutputReceiver = (reference: WorkspaceAssetReference, meta?: {
   sourceImageId?: string;
   runId?: string;
   sourceVersionIds?: readonly string[];
+  restoreDeletedPlacement?: boolean;
   signal?: AbortSignal;
 }) => void | Promise<void>;
 

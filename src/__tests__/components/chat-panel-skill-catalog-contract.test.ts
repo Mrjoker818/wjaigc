@@ -295,6 +295,52 @@ describe('canvas chat Skill catalog contract', () => {
     await expect(transfer({ ...sourceTrace, runId: 'bad run id' })).resolves.not.toHaveProperty('sourceTrace');
   });
 
+  it('restores a deleted placement only for explicit history recovery before returning it', async () => {
+    const reference = { assetId: 'asset-1', assetVersionId: 'version-1', placementId: 'placement-1', url: '/output.png' };
+    const controller = new AbortController();
+    const fetcher = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ...reference, placementStatus: 'trashed', placementRevision: '42', reused: true })))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        placement: { id: 'placement-1', assetId: 'asset-1', assetVersionId: 'version-1', status: 'active' },
+        asset: { id: 'asset-1', status: 'active' }, projectRevision: 8,
+      })));
+    await expect(transferCanvasSkillAsset({
+      reference, projectId: 'project-1', runId: 'run-1', sourceVersionIds: [],
+      restoreDeletedPlacement: true, fetcher, signal: controller.signal,
+    })).resolves.toMatchObject({ ...reference, projectRevision: 8 });
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(fetcher.mock.calls[1]?.[0]).toBe('/api/assets/asset-1/restore');
+    expect(JSON.parse(String(fetcher.mock.calls[1]?.[1]?.body)))
+      .toEqual({ projectId: 'project-1', placementId: 'placement-1', expectedPlacementRevision: '42' });
+    expect(fetcher.mock.calls[1]?.[1]?.signal).toBe(controller.signal);
+  });
+
+  it('does not resurrect a deleted placement during ordinary output projection', async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({
+      assetId: 'asset-1', assetVersionId: 'version-1', placementId: 'placement-1',
+      url: '/output.png', placementStatus: 'trashed', reused: true,
+    })));
+    await expect(transferCanvasSkillAsset({
+      reference: { assetId: 'asset-1', assetVersionId: 'version-1', url: '/output.png' },
+      projectId: 'project-1', runId: 'run-1', sourceVersionIds: [], fetcher,
+    })).rejects.toThrow('已删除');
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not return a canvas reference when explicit placement restoration is rejected', async () => {
+    const fetcher = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        assetId: 'asset-1', assetVersionId: 'version-1', placementId: 'placement-1',
+        url: '/output.png', placementStatus: 'trashed', placementRevision: '42', reused: true,
+      })))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ error: 'ASSET_RESTORE_NOT_ALLOWED' }), { status: 409 }));
+    await expect(transferCanvasSkillAsset({
+      reference: { assetId: 'asset-1', assetVersionId: 'version-1', url: '/output.png' },
+      projectId: 'project-1', runId: 'run-1', sourceVersionIds: [],
+      restoreDeletedPlacement: true, fetcher,
+    })).rejects.toThrow('ASSET_RESTORE_NOT_ALLOWED');
+  });
+
   it('clears user Skills serially and stops at the first server failure', async () => {
     let release!: () => void;
     const first = new Promise<void>(resolve => { release = resolve; });

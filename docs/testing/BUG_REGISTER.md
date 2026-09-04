@@ -1,5 +1,28 @@
 # 无界AI — 缺陷登记表 (BUG REGISTER)
 
+## 2026-09-04 云端新增：Skill 删除后恢复持久化冲突
+
+- ID：SKILL-HISTORY-20260904-04，P1，未修复。属于Skill恢复与现有资产放置的接入边界，不重新开发冻结Stage4。
+- 发布前更新：最终生产构建85442退出0（12.4分钟编译、52秒TypeScript，Build ID dpG6DGhjQK1vCcu58Q6oI）。本地修复门禁完成，状态为本地通过/云端未验证，不得将此前未构建记录当作当前状态。完整证据与限制见[本轮修复报告](2026-09-04-skill-history-placement-recovery.md)。
+- 最新门禁：最终候选会话57684退出0，668文件/5231项全通过，0失败/0跳过，含真实隔离PostgreSQL；证据`output/skill-history-revision-full-20260904.json`。全仓Lint退出0、0错误/943历史警告，38项功能保护通过，类型检查通过。测试集群已正常停止。下列较早执行中/待复现记录已由本轮增量更新；生产构建及Chrome云端恢复持久化尚未验证，未提交推送，不关闭此P1为云端已修复。
+- 本轮时序增量：两个审查风险已转为可执行回归。`skill-history-projection-retry.test.ts`直接执行生产拒绝回调，先1失败/2通过，证明显式恢复失败仍安排自动重试；修复为仅普通投影允许自动重试，显式恢复需新的历史点击。`skill-history-late-insertion.test.ts`执行生产接收及落图回调，先3失败/1通过，覆盖旧服务端修订响应、尺寸加载期间删除、本地删除代际变化；最小修复在最终同步落图前校验revision与删除代际，校验通过后才清除目标删除标记。两项测试与转入契约合计20通过，相关历史模块35通过；类型exit0、相关ESLint0错误。最终全量正在重新执行，不复用修改前5217通过作为本补丁证据。
+- 测试边界：上述为真实源码回调执行测试，不是完整React页面挂载或Chrome多标签测试；传输响应被受控延迟，不能声称证明了真实网络、跨标签同步或供应商链路。云端恢复持久化仍未验证；未改Stage4资产内核、账本、供应商任务或stable。
+- 复审追加待复现边界：页面A的trashed transfer响应被暂扣，页面B恢复后再次删除，A只同步最终删除状态而未见中间图片；随后A旧请求提交restore。恢复接口目前只接收projectId/placementId，未绑定首次观察的删除版本，返回的新revision可能高于B的删除revision，从而绕过客户端旧响应检查。须以真实隔离PG交错测试证明，再考虑可选删除版本前置条件；未执行该复现前不宣称闭环。不得关闭完整性校验或整体改写冻结资产内核。
+- 上述追加边界本轮已在真实隔离PG先失败后修复：`skill-history-delete-cycle-red-20260904.json`保留旧恢复覆盖新删除的失败，`skill-history-delete-cycle-green-20260904.json`四项通过。以PostgreSQL行版本xmin作为只读placementRevision，由新Skill客户端提交expectedPlacementRevision；既有restore事务在行锁后匹配，不同版本返回ASSET_PLACEMENT_CONFLICT。只增加可选前置条件，无新增表/迁移；旧恢复入口保持兼容，新Skill恢复缺少版本时拒绝隐式降级。真实PG传输测试仍是进程内transport，HTTP鉴权/409映射另由路由测试验证，不冒充Chrome。
+- 全量环境失败保留：会话18625共5224项，5062通过/144失败/18跳过；失败均属本地PG启动漏传端口，实际监听5432而测试使用55489（ECONNREFUSED）。已核实并停止该测试集群，以显式`-p 55489 -h 127.0.0.1`重启，pg_isready通过，专项恢复。最终新候选全量为会话57684，证据`skill-history-revision-full-20260904.json`，执行中，不能将旧失败改为通过。
+- 18:23本地候选：新增3项回归先失败（18通过/3失败），最小接入后相关4文件64测试通过。transfer回传placementStatus；仅历史查看设置restoreDeletedPlacement，经既有restore接口恢复同一放置后才交付引用；普通投影遇trashed拒绝落图，恢复失败保留受控ASSET错误码。类型/定向ESLint/diff检查通过。尚缺真实PG组合链路、修订号/并发恢复检查、全量/构建与Chrome验收，因此仍未修复完成、未提交推送。
+- 18:31增量：新增真实PG传送→删除→恢复→完整性校验与快照检查、并发恢复、跨用户/保留期限制；连同原PG对账共11项通过。发现恢复返回projectRevision未透传，新增断言先失败后修复，并在项目/信号检查后推进revision、仅清除目标entity删除标记。最新7文件86项通过，类型检查通过。18:26启动的旧候选全量会话61492因新复现缺口主动中止exit1（无残留vitest），不是全量通过；最终候选仍需重新全量/构建/Chrome。测试PG已正常停止。未提交推送。
+- 环境：Google Chrome，隔离Coze预览，main候选f2b673ce，云端tree ef92f31b20b2ac4174a246727b16efaf471c8335。
+- 项目：project_1787549625844_nfmso3ts9；run：164afb05-baf2-41ff-bd8c-204278291429。
+- 前置：真实APImart美食Skill完成，蛋糕图1254x1254首次落图/下载/刷新正常。原有三图保留。
+- 复现：选中本轮蛋糕图，工具栏删除；在同一Skill面板点击该已完成历史；图片暂时恢复但出现toast LEGACY_MIGRATION_INTEGRITY_CONFLICT；重新加载页面，恢复图消失，回到原三图。
+- 预期：显式恢复已完成结果应复用原资产版本，恢复合法活动放置，保存后刷新可见；不重新生成或扣费。
+- 实际证据：Chrome AX捕获冲突toast，刷新后仅三图；Coze只读确认placement 9a418cbe-6e3f-4ed3-90c4-74db0b3d8dac为trashed，deleted_at=2026-09-04 18:14:57 CST，asset b474beef-2d87-4ff6-b23e-9e9458ad4a6c/version 21531be6-2481-4a32-974b-6bbb2d72a70c仍存在。事件与账务保持完成，一次消费62，退款0。
+- 根因证据：canvas-client.ts的transferCanvasSkillAsset固定使用canvas-skill:run:version作为幂等键；storage.ts findTransfersByIdempotency不按活动状态筛选；service.ts sendVersionToWorkspace在命中时直接返回旧placement；transfer API不返回placement状态；legacy-migration.ts adoptManagedCanvasMapping要求活动放置。这里不能通过移除完整性校验或随意更换幂等键修复。
+- 待补：最小真实PostgreSQL失败回归和显式恢复接入测试，验证同资产版本、一次放置、无隐式恢复其他删除内容、无重复扣费；再最小修改、全量回归和Chrome复验。
+- 原始证据在本对话浏览器工具记录；尚未取得冲突requestId/HTTP响应/本地录像Trace，不伪填。截图时toast已消失，toast证据为此前AX结果。
+- 另：首次Coze报告父任务processing/pending与完成事件不一致，经18:14:31单SQL同期快照证明completed/charged，属于早晚快照混用，排除为新Bug。
+
 ## 2026-09-04 Skill 历史恢复候选审查
 
 以下为本地未提交候选的P2问题，未发布，不与云端供应商故障混为一谈。全量5200测试通过仍不足以关闭这些边界；须补稳定失败测试后最小修复。

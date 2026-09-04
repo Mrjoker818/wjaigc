@@ -89,6 +89,7 @@ export interface PlacementCommand {
   projectId: string;
   placementId: string;
   assetId?: string;
+  expectedPlacementRevision?: string;
 }
 
 function notFound(): never {
@@ -662,6 +663,9 @@ export class AssetService {
         if (!placement || placement.assetId !== locatedPlacement.assetId) notFound();
         if (input.assetId && placement.assetId !== input.assetId) notFound();
         if (placement.status !== 'trashed' || !placement.deletedAt) restoreNotAllowed();
+        // Compare after taking the row lock: an old history action cannot restore a newer deletion.
+        if (input.expectedPlacementRevision !== undefined
+          && input.expectedPlacementRevision !== placement.lifecycleRevision) placementConflict();
         const retentionEndsAt = new Date(placement.deletedAt).getTime()
           + DEFAULT_TRASH_RETENTION_DAYS * 24 * 60 * 60 * 1000;
         if (!Number.isFinite(retentionEndsAt) || Date.now() >= retentionEndsAt) restoreNotAllowed();

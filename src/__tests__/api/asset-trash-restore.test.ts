@@ -81,6 +81,32 @@ describe('asset restore API', () => {
     expect(await response.json()).toEqual({ error: 'ASSET_MEDIA_UNRECOVERABLE' });
   });
 
+  it('forwards a supplied placement revision to the authenticated atomic restore', async () => {
+    mocks.getRequestUser.mockResolvedValue({ user: { id: 'owner-a', role: 'user' } });
+    mocks.restorePlacement.mockRejectedValue(new MockAssetServiceError('ASSET_PLACEMENT_CONFLICT'));
+    const response = await restoreAsset(new NextRequest('http://localhost/api/assets/asset-a/restore', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ projectId: 'project-a', placementId: 'placement-a', expectedPlacementRevision: '42' }),
+    }), { params: Promise.resolve({ assetId: 'asset-a' }) });
+    expect(mocks.restorePlacement).toHaveBeenCalledWith({
+      actorUserId: 'owner-a', projectId: 'project-a', placementId: 'placement-a', assetId: 'asset-a',
+      expectedPlacementRevision: '42',
+    });
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({ error: 'ASSET_PLACEMENT_CONFLICT' });
+  });
+
+  it.each(['', 'invalid', '12345678901', 42, null])('rejects malformed restore revision %j', async revision => {
+    mocks.getRequestUser.mockResolvedValue({ user: { id: 'owner-a', role: 'user' } });
+    const response = await restoreAsset(new NextRequest('http://localhost/api/assets/asset-a/restore', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ projectId: 'project-a', placementId: 'placement-a', expectedPlacementRevision: revision }),
+    }), { params: Promise.resolve({ assetId: 'asset-a' }) });
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: 'ASSET_REQUEST_INVALID' });
+    expect(mocks.restorePlacement).not.toHaveBeenCalled();
+  });
+
   it('keeps the unrecoverable terminal conflict explicit in the route map', () => {
     const routeSource = readFileSync(
       path.join(process.cwd(), 'src/app/api/assets/[assetId]/restore/route.ts'),

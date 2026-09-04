@@ -199,6 +199,7 @@ interface PlacementRow extends QueryResultRow {
   entity_id: string;
   status: 'active' | 'trashed';
   deleted_at: Date | null;
+  lifecycle_revision?: string;
   transform: Record<string, unknown>;
   metadata: Record<string, unknown>;
   created_at: Date;
@@ -268,6 +269,7 @@ function mapPlacement(row: PlacementRow): WorkspacePlacement {
     entityId: row.entity_id,
     status: row.status,
     deletedAt: row.deleted_at ? toIso(row.deleted_at) : null,
+    ...(row.lifecycle_revision ? { lifecycleRevision: row.lifecycle_revision } : {}),
     ...(Object.keys(asRecord(row.transform)).length > 0 ? { transform: asRecord(row.transform) } : {}),
     ...(Object.keys(asRecord(row.metadata)).length > 0 ? { metadata: asRecord(row.metadata) } : {}),
     createdAt: toIso(row.created_at),
@@ -443,7 +445,7 @@ class PostgresAssetStorageTransaction implements AssetStorageTransaction {
 
   async lockPlacement(ownerId: string, projectId: string, placementId: string): Promise<WorkspacePlacement | null> {
     const result = await this.client.query<PlacementRow>(
-      `SELECT * FROM wujie_workspace_placements
+      `SELECT *, xmin::text AS lifecycle_revision FROM wujie_workspace_placements
        WHERE id = $1 AND owner_id = $2 AND project_id = $3 FOR UPDATE`,
       [placementId, ownerId, projectId],
     );
@@ -514,7 +516,7 @@ class PostgresAssetStorageTransaction implements AssetStorageTransaction {
     idempotencyKey: string,
   ): Promise<StoredTransfer[]> {
     const result = await this.client.query<PlacementRow>(
-      `SELECT * FROM wujie_workspace_placements
+      `SELECT *, xmin::text AS lifecycle_revision FROM wujie_workspace_placements
        WHERE owner_id = $1 AND idempotency_key = $2
        ORDER BY created_at, id`,
       [ownerId, idempotencyKey],

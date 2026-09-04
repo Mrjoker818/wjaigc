@@ -73,6 +73,17 @@ describe('POST /api/assets/transfer', () => {
     mocks.sendVersionToWorkspace.mockResolvedValue(transferResult());
   });
 
+  it.each(['active', 'trashed'])('reports actual %s placement state without implicitly restoring it', async status => {
+    const result = transferResult(true);
+    mocks.sendVersionToWorkspace.mockResolvedValue({ ...result, placement: { ...result.placement, status } });
+    const response = await POST(transferRequest(baseBody));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      placementId: 'placement-a', placementStatus: status, assetVersionId: 'version-a', reused: true,
+    });
+    expect(mocks.sendVersionToWorkspace).toHaveBeenCalledTimes(1);
+  });
+
   it('returns 401 without a session and never reaches the service', async () => {
     mocks.getSessionUser.mockResolvedValue(null);
     mocks.getRequestUser.mockResolvedValue({

@@ -14,6 +14,20 @@ const chatSource = readFileSync(resolve(process.cwd(), 'src/components/chat-pane
 const chatToolsSource = readFileSync(resolve(process.cwd(), 'src/lib/chat-tools.ts'), 'utf8');
 
 describe('canvas to embedded chat asset transfer', () => {
+  it('reconciles explicit Skill recovery revision and deletion markers only after the project scope guard', () => {
+    const start = workspaceSource.indexOf('const handleAddEmbeddedChatImage');
+    const end = workspaceSource.indexOf('const handleUploadEffectReverseSource', start);
+    const receiver = workspaceSource.slice(start, end);
+    const guard = receiver.indexOf('isWorkspaceResultScopeCurrent(expectedProjectId');
+    const recovery = receiver.indexOf('if (meta?.restoreDeletedPlacement)');
+    const insert = receiver.indexOf('await handleAddImages([{');
+    expect(guard).toBeGreaterThan(0);
+    expect(recovery).toBeGreaterThan(guard);
+    expect(insert).toBeGreaterThan(recovery);
+    expect(receiver).toContain('manager.advanceProjectSyncRevision(Number(transferred.projectRevision))');
+    expect(receiver).toContain('recentlyDeletedIdsRef.current.delete(transferred.entityId)');
+    expect(receiver).toContain('manager.clearRecentlyDeletedImageIds([transferred.entityId])');
+  });
   it('returns the canonical chat attachment reference after transfer', async () => {
     const result = await prepareCanvasAssetForChat({
       id: 'canvas-a',

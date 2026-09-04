@@ -101,7 +101,7 @@ import {
 import { taskEventsClient } from '@/lib/task-events-client';
 import { waitForTaskPollInterval } from '@/lib/task-polling-wait';
 import type { WorkflowCanvasInsertionItem } from '@/lib/asset-core/workspace-transfer';
-import { transferCanvasSkillAsset } from '@/lib/skill-runtime/canvas-client';
+import { canvasSkillProjectionIdentity, transferCanvasSkillAsset } from '@/lib/skill-runtime/canvas-client';
 import {
   buildSimpleChatCanvasBridgeImages,
   consumeSimpleChatCanvasBridge,
@@ -508,6 +508,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
   // Dragging one image records only {x, y} change, not the entire image array.
   const incrementalHistoryRef = useRef<IncrementalHistoryManager<CanvasImage>>(new IncrementalHistoryManager<CanvasImage>(50));
   const recentlyDeletedIdsRef = useRef<Set<string>>(new Set());
+  const imageDeletionGenerationRef = useRef<Map<string, number>>(new Map());
   const historyLifecyclePendingRef = useRef(false);
   const [historyTransitionPending, setHistoryTransitionPending] = useState(false);
   const historyTransitionEpochRef = useRef(0);
@@ -1972,6 +1973,9 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
       if (!currentIds.has(id)) deleted.add(id);
     });
     if (deleted.size > 0) {
+      deleted.forEach(id => imageDeletionGenerationRef.current.set(
+        id, (imageDeletionGenerationRef.current.get(id) ?? 0) + 1,
+      ));
       deleted.forEach(id => recentlyDeletedIdsRef.current.add(id));
       // 5 秒后清除（足够让自动保存完成并同步到服务器）
       setTimeout(() => {
@@ -3415,7 +3419,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
 
   // 加载图片真实尺寸
   // 添加多张图片到画布（自动排列布局）
-  const handleAddImages = useCallback(async (imageInputs: Array<string | WorkflowCanvasInsertionItem>, sourceImageId?: string, meta?: { modelName?: string; apiProvider?: string; relationType?: ConnectionRelationType; signal?: AbortSignal }) => {
+  const handleAddImages = useCallback(async (imageInputs: Array<string | WorkflowCanvasInsertionItem>, sourceImageId?: string, meta?: { modelName?: string; apiProvider?: string; relationType?: ConnectionRelationType; signal?: AbortSignal; beforeInsert?: () => void }) => {
     const expectedProjectId = currentProjectRef.current?.id;
     const newImages: CanvasImage[] = [];
     const nextWorkflowImageZIndex = Math.max(
@@ -3533,6 +3537,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
         return;
       }
       const nextImages = [...previousImages, ...insertedImages];
+      meta?.beforeInsert?.();
       latestImagesRef.current = nextImages;
       setImages(nextImages);
       if (!sourceImg) {
@@ -3587,6 +3592,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
       sourceImageId?: string;
       runId?: string;
       sourceVersionIds?: readonly string[];
+      restoreDeletedPlacement?: boolean;
       signal?: AbortSignal;
     },
   ) => {
@@ -3595,13 +3601,19 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
       return;
     }
     const expectedProjectId = currentProject.id;
-    let transferred: CoreWorkspaceAssetReference;
+    const initialRevision = UserManagerCore.getInstance().getProjectSyncRevision();
+    const restoreEntityId = meta?.runId
+      ? canvasSkillProjectionIdentity(meta.runId, reference.assetVersionId) : undefined;
+    const deletionGeneration = restoreEntityId
+      ? imageDeletionGenerationRef.current.get(restoreEntityId) ?? 0 : 0;
+    let transferred: CoreWorkspaceAssetReference & { projectRevision?: number };
     if (meta?.runId) {
       transferred = await transferCanvasSkillAsset({
           reference,
           projectId: currentProject.id,
           runId: meta.runId,
           sourceVersionIds: meta.sourceVersionIds ?? [],
+          restoreDeletedPlacement: meta.restoreDeletedPlacement,
           signal: meta.signal,
         });
     } else {
@@ -3630,11 +3642,31 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
       }
     }
     if (meta?.signal?.aborted || !isWorkspaceResultScopeCurrent(expectedProjectId, currentProjectRef.current?.id)) return;
+    let beforeInsert: (() => void) | undefined;
+    if (meta?.restoreDeletedPlacement) {
+      const manager = UserManagerCore.getInstance();
+      // Image loading is asynchronous. Recheck at the final synchronous insertion boundary.
+      beforeInsert = () => {
+        const currentGeneration = restoreEntityId
+          ? imageDeletionGenerationRef.current.get(restoreEntityId) ?? 0 : 0;
+        const restoreRevision = transferred.projectRevision ?? initialRevision;
+        if (manager.getProjectSyncRevision() > restoreRevision || currentGeneration !== deletionGeneration) {
+          throw new Error('画布已更新，请从运行记录重新选择需要恢复的结果');
+        }
+        if (Number.isSafeInteger(transferred.projectRevision)) {
+          manager.advanceProjectSyncRevision(Number(transferred.projectRevision));
+        }
+        if (transferred.entityId) {
+          recentlyDeletedIdsRef.current.delete(transferred.entityId);
+          manager.clearRecentlyDeletedImageIds([transferred.entityId]);
+        }
+      };
+    }
     await handleAddImages([{
       outputNodeId: `embedded-chat:${transferred.placementId}`,
       url: transferred.url,
       assetReference: transferred,
-    }], meta?.sourceImageId, meta);
+    }], meta?.sourceImageId, { ...meta, beforeInsert });
   }, [currentProject?.id, handleAddImages]);
 
   const handleUploadEffectReverseSource = useCallback(async (file: File): Promise<CanvasImage> => {

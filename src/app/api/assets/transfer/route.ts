@@ -170,6 +170,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       assetId: result.version.assetId,
       assetVersionId: result.version.id,
       placementId: result.placement.id,
+      placementStatus: result.placement.status,
+      ...(result.placement.lifecycleRevision ? { placementRevision: result.placement.lifecycleRevision } : {}),
       entityId: result.placement.entityId,
       url: result.version.file.url,
       ...(name ? { name } : {}),

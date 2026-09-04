@@ -7,12 +7,15 @@ interface RouteContext {
   params: Promise<{ assetId: string }>;
 }
 
-function parseRestoreInput(value: unknown): { projectId: string; placementId: string } | null {
+function parseRestoreInput(value: unknown): { projectId: string; placementId: string; expectedPlacementRevision?: string } | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const input = value as Record<string, unknown>;
   const projectId = typeof input.projectId === 'string' ? input.projectId.trim() : '';
   const placementId = typeof input.placementId === 'string' ? input.placementId.trim() : '';
-  return projectId && placementId ? { projectId, placementId } : null;
+  if (input.expectedPlacementRevision !== undefined
+    && (typeof input.expectedPlacementRevision !== 'string' || !/^\d{1,10}$/.test(input.expectedPlacementRevision))) return null;
+  return projectId && placementId ? { projectId, placementId,
+    ...(typeof input.expectedPlacementRevision === 'string' ? { expectedPlacementRevision: input.expectedPlacementRevision } : {}) } : null;
 }
 
 export async function POST(request: NextRequest, context: RouteContext): Promise<NextResponse> {
@@ -33,6 +36,7 @@ export async function POST(request: NextRequest, context: RouteContext): Promise
       projectId: input.projectId,
       placementId: input.placementId,
       assetId: assetId.trim(),
+      ...(input.expectedPlacementRevision === undefined ? {} : { expectedPlacementRevision: input.expectedPlacementRevision }),
     });
     return NextResponse.json(restored);
   } catch (error) {
