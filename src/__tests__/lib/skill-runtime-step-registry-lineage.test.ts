@@ -42,7 +42,14 @@ describe('production Skill generation lineage', () => {
     mocks.updateCloudTask.mockResolvedValue(true);
   });
 
-  it('passes the frozen source versions into the authoritative generation task', async () => {
+  it.each([false, true])('preserves lineage and terminal error metadata (failed=%s)', async (failed) => {
+    if (failed) {
+      mocks.getCloudTaskForUser.mockReset()
+        .mockResolvedValueOnce({ id: 'task-1', status: 'queued', result: { submissionPayload: { prompt: 'render' } } })
+        .mockResolvedValueOnce({ id: 'task-1', status: 'failed', error: 'request rejected', result: {
+          taskError: { code: 'TASK_RECOVERY_REQUEST_REJECTED', providerStatus: 400 },
+        } });
+    }
     const request = {
       skillId: 'preset-concept-art', skillVersion: 1, surface: 'canvas' as const,
       projectId: 'project-1', workspaceId: 'canvas:project-1', inputValues: {},
@@ -62,7 +69,7 @@ describe('production Skill generation lineage', () => {
       beginSubmission: vi.fn(), recordAccepted: vi.fn(), executeOperation: vi.fn(),
     };
 
-    await registry.stepAdapters.generate_image({
+    const execution = registry.stepAdapters.generate_image({
       actorUserId: 'user-1', projectId: 'project-1', runId: 'run-1',
       definition: {
         id: request.skillId, version: 1, name: 'Skill', category: 'image', description: '',
@@ -76,6 +83,11 @@ describe('production Skill generation lineage', () => {
       inputValues: {}, modelBinding: { providerId: 'provider-1', modelId: 'image-1' },
       requestDigest: 'digest', operation, signal: operation.signal,
     });
+    if (failed) {
+      await expect(execution).rejects.toMatchObject({ providerStatus: 400, providerCode: 'TASK_RECOVERY_REQUEST_REJECTED' });
+    } else {
+      await execution;
+    }
 
     expect(mocks.updateCloudTask).toHaveBeenCalledWith('task-1', {
       result: expect.objectContaining({

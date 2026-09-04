@@ -565,11 +565,12 @@ export async function executeSkillRun(input: {
       },
       executionFence,
     }),
-    pauseForRetry: ({ stepId, executionFence }) => pauseAgentRun({
+    pauseForRetry: ({ stepId, executionFence, error }) => pauseAgentRun({
       actorUserId: input.actor.id,
       runId: input.runId,
       nextStepId: stepId,
       pauseReason: 'execution-error',
+      error,
       executionFence,
     }),
   });

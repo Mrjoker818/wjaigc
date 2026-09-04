@@ -29,6 +29,7 @@ export function reduceSkillEvents(events: readonly AgentEvent[]): AgentRunProjec
     .sort((a, b) => a.sequence - b.sequence);
   const plan = frozenPlan(accepted.find(event => event.type === 'run.created')?.payload.skillSnapshot);
   if (!plan) return projection;
+  let pauseError: AgentRunProjection['error'];
   for (const event of accepted) {
     const stepId = event.payload.stepId ?? event.payload.nextStepId;
     const step = plan.find(item => item.id === stepId);
@@ -45,10 +46,19 @@ export function reduceSkillEvents(events: readonly AgentEvent[]): AgentRunProjec
         if (step && event.payload.passed === false) step.status = 'failed';
         break;
       case 'run.paused':
+        if (event.payload.pauseReason === 'execution-error') {
+          const error = event.payload.error;
+          if (error && typeof error === 'object' && 'code' in error && typeof error.code === 'string'
+            && 'message' in error && typeof error.message === 'string'
+            && 'retryable' in error && typeof error.retryable === 'boolean') {
+            pauseError = { code: error.code, message: error.message, retryable: error.retryable };
+          }
+        }
         for (const item of plan) if (item.status === 'processing') item.status = 'paused';
         if (step && event.payload.pauseReason === 'execution-error') step.status = 'failed';
         break;
       case 'run.resumed':
+        pauseError = undefined;
         if (step && step.status !== 'completed') step.status = 'pending';
         break;
       case 'run.completed':
@@ -64,5 +74,5 @@ export function reduceSkillEvents(events: readonly AgentEvent[]): AgentRunProjec
         break;
     }
   }
-  return { ...projection, plan };
+  return { ...projection, plan, ...(projection.status === 'paused' && pauseError ? { error: pauseError } : {}) };
 }

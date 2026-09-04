@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { safeSkillExecutionError } from '@/lib/skill-runtime/execution-error';
 
 import {
   getCloudTaskForUser,
@@ -870,6 +871,7 @@ export function createAgentRuntimeService(
       runId: string;
       nextStepId: string;
       pauseReason?: 'user' | 'execution-error';
+      error?: unknown;
       executionFence?: AgentExecutionFence;
     }): Promise<AgentRunControlResult> {
       const run = await ownedRun(input.actorUserId, input.runId);
@@ -896,7 +898,10 @@ export function createAgentRuntimeService(
         eventId: `agent:${input.runId}:paused:${pauseCount}`,
         workspace: run.workspace,
         type: 'run.paused',
-        payload: { nextStepId, pauseReason },
+        payload: { nextStepId, pauseReason,
+          ...(pauseReason === 'execution-error' && input.error !== undefined
+            ? { error: safeSkillExecutionError(input.error) } : {}),
+        },
         expectedRevision: run.task.revision ?? 0,
         executionFence: input.executionFence,
       });
@@ -1061,6 +1066,7 @@ export function pauseAgentRun(input: {
   runId: string;
   nextStepId: string;
   pauseReason?: 'user' | 'execution-error';
+  error?: unknown;
   executionFence?: AgentExecutionFence;
 }): Promise<AgentRunControlResult> {
   return runtimeService.pauseRun(input);

@@ -327,6 +327,7 @@
   "src/lib/skill-runtime/continuation.ts",
   "src/lib/skill-runtime/cost-estimator.ts",
   "src/lib/skill-runtime/executor.ts",
+  "src/lib/skill-runtime/execution-error.ts",
   "src/lib/skill-runtime/input-resolver.ts",
   "src/lib/skill-runtime/legacy-migration.ts",
   "src/lib/skill-runtime/prompt-compiler.ts",

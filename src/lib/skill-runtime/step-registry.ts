@@ -31,8 +31,11 @@ async function completedGenerationResult(
 ): Promise<SkillStepResult> {
   const task = await getCloudTaskForUser(taskId, actorUserId);
   if (!task || task.status !== 'completed') {
-    throw new AgentDownstreamProviderRejectedError(undefined, {
+    const error = task?.result?.taskError;
+    const details = error && typeof error === 'object' ? error as Record<string, unknown> : {};
+    throw new AgentDownstreamProviderRejectedError(typeof details.providerStatus === 'number' ? details.providerStatus : undefined, {
       message: task?.error || 'Skill generation task did not complete',
+      providerCode: typeof details.code === 'string' ? details.code : undefined,
     });
   }
   const assetVersionIds = projectionVersionIds(task);

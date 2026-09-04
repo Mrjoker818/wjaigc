@@ -252,11 +252,15 @@ describe('Agent runtime service', () => {
     await service.pauseRun({
       actorUserId: user.id, runId: 'run-1', nextStepId: 'generate-2',
       pauseReason: 'execution-error', executionFence: fence,
+      error: { providerStatus: 400, providerCode: 'invalid_quality', message: 'private provider text' },
     });
 
     expect(dependencies.transitionControl).toHaveBeenCalledWith(expect.objectContaining({
       executionFence: fence,
-      payload: { nextStepId: 'generate-2', pauseReason: 'execution-error' },
+      payload: { nextStepId: 'generate-2', pauseReason: 'execution-error', error: {
+        code: 'SKILL_IMAGE_QUALITY_REJECTED', message: '所选模型不支持当前图片质量参数，请检查质量设置',
+        retryable: false, providerStatus: 400,
+      } },
     }));
   });
 

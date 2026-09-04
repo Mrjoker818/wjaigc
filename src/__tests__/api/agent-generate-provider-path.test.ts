@@ -76,6 +76,27 @@ import { submitStrictAgentGeneration } from '@/lib/agent-runtime/generate-image-
 import { ModelCapabilityError } from '@/lib/task-core/model-capability-contract';
 
 describe('real Agent generate_image provider path', () => {
+  it('preserves a provider parameter rejection as HTTP 400 instead of a retryable 500', async () => {
+    const externalSubmit = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      error: { code: 'invalid_quality', message: 'This model only supports auto, low, medium or high quality (got: 1K).' },
+    }), { status: 400, headers: { 'content-type': 'application/json' } }));
+    vi.stubGlobal('fetch', externalSubmit);
+    let status = 0;
+    const result = await submitStrictAgentGeneration({
+      userId: 'user-1', userRole: 'admin', prompt: 'test image', aspectRatio: '1:1',
+      model: 'Exact::Model', providerId: 'provider-exact', idempotencyKey: 'agent-provider:quality-error',
+      fetchImpl: async (_url, init) => {
+        const response = await generate(new Request('http://localhost/api/generate', init) as never);
+        status = response.status;
+        return response;
+      },
+      extraBody: { _skipCredits: true, _skipCloudTaskPersistence: true },
+    });
+    expect(status).toBe(400);
+    expect(result).toMatchObject({ success: false, providerStatus: 400, providerCode: 'invalid_quality', retryable: false });
+    expect(externalSubmit).toHaveBeenCalledTimes(1);
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
     persistence.provider.selectedModels = ['Exact::Model'];

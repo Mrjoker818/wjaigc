@@ -2408,6 +2408,16 @@ export async function POST(request: NextRequest) {
             }
           } catch { /* ignore */ }
 
+          if (strictAgentRouting && resp.status === 400) {
+            throw Object.assign(new Error(errorCode === 'invalid_quality'
+              ? '所选模型不支持当前图片质量参数，请检查质量设置'
+              : '模型提供商拒绝了当前生成参数，请检查模型支持范围'), {
+              status: 400,
+              providerCode: errorCode === 'invalid_quality' ? 'invalid_quality' : 'request_rejected',
+              retryable: false,
+            });
+          }
+
           // 5xx 服务器错误处理
           // ★ 重要：对 5xx 错误先尝试 /chat/completions 兜底，再决定是否回退候选模型
           // 注意：FHL、AI link、虚宝三个提供商明确不使用 /chat/completions，仅使用 /images/generations 和 /images/edits
@@ -3073,12 +3083,18 @@ export async function POST(request: NextRequest) {
           }
           
           if (i === 0) {
+            const parameterRejected = strictAgentRouting && errorStatus === 400;
             return NextResponse.json({
               success: false,
               error: `${usedModelName} 提交失败: ${translatedError}`,
               modelName: usedModelName,
               errorCategory: errorClassify.category,
-            }, { status: 500 });
+              ...(parameterRejected ? {
+                providerStatus: 400,
+                providerCode: (singleError as Error & { providerCode?: string }).providerCode || 'request_rejected',
+                retryable: false,
+              } : {}),
+            }, { status: parameterRejected ? 400 : 500 });
           }
         }
       }

@@ -43,7 +43,11 @@ export const CHAT_TOOLS = [
           },
           quality: {
             type: 'string',
-            description: '图片质量，如 1K, 2K, 4K',
+            description: '所选模型支持的质量值，例如 auto、low、medium、high。仅在明确知道模型支持时设置，否则省略；不要填入分辨率。',
+          },
+          resolution: {
+            type: 'string',
+            description: '所选模型支持的分辨率，仅在明确知道模型支持时设置，否则省略。与质量参数独立。',
             enum: ['1K', '2K', '4K'],
           },
           count: {
@@ -460,7 +464,8 @@ async function executeGenerateImage(
     if (hasAgentRouteOverride(args, context)) return routeMismatch();
     const prompt = args.prompt as string;
     const aspectRatio = (args.aspect_ratio as string) || '1:1';
-    const quality = (args.quality as string) || '1K';
+    const quality = typeof args.quality === 'string' && args.quality.trim() ? args.quality : undefined;
+    const resolution = typeof args.resolution === 'string' && args.resolution.trim() ? args.resolution : undefined;
     // 强制 count=1：系统提示词要求每次只生成1张，多张时应多次调用工具
     const count = 1;
     const negativePrompt = args.negative_prompt as string | undefined;
@@ -501,6 +506,7 @@ async function executeGenerateImage(
         providerId,
         aspectRatio,
         quality,
+        resolution,
         outputCount: count,
         submitOnly: true,
         projectId: context.projectId,

@@ -18,6 +18,25 @@ const created = event(1, 'run.created', { skillSnapshot: { steps: [
 const start = event(2, 'tool.started', { stepId: 'a', generation: 0 });
 
 describe('frozen Skill step display', () => {
+  it('renders a persisted execution error and clears it after resume', () => {
+    const paused = event(3, 'run.paused', { nextStepId: 'a', pauseReason: 'execution-error',
+      error: { code: 'SKILL_PARAMETERS_REJECTED', message: '模型参数被拒绝', retryable: false } });
+    const projection = reduceSkillEvents([created, start, paused]);
+    render(<SkillRunProgress projection={projection} />);
+    expect(screen.getByText('模型参数被拒绝')).toBeTruthy();
+    expect(reduceSkillEvents([created, start, paused,
+      event(4, 'run.resumed', { nextStepId: 'a', generation: 1 })]).error).toBeUndefined();
+  });
+  it('never overwrites a later terminal error with a prior pause error', () => {
+    const events = [created, start,
+      event(3, 'run.paused', { nextStepId: 'a', pauseReason: 'execution-error', error: {
+        code: 'OLD', message: 'old pause', retryable: false,
+      } }),
+      event(4, 'run.resumed', { nextStepId: 'a', generation: 1 }),
+      event(5, 'run.failed', { error: { code: 'FINAL', message: 'terminal failure', retryable: false } }),
+    ];
+    expect(reduceSkillEvents(events).error).toEqual(reduceAgentEvents(events).error);
+  });
   it('preserves generic runs and malformed snapshots', () => {
     for (const snapshot of [undefined, null, { steps: [null] }, { steps: [{ id: 'a' }] }]) {
       const events = [event(1, 'run.created', { skillSnapshot: snapshot }), start];
