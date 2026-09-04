@@ -91,6 +91,8 @@
   "src/components/simple-chat/simple-chat-types.ts",
   "src/components/skill-runtime/SkillInputFields.tsx",
   "src/components/skill-runtime/SkillRunProgress.tsx",
+  "src/components/skill-runtime/SkillRunHistory.tsx",
+  "src/components/skill-runtime/use-skill-output-receiver.ts",
   "src/components/skill-runtime/use-skill-run.ts",
   "src/components/workflow/WorkflowLegacyNodeCard.tsx",
   "src/components/workflow/WorkflowLegacySurface.tsx",

@@ -71,6 +71,10 @@ export interface SkillRunStepHistory {
 
 export interface SkillRunHistory {
   runId: string;
+  projectId?: string;
+  surface?: SkillSurface;
+  workspaceId?: string;
+  sourceVersionIds: string[];
   skillId: string;
   skillVersion: number;
   status: AgentRunProjection['status'];
@@ -330,6 +334,9 @@ function frozenSteps(events: readonly AgentEvent[]): Array<{ id: string; label: 
 function history(task: CloudTask, events: readonly AgentEvent[], projection: AgentRunProjection): SkillRunHistory {
   const invocation = skillInvocation(events);
   if (!invocation) throw new SkillRunNotFoundError();
+  const created = events.find(event => event.type === 'run.created')?.payload;
+  const surface = created?.workspace === 'chat' ? 'simple-chat'
+    : created?.workspace === 'canvas' || created?.workspace === 'workflow' ? created.workspace : undefined;
   const snapshotSteps = frozenSteps(events);
   const steps: readonly { id: string; label: string }[] = snapshotSteps || (() => {
     const workspace = events.find(event => event.type === 'run.created')?.payload.workspace;
@@ -364,6 +371,11 @@ function history(task: CloudTask, events: readonly AgentEvent[], projection: Age
   const activeTerminalStatus = terminalStepStatusByRunStatus[projection.status];
   return {
     runId: task.id,
+    projectId: task.projectId,
+    surface,
+    sourceVersionIds: Array.isArray(created?.sourceVersionIds)
+      ? created.sourceVersionIds.filter((id): id is string => typeof id === 'string' && Boolean(id)) : [],
+    ...(typeof created?.workspaceId === 'string' ? { workspaceId: created.workspaceId } : {}),
     ...invocation,
     status: projection.status,
     ...(projection.resumeFromStepId ? { resumeFromStepId: projection.resumeFromStepId } : {}),
@@ -413,14 +425,25 @@ export function createSkillRuntimeService(
     create(input: { actor: User; request: SkillRunRequest }) {
       return dependencies.createAuthorizedSkillRun(input);
     },
-    async list(input: { actorUserId: string; limit?: number }): Promise<SkillRunHistory[]> {
+    async list(input: {
+      actorUserId: string; limit?: number; projectId?: string;
+      surface?: SkillSurface; workspaceId?: string; skillId?: string;
+    }): Promise<SkillRunHistory[]> {
       const limit = input.limit ?? 20;
-      const tasks = await dependencies.listTasks({ userId: input.actorUserId, limit: 500 });
+      const tasks = await dependencies.listTasks({
+        userId: input.actorUserId, projectId: input.projectId, limit,
+        skillRun: { surface: input.surface, skillId: input.skillId, workspaceId: input.workspaceId },
+      });
       const records: SkillRunHistory[] = [];
       for (const task of tasks) {
         if (task.type !== 'agent-run' || records.length >= limit) continue;
+        if (input.projectId !== undefined && task.projectId !== input.projectId) continue;
         try {
-          records.push((await owned({ actorUserId: input.actorUserId, runId: task.id })).history);
+          const record = (await owned({ actorUserId: input.actorUserId, runId: task.id })).history;
+          if (input.surface !== undefined && record.surface !== input.surface) continue;
+          if (input.workspaceId !== undefined && record.workspaceId !== input.workspaceId) continue;
+          if (input.skillId !== undefined && record.skillId !== input.skillId) continue;
+          records.push(record);
         } catch (error) {
           if (!(error instanceof SkillRunNotFoundError)) throw error;
         }

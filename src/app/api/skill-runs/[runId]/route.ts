@@ -22,11 +22,13 @@ export async function GET(request: NextRequest, context: SkillRunRouteContext): 
   try {
     const { runId } = await context.params;
     const run = await getSkillRun({ actorUserId: auth.user.id, runId });
-    await recoverLiveSkillRunExecution({
-      actorUserId: auth.user.id,
-      runId,
-      recoveryOnly: true,
-    });
+    if (request.nextUrl.searchParams.get('observeOnly') !== 'true') {
+      await recoverLiveSkillRunExecution({
+        actorUserId: auth.user.id,
+        runId,
+        recoveryOnly: true,
+      });
+    }
     return NextResponse.json({ run });
   } catch (error) {
     const response = skillRuntimeHttpError(error);

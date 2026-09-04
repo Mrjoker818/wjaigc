@@ -25,12 +25,31 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         code: 'SKILL_RUN_REQUEST_INVALID', status: 400,
       });
     }
-    const runs = await listSkillRuns({ actorUserId: auth.user.id, limit });
-    await Promise.allSettled(runs.slice(0, 20).map(run => recoverLiveSkillRunExecution({
-      actorUserId: auth.user.id,
-      runId: run.runId,
-      recoveryOnly: true,
-    })));
+    const scope: { projectId?: string; workspaceId?: string; skillId?: string;
+      surface?: 'canvas' | 'workflow' | 'simple-chat' } = {};
+    for (const key of ['projectId', 'workspaceId', 'skillId'] as const) {
+      const value = request.nextUrl.searchParams.get(key);
+      if (value === null) continue;
+      if (!value.trim() || value.length > 256 || /[\u0000-\u001f\u007f]/u.test(value)) {
+        throw Object.assign(new Error(`${key} is invalid`), { code: 'SKILL_RUN_REQUEST_INVALID', status: 400 });
+      }
+      scope[key] = value;
+    }
+    const surface = request.nextUrl.searchParams.get('surface');
+    if (surface !== null) {
+      if (surface !== 'canvas' && surface !== 'workflow' && surface !== 'simple-chat') {
+        throw Object.assign(new Error('surface is invalid'), { code: 'SKILL_RUN_REQUEST_INVALID', status: 400 });
+      }
+      scope.surface = surface;
+    }
+    const runs = await listSkillRuns({ actorUserId: auth.user.id, limit, ...scope });
+    if (request.nextUrl.searchParams.get('observeOnly') !== 'true') {
+      await Promise.allSettled(runs.slice(0, 20).map(run => recoverLiveSkillRunExecution({
+        actorUserId: auth.user.id,
+        runId: run.runId,
+        recoveryOnly: true,
+      })));
+    }
     return NextResponse.json({ runs });
   } catch (error) {
     const response = skillRuntimeHttpError(error);

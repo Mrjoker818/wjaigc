@@ -45,7 +45,9 @@ import { AgentProgressTimeline } from '@/components/agent-runtime/AgentProgressT
 import { useAgentRunEvents } from '@/components/agent-runtime/use-agent-run-events';
 import { SkillInputFields } from '@/components/skill-runtime/SkillInputFields';
 import { SkillRunProgress } from '@/components/skill-runtime/SkillRunProgress';
+import { SkillRunHistory, type SkillRunHistoryItem } from '@/components/skill-runtime/SkillRunHistory';
 import { useSkillRun } from '@/components/skill-runtime/use-skill-run';
+import { useSkillOutputReceiver } from '@/components/skill-runtime/use-skill-output-receiver';
 import {
   createCanvasSkillProjectionCoordinator,
   createConversationCanvasSkill,
@@ -1402,7 +1404,9 @@ export function ChatPanel({ themeStyle, projectId, onAddToPrompt, onAddImages, o
   const [activeSkill, setActiveSkill] = useState<SkillDefinition | null>(null);
   const [skillParamValues, setSkillParamValues] = useState<Record<string, unknown>>({});
   const skillRun = useSkillRun();
+  const receiveSkillOutput = useSkillOutputReceiver(onAddGeneratedImage);
   const resetSkillRun = skillRun.reset;
+  const skillAccountKey = typeof window === 'undefined' ? '' : UserManager.getInstance().getCurrentUserId() || '';
   const activeCanvasSkillRunRef = useRef<{
     runId: string;
     projectId: string;
@@ -1413,13 +1417,15 @@ export function ChatPanel({ themeStyle, projectId, onAddToPrompt, onAddImages, o
   const skillProjectionAttemptCountsRef = useRef<Map<string, number>>(new Map());
   const [skillProjectionRetry, setSkillProjectionRetry] = useState(0);
   const skillProjectionControllerRef = useRef<AbortController | null>(null);
+  const skillCanvasImagesRef = useRef(canvasImages);
+  useEffect(() => { skillCanvasImagesRef.current = canvasImages; }, [canvasImages]);
 
   useEffect(() => {
     skillProjectionControllerRef.current?.abort();
     skillProjectionCoordinatorRef.current.cancel();
     activeCanvasSkillRunRef.current = null;
     resetSkillRun();
-  }, [projectId, resetSkillRun]);
+  }, [projectId, skillAccountKey, resetSkillRun]);
 
   // ===== 聊天数据跨设备持久化（服务器同步，避免换电脑/换浏览器后数据丢失） =====
   const isChatUserLoggedIn = useCallback(() => {
@@ -3914,6 +3920,22 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
     await skillRun.estimateRun(request);
   }, [buildCanvasSkillRequest, skillRun]);
 
+  const handleRestoreSkill = useCallback(async (record: SkillRunHistoryItem): Promise<void> => {
+    if (!projectId || record.projectId !== projectId || record.surface !== 'canvas' || record.skillId !== activeSkill?.id) return;
+    skillProjectionControllerRef.current?.abort();
+    activeCanvasSkillRunRef.current = null;
+    const runId = await startCanvasSkillRun(
+      skillProjectionCoordinatorRef.current,
+      () => skillRun.restoreRun(record),
+      projectId,
+    );
+    if (runId) {
+      skillProjectionAttemptCountsRef.current.delete(runId);
+      activeCanvasSkillRunRef.current = { runId, projectId, sourceVersionIds: [...record.sourceVersionIds] };
+      setSkillProjectionRetry(value => value + 1);
+    }
+  }, [activeSkill?.id, projectId, skillRun]);
+
   const handleStartSkill = useCallback(async (): Promise<void> => {
     const request = buildCanvasSkillRequest();
     if (!request) {
@@ -3944,7 +3966,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
     if (projection.runId !== activeCanvasSkillRunRef.current?.runId) return;
     const context = activeCanvasSkillRunRef.current;
     if (!context || context.projectId !== projectId || !skillProjectionCoordinatorRef.current.isActive(context.runId, context.projectId)) return;
-    if (!onAddGeneratedImage) {
+    if (!receiveSkillOutput) {
       toast.error('画布暂时无法接收 Skill 资产版本');
       return;
     }
@@ -3972,7 +3994,8 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
           runId: context.runId,
           projectId: context.projectId,
           assetVersionId,
-          project: signal => Promise.resolve(onAddGeneratedImage(reference, {
+          isAlreadyProjected: () => skillCanvasImagesRef.current.some(image => image.assetVersionId === assetVersionId),
+          project: signal => Promise.resolve(receiveSkillOutput(reference, {
             sourceImageId: context.sourceImageId,
             runId: context.runId,
             sourceVersionIds: context.sourceVersionIds,
@@ -3989,7 +4012,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
       }
     });
     return () => controller.abort();
-  }, [onAddGeneratedImage, projectId, skillProjectionRetry, skillRun.projection]);
+  }, [receiveSkillOutput, projectId, skillProjectionRetry, skillRun.projection]);
 
   useEffect(() => () => skillProjectionControllerRef.current?.abort(), []);
 
@@ -6113,6 +6136,16 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                   </Button>
                 </div>
                 {skillRun.error && <div role="alert" className="text-xs text-red-500">{skillRun.error}</div>}
+                {projectId && <SkillRunHistory
+                  projectId={projectId}
+                  surface="canvas"
+                  skillId={activeSkill.id}
+                  accountKey={skillAccountKey}
+                  activeRunId={skillRun.runId}
+                  refreshKey={`${skillRun.runId || ''}:${skillRun.projection?.status || ''}`}
+                  busy={skillRun.busy}
+                  onSelect={handleRestoreSkill}
+                />}
                 <SkillRunProgress
                   estimate={skillRun.estimate}
                   projection={skillRun.projection}

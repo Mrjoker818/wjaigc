@@ -54,6 +54,24 @@ describe('Skill run API', () => {
     expect(await listed.json()).toEqual({ runs: [expect.objectContaining({ runId: 'run-1', skillVersion: 1 })] });
   });
 
+  it('lists scoped history without dispatching recovery when observing', async () => {
+    mocks.listSkillRuns.mockResolvedValue([{ runId: 'run-1' }]);
+    const route = await import('@/app/api/skill-runs/route');
+    const response = await route.GET(new NextRequest('http://localhost/api/skill-runs?projectId=p1&surface=canvas&workspaceId=w1&skillId=s1&observeOnly=true'));
+    expect(response.status).toBe(200);
+    expect(mocks.listSkillRuns).toHaveBeenCalledWith({ actorUserId: user.id, limit: 20,
+      projectId: 'p1', surface: 'canvas', workspaceId: 'w1', skillId: 's1' });
+    expect(mocks.recoverLiveSkillRunExecution).not.toHaveBeenCalled();
+  });
+
+  it.each(['surface=unknown', 'projectId=', `skillId=${'x'.repeat(257)}`, 'workspaceId=%00'])('rejects invalid history scope %s', async query => {
+    const route = await import('@/app/api/skill-runs/route');
+    const response = await route.GET(new NextRequest(`http://localhost/api/skill-runs?${query}`));
+    expect(response.status).toBe(400);
+    expect(mocks.listSkillRuns).not.toHaveBeenCalled();
+    expect(mocks.recoverLiveSkillRunExecution).not.toHaveBeenCalled();
+  });
+
   it('uses the durable recovery claim for an idempotent create replay', async () => {
     mocks.createSkillRun.mockResolvedValue({ runId: 'run-1', reused: true });
     const route = await import('@/app/api/skill-runs/route');
@@ -130,6 +148,19 @@ describe('Skill run API', () => {
     expect(mocks.recoverLiveSkillRunExecution).toHaveBeenCalledWith({
       actorUserId: user.id, runId: 'run-1', recoveryOnly: true,
     });
+  });
+
+  it('observes an owned run without starting recovery work', async () => {
+    mocks.getSkillRun.mockResolvedValue({ runId: 'run-1', skillId: 'preset-food-photography' });
+    const route = await import('@/app/api/skill-runs/[runId]/route');
+    const response = await route.GET(
+      new NextRequest('http://localhost/api/skill-runs/run-1?observeOnly=true'),
+      { params: Promise.resolve({ runId: 'run-1' }) },
+    );
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ run: { runId: 'run-1', skillId: 'preset-food-photography' } });
+    expect(mocks.getSkillRun).toHaveBeenCalledWith({ actorUserId: user.id, runId: 'run-1' });
+    expect(mocks.recoverLiveSkillRunExecution).not.toHaveBeenCalled();
   });
 
   it.each(['pause', 'resume', 'cancel'] as const)('authorizes %s control by actor', async action => {

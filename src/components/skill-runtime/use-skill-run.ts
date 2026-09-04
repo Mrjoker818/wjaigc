@@ -12,6 +12,13 @@ interface UseSkillRunOptions {
   fetcher?: typeof fetch;
 }
 
+export interface SkillRunRestoreIdentity {
+  runId: string;
+  projectId: string;
+  surface: SkillRunRequest['surface'];
+  skillId: string;
+}
+
 interface UseSkillRunResult {
   runId?: string;
   estimate?: SkillRunCostEstimate;
@@ -23,6 +30,7 @@ interface UseSkillRunResult {
   error?: string;
   estimateRun: (request: SkillRunRequest) => Promise<SkillRunCostEstimate | undefined>;
   startRun: (request: SkillRunRequest) => Promise<string | undefined>;
+  restoreRun: (identity: SkillRunRestoreIdentity) => Promise<string | undefined>;
   pause: () => Promise<boolean>;
   resume: () => Promise<boolean>;
   cancel: () => Promise<boolean>;
@@ -277,6 +285,53 @@ export function useSkillRun({ fetcher = fetch }: UseSkillRunOptions = {}): UseSk
     }
   }, [request]);
 
+  const restoreRun = useCallback(async (
+    identity: SkillRunRestoreIdentity,
+  ): Promise<string | undefined> => {
+    startController.current?.abort();
+    estimateController.current?.abort();
+    historyController.current?.abort();
+    estimateGeneration.current += 1;
+    historyGeneration.current += 1;
+    const controller = new AbortController();
+    startController.current = controller;
+    const generation = ++startGeneration.current;
+    const operationGeneration = ++busyGeneration.current;
+    activeRun.current = undefined;
+    setRunId(undefined);
+    setEventRunId(undefined);
+    setEstimate(undefined);
+    setRetryableStepId(undefined);
+    setRetryabilityError(undefined);
+    setError(undefined);
+    setBusy(true);
+    try {
+      const response = await request<{ run: SkillRunRestoreIdentity }>(
+        `/api/skill-runs/${encodeURIComponent(identity.runId)}?observeOnly=true`,
+        { method: 'GET' },
+        controller,
+      );
+      const restored = response?.run;
+      if (!restored || !mounted.current || startGeneration.current !== generation) return undefined;
+      if (restored.runId !== identity.runId || restored.projectId !== identity.projectId
+        || restored.surface !== identity.surface || restored.skillId !== identity.skillId) {
+        throw new Error('历史任务与当前项目或 Skill 不一致');
+      }
+      activeRun.current = { runId: identity.runId, generation };
+      setRunId(identity.runId);
+      setEventRunId(identity.runId);
+      return identity.runId;
+    } catch (restoreError) {
+      if (mounted.current && startGeneration.current === generation
+        && busyGeneration.current === operationGeneration) {
+        setError(restoreError instanceof Error ? restoreError.message : '无法恢复运行记录');
+      }
+      return undefined;
+    } finally {
+      if (mounted.current && busyGeneration.current === operationGeneration) setBusy(false);
+    }
+  }, [request]);
+
   const control = useCallback(async (
     action: 'pause' | 'resume' | 'cancel',
   ): Promise<boolean> => {
@@ -402,6 +457,7 @@ export function useSkillRun({ fetcher = fetch }: UseSkillRunOptions = {}): UseSk
     error,
     estimateRun,
     startRun,
+    restoreRun,
     pause: () => control('pause'),
     resume: () => control('resume'),
     cancel: () => control('cancel'),

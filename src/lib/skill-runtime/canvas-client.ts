@@ -189,7 +189,7 @@ export async function transferCanvasSkillAsset(input: {
 
 export function createCanvasSkillProjectionCoordinator() {
   let active: { runId: string; projectId: string; controller: AbortController } | null = null;
-  const pending = new Set<string>();
+  const pending = new Map<string, AbortSignal>();
   const completed = new Set<string>();
 
   const isActive = (runId: string, projectId: string): boolean => (
@@ -200,6 +200,7 @@ export function createCanvasSkillProjectionCoordinator() {
     activate(runId: string, projectId: string): void {
       if (isActive(runId, projectId)) return;
       active?.controller.abort();
+      completed.clear();
       active = { runId, projectId, controller: new AbortController() };
     },
     cancel(): void {
@@ -211,20 +212,22 @@ export function createCanvasSkillProjectionCoordinator() {
       runId: string;
       projectId: string;
       assetVersionId: string;
+      isAlreadyProjected?: () => boolean;
       project: (signal: AbortSignal) => Promise<void>;
     }): Promise<boolean> {
       if (!isActive(input.runId, input.projectId) || !active) return false;
+      if (input.isAlreadyProjected?.()) return false;
       const identity = canvasSkillProjectionIdentity(input.runId, input.assetVersionId);
-      if (pending.has(identity) || completed.has(identity)) return false;
-      pending.add(identity);
+      if (pending.get(identity)?.aborted === false || completed.has(identity)) return false;
       const signal = active.controller.signal;
+      pending.set(identity, signal);
       try {
         await input.project(signal);
         if (!isActive(input.runId, input.projectId) || signal.aborted) return false;
         completed.add(identity);
         return true;
       } finally {
-        pending.delete(identity);
+        if (pending.get(identity) === signal) pending.delete(identity);
       }
     },
   };

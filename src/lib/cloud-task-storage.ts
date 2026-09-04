@@ -226,6 +226,11 @@ export interface CloudTaskListFilters {
   model?: string;
   status?: CloudTaskStatus;
   limit?: number;
+  skillRun?: {
+    surface?: 'canvas' | 'workflow' | 'simple-chat';
+    skillId?: string;
+    workspaceId?: string;
+  };
 }
 
 export interface CloudTaskProviderSummary {
@@ -1731,6 +1736,27 @@ export async function listCloudTasks(filters: CloudTaskListFilters = {}): Promis
   addFilter('message_id', filters.messageId);
   addFilter('provider_id', filters.providerId);
   addFilter('model', filters.model);
+  if (filters.skillRun) {
+    if (!filters.userId) throw new TypeError('Skill history requires an authenticated user');
+    clauses.push("type = 'agent-run'");
+    const eventFilters = [
+      'created.task_id = cloud_tasks.id',
+      'created.owner_id = cloud_tasks.user_id',
+      'created.project_id = cloud_tasks.project_id',
+      "created.event_type = 'run.created'",
+      "jsonb_typeof(created.payload->'skill'->'skillId') = 'string'",
+      "created.payload->>'observed' IS DISTINCT FROM 'true'",
+    ];
+    const addEventFilter = (column: string, value: string | undefined): void => {
+      if (value === undefined) return;
+      params.push(value);
+      eventFilters.push(`${column} = $${params.length}`);
+    };
+    addEventFilter('created.workspace', filters.skillRun.surface === 'simple-chat' ? 'chat' : filters.skillRun.surface);
+    addEventFilter("created.payload->'skill'->>'skillId'", filters.skillRun.skillId);
+    addEventFilter("created.payload->>'workspaceId'", filters.skillRun.workspaceId);
+    clauses.push(`EXISTS (SELECT 1 FROM wujie_agent_events created WHERE ${eventFilters.join(' AND ')})`);
+  }
   if (filters.status) {
     const persistedStatuses = legacyFilterStatuses(filters.status);
     if (persistedStatuses.length === 1) {

@@ -51,6 +51,55 @@ function catalogSkill(id: string, allowedSurfaces: SkillDefinition['allowedSurfa
 }
 
 describe('canvas chat Skill catalog contract', () => {
+  it('does not let an aborted prior projection block or clear a new projection of the same asset', async () => {
+    const coordinator = createCanvasSkillProjectionCoordinator();
+    const input = { runId: 'run-1', projectId: 'project-1', assetVersionId: 'v1' };
+    let releaseOld!: () => void;
+    let releaseNew!: () => void;
+    coordinator.activate('run-1', 'project-1');
+    const old = coordinator.project({ ...input, project: () => new Promise<void>(resolve => { releaseOld = resolve; }) });
+    coordinator.cancel();
+    coordinator.activate('run-1', 'project-1');
+    const nextReceiver = vi.fn(() => new Promise<void>(resolve => { releaseNew = resolve; }));
+    const next = coordinator.project({ ...input, project: nextReceiver });
+    expect(nextReceiver).toHaveBeenCalledOnce();
+    releaseOld();
+    expect(await old).toBe(false);
+    expect(await coordinator.project({ ...input, project: nextReceiver })).toBe(false);
+    expect(nextReceiver).toHaveBeenCalledOnce();
+    releaseNew();
+    expect(await next).toBe(true);
+  });
+  it('allows explicit history restore after the result was deleted in the same mounted canvas', async () => {
+    const coordinator = createCanvasSkillProjectionCoordinator();
+    const canvas = new Set<string>();
+    const project = vi.fn(async () => { canvas.add('v1'); });
+    const input = { runId: 'old-run', projectId: 'project-1', assetVersionId: 'v1',
+      isAlreadyProjected: () => canvas.has('v1'), project };
+    coordinator.activate('old-run', 'project-1');
+    expect(await coordinator.project(input)).toBe(true);
+    canvas.delete('v1');
+    await startCanvasSkillRun(coordinator, async () => 'old-run', 'project-1');
+    expect(await coordinator.project(input)).toBe(true);
+    expect(project).toHaveBeenCalledTimes(2);
+    expect(canvas.has('v1')).toBe(true);
+  });
+  it('restores four outputs across remounts without duplicating an existing canvas version', async () => {
+    const canvas = new Set(['v1']);
+    const insert = vi.fn(async (id: string) => { canvas.add(id); });
+    for (let mount = 0; mount < 2; mount += 1) {
+      const coordinator = createCanvasSkillProjectionCoordinator();
+      coordinator.activate('old-run', 'project-1');
+      for (const assetVersionId of ['v1', 'v2', 'v3', 'v4']) {
+        await coordinator.project({ runId: 'old-run', projectId: 'project-1', assetVersionId,
+          isAlreadyProjected: () => canvas.has(assetVersionId),
+          project: () => insert(assetVersionId),
+        });
+      }
+    }
+    expect([...canvas]).toEqual(['v1', 'v2', 'v3', 'v4']);
+    expect(insert.mock.calls.map(([id]) => id)).toEqual(['v2', 'v3', 'v4']);
+  });
   it.each(['resolve', 'reject'] as const)('cancels an old projection before a new run POST can %s', async (outcome) => {
     const coordinator = createCanvasSkillProjectionCoordinator();
     coordinator.activate('old-run', 'project-1');

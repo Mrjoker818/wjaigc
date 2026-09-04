@@ -19,7 +19,7 @@ import {
 } from '@/lib/skill-runtime/service';
 import { agentRunRequestDigest } from '@/lib/agent-runtime/service';
 import type { AgentEvent, AgentRunProjection, AgentRunRequest } from '@/lib/agent-runtime/types';
-import type { CloudTask } from '@/lib/cloud-task-storage';
+import type { CloudTask, CloudTaskListFilters } from '@/lib/cloud-task-storage';
 import {
   CANVAS_PRESET_SKILLS,
   requireSkillForSurface,
@@ -601,6 +601,64 @@ describe('durable Skill executor', () => {
 });
 
 describe('Skill run history', () => {
+  it('finds project history even when 500 newer tasks belong to another project', async () => {
+    const tasks: CloudTask[] = Array.from({ length: 501 }, (_, index) => ({
+      id: `run-${index}`, userId: 'user-1', projectId: index === 500 ? 'target-project' : 'other-project',
+      type: 'agent-run', status: 'processing', progress: 0, creditStatus: 'pending', createdAt: 1, updatedAt: 2,
+    }));
+    const dependencies: SkillRuntimeServiceDependencies = {
+      createAuthorizedSkillRun: vi.fn(),
+      getTaskForUser: vi.fn(async (id, userId) => tasks.find(task => task.id === id && task.userId === userId) || null),
+      listTasks: vi.fn(async (filters: CloudTaskListFilters = {}) => tasks.filter(task => !filters.projectId || task.projectId === filters.projectId)
+        .slice(0, filters.limit || 100)),
+      listEvents: vi.fn(async ({ runId }: { runId: string }): Promise<AgentEvent[]> => [{
+        eventId: `created-${runId}`, runId, sequence: 1, type: 'run.created', timestamp: 'now',
+        payload: { workspace: 'canvas', workspaceId: 'w1',
+          skill: { skillId: definition.id, skillVersion: 1 },
+          skillSnapshot: { steps: [{ id: 'plan', label: 'Plan' }] } },
+      }]),
+      getProjection: vi.fn(async ({ runId }: { runId: string }): Promise<AgentRunProjection> => ({
+        runId, status: 'paused', lastSequence: 1, plan: [], assetVersionIds: [],
+        ignoredEventIds: [], missingSequences: [], qualityChecks: [],
+      })),
+      pauseRun: vi.fn(), resumeRun: vi.fn(), cancelRun: vi.fn(),
+    };
+    expect(await createSkillRuntimeService(dependencies).list({
+      actorUserId: 'user-1', projectId: 'target-project', surface: 'canvas', skillId: definition.id,
+    })).toEqual([expect.objectContaining({ runId: 'run-500' })]);
+  });
+  it.each(['project', 'surface', 'skill', 'workspace'])('filters %s before applying the history limit', async (mismatch) => {
+    const tasks: CloudTask[] = ['other', 'matching'].map(id => ({
+      id, userId: 'user-1', projectId: id === 'other' && mismatch === 'project' ? 'project-2' : 'project-1',
+      type: 'agent-run', status: 'processing', progress: 0, creditStatus: 'pending', createdAt: 1, updatedAt: 2,
+    }));
+    const dependencies: SkillRuntimeServiceDependencies = {
+      createAuthorizedSkillRun: vi.fn(),
+      getTaskForUser: vi.fn(async (id, userId) => tasks.find(task => task.id === id && task.userId === userId) || null),
+      listTasks: vi.fn(async () => tasks),
+      listEvents: vi.fn(async ({ runId }: { runId: string }): Promise<AgentEvent[]> => [{
+        eventId: `created-${runId}`, runId, sequence: 1, type: 'run.created', timestamp: 'now',
+        payload: {
+          workspace: runId === 'other' && mismatch === 'surface' ? 'chat' : 'canvas',
+          workspaceId: runId === 'other' && mismatch === 'workspace' ? 'workspace-2' : 'workspace-1',
+          skill: { skillId: runId === 'other' && mismatch === 'skill' ? 'other-skill' : definition.id, skillVersion: 1 },
+          skillSnapshot: { steps: [{ id: 'plan', label: 'Plan' }] },
+        },
+      }]),
+      getProjection: vi.fn(async ({ runId }: { runId: string }): Promise<AgentRunProjection> => ({ runId, status: 'paused', lastSequence: 1, plan: [],
+        assetVersionIds: [], ignoredEventIds: [], missingSequences: [], qualityChecks: [] })),
+      pauseRun: vi.fn(), resumeRun: vi.fn(), cancelRun: vi.fn(),
+    };
+    const service = createSkillRuntimeService(dependencies);
+    const records = await service.list({ actorUserId: 'user-1', projectId: 'project-1', surface: 'canvas',
+      workspaceId: 'workspace-1', skillId: definition.id, limit: 1 });
+    expect(records).toHaveLength(1);
+    expect(records[0]).toMatchObject({ runId: 'matching', projectId: 'project-1', surface: 'canvas',
+      workspaceId: 'workspace-1', skillId: definition.id });
+    expect(dependencies.listTasks).toHaveBeenCalledWith(expect.objectContaining({ userId: 'user-1' }));
+    expect(dependencies.resumeRun).not.toHaveBeenCalled();
+    expect(await service.list({ actorUserId: 'other-user', projectId: 'project-1' })).toEqual([]);
+  });
   it('validates the durable Skill continuation before changing a paused run to resumed', async () => {
     const task: CloudTask = {
       id: 'run-resume', userId: 'user-1', projectId: 'project-1', type: 'agent-run',
@@ -808,6 +866,7 @@ describe('Skill run history', () => {
         },
       },
     }];
+    events[0].payload.sourceVersionIds = ['original-version'];
     const projection: AgentRunProjection = {
       runId: 'run-1', status: 'completed', lastSequence: 4, plan: [],
       assetVersionIds: ['result-version-1'], ignoredEventIds: [], missingSequences: [],
@@ -826,6 +885,7 @@ describe('Skill run history', () => {
     const history = await createSkillRuntimeService(dependencies).get({ actorUserId: 'user-1', runId: 'run-1' });
 
     expect(history).toMatchObject({
+      sourceVersionIds: ['original-version'],
       skillId: definition.id, skillVersion: 1, creditStatus: 'charged', creditCost: 7,
       assetVersionIds: ['result-version-1'],
       outputs: [{ stepId: 'frozen-step', kind: 'text', content: 'durable response' }],
