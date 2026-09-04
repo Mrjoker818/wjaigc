@@ -1,6 +1,7 @@
 // 用户数据管理器 - localStorage + 服务器数据库双重存储
 import { User, Project, ApiKey, UsageStats, UserData, WujieProjectFile, ImageGroupData, CanvasImage } from './user-types';
 import { APP_VERSION_LABEL } from '@/config/app-meta';
+import { excludeDeletedCanvasPlacements, parseDeletedCanvasPlacements } from '@/lib/asset-core/deleted-canvas-placements';
 import {
   selectCanvasPlacementSnapshot,
   serializeCanvasWorkspacePlacements,
@@ -1695,13 +1696,15 @@ export class UserManager {
       return false;
     }
     const userData: UserData = { ...activeUserData, projects: cloneProjects(activeUserData.projects) };
+    const isCurrentLoad = (): boolean => this.isCurrentProjectSyncRequest(request)
+      && request.mutationGeneration === this._projectMutationGeneration;
 
     try {
       const res = await fetch('/api/user-data/sync?key=projects', {
         credentials: 'include',
         signal: AbortSignal.timeout(PROJECT_SYNC_TIMEOUT_MS),
       });
-      if (!this.isCurrentProjectSyncRequest(request)) return false;
+      if (!isCurrentLoad()) return false;
       if (!res.ok) {
         console.warn('[Sync] loadProjectsFromServer: server returned', res.status);
         // 重试：登录后 session cookie 可能尚未生效
@@ -1718,8 +1721,9 @@ export class UserManager {
         canvasKernelMode?: CanvasKernelMode;
         workflowRendererMode?: WorkflowRendererMode;
         projectRevision?: number;
+        deletedCanvasPlacements?: unknown;
       };
-      if (!this.isCurrentProjectSyncRequest(request)) return false;
+      if (!isCurrentLoad()) return false;
       if (!data.success) {
         if (retryCount > 0) {
           await new Promise(resolve => setTimeout(resolve, 1000));
@@ -1731,6 +1735,8 @@ export class UserManager {
       const nextAssetGraphMode = data.assetGraphMode === 'shadow' || data.assetGraphMode === 'asset-v3'
         ? data.assetGraphMode
         : 'legacy';
+      const deletedCanvasPlacements = parseDeletedCanvasPlacements(data.deletedCanvasPlacements);
+      if (!deletedCanvasPlacements) return false;
       const nextCanvasKernelMode = resolveCanvasKernelMode(data.canvasKernelMode);
       this._workflowRendererMode = resolveWorkflowRendererMode(data.workflowRendererMode);
       const nextProjectSyncRevision = Number.isSafeInteger(data.projectRevision) && Number(data.projectRevision) >= 0
@@ -2018,6 +2024,11 @@ export class UserManager {
       // 规范化图片 URL：将旧格式 /uploads/xxx 转换为 /api/serve-upload/uploads/xxx
       // 确保跨环境（开发/生产）和跨浏览器图片可访问
       for (const project of userData.projects) {
+        if (nextAssetGraphMode === 'shadow') {
+          project.canvasImages = excludeDeletedCanvasPlacements(
+            project.id, project.canvasImages, deletedCanvasPlacements,
+          );
+        }
         if (project.canvasImages) {
           for (const img of project.canvasImages) {
             if (img.url && img.url.startsWith('/uploads/') && !img.url.startsWith('/api/')) {
@@ -2027,7 +2038,7 @@ export class UserManager {
         }
       }
 
-      if (!this.isCurrentProjectSyncRequest(request)) return false;
+      if (!isCurrentLoad()) return false;
       this.commitProjectAdoption({
         userId: currentUserId,
         revision: nextProjectSyncRevision,

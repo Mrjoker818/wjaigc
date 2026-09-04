@@ -66,6 +66,7 @@
   "src/lib/refine-task-lifecycle.ts",
   "src/app/api/simple-chat/chat/route.ts",
   "src/app/api/user-data/sync/route.ts",
+  "src/lib/asset-core/deleted-canvas-placements.ts",
   "src/app/globals.css",
   "src/app/simple-chat/page.tsx",
   "src/components/agent-editor.tsx",

@@ -1153,49 +1153,53 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
   // ★ 自动回填 originalWidth/originalHeight：当图片缺少真实尺寸时，异步加载并补全
   const sizeFillAttemptedRef = useRef<Set<string>>(new Set());
   useEffect(() => {
-    const imagesNeedingSize = images.filter(img => !img.originalWidth || !img.originalHeight);
+    const imagesNeedingSize = images.filter(img => !img.originalWidth || !img.originalHeight
+      || img.originalWidth <= 1 || img.originalHeight <= 1);
     // 跳过已尝试过但失败的图片，避免无限重试
-    const untried = imagesNeedingSize.filter(img => !sizeFillAttemptedRef.current.has(img.id));
+    const readKey = (img: CanvasImage): string => JSON.stringify([img.id, img.url]);
+    const untried = imagesNeedingSize.filter(img => !sizeFillAttemptedRef.current.has(readKey(img)));
     if (untried.length === 0) return;
 
     // 标记这些图片为已尝试
     for (const img of untried) {
-      sizeFillAttemptedRef.current.add(img.id);
+      sizeFillAttemptedRef.current.add(readKey(img));
     }
 
     let cancelled = false;
-    const updates = new Map<string, { originalWidth: number; originalHeight: number }>();
-
-    Promise.all(untried.map(img => {
-      return new Promise<void>((resolve) => {
-        const imageEl = new window.Image();
-        imageEl.onload = () => {
-          if (!cancelled && imageEl.naturalWidth && imageEl.naturalHeight) {
-            updates.set(img.id, { originalWidth: imageEl.naturalWidth, originalHeight: imageEl.naturalHeight });
-          }
-          // poll-task returns image URL in multiple formats:resolve();
-        };
-        imageEl.onerror = () => resolve();
-        imageEl.src = img.url;
-      });
-    })).then(() => {
-      if (cancelled || updates.size === 0) return;
-      const currentImages = imagesRef.current;
-      let changed = false;
-      const updated = currentImages.map(img => {
-        const sizeUpdate = updates.get(img.id);
-        if (sizeUpdate) {
+    const pending = new Map<string, HTMLImageElement>();
+    for (const img of untried) {
+      const key = readKey(img);
+      const imageEl = new window.Image();
+      pending.set(key, imageEl);
+      imageEl.onload = () => {
+        pending.delete(key);
+        if (cancelled || !imageEl.naturalWidth || !imageEl.naturalHeight) return;
+        let changed = false;
+        const updated = imagesRef.current.map(current => {
+          if (current.id !== img.id || current.url !== img.url) return current;
           changed = true;
-          return { ...img, ...sizeUpdate };
+          return { ...current, originalWidth: imageEl.naturalWidth, originalHeight: imageEl.naturalHeight };
+        });
+        if (changed) {
+          // Keep concurrent image completions based on the latest dimension updates.
+          imagesRef.current = updated;
+          onImagesChange(updated);
         }
-        return img;
-      });
-      if (changed) {
-        onImagesChange(updated);
-      }
-    });
+      };
+      imageEl.onerror = () => { pending.delete(key); };
+      imageEl.src = img.url;
+    }
 
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+      for (const [key, imageEl] of pending) {
+        imageEl.onload = null;
+        imageEl.onerror = null;
+        imageEl.src = '';
+        sizeFillAttemptedRef.current.delete(key);
+      }
+      pending.clear();
+    };
   }, [images, onImagesChange]);
 
   // Navigate to image when navigateToImageId changes

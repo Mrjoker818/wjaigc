@@ -669,9 +669,21 @@ class PostgresAssetStorageTransaction implements AssetStorageTransaction {
       ? metadataImage as Record<string, unknown>
       : {};
     const transform = placement.transform ?? {};
+    const restoredDimensions: Record<string, number> = {};
+    for (const [key, fallback] of [
+      ['originalWidth', version.file.width],
+      ['originalHeight', version.file.height],
+    ] as const) {
+      const existing = transform[key] ?? base[key];
+      if (!(typeof existing === 'number' && Number.isFinite(existing) && existing > 1)
+        && typeof fallback === 'number' && Number.isFinite(fallback) && fallback > 0) {
+        restoredDimensions[key] = fallback;
+      }
+    }
     const image = {
       ...base,
       ...transform,
+      ...restoredDimensions,
       id: placement.entityId,
       url: version.file.url,
       sourceUrl: version.file.recoverySourceUrl ?? base.sourceUrl,

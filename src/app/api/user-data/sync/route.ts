@@ -10,6 +10,7 @@ import {
   executeCanvasProjectSync,
   executeLegacyCanvasProjectSync,
   readCanvasProjectRevision,
+  readCanvasShadowSnapshot,
   readAssetV3Projects,
   type AssetGraphMappings,
 } from '@/lib/asset-core/canvas-project-sync';
@@ -528,10 +529,18 @@ export async function GET(request: NextRequest) {
     const workflowRendererMode = resolveDeliveredWorkflowRendererMode(process.env.WUJIE_WORKFLOW_RENDERER_MODE);
     // Read the revision first: a concurrent commit between these reads yields
     // an older revision with newer data, which CAS rejects safely on write.
-    const projectRevision = key === 'projects'
+    const shadowSnapshot = key === 'projects'
+      && resolveAssetGraphMode(process.env.WUJIE_ASSET_GRAPH_MODE) === 'shadow'
+      ? await readCanvasShadowSnapshot(sessionUser.id)
+      : undefined;
+    const projectRevision = shadowSnapshot ? shadowSnapshot.revision : key === 'projects'
       ? await readCanvasProjectRevision(sessionUser.id)
       : undefined;
-    let value: unknown = await dbGetUserData(sessionUser.id, key);
+    let value: unknown = shadowSnapshot ? shadowSnapshot.value : await dbGetUserData(sessionUser.id, key);
+    if (key === 'projects' && typeof value === 'string') {
+      value = JSON.parse(value) as unknown;
+      if (!Array.isArray(value)) throw new Error('Invalid project snapshot');
+    }
 
     // 【数据隔离】对 projects 类型数据做服务端过滤，防止跨用户数据泄漏
     // 注意：GET 请求只过滤响应数据，不回写数据库，避免永久删除用户数据
@@ -566,6 +575,7 @@ export async function GET(request: NextRequest) {
       workflowRendererMode,
       ...(assetGraphMode ? { assetGraphMode } : {}),
       ...(projectRevision === undefined ? {} : { projectRevision }),
+      ...(shadowSnapshot ? { deletedCanvasPlacements: shadowSnapshot.deletedCanvasPlacements } : {}),
     });
   } catch (error) {
     return NextResponse.json({

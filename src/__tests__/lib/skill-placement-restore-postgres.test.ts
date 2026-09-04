@@ -5,6 +5,7 @@ import { Pool } from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { transferCanvasSkillAsset } from '@/lib/skill-runtime/canvas-client';
 import type { CanvasImage } from '@/lib/user-types';
+import { readCanvasShadowSnapshot } from '@/lib/asset-core/canvas-project-sync';
 
 const databaseUrl = process.env.POSTGRES_TEST_DATABASE_URL;
 const suite = databaseUrl ? describe : describe.skip;
@@ -104,6 +105,9 @@ suite('Skill placement recovery against isolated PostgreSQL', () => {
     const snapshot = await pool.query('SELECT data_value FROM wujie_user_data WHERE user_id=$1 AND data_key=\'projects\'', [ownerId]);
     expect(snapshot.rows[0].data_value[0].canvasImages).toHaveLength(1);
     expect(snapshot.rows[0].data_value[0].canvasImages[0].assetVersionId).toBe(versionId);
+    expect(snapshot.rows[0].data_value[0].canvasImages[0]).toMatchObject({
+      originalWidth: 1254, originalHeight: 1254,
+    });
     await transferCanvasSkillAsset({ ...input, restoreDeletedPlacement: true });
     expect(calls.filter(url => url.endsWith('/restore'))).toHaveLength(1);
     const counts = await pool.query(`SELECT
@@ -122,6 +126,46 @@ suite('Skill placement recovery against isolated PostgreSQL', () => {
     expect(placements.rows).toEqual([{ status: 'active' }]);
     const snapshot = await pool.query('SELECT data_value FROM wujie_user_data WHERE user_id=$1 AND data_key=\'projects\'', [ownerId]);
     expect(snapshot.rows[0].data_value[0].canvasImages).toHaveLength(1);
+  });
+
+  it('reads the deleted placement and project revision consistently and isolates other users', async () => {
+    await service.trashPlacement({ actorUserId: ownerId, projectId, placementId, assetId });
+    const deleted = await readCanvasShadowSnapshot(ownerId, pool);
+    expect(deleted.deletedCanvasPlacements).toEqual([{
+      projectId, entityId: `canvas-skill:${runId}:${versionId}`,
+      assetId, assetVersionId: versionId, placementId,
+    }]);
+    expect((deleted.value as Array<{ canvasImages: unknown[] }>)[0].canvasImages).toEqual([]);
+    expect(deleted.revision).toBeGreaterThan(0);
+    const other = await readCanvasShadowSnapshot(`unrelated-${randomUUID()}`, pool);
+    expect(other).toEqual({ value: null, revision: 0, deletedCanvasPlacements: [] });
+    await service.restorePlacement({ actorUserId: ownerId, projectId, placementId, assetId });
+    const restored = await readCanvasShadowSnapshot(ownerId, pool);
+    expect(restored.deletedCanvasPlacements).toEqual([]);
+    expect((restored.value as Array<{ canvasImages: unknown[] }>)[0].canvasImages).toHaveLength(1);
+    expect(restored.revision).toBeGreaterThan(deleted.revision);
+  });
+
+  it('does not mix a concurrent restore into an established read snapshot', async () => {
+    await service.trashPlacement({ actorUserId: ownerId, projectId, placementId, assetId });
+    const reader = await pool.connect();
+    try {
+      await reader.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
+      const before = await readCanvasShadowSnapshot(ownerId, reader);
+      await service.restorePlacement({ actorUserId: ownerId, projectId, placementId, assetId });
+      const during = await readCanvasShadowSnapshot(ownerId, reader);
+      expect(during).toEqual(before);
+      expect(during.deletedCanvasPlacements).toHaveLength(1);
+      expect((during.value as Array<{ canvasImages: unknown[] }>)[0].canvasImages).toHaveLength(0);
+      await reader.query('COMMIT');
+      const after = await readCanvasShadowSnapshot(ownerId, pool);
+      expect(after.deletedCanvasPlacements).toHaveLength(0);
+      expect(after.revision).toBeGreaterThan(before.revision);
+      expect((after.value as Array<{ canvasImages: unknown[] }>)[0].canvasImages).toHaveLength(1);
+    } finally {
+      await reader.query('ROLLBACK');
+      reader.release();
+    }
   });
 
   it('does not let a delayed historical restore undo another completed restore-delete cycle', async () => {

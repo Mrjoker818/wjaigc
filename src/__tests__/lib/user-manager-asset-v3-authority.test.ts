@@ -88,6 +88,132 @@ afterEach(() => {
 });
 
 describe('asset-v3 client project authority', () => {
+  it('preserves a local upload added during GET before any debounced POST starts', async () => {
+    let resolveResponse!: (response: Response) => void;
+    fetchMock.mockReturnValue(new Promise<Response>(resolve => { resolveResponse = resolve; }));
+    const { UserManager } = await import('@/lib/user-manager');
+    const manager = UserManager.getInstance();
+    const loading = manager.loadProjectsFromServer(0, user.id);
+    manager.updateProject('project-1', {
+      canvasImages: [...manager.getProjects()[0].canvasImages, canvasImage('new-during-get', 20)],
+    });
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(0);
+    resolveResponse(Response.json({ success: true, value: [project([canvasImage('retained', 44)])],
+      assetGraphMode: 'shadow', projectRevision: 7, deletedCanvasPlacements: [] }));
+    await expect(loading).resolves.toBe(false);
+    expect(manager.getProjects()[0].canvasImages.map(image => image.id)).toContain('new-during-get');
+    expect(manager.hasPendingProjectChanges()).toBe(true);
+  });
+
+  it('excludes an explicitly trashed shadow placement from the next save without losing local uploads', async () => {
+    const deletedImage = {
+      ...canvasImage('deleted-skill', 18),
+      assetId: 'deleted-asset',
+      assetVersionId: 'deleted-version',
+      placementId: 'deleted-placement',
+    };
+    const seed = JSON.parse(storage.get('unbounded_ai_user_data')!);
+    seed.userData[user.id].projects[0].canvasImages.push(deletedImage);
+    storage.set('unbounded_ai_user_data', JSON.stringify(seed));
+    fetchMock.mockImplementation((input: string | URL, init?: RequestInit) => {
+      if (String(input) === '/api/user-data/sync?key=projects') {
+        return Promise.resolve(new Response(JSON.stringify({
+          success: true,
+          value: [project([canvasImage('retained', 44)])],
+          assetGraphMode: 'shadow',
+          projectRevision: 7,
+          deletedCanvasPlacements: [{
+            projectId: 'project-1', entityId: deletedImage.id,
+            assetId: deletedImage.assetId, assetVersionId: deletedImage.assetVersionId,
+            placementId: deletedImage.placementId,
+          }],
+        }), { status: 200 }));
+      }
+      if (String(input) === '/api/user-data/sync' && init?.method === 'POST') {
+        return Promise.resolve(new Response(JSON.stringify({ success: true, projectRevision: 8 }), { status: 200 }));
+      }
+      throw new Error(`Unexpected request: ${String(input)}`);
+    });
+    const { UserManager } = await import('@/lib/user-manager');
+    const manager = UserManager.getInstance();
+    await expect(manager.loadProjectsFromServer(0, user.id)).resolves.toBe(true);
+    expect(manager.getProjects()[0].canvasImages.map(image => image.id)).toEqual(['retained', 'local-only']);
+    await manager.flushProjectsToServer();
+    const posts = fetchMock.mock.calls.filter(([url, init]) => (
+      String(url) === '/api/user-data/sync' && (init as RequestInit | undefined)?.method === 'POST'
+    ));
+    expect(posts.length).toBeGreaterThan(0);
+    for (const [, init] of posts) {
+      const payload = JSON.parse(String((init as RequestInit).body));
+      expect(payload.value[0].canvasImages.map((image: { id: string }) => image.id))
+        .toEqual(['retained', 'local-only']);
+    }
+  });
+
+  it.each(['projectId', 'entityId', 'assetId', 'assetVersionId', 'placementId'] as const)(
+    'does not discard a local managed image when the deletion %s differs', async (field) => {
+      const local = {
+        ...canvasImage('local-only', 8), assetId: 'asset-local',
+        assetVersionId: 'version-local', placementId: 'placement-local',
+      };
+      const seed = JSON.parse(storage.get('unbounded_ai_user_data')!);
+      seed.userData[user.id].projects[0].canvasImages[1] = local;
+      storage.set('unbounded_ai_user_data', JSON.stringify(seed));
+      const deletion = {
+        projectId: 'project-1', entityId: local.id, assetId: local.assetId,
+        assetVersionId: local.assetVersionId, placementId: local.placementId,
+        [field]: 'different-identity',
+      };
+      fetchMock.mockResolvedValue(new Response(JSON.stringify({
+        success: true, value: [project([canvasImage('retained', 44)])],
+        assetGraphMode: 'shadow', projectRevision: 7, deletedCanvasPlacements: [deletion],
+      }), { status: 200 }));
+      const { UserManager } = await import('@/lib/user-manager');
+      const manager = UserManager.getInstance();
+      await manager.loadProjectsFromServer(0, user.id);
+      expect(manager.getProjects()[0].canvasImages).toEqual(expect.arrayContaining([
+        expect.objectContaining(local),
+      ]));
+    },
+  );
+
+  it('rejects a late deletion snapshot after an explicit restore advances the project revision', async () => {
+    const local = {
+      ...canvasImage('local-only', 8), assetId: 'asset-local',
+      assetVersionId: 'version-local', placementId: 'placement-local',
+    };
+    const seed = JSON.parse(storage.get('unbounded_ai_user_data')!);
+    seed.userData[user.id].projects[0].canvasImages[1] = local;
+    storage.set('unbounded_ai_user_data', JSON.stringify(seed));
+    let resolveResponse!: (response: Response) => void;
+    fetchMock.mockReturnValue(new Promise<Response>(resolve => { resolveResponse = resolve; }));
+    const { UserManager } = await import('@/lib/user-manager');
+    const manager = UserManager.getInstance();
+    const loading = manager.loadProjectsFromServer(0, user.id);
+    manager.advanceProjectSyncRevision(8);
+    resolveResponse(Response.json({
+      success: true, value: [project([canvasImage('retained', 44)])],
+      assetGraphMode: 'shadow', projectRevision: 7,
+      deletedCanvasPlacements: [{ projectId: 'project-1', entityId: local.id,
+        assetId: local.assetId, assetVersionId: local.assetVersionId, placementId: local.placementId }],
+    }));
+    await expect(loading).resolves.toBe(false);
+    expect(manager.getProjectSyncRevision()).toBe(8);
+    expect(manager.getProjects()[0].canvasImages).toEqual(expect.arrayContaining([expect.objectContaining(local)]));
+  });
+
+  it('rejects malformed deletion records without dropping local images', async () => {
+    fetchMock.mockResolvedValue(Response.json({
+      success: true, value: [project([canvasImage('retained', 44)])],
+      assetGraphMode: 'shadow', projectRevision: 7,
+      deletedCanvasPlacements: [{ projectId: 'project-1', entityId: 'local-only' }],
+    }));
+    const { UserManager } = await import('@/lib/user-manager');
+    const manager = UserManager.getInstance();
+    await expect(manager.loadProjectsFromServer(0, user.id)).resolves.toBe(false);
+    expect(manager.getProjects()[0].canvasImages.map(image => image.id)).toContain('local-only');
+  });
+
   it('uses graph placement geometry and deletion through load and the next autosave payload', async () => {
     const serverProject = project([canvasImage('retained', 44)]);
     fetchMock.mockImplementation((input: string | URL, init?: RequestInit) => {

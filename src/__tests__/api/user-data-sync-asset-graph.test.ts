@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   executeCanvasProjectSync: vi.fn(),
   executeLegacyCanvasProjectSync: vi.fn(),
   readCanvasProjectRevision: vi.fn(),
+  readCanvasShadowSnapshot: vi.fn(),
   readAssetV3Projects: vi.fn(),
   persistResultImage: vi.fn(),
   readSimpleChatSnapshot: vi.fn(),
@@ -36,6 +37,7 @@ vi.mock('@/lib/asset-core/canvas-project-sync', () => ({
   executeCanvasProjectSync: mocks.executeCanvasProjectSync,
   executeLegacyCanvasProjectSync: mocks.executeLegacyCanvasProjectSync,
   readCanvasProjectRevision: mocks.readCanvasProjectRevision,
+  readCanvasShadowSnapshot: mocks.readCanvasShadowSnapshot,
   readAssetV3Projects: mocks.readAssetV3Projects,
 }));
 vi.mock('@/lib/persist-result-image', () => ({ persistResultImage: mocks.persistResultImage }));
@@ -71,6 +73,11 @@ describe('user-data asset graph sync route', () => {
     mocks.execSql.mockResolvedValue({ rows: [], rowCount: 0 });
     mocks.dbSetUserData.mockResolvedValue(true);
     mocks.readCanvasProjectRevision.mockResolvedValue(0);
+    mocks.readCanvasShadowSnapshot.mockImplementation(async (userId: string) => ({
+      value: await mocks.dbGetUserData(userId, 'projects'),
+      revision: 0,
+      deletedCanvasPlacements: [],
+    }));
     mocks.persistResultImage.mockImplementation(async (url: string) => url);
   });
 
@@ -81,6 +88,41 @@ describe('user-data asset graph sync route', () => {
     else process.env.WUJIE_CANVAS_KERNEL_MODE = originalCanvasKernelMode;
     if (originalWorkflowRendererMode === undefined) delete process.env.WUJIE_WORKFLOW_RENDERER_MODE;
     else process.env.WUJIE_WORKFLOW_RENDERER_MODE = originalWorkflowRendererMode;
+  });
+
+  it('returns shadow projects, revision and deleted identities from one authoritative snapshot', async () => {
+    process.env.WUJIE_ASSET_GRAPH_MODE = 'shadow';
+    const deleted = [{ projectId: 'project-1', entityId: 'old-skill', assetId: 'a', assetVersionId: 'v', placementId: 'p' }];
+    mocks.readCanvasShadowSnapshot.mockResolvedValue({ value: projects, revision: 17, deletedCanvasPlacements: deleted });
+    const response = await GET(new NextRequest('http://localhost/api/user-data/sync?key=projects'));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ value: projects, projectRevision: 17, deletedCanvasPlacements: deleted });
+    expect(mocks.readCanvasShadowSnapshot).toHaveBeenCalledWith('user-1');
+    expect(mocks.dbGetUserData).not.toHaveBeenCalled();
+    expect(mocks.readCanvasProjectRevision).not.toHaveBeenCalled();
+  });
+
+  it('fails closed when the shadow snapshot cannot be read', async () => {
+    process.env.WUJIE_ASSET_GRAPH_MODE = 'shadow';
+    mocks.readCanvasShadowSnapshot.mockRejectedValue(new Error('snapshot unavailable'));
+    const response = await GET(new NextRequest('http://localhost/api/user-data/sync?key=projects'));
+    expect(response.status).toBe(500);
+    expect(await response.json()).toMatchObject({ success: false });
+    expect(mocks.dbGetUserData).not.toHaveBeenCalled();
+  });
+
+  it('normalizes a legacy string snapshot before delivering shadow mode and filtering ownership', async () => {
+    process.env.WUJIE_ASSET_GRAPH_MODE = 'shadow';
+    const deleted = [{ projectId: 'project-1', entityId: 'old', assetId: 'a', assetVersionId: 'v', placementId: 'p' }];
+    mocks.readCanvasShadowSnapshot.mockResolvedValue({
+      value: JSON.stringify([...projects, { ...projects[0], id: 'foreign', userId: 'other-user' }]),
+      revision: 17, deletedCanvasPlacements: deleted,
+    });
+    const response = await GET(new NextRequest('http://localhost/api/user-data/sync?key=projects'));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ value: projects, assetGraphMode: 'shadow',
+      projectRevision: 17, deletedCanvasPlacements: deleted });
+    expect(mocks.dbSetUserData).not.toHaveBeenCalled();
   });
 
   it('returns failure and does not fall back to a legacy-only write when atomic shadow sync fails', async () => {
