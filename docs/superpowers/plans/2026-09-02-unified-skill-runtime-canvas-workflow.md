@@ -1120,6 +1120,8 @@ git commit -m "test: gate scoped skill runtime"
 
 ### Task 12: 文档、Obsidian、推送与 Coze 真实验收
 
+> 2026-09-04版本边界：下方Step 2/3的366b90b2与4d6d8ffa是历史验收，不证明当前修复版db41a5c5已完成云端构建和重启。当前版已推送且Coze已报告合并tree=f68010ad3f096846936a967a570068ab40971729；最终构建、重启、刷新和Step 4业务验收仍待证据。普通全量4956通过/144跳过，144项已另行真实PostgreSQL补验。现有skill-runtime-canvas-workflow.spec.ts使用受控HTTP供应商和1像素PNG，只证明编排契约，不证明远端模型质量。不得将这些结果代替Chrome真实成品验收，也不得因此启动下一批功能。
+
 **Files:**
 - Modify: `docs/testing/FUNCTION_INVENTORY.md`
 - Modify: `docs/testing/BUG_REGISTER.md`

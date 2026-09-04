@@ -3,10 +3,11 @@ import 'server-only';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
 import {
   AgentDownstreamProviderRejectedError,
+  AgentDownstreamSubmissionUnknownError,
   type AgentDownstreamRecovery,
 } from '@/lib/agent-runtime/downstream-operations';
 import { getCloudTaskForUser, updateCloudTask, type CloudTask } from '@/lib/cloud-task-storage';
-import { executeAdmittedToolCall, executeToolCall } from '@/lib/chat-tools';
+import { executeAdmittedToolCall, executeToolCall, type AdmittedToolExecution } from '@/lib/chat-tools';
 import { getApiProviders } from '@/lib/server-api-config';
 import type { User } from '@/lib/user-types';
 import { parseWorkspaceSourceTrace } from '@/lib/asset-core/source-trace';
@@ -25,11 +26,30 @@ function projectionVersionIds(task: CloudTask): string[] {
     : [];
 }
 
+function assertKnownSubmission(task: CloudTask | null): void {
+  if (task?.status === 'processing' && task.result?.skillBillingProvenance
+    && (task.result.taskError as Record<string, unknown> | undefined)?.code === 'SKILL_SUBMISSION_UNKNOWN') {
+    throw new AgentDownstreamSubmissionUnknownError();
+  }
+}
+
+async function monitorGeneration(execution: AdmittedToolExecution, signal: AbortSignal): Promise<void> {
+  try {
+    await executeAdmittedToolCall(execution, signal);
+  } catch (error) {
+    if (execution.kind === 'generation') {
+      for (const taskId of execution.taskIds) assertKnownSubmission(await getCloudTaskForUser(taskId, execution.userId));
+    }
+    throw error;
+  }
+}
+
 async function completedGenerationResult(
   taskId: string,
   actorUserId: string,
 ): Promise<SkillStepResult> {
   const task = await getCloudTaskForUser(taskId, actorUserId);
+  assertKnownSubmission(task);
   if (!task || task.status !== 'completed') {
     const error = task?.result?.taskError;
     const details = error && typeof error === 'object' ? error as Record<string, unknown> : {};
@@ -102,7 +122,7 @@ async function reconcileGeneration(
   actor: User,
   signal: AbortSignal,
 ): Promise<SkillStepResult> {
-  await executeAdmittedToolCall({
+  await monitorGeneration({
     kind: 'generation',
     taskIds: [taskId],
     userId: actor.id,
@@ -111,17 +131,18 @@ async function reconcileGeneration(
   return completedGenerationResult(taskId, actor.id);
 }
 
+function imageAdmissionError(message: string, code = 'SKILL_IMAGE_ADMISSION_FAILED'): Error {
+  return Object.assign(new Error(message), { code });
+}
+
 async function executeGenerationStep(
   actor: User,
   request: SkillRunRequest,
   input: ExecuteSkillStepInput,
 ): Promise<SkillStepResult> {
   if (!input.modelBinding) {
-    throw new AgentDownstreamProviderRejectedError(undefined, {
-      message: 'Skill image model binding is missing',
-    });
+    throw imageAdmissionError('Skill image model binding is missing');
   }
-  await input.operation.beginSubmission();
   const result = await executeToolCall('generate_image', {
     prompt: promptForStep(input),
     aspect_ratio: typeof input.inputValues.aspectRatio === 'string'
@@ -135,19 +156,23 @@ async function executeGenerationStep(
     projectId: request.projectId,
     sessionId: request.workspaceId,
     idempotencyKey: input.operation.idempotencyKey,
+    skillBillingContext: input.operation.executionFence ? {
+      runId: input.runId,
+      stepId: input.step.id,
+      requestDigest: input.requestDigest,
+      operationKey: input.operation.operationKey,
+      executionFence: input.operation.executionFence,
+    } : undefined,
     deferAgentExecution: true,
     allowedTools: ['generate_image'],
   });
   if (!result.success) {
-    throw new AgentDownstreamProviderRejectedError(undefined, {
-      message: result.error || 'Skill image generation was rejected',
-    });
+    throw imageAdmissionError('Skill image admission failed before provider submission',
+      result.errorCode === 'SKILL_BILLING_NOT_AUTHORIZED' ? result.errorCode : 'SKILL_IMAGE_ADMISSION_FAILED');
   }
   const taskId = result.taskIds?.[0]?.taskId;
   if (!taskId || !result.admittedExecution) {
-    throw new AgentDownstreamProviderRejectedError(undefined, {
-      message: 'Skill image generation did not return a durable task',
-    });
+    throw imageAdmissionError('Skill image generation did not return a durable task');
   }
   const task = await getCloudTaskForUser(taskId, actor.id);
   const submissionPayload = task?.result?.submissionPayload;
@@ -157,9 +182,7 @@ async function executeGenerationStep(
     modelBindings: request.modelBindings, createdAt: new Date().toISOString(),
   });
   if (!assetSourceTrace) {
-    throw new AgentDownstreamProviderRejectedError(undefined, {
-      message: 'Skill generation source trace could not be frozen',
-    });
+    throw imageAdmissionError('Skill generation source trace could not be frozen');
   }
   const updated = task && await updateCloudTask(taskId, {
     result: {
@@ -174,12 +197,11 @@ async function executeGenerationStep(
     },
   });
   if (!updated) {
-    throw new AgentDownstreamProviderRejectedError(undefined, {
-      message: 'Skill generation lineage could not be persisted',
-    });
+    throw imageAdmissionError('Skill generation lineage could not be persisted');
   }
-  await input.operation.recordAccepted(taskId);
-  await executeAdmittedToolCall(result.admittedExecution, input.signal);
+  if (!input.operation.recordLocalAccepted) throw new Error('Local Skill task confirmation is unavailable');
+  await input.operation.recordLocalAccepted(taskId);
+  await monitorGeneration(result.admittedExecution, input.signal);
   return completedGenerationResult(taskId, input.actorUserId);
 }
 

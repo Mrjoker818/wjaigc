@@ -323,6 +323,8 @@
   "src/lib/agent-runtime/request-validation.ts",
   "src/lib/skill-runtime/canvas-presets.ts",
   "src/lib/skill-runtime/catalog.ts",
+  "src/lib/skill-runtime/billing-authorization.ts",
+  "src/lib/skill-runtime/prepaid-generation.ts",
   "src/lib/skill-runtime/canvas-client.ts",
   "src/lib/skill-runtime/continuation.ts",
   "src/lib/skill-runtime/cost-estimator.ts",

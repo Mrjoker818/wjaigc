@@ -45,6 +45,7 @@ import {
   getCloudTaskForUser,
   getCloudTaskById,
   refundCloudTaskCredits,
+  releaseCloudTaskLease,
   terminateCloudTaskAndRefund,
   updateCloudTask,
 } from '@/lib/cloud-task-storage';
@@ -325,6 +326,47 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     const sessionUser = (await getRequestUser(request))?.user || null;
     // ★ 安全：已登录用户必须使用 session 中的 userId，忽略客户端传入值（防止伪造）
     const userId = sessionUser?.id || "anonymous";
+
+    if (sessionUser && taskId.startsWith('async-')) {
+      const child = await getCloudTaskForUser(taskId, userId);
+      if (child?.result?.skillBillingProvenance) {
+        const { inspectSkillPrepaidPoll } = await import('@/lib/skill-runtime/prepaid-generation');
+        const decision = await inspectSkillPrepaidPoll(child);
+        if (decision.action === 'wait') {
+          return NextResponse.json({ success: true, taskId, status: 'processing',
+            progress: child.progress, label: decision.message, recoveryPending: true, retryAfterMs: 3000 });
+        }
+        if (decision.action === 'stop') {
+          await terminateCloudTaskAndRefund(taskId, decision.status, decision.message);
+          const current = await getCloudTaskForUser(taskId, userId);
+          return NextResponse.json({ success: false, taskId,
+            status: current?.status || decision.status, error: decision.message, retryable: false });
+        }
+        if (child.status === 'processing' && !child.remoteTaskId && !child.result.skillDeferredCompletion
+          && (child.result.taskError as Record<string, unknown> | undefined)?.code === 'SKILL_SUBMISSION_UNKNOWN') {
+          return NextResponse.json({ success: false, taskId, status: 'error', code: 'SKILL_SUBMISSION_UNKNOWN',
+            error: '供应商提交结果尚未确认，请核对原任务，勿重复生成', retryable: false, requiresReconciliation: true });
+        }
+        if (child.status === 'processing' && !child.remoteTaskId && !child.result.skillDeferredCompletion
+          && child.result.skillProviderDispatch) {
+          const { reconcileSkillPrepaidDispatch } = await import('@/lib/skill-runtime/prepaid-generation');
+          if (await reconcileSkillPrepaidDispatch(child, requestId)) {
+            return NextResponse.json({ success: false, taskId, status: 'error', code: 'SKILL_SUBMISSION_UNKNOWN',
+              error: '供应商提交结果尚未确认，请核对原任务，勿重复生成', retryable: false, requiresReconciliation: true });
+          }
+          return NextResponse.json({ success: true, taskId, status: 'processing', progress: child.progress,
+            label: '等待原供应商请求返回', recoveryPending: true, retryAfterMs: 3000 });
+        }
+        const deferred = child.result.skillDeferredCompletion as { result?: Record<string, unknown> } | undefined;
+        if (child.status === 'processing' && deferred?.result) {
+          await completeCloudTask(taskId, deferred.result);
+          const completedResponse = await getDurableGenerationSlotResponse(taskId, userId);
+          if (completedResponse) return completedResponse;
+          return NextResponse.json({ success: true, taskId, status: 'processing',
+            progress: child.progress, label: '等待 Skill 恢复并交付已生成结果', recoveryPending: true, retryAfterMs: 3000 });
+        }
+      }
+    }
 
     // ★ 第一优先：检查任务是否已被取消，避免已取消任务继续远程轮询浪费资源
     if (taskId && isTaskCancelled(taskId)) {
@@ -1325,9 +1367,18 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
             retryable: true,
           }, { status: 200 });
         }
-        const recoveryDeadline = getRecoverySubmissionDeadline({
-          createdAt: persistedTask.createdAt,
-        });
+        const isPrepaidRecovery = Boolean(persistedTask.result?.skillBillingProvenance);
+        if (requiresSubmissionRecovery && isPrepaidRecovery && (
+          persistedResult.skillProviderDispatch || persistedResult.skillDeferredCompletion
+          || (persistedTask.leaseExpiresAt ?? 0) > Date.now()
+        )) {
+          return NextResponse.json({ success: true, taskId, status: 'processing',
+            progress: persistedTask.progress, label: '任务正在执行或等待结果确认，请勿重复提交',
+            recoveryPending: true });
+        }
+        const recoveryDeadline = isPrepaidRecovery
+          ? await (await import('@/lib/skill-runtime/prepaid-generation')).getSkillPrepaidSubmissionDeadline(persistedTask)
+          : getRecoverySubmissionDeadline({ createdAt: persistedTask.createdAt });
         if (requiresSubmissionRecovery && recoveryDeadline.expired) {
           const taskError = normalizeTaskError(null, {
             code: 'TASK_TIMEOUT',
@@ -1336,13 +1387,13 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
             retryable: true,
             requestId,
           });
-          abortTaskExecution(recovery.taskId, 'timeout');
-          const termination = await terminateCloudTaskAndRefund(
-            recovery.taskId,
-            'timeout',
-            taskError.message,
-          );
+          if (!isPrepaidRecovery) abortTaskExecution(recovery.taskId, 'timeout');
+          const termination = isPrepaidRecovery
+            ? await terminateCloudTaskAndRefund(recovery.taskId, 'timeout', taskError.message,
+              undefined, { requireUnsubmittedPrepaid: true })
+            : await terminateCloudTaskAndRefund(recovery.taskId, 'timeout', taskError.message);
           if (termination.transitioned || termination.status === 'timeout') {
+            if (isPrepaidRecovery) abortTaskExecution(recovery.taskId, 'timeout');
             updateTaskProgress(recovery.taskId, {
               status: 'timeout',
               progress: 0,
@@ -1365,6 +1416,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
               error: taskError.message,
               retryable: true,
             }, persistedTask.result, taskId), { status: 200 });
+          }
+          if (isPrepaidRecovery) {
+            return NextResponse.json({ success: true, taskId, status: 'processing',
+              progress: persistedTask.progress, label: '任务状态已更新，正在确认执行结果',
+              recoveryPending: true });
           }
         }
         const recoveryBackoff = getTaskRecoveryBackoff(persistedTask);
@@ -1446,12 +1502,31 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
             let recoveryResponseData: Record<string, unknown> | null = null;
             try {
             if (isTaskCancelled(recovered.taskId)) return;
+            if (persistedTask.result?.skillBillingProvenance) {
+              const { inspectSkillPrepaidPoll } = await import('@/lib/skill-runtime/prepaid-generation');
+              const currentChild = await getCloudTaskForUser(recovered.taskId, sessionUser.id);
+              if (!currentChild) return;
+              const decision = await inspectSkillPrepaidPoll(currentChild);
+              if (decision.action !== 'allow') {
+                if (decision.action === 'stop') {
+                  await terminateCloudTaskAndRefund(recovered.taskId, decision.status, decision.message, TASK_RECOVERY_WORKER_ID);
+                } else {
+                  await releaseCloudTaskLease(recovered.taskId, TASK_RECOVERY_WORKER_ID);
+                }
+                releaseQueueSlot(recovered.taskId);
+                return;
+              }
+            }
             const persistedSubmission = submissionPayload as Record<string, unknown>;
             const strictAgentRecovery = persistedSubmission.agentStrictRouting === true;
             const strictAgentIdempotencyKey = strictAgentRecovery
               && typeof persistedSubmission.agentProviderIdempotencyKey === 'string'
               ? persistedSubmission.agentProviderIdempotencyKey
               : '';
+            const prepaidExecution = persistedTask.result?.skillBillingProvenance
+              ? await (await import('@/lib/skill-runtime/prepaid-generation')).readSkillPrepaidExecutionReference(
+                persistedTask, TASK_RECOVERY_WORKER_ID, lease.attemptCount,
+              ) : undefined;
             const resumed = await fetch(`http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}/api/generate`, {
               method: 'POST',
               headers: {
@@ -1465,11 +1540,22 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
                 submitOnly: false,
                 _skipCredits: true,
                 _skipCloudTaskPersistence: true,
+                ...(prepaidExecution ? { skillPrepaidExecution: prepaidExecution } : {}),
               }),
               signal: recoveryAbort.signal,
             });
             recoveryResponseStatus = resumed.status;
             recoveryResponseData = await resumed.json().catch(() => null) as Record<string, unknown> | null;
+            if (recoveryResponseData?.code === 'SKILL_EXECUTION_SUSPENDED') {
+              await releaseCloudTaskLease(recovered.taskId, TASK_RECOVERY_WORKER_ID);
+              releaseQueueSlot(recovered.taskId);
+              return;
+            }
+            if (recoveryResponseData?.code === 'SKILL_PARENT_CANCELLED') {
+              await terminateCloudTaskAndRefund(recovered.taskId, 'cancelled', '父 Skill 已取消', TASK_RECOVERY_WORKER_ID);
+              releaseQueueSlot(recovered.taskId);
+              return;
+            }
             if (!resumed.ok || !recoveryResponseData?.success) {
               throw new Error(
                 typeof recoveryResponseData?.error === 'string'
@@ -1571,6 +1657,18 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
             }
             updateTaskProgress(recovered.taskId, { status: 'processing', progress: 10, result: recoveredResult });
           } catch (error) {
+            if (persistedTask.result?.skillBillingProvenance) {
+              const currentChild = await getCloudTaskForUser(recovered.taskId, recovery.userId);
+              if (currentChild?.status === 'processing' && currentChild.result?.skillProviderDispatch && !currentChild.remoteTaskId) {
+                const taskError = normalizeTaskError(null, { code: 'SKILL_SUBMISSION_UNKNOWN',
+                  message: '供应商提交结果尚未确认，请核对原任务，勿重复生成', source: 'wujie', retryable: false, requestId });
+                await updateCloudTask(recovered.taskId, { result: { taskError }, mergeResult: true,
+                  label: taskError.message, expectedStatuses: ['processing'], leaseOwner: TASK_RECOVERY_WORKER_ID });
+                await releaseCloudTaskLease(recovered.taskId, TASK_RECOVERY_WORKER_ID);
+                releaseQueueSlot(recovered.taskId);
+                return;
+              }
+            }
             const recoveryFailure = recoveryAbort.signal.aborted
               ? null
               : classifyRecoverySubmissionFailure({

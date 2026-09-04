@@ -618,6 +618,7 @@ function defaultSameTaskAgentAdapter(): Promise<ReturnType<typeof createSameTask
       prepare: eventStorage.prepareAgentDownstreamOperation,
       markSubmitted: eventStorage.markAgentDownstreamOperationSubmitted,
       markAccepted: eventStorage.markAgentDownstreamOperationAccepted,
+      markLocalAccepted: eventStorage.markAgentLocalDownstreamOperationAccepted,
       markSubmissionUnknown: eventStorage.markAgentDownstreamSubmissionUnknown,
       complete: eventStorage.completeAgentDownstreamOperation,
       read: eventStorage.getAgentDownstreamOperation,

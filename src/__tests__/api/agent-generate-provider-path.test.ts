@@ -22,6 +22,12 @@ const persistence = vi.hoisted(() => ({
   updateTaskProgress: vi.fn(),
   requireApiAuthOrReject: vi.fn(),
   consumeCredits: vi.fn(),
+  calculateConfiguredCreditCost: vi.fn(),
+  checkCredits: vi.fn(),
+  chargeCloudTaskCredits: vi.fn(),
+  getCloudTaskForUser: vi.fn(),
+  getCloudTaskForUserByIdempotencyKey: vi.fn(),
+  terminateCloudTaskAndRefund: vi.fn(),
   resolveTaskModelForUser: vi.fn(),
 }));
 
@@ -46,8 +52,8 @@ vi.mock('@/lib/server-api-config', () => ({
 }));
 vi.mock('@/lib/server-user-storage', () => ({ appendUserJsonl: vi.fn() }));
 vi.mock('@/lib/credits', () => ({
-  calculateConfiguredCreditCost: vi.fn().mockResolvedValue(0),
-  checkCredits: vi.fn().mockResolvedValue({ sufficient: true, balance: 100 }),
+  calculateConfiguredCreditCost: persistence.calculateConfiguredCreditCost,
+  checkCredits: persistence.checkCredits,
   consumeCredits: persistence.consumeCredits,
 }));
 vi.mock('@/lib/task-core/model-catalog', () => ({
@@ -65,9 +71,10 @@ vi.mock('@/lib/task-registry', () => ({
 }));
 vi.mock('@/lib/s3-storage', () => ({ persistRemoteImage: vi.fn(async (url: string) => url) }));
 vi.mock('@/lib/cloud-task-storage', () => ({
-  chargeCloudTaskCredits: vi.fn(),
-  getCloudTaskForUserByIdempotencyKey: vi.fn(),
-  terminateCloudTaskAndRefund: vi.fn(),
+  chargeCloudTaskCredits: persistence.chargeCloudTaskCredits,
+  getCloudTaskForUser: persistence.getCloudTaskForUser,
+  getCloudTaskForUserByIdempotencyKey: persistence.getCloudTaskForUserByIdempotencyKey,
+  terminateCloudTaskAndRefund: persistence.terminateCloudTaskAndRefund,
   updateCloudTask: vi.fn(),
 }));
 
@@ -76,6 +83,99 @@ import { submitStrictAgentGeneration } from '@/lib/agent-runtime/generate-image-
 import { ModelCapabilityError } from '@/lib/task-core/model-capability-contract';
 
 describe('real Agent generate_image provider path', () => {
+  it.each(['SKILL_PARENT_CANCELLED', 'SKILL_EXECUTION_SUSPENDED'])('checks prepaid execution at provider fetch and preserves %s', async code => {
+    const prepaid = await import('@/lib/skill-runtime/prepaid-generation');
+    const guard = vi.spyOn(prepaid, 'startSkillPrepaidProviderRequest').mockRejectedValue(Object.assign(new Error(code), { code }));
+    const externalSubmit = vi.fn();
+    vi.stubGlobal('fetch', externalSubmit);
+    try {
+      let responseStatus = 0;
+      let responseBody: Record<string, unknown> = {};
+      await submitStrictAgentGeneration({
+        userId: 'user-1', userRole: 'admin', prompt: 'test image', aspectRatio: '1:1',
+        model: 'Exact::Model', providerId: 'provider-exact', idempotencyKey: 'agent-provider:prepaid',
+        extraBody: { _skipCredits: true, _skipCloudTaskPersistence: true,
+          skillPrepaidExecution: { taskId: 'child-1', workerId: 'worker-1', attemptCount: 1, parentGeneration: 1 } },
+        fetchImpl: async (_url, init) => {
+          const response = await generate(new Request('http://localhost/api/generate', init) as never);
+          responseStatus = response.status;
+          responseBody = await response.clone().json();
+          return response;
+        },
+      });
+      expect(responseStatus).toBe(409);
+      expect(responseBody.code).toBe(code);
+      expect(guard).toHaveBeenCalledTimes(1);
+      expect(guard).toHaveBeenCalledWith(expect.objectContaining({
+        taskId: 'child-1', userId: 'user-1', providerId: 'provider-exact', modelId: 'Exact::Model',
+      }), expect.any(Function));
+      expect(externalSubmit).not.toHaveBeenCalled();
+    } finally { guard.mockRestore(); }
+  });
+  it.each([false, true])('admits a prepaid Skill child without another debit or cancelling a concurrent activation (reused=%s)', async (reused) => {
+    persistence.calculateConfiguredCreditCost.mockResolvedValue(60);
+    persistence.checkCredits.mockResolvedValue({ sufficient: false, balance: 22 });
+    persistence.recordImageTaskSubmitted.mockResolvedValue(true);
+    persistence.chargeCloudTaskCredits.mockResolvedValue({ charged: true, creditCost: 0 });
+    const externalSubmit = vi.fn();
+    vi.stubGlobal('fetch', externalSubmit);
+    const context = {
+      runId: 'paid-parent', stepId: 'image-step', requestDigest: 'digest', operationKey: 'operation',
+      executionFence: { runId: 'paid-parent', leaseOwner: 'lease', generation: 1 },
+    };
+    if (reused) {
+      persistence.recordImageTaskSubmitted.mockImplementation(async (input: { submissionPayload: Record<string, unknown> }) => {
+        persistence.getCloudTaskForUserByIdempotencyKey.mockResolvedValue({
+          id: 'shared-child', status: 'pending', creditStatus: 'not-applicable',
+          result: { submissionPayload: input.submissionPayload },
+        });
+        return false;
+      });
+      persistence.chargeCloudTaskCredits.mockResolvedValue({ charged: false, creditCost: 0 });
+      persistence.getCloudTaskForUser.mockResolvedValue({
+        id: 'shared-child', userId: 'user-1', status: 'processing', creditCost: 0,
+        creditStatus: 'not-applicable', result: {
+          skillBillingProvenance: { runId: 'paid-parent', stepId: 'image-step', operationKey: 'operation' },
+        },
+      });
+    }
+    const response = await generate(new Request('http://localhost/api/generate', {
+      method: 'POST', headers: {
+        'content-type': 'application/json', 'x-wujie-agent-defer-execution': 'true',
+        'x-wujie-agent-strict-routing': 'true', 'idempotency-key': 'prepaid-key',
+      },
+      body: JSON.stringify({ prompt: 'test cake', model: 'Exact::Model', providerId: 'provider-exact',
+        submitOnly: true, outputCount: 1, projectId: 'project-1', sessionId: 'canvas:project-1',
+        skillBillingContext: context }),
+    }) as never);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ success: true });
+    expect(persistence.checkCredits).not.toHaveBeenCalled();
+    expect(persistence.consumeCredits).not.toHaveBeenCalled();
+    expect(persistence.chargeCloudTaskCredits).toHaveBeenCalledWith(expect.any(String), 'user-1', 0, expect.any(String));
+    expect(persistence.recordImageTaskSubmitted).toHaveBeenCalledWith(expect.objectContaining({
+      skillBilling: { context, idempotencyKey: 'prepaid-key' },
+    }));
+    expect(externalSubmit).not.toHaveBeenCalled();
+    expect(persistence.terminateCloudTaskAndRefund).not.toHaveBeenCalled();
+  });
+
+  it('rejects session callers forging Skill prepaid billing before creating tasks', async () => {
+    persistence.requireApiAuthOrReject.mockResolvedValue({
+      authenticated: true, source: 'session', userId: 'user-1', userRole: 'admin',
+    });
+    const response = await generate(new Request('http://localhost/api/generate', {
+      method: 'POST', headers: { 'content-type': 'application/json',
+        'x-wujie-agent-defer-execution': 'true', 'x-wujie-agent-strict-routing': 'true',
+        'idempotency-key': 'forged' },
+      body: JSON.stringify({ prompt: 'free image', submitOnly: true, skillBillingContext: {} }),
+    }) as never);
+    expect(response.status).toBe(403);
+    expect(await response.json()).toMatchObject({ code: 'SKILL_BILLING_NOT_AUTHORIZED' });
+    expect(persistence.recordImageTaskSubmitted).not.toHaveBeenCalled();
+    expect(persistence.consumeCredits).not.toHaveBeenCalled();
+  });
+
   it('preserves a provider parameter rejection as HTTP 400 instead of a retryable 500', async () => {
     const externalSubmit = vi.fn().mockResolvedValue(new Response(JSON.stringify({
       error: { code: 'invalid_quality', message: 'This model only supports auto, low, medium or high quality (got: 1K).' },
@@ -101,6 +201,10 @@ describe('real Agent generate_image provider path', () => {
     vi.clearAllMocks();
     persistence.provider.selectedModels = ['Exact::Model'];
     persistence.consumeCredits.mockResolvedValue({ success: true, cost: 0 });
+    persistence.calculateConfiguredCreditCost.mockResolvedValue(0);
+    persistence.checkCredits.mockResolvedValue({ sufficient: true, balance: 100 });
+    persistence.getCloudTaskForUserByIdempotencyKey.mockReset();
+    persistence.getCloudTaskForUser.mockReset();
     persistence.resolveTaskModelForUser.mockImplementation(async (
       providerId: string,
       modelId: string,

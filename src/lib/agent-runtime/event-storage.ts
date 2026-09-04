@@ -1237,6 +1237,56 @@ export async function markAgentDownstreamOperationAccepted(
   return mapDownstreamOperation(result.rows[0], input.executionFence, true);
 }
 
+export async function markAgentLocalDownstreamOperationAccepted(
+  rawInput: AcceptAgentDownstreamOperationInput,
+): Promise<AgentDownstreamOperation> {
+  const input = validateDownstreamIdentity(rawInput);
+  const childId = validateIdentifier('providerTaskId', rawInput.providerTaskId);
+  if (input.toolId !== 'generate_image') throw new Error('Unsupported local downstream task');
+  const client = await getPool().connect();
+  try {
+    await client.query('BEGIN');
+    const parent = await client.query(`SELECT id FROM cloud_tasks
+      WHERE id=$1 AND user_id=$2 AND project_id=$3 AND type='agent-run'
+        AND status='processing' AND credit_status<>'refunded' AND refunded_transaction_id=''
+      FOR UPDATE`, [input.runId, input.actorUserId, input.projectId]);
+    if (parent.rowCount !== 1) throw new Error('Local downstream parent is not executable');
+    const lease = await client.query(`SELECT task_id FROM wujie_agent_execution_leases
+      WHERE task_id=$1 AND owner_id=$2 AND project_id=$3 AND lease_owner=$4
+        AND generation=$5 AND paused_at=0 AND completed_at=0 FOR UPDATE`,
+    [input.runId, input.actorUserId, input.projectId, input.executionFence.leaseOwner, input.executionFence.generation]);
+    if (lease.rowCount !== 1) throw new Error('Local downstream execution lease was lost');
+    const result = await client.query<AgentDownstreamOperationRow>(
+      `UPDATE wujie_agent_downstream_operations operation
+       SET status='accepted', provider_task_id=$3, accepted_at=$4, updated_at=$4
+       WHERE operation_key=$1 AND lease_owner=$2
+         AND owner_id=$5 AND project_id=$6 AND task_id=$7 AND step_id=$8
+         AND tool_id='generate_image' AND request_digest=$9 AND idempotency_key=$10
+         AND (status='prepared' OR (status='accepted' AND provider_task_id=$3))
+         AND EXISTS (SELECT 1 FROM cloud_tasks child
+           WHERE child.id=$3 AND child.user_id=operation.owner_id AND child.project_id=operation.project_id
+             AND child.type='generate-async' AND child.idempotency_key=operation.idempotency_key || ':0'
+             AND child.credit_cost=0 AND child.credit_status='not-applicable'
+             AND child.result #>> '{skillBillingProvenance,runId}'=operation.task_id
+             AND child.result #>> '{skillBillingProvenance,stepId}'=operation.step_id
+             AND child.result #>> '{skillBillingProvenance,operationKey}'=operation.operation_key)
+       RETURNING operation_key, owner_id, project_id, task_id, tool_id, step_id, request_digest,
+                 idempotency_key, status, response, provider_task_id, submission_error,
+                 lease_owner, attempt_count`,
+      [input.operationKey, input.leaseOwner, childId, input.now ?? Date.now(),
+        input.actorUserId, input.projectId, input.runId, input.stepId, input.requestDigest, input.idempotencyKey],
+    );
+    if (!result.rows[0]) throw new Error('Local downstream task identity or operation lease was lost');
+    await client.query('COMMIT');
+    return mapDownstreamOperation(result.rows[0], input.executionFence, true);
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 export async function markAgentDownstreamSubmissionUnknown(
   rawInput: MarkAgentDownstreamSubmissionUnknownInput,
 ): Promise<AgentDownstreamOperation> {

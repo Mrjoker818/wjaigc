@@ -1,4 +1,5 @@
 import { execSql, getPool } from '@/lib/db-client';
+import type { PoolClient } from 'pg';
 import {
   createTaskBillingTransactionId,
   InsufficientCreditsError,
@@ -71,6 +72,57 @@ function buildAgentSqlFence(
 
 export type CloudTaskStatus = 'queued' | 'pending' | 'processing' | 'completed' | 'failed' | 'cancelled' | 'timeout';
 export type CloudTaskCreditStatus = 'pending' | 'charged' | 'refunded' | 'not-applicable';
+
+// Serialize prepaid child completion against cancellation/refund of its parent.
+const PREPAID_PARENT_COMPLETION_CTE = `prepaid_parent_completion AS (
+  SELECT parent.id, lease.paused_at
+  FROM cloud_tasks parent
+  JOIN cloud_tasks child ON child.id = $1
+    AND parent.id = child.result #>> '{skillBillingProvenance,runId}'
+    AND parent.user_id = child.user_id AND parent.project_id = child.project_id
+  JOIN wujie_agent_execution_leases lease ON lease.task_id = parent.id
+    AND lease.owner_id = parent.user_id AND lease.project_id = parent.project_id
+  WHERE parent.type = 'agent-run' AND parent.status = 'processing'
+    AND parent.credit_status <> 'refunded' AND parent.refunded_transaction_id = ''
+    AND lease.completed_at = 0 AND (lease.paused_at > 0 OR lease.lease_owner <> '')
+  FOR SHARE OF parent, lease
+)`;
+const PREPAID_PARENT_PAUSED = 'EXISTS (SELECT 1 FROM prepaid_parent_completion WHERE paused_at > 0)';
+const PREPAID_PARENT_COMPLETION_CONDITION = `AND (
+  NOT COALESCE(cloud_tasks.result ? 'skillBillingProvenance', false)
+  OR EXISTS (SELECT 1 FROM prepaid_parent_completion)
+)`;
+
+function preservePrepaidBillingResult(expression: string): string {
+  return `(${expression}) || CASE
+    WHEN COALESCE(result ? 'skillBillingProvenance', false)
+    THEN jsonb_build_object('skillBillingProvenance', result->'skillBillingProvenance')
+    ELSE '{}'::jsonb END || CASE
+    WHEN COALESCE(result ? 'skillProviderDispatch', false)
+    THEN jsonb_build_object('skillProviderDispatch', result->'skillProviderDispatch')
+    ELSE '{}'::jsonb END || CASE
+    WHEN COALESCE(result ? 'skillDeferredCompletion', false)
+    THEN jsonb_build_object('skillDeferredCompletion', result->'skillDeferredCompletion')
+    ELSE '{}'::jsonb END`;
+}
+
+// The parent/lease locks serialize pause with both staging and publishing the first result.
+function protectPrepaidCompletionSets(sets: string[], resultExpression: string): string[] {
+  const completionSets = sets.some(set => set.startsWith('result =')) ? sets : [...sets, 'result = result'];
+  const protectedSets = completionSets.map(set => {
+    const separator = set.indexOf('=');
+    const column = set.slice(0, separator).trim();
+    const value = set.slice(separator + 1).trim();
+    if (column === 'result') return `result = CASE WHEN ${PREPAID_PARENT_PAUSED}
+      THEN COALESCE(result, '{}'::jsonb) || jsonb_build_object('skillDeferredCompletion',
+        COALESCE(result->'skillDeferredCompletion', jsonb_build_object('result', ${resultExpression})))
+      ELSE ((${value}) || (COALESCE(result #> '{skillDeferredCompletion,result}', '{}'::jsonb)
+        - 'skillBillingProvenance' - 'skillProviderDispatch' - 'skillDeferredCompletion'))
+        - 'skillDeferredCompletion' END`;
+    return `${column} = CASE WHEN ${PREPAID_PARENT_PAUSED} THEN ${column} ELSE ${value} END`;
+  });
+  return protectedSets;
+}
 
 export interface TaskTerminalIdentity {
   eventId: string;
@@ -370,9 +422,10 @@ async function initializeCloudTaskTables(): Promise<void> {
   await execSql('CREATE INDEX IF NOT EXISTS idx_cloud_tasks_chat_recovery ON cloud_tasks(user_id, project_id, session_id, updated_at DESC)');
 }
 
-export async function createCloudTask(input: CreateCloudTaskInput): Promise<boolean> {
+export async function createCloudTask(input: CreateCloudTaskInput, transaction?: PoolClient): Promise<boolean> {
   await ensureCloudTaskTables();
-  const result = await execSql(`
+  const query = transaction ? transaction.query.bind(transaction) : execSql;
+  const result = await query(`
     INSERT INTO cloud_tasks (
       id, user_id, project_id, session_id, message_id, type, status, provider_id, model, remote_task_id,
       progress, label, result, error, credit_status, credit_cost, lease_owner, lease_expires_at,
@@ -811,14 +864,17 @@ export async function updateCloudTask(taskId: string, input: UpdateCloudTaskInpu
   const sets: string[] = ['updated_at = $2', 'revision = revision + 1'];
   const params: unknown[] = [taskId, Date.now()];
   let index = 3;
+  let completionResultExpression = "'{}'::jsonb";
 
   if (input.status !== undefined) { sets.push(`status = $${index++}`); params.push(input.status); }
   if (input.progress !== undefined) { sets.push(`progress = $${index++}`); params.push(input.progress); }
   if (input.label !== undefined) { sets.push(`label = $${index++}`); params.push(input.label); }
   if (input.result !== undefined) {
-    sets.push(input.mergeResult
-      ? `result = COALESCE(result, '{}'::jsonb) || $${index++}::jsonb`
-      : `result = $${index++}`);
+    completionResultExpression = `$${index}::jsonb`;
+    const value = input.mergeResult
+      ? `COALESCE(result, '{}'::jsonb) || $${index++}::jsonb`
+      : `$${index++}::jsonb`;
+    sets.push(`result = ${preservePrepaidBillingResult(value)}`);
     params.push(JSON.stringify(input.result));
   }
   if (input.error !== undefined) { sets.push(`error = $${index++}`); params.push(input.error); }
@@ -855,11 +911,15 @@ export async function updateCloudTask(taskId: string, input: UpdateCloudTaskInpu
     params.push(...executionFence.params);
     index = executionFence.nextIndex;
   }
-  const result = await execSql(`UPDATE cloud_tasks SET ${sets.join(', ')}
+  const result = await execSql(`
+    ${input.status === 'completed' ? `WITH ${PREPAID_PARENT_COMPLETION_CTE}` : ''}
+    UPDATE cloud_tasks SET ${(input.status === 'completed'
+      ? protectPrepaidCompletionSets(sets, completionResultExpression) : sets).join(', ')}
     WHERE ${conditions.join(' AND ')}
-    RETURNING id
-  `, params);
-  return (result.rowCount ?? result.rows.length) > 0;
+      ${input.status === 'completed' ? PREPAID_PARENT_COMPLETION_CONDITION : ''}
+    RETURNING id${input.status === 'completed' ? ", status = 'completed' AS committed" : ''}
+  `.trimStart(), params);
+  return (result.rowCount ?? result.rows.length) > 0 && result.rows[0]?.committed !== false;
 }
 
 export async function transitionCloudTaskStatus(
@@ -898,9 +958,11 @@ export async function transitionCloudTaskStatus(
     Date.now(),
   ];
   let index = 6;
+  let completionResultExpression = "'{}'::jsonb";
 
   if (input.result !== undefined) {
-    sets.push(`result = $${index++}`);
+    completionResultExpression = `$${index}::jsonb`;
+    sets.push(`result = ${preservePrepaidBillingResult(`$${index++}::jsonb`)}`);
     params.push(JSON.stringify(input.result));
   }
   if (input.error !== undefined) {
@@ -928,15 +990,17 @@ export async function transitionCloudTaskStatus(
   index = executionFence.nextIndex;
 
   const result = await execSql(`
+    ${input.to === 'completed' ? `WITH ${PREPAID_PARENT_COMPLETION_CTE}` : ''}
     UPDATE cloud_tasks
-    SET ${sets.join(', ')}
+    SET ${(input.to === 'completed' ? protectPrepaidCompletionSets(sets, completionResultExpression) : sets).join(', ')}
     WHERE id = $1
       AND status = ANY($2::text[])
       AND revision = $3
       ${executionFence.condition}
+      ${input.to === 'completed' ? PREPAID_PARENT_COMPLETION_CONDITION : ''}
     RETURNING *
   `, params);
-  if (result.rows.length > 0) {
+  if (result.rows.length > 0 && (input.to !== 'completed' || result.rows[0].status === 'completed')) {
     return {
       transitioned: true,
       task: rowToPersistedCloudTask(result.rows[0]),
@@ -965,16 +1029,19 @@ export async function completeCloudTask(
   const agentFence = options.agentExecutionFence || getAgentExecutionFence();
   const executionFence = buildAgentSqlFence('$1', 6, agentFence);
   const completed = await execSql(`
+    WITH ${PREPAID_PARENT_COMPLETION_CTE}
     UPDATE cloud_tasks
-    SET status = 'completed',
-        progress = 100,
-        result = COALESCE(result, '{}'::jsonb) || $2::jsonb,
-        error = '',
-        credit_status = CASE
+    SET ${protectPrepaidCompletionSets([
+      "status = 'completed'",
+      'progress = 100',
+      `result = ${preservePrepaidBillingResult("COALESCE(result, '{}'::jsonb) || $2::jsonb")}`,
+      "error = ''",
+      `credit_status = CASE
           WHEN credit_status = 'pending' THEN 'charged'
           ELSE credit_status
-        END,
-        updated_at = $3
+        END`,
+      'updated_at = $3',
+    ], '$2::jsonb').join(', ')}
     WHERE id = $1 AND status = 'processing'
       AND ($4::text IS NULL OR lease_owner = $4)
       AND (
@@ -985,7 +1052,8 @@ export async function completeCloudTask(
         )
       )
       ${executionFence.condition}
-    RETURNING id
+      ${PREPAID_PARENT_COMPLETION_CONDITION}
+    RETURNING id, status = 'completed' AS committed
   `, [
     taskId,
     JSON.stringify(result),
@@ -994,7 +1062,7 @@ export async function completeCloudTask(
     options.deadlineAt ?? null,
     ...executionFence.params,
   ]);
-  return (completed.rowCount ?? completed.rows.length) > 0;
+  return (completed.rowCount ?? completed.rows.length) > 0 && completed.rows[0]?.committed !== false;
 }
 
 /**
@@ -1006,6 +1074,7 @@ export async function terminateCloudTaskAndRefund(
   status: CloudTaskFailureStatus,
   reason: string,
   leaseOwner?: string,
+  options: { requireUnsubmittedPrepaid?: boolean } = {},
 ): Promise<CloudTaskTerminationResult> {
   await ensureCloudTaskTables();
   const now = Date.now();
@@ -1023,6 +1092,17 @@ export async function terminateCloudTaskAndRefund(
       WHERE task.id = $1
         ${executionFence.condition}
         AND ($6::text IS NULL OR task.lease_owner = $6)
+        ${options.requireUnsubmittedPrepaid ? `AND (
+          $2 <> 'timeout'
+          OR task.type <> 'generate-async'
+          OR COALESCE(task.result->'skillBillingProvenance'->>'runId', '') = ''
+          OR (
+            COALESCE(task.remote_task_id, '') = ''
+            AND task.result->'skillProviderDispatch' IS NULL
+            AND task.result->'skillDeferredCompletion' IS NULL
+            AND COALESCE(task.lease_expires_at, 0) <= (EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::bigint
+          )
+        )` : ''}
         AND (
           task.status IN ('pending', 'processing')
           OR task.status IN ('failed', 'timeout', 'cancelled')

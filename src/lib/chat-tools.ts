@@ -281,6 +281,7 @@ export function validateChatToolCall(toolName: string, args: Record<string, unkn
 }
 
 export interface ToolCallResult {
+  errorCode?: string;
   success: boolean;
   data?: Record<string, unknown>;
   error?: string;
@@ -361,6 +362,7 @@ export async function executeToolCall(
     messageId?: string;
     idempotencyKey?: string;
     deferAgentExecution?: boolean;
+    skillBillingContext?: import('@/lib/skill-runtime/billing-authorization').SkillBillingContext;
     userRole?: 'user' | 'admin';
     allowedTools?: string[];
     canonicalImageUrl?: string;
@@ -400,6 +402,7 @@ export async function executeToolCall(
 
 // ============ Tool Context Type ============
 interface ToolContext {
+  skillBillingContext?: import('@/lib/skill-runtime/billing-authorization').SkillBillingContext;
   chatApiKey: string;
   chatBaseUrl: string;
   chatModel?: string;
@@ -509,6 +512,8 @@ async function executeGenerateImage(
         resolution,
         outputCount: count,
         submitOnly: true,
+        ...(context.deferAgentExecution && context.skillBillingContext
+          ? { skillBillingContext: context.skillBillingContext } : {}),
         projectId: context.projectId,
         sessionId: context.sessionId,
         messageId: context.messageId,
@@ -523,7 +528,15 @@ async function executeGenerateImage(
     if (!generateRes.ok) {
       const errorText = await generateRes.text().catch(() => '');
       console.error(`[chat-tools] generate_image FAILED: HTTP ${generateRes.status}, body=${errorText.substring(0, 300)}`);
-      return { success: false, error: `图像生成API失败: ${generateRes.status}`, resultText: `图像生成失败（HTTP ${generateRes.status}）。${errorText.substring(0, 200)}` };
+      let errorCode: string | undefined;
+      try {
+        const parsed: unknown = JSON.parse(errorText);
+        if (parsed && typeof parsed === 'object' && 'code' in parsed
+          && parsed.code === 'SKILL_BILLING_NOT_AUTHORIZED') errorCode = parsed.code;
+      } catch {
+        errorCode = undefined;
+      }
+      return { success: false, errorCode, error: `图像生成API失败: ${generateRes.status}`, resultText: `图像生成失败（HTTP ${generateRes.status}）。${errorText.substring(0, 200)}` };
     }
 
     const data = await generateRes.json();

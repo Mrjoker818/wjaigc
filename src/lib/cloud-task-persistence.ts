@@ -33,6 +33,10 @@ import {
 } from '@/lib/generated-image-alpha';
 
 interface ImageTaskSubmission {
+  skillBilling?: {
+    context: import('@/lib/skill-runtime/billing-authorization').SkillBillingContext;
+    idempotencyKey: string;
+  };
   taskId: string;
   userId?: string;
   projectId?: string;
@@ -335,7 +339,7 @@ export async function recordImageTaskSubmitted(input: ImageTaskSubmission): Prom
       }
     : undefined;
 
-  return createCloudTask({
+  const task: import('@/lib/cloud-task-storage').CreateCloudTaskInput = {
     id: input.taskId,
     userId: input.userId || 'anonymous',
     projectId: input.projectId,
@@ -354,7 +358,12 @@ export async function recordImageTaskSubmitted(input: ImageTaskSubmission): Prom
     idempotencyKey: input.idempotencyKey,
     createdAt: now,
     updatedAt: now,
-  });
+  };
+  if (input.skillBilling) {
+    const { createSkillPrepaidGeneration } = await import('@/lib/skill-runtime/prepaid-generation');
+    return createSkillPrepaidGeneration(task, input.skillBilling.context, input.skillBilling.idempotencyKey);
+  }
+  return createCloudTask(task);
 }
 
 export async function recordImageTaskTerminal(

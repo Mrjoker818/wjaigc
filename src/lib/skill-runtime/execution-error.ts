@@ -2,6 +2,15 @@ import type { AgentRunError } from '@/lib/agent-runtime/types';
 
 export function safeSkillExecutionError(error: unknown): AgentRunError & { providerStatus?: number } {
   const details = error && typeof error === 'object' ? error as Record<string, unknown> : {};
+  if (details.code === 'AGENT_DOWNSTREAM_SUBMISSION_UNKNOWN') {
+    return { code: 'SKILL_SUBMISSION_UNKNOWN', message: '供应商提交结果尚未确认，请核对原任务，勿重复生成', retryable: false };
+  }
+  if (details.code === 'SKILL_BILLING_NOT_AUTHORIZED') {
+    return { code: 'SKILL_BILLING_NOT_AUTHORIZED', message: 'Skill 费用授权无效或执行状态已变化，请检查任务记录', retryable: false };
+  }
+  if (details.code === 'SKILL_IMAGE_ADMISSION_FAILED') {
+    return { code: 'SKILL_IMAGE_ADMISSION_FAILED', message: '无界未能创建图像子任务，尚未向图像供应商提交，请稍后重试', retryable: true };
+  }
   const status = typeof details.providerStatus === 'number' && Number.isInteger(details.providerStatus)
     && details.providerStatus >= 400 && details.providerStatus <= 599 ? details.providerStatus : undefined;
   const metadata = status === undefined ? {} : { providerStatus: status };

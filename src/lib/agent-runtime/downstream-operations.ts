@@ -50,6 +50,7 @@ export interface AgentDownstreamOperationDependencies {
   prepare(input: AgentDownstreamOperationIdentity): Promise<AgentDownstreamOperation>;
   markSubmitted(input: AgentDownstreamOperationIdentity): Promise<AgentDownstreamOperation>;
   markAccepted(input: AcceptAgentDownstreamOperationInput): Promise<AgentDownstreamOperation>;
+  markLocalAccepted?(input: AcceptAgentDownstreamOperationInput): Promise<AgentDownstreamOperation>;
   markSubmissionUnknown(input: MarkAgentDownstreamSubmissionUnknownInput): Promise<AgentDownstreamOperation>;
   complete(input: CompleteAgentDownstreamOperationInput): Promise<AgentDownstreamOperation>;
   release?(input: AgentDownstreamOperationIdentity): Promise<boolean>;
@@ -65,6 +66,7 @@ export interface AgentDownstreamExecutionContext {
   signal?: AbortSignal;
   beginSubmission(): Promise<void>;
   recordAccepted(providerTaskId: string): Promise<void>;
+  recordLocalAccepted?(taskId: string): Promise<void>;
   executeOperation<T>(
     input: AgentDownstreamStepInput,
     execute: (context: AgentDownstreamExecutionContext) => Promise<T>,
@@ -222,6 +224,15 @@ export async function executeDurableAgentDownstreamOperation<T>(
         throw new Error('Agent downstream operation was not submitted');
       }
       await dependencies.markAccepted({ ...identity, providerTaskId });
+      acceptanceRecorded = true;
+    },
+    async recordLocalAccepted(taskId: string) {
+      if (submissionStarted || acceptanceRecorded || !dependencies.markLocalAccepted) {
+        throw new Error('Local downstream acceptance is unavailable');
+      }
+      // No external submission happened. A lost commit response is recoverable by reading the operation.
+      await dependencies.markLocalAccepted({ ...identity, providerTaskId: taskId });
+      submissionStarted = true;
       acceptanceRecorded = true;
     },
     executeOperation(step, childExecute, childRecovery) {

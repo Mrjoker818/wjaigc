@@ -42,8 +42,21 @@ describe('production Skill generation lineage', () => {
     mocks.updateCloudTask.mockResolvedValue(true);
   });
 
-  it.each([false, true])('preserves user requirements, lineage and terminal error metadata (failed=%s)', async (failed) => {
-    if (failed) {
+  it.each(['success', 'provider-failed', 'admission-failed', 'lineage-failed', 'missing-task', 'submission-unknown'])('preserves user requirements and distinguishes local admission from provider work (%s)', async (outcome) => {
+    if (outcome === 'submission-unknown') {
+      mocks.executeAdmittedToolCall.mockRejectedValue(new Error('monitor stopped'));
+      mocks.getCloudTaskForUser.mockReset()
+        .mockResolvedValueOnce({ id: 'task-1', status: 'queued', result: { submissionPayload: { prompt: 'render' } } })
+        .mockResolvedValue({ id: 'task-1', status: 'processing', result: {
+          taskError: { code: 'SKILL_SUBMISSION_UNKNOWN' }, skillBillingProvenance: { runId: 'run-1' },
+        } });
+    }
+    if (outcome === 'lineage-failed') mocks.updateCloudTask.mockResolvedValue(false);
+    if (outcome === 'missing-task') mocks.executeToolCall.mockResolvedValue({ success: true, taskIds: [] });
+    if (outcome === 'admission-failed') {
+      mocks.executeToolCall.mockResolvedValue({ success: false, error: 'internal admission failed', errorCode: 'SKILL_BILLING_NOT_AUTHORIZED' });
+    }
+    if (outcome === 'provider-failed') {
       mocks.getCloudTaskForUser.mockReset()
         .mockResolvedValueOnce({ id: 'task-1', status: 'queued', result: { submissionPayload: { prompt: 'render' } } })
         .mockResolvedValueOnce({ id: 'task-1', status: 'failed', error: 'request rejected', result: {
@@ -66,7 +79,7 @@ describe('production Skill generation lineage', () => {
       idempotencyKey: 'step-key', operationKey: 'operation-1', recovery: false,
       executionFence: { runId: 'run-1', leaseOwner: 'lease-1', generation: 1 },
       signal: new AbortController().signal,
-      beginSubmission: vi.fn(), recordAccepted: vi.fn(), executeOperation: vi.fn(),
+      beginSubmission: vi.fn(), recordAccepted: vi.fn(), recordLocalAccepted: vi.fn(), executeOperation: vi.fn(),
     };
 
     const execution = registry.stepAdapters.generate_image({
@@ -88,15 +101,42 @@ describe('production Skill generation lineage', () => {
       modelBinding: { providerId: 'provider-1', modelId: 'image-1' },
       requestDigest: 'digest', operation, signal: operation.signal,
     });
-    if (failed) {
+    if (['admission-failed', 'lineage-failed', 'missing-task'].includes(outcome)) {
+      await expect(execution).rejects.toMatchObject({
+        code: outcome === 'admission-failed' ? 'SKILL_BILLING_NOT_AUTHORIZED' : 'SKILL_IMAGE_ADMISSION_FAILED',
+      });
+      expect(operation.beginSubmission).not.toHaveBeenCalled();
+      expect(operation.recordAccepted).not.toHaveBeenCalled();
+      expect(operation.recordLocalAccepted).not.toHaveBeenCalled();
+      expect(mocks.executeAdmittedToolCall).not.toHaveBeenCalled();
+      return;
+    }
+    if (outcome === 'submission-unknown') {
+      await expect(execution).rejects.toMatchObject({ code: 'AGENT_DOWNSTREAM_SUBMISSION_UNKNOWN' });
+    } else if (outcome === 'provider-failed') {
       await expect(execution).rejects.toMatchObject({ providerStatus: 400, providerCode: 'TASK_RECOVERY_REQUEST_REJECTED' });
     } else {
       await execution;
     }
 
     const submittedPrompt = mocks.executeToolCall.mock.calls[0]?.[1]?.prompt;
+    expect(operation.beginSubmission).not.toHaveBeenCalled();
+    expect(operation.recordAccepted).not.toHaveBeenCalled();
+    expect(operation.recordLocalAccepted).toHaveBeenCalledWith('task-1');
     expect(submittedPrompt).toContain('strawberry cake');
     expect(submittedPrompt).toContain('restaurant menu');
+
+    // The receiving route must verify this identity against persisted billing and execution state.
+    expect(mocks.executeToolCall.mock.calls[0]?.[2]).toMatchObject({
+      skillBillingContext: {
+        runId: 'run-1',
+        stepId: 'generate',
+        requestDigest: 'digest',
+        operationKey: 'operation-1',
+        executionFence: operation.executionFence,
+      },
+    });
+    expect(mocks.executeToolCall.mock.calls[0]?.[1]).not.toHaveProperty('_skipCredits');
 
     expect(mocks.updateCloudTask).toHaveBeenCalledWith('task-1', {
       result: expect.objectContaining({

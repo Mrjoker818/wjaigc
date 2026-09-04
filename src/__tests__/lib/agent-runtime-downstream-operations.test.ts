@@ -14,6 +14,48 @@ describe('durable Agent downstream operations', () => {
     generation: 3,
   };
 
+  it.each([false, true])('recovers local acceptance interruption without unknown submission (committed=%s)', async committed => {
+    let operation: AgentDownstreamOperation | undefined;
+    let interrupted = false;
+    const dependencies: AgentDownstreamOperationDependencies = {
+      prepare: vi.fn(async identity => {
+        const prepared: AgentDownstreamOperation = { ...identity, ...operation, attempts: (operation?.attempts || 0) + 1,
+          status: operation?.status || 'prepared', claimed: true };
+        operation = prepared;
+        return prepared;
+      }),
+      markSubmitted: vi.fn(), markAccepted: vi.fn(), markSubmissionUnknown: vi.fn(),
+      markLocalAccepted: vi.fn(async input => {
+        if (committed || interrupted) operation = { ...operation!, status: 'accepted', providerTaskId: input.providerTaskId };
+        if (!interrupted) { interrupted = true; throw new Error('local confirmation interrupted'); }
+        return operation!;
+      }),
+      complete: vi.fn(async input => {
+        operation = { ...operation!, status: 'completed', response: input.response };
+        return operation;
+      }),
+      release: vi.fn(async () => true),
+    };
+    const input = { actorUserId: 'user-1', projectId: 'project-1', runId: 'run-1',
+      toolId: 'generate_image', requestDigest: 'a'.repeat(64), executionFence };
+    const childIds = new Set<string>();
+    const submit = vi.fn(async (context: import('@/lib/agent-runtime/downstream-operations').AgentDownstreamExecutionContext) => {
+      childIds.add(context.idempotencyKey);
+      await context.recordLocalAccepted!('local-child-1');
+      return { taskId: 'local-child-1' };
+    });
+    await expect(executeDurableAgentDownstreamOperation(input, submit, dependencies))
+      .rejects.toThrow('local confirmation interrupted');
+    await expect(executeDurableAgentDownstreamOperation(input, submit, dependencies, {
+      reconcile: async taskId => ({ taskId }),
+    })).resolves.toEqual({ taskId: 'local-child-1' });
+    expect(childIds.size).toBe(1);
+    expect(submit).toHaveBeenCalledTimes(committed ? 1 : 2);
+    expect(dependencies.markSubmitted).not.toHaveBeenCalled();
+    expect(dependencies.markAccepted).not.toHaveBeenCalled();
+    expect(dependencies.markSubmissionUnknown).not.toHaveBeenCalled();
+  });
+
   it('rejects an unfenced operation before any downstream state can be prepared', () => {
     expect(() => createAgentDownstreamOperationIdentity({
       actorUserId: 'user-1', projectId: 'project-1', runId: 'run-1',

@@ -183,14 +183,19 @@ describe('cloud-task-storage', () => {
       creditStatus: 'charged',
     })).resolves.toBe(true);
 
-    const update = execSql.mock.calls.find(([sql]) => String(sql).startsWith('UPDATE cloud_tasks SET'));
+    const update = execSql.mock.calls.find(([sql]) => String(sql).includes('UPDATE cloud_tasks SET'));
     expect(update).toBeDefined();
-    expect(update?.[0]).toContain('status = $');
-    expect(update?.[0]).toContain('result = $');
-    expect(update?.[0]).toContain('credit_status = $');
+    expect(update?.[0]).toMatch(/status = CASE WHEN EXISTS .* THEN status ELSE \$\d+ END/);
+    expect(update?.[0]).toContain("jsonb_build_object('skillDeferredCompletion'");
+    expect(update?.[0]).toMatch(/jsonb_build_object\('result', \$\d+::jsonb\)/);
+    expect(update?.[0]).toContain('WITH prepaid_parent_completion');
+    expect(update?.[0]).toContain('FOR SHARE OF parent, lease');
+    expect(update?.[0]).toContain("jsonb_build_object('skillBillingProvenance', result->'skillBillingProvenance')");
+    expect(update?.[0]).toMatch(/credit_status = CASE WHEN EXISTS .* THEN credit_status ELSE \$\d+ END/);
     expect(update?.[0]).toContain('status = ANY');
     expect(update?.[0]).toContain('revision = $');
     expect(update?.[1]).toEqual(expect.arrayContaining([
+      JSON.stringify({ imageUrl: '/result.png' }),
       ['processing'],
       4,
     ]));
@@ -998,7 +1003,7 @@ describe('cloud-task-storage', () => {
     const update = execSql.mock.calls.find(([sql]) =>
       String(sql).includes('AND revision = $3')
     );
-    expect(update?.[0]).toContain('credit_status = $');
+    expect(update?.[0]).toMatch(/credit_status = CASE WHEN EXISTS .* THEN credit_status ELSE \$\d+ END/);
     expect(update?.[1]).toEqual(expect.arrayContaining(['charged']));
   });
 });

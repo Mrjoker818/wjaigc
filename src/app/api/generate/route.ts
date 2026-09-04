@@ -2,7 +2,7 @@ import { NextRequest, NextResponse, after } from 'next/server';
 import { createHash } from 'node:crypto';
 import { appendUserJsonl } from '@/lib/server-user-storage';
 import { findProviderForModel, normalizeApiBaseUrl, findAllProvidersForType, findProviderById } from '@/lib/server-api-config';
-import { fetchWithV1Retry } from '@/lib/api-helpers';
+import { fetchWithV1Retry as fetchProviderRequest } from '@/lib/api-helpers';
 import { identifyImageSubject } from '@/lib/identify-subject';
 import { logOperation, logError, startTimer, OP_ACTIONS, sanitizeRequestData } from '@/lib/op-log';
 
@@ -27,6 +27,7 @@ import {
 } from '@/lib/task-core/task-service';
 import {
   chargeCloudTaskCredits,
+  getCloudTaskForUser,
   getCloudTaskForUserByIdempotencyKey,
   terminateCloudTaskAndRefund,
   updateCloudTask,
@@ -249,6 +250,39 @@ export async function POST(request: NextRequest) {
     // Canvas-era callers use `n`; the current panels use `outputCount`.
     // Normalize them before task fan-out so every entry point has identical behavior.
     const requestedOutputCount = outputCount ?? requestedN;
+    let skillBillingContext: import('@/lib/skill-runtime/billing-authorization').SkillBillingContext | undefined;
+    if (body.skillBillingContext !== undefined) {
+      const { parseSkillBillingContext, SkillBillingAuthorizationError } = await import('@/lib/skill-runtime/prepaid-generation');
+      if (!deferAgentExecution || !strictAgentRouting || submitOnly !== true
+        || _skipCredits || _skipCloudTaskPersistence || Number(requestedOutputCount ?? 1) !== 1
+        || !agentProviderIdempotencyKey) throw new SkillBillingAuthorizationError();
+      skillBillingContext = parseSkillBillingContext(body.skillBillingContext);
+    }
+    let prepaidExecution: import('@/lib/skill-runtime/prepaid-generation').SkillPrepaidExecutionReference | undefined;
+    if (body.skillPrepaidExecution !== undefined) {
+      const { parseSkillPrepaidExecutionReference, SkillBillingAuthorizationError } = await import('@/lib/skill-runtime/prepaid-generation');
+      if (!strictAgentRouting || deferAgentExecution || submitOnly || !_skipCredits || !_skipCloudTaskPersistence
+        || Number(requestedOutputCount ?? 1) !== 1 || typeof rawModel !== 'string' || typeof providerId !== 'string') {
+        throw new SkillBillingAuthorizationError();
+      }
+      prepaidExecution = parseSkillPrepaidExecutionReference(body.skillPrepaidExecution);
+    }
+    const prepaidRequestBody = prepaidExecution ? structuredClone(body) : undefined;
+    let prepaidExecutionFailure: unknown;
+    const fetchWithV1Retry: typeof fetchProviderRequest = async (baseUrl, path, options = {}, retryWithV1, timeoutMs) => {
+      if (!prepaidExecution || !prepaidRequestBody) return fetchProviderRequest(baseUrl, path, options, retryWithV1, timeoutMs);
+      if (prepaidExecutionFailure) throw prepaidExecutionFailure;
+      const { startSkillPrepaidProviderRequest } = await import('@/lib/skill-runtime/prepaid-generation');
+      try {
+        return await startSkillPrepaidProviderRequest({
+          ...prepaidExecution, userId: authResult.userId, providerId, modelId: rawModel,
+          requestBody: prepaidRequestBody, signal: options.signal || undefined,
+        }, signal => fetchProviderRequest(baseUrl, path, { ...options, signal, skipV1Retry: true }, false, timeoutMs));
+      } catch (error) {
+        prepaidExecutionFailure = error;
+        throw error;
+      }
+    };
     const requestedQuality = typeof body.quality === 'string' ? body.quality : undefined;
     const quality: string | undefined = requestedQuality;
     const resolutionTier: string | undefined = typeof resolution === 'string'
@@ -1125,7 +1159,7 @@ export async function POST(request: NextRequest) {
         output_format: body.output_format,
         projectId,
       })).digest('hex');
-      const childCreditCost = sessionUser && !_skipCredits
+      const childCreditCost = sessionUser && !_skipCredits && !skillBillingContext
         ? await calculateConfiguredCreditCost(
             'image_generate',
             model || '',
@@ -1209,6 +1243,9 @@ export async function POST(request: NextRequest) {
           slotId: slot.slotId,
           slotIndex: slot.slotIndex,
           deferCreditCharge: true,
+          ...(skillBillingContext ? { skillBilling: {
+            context: skillBillingContext, idempotencyKey: agentProviderIdempotencyKey,
+          } } : {}),
         });
 
         if (taskCreated) {
@@ -1272,6 +1309,18 @@ export async function POST(request: NextRequest) {
           `图像生成 ${pendingCharge.slotIndex + 1}/${generationBatch.slots.length}`,
         );
         if (!charge.charged) {
+          if (skillBillingContext) {
+            const current = await getCloudTaskForUser(pendingCharge.taskId, authResult.userId);
+            const provenance = current?.result?.skillBillingProvenance as Record<string, unknown> | undefined;
+            if (current && current.creditStatus === 'not-applicable' && current.creditCost === 0
+              && ['processing', 'completed', 'failed', 'cancelled', 'timeout'].includes(current.status)
+              && provenance?.runId === skillBillingContext.runId
+              && provenance.stepId === skillBillingContext.stepId
+              && provenance.operationKey === skillBillingContext.operationKey) {
+              // A concurrent identical request already activated this prepaid child.
+              continue;
+            }
+          }
           await Promise.allSettled(pendingCharges.map(({ taskId }) => (
             terminateCloudTaskAndRefund(taskId, 'cancelled', '图像生成批次扣费未完成，已取消未启动子任务')
           )));
@@ -2961,6 +3010,7 @@ export async function POST(request: NextRequest) {
         }
         submitted = true;
       } catch (singleError: unknown) {
+        if (prepaidExecutionFailure) throw prepaidExecutionFailure;
         const errMsg = singleError instanceof Error ? singleError.message : String(singleError);
         const isRetryable = singleError instanceof Error && (singleError as Error & { retryable?: boolean }).retryable;
         
@@ -3347,6 +3397,23 @@ export async function POST(request: NextRequest) {
     });
 
   } catch (apiError: unknown) {
+    const executionCode = apiError && typeof apiError === 'object' && 'code' in apiError ? apiError.code : undefined;
+    if (executionCode === 'SKILL_PARENT_CANCELLED' || executionCode === 'SKILL_EXECUTION_SUSPENDED'
+      || executionCode === 'SKILL_SUBMISSION_ALREADY_CLAIMED') {
+      const messages = {
+        SKILL_PARENT_CANCELLED: '父 Skill 已取消，未继续提交图像任务',
+        SKILL_EXECUTION_SUSPENDED: '父 Skill 已暂停或执行实例已变化，等待恢复',
+        SKILL_SUBMISSION_ALREADY_CLAIMED: '该图像任务已领取派发，正在核对提交结果，请勿重复生成',
+      };
+      return NextResponse.json({ success: false, code: executionCode, error: messages[executionCode],
+        retryable: executionCode === 'SKILL_EXECUTION_SUSPENDED' }, { status: 409 });
+    }
+    if (apiError instanceof Error && apiError.message === 'SKILL_BILLING_NOT_AUTHORIZED') {
+      return NextResponse.json({
+        success: false, code: 'SKILL_BILLING_NOT_AUTHORIZED',
+        error: 'Skill 费用授权无效或执行状态已变化，请检查任务记录', retryable: false,
+      }, { status: 403 });
+    }
     const errMsg = apiError instanceof Error ? apiError.message : String(apiError);
     console.error('Image generation API error:', errMsg);
     

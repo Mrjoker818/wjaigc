@@ -359,6 +359,9 @@ vi.mock('@/lib/task-core/task-abort', () => ({
 }));
 
 vi.mock('@/lib/agent-runtime/event-storage', () => ({
+  markAgentLocalDownstreamOperationAccepted: vi.fn(async () => {
+    throw new Error('Non-Skill Agent recovery must not use prepaid local acceptance');
+  }),
   appendAdoptedAgentEvent: vi.fn(async (input: Record<string, unknown>) => {
     const existing = state.events.find(event => event.eventId === input.eventId);
     if (existing) return { event: existing, inserted: false };
