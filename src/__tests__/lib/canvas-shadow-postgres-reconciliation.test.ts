@@ -351,6 +351,57 @@ suite('canvas shadow PostgreSQL reconciliation', () => {
     });
   });
 
+  it('does not trash a newly transferred Skill result before its first canvas snapshot arrives', async () => {
+    const client = await pool.connect();
+    const id = randomUUID();
+    const assetId = `skill-asset-${id}`;
+    const versionId = `skill-version-${id}`;
+    const placementId = `skill-placement-${id}`;
+    const entityId = `canvas-skill:${id}:${versionId}`;
+    try {
+      await client.query('BEGIN');
+      await migrateLegacyProjectOnWriteInTransaction(client, { actorUserId: ownerId, projectId });
+      await insertAssetGraph(client, { assetId, versionId, ownerId, projectId, url: '/media/skill-result.png' });
+      await insertPlacement(client, { id: placementId, ownerId, projectId, assetId, versionId,
+        workspaceId: `canvas:${projectId}`, entityId });
+      await client.query('UPDATE wujie_workspace_placements SET metadata = $2::jsonb WHERE id = $1',
+        [placementId, JSON.stringify({ source: 'canvas-skill', runId: id, sourceVersionIds: [], idempotencyKey: entityId })]);
+      await client.query('UPDATE wujie_workspace_placements SET idempotency_key = $2, request_digest = $3, source_version_id = $4 WHERE id = $1',
+        [placementId, entityId, 'a'.repeat(64), versionId]);
+
+      // An already queued old snapshot arrives after the transfer, before UI insertion.
+      await migrateLegacyProjectOnWriteInTransaction(client, { actorUserId: ownerId, projectId });
+      const row = await client.query<{ status: string }>('SELECT status FROM wujie_workspace_placements WHERE id = $1', [placementId]);
+      let adoption: unknown;
+      try {
+        adoption = await adoptManagedCanvasMapping(client, { actorUserId: ownerId, projectId }, {
+          ...canvasImage(entityId), assetId, assetVersionId: versionId, placementId,
+        });
+      } catch (error) {
+        adoption = error instanceof Error ? error.message : String(error);
+      }
+      expect({ status: row.rows[0]?.status, adoption }).toEqual({ status: 'active',
+        adoption: { assetId, versionId, placementId } });
+      const saved = await client.query<{ data_value: Project[] }>(
+        "SELECT data_value FROM wujie_user_data WHERE user_id = $1 AND data_key = 'projects'", [ownerId]);
+      const original = saved.rows[0].data_value;
+      const withResult = original.map(project => project.id === projectId ? { ...project,
+        canvasImages: [...project.canvasImages, { ...canvasImage(entityId), assetId, assetVersionId: versionId, placementId }],
+      } : project);
+      await client.query("UPDATE wujie_user_data SET data_value = $2::jsonb WHERE user_id = $1 AND data_key = 'projects'",
+        [ownerId, JSON.stringify(withResult)]);
+      await migrateLegacyProjectOnWriteInTransaction(client, { actorUserId: ownerId, projectId });
+      await client.query("UPDATE wujie_user_data SET data_value = $2::jsonb WHERE user_id = $1 AND data_key = 'projects'",
+        [ownerId, JSON.stringify(original)]);
+      await migrateLegacyProjectOnWriteInTransaction(client, { actorUserId: ownerId, projectId });
+      const deleted = await client.query<{ status: string }>('SELECT status FROM wujie_workspace_placements WHERE id = $1', [placementId]);
+      expect(deleted.rows[0]?.status).toBe('trashed');
+    } finally {
+      await client.query('ROLLBACK');
+      client.release();
+    }
+  });
+
   it('prefers a namespaced current canvas mapping over a stale checkpoint alias', async () => {
     const localSuffix = randomUUID();
     const localOwnerId = `shadow-current-owner-${localSuffix}`;
@@ -423,6 +474,8 @@ suite('canvas shadow PostgreSQL reconciliation', () => {
         versionId: staleVersionId,
         entityId: 'stale-checkpoint-alias',
       });
+      await client.query('UPDATE wujie_workspace_placements SET idempotency_key = $2, request_digest = $3, source_version_id = $4 WHERE id = $1',
+        [stalePlacementId, `old-transfer-${localSuffix}`, 'b'.repeat(64), staleVersionId]);
       await client.query(
         `INSERT INTO wujie_asset_migration_checkpoints(
            id, owner_id, project_id, legacy_project_id, status, checkpoint

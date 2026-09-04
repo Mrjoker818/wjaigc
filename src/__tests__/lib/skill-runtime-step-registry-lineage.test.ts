@@ -42,7 +42,7 @@ describe('production Skill generation lineage', () => {
     mocks.updateCloudTask.mockResolvedValue(true);
   });
 
-  it.each([false, true])('preserves lineage and terminal error metadata (failed=%s)', async (failed) => {
+  it.each([false, true])('preserves user requirements, lineage and terminal error metadata (failed=%s)', async (failed) => {
     if (failed) {
       mocks.getCloudTaskForUser.mockReset()
         .mockResolvedValueOnce({ id: 'task-1', status: 'queued', result: { submissionPayload: { prompt: 'render' } } })
@@ -72,15 +72,20 @@ describe('production Skill generation lineage', () => {
     const execution = registry.stepAdapters.generate_image({
       actorUserId: 'user-1', projectId: 'project-1', runId: 'run-1',
       definition: {
+        executionContextVersion: 1,
         id: request.skillId, version: 1, name: 'Skill', category: 'image', description: '',
-        systemPrompt: '', allowedSurfaces: ['canvas'], inputs: [], steps: [], enabled: true,
+        systemPrompt: '', allowedSurfaces: ['canvas'], inputs: [
+          { key: 'dish', label: 'Dish', kind: 'text', required: true },
+          { key: 'purpose', label: 'Purpose', kind: 'text', required: true },
+        ], steps: [], enabled: true,
         builtIn: true, createdAt: 1, updatedAt: 1, usageCount: 0,
       },
       step: {
         id: 'generate', label: 'Generate', toolId: 'generate_image', execution: 'sequential',
         promptTemplate: 'render', modelRole: 'image', qualityGateIds: [],
       },
-      inputValues: {}, modelBinding: { providerId: 'provider-1', modelId: 'image-1' },
+      inputValues: { dish: 'strawberry cake', purpose: 'restaurant menu' },
+      modelBinding: { providerId: 'provider-1', modelId: 'image-1' },
       requestDigest: 'digest', operation, signal: operation.signal,
     });
     if (failed) {
@@ -88,6 +93,10 @@ describe('production Skill generation lineage', () => {
     } else {
       await execution;
     }
+
+    const submittedPrompt = mocks.executeToolCall.mock.calls[0]?.[1]?.prompt;
+    expect(submittedPrompt).toContain('strawberry cake');
+    expect(submittedPrompt).toContain('restaurant menu');
 
     expect(mocks.updateCloudTask).toHaveBeenCalledWith('task-1', {
       result: expect.objectContaining({

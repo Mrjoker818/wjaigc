@@ -10,7 +10,7 @@ import { requireSkillForSurface } from './catalog';
 import { skillExecutionSteps } from './cost-estimator';
 import { parseSkillRunRequest, executeSkillRun, SkillRunRequestError } from './service';
 import { createProductionSkillStepRegistry } from './step-registry';
-import type { SkillDefinition, SkillStepDefinition, SkillSurface } from './types';
+import type { SkillDefinition, SkillInputField, SkillStepDefinition, SkillSurface } from './types';
 import { listAgentRunEvents } from '@/lib/agent-runtime/service';
 
 function record(value: unknown, name: string): Record<string, unknown> {
@@ -60,7 +60,7 @@ function parseFrozenSteps(value: unknown): SkillStepDefinition[] | null {
   return result;
 }
 
-function frozenDefinition(
+export function frozenDefinition(
   snapshotValue: unknown,
   surface: SkillSurface,
   skillId: string,
@@ -71,6 +71,28 @@ function frozenDefinition(
     throw new SkillRunRequestError('Frozen Skill identity is invalid');
   }
   const steps = parseFrozenSteps(snapshot.steps);
+  if (snapshot.executionContextVersion !== undefined && snapshot.executionContextVersion !== 1) {
+    throw new SkillRunRequestError('Frozen Skill context version is unsupported');
+  }
+  let inputs: SkillInputField[] = [];
+  if (snapshot.executionContextVersion === 1) {
+    if (!steps || typeof snapshot.systemPrompt !== 'string' || !Array.isArray(snapshot.inputs)) {
+      throw new SkillRunRequestError('Frozen Skill context is invalid');
+    }
+    const keys = new Set<string>();
+    inputs = snapshot.inputs.map(raw => {
+      const field = record(raw, 'skillSnapshot.inputs');
+      if (typeof field.key !== 'string' || !field.key || keys.has(field.key)
+        || ['__proto__', 'prototype', 'constructor'].includes(field.key)
+        || typeof field.label !== 'string' || typeof field.required !== 'boolean'
+        || typeof field.kind !== 'string'
+        || !['text', 'select', 'number', 'boolean', 'image', 'images', 'brand-kit', 'dataset'].includes(field.kind)) {
+        throw new SkillRunRequestError('Frozen Skill input is invalid');
+      }
+      keys.add(field.key);
+      return { key: field.key, label: field.label, kind: field.kind as SkillInputField['kind'], required: field.required };
+    });
+  }
   if (steps) {
     return {
       id: skillId,
@@ -78,9 +100,10 @@ function frozenDefinition(
       name: text(snapshot.name, 'skillSnapshot.name'),
       category: 'runtime',
       description: '',
-      systemPrompt: '',
+      ...(snapshot.executionContextVersion === 1 ? { executionContextVersion: 1 as const } : {}),
+      systemPrompt: snapshot.executionContextVersion === 1 ? snapshot.systemPrompt as string : '',
       allowedSurfaces: [surface],
-      inputs: [],
+      inputs,
       steps,
       enabled: true,
       builtIn: true,

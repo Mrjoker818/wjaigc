@@ -10,7 +10,7 @@ import { executeAdmittedToolCall, executeToolCall } from '@/lib/chat-tools';
 import { getApiProviders } from '@/lib/server-api-config';
 import type { User } from '@/lib/user-types';
 import { parseWorkspaceSourceTrace } from '@/lib/asset-core/source-trace';
-import { compileSkillPrompt } from './prompt-compiler';
+import { buildSkillStepPrompt } from './execution-context';
 import type { SkillRunRequest } from './run-request';
 import type { ExecuteSkillStepInput } from './executor';
 import type { SkillStepAdapter, SkillStepRecoveryFactory } from './service';
@@ -46,7 +46,7 @@ async function completedGenerationResult(
 }
 
 function promptForStep(input: ExecuteSkillStepInput): string {
-  return compileSkillPrompt(input.step.promptTemplate, input.inputValues);
+  return buildSkillStepPrompt(input);
 }
 
 async function executeOrchestratorStep(input: ExecuteSkillStepInput): Promise<SkillStepResult> {

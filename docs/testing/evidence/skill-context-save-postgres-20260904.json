@@ -1,0 +1,80 @@
+{
+  "date": "2026-09-04",
+  "timezone": "Asia/Shanghai",
+  "baselineCommit": "8237f5b6e9fb2b6c9c8fc7873ae68c291fbea0b4",
+  "candidate": "uncommitted-main-worktree",
+  "database": {
+    "engine": "PostgreSQL 18",
+    "host": "127.0.0.1",
+    "port": 55489,
+    "name": "wujie_skill_test",
+    "isolated": true,
+    "cloudDatabaseUsed": false,
+    "stoppedAfterTests": true
+  },
+  "runs": [
+    {
+      "purpose": "快照序列化真实失败",
+      "passed": 12,
+      "failed": 4,
+      "log": "output/skill-context-postgres.log",
+      "sha256": "00c50b0134a50d478733e7761aaa1a3ba5e7e03160de0d908c95868d3db72537"
+    },
+    {
+      "purpose": "快照修复后同套件回归",
+      "passed": 16,
+      "failed": 0,
+      "log": "output/skill-context-postgres-fixed.log",
+      "sha256": "b7783f2820fdba43c5c18076fb620b4fe7b224f7c9298005f7a8a2eba9fd7843"
+    },
+    {
+      "purpose": "旧快照误删尚未确认的服务器转入素材",
+      "passed": 7,
+      "failed": 1,
+      "log": "output/skill-save-race-postgres-red-v2.log",
+      "sha256": "8d1bc520e3d237632d3bd364554ebdc5a2436fe0163c99d261bfde1b68ec204d"
+    },
+    {
+      "purpose": "保存时序与Skill账务回归",
+      "passed": 58,
+      "failed": 0,
+      "realPostgresTests": 17,
+      "unitTests": 41,
+      "log": "output/skill-save-race-postgres-fixed.log",
+      "sha256": "80916b6e94bc676c805dd559cc99f92dcb5fcf217c17dbbc342c335192e06631"
+    },
+    {
+      "purpose": "旧映射替换后无法清理的真实失败",
+      "passed": 7,
+      "failed": 1,
+      "log": "output/skill-save-alias-postgres-red.log",
+      "sha256": "f263e96cc00baa918f4ed96659ada12517d5f354c0d5ecf656cebe96fe5e4b5c"
+    },
+    {
+      "purpose": "保留原checkpoint映射后的完整保存与Skill专项",
+      "passed": 58,
+      "failed": 0,
+      "realPostgresTests": 17,
+      "unitTests": 41,
+      "log": "output/skill-save-alias-postgres-fixed.log",
+      "sha256": "60a9acbe71fee80c860330758ac5e5ae34da803cd9e8b7ec137716ff6931c558"
+    }
+  ],
+  "verifiedDatabaseBoundaries": [
+    "同用户同幂等键20次创建只创建一个Skill运行并扣费一次，异摘要冲突",
+    "失败或取消只退款一次，迟到完成不能越过终态",
+    "过期派发回收不重复提交或扣费",
+    "真实Agent事件与Skill执行器质量退款及并发取消",
+    "同修订号只有一个写入者，损坏存储修订号不被当成零覆盖",
+    "新转入素材首次快照到达前不误删，确认后正常删除",
+    "替换旧别名后的原placement正常清理，新placement保持有效",
+    "清理事务回滚、锁顺序与跨工作区归属保护"
+  ],
+  "limits": [
+    "不代表其他PostgreSQL专项已完成",
+    "未调用真实图像供应商",
+    "云端原始失败请求未完整取回",
+    "历史trashed记录未修改或恢复",
+    "最终构建结果见skill-context-save-release-20260904.json；云端验收仍未完成"
+  ]
+}

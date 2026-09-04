@@ -1,5 +1,13 @@
 # 无界AI — 发布就绪报告 (RELEASE READINESS REPORT)
 
+## 2026-09-04 Skill 上下文与保存修复候选
+
+总体结论仍为**不通过**，不得把本地通过等同于云端验收。基线为main@8237f5b6；末次业务修复后固定源码全量测试4956通过、144跳过、0失败，类型检查与38功能保护门禁通过，lint为0错误/943警告。独立PostgreSQL专项17项通过，覆盖Skill并发扣退与保存时序；它不覆盖全部跳过项。
+
+生产构建退出0，119个静态页面生成完成，Build ID为7WAUKm_srtdb-ibxfmskj；7个业务源码文件哈希与测试快照一致。构建有2条Node localstorage路径警告，未隐藏。该候选可进入隔离云端测试，不代表平台可以正式发布。Google Chrome现有项目页及预览页可枚举，但接管返回Debugger unattached；未进入360或新建页。新版本的真实成品语义、保存刷新恢复和下载尚未验证，云端历史trashed素材未擅自恢复。没有重做Stage4、历史软归档或修改stable。
+
+证据：[固定源码验证](evidence/skill-context-save-release-20260904.json)、[真实数据库验证](evidence/skill-context-save-postgres-20260904.json)、[修复记录](2026-09-04-skill-context-save-repair.md)。
+
 ## 2026-09-03 Skill 与 ADMIN-003 续验判定
 
 总体结论保持**不通过**。Skill 的后端暂停/取消终态已在云端真实 run 上通过，且本地 58 项专项通过；但 Google Chrome 的按钮可见性断言因现有标签调试通道未附着仍未完成，不能用 API 结果替代 UI 证据。

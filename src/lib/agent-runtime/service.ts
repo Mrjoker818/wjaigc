@@ -787,6 +787,21 @@ export function createAgentRuntimeService(
       if (created.reused && TERMINAL_TASK_STATUSES.has(created.task.status)) {
         throw new AgentRunTerminalError(created.task.status);
       }
+      if (created.reused && skillAdmission) {
+        const persistedEvents = await dependencies.listEvents({
+          actorUserId: input.actor.id, projectId: request.projectId, runId,
+        });
+        const persistedCreated = persistedEvents.find(event => event.type === 'run.created');
+        if (persistedCreated) {
+          if (persistedCreated.payload.requestDigest !== agentRunRequestDigest(request)) {
+            throw new AgentEventConflictError();
+          }
+          return {
+            runId, reused: true, charged: created.charged, event: persistedCreated,
+            projection: reduceAgentEvents(persistedEvents), tools: authorization.tools,
+          };
+        }
+      }
       let createdEvent: AgentEvent;
       const createdEventInput = {
         actorUserId: input.actor.id,
@@ -808,6 +823,14 @@ export function createAgentRuntimeService(
           requestDigest: agentRunRequestDigest(request),
           ...(skillAdmission ? {
             skillSnapshot: {
+              executionContextVersion: 1,
+              systemPrompt: skillAdmission.skill.systemPrompt,
+              inputs: skillAdmission.skill.inputs.map(field => ({
+                key: field.key, label: field.label, kind: field.kind, required: field.required,
+                ...(field.defaultValue !== undefined ? { defaultValue: field.defaultValue } : {}),
+                ...(field.options !== undefined ? { options: [...field.options] } : {}),
+                ...(field.maximumItems !== undefined ? { maximumItems: field.maximumItems } : {}),
+              })),
               id: skillAdmission.skill.id,
               version: skillAdmission.skill.version,
               name: skillAdmission.skill.name,

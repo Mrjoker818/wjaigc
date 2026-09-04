@@ -1,5 +1,9 @@
 # 无界AI — 缺陷登记表 (BUG REGISTER)
 
+## 2026-09-04 Skill 交付与保存时序增量
+
+新增去重登记：SKILL-CONTEXT-20260904-01（需求丢失）、SKILL-SNAPSHOT-20260904-02（本地未发布快照含undefined）、SKILL-SAVE-20260904-03（旧快照误清理新转入素材）。均已失败测试后最小修复；120项上下文专项及58项保存/账务专项通过，后者含17项真实PostgreSQL。尚未完成最终固定源码发布门禁或云端验收，不关闭为全平台通过。详情与证据：[修复记录](2026-09-04-skill-context-save-repair.md)。不批量恢复历史trashed数据，不重做Stage4。
+
 ## 2026-09-03 Skill 暂停与终态投影云端增量
 
 `8e997ebf` 的两处服务端行为已由现存真实云端 run 证明：`execution-error` 暂停步骤投影为 failed，通用 resume 被 400 拒绝且状态不变；取消任务投影为 `cancelled/refunded`，活动子步骤为 cancelled、无 processing 残留。对应本地永久回归 58/58 通过。

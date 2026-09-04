@@ -27,6 +27,7 @@ import {
 } from '@/lib/skill-runtime/catalog';
 import { createProductionSkillStepRegistry } from '@/lib/skill-runtime/step-registry';
 import { skillExecutionSteps } from '@/lib/skill-runtime/cost-estimator';
+import { frozenDefinition } from '@/lib/skill-runtime/continuation';
 
 vi.mock('server-only', () => ({}));
 
@@ -69,6 +70,43 @@ function result(id: string): SkillStepResult {
 }
 
 describe('durable Skill executor', () => {
+  it('restores frozen context without consulting the live catalog', () => {
+    const restored = frozenDefinition({ ...definition, executionContextVersion: 1,
+      systemPrompt: 'frozen instruction', inputs: [{ key: 'dish', label: 'Dish', kind: 'text', required: true }],
+    }, 'canvas', definition.id, definition.version);
+    expect(restored).toMatchObject({ executionContextVersion: 1, systemPrompt: 'frozen instruction',
+      inputs: [{ key: 'dish', label: 'Dish', kind: 'text', required: true }] });
+    expect(() => frozenDefinition({ ...definition, executionContextVersion: 2 }, 'canvas', definition.id, 1)).toThrow();
+    expect(() => frozenDefinition({ ...definition, executionContextVersion: 1, inputs: null }, 'canvas', definition.id, 1)).toThrow();
+  });
+
+  it('binds new context to the digest while preserving legacy replay identities', () => {
+    const base = { runId: 'run-1', definition, step: definition.steps[1], inputValues: {} };
+    const previousOutputs = [{ stepId: 'plan', kind: 'text' as const, content: 'cake' }];
+    expect(skillStepRequestDigest(base)).toBe(skillStepRequestDigest({ ...base, previousOutputs }));
+    const modern = { ...base, definition: { ...definition, executionContextVersion: 1 as const } };
+    expect(skillStepRequestDigest(modern)).not.toBe(skillStepRequestDigest({ ...modern, previousOutputs }));
+    expect(skillStepRequestDigest(modern)).not.toBe(skillStepRequestDigest({ ...modern,
+      definition: { ...modern.definition, systemPrompt: 'changed' } }));
+  });
+
+  it('passes the same predecessor context on fresh execution and resumed execution', async () => {
+    const executeStep = vi.fn(async (input: ExecuteSkillStepInput) => ({ ...result(input.step.id), text: `output:${input.step.id}` }));
+    const executor = createSkillExecutor({ executeStep, appendEvent: vi.fn() });
+    const base = { actorUserId: 'user-1', projectId: 'project-1', runId: 'run-1', workspace: 'canvas' as const,
+      definition: { ...definition, executionContextVersion: 1 as const }, inputValues: {}, modelBindings: {},
+      operationContext: operationContext() };
+    await executor.execute(base);
+    const first = executeStep.mock.calls.find(([input]) => input.step.id === 'generate-3')![0];
+    expect(first.previousOutputs).toEqual([{ stepId: 'plan', kind: 'text', content: 'output:plan' }]);
+    executeStep.mockClear();
+    await executor.execute({ ...base, completedStepIds: ['plan', 'generate-4'], resumeFromStepId: 'generate-3',
+      existingOutputs: [{ stepId: 'plan', kind: 'text', content: 'output:plan' },
+        { stepId: 'generate-4', kind: 'text', content: 'must not leak parallel sibling' }] });
+    const resumed = executeStep.mock.calls.find(([input]) => input.step.id === 'generate-3')![0];
+    expect(resumed.previousOutputs).toEqual(first.previousOutputs);
+    expect(resumed.requestDigest).toBe(first.requestDigest);
+  });
   function dispatchDependencies(overrides: Partial<SkillRunExecutionDispatchDependencies> = {}): SkillRunExecutionDispatchDependencies {
     const task: CloudTask = {
       id: 'run-dispatch', userId: 'user-1', projectId: 'project-1', type: 'agent-run',

@@ -37,6 +37,7 @@ export interface SkillStepDefinition {
 }
 
 export interface SkillDefinition {
+  executionContextVersion?: 1;
   id: string;
   version: number;
   name: string;

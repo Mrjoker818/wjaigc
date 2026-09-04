@@ -591,10 +591,11 @@ async function existingCompletedMigration(
   }
   const read = readProjectSnapshot(rawProject);
   if (!read.project) throw migrationError('LEGACY_PROJECT_QUARANTINED');
+  const previousMappings = checkpointMappings(row.checkpoint);
   const plan = planCanvasShadowReconciliation({
     actorUserId: input.actorUserId,
     projectId: input.projectId,
-    previousMappings: checkpointMappings(row.checkpoint),
+    previousMappings,
     images: read.project.canvasImages,
   });
   await lockProjectAssetsForReconciliation(client, input);
@@ -668,7 +669,7 @@ async function existingCompletedMigration(
   for (const { imageId, mapping } of plan.removals) {
     await trashGraphForImage(client, input, imageId, mapping);
   }
-  await trashStaleCanvasPlacements(client, input, plan.activeMappings);
+  await trashStaleCanvasPlacements(client, input, plan.activeMappings, previousMappings);
   await client.query(
     `UPDATE wujie_asset_migration_checkpoints
      SET checkpoint = $4::jsonb, error_code = NULL, updated_at = now()
@@ -1023,6 +1024,7 @@ async function trashStaleCanvasPlacements(
   client: PoolClient,
   input: LegacyMigrationInput,
   activeMappings: Record<string, LegacyImageMapping>,
+  acknowledgedMappings: Record<string, LegacyImageMapping>,
 ): Promise<void> {
   await client.query(
     `SELECT asset.id
@@ -1040,8 +1042,14 @@ async function trashStaleCanvasPlacements(
      FOR UPDATE`,
     [input.actorUserId, input.projectId],
   );
-  const placementLock = await client.query<{ id: string; asset_id: string }>(
-    `SELECT id, asset_id
+  const placementLock = await client.query<{
+    id: string;
+    asset_id: string;
+    source_version_id?: string | null;
+    idempotency_key?: string | null;
+    request_digest?: string | null;
+  }>(
+    `SELECT id, asset_id, source_version_id, idempotency_key, request_digest
      FROM wujie_workspace_placements
      WHERE owner_id = $1 AND project_id = $2
        AND workspace_kind = 'canvas' AND workspace_id IN ($2, 'canvas:' || $2)
@@ -1053,7 +1061,17 @@ async function trashStaleCanvasPlacements(
   const activePlacementIds = new Set(
     Object.values(activeMappings).map(mapping => mapping.placementId),
   );
-  const staleRows = placementLock.rows.filter(row => !activePlacementIds.has(row.id));
+  const acknowledgedPlacementIds = new Set(
+    Object.values(acknowledgedMappings).map(mapping => mapping.placementId),
+  );
+  const staleRows = placementLock.rows.filter(row => {
+    if (activePlacementIds.has(row.id)) return false;
+    // A queued pre-transfer snapshot cannot delete a server transfer it has never acknowledged.
+    // Use server-written columns, not client-controlled metadata. Explicit removal stays authoritative.
+    const pendingTransfer = row.source_version_id && row.idempotency_key && row.request_digest
+      && !acknowledgedPlacementIds.has(row.id);
+    return !pendingTransfer;
+  });
   if (staleRows.length === 0) return;
 
   const stalePlacementIds = staleRows.map(row => row.id);

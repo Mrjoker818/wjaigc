@@ -7,6 +7,7 @@ import type {
 } from '@/lib/agent-runtime/downstream-operations';
 import type { AgentEventType, AgentWorkspace } from '@/lib/agent-runtime/types';
 import { runSkillQualityGates } from './quality-gates';
+import { buildSkillStepPrompt, selectSkillPredecessorOutputs } from './execution-context';
 import type {
   DurableSkillOutput,
   SkillDefinition,
@@ -27,6 +28,7 @@ export interface SkillExecutorEventInput {
 }
 
 export interface ExecuteSkillStepInput {
+  previousOutputs?: readonly DurableSkillOutput[];
   actorUserId: string;
   projectId: string;
   runId: string;
@@ -161,6 +163,7 @@ function canonicalize(value: unknown): unknown {
 }
 
 export function skillStepRequestDigest(input: {
+  previousOutputs?: readonly DurableSkillOutput[];
   runId: string;
   definition: SkillDefinition;
   step: SkillStepDefinition;
@@ -175,6 +178,10 @@ export function skillStepRequestDigest(input: {
     promptTemplate: input.step.promptTemplate,
     inputValues: input.inputValues,
     modelBinding: input.modelBinding || null,
+    ...(input.definition.executionContextVersion === 1 ? {
+      executionContextVersion: 1,
+      executionPrompt: buildSkillStepPrompt(input),
+    } : {}),
   }))).digest('hex');
 }
 
@@ -369,7 +376,9 @@ export function createSkillExecutor(dependencies: SkillExecutorDependencies) {
               if (controller.signal.aborted) throw abortError(controller.signal);
               startedStepIds.push(step.id);
               const modelBinding = input.modelBindings[step.modelRole];
+              const previousOutputs = selectSkillPredecessorOutputs(input.definition.steps, step.id, outputs);
               const requestDigest = skillStepRequestDigest({
+              previousOutputs,
               runId: input.runId,
               definition: input.definition,
               step,
@@ -385,6 +394,7 @@ export function createSkillExecutor(dependencies: SkillExecutorDependencies) {
             });
               let result: SkillStepResult;
               const stepExecutionInput = {
+                previousOutputs,
                 actorUserId: input.actorUserId,
                 projectId: input.projectId,
                 runId: input.runId,
@@ -408,6 +418,7 @@ export function createSkillExecutor(dependencies: SkillExecutorDependencies) {
                 throw stepExecutionError(step.id, error);
               }
               const stepInput: ExecuteSkillStepInput = {
+              previousOutputs,
               actorUserId: input.actorUserId,
               projectId: input.projectId,
               runId: input.runId,

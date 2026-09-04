@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as agentRuntime from '@/lib/agent-runtime/service';
 import type { AgentRuntimeDependencies } from '@/lib/agent-runtime/service';
 import { AgentEventConflictError } from '@/lib/agent-runtime/event-storage';
+import { assertAgentEventPayloadSafe } from '@/lib/agent-runtime/event-reducer';
 import type { AgentEvent, AgentRunRequest } from '@/lib/agent-runtime/types';
 import type { CloudTask } from '@/lib/cloud-task-storage';
 import type { User } from '@/lib/user-types';
@@ -1060,6 +1061,8 @@ describe('Agent runtime service', () => {
     })).resolves.toMatchObject({ reused: false });
     expect(dependencies.calculateCreditCost).toHaveBeenCalledTimes(2);
     expect(dependencies.createBillableTask).toHaveBeenCalledTimes(1);
+    const snapshot = dependencies.appendEvent.mock.calls[0][0].payload.skillSnapshot as Record<string, unknown>;
+    expect(() => assertAgentEventPayloadSafe(snapshot)).not.toThrow();
   });
 
   it('prices a public zero-step simple-chat Skill with one orchestrator base charge', async () => {
@@ -1087,6 +1090,9 @@ describe('Agent runtime service', () => {
         workspace: 'chat',
         skillSnapshot: expect.objectContaining({
           id: 'ppt-master',
+          executionContextVersion: 1,
+          systemPrompt: requireSkillForSurface('ppt-master', 'simple-chat').systemPrompt,
+          inputs: requireSkillForSurface('ppt-master', 'simple-chat').inputs,
           steps: [{
             id: 'orchestrator', label: '智能编排', toolId: 'chat', execution: 'sequential',
             promptTemplate: requireSkillForSurface('ppt-master', 'simple-chat').systemPrompt,
@@ -1096,6 +1102,27 @@ describe('Agent runtime service', () => {
       }),
     }));
     expect(dependencies.createBillableTask).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not replace a legacy Skill snapshot on an identical create retry', async () => {
+    const dependencies = serviceDependencies();
+    const input = agentRuntime.parseAgentRunRequest(simpleChatSkillRequest());
+    const digest = agentRuntime.agentRunRequestDigest(input);
+    const prior = event(1, 'run.created', { workspace: 'chat', requestDigest: digest,
+      skillSnapshot: { id: 'ppt-master', version: 1, name: 'Old snapshot', steps: [] } });
+    dependencies.listEvents.mockResolvedValue([prior]);
+    dependencies.createBillableTask.mockImplementation(async value => ({
+      task: { ...value.task, userId: value.userId, creditStatus: 'pending',
+        creditCost: value.creditCost, idempotencyKey: value.idempotencyKey, revision: 0 },
+      reused: true, charged: false,
+    }));
+    const service = agentRuntime.createAgentRuntimeService(dependencies);
+    const result = await service.createRun({ actor: user, request: input });
+    expect(result.event).toEqual(prior);
+    expect(dependencies.appendEvent).not.toHaveBeenCalled();
+    expect(result.charged).toBe(false);
+    dependencies.listEvents.mockResolvedValue([{ ...prior, payload: { ...prior.payload, requestDigest: 'different' } }]);
+    await expect(service.createRun({ actor: user, request: input })).rejects.toBeInstanceOf(AgentEventConflictError);
   });
 
   it('rejects extra Skill model roles before resolving any model', async () => {

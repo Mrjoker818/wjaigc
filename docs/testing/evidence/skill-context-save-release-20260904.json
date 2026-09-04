@@ -1,0 +1,59 @@
+{
+  "date": "2026-09-04",
+  "baselineCommit": "8237f5b6e9fb2b6c9c8fc7873ae68c291fbea0b4",
+  "candidate": "main-candidate-defined-by-sourceHashes",
+  "fullTest": {
+    "command": "pnpm test",
+    "startedAt": "2026-09-04T10:36:36+08:00",
+    "durationSeconds": 498.14,
+    "exitCode": 0,
+    "passed": 4956,
+    "skipped": 144,
+    "failed": 0,
+    "passedFiles": 630,
+    "skippedFiles": 27,
+    "log": "output/skill-context-save-release-test.log",
+    "sha256": "e8e4055f4f8ed1e7faec7a82d876ad71137d2d8a3b183d6eeea91fe0f4808af7"
+  },
+  "lint": {
+    "command": "pnpm lint",
+    "exitCode": 0,
+    "errors": 0,
+    "warnings": 943,
+    "log": "output/skill-context-save-release-lint.log",
+    "sha256": "8c1834ebb52a331a85e1b3bb93f5acbd11835cbf15defa8bb09f26efcf4498c7"
+  },
+  "typecheck": { "command": "pnpm ts-check", "exitCode": 0 },
+  "protectedBaseline": { "command": "pnpm check:protected-baseline", "exitCode": 0, "featureIds": 38 },
+  "postgresEvidence": "skill-context-save-postgres-20260904.json",
+  "build": {
+    "command": "pnpm build",
+    "nodeOptions": "--max-old-space-size=8192",
+    "status": "passed",
+    "exitCode": 0,
+    "compiledMinutes": 14.0,
+    "typecheckSeconds": 60,
+    "staticPages": 119,
+    "buildId": "7WAUKm_srtdb-ibxfmskj",
+    "log": "output/skill-context-save-build.log",
+    "sha256": "990504afb3f08383c72a0b6c54fe28989e0c9c95cbe870b4f534e554dce4d458",
+    "warnings": ["2条Node --localstorage-file未提供有效路径警告，未导致构建失败"]
+  },
+  "cloudAcceptance": "unverified-debugger-unattached",
+  "releaseReadiness": "不通过",
+  "sourceHashes": {
+    "src/lib/skill-runtime/execution-context.ts": "c87cb3f55ffbd42fa9a8b56b1a40016fd6633a4ee5925a26028a9f0db389331f",
+    "src/lib/agent-runtime/service.ts": "e6af5263cff5a35c8cd4b560c889d2d70811d70b83a6043c6bb70b9defd2aadf",
+    "src/lib/asset-core/legacy-migration.ts": "826830c0ea831b0584ed948882e149cf77bfe90b7bd275ad482670e825211a18",
+    "src/lib/skill-runtime/continuation.ts": "4c545eb8cd01ec81826af88e77169f3a4983d051831eabb524e35a0807204a2f",
+    "src/lib/skill-runtime/executor.ts": "0323db504b49b1cd658e22a59e65d71c907917ebaac74641021e4b3b264b5392",
+    "src/lib/skill-runtime/step-registry.ts": "32ec78f136bcf73ef6bee3f17e4a83c4fbadac53001e503e8e21aa6414649d93",
+    "src/lib/skill-runtime/types.ts": "38099340f8cafb8885421c218a7d36a5a0270bf634150c496c6f78d888698ff0"
+  },
+  "limits": [
+    "144项跳过不是通过；数据库专项有独立证据，不能据此覆盖全部跳过项",
+    "生产构建通过仅证明本地产物可生成，不代表云端已经部署或真实业务验收通过",
+    "云端原始失败素材未自动恢复，真实语义和保存恢复尚未验收",
+    "未触碰stable或执行历史媒体软归档"
+  ]
+}
