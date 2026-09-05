@@ -2095,3 +2095,10 @@ The focused gate test passes `7/7`; the actual protected-baseline command passes
 - 统一 Skill 真实运行确认了 62 积分估价、精确供应商/模型冻结、取消一次退款；但真实图像子任务被上游服务拒绝，尚未取得成功 AssetVersion。
 - 本轮修复 `TEST-SKILL-002/003` 的本地门禁全部通过：4903 项已执行测试 0 失败、TypeScript、零错误 ESLint、保护门禁与 8 GiB `119/119` 构建通过。
 - **发布结论仍为有条件通过。** 新修复必须推送 `main`、由 Coze 拉取并强刷现有 Chrome 预览页，复验错误暂停只剩重试、取消后无 processing 步骤；隔离 PostgreSQL 143 项与成功图像资产链路仍开放。
+## 2026-09-05 Task12 候选最终本地门禁
+
+- 当前候选为 `main@ff338cef6803de36dd9597858b6c0bf9210868f1`；`stable` 保持只读。
+- Task12 专项 `224/224` 通过；TypeScript、构建版 Lint、保护基线及生产构建 `119/119` 通过。
+- 发布结论仍为**不通过云端验收**，原因不是本地门禁失败，而是 Google Chrome 现有预览标签返回 `Debugger unattached`，无法取得 Coze exact-tree、真实任务、账务、刷新恢复和浏览器证据。
+- 未关闭项：云端 Skill 成功产出与 AssetVersion、暂停恢复、失败步骤重试、取消退款、预览/下载、完整 Console/Network/Trace，以及 PostgreSQL/供应商相关的云端回执。
+- 禁止动作：不得更新 `stable`，不得以“本地 224 项通过”宣布 Task12 或全平台发布通过。

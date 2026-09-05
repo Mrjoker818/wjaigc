@@ -2279,3 +2279,10 @@ BUG-018 已从未验证项移除。剩余顺序为 `002-B -> 002-D -> 002-E`；�
 - [ ] 沙箱重启后强刷现有 Google Chrome 预览页，验证暂停后恢复、不重复供应商提交和最终一次账务。
 - [ ] 保存云端最终 Console、Network、Trace、截图、requestId、taskId 和积分前后值。
 - 当前 Task12 约 `88%`；以上三项完成前仍为未完成，不重复已闭环的本地跨浏览器和下载测试。
+## 2026-09-05 Task12 最终本地门禁增量
+
+- 精确候选 `ff338cef6803de36dd9597858b6c0bf9210868f1` 已完成 14 个 Task12 专项文件、`224/224` 测试、TypeScript、构建版 Lint、保护门禁和生产构建 `119/119`。
+- 以上仅关闭本地候选门禁，不关闭云端未验证项。
+- 当前阻塞证据：Google Chrome 既有预览标签可发现但无法接管，返回 `Debugger unattached`；没有创建新标签，也没有改用 360 浏览器。
+- 仍需云端证据：Coze exact-tree、沙箱重启后强刷、成功 Skill 任务、暂停/恢复、失败重试、取消退款、AssetVersion、预览/下载及完整 Console/Network/Trace。
+- Task12 状态：**未完成，LOCAL PASS / CLOUD UNVERIFIED**。

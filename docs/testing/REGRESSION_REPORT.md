@@ -2737,3 +2737,11 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - Canvas 成品预览、AssetVersion 精确读取、图片浮动工具栏 PNG 下载及下载文件 `1x1 image/png` 元数据通过；生产模式 Console 失败为 0。
 - 暂停/继续、失败步骤重试、历史恢复和 API 控制专项 `57/57` 通过；证据过滤器新增精确请求摘要恢复约束，未知或未恢复的 POST 中断仍失败关闭。
 - **回归判定：LOCAL PRODUCTION / THREE-BROWSER PASS；LATEST COZE RUNTIME PENDING。** 尚不关闭 Task12。
+## 2026-09-05 Task12 最终本地候选门禁复核
+
+- 候选提交：`ff338cef6803de36dd9597858b6c0bf9210868f1`，分支 `main`，`stable` 未触碰。
+- Task12 专项：14 个测试文件，`224/224` 通过，0 失败，0 跳过；覆盖 Skill Runtime、节点模式、运行请求、质量与 UI 接线。
+- 工程门禁：`pnpm ts-check` 通过；构建版 ESLint 退出 0；保护基线 `38/38` 通过且无漂移；生产构建退出 0，`119/119` 页面生成成功。
+- 生产构建记录：Webpack 编译约 13.9 分钟，TypeScript 约 55 秒；构建期间保留了本地存储路径警告，未隐藏。
+- 云端阻塞：现有 Google Chrome 预览标签可枚举，但接管返回 `Debugger unattached`，因此本轮未执行 Coze 拉取、沙箱重启、真实 Skill 运行、暂停/恢复、失败重试、取消退款、预览/下载及新鲜 Console/Network/Trace 采集。
+- 判定：`LOCAL PASS / CLOUD UNVERIFIED`。Task12 不能标记完成；不能把本地测试结果当作云端业务通过。
