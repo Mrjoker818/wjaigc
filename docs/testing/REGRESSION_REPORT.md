@@ -1,5 +1,11 @@
 # 无界AI — 回归测试报告 (REGRESSION REPORT)
 
+## 2026-09-05 Task12 原生 Skill 租约结算补修
+
+云端真实成功任务暴露父任务已完成但执行租约 `completed_at=0`。新增失败单测证明原生 Skill 自行终态化后，适配器再次写合成 `tool.completed` 会被终态保护拒绝并跳过租约结算；最小修复后 same-task 18/18，通过 Skill 执行器、事件围栏和预付轮询等聚焦回归共 73/73，TypeScript 通过。
+
+新增真实 PostgreSQL 成功链路用例已写入套件，覆盖完成任务、租约清空、单次消费和无合成重复事件；当前机器缺少 `POSTGRES_TEST_DATABASE_URL`，该文件 8 项全部明确跳过。最终全仓为 642 文件/5142 项通过、30 文件/166 项 PostgreSQL 门禁跳过、0 失败；`lint:build` 零错误、38 项保护门禁通过，生产构建 119/119 页面，Build ID `r-dYejxNXZhfZ2hXiAEYl`。结论为 **LOCAL PASS / POSTGRES AND CLOUD UNVERIFIED**，不得把本轮结果写成 Task12 已完成。
+
 ## 2026-09-04 Skill shadow恢复最终候选
 
 最后两项审查修复之后，完整Vitest5253通过、0失败、0跳过，含真实隔离PostgreSQL，报告`output/skill-shadow-release-full-20260904.json`。类型检查及38功能保护通过；全仓lint0错误944警告。默认4GB构建OOM退出134，确认本机容量后以仅进程级8GB堆重试完整退出0，119/119页面，日志`output/skill-shadow-release-build-8gb-20260904.log`。保留失败及全部RED证据，不把本地测试冒充Chrome云端通过。详情见[最新修复记录](2026-09-04-skill-history-placement-recovery.md)。

@@ -1,5 +1,23 @@
 # 无界AI — 缺陷登记表 (BUG REGISTER)
 
+## 2026-09-05 原生 Skill 完成后执行租约未结算
+
+- ID：TEST-SKILL-009，P1，Task12 执行恢复边界；本地已修复，隔离 PostgreSQL 与 Coze 云端待验。
+- 复现证据：云端成功 run `58fa70c2-e347-45af-b505-fac910842443` 已为 `completed/charged`，但 `wujie_agent_execution_leases.completed_at=0`、`attempt_count=1`。
+- 根因：原生 Skill 执行器已经写入 `run.completed` 并完成父任务；same-task 适配器的原生观察器不返回该终态，随后又尝试写无 stepId 的合成 `tool.completed`。终态写保护拒绝该事件，控制流在 `completeAdoptedAgentExecution` 前中断。
+- 最小修复：观察器未返回终态时重读权威父任务；若同项目原生任务已经处于终态，则跳过合成 `tool.completed`，继续结算租约。非原生/未终态任务仍保持原行为。
+- TDD：新增单测先稳定失败于“terminal task rejects a synthetic tool completion”，修复后 same-task 18/18；Skill/事件/预付轮询聚焦回归合计 73/73，`pnpm ts-check` 通过。
+- 最终本地门禁：672 个测试文件中 642 通过、30 个 PostgreSQL 文件跳过；5308 项中 5142 通过、166 项跳过、0 失败。`lint:build` 零错误、38 项保护门禁通过；生产构建 `119/119` 页面，Build ID `r-dYejxNXZhfZ2hXiAEYl`。
+- 真库回归：已增加真实成功 Skill 的数据库测试，断言任务 completed、`completed_at>0`、`lease_owner=''`、仅一笔 consume、无退款、无无步骤合成完成事件。本机缺少 `POSTGRES_TEST_DATABASE_URL`，8 项 PostgreSQL 套件明确跳过，不能标记为真库通过。
+- 未改动：供应商提交、积分金额、失败退款、资产投影、登录及 stable 分支。
+
+## 2026-09-05 Skill 成品 AssetVersion 尺寸未落库
+
+- ID：TEST-SKILL-010，P2，Task12 资产元数据边界；已完成根因定位，尚未修改生产代码。
+- 证据：同一真实成品浏览器解码为 1254×1254，版本 `e819d7ba-7cbb-4984-b444-f02d3a118104` 的数据库 `width/height` 均为 NULL。
+- 根因：完成任务结果只持久化 `imageUrl/imageUrls`，没有宽高；`task-projector.ts` 只从 URL 构造 `AssetFile`，不会安全读取媒体元数据，因此数据库字段按设计写入 NULL，并非 SQL 丢值。
+- 后续边界：在生成终态、资产投影事务之外通过受控媒体读取补齐真实 MIME/字节/宽高；禁止按比例或模型声明猜测尺寸，禁止在持行锁事务中下载远程图片。需先补失败回归后实施。
+
 ## 2026-09-05 Skill 成品节点显示为单像素
 
 - ID：TEST-SKILL-008，P1，Task12内的显示缺陷；本地最小候选，尚未云端复验。

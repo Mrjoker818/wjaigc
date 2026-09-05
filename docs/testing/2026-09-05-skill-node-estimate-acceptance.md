@@ -113,3 +113,11 @@
 - 证据目录`output/skill-node-cloud-20260905/`：`01564010-coze-final.txt`、`01564010-visible.png`、`01564010-visible-dom.txt`、`01564010-visible-size.json`。与旧671fa1bc的单像素截图分开保存。
 - 随后已捕获“保存”的真实网络响应：`POST /api/workflow/save` 返回HTTP 200、`success:true`，workflowId仍为`wf-chat-import-7d07ebb373a5fdc9b11fe4afc7f3abec`。再次整页刷新并进入节点模式后，3个节点恢复，同一Skill仍为“执行完成”，同一1254×1254成品继续显示为171.20×171.20；未点击RUN、未产生新任务或新扣费。新增证据：`01564010-save-response.json`、`01564010-post-save-refresh-visible.png`、`01564010-post-save-refresh-size.json`。
 - Chrome旧标签的调试附加曾同时失效，页面标题/URL可读但DOM操作返回未附着；通过同一Google Chrome实例建立受控替代页后恢复。该现象属于浏览器控制通道，不记为产品缺陷。点击大图/下载、完整Console/Network/Trace及Task12其他项仍未完成；当前关闭“节点成品可见性”和“保存后刷新恢复”两个缺口，不宣布Task12完成。
+
+### 原生 Skill 租约与 AssetVersion 元数据核查
+
+- `completed_at=0` 已确认是代码缺陷：原生 Skill 已写 `run.completed` 后，same-task 适配器仍尝试追加无 stepId 的合成 `tool.completed`；终态保护拒绝写入，使租约结算没有执行。新增测试先失败，最小修改为重读父任务权威终态并跳过重复合成事件；聚焦 73/73、TypeScript 通过。
+- 已添加真实 PostgreSQL 成功执行用例，要求父任务 completed、租约 `completed_at>0`、owner 清空、一次 consume、无 refund/重复合成完成事件。本机未配置 `POSTGRES_TEST_DATABASE_URL`，8 项真库套件明确跳过，不能关闭云端租约问题。
+- `width/height=NULL` 不是 SQL 写入丢失。真实任务结果仅含图片 URL，资产投影器没有宽高输入，因此落库为空。后续必须在数据库投影事务之外用安全媒体读取取得真实元数据；不得以模型比例猜测 1254×1254。
+- 最终本地门禁：672 文件中 642 通过/30 个 PostgreSQL 文件跳过，5308 项中 5142 通过/166 项跳过/0 失败；`lint:build` 零错误、38 项保护通过；生产构建 119/119 页面，Build ID `r-dYejxNXZhfZ2hXiAEYl`。
+- 当前 Task12 约 76%：节点生成、账务、显示、保存刷新和租约本地修复已闭环；画布入口、暂停恢复、失败步骤重试、预览下载、完整诊断证据、尺寸持久化、租约真库/云端复验仍未完成。

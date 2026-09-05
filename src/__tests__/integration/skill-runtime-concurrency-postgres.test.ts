@@ -471,6 +471,70 @@ describe('Skill runtime PostgreSQL concurrency', () => {
     });
   }, 60_000);
 
+  postgresIt('successful native Skill execution settles its lease without a synthetic completion', async () => {
+    await withIsolatedPostgres('skill_runtime_native_success_lease', async ({ databaseUrl, query }) => {
+      const { ensureCoreTables } = await import('@/lib/db-storage');
+      const taskStorage = await import('@/lib/cloud-task-storage');
+      const agentService = await import('@/lib/agent-runtime/service');
+      const sameTask = await import('@/lib/agent-runtime/same-task-adapter');
+      const skillService = await import('@/lib/skill-runtime/service');
+      await Promise.all([ensureCoreTables(), taskStorage.ensureCloudTaskTables()]);
+      migrate(databaseUrl);
+      const userId = `skill-success-${randomUUID()}`;
+      const now = Date.now();
+      await query(
+        `INSERT INTO wujie_credits(id, user_id, balance, total_recharged, total_used, created_at, updated_at)
+         VALUES ($1, $2, 100, 100, 0, $3, $3)`,
+        [`credits-${randomUUID()}`, userId, now],
+      );
+      const input = runtimeInput(userId, `skill-success-key-${randomUUID()}`);
+      const created = await createThroughSkillService(input);
+      const [events, projection] = await Promise.all([
+        agentService.listAgentRunEvents({ actorUserId: userId, runId: created.runId }),
+        agentService.getAgentRunProjection({ actorUserId: userId, runId: created.runId }),
+      ]);
+
+      await sameTask.executeAdoptedAgentTask({
+        adoption: {
+          runId: created.runId, reused: false, claimed: true, projection, tools: [],
+          actorUserId: userId, projectId: input.request.projectId, workspace: 'canvas',
+          toolId: 'conversation-1',
+          requestDigest: String(events.find(event => event.type === 'run.created')?.payload.requestDigest),
+        },
+        execute: context => skillService.executeSkillRun({
+          actor: input.actor, request: input.request, runId: created.runId,
+          operationContext: context,
+          stepAdapters: {
+            generate_image: async step => step.step.modelRole === 'orchestrator'
+              ? { assetVersionIds: [], media: [], html: '规划完成' }
+              : { assetVersionIds: ['asset-version-success'], media: [{}] },
+          },
+        }),
+      });
+
+      const [persisted, lease, ledger, persistedEvents] = await Promise.all([
+        taskStorage.getCloudTaskForUser(created.runId, userId),
+        query<{ completed_at: string; lease_owner: string }>(
+          'SELECT completed_at::text, lease_owner FROM wujie_agent_execution_leases WHERE task_id = $1',
+          [created.runId],
+        ),
+        query<{ type: string }>(
+          'SELECT type FROM wujie_credit_transactions WHERE task_id = $1 ORDER BY created_at',
+          [created.runId],
+        ),
+        agentService.listAgentRunEvents({ actorUserId: userId, runId: created.runId }),
+      ]);
+      expect(persisted).toMatchObject({ status: 'completed', creditStatus: 'charged' });
+      expect(Number(lease.rows[0]?.completed_at)).toBeGreaterThan(0);
+      expect(lease.rows[0]?.lease_owner).toBe('');
+      expect(ledger.rows).toEqual([{ type: 'consume' }]);
+      expect(persistedEvents.filter(event => (
+        event.type === 'tool.completed' && event.payload.stepId === undefined
+      ))).toHaveLength(0);
+      expect(persistedEvents.filter(event => event.type === 'run.completed')).toHaveLength(1);
+    });
+  }, 60_000);
+
   postgresIt('real cancellation wins a concurrent late quality failure with one refund', async () => {
     await withIsolatedPostgres('skill_runtime_cancel_quality_race', async ({ databaseUrl, query }) => {
       const { ensureCoreTables } = await import('@/lib/db-storage');

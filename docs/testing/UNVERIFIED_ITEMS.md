@@ -1,5 +1,11 @@
 # 无界AI — 未验证项目清单 (UNVERIFIED ITEMS)
 
+## 2026-09-05 Task12 租约与媒体尺寸增量
+
+- TEST-SKILL-009：原生 Skill 成功后租约未结算已完成本地最小修复，73 项聚焦回归和 TypeScript 通过；最终全仓 5142 项通过、166 项 PostgreSQL 门禁跳过、0 失败，零错误 Lint、38 项保护及 119/119 构建通过。真实成功 PostgreSQL 用例已加入但因缺少 `POSTGRES_TEST_DATABASE_URL` 跳过。仍需隔离真库及 Coze 新 run 证明 `completed_at>0`、租约 owner 清空、一次消费且无退款。
+- TEST-SKILL-010：浏览器真实成品为 1254×1254，但任务终态只保存 URL，资产投影没有真实媒体元数据来源，导致版本宽高 NULL。需在投影事务外安全提取并持久化真实元数据后复验缩略图、预览和下载；当前不得标记修复。
+- Task12 其余未验证项不变：画布入口真实 Skill、暂停恢复、失败步骤重试、预览/下载尺寸、完整 Console/Network/Trace 和最终全量门禁。
+
 ## 2026-09-05 节点 Skill 最新候选
 
 最新云端增量覆盖下文待同步/待首次可见性：01564010已由Coze单次合并同tree、构建119页退出0、重启。正确Chrome强刷后原四图和三节点保留，Skill 1254平方成品显示171.2平方像素且截图可见；`POST /api/workflow/save`真实返回200与`success:true`，再次整页刷新进入节点模式后同一结果仍正常显示。保存后刷新恢复不再列为未验证。预览/下载及完整Console/Network/Trace仍未验证；不要重复同步、保存或付费生成。

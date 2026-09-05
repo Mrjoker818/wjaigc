@@ -520,7 +520,13 @@ export function createSameTaskAgentAdapter(
               leaseOwner: lease.leaseOwner,
               generation: executionGeneration,
             });
-            if (!terminalEvents.some(event => event.type.startsWith('run.'))) {
+            const terminalEventObserved = terminalEvents.some(event => event.type.startsWith('run.'));
+            const settledTask = terminalEventObserved
+              ? null
+              : await dependencies.getTaskForUser(adoption.runId, adoption.actorUserId);
+            const nativeRunAlreadyTerminal = settledTask?.projectId === adoption.projectId
+              && TERMINAL_TASK_STATUSES.has(settledTask.status);
+            if (!terminalEventObserved && !nativeRunAlreadyTerminal) {
               await dependencies.appendAdoptedEvent({
                 actorUserId: adoption.actorUserId,
                 projectId: adoption.projectId,

@@ -189,6 +189,47 @@ describe('same-task Agent adoption adapter', () => {
     expect(deps.observeTerminal).toHaveBeenCalledWith(expect.objectContaining({ generation: 0 }));
   });
 
+  it('settles the execution lease when a native Agent run terminalizes inside its executor', async () => {
+    let terminal = false;
+    const appendAdoptedEvent = vi.fn(async (input: Parameters<SameTaskAgentAdapterDependencies['appendAdoptedEvent']>[0]) => {
+      if (terminal && input.type === 'tool.completed') {
+        throw new Error('terminal task rejects a synthetic tool completion');
+      }
+      return {
+        inserted: true,
+        event: {
+          eventId: input.eventId,
+          runId: input.runId,
+          sequence: 1,
+          type: input.type,
+          timestamp: new Date(0).toISOString(),
+          payload: input.payload,
+        },
+      };
+    });
+    const getTaskForUser = vi.fn(async () => task({
+      type: 'agent-run',
+      status: terminal ? 'completed' : 'processing',
+    }));
+    const deps = dependencies({ getTaskForUser, appendAdoptedEvent });
+
+    await expect(createSameTaskAgentAdapter(deps).adoptAndExecute({
+      actor,
+      taskId: 'task-1',
+      request: request(),
+      toolId: 'generate_image',
+      execute: async () => {
+        terminal = true;
+        return 'completed-by-native-runtime';
+      },
+    })).resolves.toMatchObject({ executed: true, value: 'completed-by-native-runtime' });
+
+    expect(appendAdoptedEvent).not.toHaveBeenCalledWith(expect.objectContaining({
+      type: 'tool.completed',
+    }));
+    expect(deps.completeExecution).toHaveBeenCalledTimes(1);
+  });
+
   it('registers the initial execution signal for pause and cleans the scope afterward', async () => {
     const deps = dependencies();
     let receivedSignal: AbortSignal | undefined;
