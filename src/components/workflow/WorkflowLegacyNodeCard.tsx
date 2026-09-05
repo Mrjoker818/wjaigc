@@ -795,7 +795,7 @@ export const WorkflowLegacyNodeCard = React.memo(function WorkflowLegacyNodeCard
           {!isInputText && !isInputImage && !isOutputImage && !isOutputImageGroup && hasImageOutput && (
             <div className="w-full h-full px-2 py-1">
               <div className="w-full h-full relative group cursor-pointer flex items-center justify-center" onClick={() => onPreviewImage(hasImageOutput)} onWheel={(e) => e.stopPropagation()}>
-                <NextImage unoptimized width={1} height={1} src={hasImageOutput} alt="" className="max-w-full max-h-full object-contain rounded opacity-70 group-hover:opacity-100 transition-opacity" />
+                <NextImage unoptimized width={1} height={1} src={hasImageOutput} alt="" style={{ width: '100%', height: '100%', objectFit: 'contain' }} className="max-w-full max-h-full object-contain rounded opacity-70 group-hover:opacity-100 transition-opacity" />
               </div>
             </div>
           )}

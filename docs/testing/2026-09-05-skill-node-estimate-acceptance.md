@@ -87,3 +87,20 @@
 4. 保存刷新、历史记录、下载及单次账务证据。
 
 当前结论：不通过最终云端验收条件。此结论不表示本地回归已失败；Task12及总目标仍未完成。
+
+### 671fa1bc 云端复验：图片已恢复但显示为单像素
+
+- Coze同步已完成，不得重发：回执HEAD `c90322279be666f4bbb9650aae1bb82b8fef73e6`，tree `a52fc80b2ff9535a1b7d93689ccda44be2f8fc2c`与671fa1bc一致，构建退出0，BuildID `8eFHzpKq-DzJiJa1NL8fv`。
+- 正确Chrome既有预览页可读取并截图；网络控制通道未阻塞。截图输出上下文截断不能作为断线依据。
+- Skill状态恢复为完成，但真实DOM中1254×1254成品的显示矩形仅0.80005×0.79999像素（画布80%）。原因是NextImage固有width/height为1，只有max尺寸样式而无实际尺寸约束。图片解码成功不等于用户可见。
+- 证据：`output/skill-node-cloud-20260905/671fa1bc-restored.png`及`671fa1bc-restored-dom.txt`。本次没有重新生成或修改账务。
+- 最小候选：共享节点卡结果图明确width/height为100%、objectFit为contain。不改任务、资产、账户或积分链路。
+- TDD：`skill-preview-size-red-20260905.json`中正常/超时恢复两场景均因尺寸断言失败；修复后`skill-preview-size-green-20260905.json`32项通过，`skill-preview-module-20260905.json`55项通过，均无失败或跳过。diff检查通过。
+- 尚未推送。本次样式补修后的全仓门禁、生产构建和Chrome矩形/截图复验尚未执行；旧5306测试门禁不能替代本次门禁。Task12仍未完成。
+
+### 单像素补修最终本地门禁
+
+- 本次固定候选：672文件5306测试全通过，0失败/跳过/todo，真实隔离PostgreSQL55490参与且已正常停止。报告`output/skill-preview-final-full-20260905.json`，SHA256 `C223580E71D7937AEB0C2382604530120F1BC9D6465A63E329A6E07E93DFCA2F`。
+- 全仓lint退出0：0错误、944既有警告；38功能保护门禁通过。未关闭任何测试或检查。
+- 生产构建退出0，编译13.7分钟、TypeScript55秒，119/119页面。BuildID `iRGs3KeVu0EXq6qo6H0QI`。日志`output/skill-preview-final-build-20260905.log`，SHA256 `6FE89FCAECF8F98EF4ADED05F5189F0604227AA3FB6CB0D4CC513809B2A33912`。保留Node localstorage路径警告；8GB堆仅作用于本地构建进程，不修改Coze配置。
+- 允许将此候选推送main并同步隔离Coze；仍须同一run的节点实际矩形、可视截图与刷新验收，不代表Task12或全平台通过。

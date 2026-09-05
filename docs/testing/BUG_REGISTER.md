@@ -1,5 +1,18 @@
 # 无界AI — 缺陷登记表 (BUG REGISTER)
 
+## 2026-09-05 Skill 成品节点显示为单像素
+
+- ID：TEST-SKILL-008，P1，Task12内的显示缺陷；本地最小候选，尚未云端复验。
+- 环境：正确Google Chrome既有隔离预览，671fa1bc同tree云端合并c9032227。下方历史Debugger unattached记录不代表当前状态，本次DOM与截图控制成功。
+- 复现：打开已保存的三节点工作流，等待Skill历史完成结果恢复。节点标记完成，但结果区域肉眼空白。
+- 实际：结果图naturalWidth/naturalHeight均1254，画布80%时getBoundingClientRect宽0.80005、高0.79999。不是生成失败、不是图片下载失败。
+- 根因：共享WorkflowLegacyNodeCard结果图NextImage固有尺寸1×1，仅设置max-width/max-height，未设置实际显示宽高。
+- 修复：仅为该结果图设置100%宽高及contain，保持原任务、资产、账务和预览点击行为。
+- 证据：output/skill-node-cloud-20260905/671fa1bc-restored.png、671fa1bc-restored-dom.txt、671fa1bc-preview-size.json。无录像/Trace，不冒充完整验收。
+- 新增回归：正常及超时恢复场景中验证结果图尺寸声明，RED两项失败，修复后组件32和模块55项通过、0跳过。全量/构建及云端实际矩形复验尚未完成，不标为已关闭。
+- runId：58fa70c2-e347-45af-b505-fac910842443；未重新生成、未修改账务；本次只读观察未获取新的requestId。
+- 最终本地门禁增量：672文件5306项全部通过、0跳过，真实隔离PG已停止，lint0错944警告、38保护通过、生产构建退出0/119页面。仅云端实际显示待复验；报告及哈希见节点验收记录末节。
+
 ## 2026-09-05 节点 Skill 执行前费用预估缺失
 
 - ID：SKILL-NODE-ESTIMATE-20260905-01，P2，本地修复及最终发布门禁通过，云端尚未验证。属于统一 Skill 内核 Task12 验收范围，不重新打开 Stage4。下方时间序列保留历史过程，当前状态以本段为准。

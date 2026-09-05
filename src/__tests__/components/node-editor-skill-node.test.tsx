@@ -84,6 +84,10 @@ describe('NodeEditor workflow Skill node', () => {
       else await act(async () => { await vi.advanceTimersByTimeAsync(15_000); });
       await act(async () => { await vi.advanceTimersByTimeAsync(2_000); });
       expect(document.querySelector('img[src="/completed-result.png"]')).not.toBeNull();
+      const preview = document.querySelector<HTMLImageElement>('img[src="/completed-result.png"]')!;
+      expect(preview.style.width).toBe('100%');
+      expect(preview.style.height).toBe('100%');
+      expect(preview.style.objectFit).toBe('contain');
       const terminalReads = reads;
       await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
       expect(reads).toBe(terminalReads);
