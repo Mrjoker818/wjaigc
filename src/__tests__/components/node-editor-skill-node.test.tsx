@@ -24,6 +24,39 @@ afterEach(() => {
 });
 
 describe('NodeEditor workflow Skill node', () => {
+  it('opens a saved Skill result in a viewport-sized preview without submitting another task', async () => {
+    const requests: string[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      requests.push(url);
+      if (url.includes('/api/skill-runs/preview-run')) return new Response(JSON.stringify({ run: {
+        runId: 'preview-run', projectId: 'project-a', workspaceId: 'workflow:preview-workflow',
+        surface: 'workflow', skillId: workflowSkill.id, skillVersion: 2, status: 'completed',
+        assetVersionIds: ['preview-version'],
+      } }));
+      if (url.startsWith('/api/assets?')) return new Response(JSON.stringify({
+        assetVersionId: 'preview-version', url: '/skill-preview.png',
+      }));
+      return new Response('{}');
+    }));
+    vi.stubGlobal('matchMedia', vi.fn(() => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() })));
+    vi.stubGlobal('ResizeObserver', class { observe(): void {} unobserve(): void {} disconnect(): void {} });
+    const node = createWorkflowNode('ai-skill', 0, 0);
+    node.config = { ...node.config, skillId: workflowSkill.id, version: 2, runId: 'preview-run' };
+    render(<NodeEditor workflow={{ ...createEmptyWorkflow('Preview'), id: 'preview-workflow', nodes: [node] }} projectId="project-a" canvasImages={[]} />);
+    await waitFor(() => expect(document.querySelector('img[src="/skill-preview.png"]')).not.toBeNull());
+    fireEvent.click(document.querySelector('img[src="/skill-preview.png"]')!);
+    const preview = screen.getByAltText('预览') as HTMLImageElement;
+    expect(preview.getAttribute('src')).toBe('/skill-preview.png');
+    expect(preview.parentElement?.style.width).toBe('80vw');
+    expect(preview.parentElement?.style.height).toBe('80vh');
+    expect(preview.style.width).toBe('100%');
+    expect(preview.style.height).toBe('100%');
+    expect(preview.style.objectFit).toBe('contain');
+    fireEvent.click(preview);
+    expect(screen.queryByAltText('预览')).toBeNull();
+    expect(requests.some(url => url === '/api/workflow/execute' || url === '/api/skill-runs')).toBe(false);
+  });
+
   it.each([['paused', '已暂停'], ['cancelled', '已取消']] as const)('renders restored %s state and cleans observation on unmount', async (status, label) => {
     vi.useFakeTimers();
     let reads = 0;

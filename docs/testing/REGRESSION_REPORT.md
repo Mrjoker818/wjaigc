@@ -1,5 +1,9 @@
 # 无界AI — 回归测试报告 (REGRESSION REPORT)
 
+## 2026-09-06 Task12 大图预览增量
+
+TEST-SKILL-011本地最小修复：节点专项33/33；全仓5304通过/0失败/12跳过，原跳过12项在隔离PostgreSQL全部补验通过；类型、Lint构建门禁、38保护通过；119/119生产构建退出0（BuildID uMTJ7VMeTVPmlRpihy8qe）。本地Google Chrome横/竖图两条真实布局测试通过，覆盖六组视口/像素比例检查；不代表真实供应商或全平台验收。证据与前置失败详见[本轮报告](2026-09-06-task12-preview-modal-verification.md)。云端新版复验仍未完成。
+
 ## 2026-09-05 Task12 AssetVersion 真实尺寸补修
 
 真实 1254×1254 Skill 成品对应 AssetVersion 宽高为空，已通过失败测试确认元数据在任务终态和资产投影之间丢失。最小修复在事务外复用安全媒体输入与 Sharp 像素门禁采集真实 MIME、字节数和宽高，并让投影器按 URL 精确保留字段；读取失败只降级为无尺寸，不覆盖供应商成功终态。

@@ -1,5 +1,9 @@
 # 无界AI — 发布就绪报告 (RELEASE READINESS REPORT)
 
+## 2026-09-06 Task12 预览补修候选
+
+本地TEST-SKILL-011门禁完成：33项专项、5304项全仓加12项隔离PostgreSQL补验通过；类型/Lint/38保护通过；构建119/119；Google Chrome两条横竖图布局用例覆盖六组视口通过。此项可推送main进行测试沙箱同步，但尚未云端真实复验，不是Task12或全平台发布通过。全平台结论仍为：不通过。证据及未验证边界见2026-09-06-task12-preview-modal-verification.md。
+
 ## 2026-09-05 Skill 成品真实尺寸候选
 
 全平台结论保持**不通过**。TEST-SKILL-010 已完成 RED、最小修复和隔离 PostgreSQL 验证：全仓 `5314/5314` 通过、0 失败、0 跳过，真实 PNG 并发终态仅生成一个版本/placement，AssetVersion 写入 `1254×1254` 和 `image/png`。报告 SHA-256 为 `FA9FE6E6358B37F87AA43069D2843EC35B5F4D4FF937E2E9521636F9CA9EE651`，测试集群已停止。Coze 新 Skill 的任务结果、缩略图、预览及下载尚无新证据，因此仅允许作为本地候选继续验收。

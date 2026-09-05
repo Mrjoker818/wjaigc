@@ -3967,8 +3967,8 @@ ${contextInfo}
       {/* 图片预览弹窗 */}
       {imagePreviewUrl && (
         <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center" onClick={() => setImagePreviewUrl(null)}>
-          <div className="relative max-w-[80vw] max-h-[80vh]">
-            <NextImage unoptimized width={1} height={1} src={imagePreviewUrl} alt="预览" className="max-w-full max-h-[80vh] rounded shadow-2xl" />
+          <div className="relative" style={{ width: '80vw', height: '80vh' }}>
+            <NextImage unoptimized width={1} height={1} src={imagePreviewUrl} alt="预览" className="rounded shadow-2xl" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
             <button onClick={() => setImagePreviewUrl(null)} className="absolute -top-2 -right-2 p-1 bg-muted rounded-full text-muted-foreground hover:text-foreground cursor-pointer">
               <X size={14} />
             </button>
