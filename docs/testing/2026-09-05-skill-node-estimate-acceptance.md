@@ -104,3 +104,11 @@
 - 全仓lint退出0：0错误、944既有警告；38功能保护门禁通过。未关闭任何测试或检查。
 - 生产构建退出0，编译13.7分钟、TypeScript55秒，119/119页面。BuildID `iRGs3KeVu0EXq6qo6H0QI`。日志`output/skill-preview-final-build-20260905.log`，SHA256 `6FE89FCAECF8F98EF4ADED05F5189F0604227AA3FB6CB0D4CC513809B2A33912`。保留Node localstorage路径警告；8GB堆仅作用于本地构建进程，不修改Coze配置。
 - 允许将此候选推送main并同步隔离Coze；仍须同一run的节点实际矩形、可视截图与刷新验收，不代表Task12或全平台通过。
+
+### 01564010 云端首次强刷可见性通过
+
+- 已推送main `015640102e435c662c15d86c54f404bea09abf7f`，远端复读一致，stable仍52f7c601未动。Coze只发送一次同步，最终回执merge HEAD `c0395f903295616ce7dfbda638c32a76c1ada24d`、tree `0c0a4343c3121ef87c19af3ca79e4faf72d8bc17`匹配，diff空、工作区干净，类型/38保护退出0，构建119/119退出0。
+- 云端BuildID `tf2IgVAAov4L5QY2rH-ar`，唯一5000 PID4036，启动时间10:24:56。Coze健康命令实际使用curl -I，故200仅作为HEAD健康回执；浏览器随后的真实页面加载另作证据。
+- 现有正确Chrome预览执行CDP Page.reload(ignoreCache:true)后，登录保留、原四图完整。点击节点模式，原三节点恢复，同一Skill显示完成；1254×1254成品的DOM矩形171.20×171.20，截图肉眼可见完整蛋糕图。未点击RUN、未重新生成。
+- 证据目录`output/skill-node-cloud-20260905/`：`01564010-coze-final.txt`、`01564010-visible.png`、`01564010-visible-dom.txt`、`01564010-visible-size.json`。与旧671fa1bc的单像素截图分开保存。
+- 随后的“保存”点击在CDP派发前超时，再读DOM及重新认领均未附着；不能证明保存执行，未继续刷新或重提任务。二次保存刷新、点击大图/下载、完整网络/Console/Trace及Task12其他项仍未完成。首次读取网络事件未取得相关记录，不声称网络已证明无重复提交或新增账务。当前只关闭单次强刷可见性缺口，不宣布Task12完成。
