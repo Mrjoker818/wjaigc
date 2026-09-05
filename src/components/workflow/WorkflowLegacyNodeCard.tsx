@@ -413,6 +413,12 @@ export const WorkflowLegacyNodeCard = React.memo(function WorkflowLegacyNodeCard
           {execResult?.status === 'error' && (
             <span className="status-badge failed"><span className="status-dot" />失败</span>
           )}
+          {execResult?.status === 'paused' && (
+            <span className="status-badge queued"><span className="status-dot" />已暂停</span>
+          )}
+          {execResult?.status === 'cancelled' && (
+            <span className="status-badge queued"><span className="status-dot" />已取消</span>
+          )}
           {!execResult && !isRunning && (
             <span className="status-badge queued"><span className="status-dot" />就绪</span>
           )}

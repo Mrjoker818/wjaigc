@@ -50,6 +50,7 @@ export interface WorkflowLegacySurfaceProps {
   theme?: WorkflowLegacyNodeTheme;
   execResults?: Record<string, { status: string; output?: Record<string, unknown>; error?: string }>;
   execStatus?: string;
+  executionNodeIds?: readonly string[];
   highlightedNodeIds?: Set<string>;
   hoveredNodeId?: string | null;
   canvasImages?: WorkflowLegacyCanvasImageRef[];
@@ -85,7 +86,7 @@ function defaultConnectionPath(fromX: number, fromY: number, toX: number, toY: n
 /** Legacy SVG/HTML composition with all state and side effects held by its host. */
 export function WorkflowLegacySurface({
   model, onCommand, visibleNodeIds = new Set(model.nodes.map(node => node.id)), theme = DEFAULT_WORKFLOW_NODE_THEME,
-  execResults = {}, execStatus = 'idle', highlightedNodeIds = new Set<string>(),
+  execResults = {}, execStatus = 'idle', executionNodeIds, highlightedNodeIds = new Set<string>(),
   hoveredNodeId = null, canvasImages, llmModels, imageModels, promptTemplates, upstreamImageUrls, cardCallbacks,
   draggingConnection, boxSelect, svgViewportTransformRef, nodeViewportTransformRef,
   getConnectionPath = defaultConnectionPath, getPortPosition, isConnectionHighlighted = () => false,
@@ -183,7 +184,7 @@ export function WorkflowLegacySurface({
           const node = nodeById.get(renderNode.id)!;
           return <WorkflowLegacyNodeCard
           key={node.id} node={node} isSelected={renderNode.selected} isHighlighted={highlightedNodeIds.has(node.id)} isHovered={hoveredNodeId === node.id}
-          execResult={execResults[node.id]} isRunning={execStatus === 'running'} theme={theme} canvasImages={canvasImages} llmModels={llmModels} imageModels={imageModels} upstreamImageUrl={upstreamImageUrls?.get(node.id)}
+          execResult={execResults[node.id]} isRunning={execStatus === 'running' && (executionNodeIds?.includes(node.id) ?? true)} theme={theme} canvasImages={canvasImages} llmModels={llmModels} imageModels={imageModels} upstreamImageUrl={upstreamImageUrls?.get(node.id)}
           {...cardProps}
           promptTemplates={promptTemplates}
           onSelect={event => cardProps.onSelect(node.id, event)}

@@ -29,11 +29,57 @@
 
 ## 授权与计费边界
 
+### 本地续修候选（尚未发布）
+
+- 最终补修后门禁（覆盖下方历史待验状态）：672文件/5306测试全通过、0失败0跳过，退出0；`output/skill-restore-reviewed-full-20260905.json` SHA256 `B45B0FFB2B4EDBA266BA02C57C3897916E5BDF399A423FDB883546A62CF3EFE1`。本机隔离PG55490已停止。全仓lint0错944警告、38保护检查通过。生产构建退出0，编译13.9分钟、类型54秒、119/119页面；Build ID `Iej7_Y1CIXKJ3FCwhdYlu`，日志 `output/skill-restore-reviewed-build-20260905.log` SHA256 `A46A917E498D40BBD8FB2D46CFBA06742F2CE4AB1AA267E418CF55B43AB62FB5`。两条Node本地存储路径警告未隐藏。可提交并同步隔离沙箱，不代表Task12或全平台云端验收完成。
+
+- 独立审查后版本边界：5.6-sol中等推理只读审查提出failed进度遗漏、单次恢复超时停止观察两项。均已另写RED复现并最小修正；failed/timeout计入终态，读取超时保留观察队列且提示正在重试。最新四文件58测试通过0跳过，`output/skill-review-fixes-20260905.json`，类型检查和diff检查通过。旧候选生产构建因源码将变化而主动中止，退出1，不属于构建成功或已验证构建失败。下列5304全量仅覆盖审查前候选，不能证明当前增量；须重新固定全量/构建后才发布。审查子智能体已关闭，隔离PG已停止。
+
+- 固定候选全量门禁：672文件/5304测试全部通过、0失败0跳过，退出0。报告 `output/skill-restore-full-20260905.json`，SHA256 `7125760D559FCE421D352BB8AA50EB71C2E6E6FA89983F3888EAC5B220F38338`。使用新建的本机127.0.0.1:55490隔离PostgreSQL，测试结束已停止，未访问云端库。全仓lint退出0、0错误944警告；最新类型检查退出0。38项保护检查实现包含工作区diff，已通过。生产构建与独立只读代码审查尚待终态，不发布。
+- 暂停/取消标签补验：先RED复现无状态徽章，再在两种渲染器共享卡片显示“已暂停/已取消”。取消后不再观察、暂停继续只读观察、卸载停止观察均有组件断言，包含在上述全量结果中。
+
+- 最新检查点：跨项目已显示结果清理、迟到响应不得继续读取资产均已完成失败回归及修复。恢复超时先以组件测试复现静默失败，再区分超时与卸载取消，展示明确刷新重试提示，不重新生成或扣费。失败证据 `output/skill-restore-timeout-red-20260905.json`；四文件45项测试全部通过、0跳过，证据 `output/skill-restore-timeout-green-20260905.json`；最新 `pnpm ts-check` 退出0。这只是本地专项，尚未运行本候选全仓门禁或发布。
+- 缓存隔离补验：`skill-cache-scope-red-20260905.json` 复现旧全局缓存被直接恢复；改为按用户/项目/工作流的v2键保存并读取。未知归属的旧键保留但不自动恢复，不删除业务数据；已保存Skill仍由受授权的run查询恢复。五种场景覆盖旧键、其他用户/项目/工作流及本范围正常恢复。
+- 迟到轮询补验：`skill-status-scope-red-20260905.json` 复现同一项目切换用户后旧响应仍显示执行完成；轮询新增AbortController，清理时中止，请求返回后再次验证取消。最终四文件51项测试通过、0跳过，`output/skill-cache-status-final-20260905.json`；类型检查退出0，修改文件lint0错误15条既有警告。`skill-cache-status-green-20260905.json` 的失败保留，原因是断言误包含提示词库初始化写入，已限定工作流缓存写回范围，不屏蔽失败。
+- 多节点恢复预算已补RED→GREEN：首节点超时曾阻止后续正常节点请求，现保持串行读取、每个节点单独15秒超时，卸载中止当前请求；失败记录不阻止其他成品恢复。失败证据 `output/skill-restore-budget-red-20260905.json`。
+- 新runId旧预览残留已补RED→GREEN：只清理run身份不匹配的执行展示，不删除任何素材/历史版本；新成品按新run查询恢复。失败证据 `output/skill-rerun-preview-red-20260905.json`。四文件最新53测试通过、0跳过，报告 `output/skill-rerun-final-20260905.json`，最新类型检查退出0，diff检查通过。
+- 运行中恢复补验完成本地RED→GREEN：原实现只查询一次，executing后变completed也无成品。现串行只读观察非终态run，每轮间隔2秒，终态节点退出队列，生命周期取消清理请求与观察定时器；无POST重新生成。executing等活动状态映射为节点running，原始状态仍在结果投影内。失败证据 `skill-running-restore-red-final-20260905.json`、`skill-running-label-red-20260905.json`，最终四文件54项通过0跳过，`output/skill-running-final-20260905.json`；最新类型检查退出0，修改文件lint0错误15既有警告。
+- 下一步固定候选代码复核、全仓门禁和云端同一run恢复验收。暂停/取消终态展示与观察清理仍应在复核中逐项检查，不以本地替身结果冒充云端结果恢复通过；当前候选未发布。
+
+- 结果恢复新增RED：保存runId后组件没有成品图片，`skill-node-restore-red-20260905.json`；文本输出遗漏另有`skill-node-restore-text-red-20260905.json`。现有workflow-client新增只读恢复，GET run携带observeOnly=true，校验项目/工作区/run/Skill身份，按已有资产查询读取版本，并复用执行器的结果投影。
+- node-editor按已保存runId恢复展示，开始执行、切换范围或卸载时abort；不发POST生成，不自动恢复已删除资产。图片、文本和身份错误专项累计16项通过exit0，报告`skill-node-restore-green-20260905.json`。首次恢复接入TypeScript通过，随后文本补丁仍需最终类型复核。改动文件lint0错误15警告。
+- 仍需补跨项目迟到响应、重新执行竞争、恢复超时反馈、旧缓存与双渲染器专项，以及最终全仓测试/构建/Chrome同一run复验。当前不发布、不将Task12标完成。
+
+- 2026-09-05已补进度范围组件失败回归：旧版找不到0/1，实际以全图为分母。失败报告`output/skill-scope-display-red-final-20260905.json`。
+- 节点编辑器新增执行节点ID集合，从真实提交范围生成并随在途执行保存；进度分母使用该集合，分子仅统计终态节点。Legacy和ReactFlow节点卡运行态均限制在集合中。
+- 当前组件套件9/9通过、命令退出0，报告`output/skill-scope-display-green-20260905.json`；TypeScript退出0、diff检查通过。曾因测试替身在最终缓存清理定时器前撤销导致未捕获错误，已按明确缓存清理状态等待解决，未吞异常。
+- 此候选尚缺两套渲染器运行中专项、旧执行缓存兼容与结果恢复修复、全仓门禁及云端验证。未提交或推送，不以旧5282测试证明新改动通过。
+
 预估接口继续验证用户、Skill版本、模型授权和项目/来源归属。工作流节点的动态上游输入允许在实际执行时验证，不为预估伪造图片。执行服务仍重新校验并按服务端价格计算费用。
 
 界面报价为各Skill单次调用，其他节点及循环重复调用另计；不宣称全工作流总价、锁价或API强制确认令牌。未改变既有自动化客户端协议。
 
 ## 尚未通过的云端验收
+
+### 2026-09-05 Chrome续验增量
+
+- Coze只读复核：HEAD `5fbf94c8faacf313dc37a3b3db739882eb34cd9b`，tree `d924c13925c91a4ca43963381ae68ad42fc8003b`，与候选f15b05ee无源码差异；Build ID `kqc08JlYUHuX1Rmne5Gln`，`BUILD_EXIT=0`，5000 PID4565。此为Coze命令回执，不与本地构建混用。
+- 第一次快捷键刷新后实际仍加载旧 `webpack-6d4a5a9f63eb4179.js`。RUN未显示报价，点击停止后界面回到可执行状态；该次的账务/底层终态尚未取证，不计入新版验收。
+- 通过浏览器CDP `Page.reload({ignoreCache:true})` 刷新后，DOM脚本实际变为当前 `webpack-3da1dce2f1d948b5.js`。不能只以按下刷新快捷键证明新版本生效。
+- 新版美食摄影Skill真实显示62积分报价；第一次取消，第二次重新获取报价后确认。网络证据两次estimate、一次start，取消与第二次estimate之间没有start。
+- 实际start仅包含 `node-1788569246796-xnyehw` 一个ai-skill节点，start/tail相同、connections为空，未包含另外两个孤立节点。模型明确绑定APImartLLM `gemini-3.1-flash-lite-preview` 和APImart图像 `gpt-image-2`。
+- executionId `exec-1788569269938-72jay6`，runId `58fa70c2-e347-45af-b505-fac910842443`。最终业务响应completed，仅一个节点success，耗时32671ms，返回图片URL及新assetVersion `e819d7ba-7cbb-4984-b444-f02d3a118104`；UI执行日志一条“Skill 执行 完成”。账务、刷新恢复、图片可视质量及下载仍未验证，不重复生成。
+- 新发现展示缺陷：实际只运行一个节点，顶部仍为1/3，其他无结果节点也显示运行中。范围请求正确，不能混同为服务端多执行；需最小UI修复及回归。
+- 后续实际图片解码成功：本次URL naturalWidth/naturalHeight均1254。点击保存后CDP绕缓存刷新，再进节点模式，3个节点及Skill配置恢复，但成品预览消失、Skill显示就绪。JSON查看器确认config.runId仍为本次run，未保存result/imageUrl/assetVersionId。代码轮询只补runId，最终执行缓存3秒后清除，加载仅恢复running状态，构成恢复缺口；不能标记结果恢复通过，也不能再次生成代替恢复。证据`after-save-refresh.png`、`after-save-refresh-dom.txt`、`saved-workflow-json-dom.txt`。
+- 已向同一Coze会话发送一次只读账务核验，精确限定本次run/execution/assetVersion，不修改数据库；查询尚在执行，单次扣费及零退款仍未取得最终原始证据，不重发。
+- 账务查询中间回执已见cloud_tasks completed/charged、credit_cost=62、charged_transaction_id=`ctx_charge_cbaa66d507284fd4e981165366c5763f`、refunded_transaction_id为空；流水1条consume -62，balance_after=8960。但完整原始结果与最终NODE_EXIT尚未取得，不能正式关闭账务验收。查询中错误地把assetVersionId用于wujie_assets.id，资产归属部分必须使用实际assetId `52cda863-2ceb-4387-afd0-97ee749c7dd6`纠正，不能把空结果解释为资产丢失。项目控制随后Debugger unattached，未重发查询。
+- 证据：`output/skill-node-cloud-20260905/quote-62.png`、`quote-62-dom.txt`、`requests.json`、`latest-status.json`。未采集视频，不宣称完整视频/Trace验收。
+
+### 最新云端回执纠正
+
+- Chrome现有项目页与预览页均可读取，实际打开并关闭执行日志成功；未创建标签页、未操作360。隐藏的“上下文压缩中”按钮 `isVisible=false`，不再当作阻塞证据。预览实际webpack仍为 `3da1dce2f1d948b5`。
+- 原只读账务查询已结束，Coze最终回执标注 `NODE_EXIT=0`：run58fa70c2 completed/charged、62积分，关联流水1条consume -62且无refund。资产查询已纠正为assetId52cda863，版本e819d7ba为其current_version，用户和项目一致。此为Coze查询回执与浏览器业务响应相互印证，不是本地直连数据库审计。
+- 回执新增待核查：版本width/height为NULL、租约attempt_count=1但completed_at=0。不能直接认定导致重复计费，也不能忽略；需代码与专项证据判断。保存刷新丢失展示仍未云端闭环。未重复执行付费任务、未更改任何账务。
 
 1. 新候选准确提交同步、构建及重启后的预览强刷。
 2. 节点费用预估、取消不提交、确认仅提交一次。

@@ -165,7 +165,7 @@ export async function cancelWorkflowSkillRun(input: CancelWorkflowSkillRunInput)
   }
 }
 
-function projectWorkflowSkillRun(
+export function projectWorkflowSkillRun(
   run: WorkflowSkillRunProjection,
   references: readonly WorkflowSkillAssetReference[],
 ): Record<string, unknown> {

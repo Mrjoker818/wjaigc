@@ -3948,3 +3948,29 @@ All listed Stage 4 defects are locally closed. S4-BUG-008 also passed its exact-
 - 永久测试：skill-cancel-subscription.test.tsx，真实 Hook 组合，RED paused → GREEN cancelled；旧控件测试仍保留。
 - 验证：29 项聚焦及全仓 4904 项通过，143 环境门禁项跳过；TypeScript、定点 Lint、38 项功能保护通过。生产构建默认 4GB 堆 OOM，进程级 8GB 重试退出 0、119/119 页面；云端验收仍未关闭。
 - 证据与限制：[续验记录](2026-09-04-skill-cancel-ui-followup.md)。Chrome 截图在对话工具输出中；首次取消 PATCH 原始响应未捕获，不声称有完整录像或 Trace。
+
+### TEST-SKILL-005：节点 Skill 保存刷新后成品与状态丢失（2026-09-05）
+
+- 等级：P1。Google Chrome，云端源码对应 main@f15b05ee。
+- 复现：节点美食摄影 Skill 完成后保存、绕缓存刷新；三个节点及 config.runId 保留，成品预览消失并显示就绪。
+- runId：58fa70c2-e347-45af-b505-fac910842443；输出版本：e819d7ba-7cbb-4984-b444-f02d3a118104。真实图片已解码1254×1254。
+- 根因：结果仅保存在组件状态，最终缓存3秒后删除，初始化仅读取运行中缓存，没有按持久化runId恢复成品。
+- 修复候选：只读run和资产版本查询，校验项目/工作流/Skill/run身份；活动run持续观察，终态停止；逐节点超时、取消清理、旧run展示隔离。不重新生成、不修改账本或原始资产。
+- 永久回归：node-editor-skill-node.test.tsx，包括图片、文本、身份错误、项目切换、迟到响应、超时、多节点、重执行及暂停/取消标签。
+- 证据：output/skill-node-cloud-20260905/after-save-refresh.png；各RED报告与候选门禁见[节点验收记录](2026-09-05-skill-node-estimate-acceptance.md)。未采集视频/Trace，不宣称完整云端回归。
+- 状态：本地候选，最终全仓门禁进行中，云端未发布复验。
+
+### TEST-SKILL-006：单链执行进度误用全图范围（2026-09-05）
+
+- 等级：P2。同上真实环境，实际start只提交一个节点，服务端仅完成一个节点，但UI显示1/3且无关节点显示运行中。
+- 根因：展示分母和卡片运行态基于整个工作流，没有采用实际提交范围。
+- 修复候选：持久化执行nodeIds，分子分母及两套渲染器使用该范围。
+- 永久回归与证据：node-editor-skill-node.test.tsx，output/skill-scope-display-red-final-20260905.json、output/skill-node-cloud-20260905/running-scope.png。
+- 状态：本地候选，云端复验未完成；不能将展示错误等同于服务端多扣费。
+
+### TEST-SKILL-007：执行缓存与迟到轮询缺少完整作用域隔离（2026-09-05）
+
+- 等级：P1，本地组件测试稳定复现。全局旧缓存可用于不同用户/项目；同项目切用户后旧轮询响应可显示完成并写缓存。
+- 修复候选：v2缓存键绑定user/project/workflow；无归属旧键保留但不自动应用；清理时abort轮询，解析后拒绝已取消响应。
+- 永久回归与证据：node-editor-skill-node.test.tsx；output/skill-cache-scope-red-20260905.json、output/skill-status-scope-red-20260905.json。
+- 状态：本地专项通过，完整门禁与云端验证未闭环。此处不声称已发生真实用户数据泄漏。

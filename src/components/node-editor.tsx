@@ -43,7 +43,7 @@ import {
 import type { TaskModelCatalogModel } from '@/hooks/use-task-model-catalog';
 import { WorkspaceSourceTraceDetails } from '@/components/workspace-source-trace';
 import { SkillInputFields } from '@/components/skill-runtime/SkillInputFields';
-import { loadWorkflowSkillCatalog } from '@/lib/skill-runtime/workflow-client';
+import { loadWorkflowSkillCatalog, loadSavedWorkflowSkillResult } from '@/lib/skill-runtime/workflow-client';
 import { resolveWorkflowExecutionScope } from '@/lib/workflow-execution-scope';
 import type { WorkflowExecutionScope } from '@/lib/workflow-execution-scope';
 import { estimateWorkflowSkills, type WorkflowSkillQuote } from '@/lib/skill-runtime/workflow-estimate-client';
@@ -1030,6 +1030,7 @@ export default function NodeEditor({ taskModelCatalog = [], taskModelOptions = [
   const [searchQuery, setSearchQuery] = useState('');
   const [executionId, setExecutionId] = useState<string | null>(null);
   const [execStatus, setExecStatus] = useState<'idle' | 'running' | 'completed' | 'failed'>('idle');
+  const [executionNodeIds, setExecutionNodeIds] = useState<string[]>([]);
   const [skillEstimating, setSkillEstimating] = useState(false);
   const [skillQuote, setSkillQuote] = useState<{
     scope: WorkflowExecutionScope; quotes: WorkflowSkillQuote[]; workflow: WorkflowData; projectId: string; expiresAt: number;
@@ -1073,9 +1074,21 @@ export default function NodeEditor({ taskModelCatalog = [], taskModelOptions = [
   // P1: 执行日志
   const [execLogs, setExecLogs] = useState<WorkflowExecutionLog[]>([]);
 
-  // B1: 工作流执行状态持久化 — 切页/刷新后恢复执行进度
-  const WORKFLOW_EXEC_STATE_KEY = 'wujie_workflow_exec_state';
+  const executionViewScope = JSON.stringify([userId, projectId, wf.id]);
+  const previousExecutionViewScope = useRef(executionViewScope);
   useEffect(() => {
+    if (previousExecutionViewScope.current === executionViewScope) return;
+    previousExecutionViewScope.current = executionViewScope;
+    setExecResults({});
+    setExecLogs([]);
+    setExecutionNodeIds([]);
+    setExecutionId(null);
+    setExecStatus('idle');
+  }, [executionViewScope]);
+  // Unscoped legacy entries are preserved but cannot identify a safe restoration target.
+  const WORKFLOW_EXEC_STATE_KEY = `wujie_workflow_exec_state:v2:${executionViewScope}`;
+  useEffect(() => {
+    if (!userId || !projectId) return;
     try {
       const saved = localStorage.getItem(WORKFLOW_EXEC_STATE_KEY);
       if (saved) {
@@ -1085,15 +1098,74 @@ export default function NodeEditor({ taskModelCatalog = [], taskModelOptions = [
           setExecStatus('running');
           setExecLogs(state.execLogs || []);
           setExecResults(state.execResults || {});
+          setExecutionNodeIds(Array.isArray(state.nodeIds) ? state.nodeIds : Object.keys(state.execResults || {}));
           // 清除已持久化的running状态，由polling恢复
           localStorage.removeItem(WORKFLOW_EXEC_STATE_KEY);
         }
       }
     } catch {}
-  }, []);  // P1: 节点复制粘贴
+  }, [WORKFLOW_EXEC_STATE_KEY, userId, projectId]);
   const [showContentStrip, setShowContentStrip] = useState(true);
   const [showLeftPanel, setShowLeftPanel] = useState(true);
   const [showExecLog, setShowExecLog] = useState(false);
+  const savedSkillRunKey = JSON.stringify(wf.nodes.filter(node => node.type === 'ai-skill' && node.config.runId)
+    .map(node => [node.id, node.config.runId, node.config.skillId, node.config.version]));
+  useEffect(() => {
+    if (!projectId || execStatus === 'running') return;
+    const lifecycle = new AbortController();
+    let disposed = false;
+    let observerTimer: ReturnType<typeof setTimeout> | undefined;
+    const nodes = skillWorkflowRef.current.nodes.filter(node => node.type === 'ai-skill' && typeof node.config.runId === 'string');
+    setExecResults(previous => {
+      const stale = nodes.filter(node => previous[node.id]?.output?.runId
+        && previous[node.id].output?.runId !== node.config.runId);
+      if (stale.length === 0) return previous;
+      const next = { ...previous };
+      for (const node of stale) delete next[node.id];
+      return next;
+    });
+    const observe = async (pendingNodes: WorkflowNode[]) => {
+      const stillActive: WorkflowNode[] = [];
+      for (const node of pendingNodes) {
+        if (disposed) break;
+        const controller = new AbortController();
+        const abort = () => controller.abort();
+        lifecycle.signal.addEventListener('abort', abort, { once: true });
+        let timedOut = false;
+        const timeout = setTimeout(() => {
+          timedOut = true;
+          controller.abort();
+        }, 15_000);
+        const runId = String(node.config.runId);
+        try {
+          const result = await loadSavedWorkflowSkillResult({
+            runId, projectId, workflowId: wf.id, skillId: String(node.config.skillId),
+            skillVersion: Number(node.config.version), signal: controller.signal,
+          });
+          if (controller.signal.aborted || skillWorkflowRef.current.nodes.find(item => item.id === node.id)?.config.runId !== runId) continue;
+          setExecResults(previous => ({ ...previous, [node.id]: result }));
+          if (['running', 'paused'].includes(result.status)) {
+            stillActive.push(node);
+          }
+        } catch (error) {
+          if (disposed || (controller.signal.aborted && !timedOut)) break;
+          if (timedOut) stillActive.push(node);
+          setExecLogs(previous => mergeExecutionLogs(previous, [{ time: Date.now(), nodeId: node.id, label: node.label,
+            status: 'error', message: timedOut ? 'Skill 结果恢复超时，正在重试，不会重新生成或扣费'
+              : error instanceof Error ? error.message : 'Skill 结果恢复失败' }]));
+          setShowExecLog(true);
+        } finally {
+          clearTimeout(timeout);
+          lifecycle.signal.removeEventListener('abort', abort);
+        }
+      }
+      if (!disposed && stillActive.length > 0) {
+        observerTimer = setTimeout(() => { void observe(stillActive); }, 2_000);
+      }
+    };
+    void observe(nodes);
+    return () => { disposed = true; lifecycle.abort(); clearTimeout(observerTimer); };
+  }, [projectId, userId, wf.id, savedSkillRunKey, execStatus]);
   const [clipboard, setClipboard] = useState<WorkflowClipboardSnapshot | null>(null);
   // 右键菜单状态
   const [contextMenu, setContextMenu] = useState<{ type: 'canvas' | 'node'; x: number; y: number; nodeId?: string } | null>(null);
@@ -2047,6 +2119,7 @@ ${contextInfo}
       }
       executionNodes.push({ ...node, config: { ...node.config, model: selection.compositeKey, providerId: selection.providerId } });
     }
+    setExecutionNodeIds(executionNodes.map(node => node.id));
     setExecStatus('running');
     setExecutionId(null);
     setExecResults({});
@@ -2065,6 +2138,7 @@ ${contextInfo}
       setExecutionId(data.executionId);
       localStorage.setItem(WORKFLOW_EXEC_STATE_KEY, JSON.stringify({
         executionId: data.executionId,
+        nodeIds: executionNodes.map(node => node.id),
         execStatus: 'running',
         execResults: {},
         execLogs: [],
@@ -2072,7 +2146,7 @@ ${contextInfo}
     } catch {
       setExecStatus('failed');
     }
-  }, [projectId, imageModels, wf.id]);
+  }, [projectId, imageModels, wf.id, WORKFLOW_EXEC_STATE_KEY]);
 
   const startWorkflowExecution = useCallback(async (payload: WorkflowExecutionScope) => {
     if (skillExecutionLock.current || skillQuote || execStatus === 'running') return;
@@ -2668,7 +2742,7 @@ ${contextInfo}
     setExecStatus('idle');
     setExecutionId(null);
     localStorage.removeItem(WORKFLOW_EXEC_STATE_KEY);
-  }, [executionId]);
+  }, [executionId, WORKFLOW_EXEC_STATE_KEY]);
 
   // B2: 节点一键重试 — 仅重试单个失败节点，不重跑全流程
   const handleRetryNode = useCallback(async (nodeId: string) => {
@@ -2696,6 +2770,7 @@ ${contextInfo}
   useEffect(() => {
     if (execStatus !== 'running' || !executionId) return;
     const executionProjectId = projectId;
+    const controller = new AbortController();
     let pollCount = 0;
     let timerId: ReturnType<typeof setTimeout> | null = null;
     const poll = async () => {
@@ -2703,11 +2778,12 @@ ${contextInfo}
         pollCount++;
         const res = await fetch('/api/workflow/execute', {
           method: 'POST',
+          signal: controller.signal,
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ action: 'status', executionId }),
         });
         const data = await res.json();
-        if (!isWorkspaceResultScopeCurrent(executionProjectId, projectIdRef.current)) return;
+        if (controller.signal.aborted || !isWorkspaceResultScopeCurrent(executionProjectId, projectIdRef.current)) return;
         if (data.results && typeof data.results === 'object') {
           const results = data.results as Record<string, { output?: Record<string, unknown> }>;
           updateWorkflowSystem(current => {
@@ -2855,6 +2931,7 @@ ${contextInfo}
           if (newLogs.length > 0) setExecLogs(prev => mergeExecutionLogs(prev, newLogs));
         }
       } catch (err) {
+        if (controller.signal.aborted) return;
         // 临时网络错误不直接终止轮询，允许重试
         console.error('[workflow-poll] Error polling workflow status:', err);
         const delay = pollCount <= 5 ? 1000 : pollCount <= 15 ? 1500 : 2000;
@@ -2875,8 +2952,8 @@ ${contextInfo}
       timerId = setTimeout(poll, delay);
     };
     poll();
-    return () => { if (timerId) clearTimeout(timerId); };
-  }, [execStatus, executionId, onAddImages, projectId, updateWorkflowSystem, wf.connections, wf.id, wf.nodes]);
+    return () => { controller.abort(); if (timerId) clearTimeout(timerId); };
+  }, [execStatus, executionId, onAddImages, projectId, updateWorkflowSystem, wf.connections, wf.id, wf.nodes, WORKFLOW_EXEC_STATE_KEY]);
 
   // ─── 保存工作流 ───
 
@@ -3321,7 +3398,7 @@ ${contextInfo}
               <span className={execStatus === 'running' ? 'text-primary' : execStatus === 'completed' ? 'text-green-400' : 'text-red-400'}>
                 {execStatus === 'running' ? '执行中' : execStatus === 'completed' ? '执行完成' : '执行失败'}
               </span>
-              <span className="text-muted-foreground">{Object.keys(execResults).length}/{wf.nodes.length}</span>
+              <span className="text-muted-foreground">{executionNodeIds.filter(id => ['success', 'error', 'failed', 'timeout', 'skipped', 'cancelled'].includes(execResults[id]?.status)).length}/{executionNodeIds.length}</span>
               <button
                 type="button"
                 onClick={() => { setExecStatus('idle'); setExecResults({}); setExecLogs([]); }}
@@ -3455,6 +3532,7 @@ ${contextInfo}
               theme={T}
               execResults={execResults}
               execStatus={execStatus}
+              executionNodeIds={executionNodeIds}
               highlightedNodeIds={getConnectedNodeIds}
               hoveredNodeId={hoveredNodeId}
               canvasImages={canvasImages}
@@ -3473,6 +3551,7 @@ ${contextInfo}
             theme={T}
             execResults={execResults}
             execStatus={execStatus}
+            executionNodeIds={executionNodeIds}
             highlightedNodeIds={getConnectedNodeIds}
             hoveredNodeId={hoveredNodeId}
             canvasImages={canvasImages}

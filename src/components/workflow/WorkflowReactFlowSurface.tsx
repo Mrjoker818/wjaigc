@@ -42,6 +42,7 @@ interface WorkflowReactFlowSurfaceProps {
   theme?: WorkflowLegacyNodeTheme;
   execResults?: Record<string, { status: string; output?: Record<string, unknown>; error?: string }>;
   execStatus?: string;
+  executionNodeIds?: readonly string[];
   highlightedNodeIds?: Set<string>;
   hoveredNodeId?: string | null;
   canvasImages?: WorkflowLegacyCanvasImageRef[];
@@ -110,7 +111,7 @@ function createCardProps(
     isHighlighted: presentation.highlightedNodeIds?.has(renderNode.id) ?? false,
     isHovered: presentation.hoveredNodeId === renderNode.id,
     execResult: presentation.execResults?.[renderNode.id] ?? renderNode.workflowNode.execResult,
-    isRunning: presentation.execStatus === 'running',
+    isRunning: presentation.execStatus === 'running' && (presentation.executionNodeIds?.includes(renderNode.id) ?? true),
     theme: presentation.theme ?? DEFAULT_WORKFLOW_NODE_THEME,
     canvasImages: presentation.canvasImages,
     llmModels: presentation.llmModels,
@@ -282,6 +283,7 @@ export function WorkflowReactFlowSurface({
   theme,
   execResults,
   execStatus,
+  executionNodeIds,
   highlightedNodeIds,
   hoveredNodeId,
   canvasImages,
@@ -301,6 +303,7 @@ export function WorkflowReactFlowSurface({
     theme,
     execResults,
     execStatus,
+    executionNodeIds,
     highlightedNodeIds,
     hoveredNodeId,
     canvasImages,
@@ -314,6 +317,7 @@ export function WorkflowReactFlowSurface({
     theme,
     execResults,
     execStatus,
+    executionNodeIds,
     highlightedNodeIds,
     hoveredNodeId,
     canvasImages,
