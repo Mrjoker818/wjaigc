@@ -31,6 +31,7 @@ import {
   verifyGeneratedImageAlphaSet,
   type GeneratedImageAlphaSetVerification,
 } from '@/lib/generated-image-alpha';
+import { enrichCompletedImageResult } from '@/lib/asset-core/image-result-metadata';
 
 interface ImageTaskSubmission {
   skillBilling?: {
@@ -404,7 +405,7 @@ export async function recordImageTaskTerminal(
         },
       }
     : {};
-  const result = imageUrls.length > 0 || hasResultMetadata
+  const resultBase: Record<string, unknown> | undefined = imageUrls.length > 0 || hasResultMetadata
     ? {
         imageUrl: imageUrls[0] || '',
         imageUrls,
@@ -421,6 +422,9 @@ export async function recordImageTaskTerminal(
         ...transparentResultWarning,
       }
     : undefined;
+  const result = input.status === 'completed' && resultBase && imageUrls.length > 0
+    ? await enrichCompletedImageResult(resultBase)
+    : resultBase;
 
   const terminal = await persistTerminalTask(taskId, {
     status: input.status,

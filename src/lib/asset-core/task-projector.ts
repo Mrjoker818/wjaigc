@@ -194,6 +194,38 @@ function outputUrls(task: ProjectionTask): string[] {
   return [];
 }
 
+function positiveSafeInteger(value: unknown): number | undefined {
+  return Number.isSafeInteger(value) && Number(value) > 0 ? Number(value) : undefined;
+}
+
+function outputFileMetadata(result: Record<string, unknown>, url: string): Partial<AssetFile> {
+  const candidates = [
+    ...(Array.isArray(result.images) ? result.images : []),
+    result.image,
+  ];
+  const match = candidates.find((item) => (
+    item
+    && typeof item === 'object'
+    && !Array.isArray(item)
+    && (item as Record<string, unknown>).url === url
+  ));
+  if (!match || typeof match !== 'object' || Array.isArray(match)) return {};
+
+  const metadata = match as Record<string, unknown>;
+  const width = positiveSafeInteger(metadata.width);
+  const height = positiveSafeInteger(metadata.height);
+  const byteSize = positiveSafeInteger(metadata.byteSize);
+  const mimeType = typeof metadata.mimeType === 'string' && metadata.mimeType.length <= 128
+    ? metadata.mimeType
+    : undefined;
+  return {
+    ...(width === undefined ? {} : { width }),
+    ...(height === undefined ? {} : { height }),
+    ...(byteSize === undefined ? {} : { byteSize }),
+    ...(mimeType ? { mimeType } : {}),
+  };
+}
+
 function workspaceId(input: ProjectCompletedTaskInput): string {
   if (input.workspaceId) return input.workspaceId;
   if (input.workspace === 'workflow') return `workflow:${input.targetProjectId}`;
@@ -681,6 +713,7 @@ export function createTaskAssetProjector(
         const kind = kindForTask(task);
 
         for (const [outputIndex, url] of urls.entries()) {
+          const authoritativeFileMetadata = outputFileMetadata(task.result, url);
           const outputDigest = stableDigest(url);
           const requestDigest = stableDigest({
             actorUserId: input.actorUserId,
@@ -721,6 +754,7 @@ export function createTaskAssetProjector(
               availability: 'ready',
               ...(mimeTypeForUrl(url, kind) ? { mimeType: mimeTypeForUrl(url, kind) } : {}),
               ...(/^https?:\/\//.test(url) ? { recoverySourceUrl: url } : {}),
+              ...authoritativeFileMetadata,
             },
             workspace: input.workspace,
             workspaceId: targetWorkspaceId,

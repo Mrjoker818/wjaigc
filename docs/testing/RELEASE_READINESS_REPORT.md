@@ -1,8 +1,12 @@
 # 无界AI — 发布就绪报告 (RELEASE READINESS REPORT)
 
+## 2026-09-05 Skill 成品真实尺寸候选
+
+全平台结论保持**不通过**。TEST-SKILL-010 已完成 RED、最小修复和 66 项关联回归：生成终态在资产事务外安全读取真实媒体元数据，投影层按 URL 保留宽高/MIME/字节数；元数据读取失败不把成功生成改成失败。最终全仓 643 文件/5148 项通过、166 项真库门禁明确跳过、0 失败；TypeScript、零错误 Lint、38 项保护门禁及生产构建 119/119 通过，Build ID `mYvPkKVF-PAGUqYjiugVw`。隔离 PostgreSQL、Coze 新 Skill 的任务结果与 AssetVersion 尺寸、缩略图、预览及下载尚无新证据，因此仅允许作为本地候选继续验收。
+
 ## 2026-09-05 原生 Skill 租约结算候选
 
-全平台结论保持**不通过**。TEST-SKILL-009 已完成根因定位、失败回归和最小修复；聚焦 73 项及 TypeScript 通过。最终全仓 5142 项通过、166 项 PostgreSQL 门禁跳过、0 失败；零错误 Lint、38 项保护和生产构建 119/119 通过，Build ID `r-dYejxNXZhfZ2hXiAEYl`。新增真实 PostgreSQL 用例因本机未配置隔离测试库而跳过，且尚缺 Coze 同步后新成功 run 的 `completed_at>0` 回执，因此仅允许作为本地候选继续验证。TEST-SKILL-010 的 1254×1254 成品尺寸 NULL 已定位为任务终态未提供媒体元数据，仍未修复。
+全平台结论保持**不通过**。TEST-SKILL-009 已完成根因定位、失败回归和最小修复；聚焦 73 项及 TypeScript 通过。最终全仓 5142 项通过、166 项 PostgreSQL 门禁跳过、0 失败；零错误 Lint、38 项保护和生产构建 119/119 通过，Build ID `r-dYejxNXZhfZ2hXiAEYl`。新增真实 PostgreSQL 用例因本机未配置隔离测试库而跳过，且尚缺 Coze 同步后新成功 run 的 `completed_at>0` 回执，因此仅允许作为本地候选继续验证。TEST-SKILL-010 已另行完成本地补修，但同样必须等待真库与云端证据。
 
 ## 2026-09-05 单像素节点预览补修
 

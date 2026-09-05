@@ -124,6 +124,40 @@ describe('completed task asset projection', () => {
     });
   });
 
+  it('preserves authoritative per-image dimensions in the projected AssetVersion file', async () => {
+    const repository = new MemoryProjectionRepository(task({
+      result: {
+        imageUrl: '/api/serve-upload/uploads/result-1.png',
+        imageUrls: ['/api/serve-upload/uploads/result-1.png'],
+        images: [{
+          url: '/api/serve-upload/uploads/result-1.png',
+          width: 1254,
+          height: 1254,
+          mimeType: 'image/png',
+          byteSize: 456789,
+        }],
+      },
+    }));
+
+    const result = await projector(repository).projectCompletedTaskToAssets({
+      actorUserId: 'user-1',
+      taskId: 'task-1',
+      targetProjectId: 'project-1',
+      workspace: 'workflow',
+      workspaceId: 'workflow:workflow-1',
+      sourceEntityId: 'skill-node-1',
+      parentVersionIds: [],
+    });
+
+    expect(result.versions[0]?.file).toMatchObject({
+      url: '/api/serve-upload/uploads/result-1.png',
+      width: 1254,
+      height: 1254,
+      mimeType: 'image/png',
+      byteSize: 456789,
+    });
+  });
+
   it('carries Canvas Skill trace into authoritative version and placement creation', async () => {
     const repository = new MemoryProjectionRepository(task());
     const sourceTrace = {

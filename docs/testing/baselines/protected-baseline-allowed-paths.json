@@ -120,6 +120,7 @@
   "src/lib/agent-runtime/types.ts",
   "src/lib/agent-runtime/workspace-results.ts",
   "src/lib/agent-task-persistence.ts",
+  "src/lib/asset-core/image-result-metadata.ts",
   "src/lib/asset-core/task-projector.ts",
   "src/lib/asset-core/workspace-transfer.ts",
   "src/lib/asset-core/workflow-chat-return.ts",

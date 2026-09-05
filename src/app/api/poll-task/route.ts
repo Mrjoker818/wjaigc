@@ -67,6 +67,7 @@ import { requiresAtomicTerminalSettlement } from '@/lib/task-core/terminal-settl
 import { getRequestId } from '@/lib/request-id';
 import type { GenerationRouteAudit } from '@/lib/generation-route-audit';
 import { STRICT_AGENT_GENERATE_HEADER } from '@/lib/agent-runtime/generate-image-adapter';
+import { enrichCompletedImageResult } from '@/lib/asset-core/image-result-metadata';
 
 export const dynamic = 'force-dynamic';
 
@@ -3291,6 +3292,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         generationRouteAudit: existingResult.generationRouteAudit,
       });
       if (durableAtomicTask) {
+        const metadataEnrichedResult = await enrichCompletedImageResult(completedTaskResult);
+        completedTaskResult.images = metadataEnrichedResult.images;
         const generationCompletion = await completeCloudTask(taskId, completedTaskResult);
         if (!generationCompletion) {
           const persistedResponse = await getDurableGenerationSlotResponse(taskId, userId);

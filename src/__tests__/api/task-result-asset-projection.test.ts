@@ -102,6 +102,17 @@ describe('task result asset projection wiring', () => {
     expect(completion).toContain('if (!authoritativeCompletedResult)');
   });
 
+  it('captures completed image metadata before the durable terminal projection transaction', () => {
+    const route = source('src/app/api/poll-task/route.ts');
+    const resultStart = route.indexOf('const completedTaskResult = sanitizeCompletedTaskResult({');
+    const metadata = route.indexOf('await enrichCompletedImageResult(completedTaskResult)', resultStart);
+    const terminal = route.indexOf('completeCloudTask(taskId, completedTaskResult)', resultStart);
+
+    expect(resultStart).toBeGreaterThan(-1);
+    expect(metadata).toBeGreaterThan(resultStart);
+    expect(terminal).toBeGreaterThan(metadata);
+  });
+
   it('never publishes an annotation or aggregate completion without an authoritative durable result', () => {
     const route = source('src/app/api/poll-task/route.ts');
     const annotationRemote = route.slice(

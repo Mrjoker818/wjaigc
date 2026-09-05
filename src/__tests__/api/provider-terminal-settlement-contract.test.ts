@@ -21,6 +21,11 @@ describe('brand and font durable terminal settlement wiring', () => {
     expect(pollSource).toContain('const durableAtomicTask = requiresAtomicTerminalSettlement({');
     expect(pollSource).toMatch(/durableAtomicTask\s*\? await terminateCloudTaskAndRefund\(taskId, 'failed'/);
     expect(pollSource).toMatch(/durableAtomicTask\s*\? await terminateCloudTaskAndRefund\(taskId, 'cancelled'/);
-    expect(pollSource).toMatch(/if \(durableAtomicTask\) \{\s*const generationCompletion = await completeCloudTask/);
+    const durableCompletion = pollSource.indexOf('if (durableAtomicTask) {', pollSource.indexOf('const completedTaskResult'));
+    const metadata = pollSource.indexOf('await enrichCompletedImageResult(completedTaskResult)', durableCompletion);
+    const completion = pollSource.indexOf('const generationCompletion = await completeCloudTask', durableCompletion);
+    expect(durableCompletion).toBeGreaterThan(-1);
+    expect(metadata).toBeGreaterThan(durableCompletion);
+    expect(completion).toBeGreaterThan(metadata);
   });
 });

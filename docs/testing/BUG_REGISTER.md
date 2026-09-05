@@ -13,10 +13,12 @@
 
 ## 2026-09-05 Skill 成品 AssetVersion 尺寸未落库
 
-- ID：TEST-SKILL-010，P2，Task12 资产元数据边界；已完成根因定位，尚未修改生产代码。
+- ID：TEST-SKILL-010，P2，Task12 资产元数据边界；本地已修复，隔离 PostgreSQL 与 Coze 云端待验。
 - 证据：同一真实成品浏览器解码为 1254×1254，版本 `e819d7ba-7cbb-4984-b444-f02d3a118104` 的数据库 `width/height` 均为 NULL。
 - 根因：完成任务结果只持久化 `imageUrl/imageUrls`，没有宽高；`task-projector.ts` 只从 URL 构造 `AssetFile`，不会安全读取媒体元数据，因此数据库字段按设计写入 NULL，并非 SQL 丢值。
-- 后续边界：在生成终态、资产投影事务之外通过受控媒体读取补齐真实 MIME/字节/宽高；禁止按比例或模型声明猜测尺寸，禁止在持行锁事务中下载远程图片。需先补失败回归后实施。
+- 最小修复：生成终态在数据库事务外通过既有安全媒体读取器与 Sharp 像素上限采集真实 MIME、字节数和宽高；失败按单图降级，不改变供应商成功终态。投影器按 URL 精确匹配并保留这些字段，不按比例或模型声明猜测，也不在持行锁事务中下载媒体。
+- TDD：投影保真与终态采集先得到 3 个稳定 RED；修复后元数据、投影、持久化、原子完成顺序与终态策略共 66/66 通过。最终全仓 643 文件/5148 项通过、30 文件/166 项隔离 PostgreSQL 门禁明确跳过、0 失败；`pnpm ts-check`、`lint:build`、38 项保护门禁及生产构建 119/119 通过，Build ID `mYvPkKVF-PAGUqYjiugVw`。
+- 未关闭项：需在隔离 PostgreSQL 和 Coze 新真实 Skill 中证明 `cloud_tasks.result.images` 与 AssetVersion 均为真实 `1254×1254`，再复验缩略图、预览和下载尺寸。
 
 ## 2026-09-05 Skill 成品节点显示为单像素
 

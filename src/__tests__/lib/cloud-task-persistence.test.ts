@@ -10,6 +10,7 @@ const {
   transitionCloudTaskStatus,
   transitionTask,
   updateCloudTask,
+  enrichCompletedImageResult,
 } = vi.hoisted(() => ({
   createCloudTask: vi.fn(),
   getCloudTaskById: vi.fn(),
@@ -20,6 +21,7 @@ const {
   transitionCloudTaskStatus: vi.fn(),
   transitionTask: vi.fn(),
   updateCloudTask: vi.fn(),
+  enrichCompletedImageResult: vi.fn(),
 }));
 
 vi.mock('@/lib/cloud-task-storage', () => ({
@@ -35,6 +37,7 @@ vi.mock('@/lib/asset-core/task-projector', () => ({
   recordTaskLateResultAudit,
   recordTaskProjectionPending,
 }));
+vi.mock('@/lib/asset-core/image-result-metadata', () => ({ enrichCompletedImageResult }));
 
 import {
   recordImageTaskSubmitted,
@@ -74,6 +77,16 @@ describe('cloud-task-persistence', () => {
       },
     });
     updateCloudTask.mockReset().mockResolvedValue(undefined);
+    enrichCompletedImageResult.mockReset().mockImplementation(async (result) => ({
+      ...result,
+      images: (result.imageUrls as string[]).map((url) => ({
+        url,
+        width: 1254,
+        height: 1254,
+        mimeType: 'image/png',
+        byteSize: 456789,
+      })),
+    }));
   });
 
   it('records an image submission without storing provider credentials', async () => {
@@ -246,7 +259,7 @@ describe('cloud-task-persistence', () => {
       from: ['processing'],
       to: 'completed',
       creditStatus: 'charged',
-      result: {
+      result: expect.objectContaining({
         submissionPayload: {
           prompt: 'preserve me',
           referenceImages: ['source-a'],
@@ -255,7 +268,7 @@ describe('cloud-task-persistence', () => {
         imageUrls: ['/uploads/result.png'],
         maskUrl: '/uploads/mask.png',
         maskUrls: ['/uploads/mask.png'],
-      },
+      }),
     }));
     expect(projectCompletedTaskToAssets).toHaveBeenCalledWith({
       actorUserId: 'user-a',
@@ -400,7 +413,7 @@ describe('cloud-task-persistence', () => {
       taskId: 'remote-task-batch',
       to: 'completed',
       creditStatus: 'charged',
-      result: {
+      result: expect.objectContaining({
         imageUrl: '/uploads/result-1.png',
         imageUrls: [
           '/uploads/result-1.png',
@@ -409,7 +422,7 @@ describe('cloud-task-persistence', () => {
         ],
         maskUrl: '/uploads/mask-1.png',
         maskUrls: ['/uploads/mask-1.png', '/uploads/mask-2.png'],
-      },
+      }),
     }));
     expect(updateCloudTask).not.toHaveBeenCalled();
   });
@@ -640,6 +653,31 @@ describe('cloud-task-persistence', () => {
         modelName: 'Provider Model',
         providerId: 'provider-a',
         providerName: 'Provider A',
+      }),
+    }));
+  });
+
+  it('captures image dimensions before committing a completed image task', async () => {
+    await recordImageTaskTerminal('remote-task-dimensions', {
+      status: 'completed',
+      imageUrl: '/uploads/result.png',
+      creditStatus: 'charged',
+    });
+
+    expect(enrichCompletedImageResult).toHaveBeenCalledWith(expect.objectContaining({
+      imageUrl: '/uploads/result.png',
+      imageUrls: ['/uploads/result.png'],
+    }));
+    expect(transitionTask).toHaveBeenCalledWith(expect.objectContaining({
+      taskId: 'remote-task-dimensions',
+      result: expect.objectContaining({
+        images: [{
+          url: '/uploads/result.png',
+          width: 1254,
+          height: 1254,
+          mimeType: 'image/png',
+          byteSize: 456789,
+        }],
       }),
     }));
   });

@@ -1,5 +1,11 @@
 # 无界AI — 回归测试报告 (REGRESSION REPORT)
 
+## 2026-09-05 Task12 AssetVersion 真实尺寸补修
+
+真实 1254×1254 Skill 成品对应 AssetVersion 宽高为空，已通过失败测试确认元数据在任务终态和资产投影之间丢失。最小修复在事务外复用安全媒体输入与 Sharp 像素门禁采集真实 MIME、字节数和宽高，并让投影器按 URL 精确保留字段；读取失败只降级为无尺寸，不覆盖供应商成功终态。
+
+投影保真、元数据采集、旧持久化、原子完成顺序和终态结算聚焦回归 66/66。最终全仓 643 文件/5148 项通过、30 文件/166 项隔离 PostgreSQL 门禁明确跳过、0 失败；TypeScript、零错误 Lint、38 项保护门禁及生产构建 119/119 通过，Build ID `mYvPkKVF-PAGUqYjiugVw`。隔离 PostgreSQL、Coze 新任务落库、缩略图、预览和下载仍未验证，结论为 **LOCAL PASS / POSTGRES AND CLOUD UNVERIFIED**。
+
 ## 2026-09-05 Task12 原生 Skill 租约结算补修
 
 云端真实成功任务暴露父任务已完成但执行租约 `completed_at=0`。新增失败单测证明原生 Skill 自行终态化后，适配器再次写合成 `tool.completed` 会被终态保护拒绝并跳过租约结算；最小修复后 same-task 18/18，通过 Skill 执行器、事件围栏和预付轮询等聚焦回归共 73/73，TypeScript 通过。
