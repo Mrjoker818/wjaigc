@@ -128,3 +128,13 @@
 - 该证据关闭 TEST-SKILL-009/010 的本地 PostgreSQL 边界，不替代 Coze 新任务、缩略图、预览、下载与账务回执。Task12 仍未完成。
 - 最终本地门禁：672 文件中 642 通过/30 个 PostgreSQL 文件跳过，5308 项中 5142 通过/166 项跳过/0 失败；`lint:build` 零错误、38 项保护通过；生产构建 119/119 页面，Build ID `r-dYejxNXZhfZ2hXiAEYl`。
 - 当前 Task12 约 78%：节点生成、账务、显示、保存刷新、租约和尺寸持久化的本地修复已闭环；画布入口、暂停恢复、失败步骤重试、预览下载、完整诊断证据，以及租约/尺寸的真库与云端复验仍未完成。
+
+### Task12 生产模式跨浏览器补验
+
+- 候选基于 `main@fc775804ab7299ff8c712e5741f49c8296aac4aa`。使用隔离 PostgreSQL 18 数据库和受控 HTTP 图像供应商，在生产构建上执行 Canvas/Workflow 与 Simple Chat 专项。
+- Chromium、Firefox、WebKit 的 Canvas/Workflow 同源 Skill 和 Simple Chat 隔离共 `6/6` 通过。Canvas 与 Workflow 均为同一 21 项定义，Simple Chat 为独立 16 项；节点执行前显示 62 积分确认。
+- Canvas Skill 成品真实进入画布；资产接口按精确 AssetVersion 读取成功；浏览器解码尺寸为 `1x1`；通过图片浮动工具栏实际下载 PNG，Sharp 复读为 `image/png`、`1x1`。
+- 证据夹具保存 final screenshot、video、trace、console.json、network.json。最终生产模式运行 Console 为 0 失败；工作流状态轮询的浏览器取消仅在相同 URL、方法及请求摘要存在 2xx 恢复响应时认定为已恢复，不放宽未知请求失败。
+- 生产构建使用进程级 16 GiB 堆退出 0：webpack 编译约 11.5 分钟、TypeScript 52 秒、静态页面 `119/119`。默认 4 GiB 仍 OOM，8 GiB 本次接近上限后主动停止，未修改部署配置。
+- 暂停/继续、失败步骤重试、历史恢复和 API 控制专项 `57/57` 通过；该结果不代替云端真实暂停恢复与失败重试。
+- 当前 Task12 约 88%。剩余唯一范围：推送本候选并证明 Coze exact tree；沙箱重启后强刷现有 Google Chrome 预览；补暂停后恢复、最终一次账务、云端预览/下载及完整 Console/Network/Trace。不得重复本轮本地三浏览器和下载测试。

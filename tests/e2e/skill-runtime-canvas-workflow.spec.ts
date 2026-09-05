@@ -1,6 +1,7 @@
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo, Socket } from 'node:net';
 import type { Page } from '@playwright/test';
+import sharp from 'sharp';
 
 import {
   ensureStage4Session,
@@ -69,12 +70,33 @@ interface SkillRunEvidence {
   assetVersionIds: string[];
 }
 
+interface AssetReferenceEvidence {
+  assetVersionId: string;
+  url: string;
+  width?: number;
+  height?: number;
+}
+
 async function readSkillRun(page: Page, runId: string): Promise<SkillRunEvidence> {
   const response = await page.request.get(`/api/skill-runs/${encodeURIComponent(runId)}`);
   expect(response.ok(), `Skill Run ${runId} returned HTTP ${response.status()}`).toBe(true);
   const payload = await response.json() as { run?: SkillRunEvidence };
   expect(payload.run?.runId).toBe(runId);
   return payload.run!;
+}
+
+async function readAssetReference(
+  page: Page,
+  projectId: string,
+  assetVersionId: string,
+): Promise<AssetReferenceEvidence> {
+  const query = new URLSearchParams({ projectId, assetVersionId });
+  const response = await page.request.get(`/api/assets?${query.toString()}`);
+  expect(response.ok(), `Asset ${assetVersionId} returned HTTP ${response.status()}`).toBe(true);
+  const payload = await response.json() as AssetReferenceEvidence;
+  expect(payload.assetVersionId).toBe(assetVersionId);
+  expect(typeof payload.url).toBe('string');
+  return payload;
 }
 
 async function readCatalog(page: Page, surface: 'canvas' | 'workflow'): Promise<CatalogSkill[]> {
@@ -162,18 +184,39 @@ test('画布与节点模式使用同一套 21 项 Skill 定义和版本', async 
     modelId: 'stage4-image-model',
   });
   expect(typeof canvasSubmissionPayload.runId).toBe('string');
-  const canvasAssetLoaded = page.waitForResponse(response => (
-    response.request().method() === 'GET'
-    && new URL(response.url()).pathname === '/api/assets'
-    && response.ok()
-  ));
-  await expect(page.getByText('已完成', { exact: true })).toBeVisible({ timeout: 90_000 });
+  await expect.poll(
+    async () => (await readSkillRun(page, canvasSubmissionPayload.runId!)).status,
+    { timeout: 90_000, intervals: [250, 500, 1_000, 2_000] },
+  ).toBe('completed');
   const canvasRun = await readSkillRun(page, canvasSubmissionPayload.runId!);
   expect(canvasRun.status).toBe('completed');
   expect(canvasRun.skillId).toBe(canvasRequest.skillId);
   expect(canvasRun.skillVersion).toBe(canvasRequest.skillVersion);
   expect(canvasRun.assetVersionIds.length).toBeGreaterThan(0);
-  await canvasAssetLoaded;
+
+  await readAssetReference(
+    page,
+    String(fixture.canvasProject.id),
+    canvasRun.assetVersionIds[0],
+  );
+  const canvasPreview = page.getByRole('img', { name: 'canvas image', exact: true }).last();
+  await expect(canvasPreview).toBeVisible({ timeout: 20_000 });
+  await expect.poll(async () => canvasPreview.evaluate(image => ({
+    width: (image as HTMLImageElement).naturalWidth,
+    height: (image as HTMLImageElement).naturalHeight,
+  }))).toEqual({ width: 1, height: 1 });
+  await page.getByRole('button', { name: '展开更多工具', exact: true }).click();
+  await page.locator('[data-image-toolbar-overflow]').getByRole('button', { name: '下载', exact: true }).click();
+  await expect(page.getByText('PNG 格式', { exact: true })).toBeVisible();
+  const downloadPromise = page.waitForEvent('download');
+  await page.getByRole('button', { name: '确认下载', exact: true }).click();
+  const download = await downloadPromise;
+  const downloadPath = await download.path();
+  expect(downloadPath).toBeTruthy();
+  const downloadedMetadata = await sharp(downloadPath!).metadata();
+  expect(downloadedMetadata.format).toBe('png');
+  expect(downloadedMetadata.width).toBe(1);
+  expect(downloadedMetadata.height).toBe(1);
 
   const collapsePanel = page.getByRole('button', { name: '收起面板', exact: true });
   if (await collapsePanel.isVisible().catch(() => false)) await collapsePanel.click();
@@ -208,6 +251,9 @@ test('画布与节点模式使用同一套 21 项 Skill 定义和版本', async 
     && Boolean(response.request().postData()?.includes('"action":"start"'))
   ), { timeout: 90_000 });
   await page.getByRole('button', { name: '执行工作流', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Skill 费用预估', exact: true })).toBeVisible();
+  await expect(page.getByText('62 积分', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: '确认执行', exact: true }).click();
   const workflowSubmissionResponse = await workflowSubmission;
   expect(workflowSubmissionResponse.ok()).toBe(true);
   const workflowSubmissionPayload = await workflowSubmissionResponse.json() as { executionId?: string };

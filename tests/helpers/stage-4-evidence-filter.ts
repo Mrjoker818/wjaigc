@@ -24,6 +24,33 @@ function isRecoveredIdempotentGetAbort(
   ));
 }
 
+function isRecoveredWorkflowStatusAbort(
+  entry: Stage4RuntimeEvidenceEntry,
+  evidence: Stage4RuntimeEvidenceEntry[],
+): boolean {
+  if (
+    entry.method !== 'POST'
+    || !entry.url
+    || !entry.requestDigest
+    || !/ERR_ABORTED|NS_ERROR_ABORT|NS_BINDING_ABORTED|Load request cancelled/i.test(entry.text ?? '')
+  ) return false;
+  let pathname: string;
+  try {
+    pathname = new URL(entry.url).pathname;
+  } catch {
+    return false;
+  }
+  if (pathname !== '/api/workflow/execute') return false;
+  return evidence.some(candidate => (
+    candidate.method === 'POST'
+    && candidate.url === entry.url
+    && candidate.requestDigest === entry.requestDigest
+    && typeof candidate.status === 'number'
+    && candidate.status >= 200
+    && candidate.status < 300
+  ));
+}
+
 export function stage4RuntimeEvidenceFailures(
   consoleEntries: Stage4RuntimeEvidenceEntry[],
   networkEntries: Stage4RuntimeEvidenceEntry[],
@@ -40,6 +67,7 @@ export function stage4RuntimeEvidenceFailures(
       || (Boolean(entry.text)
         && !isBenignStage3RequestAbort(entry)
         && !isRecoveredStage3RequestAbort(entry, networkEntries)
+        && !isRecoveredWorkflowStatusAbort(entry, networkEntries)
         && !isRecoveredIdempotentGetAbort(entry, networkEntries))
     )),
   };

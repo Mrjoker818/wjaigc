@@ -292,6 +292,30 @@ describe('Stage 4 workflow performance samples', () => {
     expect(stage4RuntimeEvidenceFailures([], [aborted]).networkFailures).toEqual([aborted]);
   });
 
+  it('allows an aborted workflow status poll only after the identical request succeeds', () => {
+    const aborted = {
+      method: 'POST',
+      text: 'net::ERR_ABORTED',
+      requestDigest: 'same-status-payload',
+      url: 'http://127.0.0.1:5000/api/workflow/execute',
+      occurredAt: 100,
+    };
+    const recovered = {
+      method: 'POST',
+      status: 200,
+      requestDigest: aborted.requestDigest,
+      url: aborted.url,
+      occurredAt: 120,
+    };
+
+    expect(stage4RuntimeEvidenceFailures([], [aborted, recovered]).networkFailures).toEqual([]);
+    expect(stage4RuntimeEvidenceFailures([], [aborted]).networkFailures).toEqual([aborted]);
+    expect(stage4RuntimeEvidenceFailures([], [aborted, {
+      ...recovered,
+      requestDigest: 'different-status-payload',
+    }]).networkFailures).toEqual([aborted]);
+  });
+
   it('allows an aborted idempotent GET only when the same URL later succeeds', () => {
     const aborted = {
       method: 'GET',

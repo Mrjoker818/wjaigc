@@ -2729,3 +2729,11 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - 新 Build ID 为 `gZ8JEWqrmTL1DArgB7pSr`；唯一 5000 服务 PID `17363`，`WUJIE_ASSET_GRAPH_MODE=asset-v3`；`/`、`/simple-chat`、`/api/auth/me` 均为 HTTP 200。
 - Google Chrome 强制刷新后管理员会话和项目画布正常，Canvas Skills 入口可打开并进入真实 Skill 参数表单。填写参数时扩展控制连接脱离，尚未取得“错误暂停仅显示失败步骤重试”和“取消终态无 processing 步骤”的新部署 UI 证据。
 - **回归判定：COZE EXACT-TREE / BUILD / SERVICE PASS；CHROME STATE-MACHINE PENDING。** 不进入下一批开发，先补齐两个状态缺陷的云端真实复验。
+
+## 2026-09-05 Task12 生产模式跨浏览器补验
+
+- 基于 `main@fc775804` 的测试门禁候选，生产构建通过，生成 `119/119` 页面；本机需 16 GiB 进程堆，默认 4 GiB 构建 OOM 继续记录为工程资源风险。
+- Chromium、Firefox、WebKit 的 Canvas/Workflow 21 Skills 同源运行及 Simple Chat 16 Skills 隔离共 `6/6` 通过。
+- Canvas 成品预览、AssetVersion 精确读取、图片浮动工具栏 PNG 下载及下载文件 `1x1 image/png` 元数据通过；生产模式 Console 失败为 0。
+- 暂停/继续、失败步骤重试、历史恢复和 API 控制专项 `57/57` 通过；证据过滤器新增精确请求摘要恢复约束，未知或未恢复的 POST 中断仍失败关闭。
+- **回归判定：LOCAL PRODUCTION / THREE-BROWSER PASS；LATEST COZE RUNTIME PENDING。** 尚不关闭 Task12。

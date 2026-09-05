@@ -2268,3 +2268,14 @@ BUG-018 已从未验证项移除。剩余顺序为 `002-B -> 002-D -> 002-E`；�
 - [ ] 使用稳定图像供应商完成一个真实 Skill，生成新 AssetVersion，并验证刷新恢复、原素材不覆盖和最终一次扣费。
 - [ ] 配置专用隔离 PostgreSQL 后执行本轮默认环境跳过的 `27 files / 143 tests`；禁止使用业务库冒充隔离库。
 - [ ] 继续保留 Pear 延期验收与部署旧 Chunk 首次加载风险。
+
+## 2026-09-05 Task12 最新剩余边界
+
+- [x] 隔离 PostgreSQL 租约、幂等、扣退和 AssetVersion 元数据。
+- [x] Chromium、Firefox、WebKit 的 Canvas/Workflow 21 Skills 与 Simple Chat 16 Skills 专项，共 `6/6`。
+- [x] Canvas Skill 成品预览、精确 AssetVersion 读取、工具栏 PNG 下载及真实文件尺寸校验。
+- [x] 本地暂停/继续、失败步骤重试、历史恢复和 API 控制专项 `57/57`。
+- [ ] 推送本轮测试门禁候选，Coze 复读 exact tree、构建、重启唯一 5000 服务。
+- [ ] 沙箱重启后强刷现有 Google Chrome 预览页，验证暂停后恢复、不重复供应商提交和最终一次账务。
+- [ ] 保存云端最终 Console、Network、Trace、截图、requestId、taskId 和积分前后值。
+- 当前 Task12 约 `88%`；以上三项完成前仍为未完成，不重复已闭环的本地跨浏览器和下载测试。
