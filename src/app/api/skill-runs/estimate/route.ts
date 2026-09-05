@@ -6,6 +6,8 @@ import { resolveTaskModel } from '@/lib/task-core/model-catalog';
 import { estimateSkillRunCost } from '@/lib/skill-runtime/cost-estimator';
 import {
   buildSkillAgentRunRequest,
+  authorizeAndFreezeBindings,
+  SkillRunVersionError,
   type SkillRunRequest,
 } from '@/lib/skill-runtime/run-request';
 import { resolveExecutableSkillForUser } from '@/lib/skill-runtime/storage';
@@ -123,8 +125,35 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (auth instanceof NextResponse) return auth;
 
   try {
-    const input = parseEstimateRequest(await readStrictJsonObject(request));
+    const body = await readStrictJsonObject(request);
+    const input = parseEstimateRequest(body);
+    if (body.estimateScope !== undefined && (body.estimateScope !== 'workflow-node' || input.surface !== 'workflow')) {
+      throw new SkillRequestError('INVALID_REQUEST_BODY', 400, 'estimateScope is invalid');
+    }
     const skill = await resolveExecutableSkillForUser(auth.userId, input.skillId, input.surface);
+    if (body.estimateScope === 'workflow-node') {
+      if (skill.version !== input.skillVersion) throw new SkillRunVersionError();
+      const bindings = await authorizeAndFreezeBindings(input.modelBindings, skill, {
+        actorUserId: auth.userId, resolveTaskModel,
+      });
+      const orchestrator = bindings.orchestrator!;
+      // Pricing depends on the frozen model roles, not on future upstream output.
+      // This context is authorization-only and is never submitted as a run.
+      await authorizeAgentContext({
+        actorUserId: auth.userId,
+        request: {
+          projectId: input.projectId, workspace: 'workflow', workspaceId: input.workspaceId,
+          mode: 'agent', providerId: orchestrator.providerId, modelId: orchestrator.modelId,
+          prompt: '', sourceVersionIds: input.sourceVersionIds, allowedToolIds: [],
+          idempotencyKey: input.idempotencyKey,
+          context: { selectedEntityIds: [], visibleVersionIds: input.sourceVersionIds, locale: 'zh-CN' },
+        },
+      });
+      return NextResponse.json({
+        ...await estimateSkillRunCost(skill, bindings), modelBindings: bindings,
+        inputValidation: 'deferred-to-execution',
+      });
+    }
     const agentRequest = await buildSkillAgentRunRequest(input, {
       actorUserId: auth.userId,
       resolveTaskModel,

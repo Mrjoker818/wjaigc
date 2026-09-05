@@ -32,6 +32,7 @@ import {
 } from '@/lib/workflow-engine';
 import { loadUserSkillCatalog } from '@/lib/skill-runtime/storage';
 import { createPostgresAssetStorage } from '@/lib/asset-core/storage';
+import { resolveWorkflowExecutionScope } from '@/lib/workflow-execution-scope';
 import {
   cancelWorkflowSkillRun,
   executeWorkflowSkillRun,
@@ -733,6 +734,18 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: '节点列表不能为空' }, { status: 400 });
     }
 
+    let executionScope;
+    try {
+      executionScope = resolveWorkflowExecutionScope({
+        nodes,
+        connections: connections || [],
+        startNodeId: body.startNodeId,
+        tailNodeId: body.tailNodeId,
+      });
+    } catch (error) {
+      return NextResponse.json({ error: error instanceof Error ? error.message : '无法确定运行范围' }, { status: 400 });
+    }
+
     const executionIdNew = `exec-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const execState: WorkflowExecutionState = {
       status: 'running',
@@ -745,7 +758,7 @@ export async function POST(request: NextRequest) {
       workflowId: typeof workflowId === 'string' ? workflowId : undefined,
       userRole: auth.userRole === 'admin' ? 'admin' : 'user',
       userProductType: auth.user.productType,
-      totalNodes: nodes.length,
+      totalNodes: executionScope.nodes.length,
       activeLayerTasks: {},
       activeSkillRuns: {},
       pendingSkillSubmissions: {},
@@ -784,7 +797,7 @@ export async function POST(request: NextRequest) {
     }
 
     // 异步执行工作流
-    executeWorkflow(executionIdNew, execState, nodes, connections || []).catch(err => {
+    executeWorkflow(executionIdNew, execState, executionScope.nodes, executionScope.connections).catch(err => {
       console.error('[Workflow] 执行异常:', err);
       execState.status = 'failed';
       execState.error = err instanceof Error ? err.message : String(err);

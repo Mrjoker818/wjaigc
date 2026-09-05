@@ -147,6 +147,36 @@ describe('POST /api/skill-runs/estimate', () => {
     expect(await response.json()).toMatchObject({ minimum: 12, maximum: 12 });
   });
 
+  it('can quote a workflow node before upstream inputs exist without creating tasks', async () => {
+    const response = await POST(request(body({
+      surface: 'workflow', workspaceId: 'workflow:test', inputValues: {},
+      estimateScope: 'workflow-node',
+    })));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ minimum: 8, maximum: 8, inputValidation: 'deferred-to-execution' });
+    expect(mocks.authorizeAgentContext).toHaveBeenCalledWith(expect.objectContaining({
+      actorUserId: 'user-1', request: expect.objectContaining({ workspace: 'workflow', sourceVersionIds: ['version-1'] }),
+    }));
+    expect(mocks.createAgentRun).not.toHaveBeenCalled();
+    expect(mocks.createBillableTask).not.toHaveBeenCalled();
+  });
+
+  it('does not allow the workflow-only quote mode on the canvas surface', async () => {
+    const response = await POST(request(body({ estimateScope: 'workflow-node' })));
+    expect(response.status).toBe(400);
+    expect(mocks.calculateConfiguredCreditCost).not.toHaveBeenCalled();
+  });
+
+  it('still rejects unauthorized workflow context with deferred inputs', async () => {
+    mocks.authorizeAgentContext.mockRejectedValue(Object.assign(new Error('missing'), {
+      code: 'AGENT_CONTEXT_NOT_FOUND', status: 404,
+    }));
+    const response = await POST(request(body({ surface: 'workflow', inputValues: {}, estimateScope: 'workflow-node' })));
+    expect(response.status).toBe(404);
+    expect(mocks.calculateConfiguredCreditCost).not.toHaveBeenCalled();
+    expect(mocks.createBillableTask).not.toHaveBeenCalled();
+  });
+
   it('returns a nonzero orchestrator estimate for a zero-step simple-chat Skill', async () => {
     mocks.calculateConfiguredCreditCost.mockResolvedValue(3);
     const response = await POST(request(body({

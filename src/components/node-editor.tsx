@@ -44,6 +44,10 @@ import type { TaskModelCatalogModel } from '@/hooks/use-task-model-catalog';
 import { WorkspaceSourceTraceDetails } from '@/components/workspace-source-trace';
 import { SkillInputFields } from '@/components/skill-runtime/SkillInputFields';
 import { loadWorkflowSkillCatalog } from '@/lib/skill-runtime/workflow-client';
+import { resolveWorkflowExecutionScope } from '@/lib/workflow-execution-scope';
+import type { WorkflowExecutionScope } from '@/lib/workflow-execution-scope';
+import { estimateWorkflowSkills, type WorkflowSkillQuote } from '@/lib/skill-runtime/workflow-estimate-client';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import type { SkillDefinition, SkillModelBinding } from '@/lib/skill-runtime/types';
 import { getPromptTemplates, addPromptTemplate, type PromptTemplate } from '@/lib/prompt-templates';
 import {
@@ -1026,6 +1030,18 @@ export default function NodeEditor({ taskModelCatalog = [], taskModelOptions = [
   const [searchQuery, setSearchQuery] = useState('');
   const [executionId, setExecutionId] = useState<string | null>(null);
   const [execStatus, setExecStatus] = useState<'idle' | 'running' | 'completed' | 'failed'>('idle');
+  const [skillEstimating, setSkillEstimating] = useState(false);
+  const [skillQuote, setSkillQuote] = useState<{
+    scope: WorkflowExecutionScope; quotes: WorkflowSkillQuote[]; workflow: WorkflowData; projectId: string; expiresAt: number;
+  } | null>(null);
+  const skillEstimateController = useRef<AbortController | null>(null);
+  const skillExecutionLock = useRef(false);
+  const skillWorkflowRef = useRef(wf);
+  skillWorkflowRef.current = wf;
+  useEffect(() => {
+    setSkillQuote(null);
+    return () => skillEstimateController.current?.abort();
+  }, [wf, projectId]);
   const [execResults, setExecResults] = useState<Record<string, { status: string; output?: Record<string, unknown>; error?: string }>>({});
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const [showMinimap, setShowMinimap] = useState(true);
@@ -1996,12 +2012,20 @@ ${contextInfo}
     }
   }, [wf.nodes, handleNodeUpdate]);
 
-  const startWorkflowExecution = useCallback(async (payload: {
+  const submitWorkflowExecution = useCallback(async (payload: {
     nodes: WorkflowNode[];
     connections: WorkflowConnection[];
     startNodeId?: string;
     tailNodeId?: string;
   }) => {
+    try {
+      payload = resolveWorkflowExecutionScope(payload);
+    } catch (error) {
+      setExecStatus('failed');
+      setExecLogs([{ time: Date.now(), nodeId: 'workflow', label: '工作流', status: 'error', message: error instanceof Error ? error.message : '无法确定运行范围' }]);
+      setShowExecLog(true);
+      return;
+    }
     const executionNodes: WorkflowNode[] = [];
     for (const node of payload.nodes) {
       if (node.type !== 'ai-generate') {
@@ -2049,6 +2073,53 @@ ${contextInfo}
       setExecStatus('failed');
     }
   }, [projectId, imageModels, wf.id]);
+
+  const startWorkflowExecution = useCallback(async (payload: WorkflowExecutionScope) => {
+    if (skillExecutionLock.current || skillQuote || execStatus === 'running') return;
+    skillExecutionLock.current = true;
+    const controller = new AbortController();
+    skillEstimateController.current = controller;
+    const timeout = setTimeout(() => controller.abort(new Error('费用预估超时，请重试')), 15000);
+    try {
+      const scope = resolveWorkflowExecutionScope(payload);
+      if (!scope.nodes.some(node => node.type === 'ai-skill')) {
+        await submitWorkflowExecution(scope);
+        return;
+      }
+      if (!projectId) throw new Error('请先保存项目再运行 Skill');
+      setSkillEstimating(true);
+      const result = await estimateWorkflowSkills(scope, workflowSkills, {
+        projectId, workflowId: wf.id, requestKey: crypto.randomUUID(),
+      }, controller.signal);
+      if (controller.signal.aborted || skillWorkflowRef.current !== wf) return;
+      setSkillQuote({ ...result, workflow: wf, projectId, expiresAt: Date.now() + 60000 });
+    } catch (error) {
+      if (skillWorkflowRef.current !== wf || (controller.signal.aborted && controller.signal.reason?.name === 'AbortError')) return;
+      setExecLogs([{ time: Date.now(), nodeId: 'workflow', label: '费用预估', status: 'error', message: error instanceof Error ? error.message : '费用预估失败' }]);
+      setShowExecLog(true);
+    } finally {
+      clearTimeout(timeout);
+      if (skillEstimateController.current === controller) {
+        skillEstimateController.current = null;
+        skillExecutionLock.current = false;
+        setSkillEstimating(false);
+      }
+    }
+  }, [execStatus, projectId, skillQuote, submitWorkflowExecution, wf, workflowSkills]);
+
+  const confirmSkillExecution = useCallback(async () => {
+    if (!skillQuote || skillExecutionLock.current) return;
+    if (skillQuote.workflow !== skillWorkflowRef.current || skillQuote.projectId !== projectId || Date.now() > skillQuote.expiresAt) {
+      setSkillQuote(null);
+      setExecLogs([{ time: Date.now(), nodeId: 'workflow', label: '费用预估', status: 'error', message: '预估已过期或配置已变化，请重新执行以获取预估' }]);
+      setShowExecLog(true);
+      return;
+    }
+    skillExecutionLock.current = true;
+    setSkillQuote(null);
+    try { await submitWorkflowExecution(skillQuote.scope); }
+    finally { skillExecutionLock.current = false; }
+  }, [projectId, skillQuote, submitWorkflowExecution]);
 
   // P0: 级联一键运行 — 找到当前节点的整条链，从上游到下游依次执行
   const handleCascadeRun = useCallback(async (startNodeId: string) => {
@@ -3143,7 +3214,26 @@ ${contextInfo}
 
   return (
     <>
+    <Dialog open={Boolean(skillQuote)} onOpenChange={open => { if (!open) setSkillQuote(null); }}>
+      <DialogContent className="max-w-md" data-modal="true">
+        <DialogHeader>
+          <DialogTitle>Skill 费用预估</DialogTitle>
+          <DialogDescription>以下为各 Skill 单次调用积分，其他节点及循环重复调用另计。实际结算以执行时价格为准。</DialogDescription>
+        </DialogHeader>
+        <ul className="max-h-64 overflow-y-auto space-y-2 text-sm">
+          {skillQuote?.quotes.map(quote => <li key={quote.nodeId} className="flex items-start justify-between gap-4">
+            <span className="min-w-0 break-words">{quote.label}</span>
+            <span className="shrink-0">{quote.minimum === quote.maximum ? quote.maximum : `${quote.minimum}–${quote.maximum}`} 积分</span>
+          </li>)}
+        </ul>
+        <DialogFooter>
+          <button className="px-3 py-2 rounded-md border" onClick={() => setSkillQuote(null)}>取消</button>
+          <button className="px-3 py-2 rounded-md bg-primary text-primary-foreground" onClick={confirmSkillExecution}>确认执行</button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
     <div className="node-editor-root h-screen w-screen flex flex-col text-foreground overflow-hidden select-none" data-theme={themeStyle === 'monochrome' ? 'monochrome' : 'gold'} style={{ ...neVars, background: T.canvasBg }}>
+      {skillEstimating && <div role="status" className="absolute top-14 left-1/2 -translate-x-1/2 z-50 bg-card border rounded-md px-3 py-2 text-sm">正在预估 Skill 积分…</div>}
       {/* 全局图片上传 (foreignObject内input.click()不可靠, 统一由外部触发) */}
       <input ref={imageFileInputRef} type="file" accept="image/*" className="hidden" onChange={handleGlobalImageUpload} />
       {/* ═══ 顶部工具栏 - 全宽, 与原型对齐 ═══ */}
