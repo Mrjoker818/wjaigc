@@ -7,8 +7,7 @@
 - 根因：原生 Skill 执行器已经写入 `run.completed` 并完成父任务；same-task 适配器的原生观察器不返回该终态，随后又尝试写无 stepId 的合成 `tool.completed`。终态写保护拒绝该事件，控制流在 `completeAdoptedAgentExecution` 前中断。
 - 最小修复：观察器未返回终态时重读权威父任务；若同项目原生任务已经处于终态，则跳过合成 `tool.completed`，继续结算租约。非原生/未终态任务仍保持原行为。
 - TDD：新增单测先稳定失败于“terminal task rejects a synthetic tool completion”，修复后 same-task 18/18；Skill/事件/预付轮询聚焦回归合计 73/73，`pnpm ts-check` 通过。
-- 最终本地门禁：672 个测试文件中 642 通过、30 个 PostgreSQL 文件跳过；5308 项中 5142 通过、166 项跳过、0 失败。`lint:build` 零错误、38 项保护门禁通过；生产构建 `119/119` 页面，Build ID `r-dYejxNXZhfZ2hXiAEYl`。
-- 真库回归：已增加真实成功 Skill 的数据库测试，断言任务 completed、`completed_at>0`、`lease_owner=''`、仅一笔 consume、无退款、无无步骤合成完成事件。本机缺少 `POSTGRES_TEST_DATABASE_URL`，8 项 PostgreSQL 套件明确跳过，不能标记为真库通过。
+- 真库回归：全新 PostgreSQL 18 隔离集群上租约与投影专项 `8/8` 通过，全仓 `5314/5314` 通过、0 失败、0 跳过。成功恢复链路证明 `completed_at>0`、一次供应商调用和一次消费；报告 SHA-256 `FA9FE6E6358B37F87AA43069D2843EC35B5F4D4FF937E2E9521636F9CA9EE651`。测试集群已停止。
 - 未改动：供应商提交、积分金额、失败退款、资产投影、登录及 stable 分支。
 
 ## 2026-09-05 Skill 成品 AssetVersion 尺寸未落库
@@ -17,8 +16,8 @@
 - 证据：同一真实成品浏览器解码为 1254×1254，版本 `e819d7ba-7cbb-4984-b444-f02d3a118104` 的数据库 `width/height` 均为 NULL。
 - 根因：完成任务结果只持久化 `imageUrl/imageUrls`，没有宽高；`task-projector.ts` 只从 URL 构造 `AssetFile`，不会安全读取媒体元数据，因此数据库字段按设计写入 NULL，并非 SQL 丢值。
 - 最小修复：生成终态在数据库事务外通过既有安全媒体读取器与 Sharp 像素上限采集真实 MIME、字节数和宽高；失败按单图降级，不改变供应商成功终态。投影器按 URL 精确匹配并保留这些字段，不按比例或模型声明猜测，也不在持行锁事务中下载媒体。
-- TDD：投影保真与终态采集先得到 3 个稳定 RED；修复后元数据、投影、持久化、原子完成顺序与终态策略共 66/66 通过。最终全仓 643 文件/5148 项通过、30 文件/166 项隔离 PostgreSQL 门禁明确跳过、0 失败；`pnpm ts-check`、`lint:build`、38 项保护门禁及生产构建 119/119 通过，Build ID `mYvPkKVF-PAGUqYjiugVw`。
-- 未关闭项：需在隔离 PostgreSQL 和 Coze 新真实 Skill 中证明 `cloud_tasks.result.images` 与 AssetVersion 均为真实 `1254×1254`，再复验缩略图、预览和下载尺寸。
+- TDD：投影保真与终态采集先得到 3 个稳定 RED；修复后元数据、投影、持久化、原子完成顺序与终态策略共 66/66 通过。新增隔离 PostgreSQL 真图断言后全仓 `5314/5314` 通过、0 失败、0 跳过；数据库确认版本 `1254×1254`、`image/png`，并发重放仍只有一个版本/placement。
+- 未关闭项：需在 Coze 新真实 Skill 中证明 `cloud_tasks.result.images` 与 AssetVersion 均为真实 `1254×1254`，再复验缩略图、预览和下载尺寸。
 
 ## 2026-09-05 Skill 成品节点显示为单像素
 

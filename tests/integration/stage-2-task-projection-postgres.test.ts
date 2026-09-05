@@ -2,6 +2,7 @@ import { spawnSync } from 'node:child_process';
 import { resolve } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
+import sharp from 'sharp';
 
 import { withIsolatedPostgres } from '../helpers/postgres-test-database';
 
@@ -37,6 +38,16 @@ describe('Stage 2 authoritative task projection PostgreSQL', () => {
       migrate(url);
       const { createCloudTask } = await import('@/lib/cloud-task-storage');
       const { recordImageTaskTerminal } = await import('@/lib/cloud-task-persistence');
+      const imageUrl = `data:image/png;base64,${(
+        await sharp({
+          create: {
+            width: 1254,
+            height: 1254,
+            channels: 4,
+            background: { r: 34, g: 197, b: 94, alpha: 1 },
+          },
+        }).png().toBuffer()
+      ).toString('base64')}`;
 
       await query(
         `INSERT INTO wujie_projects(id, owner_id, name, status)
@@ -62,12 +73,12 @@ describe('Stage 2 authoritative task projection PostgreSQL', () => {
       const outcomes = await Promise.all([
         recordImageTaskTerminal('task-projection-concurrent', {
           status: 'completed',
-          imageUrl: '/api/serve-upload/uploads/task-projection.png',
+          imageUrl,
           creditStatus: 'charged',
         }),
         recordImageTaskTerminal('task-projection-concurrent', {
           status: 'completed',
-          imageUrl: '/api/serve-upload/uploads/task-projection.png',
+          imageUrl,
           creditStatus: 'charged',
         }),
       ]);
@@ -77,20 +88,31 @@ describe('Stage 2 authoritative task projection PostgreSQL', () => {
         task_status: string;
         version_count: number;
         placement_count: number;
+        width: number;
+        height: number;
+        mime_type: string;
       }>(
         `SELECT task.status AS task_status,
                 (SELECT COUNT(*)::int FROM wujie_asset_versions
                  WHERE task_id = task.id) AS version_count,
                 (SELECT COUNT(*)::int FROM wujie_workspace_placements placement
                  JOIN wujie_asset_versions version ON version.id = placement.asset_version_id
-                 WHERE version.task_id = task.id AND placement.status = 'active') AS placement_count
-         FROM cloud_tasks task WHERE task.id = $1`,
+                 WHERE version.task_id = task.id AND placement.status = 'active') AS placement_count,
+                version.width,
+                version.height,
+                version.mime_type
+         FROM cloud_tasks task
+         JOIN wujie_asset_versions version ON version.task_id = task.id
+         WHERE task.id = $1`,
         ['task-projection-concurrent'],
       );
       expect(counts.rows[0]).toEqual({
         task_status: 'completed',
         version_count: 1,
         placement_count: 1,
+        width: 1254,
+        height: 1254,
+        mime_type: 'image/png',
       });
     });
   });

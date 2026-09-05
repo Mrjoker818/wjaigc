@@ -4,13 +4,13 @@
 
 真实 1254×1254 Skill 成品对应 AssetVersion 宽高为空，已通过失败测试确认元数据在任务终态和资产投影之间丢失。最小修复在事务外复用安全媒体输入与 Sharp 像素门禁采集真实 MIME、字节数和宽高，并让投影器按 URL 精确保留字段；读取失败只降级为无尺寸，不覆盖供应商成功终态。
 
-投影保真、元数据采集、旧持久化、原子完成顺序和终态结算聚焦回归 66/66。最终全仓 643 文件/5148 项通过、30 文件/166 项隔离 PostgreSQL 门禁明确跳过、0 失败；TypeScript、零错误 Lint、38 项保护门禁及生产构建 119/119 通过，Build ID `mYvPkKVF-PAGUqYjiugVw`。隔离 PostgreSQL、Coze 新任务落库、缩略图、预览和下载仍未验证，结论为 **LOCAL PASS / POSTGRES AND CLOUD UNVERIFIED**。
+投影保真、元数据采集、旧持久化、原子完成顺序和终态结算聚焦回归 66/66。随后在全新 PostgreSQL 18 隔离集群补充真实 PNG 投影断言，全仓 `5314/5314` 通过、0 失败、0 跳过、0 todo；数据库确认并发终态只产生一个版本/placement，版本为 `1254×1254`、`image/png`。报告 `output/task12-image-lease-postgres-full-20260905.json`，SHA-256 `FA9FE6E6358B37F87AA43069D2843EC35B5F4D4FF937E2E9521636F9CA9EE651`；类型和目标 Lint 通过，测试集群已停止。Coze 新任务、缩略图、预览和下载仍未验证，结论为 **LOCAL POSTGRES PASS / CLOUD UNVERIFIED**。
 
 ## 2026-09-05 Task12 原生 Skill 租约结算补修
 
 云端真实成功任务暴露父任务已完成但执行租约 `completed_at=0`。新增失败单测证明原生 Skill 自行终态化后，适配器再次写合成 `tool.completed` 会被终态保护拒绝并跳过租约结算；最小修复后 same-task 18/18，通过 Skill 执行器、事件围栏和预付轮询等聚焦回归共 73/73，TypeScript 通过。
 
-新增真实 PostgreSQL 成功链路用例已写入套件，覆盖完成任务、租约清空、单次消费和无合成重复事件；当前机器缺少 `POSTGRES_TEST_DATABASE_URL`，该文件 8 项全部明确跳过。最终全仓为 642 文件/5142 项通过、30 文件/166 项 PostgreSQL 门禁跳过、0 失败；`lint:build` 零错误、38 项保护门禁通过，生产构建 119/119 页面，Build ID `r-dYejxNXZhfZ2hXiAEYl`。结论为 **LOCAL PASS / POSTGRES AND CLOUD UNVERIFIED**，不得把本轮结果写成 Task12 已完成。
+真实 PostgreSQL 成功链路已在全新隔离集群执行：租约与投影两文件 `8/8` 通过，随后全仓 `5314/5314` 通过、0 失败、0 跳过。租约用例覆盖 `completed_at>0`、一次供应商调用、一次消费和无重复提交；报告与哈希同上。结论升级为 **LOCAL POSTGRES PASS / CLOUD UNVERIFIED**，Coze 新成功 run 尚未复验，不得把本轮结果写成 Task12 已完成。
 
 ## 2026-09-04 Skill shadow恢复最终候选
 

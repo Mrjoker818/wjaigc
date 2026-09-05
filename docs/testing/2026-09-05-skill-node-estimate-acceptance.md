@@ -119,5 +119,12 @@
 - `completed_at=0` 已确认是代码缺陷：原生 Skill 已写 `run.completed` 后，same-task 适配器仍尝试追加无 stepId 的合成 `tool.completed`；终态保护拒绝写入，使租约结算没有执行。新增测试先失败，最小修改为重读父任务权威终态并跳过重复合成事件；聚焦 73/73、TypeScript 通过。
 - 已添加真实 PostgreSQL 成功执行用例，要求父任务 completed、租约 `completed_at>0`、owner 清空、一次 consume、无 refund/重复合成完成事件。本机未配置 `POSTGRES_TEST_DATABASE_URL`，8 项真库套件明确跳过，不能关闭云端租约问题。
 - `width/height=NULL` 不是 SQL 写入丢失。真实任务结果仅含图片 URL，资产投影器没有宽高输入，因此落库为空。已新增 RED 并完成最小修复：在数据库投影事务之外用安全媒体读取取得真实元数据，失败不覆盖成功终态；投影器按 URL 保留尺寸/MIME/字节数，未以模型比例猜测 1254×1254。聚焦 66/66、全仓 5148/5148 非跳过项、类型、零错误 Lint、38 项保护及 119/119 构建通过，Build ID `mYvPkKVF-PAGUqYjiugVw`；166 项真库门禁和云端仍待验。
+
+### 8d967ef8 隔离 PostgreSQL 补验
+
+- 使用全新 PostgreSQL 18 临时集群 `127.0.0.1:55491/wujie_skill_test`，四个数据库环境变量仅作用于测试进程；未连接云端或业务数据库，测试后已正常停止且端口无响应。
+- 租约与投影专项 `8/8` 通过。真实 PNG 投影断言确认并发终态只有一个版本/placement，AssetVersion 为 `1254×1254`、`image/png`；租约恢复断言确认 `completed_at>0`、一次供应商调用与一次消费。
+- 全仓真库回归 `5314/5314` 通过、0 失败、0 跳过、0 todo；报告 `output/task12-image-lease-postgres-full-20260905.json`，SHA-256 `FA9FE6E6358B37F87AA43069D2843EC35B5F4D4FF937E2E9521636F9CA9EE651`。`pnpm ts-check` 与新增测试目标 Lint 通过。
+- 该证据关闭 TEST-SKILL-009/010 的本地 PostgreSQL 边界，不替代 Coze 新任务、缩略图、预览、下载与账务回执。Task12 仍未完成。
 - 最终本地门禁：672 文件中 642 通过/30 个 PostgreSQL 文件跳过，5308 项中 5142 通过/166 项跳过/0 失败；`lint:build` 零错误、38 项保护通过；生产构建 119/119 页面，Build ID `r-dYejxNXZhfZ2hXiAEYl`。
 - 当前 Task12 约 78%：节点生成、账务、显示、保存刷新、租约和尺寸持久化的本地修复已闭环；画布入口、暂停恢复、失败步骤重试、预览下载、完整诊断证据，以及租约/尺寸的真库与云端复验仍未完成。
