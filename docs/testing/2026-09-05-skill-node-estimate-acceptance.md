@@ -111,4 +111,5 @@
 - 云端BuildID `tf2IgVAAov4L5QY2rH-ar`，唯一5000 PID4036，启动时间10:24:56。Coze健康命令实际使用curl -I，故200仅作为HEAD健康回执；浏览器随后的真实页面加载另作证据。
 - 现有正确Chrome预览执行CDP Page.reload(ignoreCache:true)后，登录保留、原四图完整。点击节点模式，原三节点恢复，同一Skill显示完成；1254×1254成品的DOM矩形171.20×171.20，截图肉眼可见完整蛋糕图。未点击RUN、未重新生成。
 - 证据目录`output/skill-node-cloud-20260905/`：`01564010-coze-final.txt`、`01564010-visible.png`、`01564010-visible-dom.txt`、`01564010-visible-size.json`。与旧671fa1bc的单像素截图分开保存。
-- 随后的“保存”点击在CDP派发前超时，再读DOM及重新认领均未附着；不能证明保存执行，未继续刷新或重提任务。二次保存刷新、点击大图/下载、完整网络/Console/Trace及Task12其他项仍未完成。首次读取网络事件未取得相关记录，不声称网络已证明无重复提交或新增账务。当前只关闭单次强刷可见性缺口，不宣布Task12完成。
+- 随后已捕获“保存”的真实网络响应：`POST /api/workflow/save` 返回HTTP 200、`success:true`，workflowId仍为`wf-chat-import-7d07ebb373a5fdc9b11fe4afc7f3abec`。再次整页刷新并进入节点模式后，3个节点恢复，同一Skill仍为“执行完成”，同一1254×1254成品继续显示为171.20×171.20；未点击RUN、未产生新任务或新扣费。新增证据：`01564010-save-response.json`、`01564010-post-save-refresh-visible.png`、`01564010-post-save-refresh-size.json`。
+- Chrome旧标签的调试附加曾同时失效，页面标题/URL可读但DOM操作返回未附着；通过同一Google Chrome实例建立受控替代页后恢复。该现象属于浏览器控制通道，不记为产品缺陷。点击大图/下载、完整Console/Network/Trace及Task12其他项仍未完成；当前关闭“节点成品可见性”和“保存后刷新恢复”两个缺口，不宣布Task12完成。

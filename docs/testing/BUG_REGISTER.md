@@ -3988,3 +3988,13 @@ All listed Stage 4 defects are locally closed. S4-BUG-008 also passed its exact-
 - 修复候选：v2缓存键绑定user/project/workflow；无归属旧键保留但不自动应用；清理时abort轮询，解析后拒绝已取消响应。
 - 永久回归与证据：node-editor-skill-node.test.tsx；output/skill-cache-scope-red-20260905.json、output/skill-status-scope-red-20260905.json。
 - 状态：本地专项通过，完整门禁与云端验证未闭环。此处不声称已发生真实用户数据泄漏。
+
+### TEST-SKILL-008：节点 Skill 成品预览退化为单像素（2026-09-05）
+
+- 等级：P1。Google Chrome，云端候选671fa1bc。
+- 复现：恢复同一已完成Skill运行后，图片已成功解码为1254×1254，但节点内显示矩形仅约0.8×0.8像素。
+- 根因：通用结果预览的NextImage声明`width=1`、`height=1`，样式只有最大尺寸，没有给可替换元素实际宽高。
+- 修复：为结果图片设置100%宽高与`object-fit: contain`，不改变节点尺寸、资产、任务、供应商或账务链路。
+- 永久回归：`src/__tests__/components/node-editor-skill-node.test.tsx`先RED后GREEN；最终672文件/5306测试、TypeScript、lint、38保护门禁与119页生产构建通过。
+- 云端结果：`01564010`同tree已构建运行。首次强刷及`POST /api/workflow/save`成功后的再次整页刷新均恢复3个节点、Skill完成态及同一1254×1254成品，显示矩形约171.2×171.2。未重新运行、未新增扣费。证据见`output/skill-node-cloud-20260905/01564010-post-save-refresh-visible.png`与`01564010-post-save-refresh-size.json`。
+- 状态：**已修复 / Coze云端关闭。** 关闭范围仅为节点成品可见性及保存后刷新恢复；预览、下载和Task12其余边界独立保留。
