@@ -4052,4 +4052,4 @@ All listed Stage 4 defects are locally closed. S4-BUG-008 also passed its exact-
 | 根因 | Blob 下载链接点击后在同一任务内立即执行 `URL.revokeObjectURL`；Edge 尚未开始消费 Blob URL，导致下载静默丢失。 |
 | 修复 | `src/components/node-editor.tsx` 将 Blob URL 回收延迟 1 秒，保留既有直连、`/api/save-image` 降级、文件名及错误状态。 |
 | 回归测试 | `src/__tests__/components/node-editor-skill-node.test.tsx` 先稳定 RED（2 失败），再验证点击后不会同步回收且延迟回收；聚焦结果 `35/35` 通过。 |
-| 当前状态 | 本地已修复；待 Coze 同步新提交后捕获真实下载完成事件并核对文件字节与解码，暂不关闭。 |
+| 当前状态 | **已修复 / Coze Edge 云端关闭。** `5d0ff529` 已由 Coze 普通合并为 `8a97a390`，目标 tree `978337059083dd18e91d3916e14343ea08d21d50` 精确一致。Edge 两次点击均在实际下载目录 `D:\QQDownload` 生成 `2,097,743` 字节 PNG；最新文件 SHA-256 `A4F21DBC161EE9C8C4141CB84549A22A7B87A47D5901F049C4F58D0816EF8586`，签名 `89504E470D0A1A0A`，Sharp 解码为 `1254x1254 image/png`。 |

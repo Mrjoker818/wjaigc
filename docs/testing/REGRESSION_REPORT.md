@@ -2788,3 +2788,12 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - RED：两个预览交互用例均证明同步回收仍发生；GREEN：聚焦组件测试 `35/35` 通过，覆盖 click、完整鼠标序列、延迟回收、远程持久化降级及禁止重新提交任务。
 - TypeScript、修改文件零错误 ESLint、保护基线 `38/38 / 0 drift / 0 warnings`、`git diff --check` 均通过。
 - 判定：`LOCAL FIX PASS / EDGE CLOUD RETEST PENDING`。必须部署新提交后取得真实文件交付证据才能关闭。
+
+## 2026-09-06 Task12 Edge 节点下载云端关闭
+
+- Coze 已同步 `main@5d0ff529d1f4e7f46569cd76cc9a8619a795e289`，云端 merge HEAD `8a97a3906b6f140327c003d6f9d06eac7cd3129c`，`HEAD^{tree}=978337059083dd18e91d3916e14343ea08d21d50`，与目标 tree 精确一致；`origin/stable` 仍为 `52f7c601ed150769e15d06fb435c6e360e28c9e7`。
+- 云端 TypeScript、保护基线、修改文件 ESLint、聚焦测试 `35/35` 和唯一一次 8 GiB 生产构建均退出 0；Build ID `f069Xcr3gFH-uPeIC_oNT`，唯一 5000 PID `3879`，首页 HTTP 200。
+- Edge 强刷后进入同一项目节点模式，完成态美食 Skill 的 `1254x1254` 草莓蛋糕成品可见；打开预览并连续点击两次下载，实际 Edge 下载目录 `D:\QQDownload` 分别生成 `wujie-workflow-result (1).png` 和 `(2).png`，每个 `2,097,743` 字节。
+- 最新文件 SHA-256 `A4F21DBC161EE9C8C4141CB84549A22A7B87A47D5901F049C4F58D0816EF8586`，PNG 签名 `89504E470D0A1A0A`；Sharp 成功解码为 `1254x1254`、3 通道 sRGB PNG。浏览器应用日志无新增 error，仅 Coze 宿主 SDK 一条无关 warning。
+- 本地全量新鲜回归：`646 passed / 31 PostgreSQL-gated skipped` 测试文件，`5168 passed / 168 skipped` 测试，退出码 0。跳过项明确源于缺少 `POSTGRES_TEST_DATABASE_URL`，不冒充云端账务验证。
+- **判定：TASK12-BUG-001 CLOUD PASS。** Task12 仍未关闭；剩余为未过期租约内即时暂停/恢复、同一用户项目取消任务的一次扣退关联，以及最终 Network/Trace 证据归档。

@@ -2131,3 +2131,10 @@ The focused gate test passes `7/7`; the actual protected-baseline command passes
 - 云端 TypeScript、保护基线、生产构建和单实例 5000 健康检查通过；Build ID `8azEpZi5iO7cDWIokIr9a`，监听 PID `3128`。
 - 最新预览恢复五张图片、三个节点和完成的 Skill 成品。真实节点下载尚未取得开始/完成事件、字节数和可解码证据，不能关闭 TEST-SKILL-011 的下载边界。
 - 发布结论保持**有条件通过**；Task12 和全平台目标均未完成。
+
+## 2026-09-06 Task12 5d0 节点下载验收
+
+- `5d0ff529` 已由 Coze 以目标 tree `978337059083dd18e91d3916e14343ea08d21d50` 精确合并、构建和单实例重启；`stable` 未变化。
+- Edge 同一完成态 Skill 节点两次下载均真实落盘，文件为 `2,097,743` 字节、`1254x1254 image/png`，PNG 签名与 Sharp 解码通过。`TASK12-BUG-001` 关闭。
+- 本地全量 `5168 passed / 168 PostgreSQL-gated skipped / 0 failed`，退出码 0；跳过项不计为通过。
+- **发布结论仍为有条件通过。** Task12 剩余约 5%-10%：未过期租约内即时暂停/恢复、当前归属取消任务的唯一扣退证据，以及最终 Network/Trace 归档。全平台目标未完成。
