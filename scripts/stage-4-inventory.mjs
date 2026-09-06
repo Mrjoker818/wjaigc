@@ -14,6 +14,10 @@ function uniqueSorted(values) {
   return [...new Set(values.filter(Boolean))].sort((left, right) => left.localeCompare(right));
 }
 
+function uniqueInOrder(values) {
+  return [...new Set(values.filter(Boolean))];
+}
+
 function extractLiteralApiRoutes(source) {
   return uniqueSorted(
     [...source.matchAll(/['"`](\/api\/[^'"`\s)]+)['"`]/g)].map(match => match[1]),
@@ -159,7 +163,16 @@ export function extractSkillIds(source, arrayName) {
     while (/\s/.test(arraySource[cursor] || '')) cursor += 1;
 
     const valueQuote = arraySource[cursor];
-    if (valueQuote !== "'" && valueQuote !== '"') continue;
+    if (valueQuote !== "'" && valueQuote !== '"') {
+      const identifier = /^[A-Za-z_$][A-Za-z0-9_$]*/.exec(arraySource.slice(cursor))?.[0];
+      if (!identifier) continue;
+      const escapedIdentifier = identifier.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const constant = new RegExp(
+        `\\bconst\\s+${escapedIdentifier}\\s*=\\s*(['"])(.*?)\\1`,
+      ).exec(source);
+      if (constant?.[2]) ids.push(constant[2]);
+      continue;
+    }
     const valueStart = cursor + 1;
     cursor = valueStart;
     let valueEscaped = false;
@@ -178,7 +191,7 @@ export function extractSkillIds(source, arrayName) {
     }
   }
 
-  return uniqueSorted(ids);
+  return uniqueInOrder(ids);
 }
 
 export function extractSkillIdsForSurface(
@@ -333,6 +346,7 @@ async function collectWorkspaceSources(root) {
     readFile(join(root, 'src/lib/agent-engine.ts'), 'utf8'),
     readFile(join(root, 'src/lib/workflow-engine.ts'), 'utf8'),
     readFile(join(root, 'src/lib/skill-runtime/canvas-presets.ts'), 'utf8'),
+    readFile(join(root, 'src/lib/skill-runtime/marketing-presets.ts'), 'utf8'),
     readFile(join(root, 'src/lib/skill-runtime/simple-chat-presets.ts'), 'utf8'),
   ]);
 
@@ -346,7 +360,8 @@ async function collectWorkspaceSources(root) {
     agentSource: files[6],
     workflowSource: files[7],
     canvasSkillsSource: files[8],
-    simpleChatSkillsSource: files[9],
+    marketingSkillsSource: files[9],
+    simpleChatSkillsSource: files[10],
   };
 }
 
@@ -362,6 +377,7 @@ export async function collectStage4Inventory(root = process.cwd()) {
     agentSource,
     workflowSource,
     canvasSkillsSource,
+    marketingSkillsSource,
     simpleChatSkillsSource,
   } = await collectWorkspaceSources(root);
 
@@ -396,18 +412,32 @@ export async function collectStage4Inventory(root = process.cwd()) {
 
   const nodeTypes = extractObjectKeys(workflowSource, 'NODE_TYPE_LABELS');
   const portTypes = extractObjectKeys(workflowSource, 'PORT_COMPATIBILITY');
-  const canvasSkills = extractSkillIdsForSurface(
+  const legacyCanvasSkills = extractSkillIdsForSurface(
     canvasSkillsSource,
     'RAW_CANVAS_PRESET_SKILLS',
     'canvasSurfaces',
     'canvas',
   );
-  const workflowSkills = extractSkillIdsForSurface(
+  const legacyWorkflowSkills = extractSkillIdsForSurface(
     canvasSkillsSource,
     'RAW_CANVAS_PRESET_SKILLS',
     'canvasSurfaces',
     'workflow',
   );
+  const marketingCanvasSkills = extractSkillIdsForSurface(
+    marketingSkillsSource,
+    'LOVART_MARKETING_SKILLS',
+    'surfaces',
+    'canvas',
+  );
+  const marketingWorkflowSkills = extractSkillIdsForSurface(
+    marketingSkillsSource,
+    'LOVART_MARKETING_SKILLS',
+    'surfaces',
+    'workflow',
+  );
+  const canvasSkills = uniqueInOrder([...legacyCanvasSkills, ...marketingCanvasSkills]);
+  const workflowSkills = uniqueInOrder([...legacyWorkflowSkills, ...marketingWorkflowSkills]);
   const simpleChatSkills = extractSkillIdsForSurface(
     simpleChatSkillsSource,
     'RAW_SIMPLE_CHAT_PRESET_SKILLS',

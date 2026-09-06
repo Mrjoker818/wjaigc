@@ -4,6 +4,7 @@ import { resolve } from 'node:path';
 
 import {
   CANVAS_PRESET_SKILLS,
+  CANVAS_WORKFLOW_SKILLS,
   SIMPLE_CHAT_PRESET_SKILLS,
   listSkillsForSurface,
   requireSkillForSurface,
@@ -40,11 +41,19 @@ const canvasClientSource = readFileSync(
 );
 
 describe('skill runtime catalog', () => {
-  it('保留 21 个画布 Skill 并只授权 canvas/workflow', () => {
+  it('保留 21 个画布预设并向 canvas/workflow 发布 24 项权威目录', () => {
     expect(CANVAS_PRESET_SKILLS.map(skill => skill.id)).toEqual(canvasIds);
     expect(CANVAS_PRESET_SKILLS).toHaveLength(21);
-    expect(listSkillsForSurface('canvas').map(skill => skill.id)).toEqual(canvasIds);
-    expect(listSkillsForSurface('workflow').map(skill => skill.id)).toEqual(canvasIds);
+    expect(CANVAS_WORKFLOW_SKILLS).toHaveLength(24);
+    expect(CANVAS_WORKFLOW_SKILLS.slice(0, CANVAS_PRESET_SKILLS.length)).toEqual(
+      CANVAS_PRESET_SKILLS,
+    );
+    expect(listSkillsForSurface('canvas').map(skill => skill.id)).toEqual(
+      CANVAS_WORKFLOW_SKILLS.map(skill => skill.id),
+    );
+    expect(listSkillsForSurface('workflow').map(skill => skill.id)).toEqual(
+      CANVAS_WORKFLOW_SKILLS.map(skill => skill.id),
+    );
     expect(CANVAS_PRESET_SKILLS.every(skill =>
       skill.allowedSurfaces.join(',') === 'canvas,workflow')).toBe(true);
   });
@@ -53,6 +62,8 @@ describe('skill runtime catalog', () => {
     expect(SIMPLE_CHAT_PRESET_SKILLS.map(skill => skill.id)).toEqual(simpleChatIds);
     expect(listSkillsForSurface('simple-chat').map(skill => skill.id)).toEqual(simpleChatIds);
     expect(listSkillsForSurface('simple-chat').some(skill => canvasIds.includes(skill.id))).toBe(false);
+    expect(() => requireSkillForSurface('preset-ad-ab-variants', 'simple-chat'))
+      .toThrowError(SkillSurfaceForbiddenError);
   });
 
   it('机械保留迁移前的画布预设文案、参数槽和对话步骤', () => {

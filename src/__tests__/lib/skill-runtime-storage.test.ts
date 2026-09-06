@@ -159,15 +159,15 @@ describe('versioned user skill storage', () => {
     })).rejects.toMatchObject({ code: 'SKILL_NOT_FOUND', status: 404 });
   });
 
-  it('isolates the 21 canvas/workflow and 16 simple-chat built-ins by a strict surface value', async () => {
+  it('isolates the 24 canvas/workflow and 16 simple-chat built-ins by a strict surface value', async () => {
     const store = createSkillStore(createMemorySkillStorageAdapter());
 
     await expect(store.load('user-1', 'invalid' as 'canvas')).rejects.toMatchObject({
       code: 'INVALID_SKILL_SURFACE',
       status: 400,
     });
-    expect((await store.load('user-1', 'canvas')).filter(skill => skill.builtIn)).toHaveLength(21);
-    expect((await store.load('user-1', 'workflow')).filter(skill => skill.builtIn)).toHaveLength(21);
+    expect((await store.load('user-1', 'canvas')).filter(skill => skill.builtIn)).toHaveLength(24);
+    expect((await store.load('user-1', 'workflow')).filter(skill => skill.builtIn)).toHaveLength(24);
     expect((await store.load('user-1', 'simple-chat')).filter(skill => skill.builtIn)).toHaveLength(16);
     expect((await store.load('user-1', 'simple-chat')).some(skill => skill.id.startsWith('preset-'))).toBe(false);
   });
@@ -237,7 +237,7 @@ describe('versioned user skill storage', () => {
     });
     const store = createSkillStore(adapter);
 
-    await expect(store.load('user-1', 'canvas')).resolves.toHaveLength(21 + 199);
+    await expect(store.load('user-1', 'canvas')).resolves.toHaveLength(24 + 199);
     const stored = adapter.inspect('user-1', SKILL_CATALOG_KEY) as { skills: unknown[] };
     expect(stored.skills).toHaveLength(199);
     expect(new TextEncoder().encode(JSON.stringify(stored)).byteLength).toBeLessThanOrEqual(1_048_576);
@@ -251,7 +251,7 @@ describe('versioned user skill storage', () => {
     });
     const store = createSkillStore(adapter);
 
-    await expect(store.load('user-1', 'canvas')).resolves.toHaveLength(21);
+    await expect(store.load('user-1', 'canvas')).resolves.toHaveLength(24);
     const stored = adapter.inspect('user-1', SKILL_CATALOG_KEY) as {
       skills: unknown[];
       migratedLegacyIds: string[];

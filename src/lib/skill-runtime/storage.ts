@@ -6,7 +6,7 @@ import {
   dbCompareAndSetUserDataRevision,
   dbGetUserData,
 } from '@/lib/db-storage';
-import { CANVAS_PRESET_SKILLS, SIMPLE_CHAT_PRESET_SKILLS } from './catalog';
+import { CANVAS_WORKFLOW_SKILLS, SIMPLE_CHAT_PRESET_SKILLS } from './catalog';
 import { requireSkillForSurface, SkillNotFoundError, SkillSurfaceForbiddenError } from './catalog';
 import { normalizeLegacyChatSkills, type LegacyMigrationResult } from './legacy-migration';
 import type { SkillDefinition, SkillSurface } from './types';
@@ -14,7 +14,7 @@ import type { SkillDefinition, SkillSurface } from './types';
 export const SKILL_CATALOG_KEY = 'skill_catalog_v1';
 const LEGACY_CHAT_SKILLS_KEY = 'chat_skills';
 const SURFACES: readonly SkillSurface[] = ['canvas', 'workflow', 'simple-chat'];
-const BUILT_INS: readonly SkillDefinition[] = [...CANVAS_PRESET_SKILLS, ...SIMPLE_CHAT_PRESET_SKILLS];
+const BUILT_INS: readonly SkillDefinition[] = [...CANVAS_WORKFLOW_SKILLS, ...SIMPLE_CHAT_PRESET_SKILLS];
 const INPUT_KINDS = new Set(['text', 'image', 'images', 'brand-kit', 'dataset', 'select', 'number', 'boolean']);
 const MODEL_ROLES = new Set(['orchestrator', 'image', 'video', 'vision', 'edit', 'three-d']);
 const MAX_ENVELOPE_BYTES = 1_048_576;

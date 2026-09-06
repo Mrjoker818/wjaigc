@@ -15,8 +15,18 @@ function intersection(left: string[], right: string[]): string[] {
 describe('scoped Skill runtime inventory', () => {
   it('keeps Canvas and Workflow aligned while Simple Chat remains isolated', async () => {
     const inventory = await collectStage4Inventory(process.cwd());
+    const legacyCanvasIds = [
+      'preset-ecommerce-listing', 'preset-logo-brand', 'preset-storyboard',
+      'preset-marketing-brochure', 'preset-social-media', 'preset-ip-character',
+      'preset-product-packaging', 'preset-concept-art', 'preset-interior-design',
+      'preset-poster-design', 'preset-ppt-design', 'preset-magazine-cover',
+      'preset-apparel-fashion', 'preset-business-card', 'preset-book-cover',
+      'preset-sticker-emoji', 'preset-comic-manga', 'preset-mockup-showcase',
+      'preset-illustration', 'preset-ui-design', 'preset-food-photography',
+    ];
 
-    expect(inventory.skillCatalogs.canvas).toHaveLength(21);
+    expect(inventory.skillCatalogs.canvas).toHaveLength(24);
+    expect(inventory.skillCatalogs.canvas.slice(0, legacyCanvasIds.length)).toEqual(legacyCanvasIds);
     expect(inventory.skillCatalogs.workflow).toEqual(inventory.skillCatalogs.canvas);
     expect(inventory.skillCatalogs.simpleChat).toHaveLength(16);
     expect(intersection(
