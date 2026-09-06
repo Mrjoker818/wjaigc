@@ -366,7 +366,7 @@ Commit: `feat: validate batch sku skill inputs`
 - Produces: `SkillStepFanOut` 和稳定子步骤 ID `baseId:<rowDigest>`。
 - Invariant: 同一规范化输入永远产生同序、同 ID、同报价的执行计划。
 
-- [ ] **Step 1: 写扇出与报价 RED 测试**
+- [x] **Step 1: 写扇出与报价 RED 测试**
 
 ```ts
 const plan = compileSkillExecutionPlan(batchSkuSkill, {
@@ -382,12 +382,12 @@ expect(estimate.steps).toHaveLength(3);
 
 断言改变行顺序会改变执行顺序但不改变各行摘要；重复 key、超过 maximumItems、非法并发和模板缺少 itemAlias 被拒绝。
 
-- [ ] **Step 2: 运行并确认 RED**
+- [x] **Step 2: 运行并确认 RED**
 
 Run: `pnpm exec vitest run src/__tests__/lib/skill-runtime-step-compiler.test.ts src/__tests__/lib/skill-runtime-batch-cost.test.ts src/__tests__/lib/skill-runtime-cost-estimator.test.ts`
 Expected: fanOut 缺失而 FAIL。
 
-- [ ] **Step 3: 编译成不可变具体步骤**
+- [x] **Step 3: 编译成不可变具体步骤**
 
 ```ts
 export interface SkillStepFanOut {
@@ -401,11 +401,13 @@ export interface SkillStepFanOut {
 
 使用现有规范化 JSON 摘要工具计算 16 位行摘要。编译后的具体步骤删除 `fanOut`，把 `{{sku.*}}` 只替换一次为该行规范值，并把同批子步骤放入稳定 `parallelGroup`。全局 `{{product}}` 等占位符留给现有提示词编译器。
 
-- [ ] **Step 4: 报价和 Run 使用同一计划**
+- [x] **Step 4: 报价和 Run 使用同一计划**
 
 `estimateSkillRunCost` 接收已解析 inputs 或 `CompiledSkillExecutionPlan`，禁止再次独立展开。`createSkillRun` 在冻结模型和预扣前持久化 `executionSteps`、`skippedStepIds` 和计划摘要；摘要参与请求幂等冲突检测。
 
-- [ ] **Step 5: 运行扇出回归并提交**
+实现说明：报价与 Run 快照统一调用同一纯编译器，并在 `run.created` 冻结具体步骤；请求幂等继续使用既有的 `skillVersion + 规范化 inputValues + 模型绑定` 摘要。未另改摘要格式，避免升级前已接收的在途运行在重试时产生身份冲突；条件未命中的步骤不进入冻结计划，因此不创建 operation。
+
+- [x] **Step 5: 运行扇出回归并提交**
 
 Run: Step 2 命令，加 `src/__tests__/lib/skill-runtime-run-request.test.ts`。
 Expected: 1、2、20 行报价与实际步骤数一致；21 行在报价前拒绝。

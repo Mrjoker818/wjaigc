@@ -834,6 +834,9 @@ export function createAgentRuntimeService(
                 ...(field.bindToSourceVersions !== undefined
                   ? { bindToSourceVersions: field.bindToSourceVersions }
                   : {}),
+                ...(field.datasetSchema !== undefined
+                  ? { datasetSchema: field.datasetSchema }
+                  : {}),
               })),
               id: skillAdmission.skill.id,
               version: skillAdmission.skill.version,
@@ -848,6 +851,9 @@ export function createAgentRuntimeService(
                 execution: step.execution,
                 ...(step.parallelGroup ? { parallelGroup: step.parallelGroup } : {}),
                 promptTemplate: step.promptTemplate,
+                ...(step.promptInstructionTemplate
+                  ? { promptInstructionTemplate: step.promptInstructionTemplate }
+                  : {}),
                 modelRole: step.modelRole,
                 qualityGateIds: [...step.qualityGateIds],
               })),

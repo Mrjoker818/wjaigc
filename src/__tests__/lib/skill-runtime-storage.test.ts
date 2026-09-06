@@ -98,6 +98,24 @@ describe('versioned user skill storage', () => {
     });
   });
 
+  it('preserves a dataset fan-out contract when a built-in Skill is copied', async () => {
+    const adapter = createMemorySkillStorageAdapter();
+    const store = createSkillStore(adapter, { now: () => 100 });
+
+    const copy = await store.copy({
+      actorUserId: 'user-1',
+      sourceSkillId: 'preset-batch-sku-assets',
+    });
+
+    expect(copy.steps.find(step => step.id === 'sku-creative')?.fanOut).toEqual({
+      inputKey: 'rows',
+      itemAlias: 'sku',
+      keyField: 'sku',
+      maximumItems: 20,
+      concurrency: 3,
+    });
+  });
+
   it('keeps the copy id stable and increments its version on an allowed update', async () => {
     const adapter = createMemorySkillStorageAdapter();
     let now = 100;

@@ -33,6 +33,14 @@ export interface SkillStepCondition {
   includes: readonly (string | number | boolean)[];
 }
 
+export interface SkillStepFanOut {
+  inputKey: string;
+  itemAlias: string;
+  keyField: string;
+  maximumItems: number;
+  concurrency: number;
+}
+
 export interface SkillStepDefinition {
   id: string;
   label: string;
@@ -40,9 +48,11 @@ export interface SkillStepDefinition {
   execution: 'sequential' | 'parallel';
   parallelGroup?: string;
   promptTemplate: string;
+  promptInstructionTemplate?: string;
   modelRole: SkillModelBinding['role'];
   qualityGateIds: readonly string[];
   when?: SkillStepCondition;
+  fanOut?: SkillStepFanOut;
 }
 
 export interface SkillDefinition {

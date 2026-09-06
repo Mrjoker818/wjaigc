@@ -285,6 +285,8 @@ function frozenExecutionSteps(events: readonly AgentEvent[]): SkillStepDefinitio
       || typeof step.toolId !== 'string'
       || (step.execution !== 'sequential' && step.execution !== 'parallel')
       || typeof step.promptTemplate !== 'string'
+      || (step.promptInstructionTemplate !== undefined
+        && typeof step.promptInstructionTemplate !== 'string')
       || typeof step.modelRole !== 'string'
       || !Array.isArray(step.qualityGateIds)
       || !step.qualityGateIds.every(value => typeof value === 'string')
@@ -294,6 +296,9 @@ function frozenExecutionSteps(events: readonly AgentEvent[]): SkillStepDefinitio
       execution: step.execution,
       ...(typeof step.parallelGroup === 'string' ? { parallelGroup: step.parallelGroup } : {}),
       promptTemplate: step.promptTemplate,
+      ...(typeof step.promptInstructionTemplate === 'string'
+        ? { promptInstructionTemplate: step.promptInstructionTemplate }
+        : {}),
       modelRole: step.modelRole as SkillStepDefinition['modelRole'],
       qualityGateIds: step.qualityGateIds as string[],
     });

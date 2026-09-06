@@ -124,7 +124,17 @@ export const LOVART_CONTENT_COMMERCE_SKILLS: readonly SkillDefinition[] = [
     ],
     steps: [
       planStep('sku-plan', '检查批次规则', '检查{{platform}}商品数据和{{assetType}}生产规则，不补造商品事实。'),
-      imageStep(batchSkuId, 'sku-creative', 'SKU 商品素材', '基于来源图片和 SKU 数据生成{{platform}}{{assetType}}，比例{{aspectRatio}}，保持{{brandTone}}，避免{{negativeConstraints}}。'),
+      {
+        ...imageStep(
+          batchSkuId,
+          'sku-creative',
+          'SKU 商品素材',
+          '基于来源图片为 SKU {{sku.sku}}（{{sku.name}}）生成{{platform}}{{assetType}}，比例{{aspectRatio}}；卖点：{{sku.sellingPoints}}；规格：{{sku.variant}}；标题：{{sku.headline}}；保持{{brandTone}}，避免{{negativeConstraints}}。',
+        ),
+        fanOut: {
+          inputKey: 'rows', itemAlias: 'sku', keyField: 'sku', maximumItems: 20, concurrency: 3,
+        },
+      },
     ],
   }),
 ];

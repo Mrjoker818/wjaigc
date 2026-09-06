@@ -167,7 +167,7 @@ function isStoredInput(value: unknown): boolean {
 function isStoredStep(value: unknown): boolean {
   if (!isRecord(value) || !hasOnlyKeys(value, [
     'id', 'label', 'toolId', 'execution', 'parallelGroup', 'promptTemplate',
-    'modelRole', 'qualityGateIds', 'when',
+    'modelRole', 'qualityGateIds', 'when', 'fanOut',
   ])) return false;
   if (
     !isBoundedString(value.id, 128, TOKEN_ID)
@@ -197,6 +197,23 @@ function isStoredStep(value: unknown): boolean {
         || (typeof item === 'string' && item.length <= 200)
       ))
     ) return false;
+  }
+  if ('fanOut' in value) {
+    if (!isRecord(value.fanOut)
+      || !hasOnlyKeys(value.fanOut, [
+        'inputKey', 'itemAlias', 'keyField', 'maximumItems', 'concurrency',
+      ])
+      || !isBoundedString(value.fanOut.inputKey, 64, TOKEN_ID)
+      || !isBoundedString(value.fanOut.itemAlias, 64, TOKEN_ID)
+      || !isBoundedString(value.fanOut.keyField, 64, TOKEN_ID)
+      || !Number.isSafeInteger(value.fanOut.maximumItems)
+      || (value.fanOut.maximumItems as number) < 1
+      || (value.fanOut.maximumItems as number) > 1_000
+      || !Number.isSafeInteger(value.fanOut.concurrency)
+      || (value.fanOut.concurrency as number) < 1
+      || (value.fanOut.concurrency as number) > 10
+      || value.execution !== 'parallel'
+      || typeof value.parallelGroup !== 'string') return false;
   }
   return true;
 }
@@ -586,6 +603,15 @@ export function createSkillStore(
               when: {
                 input: step.when.input,
                 includes: [...step.when.includes],
+              },
+            }),
+            ...(step.fanOut === undefined ? {} : {
+              fanOut: {
+                inputKey: step.fanOut.inputKey,
+                itemAlias: step.fanOut.itemAlias,
+                keyField: step.fanOut.keyField,
+                maximumItems: step.fanOut.maximumItems,
+                concurrency: step.fanOut.concurrency,
               },
             }),
           })),

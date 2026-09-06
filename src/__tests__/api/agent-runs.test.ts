@@ -1176,6 +1176,63 @@ describe('Agent runtime service', () => {
     });
   });
 
+  it('freezes concrete batch SKU steps and dataset metadata in run.created', async () => {
+    const definition = requireSkillForSurface('preset-batch-sku-assets', 'canvas');
+    const inputValues = resolveSkillInputs(definition, {
+      sourceImages: ['version-source-1'],
+      rows: [
+        { sku: 'A-1', name: '黑色耳机' },
+        { sku: 'B-2', name: '白色耳机' },
+        { sku: 'C-3', name: '蓝色耳机' },
+      ],
+    });
+    const dependencies = serviceDependencies();
+    dependencies.resolveTaskModel.mockImplementation(async (providerId, modelId) => ({
+      providerId, modelId,
+      kind: providerId === 'provider-image' ? 'image' : 'chat',
+      sourceType: providerId === 'provider-image' ? 'image' : 'chat',
+      protocol: providerId === 'provider-image' ? 'images-generations' : 'chat-completions',
+      executionMode: 'sync', allowedRatios: [], allowedSizes: [], qualityOptions: [], maxOutputs: 1,
+      supportsReferenceImages: false, supportsMask: false,
+      outputKinds: providerId === 'provider-image' ? ['image'] : ['text'], capabilitySources: {},
+    }));
+    const service = agentRuntime.createAgentRuntimeService(dependencies);
+
+    await service.createRun({
+      actor: user,
+      request: agentRuntime.parseAgentRunRequest(request({
+        prompt: compileSkillPrompt(definition.systemPrompt, inputValues),
+        allowedToolIds: ['img2img'],
+        sourceVersionIds: ['version-source-1'],
+        context: { selectedEntityIds: [], visibleVersionIds: ['version-source-1'], locale: 'zh-CN' },
+        skill: {
+          skillId: definition.id, skillVersion: definition.version, inputValues,
+          modelBindings: {
+            orchestrator: { providerId: 'provider-exact', modelId: 'model-exact' },
+            image: { providerId: 'provider-image', modelId: 'model-image' },
+          },
+        },
+      })),
+    });
+
+    const snapshot = dependencies.appendEvent.mock.calls[0][0].payload.skillSnapshot as {
+      inputs: Array<{ key: string; datasetSchema?: string }>;
+      steps: Array<{ id: string; promptTemplate: string; fanOut?: unknown }>;
+    };
+    expect(snapshot.inputs.find(field => field.key === 'rows')).toMatchObject({
+      datasetSchema: 'sku-v1',
+    });
+    expect(snapshot.steps.map(step => step.id)).toEqual([
+      'sku-plan',
+      expect.stringMatching(/^sku-creative:[a-f0-9]{16}$/),
+      expect.stringMatching(/^sku-creative:[a-f0-9]{16}$/),
+      expect.stringMatching(/^sku-creative:[a-f0-9]{16}$/),
+    ]);
+    expect(snapshot.steps.slice(1).every(step => (
+      step.fanOut === undefined && !step.promptTemplate.includes('{{sku.')
+    ))).toBe(true);
+  });
+
   it.each([
     ['duplicate', ['version-1', 'version-1'], ['version-1']],
     ['missing', ['version-1'], ['version-1', 'version-2']],

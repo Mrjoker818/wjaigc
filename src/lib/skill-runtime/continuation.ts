@@ -45,6 +45,8 @@ function parseFrozenSteps(value: unknown): SkillStepDefinition[] | null {
       || typeof step.toolId !== 'string'
       || (step.execution !== 'sequential' && step.execution !== 'parallel')
       || typeof step.promptTemplate !== 'string'
+      || (step.promptInstructionTemplate !== undefined
+        && typeof step.promptInstructionTemplate !== 'string')
       || typeof step.modelRole !== 'string'
       || !Array.isArray(step.qualityGateIds)
       || !step.qualityGateIds.every(gate => typeof gate === 'string')
@@ -56,6 +58,9 @@ function parseFrozenSteps(value: unknown): SkillStepDefinition[] | null {
       execution: step.execution,
       ...(typeof step.parallelGroup === 'string' ? { parallelGroup: step.parallelGroup } : {}),
       promptTemplate: step.promptTemplate,
+      ...(typeof step.promptInstructionTemplate === 'string'
+        ? { promptInstructionTemplate: step.promptInstructionTemplate }
+        : {}),
       modelRole: step.modelRole as SkillStepDefinition['modelRole'],
       qualityGateIds: step.qualityGateIds as string[],
     });
@@ -100,13 +105,16 @@ export function frozenDefinition(
         || field.options.some(option => typeof option !== 'string')
       )) throw new SkillRunRequestError('Frozen Skill input is invalid');
       if (field.maximumItems !== undefined && (
-        (field.kind !== 'images' && field.kind !== 'multi-select')
+        (field.kind !== 'images' && field.kind !== 'multi-select' && field.kind !== 'dataset')
         || !Number.isSafeInteger(field.maximumItems)
         || (field.maximumItems as number) < 1
       )) throw new SkillRunRequestError('Frozen Skill input is invalid');
       if (field.bindToSourceVersions !== undefined && typeof field.bindToSourceVersions !== 'boolean') {
         throw new SkillRunRequestError('Frozen Skill input is invalid');
       }
+      if (field.datasetSchema !== undefined && (
+        field.kind !== 'dataset' || field.datasetSchema !== 'sku-v1'
+      )) throw new SkillRunRequestError('Frozen Skill input is invalid');
       const parsed: SkillInputField = {
         key: field.key,
         label: field.label,
@@ -117,6 +125,9 @@ export function frozenDefinition(
         ...(field.maximumItems !== undefined ? { maximumItems: field.maximumItems as number } : {}),
         ...(field.bindToSourceVersions !== undefined
           ? { bindToSourceVersions: field.bindToSourceVersions as boolean }
+          : {}),
+        ...(field.datasetSchema !== undefined
+          ? { datasetSchema: field.datasetSchema as 'sku-v1' }
           : {}),
       };
       if (parsed.defaultValue !== undefined) {
