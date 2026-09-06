@@ -225,10 +225,19 @@ describe('scoped Skill runtime inventory', () => {
       'tests/e2e/skill-runtime-canvas-workflow.spec.ts',
     ), 'utf8');
 
-    expect(source).toContain('const skillFixture = structuredClone(fixture);');
-    expect(source).toContain('nodes: []');
-    expect(source).toContain('connections: []');
-    expect(source).toContain('seedStage4Baseline(page, skillFixture, auth)');
+    const isolatedFixture = source.indexOf('const skillFixture = structuredClone(fixture);');
+    const minimalWorkflow = source.indexOf('nodes: [sourceNode, marketingNode]');
+    const seed = source.indexOf('seedStage4Baseline(page, skillFixture, auth)');
+
+    expect(isolatedFixture).toBeGreaterThan(0);
+    expect(minimalWorkflow).toBeGreaterThan(isolatedFixture);
+    expect(seed).toBeGreaterThan(minimalWorkflow);
+    expect(source).toContain('fromNodeId: sourceNode.id');
+    expect(source).toContain('toNodeId: marketingNode.id');
+    expect(source).not.toContain("from '../../scripts/stage-4-e2e-fixtures.mjs'");
+    expect(source).not.toContain('buildStage4FixturePlan');
+    expect(source).not.toContain('expectedNodeIds');
+    expect(source).not.toContain('nodeCount');
   });
 
   it('requires exact model and result-version evidence in the cross-surface E2E', async () => {

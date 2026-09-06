@@ -3,6 +3,11 @@ import { resolve } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
+import {
+  AgentContextNotFoundError,
+  resolveOptionalSelectedAgentMediaUrl,
+} from '@/lib/agent-runtime/context-adapters';
+
 const routeSource = readFileSync(
   resolve(process.cwd(), 'src/lib/agent-runtime/agent-edit-execution-service.ts'),
   'utf8',
@@ -89,11 +94,27 @@ describe('agent edit task admission contract', () => {
     expect(routeSource).toContain('strictProviderModel ? exactImageModel : stripProviderModelPrefix(exactImageModel)');
   });
 
-  it('binds both agent-edit and canvas chat to the selected entity placement URL', () => {
+  it('requires agent-edit media while canvas chat only binds an authorized single selection', () => {
     expect(routeSource).toContain('resolveSelectedAgentMediaUrl(authorizedContext, selectedEntityIds)');
     expect(chatRouteSource).toContain(
+      'resolveOptionalSelectedAgentMediaUrl(authorizedContext, input.taskContext.selectedEntityIds || [])',
+    );
+    expect(chatRouteSource).not.toContain(
       'resolveSelectedAgentMediaUrl(authorizedContext, input.taskContext.selectedEntityIds || [])',
     );
+
+    const authorized = {
+      snapshot: { selectedEntityIds: ['entity-a'], visibleVersionIds: [], locale: 'zh-CN' as const },
+      mediaByVersionId: { 'version-a': 'https://media.example.com/a.png' },
+      selectedEntityVersionIds: { 'entity-a': 'version-a' },
+    };
+
+    expect(resolveOptionalSelectedAgentMediaUrl(authorized, [])).toBeUndefined();
+    expect(resolveOptionalSelectedAgentMediaUrl(authorized, ['entity-a', 'entity-b'])).toBeUndefined();
+    expect(resolveOptionalSelectedAgentMediaUrl(authorized, ['entity-a']))
+      .toBe('https://media.example.com/a.png');
+    expect(() => resolveOptionalSelectedAgentMediaUrl(authorized, ['missing-entity']))
+      .toThrow(AgentContextNotFoundError);
   });
 
   it('never retries a strict provider submit at an alternate v1 endpoint', () => {
