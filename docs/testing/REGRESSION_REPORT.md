@@ -2863,3 +2863,12 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - 生产环境无安全故障注入条件，单步失败后的云端精确重试未执行；本地确定性故障夹具新鲜重跑 `42/42` 通过，覆盖只执行 `variant-b` 和并行组未完成 sibling，不冒充云端通过。
 - 新鲜 Console 仍包含 Coze bridge CSP 与历史远程图片 CORS 错误，不能满足“Console 0 error”发布条件。
 - **回归判定：TASK 6 CLOUD CORE PASS / CONTROLLED SINGLE-STEP FAILURE UNVERIFIED。** Step 6 尚未完全关闭，Step 7 不启动。
+
+## 2026-09-07 Lovart 第二批 Task 8 本地与真库门禁
+
+- 在一次性 PostgreSQL 18 空白测试库完成批量内容电商真并发：20 次相同请求只产生一个 Run 和一次消费；三行 SKU 各有独立 operation；成功结果按编译顺序恢复；取消后保留成功行，只对两个未完成图像步骤退款 `14`，重复取消和迟到结果均不能改写终态。
+- 修复直接执行/恢复式调用未编译动态 `fanOut` 定义的问题；显式冻结定义不受影响。旧并发用例同步收紧为“部分退款后保持 charged，并精确断言退款金额”。
+- 新增与旧 Skill PostgreSQL 专项 `13/13`；目录合同 `11/11`，Canvas/Workflow 为 `27/27`，Simple Chat 独立为 `16`，三个第二批 Skill 未进入执行器特判。
+- 全仓真库回归：`1502/1502` suites、`5516/5516` tests，0 失败、0 跳过。TypeScript 通过；ESLint `0 errors / 943 warnings`；保护基线 `38/38`、零漂移、0 warning；`git diff --check` 通过。
+- 生产构建退出 0：Webpack 约 12.4 分钟、TypeScript 约 56 秒、静态页面 `119/119`。构建需要 8 GiB Node 堆，继续作为工程资源风险记录。
+- **回归判定：LOCAL + ISOLATED POSTGRESQL PASS / COZE REAL PROVIDER UNVERIFIED。** 本地 Task 8 Step 1-4 已关闭；推送与 Coze Canvas、Workflow、批量 SKU、取消退款和浏览器证据仍需执行。

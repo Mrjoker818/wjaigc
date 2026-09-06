@@ -554,7 +554,7 @@ Commit: `test: cover second Lovart workflows across workspaces`
 **Interfaces:**
 - Produces: 可追溯 `main` 候选、真库证据和 Coze 云端结论。
 
-- [ ] **Step 1: 隔离 PostgreSQL 真并发**
+- [x] **Step 1: 隔离 PostgreSQL 真并发**
 
 启动一次性 PostgreSQL 18 临时集群，不连接业务库。执行：
 
@@ -566,7 +566,7 @@ pnpm exec vitest run src/__tests__/integration/skill-content-commerce-concurrenc
 
 至少证明：重复提交一个 Run、每行一个 operation、成功行一次消费、失败/取消行一次退款、迟到结果不覆盖终态、刷新恢复顺序一致。测试结束停止并删除临时集群。
 
-- [ ] **Step 2: 运行聚焦和全量门禁**
+- [x] **Step 2: 运行聚焦和全量门禁**
 
 ```powershell
 pnpm exec vitest run src/__tests__/lib/skill-runtime-content-commerce-presets.test.ts src/__tests__/lib/skill-runtime-step-compiler.test.ts src/__tests__/lib/skill-runtime-dataset-schema.test.ts src/__tests__/lib/skill-runtime-batch-cost.test.ts src/__tests__/lib/skill-content-commerce-execution.test.ts src/__tests__/components/skill-dataset-file-parser.test.ts src/__tests__/components/skill-runtime-controls.test.tsx
@@ -580,11 +580,11 @@ $env:NODE_OPTIONS='--max-old-space-size=8192'; pnpm build
 
 Expected: 所有命令退出 0；记录真实测试、跳过、警告、页面数和 Build ID。
 
-- [ ] **Step 3: 最终审查与保护核对**
+- [x] **Step 3: 最终审查与保护核对**
 
 核对：旧 24 项摘要零漂移、Simple Chat 16、三个新 Skill 无执行器特判、没有密钥或用户数据、没有未追踪构建产物、`origin/stable` SHA 不变。
 
-- [ ] **Step 4: 更新中文证据与一次 Obsidian 阶段记录**
+- [x] **Step 4: 更新中文证据与一次 Obsidian 阶段记录**
 
 只有本阶段完成时，向 Obsidian 追加一次权威检查点。测试报告分别记录本地、PostgreSQL、GitHub、Coze 和未验证项，不用窄测试宣称全平台通过。
 

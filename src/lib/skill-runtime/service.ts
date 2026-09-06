@@ -559,8 +559,13 @@ export async function executeSkillRun(input: {
   resumeFromStepId?: string;
   definition?: import('./types').SkillDefinition;
 }): Promise<import('./executor').ExecuteSkillRunResult> {
-  const definition = input.definition
-    || requireSkillForSurface(input.request.skillId, input.request.surface);
+  const definition = input.definition || (() => {
+    const current = requireSkillForSurface(input.request.skillId, input.request.surface);
+    return {
+      ...current,
+      steps: skillExecutionSteps(current, input.request.inputValues),
+    };
+  })();
   const invocation = {
     inputValues: input.request.inputValues,
     modelBindings: input.request.modelBindings,

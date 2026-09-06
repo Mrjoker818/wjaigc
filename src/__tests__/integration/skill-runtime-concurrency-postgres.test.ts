@@ -521,12 +521,13 @@ describe('Skill runtime PostgreSQL concurrency', () => {
       });
       expect(late.accepted).toBe(false);
       const persisted = await taskStorage.getCloudTaskForUser(created.runId, userId);
-      expect(persisted).toMatchObject({ status: 'failed', creditStatus: 'refunded' });
-      const refunds = await query<{ count: string }>(
-        `SELECT COUNT(*)::text AS count FROM wujie_credit_transactions
+      expect(persisted).toMatchObject({ status: 'failed', creditStatus: 'charged' });
+      const refunds = await query<{ count: string; amount: number }>(
+        `SELECT COUNT(*)::text AS count, COALESCE(SUM(amount), 0)::integer AS amount
+         FROM wujie_credit_transactions
          WHERE task_id = $1 AND type = 'refund'`, [created.runId],
       );
-      expect(refunds.rows[0]?.count).toBe('1');
+      expect(refunds.rows[0]).toEqual({ count: '1', amount: 3 });
     });
   }, 60_000);
 
@@ -798,12 +799,13 @@ describe('Skill runtime PostgreSQL concurrency', () => {
       await expect(execution).rejects.toBeDefined();
 
       const persisted = await taskStorage.getCloudTaskForUser(created.runId, userId);
-      expect(persisted).toMatchObject({ status: 'cancelled', creditStatus: 'refunded' });
-      const refunds = await query<{ count: string }>(
-        `SELECT COUNT(*)::text AS count FROM wujie_credit_transactions
+      expect(persisted).toMatchObject({ status: 'cancelled', creditStatus: 'charged' });
+      const refunds = await query<{ count: string; amount: number }>(
+        `SELECT COUNT(*)::text AS count, COALESCE(SUM(amount), 0)::integer AS amount
+         FROM wujie_credit_transactions
          WHERE task_id = $1 AND type = 'refund'`, [created.runId],
       );
-      expect(refunds.rows[0]?.count).toBe('1');
+      expect(refunds.rows[0]).toEqual({ count: '1', amount: 3 });
     });
   }, 60_000);
 
