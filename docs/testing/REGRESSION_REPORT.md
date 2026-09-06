@@ -2833,3 +2833,11 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - 工程门禁：TypeScript 通过；ESLint `0 errors / 943 warnings`；保护基线 `38/38 / 0 drift / 0 warnings`；生产构建退出 0，Webpack 编译约 12.5 分钟并生成 `119/119` 页面。
 - 业务候选已提交并推送：`main@ba2049ad975e641c4d60835d2966fc49aa11fa4b`；推送后 `HEAD == origin/main`，`origin/stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 未变化。
 - **回归判定：LOCAL + POSTGRESQL + LOCAL CHROMIUM PASS / COZE AND REAL PROVIDER UNVERIFIED。**
+
+## 2026-09-07 Lovart Canvas 来源图片一致性回归
+
+- Coze 旧候选真实复现：画布图片已选中且浮动工具栏可见，但“广告 A/B 变体”的必填来源字段仍显示“尚未选择来源图片”，显示状态与提交时临时注入的来源版本不一致。
+- 按 RED/GREEN 做最小修复：来源版本收集和结构化字段绑定集中到 `canvas-source-inputs.ts`，表单、估价和执行共用同一份 `canvasSkillInputValues`；没有托管 AssetVersion 时在请求前显示明确错误。
+- 新鲜本地证据：聚焦 `58/58`，扩大相关回归 `152/152`；全仓 `652 passed / 32 skipped` 测试文件，`5304 passed / 171 conditional skipped / 0 failed`。条件跳过源于本轮未设置 `POSTGRES_TEST_DATABASE_URL`，不计作真库通过。
+- TypeScript 退出 0；ESLint `0 errors / 943 warnings`；保护基线 `38/38 / 0 drift / 0 warnings`；干净 `.next` 后生产构建退出 0，webpack 约 12.5 分钟并生成 `119/119` 页面。Windows 构建峰值内存较高，属于工程资源风险，不隐藏。
+- **回归判定：LOCAL FIX PASS / COZE REAL FLOW PENDING。** 下一步只部署本候选并继续 Task 6 Step 6；Task 1-5 和 Task12 不重复执行。

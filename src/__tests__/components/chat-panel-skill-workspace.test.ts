@@ -33,6 +33,11 @@ function requestFor(sessionId: string): SkillRunRequest {
     imageModel: 'image-model', imageModelProviderId: 'image-provider',
     selectedCanvasImage: { id: 'image-a', assetVersionId: 'version-a' },
     pendingImages: [], activeMentions: [], skillParamValues: { designContent: 'Keep the selected product' },
+    canvasSkillSourceVersionIds: ['version-a'],
+    canvasSkillInputValues: {
+      designContent: 'Keep the selected product',
+      sourceImages: ['version-a'],
+    },
     crypto: { randomUUID: () => 'test-request' },
   }) as () => SkillRunRequest;
   return build();
@@ -43,6 +48,7 @@ describe('Canvas Skill asset workspace identity', () => {
     const request = requestFor(sessionId);
     expect(request.workspaceId).toBe('canvas:project-a');
     expect(request.sourceVersionIds).toEqual(['version-a']);
+    expect(request.inputValues.sourceImages).toEqual(['version-a']);
     expect(request.modelBindings.image).toEqual({ providerId: 'image-provider', modelId: 'image-model' });
 
     const context = await authorizeAgentContext({

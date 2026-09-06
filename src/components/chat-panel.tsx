@@ -60,6 +60,7 @@ import {
 } from '@/lib/skill-runtime/canvas-client';
 import type { SkillRunRequest } from '@/lib/skill-runtime/run-request';
 import type { SkillDefinition, SkillModelBinding } from '@/lib/skill-runtime/types';
+import { bindCanvasSkillSourceInputs, collectCanvasSkillSourceVersionIds } from '@/lib/skill-runtime/canvas-source-inputs';
 
 const CHAT_RENDER_WINDOW = 80;
 
@@ -1515,6 +1516,16 @@ export function ChatPanel({ themeStyle, projectId, onAddToPrompt, onAddImages, o
     data?: Record<string, unknown>;
   }
   const [activeMentions, setActiveMentions] = useState<MentionRef[]>([]);
+  const canvasSkillSourceVersionIds = useMemo(() => collectCanvasSkillSourceVersionIds({
+    selected: selectedCanvasImage,
+    pending: pendingImages,
+    mentions: activeMentions,
+  }), [activeMentions, pendingImages, selectedCanvasImage]);
+  const canvasSkillInputValues = useMemo(() => bindCanvasSkillSourceInputs(
+    activeSkill?.inputs ?? [],
+    skillParamValues,
+    canvasSkillSourceVersionIds,
+  ), [activeSkill?.inputs, canvasSkillSourceVersionIds, skillParamValues]);
   const [mentionPickerOpen, setMentionPickerOpen] = useState(false);
   const [mentionPickerSearch, setMentionPickerSearch] = useState('');
   const [mentionPickerIndex, setMentionPickerIndex] = useState(0);
@@ -3884,43 +3895,39 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
         return null;
       }
     }
-    const skillSourceVersionIds = [...new Set([
-      selectedCanvasImage?.assetVersionId,
-      ...pendingImages.map(image => image.assetVersionId),
-      ...activeMentions.map(mention => mention.assetVersionId),
-    ].filter((value): value is string => typeof value === 'string' && Boolean(value)))];
-    const contextualInputs = { ...skillParamValues };
-    for (const field of activeSkill.inputs) {
-      if (contextualInputs[field.key] !== undefined) continue;
-      if (field.kind === 'image' && skillSourceVersionIds[0]) {
-        contextualInputs[field.key] = skillSourceVersionIds[0];
-      } else if (field.kind === 'images' && skillSourceVersionIds.length > 0) {
-        contextualInputs[field.key] = skillSourceVersionIds;
-      }
-    }
     return {
       skillId: executionSkill.id,
       skillVersion: executionSkill.version,
       surface: 'canvas',
       projectId,
       workspaceId: `canvas:${projectId}`,
-      inputValues: contextualInputs,
-      sourceVersionIds: skillSourceVersionIds,
+      inputValues: canvasSkillInputValues,
+      sourceVersionIds: canvasSkillSourceVersionIds,
       modelBindings,
       idempotencyKey: typeof crypto.randomUUID === 'function'
         ? `canvas-skill:${crypto.randomUUID()}`
         : `canvas-skill:${Date.now()}`,
     };
-  }, [activeMentions, activeSkill, availableChatModels, discoveredImageModels, imageModel, imageModelProviderId, model, pendingImages, projectId, selectedCanvasImage?.assetVersionId, skillParamValues]);
+  }, [activeSkill, availableChatModels, canvasSkillInputValues, canvasSkillSourceVersionIds, discoveredImageModels, imageModel, imageModelProviderId, model, projectId]);
+
+  const hasRequiredCanvasSkillSource = useCallback((): boolean => {
+    const requiresManagedSource = activeSkill?.inputs.some(field => (
+      field.required && field.bindToSourceVersions
+    ));
+    if (!requiresManagedSource || canvasSkillSourceVersionIds.length > 0) return true;
+    toast.error('当前选中图片尚未生成可用的资产版本，请等待保存完成后重新选择图片');
+    return false;
+  }, [activeSkill, canvasSkillSourceVersionIds.length]);
 
   const handleEstimateSkill = useCallback(async (): Promise<void> => {
+    if (!hasRequiredCanvasSkillSource()) return;
     const request = buildCanvasSkillRequest();
     if (!request) {
       toast.error('请先选择项目，并配置此 Skill 所需的聊天与图像模型');
       return;
     }
     await skillRun.estimateRun(request);
-  }, [buildCanvasSkillRequest, skillRun]);
+  }, [buildCanvasSkillRequest, hasRequiredCanvasSkillSource, skillRun]);
 
   const handleRestoreSkill = useCallback(async (record: SkillRunHistoryItem): Promise<void> => {
     if (!projectId || record.projectId !== projectId || record.surface !== 'canvas' || record.skillId !== activeSkill?.id) return;
@@ -3939,6 +3946,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
   }, [activeSkill?.id, projectId, skillRun]);
 
   const handleStartSkill = useCallback(async (): Promise<void> => {
+    if (!hasRequiredCanvasSkillSource()) return;
     const request = buildCanvasSkillRequest();
     if (!request) {
       toast.error('请先选择项目，并配置此 Skill 所需的聊天与图像模型');
@@ -3960,7 +3968,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
         sourceImageId,
       };
     }
-  }, [buildCanvasSkillRequest, selectedCanvasImage?.id, skillRun]);
+  }, [buildCanvasSkillRequest, hasRequiredCanvasSkillSource, selectedCanvasImage?.id, skillRun]);
 
   useEffect(() => {
     const projection = skillRun.projection;
@@ -6128,7 +6136,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                 </div>
                 <SkillInputFields
                   fields={activeSkill.inputs}
-                  values={skillParamValues}
+                  values={canvasSkillInputValues}
                   onChange={(key, value) => setSkillParamValues(current => ({ ...current, [key]: value }))}
                   disabled={skillRun.busy || Boolean(skillRun.runId && skillRun.projection?.status !== 'completed' && skillRun.projection?.status !== 'failed' && skillRun.projection?.status !== 'cancelled' && skillRun.projection?.status !== 'timeout')}
                 />

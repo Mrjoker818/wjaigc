@@ -515,6 +515,8 @@ Commit: `test: cover marketing skills across canvas and workflow`
 
 > 执行状态（2026-09-06）：Task 1-5 已按 TDD、隔离 PostgreSQL 和本地 Chromium 证据完成，不得重复实施。Task 6 的本地门禁、文档和 `main` 推送已完成；只剩 Coze 精确部署与云端真实验收。
 
+> 2026-09-07 云端检查点：Step 6 首次执行已复现 Canvas 来源字段与实际请求来源不一致。`LOVART-CANVAS-002` 已按 TDD 在本地修复并通过全量门禁，尚未部署复验；Task 6 仍处于 Step 6，不回退、不重复 Task 1-5 或 Task12。
+
 **Files:**
 - Modify: `docs/testing/BUG_REGISTER.md`
 - Modify: `docs/testing/REGRESSION_REPORT.md`

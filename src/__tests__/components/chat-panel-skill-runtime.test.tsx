@@ -50,7 +50,7 @@ describe('canvas chat shared Skill runtime wiring', () => {
     expect(source).toContain('skillId: executionSkill.id');
     expect(source).toContain('skillVersion: executionSkill.version');
     expect(source).toContain("roles.add('orchestrator')");
-    expect(source).toContain('sourceVersionIds: skillSourceVersionIds');
+    expect(source).toContain('sourceVersionIds: canvasSkillSourceVersionIds');
     expect(source).toContain('await skillRun.estimateRun(request)');
     expect(source).toContain('await startCanvasSkillRun(');
     expect(source).toContain('() => skillRun.startRun(request)');
@@ -68,5 +68,18 @@ describe('canvas chat shared Skill runtime wiring', () => {
     expect(source).toContain('runId: context.runId');
     expect(source).toContain('sourceVersionIds: context.sourceVersionIds');
     expect(source).toContain('deleteCanvasSkillsSequentially(userSkills.map(skill => skill.id))');
+  });
+
+  it('shows the same selected canvas source versions that estimate and run submit', () => {
+    expect(source).toContain("import { bindCanvasSkillSourceInputs, collectCanvasSkillSourceVersionIds } from '@/lib/skill-runtime/canvas-source-inputs';");
+    expect(source).toContain('const canvasSkillSourceVersionIds = useMemo(() => collectCanvasSkillSourceVersionIds({');
+    expect(source).toContain('const canvasSkillInputValues = useMemo(() => bindCanvasSkillSourceInputs(');
+    expect(source).toContain('values={canvasSkillInputValues}');
+    expect(source).toContain('inputValues: canvasSkillInputValues');
+    expect(source).toContain('sourceVersionIds: canvasSkillSourceVersionIds');
+  });
+
+  it('reports a missing managed source version before estimate or run submission', () => {
+    expect(source).toContain("toast.error('当前选中图片尚未生成可用的资产版本，请等待保存完成后重新选择图片')");
   });
 });

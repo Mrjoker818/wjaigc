@@ -4086,3 +4086,15 @@ Task 4 独立审查的两个 Minor 继续保留给最终审查：单元夹具 op
 | 永久测试 | Workflow 解析、Skill 节点与执行聚焦 `39/39`；最终相关聚焦回归 `127/127`；隔离 PostgreSQL Skill 并发 `10/10`；全仓真库回归 `5459 passed / 12 conditional skipped / 0 failed`。 |
 | 浏览器证据 | 本地 Chromium 真实运行 `1/1`：Canvas 与 Workflow 均显示同一 24 Skills，Canvas 产生 2 个结果，Workflow 节点完成并产生 2 个 AssetVersion，预览、下载及证据门禁均通过。 |
 | 当前状态 | **本地与隔离 PostgreSQL 已修复；Coze 最新提交部署与真实供应商链路未验证。** |
+
+### LOVART-CANVAS-002：画布已选图片未显示在营销 Skill 来源字段（2026-09-07）
+
+| 字段 | 内容 |
+|---|---|
+| 严重等级 | P1：用户已选择画布图片，但广告 A/B 等营销 Skill 仍显示“尚未选择来源图片”，估价与执行缺少可信输入反馈。 |
+| 云端复现 | Coze 预览中选中可见图片后打开“广告 A/B 变体”，图片工具栏已出现，但参数面板的必填“来源图片”仍显示未选择；点击估价没有形成可确认结果。 |
+| 根因 | `buildCanvasSkillRequest` 在提交时临时注入 AssetVersion，`SkillInputFields` 却只渲染原始 `skillParamValues`，显示路径和请求路径不是同一数据源；没有 AssetVersion 的选中图片也缺少提交前明确错误。 |
+| 修复 | 新增 `canvas-source-inputs.ts`，统一收集并去重选中、待处理和提及图片的 AssetVersion；同一 `canvasSkillInputValues` 同时供字段显示、估价和执行使用。必填来源尚未形成托管版本时，在网络请求前给出明确提示。 |
+| 永久测试 | 新增来源收集/绑定测试，并扩展 Canvas Skill 运行时与工作区合同；聚焦 `58/58`、扩大聚焦 `152/152`、全仓 `5304 passed / 171 conditional skipped / 0 failed`。 |
+| 工程门禁 | TypeScript 通过；ESLint `0 errors / 943 warnings`；保护基线 `38/38 / 0 drift / 0 warnings`；Windows 干净缓存生产构建退出 0，webpack 约 12.5 分钟，生成 `119/119` 页面。 |
+| 当前状态 | **本地修复通过 / Coze 云端复验待完成。** 不得把本地字段一致性测试替代真实估价、付费执行、AssetVersion、刷新恢复和账务证据。 |

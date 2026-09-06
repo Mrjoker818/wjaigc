@@ -2363,5 +2363,8 @@ BUG-018 已从未验证项移除。剩余顺序为 `002-B -> 002-D -> 002-E`；�
 - [x] 业务候选已推送 `main@ba2049ad975e641c4d60835d2966fc49aa11fa4b`，`origin/stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 未变化。
 - [ ] Coze 拉取最终 `main` 后核对 exact tree、Build ID、唯一服务进程与健康入口。
 - [ ] 使用真实稳定 provider 执行 Canvas 广告 A/B 与 Workflow 全渠道活动素材包，核对 provider/model 冻结、结果数量及来源图不覆盖。
+- [ ] 部署 2026-09-07 来源一致性修复后，选中已有 AssetVersion 的图片，确认“来源图片”立即显示真实选中数量，估价与执行发送同一组版本 ID；选择尚未保存为 AssetVersion 的图片时必须在请求前明确失败。
+- [ ] 完成 Canvas 广告 A/B 双成品、两个新 AssetVersion、来源图不覆盖及刷新恢复；完成 Workflow 全渠道包、失败步骤单独重试、取消一次退款和迟到结果隔离。
+- [ ] 云端复核 `/simple-chat` 仍为 16 Skills，三项营销 Skill 不出现，并保存 Console、Network、任务事件与积分流水证据。
 - [ ] 云端验证失败步骤重试不重复扣费、取消只退款一次、迟到结果不覆盖终态、保存刷新恢复。
 - [ ] 保存新鲜 Console、Network、截图和可获得的 Trace；无法生成的证据类型必须继续说明限制。

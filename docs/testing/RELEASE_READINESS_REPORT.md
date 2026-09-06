@@ -2166,3 +2166,9 @@ The focused gate test passes `7/7`; the actual protected-baseline command passes
 - Canvas/Workflow Skills 为 `24/24`，Simple Chat 继续独立为 `16`；未触碰 `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7`。
 - 业务候选 `main@ba2049ad975e641c4d60835d2966fc49aa11fa4b` 已推送 GitHub；推送后 `HEAD == origin/main`。
 - **当前发布结论：有条件通过。** 允许推送 `main` 并进入 Coze 验收，但在 exact-tree、真实 provider、失败重试、取消退款、刷新恢复与浏览器证据完成前，不得关闭 Lovart 第一批。
+
+## 2026-09-07 Lovart Task 6 云端复现后的发布判断
+
+- 云端真实验收发现 `LOVART-CANVAS-002`：选中图片和营销 Skill 来源字段显示不一致。该问题已建立失败测试并最小修复，本地聚焦、全量、类型、Lint、保护基线和 `119/119` 构建均有新鲜退出 0 证据。
+- 修复不改变 Skill 定义、供应商路由、执行状态机、积分规则或原始素材，只统一 Canvas 来源版本的 UI 与请求数据，并增加缺失 AssetVersion 的失败关闭提示。
+- **当前发布结论仍为有条件通过。** 允许将该修复推送 `main` 进入 Coze 复验；在 Canvas A/B 真实估价与双成品、Workflow 全渠道包、失败单步重试、取消唯一退款、刷新恢复及 Simple Chat 16 项隔离取得云端证据前，不得关闭 Lovart 第一批或宣布全平台通过。
