@@ -2360,6 +2360,7 @@ BUG-018 已从未验证项移除。剩余顺序为 `002-B -> 002-D -> 002-E`；�
 - [x] 隔离 PostgreSQL Skill 并发 `10/10`，全仓真库 `5459 passed / 12 conditional skipped / 0 failed`；先前“本轮全仓 PostgreSQL 169 skipped”记录已由新鲜真库回归取代。
 - [x] Workflow Skill 的 `workflow-input` placement、项目防伪和 URL-only 兼容边界已验证。
 - [x] Stage 4 已恢复同步冲突过滤器 `40/40`、最终相关聚焦 `127/127`；未知或未恢复的 409 仍失败关闭。
+- [x] 业务候选已推送 `main@ba2049ad975e641c4d60835d2966fc49aa11fa4b`，`origin/stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 未变化。
 - [ ] Coze 拉取最终 `main` 后核对 exact tree、Build ID、唯一服务进程与健康入口。
 - [ ] 使用真实稳定 provider 执行 Canvas 广告 A/B 与 Workflow 全渠道活动素材包，核对 provider/model 冻结、结果数量及来源图不覆盖。
 - [ ] 云端验证失败步骤重试不重复扣费、取消只退款一次、迟到结果不覆盖终态、保存刷新恢复。

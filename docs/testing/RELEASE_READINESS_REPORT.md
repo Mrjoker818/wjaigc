@@ -2164,4 +2164,5 @@ The focused gate test passes `7/7`; the actual protected-baseline command passes
 - 最新证据为：Workflow 聚焦 `39/39`、最终相关聚焦 `127/127`、Skill 真库并发 `10/10`、本地 Chromium `1/1`、全仓真库 `5459 passed / 12 conditional skipped / 0 failed`、TypeScript 通过、ESLint `0 errors / 943 warnings`、保护基线 `38/38 / 0 drift / 0 warnings`、生产构建 `119/119`。
 - 已恢复同步冲突的证据规则已收紧：只有同 URL、同请求摘要且随后成功的 409 才不会阻断 E2E；未知 409 仍会使验收失败，不以过滤隐藏业务错误。
 - Canvas/Workflow Skills 为 `24/24`，Simple Chat 继续独立为 `16`；未触碰 `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7`。
+- 业务候选 `main@ba2049ad975e641c4d60835d2966fc49aa11fa4b` 已推送 GitHub；推送后 `HEAD == origin/main`。
 - **当前发布结论：有条件通过。** 允许推送 `main` 并进入 Coze 验收，但在 exact-tree、真实 provider、失败重试、取消退款、刷新恢复与浏览器证据完成前，不得关闭 Lovart 第一批。

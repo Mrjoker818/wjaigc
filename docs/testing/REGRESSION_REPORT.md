@@ -2831,4 +2831,5 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - Stage 4 证据过滤器按 TDD 增加已恢复同步冲突边界：仅同 URL、同 `requestDigest` 且一秒内后续 2xx 的 `/api/user-data/sync` 409 可被识别为恢复；不同摘要、无成功重试或其他 409 继续失败关闭。过滤器 `40/40`、最终相关聚焦回归 `127/127`。
 - 全仓 PostgreSQL 回归：`679 passed / 4 skipped` 测试文件，`5459 passed / 12 conditional skipped / 0 failed`。跳过项保持显式，未计作通过。
 - 工程门禁：TypeScript 通过；ESLint `0 errors / 943 warnings`；保护基线 `38/38 / 0 drift / 0 warnings`；生产构建退出 0，Webpack 编译约 12.5 分钟并生成 `119/119` 页面。
+- 业务候选已提交并推送：`main@ba2049ad975e641c4d60835d2966fc49aa11fa4b`；推送后 `HEAD == origin/main`，`origin/stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 未变化。
 - **回归判定：LOCAL + POSTGRESQL + LOCAL CHROMIUM PASS / COZE AND REAL PROVIDER UNVERIFIED。**

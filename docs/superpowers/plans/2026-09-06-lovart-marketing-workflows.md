@@ -513,7 +513,7 @@ Commit: `test: cover marketing skills across canvas and workflow`
 
 ### Task 6: 全量回归、Obsidian、推送与云端验收
 
-> 执行状态（2026-09-06）：Task 1-5 已按 TDD、隔离 PostgreSQL 和本地 Chromium 证据完成，不得重复实施。Task 6 的本地门禁和文档步骤已完成；只剩提交推送、Coze 精确部署与云端真实验收。
+> 执行状态（2026-09-06）：Task 1-5 已按 TDD、隔离 PostgreSQL 和本地 Chromium 证据完成，不得重复实施。Task 6 的本地门禁、文档和 `main` 推送已完成；只剩 Coze 精确部署与云端真实验收。
 
 **Files:**
 - Modify: `docs/testing/BUG_REGISTER.md`
@@ -560,7 +560,7 @@ Expected: 保护门禁通过、无未批准漂移、`origin/stable` 仍为 `52f7
 
 记录：旧 21/16 零丢失、三项新目录、测试数、PostgreSQL 状态、已修问题、未验证项、提交 SHA。Obsidian 只新增本阶段一次权威检查点，不复制历史长记录。
 
-- [ ] **Step 5: 提交并推送 `main`**
+- [x] **Step 5: 提交并推送 `main`**
 
 ```powershell
 git add src scripts tests docs
