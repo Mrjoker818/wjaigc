@@ -1,0 +1,126 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`Lovart marketing Skill definitions > keeps deterministic output steps and quality gates 1`] = `
+[
+  [
+    {
+      "execution": "sequential",
+      "gates": [],
+      "id": "plan",
+      "parallelGroup": undefined,
+      "role": "orchestrator",
+      "toolId": "chat",
+    },
+    {
+      "execution": "parallel",
+      "gates": [
+        "output-present",
+      ],
+      "id": "variant-a",
+      "parallelGroup": "preset-ad-ab-variants:outputs",
+      "role": "image",
+      "toolId": "img2img",
+    },
+    {
+      "execution": "parallel",
+      "gates": [
+        "output-present",
+      ],
+      "id": "variant-b",
+      "parallelGroup": "preset-ad-ab-variants:outputs",
+      "role": "image",
+      "toolId": "img2img",
+    },
+  ],
+  [
+    {
+      "execution": "sequential",
+      "gates": [],
+      "id": "diagnose",
+      "parallelGroup": undefined,
+      "role": "orchestrator",
+      "toolId": "chat",
+    },
+    {
+      "execution": "parallel",
+      "gates": [
+        "output-present",
+      ],
+      "id": "proof",
+      "parallelGroup": "preset-retargeting-creative:outputs",
+      "role": "image",
+      "toolId": "img2img",
+    },
+    {
+      "execution": "parallel",
+      "gates": [
+        "output-present",
+      ],
+      "id": "benefit",
+      "parallelGroup": "preset-retargeting-creative:outputs",
+      "role": "image",
+      "toolId": "img2img",
+    },
+    {
+      "execution": "parallel",
+      "gates": [
+        "output-present",
+      ],
+      "id": "offer",
+      "parallelGroup": "preset-retargeting-creative:outputs",
+      "role": "image",
+      "toolId": "img2img",
+    },
+  ],
+  [
+    {
+      "execution": "sequential",
+      "gates": [],
+      "id": "campaign-plan",
+      "parallelGroup": undefined,
+      "role": "orchestrator",
+      "toolId": "chat",
+    },
+    {
+      "execution": "parallel",
+      "gates": [
+        "output-present",
+      ],
+      "id": "master-key-visual",
+      "parallelGroup": "preset-omnichannel-campaign:outputs",
+      "role": "image",
+      "toolId": "img2img",
+    },
+    {
+      "execution": "parallel",
+      "gates": [
+        "output-present",
+      ],
+      "id": "social-adaptation",
+      "parallelGroup": "preset-omnichannel-campaign:outputs",
+      "role": "image",
+      "toolId": "img2img",
+    },
+    {
+      "execution": "parallel",
+      "gates": [
+        "output-present",
+      ],
+      "id": "commerce-adaptation",
+      "parallelGroup": "preset-omnichannel-campaign:outputs",
+      "role": "image",
+      "toolId": "img2img",
+    },
+    {
+      "execution": "parallel",
+      "gates": [
+        "output-present",
+      ],
+      "id": "owned-media-adaptation",
+      "parallelGroup": "preset-omnichannel-campaign:outputs",
+      "role": "image",
+      "toolId": "img2img",
+    },
+  ],
+]
+`;

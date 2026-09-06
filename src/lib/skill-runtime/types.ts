@@ -7,6 +7,7 @@ export type SkillInputKind =
   | 'brand-kit'
   | 'dataset'
   | 'select'
+  | 'multi-select'
   | 'number'
   | 'boolean';
 
@@ -18,6 +19,7 @@ export interface SkillInputField {
   defaultValue?: unknown;
   options?: readonly string[];
   maximumItems?: number;
+  bindToSourceVersions?: boolean;
 }
 
 export interface SkillModelBinding {

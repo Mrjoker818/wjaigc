@@ -42,6 +42,7 @@ const canvasClientSource = readFileSync(
 describe('skill runtime catalog', () => {
   it('保留 21 个画布 Skill 并只授权 canvas/workflow', () => {
     expect(CANVAS_PRESET_SKILLS.map(skill => skill.id)).toEqual(canvasIds);
+    expect(CANVAS_PRESET_SKILLS).toHaveLength(21);
     expect(listSkillsForSurface('canvas').map(skill => skill.id)).toEqual(canvasIds);
     expect(listSkillsForSurface('workflow').map(skill => skill.id)).toEqual(canvasIds);
     expect(CANVAS_PRESET_SKILLS.every(skill =>
