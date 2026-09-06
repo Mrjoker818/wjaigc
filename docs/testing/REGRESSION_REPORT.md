@@ -2871,4 +2871,5 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - 新增与旧 Skill PostgreSQL 专项 `13/13`；目录合同 `11/11`，Canvas/Workflow 为 `27/27`，Simple Chat 独立为 `16`，三个第二批 Skill 未进入执行器特判。
 - 全仓真库回归：`1502/1502` suites、`5516/5516` tests，0 失败、0 跳过。TypeScript 通过；ESLint `0 errors / 943 warnings`；保护基线 `38/38`、零漂移、0 warning；`git diff --check` 通过。
 - 生产构建退出 0：Webpack 约 12.4 分钟、TypeScript 约 56 秒、静态页面 `119/119`。构建需要 8 GiB Node 堆，继续作为工程资源风险记录。
-- **回归判定：LOCAL + ISOLATED POSTGRESQL PASS / COZE REAL PROVIDER UNVERIFIED。** 本地 Task 8 Step 1-4 已关闭；推送与 Coze Canvas、Workflow、批量 SKU、取消退款和浏览器证据仍需执行。
+- GitHub 已推送 `main@1008555f2122682824ae5d8c8a3e84183d264ed4`，推送后 `HEAD == origin/main`；`origin/stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 未变化。
+- **回归判定：LOCAL + ISOLATED POSTGRESQL + GITHUB MAIN PASS / COZE REAL PROVIDER UNVERIFIED。** Task 8 Step 1-5 已关闭；Coze Canvas、Workflow、批量 SKU、取消退款和浏览器证据仍需执行。

@@ -588,7 +588,7 @@ Expected: 所有命令退出 0；记录真实测试、跳过、警告、页面�
 
 只有本阶段完成时，向 Obsidian 追加一次权威检查点。测试报告分别记录本地、PostgreSQL、GitHub、Coze 和未验证项，不用窄测试宣称全平台通过。
 
-- [ ] **Step 5: 提交并推送 `main`**
+- [x] **Step 5: 提交并推送 `main`**
 
 ```powershell
 git add package.json pnpm-lock.yaml src tests docs

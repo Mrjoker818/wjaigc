@@ -2194,4 +2194,5 @@ The focused gate test passes `7/7`; the actual protected-baseline command passes
 - 第二批内容电商本地与隔离 PostgreSQL 门禁已通过：动态扇出、同键幂等、逐行 operation、稳定恢复、部分退款与迟到终态隔离均有真库证据。
 - 全仓 `5516/5516`、0 跳过；TypeScript、零错误 ESLint、38 项保护、差异检查和 `119/119` 生产构建通过。
 - Canvas/Workflow 保持 `27/27`，Simple Chat 独立 `16`；未发现三个新 Skill 在执行器、服务、步骤注册或成本估算中被按 ID 特判；`origin/stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 未变化。
-- **当前结论：有条件通过，可推送 `main` 进入 Coze 验收。** 在真实 APImart/Pear 结果、AssetVersion、刷新恢复、取消部分退款、Console/Network 证据完成前，不得关闭第二批或宣布全平台发布通过。
+- GitHub 已同步 `main@1008555f2122682824ae5d8c8a3e84183d264ed4`，`stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 保持只读。
+- **当前结论：有条件通过，允许进入 Coze 验收。** 在真实 APImart/Pear 结果、AssetVersion、刷新恢复、取消部分退款、Console/Network 证据完成前，不得关闭第二批或宣布全平台发布通过。
