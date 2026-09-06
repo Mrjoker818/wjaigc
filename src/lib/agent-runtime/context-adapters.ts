@@ -101,6 +101,13 @@ export async function authorizeAgentContext({
       throw new AgentContextNotFoundError();
     }
 
+    // Legacy migrations and current Canvas writers use these two project-scoped IDs.
+    const canonicalCanvasId = `canvas:${request.projectId}`;
+    const workspaceIds = request.workspace === 'canvas'
+      && (request.workspaceId === request.projectId || request.workspaceId === canonicalCanvasId)
+      ? [request.workspaceId, request.workspaceId === canonicalCanvasId ? request.projectId : canonicalCanvasId]
+      : [request.workspaceId];
+
     const versionIds = new Set([
       ...request.sourceVersionIds,
       ...request.context.visibleVersionIds,
@@ -116,13 +123,13 @@ export async function authorizeAgentContext({
       mediaByVersionId[versionId] = version.file.url;
     }
     for (const versionId of new Set(request.sourceVersionIds)) {
-      const placement = await transaction.findVersionPlacement(
-        actorUserId,
-        request.projectId,
-        request.workspace,
-        request.workspaceId,
-        versionId,
-      );
+      let placement: Awaited<ReturnType<AgentContextTransaction['findVersionPlacement']>> = null;
+      for (const workspaceId of workspaceIds) {
+        placement = await transaction.findVersionPlacement(
+          actorUserId, request.projectId, request.workspace, workspaceId, versionId,
+        );
+        if (placement) break;
+      }
       if (!placement || placement.assetVersionId !== versionId) {
         throw new AgentContextNotFoundError();
       }
@@ -130,13 +137,13 @@ export async function authorizeAgentContext({
     const selectedEntityVersionIds: Record<string, string> = {};
     for (const entityId of new Set(request.context.selectedEntityIds)) {
       if (!transaction.findEntityPlacement) throw new AgentContextNotFoundError();
-      const placement = await transaction.findEntityPlacement(
-        actorUserId,
-        request.projectId,
-        request.workspace,
-        request.workspaceId,
-        entityId,
-      );
+      let placement: Awaited<ReturnType<NonNullable<AgentContextTransaction['findEntityPlacement']>>> = null;
+      for (const workspaceId of workspaceIds) {
+        placement = await transaction.findEntityPlacement(
+          actorUserId, request.projectId, request.workspace, workspaceId, entityId,
+        );
+        if (placement) break;
+      }
       if (!placement?.assetVersionId) throw new AgentContextNotFoundError();
       if (!versionIds.has(placement.assetVersionId)) throw new AgentContextNotFoundError();
       selectedEntityVersionIds[entityId] = placement.assetVersionId;

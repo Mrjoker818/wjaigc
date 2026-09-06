@@ -5,8 +5,9 @@
 - ID：TEST-SKILL-012，P1；云端两次稳定复现，当前本地最小修复，云端待重新部署验证。
 - 路径：选择画布原图 → AI聊天 → 样机展示(Mockup) → 估算积分。两次 `/api/skill-runs/estimate` 返回404 / AGENT_CONTEXT_NOT_FOUND；首个 requestId `0966f9ec-6598-9be3-9138-d8331564f1b4`。没有提交运行任务。
 - 请求已携带真实 sourceVersionId 及精确APImart模型，错误的 workspaceId 却为 `session-1786347587770`。详情见 `2026-09-06-task12-canvas-source-context-failure.md`。
-- 根因：`buildCanvasSkillRequest` 优先使用聊天 currentSessionId，和画布资产 placement 使用的 `canvas:projectId` 不一致，导致后端精确归属校验拒绝。
-- 最小修复：仅将画布Skill请求的 workspaceId 固定为 `canvas:${projectId}`，去掉无关聊天会话Hook依赖。不改后端权限、资产、登录、账务或Simple Chat作用域。
+- 根因包含两层：`buildCanvasSkillRequest` 误用聊天 currentSessionId；a1ad44e1 改为规范 Canvas ID 后，云端仍404。Coze只读诊断确认真实杯图 active placement 使用裸 projectId，同项目存在两种合法历史画布 ID。
+- 最小修复：前端固定 `canvas:${projectId}`；后端仅在同项目 Canvas 的裸 ID 与规范 ID 间兼容查询，保留原 owner/project/version/entity/active 条件。无数据回填、登录/账务修改或 Simple Chat 作用域扩展。新版云端尚未复验，不能关闭。
+- 后续回归：别名单元测试先2失败/10通过，修复后12通过；真实PostgreSQL隔离schema验证合法授权、跨作用域拒绝、已删除placement拒绝和查询前后数据不变。2026-09-06 08:56 聚焦47/47通过，0跳过；类型检查和全仓构建版ESLint通过。全量回归和构建仍须取得当前补丁证据。
 - TDD：执行真实组件请求回调，两个非空聊天会话用例先失败、空会话用例通过；修复后三项通过，并调用真实授权函数验证画布placement解析。聚焦17/17、TypeScript和改动文件ESLint通过。全仓5153通过/0失败/166跳过，隔离PG补验172/172通过（包含全部166跳过项）；38项保护通过。默认4GB堆构建OOM，按既有本地8GB堆重跑退出0、119/119页面。云端尚未部署验证。
 
 

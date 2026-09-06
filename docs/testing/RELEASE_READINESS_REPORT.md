@@ -1,5 +1,9 @@
 # 无界AI — 发布就绪报告 (RELEASE READINESS REPORT)
 
+## 2026-09-06 历史 Canvas 工作区兼容候选
+
+a1ad44e1 云端复验仍404，真实只读诊断确认旧资产placement使用裸项目ID。本次授权适配器仅兼容同项目两种Canvas ID，不改历史数据或登录账务。新增真实PostgreSQL回归通过，聚焦47/47、全量5332/5332（0失败、0跳过）、类型、全仓构建版ESLint、119/119生产构建退出0；BuildID `24_t3PODbMPtk0D9ZY3Y7`。候选可提交main并同步独立测试沙箱，不能部署为已验收正式版本。TEST-SKILL-012云端同图估算/生成及Task12生命周期、资产和账务证据仍未闭环；Task12未完成，全平台结论：不通过。
+
 ## 2026-09-06 Task12 画布归属候选
 
 TEST-SKILL-012最小修复及本地门禁完成，可仅推送main用于独立测试沙箱同步。真实Chrome确认估算404为当前阻断；新版尚未部署验收，不得标记修复闭环。全仓5153通过/166跳过，隔离PostgreSQL172项补验全通过；默认堆构建OOM、本地8GB重跑通过均保留。Task12未完成，全平台结论仍为：不通过。详见2026-09-06-task12-canvas-source-context-failure.md。
