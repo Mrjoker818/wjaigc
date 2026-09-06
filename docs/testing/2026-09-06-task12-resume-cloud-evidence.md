@@ -120,3 +120,11 @@ Edge实例9读取原项目对话：上次查询文本不在消息中，输入框
 - TypeScript 退出码 0；保护基线 `38/38` 通过且无漂移；修改测试文件 ESLint 退出码 0；`node-editor.tsx` ESLint 退出码 0，保留 15 条历史 warning，无新增 error。
 - 首次与全量测试并发的 4 GiB 构建发生 OOM；测试释放后使用进程级 `NODE_OPTIONS=--max-old-space-size=8192` 单独重跑，生产构建退出码 0，`119/119` 页面生成成功。该环境变量未写入仓库或云端配置。
 - 当前仍不可关闭节点下载验收：实现提交推送并由 Coze 精确同步、重启沙箱、强刷现有 Edge 预览后，必须捕获真实下载完成事件并核对文件字节数；不得仅凭按钮出现判定通过。
+
+## 历史取消 Run 只读账务审计入口
+
+- 新增 `scripts/task12-skill-run-audit.sql`，使用方式为 `psql "$PGDATABASE_URL" -v run_id='uuid' -f scripts/task12-skill-run-audit.sql`。
+- 脚本首先按 `runId` 发现真实 `user_id + project_id`，再读取父任务、执行租约、事件、下游操作、`skillBillingProvenance` 子任务、父任务绑定的消费/退款流水、账务基数及结果 AssetVersion/placement。
+- 全程位于 `BEGIN TRANSACTION READ ONLY` 与 `ROLLBACK` 之间，不包含数据写入或结构变更语句；不会通过猜测 owner/project 排除真实记录。
+- 测试先因 SQL 文件不存在按预期失败，最小实现后 `src/__tests__/scripts/task12-skill-run-audit.test.ts` 为 `1/1` 通过；全量回归 `646` 个测试文件通过、`31` 个 PostgreSQL 条件文件跳过，`5168` 项通过、`168` 项跳过、`0` 失败。`pnpm ts-check`、该测试 ESLint、`git diff --check` 和保护门禁 `38/38 / 0 drift / 0 warnings` 均退出 0。
+- 本机 `POSTGRES_TEST_DATABASE_URL`、`PGDATABASE_URL`、`DATABASE_URL` 均未设置，因此本轮没有执行真库查询。历史取消 Run 的精确扣退关联仍为未验证，待 Coze 终端或专用只读数据库连接执行脚本后才能关闭。

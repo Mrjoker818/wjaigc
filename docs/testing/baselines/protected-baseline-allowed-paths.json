@@ -54,6 +54,7 @@
   "scripts/run-migrations.mjs",
   "scripts/stage-4-inventory.mjs",
   "scripts/stage-4-e2e-fixtures.mjs",
+  "scripts/task12-skill-run-audit.sql",
   "src/app/api/agent-runs/[runId]/events/route.ts",
   "src/app/api/agent-runs/[runId]/route.ts",
   "src/app/api/agent-runs/route.ts",
