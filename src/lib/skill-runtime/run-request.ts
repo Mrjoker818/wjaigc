@@ -142,6 +142,12 @@ function sameJson(left: unknown, right: unknown): boolean {
   return JSON.stringify(canonicalize(left)) === JSON.stringify(canonicalize(right));
 }
 
+function downstreamToolIds(skill: SkillDefinition): string[] {
+  return [...new Set(skill.steps
+    .filter(step => step.modelRole !== 'orchestrator')
+    .map(step => step.toolId))];
+}
+
 export function assertSourceVersionBindings(
   skill: SkillDefinition,
   resolvedInputs: Record<string, unknown>,
@@ -267,7 +273,7 @@ export async function authorizeSkillAgentRunRequest(
       status: 400,
     });
   }
-  const toolIds = [...new Set(skill.steps.map(step => step.toolId))];
+  const toolIds = downstreamToolIds(skill);
   if (!sameStringSet(request.allowedToolIds, toolIds)) {
     throw Object.assign(new Error('Skill tools do not match the server definition'), {
       code: 'SKILL_TOOLS_MISMATCH',
@@ -332,7 +338,7 @@ export async function buildSkillAgentRunRequest(
     modelId: orchestrator.modelId,
     prompt: readAgentPrompt(compileSkillPrompt(skill.systemPrompt, resolved)),
     sourceVersionIds,
-    allowedToolIds: [...new Set(skill.steps.map(step => step.toolId))],
+    allowedToolIds: downstreamToolIds(skill),
     idempotencyKey: input.idempotencyKey,
     context: {
       selectedEntityIds: [],

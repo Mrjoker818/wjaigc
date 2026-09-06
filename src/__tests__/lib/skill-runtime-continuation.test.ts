@@ -4,10 +4,14 @@ vi.mock('server-only', () => ({}));
 
 const continuationMocks = vi.hoisted(() => ({
   listManagedUsers: vi.fn(),
+  authorizeAgentContext: vi.fn(),
   createRegistry: vi.fn(() => ({ stepAdapters: {}, stepRecoveries: {} })),
 }));
 
 vi.mock('@/lib/server-auth', () => ({ listManagedUsers: continuationMocks.listManagedUsers }));
+vi.mock('@/lib/agent-runtime/context-adapters', () => ({
+  authorizeAgentContext: continuationMocks.authorizeAgentContext,
+}));
 vi.mock('@/lib/skill-runtime/step-registry', () => ({
   createProductionSkillStepRegistry: continuationMocks.createRegistry,
 }));
@@ -69,6 +73,12 @@ function persistedFixture(
 beforeEach(() => {
   continuationMocks.listManagedUsers.mockReset();
   continuationMocks.listManagedUsers.mockResolvedValue([actor]);
+  continuationMocks.authorizeAgentContext.mockReset();
+  continuationMocks.authorizeAgentContext.mockImplementation(async ({ request }: { request: AgentRunRequest }) => ({
+    snapshot: request.context,
+    mediaByVersionId: Object.fromEntries(request.sourceVersionIds.map(id => [id, `/api/serve-upload/${id}.png`])),
+    selectedEntityVersionIds: {},
+  }));
   continuationMocks.createRegistry.mockClear();
 });
 
@@ -123,5 +133,30 @@ describe('Skill runtime frozen continuation', () => {
       actorUserId: actor.id, projectId: 'project-1', runId: 'run-1', ...fixture,
     })).rejects.toMatchObject({ code: expect.stringMatching(/^SKILL_INPUT_/), field: expect.any(String) });
     expect(continuationMocks.createRegistry).not.toHaveBeenCalled();
+  });
+
+  it('reauthorizes the persisted Agent Request and passes its media mapping to the registry', async () => {
+    const fixture = persistedFixture({
+      campaignName: 'Launch', channels: ['Web'], sources: ['version-1', 'version-2'],
+    }, ['version-1', 'version-2']);
+
+    await loadPersistedSkillContinuation({
+      actorUserId: actor.id, projectId: 'project-1', runId: 'run-1', ...fixture,
+    });
+
+    expect(continuationMocks.authorizeAgentContext).toHaveBeenCalledWith({
+      actorUserId: actor.id,
+      request: expect.objectContaining({
+        projectId: 'project-1', workspace: 'canvas', workspaceId: 'canvas-1',
+        sourceVersionIds: ['version-1', 'version-2'],
+      }),
+    });
+    expect(continuationMocks.createRegistry).toHaveBeenCalledWith(expect.objectContaining({
+      actor,
+      mediaByVersionId: {
+        'version-1': '/api/serve-upload/version-1.png',
+        'version-2': '/api/serve-upload/version-2.png',
+      },
+    }));
   });
 });

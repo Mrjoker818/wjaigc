@@ -37,7 +37,8 @@ const defaultDependencies: SkillCostEstimatorDependencies = {
 
 export function toolCostType(toolId: string): CreditOperation {
   switch (toolId) {
-    case 'generate_image': return 'image_generate';
+    case 'generate_image':
+    case 'img2img': return 'image_generate';
     case 'edit_image': return 'image_edit';
     case 'analyze_image': return 'chat';
     case 'adjust_color': return 'image_edit';

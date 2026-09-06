@@ -106,6 +106,11 @@ export const CHAT_TOOLS = [
             type: 'string',
             description: '参考图片URL',
           },
+          image_urls: {
+            type: 'array',
+            items: { type: 'string' },
+            description: '按顺序提供的1至6张参考图片URL',
+          },
           prompt: {
             type: 'string',
             description: '描述想要的变化，例如"换成水彩风格"、"改变背景为森林"',
@@ -123,8 +128,13 @@ export const CHAT_TOOLS = [
             type: 'string',
             description: '反向提示词',
           },
+          aspect_ratio: {
+            type: 'string',
+            description: '画面比例，如 1:1, 16:9, 9:16, 4:3, 3:4, 3:2, 2:3',
+            enum: ['1:1', '16:9', '9:16', '4:5', '4:3', '3:4', '3:2', '2:3', '21:9'],
+          },
         },
-        required: ['image_url', 'prompt'],
+        required: ['prompt'],
       },
     },
   },
@@ -258,6 +268,26 @@ export function validateChatToolCall(toolName: string, args: Record<string, unkn
   const tool = CHAT_TOOLS.find(candidate => candidate.function.name === toolName);
   if (!tool) return `Unknown tool: ${toolName}`;
 
+  if (toolName === 'img2img') {
+    const hasSingle = args.image_url !== undefined && args.image_url !== null;
+    const hasMultiple = args.image_urls !== undefined && args.image_urls !== null;
+    if (hasSingle && hasMultiple) return 'img2img image source is ambiguous';
+    if (!hasSingle && !hasMultiple) return 'Missing required parameter: image_url';
+    if (hasSingle && (typeof args.image_url !== 'string' || !args.image_url.trim())) {
+      return 'Invalid image_url: expected a non-empty string';
+    }
+    if (hasMultiple) {
+      const imageUrls = args.image_urls;
+      if (!Array.isArray(imageUrls)
+        || imageUrls.length < 1
+        || imageUrls.length > 6
+        || imageUrls.some(url => typeof url !== 'string' || !url.trim())
+        || new Set(imageUrls.map(url => typeof url === 'string' ? url.trim() : url)).size !== imageUrls.length) {
+        return 'Invalid image_urls: expected 1-6 unique non-empty strings';
+      }
+    }
+  }
+
   const parameters = tool.function.parameters as unknown as {
     properties: Record<string, { type?: string; enum?: string[] }>;
     required?: string[];
@@ -366,6 +396,7 @@ export async function executeToolCall(
     userRole?: 'user' | 'admin';
     allowedTools?: string[];
     canonicalImageUrl?: string;
+    canonicalImageUrls?: readonly string[];
   }
 ): Promise<ToolCallResult> {
   if (context.allowedTools && !context.allowedTools.includes(toolName)) {
@@ -418,6 +449,7 @@ interface ToolContext {
   deferAgentExecution?: boolean;
   userRole?: 'user' | 'admin';
   canonicalImageUrl?: string;
+  canonicalImageUrls?: readonly string[];
 }
 
 function routeMismatch(): ToolCallResult {
@@ -453,6 +485,33 @@ function authorizedAgentImageUrl(
     return { error: { success: false, error: 'AGENT_MEDIA_URL_MISMATCH', resultText: 'The image URL does not match the authorized Asset Version.' } };
   }
   return { imageUrl: canonical };
+}
+
+function authorizedAgentImageUrls(
+  args: Record<string, unknown>,
+  context: ToolContext,
+): { imageUrls?: string[]; error?: ToolCallResult } {
+  if (!Array.isArray(args.image_urls)) {
+    const single = authorizedAgentImageUrl(args, context);
+    return single.error ? { error: single.error } : { imageUrls: [single.imageUrl!] };
+  }
+  const requested = args.image_urls.map(url => normalizeImageUrl(url as string, context.origin));
+  if (new Set(requested).size !== requested.length) {
+    return { error: {
+      success: false,
+      error: 'Invalid image_urls: references must remain unique after URL normalization',
+      resultText: 'Tool validation failed: normalized image URLs contain duplicates.',
+    } };
+  }
+  if (!context.deferAgentExecution) return { imageUrls: requested };
+  if (!context.canonicalImageUrls) {
+    return { error: { success: false, error: 'AGENT_CONTEXT_NOT_FOUND', resultText: 'Authorized media is unavailable.' } };
+  }
+  const canonical = context.canonicalImageUrls.map(url => normalizeImageUrl(url, context.origin));
+  if (requested.length !== canonical.length || requested.some((url, index) => url !== canonical[index])) {
+    return { error: { success: false, error: 'AGENT_MEDIA_URL_MISMATCH', resultText: 'The image URLs do not match the authorized Asset Versions.' } };
+  }
+  return { imageUrls: [...context.canonicalImageUrls] };
 }
 
 function embeddedChatWorkspaceId(context: ToolContext): string | undefined {
@@ -682,9 +741,9 @@ async function executeImg2Img(
 ): Promise<ToolCallResult> {
   try {
     if (hasAgentRouteOverride(args, context)) return routeMismatch();
-    const authorizedImage = authorizedAgentImageUrl(args, context);
-    if (authorizedImage.error) return authorizedImage.error;
-    const imageUrl = authorizedImage.imageUrl!;
+    const authorizedImages = authorizedAgentImageUrls(args, context);
+    if (authorizedImages.error) return authorizedImages.error;
+    const imageUrls = authorizedImages.imageUrls!;
     const prompt = args.prompt as string;
     const strength = (args.strength as number) || 0.7;
     const referenceTypes = args.reference_types as string[] || ['style', 'composition'];
@@ -726,10 +785,12 @@ async function executeImg2Img(
         prompt: fullPrompt,
         model,
         providerId,
-        referenceImages: [imageUrl],
+        referenceImages: imageUrls,
         strength,
-        aspectRatio: '1:1',
+        aspectRatio: typeof args.aspect_ratio === 'string' ? args.aspect_ratio : '1:1',
         submitOnly: true,
+        ...(context.deferAgentExecution && context.skillBillingContext
+          ? { skillBillingContext: context.skillBillingContext } : {}),
         projectId: context.projectId,
         sessionId: context.sessionId,
         messageId: context.messageId,
@@ -742,18 +803,35 @@ async function executeImg2Img(
 
     if (!res.ok) {
       const errText = await res.text().catch(() => '');
-      return { success: false, error: `图生图API失败: ${res.status}`, resultText: `图生图失败（HTTP ${res.status}）。${errText.substring(0, 200)}` };
+      let errorCode: string | undefined;
+      let errorMessage: string | undefined;
+      try {
+        const parsed: unknown = JSON.parse(errText);
+        if (parsed && typeof parsed === 'object') {
+          const error = parsed as Record<string, unknown>;
+          errorCode = typeof error.code === 'string' ? error.code : undefined;
+          errorMessage = typeof error.error === 'string' ? error.error : undefined;
+        }
+      } catch {
+        errorCode = undefined;
+      }
+      return {
+        success: false,
+        errorCode,
+        error: errorMessage || `图生图API失败: ${res.status}`,
+        resultText: `图生图失败（HTTP ${res.status}）。${errText.substring(0, 200)}`,
+      };
     }
 
     const data = await res.json();
-    const imageUrls: string[] = data.imageUrls || (data.imageUrl ? [data.imageUrl] : []);
+    const outputImageUrls: string[] = data.imageUrls || (data.imageUrl ? [data.imageUrl] : []);
     const taskIds: string[] = data.taskIds || [];
 
-    if (imageUrls.length > 0) {
+    if (outputImageUrls.length > 0) {
       return {
         success: true,
-        imageUrls,
-        resultText: `成功基于参考图生成了 ${imageUrls.length} 张新图片。图片已添加到画布上。`,
+        imageUrls: outputImageUrls,
+        resultText: `成功基于参考图生成了 ${outputImageUrls.length} 张新图片。图片已添加到画布上。`,
       };
     }
 

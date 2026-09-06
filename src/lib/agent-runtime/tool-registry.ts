@@ -48,6 +48,13 @@ export const AGENT_TOOL_REGISTRY: readonly AgentToolDefinition[] = [
     downstreamModelCapabilities: ['image'],
   },
   {
+    toolId: 'img2img',
+    workspaces: ['canvas', 'workflow'],
+    productTypes: ['canvas'],
+    modelCapabilities: ['chat'],
+    downstreamModelCapabilities: ['image', 'reference-images'],
+  },
+  {
     toolId: 'edit_image',
     workspaces: ['canvas', 'workflow'],
     productTypes: ['canvas'],

@@ -10,6 +10,7 @@ import type { TaskModelDescriptor } from '@/lib/task-core/model-catalog';
 import type { User } from '@/lib/user-types';
 import type { SkillRunRequest } from '@/lib/skill-runtime/run-request';
 import type { SkillRunExecutionDispatchDependencies } from '@/lib/skill-runtime/service';
+import { LOVART_MARKETING_SKILLS } from '@/lib/skill-runtime/marketing-presets';
 
 vi.mock('server-only', () => ({}));
 
@@ -44,7 +45,8 @@ describe('Skill runtime PostgreSQL concurrency', () => {
       protocol: kind === 'chat' ? 'chat-completions' : 'images',
       executionMode: kind === 'chat' ? 'sync' : 'async',
       allowedRatios: [], allowedSizes: [], qualityOptions: [], maxOutputs: 1,
-      supportsReferenceImages: false, supportsMask: false,
+      supportsReferenceImages: kind === 'image', supportsMask: false,
+      ...(kind === 'image' ? { maxReferenceImages: 6 } : {}),
       outputKinds: kind === 'chat' ? ['text'] : ['png'], capabilitySources: {},
     };
   }
@@ -532,6 +534,83 @@ describe('Skill runtime PostgreSQL concurrency', () => {
         event.type === 'tool.completed' && event.payload.stepId === undefined
       ))).toHaveLength(0);
       expect(persistedEvents.filter(event => event.type === 'run.completed')).toHaveLength(1);
+    });
+  }, 60_000);
+
+  postgresIt('persists one independent operation per parallel marketing output and aggregates AssetVersions', async () => {
+    await withIsolatedPostgres('skill_runtime_marketing_parallel_operations', async ({ databaseUrl, query }) => {
+      const { ensureCoreTables } = await import('@/lib/db-storage');
+      const taskStorage = await import('@/lib/cloud-task-storage');
+      const agentService = await import('@/lib/agent-runtime/service');
+      const sameTask = await import('@/lib/agent-runtime/same-task-adapter');
+      const skillService = await import('@/lib/skill-runtime/service');
+      await Promise.all([ensureCoreTables(), taskStorage.ensureCloudTaskTables()]);
+      migrate(databaseUrl);
+      const userId = `skill-marketing-${randomUUID()}`;
+      const now = Date.now();
+      await query(
+        `INSERT INTO wujie_credits(id, user_id, balance, total_recharged, total_used, created_at, updated_at)
+         VALUES ($1, $2, 100, 100, 0, $3, $3)`,
+        [`credits-${randomUUID()}`, userId, now],
+      );
+      const base = runtimeInput(userId, `skill-marketing-key-${randomUUID()}`);
+      const skill = LOVART_MARKETING_SKILLS[0];
+      const input = {
+        actor: base.actor,
+        request: {
+          ...base.request,
+          skillId: skill.id,
+          skillVersion: skill.version,
+          inputValues: {
+            sourceImages: ['source-a', 'source-b'], campaignName: 'Launch', product: 'Headphones',
+            audience: 'Commuters', sellingPoints: 'Quiet travel', objective: '购买', channel: '信息流',
+            tone: '清晰、可信、具有行动感', aspectRatio: '1:1', negativeConstraints: '无',
+            hypothesis: '强调通勤降噪利益是否提升购买意愿',
+          },
+          sourceVersionIds: ['source-a', 'source-b'],
+        },
+      };
+      const created = await createThroughSkillService(input);
+      const [events, projection] = await Promise.all([
+        agentService.listAgentRunEvents({ actorUserId: userId, runId: created.runId }),
+        agentService.getAgentRunProjection({ actorUserId: userId, runId: created.runId }),
+      ]);
+
+      await sameTask.executeAdoptedAgentTask({
+        adoption: {
+          runId: created.runId, reused: false, claimed: true, projection, tools: [],
+          actorUserId: userId, projectId: input.request.projectId, workspace: 'canvas',
+          toolId: 'plan',
+          requestDigest: String(events.find(event => event.type === 'run.created')?.payload.requestDigest),
+        },
+        execute: context => skillService.executeSkillRun({
+          actor: input.actor, request: input.request, runId: created.runId,
+          operationContext: context,
+          stepAdapters: {
+            chat: async () => ({ assetVersionIds: [], media: [], text: 'plan' }),
+            img2img: async step => ({
+              assetVersionIds: [step.step.id === 'variant-a' ? 'asset-a' : 'asset-b'], media: [{}],
+            }),
+          },
+        }),
+      });
+
+      const [persisted, operations, ledger] = await Promise.all([
+        taskStorage.getCloudTaskForUser(created.runId, userId),
+        query<{ operation_key: string; step_id: string }>(
+          `SELECT operation_key, step_id FROM wujie_agent_downstream_operations
+           WHERE task_id = $1 AND tool_id = 'img2img' ORDER BY step_id`,
+          [created.runId],
+        ),
+        query<{ type: string }>(
+          'SELECT type FROM wujie_credit_transactions WHERE task_id = $1 ORDER BY created_at',
+          [created.runId],
+        ),
+      ]);
+      expect(operations.rows.map(row => row.step_id)).toEqual(['variant-a', 'variant-b']);
+      expect(new Set(operations.rows.map(row => row.operation_key)).size).toBe(2);
+      expect(persisted?.result?.assetVersionIds).toEqual(['asset-a', 'asset-b']);
+      expect(ledger.rows).toEqual([{ type: 'consume' }]);
     });
   }, 60_000);
 

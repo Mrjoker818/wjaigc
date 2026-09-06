@@ -66,6 +66,26 @@ export function resolveSelectedAgentMediaUrl(
   return mediaUrl;
 }
 
+export function resolveOptionalSelectedAgentMediaUrl(
+  context: AuthorizedAgentContext,
+  selectedEntityIds: readonly string[],
+): string | undefined {
+  return selectedEntityIds.length === 1
+    ? resolveSelectedAgentMediaUrl(context, [...selectedEntityIds])
+    : undefined;
+}
+
+export function resolveAgentMediaUrls(
+  context: AuthorizedAgentContext,
+  versionIds: readonly string[],
+): string[] {
+  return versionIds.map(versionId => {
+    const mediaUrl = context.mediaByVersionId[versionId];
+    if (!mediaUrl) throw new AgentContextNotFoundError();
+    return mediaUrl;
+  });
+}
+
 function defaultStorage(): AgentContextStorage {
   const storage = createPostgresAssetStorage();
   return {

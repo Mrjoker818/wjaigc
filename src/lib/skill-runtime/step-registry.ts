@@ -139,15 +139,18 @@ async function executeGenerationStep(
   actor: User,
   request: SkillRunRequest,
   input: ExecuteSkillStepInput,
+  toolId: 'generate_image' | 'img2img' = 'generate_image',
+  canonicalImageUrls?: readonly string[],
 ): Promise<SkillStepResult> {
   if (!input.modelBinding) {
     throw imageAdmissionError('Skill image model binding is missing');
   }
-  const result = await executeToolCall('generate_image', {
+  const result = await executeToolCall(toolId, {
     prompt: promptForStep(input),
     aspect_ratio: typeof input.inputValues.aspectRatio === 'string'
       ? input.inputValues.aspectRatio
       : '1:1',
+    ...(toolId === 'img2img' ? { image_urls: [...(canonicalImageUrls || [])] } : {}),
   }, {
     chatApiKey: '', chatBaseUrl: '', origin: 'http://localhost',
     userId: actor.id, userRole: actor.role || 'user',
@@ -164,11 +167,14 @@ async function executeGenerationStep(
       executionFence: input.operation.executionFence,
     } : undefined,
     deferAgentExecution: true,
-    allowedTools: ['generate_image'],
+    allowedTools: [toolId],
+    ...(canonicalImageUrls ? { canonicalImageUrls } : {}),
   });
   if (!result.success) {
-    throw imageAdmissionError('Skill image admission failed before provider submission',
-      result.errorCode === 'SKILL_BILLING_NOT_AUTHORIZED' ? result.errorCode : 'SKILL_IMAGE_ADMISSION_FAILED');
+    throw imageAdmissionError(
+      result.error || 'Skill image admission failed before provider submission',
+      result.errorCode || 'SKILL_IMAGE_ADMISSION_FAILED',
+    );
   }
   const taskId = result.taskIds?.[0]?.taskId;
   if (!taskId || !result.admittedExecution) {
@@ -208,6 +214,7 @@ async function executeGenerationStep(
 export function createProductionSkillStepRegistry(input: {
   actor: User;
   request: SkillRunRequest;
+  mediaByVersionId?: Readonly<Record<string, string>>;
 }): {
   stepAdapters: Readonly<Record<string, SkillStepAdapter>>;
   stepRecoveries: Readonly<Record<string, SkillStepRecoveryFactory>>;
@@ -218,8 +225,21 @@ export function createProductionSkillStepRegistry(input: {
   const recoverGenerate: SkillStepRecoveryFactory = step => ({
     reconcile: taskId => reconcileGeneration(taskId, input.actor, step.signal),
   } satisfies AgentDownstreamRecovery<SkillStepResult>);
+  const img2img: SkillStepAdapter = step => {
+    if (input.request.sourceVersionIds.length < 1 || input.request.sourceVersionIds.length > 6) {
+      throw imageAdmissionError('Skill img2img requires between 1 and 6 authorized sources');
+    }
+    const canonicalImageUrls = input.request.sourceVersionIds.map(versionId => {
+      const url = input.mediaByVersionId?.[versionId];
+      if (typeof url !== 'string' || !url.trim()) {
+        throw imageAdmissionError('Authorized Skill source media is unavailable', 'AGENT_CONTEXT_NOT_FOUND');
+      }
+      return url;
+    });
+    return executeGenerationStep(input.actor, input.request, step, 'img2img', canonicalImageUrls);
+  };
   return {
-    stepAdapters: { chat: executeOrchestratorStep, generate_image: generate },
-    stepRecoveries: { generate_image: recoverGenerate },
+    stepAdapters: { chat: executeOrchestratorStep, generate_image: generate, img2img },
+    stepRecoveries: { generate_image: recoverGenerate, img2img: recoverGenerate },
   };
 }

@@ -1,6 +1,7 @@
 import 'server-only';
 
 import type { AgentDownstreamExecutionContext } from '@/lib/agent-runtime/downstream-operations';
+import { authorizeAgentContext } from '@/lib/agent-runtime/context-adapters';
 import { agentRunRequestDigest } from '@/lib/agent-runtime/service';
 import type { AgentEvent, AgentRunRequest, AgentWorkspace } from '@/lib/agent-runtime/types';
 import { getCloudTaskForUser, type CloudTask } from '@/lib/cloud-task-storage';
@@ -242,11 +243,19 @@ export async function loadPersistedSkillContinuation(input: {
   if (!task.requestDigest || task.requestDigest !== requestDigest || created.payload.requestDigest !== requestDigest) {
     throw new SkillRunRequestError('Persisted Skill request digest is invalid');
   }
+  const authorizedContext = await authorizeAgentContext({
+    actorUserId: actor.id,
+    request: agentRequest,
+  });
   const toolId = input.nextStepId || definition.steps[0]?.id;
   if (!toolId || !definition.steps.some(step => step.id === toolId)) {
     throw new SkillRunRequestError('Persisted Skill next step is invalid');
   }
-  const registry = createProductionSkillStepRegistry({ actor, request });
+  const registry = createProductionSkillStepRegistry({
+    actor,
+    request,
+    mediaByVersionId: authorizedContext.mediaByVersionId,
+  });
   return {
     actor,
     request,

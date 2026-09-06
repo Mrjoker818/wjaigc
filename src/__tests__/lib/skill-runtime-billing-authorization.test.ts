@@ -38,6 +38,17 @@ describe('Skill prepaid generation authorization', () => {
     });
   });
 
+  it('authorizes img2img through the same prepaid image-generation contract', () => {
+    const input = fixture();
+    input.operation.toolId = 'img2img';
+    input.frozen.skillSnapshot.steps[0].toolId = 'img2img';
+
+    expect(assertSkillBillingAuthorization(input)).toEqual({
+      runId: 'run-1', stepId: 'generate', operationKey: 'agent-op:operation',
+      chargedTransactionId: 'charge-1',
+    });
+  });
+
   it('accepts pending settlement only when the original debit ledger is present', () => {
     const input = fixture();
     input.task.creditStatus = 'pending';

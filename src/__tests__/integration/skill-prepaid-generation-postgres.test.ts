@@ -11,6 +11,7 @@ describe('Skill prepaid generation database admission', () => {
     'pause-complete', 'pause-cas', 'pause-update', 'pause-race', 'pause-budget', 'dispatch-rate-limit', 'dispatch-ambiguous-429',
     'dispatch-network-error', 'dispatch-timeout-lease', 'dispatch-timeout-race'])('serializes prepaid child operations and parent cancellation (%s)', async (scenario) => {
     const completedFirst = scenario === 'complete-first';
+    const downstreamToolId = completedFirst ? 'img2img' : 'generate_image';
     await withIsolatedPostgres('skill_prepaid_generation', async ({ databaseUrl, query }) => {
       const storage = await import('@/lib/cloud-task-storage');
       const { ensureCoreTables } = await import('@/lib/db-storage');
@@ -34,18 +35,18 @@ describe('Skill prepaid generation database admission', () => {
       });
       await query(`INSERT INTO wujie_agent_execution_leases
         (task_id,owner_id,project_id,tool_id,lease_owner,generation,updated_at)
-        VALUES ('run-1','user-1','project-1','generate_image','lease-1',1,$1)`, [now]);
+        VALUES ('run-1','user-1','project-1',$2,'lease-1',1,$1)`, [now, downstreamToolId]);
       await query(`INSERT INTO wujie_agent_events
         (event_id,task_id,owner_id,project_id,workspace,sequence,event_type,request_digest,payload,created_at)
         VALUES ('created-1','run-1','user-1','project-1','canvas',1,'run.created','parent-digest',$1::jsonb,$2)`,
       [JSON.stringify({ workspaceId: 'canvas:project-1',
         skill: { modelBindings: { image: { providerId: 'provider-1', modelId: 'image-1' } } },
-        skillSnapshot: { steps: [{ id: 'image-step', toolId: 'generate_image', modelRole: 'image' }] },
+        skillSnapshot: { steps: [{ id: 'image-step', toolId: downstreamToolId, modelRole: 'image' }] },
       }), now]);
       await query(`INSERT INTO wujie_agent_downstream_operations
         (operation_key,owner_id,project_id,task_id,tool_id,step_id,request_digest,idempotency_key,status,created_at,updated_at)
-        VALUES ('operation-1','user-1','project-1','run-1','generate_image','image-step','step-digest',
-        'provider-key','prepared',$1,$1)`, [now]);
+        VALUES ('operation-1','user-1','project-1','run-1',$2,'image-step','step-digest',
+        'provider-key','prepared',$1,$1)`, [now, downstreamToolId]);
       const context = { runId: 'run-1', stepId: 'image-step', requestDigest: 'step-digest', operationKey: 'operation-1',
         executionFence: { runId: 'run-1', leaseOwner: 'lease-1', generation: 1 } };
       const child = {
@@ -76,7 +77,7 @@ describe('Skill prepaid generation database admission', () => {
       expect(await inspectSkillPrepaidPoll(childTask)).toMatchObject({ action: 'wait' });
       await query(`UPDATE wujie_agent_downstream_operations SET lease_owner='operation-lease-1'
         WHERE operation_key='operation-1'`);
-      const acceptance = { ...context, actorUserId: 'user-1', projectId: 'project-1', toolId: 'generate_image',
+      const acceptance = { ...context, actorUserId: 'user-1', projectId: 'project-1', toolId: downstreamToolId,
         idempotencyKey: 'provider-key', leaseOwner: 'operation-lease-1', providerTaskId: children.rows[0].id };
       await expect(markAgentLocalDownstreamOperationAccepted({ ...acceptance, providerTaskId: 'wrong-child' })).rejects.toThrow();
       await expect(markAgentLocalDownstreamOperationAccepted({ ...acceptance, actorUserId: 'wrong-owner' })).rejects.toThrow();

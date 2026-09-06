@@ -1250,7 +1250,9 @@ export async function markAgentLocalDownstreamOperationAccepted(
 ): Promise<AgentDownstreamOperation> {
   const input = validateDownstreamIdentity(rawInput);
   const childId = validateIdentifier('providerTaskId', rawInput.providerTaskId);
-  if (input.toolId !== 'generate_image') throw new Error('Unsupported local downstream task');
+  if (input.toolId !== 'generate_image' && input.toolId !== 'img2img') {
+    throw new Error('Unsupported local downstream task');
+  }
   const client = await getPool().connect();
   try {
     await client.query('BEGIN');
@@ -1269,7 +1271,7 @@ export async function markAgentLocalDownstreamOperationAccepted(
        SET status='accepted', provider_task_id=$3, accepted_at=$4, updated_at=$4
        WHERE operation_key=$1 AND lease_owner=$2
          AND owner_id=$5 AND project_id=$6 AND task_id=$7 AND step_id=$8
-         AND tool_id='generate_image' AND request_digest=$9 AND idempotency_key=$10
+         AND tool_id=$11 AND request_digest=$9 AND idempotency_key=$10
          AND (status='prepared' OR (status='accepted' AND provider_task_id=$3))
          AND EXISTS (SELECT 1 FROM cloud_tasks child
            WHERE child.id=$3 AND child.user_id=operation.owner_id AND child.project_id=operation.project_id
@@ -1282,7 +1284,8 @@ export async function markAgentLocalDownstreamOperationAccepted(
                  idempotency_key, status, response, provider_task_id, submission_error,
                  lease_owner, attempt_count`,
       [input.operationKey, input.leaseOwner, childId, input.now ?? Date.now(),
-        input.actorUserId, input.projectId, input.runId, input.stepId, input.requestDigest, input.idempotencyKey],
+        input.actorUserId, input.projectId, input.runId, input.stepId, input.requestDigest, input.idempotencyKey,
+        input.toolId],
     );
     if (!result.rows[0]) throw new Error('Local downstream task identity or operation lease was lost');
     await client.query('COMMIT');
