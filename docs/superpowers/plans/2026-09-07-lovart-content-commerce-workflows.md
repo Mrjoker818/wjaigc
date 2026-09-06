@@ -310,7 +310,7 @@ Commit: `feat: import skill datasets from csv and json`
 - Produces: `normalizeSkuDataset(value, authorizedSourceVersionIds)`。
 - Returns: `readonly NormalizedSkuRow[]`，保持输入顺序。
 
-- [ ] **Step 1: 写严格合同 RED 测试**
+- [x] **Step 1: 写严格合同 RED 测试**
 
 ```ts
 expect(normalizeSkuDataset([
@@ -320,14 +320,14 @@ expect(normalizeSkuDataset([
 ]);
 ```
 
-覆盖：1–20 行、SKU 唯一、字段白名单、各字段长度、有限 JSON 值、公式前缀、来源版本子集、每行最多 6 个来源、保留键和序列化 512 KiB。
+覆盖：1–20 行、SKU 唯一、字段白名单、各字段长度、有限 JSON 值、公式前缀、保留键和序列化 512 KiB。整批只使用顶层已授权来源图片，行数据不得重新声明来源版本。
 
-- [ ] **Step 2: 运行并确认 RED**
+- [x] **Step 2: 运行并确认 RED**
 
 Run: `pnpm exec vitest run src/__tests__/lib/skill-runtime-dataset-schema.test.ts src/__tests__/lib/skill-runtime-inputs.test.ts`
 Expected: 新规范化函数不存在而 FAIL。
 
-- [ ] **Step 3: 实现字段级校验器**
+- [x] **Step 3: 实现字段级校验器**
 
 ```ts
 export interface NormalizedSkuRow {
@@ -336,13 +336,12 @@ export interface NormalizedSkuRow {
   sellingPoints?: string;
   variant?: string;
   headline?: string;
-  sourceVersionIds?: readonly string[];
 }
 ```
 
 `SkillInputField` 增加可选 `datasetSchema: 'sku-v1'`。`resolveSkillInputs` 对 `dataset` 使用 `field.maximumItems`，并在 `sku-v1` 时调用规范化器；未知 schema 返回 `SKILL_INPUT_INVALID_DEFINITION`。
 
-- [ ] **Step 4: 运行服务端输入回归并提交**
+- [x] **Step 4: 运行服务端输入回归并提交**
 
 Run: Step 2 命令，加 `src/__tests__/lib/skill-runtime-content-commerce-presets.test.ts`。
 Expected: 所有非法数据在报价/任务创建前失败，合法行顺序稳定。

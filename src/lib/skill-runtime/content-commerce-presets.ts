@@ -115,7 +115,7 @@ export const LOVART_CONTENT_COMMERCE_SKILLS: readonly SkillDefinition[] = [
     systemPrompt: '你是电商商品素材生产负责人。严格使用用户数据和来源图片，不得补造参数、优惠、认证、销量或评价；每个 SKU 独立交付。',
     inputs: [
       sourceImages(),
-      { key: 'rows', label: 'SKU 数据', kind: 'dataset', required: true, maximumItems: 20 },
+      { key: 'rows', label: 'SKU 数据', kind: 'dataset', required: true, maximumItems: 20, datasetSchema: 'sku-v1' },
       { key: 'platform', label: '平台', kind: 'select', required: true, defaultValue: '通用电商', options: ['通用电商', '淘宝/天猫', '京东', 'Amazon'] },
       { key: 'assetType', label: '素材类型', kind: 'select', required: true, defaultValue: '主图', options: ['主图', '卖点图', '场景图'] },
       { key: 'aspectRatio', label: '生成比例', kind: 'select', required: true, defaultValue: '1:1', options: ['1:1', '4:5', '3:4'] },

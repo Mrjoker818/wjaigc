@@ -128,7 +128,7 @@ function isBoundedJsonValue(value: unknown, depth = 0): boolean {
 function isStoredInput(value: unknown): boolean {
   if (!isRecord(value) || !hasOnlyKeys(value, [
     'key', 'label', 'kind', 'required', 'defaultValue', 'options', 'maximumItems',
-    'bindToSourceVersions',
+    'bindToSourceVersions', 'datasetSchema',
   ])) return false;
   if (
     !isBoundedString(value.key, 64, TOKEN_ID)
@@ -149,7 +149,7 @@ function isStoredInput(value: unknown): boolean {
   } else if (value.kind === 'select' || value.kind === 'multi-select') return false;
   if ('maximumItems' in value) {
     if (
-      (value.kind !== 'images' && value.kind !== 'multi-select')
+      (value.kind !== 'images' && value.kind !== 'multi-select' && value.kind !== 'dataset')
       || !Number.isSafeInteger(value.maximumItems)
       || (value.maximumItems as number) < 1
       || (value.maximumItems as number) > 1_000
@@ -158,6 +158,9 @@ function isStoredInput(value: unknown): boolean {
   if ('bindToSourceVersions' in value && typeof value.bindToSourceVersions !== 'boolean') {
     return false;
   }
+  if ('datasetSchema' in value && (
+    value.kind !== 'dataset' || value.datasetSchema !== 'sku-v1'
+  )) return false;
   return true;
 }
 
@@ -568,6 +571,7 @@ export function createSkillStore(
             ...(field.bindToSourceVersions === undefined
               ? {}
               : { bindToSourceVersions: field.bindToSourceVersions }),
+            ...(field.datasetSchema === undefined ? {} : { datasetSchema: field.datasetSchema }),
           })),
           steps: source.steps.map(step => ({
             id: step.id,

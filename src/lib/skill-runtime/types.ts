@@ -20,6 +20,7 @@ export interface SkillInputField {
   options?: readonly string[];
   maximumItems?: number;
   bindToSourceVersions?: boolean;
+  datasetSchema?: 'sku-v1';
 }
 
 export interface SkillModelBinding {

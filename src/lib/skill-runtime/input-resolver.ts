@@ -1,4 +1,5 @@
 import type { SkillDefinition, SkillInputField } from './types';
+import { normalizeSkuDataset, SkillDatasetSchemaError } from './dataset-schema';
 
 export const SKILL_INPUT_LIMITS = {
   text: 16_384,
@@ -17,7 +18,11 @@ export type SkillInputErrorCode =
   | 'SKILL_INPUT_INVALID_DEFINITION'
   | 'SKILL_INPUT_LIMIT_EXCEEDED'
   | 'SKILL_INPUT_SERIALIZED_LIMIT_EXCEEDED'
-  | 'SKILL_INPUT_FORBIDDEN_KEY';
+  | 'SKILL_INPUT_FORBIDDEN_KEY'
+  | 'SKILL_DATASET_DUPLICATE_SKU'
+  | 'SKILL_DATASET_UNKNOWN_FIELD'
+  | 'SKILL_DATASET_INVALID_ROW'
+  | 'SKILL_DATASET_FORMULA_VALUE';
 
 export class SkillInputError extends Error {
   constructor(
@@ -165,7 +170,11 @@ function validateDataset(field: SkillInputField, value: unknown): readonly Recor
   ))) {
     return invalidType(field);
   }
-  if (value.length > SKILL_INPUT_LIMITS.datasetRows) {
+  const limit = Math.min(
+    field.maximumItems ?? SKILL_INPUT_LIMITS.datasetRows,
+    SKILL_INPUT_LIMITS.datasetRows,
+  );
+  if (value.length > limit) {
     throw new SkillInputError('SKILL_INPUT_LIMIT_EXCEEDED', field.key);
   }
   return value;
@@ -251,6 +260,20 @@ export function resolveSkillInputs(
     if (value !== undefined) assertStrictJsonValue(value, field);
     const resolved = validateField(field, value);
     output[field.key] = resolved;
+  }
+  for (const field of definition.inputs) {
+    if (field.kind !== 'dataset' || field.datasetSchema === undefined) continue;
+    if (field.datasetSchema !== 'sku-v1') {
+      throw new SkillInputError('SKILL_INPUT_INVALID_DEFINITION', field.key);
+    }
+    try {
+      output[field.key] = normalizeSkuDataset(output[field.key]);
+    } catch (error) {
+      if (error instanceof SkillDatasetSchemaError) {
+        throw new SkillInputError(error.code, field.key);
+      }
+      throw error;
+    }
   }
   assertSerializedBytes(output);
   return output;
