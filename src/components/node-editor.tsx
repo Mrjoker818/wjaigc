@@ -1047,6 +1047,7 @@ export default function NodeEditor({ taskModelCatalog = [], taskModelOptions = [
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const [showMinimap, setShowMinimap] = useState(true);
   const [imagePreviewUrl, setImagePreviewUrl] = useState<string | null>(null);
+  const [imagePreviewDownloadState, setImagePreviewDownloadState] = useState<'idle' | 'downloading' | 'error'>('idle');
   const [compareImages, setCompareImages] = useState<{ before: string; after: string } | null>(null);
   const [comparePosition, setComparePosition] = useState(50);
   const [collapsedNodes, setCollapsedNodes] = useState<Set<string>>(new Set());
@@ -3969,9 +3970,57 @@ ${contextInfo}
         <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center" onClick={() => setImagePreviewUrl(null)}>
           <div className="relative" style={{ width: '80vw', height: '80vh' }}>
             <NextImage unoptimized width={1} height={1} src={imagePreviewUrl} alt="预览" className="rounded shadow-2xl" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
-            <button onClick={() => setImagePreviewUrl(null)} className="absolute -top-2 -right-2 p-1 bg-muted rounded-full text-muted-foreground hover:text-foreground cursor-pointer">
+            <button
+              type="button"
+              aria-label="下载预览图片"
+              title="下载预览图片"
+              disabled={imagePreviewDownloadState === 'downloading'}
+              onClick={async event => {
+                event.stopPropagation();
+                setImagePreviewDownloadState('downloading');
+                try {
+                  let response: Response;
+                  try {
+                    response = await fetch(imagePreviewUrl);
+                    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                  } catch {
+                    const persistResponse = await fetch('/api/save-image', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ imageUrl: imagePreviewUrl }),
+                    });
+                    if (!persistResponse.ok) throw new Error(`HTTP ${persistResponse.status}`);
+                    const persisted = await persistResponse.json() as { success?: boolean; url?: string; savedUrl?: string; localUrl?: string };
+                    const persistedUrl = persisted.url || persisted.savedUrl || persisted.localUrl;
+                    if (!persisted.success || !persistedUrl) throw new Error('图片持久化失败');
+                    response = await fetch(persistedUrl);
+                    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                  }
+                  const blobUrl = URL.createObjectURL(await response.blob());
+                  const link = document.createElement('a');
+                  link.href = blobUrl;
+                  link.download = 'wujie-workflow-result.png';
+                  document.body.appendChild(link);
+                  link.click();
+                  link.remove();
+                  URL.revokeObjectURL(blobUrl);
+                  setImagePreviewDownloadState('idle');
+                } catch {
+                  setImagePreviewDownloadState('error');
+                }
+              }}
+              className="absolute -top-2 right-8 p-1 bg-muted rounded-full text-muted-foreground hover:text-foreground cursor-pointer disabled:cursor-wait disabled:opacity-60"
+            >
+              {imagePreviewDownloadState === 'downloading' ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
+            </button>
+            <button type="button" aria-label="关闭预览" onClick={() => setImagePreviewUrl(null)} className="absolute -top-2 -right-2 p-1 bg-muted rounded-full text-muted-foreground hover:text-foreground cursor-pointer">
               <X size={14} />
             </button>
+            {imagePreviewDownloadState === 'error' && (
+              <div role="alert" className="absolute bottom-2 left-1/2 -translate-x-1/2 rounded bg-destructive px-3 py-1.5 text-xs text-destructive-foreground">
+                下载失败，请稍后重试
+              </div>
+            )}
           </div>
         </div>
       )}

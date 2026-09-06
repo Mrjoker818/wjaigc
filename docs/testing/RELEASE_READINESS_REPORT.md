@@ -2118,3 +2118,9 @@ The focused gate test passes `7/7`; the actual protected-baseline command passes
 - 发布结论仍为**不通过云端验收**，原因不是本地门禁失败，而是 Google Chrome 现有预览标签返回 `Debugger unattached`，无法取得 Coze exact-tree、真实任务、账务、刷新恢复和浏览器证据。
 - 未关闭项：云端 Skill 成功产出与 AssetVersion、暂停恢复、失败步骤重试、取消退款、预览/下载、完整 Console/Network/Trace，以及 PostgreSQL/供应商相关的云端回执。
 - 禁止动作：不得更新 `stable`，不得以“本地 224 项通过”宣布 Task12 或全平台发布通过。
+
+## 2026-09-06 Task12 发布增量
+
+- 旧 Skill 节点大图预览已在 Edge 云端通过；缺失的节点结果下载入口已在本地按 TDD 修复。
+- 本轮全量 `5167 passed / 168 PostgreSQL-gated skipped / 0 failed`，TypeScript、保护基线和生产构建 `119/119` 通过。
+- Task12 约 `90%`，发布结论仍为**有条件通过**。尚需 Coze 同步本候选并完成节点真实下载、未过期租约内暂停/恢复、取消任务唯一扣退关联及最终浏览器证据。

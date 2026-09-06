@@ -2765,3 +2765,10 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - 生产构建记录：Webpack 编译约 13.9 分钟，TypeScript 约 55 秒；构建期间保留了本地存储路径警告，未隐藏。
 - 云端阻塞：现有 Google Chrome 预览标签可枚举，但接管返回 `Debugger unattached`，因此本轮未执行 Coze 拉取、沙箱重启、真实 Skill 运行、暂停/恢复、失败重试、取消退款、预览/下载及新鲜 Console/Network/Trace 采集。
 - 判定：`LOCAL PASS / CLOUD UNVERIFIED`。Task12 不能标记完成；不能把本地测试结果当作云端业务通过。
+
+## 2026-09-06 Task12 节点结果下载本地回归
+
+- Edge 云端实测确认旧 Skill 节点预览可打开，但没有节点结果下载入口。该缺口先以组件测试稳定复现，再做最小修复。
+- 聚焦测试 `35/35` 通过；全量 `645 passed / 31 skipped` 测试文件、`5167 passed / 168 skipped` 测试，退出码 0。跳过项为缺少隔离 PostgreSQL 地址的条件套件。
+- TypeScript、保护基线 `38/38` 和生产构建 `119/119` 通过。修改测试文件 ESLint 退出 0；业务文件无新增 error，保留 15 条历史 warning。
+- 判定：`LOCAL PASS / CLOUD DOWNLOAD PENDING`。必须推送并在 Coze 精确同步后，用现有 Edge 预览捕获节点下载完成事件；按钮存在不能替代文件交付证据。

@@ -24,7 +24,7 @@ afterEach(() => {
 });
 
 describe('NodeEditor workflow Skill node', () => {
-  it('opens a saved Skill result in a viewport-sized preview without submitting another task', async () => {
+  it.each(['click', 'mouse-sequence'] as const)('opens a saved Skill result via %s in a viewport-sized preview without submitting another task', async interaction => {
     const requests: string[] = [];
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
       requests.push(url);
@@ -44,7 +44,14 @@ describe('NodeEditor workflow Skill node', () => {
     node.config = { ...node.config, skillId: workflowSkill.id, version: 2, runId: 'preview-run' };
     render(<NodeEditor workflow={{ ...createEmptyWorkflow('Preview'), id: 'preview-workflow', nodes: [node] }} projectId="project-a" canvasImages={[]} />);
     await waitFor(() => expect(document.querySelector('img[src="/skill-preview.png"]')).not.toBeNull());
-    fireEvent.click(document.querySelector('img[src="/skill-preview.png"]')!);
+    const resultImage = document.querySelector('img[src="/skill-preview.png"]')!;
+    if (interaction === 'mouse-sequence') {
+      fireEvent.pointerDown(resultImage, { button: 0, pointerId: 1, pointerType: 'mouse' });
+      fireEvent.mouseDown(resultImage, { button: 0, clientX: 100, clientY: 100 });
+      fireEvent.pointerUp(resultImage, { button: 0, pointerId: 1, pointerType: 'mouse' });
+      fireEvent.mouseUp(resultImage, { button: 0, clientX: 100, clientY: 100 });
+    }
+    fireEvent.click(resultImage);
     const preview = screen.getByAltText('预览') as HTMLImageElement;
     expect(preview.getAttribute('src')).toBe('/skill-preview.png');
     expect(preview.parentElement?.style.width).toBe('80vw');
@@ -52,9 +59,54 @@ describe('NodeEditor workflow Skill node', () => {
     expect(preview.style.width).toBe('100%');
     expect(preview.style.height).toBe('100%');
     expect(preview.style.objectFit).toBe('contain');
+    const createObjectUrl = vi.fn(() => 'blob:workflow-skill-preview');
+    const revokeObjectUrl = vi.fn();
+    Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: createObjectUrl });
+    Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: revokeObjectUrl });
+    const anchorClick = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
+    fireEvent.click(screen.getByRole('button', { name: '下载预览图片' }));
+    await waitFor(() => expect(anchorClick).toHaveBeenCalledTimes(1));
+    expect(createObjectUrl).toHaveBeenCalledTimes(1);
+    expect(revokeObjectUrl).toHaveBeenCalledWith('blob:workflow-skill-preview');
+    expect(requests).toContain('/skill-preview.png');
     fireEvent.click(preview);
     expect(screen.queryByAltText('预览')).toBeNull();
     expect(requests.some(url => url === '/api/workflow/execute' || url === '/api/skill-runs')).toBe(false);
+  });
+
+  it('persists a remote Skill result before download when the direct fetch fails', async () => {
+    const requests: Array<{ url: string; init?: RequestInit }> = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      requests.push({ url, init });
+      if (url.includes('/api/skill-runs/preview-run')) return new Response(JSON.stringify({ run: {
+        runId: 'preview-run', projectId: 'project-a', workspaceId: 'workflow:preview-workflow',
+        surface: 'workflow', skillId: workflowSkill.id, skillVersion: 2, status: 'completed',
+        assetVersionIds: ['preview-version'],
+      } }));
+      if (url.startsWith('/api/assets?')) return new Response(JSON.stringify({
+        assetVersionId: 'preview-version', url: 'https://media.example/skill-preview.png',
+      }));
+      if (url === 'https://media.example/skill-preview.png') return new Response('', { status: 502 });
+      if (url === '/api/save-image') return new Response(JSON.stringify({ success: true, url: '/api/serve-upload/persisted.png' }));
+      if (url === '/api/serve-upload/persisted.png') return new Response('png');
+      return new Response('{}');
+    }));
+    vi.stubGlobal('matchMedia', vi.fn(() => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() })));
+    vi.stubGlobal('ResizeObserver', class { observe(): void {} unobserve(): void {} disconnect(): void {} });
+    Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: vi.fn(() => 'blob:persisted-preview') });
+    Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: vi.fn() });
+    const anchorClick = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
+    const node = createWorkflowNode('ai-skill', 0, 0);
+    node.config = { ...node.config, skillId: workflowSkill.id, version: 2, runId: 'preview-run' };
+    render(<NodeEditor workflow={{ ...createEmptyWorkflow('Preview'), id: 'preview-workflow', nodes: [node] }} projectId="project-a" canvasImages={[]} />);
+    await waitFor(() => expect(document.querySelector('img[src="https://media.example/skill-preview.png"]')).not.toBeNull());
+    fireEvent.click(document.querySelector('img[src="https://media.example/skill-preview.png"]')!);
+    fireEvent.click(screen.getByRole('button', { name: '下载预览图片' }));
+    await waitFor(() => expect(anchorClick).toHaveBeenCalledTimes(1));
+    const persistRequest = requests.find(request => request.url === '/api/save-image');
+    expect(persistRequest?.init?.method).toBe('POST');
+    expect(JSON.parse(String(persistRequest?.init?.body))).toEqual({ imageUrl: 'https://media.example/skill-preview.png' });
+    expect(requests.some(request => request.url === '/api/serve-upload/persisted.png')).toBe(true);
   });
 
   it.each([['paused', '已暂停'], ['cancelled', '已取消']] as const)('renders restored %s state and cleans observation on unmount', async (status, label) => {
