@@ -580,7 +580,9 @@ git rev-parse origin/stable
 
 Expected: `HEAD == origin/main`，stable SHA 不变。
 
-- [ ] **Step 6: Coze 精确部署与真实浏览器验收**
+- [x] **Step 6: Coze 精确部署与真实浏览器验收**
+
+执行结论（2026-09-07）：`main@da15f30d` 的业务候选已在 Coze 完成核心真实验收；Canvas 广告 A/B、Workflow 全渠道素材包、取消与一次退款、迟到终态隔离、AssetVersion、刷新恢复及 Simple Chat 隔离均有持久证据。生产环境缺少不破坏供应商配置的安全单步故障注入条件，因此“仅重试失败步骤”保留为明确未验证项；本地确定性故障夹具 `42/42` 通过。该缺口不伪装为云端通过，也不阻止按本计划约定形成有条件阶段结论。
 
 在现有项目页让 Coze 拉取精确 `main`，核对源码 tree、类型、保护门禁、构建退出码、Build ID 和唯一服务进程。沙箱重启后强制刷新现有预览页，不新建重复标签。
 
@@ -593,6 +595,8 @@ Expected: `HEAD == origin/main`，stable SHA 不变。
 5. 检查 `/simple-chat` 仍为 16 Skills，三个营销 Skill 不可见。
 6. 保存截图、Console、Network、持久事件和积分流水证据。
 
-- [ ] **Step 7: 形成阶段结论**
+- [x] **Step 7: 形成阶段结论**
 
 仅当本地门禁和云端核心链路均有真实证据时，将第一批标记为完成。供应商故障、浏览器控制或对象存储证据缺失必须进入 `UNVERIFIED_ITEMS.md`，不得写成通过。第一批关闭后才创建第二批规格。
+
+阶段结论（2026-09-07）：**有条件通过并关闭第一批**。本地、隔离 PostgreSQL、本地 Chromium、GitHub `main` 和 Coze 云端核心链路均已完成；唯一保留项为生产受控单步失败重试，已登记在 `UNVERIFIED_ITEMS.md`。后续不得重做 Task 1-6；下一阶段从第二批规格设计开始。
