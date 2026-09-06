@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { buildSkillStepPrompt, selectSkillPredecessorOutputs } from '@/lib/skill-runtime/execution-context';
 import { CANVAS_PRESET_SKILLS } from '@/lib/skill-runtime/canvas-presets';
+import { LOVART_MARKETING_SKILLS } from '@/lib/skill-runtime/marketing-presets';
+import { resolveSkillInputs } from '@/lib/skill-runtime/input-resolver';
 
 describe('frozen Skill execution context', () => {
   const original = CANVAS_PRESET_SKILLS.find(skill => skill.id === 'preset-food-photography')!;
@@ -52,5 +54,23 @@ describe('frozen Skill execution context', () => {
   it('does not interpolate raw image data into provider text', () => {
     expect(() => buildSkillStepPrompt({ definition, step, inputValues: { dish: 'data:image/png;base64,AAAA' } }))
       .toThrow('SKILL_CONTEXT_UNSAFE_MEDIA');
+  });
+
+  it('includes validated multi-select requirements but excludes source media identifiers', () => {
+    const ad = LOVART_MARKETING_SKILLS[2];
+    const resolved = resolveSkillInputs(ad, {
+      sourceImages: ['version-source-1'], campaignName: '秋季上新', product: '耳机',
+      audience: '通勤人群', sellingPoints: '降噪', channels: ['微信', 'Instagram'],
+      campaignMessage: '安静抵达', callToAction: '了解更多',
+    });
+    const prompt = buildSkillStepPrompt({
+      definition: ad, step: ad.steps[1], inputValues: resolved,
+      previousOutputs: [{ stepId: 'campaign-plan', kind: 'text', content: '只测试利益点表达' }],
+    });
+    expect(prompt).toContain('只测试利益点表达');
+    expect(prompt).toContain('秋季上新');
+    expect(prompt).toContain('["微信","Instagram"]');
+    expect(prompt).not.toContain('data:image');
+    expect(prompt).not.toContain('version-source-1');
   });
 });

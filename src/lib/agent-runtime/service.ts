@@ -830,6 +830,9 @@ export function createAgentRuntimeService(
                 ...(field.defaultValue !== undefined ? { defaultValue: field.defaultValue } : {}),
                 ...(field.options !== undefined ? { options: [...field.options] } : {}),
                 ...(field.maximumItems !== undefined ? { maximumItems: field.maximumItems } : {}),
+                ...(field.bindToSourceVersions !== undefined
+                  ? { bindToSourceVersions: field.bindToSourceVersions }
+                  : {}),
               })),
               id: skillAdmission.skill.id,
               version: skillAdmission.skill.version,

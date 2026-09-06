@@ -9,6 +9,7 @@ import type { AgentEvent, AgentRunRequest } from '@/lib/agent-runtime/types';
 import type { CloudTask } from '@/lib/cloud-task-storage';
 import type { User } from '@/lib/user-types';
 import { requireSkillForSurface } from '@/lib/skill-runtime/catalog';
+import * as skillCatalog from '@/lib/skill-runtime/catalog';
 import { resolveSkillInputs } from '@/lib/skill-runtime/input-resolver';
 import { compileSkillPrompt } from '@/lib/skill-runtime/prompt-compiler';
 
@@ -1063,6 +1064,64 @@ describe('Agent runtime service', () => {
     expect(dependencies.createBillableTask).toHaveBeenCalledTimes(1);
     const snapshot = dependencies.appendEvent.mock.calls[0][0].payload.skillSnapshot as Record<string, unknown>;
     expect(() => assertAgentEventPayloadSafe(snapshot)).not.toThrow();
+  });
+
+  it('preserves source binding metadata in the durable Agent Skill snapshot', async () => {
+    const base = requireSkillForSurface('preset-ecommerce-listing', 'canvas');
+    const definition = {
+      ...base,
+      id: 'custom-source-bound-snapshot',
+      inputs: [
+        ...base.inputs,
+        { key: 'sourceImages', label: 'Sources', kind: 'images' as const, required: true, bindToSourceVersions: true },
+      ],
+    };
+    const requireOriginal = skillCatalog.requireSkillForSurface;
+    const catalogSpy = vi.spyOn(skillCatalog, 'requireSkillForSurface')
+      .mockImplementation((skillId, surface) => (
+        skillId === definition.id ? definition : requireOriginal(skillId, surface)
+      ));
+    const inputValues = resolveSkillInputs(definition, {
+      product: '耳机', features: '降噪，长续航', sourceImages: ['version-source-1'],
+    });
+    const dependencies = serviceDependencies();
+    dependencies.resolveTaskModel.mockImplementation(async (providerId, modelId) => ({
+      providerId, modelId,
+      kind: providerId === 'provider-image' ? 'image' : 'chat',
+      sourceType: providerId === 'provider-image' ? 'image' : 'chat',
+      protocol: providerId === 'provider-image' ? 'images-generations' : 'chat-completions',
+      executionMode: 'sync', allowedRatios: [], allowedSizes: [], qualityOptions: [], maxOutputs: 1,
+      supportsReferenceImages: false, supportsMask: false,
+      outputKinds: providerId === 'provider-image' ? ['image'] : ['text'], capabilitySources: {},
+    }));
+    const service = agentRuntime.createAgentRuntimeService(dependencies);
+
+    try {
+      await service.createRun({
+        actor: user,
+        request: agentRuntime.parseAgentRunRequest(canvasSkillRequest({
+          prompt: compileSkillPrompt(definition.systemPrompt, inputValues),
+          sourceVersionIds: ['version-source-1'],
+          context: { selectedEntityIds: [], visibleVersionIds: ['version-source-1'], locale: 'zh-CN' },
+          skill: {
+            skillId: definition.id, skillVersion: definition.version, inputValues,
+            modelBindings: {
+              orchestrator: { providerId: 'provider-exact', modelId: 'model-exact' },
+              image: { providerId: 'provider-image', modelId: 'model-image' },
+            },
+          },
+        })),
+      });
+    } finally {
+      catalogSpy.mockRestore();
+    }
+
+    const snapshot = dependencies.appendEvent.mock.calls[0][0].payload.skillSnapshot as {
+      inputs: Array<{ key: string; bindToSourceVersions?: boolean }>;
+    };
+    expect(snapshot.inputs.find(field => field.key === 'sourceImages')).toMatchObject({
+      bindToSourceVersions: true,
+    });
   });
 
   it('prices a public zero-step simple-chat Skill with one orchestrator base charge', async () => {

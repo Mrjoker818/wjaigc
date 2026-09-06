@@ -144,6 +144,21 @@ function validateImages(field: SkillInputField, value: unknown): readonly string
   return value;
 }
 
+function validateMultiSelect(field: SkillInputField, value: unknown): readonly string[] {
+  if (!Array.isArray(value) || value.some(item => typeof item !== 'string')) {
+    return invalidType(field);
+  }
+  const limit = field.maximumItems ?? SKILL_INPUT_LIMITS.images;
+  if (value.length > limit) {
+    throw new SkillInputError('SKILL_INPUT_LIMIT_EXCEEDED', field.key);
+  }
+  if (new Set(value).size !== value.length
+    || (field.options && value.some(item => !field.options!.includes(item)))) {
+    throw new SkillInputError('SKILL_INPUT_INVALID_VALUE', field.key);
+  }
+  return value;
+}
+
 function validateDataset(field: SkillInputField, value: unknown): readonly Record<string, unknown>[] {
   if (!Array.isArray(value) || value.some(row => (
     row === null || typeof row !== 'object' || Array.isArray(row)
@@ -175,6 +190,8 @@ function validateField(field: SkillInputField, value: unknown): unknown {
       }
       return selected;
     }
+    case 'multi-select':
+      return validateMultiSelect(field, value);
     case 'number':
       if (typeof value !== 'number') invalidType(field);
       if (!Number.isFinite(value)) {
@@ -221,7 +238,7 @@ export function resolveSkillInputs(
       typeof field.maximumItems !== 'number'
       || !Number.isFinite(field.maximumItems)
       || !Number.isInteger(field.maximumItems)
-      || field.maximumItems < 0
+      || field.maximumItems < 1
     )) {
       throw new SkillInputError('SKILL_INPUT_INVALID_DEFINITION', field.key);
     }

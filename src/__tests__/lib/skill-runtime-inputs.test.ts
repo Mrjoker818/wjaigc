@@ -39,6 +39,15 @@ const definition = createDefinition([
     defaultValue: '高端科技感',
     options: ['高端科技感', '生活方式'],
   },
+  {
+    key: 'channels',
+    label: 'Channels',
+    kind: 'multi-select',
+    required: false,
+    defaultValue: ['Web'],
+    options: ['Web', 'Email', 'Social'],
+    maximumItems: 2,
+  },
   { key: 'heroImageVersionId', label: 'Hero image', kind: 'image', required: false },
   {
     key: 'imageVersionIds',
@@ -81,7 +90,7 @@ describe('resolveSkillInputs', () => {
     );
   });
 
-  it('应用默认值并支持 text、image、images、Brand Kit、dataset、select、number 和 boolean', () => {
+  it('应用默认值并支持 multi-select 及其他结构化字段', () => {
     const dataset = [{ sku: 'A-1', name: '黑色耳机' }];
     const resolved = resolveSkillInputs(definition, {
       product: '耳机',
@@ -96,6 +105,7 @@ describe('resolveSkillInputs', () => {
     expect(resolved).toEqual({
       product: '耳机',
       style: '高端科技感',
+      channels: ['Web'],
       heroImageVersionId: 'ver-hero',
       imageVersionIds: ['ver-1'],
       brandKitId: 'brand-1',
@@ -103,6 +113,21 @@ describe('resolveSkillInputs', () => {
       count: 2,
       transparent: true,
     });
+  });
+
+  it('校验 multi-select 的必填、类型、唯一选项和 maximumItems', () => {
+    const required = createDefinition([{
+      key: 'channels', label: 'Channels', kind: 'multi-select', required: true,
+      options: ['Web', 'Email', 'Social'], maximumItems: 2,
+    }]);
+
+    expectInputError(() => resolveSkillInputs(required, { channels: [] }), 'SKILL_INPUT_REQUIRED', 'channels');
+    expectInputError(() => resolveSkillInputs(required, { channels: 'Web' }), 'SKILL_INPUT_INVALID_TYPE', 'channels');
+    expectInputError(() => resolveSkillInputs(required, { channels: ['Web', 1] }), 'SKILL_INPUT_INVALID_TYPE', 'channels');
+    expectInputError(() => resolveSkillInputs(required, { channels: ['Web', 'Web'] }), 'SKILL_INPUT_INVALID_VALUE', 'channels');
+    expectInputError(() => resolveSkillInputs(required, { channels: ['Unknown'] }), 'SKILL_INPUT_INVALID_VALUE', 'channels');
+    expectInputError(() => resolveSkillInputs(required, { channels: ['Web', 'Email', 'Social'] }), 'SKILL_INPUT_LIMIT_EXCEEDED', 'channels');
+    expect(resolveSkillInputs(required, { channels: ['Email', 'Web'] }).channels).toEqual(['Email', 'Web']);
   });
 
   it('拒绝未知字段、错误类型和非法 select 值', () => {

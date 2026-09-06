@@ -29,17 +29,27 @@ export function buildSkillStepPrompt(input: {
     return compileSkillPrompt(input.step.promptTemplate, input.inputValues);
   }
   // Structured media stays on the authorized asset path, never in provider text.
-  const values: Record<string, string | number | boolean | null> = {};
-  const requirements = input.definition.inputs.flatMap(field => {
-    if (!['text', 'select', 'number', 'boolean'].includes(field.kind)) return [];
+  type PromptRequirementValue = string | number | boolean | null | readonly string[];
+  const values: Record<string, PromptRequirementValue> = {};
+  const requirements: Array<{ key: string; label: string; value: PromptRequirementValue }> = [];
+  for (const field of input.definition.inputs) {
+    if (!['text', 'select', 'multi-select', 'number', 'boolean'].includes(field.kind)) continue;
     const value = input.inputValues[field.key];
-    if (value === undefined) return [];
+    if (value === undefined) continue;
+    if (field.kind === 'multi-select') {
+      if (!Array.isArray(value) || value.some(item => typeof item !== 'string')) {
+        throw new Error('SKILL_CONTEXT_INVALID_VALUE');
+      }
+      values[field.key] = [...value];
+      requirements.push({ key: field.key, label: field.label, value: [...value] });
+      continue;
+    }
     if (value !== null && typeof value !== 'string' && typeof value !== 'number'
       && typeof value !== 'boolean') throw new Error('SKILL_CONTEXT_INVALID_VALUE');
     if (typeof value === 'number' && !Number.isFinite(value)) throw new Error('SKILL_CONTEXT_INVALID_VALUE');
     values[field.key] = value;
-    return [{ key: field.key, label: field.label, value }];
-  });
+    requirements.push({ key: field.key, label: field.label, value });
+  }
   const prompt = [
     input.definition.systemPrompt,
     'User requirements (authoritative; preserve the requested subject):',

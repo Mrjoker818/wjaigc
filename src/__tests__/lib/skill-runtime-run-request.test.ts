@@ -5,6 +5,7 @@ vi.mock('server-only', () => ({}));
 import type { AgentRunRequest } from '@/lib/agent-runtime/types';
 import type { TaskModelDescriptor } from '@/lib/task-core/model-catalog';
 import type { User } from '@/lib/user-types';
+import type { SkillDefinition } from '@/lib/skill-runtime/types';
 import {
   buildSkillAgentRunRequest,
   createSkillRun,
@@ -82,6 +83,63 @@ function runtimeDependencies() {
 }
 
 describe('Skill runtime run requests', () => {
+  it.each([
+    ['empty', [], []],
+    ['duplicate binding', ['version-1', 'version-1'], ['version-1']],
+    ['URL binding', ['https://example.com/source.png'], ['https://example.com/source.png']],
+    ['base64 binding', ['data:image/png;base64,AAAA'], ['data:image/png;base64,AAAA']],
+    ['missing binding', ['version-1'], ['version-1', 'version-2']],
+    ['extra binding', ['version-1', 'version-2'], ['version-1']],
+    ['reordered binding', ['version-2', 'version-1'], ['version-1', 'version-2']],
+  ])('rejects %s for any source-bound field before costing or task creation', async (_name, sources, sourceVersionIds) => {
+    const boundSkill: SkillDefinition = {
+      id: 'custom-source-bound', version: 1, name: 'Source-bound', category: 'custom', description: '',
+      executionContextVersion: 1, systemPrompt: 'Use sources', allowedSurfaces: ['canvas'],
+      inputs: [{ key: 'sources', label: 'Sources', kind: 'images', required: true, maximumItems: 6, bindToSourceVersions: true }],
+      steps: [{ id: 'plan', label: 'Plan', toolId: 'chat', execution: 'sequential', promptTemplate: 'Plan', modelRole: 'orchestrator', qualityGateIds: [] }],
+      enabled: true, builtIn: false, createdAt: 1, updatedAt: 1, usageCount: 0,
+    };
+    const dependencies = runtimeDependencies();
+    const calculateCreditCost = vi.fn();
+    const createAgentRun = vi.fn();
+    const request: SkillRunRequest = {
+      ...input, skillId: boundSkill.id, inputValues: { sources }, sourceVersionIds,
+      modelBindings: { orchestrator: input.modelBindings.orchestrator },
+    };
+
+    await expect(createSkillRun({ actor, request }, {
+      ...dependencies, calculateCreditCost, createAgentRun,
+      resolveSkill: vi.fn(async () => boundSkill),
+    })).rejects.toMatchObject({ field: 'sources' });
+    expect(calculateCreditCost).not.toHaveBeenCalled();
+    expect(createAgentRun).not.toHaveBeenCalled();
+  });
+
+  it('accepts every generic source-bound field only when it matches canonical source versions', async () => {
+    const boundSkill: SkillDefinition = {
+      id: 'custom-source-bound', version: 1, name: 'Source-bound', category: 'custom', description: '',
+      executionContextVersion: 1, systemPrompt: 'Use sources', allowedSurfaces: ['canvas'],
+      inputs: [
+        { key: 'primarySources', label: 'Primary', kind: 'images', required: true, bindToSourceVersions: true },
+        { key: 'backupSources', label: 'Backup', kind: 'images', required: true, bindToSourceVersions: true },
+      ],
+      steps: [{ id: 'plan', label: 'Plan', toolId: 'chat', execution: 'sequential', promptTemplate: 'Plan', modelRole: 'orchestrator', qualityGateIds: [] }],
+      enabled: true, builtIn: false, createdAt: 1, updatedAt: 1, usageCount: 0,
+    };
+    const dependencies = runtimeDependencies();
+    const request = await buildSkillAgentRunRequest({
+      ...input, skillId: boundSkill.id,
+      inputValues: { primarySources: ['version-1', 'version-2'], backupSources: ['version-1', 'version-2'] },
+      sourceVersionIds: ['version-1', 'version-1', 'version-2'],
+      modelBindings: { orchestrator: input.modelBindings.orchestrator },
+    }, { ...dependencies, actorUserId: actor.id, resolveSkill: vi.fn(async () => boundSkill) });
+
+    expect(request.sourceVersionIds).toEqual(['version-1', 'version-2']);
+    expect(request.skill?.inputValues).toMatchObject({
+      primarySources: ['version-1', 'version-2'], backupSources: ['version-1', 'version-2'],
+    });
+  });
+
   it('executes two owner-scoped conversation Skills from their distinct frozen definitions', async () => {
     let sequence = 0;
     const store = createSkillStore(createMemorySkillStorageAdapter(), {

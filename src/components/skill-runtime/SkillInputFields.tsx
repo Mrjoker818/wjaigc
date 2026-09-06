@@ -273,6 +273,43 @@ export function SkillInputFields({
               </select>
             );
             break;
+          case 'multi-select': {
+            const selected = Array.isArray(value)
+              ? value.filter(item => typeof item === 'string')
+              : [];
+            const maximum = field.maximumItems ?? SKILL_INPUT_LIMITS.images;
+            const atLimit = selected.length >= maximum;
+            control = (
+              <fieldset
+                id={inputId}
+                aria-invalid={error ? true : undefined}
+                aria-describedby={describedBy}
+                className="space-y-1"
+              >
+                <legend className="text-sm font-medium">
+                  {field.label}
+                  {field.required && <span aria-hidden="true"> *</span>}
+                </legend>
+                {(field.options || []).map(option => {
+                  const checked = selected.includes(option);
+                  return (
+                    <label key={option} className="flex items-center gap-2 text-sm">
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        disabled={disabled || (atLimit && !checked)}
+                        onChange={() => commitValue(field, checked
+                          ? selected.filter(item => item !== option)
+                          : [...selected, option])}
+                      />
+                      <span>{option}</span>
+                    </label>
+                  );
+                })}
+              </fieldset>
+            );
+            break;
+          }
           case 'number':
             control = (
               <input
@@ -312,10 +349,12 @@ export function SkillInputFields({
 
         return (
           <div key={field.key} className="space-y-1">
-            <label htmlFor={inputId} className="block text-sm font-medium">
-              {field.label}
-              {field.required && <span aria-hidden="true"> *</span>}
-            </label>
+            {field.kind !== 'multi-select' && (
+              <label htmlFor={inputId} className="block text-sm font-medium">
+                {field.label}
+                {field.required && <span aria-hidden="true"> *</span>}
+              </label>
+            )}
             {control}
             {error && <div id={errorId} role="alert" className="text-xs text-destructive">{error}</div>}
           </div>

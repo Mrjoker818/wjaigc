@@ -19,7 +19,7 @@ import {
   type FrozenBindings,
   type SkillCostEstimatorDependencies,
 } from './cost-estimator';
-import { resolveSkillInputs } from './input-resolver';
+import { resolveSkillInputs, SkillInputError } from './input-resolver';
 import { compileSkillPrompt } from './prompt-compiler';
 import type {
   SkillDefinition,
@@ -141,6 +141,29 @@ function sameJson(left: unknown, right: unknown): boolean {
   return JSON.stringify(canonicalize(left)) === JSON.stringify(canonicalize(right));
 }
 
+const UNSAFE_SOURCE_LITERAL = /^(?:data:|blob:|https?:\/\/)/i;
+
+function assertSourceVersionBindings(
+  skill: SkillDefinition,
+  resolvedInputs: Record<string, unknown>,
+  sourceVersionIds: readonly string[],
+): string[] {
+  const canonicalSourceVersionIds = [...new Set(sourceVersionIds)];
+  for (const field of skill.inputs) {
+    if (!field.bindToSourceVersions) continue;
+    const value = resolvedInputs[field.key];
+    if (!Array.isArray(value)
+      || value.length === 0
+      || value.some(item => typeof item !== 'string' || UNSAFE_SOURCE_LITERAL.test(item))
+      || new Set(value).size !== value.length
+      || value.length !== canonicalSourceVersionIds.length
+      || value.some((item, index) => item !== canonicalSourceVersionIds[index])) {
+      throw new SkillInputError('SKILL_INPUT_INVALID_VALUE', field.key);
+    }
+  }
+  return canonicalSourceVersionIds;
+}
+
 function assertExactBindingRoles(requested: FrozenBindings, skill: SkillDefinition): void {
   const actual = Object.keys(requested);
   const expected = requiredSkillModelRoles(skill);
@@ -229,6 +252,7 @@ export async function authorizeSkillAgentRunRequest(
   if (skill.version !== invocation.skillVersion) throw new SkillRunVersionError();
 
   const resolved = resolveSkillInputs(skill, invocation.inputValues);
+  assertSourceVersionBindings(skill, resolved, request.sourceVersionIds);
   if (!sameJson(resolved, invocation.inputValues)) {
     throw new SkillModelBindingError(
       'SKILL_MODEL_BINDINGS_INVALID',
@@ -292,13 +316,13 @@ export async function buildSkillAgentRunRequest(
   const skill = resolvedSkill ?? await resolveExecutableSkill(input, dependencies);
   if (skill.version !== input.skillVersion) throw new SkillRunVersionError();
   const resolved = resolveSkillInputs(skill, input.inputValues);
+  const sourceVersionIds = assertSourceVersionBindings(skill, resolved, input.sourceVersionIds);
   const bindings = await authorizeAndFreezeBindings(
     input.modelBindings,
     skill,
     dependencies,
   );
   const orchestrator = bindings.orchestrator!;
-  const sourceVersionIds = [...new Set(input.sourceVersionIds)];
   return {
     projectId: input.projectId,
     workspace: input.surface === 'simple-chat' ? 'chat' : input.surface,

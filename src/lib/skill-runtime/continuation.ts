@@ -10,6 +10,7 @@ import { requireSkillForSurface } from './catalog';
 import { skillExecutionSteps } from './cost-estimator';
 import { parseSkillRunRequest, executeSkillRun, SkillRunRequestError } from './service';
 import { createProductionSkillStepRegistry } from './step-registry';
+import { resolveSkillInputs } from './input-resolver';
 import type { SkillDefinition, SkillInputField, SkillStepDefinition, SkillSurface } from './types';
 import { listAgentRunEvents } from '@/lib/agent-runtime/service';
 
@@ -86,11 +87,48 @@ export function frozenDefinition(
         || ['__proto__', 'prototype', 'constructor'].includes(field.key)
         || typeof field.label !== 'string' || typeof field.required !== 'boolean'
         || typeof field.kind !== 'string'
-        || !['text', 'select', 'number', 'boolean', 'image', 'images', 'brand-kit', 'dataset'].includes(field.kind)) {
+        || !['text', 'select', 'multi-select', 'number', 'boolean', 'image', 'images', 'brand-kit', 'dataset'].includes(field.kind)) {
         throw new SkillRunRequestError('Frozen Skill input is invalid');
       }
       keys.add(field.key);
-      return { key: field.key, label: field.label, kind: field.kind as SkillInputField['kind'], required: field.required };
+      if (field.options !== undefined && (
+        (field.kind !== 'select' && field.kind !== 'multi-select')
+        || !Array.isArray(field.options)
+        || field.options.length === 0
+        || field.options.some(option => typeof option !== 'string')
+      )) throw new SkillRunRequestError('Frozen Skill input is invalid');
+      if (field.maximumItems !== undefined && (
+        (field.kind !== 'images' && field.kind !== 'multi-select')
+        || !Number.isSafeInteger(field.maximumItems)
+        || (field.maximumItems as number) < 1
+      )) throw new SkillRunRequestError('Frozen Skill input is invalid');
+      if (field.bindToSourceVersions !== undefined && typeof field.bindToSourceVersions !== 'boolean') {
+        throw new SkillRunRequestError('Frozen Skill input is invalid');
+      }
+      const parsed: SkillInputField = {
+        key: field.key,
+        label: field.label,
+        kind: field.kind as SkillInputField['kind'],
+        required: field.required,
+        ...(field.defaultValue !== undefined ? { defaultValue: field.defaultValue } : {}),
+        ...(field.options !== undefined ? { options: [...field.options as string[]] } : {}),
+        ...(field.maximumItems !== undefined ? { maximumItems: field.maximumItems as number } : {}),
+        ...(field.bindToSourceVersions !== undefined
+          ? { bindToSourceVersions: field.bindToSourceVersions as boolean }
+          : {}),
+      };
+      if (parsed.defaultValue !== undefined) {
+        try {
+          resolveSkillInputs({
+            id: skillId, version: skillVersion, name: 'frozen', category: 'runtime', description: '',
+            systemPrompt: '', allowedSurfaces: [surface], inputs: [{ ...parsed, required: false }], steps: [],
+            enabled: true, builtIn: true, createdAt: 0, updatedAt: 0, usageCount: 0,
+          }, {});
+        } catch {
+          throw new SkillRunRequestError('Frozen Skill input is invalid');
+        }
+      }
+      return parsed;
     });
   }
   if (steps) {

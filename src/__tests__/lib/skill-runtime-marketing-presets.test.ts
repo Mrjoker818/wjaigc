@@ -5,6 +5,11 @@ import { resolveSkillInputs } from '@/lib/skill-runtime/input-resolver';
 import { LOVART_MARKETING_SKILLS } from '@/lib/skill-runtime/marketing-presets';
 
 describe('Lovart marketing Skill definitions', () => {
+  const common = {
+    sourceImages: ['version-source-1'], campaignName: '秋季上新', product: '耳机',
+    audience: '通勤人群', sellingPoints: '降噪',
+  };
+
   it('defines three canvas/workflow-only built-ins with stable ids', () => {
     expect(LOVART_MARKETING_SKILLS.map(skill => skill.id)).toEqual([
       'preset-ad-ab-variants',
@@ -136,6 +141,50 @@ describe('Lovart marketing Skill definitions', () => {
         expect(prompt, `${skill.id}:${step.id}`).not.toMatch(/{{|}}/);
       }
     }
+  });
+
+  it('rejects missing marketing requirements and excessive source images', () => {
+    const ad = LOVART_MARKETING_SKILLS[0];
+    expect(() => resolveSkillInputs(ad, {})).toThrowError(expect.objectContaining({
+      code: 'SKILL_INPUT_REQUIRED', field: 'sourceImages',
+    }));
+    expect(() => resolveSkillInputs(ad, { sourceImages: ['version-source-1'] })).toThrowError(expect.objectContaining({
+      code: 'SKILL_INPUT_REQUIRED', field: 'campaignName',
+    }));
+    expect(() => resolveSkillInputs(ad, {
+      ...common, sourceImages: Array(7).fill('version-id'), objective: '点击', channel: '信息流',
+    })).toThrowError(expect.objectContaining({
+      code: 'SKILL_INPUT_LIMIT_EXCEEDED', field: 'sourceImages',
+    }));
+  });
+
+  it.each([
+    ['objective', '成交'],
+    ['channel', '电视'],
+  ])('rejects an unknown ad %s choice', (field, value) => {
+    expect(() => resolveSkillInputs(LOVART_MARKETING_SKILLS[0], {
+      ...common, objective: '点击', channel: '信息流', [field]: value,
+    })).toThrowError(expect.objectContaining({ code: 'SKILL_INPUT_INVALID_VALUE', field }));
+  });
+
+  it.each([
+    ['funnelStage', '已购买'],
+    ['urgency', '非常紧急'],
+  ])('rejects an unknown retargeting %s choice', (field, value) => {
+    expect(() => resolveSkillInputs(LOVART_MARKETING_SKILLS[1], {
+      ...common, funnelStage: '加购未购买', [field]: value,
+    })).toThrowError(expect.objectContaining({ code: 'SKILL_INPUT_INVALID_VALUE', field }));
+  });
+
+  it.each([
+    [['未知渠道'], 'SKILL_INPUT_INVALID_VALUE'],
+    [['微信', '微信'], 'SKILL_INPUT_INVALID_VALUE'],
+    [['微信', 1], 'SKILL_INPUT_INVALID_TYPE'],
+    [['小红书', '微信', '微博', '抖音', 'Instagram', 'Facebook', '邮件'], 'SKILL_INPUT_LIMIT_EXCEEDED'],
+  ])('rejects invalid omnichannel selections %#', (channels, code) => {
+    expect(() => resolveSkillInputs(LOVART_MARKETING_SKILLS[2], {
+      ...common, channels, campaignMessage: '安静抵达', callToAction: '了解更多',
+    })).toThrowError(expect.objectContaining({ code, field: 'channels' }));
   });
 
   it('keeps deterministic output steps and quality gates', () => {

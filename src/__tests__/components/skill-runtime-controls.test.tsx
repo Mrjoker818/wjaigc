@@ -44,6 +44,7 @@ const fields: readonly SkillInputField[] = [
   { key: 'style', label: '风格', kind: 'select', required: true, options: ['简约', '明亮'] },
   { key: 'count', label: '数量', kind: 'number', required: false },
   { key: 'transparent', label: '透明背景', kind: 'boolean', required: false },
+  { key: 'channels', label: '渠道', kind: 'multi-select', required: true, options: ['微信', '微博', '邮件'], maximumItems: 2 },
 ];
 
 const definition: SkillDefinition = {
@@ -72,6 +73,29 @@ afterEach(() => {
 });
 
 describe('SkillInputFields', () => {
+  it('renders a semantic multi-select checkbox group and only disables unchecked options at its limit', () => {
+    const onChange = vi.fn();
+    const { rerender } = render(<SkillInputFields
+      fields={fields}
+      values={{ channels: ['微信', '微博'] }}
+      onChange={onChange}
+    />);
+
+    const group = screen.getByRole('group', { name: '渠道' });
+    expect(group).toBeTruthy();
+    expect((screen.getByRole('checkbox', { name: '微信' }) as HTMLInputElement).disabled).toBe(false);
+    expect((screen.getByRole('checkbox', { name: '微博' }) as HTMLInputElement).disabled).toBe(false);
+    expect((screen.getByRole('checkbox', { name: '邮件' }) as HTMLInputElement).disabled).toBe(true);
+
+    fireEvent.click(screen.getByRole('checkbox', { name: '微信' }));
+    expect(onChange).toHaveBeenCalledWith('channels', ['微博']);
+
+    rerender(<SkillInputFields fields={fields} values={{ channels: ['微博'] }} onChange={onChange} />);
+    expect((screen.getByRole('checkbox', { name: '邮件' }) as HTMLInputElement).disabled).toBe(false);
+    fireEvent.click(screen.getByRole('checkbox', { name: '邮件' }));
+    expect(onChange).toHaveBeenCalledWith('channels', ['微博', '邮件']);
+  });
+
   it('renders all eight field kinds with accessible labels, constraints, values, and errors', () => {
     const onChange = vi.fn();
     render(<SkillInputFields
