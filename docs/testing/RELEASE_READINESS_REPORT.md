@@ -2150,10 +2150,10 @@ The focused gate test passes `7/7`; the actual protected-baseline command passes
 
 ## 2026-09-06 Lovart 第一批营销工作流发布判定
 
-**状态：BLOCKED，不可推送或进入 Coze/浏览器验收。**
+**状态：本地门禁通过，云端发布验收未完成。**
 
 已取得的本地证据：Canvas/Workflow 旧 21 项零丢失并新增 3 项，形成 `24/24`；Simple Chat 保持 `16`；Task 4 隔离 PostgreSQL 18 营销真并发专项 `23/23`；TypeScript 通过；ESLint `0 errors / 943 warnings`；8 GiB 构建 `119/119`；`git diff --check` 通过；`origin/stable` 保持 `52f7c601ed150769e15d06fb435c6e360e28c9e7`。
 
-阻断证据：权威聚焦门禁 `1 failed`；全量 Vitest `3 failed / 5269 passed / 169 skipped`；保护门禁因两个未授权生产路径退出 1；默认 4 GiB 构建 OOM。Task 4 两个 Minor 测试精度项仍待最终审查。
+最新门禁：权威聚焦 `110/110`、0 skip；全量 `5272 passed / 169 PostgreSQL 条件 skipped / 0 failed`；保护基线 38 项、零未授权漂移、0 warning。默认 4 GiB 构建 OOM 继续作为资源风险保留；8 GiB `119/119` 构建证据有效。Task 4 两个 Minor 测试精度项仍待最终审查。
 
-发布前必须先完成最终全分支审查并关闭三项测试/保护漂移，重跑聚焦门禁达到 0 失败、0 意外跳过，并重跑全量门禁。之后才允许控制器推送 `main`、Coze exact-tree 部署和真实浏览器验收；本 Task 没有 push，也没有操作 Coze 或浏览器。
+`6595c6b0` 只改测试/合同和两份精确保护授权 JSON，生产业务源码相对上一轮构建候选未变，因此未重复 TypeScript、Lint 和 13 分钟构建。本地收尾允许进入控制器最终审查，但第一批仍不能标记为发布完成：尚需控制器推送 `main`、Coze exact-tree 部署及真实 provider/浏览器验收。本 Task 没有 push，也没有操作云端。

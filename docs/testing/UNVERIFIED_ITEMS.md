@@ -2341,8 +2341,8 @@ BUG-018 已从未验证项移除。剩余顺序为 `002-B -> 002-D -> 002-E`；�
 
 | 项目 | 当前状态 | 关闭条件 |
 |---|---|---|
-| 权威聚焦与全量回归 | `BLOCKED` | 关闭 E2E 隔离源码契约、保护授权清单、Canvas chat 旧源码文本契约三项失败；聚焦必须 0 失败、0 意外跳过，全量必须退出 0。 |
-| 保护基线 | `BLOCKED` | 为 `src/lib/asset-core/asset-version-id.ts` 与 `src/lib/skill-runtime/marketing-presets.ts` 提供精确复审授权并重跑至 0 blocking issue。 |
+| 权威聚焦与全量回归 | `LOCAL PASS` | `6595c6b0` 后聚焦 `110/110`、0 skip；全量 `5272 passed / 169 skipped / 0 failed`。169 项 PostgreSQL 条件 skip 继续单列。 |
+| 保护基线 | `LOCAL PASS` | 38 项保留，两个生产路径已有精确来源授权，零未授权漂移、0 warning。 |
 | 本轮全仓 PostgreSQL | `169 SKIPPED` | 配置专用 `POSTGRES_TEST_DATABASE_URL` 后重跑；不得使用业务库。Task 4 的隔离真库营销专项 `23/23` 已通过，但不能替代本轮全仓真库门禁。 |
 | Chromium E2E | `ENVIRONMENT SKIPPED` | 提供 E2E 数据库变量与本地运行服务后执行 Task 5 用例；本轮禁止操作浏览器，因此没有浏览器通过结论。 |
 | 真实外部 provider | `UNVERIFIED` | 使用受控真实 provider/model 执行三项营销 Skill，核对固定路由、多参考图、结果数量、幂等和失败恢复。 |
@@ -2352,4 +2352,4 @@ BUG-018 已从未验证项移除。剩余顺序为 `002-B -> 002-D -> 002-E`；�
 | Task 4 Minor：AssetVersion 创建精度 | `REVIEW OPEN` | 补充真实 AssetVersion 创建断言，或由最终审查明确说明现有真库用例只证明 ID 聚合。 |
 | 默认构建内存 | `4 GiB OOM / 8 GiB PASS` | CI/部署提供至少 8 GiB Node heap，或降低构建内存后重新验证默认命令。 |
 
-以上项目关闭前不得将 Lovart 第一批标记为发布完成，也不得用既有 Unified Skill Runtime Task12 云端通过替代本批新增营销工作流验收。
+本地三项门禁失败已经关闭，不再列为发布阻断。其余项目关闭前仍不得将 Lovart 第一批标记为发布完成，也不得用既有 Unified Skill Runtime Task12 云端通过替代本批新增营销工作流验收。

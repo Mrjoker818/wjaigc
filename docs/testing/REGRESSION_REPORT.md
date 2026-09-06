@@ -2810,14 +2810,15 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 
 ## 2026-09-06 Lovart 营销增量工作流 Task 6 本地门禁
 
-- 测试业务候选：`main@143e44e90e5892869622072a0fc9488c9ef4a837`；`HEAD == origin/main`。`origin/stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 保持只读且未变化。
+- 当前本地候选：`main@6595c6b0b3f14f00ddc9be80963f9f25e5c8bdfc`；`origin/main` 仍为 `143e44e9`，本地 ahead 2，未 push。`origin/stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 保持只读且未变化。
 - 目录保护：旧 Canvas `21` 与 Workflow `21` 未丢失，新增 `3` 项后两者均为 `24`；Simple Chat 仍为独立 `16`，营销 Skill 不进入 Simple Chat。
-- 权威聚焦门禁：8 files，`109 passed / 1 failed / 0 skipped`。唯一失败为 E2E 隔离源码契约仍要求 `nodes: []`。
+- 权威聚焦门禁：8 files，`110 passed / 0 failed / 0 skipped`，退出 0。
 - TypeScript：`pnpm ts-check` 退出 0，Next route types 与 `tsc` 通过。
 - ESLint：`pnpm lint` 退出 0，`0 errors / 943 warnings`；另有 Babel 对超过 500KB 的 `infinite-canvas.tsx` 样式降级提示。
-- 全量 Vitest：681 files 中 `647 passed / 31 skipped / 3 failed`；5441 tests 中 `5269 passed / 169 skipped / 3 failed`。三个失败分别为 E2E 隔离源码契约、两个生产路径缺少保护授权、Canvas chat 的旧源码文本契约。
+- 全量 Vitest：681 files 中 `650 passed / 31 skipped / 0 failed`；5441 tests 中 `5272 passed / 169 skipped / 0 failed`，退出 0。
 - PostgreSQL：Task 4 已在隔离 PostgreSQL 18 上取得营销执行真并发 `23/23`；本轮全量环境没有 `POSTGRES_TEST_DATABASE_URL`，因此 169 项条件测试跳过，不能把本轮结果写成全仓真库通过。
 - 构建：默认约 4 GiB Node 堆在 Mark-Compact 后 OOM，退出 1/134；随后使用项目既有 `NODE_OPTIONS=--max-old-space-size=8192`，webpack 13.8 分钟编译、TypeScript 61 秒，`119/119` 页面生成，退出 0。
-- 保护与 Git：38 个功能 ID、组件路径、证据合同和引用均通过，但 `asset-version-id.ts` 与 `marketing-presets.ts` 缺少精确授权，保护命令退出 1；`git diff --check` 退出 0。
+- 保护与 Git：38 个功能 ID、组件路径、证据合同和引用均通过，零未授权生产漂移、`0 warning(s)`，保护命令退出 0；`git diff --check` 退出 0。
 - 浏览器：Task 5 本地 Chromium 用例因缺少数据库变量和运行服务形成 `1 skipped` 证据；本轮按约束未操作浏览器，不能写成 Chromium E2E 通过。
-- **回归判定：BLOCKED。** 本地静态检查和 8 GiB 构建通过不抵消三项真实测试失败与保护门禁失败。
+- `6595c6b0` 只修改测试/合同与精确保护授权，没有生产业务源码变化。因此 TypeScript、Lint、默认 4 GiB OOM 与 8 GiB `119/119` 构建引用同一生产代码候选的上一轮证据，没有重复消耗构建。
+- **回归判定：LOCAL GATES PASS / EXTERNAL ACCEPTANCE UNVERIFIED。** 本地门禁已收口；Chromium、真实 provider、Coze 与真实浏览器营销链路仍未验证。
