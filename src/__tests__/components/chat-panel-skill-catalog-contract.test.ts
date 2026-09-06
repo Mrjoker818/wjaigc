@@ -12,6 +12,10 @@ import {
   transferCanvasSkillAsset,
   startCanvasSkillRun,
 } from '@/lib/skill-runtime/canvas-client';
+import {
+  CANVAS_WORKFLOW_SKILLS,
+  SIMPLE_CHAT_PRESET_SKILLS,
+} from '@/lib/skill-runtime/catalog';
 import type { SkillDefinition } from '@/lib/skill-runtime/types';
 
 const chatPanelSource = readFileSync(
@@ -30,6 +34,12 @@ const canvasClientSource = readFileSync(
   resolve(process.cwd(), 'src/lib/skill-runtime/canvas-client.ts'),
   'utf8',
 );
+
+const contentCommerceSkillIds = [
+  'preset-video-platform-thumbnails',
+  'preset-pinterest-pins',
+  'preset-batch-sku-assets',
+] as const;
 
 function catalogSkill(id: string, allowedSurfaces: SkillDefinition['allowedSurfaces']): SkillDefinition {
   return {
@@ -164,6 +174,19 @@ describe('canvas chat Skill catalog contract', () => {
       expect.objectContaining({ id: 'preset-omnichannel-campaign' }),
     ]));
     expect(chatPanelSource).not.toMatch(/preset-(?:ad-ab-variants|retargeting-creative|omnichannel-campaign)/);
+  });
+
+  it('shares all three content-commerce Skill versions with Workflow without embedding their IDs in the panel', () => {
+    const canvasVersions = new Map(CANVAS_WORKFLOW_SKILLS.map(skill => [skill.id, skill.version]));
+    const simpleChatIds = new Set(SIMPLE_CHAT_PRESET_SKILLS.map(skill => skill.id));
+
+    expect(CANVAS_WORKFLOW_SKILLS).toHaveLength(27);
+    expect(SIMPLE_CHAT_PRESET_SKILLS).toHaveLength(16);
+    for (const id of contentCommerceSkillIds) {
+      expect(canvasVersions.get(id)).toBe(1);
+      expect(simpleChatIds.has(id)).toBe(false);
+      expect(chatPanelSource).not.toContain(id);
+    }
   });
 
   it('rejects incomplete catalog entries instead of exposing malformed Skills to the panel', async () => {

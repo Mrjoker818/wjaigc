@@ -315,6 +315,23 @@ describe('SkillInputFields', () => {
 });
 
 describe('SkillRunProgress', () => {
+  it('keeps completed siblings visible while a later batch item is still running', () => {
+    render(<SkillRunProgress projection={projection({
+      progress: 67,
+      plan: [
+        { id: 'sku-a', label: 'SKU A', status: 'completed' },
+        { id: 'sku-b', label: 'SKU B', status: 'processing' },
+        { id: 'sku-c', label: 'SKU C', status: 'completed' },
+      ],
+      currentStepId: 'sku-b',
+    })} />);
+
+    expect(screen.getByRole('progressbar', { name: '运行进度' }).getAttribute('value')).toBe('67');
+    expect(screen.getByText('SKU A').parentElement?.textContent).toContain('已完成');
+    expect(screen.getByText('SKU B').parentElement?.textContent).toContain('执行中');
+    expect(screen.getByText('SKU C').parentElement?.textContent).toContain('已完成');
+  });
+
   it('shows the estimate, projected phase, progress, and active controls', () => {
     const onPause = vi.fn();
     const onCancel = vi.fn();

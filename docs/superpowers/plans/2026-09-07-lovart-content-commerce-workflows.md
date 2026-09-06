@@ -499,7 +499,7 @@ Commit: `feat: execute batch skill outputs durably`
 - Consumes: 动态 27 项 Canvas/Workflow 目录。
 - Preserves: Simple Chat 16 项、旧 24 项行为和现有工作区入口。
 
-- [ ] **Step 1: 写入口合同 RED 测试**
+- [x] **Step 1: 写入口合同 RED 测试**
 
 ```ts
 for (const id of [
@@ -515,7 +515,7 @@ for (const id of [
 
 断言组件源码不静态复制三个 ID，来源版本在 Canvas 与 Workflow 都由服务端授权绑定。
 
-- [ ] **Step 2: 扩展 Chromium E2E**
+- [x] **Step 2: 扩展 Chromium E2E**
 
 使用测试数据库与可控供应商夹具：
 
@@ -524,18 +524,20 @@ for (const id of [
 - CSV 三行批次逐项显示，刷新后状态与顺序恢复。
 - Simple Chat 搜索三个名称均无结果。
 
-- [ ] **Step 3: 运行双入口回归**
+- [x] **Step 3: 运行双入口回归**
 
 Run: `pnpm exec vitest run src/__tests__/components/chat-panel-skill-catalog-contract.test.ts src/__tests__/components/node-editor-skill-node.test.tsx src/__tests__/components/simple-chat-skill-isolation.test.tsx src/__tests__/components/skill-runtime-controls.test.tsx`
 Run: `pnpm exec playwright test tests/e2e/skill-runtime-canvas-workflow.spec.ts --project=chromium`
 Expected: 组件和 E2E 全 PASS；没有新底部工具栏按钮。
 
-- [ ] **Step 4: 运行执行器特判扫描并提交**
+- [x] **Step 4: 运行执行器特判扫描并提交**
 
 Run: `rg -n "preset-video-platform-thumbnails|preset-pinterest-pins|preset-batch-sku-assets" src/lib/skill-runtime/executor.ts src/lib/skill-runtime/service.ts src/lib/skill-runtime/step-registry.ts src/lib/skill-runtime/cost-estimator.ts`
 Expected: 无匹配。
 
 Commit: `test: cover second Lovart workflows across workspaces`
+
+验证记录：组件、目录合同、运行控件和安全图片元数据专项共 `110/110` 通过；生产构建在 `NODE_OPTIONS=--max-old-space-size=8192` 下通过并生成 `119/119` 页面；隔离 PostgreSQL 与可控供应商夹具下 Chromium 生产态 E2E `2/2` 通过，覆盖 Canvas 双缩略图、CSV 三 SKU 逐项输出、刷新恢复、Workflow 三 Pinterest 输出、报价与实扣一致，以及 Simple Chat 16 项与 Canvas/Workflow 27 项隔离。执行器特判扫描无匹配。期间发现 AssetVersion 缺失宽高会误触发质量门禁，已按 TDD 修复并单独提交。
 
 ---
 

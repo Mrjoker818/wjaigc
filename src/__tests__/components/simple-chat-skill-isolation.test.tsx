@@ -94,9 +94,15 @@ describe('Simple Chat Skill catalog isolation', () => {
       'preset-ad-ab-variants',
       'preset-retargeting-creative',
       'preset-omnichannel-campaign',
+      'preset-video-platform-thumbnails',
+      'preset-pinterest-pins',
+      'preset-batch-sku-assets',
     ]));
     expect(screen.queryByText('广告 A/B 变体')).toBeNull();
     expect(screen.queryByText('再营销素材')).toBeNull();
     expect(screen.queryByText('全渠道活动素材包')).toBeNull();
+    expect(screen.queryByText('YouTube/B站缩略图')).toBeNull();
+    expect(screen.queryByText('Pinterest 图钉')).toBeNull();
+    expect(screen.queryByText('批量 SKU 商品素材')).toBeNull();
   });
 });

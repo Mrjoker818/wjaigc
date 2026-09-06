@@ -47,6 +47,9 @@ test('独立智能对话只显示 16 项专属 Skills 且不含画布 Skills', a
   await expect(renderedSkills).toHaveCount(16);
   await expect(page.getByText('PPT大师', { exact: true })).toBeVisible();
   await expect(page.getByText('电商商品套图', { exact: true })).toHaveCount(0);
+  await expect(page.getByText('YouTube/B站缩略图', { exact: true })).toHaveCount(0);
+  await expect(page.getByText('Pinterest 图钉', { exact: true })).toHaveCount(0);
+  await expect(page.getByText('批量 SKU 商品素材', { exact: true })).toHaveCount(0);
   await writeStage4Metrics(stage4Evidence, testInfo, 'simple-chat-skill-isolation', {
     simpleChat: simpleChatSkills.map(skill => `${skill.id}@${skill.version}`).sort(),
     canvasIntersection: simpleChatSkills.filter(skill => canvasIds.has(skill.id)).map(skill => skill.id),

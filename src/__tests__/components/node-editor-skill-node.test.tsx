@@ -7,6 +7,7 @@ import { resolve } from 'node:path';
 
 import NodeEditor from '@/components/node-editor';
 import { loadSavedWorkflowSkillResult } from '@/lib/skill-runtime/workflow-client';
+import { LOVART_CONTENT_COMMERCE_SKILLS } from '@/lib/skill-runtime/content-commerce-presets';
 import { createEmptyWorkflow, createWorkflowNode } from '@/lib/workflow-engine';
 
 const workflowSkill = {
@@ -655,6 +656,30 @@ describe('NodeEditor workflow Skill node', () => {
     expect(await screen.findByLabelText('活动名称')).toBeTruthy();
     expect(screen.getByRole('group', { name: /投放渠道/ })).toBeTruthy();
     expect(screen.getByRole('checkbox', { name: '小红书' })).toBeTruthy();
+  });
+
+  it('renders the three content-commerce Skills from the Workflow catalog with their server-defined inputs', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === '/api/skills?surface=workflow') {
+        return new Response(JSON.stringify({ skills: LOVART_CONTENT_COMMERCE_SKILLS }), { status: 200 });
+      }
+      return new Response('{}', { status: 200 });
+    }));
+    vi.stubGlobal('matchMedia', vi.fn(() => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() })));
+    vi.stubGlobal('ResizeObserver', class { observe(): void {} unobserve(): void {} disconnect(): void {} });
+
+    const node = createWorkflowNode('ai-skill', 0, 0);
+    render(<NodeEditor workflow={{ ...createEmptyWorkflow('Content commerce Skills'), nodes: [node] }} projectId="project-a" canvasImages={[]} />);
+    fireEvent.mouseDown(screen.getByLabelText(node.label), { button: 0 });
+    fireEvent.mouseUp(screen.getByLabelText(node.label), { button: 0 });
+
+    const skillSelect = await screen.findByRole('combobox', { name: 'Skill' });
+    expect(within(skillSelect).getByRole('option', { name: 'YouTube/B站缩略图' })).toBeTruthy();
+    expect(within(skillSelect).getByRole('option', { name: 'Pinterest 图钉' })).toBeTruthy();
+    expect(within(skillSelect).getByRole('option', { name: '批量 SKU 商品素材' })).toBeTruthy();
+    fireEvent.change(skillSelect, { target: { value: 'preset-batch-sku-assets' } });
+    expect(await screen.findByLabelText('导入 SKU 数据')).toBeTruthy();
+    expect(screen.getByLabelText('生成比例')).toBeTruthy();
   });
 
   it('shows AssetVersion inputs bound through an upstream image connection', async () => {

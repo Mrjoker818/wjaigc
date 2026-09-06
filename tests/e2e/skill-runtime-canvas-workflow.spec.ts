@@ -72,6 +72,8 @@ interface SkillRunEvidence {
   skillVersion: number;
   status: string;
   assetVersionIds: string[];
+  steps: Array<{ id: string; label: string; status: string }>;
+  creditCost: number;
 }
 
 interface AssetReferenceEvidence {
@@ -111,7 +113,7 @@ async function readCatalog(page: Page, surface: 'canvas' | 'workflow'): Promise<
   return payload.skills ?? [];
 }
 
-test('画布与节点模式使用同一套 24 项 Skill 定义和版本', async ({ page, stage4Evidence }, testInfo) => {
+test('画布与节点模式使用同一套 27 项 Skill 并逐项恢复结果', async ({ page, stage4Evidence }, testInfo) => {
   test.skip(
     !process.env.DATABASE_URL && !process.env.PGDATABASE_URL,
     'BLOCKED: DATABASE_URL or PGDATABASE_URL is required for the isolated Stage 4 Skill fixture',
@@ -169,12 +171,15 @@ test('画布与节点模式使用同一套 24 项 Skill 定义和版本', async 
   const identity = (skills: CatalogSkill[]) => skills
     .map(skill => `${skill.id}@${skill.version}`)
     .sort();
-  expect(canvasSkills).toHaveLength(24);
+  expect(canvasSkills).toHaveLength(27);
   expect(identity(workflowSkills)).toEqual(identity(canvasSkills));
   expect(canvasSkills.map(skill => skill.id)).toEqual(expect.arrayContaining([
     'preset-ad-ab-variants',
     'preset-retargeting-creative',
     'preset-omnichannel-campaign',
+    'preset-video-platform-thumbnails',
+    'preset-pinterest-pins',
+    'preset-batch-sku-assets',
   ]));
   await writeStage4Metrics(stage4Evidence, testInfo, 'skill-catalog-identity', {
     canvas: identity(canvasSkills),
@@ -186,17 +191,18 @@ test('画布与节点模式使用同一套 24 项 Skill 定义和版本', async 
   if (await expandPanel.isVisible().catch(() => false)) await expandPanel.click();
   await page.getByRole('button', { name: 'AI聊天', exact: true }).click();
   await page.getByRole('button', { name: 'Skills技能库' }).click();
+  await expect(page.getByText('YouTube/B站缩略图', { exact: true }).last()).toBeVisible();
+  await expect(page.getByText('Pinterest 图钉', { exact: true }).last()).toBeVisible();
+  await expect(page.getByText('批量 SKU 商品素材', { exact: true }).last()).toBeVisible();
   await expect(page.getByText('再营销素材', { exact: true }).last()).toBeVisible();
   await expect(page.getByText('全渠道活动素材包', { exact: true }).last()).toBeVisible();
-  const canvasSkill = page.getByText('广告 A/B 变体', { exact: true }).last();
+  const canvasSkill = page.getByText('YouTube/B站缩略图', { exact: true }).last();
   await expect(canvasSkill).toBeVisible();
   await canvasSkill.click();
-  await page.getByLabel('活动名称').fill('秋季增长测试');
-  await page.getByLabel('产品或服务').fill('测试耳机');
-  await page.getByLabel('目标受众').fill('通勤用户');
-  await page.getByLabel('核心卖点').fill('主动降噪');
-  await page.getByLabel('营销目标').selectOption('点击');
-  await page.getByLabel('投放渠道').selectOption('信息流');
+  await page.getByLabel('视频标题').fill('一分钟看懂主动降噪');
+  await page.getByLabel('主体').fill('无线降噪耳机');
+  await page.getByLabel('目标观众').fill('通勤用户');
+  await page.getByLabel('点击动机').fill('对比降噪前后的体验差异');
   const canvasSubmission = page.waitForResponse(response => (
     response.request().method() === 'POST'
     && new URL(response.url()).pathname === '/api/skill-runs'
@@ -210,7 +216,7 @@ test('画布与节点模式使用同一套 24 项 Skill 定义和版本', async 
     modelBindings?: Record<string, { providerId?: string; modelId?: string }>;
   };
   const canvasSubmissionPayload = await canvasSubmissionResponse.json() as { runId?: string };
-  expect(canvasRequest.skillId).toBe('preset-ad-ab-variants');
+  expect(canvasRequest.skillId).toBe('preset-video-platform-thumbnails');
   expect(canvasRequest.skillVersion).toBe(1);
   expect(canvasRequest.modelBindings?.orchestrator).toEqual({
     providerId: 'stage4-chat-provider',
@@ -231,18 +237,24 @@ test('画布与节点模式使用同一套 24 项 Skill 定义和版本', async 
   expect(canvasRun.skillId).toBe(canvasRequest.skillId);
   expect(canvasRun.skillVersion).toBe(canvasRequest.skillVersion);
   expect(canvasRun.assetVersionIds).toHaveLength(2);
+  expect(canvasRun.steps.map(step => step.label)).toEqual([
+    '制定缩略图方案', 'YouTube 缩略图', 'B站缩略图',
+  ]);
 
   await readAssetReference(
     page,
     String(fixture.canvasProject.id),
     canvasRun.assetVersionIds[0],
   );
-  const canvasPreview = page.getByRole('img', { name: 'canvas image', exact: true }).last();
+  const canvasImages = page.locator('[data-canvas-image-id]');
+  await expect(canvasImages).toHaveCount(3, { timeout: 20_000 });
+  const canvasPreview = canvasImages.last().getByRole('img', { name: 'canvas image', exact: true });
   await expect(canvasPreview).toBeVisible({ timeout: 20_000 });
   await expect.poll(async () => canvasPreview.evaluate(image => ({
     width: (image as HTMLImageElement).naturalWidth,
     height: (image as HTMLImageElement).naturalHeight,
   }))).toEqual({ width: 1, height: 1 });
+  await canvasImages.last().click();
   await page.getByRole('button', { name: '展开更多工具', exact: true }).click();
   await page.locator('[data-image-toolbar-overflow]').getByRole('button', { name: '下载', exact: true }).click();
   await expect(page.getByText('PNG 格式', { exact: true })).toBeVisible();
@@ -256,6 +268,75 @@ test('画布与节点模式使用同一套 24 项 Skill 定义和版本', async 
   expect(downloadedMetadata.width).toBe(1);
   expect(downloadedMetadata.height).toBe(1);
 
+  await page.getByTitle('关闭 Skill').click();
+  await page.getByPlaceholder('搜索 Skills...').fill('批量 SKU');
+  await page.getByText('批量 SKU 商品素材', { exact: true }).last().click();
+  const skuCsv = [
+    'sku,name,sellingPoints,variant,headline',
+    'SKU-A,黑色耳机,主动降噪,黑色,安静通勤',
+    'SKU-B,白色耳机,长续航,白色,全天陪伴',
+    'SKU-C,蓝色耳机,低延迟,蓝色,游戏音画同步',
+  ].join('\n');
+  await page.getByLabel('导入 SKU 数据').setInputFiles({
+    name: 'sku-batch.csv',
+    mimeType: 'text/csv',
+    buffer: Buffer.from(skuCsv, 'utf8'),
+  });
+  await expect(page.getByText('共 3 行，预览前 3 行', { exact: true })).toBeVisible();
+  const batchSubmission = page.waitForResponse(response => (
+    response.request().method() === 'POST'
+    && new URL(response.url()).pathname === '/api/skill-runs'
+  ));
+  await page.getByRole('button', { name: '运行 Skill', exact: true }).click();
+  const batchSubmissionResponse = await batchSubmission;
+  expect(batchSubmissionResponse.ok()).toBe(true);
+  const batchRequest = batchSubmissionResponse.request().postDataJSON() as {
+    skillId?: string;
+    inputValues?: { rows?: Array<{ sku?: string }> };
+  };
+  expect(batchRequest.skillId).toBe('preset-batch-sku-assets');
+  expect(batchRequest.inputValues?.rows?.map(row => row.sku)).toEqual(['SKU-A', 'SKU-B', 'SKU-C']);
+  const batchPayload = await batchSubmissionResponse.json() as { runId?: string };
+  expect(typeof batchPayload.runId).toBe('string');
+  await expect.poll(
+    async () => (await readSkillRun(page, batchPayload.runId!)).status,
+    { timeout: 90_000, intervals: [250, 500, 1_000, 2_000] },
+  ).toBe('completed');
+  const batchRun = await readSkillRun(page, batchPayload.runId!);
+  expect(batchRun.assetVersionIds).toHaveLength(3);
+  expect(batchRun.steps.map(step => step.label)).toEqual([
+    '检查批次规则', 'SKU 商品素材 1', 'SKU 商品素材 2', 'SKU 商品素材 3',
+  ]);
+  const batchAssetOrder = [...batchRun.assetVersionIds];
+  await expect(page.locator('[data-canvas-image-id]')).toHaveCount(6, { timeout: 20_000 });
+  await expect.poll(async () => {
+    const response = await page.request.get('/api/user-data/sync?key=projects');
+    if (!response.ok()) return 0;
+    const payload = await response.json() as {
+      value?: Array<{ id?: string; canvasImages?: unknown[] }>;
+    };
+    return payload.value?.find(project => project.id === fixture.canvasProject.id)?.canvasImages?.length ?? 0;
+  }, { timeout: 20_000, intervals: [250, 500, 1_000] }).toBeGreaterThanOrEqual(6);
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await expect(page.locator('[data-canvas-viewport]')).toBeVisible({ timeout: 20_000 });
+  const restoredBatchRun = await readSkillRun(page, batchPayload.runId!);
+  expect(restoredBatchRun.status).toBe('completed');
+  expect(restoredBatchRun.assetVersionIds).toEqual(batchAssetOrder);
+  expect(restoredBatchRun.steps.map(step => step.label)).toEqual(batchRun.steps.map(step => step.label));
+
+  await page.locator('[data-canvas-image-id]').first().click();
+  const reopenedExpandPanel = page.getByRole('button', { name: '展开面板', exact: true });
+  if (await reopenedExpandPanel.isVisible().catch(() => false)) await reopenedExpandPanel.click();
+  await page.getByRole('button', { name: 'AI聊天', exact: true }).click();
+  await page.getByRole('button', { name: 'Skills技能库' }).click();
+  await page.getByPlaceholder('搜索 Skills...').fill('批量 SKU');
+  await page.getByText('批量 SKU 商品素材', { exact: true }).last().click();
+  await page.getByRole('button', { name: `查看任务 ${batchPayload.runId}` }).click();
+  const restoredStepLabels = page.locator('ol li > span:first-child');
+  await expect(restoredStepLabels).toHaveText([
+    '检查批次规则', 'SKU 商品素材 1', 'SKU 商品素材 2', 'SKU 商品素材 3',
+  ]);
+
   const collapsePanel = page.getByRole('button', { name: '收起面板', exact: true });
   if (await collapsePanel.isVisible().catch(() => false)) await collapsePanel.click();
   await page.getByTitle('节点模式').first().click();
@@ -266,22 +347,24 @@ test('画布与节点模式使用同一套 24 项 Skill 定义和版本', async 
     await page.getByLabel('Skill 执行').last().click();
   }
   await expect(skillSelect).toBeVisible({ timeout: 20_000 });
-  await expect(skillSelect.locator('option')).toHaveCount(25);
-  await skillSelect.selectOption('preset-ad-ab-variants');
-  await expect(skillSelect).toHaveValue('preset-ad-ab-variants');
+  await expect(skillSelect.locator('option')).toHaveCount(28);
+  await skillSelect.selectOption('preset-pinterest-pins');
+  await expect(skillSelect).toHaveValue('preset-pinterest-pins');
   await expect(page.getByText('已选择 1 张来源图片', { exact: true }).last()).toBeVisible();
-  await page.getByLabel('活动名称').last().fill('秋季增长测试');
-  await page.getByLabel('产品或服务').last().fill('测试耳机');
+  await page.getByLabel('内容主题').last().fill('通勤降噪指南');
   await page.getByLabel('目标受众').last().fill('通勤用户');
-  await page.getByLabel('核心卖点').last().fill('主动降噪');
-  await page.getByLabel('营销目标').last().selectOption('点击');
-  await page.getByLabel('投放渠道').last().selectOption('信息流');
+  await page.getByLabel('目标').last().selectOption('收藏');
+  await page.getByLabel('图钉数量').last().selectOption('3');
   await page.getByRole('combobox', { name: 'orchestrator 模型' }).selectOption(
     'stage4-chat-provider::stage4-chat-model',
   );
   await page.getByRole('combobox', { name: 'image 模型' }).selectOption(
     'stage4-image-provider::stage4-image-model',
   );
+  const workflowEstimate = page.waitForResponse(response => (
+    response.request().method() === 'POST'
+    && new URL(response.url()).pathname === '/api/skill-runs/estimate'
+  ), { timeout: 90_000 });
   const workflowSubmission = page.waitForResponse(response => (
     response.request().method() === 'POST'
     && new URL(response.url()).pathname === '/api/workflow/execute'
@@ -289,6 +372,12 @@ test('画布与节点模式使用同一套 24 项 Skill 定义和版本', async 
   ), { timeout: 90_000 });
   await page.getByRole('button', { name: '执行工作流', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Skill 费用预估', exact: true })).toBeVisible({ timeout: 20_000 });
+  const workflowEstimateResponse = await workflowEstimate;
+  expect(workflowEstimateResponse.ok()).toBe(true);
+  const workflowEstimatePayload = await workflowEstimateResponse.json() as { minimum?: number; maximum?: number };
+  expect(workflowEstimatePayload.minimum).toBe(workflowEstimatePayload.maximum);
+  expect(workflowEstimatePayload.maximum).toBeGreaterThan(0);
+  await expect(page.getByText(`${workflowEstimatePayload.maximum} 积分`, { exact: true })).toBeVisible();
   await page.getByRole('button', { name: '确认执行', exact: true }).click();
   const workflowSubmissionResponse = await workflowSubmission;
   expect(workflowSubmissionResponse.ok()).toBe(true);
@@ -302,8 +391,8 @@ test('画布与节点模式使用同一套 24 项 Skill 定义和版本', async 
     }>;
   };
   const workflowSkillNode = workflowRequest.nodes?.find(node => node.type === 'ai-skill');
-  expect(workflowSkillNode?.config?.skillId).toBe(canvasRequest.skillId);
-  expect(workflowSkillNode?.config?.version).toBe(canvasRequest.skillVersion);
+  expect(workflowSkillNode?.config?.skillId).toBe('preset-pinterest-pins');
+  expect(workflowSkillNode?.config?.version).toBe(1);
   await expect(page.getByText('执行完成', { exact: true })).toBeVisible({ timeout: 90_000 });
   const workflowStatusResponse = await page.request.post('/api/workflow/execute', {
     data: { action: 'status', executionId: workflowSubmissionPayload.executionId },
@@ -316,12 +405,16 @@ test('画布与节点模式使用同一套 24 项 Skill 定义和版本', async 
   expect(workflowStatus.status).toBe('completed');
   const workflowOutput = workflowStatus.results?.[workflowSkillNode?.id || '']?.output;
   expect(typeof workflowOutput?.runId).toBe('string');
-  expect(workflowOutput?.assetVersionIds).toHaveLength(2);
+  expect(workflowOutput?.assetVersionIds).toHaveLength(3);
   const workflowRun = await readSkillRun(page, workflowOutput!.runId!);
   expect(workflowRun.status).toBe('completed');
-  expect(workflowRun.skillId).toBe(canvasRun.skillId);
-  expect(workflowRun.skillVersion).toBe(canvasRun.skillVersion);
-  expect(workflowRun.assetVersionIds).toHaveLength(2);
+  expect(workflowRun.skillId).toBe('preset-pinterest-pins');
+  expect(workflowRun.skillVersion).toBe(1);
+  expect(workflowRun.assetVersionIds).toHaveLength(3);
+  expect(workflowRun.steps.map(step => step.label)).toEqual([
+    '制定图钉系列方案', '主图钉', '细节图钉', '转化图钉',
+  ]);
+  expect(workflowRun.creditCost).toBe(workflowEstimatePayload.maximum);
   expect(workflowOutput?.assetVersionIds).toEqual(workflowRun.assetVersionIds);
   await writeStage4Metrics(stage4Evidence, testInfo, 'skill-run-surface-identity', {
     canvas: {
@@ -329,6 +422,12 @@ test('画布与节点模式使用同一套 24 项 Skill 定义和版本', async 
       skillId: canvasRun.skillId,
       skillVersion: canvasRun.skillVersion,
       assetVersionIds: canvasRun.assetVersionIds,
+    },
+    batch: {
+      runId: batchRun.runId,
+      skillId: batchRun.skillId,
+      skillVersion: batchRun.skillVersion,
+      assetVersionIds: batchRun.assetVersionIds,
     },
     workflow: {
       runId: workflowRun.runId,
