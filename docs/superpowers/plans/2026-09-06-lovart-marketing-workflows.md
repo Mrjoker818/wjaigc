@@ -517,6 +517,8 @@ Commit: `test: cover marketing skills across canvas and workflow`
 
 > 2026-09-07 云端检查点：Step 6 首次执行已复现 Canvas 来源字段与实际请求来源不一致。`LOVART-CANVAS-002` 已按 TDD 在本地修复并通过全量门禁，尚未部署复验；Task 6 仍处于 Step 6，不回退、不重复 Task 1-5 或 Task12。
 
+> 2026-09-07 续接检查点：Coze `4786e59b` 已证明托管来源图片显示为“已选择 1 张来源图片”，随后真实估价复现 `LOVART-CANVAS-003`（必填下拉项仅有视觉默认值，请求缺少 `objective`）。该问题已按 RED/GREEN 最小修复；扩大相关回归 `94/94`、全仓 `5304 passed / 171 conditional skipped / 0 failed`、类型、构建版 ESLint、保护基线和生产构建 `119/119` 已通过。待推送和 Coze 复验。Task 6 仍只执行 Step 6，不重复已关闭内容。
+
 **Files:**
 - Modify: `docs/testing/BUG_REGISTER.md`
 - Modify: `docs/testing/REGRESSION_REPORT.md`

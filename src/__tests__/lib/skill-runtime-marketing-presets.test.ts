@@ -55,12 +55,12 @@ describe('Lovart marketing Skill definitions', () => {
     const [variants, retargeting, omnichannel] = LOVART_MARKETING_SKILLS;
 
     expect(variants.inputs.slice(-3)).toEqual([
-      { key: 'objective', label: '营销目标', kind: 'select', required: true, options: ['认知', '点击', '加购', '购买', '留资'] },
-      { key: 'channel', label: '投放渠道', kind: 'select', required: true, options: ['信息流', '搜索展示', '社交媒体', '电商站内'] },
+      { key: 'objective', label: '营销目标', kind: 'select', required: true, defaultValue: '认知', options: ['认知', '点击', '加购', '购买', '留资'] },
+      { key: 'channel', label: '投放渠道', kind: 'select', required: true, defaultValue: '信息流', options: ['信息流', '搜索展示', '社交媒体', '电商站内'] },
       { key: 'hypothesis', label: '测试假设', kind: 'text', required: false, defaultValue: '未指定；请提出一个可验证的单变量假设' },
     ]);
     expect(retargeting.inputs.slice(-4)).toEqual([
-      { key: 'funnelStage', label: '漏斗阶段', kind: 'select', required: true, options: ['浏览未点击', '点击未加购', '加购未购买', '老客复购'] },
+      { key: 'funnelStage', label: '漏斗阶段', kind: 'select', required: true, defaultValue: '浏览未点击', options: ['浏览未点击', '点击未加购', '加购未购买', '老客复购'] },
       { key: 'objection', label: '购买顾虑', kind: 'text', required: false, defaultValue: '未提供；请根据漏斗阶段判断常见顾虑，但不得编造事实' },
       { key: 'offer', label: '促销方案', kind: 'text', required: false, defaultValue: '未提供优惠；使用非价格行动理由，不得虚构折扣' },
       { key: 'urgency', label: '紧迫程度', kind: 'select', required: false, defaultValue: '温和', options: ['无', '温和', '明确'] },

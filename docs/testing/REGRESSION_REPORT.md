@@ -2841,3 +2841,13 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - 新鲜本地证据：聚焦 `58/58`，扩大相关回归 `152/152`；全仓 `652 passed / 32 skipped` 测试文件，`5304 passed / 171 conditional skipped / 0 failed`。条件跳过源于本轮未设置 `POSTGRES_TEST_DATABASE_URL`，不计作真库通过。
 - TypeScript 退出 0；ESLint `0 errors / 943 warnings`；保护基线 `38/38 / 0 drift / 0 warnings`；干净 `.next` 后生产构建退出 0，webpack 约 12.5 分钟并生成 `119/119` 页面。Windows 构建峰值内存较高，属于工程资源风险，不隐藏。
 - **回归判定：LOCAL FIX PASS / COZE REAL FLOW PENDING。** 下一步只部署本候选并继续 Task 6 Step 6；Task 1-5 和 Task12 不重复执行。
+
+## 2026-09-07 Lovart Canvas 营销下拉默认值回归
+
+- Coze `4786e59b` 已证明 `LOVART-CANVAS-002` 的托管来源绑定生效：选择一张 `AssetVersion` 图片后，广告 A/B 面板显示“已选择 1 张来源图片”。
+- 同一次真实估价发现 `LOVART-CANVAS-003`：营销目标和投放渠道虽在下拉框视觉显示首项，请求仍返回 `SKILL_INPUT_REQUIRED: objective`。
+- RED：营销预设合同 `1 failed / 17 passed`，精确证明三个必填下拉项缺少 `defaultValue`。
+- GREEN：权威定义补齐 A/B 的 `objective=认知`、`channel=信息流` 和再营销的 `funnelStage=浏览未点击`；扩大相关回归 `94/94`。
+- 新鲜全仓门禁：`652 passed / 32 skipped` 测试文件，`5304 passed / 171 conditional skipped / 0 failed`；TypeScript、构建版 ESLint、保护基线 `38/38` 和差异检查退出 0。171 项因缺少隔离 PostgreSQL 变量而跳过，不计作通过。
+- 生产构建：8 GiB Node 堆退出 0，Webpack 约 12.8 分钟、TypeScript 53 秒，生成 `119/119` 页面；保留本地数据目录不可跨部署的构建警告。
+- **回归判定：LOCAL FIX PASS / NEW COZE DEPLOYMENT PENDING。** 尚不能把显示默认值或本地测试替代真实估价、扣费、双成品与恢复证据。

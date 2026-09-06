@@ -4098,3 +4098,16 @@ Task 4 独立审查的两个 Minor 继续保留给最终审查：单元夹具 op
 | 永久测试 | 新增来源收集/绑定测试，并扩展 Canvas Skill 运行时与工作区合同；聚焦 `58/58`、扩大聚焦 `152/152`、全仓 `5304 passed / 171 conditional skipped / 0 failed`。 |
 | 工程门禁 | TypeScript 通过；ESLint `0 errors / 943 warnings`；保护基线 `38/38 / 0 drift / 0 warnings`；Windows 干净缓存生产构建退出 0，webpack 约 12.5 分钟，生成 `119/119` 页面。 |
 | 当前状态 | **本地修复通过 / Coze 云端复验待完成。** 不得把本地字段一致性测试替代真实估价、付费执行、AssetVersion、刷新恢复和账务证据。 |
+
+### LOVART-CANVAS-003：营销 Skill 必填下拉项未进入估价请求（2026-09-07）
+
+| 字段 | 内容 |
+|---|---|
+| 严重等级 | P1：表单视觉上已有默认选项，但请求状态缺少必填字段，广告 A/B 无法估价和执行。 |
+| 云端复现 | Coze 已部署 `4786e59b`。选择托管图片后来源字段正确显示“已选择 1 张来源图片”，但点击“估算积分”返回 `SKILL_INPUT_REQUIRED: objective`。 |
+| 根因 | 原生 `select` 会视觉选中第一项，运行时初始化却只写入声明了 `defaultValue` 的字段；`objective`、`channel` 与再营销 `funnelStage` 没有默认值，造成 UI 与请求状态分离。 |
+| TDD | 先扩展营销预设合同并观察 `1 failed / 17 passed`，失败内容精确指向缺失默认值；随后才修改生产定义。 |
+| 修复 | 在服务端权威营销 Skill 定义中增加 `objective=认知`、`channel=信息流`、`funnelStage=浏览未点击`，不在组件或 Skill ID 分支中补丁。 |
+| 永久测试 | `skill-runtime-marketing-presets.test.ts` 锁定三个默认值；扩大相关回归 `94/94`，全仓 `5304 passed / 171 conditional skipped / 0 failed`。 |
+| 工程门禁 | TypeScript、构建版 ESLint、保护基线 `38/38`、`git diff --check` 均退出 0；8 GiB Node 堆生产构建退出 0，Webpack 约 12.8 分钟、TypeScript 53 秒、`119/119` 页面。 |
+| 当前状态 | **本地修复通过 / 新候选尚未推送部署。** 171 项因未配置隔离 PostgreSQL 而跳过，不计作通过；云端估价、付费执行与双成品仍需在部署后复验。 |

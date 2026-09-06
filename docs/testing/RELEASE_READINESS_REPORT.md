@@ -2172,3 +2172,11 @@ The focused gate test passes `7/7`; the actual protected-baseline command passes
 - 云端真实验收发现 `LOVART-CANVAS-002`：选中图片和营销 Skill 来源字段显示不一致。该问题已建立失败测试并最小修复，本地聚焦、全量、类型、Lint、保护基线和 `119/119` 构建均有新鲜退出 0 证据。
 - 修复不改变 Skill 定义、供应商路由、执行状态机、积分规则或原始素材，只统一 Canvas 来源版本的 UI 与请求数据，并增加缺失 AssetVersion 的失败关闭提示。
 - **当前发布结论仍为有条件通过。** 允许将该修复推送 `main` 进入 Coze 复验；在 Canvas A/B 真实估价与双成品、Workflow 全渠道包、失败单步重试、取消唯一退款、刷新恢复及 Simple Chat 16 项隔离取得云端证据前，不得关闭 Lovart 第一批或宣布全平台通过。
+
+## 2026-09-07 Lovart 营销必填默认值发布判断
+
+- Coze 已验证来源图片显示与真实选中素材一致，`LOVART-CANVAS-002` 的来源绑定边界取得正向证据。
+- 同轮估价被 `SKILL_INPUT_REQUIRED: objective` 阻断，登记为 `LOVART-CANVAS-003`；已按 RED/GREEN 最小补齐权威定义的三个必填下拉默认值，扩大相关回归 `94/94`。
+- 新鲜全仓门禁为 `5304 passed / 171 conditional skipped / 0 failed`，类型、构建版 ESLint、保护基线与差异检查退出 0；生产构建退出 0 并生成 `119/119` 页面。PostgreSQL 条件跳过保持未验证。
+- 本修复不改供应商选择、计费、任务幂等或状态终态；新候选仍须推送 `main`、Coze 精确同步及真实估价/执行复验。
+- **当前发布结论：有条件通过，Task 6 Step 6 继续。** 全平台与 Lovart 第一批均未关闭。
