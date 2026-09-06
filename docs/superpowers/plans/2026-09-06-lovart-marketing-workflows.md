@@ -519,6 +519,8 @@ Commit: `test: cover marketing skills across canvas and workflow`
 
 > 2026-09-07 续接检查点：Coze `4786e59b` 已证明托管来源图片显示为“已选择 1 张来源图片”，随后真实估价复现 `LOVART-CANVAS-003`（必填下拉项仅有视觉默认值，请求缺少 `objective`）。该问题已按 RED/GREEN 最小修复；扩大相关回归 `94/94`、全仓 `5304 passed / 171 conditional skipped / 0 failed`、类型、构建版 ESLint、保护基线和生产构建 `119/119` 已通过。待推送和 Coze 复验。Task 6 仍只执行 Step 6，不重复已关闭内容。
 
+> 2026-09-07 云端验收检查点：Coze 已运行 `main@da15f30d`。Canvas A/B 报价、双成品、两个 AssetVersion、来源保留与刷新恢复通过；取消样本精确退款一次且迟到窗口无终态覆盖；Workflow 全渠道包在沙箱实例丢失并恢复后继续完成，固定 APImart 路由、5/5 步骤、4 个 AssetVersion 和单次 242 积分计费均由持久事件证明；`/simple-chat` 仍为 16 Skills 且不含三项营销 Skill。仅“生产环境受控单步失败后只重试失败步骤”缺少安全故障注入条件，保持未验证；本地确定性故障夹具 `42/42` 通过。Task 6 仍处于 Step 6，不重复 Task 1-5 或 Task12。
+
 **Files:**
 - Modify: `docs/testing/BUG_REGISTER.md`
 - Modify: `docs/testing/REGRESSION_REPORT.md`

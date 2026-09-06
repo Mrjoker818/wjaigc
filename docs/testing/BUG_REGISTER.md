@@ -4110,4 +4110,17 @@ Task 4 独立审查的两个 Minor 继续保留给最终审查：单元夹具 op
 | 修复 | 在服务端权威营销 Skill 定义中增加 `objective=认知`、`channel=信息流`、`funnelStage=浏览未点击`，不在组件或 Skill ID 分支中补丁。 |
 | 永久测试 | `skill-runtime-marketing-presets.test.ts` 锁定三个默认值；扩大相关回归 `94/94`，全仓 `5304 passed / 171 conditional skipped / 0 failed`。 |
 | 工程门禁 | TypeScript、构建版 ESLint、保护基线 `38/38`、`git diff --check` 均退出 0；8 GiB Node 堆生产构建退出 0，Webpack 约 12.8 分钟、TypeScript 53 秒、`119/119` 页面。 |
-| 当前状态 | **本地修复通过 / 新候选尚未推送部署。** 171 项因未配置隔离 PostgreSQL 而跳过，不计作通过；云端估价、付费执行与双成品仍需在部署后复验。 |
+| 当前状态 | **已修复并完成 Coze 云端复验。** `main@da15f30d` 真实估价与付费 A/B 成功，两个 AssetVersion、来源保留、刷新恢复和账务均有证据。 |
+
+### LOVART-TASK6-CLOUD-001：营销工作流云端验收记录（2026-09-07）
+
+| 字段 | 内容 |
+|---|---|
+| 环境 | Coze 独立测试项目 `7671964106919837702`；预览域名 `62afe49a-716e-4d9e-99cd-a0be49c4794c-5000.dev.coze.site`；`main@da15f30dadec04431746de3052b341ec027be96d`。 |
+| Canvas A/B | `2a02c94e-fd50-4411-a0dc-4d9a151bc547` 完成，APImart `gpt-image-2`，报价/扣费 122，生成两个 AssetVersion，原来源节点未覆盖，刷新后双输出仍存在。 |
+| 取消与退款 | `22a9ca2f-8d29-43fb-9895-1e677a61392d` 取消后 `creditStatus=refunded`、`creditCost=122`、资产为空；余额从 8652 恢复至 8774，超过五分钟迟到窗口无后续事件及 AssetVersion。 |
+| Workflow 全渠道 | `executionId=exec-1788719062341-j29rg5`，Run `73d8c047-4d48-4690-87fd-f2a58f759b3d`；沙箱实例消失后从 PostgreSQL 恢复为 completed，5/5 步骤完成，4 个 AssetVersion，固定 APImart 图像/编排模型，单次扣费 242，最终余额 8410。 |
+| Simple Chat 隔离 | 云端 DOM 精确统计 16 Skills，`广告 A/B 变体`、`再营销素材`、`全渠道活动素材包` 均不存在。 |
+| 未闭环 | 生产环境没有安全故障注入开关，不能在不破坏供应商配置的前提下稳定制造“仅一个并行步骤可恢复失败”；该项保持未验证。本地确定性执行器夹具 `42/42` 通过，不能替代云端证据。 |
+| Console | 新鲜加载存在 3 条 Coze bridge CSP 错误，以及旧 Pear/APImart 远端图片 CORS 错误；本次 Skill API/工作流请求成功，但不得写成 Console 0 error。 |
+| 基础设施事件 | 验收期间沙箱返回 `instance_not_found`，自动预览构建又因并发 Next build 失败；同一项目内受控清理遗留构建和重建后恢复。该事件没有修改业务源码、数据库、账号、积分、供应商或 `stable`。 |

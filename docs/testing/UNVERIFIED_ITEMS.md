@@ -2376,3 +2376,12 @@ BUG-018 已从未验证项移除。剩余顺序为 `002-B -> 002-D -> 002-E`；�
 - [ ] 推送并部署含默认值修复的新候选，确认估价请求包含 `objective`、`channel`；再营销请求包含 `funnelStage`。
 - [ ] 估价成功后再执行真实付费 A/B，核对两个结果、两个新 AssetVersion、来源图不覆盖、保存刷新恢复及账务。
 - [ ] Workflow 全渠道包、受控失败单步重试、取消一次退款、迟到结果隔离、Simple Chat 16 项隔离和最终证据仍按原清单保留。
+
+### 2026-09-07 Task 6 云端验收更新
+
+- [x] `main@da15f30d` 已在 Coze 独立测试项目运行；Canvas A/B 报价、双成品、两个 AssetVersion、来源保留和刷新恢复通过。
+- [x] 当前归属取消 Run 只退款一次，五分钟迟到窗口后仍为 cancelled/refunded，未产生 AssetVersion。
+- [x] Workflow 全渠道包固定 APImart provider/model，5/5 步骤、4 个 AssetVersion 和单次 242 积分扣费完成；沙箱重建后从持久化状态恢复。
+- [x] `/simple-chat` 云端精确统计 16 Skills，三项营销 Skill 均不可见。
+- [ ] **唯一功能证据缺口：** 生产环境受控单步失败后，只重试失败步骤且不重复扣除已完成步骤。当前没有安全故障注入开关；本地确定性夹具 `42/42` 通过但不替代云端。
+- [ ] **发布环境残余：** 新鲜 Console 有 Coze bridge CSP 错误及历史 Pear/APImart 远端媒体 CORS 错误；必须分别归因并处理或形成受控豁免，不能记录为 Console clean。

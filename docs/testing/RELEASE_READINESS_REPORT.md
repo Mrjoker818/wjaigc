@@ -2180,3 +2180,11 @@ The focused gate test passes `7/7`; the actual protected-baseline command passes
 - 新鲜全仓门禁为 `5304 passed / 171 conditional skipped / 0 failed`，类型、构建版 ESLint、保护基线与差异检查退出 0；生产构建退出 0 并生成 `119/119` 页面。PostgreSQL 条件跳过保持未验证。
 - 本修复不改供应商选择、计费、任务幂等或状态终态；新候选仍须推送 `main`、Coze 精确同步及真实估价/执行复验。
 - **当前发布结论：有条件通过，Task 6 Step 6 继续。** 全平台与 Lovart 第一批均未关闭。
+
+## 2026-09-07 Lovart Task 6 云端核心验收判断
+
+- Canvas A/B、双 AssetVersion、来源保留、刷新恢复、当前归属取消、一次退款和迟到终态隔离均已取得真实 APImart、持久事件和积分证据。
+- Workflow 全渠道包取得固定 provider/model、5/5 步骤、4 个 AssetVersion、242 积分单次扣费及沙箱重建后持久恢复证据。
+- 独立 `/simple-chat` 保持 16 Skills，营销三项未泄漏。
+- 仍未取得生产环境“受控单步失败后仅重试失败步骤”的真实证据；没有安全注入开关时不得通过破坏供应商配置、恶意内容或猜测性操作制造结果。新鲜 Console 仍有 Coze CSP 和旧远端媒体 CORS 错误。
+- **当前发布结论：有条件通过。Lovart Task 6 完成度约 95%，Step 6 保留一项，Step 7 尚未关闭；全平台不能判定通过。**

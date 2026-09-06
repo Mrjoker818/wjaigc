@@ -1,0 +1,66 @@
+{
+  "candidate": "da15f30dadec04431746de3052b341ec027be96d",
+  "stable": "52f7c601ed150769e15d06fb435c6e360e28c9e7",
+  "environment": {
+    "cozeProjectId": "7671964106919837702",
+    "previewHost": "62afe49a-716e-4d9e-99cd-a0be49c4794c-5000.dev.coze.site",
+    "projectId": "project_1787549625844_nfmso3ts9"
+  },
+  "canvasAb": {
+    "completedRunId": "2a02c94e-fd50-4411-a0dc-4d9a151bc547",
+    "cancelledRunId": "22a9ca2f-8d29-43fb-9895-1e677a61392d",
+    "providerId": "api_1778430731224_533e09a",
+    "modelId": "gpt-image-2",
+    "completedCreditCost": 122,
+    "assetVersionIds": [
+      "fa3f6d04-f5ab-492e-8bfd-cabee5f572f8",
+      "864c0cc9-cf1a-4c31-8b47-eab299950028"
+    ],
+    "cancelledCreditStatus": "refunded",
+    "lateWindowMinutes": 5
+  },
+  "workflow": {
+    "executionId": "exec-1788719062341-j29rg5",
+    "runId": "73d8c047-4d48-4690-87fd-f2a58f759b3d",
+    "skillId": "preset-omnichannel-campaign",
+    "status": "completed",
+    "sourceVersionIds": ["919e5c53-0354-4cbe-b5ef-ea12aff9e941"],
+    "orchestrator": "api_1778428130626_2qpg71v::gemini-3.1-flash-lite-preview",
+    "image": "api_1778430731224_533e09a::gpt-image-2",
+    "stepsCompleted": 5,
+    "assetVersionIds": [
+      "81f35dd6-c76d-43df-8e6a-1e41cff031b0",
+      "7c680e1d-e797-47cf-a7cf-404726a86912",
+      "a259d25a-61c7-4e82-9493-0809f7990c6c",
+      "bd259765-d600-40a3-ba42-1f20315bbb58"
+    ],
+    "creditStatus": "charged",
+    "creditCost": 242,
+    "balanceAfter": 8410,
+    "persistentEventCount": 21,
+    "recoveredAfterSandboxRestart": true
+  },
+  "simpleChat": {
+    "skillCount": 16,
+    "marketingSkillMatches": 0
+  },
+  "focusedLocalRetryTests": {
+    "files": 2,
+    "passed": 42,
+    "failed": 0,
+    "skipped": 0
+  },
+  "screenshots": [
+    "output/task6-ab-estimate-122.png",
+    "output/task6-ab-apimart-completed.png",
+    "output/task6-ab-after-reload.png",
+    "output/task6-ab-stuck-before-cancel.png",
+    "output/task6-simple-chat-skill-isolation.png",
+    "output/task6-workflow-quote-242.png",
+    "output/task6-workflow-omnichannel-completed.png"
+  ],
+  "remaining": [
+    "cloud controlled single-step recoverable failure and failed-step-only retry",
+    "Coze bridge CSP and legacy remote-media CORS console errors"
+  ]
+}

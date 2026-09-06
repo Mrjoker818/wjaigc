@@ -2851,3 +2851,15 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - 新鲜全仓门禁：`652 passed / 32 skipped` 测试文件，`5304 passed / 171 conditional skipped / 0 failed`；TypeScript、构建版 ESLint、保护基线 `38/38` 和差异检查退出 0。171 项因缺少隔离 PostgreSQL 变量而跳过，不计作通过。
 - 生产构建：8 GiB Node 堆退出 0，Webpack 约 12.8 分钟、TypeScript 53 秒，生成 `119/119` 页面；保留本地数据目录不可跨部署的构建警告。
 - **回归判定：LOCAL FIX PASS / NEW COZE DEPLOYMENT PENDING。** 尚不能把显示默认值或本地测试替代真实估价、扣费、双成品与恢复证据。
+
+## 2026-09-07 Lovart Task 6 云端核心链路回归
+
+- 云端候选为 `main@da15f30dadec04431746de3052b341ec027be96d`，`origin/stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 未触碰。
+- Canvas A/B Run `2a02c94e-fd50-4411-a0dc-4d9a151bc547` 使用 APImart `gpt-image-2` 完成，报价与单次扣费 122；两个成品分别建立 AssetVersion `fa3f6d04...`、`864c0cc9...`，原来源节点保留，刷新后两个成品继续存在。
+- 取消 Run `22a9ca2f-8d29-43fb-9895-1e677a61392d` 只退款一次 122，余额恢复；五分钟后仍为 cancelled/refunded，资产为空且没有迟到完成事件。
+- Workflow 执行 `exec-1788719062341-j29rg5` 对应全渠道 Run `73d8c047-4d48-4690-87fd-f2a58f759b3d`。固定 APImart 编排模型 `gemini-3.1-flash-lite-preview` 与图像模型 `gpt-image-2`；5/5 步骤、4/4 质量门禁和 4 个 AssetVersion 完成，单次扣费 242，余额为 8410。
+- 该 Workflow 在 Coze `instance_not_found` 和沙箱重建后从持久化状态恢复为 completed，UI 显示 `执行完成 3/3`，Skill 节点显示完成及成品预览；没有重新创建 Run 或重复扣费。
+- `/simple-chat` 云端 DOM 为 16 Skills，三项营销 Skill 匹配数为 0，作用域隔离通过。
+- 生产环境无安全故障注入条件，单步失败后的云端精确重试未执行；本地确定性故障夹具新鲜重跑 `42/42` 通过，覆盖只执行 `variant-b` 和并行组未完成 sibling，不冒充云端通过。
+- 新鲜 Console 仍包含 Coze bridge CSP 与历史远程图片 CORS 错误，不能满足“Console 0 error”发布条件。
+- **回归判定：TASK 6 CLOUD CORE PASS / CONTROLLED SINGLE-STEP FAILURE UNVERIFIED。** Step 6 尚未完全关闭，Step 7 不启动。
