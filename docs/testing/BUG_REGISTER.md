@@ -4042,3 +4042,14 @@ All listed Stage 4 defects are locally closed. S4-BUG-008 also passed its exact-
 - 永久回归：`src/__tests__/components/node-editor-skill-node.test.tsx`先RED后GREEN；最终672文件/5306测试、TypeScript、lint、38保护门禁与119页生产构建通过。
 - 云端结果：`01564010`同tree已构建运行。首次强刷及`POST /api/workflow/save`成功后的再次整页刷新均恢复3个节点、Skill完成态及同一1254×1254成品，显示矩形约171.2×171.2。未重新运行、未新增扣费。证据见`output/skill-node-cloud-20260905/01564010-post-save-refresh-visible.png`与`01564010-post-save-refresh-size.json`。
 - 状态：**已修复 / Coze云端关闭。** 关闭范围仅为节点成品可见性及保存后刷新恢复；预览、下载和Task12其余边界独立保留。
+### TASK12-BUG-001：Edge 节点成品预览点击下载但无文件（2026-09-06）
+
+| 字段 | 内容 |
+|---|---|
+| 严重等级 | P1（Task12 成品交付链路不可完成） |
+| 环境 | Coze 云端预览，Microsoft Edge，既有已完成 Skill 节点 |
+| 复现 | 打开节点成品预览，点击“下载预览图片”；按钮短暂进入下载态后恢复，但浏览器无下载事件，Windows 下载目录无文件，页面无错误提示。 |
+| 根因 | Blob 下载链接点击后在同一任务内立即执行 `URL.revokeObjectURL`；Edge 尚未开始消费 Blob URL，导致下载静默丢失。 |
+| 修复 | `src/components/node-editor.tsx` 将 Blob URL 回收延迟 1 秒，保留既有直连、`/api/save-image` 降级、文件名及错误状态。 |
+| 回归测试 | `src/__tests__/components/node-editor-skill-node.test.tsx` 先稳定 RED（2 失败），再验证点击后不会同步回收且延迟回收；聚焦结果 `35/35` 通过。 |
+| 当前状态 | 本地已修复；待 Coze 同步新提交后捕获真实下载完成事件并核对文件字节与解码，暂不关闭。 |

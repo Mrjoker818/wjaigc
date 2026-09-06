@@ -4003,7 +4003,7 @@ ${contextInfo}
                   document.body.appendChild(link);
                   link.click();
                   link.remove();
-                  URL.revokeObjectURL(blobUrl);
+                  window.setTimeout(() => URL.revokeObjectURL(blobUrl), 1_000);
                   setImagePreviewDownloadState('idle');
                 } catch {
                   setImagePreviewDownloadState('error');

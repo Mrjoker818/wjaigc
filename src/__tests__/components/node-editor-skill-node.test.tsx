@@ -67,7 +67,11 @@ describe('NodeEditor workflow Skill node', () => {
     fireEvent.click(screen.getByRole('button', { name: '下载预览图片' }));
     await waitFor(() => expect(anchorClick).toHaveBeenCalledTimes(1));
     expect(createObjectUrl).toHaveBeenCalledTimes(1);
-    expect(revokeObjectUrl).toHaveBeenCalledWith('blob:workflow-skill-preview');
+    expect(revokeObjectUrl).not.toHaveBeenCalled();
+    await waitFor(
+      () => expect(revokeObjectUrl).toHaveBeenCalledWith('blob:workflow-skill-preview'),
+      { timeout: 1_500 },
+    );
     expect(requests).toContain('/skill-preview.png');
     fireEvent.click(preview);
     expect(screen.queryByAltText('预览')).toBeNull();

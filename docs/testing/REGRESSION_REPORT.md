@@ -2780,3 +2780,11 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - 旧 5000 PID `1974` 已停止，新唯一监听 PID `3128`；首页 HTTP 200、HTML Content-Type 正确。
 - Edge 忽略缓存刷新后，五图画布、三节点工作流及完成的 Skill 蛋糕成品均恢复。点击成品前控制通道脱附，下载事件和文件验证仍未完成。
 - 判定：`CLOUD DEPLOY PASS / DOWNLOAD INTERACTION PENDING`。没有重新生成、扣费、退款或修改 `stable`。
+
+## 2026-09-06 Task12 Edge 节点下载静默失败修复
+
+- 云端 Edge 真实点击节点成品“下载预览图片”后，按钮从 downloading 返回 idle，但 30 秒内没有下载事件，默认下载目录也没有新文件；该问题已按 P1 稳定复现。
+- 根因为 `<a download>` 点击后同步回收 Blob URL。最小修复仅把回收延迟 1 秒，不改 Skill 执行、任务状态、供应商、AssetVersion 或账务逻辑。
+- RED：两个预览交互用例均证明同步回收仍发生；GREEN：聚焦组件测试 `35/35` 通过，覆盖 click、完整鼠标序列、延迟回收、远程持久化降级及禁止重新提交任务。
+- TypeScript、修改文件零错误 ESLint、保护基线 `38/38 / 0 drift / 0 warnings`、`git diff --check` 均通过。
+- 判定：`LOCAL FIX PASS / EDGE CLOUD RETEST PENDING`。必须部署新提交后取得真实文件交付证据才能关闭。
