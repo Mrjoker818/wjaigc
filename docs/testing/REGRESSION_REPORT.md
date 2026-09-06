@@ -2772,3 +2772,11 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - 聚焦测试 `35/35` 通过；全量 `645 passed / 31 skipped` 测试文件、`5167 passed / 168 skipped` 测试，退出码 0。跳过项为缺少隔离 PostgreSQL 地址的条件套件。
 - TypeScript、保护基线 `38/38` 和生产构建 `119/119` 通过。修改测试文件 ESLint 退出 0；业务文件无新增 error，保留 15 条历史 warning。
 - 判定：`LOCAL PASS / CLOUD DOWNLOAD PENDING`。必须推送并在 Coze 精确同步后，用现有 Edge 预览捕获节点下载完成事件；按钮存在不能替代文件交付证据。
+
+## 2026-09-06 Task12 c74 云端部署增量
+
+- Coze `/workspace/projects` 从 `main@f478b8af` 普通合并到 `8a0ca32f`，`HEAD^{tree}=0714a4fb60642d97480b79c4b8ddb401d378fffd`，与 GitHub `c74a6cf` 精确一致。
+- 云端 TypeScript、保护基线和唯一一次生产构建退出 0，`119/119` 页面完成，Build ID `8azEpZi5iO7cDWIokIr9a`。
+- 旧 5000 PID `1974` 已停止，新唯一监听 PID `3128`；首页 HTTP 200、HTML Content-Type 正确。
+- Edge 忽略缓存刷新后，五图画布、三节点工作流及完成的 Skill 蛋糕成品均恢复。点击成品前控制通道脱附，下载事件和文件验证仍未完成。
+- 判定：`CLOUD DEPLOY PASS / DOWNLOAD INTERACTION PENDING`。没有重新生成、扣费、退款或修改 `stable`。
