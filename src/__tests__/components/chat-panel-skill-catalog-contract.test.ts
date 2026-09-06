@@ -148,6 +148,24 @@ describe('canvas chat Skill catalog contract', () => {
     expect(fetcher).toHaveBeenCalledWith('/api/skills?surface=canvas', expect.any(Object));
   });
 
+  it('exposes marketing Skills returned by the shared canvas catalog without embedding their IDs in the component', async () => {
+    const marketingSkills = [
+      catalogSkill('preset-ad-ab-variants', ['canvas', 'workflow']),
+      catalogSkill('preset-retargeting-creative', ['canvas', 'workflow']),
+      catalogSkill('preset-omnichannel-campaign', ['canvas', 'workflow']),
+    ];
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({
+      skills: marketingSkills,
+    }), { status: 200 }));
+
+    await expect(loadCanvasSkillCatalog(fetcher)).resolves.toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'preset-ad-ab-variants' }),
+      expect.objectContaining({ id: 'preset-retargeting-creative' }),
+      expect.objectContaining({ id: 'preset-omnichannel-campaign' }),
+    ]));
+    expect(chatPanelSource).not.toMatch(/preset-(?:ad-ab-variants|retargeting-creative|omnichannel-campaign)/);
+  });
+
   it('rejects incomplete catalog entries instead of exposing malformed Skills to the panel', async () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({
       skills: [{ id: 'broken', version: 1, allowedSurfaces: ['canvas'] }],

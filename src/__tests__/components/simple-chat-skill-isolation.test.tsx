@@ -90,5 +90,13 @@ describe('Simple Chat Skill catalog isolation', () => {
     expect(renderedSkillIds).toEqual(SIMPLE_CHAT_PRESET_SKILLS.map(skill => skill.id));
     expect(screen.getAllByText('PPT大师')).toHaveLength(2);
     expect(screen.queryByText('电商商品套图')).toBeNull();
+    expect(renderedSkillIds).not.toEqual(expect.arrayContaining([
+      'preset-ad-ab-variants',
+      'preset-retargeting-creative',
+      'preset-omnichannel-campaign',
+    ]));
+    expect(screen.queryByText('广告 A/B 变体')).toBeNull();
+    expect(screen.queryByText('再营销素材')).toBeNull();
+    expect(screen.queryByText('全渠道活动素材包')).toBeNull();
   });
 });

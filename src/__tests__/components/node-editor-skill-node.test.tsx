@@ -17,6 +17,23 @@ const workflowSkill = {
   enabled: true, builtIn: true, createdAt: 1, updatedAt: 1, usageCount: 0,
 };
 
+const marketingWorkflowSkills = [
+  { ...workflowSkill, id: 'preset-ad-ab-variants', name: '广告 A/B 变体' },
+  { ...workflowSkill, id: 'preset-retargeting-creative', name: '再营销素材' },
+  {
+    ...workflowSkill,
+    id: 'preset-omnichannel-campaign',
+    name: '全渠道活动素材包',
+    inputs: [
+      { key: 'campaignName', label: '活动名称', kind: 'text', required: true },
+      {
+        key: 'channels', label: '投放渠道', kind: 'multi-select', required: true,
+        options: ['小红书', '微信', 'Instagram'], maximumItems: 3,
+      },
+    ],
+  },
+];
+
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
@@ -613,5 +630,30 @@ describe('NodeEditor workflow Skill node', () => {
     expect(screen.queryByText('独立对话 Skill')).toBeNull();
     fireEvent.change(skillSelect, { target: { value: workflowSkill.id } });
     expect(await screen.findByLabelText('产品需求')).toBeTruthy();
+  });
+
+  it('renders all marketing Skills and their structured inputs from the workflow catalog', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === '/api/skills?surface=workflow') {
+        return new Response(JSON.stringify({ skills: marketingWorkflowSkills }), { status: 200 });
+      }
+      return new Response('{}', { status: 200 });
+    }));
+    vi.stubGlobal('matchMedia', vi.fn(() => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() })));
+    vi.stubGlobal('ResizeObserver', class { observe(): void {} unobserve(): void {} disconnect(): void {} });
+
+    const node = createWorkflowNode('ai-skill', 0, 0);
+    render(<NodeEditor workflow={{ ...createEmptyWorkflow('Marketing Skills'), nodes: [node] }} projectId="project-a" canvasImages={[]} />);
+    fireEvent.mouseDown(screen.getByLabelText(node.label), { button: 0 });
+    fireEvent.mouseUp(screen.getByLabelText(node.label), { button: 0 });
+
+    const skillSelect = await screen.findByRole('combobox', { name: 'Skill' });
+    expect(within(skillSelect).getByRole('option', { name: '广告 A/B 变体' })).toBeTruthy();
+    expect(within(skillSelect).getByRole('option', { name: '再营销素材' })).toBeTruthy();
+    expect(within(skillSelect).getByRole('option', { name: '全渠道活动素材包' })).toBeTruthy();
+    fireEvent.change(skillSelect, { target: { value: 'preset-omnichannel-campaign' } });
+    expect(await screen.findByLabelText('活动名称')).toBeTruthy();
+    expect(screen.getByRole('group', { name: /投放渠道/ })).toBeTruthy();
+    expect(screen.getByRole('checkbox', { name: '小红书' })).toBeTruthy();
   });
 });

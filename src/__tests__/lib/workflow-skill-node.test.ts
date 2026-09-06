@@ -128,6 +128,43 @@ describe('workflow Skill node contract', () => {
     });
   });
 
+  it('binds workflow Skill source fields to ordered AssetVersion IDs instead of upstream URLs', () => {
+    const node = createWorkflowNode('ai-skill', 0, 0);
+    const marketingSkill: SkillDefinition = {
+      ...skill,
+      id: 'preset-ad-ab-variants',
+      inputs: [
+        { key: 'sourceImages', label: '来源图片', kind: 'images', required: true, bindToSourceVersions: true },
+        { key: 'brief', label: '需求', kind: 'text', required: true },
+      ],
+    };
+    node.config = {
+      ...node.config,
+      skillId: marketingSkill.id,
+      version: marketingSkill.version,
+      inputValues: { brief: '生成广告变体' },
+    };
+
+    const request = buildWorkflowSkillRunRequest(node, {
+      imageUrl: '/api/serve-upload/primary.png',
+      imageUrls: ['/api/serve-upload/primary.png', '/api/serve-upload/reference.png'],
+      assetVersionId: 'version-primary',
+      assetReferences: [
+        { assetVersionId: 'version-primary', url: '/api/serve-upload/primary.png' },
+        { assetVersionId: 'version-reference', url: '/api/serve-upload/reference.png' },
+      ],
+    }, marketingSkill, {
+      projectId: 'project', workflowId: 'workflow', executionId: 'execution',
+    });
+
+    expect(request.body.sourceVersionIds).toEqual(['version-primary', 'version-reference']);
+    expect(request.body.inputValues).toEqual({
+      sourceImages: ['version-primary', 'version-reference'],
+      brief: '生成广告变体',
+    });
+    expect(JSON.stringify(request.body)).not.toContain('/api/serve-upload/');
+  });
+
   it('excludes disabled Skills from the executable workflow catalog', async () => {
     const disabledSkill = { ...skill, id: 'disabled-skill', enabled: false };
     const fetcher = async () => new Response(JSON.stringify({ skills: [skill, disabledSkill] }), { status: 200 });

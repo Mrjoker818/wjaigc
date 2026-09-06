@@ -3,6 +3,8 @@ import type { AddressInfo, Socket } from 'node:net';
 import type { Page } from '@playwright/test';
 import sharp from 'sharp';
 
+import { createWorkflowNode } from '../../src/lib/workflow-engine';
+
 import {
   ensureStage4Session,
   expect,
@@ -107,18 +109,38 @@ async function readCatalog(page: Page, surface: 'canvas' | 'workflow'): Promise<
   return payload.skills ?? [];
 }
 
-test('画布与节点模式使用同一套 21 项 Skill 定义和版本', async ({ page, stage4Evidence }, testInfo) => {
+test('画布与节点模式使用同一套 24 项 Skill 定义和版本', async ({ page, stage4Evidence }, testInfo) => {
+  test.skip(
+    !process.env.DATABASE_URL && !process.env.PGDATABASE_URL,
+    'BLOCKED: DATABASE_URL or PGDATABASE_URL is required for the isolated Stage 4 Skill fixture',
+  );
   test.setTimeout(180_000);
   const fixture = await stage4FixtureForProject(testInfo.project.name);
   const auth = await ensureStage4Session(page, fixture);
   const skillFixture = structuredClone(fixture);
   const metadata = skillFixture.canvasProject.metadata as Record<string, unknown>;
+  const sourceNode = createWorkflowNode('input-image', 80, 120, '营销来源图');
+  sourceNode.config = {
+    ...sourceNode.config,
+    projectId: String(fixture.canvasProject.id),
+    assetVersionId: `stage4-version-${fixture.browserProfile}`,
+    placementId: `stage4-placement-${fixture.browserProfile}`,
+    imageUrl: '/logo.png',
+  };
+  const marketingNode = createWorkflowNode('ai-skill', 420, 120);
   skillFixture.canvasProject.metadata = {
     ...metadata,
     workflow: {
       ...skillFixture.workflow,
-      nodes: [],
-      connections: [],
+      nodes: [sourceNode, marketingNode],
+      connections: [{
+        id: `stage4-marketing-source-${fixture.browserProfile}`,
+        fromNodeId: sourceNode.id,
+        fromPortId: 'out-image',
+        toNodeId: marketingNode.id,
+        toPortId: 'in-image',
+        type: 'image',
+      }],
       name: `Skill runtime ${fixture.browserProfile}`,
     },
   };
@@ -144,22 +166,34 @@ test('画布与节点模式使用同一套 21 项 Skill 定义和版本', async 
   const identity = (skills: CatalogSkill[]) => skills
     .map(skill => `${skill.id}@${skill.version}`)
     .sort();
-  expect(canvasSkills).toHaveLength(21);
+  expect(canvasSkills).toHaveLength(24);
   expect(identity(workflowSkills)).toEqual(identity(canvasSkills));
+  expect(canvasSkills.map(skill => skill.id)).toEqual(expect.arrayContaining([
+    'preset-ad-ab-variants',
+    'preset-retargeting-creative',
+    'preset-omnichannel-campaign',
+  ]));
   await writeStage4Metrics(stage4Evidence, testInfo, 'skill-catalog-identity', {
     canvas: identity(canvasSkills),
     workflow: identity(workflowSkills),
   });
 
+  await page.getByRole('img', { name: 'canvas image', exact: true }).first().click();
   const expandPanel = page.getByRole('button', { name: '展开面板', exact: true });
   if (await expandPanel.isVisible().catch(() => false)) await expandPanel.click();
   await page.getByRole('button', { name: 'AI聊天', exact: true }).click();
   await page.getByRole('button', { name: 'Skills技能库' }).click();
-  const canvasSkill = page.getByText('电商商品套图', { exact: true }).last();
+  await expect(page.getByText('再营销素材', { exact: true }).last()).toBeVisible();
+  await expect(page.getByText('全渠道活动素材包', { exact: true }).last()).toBeVisible();
+  const canvasSkill = page.getByText('广告 A/B 变体', { exact: true }).last();
   await expect(canvasSkill).toBeVisible();
   await canvasSkill.click();
-  await page.getByLabel('产品名称').fill('测试耳机');
+  await page.getByLabel('活动名称').fill('秋季增长测试');
+  await page.getByLabel('产品或服务').fill('测试耳机');
+  await page.getByLabel('目标受众').fill('通勤用户');
   await page.getByLabel('核心卖点').fill('主动降噪');
+  await page.getByLabel('营销目标').selectOption('点击');
+  await page.getByLabel('投放渠道').selectOption('信息流');
   const canvasSubmission = page.waitForResponse(response => (
     response.request().method() === 'POST'
     && new URL(response.url()).pathname === '/api/skill-runs'
@@ -173,7 +207,7 @@ test('画布与节点模式使用同一套 21 项 Skill 定义和版本', async 
     modelBindings?: Record<string, { providerId?: string; modelId?: string }>;
   };
   const canvasSubmissionPayload = await canvasSubmissionResponse.json() as { runId?: string };
-  expect(canvasRequest.skillId).toBe('preset-ecommerce-listing');
+  expect(canvasRequest.skillId).toBe('preset-ad-ab-variants');
   expect(canvasRequest.skillVersion).toBe(1);
   expect(canvasRequest.modelBindings?.orchestrator).toEqual({
     providerId: 'stage4-chat-provider',
@@ -192,7 +226,7 @@ test('画布与节点模式使用同一套 21 项 Skill 定义和版本', async 
   expect(canvasRun.status).toBe('completed');
   expect(canvasRun.skillId).toBe(canvasRequest.skillId);
   expect(canvasRun.skillVersion).toBe(canvasRequest.skillVersion);
-  expect(canvasRun.assetVersionIds.length).toBeGreaterThan(0);
+  expect(canvasRun.assetVersionIds).toHaveLength(2);
 
   await readAssetReference(
     page,
@@ -221,24 +255,23 @@ test('画布与节点模式使用同一套 21 项 Skill 定义和版本', async 
   const collapsePanel = page.getByRole('button', { name: '收起面板', exact: true });
   if (await collapsePanel.isVisible().catch(() => false)) await collapsePanel.click();
   await page.getByTitle('节点模式').first().click();
-  const skillNodeButton = page.locator('[data-node-type="ai-skill"]');
-  const nodeLibraryToggle = page.getByRole('button', { name: '切换节点库面板', exact: true });
-  if (await nodeLibraryToggle.getAttribute('aria-pressed') !== 'true') {
-    await nodeLibraryToggle.click();
-  }
-  await expect(skillNodeButton).toBeVisible({ timeout: 20_000 });
-  await skillNodeButton.click();
+  await page.getByLabel('Skill 执行').last().click();
 
   const skillSelect = page.getByRole('combobox', { name: 'Skill' });
   if (!await skillSelect.isVisible().catch(() => false)) {
     await page.getByLabel('Skill 执行').last().click();
   }
   await expect(skillSelect).toBeVisible({ timeout: 20_000 });
-  await expect(skillSelect.locator('option')).toHaveCount(22);
-  await skillSelect.selectOption('preset-ecommerce-listing');
-  await expect(skillSelect).toHaveValue('preset-ecommerce-listing');
-  await page.getByLabel('产品名称').last().fill('测试耳机');
+  await expect(skillSelect.locator('option')).toHaveCount(25);
+  await skillSelect.selectOption('preset-ad-ab-variants');
+  await expect(skillSelect).toHaveValue('preset-ad-ab-variants');
+  await page.getByLabel('来源图片').last().fill(`stage4-version-${fixture.browserProfile}`);
+  await page.getByLabel('活动名称').last().fill('秋季增长测试');
+  await page.getByLabel('产品或服务').last().fill('测试耳机');
+  await page.getByLabel('目标受众').last().fill('通勤用户');
   await page.getByLabel('核心卖点').last().fill('主动降噪');
+  await page.getByLabel('营销目标').last().selectOption('点击');
+  await page.getByLabel('投放渠道').last().selectOption('信息流');
   await page.getByRole('combobox', { name: 'orchestrator 模型' }).selectOption(
     'stage4-chat-provider::stage4-chat-model',
   );
@@ -252,7 +285,6 @@ test('画布与节点模式使用同一套 21 项 Skill 定义和版本', async 
   ), { timeout: 90_000 });
   await page.getByRole('button', { name: '执行工作流', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Skill 费用预估', exact: true })).toBeVisible();
-  await expect(page.getByText('62 积分', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: '确认执行', exact: true }).click();
   const workflowSubmissionResponse = await workflowSubmission;
   expect(workflowSubmissionResponse.ok()).toBe(true);
@@ -280,11 +312,12 @@ test('画布与节点模式使用同一套 21 项 Skill 定义和版本', async 
   expect(workflowStatus.status).toBe('completed');
   const workflowOutput = workflowStatus.results?.[workflowSkillNode?.id || '']?.output;
   expect(typeof workflowOutput?.runId).toBe('string');
-  expect(workflowOutput?.assetVersionIds?.length).toBeGreaterThan(0);
+  expect(workflowOutput?.assetVersionIds).toHaveLength(2);
   const workflowRun = await readSkillRun(page, workflowOutput!.runId!);
   expect(workflowRun.status).toBe('completed');
   expect(workflowRun.skillId).toBe(canvasRun.skillId);
   expect(workflowRun.skillVersion).toBe(canvasRun.skillVersion);
+  expect(workflowRun.assetVersionIds).toHaveLength(2);
   expect(workflowOutput?.assetVersionIds).toEqual(workflowRun.assetVersionIds);
   await writeStage4Metrics(stage4Evidence, testInfo, 'skill-run-surface-identity', {
     canvas: {

@@ -1793,6 +1793,7 @@ function skillInputValues(
   fields: readonly SkillInputField[],
   configured: Record<string, unknown>,
   inputs: Record<string, unknown>,
+  sourceVersionIds: readonly string[],
 ): Record<string, unknown> {
   const values = { ...configured };
   for (const field of fields) {
@@ -1824,6 +1825,9 @@ function skillInputValues(
   }
   const imagesField = fields.find(field => field.kind === 'images' && values[field.key] == null);
   if (imagesField && imageUrls.length > 0) values[imagesField.key] = imageUrls;
+  for (const field of fields) {
+    if (field.bindToSourceVersions) values[field.key] = [...sourceVersionIds];
+  }
   return values;
 }
 
@@ -1860,6 +1864,7 @@ export function buildWorkflowSkillRunRequest(
     ? node.config.modelBindings as Record<string, unknown>
     : {};
   const attempt = Math.max(0, Math.floor(context.attempt ?? 0));
+  const sourceVersionIds = workflowSourceVersionIds(inputs);
   return {
     endpoint: '/api/skill-runs',
     method: 'POST',
@@ -1869,8 +1874,8 @@ export function buildWorkflowSkillRunRequest(
       surface: 'workflow',
       projectId: context.projectId,
       workspaceId: `workflow:${context.workflowId}`,
-      inputValues: skillInputValues(skill.inputs, configuredValues, inputs),
-      sourceVersionIds: workflowSourceVersionIds(inputs),
+      inputValues: skillInputValues(skill.inputs, configuredValues, inputs, sourceVersionIds),
+      sourceVersionIds,
       modelBindings,
       idempotencyKey: `workflow:${context.executionId}:${node.id}:attempt:${context.attemptKey || attempt}`,
     },
