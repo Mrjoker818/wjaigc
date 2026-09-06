@@ -1,8 +1,8 @@
 # Lovart 营销增量工作流第一批设计
 
-日期：2026-09-06  
-状态：待用户书面复核  
-适用分支：`main`  
+日期：2026-09-06
+状态：已批准，待实施
+适用分支：`main`
 只读基线：V5.8.8 donor、`stable@52f7c601ed150769e15d06fb435c6e360e28c9e7`
 
 ## 1. 目标
@@ -30,7 +30,8 @@
 
 - 新建独立的营销增量 Skill 定义模块，避免继续扩大旧版 `canvas-presets.ts`。
 - `catalog.ts` 合并旧 21 项与新增 3 项，Canvas 与 Workflow 得到完全相同的 24 项目录。
-- 执行只使用现有 `chat` 和 `generate_image` 步骤适配器。
+- 为全渠道输入补充通用 `multi-select` 字段类型，复用 `options` 与 `maximumItems` 做前后端一致校验；不使用无法校验的逗号文本代替。
+- 规划执行使用现有 `chat`；成品执行复用现有 `img2img` 供应商链路，并在 Skill 步骤注册表增加受控适配器。适配器只接受当前用户、项目和工作区已授权的 AssetVersion URL，不接受客户端任意 URL。
 - 规划步骤顺序执行；同一批成品步骤可使用相同 `parallelGroup` 并行执行。
 - 每个生成步骤使用 `output-present` 质量门禁。不得把无 AssetVersion 的文本回复记为成品。
 
@@ -46,8 +47,7 @@
 
 每项 Skill 使用现有结构化字段：
 
-- `sourceImages`：图片，可选，最多 6 张。来自画布选择或节点上游图片。
-- `brandKit`：Brand Kit，可选。包含品牌色、Logo、字体和视觉约束。
+- `sourceImages`：图片，必填，最多 6 张。来自画布选择或节点上游图片；至少一张真实进入供应商参考图参数。
 - `campaignName`：活动名称，必填。
 - `product`：产品或服务，必填。
 - `audience`：目标受众，必填。
@@ -56,7 +56,9 @@
 - `aspectRatio`：生成比例，默认由具体工作流决定。
 - `negativeConstraints`：禁止内容，可选。
 
-输入缺少必填项时，沿用统一 Skill Runtime 的校验结果，不创建任务、不扣积分。模型绑定必须由执行前目录精确冻结为 `providerId + modelId`。
+输入缺少必填项时，沿用统一 Skill Runtime 的校验结果，不创建任务、不扣积分。模型绑定必须由执行前目录精确冻结为 `providerId + modelId`。`sourceImages` 只保存 AssetVersion ID，并必须与去重后的 `sourceVersionIds` 同序一致；服务端再按当前用户、项目、工作区和 AssetVersion 重新授权并解析规范 URL。客户端传入的图片 URL 不作为权威输入，也不得直接进入供应商请求。
+
+首批不暴露 `brandKit` 输入。当前 Skill Runtime 只把它当作字符串 ID，尚未形成按用户授权、冻结内容快照并注入执行上下文的闭环；在该闭环完成前显示此字段会形成空壳。首批品牌约束由 `tone`、`sellingPoints`、`negativeConstraints` 和已授权来源图承担，Brand Kit 接入另行设计和验收。
 
 ### 4.2 共用输出
 
@@ -86,7 +88,7 @@ Skill ID：`preset-ad-ab-variants`
 2. `variant-a`：生成基准创意，默认强调核心利益点。
 3. `variant-b`：生成挑战创意，只改变规划中声明的主要测试变量。
 
-质量要求：固定交付 A、B 两个独立 AssetVersion；每个变体的提示词必须写明变体编号、测试变量、受众、渠道、比例与品牌约束。首批不提供大于两张的动态变体数，避免引入未经设计的条件步骤执行语义。
+质量要求：固定交付 A、B 两个独立 AssetVersion；每个变体的提示词必须写明变体编号、测试变量、受众、渠道、比例与已输入的品牌约束。首批不提供大于两张的动态变体数，避免引入未经设计的条件步骤执行语义。
 
 ### 5.2 再营销素材
 
@@ -106,7 +108,7 @@ Skill ID：`preset-retargeting-creative`
 3. `benefit`：生成以未完成利益和使用场景为核心的素材。
 4. `offer`：在用户确实提供优惠时生成行动素材；未提供优惠时不得虚构折扣。
 
-质量要求：固定交付证据型、利益型、行动型三个独立 AssetVersion；不得编造价格、折扣、销量、认证或用户评价；所有成品必须保留相同产品身份和 Brand Kit。没有优惠时，行动型素材使用非价格行动理由。
+质量要求：固定交付证据型、利益型、行动型三个独立 AssetVersion；不得编造价格、折扣、销量、认证或用户评价；所有成品必须保留相同产品身份和来源视觉特征。没有优惠时，行动型素材使用非价格行动理由。
 
 ### 5.3 全渠道活动素材包
 
@@ -114,7 +116,7 @@ Skill ID：`preset-omnichannel-campaign`
 
 新增输入：
 
-- `channels`：目标渠道，默认“小红书、微信、Instagram、电商站内”，最多 6 项。
+- `channels`：`multi-select` 目标渠道，默认“小红书、微信、Instagram、电商站内”，最多 6 项，候选为小红书、微信、微博、抖音、Instagram、Facebook、电商站内、品牌官网和邮件。
 - `campaignMessage`：统一主张，必填。
 - `callToAction`：行动文案，必填。
 - `visualAnchor`：必须保持一致的视觉锚点，可选。
@@ -132,6 +134,7 @@ Skill ID：`preset-omnichannel-campaign`
 ## 6. 运行与错误处理
 
 - 估价必须覆盖所有实际启用的生成步骤，确认后才允许执行。
+- 成品步骤必须通过受控 `img2img` 适配器把来源 AssetVersion 解析为规范 URL；供应商支持多参考图时发送全部已授权图片，模型能力上限不足时在提交前明确拒绝，不能静默丢弃或换模型。
 - 并行步骤分别拥有独立 operation key、幂等键和远程 taskId。
 - 单步失败必须保留供应商原始错误摘要和任务身份；父 Run 进入可重试状态。
 - 从失败步骤重试不得重跑已完成步骤，不得重复扣除已完成步骤费用。
@@ -158,6 +161,7 @@ Skill ID：`preset-omnichannel-campaign`
 - Simple Chat 保持 16 项，与 Canvas/Workflow 交集仍为 0。
 - 三项 Skill 输入、默认值、范围、步骤、并行组、模型角色和质量门禁准确。
 - 超量图片、超量渠道或非法枚举值在任务创建前拒绝。
+- `multi-select` 拒绝重复项、未知选项、非字符串项和超过 `maximumItems` 的数组，并在前端提供复选框组，不要求用户手写分隔符。
 - 精确 provider/model 冻结、估价、多子任务幂等、部分失败重试、取消退款和迟到结果隔离。
 - Canvas 与 Workflow 产生新的 AssetVersion，不覆盖来源版本。
 - 刷新后恢复运行和成品。
