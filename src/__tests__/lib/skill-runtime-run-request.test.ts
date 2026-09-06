@@ -140,6 +140,48 @@ describe('Skill runtime run requests', () => {
     });
   });
 
+  it.each([
+    '550e8400-e29b-41d4-a716-446655440000',
+    'version-1',
+    'image-1:1:source',
+  ])('accepts compatible AssetVersion identifier %s', async versionId => {
+    const boundSkill: SkillDefinition = {
+      id: 'custom-id-contract', version: 1, name: 'ID contract', category: 'custom', description: '',
+      executionContextVersion: 1, systemPrompt: 'Use sources', allowedSurfaces: ['canvas'],
+      inputs: [{ key: 'sources', label: 'Sources', kind: 'images', required: true, bindToSourceVersions: true }],
+      steps: [{ id: 'plan', label: 'Plan', toolId: 'chat', execution: 'sequential', promptTemplate: 'Plan', modelRole: 'orchestrator', qualityGateIds: [] }],
+      enabled: true, builtIn: false, createdAt: 1, updatedAt: 1, usageCount: 0,
+    };
+    await expect(buildSkillAgentRunRequest({
+      ...input, skillId: boundSkill.id, inputValues: { sources: [versionId] },
+      sourceVersionIds: [versionId], modelBindings: { orchestrator: input.modelBindings.orchestrator },
+    }, { ...runtimeDependencies(), actorUserId: actor.id, resolveSkill: vi.fn(async () => boundSkill) }))
+      .resolves.toMatchObject({ sourceVersionIds: [versionId] });
+  });
+
+  it.each([
+    '/api/serve-upload/source.png',
+    '//cdn.example.com/source.png',
+    'file:source.png',
+    'data:image/png;base64,AAAA',
+    'blob:source-id',
+    'http://example.com/source.png',
+    'https://example.com/source.png',
+  ])('rejects URL or path source literal %s', async source => {
+    const boundSkill: SkillDefinition = {
+      id: 'custom-id-contract', version: 1, name: 'ID contract', category: 'custom', description: '',
+      executionContextVersion: 1, systemPrompt: 'Use sources', allowedSurfaces: ['canvas'],
+      inputs: [{ key: 'sources', label: 'Sources', kind: 'images', required: true, bindToSourceVersions: true }],
+      steps: [{ id: 'plan', label: 'Plan', toolId: 'chat', execution: 'sequential', promptTemplate: 'Plan', modelRole: 'orchestrator', qualityGateIds: [] }],
+      enabled: true, builtIn: false, createdAt: 1, updatedAt: 1, usageCount: 0,
+    };
+    await expect(buildSkillAgentRunRequest({
+      ...input, skillId: boundSkill.id, inputValues: { sources: [source] },
+      sourceVersionIds: [source], modelBindings: { orchestrator: input.modelBindings.orchestrator },
+    }, { ...runtimeDependencies(), actorUserId: actor.id, resolveSkill: vi.fn(async () => boundSkill) }))
+      .rejects.toMatchObject({ code: 'SKILL_INPUT_INVALID_VALUE', field: 'sources' });
+  });
+
   it('executes two owner-scoped conversation Skills from their distinct frozen definitions', async () => {
     let sequence = 0;
     const store = createSkillStore(createMemorySkillStorageAdapter(), {

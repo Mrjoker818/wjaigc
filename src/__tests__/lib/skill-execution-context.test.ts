@@ -73,4 +73,23 @@ describe('frozen Skill execution context', () => {
     expect(prompt).not.toContain('data:image');
     expect(prompt).not.toContain('version-source-1');
   });
+
+  it('excludes source-bound multi-select values from requirements and step interpolation', () => {
+    const sourceBound = {
+      ...definition,
+      inputs: [{
+        key: 'sources', label: 'Sources', kind: 'multi-select' as const, required: true,
+        options: ['version-source-1'], maximumItems: 1, bindToSourceVersions: true,
+      }],
+    };
+    const prompt = buildSkillStepPrompt({
+      definition: sourceBound,
+      step: { ...step, promptTemplate: 'Never expose {{sources}} here' },
+      inputValues: { sources: ['version-source-1'] },
+    });
+
+    expect(prompt).not.toContain('version-source-1');
+    expect(prompt).not.toContain('"key":"sources"');
+    expect(prompt).toContain('Never expose  here');
+  });
 });

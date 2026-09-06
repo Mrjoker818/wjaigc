@@ -11,6 +11,7 @@ import { skillExecutionSteps } from './cost-estimator';
 import { parseSkillRunRequest, executeSkillRun, SkillRunRequestError } from './service';
 import { createProductionSkillStepRegistry } from './step-registry';
 import { resolveSkillInputs } from './input-resolver';
+import { assertSourceVersionBindings } from './run-request';
 import type { SkillDefinition, SkillInputField, SkillStepDefinition, SkillSurface } from './types';
 import { listAgentRunEvents } from '@/lib/agent-runtime/service';
 
@@ -192,7 +193,7 @@ export async function loadPersistedSkillContinuation(input: {
   const skill = record(created.payload.skill, 'skill');
   const skillId = text(skill.skillId, 'skillId');
   const skillVersion = Number(skill.skillVersion);
-  const request = parseSkillRunRequest({
+  const parsedRequest = parseSkillRunRequest({
     skillId,
     skillVersion,
     surface: surfaceFromWorkspace(workspace),
@@ -205,10 +206,17 @@ export async function loadPersistedSkillContinuation(input: {
   });
   const definition = frozenDefinition(
     created.payload.skillSnapshot,
-    request.surface,
-    request.skillId,
-    request.skillVersion,
+    parsedRequest.surface,
+    parsedRequest.skillId,
+    parsedRequest.skillVersion,
   );
+  const inputValues = resolveSkillInputs(definition, parsedRequest.inputValues);
+  const sourceVersionIds = assertSourceVersionBindings(
+    definition,
+    inputValues,
+    parsedRequest.sourceVersionIds,
+  );
+  const request = { ...parsedRequest, inputValues, sourceVersionIds };
   const agentRequest: AgentRunRequest = {
     projectId: request.projectId,
     workspace,

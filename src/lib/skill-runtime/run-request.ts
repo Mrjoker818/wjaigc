@@ -12,6 +12,7 @@ import {
   type TaskModelDescriptor,
 } from '@/lib/task-core/model-catalog';
 import type { User } from '@/lib/user-types';
+import { isAssetVersionId } from '@/lib/asset-core/asset-version-id';
 import { requireSkillForSurface } from './catalog';
 import { resolveExecutableSkillForUser } from './storage';
 import {
@@ -141,9 +142,7 @@ function sameJson(left: unknown, right: unknown): boolean {
   return JSON.stringify(canonicalize(left)) === JSON.stringify(canonicalize(right));
 }
 
-const UNSAFE_SOURCE_LITERAL = /^(?:data:|blob:|https?:\/\/)/i;
-
-function assertSourceVersionBindings(
+export function assertSourceVersionBindings(
   skill: SkillDefinition,
   resolvedInputs: Record<string, unknown>,
   sourceVersionIds: readonly string[],
@@ -154,7 +153,8 @@ function assertSourceVersionBindings(
     const value = resolvedInputs[field.key];
     if (!Array.isArray(value)
       || value.length === 0
-      || value.some(item => typeof item !== 'string' || UNSAFE_SOURCE_LITERAL.test(item))
+      || canonicalSourceVersionIds.some(item => !isAssetVersionId(item))
+      || value.some(item => !isAssetVersionId(item))
       || new Set(value).size !== value.length
       || value.length !== canonicalSourceVersionIds.length
       || value.some((item, index) => item !== canonicalSourceVersionIds[index])) {

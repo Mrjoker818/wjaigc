@@ -1124,6 +1124,65 @@ describe('Agent runtime service', () => {
     });
   });
 
+  it.each([
+    ['duplicate', ['version-1', 'version-1'], ['version-1']],
+    ['missing', ['version-1'], ['version-1', 'version-2']],
+    ['extra', ['version-1', 'version-2'], ['version-1']],
+    ['reordered', ['version-2', 'version-1'], ['version-1', 'version-2']],
+    ['relative upload path', ['/api/serve-upload/source.png'], ['/api/serve-upload/source.png']],
+    ['protocol-relative URL', ['//cdn.example.com/source.png'], ['//cdn.example.com/source.png']],
+    ['file URL', ['file:source.png'], ['file:source.png']],
+    ['data URL', ['data:image/png;base64,AAAA'], ['data:image/png;base64,AAAA']],
+    ['blob URL', ['blob:source-id'], ['blob:source-id']],
+    ['HTTP URL', ['http://example.com/source.png'], ['http://example.com/source.png']],
+    ['HTTPS URL', ['https://example.com/source.png'], ['https://example.com/source.png']],
+  ])('rejects invalid source binding at Agent creation with zero billing side effects: %s', async (_name, sources, sourceVersionIds) => {
+    const base = requireSkillForSurface('preset-ecommerce-listing', 'canvas');
+    const definition = {
+      ...base,
+      id: 'custom-agent-source-validation',
+      inputs: [
+        ...base.inputs,
+        { key: 'sourceImages', label: 'Sources', kind: 'images' as const, required: true, bindToSourceVersions: true },
+      ],
+    };
+    const requireOriginal = skillCatalog.requireSkillForSurface;
+    const catalogSpy = vi.spyOn(skillCatalog, 'requireSkillForSurface')
+      .mockImplementation((skillId, surface) => (
+        skillId === definition.id ? definition : requireOriginal(skillId, surface)
+      ));
+    const inputValues = resolveSkillInputs(definition, {
+      product: '耳机', features: '降噪，长续航', sourceImages: sources,
+    });
+    const dependencies = serviceDependencies();
+    const service = agentRuntime.createAgentRuntimeService(dependencies);
+
+    try {
+      await expect(service.createRun({
+        actor: user,
+        request: canvasSkillRequest({
+          prompt: compileSkillPrompt(definition.systemPrompt, inputValues),
+          sourceVersionIds,
+          context: { selectedEntityIds: [], visibleVersionIds: sourceVersionIds, locale: 'zh-CN' },
+          skill: {
+            skillId: definition.id, skillVersion: definition.version, inputValues,
+            modelBindings: {
+              orchestrator: { providerId: 'provider-exact', modelId: 'model-exact' },
+              image: { providerId: 'provider-image', modelId: 'model-image' },
+            },
+          },
+        }),
+      })).rejects.toMatchObject({ code: 'SKILL_INPUT_INVALID_VALUE', field: 'sourceImages' });
+    } finally {
+      catalogSpy.mockRestore();
+    }
+
+    expect(dependencies.calculateCreditCost).not.toHaveBeenCalled();
+    expect(dependencies.createBillableTask).not.toHaveBeenCalled();
+    expect(dependencies.appendEvent).not.toHaveBeenCalled();
+    expect(dependencies.dispatchExecution).not.toHaveBeenCalled();
+  });
+
   it('prices a public zero-step simple-chat Skill with one orchestrator base charge', async () => {
     const dependencies = serviceDependencies();
     dependencies.calculateCreditCost.mockResolvedValue(3);

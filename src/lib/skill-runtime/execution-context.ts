@@ -33,6 +33,10 @@ export function buildSkillStepPrompt(input: {
   const values: Record<string, PromptRequirementValue> = {};
   const requirements: Array<{ key: string; label: string; value: PromptRequirementValue }> = [];
   for (const field of input.definition.inputs) {
+    if (field.bindToSourceVersions) {
+      values[field.key] = '';
+      continue;
+    }
     if (!['text', 'select', 'multi-select', 'number', 'boolean'].includes(field.kind)) continue;
     const value = input.inputValues[field.key];
     if (value === undefined) continue;
