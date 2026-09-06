@@ -440,6 +440,7 @@ async function collectWorkspaceSources(root) {
     readFile(join(root, 'src/lib/workflow-engine.ts'), 'utf8'),
     readFile(join(root, 'src/lib/skill-runtime/canvas-presets.ts'), 'utf8'),
     readFile(join(root, 'src/lib/skill-runtime/marketing-presets.ts'), 'utf8'),
+    readFile(join(root, 'src/lib/skill-runtime/content-commerce-presets.ts'), 'utf8'),
     readFile(join(root, 'src/lib/skill-runtime/simple-chat-presets.ts'), 'utf8'),
   ]);
 
@@ -454,7 +455,8 @@ async function collectWorkspaceSources(root) {
     workflowSource: files[7],
     canvasSkillsSource: files[8],
     marketingSkillsSource: files[9],
-    simpleChatSkillsSource: files[10],
+    contentCommerceSkillsSource: files[10],
+    simpleChatSkillsSource: files[11],
   };
 }
 
@@ -471,6 +473,7 @@ export async function collectStage4Inventory(root = process.cwd()) {
     workflowSource,
     canvasSkillsSource,
     marketingSkillsSource,
+    contentCommerceSkillsSource,
     simpleChatSkillsSource,
   } = await collectWorkspaceSources(root);
 
@@ -529,8 +532,28 @@ export async function collectStage4Inventory(root = process.cwd()) {
     'surfaces',
     'workflow',
   );
-  const canvasSkills = uniqueInOrder([...legacyCanvasSkills, ...marketingCanvasSkills]);
-  const workflowSkills = uniqueInOrder([...legacyWorkflowSkills, ...marketingWorkflowSkills]);
+  const contentCommerceCanvasSkills = extractSkillIdsForSurface(
+    contentCommerceSkillsSource,
+    'LOVART_CONTENT_COMMERCE_SKILLS',
+    'surfaces',
+    'canvas',
+  );
+  const contentCommerceWorkflowSkills = extractSkillIdsForSurface(
+    contentCommerceSkillsSource,
+    'LOVART_CONTENT_COMMERCE_SKILLS',
+    'surfaces',
+    'workflow',
+  );
+  const canvasSkills = uniqueInOrder([
+    ...legacyCanvasSkills,
+    ...marketingCanvasSkills,
+    ...contentCommerceCanvasSkills,
+  ]);
+  const workflowSkills = uniqueInOrder([
+    ...legacyWorkflowSkills,
+    ...marketingWorkflowSkills,
+    ...contentCommerceWorkflowSkills,
+  ]);
   const simpleChatSkills = extractSkillIdsForSurface(
     simpleChatSkillsSource,
     'RAW_SIMPLE_CHAT_PRESET_SKILLS',

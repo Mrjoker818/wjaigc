@@ -31,6 +31,12 @@ const simpleChatIds = [
   'report-master', 'ppt-page-design', 'infographic-design', 'brand-visual-design',
 ];
 
+const secondBatchIds = [
+  'preset-video-platform-thumbnails',
+  'preset-pinterest-pins',
+  'preset-batch-sku-assets',
+];
+
 const chatPanelSource = readFileSync(
   resolve(process.cwd(), 'src/components/chat-panel.tsx'),
   'utf8',
@@ -41,10 +47,10 @@ const canvasClientSource = readFileSync(
 );
 
 describe('skill runtime catalog', () => {
-  it('保留 21 个画布预设并向 canvas/workflow 发布 24 项权威目录', () => {
+  it('保留 21 个画布预设并向 canvas/workflow 发布 27 项权威目录', () => {
     expect(CANVAS_PRESET_SKILLS.map(skill => skill.id)).toEqual(canvasIds);
     expect(CANVAS_PRESET_SKILLS).toHaveLength(21);
-    expect(CANVAS_WORKFLOW_SKILLS).toHaveLength(24);
+    expect(CANVAS_WORKFLOW_SKILLS).toHaveLength(27);
     expect(CANVAS_WORKFLOW_SKILLS.slice(0, CANVAS_PRESET_SKILLS.length)).toEqual(
       CANVAS_PRESET_SKILLS,
     );
@@ -56,6 +62,7 @@ describe('skill runtime catalog', () => {
     );
     expect(CANVAS_PRESET_SKILLS.every(skill =>
       skill.allowedSurfaces.join(',') === 'canvas,workflow')).toBe(true);
+    expect(CANVAS_WORKFLOW_SKILLS.map(skill => skill.id).slice(-3)).toEqual(secondBatchIds);
   });
 
   it('保留 16 个独立对话 Skill 且不泄漏画布目录', () => {

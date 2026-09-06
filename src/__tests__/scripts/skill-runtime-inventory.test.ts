@@ -70,7 +70,7 @@ describe('scoped Skill runtime inventory', () => {
       'preset-illustration', 'preset-ui-design', 'preset-food-photography',
     ];
 
-    expect(inventory.skillCatalogs.canvas).toHaveLength(24);
+    expect(inventory.skillCatalogs.canvas).toHaveLength(27);
     expect(inventory.skillCatalogs.canvas.slice(0, legacyCanvasIds.length)).toEqual(legacyCanvasIds);
     expect(inventory.skillCatalogs.workflow).toEqual(inventory.skillCatalogs.canvas);
     expect(inventory.skillCatalogs.simpleChat).toHaveLength(16);

@@ -54,7 +54,7 @@
 - Produces: `LOVART_CONTENT_COMMERCE_SKILLS: readonly SkillDefinition[]`。
 - Preserves: 既有 `CANVAS_PRESET_SKILLS` 和 `LOVART_MARKETING_SKILLS` 的 ID、顺序与定义摘要。
 
-- [ ] **Step 1: 写目录失败测试**
+- [x] **Step 1: 写目录失败测试**
 
 ```ts
 expect(LOVART_CONTENT_COMMERCE_SKILLS.map(skill => skill.id)).toEqual([
@@ -71,12 +71,12 @@ expect(listSkillsForSurface('simple-chat').map(skill => skill.id))
 
 同时保存当前 24 项的定义摘要并断言完全不变。
 
-- [ ] **Step 2: 运行并确认 RED**
+- [x] **Step 2: 运行并确认 RED**
 
 Run: `pnpm exec vitest run src/__tests__/lib/skill-runtime-content-commerce-presets.test.ts src/__tests__/lib/skill-runtime-catalog.test.ts src/__tests__/scripts/skill-runtime-inventory.test.ts`
 Expected: 新模块或三项 ID 不存在而 FAIL；旧保护断言 PASS。
 
-- [ ] **Step 3: 实现最小静态定义**
+- [x] **Step 3: 实现最小静态定义**
 
 ```ts
 export const LOVART_CONTENT_COMMERCE_SKILLS: readonly SkillDefinition[] = [
@@ -153,12 +153,12 @@ export const CANVAS_WORKFLOW_SKILLS = [
 ] as const;
 ```
 
-- [ ] **Step 4: 运行定义回归**
+- [x] **Step 4: 运行定义回归**
 
 Run: 与 Step 2 相同。
 Expected: 3 个文件全 PASS，Canvas/Workflow 27，Simple Chat 16。
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 git add src/lib/skill-runtime/content-commerce-presets.ts src/lib/skill-runtime/catalog.ts src/__tests__/lib/skill-runtime-content-commerce-presets.test.ts src/__tests__/lib/skill-runtime-catalog.test.ts src/__tests__/scripts/skill-runtime-inventory.test.ts
