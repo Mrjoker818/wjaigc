@@ -4060,3 +4060,15 @@ All listed Stage 4 defects are locally closed. S4-BUG-008 also passed its exact-
 - 取消/退款：`cbf85a8f-72ff-40e7-a4fa-778fead81498` 一次消费、一次退款、净额 0，终态不可回写且无迟到资产。
 - 本轮没有发现新的业务缺陷，也没有修改业务源码。永久测试仍由 Task12 本地 `224/224`、全仓 `5168 passed / 168 PostgreSQL-gated skipped` 和既有真库专项承担。
 - 机器可读证据：[task12-edge-cloud-final-20260906.json](evidence/task12-edge-cloud-final-20260906.json)。
+
+## 2026-09-06 Lovart 营销增量工作流 Task 6 门禁阻断
+
+测试业务候选：`main@143e44e90e5892869622072a0fc9488c9ef4a837`。本轮只执行本地门禁与文档收口，没有修改业务代码、推送、操作 Coze 或浏览器。
+
+| 编号 | 等级 | 真实现象 | 当前判定 |
+|---|---|---|---|
+| `LOVART-GATE-001` | P1 | 权威聚焦门禁 `109 passed / 1 failed / 0 skipped`；`skill-runtime-inventory.test.ts` 仍要求 E2E 源码包含 `nodes: []`，而当前隔离夹具构造两个精确节点。 | `BLOCKED`，需最终全分支审查判断应更新契约还是恢复夹具，不在 Task 6 擅改。 |
+| `LOVART-GATE-002` | P1 | 保护基线保留 38 个功能 ID、组件路径、证据合同和 Git 引用，但阻断两个未授权生产路径：`src/lib/asset-core/asset-version-id.ts`、`src/lib/skill-runtime/marketing-presets.ts`。 | `BLOCKED`，必须补齐精确审查授权后重跑。 |
+| `LOVART-GATE-003` | P1 | 全量回归中 `agent-edit-task-admission-contract.test.ts` 仍断言旧的 `resolveSelectedAgentMediaUrl(...)` 文本；当前 Canvas chat 已调用 `resolveOptionalSelectedAgentMediaUrl(...)`。 | `BLOCKED`，需审查当前语义后更新实现或永久契约，不能按字符串盲修。 |
+
+Task 4 独立审查的两个 Minor 继续保留给最终审查：单元夹具 operation key 不是生产生成逻辑；PostgreSQL 用例验证 AssetVersion ID 聚合，但没有创建真实 AssetVersion。二者不是本轮新增失败，也没有被提升为“已验证”。

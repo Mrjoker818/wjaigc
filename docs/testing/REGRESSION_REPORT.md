@@ -2807,3 +2807,17 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - 最终 Console error/warning 为 `0/0`。CDP 重新采集四个 Skill/Agent/积分审计请求，均 HTTP 200；Agent 持久事件序列提供暂停、恢复、完成、取消的时间线。现有扩展控制 Edge 无法事后生成独立 Playwright `trace.zip`，不伪造该文件；限制已写入机器可读证据。
 - 证据：[task12-edge-cloud-final-20260906.json](evidence/task12-edge-cloud-final-20260906.json)。
 - **判定：TASK12 CLOUD PASS。** 统一 Skill Runtime 的 Task12 已按当前清单关闭；这不代表十五阶段全平台测试总目标完成，也不关闭其余供应商、支付或全平台未验证项。
+
+## 2026-09-06 Lovart 营销增量工作流 Task 6 本地门禁
+
+- 测试业务候选：`main@143e44e90e5892869622072a0fc9488c9ef4a837`；`HEAD == origin/main`。`origin/stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 保持只读且未变化。
+- 目录保护：旧 Canvas `21` 与 Workflow `21` 未丢失，新增 `3` 项后两者均为 `24`；Simple Chat 仍为独立 `16`，营销 Skill 不进入 Simple Chat。
+- 权威聚焦门禁：8 files，`109 passed / 1 failed / 0 skipped`。唯一失败为 E2E 隔离源码契约仍要求 `nodes: []`。
+- TypeScript：`pnpm ts-check` 退出 0，Next route types 与 `tsc` 通过。
+- ESLint：`pnpm lint` 退出 0，`0 errors / 943 warnings`；另有 Babel 对超过 500KB 的 `infinite-canvas.tsx` 样式降级提示。
+- 全量 Vitest：681 files 中 `647 passed / 31 skipped / 3 failed`；5441 tests 中 `5269 passed / 169 skipped / 3 failed`。三个失败分别为 E2E 隔离源码契约、两个生产路径缺少保护授权、Canvas chat 的旧源码文本契约。
+- PostgreSQL：Task 4 已在隔离 PostgreSQL 18 上取得营销执行真并发 `23/23`；本轮全量环境没有 `POSTGRES_TEST_DATABASE_URL`，因此 169 项条件测试跳过，不能把本轮结果写成全仓真库通过。
+- 构建：默认约 4 GiB Node 堆在 Mark-Compact 后 OOM，退出 1/134；随后使用项目既有 `NODE_OPTIONS=--max-old-space-size=8192`，webpack 13.8 分钟编译、TypeScript 61 秒，`119/119` 页面生成，退出 0。
+- 保护与 Git：38 个功能 ID、组件路径、证据合同和引用均通过，但 `asset-version-id.ts` 与 `marketing-presets.ts` 缺少精确授权，保护命令退出 1；`git diff --check` 退出 0。
+- 浏览器：Task 5 本地 Chromium 用例因缺少数据库变量和运行服务形成 `1 skipped` 证据；本轮按约束未操作浏览器，不能写成 Chromium E2E 通过。
+- **回归判定：BLOCKED。** 本地静态检查和 8 GiB 构建通过不抵消三项真实测试失败与保护门禁失败。

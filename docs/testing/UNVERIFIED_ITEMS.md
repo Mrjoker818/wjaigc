@@ -2336,3 +2336,20 @@ BUG-018 已从未验证项移除。剩余顺序为 `002-B -> 002-D -> 002-E`；�
 - [x] 最终浏览器证据：Edge UI 截图已由 CUA 捕获；Console error/warning 为 0；四个审计请求 CDP Network 状态均为 200；持久 Agent 事件序列覆盖 pause/resume/completed/cancelled。
 - [x] 证据形式限制明确记录：扩展控制的既有 Edge 标签无法事后生成 Playwright `trace.zip`，未用伪造文件替代；采用 CDP 请求/响应序列与服务端持久事件序列作为本次运行 Trace。
 - Task12 当前状态：**CLOUD PASS / CLOSED**。此处只关闭 Unified Skill Runtime Task12；全平台其他未验证项继续保留。
+
+## 2026-09-06 Lovart 营销增量工作流第一批未验证项
+
+| 项目 | 当前状态 | 关闭条件 |
+|---|---|---|
+| 权威聚焦与全量回归 | `BLOCKED` | 关闭 E2E 隔离源码契约、保护授权清单、Canvas chat 旧源码文本契约三项失败；聚焦必须 0 失败、0 意外跳过，全量必须退出 0。 |
+| 保护基线 | `BLOCKED` | 为 `src/lib/asset-core/asset-version-id.ts` 与 `src/lib/skill-runtime/marketing-presets.ts` 提供精确复审授权并重跑至 0 blocking issue。 |
+| 本轮全仓 PostgreSQL | `169 SKIPPED` | 配置专用 `POSTGRES_TEST_DATABASE_URL` 后重跑；不得使用业务库。Task 4 的隔离真库营销专项 `23/23` 已通过，但不能替代本轮全仓真库门禁。 |
+| Chromium E2E | `ENVIRONMENT SKIPPED` | 提供 E2E 数据库变量与本地运行服务后执行 Task 5 用例；本轮禁止操作浏览器，因此没有浏览器通过结论。 |
+| 真实外部 provider | `UNVERIFIED` | 使用受控真实 provider/model 执行三项营销 Skill，核对固定路由、多参考图、结果数量、幂等和失败恢复。 |
+| Coze exact-tree 与服务 | `UNVERIFIED` | 仅在门禁转绿并由控制器推送后，验证 Coze tree、构建、Build ID、唯一服务进程与健康入口。 |
+| 真实浏览器业务链路 | `UNVERIFIED` | 在既有预览页验证 Canvas 广告 A/B、Workflow 全渠道包、失败步骤重试、取消唯一退款、刷新恢复、Simple Chat 16 项隔离，并保存 Console/Network/Trace/截图。 |
+| Task 4 Minor：operation key | `REVIEW OPEN` | 将单元夹具覆盖与生产 operation key 生成逻辑对齐，或由最终审查明确接受现有间接覆盖。 |
+| Task 4 Minor：AssetVersion 创建精度 | `REVIEW OPEN` | 补充真实 AssetVersion 创建断言，或由最终审查明确说明现有真库用例只证明 ID 聚合。 |
+| 默认构建内存 | `4 GiB OOM / 8 GiB PASS` | CI/部署提供至少 8 GiB Node heap，或降低构建内存后重新验证默认命令。 |
+
+以上项目关闭前不得将 Lovart 第一批标记为发布完成，也不得用既有 Unified Skill Runtime Task12 云端通过替代本批新增营销工作流验收。

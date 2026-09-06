@@ -2147,3 +2147,13 @@ The focused gate test passes `7/7`; the actual protected-baseline command passes
 - Edge 最终 Console `0 error / 0 warning`；CDP Network 四个审计请求均为 200，持久 Agent 事件序列作为控制流程 Trace。扩展控制会话无法事后生成 Playwright `trace.zip`，该证据形式限制已显式保留。
 - **Task12 结论：通过。** `stable@52f7c601` 未触碰，当前仅需提交测试证据与中文报告，不需要 Coze 重新构建业务代码。
 - **全平台发布结论仍为有条件通过。** Task12 完成不自动关闭十五阶段任务中其他开放项、Pear 延期验证、部署旧 Chunk 风险及其他业务模块未验证项。
+
+## 2026-09-06 Lovart 第一批营销工作流发布判定
+
+**状态：BLOCKED，不可推送或进入 Coze/浏览器验收。**
+
+已取得的本地证据：Canvas/Workflow 旧 21 项零丢失并新增 3 项，形成 `24/24`；Simple Chat 保持 `16`；Task 4 隔离 PostgreSQL 18 营销真并发专项 `23/23`；TypeScript 通过；ESLint `0 errors / 943 warnings`；8 GiB 构建 `119/119`；`git diff --check` 通过；`origin/stable` 保持 `52f7c601ed150769e15d06fb435c6e360e28c9e7`。
+
+阻断证据：权威聚焦门禁 `1 failed`；全量 Vitest `3 failed / 5269 passed / 169 skipped`；保护门禁因两个未授权生产路径退出 1；默认 4 GiB 构建 OOM。Task 4 两个 Minor 测试精度项仍待最终审查。
+
+发布前必须先完成最终全分支审查并关闭三项测试/保护漂移，重跑聚焦门禁达到 0 失败、0 意外跳过，并重跑全量门禁。之后才允许控制器推送 `main`、Coze exact-tree 部署和真实浏览器验收；本 Task 没有 push，也没有操作 Coze 或浏览器。
