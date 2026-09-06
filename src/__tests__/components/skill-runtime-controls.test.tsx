@@ -73,6 +73,18 @@ afterEach(() => {
 });
 
 describe('SkillInputFields', () => {
+  it('offers CSV and JSON import from the dataset control', () => {
+    render(<SkillInputFields
+      fields={[{ key: 'rows', label: 'SKU 数据', kind: 'dataset', required: true }]}
+      values={{ rows: [] }}
+      onChange={vi.fn()}
+    />);
+
+    const input = screen.getByLabelText('导入 SKU 数据');
+    expect(input.getAttribute('type')).toBe('file');
+    expect(input.getAttribute('accept')).toBe('.csv,.json');
+  });
+
   it('renders source-bound image selections as a read-only summary without exposing editable IDs', () => {
     const onChange = vi.fn();
     render(<SkillInputFields

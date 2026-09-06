@@ -1,7 +1,9 @@
 'use client';
 
 import { useEffect, useId, useRef, useState } from 'react';
+import { Upload } from 'lucide-react';
 
+import { parseSkillDatasetFile } from './dataset-file-parser';
 import { SKILL_INPUT_LIMITS } from '@/lib/skill-runtime/input-resolver';
 import type { SkillInputField } from '@/lib/skill-runtime/types';
 
@@ -260,22 +262,79 @@ export function SkillInputFields({
           }
           case 'dataset':
             control = (
-              <textarea
-                {...common}
-                value={drafts[field.key] ?? datasetValue(value)}
-                onChange={event => updateStructuredValue(field, event.target.value, () => {
-                  const parsed: unknown = JSON.parse(event.target.value || '[]');
-                  if (!Array.isArray(parsed)) throw new Error('请输入有效的 JSON 数组');
-                  if (parsed.length > SKILL_INPUT_LIMITS.datasetRows) {
-                    throw new Error(`最多允许 ${SKILL_INPUT_LIMITS.datasetRows} 行`);
-                  }
-                  if (parsed.some(row => !row || typeof row !== 'object' || Array.isArray(row))) {
-                    throw new Error('数据集每一行必须是对象');
-                  }
-                  assertDatasetKeys(parsed);
-                  return parsed;
-                })}
-              />
+              <div className="space-y-2">
+                <textarea
+                  {...common}
+                  value={drafts[field.key] ?? datasetValue(value)}
+                  onChange={event => updateStructuredValue(field, event.target.value, () => {
+                    const parsed: unknown = JSON.parse(event.target.value || '[]');
+                    if (!Array.isArray(parsed)) throw new Error('请输入有效的 JSON 数组');
+                    const maximum = Math.min(
+                      field.maximumItems ?? SKILL_INPUT_LIMITS.datasetRows,
+                      SKILL_INPUT_LIMITS.datasetRows,
+                    );
+                    if (parsed.length > maximum) throw new Error(`最多允许 ${maximum} 行`);
+                    if (parsed.some(row => !row || typeof row !== 'object' || Array.isArray(row))) {
+                      throw new Error('数据集每一行必须是对象');
+                    }
+                    assertDatasetKeys(parsed);
+                    return parsed;
+                  })}
+                />
+                <label className="inline-flex cursor-pointer items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground">
+                  <Upload aria-hidden="true" size={14} />
+                  导入 CSV/JSON
+                  <input
+                    type="file"
+                    accept=".csv,.json"
+                    aria-label={`导入 ${field.label}`}
+                    className="sr-only"
+                    disabled={disabled}
+                    onChange={async event => {
+                      const file = event.target.files?.[0];
+                      event.target.value = '';
+                      if (!file) return;
+                      try {
+                        const rows = await parseSkillDatasetFile(file);
+                        const maximum = Math.min(
+                          field.maximumItems ?? SKILL_INPUT_LIMITS.datasetRows,
+                          SKILL_INPUT_LIMITS.datasetRows,
+                        );
+                        if (rows.length > maximum) throw new Error(`最多允许 ${maximum} 行`);
+                        if (commitValue(field, rows)) {
+                          setDrafts(current => ({
+                            ...current,
+                            [field.key]: JSON.stringify(rows, null, 2),
+                          }));
+                        }
+                      } catch (caught) {
+                        setLocalErrors(current => ({
+                          ...current,
+                          [field.key]: caught instanceof Error ? caught.message : '数据集文件解析失败',
+                        }));
+                      }
+                    }}
+                  />
+                </label>
+                {Array.isArray(value) && value.length > 0 && (() => {
+                  const rows = value.filter(row => row && typeof row === 'object' && !Array.isArray(row))
+                    .slice(0, 5) as Record<string, unknown>[];
+                  const columns = [...new Set(rows.flatMap(row => Object.keys(row)))].slice(0, 8);
+                  return (
+                    <div className="max-w-full overflow-x-auto rounded border" aria-label={`${field.label}预览`}>
+                      <div className="px-2 py-1 text-xs text-muted-foreground">共 {value.length} 行，预览前 {rows.length} 行</div>
+                      <table className="min-w-full text-left text-xs">
+                        <thead><tr>{columns.map(column => <th className="border-t px-2 py-1 font-medium" key={column}>{column}</th>)}</tr></thead>
+                        <tbody>{rows.map((row, index) => (
+                          <tr key={index}>{columns.map(column => (
+                            <td className="max-w-48 truncate border-t px-2 py-1" key={column}>{String(row[column] ?? '')}</td>
+                          ))}</tr>
+                        ))}</tbody>
+                      </table>
+                    </div>
+                  );
+                })()}
+              </div>
             );
             break;
           case 'select':

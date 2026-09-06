@@ -249,7 +249,7 @@ Commit: `feat: compile conditional skill steps`
 - Produces: `parseSkillDatasetFile(file: File): Promise<readonly Record<string, unknown>[]>`。
 - Consumes: `.json` 或 `.csv`，最大 512 KiB。
 
-- [ ] **Step 1: 安装直接依赖并写失败测试**
+- [x] **Step 1: 安装直接依赖并写失败测试**
 
 Run: `pnpm add papaparse && pnpm add -D @types/papaparse`
 
@@ -262,12 +262,12 @@ await expect(parseSkillDatasetFile(csvFile('sku,name\n=cmd,危险')))
   .rejects.toMatchObject({ code: 'SKILL_DATASET_FORMULA_VALUE' });
 ```
 
-- [ ] **Step 2: 运行并确认 RED**
+- [x] **Step 2: 运行并确认 RED**
 
 Run: `pnpm exec vitest run src/__tests__/components/skill-dataset-file-parser.test.ts src/__tests__/components/skill-runtime-controls.test.tsx`
 Expected: 解析模块和导入控件不存在而 FAIL。
 
-- [ ] **Step 3: 实现独立解析器**
+- [x] **Step 3: 实现独立解析器**
 
 ```ts
 export async function parseSkillDatasetFile(
@@ -283,11 +283,11 @@ export async function parseSkillDatasetFile(
 
 Papa Parse 必须启用 `header: true`、`skipEmptyLines: 'greedy'`，并把任何 parser error 转为稳定中文错误。不得使用 `split(',')`。
 
-- [ ] **Step 4: 扩展统一数据集控件**
+- [x] **Step 4: 扩展统一数据集控件**
 
 在 `dataset` 分支增加隐藏文件输入和带上传图标的命令按钮，`accept=".csv,.json"`；解析后调用现有 `commitValue`。显示总行数、前 5 行表格和字段错误，保证 375px 下横向表格在自身区域滚动，不改变画布缩放。
 
-- [ ] **Step 5: 运行组件回归并提交**
+- [x] **Step 5: 运行组件回归并提交**
 
 Run: Step 2 命令。
 Expected: 所有解析边界和既有八类输入控件通过。
