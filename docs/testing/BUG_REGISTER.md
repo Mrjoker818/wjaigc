@@ -1,8 +1,18 @@
 # 无界AI — 缺陷登记表 (BUG REGISTER)
 
+## 2026-09-06 画布带图片 Skill 使用聊天会话作为资产工作区
+
+- ID：TEST-SKILL-012，P1；云端两次稳定复现，当前本地最小修复，云端待重新部署验证。
+- 路径：选择画布原图 → AI聊天 → 样机展示(Mockup) → 估算积分。两次 `/api/skill-runs/estimate` 返回404 / AGENT_CONTEXT_NOT_FOUND；首个 requestId `0966f9ec-6598-9be3-9138-d8331564f1b4`。没有提交运行任务。
+- 请求已携带真实 sourceVersionId 及精确APImart模型，错误的 workspaceId 却为 `session-1786347587770`。详情见 `2026-09-06-task12-canvas-source-context-failure.md`。
+- 根因：`buildCanvasSkillRequest` 优先使用聊天 currentSessionId，和画布资产 placement 使用的 `canvas:projectId` 不一致，导致后端精确归属校验拒绝。
+- 最小修复：仅将画布Skill请求的 workspaceId 固定为 `canvas:${projectId}`，去掉无关聊天会话Hook依赖。不改后端权限、资产、登录、账务或Simple Chat作用域。
+- TDD：执行真实组件请求回调，两个非空聊天会话用例先失败、空会话用例通过；修复后三项通过，并调用真实授权函数验证画布placement解析。聚焦17/17、TypeScript和改动文件ESLint通过。全仓5153通过/0失败/166跳过，隔离PG补验172/172通过（包含全部166跳过项）；38项保护通过。默认4GB堆构建OOM，按既有本地8GB堆重跑退出0、119/119页面。云端尚未部署验证。
+
+
 ## 2026-09-06 节点成品大图弹窗没有实际显示尺寸
 
-- ID：TEST-SKILL-011，P2，节点图片预览；本地修复和浏览器布局回归通过，6407ec0c云端真实大图可见性通过；精确尺寸、关闭交互及完整Trace补证未完成。
+- ID：TEST-SKILL-011，P2，节点图片预览；本地修复和浏览器布局回归通过，6407ec0c云端真实大图可见性、原图1254×1254尺寸与关闭返回已通过；下载及完整Trace补证未完成。增量见 `2026-09-06-task12-chrome-navigation-evidence.md`。
 - 环境：Chrome，独立Coze预览62afe49a；源码tree5507aff6（main候选3d72f464），管理员已登录。
 - 步骤：进入既有三节点工作流，点击完成的Skill蛋糕切片结果。预期大图可见；实际出现深色遮罩和中央关闭按钮，没有正常大图。截图保留于本对话工具回执。后续测量时调试通道脱附，未取得云端像素测量或Trace，不能补造。
 - 根因：node-editor.tsx的独立预览弹窗仍将NextImage固有尺寸设置为1x1，只提供max-width/max-height，没有显示尺寸。此前节点卡片的修复没有覆盖此弹窗。

@@ -1,5 +1,9 @@
 # 无界AI — 发布就绪报告 (RELEASE READINESS REPORT)
 
+## 2026-09-06 Task12 画布归属候选
+
+TEST-SKILL-012最小修复及本地门禁完成，可仅推送main用于独立测试沙箱同步。真实Chrome确认估算404为当前阻断；新版尚未部署验收，不得标记修复闭环。全仓5153通过/166跳过，隔离PostgreSQL172项补验全通过；默认堆构建OOM、本地8GB重跑通过均保留。Task12未完成，全平台结论仍为：不通过。详见2026-09-06-task12-canvas-source-context-failure.md。
+
 ## 2026-09-06 Task12 预览补修候选
 
 本地TEST-SKILL-011门禁完成：33项专项、5304项全仓加12项隔离PostgreSQL补验通过；类型/Lint/38保护通过；构建119/119；Google Chrome两条横竖图布局用例覆盖六组视口通过。此项可推送main进行测试沙箱同步，但尚未云端真实复验，不是Task12或全平台发布通过。全平台结论仍为：不通过。证据及未验证边界见2026-09-06-task12-preview-modal-verification.md。

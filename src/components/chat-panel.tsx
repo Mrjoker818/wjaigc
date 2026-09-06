@@ -3903,7 +3903,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
       skillVersion: executionSkill.version,
       surface: 'canvas',
       projectId,
-      workspaceId: currentSessionId || `canvas:${projectId}`,
+      workspaceId: `canvas:${projectId}`,
       inputValues: contextualInputs,
       sourceVersionIds: skillSourceVersionIds,
       modelBindings,
@@ -3911,7 +3911,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
         ? `canvas-skill:${crypto.randomUUID()}`
         : `canvas-skill:${Date.now()}`,
     };
-  }, [activeMentions, activeSkill, availableChatModels, currentSessionId, discoveredImageModels, imageModel, imageModelProviderId, model, pendingImages, projectId, selectedCanvasImage?.assetVersionId, skillParamValues]);
+  }, [activeMentions, activeSkill, availableChatModels, discoveredImageModels, imageModel, imageModelProviderId, model, pendingImages, projectId, selectedCanvasImage?.assetVersionId, skillParamValues]);
 
   const handleEstimateSkill = useCallback(async (): Promise<void> => {
     const request = buildCanvasSkillRequest();
