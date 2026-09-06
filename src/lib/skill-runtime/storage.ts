@@ -15,12 +15,15 @@ export const SKILL_CATALOG_KEY = 'skill_catalog_v1';
 const LEGACY_CHAT_SKILLS_KEY = 'chat_skills';
 const SURFACES: readonly SkillSurface[] = ['canvas', 'workflow', 'simple-chat'];
 const BUILT_INS: readonly SkillDefinition[] = [...CANVAS_WORKFLOW_SKILLS, ...SIMPLE_CHAT_PRESET_SKILLS];
-const INPUT_KINDS = new Set(['text', 'image', 'images', 'brand-kit', 'dataset', 'select', 'number', 'boolean']);
+const INPUT_KINDS = new Set([
+  'text', 'image', 'images', 'brand-kit', 'dataset', 'select', 'multi-select', 'number', 'boolean',
+]);
 const MODEL_ROLES = new Set(['orchestrator', 'image', 'video', 'vision', 'edit', 'three-d']);
 const MAX_ENVELOPE_BYTES = 1_048_576;
 const LEGACY_CUSTOM_ID = /^skill-[1-9][0-9]{12}$/;
 const GENERATED_SKILL_ID = /^skill-[a-f0-9]{24}$/;
 const TOKEN_ID = /^[A-Za-z][A-Za-z0-9_-]*$/;
+const GROUP_ID = /^[A-Za-z][A-Za-z0-9_:-]*$/;
 const CONVERSATION_CANVAS_SOURCE_ID = 'conversation-canvas';
 
 export interface UserSkillEnvelope {
@@ -125,6 +128,7 @@ function isBoundedJsonValue(value: unknown, depth = 0): boolean {
 function isStoredInput(value: unknown): boolean {
   if (!isRecord(value) || !hasOnlyKeys(value, [
     'key', 'label', 'kind', 'required', 'defaultValue', 'options', 'maximumItems',
+    'bindToSourceVersions',
   ])) return false;
   if (
     !isBoundedString(value.key, 64, TOKEN_ID)
@@ -136,20 +140,23 @@ function isStoredInput(value: unknown): boolean {
   if ('defaultValue' in value && !isBoundedJsonValue(value.defaultValue)) return false;
   if ('options' in value) {
     if (
-      value.kind !== 'select'
+      (value.kind !== 'select' && value.kind !== 'multi-select')
       || !Array.isArray(value.options)
       || value.options.length === 0
       || value.options.length > 100
       || !value.options.every(option => isBoundedString(option, 200))
     ) return false;
-  } else if (value.kind === 'select') return false;
+  } else if (value.kind === 'select' || value.kind === 'multi-select') return false;
   if ('maximumItems' in value) {
     if (
-      value.kind !== 'images'
+      (value.kind !== 'images' && value.kind !== 'multi-select')
       || !Number.isSafeInteger(value.maximumItems)
       || (value.maximumItems as number) < 1
       || (value.maximumItems as number) > 1_000
     ) return false;
+  }
+  if ('bindToSourceVersions' in value && typeof value.bindToSourceVersions !== 'boolean') {
+    return false;
   }
   return true;
 }
@@ -171,7 +178,7 @@ function isStoredStep(value: unknown): boolean {
     || value.qualityGateIds.length > 32
     || !value.qualityGateIds.every(id => isBoundedString(id, 128, TOKEN_ID))
   ) return false;
-  return !('parallelGroup' in value) || isBoundedString(value.parallelGroup, 128, TOKEN_ID);
+  return !('parallelGroup' in value) || isBoundedString(value.parallelGroup, 128, GROUP_ID);
 }
 
 function hasUniqueSurfaces(value: unknown): value is SkillSurface[] {
@@ -537,6 +544,9 @@ export function createSkillStore(
             ...(field.defaultValue === undefined ? {} : { defaultValue: structuredClone(field.defaultValue) }),
             ...(field.options === undefined ? {} : { options: [...field.options] }),
             ...(field.maximumItems === undefined ? {} : { maximumItems: field.maximumItems }),
+            ...(field.bindToSourceVersions === undefined
+              ? {}
+              : { bindToSourceVersions: field.bindToSourceVersions }),
           })),
           steps: source.steps.map(step => ({
             id: step.id,

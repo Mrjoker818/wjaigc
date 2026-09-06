@@ -3,7 +3,6 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import {
-  appFileToRoute,
   discoverRepository,
   extractAgentTools,
   posixPath,
@@ -16,6 +15,64 @@ function uniqueSorted(values) {
 
 function uniqueInOrder(values) {
   return [...new Set(values.filter(Boolean))];
+}
+
+function lexicalCodeView(source) {
+  const characters = source.split('');
+  let quote = null;
+  let escaped = false;
+  let lineComment = false;
+  let blockComment = false;
+
+  for (let index = 0; index < source.length; index += 1) {
+    const character = source[index];
+    const next = source[index + 1];
+
+    if (lineComment) {
+      if (character === '\n') {
+        lineComment = false;
+      } else {
+        characters[index] = ' ';
+      }
+      continue;
+    }
+    if (blockComment) {
+      characters[index] = character === '\n' ? '\n' : ' ';
+      if (character === '*' && next === '/') {
+        characters[index + 1] = ' ';
+        blockComment = false;
+        index += 1;
+      }
+      continue;
+    }
+    if (quote) {
+      characters[index] = character === '\n' ? '\n' : ' ';
+      if (escaped) {
+        escaped = false;
+      } else if (character === '\\') {
+        escaped = true;
+      } else if (character === quote) {
+        quote = null;
+      }
+      continue;
+    }
+    if (character === '/' && next === '/') {
+      characters[index] = ' ';
+      characters[index + 1] = ' ';
+      lineComment = true;
+      index += 1;
+    } else if (character === '/' && next === '*') {
+      characters[index] = ' ';
+      characters[index + 1] = ' ';
+      blockComment = true;
+      index += 1;
+    } else if (character === "'" || character === '"' || character === '`') {
+      characters[index] = ' ';
+      quote = character;
+    }
+  }
+
+  return characters.join('');
 }
 
 function extractLiteralApiRoutes(source) {
@@ -32,7 +89,8 @@ function extractTaskTypes(source) {
 
 function extractNamedArray(source, arrayName) {
   const escapedName = arrayName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const declaration = new RegExp(`\\b(?:export\\s+)?const\\s+${escapedName}\\b[^=]*=\\s*\\[`).exec(source);
+  const code = lexicalCodeView(source);
+  const declaration = new RegExp(`\\b(?:export\\s+)?const\\s+${escapedName}\\b[^=]*=\\s*\\[`).exec(code);
   if (!declaration) return '';
 
   const start = declaration.index + declaration[0].lastIndexOf('[');

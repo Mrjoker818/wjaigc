@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   collectStage4Inventory,
+  extractSkillIds,
   extractSkillIdsForSurface,
 } from '../../../scripts/stage-4-inventory.mjs';
 
@@ -13,6 +14,28 @@ function intersection(left: string[], right: string[]): string[] {
 }
 
 describe('scoped Skill runtime inventory', () => {
+  it('finds the real named array past declarations hidden in lexical trivia', () => {
+    const source = [
+      "// export const TARGET_SKILLS = [{ id: 'line-comment-decoy' }];",
+      "/* const TARGET_SKILLS = [{ id: 'block-comment-decoy' }]; */",
+      'const prose = "export const TARGET_SKILLS = [{ id: \'string-decoy\' }]";',
+      "const example = `const TARGET_SKILLS = [{ id: 'template-decoy' }]`;",
+      'export const TARGET_SKILLS: readonly unknown[] = [',
+      '  {',
+      "    id: 'real-first',",
+      "    metadata: { nested: { closingBracket: ']' } },",
+      '  },',
+      "  /* { id: 'nested-comment-decoy' }, ] */",
+      '  {',
+      "    id: 'real-second',",
+      "    metadata: { nested: [{ note: 'kept' }] },",
+      '  },',
+      '];',
+    ].join('\n');
+
+    expect(extractSkillIds(source, 'TARGET_SKILLS')).toEqual(['real-first', 'real-second']);
+  });
+
   it('keeps Canvas and Workflow aligned while Simple Chat remains isolated', async () => {
     const inventory = await collectStage4Inventory(process.cwd());
     const legacyCanvasIds = [

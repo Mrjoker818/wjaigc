@@ -51,6 +51,34 @@ describe('versioned user skill storage', () => {
     expect(stored.skills.some(skill => skill.id.startsWith('preset-'))).toBe(false);
   });
 
+  it('copies the complete omnichannel input contract without losing source bindings', async () => {
+    const adapter = createMemorySkillStorageAdapter();
+    const store = createSkillStore(adapter, { now: () => 100 });
+    const source = (await store.load('user-1', 'canvas'))
+      .find(skill => skill.id === 'preset-omnichannel-campaign');
+
+    expect(source).toBeDefined();
+    const copy = await store.copy({
+      actorUserId: 'user-1',
+      sourceSkillId: 'preset-omnichannel-campaign',
+    });
+
+    expect(copy.inputs).toEqual(source!.inputs);
+    expect(copy.steps).toEqual(source!.steps);
+    expect(copy.inputs.find(field => field.key === 'channels')).toMatchObject({
+      kind: 'multi-select',
+      maximumItems: 6,
+    });
+    expect(copy.inputs.find(field => field.key === 'sourceImages')).toMatchObject({
+      kind: 'images',
+      maximumItems: 6,
+      bindToSourceVersions: true,
+    });
+    expect((adapter.inspect('user-1', SKILL_CATALOG_KEY) as {
+      skills: Array<{ inputs: unknown[] }>;
+    }).skills[0]?.inputs).toEqual(source!.inputs);
+  });
+
   it('keeps the copy id stable and increments its version on an allowed update', async () => {
     const adapter = createMemorySkillStorageAdapter();
     let now = 100;
@@ -264,6 +292,7 @@ describe('versioned user skill storage', () => {
     mutation: (skill: {
       allowedSurfaces: string[];
       sourceAllowedSurfaces: string[];
+      inputs: Array<{ bindToSourceVersions?: unknown }>;
       steps: Array<{ modelRole: string }>;
     }) => void,
   ) {
@@ -275,6 +304,7 @@ describe('versioned user skill storage', () => {
       skills: Array<{
         allowedSurfaces: string[];
         sourceAllowedSurfaces: string[];
+        inputs: Array<{ bindToSourceVersions?: unknown }>;
         steps: Array<{ modelRole: string }>;
       }>;
     };
@@ -289,6 +319,14 @@ describe('versioned user skill storage', () => {
   it('rejects recursively forged stored step enums', async () => {
     const store = await overwriteFirstStoredSkill(skill => {
       skill.steps[0]!.modelRole = 'root';
+    });
+
+    await expect(store.loadEnvelope('user-1')).rejects.toBeInstanceOf(SkillStorageError);
+  });
+
+  it('rejects non-boolean source-version bindings in stored inputs', async () => {
+    const store = await overwriteFirstStoredSkill(skill => {
+      skill.inputs[0]!.bindToSourceVersions = 'true';
     });
 
     await expect(store.loadEnvelope('user-1')).rejects.toBeInstanceOf(SkillStorageError);
