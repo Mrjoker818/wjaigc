@@ -128,3 +128,11 @@ Edge实例9读取原项目对话：上次查询文本不在消息中，输入框
 - 全程位于 `BEGIN TRANSACTION READ ONLY` 与 `ROLLBACK` 之间，不包含数据写入或结构变更语句；不会通过猜测 owner/project 排除真实记录。
 - 测试先因 SQL 文件不存在按预期失败，最小实现后 `src/__tests__/scripts/task12-skill-run-audit.test.ts` 为 `1/1` 通过；全量回归 `646` 个测试文件通过、`31` 个 PostgreSQL 条件文件跳过，`5168` 项通过、`168` 项跳过、`0` 失败。`pnpm ts-check`、该测试 ESLint、`git diff --check` 和保护门禁 `38/38 / 0 drift / 0 warnings` 均退出 0。
 - 本机 `POSTGRES_TEST_DATABASE_URL`、`PGDATABASE_URL`、`DATABASE_URL` 均未设置，因此本轮没有执行真库查询。历史取消 Run 的精确扣退关联仍为未验证，待 Coze 终端或专用只读数据库连接执行脚本后才能关闭。
+
+### 隔离 PostgreSQL 实际执行
+
+- 使用系统已有 PostgreSQL 18 二进制在 `%TEMP%` 创建一次性隔离集群，端口 `55439`，认证仅限该临时实例的本机 trust；没有修改或连接默认 PostgreSQL 服务，也没有使用云端业务库。
+- 使用完全虚构的 `test-cancel-run` 夹具执行同一 `scripts/task12-skill-run-audit.sql`，`psql` 退出 0；脚本自动发现 `user-a / project-a`，读取 2 个事件、1 个下游操作、1 个预付子任务及 1 个结果资产。
+- 账务结果为 `linked_charge_count=1`、`linked_refund_count=1`、`run_charge_count=1`、`run_refund_count=1`、`run_net_amount=0`，最终输出 `ROLLBACK`。
+- 临时服务已正常停止，`pg_isready` 确认 `55439` 无响应。主机策略拒绝递归删除测试目录，因此保留已停止的 `C:\Users\Administrator\AppData\Local\Temp\wujie-task12-audit-20260906`；该目录不在仓库且没有运行进程。
+- 这项证据关闭“SQL 是否可执行、是否能精确关联、是否只读”的工具链疑问，但不替代云端历史 Run 的真实查询结果；该业务证据仍为未验证。
