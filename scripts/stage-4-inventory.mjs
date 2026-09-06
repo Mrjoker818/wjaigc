@@ -99,21 +99,29 @@ function directPropertyInitializer(object, propertyName) {
 
 function skillObjectFromElement(element) {
   const value = unwrapExpression(element);
-  if (value && ts.isObjectLiteralExpression(value)) return value;
+  if (value && ts.isObjectLiteralExpression(value)) {
+    return { argumentIndex: undefined, object: value };
+  }
   if (!value || !ts.isCallExpression(value)) return undefined;
-  return value.arguments
-    .map(argument => unwrapExpression(argument))
-    .find(argument => argument && ts.isObjectLiteralExpression(argument));
+  const argumentIndex = value.arguments.findIndex(argument => {
+    const candidate = unwrapExpression(argument);
+    return candidate && ts.isObjectLiteralExpression(candidate);
+  });
+  if (argumentIndex < 0) return undefined;
+  return {
+    argumentIndex,
+    object: unwrapExpression(value.arguments[argumentIndex]),
+  };
 }
 
 function skillRecords(array, constants) {
   return array.elements.flatMap(element => {
-    const object = skillObjectFromElement(element);
-    if (!object) return [];
-    const idInitializer = directPropertyInitializer(object, 'id');
+    const skillObject = skillObjectFromElement(element);
+    if (!skillObject) return [];
+    const idInitializer = directPropertyInitializer(skillObject.object, 'id');
     if (!idInitializer) return [];
     const id = stringValue(idInitializer, constants);
-    return id ? [{ element: unwrapExpression(element), id }] : [];
+    return id ? [{ ...skillObject, element: unwrapExpression(element), id }] : [];
   });
 }
 
@@ -136,6 +144,14 @@ function returnedExpressions(functionLike) {
   ));
 }
 
+function objectSpreadsIdentifier(object, identifierName) {
+  return object.properties.some(property => {
+    if (!ts.isSpreadAssignment(property)) return false;
+    const spread = unwrapExpression(property.expression);
+    return spread && ts.isIdentifier(spread) && spread.text === identifierName;
+  });
+}
+
 function callbackNormalizesSkill(callback, surfacesVariableName) {
   const parameter = callback.parameters[0];
   if (!parameter || !ts.isIdentifier(parameter.name)) return false;
@@ -143,11 +159,7 @@ function callbackNormalizesSkill(callback, surfacesVariableName) {
     returned
     && ts.isObjectLiteralExpression(returned)
     && objectUsesSurfaces(returned, surfacesVariableName)
-    && returned.properties.some(property => {
-      if (!ts.isSpreadAssignment(property)) return false;
-      const spread = unwrapExpression(property.expression);
-      return spread && ts.isIdentifier(spread) && spread.text === parameter.name.text;
-    })
+    && objectSpreadsIdentifier(returned, parameter.name.text)
   ));
 }
 
@@ -171,9 +183,14 @@ function constructionUsesSurfaces(expression, surfacesVariableName) {
   return callbackNormalizesSkill(callback, surfacesVariableName);
 }
 
-function functionUsesSurfaces(functionLike, surfacesVariableName) {
-  return returnedExpressions(functionLike).some(expression => (
-    constructionUsesSurfaces(expression, surfacesVariableName)
+function factoryNormalizesArgument(functionLike, argumentIndex, surfacesVariableName) {
+  const parameter = functionLike.parameters[argumentIndex];
+  if (!parameter || !ts.isIdentifier(parameter.name)) return false;
+  return returnedExpressions(functionLike).some(returned => (
+    returned
+    && ts.isObjectLiteralExpression(returned)
+    && objectUsesSurfaces(returned, surfacesVariableName)
+    && objectSpreadsIdentifier(returned, parameter.name.text)
   ));
 }
 
@@ -216,13 +233,20 @@ function functionNormalizesArgument(functionLike, argumentIndex, surfacesVariabl
   ));
 }
 
-function elementUsesSurfaces(element, functions, surfacesVariableName) {
-  if (ts.isObjectLiteralExpression(element)) {
-    return objectUsesSurfaces(element, surfacesVariableName);
+function elementUsesSurfaces(record, functions, surfacesVariableName) {
+  if (ts.isObjectLiteralExpression(record.element)) {
+    return objectUsesSurfaces(record.element, surfacesVariableName);
   }
-  if (!ts.isCallExpression(element) || !ts.isIdentifier(element.expression)) return false;
-  const factory = functions.get(element.expression.text);
-  return Boolean(factory && functionUsesSurfaces(factory, surfacesVariableName));
+  if (
+    record.argumentIndex === undefined
+    || !ts.isCallExpression(record.element)
+    || !ts.isIdentifier(record.element.expression)
+  ) return false;
+  const factory = functions.get(record.element.expression.text);
+  return Boolean(
+    factory
+    && factoryNormalizesArgument(factory, record.argumentIndex, surfacesVariableName),
+  );
 }
 
 function arrayConstructionUsesSurfaces(
@@ -309,7 +333,7 @@ export function extractSkillIdsForSurface(
   const records = skillRecords(array, constants);
   const functions = topLevelFunctions(sourceFile);
   const boundRecords = records.filter(record => (
-    elementUsesSurfaces(record.element, functions, surfacesVariableName)
+    elementUsesSurfaces(record, functions, surfacesVariableName)
   ));
   if (boundRecords.length > 0) {
     return uniqueInOrder(boundRecords.map(record => record.id));

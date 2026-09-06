@@ -172,6 +172,24 @@ describe('scoped Skill runtime inventory', () => {
     )).toEqual([]);
   });
 
+  it('rejects factories that discard the argument carrying the Skill id', () => {
+    const source = `
+      const surfaces = ['canvas'] as const;
+      function inspect(input) {
+        void input;
+        return { allowedSurfaces: surfaces };
+      }
+      const TARGET_SKILLS = [inspect({ id: 'ghost' })];
+    `;
+
+    expect(extractSkillIdsForSurface(
+      source,
+      'TARGET_SKILLS',
+      'surfaces',
+      'canvas',
+    )).toEqual([]);
+  });
+
   it('extracts ids from the real legacy and marketing Skill definitions', async () => {
     const [legacySource, marketingSource] = await Promise.all([
       readFile(resolve(process.cwd(), 'src/lib/skill-runtime/canvas-presets.ts'), 'utf8'),
