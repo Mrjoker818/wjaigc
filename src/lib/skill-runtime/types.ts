@@ -27,6 +27,11 @@ export interface SkillModelBinding {
   requiredCapabilities: readonly string[];
 }
 
+export interface SkillStepCondition {
+  input: string;
+  includes: readonly (string | number | boolean)[];
+}
+
 export interface SkillStepDefinition {
   id: string;
   label: string;
@@ -36,6 +41,7 @@ export interface SkillStepDefinition {
   promptTemplate: string;
   modelRole: SkillModelBinding['role'];
   qualityGateIds: readonly string[];
+  when?: SkillStepCondition;
 }
 
 export interface SkillDefinition {

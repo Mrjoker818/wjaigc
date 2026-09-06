@@ -38,4 +38,36 @@ describe('Skill runtime cost estimator', () => {
       { providerId: bindings.image.providerId },
     );
   });
+
+  it('prices only the steps enabled by resolved input values', async () => {
+    const calculateCreditCost = vi.fn(async () => 2);
+    const conditional = {
+      ...canvasSkill,
+      inputs: [
+        { key: 'count', label: 'Count', kind: 'select', required: true, options: ['2', '3'] },
+      ],
+      steps: [
+        ...canvasSkill.steps,
+        {
+          id: 'optional-image', label: 'Optional', toolId: 'img2img',
+          execution: 'sequential', promptTemplate: 'optional', modelRole: 'image',
+          qualityGateIds: [], when: { input: 'count', includes: ['3'] },
+        },
+      ],
+    } as SkillDefinition;
+    const bindings = {
+      orchestrator: { providerId: 'chat-provider', modelId: 'chat-model' },
+      image: { providerId: 'image-provider', modelId: 'image-model' },
+    };
+
+    const estimate = await estimateSkillRunCost(
+      conditional,
+      bindings,
+      { calculateCreditCost },
+      { count: '2' },
+    );
+
+    expect(estimate.steps.map(step => step.stepId)).toEqual(['orchestrator', 'image']);
+    expect(estimate.maximum).toBe(4);
+  });
 });

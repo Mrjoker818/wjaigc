@@ -381,6 +381,7 @@ export async function createSkillRun(
     skill,
     agentRequest.skill!.modelBindings,
     effective,
+    agentRequest.skill!.inputValues,
   );
   const billingQuote: AgentRunBillingQuote = {
     creditCost: estimate.maximum,

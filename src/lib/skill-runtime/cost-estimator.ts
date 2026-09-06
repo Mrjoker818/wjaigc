@@ -1,6 +1,7 @@
 import { calculateConfiguredCreditCost } from '@/lib/credits';
 import type { CreditOperation } from '@/lib/credits';
 import type { SkillDefinition, SkillModelBinding, SkillStepDefinition } from './types';
+import { compileConditionalSkillSteps } from './step-compiler';
 
 export interface FrozenModelBinding {
   providerId: string;
@@ -51,9 +52,13 @@ export function toolCostType(toolId: string): CreditOperation {
   }
 }
 
-export function skillExecutionSteps(skill: SkillDefinition): SkillStepDefinition[] {
-  if (skill.steps.some(step => step.modelRole === 'orchestrator')) {
-    return skill.steps.map(step => ({ ...step }));
+export function skillExecutionSteps(
+  skill: SkillDefinition,
+  inputValues: Readonly<Record<string, unknown>> = {},
+): SkillStepDefinition[] {
+  const compiled = compileConditionalSkillSteps(skill, inputValues);
+  if (compiled.some(step => step.modelRole === 'orchestrator')) {
+    return compiled;
   }
   return [{
     id: 'orchestrator',
@@ -63,7 +68,7 @@ export function skillExecutionSteps(skill: SkillDefinition): SkillStepDefinition
     promptTemplate: skill.systemPrompt,
     modelRole: 'orchestrator',
     qualityGateIds: [],
-  }, ...skill.steps.map(step => ({ ...step }))];
+  }, ...compiled];
 }
 
 export function skillStepCreditOperation(step: SkillStepDefinition): CreditOperation {
@@ -75,8 +80,9 @@ export async function estimateSkillRunCost(
   skill: SkillDefinition,
   bindings: FrozenBindings,
   dependencies: SkillCostEstimatorDependencies = defaultDependencies,
+  inputValues: Readonly<Record<string, unknown>> = {},
 ): Promise<SkillRunCostEstimate> {
-  const definitions = skillExecutionSteps(skill);
+  const definitions = skillExecutionSteps(skill, inputValues);
   const steps = await Promise.all(definitions.map(async step => {
     const binding = bindings[step.modelRole];
     if (!binding) {

@@ -184,7 +184,7 @@ git commit -m "feat: define second Lovart workflow batch"
 - Produces: `SkillStepCondition`、`compileSkillExecutionPlan(definition, inputs)`。
 - Returns: `{ steps: SkillStepDefinition[]; skippedStepIds: string[] }`。
 
-- [ ] **Step 1: 写条件编译 RED 测试**
+- [x] **Step 1: 写条件编译 RED 测试**
 
 ```ts
 const plan2 = compileSkillExecutionPlan(pinterest, { seriesCount: '2' });
@@ -200,12 +200,12 @@ expect(plan3.skippedStepIds).toEqual([]);
 
 再断言未知 input、空 includes、非 select/multi-select 字段和空执行计划抛出 `SKILL_STEP_CONDITION_INVALID`。
 
-- [ ] **Step 2: 运行并确认 RED**
+- [x] **Step 2: 运行并确认 RED**
 
 Run: `pnpm exec vitest run src/__tests__/lib/skill-runtime-step-compiler.test.ts src/__tests__/lib/skill-runtime-cost-estimator.test.ts src/__tests__/lib/skill-runtime-run-request.test.ts`
 Expected: 编译器缺失而 FAIL。
 
-- [ ] **Step 3: 增加声明式类型和纯编译器**
+- [x] **Step 3: 增加声明式类型和纯编译器**
 
 ```ts
 export interface SkillStepCondition {
@@ -222,11 +222,11 @@ export interface SkillStepDefinition {
 
 `compileSkillExecutionPlan` 必须纯函数、保持原顺序、不修改输入，并在编译结果中移除 `when`。报价和 Run 创建使用同一编译结果，禁止分别实现条件判断。
 
-- [ ] **Step 4: 冻结与恢复扩展字段**
+- [x] **Step 4: 冻结与恢复扩展字段**
 
 在 `storage.ts`、`continuation.ts`、`service.ts` 的严格解析器中显式复制并验证 `when`，拒绝未知形状，不使用类型断言绕过验证。Run 创建事件记录 `skippedStepIds`，不为跳过项建立 operation。
 
-- [ ] **Step 5: 运行条件步骤回归并提交**
+- [x] **Step 5: 运行条件步骤回归并提交**
 
 Run: Step 2 命令，加 `src/__tests__/lib/skill-runtime-continuation.test.ts src/__tests__/lib/skill-runtime-storage.test.ts`。
 Expected: seriesCount 2/3 的报价和冻结步骤一致，旧 Skill 结果不变。

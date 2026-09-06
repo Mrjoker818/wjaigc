@@ -744,10 +744,11 @@ export function createAgentRuntimeService(
         throw new AgentRunRequestError('billingQuote is invalid');
       }
       const skillEstimate = skillAdmission
-        ? await estimateSkillRunCost(
+          ? await estimateSkillRunCost(
             skillAdmission.skill,
             skillAdmission.modelBindings,
             { calculateCreditCost: dependencies.calculateCreditCost },
+            request.skill!.inputValues,
           )
         : null;
       const creditCost = skillEstimate?.maximum
@@ -837,7 +838,10 @@ export function createAgentRuntimeService(
               id: skillAdmission.skill.id,
               version: skillAdmission.skill.version,
               name: skillAdmission.skill.name,
-              steps: skillExecutionSteps(skillAdmission.skill).map(step => ({
+              steps: skillExecutionSteps(
+                skillAdmission.skill,
+                request.skill!.inputValues,
+              ).map(step => ({
                 id: step.id,
                 label: step.label,
                 toolId: step.toolId,

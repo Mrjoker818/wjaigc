@@ -101,7 +101,10 @@ export const LOVART_CONTENT_COMMERCE_SKILLS: readonly SkillDefinition[] = [
       planStep('pin-plan', '制定图钉系列方案', '围绕{{topic}}制定面向{{audience}}、目标为{{goal}}的 Pinterest 系列方案，确保内容支柱、视觉连续性和行动路径一致。'),
       imageStep(pinterestId, 'pin-hero', '主图钉', '基于来源图片生成2:3主图钉，主题{{topic}}，风格{{style}}，目标{{goal}}，避免{{negativeConstraints}}。'),
       imageStep(pinterestId, 'pin-detail', '细节图钉', '基于来源图片生成2:3细节或步骤型图钉，面向{{audience}}，保持{{style}}，避免{{negativeConstraints}}。'),
-      imageStep(pinterestId, 'pin-conversion', '转化图钉', '基于来源图片生成2:3转化图钉，行动号召为{{callToAction}}，保持{{style}}，避免{{negativeConstraints}}。'),
+      {
+        ...imageStep(pinterestId, 'pin-conversion', '转化图钉', '基于来源图片生成2:3转化图钉，行动号召为{{callToAction}}，保持{{style}}，避免{{negativeConstraints}}。'),
+        when: { input: 'seriesCount', includes: ['3'] },
+      },
     ],
   }),
   definition({

@@ -164,7 +164,7 @@ function isStoredInput(value: unknown): boolean {
 function isStoredStep(value: unknown): boolean {
   if (!isRecord(value) || !hasOnlyKeys(value, [
     'id', 'label', 'toolId', 'execution', 'parallelGroup', 'promptTemplate',
-    'modelRole', 'qualityGateIds',
+    'modelRole', 'qualityGateIds', 'when',
   ])) return false;
   if (
     !isBoundedString(value.id, 128, TOKEN_ID)
@@ -178,7 +178,24 @@ function isStoredStep(value: unknown): boolean {
     || value.qualityGateIds.length > 32
     || !value.qualityGateIds.every(id => isBoundedString(id, 128, TOKEN_ID))
   ) return false;
-  return !('parallelGroup' in value) || isBoundedString(value.parallelGroup, 128, GROUP_ID);
+  if ('parallelGroup' in value && !isBoundedString(value.parallelGroup, 128, GROUP_ID)) {
+    return false;
+  }
+  if ('when' in value) {
+    if (!isRecord(value.when) || !hasOnlyKeys(value.when, ['input', 'includes'])) return false;
+    if (!isBoundedString(value.when.input, 64, TOKEN_ID)) return false;
+    if (
+      !Array.isArray(value.when.includes)
+      || value.when.includes.length === 0
+      || value.when.includes.length > 100
+      || !value.when.includes.every(item => (
+        typeof item === 'boolean'
+        || (typeof item === 'number' && Number.isFinite(item))
+        || (typeof item === 'string' && item.length <= 200)
+      ))
+    ) return false;
+  }
+  return true;
 }
 
 function hasUniqueSurfaces(value: unknown): value is SkillSurface[] {
@@ -561,6 +578,12 @@ export function createSkillStore(
             promptTemplate: step.promptTemplate,
             modelRole: step.modelRole,
             qualityGateIds: [...step.qualityGateIds],
+            ...(step.when === undefined ? {} : {
+              when: {
+                input: step.when.input,
+                includes: [...step.when.includes],
+              },
+            }),
           })),
           enabled: true,
           builtIn: false,

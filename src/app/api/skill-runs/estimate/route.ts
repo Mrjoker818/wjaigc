@@ -150,7 +150,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         },
       });
       return NextResponse.json({
-        ...await estimateSkillRunCost(skill, bindings), modelBindings: bindings,
+        ...await estimateSkillRunCost(skill, bindings, undefined, input.inputValues), modelBindings: bindings,
         inputValidation: 'deferred-to-execution',
       });
     }
@@ -159,7 +159,12 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       resolveTaskModel,
     }, skill);
     await authorizeAgentContext({ actorUserId: auth.userId, request: agentRequest });
-    const estimate = await estimateSkillRunCost(skill, agentRequest.skill!.modelBindings);
+    const estimate = await estimateSkillRunCost(
+      skill,
+      agentRequest.skill!.modelBindings,
+      undefined,
+      agentRequest.skill!.inputValues,
+    );
     return NextResponse.json({
       ...estimate,
       modelBindings: agentRequest.skill!.modelBindings,
