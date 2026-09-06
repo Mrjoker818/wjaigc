@@ -21,6 +21,7 @@ const expectedSkillIds = [
   'poster-design',
   'ppt-master',
   'ppt-page-design',
+  'preset-ad-ab-variants',
   'preset-apparel-fashion',
   'preset-book-cover',
   'preset-business-card',
@@ -35,9 +36,11 @@ const expectedSkillIds = [
   'preset-magazine-cover',
   'preset-marketing-brochure',
   'preset-mockup-showcase',
+  'preset-omnichannel-campaign',
   'preset-poster-design',
   'preset-ppt-design',
   'preset-product-packaging',
+  'preset-retargeting-creative',
   'preset-social-media',
   'preset-sticker-emoji',
   'preset-storyboard',
@@ -94,8 +97,8 @@ describe('Stage 4 inventory generator', () => {
     ].join('\n');
 
     expect(extractSkillIds(source, 'RAW_CANVAS_PRESET_SKILLS')).toEqual([
-      'kept-first',
       'kept-second',
+      'kept-first',
     ]);
   });
 });

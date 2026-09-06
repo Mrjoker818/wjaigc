@@ -36,6 +36,28 @@ describe('scoped Skill runtime inventory', () => {
     expect(extractSkillIds(source, 'TARGET_SKILLS')).toEqual(['real-first', 'real-second']);
   });
 
+  it('resolves only direct Skill ids from real top-level string constants', () => {
+    const source = [
+      "// const REAL_ID = 'line-comment-decoy';",
+      "/* const REAL_ID = 'block-comment-decoy'; */",
+      'const prose = "const REAL_ID = \'string-decoy\'";',
+      "const example = `const REAL_ID = 'template-decoy'`;",
+      "const REAL_ID = 'real-constant-id';",
+      'export const TARGET_SKILLS = [',
+      '  {',
+      '    id: REAL_ID,',
+      "    metadata: { id: 'nested-object-decoy' },",
+      '  },',
+      "  { id: 'real-literal-id' },",
+      '];',
+    ].join('\n');
+
+    expect(extractSkillIds(source, 'TARGET_SKILLS')).toEqual([
+      'real-constant-id',
+      'real-literal-id',
+    ]);
+  });
+
   it('keeps Canvas and Workflow aligned while Simple Chat remains isolated', async () => {
     const inventory = await collectStage4Inventory(process.cwd());
     const legacyCanvasIds = [
@@ -88,6 +110,58 @@ describe('scoped Skill runtime inventory', () => {
       'canvasSurfaces',
       'canvas',
     )).toEqual([]);
+  });
+
+  it('rejects surface references that do not belong to the target Skill construction', () => {
+    const source = `
+      const canvasSurfaces = ['canvas'] as const;
+      const otherSurfaces = ['workflow'] as const;
+      const prose = 'allowedSurfaces: canvasSurfaces';
+      const example = \`allowedSurfaces: canvasSurfaces\`;
+      const unrelated = { nested: { allowedSurfaces: canvasSurfaces } };
+      const TARGET_SKILLS = [{ id: 'workflow-only' }];
+      const normalized = TARGET_SKILLS.map(skill => ({
+        ...skill,
+        metadata: { allowedSurfaces: canvasSurfaces },
+        allowedSurfaces: otherSurfaces,
+      }));
+    `;
+
+    expect(extractSkillIdsForSurface(
+      source,
+      'TARGET_SKILLS',
+      'canvasSurfaces',
+      'canvas',
+    )).toEqual([]);
+  });
+
+  it('extracts ids from the real legacy and marketing Skill definitions', async () => {
+    const [legacySource, marketingSource] = await Promise.all([
+      readFile(resolve(process.cwd(), 'src/lib/skill-runtime/canvas-presets.ts'), 'utf8'),
+      readFile(resolve(process.cwd(), 'src/lib/skill-runtime/marketing-presets.ts'), 'utf8'),
+    ]);
+
+    const legacyIds = extractSkillIdsForSurface(
+      legacySource,
+      'RAW_CANVAS_PRESET_SKILLS',
+      'canvasSurfaces',
+      'workflow',
+    );
+    const marketingIds = extractSkillIdsForSurface(
+      marketingSource,
+      'LOVART_MARKETING_SKILLS',
+      'surfaces',
+      'canvas',
+    );
+
+    expect(legacyIds).toHaveLength(21);
+    expect(legacyIds[0]).toBe('preset-ecommerce-listing');
+    expect(legacyIds.at(-1)).toBe('preset-food-photography');
+    expect(marketingIds).toEqual([
+      'preset-ad-ab-variants',
+      'preset-retargeting-creative',
+      'preset-omnichannel-campaign',
+    ]);
   });
 
   it('isolates the Skill E2E from the 100-node Stage 4 workflow fixture', async () => {

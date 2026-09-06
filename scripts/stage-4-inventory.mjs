@@ -2,6 +2,8 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import ts from 'typescript';
+
 import {
   discoverRepository,
   extractAgentTools,
@@ -17,64 +19,6 @@ function uniqueInOrder(values) {
   return [...new Set(values.filter(Boolean))];
 }
 
-function lexicalCodeView(source) {
-  const characters = source.split('');
-  let quote = null;
-  let escaped = false;
-  let lineComment = false;
-  let blockComment = false;
-
-  for (let index = 0; index < source.length; index += 1) {
-    const character = source[index];
-    const next = source[index + 1];
-
-    if (lineComment) {
-      if (character === '\n') {
-        lineComment = false;
-      } else {
-        characters[index] = ' ';
-      }
-      continue;
-    }
-    if (blockComment) {
-      characters[index] = character === '\n' ? '\n' : ' ';
-      if (character === '*' && next === '/') {
-        characters[index + 1] = ' ';
-        blockComment = false;
-        index += 1;
-      }
-      continue;
-    }
-    if (quote) {
-      characters[index] = character === '\n' ? '\n' : ' ';
-      if (escaped) {
-        escaped = false;
-      } else if (character === '\\') {
-        escaped = true;
-      } else if (character === quote) {
-        quote = null;
-      }
-      continue;
-    }
-    if (character === '/' && next === '/') {
-      characters[index] = ' ';
-      characters[index + 1] = ' ';
-      lineComment = true;
-      index += 1;
-    } else if (character === '/' && next === '*') {
-      characters[index] = ' ';
-      characters[index + 1] = ' ';
-      blockComment = true;
-      index += 1;
-    } else if (character === "'" || character === '"' || character === '`') {
-      characters[index] = ' ';
-      quote = character;
-    }
-  }
-
-  return characters.join('');
-}
-
 function extractLiteralApiRoutes(source) {
   return uniqueSorted(
     [...source.matchAll(/['"`](\/api\/[^'"`\s)]+)['"`]/g)].map(match => match[1]),
@@ -87,169 +31,207 @@ function extractTaskTypes(source) {
   );
 }
 
-function extractNamedArray(source, arrayName) {
-  const escapedName = arrayName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const code = lexicalCodeView(source);
-  const declaration = new RegExp(`\\b(?:export\\s+)?const\\s+${escapedName}\\b[^=]*=\\s*\\[`).exec(code);
-  if (!declaration) return '';
-
-  const start = declaration.index + declaration[0].lastIndexOf('[');
-  let depth = 0;
-  let quote = null;
-  let escaped = false;
-  let lineComment = false;
-  let blockComment = false;
-
-  for (let index = start; index < source.length; index += 1) {
-    const character = source[index];
-    const next = source[index + 1];
-
-    if (lineComment) {
-      if (character === '\n') lineComment = false;
-      continue;
-    }
-    if (blockComment) {
-      if (character === '*' && next === '/') {
-        blockComment = false;
-        index += 1;
-      }
-      continue;
-    }
-    if (quote) {
-      if (escaped) {
-        escaped = false;
-      } else if (character === '\\') {
-        escaped = true;
-      } else if (character === quote) {
-        quote = null;
-      }
-      continue;
-    }
-    if (character === '/' && next === '/') {
-      lineComment = true;
-      index += 1;
-      continue;
-    }
-    if (character === '/' && next === '*') {
-      blockComment = true;
-      index += 1;
-      continue;
-    }
-    if (character === "'" || character === '"' || character === '`') {
-      quote = character;
-      continue;
-    }
-    if (character === '[') depth += 1;
-    if (character === ']') {
-      depth -= 1;
-      if (depth === 0) return source.slice(start, index + 1);
-    }
+function unwrapExpression(expression) {
+  let current = expression;
+  while (
+    current
+    && (ts.isParenthesizedExpression(current)
+      || ts.isAsExpression(current)
+      || ts.isTypeAssertionExpression(current)
+      || ts.isSatisfiesExpression(current)
+      || ts.isNonNullExpression(current))
+  ) {
+    current = current.expression;
   }
-
-  return '';
+  return current;
 }
 
-export function extractSkillIds(source, arrayName) {
-  const arraySource = extractNamedArray(source, arrayName);
-  const ids = [];
-  let objectDepth = 0;
-  let quote = null;
-  let escaped = false;
-  let lineComment = false;
-  let blockComment = false;
-
-  for (let index = 0; index < arraySource.length; index += 1) {
-    const character = arraySource[index];
-    const next = arraySource[index + 1];
-
-    if (lineComment) {
-      if (character === '\n') lineComment = false;
-      continue;
-    }
-    if (blockComment) {
-      if (character === '*' && next === '/') {
-        blockComment = false;
-        index += 1;
-      }
-      continue;
-    }
-    if (quote) {
-      if (escaped) {
-        escaped = false;
-      } else if (character === '\\') {
-        escaped = true;
-      } else if (character === quote) {
-        quote = null;
-      }
-      continue;
-    }
-    if (character === '/' && next === '/') {
-      lineComment = true;
-      index += 1;
-      continue;
-    }
-    if (character === '/' && next === '*') {
-      blockComment = true;
-      index += 1;
-      continue;
-    }
-    if (character === "'" || character === '"' || character === '`') {
-      quote = character;
-      continue;
-    }
-    if (character === '{') {
-      objectDepth += 1;
-      continue;
-    }
-    if (character === '}') {
-      objectDepth -= 1;
-      continue;
-    }
+function topLevelConstInitializers(sourceFile) {
+  const initializers = new Map();
+  for (const statement of sourceFile.statements) {
     if (
-      objectDepth !== 1
-      || arraySource.slice(index, index + 2) !== 'id'
-      || /[A-Za-z0-9_$]/.test(arraySource[index - 1] || '')
-      || /[A-Za-z0-9_$]/.test(arraySource[index + 2] || '')
+      !ts.isVariableStatement(statement)
+      || !(statement.declarationList.flags & ts.NodeFlags.Const)
     ) {
       continue;
     }
-
-    let cursor = index + 2;
-    while (/\s/.test(arraySource[cursor] || '')) cursor += 1;
-    if (arraySource[cursor] !== ':') continue;
-    cursor += 1;
-    while (/\s/.test(arraySource[cursor] || '')) cursor += 1;
-
-    const valueQuote = arraySource[cursor];
-    if (valueQuote !== "'" && valueQuote !== '"') {
-      const identifier = /^[A-Za-z_$][A-Za-z0-9_$]*/.exec(arraySource.slice(cursor))?.[0];
-      if (!identifier) continue;
-      const escapedIdentifier = identifier.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      const constant = new RegExp(
-        `\\bconst\\s+${escapedIdentifier}\\s*=\\s*(['"])(.*?)\\1`,
-      ).exec(source);
-      if (constant?.[2]) ids.push(constant[2]);
-      continue;
-    }
-    const valueStart = cursor + 1;
-    cursor = valueStart;
-    let valueEscaped = false;
-    while (cursor < arraySource.length) {
-      const valueCharacter = arraySource[cursor];
-      if (valueEscaped) {
-        valueEscaped = false;
-      } else if (valueCharacter === '\\') {
-        valueEscaped = true;
-      } else if (valueCharacter === valueQuote) {
-        ids.push(arraySource.slice(valueStart, cursor));
-        index = cursor;
-        break;
+    for (const declaration of statement.declarationList.declarations) {
+      if (ts.isIdentifier(declaration.name) && declaration.initializer) {
+        initializers.set(declaration.name.text, unwrapExpression(declaration.initializer));
       }
-      cursor += 1;
     }
   }
+  return initializers;
+}
 
-  return uniqueInOrder(ids);
+function topLevelFunctions(sourceFile) {
+  const functions = new Map();
+  for (const statement of sourceFile.statements) {
+    if (ts.isFunctionDeclaration(statement) && statement.name) {
+      functions.set(statement.name.text, statement);
+    }
+  }
+  return functions;
+}
+
+function stringValue(expression, constants) {
+  const value = unwrapExpression(expression);
+  if (value && ts.isStringLiteralLike(value)) return value.text;
+  if (value && ts.isIdentifier(value)) {
+    const initializer = constants.get(value.text);
+    if (initializer && ts.isStringLiteralLike(initializer)) return initializer.text;
+  }
+  return undefined;
+}
+
+function propertyNameText(name) {
+  if (ts.isIdentifier(name) || ts.isStringLiteralLike(name)) return name.text;
+  return undefined;
+}
+
+function directPropertyInitializer(object, propertyName) {
+  const property = object.properties.find(candidate => (
+    ts.isPropertyAssignment(candidate)
+    && propertyNameText(candidate.name) === propertyName
+  ));
+  return property?.initializer;
+}
+
+function skillObjectFromElement(element) {
+  const value = unwrapExpression(element);
+  if (value && ts.isObjectLiteralExpression(value)) return value;
+  if (!value || !ts.isCallExpression(value)) return undefined;
+  return value.arguments
+    .map(argument => unwrapExpression(argument))
+    .find(argument => argument && ts.isObjectLiteralExpression(argument));
+}
+
+function skillRecords(array, constants) {
+  return array.elements.flatMap(element => {
+    const object = skillObjectFromElement(element);
+    if (!object) return [];
+    const idInitializer = directPropertyInitializer(object, 'id');
+    if (!idInitializer) return [];
+    const id = stringValue(idInitializer, constants);
+    return id ? [{ element: unwrapExpression(element), id }] : [];
+  });
+}
+
+function objectUsesSurfaces(object, surfacesVariableName) {
+  const initializer = directPropertyInitializer(object, 'allowedSurfaces');
+  const value = initializer && unwrapExpression(initializer);
+  return Boolean(value && ts.isIdentifier(value) && value.text === surfacesVariableName);
+}
+
+function returnedExpressions(functionLike) {
+  if (ts.isArrowFunction(functionLike) && !ts.isBlock(functionLike.body)) {
+    return [unwrapExpression(functionLike.body)];
+  }
+  const body = functionLike.body;
+  if (!body || !ts.isBlock(body)) return [];
+  return body.statements.flatMap(statement => (
+    ts.isReturnStatement(statement) && statement.expression
+      ? [unwrapExpression(statement.expression)]
+      : []
+  ));
+}
+
+function constructionUsesSurfaces(expression, surfacesVariableName) {
+  const value = unwrapExpression(expression);
+  if (!value) return false;
+  if (ts.isObjectLiteralExpression(value)) {
+    return objectUsesSurfaces(value, surfacesVariableName);
+  }
+  if (
+    !ts.isCallExpression(value)
+    || !ts.isPropertyAccessExpression(value.expression)
+    || value.expression.name.text !== 'map'
+  ) {
+    return false;
+  }
+  const callback = unwrapExpression(value.arguments[0]);
+  if (!callback || (!ts.isArrowFunction(callback) && !ts.isFunctionExpression(callback))) {
+    return false;
+  }
+  return returnedExpressions(callback).some(returned => (
+    returned && ts.isObjectLiteralExpression(returned)
+    && objectUsesSurfaces(returned, surfacesVariableName)
+  ));
+}
+
+function functionUsesSurfaces(functionLike, surfacesVariableName) {
+  return returnedExpressions(functionLike).some(expression => (
+    constructionUsesSurfaces(expression, surfacesVariableName)
+  ));
+}
+
+function elementUsesSurfaces(element, functions, surfacesVariableName) {
+  if (ts.isObjectLiteralExpression(element)) {
+    return objectUsesSurfaces(element, surfacesVariableName);
+  }
+  if (!ts.isCallExpression(element) || !ts.isIdentifier(element.expression)) return false;
+  const factory = functions.get(element.expression.text);
+  return Boolean(factory && functionUsesSurfaces(factory, surfacesVariableName));
+}
+
+function arrayConstructionUsesSurfaces(
+  sourceFile,
+  arrayName,
+  functions,
+  surfacesVariableName,
+) {
+  for (const statement of sourceFile.statements) {
+    if (!ts.isVariableStatement(statement)) continue;
+    for (const declaration of statement.declarationList.declarations) {
+      const initializer = declaration.initializer && unwrapExpression(declaration.initializer);
+      if (!initializer || !ts.isCallExpression(initializer)) continue;
+
+      if (
+        ts.isPropertyAccessExpression(initializer.expression)
+        && initializer.expression.name.text === 'map'
+        && ts.isIdentifier(unwrapExpression(initializer.expression.expression))
+        && unwrapExpression(initializer.expression.expression).text === arrayName
+        && constructionUsesSurfaces(initializer, surfacesVariableName)
+      ) {
+        return true;
+      }
+
+      if (
+        ts.isIdentifier(initializer.expression)
+        && initializer.arguments.some(argument => {
+          const value = unwrapExpression(argument);
+          return value && ts.isIdentifier(value) && value.text === arrayName;
+        })
+      ) {
+        const normalizer = functions.get(initializer.expression.text);
+        if (normalizer && functionUsesSurfaces(normalizer, surfacesVariableName)) return true;
+      }
+    }
+  }
+  return false;
+}
+
+function parseSkillSource(source, arrayName) {
+  const sourceFile = ts.createSourceFile(
+    'skill-inventory.ts',
+    source,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TS,
+  );
+  const constants = topLevelConstInitializers(sourceFile);
+  const array = constants.get(arrayName);
+  return {
+    array: array && ts.isArrayLiteralExpression(array) ? array : undefined,
+    constants,
+    sourceFile,
+  };
+}
+
+export function extractSkillIds(source, arrayName) {
+  const { array, constants } = parseSkillSource(source, arrayName);
+  if (!array) return [];
+  return uniqueInOrder(skillRecords(array, constants).map(record => record.id));
 }
 
 export function extractSkillIdsForSurface(
@@ -258,57 +240,31 @@ export function extractSkillIdsForSurface(
   surfacesVariableName,
   surface,
 ) {
-  const escapedSurfacesName = surfacesVariableName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  if (!new RegExp(`\\ballowedSurfaces\\s*:\\s*${escapedSurfacesName}\\b`).test(source)) {
+  const { array, constants, sourceFile } = parseSkillSource(source, arrayName);
+  if (!array) return [];
+  const surfaces = constants.get(surfacesVariableName);
+  if (
+    !surfaces
+    || !ts.isArrayLiteralExpression(surfaces)
+    || !surfaces.elements.some(element => stringValue(element, constants) === surface)
+  ) {
     return [];
   }
-  const declaredSurfaces = extractNamedArray(source, surfacesVariableName);
-  const allowedSurfaces = [];
-  let quote = null;
-  let value = '';
-  let escaped = false;
-  let lineComment = false;
-  let blockComment = false;
-  for (let index = 0; index < declaredSurfaces.length; index += 1) {
-    const character = declaredSurfaces[index];
-    const next = declaredSurfaces[index + 1];
-    if (lineComment) {
-      if (character === '\n') lineComment = false;
-      continue;
-    }
-    if (blockComment) {
-      if (character === '*' && next === '/') {
-        blockComment = false;
-        index += 1;
-      }
-      continue;
-    }
-    if (quote) {
-      if (escaped) {
-        value += character;
-        escaped = false;
-      } else if (character === '\\') {
-        escaped = true;
-      } else if (character === quote) {
-        allowedSurfaces.push(value);
-        quote = null;
-        value = '';
-      } else {
-        value += character;
-      }
-      continue;
-    }
-    if (character === '/' && next === '/') {
-      lineComment = true;
-      index += 1;
-    } else if (character === '/' && next === '*') {
-      blockComment = true;
-      index += 1;
-    } else if (character === "'" || character === '"') {
-      quote = character;
-    }
+
+  const records = skillRecords(array, constants);
+  const functions = topLevelFunctions(sourceFile);
+  const boundRecords = records.filter(record => (
+    elementUsesSurfaces(record.element, functions, surfacesVariableName)
+  ));
+  if (boundRecords.length > 0) {
+    return uniqueInOrder(boundRecords.map(record => record.id));
   }
-  return allowedSurfaces.includes(surface) ? extractSkillIds(source, arrayName) : [];
+  return arrayConstructionUsesSurfaces(
+    sourceFile,
+    arrayName,
+    functions,
+    surfacesVariableName,
+  ) ? uniqueInOrder(records.map(record => record.id)) : [];
 }
 
 function extractObjectKeys(source, exportName) {
