@@ -2196,3 +2196,12 @@ The focused gate test passes `7/7`; the actual protected-baseline command passes
 - Canvas/Workflow 保持 `27/27`，Simple Chat 独立 `16`；未发现三个新 Skill 在执行器、服务、步骤注册或成本估算中被按 ID 特判；`origin/stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 未变化。
 - GitHub 已同步 `main@1008555f2122682824ae5d8c8a3e84183d264ed4`，`stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 保持只读。
 - **当前结论：有条件通过，允许进入 Coze 验收。** 在真实 APImart/Pear 结果、AssetVersion、刷新恢复、取消部分退款、Console/Network 证据完成前，不得关闭第二批或宣布全平台发布通过。
+
+## 2026-09-07 Lovart 第二批云端首轮后的发布判断
+
+- `bcdcfe50` 同树 Coze 首轮证明真实报价、APImart 文本步骤、精确 provider/model 冻结和部分退款链路可运行。
+- 首轮同时发现并本地修复两个 P1：缩略图/Pinterest 固定比例未进入请求，父 Run 取消后预付图像子任务未进入取消终态。
+- 修复候选的新鲜本地证据为聚焦 `97/97`、全仓 `5344 passed / 174 conditional skipped / 0 failed`、TypeScript 和构建版 ESLint 退出 0、生产构建 `119/119`。
+- 当前工作站没有专用 `POSTGRES_TEST_DATABASE_URL`，新 SQL 取消语句尚无本轮隔离真库执行证据；历史 Task 8 真库门禁不能替代该增量。
+- Pear 上游本轮未产出图像，两个成品、AssetVersion、刷新恢复仍未验证；Workflow Pinterest、三行 SKU 和成功路径浏览器证据亦未完成。
+- **发布结论：有条件通过，仅允许推送 `main` 进入复验；Task 8 和全平台均不得宣布完成。**

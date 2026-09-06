@@ -614,6 +614,8 @@ Expected: `HEAD == origin/main`，stable 仍为固定 SHA。
 4. 取消当前归属的批量 Run，证明只退款未完成项一次，等待迟到窗口确认终态不回写。
 5. 检查 Simple Chat 仍为 16 Skills，Console、Network、事件、AssetVersion 和积分流水留证。
 
+2026-09-07 增量记录：`main@bcdcfe50` 已由 Coze 以同源码树构建并运行，Build ID `wBB36Y68vT1AEnuDvQxrv`，唯一 5000 服务与首页 HTTP 200 已核对。Edge 真实运行 Canvas“YouTube/B站缩略图”时，APImart 文本规划完成，Pear 两个图像子任务进入上游重试；真实取消后父 Run 正确退回未完成图像步骤的 120 积分，净消费 2 积分，但同时发现固定比例被提交为 `1:1`、父取消后两个子任务仍停在 `processing`。两项均已完成 RED/GREEN 最小修复；本地全量 `5344 passed / 174 conditional skipped / 0 failed`、TypeScript、构建版 ESLint 与 `119/119` 生产构建通过。修复尚待推送和 Coze 复验，因此 Step 6 保持未完成。
+
 - [ ] **Step 7: 形成阶段结论**
 
 只有本地、真库和云端核心链路有真实证据时关闭第二批。无法安全制造的供应商故障或浏览器证据写入 `UNVERIFIED_ITEMS.md`，结论最多为“有条件通过”，不得伪造完整通过。

@@ -1,10 +1,17 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CloudTask } from '@/lib/cloud-task-storage';
-const mocks = vi.hoisted(() => ({ getParent: vi.fn(), query: vi.fn() }));
+const mocks = vi.hoisted(() => ({ ensureTables: vi.fn(), getParent: vi.fn(), query: vi.fn() }));
 vi.mock('server-only', () => ({}));
-vi.mock('@/lib/cloud-task-storage', () => ({ getCloudTaskForUser: mocks.getParent }));
+vi.mock('@/lib/cloud-task-storage', () => ({
+  ensureCloudTaskTables: mocks.ensureTables,
+  getCloudTaskForUser: mocks.getParent,
+}));
 vi.mock('@/lib/db-client', () => ({ getPool: () => ({ query: mocks.query }) }));
-import { inspectSkillPrepaidPoll, getSkillPrepaidSubmissionDeadline } from '@/lib/skill-runtime/prepaid-generation';
+import {
+  cancelSkillPrepaidChildren,
+  inspectSkillPrepaidPoll,
+  getSkillPrepaidSubmissionDeadline,
+} from '@/lib/skill-runtime/prepaid-generation';
 
 const child: CloudTask = {
   id: 'async-child', userId: 'user', projectId: 'project', type: 'generate-async', status: 'processing',
@@ -68,5 +75,19 @@ describe('prepaid child polling lifecycle', () => {
     ] });
     expect(await getSkillPrepaidSubmissionDeadline({ ...child, createdAt: 500 }, 3000))
       .toEqual({ expired: false, deadlineAt: 602_000, remainingMs: 599_000 });
+  });
+  it('cancels only live zero-cost prepaid children owned by the cancelled parent run', async () => {
+    mocks.query.mockResolvedValue({ rows: [{ id: 'child-1' }, { id: 'child-2' }] });
+
+    await expect(cancelSkillPrepaidChildren({
+      actorUserId: 'user',
+      runId: 'parent',
+    })).resolves.toEqual(['child-1', 'child-2']);
+
+    expect(mocks.ensureTables).toHaveBeenCalledTimes(1);
+    expect(mocks.query).toHaveBeenCalledWith(
+      expect.stringMatching(/parent\.status = 'cancelled'[\s\S]*child\.status IN \('queued', 'pending', 'processing'\)[\s\S]*child\.credit_status = 'not-applicable'[\s\S]*skillBillingProvenance,runId/),
+      ['parent', 'user', expect.any(Number)],
+    );
   });
 });

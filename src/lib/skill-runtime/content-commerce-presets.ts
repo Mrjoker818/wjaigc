@@ -72,6 +72,7 @@ export const LOVART_CONTENT_COMMERCE_SKILLS: readonly SkillDefinition[] = [
       { key: 'hook', label: '点击动机', kind: 'text', required: true },
       { key: 'brandTone', label: '品牌调性', kind: 'text', required: false, defaultValue: '醒目、清晰、可信' },
       { key: 'headline', label: '封面短文案', kind: 'text', required: false, defaultValue: '由编排步骤提出' },
+      { key: 'aspectRatio', label: '输出比例', kind: 'select', required: true, defaultValue: '16:9', options: ['16:9'] },
       { key: 'faceEmphasis', label: '突出人物表情', kind: 'boolean', required: false, defaultValue: false },
       { key: 'negativeConstraints', label: '禁止内容', kind: 'text', required: false, defaultValue: '禁止水印、乱码和无关文字' },
     ],
@@ -95,6 +96,7 @@ export const LOVART_CONTENT_COMMERCE_SKILLS: readonly SkillDefinition[] = [
       { key: 'style', label: '视觉风格', kind: 'text', required: false, defaultValue: '编辑感、可收藏、层级清晰' },
       { key: 'callToAction', label: '行动号召', kind: 'text', required: false, defaultValue: '不使用虚假优惠或稀缺信息' },
       { key: 'seriesCount', label: '图钉数量', kind: 'select', required: true, defaultValue: '3', options: ['2', '3'] },
+      { key: 'aspectRatio', label: '输出比例', kind: 'select', required: true, defaultValue: '2:3', options: ['2:3'] },
       { key: 'negativeConstraints', label: '禁止内容', kind: 'text', required: false, defaultValue: '禁止水印、乱码和无关文字' },
     ],
     steps: [

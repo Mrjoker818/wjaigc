@@ -1,0 +1,40 @@
+{
+  "scope": "Lovart 第二批内容电商 Task 8 云端首轮",
+  "cloudSourceCommit": "bcdcfe50fb3acc079ff8e586a58525a72fd0f80a",
+  "cloudBuildId": "wBB36Y68vT1AEnuDvQxrv",
+  "browser": "Microsoft Edge",
+  "runId": "4257e01c-caf9-44f1-a814-9086e017158d",
+  "skill": "preset-video-platform-thumbnails",
+  "bindings": {
+    "imageProviderId": "api_1780630178347_rjqlmam",
+    "imageModelId": "gpt-image-2",
+    "orchestratorProviderId": "api_1778428130626_2qpg71v",
+    "orchestratorModelId": "gemini-3.1-flash-lite-preview"
+  },
+  "children": [
+    "async-1788734575885-0-orcrvd",
+    "async-1788734575865-0-fu6at7"
+  ],
+  "credits": {
+    "before": 8410,
+    "afterCharge": 8288,
+    "afterCancel": 8408,
+    "netCost": 2,
+    "chargeTransaction": "ctx_charge_b494d32e9a02149fb3743f9d594f681d",
+    "refundTransaction": "ctx_refund_bceddc9523d93fed5d30cd626facbe05"
+  },
+  "findings": [
+    "两个缩略图子任务错误提交 aspectRatio=1:1，而不是 16:9",
+    "父 Run 取消后超过 25 秒，两个子任务仍保持 processing",
+    "Pear 上游暂时不可用，未生成成品或 AssetVersion"
+  ],
+  "localCandidateVerification": {
+    "focused": "45/45 passed",
+    "task8Expanded": "97/97 passed",
+    "fullSuite": "5344 passed / 174 conditional skipped / 0 failed",
+    "typecheck": "exit 0",
+    "lintBuild": "exit 0",
+    "productionBuild": "exit 0; 119/119 pages"
+  },
+  "verdict": "PARTIAL; local fixes require Coze redeploy and real retest"
+}

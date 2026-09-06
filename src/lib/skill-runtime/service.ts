@@ -42,6 +42,8 @@ import type {
   SkillStepDefinition,
   SkillSurface,
 } from './types';
+import { abortTaskExecution } from '@/lib/task-core/task-abort';
+import { cancelSkillPrepaidChildren } from './prepaid-generation';
 
 export class SkillRunRequestError extends Error {
   readonly code = 'SKILL_RUN_REQUEST_INVALID';
@@ -139,6 +141,8 @@ export interface SkillRuntimeServiceDependencies {
   pauseRun: typeof pauseAgentRun;
   resumeRun: typeof resumeAgentRun;
   cancelRun: typeof cancelAgentRun;
+  cancelPrepaidChildren?: typeof cancelSkillPrepaidChildren;
+  abortTaskExecution?: typeof abortTaskExecution;
   prepareResume?(input: {
     actorUserId: string;
     projectId: string;
@@ -156,6 +160,8 @@ const defaultDependencies: SkillRuntimeServiceDependencies = {
   pauseRun: pauseAgentRun,
   resumeRun: resumeAgentRun,
   cancelRun: cancelAgentRun,
+  cancelPrepaidChildren: cancelSkillPrepaidChildren,
+  abortTaskExecution,
   prepareResume: input => import('./continuation').then(module => (
     module.loadPersistedSkillContinuation(input)
   )),
@@ -502,8 +508,13 @@ export function createSkillRuntimeService(
       });
       return dependencies.resumeRun(input);
     },
-    cancel(input: { actorUserId: string; runId: string }) {
-      return dependencies.cancelRun(input);
+    async cancel(input: { actorUserId: string; runId: string }) {
+      const result = await dependencies.cancelRun(input);
+      const childTaskIds = await dependencies.cancelPrepaidChildren?.(input) || [];
+      for (const taskId of childTaskIds) {
+        dependencies.abortTaskExecution?.(taskId, 'cancelled');
+      }
+      return result;
     },
     async retry(input: {
       actorUserId: string;

@@ -4136,3 +4136,26 @@ Task 4 独立审查的两个 Minor 继续保留给最终审查：单元夹具 op
 | 账务语义 | 规划步骤已完成、图像步骤未完成时只退未完成步骤成本，父任务 `creditStatus` 保持 `charged`；永久测试同时断言唯一退款金额。 |
 | 永久回归 | 新增 PostgreSQL 真并发用例：20 次同键归并、三行三 operation、输出顺序恢复、取消部分退款、迟到结果隔离。专项 `13/13`，全仓 `5516/5516` 通过。 |
 | 当前状态 | **本地与隔离真库已修复；Coze 真实供应商验收待执行。** |
+
+### LOVART-CONTENT-002：内容电商 Skill 固定输出比例未进入图像子任务（2026-09-07）
+
+| 字段 | 内容 |
+|---|---|
+| 严重等级 | P1：缩略图承诺 16:9，但真实子任务提交为 1:1，交付规格错误。 |
+| 云端复现 | Coze 同树 `bcdcfe50`；Run `4257e01c-caf9-44f1-a814-9086e017158d` 的两个 Pear 子任务 `submissionPayload.aspectRatio` 均为 `1:1`。 |
+| 根因 | 通用生成适配器读取 `inputValues.aspectRatio`，缩略图和 Pinterest 权威定义却未声明该输入。 |
+| 修复 | 缩略图定义固定 `aspectRatio=16:9`，Pinterest 固定 `aspectRatio=2:3`；仍由通用输入解析和步骤编译链路消费，不增加 Skill ID 特判。 |
+| TDD | 比例合同先 RED，再 GREEN；聚焦两文件 `45/45`、Task 8 扩大聚焦 `97/97`。 |
+| 当前状态 | **本地已修复 / 云端待复验。** 新候选部署后必须从持久子任务核对实际 `submissionPayload.aspectRatio`。 |
+
+### LOVART-CONTENT-003：父 Skill 取消后预付图像子任务仍保持 processing（2026-09-07）
+
+| 字段 | 内容 |
+|---|---|
+| 严重等级 | P1：用户看到父任务已取消，但后台子任务仍运行，存在资源浪费和迟到结果风险。 |
+| 云端复现 | 同一 Run 取消后超过 25 秒，子任务 `async-1788734575885-0-orcrvd`、`async-1788734575865-0-fu6at7` 仍为 `processing` 且 `updatedAt` 不变。 |
+| 账务事实 | 余额 `8410 → 8288 → 8408`；父消费 `ctx_charge_b494d32e9a02149fb3743f9d594f681d`，部分退款 `ctx_refund_bceddc9523d93fed5d30cd626facbe05`，最终只消费已完成文本步骤 2 积分。退款本身正确。 |
+| 根因 | `SkillRuntimeService.cancel()` 只取消父 Agent Run；停止轮询后既没有持久化取消当前 Run 的预付子任务，也没有 abort 子任务执行域。 |
+| 修复 | 父取消成功后，以用户、项目、Run provenance、零成本预付子任务和活动终态为条件，数据库批量转为 cancelled；随后逐个 abort 当前进程执行域。其他用户、项目、普通计费任务和终态任务均不触碰。 |
+| TDD | 服务合同先 RED，再 GREEN；聚焦两文件 `45/45`、Task 8 扩大聚焦 `97/97`。 |
+| 当前状态 | **本地已修复 / 隔离 PostgreSQL 当前增量未验证 / 云端待复验。** 必须证明子任务及时 cancelled、一次退款不变、迟到结果不回写。 |

@@ -635,6 +635,33 @@ describe('durable Skill executor', () => {
 });
 
 describe('Skill run history', () => {
+  it('cancels persisted prepaid children and aborts their live execution scopes', async () => {
+    const cancelled = {
+      accepted: true,
+      event: { eventId: 'cancelled', runId: 'run-1', sequence: 2, type: 'run.cancelled', timestamp: 'now', payload: {} },
+      projection: { runId: 'run-1', status: 'cancelled', lastSequence: 2, plan: [], assetVersionIds: [], ignoredEventIds: [], missingSequences: [], qualityChecks: [] },
+    } as Awaited<ReturnType<SkillRuntimeServiceDependencies['cancelRun']>>;
+    const cancelRun = vi.fn(async () => cancelled);
+    const cancelPrepaidChildren = vi.fn(async () => ['child-1', 'child-2']);
+    const abortTaskExecution = vi.fn(() => true);
+    const dependencies = {
+      createAuthorizedSkillRun: vi.fn(), getTaskForUser: vi.fn(), listTasks: vi.fn(),
+      listEvents: vi.fn(), getProjection: vi.fn(), pauseRun: vi.fn(), resumeRun: vi.fn(),
+      cancelRun, cancelPrepaidChildren, abortTaskExecution,
+    } as SkillRuntimeServiceDependencies;
+
+    await expect(createSkillRuntimeService(dependencies).cancel({
+      actorUserId: 'user-1', runId: 'run-1',
+    })).resolves.toEqual(cancelled);
+
+    expect(cancelPrepaidChildren).toHaveBeenCalledWith({
+      actorUserId: 'user-1', runId: 'run-1',
+    });
+    expect(abortTaskExecution).toHaveBeenCalledTimes(2);
+    expect(abortTaskExecution).toHaveBeenNthCalledWith(1, 'child-1', 'cancelled');
+    expect(abortTaskExecution).toHaveBeenNthCalledWith(2, 'child-2', 'cancelled');
+  });
+
   it('finds project history even when 500 newer tasks belong to another project', async () => {
     const tasks: CloudTask[] = Array.from({ length: 501 }, (_, index) => ({
       id: `run-${index}`, userId: 'user-1', projectId: index === 500 ? 'target-project' : 'other-project',

@@ -278,6 +278,38 @@ export async function inspectSkillPrepaidPoll(child: CloudTask): Promise<
   return { action: 'allow' };
 }
 
+export async function cancelSkillPrepaidChildren(input: {
+  actorUserId: string;
+  runId: string;
+}): Promise<string[]> {
+  await ensureCloudTaskTables();
+  const result = await getPool().query<{ id: string }>(`
+    UPDATE cloud_tasks child
+    SET status = 'cancelled',
+        progress = 0,
+        label = '父 Skill 已取消',
+        error = '父 Skill 已取消，图像子任务已停止',
+        lease_owner = '',
+        lease_expires_at = 0,
+        revision = revision + 1,
+        updated_at = $3
+    FROM cloud_tasks parent
+    WHERE parent.id = $1
+      AND parent.user_id = $2
+      AND parent.type = 'agent-run'
+      AND parent.status = 'cancelled'
+      AND child.user_id = parent.user_id
+      AND child.project_id = parent.project_id
+      AND child.type = 'generate-async'
+      AND child.status IN ('queued', 'pending', 'processing')
+      AND child.credit_status = 'not-applicable'
+      AND child.credit_cost = 0
+      AND child.result #>> '{skillBillingProvenance,runId}' = parent.id
+    RETURNING child.id
+  `, [input.runId, input.actorUserId, Date.now()]);
+  return result.rows.map(row => row.id);
+}
+
 export function parseSkillBillingContext(value: unknown): SkillBillingContext {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new SkillBillingAuthorizationError();
   const raw = value as Record<string, unknown>;

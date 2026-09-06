@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { skillExecutionSteps } from '@/lib/skill-runtime/cost-estimator';
 import { LOVART_CONTENT_COMMERCE_SKILLS } from '@/lib/skill-runtime/content-commerce-presets';
+import { resolveSkillInputs } from '@/lib/skill-runtime/input-resolver';
 import type { SkillDefinition } from '@/lib/skill-runtime/types';
 
 const conditionalSkill = {
@@ -48,6 +49,23 @@ describe('Skill execution step compiler', () => {
     expect(skillExecutionSteps(pinterest, { seriesCount: '3' }).map(step => step.id))
       .toEqual(['pin-plan', 'pin-hero', 'pin-detail', 'pin-conversion']);
     expect(pinterest.steps.at(-1)?.when).toEqual({ input: 'seriesCount', includes: ['3'] });
+  });
+
+  it('freezes the advertised output ratio for thumbnail and Pinterest presets', () => {
+    const thumbnails = LOVART_CONTENT_COMMERCE_SKILLS.find(
+      skill => skill.id === 'preset-video-platform-thumbnails',
+    )!;
+    const pinterest = LOVART_CONTENT_COMMERCE_SKILLS.find(
+      skill => skill.id === 'preset-pinterest-pins',
+    )!;
+
+    expect(resolveSkillInputs(thumbnails, {
+      sourceImages: ['source-1'], videoTitle: 'Title', subject: 'Cake',
+      audience: 'Bakers', hook: 'Learn quickly',
+    }).aspectRatio).toBe('16:9');
+    expect(resolveSkillInputs(pinterest, {
+      sourceImages: ['source-1'], topic: 'Cake', audience: 'Bakers', goal: '收藏',
+    }).aspectRatio).toBe('2:3');
   });
 
   it('rejects a condition that references an undeclared input', () => {

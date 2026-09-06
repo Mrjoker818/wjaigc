@@ -2873,3 +2873,13 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - 生产构建退出 0：Webpack 约 12.4 分钟、TypeScript 约 56 秒、静态页面 `119/119`。构建需要 8 GiB Node 堆，继续作为工程资源风险记录。
 - GitHub 已推送 `main@1008555f2122682824ae5d8c8a3e84183d264ed4`，推送后 `HEAD == origin/main`；`origin/stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 未变化。
 - **回归判定：LOCAL + ISOLATED POSTGRESQL + GITHUB MAIN PASS / COZE REAL PROVIDER UNVERIFIED。** Task 8 Step 1-5 已关闭；Coze Canvas、Workflow、批量 SKU、取消退款和浏览器证据仍需执行。
+
+## 2026-09-07 Lovart 第二批 Task 8 云端首轮与修复候选
+
+- Coze 已运行与 `main@bcdcfe50fb3acc079ff8e586a58525a72fd0f80a` 同源码树，Build ID `wBB36Y68vT1AEnuDvQxrv`，端口 5000 唯一进程和首页 HTTP 200 已核对。
+- Edge 真实运行 Canvas“YouTube/B站缩略图”：APImart `gemini-3.1-flash-lite-preview` 文本规划成功；Pear `gpt-image-2` 两个图像子任务因上游暂时不可用持续重试，未取得成品和 AssetVersion。
+- 真实取消证明父级消费 122、退款 120、最终净消费 2；同时稳定复现 `LOVART-CONTENT-002/003`。
+- 本地 TDD：聚焦 `45/45`，Task 8 扩大聚焦 `97/97`。
+- 新鲜全仓：`658 passed / 33 skipped` 测试文件，`5344 passed / 174 conditional skipped / 0 failed`；跳过项主要需要专用隔离 PostgreSQL，未冒充通过。
+- `pnpm ts-check`、`pnpm lint:build` 均退出 0；8 GiB Node 堆生产构建退出 0，Webpack 约 12.1 分钟、TypeScript 54 秒、静态页面 `119/119`。
+- 结论：修复候选可进入 `main` 与 Coze 复验；在固定比例、子任务取消、Pear 成功输出、Workflow Pinterest、三行 SKU、刷新恢复及最终浏览器证据闭环前，Task 8 仍为“有条件通过”。
