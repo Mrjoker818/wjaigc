@@ -329,9 +329,16 @@ describe('Agent context ownership adapter', () => {
   it('validates project and every unique source or visible version through Asset Graph scope', async () => {
     const transaction = {
       findProject: vi.fn(async () => true),
+      findAsset: vi.fn(async () => ({ id: 'asset-1', kind: 'image' as const })),
       findVersion: vi.fn(async (_ownerId: string, _projectId: string, versionId: string) => (
         versionId === 'version-1' || versionId === 'version-2'
-          ? { id: versionId, file: { url: `https://media.example.com/${versionId}.png` } }
+          ? {
+            id: versionId, assetId: 'asset-1',
+            file: {
+              url: `https://media.example.com/${versionId}.png`,
+              availability: 'ready' as const, mimeType: 'image/png',
+            },
+          }
           : null
       )),
       findEntityPlacement: vi.fn(async (

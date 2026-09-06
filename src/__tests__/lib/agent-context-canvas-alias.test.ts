@@ -18,9 +18,17 @@ function fixture(storedWorkspace: string, active = true): AgentContextTransactio
       && surface === 'canvas' && workspace === storedWorkspace;
   return {
     findProject: vi.fn(async (owner, project) => owner === 'owner-a' && project === 'project-a'),
+    findAsset: vi.fn(async (owner, project, assetId) =>
+      owner === 'owner-a' && project === 'project-a' && assetId === 'asset-a'
+        ? { id: assetId, kind: 'image' as const } : null),
     findVersion: vi.fn(async (owner, project, version) =>
       owner === 'owner-a' && project === 'project-a' && version === 'version-a'
-        ? { id: version, file: { url: '/api/serve-upload/product.png' } } : null),
+        ? {
+          id: version, assetId: 'asset-a',
+          file: {
+            url: '/api/serve-upload/product.png', availability: 'ready' as const, mimeType: 'image/png',
+          },
+        } : null),
     findVersionPlacement: vi.fn(async (owner, project, surface, workspace, version) =>
       matches(owner, project, surface, workspace) && version === 'version-a'
         ? { id: 'placement-a', assetVersionId: version } : null),
@@ -61,5 +69,21 @@ describe('Agent context project Canvas aliases', () => {
       actorUserId, request: request(),
       storage: { transaction: async execute => execute(fixture('project-a', active)) },
     })).rejects.toMatchObject({ code: 'AGENT_CONTEXT_NOT_FOUND' });
+  });
+
+  it('accepts a ready legacy image version whose persisted MIME is missing', async () => {
+    const transaction = fixture('project-a');
+    transaction.findVersion = vi.fn(async () => ({
+      id: 'version-a',
+      assetId: 'asset-a',
+      file: { url: '/api/serve-upload/legacy.png', availability: 'ready' as const },
+    }));
+
+    await expect(authorizeAgentContext({
+      actorUserId: 'owner-a', request: request(),
+      storage: { transaction: async execute => execute(transaction) },
+    })).resolves.toMatchObject({
+      mediaByVersionId: { 'version-a': '/api/serve-upload/legacy.png' },
+    });
   });
 });

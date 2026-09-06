@@ -513,6 +513,8 @@ Commit: `test: cover marketing skills across canvas and workflow`
 
 ### Task 6: 全量回归、Obsidian、推送与云端验收
 
+> 执行状态（2026-09-06）：Task 1-5 已按 TDD、隔离 PostgreSQL 和本地 Chromium 证据完成，不得重复实施。Task 6 的本地门禁和文档步骤已完成；只剩提交推送、Coze 精确部署与云端真实验收。
+
 **Files:**
 - Modify: `docs/testing/BUG_REGISTER.md`
 - Modify: `docs/testing/REGRESSION_REPORT.md`
@@ -524,7 +526,7 @@ Commit: `test: cover marketing skills across canvas and workflow`
 - Consumes: Tasks 1 至 5 的固定候选与测试证据。
 - Produces: 可追溯的 GitHub `main` 候选、Obsidian 阶段记录和云端真实验收结论。
 
-- [ ] **Step 1: 运行聚焦门禁**
+- [x] **Step 1: 运行聚焦门禁**
 
 ```powershell
 pnpm exec vitest run src/__tests__/lib/skill-runtime-marketing-presets.test.ts src/__tests__/lib/skill-marketing-execution.test.ts src/__tests__/lib/skill-runtime-catalog.test.ts src/__tests__/scripts/skill-runtime-inventory.test.ts src/__tests__/api/skills.test.ts src/__tests__/components/chat-panel-skill-catalog-contract.test.ts src/__tests__/components/node-editor-skill-node.test.tsx src/__tests__/components/simple-chat-skill-isolation.test.tsx
@@ -532,7 +534,7 @@ pnpm exec vitest run src/__tests__/lib/skill-runtime-marketing-presets.test.ts s
 
 Expected: 0 failed、0 unexpected skipped。
 
-- [ ] **Step 2: 运行完整本地门禁**
+- [x] **Step 2: 运行完整本地门禁**
 
 ```powershell
 pnpm ts-check
@@ -543,7 +545,7 @@ pnpm build
 
 Expected: 所有命令退出 0；记录真实通过、跳过和警告数，不能只写“通过”。
 
-- [ ] **Step 3: 检查功能保护和分支约束**
+- [x] **Step 3: 检查功能保护和分支约束**
 
 ```powershell
 pnpm run check:protected-baseline
@@ -554,7 +556,7 @@ git rev-parse origin/stable
 
 Expected: 保护门禁通过、无未批准漂移、`origin/stable` 仍为 `52f7c601ed150769e15d06fb435c6e360e28c9e7`。
 
-- [ ] **Step 4: 更新中文证据文档和 Obsidian**
+- [x] **Step 4: 更新中文证据文档和 Obsidian**
 
 记录：旧 21/16 零丢失、三项新目录、测试数、PostgreSQL 状态、已修问题、未验证项、提交 SHA。Obsidian 只新增本阶段一次权威检查点，不复制历史长记录。
 

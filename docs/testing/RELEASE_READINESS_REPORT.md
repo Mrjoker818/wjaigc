@@ -2157,3 +2157,11 @@ The focused gate test passes `7/7`; the actual protected-baseline command passes
 最新门禁：权威聚焦 `110/110`、0 skip；全量 `5272 passed / 169 PostgreSQL 条件 skipped / 0 failed`；保护基线 38 项、零未授权漂移、0 warning。默认 4 GiB 构建 OOM 继续作为资源风险保留；8 GiB `119/119` 构建证据有效。Task 4 两个 Minor 测试精度项仍待最终审查。
 
 `6595c6b0` 只改测试/合同和两份精确保护授权 JSON，生产业务源码相对上一轮构建候选未变，因此未重复 TypeScript、Lint 和 13 分钟构建。本地收尾允许进入控制器最终审查，但第一批仍不能标记为发布完成：尚需控制器推送 `main`、Coze exact-tree 部署及真实 provider/浏览器验收。本 Task 没有 push，也没有操作云端。
+
+## 2026-09-06 Lovart 第一批最终本地候选判断
+
+- 本轮已修复 Workflow Skill 的真实工作区资产授权缺口，并通过本地 Chromium、隔离 PostgreSQL、全仓测试和生产构建。
+- 最新证据为：Workflow 聚焦 `39/39`、最终相关聚焦 `127/127`、Skill 真库并发 `10/10`、本地 Chromium `1/1`、全仓真库 `5459 passed / 12 conditional skipped / 0 failed`、TypeScript 通过、ESLint `0 errors / 943 warnings`、保护基线 `38/38 / 0 drift / 0 warnings`、生产构建 `119/119`。
+- 已恢复同步冲突的证据规则已收紧：只有同 URL、同请求摘要且随后成功的 409 才不会阻断 E2E；未知 409 仍会使验收失败，不以过滤隐藏业务错误。
+- Canvas/Workflow Skills 为 `24/24`，Simple Chat 继续独立为 `16`；未触碰 `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7`。
+- **当前发布结论：有条件通过。** 允许推送 `main` 并进入 Coze 验收，但在 exact-tree、真实 provider、失败重试、取消退款、刷新恢复与浏览器证据完成前，不得关闭 Lovart 第一批。

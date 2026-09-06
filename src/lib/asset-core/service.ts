@@ -475,6 +475,52 @@ export class AssetService {
     });
   }
 
+  async bindWorkflowInputPlacement(input: CreatePlacementInput): Promise<{
+    placement: WorkspacePlacement;
+    reused: boolean;
+  }> {
+    if (input.workspace !== 'workflow' || input.entityType !== 'workflow-input') placementConflict();
+    return this.storage.transaction(async (transaction) => {
+      if (!await transaction.findProject(input.actorUserId, input.projectId)) notFound();
+      await transaction.lockWorkspacePlacementSlot(
+        input.actorUserId, input.projectId, input.workspace, input.workspaceId, input.entityType, input.entityId,
+      );
+      const version = await transaction.findVersion(input.actorUserId, input.projectId, input.assetVersionId);
+      if (!version) notFound();
+      const asset = await transaction.lockAsset(input.actorUserId, input.projectId, version.assetId);
+      if (!asset || asset.status !== 'active') notFound();
+
+      const existing = await transaction.findActivePlacement(
+        input.actorUserId, input.projectId, input.workspace, input.workspaceId, input.entityType, input.entityId,
+      );
+      if (existing) {
+        const locked = await transaction.lockPlacement(input.actorUserId, input.projectId, existing.id);
+        const current = await transaction.findActivePlacement(
+          input.actorUserId, input.projectId, input.workspace, input.workspaceId, input.entityType, input.entityId,
+        );
+        if (current?.assetVersionId === version.id) return { placement: current, reused: true };
+        if (current && locked?.id === current.id && locked.status === 'active') {
+          if (!await transaction.trashPlacement(input.actorUserId, input.projectId, current.id)) placementConflict();
+        } else if (current) {
+          placementConflict();
+        }
+      }
+
+      const placement = createPlacement(
+        input.actorUserId, input.projectId, version, input.workspace, input.workspaceId,
+        input.entityType, input.entityId, input.transform, input.metadata,
+      );
+      if (!await transaction.insertPlacement(placement)) {
+        const raced = await transaction.findActivePlacement(
+          input.actorUserId, input.projectId, input.workspace, input.workspaceId, input.entityType, input.entityId,
+        );
+        if (raced?.assetVersionId === version.id) return { placement: raced, reused: true };
+        placementConflict();
+      }
+      return { placement, reused: false };
+    });
+  }
+
   async sendVersionToWorkspace(input: TransferVersionInput): Promise<{
     version: AssetVersion;
     placement: WorkspacePlacement;

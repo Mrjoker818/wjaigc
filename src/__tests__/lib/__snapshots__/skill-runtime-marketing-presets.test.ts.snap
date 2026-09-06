@@ -5,7 +5,9 @@ exports[`Lovart marketing Skill definitions > keeps deterministic output steps a
   [
     {
       "execution": "sequential",
-      "gates": [],
+      "gates": [
+        "text-output-present",
+      ],
       "id": "plan",
       "parallelGroup": undefined,
       "role": "orchestrator",
@@ -35,7 +37,9 @@ exports[`Lovart marketing Skill definitions > keeps deterministic output steps a
   [
     {
       "execution": "sequential",
-      "gates": [],
+      "gates": [
+        "text-output-present",
+      ],
       "id": "diagnose",
       "parallelGroup": undefined,
       "role": "orchestrator",
@@ -75,7 +79,9 @@ exports[`Lovart marketing Skill definitions > keeps deterministic output steps a
   [
     {
       "execution": "sequential",
-      "gates": [],
+      "gates": [
+        "text-output-present",
+      ],
       "id": "campaign-plan",
       "parallelGroup": undefined,
       "role": "orchestrator",

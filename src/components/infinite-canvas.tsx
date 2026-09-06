@@ -2,6 +2,7 @@
 import NextImage from 'next/image';
 import { withClientImageOutputPreference } from '@/lib/image-generation-output-preference';
 import { getTransparentOutputWarning } from '@/lib/image-generation-output';
+import { loadBrowserImageBlob } from '@/lib/browser-image-blob';
 import { toast } from 'sonner';
 import { } from '@/lib/canvas-mode-handlers';
 import { findClosestStandardRatio, STANDARD_RATIOS, type StandardRatio } from '@/lib/canvas-utils';
@@ -10894,9 +10895,7 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
 
       // Step 2: 下载图片
       try {
-        const response = await fetch(downloadUrl);
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        const blob = await response.blob();
+        const blob = await loadBrowserImageBlob(downloadUrl);
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;

@@ -18,7 +18,7 @@ postgresIt('authorizes migrated Canvas placements with real storage while preser
     const service = createAssetService();
     const { version } = await service.createAssetVersion({
       actorUserId: 'owner-a', projectId: 'project-a', kind: 'image',
-      file: { url: '/api/serve-upload/product.png', availability: 'ready' },
+      file: { url: '/api/serve-upload/product.png', availability: 'ready', mimeType: 'image/png' },
       idempotencyKey: 'alias-version', requestDigest: 'alias-digest',
     });
     const { placement } = await service.createWorkspacePlacement({

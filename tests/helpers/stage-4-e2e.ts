@@ -56,6 +56,7 @@ export interface Stage4AuthContext {
 }
 
 const SECRET_PATTERN = /((?:api[-_]?key|access[-_]?token|refresh[-_]?token|session[-_]?token|password|credential|secret))(["'=:\s]+)(?:"[^"]*"|'[^']*'|[^\r\n,}]+)/gi;
+const STAGE4_SOURCE_PNG_BASE64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
 let cachedStage4RunId: string | null = null;
 
 function safe(value: string): string {
@@ -524,6 +525,7 @@ export async function seedStage4Baseline(
 export async function seedStage4RuntimeDependencies(input: {
   auth: Stage4AuthContext;
   fixture: Stage4SeedTarget;
+  page: Page;
   providerBaseUrl: string;
 }): Promise<{ sourceVersionId: string; selectedEntityId: string; canonicalUrl: string }> {
   await assertStage4IsolationDatabaseConfigured();
@@ -536,7 +538,18 @@ export async function seedStage4RuntimeDependencies(input: {
   const assetId = `stage4-asset-${profile}`;
   const sourceVersionId = `stage4-version-${profile}`;
   const placementId = `stage4-placement-${profile}`;
-  const canonicalUrl = '/logo.png';
+  const sourceResponse = await input.page.request.post('/api/save-image', {
+    data: {
+      imageUrl: `data:image/png;base64,${STAGE4_SOURCE_PNG_BASE64}`,
+    },
+  });
+  const sourcePayload = await readJson(sourceResponse);
+  const canonicalUrl = typeof sourcePayload.url === 'string' ? sourcePayload.url : '';
+  if (!sourceResponse.ok() || !canonicalUrl.startsWith('/api/serve-upload/uploads/')) {
+    throw new Error(
+      `BLOCKED: failed to persist the controlled Stage 4 source image (HTTP ${sourceResponse.status()})`,
+    );
+  }
   const now = Date.now();
   try {
     await pool.query(
@@ -568,6 +581,8 @@ export async function seedStage4RuntimeDependencies(input: {
           supportedQualities: ['1K'],
           maxImages: 1,
           capabilities: ['image'],
+          supportedOperations: ['image-to-image'],
+          maxReferenceImages: 1,
           outputKinds: ['png'],
         }]),
       ],
@@ -602,8 +617,11 @@ export async function seedStage4RuntimeDependencies(input: {
     );
     await pool.query(
       `INSERT INTO wujie_asset_versions(
-         id, asset_id, owner_id, project_id, file_url, availability, idempotency_key
-       ) VALUES ($1, $2, $3, $4, $5, 'ready', $6) ON CONFLICT (id) DO NOTHING`,
+         id, asset_id, owner_id, project_id, file_url, mime_type, availability, idempotency_key
+       ) VALUES ($1, $2, $3, $4, $5, 'image/png', 'ready', $6) ON CONFLICT (id) DO UPDATE SET
+         file_url = EXCLUDED.file_url,
+         mime_type = EXCLUDED.mime_type,
+         availability = EXCLUDED.availability`,
       [sourceVersionId, assetId, input.auth.userId, projectId, canonicalUrl, `stage4:${profile}:source`],
     );
     await pool.query('UPDATE wujie_assets SET current_version_id = $2 WHERE id = $1', [assetId, sourceVersionId]);

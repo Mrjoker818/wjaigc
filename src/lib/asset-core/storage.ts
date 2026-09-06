@@ -97,6 +97,14 @@ export interface AssetStorageTransaction {
   ): Promise<Asset>;
   findPlacement(ownerId: string, projectId: string, placementId: string): Promise<WorkspacePlacement | null>;
   lockPlacement(ownerId: string, projectId: string, placementId: string): Promise<WorkspacePlacement | null>;
+  lockWorkspacePlacementSlot(
+    ownerId: string,
+    projectId: string,
+    workspace: WorkspaceKind,
+    workspaceId: string,
+    entityType: string,
+    entityId: string,
+  ): Promise<void>;
   findActivePlacement(
     ownerId: string,
     projectId: string,
@@ -467,6 +475,20 @@ class PostgresAssetStorageTransaction implements AssetStorageTransaction {
       [ownerId, projectId, workspace, workspaceId, entityType, entityId],
     );
     return result.rows[0] ? mapPlacement(result.rows[0]) : null;
+  }
+
+  async lockWorkspacePlacementSlot(
+    ownerId: string,
+    projectId: string,
+    workspace: WorkspaceKind,
+    workspaceId: string,
+    entityType: string,
+    entityId: string,
+  ): Promise<void> {
+    await this.client.query(
+      'SELECT pg_advisory_xact_lock(hashtextextended($1, 0))',
+      [`asset-placement:${ownerId}:${projectId}:${workspace}:${workspaceId}:${entityType}:${entityId}`],
+    );
   }
 
   async findActivePlacementForVersion(

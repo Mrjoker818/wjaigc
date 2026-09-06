@@ -473,6 +473,79 @@ describe('Skill runtime PostgreSQL concurrency', () => {
     });
   }, 60_000);
 
+  postgresIt('empty marketing planning fails and refunds without dispatching parallel images', async () => {
+    await withIsolatedPostgres('skill_runtime_empty_marketing_plan', async ({ databaseUrl, query }) => {
+      const { ensureCoreTables } = await import('@/lib/db-storage');
+      const taskStorage = await import('@/lib/cloud-task-storage');
+      const agentService = await import('@/lib/agent-runtime/service');
+      const sameTask = await import('@/lib/agent-runtime/same-task-adapter');
+      const skillService = await import('@/lib/skill-runtime/service');
+      await Promise.all([ensureCoreTables(), taskStorage.ensureCloudTaskTables()]);
+      migrate(databaseUrl);
+      const userId = `skill-empty-plan-${randomUUID()}`;
+      const now = Date.now();
+      await query(
+        `INSERT INTO wujie_credits(id, user_id, balance, total_recharged, total_used, created_at, updated_at)
+         VALUES ($1, $2, 100, 100, 0, $3, $3)`,
+        [`credits-${randomUUID()}`, userId, now],
+      );
+      const base = runtimeInput(userId, `skill-empty-plan-key-${randomUUID()}`);
+      const skill = LOVART_MARKETING_SKILLS[0];
+      const input = {
+        actor: base.actor,
+        request: {
+          ...base.request,
+          skillId: skill.id,
+          skillVersion: skill.version,
+          inputValues: {
+            sourceImages: ['source-a'], campaignName: 'Launch', product: 'Headphones',
+            audience: 'Commuters', sellingPoints: 'Quiet travel', objective: '购买', channel: '信息流',
+            tone: '清晰、可信、具有行动感', aspectRatio: '1:1', negativeConstraints: '无',
+            hypothesis: 'Test one benefit',
+          },
+          sourceVersionIds: ['source-a'],
+        },
+      };
+      const created = await createThroughSkillService(input);
+      const [events, projection] = await Promise.all([
+        agentService.listAgentRunEvents({ actorUserId: userId, runId: created.runId }),
+        agentService.getAgentRunProjection({ actorUserId: userId, runId: created.runId }),
+      ]);
+      let imageDispatches = 0;
+
+      await expect(sameTask.executeAdoptedAgentTask({
+        adoption: {
+          runId: created.runId, reused: false, claimed: true, projection, tools: [],
+          actorUserId: userId, projectId: input.request.projectId, workspace: 'canvas',
+          toolId: 'plan',
+          requestDigest: String(events.find(event => event.type === 'run.created')?.payload.requestDigest),
+        },
+        execute: context => skillService.executeSkillRun({
+          actor: input.actor, request: input.request, runId: created.runId,
+          operationContext: context,
+          stepAdapters: {
+            chat: async () => ({ assetVersionIds: [], media: [], text: ' \n\t ' }),
+            img2img: async () => {
+              imageDispatches += 1;
+              return { assetVersionIds: ['must-not-exist'], media: [{}] };
+            },
+          },
+        }),
+      })).rejects.toMatchObject({ code: 'SKILL_QUALITY_FAILED', stepId: 'plan' });
+
+      const [persisted, refunds] = await Promise.all([
+        taskStorage.getCloudTaskForUser(created.runId, userId),
+        query<{ count: string }>(
+          `SELECT COUNT(*)::text AS count FROM wujie_credit_transactions
+           WHERE task_id = $1 AND type = 'refund'`, [created.runId],
+        ),
+      ]);
+      expect(imageDispatches).toBe(0);
+      expect(persisted).toMatchObject({ status: 'failed', creditStatus: 'refunded' });
+      expect(refunds.rows[0]?.count).toBe('1');
+    });
+  }, 60_000);
+
   postgresIt('successful native Skill execution settles its lease without a synthetic completion', async () => {
     await withIsolatedPostgres('skill_runtime_native_success_lease', async ({ databaseUrl, query }) => {
       const { ensureCoreTables } = await import('@/lib/db-storage');

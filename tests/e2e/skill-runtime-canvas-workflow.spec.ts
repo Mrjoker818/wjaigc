@@ -24,6 +24,7 @@ const TINY_PNG_BASE64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR
 let providerServer: Server | undefined;
 let providerBaseUrl = '';
 const providerSockets = new Set<Socket>();
+const providerImageRequests: string[] = [];
 
 test.beforeAll(async () => {
   providerServer = createServer((request, response) => {
@@ -32,7 +33,8 @@ test.beforeAll(async () => {
     request.on('data', chunk => { raw += chunk; });
     request.on('end', () => {
       const pathname = new URL(request.url || '/', 'http://127.0.0.1').pathname;
-      if (pathname.endsWith('/images/generations')) {
+      if (pathname.endsWith('/images/generations') || pathname.endsWith('/images/edits')) {
+        providerImageRequests.push(pathname);
         response.writeHead(200, { 'Content-Type': 'application/json' });
         response.end(JSON.stringify({ data: [{ b64_json: TINY_PNG_BASE64 }] }));
         return;
@@ -118,6 +120,12 @@ test('画布与节点模式使用同一套 24 项 Skill 定义和版本', async 
   const fixture = await stage4FixtureForProject(testInfo.project.name);
   const auth = await ensureStage4Session(page, fixture);
   const skillFixture = structuredClone(fixture);
+  const sourceAsset = await seedStage4RuntimeDependencies({
+    auth,
+    fixture: skillFixture,
+    page,
+    providerBaseUrl: `${providerBaseUrl}/v1`,
+  });
   const metadata = skillFixture.canvasProject.metadata as Record<string, unknown>;
   const sourceNode = createWorkflowNode('input-image', 80, 120, '营销来源图');
   sourceNode.config = {
@@ -125,7 +133,7 @@ test('画布与节点模式使用同一套 24 项 Skill 定义和版本', async 
     projectId: String(fixture.canvasProject.id),
     assetVersionId: `stage4-version-${fixture.browserProfile}`,
     placementId: `stage4-placement-${fixture.browserProfile}`,
-    imageUrl: '/logo.png',
+    imageUrl: sourceAsset.canonicalUrl,
   };
   const marketingNode = createWorkflowNode('ai-skill', 420, 120);
   skillFixture.canvasProject.metadata = {
@@ -145,11 +153,6 @@ test('画布与节点模式使用同一套 24 项 Skill 定义和版本', async 
     },
   };
   await seedStage4Baseline(page, skillFixture, auth);
-  await seedStage4RuntimeDependencies({
-    auth,
-    fixture: skillFixture,
-    providerBaseUrl: `${providerBaseUrl}/v1`,
-  });
   await page.addInitScript(() => {
     localStorage.setItem('wujie_selected_model', JSON.stringify({
       model: 'stage4-image-model',
@@ -178,7 +181,7 @@ test('画布与节点模式使用同一套 24 项 Skill 定义和版本', async 
     workflow: identity(workflowSkills),
   });
 
-  await page.getByRole('img', { name: 'canvas image', exact: true }).first().click();
+  await page.locator('[data-canvas-image-id]').first().click();
   const expandPanel = page.getByRole('button', { name: '展开面板', exact: true });
   if (await expandPanel.isVisible().catch(() => false)) await expandPanel.click();
   await page.getByRole('button', { name: 'AI聊天', exact: true }).click();
@@ -222,6 +225,7 @@ test('画布与节点模式使用同一套 24 项 Skill 定义和版本', async 
     async () => (await readSkillRun(page, canvasSubmissionPayload.runId!)).status,
     { timeout: 90_000, intervals: [250, 500, 1_000, 2_000] },
   ).toBe('completed');
+  expect(providerImageRequests.length).toBeGreaterThanOrEqual(2);
   const canvasRun = await readSkillRun(page, canvasSubmissionPayload.runId!);
   expect(canvasRun.status).toBe('completed');
   expect(canvasRun.skillId).toBe(canvasRequest.skillId);
@@ -265,7 +269,7 @@ test('画布与节点模式使用同一套 24 项 Skill 定义和版本', async 
   await expect(skillSelect.locator('option')).toHaveCount(25);
   await skillSelect.selectOption('preset-ad-ab-variants');
   await expect(skillSelect).toHaveValue('preset-ad-ab-variants');
-  await page.getByLabel('来源图片').last().fill(`stage4-version-${fixture.browserProfile}`);
+  await expect(page.getByText('已选择 1 张来源图片', { exact: true }).last()).toBeVisible();
   await page.getByLabel('活动名称').last().fill('秋季增长测试');
   await page.getByLabel('产品或服务').last().fill('测试耳机');
   await page.getByLabel('目标受众').last().fill('通勤用户');
@@ -284,7 +288,7 @@ test('画布与节点模式使用同一套 24 项 Skill 定义和版本', async 
     && Boolean(response.request().postData()?.includes('"action":"start"'))
   ), { timeout: 90_000 });
   await page.getByRole('button', { name: '执行工作流', exact: true }).click();
-  await expect(page.getByRole('heading', { name: 'Skill 费用预估', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Skill 费用预估', exact: true })).toBeVisible({ timeout: 20_000 });
   await page.getByRole('button', { name: '确认执行', exact: true }).click();
   const workflowSubmissionResponse = await workflowSubmission;
   expect(workflowSubmissionResponse.ok()).toBe(true);

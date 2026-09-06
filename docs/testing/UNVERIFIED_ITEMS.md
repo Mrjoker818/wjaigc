@@ -2353,3 +2353,14 @@ BUG-018 已从未验证项移除。剩余顺序为 `002-B -> 002-D -> 002-E`；�
 | 默认构建内存 | `4 GiB OOM / 8 GiB PASS` | CI/部署提供至少 8 GiB Node heap，或降低构建内存后重新验证默认命令。 |
 
 本地三项门禁失败已经关闭，不再列为发布阻断。其余项目关闭前仍不得将 Lovart 第一批标记为发布完成，也不得用既有 Unified Skill Runtime Task12 云端通过替代本批新增营销工作流验收。
+
+### 2026-09-06 最新本地候选后的剩余项
+
+- [x] 本地 Chromium 已完成 Canvas 与 Workflow 同源 24 Skills、双输出、AssetVersion、预览和下载验证。
+- [x] 隔离 PostgreSQL Skill 并发 `10/10`，全仓真库 `5459 passed / 12 conditional skipped / 0 failed`；先前“本轮全仓 PostgreSQL 169 skipped”记录已由新鲜真库回归取代。
+- [x] Workflow Skill 的 `workflow-input` placement、项目防伪和 URL-only 兼容边界已验证。
+- [x] Stage 4 已恢复同步冲突过滤器 `40/40`、最终相关聚焦 `127/127`；未知或未恢复的 409 仍失败关闭。
+- [ ] Coze 拉取最终 `main` 后核对 exact tree、Build ID、唯一服务进程与健康入口。
+- [ ] 使用真实稳定 provider 执行 Canvas 广告 A/B 与 Workflow 全渠道活动素材包，核对 provider/model 冻结、结果数量及来源图不覆盖。
+- [ ] 云端验证失败步骤重试不重复扣费、取消只退款一次、迟到结果不覆盖终态、保存刷新恢复。
+- [ ] 保存新鲜 Console、Network、截图和可获得的 Trace；无法生成的证据类型必须继续说明限制。

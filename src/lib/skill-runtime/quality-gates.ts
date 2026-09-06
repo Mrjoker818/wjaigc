@@ -7,6 +7,9 @@ import type {
 
 export const QUALITY_GATES = {
   'output-present': (result: SkillStepResult) => result.assetVersionIds.length > 0,
+  'text-output-present': (result: SkillStepResult) => (
+    typeof result.text === 'string' && result.text.trim().length > 0
+  ),
   'expected-count': (result: SkillStepResult, context: SkillQualityContext) => (
     typeof context.expectedCount === 'number'
     && Number.isInteger(context.expectedCount)

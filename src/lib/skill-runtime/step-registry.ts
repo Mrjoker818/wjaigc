@@ -11,7 +11,7 @@ import { executeAdmittedToolCall, executeToolCall, type AdmittedToolExecution } 
 import { getApiProviders } from '@/lib/server-api-config';
 import type { User } from '@/lib/user-types';
 import { parseWorkspaceSourceTrace } from '@/lib/asset-core/source-trace';
-import { buildSkillStepPrompt } from './execution-context';
+import { buildSkillStepMessages, buildSkillStepPrompt } from './execution-context';
 import type { SkillRunRequest } from './run-request';
 import type { ExecuteSkillStepInput } from './executor';
 import type { SkillStepAdapter, SkillStepRecoveryFactory } from './service';
@@ -92,7 +92,7 @@ async function executeOrchestratorStep(input: ExecuteSkillStepInput): Promise<Sk
     },
     body: JSON.stringify({
       model: input.modelBinding.modelId,
-      messages: [{ role: 'user', content: promptForStep(input) }],
+      messages: buildSkillStepMessages(input),
       stream: false,
     }),
     signal: input.signal,

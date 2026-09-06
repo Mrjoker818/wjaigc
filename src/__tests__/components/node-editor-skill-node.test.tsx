@@ -656,4 +656,43 @@ describe('NodeEditor workflow Skill node', () => {
     expect(screen.getByRole('group', { name: /投放渠道/ })).toBeTruthy();
     expect(screen.getByRole('checkbox', { name: '小红书' })).toBeTruthy();
   });
+
+  it('shows AssetVersion inputs bound through an upstream image connection', async () => {
+    const boundSkill = {
+      ...workflowSkill,
+      id: 'bound-source-skill',
+      name: '来源绑定 Skill',
+      inputs: [{
+        key: 'sourceImages', label: '来源图片', kind: 'images', required: true,
+        maximumItems: 6, bindToSourceVersions: true,
+      }],
+    };
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === '/api/skills?surface=workflow') {
+        return new Response(JSON.stringify({ skills: [boundSkill] }), { status: 200 });
+      }
+      return new Response('{}', { status: 200 });
+    }));
+    vi.stubGlobal('matchMedia', vi.fn(() => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() })));
+    vi.stubGlobal('ResizeObserver', class { observe(): void {} unobserve(): void {} disconnect(): void {} });
+
+    const source = createWorkflowNode('input-image', -300, 0);
+    source.config = { ...source.config, imageUrl: '/logo.png', assetVersionId: 'asset-version-1' };
+    const skillNode = createWorkflowNode('ai-skill', 0, 0);
+    const workflow = {
+      ...createEmptyWorkflow('Bound source'),
+      nodes: [source, skillNode],
+      connections: [{
+        id: 'source-to-skill', fromNodeId: source.id, fromPortId: 'out-image',
+        toNodeId: skillNode.id, toPortId: 'in-image', type: 'image' as const,
+      }],
+    };
+    render(<NodeEditor workflow={workflow} projectId="project-a" canvasImages={[]} />);
+    fireEvent.mouseDown(screen.getByLabelText(skillNode.label), { button: 0 });
+    fireEvent.mouseUp(screen.getByLabelText(skillNode.label), { button: 0 });
+    const skillSelect = await screen.findByRole('combobox', { name: 'Skill' });
+    fireEvent.change(skillSelect, { target: { value: boundSkill.id } });
+
+    expect(await screen.findByText('已选择 1 张来源图片')).toBeTruthy();
+  });
 });

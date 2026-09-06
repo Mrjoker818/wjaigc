@@ -215,6 +215,25 @@ export function SkillInputFields({
               field.maximumItems ?? SKILL_INPUT_LIMITS.images,
               SKILL_INPUT_LIMITS.images,
             );
+            if (field.bindToSourceVersions) {
+              const selectedCount = Array.isArray(value)
+                ? value.filter(item => typeof item === 'string' && item.length > 0).length
+                : 0;
+              control = (
+                <div
+                  id={inputId}
+                  role="status"
+                  aria-label={field.label}
+                  aria-describedby={describedBy}
+                  className="rounded border bg-muted/40 px-3 py-2 text-sm text-muted-foreground"
+                >
+                  {selectedCount > 0
+                    ? `已选择 ${selectedCount} 张来源图片`
+                    : '尚未选择来源图片'}
+                </div>
+              );
+              break;
+            }
             control = (
               <>
                 <textarea

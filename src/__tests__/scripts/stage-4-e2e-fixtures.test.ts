@@ -292,6 +292,45 @@ describe('Stage 4 workflow performance samples', () => {
     expect(stage4RuntimeEvidenceFailures([], [aborted]).networkFailures).toEqual([aborted]);
   });
 
+  it('allows a project sync conflict only after the identical snapshot retries successfully', () => {
+    const conflict = {
+      method: 'POST',
+      status: 409,
+      requestDigest: 'same-project-snapshot',
+      url: 'http://127.0.0.1:5000/api/user-data/sync',
+      occurredAt: 100,
+    };
+    const browserConflict = {
+      type: 'error',
+      text: 'Failed to load resource: the server responded with a status of 409 (Conflict)',
+      url: conflict.url,
+      occurredAt: 101,
+    };
+    const recovered = {
+      method: 'POST',
+      status: 200,
+      requestDigest: conflict.requestDigest,
+      url: conflict.url,
+      occurredAt: 120,
+    };
+
+    expect(stage4RuntimeEvidenceFailures([browserConflict], [conflict, recovered])).toEqual({
+      consoleFailures: [],
+      networkFailures: [],
+    });
+    expect(stage4RuntimeEvidenceFailures([browserConflict], [conflict, {
+      ...recovered,
+      requestDigest: 'different-project-snapshot',
+    }])).toEqual({
+      consoleFailures: [browserConflict],
+      networkFailures: [conflict],
+    });
+    expect(stage4RuntimeEvidenceFailures([browserConflict], [conflict])).toEqual({
+      consoleFailures: [browserConflict],
+      networkFailures: [conflict],
+    });
+  });
+
   it('allows an aborted workflow status poll only after the identical request succeeds', () => {
     const aborted = {
       method: 'POST',

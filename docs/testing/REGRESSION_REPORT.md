@@ -2822,3 +2822,13 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - 浏览器：Task 5 本地 Chromium 用例因缺少数据库变量和运行服务形成 `1 skipped` 证据；本轮按约束未操作浏览器，不能写成 Chromium E2E 通过。
 - `6595c6b0` 只修改测试/合同与精确保护授权，没有生产业务源码变化。因此 TypeScript、Lint、默认 4 GiB OOM 与 8 GiB `119/119` 构建引用同一生产代码候选的上一轮证据，没有重复消耗构建。
 - **回归判定：LOCAL GATES PASS / EXTERNAL ACCEPTANCE UNVERIFIED。** 本地门禁已收口；Chromium、真实 provider、Coze 与真实浏览器营销链路仍未验证。
+
+## 2026-09-06 Lovart 营销工作流最终本地候选回归
+
+- 修复 `LOVART-WORKFLOW-001`：Workflow Skill 现在基于服务端权威项目、工作流和节点身份，为合法 Canvas AssetVersion 幂等建立 `workflow-input` placement；拒绝项目伪造，URL-only 旧输入保持兼容且不创建 placement。
+- Workflow 聚焦回归 `39/39`；隔离 PostgreSQL Skill 并发套件 `10/10`，覆盖同键归并、一次扣费/退款、取消及终态竞争。
+- 本地 Chromium E2E `1/1`：Canvas/Workflow 同为 `24/24` Skills；Canvas 产出 2 个结果与 2 个 AssetVersion；Workflow 节点成功产出 2 个 AssetVersion，预览、下载与最终证据门禁可用。
+- Stage 4 证据过滤器按 TDD 增加已恢复同步冲突边界：仅同 URL、同 `requestDigest` 且一秒内后续 2xx 的 `/api/user-data/sync` 409 可被识别为恢复；不同摘要、无成功重试或其他 409 继续失败关闭。过滤器 `40/40`、最终相关聚焦回归 `127/127`。
+- 全仓 PostgreSQL 回归：`679 passed / 4 skipped` 测试文件，`5459 passed / 12 conditional skipped / 0 failed`。跳过项保持显式，未计作通过。
+- 工程门禁：TypeScript 通过；ESLint `0 errors / 943 warnings`；保护基线 `38/38 / 0 drift / 0 warnings`；生产构建退出 0，Webpack 编译约 12.5 分钟并生成 `119/119` 页面。
+- **回归判定：LOCAL + POSTGRESQL + LOCAL CHROMIUM PASS / COZE AND REAL PROVIDER UNVERIFIED。**

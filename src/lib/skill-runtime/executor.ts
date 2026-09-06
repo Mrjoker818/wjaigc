@@ -430,8 +430,11 @@ export function createSkillExecutor(dependencies: SkillExecutorDependencies) {
               operation: input.operationContext,
               signal: controller.signal,
             };
+              const qualityGateIds = step.toolId === 'chat' && step.modelRole === 'orchestrator'
+                ? [...new Set([...step.qualityGateIds, 'text-output-present'])]
+                : step.qualityGateIds;
               const checks = runSkillQualityGates(
-              step.qualityGateIds,
+              qualityGateIds,
               result,
               dependencies.qualityContext?.(stepInput) || {},
             );

@@ -1,14 +1,17 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { sendUserDataRecord } from '@/lib/user-data-record-client';
+import {
+  sendUserDataRecord,
+  type UserDataRecordFetcher,
+} from '@/lib/user-data-record-client';
 
 afterEach(() => {
   vi.useRealTimers();
 });
 
 describe('sendUserDataRecord', () => {
-  it('uses a navigation-safe beacon for small keepalive audit records', async () => {
-    const fetcher = vi.fn();
+  it('uses a response-aware keepalive request before falling back to beacon', async () => {
+    const fetcher = vi.fn<UserDataRecordFetcher>(async () => new Response(null, { status: 200 }));
     const beacon = vi.fn<(url: string, data?: BodyInit | null) => boolean>(() => true);
 
     await sendUserDataRecord({
@@ -18,23 +21,26 @@ describe('sendUserDataRecord', () => {
       beacon,
     });
 
-    expect(beacon).toHaveBeenCalledOnce();
-    expect(beacon.mock.calls[0]?.[0]).toBe('/api/user-data/record');
-    expect(beacon.mock.calls[0]?.[1]).toBeInstanceOf(Blob);
-    expect(fetcher).not.toHaveBeenCalled();
+    expect(fetcher).toHaveBeenCalledOnce();
+    expect(fetcher.mock.calls[0]?.[1]).toMatchObject({ keepalive: true });
+    expect(beacon).not.toHaveBeenCalled();
   });
 
-  it('falls back to the bounded fetch when the beacon queue rejects the record', async () => {
-    const fetcher = vi.fn(async () => new Response(null, { status: 200 }));
+  it('falls back to a navigation-safe beacon when the keepalive request fails', async () => {
+    const fetcher = vi.fn<UserDataRecordFetcher>(async () => { throw new TypeError('navigation interrupted'); });
+    const beacon = vi.fn<(url: string, data?: BodyInit | null) => boolean>(() => true);
 
     await sendUserDataRecord({
       requestBody: '{"type":"autosave"}',
       keepalive: true,
       fetcher,
-      beacon: () => false,
+      beacon,
     });
 
     expect(fetcher).toHaveBeenCalledOnce();
+    expect(beacon).toHaveBeenCalledOnce();
+    expect(beacon.mock.calls[0]?.[0]).toBe('/api/user-data/record');
+    expect(beacon.mock.calls[0]?.[1]).toBe('{"type":"autosave"}');
   });
 
   it('aborts a hung activity request at the bounded timeout', async () => {

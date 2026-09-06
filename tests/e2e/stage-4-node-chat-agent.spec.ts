@@ -200,7 +200,12 @@ test('executes ordinary chat, vision stop, agent cancel, and refresh recovery', 
   providerCounts.delete(fixture.browserProfile);
   const auth = await ensureStage4Session(page, fixture);
   await seedStage4Baseline(page, fixture, auth);
-  const asset = await seedStage4RuntimeDependencies({ auth, fixture, providerBaseUrl: `${providerBaseUrl}/v1` });
+  const asset = await seedStage4RuntimeDependencies({
+    auth,
+    fixture,
+    page,
+    providerBaseUrl: `${providerBaseUrl}/v1`,
+  });
 
   await openStage4ChatProject(page, String(fixture.chatProject.id));
   const measuredCeilingFps = await sampleRawFps(page);
@@ -393,7 +398,12 @@ test('completes chat to canvas to workflow to chat with durable lineage and refr
     },
   };
   await seedStage4Baseline(page, chainFixture, auth);
-  await seedStage4RuntimeDependencies({ auth, fixture: chainFixture, providerBaseUrl: `${providerBaseUrl}/v1` });
+  await seedStage4RuntimeDependencies({
+    auth,
+    fixture: chainFixture,
+    page,
+    providerBaseUrl: `${providerBaseUrl}/v1`,
+  });
   const canvasProjectId = String(fixture.canvasProject.id);
   const chatProjectId = String(fixture.chatProject.id);
 

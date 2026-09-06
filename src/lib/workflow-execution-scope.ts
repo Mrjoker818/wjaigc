@@ -60,3 +60,21 @@ export function resolveWorkflowExecutionScope(input: WorkflowExecutionScope): Wo
     connections: input.connections.filter(edge => reachable.has(edge.fromNodeId) && reachable.has(edge.toNodeId)),
   };
 }
+
+export function isWorkflowExecutionScopeCurrent(
+  quotedScope: WorkflowExecutionScope,
+  currentNodes: WorkflowNode[],
+  currentConnections: WorkflowConnection[],
+): boolean {
+  try {
+    const currentScope = resolveWorkflowExecutionScope({
+      nodes: currentNodes,
+      connections: currentConnections,
+      ...(quotedScope.startNodeId === undefined ? {} : { startNodeId: quotedScope.startNodeId }),
+      ...(quotedScope.tailNodeId === undefined ? {} : { tailNodeId: quotedScope.tailNodeId }),
+    });
+    return JSON.stringify(currentScope) === JSON.stringify(quotedScope);
+  } catch {
+    return false;
+  }
+}

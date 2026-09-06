@@ -71,6 +71,10 @@ type AssetService = {
     placement: WorkspacePlacement;
     reused: boolean;
   }>;
+  bindWorkflowInputPlacement(input: CreatePlacementInput): Promise<{
+    placement: WorkspacePlacement;
+    reused: boolean;
+  }>;
   createVersionWithPlacement(input: CreateVersionWithPlacementInput): Promise<{
     asset: Asset;
     version: AssetVersion;
@@ -278,6 +282,10 @@ class MemoryStorage {
     this.lifecycleCalls.push('lockPlacement');
     const placement = this.data.placements.get(placementId);
     return placement?.ownerId === ownerId && placement.projectId === projectId ? placement : null;
+  }
+
+  async lockWorkspacePlacementSlot(): Promise<void> {
+    this.lifecycleCalls.push('lockWorkspacePlacementSlot');
   }
 
   async findActivePlacement(
@@ -822,6 +830,59 @@ describe('asset graph service', () => {
       requestDigest: 'digest-workflow-b',
     })).rejects.toMatchObject({ code: 'ASSET_IDEMPOTENCY_CONFLICT' });
   });
+
+  it('rebinds a workflow input atomically without changing either source asset status', async () => {
+    const ownerId = randomUUID();
+    const projectId = randomUUID();
+    const storage = new MemoryStorage(ownerId, projectId);
+    const { createAssetService } = await loadService();
+    const service = createAssetService(storage);
+    const first = await service.createAssetVersion(createVersionInput(ownerId, projectId, {
+      idempotencyKey: 'workflow-input-first', requestDigest: 'workflow-input-first',
+    }));
+    const second = await service.createAssetVersion(createVersionInput(ownerId, projectId, {
+      idempotencyKey: 'workflow-input-second', requestDigest: 'workflow-input-second',
+    }));
+    const binding = {
+      actorUserId: ownerId, projectId, workspace: 'workflow' as const,
+      workspaceId: 'workflow-a', entityType: 'workflow-input', entityId: 'input-a',
+    };
+
+    const firstPlacement = await service.bindWorkflowInputPlacement({
+      ...binding, assetVersionId: first.version.id,
+    });
+    const secondPlacement = await service.bindWorkflowInputPlacement({
+      ...binding, assetVersionId: second.version.id,
+    });
+
+    expect(storage.data.placements.get(firstPlacement.placement.id)?.status).toBe('trashed');
+    expect(storage.data.placements.get(secondPlacement.placement.id)?.status).toBe('active');
+    expect(storage.data.assets.get(first.asset.id)?.status).toBe('active');
+    expect(storage.data.assets.get(second.asset.id)?.status).toBe('active');
+    expect(storage.lifecycleCalls.indexOf('lockWorkspacePlacementSlot')).toBeLessThan(
+      storage.lifecycleCalls.indexOf('lockAsset'),
+    );
+  });
+
+  it('rejects binding a trashed workflow source without restoring the asset', async () => {
+    const ownerId = randomUUID();
+    const projectId = randomUUID();
+    const storage = new MemoryStorage(ownerId, projectId);
+    const { createAssetService } = await loadService();
+    const service = createAssetService(storage);
+    const created = await service.createAssetVersion(createVersionInput(ownerId, projectId));
+    storage.data.assets.set(created.asset.id, { ...created.asset, status: 'trashed' });
+    storage.lifecycleCalls.length = 0;
+
+    await expect(service.bindWorkflowInputPlacement({
+      actorUserId: ownerId, projectId, assetVersionId: created.version.id,
+      workspace: 'workflow', workspaceId: 'workflow-a',
+      entityType: 'workflow-input', entityId: 'input-a',
+    })).rejects.toMatchObject({ code: 'ASSET_NOT_FOUND' });
+    expect(storage.data.assets.get(created.asset.id)?.status).toBe('trashed');
+    expect(storage.lifecycleCalls).not.toContain('activateAsset');
+  });
+
 
   it('round-trips Canvas Skill trace through a real transfer placement and asset resolve', async () => {
     const ownerId = randomUUID();

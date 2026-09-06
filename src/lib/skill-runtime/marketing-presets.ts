@@ -45,7 +45,7 @@ function planStep(id: string, label: string, promptTemplate: string): SkillStepD
     promptTemplate,
     modelRole: 'orchestrator',
     execution: 'sequential',
-    qualityGateIds: [],
+    qualityGateIds: ['text-output-present'],
   };
 }
 
@@ -93,7 +93,7 @@ export const LOVART_MARKETING_SKILLS: readonly SkillDefinition[] = [
     id: retargetingId,
     name: '再营销素材',
     description: '根据用户所处漏斗阶段生成消除顾虑、强化利益和促进转化的创意。',
-    systemPrompt: '你是再营销策略师。诊断当前漏斗阻力，再用信任证明、利益表达和合理促销分别制作创意，避免夸大或虚假稀缺。',
+    systemPrompt: '你是再营销策略师。诊断当前漏斗阻力，再用信任证明、利益表达和合理促销分别制作创意，避免夸大或虚假稀缺。不得虚构价格、不得虚构折扣、不得虚构销量、不得虚构认证、不得虚构用户评价。',
     inputs: [
       ...commonInputs,
       { key: 'funnelStage', label: '漏斗阶段', kind: 'select', required: true, options: ['浏览未点击', '点击未加购', '加购未购买', '老客复购'] },

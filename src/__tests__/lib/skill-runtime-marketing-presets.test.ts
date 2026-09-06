@@ -5,6 +5,13 @@ import { resolveSkillInputs } from '@/lib/skill-runtime/input-resolver';
 import { LOVART_MARKETING_SKILLS } from '@/lib/skill-runtime/marketing-presets';
 
 describe('Lovart marketing Skill definitions', () => {
+  it('keeps explicit anti-fabrication rules in the retargeting system prompt', () => {
+    const retargeting = LOVART_MARKETING_SKILLS.find(skill => skill.id === 'preset-retargeting-creative')!;
+    for (const fact of ['价格', '折扣', '销量', '认证', '用户评价']) {
+      expect(retargeting.systemPrompt).toContain(`不得虚构${fact}`);
+    }
+  });
+
   const common = {
     sourceImages: ['version-source-1'], campaignName: '秋季上新', product: '耳机',
     audience: '通勤人群', sellingPoints: '降噪',

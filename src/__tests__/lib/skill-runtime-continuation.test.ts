@@ -159,4 +159,19 @@ describe('Skill runtime frozen continuation', () => {
       },
     }));
   });
+
+  it('stops continuation before registry creation when source media reauthorization fails', async () => {
+    const fixture = persistedFixture({
+      campaignName: 'Launch', channels: ['Web'], sources: ['version-1'],
+    }, ['version-1']);
+    continuationMocks.authorizeAgentContext.mockRejectedValue(Object.assign(
+      new Error('Agent context not found'),
+      { code: 'AGENT_CONTEXT_NOT_FOUND', status: 404 },
+    ));
+
+    await expect(loadPersistedSkillContinuation({
+      actorUserId: actor.id, projectId: 'project-1', runId: 'run-1', ...fixture,
+    })).rejects.toMatchObject({ code: 'AGENT_CONTEXT_NOT_FOUND', status: 404 });
+    expect(continuationMocks.createRegistry).not.toHaveBeenCalled();
+  });
 });

@@ -24,18 +24,6 @@ export async function sendUserDataRecord({
       ? navigator.sendBeacon.bind(navigator)
       : undefined
   );
-  if (keepalive && navigationBeacon) {
-    try {
-      const accepted = navigationBeacon(
-        '/api/user-data/record',
-        new Blob([requestBody], { type: 'application/json' }),
-      );
-      if (accepted) return;
-    } catch {
-      // Fall through to the response-aware request when the beacon API rejects the body.
-    }
-  }
-
   const controller = new AbortController();
   let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
   const timeoutError = new Error(`activity record request timed out after ${timeoutMs}ms`);
@@ -46,17 +34,23 @@ export async function sendUserDataRecord({
     }, timeoutMs);
   });
   try {
-    const response = await Promise.race([
-      fetcher('/api/user-data/record', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: requestBody,
-        keepalive,
-        signal: controller.signal,
-      }),
-      timeout,
-    ]);
-    if (!response.ok) throw new Error(`activity record failed with HTTP ${response.status}`);
+    try {
+      const response = await Promise.race([
+        fetcher('/api/user-data/record', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: requestBody,
+          keepalive,
+          signal: controller.signal,
+        }),
+        timeout,
+      ]);
+      if (!response.ok) throw new Error(`activity record failed with HTTP ${response.status}`);
+    } catch (error) {
+      if (!keepalive || !navigationBeacon || controller.signal.aborted) throw error;
+      const accepted = navigationBeacon('/api/user-data/record', requestBody);
+      if (!accepted) throw error;
+    }
   } finally {
     if (timeoutHandle) clearTimeout(timeoutHandle);
   }

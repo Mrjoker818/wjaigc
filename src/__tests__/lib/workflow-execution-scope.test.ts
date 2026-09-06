@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { createWorkflowNode, type WorkflowConnection } from '@/lib/workflow-engine';
-import { resolveWorkflowExecutionScope } from '@/lib/workflow-execution-scope';
+import {
+  isWorkflowExecutionScopeCurrent,
+  resolveWorkflowExecutionScope,
+} from '@/lib/workflow-execution-scope';
 
 function graph() {
   const nodes = ['source', 'selected', 'left', 'right', 'dependency', 'sibling', 'isolated']
@@ -64,5 +67,31 @@ describe('workflow execution scope', () => {
     const input = graph();
     input.connections.push({ id: 'cycle', fromNodeId: 'right', toNodeId: 'selected', fromPortId: 'out-prompt', toPortId: 'in-prompt', type: 'prompt' });
     expect(resolveWorkflowExecutionScope({ ...input, startNodeId: 'selected' }).nodes).toHaveLength(5);
+  });
+
+  it('keeps a pending estimate valid across an equivalent workflow hydration', () => {
+    const input = graph();
+    const scope = resolveWorkflowExecutionScope(input);
+    const hydrated = structuredClone(input);
+
+    expect(isWorkflowExecutionScopeCurrent(scope, hydrated.nodes, hydrated.connections)).toBe(true);
+  });
+
+  it('invalidates a pending estimate when execution-relevant configuration changes', () => {
+    const input = graph();
+    const scope = resolveWorkflowExecutionScope(input);
+    const changed = structuredClone(input);
+    changed.nodes[0].config = { ...changed.nodes[0].config, prompt: 'changed after quote' };
+
+    expect(isWorkflowExecutionScopeCurrent(scope, changed.nodes, changed.connections)).toBe(false);
+  });
+
+  it('ignores disconnected changes outside a cascade execution scope', () => {
+    const input = graph();
+    const scope = resolveWorkflowExecutionScope({ ...input, startNodeId: 'selected', tailNodeId: 'left' });
+    const changed = structuredClone(input);
+    changed.nodes.find(node => node.id === 'isolated')!.config = { prompt: 'unrelated change' };
+
+    expect(isWorkflowExecutionScopeCurrent(scope, changed.nodes, changed.connections)).toBe(true);
   });
 });

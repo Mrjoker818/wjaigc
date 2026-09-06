@@ -73,6 +73,24 @@ afterEach(() => {
 });
 
 describe('SkillInputFields', () => {
+  it('renders source-bound image selections as a read-only summary without exposing editable IDs', () => {
+    const onChange = vi.fn();
+    render(<SkillInputFields
+      fields={[{
+        key: 'sources', label: '来源图片', kind: 'images', required: true,
+        maximumItems: 6, bindToSourceVersions: true,
+      }]}
+      values={{ sources: ['asset-version-first', 'asset-version-second'] }}
+      onChange={onChange}
+    />);
+
+    expect(screen.getByText('已选择 2 张来源图片')).toBeTruthy();
+    expect(screen.queryByRole('textbox', { name: '来源图片' })).toBeNull();
+    expect(screen.queryByText('asset-version-first')).toBeNull();
+    expect(screen.queryByText('asset-version-second')).toBeNull();
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
   it('renders a semantic multi-select checkbox group and only disables unchecked options at its limit', () => {
     const onChange = vi.fn();
     const { rerender } = render(<SkillInputFields

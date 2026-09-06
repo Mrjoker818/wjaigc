@@ -12,6 +12,7 @@ import { requireSkillForSurface } from '@/lib/skill-runtime/catalog';
 import * as skillCatalog from '@/lib/skill-runtime/catalog';
 import { resolveSkillInputs } from '@/lib/skill-runtime/input-resolver';
 import { compileSkillPrompt } from '@/lib/skill-runtime/prompt-compiler';
+import { authorizeAgentContext } from '@/lib/agent-runtime/context-adapters';
 
 const authMocks = vi.hoisted(() => ({
   requireApiAuthOrReject: vi.fn(),
@@ -144,6 +145,57 @@ function serviceDependencies() {
     })),
   } satisfies AgentRuntimeDependencies;
 }
+
+describe('Agent source media admission', () => {
+  it.each([
+    ['video asset', { kind: 'video', availability: 'ready', mimeType: 'image/png' }],
+    ['3D asset', { kind: 'model-3d', availability: 'ready', mimeType: 'image/png' }],
+    ['document asset', { kind: 'document', availability: 'ready', mimeType: 'image/png' }],
+    ['pending version', { kind: 'image', availability: 'pending-persist', mimeType: 'image/png' }],
+    ['non-image MIME', { kind: 'image', availability: 'ready', mimeType: 'video/mp4' }],
+  ])('rejects a %s through createRun before model lookup, billing, or task creation', async (_name, media) => {
+    const dependencies = serviceDependencies();
+    dependencies.authorizeContext.mockImplementation(({ actorUserId, request: runRequest }) => (
+      authorizeAgentContext({
+        actorUserId,
+        request: runRequest,
+        storage: {
+          transaction: async callback => callback({
+            findProject: async () => true,
+            findAsset: async () => ({
+              id: 'asset-1', ownerId: actorUserId, projectId: runRequest.projectId,
+              kind: media.kind as 'image', status: 'active', currentVersionId: 'version-1',
+              createdAt: '2026-09-06T00:00:00.000Z', updatedAt: '2026-09-06T00:00:00.000Z',
+            }),
+            findVersion: async () => ({
+              id: 'version-1', assetId: 'asset-1', ownerId: actorUserId,
+              projectId: runRequest.projectId, parentVersionIds: [], createdAt: '2026-09-06T00:00:00.000Z',
+              file: {
+                url: 'https://media.example.com/source.png',
+                availability: media.availability as 'ready',
+                mimeType: media.mimeType,
+              },
+            }),
+            findVersionPlacement: async () => ({ id: 'placement-1', assetVersionId: 'version-1' }),
+          }),
+        },
+      })
+    ));
+    const service = agentRuntime.createAgentRuntimeService(dependencies);
+
+    await expect(service.createRun({
+      actor: user,
+      request: request({
+        sourceVersionIds: ['version-1'],
+        context: { selectedEntityIds: [], visibleVersionIds: ['version-1'], locale: 'zh-CN' },
+      }),
+    })).rejects.toMatchObject({ code: 'AGENT_CONTEXT_NOT_FOUND' });
+    expect(dependencies.resolveTaskModel).not.toHaveBeenCalled();
+    expect(dependencies.calculateCreditCost).not.toHaveBeenCalled();
+    expect(dependencies.createBillableTask).not.toHaveBeenCalled();
+    expect(dependencies.appendEvent).not.toHaveBeenCalled();
+  });
+});
 
 function canvasSkillRequest(
   overrides: Partial<AgentRunRequest> = {},

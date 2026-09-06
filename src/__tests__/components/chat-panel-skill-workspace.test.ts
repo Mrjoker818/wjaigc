@@ -54,8 +54,16 @@ describe('Canvas Skill asset workspace identity', () => {
       storage: {
         transaction: async execute => execute({
           findProject: async (owner, project) => owner === 'owner-a' && project === 'project-a',
+          findAsset: async (owner, project, assetId) =>
+            owner === 'owner-a' && project === 'project-a' && assetId === 'asset-a'
+              ? { id: assetId, kind: 'image' as const } : null,
           findVersion: async (_owner, _project, version) => version === 'version-a'
-            ? { id: version, file: { url: '/api/serve-upload/product.png' } } : null,
+            ? {
+              id: version, assetId: 'asset-a',
+              file: {
+                url: '/api/serve-upload/product.png', availability: 'ready' as const, mimeType: 'image/png',
+              },
+            } : null,
           findVersionPlacement: async (_owner, _project, surface, workspace, version) =>
             surface === 'canvas' && workspace === 'canvas:project-a' && version === 'version-a'
               ? { id: 'placement-a', assetVersionId: version } : null,

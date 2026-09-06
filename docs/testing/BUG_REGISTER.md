@@ -4070,5 +4070,19 @@ All listed Stage 4 defects are locally closed. S4-BUG-008 also passed its exact-
 | `LOVART-GATE-001` | P1 | E2E 隔离合同曾硬编码要求 `nodes: []`，与当前最小营销双节点夹具冲突。 | **已修复。** 聚焦门禁 `110/110`，0 失败、0 skip。 |
 | `LOVART-GATE-002` | P1 | `asset-version-id.ts` 与 `marketing-presets.ts` 曾缺少精确保护授权。 | **已修复。** 仅新增两个完整路径及来源提交，保护门禁 38 项、零漂移、0 warning。 |
 | `LOVART-GATE-003` | P1 | Canvas chat 合同曾断言旧的强制单图解析器文本。 | **已修复。** 合同现覆盖可选解析器的零选、多选、合法单选及缺失映射边界；全量回归通过。 |
+| `LOVART-GATE-004` | P2 | 本地 Chromium 中项目同步先返回 409、随后以相同 URL 和相同 `requestDigest` 重试成功，但 Stage 4 证据门禁仍把已恢复冲突误判为失败。 | **已修复。** 仅豁免一秒内同 URL、同摘要、后续 2xx 的已恢复同步冲突；不同摘要、无成功重试或其他 409 仍失败关闭。过滤器回归 `40/40`，最终 Chromium `1/1` 通过。 |
 
 Task 4 独立审查的两个 Minor 继续保留给最终审查：单元夹具 operation key 不是生产生成逻辑；PostgreSQL 用例验证 AssetVersion ID 聚合，但没有创建真实 AssetVersion。二者不阻断本地门禁，也没有被提升为“已验证”。
+
+### LOVART-WORKFLOW-001：Workflow Skill 无法解析同项目画布资产（2026-09-06）
+
+| 字段 | 内容 |
+|---|---|
+| 严重等级 | P1：Canvas Skill 可产出，但相同素材进入 Workflow Skill 节点时失败，三工作区互通链路中断。 |
+| 稳定复现 | 隔离 PostgreSQL 与本地 Chromium 中，Canvas Skill 成功生成 2 个 AssetVersion；Workflow Skill 随后返回 `Agent context not found`。 |
+| 根因 | 工作流输入解析只读取 Canvas placement，没有在权威项目和工作流上下文中建立 `workflow-input` placement；严格的 Skill/Agent 授权因此找不到当前工作区资产。 |
+| 修复 | `workflow-resolver.ts` 接收服务端权威 `projectId + workflowId + nodeId`，校验客户端项目不可越权，并幂等创建 `workflow-input` placement；正常执行与重试路径均传入相同权威上下文。 |
+| 安全边界 | URL-only 旧输入不创建 placement；伪造 projectId 在进入解析器前拒绝；不修改原始 AssetVersion、供应商路由或积分逻辑。 |
+| 永久测试 | Workflow 解析、Skill 节点与执行聚焦 `39/39`；最终相关聚焦回归 `127/127`；隔离 PostgreSQL Skill 并发 `10/10`；全仓真库回归 `5459 passed / 12 conditional skipped / 0 failed`。 |
+| 浏览器证据 | 本地 Chromium 真实运行 `1/1`：Canvas 与 Workflow 均显示同一 24 Skills，Canvas 产生 2 个结果，Workflow 节点完成并产生 2 个 AssetVersion，预览、下载及证据门禁均通过。 |
+| 当前状态 | **本地与隔离 PostgreSQL 已修复；Coze 最新提交部署与真实供应商链路未验证。** |

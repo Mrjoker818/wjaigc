@@ -340,6 +340,40 @@ describe('durable Skill executor', () => {
     expect(completeRun).not.toHaveBeenCalled();
   });
 
+  it('fails an empty planning result and never dispatches the following parallel image group', async () => {
+    const failRun = vi.fn(async () => true);
+    const pauseForRetry = vi.fn(async () => true);
+    const completeRun = vi.fn(async () => true);
+    const executeStep = vi.fn(async ({ step }: { step: { id: string } }) => (
+      step.id === 'plan'
+        ? { assetVersionIds: [], media: [], text: '   ' }
+        : result(`version-${step.id}`)
+    ));
+    const executor = createSkillExecutor({
+      executeStep,
+      appendEvent: vi.fn(async () => true),
+      failRun,
+      pauseForRetry,
+      completeRun,
+    });
+    const guardedDefinition = {
+      ...definition,
+      steps: definition.steps.map(step => step.id === 'plan'
+        ? { ...step, toolId: 'chat', qualityGateIds: [] }
+        : step),
+    };
+
+    await expect(executor.execute({
+      actorUserId: 'user-1', projectId: 'project-1', runId: 'run-1', workspace: 'canvas',
+      definition: guardedDefinition, inputValues: {}, modelBindings: {}, operationContext: operationContext(),
+    })).rejects.toMatchObject({ code: 'SKILL_QUALITY_FAILED', stepId: 'plan' });
+
+    expect(executeStep.mock.calls.map(call => call[0].step.id)).toEqual(['plan']);
+    expect(failRun).toHaveBeenCalledTimes(1);
+    expect(pauseForRetry).not.toHaveBeenCalled();
+    expect(completeRun).not.toHaveBeenCalled();
+  });
+
   it('refuses a late completion after the active execution signal is aborted', async () => {
     const controller = new AbortController();
     const completeRun = vi.fn(async () => true);

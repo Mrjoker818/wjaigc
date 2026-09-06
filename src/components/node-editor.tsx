@@ -44,7 +44,10 @@ import type { TaskModelCatalogModel } from '@/hooks/use-task-model-catalog';
 import { WorkspaceSourceTraceDetails } from '@/components/workspace-source-trace';
 import { SkillInputFields } from '@/components/skill-runtime/SkillInputFields';
 import { loadWorkflowSkillCatalog, loadSavedWorkflowSkillResult } from '@/lib/skill-runtime/workflow-client';
-import { resolveWorkflowExecutionScope } from '@/lib/workflow-execution-scope';
+import {
+  isWorkflowExecutionScopeCurrent,
+  resolveWorkflowExecutionScope,
+} from '@/lib/workflow-execution-scope';
 import type { WorkflowExecutionScope } from '@/lib/workflow-execution-scope';
 import { estimateWorkflowSkills, type WorkflowSkillQuote } from '@/lib/skill-runtime/workflow-estimate-client';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
@@ -1033,7 +1036,7 @@ export default function NodeEditor({ taskModelCatalog = [], taskModelOptions = [
   const [executionNodeIds, setExecutionNodeIds] = useState<string[]>([]);
   const [skillEstimating, setSkillEstimating] = useState(false);
   const [skillQuote, setSkillQuote] = useState<{
-    scope: WorkflowExecutionScope; quotes: WorkflowSkillQuote[]; workflow: WorkflowData; projectId: string; expiresAt: number;
+    scope: WorkflowExecutionScope; quotes: WorkflowSkillQuote[]; projectId: string; expiresAt: number;
   } | null>(null);
   const skillEstimateController = useRef<AbortController | null>(null);
   const skillExecutionLock = useRef(false);
@@ -1042,7 +1045,12 @@ export default function NodeEditor({ taskModelCatalog = [], taskModelOptions = [
   useEffect(() => {
     setSkillQuote(null);
     return () => skillEstimateController.current?.abort();
-  }, [wf, projectId]);
+  }, [projectId]);
+  useEffect(() => {
+    if (skillQuote && !isWorkflowExecutionScopeCurrent(skillQuote.scope, wf.nodes, wf.connections)) {
+      setSkillQuote(null);
+    }
+  }, [skillQuote, wf.connections, wf.nodes]);
   const [execResults, setExecResults] = useState<Record<string, { status: string; output?: Record<string, unknown>; error?: string }>>({});
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const [showMinimap, setShowMinimap] = useState(true);
@@ -1534,9 +1542,7 @@ ${contextInfo}
   const [workflowSkills, setWorkflowSkills] = useState<SkillDefinition[]>([]);
   const [workflowSkillsLoading, setWorkflowSkillsLoading] = useState(false);
   const [workflowSkillsError, setWorkflowSkillsError] = useState<string | null>(null);
-  const hasWorkflowSkillNode = wf.nodes.some(node => node.type === 'ai-skill');
   useEffect(() => {
-    if (!hasWorkflowSkillNode) return;
     const controller = new AbortController();
     setWorkflowSkillsLoading(true);
     loadWorkflowSkillCatalog(fetch, controller.signal).then(skills => {
@@ -1549,7 +1555,7 @@ ${contextInfo}
       if (!controller.signal.aborted) setWorkflowSkillsLoading(false);
     });
     return () => controller.abort();
-  }, [hasWorkflowSkillNode]);
+  }, []);
   const chatModels = useMemo(() => models.filter(m => m.type === 'chat'), [models]);
   const imageModels = useMemo(() => models.filter(m => m.type === 'image'), [models]);
   const annotationModels = useMemo(() => imageModels
@@ -1604,6 +1610,19 @@ ${contextInfo}
   const isBoxSelectingRef = useRef(false);
 
   const selectedNode = useMemo(() => wf.nodes.find(n => n.id === selectedNodeId) || null, [wf.nodes, selectedNodeId]);
+  const selectedNodeBoundSourceVersionIds = useMemo(() => {
+    if (!selectedNode) return [];
+    const ids: string[] = [];
+    for (const connection of wf.connections) {
+      if (connection.toNodeId !== selectedNode.id || connection.type !== 'image') continue;
+      const source = nodeById.get(connection.fromNodeId);
+      const assetVersionId = source?.config?.assetVersionId;
+      const sourceVersionId = source?.config?.sourceVersionId;
+      if (typeof assetVersionId === 'string' && assetVersionId) ids.push(assetVersionId);
+      if (typeof sourceVersionId === 'string' && sourceVersionId) ids.push(sourceVersionId);
+    }
+    return [...new Set(ids)];
+  }, [nodeById, selectedNode, wf.connections]);
 
   const getNodeAnnotationCandidates = useCallback((
     node: WorkflowNode,
@@ -2166,10 +2185,13 @@ ${contextInfo}
       const result = await estimateWorkflowSkills(scope, workflowSkills, {
         projectId, workflowId: wf.id, requestKey: crypto.randomUUID(),
       }, controller.signal);
-      if (controller.signal.aborted || skillWorkflowRef.current !== wf) return;
-      setSkillQuote({ ...result, workflow: wf, projectId, expiresAt: Date.now() + 60000 });
+      if (controller.signal.aborted || !isWorkflowExecutionScopeCurrent(scope,
+        skillWorkflowRef.current.nodes, skillWorkflowRef.current.connections)) return;
+      setSkillQuote({ ...result, projectId, expiresAt: Date.now() + 60000 });
     } catch (error) {
-      if (skillWorkflowRef.current !== wf || (controller.signal.aborted && controller.signal.reason?.name === 'AbortError')) return;
+      if (!isWorkflowExecutionScopeCurrent(payload,
+        skillWorkflowRef.current.nodes, skillWorkflowRef.current.connections)
+        || (controller.signal.aborted && controller.signal.reason?.name === 'AbortError')) return;
       setExecLogs([{ time: Date.now(), nodeId: 'workflow', label: '费用预估', status: 'error', message: error instanceof Error ? error.message : '费用预估失败' }]);
       setShowExecLog(true);
     } finally {
@@ -2184,7 +2206,9 @@ ${contextInfo}
 
   const confirmSkillExecution = useCallback(async () => {
     if (!skillQuote || skillExecutionLock.current) return;
-    if (skillQuote.workflow !== skillWorkflowRef.current || skillQuote.projectId !== projectId || Date.now() > skillQuote.expiresAt) {
+    if (!isWorkflowExecutionScopeCurrent(skillQuote.scope,
+      skillWorkflowRef.current.nodes, skillWorkflowRef.current.connections)
+      || skillQuote.projectId !== projectId || Date.now() > skillQuote.expiresAt) {
       setSkillQuote(null);
       setExecLogs([{ time: Date.now(), nodeId: 'workflow', label: '费用预估', status: 'error', message: '预估已过期或配置已变化，请重新执行以获取预估' }]);
       setShowExecLog(true);
@@ -3734,6 +3758,7 @@ ${contextInfo}
               workflowSkills={workflowSkills}
               workflowSkillsLoading={workflowSkillsLoading}
               workflowSkillsError={workflowSkillsError}
+              boundSourceVersionIds={selectedNodeBoundSourceVersionIds}
               onUpdate={handleNodeUpdate}
               onDelete={handleDeleteNode}
               onImageUpload={handleImageUpload}
@@ -4170,6 +4195,7 @@ interface PropertyPanelProps {
   workflowSkills: SkillDefinition[];
   workflowSkillsLoading: boolean;
   workflowSkillsError: string | null;
+  boundSourceVersionIds: readonly string[];
   onUpdate: (nodeId: string, updates: Partial<WorkflowNode>) => void;
   onDelete: (nodeId: string) => void;
   onImageUpload: (nodeId: string, file: File) => void;
@@ -4178,7 +4204,7 @@ interface PropertyPanelProps {
   onCanvasImageSelect: (nodeId: string, image: CanvasImageRef) => Promise<void>;
 }
 
-function PropertyPanel({ node, models, modelCatalogIndex, modelsLoading, workflowSkills, workflowSkillsLoading, workflowSkillsError, onUpdate, onDelete, onImageUpload, canvasImages, onCanvasImageSelect }: PropertyPanelProps) {
+function PropertyPanel({ node, models, modelCatalogIndex, modelsLoading, workflowSkills, workflowSkillsLoading, workflowSkillsError, boundSourceVersionIds, onUpdate, onDelete, onImageUpload, canvasImages, onCanvasImageSelect }: PropertyPanelProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [localTextValues, setLocalTextValues] = useState<Record<string, string>>({});
   const [focusedField, setFocusedField] = useState<string | null>(null);
@@ -4218,6 +4244,12 @@ function PropertyPanel({ node, models, modelCatalogIndex, modelsLoading, workflo
     && !Array.isArray(node.config.inputValues)
     ? node.config.inputValues as Record<string, unknown>
     : {};
+  const displayedSkillInputs = selectedSkill
+    ? selectedSkill.inputs.reduce<Record<string, unknown>>((values, field) => {
+        if (field.bindToSourceVersions) values[field.key] = [...boundSourceVersionIds];
+        return values;
+      }, { ...configuredSkillInputs })
+    : configuredSkillInputs;
   const configuredSkillBindings = node.config.modelBindings && typeof node.config.modelBindings === 'object'
     && !Array.isArray(node.config.modelBindings)
     ? node.config.modelBindings as Record<string, { providerId?: string; modelId?: string }>
@@ -4666,7 +4698,7 @@ function PropertyPanel({ node, models, modelCatalogIndex, modelsLoading, workflo
             <>
               <SkillInputFields
                 fields={selectedSkill.inputs}
-                values={configuredSkillInputs}
+                values={displayedSkillInputs}
                 onChange={(key, value) => onUpdate(node.id, { config: {
                   inputValues: { ...configuredSkillInputs, [key]: value },
                 } })}

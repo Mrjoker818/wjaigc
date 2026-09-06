@@ -584,7 +584,13 @@ export async function POST(request: NextRequest) {
         const retryAttempt = (exec.retryAttempts[nodeId] || 0) + 1;
         exec.retryAttempts[nodeId] = retryAttempt;
         if (retryNode.type === 'input-image') {
-          const output = await resolveWorkflowInputImageForActor(auth.userId, retryNode);
+          const output = await resolveWorkflowInputImageForActor(auth.userId, retryNode, {
+            projectId: exec.projectId || String(projectId || executionId),
+            workspaceId: `workflow:${exec.workflowId || String(workflowId || projectId || executionId)}`,
+            entityId: retryNode.id,
+            requireManagedAsset: Array.isArray(body.nodes)
+              && body.nodes.some((node: WorkflowNode) => node.type === 'ai-skill'),
+          });
           exec.results[nodeId] = { nodeId, status: 'success', output, durationMs: 0 };
           await persistWorkflowExecution(executionId, exec);
           return NextResponse.json({ success: true, nodeId, output });
@@ -969,7 +975,12 @@ async function executeWorkflow(
         }
       }
       if (node.type === 'input-image') {
-        const output = await resolveWorkflowInputImageForActor(execState.userId!, node);
+        const output = await resolveWorkflowInputImageForActor(execState.userId!, node, {
+          projectId: execState.projectId || executionId,
+          workspaceId: `workflow:${execState.workflowId || execState.projectId || executionId}`,
+          entityId: node.id,
+          requireManagedAsset: nodes.some(candidate => candidate.type === 'ai-skill'),
+        });
         const result: ExecutionResult = {
           nodeId: node.id,
           status: 'success',
