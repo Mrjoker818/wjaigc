@@ -231,6 +231,59 @@ describe('Stage 4 Agent event migration', () => {
 });
 
 describe('Stage 4 Agent event storage on real PostgreSQL', () => {
+  postgresIt('reclaims an accepted child immediately after pause and resume without resubmitting', async () => {
+    await withIsolatedPostgres('task12-accepted-child-resume', async ({ databaseUrl, query }) => {
+      expect(runMigrations(databaseUrl).status).toBe(0);
+      const ownerId = randomUUID();
+      const projectId = randomUUID();
+      const runId = randomUUID();
+      await query('INSERT INTO wujie_projects(id, owner_id, name, status) VALUES ($1, $2, $3, $4)',
+        [projectId, ownerId, 'Accepted child resume', 'active']);
+      await createScopedRun({ ownerId, projectId, runId });
+      await appendAgentEvent({ actorUserId: ownerId, projectId, runId,
+        eventId: 'resume-created', workspace: 'canvas', type: 'run.created', payload: { workspace: 'canvas' } });
+      await query(`INSERT INTO wujie_agent_execution_leases(
+        task_id, owner_id, project_id, tool_id, lease_owner, lease_expires_at,
+        attempt_count, completed_at, updated_at
+      ) VALUES ($1,$2,$3,'generate-2','parent-old',$4,1,0,$5)`,
+      [runId, ownerId, projectId, Date.now() + 600_000, Date.now()]);
+      const storage = await import('@/lib/agent-runtime/event-storage');
+      const { createAgentDownstreamOperationIdentity } = await import('@/lib/agent-runtime/downstream-operations');
+      const oldIdentity = createAgentDownstreamOperationIdentity({
+        actorUserId: ownerId, projectId, runId, toolId: 'generate_image', stepId: 'generate-2',
+        requestDigest: 'a'.repeat(64), leaseOwner: 'child-old',
+        executionFence: { runId, leaseOwner: 'parent-old', generation: 0 },
+      });
+      expect((await storage.prepareAgentDownstreamOperation(oldIdentity)).claimed).toBe(true);
+      await storage.markAgentDownstreamOperationSubmitted(oldIdentity);
+      await storage.markAgentDownstreamOperationAccepted({ ...oldIdentity, providerTaskId: 'existing-child' });
+      await transitionAgentRunControl({ actorUserId: ownerId, projectId, runId,
+        eventId: 'resume-paused', workspace: 'canvas', type: 'run.paused',
+        payload: { nextStepId: 'generate-2' }, expectedRevision: 1 });
+      expect(await storage.releaseAgentDownstreamOperation(oldIdentity)).toBe(false);
+      await transitionAgentRunControl({ actorUserId: ownerId, projectId, runId,
+        eventId: 'resume-resumed', workspace: 'canvas', type: 'run.resumed',
+        payload: { nextStepId: 'generate-2', generation: 1 }, expectedRevision: 2,
+        leaseOwner: 'parent-new' });
+      const newIdentity = createAgentDownstreamOperationIdentity({
+        ...oldIdentity, leaseOwner: 'child-new',
+        executionFence: { runId, leaseOwner: 'parent-new', generation: 1 },
+      });
+      expect(newIdentity.operationKey).toBe(oldIdentity.operationKey);
+      const recovered = await storage.prepareAgentDownstreamOperation(newIdentity);
+      expect(recovered).toMatchObject({ claimed: true, status: 'accepted', providerTaskId: 'existing-child', attempts: 2 });
+      await expect(storage.completeAgentDownstreamOperation({ ...oldIdentity, response: { stale: true } })).rejects.toThrow();
+      await transitionAgentRunControl({ actorUserId: ownerId, projectId, runId,
+        eventId: 'resume-resumed', workspace: 'canvas', type: 'run.resumed',
+        payload: { nextStepId: 'generate-2', generation: 1 }, expectedRevision: 2,
+        leaseOwner: 'must-not-replace-parent' });
+      const competing = await storage.prepareAgentDownstreamOperation({ ...newIdentity, leaseOwner: 'competing-child' });
+      expect(competing).toMatchObject({ claimed: false, attempts: 2, providerTaskId: 'existing-child' });
+      const rows = await query('SELECT provider_task_id FROM wujie_agent_downstream_operations WHERE task_id=$1', [runId]);
+      expect(rows.rows).toEqual([{ provider_task_id: 'existing-child' }]);
+    });
+  });
+
   postgresIt('persists pause before releasing the old lease and resumes with a new lease', async () => {
     await withIsolatedPostgres('stage-4-agent-control-transition', async ({ databaseUrl, query }) => {
       expect(runMigrations(databaseUrl).status).toBe(0);

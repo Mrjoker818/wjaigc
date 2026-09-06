@@ -1,5 +1,9 @@
 # 无界AI — 回归测试报告 (REGRESSION REPORT)
 
+## 2026-09-06 Task12 暂停恢复子任务租约修复
+
+真实PostgreSQL先复现accepted子任务在暂停恢复后无法立即接管，再最小修复成功恢复事务清除旧子租约；保留原provider_task_id与账务。全仓5321通过、0失败、12因旧数据库变量跳过；补齐TEST_POSTGRES_URL后四个文件12/12通过，合计覆盖5333项。新增回归确认旧执行器写回拒绝、重复恢复不抢占新租约。类型检查、构建版Lint退出0；生产构建退出0、119/119页面、BuildID `qODy_KTeI8k1tbnsf48An`。机器证据及哈希见同日Task12专项记录。云端同一原任务恢复与交付仍未验证。
+
 ## 2026-09-06 Task12 历史 Canvas ID 兼容增量
 
 最终补充：生产构建退出0、119/119页面、BuildID `24_t3PODbMPtk0D9ZY3Y7`。全量机器报告SHA256 `8A3BE42CB64C728D9DDEE537B44A74BEAF934FA8D2DF1B88916A9769C0D4FA11`。本地门禁通过，云端仍待新提交同步后同图验收。

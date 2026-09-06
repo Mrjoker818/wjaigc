@@ -788,6 +788,14 @@ export async function transitionAgentRunControl(
         [input.runId, input.actorUserId, input.projectId, nextStepId,
           requestedLeaseOwner, now + leaseDurationMs, now, Number(generation)],
       );
+      // The new parent fence invalidates old workers; resume the accepted task, not its submission.
+      await client.query(
+        `UPDATE wujie_agent_downstream_operations
+         SET lease_owner = '', lease_expires_at = 0, updated_at = $4
+         WHERE task_id = $1 AND owner_id = $2 AND project_id = $3
+           AND status = 'accepted' AND provider_task_id IS NOT NULL`,
+        [input.runId, input.actorUserId, input.projectId, now],
+      );
     }
 
     const nextEvents = [...events, appended.event];
