@@ -135,6 +135,43 @@ describe('scoped Skill runtime inventory', () => {
     )).toEqual([]);
   });
 
+  it('rejects unrelated calls that merely receive the target Skill array', () => {
+    const source = `
+      const canvasSurfaces = ['canvas'] as const;
+      const TARGET_SKILLS = [{ id: 'not-normalized' }];
+      function inspect(skills) {
+        void skills;
+        return { allowedSurfaces: canvasSurfaces };
+      }
+      const inspected = inspect(TARGET_SKILLS);
+    `;
+
+    expect(extractSkillIdsForSurface(
+      source,
+      'TARGET_SKILLS',
+      'canvasSurfaces',
+      'canvas',
+    )).toEqual([]);
+  });
+
+  it('rejects map callbacks that replace rather than normalize each target Skill', () => {
+    const source = `
+      const canvasSurfaces = ['canvas'] as const;
+      const TARGET_SKILLS = [{ id: 'replaced-skill' }];
+      const replacements = TARGET_SKILLS.map(() => ({
+        id: 'unrelated-output',
+        allowedSurfaces: canvasSurfaces,
+      }));
+    `;
+
+    expect(extractSkillIdsForSurface(
+      source,
+      'TARGET_SKILLS',
+      'canvasSurfaces',
+      'canvas',
+    )).toEqual([]);
+  });
+
   it('extracts ids from the real legacy and marketing Skill definitions', async () => {
     const [legacySource, marketingSource] = await Promise.all([
       readFile(resolve(process.cwd(), 'src/lib/skill-runtime/canvas-presets.ts'), 'utf8'),

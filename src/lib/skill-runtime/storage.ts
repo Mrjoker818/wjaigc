@@ -203,7 +203,7 @@ function expectedSourceSurfaces(sourceSkillId: string): readonly SkillSurface[] 
 
 function isStoredSkill(value: unknown): value is SkillDefinition {
   if (!isRecord(value) || !hasOnlyKeys(value, [
-    'id', 'version', 'name', 'category', 'description', 'systemPrompt',
+    'executionContextVersion', 'id', 'version', 'name', 'category', 'description', 'systemPrompt',
     'allowedSurfaces', 'inputs', 'steps', 'enabled', 'builtIn', 'ownerId',
     'sourceSkillId', 'sourceAllowedSurfaces', 'createdAt', 'updatedAt', 'usageCount',
   ])) return false;
@@ -221,6 +221,7 @@ function isStoredSkill(value: unknown): value is SkillDefinition {
     || !allowedSurfaces.every(surface => sourceAllowedSurfaces.includes(surface))
   ) return false;
   return isBoundedString(value.id, 30, GENERATED_SKILL_ID)
+    && (!('executionContextVersion' in value) || value.executionContextVersion === 1)
     && Number.isSafeInteger(value.version)
     && (value.version as number) >= 1
     && isBoundedString(value.name, 120)
@@ -529,6 +530,9 @@ export function createSkillStore(
         const sourceSkillId = source.sourceSkillId ?? source.id;
         const sourceAllowedSurfaces = source.sourceAllowedSurfaces ?? source.allowedSurfaces;
         const copy: SkillDefinition = {
+          ...(source.executionContextVersion === undefined
+            ? {}
+            : { executionContextVersion: source.executionContextVersion }),
           id,
           version: 1,
           name: source.name,

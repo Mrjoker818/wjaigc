@@ -65,6 +65,7 @@ describe('versioned user skill storage', () => {
 
     expect(copy.inputs).toEqual(source!.inputs);
     expect(copy.steps).toEqual(source!.steps);
+    expect(copy.executionContextVersion).toBe(1);
     expect(copy.inputs.find(field => field.key === 'channels')).toMatchObject({
       kind: 'multi-select',
       maximumItems: 6,
@@ -75,8 +76,11 @@ describe('versioned user skill storage', () => {
       bindToSourceVersions: true,
     });
     expect((adapter.inspect('user-1', SKILL_CATALOG_KEY) as {
-      skills: Array<{ inputs: unknown[] }>;
-    }).skills[0]?.inputs).toEqual(source!.inputs);
+      skills: Array<{ executionContextVersion?: number; inputs: unknown[] }>;
+    }).skills[0]).toMatchObject({
+      executionContextVersion: 1,
+      inputs: source!.inputs,
+    });
   });
 
   it('keeps the copy id stable and increments its version on an allowed update', async () => {

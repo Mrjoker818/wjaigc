@@ -136,6 +136,21 @@ function returnedExpressions(functionLike) {
   ));
 }
 
+function callbackNormalizesSkill(callback, surfacesVariableName) {
+  const parameter = callback.parameters[0];
+  if (!parameter || !ts.isIdentifier(parameter.name)) return false;
+  return returnedExpressions(callback).some(returned => (
+    returned
+    && ts.isObjectLiteralExpression(returned)
+    && objectUsesSurfaces(returned, surfacesVariableName)
+    && returned.properties.some(property => {
+      if (!ts.isSpreadAssignment(property)) return false;
+      const spread = unwrapExpression(property.expression);
+      return spread && ts.isIdentifier(spread) && spread.text === parameter.name.text;
+    })
+  ));
+}
+
 function constructionUsesSurfaces(expression, surfacesVariableName) {
   const value = unwrapExpression(expression);
   if (!value) return false;
@@ -153,15 +168,51 @@ function constructionUsesSurfaces(expression, surfacesVariableName) {
   if (!callback || (!ts.isArrowFunction(callback) && !ts.isFunctionExpression(callback))) {
     return false;
   }
-  return returnedExpressions(callback).some(returned => (
-    returned && ts.isObjectLiteralExpression(returned)
-    && objectUsesSurfaces(returned, surfacesVariableName)
-  ));
+  return callbackNormalizesSkill(callback, surfacesVariableName);
 }
 
 function functionUsesSurfaces(functionLike, surfacesVariableName) {
   return returnedExpressions(functionLike).some(expression => (
     constructionUsesSurfaces(expression, surfacesVariableName)
+  ));
+}
+
+function mapNormalizesSource(expression, sourceName, surfacesVariableName) {
+  const value = unwrapExpression(expression);
+  if (
+    !value
+    || !ts.isCallExpression(value)
+    || !ts.isPropertyAccessExpression(value.expression)
+    || value.expression.name.text !== 'map'
+  ) {
+    return false;
+  }
+  const receiver = unwrapExpression(value.expression.expression);
+  if (!receiver || !ts.isIdentifier(receiver) || receiver.text !== sourceName) return false;
+  const callback = unwrapExpression(value.arguments[0]);
+  if (!callback || (!ts.isArrowFunction(callback) && !ts.isFunctionExpression(callback))) {
+    return false;
+  }
+  return callbackNormalizesSkill(callback, surfacesVariableName);
+}
+
+function returnedArrayNormalizesSource(expression, sourceName, surfacesVariableName) {
+  const value = unwrapExpression(expression);
+  if (!value) return false;
+  if (mapNormalizesSource(value, sourceName, surfacesVariableName)) return true;
+  return ts.isArrayLiteralExpression(value)
+    && value.elements.length > 0
+    && value.elements.every(element => (
+      ts.isSpreadElement(element)
+      && returnedArrayNormalizesSource(element.expression, sourceName, surfacesVariableName)
+    ));
+}
+
+function functionNormalizesArgument(functionLike, argumentIndex, surfacesVariableName) {
+  const parameter = functionLike.parameters[argumentIndex];
+  if (!parameter || !ts.isIdentifier(parameter.name)) return false;
+  return returnedExpressions(functionLike).some(expression => (
+    returnedArrayNormalizesSource(expression, parameter.name.text, surfacesVariableName)
   ));
 }
 
@@ -198,13 +249,17 @@ function arrayConstructionUsesSurfaces(
 
       if (
         ts.isIdentifier(initializer.expression)
-        && initializer.arguments.some(argument => {
+        && initializer.arguments.some((argument, argumentIndex) => {
           const value = unwrapExpression(argument);
-          return value && ts.isIdentifier(value) && value.text === arrayName;
+          if (!value || !ts.isIdentifier(value) || value.text !== arrayName) return false;
+          const normalizer = functions.get(initializer.expression.text);
+          return Boolean(
+            normalizer
+            && functionNormalizesArgument(normalizer, argumentIndex, surfacesVariableName),
+          );
         })
       ) {
-        const normalizer = functions.get(initializer.expression.text);
-        if (normalizer && functionUsesSurfaces(normalizer, surfacesVariableName)) return true;
+        return true;
       }
     }
   }
