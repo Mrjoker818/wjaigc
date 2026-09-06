@@ -49,7 +49,7 @@ function imageStep(
   return {
     id, label, toolId: 'img2img', execution: 'parallel',
     parallelGroup: `${skillId}:outputs`, promptTemplate,
-    modelRole: 'image', qualityGateIds: ['output-present'],
+    modelRole: 'image', qualityGateIds: ['output-present', 'image-dimensions-known'],
   };
 }
 
@@ -134,6 +134,7 @@ export const LOVART_CONTENT_COMMERCE_SKILLS: readonly SkillDefinition[] = [
         fanOut: {
           inputKey: 'rows', itemAlias: 'sku', keyField: 'sku', maximumItems: 20, concurrency: 3,
         },
+        qualityGateIds: ['output-present', 'image-dimensions-known', 'aspect-ratio-match'],
       },
     ],
   }),

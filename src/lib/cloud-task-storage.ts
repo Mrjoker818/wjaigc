@@ -288,6 +288,7 @@ export interface SettleFailedCloudTaskInput {
   status: CloudTaskFailureStatus;
   error: TaskErrorInput;
   result?: Record<string, unknown>;
+  refundCreditCost?: number;
   expectedRevision?: number;
   terminalIdentity?: TaskTerminalIdentity;
   leaseOwner?: string;
@@ -734,7 +735,19 @@ export async function settleFailedCloudTask(
     }
 
     const creditCost = Number(row.credit_cost || 0);
-    const shouldRefund = row.credit_status === 'pending' && creditCost > 0;
+    if (
+      input.refundCreditCost !== undefined
+      && (!Number.isSafeInteger(input.refundCreditCost) || input.refundCreditCost < 0)
+    ) {
+      throw new Error('refundCreditCost must be a non-negative safe integer');
+    }
+    const requestedRefundCreditCost = input.refundCreditCost === undefined
+      ? creditCost
+      : Math.min(input.refundCreditCost, creditCost);
+    const shouldRefund = row.credit_status === 'pending' && requestedRefundCreditCost > 0;
+    const settlesPartialCharge = row.credit_status === 'pending'
+      && input.refundCreditCost !== undefined
+      && requestedRefundCreditCost < creditCost;
     const refundedTransactionId = shouldRefund
       ? createTaskBillingTransactionId('refund', input.taskId)
       : '';
@@ -754,7 +767,7 @@ export async function settleFailedCloudTask(
              updated_at = $2
          WHERE user_id = $3
          RETURNING balance`,
-        [creditCost, Date.now(), row.user_id],
+        [requestedRefundCreditCost, Date.now(), row.user_id],
       );
       const balanceAfter = Number(refunded.rows[0]?.balance ?? 0);
       await client.query(
@@ -765,7 +778,7 @@ export async function settleFailedCloudTask(
         [
           refundedTransactionId,
           row.user_id,
-          creditCost,
+          requestedRefundCreditCost,
           balanceAfter,
           input.error.message,
           row.model || '',
@@ -782,6 +795,7 @@ export async function settleFailedCloudTask(
            error = $3,
            result = COALESCE(result, '{}'::jsonb) || $10::jsonb,
            credit_status = CASE
+             WHEN $11::boolean THEN 'charged'
              WHEN $4::boolean THEN 'refunded'
              WHEN credit_cost <= 0 THEN 'not-applicable'
              ELSE credit_status
@@ -808,6 +822,7 @@ export async function settleFailedCloudTask(
          input.terminalIdentity?.requestDigest || '',
          input.terminalIdentity?.eventType || '',
          JSON.stringify({ ...(input.result || {}), taskError: input.error }),
+         settlesPartialCharge,
        ],
     );
     await client.query('COMMIT');

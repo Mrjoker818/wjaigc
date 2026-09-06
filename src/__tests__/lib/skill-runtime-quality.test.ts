@@ -44,6 +44,40 @@ describe('runSkillQualityGates', () => {
     )).toEqual([{ id: 'expected-count', passed: false }]);
   });
 
+  it('要求图像包含有效尺寸元数据', () => {
+    expect(runSkillQualityGates(
+      ['image-dimensions-known'],
+      result({ assetVersionIds: ['ver-1'], media: [{ width: 1200, height: 1200 }] }),
+      {},
+    )).toEqual([{ id: 'image-dimensions-known', passed: true }]);
+
+    expect(runSkillQualityGates(
+      ['image-dimensions-known'],
+      result({ assetVersionIds: ['ver-1'], media: [{}] }),
+      {},
+    )).toEqual([{ id: 'image-dimensions-known', passed: false }]);
+  });
+
+  it('在 1% 容差内检查目标画幅比例', () => {
+    expect(runSkillQualityGates(
+      ['aspect-ratio-match'],
+      result({ assetVersionIds: ['ver-1'], media: [{ width: 1000, height: 1005 }] }),
+      { expectedAspectRatio: '1:1' },
+    )).toEqual([{ id: 'aspect-ratio-match', passed: true }]);
+
+    expect(runSkillQualityGates(
+      ['aspect-ratio-match'],
+      result({ assetVersionIds: ['ver-1'], media: [{ width: 1000, height: 1020 }] }),
+      { expectedAspectRatio: '1:1' },
+    )).toEqual([{ id: 'aspect-ratio-match', passed: false }]);
+
+    expect(runSkillQualityGates(
+      ['aspect-ratio-match'],
+      result({ assetVersionIds: ['ver-1'], media: [{ width: 1600, height: 900 }] }),
+      { expectedAspectRatio: 'invalid' },
+    )).toEqual([{ id: 'aspect-ratio-match', passed: false }]);
+  });
+
   it('缺失质量条件时明确失败', () => {
     expect(runSkillQualityGates(
       ['output-present', 'transparent-alpha', 'valid-html', 'expected-count'],

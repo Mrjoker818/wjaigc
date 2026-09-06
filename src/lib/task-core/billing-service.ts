@@ -43,6 +43,7 @@ export interface SettleFailedTaskInput {
   status: CloudTaskFailureStatus;
   error: TaskErrorInput;
   result?: Record<string, unknown>;
+  refundCreditCost?: number;
   expectedRevision?: number;
   terminalIdentity?: TaskTerminalIdentity;
   leaseOwner?: string;

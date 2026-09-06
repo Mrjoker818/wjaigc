@@ -603,12 +603,17 @@ export function createAgentRuntimeService(
       }
     } else if (requestedTerminalStatus) {
       const error = terminalError(validated.type, validated.payload);
+      const refundCreditCost = unfinishedSkillRefundCreditCost(
+        beforeEvents,
+        beforeProjection.ignoredEventIds,
+      );
       const settlement = await dependencies.settleFailedTask({
         taskId: validated.runId,
         status: requestedTerminalStatus,
         error,
         expectedRevision: run.task.revision ?? 0,
         terminalIdentity,
+        ...(refundCreditCost !== undefined ? { refundCreditCost } : {}),
         ...(validated.type === 'run.cancelled' ? { allowPausedAgentSettlement: true } : {}),
       });
       if (!settlement.transitioned) {
@@ -804,6 +809,9 @@ export function createAgentRuntimeService(
         }
       }
       let createdEvent: AgentEvent;
+      const skillStepCosts = new Map(
+        (skillEstimate?.steps || []).map(step => [step.stepId, step.cost]),
+      );
       const createdEventInput = {
         actorUserId: input.actor.id,
         projectId: request.projectId,
@@ -856,6 +864,7 @@ export function createAgentRuntimeService(
                   : {}),
                 modelRole: step.modelRole,
                 qualityGateIds: [...step.qualityGateIds],
+                ...(skillStepCosts.has(step.id) ? { cost: skillStepCosts.get(step.id) } : {}),
               })),
             },
           } : {}),
@@ -1095,6 +1104,42 @@ export function cancelAgentRun(input: {
   runId: string;
 }): Promise<AgentEventAppendResult> {
   return runtimeService.cancelRun(input);
+}
+
+function unfinishedSkillRefundCreditCost(
+  events: readonly AgentEvent[],
+  ignoredEventIds: readonly string[],
+): number | undefined {
+  const ignored = new Set(ignoredEventIds);
+  const created = events.find(event => event.type === 'run.created' && !ignored.has(event.eventId));
+  const snapshot = created?.payload.skillSnapshot;
+  if (!snapshot || typeof snapshot !== 'object' || Array.isArray(snapshot)) return undefined;
+  const steps = (snapshot as Record<string, unknown>).steps;
+  if (!Array.isArray(steps) || steps.length === 0) return undefined;
+
+  const costs = new Map<string, number>();
+  for (const value of steps) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+    const step = value as Record<string, unknown>;
+    if (
+      typeof step.id !== 'string'
+      || !step.id
+      || costs.has(step.id)
+      || !Number.isSafeInteger(step.cost)
+      || Number(step.cost) < 0
+    ) return undefined;
+    costs.set(step.id, Number(step.cost));
+  }
+
+  const completed = new Set(events.filter(event => (
+    event.type === 'tool.completed'
+    && !ignored.has(event.eventId)
+    && typeof event.payload.stepId === 'string'
+  )).map(event => event.payload.stepId as string));
+  const refund = [...costs].reduce((total, [stepId, cost]) => (
+    completed.has(stepId) ? total : total + cost
+  ), 0);
+  return Number.isSafeInteger(refund) ? refund : undefined;
 }
 
 export function pauseAgentRun(input: {

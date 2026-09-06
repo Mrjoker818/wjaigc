@@ -840,6 +840,14 @@ describe('Skill run history', () => {
       startedStepIds: [],
       scheduledStepIds: ['generate-3', 'generate-4', 'quality-3'],
     });
+
+    await expect(makeService(['plan']).retry({
+      actorUserId: 'user-1', runId: task.id, stepId: 'missing-step',
+    })).rejects.toMatchObject({ code: 'SKILL_STEP_NOT_FOUND', status: 404 });
+
+    await expect(makeService(['plan', 'generate-4']).retry({
+      actorUserId: 'user-1', runId: task.id, stepId: 'generate-4',
+    })).rejects.toMatchObject({ code: 'SKILL_STEP_ALREADY_COMPLETED', status: 409 });
   });
 
   it('reports only the first sequential step as started while scheduling all unfinished work', async () => {

@@ -363,5 +363,9 @@
   "src/__tests__/components/chat-panel-skill-runtime.test.tsx",
   "src/__tests__/components/chat-panel-skill-catalog-contract.test.ts",
   "src/__tests__/lib/skill-runtime-catalog.test.ts",
-  "src/components/skill-runtime/skill-event-projection.ts"
+  "src/components/skill-runtime/skill-event-projection.ts",
+  "src/components/skill-runtime/dataset-file-parser.ts",
+  "src/lib/skill-runtime/content-commerce-presets.ts",
+  "src/lib/skill-runtime/dataset-schema.ts",
+  "src/lib/skill-runtime/step-compiler.ts"
 ]

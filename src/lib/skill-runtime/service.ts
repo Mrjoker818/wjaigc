@@ -63,6 +63,26 @@ export class SkillRunNotFoundError extends Error {
   }
 }
 
+export class SkillStepNotFoundError extends Error {
+  readonly code = 'SKILL_STEP_NOT_FOUND';
+  readonly status = 404;
+
+  constructor() {
+    super('Skill step not found');
+    this.name = 'SkillStepNotFoundError';
+  }
+}
+
+export class SkillStepAlreadyCompletedError extends Error {
+  readonly code = 'SKILL_STEP_ALREADY_COMPLETED';
+  readonly status = 409;
+
+  constructor() {
+    super('Skill step is already completed');
+    this.name = 'SkillStepAlreadyCompletedError';
+  }
+}
+
 export interface SkillRunStepHistory {
   id: string;
   label: string;
@@ -495,7 +515,10 @@ export function createSkillRuntimeService(
       if (!invocation) throw new SkillRunNotFoundError();
       const executionSteps = executionStepsForRun(run.events, invocation);
       if (!executionSteps.some(step => step.id === input.stepId)) {
-        throw new SkillRunRequestError('stepId is invalid');
+        throw new SkillStepNotFoundError();
+      }
+      if (completedStepIds(run.events).has(input.stepId)) {
+        throw new SkillStepAlreadyCompletedError();
       }
       if (run.projection.status !== 'paused' || run.projection.resumeFromStepId !== input.stepId) {
         throw new SkillRunRequestError('Only the persisted paused step can be retried');
@@ -600,6 +623,11 @@ export async function executeSkillRun(input: {
       pauseReason: 'execution-error',
       error,
       executionFence,
+    }),
+    qualityContext: () => ({
+      ...(typeof invocation.inputValues.aspectRatio === 'string'
+        ? { expectedAspectRatio: invocation.inputValues.aspectRatio }
+        : {}),
     }),
   });
   return executor.execute({

@@ -500,6 +500,41 @@ describe('Agent runtime service', () => {
     expect(dependencies.abortTaskExecution).toHaveBeenCalledTimes(1);
   });
 
+  it('refunds only unfinished frozen Skill steps when a partial batch is cancelled', async () => {
+    const dependencies = serviceDependencies();
+    const created = event(1, 'run.created', {
+      skillSnapshot: {
+        steps: [
+          { id: 'sku-plan', cost: 2 },
+          { id: 'sku-a', cost: 7 },
+          { id: 'sku-b', cost: 7 },
+          { id: 'sku-c', cost: 7 },
+        ],
+      },
+    });
+    const completedPlan = event(2, 'tool.completed', { stepId: 'sku-plan' });
+    const completedA = event(3, 'tool.completed', { stepId: 'sku-a' });
+    const completedC = event(4, 'tool.completed', { stepId: 'sku-c' });
+    const paused = event(5, 'run.paused', {
+      nextStepId: 'sku-b', pauseReason: 'execution-error',
+    });
+    const cancelled = event(6, 'run.cancelled');
+    dependencies.appendEvent.mockResolvedValue(cancelled);
+    dependencies.listEvents
+      .mockResolvedValueOnce([created, completedPlan, completedA, completedC, paused])
+      .mockResolvedValueOnce([created, completedPlan, completedA, completedC, paused, cancelled]);
+    const service = agentRuntime.createAgentRuntimeService(dependencies);
+
+    await service.cancelRun({ actorUserId: user.id, runId: 'run-1' });
+
+    expect(dependencies.settleFailedTask).toHaveBeenCalledTimes(1);
+    expect(dependencies.settleFailedTask).toHaveBeenCalledWith(expect.objectContaining({
+      taskId: 'run-1',
+      status: 'cancelled',
+      refundCreditCost: 7,
+    }));
+  });
+
 
   it('does not expose a shadow-observed durable task as a cancellable Agent run', async () => {
     const dependencies = {
@@ -1217,7 +1252,7 @@ describe('Agent runtime service', () => {
 
     const snapshot = dependencies.appendEvent.mock.calls[0][0].payload.skillSnapshot as {
       inputs: Array<{ key: string; datasetSchema?: string }>;
-      steps: Array<{ id: string; promptTemplate: string; fanOut?: unknown }>;
+      steps: Array<{ id: string; promptTemplate: string; cost?: number; fanOut?: unknown }>;
     };
     expect(snapshot.inputs.find(field => field.key === 'rows')).toMatchObject({
       datasetSchema: 'sku-v1',
@@ -1231,6 +1266,7 @@ describe('Agent runtime service', () => {
     expect(snapshot.steps.slice(1).every(step => (
       step.fanOut === undefined && !step.promptTemplate.includes('{{sku.')
     ))).toBe(true);
+    expect(snapshot.steps.map(step => step.cost)).toEqual([7, 7, 7, 7]);
   });
 
   it.each([
@@ -1323,7 +1359,7 @@ describe('Agent runtime service', () => {
           steps: [{
             id: 'orchestrator', label: '智能编排', toolId: 'chat', execution: 'sequential',
             promptTemplate: requireSkillForSurface('ppt-master', 'simple-chat').systemPrompt,
-            modelRole: 'orchestrator', qualityGateIds: [],
+            modelRole: 'orchestrator', qualityGateIds: [], cost: 3,
           }],
         }),
       }),

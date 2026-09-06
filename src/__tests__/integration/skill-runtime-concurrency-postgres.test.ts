@@ -224,6 +224,63 @@ describe('Skill runtime PostgreSQL concurrency', () => {
     });
   }, 60_000);
 
+  postgresIt('partial batch cancellation refunds only unfinished step cost once', async () => {
+    await withIsolatedPostgres('skill_runtime_partial_refund', async ({ databaseUrl, query }) => {
+      const { createBillableTask, settleFailedTask } = await import('@/lib/task-core/billing-service');
+      const { completeCloudTask, ensureCloudTaskTables } = await import('@/lib/cloud-task-storage');
+      const { ensureCoreTables } = await import('@/lib/db-storage');
+      await Promise.all([ensureCoreTables(), ensureCloudTaskTables()]);
+      migrate(databaseUrl);
+      const now = Date.now();
+      const userId = `skill-partial-${randomUUID()}`;
+      await query(
+        `INSERT INTO wujie_credits(id, user_id, balance, total_recharged, total_used, created_at, updated_at)
+         VALUES ($1, $2, 100, 100, 0, $3, $3)`,
+        [`credits-${randomUUID()}`, userId, now],
+      );
+      const created = await createBillableTask({
+        userId, idempotencyKey: randomUUID(), requestDigest: 'd'.repeat(64), creditCost: 23,
+        task: {
+          id: `skill-run-${randomUUID()}`, projectId: 'project-1', type: 'agent-run',
+          status: 'processing', progress: 70, createdAt: now, updatedAt: now,
+        },
+      });
+
+      const first = await settleFailedTask({
+        taskId: created.task.id,
+        status: 'cancelled',
+        refundCreditCost: 7,
+        error: { code: 'AGENT_RUN_CANCELLED', message: 'cancelled', retryable: false },
+      });
+      const repeated = await settleFailedTask({
+        taskId: created.task.id,
+        status: 'cancelled',
+        refundCreditCost: 7,
+        error: { code: 'AGENT_RUN_CANCELLED', message: 'cancelled', retryable: false },
+      });
+
+      expect(first).toEqual({ transitioned: true, refunded: true });
+      expect(repeated).toEqual({ transitioned: false, refunded: false });
+      await expect(completeCloudTask(created.task.id, {
+        assetVersionIds: ['late-version'],
+      })).resolves.toBe(false);
+      const task = await query<{ status: string; credit_status: string }>(
+        'SELECT status, credit_status FROM cloud_tasks WHERE id = $1', [created.task.id],
+      );
+      const credits = await query<{ balance: number; total_used: number }>(
+        'SELECT balance, total_used FROM wujie_credits WHERE user_id = $1', [userId],
+      );
+      const refunds = await query<{ count: string; amount: number }>(
+        `SELECT COUNT(*)::text AS count, COALESCE(SUM(amount), 0)::integer AS amount
+         FROM wujie_credit_transactions WHERE task_id = $1 AND type = 'refund'`,
+        [created.task.id],
+      );
+      expect(task.rows[0]).toEqual({ status: 'cancelled', credit_status: 'charged' });
+      expect(credits.rows[0]).toEqual({ balance: 84, total_used: 16 });
+      expect(refunds.rows[0]).toEqual({ count: '1', amount: 7 });
+    });
+  }, 60_000);
+
   postgresIt('real Skill service coalesces 20 creates and rejects a different digest', async () => {
     await withIsolatedPostgres('skill_runtime_service_concurrency', async ({ databaseUrl, query }) => {
       const { ensureCoreTables } = await import('@/lib/db-storage');

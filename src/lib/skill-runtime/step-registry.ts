@@ -11,11 +11,29 @@ import { executeAdmittedToolCall, executeToolCall, type AdmittedToolExecution } 
 import { getApiProviders } from '@/lib/server-api-config';
 import type { User } from '@/lib/user-types';
 import { parseWorkspaceSourceTrace } from '@/lib/asset-core/source-trace';
+import { createPostgresAssetStorage } from '@/lib/asset-core/storage';
 import { buildSkillStepMessages, buildSkillStepPrompt } from './execution-context';
 import type { SkillRunRequest } from './run-request';
 import type { ExecuteSkillStepInput } from './executor';
 import type { SkillStepAdapter, SkillStepRecoveryFactory } from './service';
 import type { SkillStepResult } from './types';
+
+type ResolveSkillMediaMetadata = (input: {
+  actorUserId: string;
+  projectId: string;
+  assetVersionIds: readonly string[];
+}) => Promise<SkillStepResult['media']>;
+
+const resolveSkillMediaMetadata: ResolveSkillMediaMetadata = async input => {
+  const storage = createPostgresAssetStorage();
+  return storage.read(async transaction => Promise.all(input.assetVersionIds.map(async versionId => {
+    const version = await transaction.findVersion(input.actorUserId, input.projectId, versionId);
+    return {
+      ...(version?.file.width !== undefined ? { width: version.file.width } : {}),
+      ...(version?.file.height !== undefined ? { height: version.file.height } : {}),
+    };
+  })));
+};
 
 function projectionVersionIds(task: CloudTask): string[] {
   const projection = task.result?.assetProjection;
@@ -47,6 +65,8 @@ async function monitorGeneration(execution: AdmittedToolExecution, signal: Abort
 async function completedGenerationResult(
   taskId: string,
   actorUserId: string,
+  projectId: string,
+  metadataResolver?: ResolveSkillMediaMetadata,
 ): Promise<SkillStepResult> {
   const task = await getCloudTaskForUser(taskId, actorUserId);
   assertKnownSubmission(task);
@@ -61,7 +81,9 @@ async function completedGenerationResult(
   const assetVersionIds = projectionVersionIds(task);
   return {
     assetVersionIds,
-    media: assetVersionIds.map(() => ({})),
+    media: metadataResolver
+      ? await metadataResolver({ actorUserId, projectId, assetVersionIds })
+      : assetVersionIds.map(() => ({})),
   };
 }
 
@@ -120,7 +142,9 @@ async function executeOrchestratorStep(input: ExecuteSkillStepInput): Promise<Sk
 async function reconcileGeneration(
   taskId: string,
   actor: User,
+  projectId: string,
   signal: AbortSignal,
+  metadataResolver?: ResolveSkillMediaMetadata,
 ): Promise<SkillStepResult> {
   await monitorGeneration({
     kind: 'generation',
@@ -128,7 +152,7 @@ async function reconcileGeneration(
     userId: actor.id,
     userRole: actor.role || 'user',
   }, signal);
-  return completedGenerationResult(taskId, actor.id);
+  return completedGenerationResult(taskId, actor.id, projectId, metadataResolver);
 }
 
 function imageAdmissionError(message: string, code = 'SKILL_IMAGE_ADMISSION_FAILED'): Error {
@@ -141,6 +165,7 @@ async function executeGenerationStep(
   input: ExecuteSkillStepInput,
   toolId: 'generate_image' | 'img2img' = 'generate_image',
   canonicalImageUrls?: readonly string[],
+  metadataResolver?: ResolveSkillMediaMetadata,
 ): Promise<SkillStepResult> {
   if (!input.modelBinding) {
     throw imageAdmissionError('Skill image model binding is missing');
@@ -208,22 +233,42 @@ async function executeGenerationStep(
   if (!input.operation.recordLocalAccepted) throw new Error('Local Skill task confirmation is unavailable');
   await input.operation.recordLocalAccepted(taskId);
   await monitorGeneration(result.admittedExecution, input.signal);
-  return completedGenerationResult(taskId, input.actorUserId);
+  const requiresDimensions = input.step.qualityGateIds.some(id => (
+    id === 'image-dimensions-known' || id === 'aspect-ratio-match'
+  ));
+  return completedGenerationResult(
+    taskId,
+    input.actorUserId,
+    request.projectId,
+    requiresDimensions ? metadataResolver : undefined,
+  );
 }
 
 export function createProductionSkillStepRegistry(input: {
   actor: User;
   request: SkillRunRequest;
   mediaByVersionId?: Readonly<Record<string, string>>;
+  resolveMediaMetadata?: ResolveSkillMediaMetadata;
 }): {
   stepAdapters: Readonly<Record<string, SkillStepAdapter>>;
   stepRecoveries: Readonly<Record<string, SkillStepRecoveryFactory>>;
 } {
   const generate: SkillStepAdapter = step => step.step.modelRole === 'orchestrator'
     ? executeOrchestratorStep(step)
-    : executeGenerationStep(input.actor, input.request, step);
+    : executeGenerationStep(
+      input.actor, input.request, step, 'generate_image', undefined,
+      input.resolveMediaMetadata || resolveSkillMediaMetadata,
+    );
   const recoverGenerate: SkillStepRecoveryFactory = step => ({
-    reconcile: taskId => reconcileGeneration(taskId, input.actor, step.signal),
+    reconcile: taskId => reconcileGeneration(
+      taskId,
+      input.actor,
+      input.request.projectId,
+      step.signal,
+      step.step.qualityGateIds.some(id => (
+        id === 'image-dimensions-known' || id === 'aspect-ratio-match'
+      )) ? input.resolveMediaMetadata || resolveSkillMediaMetadata : undefined,
+    ),
   } satisfies AgentDownstreamRecovery<SkillStepResult>);
   const img2img: SkillStepAdapter = step => {
     if (input.request.sourceVersionIds.length < 1 || input.request.sourceVersionIds.length > 6) {
@@ -236,7 +281,14 @@ export function createProductionSkillStepRegistry(input: {
       }
       return url;
     });
-    return executeGenerationStep(input.actor, input.request, step, 'img2img', canonicalImageUrls);
+    return executeGenerationStep(
+      input.actor,
+      input.request,
+      step,
+      'img2img',
+      canonicalImageUrls,
+      input.resolveMediaMetadata || resolveSkillMediaMetadata,
+    );
   };
   return {
     stepAdapters: { chat: executeOrchestratorStep, generate_image: generate, img2img },

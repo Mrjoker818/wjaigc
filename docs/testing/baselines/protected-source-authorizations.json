@@ -213,6 +213,10 @@
     { "path": "src/app/api/workflow/execute/route.ts", "sourceCommit": "347b0b21" },
     { "path": "src/lib/skill-runtime/workflow-client.ts", "sourceCommit": "347b0b21" },
     { "path": "src/lib/workflow-execution-context.ts", "sourceCommit": "347b0b21" },
-    { "path": "src/lib/workflow-skill-execution.ts", "sourceCommit": "347b0b21" }
+    { "path": "src/lib/workflow-skill-execution.ts", "sourceCommit": "347b0b21" },
+    { "path": "src/components/skill-runtime/dataset-file-parser.ts", "sourceCommit": "21913c4a" },
+    { "path": "src/lib/skill-runtime/content-commerce-presets.ts", "sourceCommit": "f760c3f7" },
+    { "path": "src/lib/skill-runtime/dataset-schema.ts", "sourceCommit": "e6da017a" },
+    { "path": "src/lib/skill-runtime/step-compiler.ts", "sourceCommit": "f760c3f7" }
   ]
 }

@@ -433,7 +433,7 @@ Commit: `feat: compile dataset fanout skill steps`
 - Consumes: Task 5 的具体 `executionSteps`。
 - Produces: 每个扇出步骤独立 operation、事件、AssetVersion、attempt 和结算。
 
-- [ ] **Step 1: 写逐项执行 RED 测试**
+- [x] **Step 1: 写逐项执行 RED 测试**
 
 构造三行批次，让第 2 行第一次失败：
 
@@ -449,20 +449,20 @@ expect(uniqueAssetVersionIds).toHaveLength(3);
 
 再覆盖取消时已完成项不退款、未完成项退款一次、重复取消不新增退款、迟到成功被拒绝。
 
-- [ ] **Step 2: 运行并确认 RED**
+- [x] **Step 2: 运行并确认 RED**
 
 Run: `pnpm exec vitest run src/__tests__/lib/skill-content-commerce-execution.test.ts src/__tests__/lib/skill-runtime-executor.test.ts src/__tests__/lib/skill-runtime-step-registry.test.ts`
 Expected: 动态步骤恢复或逐项结算断言 FAIL。
 
-- [ ] **Step 3: 复用现有 operation 执行**
+- [x] **Step 3: 复用现有 operation 执行**
 
 不得为 SKU 新建状态机。让 executor 按冻结具体步骤运行；`step.id` 自然进入现有 `skillStepRequestDigest`、operation key、事件 ID 和 AssetVersion 来源追踪。并发度由编译后的平行组分片控制，每片最多 3 项，前一片全部终态后进入下一片。
 
-- [ ] **Step 4: 恢复和重试精确读取冻结步骤**
+- [x] **Step 4: 恢复和重试精确读取冻结步骤**
 
 `loadPersistedSkillContinuation` 只读取 Run 创建时的 `executionSteps`，不得按后来修改的 CSV 或最新 Skill 定义重新扇出。`retrySkillStep` 只接受冻结步骤 ID，成功步骤返回 409，未知或不同 Run 的 ID 返回 404/403。
 
-- [ ] **Step 5: 增加宽高与比例质量门禁**
+- [x] **Step 5: 增加宽高与比例质量门禁**
 
 ```ts
 'image-dimensions-known': result => result.media.every(media => (
@@ -473,12 +473,16 @@ Expected: 动态步骤恢复或逐项结算断言 FAIL。
 
 扩展 `SkillResultMedia` 和 `SkillQualityContext` 的明确字段；媒体元数据读取失败使该步骤质量失败，但不得改写已成功的供应商任务身份。
 
-- [ ] **Step 6: 运行执行回归并提交**
+- [x] **Step 6: 运行执行回归并提交**
 
 Run: Step 2 命令，加 `src/__tests__/lib/skill-runtime-quality.test.ts src/__tests__/lib/skill-runtime-continuation.test.ts`。
 Expected: 单项回图、恢复、重试、取消和质量门禁全部 PASS。
 
 Commit: `feat: execute batch skill outputs durably`
+
+实现说明：普通单项失败不再中止同批其他项；质量失败和父级取消仍会中止后续工作。重试只接受 Run 创建时冻结的具体步骤 ID，成功步骤返回 409，未知步骤返回 404。生成结果的宽高从权威 AssetVersion 读取，并执行尺寸存在与 1% 比例误差门禁。Run 快照冻结逐项成本，取消、失败和超时只退还未完成项费用，旧快照继续使用完整退款兼容路径。
+
+验证记录：Task 6 专项 `160` 项通过，完整 Vitest `5338` 项通过、`0` 失败；TypeScript 与 ESLint 均通过门禁退出码为 `0`；生产构建在 `NODE_OPTIONS=--max-old-space-size=16384` 下完成并生成 `119/119` 页面。真实 PostgreSQL 并发、部分退款和迟到终态测试共 `11` 项因本机未配置 `POSTGRES_TEST_DATABASE_URL` 明确跳过，保持为后续云端/隔离库未验证项，不冒充通过。
 
 ---
 

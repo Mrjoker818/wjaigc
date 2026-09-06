@@ -477,7 +477,9 @@ export function createSkillExecutor(dependencies: SkillExecutorDependencies) {
               groupAssets.set(step.id, result.assetVersionIds);
               groupOutputs.set(step.id, resultOutputs);
             } catch (error) {
-              controller.abort(error);
+              if (error instanceof SkillQualityFailedError || input.operationContext.signal?.aborted) {
+                controller.abort(error);
+              }
               throw error;
             }
           }));

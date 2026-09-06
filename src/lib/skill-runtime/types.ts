@@ -78,6 +78,8 @@ export interface SkillDefinition {
 
 export interface SkillResultMedia {
   hasTransparency?: boolean;
+  width?: number;
+  height?: number;
 }
 
 export interface DurableSkillOutput {
@@ -95,6 +97,7 @@ export interface SkillStepResult {
 
 export interface SkillQualityContext {
   expectedCount?: number;
+  expectedAspectRatio?: string;
 }
 
 export interface SkillQualityResult {

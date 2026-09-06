@@ -204,6 +204,42 @@ describe('production Skill img2img adapter', () => {
     expect(stepInput.operation.recordLocalAccepted).toHaveBeenCalledWith('task-1');
   });
 
+  it('reads authoritative AssetVersion dimensions for declared image quality gates', async () => {
+    const resolveMediaMetadata = vi.fn(async () => [{ width: 1600, height: 900 }]);
+    const registry = createProductionSkillStepRegistry({
+      actor,
+      request,
+      mediaByVersionId: {
+        'source-a': '/api/serve-upload/source-a.png',
+        'source-b': '/api/serve-upload/source-b.png',
+      },
+      resolveMediaMetadata,
+    });
+
+    const result = await registry.stepAdapters.img2img({
+      ...stepInput,
+      step: {
+        ...stepInput.step,
+        qualityGateIds: ['output-present', 'image-dimensions-known', 'aspect-ratio-match'],
+      },
+    });
+
+    expect(resolveMediaMetadata).toHaveBeenCalledWith({
+      actorUserId: actor.id,
+      projectId: request.projectId,
+      assetVersionIds: ['asset-a'],
+    });
+    expect(result.media).toEqual([{ width: 1600, height: 900 }]);
+    expect(runSkillQualityGates(
+      ['image-dimensions-known', 'aspect-ratio-match'],
+      result,
+      { expectedAspectRatio: '16:9' },
+    )).toEqual([
+      { id: 'image-dimensions-known', passed: true },
+      { id: 'aspect-ratio-match', passed: true },
+    ]);
+  });
+
   it.each([
     ['missing mapping', { 'source-a': '/api/serve-upload/source-a.png' }],
     ['blank mapping', { 'source-a': '/api/serve-upload/source-a.png', 'source-b': '   ' }],
