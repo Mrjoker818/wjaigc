@@ -12,6 +12,7 @@ import { getApiProviders } from '@/lib/server-api-config';
 import type { User } from '@/lib/user-types';
 import { parseWorkspaceSourceTrace } from '@/lib/asset-core/source-trace';
 import { createPostgresAssetStorage } from '@/lib/asset-core/storage';
+import { enrichCompletedImageResult } from '@/lib/asset-core/image-result-metadata';
 import { buildSkillStepMessages, buildSkillStepPrompt } from './execution-context';
 import type { SkillRunRequest } from './run-request';
 import type { ExecuteSkillStepInput } from './executor';
@@ -28,6 +29,20 @@ const resolveSkillMediaMetadata: ResolveSkillMediaMetadata = async input => {
   const storage = createPostgresAssetStorage();
   return storage.read(async transaction => Promise.all(input.assetVersionIds.map(async versionId => {
     const version = await transaction.findVersion(input.actorUserId, input.projectId, versionId);
+    if (version?.file.width !== undefined && version.file.height !== undefined) {
+      return { width: version.file.width, height: version.file.height };
+    }
+    if (version?.file.url) {
+      const enriched = await enrichCompletedImageResult({ imageUrls: [version.file.url] });
+      const inspected = Array.isArray(enriched.images) ? enriched.images[0] : undefined;
+      if (inspected && typeof inspected === 'object' && !Array.isArray(inspected)) {
+        const media = inspected as Record<string, unknown>;
+        return {
+          ...(typeof media.width === 'number' ? { width: media.width } : {}),
+          ...(typeof media.height === 'number' ? { height: media.height } : {}),
+        };
+      }
+    }
     return {
       ...(version?.file.width !== undefined ? { width: version.file.width } : {}),
       ...(version?.file.height !== undefined ? { height: version.file.height } : {}),

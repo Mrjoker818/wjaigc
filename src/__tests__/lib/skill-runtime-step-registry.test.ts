@@ -4,6 +4,7 @@ const mocks = vi.hoisted(() => ({
   executeToolCall: vi.fn(), executeAdmittedToolCall: vi.fn(),
   getCloudTaskForUser: vi.fn(), updateCloudTask: vi.fn(),
   fetchWithV1Retry: vi.fn(), getApiProviders: vi.fn(),
+  findVersion: vi.fn(), enrichCompletedImageResult: vi.fn(),
 }));
 
 vi.mock('server-only', () => ({}));
@@ -17,6 +18,16 @@ vi.mock('@/lib/cloud-task-storage', () => ({
   updateCloudTask: mocks.updateCloudTask,
 }));
 vi.mock('@/lib/server-api-config', () => ({ getApiProviders: mocks.getApiProviders }));
+vi.mock('@/lib/asset-core/storage', () => ({
+  createPostgresAssetStorage: () => ({
+    read: async (callback: (transaction: { findVersion: typeof mocks.findVersion }) => Promise<unknown>) => (
+      callback({ findVersion: mocks.findVersion })
+    ),
+  }),
+}));
+vi.mock('@/lib/asset-core/image-result-metadata', () => ({
+  enrichCompletedImageResult: mocks.enrichCompletedImageResult,
+}));
 
 import { createProductionSkillStepRegistry } from '@/lib/skill-runtime/step-registry';
 import { runSkillQualityGates } from '@/lib/skill-runtime/quality-gates';
@@ -72,6 +83,8 @@ describe('production Skill img2img adapter', () => {
     mocks.getApiProviders.mockResolvedValue([{
       id: 'frozen-provider', isEnabled: true, apiKey: 'test-key', baseUrl: 'https://chat.example.com',
     }]);
+    mocks.findVersion.mockResolvedValue(null);
+    mocks.enrichCompletedImageResult.mockImplementation(async result => result);
   });
 
   it('sends trusted rules separately from explicitly untrusted user and prior-model data', async () => {
@@ -238,6 +251,43 @@ describe('production Skill img2img adapter', () => {
       { id: 'image-dimensions-known', passed: true },
       { id: 'aspect-ratio-match', passed: true },
     ]);
+  });
+
+  it('safely inspects the authoritative AssetVersion image when stored dimensions are missing', async () => {
+    mocks.findVersion.mockResolvedValue({
+      file: { url: 'data:image/png;base64,valid-image-without-stored-dimensions' },
+    });
+    mocks.enrichCompletedImageResult.mockResolvedValue({
+      imageUrls: ['data:image/png;base64,valid-image-without-stored-dimensions'],
+      images: [{
+        url: 'data:image/png;base64,valid-image-without-stored-dimensions',
+        width: 1600,
+        height: 900,
+        mimeType: 'image/png',
+        byteSize: 1234,
+      }],
+    });
+    const registry = createProductionSkillStepRegistry({
+      actor,
+      request,
+      mediaByVersionId: {
+        'source-a': '/api/serve-upload/source-a.png',
+        'source-b': '/api/serve-upload/source-b.png',
+      },
+    });
+
+    const result = await registry.stepAdapters.img2img({
+      ...stepInput,
+      step: {
+        ...stepInput.step,
+        qualityGateIds: ['output-present', 'image-dimensions-known', 'aspect-ratio-match'],
+      },
+    });
+
+    expect(mocks.enrichCompletedImageResult).toHaveBeenCalledWith({
+      imageUrls: ['data:image/png;base64,valid-image-without-stored-dimensions'],
+    });
+    expect(result.media).toEqual([{ width: 1600, height: 900 }]);
   });
 
   it.each([
