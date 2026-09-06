@@ -2138,3 +2138,12 @@ The focused gate test passes `7/7`; the actual protected-baseline command passes
 - Edge 同一完成态 Skill 节点两次下载均真实落盘，文件为 `2,097,743` 字节、`1254x1254 image/png`，PNG 签名与 Sharp 解码通过。`TASK12-BUG-001` 关闭。
 - 本地全量 `5168 passed / 168 PostgreSQL-gated skipped / 0 failed`，退出码 0；跳过项不计为通过。
 - **发布结论仍为有条件通过。** Task12 剩余约 5%-10%：未过期租约内即时暂停/恢复、当前归属取消任务的唯一扣退证据，以及最终 Network/Trace 归档。全平台目标未完成。
+
+## 2026-09-06 Task12 最终发布判断
+
+- 当前云端已真实完成 Workflow Skill 成功样本、Canvas Skill 未过期窗口内暂停/立即恢复、当前用户项目取消与单次退款，以及节点预览下载。
+- 暂停恢复样本 `a8eaa0c0...` 仅有一个图像子任务和一个远端任务，`attemptCount=1`；父任务单扣 62，子任务计费为 `not-applicable`，最终资产为 `1254x1254 image/png`。
+- 取消样本 `cbf85a8f...` 的任务记录同时绑定唯一消费与唯一退款流水，净额为 0；40 秒后仍为取消且资产为空。
+- Edge 最终 Console `0 error / 0 warning`；CDP Network 四个审计请求均为 200，持久 Agent 事件序列作为控制流程 Trace。扩展控制会话无法事后生成 Playwright `trace.zip`，该证据形式限制已显式保留。
+- **Task12 结论：通过。** `stable@52f7c601` 未触碰，当前仅需提交测试证据与中文报告，不需要 Coze 重新构建业务代码。
+- **全平台发布结论仍为有条件通过。** Task12 完成不自动关闭十五阶段任务中其他开放项、Pear 延期验证、部署旧 Chunk 风险及其他业务模块未验证项。

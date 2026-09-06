@@ -2797,3 +2797,13 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - 最新文件 SHA-256 `A4F21DBC161EE9C8C4141CB84549A22A7B87A47D5901F049C4F58D0816EF8586`，PNG 签名 `89504E470D0A1A0A`；Sharp 成功解码为 `1254x1254`、3 通道 sRGB PNG。浏览器应用日志无新增 error，仅 Coze 宿主 SDK 一条无关 warning。
 - 本地全量新鲜回归：`646 passed / 31 PostgreSQL-gated skipped` 测试文件，`5168 passed / 168 skipped` 测试，退出码 0。跳过项明确源于缺少 `POSTGRES_TEST_DATABASE_URL`，不冒充云端账务验证。
 - **判定：TASK12-BUG-001 CLOUD PASS。** Task12 仍未关闭；剩余为未过期租约内即时暂停/恢复、同一用户项目取消任务的一次扣退关联，以及最终 Network/Trace 证据归档。
+
+## 2026-09-06 Task12 最终云端运行验收
+
+- Edge 在当前管理员与项目中真实完成 Workflow Skill：`c2f77b18-166b-4385-b728-fded5a619e9c` 两步完成、质量门禁通过、单扣 62，生成 `AssetVersion 0dd3a7e6-a809-431e-bfd9-1b34590145c1`。
+- Canvas Skill `a8eaa0c0-6fe2-4b6d-a260-908b65891226` 在成品步骤运行中手动暂停，约 10 秒后立即恢复；同一 Run 最终完成，规划步骤只执行一次。关联图像子任务仅一个：`async-1788679873911-0-xfl2ug`，远端任务仅一个：`task_01M1TT1WJK0M3XJC030M8TAVCC`，`attemptCount=1`，子任务不扣费；父任务仅一笔 62 积分消费。
+- 暂停恢复任务冻结 APImart `gemini-3.1-flash-lite-preview` 与 `gpt-image-2`，最终生成 `1254x1254 image/png`、`2,405,033` 字节及 `AssetVersion 1e00771a-8e63-4b05-a1d0-0583f22ce9dc`。
+- 当前归属取消样本 `cbf85a8f-72ff-40e7-a4fa-778fead81498` 进入 `cancelled`，成品步骤同步取消，资产版本为空；消费流水 `ctx_charge_85fb29b0123ea8161c94c3d48698d2ea` 为 `-62`，退款流水 `ctx_refund_9e40cd8d507eb9fd9da8cf96617fc3e7` 为 `+62`，净额 0。40 秒后复查仍为取消、无新资产、无迟到完成。
+- 最终 Console error/warning 为 `0/0`。CDP 重新采集四个 Skill/Agent/积分审计请求，均 HTTP 200；Agent 持久事件序列提供暂停、恢复、完成、取消的时间线。现有扩展控制 Edge 无法事后生成独立 Playwright `trace.zip`，不伪造该文件；限制已写入机器可读证据。
+- 证据：[task12-edge-cloud-final-20260906.json](evidence/task12-edge-cloud-final-20260906.json)。
+- **判定：TASK12 CLOUD PASS。** 统一 Skill Runtime 的 Task12 已按当前清单关闭；这不代表十五阶段全平台测试总目标完成，也不关闭其余供应商、支付或全平台未验证项。

@@ -2328,3 +2328,11 @@ BUG-018 已从未验证项移除。剩余顺序为 `002-B -> 002-D -> 002-E`；�
 - [ ] Coze 同步含延迟回收修复的新提交，重启唯一服务并强刷既有 Edge 预览页。
 - [ ] 捕获节点成品真实下载完成事件，定位落盘文件并核对字节数、SHA-256、PNG 签名与 Sharp 解码。
 - [ ] 下载闭环后继续未过期租约的暂停/立即恢复、历史取消账务归属及最终诊断证据归档。
+
+### 2026-09-06 Task12 关闭记录
+
+- [x] 未过期租约窗口内暂停并立即恢复：`a8eaa0c0...` 的暂停/恢复事件为 sequence 5/6，规划步骤未重跑，唯一子任务 `async-...xfl2ug`、唯一远端任务 `task_01M1TT...`、`attemptCount=1`，父任务只扣 62。
+- [x] 当前用户/项目取消与退款：`cbf85a8f...` 绑定唯一 `-62` 消费与 `+62` 退款，净额 0，40 秒后仍为取消且无 AssetVersion。
+- [x] 最终浏览器证据：Edge UI 截图已由 CUA 捕获；Console error/warning 为 0；四个审计请求 CDP Network 状态均为 200；持久 Agent 事件序列覆盖 pause/resume/completed/cancelled。
+- [x] 证据形式限制明确记录：扩展控制的既有 Edge 标签无法事后生成 Playwright `trace.zip`，未用伪造文件替代；采用 CDP 请求/响应序列与服务端持久事件序列作为本次运行 Trace。
+- Task12 当前状态：**CLOUD PASS / CLOSED**。此处只关闭 Unified Skill Runtime Task12；全平台其他未验证项继续保留。

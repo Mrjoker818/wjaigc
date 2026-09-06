@@ -1,0 +1,115 @@
+{
+  "title": "Task12 Unified Skill Runtime Edge cloud acceptance",
+  "testedAt": "2026-09-06T07:26:30Z/2026-09-06T07:34:27Z",
+  "environment": {
+    "previewUrl": "https://62afe49a-716e-4d9e-99cd-a0be49c4794c-5000.dev.coze.site/",
+    "projectId": "project_1787549625844_nfmso3ts9",
+    "userId": "admin_mr_joker",
+    "browser": "Microsoft Edge",
+    "githubMain": "715872b212d150f491bb0588471527edda7059ed",
+    "deployedSourceTree": "978337059083dd18e91d3916e14343ea08d21d50",
+    "stable": "52f7c601ed150769e15d06fb435c6e360e28c9e7"
+  },
+  "workflowSuccess": {
+    "runId": "c2f77b18-166b-4385-b728-fded5a619e9c",
+    "status": "completed",
+    "creditStatus": "charged",
+    "creditCost": 62,
+    "createdAt": 1788679590115,
+    "completedAt": 1788679624988,
+    "assetVersionId": "0dd3a7e6-a809-431e-bfd9-1b34590145c1",
+    "steps": ["conversation-1:completed", "conversation-2:completed"],
+    "qualityGate": "output-present:passed"
+  },
+  "pauseResume": {
+    "runId": "a8eaa0c0-6fe2-4b6d-a260-908b65891226",
+    "surface": "canvas",
+    "workspaceId": "canvas:project_1787549625844_nfmso3ts9",
+    "status": "completed",
+    "pause": {
+      "sequence": 5,
+      "timestamp": "2026-09-06T07:31:21.286Z",
+      "nextStepId": "conversation-2"
+    },
+    "resume": {
+      "sequence": 6,
+      "timestamp": "2026-09-06T07:31:31.202Z",
+      "generation": 1,
+      "nextStepId": "conversation-2"
+    },
+    "completedAt": "2026-09-06T07:32:02.131Z",
+    "planningStepStartedCount": 1,
+    "planningStepCompletedCount": 1,
+    "parentBilling": {
+      "status": "charged",
+      "cost": 62,
+      "chargedTransactionId": "ctx_charge_eb277881fc22899654c6b0011247b388",
+      "refundTransactionId": null
+    },
+    "modelBindings": {
+      "orchestrator": {
+        "providerId": "api_1778428130626_2qpg71v",
+        "modelId": "gemini-3.1-flash-lite-preview"
+      },
+      "image": {
+        "providerId": "api_1778430731224_533e09a",
+        "modelId": "gpt-image-2"
+      }
+    },
+    "childTask": {
+      "id": "async-1788679873911-0-xfl2ug",
+      "remoteTaskId": "task_01M1TT1WJK0M3XJC030M8TAVCC",
+      "status": "completed",
+      "attemptCount": 1,
+      "idempotencyKey": "agent-provider:c82fd6fc9a651a25fdf5acd14577d0323aab708d018b7aeda645d0107098f0ff:0",
+      "creditStatus": "not-applicable",
+      "creditCost": 0,
+      "width": 1254,
+      "height": 1254,
+      "byteSize": 2405033,
+      "mimeType": "image/png"
+    },
+    "assetVersionId": "1e00771a-8e63-4b05-a1d0-0583f22ce9dc"
+  },
+  "cancelRefund": {
+    "runId": "cbf85a8f-72ff-40e7-a4fa-778fead81498",
+    "status": "cancelled",
+    "cancelledAt": "2026-09-06T07:33:07.384Z",
+    "assetVersionIds": [],
+    "creditStatus": "refunded",
+    "creditCost": 62,
+    "charge": {
+      "id": "ctx_charge_85fb29b0123ea8161c94c3d48698d2ea",
+      "amount": -62,
+      "balanceAfter": 8712
+    },
+    "refund": {
+      "id": "ctx_refund_9e40cd8d507eb9fd9da8cf96617fc3e7",
+      "amount": 62,
+      "balanceAfter": 8774
+    },
+    "netCredits": 0,
+    "lateResultCheck": {
+      "waitSeconds": 40,
+      "status": "cancelled",
+      "assetVersionIds": [],
+      "terminalEventCount": 1,
+      "lateCompletionObserved": false
+    }
+  },
+  "browserEvidence": {
+    "consoleErrors": 0,
+    "consoleWarnings": 0,
+    "screenshots": "Captured inline by Codex CUA for workflow completion and canvas cancellation terminal state.",
+    "network": [
+      {"sequence": 301, "method": "GET", "path": "/api/skill-runs/a8eaa0c0-6fe2-4b6d-a260-908b65891226?observeOnly=true", "status": 200},
+      {"sequence": 302, "method": "GET", "path": "/api/agent-runs/a8eaa0c0-6fe2-4b6d-a260-908b65891226/events", "status": 200},
+      {"sequence": 303, "method": "GET", "path": "/api/skill-runs/cbf85a8f-72ff-40e7-a4fa-778fead81498?observeOnly=true", "status": 200},
+      {"sequence": 304, "method": "GET", "path": "/api/credits?transactions=true&limit=10", "status": 200}
+    ],
+    "traceType": "CDP request/response sequence plus persisted Agent event sequence",
+    "playwrightTraceZip": null,
+    "playwrightTraceLimitation": "The accepted runs were executed in an existing extension-controlled Edge tab; a standalone Playwright trace.zip cannot be attached retroactively."
+  },
+  "result": "TASK12_CLOUD_PASS"
+}

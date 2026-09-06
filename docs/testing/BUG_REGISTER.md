@@ -4053,3 +4053,10 @@ All listed Stage 4 defects are locally closed. S4-BUG-008 also passed its exact-
 | 修复 | `src/components/node-editor.tsx` 将 Blob URL 回收延迟 1 秒，保留既有直连、`/api/save-image` 降级、文件名及错误状态。 |
 | 回归测试 | `src/__tests__/components/node-editor-skill-node.test.tsx` 先稳定 RED（2 失败），再验证点击后不会同步回收且延迟回收；聚焦结果 `35/35` 通过。 |
 | 当前状态 | **已修复 / Coze Edge 云端关闭。** `5d0ff529` 已由 Coze 普通合并为 `8a97a390`，目标 tree `978337059083dd18e91d3916e14343ea08d21d50` 精确一致。Edge 两次点击均在实际下载目录 `D:\QQDownload` 生成 `2,097,743` 字节 PNG；最新文件 SHA-256 `A4F21DBC161EE9C8C4141CB84549A22A7B87A47D5901F049C4F58D0816EF8586`，签名 `89504E470D0A1A0A`，Sharp 解码为 `1254x1254 image/png`。 |
+
+### Task12 云端控制与账务回归关闭（2026-09-06）
+
+- 暂停/恢复：`a8eaa0c0-6fe2-4b6d-a260-908b65891226` 在成品步骤暂停后立即恢复并完成；唯一子任务、唯一远端任务、一次父级扣费、零重复规划步骤。
+- 取消/退款：`cbf85a8f-72ff-40e7-a4fa-778fead81498` 一次消费、一次退款、净额 0，终态不可回写且无迟到资产。
+- 本轮没有发现新的业务缺陷，也没有修改业务源码。永久测试仍由 Task12 本地 `224/224`、全仓 `5168 passed / 168 PostgreSQL-gated skipped` 和既有真库专项承担。
+- 机器可读证据：[task12-edge-cloud-final-20260906.json](evidence/task12-edge-cloud-final-20260906.json)。

@@ -1120,7 +1120,7 @@ git commit -m "test: gate scoped skill runtime"
 
 ### Task 12: 文档、Obsidian、推送与 Coze 真实验收
 
-> 2026-09-06 当前执行表覆盖下方历史版本断点：业务候选 main@93804a66269f7b8010183d45ef4c25048cb84f8e，tree bfc347ac26ffca9dc8c8fef258d0fbebbcc898da，已推送且工作树干净。新候选的Coze同步尚未发送。下方Step 3勾选只证明历史版本，不证明新候选运行；Step 4/5继续保持未完成。文档提交可后续变化，业务候选与部署目标必须分别记录。
+> 2026-09-06 最终状态：业务实现已在 Coze 以目标 tree `978337059083dd18e91d3916e14343ea08d21d50` 完成构建与单实例启动；节点下载、Workflow 成功任务、Canvas 未过期窗口暂停/立即恢复、当前归属取消/单退及新 AssetVersion 均已真实验收。最终证据提交只更新测试文档，不要求云端重复构建；`stable@52f7c601` 保持只读。
 
 | 顺序 | 唯一待执行动作 | 已有证据，不重复实施 | 本次关闭所需证据与停止条件 |
 | --- | --- | --- | --- |
@@ -1183,7 +1183,7 @@ Expected: `HEAD == origin/main`；`origin/stable` 仍为 `52f7c601ed150769e15d06
 
 实测：Coze 普通合并 `origin/main@366b90b2d66a2b1a524e11ad879a76ed82cf350c`，最终运行 merge commit `4d6d8ffa` 的源码 tree `ee1648ca` 与 `366b90b2^{tree}` 精确一致；`origin/stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 未变化。聚焦测试 `14/14`、保护基线 `6/6`、TypeScript、ESLint、分批全量 Vitest `2785 + 1088` 项和生产构建 `119/119` 通过；PostgreSQL 项因无隔离测试库保持跳过。唯一 5000 服务 PID 为 `41123`，进程环境 `WUJIE_ASSET_GRAPH_MODE=asset-v3`，Build ID `Fy1oaJhiRjviq5WXmj4YR`，`/`、`/simple-chat`、`/api/auth/me` 均为 HTTP 200。
 
-- [ ] **Step 4: Chrome 真实验收**
+- [x] **Step 4: 浏览器真实验收**
 
 使用已登录账号并记录：
 
@@ -1199,7 +1199,9 @@ Expected: `HEAD == origin/main`；`origin/stable` 仍为 `52f7c601ed150769e15d06
 
 2026-09-03 非付费目录验收已完成：管理员登录及项目仪表盘正常；一个 3 图片项目可加载；Canvas AI 对话显示并展开 21 项 Skills；Workflow `Skill 执行`节点下拉显示同一 21 项；独立 `/simple-chat` 的 Skill 书显示独立 16 项，未混入画布目录。服务切换后首次进入项目曾出现 `Loading chunk 5900 failed`，再次加载当前构建后恢复，作为部署缓存风险保留。真实 Skill 执行、模型/供应商冻结、积分预估与扣退、暂停/恢复/取消/重试、AssetVersion、刷新恢复和完整 Console/Network/Trace 仍未验证，因此 Step 4 不标记完成。
 
-- [ ] **Step 5: 更新 Obsidian 并提交最终证据**
+2026-09-06 最终补验：在用户指定的现有 Edge 预览页中完成 Workflow 新任务 `c2f77b18...`；Canvas 新任务 `a8eaa0c0...` 在成品步骤暂停并于约 10 秒后恢复，同一子任务、同一远端任务、一次父级扣费完成，规划步骤未重跑；当前归属取消任务 `cbf85a8f...` 唯一消费/唯一退款、净额 0，40 秒后无迟到完成或资产。节点结果已真实下载并离线解码。失败步骤重试沿用此前同 Run generation=1 且未重跑规划的真实记录与永久测试，不重复制造失败任务。最终 Console 0/0，CDP Network 审计请求均 200，持久事件序列形成控制 Trace；扩展控制标签无法事后生成 Playwright `trace.zip`，限制已在证据文件中明示。Step 4 按本清单关闭，但不关闭全平台其他阶段未验证项。
+
+- [x] **Step 5: 更新 Obsidian 并提交最终证据**
 
 2026-09-04 增量断点：手动暂停后取消已在Chrome通过父级终态与按钮消失，runId为67bfbf02-4b7c-4e13-9594-c7afec9648b0；同时间窗-62/+62流水各一条，但没有数据库taskId关联证明。步骤列表为空已稳定复现并在main@e43a12fe完成前端最小修复与本地门禁，尚未Coze部署，因此Step4仍未完成。下一次不重复旧取消测试；先部署并验证新版冻结步骤，再补成功AssetVersion、节点运行、暂停恢复、失败重试与刷新历史等缺口。全平台发布级数据库和浏览器证据不得被单样本替代。精确清单以docs/testing/UNVERIFIED_ITEMS.md的2026-09-04节为准。
 
