@@ -26,6 +26,7 @@
 **Files:**
 - Create: `src/lib/skill-runtime/marketing-presets.ts`
 - Create: `src/__tests__/lib/skill-runtime-marketing-presets.test.ts`
+- Modify: `src/lib/skill-runtime/types.ts`
 - Modify: `src/__tests__/lib/skill-runtime-catalog.test.ts`
 
 **Interfaces:**
@@ -73,6 +74,8 @@ Run: `pnpm exec vitest run src/__tests__/lib/skill-runtime-marketing-presets.tes
 Expected: FAIL，模块 `marketing-presets` 不存在。
 
 - [ ] **Step 3: 最小实现定义模块**
+
+先在 `types.ts` 只扩展定义能力：`SkillInputKind` 增加 `multi-select`，`SkillInputField` 增加可选的 `bindToSourceVersions?: boolean`。输入值校验、冻结快照和 UI 行为留给 Task 3 的 RED/GREEN 实现。
 
 ```ts
 import type { SkillDefinition, SkillInputField, SkillStepDefinition } from './types';
@@ -260,7 +263,7 @@ expect(() => resolveSkillInputs(ad, {
 
 分别覆盖非法 `objective`、`channel`、`funnelStage`、`urgency`，以及 `channels` 的未知项、重复项、非字符串项和超过 6 项。
 
-给 `SkillInputField` 增加可选的 `bindToSourceVersions?: boolean`，三项营销 Skill 的 `sourceImages` 设置为 `true`。在 `skill-runtime-run-request.test.ts` 断言所有带该标记的字段都必须与去重后的 `sourceVersionIds` 同序一致；空数组、重复、URL/base64、缺失、额外和换序均在任务创建与扣费前拒绝。不得根据三个 Skill ID 写条件分支。
+三项营销 Skill 的 `sourceImages` 已设置 `bindToSourceVersions: true`。在 `skill-runtime-run-request.test.ts` 断言所有带该标记的字段都必须与去重后的 `sourceVersionIds` 同序一致；空数组、重复、URL/base64、缺失、额外和换序均在任务创建与扣费前拒绝。不得根据三个 Skill ID 写条件分支。
 
 - [ ] **Step 2: 写入提示词与来源隔离失败测试**
 
@@ -282,12 +285,11 @@ expect(prompt).not.toContain('version-source-1');
 Run: `pnpm exec vitest run src/__tests__/lib/skill-runtime-marketing-presets.test.ts src/__tests__/lib/skill-runtime-inputs.test.ts src/__tests__/lib/skill-execution-context.test.ts`
 Expected: 新定义相关断言在实现前 FAIL；已有安全合同继续 PASS。
 
-- [ ] **Step 4: 增加通用 `multi-select` 输入合同**
+- [ ] **Step 4: 实现通用 `multi-select` 与来源绑定输入合同**
 
 ```ts
-export type SkillInputKind =
-  | 'text' | 'image' | 'images' | 'brand-kit' | 'dataset'
-  | 'select' | 'multi-select' | 'number' | 'boolean';
+// `multi-select` 与 `bindToSourceVersions` 已在 Task 1 加入类型定义；
+// 本任务实现它们的解析、快照、恢复和 UI 合同。
 
 function validateMultiSelect(field: SkillInputField, value: unknown): readonly string[] {
   if (!Array.isArray(value) || value.some(item => typeof item !== 'string')) {
