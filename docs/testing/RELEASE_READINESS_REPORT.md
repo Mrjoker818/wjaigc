@@ -2218,5 +2218,6 @@ The focused gate test passes `7/7`; the actual protected-baseline command passes
 - `main@eae09525` 已在 Coze 证明父 Run 取消会把两个活动预付图像子任务持久化为 `cancelled`，且迟到结果不建立 AssetVersion；`LOVART-CONTENT-003` 云端关闭。
 - 同一真实账务样本只有一笔消费 `122` 和一笔退款 `120`，最终净消费 `2`，与已完成文本规划步骤一致。
 - 新发现的 `LOVART-CONTENT-004` 已完成最小兼容修复：旧 `apiProvider` 和新 `providerId + compositeKey` 均可解析为精确图像模型绑定，新选择继续同时写入兼容字段。扩大相关回归 `145/145`，TypeScript、构建版 ESLint、保护基线和差异检查均退出 0；生产构建 `119/119` 页面、退出 0。
-- 本修复只处理浏览器模型选择持久化，不修改供应商请求、任务、资产、积分或 Skill 目录；仍须推送新候选并在未手工迁移 localStorage 的云端会话中复验估价和创建。
-- **发布结论：有条件通过，可进入 Coze 兼容性复验。** Workflow Pinterest、Canvas 三行 SKU、Pear 成功成品及完整证据关闭前，Task 8 与全平台仍不通过。
+- `main@536277f5737043444a6d4914007c094c3b0b9ff0` 已在 Coze 使用仅含旧 `apiProvider` 的浏览器记录完成兼容性复验：估价 HTTP 200、创建 HTTP 201，Run `f46a23ea-aa72-400f-98ef-78f50bf832bd` 取消 HTTP 200 且终态 `cancelled`。`LOVART-CONTENT-004` 云端关闭。
+- 本修复只处理浏览器模型选择持久化，没有修改供应商请求、任务、资产、积分或 Skill 目录。
+- **发布结论：有条件通过，可继续 Task 8 云端业务验收。** Workflow Pinterest、Canvas 三行 SKU、Pear 成功成品及完整证据关闭前，Task 8 与全平台仍不通过。

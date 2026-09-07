@@ -2425,7 +2425,7 @@ BUG-018 已从未验证项移除。剩余顺序为 `002-B -> 002-D -> 002-E`；�
 - [x] Coze `eae09525` 中，父 Run 取消后两个活动预付子任务均进入 `cancelled`；取消 API 返回 2xx，未观察到迟到结果或 AssetVersion。
 - [x] 同一样本账务为一次消费 122、一次退款 120、净消费 2；两个子任务保持零成本 `not-applicable`。
 - [x] 旧 `apiProvider` 模型持久化兼容问题已完成本地 RED/GREEN 与扩大回归 `145/145`。
-- [ ] 部署含 `LOVART-CONTENT-004` 修复的新候选；在不手工补写 `providerId/compositeKey` 的旧浏览器记录上确认估价 HTTP 200、创建 HTTP 201。
+- [x] Coze `536277f5` 在不手工补写 `providerId/compositeKey` 的旧浏览器记录上完成估价 HTTP 200、创建 HTTP 201，并完成 Run HTTP 200 取消；`LOVART-CONTENT-004` 关闭。
 - [ ] Workflow Pinterest 验证固定 `2:3`、三个逐项结果、AssetVersion 和刷新恢复。
 - [ ] Canvas 三行 SKU 验证三项逐项回图、顺序、失败行精确重试和账务。
 - [ ] Pear 成功生成两张缩略图、AssetVersion、预览下载与刷新恢复；若供应商仍阻塞，保留为外部依赖未验证，不使用回退结果冒充。

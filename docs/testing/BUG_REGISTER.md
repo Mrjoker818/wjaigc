@@ -4170,4 +4170,5 @@ Task 4 独立审查的两个 Minor 继续保留给最终审查：单元夹具 op
 | 根因 | `chat-panel.tsx` 的 Skill 初始化只读取新字段 `providerId`，而历史模型选择仍可能只保存旧字段 `apiProvider`；`buildCanvasSkillRequest()` 因缺少精确图像供应商绑定返回空。 |
 | 最小修复 | 在 `model-defaults.ts` 增加统一持久化解析器，优先读取 `providerId`、兼容 `apiProvider`，支持 `compositeKey` 与带命名空间模型 ID；模型选择新写入同时保存 `providerId`、`compositeKey` 和兼容 `apiProvider`。 |
 | TDD | 三个兼容合同先 RED，再 GREEN；模型默认值和 Canvas Skill 相关扩大回归 `145/145`，TypeScript、构建版 ESLint、差异检查退出 0。 |
-| 当前状态 | **本地修复通过 / Coze 待部署复验。** 必须用旧字段记录直接刷新新部署，证明无需手工迁移即可估价和创建。 |
+| 云端回归 | Coze 精确运行 `main@536277f5737043444a6d4914007c094c3b0b9ff0`。同一浏览器仅写入旧记录 `model + modelName + apiProvider`，不补写 `providerId/compositeKey`，刷新后估价 `POST /api/skill-runs/estimate` 返回 HTTP 200（requestId `d1feb2db-3fb9-9f0a-8d01-aa2c03366cc0`），创建 `POST /api/skill-runs` 返回 HTTP 201（requestId `e8aa9f67-7575-9e87-b419-819b1b80f476`），服务端精确解析为 Pear `gpt-image-2`。Run `f46a23ea-aa72-400f-98ef-78f50bf832bd` 随后通过 `PATCH .../skill-runs/{runId}` HTTP 200 取消，终态为 `cancelled`。截图 `.playwright-cli/page-2026-09-07T01-22-49-727Z.png` SHA-256 为 `4FC3DEDE4E8A97D11EBD232C8DFC7834342C8BBD0FCE3FA11DA01A017F0783D9`。 |
+| 当前状态 | **已修复并完成 Coze 云端复验。** 旧浏览器记录无需手工迁移即可完成估价、创建和取消，`LOVART-CONTENT-004` 关闭。 |

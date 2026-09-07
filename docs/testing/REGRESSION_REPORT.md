@@ -2900,4 +2900,6 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - 父 Run 最终为 `cancelled`。消费流水 `-122`，退款流水 `+120`，净消费为已完成文本规划步骤的 `2` 积分；没有重复消费或重复退款。由此关闭 `LOVART-CONTENT-003` 的云端子任务取消与部分退款边界。
 - 同轮稳定复现 `LOVART-CONTENT-004`：浏览器历史 `wujie_selected_model` 仅保存 `apiProvider` 时，Canvas Skill 表单虽可填写，但估价与执行不会发出请求；临时迁移为 `providerId + compositeKey` 后，估价 HTTP 200、Run HTTP 201，证明根因位于前端持久化兼容读取。
 - 本地按 RED/GREEN 新增统一解析器，同时兼容 `providerId` 和旧 `apiProvider`，并在新写入中持久化 `providerId + compositeKey`。模型默认值、Canvas Skill 表单与相关运行时扩大回归共 `145/145` 通过；`pnpm ts-check`、`pnpm lint:build`、保护基线 `38/38` 和 `git diff --check` 通过。8 GiB Node 堆生产构建退出 0，Webpack 12.2 分钟、TypeScript 56 秒、静态页面 `119/119`。
-- **回归判定：子任务取消与部分退款 CLOUD PASS；旧模型持久化兼容 LOCAL PASS / CLOUD PENDING。** Pinterest、三行 SKU、Pear 成功成品与最终浏览器证据仍未关闭。
+- Coze 已精确部署 `main@536277f5737043444a6d4914007c094c3b0b9ff0`。浏览器仅写入旧字段 `model + modelName + apiProvider` 后刷新，不补写 `providerId/compositeKey`；估价请求 HTTP 200，创建请求 HTTP 201，并精确绑定 Pear `gpt-image-2`。创建 Run `f46a23ea-aa72-400f-98ef-78f50bf832bd` 后立即取消，取消请求 HTTP 200，投影终态为 `cancelled`。
+- 本轮证据截图为 `.playwright-cli/page-2026-09-07T01-22-49-727Z.png`，SHA-256 `4FC3DEDE4E8A97D11EBD232C8DFC7834342C8BBD0FCE3FA11DA01A017F0783D9`；控制台仍含历史 Coze CSP 与远程媒体 CORS 噪声，不能据此宣称 Console 全净。
+- **回归判定：子任务取消与部分退款 CLOUD PASS；旧模型持久化兼容 CLOUD PASS，`LOVART-CONTENT-004` 关闭。** Pinterest、三行 SKU、Pear 成功成品与最终浏览器证据仍未关闭。
