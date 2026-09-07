@@ -1,0 +1,63 @@
+{
+  "scope": "Lovart 第二批内容电商 Task 8 Workflow Pinterest 云端验收",
+  "cloudSourceCommit": "536277f5737043444a6d4914007c094c3b0b9ff0",
+  "browser": "Microsoft Edge",
+  "projectId": "project_1787549625844_nfmso3ts9",
+  "workflowId": "wf-chat-import-7d07ebb373a5fdc9b11fe4afc7f3abec",
+  "executionId": "exec-1788744493217-a3hz52",
+  "runId": "49e568bc-5193-4afa-b7cd-bf7d6f596f8a",
+  "skill": "preset-pinterest-pins",
+  "estimate": 182,
+  "creditStatus": "charged",
+  "creditCost": 182,
+  "bindings": {
+    "imageProviderId": "api_1778430731224_533e09a",
+    "imageModelId": "gpt-image-2",
+    "orchestratorProviderId": "api_1778428130626_2qpg71v",
+    "orchestratorModelId": "gemini-3.1-flash-lite-preview"
+  },
+  "sourceVersionIds": [
+    "919e5c53-0354-4cbe-b5ef-ea12aff9e941"
+  ],
+  "assetVersions": [
+    {
+      "assetVersionId": "8a33d282-73fc-4cb2-a3dc-1910170da8e9",
+      "width": 1024,
+      "height": 1536
+    },
+    {
+      "assetVersionId": "c9627204-9bfb-410d-b555-e53aeff63df8",
+      "width": 1024,
+      "height": 1536
+    },
+    {
+      "assetVersionId": "9b942493-c82f-4979-b171-821e8446e835",
+      "width": 1024,
+      "height": 1536
+    }
+  ],
+  "workflowSave": "HTTP 200",
+  "refreshRecovery": "PASS: Skill 节点恢复 completed、runId、输入值、模型绑定与来源图片",
+  "download": {
+    "file": ".playwright-cli/wujie-workflow-result.png",
+    "sha256": "76AEEC3C789B67D5679CDEADD1D6E673C1204792243617E4835DE5F275272134"
+  },
+  "screenshot": {
+    "file": ".playwright-cli/page-2026-09-07T01-34-43-443Z.png",
+    "sha256": "F7AE2A5E2C7A8D343994F688E5C9DF6B6146DDF8FA708C545EF1A74F8C845F0A"
+  },
+  "trace": {
+    "file": ".playwright-cli/traces/trace-1788732729782.trace",
+    "sha256": "DBDE2CFE07E92892F672F15068380C0E51250C20D8FB905CD73ACFE88E4A9BDC"
+  },
+  "network": {
+    "file": ".playwright-cli/traces/trace-1788732729782.network",
+    "sha256": "993BE28AA67294B6661E53018292BC51C260F26B622269B7152DD18B75200CB8"
+  },
+  "video": {
+    "file": ".playwright-cli/task8-pinterest-cloud.webm",
+    "sha256": "7F7A957EB0E2236DAF6563EA71E9120D69DA8B6E18EB7F3A03EBB56ABAD81FAF"
+  },
+  "console": "NOT CLEAN: 历史及当前远程媒体存在 CORS 错误，未将业务成功冒充为 Console clean",
+  "verdict": "CLOUD PASS: 三项结果、固定 2:3、AssetVersion、计费、保存、刷新恢复和下载均通过关闭"
+}

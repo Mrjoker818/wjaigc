@@ -2221,3 +2221,10 @@ The focused gate test passes `7/7`; the actual protected-baseline command passes
 - `main@536277f5737043444a6d4914007c094c3b0b9ff0` 已在 Coze 使用仅含旧 `apiProvider` 的浏览器记录完成兼容性复验：估价 HTTP 200、创建 HTTP 201，Run `f46a23ea-aa72-400f-98ef-78f50bf832bd` 取消 HTTP 200 且终态 `cancelled`。`LOVART-CONTENT-004` 云端关闭。
 - 本修复只处理浏览器模型选择持久化，没有修改供应商请求、任务、资产、积分或 Skill 目录。
 - **发布结论：有条件通过，可继续 Task 8 云端业务验收。** Workflow Pinterest、Canvas 三行 SKU、Pear 成功成品及完整证据关闭前，Task 8 与全平台仍不通过。
+
+## 2026-09-07 Lovart Task 8 Workflow Pinterest 发布判断
+
+- Workflow Pinterest 已在 Coze 真实完成：估价与实扣均为 182，三个图像步骤全部完成并产生三个独立 AssetVersion；三张成品均实测 `1024×1536`，比例严格为 `2:3`。
+- 工作流保存 HTTP 200，刷新后 Skill 节点、Run、来源、输入和模型绑定均恢复；预览及 PNG 下载成功。机器证据位于 `docs/testing/evidence/lovart-content-commerce-task8-workflow-pinterest-20260907.json`。
+- 远程媒体 CORS 仍产生 Console Error，当前不满足“无未处理 Console Error”的全平台发布标准。
+- **发布结论：Pinterest 子链路通过；Task 8 仍为有条件通过。** 下一阻断为 Canvas 三行 SKU；Pear 成功缩略图及 Console 跨域风险仍保留。

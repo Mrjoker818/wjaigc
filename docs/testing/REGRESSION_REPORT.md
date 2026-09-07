@@ -2903,3 +2903,12 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - Coze 已精确部署 `main@536277f5737043444a6d4914007c094c3b0b9ff0`。浏览器仅写入旧字段 `model + modelName + apiProvider` 后刷新，不补写 `providerId/compositeKey`；估价请求 HTTP 200，创建请求 HTTP 201，并精确绑定 Pear `gpt-image-2`。创建 Run `f46a23ea-aa72-400f-98ef-78f50bf832bd` 后立即取消，取消请求 HTTP 200，投影终态为 `cancelled`。
 - 本轮证据截图为 `.playwright-cli/page-2026-09-07T01-22-49-727Z.png`，SHA-256 `4FC3DEDE4E8A97D11EBD232C8DFC7834342C8BBD0FCE3FA11DA01A017F0783D9`；控制台仍含历史 Coze CSP 与远程媒体 CORS 噪声，不能据此宣称 Console 全净。
 - **回归判定：子任务取消与部分退款 CLOUD PASS；旧模型持久化兼容 CLOUD PASS，`LOVART-CONTENT-004` 关闭。** Pinterest、三行 SKU、Pear 成功成品与最终浏览器证据仍未关闭。
+
+## 2026-09-07 Lovart Task 8 Workflow Pinterest 云端回归
+
+- Coze `main@536277f5737043444a6d4914007c094c3b0b9ff0` 使用既有 Workflow Skill 节点运行 `preset-pinterest-pins`；估价 HTTP 200 为 182 积分，工作流执行 `exec-1788744493217-a3hz52` 和 Run `49e568bc-5193-4afa-b7cd-bf7d6f596f8a` 最终均为 `completed`，实扣 182。
+- 四个具体步骤“制定图钉系列方案、主图钉、细节图钉、转化图钉”全部完成；三个结果分别建立 AssetVersion `8a33d282-...`、`c9627204-...`、`9b942493-...`，来源版本均保持 `919e5c53-...`，模型绑定均为 APImart `gpt-image-2`。
+- 三张远程成品在浏览器内逐张读取尺寸均为 `1024×1536`，严格为 `2:3`；节点属性在完成后继续保留 image/prompt/task 输出端口。
+- `POST /api/workflow/save` 返回 HTTP 200。整页刷新并重新进入节点模式后，Skill 节点仍恢复为“完成”，保留 Pinterest、来源图片、输入参数、精确模型绑定和 Run；预览可打开，下载生成 `.playwright-cli/wujie-workflow-result.png`（SHA-256 `76AEEC3...2134`）。
+- 截图、录像、Trace 和 Network 哈希详见 `docs/testing/evidence/lovart-content-commerce-task8-workflow-pinterest-20260907.json`。控制台仍含远程媒体 CORS 错误，故本轮只判定 Pinterest 业务链路通过，不宣称 Console clean。
+- **回归判定：Workflow Pinterest CLOUD PASS。** Canvas 三行 SKU、Pear 缩略图成功成品和最终 Console 风险仍未关闭。
