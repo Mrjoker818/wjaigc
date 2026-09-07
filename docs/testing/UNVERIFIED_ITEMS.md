@@ -2427,6 +2427,9 @@ BUG-018 已从未验证项移除。剩余顺序为 `002-B -> 002-D -> 002-E`；�
 - [x] 旧 `apiProvider` 模型持久化兼容问题已完成本地 RED/GREEN 与扩大回归 `145/145`。
 - [x] Coze `536277f5` 在不手工补写 `providerId/compositeKey` 的旧浏览器记录上完成估价 HTTP 200、创建 HTTP 201，并完成 Run HTTP 200 取消；`LOVART-CONTENT-004` 关闭。
 - [x] Workflow Pinterest 在 Coze `536277f5` 完成三项逐项结果、三个 AssetVersion、三张 `1024×1536` 固定 `2:3` 成品、182 积分结算、保存、刷新恢复及 PNG 下载。
-- [ ] Canvas 三行 SKU 验证三项逐项回图、顺序、失败行精确重试和账务。
-- [ ] Pear 成功生成两张缩略图、AssetVersion、预览下载与刷新恢复；若供应商仍阻塞，保留为外部依赖未验证，不使用回退结果冒充。
-- [ ] 保存新候选的新鲜 Console、Network、截图和可获得的 Trace，并单独归因历史远程媒体 CORS 与 Coze CSP 噪声。
+- [x] Canvas 三行 SKU 已完成三项逐项回图、顺序、三个 AssetVersion、182 积分单次结算、刷新恢复和 PNG 下载。
+- [x] 使用本轮稳定 APImart 完成两张缩略图、两个 AssetVersion、`1672×941` 16:9、122 积分单次结算、预览下载与刷新恢复。
+- [x] SKU 与缩略图均保存新鲜 Console、Network、截图、Trace、录像和下载哈希证据。
+- [ ] Pear 专用成功生成链路仍为外部依赖未验证；APImart 成功结果只关闭缩略图业务能力，不冒充 Pear 成功。
+- [ ] 生产环境受控失败行精确重试仍未验证；当前没有安全故障注入开关，不通过破坏真实供应商配置、恶意内容或猜测性操作制造失败。
+- [ ] Console 仍有 `getapib.org` / Pear 远程媒体 CORS Error，不能登记为 Console clean；须治理或形成正式受控豁免。

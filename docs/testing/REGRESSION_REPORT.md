@@ -2912,3 +2912,13 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - `POST /api/workflow/save` 返回 HTTP 200。整页刷新并重新进入节点模式后，Skill 节点仍恢复为“完成”，保留 Pinterest、来源图片、输入参数、精确模型绑定和 Run；预览可打开，下载生成 `.playwright-cli/wujie-workflow-result.png`（SHA-256 `76AEEC3...2134`）。
 - 截图、录像、Trace 和 Network 哈希详见 `docs/testing/evidence/lovart-content-commerce-task8-workflow-pinterest-20260907.json`。控制台仍含远程媒体 CORS 错误，故本轮只判定 Pinterest 业务链路通过，不宣称 Console clean。
 - **回归判定：Workflow Pinterest CLOUD PASS。** Canvas 三行 SKU、Pear 缩略图成功成品和最终 Console 风险仍未关闭。
+
+## 2026-09-07 Lovart Task 8 Canvas SKU 与缩略图云端回归
+
+- Canvas `批量 SKU 商品素材` 导入三行 CSV，页面按 `SKU-A → SKU-B → SKU-C` 显示；估价与实扣均为 182。Run `de408a76-1176-4e38-b7f4-c04eac6011fb` 的规划和三个图像步骤全部完成，按编译顺序建立三个独立 AssetVersion。
+- 三张 SKU 成品均在浏览器读取为 `1254×1254`，三个图像步骤分别通过 `output-present`、`image-dimensions-known`、`aspect-ratio-match`；来源版本和 APImart `gpt-image-2` / APImartLLM `gemini-3.1-flash-lite-preview` 绑定保持一致。
+- 沙箱中途丢失后重新启动，持久化恢复继续轮询第三个供应商任务并完成父 Run。整页刷新后画布结果和运行记录恢复；PNG 下载为 `.playwright-cli/wujie-20260907-913-image.png`，尺寸 `1254×1254`。
+- Canvas `YouTube/B站缩略图` 改用本轮稳定的 APImart 供应商。Run `b4d19e97-e46e-4275-a29d-4213298be2fc` 在约 65 秒内完成规划与两个图像步骤，建立两个 AssetVersion，估价与实扣均为 122；两张成品均为 `1672×941`，符合供应商像素取整后的 `16:9`。
+- 缩略图整页刷新后，两张结果、completed 运行记录、来源版本和模型绑定均恢复；PNG 下载尺寸 `1672×941`。SKU 与缩略图的截图、录像、Trace、Network 和下载哈希分别见 `lovart-content-commerce-task8-canvas-batch-sku-20260907.json` 与 `lovart-content-commerce-task8-canvas-thumbnails-20260907.json`。
+- Console 仍有 `getapib.org` / Pear 历史与当前远程媒体 CORS 错误；生产环境没有安全故障注入开关，因此没有通过破坏真实供应商配置制造失败行，相关两项继续留在未验证清单。
+- **回归判定：Task 8 云端核心业务链路 CLOUD PASS；阶段有条件通过。** Pear 专用成功链路、受控失败行精确重试和 Console CORS 治理不冒充通过。

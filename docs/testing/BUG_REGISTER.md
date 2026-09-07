@@ -4135,7 +4135,7 @@ Task 4 独立审查的两个 Minor 继续保留给最终审查：单元夹具 op
 | 最小修复 | 仅在缺少显式冻结定义时，用已解析输入调用 `skillExecutionSteps`；显式定义、供应商冻结、任务状态机和账务边界保持不变。 |
 | 账务语义 | 规划步骤已完成、图像步骤未完成时只退未完成步骤成本，父任务 `creditStatus` 保持 `charged`；永久测试同时断言唯一退款金额。 |
 | 永久回归 | 新增 PostgreSQL 真并发用例：20 次同键归并、三行三 operation、输出顺序恢复、取消部分退款、迟到结果隔离。专项 `13/13`，全仓 `5516/5516` 通过。 |
-| 当前状态 | **本地与隔离真库已修复；Coze 真实供应商验收待执行。** |
+| 当前状态 | **已修复并完成 Coze 云端验收。** Run `de408a76-1176-4e38-b7f4-c04eac6011fb` 按 CSV 顺序完成三个独立图像步骤，建立三个 AssetVersion，估价与实扣均为 182；刷新后运行记录和三项结果恢复。生产环境失败行精确重试因无安全故障注入开关仍单列未验证，不回退本修复结论。 |
 
 ### LOVART-CONTENT-002：内容电商 Skill 固定输出比例未进入图像子任务（2026-09-07）
 
@@ -4146,7 +4146,7 @@ Task 4 独立审查的两个 Minor 继续保留给最终审查：单元夹具 op
 | 根因 | 通用生成适配器读取 `inputValues.aspectRatio`，缩略图和 Pinterest 权威定义却未声明该输入。 |
 | 修复 | 缩略图定义固定 `aspectRatio=16:9`，Pinterest 固定 `aspectRatio=2:3`；仍由通用输入解析和步骤编译链路消费，不增加 Skill ID 特判。 |
 | TDD | 比例合同先 RED，再 GREEN；聚焦两文件 `45/45`、Task 8 扩大聚焦 `97/97`。 |
-| 当前状态 | **已修复 / Coze Edge 云端关闭。** `main@8bc08331` 的 Run `5b7dda8a-57fb-4991-a2f3-d7cf46903570` 已真实创建两个 Pear 子任务；持久化 `submissionPayload.aspectRatio` 均为 `16:9`。Pear 当时不可用不影响请求规格结论。Pinterest `2:3` 仍需在 Workflow 真实任务中独立验收。 |
+| 当前状态 | **已修复 / Coze Edge 云端关闭。** `main@8bc08331` 已证明 Pear 子任务提交 `16:9`；后续 `main@536277f5` 的 APImart Run `b4d19e97-e46e-4275-a29d-4213298be2fc` 真实生成两张 `1672×941` 缩略图并建立两个 AssetVersion。Workflow Pinterest Run `49e568bc-5193-4afa-b7cd-bf7d6f596f8a` 生成三张 `1024×1536` 成品，`2:3` 同步关闭。 |
 
 ### LOVART-CONTENT-003：父 Skill 取消后预付图像子任务仍保持 processing（2026-09-07）
 

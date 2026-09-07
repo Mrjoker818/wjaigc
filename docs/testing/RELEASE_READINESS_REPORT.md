@@ -2228,3 +2228,11 @@ The focused gate test passes `7/7`; the actual protected-baseline command passes
 - 工作流保存 HTTP 200，刷新后 Skill 节点、Run、来源、输入和模型绑定均恢复；预览及 PNG 下载成功。机器证据位于 `docs/testing/evidence/lovart-content-commerce-task8-workflow-pinterest-20260907.json`。
 - 远程媒体 CORS 仍产生 Console Error，当前不满足“无未处理 Console Error”的全平台发布标准。
 - **发布结论：Pinterest 子链路通过；Task 8 仍为有条件通过。** 下一阻断为 Canvas 三行 SKU；Pear 成功缩略图及 Console 跨域风险仍保留。
+
+## 2026-09-07 Lovart Task 8 阶段发布判断
+
+- Canvas 三行 SKU 已真实完成：三行按序执行、三个独立 AssetVersion、三张 `1254×1254` 成品、182 积分单次结算、来源与模型冻结、沙箱恢复、整页刷新恢复及 PNG 下载均通过。
+- Canvas YouTube/B站缩略图已使用稳定 APImart 完成：两个独立 AssetVersion、两张 `1672×941` 16:9 成品、122 积分单次结算、刷新恢复与 PNG 下载均通过。此前 Pear 子任务的 `16:9` 请求合同也已有云端证据，但 Pear 成功成品仍不作通过声明。
+- Workflow Pinterest、父 Run 取消后子任务终止、一次部分退款、迟到结果隔离、旧模型持久化兼容均已在同一云端代码树关闭。Canvas/Workflow 保持 27 Skills，Simple Chat 保持 16 Skills。
+- 生产环境没有安全故障注入开关，失败行仅重试失败步骤尚无真实云端证据；远程媒体 CORS Console Error 仍未治理。两项均不影响已取得的成功链路证据，但不满足全平台最终发布标准。
+- **Task 8 阶段结论：有条件通过。** 本地、隔离 PostgreSQL、GitHub `main` 与云端核心链路已闭环；Pear 专用成功链路、受控失败行重试和 Console CORS 继续列为发布前未验证/未关闭项。全平台仍不能判定“通过”。

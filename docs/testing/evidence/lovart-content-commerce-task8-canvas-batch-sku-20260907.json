@@ -1,0 +1,69 @@
+{
+  "scope": "Lovart 第二批内容电商 Task 8 Canvas 三行 SKU 云端验收",
+  "cloudSourceCommit": "536277f5737043444a6d4914007c094c3b0b9ff0",
+  "browser": "Microsoft Edge",
+  "projectId": "project_1787549625844_nfmso3ts9",
+  "runId": "de408a76-1176-4e38-b7f4-c04eac6011fb",
+  "skill": "preset-batch-sku-assets",
+  "dataset": {
+    "format": "CSV",
+    "rows": 3,
+    "order": ["SKU-A", "SKU-B", "SKU-C"]
+  },
+  "estimate": 182,
+  "creditStatus": "charged",
+  "creditCost": 182,
+  "bindings": {
+    "imageProviderId": "api_1778430731224_533e09a",
+    "imageModelId": "gpt-image-2",
+    "orchestratorProviderId": "api_1778428130626_2qpg71v",
+    "orchestratorModelId": "gemini-3.1-flash-lite-preview"
+  },
+  "sourceVersionIds": [
+    "364dd089-09f1-5f94-901b-cfe9c58c6243"
+  ],
+  "assetVersions": [
+    {
+      "assetVersionId": "b2ee7961-dc25-49b4-bd0a-cd464f6cf99e",
+      "width": 1254,
+      "height": 1254
+    },
+    {
+      "assetVersionId": "6f84b6d9-8987-4c25-88df-e43fdc82826c",
+      "width": 1254,
+      "height": 1254
+    },
+    {
+      "assetVersionId": "3e9b9f44-3232-4288-bf6a-e224caa8698c",
+      "width": 1254,
+      "height": 1254
+    }
+  ],
+  "qualityGates": "PASS: 三个图像步骤均通过 output-present、image-dimensions-known、aspect-ratio-match",
+  "refreshRecovery": "PASS: 整页刷新后画布保留三个 1254x1254 结果，运行记录恢复 completed、三个步骤、来源版本和模型绑定",
+  "download": {
+    "file": ".playwright-cli/wujie-20260907-913-image.png",
+    "width": 1254,
+    "height": 1254,
+    "sha256": "7ADDE796D320311F838A71F823C8D0230706C393CBB22ED748871D5A0C11B36B"
+  },
+  "screenshot": {
+    "file": ".playwright-cli/page-2026-09-07T02-01-53-390Z.png",
+    "sha256": "ED006EA617C75D68A94E703AE92FB0DEFDC4B3C0BCCEC4B8F729050E18DAE74D"
+  },
+  "trace": {
+    "file": ".playwright-cli/traces/trace-1788745465516.trace",
+    "sha256": "691B5DA8A5EC63197653F3D2E3D423C7A34DFD89717088B781BDAE592AAAC9AC"
+  },
+  "network": {
+    "file": ".playwright-cli/traces/trace-1788745465516.network",
+    "sha256": "45B6BEA6B54D6153F24F1F074A1BF66926A829951FB0F49C90C2E0478F928A7E"
+  },
+  "video": {
+    "file": ".playwright-cli/video-2026-09-07T01-44-28-526Z.webm",
+    "sha256": "4D3360CDA29EFF2D12B7FAB733E230D115DF1CE828EB875E61C0B84F20B748F0"
+  },
+  "console": "NOT CLEAN: 远程媒体 getapib.org/Pear CORS 错误仍存在，未将业务成功冒充为 Console clean",
+  "faultInjection": "UNVERIFIED: 生产环境没有安全故障注入开关，未破坏供应商配置制造失败行",
+  "verdict": "CLOUD PASS: 三行顺序、三个独立结果、AssetVersion、质量门禁、计费、刷新恢复和下载均通过"
+}

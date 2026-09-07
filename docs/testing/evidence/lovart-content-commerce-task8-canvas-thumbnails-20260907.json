@@ -1,0 +1,59 @@
+{
+  "scope": "Lovart 第二批内容电商 Task 8 Canvas YouTube/B站缩略图云端验收",
+  "cloudSourceCommit": "536277f5737043444a6d4914007c094c3b0b9ff0",
+  "browser": "Microsoft Edge",
+  "projectId": "project_1787549625844_nfmso3ts9",
+  "runId": "b4d19e97-e46e-4275-a29d-4213298be2fc",
+  "skill": "preset-video-platform-thumbnails",
+  "estimate": 122,
+  "creditStatus": "charged",
+  "creditCost": 122,
+  "bindings": {
+    "imageProviderId": "api_1778430731224_533e09a",
+    "imageModelId": "gpt-image-2",
+    "orchestratorProviderId": "api_1778428130626_2qpg71v",
+    "orchestratorModelId": "gemini-3.1-flash-lite-preview"
+  },
+  "sourceVersionIds": [
+    "3e9b9f44-3232-4288-bf6a-e224caa8698c"
+  ],
+  "assetVersions": [
+    {
+      "assetVersionId": "89276f10-7b85-4b95-a4d7-a8cec7c95527",
+      "width": 1672,
+      "height": 941
+    },
+    {
+      "assetVersionId": "a3f81fc7-eda1-46cb-ad7b-7798723356fa",
+      "width": 1672,
+      "height": 941
+    }
+  ],
+  "ratio": "PASS: 两张均为 1672x941，供应商像素取整后的 16:9",
+  "refreshRecovery": "PASS: 整页刷新后两张缩略图、completed 运行记录、三个步骤、来源和模型绑定全部恢复",
+  "download": {
+    "file": ".playwright-cli/wujie-20260907-213-image.png",
+    "width": 1672,
+    "height": 941,
+    "sha256": "5CA1FC030544ABABDAEE59439BE530D9C2CF956820EFD86FC02EEED0435565F6"
+  },
+  "screenshot": {
+    "file": ".playwright-cli/page-2026-09-07T02-10-25-475Z.png",
+    "sha256": "3BBE06912A1B5F364F75AC0A818116BF07BBE97A19281E42C78D190AD50EFFCA"
+  },
+  "trace": {
+    "file": ".playwright-cli/traces/trace-1788746758323.trace",
+    "sha256": "AC40F736D1E7604215A32DF524E1954AB8D3D687BACE58324945BD31BBF356ED"
+  },
+  "network": {
+    "file": ".playwright-cli/traces/trace-1788746758323.network",
+    "sha256": "C089E46414D4A393375FD852FB5B20F86051DBF40EBD148F2425EF0EE14AB79A"
+  },
+  "video": {
+    "file": ".playwright-cli/video-2026-09-07T02-06-01-439Z.webm",
+    "sha256": "9B49A2AD08F4FDE4009EFD9981B40F16DEE3FA67AEA6030CEF2C62A12EF336B5"
+  },
+  "console": "NOT CLEAN: 远程媒体 CORS 错误仍存在",
+  "pear": "DEFERRED: Pear 上游此前长时间无成品；本轮按计划使用已证明稳定的 APImart 完成业务闭环，不冒充 Pear 成功",
+  "verdict": "CLOUD PASS: 双成品、双 AssetVersion、16:9、单次计费、刷新恢复和下载均通过"
+}

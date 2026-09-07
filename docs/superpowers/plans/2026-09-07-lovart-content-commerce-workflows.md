@@ -602,7 +602,7 @@ git rev-parse origin/stable
 
 Expected: `HEAD == origin/main`，stable 仍为固定 SHA。
 
-- [ ] **Step 6: Coze 精确部署与真实浏览器验收**
+- [x] **Step 6: Coze 精确部署与真实浏览器验收**
 
 在现有项目标签让 Coze 拉取精确 `main`、核对 tree、类型、保护、构建、Build ID 和唯一服务进程；沙箱重启后强刷现有预览标签，不新建标签。
 
@@ -616,9 +616,13 @@ Expected: `HEAD == origin/main`，stable 仍为固定 SHA。
 
 2026-09-07 增量记录：`main@bcdcfe50` 已由 Coze 以同源码树构建并运行，Build ID `wBB36Y68vT1AEnuDvQxrv`，唯一 5000 服务与首页 HTTP 200 已核对。Edge 真实运行 Canvas“YouTube/B站缩略图”时，APImart 文本规划完成，Pear 两个图像子任务进入上游重试；真实取消后父 Run 正确退回未完成图像步骤的 120 积分，净消费 2 积分，但同时发现固定比例被提交为 `1:1`、父取消后两个子任务仍停在 `processing`。两项均已完成 RED/GREEN 最小修复；本地全量 `5344 passed / 174 conditional skipped / 0 failed`、TypeScript、构建版 ESLint 与 `119/119` 生产构建通过。修复尚待推送和 Coze 复验，因此 Step 6 保持未完成。
 
-- [ ] **Step 7: 形成阶段结论**
+2026-09-07 关闭记录：Coze `main@536277f5` 已完成 Workflow Pinterest 三项输出与恢复、Canvas 三行 SKU 三项输出与恢复、父取消/部分退款/迟到隔离、模型持久化兼容和 Simple Chat 隔离。缩略图使用本轮稳定 APImart 生成两张 `1672×941` 成品并完成双 AssetVersion、122 积分单次结算、整页刷新恢复和下载。Pear 专用成功链路与安全故障注入不作为 Step 6 成功链路的替代证据，继续单列未验证；Console 远程媒体 CORS 继续开放。
+
+- [x] **Step 7: 形成阶段结论**
 
 只有本地、真库和云端核心链路有真实证据时关闭第二批。无法安全制造的供应商故障或浏览器证据写入 `UNVERIFIED_ITEMS.md`，结论最多为“有条件通过”，不得伪造完整通过。
+
+阶段结论：**有条件通过。** 本地、隔离 PostgreSQL、GitHub `main` 与 Coze 核心业务链路已闭环；Pear 专用成功链路、生产受控失败行精确重试和 Console CORS 保留为明确未验证/未关闭项，全平台仍不判定通过。
 
 ---
 
