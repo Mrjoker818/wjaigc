@@ -4158,4 +4158,16 @@ Task 4 独立审查的两个 Minor 继续保留给最终审查：单元夹具 op
 | 根因 | 第一轮确认为 `SkillRuntimeService.cancel()` 没有持久化取消预付子任务。`8bc08331` 增加取消后，云端进一步证明单条自连接 `UPDATE ... FROM cloud_tasks parent` 在父任务已经成功取消和退款后抛错：PATCH 返回 500，两个完全满足用户、项目、类型、零成本及 provenance 条件的子任务仍为 `processing`。因此父终态与子更新耦合在同一复杂 SQL 是第二层根因。 |
 | 修复 | 二次候选先通过权威读取验证父任务归属、类型、取消终态和项目，再用 `actorUserId + projectId + runId provenance` 直接条件更新活动零成本子任务，移除自连接；成功返回的子任务 ID 继续逐个 abort 当前进程执行域。普通计费任务、其他项目及既有终态均不触碰。 |
 | TDD | 新增真实行结构合同并先观察 `2 failed / 11 passed`，再完成最小修改；聚焦 `58/58`，全仓 `5346 passed / 174 conditional skipped / 0 failed`，TypeScript 与构建版 ESLint 退出 0。 |
-| 当前状态 | **二次本地候选通过 / Coze 待复验。** 云端失败样本为 Run `5b7dda8a-57fb-4991-a2f3-d7cf46903570`，子任务 `async-1788737886967-0-50r251`、`async-1788737886994-0-pceesz`；父任务已部分退款且净消费 2，但两子任务持续 processing。必须部署二次候选后证明及时 cancelled、一次退款不变、迟到结果不回写。 |
+| 当前状态 | **已修复并完成 Coze 云端复验。** `main@eae09525` 的 Run `6701d85c-33e8-47aa-a3d1-799fd1477c30` 取消后，子任务 `async-1788742244699-0-r53i65`、`async-1788742244717-0-rs2mo3` 均进入 `cancelled`；一次消费 122、一次退款 120、净消费 2，迟到结果未建立 AssetVersion。 |
+
+### LOVART-CONTENT-004：旧模型持久化字段导致 Canvas Skill 无法估价和执行（2026-09-07）
+
+| 字段 | 内容 |
+|---|---|
+| 严重等级 | P1：已登录用户可以填写 Skill 表单，但点击估价或执行不产生请求，核心工作流无法开始。 |
+| 云端复现 | Coze `main@eae09525`；浏览器 `wujie_selected_model` 仅包含 `model`、`modelName`、`apiProvider`。表单按钮可用，但 Network 无 `/api/skill-runs/estimate` 或 `/api/skill-runs` 请求。 |
+| 对照证据 | 在同一会话临时把相同供应商写入 `providerId` 和 `compositeKey` 后，估价返回 HTTP 200，Run 创建返回 HTTP 201；Run 为 `6701d85c-33e8-47aa-a3d1-799fd1477c30`。 |
+| 根因 | `chat-panel.tsx` 的 Skill 初始化只读取新字段 `providerId`，而历史模型选择仍可能只保存旧字段 `apiProvider`；`buildCanvasSkillRequest()` 因缺少精确图像供应商绑定返回空。 |
+| 最小修复 | 在 `model-defaults.ts` 增加统一持久化解析器，优先读取 `providerId`、兼容 `apiProvider`，支持 `compositeKey` 与带命名空间模型 ID；模型选择新写入同时保存 `providerId`、`compositeKey` 和兼容 `apiProvider`。 |
+| TDD | 三个兼容合同先 RED，再 GREEN；模型默认值和 Canvas Skill 相关扩大回归 `145/145`，TypeScript、构建版 ESLint、差异检查退出 0。 |
+| 当前状态 | **本地修复通过 / Coze 待部署复验。** 必须用旧字段记录直接刷新新部署，证明无需手工迁移即可估价和创建。 |

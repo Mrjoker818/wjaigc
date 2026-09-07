@@ -26,7 +26,7 @@ import { UniversalApiManager } from '@/lib/universal-api-manager';
 import type { ApiProvider } from '@/lib/universal-api-types';
 import type { CanvasImage } from '@/components/infinite-canvas';
 import { getModelDisplayName } from '@/lib/model-name-map';
-import { selectInitialModel } from '@/lib/model-defaults';
+import { readPersistedImageModelSelection, selectInitialModel } from '@/lib/model-defaults';
 import { getPromptTemplates, searchTemplates, type PromptTemplate } from '@/lib/prompt-templates';
 import { classifyIntent, ClassifiedIntent, IntentCategory } from '@/lib/intent-classifier';
 import { generateClarificationMessage, detectVagueScenarios, type ClarificationTemplate, type VagueScenario } from '@/lib/clarification-templates';
@@ -995,10 +995,8 @@ function getCurrentImageModelInfo(imageModelState: string, imageModelProviderIdS
     // 备用：从 wujie_selected_model 读取（generation panel 选择的模型）
     const rawModel = localStorage.getItem('wujie_selected_model');
     if (rawModel) {
-      const modelInfo = JSON.parse(rawModel);
-      if (modelInfo.model) {
-        return { model: modelInfo.model, providerId: modelInfo.providerId || undefined };
-      }
+      const selection = readPersistedImageModelSelection(JSON.parse(rawModel));
+      if (selection) return { model: selection.modelId, providerId: selection.providerId };
     }
     // 备用：从 userData 读取
     const currentUserId = localStorage.getItem('unbounded_ai_current_user');
@@ -2069,11 +2067,10 @@ export function ChatPanel({ themeStyle, projectId, onAddToPrompt, onAddImages, o
     const saved = localStorage.getItem('wujie_selected_model');
     if (saved) {
       try {
-        const parsed = JSON.parse(saved);
-        if (parsed?.model) {
-          const modelId = parsed.providerId ? `${parsed.providerId}::${parsed.model}` : parsed.model;
-          setImageModel(modelId);
-          setImageModelProviderId(parsed.providerId || '');
+        const selection = readPersistedImageModelSelection(JSON.parse(saved));
+        if (selection) {
+          setImageModel(selection.compositeKey);
+          setImageModelProviderId(selection.providerId);
         }
       } catch {
         // ignore
@@ -5523,6 +5520,8 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                                 ...existing,
                                 model: modelId,
                                 modelName: m.name,
+                                providerId: m.providerId,
+                                compositeKey: `${m.providerId}::${modelId}`,
                                 apiProvider: m.providerId,
                               }));
                             }}

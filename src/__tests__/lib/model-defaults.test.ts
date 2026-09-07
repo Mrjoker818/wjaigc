@@ -2,10 +2,41 @@ import { describe, expect, it } from 'vitest';
 import {
   isModelAssignedToUser,
   parseExactModelKey,
+  readPersistedImageModelSelection,
   resolvePersistedModelSelection,
   resolveQuickCreateModel,
   selectInitialModel,
 } from '@/lib/model-defaults';
+
+describe('persisted image model record', () => {
+  it('reads the legacy apiProvider field written by the canvas chat model selector', () => {
+    expect(readPersistedImageModelSelection({
+      model: 'gpt-image-2',
+      apiProvider: 'pear-image',
+    })).toEqual({
+      compositeKey: 'pear-image::gpt-image-2',
+      modelId: 'gpt-image-2',
+      providerId: 'pear-image',
+    });
+  });
+
+  it('prefers the canonical providerId and preserves namespaced model ids', () => {
+    expect(readPersistedImageModelSelection({
+      model: 'vendor::image-v2',
+      providerId: 'provider-a',
+      apiProvider: 'stale-provider',
+    })).toEqual({
+      compositeKey: 'provider-a::vendor::image-v2',
+      modelId: 'vendor::image-v2',
+      providerId: 'provider-a',
+    });
+  });
+
+  it('rejects records without an exact provider identity', () => {
+    expect(readPersistedImageModelSelection({ model: 'gpt-image-2' })).toBeNull();
+    expect(readPersistedImageModelSelection('gpt-image-2')).toBeNull();
+  });
+});
 
 describe('persisted model selection resolution', () => {
   const candidates = [

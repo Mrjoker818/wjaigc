@@ -2212,3 +2212,11 @@ The focused gate test passes `7/7`; the actual protected-baseline command passes
 - 首版父子取消修复未通过云端：父任务取消和部分退款成功后，两个零成本子任务仍 processing，重复取消返回 HTTP 500。二次候选已按真实行结构完成 RED/GREEN，聚焦 `58/58`、全仓 `5346 passed / 174 conditional skipped / 0 failed`，类型与零错误 ESLint 通过。
 - 本轮增量尚无隔离 PostgreSQL 真执行；当前生产构建也没有新鲜通过结果，4 GiB OOM、12 GiB 长构建被人工终止。Coze 必须重新构建并执行取消链路，不能沿用上一提交构建证明当前候选。
 - **发布结论：有条件通过，仅允许将二次取消候选推送 `main` 做 Coze 验证。** 子任务取消、Pinterest、CSV、Pear 成功输出和最终浏览器证据关闭前，Task 8 与全平台仍不通过。
+
+## 2026-09-07 Lovart 第二批第三轮发布判断
+
+- `main@eae09525` 已在 Coze 证明父 Run 取消会把两个活动预付图像子任务持久化为 `cancelled`，且迟到结果不建立 AssetVersion；`LOVART-CONTENT-003` 云端关闭。
+- 同一真实账务样本只有一笔消费 `122` 和一笔退款 `120`，最终净消费 `2`，与已完成文本规划步骤一致。
+- 新发现的 `LOVART-CONTENT-004` 已完成最小兼容修复：旧 `apiProvider` 和新 `providerId + compositeKey` 均可解析为精确图像模型绑定，新选择继续同时写入兼容字段。扩大相关回归 `145/145`，TypeScript、构建版 ESLint、保护基线和差异检查均退出 0；生产构建 `119/119` 页面、退出 0。
+- 本修复只处理浏览器模型选择持久化，不修改供应商请求、任务、资产、积分或 Skill 目录；仍须推送新候选并在未手工迁移 localStorage 的云端会话中复验估价和创建。
+- **发布结论：有条件通过，可进入 Coze 兼容性复验。** Workflow Pinterest、Canvas 三行 SKU、Pear 成功成品及完整证据关闭前，Task 8 与全平台仍不通过。

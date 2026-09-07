@@ -2892,3 +2892,12 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - 二次 TDD 将取消拆为“权威父任务验证 + 直接条件更新子任务”，RED 为 `2 failed / 11 passed`，GREEN 聚焦 `58/58`。新鲜全仓 `5346 passed / 174 conditional skipped / 0 failed`；TypeScript、构建版 ESLint 退出 0。
 - 本机 4 GiB 构建确定性 OOM；12 GiB 重试因耗时超过十分钟被人工终止，当前二次候选没有新的生产构建通过声明。上一提交 `8bc08331` 已有云端真实构建，本次仅涉及取消 SQL 与回归测试，但仍需由 Coze 新构建验证。
 - **回归判定：缩略图 16:9 CLOUD PASS；子任务取消 SECOND LOCAL CANDIDATE PASS / CLOUD PENDING。** Pinterest、CSV、Pear 成功成品与最终证据仍未关闭。
+
+## 2026-09-07 Lovart Task 8 第三轮云端取消与模型持久化回归
+
+- Coze 精确运行 `main@eae0952521f74e652ac8754e9b9a489233588716`，`origin/stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 保持不变。
+- Canvas“YouTube/B站缩略图”Run `6701d85c-33e8-47aa-a3d1-799fd1477c30` 的两个持久化图像子任务 `async-1788742244699-0-r53i65`、`async-1788742244717-0-rs2mo3` 均进入 `cancelled`；类型为 `generate-async`、`creditStatus=not-applicable`、`creditCost=0`，迟到结果未建立 AssetVersion。
+- 父 Run 最终为 `cancelled`。消费流水 `-122`，退款流水 `+120`，净消费为已完成文本规划步骤的 `2` 积分；没有重复消费或重复退款。由此关闭 `LOVART-CONTENT-003` 的云端子任务取消与部分退款边界。
+- 同轮稳定复现 `LOVART-CONTENT-004`：浏览器历史 `wujie_selected_model` 仅保存 `apiProvider` 时，Canvas Skill 表单虽可填写，但估价与执行不会发出请求；临时迁移为 `providerId + compositeKey` 后，估价 HTTP 200、Run HTTP 201，证明根因位于前端持久化兼容读取。
+- 本地按 RED/GREEN 新增统一解析器，同时兼容 `providerId` 和旧 `apiProvider`，并在新写入中持久化 `providerId + compositeKey`。模型默认值、Canvas Skill 表单与相关运行时扩大回归共 `145/145` 通过；`pnpm ts-check`、`pnpm lint:build`、保护基线 `38/38` 和 `git diff --check` 通过。8 GiB Node 堆生产构建退出 0，Webpack 12.2 分钟、TypeScript 56 秒、静态页面 `119/119`。
+- **回归判定：子任务取消与部分退款 CLOUD PASS；旧模型持久化兼容 LOCAL PASS / CLOUD PENDING。** Pinterest、三行 SKU、Pear 成功成品与最终浏览器证据仍未关闭。

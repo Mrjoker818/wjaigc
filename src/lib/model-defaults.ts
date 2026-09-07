@@ -13,6 +13,13 @@ export interface ExactModelKey {
   modelId: string;
 }
 
+interface PersistedImageModelRecord {
+  model?: unknown;
+  providerId?: unknown;
+  apiProvider?: unknown;
+  compositeKey?: unknown;
+}
+
 export type PersistedModelSelectionResolution =
   | {
       status: 'exact' | 'migrated';
@@ -75,6 +82,22 @@ export function parseExactModelKey(selection: string): ExactModelKey | null {
   const providerId = selection.slice(0, separatorIndex);
   const modelId = selection.slice(separatorIndex + 2);
   return modelId ? { providerId, modelId } : null;
+}
+
+export function readPersistedImageModelSelection(value: unknown): (ExactModelKey & { compositeKey: string }) | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const record = value as PersistedImageModelRecord;
+  if (typeof record.compositeKey === 'string') {
+    const exact = parseExactModelKey(record.compositeKey.trim());
+    if (exact) return { ...exact, compositeKey: `${exact.providerId}::${exact.modelId}` };
+  }
+
+  const modelId = typeof record.model === 'string' ? record.model.trim() : '';
+  const canonicalProviderId = typeof record.providerId === 'string' ? record.providerId.trim() : '';
+  const legacyProviderId = typeof record.apiProvider === 'string' ? record.apiProvider.trim() : '';
+  const providerId = canonicalProviderId || legacyProviderId;
+  if (!modelId || !providerId) return null;
+  return { providerId, modelId, compositeKey: `${providerId}::${modelId}` };
 }
 
 export function resolvePersistedModelSelection(
