@@ -2883,3 +2883,12 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - 新鲜全仓：`658 passed / 33 skipped` 测试文件，`5344 passed / 174 conditional skipped / 0 failed`；跳过项主要需要专用隔离 PostgreSQL，未冒充通过。
 - `pnpm ts-check`、`pnpm lint:build` 均退出 0；8 GiB Node 堆生产构建退出 0，Webpack 约 12.1 分钟、TypeScript 54 秒、静态页面 `119/119`。
 - 结论：修复候选可进入 `main` 与 Coze 复验；在固定比例、子任务取消、Pear 成功输出、Workflow Pinterest、三行 SKU、刷新恢复及最终浏览器证据闭环前，Task 8 仍为“有条件通过”。
+
+## 2026-09-07 Lovart Task 8 第二轮云端取消回归
+
+- Coze `main@8bc083315aa4e8f4bebfae02d4c313726cd57247` 已真实运行 Canvas“YouTube/B站缩略图”。Run `5b7dda8a-57fb-4991-a2f3-d7cf46903570` 的两个持久化子任务均提交 `aspectRatio=16:9`，关闭缩略图比例错误。
+- 同一真实取消中，父 Run 为 `cancelled`，文本步骤完成、两个图像步骤未完成；消费 122、退款 120，净消费 2。子任务仍为 `processing`，再次 PATCH 取消返回 HTTP 500，稳定证明首版子取消 SQL 没有生效。
+- 云端原始行已核对：父子 `userId=admin_mr_joker`、`projectId=project_1787549625844_nfmso3ts9` 一致；子任务类型 `generate-async`、`creditStatus=not-applicable`、`creditCost=0`，provenance 精确指向父 Run。因此不是模型不可用或数据不满足业务条件。
+- 二次 TDD 将取消拆为“权威父任务验证 + 直接条件更新子任务”，RED 为 `2 failed / 11 passed`，GREEN 聚焦 `58/58`。新鲜全仓 `5346 passed / 174 conditional skipped / 0 failed`；TypeScript、构建版 ESLint 退出 0。
+- 本机 4 GiB 构建确定性 OOM；12 GiB 重试因耗时超过十分钟被人工终止，当前二次候选没有新的生产构建通过声明。上一提交 `8bc08331` 已有云端真实构建，本次仅涉及取消 SQL 与回归测试，但仍需由 Coze 新构建验证。
+- **回归判定：缩略图 16:9 CLOUD PASS；子任务取消 SECOND LOCAL CANDIDATE PASS / CLOUD PENDING。** Pinterest、CSV、Pear 成功成品与最终证据仍未关闭。

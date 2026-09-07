@@ -2205,3 +2205,10 @@ The focused gate test passes `7/7`; the actual protected-baseline command passes
 - 当前工作站没有专用 `POSTGRES_TEST_DATABASE_URL`，新 SQL 取消语句尚无本轮隔离真库执行证据；历史 Task 8 真库门禁不能替代该增量。
 - Pear 上游本轮未产出图像，两个成品、AssetVersion、刷新恢复仍未验证；Workflow Pinterest、三行 SKU 和成功路径浏览器证据亦未完成。
 - **发布结论：有条件通过，仅允许推送 `main` 进入复验；Task 8 和全平台均不得宣布完成。**
+
+## 2026-09-07 Lovart 第二批第二轮发布判断
+
+- `main@8bc08331` 已在 Coze 证明 YouTube/B站两个真实子任务均携带 `16:9`，该规格错误关闭。
+- 首版父子取消修复未通过云端：父任务取消和部分退款成功后，两个零成本子任务仍 processing，重复取消返回 HTTP 500。二次候选已按真实行结构完成 RED/GREEN，聚焦 `58/58`、全仓 `5346 passed / 174 conditional skipped / 0 failed`，类型与零错误 ESLint 通过。
+- 本轮增量尚无隔离 PostgreSQL 真执行；当前生产构建也没有新鲜通过结果，4 GiB OOM、12 GiB 长构建被人工终止。Coze 必须重新构建并执行取消链路，不能沿用上一提交构建证明当前候选。
+- **发布结论：有条件通过，仅允许将二次取消候选推送 `main` 做 Coze 验证。** 子任务取消、Pinterest、CSV、Pear 成功输出和最终浏览器证据关闭前，Task 8 与全平台仍不通过。

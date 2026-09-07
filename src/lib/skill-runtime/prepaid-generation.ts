@@ -283,8 +283,15 @@ export async function cancelSkillPrepaidChildren(input: {
   runId: string;
 }): Promise<string[]> {
   await ensureCloudTaskTables();
+  const parent = await getCloudTaskForUser(input.runId, input.actorUserId);
+  if (
+    !parent
+    || parent.type !== 'agent-run'
+    || parent.status !== 'cancelled'
+    || !parent.projectId
+  ) return [];
   const result = await getPool().query<{ id: string }>(`
-    UPDATE cloud_tasks child
+    UPDATE cloud_tasks
     SET status = 'cancelled',
         progress = 0,
         label = '父 Skill 已取消',
@@ -293,20 +300,15 @@ export async function cancelSkillPrepaidChildren(input: {
         lease_expires_at = 0,
         revision = revision + 1,
         updated_at = $3
-    FROM cloud_tasks parent
-    WHERE parent.id = $1
-      AND parent.user_id = $2
-      AND parent.type = 'agent-run'
-      AND parent.status = 'cancelled'
-      AND child.user_id = parent.user_id
-      AND child.project_id = parent.project_id
-      AND child.type = 'generate-async'
-      AND child.status IN ('queued', 'pending', 'processing')
-      AND child.credit_status = 'not-applicable'
-      AND child.credit_cost = 0
-      AND child.result #>> '{skillBillingProvenance,runId}' = parent.id
-    RETURNING child.id
-  `, [input.runId, input.actorUserId, Date.now()]);
+    WHERE user_id = $2
+      AND project_id = $4
+      AND type = 'generate-async'
+      AND status IN ('queued', 'pending', 'processing')
+      AND credit_status = 'not-applicable'
+      AND credit_cost = 0
+      AND result #>> '{skillBillingProvenance,runId}' = $1
+    RETURNING id
+  `, [input.runId, input.actorUserId, Date.now(), parent.projectId]);
   return result.rows.map(row => row.id);
 }
 

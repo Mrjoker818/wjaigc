@@ -1,9 +1,9 @@
 {
-  "scope": "Lovart 第二批内容电商 Task 8 云端首轮",
-  "cloudSourceCommit": "bcdcfe50fb3acc079ff8e586a58525a72fd0f80a",
-  "cloudBuildId": "wBB36Y68vT1AEnuDvQxrv",
+  "scope": "Lovart 第二批内容电商 Task 8 云端首轮与第二轮",
+  "cloudSourceCommit": "8bc083315aa4e8f4bebfae02d4c313726cd57247",
+  "cloudBuildId": "HmaEewyFjKRZtQ8qhUf-O",
   "browser": "Microsoft Edge",
-  "runId": "4257e01c-caf9-44f1-a814-9086e017158d",
+  "runId": "5b7dda8a-57fb-4991-a2f3-d7cf46903570",
   "skill": "preset-video-platform-thumbnails",
   "bindings": {
     "imageProviderId": "api_1780630178347_rjqlmam",
@@ -12,29 +12,25 @@
     "orchestratorModelId": "gemini-3.1-flash-lite-preview"
   },
   "children": [
-    "async-1788734575885-0-orcrvd",
-    "async-1788734575865-0-fu6at7"
+    "async-1788737886967-0-50r251",
+    "async-1788737886994-0-pceesz"
   ],
   "credits": {
-    "before": 8410,
-    "afterCharge": 8288,
-    "afterCancel": 8408,
     "netCost": 2,
-    "chargeTransaction": "ctx_charge_b494d32e9a02149fb3743f9d594f681d",
-    "refundTransaction": "ctx_refund_bceddc9523d93fed5d30cd626facbe05"
+    "chargeTransaction": "ctx_charge_6e8a8c0014a7b49df91d7fe9de72dcdb",
+    "refundTransaction": "ctx_refund_38417e4ca735b205a102aaf50797ffe7"
   },
   "findings": [
-    "两个缩略图子任务错误提交 aspectRatio=1:1，而不是 16:9",
-    "父 Run 取消后超过 25 秒，两个子任务仍保持 processing",
+    "两个缩略图子任务均正确提交 aspectRatio=16:9，比例修复云端通过",
+    "父 Run 取消后两个子任务仍保持 processing，再次取消返回 HTTP 500",
     "Pear 上游暂时不可用，未生成成品或 AssetVersion"
   ],
   "localCandidateVerification": {
-    "focused": "45/45 passed",
-    "task8Expanded": "97/97 passed",
-    "fullSuite": "5344 passed / 174 conditional skipped / 0 failed",
+    "focused": "58/58 passed",
+    "fullSuite": "5346 passed / 174 conditional skipped / 0 failed",
     "typecheck": "exit 0",
     "lintBuild": "exit 0",
-    "productionBuild": "exit 0; 119/119 pages"
+    "productionBuild": "current delta unverified: 4 GiB OOM; 12 GiB retry manually stopped after more than 10 minutes"
   },
-  "verdict": "PARTIAL; local fixes require Coze redeploy and real retest"
+  "verdict": "PARTIAL; 16:9 cloud pass, second child-cancellation candidate requires Coze rebuild and real retest"
 }

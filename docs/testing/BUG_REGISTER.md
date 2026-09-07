@@ -4146,7 +4146,7 @@ Task 4 独立审查的两个 Minor 继续保留给最终审查：单元夹具 op
 | 根因 | 通用生成适配器读取 `inputValues.aspectRatio`，缩略图和 Pinterest 权威定义却未声明该输入。 |
 | 修复 | 缩略图定义固定 `aspectRatio=16:9`，Pinterest 固定 `aspectRatio=2:3`；仍由通用输入解析和步骤编译链路消费，不增加 Skill ID 特判。 |
 | TDD | 比例合同先 RED，再 GREEN；聚焦两文件 `45/45`、Task 8 扩大聚焦 `97/97`。 |
-| 当前状态 | **本地已修复 / 云端待复验。** 新候选部署后必须从持久子任务核对实际 `submissionPayload.aspectRatio`。 |
+| 当前状态 | **已修复 / Coze Edge 云端关闭。** `main@8bc08331` 的 Run `5b7dda8a-57fb-4991-a2f3-d7cf46903570` 已真实创建两个 Pear 子任务；持久化 `submissionPayload.aspectRatio` 均为 `16:9`。Pear 当时不可用不影响请求规格结论。Pinterest `2:3` 仍需在 Workflow 真实任务中独立验收。 |
 
 ### LOVART-CONTENT-003：父 Skill 取消后预付图像子任务仍保持 processing（2026-09-07）
 
@@ -4155,7 +4155,7 @@ Task 4 独立审查的两个 Minor 继续保留给最终审查：单元夹具 op
 | 严重等级 | P1：用户看到父任务已取消，但后台子任务仍运行，存在资源浪费和迟到结果风险。 |
 | 云端复现 | 同一 Run 取消后超过 25 秒，子任务 `async-1788734575885-0-orcrvd`、`async-1788734575865-0-fu6at7` 仍为 `processing` 且 `updatedAt` 不变。 |
 | 账务事实 | 余额 `8410 → 8288 → 8408`；父消费 `ctx_charge_b494d32e9a02149fb3743f9d594f681d`，部分退款 `ctx_refund_bceddc9523d93fed5d30cd626facbe05`，最终只消费已完成文本步骤 2 积分。退款本身正确。 |
-| 根因 | `SkillRuntimeService.cancel()` 只取消父 Agent Run；停止轮询后既没有持久化取消当前 Run 的预付子任务，也没有 abort 子任务执行域。 |
-| 修复 | 父取消成功后，以用户、项目、Run provenance、零成本预付子任务和活动终态为条件，数据库批量转为 cancelled；随后逐个 abort 当前进程执行域。其他用户、项目、普通计费任务和终态任务均不触碰。 |
-| TDD | 服务合同先 RED，再 GREEN；聚焦两文件 `45/45`、Task 8 扩大聚焦 `97/97`。 |
-| 当前状态 | **本地已修复 / 隔离 PostgreSQL 当前增量未验证 / 云端待复验。** 必须证明子任务及时 cancelled、一次退款不变、迟到结果不回写。 |
+| 根因 | 第一轮确认为 `SkillRuntimeService.cancel()` 没有持久化取消预付子任务。`8bc08331` 增加取消后，云端进一步证明单条自连接 `UPDATE ... FROM cloud_tasks parent` 在父任务已经成功取消和退款后抛错：PATCH 返回 500，两个完全满足用户、项目、类型、零成本及 provenance 条件的子任务仍为 `processing`。因此父终态与子更新耦合在同一复杂 SQL 是第二层根因。 |
+| 修复 | 二次候选先通过权威读取验证父任务归属、类型、取消终态和项目，再用 `actorUserId + projectId + runId provenance` 直接条件更新活动零成本子任务，移除自连接；成功返回的子任务 ID 继续逐个 abort 当前进程执行域。普通计费任务、其他项目及既有终态均不触碰。 |
+| TDD | 新增真实行结构合同并先观察 `2 failed / 11 passed`，再完成最小修改；聚焦 `58/58`，全仓 `5346 passed / 174 conditional skipped / 0 failed`，TypeScript 与构建版 ESLint 退出 0。 |
+| 当前状态 | **二次本地候选通过 / Coze 待复验。** 云端失败样本为 Run `5b7dda8a-57fb-4991-a2f3-d7cf46903570`，子任务 `async-1788737886967-0-50r251`、`async-1788737886994-0-pceesz`；父任务已部分退款且净消费 2，但两子任务持续 processing。必须部署二次候选后证明及时 cancelled、一次退款不变、迟到结果不回写。 |

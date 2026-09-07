@@ -77,6 +77,10 @@ describe('prepaid child polling lifecycle', () => {
       .toEqual({ expired: false, deadlineAt: 602_000, remainingMs: 599_000 });
   });
   it('cancels only live zero-cost prepaid children owned by the cancelled parent run', async () => {
+    mocks.getParent.mockResolvedValue({
+      id: 'parent', userId: 'user', projectId: 'project', type: 'agent-run',
+      status: 'cancelled', creditStatus: 'charged',
+    });
     mocks.query.mockResolvedValue({ rows: [{ id: 'child-1' }, { id: 'child-2' }] });
 
     await expect(cancelSkillPrepaidChildren({
@@ -85,9 +89,19 @@ describe('prepaid child polling lifecycle', () => {
     })).resolves.toEqual(['child-1', 'child-2']);
 
     expect(mocks.ensureTables).toHaveBeenCalledTimes(1);
+    expect(mocks.getParent).toHaveBeenCalledWith('parent', 'user');
     expect(mocks.query).toHaveBeenCalledWith(
-      expect.stringMatching(/parent\.status = 'cancelled'[\s\S]*child\.status IN \('queued', 'pending', 'processing'\)[\s\S]*child\.credit_status = 'not-applicable'[\s\S]*skillBillingProvenance,runId/),
-      ['parent', 'user', expect.any(Number)],
+      expect.stringMatching(/UPDATE cloud_tasks[\s\S]*status IN \('queued', 'pending', 'processing'\)[\s\S]*credit_status = 'not-applicable'[\s\S]*skillBillingProvenance,runId/),
+      ['parent', 'user', expect.any(Number), 'project'],
     );
+    expect(mocks.query.mock.calls[0]?.[0]).not.toMatch(/FROM cloud_tasks parent/);
+  });
+
+  it('refuses to cancel children unless the owned parent is already cancelled', async () => {
+    await expect(cancelSkillPrepaidChildren({
+      actorUserId: 'user', runId: 'parent',
+    })).resolves.toEqual([]);
+
+    expect(mocks.query).not.toHaveBeenCalled();
   });
 });
