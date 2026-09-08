@@ -10,7 +10,7 @@ const secondBatchIds = [
 
 describe('Lovart content and commerce Skill definitions', () => {
   it('publishes the three second-batch workflows only to canvas and workflow', () => {
-    expect(CANVAS_WORKFLOW_SKILLS.map(skill => skill.id).slice(-3)).toEqual(secondBatchIds);
+    expect(CANVAS_WORKFLOW_SKILLS.map(skill => skill.id).slice(24, 27)).toEqual(secondBatchIds);
     expect(listSkillsForSurface('canvas').map(skill => skill.id)).toEqual(
       CANVAS_WORKFLOW_SKILLS.map(skill => skill.id),
     );
