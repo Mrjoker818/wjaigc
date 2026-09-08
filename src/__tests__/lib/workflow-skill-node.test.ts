@@ -204,7 +204,7 @@ describe('workflow Skill node contract', () => {
     }]);
   });
 
-  it('isolates an unknown structured output schema during workflow restore', async () => {
+  it('rejects an unknown structured output schema during workflow restore', async () => {
     const fetcher = async () => new Response(JSON.stringify({ run: {
       runId: 'run', projectId: 'project', surface: 'workflow', workspaceId: 'workflow:wf',
       skillId: 'skill', skillVersion: 1, status: 'completed', assetVersionIds: [],
@@ -214,10 +214,7 @@ describe('workflow Skill node contract', () => {
     await expect(loadSavedWorkflowSkillResult({
       runId: 'run', projectId: 'project', workflowId: 'wf', skillId: 'skill', skillVersion: 1,
       signal: new AbortController().signal, fetcher: fetcher as typeof fetch,
-    })).resolves.toMatchObject({ output: {
-      outputs: [],
-      outputErrors: [{ index: 0, stepId: 'audit:a', schemaId: 'unknown', code: 'SKILL_OUTPUT_SCHEMA_UNKNOWN' }],
-    } });
+    })).rejects.toThrow('SKILL_OUTPUT_SCHEMA_UNKNOWN');
   });
 
   it('distinguishes missing outputs from present non-array outputs during workflow restore', async () => {

@@ -84,9 +84,15 @@ function readWorkflowSkillRunProjection(payload: unknown): WorkflowSkillRunProje
   if (typeof candidate.runId !== 'string' || typeof candidate.status !== 'string') return null;
   const parsedOutputs = parseDurableSkillOutputsIsolated(candidate.outputs);
   return {
-    ...(candidate as unknown as WorkflowSkillRunProjection),
+    runId: candidate.runId,
+    status: candidate.status,
+    ...(Array.isArray(candidate.assetVersionIds)
+      ? { assetVersionIds: candidate.assetVersionIds as string[] }
+      : {}),
     outputs: parsedOutputs.outputs,
     ...(parsedOutputs.errors.length > 0 ? { outputErrors: parsedOutputs.errors } : {}),
+    ...(typeof candidate.currentStepId === 'string' ? { currentStepId: candidate.currentStepId } : {}),
+    ...(typeof candidate.resumeFromStepId === 'string' ? { resumeFromStepId: candidate.resumeFromStepId } : {}),
   };
 }
 

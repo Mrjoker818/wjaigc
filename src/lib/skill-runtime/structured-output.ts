@@ -101,6 +101,7 @@ export function parseDurableSkillOutputsIsolated(value: unknown): {
     } catch (error) {
       const stepId = diagnosticString(item, 'stepId');
       const schemaId = diagnosticString(item, 'schemaId');
+      if (schemaId !== 'platform-compliance-report-v1') throw error;
       errors.push({
         index,
         ...(stepId ? { stepId } : {}),

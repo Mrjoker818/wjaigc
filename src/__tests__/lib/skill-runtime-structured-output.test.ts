@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   durableSkillOutputKey,
   parseDurableSkillOutput,
+  parseDurableSkillOutputsIsolated,
 } from '@/lib/skill-runtime/structured-output';
 import { canonicalComplianceReportJson } from '@/lib/platform-compliance/report-schema';
 import { validReport, wideReport } from '@/__tests__/helpers/platform-compliance-fixtures';
@@ -64,5 +65,32 @@ describe('bounded durable Skill outputs', () => {
     expect(html).toEqual({ stepId: 'audit:a', kind: 'html', content: '<p>legacy</p>' });
     expect(durableSkillOutputKey(text)).toBe('audit:a\u0000text');
     expect(durableSkillOutputKey(json)).toBe('audit:a\u0000json\u0000platform-compliance-report-v1');
+  });
+
+  it('isolates only an explicitly tagged damaged platform compliance report', () => {
+    expect(parseDurableSkillOutputsIsolated([
+      { stepId: 'copy', kind: 'text', content: 'safe' },
+      { stepId: 'audit:a', kind: 'json', schemaId: 'platform-compliance-report-v1', content: '{bad' },
+    ])).toEqual({
+      outputs: [{ stepId: 'copy', kind: 'text', content: 'safe' }],
+      errors: [{
+        index: 1,
+        stepId: 'audit:a',
+        schemaId: 'platform-compliance-report-v1',
+        code: 'SKILL_OUTPUT_JSON_INVALID',
+      }],
+    });
+  });
+
+  it.each([
+    ['unknown schema', { stepId: 'ordinary', kind: 'json', schemaId: 'ordinary-skill-v1', content: '{}' }, 'SKILL_OUTPUT_SCHEMA_UNKNOWN'],
+    ['ordinary invalid JSON', { stepId: 'ordinary', kind: 'json', schemaId: 'ordinary-skill-v1', content: '{bad' }, 'SKILL_OUTPUT_JSON_INVALID'],
+    ['illegal kind', { stepId: 'ordinary', kind: 'binary', content: 'unsafe' }, 'SKILL_OUTPUT_INVALID'],
+    ['missing fields', { kind: 'text', content: 'unsafe' }, 'SKILL_OUTPUT_INVALID'],
+  ])('keeps the whole-output failure contract for %s', (_label, invalidOutput, code) => {
+    expect(() => parseDurableSkillOutputsIsolated([
+      { stepId: 'audit:a', kind: 'json', schemaId: 'platform-compliance-report-v1', content: '{bad' },
+      invalidOutput,
+    ])).toThrow(code);
   });
 });

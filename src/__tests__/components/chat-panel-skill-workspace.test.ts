@@ -38,6 +38,7 @@ function requestFor(sessionId: string): SkillRunRequest {
       designContent: 'Keep the selected product',
       sourceImages: ['version-a'],
     },
+    createCanvasSkillIdempotencyKey: () => 'canvas-skill:test-request',
     crypto: { randomUUID: () => 'test-request' },
   }) as () => SkillRunRequest;
   return build();
@@ -58,6 +59,7 @@ function visionRequestFor(input: {
     discoveredImageModels: [], imageModel: '', imageModelProviderId: '',
     canvasSkillSourceVersionIds: ['version-a'],
     canvasSkillInputValues: { sourceImages: ['version-a'] },
+    createCanvasSkillIdempotencyKey: () => 'canvas-skill:vision-request',
     crypto: { randomUUID: () => 'vision-request' },
   }) as () => SkillRunRequest | null;
   return build();

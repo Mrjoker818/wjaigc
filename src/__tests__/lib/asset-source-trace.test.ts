@@ -53,6 +53,10 @@ describe('asset source trace propagation', () => {
         metadata: { sourceTrace: { ...canvasSkillTraceFixture, privateValue: 'drop-me' } },
         createdAt: '2026-09-02T00:00:00.000Z',
       }),
+      findAsset: vi.fn().mockResolvedValue({
+        id: 'asset-output', ownerId: 'user-1', projectId: 'project-1', kind: 'image', status: 'active',
+        currentVersionId: 'version-output', createdAt: '2026-09-02T00:00:00.000Z', updatedAt: '2026-09-02T00:00:00.000Z',
+      }),
     };
     const storage = { read: async <T>(callback: (tx: typeof transaction) => Promise<T>) => callback(transaction) };
     const service = new AssetService(storage as unknown as AssetStorage);
@@ -91,6 +95,10 @@ describe('asset source trace propagation', () => {
         file: { url: '/managed.png', availability: 'ready' },
         parentVersionIds: [],
         createdAt: '2026-08-27T08:00:00.000Z',
+      }),
+      findAsset: vi.fn().mockResolvedValue({
+        id: 'asset-1', ownerId: 'user-1', projectId: 'project-1', kind: 'image', status: 'active',
+        currentVersionId: 'version-1', createdAt: '2026-08-27T08:00:00.000Z', updatedAt: '2026-08-27T08:00:00.000Z',
       }),
       findPlacement: vi.fn().mockResolvedValue({
         id: 'placement-1',

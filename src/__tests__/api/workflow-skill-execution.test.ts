@@ -27,7 +27,6 @@ const routeSource = readFileSync(
 
 describe('workflow Skill Run execution', () => {
   it.each([
-    ['unknown schema', { stepId: 'audit:a', kind: 'json', schemaId: 'unknown', content: '{}' }, 'SKILL_OUTPUT_SCHEMA_UNKNOWN'],
     ['oversized content', { stepId: 'audit:a', kind: 'json', schemaId: 'platform-compliance-report-v1', content: `${JSON.stringify(validReport())}${' '.repeat(256 * 1024)}` }, 'SKILL_OUTPUT_SIZE_LIMIT'],
     ['invalid report', { stepId: 'audit:a', kind: 'json', schemaId: 'platform-compliance-report-v1', content: JSON.stringify(wideReport(4097)) }, 'REPORT_KEY_LIMIT'],
   ])('isolates %s in a running poll while preserving safe progress evidence', async (_label, output, error) => {
@@ -58,6 +57,29 @@ describe('workflow Skill Run execution', () => {
       outputs: [{ stepId: 'copy', kind: 'text', content: 'safe progress' }],
       outputErrors: [expect.objectContaining({ index: 1, code: error })],
     }));
+  });
+
+  it.each([
+    ['unknown schema', { stepId: 'ordinary', kind: 'json', schemaId: 'ordinary-skill-v1', content: '{}' }, 'SKILL_OUTPUT_SCHEMA_UNKNOWN'],
+    ['ordinary invalid JSON', { stepId: 'ordinary', kind: 'json', schemaId: 'ordinary-skill-v1', content: '{bad' }, 'SKILL_OUTPUT_JSON_INVALID'],
+    ['illegal kind', { stepId: 'ordinary', kind: 'binary', content: 'unsafe' }, 'SKILL_OUTPUT_INVALID'],
+    ['missing fields', { kind: 'text', content: 'unsafe' }, 'SKILL_OUTPUT_INVALID'],
+  ])('rejects the whole Workflow run projection for %s', async (_label, output, error) => {
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ runId: 'run-reject' }), { status: 201 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ run: {
+        runId: 'run-reject', status: 'running', assetVersionIds: [], outputs: [
+          { stepId: 'copy', kind: 'text', content: 'must not become success' },
+          { stepId: 'audit:a', kind: 'json', schemaId: 'platform-compliance-report-v1', content: '{bad' },
+          output,
+        ],
+      } }), { status: 200 }));
+
+    await expect(executeWorkflowSkillRun({
+      submitUrl: 'http://localhost:5000/api/skill-runs', requestBody: { skillId: 'skill-a' },
+      headers: { 'Content-Type': 'application/json' }, fetcher, pollIntervalMs: 0,
+      resolveAssetVersion: async () => null,
+    })).rejects.toThrow(error);
   });
 
   it('normalizes a valid structured report before projecting running progress', async () => {
@@ -543,5 +565,31 @@ describe('workflow Skill Run execution', () => {
         outputErrors: [{ index: 1, stepId: 'audit:bad', schemaId: 'platform-compliance-report-v1', code: 'SKILL_OUTPUT_JSON_INVALID' }],
       },
     });
+  });
+
+  it.each([
+    ['failed', {}],
+    ['timeout', [{ index: 0, code: 'FAKE', secret: 'api-key-like-value' }]],
+    ['paused', Array.from({ length: 1024 }, (_, index) => ({ index, code: 'FAKE' }))],
+  ])('ignores untrusted remote outputErrors and preserves the %s terminal contract', async (status, outputErrors) => {
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ runId: 'run-untrusted-errors' }), { status: 201 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ run: {
+        runId: 'run-untrusted-errors', status, assetVersionIds: [], outputErrors,
+        outputs: [{ stepId: 'copy', kind: 'text', content: '可信部分输出' }],
+      } }), { status: 200 }));
+
+    const error = await executeWorkflowSkillRun({
+      submitUrl: 'http://localhost:5000/api/skill-runs', requestBody: { skillId: 'skill-a' },
+      headers: { 'Content-Type': 'application/json' }, fetcher, pollIntervalMs: 0,
+      resolveAssetVersion: async () => null,
+    }).catch(value => value as unknown);
+
+    expect(error).toBeInstanceOf(WorkflowSkillRunTerminalError);
+    expect(error).toMatchObject({
+      runId: 'run-untrusted-errors', status,
+      output: { text: '可信部分输出', outputs: [{ stepId: 'copy', kind: 'text', content: '可信部分输出' }] },
+    });
+    expect((error as WorkflowSkillRunTerminalError).output).not.toHaveProperty('outputErrors');
   });
 });
