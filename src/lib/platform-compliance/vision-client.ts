@@ -35,6 +35,7 @@ export interface ComplianceVisionDependencies {
 }
 
 type ComplianceVisionErrorCode =
+  | 'COMPLIANCE_VISION_CANCELLED'
   | 'COMPLIANCE_VISION_AUTH_REJECTED'
   | 'COMPLIANCE_VISION_RATE_LIMITED'
   | 'COMPLIANCE_VISION_PROVIDER_UNAVAILABLE'
@@ -70,6 +71,12 @@ const defaultDependencies: ComplianceVisionDependencies = {
 };
 
 const RESPONSE_KEYS = new Set(['checks']);
+const MAX_RESPONSE_BYTES = 256 * 1024;
+const MAX_RESPONSE_DEPTH = 10;
+const MAX_RESPONSE_ITEMS = 256;
+const MAX_REQUEST_ID_LENGTH = 128;
+const VISION_TIMEOUT_MS = 60_000;
+const SAFE_REQUEST_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/u;
 const CHECK_KEYS = new Set([
   'ruleId', 'status', 'evidence', 'measuredValue', 'confidence', 'remediation',
 ]);
@@ -78,10 +85,14 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
-function requestIdFrom(response: Response, fallback: string): string {
-  return response.headers.get('x-request-id')?.trim()
-    || response.headers.get('request-id')?.trim()
-    || fallback;
+function requestIdFrom(response: Response, input: ComplianceVisionInput): string {
+  const value = response.headers.get('x-request-id')?.trim()
+    || response.headers.get('request-id')?.trim();
+  if (!value) return input.requestId;
+  if (value.length > MAX_REQUEST_ID_LENGTH || !SAFE_REQUEST_ID.test(value)) {
+    throw responseError(input, input.requestId);
+  }
+  return value;
 }
 
 function failedStatus(rule: PlatformComplianceRule): PlatformComplianceCheckV1['status'] {
@@ -104,6 +115,67 @@ function responseError(
   );
 }
 
+async function readBoundedResponse(
+  response: Response,
+  input: ComplianceVisionInput,
+  requestId: string,
+): Promise<string> {
+  const declaredLength = response.headers.get('content-length');
+  if (declaredLength !== null && (
+    !/^\d+$/u.test(declaredLength)
+    || Number(declaredLength) > MAX_RESPONSE_BYTES
+  )) {
+    throw responseError(input, requestId);
+  }
+  if (!response.body) return '';
+
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let byteLength = 0;
+  try {
+    while (true) {
+      const chunk = await reader.read();
+      if (chunk.done) break;
+      byteLength += chunk.value.byteLength;
+      if (byteLength > MAX_RESPONSE_BYTES) {
+        await reader.cancel().catch(() => undefined);
+        throw responseError(input, requestId);
+      }
+      chunks.push(chunk.value);
+    }
+  } catch (error) {
+    if (error instanceof ComplianceVisionError) throw error;
+    throw responseError(input, requestId);
+  }
+
+  const bytes = new Uint8Array(byteLength);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  try {
+    return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+  } catch {
+    throw responseError(input, requestId);
+  }
+}
+
+function assertBoundedJsonStructure(value: unknown): void {
+  let itemCount = 0;
+  const visit = (candidate: unknown, depth: number): void => {
+    if (depth > MAX_RESPONSE_DEPTH) throw new Error('COMPLIANCE_VISION_RESPONSE_DEPTH_LIMIT');
+    itemCount += 1;
+    if (itemCount > MAX_RESPONSE_ITEMS) throw new Error('COMPLIANCE_VISION_RESPONSE_ITEM_LIMIT');
+    if (!candidate || typeof candidate !== 'object') return;
+    const children = Array.isArray(candidate)
+      ? candidate
+      : Object.values(candidate as Record<string, unknown>);
+    for (const child of children) visit(child, depth + 1);
+  };
+  visit(value, 0);
+}
+
 function parseScalar(value: unknown): ComplianceJsonScalar | undefined {
   if (value === null || typeof value === 'string' || typeof value === 'boolean') return value;
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
@@ -117,8 +189,9 @@ function parseVisionChecks(
   let parsed: unknown;
   try {
     parsed = JSON.parse(content) as unknown;
-  } catch (error) {
-    throw responseError(input, requestId, error);
+    assertBoundedJsonStructure(parsed);
+  } catch {
+    throw responseError(input, requestId);
   }
   if (
     !isRecord(parsed)
@@ -219,7 +292,21 @@ export async function invokeComplianceVision(
   input: ComplianceVisionInput,
   dependencies: ComplianceVisionDependencies = defaultDependencies,
 ): Promise<VisionComplianceResult> {
-  input.signal.throwIfAborted();
+  if (input.signal.aborted) {
+    throw new ComplianceVisionError(
+      'COMPLIANCE_VISION_CANCELLED',
+      input.provider.id,
+      input.modelId,
+      input.requestId,
+      false,
+      undefined,
+      { cause: input.signal.reason },
+    );
+  }
+  const requestSignal = AbortSignal.any([
+    input.signal,
+    AbortSignal.timeout(VISION_TIMEOUT_MS),
+  ]);
   let response: Response;
   try {
     response = await dependencies.fetcher(input.provider.baseUrl, '/chat/completions', {
@@ -241,9 +328,20 @@ export async function invokeComplianceVision(
           ],
         }],
       }),
-      signal: input.signal,
+      signal: requestSignal,
     });
   } catch (error) {
+    if (input.signal.aborted) {
+      throw new ComplianceVisionError(
+        'COMPLIANCE_VISION_CANCELLED',
+        input.provider.id,
+        input.modelId,
+        input.requestId,
+        false,
+        undefined,
+        { cause: input.signal.reason },
+      );
+    }
     throw new ComplianceVisionError(
       'COMPLIANCE_VISION_SUBMISSION_UNKNOWN',
       input.provider.id,
@@ -255,13 +353,15 @@ export async function invokeComplianceVision(
     );
   }
 
-  const requestId = requestIdFrom(response, input.requestId);
+  const requestId = requestIdFrom(response, input);
   if (!response.ok) throw httpError(input, response, requestId);
   let envelope: unknown;
   try {
-    envelope = await response.json() as unknown;
+    envelope = JSON.parse(await readBoundedResponse(response, input, requestId)) as unknown;
+    assertBoundedJsonStructure(envelope);
   } catch (error) {
-    throw responseError(input, requestId, error);
+    if (error instanceof ComplianceVisionError) throw error;
+    throw responseError(input, requestId);
   }
   const choices = isRecord(envelope) && Array.isArray(envelope.choices) ? envelope.choices : [];
   const first = choices[0];

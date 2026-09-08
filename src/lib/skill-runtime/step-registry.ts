@@ -1,7 +1,5 @@
 import 'server-only';
 
-import { createHash } from 'node:crypto';
-
 import { fetchWithV1Retry } from '@/lib/api-helpers';
 import {
   AgentDownstreamProviderRejectedError,
@@ -61,6 +59,7 @@ type PersistCompliancePartialReport = (
 
 class ComplianceAuditVisionFailedError extends Error {
   readonly code = 'COMPLIANCE_AUDIT_VISION_FAILED';
+  readonly submissionOutcome = 'known';
 
   constructor(
     readonly partialReport: PlatformComplianceReportV1,
@@ -438,11 +437,7 @@ export function createProductionSkillStepRegistry(input: {
     });
     const facts = await auditComplianceMedia({ imageInput, signal: step.signal });
     const technicalChecks = evaluateTechnicalRules(facts, ruleSet.rules);
-    const sourceDigest = createHash('sha256')
-      .update(sourceVersionId)
-      .update('\0')
-      .update(imageInput)
-      .digest('hex');
+    const sourceDigest = facts.sourceDigest;
     const reportId = `compliance:${step.runId}:${step.step.id}`;
     const generatedAt = new Date().toISOString();
     const visionModel = {

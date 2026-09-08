@@ -1323,12 +1323,20 @@ export async function markAgentDownstreamSubmissionUnknown(
 
 export async function releaseAgentDownstreamOperation(
   rawInput: AgentDownstreamOperationIdentity,
+  options: { knownSubmissionOutcome?: boolean } = {},
 ): Promise<boolean> {
   const input = validateDownstreamIdentity(rawInput);
+  const knownSubmissionOutcome = options.knownSubmissionOutcome === true;
+  const statusAssignment = knownSubmissionOutcome
+    ? "status = CASE WHEN status = 'submitted' THEN 'prepared' ELSE status END,"
+    : '';
+  const allowedStatuses = knownSubmissionOutcome
+    ? "status IN ('prepared', 'submitted', 'accepted')"
+    : "status IN ('prepared', 'accepted')";
   const result = await getPool().query(
     `UPDATE wujie_agent_downstream_operations operation
-     SET lease_owner = '', lease_expires_at = 0, updated_at = $3
-     WHERE operation_key = $1 AND lease_owner = $2 AND status IN ('prepared', 'accepted')
+     SET ${statusAssignment} lease_owner = '', lease_expires_at = 0, updated_at = $3
+     WHERE operation_key = $1 AND lease_owner = $2 AND ${allowedStatuses}
        AND ${downstreamFenceSql('operation', 4, 5, 6)}`,
     [input.operationKey, input.leaseOwner, input.now ?? Date.now(),
       input.executionFence.runId, input.executionFence.leaseOwner,

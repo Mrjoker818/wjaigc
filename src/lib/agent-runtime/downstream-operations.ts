@@ -53,7 +53,10 @@ export interface AgentDownstreamOperationDependencies {
   markLocalAccepted?(input: AcceptAgentDownstreamOperationInput): Promise<AgentDownstreamOperation>;
   markSubmissionUnknown(input: MarkAgentDownstreamSubmissionUnknownInput): Promise<AgentDownstreamOperation>;
   complete(input: CompleteAgentDownstreamOperationInput): Promise<AgentDownstreamOperation>;
-  release?(input: AgentDownstreamOperationIdentity): Promise<boolean>;
+  release?(
+    input: AgentDownstreamOperationIdentity,
+    options?: { knownSubmissionOutcome?: boolean },
+  ): Promise<boolean>;
   read?(input: AgentDownstreamOperationIdentity): Promise<AgentDownstreamOperation | null>;
 }
 
@@ -145,6 +148,14 @@ function replayKnownProviderRejection(response: unknown): void {
       message: typeof message === 'string' ? message : undefined,
       providerCode: typeof providerCode === 'string' ? providerCode : undefined,
     },
+  );
+}
+
+function hasKnownSubmissionOutcome(error: unknown): boolean {
+  return Boolean(
+    error
+    && typeof error === 'object'
+    && (error as Record<string, unknown>).submissionOutcome === 'known',
   );
 }
 
@@ -289,6 +300,8 @@ export async function executeDurableAgentDownstreamOperation<T>(
         ...identity,
         response: serializeKnownProviderRejection(error),
       });
+    } else if (hasKnownSubmissionOutcome(error)) {
+      await dependencies.release?.(identity, { knownSubmissionOutcome: true }).catch(() => false);
     } else if (submissionStarted && !acceptanceRecorded) {
       await dependencies.markSubmissionUnknown({
         ...identity,

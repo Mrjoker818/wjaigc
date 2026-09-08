@@ -144,4 +144,109 @@ describe('platform compliance frozen vision client', () => {
     });
     expect(fetcher).toHaveBeenCalledTimes(1);
   });
+
+  it('classifies an already-aborted caller signal without attempting submission', async () => {
+    const controller = new AbortController();
+    controller.abort(new DOMException('cancelled by user', 'AbortError'));
+    const fetcher = vi.fn(async () => response(JSON.stringify({ checks: providerChecks() })));
+
+    await expect(invokeComplianceVision({
+      provider, modelId: 'gemini-vision-stable', imageInput: '/uploads/authorized.png', rules,
+      requestId: 'local-request-1', signal: controller.signal,
+    }, { fetcher })).rejects.toMatchObject({
+      code: 'COMPLIANCE_VISION_CANCELLED', requestId: 'local-request-1', retryable: false,
+    });
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['declared length', new Response(response(JSON.stringify({ checks: providerChecks() })).body, {
+      headers: { 'content-length': String(300 * 1024) },
+    }), 'local-request-1'],
+    ['streamed bytes', response(
+      `${JSON.stringify({ checks: providerChecks() })}${' '.repeat(300 * 1024)}`,
+    ), 'provider-request-1'],
+  ])('rejects provider responses over the byte limit from %s', async (
+    _name, oversized, expectedRequestId,
+  ) => {
+    const fetcher = vi.fn(async () => oversized);
+
+    await expect(invokeComplianceVision({
+      provider, modelId: 'gemini-vision-stable', imageInput: '/uploads/authorized.png', rules,
+      requestId: 'local-request-1', signal: new AbortController().signal,
+    }, { fetcher })).rejects.toMatchObject({
+      code: 'COMPLIANCE_VISION_RESPONSE_INVALID', requestId: expectedRequestId, retryable: true,
+    });
+  });
+
+  it('does not retain malformed provider content in the parse error chain', async () => {
+    const secret = 'provider-secret-payload';
+    const fetcher = vi.fn(async () => response(secret));
+
+    let error: unknown;
+    try {
+      await invokeComplianceVision({
+        provider, modelId: 'gemini-vision-stable', imageInput: '/uploads/authorized.png', rules,
+        requestId: 'local-request-1', signal: new AbortController().signal,
+      }, { fetcher });
+    } catch (caught) {
+      error = caught;
+    }
+    expect(error).toMatchObject({ code: 'COMPLIANCE_VISION_RESPONSE_INVALID' });
+    expect((error as Error & { cause?: Error }).cause?.message ?? '').not.toContain('provider-s');
+  });
+
+  it.each([
+    ['depth', {
+      nested: JSON.parse(`${'{\"child\":'.repeat(12)}true${'}'.repeat(12)}`) as unknown,
+    }],
+    ['items', { nested: Array.from({ length: 300 }, (_, index) => index) }],
+  ])('rejects provider envelopes over the %s limit', async (_name, extra) => {
+    const envelope = {
+      choices: [{ message: { content: JSON.stringify({ checks: providerChecks() }) } }],
+      ...extra,
+    };
+    const fetcher = vi.fn(async () => new Response(JSON.stringify(envelope)));
+
+    await expect(invokeComplianceVision({
+      provider, modelId: 'gemini-vision-stable', imageInput: '/uploads/authorized.png', rules,
+      requestId: 'local-request-1', signal: new AbortController().signal,
+    }, { fetcher })).rejects.toMatchObject({
+      code: 'COMPLIANCE_VISION_RESPONSE_INVALID', requestId: 'local-request-1', retryable: true,
+    });
+  });
+
+  it('rejects excessive items inside the model content JSON', async () => {
+    const checks = providerChecks();
+    checks[0].evidence = Array.from({ length: 300 }, (_, index) => `evidence-${index}`);
+    const fetcher = vi.fn(async () => response(JSON.stringify({ checks })));
+
+    await expect(invokeComplianceVision({
+      provider, modelId: 'gemini-vision-stable', imageInput: '/uploads/authorized.png', rules,
+      requestId: 'local-request-1', signal: new AbortController().signal,
+    }, { fetcher })).rejects.toMatchObject({
+      code: 'COMPLIANCE_VISION_RESPONSE_INVALID', requestId: 'provider-request-1', retryable: true,
+    });
+  });
+
+  it('rejects an unsafe provider request id without retaining provider-controlled text', async () => {
+    const unsafeRequestId = `secret/${'x'.repeat(300)}`;
+    const fetcher = vi.fn(async () => response(
+      JSON.stringify({ checks: providerChecks() }), 200, unsafeRequestId,
+    ));
+
+    let error: unknown;
+    try {
+      await invokeComplianceVision({
+        provider, modelId: 'gemini-vision-stable', imageInput: '/uploads/authorized.png', rules,
+        requestId: 'local-request-1', signal: new AbortController().signal,
+      }, { fetcher });
+    } catch (caught) {
+      error = caught;
+    }
+    expect(error).toMatchObject({
+      code: 'COMPLIANCE_VISION_RESPONSE_INVALID', requestId: 'local-request-1', retryable: true,
+    });
+    expect(JSON.stringify(error)).not.toContain('secret');
+  });
 });

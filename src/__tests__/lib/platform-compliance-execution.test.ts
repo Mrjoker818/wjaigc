@@ -17,6 +17,11 @@ import { buildComplianceReport } from '@/lib/platform-compliance/report-builder'
 import { resolveComplianceRuleSet } from '@/lib/platform-compliance/rules';
 import { evaluateTechnicalRules } from '@/lib/platform-compliance/technical-evaluator';
 import {
+  executeDurableAgentDownstreamOperation,
+  type AgentDownstreamOperation,
+  type AgentDownstreamOperationDependencies,
+} from '@/lib/agent-runtime/downstream-operations';
+import {
   createProductionSkillStepRegistry,
   type PersistCompliancePartialReportInput,
 } from '@/lib/skill-runtime/step-registry';
@@ -34,6 +39,73 @@ function successfulVisionChecks() {
     ruleId: rule.id, status: 'passed', evidence: ['model-observation=clear'],
     measuredValue: 'compliant', confidence: 0.9, remediation: null,
   }));
+}
+
+function durableDependencies() {
+  let operation: AgentDownstreamOperation | undefined;
+  const dependencies: AgentDownstreamOperationDependencies = {
+    prepare: vi.fn(async identity => {
+      operation = operation
+        ? { ...operation, ...identity, attempts: operation.attempts + 1, claimed: true }
+        : { ...identity, status: 'prepared', attempts: 1, claimed: true };
+      return operation as AgentDownstreamOperation;
+    }),
+    markSubmitted: vi.fn(async identity => {
+      operation = { ...operation!, ...identity, status: 'submitted' };
+      return operation as AgentDownstreamOperation;
+    }),
+    markAccepted: vi.fn(),
+    markSubmissionUnknown: vi.fn(async identity => {
+      operation = { ...operation!, ...identity, status: 'submission_unknown' };
+      return operation as AgentDownstreamOperation;
+    }),
+    complete: vi.fn(async identity => {
+      operation = { ...operation!, ...identity, status: 'completed' };
+      return operation as AgentDownstreamOperation;
+    }),
+    release: vi.fn(async (_identity, options) => {
+      if (operation?.status === 'submitted' && options?.knownSubmissionOutcome) {
+        operation = { ...operation, status: 'prepared', claimed: false };
+      }
+      return true;
+    }),
+  };
+  return dependencies;
+}
+
+function complianceRequest() {
+  return {
+    skillId: 'preset-platform-compliance-audit', skillVersion: 1, surface: 'canvas' as const,
+    projectId: 'project-1', workspaceId: 'canvas-1',
+    inputValues: {
+      sourceImages: ['asset-version-a'],
+      platform: 'Amazon', region: 'US', assetType: 'main', productCategory: '',
+    },
+    sourceVersionIds: ['asset-version-a'], modelBindings: {}, idempotencyKey: 'run-key',
+  };
+}
+
+function complianceStepInput(
+  request: ReturnType<typeof complianceRequest>,
+  operation: Parameters<ReturnType<typeof createProductionSkillStepRegistry>['stepAdapters']['compliance_audit']>[0]['operation'],
+  signal: AbortSignal,
+) {
+  return {
+    actorUserId: 'user-1', projectId: 'project-1', runId: 'run-1',
+    definition: {
+      id: request.skillId, version: 1, name: 'Compliance', category: 'commerce', description: '',
+      systemPrompt: '', allowedSurfaces: ['canvas' as const], inputs: [], steps: [],
+      enabled: true, builtIn: true, createdAt: 1, updatedAt: 1, usageCount: 0,
+    },
+    step: {
+      id: 'audit:a', label: 'Audit 1', toolId: 'compliance_audit', execution: 'parallel' as const,
+      parallelGroup: 'audit', promptTemplate: '', modelRole: 'vision' as const, qualityGateIds: [],
+      compiledFanOut: { inputKey: 'sourceImages', itemIndex: 0, itemDigest: 'aaaaaaaaaaaaaaaa' },
+    },
+    inputValues: request.inputValues,
+    modelBinding: { providerId: 'frozen-vision', modelId: 'vision-model' },
+    requestDigest: 'request-digest', operation, signal,
+  };
 }
 
 describe('platform compliance report execution', () => {
@@ -211,6 +283,130 @@ describe('platform compliance report execution', () => {
     const failedReport = persisted.mock.calls[1]?.[0].report;
     expect(failedReport.checks.filter((check: { evaluator: string }) => check.evaluator === 'vision')
       .every((check: { status: string }) => check.status === 'unknown')).toBe(true);
+    expect(mocks.fetchWithV1Retry).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ['HTTP 401', () => new Response('{}', { status: 401, headers: { 'x-request-id': 'request-401' } }), false, 401],
+    ['HTTP 429', () => new Response('{}', { status: 429, headers: { 'x-request-id': 'request-429' } }), true, 429],
+    ['HTTP 500', () => new Response('{}', { status: 500, headers: { 'x-request-id': 'request-500' } }), true, 500],
+    ['invalid JSON', () => new Response('{broken', { status: 200 }), true, undefined],
+  ])('keeps %s as a known failure through the durable operation', async (
+    _name, makeResponse, retryable, providerStatus,
+  ) => {
+    mocks.fetchWithV1Retry.mockImplementation(async () => makeResponse());
+    const dependencies = durableDependencies();
+    const persisted = vi.fn<(input: PersistCompliancePartialReportInput) => Promise<void>>(
+      async () => undefined,
+    );
+    const request = complianceRequest();
+    const registry = createProductionSkillStepRegistry({
+      actor: { id: 'user-1', name: 'User', role: 'user', status: 'active', productType: 'canvas', createdAt: 1, updatedAt: 1 },
+      request, mediaByVersionId: { 'asset-version-a': imageDataUrl },
+      persistCompliancePartialReport: persisted,
+    });
+
+    let error: unknown;
+    try {
+      await executeDurableAgentDownstreamOperation({
+        actorUserId: 'user-1', projectId: 'project-1', runId: 'run-1',
+        toolId: 'compliance_audit', stepId: 'audit:a', requestDigest: 'request-digest',
+        executionFence: { runId: 'run-1', leaseOwner: 'lease-1', generation: 1 },
+      }, operation => registry.stepAdapters.compliance_audit(
+        complianceStepInput(request, operation, new AbortController().signal),
+      ), dependencies);
+    } catch (caught) {
+      error = caught;
+    }
+
+    expect(error).toMatchObject({
+      code: 'COMPLIANCE_AUDIT_VISION_FAILED', retryable,
+      providerId: 'frozen-vision', modelId: 'vision-model',
+      ...(providerStatus === undefined ? {} : { providerStatus }),
+    });
+    expect(dependencies.markSubmissionUnknown).not.toHaveBeenCalled();
+    expect(dependencies.release).toHaveBeenCalledTimes(1);
+    expect(dependencies.release).toHaveBeenCalledWith(
+      expect.any(Object), { knownSubmissionOutcome: true },
+    );
+    mocks.fetchWithV1Retry.mockResolvedValue(new Response(JSON.stringify({
+      choices: [{ message: { content: JSON.stringify({ checks: successfulVisionChecks() }) } }],
+    })));
+    await expect(executeDurableAgentDownstreamOperation({
+      actorUserId: 'user-1', projectId: 'project-1', runId: 'run-1',
+      toolId: 'compliance_audit', stepId: 'audit:a', requestDigest: 'request-digest',
+      executionFence: { runId: 'run-1', leaseOwner: 'lease-1', generation: 1 },
+    }, operation => registry.stepAdapters.compliance_audit(
+      complianceStepInput(request, operation, new AbortController().signal),
+    ), dependencies)).resolves.toMatchObject({
+      structured: { schemaId: 'platform-compliance-report-v1' },
+    });
+    expect(mocks.fetchWithV1Retry).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps caller abort classified as cancellation through the durable operation', async () => {
+    const controller = new AbortController();
+    mocks.fetchWithV1Retry.mockImplementation(async () => {
+      controller.abort(new DOMException('cancelled by user', 'AbortError'));
+      throw controller.signal.reason;
+    });
+    const dependencies = durableDependencies();
+    const persisted = vi.fn<(input: PersistCompliancePartialReportInput) => Promise<void>>(
+      async () => undefined,
+    );
+    const request = complianceRequest();
+    const registry = createProductionSkillStepRegistry({
+      actor: { id: 'user-1', name: 'User', role: 'user', status: 'active', productType: 'canvas', createdAt: 1, updatedAt: 1 },
+      request, mediaByVersionId: { 'asset-version-a': imageDataUrl },
+      persistCompliancePartialReport: persisted,
+    });
+
+    let error: unknown;
+    try {
+      await executeDurableAgentDownstreamOperation({
+        actorUserId: 'user-1', projectId: 'project-1', runId: 'run-1',
+        toolId: 'compliance_audit', stepId: 'audit:a', requestDigest: 'request-digest',
+        executionFence: { runId: 'run-1', leaseOwner: 'lease-1', generation: 1 },
+      }, operation => registry.stepAdapters.compliance_audit(
+        complianceStepInput(request, operation, controller.signal),
+      ), dependencies);
+    } catch (caught) {
+      error = caught;
+    }
+
+    expect(error).toMatchObject({ code: 'COMPLIANCE_AUDIT_VISION_FAILED', retryable: false });
+    expect(persisted.mock.calls[1]?.[0].report.technicalErrors[0]).toMatchObject({
+      code: 'COMPLIANCE_VISION_CANCELLED', retryable: false,
+    });
+    expect(dependencies.markSubmissionUnknown).not.toHaveBeenCalled();
+    expect(dependencies.release).toHaveBeenCalledTimes(1);
+  });
+
+  it('marks only transport response loss as submission_unknown without replay', async () => {
+    mocks.fetchWithV1Retry.mockRejectedValue(new TypeError('socket closed'));
+    const dependencies = durableDependencies();
+    const request = complianceRequest();
+    const registry = createProductionSkillStepRegistry({
+      actor: { id: 'user-1', name: 'User', role: 'user', status: 'active', productType: 'canvas', createdAt: 1, updatedAt: 1 },
+      request, mediaByVersionId: { 'asset-version-a': imageDataUrl },
+      persistCompliancePartialReport: vi.fn(async () => undefined),
+    });
+
+    const durableInput = {
+      actorUserId: 'user-1', projectId: 'project-1', runId: 'run-1',
+      toolId: 'compliance_audit', stepId: 'audit:a', requestDigest: 'request-digest',
+      executionFence: { runId: 'run-1', leaseOwner: 'lease-1', generation: 1 },
+    };
+    const execute = () => executeDurableAgentDownstreamOperation(durableInput, operation => (
+      registry.stepAdapters.compliance_audit(
+      complianceStepInput(request, operation, new AbortController().signal),
+      )
+    ), dependencies);
+
+    await expect(execute()).rejects.toMatchObject({ code: 'AGENT_DOWNSTREAM_SUBMISSION_UNKNOWN' });
+    await expect(execute()).rejects.toMatchObject({ code: 'AGENT_DOWNSTREAM_SUBMISSION_UNKNOWN' });
+
+    expect(dependencies.markSubmissionUnknown).toHaveBeenCalledTimes(1);
     expect(mocks.fetchWithV1Retry).toHaveBeenCalledTimes(1);
   });
 });

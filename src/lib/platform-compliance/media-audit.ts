@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+
 import { loadSafeImageInput, safeSharp } from '@/lib/safe-image-input';
 
 const MAX_COMPLIANCE_BYTES = 25 * 1024 * 1024;
@@ -12,6 +14,7 @@ const WHITE_RGB_DISTANCE = 10;
 export interface ComplianceMediaFacts {
   mimeType: string;
   byteLength: number;
+  sourceDigest: string;
   width: number;
   height: number;
   pixelCount: number;
@@ -155,6 +158,7 @@ export async function auditComplianceMedia(input: {
   return Object.freeze({
     mimeType: decoded.mimeType,
     byteLength: decoded.buffer.byteLength,
+    sourceDigest: createHash('sha256').update(decoded.buffer).digest('hex'),
     width: metadata.width,
     height: metadata.height,
     pixelCount: metadata.width * metadata.height,

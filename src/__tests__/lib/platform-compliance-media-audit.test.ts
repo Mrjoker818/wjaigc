@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { mkdir, unlink, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
+import { createHash } from 'node:crypto';
 
 import sharp from 'sharp';
 import { describe, expect, it } from 'vitest';
@@ -38,6 +39,7 @@ describe('platform compliance deterministic media audit', () => {
 
     expect(facts).toMatchObject({
       mimeType: 'image/png', byteLength: source.byteLength,
+      sourceDigest: createHash('sha256').update(source).digest('hex'),
       width: 1600, height: 1600, pixelCount: 2_560_000,
       hasAlpha: false, hasTransparentPixels: false, isAnimated: false,
       backgroundSampleRegion: 'corner-depth-zones',
