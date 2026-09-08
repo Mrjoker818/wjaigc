@@ -52,6 +52,13 @@ function sameStrings(left: readonly string[], right: readonly string[]): boolean
   return left.length === right.length && left.every((value, index) => value === right[index]);
 }
 
+export function complianceReportLineageMatches(
+  parentVersionIds: readonly string[],
+  sourceVersionIds: readonly string[],
+): boolean {
+  return parentVersionIds.length === 0 || sameStrings(parentVersionIds, sourceVersionIds);
+}
+
 function validatedSourceTrace(
   value: WorkspaceSourceTrace,
   runId: string,
@@ -146,8 +153,13 @@ export function complianceReportFromAssetVersion(
   version: AssetVersion,
 ): PlatformComplianceReportV1 {
   const content = version.metadata?.reportContent;
+  const sourceVersionIds = Array.isArray(version.metadata?.sourceVersionIds)
+    && version.metadata.sourceVersionIds.every(value => typeof value === 'string')
+    ? version.metadata.sourceVersionIds as string[]
+    : [];
   if (
-    version.parentVersionIds.length !== 0
+    sourceVersionIds.length === 0
+    || !complianceReportLineageMatches(version.parentVersionIds, sourceVersionIds)
     || version.file.availability !== 'ready'
     || version.file.mimeType !== 'application/json'
     || version.metadata?.schemaId !== COMPLIANCE_REPORT_SCHEMA_ID

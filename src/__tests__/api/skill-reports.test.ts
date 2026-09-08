@@ -147,6 +147,23 @@ describe('skill compliance report downloads', () => {
     expect(mocks.listAgentRunEvents).toHaveBeenCalledWith({ actorUserId: 'user-1', runId });
   });
 
+  it('normalizes the encoded production route segment before matching the report step', async () => {
+    const { content, checksum, transaction } = arrangeOwnedReport();
+    const reportVersion = await transaction.findVersion();
+    transaction.findVersion.mockImplementation(async (...args: unknown[]) => (
+      args[2] === versionId
+        ? { ...reportVersion, parentVersionIds: ['asset-version-1'] }
+        : reportVersion
+    ));
+    const response = await GET(
+      request(`?projectId=${projectId}&checksum=${checksum}&format=json`),
+      context(runId, encodeURIComponent(stepId)),
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.text()).toBe(content);
+  });
+
   it('renders deterministic sanitized HTML from canonical JSON with download protections', async () => {
     const malicious = '</h1><script>alert(1)</script><img src=x onerror=alert(2)>';
     const { checksum } = arrangeOwnedReport(malicious);
@@ -197,7 +214,7 @@ describe('skill compliance report downloads', () => {
       ...version, file: { ...(version.file as object), checksum: 'e'.repeat(64) },
     }), undefined, undefined],
     ['document kind', version => version, undefined, 'image'],
-    ['parent lineage', version => ({ ...version, parentVersionIds: ['asset-version-1'] }), undefined, undefined],
+    ['parent lineage', version => ({ ...version, parentVersionIds: ['foreign-version'] }), undefined, undefined],
     ['schema', version => ({
       ...version,
       metadata: { ...(version.metadata as object), schemaId: 'unknown-schema' },

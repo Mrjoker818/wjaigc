@@ -8,6 +8,7 @@ import { createPostgresAssetStorage } from '@/lib/asset-core/storage';
 import { getCloudTaskForUser } from '@/lib/cloud-task-storage';
 import {
   COMPLIANCE_REPORT_SCHEMA_ID,
+  complianceReportLineageMatches,
   renderComplianceReportHtml,
   reportDownloadUrl,
 } from '@/lib/platform-compliance/report-asset';
@@ -25,6 +26,19 @@ type ReportFormat = 'json' | 'html';
 
 function notFound(): NextResponse {
   return NextResponse.json({ error: 'REPORT_NOT_FOUND' }, { status: 404 });
+}
+
+function decodeStepId(value: string): string | null {
+  try {
+    const decoded = decodeURIComponent(value);
+    return decoded
+      && decoded.length <= 256
+      && !/[\\/\u0000-\u001f\u007f]/u.test(decoded)
+      ? decoded
+      : null;
+  } catch {
+    return null;
+  }
 }
 
 function sameStrings(left: readonly string[], right: readonly string[]): boolean {
@@ -54,7 +68,8 @@ export async function GET(request: NextRequest, context: RouteContext): Promise<
   if (!sessionUser) {
     return NextResponse.json({ error: 'Authentication required' }, { status: 401 });
   }
-  const { runId, stepId } = await context.params;
+  const { runId, stepId: encodedStepId } = await context.params;
+  const stepId = decodeStepId(encodedStepId);
   const projectId = request.nextUrl.searchParams.get('projectId')?.trim() ?? '';
   const checksum = request.nextUrl.searchParams.get('checksum')?.trim() ?? '';
   const formatValue = request.nextUrl.searchParams.get('format') ?? 'json';
@@ -100,7 +115,7 @@ export async function GET(request: NextRequest, context: RouteContext): Promise<
     if (!await transaction.findProject(sessionUser.id, projectId)) return null;
     for (const versionId of reportVersionIds) {
       const version = await transaction.findVersion(sessionUser.id, projectId, versionId);
-      if (!version || version.parentVersionIds.length !== 0) continue;
+      if (!version) continue;
       const asset = await transaction.findAsset(sessionUser.id, projectId, version.assetId);
       if (!asset || asset.kind !== 'document' || asset.status !== 'active') continue;
       const metadata = version.metadata;
@@ -114,6 +129,7 @@ export async function GET(request: NextRequest, context: RouteContext): Promise<
         || metadata?.schemaId !== COMPLIANCE_REPORT_SCHEMA_ID
         || typeof content !== 'string'
         || !sourceVersionIds
+        || !complianceReportLineageMatches(version.parentVersionIds, sourceVersionIds)
         || sourceVersionIds.some(sourceVersionId => !runSourceVersionIds.includes(sourceVersionId))
         || sourceTrace?.source !== 'canvas-skill'
         || sourceTrace.runId !== runId
