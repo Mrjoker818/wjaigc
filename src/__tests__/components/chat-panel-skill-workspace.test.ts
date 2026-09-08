@@ -43,6 +43,26 @@ function requestFor(sessionId: string): SkillRunRequest {
   return build();
 }
 
+function visionRequestFor(input: {
+  selectedModel: string;
+  models: Array<{ id: string; providerId: string; supportsVision?: boolean }>;
+}): SkillRunRequest | null {
+  const build = runInNewContext(script, {
+    activeSkill: {
+      id: 'preset-platform-compliance-audit', version: 1, inputs: [],
+      steps: [{ modelRole: 'vision' }],
+    },
+    projectId: 'project-a',
+    availableChatModels: input.models,
+    model: input.selectedModel,
+    discoveredImageModels: [], imageModel: '', imageModelProviderId: '',
+    canvasSkillSourceVersionIds: ['version-a'],
+    canvasSkillInputValues: { sourceImages: ['version-a'] },
+    crypto: { randomUUID: () => 'vision-request' },
+  }) as () => SkillRunRequest | null;
+  return build();
+}
+
 describe('Canvas Skill asset workspace identity', () => {
   it.each(['session-old', 'session-new', ''])('uses the canvas placement regardless of chat session %s', async sessionId => {
     const request = requestFor(sessionId);
@@ -77,5 +97,29 @@ describe('Canvas Skill asset workspace identity', () => {
       },
     });
     expect(context.mediaByVersionId['version-a']).toBe('/api/serve-upload/product.png');
+  });
+
+  it('binds the explicitly selected authorized VLM to the real Canvas vision request', () => {
+    const request = visionRequestFor({
+      selectedModel: 'vision-provider::vision-model',
+      models: [{
+        id: 'vision-provider::vision-model', providerId: 'vision-provider', supportsVision: true,
+      }],
+    });
+
+    expect(request?.modelBindings).toEqual({
+      orchestrator: { providerId: 'vision-provider', modelId: 'vision-model' },
+      vision: { providerId: 'vision-provider', modelId: 'vision-model' },
+    });
+  });
+
+  it('does not silently switch to another provider when the selected model lacks vision', () => {
+    expect(visionRequestFor({
+      selectedModel: 'chat-provider::chat-model',
+      models: [
+        { id: 'chat-provider::chat-model', providerId: 'chat-provider' },
+        { id: 'vision-provider::vision-model', providerId: 'vision-provider', supportsVision: true },
+      ],
+    })).toBeNull();
   });
 });

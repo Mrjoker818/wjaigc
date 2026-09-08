@@ -4,7 +4,11 @@ import { useEffect, useId, useRef, useState } from 'react';
 import { Upload } from 'lucide-react';
 
 import { parseSkillDatasetFile } from './dataset-file-parser';
-import { resolveSkillInputOptions, SKILL_INPUT_LIMITS } from '@/lib/skill-runtime/input-resolver';
+import {
+  assertSkillInputDefinitions,
+  resolveSkillInputOptions,
+  SKILL_INPUT_LIMITS,
+} from '@/lib/skill-runtime/input-resolver';
 import type { SkillInputField } from '@/lib/skill-runtime/types';
 
 const FORBIDDEN_DATASET_KEYS = new Set(['__proto__', 'prototype', 'constructor']);
@@ -48,7 +52,12 @@ function structuredDrafts(
 }
 
 function fieldDefinitionSignature(fields: readonly SkillInputField[]): string {
-  return JSON.stringify(fields);
+  try {
+    assertSkillInputDefinitions(fields);
+    return JSON.stringify(fields);
+  } catch {
+    return `invalid:${fields.length}`;
+  }
 }
 
 function assertDatasetKeys(value: unknown): void {
@@ -136,8 +145,13 @@ export function SkillInputFields({
   }, [fields, onChange, values]);
 
   useEffect(() => {
+    try {
+      assertSkillInputDefinitions(fields);
+    } catch {
+      return;
+    }
     for (const field of fields) {
-      if (!field.dependentOptions) continue;
+      if (!Object.hasOwn(field, 'dependentOptions')) continue;
       const current = effectiveValue(field, values);
       if (typeof current !== 'string' || current.length === 0) continue;
       const options = resolveSkillInputOptions(fields, values, field.key);

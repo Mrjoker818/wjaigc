@@ -103,6 +103,42 @@ describe('resolveSkillInputs', () => {
     );
   });
 
+  it('uses all field defaults when resolving dependent options', () => {
+    const constrained = createDefinition([
+      {
+        key: 'platform', label: 'Platform', kind: 'select', required: true,
+        options: ['Amazon', '京东'], defaultValue: 'Amazon',
+      },
+      {
+        key: 'region', label: 'Region', kind: 'select', required: true,
+        dependentOptions: { inputKey: 'platform', values: { Amazon: ['US'], '京东': ['CN'] } },
+      },
+    ]);
+
+    expect(resolveSkillInputOptions(constrained.inputs, { region: 'US' }, 'region'))
+      .toEqual(['US']);
+    expect(resolveSkillInputs(constrained, { region: 'US' }).region).toBe('US');
+  });
+
+  it('returns no options without invoking a dependentOptions getter', () => {
+    let getterCalls = 0;
+    const unsafe: Record<string, unknown> = {
+      key: 'region', label: 'Region', kind: 'select', required: true,
+    };
+    Object.defineProperty(unsafe, 'dependentOptions', {
+      enumerable: true,
+      get: () => {
+        getterCalls += 1;
+        throw new Error('public helper getter must not run');
+      },
+    });
+
+    expect(resolveSkillInputOptions(
+      [unsafe as unknown as SkillInputField], { region: 'US' }, 'region',
+    )).toEqual([]);
+    expect(getterCalls).toBe(0);
+  });
+
   it('requires images to contain unique non-empty identities', () => {
     const sources = createDefinition([{
       key: 'sourceImages', label: 'Sources', kind: 'images', required: true,
@@ -124,6 +160,14 @@ describe('resolveSkillInputs', () => {
     }]);
     expect(resolveSkillInputs(legacy, { images: ['version-1', 'version-1'] }).images)
       .toEqual(['version-1', 'version-1']);
+  });
+
+  it('preserves legacy blank and untrimmed image identities without uniqueItems', () => {
+    const legacy = createDefinition([{
+      key: 'images', label: 'Images', kind: 'images', required: true,
+    }]);
+    expect(resolveSkillInputs(legacy, { images: ['', ' version-1 '] }).images)
+      .toEqual(['', ' version-1 ']);
   });
 
   it.each([

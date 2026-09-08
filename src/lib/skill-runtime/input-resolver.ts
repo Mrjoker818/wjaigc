@@ -147,8 +147,10 @@ function validateImages(field: SkillInputField, value: unknown): readonly string
   if (value.length > limit) {
     throw new SkillInputError('SKILL_INPUT_LIMIT_EXCEEDED', field.key);
   }
-  if (value.some(item => item.trim().length === 0 || item !== item.trim())
-    || (field.uniqueItems && new Set(value).size !== value.length)) {
+  if (field.uniqueItems && (
+    value.some(item => item.trim().length === 0 || item !== item.trim())
+    || new Set(value).size !== value.length
+  )) {
     throw new SkillInputError('SKILL_INPUT_INVALID_VALUE', field.key);
   }
   return value;
@@ -159,11 +161,20 @@ export function resolveSkillInputOptions(
   values: Readonly<Record<string, unknown>>,
   fieldKey: string,
 ): readonly string[] {
+  try {
+    assertSkillInputDefinitions(fields);
+  } catch {
+    return [];
+  }
   const field = fields.find(candidate => candidate.key === fieldKey);
   if (!field) return [];
   if (!field.dependentOptions) return field.options ?? [];
   if (!isPlainObject(field.dependentOptions.values)) return [];
-  const sourceValue = values[field.dependentOptions.inputKey];
+  const valuesWithDefaults = Object.fromEntries(fields.map(candidate => [
+    candidate.key,
+    values[candidate.key] ?? candidate.defaultValue,
+  ]));
+  const sourceValue = valuesWithDefaults[field.dependentOptions.inputKey];
   if (typeof sourceValue !== 'string') return [];
   if (!Object.hasOwn(field.dependentOptions.values, sourceValue)) return [];
   const options = field.dependentOptions.values[sourceValue];

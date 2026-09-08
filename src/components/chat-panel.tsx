@@ -1353,9 +1353,9 @@ export function ChatPanel({ themeStyle, projectId, onAddToPrompt, onAddImages, o
   const [isAnalyzingImage, setIsAnalyzingImage] = useState(false);
   // 第三方模型相关状态
   const [showThirdPartyDialog, setShowThirdPartyDialog] = useState(false);
-  const [thirdPartyChatModels, setThirdPartyChatModels] = useState<{id: string; name: string; provider: string; providerId: string}[]>([]);
+  const [thirdPartyChatModels, setThirdPartyChatModels] = useState<{id: string; name: string; provider: string; providerId: string; supportsVision?: boolean}[]>([]);
   // 服务器端发现的模型
-  const [discoveredChatModels, setDiscoveredChatModels] = useState<{id: string; name: string; provider: string; providerId: string; description?: string; isDefault?: boolean}[]>([]);
+  const [discoveredChatModels, setDiscoveredChatModels] = useState<{id: string; name: string; provider: string; providerId: string; description?: string; isDefault?: boolean; supportsVision?: boolean}[]>([]);
   const availableChatModels = useMemo(() => {
     const uniqueModels = new Map<string, typeof discoveredChatModels[number]>();
     [...discoveredChatModels, ...thirdPartyChatModels].forEach((candidate) => {
@@ -1983,32 +1983,56 @@ export function ChatPanel({ themeStyle, projectId, onAddToPrompt, onAddImages, o
   // 从服务器加载可用聊天模型
   const loadServerModels = useCallback(async () => {
       try {
-        const res = await fetch('/api/models?type=chat');
-        if (res.ok) {
-          const data = await res.json();
-          const models: {id: string; name: string; provider: string; providerId: string; description?: string; isDefault?: boolean}[] = [];
+        const loadCatalog = async (type: 'chat' | 'vlm'): Promise<Record<string, unknown> | null> => {
+          try {
+            const response = await fetch(`/api/models?type=${type}`);
+            return response.ok ? await response.json() as Record<string, unknown> : null;
+          } catch {
+            return null;
+          }
+        };
+        const [chatCatalog, visionCatalog] = await Promise.all([
+          loadCatalog('chat'), loadCatalog('vlm'),
+        ]);
+        if (chatCatalog || visionCatalog) {
+          const models = new Map<string, typeof discoveredChatModels[number]>();
           const providerMap = new Map<string, string>();
-          if (data.providers && Array.isArray(data.providers)) {
-            for (const p of data.providers) {
-              providerMap.set(p.id, p.name || p.displayName || '');
+          for (const catalog of [chatCatalog, visionCatalog]) {
+            if (catalog?.providers && Array.isArray(catalog.providers)) {
+              for (const provider of catalog.providers as Array<Record<string, unknown>>) {
+                if (typeof provider.id === 'string') {
+                  providerMap.set(provider.id, String(provider.name || provider.displayName || ''));
+                }
+              }
             }
           }
-          // 优先从顶层 models 数组读取（已由服务端按 selectedModels + type 过滤）
-          if (data.models && Array.isArray(data.models)) {
-            for (const m of data.models) {
-              models.push({
-                id: m.providerId ? `${m.providerId}::${m.id || m.name}` : (m.id || m.name),
-                name: (m.name && m.name !== m.id) ? m.name : getModelDisplayName(m.name || m.id),
-                provider: providerMap.get(m.providerId) || m.providerId || '',
-                providerId: m.providerId || '',
-                description: m.description,
-                isDefault: m.isDefault,
+          for (const [catalog, supportsVision] of [
+            [chatCatalog, false], [visionCatalog, true],
+          ] as const) {
+            if (!catalog?.models || !Array.isArray(catalog.models)) continue;
+            for (const raw of catalog.models as Array<Record<string, unknown>>) {
+              const modelId = String(raw.id || raw.name || '');
+              const providerId = typeof raw.providerId === 'string' ? raw.providerId : '';
+              if (!modelId || !providerId) continue;
+              const id = `${providerId}::${modelId}`;
+              const existing = models.get(id);
+              models.set(id, {
+                id,
+                name: raw.name && raw.name !== raw.id
+                  ? String(raw.name)
+                  : getModelDisplayName(modelId),
+                provider: providerMap.get(providerId) || providerId,
+                providerId,
+                ...(typeof raw.description === 'string' ? { description: raw.description } : {}),
+                ...(raw.isDefault === true ? { isDefault: true } : {}),
+                ...(supportsVision || existing?.supportsVision ? { supportsVision: true } : {}),
               });
             }
           }
-          setDiscoveredChatModels(models);
+          const available = Array.from(models.values());
+          setDiscoveredChatModels(available);
           // 如果有默认模型，自动选中
-          setModel(current => selectInitialModel(current, models));
+          setModel(current => selectInitialModel(current, available));
         }
       } catch {
         // 静默失败
@@ -3886,6 +3910,8 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
     for (const role of roles) {
       if (role === 'orchestrator' && chatProviderId && chatModelId) {
         modelBindings.orchestrator = { providerId: chatProviderId, modelId: chatModelId };
+      } else if (role === 'vision' && chatSelection?.supportsVision && chatProviderId && chatModelId) {
+        modelBindings.vision = { providerId: chatProviderId, modelId: chatModelId };
       } else if (role === 'image' && imageProviderId && imageModelId) {
         modelBindings.image = { providerId: imageProviderId, modelId: imageModelId };
       } else {

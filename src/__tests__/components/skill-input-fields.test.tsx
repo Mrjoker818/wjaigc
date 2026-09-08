@@ -37,4 +37,41 @@ describe('SkillInputFields dependent constraints', () => {
     );
     expect(onChange).toHaveBeenCalledWith('region', undefined);
   });
+
+  it('keeps a restored region valid when its platform comes from defaultValue', () => {
+    const onChange = vi.fn();
+    const fieldsWithDefault: readonly SkillInputField[] = [
+      { ...fields[0], defaultValue: 'Amazon' },
+      fields[1],
+    ];
+
+    render(<SkillInputFields fields={fieldsWithDefault} values={{ region: 'US' }} onChange={onChange} />);
+
+    expect(Array.from((screen.getByLabelText('地区') as HTMLSelectElement).options)
+      .map(option => option.value)).toEqual(['US', 'EU', 'JP']);
+    expect(onChange).not.toHaveBeenCalledWith('region', undefined);
+  });
+
+  it('does not invoke dependentOptions accessors while rendering invalid metadata', () => {
+    let getterCalls = 0;
+    const unsafe: Record<string, unknown> = {
+      key: 'region', label: '地区', kind: 'select', required: true,
+    };
+    Object.defineProperty(unsafe, 'dependentOptions', {
+      enumerable: true,
+      get: () => {
+        getterCalls += 1;
+        throw new Error('UI getter must not run');
+      },
+    });
+
+    expect(() => render(
+      <SkillInputFields
+        fields={[unsafe as unknown as SkillInputField]}
+        values={{ region: 'US' }}
+        onChange={vi.fn()}
+      />,
+    )).not.toThrow();
+    expect(getterCalls).toBe(0);
+  });
 });
