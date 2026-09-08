@@ -233,6 +233,54 @@ describe('durable Skill executor', () => {
     }));
   });
 
+  it('does not persist or error-log a dispatch failure after cancellation wins', async () => {
+    const liveTask = await dispatchDependencies().getTaskForUser('run-dispatch', 'user-1');
+    const dependencies = dispatchDependencies({
+      getTaskForUser: vi.fn()
+        .mockResolvedValueOnce(liveTask)
+        .mockResolvedValue({ ...liveTask, status: 'cancelled' }),
+      executeAdopted: vi.fn(async () => {
+        throw Object.assign(new Error('late completion rejected'), {
+          code: 'AGENT_RUN_TERMINAL_CONFLICT', status: 409,
+        });
+      }),
+    });
+    const errorLog = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+    const dispatched = await dispatchSkillRunExecution({
+      actorUserId: 'user-1', runId: 'run-dispatch',
+    }, dependencies);
+    await expect(dispatched.completion).resolves.toBeUndefined();
+
+    expect(dependencies.failDispatch).not.toHaveBeenCalled();
+    expect(errorLog).not.toHaveBeenCalled();
+    errorLog.mockRestore();
+  });
+
+  it('does not overwrite a persisted paused step with dispatch_error', async () => {
+    const liveTask = await dispatchDependencies().getTaskForUser('run-dispatch', 'user-1');
+    const dependencies = dispatchDependencies({
+      getTaskForUser: vi.fn().mockResolvedValue(liveTask),
+      getProjection: vi.fn(async () => ({
+        runId: 'run-dispatch', status: 'paused', lastSequence: 2, plan: [], assetVersionIds: [],
+        ignoredEventIds: [], missingSequences: [], qualityChecks: [], resumeFromStepId: 'plan',
+      } as AgentRunProjection)),
+      executeAdopted: vi.fn(async () => {
+        throw new Error('vision step paused for retry');
+      }),
+    });
+    const errorLog = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+    const dispatched = await dispatchSkillRunExecution({
+      actorUserId: 'user-1', runId: 'run-dispatch',
+    }, dependencies);
+    await expect(dispatched.completion).resolves.toBeUndefined();
+
+    expect(dependencies.failDispatch).not.toHaveBeenCalled();
+    expect(errorLog).not.toHaveBeenCalled();
+    errorLog.mockRestore();
+  });
+
   it('persists dispatch_error when projection loading fails after the dispatch claim', async () => {
     const projectionError = new Error('projection storage unavailable');
     const dependencies = dispatchDependencies({

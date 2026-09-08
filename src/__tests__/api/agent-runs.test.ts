@@ -429,6 +429,72 @@ describe('Agent runtime service', () => {
     expect(recordFailure).not.toHaveBeenCalled();
   });
 
+  it('does not log an expected terminal fence rejection as an error after resumed execution', async () => {
+    const dependencies = serviceDependencies();
+    const paused = event(2, 'run.paused', { nextStepId: 'generate-2' });
+    const resumed = event(3, 'run.resumed', {
+      nextStepId: 'generate-2', generation: 1,
+    });
+    dependencies.listEvents.mockResolvedValue([event(1, 'run.created'), paused]);
+    dependencies.transitionControl = vi.fn(async () => ({
+      accepted: true, event: resumed,
+      events: [event(1, 'run.created'), paused, resumed],
+      leaseOwner: 'lease-new',
+    }));
+    dependencies.dispatchExecution.mockResolvedValue({
+      started: true,
+      completion: Promise.reject(new Error('late resumed worker')),
+    });
+    const expectedFence = Object.assign(new Error('Agent run not found'), {
+      code: 'AGENT_RUN_NOT_FOUND', status: 404,
+    });
+    const recordFailure = vi.fn(async () => Promise.reject(expectedFence));
+    const errorLog = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const service = agentRuntime.createAgentRuntimeService({
+      ...dependencies,
+      recordDispatchCompletionFailure: recordFailure,
+    });
+
+    await service.resumeRun({ actorUserId: user.id, runId: 'run-1' });
+    await vi.waitFor(() => expect(recordFailure).toHaveBeenCalledOnce());
+    await new Promise(resolve => setTimeout(resolve, 0));
+
+    expect(errorLog).not.toHaveBeenCalled();
+    errorLog.mockRestore();
+  });
+
+  it('keeps unknown resumed failure persistence errors at error level', async () => {
+    const dependencies = serviceDependencies();
+    const paused = event(2, 'run.paused', { nextStepId: 'generate-2' });
+    const resumed = event(3, 'run.resumed', {
+      nextStepId: 'generate-2', generation: 1,
+    });
+    dependencies.listEvents.mockResolvedValue([event(1, 'run.created'), paused]);
+    dependencies.transitionControl = vi.fn(async () => ({
+      accepted: true, event: resumed,
+      events: [event(1, 'run.created'), paused, resumed],
+      leaseOwner: 'lease-new',
+    }));
+    dependencies.dispatchExecution.mockResolvedValue({
+      started: true,
+      completion: Promise.reject(new Error('background executor failed')),
+    });
+    const storageFailure = new Error('database unavailable');
+    const recordFailure = vi.fn(async () => Promise.reject(storageFailure));
+    const errorLog = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const service = agentRuntime.createAgentRuntimeService({
+      ...dependencies,
+      recordDispatchCompletionFailure: recordFailure,
+    });
+
+    await service.resumeRun({ actorUserId: user.id, runId: 'run-1' });
+    await vi.waitFor(() => expect(errorLog).toHaveBeenCalledWith(
+      '[agent-runtime] failed to persist resumed execution failure', storageFailure,
+    ));
+
+    errorLog.mockRestore();
+  });
+
   it('retries the abort for an identical repeated pause after a commit-before-abort crash', async () => {
     const dependencies = serviceDependencies();
     const paused = event(2, 'run.paused', { nextStepId: 'generate-2' });

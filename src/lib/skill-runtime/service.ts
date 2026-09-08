@@ -594,6 +594,7 @@ export async function executeSkillRun(input: {
   stepRecoveries?: Readonly<Record<string, SkillStepRecoveryFactory>>;
   resumeFromStepId?: string;
   definition?: import('./types').SkillDefinition;
+  appendRunEvent?: typeof appendAgentRunEvent;
 }): Promise<import('./executor').ExecuteSkillRunResult> {
   const definition = input.definition || (() => {
     const current = requireSkillForSurface(input.request.skillId, input.request.surface);
@@ -609,6 +610,7 @@ export async function executeSkillRun(input: {
   const workspace = input.request.surface === 'simple-chat' ? 'chat' : input.request.surface;
   const events = await listAgentRunEvents({ actorUserId: input.actor.id, runId: input.runId });
   const completed = completedStepIds(events);
+  const appendRunEvent = input.appendRunEvent || appendAgentRunEvent;
   const fence = input.operationContext.executionFence;
   if (!fence || fence.runId !== input.runId) {
     throw new SkillRunRequestError('A database execution lease is required');
@@ -631,7 +633,7 @@ export async function executeSkillRun(input: {
       payload: { ...event.payload, generation: fence.generation },
       executionFence: fence,
     }),
-    completeRun: ({ result, executionFence }) => appendAgentRunEvent({
+    completeRun: ({ result, executionFence }) => appendRunEvent({
       actorUserId: input.actor.id,
       runId: input.runId,
       eventId: `skill:${input.runId}:generation:${executionFence.generation}:completed`,
@@ -645,7 +647,7 @@ export async function executeSkillRun(input: {
       },
       executionFence,
     }),
-    failRun: ({ error, executionFence }) => appendAgentRunEvent({
+    failRun: ({ error, executionFence }) => appendRunEvent({
       actorUserId: input.actor.id,
       runId: input.runId,
       eventId: `skill:${input.runId}:generation:${executionFence.generation}:quality-failed`,
@@ -763,8 +765,21 @@ export async function dispatchSkillRunExecution(input: {
   });
   if (!dispatch.claimed) return { started: false };
 
-  const persistDispatchFailure = async (error: unknown): Promise<void> => {
+  const persistDispatchFailure = async (error: unknown, executionStarted = false): Promise<void> => {
     try {
+      const authoritative = await dependencies.getTaskForUser(input.runId, input.actorUserId);
+      if (authoritative && ['paused', 'completed', 'failed', 'cancelled', 'timeout'].includes(authoritative.status)) {
+        return;
+      }
+      if (executionStarted) {
+        const projection = await dependencies.getProjection({
+          actorUserId: input.actorUserId,
+          runId: input.runId,
+        });
+        if (['paused', 'completed', 'failed', 'cancelled', 'timeout'].includes(projection.status)) {
+          return;
+        }
+      }
       await dependencies.failDispatch({
         actorUserId: input.actorUserId,
         projectId: task.projectId!,
@@ -813,7 +828,9 @@ export async function dispatchSkillRunExecution(input: {
     return { started: false };
   }
 
-  const completion = executionPromise.then(() => undefined).catch(persistDispatchFailure);
+  const completion = executionPromise.then(() => undefined).catch(error => (
+    persistDispatchFailure(error, true)
+  ));
   return { started: true, completion };
 }
 

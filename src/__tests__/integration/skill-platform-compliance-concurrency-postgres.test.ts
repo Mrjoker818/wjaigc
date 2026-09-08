@@ -324,6 +324,56 @@ async function createProductionAgentRuntime(
   };
 }
 
+async function dispatchComplianceWithRuntime(input: {
+  actorUserId: string;
+  runId: string;
+  mediaByVersionId: Readonly<Record<string, string>>;
+  runtime: Awaited<ReturnType<typeof createProductionAgentRuntime>>['runtime'];
+}) {
+  const [skillService, taskStorage, eventStorage, continuation, sameTask, stepRegistry] = await Promise.all([
+    import('@/lib/skill-runtime/service'),
+    import('@/lib/cloud-task-storage'),
+    import('@/lib/agent-runtime/event-storage'),
+    import('@/lib/skill-runtime/continuation'),
+    import('@/lib/agent-runtime/same-task-adapter'),
+    import('@/lib/skill-runtime/step-registry'),
+  ]);
+  return skillService.dispatchSkillRunExecution({
+    actorUserId: input.actorUserId,
+    runId: input.runId,
+  }, {
+    getTaskForUser: taskStorage.getCloudTaskForUser,
+    getRecoverableDispatch: eventStorage.getRecoverableAgentExecutionDispatch,
+    loadContinuation: async loadInput => {
+      const loaded = await continuation.loadPersistedSkillContinuation(loadInput);
+      const registry = stepRegistry.createProductionSkillStepRegistry({
+        actor: loaded.actor,
+        request: loaded.request,
+        mediaByVersionId: input.mediaByVersionId,
+      });
+      return {
+        ...loaded,
+        execute: context => skillService.executeSkillRun({
+          actor: loaded.actor,
+          request: loaded.request,
+          runId: loadInput.runId,
+          operationContext: context,
+          stepAdapters: registry.stepAdapters,
+          stepRecoveries: registry.stepRecoveries,
+          resumeFromStepId: loadInput.nextStepId,
+          definition: loaded.definition,
+          appendRunEvent: input.runtime.appendEvent,
+        }).then(() => undefined),
+      };
+    },
+    claimExecution: eventStorage.claimAdoptedAgentExecution,
+    claimDispatch: eventStorage.claimResumedAgentExecutionDispatch,
+    getProjection: input.runtime.getRun,
+    executeAdopted: sameTask.executeAdoptedAgentTask,
+    failDispatch: eventStorage.failResumedAgentExecutionDispatch,
+  });
+}
+
 describe('platform compliance accounting on isolated PostgreSQL', () => {
   postgresIt('rejects compliance_audit from the real non-Skill service before task creation or charge', async () => {
     await withIsolatedPostgres('platform_compliance_non_skill_denied', async ({ databaseUrl, query }) => {
@@ -438,7 +488,7 @@ describe('platform compliance accounting on isolated PostgreSQL', () => {
     });
   }, 60_000);
 
-  postgresIt('retries completed settlement after a real PostgreSQL revision advance', async () => {
+  postgresIt('completes the full compliance dispatcher after a real PostgreSQL revision advance', async () => {
     await withIsolatedPostgres('platform_compliance_completion_revision', async ({ databaseUrl, query }) => {
       const [core, taskStorage, taskService] = await Promise.all([
         import('@/lib/db-storage'),
@@ -450,70 +500,105 @@ describe('platform compliance accounting on isolated PostgreSQL', () => {
       const userId = `compliance-revision-${randomUUID()}`;
       const seeded = await seedProductionComplianceInputs(query, userId);
       await seedCredits(query, userId);
+      const provider = await startControlledProvider({ imageDataBySource: seeded.imageDataBySource });
       const transitionEntered = createGate();
       const releaseTransition = createGate();
       let completedAttempts = 0;
-      const production = await createProductionAgentRuntime({ transitionTask: async input => {
-        if (input.to === 'completed') {
-          completedAttempts += 1;
-          if (completedAttempts === 1) {
-            transitionEntered.release();
-            await releaseTransition.promise;
+      const completedTransitions: boolean[] = [];
+      try {
+        await query("UPDATE wujie_api_providers SET base_url = $1 WHERE id = 'pear-vision'", [provider.baseUrl]);
+        const production = await createProductionAgentRuntime({ transitionTask: async input => {
+          if (input.to === 'completed') {
+            completedAttempts += 1;
+            if (completedAttempts === 1) {
+              transitionEntered.release();
+              await releaseTransition.promise;
+            }
           }
-        }
-        return taskService.transitionTask(input);
-      } });
-      const created = await production.createSkillRun(
-        complianceInput(userId, `completion-revision-${randomUUID()}`, seeded.scenario),
-      );
-      const completedEventId = `agent:${created.runId}:completed:r2`;
-      const completion = production.runtime.appendEvent({
-        actorUserId: userId,
-        runId: created.runId,
-        eventId: completedEventId,
-        type: 'run.completed',
-        payload: { result: { assetVersionIds: ['report-version-r2'] } },
-      });
-      await transitionEntered.promise;
-      const advanced = await query<{ revision: number }>(
-        `UPDATE cloud_tasks SET revision = revision + 1, updated_at = $2
-         WHERE id = $1 RETURNING revision`,
-        [created.runId, Date.now()],
-      );
-      expect(advanced.rows[0]?.revision).toBeGreaterThan(0);
-      releaseTransition.release();
+          const result = await taskService.transitionTask(input);
+          if (input.to === 'completed') completedTransitions.push(result.transitioned);
+          return result;
+        } });
+        const created = await production.createSkillRun(
+          complianceInput(userId, `completion-revision-${randomUUID()}`, seeded.scenario),
+        );
+        const dispatch = await dispatchComplianceWithRuntime({
+          actorUserId: userId,
+          runId: created.runId,
+          mediaByVersionId: seeded.imageDataBySource,
+          runtime: production.runtime,
+        });
+        expect(dispatch.started).toBe(true);
+        await transitionEntered.promise;
+        const advanced = await query<{ revision: number }>(
+          `UPDATE cloud_tasks SET revision = revision + 1, updated_at = $2
+           WHERE id = $1 RETURNING revision`,
+          [created.runId, Date.now()],
+        );
+        expect(advanced.rows[0]?.revision).toBeGreaterThan(0);
+        releaseTransition.release();
+        await dispatch.completion;
 
-      await expect(completion).resolves.toMatchObject({
-        accepted: true,
-        event: { eventId: completedEventId, type: 'run.completed' },
-        projection: { status: 'completed' },
-      });
-      const [task, events, ledger] = await Promise.all([
-        taskStorage.getCloudTaskForUser(created.runId, userId),
-        query<{ event_id: string; event_type: string }>(
-          `SELECT event_id, event_type FROM wujie_agent_events
-           WHERE task_id = $1 AND event_type IN ('run.completed', 'run.failed', 'run.cancelled', 'run.timeout')`,
-          [created.runId],
-        ),
-        query<{ type: string; amount: number }>(
-          `SELECT type, amount::float8 AS amount FROM wujie_credit_transactions
-           WHERE task_id = $1 ORDER BY created_at, id`,
-          [created.runId],
-        ),
-      ]);
-      expect(completedAttempts).toBe(2);
-      expect(task).toMatchObject({
-        status: 'completed',
-        creditStatus: 'charged',
-        terminalEventId: completedEventId,
-        terminalEventType: 'run.completed',
-      });
-      expect(events.rows).toEqual([{ event_id: completedEventId, event_type: 'run.completed' }]);
-      expect(ledger.rows).toEqual([{ type: 'consume', amount: -(task!.creditCost || 0) }]);
+        const [task, events, ledger, reports, operations] = await Promise.all([
+          taskStorage.getCloudTaskForUser(created.runId, userId),
+          query<{ event_id: string; event_type: string }>(
+            `SELECT event_id, event_type FROM wujie_agent_events
+             WHERE task_id = $1 AND event_type IN ('run.completed', 'run.failed', 'run.cancelled', 'run.timeout')`,
+            [created.runId],
+          ),
+          query<{ type: string; amount: number }>(
+            `SELECT type, amount::float8 AS amount FROM wujie_credit_transactions
+             WHERE task_id = $1 ORDER BY created_at, id`, [created.runId],
+          ),
+          query<{ id: string; asset_id: string; mime_type: string; metadata: Record<string, unknown> }>(
+            `SELECT version.id, version.asset_id, version.mime_type, version.metadata
+             FROM wujie_asset_versions version JOIN wujie_assets asset ON asset.id = version.asset_id
+             WHERE asset.owner_id = $1 AND asset.project_id = $2 AND asset.kind = 'document'
+             ORDER BY version.created_at, version.id`, [userId, seeded.scenario.projectId],
+          ),
+          query<{ step_id: string; status: string; attempt_count: number }>(
+            `SELECT step_id, status, attempt_count FROM wujie_agent_downstream_operations
+             WHERE task_id = $1 AND tool_id = 'compliance_audit' ORDER BY step_id`, [created.runId],
+          ),
+        ]);
+        expect(completedAttempts).toBe(2);
+        expect(completedTransitions).toEqual([false, true]);
+        expect(task).toMatchObject({ status: 'completed', creditStatus: 'charged', terminalEventType: 'run.completed' });
+        expect(events.rows).toHaveLength(1);
+        expect(events.rows[0]).toMatchObject({ event_id: task!.terminalEventId, event_type: 'run.completed' });
+        expect(ledger.rows).toEqual([{ type: 'consume', amount: -(task!.creditCost || 0) }]);
+        const visionCalls = provider.calls.filter(call => call.sourceVersionId !== null);
+        expect(visionCalls).toHaveLength(3);
+        for (const sourceVersionId of seeded.scenario.sourceVersionIds) {
+          expect(visionCalls.filter(call => call.sourceVersionId === sourceVersionId)).toEqual([
+            expect.objectContaining({
+              sourceVersionId,
+              attempt: 1,
+              requestId: expect.stringMatching(/^agent-provider:[a-f0-9]{64}$/u),
+            }),
+          ]);
+        }
+        expect(operations.rows).toHaveLength(3);
+        expect(operations.rows.every(row => row.status === 'completed' && row.attempt_count === 1)).toBe(true);
+        expect(reports.rows).toHaveLength(3);
+        expect(new Set(reports.rows.map(row => row.asset_id))).toHaveLength(3);
+        for (const report of reports.rows) {
+          expect(report.mime_type).toBe('application/json');
+          expect(report.metadata).toMatchObject({
+            schemaId: 'platform-compliance-report-v1',
+            sourceTrace: { source: 'canvas-skill', runId: created.runId },
+          });
+          const content = JSON.parse(String(report.metadata.reportContent)) as Record<string, unknown>;
+          expect(String(report.metadata.reportContent)).toBe(canonicalComplianceReportJson(content));
+        }
+      } finally {
+        releaseTransition.release();
+        await provider.close();
+      }
     });
   }, 60_000);
 
-  postgresIt('keeps a real cancelled terminal when cancel wins a completion race', async () => {
+  postgresIt('keeps cancellation authoritative when it wins the full dispatcher completion race', async () => {
     await withIsolatedPostgres('platform_compliance_cancel_wins_completion', async ({ databaseUrl, query }) => {
       const [core, taskStorage, taskService] = await Promise.all([
         import('@/lib/db-storage'),
@@ -525,57 +610,109 @@ describe('platform compliance accounting on isolated PostgreSQL', () => {
       const userId = `compliance-cancel-wins-${randomUUID()}`;
       const seeded = await seedProductionComplianceInputs(query, userId);
       await seedCredits(query, userId);
+      const provider = await startControlledProvider({ imageDataBySource: seeded.imageDataBySource });
       const transitionEntered = createGate();
       const releaseTransition = createGate();
-      const production = await createProductionAgentRuntime({ transitionTask: async input => {
-        if (input.to === 'completed') {
-          transitionEntered.release();
-          await releaseTransition.promise;
-        }
-        return taskService.transitionTask(input);
-      } });
-      const created = await production.createSkillRun(
-        complianceInput(userId, `cancel-wins-${randomUUID()}`, seeded.scenario),
-      );
-      const completion = production.runtime.appendEvent({
-        actorUserId: userId,
-        runId: created.runId,
-        eventId: `agent:${created.runId}:completed:loser`,
-        type: 'run.completed',
-        payload: { result: { assetVersionIds: ['late-report'] } },
-      });
-      await transitionEntered.promise;
-      const cancelled = await production.runtime.cancelRun({ actorUserId: userId, runId: created.runId });
-      expect(cancelled).toMatchObject({ accepted: true, projection: { status: 'cancelled' } });
-      releaseTransition.release();
-      await expect(completion).rejects.toMatchObject({ code: 'AGENT_RUN_TERMINAL_CONFLICT' });
+      let completedAttempts = 0;
+      const completedTransitions: boolean[] = [];
+      try {
+        await query("UPDATE wujie_api_providers SET base_url = $1 WHERE id = 'pear-vision'", [provider.baseUrl]);
+        const production = await createProductionAgentRuntime({ transitionTask: async input => {
+          if (input.to === 'completed') {
+            completedAttempts += 1;
+            transitionEntered.release();
+            await releaseTransition.promise;
+          }
+          const result = await taskService.transitionTask(input);
+          if (input.to === 'completed') completedTransitions.push(result.transitioned);
+          return result;
+        } });
+        const created = await production.createSkillRun(
+          complianceInput(userId, `cancel-wins-${randomUUID()}`, seeded.scenario),
+        );
+        const dispatch = await dispatchComplianceWithRuntime({
+          actorUserId: userId,
+          runId: created.runId,
+          mediaByVersionId: seeded.imageDataBySource,
+          runtime: production.runtime,
+        });
+        await transitionEntered.promise;
+        const beforeCancel = await query<{ id: string; metadata: Record<string, unknown> }>(
+          `SELECT version.id, version.metadata FROM wujie_asset_versions version
+           JOIN wujie_assets asset ON asset.id = version.asset_id
+           WHERE asset.owner_id = $1 AND asset.project_id = $2 AND asset.kind = 'document'
+           ORDER BY version.id`, [userId, seeded.scenario.projectId],
+        );
+        const providerCallsBeforeCancel = provider.calls.length;
+        const cancelled = await production.runtime.cancelRun({ actorUserId: userId, runId: created.runId });
+        expect(cancelled).toMatchObject({ accepted: true, projection: { status: 'cancelled' } });
+        releaseTransition.release();
+        await dispatch.completion;
 
-      const [task, events, ledger] = await Promise.all([
-        taskStorage.getCloudTaskForUser(created.runId, userId),
-        query<{ event_id: string; event_type: string }>(
-          `SELECT event_id, event_type FROM wujie_agent_events
-           WHERE task_id = $1 AND event_type IN ('run.completed', 'run.failed', 'run.cancelled', 'run.timeout')`,
+        const [task, events, ledger, reports, operations] = await Promise.all([
+          taskStorage.getCloudTaskForUser(created.runId, userId),
+          query<{ event_id: string; event_type: string }>(
+            `SELECT event_id, event_type FROM wujie_agent_events
+             WHERE task_id = $1 AND event_type IN ('run.completed', 'run.failed', 'run.cancelled', 'run.timeout')`,
+            [created.runId],
+          ),
+          query<{ type: string; amount: number }>(
+            `SELECT type, amount::float8 AS amount FROM wujie_credit_transactions
+             WHERE task_id = $1 ORDER BY created_at, id`, [created.runId],
+          ),
+          query<{ id: string; metadata: Record<string, unknown> }>(
+            `SELECT version.id, version.metadata FROM wujie_asset_versions version
+             JOIN wujie_assets asset ON asset.id = version.asset_id
+             WHERE asset.owner_id = $1 AND asset.project_id = $2 AND asset.kind = 'document'
+             ORDER BY version.id`, [userId, seeded.scenario.projectId],
+          ),
+          query<{ step_id: string; status: string; attempt_count: number }>(
+            `SELECT step_id, status, attempt_count FROM wujie_agent_downstream_operations
+             WHERE task_id = $1 AND tool_id = 'compliance_audit' ORDER BY step_id`, [created.runId],
+          ),
+        ]);
+        expect(completedAttempts).toBe(1);
+        expect(completedTransitions).toEqual([false]);
+        expect(task).toMatchObject({ status: 'cancelled', terminalEventType: 'run.cancelled' });
+        expect(events.rows).toEqual([{
+          event_id: `agent:${created.runId}:cancelled`, event_type: 'run.cancelled',
+        }]);
+        const runEvents = await query<{ event_type: string; payload: Record<string, unknown> }>(
+          `SELECT event_type, payload FROM wujie_agent_events
+           WHERE task_id = $1 AND event_type IN ('run.created', 'tool.completed')`,
           [created.runId],
-        ),
-        query<{ type: string; amount: number }>(
-          `SELECT type, amount::float8 AS amount FROM wujie_credit_transactions
-           WHERE task_id = $1 ORDER BY created_at, id`,
-          [created.runId],
-        ),
-      ]);
-      expect(task).toMatchObject({
-        status: 'cancelled',
-        creditStatus: 'refunded',
-        terminalEventType: 'run.cancelled',
-      });
-      expect(events.rows).toEqual([{
-        event_id: `agent:${created.runId}:cancelled`,
-        event_type: 'run.cancelled',
-      }]);
-      expect(ledger.rows).toEqual([
-        { type: 'consume', amount: -(task!.creditCost || 0) },
-        { type: 'refund', amount: task!.creditCost || 0 },
-      ]);
+        );
+        const createdPayload = runEvents.rows.find(row => row.event_type === 'run.created')?.payload;
+        const completedStepIds = new Set(runEvents.rows
+          .filter(row => row.event_type === 'tool.completed' && typeof row.payload.stepId === 'string')
+          .map(row => String(row.payload.stepId)));
+        const snapshot = createdPayload?.skillSnapshot as {
+          steps: Array<{ id: string; cost?: number }>;
+        };
+        const expectedRefund = snapshot.steps.reduce((sum, step) => (
+          completedStepIds.has(step.id) ? sum : sum + Number(step.cost || 0)
+        ), 0);
+        expect(ledger.rows[0]).toEqual({ type: 'consume', amount: -(task!.creditCost || 0) });
+        expect(ledger.rows.filter(row => row.type === 'refund')).toEqual(
+          expectedRefund > 0 ? [{ type: 'refund', amount: expectedRefund }] : [],
+        );
+        expect(provider.calls).toHaveLength(providerCallsBeforeCancel);
+        expect(reports.rows).toEqual(beforeCancel.rows);
+        expect(reports.rows).toHaveLength(3);
+        for (const report of reports.rows) {
+          expect(report.metadata).toMatchObject({
+            schemaId: 'platform-compliance-report-v1',
+            sourceTrace: { source: 'canvas-skill', runId: created.runId },
+          });
+          const content = JSON.parse(String(report.metadata.reportContent)) as Record<string, unknown>;
+          expect(String(report.metadata.reportContent)).toBe(canonicalComplianceReportJson(content));
+        }
+        expect(operations.rows).toHaveLength(3);
+        expect(operations.rows.every(row => row.status === 'completed' && row.attempt_count === 1)).toBe(true);
+      } finally {
+        releaseTransition.release();
+        await provider.close();
+      }
     });
   }, 60_000);
 

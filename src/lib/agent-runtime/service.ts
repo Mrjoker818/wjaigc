@@ -320,6 +320,14 @@ function readSkill(value: unknown): AgentSkillInvocation | undefined {
   };
 }
 
+function isExpectedResumedExecutionFenceRejection(error: unknown): boolean {
+  return Boolean(
+    error
+    && typeof error === 'object'
+    && (error as { code?: unknown }).code === 'AGENT_RUN_NOT_FOUND',
+  );
+}
+
 export function parseAgentRunRequest(value: unknown): AgentRunRequest {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw new AgentRunRequestError();
@@ -721,6 +729,7 @@ export function createAgentRuntimeService(
           if (!dependencies.recordDispatchCompletionFailure) throw error;
           await dependencies.recordDispatchCompletionFailure(dispatchInput, error);
         }).catch(error => {
+          if (isExpectedResumedExecutionFenceRejection(error)) return;
           console.error('[agent-runtime] failed to persist resumed execution failure', error);
         }).finally(scope.dispose);
       } else {
