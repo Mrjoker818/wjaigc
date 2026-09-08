@@ -21,6 +21,7 @@ export interface BuildComplianceReportInput {
   visionModel: PlatformComplianceVisionModelV1;
   visionResult?: VisionComplianceResult;
   visionError?: PlatformComplianceTechnicalErrorV1;
+  technicalErrors?: readonly PlatformComplianceTechnicalErrorV1[];
 }
 
 function unknownVisionCheck(rule: FrozenComplianceRuleSet['rules'][number]): PlatformComplianceCheckV1 {
@@ -70,7 +71,10 @@ export function buildComplianceReport(
     summary: { passed: 0, warning: 0, blocked: 0, unknown: 0 },
     visionModel: input.visionModel,
     knownLimitations: partial ? ['Vision evaluation is unavailable or pending.'] : [],
-    technicalErrors: input.visionError ? [input.visionError] : [],
+    technicalErrors: [
+      ...(input.visionError ? [input.visionError] : []),
+      ...(input.technicalErrors ?? []),
+    ],
     manualReviewRequired: partial,
     extensions: { partial },
   });

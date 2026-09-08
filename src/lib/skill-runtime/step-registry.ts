@@ -60,6 +60,7 @@ type PersistCompliancePartialReport = (
 class ComplianceAuditVisionFailedError extends Error {
   readonly code = 'COMPLIANCE_AUDIT_VISION_FAILED';
   readonly submissionOutcome = 'known';
+  readonly persistenceFailed: boolean;
 
   constructor(
     readonly partialReport: PlatformComplianceReportV1,
@@ -68,10 +69,11 @@ class ComplianceAuditVisionFailedError extends Error {
     readonly requestId: string,
     readonly retryable: boolean,
     readonly providerStatus?: number,
-    options?: ErrorOptions,
+    options?: ErrorOptions & { persistenceFailed?: boolean },
   ) {
     super('The frozen compliance vision check failed', options);
     this.name = 'ComplianceAuditVisionFailedError';
+    this.persistenceFailed = options?.persistenceFailed === true;
   }
 }
 
@@ -445,7 +447,7 @@ export function createProductionSkillStepRegistry(input: {
       modelId: step.modelBinding.modelId,
     };
     const buildReport = (
-      visionError?: PlatformComplianceTechnicalErrorV1,
+      technicalErrors: readonly PlatformComplianceTechnicalErrorV1[] = [],
       visionResult?: Awaited<ReturnType<typeof invokeComplianceVision>>,
     ): PlatformComplianceReportV1 => buildComplianceReport({
       reportId,
@@ -456,7 +458,7 @@ export function createProductionSkillStepRegistry(input: {
       ruleSet,
       technicalChecks,
       visionModel,
-      visionError,
+      technicalErrors,
       visionResult,
     });
     const persist = input.persistCompliancePartialReport || persistCompliancePartialReport;
@@ -488,7 +490,7 @@ export function createProductionSkillStepRegistry(input: {
         modelId: step.modelBinding.modelId,
         requestId: step.operation.idempotencyKey,
       };
-      const partialReport = buildReport(technicalError);
+      const partialReport = buildReport([technicalError]);
       await persistReport('vision-error', partialReport);
       throw new ComplianceAuditVisionFailedError(
         partialReport,
@@ -504,12 +506,12 @@ export function createProductionSkillStepRegistry(input: {
       const visionResult = await invokeComplianceVision({
         provider,
         modelId: step.modelBinding.modelId,
-        imageInput,
+        imageInput: facts.inspectedImageDataUrl,
         rules: ruleSet.rules.filter(rule => rule.evaluator === 'vision'),
         requestId: step.operation.idempotencyKey,
         signal: step.signal,
       });
-      const report = buildReport(undefined, visionResult);
+      const report = buildReport([], visionResult);
       return {
         assetVersionIds: [],
         media: [],
@@ -525,8 +527,35 @@ export function createProductionSkillStepRegistry(input: {
         modelId: error.modelId,
         requestId: error.requestId,
       };
-      const partialReport = buildReport(technicalError);
-      await persistReport('vision-error', partialReport);
+      let partialReport = buildReport([technicalError]);
+      try {
+        await persistReport('vision-error', partialReport);
+      } catch (persistenceError) {
+        partialReport = buildReport([technicalError, {
+          code: 'COMPLIANCE_PARTIAL_REPORT_PERSIST_FAILED',
+          message: 'The compliance partial report could not be persisted',
+          retryable: true,
+        }]);
+        if (error.submissionUnknown) {
+          throw Object.assign(new AgentDownstreamSubmissionUnknownError(error), {
+            partialReport,
+            providerId: error.providerId,
+            modelId: error.modelId,
+            requestId: error.requestId,
+            retryable: false,
+            persistenceFailed: true,
+          });
+        }
+        throw new ComplianceAuditVisionFailedError(
+          partialReport,
+          error.providerId,
+          error.modelId,
+          error.requestId,
+          error.retryable,
+          error.providerStatus,
+          { cause: persistenceError, persistenceFailed: true },
+        );
+      }
       if (error.submissionUnknown) {
         throw Object.assign(new AgentDownstreamSubmissionUnknownError(error), {
           partialReport,

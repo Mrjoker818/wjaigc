@@ -15,6 +15,7 @@ export interface ComplianceMediaFacts {
   mimeType: string;
   byteLength: number;
   sourceDigest: string;
+  inspectedImageDataUrl: string;
   width: number;
   height: number;
   pixelCount: number;
@@ -159,6 +160,7 @@ export async function auditComplianceMedia(input: {
     mimeType: decoded.mimeType,
     byteLength: decoded.buffer.byteLength,
     sourceDigest: createHash('sha256').update(decoded.buffer).digest('hex'),
+    inspectedImageDataUrl: `data:${decoded.mimeType};base64,${decoded.buffer.toString('base64')}`,
     width: metadata.width,
     height: metadata.height,
     pixelCount: metadata.width * metadata.height,

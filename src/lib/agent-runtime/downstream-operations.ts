@@ -307,6 +307,7 @@ export async function executeDurableAgentDownstreamOperation<T>(
         ...identity,
         reason: error instanceof Error ? error.message : 'Provider submission outcome is unknown',
       }).catch(() => undefined);
+      if (error instanceof AgentDownstreamSubmissionUnknownError) throw error;
       throw new AgentDownstreamSubmissionUnknownError(error);
     } else {
       await dependencies.release?.(identity).catch(() => false);

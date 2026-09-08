@@ -1,5 +1,7 @@
 import { readFileSync } from 'node:fs';
+import { mkdir, unlink, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
+import { createHash } from 'node:crypto';
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -408,5 +410,126 @@ describe('platform compliance report execution', () => {
 
     expect(dependencies.markSubmissionUnknown).toHaveBeenCalledTimes(1);
     expect(mocks.fetchWithV1Retry).toHaveBeenCalledTimes(1);
+  });
+
+  it('binds vision to the inspected bytes when the authorized URL content changes', async () => {
+    const uploads = resolve(process.cwd(), 'public/uploads');
+    const name = `compliance-byte-binding-${process.pid}-${Date.now()}.png`;
+    const path = resolve(uploads, name);
+    const replacement = readFileSync(resolve(
+      process.cwd(), 'src/__tests__/fixtures/platform-compliance/amazon-main-alpha.png',
+    ));
+    await mkdir(uploads, { recursive: true });
+    await writeFile(path, image);
+    mocks.fetchWithV1Retry.mockResolvedValue(new Response(JSON.stringify({
+      choices: [{ message: { content: JSON.stringify({ checks: successfulVisionChecks() }) } }],
+    })));
+    const persisted = vi.fn<(input: PersistCompliancePartialReportInput) => Promise<void>>(
+      async input => {
+        expect(JSON.stringify(input.report)).not.toContain(image.toString('base64'));
+        if (input.phase === 'technical') await writeFile(path, replacement);
+      },
+    );
+    const request = complianceRequest();
+    const mutableUrl = `/uploads/${name}`;
+    const registry = createProductionSkillStepRegistry({
+      actor: { id: 'user-1', name: 'User', role: 'user', status: 'active', productType: 'canvas', createdAt: 1, updatedAt: 1 },
+      request, mediaByVersionId: { 'asset-version-a': mutableUrl },
+      persistCompliancePartialReport: persisted,
+    });
+
+    try {
+      const result = await registry.stepAdapters.compliance_audit(complianceStepInput(
+        request,
+        {
+          idempotencyKey: 'provider-idempotency', operationKey: 'operation-1', recovery: false,
+          executionFence: { runId: 'run-1', leaseOwner: 'lease-1', generation: 1 },
+          beginSubmission: vi.fn(async () => undefined), recordAccepted: vi.fn(async () => undefined),
+          recordLocalAccepted: vi.fn(async () => undefined), executeOperation: vi.fn(),
+        },
+        new AbortController().signal,
+      ));
+      const body = String(mocks.fetchWithV1Retry.mock.calls[0]?.[2]?.body);
+      expect(body).toContain(`data:image/png;base64,${image.toString('base64')}`);
+      expect(body).not.toContain(mutableUrl);
+      expect(body).not.toContain(replacement.toString('base64'));
+      expect(result.structured?.value).toMatchObject({
+        sourceDigest: createHash('sha256').update(image).digest('hex'),
+      });
+    } finally {
+      await unlink(path);
+    }
+  });
+
+  it('keeps a known provider failure known when the vision-error report cannot persist', async () => {
+    mocks.fetchWithV1Retry.mockResolvedValue(new Response('{}', {
+      status: 429, headers: { 'x-request-id': 'persist-request-429' },
+    }));
+    const dependencies = durableDependencies();
+    const persisted = vi.fn<(input: PersistCompliancePartialReportInput) => Promise<void>>()
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error('event storage unavailable'));
+    const request = complianceRequest();
+    const registry = createProductionSkillStepRegistry({
+      actor: { id: 'user-1', name: 'User', role: 'user', status: 'active', productType: 'canvas', createdAt: 1, updatedAt: 1 },
+      request, mediaByVersionId: { 'asset-version-a': imageDataUrl },
+      persistCompliancePartialReport: persisted,
+    });
+
+    let error: unknown;
+    try {
+      await executeDurableAgentDownstreamOperation({
+        actorUserId: 'user-1', projectId: 'project-1', runId: 'run-1',
+        toolId: 'compliance_audit', stepId: 'audit:a', requestDigest: 'request-digest',
+        executionFence: { runId: 'run-1', leaseOwner: 'lease-1', generation: 1 },
+      }, operation => registry.stepAdapters.compliance_audit(
+        complianceStepInput(request, operation, new AbortController().signal),
+      ), dependencies);
+    } catch (caught) {
+      error = caught;
+    }
+
+    expect(error).toMatchObject({
+      code: 'COMPLIANCE_AUDIT_VISION_FAILED', submissionOutcome: 'known',
+      providerId: 'frozen-vision', modelId: 'vision-model', requestId: 'persist-request-429',
+      providerStatus: 429, retryable: true, persistenceFailed: true,
+      partialReport: expect.objectContaining({
+        technicalErrors: expect.arrayContaining([
+          expect.objectContaining({ code: 'COMPLIANCE_VISION_RATE_LIMITED' }),
+          expect.objectContaining({ code: 'COMPLIANCE_PARTIAL_REPORT_PERSIST_FAILED' }),
+        ]),
+      }),
+    });
+    expect(dependencies.markSubmissionUnknown).not.toHaveBeenCalled();
+    expect(dependencies.release).toHaveBeenCalledWith(
+      expect.any(Object), { knownSubmissionOutcome: true },
+    );
+  });
+
+  it('keeps transport response loss unknown when its partial report cannot persist', async () => {
+    mocks.fetchWithV1Retry.mockRejectedValue(new TypeError('socket closed'));
+    const dependencies = durableDependencies();
+    const persisted = vi.fn<(input: PersistCompliancePartialReportInput) => Promise<void>>()
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error('event storage unavailable'));
+    const request = complianceRequest();
+    const registry = createProductionSkillStepRegistry({
+      actor: { id: 'user-1', name: 'User', role: 'user', status: 'active', productType: 'canvas', createdAt: 1, updatedAt: 1 },
+      request, mediaByVersionId: { 'asset-version-a': imageDataUrl },
+      persistCompliancePartialReport: persisted,
+    });
+
+    await expect(executeDurableAgentDownstreamOperation({
+      actorUserId: 'user-1', projectId: 'project-1', runId: 'run-1',
+      toolId: 'compliance_audit', stepId: 'audit:a', requestDigest: 'request-digest',
+      executionFence: { runId: 'run-1', leaseOwner: 'lease-1', generation: 1 },
+    }, operation => registry.stepAdapters.compliance_audit(
+      complianceStepInput(request, operation, new AbortController().signal),
+    ), dependencies)).rejects.toMatchObject({
+      code: 'AGENT_DOWNSTREAM_SUBMISSION_UNKNOWN', persistenceFailed: true,
+      providerId: 'frozen-vision', modelId: 'vision-model',
+    });
+    expect(dependencies.markSubmissionUnknown).toHaveBeenCalledTimes(1);
+    expect(dependencies.release).not.toHaveBeenCalled();
   });
 });

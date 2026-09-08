@@ -85,11 +85,29 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
-function requestIdFrom(response: Response, input: ComplianceVisionInput): string {
+async function cancelResponseBody(response: Response, reason?: unknown): Promise<void> {
+  if (!response.body || response.bodyUsed) return;
+  await response.body.cancel(reason).catch(() => undefined);
+}
+
+function cancellationError(input: ComplianceVisionInput, requestId: string): ComplianceVisionError {
+  return new ComplianceVisionError(
+    'COMPLIANCE_VISION_CANCELLED',
+    input.provider.id,
+    input.modelId,
+    requestId,
+    false,
+    undefined,
+    { cause: input.signal.reason },
+  );
+}
+
+async function requestIdFrom(response: Response, input: ComplianceVisionInput): Promise<string> {
   const value = response.headers.get('x-request-id')?.trim()
     || response.headers.get('request-id')?.trim();
   if (!value) return input.requestId;
   if (value.length > MAX_REQUEST_ID_LENGTH || !SAFE_REQUEST_ID.test(value)) {
+    await cancelResponseBody(response);
     throw responseError(input, input.requestId);
   }
   return value;
@@ -125,6 +143,7 @@ async function readBoundedResponse(
     !/^\d+$/u.test(declaredLength)
     || Number(declaredLength) > MAX_RESPONSE_BYTES
   )) {
+    await cancelResponseBody(response);
     throw responseError(input, requestId);
   }
   if (!response.body) return '';
@@ -132,9 +151,15 @@ async function readBoundedResponse(
   const reader = response.body.getReader();
   const chunks: Uint8Array[] = [];
   let byteLength = 0;
+  const cancelForCaller = () => {
+    void reader.cancel(input.signal.reason).catch(() => undefined);
+  };
+  input.signal.addEventListener('abort', cancelForCaller, { once: true });
   try {
     while (true) {
+      if (input.signal.aborted) throw cancellationError(input, requestId);
       const chunk = await reader.read();
+      if (input.signal.aborted) throw cancellationError(input, requestId);
       if (chunk.done) break;
       byteLength += chunk.value.byteLength;
       if (byteLength > MAX_RESPONSE_BYTES) {
@@ -144,8 +169,14 @@ async function readBoundedResponse(
       chunks.push(chunk.value);
     }
   } catch (error) {
+    if (input.signal.aborted) {
+      await reader.cancel(input.signal.reason).catch(() => undefined);
+      throw cancellationError(input, requestId);
+    }
     if (error instanceof ComplianceVisionError) throw error;
     throw responseError(input, requestId);
+  } finally {
+    input.signal.removeEventListener('abort', cancelForCaller);
   }
 
   const bytes = new Uint8Array(byteLength);
@@ -293,15 +324,7 @@ export async function invokeComplianceVision(
   dependencies: ComplianceVisionDependencies = defaultDependencies,
 ): Promise<VisionComplianceResult> {
   if (input.signal.aborted) {
-    throw new ComplianceVisionError(
-      'COMPLIANCE_VISION_CANCELLED',
-      input.provider.id,
-      input.modelId,
-      input.requestId,
-      false,
-      undefined,
-      { cause: input.signal.reason },
-    );
+    throw cancellationError(input, input.requestId);
   }
   const requestSignal = AbortSignal.any([
     input.signal,
@@ -332,15 +355,7 @@ export async function invokeComplianceVision(
     });
   } catch (error) {
     if (input.signal.aborted) {
-      throw new ComplianceVisionError(
-        'COMPLIANCE_VISION_CANCELLED',
-        input.provider.id,
-        input.modelId,
-        input.requestId,
-        false,
-        undefined,
-        { cause: input.signal.reason },
-      );
+      throw cancellationError(input, input.requestId);
     }
     throw new ComplianceVisionError(
       'COMPLIANCE_VISION_SUBMISSION_UNKNOWN',
@@ -353,13 +368,19 @@ export async function invokeComplianceVision(
     );
   }
 
-  const requestId = requestIdFrom(response, input);
-  if (!response.ok) throw httpError(input, response, requestId);
+  const requestId = await requestIdFrom(response, input);
+  if (!response.ok) {
+    await cancelResponseBody(response);
+    throw httpError(input, response, requestId);
+  }
   let envelope: unknown;
   try {
-    envelope = JSON.parse(await readBoundedResponse(response, input, requestId)) as unknown;
+    const responseText = await readBoundedResponse(response, input, requestId);
+    if (input.signal.aborted) throw cancellationError(input, requestId);
+    envelope = JSON.parse(responseText) as unknown;
     assertBoundedJsonStructure(envelope);
   } catch (error) {
+    if (input.signal.aborted) throw cancellationError(input, requestId);
     if (error instanceof ComplianceVisionError) throw error;
     throw responseError(input, requestId);
   }
@@ -368,6 +389,7 @@ export async function invokeComplianceVision(
   const message = isRecord(first) && isRecord(first.message) ? first.message : null;
   const content = message?.content;
   if (typeof content !== 'string' || !content) throw responseError(input, requestId);
+  if (input.signal.aborted) throw cancellationError(input, requestId);
   return Object.freeze({
     providerId: input.provider.id,
     modelId: input.modelId,

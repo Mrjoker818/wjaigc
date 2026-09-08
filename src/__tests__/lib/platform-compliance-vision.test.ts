@@ -249,4 +249,44 @@ describe('platform compliance frozen vision client', () => {
     });
     expect(JSON.stringify(error)).not.toContain('secret');
   });
+
+  it('cancels the response reader and reports caller cancellation during body reads', async () => {
+    const controller = new AbortController();
+    const cancel = vi.fn();
+    const body = new ReadableStream<Uint8Array>({
+      start(stream) {
+        setTimeout(() => controller.abort(new DOMException('cancelled by user', 'AbortError')), 0);
+        setTimeout(() => stream.error(new Error('late stream failure')), 20);
+      },
+      cancel,
+    });
+    const fetcher = vi.fn(async () => new Response(body, {
+      headers: { 'x-request-id': 'body-request-1' },
+    }));
+
+    await expect(invokeComplianceVision({
+      provider, modelId: 'gemini-vision-stable', imageInput: '/uploads/authorized.png', rules,
+      requestId: 'local-request-1', signal: controller.signal,
+    }, { fetcher })).rejects.toMatchObject({
+      code: 'COMPLIANCE_VISION_CANCELLED', requestId: 'body-request-1', retryable: false,
+      submissionUnknown: false,
+    });
+    expect(cancel).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ['unsafe request id', 200, { 'x-request-id': 'unsafe/request' }],
+    ['oversized content length', 200, { 'content-length': String(300 * 1024) }],
+    ['HTTP error', 429, { 'x-request-id': 'request-429' }],
+  ])('cancels the unconsumed response body for %s', async (_name, status, headers) => {
+    const cancel = vi.fn();
+    const body = new ReadableStream<Uint8Array>({ pull() {}, cancel });
+    const fetcher = vi.fn(async () => new Response(body, { status, headers }));
+
+    await expect(invokeComplianceVision({
+      provider, modelId: 'gemini-vision-stable', imageInput: '/uploads/authorized.png', rules,
+      requestId: 'local-request-1', signal: new AbortController().signal,
+    }, { fetcher })).rejects.toBeInstanceOf(ComplianceVisionError);
+    expect(cancel).toHaveBeenCalledTimes(1);
+  });
 });
