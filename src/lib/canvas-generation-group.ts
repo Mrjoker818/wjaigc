@@ -623,8 +623,11 @@ export function getModelParamType(modelId: string, providerHint = ''): ModelPara
         if (normalizedId.includes(keyword)) return 'both';
     }
 
-    // Grok Imagine 支持 resolution(1k/2k) + quality(low/medium)，默认 2K
-    if (normalizedId.includes('grok-imagine')) return 'both';
+    // Grok Imagine：APIMart 官方文档暴露 resolution(1k/2k) + quality(low/medium)（默认 2K）；
+    // Pear 官方文档（生成图片）仅暴露 aspect_ratio 比例，不暴露 resolution/quality
+    if (normalizedId.includes('grok-imagine')) {
+        return /pear/i.test(providerHint) ? 'none' : 'both';
+    }
     
     // 🔧 后缀优先检测（必须在关键词之前！否则 banana-4k 会被关键词误判为 resolution）
     const hasResolutionSuffix = /(?:^|[-_])[1234]k(?:[-_]|$)/i.test(modelId) || /(?:^|[-_])hd(?:[-_]|$)/i.test(modelId);
@@ -748,9 +751,12 @@ export function inferModelParamCapability(modelId: string, providerHint = ''): {
         return { type: 'quality', options: ['auto', 'low', 'medium', 'high'], defaultOption: 'auto' };
     }
 
-    // Grok Imagine (xAI): official params are aspect_ratio + resolution(1k/2k) + quality(low|medium),
-    // one image per request. Surface 1K/2K resolution tiers and low/medium quality.
+    // Grok Imagine (xAI)：APIMart 文档暴露 aspect_ratio + resolution(1k/2k) + quality(low|medium)，
+    // 每次一张；Pear 网关按官方文档仅暴露 aspect_ratio 比例，不暴露 resolution/quality
     if (id.includes('grok-imagine')) {
+        if (/pear/i.test(providerHint)) {
+            return { type: 'none', options: [], defaultOption: '' };
+        }
         return { type: 'both', options: ['1K', '2K', 'low', 'medium'], defaultOption: '2K' };
     }
 

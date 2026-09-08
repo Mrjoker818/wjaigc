@@ -1897,6 +1897,32 @@ export function adjustRequestForProfile(
     }
   }
 
+  // ★ Pear 网关 Grok Imagine（生成图片）：官方文档仅暴露 aspect_ratio + n +
+  // negative_prompt + seed + image/images + response_format + task_type。
+  // 不暴露 resolution/quality，也不接受通用派生像素提示，故裁剪掉这些字段。
+  const dispatchModelId = typeof body.model === 'string' ? (body.model as string) : '';
+  if (profile.id === 'pearapi' && /grok-imagine/i.test(dispatchModelId)) {
+    const grokBody: Record<string, unknown> = {};
+    const grokAllowedFields = [
+      'model',
+      'prompt',
+      'negative_prompt',
+      'n',
+      'size',
+      'aspect_ratio',
+      'response_format',
+      'task_type',
+      'image',
+      'images',
+      'seed',
+    ] as const;
+    for (const field of grokAllowedFields) {
+      if (body[field] !== undefined) grokBody[field] = body[field];
+    }
+    // n 已由 pearapi 分支从 image_count 归一化；这里从 body 取最终值
+    return { body: grokBody, endpoint };
+  }
+
   return { body, endpoint };
 }
 
