@@ -769,6 +769,7 @@ export function createAgentRuntimeService(
         userProductTypes: userProductTypes(input.actor),
         modelCapabilities: [...toAgentModelCapabilitySet(model)],
         capabilityScope: 'orchestrator',
+        skillAdmission: skillAdmission !== null,
       });
       if (authorization.denials.length > 0) {
         throw new AgentToolAuthorizationError(authorization.denials);

@@ -1107,6 +1107,27 @@ describe('Agent runtime service', () => {
     expect(dependencies.settleFailedTask).not.toHaveBeenCalled();
   });
 
+  it('rejects the Skill-only compliance tool before pricing, task creation, or events', async () => {
+    const dependencies = serviceDependencies();
+    const service = agentRuntime.createAgentRuntimeService(dependencies);
+
+    await expect(service.createRun({
+      actor: user,
+      request: request({
+        allowedToolIds: ['compliance_audit'],
+        idempotencyKey: 'plain-agent-compliance-denied',
+      }),
+    })).rejects.toMatchObject({
+      code: 'AGENT_TOOL_AUTHORIZATION_DENIED',
+      status: 403,
+      denials: [{ toolId: 'compliance_audit', code: 'SKILL_ADMISSION_REQUIRED' }],
+    });
+
+    expect(dependencies.calculateCreditCost).not.toHaveBeenCalled();
+    expect(dependencies.createBillableTask).not.toHaveBeenCalled();
+    expect(dependencies.appendEvent).not.toHaveBeenCalled();
+  });
+
   it('rejects a public Agent request that maps a canvas Skill onto chat before any admission side effect', async () => {
     const dependencies = serviceDependencies();
     const service = agentRuntime.createAgentRuntimeService(dependencies);
@@ -1934,6 +1955,32 @@ describe('Agent run API routes', () => {
 
     expect(response.status).toBe(200);
     expect(cancelRun).toHaveBeenCalledWith({ actorUserId: user.id, runId: 'run-1' });
+  });
+
+  it('returns 403 when a plain Agent request asks for the Skill-only compliance tool', async () => {
+    const createRun = vi.spyOn(agentRuntime, 'createAgentRun').mockRejectedValue(
+      new agentRuntime.AgentToolAuthorizationError([
+        { toolId: 'compliance_audit', code: 'SKILL_ADMISSION_REQUIRED' },
+      ]),
+    );
+    const { POST } = await import('@/app/api/agent-runs/route');
+    const response = await POST(new NextRequest('http://localhost/api/agent-runs', {
+      method: 'POST',
+      body: JSON.stringify(request({
+        allowedToolIds: ['compliance_audit'],
+        idempotencyKey: 'plain-agent-compliance-denied',
+      })),
+      headers: { 'content-type': 'application/json' },
+    }));
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: 'AGENT_TOOL_AUTHORIZATION_DENIED',
+        message: 'Requested Agent tools are not authorized',
+      },
+    });
+    expect(createRun).toHaveBeenCalledTimes(1);
   });
 
   it.each([

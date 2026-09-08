@@ -70,6 +70,7 @@ export async function admitAuthorizedAgentExecution<T>(
     userProductTypes: userProductTypes(input.actor),
     modelCapabilities: [...toAgentModelCapabilitySet(model)],
     capabilityScope: 'downstream',
+    skillAdmission: input.request.skill !== undefined,
   });
   if (
     authorization.denials.length > 0

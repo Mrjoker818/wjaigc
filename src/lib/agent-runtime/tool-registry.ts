@@ -2,6 +2,7 @@ import type { AgentWorkspace } from './types';
 
 export interface AgentToolDefinition {
   toolId: string;
+  skillOnly?: boolean;
   workspaces: AgentWorkspace[];
   productTypes: string[];
   modelCapabilities: string[];
@@ -12,6 +13,7 @@ export type AuthorizedAgentTool = AgentToolDefinition;
 
 export type AgentToolDenialCode =
   | 'TOOL_NOT_FOUND'
+  | 'SKILL_ADMISSION_REQUIRED'
   | 'WORKSPACE_FORBIDDEN'
   | 'PRODUCT_PERMISSION_REQUIRED'
   | 'MODEL_CAPABILITY_REQUIRED';
@@ -30,6 +32,7 @@ export interface AuthorizeAgentToolsInput {
   userProductTypes: string[];
   modelCapabilities: string[];
   capabilityScope?: 'orchestrator' | 'downstream';
+  skillAdmission?: boolean;
   registry?: readonly AgentToolDefinition[];
 }
 
@@ -77,6 +80,7 @@ export const AGENT_TOOL_REGISTRY: readonly AgentToolDefinition[] = [
   },
   {
     toolId: 'compliance_audit',
+    skillOnly: true,
     workspaces: ['canvas', 'workflow'],
     productTypes: ['canvas'],
     modelCapabilities: ['chat'],
@@ -90,6 +94,7 @@ export function authorizeAgentTools({
   userProductTypes,
   modelCapabilities,
   capabilityScope = 'orchestrator',
+  skillAdmission = false,
   registry = AGENT_TOOL_REGISTRY,
 }: AuthorizeAgentToolsInput): AgentToolAuthorizationResult {
   const definitions = new Map(registry.map(tool => [tool.toolId, tool]));
@@ -105,6 +110,10 @@ export function authorizeAgentTools({
     const tool = definitions.get(toolId);
     if (!tool) {
       denials.push({ toolId, code: 'TOOL_NOT_FOUND' });
+      continue;
+    }
+    if (tool.skillOnly && !skillAdmission) {
+      denials.push({ toolId, code: 'SKILL_ADMISSION_REQUIRED' });
       continue;
     }
     if (!tool.workspaces.includes(workspace)) {

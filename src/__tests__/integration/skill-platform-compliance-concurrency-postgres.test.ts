@@ -253,7 +253,131 @@ async function waitFor<T>(
   return value;
 }
 
+function createBarrier(parties: number): { wait(): Promise<void> } {
+  let arrived = 0;
+  let release!: () => void;
+  const ready = new Promise<void>(resolveReady => { release = resolveReady; });
+  return {
+    async wait() {
+      arrived += 1;
+      if (arrived === parties) release();
+      await ready;
+    },
+  };
+}
+
+function createGate(): { promise: Promise<void>; release(): void } {
+  let release!: () => void;
+  const promise = new Promise<void>(resolveGate => { release = resolveGate; });
+  return { promise, release };
+}
+
+async function createProductionAgentRuntime(
+  options: {
+    transitionTask?: typeof import('@/lib/task-core/task-service').transitionTask;
+    recordDispatchCompletionFailure?: import('@/lib/agent-runtime/service').AgentRuntimeDependencies['recordDispatchCompletionFailure'];
+  } = {},
+) {
+  const [agentService, eventStorage, taskStorage, billing, taskService, modelCatalog, contextAdapters, credits, taskAbort, runRequest, executionDispatch] = await Promise.all([
+    import('@/lib/agent-runtime/service'),
+    import('@/lib/agent-runtime/event-storage'),
+    import('@/lib/cloud-task-storage'),
+    import('@/lib/task-core/billing-service'),
+    import('@/lib/task-core/task-service'),
+    import('@/lib/task-core/model-catalog'),
+    import('@/lib/agent-runtime/context-adapters'),
+    import('@/lib/credits'),
+    import('@/lib/task-core/task-abort'),
+    import('@/lib/skill-runtime/run-request'),
+    import('@/lib/agent-runtime/execution-dispatch'),
+  ]);
+  const runtime = agentService.createAgentRuntimeService({
+    randomUUID,
+    now: Date.now,
+    resolveTaskModel: modelCatalog.resolveTaskModel,
+    authorizeContext: contextAdapters.authorizeAgentContext,
+    calculateCreditCost: credits.calculateConfiguredCreditCost,
+    createBillableTask: billing.createBillableTask,
+    appendEvent: eventStorage.appendAgentEvent,
+    transitionControl: eventStorage.transitionAgentRunControl,
+    listEvents: eventStorage.listAgentEventsForActor,
+    observeAdoptedTerminal: eventStorage.observeAdoptedAgentTaskTerminal,
+    listRunEventStreams: eventStorage.listAgentEventStreamsForActor,
+    getTaskForUser: taskStorage.getCloudTaskForUser,
+    transitionTask: options.transitionTask || taskService.transitionTask,
+    settleFailedTask: billing.settleFailedTask,
+    abortTaskExecution: taskAbort.abortTaskExecution,
+    dispatchExecution: executionDispatch.dispatchResumedAgentExecution,
+    recordDispatchCompletionFailure: options.recordDispatchCompletionFailure
+      || executionDispatch.recordResumedAgentExecutionCompletionFailure,
+  });
+  return {
+    runtime,
+    createSkillRun(input: { actor: User; request: SkillRunRequest }) {
+      return runRequest.createSkillRun(input, {
+        resolveTaskModel: modelCatalog.resolveTaskModel,
+        authorizeContext: contextAdapters.authorizeAgentContext,
+        calculateCreditCost: credits.calculateConfiguredCreditCost,
+        createAgentRun: runtime.createRun,
+      });
+    },
+  };
+}
+
 describe('platform compliance accounting on isolated PostgreSQL', () => {
+  postgresIt('rejects compliance_audit from the real non-Skill service before task creation or charge', async () => {
+    await withIsolatedPostgres('platform_compliance_non_skill_denied', async ({ databaseUrl, query }) => {
+      const [core, taskStorage, agentService] = await Promise.all([
+        import('@/lib/db-storage'),
+        import('@/lib/cloud-task-storage'),
+        import('@/lib/agent-runtime/service'),
+      ]);
+      await Promise.all([core.ensureCoreTables(), taskStorage.ensureCloudTaskTables()]);
+      migrate(databaseUrl);
+      const userId = `compliance-denied-${randomUUID()}`;
+      const seeded = await seedProductionComplianceInputs(query, userId);
+      await seedCredits(query, userId);
+
+      await expect(agentService.createAgentRun({
+        actor: complianceInput(userId, 'unused', seeded.scenario).actor,
+        request: {
+          projectId: seeded.scenario.projectId,
+          workspace: 'canvas',
+          workspaceId: seeded.scenario.workspaceId,
+          mode: 'agent',
+          providerId: 'pear-vision',
+          modelId: 'vision-model',
+          prompt: 'Run a platform compliance audit',
+          sourceVersionIds: seeded.scenario.sourceVersionIds,
+          allowedToolIds: ['compliance_audit'],
+          idempotencyKey: `plain-agent-denied-${randomUUID()}`,
+          context: {
+            selectedEntityIds: [],
+            visibleVersionIds: seeded.scenario.sourceVersionIds,
+            locale: 'zh-CN',
+          },
+        },
+      })).rejects.toMatchObject({
+        code: 'AGENT_TOOL_AUTHORIZATION_DENIED',
+        status: 403,
+        denials: [{ toolId: 'compliance_audit', code: 'SKILL_ADMISSION_REQUIRED' }],
+      });
+      const [tasks, consumes] = await Promise.all([
+        query<{ count: string }>(
+          'SELECT COUNT(*)::text AS count FROM cloud_tasks WHERE user_id = $1',
+          [userId],
+        ),
+        query<{ count: string }>(
+          `SELECT COUNT(*)::text AS count FROM wujie_credit_transactions
+           WHERE user_id = $1 AND type = 'consume'`,
+          [userId],
+        ),
+      ]);
+      expect(tasks.rows[0]?.count).toBe('0');
+      expect(consumes.rows[0]?.count).toBe('0');
+    });
+  }, 60_000);
+
   postgresIt('enters through production createSkillRun for same-user and cross-user idempotency', async () => {
     await withIsolatedPostgres('platform_compliance_create_idempotency', async ({ databaseUrl, query }) => {
       const [core, taskStorage, skillService] = await Promise.all([
@@ -311,6 +435,147 @@ describe('platform compliance accounting on isolated PostgreSQL', () => {
         { user_id: firstUser, count: '1' },
         { user_id: secondUser, count: '1' },
       ].sort((left, right) => left.user_id.localeCompare(right.user_id)));
+    });
+  }, 60_000);
+
+  postgresIt('retries completed settlement after a real PostgreSQL revision advance', async () => {
+    await withIsolatedPostgres('platform_compliance_completion_revision', async ({ databaseUrl, query }) => {
+      const [core, taskStorage, taskService] = await Promise.all([
+        import('@/lib/db-storage'),
+        import('@/lib/cloud-task-storage'),
+        import('@/lib/task-core/task-service'),
+      ]);
+      await Promise.all([core.ensureCoreTables(), taskStorage.ensureCloudTaskTables()]);
+      migrate(databaseUrl);
+      const userId = `compliance-revision-${randomUUID()}`;
+      const seeded = await seedProductionComplianceInputs(query, userId);
+      await seedCredits(query, userId);
+      const transitionEntered = createGate();
+      const releaseTransition = createGate();
+      let completedAttempts = 0;
+      const production = await createProductionAgentRuntime({ transitionTask: async input => {
+        if (input.to === 'completed') {
+          completedAttempts += 1;
+          if (completedAttempts === 1) {
+            transitionEntered.release();
+            await releaseTransition.promise;
+          }
+        }
+        return taskService.transitionTask(input);
+      } });
+      const created = await production.createSkillRun(
+        complianceInput(userId, `completion-revision-${randomUUID()}`, seeded.scenario),
+      );
+      const completedEventId = `agent:${created.runId}:completed:r2`;
+      const completion = production.runtime.appendEvent({
+        actorUserId: userId,
+        runId: created.runId,
+        eventId: completedEventId,
+        type: 'run.completed',
+        payload: { result: { assetVersionIds: ['report-version-r2'] } },
+      });
+      await transitionEntered.promise;
+      const advanced = await query<{ revision: number }>(
+        `UPDATE cloud_tasks SET revision = revision + 1, updated_at = $2
+         WHERE id = $1 RETURNING revision`,
+        [created.runId, Date.now()],
+      );
+      expect(advanced.rows[0]?.revision).toBeGreaterThan(0);
+      releaseTransition.release();
+
+      await expect(completion).resolves.toMatchObject({
+        accepted: true,
+        event: { eventId: completedEventId, type: 'run.completed' },
+        projection: { status: 'completed' },
+      });
+      const [task, events, ledger] = await Promise.all([
+        taskStorage.getCloudTaskForUser(created.runId, userId),
+        query<{ event_id: string; event_type: string }>(
+          `SELECT event_id, event_type FROM wujie_agent_events
+           WHERE task_id = $1 AND event_type IN ('run.completed', 'run.failed', 'run.cancelled', 'run.timeout')`,
+          [created.runId],
+        ),
+        query<{ type: string; amount: number }>(
+          `SELECT type, amount::float8 AS amount FROM wujie_credit_transactions
+           WHERE task_id = $1 ORDER BY created_at, id`,
+          [created.runId],
+        ),
+      ]);
+      expect(completedAttempts).toBe(2);
+      expect(task).toMatchObject({
+        status: 'completed',
+        creditStatus: 'charged',
+        terminalEventId: completedEventId,
+        terminalEventType: 'run.completed',
+      });
+      expect(events.rows).toEqual([{ event_id: completedEventId, event_type: 'run.completed' }]);
+      expect(ledger.rows).toEqual([{ type: 'consume', amount: -(task!.creditCost || 0) }]);
+    });
+  }, 60_000);
+
+  postgresIt('keeps a real cancelled terminal when cancel wins a completion race', async () => {
+    await withIsolatedPostgres('platform_compliance_cancel_wins_completion', async ({ databaseUrl, query }) => {
+      const [core, taskStorage, taskService] = await Promise.all([
+        import('@/lib/db-storage'),
+        import('@/lib/cloud-task-storage'),
+        import('@/lib/task-core/task-service'),
+      ]);
+      await Promise.all([core.ensureCoreTables(), taskStorage.ensureCloudTaskTables()]);
+      migrate(databaseUrl);
+      const userId = `compliance-cancel-wins-${randomUUID()}`;
+      const seeded = await seedProductionComplianceInputs(query, userId);
+      await seedCredits(query, userId);
+      const transitionEntered = createGate();
+      const releaseTransition = createGate();
+      const production = await createProductionAgentRuntime({ transitionTask: async input => {
+        if (input.to === 'completed') {
+          transitionEntered.release();
+          await releaseTransition.promise;
+        }
+        return taskService.transitionTask(input);
+      } });
+      const created = await production.createSkillRun(
+        complianceInput(userId, `cancel-wins-${randomUUID()}`, seeded.scenario),
+      );
+      const completion = production.runtime.appendEvent({
+        actorUserId: userId,
+        runId: created.runId,
+        eventId: `agent:${created.runId}:completed:loser`,
+        type: 'run.completed',
+        payload: { result: { assetVersionIds: ['late-report'] } },
+      });
+      await transitionEntered.promise;
+      const cancelled = await production.runtime.cancelRun({ actorUserId: userId, runId: created.runId });
+      expect(cancelled).toMatchObject({ accepted: true, projection: { status: 'cancelled' } });
+      releaseTransition.release();
+      await expect(completion).rejects.toMatchObject({ code: 'AGENT_RUN_TERMINAL_CONFLICT' });
+
+      const [task, events, ledger] = await Promise.all([
+        taskStorage.getCloudTaskForUser(created.runId, userId),
+        query<{ event_id: string; event_type: string }>(
+          `SELECT event_id, event_type FROM wujie_agent_events
+           WHERE task_id = $1 AND event_type IN ('run.completed', 'run.failed', 'run.cancelled', 'run.timeout')`,
+          [created.runId],
+        ),
+        query<{ type: string; amount: number }>(
+          `SELECT type, amount::float8 AS amount FROM wujie_credit_transactions
+           WHERE task_id = $1 ORDER BY created_at, id`,
+          [created.runId],
+        ),
+      ]);
+      expect(task).toMatchObject({
+        status: 'cancelled',
+        creditStatus: 'refunded',
+        terminalEventType: 'run.cancelled',
+      });
+      expect(events.rows).toEqual([{
+        event_id: `agent:${created.runId}:cancelled`,
+        event_type: 'run.cancelled',
+      }]);
+      expect(ledger.rows).toEqual([
+        { type: 'consume', amount: -(task!.creditCost || 0) },
+        { type: 'refund', amount: task!.creditCost || 0 },
+      ]);
     });
   }, 60_000);
 
@@ -527,67 +792,116 @@ describe('platform compliance accounting on isolated PostgreSQL', () => {
     });
   }, 60_000);
 
-  postgresIt('settles duplicate cancel and retry races once and rejects late completion', async () => {
+  postgresIt('races a real paused-step retry with duplicate cancel and settles once', async () => {
     await withIsolatedPostgres('platform_compliance_cancel_race', async ({ databaseUrl, query }) => {
-      const [core, taskStorage, agentService, skillService] = await Promise.all([
+      const [core, taskStorage, agentService, skillService, continuation, prepaid, taskAbort, executionDispatch] = await Promise.all([
         import('@/lib/db-storage'), import('@/lib/cloud-task-storage'),
         import('@/lib/agent-runtime/service'), import('@/lib/skill-runtime/service'),
+        import('@/lib/skill-runtime/continuation'), import('@/lib/skill-runtime/prepaid-generation'),
+        import('@/lib/task-core/task-abort'), import('@/lib/agent-runtime/execution-dispatch'),
       ]);
       await Promise.all([core.ensureCoreTables(), taskStorage.ensureCloudTaskTables()]);
       migrate(databaseUrl);
       const userId = `compliance-cancel-${randomUUID()}`;
       const seeded = await seedProductionComplianceInputs(query, userId);
       await seedCredits(query, userId);
-      const immediateSource = seeded.scenario.sourceVersionIds[0];
-      let release!: () => void;
-      const gate = new Promise<void>(resolveGate => { release = resolveGate; });
+      const failedSource = seeded.scenario.sourceVersionIds[1];
+      let releaseRetryProvider!: () => void;
+      const retryProviderGate = new Promise<void>(resolveGate => { releaseRetryProvider = resolveGate; });
       const provider = await startControlledProvider({
         imageDataBySource: seeded.imageDataBySource,
         respond: async call => {
-          if (call.sourceVersionId && call.sourceVersionId !== immediateSource) await gate;
+          if (call.sourceVersionId === failedSource && call.attempt === 1) return 500;
+          if (call.sourceVersionId === failedSource && call.attempt === 2) await retryProviderGate;
           return 200;
         },
       });
       try {
         await query("UPDATE wujie_api_providers SET base_url = $1 WHERE id = 'pear-vision'", [provider.baseUrl]);
-        const created = await skillService.createSkillRun(
+        let dispatchCompletionSettled = false;
+        const production = await createProductionAgentRuntime({
+          recordDispatchCompletionFailure: async input => {
+            try {
+              await executionDispatch.recordResumedAgentExecutionCompletionFailure(input);
+            } finally {
+              dispatchCompletionSettled = true;
+            }
+          },
+        });
+        const racedSkillService = skillService.createSkillRuntimeService({
+          createAuthorizedSkillRun: production.createSkillRun,
+          getTaskForUser: taskStorage.getCloudTaskForUser,
+          listTasks: taskStorage.listCloudTasks,
+          listEvents: production.runtime.listEvents,
+          getProjection: production.runtime.getRun,
+          pauseRun: production.runtime.pauseRun,
+          resumeRun: production.runtime.resumeRun,
+          cancelRun: production.runtime.cancelRun,
+          cancelPrepaidChildren: prepaid.cancelSkillPrepaidChildren,
+          abortTaskExecution: taskAbort.abortTaskExecution,
+          prepareResume: input => continuation.loadPersistedSkillContinuation(input),
+        });
+        const created = await racedSkillService.create(
           complianceInput(userId, `cancel-${randomUUID()}`, seeded.scenario),
         );
-        const dispatch = await skillService.dispatchSkillRunExecution({ actorUserId: userId, runId: created.runId });
-        await waitFor(async () => {
-          const result = await query<{ count: string }>(
-            `SELECT COUNT(*)::text AS count FROM wujie_asset_versions version
-             JOIN wujie_assets asset ON asset.id = version.asset_id
-             WHERE asset.owner_id = $1 AND asset.kind = 'document'`,
-            [userId],
+        const first = await skillService.dispatchSkillRunExecution({ actorUserId: userId, runId: created.runId });
+        await first.completion;
+        const paused = await waitFor(
+          () => racedSkillService.get({ actorUserId: userId, runId: created.runId }),
+          history => history.status === 'paused',
+        );
+        expect(paused.resumeFromStepId).toBeTruthy();
+        expect(paused.steps.find(step => step.id === paused.resumeFromStepId)?.status).toBe('failed');
+
+        const race = createBarrier(3);
+        const retry = (async () => {
+          await race.wait();
+          return racedSkillService.retry({
+            actorUserId: userId, runId: created.runId, stepId: paused.resumeFromStepId!,
+          });
+        })();
+        const cancelDuringRetry = async () => {
+          await race.wait();
+          await waitFor(
+            async () => provider.calls.filter(call => (
+              call.sourceVersionId === failedSource && call.attempt === 2
+            )).length,
+            count => count === 1,
           );
-          return Number(result.rows[0]?.count || 0);
-        }, count => count === 1);
-        const live = await skillService.getSkillRun({ actorUserId: userId, runId: created.runId });
-        const retry = skillService.retrySkillStep({
-          actorUserId: userId, runId: created.runId,
-          stepId: live.steps.find(step => step.status !== 'completed')!.id,
-        });
-        const cancellations = await Promise.allSettled([
-          skillService.cancelSkillRun({ actorUserId: userId, runId: created.runId }),
-          skillService.cancelSkillRun({ actorUserId: userId, runId: created.runId }),
+          return racedSkillService.cancel({ actorUserId: userId, runId: created.runId });
+        };
+        const outcomes = await Promise.allSettled([
           retry,
+          cancelDuringRetry(),
+          cancelDuringRetry(),
         ]);
-        expect(cancellations.filter(result => result.status === 'fulfilled')).toHaveLength(2);
-        release();
-        await dispatch.completion;
+        expect(outcomes[0]).toMatchObject({
+          status: 'fulfilled',
+          value: { accepted: true },
+        });
+        expect(outcomes.slice(1).every(result => result.status === 'fulfilled')).toBe(true);
+        releaseRetryProvider();
         const terminal = await waitFor(
-          () => skillService.getSkillRun({ actorUserId: userId, runId: created.runId }),
+          () => racedSkillService.get({ actorUserId: userId, runId: created.runId }),
           history => history.status === 'cancelled',
         );
         expect(terminal.status).toBe('cancelled');
+        await waitFor(
+          async () => dispatchCompletionSettled,
+          settled => settled,
+        );
 
-        const [task, events, ledger] = await Promise.all([
+        const [task, events, ledger, operations] = await Promise.all([
           taskStorage.getCloudTaskForUser(created.runId, userId),
           agentService.listAgentRunEvents({ actorUserId: userId, runId: created.runId }),
           query<{ type: string; amount: number }>(
             `SELECT type, amount::float8 AS amount FROM wujie_credit_transactions
              WHERE task_id = $1 ORDER BY created_at, id`, [created.runId],
+          ),
+          query<{ step_id: string; status: string; attempt_count: number }>(
+            `SELECT step_id, status, attempt_count FROM wujie_agent_downstream_operations
+             WHERE task_id = $1 AND tool_id = 'compliance_audit' ORDER BY step_id, operation_key`,
+            [created.runId],
           ),
         ]);
         const createdEvent = events.find(event => event.type === 'run.created')!;
@@ -604,10 +918,30 @@ describe('platform compliance accounting on isolated PostgreSQL', () => {
           { type: 'consume', amount: -(task!.creditCost || 0) },
           { type: 'refund', amount: expectedRefund },
         ]);
+        expect(events.filter(event => (
+          event.type === 'run.completed'
+          || event.type === 'run.failed'
+          || event.type === 'run.cancelled'
+          || event.type === 'run.timeout'
+        ))).toHaveLength(1);
+        expect(events.filter(event => event.type === 'run.cancelled')).toHaveLength(1);
         expect(events.filter(event => event.type === 'run.completed')).toHaveLength(0);
-        expect(provider.calls.filter(call => call.sourceVersionId === immediateSource)).toHaveLength(1);
+        expect(provider.calls.filter(call => call.sourceVersionId === failedSource)).toHaveLength(2);
+        for (const source of seeded.scenario.sourceVersionIds.filter(value => value !== failedSource)) {
+          expect(provider.calls.filter(call => call.sourceVersionId === source)).toHaveLength(1);
+        }
+        expect(operations.rows).toHaveLength(3);
+        expect(new Set(operations.rows.map(operation => operation.step_id))).toHaveLength(3);
+        expect(operations.rows.map(operation => ({
+          status: operation.status,
+          attempts: operation.attempt_count,
+        })).sort((left, right) => left.attempts - right.attempts)).toEqual([
+          { status: 'completed', attempts: 1 },
+          { status: 'completed', attempts: 1 },
+          { status: 'prepared', attempts: 2 },
+        ]);
       } finally {
-        release?.();
+        releaseRetryProvider?.();
         await provider.close();
       }
     });
