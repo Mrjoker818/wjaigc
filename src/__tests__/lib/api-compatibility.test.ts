@@ -4,7 +4,9 @@ import {
   PROFILE_APIMART,
   PROFILE_4SAPI,
   PROFILE_OPENAI,
+  PROFILE_PEARAPI,
   adjustRequestForProfile,
+  buildPollUrl,
   resolveProviderPixelSize,
   resolveProfileForModel,
 } from '@/lib/api-compatibility';
@@ -203,5 +205,70 @@ describe('provider request contracts', () => {
     expect(body).not.toHaveProperty('width');
     expect(body).not.toHaveProperty('height');
     expect(body).not.toHaveProperty('size_px');
+  });
+
+  describe('PearAPI protocol per official docs', () => {
+    const pearProvider = { baseUrl: 'https://api.pearapi.ai', id: 'pear', name: 'PearAPI' } as any;
+
+    it('uses /v1/images/generations for text-to-image submission', () => {
+      const profile = resolveProfileForModel('nano-banana-pro', pearProvider);
+      expect(profile?.defaultEndpoint).toBe('/v1/images/generations');
+    });
+
+    it('uses /v1/images/edits for image edit submission', () => {
+      const pearProvider = { baseUrl: 'https://api.pearapi.ai', id: 'pear', name: 'PearAPI' } as any;
+      const prof = resolveProfileForModel('nano-banana-pro', pearProvider);
+      const request = {
+        model: 'nano-banana-pro',
+        prompt: 'make him wear a suit',
+        image: 'https://example.com/portrait.jpg',
+      } as any;
+      const { endpoint } = adjustRequestForProfile(request, prof, { isEditEndpoint: true, hasImage: true });
+
+      expect(endpoint).toBe('/v1/images/edits');
+    });
+
+    it('builds poll URL with /v1 prefix without duplicating it', () => {
+      const pollUrl = buildPollUrl('https://api.pearapi.ai', 'img_123', PROFILE_PEARAPI);
+      expect(pollUrl).toBe('https://api.pearapi.ai/v1/images/tasks/img_123');
+    });
+
+    it('flattens reference images into image/images per official schema', () => {
+      const pearProvider = { baseUrl: 'https://api.pearapi.ai', id: 'pear', name: 'PearAPI' } as any;
+      const prof = resolveProfileForModel('wan2.7-image', pearProvider);
+      const request = {
+        model: 'wan2.7-image',
+        prompt: 'orange cat in cyberpunk city',
+        image: 'https://example.com/ref.png',
+        image_urls: ['https://example.com/a.png', 'https://example.com/b.png'],
+      } as any;
+      const { body } = adjustRequestForProfile(request, prof, { isEditEndpoint: true, hasImage: true, hasReferenceImages: true });
+
+      expect(body.image).toBe('https://example.com/ref.png');
+      expect(body.images).toEqual(['https://example.com/ref.png', 'https://example.com/a.png', 'https://example.com/b.png']);
+      expect(body).not.toHaveProperty('image_urls');
+    });
+
+    it('forces sync mode and url response_format for Pear generation', () => {
+      const { body } = adjustRequestForProfile({
+        model: 'nano-banana-2',
+        prompt: 'A cinematic landscape',
+        n: 2,
+      } as any, PROFILE_PEARAPI);
+
+      expect(body.task_type).toBe('sync');
+      expect(body.response_format).toBe('url');
+    });
+
+    it('strips edit-only fields when normalizing the /v1 generation endpoint', () => {
+      const { body } = adjustRequestForProfile({
+        model: 'wan2.7-image',
+        prompt: 'A poster',
+        image: 'https://example.com/ref.png',
+        strength: 0.7,
+      } as any, PROFILE_PEARAPI);
+
+      expect(body).not.toHaveProperty('strength');
+    });
   });
 });

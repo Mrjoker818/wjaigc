@@ -32,7 +32,16 @@ export type ResponseMode = 'polling' | 'direct' | 'async-task';
 export type SizeFormat = 'aspect-ratio' | 'pixel';
 
 /** Which endpoint to use for image generation */
-export type ImageEndpoint = '/images/generations' | '/images/edits' | '/midjourney/generations' | '/chat/completions' | '/302/submit/super-upscale-v2';
+export type ImageEndpoint = '/images/generations' | '/images/edits' | '/midjourney/generations' | '/chat/completions' | '/302/submit/super-upscale-v2' | '/v1/images/generations' | '/v1/images/edits';
+
+/**
+ * Normalize an image endpoint path by stripping a leading `/v1` prefix so that
+ * comparisons like `endpoint === '/images/generations'` remain valid for
+ * versioned endpoints (e.g. PearAPI `/v1/images/generations`).
+ */
+function normalizeEndpointPath(endpoint: string): string {
+  return endpoint.startsWith('/v1/') ? endpoint.slice(3) : endpoint;
+}
 
 /** How to encode /images/edits requests */
 export type EditEncoding = 'json-first' | 'multipart-only';
@@ -220,8 +229,8 @@ export const PROFILE_PEARAPI: ApiCompatProfile = {
   label: 'PearAPI 兼容 (JSON + /images/edits, 同步返回, 支持所有绘画模型 jimeng/gpt-image/grok等)',
   responseMode: 'direct',
   sizeFormat: 'aspect-ratio',
-  defaultEndpoint: '/images/generations',
-  editEndpoint: '/images/edits',
+  defaultEndpoint: '/v1/images/generations',
+  editEndpoint: '/v1/images/edits',
   editEncoding: 'json-first',
   supportsInputFidelity: false,
   pollMode: 'pearapi-task',
@@ -853,7 +862,7 @@ export function resolveProfileForModel(
   // These providers have their own format requirements (e.g., APImart uses image_urls, not images[]).
   // Only force the openai profile for 'auto' or undefined baseProfiles.
   // For 'auto' profile, also preserve sizeFormat and use correct editEndpoint for GPT-Image models.
-  const providerSpecificProfiles = ['apimart', 'pearapi'];
+  const providerSpecificProfiles = ['apimart', 'pearapi', '4sapi'];
   if (isOpenAIImageModel(modelId) && !providerSpecificProfiles.includes(baseProfile.id)) {
     const openaiProfile = COMPAT_PROFILES['openai'];
     // GPT-Image models use /images/generations for reference images (images[]),
@@ -1768,20 +1777,20 @@ export function adjustRequestForProfile(
   // When using /images/generations endpoint with NO image/edit context,
   // strip image-edit-specific fields.  However, when reference images exist
   // (image_urls), we KEEP strength so the API can control img2img fidelity.
-  if (endpoint === '/images/generations' && !hasImage && !hasReferenceImages) {
+  if (normalizeEndpointPath(endpoint) === '/images/generations' && !hasImage && !hasReferenceImages) {
     delete body.image;
     delete body.mask;
     delete body.strength;
   }
   // ★ 即使 hasImage=false（参考图模式用 /images/generations），也要删除 mask
   // 但保留 strength 和 image_urls 供 API 参考图功能使用
-  if (endpoint === '/images/generations' && !hasImage && hasReferenceImages) {
+  if (normalizeEndpointPath(endpoint) === '/images/generations' && !hasImage && hasReferenceImages) {
     delete body.mask;
     // 不删除 strength 和 image_urls — 这些是参考图功能的关键参数
   }
 
   // --- input_fidelity ---
-  if (profile.supportsInputFidelity && hasImage && endpoint === '/images/edits') {
+  if (profile.supportsInputFidelity && hasImage && normalizeEndpointPath(endpoint) === '/images/edits') {
     if (!body.input_fidelity) {
       body.input_fidelity = 'high';
     }
@@ -1790,7 +1799,7 @@ export function adjustRequestForProfile(
   // input_fidelity='low' → strength=0.85 (大幅变化，如多角度功能)
   // input_fidelity='medium' → strength=0.65 (中等变化)
   // input_fidelity='high' → 不设置 strength (保持默认行为)
-  if (!profile.supportsInputFidelity || endpoint !== '/images/edits') {
+  if (!profile.supportsInputFidelity || normalizeEndpointPath(endpoint) !== '/images/edits') {
     const requestedFidelity = body.input_fidelity as string | undefined;
     if (requestedFidelity === 'low' && body.strength === undefined) {
       body.strength = 0.85;
@@ -1805,7 +1814,7 @@ export function adjustRequestForProfile(
   // OpenAI GPT-Image: images: [{image_url:{url}}]（嵌套对象格式，用于 /images/generations）
   // PearAPI: image (string) 单张 / images (string[]) 多张（扁平字符串数组，用于 /images/edits 和 /images/generations）
   // APImart: image_urls (string[])（扁平字符串数组）
-  const shouldConvertToNestedImages = (hasImage || hasReferenceImages) && endpoint === '/images/generations'
+  const shouldConvertToNestedImages = (hasImage || hasReferenceImages) && normalizeEndpointPath(endpoint) === '/images/generations'
     && (profile.id === 'openai' || profile.id === 'auto');
 
   if (shouldConvertToNestedImages) {
