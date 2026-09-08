@@ -39,7 +39,8 @@ describe('Real-ESRGAN ONNX model contract', () => {
   });
 
   it('keeps the CPU thread pool bounded', () => {
-    expect(scriptSource).toContain('intra_op_num_threads = 2');
+    expect(scriptSource).toContain('intra_op_num_threads = int(os.environ.get("UPSAMPLE_NUM_THREADS"');
+    expect(scriptSource).toContain('inter_op_num_threads = 1');
   });
 
   it('provides download entry points for the Real-ESRGAN model', () => {

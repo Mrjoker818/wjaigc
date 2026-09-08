@@ -46,6 +46,14 @@ interface ProjectSyncResponse {
   success?: boolean;
   error?: string;
   projectIdMap?: Record<string, string>;
+  projects?: Project[];
+  // 从 JSON 断言而来，保留 unknown 由 applyServerDeletionTombstones 内部收窄
+  deletedProjectIds?: unknown;
+  deletedImageIds?: unknown;
+  deletionTombstones?: {
+    projectIds?: unknown[];
+    imageIds?: unknown[];
+  };
 }
 
 export interface ProjectSyncResult {
@@ -58,19 +66,82 @@ export class UserManager {
   private currentUserId: string | null = null;
   private _serverSyncReady = false; // 在 loadProjectsFromServer 成功前阻止 syncToServer 上传空数据
   private _onProjectsChanged: (() => void) | null = null;
+  // 串行化项目写入，确保删除快照不会被更早发出的旧快照覆盖。
+  private _projectSyncChain: Promise<void> = Promise.resolve();
+  private _projectSyncBusy = false; // chain 当前是否有进行中的请求（flush 同步发起判据）
+  private static readonly DELETION_TOMBSTONES_KEY = 'wujie_deletion_tombstones_v1';
   // ★ 跟踪最近删除的图片ID，防止服务器同步时将已删除的图片合并回来
-  // Map: imageId → 删除时间戳(ms)，60秒后自动清理
+  // Map: imageId → 删除时间戳(ms)。TTL 5 分钟：为同步失败重试留窗口；
+  // 撤销恢复（Ctrl+Z）时会主动清除墓碑，因此延长 TTL 不会阻碍恢复。
   private _recentlyDeletedImageIds: Map<string, number> = new Map();
-  private static readonly DELETED_IMAGE_TTL_MS = 60_000; // 60秒内过滤已删除图片
+  private static readonly DELETED_IMAGE_TTL_MS = 300_000; // 5分钟内过滤已删除图片
   // ★ 跟踪最近删除的项目ID，防止服务器同步时将已删除的项目合并回来
-  // Map: projectId → 删除时间戳(ms)，60秒后自动清理
+  // Map: projectId → 删除时间戳(ms)
   private _recentlyDeletedProjectIds: Map<string, number> = new Map();
-  private static readonly DELETED_PROJECT_TTL_MS = 60_000; // 60秒内过滤已删除项目
+  private static readonly DELETED_PROJECT_TTL_MS = 300_000; // 5分钟内过滤已删除项目
 
   /** 注册项目数据变更回调（用于跨设备同步时刷新 UI），返回取消订阅函数 */
   onProjectsChanged(callback: (() => void) | null): () => void {
     this._onProjectsChanged = callback;
     return () => { if (this._onProjectsChanged === callback) this._onProjectsChanged = null; };
+  }
+
+  /** 将当前删除墓碑持久化到 localStorage，刷新页面后继续阻止旧云端数据复活。 */
+  private persistDeletionTombstones(): void {
+    if (!this.canUseStorage() || !this.currentUserId) return;
+    try {
+      const raw = localStorage.getItem(UserManager.DELETION_TOMBSTONES_KEY);
+      const all = raw ? JSON.parse(raw) as Record<string, { projectIds: Record<string, number>; imageIds: Record<string, number> }> : {};
+      all[this.currentUserId] = {
+        projectIds: Object.fromEntries(this._recentlyDeletedProjectIds),
+        imageIds: Object.fromEntries(this._recentlyDeletedImageIds),
+      };
+      localStorage.setItem(UserManager.DELETION_TOMBSTONES_KEY, JSON.stringify(all));
+    } catch {
+      // localStorage 不可写时仍保留内存墓碑。
+    }
+  }
+
+  /** 在登录/加载前恢复当前用户的删除墓碑。 */
+  private hydrateDeletionTombstones(userId: string): void {
+    if (!this.canUseStorage()) return;
+    try {
+      const raw = localStorage.getItem(UserManager.DELETION_TOMBSTONES_KEY);
+      if (!raw) return;
+      const all = JSON.parse(raw) as Record<string, { projectIds?: Record<string, number>; imageIds?: Record<string, number> }>;
+      const stored = all[userId];
+      if (!stored) return;
+      // 时间戳统一为 number（JSON 序列化后读回为 string 会导致 TTL 计算不可靠）
+      this._recentlyDeletedProjectIds = new Map(
+        Object.entries(stored.projectIds || {}).map(([id, t]) => [id, Number(t)] as [string, number]),
+      );
+      this._recentlyDeletedImageIds = new Map(
+        Object.entries(stored.imageIds || {}).map(([id, t]) => [id, Number(t)] as [string, number]),
+      );
+      this.cleanupDeletedProjectIds();
+      this.cleanupDeletedImageIds();
+      this.persistDeletionTombstones();
+    } catch {
+      // 损坏的墓碑缓存不应阻止登录。
+    }
+  }
+
+  /** 合并服务端返回的墓碑，防止其他标签页或设备的删除被旧快照覆盖。 */
+  private applyServerDeletionTombstones(
+    tombstones?: { projectIds?: unknown; imageIds?: unknown },
+  ): void {
+    const projectIds = Array.isArray(tombstones?.projectIds)
+      ? (tombstones.projectIds as unknown[]).filter((id): id is string => typeof id === 'string' && id.length > 0)
+      : [];
+    const imageIds = Array.isArray(tombstones?.imageIds)
+      ? (tombstones.imageIds as unknown[]).filter((id): id is string => typeof id === 'string' && id.length > 0)
+      : [];
+    if (projectIds.length === 0 && imageIds.length === 0) return;
+
+    const now = Date.now();
+    for (const id of projectIds) this._recentlyDeletedProjectIds.set(id, now);
+    for (const id of imageIds) this._recentlyDeletedImageIds.set(id, now);
+    this.persistDeletionTombstones();
   }
 
   /** 记录已删除的图片ID（防止服务器同步时恢复已删除图片） */
@@ -81,6 +152,7 @@ export class UserManager {
     }
     // 清理过期的记录
     this.cleanupDeletedImageIds();
+    this.persistDeletionTombstones();
   }
 
   /** 检查图片ID是否在最近删除列表中 */
@@ -94,14 +166,33 @@ export class UserManager {
     return true;
   }
 
+  /** 撤销恢复图片（如 Ctrl+Z）：将图片从删除墓碑中移除，确保恢复的图片能被正常同步与加载 */
+  restoreDeletedImageIds(imageIds: string[]): void {
+    let changed = false;
+    for (const id of imageIds) {
+      if (id && this._recentlyDeletedImageIds.delete(id)) changed = true;
+    }
+    if (changed) this.persistDeletionTombstones();
+  }
+
+  /** 撤销恢复项目：将项目从删除墓碑中移除 */
+  restoreDeletedProjectIds(projectIds: string[]): void {
+    let changed = false;
+    for (const id of projectIds) {
+      if (id && this._recentlyDeletedProjectIds.delete(id)) changed = true;
+    }
+    if (changed) this.persistDeletionTombstones();
+  }
+
   /** 记录已删除的项目ID（防止服务器同步时恢复已删除项目） */
   recordDeletedProjectIds(projectIds: string[]): void {
     const now = Date.now();
     for (const id of projectIds) {
       this._recentlyDeletedProjectIds.set(id, now);
     }
-    // 清理过期的记录
+    // 清理过期的记录，并立即持久化，确保刷新/多标签页后仍能阻止旧数据回流
     this.cleanupDeletedProjectIds();
+    this.persistDeletionTombstones();
   }
 
   /** 检查项目ID是否在最近删除列表中 */
@@ -418,7 +509,18 @@ export class UserManager {
                 const snapUd = snapData?.userData?.[uid];
                 const snapProj = snapUd?.projects?.find((p: Record<string, unknown>) => (p.id || p.projectId) === pid);
                 if (snapProj && (snapProj.canvasImages || []).length >= 10) {
-                  proj.canvasImages = snapProj.canvasImages;
+                  // ★ 墓碑过滤：用户主动删除的图片不允许被"数据丢失保护"复活
+                  const recovered = (snapProj.canvasImages as Array<{ id?: string }>).filter(
+                    (img) => !(img?.id && this.isRecentlyDeletedImage(String(img.id))),
+                  );
+                  if (recovered.length === 0) {
+                    // 快照中的图片全部在墓碑中 → 用户主动删光了图片，这是合法操作。
+                    // 更新基线计数，停止后续保存时的反复恢复尝试。
+                    console.log(`[DataLossGuard] All snapshot images of "${pid}" are tombstoned — user-initiated deletion, skip restore`);
+                    this.lastProjectImageCounts.set(pid, 0);
+                    break;
+                  }
+                  proj.canvasImages = recovered as typeof proj.canvasImages;
                   proj.updatedAt = Date.now();
                   restoreSnapshot = true;
                   needRestore = true;
@@ -564,6 +666,21 @@ export class UserManager {
 
   /** 强制将当前项目快照提交到数据库；任何失败都会抛错并阻断依赖该快照的操作。 */
   async flushProjectsToServer(): Promise<ProjectSyncResult> {
+    // 与防抖同步共用串行链，防止旧快照响应晚到覆盖最新删除快照。
+    // chain 空闲时保持同步发起 fetch（登出 flush 的同步可见性依赖此语义）；忙时才排队。
+    if (!this._projectSyncBusy) {
+      this._projectSyncBusy = true;
+      const task = this.doFlushProjectsToServer()
+        .finally(() => { this._projectSyncBusy = false; });
+      this._projectSyncChain = task.then(() => undefined, () => undefined);
+      return task;
+    }
+    const result = this._projectSyncChain.then(() => this.doFlushProjectsToServer());
+    this._projectSyncChain = result.then(() => undefined, () => undefined);
+    return result;
+  }
+
+  private async doFlushProjectsToServer(): Promise<ProjectSyncResult> {
     if (this.serverSyncTimer) {
       clearTimeout(this.serverSyncTimer);
       this.serverSyncTimer = null;
@@ -579,7 +696,12 @@ export class UserManager {
       signal: typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function'
         ? AbortSignal.timeout(PROJECT_SYNC_TIMEOUT_MS)
         : undefined,
-      body: JSON.stringify({ key: 'projects', value: projectsPayload }),
+      body: JSON.stringify({
+        key: 'projects',
+        value: projectsPayload,
+        deletedProjectIds: [...this._recentlyDeletedProjectIds.keys()],
+        deletedImageIds: [...this._recentlyDeletedImageIds.keys()],
+      }),
     });
     const data = await response.json().catch(() => null) as ProjectSyncResponse | null;
     if (!response.ok || !data?.success) {
@@ -592,7 +714,6 @@ export class UserManager {
       ? data.projectIdMap
       : {};
     this.applyProjectIdMap(projectIdMap);
-    this._recentlyDeletedImageIds.clear();
     return { projectIdMap };
   }
 
@@ -601,6 +722,27 @@ export class UserManager {
    * @param silent 静默模式（退出登录时使用），不向 console.error 输出 fetch 失败
    */
   private async syncToServer(immediate: boolean = false, silent: boolean = false): Promise<void> {
+    // 串行化：确保"先发出但晚到"的旧快照不会覆盖"后发出"的删除快照。
+    // chain 空闲时保持同步发起 fetch（登出/删除的同步可见性依赖此语义）；忙时才排队。
+    if (!this._projectSyncBusy) {
+      this._projectSyncBusy = true;
+      const direct = this.doSyncToServer(immediate, silent)
+        .finally(() => { this._projectSyncBusy = false; });
+      this._projectSyncChain = direct.then(() => undefined, () => undefined);
+      await direct;
+      return;
+    }
+    const task = this._projectSyncChain
+      .then(() => {
+        this._projectSyncBusy = true;
+        return this.doSyncToServer(immediate, silent);
+      })
+      .finally(() => { this._projectSyncBusy = false; });
+    this._projectSyncChain = task.then(() => undefined, () => undefined);
+    await task;
+  }
+
+  private async doSyncToServer(immediate: boolean, silent: boolean): Promise<void> {
     try {
       const projectsPayload = this.buildProjectsSyncPayload(false);
       if (!projectsPayload) return;
@@ -612,27 +754,53 @@ export class UserManager {
         signal: typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function'
           ? AbortSignal.timeout(PROJECT_SYNC_TIMEOUT_MS)
           : undefined,
-        body: JSON.stringify({ key: 'projects', value: projectsPayload }),
+        body: JSON.stringify({
+          key: 'projects',
+          value: projectsPayload,
+          deletedProjectIds: [...this._recentlyDeletedProjectIds.keys()],
+          deletedImageIds: [...this._recentlyDeletedImageIds.keys()],
+        }),
       });
       if (!syncRes.ok) {
         console.warn('[Sync] syncToServer: server returned', syncRes.status);
+        // 同步失败时安排一次重试：删除墓碑在上传成功前不能丢，
+        // 否则刷新后服务器旧数据（仍含已删内容）会把项目/图片合并回来。
+        this.scheduleSyncRetry();
       } else {
         const data = await syncRes.json().catch(() => null) as ProjectSyncResponse | null;
         if (data?.success) {
+          this._syncFailureRetries = 0;
           this.applyProjectIdMap(data.projectIdMap || {});
+          // 应用服务器端墓碑（其他标签页/设备的删除），保持多端一致
+          this.applyServerDeletionTombstones(data.deletionTombstones);
           console.log('[Sync] syncToServer: success, projects=', projectsPayload.length);
-          this._recentlyDeletedImageIds.clear();
-          // 服务器已成功同步删除后的数据，清空项目墓碑（后续 load 不会再把已删项目合并回来）
-          this._recentlyDeletedProjectIds.clear();
         } else {
           console.warn('[Sync] syncToServer: invalid success response');
+          this.scheduleSyncRetry();
         }
       }
     } catch (error) {
       if (!silent) {
         console.error('[Sync] syncToServer error:', error);
       }
+      this.scheduleSyncRetry();
     }
+  }
+
+  private _syncFailureRetries = 0;
+  private static readonly SYNC_RETRY_DELAY_MS = 3000;
+  private static readonly MAX_SYNC_FAILURE_RETRIES = 3;
+
+  /** 同步失败后的有限重试（指数不放大，固定间隔，成功后清零），防止删除因瞬时网络问题丢失 */
+  private scheduleSyncRetry(): void {
+    if (typeof window === 'undefined') return;
+    if (this._syncFailureRetries >= UserManager.MAX_SYNC_FAILURE_RETRIES) return;
+    this._syncFailureRetries++;
+    if (this.serverSyncTimer) clearTimeout(this.serverSyncTimer);
+    this.serverSyncTimer = setTimeout(() => {
+      this.serverSyncTimer = null;
+      void this.syncToServer();
+    }, UserManager.SYNC_RETRY_DELAY_MS);
   }
 
   /** 从服务器加载当前用户的项目数据 */
@@ -656,7 +824,12 @@ export class UserManager {
         }
         return false;
       }
-      const data = await res.json() as { success: boolean; value?: unknown };
+      const data = await res.json() as {
+        success: boolean;
+        value?: unknown;
+        deletedProjectIds?: unknown;
+        deletedImageIds?: unknown;
+      };
       if (!data.success) {
         if (retryCount > 0) {
           await new Promise(resolve => setTimeout(resolve, 1000));
@@ -665,6 +838,13 @@ export class UserManager {
         console.warn('[Sync] loadProjectsFromServer: unsuccessful response', data);
         return false;
       }
+
+      // ★ 应用服务器端删除墓碑（其他标签页/设备的删除记录），
+      // 必须在合并 serverProjects 之前应用，否则已删内容会被合并回来
+      this.applyServerDeletionTombstones({
+        projectIds: data.deletedProjectIds,
+        imageIds: data.deletedImageIds,
+      });
 
       if (data.value === undefined || data.value === null) {
         // A missing record is a valid first-login state, not a failed sync.
@@ -1012,6 +1192,8 @@ export class UserManager {
 
     // 始终尝试从服务器加载项目数据（解决跨设备同步问题）
     this.currentUserId = nextUser.id;
+    // ★ 恢复该用户的删除墓碑（localStorage 持久化），刷新/重新登录后仍能阻止旧云端数据复活
+    this.hydrateDeletionTombstones(nextUser.id);
     if (this.serverSyncTimer) {
       clearTimeout(this.serverSyncTimer);
       this.serverSyncTimer = null;

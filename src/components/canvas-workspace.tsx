@@ -334,6 +334,18 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
         }
       }
 
+      // ★ 检测新增图片（含 Ctrl+Z 撤销删除的恢复）：从删除墓碑中移除对应 ID，
+      // 否则恢复的图片会被后续同步/加载的墓碑过滤掉，表现为"撤销后图片又消失"
+      if (next.length > prev.length && !serverSyncMergeRef.current) {
+        const prevIdSet = new Set(prev.map(img => img.id));
+        const addedIds = next.filter(img => img.id && !prevIdSet.has(img.id)).map(img => img.id);
+        if (addedIds.length > 0) {
+          try {
+            UserManagerCore.getInstance().restoreDeletedImageIds(addedIds);
+          } catch { /* non-blocking */ }
+        }
+      }
+
       // Record diff: always use the actual React state `prev` as the base.
       // ★ 修复：之前当 prevImagesRef 过期时（如 setImagesRaw 直接调用未更新 ref），
       // 会使用过期的 prevImagesRef.current（可能为 []）作为基准，

@@ -471,6 +471,95 @@ export async function dbSetUserData(userId: string, key: string, value: unknown)
   }
 }
 
+/** 墓碑列表上限：防止历史删除记录无限膨胀 */
+const MAX_TOMBSTONE_IDS = 2000;
+
+export interface ProjectTombstonePersistResult {
+  projects: unknown[];
+  projectTombstones: string[];
+  imageTombstones: string[];
+}
+
+/**
+ * Atomically merge deletion tombstones and persist the filtered project snapshot.
+ * The transaction serializes writers per user so an older tab cannot overwrite a newer deletion.
+ */
+export async function dbSetProjectsWithDeletionTombstones(
+  userId: string,
+  projects: unknown,
+  deletedProjectIds: string[],
+  deletedImageIds: string[],
+): Promise<ProjectTombstonePersistResult> {
+  const client = await getPool().connect();
+  try {
+    await client.query('BEGIN');
+    // hashtext 返回 int4，显式转 bigint 以匹配 pg_advisory_xact_lock 的重载签名
+    await client.query('SELECT pg_advisory_xact_lock(hashtext($1)::bigint)', [`wujie-project-sync:${userId}`]);
+
+    const keys = ['deletedProjectIds', 'deletedImageIds'];
+    const existingResult = await client.query(
+      'SELECT data_key, data_value FROM wujie_user_data WHERE user_id = $1 AND data_key = ANY($2::text[])',
+      [userId, keys],
+    );
+    const existing = new Map<string, unknown>(
+      (existingResult.rows as Array<{ data_key: string; data_value: unknown }>).map((row) => [row.data_key, row.data_value]),
+    );
+    const normalizeIds = (value: unknown): string[] => Array.isArray(value)
+      ? value.filter((id): id is string => typeof id === 'string' && id.length > 0)
+      : [];
+    const projectTombstones = Array.from(new Set([
+      ...normalizeIds(existing.get('deletedProjectIds')),
+      ...deletedProjectIds,
+    ])).slice(-MAX_TOMBSTONE_IDS);
+    const imageTombstones = Array.from(new Set([
+      ...normalizeIds(existing.get('deletedImageIds')),
+      ...deletedImageIds,
+    ])).slice(-MAX_TOMBSTONE_IDS);
+    const deletedProjectSet = new Set(projectTombstones);
+    const deletedImageSet = new Set(imageTombstones);
+    const projectList = Array.isArray(projects) ? projects : [];
+    const filterTombstonedImages = (images: unknown): unknown => Array.isArray(images)
+      ? images.filter((image) => !deletedImageSet.has(String((image as Record<string, unknown>)?.id)))
+      : images;
+    const filteredProjects = projectList
+      .filter((project): project is Record<string, unknown> => Boolean(
+        project && typeof project === 'object' && !deletedProjectSet.has(String((project as Record<string, unknown>).id)),
+      ))
+      .map((project) => ({
+        ...project,
+        userId,
+        // ★ canvasImages 是当前主字段，images 是历史兼容字段，两者都要过滤，
+        // 否则墓碑图片会随旧标签页的快照写回数据库
+        canvasImages: filterTombstonedImages(project.canvasImages),
+        images: filterTombstonedImages(project.images),
+      }));
+
+    const updatedAt = Date.now();
+    const entries: Array<[string, unknown]> = [
+      ['projects', filteredProjects],
+      ['deletedProjectIds', projectTombstones],
+      ['deletedImageIds', imageTombstones],
+    ];
+    for (const [key, value] of entries) {
+      await client.query(`
+        INSERT INTO wujie_user_data (user_id, data_key, data_value, updated_at)
+        VALUES ($1, $2, $3, $4)
+        ON CONFLICT (user_id, data_key) DO UPDATE SET
+          data_value = EXCLUDED.data_value,
+          updated_at = EXCLUDED.updated_at
+      `, [userId, key, JSON.stringify(value), updatedAt]);
+    }
+    await client.query('COMMIT');
+    return { projects: filteredProjects, projectTombstones, imageTombstones };
+  } catch (e) {
+    try { await client.query('ROLLBACK'); } catch { /* ignore rollback error */ }
+    console.error('[db-storage] dbSetProjectsWithDeletionTombstones error:', e);
+    throw e;
+  } finally {
+    client.release();
+  }
+}
+
 export async function dbListUserData(userId: string): Promise<{ dataKey: string; updatedAt: number }[]> {
   try {
     const result = await execSql(

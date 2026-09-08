@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSessionUser } from '@/lib/server-auth';
-import { dbGetUserData, dbSetUserData } from '@/lib/db-storage';
+import { dbGetUserData, dbSetUserData, dbSetProjectsWithDeletionTombstones } from '@/lib/db-storage';
 import { execSql } from '@/lib/db-client';
 
 export const dynamic = 'force-dynamic';
@@ -8,8 +8,58 @@ export const dynamic = 'force-dynamic';
 // Allowed key prefixes for user data sync (prevent overwriting system data)
 const ALLOWED_KEY_PREFIXES = ['projects', 'favorites', 'brand_', 'font_', 'canvas_', 'workflow_', 'settings_', 'theme_', 'custom_', 'chat_'];
 
+// 删除墓碑的数据键（与 projects 键同库存储，服务端持久防线）
+const TOMBSTONE_PROJECT_KEY = 'deletedProjectIds';
+const TOMBSTONE_IMAGE_KEY = 'deletedImageIds';
+
 function isKeyAllowed(key: string): boolean {
   return ALLOWED_KEY_PREFIXES.some(prefix => key.startsWith(prefix));
+}
+
+/** 解析墓碑键为合法的 ID 数组 */
+function parseTombstoneIds(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((id): id is string => typeof id === 'string' && id.length > 0)
+    : [];
+}
+
+/** 读取当前用户的删除墓碑（projects + images），读取失败不阻塞主流程 */
+async function readDeletionTombstones(userId: string): Promise<{ projectIds: string[]; imageIds: string[] }> {
+  try {
+    const [projectRaw, imageRaw] = await Promise.all([
+      dbGetUserData(userId, TOMBSTONE_PROJECT_KEY),
+      dbGetUserData(userId, TOMBSTONE_IMAGE_KEY),
+    ]);
+    return {
+      projectIds: parseTombstoneIds(projectRaw),
+      imageIds: parseTombstoneIds(imageRaw),
+    };
+  } catch (error) {
+    console.warn('[Sync] readDeletionTombstones failed (non-blocking):', error);
+    return { projectIds: [], imageIds: [] };
+  }
+}
+
+/** 按墓碑过滤项目列表（过滤已删项目 + 项目内已删图片），不回写数据库 */
+function applyTombstoneFilter(
+  projects: unknown[],
+  tombstones: { projectIds: string[]; imageIds: string[] },
+): unknown[] {
+  if (tombstones.projectIds.length === 0 && tombstones.imageIds.length === 0) return projects;
+  const deletedProjectSet = new Set(tombstones.projectIds);
+  const deletedImageSet = new Set(tombstones.imageIds);
+  const filterImages = (images: unknown): unknown => Array.isArray(images)
+    ? images.filter((image) => !deletedImageSet.has(String((image as Record<string, unknown>)?.id)))
+    : images;
+  return projects
+    .filter((p) => !deletedProjectSet.has(String((p as Record<string, unknown>).id)))
+    .map((p) => {
+      const record = p as Record<string, unknown>;
+      // canvasImages 是当前主字段，images 是历史兼容字段
+      if ('canvasImages' in record) record.canvasImages = filterImages(record.canvasImages);
+      if ('images' in record) record.images = filterImages(record.images);
+      return record;
+    });
 }
 
 /**
@@ -108,6 +158,22 @@ export async function GET(request: NextRequest) {
       if (removed > 0) {
         console.warn(`[Sync] GET projects: filtered out ${removed} cross-user projects for user ${sessionUser.id} (response only, not persisted)`);
       }
+
+      // ★ 服务端删除墓碑防线：过滤已删除的项目和图片（跨设备/刷新后旧数据不得复活），
+      // 并把墓碑返回给客户端，用于其本地过滤与合并
+      const tombstones = await readDeletionTombstones(sessionUser.id);
+      const beforeTombstone = (value as unknown[]).length;
+      value = applyTombstoneFilter(value as unknown[], tombstones);
+      if ((value as unknown[]).length < beforeTombstone) {
+        console.warn(`[Sync] GET projects: filtered out ${beforeTombstone - (value as unknown[]).length} tombstoned projects for user ${sessionUser.id} (response only)`);
+      }
+      return NextResponse.json({
+        success: true,
+        key,
+        value,
+        deletedProjectIds: tombstones.projectIds,
+        deletedImageIds: tombstones.imageIds,
+      });
     }
 
     return NextResponse.json({ success: true, key, value });
@@ -131,7 +197,12 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: false, error: 'Login required' }, { status: 401 });
     }
 
-    const body = await request.json() as { key?: string; value?: unknown };
+    const body = await request.json() as {
+      key?: string;
+      value?: unknown;
+      deletedProjectIds?: unknown;
+      deletedImageIds?: unknown;
+    };
     const key = body.key;
     if (!key) {
       return NextResponse.json({ success: false, error: 'Missing key parameter' }, { status: 400 });
@@ -177,10 +248,31 @@ export async function POST(request: NextRequest) {
         }
       }
 
-      // 3. 强制设置所有项目的 userId 为当前会话用户（确保数据一致性）
-      for (const p of (value as Record<string, unknown>[])) {
-        p.userId = sessionUser.id;
-      }
+      // 3. 对删除墓碑执行服务端原子过滤。删除 ID 会和数据库已保存的墓碑合并，
+      // 然后在同一个事务中更新项目列表，防止旧标签页或乱序请求重新写回已删除内容。
+      const deletedProjectIds = Array.isArray(body.deletedProjectIds)
+        ? body.deletedProjectIds.filter((id): id is string => typeof id === 'string' && id.length > 0)
+        : [];
+      const deletedImageIds = Array.isArray(body.deletedImageIds)
+        ? body.deletedImageIds.filter((id): id is string => typeof id === 'string' && id.length > 0)
+        : [];
+
+      const persisted = await dbSetProjectsWithDeletionTombstones(
+        sessionUser.id,
+        value,
+        deletedProjectIds,
+        deletedImageIds,
+      );
+      return NextResponse.json({
+        success: true,
+        key,
+        value: persisted.projects,
+        projectIdMap,
+        deletionTombstones: {
+          projectIds: persisted.projectTombstones,
+          imageIds: persisted.imageTombstones,
+        },
+      });
     }
 
     await dbSetUserData(sessionUser.id, key, value);
