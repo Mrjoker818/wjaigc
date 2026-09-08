@@ -1,5 +1,7 @@
 import 'server-only';
 
+import { createHash } from 'node:crypto';
+
 import { fetchWithV1Retry } from '@/lib/api-helpers';
 import {
   AgentDownstreamProviderRejectedError,
@@ -53,6 +55,7 @@ export interface PersistCompliancePartialReportInput {
   sourceVersionId: string;
   phase: 'technical' | 'vision-error';
   report: PlatformComplianceReportV1;
+  assetVersionId?: string;
   executionFence: NonNullable<ExecuteSkillStepInput['operation']['executionFence']>;
   workspace: 'canvas' | 'workflow';
 }
@@ -84,6 +87,18 @@ class ComplianceAuditVisionFailedError extends Error {
 async function persistCompliancePartialReport(
   input: PersistCompliancePartialReportInput,
 ): Promise<void> {
+  if (input.assetVersionId) {
+    await appendAdoptedAgentEvent({
+      actorUserId: input.actorUserId,
+      projectId: input.projectId,
+      runId: input.runId,
+      workspace: input.workspace,
+      eventId: `skill:${input.runId}:step:${input.stepId}:compliance:${input.phase}:asset:${input.assetVersionId}:generation:${input.executionFence.generation}`,
+      type: 'asset.created',
+      payload: { stepId: input.stepId, assetVersionId: input.assetVersionId },
+      executionFence: input.executionFence,
+    });
+  }
   await appendAdoptedAgentEvent({
     actorUserId: input.actorUserId,
     projectId: input.projectId,
@@ -96,6 +111,7 @@ async function persistCompliancePartialReport(
       stepId: input.stepId,
       phase: input.phase,
       generation: input.executionFence.generation,
+      ...(input.assetVersionId ? { assetVersionId: input.assetVersionId } : {}),
       outputs: [{
         stepId: input.stepId,
         kind: 'json',
@@ -465,21 +481,57 @@ export function createProductionSkillStepRegistry(input: {
       technicalErrors,
       visionResult,
     });
+    const sourceTrace = parseWorkspaceSourceTrace({
+      source: 'canvas-skill',
+      runId: step.runId,
+      skillId: input.request.skillId,
+      skillVersion: input.request.skillVersion,
+      sourceVersionIds: [sourceVersionId],
+      modelBindings: input.request.modelBindings,
+      createdAt: generatedAt,
+    });
+    if (sourceTrace?.source !== 'canvas-skill') {
+      throw imageAdmissionError('Skill compliance report source trace could not be frozen');
+    }
+    const persistReportAsset = async (
+      phase: 'technical' | 'vision-error' | 'completed',
+      report: PlatformComplianceReportV1,
+    ) => {
+      const version = await persistComplianceReportAsset({
+        actorUserId: step.actorUserId,
+        projectId: step.projectId,
+        runId: step.runId,
+        stepId: step.step.id,
+        report,
+        sourceVersionIds: [sourceVersionId],
+        sourceTrace,
+        idempotencyKey: `${step.operation.idempotencyKey}:report-asset:${phase}`,
+        requestDigest: step.requestDigest,
+      });
+      return { version, report: complianceReportFromAssetVersion(version) };
+    };
     const persist = input.persistCompliancePartialReport || persistCompliancePartialReport;
-    const persistReport = (
+    const persistReport = async (
       phase: PersistCompliancePartialReportInput['phase'],
       report: PlatformComplianceReportV1,
-    ) => persist({
-      actorUserId: step.actorUserId,
-      projectId: step.projectId,
-      runId: step.runId,
-      stepId: step.step.id,
-      sourceVersionId,
-      phase,
-      report,
-      executionFence: step.operation.executionFence!,
-      workspace,
-    });
+    ) => {
+      const persisted = phase === 'technical'
+        ? { report }
+        : await persistReportAsset(phase, report);
+      await persist({
+        actorUserId: step.actorUserId,
+        projectId: step.projectId,
+        runId: step.runId,
+        stepId: step.step.id,
+        sourceVersionId,
+        phase,
+        report: persisted.report,
+        ...('version' in persisted ? { assetVersionId: persisted.version.id } : {}),
+        executionFence: step.operation.executionFence!,
+        workspace,
+      });
+      return persisted;
+    };
 
     await persistReport('technical', buildReport());
     const provider = (await getApiProviders()).find(candidate => (
@@ -495,9 +547,9 @@ export function createProductionSkillStepRegistry(input: {
         requestId: step.operation.idempotencyKey,
       };
       const partialReport = buildReport([technicalError]);
-      await persistReport('vision-error', partialReport);
+      const persisted = await persistReport('vision-error', partialReport);
       throw new ComplianceAuditVisionFailedError(
-        partialReport,
+        persisted.report,
         step.modelBinding.providerId,
         step.modelBinding.modelId,
         step.operation.idempotencyKey,
@@ -505,47 +557,7 @@ export function createProductionSkillStepRegistry(input: {
       );
     }
 
-    await step.operation.beginSubmission();
-    try {
-      const visionResult = await invokeComplianceVision({
-        provider,
-        modelId: step.modelBinding.modelId,
-        imageInput: facts.inspectedImageDataUrl,
-        rules: ruleSet.rules.filter(rule => rule.evaluator === 'vision'),
-        requestId: step.operation.idempotencyKey,
-        signal: step.signal,
-      });
-      const report = buildReport([], visionResult);
-      const sourceTrace = parseWorkspaceSourceTrace({
-        source: 'canvas-skill',
-        runId: step.runId,
-        skillId: input.request.skillId,
-        skillVersion: input.request.skillVersion,
-        sourceVersionIds: [sourceVersionId],
-        modelBindings: input.request.modelBindings,
-        createdAt: generatedAt,
-      });
-      if (sourceTrace?.source !== 'canvas-skill') {
-        throw imageAdmissionError('Skill compliance report source trace could not be frozen');
-      }
-      const reportVersion = await persistComplianceReportAsset({
-        actorUserId: step.actorUserId,
-        projectId: step.projectId,
-        runId: step.runId,
-        stepId: step.step.id,
-        report,
-        sourceVersionIds: [sourceVersionId],
-        sourceTrace,
-        idempotencyKey: `${step.operation.idempotencyKey}:report-asset`,
-        requestDigest: step.requestDigest,
-      });
-      const authoritativeReport = complianceReportFromAssetVersion(reportVersion);
-      return {
-        assetVersionIds: [reportVersion.id],
-        media: [],
-        structured: { schemaId: 'platform-compliance-report-v1', value: authoritativeReport },
-      };
-    } catch (error) {
+    const persistVisionFailure = async (error: ComplianceVisionError): Promise<never> => {
       if (!(error instanceof ComplianceVisionError)) throw error;
       const technicalError: PlatformComplianceTechnicalErrorV1 = {
         code: error.code,
@@ -557,7 +569,7 @@ export function createProductionSkillStepRegistry(input: {
       };
       let partialReport = buildReport([technicalError]);
       try {
-        await persistReport('vision-error', partialReport);
+        partialReport = (await persistReport('vision-error', partialReport)).report;
       } catch (persistenceError) {
         partialReport = buildReport([technicalError, {
           code: 'COMPLIANCE_PARTIAL_REPORT_PERSIST_FAILED',
@@ -602,7 +614,40 @@ export function createProductionSkillStepRegistry(input: {
         error.providerStatus,
         { cause: error },
       );
-    }
+    };
+    const visionRequestDigest = createHash('sha256').update(JSON.stringify({
+      requestDigest: step.requestDigest,
+      sourceDigest,
+      providerId: step.modelBinding.providerId,
+      modelId: step.modelBinding.modelId,
+      ruleSetDigest: ruleSet.digest,
+    })).digest('hex');
+    const visionResult = await step.operation.executeOperation({
+      stepId: `${step.step.id}:vision`,
+      toolId: 'compliance_audit_vision',
+      requestDigest: visionRequestDigest,
+    }, async visionOperation => {
+      await visionOperation.beginSubmission();
+      try {
+        return await invokeComplianceVision({
+          provider,
+          modelId: step.modelBinding!.modelId,
+          imageInput: facts.inspectedImageDataUrl,
+          rules: ruleSet.rules.filter(rule => rule.evaluator === 'vision'),
+          requestId: visionOperation.idempotencyKey,
+          signal: step.signal,
+        });
+      } catch (error) {
+        if (!(error instanceof ComplianceVisionError)) throw error;
+        return persistVisionFailure(error);
+      }
+    });
+    const completed = await persistReportAsset('completed', buildReport([], visionResult));
+    return {
+      assetVersionIds: [completed.version.id],
+      media: [],
+      structured: { schemaId: 'platform-compliance-report-v1', value: completed.report },
+    };
   };
   return {
     stepAdapters: {

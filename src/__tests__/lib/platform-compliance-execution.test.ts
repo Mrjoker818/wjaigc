@@ -52,33 +52,50 @@ function successfulVisionChecks() {
 }
 
 function durableDependencies() {
-  let operation: AgentDownstreamOperation | undefined;
+  const operations = new Map<string, AgentDownstreamOperation>();
   const dependencies: AgentDownstreamOperationDependencies = {
     prepare: vi.fn(async identity => {
-      operation = operation
-        ? { ...operation, ...identity, attempts: operation.attempts + 1, claimed: true }
+      const current = operations.get(identity.operationKey);
+      const operation = current
+        ? { ...current, ...identity, attempts: current.attempts + 1, claimed: true }
         : { ...identity, status: 'prepared', attempts: 1, claimed: true };
+      operations.set(identity.operationKey, operation as AgentDownstreamOperation);
       return operation as AgentDownstreamOperation;
     }),
     markSubmitted: vi.fn(async identity => {
-      operation = { ...operation!, ...identity, status: 'submitted' };
+      const operation = { ...operations.get(identity.operationKey)!, ...identity, status: 'submitted' };
+      operations.set(identity.operationKey, operation as AgentDownstreamOperation);
       return operation as AgentDownstreamOperation;
     }),
-    markAccepted: vi.fn(),
+    markAccepted: vi.fn(async identity => {
+      const operation = { ...operations.get(identity.operationKey)!, ...identity, status: 'accepted' };
+      operations.set(identity.operationKey, operation as AgentDownstreamOperation);
+      return operation as AgentDownstreamOperation;
+    }),
     markSubmissionUnknown: vi.fn(async identity => {
-      operation = { ...operation!, ...identity, status: 'submission_unknown' };
+      const operation = { ...operations.get(identity.operationKey)!, ...identity, status: 'submission_unknown' };
+      operations.set(identity.operationKey, operation as AgentDownstreamOperation);
       return operation as AgentDownstreamOperation;
     }),
     complete: vi.fn(async identity => {
-      operation = { ...operation!, ...identity, status: 'completed' };
+      const operation = { ...operations.get(identity.operationKey)!, ...identity, status: 'completed' };
+      operations.set(identity.operationKey, operation as AgentDownstreamOperation);
       return operation as AgentDownstreamOperation;
     }),
-    release: vi.fn(async (_identity, options) => {
-      if (operation?.status === 'submitted' && options?.knownSubmissionOutcome) {
-        operation = { ...operation, status: 'prepared', claimed: false };
+    release: vi.fn(async (identity, options) => {
+      const operation = operations.get(identity.operationKey);
+      if (operation && (operation.status !== 'submission_unknown')) {
+        operations.set(identity.operationKey, {
+          ...operation,
+          ...(operation.status === 'submitted' && options?.knownSubmissionOutcome
+            ? { status: 'prepared' as const }
+            : {}),
+          claimed: false,
+        });
       }
       return true;
     }),
+    read: vi.fn(async identity => operations.get(identity.operationKey) ?? null),
   };
   return dependencies;
 }
@@ -116,6 +133,22 @@ function complianceStepInput(
     modelBinding: { providerId: 'frozen-vision', modelId: 'vision-model' },
     requestDigest: 'request-digest', operation, signal,
   };
+}
+
+function immediateOperationContext(idempotencyKey = 'provider-idempotency') {
+  const beginSubmission = vi.fn(async () => undefined);
+  const operation = {
+    idempotencyKey,
+    operationKey: 'operation-1',
+    recovery: false,
+    executionFence: { runId: 'run-1', leaseOwner: 'lease-1', generation: 1 },
+    beginSubmission,
+    recordAccepted: vi.fn(async () => undefined),
+    recordLocalAccepted: vi.fn(async () => undefined),
+    executeOperation: vi.fn(),
+  } as Parameters<ReturnType<typeof createProductionSkillStepRegistry>['stepAdapters']['compliance_audit']>[0]['operation'];
+  operation.executeOperation = vi.fn(async (_input, execute) => execute(operation));
+  return operation;
 }
 
 describe('platform compliance report execution', () => {
@@ -192,14 +225,7 @@ describe('platform compliance report execution', () => {
       modelBindings: { vision: { providerId: 'frozen-vision', modelId: 'vision-model' } },
       idempotencyKey: 'run-key',
     };
-    const operation = {
-      idempotencyKey: 'provider-idempotency', operationKey: 'operation-1', recovery: false,
-      executionFence: { runId: 'run-1', leaseOwner: 'lease-1', generation: 1 },
-      beginSubmission: vi.fn(async () => undefined),
-      recordAccepted: vi.fn(async () => undefined),
-      recordLocalAccepted: vi.fn(async () => undefined),
-      executeOperation: vi.fn(),
-    };
+    const operation = immediateOperationContext();
     const registry = createProductionSkillStepRegistry({
       actor: { id: 'user-1', name: 'User', role: 'user', status: 'active', productType: 'canvas', createdAt: 1, updatedAt: 1 },
       request,
@@ -232,9 +258,9 @@ describe('platform compliance report execution', () => {
     expect(persistCompliancePartialReport.mock.calls[0]?.[0]).toMatchObject({
       sourceVersionId: 'asset-version-b', phase: 'technical',
     });
-    expect(operation.beginSubmission).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(operation.beginSubmission)).toHaveBeenCalledTimes(1);
     expect(persistCompliancePartialReport.mock.invocationCallOrder[0])
-      .toBeLessThan(operation.beginSubmission.mock.invocationCallOrder[0]);
+      .toBeLessThan(vi.mocked(operation.beginSubmission).mock.invocationCallOrder[0]);
     expect(mocks.fetchWithV1Retry).toHaveBeenCalledTimes(1);
     expect(mocks.fetchWithV1Retry.mock.calls[0]?.[0]).toBe('https://vision.example/v1');
     expect(String(mocks.fetchWithV1Retry.mock.calls[0]?.[2]?.body)).toContain(imageDataUrl);
@@ -242,7 +268,7 @@ describe('platform compliance report execution', () => {
     expect(mocks.persistComplianceReportAsset).toHaveBeenCalledWith(expect.objectContaining({
       actorUserId: 'user-1', projectId: 'project-1', runId: 'run-1', stepId: 'audit:b',
       sourceVersionIds: ['asset-version-b'], requestDigest: 'request-digest',
-      idempotencyKey: 'provider-idempotency:report-asset',
+      idempotencyKey: 'provider-idempotency:report-asset:completed',
       sourceTrace: expect.objectContaining({
         source: 'canvas-skill', runId: 'run-1', sourceVersionIds: ['asset-version-b'],
       }),
@@ -290,12 +316,7 @@ describe('platform compliance report execution', () => {
         inputValues: request.inputValues,
         modelBinding: { providerId: 'frozen-vision', modelId: 'vision-model' },
         requestDigest: 'request-digest',
-        operation: {
-          idempotencyKey: 'provider-idempotency', operationKey: 'operation-1', recovery: false,
-          executionFence: { runId: 'run-1', leaseOwner: 'lease-1', generation: 1 },
-          beginSubmission: vi.fn(async () => undefined), recordAccepted: vi.fn(async () => undefined),
-          recordLocalAccepted: vi.fn(async () => undefined), executeOperation: vi.fn(),
-        },
+        operation: immediateOperationContext(),
         signal: new AbortController().signal,
       });
     } catch (caught) {
@@ -356,9 +377,8 @@ describe('platform compliance report execution', () => {
       ...(providerStatus === undefined ? {} : { providerStatus }),
     });
     expect(dependencies.markSubmissionUnknown).not.toHaveBeenCalled();
-    expect(dependencies.release).toHaveBeenCalledTimes(1);
     expect(dependencies.release).toHaveBeenCalledWith(
-      expect.any(Object), { knownSubmissionOutcome: true },
+      expect.objectContaining({ stepId: 'audit:a:vision' }), { knownSubmissionOutcome: true },
     );
     mocks.fetchWithV1Retry.mockResolvedValue(new Response(JSON.stringify({
       choices: [{ message: { content: JSON.stringify({ checks: successfulVisionChecks() }) } }],
@@ -410,7 +430,9 @@ describe('platform compliance report execution', () => {
       code: 'COMPLIANCE_VISION_CANCELLED', retryable: false,
     });
     expect(dependencies.markSubmissionUnknown).not.toHaveBeenCalled();
-    expect(dependencies.release).toHaveBeenCalledTimes(1);
+    expect(dependencies.release).toHaveBeenCalledWith(
+      expect.objectContaining({ stepId: 'audit:a:vision' }), { knownSubmissionOutcome: true },
+    );
   });
 
   it('marks only transport response loss as submission_unknown without replay', async () => {
@@ -480,7 +502,9 @@ describe('platform compliance report execution', () => {
     });
     await expect(execute()).rejects.toMatchObject({ code: 'AGENT_DOWNSTREAM_SUBMISSION_UNKNOWN' });
     expect(dependencies.markSubmissionUnknown).toHaveBeenCalledTimes(1);
-    expect(dependencies.release).not.toHaveBeenCalled();
+    expect(dependencies.release).not.toHaveBeenCalledWith(
+      expect.objectContaining({ stepId: 'audit:a:vision' }), expect.anything(),
+    );
     expect(mocks.fetchWithV1Retry).toHaveBeenCalledTimes(1);
   });
 
@@ -667,10 +691,7 @@ describe('platform compliance report execution', () => {
       const result = await registry.stepAdapters.compliance_audit(complianceStepInput(
         request,
         {
-          idempotencyKey: 'provider-idempotency', operationKey: 'operation-1', recovery: false,
-          executionFence: { runId: 'run-1', leaseOwner: 'lease-1', generation: 1 },
-          beginSubmission: vi.fn(async () => undefined), recordAccepted: vi.fn(async () => undefined),
-          recordLocalAccepted: vi.fn(async () => undefined), executeOperation: vi.fn(),
+          ...immediateOperationContext(),
         },
         new AbortController().signal,
       ));
@@ -755,6 +776,99 @@ describe('platform compliance report execution', () => {
       providerId: 'frozen-vision', modelId: 'vision-model',
     });
     expect(dependencies.markSubmissionUnknown).toHaveBeenCalledTimes(1);
-    expect(dependencies.release).not.toHaveBeenCalled();
+    expect(dependencies.release).not.toHaveBeenCalledWith(
+      expect.objectContaining({ stepId: 'audit:a:vision' }), expect.anything(),
+    );
+  });
+
+  it('retries only local report persistence after a paid vision response succeeds', async () => {
+    mocks.fetchWithV1Retry.mockResolvedValue(new Response(JSON.stringify({
+      choices: [{ message: { content: JSON.stringify({ checks: successfulVisionChecks() }) } }],
+    })));
+    let rejectCompletedAssetOnce = true;
+    mocks.persistComplianceReportAsset.mockImplementation(async input => {
+      const report = input.report as { checks: Array<{ evaluator: string; status: string }> };
+      const isCompleted = report.checks
+        .filter(check => check.evaluator === 'vision')
+        .every(check => check.status === 'passed');
+      if (isCompleted && rejectCompletedAssetOnce) {
+        rejectCompletedAssetOnce = false;
+        throw new Error('asset database temporarily unavailable');
+      }
+      const reportContent = canonicalComplianceReportJson(input.report);
+      return {
+        id: isCompleted ? 'completed-report-version' : 'technical-report-version',
+        parentVersionIds: [],
+        file: {
+          availability: 'ready', mimeType: 'application/json',
+          byteSize: Buffer.byteLength(reportContent),
+          checksum: createHash('sha256').update(reportContent).digest('hex'),
+        },
+        metadata: { schemaId: 'platform-compliance-report-v1', reportContent },
+      };
+    });
+    const dependencies = durableDependencies();
+    const request = complianceRequest();
+    const registry = createProductionSkillStepRegistry({
+      actor: { id: 'user-1', name: 'User', role: 'user', status: 'active', productType: 'canvas', createdAt: 1, updatedAt: 1 },
+      request, mediaByVersionId: { 'asset-version-a': imageDataUrl },
+      persistCompliancePartialReport: vi.fn(async () => undefined),
+    });
+    const durableInput = {
+      actorUserId: 'user-1', projectId: 'project-1', runId: 'run-1',
+      toolId: 'compliance_audit', stepId: 'audit:a', requestDigest: 'request-digest',
+      executionFence: { runId: 'run-1', leaseOwner: 'lease-1', generation: 1 },
+    };
+    const execute = () => executeDurableAgentDownstreamOperation(
+      durableInput,
+      operation => registry.stepAdapters.compliance_audit(
+        complianceStepInput(request, operation, new AbortController().signal),
+      ),
+      dependencies,
+    );
+
+    await expect(execute()).rejects.toThrow('asset database temporarily unavailable');
+    await expect(execute()).resolves.toMatchObject({
+      assetVersionIds: ['completed-report-version'],
+      structured: { schemaId: 'platform-compliance-report-v1' },
+    });
+    expect(mocks.fetchWithV1Retry).toHaveBeenCalledTimes(1);
+    expect(dependencies.markSubmissionUnknown).not.toHaveBeenCalled();
+    expect(mocks.persistComplianceReportAsset).toHaveBeenCalledTimes(2);
+    expect(mocks.persistComplianceReportAsset.mock.calls.every(call => (
+      String(call[0].idempotencyKey).endsWith(':report-asset:completed')
+    ))).toBe(true);
+  });
+
+  it('creates an exportable document asset for a provider-unavailable partial report', async () => {
+    mocks.getApiProviders.mockResolvedValue([]);
+    const dependencies = durableDependencies();
+    const request = complianceRequest();
+    const registry = createProductionSkillStepRegistry({
+      actor: { id: 'user-1', name: 'User', role: 'user', status: 'active', productType: 'canvas', createdAt: 1, updatedAt: 1 },
+      request, mediaByVersionId: { 'asset-version-a': imageDataUrl },
+      persistCompliancePartialReport: vi.fn(async () => undefined),
+    });
+
+    await expect(executeDurableAgentDownstreamOperation({
+      actorUserId: 'user-1', projectId: 'project-1', runId: 'run-1',
+      toolId: 'compliance_audit', stepId: 'audit:a', requestDigest: 'request-digest',
+      executionFence: { runId: 'run-1', leaseOwner: 'lease-1', generation: 1 },
+    }, operation => registry.stepAdapters.compliance_audit(
+      complianceStepInput(request, operation, new AbortController().signal),
+    ), dependencies)).rejects.toMatchObject({
+      code: 'COMPLIANCE_AUDIT_VISION_FAILED', submissionOutcome: 'known',
+    });
+
+    expect(mocks.persistComplianceReportAsset).toHaveBeenCalledWith(expect.objectContaining({
+      actorUserId: 'user-1', projectId: 'project-1', runId: 'run-1', stepId: 'audit:a',
+      idempotencyKey: expect.stringContaining(':vision-error'),
+      report: expect.objectContaining({
+        technicalErrors: [expect.objectContaining({
+          code: 'COMPLIANCE_VISION_PROVIDER_UNAVAILABLE',
+        })],
+      }),
+    }));
+    expect(mocks.persistComplianceReportAsset).toHaveBeenCalledTimes(1);
   });
 });

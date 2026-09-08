@@ -64,10 +64,13 @@ describe('platform compliance report assets', () => {
     ), 'utf8');
 
     expect(source).toContain("from '@/lib/platform-compliance/report-asset'");
-    expect(source).toMatch(/const reportVersion = await persistComplianceReportAsset\(\{[\s\S]*actorUserId: step\.actorUserId,[\s\S]*projectId: step\.projectId,[\s\S]*runId: step\.runId,[\s\S]*stepId: step\.step\.id,[\s\S]*sourceVersionIds: \[sourceVersionId\],[\s\S]*requestDigest: step\.requestDigest,/u);
-    expect(source).toContain('assetVersionIds: [reportVersion.id]');
-    expect(source).toContain('const authoritativeReport = complianceReportFromAssetVersion(reportVersion)');
-    expect(source).toContain("structured: { schemaId: 'platform-compliance-report-v1', value: authoritativeReport }");
+    expect(source).toMatch(/const persistReportAsset = async \([\s\S]*await persistComplianceReportAsset\(\{[\s\S]*actorUserId: step\.actorUserId,[\s\S]*projectId: step\.projectId,[\s\S]*runId: step\.runId,[\s\S]*stepId: step\.step\.id,[\s\S]*sourceVersionIds: \[sourceVersionId\],[\s\S]*requestDigest: step\.requestDigest,/u);
+    expect(source).toContain("const completed = await persistReportAsset('completed'");
+    expect(source).toContain('assetVersionIds: [completed.version.id]');
+    expect(source).toContain('report: complianceReportFromAssetVersion(version)');
+    expect(source).toContain("structured: { schemaId: 'platform-compliance-report-v1', value: completed.report }");
+    expect(source).toContain("type: 'asset.created'");
+    expect(source).toContain('payload: { stepId: input.stepId, assetVersionId: input.assetVersionId }');
   });
 
   it('creates an independent document version with canonical content and metadata-only lineage', async () => {
