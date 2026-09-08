@@ -9,6 +9,7 @@ import NodeEditor from '@/components/node-editor';
 import { loadSavedWorkflowSkillResult } from '@/lib/skill-runtime/workflow-client';
 import { LOVART_CONTENT_COMMERCE_SKILLS } from '@/lib/skill-runtime/content-commerce-presets';
 import { createEmptyWorkflow, createWorkflowNode } from '@/lib/workflow-engine';
+import { validReport } from '@/__tests__/helpers/platform-compliance-fixtures';
 
 const workflowSkill = {
   id: 'workflow-skill', version: 2, name: '工作流产品套图', category: 'image',
@@ -412,6 +413,48 @@ describe('NodeEditor workflow Skill node', () => {
       skillVersion: 1, signal: new AbortController().signal, fetcher });
     expect(result.output.text).toBe('Saved brief');
     expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  it('restores a compliance document as a report summary instead of an image', async () => {
+    const report = validReport({
+      verdict: 'warning',
+      checks: [
+        ...validReport().checks,
+        {
+          ruleId: 'manual-check', ruleVersion: 1, title: '人工确认', severity: 'warning',
+          evaluator: 'vision', status: 'warning', evidence: ['需要人工确认'],
+          measuredValue: null, requiredValue: null, confidence: 0.7, remediation: '人工复核',
+        },
+      ],
+      summary: { passed: 1, warning: 1, blocked: 0, unknown: 0 },
+      manualReviewRequired: true,
+    });
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('/api/skill-runs/')) return new Response(JSON.stringify({ run: {
+        runId: 'report-run', projectId: 'project-a', surface: 'workflow', workspaceId: 'workflow:report-workflow',
+        skillId: workflowSkill.id, skillVersion: workflowSkill.version, status: 'completed',
+        assetVersionIds: ['report-version'], outputs: [{
+          stepId: 'audit:a', kind: 'json', schemaId: 'platform-compliance-report-v1',
+          content: JSON.stringify(report),
+        }],
+      } }));
+      if (url.startsWith('/api/assets?')) return new Response(JSON.stringify({
+        assetId: 'report-asset', assetVersionId: 'report-version',
+        url: '/api/skill-reports/report-version?format=json', kind: 'document',
+      }));
+      return new Response('{}');
+    }));
+    vi.stubGlobal('matchMedia', vi.fn(() => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() })));
+    vi.stubGlobal('ResizeObserver', class { observe(): void {} unobserve(): void {} disconnect(): void {} });
+    const node = createWorkflowNode('ai-skill', 0, 0);
+    node.config = { ...node.config, skillId: workflowSkill.id, version: workflowSkill.version, runId: 'report-run' };
+
+    render(<NodeEditor workflow={{ ...createEmptyWorkflow('Report'), id: 'report-workflow', nodes: [node] }} projectId="project-a" canvasImages={[]} />);
+
+    expect(await screen.findByText('需关注')).toBeTruthy();
+    expect(screen.getByText('1 份报告')).toBeTruthy();
+    expect(screen.getByText('1 项问题')).toBeTruthy();
+    expect(document.querySelector('img[src*="skill-reports"]')).toBeNull();
   });
 
   it('restores a saved Skill result through read-only run and asset queries without generating again', async () => {

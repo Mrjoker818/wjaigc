@@ -1,5 +1,6 @@
 import type { DurableSkillOutput } from './skill-runtime/types';
 import { parseDurableSkillOutputs } from './skill-runtime/structured-output';
+import { parsePlatformComplianceReport } from './platform-compliance/report-schema';
 
 interface WorkflowSkillRunProjection {
   runId: string;
@@ -28,6 +29,7 @@ export interface WorkflowSkillAssetReference {
   assetId?: string;
   assetVersionId: string;
   url: string;
+  kind?: 'image' | 'video' | 'three-d' | 'document' | 'dataset';
 }
 
 interface ExecuteWorkflowSkillRunInput {
@@ -177,15 +179,24 @@ export function projectWorkflowSkillRun(
   const assetVersionIds = [...new Set(run.assetVersionIds || [])];
   const outputs = parseDurableSkillOutputs(run.outputs);
   const text = outputs.filter(output => output.kind === 'text').map(output => output.content).join('\n\n');
+  const complianceReports = outputs
+    .filter(output => output.kind === 'json' && output.schemaId === 'platform-compliance-report-v1')
+    .map(output => parsePlatformComplianceReport(JSON.parse(output.content) as unknown));
+  const imageReferences = references.filter(reference => reference.kind === undefined || reference.kind === 'image');
+  const documentReferences = references.filter(reference => reference.kind === 'document');
   return {
     runId: run.runId,
     status: run.status,
     taskId: run.runId,
-    ...(references[0]?.url ? { imageUrl: references[0].url } : {}),
-    ...(references.length > 0 ? { imageUrls: references.map(reference => reference.url) } : {}),
-    ...(references[0]?.assetVersionId ? { assetVersionId: references[0].assetVersionId } : {}),
+    ...(imageReferences[0]?.url ? { imageUrl: imageReferences[0].url } : {}),
+    ...(imageReferences.length > 0 ? { imageUrls: imageReferences.map(reference => reference.url) } : {}),
+    ...(imageReferences[0]?.assetVersionId ? { assetVersionId: imageReferences[0].assetVersionId } : {}),
     assetVersionIds,
     assetReferences: references,
+    ...(documentReferences.length > 0 ? {
+      documentAssetVersionIds: documentReferences.map(reference => reference.assetVersionId),
+    } : {}),
+    ...(complianceReports.length > 0 ? { complianceReports } : {}),
     ...(text ? { prompt: text, text } : {}),
     outputs,
     ...(run.currentStepId ? { currentStepId: run.currentStepId } : {}),

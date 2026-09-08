@@ -14,6 +14,7 @@ import {
 } from '@/components/workflow/WorkflowReactFlowSurface';
 import { WorkflowLegacySurface } from '@/components/workflow/WorkflowLegacySurface';
 import { WorkflowShadowProbe } from '@/components/workflow/WorkflowShadowProbe';
+import { validReport } from '@/__tests__/helpers/platform-compliance-fixtures';
 
 const legacyRendererSource = readFileSync(resolve(process.cwd(), 'src/components/workflow/WorkflowLegacyNodeCard.tsx'), 'utf8');
 const reactFlowSurfaceSource = readFileSync(resolve(process.cwd(), 'src/components/workflow/WorkflowReactFlowSurface.tsx'), 'utf8');
@@ -32,6 +33,36 @@ const rendererSources = [
 afterEach(() => vi.unstubAllGlobals());
 
 describe('WorkflowReactFlowSurface', () => {
+  it('renders the compliance report summary through the shared React Flow product card', () => {
+    const workflow = createEmptyWorkflow('compliance summary');
+    const node = createWorkflowNode('ai-skill', 0, 0, 'Platform compliance');
+    node.execResult = {
+      status: 'success',
+      output: {
+        complianceReports: [validReport({
+          verdict: 'blocked',
+          summary: { passed: 0, warning: 0, blocked: 1, unknown: 0 },
+          checks: [{
+            ...validReport().checks[0]!, status: 'blocked', evidence: ['尺寸不合规'],
+            remediation: '调整尺寸',
+          }],
+        })],
+        documentAssetVersionIds: ['report-version'],
+      },
+    };
+    workflow.nodes = [node];
+
+    const markup = renderToStaticMarkup(createElement(WorkflowReactFlowSurface, {
+      model: projectReactFlowRenderModel(workflow, { x: 0, y: 0, zoom: 1 }),
+      onCommand: vi.fn(), readOnly: false,
+    }));
+
+    expect(markup).toContain('不通过');
+    expect(markup).toContain('1 份报告');
+    expect(markup).toContain('1 项问题');
+    expect(markup).not.toContain('/api/skill-reports/report-version');
+  });
+
   it('keeps execution logs in the bottom dock instead of covering workflow nodes', () => {
     expect(nodeEditorSource).not.toContain('(showExecLog || execLogs.length > 0)');
     expect(nodeEditorSource).not.toContain('absolute bottom-12 right-3 w-[380px]');

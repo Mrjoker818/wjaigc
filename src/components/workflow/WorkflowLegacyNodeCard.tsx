@@ -223,6 +223,36 @@ function OutputImageGroupContent({ imageUrls, theme: T, onPreviewImage }: {
   );
 }
 
+interface WorkflowComplianceSummary {
+  verdict: 'passed' | 'warning' | 'blocked' | 'unknown';
+  reportCount: number;
+  issueCount: number;
+}
+
+function readWorkflowComplianceSummary(output: Record<string, unknown> | undefined): WorkflowComplianceSummary | null {
+  const reports = output?.complianceReports;
+  if (!Array.isArray(reports) || reports.length === 0) return null;
+  const verdicts = reports.map(report => (
+    report && typeof report === 'object' && !Array.isArray(report)
+      ? (report as Record<string, unknown>).verdict
+      : undefined
+  ));
+  const verdict = verdicts.includes('blocked') ? 'blocked'
+    : verdicts.includes('unknown') ? 'unknown'
+      : verdicts.includes('warning') ? 'warning' : 'passed';
+  const issueCount = reports.reduce((total, report) => {
+    if (!report || typeof report !== 'object' || Array.isArray(report)) return total;
+    const summary = (report as Record<string, unknown>).summary;
+    if (!summary || typeof summary !== 'object' || Array.isArray(summary)) return total;
+    const counts = summary as Record<string, unknown>;
+    return total + ['warning', 'blocked', 'unknown'].reduce((sum, key) => {
+      const count = counts[key];
+      return sum + (typeof count === 'number' && Number.isSafeInteger(count) && count >= 0 ? count : 0);
+    }, 0);
+  }, 0);
+  return { verdict, reportCount: reports.length, issueCount };
+}
+
 export const WorkflowLegacyNodeCard = React.memo(function WorkflowLegacyNodeCard({ node, isSelected, isHovered, execResult, isRunning, theme, canvasImages, llmModels, imageModels, onNodeFieldChange, onLlmOptimize, onCascadeRun, onExtractToSource, onGridSplit, onCompare, onSendToChat, onTriggerImageUpload, onImageFileDrop, promptPresets = [], promptTemplates = [], onSavePromptPreset, onDeletePromptPreset, upstreamImageUrl, onSelect, onHover, onDragStart, onPortMouseDown, onPortMouseUp, onDeselect, onPreviewImage, onResizeNode, onUpdateNodeSize, collapsedNodes, onToggleCollapse, onContextMenu, onDoubleClickAnnotation, layout = 'canvas', renderPortHandle }: WorkflowLegacyNodeCardProps) {
   const T = theme;
   const cat = getWorkflowRenderNodeCategory(node.type);
@@ -285,6 +315,9 @@ export const WorkflowLegacyNodeCard = React.memo(function WorkflowLegacyNodeCard
   const isInputImage = node.type === 'input-image';
   const isOutputImage = node.type === 'output-image';
   const isOutputImageGroup = node.type === 'output-image-group';
+  const complianceSummary = node.type === 'ai-skill'
+    ? readWorkflowComplianceSummary(execResult?.output)
+    : null;
 
   // 图片URL: 优先执行结果, 其次节点配置(input-image节点)
   const hasImageOutput = (execResult?.output?.imageUrl || node.config?.imageUrl) as string | undefined;
@@ -431,6 +464,26 @@ export const WorkflowLegacyNodeCard = React.memo(function WorkflowLegacyNodeCard
       {/* ===== 节点体内容 (非折叠时显示) ===== */}
       {!isCollapsed && !isCondition && (
         <div className="node-body">
+          {complianceSummary && (
+            <div
+              className="mb-2 border border-border/60 bg-muted/40 px-2 py-2"
+              data-workflow-compliance-summary
+              aria-label="平台合规报告摘要"
+            >
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[10px] font-semibold" style={{ color: T.nodeTitle }}>
+                  {complianceSummary.verdict === 'blocked' ? '不通过'
+                    : complianceSummary.verdict === 'warning' ? '需关注'
+                      : complianceSummary.verdict === 'unknown' ? '待确认' : '通过'}
+                </span>
+                <FileText size={12} style={{ color: T.textMuted }} aria-hidden="true" />
+              </div>
+              <div className="mt-1 flex items-center gap-2 text-[9px]" style={{ color: T.textMuted }}>
+                <span>{complianceSummary.reportCount} 份报告</span>
+                <span>{complianceSummary.issueCount} 项问题</span>
+              </div>
+            </div>
+          )}
           {/* input-text 节点: 文本编辑 + LLM优化 + 预设 */}
           {isInputText && (
             <div className="flex flex-col gap-1.5 relative" style={{ color: T.nodeTitle, fontSize: 12 }} onWheel={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>

@@ -14,6 +14,7 @@ import {
 import type { SkillDefinition } from '@/lib/skill-runtime/types';
 import type { TaskModelDescriptor } from '@/lib/task-core/model-capability-contract';
 import { loadSavedWorkflowSkillResult, loadWorkflowSkillCatalog } from '@/lib/skill-runtime/workflow-client';
+import { projectWorkflowSkillRun } from '@/lib/workflow-skill-execution';
 import { canonicalComplianceReportJson } from '@/lib/platform-compliance/report-schema';
 import { validReport } from '@/__tests__/helpers/platform-compliance-fixtures';
 
@@ -46,6 +47,72 @@ const skill: SkillDefinition = {
 };
 
 describe('workflow Skill node contract', () => {
+  it('projects compliance reports and document versions without image coercion', () => {
+    const report = validReport({
+      verdict: 'blocked',
+      checks: [
+        ...validReport().checks,
+        {
+          ruleId: 'claim-review', ruleVersion: 1, title: '声明审核', severity: 'blocking',
+          evaluator: 'vision', status: 'blocked', evidence: ['声明缺少证明'],
+          measuredValue: 'unsupported', requiredValue: 'supported', confidence: 0.9,
+          remediation: '补充证明材料',
+        },
+      ],
+      summary: { passed: 1, warning: 0, blocked: 1, unknown: 0 },
+      manualReviewRequired: true,
+    });
+    const output = projectWorkflowSkillRun({
+      runId: 'compliance-run', status: 'completed',
+      assetVersionIds: ['report-version'],
+      outputs: [{
+        stepId: 'audit:a', kind: 'json', schemaId: 'platform-compliance-report-v1',
+        content: JSON.stringify(report),
+      }],
+    }, [{
+      assetId: 'report-asset', assetVersionId: 'report-version',
+      url: '/api/skill-reports/report-version?format=json', kind: 'document',
+    }]);
+
+    expect(output).toMatchObject({
+      complianceReports: [expect.objectContaining({ schemaVersion: 1, verdict: 'blocked' })],
+      documentAssetVersionIds: ['report-version'],
+      assetVersionIds: ['report-version'],
+      assetReferences: [expect.objectContaining({ kind: 'document' })],
+      outputs: [expect.objectContaining({ schemaId: 'platform-compliance-report-v1' })],
+    });
+    expect(output.imageUrl).toBeUndefined();
+    expect(output.imageUrls).toBeUndefined();
+    expect(output.assetVersionId).toBeUndefined();
+  });
+
+  it('uses the trusted asset kind returned by /api/assets during report restoration', async () => {
+    const report = validReport();
+    const fetcher = async (url: string) => {
+      if (url.startsWith('/api/assets?')) return new Response(JSON.stringify({
+        assetId: 'report-asset', assetVersionId: 'report-version',
+        url: '/api/skill-reports/report-version?format=json', kind: 'document',
+      }), { status: 200 });
+      return new Response(JSON.stringify({ run: {
+        runId: 'run', projectId: 'project', surface: 'workflow', workspaceId: 'workflow:wf',
+        skillId: 'skill', skillVersion: 1, status: 'completed', assetVersionIds: ['report-version'],
+        outputs: [{ stepId: 'audit:a', kind: 'json', schemaId: 'platform-compliance-report-v1',
+          content: JSON.stringify(report) }],
+      } }), { status: 200 });
+    };
+
+    const restored = await loadSavedWorkflowSkillResult({
+      runId: 'run', projectId: 'project', workflowId: 'wf', skillId: 'skill', skillVersion: 1,
+      signal: new AbortController().signal, fetcher: fetcher as typeof fetch,
+    });
+
+    expect(restored.output).toMatchObject({
+      documentAssetVersionIds: ['report-version'],
+      complianceReports: [expect.objectContaining({ reportId: report.reportId })],
+    });
+    expect(restored.output.imageUrls).toBeUndefined();
+  });
+
   it('restores registered structured output through the workflow client', async () => {
     const report = validReport();
     const fetcher = async () => new Response(JSON.stringify({ run: {

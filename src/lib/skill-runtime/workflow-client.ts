@@ -6,6 +6,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
+const WORKFLOW_ASSET_KINDS = new Set(['image', 'video', 'three-d', 'document', 'dataset']);
+
 function isWorkflowSkill(value: unknown): value is SkillDefinition {
   return isRecord(value)
     && typeof value.id === 'string'
@@ -61,7 +63,14 @@ export async function loadSavedWorkflowSkillResult(input: {
       input.signal.throwIfAborted();
       if (!assetResponse.ok || !isRecord(asset) || asset.assetVersionId !== assetVersionId
         || typeof asset.url !== 'string' || !asset.url) throw new Error('Skill 成品版本恢复失败');
-      references.push({ assetVersionId, url: asset.url, ...(typeof asset.assetId === 'string' ? { assetId: asset.assetId } : {}) });
+      references.push({
+        assetVersionId,
+        url: asset.url,
+        ...(typeof asset.assetId === 'string' ? { assetId: asset.assetId } : {}),
+        ...(typeof asset.kind === 'string' && WORKFLOW_ASSET_KINDS.has(asset.kind)
+          ? { kind: asset.kind as WorkflowSkillAssetReference['kind'] }
+          : {}),
+      });
     }
   }
   input.signal.throwIfAborted();
