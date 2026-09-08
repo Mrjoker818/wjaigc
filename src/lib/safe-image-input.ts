@@ -15,6 +15,7 @@ const MIME_BY_FORMAT: Record<string, string> = {
   jpeg: 'image/jpeg',
   jpg: 'image/jpeg',
   png: 'image/png',
+  tiff: 'image/tiff',
   webp: 'image/webp',
 };
 
@@ -69,6 +70,15 @@ function detectImageMimeType(buffer: Buffer): string | null {
     && buffer.toString('ascii', 4, 8) === 'ftyp'
     && ['avif', 'avis'].includes(buffer.toString('ascii', 8, 12))
   ) return 'image/avif';
+  if (
+    buffer.length >= 4
+    && (
+      buffer.subarray(0, 4).equals(Buffer.from([0x49, 0x49, 0x2a, 0x00]))
+      || buffer.subarray(0, 4).equals(Buffer.from([0x4d, 0x4d, 0x00, 0x2a]))
+      || buffer.subarray(0, 4).equals(Buffer.from([0x49, 0x49, 0x2b, 0x00]))
+      || buffer.subarray(0, 4).equals(Buffer.from([0x4d, 0x4d, 0x00, 0x2b]))
+    )
+  ) return 'image/tiff';
   return null;
 }
 
@@ -98,7 +108,7 @@ export function decodeSafeImageInput(
   const value = input.trim();
   const maxBytes = options.maxBytes ?? DEFAULT_MAX_BYTES;
   const dataUrl = value.match(
-    /^data:(image\/(?:avif|gif|jpeg|png|webp));base64,([A-Za-z0-9+/=]+)$/i,
+    /^data:(image\/(?:avif|gif|jpeg|png|tiff|webp));base64,([A-Za-z0-9+/=]+)$/i,
   );
   if (dataUrl) {
     const declaredMime = dataUrl[1].toLowerCase();

@@ -3,6 +3,8 @@ import { loadSafeImageInput, safeSharp } from '@/lib/safe-image-input';
 const MAX_COMPLIANCE_BYTES = 25 * 1024 * 1024;
 const MAX_COMPLIANCE_PIXELS = 40_000_000;
 const BACKGROUND_SAMPLE_EDGE = 256;
+const BACKGROUND_SAMPLE_INSET_RATIOS = [0, 0.04, 0.08, 0.12] as const;
+const BACKGROUND_SAMPLES_PER_RING = 64;
 const WHITE_RGB_DISTANCE = 10;
 
 export interface ComplianceMediaFacts {
@@ -13,18 +15,43 @@ export interface ComplianceMediaFacts {
   pixelCount: number;
   longestEdge: number;
   hasAlpha: boolean;
+  hasTransparentPixels: boolean;
   isAnimated: boolean;
+  backgroundSampleRingCount: number;
   backgroundSampleCount: number;
   whiteBackgroundSampleCount: number;
   whiteBackgroundRatio: number;
 }
 
-function measureWhiteEdgeSamples(
+function ringCoordinate(
+  index: number,
+  left: number,
+  top: number,
+  right: number,
+  bottom: number,
+): readonly [number, number] {
+  const width = right - left + 1;
+  const height = bottom - top + 1;
+  if (height === 1) return [left + index, top];
+  if (width === 1) return [left, top + index];
+  if (index < width) return [left + index, top];
+  if (index < width + height - 2) return [right, top + index - width + 1];
+  if (index < width * 2 + height - 2) {
+    return [right - (index - width - height + 2), bottom];
+  }
+  return [left, bottom - (index - width * 2 - height + 3)];
+}
+
+function measureWhiteBackgroundSamples(
   pixels: Buffer,
   width: number,
   height: number,
   channels: number,
-): Pick<ComplianceMediaFacts, 'backgroundSampleCount' | 'whiteBackgroundSampleCount' | 'whiteBackgroundRatio'> {
+): Pick<ComplianceMediaFacts,
+  | 'backgroundSampleRingCount'
+  | 'backgroundSampleCount'
+  | 'whiteBackgroundSampleCount'
+  | 'whiteBackgroundRatio'> {
   let backgroundSampleCount = 0;
   let whiteBackgroundSampleCount = 0;
   const sample = (x: number, y: number): void => {
@@ -40,16 +67,30 @@ function measureWhiteEdgeSamples(
     if (alpha === 255 && distance <= WHITE_RGB_DISTANCE) whiteBackgroundSampleCount += 1;
   };
 
-  for (let x = 0; x < width; x += 1) {
-    sample(x, 0);
-    if (height > 1) sample(x, height - 1);
-  }
-  for (let y = 1; y < height - 1; y += 1) {
-    sample(0, y);
-    if (width > 1) sample(width - 1, y);
+  const maximumInset = Math.floor((Math.min(width, height) - 1) / 2);
+  const insets = [...new Set(BACKGROUND_SAMPLE_INSET_RATIOS.map(
+    ratio => Math.min(maximumInset, Math.floor((Math.min(width, height) - 1) * ratio)),
+  ))];
+  for (const inset of insets) {
+    const left = inset;
+    const top = inset;
+    const right = width - inset - 1;
+    const bottom = height - inset - 1;
+    const ringLength = right === left
+      ? bottom - top + 1
+      : bottom === top
+        ? right - left + 1
+        : 2 * (right - left + 1) + 2 * (bottom - top - 1);
+    const sampleCount = Math.min(BACKGROUND_SAMPLES_PER_RING, ringLength);
+    for (let index = 0; index < sampleCount; index += 1) {
+      const ringIndex = Math.floor(index * ringLength / sampleCount);
+      const [x, y] = ringCoordinate(ringIndex, left, top, right, bottom);
+      sample(x, y);
+    }
   }
 
   return {
+    backgroundSampleRingCount: insets.length,
     backgroundSampleCount,
     whiteBackgroundSampleCount,
     whiteBackgroundRatio: backgroundSampleCount === 0
@@ -75,13 +116,16 @@ export async function auditComplianceMedia(input: {
   const metadata = await image.metadata();
   input.signal.throwIfAborted();
   if (!metadata.width || !metadata.height) throw new Error('COMPLIANCE_IMAGE_DIMENSIONS_INVALID');
-  const sampled = await image.clone()
-    .resize(BACKGROUND_SAMPLE_EDGE, BACKGROUND_SAMPLE_EDGE, { fit: 'inside' })
-    .ensureAlpha()
-    .raw()
-    .toBuffer({ resolveWithObject: true });
+  const [sampled, imageStats] = await Promise.all([
+    image.clone()
+      .resize(BACKGROUND_SAMPLE_EDGE, BACKGROUND_SAMPLE_EDGE, { fit: 'inside' })
+      .ensureAlpha()
+      .raw()
+      .toBuffer({ resolveWithObject: true }),
+    image.clone().stats(),
+  ]);
   input.signal.throwIfAborted();
-  const background = measureWhiteEdgeSamples(
+  const background = measureWhiteBackgroundSamples(
     sampled.data,
     sampled.info.width,
     sampled.info.height,
@@ -96,6 +140,7 @@ export async function auditComplianceMedia(input: {
     pixelCount: metadata.width * metadata.height,
     longestEdge: Math.max(metadata.width, metadata.height),
     hasAlpha: metadata.hasAlpha === true,
+    hasTransparentPixels: !imageStats.isOpaque,
     isAnimated: Number(metadata.pages ?? 1) > 1,
     ...background,
   });

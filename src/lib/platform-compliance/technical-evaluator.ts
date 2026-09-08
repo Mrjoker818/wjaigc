@@ -80,12 +80,14 @@ function evaluateWhiteBackground(
   rule: PlatformComplianceRule,
 ): ComplianceCheckResult {
   const requiredRatio = 0.99;
-  const passed = !facts.hasAlpha && facts.whiteBackgroundRatio >= requiredRatio;
+  const passed = !facts.hasTransparentPixels && facts.whiteBackgroundRatio >= requiredRatio;
   return result(
     rule,
     passed,
     [
       `hasAlpha=${facts.hasAlpha}`,
+      `hasTransparentPixels=${facts.hasTransparentPixels}`,
+      `backgroundSampleRings=${facts.backgroundSampleRingCount}`,
       `backgroundSamples=${facts.backgroundSampleCount}`,
       `whiteBackgroundSamples=${facts.whiteBackgroundSampleCount}`,
       `whiteBackgroundRatio=${facts.whiteBackgroundRatio}`,

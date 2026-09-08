@@ -19,6 +19,10 @@ function fixture(name: string, mimeType = 'image/png'): string {
   return `data:${mimeType};base64,${fixtureBuffer(name).toString('base64')}`;
 }
 
+function dataUrl(buffer: Buffer, mimeType = 'image/png'): string {
+  return `data:${mimeType};base64,${buffer.toString('base64')}`;
+}
+
 function amazonMainRules() {
   return resolveComplianceRuleSet({
     platform: 'Amazon', region: 'US', assetType: 'main', productCategory: '',
@@ -35,10 +39,12 @@ describe('platform compliance deterministic media audit', () => {
     expect(facts).toMatchObject({
       mimeType: 'image/png', byteLength: source.byteLength,
       width: 1600, height: 1600, pixelCount: 2_560_000,
-      hasAlpha: false, isAnimated: false,
-      backgroundSampleCount: 1020, whiteBackgroundSampleCount: 1020,
+      hasAlpha: false, hasTransparentPixels: false, isAnimated: false,
+      backgroundSampleRingCount: 4,
       whiteBackgroundRatio: 1,
     });
+    expect(facts.backgroundSampleCount).toBeLessThanOrEqual(256);
+    expect(facts.whiteBackgroundSampleCount).toBe(facts.backgroundSampleCount);
     const checks = evaluateTechnicalRules(facts, amazonMainRules());
     expect(checks.find(check => check.ruleId === 'amazon-supported-format')).toMatchObject({
       status: 'passed', evidence: expect.arrayContaining(['mimeType=image/png']),
@@ -48,11 +54,16 @@ describe('platform compliance deterministic media audit', () => {
     });
     expect(checks.find(check => check.ruleId === 'amazon-main-white-background')).toMatchObject({
       status: 'passed',
-      evidence: expect.arrayContaining(['backgroundSamples=1020', 'whiteBackgroundRatio=1']),
+      evidence: expect.arrayContaining([
+        'hasTransparentPixels=false',
+        'backgroundSampleRings=4',
+        `backgroundSamples=${facts.backgroundSampleCount}`,
+        'whiteBackgroundRatio=1',
+      ]),
     });
   });
 
-  it('blocks an Amazon main image with an alpha channel', async () => {
+  it('blocks an Amazon main image with transparent pixels', async () => {
     const facts = await auditComplianceMedia({
       imageInput: fixture('amazon-main-alpha.png'), signal: new AbortController().signal,
     });
@@ -60,8 +71,80 @@ describe('platform compliance deterministic media audit', () => {
       .find(check => check.ruleId === 'amazon-main-white-background');
 
     expect(facts.hasAlpha).toBe(true);
+    expect(facts.hasTransparentPixels).toBe(true);
     expect(background).toMatchObject({
-      status: 'blocked', evidence: expect.arrayContaining(['hasAlpha=true']),
+      status: 'blocked', evidence: expect.arrayContaining(['hasTransparentPixels=true']),
+    });
+  });
+
+  it('accepts a fully opaque RGBA PNG and reports channel and pixel alpha separately', async () => {
+    const rgba = await sharp({
+      create: {
+        width: 1600, height: 1600, channels: 4,
+        background: { r: 255, g: 255, b: 255, alpha: 1 },
+      },
+    }).png().toBuffer();
+    const facts = await auditComplianceMedia({
+      imageInput: dataUrl(rgba), signal: new AbortController().signal,
+    });
+    const background = evaluateTechnicalRules(facts, amazonMainRules())
+      .find(check => check.ruleId === 'amazon-main-white-background');
+
+    expect(facts).toMatchObject({ hasAlpha: true, hasTransparentPixels: false });
+    expect(background).toMatchObject({
+      status: 'passed',
+      evidence: expect.arrayContaining(['hasAlpha=true', 'hasTransparentPixels=false']),
+    });
+  });
+
+  it('audits a real TIFF through the shared safe image loader', async () => {
+    const tiff = await sharp({
+      create: { width: 1600, height: 1600, channels: 3, background: '#ffffff' },
+    }).tiff().toBuffer();
+    const facts = await auditComplianceMedia({
+      imageInput: dataUrl(tiff, 'image/tiff'), signal: new AbortController().signal,
+    });
+    const format = evaluateTechnicalRules(facts, amazonMainRules())
+      .find(check => check.ruleId === 'amazon-supported-format');
+
+    expect(facts.mimeType).toBe('image/tiff');
+    expect(format).toMatchObject({ status: 'passed', measuredValue: 'TIFF' });
+  });
+
+  it('does not mistake a white outer frame around a dark inset ring for a white background', async () => {
+    const framed = await sharp({
+      create: { width: 256, height: 256, channels: 3, background: '#ffffff' },
+    }).composite([{
+      input: await sharp({
+        create: { width: 216, height: 216, channels: 3, background: '#111111' },
+      }).png().toBuffer(),
+      left: 20,
+      top: 20,
+    }]).png().toBuffer();
+    const pixels = await sharp(framed).raw().toBuffer({ resolveWithObject: true });
+    const rgbAt = (x: number, y: number) => {
+      const offset = (y * pixels.info.width + x) * pixels.info.channels;
+      return [...pixels.data.subarray(offset, offset + 3)];
+    };
+    expect(rgbAt(0, 0)).toEqual([255, 255, 255]);
+    expect(rgbAt(24, 24)).toEqual([17, 17, 17]);
+
+    const facts = await auditComplianceMedia({
+      imageInput: dataUrl(framed), signal: new AbortController().signal,
+    });
+    const background = evaluateTechnicalRules(facts, amazonMainRules())
+      .find(check => check.ruleId === 'amazon-main-white-background');
+
+    expect(facts.backgroundSampleRingCount).toBe(4);
+    expect(facts.backgroundSampleCount).toBeLessThanOrEqual(256);
+    expect(facts.whiteBackgroundRatio).toBeLessThan(0.99);
+    expect(background).toMatchObject({
+      status: 'blocked',
+      evidence: expect.arrayContaining([
+        'backgroundSampleRings=4',
+        `backgroundSamples=${facts.backgroundSampleCount}`,
+        `whiteBackgroundSamples=${facts.whiteBackgroundSampleCount}`,
+      ]),
     });
   });
 
@@ -78,7 +161,7 @@ describe('platform compliance deterministic media audit', () => {
     expect(background).toMatchObject({
       status: 'blocked',
       evidence: expect.arrayContaining([
-        'backgroundSamples=1020',
+        `backgroundSamples=${facts.backgroundSampleCount}`,
         `whiteBackgroundRatio=${facts.whiteBackgroundRatio}`,
       ]),
     });

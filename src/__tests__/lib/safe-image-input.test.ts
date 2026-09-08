@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
+import sharp from 'sharp';
 
 import {
   assertSafePixelDimensions,
   decodeSafeImageInput,
+  loadSafeImageInput,
   normalizeTrustedManagedMediaInput,
   resolveManagedMediaPath,
 } from '@/lib/safe-image-input';
@@ -13,6 +15,23 @@ const PNG_1X1 = Buffer.from(
 );
 
 describe('safe edit image inputs', () => {
+  it('recognizes and safely decodes a real TIFF through the shared loader', async () => {
+    const tiff = await sharp({
+      create: { width: 32, height: 24, channels: 3, background: '#ffffff' },
+    }).tiff().toBuffer();
+
+    const decoded = await loadSafeImageInput(
+      `data:image/tiff;base64,${tiff.toString('base64')}`,
+      { maxBytes: 1024 * 1024, maxPixels: 10_000 },
+    );
+
+    expect(decoded.mimeType).toBe('image/tiff');
+    expect(decoded.buffer.equals(tiff)).toBe(true);
+    await expect(sharp(decoded.buffer).metadata()).resolves.toMatchObject({
+      format: 'tiff', width: 32, height: 24,
+    });
+  });
+
   it('accepts a valid image data URL and verifies its real format', () => {
     const decoded = decodeSafeImageInput(
       `data:image/png;base64,${PNG_1X1.toString('base64')}`,
