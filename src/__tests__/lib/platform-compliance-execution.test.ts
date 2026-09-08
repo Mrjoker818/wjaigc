@@ -9,11 +9,15 @@ const mocks = vi.hoisted(() => ({
   fetchWithV1Retry: vi.fn(),
   getApiProviders: vi.fn(),
   persistComplianceReportAsset: vi.fn(),
+  appendAdoptedAgentEvent: vi.fn(),
 }));
 
 vi.mock('server-only', () => ({}));
 vi.mock('@/lib/api-helpers', () => ({ fetchWithV1Retry: mocks.fetchWithV1Retry }));
 vi.mock('@/lib/server-api-config', () => ({ getApiProviders: mocks.getApiProviders }));
+vi.mock('@/lib/agent-runtime/event-storage', () => ({
+  appendAdoptedAgentEvent: mocks.appendAdoptedAgentEvent,
+}));
 vi.mock('@/lib/platform-compliance/report-asset', () => ({
   persistComplianceReportAsset: mocks.persistComplianceReportAsset,
   complianceReportFromAssetVersion: (version: { metadata?: { reportContent?: string } }) => (
@@ -166,6 +170,7 @@ describe('platform compliance report execution', () => {
         metadata: { schemaId: 'platform-compliance-report-v1', reportContent },
       };
     });
+    mocks.appendAdoptedAgentEvent.mockResolvedValue(undefined);
     mocks.getApiProviders.mockResolvedValue([{
       id: 'frozen-vision', name: 'Frozen Vision', baseUrl: 'https://vision.example/v1',
       apiKey: 'test-key', isEnabled: true, type: 'vlm', createdAt: 1, updatedAt: 1,
@@ -870,5 +875,43 @@ describe('platform compliance report execution', () => {
       }),
     }));
     expect(mocks.persistComplianceReportAsset).toHaveBeenCalledTimes(1);
+  });
+
+  it('publishes the partial report asset event before its progress output', async () => {
+    mocks.getApiProviders.mockResolvedValue([]);
+    const dependencies = durableDependencies();
+    const request = complianceRequest();
+    const registry = createProductionSkillStepRegistry({
+      actor: { id: 'user-1', name: 'User', role: 'user', status: 'active', productType: 'canvas', createdAt: 1, updatedAt: 1 },
+      request, mediaByVersionId: { 'asset-version-a': imageDataUrl },
+    });
+
+    await expect(executeDurableAgentDownstreamOperation({
+      actorUserId: 'user-1', projectId: 'project-1', runId: 'run-1',
+      toolId: 'compliance_audit', stepId: 'audit:a', requestDigest: 'request-digest',
+      executionFence: { runId: 'run-1', leaseOwner: 'lease-1', generation: 1 },
+    }, operation => registry.stepAdapters.compliance_audit(
+      complianceStepInput(request, operation, new AbortController().signal),
+    ), dependencies)).rejects.toMatchObject({ code: 'COMPLIANCE_AUDIT_VISION_FAILED' });
+
+    const assetEvent = mocks.appendAdoptedAgentEvent.mock.calls.find(call => (
+      call[0]?.type === 'asset.created'
+    ))?.[0];
+    const progressEvent = mocks.appendAdoptedAgentEvent.mock.calls.find(call => (
+      call[0]?.type === 'tool.progress' && call[0]?.payload?.phase === 'vision-error'
+    ))?.[0];
+    expect(assetEvent).toMatchObject({
+      actorUserId: 'user-1', projectId: 'project-1', runId: 'run-1', workspace: 'canvas',
+      type: 'asset.created',
+      payload: { stepId: 'audit:a', assetVersionId: 'report-version-1' },
+    });
+    expect(progressEvent).toMatchObject({
+      type: 'tool.progress',
+      payload: {
+        stepId: 'audit:a', phase: 'vision-error', assetVersionId: 'report-version-1',
+      },
+    });
+    expect(mocks.appendAdoptedAgentEvent.mock.invocationCallOrder[0])
+      .toBeLessThan(mocks.appendAdoptedAgentEvent.mock.invocationCallOrder[1]);
   });
 });
