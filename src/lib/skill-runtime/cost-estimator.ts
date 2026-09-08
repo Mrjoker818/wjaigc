@@ -42,6 +42,7 @@ export function toolCostType(toolId: string): CreditOperation {
     case 'img2img': return 'image_generate';
     case 'edit_image': return 'image_edit';
     case 'analyze_image': return 'chat';
+    case 'compliance_audit': return 'chat';
     case 'adjust_color': return 'image_edit';
     case 'agent_edit': return 'agent_edit';
     default:

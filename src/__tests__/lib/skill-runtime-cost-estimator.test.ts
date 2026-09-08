@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { estimateSkillRunCost } from '@/lib/skill-runtime/cost-estimator';
+import { estimateSkillRunCost, toolCostType } from '@/lib/skill-runtime/cost-estimator';
 import type { SkillDefinition } from '@/lib/skill-runtime/types';
 
 const canvasSkill: SkillDefinition = {
@@ -20,6 +20,37 @@ const canvasSkill: SkillDefinition = {
 };
 
 describe('Skill runtime cost estimator', () => {
+  it('prices each compliance audit image as one frozen vision chat call', async () => {
+    expect(toolCostType('compliance_audit')).toBe('chat');
+    const calculateCreditCost = vi.fn(async () => 3);
+    const complianceSkill: SkillDefinition = {
+      ...canvasSkill,
+      steps: [{
+        id: 'orchestrator', label: 'Plan', toolId: 'chat', execution: 'sequential',
+        promptTemplate: 'plan', modelRole: 'orchestrator', qualityGateIds: [],
+      }, {
+        id: 'audit:a', label: 'Audit 1', toolId: 'compliance_audit', execution: 'parallel',
+        parallelGroup: 'audit', promptTemplate: 'audit', modelRole: 'vision', qualityGateIds: [],
+      }, {
+        id: 'audit:b', label: 'Audit 2', toolId: 'compliance_audit', execution: 'parallel',
+        parallelGroup: 'audit', promptTemplate: 'audit', modelRole: 'vision', qualityGateIds: [],
+      }],
+    };
+
+    const estimate = await estimateSkillRunCost(complianceSkill, {
+      orchestrator: { providerId: 'chat-provider', modelId: 'chat-model' },
+      vision: { providerId: 'vision-provider', modelId: 'vision-model' },
+    }, { calculateCreditCost });
+
+    expect(estimate).toMatchObject({ minimum: 9, maximum: 9 });
+    expect(calculateCreditCost).toHaveBeenNthCalledWith(
+      2, 'chat', 'vision-model', { providerId: 'vision-provider' },
+    );
+    expect(calculateCreditCost).toHaveBeenNthCalledWith(
+      3, 'chat', 'vision-model', { providerId: 'vision-provider' },
+    );
+  });
+
   it('prices an orchestrator-role generate_image step as chat and a real image step as image_generate', async () => {
     const calculateCreditCost = vi.fn(async () => 2);
     const bindings = {

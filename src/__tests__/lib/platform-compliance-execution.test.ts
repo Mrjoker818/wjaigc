@@ -1,0 +1,216 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+const mocks = vi.hoisted(() => ({
+  fetchWithV1Retry: vi.fn(),
+  getApiProviders: vi.fn(),
+}));
+
+vi.mock('server-only', () => ({}));
+vi.mock('@/lib/api-helpers', () => ({ fetchWithV1Retry: mocks.fetchWithV1Retry }));
+vi.mock('@/lib/server-api-config', () => ({ getApiProviders: mocks.getApiProviders }));
+
+import { auditComplianceMedia } from '@/lib/platform-compliance/media-audit';
+import { buildComplianceReport } from '@/lib/platform-compliance/report-builder';
+import { resolveComplianceRuleSet } from '@/lib/platform-compliance/rules';
+import { evaluateTechnicalRules } from '@/lib/platform-compliance/technical-evaluator';
+import {
+  createProductionSkillStepRegistry,
+  type PersistCompliancePartialReportInput,
+} from '@/lib/skill-runtime/step-registry';
+
+const image = readFileSync(resolve(
+  process.cwd(), 'src/__tests__/fixtures/platform-compliance/amazon-main-pass.png',
+));
+const imageDataUrl = `data:image/png;base64,${image.toString('base64')}`;
+const ruleSet = resolveComplianceRuleSet({
+  platform: 'Amazon', region: 'US', assetType: 'main', productCategory: '',
+});
+
+function successfulVisionChecks() {
+  return ruleSet.rules.filter(rule => rule.evaluator === 'vision').map(rule => ({
+    ruleId: rule.id, status: 'passed', evidence: ['model-observation=clear'],
+    measuredValue: 'compliant', confidence: 0.9, remediation: null,
+  }));
+}
+
+describe('platform compliance report execution', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.getApiProviders.mockResolvedValue([{
+      id: 'frozen-vision', name: 'Frozen Vision', baseUrl: 'https://vision.example/v1',
+      apiKey: 'test-key', isEnabled: true, type: 'vlm', createdAt: 1, updatedAt: 1,
+    }, {
+      id: 'fallback-vision', name: 'Fallback Vision', baseUrl: 'https://fallback.example/v1',
+      apiKey: 'fallback-key', isEnabled: true, type: 'vlm', createdAt: 1, updatedAt: 1,
+    }]);
+  });
+
+  it('builds a canonical partial report with technical checks and unknown vision checks', async () => {
+    const facts = await auditComplianceMedia({
+      imageInput: imageDataUrl, signal: new AbortController().signal,
+    });
+    const technicalChecks = evaluateTechnicalRules(facts, ruleSet.rules);
+    const report = buildComplianceReport({
+      reportId: 'report-partial', runId: 'run-1', generatedAt: '2026-09-08T00:00:00.000Z',
+      sourceVersionId: 'asset-version-1', sourceDigest: 'a'.repeat(64), ruleSet,
+      technicalChecks,
+      visionModel: { providerId: 'frozen-vision', modelId: 'vision-model' },
+      visionError: {
+        code: 'COMPLIANCE_VISION_RATE_LIMITED', message: 'Vision provider rate limited the request',
+        retryable: true, providerId: 'frozen-vision', modelId: 'vision-model',
+        requestId: 'provider-request-1',
+      },
+    });
+
+    expect(report.checks.filter(check => check.evaluator !== 'vision')).toEqual(technicalChecks);
+    expect(report.checks.filter(check => check.evaluator === 'vision'))
+      .toHaveLength(ruleSet.rules.filter(rule => rule.evaluator === 'vision').length);
+    expect(report.checks.filter(check => check.evaluator === 'vision')
+      .every(check => check.status === 'unknown')).toBe(true);
+    expect(report).toMatchObject({
+      verdict: 'unknown', manualReviewRequired: true,
+      visionModel: { providerId: 'frozen-vision', modelId: 'vision-model' },
+      technicalErrors: [expect.objectContaining({
+        providerId: 'frozen-vision', modelId: 'vision-model', requestId: 'provider-request-1',
+        retryable: true,
+      })],
+    });
+  });
+
+  it('uses compiledFanOut itemIndex and authorized media before recording the partial report', async () => {
+    mocks.fetchWithV1Retry.mockResolvedValue(new Response(JSON.stringify({
+      choices: [{ message: { content: JSON.stringify({ checks: successfulVisionChecks() }) } }],
+    }), { status: 200, headers: { 'x-request-id': 'provider-request-2' } }));
+    const persistCompliancePartialReport = vi.fn<(
+      input: PersistCompliancePartialReportInput,
+    ) => Promise<void>>(async () => undefined);
+    const request = {
+      skillId: 'preset-platform-compliance-audit', skillVersion: 1, surface: 'canvas' as const,
+      projectId: 'project-1', workspaceId: 'canvas-1',
+      inputValues: {
+        sourceImages: ['asset-version-a', 'asset-version-b'],
+        platform: 'Amazon', region: 'US', assetType: 'main', productCategory: '',
+      },
+      sourceVersionIds: ['asset-version-a', 'asset-version-b'],
+      modelBindings: { vision: { providerId: 'frozen-vision', modelId: 'vision-model' } },
+      idempotencyKey: 'run-key',
+    };
+    const operation = {
+      idempotencyKey: 'provider-idempotency', operationKey: 'operation-1', recovery: false,
+      executionFence: { runId: 'run-1', leaseOwner: 'lease-1', generation: 1 },
+      beginSubmission: vi.fn(async () => undefined),
+      recordAccepted: vi.fn(async () => undefined),
+      recordLocalAccepted: vi.fn(async () => undefined),
+      executeOperation: vi.fn(),
+    };
+    const registry = createProductionSkillStepRegistry({
+      actor: { id: 'user-1', name: 'User', role: 'user', status: 'active', productType: 'canvas', createdAt: 1, updatedAt: 1 },
+      request,
+      mediaByVersionId: {
+        'asset-version-a': 'data:image/png;base64,client-must-not-win',
+        'asset-version-b': imageDataUrl,
+      },
+      persistCompliancePartialReport,
+    });
+
+    const result = await registry.stepAdapters.compliance_audit({
+      actorUserId: 'user-1', projectId: 'project-1', runId: 'run-1',
+      definition: {
+        id: request.skillId, version: 1, name: 'Compliance', category: 'commerce', description: '',
+        systemPrompt: '', allowedSurfaces: ['canvas'], inputs: [], steps: [],
+        enabled: true, builtIn: true, createdAt: 1, updatedAt: 1, usageCount: 0,
+      },
+      step: {
+        id: 'audit:b', label: 'Audit 2', toolId: 'compliance_audit', execution: 'parallel',
+        parallelGroup: 'audit', promptTemplate: '', modelRole: 'vision', qualityGateIds: [],
+        compiledFanOut: { inputKey: 'sourceImages', itemIndex: 1, itemDigest: 'bbbbbbbbbbbbbbbb' },
+      },
+      inputValues: request.inputValues,
+      modelBinding: { providerId: 'frozen-vision', modelId: 'vision-model' },
+      requestDigest: 'request-digest', operation,
+      signal: new AbortController().signal,
+    });
+
+    expect(persistCompliancePartialReport).toHaveBeenCalledTimes(1);
+    expect(persistCompliancePartialReport.mock.calls[0]?.[0]).toMatchObject({
+      sourceVersionId: 'asset-version-b', phase: 'technical',
+    });
+    expect(operation.beginSubmission).toHaveBeenCalledTimes(1);
+    expect(persistCompliancePartialReport.mock.invocationCallOrder[0])
+      .toBeLessThan(operation.beginSubmission.mock.invocationCallOrder[0]);
+    expect(mocks.fetchWithV1Retry).toHaveBeenCalledTimes(1);
+    expect(mocks.fetchWithV1Retry.mock.calls[0]?.[0]).toBe('https://vision.example/v1');
+    expect(String(mocks.fetchWithV1Retry.mock.calls[0]?.[2]?.body)).toContain(imageDataUrl);
+    expect(String(mocks.fetchWithV1Retry.mock.calls[0]?.[2]?.body)).not.toContain('client-must-not-win');
+    expect(result.structured).toMatchObject({ schemaId: 'platform-compliance-report-v1' });
+  });
+
+  it('keeps the partial report and exact retryable identity when vision fails', async () => {
+    mocks.fetchWithV1Retry.mockResolvedValue(new Response('{}', {
+      status: 429, headers: { 'x-request-id': 'rate-request-1' },
+    }));
+    const persisted = vi.fn<(
+      input: PersistCompliancePartialReportInput,
+    ) => Promise<void>>(async () => undefined);
+    const request = {
+      skillId: 'preset-platform-compliance-audit', skillVersion: 1, surface: 'canvas' as const,
+      projectId: 'project-1', workspaceId: 'canvas-1',
+      inputValues: {
+        sourceImages: ['asset-version-a'],
+        platform: 'Amazon', region: 'US', assetType: 'main', productCategory: '',
+      },
+      sourceVersionIds: ['asset-version-a'], modelBindings: {}, idempotencyKey: 'run-key',
+    };
+    const registry = createProductionSkillStepRegistry({
+      actor: { id: 'user-1', name: 'User', role: 'user', status: 'active', productType: 'canvas', createdAt: 1, updatedAt: 1 },
+      request, mediaByVersionId: { 'asset-version-a': imageDataUrl },
+      persistCompliancePartialReport: persisted,
+    });
+
+    let error: unknown;
+    try {
+      await registry.stepAdapters.compliance_audit({
+        actorUserId: 'user-1', projectId: 'project-1', runId: 'run-1',
+        definition: {
+          id: request.skillId, version: 1, name: 'Compliance', category: 'commerce', description: '',
+          systemPrompt: '', allowedSurfaces: ['canvas'], inputs: [], steps: [],
+          enabled: true, builtIn: true, createdAt: 1, updatedAt: 1, usageCount: 0,
+        },
+        step: {
+          id: 'audit:a', label: 'Audit 1', toolId: 'compliance_audit', execution: 'parallel',
+          parallelGroup: 'audit', promptTemplate: '', modelRole: 'vision', qualityGateIds: [],
+          compiledFanOut: { inputKey: 'sourceImages', itemIndex: 0, itemDigest: 'aaaaaaaaaaaaaaaa' },
+        },
+        inputValues: request.inputValues,
+        modelBinding: { providerId: 'frozen-vision', modelId: 'vision-model' },
+        requestDigest: 'request-digest',
+        operation: {
+          idempotencyKey: 'provider-idempotency', operationKey: 'operation-1', recovery: false,
+          executionFence: { runId: 'run-1', leaseOwner: 'lease-1', generation: 1 },
+          beginSubmission: vi.fn(async () => undefined), recordAccepted: vi.fn(async () => undefined),
+          recordLocalAccepted: vi.fn(async () => undefined), executeOperation: vi.fn(),
+        },
+        signal: new AbortController().signal,
+      });
+    } catch (caught) {
+      error = caught;
+    }
+
+    expect(error).toMatchObject({
+      code: 'COMPLIANCE_AUDIT_VISION_FAILED', retryable: true,
+      providerId: 'frozen-vision', modelId: 'vision-model', requestId: 'rate-request-1',
+      partialReport: expect.objectContaining({
+        technicalErrors: [expect.objectContaining({ retryable: true })],
+      }),
+    });
+    expect(persisted).toHaveBeenCalledTimes(2);
+    expect(persisted.mock.calls[1]?.[0]).toMatchObject({ phase: 'vision-error' });
+    const failedReport = persisted.mock.calls[1]?.[0].report;
+    expect(failedReport.checks.filter((check: { evaluator: string }) => check.evaluator === 'vision')
+      .every((check: { status: string }) => check.status === 'unknown')).toBe(true);
+    expect(mocks.fetchWithV1Retry).toHaveBeenCalledTimes(1);
+  });
+});

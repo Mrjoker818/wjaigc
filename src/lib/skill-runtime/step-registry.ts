@@ -1,5 +1,7 @@
 import 'server-only';
 
+import { createHash } from 'node:crypto';
+
 import { fetchWithV1Retry } from '@/lib/api-helpers';
 import {
   AgentDownstreamProviderRejectedError,
@@ -9,10 +11,26 @@ import {
 import { getCloudTaskForUser, updateCloudTask, type CloudTask } from '@/lib/cloud-task-storage';
 import { executeAdmittedToolCall, executeToolCall, type AdmittedToolExecution } from '@/lib/chat-tools';
 import { getApiProviders } from '@/lib/server-api-config';
+import { appendAdoptedAgentEvent } from '@/lib/agent-runtime/event-storage';
 import type { User } from '@/lib/user-types';
 import { parseWorkspaceSourceTrace } from '@/lib/asset-core/source-trace';
 import { createPostgresAssetStorage } from '@/lib/asset-core/storage';
 import { enrichCompletedImageResult } from '@/lib/asset-core/image-result-metadata';
+import { auditComplianceMedia } from '@/lib/platform-compliance/media-audit';
+import { buildComplianceReport } from '@/lib/platform-compliance/report-builder';
+import { canonicalComplianceReportJson } from '@/lib/platform-compliance/report-schema';
+import { resolveComplianceRuleSet } from '@/lib/platform-compliance/rules';
+import { evaluateTechnicalRules } from '@/lib/platform-compliance/technical-evaluator';
+import type {
+  ComplianceAssetType,
+  CompliancePlatform,
+  PlatformComplianceReportV1,
+  PlatformComplianceTechnicalErrorV1,
+} from '@/lib/platform-compliance/types';
+import {
+  ComplianceVisionError,
+  invokeComplianceVision,
+} from '@/lib/platform-compliance/vision-client';
 import { buildSkillStepMessages, buildSkillStepPrompt } from './execution-context';
 import type { SkillRunRequest } from './run-request';
 import type { ExecuteSkillStepInput } from './executor';
@@ -24,6 +42,65 @@ type ResolveSkillMediaMetadata = (input: {
   projectId: string;
   assetVersionIds: readonly string[];
 }) => Promise<SkillStepResult['media']>;
+
+export interface PersistCompliancePartialReportInput {
+  actorUserId: string;
+  projectId: string;
+  runId: string;
+  stepId: string;
+  sourceVersionId: string;
+  phase: 'technical' | 'vision-error';
+  report: PlatformComplianceReportV1;
+  executionFence: NonNullable<ExecuteSkillStepInput['operation']['executionFence']>;
+  workspace: 'canvas' | 'workflow';
+}
+
+type PersistCompliancePartialReport = (
+  input: PersistCompliancePartialReportInput,
+) => Promise<void>;
+
+class ComplianceAuditVisionFailedError extends Error {
+  readonly code = 'COMPLIANCE_AUDIT_VISION_FAILED';
+
+  constructor(
+    readonly partialReport: PlatformComplianceReportV1,
+    readonly providerId: string,
+    readonly modelId: string,
+    readonly requestId: string,
+    readonly retryable: boolean,
+    readonly providerStatus?: number,
+    options?: ErrorOptions,
+  ) {
+    super('The frozen compliance vision check failed', options);
+    this.name = 'ComplianceAuditVisionFailedError';
+  }
+}
+
+async function persistCompliancePartialReport(
+  input: PersistCompliancePartialReportInput,
+): Promise<void> {
+  await appendAdoptedAgentEvent({
+    actorUserId: input.actorUserId,
+    projectId: input.projectId,
+    runId: input.runId,
+    workspace: input.workspace,
+    eventId: `skill:${input.runId}:step:${input.stepId}:compliance:${input.phase}:generation:${input.executionFence.generation}`,
+    type: 'tool.progress',
+    payload: {
+      toolId: 'compliance_audit',
+      stepId: input.stepId,
+      phase: input.phase,
+      generation: input.executionFence.generation,
+      outputs: [{
+        stepId: input.stepId,
+        kind: 'json',
+        schemaId: 'platform-compliance-report-v1',
+        content: canonicalComplianceReportJson(input.report),
+      }],
+    },
+    executionFence: input.executionFence,
+  });
+}
 
 const resolveSkillMediaMetadata: ResolveSkillMediaMetadata = async input => {
   const storage = createPostgresAssetStorage();
@@ -264,6 +341,7 @@ export function createProductionSkillStepRegistry(input: {
   request: SkillRunRequest;
   mediaByVersionId?: Readonly<Record<string, string>>;
   resolveMediaMetadata?: ResolveSkillMediaMetadata;
+  persistCompliancePartialReport?: PersistCompliancePartialReport;
 }): {
   stepAdapters: Readonly<Record<string, SkillStepAdapter>>;
   stepRecoveries: Readonly<Record<string, SkillStepRecoveryFactory>>;
@@ -305,8 +383,182 @@ export function createProductionSkillStepRegistry(input: {
       input.resolveMediaMetadata || resolveSkillMediaMetadata,
     );
   };
+
+  const complianceAudit: SkillStepAdapter = async step => {
+    const fanOut = step.step.compiledFanOut;
+    const sourceValues = fanOut ? step.inputValues[fanOut.inputKey] : undefined;
+    const sourceVersionId = Array.isArray(sourceValues) ? sourceValues[fanOut!.itemIndex] : undefined;
+    if (
+      !fanOut
+      || typeof sourceVersionId !== 'string'
+      || !sourceVersionId
+      || !input.request.sourceVersionIds.includes(sourceVersionId)
+    ) {
+      throw imageAdmissionError(
+        'Skill compliance audit source is not an authorized compiled fan-out item',
+        'AGENT_CONTEXT_NOT_FOUND',
+      );
+    }
+    const imageInput = input.mediaByVersionId?.[sourceVersionId];
+    if (typeof imageInput !== 'string' || !imageInput.trim()) {
+      throw imageAdmissionError(
+        'Authorized Skill compliance source media is unavailable',
+        'AGENT_CONTEXT_NOT_FOUND',
+      );
+    }
+    if (!step.modelBinding) {
+      throw imageAdmissionError('Skill compliance vision model binding is missing');
+    }
+    if (!step.operation.executionFence) {
+      throw imageAdmissionError('Skill compliance execution fence is missing');
+    }
+    if (input.request.surface !== 'canvas' && input.request.surface !== 'workflow') {
+      throw imageAdmissionError('Skill compliance audit requires a persisted workspace');
+    }
+    const workspace = input.request.surface;
+
+    const platform = step.inputValues.platform;
+    const region = step.inputValues.region;
+    const assetType = step.inputValues.assetType;
+    const productCategory = step.inputValues.productCategory;
+    if (
+      !['通用电商', 'Amazon', '淘宝/天猫', '京东'].includes(String(platform))
+      || typeof region !== 'string'
+      || !['main', 'secondary', 'detail', 'a-plus'].includes(String(assetType))
+      || typeof productCategory !== 'string'
+    ) {
+      throw imageAdmissionError('Skill compliance audit inputs are invalid');
+    }
+
+    const ruleSet = resolveComplianceRuleSet({
+      platform: platform as CompliancePlatform,
+      region,
+      assetType: assetType as ComplianceAssetType,
+      productCategory,
+    });
+    const facts = await auditComplianceMedia({ imageInput, signal: step.signal });
+    const technicalChecks = evaluateTechnicalRules(facts, ruleSet.rules);
+    const sourceDigest = createHash('sha256')
+      .update(sourceVersionId)
+      .update('\0')
+      .update(imageInput)
+      .digest('hex');
+    const reportId = `compliance:${step.runId}:${step.step.id}`;
+    const generatedAt = new Date().toISOString();
+    const visionModel = {
+      providerId: step.modelBinding.providerId,
+      modelId: step.modelBinding.modelId,
+    };
+    const buildReport = (
+      visionError?: PlatformComplianceTechnicalErrorV1,
+      visionResult?: Awaited<ReturnType<typeof invokeComplianceVision>>,
+    ): PlatformComplianceReportV1 => buildComplianceReport({
+      reportId,
+      runId: step.runId,
+      generatedAt,
+      sourceVersionId,
+      sourceDigest,
+      ruleSet,
+      technicalChecks,
+      visionModel,
+      visionError,
+      visionResult,
+    });
+    const persist = input.persistCompliancePartialReport || persistCompliancePartialReport;
+    const persistReport = (
+      phase: PersistCompliancePartialReportInput['phase'],
+      report: PlatformComplianceReportV1,
+    ) => persist({
+      actorUserId: step.actorUserId,
+      projectId: step.projectId,
+      runId: step.runId,
+      stepId: step.step.id,
+      sourceVersionId,
+      phase,
+      report,
+      executionFence: step.operation.executionFence!,
+      workspace,
+    });
+
+    await persistReport('technical', buildReport());
+    const provider = (await getApiProviders()).find(candidate => (
+      candidate.id === step.modelBinding!.providerId && candidate.isEnabled
+    ));
+    if (!provider || !provider.apiKey || !provider.baseUrl) {
+      const technicalError: PlatformComplianceTechnicalErrorV1 = {
+        code: 'COMPLIANCE_VISION_PROVIDER_UNAVAILABLE',
+        message: 'The frozen compliance vision provider is unavailable',
+        retryable: true,
+        providerId: step.modelBinding.providerId,
+        modelId: step.modelBinding.modelId,
+        requestId: step.operation.idempotencyKey,
+      };
+      const partialReport = buildReport(technicalError);
+      await persistReport('vision-error', partialReport);
+      throw new ComplianceAuditVisionFailedError(
+        partialReport,
+        step.modelBinding.providerId,
+        step.modelBinding.modelId,
+        step.operation.idempotencyKey,
+        true,
+      );
+    }
+
+    await step.operation.beginSubmission();
+    try {
+      const visionResult = await invokeComplianceVision({
+        provider,
+        modelId: step.modelBinding.modelId,
+        imageInput,
+        rules: ruleSet.rules.filter(rule => rule.evaluator === 'vision'),
+        requestId: step.operation.idempotencyKey,
+        signal: step.signal,
+      });
+      const report = buildReport(undefined, visionResult);
+      return {
+        assetVersionIds: [],
+        media: [],
+        structured: { schemaId: 'platform-compliance-report-v1', value: report },
+      };
+    } catch (error) {
+      if (!(error instanceof ComplianceVisionError)) throw error;
+      const technicalError: PlatformComplianceTechnicalErrorV1 = {
+        code: error.code,
+        message: 'The frozen compliance vision check did not complete',
+        retryable: error.retryable,
+        providerId: error.providerId,
+        modelId: error.modelId,
+        requestId: error.requestId,
+      };
+      const partialReport = buildReport(technicalError);
+      await persistReport('vision-error', partialReport);
+      if (error.submissionUnknown) {
+        throw Object.assign(new AgentDownstreamSubmissionUnknownError(error), {
+          partialReport,
+          providerId: error.providerId,
+          modelId: error.modelId,
+          requestId: error.requestId,
+          retryable: false,
+        });
+      }
+      throw new ComplianceAuditVisionFailedError(
+        partialReport,
+        error.providerId,
+        error.modelId,
+        error.requestId,
+        error.retryable,
+        error.providerStatus,
+        { cause: error },
+      );
+    }
+  };
   return {
-    stepAdapters: { chat: executeOrchestratorStep, generate_image: generate, img2img },
+    stepAdapters: {
+      chat: executeOrchestratorStep,
+      generate_image: generate,
+      img2img,
+      compliance_audit: complianceAudit,
+    },
     stepRecoveries: { generate_image: recoverGenerate, img2img: recoverGenerate },
   };
 }
