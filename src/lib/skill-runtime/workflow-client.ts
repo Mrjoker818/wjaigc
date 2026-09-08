@@ -1,6 +1,6 @@
-import type { DurableSkillOutput, SkillDefinition } from './types';
+import type { SkillDefinition } from './types';
 import { projectWorkflowSkillRun, type WorkflowSkillAssetReference } from '../workflow-skill-execution';
-import { parseDurableSkillOutput } from './structured-output';
+import { parseDurableSkillOutputs } from './structured-output';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -65,10 +65,7 @@ export async function loadSavedWorkflowSkillResult(input: {
     }
   }
   input.signal.throwIfAborted();
-  const outputs: DurableSkillOutput[] = [];
-  for (const value of Array.isArray(run.outputs) ? run.outputs : []) {
-    outputs.push(parseDurableSkillOutput(value));
-  }
+  const outputs = parseDurableSkillOutputs(run.outputs);
   return {
     status: run.status === 'completed' ? 'success' : ['failed', 'timeout'].includes(run.status) ? 'error'
       : ['created', 'queued', 'planning', 'awaiting-confirmation', 'executing', 'uploading'].includes(run.status) ? 'running' : run.status,

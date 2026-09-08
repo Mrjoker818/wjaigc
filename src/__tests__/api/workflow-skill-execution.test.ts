@@ -17,6 +17,8 @@ import {
   waitForWorkflowSkillSubmissions,
   workflowSkillRunRegistryKey,
 } from '@/lib/workflow-execution-context';
+import { canonicalComplianceReportJson } from '@/lib/platform-compliance/report-schema';
+import { validReport, wideReport } from '@/__tests__/helpers/platform-compliance-fixtures';
 
 const routeSource = readFileSync(
   resolve(process.cwd(), 'src/app/api/workflow/execute/route.ts'),
@@ -24,6 +26,70 @@ const routeSource = readFileSync(
 ).replace(/\r\n/g, '\n');
 
 describe('workflow Skill Run execution', () => {
+  it.each([
+    ['unknown schema', { stepId: 'audit:a', kind: 'json', schemaId: 'unknown', content: '{}' }, 'SKILL_OUTPUT_SCHEMA_UNKNOWN'],
+    ['oversized content', { stepId: 'audit:a', kind: 'json', schemaId: 'platform-compliance-report-v1', content: `${JSON.stringify(validReport())}${' '.repeat(256 * 1024)}` }, 'SKILL_OUTPUT_SIZE_LIMIT'],
+    ['invalid report', { stepId: 'audit:a', kind: 'json', schemaId: 'platform-compliance-report-v1', content: JSON.stringify(wideReport(4097)) }, 'REPORT_KEY_LIMIT'],
+  ])('rejects %s in a running poll before progress projection', async (_label, output, error) => {
+    const onProgress = vi.fn(() => { throw new Error('UNVALIDATED_PROGRESS'); });
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ runId: 'run-validate' }), { status: 201 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        run: { runId: 'run-validate', status: 'running', assetVersionIds: [], outputs: [output] },
+      }), { status: 200 }));
+
+    await expect(executeWorkflowSkillRun({
+      submitUrl: 'http://localhost:5000/api/skill-runs', requestBody: { skillId: 'skill-a' },
+      headers: { 'Content-Type': 'application/json' }, fetcher, pollIntervalMs: 0,
+      onProgress, resolveAssetVersion: async () => null,
+    })).rejects.toThrow(error);
+    expect(onProgress).not.toHaveBeenCalled();
+  });
+
+  it('normalizes a valid structured report before projecting running progress', async () => {
+    const report = validReport({
+      verdict: 'blocked', summary: { passed: 99, warning: 0, blocked: 0, unknown: 0 },
+    });
+    const onProgress = vi.fn();
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ runId: 'run-normalize' }), { status: 201 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ run: {
+        runId: 'run-normalize', status: 'running', assetVersionIds: [],
+        outputs: [{ stepId: 'audit:a', kind: 'json', schemaId: 'platform-compliance-report-v1',
+          content: JSON.stringify(report) }],
+      } }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        run: { runId: 'run-normalize', status: 'completed', assetVersionIds: [], outputs: [] },
+      }), { status: 200 }));
+
+    await executeWorkflowSkillRun({
+      submitUrl: 'http://localhost:5000/api/skill-runs', requestBody: { skillId: 'skill-a' },
+      headers: { 'Content-Type': 'application/json' }, fetcher, pollIntervalMs: 0,
+      onProgress, resolveAssetVersion: async () => null,
+    });
+
+    expect(onProgress).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      outputs: [{ stepId: 'audit:a', kind: 'json', schemaId: 'platform-compliance-report-v1',
+        content: canonicalComplianceReportJson(validReport()) }],
+    }));
+  });
+
+  it('rejects a mismatched running runId before progress projection', async () => {
+    const onProgress = vi.fn(() => { throw new Error('UNVALIDATED_PROGRESS'); });
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ runId: 'run-expected' }), { status: 201 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        run: { runId: 'run-other', status: 'running', assetVersionIds: [], outputs: [] },
+      }), { status: 200 }));
+
+    await expect(executeWorkflowSkillRun({
+      submitUrl: 'http://localhost:5000/api/skill-runs', requestBody: { skillId: 'skill-a' },
+      headers: { 'Content-Type': 'application/json' }, fetcher, pollIntervalMs: 0,
+      onProgress, resolveAssetVersion: async () => null,
+    })).rejects.toThrow('Skill Run 状态读取失败');
+    expect(onProgress).not.toHaveBeenCalled();
+  });
+
   it('submits and projects the same durable Skill Run instead of creating another state machine', async () => {
     const fetcher = vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify({ runId: 'run-1' }), { status: 201 }))

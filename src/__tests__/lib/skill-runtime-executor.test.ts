@@ -679,6 +679,38 @@ describe('durable Skill executor', () => {
 });
 
 describe('Skill run history', () => {
+  it('distinguishes missing outputs from present non-array outputs in server history', async () => {
+    const task: CloudTask = {
+      id: 'run-output-shape', userId: 'user-1', projectId: 'project-1', type: 'agent-run',
+      status: 'completed', progress: 100, creditStatus: 'charged', creditCost: 0,
+      createdAt: 10, updatedAt: 20,
+    };
+    const events: AgentEvent[] = [{
+      eventId: 'created', runId: task.id, sequence: 1, type: 'run.created', timestamp: 'now',
+      payload: {
+        workspace: 'canvas',
+        skill: { skillId: definition.id, skillVersion: 1, inputValues: {}, modelBindings: {} },
+        skillSnapshot: { id: definition.id, version: 1, name: definition.name, steps: definition.steps },
+      },
+    }];
+    const projection = (outputs?: unknown): AgentRunProjection => ({
+      runId: task.id, status: 'completed', lastSequence: 1, plan: [], assetVersionIds: [],
+      ignoredEventIds: [], missingSequences: [], qualityChecks: [],
+      result: { assetVersionIds: [], ...(outputs === undefined ? {} : { outputs }) },
+    });
+    const service = (outputs?: unknown) => createSkillRuntimeService({
+      createAuthorizedSkillRun: vi.fn(), getTaskForUser: vi.fn(async () => task),
+      listTasks: vi.fn(async () => [task]), listEvents: vi.fn(async () => events),
+      getProjection: vi.fn(async () => projection(outputs)), pauseRun: vi.fn(), resumeRun: vi.fn(),
+      cancelRun: vi.fn(),
+    });
+
+    await expect(service().get({ actorUserId: 'user-1', runId: task.id }))
+      .resolves.toMatchObject({ outputs: [] });
+    await expect(service({}).get({ actorUserId: 'user-1', runId: task.id }))
+      .rejects.toThrow('SKILL_OUTPUTS_INVALID');
+  });
+
   it('cancels persisted prepaid children and aborts their live execution scopes', async () => {
     const cancelled = {
       accepted: true,

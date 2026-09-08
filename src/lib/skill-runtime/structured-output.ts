@@ -60,6 +60,12 @@ export function parseDurableSkillOutput(value: unknown): DurableSkillOutput {
   };
 }
 
+export function parseDurableSkillOutputs(value: unknown): DurableSkillOutput[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value)) throw new Error('SKILL_OUTPUTS_INVALID');
+  return value.map(parseDurableSkillOutput);
+}
+
 export function durableSkillOutputKey(output: DurableSkillOutput): string {
   return output.kind === 'json'
     ? `${output.stepId}\u0000${output.kind}\u0000${output.schemaId}`

@@ -79,6 +79,24 @@ describe('workflow Skill node contract', () => {
     })).rejects.toThrow('SKILL_OUTPUT_SCHEMA_UNKNOWN');
   });
 
+  it('distinguishes missing outputs from present non-array outputs during workflow restore', async () => {
+    const run = {
+      runId: 'run', projectId: 'project', surface: 'workflow', workspaceId: 'workflow:wf',
+      skillId: 'skill', skillVersion: 1, status: 'completed', assetVersionIds: [],
+    };
+    const missingFetcher = async () => new Response(JSON.stringify({ run }), { status: 200 });
+    const invalidFetcher = async () => new Response(JSON.stringify({ run: { ...run, outputs: {} } }), { status: 200 });
+    const input = {
+      runId: 'run', projectId: 'project', workflowId: 'wf', skillId: 'skill', skillVersion: 1,
+      signal: new AbortController().signal,
+    };
+
+    await expect(loadSavedWorkflowSkillResult({ ...input, fetcher: missingFetcher as typeof fetch }))
+      .resolves.toMatchObject({ output: { outputs: [] } });
+    await expect(loadSavedWorkflowSkillResult({ ...input, fetcher: invalidFetcher as typeof fetch }))
+      .rejects.toThrow('SKILL_OUTPUTS_INVALID');
+  });
+
   it('registers one ai-skill node with stable prompt, image, reference and result ports', () => {
     const node = createWorkflowNode('ai-skill', 10, 20);
 

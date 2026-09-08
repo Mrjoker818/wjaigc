@@ -247,6 +247,17 @@ describe('canvas chat Skill catalog contract', () => {
     })).rejects.toThrow('SKILL_OUTPUT_SCHEMA_UNKNOWN');
   });
 
+  it('rejects present non-array outputs during Canvas history restore', async () => {
+    const fetcher = vi.fn(async () => new Response(JSON.stringify({
+      run: { runId: 'run-1', status: 'completed', assetVersionIds: [], outputs: {} },
+    }), { status: 200 }));
+
+    await expect(loadCompletedCanvasSkillAssets({
+      fetcher: fetcher as typeof fetch,
+      projectId: 'project-1', runId: 'run-1', sourceVersionIds: [],
+    })).rejects.toThrow('SKILL_OUTPUTS_INVALID');
+  });
+
   it.each(['failed', 'cancelled', 'paused'])('does not project %s runs', async status => {
     const fetcher = vi.fn(async () => new Response(JSON.stringify({
       run: { runId: 'run-1', status, assetVersionIds: ['late-version'] },

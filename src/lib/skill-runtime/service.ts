@@ -35,7 +35,7 @@ import {
   selectSkillStepsForExecution,
   type ExecuteSkillStepInput,
 } from './executor';
-import { parseDurableSkillOutput } from './structured-output';
+import { parseDurableSkillOutputs } from './structured-output';
 import { skillExecutionSteps } from './cost-estimator';
 import { parseCompiledSkillFanOut } from './compiled-fan-out';
 import { assertCompiledSkillFanOutValues } from './step-compiler';
@@ -276,20 +276,15 @@ function completedAssetVersionIds(events: readonly AgentEvent[]): string[] {
     .filter((versionId): versionId is string => typeof versionId === 'string' && Boolean(versionId)))];
 }
 
-function readDurableSkillOutputs(value: unknown): DurableSkillOutput[] {
-  if (!Array.isArray(value)) return [];
-  return value.map(parseDurableSkillOutput);
-}
-
 function completedSkillOutputs(events: readonly AgentEvent[]): DurableSkillOutput[] {
   return events.flatMap(event => {
     if (event.type === 'tool.completed') {
-      return readDurableSkillOutputs(event.payload.outputs);
+      return parseDurableSkillOutputs(event.payload.outputs);
     }
     if (event.type !== 'run.completed') return [];
     const result = event.payload.result;
     if (!result || typeof result !== 'object' || Array.isArray(result)) return [];
-    return readDurableSkillOutputs((result as Record<string, unknown>).outputs);
+    return parseDurableSkillOutputs((result as Record<string, unknown>).outputs);
   });
 }
 
@@ -440,7 +435,7 @@ function history(task: CloudTask, events: readonly AgentEvent[], projection: Age
     assetVersionIds: [...projection.assetVersionIds],
     outputs: mergeDurableSkillOutputs(steps, [
       ...completedSkillOutputs(events),
-      ...readDurableSkillOutputs(projection.result?.outputs),
+      ...parseDurableSkillOutputs(projection.result?.outputs),
     ]),
     creditStatus: task.creditStatus,
     creditCost: task.creditCost || 0,

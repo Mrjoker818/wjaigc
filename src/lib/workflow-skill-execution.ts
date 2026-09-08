@@ -1,5 +1,5 @@
 import type { DurableSkillOutput } from './skill-runtime/types';
-import { parseDurableSkillOutput } from './skill-runtime/structured-output';
+import { parseDurableSkillOutputs } from './skill-runtime/structured-output';
 
 interface WorkflowSkillRunProjection {
   runId: string;
@@ -76,15 +76,10 @@ function readWorkflowSkillRunProjection(payload: unknown): WorkflowSkillRunProje
     ? wrapped as Record<string, unknown>
     : record;
   if (typeof candidate.runId !== 'string' || typeof candidate.status !== 'string') return null;
-  const outputs = candidate.outputs === undefined
-    ? undefined
-    : Array.isArray(candidate.outputs)
-      ? candidate.outputs.map(parseDurableSkillOutput)
-      : null;
-  if (outputs === null) return null;
+  const outputs = parseDurableSkillOutputs(candidate.outputs);
   return {
     ...(candidate as unknown as WorkflowSkillRunProjection),
-    ...(outputs ? { outputs } : {}),
+    outputs,
   };
 }
 
@@ -180,7 +175,7 @@ export function projectWorkflowSkillRun(
   references: readonly WorkflowSkillAssetReference[],
 ): Record<string, unknown> {
   const assetVersionIds = [...new Set(run.assetVersionIds || [])];
-  const outputs = (run.outputs || []).map(parseDurableSkillOutput);
+  const outputs = parseDurableSkillOutputs(run.outputs);
   const text = outputs.filter(output => output.kind === 'text').map(output => output.content).join('\n\n');
   return {
     runId: run.runId,
@@ -228,7 +223,7 @@ async function waitForWorkflowSkillRun(
       await wait(Math.min(retryDelayMs, Math.max(0, deadline - Date.now())), input.signal);
       continue;
     }
-    const payload = await response.json().catch(() => null) as { run?: WorkflowSkillRunProjection } | null;
+    const payload: unknown = await response.json().catch(() => null);
     if (!response.ok) {
       const error = new Error(errorMessage(payload, `Skill Run 状态读取失败 (${response.status})`));
       if (!transientStatus(response.status)) throw error;
@@ -236,8 +231,9 @@ async function waitForWorkflowSkillRun(
       await wait(Math.min(retryDelayMs, Math.max(0, deadline - Date.now())), input.signal);
       continue;
     }
-    if (!payload?.run) throw new Error('Skill Run 状态读取失败');
-    run = payload.run;
+    const parsedRun = readWorkflowSkillRunProjection(payload);
+    if (!parsedRun || parsedRun.runId !== runId) throw new Error('Skill Run 状态读取失败');
+    run = parsedRun;
     await input.onProgress?.(run);
     if (run.status === 'completed') break;
     if (['failed', 'cancelled', 'paused', 'timeout'].includes(run.status)) {
