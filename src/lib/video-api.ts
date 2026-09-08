@@ -323,6 +323,18 @@ export const VIDEO_MODEL_REGISTRY: Record<string, VideoModelInfo> = {
     profile: 'apimart-video', name: 'Grok Imagine 1.5 Video (APImart)', short: 'GrokI1.5', provider: 'xAI/APImart',
     features: { firstLastFrame: false, multiReference: true, videoEdit: false, videoExtend: false, audio: false, cameraControl: false, motionBrush: false, characterConsistency: false, multiShot: false, maxDuration: 8, durations: [3, 5, 8], ratios: ['16:9','9:16','1:1'], resolutions: ['720p','1080p'], region: 'global' },
   },
+  'seedance-2.5': {
+    profile: 'apimart-video', name: 'Seedance 2.5 (APImart)', short: 'SD2.5', provider: 'ByteDance/APImart',
+    features: { firstLastFrame: true, multiReference: true, videoEdit: true, videoExtend: true, audio: true, cameraControl: true, motionBrush: true, characterConsistency: true, multiShot: false, maxDuration: 15, durations: [5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15], ratios: ['1:1','4:3','3:4','16:9','9:16','21:9'], resolutions: ['480p','720p','1080p','4K'], region: 'global' },
+  },
+  'kling-3.0-turbo': {
+    profile: 'apimart-video', name: 'Kling 3.0 Turbo (APImart)', short: 'Kling3T', provider: 'Kuaishou/APImart',
+    features: { firstLastFrame: true, multiReference: true, videoEdit: true, videoExtend: true, audio: true, cameraControl: true, motionBrush: true, characterConsistency: true, multiShot: false, maxDuration: 30, durations: [5, 10, 15, 30], ratios: ['1:1','4:3','16:9','9:16'], resolutions: ['720p','1080p','4K'], region: 'global' },
+  },
+  'gemini-omni-flash-preview': {
+    profile: 'apimart-video', name: 'Gemini Omni Flash (APImart)', short: 'GemOmni', provider: 'Google/APImart',
+    features: { firstLastFrame: false, multiReference: false, videoEdit: false, videoExtend: false, audio: false, cameraControl: false, motionBrush: false, characterConsistency: false, multiShot: false, maxDuration: 8, durations: [8], ratios: ['16:9','9:16','1:1'], resolutions: ['720p','1080p'], region: 'global' },
+  },
   // ==== AI Link 视频模型 ====
   'kling-v3': {
     profile: 'ai-link', name: 'Kling V3 (AI Link)', short: 'KlingV3', provider: 'Kuaishou/AI-Link',
