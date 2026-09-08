@@ -4,9 +4,12 @@ import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  COMPLIANCE_ALERT_COLORS,
   COMPLIANCE_STATUS_COLORS,
   PlatformComplianceReportCard,
 } from '@/components/skill-runtime/PlatformComplianceReportCard';
+import { SkillRunProgress } from '@/components/skill-runtime/SkillRunProgress';
+import { canonicalComplianceReportJson } from '@/lib/platform-compliance/report-schema';
 import type { PlatformComplianceReportV1 } from '@/lib/platform-compliance/types';
 
 export const fourStatusReport: PlatformComplianceReportV1 = {
@@ -57,6 +60,33 @@ describe('PlatformComplianceReportCard', () => {
       expect(contrast(palette.light.foreground, palette.light.background)).toBeGreaterThanOrEqual(4.5);
       expect(contrast(palette.dark.foreground, palette.dark.background)).toBeGreaterThanOrEqual(4.5);
     }
+    for (const palette of Object.values(COMPLIANCE_ALERT_COLORS)) {
+      expect(contrast(palette.foreground, palette.background)).toBeGreaterThanOrEqual(4.5);
+    }
+  });
+
+  it.each(['light', 'dark'] as const)('uses an AA alert color for download and projection errors in %s theme', async theme => {
+    const fetcher = vi.fn().mockResolvedValue({ ok: false, status: 500 });
+    const view = render(<PlatformComplianceReportCard report={fourStatusReport} stepId="audit:one"
+      theme={theme} downloadUrls={{ json: '/api/report?format=json', html: '/api/report?format=html' }}
+      downloadFetcher={fetcher as typeof fetch} onLocate={vi.fn()} />);
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: '导出 JSON' })); });
+    expect((await screen.findByRole('alert')).className).toContain(theme === 'dark' ? 'text-red-300' : 'text-red-700');
+
+    view.unmount();
+    render(<SkillRunProgress projectId="project-1" theme={theme} onLocateComplianceSource={vi.fn()}
+      projection={{ runId: 'run-1', status: 'completed', lastSequence: 3, plan: [], assetVersionIds: [],
+        result: { outputs: [{ stepId: 'audit:one', kind: 'json', schemaId: 'platform-compliance-report-v1', content: `${canonicalComplianceReportJson(fourStatusReport)} ` }] },
+        ignoredEventIds: [], missingSequences: [], qualityChecks: [], progress: 100 }} />);
+    expect((await screen.findByRole('alert')).className).toContain(theme === 'dark' ? 'text-red-300' : 'text-red-700');
+  });
+
+  it('shows why recheck is unavailable without hiding the historical report', () => {
+    render(<PlatformComplianceReportCard report={fourStatusReport} stepId="audit:one" onLocate={vi.fn()}
+      recheckUnavailableReason="旧运行记录缺少工作区信息，无法按当前规则复检" />);
+    expect(screen.getByRole('region', { name: '平台素材合规报告' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: '重新检查' })).toBeNull();
+    expect(screen.getByText('旧运行记录缺少工作区信息，无法按当前规则复检')).toBeTruthy();
   });
 
   it('renders pass warning blocked and unknown without relying on color', async () => {

@@ -6,6 +6,7 @@ import type { AgentRunRequest } from '@/lib/agent-runtime/types';
 import type { TaskModelDescriptor } from '@/lib/task-core/model-catalog';
 import type { User } from '@/lib/user-types';
 import type { SkillDefinition } from '@/lib/skill-runtime/types';
+import { LOVART_PLATFORM_COMPLIANCE_SKILLS } from '@/lib/skill-runtime/platform-compliance-preset';
 import {
   buildSkillAgentRunRequest,
   createSkillRun,
@@ -83,6 +84,43 @@ function runtimeDependencies() {
 }
 
 describe('Skill runtime run requests', () => {
+  it('revalidates frozen v1 compliance values, sources, and models against the current v2 definition', async () => {
+    const currentSkill = { ...LOVART_PLATFORM_COMPLIANCE_SKILLS[0], version: 2 };
+    const resolveTaskModel = vi.fn(async (providerId: string, modelId: string) => ({
+      ...descriptor(providerId, modelId, 'chat'),
+      sourceType: 'vlm' as const,
+    }));
+    const request: SkillRunRequest = {
+      ...input,
+      skillId: currentSkill.id,
+      skillVersion: currentSkill.version,
+      inputValues: { sourceImages: ['version-1'], platform: 'Amazon', region: 'US', assetType: 'main' },
+      sourceVersionIds: ['version-1'],
+      modelBindings: {
+        orchestrator: { providerId: 'frozen-provider', modelId: 'frozen-chat' },
+        vision: { providerId: 'frozen-provider', modelId: 'frozen-vision' },
+      },
+    };
+
+    const built = await buildSkillAgentRunRequest(request, {
+      actorUserId: actor.id,
+      resolveTaskModel,
+      resolveSkill: vi.fn(async () => currentSkill),
+    });
+    expect(built.skill).toMatchObject({ skillId: currentSkill.id, skillVersion: 2,
+      inputValues: request.inputValues, modelBindings: request.modelBindings });
+    expect(resolveTaskModel).toHaveBeenCalledTimes(2);
+
+    await expect(buildSkillAgentRunRequest({
+      ...request,
+      inputValues: { sourceImages: ['version-1'], platform: 'Amazon', assetType: 'main' },
+    }, {
+      actorUserId: actor.id,
+      resolveTaskModel,
+      resolveSkill: vi.fn(async () => currentSkill),
+    })).rejects.toMatchObject({ code: 'SKILL_INPUT_REQUIRED', field: 'region' });
+  });
+
   it.each([
     ['empty', [], []],
     ['duplicate binding', ['version-1', 'version-1'], ['version-1']],

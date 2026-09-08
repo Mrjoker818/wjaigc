@@ -7,13 +7,13 @@ import type { SkillRunRequest } from '@/lib/skill-runtime/run-request';
 import type { SkillRunRestoreIdentity } from './use-skill-run';
 
 export interface SkillRunHistoryItem extends SkillRunRestoreIdentity {
-  workspaceId: string;
-  skillVersion: number;
+  workspaceId?: string;
+  skillVersion?: number;
   status: string;
   createdAt: number;
-  sourceVersionIds: string[];
-  inputValues: Record<string, unknown>;
-  modelBindings: SkillRunRequest['modelBindings'];
+  sourceVersionIds?: string[];
+  inputValues?: Record<string, unknown>;
+  modelBindings?: SkillRunRequest['modelBindings'];
   outputs?: DurableSkillOutput[];
 }
 
@@ -34,6 +34,46 @@ const labels: Record<string, string> = {
   executing: '执行中', uploading: '保存中', paused: '已暂停', completed: '已完成',
   failed: '失败', cancelled: '已取消', timeout: '超时',
 };
+
+function optionalRecord(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? structuredClone(value as Record<string, unknown>)
+    : undefined;
+}
+
+function parseHistoryItem(value: unknown, scope: {
+  projectId: string;
+  surface: SkillSurface;
+  skillId: string;
+}): SkillRunHistoryItem | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const item = value as Record<string, unknown>;
+  if (typeof item.runId !== 'string' || !item.runId || item.projectId !== scope.projectId
+    || item.surface !== scope.surface || item.skillId !== scope.skillId || typeof item.status !== 'string'
+    || !Object.hasOwn(labels, item.status) || typeof item.createdAt !== 'number'
+    || !Number.isFinite(item.createdAt) || Math.abs(item.createdAt) > 8.64e15) return undefined;
+  const sourceVersionIds = Array.isArray(item.sourceVersionIds)
+    && item.sourceVersionIds.every(id => typeof id === 'string')
+    ? [...item.sourceVersionIds] as string[] : undefined;
+  const outputs = Array.isArray(item.outputs)
+    ? structuredClone(item.outputs) as DurableSkillOutput[] : undefined;
+  return {
+    runId: item.runId,
+    projectId: scope.projectId,
+    surface: scope.surface,
+    skillId: scope.skillId,
+    status: item.status,
+    createdAt: item.createdAt,
+    ...(typeof item.workspaceId === 'string' && item.workspaceId ? { workspaceId: item.workspaceId } : {}),
+    ...(Number.isSafeInteger(item.skillVersion) && Number(item.skillVersion) > 0
+      ? { skillVersion: Number(item.skillVersion) } : {}),
+    ...(sourceVersionIds ? { sourceVersionIds } : {}),
+    ...(optionalRecord(item.inputValues) ? { inputValues: optionalRecord(item.inputValues) } : {}),
+    ...(optionalRecord(item.modelBindings)
+      ? { modelBindings: optionalRecord(item.modelBindings) as SkillRunRequest['modelBindings'] } : {}),
+    ...(outputs ? { outputs } : {}),
+  };
+}
 
 export function SkillRunHistory({ projectId, surface, skillId, accountKey, activeRunId,
   refreshKey, busy = false, onSelect, fetcher = fetch }: SkillRunHistoryProps): React.ReactElement {
@@ -57,21 +97,14 @@ export function SkillRunHistory({ projectId, surface, skillId, accountKey, activ
         if (!response.ok) throw new Error(response.status === 401 ? '登录已失效，请重新登录' : '运行记录加载失败');
         const body: unknown = await response.json();
         const runs = body && typeof body === 'object' && 'runs' in body ? body.runs : undefined;
-        if (!Array.isArray(runs) || runs.length > 20 || runs.some((run: unknown) => {
-          if (!run || typeof run !== 'object') return true;
-          const item = run as Record<string, unknown>;
-          return typeof item.runId !== 'string' || !item.runId || item.projectId !== projectId
-            || item.surface !== surface || item.skillId !== skillId || typeof item.status !== 'string'
-            || !Object.hasOwn(labels, item.status) || typeof item.createdAt !== 'number'
-            || !Number.isFinite(item.createdAt) || Math.abs(item.createdAt) > 8.64e15
-            || !Number.isSafeInteger(item.skillVersion) || Number(item.skillVersion) < 1
-            || !Array.isArray(item.sourceVersionIds) || item.sourceVersionIds.some(id => typeof id !== 'string')
-            || !item.inputValues || typeof item.inputValues !== 'object' || Array.isArray(item.inputValues)
-            || !item.modelBindings || typeof item.modelBindings !== 'object' || Array.isArray(item.modelBindings)
-            || (item.outputs !== undefined && !Array.isArray(item.outputs))
-            || typeof item.workspaceId !== 'string' || !item.workspaceId;
-        })) throw new Error('运行记录响应无效，请刷新重试');
-        if (active && !controller.signal.aborted) setState({ key: scopeKey, loading: false, runs });
+        if (!Array.isArray(runs) || runs.length > 20) throw new Error('运行记录响应无效，请刷新重试');
+        const parsedRuns = runs.map(run => parseHistoryItem(run, { projectId, surface, skillId }));
+        if (parsedRuns.some(run => !run)) throw new Error('运行记录响应无效，请刷新重试');
+        if (active && !controller.signal.aborted) setState({
+          key: scopeKey,
+          loading: false,
+          runs: parsedRuns as SkillRunHistoryItem[],
+        });
       } catch (error) {
         if (active) setState({ key: scopeKey, loading: false, runs: [],
           error: timedOut ? '运行记录加载超时，请重试' : error instanceof Error ? error.message : '运行记录加载失败' });

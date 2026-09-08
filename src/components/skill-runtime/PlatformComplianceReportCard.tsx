@@ -13,6 +13,7 @@ interface PlatformComplianceReportCardProps {
   busy?: boolean;
   onLocate: (sourceVersionId: string) => void;
   onRecheck?: (report: PlatformComplianceReportV1) => void;
+  recheckUnavailableReason?: string;
   theme?: 'light' | 'dark';
   downloadFetcher?: typeof fetch;
 }
@@ -30,6 +31,15 @@ export const COMPLIANCE_STATUS_COLORS: Record<ComplianceStatus, {
   blocked: { light: { foreground: '#991b1b', background: '#fee2e2' }, dark: { foreground: '#fecaca', background: '#450a0a' } },
   unknown: { light: { foreground: '#334155', background: '#f1f5f9' }, dark: { foreground: '#e2e8f0', background: '#1e293b' } },
 };
+
+export const COMPLIANCE_ALERT_COLORS = {
+  light: { foreground: '#b91c1c', background: '#ffffff' },
+  dark: { foreground: '#fca5a5', background: '#020617' },
+} as const;
+
+export function complianceAlertClass(theme: 'light' | 'dark'): string {
+  return theme === 'dark' ? 'text-red-300' : 'text-red-700';
+}
 
 const lightStatusClasses: Record<ComplianceStatus, string> = {
   passed: 'border-green-300 bg-green-100 text-green-800', warning: 'border-amber-300 bg-amber-100 text-amber-900',
@@ -51,6 +61,7 @@ export function PlatformComplianceReportCard({
   busy = false,
   onLocate,
   onRecheck,
+  recheckUnavailableReason,
   theme = 'dark',
   downloadFetcher = fetch,
 }: PlatformComplianceReportCardProps): React.ReactElement {
@@ -101,7 +112,7 @@ export function PlatformComplianceReportCard({
         <button type="button" aria-pressed={problemsOnly} title="筛选检查项" className="inline-flex items-center gap-1 rounded border border-current/20 px-2 py-1 hover:bg-current/10" onClick={() => setProblemsOnly(value => !value)}>
           <Filter size={13} aria-hidden="true" />{problemsOnly ? '查看全部' : '只看问题'}
         </button>
-        {onRecheck && (
+        {onRecheck && !recheckUnavailableReason && (
           <button type="button" title="按相同设置重新检查" disabled={busy} className="inline-flex items-center gap-1 rounded border border-current/20 px-2 py-1 hover:bg-current/10 disabled:opacity-50" onClick={() => onRecheck(report)}>
             <RotateCcw size={13} aria-hidden="true" />重新检查
           </button>
@@ -123,7 +134,10 @@ export function PlatformComplianceReportCard({
           </button>
         </>}
       </div>
-      {downloadState.error && <div role="alert" className="mb-2 flex items-center gap-2 text-red-600">
+      {recheckUnavailableReason && <p className="mb-2 break-words text-muted-foreground">
+        {recheckUnavailableReason}
+      </p>}
+      {downloadState.error && <div role="alert" className={`mb-2 flex items-center gap-2 ${complianceAlertClass(theme)}`}>
         <span>{downloadState.error}</span>
         <button type="button" className="underline" onClick={() => {
           const format = downloadState.format;

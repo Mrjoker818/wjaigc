@@ -13,7 +13,7 @@ describe('canvas chat shared Skill runtime wiring', () => {
     expect(source).toContain('<SkillRunHistory');
     expect(source).toContain('onSelect={handleRestoreSkill}');
     expect(source).toContain('() => skillRun.restoreRun(record)');
-    expect(source).toContain('sourceVersionIds: [...record.sourceVersionIds]');
+    expect(source).toContain('sourceVersionIds: [...(record.sourceVersionIds || [])]');
     expect(source).toContain('skillCanvasImagesRef.current.some(image => image.assetVersionId === assetVersionId)');
   });
   it('uses the Task 7 controls and never routes an active Skill through ordinary chat', () => {

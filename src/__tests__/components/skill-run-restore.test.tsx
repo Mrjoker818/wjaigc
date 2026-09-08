@@ -6,8 +6,10 @@ import { useSkillRun } from '@/components/skill-runtime/use-skill-run';
 import {
   createCanvasSkillIdempotencyKey,
   createPlatformComplianceRecheckRequest,
+  currentSkillRecheckRequestFromHistory,
   frozenSkillRunRequestFromHistory,
 } from '@/components/skill-runtime/platform-compliance-client';
+import { LOVART_PLATFORM_COMPLIANCE_SKILLS } from '@/lib/skill-runtime/platform-compliance-preset';
 import type { SkillRunRequest } from '@/lib/skill-runtime/run-request';
 
 vi.mock('@/components/agent-runtime/use-agent-run-events', () => ({
@@ -115,6 +117,36 @@ describe('restore an existing Skill run after remount', () => {
       sourceVersionIds: ['version-1'],
       modelBindings: { vision: { providerId: 'historical-provider', modelId: 'historical-vision' } },
     });
+  });
+
+  it('migrates a frozen v1 history request to the current v2 Skill definition', () => {
+    const currentSkill = { ...LOVART_PLATFORM_COMPLIANCE_SKILLS[0], version: 2 };
+    const request = currentSkillRecheckRequestFromHistory({
+      runId: 'old-run', projectId: 'project-1', surface: 'canvas', workspaceId: 'canvas:project-1',
+      skillId: currentSkill.id, skillVersion: 1, status: 'completed', createdAt: 1,
+      inputValues: { sourceImages: ['version-1'], platform: 'Amazon', region: 'US', assetType: 'main' },
+      sourceVersionIds: ['version-1'],
+      modelBindings: {
+        orchestrator: { providerId: 'historical-provider', modelId: 'historical-chat' },
+        vision: { providerId: 'historical-provider', modelId: 'historical-vision' },
+      },
+    }, currentSkill);
+
+    expect(request).toMatchObject({
+      skillId: currentSkill.id,
+      skillVersion: 2,
+      inputValues: { sourceImages: ['version-1'], platform: 'Amazon', region: 'US', assetType: 'main' },
+      sourceVersionIds: ['version-1'],
+      modelBindings: { vision: { providerId: 'historical-provider', modelId: 'historical-vision' } },
+    });
+  });
+
+  it('does not invent a recheck request when the current Skill is unavailable', () => {
+    expect(() => currentSkillRecheckRequestFromHistory({
+      runId: 'old-run', projectId: 'project-1', surface: 'canvas', workspaceId: 'canvas:project-1',
+      skillId: 'removed-skill', skillVersion: 1, status: 'completed', createdAt: 1,
+      inputValues: {}, sourceVersionIds: [], modelBindings: {},
+    }, undefined)).toThrow('当前 Skill 已删除或不可用，无法按当前规则复检');
   });
 
   it('creates distinct fallback keys for consecutive rechecks in the same millisecond', () => {

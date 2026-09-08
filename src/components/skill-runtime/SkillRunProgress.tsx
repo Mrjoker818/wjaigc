@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import type { AgentRunProjection } from '@/lib/agent-runtime/types';
 import type { SkillRunCostEstimate } from '@/lib/skill-runtime/cost-estimator';
 import type { PlatformComplianceReportV1 } from '@/lib/platform-compliance/types';
-import { PlatformComplianceReportCard } from './PlatformComplianceReportCard';
+import { complianceAlertClass, PlatformComplianceReportCard } from './PlatformComplianceReportCard';
 import { projectPlatformComplianceReports, type PlatformComplianceReportProjection } from './platform-compliance-client';
 
 interface SkillRunProgressProps {
@@ -22,6 +22,7 @@ interface SkillRunProgressProps {
   projectId?: string;
   onLocateComplianceSource?: (sourceVersionId: string) => void;
   onRecheckCompliance?: (report: PlatformComplianceReportV1) => void;
+  complianceRecheckUnavailableReason?: string;
   theme?: 'light' | 'dark';
 }
 
@@ -72,6 +73,7 @@ export function SkillRunProgress({
   projectId,
   onLocateComplianceSource,
   onRecheckCompliance,
+  complianceRecheckUnavailableReason,
   theme = 'dark',
 }: SkillRunProgressProps): React.ReactElement | null {
   const [complianceReports, setComplianceReports] = useState<PlatformComplianceReportProjection[]>([]);
@@ -166,7 +168,7 @@ export function SkillRunProgress({
                 </button>
               )}
           </div>
-          {complianceError && <div role="alert" className="flex items-center gap-2 text-red-600">
+          {complianceError && <div role="alert" className={`flex items-center gap-2 ${complianceAlertClass(theme)}`}>
             <span>{complianceError}</span>
             <button type="button" className="underline" onClick={() => setComplianceRevision(value => value + 1)}>重新加载报告</button>
           </div>}
@@ -179,6 +181,7 @@ export function SkillRunProgress({
               busy={busy}
               onLocate={onLocateComplianceSource}
               onRecheck={onRecheckCompliance}
+              recheckUnavailableReason={complianceRecheckUnavailableReason}
               theme={theme}
             />
           ))}

@@ -54,13 +54,29 @@ describe('Skill run history list', () => {
     expect(screen.queryByRole('button', { name: /查看任务/ })).toBeNull();
   });
 
-  it.each(['skillVersion', 'inputValues', 'modelBindings', 'workspaceId'] as const)(
-    'rejects history without frozen %s context',
+  it('keeps old and new records observable when one old summary has no workspaceId', async () => {
+    const legacy = { ...run, runId: 'legacy-run', apiKey: 'must-not-reach-the-view' } as Record<string, unknown>;
+    delete legacy.workspaceId;
+    const onSelect = vi.fn();
+    render(<SkillRunHistory {...scope} fetcher={vi.fn().mockResolvedValue(response([legacy, run]))} onSelect={onSelect} />);
+
+    const legacyButton = await screen.findByRole('button', { name: /查看任务 legacy-run/ });
+    expect(screen.getByRole('button', { name: /查看任务 old-run/ })).toBeTruthy();
+    fireEvent.click(legacyButton);
+    expect(onSelect).toHaveBeenCalledWith(expect.objectContaining({ runId: 'legacy-run' }));
+    expect(onSelect.mock.calls[0][0]).not.toHaveProperty('apiKey');
+    expect(onSelect.mock.calls[0][0]).not.toHaveProperty('workspaceId');
+  });
+
+  it.each(['inputValues', 'modelBindings'] as const)(
+    'keeps history without frozen %s observable for report-only restore',
     async field => {
-      const invalid = { ...run } as Record<string, unknown>;
-      delete invalid[field];
-      render(<SkillRunHistory {...scope} fetcher={vi.fn().mockResolvedValue(response([invalid]))} onSelect={vi.fn()} />);
-      expect((await screen.findByRole('alert')).textContent).toContain('运行记录响应无效');
+      const legacy = { ...run } as Record<string, unknown>;
+      delete legacy[field];
+      const onSelect = vi.fn();
+      render(<SkillRunHistory {...scope} fetcher={vi.fn().mockResolvedValue(response([legacy]))} onSelect={onSelect} />);
+      fireEvent.click(await screen.findByRole('button', { name: /查看任务 old-run/ }));
+      expect(onSelect).toHaveBeenCalledWith(expect.objectContaining({ runId: 'old-run' }));
     },
   );
 });

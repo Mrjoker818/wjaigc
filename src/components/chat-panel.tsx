@@ -49,7 +49,7 @@ import { SkillRunHistory, type SkillRunHistoryItem } from '@/components/skill-ru
 import {
   createCanvasSkillIdempotencyKey,
   createPlatformComplianceRecheckRequest,
-  frozenSkillRunRequestFromHistory,
+  currentSkillRecheckRequestFromHistory,
 } from '@/components/skill-runtime/platform-compliance-client';
 import type { PlatformComplianceReportV1 } from '@/lib/platform-compliance/types';
 import { useSkillRun } from '@/components/skill-runtime/use-skill-run';
@@ -1409,6 +1409,7 @@ export function ChatPanel({ themeStyle, projectId, onAddToPrompt, onAddImages, o
   const [skillCategoryFilter, setSkillCategoryFilter] = useState('');
   const [activeSkill, setActiveSkill] = useState<SkillDefinition | null>(null);
   const [skillParamValues, setSkillParamValues] = useState<Record<string, unknown>>({});
+  const [skillRecheckUnavailableReason, setSkillRecheckUnavailableReason] = useState<string>();
   const skillRun = useSkillRun();
   const receiveSkillOutput = useSkillOutputReceiver(onAddGeneratedImage);
   const resetSkillRun = skillRun.reset;
@@ -1420,6 +1421,7 @@ export function ChatPanel({ themeStyle, projectId, onAddToPrompt, onAddImages, o
     sourceImageId?: string;
     restoreDeletedPlacement?: boolean;
     request?: SkillRunRequest;
+    historyRecord?: SkillRunHistoryItem;
   } | null>(null);
   const skillProjectionCoordinatorRef = useRef(createCanvasSkillProjectionCoordinator());
   const skillProjectionAttemptCountsRef = useRef<Map<string, number>>(new Map());
@@ -1432,6 +1434,7 @@ export function ChatPanel({ themeStyle, projectId, onAddToPrompt, onAddImages, o
     skillProjectionControllerRef.current?.abort();
     skillProjectionCoordinatorRef.current.cancel();
     activeCanvasSkillRunRef.current = null;
+    setSkillRecheckUnavailableReason(undefined);
     resetSkillRun();
   }, [projectId, skillAccountKey, resetSkillRun]);
 
@@ -1908,11 +1911,13 @@ export function ChatPanel({ themeStyle, projectId, onAddToPrompt, onAddImages, o
       await deleteCanvasSkill(skillId);
       setChatSkills(current => current.filter(skill => skill.id !== skillId));
       if (activeSkill?.id === skillId) {
-        skillProjectionControllerRef.current?.abort();
-        skillProjectionCoordinatorRef.current.cancel();
-        activeCanvasSkillRunRef.current = null;
-        setActiveSkill(null);
-        skillRun.reset();
+        if (!skillRun.runId) {
+          skillProjectionControllerRef.current?.abort();
+          skillProjectionCoordinatorRef.current.cancel();
+          activeCanvasSkillRunRef.current = null;
+          setActiveSkill(null);
+          skillRun.reset();
+        }
       }
     } catch (error) {
       await loadCanvasSkills();
@@ -1936,11 +1941,13 @@ export function ChatPanel({ themeStyle, projectId, onAddToPrompt, onAddImages, o
       await deleteCanvasSkillsSequentially(userSkills.map(skill => skill.id));
       await loadCanvasSkills();
       if (activeSkill && !activeSkill.builtIn) {
-        skillProjectionControllerRef.current?.abort();
-        skillProjectionCoordinatorRef.current.cancel();
-        activeCanvasSkillRunRef.current = null;
-        setActiveSkill(null);
-        skillRun.reset();
+        if (!skillRun.runId) {
+          skillProjectionControllerRef.current?.abort();
+          skillProjectionCoordinatorRef.current.cancel();
+          activeCanvasSkillRunRef.current = null;
+          setActiveSkill(null);
+          skillRun.reset();
+        }
       }
     } catch (error) {
       await loadCanvasSkills();
@@ -3882,6 +3889,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
     skillProjectionControllerRef.current?.abort();
     skillProjectionCoordinatorRef.current.cancel();
     activeCanvasSkillRunRef.current = null;
+    setSkillRecheckUnavailableReason(undefined);
     skillRun.reset();
     setActiveSkill(skill);
     setSkillParamValues(Object.fromEntries(skill.inputs.flatMap(field => (
@@ -3893,6 +3901,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
     skillProjectionControllerRef.current?.abort();
     skillProjectionCoordinatorRef.current.cancel();
     activeCanvasSkillRunRef.current = null;
+    setSkillRecheckUnavailableReason(undefined);
     skillRun.reset();
     setActiveSkill(null);
     setSkillParamValues({});
@@ -3976,17 +3985,45 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
     );
     if (runId) {
       let restoredRequest: SkillRunRequest | undefined;
+      let recheckUnavailableReason: string | undefined;
       try {
-        restoredRequest = frozenSkillRunRequestFromHistory(record);
+        const currentSkill = chatSkills.find(skill => skill.id === record.skillId && skill.enabled);
+        restoredRequest = currentSkillRecheckRequestFromHistory(record, currentSkill);
         setSkillParamValues(structuredClone(restoredRequest.inputValues));
-      } catch {
-        toast.error('历史运行上下文不完整，报告仍可查看但无法复检');
+      } catch (error) {
+        recheckUnavailableReason = error instanceof Error
+          ? error.message
+          : '旧运行记录缺少冻结复检上下文，无法按当前规则复检';
+        toast.error(recheckUnavailableReason);
       }
+      setSkillRecheckUnavailableReason(recheckUnavailableReason);
       skillProjectionAttemptCountsRef.current.delete(runId);
-      activeCanvasSkillRunRef.current = { runId, projectId, sourceVersionIds: [...record.sourceVersionIds], restoreDeletedPlacement: true, request: restoredRequest };
+      activeCanvasSkillRunRef.current = {
+        runId,
+        projectId,
+        sourceVersionIds: [...(record.sourceVersionIds || [])],
+        restoreDeletedPlacement: true,
+        request: restoredRequest,
+        historyRecord: record,
+      };
       setSkillProjectionRetry(value => value + 1);
     }
-  }, [projectId, skillRun]);
+  }, [chatSkills, projectId, skillRun]);
+
+  useEffect(() => {
+    const context = activeCanvasSkillRunRef.current;
+    if (!context?.historyRecord) return;
+    try {
+      const currentSkill = chatSkills.find(skill => skill.id === context.historyRecord?.skillId && skill.enabled);
+      context.request = currentSkillRecheckRequestFromHistory(context.historyRecord, currentSkill);
+      setSkillRecheckUnavailableReason(undefined);
+    } catch (error) {
+      context.request = undefined;
+      setSkillRecheckUnavailableReason(error instanceof Error
+        ? error.message
+        : '旧运行记录缺少冻结复检上下文，无法按当前规则复检');
+    }
+  }, [chatSkills]);
 
   const handleStartSkill = useCallback(async (): Promise<void> => {
     if (!hasRequiredCanvasSkillSource()) return;
@@ -3997,6 +4034,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
     }
     skillProjectionControllerRef.current?.abort();
     activeCanvasSkillRunRef.current = null;
+    setSkillRecheckUnavailableReason(undefined);
     const sourceImageId = selectedCanvasImage?.id;
     const runId = await startCanvasSkillRun(
       skillProjectionCoordinatorRef.current,
@@ -4029,12 +4067,24 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
       toast.error('无法确认报告来源，请从运行记录恢复后重试');
       return;
     }
-    if (!context.request) {
-      toast.error('历史运行上下文不完整，无法按原设置复检');
-      return;
+    let historicalRequest = context.request;
+    if (context.historyRecord) {
+      try {
+        const currentSkill = chatSkills.find(skill => skill.id === context.historyRecord?.skillId && skill.enabled);
+        historicalRequest = currentSkillRecheckRequestFromHistory(context.historyRecord, currentSkill);
+        setSkillRecheckUnavailableReason(undefined);
+      } catch (error) {
+        const reason = error instanceof Error
+          ? error.message
+          : '旧运行记录缺少冻结复检上下文，无法按当前规则复检';
+        setSkillRecheckUnavailableReason(reason);
+        toast.error(reason);
+        return;
+      }
     }
+    if (!historicalRequest) return;
     const idempotencyKey = createCanvasSkillIdempotencyKey();
-    const request = createPlatformComplianceRecheckRequest(context.request, idempotencyKey);
+    const request = createPlatformComplianceRecheckRequest(historicalRequest, idempotencyKey);
     skillProjectionControllerRef.current?.abort();
     const runId = await startCanvasSkillRun(
       skillProjectionCoordinatorRef.current,
@@ -4050,7 +4100,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
         request,
       };
     }
-  }, [skillRun]);
+  }, [chatSkills, skillRun]);
 
   useEffect(() => {
     const projection = skillRun.projection;
@@ -6222,13 +6272,14 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                   fields={activeSkill.inputs}
                   values={canvasSkillInputValues}
                   onChange={(key, value) => setSkillParamValues(current => ({ ...current, [key]: value }))}
-                  disabled={skillRun.busy || Boolean(skillRun.runId && skillRun.projection?.status !== 'completed' && skillRun.projection?.status !== 'failed' && skillRun.projection?.status !== 'cancelled' && skillRun.projection?.status !== 'timeout')}
+                  disabled={skillRun.busy || !chatSkills.some(skill => skill.id === activeSkill.id && skill.enabled)
+                    || Boolean(skillRun.runId && skillRun.projection?.status !== 'completed' && skillRun.projection?.status !== 'failed' && skillRun.projection?.status !== 'cancelled' && skillRun.projection?.status !== 'timeout')}
                 />
                 <div className="flex gap-2">
-                  <Button type="button" variant="outline" className="h-8 flex-1 text-xs" onClick={() => { void handleEstimateSkill(); }} disabled={skillRun.busy}>
+                  <Button type="button" variant="outline" className="h-8 flex-1 text-xs" onClick={() => { void handleEstimateSkill(); }} disabled={skillRun.busy || !chatSkills.some(skill => skill.id === activeSkill.id && skill.enabled)}>
                     估算积分
                   </Button>
-                  <Button type="button" className="h-8 flex-1 text-xs" onClick={() => { void handleStartSkill(); }} disabled={skillRun.busy}>
+                  <Button type="button" className="h-8 flex-1 text-xs" onClick={() => { void handleStartSkill(); }} disabled={skillRun.busy || !chatSkills.some(skill => skill.id === activeSkill.id && skill.enabled)}>
                     运行 Skill
                   </Button>
                 </div>
@@ -6258,6 +6309,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                   projectId={projectId}
                   onLocateComplianceSource={handleLocateComplianceSource}
                   onRecheckCompliance={report => { void handleRecheckCompliance(report); }}
+                  complianceRecheckUnavailableReason={skillRecheckUnavailableReason}
                   theme={themeStyle === 'gold' ? 'dark' : 'light'}
                 />
               </div>

@@ -113,6 +113,7 @@ describe('Canvas compliance report projection', () => {
   });
 
   it('restores a frozen historical report in the real ChatPanel and rechecks without the current model', async () => {
+    const currentSkill = { ...LOVART_PLATFORM_COMPLIANCE_SKILLS[0], version: 2 };
     const historicalReport = { ...report, runId: 'old-run' };
     integration.projections.set('old-run', completedProjection('old-run', canonicalComplianceReportJson(historicalReport)));
     const historical = {
@@ -130,7 +131,7 @@ describe('Canvas compliance report projection', () => {
     let resolveSubmit: ((response: Response) => void) | undefined;
     const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
       const url = String(input);
-      if (url === '/api/skills?surface=canvas') return jsonResponse({ skills: LOVART_PLATFORM_COMPLIANCE_SKILLS });
+      if (url === '/api/skills?surface=canvas') return jsonResponse({ skills: [currentSkill] });
       if (url.startsWith('/api/models?')) return jsonResponse({ models: [], providers: [] });
       if (url.startsWith('/api/user-data/sync')) return jsonResponse({ data: null });
       if (url.startsWith('/api/chat-tasks?')) return jsonResponse({ tasks: [] });
@@ -158,7 +159,7 @@ describe('Canvas compliance report projection', () => {
     fireEvent.click(recheck);
     await waitFor(() => expect(submitted).toHaveLength(1));
     expect(submitted[0]).toMatchObject({
-      skillVersion: 1,
+      skillVersion: 2,
       inputValues: historical.inputValues,
       sourceVersionIds: historical.sourceVersionIds,
       modelBindings: historical.modelBindings,
@@ -169,6 +170,93 @@ describe('Canvas compliance report projection', () => {
     resolveSubmit?.(jsonResponse({ runId: 'new-run' }, 201));
     await waitFor(() => expect(screen.getByRole('region', { name: '平台素材合规报告' })).toBeTruthy());
     expect('new-run').not.toBe(historical.runId);
+  });
+
+  it('keeps mixed legacy and current history visible while disabling only an incomplete legacy recheck', async () => {
+    const legacyReport = { ...report, runId: 'legacy-run' };
+    integration.projections.set('legacy-run', completedProjection('legacy-run', canonicalComplianceReportJson(legacyReport)));
+    const legacy = {
+      runId: 'legacy-run', projectId: 'project-1', surface: 'canvas',
+      skillId: 'preset-platform-compliance-audit', skillVersion: 1, status: 'completed', createdAt: 1,
+      inputValues: { sourceImages: [report.sourceVersionId], platform: 'Amazon', region: 'US', assetType: 'main' },
+      sourceVersionIds: [report.sourceVersionId],
+      modelBindings: { vision: { providerId: 'frozen-provider', modelId: 'frozen-vision' } },
+      apiKey: 'must-not-be-rendered',
+    };
+    const current = { ...legacy, runId: 'current-run', workspaceId: 'canvas:project-1', createdAt: 2 };
+    const incomplete = { ...current, runId: 'incomplete-run', createdAt: 3 } as Record<string, unknown>;
+    delete incomplete.modelBindings;
+    integration.projections.set('incomplete-run', completedProjection('incomplete-run', canonicalComplianceReportJson({
+      ...report, runId: 'incomplete-run', reportId: 'report-incomplete',
+    })));
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL): Promise<Response> => {
+      const url = String(input);
+      if (url === '/api/skills?surface=canvas') return jsonResponse({ skills: LOVART_PLATFORM_COMPLIANCE_SKILLS });
+      if (url.startsWith('/api/models?')) return jsonResponse({ models: [], providers: [] });
+      if (url.startsWith('/api/user-data/sync')) return jsonResponse({ data: null });
+      if (url.startsWith('/api/chat-tasks?')) return jsonResponse({ tasks: [] });
+      if (url.startsWith('/api/skill-runs?')) return jsonResponse({ runs: [legacy, incomplete, current] });
+      if (url === '/api/skill-runs/legacy-run?observeOnly=true') return jsonResponse({ run: legacy });
+      if (url === '/api/skill-runs/incomplete-run?observeOnly=true') return jsonResponse({ run: incomplete });
+      return jsonResponse({});
+    }));
+
+    render(<ChatPanel themeStyle="monochrome" projectId="project-1" canvasImages={[]} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Skills技能库' }));
+    fireEvent.click(await screen.findByText('平台素材合规检查'));
+    expect(await screen.findByRole('button', { name: '查看任务 legacy-run' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: '查看任务 current-run' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: '查看任务 incomplete-run' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '查看任务 legacy-run' }));
+
+    expect(await screen.findByRole('region', { name: '平台素材合规报告' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: '重新检查' })).toBeNull();
+    expect(screen.getByText('旧运行记录缺少工作区信息，无法按当前规则复检')).toBeTruthy();
+    expect(document.body.textContent).not.toContain('must-not-be-rendered');
+
+    fireEvent.click(screen.getByRole('button', { name: '查看任务 incomplete-run' }));
+    expect(await screen.findByText('旧运行记录缺少冻结复检上下文，无法按当前规则复检')).toBeTruthy();
+    expect(screen.getByRole('region', { name: '平台素材合规报告' })).toBeTruthy();
+  });
+
+  it('keeps a restored report visible and disables recheck after its current Skill is deleted', async () => {
+    const customSkill = {
+      ...LOVART_PLATFORM_COMPLIANCE_SKILLS[0], id: 'custom-compliance', name: '自定义合规检查',
+      version: 2, builtIn: false, category: 'custom',
+    };
+    const historicalReport = { ...report, runId: 'deleted-run' };
+    integration.projections.set('deleted-run', completedProjection('deleted-run', canonicalComplianceReportJson(historicalReport)));
+    const historical = {
+      runId: 'deleted-run', projectId: 'project-1', surface: 'canvas', workspaceId: 'canvas:project-1',
+      skillId: customSkill.id, skillVersion: 1, status: 'completed', createdAt: 1,
+      inputValues: { sourceImages: [report.sourceVersionId], platform: 'Amazon', region: 'US', assetType: 'main' },
+      sourceVersionIds: [report.sourceVersionId],
+      modelBindings: { vision: { providerId: 'frozen-provider', modelId: 'frozen-vision' } },
+    };
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+      const url = String(input);
+      if (url === '/api/skills?surface=canvas') return jsonResponse({ skills: [customSkill] });
+      if (url.startsWith('/api/models?')) return jsonResponse({ models: [], providers: [] });
+      if (url.startsWith('/api/user-data/sync')) return jsonResponse({ data: null });
+      if (url.startsWith('/api/chat-tasks?')) return jsonResponse({ tasks: [] });
+      if (url.startsWith('/api/skill-runs?')) return jsonResponse({ runs: [historical] });
+      if (url === '/api/skill-runs/deleted-run?observeOnly=true') return jsonResponse({ run: historical });
+      if (url === '/api/skills/custom-compliance' && init?.method === 'DELETE') return jsonResponse({ success: true });
+      return jsonResponse({});
+    }));
+
+    render(<ChatPanel themeStyle="gold" projectId="project-1" canvasImages={[]} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Skills技能库' }));
+    fireEvent.click(await screen.findByTitle('使用此 Skill'));
+    fireEvent.click(await screen.findByRole('button', { name: '查看任务 deleted-run' }));
+    expect(await screen.findByRole('region', { name: '平台素材合规报告' })).toBeTruthy();
+    fireEvent.click(screen.getByTitle('删除'));
+
+    await waitFor(() => expect(screen.getByText('当前 Skill 已删除或不可用，无法按当前规则复检')).toBeTruthy());
+    expect(screen.getByRole('region', { name: '平台素材合规报告' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: '重新检查' })).toBeNull();
+    expect(screen.getByRole('button', { name: '运行 Skill' }).hasAttribute('disabled')).toBe(true);
+    expect(screen.getByRole('button', { name: '估算积分' }).hasAttribute('disabled')).toBe(true);
   });
 
   it('shows a projection failure inside the real ChatPanel after historical restore', async () => {

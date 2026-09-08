@@ -1,7 +1,7 @@
 import { canonicalComplianceReportJson, parsePlatformComplianceReport } from '@/lib/platform-compliance/report-schema';
 import type { PlatformComplianceReportV1 } from '@/lib/platform-compliance/types';
 import type { SkillRunRequest } from '@/lib/skill-runtime/run-request';
-import type { DurableSkillOutput } from '@/lib/skill-runtime/types';
+import type { DurableSkillOutput, SkillDefinition } from '@/lib/skill-runtime/types';
 
 const REPORT_SCHEMA_ID = 'platform-compliance-report-v1';
 
@@ -126,6 +126,30 @@ export function frozenSkillRunRequestFromHistory(value: unknown): SkillRunReques
     modelBindings: structuredClone(modelBindings),
     idempotencyKey: createCanvasSkillIdempotencyKey(),
   };
+}
+
+export function currentSkillRecheckRequestFromHistory(
+  value: unknown,
+  currentSkill: SkillDefinition | undefined,
+): SkillRunRequest {
+  if (!currentSkill || !currentSkill.enabled || !currentSkill.allowedSurfaces.includes('canvas')) {
+    throw new Error('当前 Skill 已删除或不可用，无法按当前规则复检');
+  }
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('旧运行记录缺少冻结复检上下文，无法按当前规则复检');
+  }
+  const item = value as Record<string, unknown>;
+  if (item.skillId !== currentSkill.id) {
+    throw new Error('当前 Skill 已删除或不可用，无法按当前规则复检');
+  }
+  if (!nonEmptyString(item.workspaceId)) {
+    throw new Error('旧运行记录缺少工作区信息，无法按当前规则复检');
+  }
+  try {
+    return { ...frozenSkillRunRequestFromHistory(value), skillVersion: currentSkill.version };
+  } catch {
+    throw new Error('旧运行记录缺少冻结复检上下文，无法按当前规则复检');
+  }
 }
 
 export async function downloadPlatformComplianceReport(
