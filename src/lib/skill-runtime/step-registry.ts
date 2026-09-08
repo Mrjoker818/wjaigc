@@ -16,6 +16,10 @@ import { createPostgresAssetStorage } from '@/lib/asset-core/storage';
 import { enrichCompletedImageResult } from '@/lib/asset-core/image-result-metadata';
 import { auditComplianceMedia } from '@/lib/platform-compliance/media-audit';
 import { buildComplianceReport } from '@/lib/platform-compliance/report-builder';
+import {
+  complianceReportFromAssetVersion,
+  persistComplianceReportAsset,
+} from '@/lib/platform-compliance/report-asset';
 import { canonicalComplianceReportJson } from '@/lib/platform-compliance/report-schema';
 import { resolveComplianceRuleSet } from '@/lib/platform-compliance/rules';
 import { evaluateTechnicalRules } from '@/lib/platform-compliance/technical-evaluator';
@@ -512,10 +516,34 @@ export function createProductionSkillStepRegistry(input: {
         signal: step.signal,
       });
       const report = buildReport([], visionResult);
+      const sourceTrace = parseWorkspaceSourceTrace({
+        source: 'canvas-skill',
+        runId: step.runId,
+        skillId: input.request.skillId,
+        skillVersion: input.request.skillVersion,
+        sourceVersionIds: [sourceVersionId],
+        modelBindings: input.request.modelBindings,
+        createdAt: generatedAt,
+      });
+      if (sourceTrace?.source !== 'canvas-skill') {
+        throw imageAdmissionError('Skill compliance report source trace could not be frozen');
+      }
+      const reportVersion = await persistComplianceReportAsset({
+        actorUserId: step.actorUserId,
+        projectId: step.projectId,
+        runId: step.runId,
+        stepId: step.step.id,
+        report,
+        sourceVersionIds: [sourceVersionId],
+        sourceTrace,
+        idempotencyKey: `${step.operation.idempotencyKey}:report-asset`,
+        requestDigest: step.requestDigest,
+      });
+      const authoritativeReport = complianceReportFromAssetVersion(reportVersion);
       return {
-        assetVersionIds: [],
+        assetVersionIds: [reportVersion.id],
         media: [],
-        structured: { schemaId: 'platform-compliance-report-v1', value: report },
+        structured: { schemaId: 'platform-compliance-report-v1', value: authoritativeReport },
       };
     } catch (error) {
       if (!(error instanceof ComplianceVisionError)) throw error;

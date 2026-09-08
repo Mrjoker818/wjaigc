@@ -8,14 +8,22 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({
   fetchWithV1Retry: vi.fn(),
   getApiProviders: vi.fn(),
+  persistComplianceReportAsset: vi.fn(),
 }));
 
 vi.mock('server-only', () => ({}));
 vi.mock('@/lib/api-helpers', () => ({ fetchWithV1Retry: mocks.fetchWithV1Retry }));
 vi.mock('@/lib/server-api-config', () => ({ getApiProviders: mocks.getApiProviders }));
+vi.mock('@/lib/platform-compliance/report-asset', () => ({
+  persistComplianceReportAsset: mocks.persistComplianceReportAsset,
+  complianceReportFromAssetVersion: (version: { metadata?: { reportContent?: string } }) => (
+    JSON.parse(version.metadata?.reportContent || '{}') as unknown
+  ),
+}));
 
 import { auditComplianceMedia } from '@/lib/platform-compliance/media-audit';
 import { buildComplianceReport } from '@/lib/platform-compliance/report-builder';
+import { canonicalComplianceReportJson } from '@/lib/platform-compliance/report-schema';
 import { resolveComplianceRuleSet } from '@/lib/platform-compliance/rules';
 import { evaluateTechnicalRules } from '@/lib/platform-compliance/technical-evaluator';
 import {
@@ -113,6 +121,18 @@ function complianceStepInput(
 describe('platform compliance report execution', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.persistComplianceReportAsset.mockImplementation(async input => {
+      const reportContent = canonicalComplianceReportJson(input.report);
+      return {
+        id: 'report-version-1', parentVersionIds: [],
+        file: {
+          availability: 'ready', mimeType: 'application/json',
+          byteSize: Buffer.byteLength(reportContent),
+          checksum: createHash('sha256').update(reportContent).digest('hex'),
+        },
+        metadata: { schemaId: 'platform-compliance-report-v1', reportContent },
+      };
+    });
     mocks.getApiProviders.mockResolvedValue([{
       id: 'frozen-vision', name: 'Frozen Vision', baseUrl: 'https://vision.example/v1',
       apiKey: 'test-key', isEnabled: true, type: 'vlm', createdAt: 1, updatedAt: 1,
@@ -219,6 +239,15 @@ describe('platform compliance report execution', () => {
     expect(mocks.fetchWithV1Retry.mock.calls[0]?.[0]).toBe('https://vision.example/v1');
     expect(String(mocks.fetchWithV1Retry.mock.calls[0]?.[2]?.body)).toContain(imageDataUrl);
     expect(String(mocks.fetchWithV1Retry.mock.calls[0]?.[2]?.body)).not.toContain('client-must-not-win');
+    expect(mocks.persistComplianceReportAsset).toHaveBeenCalledWith(expect.objectContaining({
+      actorUserId: 'user-1', projectId: 'project-1', runId: 'run-1', stepId: 'audit:b',
+      sourceVersionIds: ['asset-version-b'], requestDigest: 'request-digest',
+      idempotencyKey: 'provider-idempotency:report-asset',
+      sourceTrace: expect.objectContaining({
+        source: 'canvas-skill', runId: 'run-1', sourceVersionIds: ['asset-version-b'],
+      }),
+    }));
+    expect(result.assetVersionIds).toEqual(['report-version-1']);
     expect(result.structured).toMatchObject({ schemaId: 'platform-compliance-report-v1' });
   });
 
