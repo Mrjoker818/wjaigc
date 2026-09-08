@@ -8,6 +8,15 @@ import { getServerDataRoot } from '@/lib/server-data-root';
 
 const DEFAULT_MAX_BYTES = 25 * 1024 * 1024;
 const DEFAULT_MAX_PIXELS = 40_000_000;
+const BASE64_DECODE_CHUNK_CHARS = 64 * 1024;
+const DATA_URL_MIME_BY_HEADER: Readonly<Record<string, string>> = {
+  'data:image/avif;base64,': 'image/avif',
+  'data:image/gif;base64,': 'image/gif',
+  'data:image/jpeg;base64,': 'image/jpeg',
+  'data:image/png;base64,': 'image/png',
+  'data:image/tiff;base64,': 'image/tiff',
+  'data:image/webp;base64,': 'image/webp',
+};
 
 const MIME_BY_FORMAT: Record<string, string> = {
   avif: 'image/avif',
@@ -82,22 +91,61 @@ function detectImageMimeType(buffer: Buffer): string | null {
   return null;
 }
 
-function decodeStrictBase64(value: string, maxBytes: number): Buffer {
-  const padding = value.endsWith('==') ? 2 : value.endsWith('=') ? 1 : 0;
-  const estimatedBytes = Math.floor((value.length * 3) / 4) - padding;
+function isBase64Character(code: number): boolean {
+  return code >= 65 && code <= 90
+    || code >= 97 && code <= 122
+    || code >= 48 && code <= 57
+    || code === 43
+    || code === 47;
+}
+
+function trimWithoutCopy(value: string): string {
+  let start = 0;
+  let end = value.length;
+  while (start < end && value[start].trim().length === 0) start += 1;
+  while (end > start && value[end - 1].trim().length === 0) end -= 1;
+  return start === 0 && end === value.length ? value : value.slice(start, end);
+}
+
+function decodeStrictBase64(
+  value: string,
+  start: number,
+  end: number,
+  maxBytes: number,
+): Buffer {
+  const length = end - start;
+  const padding = value.charCodeAt(end - 1) === 61
+    ? value.charCodeAt(end - 2) === 61 ? 2 : 1
+    : 0;
+  const estimatedBytes = Math.floor((length * 3) / 4) - padding;
   if (estimatedBytes > maxBytes) {
     throw new SafeImageInputError('Image exceeds the decoded size limit');
   }
-  if (
-    value.length === 0
-    || value.length % 4 !== 0
-    || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(value)
-  ) {
+  if (length === 0 || length % 4 !== 0) {
     throw new SafeImageInputError('Image base64 is malformed');
   }
+  const contentEnd = end - padding;
+  for (let index = start; index < contentEnd; index += 1) {
+    if (!isBase64Character(value.charCodeAt(index))) {
+      throw new SafeImageInputError('Image base64 is malformed');
+    }
+  }
+  for (let index = contentEnd; index < end; index += 1) {
+    if (value.charCodeAt(index) !== 61) {
+      throw new SafeImageInputError('Image base64 is malformed');
+    }
+  }
+
   let buffer: Buffer;
   try {
-    buffer = Buffer.from(value, 'base64');
+    buffer = Buffer.allocUnsafe(estimatedBytes);
+    let written = 0;
+    for (let offset = start; offset < end; offset += BASE64_DECODE_CHUNK_CHARS) {
+      const chunkEnd = Math.min(end, offset + BASE64_DECODE_CHUNK_CHARS);
+      const chunk = Buffer.from(value.slice(offset, chunkEnd), 'base64');
+      written += chunk.copy(buffer, written);
+    }
+    if (written !== estimatedBytes) throw new Error('Decoded image length did not match base64');
   } catch (error) {
     throw new SafeImageInputError('Image base64 could not be decoded', { cause: error });
   }
@@ -111,14 +159,14 @@ export function decodeSafeImageInput(
   input: string,
   options: Pick<SafeImageInputOptions, 'allowRawBase64' | 'maxBytes'> = {},
 ): DecodedSafeImage {
-  const value = input.trim();
+  const value = trimWithoutCopy(input);
   const maxBytes = options.maxBytes ?? DEFAULT_MAX_BYTES;
-  const dataUrl = value.match(
-    /^data:(image\/(?:avif|gif|jpeg|png|tiff|webp));base64,/i,
-  );
-  if (dataUrl) {
-    const declaredMime = dataUrl[1].toLowerCase();
-    const buffer = decodeStrictBase64(value.slice(dataUrl[0].length), maxBytes);
+  const headerProbe = value.slice(0, Math.min(value.length, 64));
+  const commaIndex = headerProbe.indexOf(',');
+  const header = commaIndex < 0 ? '' : headerProbe.slice(0, commaIndex + 1).toLowerCase();
+  const declaredMime = DATA_URL_MIME_BY_HEADER[header];
+  if (declaredMime) {
+    const buffer = decodeStrictBase64(value, commaIndex + 1, value.length, maxBytes);
     const detectedMime = detectImageMimeType(buffer);
     if (!detectedMime || detectedMime !== declaredMime) {
       throw new SafeImageInputError('Image MIME does not match its decoded format');
@@ -131,7 +179,7 @@ export function decodeSafeImageInput(
   if (!options.allowRawBase64) {
     throw new SafeImageInputError('Raw image base64 is not allowed');
   }
-  const buffer = decodeStrictBase64(value, maxBytes);
+  const buffer = decodeStrictBase64(value, 0, value.length, maxBytes);
   const mimeType = detectImageMimeType(buffer);
   if (!mimeType) {
     throw new SafeImageInputError('Decoded input is not a supported image');
@@ -305,7 +353,7 @@ export async function loadSafeImageInput(
   input: string,
   options: SafeImageInputOptions = {},
 ): Promise<DecodedSafeImage> {
-  const value = input.trim();
+  const value = trimWithoutCopy(input);
   const maxBytes = options.maxBytes ?? DEFAULT_MAX_BYTES;
   options.signal?.throwIfAborted();
 

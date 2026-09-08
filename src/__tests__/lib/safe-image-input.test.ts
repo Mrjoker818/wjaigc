@@ -77,6 +77,23 @@ describe('safe edit image inputs', () => {
     expect((error as Error).message).toMatch(/decoded size limit/i);
   });
 
+  it('wraps a malformed exactly-25-MiB data URL without a native RangeError', () => {
+    const maxBytes = 25 * 1024 * 1024;
+    const encodedLength = Math.ceil(maxBytes / 3) * 4;
+    const exactLimitPayload = `${'A'.repeat(encodedLength - 2)}==`;
+
+    let error: unknown;
+    try {
+      decodeSafeImageInput(`data:image/png;base64,${exactLimitPayload}`, { maxBytes });
+    } catch (caught) {
+      error = caught;
+    }
+
+    expect(error).toBeInstanceOf(SafeImageInputError);
+    expect(error).not.toBeInstanceOf(RangeError);
+    expect(error).toMatchObject({ code: 'UNSAFE_IMAGE_INPUT' });
+  }, 20_000);
+
   it('keeps runtime abort errors handled in an isolated Sharp process', () => {
     const probe = spawnSync(process.execPath, ['--import', 'tsx', '--input-type=module', '-'], {
       cwd: process.cwd(),

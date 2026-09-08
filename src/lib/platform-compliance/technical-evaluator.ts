@@ -16,11 +16,12 @@ function failedStatus(rule: PlatformComplianceRule): ComplianceCheckResult['stat
 
 function result(
   rule: PlatformComplianceRule,
-  passed: boolean,
+  status: ComplianceCheckResult['status'],
   evidence: readonly string[],
   measuredValue: ComplianceCheckResult['measuredValue'],
   requiredValue: ComplianceCheckResult['requiredValue'],
   remediation: string,
+  confidence: number | null = 1,
 ): ComplianceCheckResult {
   return Object.freeze({
     ruleId: rule.id,
@@ -28,12 +29,12 @@ function result(
     title: rule.title,
     severity: rule.severity,
     evaluator: rule.evaluator,
-    status: passed ? 'passed' : failedStatus(rule),
+    status,
     evidence: Object.freeze([...evidence]),
     measuredValue,
     requiredValue,
-    confidence: 1,
-    remediation: passed ? null : remediation,
+    confidence,
+    remediation: status === 'passed' ? null : remediation,
   });
 }
 
@@ -49,7 +50,7 @@ function evaluateFormat(
     && (format !== 'GIF' || !facts.isAnimated || animatedGifAllowed);
   return result(
     rule,
-    passed,
+    passed ? 'passed' : failedStatus(rule),
     [`mimeType=${facts.mimeType}`, `format=${format}`, `animated=${facts.isAnimated}`],
     format,
     supportedFormats.join(','),
@@ -67,7 +68,7 @@ function evaluateDimensions(
     && facts.longestEdge >= minimum && facts.longestEdge <= maximum;
   return result(
     rule,
-    passed,
+    passed ? 'passed' : failedStatus(rule),
     [`width=${facts.width}`, `height=${facts.height}`, `longestEdge=${facts.longestEdge}`],
     facts.longestEdge,
     `${minimum}-${maximum}`,
@@ -80,10 +81,16 @@ function evaluateWhiteBackground(
   rule: PlatformComplianceRule,
 ): ComplianceCheckResult {
   const requiredRatio = 0.99;
-  const passed = !facts.hasTransparentPixels && facts.whiteBackgroundRatio >= requiredRatio;
+  const outerPassed = facts.whiteOuterBackgroundRatio >= requiredRatio;
+  const deepPassed = facts.whiteDeepBackgroundRatio >= requiredRatio;
+  const conflictingEvidence = !facts.hasTransparentPixels && outerPassed && !deepPassed;
+  const status = facts.hasTransparentPixels || !outerPassed
+    ? failedStatus(rule)
+    : conflictingEvidence ? 'unknown' : 'passed';
+  const measuredValue = `outer=${facts.whiteOuterBackgroundRatio};deep=${facts.whiteDeepBackgroundRatio};transparent=${facts.hasTransparentPixels}`;
   return result(
     rule,
-    passed,
+    status,
     [
       `hasAlpha=${facts.hasAlpha}`,
       `hasTransparentPixels=${facts.hasTransparentPixels}`,
@@ -93,11 +100,21 @@ function evaluateWhiteBackground(
       `backgroundSamples=${facts.backgroundSampleCount}`,
       `whiteBackgroundSamples=${facts.whiteBackgroundSampleCount}`,
       `whiteBackgroundRatio=${facts.whiteBackgroundRatio}`,
+      `outerBackgroundSamples=${facts.outerBackgroundSampleCount}`,
+      `whiteOuterBackgroundSamples=${facts.whiteOuterBackgroundSampleCount}`,
+      `whiteOuterBackgroundRatio=${facts.whiteOuterBackgroundRatio}`,
+      `deepBackgroundSamples=${facts.deepBackgroundSampleCount}`,
+      `whiteDeepBackgroundSamples=${facts.whiteDeepBackgroundSampleCount}`,
+      `whiteDeepBackgroundRatio=${facts.whiteDeepBackgroundRatio}`,
+      `backgroundEvidenceConflict=${conflictingEvidence}`,
       `whiteRgbDistanceThreshold=${WHITE_RGB_DISTANCE_EVIDENCE}`,
     ],
-    facts.whiteBackgroundRatio,
-    `opaque ${String(rule.thresholds?.backgroundColor ?? '#FFFFFF')} ratio>=${requiredRatio}`,
-    'Use an opaque pure-white background across the image edges.',
+    measuredValue,
+    `opaque ${String(rule.thresholds?.backgroundColor ?? '#FFFFFF')} outer/deep ratio>=${requiredRatio}`,
+    conflictingEvidence
+      ? 'Use vision review to distinguish a centered product from a non-white background.'
+      : 'Use an opaque pure-white background across the image edges.',
+    status === 'unknown' ? null : 1,
   );
 }
 

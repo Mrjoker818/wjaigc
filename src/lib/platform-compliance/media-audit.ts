@@ -25,6 +25,12 @@ export interface ComplianceMediaFacts {
   backgroundSampleCount: number;
   whiteBackgroundSampleCount: number;
   whiteBackgroundRatio: number;
+  outerBackgroundSampleCount: number;
+  whiteOuterBackgroundSampleCount: number;
+  whiteOuterBackgroundRatio: number;
+  deepBackgroundSampleCount: number;
+  whiteDeepBackgroundSampleCount: number;
+  whiteDeepBackgroundRatio: number;
 }
 
 function measureWhiteBackgroundSamples(
@@ -38,10 +44,14 @@ function measureWhiteBackgroundSamples(
   | 'backgroundSampleMaxDepthRatio'
   | 'backgroundSampleCount'
   | 'whiteBackgroundSampleCount'
-  | 'whiteBackgroundRatio'> {
-  let backgroundSampleCount = 0;
-  let whiteBackgroundSampleCount = 0;
-  const sample = (x: number, y: number): void => {
+  | 'whiteBackgroundRatio'
+  | 'outerBackgroundSampleCount'
+  | 'whiteOuterBackgroundSampleCount'
+  | 'whiteOuterBackgroundRatio'
+  | 'deepBackgroundSampleCount'
+  | 'whiteDeepBackgroundSampleCount'
+  | 'whiteDeepBackgroundRatio'> {
+  const isWhite = (x: number, y: number): boolean => {
     const offset = (y * width + x) * channels;
     const redDistance = 255 - pixels[offset];
     const greenDistance = 255 - pixels[offset + 1];
@@ -50,29 +60,42 @@ function measureWhiteBackgroundSamples(
     const distance = Math.sqrt(
       redDistance * redDistance + greenDistance * greenDistance + blueDistance * blueDistance,
     );
-    backgroundSampleCount += 1;
-    if (alpha === 255 && distance <= WHITE_RGB_DISTANCE) whiteBackgroundSampleCount += 1;
+    return alpha === 255 && distance <= WHITE_RGB_DISTANCE;
   };
 
   const maxXDepth = Math.floor((width - 1) * BACKGROUND_SAMPLE_MAX_DEPTH_RATIO);
   const maxYDepth = Math.floor((height - 1) * BACKGROUND_SAMPLE_MAX_DEPTH_RATIO);
   const xPointCount = Math.min(BACKGROUND_SAMPLE_AXIS_POINTS, maxXDepth + 1);
   const yPointCount = Math.min(BACKGROUND_SAMPLE_AXIS_POINTS, maxYDepth + 1);
-  const coordinates = new Set<string>();
+  const outerCoordinates = new Set<string>();
+  const deepCoordinates = new Set<string>();
   for (let xIndex = 0; xIndex < xPointCount; xIndex += 1) {
     const xDepth = xPointCount === 1 ? 0 : Math.floor(xIndex * maxXDepth / (xPointCount - 1));
     for (let yIndex = 0; yIndex < yPointCount; yIndex += 1) {
       const yDepth = yPointCount === 1 ? 0 : Math.floor(yIndex * maxYDepth / (yPointCount - 1));
-      coordinates.add(`${xDepth},${yDepth}`);
-      coordinates.add(`${width - xDepth - 1},${yDepth}`);
-      coordinates.add(`${xDepth},${height - yDepth - 1}`);
-      coordinates.add(`${width - xDepth - 1},${height - yDepth - 1}`);
+      const target = xDepth === 0 || yDepth === 0 ? outerCoordinates : deepCoordinates;
+      target.add(`${xDepth},${yDepth}`);
+      target.add(`${width - xDepth - 1},${yDepth}`);
+      target.add(`${xDepth},${height - yDepth - 1}`);
+      target.add(`${width - xDepth - 1},${height - yDepth - 1}`);
     }
   }
-  for (const coordinate of coordinates) {
-    const [x, y] = coordinate.split(',').map(Number);
-    sample(x, y);
-  }
+  for (const coordinate of outerCoordinates) deepCoordinates.delete(coordinate);
+  const countWhite = (coordinates: ReadonlySet<string>): number => {
+    let count = 0;
+    for (const coordinate of coordinates) {
+      const [x, y] = coordinate.split(',').map(Number);
+      if (isWhite(x, y)) count += 1;
+    }
+    return count;
+  };
+  const outerBackgroundSampleCount = outerCoordinates.size;
+  const deepBackgroundSampleCount = deepCoordinates.size;
+  const whiteOuterBackgroundSampleCount = countWhite(outerCoordinates);
+  const whiteDeepBackgroundSampleCount = countWhite(deepCoordinates);
+  const backgroundSampleCount = outerBackgroundSampleCount + deepBackgroundSampleCount;
+  const whiteBackgroundSampleCount = whiteOuterBackgroundSampleCount
+    + whiteDeepBackgroundSampleCount;
 
   return {
     backgroundSampleRegion: BACKGROUND_SAMPLE_REGION,
@@ -83,6 +106,16 @@ function measureWhiteBackgroundSamples(
     whiteBackgroundRatio: backgroundSampleCount === 0
       ? 0
       : whiteBackgroundSampleCount / backgroundSampleCount,
+    outerBackgroundSampleCount,
+    whiteOuterBackgroundSampleCount,
+    whiteOuterBackgroundRatio: outerBackgroundSampleCount === 0
+      ? 0
+      : whiteOuterBackgroundSampleCount / outerBackgroundSampleCount,
+    deepBackgroundSampleCount,
+    whiteDeepBackgroundSampleCount,
+    whiteDeepBackgroundRatio: deepBackgroundSampleCount === 0
+      ? 0
+      : whiteDeepBackgroundSampleCount / deepBackgroundSampleCount,
   };
 }
 

@@ -43,6 +43,8 @@ describe('platform compliance deterministic media audit', () => {
       backgroundSampleRegion: 'corner-depth-zones',
       backgroundSampleRegionCount: 4,
       backgroundSampleMaxDepthRatio: 0.24,
+      whiteOuterBackgroundRatio: 1,
+      whiteDeepBackgroundRatio: 1,
       whiteBackgroundRatio: 1,
     });
     expect(facts.backgroundSampleCount).toBeLessThanOrEqual(256);
@@ -61,6 +63,9 @@ describe('platform compliance deterministic media audit', () => {
         'backgroundSampleRegion=corner-depth-zones',
         'backgroundSampleRegions=4',
         'backgroundSampleMaxDepthRatio=0.24',
+        'whiteOuterBackgroundRatio=1',
+        'whiteDeepBackgroundRatio=1',
+        'backgroundEvidenceConflict=false',
         `backgroundSamples=${facts.backgroundSampleCount}`,
         'whiteBackgroundRatio=1',
       ]),
@@ -115,7 +120,7 @@ describe('platform compliance deterministic media audit', () => {
     expect(format).toMatchObject({ status: 'passed', measuredValue: 'TIFF' });
   });
 
-  it('does not mistake an 80px white frame around a dark 600px background for white', async () => {
+  it('returns unknown for an 80px white frame with conflicting deep dark evidence', async () => {
     const framed = await sharp({
       create: { width: 600, height: 600, channels: 3, background: '#ffffff' },
     }).composite([{
@@ -145,28 +150,36 @@ describe('platform compliance deterministic media audit', () => {
       backgroundSampleMaxDepthRatio: 0.24,
     });
     expect(facts.backgroundSampleCount).toBeLessThanOrEqual(256);
+    expect(facts.whiteOuterBackgroundRatio).toBe(1);
+    expect(facts.whiteDeepBackgroundRatio).toBeLessThan(0.99);
     expect(facts.whiteBackgroundRatio).toBeLessThan(0.99);
     expect(background).toMatchObject({
-      status: 'blocked',
+      status: 'unknown',
+      confidence: null,
+      measuredValue: `outer=${facts.whiteOuterBackgroundRatio};deep=${facts.whiteDeepBackgroundRatio};transparent=false`,
+      remediation: expect.stringMatching(/vision|review/i),
       evidence: expect.arrayContaining([
         'backgroundSampleRegion=corner-depth-zones',
         'backgroundSampleRegions=4',
         'backgroundSampleMaxDepthRatio=0.24',
         `backgroundSamples=${facts.backgroundSampleCount}`,
         `whiteBackgroundSamples=${facts.whiteBackgroundSampleCount}`,
+        'whiteOuterBackgroundRatio=1',
+        `whiteDeepBackgroundRatio=${facts.whiteDeepBackgroundRatio}`,
+        'backgroundEvidenceConflict=true',
       ]),
     });
   });
 
-  it('excludes a centered product from corner background samples', async () => {
+  it('does not block an 85-percent centered product when background evidence conflicts', async () => {
     const centeredProduct = await sharp({
       create: { width: 600, height: 600, channels: 3, background: '#ffffff' },
     }).composite([{
       input: await sharp({
-        create: { width: 300, height: 300, channels: 3, background: '#111111' },
+        create: { width: 510, height: 510, channels: 3, background: '#111111' },
       }).png().toBuffer(),
-      left: 150,
-      top: 150,
+      left: 45,
+      top: 45,
     }]).png().toBuffer();
     const pixels = await sharp(centeredProduct).raw().toBuffer({ resolveWithObject: true });
     const centerOffset = (300 * pixels.info.width + 300) * pixels.info.channels;
@@ -179,8 +192,33 @@ describe('platform compliance deterministic media audit', () => {
       .find(check => check.ruleId === 'amazon-main-white-background');
 
     expect(facts.backgroundSampleRegion).toBe('corner-depth-zones');
-    expect(facts.whiteBackgroundRatio).toBe(1);
-    expect(background).toMatchObject({ status: 'passed' });
+    expect(facts.whiteOuterBackgroundRatio).toBe(1);
+    expect(facts.whiteDeepBackgroundRatio).toBeLessThan(0.99);
+    expect(background).toMatchObject({ status: 'unknown', confidence: null });
+  });
+
+  it('deterministically blocks an opaque image whose outer edge is non-white', async () => {
+    const dark = await sharp({
+      create: { width: 1600, height: 1600, channels: 3, background: '#111111' },
+    }).png().toBuffer();
+    const facts = await auditComplianceMedia({
+      imageInput: dataUrl(dark), signal: new AbortController().signal,
+    });
+    const background = evaluateTechnicalRules(facts, amazonMainRules())
+      .find(check => check.ruleId === 'amazon-main-white-background');
+
+    expect(facts).toMatchObject({
+      hasTransparentPixels: false,
+      whiteOuterBackgroundRatio: 0,
+      whiteDeepBackgroundRatio: 0,
+    });
+    expect(background).toMatchObject({
+      status: 'blocked', confidence: 1,
+      evidence: expect.arrayContaining([
+        'whiteOuterBackgroundRatio=0',
+        'backgroundEvidenceConflict=false',
+      ]),
+    });
   });
 
   it('blocks off-white edges using many samples instead of one corner', async () => {
