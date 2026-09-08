@@ -180,7 +180,7 @@ describe('canvas chat Skill catalog contract', () => {
     const canvasVersions = new Map(CANVAS_WORKFLOW_SKILLS.map(skill => [skill.id, skill.version]));
     const simpleChatIds = new Set(SIMPLE_CHAT_PRESET_SKILLS.map(skill => skill.id));
 
-    expect(CANVAS_WORKFLOW_SKILLS).toHaveLength(27);
+    expect(CANVAS_WORKFLOW_SKILLS).toHaveLength(28);
     expect(SIMPLE_CHAT_PRESET_SKILLS).toHaveLength(16);
     for (const id of contentCommerceSkillIds) {
       expect(canvasVersions.get(id)).toBe(1);

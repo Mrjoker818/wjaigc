@@ -4,7 +4,7 @@ import { useEffect, useId, useRef, useState } from 'react';
 import { Upload } from 'lucide-react';
 
 import { parseSkillDatasetFile } from './dataset-file-parser';
-import { SKILL_INPUT_LIMITS } from '@/lib/skill-runtime/input-resolver';
+import { resolveSkillInputOptions, SKILL_INPUT_LIMITS } from '@/lib/skill-runtime/input-resolver';
 import type { SkillInputField } from '@/lib/skill-runtime/types';
 
 const FORBIDDEN_DATASET_KEYS = new Set(['__proto__', 'prototype', 'constructor']);
@@ -135,6 +135,16 @@ export function SkillInputFields({
     }
   }, [fields, onChange, values]);
 
+  useEffect(() => {
+    for (const field of fields) {
+      if (!field.dependentOptions) continue;
+      const current = effectiveValue(field, values);
+      if (typeof current !== 'string' || current.length === 0) continue;
+      const options = resolveSkillInputOptions(fields, values, field.key);
+      if (!options.includes(current)) onChange(field.key, undefined);
+    }
+  }, [fields, onChange, values]);
+
   const commitValue = (field: SkillInputField, value: unknown): boolean => {
     if (serializedBytes({ ...values, [field.key]: value }) > SKILL_INPUT_LIMITS.serialized) {
       setLocalErrors(current => ({ ...current, [field.key]: '输入内容超过 512 KiB' }));
@@ -194,7 +204,7 @@ export function SkillInputFields({
             control = (
               <textarea
                 {...common}
-                maxLength={SKILL_INPUT_LIMITS.text}
+                maxLength={Math.min(field.maximumLength ?? SKILL_INPUT_LIMITS.text, SKILL_INPUT_LIMITS.text)}
                 value={textValue(value)}
                 onChange={event => commitValue(field, event.target.value)}
               />
@@ -206,7 +216,7 @@ export function SkillInputFields({
               <input
                 {...common}
                 type="text"
-                maxLength={SKILL_INPUT_LIMITS.text}
+                maxLength={Math.min(field.maximumLength ?? SKILL_INPUT_LIMITS.text, SKILL_INPUT_LIMITS.text)}
                 value={textValue(value)}
                 onChange={event => commitValue(field, event.target.value)}
               />
@@ -337,20 +347,24 @@ export function SkillInputFields({
               </div>
             );
             break;
-          case 'select':
+          case 'select': {
+            const selectOptions = resolveSkillInputOptions(fields, values, field.key);
             control = (
               <select
                 {...common}
                 value={textValue(value)}
                 onChange={event => commitValue(field, event.target.value)}
               >
-                {!field.required && <option value="">请选择</option>}
-                {(field.options || []).map(option => (
+                {(!field.required || textValue(value) === '') && (
+                  <option value="" disabled={field.required}>请选择</option>
+                )}
+                {selectOptions.map(option => (
                   <option key={option} value={option}>{option}</option>
                 ))}
               </select>
             );
             break;
+          }
           case 'multi-select': {
             const selected = Array.isArray(value)
               ? value.filter(item => typeof item === 'string')

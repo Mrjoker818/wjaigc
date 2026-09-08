@@ -5,6 +5,7 @@ import { resolve } from 'node:path';
 import {
   CANVAS_PRESET_SKILLS,
   CANVAS_WORKFLOW_SKILLS,
+  LOVART_PLATFORM_COMPLIANCE_SKILLS,
   SIMPLE_CHAT_PRESET_SKILLS,
   listSkillsForSurface,
   requireSkillForSurface,
@@ -37,6 +38,14 @@ const secondBatchIds = [
   'preset-batch-sku-assets',
 ];
 
+const preComplianceCanvasWorkflowIds = [
+  ...canvasIds,
+  'preset-ad-ab-variants',
+  'preset-retargeting-creative',
+  'preset-omnichannel-campaign',
+  ...secondBatchIds,
+];
+
 const chatPanelSource = readFileSync(
   resolve(process.cwd(), 'src/components/chat-panel.tsx'),
   'utf8',
@@ -47,10 +56,10 @@ const canvasClientSource = readFileSync(
 );
 
 describe('skill runtime catalog', () => {
-  it('保留 21 个画布预设并向 canvas/workflow 发布 27 项权威目录', () => {
+  it('保留原 27 项定义和顺序，仅在末尾追加平台合规 Skill', () => {
     expect(CANVAS_PRESET_SKILLS.map(skill => skill.id)).toEqual(canvasIds);
     expect(CANVAS_PRESET_SKILLS).toHaveLength(21);
-    expect(CANVAS_WORKFLOW_SKILLS).toHaveLength(27);
+    expect(CANVAS_WORKFLOW_SKILLS).toHaveLength(28);
     expect(CANVAS_WORKFLOW_SKILLS.slice(0, CANVAS_PRESET_SKILLS.length)).toEqual(
       CANVAS_PRESET_SKILLS,
     );
@@ -62,15 +71,48 @@ describe('skill runtime catalog', () => {
     );
     expect(CANVAS_PRESET_SKILLS.every(skill =>
       skill.allowedSurfaces.join(',') === 'canvas,workflow')).toBe(true);
-    expect(CANVAS_WORKFLOW_SKILLS.map(skill => skill.id).slice(-3)).toEqual(secondBatchIds);
+    expect(CANVAS_WORKFLOW_SKILLS.slice(0, 27).map(skill => skill.id))
+      .toEqual(preComplianceCanvasWorkflowIds);
+    expect(CANVAS_WORKFLOW_SKILLS[27]).toBe(LOVART_PLATFORM_COMPLIANCE_SKILLS[0]);
+    expect(CANVAS_WORKFLOW_SKILLS.map(skill => skill.id).slice(-4)).toEqual([
+      ...secondBatchIds,
+      'preset-platform-compliance-audit',
+    ]);
+    expect(listSkillsForSurface('canvas')).toHaveLength(28);
+    expect(listSkillsForSurface('workflow')).toHaveLength(28);
   });
 
   it('保留 16 个独立对话 Skill 且不泄漏画布目录', () => {
     expect(SIMPLE_CHAT_PRESET_SKILLS.map(skill => skill.id)).toEqual(simpleChatIds);
     expect(listSkillsForSurface('simple-chat').map(skill => skill.id)).toEqual(simpleChatIds);
     expect(listSkillsForSurface('simple-chat').some(skill => canvasIds.includes(skill.id))).toBe(false);
+    expect(listSkillsForSurface('simple-chat')).toHaveLength(16);
+    expect(listSkillsForSurface('simple-chat').some(
+      skill => skill.id === 'preset-platform-compliance-audit',
+    )).toBe(false);
     expect(() => requireSkillForSurface('preset-ad-ab-variants', 'simple-chat'))
       .toThrowError(SkillSurfaceForbiddenError);
+  });
+
+  it('机械冻结平台合规 Skill 的公开目录合同', () => {
+    const skill = LOVART_PLATFORM_COMPLIANCE_SKILLS[0];
+    expect({
+      id: skill.id,
+      name: skill.name,
+      category: skill.category,
+      description: skill.description,
+      systemPrompt: skill.systemPrompt,
+      allowedSurfaces: skill.allowedSurfaces,
+      inputKeys: skill.inputs.map(field => field.key),
+      step: {
+        id: skill.steps[0]?.id,
+        toolId: skill.steps[0]?.toolId,
+        execution: skill.steps[0]?.execution,
+        modelRole: skill.steps[0]?.modelRole,
+        maximumItems: skill.steps[0]?.fanOut?.maximumItems,
+        concurrency: skill.steps[0]?.fanOut?.concurrency,
+      },
+    }).toEqual(presetBaseline.platformCompliance);
   });
 
   it('机械保留迁移前的画布预设文案、参数槽和对话步骤', () => {

@@ -441,6 +441,7 @@ async function collectWorkspaceSources(root) {
     readFile(join(root, 'src/lib/skill-runtime/canvas-presets.ts'), 'utf8'),
     readFile(join(root, 'src/lib/skill-runtime/marketing-presets.ts'), 'utf8'),
     readFile(join(root, 'src/lib/skill-runtime/content-commerce-presets.ts'), 'utf8'),
+    readFile(join(root, 'src/lib/skill-runtime/platform-compliance-preset.ts'), 'utf8'),
     readFile(join(root, 'src/lib/skill-runtime/simple-chat-presets.ts'), 'utf8'),
   ]);
 
@@ -456,7 +457,8 @@ async function collectWorkspaceSources(root) {
     canvasSkillsSource: files[8],
     marketingSkillsSource: files[9],
     contentCommerceSkillsSource: files[10],
-    simpleChatSkillsSource: files[11],
+    platformComplianceSkillsSource: files[11],
+    simpleChatSkillsSource: files[12],
   };
 }
 
@@ -474,6 +476,7 @@ export async function collectStage4Inventory(root = process.cwd()) {
     canvasSkillsSource,
     marketingSkillsSource,
     contentCommerceSkillsSource,
+    platformComplianceSkillsSource,
     simpleChatSkillsSource,
   } = await collectWorkspaceSources(root);
 
@@ -544,15 +547,29 @@ export async function collectStage4Inventory(root = process.cwd()) {
     'surfaces',
     'workflow',
   );
+  const platformComplianceCanvasSkills = extractSkillIdsForSurface(
+    platformComplianceSkillsSource,
+    'LOVART_PLATFORM_COMPLIANCE_SKILLS',
+    'surfaces',
+    'canvas',
+  );
+  const platformComplianceWorkflowSkills = extractSkillIdsForSurface(
+    platformComplianceSkillsSource,
+    'LOVART_PLATFORM_COMPLIANCE_SKILLS',
+    'surfaces',
+    'workflow',
+  );
   const canvasSkills = uniqueInOrder([
     ...legacyCanvasSkills,
     ...marketingCanvasSkills,
     ...contentCommerceCanvasSkills,
+    ...platformComplianceCanvasSkills,
   ]);
   const workflowSkills = uniqueInOrder([
     ...legacyWorkflowSkills,
     ...marketingWorkflowSkills,
     ...contentCommerceWorkflowSkills,
+    ...platformComplianceWorkflowSkills,
   ]);
   const simpleChatSkills = extractSkillIdsForSurface(
     simpleChatSkillsSource,

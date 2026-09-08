@@ -129,7 +129,8 @@ function invalidType(field: SkillInputField): never {
 
 function validateString(field: SkillInputField, value: unknown): string {
   if (typeof value !== 'string') invalidType(field);
-  if (value.length > SKILL_INPUT_LIMITS.text) {
+  const limit = Math.min(field.maximumLength ?? SKILL_INPUT_LIMITS.text, SKILL_INPUT_LIMITS.text);
+  if (value.length > limit) {
     throw new SkillInputError('SKILL_INPUT_LIMIT_EXCEEDED', field.key);
   }
   return value;
@@ -146,7 +147,26 @@ function validateImages(field: SkillInputField, value: unknown): readonly string
   if (value.length > limit) {
     throw new SkillInputError('SKILL_INPUT_LIMIT_EXCEEDED', field.key);
   }
+  if (value.some(item => item.trim().length === 0 || item !== item.trim())
+    || new Set(value).size !== value.length) {
+    throw new SkillInputError('SKILL_INPUT_INVALID_VALUE', field.key);
+  }
   return value;
+}
+
+export function resolveSkillInputOptions(
+  fields: readonly SkillInputField[],
+  values: Readonly<Record<string, unknown>>,
+  fieldKey: string,
+): readonly string[] {
+  const field = fields.find(candidate => candidate.key === fieldKey);
+  if (!field) return [];
+  if (!field.dependentOptions) return field.options ?? [];
+  const sourceValue = values[field.dependentOptions.inputKey];
+  if (typeof sourceValue !== 'string') return [];
+  return Object.hasOwn(field.dependentOptions.values, sourceValue)
+    ? field.dependentOptions.values[sourceValue] ?? []
+    : [];
 }
 
 function validateMultiSelect(field: SkillInputField, value: unknown): readonly string[] {
@@ -180,7 +200,12 @@ function validateDataset(field: SkillInputField, value: unknown): readonly Recor
   return value;
 }
 
-function validateField(field: SkillInputField, value: unknown): unknown {
+function validateField(
+  field: SkillInputField,
+  value: unknown,
+  fields: readonly SkillInputField[],
+  values: Readonly<Record<string, unknown>>,
+): unknown {
   if (value === undefined || value === null) return undefined;
 
   switch (field.kind) {
@@ -194,7 +219,8 @@ function validateField(field: SkillInputField, value: unknown): unknown {
       return validateDataset(field, value);
     case 'select': {
       const selected = validateString(field, value);
-      if (field.options && !field.options.includes(selected)) {
+      const options = resolveSkillInputOptions(fields, values, field.key);
+      if ((field.options || field.dependentOptions) && !options.includes(selected)) {
         throw new SkillInputError('SKILL_INPUT_INVALID_VALUE', field.key);
       }
       return selected;
@@ -239,6 +265,11 @@ export function resolveSkillInputs(
   }
 
   const output: Record<string, unknown> = {};
+  const valuesWithDefaults: Record<string, unknown> = {};
+  for (const field of definition.inputs) {
+    const rawDescriptor = rawSnapshot.descriptors[field.key];
+    valuesWithDefaults[field.key] = rawDescriptor?.value ?? field.defaultValue;
+  }
   for (const field of definition.inputs) {
     if (FORBIDDEN_KEYS.has(field.key)) {
       throw new SkillInputError('SKILL_INPUT_FORBIDDEN_KEY', field.key);
@@ -251,6 +282,20 @@ export function resolveSkillInputs(
     )) {
       throw new SkillInputError('SKILL_INPUT_INVALID_DEFINITION', field.key);
     }
+    if (field.maximumLength !== undefined && (
+      typeof field.maximumLength !== 'number'
+      || !Number.isFinite(field.maximumLength)
+      || !Number.isInteger(field.maximumLength)
+      || field.maximumLength < 1
+    )) {
+      throw new SkillInputError('SKILL_INPUT_INVALID_DEFINITION', field.key);
+    }
+    if (field.dependentOptions) {
+      const dependency = fields.get(field.dependentOptions.inputKey);
+      if (!dependency || dependency.kind !== 'select') {
+        throw new SkillInputError('SKILL_INPUT_INVALID_DEFINITION', field.key);
+      }
+    }
     const rawDescriptor = rawSnapshot.descriptors[field.key];
     const rawValue = rawDescriptor?.value;
     const value = rawValue ?? field.defaultValue;
@@ -258,7 +303,7 @@ export function resolveSkillInputs(
       throw new SkillInputError('SKILL_INPUT_REQUIRED', field.key);
     }
     if (value !== undefined) assertStrictJsonValue(value, field);
-    const resolved = validateField(field, value);
+    const resolved = validateField(field, value, definition.inputs, valuesWithDefaults);
     output[field.key] = resolved;
   }
   for (const field of definition.inputs) {

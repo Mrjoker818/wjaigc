@@ -1155,5 +1155,22 @@
         "Logo"
       ]
     }
-  ]
+  ],
+  "platformCompliance": {
+    "id": "preset-platform-compliance-audit",
+    "name": "平台素材合规检查",
+    "category": "commerce",
+    "description": "按平台、地区和素材类型逐张检查商品图片，并交付可追踪的合规报告。",
+    "systemPrompt": "严格依据冻结规则和可验证证据检查素材。不得把未知结论标记为通过。",
+    "allowedSurfaces": ["canvas", "workflow"],
+    "inputKeys": ["sourceImages", "platform", "region", "assetType", "productCategory", "productFacts", "claims", "reportLanguage"],
+    "step": {
+      "id": "audit-image",
+      "toolId": "compliance_audit",
+      "execution": "parallel",
+      "modelRole": "vision",
+      "maximumItems": 20,
+      "concurrency": 3
+    }
+  }
 }

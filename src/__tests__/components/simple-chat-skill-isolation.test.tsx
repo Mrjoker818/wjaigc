@@ -97,6 +97,7 @@ describe('Simple Chat Skill catalog isolation', () => {
       'preset-video-platform-thumbnails',
       'preset-pinterest-pins',
       'preset-batch-sku-assets',
+      'preset-platform-compliance-audit',
     ]));
     expect(screen.queryByText('广告 A/B 变体')).toBeNull();
     expect(screen.queryByText('再营销素材')).toBeNull();
@@ -104,5 +105,6 @@ describe('Simple Chat Skill catalog isolation', () => {
     expect(screen.queryByText('YouTube/B站缩略图')).toBeNull();
     expect(screen.queryByText('Pinterest 图钉')).toBeNull();
     expect(screen.queryByText('批量 SKU 商品素材')).toBeNull();
+    expect(screen.queryByText('平台素材合规检查')).toBeNull();
   });
 });

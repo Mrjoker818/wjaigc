@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   SkillInputError,
+  resolveSkillInputOptions,
   resolveSkillInputs,
 } from '@/lib/skill-runtime/input-resolver';
 import {
@@ -77,6 +78,46 @@ function expectInputError(
 }
 
 describe('resolveSkillInputs', () => {
+  it('applies generic maximumLength and dependentOptions declarations', () => {
+    const constrained = createDefinition([
+      { key: 'platform', label: 'Platform', kind: 'select', required: true, options: ['Amazon', '京东'] },
+      {
+        key: 'region', label: 'Region', kind: 'select', required: true,
+        dependentOptions: { inputKey: 'platform', values: { Amazon: ['US', 'JP'], '京东': ['CN'] } },
+      },
+      { key: 'claims', label: 'Claims', kind: 'text', required: false, maximumLength: 4 },
+    ]);
+
+    expect(resolveSkillInputOptions(constrained.inputs, { platform: 'Amazon' }, 'region'))
+      .toEqual(['US', 'JP']);
+    expect(resolveSkillInputs(constrained, {
+      platform: 'Amazon', region: 'JP', claims: '1234',
+    })).toMatchObject({ region: 'JP', claims: '1234' });
+    expectInputError(
+      () => resolveSkillInputs(constrained, { platform: 'Amazon', region: 'CN', claims: '' }),
+      'SKILL_INPUT_INVALID_VALUE', 'region',
+    );
+    expectInputError(
+      () => resolveSkillInputs(constrained, { platform: 'Amazon', region: 'US', claims: '12345' }),
+      'SKILL_INPUT_LIMIT_EXCEEDED', 'claims',
+    );
+  });
+
+  it('requires images to contain unique non-empty identities', () => {
+    const sources = createDefinition([{
+      key: 'sourceImages', label: 'Sources', kind: 'images', required: true,
+      maximumItems: 20, bindToSourceVersions: true,
+    }]);
+    expectInputError(
+      () => resolveSkillInputs(sources, { sourceImages: ['asset-version-1', 'asset-version-1'] }),
+      'SKILL_INPUT_INVALID_VALUE', 'sourceImages',
+    );
+    expectInputError(
+      () => resolveSkillInputs(sources, { sourceImages: ['asset-version-1', '   '] }),
+      'SKILL_INPUT_INVALID_VALUE', 'sourceImages',
+    );
+  });
+
   it('缺少或提供空白必填输入时返回字段级错误', () => {
     expectInputError(
       () => resolveSkillInputs(definition, { style: '高端科技感' }),
@@ -264,7 +305,9 @@ describe('resolveSkillInputs', () => {
     const globalDefinition = createDefinition([
       { key: 'images', label: 'Images', kind: 'images', required: true },
     ]);
-    expect(resolveSkillInputs(globalDefinition, { images: Array(20).fill('ver') }).images)
+    expect(resolveSkillInputs(globalDefinition, {
+      images: Array.from({ length: 20 }, (_, index) => `ver-${index}`),
+    }).images)
       .toHaveLength(20);
     expectInputError(
       () => resolveSkillInputs(globalDefinition, { images: Array(21).fill('ver') }),

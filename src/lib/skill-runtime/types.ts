@@ -19,6 +19,11 @@ export interface SkillInputField {
   defaultValue?: unknown;
   options?: readonly string[];
   maximumItems?: number;
+  maximumLength?: number;
+  dependentOptions?: {
+    inputKey: string;
+    values: Readonly<Record<string, readonly string[]>>;
+  };
   bindToSourceVersions?: boolean;
   datasetSchema?: 'sku-v1';
 }
