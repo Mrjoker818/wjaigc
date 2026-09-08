@@ -3,6 +3,8 @@
 import { act, renderHook } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { useSkillRun } from '@/components/skill-runtime/use-skill-run';
+import { createPlatformComplianceRecheckRequest } from '@/components/skill-runtime/platform-compliance-client';
+import type { SkillRunRequest } from '@/lib/skill-runtime/run-request';
 
 vi.mock('@/components/agent-runtime/use-agent-run-events', () => ({
   useAgentRunEvents: vi.fn(() => ({ projection: undefined, stale: false })),
@@ -66,5 +68,30 @@ describe('restore an existing Skill run after remount', () => {
     expect(result.current.error).toBe('Run not found');
     expect(result.current.runId).toBeUndefined();
     expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  it('creates a new run request for recheck without mutating historical inputs or sources', () => {
+    const historical: SkillRunRequest = {
+      skillId: 'preset-platform-compliance-audit', skillVersion: 1, surface: 'canvas',
+      projectId: 'project-1', workspaceId: 'canvas:project-1',
+      inputValues: { sourceImages: ['version-1', 'version-2'], platform: 'Amazon', region: 'US' },
+      sourceVersionIds: ['version-1', 'version-2'],
+      modelBindings: {
+        orchestrator: { providerId: 'pear', modelId: 'chat-1' },
+        vision: { providerId: 'pear', modelId: 'vision-1' },
+      },
+      idempotencyKey: 'canvas-skill:old',
+    };
+
+    const next = createPlatformComplianceRecheckRequest(historical, 'canvas-skill:new');
+
+    expect(next).toEqual({ ...historical, inputValues: historical.inputValues,
+      sourceVersionIds: historical.sourceVersionIds, modelBindings: historical.modelBindings,
+      idempotencyKey: 'canvas-skill:new' });
+    expect(next).not.toBe(historical);
+    expect(next.inputValues).not.toBe(historical.inputValues);
+    expect(next.sourceVersionIds).not.toBe(historical.sourceVersionIds);
+    expect(next.modelBindings).not.toBe(historical.modelBindings);
+    expect(historical.idempotencyKey).toBe('canvas-skill:old');
   });
 });

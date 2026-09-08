@@ -1,7 +1,11 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import type { AgentRunProjection } from '@/lib/agent-runtime/types';
 import type { SkillRunCostEstimate } from '@/lib/skill-runtime/cost-estimator';
+import type { PlatformComplianceReportV1 } from '@/lib/platform-compliance/types';
+import { PlatformComplianceReportCard } from './PlatformComplianceReportCard';
+import { projectPlatformComplianceReports, type PlatformComplianceReportProjection } from './platform-compliance-client';
 
 interface SkillRunProgressProps {
   estimate?: SkillRunCostEstimate;
@@ -15,6 +19,9 @@ interface SkillRunProgressProps {
   onCancel?: () => void;
   onRetry?: (stepId: string) => void;
   onRefreshRetryability?: () => void;
+  projectId?: string;
+  onLocateComplianceSource?: (sourceVersionId: string) => void;
+  onRecheckCompliance?: (report: PlatformComplianceReportV1) => void;
 }
 
 const terminalStatuses = new Set(['completed', 'failed', 'cancelled', 'timeout']);
@@ -61,7 +68,23 @@ export function SkillRunProgress({
   onCancel,
   onRetry,
   onRefreshRetryability,
+  projectId,
+  onLocateComplianceSource,
+  onRecheckCompliance,
 }: SkillRunProgressProps): React.ReactElement | null {
+  const [complianceReports, setComplianceReports] = useState<PlatformComplianceReportProjection[]>([]);
+  const outputs = projection?.result?.outputs;
+  useEffect(() => {
+    let active = true;
+    if (!projection || !projectId) {
+      setComplianceReports([]);
+      return () => { active = false; };
+    }
+    void projectPlatformComplianceReports(outputs, { runId: projection.runId, projectId })
+      .then(reports => { if (active) setComplianceReports(reports); });
+    return () => { active = false; };
+  }, [outputs, projectId, projection]);
+
   if (!estimate && !projection) return null;
   const terminal = projection ? terminalStatuses.has(projection.status) : false;
   const retryablePausedStep = projection?.status === 'paused'
@@ -136,6 +159,17 @@ export function SkillRunProgress({
                 </button>
               )}
           </div>
+          {onLocateComplianceSource && complianceReports.map(item => (
+            <PlatformComplianceReportCard
+              key={`${item.stepId}:${item.report.reportId}`}
+              report={item.report}
+              stepId={item.stepId}
+              downloadUrls={item.downloadUrls}
+              busy={busy}
+              onLocate={onLocateComplianceSource}
+              onRecheck={onRecheckCompliance}
+            />
+          ))}
         </>
       )}
     </div>

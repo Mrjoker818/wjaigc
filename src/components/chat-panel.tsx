@@ -46,6 +46,8 @@ import { useAgentRunEvents } from '@/components/agent-runtime/use-agent-run-even
 import { SkillInputFields } from '@/components/skill-runtime/SkillInputFields';
 import { SkillRunProgress } from '@/components/skill-runtime/SkillRunProgress';
 import { SkillRunHistory, type SkillRunHistoryItem } from '@/components/skill-runtime/SkillRunHistory';
+import { createPlatformComplianceRecheckRequest } from '@/components/skill-runtime/platform-compliance-client';
+import type { PlatformComplianceReportV1 } from '@/lib/platform-compliance/types';
 import { useSkillRun } from '@/components/skill-runtime/use-skill-run';
 import { useSkillOutputReceiver } from '@/components/skill-runtime/use-skill-output-receiver';
 import {
@@ -1413,6 +1415,7 @@ export function ChatPanel({ themeStyle, projectId, onAddToPrompt, onAddImages, o
     sourceVersionIds: string[];
     sourceImageId?: string;
     restoreDeletedPlacement?: boolean;
+    request: SkillRunRequest;
   } | null>(null);
   const skillProjectionCoordinatorRef = useRef(createCanvasSkillProjectionCoordinator());
   const skillProjectionAttemptCountsRef = useRef<Map<string, number>>(new Map());
@@ -3891,7 +3894,10 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
     setSkillParamValues({});
   }, [skillRun]);
 
-  const buildCanvasSkillRequest = useCallback((): SkillRunRequest | null => {
+  const buildCanvasSkillRequest = useCallback((overrides?: {
+    inputValues: Record<string, unknown>;
+    sourceVersionIds: string[];
+  }): SkillRunRequest | null => {
     if (!activeSkill || !projectId) return null;
     const executionSkill = activeSkill;
     const chatSelection = availableChatModels.find(candidate => candidate.id === model);
@@ -3918,7 +3924,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
         return null;
       }
     }
-    return {
+    const request: SkillRunRequest = {
       skillId: executionSkill.id,
       skillVersion: executionSkill.version,
       surface: 'canvas',
@@ -3931,6 +3937,11 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
         ? `canvas-skill:${crypto.randomUUID()}`
         : `canvas-skill:${Date.now()}`,
     };
+    return overrides ? {
+      ...request,
+      inputValues: overrides.inputValues,
+      sourceVersionIds: overrides.sourceVersionIds,
+    } : request;
   }, [activeSkill, availableChatModels, canvasSkillInputValues, canvasSkillSourceVersionIds, discoveredImageModels, imageModel, imageModelProviderId, model, projectId]);
 
   const hasRequiredCanvasSkillSource = useCallback((): boolean => {
@@ -3954,6 +3965,13 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
 
   const handleRestoreSkill = useCallback(async (record: SkillRunHistoryItem): Promise<void> => {
     if (!projectId || record.projectId !== projectId || record.surface !== 'canvas' || record.skillId !== activeSkill?.id) return;
+    const restoredInputValues = record.inputValues ?? canvasSkillInputValues;
+    const restoredRequest = buildCanvasSkillRequest({
+      inputValues: restoredInputValues,
+      sourceVersionIds: [...record.sourceVersionIds],
+    });
+    if (!restoredRequest) return;
+    if (record.inputValues) setSkillParamValues(structuredClone(record.inputValues));
     skillProjectionControllerRef.current?.abort();
     activeCanvasSkillRunRef.current = null;
     const runId = await startCanvasSkillRun(
@@ -3963,10 +3981,10 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
     );
     if (runId) {
       skillProjectionAttemptCountsRef.current.delete(runId);
-      activeCanvasSkillRunRef.current = { runId, projectId, sourceVersionIds: [...record.sourceVersionIds], restoreDeletedPlacement: true };
+      activeCanvasSkillRunRef.current = { runId, projectId, sourceVersionIds: [...record.sourceVersionIds], restoreDeletedPlacement: true, request: restoredRequest };
       setSkillProjectionRetry(value => value + 1);
     }
-  }, [activeSkill?.id, projectId, skillRun]);
+  }, [activeSkill?.id, buildCanvasSkillRequest, canvasSkillInputValues, projectId, skillRun]);
 
   const handleStartSkill = useCallback(async (): Promise<void> => {
     if (!hasRequiredCanvasSkillSource()) return;
@@ -3989,9 +4007,46 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
         projectId: request.projectId,
         sourceVersionIds: [...request.sourceVersionIds],
         sourceImageId,
+        request,
       };
     }
   }, [buildCanvasSkillRequest, hasRequiredCanvasSkillSource, selectedCanvasImage?.id, skillRun]);
+
+  const handleLocateComplianceSource = useCallback((sourceVersionId: string): void => {
+    const image = skillCanvasImagesRef.current.find(candidate => candidate.assetVersionId === sourceVersionId);
+    if (!image) {
+      toast.error('来源图片不在当前画布中');
+      return;
+    }
+    onNavigateToImage?.(image.id);
+  }, [onNavigateToImage]);
+
+  const handleRecheckCompliance = useCallback(async (report: PlatformComplianceReportV1): Promise<void> => {
+    const context = activeCanvasSkillRunRef.current;
+    if (!context || !context.sourceVersionIds.includes(report.sourceVersionId)) {
+      toast.error('无法确认报告来源，请从运行记录恢复后重试');
+      return;
+    }
+    const idempotencyKey = typeof crypto.randomUUID === 'function'
+      ? `canvas-skill:${crypto.randomUUID()}`
+      : `canvas-skill:${Date.now()}`;
+    const request = createPlatformComplianceRecheckRequest(context.request, idempotencyKey);
+    skillProjectionControllerRef.current?.abort();
+    const runId = await startCanvasSkillRun(
+      skillProjectionCoordinatorRef.current,
+      () => skillRun.startRun(request),
+      request.projectId,
+    );
+    if (runId) {
+      activeCanvasSkillRunRef.current = {
+        runId,
+        projectId: request.projectId,
+        sourceVersionIds: [...request.sourceVersionIds],
+        sourceImageId: context.sourceImageId,
+        request,
+      };
+    }
+  }, [skillRun]);
 
   useEffect(() => {
     const projection = skillRun.projection;
@@ -6196,6 +6251,9 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                   onCancel={() => { void skillRun.cancel(); }}
                   onRetry={stepId => { void skillRun.retry(stepId); }}
                   onRefreshRetryability={skillRun.refreshRetryability}
+                  projectId={projectId}
+                  onLocateComplianceSource={handleLocateComplianceSource}
+                  onRecheckCompliance={report => { void handleRecheckCompliance(report); }}
                 />
               </div>
             )}

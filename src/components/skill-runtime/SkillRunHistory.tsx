@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { History, RefreshCw } from 'lucide-react';
-import type { SkillSurface } from '@/lib/skill-runtime/types';
+import type { DurableSkillOutput, SkillSurface } from '@/lib/skill-runtime/types';
 import type { SkillRunRestoreIdentity } from './use-skill-run';
 
 export interface SkillRunHistoryItem extends SkillRunRestoreIdentity {
@@ -10,6 +10,8 @@ export interface SkillRunHistoryItem extends SkillRunRestoreIdentity {
   status: string;
   createdAt: number;
   sourceVersionIds: string[];
+  inputValues?: Record<string, unknown>;
+  outputs?: DurableSkillOutput[];
 }
 
 interface SkillRunHistoryProps {
@@ -60,6 +62,8 @@ export function SkillRunHistory({ projectId, surface, skillId, accountKey, activ
             || !Object.hasOwn(labels, item.status) || typeof item.createdAt !== 'number'
             || !Number.isFinite(item.createdAt) || Math.abs(item.createdAt) > 8.64e15
             || !Array.isArray(item.sourceVersionIds) || item.sourceVersionIds.some(id => typeof id !== 'string')
+            || (item.inputValues !== undefined && (!item.inputValues || typeof item.inputValues !== 'object' || Array.isArray(item.inputValues)))
+            || (item.outputs !== undefined && !Array.isArray(item.outputs))
             || (item.workspaceId !== undefined && typeof item.workspaceId !== 'string');
         })) throw new Error('运行记录响应无效，请刷新重试');
         if (active && !controller.signal.aborted) setState({ key: scopeKey, loading: false, runs });
