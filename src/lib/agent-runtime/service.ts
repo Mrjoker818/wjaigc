@@ -581,28 +581,43 @@ export function createAgentRuntimeService(
     }
     if (requestedTerminalStatus === 'completed') {
       const result = validated.payload.result;
-      const settlement = await dependencies.transitionTask({
-        taskId: validated.runId,
-        from: [...LIVE_TASK_STATUSES],
-        to: 'completed',
-        revision: run.task.revision ?? 0,
-        creditStatus: 'charged',
-        result: result && typeof result === 'object' && !Array.isArray(result)
-          ? result as Record<string, unknown>
-          : undefined,
-        terminalIdentity,
-      });
-      if (
-        !settlement.transitioned
-        && (
-          settlement.task.status !== 'completed'
-          || settlement.task.terminalEventId !== terminalIdentity?.eventId
-          || settlement.task.terminalEventDigest !== terminalIdentity?.requestDigest
-          || settlement.task.terminalEventType !== terminalIdentity?.eventType
-        )
-      ) {
-        throw new AgentRunTerminalConflictError();
+      let settlementTask = run.task;
+      let settled = false;
+      for (let attempt = 0; attempt < 8 && !settled; attempt += 1) {
+        const settlement = await dependencies.transitionTask({
+          taskId: validated.runId,
+          from: [...LIVE_TASK_STATUSES],
+          to: 'completed',
+          revision: settlementTask.revision ?? 0,
+          creditStatus: 'charged',
+          result: result && typeof result === 'object' && !Array.isArray(result)
+            ? result as Record<string, unknown>
+            : undefined,
+          terminalIdentity,
+        });
+        if (settlement.transitioned) {
+          settled = true;
+          break;
+        }
+        const authoritative = await dependencies.getTaskForUser(
+          validated.runId,
+          validated.actorUserId,
+        );
+        if (
+          authoritative?.status === 'completed'
+          && authoritative.terminalEventId === terminalIdentity?.eventId
+          && authoritative.terminalEventDigest === terminalIdentity?.requestDigest
+          && authoritative.terminalEventType === terminalIdentity?.eventType
+        ) {
+          settled = true;
+          break;
+        }
+        if (!authoritative || TERMINAL_TASK_STATUSES.has(authoritative.status)) {
+          throw new AgentRunTerminalConflictError();
+        }
+        settlementTask = authoritative;
       }
+      if (!settled) throw new AgentRunTerminalConflictError();
     } else if (requestedTerminalStatus) {
       const error = terminalError(validated.type, validated.payload);
       let settlementTask = run.task;

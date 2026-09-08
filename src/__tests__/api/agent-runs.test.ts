@@ -1601,6 +1601,50 @@ describe('Agent runtime service', () => {
     );
   });
 
+  it('rereads the authoritative live task and retries completion after revision advances', async () => {
+    const dependencies = serviceDependencies();
+    const completed = event(2, 'run.completed', {
+      result: { imageUrl: '/winner-after-revision.png' },
+    });
+    const advancedTask = {
+      id: 'run-1', userId: user.id, projectId: 'project-1', type: 'agent-run' as const,
+      status: 'processing' as const, progress: 50, result: { workspace: 'canvas' },
+      creditStatus: 'pending' as const, creditCost: 7,
+      createdAt: 1, updatedAt: 2, revision: 1,
+    };
+    const settledTask = {
+      ...advancedTask, status: 'completed' as const, progress: 100,
+      creditStatus: 'charged' as const, revision: 2,
+      result: completed.payload.result as Record<string, unknown>,
+      terminalEventId: completed.eventId,
+      terminalEventDigest: expect.any(String),
+      terminalEventType: completed.type,
+    };
+    dependencies.transitionTask
+      .mockResolvedValueOnce({ transitioned: false, task: advancedTask })
+      .mockResolvedValueOnce({ transitioned: true, task: settledTask });
+    dependencies.getTaskForUser
+      .mockResolvedValueOnce({ ...advancedTask, revision: 0 })
+      .mockResolvedValueOnce(advancedTask);
+    dependencies.appendEvent.mockResolvedValue(completed);
+    dependencies.listEvents
+      .mockResolvedValueOnce([event(1, 'run.created')])
+      .mockResolvedValueOnce([event(1, 'run.created'), completed]);
+    const service = agentRuntime.createAgentRuntimeService(dependencies);
+
+    await expect(service.appendEvent({
+      actorUserId: user.id,
+      runId: 'run-1',
+      eventId: completed.eventId,
+      type: completed.type,
+      payload: completed.payload,
+    })).resolves.toMatchObject({ accepted: true, projection: { status: 'completed' } });
+
+    expect(dependencies.transitionTask).toHaveBeenCalledTimes(2);
+    expect(dependencies.transitionTask.mock.calls.map(call => call[0].revision)).toEqual([0, 1]);
+    expect(dependencies.appendEvent).toHaveBeenCalledTimes(1);
+  });
+
   it('uses one normalized prompt for context authorization, digest, and run.created execution data', async () => {
     const rawDependencies = serviceDependencies();
     const normalizedDependencies = serviceDependencies();

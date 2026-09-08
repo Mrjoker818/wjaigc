@@ -75,6 +75,13 @@ export const AGENT_TOOL_REGISTRY: readonly AgentToolDefinition[] = [
     modelCapabilities: ['chat'],
     downstreamModelCapabilities: ['image'],
   },
+  {
+    toolId: 'compliance_audit',
+    workspaces: ['canvas', 'workflow'],
+    productTypes: ['canvas'],
+    modelCapabilities: ['chat'],
+    downstreamModelCapabilities: ['vision'],
+  },
 ] as const;
 
 export function authorizeAgentTools({
