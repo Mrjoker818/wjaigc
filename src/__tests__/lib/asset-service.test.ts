@@ -587,9 +587,14 @@ describe('asset graph service', () => {
     const versionId = randomUUID();
     const read = vi.fn(async (callback: (transaction: {
       findProject: () => Promise<boolean>;
+      findAsset: () => Promise<Asset>;
       findVersion: () => Promise<AssetVersion>;
     }) => Promise<unknown>) => callback({
       findProject: async () => true,
+      findAsset: async () => ({
+        id: 'asset-read', ownerId, projectId, kind: 'document', status: 'active',
+        currentVersionId: versionId, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+      }),
       findVersion: async () => ({
         id: versionId,
         assetId: 'asset-read',
@@ -613,6 +618,7 @@ describe('asset graph service', () => {
     })).resolves.toMatchObject({
       assetId: 'asset-read',
       assetVersionId: versionId,
+      kind: 'document',
       url: 'https://canonical.test/read.png',
     });
     expect(read).toHaveBeenCalledOnce();
@@ -792,6 +798,7 @@ describe('asset graph service', () => {
     })).resolves.toEqual({
       assetId: created.asset.id,
       assetVersionId: created.version.id,
+      kind: 'image',
       placementId: placed.placement.id,
       entityId: 'input-a',
       url: 'https://canonical.test/owned.png',

@@ -1,5 +1,8 @@
 import type { DurableSkillOutput } from './skill-runtime/types';
-import { parseDurableSkillOutputs } from './skill-runtime/structured-output';
+import {
+  parseDurableSkillOutputsIsolated,
+  type DurableSkillOutputError,
+} from './skill-runtime/structured-output';
 import { parsePlatformComplianceReport } from './platform-compliance/report-schema';
 
 interface WorkflowSkillRunProjection {
@@ -7,6 +10,7 @@ interface WorkflowSkillRunProjection {
   status: string;
   assetVersionIds?: string[];
   outputs?: DurableSkillOutput[];
+  outputErrors?: DurableSkillOutputError[];
   currentStepId?: string;
   resumeFromStepId?: string;
 }
@@ -29,7 +33,7 @@ export interface WorkflowSkillAssetReference {
   assetId?: string;
   assetVersionId: string;
   url: string;
-  kind?: 'image' | 'video' | 'three-d' | 'document' | 'dataset';
+  kind?: 'image' | 'video' | 'model-3d' | 'three-d' | 'psd' | 'svg' | 'document' | 'audio' | 'dataset';
 }
 
 interface ExecuteWorkflowSkillRunInput {
@@ -78,10 +82,11 @@ function readWorkflowSkillRunProjection(payload: unknown): WorkflowSkillRunProje
     ? wrapped as Record<string, unknown>
     : record;
   if (typeof candidate.runId !== 'string' || typeof candidate.status !== 'string') return null;
-  const outputs = parseDurableSkillOutputs(candidate.outputs);
+  const parsedOutputs = parseDurableSkillOutputsIsolated(candidate.outputs);
   return {
     ...(candidate as unknown as WorkflowSkillRunProjection),
-    outputs,
+    outputs: parsedOutputs.outputs,
+    ...(parsedOutputs.errors.length > 0 ? { outputErrors: parsedOutputs.errors } : {}),
   };
 }
 
@@ -177,13 +182,22 @@ export function projectWorkflowSkillRun(
   references: readonly WorkflowSkillAssetReference[],
 ): Record<string, unknown> {
   const assetVersionIds = [...new Set(run.assetVersionIds || [])];
-  const outputs = parseDurableSkillOutputs(run.outputs);
+  const parsedOutputs = parseDurableSkillOutputsIsolated(run.outputs);
+  const outputs = parsedOutputs.outputs;
+  const outputErrors = [...(run.outputErrors || []), ...parsedOutputs.errors];
   const text = outputs.filter(output => output.kind === 'text').map(output => output.content).join('\n\n');
   const complianceReports = outputs
     .filter(output => output.kind === 'json' && output.schemaId === 'platform-compliance-report-v1')
     .map(output => parsePlatformComplianceReport(JSON.parse(output.content) as unknown));
-  const imageReferences = references.filter(reference => reference.kind === undefined || reference.kind === 'image');
-  const documentReferences = references.filter(reference => reference.kind === 'document');
+  const referencesByVersion = new Map<string, WorkflowSkillAssetReference>();
+  for (const reference of references) {
+    if (!referencesByVersion.has(reference.assetVersionId)) {
+      referencesByVersion.set(reference.assetVersionId, reference);
+    }
+  }
+  const dedupedReferences = [...referencesByVersion.values()];
+  const imageReferences = dedupedReferences.filter(reference => reference.kind === undefined || reference.kind === 'image');
+  const documentReferences = dedupedReferences.filter(reference => reference.kind === 'document');
   return {
     runId: run.runId,
     status: run.status,
@@ -192,13 +206,14 @@ export function projectWorkflowSkillRun(
     ...(imageReferences.length > 0 ? { imageUrls: imageReferences.map(reference => reference.url) } : {}),
     ...(imageReferences[0]?.assetVersionId ? { assetVersionId: imageReferences[0].assetVersionId } : {}),
     assetVersionIds,
-    assetReferences: references,
+    assetReferences: dedupedReferences,
     ...(documentReferences.length > 0 ? {
       documentAssetVersionIds: documentReferences.map(reference => reference.assetVersionId),
     } : {}),
     ...(complianceReports.length > 0 ? { complianceReports } : {}),
     ...(text ? { prompt: text, text } : {}),
     outputs,
+    ...(outputErrors.length > 0 ? { outputErrors } : {}),
     ...(run.currentStepId ? { currentStepId: run.currentStepId } : {}),
     ...(run.resumeFromStepId ? { resumeFromStepId: run.resumeFromStepId } : {}),
   };
@@ -272,8 +287,13 @@ async function waitForWorkflowSkillRun(
   }
 
   const assetVersionIds = [...new Set(run.assetVersionIds || [])];
-  const references = (await Promise.all(assetVersionIds.map(input.resolveAssetVersion)))
-    .filter((value): value is WorkflowSkillAssetReference => Boolean(value));
+  const references = (await Promise.all(assetVersionIds.map(async (assetVersionId) => {
+    const reference = await input.resolveAssetVersion(assetVersionId);
+    if (reference && reference.assetVersionId !== assetVersionId) {
+      throw new Error('Skill 成品版本解析不一致');
+    }
+    return reference;
+  }))).filter((value): value is WorkflowSkillAssetReference => Boolean(value));
   return projectWorkflowSkillRun(run, references);
 }
 

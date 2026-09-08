@@ -141,6 +141,23 @@ describe('asset API ownership', () => {
     });
   });
 
+  it('returns the trusted asset kind supplied by the asset service', async () => {
+    mocks.getSessionUser.mockResolvedValue({ id: 'owner-1', role: 'user' });
+    mocks.resolveAssetReference.mockResolvedValue({
+      assetId: 'asset-document', assetVersionId: 'version-document',
+      kind: 'document', url: '/api/skill-reports/version-document?format=json',
+    });
+
+    const response = await resolveAsset(resolveRequest({
+      projectId: 'project-a', assetVersionId: 'version-document',
+    }));
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      assetVersionId: 'version-document', kind: 'document',
+    });
+  });
+
   it('injects the session owner when deleting a placement and masks foreign placement ownership', async () => {
     mocks.getSessionUser.mockResolvedValue({ id: 'owner-1', role: 'user' });
     mocks.trashPlacement.mockRejectedValue(new AssetServiceError('ASSET_NOT_FOUND'));

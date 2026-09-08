@@ -6,9 +6,11 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 import NodeEditor from '@/components/node-editor';
+import { WorkflowLegacySurface } from '@/components/workflow/WorkflowLegacySurface';
 import { loadSavedWorkflowSkillResult } from '@/lib/skill-runtime/workflow-client';
 import { LOVART_CONTENT_COMMERCE_SKILLS } from '@/lib/skill-runtime/content-commerce-presets';
 import { createEmptyWorkflow, createWorkflowNode } from '@/lib/workflow-engine';
+import { projectLegacyRenderModel } from '@/lib/workflow-renderer/view-model';
 import { validReport } from '@/__tests__/helpers/platform-compliance-fixtures';
 
 const workflowSkill = {
@@ -455,6 +457,25 @@ describe('NodeEditor workflow Skill node', () => {
     expect(screen.getByText('1 份报告')).toBeTruthy();
     expect(screen.getByText('1 项问题')).toBeTruthy();
     expect(document.querySelector('img[src*="skill-reports"]')).toBeNull();
+  });
+
+  it('shows manual review instead of passing an invalid compliance report on the legacy surface', () => {
+    const node = createWorkflowNode('ai-skill', 0, 0);
+    const execResult = {
+      status: 'success',
+      output: { complianceReports: [{ schemaVersion: 1, verdict: 'approved', summary: { passed: -1 } }] },
+    };
+    const workflow = { ...createEmptyWorkflow('Invalid report'), nodes: [node] };
+
+    render(<WorkflowLegacySurface
+      model={projectLegacyRenderModel(workflow, { x: 0, y: 0, zoom: 1 })}
+      onCommand={vi.fn()}
+      execResults={{ [node.id]: execResult }}
+    />);
+
+    expect(screen.getByText('待确认')).toBeTruthy();
+    expect(screen.getByText('需要人工复核')).toBeTruthy();
+    expect(screen.queryByText('通过')).toBeNull();
   });
 
   it('restores a saved Skill result through read-only run and asset queries without generating again', async () => {

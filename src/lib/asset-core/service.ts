@@ -187,6 +187,12 @@ export class AssetService {
         input.assetVersionId,
       );
       if (!version) notFound();
+      const asset = await transaction.findAsset(
+        input.actorUserId,
+        input.projectId,
+        version.assetId,
+      );
+      if (!asset) notFound();
 
       let placement: WorkspacePlacement | null = null;
       if (input.placementId) {
@@ -206,6 +212,7 @@ export class AssetService {
       return {
         assetId: version.assetId,
         assetVersionId: version.id,
+        kind: asset.kind,
         ...(placement ? { placementId: placement.id } : {}),
         ...(placement ? { entityId: placement.entityId } : {}),
         url: version.file.url,

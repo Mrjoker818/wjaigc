@@ -63,6 +63,26 @@ describe('WorkflowReactFlowSurface', () => {
     expect(markup).not.toContain('/api/skill-reports/report-version');
   });
 
+  it.each([
+    ['unknown verdict', { schemaVersion: 1, verdict: 'approved', summary: { passed: 1, warning: 0, blocked: 0, unknown: 0 } }],
+    ['missing fields', { schemaVersion: 1, verdict: 'passed' }],
+    ['invalid counts', { schemaVersion: 1, verdict: 'passed', summary: { passed: -1, warning: 0, blocked: 0, unknown: 0 } }],
+  ])('fails closed for %s in the shared compliance summary', (_label, report) => {
+    const workflow = createEmptyWorkflow('invalid compliance summary');
+    const node = createWorkflowNode('ai-skill', 0, 0, 'Platform compliance');
+    node.execResult = { status: 'success', output: { complianceReports: [report] } };
+    workflow.nodes = [node];
+
+    const markup = renderToStaticMarkup(createElement(WorkflowReactFlowSurface, {
+      model: projectReactFlowRenderModel(workflow, { x: 0, y: 0, zoom: 1 }),
+      onCommand: vi.fn(), readOnly: false,
+    }));
+
+    expect(markup).toContain('待确认');
+    expect(markup).toContain('需要人工复核');
+    expect(markup).not.toContain('>通过<');
+  });
+
   it('keeps execution logs in the bottom dock instead of covering workflow nodes', () => {
     expect(nodeEditorSource).not.toContain('(showExecLog || execLogs.length > 0)');
     expect(nodeEditorSource).not.toContain('absolute bottom-12 right-3 w-[380px]');

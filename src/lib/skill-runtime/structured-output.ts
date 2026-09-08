@@ -11,6 +11,13 @@ const STRUCTURED_OUTPUT_SCHEMAS = new Map<string, (value: unknown) => string>([
 ]);
 const MAX_STRUCTURED_OUTPUT_BYTES = 256 * 1024;
 
+export interface DurableSkillOutputError {
+  index: number;
+  stepId?: string;
+  schemaId?: string;
+  code: string;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
@@ -64,6 +71,45 @@ export function parseDurableSkillOutputs(value: unknown): DurableSkillOutput[] {
   if (value === undefined) return [];
   if (!Array.isArray(value)) throw new Error('SKILL_OUTPUTS_INVALID');
   return value.map(parseDurableSkillOutput);
+}
+
+function diagnosticString(value: unknown, key: string): string | undefined {
+  if (!isRecord(value)) return undefined;
+  const descriptor = Object.getOwnPropertyDescriptor(value, key);
+  return descriptor && 'value' in descriptor && typeof descriptor.value === 'string'
+    && descriptor.value.length > 0 && descriptor.value.length <= 128
+    ? descriptor.value
+    : undefined;
+}
+
+function diagnosticCode(error: unknown): string {
+  const message = error instanceof Error ? error.message : '';
+  return /^[A-Z][A-Z0-9_]{0,63}$/u.test(message) ? message : 'SKILL_OUTPUT_INVALID';
+}
+
+export function parseDurableSkillOutputsIsolated(value: unknown): {
+  outputs: DurableSkillOutput[];
+  errors: DurableSkillOutputError[];
+} {
+  if (value === undefined) return { outputs: [], errors: [] };
+  if (!Array.isArray(value)) throw new Error('SKILL_OUTPUTS_INVALID');
+  const outputs: DurableSkillOutput[] = [];
+  const errors: DurableSkillOutputError[] = [];
+  value.forEach((item, index) => {
+    try {
+      outputs.push(parseDurableSkillOutput(item));
+    } catch (error) {
+      const stepId = diagnosticString(item, 'stepId');
+      const schemaId = diagnosticString(item, 'schemaId');
+      errors.push({
+        index,
+        ...(stepId ? { stepId } : {}),
+        ...(schemaId ? { schemaId } : {}),
+        code: diagnosticCode(error),
+      });
+    }
+  });
+  return { outputs, errors };
 }
 
 export function durableSkillOutputKey(output: DurableSkillOutput): string {

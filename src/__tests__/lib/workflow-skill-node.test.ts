@@ -15,6 +15,8 @@ import type { SkillDefinition } from '@/lib/skill-runtime/types';
 import type { TaskModelDescriptor } from '@/lib/task-core/model-capability-contract';
 import { loadSavedWorkflowSkillResult, loadWorkflowSkillCatalog } from '@/lib/skill-runtime/workflow-client';
 import { projectWorkflowSkillRun } from '@/lib/workflow-skill-execution';
+import { AssetService } from '@/lib/asset-core/service';
+import type { AssetStorage, AssetStorageTransaction } from '@/lib/asset-core/storage';
 import { canonicalComplianceReportJson } from '@/lib/platform-compliance/report-schema';
 import { validReport } from '@/__tests__/helpers/platform-compliance-fixtures';
 
@@ -88,11 +90,27 @@ describe('workflow Skill node contract', () => {
 
   it('uses the trusted asset kind returned by /api/assets during report restoration', async () => {
     const report = validReport();
+    const assetService = new AssetService({
+      read: async callback => callback({
+        findProject: async () => true,
+        findVersion: async () => ({
+          id: 'report-version', assetId: 'report-asset', ownerId: 'owner', projectId: 'project',
+          file: { url: '/api/skill-reports/report-version?format=json', availability: 'ready' },
+          parentVersionIds: [], createdAt: '2026-09-09T00:00:00.000Z',
+        }),
+        findAsset: async () => ({
+          id: 'report-asset', ownerId: 'owner', projectId: 'project', kind: 'document', status: 'active',
+          currentVersionId: 'report-version', createdAt: '2026-09-09T00:00:00.000Z', updatedAt: '2026-09-09T00:00:00.000Z',
+        }),
+        findPlacement: async () => null,
+      } as unknown as AssetStorageTransaction),
+      transaction: async () => { throw new Error('write transaction is not allowed'); },
+    } as AssetStorage);
+    const trustedReference = await assetService.resolveAssetReference({
+      actorUserId: 'owner', projectId: 'project', assetVersionId: 'report-version',
+    });
     const fetcher = async (url: string) => {
-      if (url.startsWith('/api/assets?')) return new Response(JSON.stringify({
-        assetId: 'report-asset', assetVersionId: 'report-version',
-        url: '/api/skill-reports/report-version?format=json', kind: 'document',
-      }), { status: 200 });
+      if (url.startsWith('/api/assets?')) return new Response(JSON.stringify(trustedReference), { status: 200 });
       return new Response(JSON.stringify({ run: {
         runId: 'run', projectId: 'project', surface: 'workflow', workspaceId: 'workflow:wf',
         skillId: 'skill', skillVersion: 1, status: 'completed', assetVersionIds: ['report-version'],
@@ -111,6 +129,59 @@ describe('workflow Skill node contract', () => {
       complianceReports: [expect.objectContaining({ reportId: report.reportId })],
     });
     expect(restored.output.imageUrls).toBeUndefined();
+  });
+
+  it('isolates a damaged registered report while preserving valid outputs and evidence', () => {
+    const report = validReport();
+    const output = projectWorkflowSkillRun({
+      runId: 'partial-run', status: 'completed', assetVersionIds: ['report-version'],
+      outputs: [
+        { stepId: 'copy', kind: 'text', content: '仍可使用的文本' },
+        { stepId: 'audit:good', kind: 'json', schemaId: 'platform-compliance-report-v1', content: JSON.stringify(report) },
+        { stepId: 'audit:bad', kind: 'json', schemaId: 'platform-compliance-report-v1', content: '{"schemaVersion":' },
+      ],
+    }, []);
+
+    expect(output).toMatchObject({
+      text: '仍可使用的文本',
+      assetVersionIds: ['report-version'],
+      complianceReports: [expect.objectContaining({ reportId: report.reportId })],
+      outputErrors: [{ index: 2, stepId: 'audit:bad', schemaId: 'platform-compliance-report-v1', code: 'SKILL_OUTPUT_JSON_INVALID' }],
+    });
+    expect(output.outputs).toEqual([
+      { stepId: 'copy', kind: 'text', content: '仍可使用的文本' },
+      expect.objectContaining({ stepId: 'audit:good', kind: 'json' }),
+    ]);
+  });
+
+  it('stably deduplicates asset references and document version ids', () => {
+    const output = projectWorkflowSkillRun({
+      runId: 'dedupe-run', status: 'completed', assetVersionIds: ['document-v', 'document-v'], outputs: [],
+    }, [
+      { assetVersionId: 'document-v', url: '/report.json', kind: 'document' },
+      { assetVersionId: 'document-v', url: '/conflicting-report.json', kind: 'document' },
+    ]);
+
+    expect(output.assetVersionIds).toEqual(['document-v']);
+    expect(output.documentAssetVersionIds).toEqual(['document-v']);
+    expect(output.assetReferences).toEqual([{ assetVersionId: 'document-v', url: '/report.json', kind: 'document' }]);
+  });
+
+  it('fails closed when /api/assets explicitly returns an unknown asset kind', async () => {
+    const fetcher = async (url: string) => {
+      if (url.startsWith('/api/assets?')) return new Response(JSON.stringify({
+        assetVersionId: 'future-version', url: '/future.asset', kind: 'future-document',
+      }), { status: 200 });
+      return new Response(JSON.stringify({ run: {
+        runId: 'run', projectId: 'project', surface: 'workflow', workspaceId: 'workflow:wf',
+        skillId: 'skill', skillVersion: 1, status: 'completed', assetVersionIds: ['future-version'], outputs: [],
+      } }), { status: 200 });
+    };
+
+    await expect(loadSavedWorkflowSkillResult({
+      runId: 'run', projectId: 'project', workflowId: 'wf', skillId: 'skill', skillVersion: 1,
+      signal: new AbortController().signal, fetcher: fetcher as typeof fetch,
+    })).rejects.toThrow('Skill 成品资产类型无效');
   });
 
   it('restores registered structured output through the workflow client', async () => {
@@ -133,7 +204,7 @@ describe('workflow Skill node contract', () => {
     }]);
   });
 
-  it('rejects an unknown structured output schema during workflow restore', async () => {
+  it('isolates an unknown structured output schema during workflow restore', async () => {
     const fetcher = async () => new Response(JSON.stringify({ run: {
       runId: 'run', projectId: 'project', surface: 'workflow', workspaceId: 'workflow:wf',
       skillId: 'skill', skillVersion: 1, status: 'completed', assetVersionIds: [],
@@ -143,7 +214,10 @@ describe('workflow Skill node contract', () => {
     await expect(loadSavedWorkflowSkillResult({
       runId: 'run', projectId: 'project', workflowId: 'wf', skillId: 'skill', skillVersion: 1,
       signal: new AbortController().signal, fetcher: fetcher as typeof fetch,
-    })).rejects.toThrow('SKILL_OUTPUT_SCHEMA_UNKNOWN');
+    })).resolves.toMatchObject({ output: {
+      outputs: [],
+      outputErrors: [{ index: 0, stepId: 'audit:a', schemaId: 'unknown', code: 'SKILL_OUTPUT_SCHEMA_UNKNOWN' }],
+    } });
   });
 
   it('distinguishes missing outputs from present non-array outputs during workflow restore', async () => {

@@ -16,6 +16,7 @@ import {
 import type { NodePort, NodeType, WorkflowNode } from '@/lib/workflow-engine';
 import { getModelDisplayName } from '@/lib/model-name-map';
 import { parseExactModelKey, resolvePersistedModelSelection } from '@/lib/model-defaults';
+import { parsePlatformComplianceReport } from '@/lib/platform-compliance/report-schema';
 import {
   getWorkflowRenderNodeCategory,
   WORKFLOW_RENDER_NODE_COLORS,
@@ -227,30 +228,36 @@ interface WorkflowComplianceSummary {
   verdict: 'passed' | 'warning' | 'blocked' | 'unknown';
   reportCount: number;
   issueCount: number;
+  manualReviewRequired: boolean;
 }
 
 function readWorkflowComplianceSummary(output: Record<string, unknown> | undefined): WorkflowComplianceSummary | null {
   const reports = output?.complianceReports;
   if (!Array.isArray(reports) || reports.length === 0) return null;
-  const verdicts = reports.map(report => (
-    report && typeof report === 'object' && !Array.isArray(report)
-      ? (report as Record<string, unknown>).verdict
-      : undefined
-  ));
+  const validatedReports = [];
+  try {
+    for (const report of reports) validatedReports.push(parsePlatformComplianceReport(report));
+  } catch {
+    return {
+      verdict: 'unknown',
+      reportCount: reports.length,
+      issueCount: 0,
+      manualReviewRequired: true,
+    };
+  }
+  const verdicts = validatedReports.map(report => report.verdict);
   const verdict = verdicts.includes('blocked') ? 'blocked'
     : verdicts.includes('unknown') ? 'unknown'
       : verdicts.includes('warning') ? 'warning' : 'passed';
-  const issueCount = reports.reduce((total, report) => {
-    if (!report || typeof report !== 'object' || Array.isArray(report)) return total;
-    const summary = (report as Record<string, unknown>).summary;
-    if (!summary || typeof summary !== 'object' || Array.isArray(summary)) return total;
-    const counts = summary as Record<string, unknown>;
-    return total + ['warning', 'blocked', 'unknown'].reduce((sum, key) => {
-      const count = counts[key];
-      return sum + (typeof count === 'number' && Number.isSafeInteger(count) && count >= 0 ? count : 0);
-    }, 0);
-  }, 0);
-  return { verdict, reportCount: reports.length, issueCount };
+  const issueCount = validatedReports.reduce((total, report) => (
+    total + report.summary.warning + report.summary.blocked + report.summary.unknown
+  ), 0);
+  return {
+    verdict,
+    reportCount: validatedReports.length,
+    issueCount,
+    manualReviewRequired: validatedReports.some(report => report.manualReviewRequired),
+  };
 }
 
 export const WorkflowLegacyNodeCard = React.memo(function WorkflowLegacyNodeCard({ node, isSelected, isHovered, execResult, isRunning, theme, canvasImages, llmModels, imageModels, onNodeFieldChange, onLlmOptimize, onCascadeRun, onExtractToSource, onGridSplit, onCompare, onSendToChat, onTriggerImageUpload, onImageFileDrop, promptPresets = [], promptTemplates = [], onSavePromptPreset, onDeletePromptPreset, upstreamImageUrl, onSelect, onHover, onDragStart, onPortMouseDown, onPortMouseUp, onDeselect, onPreviewImage, onResizeNode, onUpdateNodeSize, collapsedNodes, onToggleCollapse, onContextMenu, onDoubleClickAnnotation, layout = 'canvas', renderPortHandle }: WorkflowLegacyNodeCardProps) {
@@ -481,6 +488,7 @@ export const WorkflowLegacyNodeCard = React.memo(function WorkflowLegacyNodeCard
               <div className="mt-1 flex items-center gap-2 text-[9px]" style={{ color: T.textMuted }}>
                 <span>{complianceSummary.reportCount} 份报告</span>
                 <span>{complianceSummary.issueCount} 项问题</span>
+                {complianceSummary.manualReviewRequired && <span>需要人工复核</span>}
               </div>
             </div>
           )}

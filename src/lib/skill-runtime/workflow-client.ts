@@ -1,12 +1,14 @@
 import type { SkillDefinition } from './types';
 import { projectWorkflowSkillRun, type WorkflowSkillAssetReference } from '../workflow-skill-execution';
-import { parseDurableSkillOutputs } from './structured-output';
+import { parseDurableSkillOutputsIsolated } from './structured-output';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
-const WORKFLOW_ASSET_KINDS = new Set(['image', 'video', 'three-d', 'document', 'dataset']);
+const WORKFLOW_ASSET_KINDS = new Set([
+  'image', 'video', 'model-3d', 'three-d', 'psd', 'svg', 'document', 'audio', 'dataset',
+]);
 
 function isWorkflowSkill(value: unknown): value is SkillDefinition {
   return isRecord(value)
@@ -63,21 +65,31 @@ export async function loadSavedWorkflowSkillResult(input: {
       input.signal.throwIfAborted();
       if (!assetResponse.ok || !isRecord(asset) || asset.assetVersionId !== assetVersionId
         || typeof asset.url !== 'string' || !asset.url) throw new Error('Skill 成品版本恢复失败');
+      const hasKind = Object.prototype.hasOwnProperty.call(asset, 'kind');
+      if (hasKind && (typeof asset.kind !== 'string' || !WORKFLOW_ASSET_KINDS.has(asset.kind))) {
+        throw new Error('Skill 成品资产类型无效');
+      }
       references.push({
         assetVersionId,
         url: asset.url,
         ...(typeof asset.assetId === 'string' ? { assetId: asset.assetId } : {}),
-        ...(typeof asset.kind === 'string' && WORKFLOW_ASSET_KINDS.has(asset.kind)
+        ...(hasKind
           ? { kind: asset.kind as WorkflowSkillAssetReference['kind'] }
           : {}),
       });
     }
   }
   input.signal.throwIfAborted();
-  const outputs = parseDurableSkillOutputs(run.outputs);
+  const parsedOutputs = parseDurableSkillOutputsIsolated(run.outputs);
   return {
     status: run.status === 'completed' ? 'success' : ['failed', 'timeout'].includes(run.status) ? 'error'
       : ['created', 'queued', 'planning', 'awaiting-confirmation', 'executing', 'uploading'].includes(run.status) ? 'running' : run.status,
-    output: projectWorkflowSkillRun({ runId: input.runId, status: run.status, assetVersionIds: run.assetVersionIds as string[], outputs }, references),
+    output: projectWorkflowSkillRun({
+      runId: input.runId,
+      status: run.status,
+      assetVersionIds: run.assetVersionIds as string[],
+      outputs: parsedOutputs.outputs,
+      ...(parsedOutputs.errors.length > 0 ? { outputErrors: parsedOutputs.errors } : {}),
+    }, references),
   };
 }

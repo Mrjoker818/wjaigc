@@ -30,20 +30,34 @@ describe('workflow Skill Run execution', () => {
     ['unknown schema', { stepId: 'audit:a', kind: 'json', schemaId: 'unknown', content: '{}' }, 'SKILL_OUTPUT_SCHEMA_UNKNOWN'],
     ['oversized content', { stepId: 'audit:a', kind: 'json', schemaId: 'platform-compliance-report-v1', content: `${JSON.stringify(validReport())}${' '.repeat(256 * 1024)}` }, 'SKILL_OUTPUT_SIZE_LIMIT'],
     ['invalid report', { stepId: 'audit:a', kind: 'json', schemaId: 'platform-compliance-report-v1', content: JSON.stringify(wideReport(4097)) }, 'REPORT_KEY_LIMIT'],
-  ])('rejects %s in a running poll before progress projection', async (_label, output, error) => {
-    const onProgress = vi.fn(() => { throw new Error('UNVALIDATED_PROGRESS'); });
+  ])('isolates %s in a running poll while preserving safe progress evidence', async (_label, output, error) => {
+    const onProgress = vi.fn();
     const fetcher = vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify({ runId: 'run-validate' }), { status: 201 }))
       .mockResolvedValueOnce(new Response(JSON.stringify({
-        run: { runId: 'run-validate', status: 'running', assetVersionIds: [], outputs: [output] },
-      }), { status: 200 }));
+        run: { runId: 'run-validate', status: 'running', assetVersionIds: [], outputs: [
+          { stepId: 'copy', kind: 'text', content: 'safe progress' }, output,
+        ] },
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ run: {
+        runId: 'run-validate', status: 'completed', assetVersionIds: [], outputs: [
+          { stepId: 'copy', kind: 'text', content: 'safe progress' }, output,
+        ],
+      } }), { status: 200 }));
 
     await expect(executeWorkflowSkillRun({
       submitUrl: 'http://localhost:5000/api/skill-runs', requestBody: { skillId: 'skill-a' },
       headers: { 'Content-Type': 'application/json' }, fetcher, pollIntervalMs: 0,
       onProgress, resolveAssetVersion: async () => null,
-    })).rejects.toThrow(error);
-    expect(onProgress).not.toHaveBeenCalled();
+    })).resolves.toMatchObject({
+      text: 'safe progress',
+      outputs: [{ stepId: 'copy', kind: 'text', content: 'safe progress' }],
+      outputErrors: [expect.objectContaining({ index: 1, code: error })],
+    });
+    expect(onProgress).toHaveBeenCalledWith(expect.objectContaining({
+      outputs: [{ stepId: 'copy', kind: 'text', content: 'safe progress' }],
+      outputErrors: [expect.objectContaining({ index: 1, code: error })],
+    }));
   });
 
   it('normalizes a valid structured report before projecting running progress', async () => {
@@ -417,6 +431,20 @@ describe('workflow Skill Run execution', () => {
     expect(result).toMatchObject({ imageUrl: '/resolved.png', assetVersionId: 'resolved-version' });
   });
 
+  it('rejects a resolver result whose asset version id does not match the requested id', async () => {
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ runId: 'run-mismatch' }), { status: 201 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ run: {
+        runId: 'run-mismatch', status: 'completed', assetVersionIds: ['requested-version'], outputs: [],
+      } }), { status: 200 }));
+
+    await expect(executeWorkflowSkillRun({
+      submitUrl: 'http://localhost:5000/api/skill-runs', requestBody: { skillId: 'skill-a' },
+      headers: { 'Content-Type': 'application/json' }, fetcher, pollIntervalMs: 0,
+      resolveAssetVersion: async () => ({ assetVersionId: 'other-version', url: '/wrong.png', kind: 'image' }),
+    })).rejects.toThrow('Skill 成品版本解析不一致');
+  });
+
   it('resumes a paused Skill Run at its persisted step without creating a new run', async () => {
     const fetcher = vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify({ accepted: true }), { status: 200 }))
@@ -486,6 +514,33 @@ describe('workflow Skill Run execution', () => {
         status,
         assetVersionIds: ['version-terminal'],
         outputs: [{ stepId: 'copy', kind: 'text', content: '终态输出' }],
+      },
+    });
+  });
+
+  it.each(['failed', 'paused', 'timeout'])('retains partial output evidence when %s includes a damaged report', async status => {
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ runId: 'run-partial-terminal' }), { status: 201 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ run: {
+        runId: 'run-partial-terminal', status, assetVersionIds: ['report-version'],
+        outputs: [
+          { stepId: 'copy', kind: 'text', content: '终态可用文本' },
+          { stepId: 'audit:bad', kind: 'json', schemaId: 'platform-compliance-report-v1', content: '{bad' },
+        ],
+      } }), { status: 200 }));
+
+    const execution = executeWorkflowSkillRun({
+      submitUrl: 'http://localhost:5000/api/skill-runs', requestBody: { skillId: 'skill-a' },
+      headers: { 'Content-Type': 'application/json' }, fetcher, pollIntervalMs: 0,
+      resolveAssetVersion: async () => null,
+    });
+
+    await expect(execution).rejects.toMatchObject({
+      name: 'WorkflowSkillRunTerminalError', runId: 'run-partial-terminal', status,
+      output: {
+        text: '终态可用文本', assetVersionIds: ['report-version'],
+        outputs: [{ stepId: 'copy', kind: 'text', content: '终态可用文本' }],
+        outputErrors: [{ index: 1, stepId: 'audit:bad', schemaId: 'platform-compliance-report-v1', code: 'SKILL_OUTPUT_JSON_INVALID' }],
       },
     });
   });

@@ -77,6 +77,7 @@ export interface AssetVersion {
 export interface WorkspaceAssetReference {
   assetId?: string;
   assetVersionId?: string;
+  kind?: AssetKind;
   placementId?: string;
   entityId?: string;
   url: string;
