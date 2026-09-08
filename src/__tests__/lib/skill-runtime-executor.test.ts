@@ -28,6 +28,7 @@ import {
 import { createProductionSkillStepRegistry } from '@/lib/skill-runtime/step-registry';
 import { skillExecutionSteps } from '@/lib/skill-runtime/cost-estimator';
 import { frozenDefinition } from '@/lib/skill-runtime/continuation';
+import { compileConditionalSkillSteps } from '@/lib/skill-runtime/step-compiler';
 
 vi.mock('server-only', () => ({}));
 
@@ -875,6 +876,165 @@ describe('Skill run history', () => {
     await expect(makeService(['plan', 'generate-4']).retry({
       actorUserId: 'user-1', runId: task.id, stepId: 'generate-4',
     })).rejects.toMatchObject({ code: 'SKILL_STEP_ALREADY_COMPLETED', status: 409 });
+  });
+
+  it('rejects retry when a frozen compiled fan-out digest no longer matches frozen inputs', async () => {
+    const fanOutSkill: SkillDefinition = {
+      ...definition,
+      inputs: [{
+        key: 'sourceImages', label: 'Sources', kind: 'images', required: true,
+        maximumItems: 20, bindToSourceVersions: true,
+      }],
+      steps: [{
+        id: 'audit-image', label: 'Audit image', toolId: 'analyze_image',
+        execution: 'parallel', parallelGroup: 'audit', promptTemplate: 'Audit image',
+        modelRole: 'vision', qualityGateIds: [], fanOut: {
+          inputKey: 'sourceImages', itemAlias: 'sourceImage', maximumItems: 20, concurrency: 2,
+        },
+      }],
+    };
+    const frozenSteps = compileConditionalSkillSteps(fanOutSkill, {
+      sourceImages: ['asset_version_old'],
+    });
+    const task: CloudTask = {
+      id: 'run-fan-out-drift', userId: 'user-1', projectId: 'project-1', type: 'agent-run',
+      status: 'processing', progress: 20, creditStatus: 'charged', creditCost: 1,
+      createdAt: 10, updatedAt: 20,
+    };
+    const stepId = frozenSteps[0]!.id;
+    const events: AgentEvent[] = [{
+      eventId: 'created', runId: task.id, sequence: 1, type: 'run.created', timestamp: 'now',
+      payload: {
+        workspace: 'canvas', workspaceId: 'canvas-1',
+        skill: {
+          skillId: definition.id, skillVersion: 1,
+          inputValues: { sourceImages: ['asset_version_new'] }, modelBindings: {},
+        },
+        skillSnapshot: { id: definition.id, version: 1, name: definition.name, steps: frozenSteps },
+      },
+    }, {
+      eventId: 'paused', runId: task.id, sequence: 2, type: 'run.paused', timestamp: 'now',
+      payload: { nextStepId: stepId, pauseReason: 'execution-error' },
+    }];
+    const resumeRun = vi.fn();
+    const service = createSkillRuntimeService({
+      createAuthorizedSkillRun: vi.fn(), getTaskForUser: vi.fn(async () => task),
+      listTasks: vi.fn(async () => [task]), listEvents: vi.fn(async () => events),
+      getProjection: vi.fn(async () => ({
+        runId: task.id, status: 'paused', lastSequence: 2, plan: [], resumeFromStepId: stepId,
+        assetVersionIds: [], ignoredEventIds: [], missingSequences: [], qualityChecks: [],
+      } as AgentRunProjection)), pauseRun: vi.fn(), resumeRun, cancelRun: vi.fn(),
+      prepareResume: vi.fn(),
+    });
+
+    await expect(service.retry({ actorUserId: 'user-1', runId: task.id, stepId }))
+      .rejects.toMatchObject({ code: 'SKILL_STEP_FAN_OUT_INVALID' });
+    expect(resumeRun).not.toHaveBeenCalled();
+  });
+
+  it('rejects retry when a compiled fan-out step id is detached from its digest', async () => {
+    const fanOutSkill: SkillDefinition = {
+      ...definition,
+      inputs: [{
+        key: 'sourceImages', label: 'Sources', kind: 'images', required: true,
+        maximumItems: 20, bindToSourceVersions: true,
+      }],
+      steps: [{
+        id: 'audit-image', label: 'Audit image', toolId: 'analyze_image',
+        execution: 'parallel', parallelGroup: 'audit', promptTemplate: 'Audit image',
+        modelRole: 'vision', qualityGateIds: [], fanOut: {
+          inputKey: 'sourceImages', itemAlias: 'sourceImage', maximumItems: 20, concurrency: 2,
+        },
+      }],
+    };
+    const [compiled] = compileConditionalSkillSteps(fanOutSkill, {
+      sourceImages: ['asset_version_a'],
+    });
+    const forgedStep = { ...compiled!, id: 'audit-image:ffffffffffffffff' };
+    const task: CloudTask = {
+      id: 'run-fan-out-id-drift', userId: 'user-1', projectId: 'project-1',
+      type: 'agent-run', status: 'processing', progress: 20, creditStatus: 'charged',
+      creditCost: 1, createdAt: 10, updatedAt: 20,
+    };
+    const events: AgentEvent[] = [{
+      eventId: 'created', runId: task.id, sequence: 1, type: 'run.created', timestamp: 'now',
+      payload: {
+        workspace: 'canvas', workspaceId: 'canvas-1',
+        skill: {
+          skillId: definition.id, skillVersion: 1,
+          inputValues: { sourceImages: ['asset_version_a'] }, modelBindings: {},
+        },
+        skillSnapshot: {
+          id: definition.id, version: 1, name: definition.name,
+          inputs: fanOutSkill.inputs, steps: [forgedStep],
+        },
+      },
+    }, {
+      eventId: 'paused', runId: task.id, sequence: 2, type: 'run.paused', timestamp: 'now',
+      payload: { nextStepId: forgedStep.id, pauseReason: 'execution-error' },
+    }];
+    const resumeRun = vi.fn();
+    const service = createSkillRuntimeService({
+      createAuthorizedSkillRun: vi.fn(), getTaskForUser: vi.fn(async () => task),
+      listTasks: vi.fn(async () => [task]), listEvents: vi.fn(async () => events),
+      getProjection: vi.fn(async () => ({
+        runId: task.id, status: 'paused', lastSequence: 2, plan: [],
+        resumeFromStepId: forgedStep.id, assetVersionIds: [], ignoredEventIds: [],
+        missingSequences: [], qualityChecks: [],
+      } as AgentRunProjection)), pauseRun: vi.fn(), resumeRun, cancelRun: vi.fn(),
+      prepareResume: vi.fn(),
+    });
+
+    await expect(service.retry({
+      actorUserId: 'user-1', runId: task.id, stepId: forgedStep.id,
+    })).rejects.toMatchObject({ code: 'SKILL_STEP_FAN_OUT_INVALID' });
+    expect(resumeRun).not.toHaveBeenCalled();
+  });
+
+  it('rejects retry instead of falling back to live steps for malformed compiled fan-out', async () => {
+    const task: CloudTask = {
+      id: 'run-malformed-fan-out', userId: 'user-1', projectId: 'project-1',
+      type: 'agent-run', status: 'processing', progress: 20, creditStatus: 'charged',
+      creditCost: 1, createdAt: 10, updatedAt: 20,
+    };
+    const stepId = 'audit-image:0123456789abcdef';
+    const events: AgentEvent[] = [{
+      eventId: 'created', runId: task.id, sequence: 1, type: 'run.created', timestamp: 'now',
+      payload: {
+        workspace: 'canvas', workspaceId: 'canvas-1',
+        skill: {
+          skillId: definition.id, skillVersion: 1,
+          inputValues: { sourceImages: ['asset_version_a'] }, modelBindings: {},
+        },
+        skillSnapshot: {
+          id: definition.id, version: 1, name: definition.name,
+          steps: [{
+            id: stepId, label: 'Audit image', toolId: 'analyze_image',
+            execution: 'sequential', promptTemplate: 'Audit image', modelRole: 'vision',
+            qualityGateIds: [], compiledFanOut: {
+              inputKey: 'sourceImages', itemIndex: 0, itemDigest: '0123456789abcdef',
+            },
+          }],
+        },
+      },
+    }, {
+      eventId: 'paused', runId: task.id, sequence: 2, type: 'run.paused', timestamp: 'now',
+      payload: { nextStepId: stepId, pauseReason: 'execution-error' },
+    }];
+    const resumeRun = vi.fn();
+    const service = createSkillRuntimeService({
+      createAuthorizedSkillRun: vi.fn(), getTaskForUser: vi.fn(async () => task),
+      listTasks: vi.fn(async () => [task]), listEvents: vi.fn(async () => events),
+      getProjection: vi.fn(async () => ({
+        runId: task.id, status: 'paused', lastSequence: 2, plan: [], resumeFromStepId: stepId,
+        assetVersionIds: [], ignoredEventIds: [], missingSequences: [], qualityChecks: [],
+      } as AgentRunProjection)), pauseRun: vi.fn(), resumeRun, cancelRun: vi.fn(),
+      prepareResume: vi.fn(),
+    });
+
+    await expect(service.retry({ actorUserId: 'user-1', runId: task.id, stepId }))
+      .rejects.toMatchObject({ code: 'SKILL_RUN_REQUEST_INVALID' });
+    expect(resumeRun).not.toHaveBeenCalled();
   });
 
   it('reports only the first sequential step as started while scheduling all unfinished work', async () => {

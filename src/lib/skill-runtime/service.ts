@@ -36,6 +36,8 @@ import {
   type ExecuteSkillStepInput,
 } from './executor';
 import { skillExecutionSteps } from './cost-estimator';
+import { parseCompiledSkillFanOut } from './compiled-fan-out';
+import { assertCompiledSkillFanOutValues } from './step-compiler';
 import type {
   DurableSkillOutput,
   SkillModelBinding,
@@ -242,6 +244,7 @@ export function parseSkillRunRequest(value: unknown): SkillRunRequest {
 function skillInvocation(events: readonly AgentEvent[]): {
   skillId: string;
   skillVersion: number;
+  inputValues: Record<string, unknown>;
 } | null {
   const created = events.find(event => event.type === 'run.created');
   const skill = created?.payload.skill;
@@ -250,7 +253,14 @@ function skillInvocation(events: readonly AgentEvent[]): {
   if (typeof candidate.skillId !== 'string' || !Number.isSafeInteger(candidate.skillVersion)) {
     return null;
   }
-  return { skillId: candidate.skillId, skillVersion: Number(candidate.skillVersion) };
+  const inputValues = candidate.inputValues;
+  return {
+    skillId: candidate.skillId,
+    skillVersion: Number(candidate.skillVersion),
+    inputValues: inputValues && typeof inputValues === 'object' && !Array.isArray(inputValues)
+      ? inputValues as Record<string, unknown>
+      : {},
+  };
 }
 
 function completedStepIds(events: readonly AgentEvent[]): Set<string> {
@@ -296,10 +306,14 @@ function completedSkillOutputs(events: readonly AgentEvent[]): DurableSkillOutpu
   });
 }
 
-function frozenExecutionSteps(events: readonly AgentEvent[]): SkillStepDefinition[] | null {
+function frozenExecutionSteps(events: readonly AgentEvent[]): {
+  inputs: readonly unknown[];
+  steps: SkillStepDefinition[];
+} | null {
   const snapshot = events.find(event => event.type === 'run.created')?.payload.skillSnapshot;
   if (!snapshot || typeof snapshot !== 'object' || Array.isArray(snapshot)) return null;
-  const steps = (snapshot as Record<string, unknown>).steps;
+  const snapshotRecord = snapshot as Record<string, unknown>;
+  const steps = snapshotRecord.steps;
   if (!Array.isArray(steps) || steps.length === 0) return null;
   const parsed: SkillStepDefinition[] = [];
   for (const raw of steps) {
@@ -317,6 +331,12 @@ function frozenExecutionSteps(events: readonly AgentEvent[]): SkillStepDefinitio
       || !Array.isArray(step.qualityGateIds)
       || !step.qualityGateIds.every(value => typeof value === 'string')
     ) return null;
+    let compiledFanOut: SkillStepDefinition['compiledFanOut'];
+    try {
+      compiledFanOut = parseCompiledSkillFanOut(step);
+    } catch {
+      throw new SkillRunRequestError('Frozen Skill step is invalid');
+    }
     parsed.push({
       id: step.id, label: step.label, toolId: step.toolId,
       execution: step.execution,
@@ -327,17 +347,25 @@ function frozenExecutionSteps(events: readonly AgentEvent[]): SkillStepDefinitio
         : {}),
       modelRole: step.modelRole as SkillStepDefinition['modelRole'],
       qualityGateIds: step.qualityGateIds as string[],
+      ...(compiledFanOut ? { compiledFanOut } : {}),
     });
   }
-  return parsed;
+  return {
+    inputs: Array.isArray(snapshotRecord.inputs) ? snapshotRecord.inputs : [],
+    steps: parsed,
+  };
 }
 
 function executionStepsForRun(events: readonly AgentEvent[], invocation: {
   skillId: string;
   skillVersion: number;
+  inputValues: Record<string, unknown>;
 }): SkillStepDefinition[] {
   const frozen = frozenExecutionSteps(events);
-  if (frozen) return frozen;
+  if (frozen) {
+    assertCompiledSkillFanOutValues(frozen, invocation.inputValues);
+    return frozen.steps;
+  }
   const workspace = events.find(event => event.type === 'run.created')?.payload.workspace;
   const surface = workspace === 'chat' ? 'simple-chat' : workspace as SkillSurface;
   const current = requireSkillForSurface(invocation.skillId, surface);

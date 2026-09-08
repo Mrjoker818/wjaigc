@@ -3,7 +3,7 @@ import { normalizeSkuDataset, SkillDatasetSchemaError } from './dataset-schema';
 
 export const SKILL_INPUT_LIMITS = {
   text: 16_384,
-  images: 16,
+  images: 20,
   datasetRows: 1_000,
   serialized: 512 * 1024,
 } as const;

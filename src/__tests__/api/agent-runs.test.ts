@@ -12,6 +12,7 @@ import { requireSkillForSurface } from '@/lib/skill-runtime/catalog';
 import * as skillCatalog from '@/lib/skill-runtime/catalog';
 import { resolveSkillInputs } from '@/lib/skill-runtime/input-resolver';
 import { compileSkillPrompt } from '@/lib/skill-runtime/prompt-compiler';
+import { compileConditionalSkillSteps } from '@/lib/skill-runtime/step-compiler';
 import { authorizeAgentContext } from '@/lib/agent-runtime/context-adapters';
 
 const authMocks = vi.hoisted(() => ({
@@ -1209,6 +1210,150 @@ describe('Agent runtime service', () => {
     expect(snapshot.inputs.find(field => field.key === 'sourceImages')).toMatchObject({
       bindToSourceVersions: true,
     });
+  });
+
+  it('persists compiled image fan-out identity without leaking source AssetVersion ids', async () => {
+    const base = requireSkillForSurface('preset-ecommerce-listing', 'canvas');
+    const definition = {
+      ...base,
+      id: 'custom-image-fan-out-snapshot',
+      inputs: [
+        ...base.inputs,
+        {
+          key: 'sourceImages', label: 'Sources', kind: 'images' as const, required: true,
+          maximumItems: 2, bindToSourceVersions: true,
+        },
+      ],
+      steps: [{
+        id: 'audit-image', label: 'Audit image', toolId: 'img2img' as const,
+        execution: 'parallel' as const, parallelGroup: 'audit',
+        promptTemplate: 'Audit source image', modelRole: 'image' as const,
+        qualityGateIds: [], fanOut: {
+          inputKey: 'sourceImages', itemAlias: 'sourceImage', maximumItems: 2, concurrency: 2,
+        },
+      }],
+    };
+    const requireOriginal = skillCatalog.requireSkillForSurface;
+    const catalogSpy = vi.spyOn(skillCatalog, 'requireSkillForSurface')
+      .mockImplementation((skillId, surface) => (
+        skillId === definition.id ? definition : requireOriginal(skillId, surface)
+      ));
+    const inputValues = resolveSkillInputs(definition, {
+      product: '耳机', features: '降噪', sourceImages: ['version-source-1', 'version-source-2'],
+    });
+    const dependencies = serviceDependencies();
+    dependencies.resolveTaskModel.mockImplementation(async (providerId, modelId) => ({
+      providerId, modelId, kind: providerId === 'provider-image' ? 'image' : 'chat',
+      sourceType: providerId === 'provider-image' ? 'image' : 'chat',
+      protocol: providerId === 'provider-image' ? 'images-generations' : 'chat-completions',
+      executionMode: 'sync', allowedRatios: [], allowedSizes: [], qualityOptions: [], maxOutputs: 1,
+      supportsReferenceImages: false, supportsMask: false,
+      outputKinds: providerId === 'provider-image' ? ['image'] : ['text'], capabilitySources: {},
+    }));
+    const service = agentRuntime.createAgentRuntimeService(dependencies);
+
+    try {
+      await service.createRun({
+        actor: user,
+        request: agentRuntime.parseAgentRunRequest(canvasSkillRequest({
+          prompt: compileSkillPrompt(definition.systemPrompt, inputValues),
+          allowedToolIds: ['img2img'],
+          sourceVersionIds: ['version-source-1', 'version-source-2'],
+          context: {
+            selectedEntityIds: [],
+            visibleVersionIds: ['version-source-1', 'version-source-2'], locale: 'zh-CN',
+          },
+          skill: {
+            skillId: definition.id, skillVersion: definition.version, inputValues,
+            modelBindings: {
+              orchestrator: { providerId: 'provider-exact', modelId: 'model-exact' },
+              image: { providerId: 'provider-image', modelId: 'model-image' },
+            },
+          },
+        })),
+      });
+    } finally {
+      catalogSpy.mockRestore();
+    }
+
+    const snapshot = dependencies.appendEvent.mock.calls[0][0].payload.skillSnapshot as {
+      steps: Array<{ id: string; compiledFanOut?: Record<string, unknown> }>;
+    };
+    const compiledSteps = snapshot.steps.filter(step => step.compiledFanOut);
+    expect(compiledSteps.map(step => step.compiledFanOut)).toEqual([
+      { inputKey: 'sourceImages', itemIndex: 0, itemDigest: expect.any(String) },
+      { inputKey: 'sourceImages', itemIndex: 1, itemDigest: expect.any(String) },
+    ]);
+    expect(compiledSteps.every(step => step.id.endsWith(`:${step.compiledFanOut?.itemDigest}`)))
+      .toBe(true);
+    expect(JSON.stringify(snapshot.steps)).not.toContain('version-source-');
+  });
+
+  it('rejects a compiled step id collision before creating a billable task', async () => {
+    const base = requireSkillForSurface('preset-ecommerce-listing', 'canvas');
+    const sourceField = {
+      key: 'sourceImages', label: 'Sources', kind: 'images' as const, required: true,
+      maximumItems: 2, bindToSourceVersions: true,
+    };
+    const fanOutSource = {
+      ...base,
+      id: 'custom-image-fan-out-collision-source',
+      inputs: [...base.inputs, sourceField],
+      steps: [{
+        id: 'audit-image', label: 'Audit image', toolId: 'img2img' as const,
+        execution: 'parallel' as const, parallelGroup: 'audit',
+        promptTemplate: 'Audit source image', modelRole: 'image' as const,
+        qualityGateIds: [], fanOut: {
+          inputKey: 'sourceImages', itemAlias: 'sourceImage', maximumItems: 2, concurrency: 2,
+        },
+      }],
+    };
+    const inputValues = resolveSkillInputs(fanOutSource, {
+      product: '耳机', features: '降噪', sourceImages: ['version-source-1'],
+    });
+    const [compiled] = compileConditionalSkillSteps(fanOutSource, inputValues);
+    const ordinary = { ...compiled! };
+    delete ordinary.compiledFanOut;
+    const definition = { ...fanOutSource, steps: [ordinary, compiled!] };
+    const requireOriginal = skillCatalog.requireSkillForSurface;
+    const catalogSpy = vi.spyOn(skillCatalog, 'requireSkillForSurface')
+      .mockImplementation((skillId, surface) => (
+        skillId === definition.id ? definition : requireOriginal(skillId, surface)
+      ));
+    const dependencies = serviceDependencies();
+    dependencies.resolveTaskModel.mockImplementation(async (providerId, modelId) => ({
+      providerId, modelId, kind: providerId === 'provider-image' ? 'image' : 'chat',
+      sourceType: providerId === 'provider-image' ? 'image' : 'chat',
+      protocol: providerId === 'provider-image' ? 'images-generations' : 'chat-completions',
+      executionMode: 'sync', allowedRatios: [], allowedSizes: [], qualityOptions: [], maxOutputs: 1,
+      supportsReferenceImages: false, supportsMask: false,
+      outputKinds: providerId === 'provider-image' ? ['image'] : ['text'], capabilitySources: {},
+    }));
+    const service = agentRuntime.createAgentRuntimeService(dependencies);
+
+    try {
+      await expect(service.createRun({
+        actor: user,
+        request: agentRuntime.parseAgentRunRequest(canvasSkillRequest({
+          prompt: compileSkillPrompt(definition.systemPrompt, inputValues),
+          allowedToolIds: ['img2img'], sourceVersionIds: ['version-source-1'],
+          context: {
+            selectedEntityIds: [], visibleVersionIds: ['version-source-1'], locale: 'zh-CN',
+          },
+          skill: {
+            skillId: definition.id, skillVersion: definition.version, inputValues,
+            modelBindings: {
+              orchestrator: { providerId: 'provider-exact', modelId: 'model-exact' },
+              image: { providerId: 'provider-image', modelId: 'model-image' },
+            },
+          },
+        })),
+      })).rejects.toMatchObject({ code: 'SKILL_STEP_FAN_OUT_INVALID' });
+    } finally {
+      catalogSpy.mockRestore();
+    }
+    expect(dependencies.createBillableTask).not.toHaveBeenCalled();
+    expect(dependencies.appendEvent).not.toHaveBeenCalled();
   });
 
   it('freezes concrete batch SKU steps and dataset metadata in run.created', async () => {

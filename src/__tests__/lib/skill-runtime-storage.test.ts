@@ -329,20 +329,31 @@ describe('versioned user skill storage', () => {
     mutation: (skill: {
       allowedSurfaces: string[];
       sourceAllowedSurfaces: string[];
-      inputs: Array<{ bindToSourceVersions?: unknown }>;
-      steps: Array<{ modelRole: string }>;
+      inputs: Array<{ key: string; kind: string; bindToSourceVersions?: unknown }>;
+      steps: Array<{
+        id: string;
+        modelRole: string;
+        fanOut?: unknown;
+        compiledFanOut?: unknown;
+      }>;
     }) => void,
+    sourceSkillId = 'preset-storyboard',
   ) {
     const adapter = createMemorySkillStorageAdapter();
     const store = createSkillStore(adapter);
-    await store.copy({ actorUserId: 'user-1', sourceSkillId: 'preset-storyboard' });
+    await store.copy({ actorUserId: 'user-1', sourceSkillId });
     const envelope = adapter.inspect('user-1', SKILL_CATALOG_KEY) as {
       revision: number;
       skills: Array<{
         allowedSurfaces: string[];
         sourceAllowedSurfaces: string[];
-        inputs: Array<{ bindToSourceVersions?: unknown }>;
-        steps: Array<{ modelRole: string }>;
+        inputs: Array<{ key: string; kind: string; bindToSourceVersions?: unknown }>;
+        steps: Array<{
+          id: string;
+          modelRole: string;
+          fanOut?: unknown;
+          compiledFanOut?: unknown;
+        }>;
       }>;
     };
     mutation(envelope.skills[0]!);
@@ -352,6 +363,97 @@ describe('versioned user skill storage', () => {
     } as never);
     return store;
   }
+
+  it('accepts and preserves a validated compiled image fan-out identity', async () => {
+    const compiledFanOut = {
+      inputKey: 'sourceImages', itemIndex: 0, itemDigest: '0123456789abcdef',
+    };
+    const store = await overwriteFirstStoredSkill(skill => {
+      const step = skill.steps.find(candidate => candidate.id === 'sku-creative')!;
+      delete step.fanOut;
+      step.id = `sku-creative:${compiledFanOut.itemDigest}`;
+      step.compiledFanOut = compiledFanOut;
+    }, 'preset-batch-sku-assets');
+
+    const envelope = await store.loadEnvelope('user-1');
+    expect(envelope.skills[0]?.steps.find(
+      step => step.id === `sku-creative:${compiledFanOut.itemDigest}`,
+    )?.compiledFanOut)
+      .toEqual(compiledFanOut);
+  });
+
+  it.each([
+    { inputKey: '', itemIndex: 0, itemDigest: '0123456789abcdef' },
+    { inputKey: 'sourceImages', itemIndex: -1, itemDigest: '0123456789abcdef' },
+    { inputKey: 'sourceImages', itemIndex: 0, itemDigest: 'not-a-digest' },
+    { inputKey: 'sourceImages', itemIndex: 0, itemDigest: '0123456789abcdef', extra: true },
+  ])('rejects malformed stored compiled fan-out identity %#', async compiledFanOut => {
+    const store = await overwriteFirstStoredSkill(skill => {
+      const step = skill.steps.find(candidate => candidate.id === 'sku-creative')!;
+      delete step.fanOut;
+      step.compiledFanOut = compiledFanOut;
+    }, 'preset-batch-sku-assets');
+
+    await expect(store.loadEnvelope('user-1')).rejects.toBeInstanceOf(SkillStorageError);
+  });
+
+  it('rejects a stored compiled fan-out detached from its step id or bound image field', async () => {
+    const forgedIdStore = await overwriteFirstStoredSkill(skill => {
+      const step = skill.steps.find(candidate => candidate.id === 'sku-creative')!;
+      delete step.fanOut;
+      step.id = 'sku-creative:ffffffffffffffff';
+      step.compiledFanOut = {
+        inputKey: 'sourceImages', itemIndex: 0, itemDigest: '0123456789abcdef',
+      };
+    }, 'preset-batch-sku-assets');
+    const unboundStore = await overwriteFirstStoredSkill(skill => {
+      const sourceImages = skill.inputs.find(field => field.key === 'sourceImages')!;
+      sourceImages.bindToSourceVersions = false;
+      const step = skill.steps.find(candidate => candidate.id === 'sku-creative')!;
+      delete step.fanOut;
+      step.id = 'sku-creative:0123456789abcdef';
+      step.compiledFanOut = {
+        inputKey: 'sourceImages', itemIndex: 0, itemDigest: '0123456789abcdef',
+      };
+    }, 'preset-batch-sku-assets');
+
+    await expect(forgedIdStore.loadEnvelope('user-1')).rejects.toBeInstanceOf(SkillStorageError);
+    await expect(unboundStore.loadEnvelope('user-1')).rejects.toBeInstanceOf(SkillStorageError);
+  });
+
+  it('rejects stored compiled steps that reuse the same frozen input index', async () => {
+    const store = await overwriteFirstStoredSkill(skill => {
+      const step = skill.steps.find(candidate => candidate.id === 'sku-creative')!;
+      delete step.fanOut;
+      step.id = 'sku-creative:0123456789abcdef';
+      step.compiledFanOut = {
+        inputKey: 'sourceImages', itemIndex: 0, itemDigest: '0123456789abcdef',
+      };
+      skill.steps.push({
+        ...structuredClone(step),
+        id: 'sku-creative-copy:0123456789abcdef',
+      });
+    }, 'preset-batch-sku-assets');
+
+    await expect(store.loadEnvelope('user-1')).rejects.toBeInstanceOf(SkillStorageError);
+  });
+
+  it.each([
+    { execution: 'sequential' },
+    { parallelGroup: undefined },
+  ])('rejects stored compiled fan-out outside a named parallel group %#', async override => {
+    const store = await overwriteFirstStoredSkill(skill => {
+      const step = skill.steps.find(candidate => candidate.id === 'sku-creative')! as
+        typeof skill.steps[number] & { execution?: unknown; parallelGroup?: unknown };
+      delete step.fanOut;
+      step.compiledFanOut = {
+        inputKey: 'sourceImages', itemIndex: 0, itemDigest: '0123456789abcdef',
+      };
+      Object.assign(step, override);
+    }, 'preset-batch-sku-assets');
+
+    await expect(store.loadEnvelope('user-1')).rejects.toBeInstanceOf(SkillStorageError);
+  });
 
   it('rejects recursively forged stored step enums', async () => {
     const store = await overwriteFirstStoredSkill(skill => {

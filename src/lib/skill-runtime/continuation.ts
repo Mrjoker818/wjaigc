@@ -12,6 +12,8 @@ import { skillExecutionSteps } from './cost-estimator';
 import { parseSkillRunRequest, executeSkillRun, SkillRunRequestError } from './service';
 import { createProductionSkillStepRegistry } from './step-registry';
 import { resolveSkillInputs } from './input-resolver';
+import { parseCompiledSkillFanOut } from './compiled-fan-out';
+import { assertCompiledSkillFanOutValues } from './step-compiler';
 import { assertSourceVersionBindings } from './run-request';
 import type { SkillDefinition, SkillInputField, SkillStepDefinition, SkillSurface } from './types';
 import { listAgentRunEvents } from '@/lib/agent-runtime/service';
@@ -51,6 +53,12 @@ function parseFrozenSteps(value: unknown): SkillStepDefinition[] | null {
       || !Array.isArray(step.qualityGateIds)
       || !step.qualityGateIds.every(gate => typeof gate === 'string')
     ) return null;
+    let compiledFanOut: SkillStepDefinition['compiledFanOut'];
+    try {
+      compiledFanOut = parseCompiledSkillFanOut(step);
+    } catch {
+      return null;
+    }
     result.push({
       id: step.id,
       label: step.label,
@@ -63,6 +71,7 @@ function parseFrozenSteps(value: unknown): SkillStepDefinition[] | null {
         : {}),
       modelRole: step.modelRole as SkillStepDefinition['modelRole'],
       qualityGateIds: step.qualityGateIds as string[],
+      ...(compiledFanOut ? { compiledFanOut } : {}),
     });
   }
   return result;
@@ -79,6 +88,9 @@ export function frozenDefinition(
     throw new SkillRunRequestError('Frozen Skill identity is invalid');
   }
   const steps = parseFrozenSteps(snapshot.steps);
+  if (Array.isArray(snapshot.steps) && snapshot.steps.length > 0 && !steps) {
+    throw new SkillRunRequestError('Frozen Skill step is invalid');
+  }
   if (snapshot.executionContextVersion !== undefined && snapshot.executionContextVersion !== 1) {
     throw new SkillRunRequestError('Frozen Skill context version is unsupported');
   }
@@ -223,6 +235,7 @@ export async function loadPersistedSkillContinuation(input: {
     parsedRequest.skillVersion,
   );
   const inputValues = resolveSkillInputs(definition, parsedRequest.inputValues);
+  assertCompiledSkillFanOutValues(definition, inputValues);
   const sourceVersionIds = assertSourceVersionBindings(
     definition,
     inputValues,

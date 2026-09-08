@@ -260,14 +260,14 @@ describe('resolveSkillInputs', () => {
     );
   });
 
-  it('限制图片为 16 个且尊重更小的 maximumItems', () => {
+  it('限制图片为 20 个且尊重更小的 maximumItems', () => {
     const globalDefinition = createDefinition([
       { key: 'images', label: 'Images', kind: 'images', required: true },
     ]);
-    expect(resolveSkillInputs(globalDefinition, { images: Array(16).fill('ver') }).images)
-      .toHaveLength(16);
+    expect(resolveSkillInputs(globalDefinition, { images: Array(20).fill('ver') }).images)
+      .toHaveLength(20);
     expectInputError(
-      () => resolveSkillInputs(globalDefinition, { images: Array(17).fill('ver') }),
+      () => resolveSkillInputs(globalDefinition, { images: Array(21).fill('ver') }),
       'SKILL_INPUT_LIMIT_EXCEEDED',
       'images',
     );
@@ -302,7 +302,7 @@ describe('resolveSkillInputs', () => {
     );
   });
 
-  it('maximumItems 大于全局上限时仍限制为 16', () => {
+  it('maximumItems 大于全局上限时仍限制为 20', () => {
     const looseDefinition = createDefinition([{
       key: 'images',
       label: 'Images',
@@ -312,7 +312,7 @@ describe('resolveSkillInputs', () => {
     }]);
 
     expectInputError(
-      () => resolveSkillInputs(looseDefinition, { images: Array(17).fill('ver') }),
+      () => resolveSkillInputs(looseDefinition, { images: Array(21).fill('ver') }),
       'SKILL_INPUT_LIMIT_EXCEEDED',
       'images',
     );

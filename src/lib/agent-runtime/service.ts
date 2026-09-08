@@ -18,6 +18,8 @@ import { abortTaskExecution, createTaskAbortScope } from '@/lib/task-core/task-a
 import { transitionTask } from '@/lib/task-core/task-service';
 import type { User } from '@/lib/user-types';
 import { estimateSkillRunCost, skillExecutionSteps } from '@/lib/skill-runtime/cost-estimator';
+import { parseCompiledSkillFanOut } from '@/lib/skill-runtime/compiled-fan-out';
+import { assertCompiledSkillFanOutValues } from '@/lib/skill-runtime/step-compiler';
 import { authorizeSkillAgentRunRequest } from '@/lib/skill-runtime/run-request';
 import { authorizeAgentContext } from './context-adapters';
 import { readAgentPrompt } from './request-validation';
@@ -756,6 +758,15 @@ export function createAgentRuntimeService(
             request.skill!.inputValues,
           )
         : null;
+      const frozenSkillSteps = skillAdmission
+        ? skillExecutionSteps(skillAdmission.skill, request.skill!.inputValues)
+        : [];
+      if (skillAdmission) {
+        assertCompiledSkillFanOutValues({
+          inputs: skillAdmission.skill.inputs,
+          steps: frozenSkillSteps,
+        }, request.skill!.inputValues);
+      }
       const creditCost = skillEstimate?.maximum
         ?? input.billingQuote?.creditCost
         ?? await dependencies.calculateCreditCost(
@@ -849,23 +860,30 @@ export function createAgentRuntimeService(
               id: skillAdmission.skill.id,
               version: skillAdmission.skill.version,
               name: skillAdmission.skill.name,
-              steps: skillExecutionSteps(
-                skillAdmission.skill,
-                request.skill!.inputValues,
-              ).map(step => ({
-                id: step.id,
-                label: step.label,
-                toolId: step.toolId,
-                execution: step.execution,
-                ...(step.parallelGroup ? { parallelGroup: step.parallelGroup } : {}),
-                promptTemplate: step.promptTemplate,
-                ...(step.promptInstructionTemplate
-                  ? { promptInstructionTemplate: step.promptInstructionTemplate }
-                  : {}),
-                modelRole: step.modelRole,
-                qualityGateIds: [...step.qualityGateIds],
-                ...(skillStepCosts.has(step.id) ? { cost: skillStepCosts.get(step.id) } : {}),
-              })),
+              steps: frozenSkillSteps.map(step => {
+                const compiledFanOut = parseCompiledSkillFanOut(step as unknown as Record<string, unknown>);
+                return {
+                  id: step.id,
+                  label: step.label,
+                  toolId: step.toolId,
+                  execution: step.execution,
+                  ...(step.parallelGroup ? { parallelGroup: step.parallelGroup } : {}),
+                  promptTemplate: step.promptTemplate,
+                  ...(step.promptInstructionTemplate
+                    ? { promptInstructionTemplate: step.promptInstructionTemplate }
+                    : {}),
+                  ...(compiledFanOut ? {
+                    compiledFanOut: {
+                      inputKey: compiledFanOut.inputKey,
+                      itemIndex: compiledFanOut.itemIndex,
+                      itemDigest: compiledFanOut.itemDigest,
+                    },
+                  } : {}),
+                  modelRole: step.modelRole,
+                  qualityGateIds: [...step.qualityGateIds],
+                  ...(skillStepCosts.has(step.id) ? { cost: skillStepCosts.get(step.id) } : {}),
+                };
+              }),
             },
           } : {}),
           ...(request.skill ? { skill: request.skill } : {}),

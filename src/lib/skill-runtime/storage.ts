@@ -9,6 +9,10 @@ import {
 import { CANVAS_WORKFLOW_SKILLS, SIMPLE_CHAT_PRESET_SKILLS } from './catalog';
 import { requireSkillForSurface, SkillNotFoundError, SkillSurfaceForbiddenError } from './catalog';
 import { normalizeLegacyChatSkills, type LegacyMigrationResult } from './legacy-migration';
+import {
+  assertCompiledSkillFanOutContracts,
+  parseCompiledSkillFanOut,
+} from './compiled-fan-out';
 import type { SkillDefinition, SkillSurface } from './types';
 
 export const SKILL_CATALOG_KEY = 'skill_catalog_v1';
@@ -23,6 +27,7 @@ const MAX_ENVELOPE_BYTES = 1_048_576;
 const LEGACY_CUSTOM_ID = /^skill-[1-9][0-9]{12}$/;
 const GENERATED_SKILL_ID = /^skill-[a-f0-9]{24}$/;
 const TOKEN_ID = /^[A-Za-z][A-Za-z0-9_-]*$/;
+const STEP_ID = /^[A-Za-z][A-Za-z0-9_-]*(?::[a-f0-9]{16})?$/;
 const GROUP_ID = /^[A-Za-z][A-Za-z0-9_:-]*$/;
 const CONVERSATION_CANVAS_SOURCE_ID = 'conversation-canvas';
 
@@ -167,14 +172,17 @@ function isStoredInput(value: unknown): boolean {
 function isStoredStep(value: unknown): boolean {
   if (!isRecord(value) || !hasOnlyKeys(value, [
     'id', 'label', 'toolId', 'execution', 'parallelGroup', 'promptTemplate',
-    'modelRole', 'qualityGateIds', 'when', 'fanOut',
+    'promptInstructionTemplate', 'modelRole', 'qualityGateIds', 'when', 'fanOut',
+    'compiledFanOut',
   ])) return false;
   if (
-    !isBoundedString(value.id, 128, TOKEN_ID)
+    !isBoundedString(value.id, 128, STEP_ID)
     || !isBoundedString(value.label, 120)
     || !isBoundedString(value.toolId, 128, TOKEN_ID)
     || (value.execution !== 'sequential' && value.execution !== 'parallel')
     || !isBoundedString(value.promptTemplate, 32_768)
+    || ('promptInstructionTemplate' in value
+      && !isBoundedString(value.promptInstructionTemplate, 32_768))
     || typeof value.modelRole !== 'string'
     || !MODEL_ROLES.has(value.modelRole)
     || !Array.isArray(value.qualityGateIds)
@@ -205,7 +213,8 @@ function isStoredStep(value: unknown): boolean {
       ])
       || !isBoundedString(value.fanOut.inputKey, 64, TOKEN_ID)
       || !isBoundedString(value.fanOut.itemAlias, 64, TOKEN_ID)
-      || !isBoundedString(value.fanOut.keyField, 64, TOKEN_ID)
+      || ('keyField' in value.fanOut
+        && !isBoundedString(value.fanOut.keyField, 64, TOKEN_ID))
       || !Number.isSafeInteger(value.fanOut.maximumItems)
       || (value.fanOut.maximumItems as number) < 1
       || (value.fanOut.maximumItems as number) > 1_000
@@ -214,6 +223,13 @@ function isStoredStep(value: unknown): boolean {
       || (value.fanOut.concurrency as number) > 10
       || value.execution !== 'parallel'
       || typeof value.parallelGroup !== 'string') return false;
+  }
+  if ('compiledFanOut' in value) {
+    try {
+      parseCompiledSkillFanOut(value);
+    } catch {
+      return false;
+    }
   }
   return true;
 }
@@ -257,7 +273,7 @@ function isStoredSkill(value: unknown): value is SkillDefinition {
     || !sameSurfaces(sourceAllowedSurfaces, expectedSurfaces)
     || !allowedSurfaces.every(surface => sourceAllowedSurfaces.includes(surface))
   ) return false;
-  return isBoundedString(value.id, 30, GENERATED_SKILL_ID)
+  const valid = isBoundedString(value.id, 30, GENERATED_SKILL_ID)
     && (!('executionContextVersion' in value) || value.executionContextVersion === 1)
     && Number.isSafeInteger(value.version)
     && (value.version as number) >= 1
@@ -280,6 +296,16 @@ function isStoredSkill(value: unknown): value is SkillDefinition {
     && isNonNegativeSafeInteger(value.updatedAt)
     && (value.updatedAt as number) >= (value.createdAt as number)
     && isNonNegativeSafeInteger(value.usageCount);
+  if (!valid) return false;
+  try {
+    assertCompiledSkillFanOutContracts({
+      inputs: value.inputs as unknown[],
+      steps: value.steps as unknown[],
+    });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export function parseUserSkillEnvelope(value: unknown): UserSkillEnvelope {
@@ -597,6 +623,9 @@ export function createSkillStore(
             execution: step.execution,
             ...(step.parallelGroup === undefined ? {} : { parallelGroup: step.parallelGroup }),
             promptTemplate: step.promptTemplate,
+            ...(step.promptInstructionTemplate === undefined
+              ? {}
+              : { promptInstructionTemplate: step.promptInstructionTemplate }),
             modelRole: step.modelRole,
             qualityGateIds: [...step.qualityGateIds],
             ...(step.when === undefined ? {} : {
@@ -609,9 +638,16 @@ export function createSkillStore(
               fanOut: {
                 inputKey: step.fanOut.inputKey,
                 itemAlias: step.fanOut.itemAlias,
-                keyField: step.fanOut.keyField,
+                ...(step.fanOut.keyField === undefined ? {} : { keyField: step.fanOut.keyField }),
                 maximumItems: step.fanOut.maximumItems,
                 concurrency: step.fanOut.concurrency,
+              },
+            }),
+            ...(step.compiledFanOut === undefined ? {} : {
+              compiledFanOut: {
+                inputKey: step.compiledFanOut.inputKey,
+                itemIndex: step.compiledFanOut.itemIndex,
+                itemDigest: step.compiledFanOut.itemDigest,
               },
             }),
           })),

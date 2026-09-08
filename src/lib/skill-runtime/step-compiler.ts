@@ -1,5 +1,11 @@
 import { createHash } from 'node:crypto';
 
+import { isAssetVersionId } from '@/lib/asset-core/asset-version-id';
+import {
+  assertCompiledSkillFanOutContracts,
+  assertCompiledSkillFanOutFieldContract,
+} from './compiled-fan-out';
+
 import type {
   SkillDefinition,
   SkillStepCondition,
@@ -37,11 +43,14 @@ function canonicalize(value: unknown): unknown {
   return value;
 }
 
-function rowDigest(row: Readonly<Record<string, unknown>>): string {
-  return createHash('sha256')
-    .update(JSON.stringify(canonicalize(row)))
-    .digest('hex')
-    .slice(0, 16);
+function valueDigest(value: unknown, stepId: string): string {
+  try {
+    const serialized = JSON.stringify(canonicalize(value));
+    if (serialized === undefined) throw new TypeError('Value is not JSON serializable');
+    return createHash('sha256').update(serialized).digest('hex').slice(0, 16);
+  } catch {
+    throw new SkillStepFanOutError(stepId);
+  }
 }
 
 function formatRowValue(value: unknown, stepId: string): string {
@@ -69,11 +78,17 @@ function compileFanOutStep(
   inputValues: Readonly<Record<string, unknown>>,
 ): SkillStepDefinition[] {
   const field = definition.inputs.find(candidate => candidate.key === fanOut.inputKey);
+  const isDataset = field?.kind === 'dataset';
+  const isImages = field?.kind === 'images';
   if (
     !field
-    || field.kind !== 'dataset'
+    || (!isDataset && !isImages)
     || !/^[A-Za-z][A-Za-z0-9_-]*$/.test(fanOut.itemAlias)
-    || !/^[A-Za-z][A-Za-z0-9_-]*$/.test(fanOut.keyField)
+    || (isDataset && (
+      typeof fanOut.keyField !== 'string'
+      || !/^[A-Za-z][A-Za-z0-9_-]*$/.test(fanOut.keyField)
+    ))
+    || (isImages && (fanOut.keyField !== undefined || field.bindToSourceVersions !== true))
     || !Number.isSafeInteger(fanOut.maximumItems)
     || fanOut.maximumItems < 1
     || fanOut.maximumItems > (field.maximumItems ?? fanOut.maximumItems)
@@ -85,30 +100,57 @@ function compileFanOutStep(
   ) {
     throw new SkillStepFanOutError(step.id);
   }
-  const rowPlaceholder = new RegExp(
-    `{{\\s*${fanOut.itemAlias}\\.[A-Za-z][A-Za-z0-9_-]*\\s*}}`,
-  );
-  if (!rowPlaceholder.test(step.promptTemplate)) throw new SkillStepFanOutError(step.id);
+  if (isDataset) {
+    const rowPlaceholder = new RegExp(
+      `{{\\s*${fanOut.itemAlias}\\.[A-Za-z][A-Za-z0-9_-]*\\s*}}`,
+    );
+    if (!rowPlaceholder.test(step.promptTemplate)) throw new SkillStepFanOutError(step.id);
+  }
 
   const base = { ...step };
   delete base.fanOut;
   if (!Object.hasOwn(inputValues, fanOut.inputKey)) return [base];
-  const rows = inputValues[fanOut.inputKey];
-  if (!Array.isArray(rows) || rows.length === 0 || rows.length > fanOut.maximumItems) {
+  const values = inputValues[fanOut.inputKey];
+  if (values === undefined) return [base];
+  const maximumItems = isImages ? Math.min(fanOut.maximumItems, 20) : fanOut.maximumItems;
+  if (!Array.isArray(values) || values.length === 0 || values.length > maximumItems) {
     throw new SkillStepFanOutError(step.id);
   }
 
-  return rows.map((value, index) => {
+  if (isImages && new Set(values).size !== values.length) {
+    throw new SkillStepFanOutError(step.id);
+  }
+
+  return values.map((value, index) => {
+    if (isImages) {
+      if (!isAssetVersionId(value)) {
+        throw new SkillStepFanOutError(step.id);
+      }
+      const digest = valueDigest(value, step.id);
+      return {
+        ...base,
+        id: `${step.id}:${digest}`,
+        label: `${step.label} ${index + 1}`,
+        parallelGroup: `${step.parallelGroup}:chunk:${Math.floor(index / fanOut.concurrency)}`,
+        compiledFanOut: {
+          inputKey: fanOut.inputKey,
+          itemIndex: index,
+          itemDigest: digest,
+        },
+      };
+    }
     if (!value || typeof value !== 'object' || Array.isArray(value)) {
       throw new SkillStepFanOutError(step.id);
     }
     const row = value as Readonly<Record<string, unknown>>;
-    if (typeof row[fanOut.keyField] !== 'string' || !row[fanOut.keyField]) {
+    const digest = valueDigest(row, step.id);
+    const keyField = fanOut.keyField!;
+    if (typeof row[keyField] !== 'string' || !row[keyField]) {
       throw new SkillStepFanOutError(step.id);
     }
     return {
       ...base,
-      id: `${step.id}:${rowDigest(row)}`,
+      id: `${step.id}:${digest}`,
       label: `${step.label} ${index + 1}`,
       parallelGroup: `${step.parallelGroup}:chunk:${Math.floor(index / fanOut.concurrency)}`,
       promptInstructionTemplate: step.promptTemplate,
@@ -120,6 +162,74 @@ function compileFanOutStep(
       ),
     };
   });
+}
+
+export function compiledSkillFanOutValue(
+  step: SkillStepDefinition,
+  inputValues: Readonly<Record<string, unknown>>,
+): string | Record<string, unknown> {
+  const compiled = step.compiledFanOut;
+  if (
+    !compiled
+    || !/^[A-Za-z][A-Za-z0-9_-]*$/.test(compiled.inputKey)
+    || !Number.isSafeInteger(compiled.itemIndex)
+    || compiled.itemIndex < 0
+    || !/^[a-f0-9]{16}$/.test(compiled.itemDigest)
+    || !step.id.endsWith(`:${compiled.itemDigest}`)
+  ) throw new SkillStepFanOutError(step.id);
+  const values = inputValues[compiled.inputKey];
+  if (!Array.isArray(values) || compiled.itemIndex >= values.length) {
+    throw new SkillStepFanOutError(step.id);
+  }
+  const value = values[compiled.itemIndex];
+  const validValue = typeof value === 'string'
+    ? isAssetVersionId(value)
+    : Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+  if (
+    !validValue
+    || valueDigest(value, step.id) !== compiled.itemDigest
+  ) throw new SkillStepFanOutError(step.id);
+  return value as string | Record<string, unknown>;
+}
+
+export function assertCompiledSkillFanOutValues(
+  definition: {
+    inputs: readonly unknown[];
+    steps: readonly SkillStepDefinition[];
+  },
+  inputValues: Readonly<Record<string, unknown>>,
+): void {
+  try {
+    assertCompiledSkillFanOutContracts(definition);
+  } catch {
+    const stepId = definition.steps.find(step => step.compiledFanOut)?.id ?? 'skill';
+    throw new SkillStepFanOutError(stepId);
+  }
+  for (const step of definition.steps) {
+    if (!step.compiledFanOut) continue;
+    try {
+      const compiled = assertCompiledSkillFanOutFieldContract(
+        step as unknown as Readonly<Record<string, unknown>>,
+        definition.inputs,
+      )!;
+      const value = compiledSkillFanOutValue(step, inputValues);
+      const field = definition.inputs.find(candidate => (
+        candidate !== null
+        && typeof candidate === 'object'
+        && !Array.isArray(candidate)
+        && (candidate as Record<string, unknown>).key === compiled.inputKey
+      )) as SkillDefinition['inputs'][number] | undefined;
+      if (
+        (field?.kind === 'images' && typeof value !== 'string')
+        || (field?.kind === 'dataset' && (
+          !value || typeof value !== 'object' || Array.isArray(value)
+        ))
+      ) throw new SkillStepFanOutError(step.id);
+    } catch (error) {
+      if (error instanceof SkillStepFanOutError) throw error;
+      throw new SkillStepFanOutError(step.id);
+    }
+  }
 }
 
 function conditionMatches(

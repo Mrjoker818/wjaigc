@@ -36,9 +36,15 @@ export interface SkillStepCondition {
 export interface SkillStepFanOut {
   inputKey: string;
   itemAlias: string;
-  keyField: string;
+  keyField?: string;
   maximumItems: number;
   concurrency: number;
+}
+
+export interface CompiledSkillStepFanOut {
+  inputKey: string;
+  itemIndex: number;
+  itemDigest: string;
 }
 
 export interface SkillStepDefinition {
@@ -53,6 +59,7 @@ export interface SkillStepDefinition {
   qualityGateIds: readonly string[];
   when?: SkillStepCondition;
   fanOut?: SkillStepFanOut;
+  compiledFanOut?: CompiledSkillStepFanOut;
 }
 
 export interface SkillDefinition {

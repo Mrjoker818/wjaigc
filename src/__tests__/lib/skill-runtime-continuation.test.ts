@@ -20,6 +20,8 @@ import { agentRunRequestDigest } from '@/lib/agent-runtime/service';
 import type { AgentEvent, AgentRunRequest } from '@/lib/agent-runtime/types';
 import type { CloudTask } from '@/lib/cloud-task-storage';
 import { frozenDefinition, loadPersistedSkillContinuation } from '@/lib/skill-runtime/continuation';
+import { compileConditionalSkillSteps } from '@/lib/skill-runtime/step-compiler';
+import type { SkillDefinition } from '@/lib/skill-runtime/types';
 
 const actor = {
   id: 'user-1', name: 'User', role: 'user' as const, status: 'active' as const,
@@ -83,6 +85,139 @@ beforeEach(() => {
 });
 
 describe('Skill runtime frozen continuation', () => {
+  it('restores a validated compiled image fan-out identity from the frozen snapshot', () => {
+    const compiledFanOut = {
+      inputKey: 'sources', itemIndex: 1, itemDigest: '0123456789abcdef',
+    };
+    const definition = frozenDefinition({
+      ...frozenSnapshot,
+      steps: [{
+        id: 'audit-image:0123456789abcdef', label: 'Audit image 2', toolId: 'audit',
+        execution: 'parallel', parallelGroup: 'audit:chunk:0', promptTemplate: 'Audit image',
+        modelRole: 'vision', qualityGateIds: [], compiledFanOut,
+      }],
+    }, 'canvas', frozenSnapshot.id, frozenSnapshot.version);
+
+    expect(definition.steps[0]?.compiledFanOut).toEqual(compiledFanOut);
+  });
+
+  it.each([
+    { inputKey: '', itemIndex: 0, itemDigest: '0123456789abcdef' },
+    { inputKey: 'sources', itemIndex: -1, itemDigest: '0123456789abcdef' },
+    { inputKey: 'sources', itemIndex: 0, itemDigest: 'not-a-digest' },
+  ])('rejects malformed frozen compiled fan-out identity %#', compiledFanOut => {
+    expect(() => frozenDefinition({
+      ...frozenSnapshot,
+      steps: [{
+        ...frozenSnapshot.steps[0], compiledFanOut,
+      }],
+    }, 'canvas', frozenSnapshot.id, frozenSnapshot.version))
+      .toThrow('Frozen Skill step is invalid');
+  });
+
+  it('rejects a frozen step with both source and compiled fan-out metadata', () => {
+    expect(() => frozenDefinition({
+      ...frozenSnapshot,
+      steps: [{
+        id: 'audit-image:0123456789abcdef', label: 'Audit image 1', toolId: 'audit',
+        execution: 'parallel', parallelGroup: 'audit:chunk:0', promptTemplate: 'Audit image',
+        modelRole: 'vision', qualityGateIds: [],
+        fanOut: {
+          inputKey: 'sources', itemAlias: 'sourceImage', maximumItems: 3, concurrency: 2,
+        },
+        compiledFanOut: {
+          inputKey: 'sources', itemIndex: 0, itemDigest: '0123456789abcdef',
+        },
+      }],
+    }, 'canvas', frozenSnapshot.id, frozenSnapshot.version))
+      .toThrow('Frozen Skill step is invalid');
+  });
+
+  it.each([
+    { execution: 'sequential' },
+    { parallelGroup: undefined },
+    { compiledFanOut: {
+      inputKey: 'sources', itemIndex: 0, itemDigest: '0123456789abcdef', extra: true,
+    } },
+  ])('rejects inconsistent compiled fan-out snapshot structure %#', override => {
+    expect(() => frozenDefinition({
+      ...frozenSnapshot,
+      steps: [{
+        id: 'audit-image:0123456789abcdef', label: 'Audit image 1', toolId: 'audit',
+        execution: 'parallel', parallelGroup: 'audit:chunk:0', promptTemplate: 'Audit image',
+        modelRole: 'vision', qualityGateIds: [],
+        compiledFanOut: {
+          inputKey: 'sources', itemIndex: 0, itemDigest: '0123456789abcdef',
+        },
+        ...override,
+      }],
+    }, 'canvas', frozenSnapshot.id, frozenSnapshot.version))
+      .toThrow('Frozen Skill step is invalid');
+  });
+
+  it('rejects continuation when compiled fan-out digest drifts from frozen input values', async () => {
+    const fanOutDefinition: SkillDefinition = {
+      ...frozenSnapshot,
+      executionContextVersion: 1,
+      inputs: frozenSnapshot.inputs as SkillDefinition['inputs'],
+      allowedSurfaces: ['canvas'], category: 'test', description: 'test',
+      enabled: true, builtIn: true, createdAt: 1, updatedAt: 1, usageCount: 0,
+      steps: [{
+        id: 'audit-image', label: 'Audit image', toolId: 'audit', execution: 'parallel',
+        parallelGroup: 'audit', promptTemplate: 'Audit image', modelRole: 'vision',
+        qualityGateIds: [], fanOut: {
+          inputKey: 'sources', itemAlias: 'sourceImage', maximumItems: 3, concurrency: 2,
+        },
+      }],
+    };
+    const fixture = persistedFixture({
+      campaignName: 'Launch', channels: ['Web'], sources: ['version-1'],
+    }, ['version-1']);
+    fixture.events[0]!.payload.skillSnapshot = {
+      ...frozenSnapshot,
+      steps: compileConditionalSkillSteps(fanOutDefinition, { sources: ['version-2'] }),
+    };
+
+    await expect(loadPersistedSkillContinuation({
+      actorUserId: actor.id, projectId: 'project-1', runId: 'run-1', ...fixture,
+    })).rejects.toMatchObject({ code: 'SKILL_STEP_FAN_OUT_INVALID' });
+    expect(continuationMocks.createRegistry).not.toHaveBeenCalled();
+  });
+
+  it('rejects continuation when a compiled fan-out step id is detached from its digest', async () => {
+    const fanOutDefinition: SkillDefinition = {
+      ...frozenSnapshot,
+      executionContextVersion: 1,
+      inputs: [{
+        key: 'sources', label: 'Sources', kind: 'images', required: true,
+        maximumItems: 3, bindToSourceVersions: true,
+      }],
+      allowedSurfaces: ['canvas'], category: 'test', description: 'test',
+      enabled: true, builtIn: true, createdAt: 1, updatedAt: 1, usageCount: 0,
+      steps: [{
+        id: 'audit-image', label: 'Audit image', toolId: 'audit', execution: 'parallel',
+        parallelGroup: 'audit', promptTemplate: 'Audit image', modelRole: 'vision',
+        qualityGateIds: [], fanOut: {
+          inputKey: 'sources', itemAlias: 'sourceImage', maximumItems: 3, concurrency: 2,
+        },
+      }],
+    };
+    const fixture = persistedFixture({ sources: ['version-1'] }, ['version-1']);
+    const [compiled] = compileConditionalSkillSteps(fanOutDefinition, {
+      sources: ['version-1'],
+    });
+    fixture.events[0]!.payload.skillSnapshot = {
+      ...frozenSnapshot,
+      inputs: fanOutDefinition.inputs,
+      steps: [{ ...compiled!, id: 'audit-image:ffffffffffffffff' }],
+    };
+
+    await expect(loadPersistedSkillContinuation({
+      actorUserId: actor.id, projectId: 'project-1', runId: 'run-1', ...fixture,
+    })).rejects.toMatchObject({ code: 'SKILL_STEP_FAN_OUT_INVALID' });
+    expect(continuationMocks.createRegistry).not.toHaveBeenCalled();
+  });
+
   it('restores the complete validated input contract from the frozen snapshot', () => {
     const definition = frozenDefinition({
       id: 'custom-source-bound', version: 4, name: 'Frozen source skill',
