@@ -553,6 +553,61 @@ describe('platform compliance report execution', () => {
     );
   });
 
+  it('preserves caller cancellation during HTTP response cleanup through durable execution', async () => {
+    const controller = new AbortController();
+    let markCleanupStarted!: () => void;
+    let finishCleanup!: () => void;
+    const cleanupStarted = new Promise<void>(resolve => { markCleanupStarted = resolve; });
+    const cleanupPending = new Promise<void>(resolve => { finishCleanup = resolve; });
+    const cancel = vi.fn(async () => {
+      markCleanupStarted();
+      await cleanupPending;
+    });
+    mocks.fetchWithV1Retry.mockImplementation(async () => new Response(
+      new ReadableStream<Uint8Array>({ pull() {}, cancel }),
+      { status: 429, headers: { 'x-request-id': 'provider-request-429' } },
+    ));
+    const dependencies = durableDependencies();
+    const persisted = vi.fn<(input: PersistCompliancePartialReportInput) => Promise<void>>(
+      async () => undefined,
+    );
+    const request = complianceRequest();
+    const registry = createProductionSkillStepRegistry({
+      actor: { id: 'user-1', name: 'User', role: 'user', status: 'active', productType: 'canvas', createdAt: 1, updatedAt: 1 },
+      request, mediaByVersionId: { 'asset-version-a': imageDataUrl },
+      persistCompliancePartialReport: persisted,
+    });
+
+    const execution = executeDurableAgentDownstreamOperation({
+      actorUserId: 'user-1', projectId: 'project-1', runId: 'run-1',
+      toolId: 'compliance_audit', stepId: 'audit:a', requestDigest: 'request-digest',
+      executionFence: { runId: 'run-1', leaseOwner: 'lease-1', generation: 1 },
+    }, operation => registry.stepAdapters.compliance_audit(
+      complianceStepInput(request, operation, controller.signal),
+    ), dependencies);
+    await cleanupStarted;
+    controller.abort(new DOMException('cancelled during cleanup', 'AbortError'));
+    finishCleanup();
+
+    await expect(execution).rejects.toMatchObject({
+      code: 'COMPLIANCE_AUDIT_VISION_FAILED',
+      submissionOutcome: 'known',
+      retryable: false,
+      partialReport: expect.objectContaining({
+        technicalErrors: [expect.objectContaining({
+          code: 'COMPLIANCE_VISION_CANCELLED',
+          requestId: 'provider-request-429',
+          retryable: false,
+        })],
+      }),
+    });
+    expect(cancel).toHaveBeenCalledTimes(1);
+    expect(dependencies.markSubmissionUnknown).not.toHaveBeenCalled();
+    expect(dependencies.release).toHaveBeenCalledWith(
+      expect.any(Object), { knownSubmissionOutcome: true },
+    );
+  });
+
   it('binds vision to the inspected bytes when the authorized URL content changes', async () => {
     const uploads = resolve(process.cwd(), 'public/uploads');
     const name = `compliance-byte-binding-${process.pid}-${Date.now()}.png`;

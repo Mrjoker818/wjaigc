@@ -364,4 +364,42 @@ describe('platform compliance frozen vision client', () => {
     });
     expect(cancel).toHaveBeenCalledTimes(1);
   });
+
+  it.each([
+    ['unsafe request id', 200, { 'x-request-id': 'unsafe/request' }, 'local-request-1'],
+    ['oversized content length', 200, {
+      'x-request-id': 'provider-request-1', 'content-length': String(300 * 1024),
+    }, 'provider-request-1'],
+    ['HTTP rejection', 429, { 'x-request-id': 'provider-request-429' }, 'provider-request-429'],
+  ])('preserves caller cancellation during asynchronous cleanup for %s', async (
+    _name, status, headers, expectedRequestId,
+  ) => {
+    const controller = new AbortController();
+    let markCleanupStarted!: () => void;
+    let finishCleanup!: () => void;
+    const cleanupStarted = new Promise<void>(resolve => { markCleanupStarted = resolve; });
+    const cleanupPending = new Promise<void>(resolve => { finishCleanup = resolve; });
+    const cancel = vi.fn(async () => {
+      markCleanupStarted();
+      await cleanupPending;
+    });
+    const body = new ReadableStream<Uint8Array>({ pull() {}, cancel });
+    const fetcher = vi.fn(async () => new Response(body, { status, headers }));
+
+    const execution = invokeComplianceVision({
+      provider, modelId: 'gemini-vision-stable', imageInput: '/uploads/authorized.png', rules,
+      requestId: 'local-request-1', signal: controller.signal,
+    }, { fetcher });
+    await cleanupStarted;
+    controller.abort(new DOMException('cancelled during cleanup', 'AbortError'));
+    finishCleanup();
+
+    await expect(execution).rejects.toMatchObject({
+      code: 'COMPLIANCE_VISION_CANCELLED',
+      requestId: expectedRequestId,
+      retryable: false,
+      submissionUnknown: false,
+    });
+    expect(cancel).toHaveBeenCalledTimes(1);
+  });
 });

@@ -103,12 +103,21 @@ function cancellationError(input: ComplianceVisionInput, requestId: string): Com
   );
 }
 
+async function cancelRejectedResponseBody(
+  response: Response,
+  input: ComplianceVisionInput,
+  requestId: string,
+): Promise<void> {
+  await cancelResponseBody(response);
+  if (input.signal.aborted) throw cancellationError(input, requestId);
+}
+
 async function requestIdFrom(response: Response, input: ComplianceVisionInput): Promise<string> {
   const value = response.headers.get('x-request-id')?.trim()
     || response.headers.get('request-id')?.trim();
   if (!value) return input.requestId;
   if (value.length > MAX_REQUEST_ID_LENGTH || !SAFE_REQUEST_ID.test(value)) {
-    await cancelResponseBody(response);
+    await cancelRejectedResponseBody(response, input, input.requestId);
     throw responseError(input, input.requestId);
   }
   return value;
@@ -170,7 +179,7 @@ async function readBoundedResponse(
     !/^\d+$/u.test(declaredLength)
     || Number(declaredLength) > MAX_RESPONSE_BYTES
   )) {
-    await cancelResponseBody(response);
+    await cancelRejectedResponseBody(response, input, requestId);
     throw responseError(input, requestId);
   }
   if (!response.body) return '';
@@ -396,7 +405,7 @@ export async function invokeComplianceVision(
   const requestId = await requestIdFrom(response, input);
   await throwIfCallerCancelled(response, input, requestId);
   if (!response.ok) {
-    await cancelResponseBody(response);
+    await cancelRejectedResponseBody(response, input, requestId);
     throw httpError(input, response, requestId);
   }
   let envelope: unknown;
