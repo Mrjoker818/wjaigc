@@ -62,6 +62,10 @@ export class UserManager {
   // Map: imageId → 删除时间戳(ms)，60秒后自动清理
   private _recentlyDeletedImageIds: Map<string, number> = new Map();
   private static readonly DELETED_IMAGE_TTL_MS = 60_000; // 60秒内过滤已删除图片
+  // ★ 跟踪最近删除的项目ID，防止服务器同步时将已删除的项目合并回来
+  // Map: projectId → 删除时间戳(ms)，60秒后自动清理
+  private _recentlyDeletedProjectIds: Map<string, number> = new Map();
+  private static readonly DELETED_PROJECT_TTL_MS = 60_000; // 60秒内过滤已删除项目
 
   /** 注册项目数据变更回调（用于跨设备同步时刷新 UI），返回取消订阅函数 */
   onProjectsChanged(callback: (() => void) | null): () => void {
@@ -88,6 +92,37 @@ export class UserManager {
       return false;
     }
     return true;
+  }
+
+  /** 记录已删除的项目ID（防止服务器同步时恢复已删除项目） */
+  recordDeletedProjectIds(projectIds: string[]): void {
+    const now = Date.now();
+    for (const id of projectIds) {
+      this._recentlyDeletedProjectIds.set(id, now);
+    }
+    // 清理过期的记录
+    this.cleanupDeletedProjectIds();
+  }
+
+  /** 检查项目ID是否在最近删除列表中 */
+  isRecentlyDeletedProject(projectId: string): boolean {
+    const deleteTime = this._recentlyDeletedProjectIds.get(projectId);
+    if (!deleteTime) return false;
+    if (Date.now() - deleteTime > UserManager.DELETED_PROJECT_TTL_MS) {
+      this._recentlyDeletedProjectIds.delete(projectId);
+      return false;
+    }
+    return true;
+  }
+
+  /** 清理过期的已删除项目ID记录 */
+  private cleanupDeletedProjectIds(): void {
+    const now = Date.now();
+    for (const [id, time] of this._recentlyDeletedProjectIds) {
+      if (now - time > UserManager.DELETED_PROJECT_TTL_MS) {
+        this._recentlyDeletedProjectIds.delete(id);
+      }
+    }
   }
 
   /** 清理过期的已删除图片ID记录 */
@@ -587,6 +622,8 @@ export class UserManager {
           this.applyProjectIdMap(data.projectIdMap || {});
           console.log('[Sync] syncToServer: success, projects=', projectsPayload.length);
           this._recentlyDeletedImageIds.clear();
+          // 服务器已成功同步删除后的数据，清空项目墓碑（后续 load 不会再把已删项目合并回来）
+          this._recentlyDeletedProjectIds.clear();
         } else {
           console.warn('[Sync] syncToServer: invalid success response');
         }
@@ -666,6 +703,14 @@ export class UserManager {
         if (!p.userId) p.userId = currentUserId; // 历史数据补上 userId
         return true;
       });
+      // ★ 过滤掉最近被删除的项目：防止删除后（同步延迟/失败/刷新）项目从服务器端合并回来
+      if (this._recentlyDeletedProjectIds.size > 0) {
+        const beforeDeleteFilter = serverProjects.length;
+        serverProjects = serverProjects.filter(p => !this.isRecentlyDeletedProject(p.id));
+        if (serverProjects.length !== beforeDeleteFilter) {
+          console.log(`[Sync] loadProjectsFromServer: filtered out ${beforeDeleteFilter - serverProjects.length} recently deleted projects`);
+        }
+      }
       const localProjectsFiltered = userData.projects.filter(p => {
         if (p.userId && p.userId !== currentUserId) return false;
         if (!p.userId) p.userId = currentUserId;
@@ -1311,6 +1356,8 @@ export class UserManager {
       clearTimeout(this.serverSyncTimer);
       this.serverSyncTimer = null;
     }
+    // ★ 记录被删除的项目ID，防止服务器同步时把已删除项目合并回来
+    this.recordDeletedProjectIds(deletedIds);
     // Keep deletion optimistic while one bounded background sync persists the complete batch.
     void this.syncToServer(true);
 
