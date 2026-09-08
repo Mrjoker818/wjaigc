@@ -3,8 +3,10 @@ import { loadSafeImageInput, safeSharp } from '@/lib/safe-image-input';
 const MAX_COMPLIANCE_BYTES = 25 * 1024 * 1024;
 const MAX_COMPLIANCE_PIXELS = 40_000_000;
 const BACKGROUND_SAMPLE_EDGE = 256;
-const BACKGROUND_SAMPLE_INSET_RATIOS = [0, 0.04, 0.08, 0.12] as const;
-const BACKGROUND_SAMPLES_PER_RING = 64;
+const BACKGROUND_SAMPLE_REGION = 'corner-depth-zones' as const;
+const BACKGROUND_SAMPLE_REGION_COUNT = 4;
+const BACKGROUND_SAMPLE_MAX_DEPTH_RATIO = 0.24;
+const BACKGROUND_SAMPLE_AXIS_POINTS = 8;
 const WHITE_RGB_DISTANCE = 10;
 
 export interface ComplianceMediaFacts {
@@ -17,29 +19,12 @@ export interface ComplianceMediaFacts {
   hasAlpha: boolean;
   hasTransparentPixels: boolean;
   isAnimated: boolean;
-  backgroundSampleRingCount: number;
+  backgroundSampleRegion: typeof BACKGROUND_SAMPLE_REGION;
+  backgroundSampleRegionCount: number;
+  backgroundSampleMaxDepthRatio: number;
   backgroundSampleCount: number;
   whiteBackgroundSampleCount: number;
   whiteBackgroundRatio: number;
-}
-
-function ringCoordinate(
-  index: number,
-  left: number,
-  top: number,
-  right: number,
-  bottom: number,
-): readonly [number, number] {
-  const width = right - left + 1;
-  const height = bottom - top + 1;
-  if (height === 1) return [left + index, top];
-  if (width === 1) return [left, top + index];
-  if (index < width) return [left + index, top];
-  if (index < width + height - 2) return [right, top + index - width + 1];
-  if (index < width * 2 + height - 2) {
-    return [right - (index - width - height + 2), bottom];
-  }
-  return [left, bottom - (index - width * 2 - height + 3)];
 }
 
 function measureWhiteBackgroundSamples(
@@ -48,7 +33,9 @@ function measureWhiteBackgroundSamples(
   height: number,
   channels: number,
 ): Pick<ComplianceMediaFacts,
-  | 'backgroundSampleRingCount'
+  | 'backgroundSampleRegion'
+  | 'backgroundSampleRegionCount'
+  | 'backgroundSampleMaxDepthRatio'
   | 'backgroundSampleCount'
   | 'whiteBackgroundSampleCount'
   | 'whiteBackgroundRatio'> {
@@ -67,30 +54,30 @@ function measureWhiteBackgroundSamples(
     if (alpha === 255 && distance <= WHITE_RGB_DISTANCE) whiteBackgroundSampleCount += 1;
   };
 
-  const maximumInset = Math.floor((Math.min(width, height) - 1) / 2);
-  const insets = [...new Set(BACKGROUND_SAMPLE_INSET_RATIOS.map(
-    ratio => Math.min(maximumInset, Math.floor((Math.min(width, height) - 1) * ratio)),
-  ))];
-  for (const inset of insets) {
-    const left = inset;
-    const top = inset;
-    const right = width - inset - 1;
-    const bottom = height - inset - 1;
-    const ringLength = right === left
-      ? bottom - top + 1
-      : bottom === top
-        ? right - left + 1
-        : 2 * (right - left + 1) + 2 * (bottom - top - 1);
-    const sampleCount = Math.min(BACKGROUND_SAMPLES_PER_RING, ringLength);
-    for (let index = 0; index < sampleCount; index += 1) {
-      const ringIndex = Math.floor(index * ringLength / sampleCount);
-      const [x, y] = ringCoordinate(ringIndex, left, top, right, bottom);
-      sample(x, y);
+  const maxXDepth = Math.floor((width - 1) * BACKGROUND_SAMPLE_MAX_DEPTH_RATIO);
+  const maxYDepth = Math.floor((height - 1) * BACKGROUND_SAMPLE_MAX_DEPTH_RATIO);
+  const xPointCount = Math.min(BACKGROUND_SAMPLE_AXIS_POINTS, maxXDepth + 1);
+  const yPointCount = Math.min(BACKGROUND_SAMPLE_AXIS_POINTS, maxYDepth + 1);
+  const coordinates = new Set<string>();
+  for (let xIndex = 0; xIndex < xPointCount; xIndex += 1) {
+    const xDepth = xPointCount === 1 ? 0 : Math.floor(xIndex * maxXDepth / (xPointCount - 1));
+    for (let yIndex = 0; yIndex < yPointCount; yIndex += 1) {
+      const yDepth = yPointCount === 1 ? 0 : Math.floor(yIndex * maxYDepth / (yPointCount - 1));
+      coordinates.add(`${xDepth},${yDepth}`);
+      coordinates.add(`${width - xDepth - 1},${yDepth}`);
+      coordinates.add(`${xDepth},${height - yDepth - 1}`);
+      coordinates.add(`${width - xDepth - 1},${height - yDepth - 1}`);
     }
+  }
+  for (const coordinate of coordinates) {
+    const [x, y] = coordinate.split(',').map(Number);
+    sample(x, y);
   }
 
   return {
-    backgroundSampleRingCount: insets.length,
+    backgroundSampleRegion: BACKGROUND_SAMPLE_REGION,
+    backgroundSampleRegionCount: BACKGROUND_SAMPLE_REGION_COUNT,
+    backgroundSampleMaxDepthRatio: BACKGROUND_SAMPLE_MAX_DEPTH_RATIO,
     backgroundSampleCount,
     whiteBackgroundSampleCount,
     whiteBackgroundRatio: backgroundSampleCount === 0

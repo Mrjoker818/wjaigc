@@ -87,7 +87,9 @@ function evaluateWhiteBackground(
     [
       `hasAlpha=${facts.hasAlpha}`,
       `hasTransparentPixels=${facts.hasTransparentPixels}`,
-      `backgroundSampleRings=${facts.backgroundSampleRingCount}`,
+      `backgroundSampleRegion=${facts.backgroundSampleRegion}`,
+      `backgroundSampleRegions=${facts.backgroundSampleRegionCount}`,
+      `backgroundSampleMaxDepthRatio=${facts.backgroundSampleMaxDepthRatio}`,
       `backgroundSamples=${facts.backgroundSampleCount}`,
       `whiteBackgroundSamples=${facts.whiteBackgroundSampleCount}`,
       `whiteBackgroundRatio=${facts.whiteBackgroundRatio}`,

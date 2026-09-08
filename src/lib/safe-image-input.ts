@@ -83,6 +83,11 @@ function detectImageMimeType(buffer: Buffer): string | null {
 }
 
 function decodeStrictBase64(value: string, maxBytes: number): Buffer {
+  const padding = value.endsWith('==') ? 2 : value.endsWith('=') ? 1 : 0;
+  const estimatedBytes = Math.floor((value.length * 3) / 4) - padding;
+  if (estimatedBytes > maxBytes) {
+    throw new SafeImageInputError('Image exceeds the decoded size limit');
+  }
   if (
     value.length === 0
     || value.length % 4 !== 0
@@ -90,11 +95,12 @@ function decodeStrictBase64(value: string, maxBytes: number): Buffer {
   ) {
     throw new SafeImageInputError('Image base64 is malformed');
   }
-  const estimatedBytes = Math.floor((value.length * 3) / 4);
-  if (estimatedBytes > maxBytes + 2) {
-    throw new SafeImageInputError('Image exceeds the decoded size limit');
+  let buffer: Buffer;
+  try {
+    buffer = Buffer.from(value, 'base64');
+  } catch (error) {
+    throw new SafeImageInputError('Image base64 could not be decoded', { cause: error });
   }
-  const buffer = Buffer.from(value, 'base64');
   if (buffer.byteLength === 0 || buffer.byteLength > maxBytes) {
     throw new SafeImageInputError('Image exceeds the decoded size limit');
   }
@@ -108,11 +114,11 @@ export function decodeSafeImageInput(
   const value = input.trim();
   const maxBytes = options.maxBytes ?? DEFAULT_MAX_BYTES;
   const dataUrl = value.match(
-    /^data:(image\/(?:avif|gif|jpeg|png|tiff|webp));base64,([A-Za-z0-9+/=]+)$/i,
+    /^data:(image\/(?:avif|gif|jpeg|png|tiff|webp));base64,/i,
   );
   if (dataUrl) {
     const declaredMime = dataUrl[1].toLowerCase();
-    const buffer = decodeStrictBase64(dataUrl[2], maxBytes);
+    const buffer = decodeStrictBase64(value.slice(dataUrl[0].length), maxBytes);
     const detectedMime = detectImageMimeType(buffer);
     if (!detectedMime || detectedMime !== declaredMime) {
       throw new SafeImageInputError('Image MIME does not match its decoded format');
@@ -218,9 +224,11 @@ export function safeSharp(
     limitInputPixels: options.maxPixels ?? DEFAULT_MAX_PIXELS,
   });
   const abortPipeline = () => {
-    pipeline.destroy(options.signal?.reason instanceof Error
+    const abortError = options.signal?.reason instanceof Error
       ? options.signal.reason
-      : new SafeImageInputError('Image processing was aborted'));
+      : new SafeImageInputError('Image processing was aborted');
+    pipeline.once('error', () => undefined);
+    pipeline.destroy(abortError);
   };
   options.signal?.addEventListener('abort', abortPipeline, { once: true });
   pipeline.once('close', () => options.signal?.removeEventListener('abort', abortPipeline));

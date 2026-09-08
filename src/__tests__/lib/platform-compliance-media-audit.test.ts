@@ -40,7 +40,9 @@ describe('platform compliance deterministic media audit', () => {
       mimeType: 'image/png', byteLength: source.byteLength,
       width: 1600, height: 1600, pixelCount: 2_560_000,
       hasAlpha: false, hasTransparentPixels: false, isAnimated: false,
-      backgroundSampleRingCount: 4,
+      backgroundSampleRegion: 'corner-depth-zones',
+      backgroundSampleRegionCount: 4,
+      backgroundSampleMaxDepthRatio: 0.24,
       whiteBackgroundRatio: 1,
     });
     expect(facts.backgroundSampleCount).toBeLessThanOrEqual(256);
@@ -56,7 +58,9 @@ describe('platform compliance deterministic media audit', () => {
       status: 'passed',
       evidence: expect.arrayContaining([
         'hasTransparentPixels=false',
-        'backgroundSampleRings=4',
+        'backgroundSampleRegion=corner-depth-zones',
+        'backgroundSampleRegions=4',
+        'backgroundSampleMaxDepthRatio=0.24',
         `backgroundSamples=${facts.backgroundSampleCount}`,
         'whiteBackgroundRatio=1',
       ]),
@@ -111,15 +115,15 @@ describe('platform compliance deterministic media audit', () => {
     expect(format).toMatchObject({ status: 'passed', measuredValue: 'TIFF' });
   });
 
-  it('does not mistake a white outer frame around a dark inset ring for a white background', async () => {
+  it('does not mistake an 80px white frame around a dark 600px background for white', async () => {
     const framed = await sharp({
-      create: { width: 256, height: 256, channels: 3, background: '#ffffff' },
+      create: { width: 600, height: 600, channels: 3, background: '#ffffff' },
     }).composite([{
       input: await sharp({
-        create: { width: 216, height: 216, channels: 3, background: '#111111' },
+        create: { width: 440, height: 440, channels: 3, background: '#111111' },
       }).png().toBuffer(),
-      left: 20,
-      top: 20,
+      left: 80,
+      top: 80,
     }]).png().toBuffer();
     const pixels = await sharp(framed).raw().toBuffer({ resolveWithObject: true });
     const rgbAt = (x: number, y: number) => {
@@ -127,7 +131,7 @@ describe('platform compliance deterministic media audit', () => {
       return [...pixels.data.subarray(offset, offset + 3)];
     };
     expect(rgbAt(0, 0)).toEqual([255, 255, 255]);
-    expect(rgbAt(24, 24)).toEqual([17, 17, 17]);
+    expect(rgbAt(90, 90)).toEqual([17, 17, 17]);
 
     const facts = await auditComplianceMedia({
       imageInput: dataUrl(framed), signal: new AbortController().signal,
@@ -135,17 +139,48 @@ describe('platform compliance deterministic media audit', () => {
     const background = evaluateTechnicalRules(facts, amazonMainRules())
       .find(check => check.ruleId === 'amazon-main-white-background');
 
-    expect(facts.backgroundSampleRingCount).toBe(4);
+    expect(facts).toMatchObject({
+      backgroundSampleRegion: 'corner-depth-zones',
+      backgroundSampleRegionCount: 4,
+      backgroundSampleMaxDepthRatio: 0.24,
+    });
     expect(facts.backgroundSampleCount).toBeLessThanOrEqual(256);
     expect(facts.whiteBackgroundRatio).toBeLessThan(0.99);
     expect(background).toMatchObject({
       status: 'blocked',
       evidence: expect.arrayContaining([
-        'backgroundSampleRings=4',
+        'backgroundSampleRegion=corner-depth-zones',
+        'backgroundSampleRegions=4',
+        'backgroundSampleMaxDepthRatio=0.24',
         `backgroundSamples=${facts.backgroundSampleCount}`,
         `whiteBackgroundSamples=${facts.whiteBackgroundSampleCount}`,
       ]),
     });
+  });
+
+  it('excludes a centered product from corner background samples', async () => {
+    const centeredProduct = await sharp({
+      create: { width: 600, height: 600, channels: 3, background: '#ffffff' },
+    }).composite([{
+      input: await sharp({
+        create: { width: 300, height: 300, channels: 3, background: '#111111' },
+      }).png().toBuffer(),
+      left: 150,
+      top: 150,
+    }]).png().toBuffer();
+    const pixels = await sharp(centeredProduct).raw().toBuffer({ resolveWithObject: true });
+    const centerOffset = (300 * pixels.info.width + 300) * pixels.info.channels;
+    expect([...pixels.data.subarray(centerOffset, centerOffset + 3)]).toEqual([17, 17, 17]);
+
+    const facts = await auditComplianceMedia({
+      imageInput: dataUrl(centeredProduct), signal: new AbortController().signal,
+    });
+    const background = evaluateTechnicalRules(facts, amazonMainRules())
+      .find(check => check.ruleId === 'amazon-main-white-background');
+
+    expect(facts.backgroundSampleRegion).toBe('corner-depth-zones');
+    expect(facts.whiteBackgroundRatio).toBe(1);
+    expect(background).toMatchObject({ status: 'passed' });
   });
 
   it('blocks off-white edges using many samples instead of one corner', async () => {

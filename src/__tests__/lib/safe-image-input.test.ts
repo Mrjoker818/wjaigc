@@ -1,3 +1,5 @@
+import { spawnSync } from 'node:child_process';
+
 import { describe, expect, it } from 'vitest';
 import sharp from 'sharp';
 
@@ -7,6 +9,8 @@ import {
   loadSafeImageInput,
   normalizeTrustedManagedMediaInput,
   resolveManagedMediaPath,
+  SafeImageInputError,
+  safeSharp,
 } from '@/lib/safe-image-input';
 
 const PNG_1X1 = Buffer.from(
@@ -55,6 +59,59 @@ describe('safe edit image inputs', () => {
       `data:image/png;base64,${PNG_1X1.toString('base64')}`,
       { maxBytes: 16 },
     )).toThrow(/size limit/i);
+  });
+
+  it('rejects an oversized data URL by encoded length before base64 decoding', () => {
+    const maxBytes = 25 * 1024 * 1024;
+    const oversizedBase64 = `${'A'.repeat(Math.ceil((maxBytes + 1) * 4 / 3 / 4) * 4)}!`;
+
+    let error: unknown;
+    try {
+      decodeSafeImageInput(`data:image/png;base64,${oversizedBase64}`, { maxBytes });
+    } catch (caught) {
+      error = caught;
+    }
+
+    expect(error).toBeInstanceOf(SafeImageInputError);
+    expect(error).toMatchObject({ code: 'UNSAFE_IMAGE_INPUT' });
+    expect((error as Error).message).toMatch(/decoded size limit/i);
+  });
+
+  it('keeps runtime abort errors handled in an isolated Sharp process', () => {
+    const probe = spawnSync(process.execPath, ['--import', 'tsx', '--input-type=module', '-'], {
+      cwd: process.cwd(),
+      encoding: 'utf8',
+      input: `
+        import sharp from 'sharp';
+        import safeImageInput from './src/lib/safe-image-input.ts';
+        const source = await sharp({
+          create: { width: 5000, height: 5000, channels: 3, background: '#ffffff' },
+        }).png().toBuffer();
+        const controller = new AbortController();
+        const pending = safeImageInput.safeSharp(source, {
+          signal: controller.signal, maxPixels: 40_000_000,
+        }).resize(7000, 7000).blur(10).raw().toBuffer();
+        setImmediate(() => controller.abort(new Error('PROBE_ABORT')));
+        try {
+          await pending;
+          controller.signal.throwIfAborted();
+        } catch (error) {
+          console.log('REJECTED', error instanceof Error ? error.message : String(error));
+        }
+        await new Promise(resolve => setTimeout(resolve, 50));
+        console.log('SURVIVED');
+      `,
+      timeout: 15_000,
+    });
+
+    expect(probe.status, probe.stderr).toBe(0);
+    expect(probe.stdout).toContain('REJECTED PROBE_ABORT');
+    expect(probe.stdout).toContain('SURVIVED');
+    expect(probe.stderr).not.toContain("Unhandled 'error' event");
+  }, 20_000);
+
+  it('does not swallow non-cancellation Sharp decode errors', async () => {
+    await expect(safeSharp(Buffer.from('not-an-image')).metadata()).rejects.toThrow();
   });
 
   it('rejects pixel-bomb dimensions before Sharp transforms run', () => {
