@@ -306,6 +306,15 @@ export const MODEL_ASPECT_RATIOS: Record<string, string[]> = {
     'gemini-3-flash-image-preview': ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3', '5:4', '4:5', '21:9', '9:21'],
     'gemini-3.1-flash-image-preview': ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3', '5:4', '4:5', '21:9', '9:21'],
 
+    // ===== Grok Imagine 系列 (xAI) =====
+    // Grok Imagine 2.0: aspectRatio 参数支持多种比例
+    // 官方支持: 1:1, 16:9, 9:16, 4:3, 3:4, 3:2, 2:3, 2:1, 1:2, 19.5:9, 9:19.5, 20:9, 9:20
+    'grok-imagine': ['1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3', '2:1', '1:2', '19.5:9', '9:19.5', '20:9', '9:20'],
+
+    // ===== Qwen Image 系列 (阿里云) =====
+    // Qwen Image 3.0: 通过 size(width*height) 设像素，比例自由；此处提供常用比例供前端选择
+    'qwen-image': ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3', '21:9', '9:21'],
+
     // ===== Imagen 系列 =====
     // Imagen 4: aspectRatio 1:1, 3:4, 4:3, 9:16, 16:9
     'imagen-4-ultra': ['1:1', '4:3', '3:4', '16:9', '9:16'],
@@ -613,6 +622,9 @@ export function getModelParamType(modelId: string, providerHint = ''): ModelPara
     for (const keyword of gptImageKeywords) {
         if (normalizedId.includes(keyword)) return 'both';
     }
+
+    // Grok Imagine 支持 resolution(1k/2k) + quality(low/medium)，默认 2K
+    if (normalizedId.includes('grok-imagine')) return 'both';
     
     // 🔧 后缀优先检测（必须在关键词之前！否则 banana-4k 会被关键词误判为 resolution）
     const hasResolutionSuffix = /(?:^|[-_])[1234]k(?:[-_]|$)/i.test(modelId) || /(?:^|[-_])hd(?:[-_]|$)/i.test(modelId);
@@ -734,6 +746,12 @@ export function inferModelParamCapability(modelId: string, providerHint = ''): {
     // field only. Do not surface the generic gateway resolution tiers here.
     if (is302GptImage(modelId, providerHint)) {
         return { type: 'quality', options: ['auto', 'low', 'medium', 'high'], defaultOption: 'auto' };
+    }
+
+    // Grok Imagine (xAI): official params are aspect_ratio + resolution(1k/2k) + quality(low|medium),
+    // one image per request. Surface 1K/2K resolution tiers and low/medium quality.
+    if (id.includes('grok-imagine')) {
+        return { type: 'both', options: ['1K', '2K', 'low', 'medium'], defaultOption: '2K' };
     }
 
     // 1. 优先查MODEL_QUALITIES
