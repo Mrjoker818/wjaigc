@@ -102,6 +102,8 @@ export interface SkillRunHistory {
   sourceVersionIds: string[];
   skillId: string;
   skillVersion: number;
+  inputValues: Record<string, unknown>;
+  modelBindings: SkillRunRequest['modelBindings'];
   status: AgentRunProjection['status'];
   resumeFromStepId?: string;
   steps: SkillRunStepHistory[];
@@ -246,6 +248,7 @@ function skillInvocation(events: readonly AgentEvent[]): {
   skillId: string;
   skillVersion: number;
   inputValues: Record<string, unknown>;
+  modelBindings: SkillRunRequest['modelBindings'];
 } | null {
   const created = events.find(event => event.type === 'run.created');
   const skill = created?.payload.skill;
@@ -255,12 +258,24 @@ function skillInvocation(events: readonly AgentEvent[]): {
     return null;
   }
   const inputValues = candidate.inputValues;
+  const rawBindings = candidate.modelBindings;
+  if (rawBindings !== undefined && (!rawBindings || typeof rawBindings !== 'object' || Array.isArray(rawBindings))) return null;
+  const modelBindings: SkillRunRequest['modelBindings'] = {};
+  for (const [role, raw] of Object.entries((rawBindings || {}) as Record<string, unknown>)) {
+    if (!roles.has(role as SkillModelBinding['role']) || !raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+    const binding = raw as Record<string, unknown>;
+    if (Object.keys(binding).some(key => key !== 'providerId' && key !== 'modelId')
+      || typeof binding.providerId !== 'string' || !binding.providerId
+      || typeof binding.modelId !== 'string' || !binding.modelId) return null;
+    modelBindings[role as SkillModelBinding['role']] = { providerId: binding.providerId, modelId: binding.modelId };
+  }
   return {
     skillId: candidate.skillId,
     skillVersion: Number(candidate.skillVersion),
     inputValues: inputValues && typeof inputValues === 'object' && !Array.isArray(inputValues)
       ? inputValues as Record<string, unknown>
       : {},
+    modelBindings,
   };
 }
 

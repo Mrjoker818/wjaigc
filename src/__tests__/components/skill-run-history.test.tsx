@@ -6,7 +6,10 @@ import { SkillRunHistory } from '@/components/skill-runtime/SkillRunHistory';
 afterEach(cleanup);
 const scope = { projectId: 'p1', surface: 'canvas' as const, skillId: 'food', accountKey: 'u1' };
 const run = { runId: 'old-run', projectId: 'p1', surface: 'canvas', skillId: 'food',
-  workspaceId: 'old-session', sourceVersionIds: [], status: 'paused', createdAt: 1, updatedAt: 2 };
+  skillVersion: 2, workspaceId: 'old-session', sourceVersionIds: ['version-1'],
+  inputValues: { platform: 'Amazon' },
+  modelBindings: { vision: { providerId: 'pear', modelId: 'vision-1' } },
+  status: 'paused', createdAt: 1, updatedAt: 2 };
 const response = (runs: unknown[]): Response => ({ ok: true, json: async () => ({ runs }) }) as Response;
 
 describe('Skill run history list', () => {
@@ -50,4 +53,14 @@ describe('Skill run history list', () => {
     await screen.findByRole('alert');
     expect(screen.queryByRole('button', { name: /查看任务/ })).toBeNull();
   });
+
+  it.each(['skillVersion', 'inputValues', 'modelBindings', 'workspaceId'] as const)(
+    'rejects history without frozen %s context',
+    async field => {
+      const invalid = { ...run } as Record<string, unknown>;
+      delete invalid[field];
+      render(<SkillRunHistory {...scope} fetcher={vi.fn().mockResolvedValue(response([invalid]))} onSelect={vi.fn()} />);
+      expect((await screen.findByRole('alert')).textContent).toContain('运行记录响应无效');
+    },
+  );
 });

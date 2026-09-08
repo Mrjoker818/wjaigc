@@ -689,7 +689,8 @@ describe('Skill run history', () => {
       eventId: 'created', runId: task.id, sequence: 1, type: 'run.created', timestamp: 'now',
       payload: {
         workspace: 'canvas',
-        skill: { skillId: definition.id, skillVersion: 1, inputValues: {}, modelBindings: {} },
+        skill: { skillId: definition.id, skillVersion: 1, inputValues: {},
+          modelBindings: { vision: { providerId: 'frozen-provider', modelId: 'frozen-vision' } } },
         skillSnapshot: { id: definition.id, version: 1, name: definition.name, steps: definition.steps },
       },
     }];
@@ -1163,7 +1164,8 @@ describe('Skill run history', () => {
       eventId: 'created', runId: 'run-1', sequence: 1, type: 'run.created', timestamp: 'now',
       payload: {
         workspace: 'canvas',
-        skill: { skillId: definition.id, skillVersion: 1, inputValues: {}, modelBindings: {} },
+        skill: { skillId: definition.id, skillVersion: 1, inputValues: {},
+          modelBindings: { vision: { providerId: 'frozen-provider', modelId: 'frozen-vision' } } },
         skillSnapshot: {
           id: definition.id, version: 1, name: 'Frozen name',
           steps: [{ id: 'frozen-step', label: 'Frozen step' }],
@@ -1191,12 +1193,13 @@ describe('Skill run history', () => {
     expect(history).toMatchObject({
       sourceVersionIds: ['original-version'],
       skillId: definition.id, skillVersion: 1, creditStatus: 'charged', creditCost: 7,
+      inputValues: {},
+      modelBindings: { vision: { providerId: 'frozen-provider', modelId: 'frozen-vision' } },
       assetVersionIds: ['result-version-1'],
       outputs: [{ stepId: 'frozen-step', kind: 'text', content: 'durable response' }],
       steps: [{ id: 'frozen-step', label: 'Frozen step', status: 'pending' }],
       qualityEvents: [{ stepId: 'frozen-step', gateId: 'output-present', passed: true }],
     });
-    expect(history).not.toHaveProperty('modelBindings');
     expect(history).not.toHaveProperty('descriptor');
     expect(history).not.toHaveProperty('apiKey');
     expect(history).not.toHaveProperty('upstreamResponse');

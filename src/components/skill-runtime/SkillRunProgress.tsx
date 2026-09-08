@@ -22,6 +22,7 @@ interface SkillRunProgressProps {
   projectId?: string;
   onLocateComplianceSource?: (sourceVersionId: string) => void;
   onRecheckCompliance?: (report: PlatformComplianceReportV1) => void;
+  theme?: 'light' | 'dark';
 }
 
 const terminalStatuses = new Set(['completed', 'failed', 'cancelled', 'timeout']);
@@ -71,19 +72,25 @@ export function SkillRunProgress({
   projectId,
   onLocateComplianceSource,
   onRecheckCompliance,
+  theme = 'dark',
 }: SkillRunProgressProps): React.ReactElement | null {
   const [complianceReports, setComplianceReports] = useState<PlatformComplianceReportProjection[]>([]);
+  const [complianceError, setComplianceError] = useState<string>();
+  const [complianceRevision, setComplianceRevision] = useState(0);
   const outputs = projection?.result?.outputs;
   useEffect(() => {
     let active = true;
     if (!projection || !projectId) {
       setComplianceReports([]);
+      setComplianceError(undefined);
       return () => { active = false; };
     }
+    setComplianceError(undefined);
     void projectPlatformComplianceReports(outputs, { runId: projection.runId, projectId })
-      .then(reports => { if (active) setComplianceReports(reports); });
+      .then(reports => { if (active) setComplianceReports(reports); })
+      .catch(() => { if (active) { setComplianceReports([]); setComplianceError('报告加载失败，请重试'); } });
     return () => { active = false; };
-  }, [outputs, projectId, projection]);
+  }, [complianceRevision, outputs, projectId, projection]);
 
   if (!estimate && !projection) return null;
   const terminal = projection ? terminalStatuses.has(projection.status) : false;
@@ -159,6 +166,10 @@ export function SkillRunProgress({
                 </button>
               )}
           </div>
+          {complianceError && <div role="alert" className="flex items-center gap-2 text-red-600">
+            <span>{complianceError}</span>
+            <button type="button" className="underline" onClick={() => setComplianceRevision(value => value + 1)}>重新加载报告</button>
+          </div>}
           {onLocateComplianceSource && complianceReports.map(item => (
             <PlatformComplianceReportCard
               key={`${item.stepId}:${item.report.reportId}`}
@@ -168,6 +179,7 @@ export function SkillRunProgress({
               busy={busy}
               onLocate={onLocateComplianceSource}
               onRecheck={onRecheckCompliance}
+              theme={theme}
             />
           ))}
         </>

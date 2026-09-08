@@ -3,7 +3,11 @@
 import { act, renderHook } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { useSkillRun } from '@/components/skill-runtime/use-skill-run';
-import { createPlatformComplianceRecheckRequest } from '@/components/skill-runtime/platform-compliance-client';
+import {
+  createCanvasSkillIdempotencyKey,
+  createPlatformComplianceRecheckRequest,
+  frozenSkillRunRequestFromHistory,
+} from '@/components/skill-runtime/platform-compliance-client';
 import type { SkillRunRequest } from '@/lib/skill-runtime/run-request';
 
 vi.mock('@/components/agent-runtime/use-agent-run-events', () => ({
@@ -93,5 +97,38 @@ describe('restore an existing Skill run after remount', () => {
     expect(next.sourceVersionIds).not.toBe(historical.sourceVersionIds);
     expect(next.modelBindings).not.toBe(historical.modelBindings);
     expect(historical.idempotencyKey).toBe('canvas-skill:old');
+  });
+
+  it('restores a validated frozen historical request without consulting the current model', () => {
+    const request = frozenSkillRunRequestFromHistory({
+      runId: 'old-run', projectId: 'project-1', surface: 'canvas', workspaceId: 'canvas:project-1',
+      skillId: 'preset-platform-compliance-audit', skillVersion: 3, status: 'completed', createdAt: 1,
+      inputValues: { platform: 'Amazon', region: 'US' }, sourceVersionIds: ['version-1'],
+      modelBindings: {
+        orchestrator: { providerId: 'historical-provider', modelId: 'historical-chat' },
+        vision: { providerId: 'historical-provider', modelId: 'historical-vision' },
+      },
+    });
+    expect(request).toMatchObject({
+      skillVersion: 3,
+      inputValues: { platform: 'Amazon', region: 'US' },
+      sourceVersionIds: ['version-1'],
+      modelBindings: { vision: { providerId: 'historical-provider', modelId: 'historical-vision' } },
+    });
+  });
+
+  it('creates distinct fallback keys for consecutive rechecks in the same millisecond', () => {
+    vi.spyOn(Date, 'now').mockReturnValue(1_800_000_000_000);
+    const originalCrypto = globalThis.crypto;
+    Object.defineProperty(globalThis, 'crypto', { configurable: true, value: {
+      getRandomValues: (bytes: Uint8Array) => { bytes.fill(7); return bytes; },
+    } });
+    try {
+      const first = createCanvasSkillIdempotencyKey();
+      const second = createCanvasSkillIdempotencyKey();
+      expect(first).not.toBe(second);
+    } finally {
+      Object.defineProperty(globalThis, 'crypto', { configurable: true, value: originalCrypto });
+    }
   });
 });

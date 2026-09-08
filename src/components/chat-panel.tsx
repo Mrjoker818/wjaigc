@@ -46,7 +46,11 @@ import { useAgentRunEvents } from '@/components/agent-runtime/use-agent-run-even
 import { SkillInputFields } from '@/components/skill-runtime/SkillInputFields';
 import { SkillRunProgress } from '@/components/skill-runtime/SkillRunProgress';
 import { SkillRunHistory, type SkillRunHistoryItem } from '@/components/skill-runtime/SkillRunHistory';
-import { createPlatformComplianceRecheckRequest } from '@/components/skill-runtime/platform-compliance-client';
+import {
+  createCanvasSkillIdempotencyKey,
+  createPlatformComplianceRecheckRequest,
+  frozenSkillRunRequestFromHistory,
+} from '@/components/skill-runtime/platform-compliance-client';
 import type { PlatformComplianceReportV1 } from '@/lib/platform-compliance/types';
 import { useSkillRun } from '@/components/skill-runtime/use-skill-run';
 import { useSkillOutputReceiver } from '@/components/skill-runtime/use-skill-output-receiver';
@@ -1415,7 +1419,7 @@ export function ChatPanel({ themeStyle, projectId, onAddToPrompt, onAddImages, o
     sourceVersionIds: string[];
     sourceImageId?: string;
     restoreDeletedPlacement?: boolean;
-    request: SkillRunRequest;
+    request?: SkillRunRequest;
   } | null>(null);
   const skillProjectionCoordinatorRef = useRef(createCanvasSkillProjectionCoordinator());
   const skillProjectionAttemptCountsRef = useRef<Map<string, number>>(new Map());
@@ -3933,9 +3937,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
       inputValues: canvasSkillInputValues,
       sourceVersionIds: canvasSkillSourceVersionIds,
       modelBindings,
-      idempotencyKey: typeof crypto.randomUUID === 'function'
-        ? `canvas-skill:${crypto.randomUUID()}`
-        : `canvas-skill:${Date.now()}`,
+      idempotencyKey: createCanvasSkillIdempotencyKey(),
     };
     return overrides ? {
       ...request,
@@ -3964,14 +3966,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
   }, [buildCanvasSkillRequest, hasRequiredCanvasSkillSource, skillRun]);
 
   const handleRestoreSkill = useCallback(async (record: SkillRunHistoryItem): Promise<void> => {
-    if (!projectId || record.projectId !== projectId || record.surface !== 'canvas' || record.skillId !== activeSkill?.id) return;
-    const restoredInputValues = record.inputValues ?? canvasSkillInputValues;
-    const restoredRequest = buildCanvasSkillRequest({
-      inputValues: restoredInputValues,
-      sourceVersionIds: [...record.sourceVersionIds],
-    });
-    if (!restoredRequest) return;
-    if (record.inputValues) setSkillParamValues(structuredClone(record.inputValues));
+    if (!projectId || record.projectId !== projectId || record.surface !== 'canvas') return;
     skillProjectionControllerRef.current?.abort();
     activeCanvasSkillRunRef.current = null;
     const runId = await startCanvasSkillRun(
@@ -3980,11 +3975,18 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
       projectId,
     );
     if (runId) {
+      let restoredRequest: SkillRunRequest | undefined;
+      try {
+        restoredRequest = frozenSkillRunRequestFromHistory(record);
+        setSkillParamValues(structuredClone(restoredRequest.inputValues));
+      } catch {
+        toast.error('历史运行上下文不完整，报告仍可查看但无法复检');
+      }
       skillProjectionAttemptCountsRef.current.delete(runId);
       activeCanvasSkillRunRef.current = { runId, projectId, sourceVersionIds: [...record.sourceVersionIds], restoreDeletedPlacement: true, request: restoredRequest };
       setSkillProjectionRetry(value => value + 1);
     }
-  }, [activeSkill?.id, buildCanvasSkillRequest, canvasSkillInputValues, projectId, skillRun]);
+  }, [projectId, skillRun]);
 
   const handleStartSkill = useCallback(async (): Promise<void> => {
     if (!hasRequiredCanvasSkillSource()) return;
@@ -4027,9 +4029,11 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
       toast.error('无法确认报告来源，请从运行记录恢复后重试');
       return;
     }
-    const idempotencyKey = typeof crypto.randomUUID === 'function'
-      ? `canvas-skill:${crypto.randomUUID()}`
-      : `canvas-skill:${Date.now()}`;
+    if (!context.request) {
+      toast.error('历史运行上下文不完整，无法按原设置复检');
+      return;
+    }
+    const idempotencyKey = createCanvasSkillIdempotencyKey();
     const request = createPlatformComplianceRecheckRequest(context.request, idempotencyKey);
     skillProjectionControllerRef.current?.abort();
     const runId = await startCanvasSkillRun(
@@ -6254,6 +6258,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                   projectId={projectId}
                   onLocateComplianceSource={handleLocateComplianceSource}
                   onRecheckCompliance={report => { void handleRecheckCompliance(report); }}
+                  theme={themeStyle === 'gold' ? 'dark' : 'light'}
                 />
               </div>
             )}

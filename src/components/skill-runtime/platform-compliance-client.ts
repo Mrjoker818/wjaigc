@@ -11,6 +11,15 @@ export interface PlatformComplianceReportProjection {
   downloadUrls: { json: string; html: string };
 }
 
+let fallbackIdCounter = 0;
+
+export class PlatformComplianceProjectionError extends Error {
+  constructor() {
+    super('报告加载失败，请重试');
+    this.name = 'PlatformComplianceProjectionError';
+  }
+}
+
 async function sha256(value: string): Promise<string> {
   const subtle = globalThis.crypto?.subtle;
   if (!subtle) throw new Error('当前浏览器不支持报告完整性校验');
@@ -47,9 +56,9 @@ export async function projectPlatformComplianceReports(
     ) continue;
     try {
       const report = parsePlatformComplianceReport(JSON.parse(output.content) as unknown);
-      if (report.runId !== input.runId) continue;
+      if (report.runId !== input.runId) throw new PlatformComplianceProjectionError();
       const canonical = canonicalComplianceReportJson(report);
-      if (canonical !== output.content) continue;
+      if (canonical !== output.content) throw new PlatformComplianceProjectionError();
       const checksum = await sha256(output.content);
       reports.push({
         stepId: output.stepId,
@@ -60,10 +69,87 @@ export async function projectPlatformComplianceReports(
         },
       });
     } catch {
-      // Invalid or unverifiable structured output is never rendered as a trusted report.
+      throw new PlatformComplianceProjectionError();
     }
   }
   return reports;
+}
+
+export function createCanvasSkillIdempotencyKey(): string {
+  const randomUUID = globalThis.crypto?.randomUUID?.bind(globalThis.crypto);
+  if (randomUUID) return `canvas-skill:${randomUUID()}`;
+  fallbackIdCounter = (fallbackIdCounter + 1) % Number.MAX_SAFE_INTEGER;
+  const bytes = new Uint8Array(12);
+  globalThis.crypto?.getRandomValues?.(bytes);
+  const random = Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('');
+  return `canvas-skill:${Date.now().toString(36)}:${fallbackIdCounter.toString(36)}:${random}`;
+}
+
+function nonEmptyString(value: unknown): value is string {
+  return typeof value === 'string' && value.trim().length > 0 && value.length <= 256;
+}
+
+export function frozenSkillRunRequestFromHistory(value: unknown): SkillRunRequest {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('历史运行上下文无效');
+  const item = value as Record<string, unknown>;
+  if (!nonEmptyString(item.skillId) || !Number.isSafeInteger(item.skillVersion) || Number(item.skillVersion) < 1
+    || item.surface !== 'canvas' || !nonEmptyString(item.projectId) || !nonEmptyString(item.workspaceId)
+    || !item.inputValues || typeof item.inputValues !== 'object' || Array.isArray(item.inputValues)
+    || !Array.isArray(item.sourceVersionIds) || item.sourceVersionIds.some(id => !nonEmptyString(id))
+    || !item.modelBindings || typeof item.modelBindings !== 'object' || Array.isArray(item.modelBindings)) {
+    throw new Error('历史运行上下文无效');
+  }
+  const modelBindings: SkillRunRequest['modelBindings'] = {};
+  const allowedRoles = new Set(['orchestrator', 'image', 'video', 'vision', 'edit', 'three-d']);
+  for (const [role, rawBinding] of Object.entries(item.modelBindings as Record<string, unknown>)) {
+    if (!allowedRoles.has(role) || !rawBinding || typeof rawBinding !== 'object' || Array.isArray(rawBinding)) {
+      throw new Error('历史运行上下文无效');
+    }
+    const binding = rawBinding as Record<string, unknown>;
+    if (Object.keys(binding).some(key => key !== 'providerId' && key !== 'modelId')
+      || !nonEmptyString(binding.providerId) || !nonEmptyString(binding.modelId)) {
+      throw new Error('历史运行上下文无效');
+    }
+    modelBindings[role as keyof SkillRunRequest['modelBindings']] = {
+      providerId: binding.providerId,
+      modelId: binding.modelId,
+    };
+  }
+  return {
+    skillId: item.skillId,
+    skillVersion: Number(item.skillVersion),
+    surface: 'canvas',
+    projectId: item.projectId,
+    workspaceId: item.workspaceId,
+    inputValues: structuredClone(item.inputValues as Record<string, unknown>),
+    sourceVersionIds: [...item.sourceVersionIds] as string[],
+    modelBindings: structuredClone(modelBindings),
+    idempotencyKey: createCanvasSkillIdempotencyKey(),
+  };
+}
+
+export async function downloadPlatformComplianceReport(
+  url: string,
+  filename: string,
+  fetcher: typeof fetch = fetch,
+): Promise<void> {
+  let objectUrl: string | undefined;
+  try {
+    const response = await fetcher(url, { method: 'GET', credentials: 'same-origin', cache: 'no-store' });
+    if (!response.ok) throw new Error('download failed');
+    objectUrl = URL.createObjectURL(await response.blob());
+    const anchor = document.createElement('a');
+    anchor.href = objectUrl;
+    anchor.download = filename;
+    anchor.hidden = true;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+  } catch {
+    throw new Error('报告下载失败，请重试');
+  } finally {
+    if (objectUrl) URL.revokeObjectURL(objectUrl);
+  }
 }
 
 export function createPlatformComplianceRecheckRequest(
