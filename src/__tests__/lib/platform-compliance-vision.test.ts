@@ -145,6 +145,33 @@ describe('platform compliance frozen vision client', () => {
     expect(fetcher).toHaveBeenCalledTimes(1);
   });
 
+  it('marks a response body transport failure as submission unknown', async () => {
+    let sentHeaders = false;
+    const body = new ReadableStream<Uint8Array>({
+      pull(stream) {
+        if (!sentHeaders) {
+          sentHeaders = true;
+          stream.enqueue(new TextEncoder().encode('{"choices":'));
+          return;
+        }
+        stream.error(new TypeError('socket reset during body'));
+      },
+    });
+    const fetcher = vi.fn(async () => new Response(body, {
+      headers: { 'x-request-id': 'body-loss-request-1' },
+    }));
+
+    await expect(invokeComplianceVision({
+      provider, modelId: 'gemini-vision-stable', imageInput: '/uploads/authorized.png', rules,
+      requestId: 'local-request-1', signal: new AbortController().signal,
+    }, { fetcher })).rejects.toMatchObject({
+      code: 'COMPLIANCE_VISION_SUBMISSION_UNKNOWN',
+      requestId: 'body-loss-request-1',
+      retryable: false,
+      submissionUnknown: true,
+    });
+  });
+
   it('classifies an already-aborted caller signal without attempting submission', async () => {
     const controller = new AbortController();
     controller.abort(new DOMException('cancelled by user', 'AbortError'));
@@ -229,6 +256,29 @@ describe('platform compliance frozen vision client', () => {
     });
   });
 
+  it.each(['evidence', 'measuredValue', 'remediation'] as const)(
+    'rejects an oversized model %s string at the vision boundary',
+    async field => {
+      const checks: Record<string, unknown>[] = providerChecks();
+      checks[0] = {
+        ...checks[0],
+        ...(field === 'remediation' ? { status: 'blocked' } : {}),
+        [field]: field === 'evidence' ? ['x'.repeat(16_385)] : 'x'.repeat(16_385),
+      };
+      const fetcher = vi.fn(async () => response(JSON.stringify({ checks })));
+
+      await expect(invokeComplianceVision({
+        provider, modelId: 'gemini-vision-stable', imageInput: '/uploads/authorized.png', rules,
+        requestId: 'local-request-1', signal: new AbortController().signal,
+      }, { fetcher })).rejects.toMatchObject({
+        code: 'COMPLIANCE_VISION_RESPONSE_INVALID',
+        requestId: 'provider-request-1',
+        retryable: true,
+        submissionUnknown: false,
+      });
+    },
+  );
+
   it('rejects an unsafe provider request id without retaining provider-controlled text', async () => {
     const unsafeRequestId = `secret/${'x'.repeat(300)}`;
     const fetcher = vi.fn(async () => response(
@@ -287,6 +337,31 @@ describe('platform compliance frozen vision client', () => {
       provider, modelId: 'gemini-vision-stable', imageInput: '/uploads/authorized.png', rules,
       requestId: 'local-request-1', signal: new AbortController().signal,
     }, { fetcher })).rejects.toBeInstanceOf(ComplianceVisionError);
+    expect(cancel).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ['successful response', 200, { 'x-request-id': 'provider-request-1' }],
+    ['HTTP rejection', 429, { 'x-request-id': 'provider-request-429' }],
+    ['unsafe request id', 200, { 'x-request-id': 'unsafe/request' }],
+  ])('prioritizes caller cancellation after fetch over %s', async (_name, status, headers) => {
+    const controller = new AbortController();
+    const cancel = vi.fn();
+    const body = new ReadableStream<Uint8Array>({ pull() {}, cancel });
+    const fetcher = vi.fn(async () => {
+      controller.abort(new DOMException('cancelled by user', 'AbortError'));
+      return new Response(body, { status, headers });
+    });
+
+    await expect(invokeComplianceVision({
+      provider, modelId: 'gemini-vision-stable', imageInput: '/uploads/authorized.png', rules,
+      requestId: 'local-request-1', signal: controller.signal,
+    }, { fetcher })).rejects.toMatchObject({
+      code: 'COMPLIANCE_VISION_CANCELLED',
+      requestId: 'local-request-1',
+      retryable: false,
+      submissionUnknown: false,
+    });
     expect(cancel).toHaveBeenCalledTimes(1);
   });
 });

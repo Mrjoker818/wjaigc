@@ -74,6 +74,7 @@ const RESPONSE_KEYS = new Set(['checks']);
 const MAX_RESPONSE_BYTES = 256 * 1024;
 const MAX_RESPONSE_DEPTH = 10;
 const MAX_RESPONSE_ITEMS = 256;
+const MAX_MODEL_STRING_LENGTH = 16_384;
 const MAX_REQUEST_ID_LENGTH = 128;
 const VISION_TIMEOUT_MS = 60_000;
 const SAFE_REQUEST_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/u;
@@ -133,6 +134,32 @@ function responseError(
   );
 }
 
+function submissionUnknownError(
+  input: ComplianceVisionInput,
+  requestId: string,
+  cause?: unknown,
+): ComplianceVisionError {
+  return new ComplianceVisionError(
+    'COMPLIANCE_VISION_SUBMISSION_UNKNOWN',
+    input.provider.id,
+    input.modelId,
+    requestId,
+    false,
+    undefined,
+    { cause },
+  );
+}
+
+async function throwIfCallerCancelled(
+  response: Response,
+  input: ComplianceVisionInput,
+  requestId: string,
+): Promise<void> {
+  if (!input.signal.aborted) return;
+  await cancelResponseBody(response, input.signal.reason);
+  throw cancellationError(input, requestId);
+}
+
 async function readBoundedResponse(
   response: Response,
   input: ComplianceVisionInput,
@@ -174,7 +201,7 @@ async function readBoundedResponse(
       throw cancellationError(input, requestId);
     }
     if (error instanceof ComplianceVisionError) throw error;
-    throw responseError(input, requestId);
+    throw submissionUnknownError(input, requestId, error);
   } finally {
     input.signal.removeEventListener('abort', cancelForCaller);
   }
@@ -192,12 +219,17 @@ async function readBoundedResponse(
   }
 }
 
-function assertBoundedJsonStructure(value: unknown): void {
+function assertBoundedJsonStructure(value: unknown, maxStringLength?: number): void {
   let itemCount = 0;
   const visit = (candidate: unknown, depth: number): void => {
     if (depth > MAX_RESPONSE_DEPTH) throw new Error('COMPLIANCE_VISION_RESPONSE_DEPTH_LIMIT');
     itemCount += 1;
     if (itemCount > MAX_RESPONSE_ITEMS) throw new Error('COMPLIANCE_VISION_RESPONSE_ITEM_LIMIT');
+    if (
+      typeof candidate === 'string'
+      && maxStringLength !== undefined
+      && candidate.length > maxStringLength
+    ) throw new Error('COMPLIANCE_VISION_RESPONSE_STRING_LIMIT');
     if (!candidate || typeof candidate !== 'object') return;
     const children = Array.isArray(candidate)
       ? candidate
@@ -220,7 +252,7 @@ function parseVisionChecks(
   let parsed: unknown;
   try {
     parsed = JSON.parse(content) as unknown;
-    assertBoundedJsonStructure(parsed);
+    assertBoundedJsonStructure(parsed, MAX_MODEL_STRING_LENGTH);
   } catch {
     throw responseError(input, requestId);
   }
@@ -357,18 +389,12 @@ export async function invokeComplianceVision(
     if (input.signal.aborted) {
       throw cancellationError(input, input.requestId);
     }
-    throw new ComplianceVisionError(
-      'COMPLIANCE_VISION_SUBMISSION_UNKNOWN',
-      input.provider.id,
-      input.modelId,
-      input.requestId,
-      false,
-      undefined,
-      { cause: error },
-    );
+    throw submissionUnknownError(input, input.requestId, error);
   }
 
+  await throwIfCallerCancelled(response, input, input.requestId);
   const requestId = await requestIdFrom(response, input);
+  await throwIfCallerCancelled(response, input, requestId);
   if (!response.ok) {
     await cancelResponseBody(response);
     throw httpError(input, response, requestId);
