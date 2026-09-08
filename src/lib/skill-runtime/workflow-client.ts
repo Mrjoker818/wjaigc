@@ -1,5 +1,6 @@
 import type { DurableSkillOutput, SkillDefinition } from './types';
 import { projectWorkflowSkillRun, type WorkflowSkillAssetReference } from '../workflow-skill-execution';
+import { parseDurableSkillOutput } from './structured-output';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -66,9 +67,7 @@ export async function loadSavedWorkflowSkillResult(input: {
   input.signal.throwIfAborted();
   const outputs: DurableSkillOutput[] = [];
   for (const value of Array.isArray(run.outputs) ? run.outputs : []) {
-    if (!isRecord(value) || typeof value.stepId !== 'string' || typeof value.content !== 'string'
-      || (value.kind !== 'text' && value.kind !== 'html')) throw new Error('Skill 文本结果格式无效');
-    outputs.push({ stepId: value.stepId, kind: value.kind, content: value.content });
+    outputs.push(parseDurableSkillOutput(value));
   }
   return {
     status: run.status === 'completed' ? 'success' : ['failed', 'timeout'].includes(run.status) ? 'error'

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { runSkillQualityGates } from '@/lib/skill-runtime/quality-gates';
 import type { SkillStepResult } from '@/lib/skill-runtime/types';
+import { validReport } from '@/__tests__/helpers/platform-compliance-fixtures';
 
 function result(overrides: Partial<SkillStepResult> = {}): SkillStepResult {
   return {
@@ -12,6 +13,17 @@ function result(overrides: Partial<SkillStepResult> = {}): SkillStepResult {
 }
 
 describe('runSkillQualityGates', () => {
+  it('requires the registered compliance report schema at the quality gate', () => {
+    expect(runSkillQualityGates(['structured-report-present'], result({
+      structured: { schemaId: 'platform-compliance-report-v1', value: validReport() },
+    }), {})).toEqual([{ id: 'structured-report-present', passed: true }]);
+    expect(runSkillQualityGates(['structured-report-present'], result({
+      structured: { schemaId: 'other-report-v1', value: validReport() },
+    }), {})[0]?.passed).toBe(false);
+    expect(runSkillQualityGates(['structured-report-present'], result({ text: 'plain only' }), {})[0]?.passed)
+      .toBe(false);
+  });
+
   it('确定性检查输出存在、透明通道和有效 HTML', () => {
     const actual = runSkillQualityGates(
       ['output-present', 'transparent-alpha', 'valid-html'],

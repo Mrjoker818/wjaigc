@@ -4,6 +4,7 @@ import type {
   SkillQualityResult,
   SkillStepResult,
 } from './types';
+import { durableSkillOutputFromStructuredResult } from './structured-output';
 
 function hasKnownDimensions(media: SkillStepResult['media'][number]): boolean {
   return Number.isInteger(media.width) && Number(media.width) > 0
@@ -59,6 +60,15 @@ export const QUALITY_GATES = {
   'valid-html': (result: SkillStepResult) => (
     typeof result.html === 'string' && result.html.length > 0
   ),
+  'structured-report-present': (result: SkillStepResult) => {
+    if (result.structured?.schemaId !== 'platform-compliance-report-v1') return false;
+    try {
+      durableSkillOutputFromStructuredResult('quality-gate', result.structured);
+      return true;
+    } catch {
+      return false;
+    }
+  },
 } satisfies Record<string, SkillQualityGate>;
 
 export function runSkillQualityGates(

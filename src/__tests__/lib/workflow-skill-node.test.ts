@@ -13,7 +13,9 @@ import {
 } from '@/lib/workflow-engine';
 import type { SkillDefinition } from '@/lib/skill-runtime/types';
 import type { TaskModelDescriptor } from '@/lib/task-core/model-capability-contract';
-import { loadWorkflowSkillCatalog } from '@/lib/skill-runtime/workflow-client';
+import { loadSavedWorkflowSkillResult, loadWorkflowSkillCatalog } from '@/lib/skill-runtime/workflow-client';
+import { canonicalComplianceReportJson } from '@/lib/platform-compliance/report-schema';
+import { validReport } from '@/__tests__/helpers/platform-compliance-fixtures';
 
 const skill: SkillDefinition = {
   id: 'preset-product',
@@ -44,6 +46,39 @@ const skill: SkillDefinition = {
 };
 
 describe('workflow Skill node contract', () => {
+  it('restores registered structured output through the workflow client', async () => {
+    const report = validReport();
+    const fetcher = async () => new Response(JSON.stringify({ run: {
+      runId: 'run', projectId: 'project', surface: 'workflow', workspaceId: 'workflow:wf',
+      skillId: 'skill', skillVersion: 1, status: 'completed', assetVersionIds: [],
+      outputs: [{ stepId: 'audit:a', kind: 'json', schemaId: 'platform-compliance-report-v1',
+        content: JSON.stringify(report) }],
+    } }), { status: 200 });
+
+    const restored = await loadSavedWorkflowSkillResult({
+      runId: 'run', projectId: 'project', workflowId: 'wf', skillId: 'skill', skillVersion: 1,
+      signal: new AbortController().signal, fetcher: fetcher as typeof fetch,
+    });
+
+    expect(restored.output.outputs).toEqual([{
+      stepId: 'audit:a', kind: 'json', schemaId: 'platform-compliance-report-v1',
+      content: canonicalComplianceReportJson(report),
+    }]);
+  });
+
+  it('rejects an unknown structured output schema during workflow restore', async () => {
+    const fetcher = async () => new Response(JSON.stringify({ run: {
+      runId: 'run', projectId: 'project', surface: 'workflow', workspaceId: 'workflow:wf',
+      skillId: 'skill', skillVersion: 1, status: 'completed', assetVersionIds: [],
+      outputs: [{ stepId: 'audit:a', kind: 'json', schemaId: 'unknown', content: '{}' }],
+    } }), { status: 200 });
+
+    await expect(loadSavedWorkflowSkillResult({
+      runId: 'run', projectId: 'project', workflowId: 'wf', skillId: 'skill', skillVersion: 1,
+      signal: new AbortController().signal, fetcher: fetcher as typeof fetch,
+    })).rejects.toThrow('SKILL_OUTPUT_SCHEMA_UNKNOWN');
+  });
+
   it('registers one ai-skill node with stable prompt, image, reference and result ports', () => {
     const node = createWorkflowNode('ai-skill', 10, 20);
 

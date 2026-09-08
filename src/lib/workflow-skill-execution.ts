@@ -1,4 +1,5 @@
 import type { DurableSkillOutput } from './skill-runtime/types';
+import { parseDurableSkillOutput } from './skill-runtime/structured-output';
 
 interface WorkflowSkillRunProjection {
   runId: string;
@@ -75,7 +76,16 @@ function readWorkflowSkillRunProjection(payload: unknown): WorkflowSkillRunProje
     ? wrapped as Record<string, unknown>
     : record;
   if (typeof candidate.runId !== 'string' || typeof candidate.status !== 'string') return null;
-  return candidate as unknown as WorkflowSkillRunProjection;
+  const outputs = candidate.outputs === undefined
+    ? undefined
+    : Array.isArray(candidate.outputs)
+      ? candidate.outputs.map(parseDurableSkillOutput)
+      : null;
+  if (outputs === null) return null;
+  return {
+    ...(candidate as unknown as WorkflowSkillRunProjection),
+    ...(outputs ? { outputs } : {}),
+  };
 }
 
 async function wait(delayMs: number, signal?: AbortSignal): Promise<void> {
@@ -170,7 +180,8 @@ export function projectWorkflowSkillRun(
   references: readonly WorkflowSkillAssetReference[],
 ): Record<string, unknown> {
   const assetVersionIds = [...new Set(run.assetVersionIds || [])];
-  const text = (run.outputs || []).filter(output => output.kind === 'text').map(output => output.content).join('\n\n');
+  const outputs = (run.outputs || []).map(parseDurableSkillOutput);
+  const text = outputs.filter(output => output.kind === 'text').map(output => output.content).join('\n\n');
   return {
     runId: run.runId,
     status: run.status,
@@ -181,7 +192,7 @@ export function projectWorkflowSkillRun(
     assetVersionIds,
     assetReferences: references,
     ...(text ? { prompt: text, text } : {}),
-    outputs: run.outputs || [],
+    outputs,
     ...(run.currentStepId ? { currentStepId: run.currentStepId } : {}),
     ...(run.resumeFromStepId ? { resumeFromStepId: run.resumeFromStepId } : {}),
   };

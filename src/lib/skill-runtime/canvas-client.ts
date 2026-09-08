@@ -1,6 +1,7 @@
 import type { WorkspaceAssetReference } from '@/lib/asset-core/types';
 import { parseWorkspaceSourceTrace } from '@/lib/asset-core/source-trace';
 import type { SkillDefinition } from './types';
+import { parseDurableSkillOutput } from './structured-output';
 
 interface SkillCatalogResponse {
   skills?: unknown;
@@ -15,6 +16,7 @@ interface SkillRunHistoryResponse {
     runId?: unknown;
     status?: unknown;
     assetVersionIds?: unknown;
+    outputs?: unknown;
   };
 }
 
@@ -314,6 +316,10 @@ export async function loadCompletedCanvasSkillAssets(input: {
   );
   const run = payload.run;
   if (run?.runId !== input.runId || run.status !== 'completed') return [];
+  if (run.outputs !== undefined) {
+    if (!Array.isArray(run.outputs)) throw new Error('Skill 结构化结果格式无效');
+    run.outputs.map(parseDurableSkillOutput);
+  }
   const sourceIds = new Set(input.sourceVersionIds);
   const outputIds = Array.isArray(run.assetVersionIds)
     ? [...new Set(run.assetVersionIds.filter((value): value is string => (

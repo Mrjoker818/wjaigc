@@ -35,6 +35,7 @@ import {
   selectSkillStepsForExecution,
   type ExecuteSkillStepInput,
 } from './executor';
+import { parseDurableSkillOutput } from './structured-output';
 import { skillExecutionSteps } from './cost-estimator';
 import { parseCompiledSkillFanOut } from './compiled-fan-out';
 import { assertCompiledSkillFanOutValues } from './step-compiler';
@@ -277,21 +278,7 @@ function completedAssetVersionIds(events: readonly AgentEvent[]): string[] {
 
 function readDurableSkillOutputs(value: unknown): DurableSkillOutput[] {
   if (!Array.isArray(value)) return [];
-  return value.flatMap(output => {
-    if (!output || typeof output !== 'object' || Array.isArray(output)) return [];
-    const candidate = output as Record<string, unknown>;
-    if (
-      typeof candidate.stepId !== 'string'
-      || (candidate.kind !== 'text' && candidate.kind !== 'html')
-      || typeof candidate.content !== 'string'
-      || !candidate.content
-    ) return [];
-    return [{
-      stepId: candidate.stepId,
-      kind: candidate.kind,
-      content: candidate.content,
-    }];
-  });
+  return value.map(parseDurableSkillOutput);
 }
 
 function completedSkillOutputs(events: readonly AgentEvent[]): DurableSkillOutput[] {

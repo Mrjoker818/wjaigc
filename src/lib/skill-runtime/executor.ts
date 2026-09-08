@@ -7,6 +7,11 @@ import type {
 } from '@/lib/agent-runtime/downstream-operations';
 import type { AgentEventType, AgentWorkspace } from '@/lib/agent-runtime/types';
 import { runSkillQualityGates } from './quality-gates';
+import {
+  durableSkillOutputFromStructuredResult,
+  durableSkillOutputKey,
+  parseDurableSkillOutput,
+} from './structured-output';
 import { buildSkillStepPrompt, selectSkillPredecessorOutputs } from './execution-context';
 import type {
   DurableSkillOutput,
@@ -316,6 +321,9 @@ function durableOutputs(stepId: string, result: SkillStepResult): DurableSkillOu
     ...(typeof result.html === 'string' && result.html
       ? [{ stepId, kind: 'html' as const, content: sanitizeDurableSkillHtml(result.html) }]
       : []),
+    ...(result.structured
+      ? [durableSkillOutputFromStructuredResult(stepId, result.structured)]
+      : []),
   ];
 }
 
@@ -324,8 +332,9 @@ export function mergeDurableSkillOutputs(
   outputs: readonly DurableSkillOutput[],
 ): DurableSkillOutput[] {
   const unique = new Map<string, DurableSkillOutput>();
-  for (const output of outputs) {
-    const key = `${output.stepId}\u0000${output.kind}`;
+  for (const rawOutput of outputs) {
+    const output = parseDurableSkillOutput(rawOutput);
+    const key = durableSkillOutputKey(output);
     if (!unique.has(key)) {
       unique.set(key, {
         ...output,

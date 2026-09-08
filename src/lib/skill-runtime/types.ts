@@ -89,10 +89,13 @@ export interface SkillResultMedia {
   height?: number;
 }
 
-export interface DurableSkillOutput {
-  stepId: string;
-  kind: 'text' | 'html';
-  content: string;
+export type DurableSkillOutput =
+  | { stepId: string; kind: 'text' | 'html'; content: string }
+  | { stepId: string; kind: 'json'; schemaId: string; content: string };
+
+export interface SkillStructuredResult {
+  schemaId: string;
+  value: unknown;
 }
 
 export interface SkillStepResult {
@@ -100,6 +103,7 @@ export interface SkillStepResult {
   media: readonly SkillResultMedia[];
   text?: string;
   html?: string;
+  structured?: SkillStructuredResult;
 }
 
 export interface SkillQualityContext {

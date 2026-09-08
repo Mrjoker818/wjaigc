@@ -29,6 +29,8 @@ import { createProductionSkillStepRegistry } from '@/lib/skill-runtime/step-regi
 import { skillExecutionSteps } from '@/lib/skill-runtime/cost-estimator';
 import { frozenDefinition } from '@/lib/skill-runtime/continuation';
 import { compileConditionalSkillSteps } from '@/lib/skill-runtime/step-compiler';
+import { canonicalComplianceReportJson } from '@/lib/platform-compliance/report-schema';
+import { validReport, wideReport } from '@/__tests__/helpers/platform-compliance-fixtures';
 
 vi.mock('server-only', () => ({}));
 
@@ -71,6 +73,47 @@ function result(id: string): SkillStepResult {
 }
 
 describe('durable Skill executor', () => {
+  it('persists a bounded schema-tagged JSON output', async () => {
+    const completeRun = vi.fn(async () => true);
+    const executor = createSkillExecutor({
+      appendEvent: vi.fn(async () => true),
+      completeRun,
+      executeStep: vi.fn(async () => ({
+        assetVersionIds: [], media: [],
+        structured: { schemaId: 'platform-compliance-report-v1', value: validReport() },
+      })),
+    });
+    const oneStep = { ...definition, steps: [{ ...definition.steps[0], id: 'audit:a' }] };
+
+    const execution = await executor.execute({
+      actorUserId: 'user-1', projectId: 'project-1', runId: 'run-1', workspace: 'canvas',
+      definition: oneStep, inputValues: {}, modelBindings: {}, operationContext: operationContext(),
+    });
+
+    expect(execution.outputs).toContainEqual({
+      stepId: 'audit:a', kind: 'json', schemaId: 'platform-compliance-report-v1',
+      content: canonicalComplianceReportJson(validReport()),
+    });
+  });
+
+  it('rejects invalid JSON output before appending tool.completed', async () => {
+    const events: SkillExecutorEventInput[] = [];
+    const executor = createSkillExecutor({
+      appendEvent: vi.fn(async event => { events.push(event); return true; }),
+      executeStep: vi.fn(async () => ({
+        assetVersionIds: [], media: [],
+        structured: { schemaId: 'platform-compliance-report-v1', value: wideReport(4097) },
+      })),
+    });
+    const oneStep = { ...definition, steps: [{ ...definition.steps[0], id: 'audit:a' }] };
+
+    await expect(executor.execute({
+      actorUserId: 'user-1', projectId: 'project-1', runId: 'run-1', workspace: 'canvas',
+      definition: oneStep, inputValues: {}, modelBindings: {}, operationContext: operationContext(),
+    })).rejects.toThrow('REPORT_KEY_LIMIT');
+    expect(events.some(event => event.type === 'tool.completed')).toBe(false);
+  });
+
   it('restores frozen context without consulting the live catalog', () => {
     const restored = frozenDefinition({ ...definition, executionContextVersion: 1,
       systemPrompt: 'frozen instruction', inputs: [{ key: 'dish', label: 'Dish', kind: 'text', required: true }],
