@@ -442,11 +442,19 @@ export function createProductionSkillStepRegistry(input: {
     const region = step.inputValues.region;
     const assetType = step.inputValues.assetType;
     const productCategory = step.inputValues.productCategory;
+    const productFacts = step.inputValues.productFacts ?? '';
+    const claims = step.inputValues.claims ?? '';
+    const reportLanguage = step.inputValues.reportLanguage ?? '中文';
     if (
       !['通用电商', 'Amazon', '淘宝/天猫', '京东'].includes(String(platform))
       || typeof region !== 'string'
       || !['main', 'secondary', 'detail', 'a-plus'].includes(String(assetType))
       || typeof productCategory !== 'string'
+      || typeof productFacts !== 'string'
+      || productFacts.length > 4_000
+      || typeof claims !== 'string'
+      || claims.length > 4_000
+      || (reportLanguage !== '中文' && reportLanguage !== 'English')
     ) {
       throw imageAdmissionError('Skill compliance audit inputs are invalid');
     }
@@ -634,6 +642,9 @@ export function createProductionSkillStepRegistry(input: {
           modelId: step.modelBinding!.modelId,
           imageInput: facts.inspectedImageDataUrl,
           rules: ruleSet.rules.filter(rule => rule.evaluator === 'vision'),
+          productFacts,
+          claims,
+          reportLanguage,
           requestId: visionOperation.idempotencyKey,
           signal: step.signal,
         });

@@ -13,7 +13,8 @@ import {
   assertCompiledSkillFanOutContracts,
   parseCompiledSkillFanOut,
 } from './compiled-fan-out';
-import type { SkillDefinition, SkillSurface } from './types';
+import { assertSkillInputDefinitions } from './input-resolver';
+import type { SkillDefinition, SkillInputField, SkillSurface } from './types';
 
 export const SKILL_CATALOG_KEY = 'skill_catalog_v1';
 const LEGACY_CHAT_SKILLS_KEY = 'chat_skills';
@@ -133,7 +134,7 @@ function isBoundedJsonValue(value: unknown, depth = 0): boolean {
 function isStoredInput(value: unknown): boolean {
   if (!isRecord(value) || !hasOnlyKeys(value, [
     'key', 'label', 'kind', 'required', 'defaultValue', 'options', 'maximumItems',
-    'bindToSourceVersions', 'datasetSchema',
+    'uniqueItems', 'maximumLength', 'dependentOptions', 'bindToSourceVersions', 'datasetSchema',
   ])) return false;
   if (
     !isBoundedString(value.key, 64, TOKEN_ID)
@@ -151,7 +152,8 @@ function isStoredInput(value: unknown): boolean {
       || value.options.length > 100
       || !value.options.every(option => isBoundedString(option, 200))
     ) return false;
-  } else if (value.kind === 'select' || value.kind === 'multi-select') return false;
+  } else if (value.kind === 'multi-select'
+    || (value.kind === 'select' && !('dependentOptions' in value))) return false;
   if ('maximumItems' in value) {
     if (
       (value.kind !== 'images' && value.kind !== 'multi-select' && value.kind !== 'dataset')
@@ -160,6 +162,22 @@ function isStoredInput(value: unknown): boolean {
       || (value.maximumItems as number) > 1_000
     ) return false;
   }
+  const descriptors = Object.getOwnPropertyDescriptors(value);
+  if (descriptors.uniqueItems && (
+    !descriptors.uniqueItems.enumerable
+    || !Object.hasOwn(descriptors.uniqueItems, 'value')
+    || typeof descriptors.uniqueItems.value !== 'boolean'
+  )) return false;
+  if (descriptors.maximumLength && (
+    !descriptors.maximumLength.enumerable
+    || !Object.hasOwn(descriptors.maximumLength, 'value')
+    || !Number.isSafeInteger(descriptors.maximumLength.value)
+  )) return false;
+  if (descriptors.dependentOptions && (
+    !descriptors.dependentOptions.enumerable
+    || !Object.hasOwn(descriptors.dependentOptions, 'value')
+    || !isRecord(descriptors.dependentOptions.value)
+  )) return false;
   if ('bindToSourceVersions' in value && typeof value.bindToSourceVersions !== 'boolean') {
     return false;
   }
@@ -298,6 +316,7 @@ function isStoredSkill(value: unknown): value is SkillDefinition {
     && isNonNegativeSafeInteger(value.usageCount);
   if (!valid) return false;
   try {
+    assertSkillInputDefinitions(value.inputs as SkillInputField[]);
     assertCompiledSkillFanOutContracts({
       inputs: value.inputs as unknown[],
       steps: value.steps as unknown[],
@@ -611,6 +630,14 @@ export function createSkillStore(
             ...(field.defaultValue === undefined ? {} : { defaultValue: structuredClone(field.defaultValue) }),
             ...(field.options === undefined ? {} : { options: [...field.options] }),
             ...(field.maximumItems === undefined ? {} : { maximumItems: field.maximumItems }),
+            ...(field.uniqueItems === undefined ? {} : { uniqueItems: field.uniqueItems }),
+            ...(field.maximumLength === undefined ? {} : { maximumLength: field.maximumLength }),
+            ...(field.dependentOptions === undefined ? {} : {
+              dependentOptions: {
+                inputKey: field.dependentOptions.inputKey,
+                values: structuredClone(field.dependentOptions.values),
+              },
+            }),
             ...(field.bindToSourceVersions === undefined
               ? {}
               : { bindToSourceVersions: field.bindToSourceVersions }),

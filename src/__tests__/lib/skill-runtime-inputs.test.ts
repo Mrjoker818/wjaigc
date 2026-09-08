@@ -106,7 +106,7 @@ describe('resolveSkillInputs', () => {
   it('requires images to contain unique non-empty identities', () => {
     const sources = createDefinition([{
       key: 'sourceImages', label: 'Sources', kind: 'images', required: true,
-      maximumItems: 20, bindToSourceVersions: true,
+      maximumItems: 20, bindToSourceVersions: true, uniqueItems: true,
     }]);
     expectInputError(
       () => resolveSkillInputs(sources, { sourceImages: ['asset-version-1', 'asset-version-1'] }),
@@ -116,6 +116,101 @@ describe('resolveSkillInputs', () => {
       () => resolveSkillInputs(sources, { sourceImages: ['asset-version-1', '   '] }),
       'SKILL_INPUT_INVALID_VALUE', 'sourceImages',
     );
+  });
+
+  it('preserves duplicate image inputs unless uniqueness is declared', () => {
+    const legacy = createDefinition([{
+      key: 'images', label: 'Images', kind: 'images', required: true,
+    }]);
+    expect(resolveSkillInputs(legacy, { images: ['version-1', 'version-1'] }).images)
+      .toEqual(['version-1', 'version-1']);
+  });
+
+  it.each([
+    { key: 'region', label: 'Region', kind: 'text', required: false,
+      dependentOptions: { inputKey: 'platform', values: { Amazon: ['US'] } } },
+    { key: 'region', label: 'Region', kind: 'select', required: false,
+      dependentOptions: { inputKey: 'missing', values: { Amazon: ['US'] } } },
+    { key: 'region', label: 'Region', kind: 'select', required: false,
+      dependentOptions: { inputKey: 'platform', values: { Unknown: ['US'] } } },
+    { key: 'region', label: 'Region', kind: 'select', required: false,
+      dependentOptions: { inputKey: 'platform', values: { Amazon: ['US', 'US'] } } },
+  ])('rejects malformed dependent option definitions %#', region => {
+    const invalid = createDefinition([
+      { key: 'platform', label: 'Platform', kind: 'select', required: true, options: ['Amazon'] },
+      region as unknown as SkillInputField,
+    ]);
+    expectInputError(
+      () => resolveSkillInputs(invalid, { platform: 'Amazon', region: 'US' }),
+      'SKILL_INPUT_INVALID_DEFINITION', 'region',
+    );
+  });
+
+  it('rejects dependentOptions accessors without invoking them', () => {
+    let getterCalls = 0;
+    const region: Record<string, unknown> = {
+      key: 'region', label: 'Region', kind: 'select', required: true,
+    };
+    Object.defineProperty(region, 'dependentOptions', {
+      enumerable: true,
+      get: () => {
+        getterCalls += 1;
+        throw new Error('dependentOptions getter must not run');
+      },
+    });
+    const invalid = createDefinition([
+      { key: 'platform', label: 'Platform', kind: 'select', required: true, options: ['Amazon'] },
+      region as unknown as SkillInputField,
+    ]);
+
+    expectInputError(
+      () => resolveSkillInputs(invalid, { platform: 'Amazon', region: 'US' }),
+      'SKILL_INPUT_INVALID_DEFINITION', 'region',
+    );
+    expect(getterCalls).toBe(0);
+  });
+
+  it.each([
+    ['extra key', { inputKey: 'platform', values: { Amazon: ['US'] }, extra: true }],
+    ['trimmed input key', { inputKey: ' platform ', values: { Amazon: ['US'] } }],
+    ['extra mapping key', { inputKey: 'platform', values: { Amazon: ['US'], Other: ['CN'] } }],
+  ])('rejects non-canonical dependentOptions objects: %s', (_name, dependentOptions) => {
+    const invalid = createDefinition([
+      { key: 'platform', label: 'Platform', kind: 'select', required: true, options: ['Amazon'] },
+      {
+        key: 'region', label: 'Region', kind: 'select', required: true,
+        dependentOptions,
+      } as unknown as SkillInputField,
+    ]);
+    expectInputError(
+      () => resolveSkillInputs(invalid, { platform: 'Amazon', region: 'US' }),
+      'SKILL_INPUT_INVALID_DEFINITION', 'region',
+    );
+  });
+
+  it('rejects dependent option mapping accessors without invoking them', () => {
+    let getterCalls = 0;
+    const values: Record<string, unknown> = {};
+    Object.defineProperty(values, 'Amazon', {
+      enumerable: true,
+      get: () => {
+        getterCalls += 1;
+        throw new Error('mapping getter must not run');
+      },
+    });
+    const invalid = createDefinition([
+      { key: 'platform', label: 'Platform', kind: 'select', required: true, options: ['Amazon'] },
+      {
+        key: 'region', label: 'Region', kind: 'select', required: true,
+        dependentOptions: { inputKey: 'platform', values },
+      } as unknown as SkillInputField,
+    ]);
+
+    expectInputError(
+      () => resolveSkillInputs(invalid, { platform: 'Amazon', region: 'US' }),
+      'SKILL_INPUT_INVALID_DEFINITION', 'region',
+    );
+    expect(getterCalls).toBe(0);
   });
 
   it('缺少或提供空白必填输入时返回字段级错误', () => {
@@ -305,9 +400,7 @@ describe('resolveSkillInputs', () => {
     const globalDefinition = createDefinition([
       { key: 'images', label: 'Images', kind: 'images', required: true },
     ]);
-    expect(resolveSkillInputs(globalDefinition, {
-      images: Array.from({ length: 20 }, (_, index) => `ver-${index}`),
-    }).images)
+    expect(resolveSkillInputs(globalDefinition, { images: Array(20).fill('ver') }).images)
       .toHaveLength(20);
     expectInputError(
       () => resolveSkillInputs(globalDefinition, { images: Array(21).fill('ver') }),

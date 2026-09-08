@@ -52,6 +52,7 @@ describe('platform compliance Skill preset', () => {
     const [skill] = LOVART_PLATFORM_COMPLIANCE_SKILLS;
     expect(skill.inputs.find(field => field.key === 'sourceImages')).toMatchObject({
       kind: 'images', required: true, maximumItems: 20, bindToSourceVersions: true,
+      uniqueItems: true,
     });
     expect(skill.inputs.find(field => field.key === 'productFacts')?.maximumLength).toBe(4_000);
     expect(skill.inputs.find(field => field.key === 'claims')?.maximumLength).toBe(4_000);

@@ -850,6 +850,14 @@ export function createAgentRuntimeService(
                 ...(field.defaultValue !== undefined ? { defaultValue: field.defaultValue } : {}),
                 ...(field.options !== undefined ? { options: [...field.options] } : {}),
                 ...(field.maximumItems !== undefined ? { maximumItems: field.maximumItems } : {}),
+                ...(field.uniqueItems !== undefined ? { uniqueItems: field.uniqueItems } : {}),
+                ...(field.maximumLength !== undefined ? { maximumLength: field.maximumLength } : {}),
+                ...(field.dependentOptions !== undefined ? {
+                  dependentOptions: {
+                    inputKey: field.dependentOptions.inputKey,
+                    values: structuredClone(field.dependentOptions.values),
+                  },
+                } : {}),
                 ...(field.bindToSourceVersions !== undefined
                   ? { bindToSourceVersions: field.bindToSourceVersions }
                   : {}),

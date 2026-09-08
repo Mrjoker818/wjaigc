@@ -148,7 +148,7 @@ function validateImages(field: SkillInputField, value: unknown): readonly string
     throw new SkillInputError('SKILL_INPUT_LIMIT_EXCEEDED', field.key);
   }
   if (value.some(item => item.trim().length === 0 || item !== item.trim())
-    || new Set(value).size !== value.length) {
+    || (field.uniqueItems && new Set(value).size !== value.length)) {
     throw new SkillInputError('SKILL_INPUT_INVALID_VALUE', field.key);
   }
   return value;
@@ -162,11 +162,145 @@ export function resolveSkillInputOptions(
   const field = fields.find(candidate => candidate.key === fieldKey);
   if (!field) return [];
   if (!field.dependentOptions) return field.options ?? [];
+  if (!isPlainObject(field.dependentOptions.values)) return [];
   const sourceValue = values[field.dependentOptions.inputKey];
   if (typeof sourceValue !== 'string') return [];
-  return Object.hasOwn(field.dependentOptions.values, sourceValue)
-    ? field.dependentOptions.values[sourceValue] ?? []
+  if (!Object.hasOwn(field.dependentOptions.values, sourceValue)) return [];
+  const options = field.dependentOptions.values[sourceValue];
+  return Array.isArray(options) && options.every(option => typeof option === 'string')
+    ? options
     : [];
+}
+
+function invalidDefinition(fieldKey: string): never {
+  throw new SkillInputError('SKILL_INPUT_INVALID_DEFINITION', fieldKey);
+}
+
+function cloneOptionListDefinition(value: unknown, fieldKey: string): readonly string[] {
+  if (!Array.isArray(value) || Object.getPrototypeOf(value) !== Array.prototype) {
+    return invalidDefinition(fieldKey);
+  }
+  const { descriptors, keys } = ownDescriptorSnapshot(value);
+  const lengthDescriptor = descriptors.length;
+  const length = lengthDescriptor?.value;
+  if (!Number.isSafeInteger(length) || length < 1 || length > 100 || keys.length !== length + 1) {
+    return invalidDefinition(fieldKey);
+  }
+  const result: string[] = [];
+  for (let index = 0; index < length; index += 1) {
+    const descriptor = descriptors[String(index)];
+    if (!descriptor || !descriptor.enumerable || !Object.hasOwn(descriptor, 'value')) {
+      return invalidDefinition(fieldKey);
+    }
+    const option = descriptor.value;
+    if (typeof option !== 'string' || option.length > 200
+      || option.trim().length === 0 || option !== option.trim()) {
+      return invalidDefinition(fieldKey);
+    }
+    result.push(option);
+  }
+  if (new Set(result).size !== result.length) return invalidDefinition(fieldKey);
+  return result;
+}
+
+export function cloneSkillInputDependentOptions(
+  value: unknown,
+  fieldKey: string,
+): NonNullable<SkillInputField['dependentOptions']> {
+  if (!isPlainObject(value)) return invalidDefinition(fieldKey);
+  const { descriptors, keys } = ownDescriptorSnapshot(value);
+  if (keys.length !== 2 || keys.some(key => (
+    typeof key !== 'string' || (key !== 'inputKey' && key !== 'values')
+  ))) return invalidDefinition(fieldKey);
+  const inputKeyDescriptor = descriptors.inputKey;
+  const valuesDescriptor = descriptors.values;
+  if (!inputKeyDescriptor?.enumerable || !Object.hasOwn(inputKeyDescriptor, 'value')
+    || !valuesDescriptor?.enumerable || !Object.hasOwn(valuesDescriptor, 'value')) {
+    return invalidDefinition(fieldKey);
+  }
+  const inputKey = inputKeyDescriptor.value;
+  if (typeof inputKey !== 'string' || inputKey.length > 64 || inputKey.trim().length === 0
+    || inputKey !== inputKey.trim() || FORBIDDEN_KEYS.has(inputKey)) {
+    return invalidDefinition(fieldKey);
+  }
+  const mapping = valuesDescriptor.value;
+  if (!isPlainObject(mapping)) return invalidDefinition(fieldKey);
+  const mappingSnapshot = ownDescriptorSnapshot(mapping);
+  const values: Record<string, readonly string[]> = Object.create(null) as Record<string, readonly string[]>;
+  for (const key of mappingSnapshot.keys) {
+    if (typeof key !== 'string' || FORBIDDEN_KEYS.has(key) || key.length > 200
+      || key.trim().length === 0 || key !== key.trim()) {
+      return invalidDefinition(fieldKey);
+    }
+    const descriptor = mappingSnapshot.descriptors[key];
+    if (!descriptor || !descriptor.enumerable || !Object.hasOwn(descriptor, 'value')) {
+      return invalidDefinition(fieldKey);
+    }
+    values[key] = cloneOptionListDefinition(descriptor.value, fieldKey);
+  }
+  return { inputKey, values };
+}
+
+export function assertSkillInputDefinitions(fields: readonly SkillInputField[]): void {
+  const parsed = fields.map(field => {
+    if (!isPlainObject(field)) return invalidDefinition('unknown');
+    const descriptors = Object.getOwnPropertyDescriptors(field);
+    const key = descriptors.key?.value;
+    const kind = descriptors.kind?.value;
+    if (typeof key !== 'string' || typeof kind !== 'string') return invalidDefinition('unknown');
+    for (const property of ['uniqueItems', 'maximumLength', 'dependentOptions'] as const) {
+      const descriptor = descriptors[property];
+      if (descriptor && (!descriptor.enumerable || !Object.hasOwn(descriptor, 'value'))) {
+        return invalidDefinition(key);
+      }
+    }
+    const options = descriptors.options
+      ? cloneOptionListDefinition(descriptors.options.value, key)
+      : undefined;
+    const dependentOptions = descriptors.dependentOptions
+      ? cloneSkillInputDependentOptions(descriptors.dependentOptions.value, key)
+      : undefined;
+    return {
+      field, key, kind, options, dependentOptions,
+      uniqueItems: descriptors.uniqueItems?.value,
+      maximumLength: descriptors.maximumLength?.value,
+    };
+  });
+  const byKey = new Map(parsed.map(item => [item.key, item]));
+  for (const item of parsed) {
+    const { field, key, kind, options, dependentOptions, uniqueItems, maximumLength } = item;
+    if (maximumLength !== undefined && (
+      !['text', 'image', 'brand-kit'].includes(kind)
+      || !Number.isSafeInteger(maximumLength)
+      || maximumLength < 1
+    )) throw new SkillInputError('SKILL_INPUT_INVALID_DEFINITION', field.key);
+    if (uniqueItems !== undefined && (
+      (kind !== 'images' && kind !== 'multi-select')
+      || typeof uniqueItems !== 'boolean'
+    )) throw new SkillInputError('SKILL_INPUT_INVALID_DEFINITION', field.key);
+    if (!dependentOptions) continue;
+    const dependency = byKey.get(dependentOptions.inputKey);
+    const mapping = dependentOptions.values;
+    if (
+      kind !== 'select'
+      || options !== undefined
+      || !dependency
+      || dependency.kind !== 'select'
+      || !dependency.options
+      || !isPlainObject(mapping)
+    ) throw new SkillInputError('SKILL_INPUT_INVALID_DEFINITION', key);
+    const { descriptors, keys } = ownDescriptorSnapshot(mapping);
+    if (keys.length !== dependency.options.length) {
+      throw new SkillInputError('SKILL_INPUT_INVALID_DEFINITION', key);
+    }
+    for (const option of dependency.options) {
+      const descriptor = descriptors[option];
+      if (!descriptor || !descriptor.enumerable || !Object.hasOwn(descriptor, 'value')
+        || FORBIDDEN_KEYS.has(option)) {
+        throw new SkillInputError('SKILL_INPUT_INVALID_DEFINITION', key);
+      }
+    }
+  }
 }
 
 function validateMultiSelect(field: SkillInputField, value: unknown): readonly string[] {
@@ -265,6 +399,7 @@ export function resolveSkillInputs(
   }
 
   const output: Record<string, unknown> = {};
+  assertSkillInputDefinitions(definition.inputs);
   const valuesWithDefaults: Record<string, unknown> = {};
   for (const field of definition.inputs) {
     const rawDescriptor = rawSnapshot.descriptors[field.key];
@@ -281,20 +416,6 @@ export function resolveSkillInputs(
       || field.maximumItems < 1
     )) {
       throw new SkillInputError('SKILL_INPUT_INVALID_DEFINITION', field.key);
-    }
-    if (field.maximumLength !== undefined && (
-      typeof field.maximumLength !== 'number'
-      || !Number.isFinite(field.maximumLength)
-      || !Number.isInteger(field.maximumLength)
-      || field.maximumLength < 1
-    )) {
-      throw new SkillInputError('SKILL_INPUT_INVALID_DEFINITION', field.key);
-    }
-    if (field.dependentOptions) {
-      const dependency = fields.get(field.dependentOptions.inputKey);
-      if (!dependency || dependency.kind !== 'select') {
-        throw new SkillInputError('SKILL_INPUT_INVALID_DEFINITION', field.key);
-      }
     }
     const rawDescriptor = rawSnapshot.descriptors[field.key];
     const rawValue = rawDescriptor?.value;

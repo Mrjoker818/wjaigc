@@ -5,6 +5,7 @@ vi.mock('server-only', () => ({}));
 import {
   createMemorySkillStorageAdapter,
   createSkillStore,
+  parseUserSkillEnvelope,
   SkillRevisionConflictError,
   SKILL_CATALOG_KEY,
   SkillStorageError,
@@ -114,6 +115,50 @@ describe('versioned user skill storage', () => {
       maximumItems: 20,
       concurrency: 3,
     });
+  });
+
+  it('preserves platform compliance input constraints when copied', async () => {
+    const store = createSkillStore(createMemorySkillStorageAdapter(), { now: () => 100 });
+    const source = (await store.load('user-1', 'canvas'))
+      .find(skill => skill.id === 'preset-platform-compliance-audit');
+    const copy = await store.copy({
+      actorUserId: 'user-1', sourceSkillId: 'preset-platform-compliance-audit',
+    });
+
+    expect(copy.inputs).toEqual(source?.inputs);
+    expect(copy.inputs.find(field => field.key === 'sourceImages')).toMatchObject({ uniqueItems: true });
+    expect(copy.inputs.find(field => field.key === 'claims')).toMatchObject({ maximumLength: 4_000 });
+    expect(copy.inputs.find(field => field.key === 'region')).toMatchObject({
+      dependentOptions: { inputKey: 'platform', values: { Amazon: ['US', 'EU', 'JP'] } },
+    });
+  });
+
+  it('rejects stored dependentOptions accessors without invoking them', async () => {
+    let getterCalls = 0;
+    const store = createSkillStore(createMemorySkillStorageAdapter(), { now: () => 100 });
+    const copy = await store.copy({
+      actorUserId: 'user-1', sourceSkillId: 'preset-platform-compliance-audit',
+    });
+    const inputs = copy.inputs.map(field => {
+      if (field.key !== 'region') return structuredClone(field);
+      const unsafe: Record<string, unknown> = {
+        key: field.key, label: field.label, kind: field.kind, required: field.required,
+      };
+      Object.defineProperty(unsafe, 'dependentOptions', {
+        enumerable: true,
+        get: () => {
+          getterCalls += 1;
+          throw new Error('stored getter must not run');
+        },
+      });
+      return unsafe;
+    });
+
+    expect(() => parseUserSkillEnvelope({
+      schemaVersion: 1, revision: 1, migratedLegacyIds: [],
+      skills: [{ ...copy, inputs }],
+    })).toThrow(SkillStorageError);
+    expect(getterCalls).toBe(0);
   });
 
   it('keeps the copy id stable and increments its version on an allowed update', async () => {

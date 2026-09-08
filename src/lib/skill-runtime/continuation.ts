@@ -11,7 +11,11 @@ import { requireSkillForSurface } from './catalog';
 import { skillExecutionSteps } from './cost-estimator';
 import { parseSkillRunRequest, executeSkillRun, SkillRunRequestError } from './service';
 import { createProductionSkillStepRegistry } from './step-registry';
-import { resolveSkillInputs } from './input-resolver';
+import {
+  assertSkillInputDefinitions,
+  cloneSkillInputDependentOptions,
+  resolveSkillInputs,
+} from './input-resolver';
 import { parseCompiledSkillFanOut } from './compiled-fan-out';
 import { assertCompiledSkillFanOutValues } from './step-compiler';
 import { assertSourceVersionBindings } from './run-request';
@@ -99,6 +103,11 @@ export function frozenDefinition(
     if (!steps || typeof snapshot.systemPrompt !== 'string' || !Array.isArray(snapshot.inputs)) {
       throw new SkillRunRequestError('Frozen Skill context is invalid');
     }
+    try {
+      assertSkillInputDefinitions(snapshot.inputs as SkillInputField[]);
+    } catch {
+      throw new SkillRunRequestError('Frozen Skill input is invalid');
+    }
     const keys = new Set<string>();
     inputs = snapshot.inputs.map(raw => {
       const field = record(raw, 'skillSnapshot.inputs');
@@ -135,6 +144,14 @@ export function frozenDefinition(
         ...(field.defaultValue !== undefined ? { defaultValue: field.defaultValue } : {}),
         ...(field.options !== undefined ? { options: [...field.options as string[]] } : {}),
         ...(field.maximumItems !== undefined ? { maximumItems: field.maximumItems as number } : {}),
+        ...(field.uniqueItems !== undefined ? { uniqueItems: field.uniqueItems as boolean } : {}),
+        ...(field.maximumLength !== undefined ? { maximumLength: field.maximumLength as number } : {}),
+        ...(Object.hasOwn(field, 'dependentOptions') ? {
+          dependentOptions: cloneSkillInputDependentOptions(
+            Object.getOwnPropertyDescriptor(field, 'dependentOptions')?.value,
+            field.key as string,
+          ),
+        } : {}),
         ...(field.bindToSourceVersions !== undefined
           ? { bindToSourceVersions: field.bindToSourceVersions as boolean }
           : {}),
@@ -155,6 +172,7 @@ export function frozenDefinition(
       }
       return parsed;
     });
+    assertSkillInputDefinitions(inputs);
   }
   if (steps) {
     return {

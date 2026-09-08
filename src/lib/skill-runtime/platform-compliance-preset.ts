@@ -13,7 +13,7 @@ export function complianceInputFields(): readonly SkillInputField[] {
   return [
     {
       key: 'sourceImages', label: '来源图片', kind: 'images', required: true,
-      maximumItems: 20, bindToSourceVersions: true,
+      maximumItems: 20, uniqueItems: true, bindToSourceVersions: true,
     },
     {
       key: 'platform', label: '平台', kind: 'select', required: true,

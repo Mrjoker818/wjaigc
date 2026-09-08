@@ -45,6 +45,9 @@ describe('platform compliance frozen vision client', () => {
       modelId: 'gemini-vision-stable',
       imageInput: '/api/serve-upload/authorized.png',
       rules,
+      productFacts: '材质为食品级不锈钢',
+      claims: '宣称通过 FDA 认证',
+      reportLanguage: '中文',
       requestId: 'local-request-1',
       signal: new AbortController().signal,
     }, { fetcher });
@@ -57,6 +60,9 @@ describe('platform compliance frozen vision client', () => {
       response_format: { type: 'json_object' },
     });
     expect(JSON.stringify(body)).toContain('/api/serve-upload/authorized.png');
+    expect(JSON.stringify(body)).toContain('材质为食品级不锈钢');
+    expect(JSON.stringify(body)).toContain('宣称通过 FDA 认证');
+    expect(JSON.stringify(body)).toContain('中文');
     expect(result).toMatchObject({
       providerId: provider.id,
       modelId: 'gemini-vision-stable',

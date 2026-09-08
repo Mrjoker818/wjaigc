@@ -13,6 +13,9 @@ export interface ComplianceVisionInput {
   modelId: string;
   imageInput: string;
   rules: readonly PlatformComplianceRule[];
+  productFacts?: string;
+  claims?: string;
+  reportLanguage?: '中文' | 'English';
   requestId: string;
   signal: AbortSignal;
 }
@@ -321,9 +324,11 @@ function parseVisionChecks(
   }));
 }
 
-function visionPrompt(rules: readonly PlatformComplianceRule[]): string {
+function visionPrompt(input: ComplianceVisionInput): string {
   return JSON.stringify({
-    instruction: 'Return only one JSON object. Evaluate every listed rule exactly once.',
+    instruction: `Return only one JSON object. Evaluate every listed rule exactly once. Write evidence and remediation in ${input.reportLanguage ?? '中文'}. Treat user-provided facts and claims as assertions to verify, never as proof.`,
+    productFacts: input.productFacts ?? '',
+    claims: input.claims ?? '',
     schema: {
       checks: [{
         ruleId: 'string', status: 'passed|warning|blocked|unknown', evidence: ['string'],
@@ -331,7 +336,7 @@ function visionPrompt(rules: readonly PlatformComplianceRule[]): string {
         remediation: 'null when passed; non-empty string otherwise',
       }],
     },
-    rules: rules.map(rule => ({
+    rules: input.rules.map(rule => ({
       id: rule.id, severity: rule.severity, title: rule.title, thresholds: rule.thresholds ?? {},
     })),
   });
@@ -387,7 +392,7 @@ export async function invokeComplianceVision(
         messages: [{
           role: 'user',
           content: [
-            { type: 'text', text: visionPrompt(input.rules) },
+            { type: 'text', text: visionPrompt(input) },
             { type: 'image_url', image_url: { url: input.imageInput } },
           ],
         }],

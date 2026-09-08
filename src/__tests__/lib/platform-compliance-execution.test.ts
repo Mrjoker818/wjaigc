@@ -111,6 +111,7 @@ function complianceRequest() {
     inputValues: {
       sourceImages: ['asset-version-a'],
       platform: 'Amazon', region: 'US', assetType: 'main', productCategory: '',
+      productFacts: '材质为食品级不锈钢', claims: '宣称通过 FDA 认证', reportLanguage: '中文',
     },
     sourceVersionIds: ['asset-version-a'], modelBindings: {}, idempotencyKey: 'run-key',
   };
@@ -225,6 +226,7 @@ describe('platform compliance report execution', () => {
       inputValues: {
         sourceImages: ['asset-version-a', 'asset-version-b'],
         platform: 'Amazon', region: 'US', assetType: 'main', productCategory: '',
+        productFacts: '材质为食品级不锈钢', claims: '宣称通过 FDA 认证', reportLanguage: '中文',
       },
       sourceVersionIds: ['asset-version-a', 'asset-version-b'],
       modelBindings: { vision: { providerId: 'frozen-vision', modelId: 'vision-model' } },
@@ -269,6 +271,9 @@ describe('platform compliance report execution', () => {
     expect(mocks.fetchWithV1Retry).toHaveBeenCalledTimes(1);
     expect(mocks.fetchWithV1Retry.mock.calls[0]?.[0]).toBe('https://vision.example/v1');
     expect(String(mocks.fetchWithV1Retry.mock.calls[0]?.[2]?.body)).toContain(imageDataUrl);
+    expect(String(mocks.fetchWithV1Retry.mock.calls[0]?.[2]?.body)).toContain('材质为食品级不锈钢');
+    expect(String(mocks.fetchWithV1Retry.mock.calls[0]?.[2]?.body)).toContain('宣称通过 FDA 认证');
+    expect(String(mocks.fetchWithV1Retry.mock.calls[0]?.[2]?.body)).toContain('中文');
     expect(String(mocks.fetchWithV1Retry.mock.calls[0]?.[2]?.body)).not.toContain('client-must-not-win');
     expect(mocks.persistComplianceReportAsset).toHaveBeenCalledWith(expect.objectContaining({
       actorUserId: 'user-1', projectId: 'project-1', runId: 'run-1', stepId: 'audit:b',

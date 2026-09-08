@@ -19,6 +19,7 @@ export interface SkillInputField {
   defaultValue?: unknown;
   options?: readonly string[];
   maximumItems?: number;
+  uniqueItems?: boolean;
   maximumLength?: number;
   dependentOptions?: {
     inputKey: string;

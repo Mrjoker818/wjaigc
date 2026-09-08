@@ -225,8 +225,13 @@ describe('Skill runtime frozen continuation', () => {
       inputs: [{
         key: 'sources', label: 'Sources', kind: 'multi-select', required: true,
         defaultValue: ['version-a'], options: ['version-a', 'version-b'], maximumItems: 2,
-        bindToSourceVersions: true,
-      }],
+        bindToSourceVersions: true, uniqueItems: true,
+      }, {
+        key: 'platform', label: 'Platform', kind: 'select', required: true, options: ['Amazon', '京东'],
+      }, {
+        key: 'region', label: 'Region', kind: 'select', required: true,
+        dependentOptions: { inputKey: 'platform', values: { Amazon: ['US'], '京东': ['CN'] } },
+      }, { key: 'claims', label: 'Claims', kind: 'text', required: false, maximumLength: 4_000 }],
       steps: [{
         id: 'plan', label: 'Plan', toolId: 'chat', execution: 'sequential',
         promptTemplate: '{{sources}}', modelRole: 'orchestrator', qualityGateIds: [],
@@ -236,8 +241,13 @@ describe('Skill runtime frozen continuation', () => {
     expect(definition.inputs).toEqual([{
       key: 'sources', label: 'Sources', kind: 'multi-select', required: true,
       defaultValue: ['version-a'], options: ['version-a', 'version-b'], maximumItems: 2,
-      bindToSourceVersions: true,
-    }]);
+      bindToSourceVersions: true, uniqueItems: true,
+    }, {
+      key: 'platform', label: 'Platform', kind: 'select', required: true, options: ['Amazon', '京东'],
+    }, {
+      key: 'region', label: 'Region', kind: 'select', required: true,
+      dependentOptions: { inputKey: 'platform', values: { Amazon: ['US'], '京东': ['CN'] } },
+    }, { key: 'claims', label: 'Claims', kind: 'text', required: false, maximumLength: 4_000 }]);
   });
 
   it.each([
@@ -245,12 +255,64 @@ describe('Skill runtime frozen continuation', () => {
     [{ options: ['version-a', 1] }],
     [{ maximumItems: 0 }],
     [{ bindToSourceVersions: 'true' }],
+    [{ uniqueItems: 'true' }],
+    [{ maximumLength: 0 }],
+    [{ dependentOptions: { inputKey: 'missing', values: { Amazon: ['US'] } } }],
   ])('rejects malformed frozen input metadata %#', extra => {
     expect(() => frozenDefinition({
       id: 'bad', version: 1, name: 'Bad', executionContextVersion: 1, systemPrompt: 'Bad',
       inputs: [{ key: 'sources', label: 'Sources', kind: 'multi-select', required: true, ...extra }],
       steps: [{ id: 'plan', label: 'Plan', toolId: 'chat', execution: 'sequential', promptTemplate: '', modelRole: 'orchestrator', qualityGateIds: [] }],
     }, 'canvas', 'bad', 1)).toThrow('Frozen Skill input is invalid');
+  });
+
+  it('rejects frozen dependentOptions getters before cloning or invocation', () => {
+    let getterCalls = 0;
+    const region: Record<string, unknown> = {
+      key: 'region', label: 'Region', kind: 'select', required: true,
+    };
+    Object.defineProperty(region, 'dependentOptions', {
+      enumerable: true,
+      get: () => {
+        getterCalls += 1;
+        throw new Error('frozen getter must not run');
+      },
+    });
+
+    expect(() => frozenDefinition({
+      id: 'bad', version: 1, name: 'Bad', executionContextVersion: 1, systemPrompt: 'Bad',
+      inputs: [
+        { key: 'platform', label: 'Platform', kind: 'select', required: true, options: ['Amazon'] },
+        region,
+      ],
+      steps: [{ id: 'plan', label: 'Plan', toolId: 'chat', execution: 'sequential', promptTemplate: '', modelRole: 'orchestrator', qualityGateIds: [] }],
+    }, 'canvas', 'bad', 1)).toThrow('Frozen Skill input is invalid');
+    expect(getterCalls).toBe(0);
+  });
+
+  it('rejects frozen nested option getters before cloning or invocation', () => {
+    let getterCalls = 0;
+    const values: Record<string, unknown> = {};
+    Object.defineProperty(values, 'Amazon', {
+      enumerable: true,
+      get: () => {
+        getterCalls += 1;
+        throw new Error('frozen mapping getter must not run');
+      },
+    });
+
+    expect(() => frozenDefinition({
+      id: 'bad', version: 1, name: 'Bad', executionContextVersion: 1, systemPrompt: 'Bad',
+      inputs: [
+        { key: 'platform', label: 'Platform', kind: 'select', required: true, options: ['Amazon'] },
+        {
+          key: 'region', label: 'Region', kind: 'select', required: true,
+          dependentOptions: { inputKey: 'platform', values },
+        },
+      ],
+      steps: [{ id: 'plan', label: 'Plan', toolId: 'chat', execution: 'sequential', promptTemplate: '', modelRole: 'orchestrator', qualityGateIds: [] }],
+    }, 'canvas', 'bad', 1)).toThrow('Frozen Skill input is invalid');
+    expect(getterCalls).toBe(0);
   });
 
   it.each([
