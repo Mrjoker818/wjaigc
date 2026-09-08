@@ -605,33 +605,53 @@ export function createAgentRuntimeService(
       }
     } else if (requestedTerminalStatus) {
       const error = terminalError(validated.type, validated.payload);
-      const refundCreditCost = unfinishedSkillRefundCreditCost(
-        beforeEvents,
-        beforeProjection.ignoredEventIds,
-      );
-      const settlement = await dependencies.settleFailedTask({
-        taskId: validated.runId,
-        status: requestedTerminalStatus,
-        error,
-        expectedRevision: run.task.revision ?? 0,
-        terminalIdentity,
-        ...(refundCreditCost !== undefined ? { refundCreditCost } : {}),
-        ...(validated.type === 'run.cancelled' ? { allowPausedAgentSettlement: true } : {}),
-      });
-      if (!settlement.transitioned) {
+      let settlementTask = run.task;
+      let settlementEvents = beforeEvents;
+      let settlementProjection = beforeProjection;
+      let settled = false;
+      for (let attempt = 0; attempt < 8 && !settled; attempt += 1) {
+        const refundCreditCost = unfinishedSkillRefundCreditCost(
+          settlementEvents,
+          settlementProjection.ignoredEventIds,
+        );
+        const settlement = await dependencies.settleFailedTask({
+          taskId: validated.runId,
+          status: requestedTerminalStatus,
+          error,
+          expectedRevision: settlementTask.revision ?? 0,
+          terminalIdentity,
+          ...(refundCreditCost !== undefined ? { refundCreditCost } : {}),
+          ...(validated.type === 'run.cancelled' ? { allowPausedAgentSettlement: true } : {}),
+        });
+        if (settlement.transitioned) {
+          settled = true;
+          break;
+        }
         const authoritative = await dependencies.getTaskForUser(
           validated.runId,
           validated.actorUserId,
         );
         if (
-          authoritative?.status !== requestedTerminalStatus
-          || authoritative.terminalEventId !== terminalIdentity?.eventId
-          || authoritative.terminalEventDigest !== terminalIdentity?.requestDigest
-          || authoritative.terminalEventType !== terminalIdentity?.eventType
+          authoritative?.status === requestedTerminalStatus
+          && authoritative.terminalEventId === terminalIdentity?.eventId
+          && authoritative.terminalEventDigest === terminalIdentity?.requestDigest
+          && authoritative.terminalEventType === terminalIdentity?.eventType
         ) {
+          settled = true;
+          break;
+        }
+        if (!authoritative || TERMINAL_TASK_STATUSES.has(authoritative.status)) {
           throw new AgentRunTerminalConflictError();
         }
+        settlementTask = authoritative;
+        settlementEvents = await dependencies.listEvents({
+          actorUserId: validated.actorUserId,
+          projectId: run.projectId,
+          runId: validated.runId,
+        });
+        settlementProjection = reduceAgentEvents(settlementEvents);
       }
+      if (!settled) throw new AgentRunTerminalConflictError();
     }
 
     const appended = await dependencies.appendEvent({

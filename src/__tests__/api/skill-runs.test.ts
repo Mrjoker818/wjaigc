@@ -221,6 +221,55 @@ describe('Skill run API', () => {
     });
   });
 
+  it('returns preserved partial compliance reports while a failed image awaits retry', async () => {
+    mocks.getSkillRun.mockResolvedValue({
+      runId: 'run-compliance', skillId: 'preset-platform-compliance-audit', skillVersion: 1,
+      status: 'paused', resumeFromStepId: 'audit-image:failed',
+      assetVersionIds: ['report-complete-a', 'report-technical-b', 'report-complete-c'],
+      outputs: [
+        { stepId: 'audit-image:a', kind: 'json', schemaId: 'platform-compliance-report-v1', content: '{"verdict":"passed"}' },
+        { stepId: 'audit-image:c', kind: 'json', schemaId: 'platform-compliance-report-v1', content: '{"verdict":"warning"}' },
+      ],
+    });
+    const route = await import('@/app/api/skill-runs/[runId]/route');
+    const response = await route.GET(
+      new NextRequest('http://localhost/api/skill-runs/run-compliance?observeOnly=true'),
+      { params: Promise.resolve({ runId: 'run-compliance' }) },
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      run: expect.objectContaining({
+        status: 'paused', resumeFromStepId: 'audit-image:failed',
+        assetVersionIds: ['report-complete-a', 'report-technical-b', 'report-complete-c'],
+      }),
+    });
+    expect(mocks.recoverLiveSkillRunExecution).not.toHaveBeenCalled();
+  });
+
+  it('retries only the selected failed compliance image step', async () => {
+    mocks.retrySkillStep.mockResolvedValue({
+      accepted: true,
+      startedStepIds: ['audit-image:failed'],
+      scheduledStepIds: ['audit-image:failed'],
+    });
+    const route = await import('@/app/api/skill-runs/[runId]/retry/route');
+    const response = await route.POST(new NextRequest('http://localhost/api/skill-runs/run-compliance/retry', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ stepId: 'audit-image:failed' }),
+    }), { params: Promise.resolve({ runId: 'run-compliance' }) });
+
+    expect(response.status).toBe(200);
+    expect(mocks.retrySkillStep).toHaveBeenCalledWith({
+      actorUserId: user.id, runId: 'run-compliance', stepId: 'audit-image:failed',
+    });
+    await expect(response.json()).resolves.toEqual({
+      accepted: true,
+      startedStepIds: ['audit-image:failed'],
+      scheduledStepIds: ['audit-image:failed'],
+    });
+  });
+
   it('returns authentication responses without invoking services', async () => {
     mocks.requireApiAuthOrReject.mockResolvedValue(NextResponse.json({ error: 'unauthorized' }, { status: 401 }));
     const route = await import('@/app/api/skill-runs/route');

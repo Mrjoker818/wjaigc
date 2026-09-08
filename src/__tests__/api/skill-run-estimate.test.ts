@@ -199,6 +199,48 @@ describe('POST /api/skill-runs/estimate', () => {
     });
   });
 
+  it('quotes every compliance image as an independent billable vision step', async () => {
+    mocks.calculateConfiguredCreditCost.mockResolvedValue(5);
+    mocks.resolveTaskModel.mockImplementation(async (providerId: string, modelId: string) => ({
+      ...descriptor(providerId, modelId, 'chat'),
+      sourceType: providerId === 'pear-vision' ? 'vlm' : 'chat',
+      supportsReferenceImages: providerId === 'pear-vision',
+    }));
+    mocks.authorizeAgentContext.mockResolvedValue({
+      snapshot: {},
+      mediaByVersionId: {
+        'version-1': '/uploads/version-1.png',
+        'version-2': '/uploads/version-2.png',
+        'version-3': '/uploads/version-3.png',
+      },
+      selectedEntityVersionIds: {},
+    });
+    const response = await POST(request(body({
+      skillId: 'preset-platform-compliance-audit',
+      inputValues: {
+        sourceImages: ['version-1', 'version-2', 'version-3'], platform: 'Amazon',
+        region: 'US', assetType: 'main', productCategory: '', productFacts: '', claims: '',
+        reportLanguage: '中文',
+      },
+      sourceVersionIds: ['version-1', 'version-2', 'version-3'],
+      modelBindings: {
+        orchestrator: { providerId: 'pear-chat', modelId: 'gemini-3.1-flash' },
+        vision: { providerId: 'pear-vision', modelId: 'vision-model' },
+      },
+    })));
+
+    expect(response.status).toBe(200);
+    const payload = await response.json();
+    expect(payload).toMatchObject({ minimum: 20, maximum: 20 });
+    expect(payload.steps).toHaveLength(4);
+    expect(payload.steps[0]).toEqual({ stepId: 'orchestrator', cost: 5 });
+    expect(payload.steps.slice(1)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ stepId: expect.stringMatching(/^audit-image:/u), cost: 5 }),
+    ]));
+    expect(new Set(payload.steps.slice(1).map((step: { stepId: string }) => step.stepId)).size).toBe(3);
+    expect(mocks.createBillableTask).not.toHaveBeenCalled();
+  });
+
   it('rejects a forged surface before asset authorization, costing, or task creation', async () => {
     const response = await POST(request(body({ surface: 'simple-chat' })));
 

@@ -101,4 +101,30 @@ describe('resumed Agent execution dispatcher', () => {
       error: 'executor unavailable',
     }));
   });
+
+  it('keeps the exact failed compliance step and abort signal on retry dispatch', async () => {
+    mocks.load.mockResolvedValue({
+      adoption: { runId: 'run-compliance', toolId: 'audit-image:failed' },
+      execute: async (context: AgentDownstreamExecutionContext) => mocks.execute(context),
+    });
+    const controller = new AbortController();
+    const started = await dispatchResumedAgentExecution({
+      actorUserId: 'user-1', projectId: 'project-1', runId: 'run-compliance',
+      workspace: 'canvas', nextStepId: 'audit-image:failed', generation: 4,
+      leaseOwner: 'lease-4', signal: controller.signal,
+    });
+    await started.completion;
+
+    expect(mocks.load).toHaveBeenCalledWith(expect.objectContaining({
+      runId: 'run-compliance', nextStepId: 'audit-image:failed',
+    }));
+    expect(mocks.executeAdoption).toHaveBeenCalledWith(expect.objectContaining({
+      resumeFromStepId: 'audit-image:failed', expectedGeneration: 4,
+      leaseOwner: 'lease-4', signal: controller.signal,
+    }));
+    expect(mocks.execute).toHaveBeenCalledWith(expect.objectContaining({
+      resumeFromStepId: 'audit-image:failed', generation: 4,
+      leaseOwner: 'lease-4', signal: controller.signal,
+    }));
+  });
 });
