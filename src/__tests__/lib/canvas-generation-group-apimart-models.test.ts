@@ -26,10 +26,19 @@ describe('apimart gpt-image-2.5 model capabilities (per apimart official docs)',
     expect(getQualityLevelOptions('gpt-image-2.5-sunburst', APIMART)).toEqual(['auto', 'low', 'medium', 'high', 'xhigh', 'max']);
   });
 
-  it('supports PearAPI GPT Image 2.5 4K quality', () => {
-    expect(getQualityLevelOptions('gpt-image-2.5-4k', APIMART)).toEqual(['auto', 'low', 'medium', 'high']);
-    expect(getResolutionTierOptions('gpt-image-2.5-4k', APIMART)).toEqual(['4K']);
-    expect(getProviderAspectRatios('gpt-image-2.5-4k', APIMART)).toEqual(['1:1', '16:9', '9:16']);
+  it('supports PearAPI GPT Image 2.5 4K with the same APImart contract', () => {
+    const expectedQualities = ['auto', 'low', 'medium', 'high', 'xhigh', 'max'];
+    const expectedRatios = [
+      'auto',
+      '1:1', '3:2', '2:3', '4:3', '3:4', '5:4', '4:5',
+      '16:9', '9:16', '2:1', '1:2', '3:1', '1:3', '21:9', '9:21',
+    ];
+    expect(getQualityLevelOptions('gpt-image-2.5-4k', APIMART)).toEqual(expectedQualities);
+    expect(getResolutionTierOptions('gpt-image-2.5-4k', APIMART)).toEqual(['1K', '2K', '4K']);
+    expect(getProviderAspectRatios('gpt-image-2.5-4k', APIMART)).toEqual(expectedRatios);
+    // PearAPI 4K 型号必须与 APImart flare/sunburst 能力完全一致
+    expect(getQualityLevelOptions('gpt-image-2.5-4k', APIMART)).toEqual(getQualityLevelOptions('gpt-image-2.5-flare', APIMART));
+    expect(getProviderAspectRatios('gpt-image-2.5-4k', APIMART)).toEqual(getProviderAspectRatios('gpt-image-2.5-flare', APIMART));
   });
 });
 

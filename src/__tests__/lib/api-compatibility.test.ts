@@ -51,6 +51,10 @@ describe('provider request contracts', () => {
   it('maps PearAPI GPT Image 2.5 4K to the shared GPT Image 2.5 pixel contract', () => {
     expect(resolveProviderPixelSize('16:9', 'max', '4K', 'gpt-image-2.5-4k', PROFILE_APIMART)).toBe('7282x4096');
     expect(resolveProviderPixelSize('16:9', 'high', '4K', 'gpt-image-2.5-4k', PROFILE_APIMART)).toBe('7282x4096');
+    // 与 APImart 完全相同的尺寸契约：各比例均支持 1K/2K/4K
+    expect(resolveProviderPixelSize('21:9', 'auto', '1K', 'gpt-image-2.5-4k', PROFILE_APIMART)).toBe('2389x1024');
+    expect(resolveProviderPixelSize('21:9', 'auto', '2K', 'gpt-image-2.5-4k', PROFILE_APIMART)).toBe('4779x2048');
+    expect(resolveProviderPixelSize('1:1', 'xhigh', '4K', 'gpt-image-2.5-4k', PROFILE_APIMART)).toBe('4096x4096');
   });
 
   it('hides the undocumented auto aspect ratio for 4SAPI while preserving it for APImart', () => {

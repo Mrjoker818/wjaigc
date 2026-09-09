@@ -287,7 +287,7 @@ export const MODEL_ASPECT_RATIOS: Record<string, string[]> = {
     // 参考：https://docs.apimart.ai/cn/api-reference/images/gpt-image-2.5/generation
     'gpt-image-2.5-flare': ['auto', '1:1', '3:2', '2:3', '4:3', '3:4', '5:4', '4:5', '16:9', '9:16', '2:1', '1:2', '3:1', '1:3', '21:9', '9:21'],
     'gpt-image-2.5-sunburst': ['auto', '1:1', '3:2', '2:3', '4:3', '3:4', '5:4', '4:5', '16:9', '9:16', '2:1', '1:2', '3:1', '1:3', '21:9', '9:21'],
-    'gpt-image-2.5-4k': ['1:1', '16:9', '9:16'],
+    'gpt-image-2.5-4k': ['auto', '1:1', '3:2', '2:3', '4:3', '3:4', '5:4', '4:5', '16:9', '9:16', '2:1', '1:2', '3:1', '1:3', '21:9', '9:21'],
     'gpt-image-2': ['auto', '1:1', '3:2', '2:3', '4:3', '3:4', '5:4', '4:5', '16:9', '9:16', '2:1', '1:2', '3:1', '1:3', '21:9', '9:21'],
     'gpt-image-2-official': ['auto', '1:1', '3:2', '2:3', '4:3', '3:4', '5:4', '4:5', '16:9', '9:16', '2:1', '1:2', '3:1', '1:3', '21:9', '9:21'],
     'gpt-image-1': ['auto', '1:1', '3:2', '2:3', '4:3', '3:4', '5:4', '4:5', '16:9', '9:16', '2:1', '1:2', '3:1', '1:3', '21:9', '9:21'],
@@ -419,7 +419,7 @@ export const MODEL_QUALITIES: Record<string, string[]> = {
     'gpt-image-2.5': ['auto', 'low', 'medium', 'high', 'xhigh', 'max'],
     'gpt-image-2.5-flare': ['auto', 'low', 'medium', 'high', 'xhigh', 'max'],
     'gpt-image-2.5-sunburst': ['auto', 'low', 'medium', 'high', 'xhigh', 'max'],
-    'gpt-image-2.5-4k': ['auto', 'low', 'medium', 'high'],
+    'gpt-image-2.5-4k': ['auto', 'low', 'medium', 'high', 'xhigh', 'max'],
     'gpt-image-2': ['auto', 'low', 'medium', 'high'],
     'gpt-image-2-official': ['auto', 'low', 'medium', 'high'],
     'gpt-image-1': ['auto', 'low', 'medium', 'high'],
@@ -888,8 +888,7 @@ export function inferModelParamCapability(modelId: string, providerHint = ''): {
 
 /** 获取模型支持的分辨率档位选项（智能兜底） */
 export function getResolutionTierOptions(modelId: string, providerHint = ''): string[] {
-    if (modelId.toLowerCase().includes('gpt-image-2.5-4k')) return ['4K'];
-
+    // PearAPI gpt-image-2.5-4k 与 APImart GPT Image 2.5 契约一致：支持 1K/2K/4K
     const cap = inferModelParamCapability(modelId, providerHint);
     if (cap.type === 'resolution' || cap.type === 'both') return cap.options.filter(isResolutionTier);
     return [];
