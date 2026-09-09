@@ -165,3 +165,59 @@ TEST_PGDATABASE_URL is required for this dedicated Task 6 integration test.
 ```
 
 因此真实 PostgreSQL 并发、恢复和积分账本断言仍为**阻塞/未验证**；该失败符合专用命令设计，不计入默认套件通过数，也不标记为跳过。
+
+## 第二轮复审整改（2026-09-09）
+
+第二轮复审剩余两项 Important。本轮以 `d4ae202a` 为父提交继续修复，不 amend、不 push。
+
+### 目录契约 RED/GREEN
+
+修复前实际执行两个旧目录契约：`2` 项失败、`26` 项通过。失败原因是旧测试把全部定义固定为 28 项，且把关闭状态的可选 export Skill 与公开目录混为一体。
+
+修复后：
+
+- 显式锁定原有 28 项 ID、顺序和身份不变；
+- 单独验证 `preset-multi-platform-export` 关闭时不出 Canvas/Workflow 公开目录；
+- 开启后仅追加到 Canvas/Workflow；
+- Simple Chat 保留执行授权，但始终不显示目录入口；
+- 两个旧目录契约共 `30/30` 通过；
+- Task6、客户端/Workflow、目录、Task1/5、API/Event 扩展回归共 `491/491` 通过。
+
+### Protected baseline 精确授权
+
+仓库授权格式为纯“精确路径字符串数组”，不支持在单项中附加原因、计划或审查提交。本报告承担审计说明；门禁脚本、测试逻辑和匹配规则均未修改，也没有新增目录级通配。
+
+授权理由统一为：多平台批量导出 Task1-6 计划实际生产路径或专用测试配置，已经过对应 Task 实现与复审；本轮仅登记门禁列出的缺口。对应最近审查提交如下：
+
+- 预设/API/运行设置：`cf13bcf6`、`cc45e1c8`、`865adafb`；
+- 规划/schema/naming/types：`4ca25b04`、`71c02a4e`；
+- 来源读取与图像转换：`b5e5775f`、`e3f9aa26`、`f53429dc`；
+- 产物持久化、跨资产父链和恢复：`8180a77a`、`5fa138f1`、`ae5df194`；
+- 清理 outbox、租约、S3/serve-upload/instrumentation：`a3ea794a`、`6ef6d6a4`；
+- Task6 executor、manifest、preset、PostgreSQL 配置及复审修正：`50f337bf`、`d4ae202a`。
+
+精确新增路径为三项 MPE migration、两项 preset API、serve-upload 路由、instrumentation、四项 asset binary/cleanup 路径、image-tools file、十项 `src/lib/multi-platform-export/*` 文件、runtime-settings、s3-storage、Skill preset、专用 Vitest 配置及本报告。未登记 `.superpowers/sdd/mpe-progress.md` 或六个既有脏 SDD 文件。
+
+由于保护门禁会扫描工作区，执行时临时 stash 七个既有脏 SDD 文件，并仅通过 CLI 精确豁免因换行过滤仍显示为脏的 `mpe-progress.md`；执行后立即恢复，恢复前后 diff SHA-256 均为：
+
+```text
+D82B76EAD4E505F215D13F7621544478E26B484D3F3C14368E1D08B0280673BC
+```
+
+保护门禁结果：38/38 保护身份存在，0 未授权源码漂移，0 warning，退出码 0。最终提交后还需在干净临时工作树中以原始命令复验，不依赖上述 CLI 豁免。
+
+### 全量测试事实
+
+`pnpm test` 已完整运行，结果为：
+
+```text
+690 个文件通过，34 个环境项跳过，2 个文件失败
+5865 个测试通过，184 个 PostgreSQL 环境项跳过，8 个测试失败
+```
+
+8 个失败全部集中在既有 Canvas Chat 模型角色契约：
+
+- `chat-panel-skill-runtime.test.tsx`：旧源码字符串断言仍要求 `roles.add('orchestrator')`；
+- `chat-panel-skill-workspace.test.ts`：其 VM 测试沙箱没有注入当前源码使用的 `requiredSkillModelRoles` / `skillStepModelRole`。
+
+这些文件不属于 Task6 修改集，Task6 定向回归为 0 失败；本轮不掩盖失败，也不越界修改其生产路径或测试夹具。

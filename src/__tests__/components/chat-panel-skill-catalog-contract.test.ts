@@ -15,7 +15,9 @@ import {
 import {
   CANVAS_WORKFLOW_SKILLS,
   SIMPLE_CHAT_PRESET_SKILLS,
+  listSkillsForSurface,
 } from '@/lib/skill-runtime/catalog';
+import { MULTI_PLATFORM_EXPORT_SKILL } from '@/lib/skill-runtime/multi-platform-export-preset';
 import type { SkillDefinition } from '@/lib/skill-runtime/types';
 
 const chatPanelSource = readFileSync(
@@ -39,6 +41,19 @@ const contentCommerceSkillIds = [
   'preset-video-platform-thumbnails',
   'preset-pinterest-pins',
   'preset-batch-sku-assets',
+] as const;
+
+const originalCanvasWorkflowSkillIds = [
+  'preset-ecommerce-listing', 'preset-logo-brand', 'preset-storyboard',
+  'preset-marketing-brochure', 'preset-social-media', 'preset-ip-character',
+  'preset-product-packaging', 'preset-concept-art', 'preset-interior-design',
+  'preset-poster-design', 'preset-ppt-design', 'preset-magazine-cover',
+  'preset-apparel-fashion', 'preset-business-card', 'preset-book-cover',
+  'preset-sticker-emoji', 'preset-comic-manga', 'preset-mockup-showcase',
+  'preset-illustration', 'preset-ui-design', 'preset-food-photography',
+  'preset-ad-ab-variants', 'preset-retargeting-creative', 'preset-omnichannel-campaign',
+  ...contentCommerceSkillIds,
+  'preset-platform-compliance-audit',
 ] as const;
 
 function catalogSkill(id: string, allowedSurfaces: SkillDefinition['allowedSurfaces']): SkillDefinition {
@@ -196,12 +211,35 @@ describe('canvas chat Skill catalog contract', () => {
     const canvasVersions = new Map(CANVAS_WORKFLOW_SKILLS.map(skill => [skill.id, skill.version]));
     const simpleChatIds = new Set(SIMPLE_CHAT_PRESET_SKILLS.map(skill => skill.id));
 
-    expect(CANVAS_WORKFLOW_SKILLS).toHaveLength(28);
+    expect(CANVAS_WORKFLOW_SKILLS.slice(0, 28).map(skill => skill.id))
+      .toEqual(originalCanvasWorkflowSkillIds);
     expect(SIMPLE_CHAT_PRESET_SKILLS).toHaveLength(16);
     for (const id of contentCommerceSkillIds) {
       expect(canvasVersions.get(id)).toBe(1);
       expect(simpleChatIds.has(id)).toBe(false);
       expect(chatPanelSource).not.toContain(id);
+    }
+  });
+
+  it('keeps optional multi-platform export out of the default catalog and scopes it by catalog surface', () => {
+    const previous = MULTI_PLATFORM_EXPORT_SKILL.enabled;
+    try {
+      MULTI_PLATFORM_EXPORT_SKILL.enabled = false;
+      expect(listSkillsForSurface('canvas').map(skill => skill.id))
+        .toEqual(originalCanvasWorkflowSkillIds);
+      MULTI_PLATFORM_EXPORT_SKILL.enabled = true;
+      expect(listSkillsForSurface('canvas').map(skill => skill.id)).toEqual([
+        ...originalCanvasWorkflowSkillIds, 'preset-multi-platform-export',
+      ]);
+      expect(listSkillsForSurface('workflow').map(skill => skill.id)).toEqual([
+        ...originalCanvasWorkflowSkillIds, 'preset-multi-platform-export',
+      ]);
+      expect(listSkillsForSurface('simple-chat').map(skill => skill.id))
+        .not.toContain('preset-multi-platform-export');
+      expect(MULTI_PLATFORM_EXPORT_SKILL.allowedSurfaces).toContain('simple-chat');
+      expect(MULTI_PLATFORM_EXPORT_SKILL.catalogSurfaces).toEqual(['canvas', 'workflow']);
+    } finally {
+      MULTI_PLATFORM_EXPORT_SKILL.enabled = previous;
     }
   });
 
