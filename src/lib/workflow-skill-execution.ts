@@ -328,6 +328,10 @@ export async function resumeWorkflowSkillRun(input: ResumeWorkflowSkillRunInput)
   }, input.requestTimeoutMs ?? 30_000, 'Skill Run 恢复请求超时', input.signal);
   const payload = await resumed.json().catch(() => null);
   if (!resumed.ok) throw new Error(errorMessage(payload, 'Skill Run 恢复失败'));
-  await input.onRunId?.(input.runId);
-  return waitForWorkflowSkillRun({ ...input, runId: input.runId });
+  const responseRunId = payload && typeof payload === 'object'
+    && typeof (payload as { runId?: unknown }).runId === 'string'
+    ? (payload as { runId: string }).runId
+    : input.runId;
+  await input.onRunId?.(responseRunId);
+  return waitForWorkflowSkillRun({ ...input, runId: responseRunId });
 }

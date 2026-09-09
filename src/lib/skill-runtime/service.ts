@@ -55,6 +55,7 @@ import {
   type MultiPlatformExportRetryLineage,
 } from '@/lib/multi-platform-export/manifest';
 import { listManagedUsers } from '@/lib/server-auth';
+import { createHash } from 'node:crypto';
 
 export class SkillRunRequestError extends Error {
   readonly code = 'SKILL_RUN_REQUEST_INVALID';
@@ -137,6 +138,22 @@ export interface SkillPartialRetryResult {
   runId: string;
   reused: boolean;
   newAttempt: true;
+  rootRunId: string;
+  attempt: number;
+}
+
+export function deriveMultiPlatformExportRetryIdempotencyKey(input: {
+  rootRunId: string;
+  sourceRunId: string;
+  attempt: number;
+}): string {
+  const digest = createHash('sha256').update(JSON.stringify({
+    kind: 'multi-platform-export-retry-v1',
+    rootRunId: input.rootRunId,
+    sourceRunId: input.sourceRunId,
+    attempt: input.attempt,
+  })).digest('hex');
+  return `mpe-retry:${digest}`;
 }
 
 export type SkillStepAdapter = (input: ExecuteSkillStepInput) => Promise<import('./types').SkillStepResult>;
@@ -635,7 +652,11 @@ export function createSkillRuntimeService(
           targetPresetIds,
           lineage,
         });
-        const retryIdempotencyKey = `${run.task.idempotencyKey || input.runId}:partial-retry`;
+        const retryIdempotencyKey = deriveMultiPlatformExportRetryIdempotencyKey({
+          rootRunId: lineage.rootRunId,
+          sourceRunId: input.runId,
+          attempt: lineage.attempt,
+        });
         const existingAttempt = await dependencies.getTaskByIdempotencyKey?.(
           input.actorUserId,
           retryIdempotencyKey,
@@ -661,6 +682,7 @@ export function createSkillRuntimeService(
           return {
             accepted: true, startedStepIds: [], scheduledStepIds: ['export'],
             runId: existingAttempt.id, reused: true, newAttempt: true,
+            rootRunId: lineage.rootRunId, attempt: lineage.attempt,
           };
         }
         const actor = await dependencies.getActor?.(input.actorUserId);
@@ -689,11 +711,13 @@ export function createSkillRuntimeService(
         }, undefined, frozenSkill);
         return {
           accepted: true,
-          startedStepIds: createdRun.reused ? [] : ['export'],
+          startedStepIds: [],
           scheduledStepIds: ['export'],
           runId: createdRun.runId,
           reused: createdRun.reused,
           newAttempt: true,
+          rootRunId: lineage.rootRunId,
+          attempt: lineage.attempt,
         };
       }
       const executionSteps = executionStepsForRun(run.events, invocation);

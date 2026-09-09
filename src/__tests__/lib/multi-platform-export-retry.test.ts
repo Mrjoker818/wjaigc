@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { createSkillRuntimeService, parseSkillRunRequest } from '@/lib/skill-runtime/service';
+import {
+  createSkillRuntimeService,
+  deriveMultiPlatformExportRetryIdempotencyKey,
+  parseSkillRunRequest,
+} from '@/lib/skill-runtime/service';
 import type { AgentEvent, AgentRunProjection } from '@/lib/agent-runtime/types';
 import type { CloudTask } from '@/lib/cloud-task-storage';
 import { agentRunRequestDigest } from '@/lib/agent-runtime/service';
@@ -65,6 +69,19 @@ function oldRun() {
 }
 
 describe('multi-platform export terminal retry', () => {
+  it('uses a fixed-length digest key across consecutive retry attempts', () => {
+    const second = deriveMultiPlatformExportRetryIdempotencyKey({
+      rootRunId: 'r'.repeat(256), sourceRunId: 's'.repeat(256), attempt: 2,
+    });
+    const third = deriveMultiPlatformExportRetryIdempotencyKey({
+      rootRunId: 'r'.repeat(256), sourceRunId: 't'.repeat(256), attempt: 3,
+    });
+    expect(second).toMatch(/^mpe-retry:[a-f0-9]{64}$/u);
+    expect(third).toMatch(/^mpe-retry:[a-f0-9]{64}$/u);
+    expect(second.length).toBeLessThanOrEqual(256);
+    expect(third.length).toBeLessThanOrEqual(256);
+    expect(third).not.toBe(second);
+  });
   it('binds frozen retry lineage into the canonical Agent request digest', () => {
     const request = {
       projectId: 'project-1', workspace: 'canvas', workspaceId: 'canvas-1', mode: 'agent',
@@ -122,7 +139,9 @@ describe('multi-platform export terminal retry', () => {
     });
 
     await expect(service.retry({ actorUserId: 'user-1', runId: 'run-old', stepId: 'export' }))
-      .resolves.toMatchObject({ runId: 'run-retry', reused: false, newAttempt: true });
+      .resolves.toMatchObject({
+        runId: 'run-retry', reused: false, newAttempt: true, rootRunId: 'run-old', attempt: 2,
+      });
     await expect(service.retry({ actorUserId: 'user-1', runId: 'run-old', stepId: 'export' }))
       .resolves.toMatchObject({ runId: 'run-retry', reused: true, newAttempt: true });
 
@@ -134,7 +153,7 @@ describe('multi-platform export terminal retry', () => {
       targetPresetIds: ['instagram-post-v1', 'instagram-story-v1'],
     }));
     const request = createAuthorizedSkillRun.mock.calls[0]![0].request;
-    expect(request.idempotencyKey).toBe('request-old:partial-retry');
+    expect(request.idempotencyKey).toMatch(/^mpe-retry:[a-f0-9]{64}$/u);
     expect(request.retryLineage).toEqual({
       kind: 'multi-platform-export-retry-v1', rootRunId: 'run-old', retryOfRunId: 'run-old', attempt: 2,
       failedItems: failedResult.failures,

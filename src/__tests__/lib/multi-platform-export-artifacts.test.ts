@@ -145,6 +145,8 @@ describe('multi-platform export artifacts', () => {
       reusedImageAssetVersionIds: ['version-reused'], failedItems: [{
         sourceAssetVersionId: 'source-v1', presetId: 'story', presetVersion: 1,
         outputFilename: 'story.png', code: 'EXPORT_IMAGE_TRANSFORM_FAILED', retryable: true,
+      }, {
+        sourceAssetVersionId: 'source-v1', code: 'EXPORT_ZIP_FAILED', retryable: true,
       }],
     };
     await expect(validateMultiPlatformExportRetryLineage({

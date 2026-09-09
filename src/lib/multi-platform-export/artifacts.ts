@@ -224,7 +224,8 @@ export async function validateMultiPlatformExportRetryLineage(input: {
     digests.add(metadata.requestDigest);
   }
   if (digests.size > 1) throw new Error('EXPORT_RETRY_LINEAGE_INVALID');
-  const archiveOnlyFailure = input.lineage.failedItems.some(failure => failure.presetId === undefined);
+  const archiveOnlyFailure = failedKeys.size === 0
+    && input.lineage.failedItems.some(failure => failure.presetId === undefined);
   if (archiveOnlyFailure ? versionKeys.size !== expectedCount : versionKeys.size + failedKeys.size !== expectedCount) {
     throw new Error('EXPORT_RETRY_LINEAGE_INVALID');
   }

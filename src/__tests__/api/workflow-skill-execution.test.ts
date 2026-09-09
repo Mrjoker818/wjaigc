@@ -494,6 +494,36 @@ describe('workflow Skill Run execution', () => {
     expect(fetcher).toHaveBeenCalledTimes(2);
   });
 
+  it('follows the new run id returned by a terminal partial retry', async () => {
+    const onRunId = vi.fn();
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        accepted: true, runId: 'run-new', rootRunId: 'run-root', attempt: 2,
+        newAttempt: true, reused: false, startedStepIds: ['export'], scheduledStepIds: ['export'],
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        run: { runId: 'run-new', status: 'completed', assetVersionIds: [], outputs: [] },
+      }), { status: 200 }));
+
+    await expect(resumeWorkflowSkillRun({
+      submitUrl: 'http://localhost:5000/api/skill-runs',
+      runId: 'run-old',
+      stepId: 'export',
+      headers: { 'Content-Type': 'application/json' },
+      fetcher,
+      pollIntervalMs: 0,
+      onRunId,
+      resolveAssetVersion: async () => null,
+    })).resolves.toMatchObject({ runId: 'run-new', status: 'completed' });
+
+    expect(onRunId).toHaveBeenCalledWith('run-new');
+    expect(fetcher).toHaveBeenNthCalledWith(
+      2,
+      'http://localhost:5000/api/skill-runs/run-new',
+      expect.objectContaining({ method: 'GET' }),
+    );
+  });
+
   it('resumes a frozen paused run before resolving the mutable Skill definition', () => {
     const retryBranch = routeSource.slice(
       routeSource.indexOf("if (action === 'retry')"),

@@ -469,6 +469,30 @@ describe('useSkillRun', () => {
     });
   });
 
+  it('switches event observation to the authoritative new run returned by a partial retry', async () => {
+    agentEvents.useAgentRunEvents.mockImplementation((eventRunId: string | undefined) => ({
+      projection: eventRunId ? projection({ runId: eventRunId }) : undefined,
+      stale: false,
+      cancel: vi.fn(), pause: vi.fn(), resume: vi.fn(),
+    }));
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ runId: 'run-old', reused: false }))
+      .mockResolvedValueOnce(jsonResponse({
+        accepted: true, runId: 'run-new', rootRunId: 'run-old', attempt: 2,
+        newAttempt: true, reused: false, startedStepIds: ['export'], scheduledStepIds: ['export'],
+      }));
+    const { result } = renderHook(() => useSkillRun({ fetcher: fetcher as typeof fetch }));
+
+    await act(async () => { await result.current.startRun(request); });
+    await act(async () => { await expect(result.current.retry('export')).resolves.toBe(true); });
+
+    expect(result.current.runId).toBe('run-new');
+    expect(result.current.busy).toBe(false);
+    await waitFor(() => {
+      expect(agentEvents.useAgentRunEvents).toHaveBeenLastCalledWith('run-new', expect.any(Number), reduceSkillEvents);
+    });
+  });
+
   it('isolates a delayed old start response after a newer run starts', async () => {
     let resolveOld!: (response: Response) => void;
     const fetcher = vi.fn()

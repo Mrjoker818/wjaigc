@@ -7,6 +7,7 @@ import {
   extractSkillIds,
   extractSkillIdsForSurface,
 } from '../../../scripts/stage-4-inventory.mjs';
+import { createMultiPlatformExportSkill } from '@/lib/skill-runtime/multi-platform-export-preset';
 
 function intersection(left: string[], right: string[]): string[] {
   const rightIds = new Set(right);
@@ -58,7 +59,7 @@ describe('scoped Skill runtime inventory', () => {
     ]);
   });
 
-  it('keeps Canvas and Workflow aligned while Simple Chat remains isolated', async () => {
+  it('keeps the original 28-item Canvas and Workflow inventory stable', async () => {
     const inventory = await collectStage4Inventory(process.cwd());
     const legacyCanvasIds = [
       'preset-ecommerce-listing', 'preset-logo-brand', 'preset-storyboard',
@@ -80,6 +81,15 @@ describe('scoped Skill runtime inventory', () => {
       inventory.skillCatalogs.simpleChat,
     )).toEqual([]);
     expect(inventory.nodeTypes).toContain('ai-skill');
+  });
+
+  it('keeps the optional batch export executable on Simple Chat but hidden from its catalog', () => {
+    const disabled = createMultiPlatformExportSkill(false);
+    const enabled = createMultiPlatformExportSkill(true);
+    expect(disabled.enabled).toBe(false);
+    expect(enabled.enabled).toBe(true);
+    expect(enabled.allowedSurfaces).toEqual(['canvas', 'workflow', 'simple-chat']);
+    expect(enabled.catalogSurfaces).toEqual(['canvas', 'workflow']);
   });
 
   it('derives Workflow inventory from the declared Skill surfaces', () => {

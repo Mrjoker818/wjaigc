@@ -394,7 +394,7 @@ export function useSkillRun({ fetcher = fetch }: UseSkillRunOptions = {}): UseSk
       setError(undefined);
     }
     try {
-      const result = await request<{ accepted?: boolean }>(
+      const result = await request<{ accepted?: boolean; runId?: string; newAttempt?: boolean }>(
         `/api/skill-runs/${encodeURIComponent(expectedRunId)}/retry`,
         {
           method: 'POST',
@@ -406,7 +406,18 @@ export function useSkillRun({ fetcher = fetch }: UseSkillRunOptions = {}): UseSk
       const accepted = result?.accepted === true
         && activeRun.current?.runId === expectedRunId
         && activeRun.current.generation === expectedGeneration;
-      if (accepted) refreshEventProjection(expectedRunId, expectedGeneration);
+      if (accepted && result?.newAttempt === true && result.runId && result.runId !== expectedRunId) {
+        historyController.current?.abort();
+        historyGeneration.current += 1;
+        const nextGeneration = ++startGeneration.current;
+        activeRun.current = { runId: result.runId, generation: nextGeneration };
+        setRunId(result.runId);
+        setEventRunId(result.runId);
+        setRetryableStepId(undefined);
+        setRetryabilityError(undefined);
+      } else if (accepted) {
+        refreshEventProjection(expectedRunId, expectedGeneration);
+      }
       return accepted;
     } catch (requestError) {
       if (
@@ -419,12 +430,7 @@ export function useSkillRun({ fetcher = fetch }: UseSkillRunOptions = {}): UseSk
       }
       return false;
     } finally {
-      if (
-        mounted.current
-        && activeRun.current?.runId === expectedRunId
-        && activeRun.current.generation === expectedGeneration
-        && busyGeneration.current === operationGeneration
-      ) setBusy(false);
+      if (mounted.current && busyGeneration.current === operationGeneration) setBusy(false);
     }
   }, [refreshEventProjection, request, runId]);
 

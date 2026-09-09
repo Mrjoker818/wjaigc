@@ -270,6 +270,42 @@ describe('Skill run API', () => {
     });
   });
 
+  it('dispatches a terminal partial retry exactly once and returns the authoritative new lineage', async () => {
+    mocks.retrySkillStep.mockResolvedValue({
+      accepted: true,
+      startedStepIds: [],
+      scheduledStepIds: ['export'],
+      runId: 'run-export-attempt-2',
+      reused: false,
+      newAttempt: true,
+      rootRunId: 'run-export-root',
+      attempt: 2,
+    });
+    mocks.dispatchSkillRunExecution.mockResolvedValue({ started: true, completion: Promise.resolve() });
+    const route = await import('@/app/api/skill-runs/[runId]/retry/route');
+    const response = await route.POST(new NextRequest('http://localhost/api/skill-runs/run-export/retry', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ stepId: 'export' }),
+    }), { params: Promise.resolve({ runId: 'run-export' }) });
+
+    expect(mocks.dispatchSkillRunExecution).toHaveBeenCalledTimes(1);
+    expect(mocks.dispatchSkillRunExecution).toHaveBeenCalledWith({
+      actorUserId: user.id,
+      runId: 'run-export-attempt-2',
+      recoveryOnly: false,
+    });
+    await expect(response.json()).resolves.toEqual({
+      accepted: true,
+      startedStepIds: ['export'],
+      scheduledStepIds: ['export'],
+      runId: 'run-export-attempt-2',
+      reused: false,
+      newAttempt: true,
+      rootRunId: 'run-export-root',
+      attempt: 2,
+    });
+  });
+
   it('rejects client-forged partial retry lineage fields', async () => {
     const route = await import('@/app/api/skill-runs/[runId]/retry/route');
     const response = await route.POST(new NextRequest('http://localhost/api/skill-runs/run-export/retry', {

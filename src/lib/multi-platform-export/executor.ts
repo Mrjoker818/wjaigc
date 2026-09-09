@@ -263,7 +263,7 @@ export async function executeMultiPlatformExportStep(
     });
   } catch (error) {
     if (step.signal.aborted) throw step.signal.reason;
-    throw new SkillPartialSuccessError(partialResult(step.runId, orderedImages, [{
+    throw new SkillPartialSuccessError(partialResult(step.runId, orderedImages, [...failures, {
       sourceAssetVersionId: input.sourceAssetVersionIds[0],
       code: errorCode(error, 'EXPORT_ZIP_FAILED'),
       retryable: true,

@@ -244,6 +244,9 @@ describe('multi-platform export execution', () => {
 
   it('keeps image versions available when archive persistence fails', async () => {
     const deps = dependencies(2);
+    vi.mocked(deps.transform).mockRejectedValueOnce(Object.assign(new Error('bad image'), {
+      code: 'EXPORT_IMAGE_TRANSFORM_FAILED',
+    }));
     vi.mocked(deps.persistArtifacts).mockRejectedValue(Object.assign(new Error('zip failed'), {
       code: 'EXPORT_ZIP_FAILED',
     }));
@@ -251,14 +254,51 @@ describe('multi-platform export execution', () => {
     await expect(executeMultiPlatformExportStep(stepInput(), deps)).rejects.toSatisfy(error => {
       expect(error).toBeInstanceOf(SkillPartialSuccessError);
       expect((error as SkillPartialSuccessError).result).toMatchObject({
-        assetVersionIds: expect.arrayContaining(['image-output-0.png', 'image-output-1.png']),
+        assetVersionIds: expect.arrayContaining(['image-output-1.png']),
         structured: { value: {
           outcome: 'partial_success',
-          imageAssetVersionIds: expect.arrayContaining(['image-output-0.png', 'image-output-1.png']),
-          failures: [expect.objectContaining({ code: 'EXPORT_ZIP_FAILED' })],
+          imageAssetVersionIds: expect.arrayContaining(['image-output-1.png']),
+          failures: expect.arrayContaining([
+            expect.objectContaining({ code: 'EXPORT_IMAGE_TRANSFORM_FAILED', outputFilename: 'output-0.png' }),
+            expect.objectContaining({ code: 'EXPORT_ZIP_FAILED' }),
+          ]),
         } },
       });
+      const structured = (error as SkillPartialSuccessError).result.structured?.value as {
+        failures?: unknown[];
+      };
+      expect(structured.failures).toHaveLength(2);
       return true;
     });
+  });
+
+  it('retries image failures but only repackages an archive failure', async () => {
+    const deps = dependencies(2);
+    const reused = version('reused-v1', 'version-aaaaaaaaaaaaaaaa', 'output-1.png');
+    reused.metadata = { ...reused.metadata, presetId: 'square-1', usage: 'post-1' };
+    deps.loadPersistedImages = vi.fn(async () => [{
+      version: reused, filename: 'output-1.png', bytes: Buffer.from('img'),
+      sourceAssetVersionId: 'version-aaaaaaaaaaaaaaaa', platform: 'test', usage: 'post-1',
+      width: 10, height: 10, mimeType: 'image/png' as const, sha256: 'a'.repeat(64),
+      reusedFromRunId: 'run-old',
+    }]);
+
+    await executeMultiPlatformExportStep(stepInput(), {
+      ...deps,
+      retryLineage: {
+        kind: 'multi-platform-export-retry-v1', rootRunId: 'run-old', retryOfRunId: 'run-old', attempt: 2,
+        failedItems: [{
+          sourceAssetVersionId: 'version-aaaaaaaaaaaaaaaa', presetId: 'square-0', presetVersion: 1,
+          outputFilename: 'output-0.png', code: 'EXPORT_IMAGE_TRANSFORM_FAILED', retryable: true,
+        }, {
+          sourceAssetVersionId: 'version-aaaaaaaaaaaaaaaa', code: 'EXPORT_ZIP_FAILED', retryable: true,
+        }],
+        reusedImageAssetVersionIds: ['reused-v1'],
+      },
+    });
+
+    expect(deps.transform).toHaveBeenCalledTimes(1);
+    expect(deps.persistImage).toHaveBeenCalledWith(expect.objectContaining({ outputFilename: 'output-0.png' }));
+    expect(deps.persistArtifacts).toHaveBeenCalledOnce();
   });
 });

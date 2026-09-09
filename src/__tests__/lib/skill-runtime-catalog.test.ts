@@ -13,6 +13,7 @@ import {
   SkillSurfaceForbiddenError,
 } from '@/lib/skill-runtime/catalog';
 import { CANVAS_PRESET_CHAT_SKILLS } from '@/lib/skill-runtime/canvas-presets';
+import { MULTI_PLATFORM_EXPORT_SKILL } from '@/lib/skill-runtime/multi-platform-export-preset';
 import type { SkillDefinition } from '@/lib/skill-runtime/types';
 import presetBaseline from '@/__tests__/fixtures/skill-runtime-presets.baseline.json';
 
@@ -72,29 +73,37 @@ describe('skill runtime catalog', () => {
     }
   });
 
-  it('保留原 27 项定义和顺序，仅在末尾追加平台合规 Skill', () => {
+  it('保留原 28 项身份，并按功能开关在末尾公开可选批量导出 Skill', () => {
+    const coreIds = [...preComplianceCanvasWorkflowIds, 'preset-platform-compliance-audit'];
     expect(CANVAS_PRESET_SKILLS.map(skill => skill.id)).toEqual(canvasIds);
     expect(CANVAS_PRESET_SKILLS).toHaveLength(21);
     expect(CANVAS_WORKFLOW_SKILLS).toHaveLength(29);
     expect(CANVAS_WORKFLOW_SKILLS.slice(0, CANVAS_PRESET_SKILLS.length)).toEqual(
       CANVAS_PRESET_SKILLS,
     );
-    const enabledCatalogIds = CANVAS_WORKFLOW_SKILLS.filter(skill => skill.enabled).map(skill => skill.id);
-    expect(listSkillsForSurface('canvas').map(skill => skill.id)).toEqual(enabledCatalogIds);
-    expect(listSkillsForSurface('workflow').map(skill => skill.id)).toEqual(enabledCatalogIds);
     expect(CANVAS_PRESET_SKILLS.every(skill =>
       skill.allowedSurfaces.join(',') === 'canvas,workflow')).toBe(true);
-    expect(CANVAS_WORKFLOW_SKILLS.slice(0, 27).map(skill => skill.id))
-      .toEqual(preComplianceCanvasWorkflowIds);
-    expect(CANVAS_WORKFLOW_SKILLS.at(-1)?.id).toBe('preset-multi-platform-export');
+    expect(CANVAS_WORKFLOW_SKILLS.slice(0, 28).map(skill => skill.id)).toEqual(coreIds);
     expect(CANVAS_WORKFLOW_SKILLS[27]).toBe(LOVART_PLATFORM_COMPLIANCE_SKILLS[0]);
-    expect(CANVAS_WORKFLOW_SKILLS.map(skill => skill.id).slice(-5)).toEqual([
-      ...secondBatchIds,
-      'preset-platform-compliance-audit',
-      'preset-multi-platform-export',
-    ]);
-    expect(listSkillsForSurface('canvas')).toHaveLength(28);
-    expect(listSkillsForSurface('workflow')).toHaveLength(28);
+    expect(CANVAS_WORKFLOW_SKILLS[28]).toBe(MULTI_PLATFORM_EXPORT_SKILL);
+
+    const previous = MULTI_PLATFORM_EXPORT_SKILL.enabled;
+    try {
+      MULTI_PLATFORM_EXPORT_SKILL.enabled = false;
+      expect(listSkillsForSurface('canvas').map(skill => skill.id)).toEqual(coreIds);
+      expect(listSkillsForSurface('workflow').map(skill => skill.id)).toEqual(coreIds);
+      MULTI_PLATFORM_EXPORT_SKILL.enabled = true;
+      expect(listSkillsForSurface('canvas').map(skill => skill.id)).toEqual([
+        ...coreIds, 'preset-multi-platform-export',
+      ]);
+      expect(listSkillsForSurface('workflow').map(skill => skill.id)).toEqual([
+        ...coreIds, 'preset-multi-platform-export',
+      ]);
+      expect(listSkillsForSurface('simple-chat').map(skill => skill.id))
+        .not.toContain('preset-multi-platform-export');
+    } finally {
+      MULTI_PLATFORM_EXPORT_SKILL.enabled = previous;
+    }
   });
 
   it('保留 16 个独立对话 Skill 且不泄漏画布目录', () => {

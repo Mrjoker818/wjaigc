@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { requireApiAuthOrReject } from '@/lib/api-auth';
 import {
+  dispatchSkillRunExecution,
   retrySkillStep,
   SkillRunRequestError,
   skillRuntimeHttpError,
@@ -22,11 +23,31 @@ export async function POST(request: NextRequest, context: SkillRunRetryRouteCont
       throw new SkillRunRequestError('stepId is invalid');
     }
     const { runId } = await context.params;
-    return NextResponse.json(await retrySkillStep({
+    const result = await retrySkillStep({
       actorUserId: auth.user.id,
       runId,
       stepId: body.stepId.trim(),
-    }));
+    });
+    if ('newAttempt' in result && result.newAttempt) {
+      const execution = await dispatchSkillRunExecution({
+        actorUserId: auth.user.id,
+        runId: result.runId,
+        recoveryOnly: result.reused,
+      });
+      if (execution.completion) {
+        void execution.completion.catch(error => {
+          console.error('[skill-runtime] controlled retry dispatch completion failed', {
+            runId: result.runId,
+            code: error instanceof Error ? error.name : 'UNKNOWN',
+          });
+        });
+      }
+      return NextResponse.json({
+        ...result,
+        startedStepIds: execution.started ? result.scheduledStepIds.slice(0, 1) : [],
+      });
+    }
+    return NextResponse.json(result);
   } catch (error) {
     const response = skillRuntimeHttpError(error);
     return NextResponse.json(response.body, { status: response.status });

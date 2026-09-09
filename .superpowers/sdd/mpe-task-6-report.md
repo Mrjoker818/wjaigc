@@ -121,3 +121,47 @@ TEST_PGDATABASE_URL is required. Do not point it at PGDATABASE_URL or a producti
 - `.superpowers/sdd/task-3-brief.md`
 
 本报告受 SDD 目录忽略规则覆盖，将仅对本文件使用强制暂存。提交完成后不执行 push。
+
+## 复审整改（2026-09-09）
+
+基于 `50f337bf` 的复审结论为 `NEEDS_FIXES`。本轮继续采用 TDD，先补充失败测试，再实施最小范围修复。
+
+### RED 证据
+
+首轮复审测试结果：`6` 项失败、`102` 项通过。失败分别证明：
+
+1. partial retry route 创建新 Run 后没有调用执行调度；
+2. Workflow 客户端仍轮询旧 Run；
+3. React hook 没有切换到服务端返回的新 Run；
+4. ZIP 失败覆盖了已有图片失败；
+5. retry 幂等键不是固定长度派生；
+6. retry 返回缺少权威 root/attempt lineage。
+
+### GREEN 实现
+
+- retry route 仅在取得权威新 Run 后调用 `dispatchSkillRunExecution`，并以 dispatch fence 的真实结果填充 `startedStepIds`；重复 retry 复用同一新尝试且不重复执行。
+- route 返回新 `runId`、`rootRunId` 与 `attempt`；普通 paused retry 仍保持原 Run 语义。
+- React hook 在 terminal partial retry 后切换 active Run，并重建事件/轮询观察；Workflow 客户端同样跟随响应中的新 Run ID。
+- partial retry 幂等键改为基于 `rootRunId/sourceRunId/attempt` 的 SHA-256 固定长度派生，连续重试不会累积增长。
+- ZIP 打包失败追加到既有 `failures`；混合图片失败与 ZIP 失败时，仅重试图片缺失项并重新打包，manifest 保留完整失败历史。
+- 两个目录契约测试固定验证原有 28 项身份，并通过功能开关与 catalog surfaces 单独验证可选批量导出 Skill，避免脆弱的“全部启用固定数组”断言。
+- PostgreSQL 专项测试改为通过生产 Skill Service 创建真实本地 Run，覆盖并发幂等、dispatch fence、缺失项恢复、partial retry 幂等、真实 AssetVersion 与零积分账本。
+
+### 复审回归证据
+
+```text
+Task6 + client/workflow + 目录 + Task1/5 + API/event：
+28 个测试文件，461 个测试通过，0 失败
+
+pnpm ts-check：退出码 0
+目标 ESLint：退出码 0
+```
+
+PostgreSQL 专用命令已在未设置隔离库的当前环境实际执行：
+
+```text
+pnpm test:mpe:postgres：退出码 1
+TEST_PGDATABASE_URL is required for this dedicated Task 6 integration test.
+```
+
+因此真实 PostgreSQL 并发、恢复和积分账本断言仍为**阻塞/未验证**；该失败符合专用命令设计，不计入默认套件通过数，也不标记为跳过。
