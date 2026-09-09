@@ -2,6 +2,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   awsSend: vi.fn(),
+  middlewareAdd: vi.fn(),
+  s3ClientConfig: vi.fn(),
+  recordAssetCleanupFailure: vi.fn(),
   chunkUploadFile: vi.fn(),
   deleteFile: vi.fn(),
   generatePresignedUrl: vi.fn(),
@@ -10,7 +13,11 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock('@aws-sdk/client-s3', () => ({
-  S3Client: class { send = mocks.awsSend; },
+  S3Client: class {
+    send = mocks.awsSend;
+    middlewareStack = { add: mocks.middlewareAdd };
+    constructor(config: unknown) { mocks.s3ClientConfig(config); }
+  },
   PutObjectCommand: class { constructor(readonly input: unknown) {} },
   DeleteObjectCommand: class { constructor(readonly input: unknown) {} },
   GetObjectCommand: class { constructor(readonly input: unknown) {} },
@@ -25,6 +32,9 @@ vi.mock('coze-coding-dev-sdk', () => ({
     uploadFile = mocks.uploadFile;
   },
 }));
+vi.mock('@/lib/asset-core/cleanup-outbox', () => ({
+  recordAssetCleanupFailure: mocks.recordAssetCleanupFailure,
+}));
 
 describe('readImageFromS3Bounded cancellation', () => {
   const originalEnv = { ...process.env };
@@ -38,6 +48,14 @@ describe('readImageFromS3Bounded cancellation', () => {
     mocks.readFile.mockReset().mockResolvedValue(Buffer.from('exact'));
     mocks.uploadFile.mockReset().mockResolvedValue('exports/result.zip');
     mocks.awsSend.mockReset().mockResolvedValue({});
+    mocks.middlewareAdd.mockReset();
+    mocks.s3ClientConfig.mockReset();
+    mocks.recordAssetCleanupFailure.mockReset().mockResolvedValue(undefined);
+    delete process.env.COZE_WORKLOAD_IDENTITY_API_KEY;
+    delete process.env.COZE_BUCKET_ACCESS_KEY;
+    delete process.env.COZE_BUCKET_SECRET_KEY;
+    delete process.env.AWS_ACCESS_KEY_ID;
+    delete process.env.AWS_SECRET_ACCESS_KEY;
     process.env.COZE_BUCKET_ENDPOINT_URL = 'https://bucket.test';
     process.env.COZE_BUCKET_NAME = 'test-bucket';
   });
@@ -187,6 +205,36 @@ describe('readImageFromS3Bounded cancellation', () => {
     );
     expect(mocks.chunkUploadFile).not.toHaveBeenCalled();
     expect(mocks.uploadFile).not.toHaveBeenCalled();
+  });
+
+  it('matches the installed Coze SDK workload identity storage middleware without logging the token', async () => {
+    process.env.COZE_WORKLOAD_IDENTITY_API_KEY = 'secret-workload-token';
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const { uploadBinaryToS3 } = await import('@/lib/s3-storage');
+    await uploadBinaryToS3(Buffer.from('{}'), '0123456789abcdef-manifest.json', 'application/json');
+    expect(mocks.middlewareAdd).toHaveBeenCalledWith(expect.any(Function), {
+      step: 'build', name: 'injectStorageToken',
+    });
+    const middleware = mocks.middlewareAdd.mock.calls[0][0];
+    const next = vi.fn(async (args: unknown) => args);
+    const request = { request: { headers: {} as Record<string, string> } };
+    await middleware(next)(request);
+    expect(request.request.headers['x-storage-token']).toBe('secret-workload-token');
+    expect(JSON.stringify([...log.mock.calls, ...error.mock.calls])).not.toContain('secret-workload-token');
+  });
+
+  it('preserves static access-key credentials while installing the same middleware', async () => {
+    process.env.COZE_BUCKET_ACCESS_KEY = 'static-access';
+    process.env.COZE_BUCKET_SECRET_KEY = 'static-secret';
+    const { uploadBinaryToS3 } = await import('@/lib/s3-storage');
+    await uploadBinaryToS3(Buffer.from('{}'), '0123456789abcdef-manifest.json', 'application/json');
+    expect(mocks.s3ClientConfig).toHaveBeenCalledWith(expect.objectContaining({
+      endpoint: 'https://bucket.test',
+      region: expect.any(String),
+      forcePathStyle: true,
+      credentials: { accessKeyId: 'static-access', secretAccessKey: 'static-secret' },
+    }));
   });
 
   it('cleans a late uploaded object when cancellation wins the SDK race', async () => {

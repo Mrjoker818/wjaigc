@@ -4,7 +4,11 @@ import { downloadImageFromS3, getS3PresignedUrl, deriveS3Key, readBinaryFromS3Ex
 import { getImageSourceUrl } from '@/lib/image-source-map';
 import { isAllowedPublicMediaExtension } from '@/lib/media-validation';
 import { readExactRecoveryMedia } from '@/lib/asset-core/recovery-media';
-import { recoverExportAssetBytes } from '@/lib/asset-core/binary-persistence';
+import {
+  MAX_ASSET_BINARY_BYTES,
+  recoverExportAssetBytes,
+  validateExportAssetBytes,
+} from '@/lib/asset-core/binary-persistence';
 import path from 'path';
 import fs from 'fs';
 
@@ -32,19 +36,37 @@ export async function GET(
       if (!localPath.startsWith(`${exportsRoot}${path.sep}`)) {
         return NextResponse.json({ error: 'File not found' }, { status: 404 });
       }
-      const bytes: Buffer | null = fs.existsSync(localPath)
-        ? await fs.promises.readFile(localPath)
-        : await readBinaryFromS3Exact(`exports/${exportArtifact.filename}`);
-      if (!bytes) return NextResponse.json({ error: 'File not found' }, { status: 404 });
-      try {
-        await recoverExportAssetBytes({
-          bytes,
-          filename: exportArtifact.filename,
-          mimeType: exportArtifact.contentType,
-        });
-      } catch {
-        return NextResponse.json({ error: 'File not found' }, { status: 404 });
+      let bytes: Buffer | null;
+      if (fs.existsSync(localPath)) {
+        try {
+          const stats = await fs.promises.stat(localPath);
+          if (!stats.isFile?.() || stats.size < 1 || stats.size > MAX_ASSET_BINARY_BYTES) {
+            return NextResponse.json({ error: 'File not found' }, { status: 404 });
+          }
+          bytes = await fs.promises.readFile(localPath);
+          await validateExportAssetBytes({
+            bytes,
+            filename: exportArtifact.filename,
+            mimeType: exportArtifact.contentType,
+          });
+        } catch {
+          return NextResponse.json({ error: 'File not found' }, { status: 404 });
+        }
+      } else {
+        bytes = await readBinaryFromS3Exact(`exports/${exportArtifact.filename}`);
+        if (bytes) {
+          try {
+            await recoverExportAssetBytes({
+              bytes,
+              filename: exportArtifact.filename,
+              mimeType: exportArtifact.contentType,
+            });
+          } catch {
+            return NextResponse.json({ error: 'File not found' }, { status: 404 });
+          }
+        }
       }
+      if (!bytes) return NextResponse.json({ error: 'File not found' }, { status: 404 });
       return exportArtifact.attachment
         ? exportDocumentResponse(new Uint8Array(bytes), exportArtifact.contentType, exportArtifact.filename)
         : publicMediaResponse(new Uint8Array(bytes), exportArtifact.contentType, path.extname(exportArtifact.filename).toLowerCase());

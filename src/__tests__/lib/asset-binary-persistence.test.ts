@@ -12,6 +12,8 @@ vi.mock('server-only', () => ({}));
 const mocks = vi.hoisted(() => ({
   uploadBinaryToS3: vi.fn(),
   getServerDataRoot: vi.fn(),
+  drainPendingAssetCleanup: vi.fn(),
+  recordAssetCleanupFailure: vi.fn(),
 }));
 
 vi.mock('@/lib/s3-storage', () => ({
@@ -19,6 +21,10 @@ vi.mock('@/lib/s3-storage', () => ({
 }));
 vi.mock('@/lib/server-data-root', () => ({
   getServerDataRoot: mocks.getServerDataRoot,
+}));
+vi.mock('@/lib/asset-core/cleanup-outbox', () => ({
+  drainPendingAssetCleanup: mocks.drainPendingAssetCleanup,
+  recordAssetCleanupFailure: mocks.recordAssetCleanupFailure,
 }));
 
 import { persistAssetBytes, recoverExportAssetBytes } from '@/lib/asset-core/binary-persistence';
@@ -30,6 +36,8 @@ describe('generic asset binary persistence', () => {
   beforeEach(async () => {
     root = await mkdtemp(join(tmpdir(), 'wujie-export-bytes-'));
     mocks.getServerDataRoot.mockReturnValue(root);
+    mocks.drainPendingAssetCleanup.mockResolvedValue({ completed: 0, failed: 0 });
+    mocks.recordAssetCleanupFailure.mockResolvedValue(undefined);
     mocks.uploadBinaryToS3.mockImplementation(async (_bytes: Buffer, filename: string) => ({
       storageKey: `exports/${filename}`,
       createdThisCall: true,
@@ -57,8 +65,8 @@ describe('generic asset binary persistence', () => {
       byteSize: bytes.length,
     });
     expect(file.checksum).toMatch(/^[a-f0-9]{64}$/);
-    const storedFilename = `${file.checksum?.slice(0, 16)}-delivery.zip`;
-    expect(file.url).toBe(`/api/serve-upload/exports/${storedFilename}`);
+    const storedFilename = file.url.split('/').at(-1)!;
+    expect(storedFilename).toMatch(new RegExp(`^${file.checksum?.slice(0, 16)}-[a-f0-9-]{36}-delivery\\.zip$`));
     expect(await readFile(join(root, 'exports', storedFilename))).toEqual(bytes);
     expect(mocks.uploadBinaryToS3).toHaveBeenCalledWith(
       bytes,
@@ -122,7 +130,7 @@ describe('generic asset binary persistence', () => {
     const file = await persistAssetBytes({
       bytes: Buffer.from('{}'), filename: '平台清单.json', mimeType: 'application/json',
     });
-    expect(file.url).toMatch(/^\/api\/serve-upload\/exports\/[a-f0-9]{16}-_+\.json$/);
+    expect(file.url).toMatch(/^\/api\/serve-upload\/exports\/[a-f0-9]{16}-[a-f0-9-]{36}-_+\.json$/);
     expect(decodeURIComponent(file.url)).not.toContain('平台');
   });
 
@@ -156,8 +164,21 @@ describe('generic asset binary persistence', () => {
     }));
     const persisted = await persistAssetBytes({ bytes: Buffer.from('{}'), filename: 'manifest.json', mimeType: 'application/json' });
     await expect(persisted.cleanup()).rejects.toThrow('delete unavailable');
+    expect(mocks.recordAssetCleanupFailure).toHaveBeenCalledWith(expect.objectContaining({
+      storageKey: expect.stringMatching(/^exports\//),
+      lastError: 'delete unavailable',
+    }));
     await expect(persisted.cleanup()).resolves.toBeUndefined();
     expect(s3Cleanup).toHaveBeenCalledTimes(2);
+  });
+
+  it('isolates concurrent same-content persistence so one failed request cannot delete the successful object', async () => {
+    const input = { bytes: Buffer.from('{}'), filename: 'manifest.json', mimeType: 'application/json' };
+    const [successful, failed] = await Promise.all([persistAssetBytes(input), persistAssetBytes(input)]);
+    expect(successful.url).not.toBe(failed.url);
+    expect(successful.storageKey).not.toBe(failed.storageKey);
+    await failed.cleanup();
+    await expect(readFile(join(root, 'exports', successful.url.split('/').at(-1)!))).resolves.toEqual(input.bytes);
   });
 
   it('removes a just-published target when temporary unlink fails after linking', async () => {

@@ -9,8 +9,9 @@ import { getServerDataRoot } from '@/lib/server-data-root';
 import { uploadBinaryToS3, type S3BinaryUploadResult } from '@/lib/s3-storage';
 import type { AssetFile } from './types';
 import { assetBinaryFileOps } from './binary-file-ops';
+import { drainPendingAssetCleanup, recordAssetCleanupFailure } from './cleanup-outbox';
 
-const MAX_BINARY_BYTES = 256 * 1024 * 1024;
+export const MAX_ASSET_BINARY_BYTES = 256 * 1024 * 1024;
 const EXTENSION_BY_MIME = new Map([
   ['image/png', '.png'],
   ['image/jpeg', '.jpeg'],
@@ -78,6 +79,22 @@ export async function validateAssetBinaryFormat(bytes: Buffer, mimeType: string)
   }
 }
 
+export async function validateExportAssetBytes(input: {
+  bytes: Buffer;
+  filename: string;
+  mimeType: string;
+}): Promise<void> {
+  if (!Buffer.isBuffer(input.bytes) || input.bytes.length < 1 || input.bytes.length > MAX_ASSET_BINARY_BYTES) {
+    fail('ASSET_BYTES_INVALID');
+  }
+  normalizeFilename(input.filename, input.mimeType);
+  const match = input.filename.match(/^([a-f0-9]{16})-[A-Za-z0-9._-]+\.(?:png|jpe?g|webp|json|zip)$/u);
+  if (!match || createHash('sha256').update(input.bytes).digest('hex').slice(0, 16) !== match[1]) {
+    fail('ASSET_RECOVERY_CHECKSUM_MISMATCH');
+  }
+  await validateAssetBinaryFormat(input.bytes, input.mimeType);
+}
+
 function exportTarget(filename: string): { directory: string; target: string } {
   const root = path.resolve(getServerDataRoot());
   const directory = path.resolve(root, 'exports');
@@ -92,15 +109,9 @@ export async function recoverExportAssetBytes(input: {
   filename: string;
   mimeType: string;
 }): Promise<void> {
-  if (!Buffer.isBuffer(input.bytes) || input.bytes.length < 1 || input.bytes.length > MAX_BINARY_BYTES) {
-    fail('ASSET_BYTES_INVALID');
-  }
-  normalizeFilename(input.filename, input.mimeType);
+  await validateExportAssetBytes(input);
   const match = input.filename.match(/^([a-f0-9]{16})-[A-Za-z0-9._-]+\.(?:png|jpe?g|webp|json|zip)$/u);
-  if (!match || createHash('sha256').update(input.bytes).digest('hex').slice(0, 16) !== match[1]) {
-    fail('ASSET_RECOVERY_CHECKSUM_MISMATCH');
-  }
-  await validateAssetBinaryFormat(input.bytes, input.mimeType);
+  if (!match) fail('ASSET_RECOVERY_CHECKSUM_MISMATCH');
   const { directory, target } = exportTarget(input.filename);
   const temporary = path.resolve(directory, `.${input.filename}.${randomUUID()}.recover.tmp`);
   await assetBinaryFileOps.mkdir(directory, { recursive: true });
@@ -128,7 +139,10 @@ export async function recoverExportAssetBytes(input: {
 
 export async function persistAssetBytes(input: PersistAssetBytesInput): Promise<PersistedAssetFile> {
   input.signal?.throwIfAborted();
-  if (!Buffer.isBuffer(input.bytes) || input.bytes.length < 1 || input.bytes.length > MAX_BINARY_BYTES) {
+  await drainPendingAssetCleanup({ limit: 2 }).catch(() => {
+    console.warn({ code: 'ASSET_CLEANUP_OPPORTUNISTIC_DRAIN_FAILED' });
+  });
+  if (!Buffer.isBuffer(input.bytes) || input.bytes.length < 1 || input.bytes.length > MAX_ASSET_BINARY_BYTES) {
     fail('ASSET_BYTES_INVALID');
   }
   if (typeof input.mimeType !== 'string' || !EXTENSION_BY_MIME.has(input.mimeType)) {
@@ -139,7 +153,7 @@ export async function persistAssetBytes(input: PersistAssetBytesInput): Promise<
   input.signal?.throwIfAborted();
   const checksum = createHash('sha256').update(input.bytes).digest('hex');
   const asciiFilename = filename.replace(/[^A-Za-z0-9._-]/gu, '_');
-  const storedFilename = `${checksum.slice(0, 16)}-${asciiFilename}`;
+  const storedFilename = `${checksum.slice(0, 16)}-${randomUUID()}-${asciiFilename}`;
   const root = path.resolve(getServerDataRoot());
   const directory = path.resolve(root, 'exports');
   const temporary = path.resolve(directory, `.${storedFilename}.${randomUUID()}.tmp`);
@@ -181,8 +195,24 @@ export async function persistAssetBytes(input: PersistAssetBytesInput): Promise<
       cleanup: async () => {
         if (cleaned) return;
         const failures: unknown[] = [];
-        if (publishedByThisCall) await assetBinaryFileOps.rm(cleanupTarget, { force: true }).catch(error => failures.push(error));
-        if (s3Upload?.createdThisCall) await s3Upload.cleanup().catch(error => failures.push(error));
+        const pending: Array<Parameters<typeof recordAssetCleanupFailure>[0]> = [];
+        if (publishedByThisCall) await assetBinaryFileOps.rm(cleanupTarget, { force: true }).catch(error => {
+          failures.push(error);
+          pending.push({
+            rootId: 'server-data', localPath: `exports/${path.basename(cleanupTarget)}`,
+            lastError: error instanceof Error ? error.message : String(error),
+          });
+        });
+        if (s3Upload?.createdThisCall) await s3Upload.cleanup().catch(error => {
+          failures.push(error);
+          pending.push({
+            rootId: 'server-data', storageKey: s3Upload!.storageKey,
+            lastError: error instanceof Error ? error.message : String(error),
+          });
+        });
+        for (const record of pending) {
+          await recordAssetCleanupFailure(record).catch(error => failures.push(error));
+        }
         if (failures.length === 1) throw failures[0];
         if (failures.length > 1) throw new AggregateError(failures, 'ASSET_CLEANUP_FAILED');
         cleaned = true;
@@ -190,9 +220,31 @@ export async function persistAssetBytes(input: PersistAssetBytesInput): Promise<
     };
   } catch (error) {
     const failures: unknown[] = [];
-    await assetBinaryFileOps.rm(temporary, { force: true }).catch(cleanupError => failures.push(cleanupError));
-    if (publishedByThisCall && target) await assetBinaryFileOps.rm(target, { force: true }).catch(cleanupError => failures.push(cleanupError));
-    if (s3Upload?.createdThisCall) await s3Upload.cleanup().catch(cleanupError => failures.push(cleanupError));
+    const pending: Array<Parameters<typeof recordAssetCleanupFailure>[0]> = [];
+    await assetBinaryFileOps.rm(temporary, { force: true }).catch(cleanupError => {
+      failures.push(cleanupError);
+      pending.push({
+        rootId: 'server-data', localPath: `exports/${path.basename(temporary)}`,
+        lastError: cleanupError instanceof Error ? cleanupError.message : String(cleanupError),
+      });
+    });
+    if (publishedByThisCall && target) await assetBinaryFileOps.rm(target, { force: true }).catch(cleanupError => {
+      failures.push(cleanupError);
+      pending.push({
+        rootId: 'server-data', localPath: `exports/${path.basename(target!)}`,
+        lastError: cleanupError instanceof Error ? cleanupError.message : String(cleanupError),
+      });
+    });
+    if (s3Upload?.createdThisCall) await s3Upload.cleanup().catch(cleanupError => {
+      failures.push(cleanupError);
+      pending.push({
+        rootId: 'server-data', storageKey: s3Upload!.storageKey,
+        lastError: cleanupError instanceof Error ? cleanupError.message : String(cleanupError),
+      });
+    });
+    for (const record of pending) {
+      await recordAssetCleanupFailure(record).catch(cleanupError => failures.push(cleanupError));
+    }
     if (failures.length > 0) throw new AggregateError([error, ...failures], 'ASSET_PERSISTENCE_COMPENSATION_FAILED');
     throw error;
   }

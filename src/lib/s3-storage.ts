@@ -36,8 +36,17 @@ function getBinaryStorage(): { client: S3Client; bucket: string } | null {
       endpoint,
       region: process.env.COZE_BUCKET_REGION || 'cn-beijing',
       forcePathStyle: true,
-      ...(accessKeyId && secretAccessKey ? { credentials: { accessKeyId, secretAccessKey } } : {}),
+      credentials: { accessKeyId: accessKeyId || '', secretAccessKey: secretAccessKey || '' },
     });
+    _binaryStorage.middlewareStack.add(
+      next => async args => {
+        const token = process.env.COZE_WORKLOAD_IDENTITY_API_KEY;
+        const request = args.request as { headers?: Record<string, string> } | undefined;
+        if (token && request?.headers) request.headers['x-storage-token'] = token;
+        return next(args);
+      },
+      { step: 'build', name: 'injectStorageToken' },
+    );
   }
   return { client: _binaryStorage, bucket };
 }
@@ -200,6 +209,33 @@ async function deleteExactS3Key(client: S3Client, bucket: string, key: string): 
   throw new Error('S3_BINARY_DELETE_FAILED', { cause: lastError });
 }
 
+export async function deleteBinaryFromS3Exact(key: string): Promise<void> {
+  if (!/^exports\/[a-f0-9]{16}-[A-Za-z0-9._-]+\.(?:png|jpe?g|webp|json|zip)$/u.test(key)) {
+    throw new TypeError('S3_BINARY_KEY_INVALID');
+  }
+  const storage = getBinaryStorage();
+  if (!storage) throw new Error('S3_BINARY_STORAGE_UNAVAILABLE');
+  await deleteExactS3Key(storage.client, storage.bucket, key);
+}
+
+async function deleteBinaryWithPersistentFallback(key: string): Promise<void> {
+  try {
+    await deleteBinaryFromS3Exact(key);
+  } catch (error) {
+    try {
+      const { recordAssetCleanupFailure } = await import('@/lib/asset-core/cleanup-outbox');
+      await recordAssetCleanupFailure({
+        storageKey: key,
+        rootId: 'server-data',
+        lastError: error instanceof Error ? error.message : String(error),
+      });
+    } catch (outboxError) {
+      throw new AggregateError([error, outboxError], 'S3_BINARY_DELETE_AND_OUTBOX_FAILED');
+    }
+    throw error;
+  }
+}
+
 /** Upload one already-validated export artifact without routing it through image validation. */
 export async function uploadBinaryToS3(
   buffer: Buffer,
@@ -235,7 +271,7 @@ export async function uploadBinaryToS3(
       throw error;
     }
     if (signal?.aborted) {
-      await deleteExactS3Key(storage.client, storage.bucket, key);
+      await deleteBinaryWithPersistentFallback(key);
       signal.throwIfAborted();
     }
     let cleaned = false;
@@ -244,12 +280,12 @@ export async function uploadBinaryToS3(
       createdThisCall: true,
       cleanup: async () => {
         if (cleaned) return;
-        await deleteExactS3Key(storage.client, storage.bucket, key);
+        await deleteBinaryWithPersistentFallback(key);
         cleaned = true;
       },
     };
   } catch (error) {
-    if ((error as Error)?.message === 'S3_BINARY_DELETE_FAILED') throw error;
+    if ((error as Error)?.message?.startsWith('S3_BINARY_DELETE')) throw error;
     if (signal?.aborted) signal.throwIfAborted();
     throw new Error('S3_BINARY_UPLOAD_FAILED', { cause: error });
   }
