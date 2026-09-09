@@ -9,4 +9,5 @@ Task 4: complete (`fbbd2767..f53429dc`, review APPROVED, 115/115 security tests)
 Task 5: complete (`5c2b3c9f..6ef6d6a4`, review APPROVED, 153/153 focused tests)
 Task 6: complete (`3fae296f..71b8588b`, review APPROVED, 108/108 core tests)
 Task 7: complete (`c06fda25..9885c329`, review APPROVED, 161/161 related regression tests)
-Task 8: pending
+Task 8: complete (`4becc3fb..9bdbfe1b`, review APPROVED, 157/157 related regression tests)
+Task 9: pending
