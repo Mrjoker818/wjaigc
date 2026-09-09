@@ -6,6 +6,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { Pool, type PoolClient } from 'pg';
 
 import type { LegacyImageMapping } from '@/lib/asset-core/legacy-migration';
+import { reconcileDeletedCanvasProjectsInTransaction } from '@/lib/asset-core/canvas-project-sync';
 import type { CanvasImage, Project } from '@/lib/user-types';
 
 const databaseUrl = process.env.TEST_POSTGRES_URL;
@@ -349,6 +350,87 @@ suite('canvas shadow PostgreSQL reconciliation', () => {
       [assetIds.otherProject]: 'active',
       [assetIds.otherOwner]: 'active',
     });
+  });
+
+  it('trashes unreferenced assets of deleted projects without touching active projects or other owners', async () => {
+    const localSuffix = randomUUID();
+    const localOwnerId = `deleted-owner-${localSuffix}`;
+    const localOtherOwnerId = `deleted-other-owner-${localSuffix}`;
+    const deletedProjectId = `deleted-project-${localSuffix}`;
+    const activeProjectId = `active-project-${localSuffix}`;
+    const otherOwnerProjectId = `other-owner-project-${localSuffix}`;
+    const assetRows = [
+      ['deleted-document', localOwnerId, deletedProjectId, 'document'],
+      ['deleted-workflow', localOwnerId, deletedProjectId, 'document'],
+      ['deleted-psd', localOwnerId, deletedProjectId, 'psd'],
+      ['deleted-video', localOwnerId, deletedProjectId, 'video'],
+      ['active-report', localOwnerId, activeProjectId, 'document'],
+      ['active-shared', localOwnerId, activeProjectId, 'image'],
+      ['other-owner-document', localOtherOwnerId, otherOwnerProjectId, 'document'],
+    ].map(([stem, rowOwnerId, rowProjectId, kind]) => ({
+      assetId: `${stem}-asset-${localSuffix}`,
+      versionId: `${stem}-version-${localSuffix}`,
+      ownerId: rowOwnerId,
+      projectId: rowProjectId,
+      kind,
+    }));
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query(
+        `INSERT INTO wujie_projects(id, owner_id, name, status, schema_version, metadata)
+         VALUES ($1, $2, 'Deleted', 'active', 3, '{}'::jsonb),
+                ($3, $2, 'Active', 'active', 3, '{}'::jsonb),
+                ($4, $5, 'Other owner', 'active', 3, '{}'::jsonb)`,
+        [deletedProjectId, localOwnerId, activeProjectId, otherOwnerProjectId, localOtherOwnerId],
+      );
+      for (const row of assetRows) {
+        await client.query(
+          `INSERT INTO wujie_assets(id, owner_id, project_id, kind, status, metadata)
+           VALUES ($1, $2, $3, $4, 'active', '{}'::jsonb)`,
+          [row.assetId, row.ownerId, row.projectId, row.kind],
+        );
+        await client.query(
+          `INSERT INTO wujie_asset_versions(
+             id, asset_id, owner_id, project_id, file_url, availability, metadata
+           ) VALUES ($1, $2, $3, $4, $5, 'ready', '{}'::jsonb)`,
+          [row.versionId, row.assetId, row.ownerId, row.projectId, `/media/${row.assetId}`],
+        );
+        await client.query('UPDATE wujie_assets SET current_version_id = $2 WHERE id = $1', [
+          row.assetId,
+          row.versionId,
+        ]);
+      }
+      const activeShared = assetRows.find(row => row.assetId.startsWith('active-shared-'))!;
+      await insertPlacement(client, {
+        id: `active-workflow-placement-${localSuffix}`,
+        ownerId: localOwnerId,
+        projectId: activeProjectId,
+        assetId: activeShared.assetId,
+        versionId: activeShared.versionId,
+        workspaceKind: 'workflow',
+        workspaceId: `workflow:${activeProjectId}`,
+        entityType: 'workflow-input',
+        entityId: `active-workflow-input-${localSuffix}`,
+      });
+
+      await reconcileDeletedCanvasProjectsInTransaction(client, localOwnerId, [activeProjectId]);
+
+      const statuses = await client.query<{ id: string; status: string }>(
+        'SELECT id, status FROM wujie_assets WHERE id = ANY($1::text[]) ORDER BY id',
+        [assetRows.map(row => row.assetId)],
+      );
+      const byId = Object.fromEntries(statuses.rows.map(row => [row.id, row.status]));
+      for (const stem of ['deleted-document', 'deleted-workflow', 'deleted-psd', 'deleted-video']) {
+        expect(byId[`${stem}-asset-${localSuffix}`]).toBe('trashed');
+      }
+      expect(byId[`active-report-asset-${localSuffix}`]).toBe('active');
+      expect(byId[`active-shared-asset-${localSuffix}`]).toBe('active');
+      expect(byId[`other-owner-document-asset-${localSuffix}`]).toBe('active');
+    } finally {
+      await client.query('ROLLBACK').catch(() => undefined);
+      client.release();
+    }
   });
 
   it('does not trash a newly transferred Skill result before its first canvas snapshot arrives', async () => {

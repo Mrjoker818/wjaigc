@@ -306,13 +306,19 @@ describe('continuous canvas shadow synchronization', () => {
         { id: 'placement-deleted-only', ownerId: 'user-1', projectId: 'deleted-project', assetId: 'asset-deleted-only', status: 'active' },
         { id: 'placement-shared-deleted', ownerId: 'user-1', projectId: 'deleted-project', assetId: 'asset-shared', status: 'active' },
         { id: 'placement-shared-live', ownerId: 'user-1', projectId: 'active-project', assetId: 'asset-shared', status: 'active' },
+        { id: 'placement-document-shared-live', ownerId: 'user-1', projectId: 'active-project', assetId: 'asset-deleted-document-shared', status: 'active' },
         { id: 'placement-other-owner', ownerId: 'user-2', projectId: 'deleted-project', assetId: 'asset-other-owner', status: 'active' },
       ],
       assets: [
-        { id: 'asset-deleted-only', ownerId: 'user-1', status: 'active' },
-        { id: 'asset-shared', ownerId: 'user-1', status: 'active' },
-        { id: 'asset-report-document', ownerId: 'user-1', status: 'active' },
-        { id: 'asset-other-owner', ownerId: 'user-2', status: 'active' },
+        { id: 'asset-deleted-only', ownerId: 'user-1', projectId: 'deleted-project', status: 'active' },
+        { id: 'asset-shared', ownerId: 'user-1', projectId: 'deleted-project', status: 'active' },
+        { id: 'asset-deleted-document', ownerId: 'user-1', projectId: 'deleted-project', status: 'active' },
+        { id: 'asset-deleted-workflow', ownerId: 'user-1', projectId: 'deleted-project', status: 'active' },
+        { id: 'asset-deleted-psd', ownerId: 'user-1', projectId: 'deleted-project', status: 'active' },
+        { id: 'asset-deleted-video', ownerId: 'user-1', projectId: 'deleted-project', status: 'active' },
+        { id: 'asset-deleted-document-shared', ownerId: 'user-1', projectId: 'deleted-project', status: 'active' },
+        { id: 'asset-report-document', ownerId: 'user-1', projectId: 'active-project', status: 'active' },
+        { id: 'asset-other-owner', ownerId: 'user-2', projectId: 'deleted-project', status: 'active' },
       ],
       projects: [
         { id: 'deleted-project', ownerId: 'user-1', status: 'active' },
@@ -336,6 +342,7 @@ describe('continuous canvas shadow synchronization', () => {
         return { rows: [], rowCount: 2 };
       }
       if (sql.includes('UPDATE wujie_assets')) {
+        const selectsDeletedProjectAssets = sql.includes('NOT (asset.project_id = ANY($2::text[]))');
         const limitsToCanvasAssets = sql.includes("canvas_placement.workspace_kind = 'canvas'")
           && sql.includes("canvas_placement.entity_type = 'canvas-image'");
         for (const asset of state.assets) {
@@ -347,7 +354,10 @@ describe('continuous canvas shadow synchronization', () => {
           ));
           if (
             asset.ownerId === ownerId
-            && (!limitsToCanvasAssets || hasCanvasReference)
+            && (
+              (selectsDeletedProjectAssets && !activeIds.has(asset.projectId))
+              || (limitsToCanvasAssets && hasCanvasReference)
+            )
             && !hasLiveReference
           ) asset.status = 'trashed';
         }
@@ -374,6 +384,11 @@ describe('continuous canvas shadow synchronization', () => {
     expect(state.placements.find((item) => item.id === 'placement-other-owner')?.status).toBe('active');
     expect(state.assets.find((item) => item.id === 'asset-deleted-only')?.status).toBe('trashed');
     expect(state.assets.find((item) => item.id === 'asset-shared')?.status).toBe('active');
+    expect(state.assets.find((item) => item.id === 'asset-deleted-document')?.status).toBe('trashed');
+    expect(state.assets.find((item) => item.id === 'asset-deleted-workflow')?.status).toBe('trashed');
+    expect(state.assets.find((item) => item.id === 'asset-deleted-psd')?.status).toBe('trashed');
+    expect(state.assets.find((item) => item.id === 'asset-deleted-video')?.status).toBe('trashed');
+    expect(state.assets.find((item) => item.id === 'asset-deleted-document-shared')?.status).toBe('active');
     expect(state.assets.find((item) => item.id === 'asset-report-document')?.status).toBe('active');
     expect(state.assets.find((item) => item.id === 'asset-other-owner')?.status).toBe('active');
     expect(state.projects.find((item) => item.ownerId === 'user-1' && item.id === 'deleted-project')?.status).toBe('trashed');
@@ -1141,7 +1156,7 @@ describe('continuous canvas shadow synchronization', () => {
         state.placementStatus = 'trashed';
         return { rows: [], rowCount: 1 };
       }
-      if (sql.includes('UPDATE wujie_assets asset') && params.length === 1) {
+      if (sql.includes('UPDATE wujie_assets asset') && sql.includes('NOT (asset.project_id = ANY')) {
         state.assetStatus = 'trashed';
         return { rows: [], rowCount: 1 };
       }
@@ -1190,7 +1205,7 @@ describe('continuous canvas shadow synchronization', () => {
           rowCount: 1,
         };
       }
-      if (sql.includes('UPDATE wujie_assets') && sql.includes("status = 'active'")) {
+      if (sql.includes('UPDATE wujie_assets') && sql.includes("SET kind = $4, status = 'active'")) {
         expect(params.slice(0, 3)).toEqual(['asset-a', 'user-1', 'project-1']);
         state.assetStatus = 'active';
         return { rows: [], rowCount: 1 };

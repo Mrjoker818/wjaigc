@@ -339,12 +339,15 @@ export async function reconcileDeletedCanvasProjectsInTransaction(
     `UPDATE wujie_assets asset
      SET status = 'trashed', updated_at = now()
      WHERE asset.owner_id = $1 AND asset.status = 'active'
-       AND EXISTS (
-         SELECT 1 FROM wujie_workspace_placements canvas_placement
-         WHERE canvas_placement.asset_id = asset.id
-           AND canvas_placement.owner_id = asset.owner_id
-           AND canvas_placement.workspace_kind = 'canvas'
-           AND canvas_placement.entity_type = 'canvas-image'
+       AND (
+         NOT (asset.project_id = ANY($2::text[]))
+         OR EXISTS (
+           SELECT 1 FROM wujie_workspace_placements canvas_placement
+           WHERE canvas_placement.asset_id = asset.id
+             AND canvas_placement.owner_id = asset.owner_id
+             AND canvas_placement.workspace_kind = 'canvas'
+             AND canvas_placement.entity_type = 'canvas-image'
+         )
        )
        AND NOT EXISTS (
          SELECT 1 FROM wujie_workspace_placements placement
@@ -352,7 +355,7 @@ export async function reconcileDeletedCanvasProjectsInTransaction(
            AND placement.owner_id = asset.owner_id
            AND placement.status = 'active'
        )`,
-    [actorUserId],
+    [actorUserId, activeProjectIds],
   );
   await client.query(
     `UPDATE wujie_projects
