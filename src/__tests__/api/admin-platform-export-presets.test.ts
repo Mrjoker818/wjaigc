@@ -81,16 +81,34 @@ describe('/api/admin/platform-export-presets', () => {
     expect(mocks.createPlatformExportPresetVersion).toHaveBeenCalledWith(validPreset);
   });
 
-  it('returns a structured error when persistence cannot create the version', async () => {
-    mocks.createPlatformExportPresetVersion.mockRejectedValue(new Error('database unavailable'));
+  it('returns a structured service-unavailable error when persistence cannot create the version', async () => {
+    mocks.createPlatformExportPresetVersion.mockRejectedValue(Object.assign(
+      new Error('database unavailable'),
+      { code: 'PLATFORM_EXPORT_PRESET_STORAGE_UNAVAILABLE' },
+    ));
 
     const response = await POST(request('POST', validPreset));
 
-    expect(response.status).toBe(500);
+    expect(response.status).toBe(503);
     expect(await response.json()).toEqual({
       success: false,
-      code: 'PLATFORM_EXPORT_PRESET_WRITE_FAILED',
-      error: 'Unable to create platform export preset version',
+      code: 'PLATFORM_EXPORT_PRESET_STORAGE_UNAVAILABLE',
+      error: 'Platform export preset storage is unavailable',
+    });
+  });
+
+  it('maps an atomic version conflict to a structured 409 response', async () => {
+    mocks.createPlatformExportPresetVersion.mockRejectedValue(Object.assign(
+      new Error('version conflict'),
+      { code: 'PLATFORM_EXPORT_PRESET_VERSION_CONFLICT' },
+    ));
+
+    const response = await POST(request('POST', validPreset));
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({
+      success: false,
+      code: 'PLATFORM_EXPORT_PRESET_VERSION_CONFLICT',
     });
   });
 
@@ -132,4 +150,31 @@ describe('/api/admin/platform-export-presets', () => {
     expect(response.status).toBe(400);
     expect(mocks.setPlatformExportPresetEnabled).not.toHaveBeenCalled();
   });
+
+  it.each([
+    [Object.assign(new Error('missing'), { code: 'PLATFORM_EXPORT_PRESET_NOT_FOUND' }), 404],
+    [Object.assign(new Error('conflict'), { code: 'PLATFORM_EXPORT_PRESET_VERSION_CONFLICT' }), 409],
+    [Object.assign(new Error('database unavailable'), { code: 'PLATFORM_EXPORT_PRESET_STORAGE_UNAVAILABLE' }), 503],
+  ])('maps PATCH domain errors to structured responses', async (error, status) => {
+    mocks.setPlatformExportPresetEnabled.mockRejectedValue(error);
+
+    const response = await PATCH(request('PATCH', {
+      presetId: 'custom-banner', version: 1, enabled: false,
+    }));
+
+    expect(response.status).toBe(status);
+    expect(await response.json()).toMatchObject({ success: false, code: (error as Error & { code: string }).code });
+  });
+
+  it.each([Number.MAX_SAFE_INTEGER, 2_147_483_648])(
+    'rejects a PATCH version outside the PostgreSQL INTEGER range',
+    async version => {
+      const response = await PATCH(request('PATCH', {
+        presetId: 'custom-banner', version, enabled: false,
+      }));
+
+      expect(response.status).toBe(400);
+      expect(mocks.setPlatformExportPresetEnabled).not.toHaveBeenCalled();
+    },
+  );
 });

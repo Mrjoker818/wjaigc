@@ -27,9 +27,16 @@ const preset = {
 };
 
 describe('platform export preset PostgreSQL storage contract', () => {
+  const client = {
+    query: vi.fn(),
+    release: vi.fn(),
+  };
+
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.execSql.mockResolvedValue({ rows: [], rowCount: 0 });
+    client.query.mockResolvedValue({ rows: [], rowCount: 0 });
+    mocks.getPool.mockReturnValue({ connect: vi.fn().mockResolvedValue(client) });
   });
 
   afterEach(() => {
@@ -48,10 +55,14 @@ describe('platform export preset PostgreSQL storage contract', () => {
   });
 
   it('inserts new versions without overwriting a conflicting historical version', async () => {
-    mocks.execSql.mockResolvedValueOnce({
+    client.query
+      .mockResolvedValueOnce({ rows: [], rowCount: 0 })
+      .mockResolvedValueOnce({ rows: [], rowCount: 0 })
+      .mockResolvedValueOnce({ rows: [{ version: 3 }], rowCount: 1 })
+      .mockResolvedValueOnce({
       rows: [{
         preset_id: preset.id,
-        version: preset.version,
+        version: 3,
         platform: preset.platform,
         usage: preset.usage,
         label: preset.label,
@@ -62,11 +73,63 @@ describe('platform export preset PostgreSQL storage contract', () => {
         enabled: preset.enabled,
       }],
       rowCount: 1,
-    });
+      })
+      .mockResolvedValueOnce({ rows: [], rowCount: 0 });
 
-    await expect(dbCreatePlatformExportPresetVersion(preset)).resolves.toEqual(preset);
-    const [sql] = mocks.execSql.mock.calls[0];
-    expect(sql).toContain('ON CONFLICT (preset_id, version) DO NOTHING');
+    const input = { ...preset };
+    delete (input as Partial<typeof input>).version;
+    await expect(dbCreatePlatformExportPresetVersion(input)).resolves.toEqual({ ...preset, version: 3 });
+    const statements = client.query.mock.calls.map(([sql]) => String(sql));
+    expect(statements[0]).toBe('BEGIN');
+    expect(statements[1]).toContain('pg_advisory_xact_lock');
+    expect(statements[2]).toContain('MAX(version)');
+    expect(statements[3]).toContain('INSERT INTO wujie_platform_export_presets');
+    expect(statements[4]).toBe('COMMIT');
+    expect(client.release).toHaveBeenCalledOnce();
+  });
+
+  it('rolls back and exposes a named conflict when the atomic insert conflicts', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    client.query
+      .mockResolvedValueOnce({ rows: [], rowCount: 0 })
+      .mockResolvedValueOnce({ rows: [], rowCount: 0 })
+      .mockResolvedValueOnce({ rows: [{ version: 2 }], rowCount: 1 })
+      .mockRejectedValueOnce(Object.assign(new Error('duplicate'), { code: '23505' }))
+      .mockResolvedValueOnce({ rows: [], rowCount: 0 });
+    const input = { ...preset };
+    delete (input as Partial<typeof input>).version;
+
+    await expect(dbCreatePlatformExportPresetVersion(input)).rejects.toMatchObject({
+      code: 'PLATFORM_EXPORT_PRESET_VERSION_CONFLICT',
+    });
+    expect(client.query).toHaveBeenCalledWith('ROLLBACK');
+    expect(client.release).toHaveBeenCalledOnce();
+    consoleError.mockRestore();
+  });
+
+  it('exposes a named storage error when the transaction connection cannot be opened', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    mocks.getPool.mockReturnValue({
+      connect: vi.fn().mockRejectedValue(new Error('connection unavailable')),
+    });
+    const input = { ...preset };
+    delete (input as Partial<typeof input>).version;
+
+    await expect(dbCreatePlatformExportPresetVersion(input)).rejects.toMatchObject({
+      code: 'PLATFORM_EXPORT_PRESET_STORAGE_UNAVAILABLE',
+    });
+    consoleError.mockRestore();
+  });
+
+  it('does not turn a storage read failure into an empty override set', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    mocks.execSql.mockRejectedValueOnce(new Error('database unavailable'));
+    const { dbListPlatformExportPresets } = await import('@/lib/db-storage');
+
+    await expect(dbListPlatformExportPresets()).rejects.toMatchObject({
+      code: 'PLATFORM_EXPORT_PRESET_STORAGE_UNAVAILABLE',
+    });
+    consoleError.mockRestore();
   });
 
   it('updates only enabled and updated_at for an existing version', async () => {

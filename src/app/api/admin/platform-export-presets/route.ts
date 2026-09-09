@@ -15,9 +15,25 @@ const CREATE_FIELDS = new Set([
 ]);
 const PATCH_FIELDS = new Set(['presetId', 'version', 'enabled']);
 const EXPORT_FORMATS = new Set<ExportFormat>(['png', 'jpeg', 'webp']);
+const POSTGRES_INTEGER_MAX = 2_147_483_647;
 
 function errorResponse(status: number, code: string, error: string): NextResponse {
   return NextResponse.json({ success: false, code, error }, { status });
+}
+
+function domainErrorResponse(error: unknown): NextResponse {
+  const code = (error as { code?: unknown })?.code;
+  if (code === 'PLATFORM_EXPORT_PRESET_NOT_FOUND') {
+    return errorResponse(404, code, 'Platform export preset version was not found');
+  }
+  if (code === 'PLATFORM_EXPORT_PRESET_VERSION_CONFLICT') {
+    return errorResponse(409, code, 'Platform export preset version conflicts with another write');
+  }
+  return errorResponse(
+    503,
+    'PLATFORM_EXPORT_PRESET_STORAGE_UNAVAILABLE',
+    'Platform export preset storage is unavailable',
+  );
 }
 
 async function requireAdministrator(request: NextRequest): Promise<NextResponse | null> {
@@ -66,7 +82,8 @@ function parsePatchInput(value: unknown): { presetId: string; version: number; e
   if (
     !boundedText(value.presetId, 64)
     || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(value.presetId)
-    || !Number.isInteger(value.version) || Number(value.version) < 1
+    || !Number.isSafeInteger(value.version) || Number(value.version) < 1
+    || Number(value.version) > POSTGRES_INTEGER_MAX
     || typeof value.enabled !== 'boolean'
   ) return null;
   return { presetId: value.presetId, version: value.version as number, enabled: value.enabled };
@@ -83,7 +100,11 @@ async function readJson(request: NextRequest): Promise<unknown> {
 export async function GET(request: NextRequest) {
   const denied = await requireAdministrator(request);
   if (denied) return denied;
-  return NextResponse.json({ success: true, presets: await listAllPlatformExportPresets() });
+  try {
+    return NextResponse.json({ success: true, presets: await listAllPlatformExportPresets() });
+  } catch (error) {
+    return domainErrorResponse(error);
+  }
 }
 
 export async function POST(request: NextRequest) {
@@ -94,12 +115,8 @@ export async function POST(request: NextRequest) {
   try {
     const preset = await createPlatformExportPresetVersion(input);
     return NextResponse.json({ success: true, preset }, { status: 201 });
-  } catch {
-    return errorResponse(
-      500,
-      'PLATFORM_EXPORT_PRESET_WRITE_FAILED',
-      'Unable to create platform export preset version',
-    );
+  } catch (error) {
+    return domainErrorResponse(error);
   }
 }
 
@@ -108,6 +125,10 @@ export async function PATCH(request: NextRequest) {
   if (denied) return denied;
   const input = parsePatchInput(await readJson(request));
   if (!input) return errorResponse(400, 'PLATFORM_EXPORT_PRESET_INVALID', 'Invalid platform export preset update');
-  const preset = await setPlatformExportPresetEnabled(input.presetId, input.version, input.enabled);
-  return NextResponse.json({ success: true, preset });
+  try {
+    const preset = await setPlatformExportPresetEnabled(input.presetId, input.version, input.enabled);
+    return NextResponse.json({ success: true, preset });
+  } catch (error) {
+    return domainErrorResponse(error);
+  }
 }

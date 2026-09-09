@@ -20,7 +20,7 @@ describe('versioned platform export presets', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.dbListPlatformExportPresets.mockResolvedValue([]);
-    mocks.dbCreatePlatformExportPresetVersion.mockImplementation(async preset => preset);
+    mocks.dbCreatePlatformExportPresetVersion.mockImplementation(async preset => ({ ...preset, version: 2 }));
     mocks.dbSetPlatformExportPresetEnabled.mockResolvedValue(true);
   });
 
@@ -50,11 +50,11 @@ describe('versioned platform export presets', () => {
 
     await expect(freezePlatformExportPresets(['instagram-post-v1'])).resolves.toEqual(frozen);
     expect(mocks.dbCreatePlatformExportPresetVersion).toHaveBeenCalledWith(
-      expect.objectContaining({ id: 'instagram-post', version: 2, width: 1200 }),
+      expect.objectContaining({ id: 'instagram-post', width: 1200 }),
     );
   });
 
-  it('returns only enabled latest versions in the public catalog', async () => {
+  it('returns all enabled versions in the public catalog', async () => {
     mocks.dbListPlatformExportPresets.mockResolvedValue([
       {
         id: 'instagram-post', version: 2, platform: 'instagram', usage: 'post',
@@ -72,7 +72,52 @@ describe('versioned platform export presets', () => {
 
     expect(enabled.every(item => item.enabled)).toBe(true);
     expect(enabled).toContainEqual(expect.objectContaining({ id: 'custom-banner', version: 1 }));
-    expect(enabled).not.toContainEqual(expect.objectContaining({ id: 'instagram-post' }));
+    expect(enabled).toContainEqual(expect.objectContaining({ id: 'instagram-post', version: 1 }));
+    expect(enabled).not.toContainEqual(expect.objectContaining({ id: 'instagram-post', version: 2 }));
+  });
+
+  it('returns every enabled version and can re-enable an exact historical version', async () => {
+    mocks.dbListPlatformExportPresets.mockResolvedValue([
+      {
+        id: 'instagram-post', version: 1, platform: 'instagram', usage: 'post',
+        label: 'Instagram 帖子', width: 1080, height: 1080,
+        recommendedFormat: 'jpeg', supportsTransparency: false, enabled: true,
+      },
+      {
+        id: 'instagram-post', version: 2, platform: 'instagram', usage: 'post',
+        label: 'Instagram 帖子新版', width: 1200, height: 1200,
+        recommendedFormat: 'jpeg', supportsTransparency: false, enabled: false,
+      },
+    ]);
+
+    await expect(listEnabledPlatformExportPresets()).resolves.toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: 'instagram-post', version: 1 })]),
+    );
+    await setPlatformExportPresetEnabled('instagram-post', 1, true);
+    expect(mocks.dbSetPlatformExportPresetEnabled).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'instagram-post', version: 1 }),
+      true,
+    );
+  });
+
+  it('fails closed when preset storage is unavailable', async () => {
+    mocks.dbListPlatformExportPresets.mockRejectedValue(new Error('database unavailable'));
+
+    await expect(listEnabledPlatformExportPresets()).rejects.toMatchObject({
+      code: 'PLATFORM_EXPORT_PRESET_STORAGE_UNAVAILABLE',
+    });
+  });
+
+  it('delegates version allocation atomically to storage without reading the current maximum', async () => {
+    await createPlatformExportPresetVersion({
+      id: 'custom-banner', platform: 'custom', usage: 'banner', label: '自定义横幅',
+      width: 1600, height: 900, recommendedFormat: 'png', supportsTransparency: true, enabled: true,
+    });
+
+    expect(mocks.dbListPlatformExportPresets).not.toHaveBeenCalled();
+    expect(mocks.dbCreatePlatformExportPresetVersion).toHaveBeenCalledWith(
+      expect.not.objectContaining({ version: expect.anything() }),
+    );
   });
 
   it('changes only enabled state and preserves immutable preset fields', async () => {
@@ -84,6 +129,17 @@ describe('versioned platform export presets', () => {
     await expect(listAllPlatformExportPresets()).resolves.toEqual(
       expect.arrayContaining([expect.objectContaining({ id: 'instagram-post', width: 1080 })]),
     );
+  });
+
+  it('preserves a named version conflict from an exact enabled-state update', async () => {
+    mocks.dbSetPlatformExportPresetEnabled.mockRejectedValue(Object.assign(
+      new Error('conflict'),
+      { code: 'PLATFORM_EXPORT_PRESET_VERSION_CONFLICT' },
+    ));
+
+    await expect(setPlatformExportPresetEnabled('instagram-post', 1, false)).rejects.toMatchObject({
+      code: 'PLATFORM_EXPORT_PRESET_VERSION_CONFLICT',
+    });
   });
 
   it('rejects unknown or malformed frozen references', async () => {

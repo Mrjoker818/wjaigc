@@ -12,7 +12,11 @@ import {
   resolveSelectedModelsStorageKind,
 } from './api-provider-selected-models-storage';
 import type { PoolClient } from 'pg';
-import type { FrozenPlatformExportPreset, PlatformExportPreset } from './multi-platform-export/types';
+import type {
+  CreatePlatformExportPresetVersionInput,
+  FrozenPlatformExportPreset,
+  PlatformExportPreset,
+} from './multi-platform-export/types';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -756,16 +760,38 @@ export async function dbListPlatformExportPresets(): Promise<PlatformExportPrese
     return (result.rows as unknown as DbPlatformExportPresetRow[]).map(mapPlatformExportPreset);
   } catch (error) {
     console.error('[db-storage] dbListPlatformExportPresets error:', error);
-    return [];
+    throw Object.assign(new Error('Platform export preset storage is unavailable'), {
+      code: 'PLATFORM_EXPORT_PRESET_STORAGE_UNAVAILABLE',
+      cause: error,
+    });
   }
 }
 
 export async function dbCreatePlatformExportPresetVersion(
-  preset: PlatformExportPreset,
-): Promise<PlatformExportPreset | null> {
+  preset: CreatePlatformExportPresetVersionInput,
+): Promise<PlatformExportPreset> {
+  let client: PoolClient | null = null;
   try {
+    client = await getPool().connect();
+    await client.query('BEGIN');
+    await client.query(
+      'SELECT pg_advisory_xact_lock(hashtext($1))',
+      [preset.id],
+    );
+    const versionResult = await client.query(
+      `SELECT COALESCE(MAX(version), 0) + 1 AS version
+       FROM wujie_platform_export_presets
+       WHERE preset_id = $1`,
+      [preset.id],
+    );
+    const version = Number(versionResult.rows[0]?.version);
+    if (!Number.isSafeInteger(version) || version < 1 || version > 2_147_483_647) {
+      throw Object.assign(new Error('Platform export preset version range exhausted'), {
+        code: 'PLATFORM_EXPORT_PRESET_VERSION_CONFLICT',
+      });
+    }
     const now = Date.now();
-    const result = await execSql(`
+    const result = await client.query(`
       INSERT INTO wujie_platform_export_presets (
         preset_id, version, platform, usage, label, width, height,
         recommended_format, supports_transparency, enabled, created_at, updated_at
@@ -774,15 +800,36 @@ export async function dbCreatePlatformExportPresetVersion(
       RETURNING preset_id, version, platform, usage, label, width, height,
                 recommended_format, supports_transparency, enabled
     `, [
-      preset.id, preset.version, preset.platform, preset.usage, preset.label,
+      preset.id, version, preset.platform, preset.usage, preset.label,
       preset.width, preset.height, preset.recommendedFormat,
       preset.supportsTransparency, preset.enabled, now,
     ]);
     const row = (result.rows as unknown as DbPlatformExportPresetRow[])[0];
-    return row ? mapPlatformExportPreset(row) : null;
+    if (!row) {
+      throw Object.assign(new Error('Platform export preset version was not created'), {
+        code: 'PLATFORM_EXPORT_PRESET_VERSION_CONFLICT',
+      });
+    }
+    await client.query('COMMIT');
+    return mapPlatformExportPreset(row);
   } catch (error) {
+    if (client) {
+      try { await client.query('ROLLBACK'); } catch { /* preserve original error */ }
+    }
     console.error('[db-storage] dbCreatePlatformExportPresetVersion error:', error);
-    return null;
+    const code = (error as { code?: unknown })?.code;
+    if (code === '23505' || code === 'PLATFORM_EXPORT_PRESET_VERSION_CONFLICT') {
+      throw Object.assign(new Error('Platform export preset version conflict'), {
+        code: 'PLATFORM_EXPORT_PRESET_VERSION_CONFLICT',
+        cause: error,
+      });
+    }
+    throw Object.assign(new Error('Platform export preset storage is unavailable'), {
+      code: 'PLATFORM_EXPORT_PRESET_STORAGE_UNAVAILABLE',
+      cause: error,
+    });
+  } finally {
+    client?.release();
   }
 }
 
@@ -808,7 +855,10 @@ export async function dbSetPlatformExportPresetEnabled(
     return true;
   } catch (error) {
     console.error('[db-storage] dbSetPlatformExportPresetEnabled error:', error);
-    return false;
+    throw Object.assign(new Error('Platform export preset storage is unavailable'), {
+      code: 'PLATFORM_EXPORT_PRESET_STORAGE_UNAVAILABLE',
+      cause: error,
+    });
   }
 }
 

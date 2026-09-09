@@ -10,6 +10,14 @@ export async function GET(_request: NextRequest) {
   if (!settings.multiPlatformExportEnabled) {
     return NextResponse.json({ success: true, presets: [] });
   }
-  const presets = await listEnabledPlatformExportPresets();
-  return NextResponse.json({ success: true, presets });
+  try {
+    const presets = await listEnabledPlatformExportPresets();
+    return NextResponse.json({ success: true, presets });
+  } catch {
+    return NextResponse.json({
+      success: false,
+      code: 'PLATFORM_EXPORT_PRESET_STORAGE_UNAVAILABLE',
+      error: 'Platform export presets are temporarily unavailable',
+    }, { status: 503 });
+  }
 }

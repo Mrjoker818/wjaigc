@@ -41,4 +41,20 @@ describe('GET /api/platform-export-presets', () => {
     expect(await response.json()).toEqual({ success: true, presets: [] });
     expect(mocks.listEnabledPlatformExportPresets).not.toHaveBeenCalled();
   });
+
+  it('fails closed with a structured response when preset storage is unavailable', async () => {
+    mocks.listEnabledPlatformExportPresets.mockRejectedValue(Object.assign(
+      new Error('database unavailable'),
+      { code: 'PLATFORM_EXPORT_PRESET_STORAGE_UNAVAILABLE' },
+    ));
+
+    const response = await GET(new NextRequest('http://localhost/api/platform-export-presets'));
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({
+      success: false,
+      code: 'PLATFORM_EXPORT_PRESET_STORAGE_UNAVAILABLE',
+      error: 'Platform export presets are temporarily unavailable',
+    });
+  });
 });

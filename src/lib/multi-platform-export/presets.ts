@@ -76,7 +76,15 @@ function freezePreset(preset: PlatformExportPreset): FrozenPlatformExportPreset 
 }
 
 export async function listAllPlatformExportPresets(): Promise<PlatformExportPreset[]> {
-  const stored = await dbListPlatformExportPresets();
+  let stored: PlatformExportPreset[];
+  try {
+    stored = await dbListPlatformExportPresets();
+  } catch (error) {
+    throw new PlatformExportPresetError(
+      'PLATFORM_EXPORT_PRESET_STORAGE_UNAVAILABLE',
+      error instanceof Error ? error.message : 'Platform export preset storage is unavailable',
+    );
+  }
   const versions = new Map<string, PlatformExportPreset>();
   for (const preset of DEFAULT_PLATFORM_EXPORT_PRESETS) {
     versions.set(presetReference(preset), { ...preset });
@@ -91,12 +99,7 @@ export async function listAllPlatformExportPresets(): Promise<PlatformExportPres
 
 export async function listEnabledPlatformExportPresets(): Promise<PlatformExportPreset[]> {
   const all = await listAllPlatformExportPresets();
-  const latestById = new Map<string, PlatformExportPreset>();
-  for (const preset of all) {
-    const current = latestById.get(preset.id);
-    if (!current || preset.version > current.version) latestById.set(preset.id, preset);
-  }
-  return [...latestById.values()].filter(preset => preset.enabled);
+  return all.filter(preset => preset.enabled);
 }
 
 export async function freezePlatformExportPresets(
@@ -125,18 +128,20 @@ export async function freezePlatformExportPresets(
 export async function createPlatformExportPresetVersion(
   input: CreatePlatformExportPresetVersionInput,
 ): Promise<PlatformExportPreset> {
-  const all = await listAllPlatformExportPresets();
-  const version = all
-    .filter(preset => preset.id === input.id)
-    .reduce((highest, preset) => Math.max(highest, preset.version), 0) + 1;
-  const created = await dbCreatePlatformExportPresetVersion({ ...input, version });
-  if (!created) {
+  try {
+    return await dbCreatePlatformExportPresetVersion(input);
+  } catch (error) {
+    if ((error as { code?: unknown })?.code === 'PLATFORM_EXPORT_PRESET_VERSION_CONFLICT') {
+      throw new PlatformExportPresetError(
+        'PLATFORM_EXPORT_PRESET_VERSION_CONFLICT',
+        `Platform export preset version conflicts with another write: ${input.id}`,
+      );
+    }
     throw new PlatformExportPresetError(
-      'PLATFORM_EXPORT_PRESET_VERSION_CONFLICT',
-      `Platform export preset version already exists: ${input.id}-v${version}`,
+      'PLATFORM_EXPORT_PRESET_STORAGE_UNAVAILABLE',
+      'Platform export preset storage is unavailable',
     );
   }
-  return created;
 }
 
 export async function setPlatformExportPresetEnabled(
@@ -146,10 +151,18 @@ export async function setPlatformExportPresetEnabled(
 ): Promise<PlatformExportPreset> {
   const [preset] = await freezePlatformExportPresets([`${id}-v${version}`]);
   const updated = { ...preset, enabled };
-  if (!await dbSetPlatformExportPresetEnabled(preset, enabled)) {
+  try {
+    await dbSetPlatformExportPresetEnabled(preset, enabled);
+  } catch (error) {
+    if ((error as { code?: unknown })?.code === 'PLATFORM_EXPORT_PRESET_VERSION_CONFLICT') {
+      throw new PlatformExportPresetError(
+        'PLATFORM_EXPORT_PRESET_VERSION_CONFLICT',
+        `Platform export preset version conflicts with another write: ${id}-v${version}`,
+      );
+    }
     throw new PlatformExportPresetError(
-      'PLATFORM_EXPORT_PRESET_UPDATE_FAILED',
-      `Unable to update platform export preset: ${id}-v${version}`,
+      'PLATFORM_EXPORT_PRESET_STORAGE_UNAVAILABLE',
+      'Platform export preset storage is unavailable',
     );
   }
   return updated;
