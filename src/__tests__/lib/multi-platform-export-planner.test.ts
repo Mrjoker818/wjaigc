@@ -1,7 +1,10 @@
 import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 
-import { planMultiPlatformExport } from '@/lib/multi-platform-export/planner';
+import {
+  parseExportPlanningContext,
+  planMultiPlatformExport,
+} from '@/lib/multi-platform-export/planner';
 import type {
   ExportPlanningContext,
   ExportSourceDescriptor,
@@ -77,6 +80,71 @@ describe('multi-platform export planner', () => {
     expect(digestPayload.frozenPresets).toEqual(presets);
   });
 
+  it('hashes an explicit canonical DTO independent of property insertion order and runtime extras', () => {
+    const reorderedSource = {
+      runtimeNote: 'ignored',
+      hasTransparency: false,
+      assetName: '乙',
+      versionId: 'version-b',
+    } as ExportSourceDescriptor;
+    const reorderedPreset = {
+      runtimeNote: 'ignored', enabled: true, supportsTransparency: false,
+      recommendedFormat: 'jpeg', height: 1080, width: 1080, label: '方图',
+      usage: 'post', platform: 'instagram', version: 1, id: 'square',
+    } as FrozenPlatformExportPreset;
+    const reorderedContext = {
+      skillVersion: 1,
+      skillId: ' preset-multi-platform-export ',
+      projectName: ' 中文项目 ',
+      projectId: ' project-a ',
+      userId: ' user-a ',
+      runtimeNote: 'ignored',
+    } as ExportPlanningContext;
+    const baseline = planMultiPlatformExport(input, sources, presets, planningContext);
+    const equivalent = planMultiPlatformExport(
+      input,
+      [reorderedSource, { ...sources[1], versionId: 'version-a', assetName: '甲' }],
+      [reorderedPreset, { ...presets[1], runtimeNote: 'ignored' } as FrozenPlatformExportPreset],
+      reorderedContext,
+    );
+
+    expect(equivalent.requestDigest).toBe(baseline.requestDigest);
+    expect(Object.keys(equivalent.digestPayload.sources[0])).toEqual([
+      'versionId', 'assetName', 'hasTransparency',
+    ]);
+    expect(Object.keys(equivalent.digestPayload.frozenPresets[0])).toEqual([
+      'id', 'version', 'platform', 'usage', 'label', 'width', 'height',
+      'recommendedFormat', 'supportsTransparency', 'enabled',
+    ]);
+    expect(equivalent.digestPayload).toMatchObject({
+      userId: 'user-a', projectId: 'project-a', projectName: '中文项目',
+      skillId: 'preset-multi-platform-export', skillVersion: 1,
+    });
+    expect(equivalent.outputs[0].outputFilename.startsWith('乙-instagram')).toBe(true);
+
+    expect(planMultiPlatformExport(input, [
+      { ...sources[0], assetName: '甲' },
+      { ...sources[1], versionId: 'version-b', assetName: '不同名称' },
+    ], presets, planningContext).requestDigest).not.toBe(baseline.requestDigest);
+    expect(planMultiPlatformExport(input, sources, [
+      { ...presets[0], supportsTransparency: true }, presets[1],
+    ], planningContext).requestDigest).not.toBe(baseline.requestDigest);
+  });
+
+  it.each([
+    [{ ...planningContext, userId: 1 }, 'EXPORT_USER_ID_INVALID'],
+    [{ ...planningContext, userId: 'bad/id' }, 'EXPORT_USER_ID_INVALID'],
+    [{ ...planningContext, projectId: ' ' }, 'EXPORT_PROJECT_ID_INVALID'],
+    [{ ...planningContext, projectName: 1 }, 'EXPORT_PROJECT_NAME_INVALID'],
+    [{ ...planningContext, projectName: 'x'.repeat(257) }, 'EXPORT_PROJECT_NAME_INVALID'],
+    [{ ...planningContext, skillId: 'bad skill' }, 'EXPORT_SKILL_ID_INVALID'],
+    [{ ...planningContext, skillVersion: 0 }, 'EXPORT_SKILL_VERSION_INVALID'],
+    [{ ...planningContext, skillVersion: 2_147_483_648 }, 'EXPORT_SKILL_VERSION_INVALID'],
+  ] as const)('rejects invalid planning context with named error %s', (value, code) => {
+    expect(() => parseExportPlanningContext(value)).toThrow(code);
+    expect(() => planMultiPlatformExport(input, sources, presets, value as ExportPlanningContext)).toThrow(code);
+  });
+
   it('rejects transparent output when the selected format cannot preserve alpha', () => {
     expect(() => planMultiPlatformExport(
       { ...input, sourceAssetVersionIds: ['version-a'], targetPresetIds: ['square-v1'], background: 'transparent' },
@@ -84,6 +152,30 @@ describe('multi-platform export planner', () => {
       [presets[0]],
       planningContext,
     )).toThrow('EXPORT_TRANSPARENCY_FORMAT_CONFLICT');
+  });
+
+  it('derives transparency from RGBA alpha and source alpha without rejecting opaque output', () => {
+    const jpegPreset = presets[0];
+    const oneSourceInput = {
+      ...input,
+      sourceAssetVersionIds: ['version-a'],
+      targetPresetIds: ['square-v1'],
+    };
+    expect(() => planMultiPlatformExport(
+      { ...oneSourceInput, background: '#ffffff00' }, [sources[0]], [jpegPreset], planningContext,
+    )).toThrow('EXPORT_TRANSPARENCY_FORMAT_CONFLICT');
+    expect(() => planMultiPlatformExport(
+      { ...oneSourceInput, background: '#ffffff80' }, [sources[0]], [jpegPreset], planningContext,
+    )).toThrow('EXPORT_TRANSPARENCY_FORMAT_CONFLICT');
+    expect(() => planMultiPlatformExport(
+      { ...oneSourceInput, background: '#ffffffff' },
+      [{ ...sources[0], hasTransparency: true }],
+      [jpegPreset],
+      planningContext,
+    )).toThrow('EXPORT_TRANSPARENCY_FORMAT_CONFLICT');
+    expect(() => planMultiPlatformExport(
+      { ...oneSourceInput, background: '#ffffffff' }, [sources[0]], [jpegPreset], planningContext,
+    )).not.toThrow();
   });
 
   it('enforces source, target, output and pixel budgets defensively', () => {
@@ -126,6 +218,13 @@ describe('multi-platform export planner', () => {
       batchPresets,
       planningContext,
     )).toThrow('EXPORT_BATCH_PIXEL_LIMIT');
+
+    expect(() => planMultiPlatformExport(
+      { ...input, sourceAssetVersionIds: ['version-a'], targetPresetIds: ['square-v2147483648'] },
+      [sources[0]],
+      [{ ...presets[0], version: 2_147_483_648 }],
+      planningContext,
+    )).toThrow('EXPORT_PRESET_VERSION_INVALID');
   });
 
   it('rejects missing, duplicate or mismatched source and frozen preset descriptors', () => {

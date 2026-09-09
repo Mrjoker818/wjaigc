@@ -47,6 +47,25 @@ describe('multi-platform export naming', () => {
     expect(renderExportFilename('{asset}', context, usedNames)).toBe(`主视觉-${suffix}.png`);
   });
 
+  it('extends a colliding six-character digest until every filename is unique', () => {
+    const usedNames = new Set<string>();
+    const firstCollision = { ...context, sourceVersionId: 'version-112' };
+    const secondCollision = { ...context, sourceVersionId: 'version-4041' };
+
+    expect(renderExportFilename('{asset}', firstCollision, usedNames)).toBe('主视觉.png');
+    expect(renderExportFilename('{asset}', firstCollision, usedNames)).toBe('主视觉-0c461b.png');
+    expect(renderExportFilename('{asset}', secondCollision, usedNames)).toBe('主视觉-0c461b39.png');
+    expect(new Set(usedNames).size).toBe(3);
+  });
+
+  it('truncates by Unicode code point without splitting a surrogate pair', () => {
+    const sanitized = sanitizeExportBaseName(`${'a'.repeat(119)}😀tail`);
+
+    expect(Array.from(sanitized)).toHaveLength(120);
+    expect(sanitized.endsWith('😀')).toBe(true);
+    expect(sanitized).not.toContain('\uFFFD');
+  });
+
   it('never allows a template to create directories', () => {
     const filename = renderExportFilename('../../{asset}', context, new Set());
     expect(filename).not.toContain('..');

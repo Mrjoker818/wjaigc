@@ -16,7 +16,8 @@ const TEMPLATE_TOKEN = /\{([^{}]+)\}/g;
 const ALLOWED_TEMPLATE_TOKENS = new Set([
   'project', 'asset', 'platform', 'usage', 'size', 'index',
 ]);
-const PRESET_REFERENCE = /^[a-z0-9](?:[a-z0-9-]{0,126}[a-z0-9])?-v[1-9]\d{0,9}$/;
+const MAX_POSTGRES_INTEGER = 2_147_483_647;
+const PRESET_REFERENCE = /^([a-z0-9](?:[a-z0-9-]{0,126}[a-z0-9])?)-v([1-9]\d{0,9})$/;
 
 export class MultiPlatformExportInputError extends Error {
   constructor(readonly code: string) {
@@ -79,6 +80,13 @@ function normalizeNamingTemplate(value: unknown): string {
   return template;
 }
 
+function isPresetReference(value: string): boolean {
+  const match = PRESET_REFERENCE.exec(value);
+  if (!match) return false;
+  const version = Number(match[2]);
+  return Number.isSafeInteger(version) && version <= MAX_POSTGRES_INTEGER;
+}
+
 export function parseMultiPlatformExportInput(value: unknown): MultiPlatformExportInput {
   if (serializedByteLength(value) > MAX_SERIALIZED_INPUT_BYTES) {
     fail('EXPORT_INPUT_SERIALIZED_LIMIT_EXCEEDED');
@@ -105,7 +113,7 @@ export function parseMultiPlatformExportInput(value: unknown): MultiPlatformExpo
     countCode: 'EXPORT_TARGET_COUNT_INVALID',
     invalidCode: 'EXPORT_TARGET_ID_INVALID',
     duplicateCode: 'EXPORT_TARGET_ID_DUPLICATE',
-    validate: id => PRESET_REFERENCE.test(id),
+    validate: isPresetReference,
   });
   if (record.fit !== 'cover' && record.fit !== 'contain') fail('EXPORT_FIT_INVALID');
 

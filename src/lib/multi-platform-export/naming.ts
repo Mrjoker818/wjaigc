@@ -12,19 +12,20 @@ export function sanitizeExportBaseName(value: string): string {
     .replace(/[\\/:*?"<>|]+/g, '-')
     .replace(/\s+/g, ' ')
     .replace(/-+/g, '-')
-    .replace(/^[ .-]+|[ .-]+$/g, '')
+    .replace(/^[ .-]+|[ .-]+$/g, '');
+  sanitized = Array.from(sanitized)
     .slice(0, MAX_EXPORT_BASE_NAME_LENGTH)
+    .join('')
     .replace(/[ .]+$/g, '');
 
   if (!sanitized || WINDOWS_RESERVED_NAME.test(sanitized)) sanitized = 'asset';
   return sanitized;
 }
 
-function duplicateSuffix(context: ExportFilenameContext): string {
+function duplicateDigest(context: ExportFilenameContext): string {
   return createHash('sha256')
     .update(`${context.sourceVersionId}:${context.presetId}:${context.presetVersion}`)
-    .digest('hex')
-    .slice(0, 6);
+    .digest('hex');
 }
 
 export function renderExportFilename(
@@ -46,9 +47,23 @@ export function renderExportFilename(
   const baseName = sanitizeExportBaseName(rendered);
   const extension = context.outputFormat;
   let filename = `${baseName}.${extension}`;
-  if (usedNames.has(filename.toLocaleLowerCase('en-US'))) {
-    filename = `${baseName}-${duplicateSuffix(context)}.${extension}`;
+  const normalizedName = (value: string) => value.toLocaleLowerCase('en-US');
+  if (usedNames.has(normalizedName(filename))) {
+    const digest = duplicateDigest(context);
+    let suffixLength = 6;
+    while (suffixLength <= digest.length) {
+      filename = `${baseName}-${digest.slice(0, suffixLength)}.${extension}`;
+      if (!usedNames.has(normalizedName(filename))) break;
+      suffixLength += 2;
+    }
+    if (usedNames.has(normalizedName(filename))) {
+      let sequence = 2;
+      do {
+        filename = `${baseName}-${digest}-${sequence}.${extension}`;
+        sequence += 1;
+      } while (usedNames.has(normalizedName(filename)));
+    }
   }
-  usedNames.add(filename.toLocaleLowerCase('en-US'));
+  usedNames.add(normalizedName(filename));
   return filename;
 }

@@ -59,6 +59,14 @@ describe('multi-platform export input schema', () => {
       ...validInput,
       targetPresetIds: ['instagram-post'],
     })).toThrow('EXPORT_TARGET_ID_INVALID');
+    expect(() => parseMultiPlatformExportInput({
+      ...validInput,
+      targetPresetIds: ['instagram-post-v2147483648'],
+    })).toThrow('EXPORT_TARGET_ID_INVALID');
+    expect(parseMultiPlatformExportInput({
+      ...validInput,
+      targetPresetIds: ['instagram-post-v2147483647'],
+    }).targetPresetIds).toEqual(['instagram-post-v2147483647']);
   });
 
   it('rejects an oversized serialized request before field parsing', () => {

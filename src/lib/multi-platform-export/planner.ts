@@ -14,6 +14,10 @@ const MAX_TARGET_COUNT = 20;
 const MAX_OUTPUT_COUNT = 100;
 const MAX_OUTPUT_PIXELS = 67_108_864;
 const MAX_BATCH_PIXELS = 402_653_184;
+const MAX_POSTGRES_INTEGER = 2_147_483_647;
+const MAX_CONTEXT_ID_LENGTH = 256;
+const MAX_PROJECT_NAME_LENGTH = 256;
+const CONTEXT_ID = /^[A-Za-z0-9._:-]+$/;
 
 export class MultiPlatformExportPlanError extends Error {
   constructor(readonly code: string) {
@@ -30,16 +34,44 @@ function presetReference(preset: FrozenPlatformExportPreset): string {
   return `${preset.id}-v${preset.version}`;
 }
 
-function requirePlanningContext(context: ExportPlanningContext): void {
+function parseContextId(value: unknown, code: string): string {
+  if (typeof value !== 'string') fail(code);
+  const normalized = value.trim();
   if (
-    !context.userId.trim()
-    || !context.projectId.trim()
-    || !context.skillId.trim()
-    || !Number.isSafeInteger(context.skillVersion)
-    || context.skillVersion < 1
-  ) {
+    !normalized
+    || normalized.length > MAX_CONTEXT_ID_LENGTH
+    || !CONTEXT_ID.test(normalized)
+  ) fail(code);
+  return normalized;
+}
+
+export function parseExportPlanningContext(value: unknown): ExportPlanningContext {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
     fail('EXPORT_PLANNING_CONTEXT_INVALID');
   }
+  const context = value as Record<string, unknown>;
+  const userId = parseContextId(context.userId, 'EXPORT_USER_ID_INVALID');
+  const projectId = parseContextId(context.projectId, 'EXPORT_PROJECT_ID_INVALID');
+  const skillId = parseContextId(context.skillId, 'EXPORT_SKILL_ID_INVALID');
+  if (typeof context.projectName !== 'string') fail('EXPORT_PROJECT_NAME_INVALID');
+  const projectName = context.projectName.trim();
+  if (
+    !projectName
+    || projectName.length > MAX_PROJECT_NAME_LENGTH
+    || /[\u0000-\u001f\u007f]/u.test(projectName)
+  ) fail('EXPORT_PROJECT_NAME_INVALID');
+  if (
+    !Number.isSafeInteger(context.skillVersion)
+    || (context.skillVersion as number) < 1
+    || (context.skillVersion as number) > MAX_POSTGRES_INTEGER
+  ) fail('EXPORT_SKILL_VERSION_INVALID');
+  return {
+    userId,
+    projectId,
+    projectName,
+    skillId,
+    skillVersion: context.skillVersion as number,
+  };
 }
 
 function orderSources(
@@ -63,6 +95,11 @@ function validatePresets(
   const seen = new Set<string>();
   for (let index = 0; index < presets.length; index += 1) {
     const preset = presets[index];
+    if (
+      !Number.isSafeInteger(preset.version)
+      || preset.version < 1
+      || preset.version > MAX_POSTGRES_INTEGER
+    ) fail('EXPORT_PRESET_VERSION_INVALID');
     const reference = presetReference(preset);
     if (seen.has(reference) || reference !== input.targetPresetIds[index]) {
       fail('EXPORT_PRESET_DESCRIPTOR_MISMATCH');
@@ -86,7 +123,7 @@ export function planMultiPlatformExport(
   frozenPresets: readonly FrozenPlatformExportPreset[],
   context: ExportPlanningContext,
 ): ExportPlan {
-  requirePlanningContext(context);
+  const normalizedContext = parseExportPlanningContext(context);
   if (input.sourceAssetVersionIds.length < 1 || input.sourceAssetVersionIds.length > MAX_SOURCE_COUNT) {
     fail('EXPORT_SOURCE_COUNT_INVALID');
   }
@@ -101,7 +138,10 @@ export function planMultiPlatformExport(
   const usedNames = new Set<string>();
   let totalPixels = 0;
   const outputs = orderedSources.flatMap((source, sourceIndex) => orderedPresets.map(preset => {
-    if (input.background === 'transparent' && (
+    const backgroundNeedsTransparency = input.background === 'transparent'
+      || input.background.slice(-2).toLowerCase() !== 'ff';
+    const needsTransparency = backgroundNeedsTransparency || source.hasTransparency;
+    if (needsTransparency && (
       !preset.supportsTransparency || preset.recommendedFormat === 'jpeg'
     )) {
       fail('EXPORT_TRANSPARENCY_FORMAT_CONFLICT');
@@ -113,7 +153,7 @@ export function planMultiPlatformExport(
     totalPixels += pixelCount;
     if (totalPixels > MAX_BATCH_PIXELS) fail('EXPORT_BATCH_PIXEL_LIMIT');
     const outputFilename = renderExportFilename(input.namingTemplate, {
-      project: context.projectName,
+      project: normalizedContext.projectName,
       asset: source.assetName,
       platform: preset.platform,
       usage: preset.usage,
@@ -140,14 +180,29 @@ export function planMultiPlatformExport(
   }));
 
   const digestPayload: ExportDigestPayload = {
-    userId: context.userId,
-    projectId: context.projectId,
-    projectName: context.projectName,
-    skillId: context.skillId,
-    skillVersion: context.skillVersion,
+    userId: normalizedContext.userId,
+    projectId: normalizedContext.projectId,
+    projectName: normalizedContext.projectName,
+    skillId: normalizedContext.skillId,
+    skillVersion: normalizedContext.skillVersion,
     sourceAssetVersionIds: [...input.sourceAssetVersionIds],
-    sources: orderedSources.map(source => ({ ...source })),
-    frozenPresets: orderedPresets.map(preset => ({ ...preset })),
+    sources: orderedSources.map(source => ({
+      versionId: source.versionId,
+      assetName: source.assetName,
+      hasTransparency: source.hasTransparency,
+    })),
+    frozenPresets: orderedPresets.map(preset => ({
+      id: preset.id,
+      version: preset.version,
+      platform: preset.platform,
+      usage: preset.usage,
+      label: preset.label,
+      width: preset.width,
+      height: preset.height,
+      recommendedFormat: preset.recommendedFormat,
+      supportsTransparency: preset.supportsTransparency,
+      enabled: preset.enabled,
+    })),
     fit: input.fit,
     background: input.background,
     namingTemplate: input.namingTemplate,
