@@ -236,6 +236,45 @@ describe('multi-platform export artifacts', () => {
     expect(cleanup).toHaveBeenCalledTimes(2);
   });
 
+  it('rechecks cancellation after image persistence and never publishes a DB version', async () => {
+    const controller = new AbortController();
+    const cleanup = vi.fn(async () => undefined);
+    const bytes = Buffer.from('png');
+    const checksum = createHash('sha256').update(bytes).digest('hex');
+    const service = assetServiceDouble();
+    const persistBytes = vi.fn(async () => {
+      controller.abort(new DOMException('cancelled', 'AbortError'));
+      return { ...persistedFile('post.png', 'image/png', bytes), checksum, createdThisCall: true, cleanup };
+    });
+    await expect(persistExportImageVersion({
+      actorUserId: 'user-1', projectId: 'project-1', runId: 'run-cancel', sourceAssetVersionId: 'source-v1',
+      presetId: 'post', presetVersion: 1, platform: 'instagram', usage: 'post', width: 10, height: 10,
+      fit: 'cover', outputFormat: 'png', outputFilename: 'post.png', requestDigest: 'd'.repeat(64),
+      transformed: { bytes, mimeType: 'image/png', sha256: checksum }, signal: controller.signal,
+      assetService: service, persistBytes,
+    })).rejects.toMatchObject({ name: 'AbortError' });
+    expect(cleanup).toHaveBeenCalledOnce();
+    expect(service.createAssetVersion).not.toHaveBeenCalled();
+  });
+
+  it('rechecks cancellation after document persistence and never publishes manifest or ZIP versions', async () => {
+    const controller = new AbortController();
+    const cleanup = vi.fn(async () => undefined);
+    const service = assetServiceDouble();
+    const persistBytes = vi.fn(async ({ bytes, filename, mimeType }: { bytes: Buffer; filename: string; mimeType: string }) => {
+      controller.abort(new DOMException('cancelled', 'AbortError'));
+      return { ...persistedFile(filename, mimeType, bytes), createdThisCall: true, cleanup };
+    });
+    await expect(persistExportArtifacts({
+      actorUserId: 'user-1', projectId: 'project-1', runId: 'run-cancel', requestDigest: 'a'.repeat(64),
+      createdAt: '2026-09-09T00:00:00.000Z', frozenParameters: {}, images: [],
+      failures: [{ sourceAssetVersionId: 'source-v1', code: 'EXPORT_FAILED', retryable: false }],
+      signal: controller.signal, assetService: service, persistBytes,
+    })).rejects.toMatchObject({ name: 'AbortError' });
+    expect(cleanup).toHaveBeenCalledOnce();
+    expect(service.createAssetVersionsAtomically).not.toHaveBeenCalled();
+  });
+
   it('rejects the same output idempotency key when transformed bytes change', async () => {
     const service = assetServiceDouble();
     const persistBytes = vi.fn(async ({ bytes, filename, mimeType }: { bytes: Buffer; filename: string; mimeType: string }) => ({

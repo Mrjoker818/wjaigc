@@ -66,6 +66,7 @@ export async function persistExportImageVersion(input: PersistExportImageVersion
   };
   let created: Awaited<ReturnType<ExportAssetService['createAssetVersion']>>;
   try {
+    input.signal?.throwIfAborted();
     created = await (input.assetService ?? createAssetService()).createAssetVersion({
       actorUserId: input.actorUserId, projectId: input.projectId, kind: 'image', file,
       parentVersionIds: [input.sourceAssetVersionId],
@@ -189,7 +190,9 @@ export async function persistExportArtifacts(input: PersistExportArtifactsInput)
   let zipFile: ManagedAssetFile | undefined;
   try {
     manifestFile = await persist({ bytes: Buffer.from(manifestJson), filename: 'manifest.json', mimeType: 'application/json', signal: input.signal });
+    input.signal?.throwIfAborted();
     zipFile = await persist({ bytes: zipBytes, filename: 'multi-platform-export.zip', mimeType: 'application/zip', signal: input.signal });
+    input.signal?.throwIfAborted();
   } catch (error) {
     await Promise.all([cleanupCreatedFile(manifestFile), cleanupCreatedFile(zipFile)]);
     throw error;
@@ -219,6 +222,7 @@ export async function persistExportArtifacts(input: PersistExportArtifactsInput)
   };
   let documents: Awaited<ReturnType<ExportAssetService['createAssetVersionsAtomically']>>;
   try {
+    input.signal?.throwIfAborted();
     documents = await service.createAssetVersionsAtomically([
       documentInput('manifest', manifestFile),
       documentInput('zip', zipFile),

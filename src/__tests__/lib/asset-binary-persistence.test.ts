@@ -1,4 +1,5 @@
 import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -20,7 +21,8 @@ vi.mock('@/lib/server-data-root', () => ({
   getServerDataRoot: mocks.getServerDataRoot,
 }));
 
-import { persistAssetBytes } from '@/lib/asset-core/binary-persistence';
+import { persistAssetBytes, recoverExportAssetBytes } from '@/lib/asset-core/binary-persistence';
+import { assetBinaryFileOps } from '@/lib/asset-core/binary-file-ops';
 
 describe('generic asset binary persistence', () => {
   let root: string;
@@ -143,5 +145,55 @@ describe('generic asset binary persistence', () => {
 
     await expect(readFile(join(root, 'exports', localName))).rejects.toMatchObject({ code: 'ENOENT' });
     expect(s3Cleanup).toHaveBeenCalledOnce();
+  });
+
+  it('allows cleanup to retry when S3 deletion initially fails', async () => {
+    const s3Cleanup = vi.fn()
+      .mockRejectedValueOnce(new Error('delete unavailable'))
+      .mockResolvedValueOnce(undefined);
+    mocks.uploadBinaryToS3.mockImplementationOnce(async (_bytes: Buffer, filename: string) => ({
+      storageKey: `exports/${filename}`, createdThisCall: true, cleanup: s3Cleanup,
+    }));
+    const persisted = await persistAssetBytes({ bytes: Buffer.from('{}'), filename: 'manifest.json', mimeType: 'application/json' });
+    await expect(persisted.cleanup()).rejects.toThrow('delete unavailable');
+    await expect(persisted.cleanup()).resolves.toBeUndefined();
+    expect(s3Cleanup).toHaveBeenCalledTimes(2);
+  });
+
+  it('removes a just-published target when temporary unlink fails after linking', async () => {
+    const originalRm = assetBinaryFileOps.rm;
+    let failed = false;
+    const rmSpy = vi.spyOn(assetBinaryFileOps, 'rm').mockImplementation(async (filePath, options) => {
+      if (!failed && String(filePath).endsWith('.tmp')) {
+        failed = true;
+        throw new Error('temporary unlink failed');
+      }
+      return originalRm(filePath, options);
+    });
+    await expect(persistAssetBytes({ bytes: Buffer.from('{}'), filename: 'manifest.json', mimeType: 'application/json' }))
+      .rejects.toThrow('temporary unlink failed');
+    expect((await readdir(join(root, 'exports'))).filter(name => !name.startsWith('.'))).toEqual([]);
+    rmSpy.mockRestore();
+  });
+
+  it('rejects recovery bytes whose digest does not match the content-addressed filename', async () => {
+    await expect(recoverExportAssetBytes({
+      bytes: Buffer.from('{}'),
+      filename: `${'0'.repeat(16)}-manifest.json`,
+      mimeType: 'application/json',
+    })).rejects.toThrow('ASSET_RECOVERY_CHECKSUM_MISMATCH');
+    expect(await readdir(root)).toEqual([]);
+  });
+
+  it('atomically publishes concurrent recoveries without leaving temporary files', async () => {
+    const bytes = Buffer.from('{"schemaVersion":1}');
+    const filename = `${createHash('sha256').update(bytes).digest('hex').slice(0, 16)}-manifest.json`;
+    await Promise.all(Array.from({ length: 4 }, () => recoverExportAssetBytes({
+      bytes,
+      filename,
+      mimeType: 'application/json',
+    })));
+    expect(await readFile(join(root, 'exports', filename))).toEqual(bytes);
+    expect(await readdir(join(root, 'exports'))).toEqual([filename]);
   });
 });

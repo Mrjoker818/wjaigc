@@ -4,6 +4,7 @@ import { downloadImageFromS3, getS3PresignedUrl, deriveS3Key, readBinaryFromS3Ex
 import { getImageSourceUrl } from '@/lib/image-source-map';
 import { isAllowedPublicMediaExtension } from '@/lib/media-validation';
 import { readExactRecoveryMedia } from '@/lib/asset-core/recovery-media';
+import { recoverExportAssetBytes } from '@/lib/asset-core/binary-persistence';
 import path from 'path';
 import fs from 'fs';
 
@@ -20,28 +21,33 @@ export async function GET(
       return NextResponse.json({ error: 'Invalid path' }, { status: 400 });
     }
 
-    const exportDocument = exportDocumentDescriptor(pathParts);
-    if (!exportDocument && !isAllowedPublicMediaPath(pathParts)) {
+    const exportArtifact = exportArtifactDescriptor(pathParts);
+    if (!exportArtifact && !isAllowedPublicMediaPath(pathParts)) {
       return NextResponse.json({ error: 'File not found' }, { status: 404 });
     }
-    if (exportDocument) {
+    if (exportArtifact) {
       const dataRoot = path.resolve(getServerDataRoot());
       const exportsRoot = path.resolve(dataRoot, 'exports');
-      const localPath = path.resolve(exportsRoot, exportDocument.filename);
+      const localPath = path.resolve(exportsRoot, exportArtifact.filename);
       if (!localPath.startsWith(`${exportsRoot}${path.sep}`)) {
         return NextResponse.json({ error: 'File not found' }, { status: 404 });
       }
       const bytes: Buffer | null = fs.existsSync(localPath)
         ? await fs.promises.readFile(localPath)
-        : await readBinaryFromS3Exact(`exports/${exportDocument.filename}`);
+        : await readBinaryFromS3Exact(`exports/${exportArtifact.filename}`);
       if (!bytes) return NextResponse.json({ error: 'File not found' }, { status: 404 });
-      if (!fs.existsSync(localPath)) {
-        await fs.promises.mkdir(exportsRoot, { recursive: true });
-        await fs.promises.writeFile(localPath, bytes, { flag: 'wx' }).catch(error => {
-          if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+      try {
+        await recoverExportAssetBytes({
+          bytes,
+          filename: exportArtifact.filename,
+          mimeType: exportArtifact.contentType,
         });
+      } catch {
+        return NextResponse.json({ error: 'File not found' }, { status: 404 });
       }
-      return exportDocumentResponse(new Uint8Array(bytes), exportDocument.contentType, exportDocument.filename);
+      return exportArtifact.attachment
+        ? exportDocumentResponse(new Uint8Array(bytes), exportArtifact.contentType, exportArtifact.filename)
+        : publicMediaResponse(new Uint8Array(bytes), exportArtifact.contentType, path.extname(exportArtifact.filename).toLowerCase());
     }
 
     const isRecoveryPath = filePath.startsWith('recovery/');
@@ -205,13 +211,20 @@ function getContentType(ext: string): string {
     : 'application/octet-stream';
 }
 
-function exportDocumentDescriptor(pathParts: string[]): { filename: string; contentType: string } | null {
+function exportArtifactDescriptor(pathParts: string[]): { filename: string; contentType: string; attachment: boolean } | null {
   if (pathParts.length !== 2 || pathParts[0] !== 'exports') return null;
   const filename = pathParts[1];
-  if (!/^[a-f0-9]{16}-[A-Za-z0-9._-]+\.(?:json|zip)$/u.test(filename)) return null;
+  if (!/^[a-f0-9]{16}-[A-Za-z0-9._-]+\.(?:png|jpe?g|webp|json|zip)$/u.test(filename)) return null;
+  const extension = path.extname(filename).toLowerCase();
+  const contentType = extension === '.png' ? 'image/png'
+    : extension === '.jpg' || extension === '.jpeg' ? 'image/jpeg'
+    : extension === '.webp' ? 'image/webp'
+    : extension === '.json' ? 'application/json'
+    : 'application/zip';
   return {
     filename,
-    contentType: filename.endsWith('.json') ? 'application/json' : 'application/zip',
+    contentType,
+    attachment: extension === '.json' || extension === '.zip',
   };
 }
 

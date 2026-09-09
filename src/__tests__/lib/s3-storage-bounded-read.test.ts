@@ -1,11 +1,19 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
+  awsSend: vi.fn(),
   chunkUploadFile: vi.fn(),
   deleteFile: vi.fn(),
   generatePresignedUrl: vi.fn(),
   readFile: vi.fn(),
   uploadFile: vi.fn(),
+}));
+
+vi.mock('@aws-sdk/client-s3', () => ({
+  S3Client: class { send = mocks.awsSend; },
+  PutObjectCommand: class { constructor(readonly input: unknown) {} },
+  DeleteObjectCommand: class { constructor(readonly input: unknown) {} },
+  GetObjectCommand: class { constructor(readonly input: unknown) {} },
 }));
 
 vi.mock('coze-coding-dev-sdk', () => ({
@@ -29,6 +37,7 @@ describe('readImageFromS3Bounded cancellation', () => {
     mocks.deleteFile.mockReset().mockResolvedValue(true);
     mocks.readFile.mockReset().mockResolvedValue(Buffer.from('exact'));
     mocks.uploadFile.mockReset().mockResolvedValue('exports/result.zip');
+    mocks.awsSend.mockReset().mockResolvedValue({});
     process.env.COZE_BUCKET_ENDPOINT_URL = 'https://bucket.test';
     process.env.COZE_BUCKET_NAME = 'test-bucket';
   });
@@ -172,34 +181,79 @@ describe('readImageFromS3Bounded cancellation', () => {
     await expect(uploadBinaryToS3(
       Buffer.from('PK\u0003\u0004zip'), '0123456789abcdef-result.zip', 'application/zip', new AbortController().signal,
     )).resolves.toMatchObject({ storageKey: 'exports/0123456789abcdef-result.zip', createdThisCall: true });
-    expect(mocks.chunkUploadFile).toHaveBeenCalledWith({
-      chunks: expect.any(Object),
-      fileName: 'exports/0123456789abcdef-result.zip',
-      contentType: 'application/zip',
-    });
-    const chunks = mocks.chunkUploadFile.mock.calls[0][0].chunks as AsyncIterable<Buffer>;
-    const received: Buffer[] = [];
-    for await (const chunk of chunks) received.push(chunk);
-    expect(Buffer.concat(received)).toEqual(Buffer.from('PK\u0003\u0004zip'));
+    expect(mocks.awsSend).toHaveBeenCalledWith(
+      expect.objectContaining({ input: expect.objectContaining({ Key: 'exports/0123456789abcdef-result.zip', IfNoneMatch: '*' }) }),
+      expect.objectContaining({ abortSignal: expect.any(AbortSignal) }),
+    );
+    expect(mocks.chunkUploadFile).not.toHaveBeenCalled();
     expect(mocks.uploadFile).not.toHaveBeenCalled();
   });
 
   it('cleans a late uploaded object when cancellation wins the SDK race', async () => {
-    let resolveUpload!: (key: string) => void;
-    mocks.chunkUploadFile.mockImplementation(() => new Promise<string>(resolve => { resolveUpload = resolve; }));
+    let resolveUpload!: () => void;
+    mocks.awsSend.mockImplementationOnce(() => new Promise<void>(resolve => { resolveUpload = resolve; }));
     const controller = new AbortController();
     const { uploadBinaryToS3 } = await import('@/lib/s3-storage');
     const pending = uploadBinaryToS3(Buffer.from('{}'), '0123456789abcdef-manifest.json', 'application/json', controller.signal);
     await vi.waitFor(() => expect(resolveUpload).toBeTypeOf('function'));
     controller.abort(new DOMException('cancelled', 'AbortError'));
+    let settled = false;
+    void pending.finally(() => { settled = true; }).catch(() => undefined);
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    resolveUpload();
     await expect(pending).rejects.toMatchObject({ name: 'AbortError' });
-    resolveUpload('exports/late.json');
-    await vi.waitFor(() => expect(mocks.deleteFile).toHaveBeenCalledWith({ fileKey: 'exports/late.json' }));
+    expect(mocks.awsSend).toHaveBeenCalledTimes(2);
+  });
+
+  it('reports cancellation cleanup failure instead of hiding the last delete error', async () => {
+    const controller = new AbortController();
+    mocks.awsSend
+      .mockImplementationOnce(async () => {
+        controller.abort(new DOMException('cancelled', 'AbortError'));
+        return {};
+      })
+      .mockRejectedValueOnce(new Error('delete 1'))
+      .mockRejectedValueOnce(new Error('delete 2'))
+      .mockRejectedValueOnce(new Error('delete 3'));
+    const { uploadBinaryToS3 } = await import('@/lib/s3-storage');
+    await expect(uploadBinaryToS3(
+      Buffer.from('{}'), '0123456789abcdef-manifest.json', 'application/json', controller.signal,
+    )).rejects.toThrow('S3_BINARY_DELETE_FAILED');
+    expect(mocks.awsSend).toHaveBeenCalledTimes(4);
   });
 
   it('reads an export artifact by its exact key without deriving the images namespace', async () => {
+    mocks.awsSend.mockResolvedValueOnce({
+      Body: { transformToByteArray: async () => new Uint8Array(Buffer.from('exact')) },
+    });
     const { readBinaryFromS3Exact } = await import('@/lib/s3-storage');
     await expect(readBinaryFromS3Exact('exports/0123456789abcdef-report.zip')).resolves.toEqual(Buffer.from('exact'));
-    expect(mocks.readFile).toHaveBeenCalledWith({ fileKey: 'exports/0123456789abcdef-report.zip' });
+    expect(mocks.awsSend).toHaveBeenCalledWith(expect.objectContaining({ input: expect.objectContaining({ Key: 'exports/0123456789abcdef-report.zip' }) }));
+  });
+
+  it('retries cleanup after a transient delete failure and only marks it clean after success', async () => {
+    mocks.awsSend
+      .mockResolvedValueOnce({})
+      .mockRejectedValueOnce(new Error('delete unavailable'))
+      .mockResolvedValueOnce({});
+    const { uploadBinaryToS3 } = await import('@/lib/s3-storage');
+    const uploaded = await uploadBinaryToS3(Buffer.from('{}'), '0123456789abcdef-manifest.json', 'application/json');
+    await expect(uploaded?.cleanup()).resolves.toBeUndefined();
+    expect(mocks.awsSend).toHaveBeenCalledTimes(3);
+  });
+
+  it('keeps cleanup retryable after the bounded delete attempts are exhausted', async () => {
+    mocks.awsSend
+      .mockResolvedValueOnce({})
+      .mockRejectedValueOnce(new Error('delete unavailable 1'))
+      .mockRejectedValueOnce(new Error('delete unavailable 2'))
+      .mockRejectedValueOnce(new Error('delete unavailable 3'))
+      .mockResolvedValueOnce({});
+    const { uploadBinaryToS3 } = await import('@/lib/s3-storage');
+    const uploaded = await uploadBinaryToS3(Buffer.from('{}'), '0123456789abcdef-manifest.json', 'application/json');
+    await expect(uploaded?.cleanup()).rejects.toThrow('S3_BINARY_DELETE_FAILED');
+    await expect(uploaded?.cleanup()).resolves.toBeUndefined();
+    expect(mocks.awsSend).toHaveBeenCalledTimes(5);
   });
 });

@@ -14,9 +14,33 @@
  */
 
 import { S3Storage } from 'coze-coding-dev-sdk';
+import {
+  DeleteObjectCommand,
+  GetObjectCommand,
+  PutObjectCommand,
+  S3Client,
+} from '@aws-sdk/client-s3';
 import { saveImageDataMapping } from './image-source-map';
 
 let _storage: S3Storage | null = null;
+let _binaryStorage: S3Client | null = null;
+
+function getBinaryStorage(): { client: S3Client; bucket: string } | null {
+  const endpoint = process.env.COZE_BUCKET_ENDPOINT_URL;
+  const bucket = process.env.COZE_BUCKET_NAME;
+  if (!endpoint || !bucket) return null;
+  if (!_binaryStorage) {
+    const accessKeyId = process.env.COZE_BUCKET_ACCESS_KEY || process.env.AWS_ACCESS_KEY_ID;
+    const secretAccessKey = process.env.COZE_BUCKET_SECRET_KEY || process.env.AWS_SECRET_ACCESS_KEY;
+    _binaryStorage = new S3Client({
+      endpoint,
+      region: process.env.COZE_BUCKET_REGION || 'cn-beijing',
+      forcePathStyle: true,
+      ...(accessKeyId && secretAccessKey ? { credentials: { accessKeyId, secretAccessKey } } : {}),
+    });
+  }
+  return { client: _binaryStorage, bucket };
+}
 
 function getStorage(): S3Storage | null {
   if (_storage) return _storage;
@@ -152,23 +176,28 @@ const BINARY_CONTENT_TYPES = new Set([
 
 export interface S3BinaryUploadResult {
   storageKey: string;
-  createdThisCall: true;
+  createdThisCall: boolean;
   cleanup(): Promise<void>;
 }
 
-async function* abortableBufferChunks(buffer: Buffer, signal?: AbortSignal): AsyncIterable<Buffer> {
-  const chunkSize = 1024 * 1024;
-  for (let offset = 0; offset < buffer.length; offset += chunkSize) {
-    signal?.throwIfAborted();
-    yield buffer.subarray(offset, Math.min(offset + chunkSize, buffer.length));
-  }
-  signal?.throwIfAborted();
+function isPreconditionFailure(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+  const candidate = error as { name?: string; $metadata?: { httpStatusCode?: number } };
+  return candidate.name === 'PreconditionFailed' || candidate.$metadata?.httpStatusCode === 412;
 }
 
-async function deleteExactS3Key(storage: S3Storage, key: string): Promise<void> {
-  await storage.deleteFile({ fileKey: key }).catch(error => {
-    console.error(`[s3-storage] Failed to compensate ${key}:`, error);
-  });
+async function deleteExactS3Key(client: S3Client, bucket: string, key: string): Promise<void> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      await client.send(new DeleteObjectCommand({ Bucket: bucket, Key: key }));
+      return;
+    } catch (error) {
+      lastError = error;
+      if (attempt < 2) await new Promise(resolve => setTimeout(resolve, 10 * (2 ** attempt)));
+    }
+  }
+  throw new Error('S3_BINARY_DELETE_FAILED', { cause: lastError });
 }
 
 /** Upload one already-validated export artifact without routing it through image validation. */
@@ -187,44 +216,64 @@ export async function uploadBinaryToS3(
     || /[. ]$/u.test(fileName)
   ) throw new TypeError('S3_BINARY_FILENAME_INVALID');
   signal?.throwIfAborted();
-  const storage = getStorage();
+  const storage = getBinaryStorage();
   if (!storage) return null;
-  const operation = storage.chunkUploadFile({
-    chunks: abortableBufferChunks(buffer, signal),
-    fileName: `exports/${fileName}`,
-    contentType,
-  });
+  const key = `exports/${fileName}`;
   try {
-    const key = signal ? await waitForAbortable(operation, signal) : await operation;
-    signal?.throwIfAborted();
-    const normalizedKey = key.replace(/^\/+/, '');
-    if (!/^exports\/[^/]+$/u.test(normalizedKey)) {
-      await deleteExactS3Key(storage, normalizedKey);
-      throw new Error('S3_BINARY_KEY_INVALID');
+    try {
+      await storage.client.send(new PutObjectCommand({
+        Bucket: storage.bucket,
+        Key: key,
+        Body: buffer,
+        ContentType: contentType,
+        IfNoneMatch: '*',
+      }), { abortSignal: signal ?? new AbortController().signal });
+    } catch (error) {
+      if (isPreconditionFailure(error)) {
+        return { storageKey: key, createdThisCall: false, cleanup: async () => undefined };
+      }
+      throw error;
+    }
+    if (signal?.aborted) {
+      await deleteExactS3Key(storage.client, storage.bucket, key);
+      signal.throwIfAborted();
     }
     let cleaned = false;
     return {
-      storageKey: normalizedKey,
+      storageKey: key,
       createdThisCall: true,
       cleanup: async () => {
         if (cleaned) return;
+        await deleteExactS3Key(storage.client, storage.bucket, key);
         cleaned = true;
-        await deleteExactS3Key(storage, normalizedKey);
       },
     };
   } catch (error) {
-    if (signal?.aborted) {
-      void operation.then(key => deleteExactS3Key(storage, key.replace(/^\/+/, ''))).catch(() => undefined);
-      signal.throwIfAborted();
-    }
+    if ((error as Error)?.message === 'S3_BINARY_DELETE_FAILED') throw error;
+    if (signal?.aborted) signal.throwIfAborted();
     throw new Error('S3_BINARY_UPLOAD_FAILED', { cause: error });
   }
 }
 
 /** Read an export artifact by its persisted exact key; never derives the legacy images namespace. */
 export async function readBinaryFromS3Exact(key: string): Promise<Buffer | null> {
-  if (!/^exports\/[a-f0-9]{16}-[A-Za-z0-9._-]+\.(?:json|zip)$/u.test(key)) return null;
-  return readImageFromS3(key);
+  if (!/^exports\/[a-f0-9]{16}-[A-Za-z0-9._-]+\.(?:png|jpe?g|webp|json|zip)$/u.test(key)) return null;
+  const storage = getBinaryStorage();
+  if (!storage) return null;
+  try {
+    const result = await storage.client.send(new GetObjectCommand({ Bucket: storage.bucket, Key: key }));
+    if (!result.Body) return null;
+    if (typeof result.Body.transformToByteArray === 'function') {
+      return Buffer.from(await result.Body.transformToByteArray());
+    }
+    const chunks: Buffer[] = [];
+    for await (const chunk of result.Body as AsyncIterable<Uint8Array>) chunks.push(Buffer.from(chunk));
+    return Buffer.concat(chunks);
+  } catch (error) {
+    const status = (error as { $metadata?: { httpStatusCode?: number } })?.$metadata?.httpStatusCode;
+    if (status === 404 || (error as { name?: string })?.name === 'NoSuchKey') return null;
+    throw error;
+  }
 }
 
 export type S3BoundedReadErrorCode =

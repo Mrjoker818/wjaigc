@@ -1,7 +1,6 @@
 import 'server-only';
 
 import { createHash, randomUUID } from 'node:crypto';
-import { link, mkdir, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import JSZip from 'jszip';
 import sharp from 'sharp';
@@ -9,6 +8,7 @@ import sharp from 'sharp';
 import { getServerDataRoot } from '@/lib/server-data-root';
 import { uploadBinaryToS3, type S3BinaryUploadResult } from '@/lib/s3-storage';
 import type { AssetFile } from './types';
+import { assetBinaryFileOps } from './binary-file-ops';
 
 const MAX_BINARY_BYTES = 256 * 1024 * 1024;
 const EXTENSION_BY_MIME = new Map([
@@ -53,7 +53,7 @@ function normalizeFilename(value: unknown, mimeType: string): string {
   return value;
 }
 
-async function validateBinaryFormat(bytes: Buffer, mimeType: string): Promise<void> {
+export async function validateAssetBinaryFormat(bytes: Buffer, mimeType: string): Promise<void> {
   try {
     if (mimeType === 'application/json') {
       const parsed = JSON.parse(bytes.toString('utf8')) as unknown;
@@ -78,6 +78,54 @@ async function validateBinaryFormat(bytes: Buffer, mimeType: string): Promise<vo
   }
 }
 
+function exportTarget(filename: string): { directory: string; target: string } {
+  const root = path.resolve(getServerDataRoot());
+  const directory = path.resolve(root, 'exports');
+  const target = path.resolve(directory, filename);
+  if (!target.startsWith(`${directory}${path.sep}`)) fail('ASSET_FILENAME_INVALID');
+  return { directory, target };
+}
+
+/** Atomically restore one content-addressed export without exposing partial bytes. */
+export async function recoverExportAssetBytes(input: {
+  bytes: Buffer;
+  filename: string;
+  mimeType: string;
+}): Promise<void> {
+  if (!Buffer.isBuffer(input.bytes) || input.bytes.length < 1 || input.bytes.length > MAX_BINARY_BYTES) {
+    fail('ASSET_BYTES_INVALID');
+  }
+  normalizeFilename(input.filename, input.mimeType);
+  const match = input.filename.match(/^([a-f0-9]{16})-[A-Za-z0-9._-]+\.(?:png|jpe?g|webp|json|zip)$/u);
+  if (!match || createHash('sha256').update(input.bytes).digest('hex').slice(0, 16) !== match[1]) {
+    fail('ASSET_RECOVERY_CHECKSUM_MISMATCH');
+  }
+  await validateAssetBinaryFormat(input.bytes, input.mimeType);
+  const { directory, target } = exportTarget(input.filename);
+  const temporary = path.resolve(directory, `.${input.filename}.${randomUUID()}.recover.tmp`);
+  await assetBinaryFileOps.mkdir(directory, { recursive: true });
+  try {
+    await assetBinaryFileOps.writeFile(temporary, input.bytes, { flag: 'wx' });
+    const staged = await assetBinaryFileOps.readFile(temporary);
+    if (createHash('sha256').update(staged).digest('hex').slice(0, 16) !== match[1]) {
+      fail('ASSET_RECOVERY_CHECKSUM_MISMATCH');
+    }
+    await validateAssetBinaryFormat(staged, input.mimeType);
+    try {
+      await assetBinaryFileOps.link(temporary, target);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+      const existing = await assetBinaryFileOps.readFile(target);
+      if (createHash('sha256').update(existing).digest('hex').slice(0, 16) !== match[1]) {
+        fail('ASSET_RECOVERY_CHECKSUM_MISMATCH');
+      }
+      await validateAssetBinaryFormat(existing, input.mimeType);
+    }
+  } finally {
+    await assetBinaryFileOps.rm(temporary, { force: true });
+  }
+}
+
 export async function persistAssetBytes(input: PersistAssetBytesInput): Promise<PersistedAssetFile> {
   input.signal?.throwIfAborted();
   if (!Buffer.isBuffer(input.bytes) || input.bytes.length < 1 || input.bytes.length > MAX_BINARY_BYTES) {
@@ -87,7 +135,7 @@ export async function persistAssetBytes(input: PersistAssetBytesInput): Promise<
     fail('ASSET_MIME_TYPE_INVALID');
   }
   const filename = normalizeFilename(input.filename, input.mimeType);
-  await validateBinaryFormat(input.bytes, input.mimeType);
+  await validateAssetBinaryFormat(input.bytes, input.mimeType);
   input.signal?.throwIfAborted();
   const checksum = createHash('sha256').update(input.bytes).digest('hex');
   const asciiFilename = filename.replace(/[^A-Za-z0-9._-]/gu, '_');
@@ -95,12 +143,13 @@ export async function persistAssetBytes(input: PersistAssetBytesInput): Promise<
   const root = path.resolve(getServerDataRoot());
   const directory = path.resolve(root, 'exports');
   const temporary = path.resolve(directory, `.${storedFilename}.${randomUUID()}.tmp`);
-  await mkdir(directory, { recursive: true });
+  await assetBinaryFileOps.mkdir(directory, { recursive: true });
   input.signal?.throwIfAborted();
   let publishedByThisCall = false;
   let s3Upload: S3BinaryUploadResult | null = null;
+  let target: string | undefined;
   try {
-    await writeFile(temporary, input.bytes, { flag: 'wx', signal: input.signal });
+    await assetBinaryFileOps.writeFile(temporary, input.bytes, { flag: 'wx', signal: input.signal });
     input.signal?.throwIfAborted();
     s3Upload = await uploadBinaryToS3(
       input.bytes,
@@ -113,12 +162,13 @@ export async function persistAssetBytes(input: PersistAssetBytesInput): Promise<
     if (!new RegExp(`^${checksum.slice(0, 16)}-[A-Za-z0-9._-]+\\.(?:png|jpe?g|webp|json|zip)$`, 'u').test(publicFilename)) {
       fail('ASSET_STORAGE_KEY_INVALID');
     }
-    const target = path.resolve(directory, publicFilename);
+    target = path.resolve(directory, publicFilename);
     if (!target.startsWith(`${directory}${path.sep}`)) fail('ASSET_FILENAME_INVALID');
-    await link(temporary, target).then(() => { publishedByThisCall = true; }).catch(error => {
+    await assetBinaryFileOps.link(temporary, target).then(() => { publishedByThisCall = true; }).catch(error => {
       if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
     });
-    await rm(temporary, { force: true });
+    await assetBinaryFileOps.rm(temporary, { force: true });
+    const cleanupTarget = target;
     let cleaned = false;
     return {
       url: `/api/serve-upload/exports/${publicFilename}`,
@@ -130,18 +180,20 @@ export async function persistAssetBytes(input: PersistAssetBytesInput): Promise<
       createdThisCall: publishedByThisCall || s3Upload?.createdThisCall === true,
       cleanup: async () => {
         if (cleaned) return;
+        const failures: unknown[] = [];
+        if (publishedByThisCall) await assetBinaryFileOps.rm(cleanupTarget, { force: true }).catch(error => failures.push(error));
+        if (s3Upload?.createdThisCall) await s3Upload.cleanup().catch(error => failures.push(error));
+        if (failures.length === 1) throw failures[0];
+        if (failures.length > 1) throw new AggregateError(failures, 'ASSET_CLEANUP_FAILED');
         cleaned = true;
-        await Promise.all([
-          ...(publishedByThisCall ? [rm(target, { force: true })] : []),
-          ...(s3Upload?.createdThisCall ? [s3Upload.cleanup()] : []),
-        ]);
       },
     };
   } catch (error) {
-    await Promise.all([
-      rm(temporary, { force: true }),
-      ...(s3Upload?.createdThisCall ? [s3Upload.cleanup()] : []),
-    ]).catch(() => undefined);
+    const failures: unknown[] = [];
+    await assetBinaryFileOps.rm(temporary, { force: true }).catch(cleanupError => failures.push(cleanupError));
+    if (publishedByThisCall && target) await assetBinaryFileOps.rm(target, { force: true }).catch(cleanupError => failures.push(cleanupError));
+    if (s3Upload?.createdThisCall) await s3Upload.cleanup().catch(cleanupError => failures.push(cleanupError));
+    if (failures.length > 0) throw new AggregateError([error, ...failures], 'ASSET_PERSISTENCE_COMPENSATION_FAILED');
     throw error;
   }
 }
