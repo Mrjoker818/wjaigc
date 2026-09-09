@@ -2433,3 +2433,14 @@ BUG-018 已从未验证项移除。剩余顺序为 `002-B -> 002-D -> 002-E`；�
 - [ ] Pear 专用成功生成链路仍为外部依赖未验证；APImart 成功结果只关闭缩略图业务能力，不冒充 Pear 成功。
 - [ ] 生产环境受控失败行精确重试仍未验证；当前没有安全故障注入开关，不通过破坏真实供应商配置、恶意内容或猜测性操作制造失败。
 - [ ] Console 仍有 `getapib.org` / Pear 远程媒体 CORS Error，不能登记为 Console clean；须治理或形成正式受控豁免。
+
+## 2026-09-09 Lovart 平台素材合规 Task 11 剩余项
+
+- [x] Coze 同树构建并重启 `main@2093c70c`；聚焦 `62/62`、扩大 `307/307`、生产构建 `119/119`。
+- [x] Edge 云端独立智能对话 Skill 目录精确为 `16` 项，且不包含画布专用“平台素材合规检查”。
+- [x] Canvas 已选择三张受管图片并填写 Amazon/US/main 合规参数；执行前估价为 `32` 积分。
+- [ ] 提交真实 Canvas Run，核对三份逐图报告、硬规则、视觉警告、unknown、规则版本和来源 AssetVersion。
+- [ ] 核对 APImartLLM `gpt-4o` 的 `providerId + modelId` 冻结、单次实扣、取消与一次退款。
+- [ ] Workflow 运行同一 Skill、连接下游节点，并核对 Canvas/Workflow 均为 `28` 项。
+- [ ] 下载 JSON/HTML，核对文件并在整页刷新后恢复同一 document AssetVersion。
+- [ ] 保存新鲜截图、Console、Network、事件、Run/Task ID 与积分流水；Edge 扩展当前在无限画布页返回 `Debugger unattached`，不可冒充通过。

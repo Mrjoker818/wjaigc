@@ -2236,3 +2236,10 @@ The focused gate test passes `7/7`; the actual protected-baseline command passes
 - Workflow Pinterest、父 Run 取消后子任务终止、一次部分退款、迟到结果隔离、旧模型持久化兼容均已在同一云端代码树关闭。Canvas/Workflow 保持 27 Skills，Simple Chat 保持 16 Skills。
 - 生产环境没有安全故障注入开关，失败行仅重试失败步骤尚无真实云端证据；远程媒体 CORS Console Error 仍未治理。两项均不影响已取得的成功链路证据，但不满足全平台最终发布标准。
 - **Task 8 阶段结论：有条件通过。** 本地、隔离 PostgreSQL、GitHub `main` 与云端核心链路已闭环；Pear 专用成功链路、受控失败行重试和 Console CORS 继续列为发布前未验证/未关闭项。全平台仍不能判定“通过”。
+
+## 2026-09-09 Lovart 平台素材合规 Task 11 阶段发布判断
+
+- `main@2093c70c` 的 Coze 同树构建、服务启动和两组云端回归已通过；`stable` 保持只读。
+- Edge 云端证明独立智能对话仍为 `16` 个独立 Skills，且不包含“平台素材合规检查”，工作区作用域隔离符合设计。
+- Canvas 三图 Amazon 主图检查已完成运行前配置并取得 `32` 积分估价，但尚无真实 Run、逐图报告、AssetVersion、实扣/退款、Workflow 和下载恢复证据。
+- **当前发布结论：有条件通过，仅允许继续 Task 11 云端验收。** Task 11 未关闭，全平台不能判定通过。

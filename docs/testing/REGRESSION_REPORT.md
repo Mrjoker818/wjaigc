@@ -2922,3 +2922,12 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - 缩略图整页刷新后，两张结果、completed 运行记录、来源版本和模型绑定均恢复；PNG 下载尺寸 `1672×941`。SKU 与缩略图的截图、录像、Trace、Network 和下载哈希分别见 `lovart-content-commerce-task8-canvas-batch-sku-20260907.json` 与 `lovart-content-commerce-task8-canvas-thumbnails-20260907.json`。
 - Console 仍有 `getapib.org` / Pear 历史与当前远程媒体 CORS 错误；生产环境没有安全故障注入开关，因此没有通过破坏真实供应商配置制造失败行，相关两项继续留在未验证清单。
 - **回归判定：Task 8 云端核心业务链路 CLOUD PASS；阶段有条件通过。** Pear 专用成功链路、受控失败行精确重试和 Console CORS 治理不冒充通过。
+
+## 2026-09-09 Lovart 平台素材合规 Task 11 云端目录隔离增量
+
+- GitHub 与本地均为 `main@2093c70cfbb2046049717106275e917feadff511`；`origin/stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 未变化。
+- Coze 已完成同源码树构建与重启：合并 HEAD `7864d7c5c6b60b51d4f28360736ce4e47de86bdb`，云端聚焦与扩大回归分别为 `62/62`、`307/307`，生产构建生成 `119/119` 页面。
+- Edge 在已登录的独立 `/simple-chat` 页面打开 Skill 目录，DOM 精确统计为 `16` 项；“平台素材合规检查”匹配数为 `0`，证明画布专用 Skill 未泄漏到独立智能对话页面。
+- 无限画布已配置 APImartLLM `gpt-4o` 显式视觉能力，并完成三张受管图片、Amazon/US/main、商品事实和中文报告参数填写；估价显示 `32` 积分，尚未提交付费运行。
+- 切换无限画布验收时 Edge 扩展返回 `Debugger unattached`。因此逐图报告、document AssetVersion、冻结 provider/model、实扣、取消退款、Workflow 下游、JSON/HTML 下载和刷新恢复仍未取得新鲜云端证据。
+- **回归判定：TASK 11 CLOUD CATALOG ISOLATION PASS / PAID EXECUTION PENDING。** 不提前关闭 Task 11，不更新 Obsidian 阶段结论。
