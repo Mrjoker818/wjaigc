@@ -11,16 +11,25 @@ import type { SkillRunRequest } from '@/lib/skill-runtime/run-request';
 const source = readFileSync(resolve(process.cwd(), 'src/components/chat-panel.tsx'), 'utf8');
 const tree = ts.createSourceFile('chat-panel.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
 let callback: ts.Expression | undefined;
+let unavailableReasonCallback: ts.Expression | undefined;
 function visit(node: ts.Node): void {
   if (ts.isVariableDeclaration(node) && node.name.getText(tree) === 'buildCanvasSkillRequest'
       && node.initializer && ts.isCallExpression(node.initializer)) {
     callback = node.initializer.arguments[0];
   }
+  if (ts.isVariableDeclaration(node) && node.name.getText(tree) === 'canvasSkillModelUnavailableReason'
+      && node.initializer && ts.isCallExpression(node.initializer)) {
+    unavailableReasonCallback = node.initializer.arguments[0];
+  }
   ts.forEachChild(node, visit);
 }
 visit(tree);
 if (!callback) throw new Error('Canvas Skill request callback missing');
+if (!unavailableReasonCallback) throw new Error('Canvas Skill model reason callback missing');
 const script = ts.transpileModule(`(${callback.getText(tree)})`, {
+  compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.None },
+}).outputText;
+const unavailableReasonScript = ts.transpileModule(`(${unavailableReasonCallback.getText(tree)})`, {
   compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.None },
 }).outputText;
 
@@ -63,6 +72,23 @@ function visionRequestFor(input: {
     crypto: { randomUUID: () => 'vision-request' },
   }) as () => SkillRunRequest | null;
   return build();
+}
+
+function unavailableReasonFor(input: {
+  selectedModel: string;
+  models: Array<{ id: string; name: string; providerId: string; supportsVision?: boolean }>;
+}): string | undefined {
+  const reason = runInNewContext(unavailableReasonScript, {
+    activeSkill: {
+      id: 'preset-platform-compliance-audit', version: 1, inputs: [],
+      steps: [{ modelRole: 'vision' }],
+    },
+    projectId: 'project-a',
+    availableChatModels: input.models,
+    model: input.selectedModel,
+    discoveredImageModels: [], imageModel: '', imageModelProviderId: '',
+  }) as () => string | undefined;
+  return reason();
 }
 
 describe('Canvas Skill asset workspace identity', () => {
@@ -123,5 +149,28 @@ describe('Canvas Skill asset workspace identity', () => {
         { id: 'vision-provider::vision-model', providerId: 'vision-provider', supportsVision: true },
       ],
     })).toBeNull();
+  });
+
+  it('explains that the selected chat model lacks vision and names an available VLM', () => {
+    expect(unavailableReasonFor({
+      selectedModel: 'chat-provider::chat-model',
+      models: [
+        { id: 'chat-provider::chat-model', name: '普通聊天模型', providerId: 'chat-provider' },
+        {
+          id: 'vision-provider::qwen-vl-max', name: '通义千问',
+          providerId: 'vision-provider', supportsVision: true,
+        },
+      ],
+    })).toBe('当前模型不支持图片理解，请切换到视觉模型：通义千问');
+  });
+
+  it('does not report a model error after the user explicitly selects a VLM', () => {
+    expect(unavailableReasonFor({
+      selectedModel: 'vision-provider::qwen-vl-max',
+      models: [{
+        id: 'vision-provider::qwen-vl-max', name: '通义千问',
+        providerId: 'vision-provider', supportsVision: true,
+      }],
+    })).toBeUndefined();
   });
 });

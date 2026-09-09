@@ -3964,15 +3964,33 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
     return false;
   }, [activeSkill, canvasSkillSourceVersionIds.length]);
 
+  const canvasSkillModelUnavailableReason = useCallback((): string | undefined => {
+    if (!activeSkill?.steps.some(step => step.modelRole === 'vision')) return undefined;
+    const selected = availableChatModels.find(candidate => candidate.id === model);
+    if (selected?.supportsVision) return undefined;
+    const visionModelNames = [...new Set(availableChatModels
+      .filter(candidate => candidate.supportsVision)
+      .map(candidate => candidate.name))]
+      .slice(0, 3);
+    return visionModelNames.length > 0
+      ? `当前模型不支持图片理解，请切换到视觉模型：${visionModelNames.join('、')}`
+      : '当前未配置可用的视觉模型，请联系管理员配置 VLM';
+  }, [activeSkill, availableChatModels, model]);
+
   const handleEstimateSkill = useCallback(async (): Promise<void> => {
     if (!hasRequiredCanvasSkillSource()) return;
+    const modelUnavailableReason = canvasSkillModelUnavailableReason();
+    if (modelUnavailableReason) {
+      toast.error(modelUnavailableReason);
+      return;
+    }
     const request = buildCanvasSkillRequest();
     if (!request) {
       toast.error('请先选择项目，并配置此 Skill 所需的聊天与图像模型');
       return;
     }
     await skillRun.estimateRun(request);
-  }, [buildCanvasSkillRequest, hasRequiredCanvasSkillSource, skillRun]);
+  }, [buildCanvasSkillRequest, canvasSkillModelUnavailableReason, hasRequiredCanvasSkillSource, skillRun]);
 
   const handleRestoreSkill = useCallback(async (record: SkillRunHistoryItem): Promise<void> => {
     if (!projectId || record.projectId !== projectId || record.surface !== 'canvas') return;
@@ -4027,6 +4045,11 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
 
   const handleStartSkill = useCallback(async (): Promise<void> => {
     if (!hasRequiredCanvasSkillSource()) return;
+    const modelUnavailableReason = canvasSkillModelUnavailableReason();
+    if (modelUnavailableReason) {
+      toast.error(modelUnavailableReason);
+      return;
+    }
     const request = buildCanvasSkillRequest();
     if (!request) {
       toast.error('请先选择项目，并配置此 Skill 所需的聊天与图像模型');
@@ -4050,7 +4073,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
         request,
       };
     }
-  }, [buildCanvasSkillRequest, hasRequiredCanvasSkillSource, selectedCanvasImage?.id, skillRun]);
+  }, [buildCanvasSkillRequest, canvasSkillModelUnavailableReason, hasRequiredCanvasSkillSource, selectedCanvasImage?.id, skillRun]);
 
   const handleLocateComplianceSource = useCallback((sourceVersionId: string): void => {
     const image = skillCanvasImagesRef.current.find(candidate => candidate.assetVersionId === sourceVersionId);
