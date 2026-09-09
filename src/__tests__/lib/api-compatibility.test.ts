@@ -44,10 +44,15 @@ describe('provider request contracts', () => {
   });
 
   it('maps APImart GPT Image 2.5 to documented pixel sizes by resolution tier', () => {
-    expect(resolveProviderPixelSize('16:9', '1K', '2K', 'gpt-image-2.5', PROFILE_APIMART)).toBe('1820x1024');
-    expect(resolveProviderPixelSize('16:9', '2K', '2K', 'gpt-image-2.5', PROFILE_APIMART)).toBe('3641x2048');
-    expect(resolveProviderPixelSize('16:9', '4K', '4K', 'gpt-image-2.5', PROFILE_APIMART)).toBe('7282x4096');
+    expect(resolveProviderPixelSize('16:9', 'auto', '1K', 'gpt-image-2.5-flare', PROFILE_APIMART)).toBe('1820x1024');
+    expect(resolveProviderPixelSize('16:9', 'auto', '2K', 'gpt-image-2.5-flare', PROFILE_APIMART)).toBe('3641x2048');
+    expect(resolveProviderPixelSize('16:9', 'auto', '4K', 'gpt-image-2.5-flare', PROFILE_APIMART)).toBe('7282x4096');
   });
+  it('maps PearAPI GPT Image 2.5 4K to the shared GPT Image 2.5 pixel contract', () => {
+    expect(resolveProviderPixelSize('16:9', 'max', '4K', 'gpt-image-2.5-4k', PROFILE_APIMART)).toBe('7282x4096');
+    expect(resolveProviderPixelSize('16:9', 'high', '4K', 'gpt-image-2.5-4k', PROFILE_APIMART)).toBe('7282x4096');
+  });
+
   it('hides the undocumented auto aspect ratio for 4SAPI while preserving it for APImart', () => {
     expect(getProviderAspectRatios('gpt-image-2', '4SAPI')).not.toContain('auto');
     expect(getProviderAspectRatios('gpt-image-2', 'APImart')).toContain('auto');

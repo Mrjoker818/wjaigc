@@ -1260,9 +1260,8 @@ const MODEL_SPECIFIC_PIXEL_SIZES: Record<string, Record<string, Record<string, s
     '16:9': { '2K': '2048x1152', '4K': '3840x2160' },
     '9:16': { '2K': '1152x2048', '4K': '2160x3840' },
   },
-  // GPT Image 2.5 — APImart官方: 15种比例+auto，resolution=1K/2K/4K，quality=auto/low/medium/high
-  // APImart接收比例和分辨率档位；这里记录各档位用于前端尺寸预览，不会作为额外像素字段发送。
-  'gpt-image-2.5': {
+  // GPT Image 2.5 — APImart Flare/Sunburst: quality=auto/low/medium/high/xhigh/max.
+  'gpt-image-2.5-flare': {
     '1:1':  { '1K': '1024x1024', '2K': '2048x2048', '4K': '4096x4096' },
     '3:2':  { '1K': '1536x1024', '2K': '3072x2048', '4K': '6144x4096' },
     '2:3':  { '1K': '1024x1536', '2K': '2048x3072', '4K': '4096x6144' },
@@ -1278,6 +1277,21 @@ const MODEL_SPECIFIC_PIXEL_SIZES: Record<string, Record<string, Record<string, s
     '1:3':  { '1K': '1024x3072', '2K': '2048x6144', '4K': '4096x12288' },
     '21:9': { '1K': '2389x1024', '2K': '4779x2048', '4K': '9557x4096' },
     '9:21': { '1K': '1024x2389', '2K': '2048x4779', '4K': '4096x9557' },
+  },
+  'gpt-image-2.5-sunburst': {
+    '1:1': { '1K': '1024x1024', '2K': '2048x2048', '4K': '4096x4096' },
+    '16:9': { '1K': '1820x1024', '2K': '3641x2048', '4K': '7282x4096' },
+    '9:16': { '1K': '1024x1820', '2K': '2048x3641', '4K': '4096x7282' },
+  },
+  'gpt-image-2.5': {
+    '1:1': { '1K': '1024x1024', '2K': '2048x2048', '4K': '4096x4096' },
+    '16:9': { '1K': '1820x1024', '2K': '3641x2048', '4K': '7282x4096' },
+    '9:16': { '1K': '1024x1820', '2K': '2048x3641', '4K': '4096x7282' },
+  },
+  'gpt-image-2.5-4k': {
+    '1:1': { '4K': '4096x4096' },
+    '16:9': { '4K': '7282x4096' },
+    '9:16': { '4K': '4096x7282' },
   },
   // GPT Image 2 — 官方支持的尺寸
   'gpt-image-2': {
@@ -1956,7 +1970,8 @@ export function resolveProviderPixelSize(
   modelId: string | undefined,
   profile: ApiCompatProfile,
 ): string {
-  const sizeHint = profile.resolutionTierMode === 'size' && resolution
+  const isGptImage25 = /gpt[-_]?image[-_]?2\.5/i.test(modelId || '');
+  const sizeHint = (profile.resolutionTierMode === 'size' || isGptImage25) && resolution
     ? resolution
     : quality;
   return convertAspectRatioToSize(aspectRatio, sizeHint, modelId);

@@ -285,7 +285,9 @@ export const MODEL_ASPECT_RATIOS: Record<string, string[]> = {
     // ===== GPT Image 系列（APIMart/PearAPI官方文档）=====
     // GPT Image 2.5 与 2 使用同一 APImart 参数契约：15种比例 + auto，resolution=1k|2k|4k，quality=auto|low|medium|high
     // 参考：https://docs.apimart.ai/cn/api-reference/images/gpt-image-2.5/generation
-    'gpt-image-2.5': ['auto', '1:1', '3:2', '2:3', '4:3', '3:4', '5:4', '4:5', '16:9', '9:16', '2:1', '1:2', '3:1', '1:3', '21:9', '9:21'],
+    'gpt-image-2.5-flare': ['auto', '1:1', '3:2', '2:3', '4:3', '3:4', '5:4', '4:5', '16:9', '9:16', '2:1', '1:2', '3:1', '1:3', '21:9', '9:21'],
+    'gpt-image-2.5-sunburst': ['auto', '1:1', '3:2', '2:3', '4:3', '3:4', '5:4', '4:5', '16:9', '9:16', '2:1', '1:2', '3:1', '1:3', '21:9', '9:21'],
+    'gpt-image-2.5-4k': ['1:1', '16:9', '9:16'],
     'gpt-image-2': ['auto', '1:1', '3:2', '2:3', '4:3', '3:4', '5:4', '4:5', '16:9', '9:16', '2:1', '1:2', '3:1', '1:3', '21:9', '9:21'],
     'gpt-image-2-official': ['auto', '1:1', '3:2', '2:3', '4:3', '3:4', '5:4', '4:5', '16:9', '9:16', '2:1', '1:2', '3:1', '1:3', '21:9', '9:21'],
     'gpt-image-1': ['auto', '1:1', '3:2', '2:3', '4:3', '3:4', '5:4', '4:5', '16:9', '9:16', '2:1', '1:2', '3:1', '1:3', '21:9', '9:21'],
@@ -412,8 +414,12 @@ export const MODEL_QUALITIES: Record<string, string[]> = {
     'seedance': ['2K', '4K'],
 
     // ===== GPT Image 系列 =====
-    // APImart GPT Image 2.5/2: quality="auto"|"low"|"medium"|"high"
-    'gpt-image-2.5': ['auto', 'low', 'medium', 'high'],
+    // APImart GPT-Image-2.5 Flare/Sunburst: quality="low"|"medium"|"high"|"xhigh"|"max"|"auto".
+    // xhigh/max are supported only by GPT-Image-2.5 and must not be silently downgraded.
+    'gpt-image-2.5': ['auto', 'low', 'medium', 'high', 'xhigh', 'max'],
+    'gpt-image-2.5-flare': ['auto', 'low', 'medium', 'high', 'xhigh', 'max'],
+    'gpt-image-2.5-sunburst': ['auto', 'low', 'medium', 'high', 'xhigh', 'max'],
+    'gpt-image-2.5-4k': ['auto', 'low', 'medium', 'high'],
     'gpt-image-2': ['auto', 'low', 'medium', 'high'],
     'gpt-image-2-official': ['auto', 'low', 'medium', 'high'],
     'gpt-image-1': ['auto', 'low', 'medium', 'high'],
@@ -496,6 +502,7 @@ export type ModelParamType = 'resolution' | 'quality' | 'both' | 'none';
 /** 分辨率档位型模型（参数值是"1K/2K/4K"，控制输出尺寸） */
 export const RESOLUTION_TIER_MODELS = [
     // GPT-Image 系列（APIMart/PearAPI支持resolution参数）
+    'gpt-image-2.5-flare', 'gpt-image-2.5-sunburst', 'gpt-image-2.5-4k',
     'gpt-image-2', 'gpt-image-2-official', 'gpt-image-1', 'gpt-image-1-mini', 'gpt-image-1.5', 'chatgpt-image-latest',
     // Seedream 系列
     'doubao-seedream-4-5', 'seedream-4-5', 'doubao-seedream-4', 'seedream-4',
@@ -516,7 +523,8 @@ export const RESOLUTION_TIER_MODELS = [
 /** 质量级别型模型（参数值是"standard/hd/auto/low/medium/high"，控制细节增强） */
 export const QUALITY_LEVEL_MODELS = [
     // GPT-Image 系列
-    'gpt-image-2.5', 'gpt-image-2', 'gpt-image-2-official', 'gpt-image-1', 'gpt-image-2-c',
+    'gpt-image-2.5-flare', 'gpt-image-2.5-sunburst', 'gpt-image-2.5-4k',
+    'gpt-image-2', 'gpt-image-2-official', 'gpt-image-1', 'gpt-image-2-c',
     // DALL-E 3
     'dall-e-3',
     // Ideogram
@@ -880,6 +888,8 @@ export function inferModelParamCapability(modelId: string, providerHint = ''): {
 
 /** 获取模型支持的分辨率档位选项（智能兜底） */
 export function getResolutionTierOptions(modelId: string, providerHint = ''): string[] {
+    if (modelId.toLowerCase().includes('gpt-image-2.5-4k')) return ['4K'];
+
     const cap = inferModelParamCapability(modelId, providerHint);
     if (cap.type === 'resolution' || cap.type === 'both') return cap.options.filter(isResolutionTier);
     return [];
@@ -909,7 +919,7 @@ export function isResolutionTier(value: string): boolean {
 
 /** 判断值是否是质量级别 */
 export function isQualityLevel(value: string): boolean {
-    return ['auto', 'low', 'medium', 'high', 'standard', 'hd', 'quality'].includes(value);
+    return ['auto', 'low', 'medium', 'high', 'xhigh', 'max', 'standard', 'hd', 'quality'].includes(value);
 }
 
 /** 各模型质量/分辨率对应的实际像素尺寸 */

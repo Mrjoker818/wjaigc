@@ -21,12 +21,18 @@ describe('apimart gpt-image-2.5 model capabilities (per apimart official docs)',
     ]);
   });
 
-  it('supports resolution 1K/2K/4K and quality auto/low/medium/high', () => {
-    expect(getResolutionTierOptions('gpt-image-2.5', APIMART)).toEqual(['1K', '2K', '4K']);
-    expect(getQualityLevelOptions('gpt-image-2.5', APIMART)).toEqual(['auto', 'low', 'medium', 'high']);
-    expect(getModelParamType('gpt-image-2.5', APIMART)).toBe('both');
+  it('supports complete APImart GPT Image 2.5 quality levels and named models', () => {
+    expect(getQualityLevelOptions('gpt-image-2.5-flare', APIMART)).toEqual(['auto', 'low', 'medium', 'high', 'xhigh', 'max']);
+    expect(getQualityLevelOptions('gpt-image-2.5-sunburst', APIMART)).toEqual(['auto', 'low', 'medium', 'high', 'xhigh', 'max']);
+  });
+
+  it('supports PearAPI GPT Image 2.5 4K quality', () => {
+    expect(getQualityLevelOptions('gpt-image-2.5-4k', APIMART)).toEqual(['auto', 'low', 'medium', 'high']);
+    expect(getResolutionTierOptions('gpt-image-2.5-4k', APIMART)).toEqual(['4K']);
+    expect(getProviderAspectRatios('gpt-image-2.5-4k', APIMART)).toEqual(['1:1', '16:9', '9:16']);
   });
 });
+
 describe('apimart grok-imagine model capabilities (per apimart official docs)', () => {
   it('exposes the full 13-ratio list for grok-imagine-2.0-ext', () => {
     const ratios = getProviderAspectRatios('grok-imagine-2.0-ext', APIMART);
