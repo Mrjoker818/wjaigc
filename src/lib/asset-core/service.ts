@@ -228,70 +228,77 @@ export class AssetService {
     version: AssetVersion;
     reused: boolean;
   }> {
+    return (await this.createAssetVersionsAtomically([input]))[0];
+  }
+
+  async createAssetVersionsAtomically(inputs: readonly CreateAssetVersionInput[]): Promise<Array<{
+    asset: Asset;
+    version: AssetVersion;
+    reused: boolean;
+  }>> {
+    if (inputs.length < 1 || inputs.length > 101) throw new TypeError('ASSET_VERSION_BATCH_INVALID');
+    const [{ actorUserId, projectId }] = inputs;
+    if (inputs.some(input => input.actorUserId !== actorUserId || input.projectId !== projectId)) {
+      throw new TypeError('ASSET_VERSION_BATCH_SCOPE_INVALID');
+    }
     return this.storage.transaction(async (transaction) => {
-      if (!await transaction.findProject(input.actorUserId, input.projectId)) notFound();
-      await transaction.lockVersionIdempotency(
-        input.actorUserId,
-        input.projectId,
-        input.idempotencyKey,
-      );
-
-      const existing = await transaction.findVersionByIdempotency(
-        input.actorUserId,
-        input.projectId,
-        input.idempotencyKey,
-      );
-      if (existing) {
-        if (existing.requestDigest !== input.requestDigest) conflict();
-        const asset = await transaction.findAsset(input.actorUserId, input.projectId, existing.version.assetId);
-        if (!asset) notFound();
-        return { asset, version: existing.version, reused: true };
+      if (!await transaction.findProject(actorUserId, projectId)) notFound();
+      const lockKeys = [...new Set(inputs.map(input => input.idempotencyKey))].sort();
+      if (lockKeys.length !== inputs.length) throw new TypeError('ASSET_VERSION_BATCH_IDEMPOTENCY_DUPLICATE');
+      for (const idempotencyKey of lockKeys) {
+        await transaction.lockVersionIdempotency(actorUserId, projectId, idempotencyKey);
       }
 
-      let asset: Asset;
-      if (input.assetId) {
-        const existingAsset = await transaction.findAsset(input.actorUserId, input.projectId, input.assetId);
-        if (!existingAsset) notFound();
-        asset = existingAsset;
-      } else {
-        asset = {
-          id: randomUUID(),
-          ownerId: input.actorUserId,
-          projectId: input.projectId,
-          kind: input.kind,
-          status: 'active',
-          currentVersionId: null,
-          createdAt: now(),
-          updatedAt: now(),
+      const results: Array<{ asset: Asset; version: AssetVersion; reused: boolean }> = [];
+      for (const input of inputs) {
+        const existing = await transaction.findVersionByIdempotency(
+          actorUserId,
+          projectId,
+          input.idempotencyKey,
+        );
+        if (existing) {
+          if (existing.requestDigest !== input.requestDigest) conflict();
+          const asset = await transaction.findAsset(actorUserId, projectId, existing.version.assetId);
+          if (!asset) notFound();
+          results.push({ asset, version: existing.version, reused: true });
+          continue;
+        }
+
+        let asset: Asset;
+        if (input.assetId) {
+          const existingAsset = await transaction.findAsset(actorUserId, projectId, input.assetId);
+          if (!existingAsset) notFound();
+          asset = existingAsset;
+        } else {
+          const timestamp = now();
+          asset = {
+            id: randomUUID(), ownerId: actorUserId, projectId, kind: input.kind,
+            status: 'active', currentVersionId: null, createdAt: timestamp, updatedAt: timestamp,
+          };
+          await transaction.insertAsset(asset);
+        }
+
+        const parentVersionIds = input.parentVersionIds ?? [];
+        for (const parentVersionId of parentVersionIds) {
+          if (!await transaction.findVersion(actorUserId, projectId, parentVersionId)) notFound();
+        }
+        const metadata = input.metadata
+          ? { ...input.metadata, requestDigest: input.requestDigest }
+          : undefined;
+        const version: AssetVersion = {
+          id: randomUUID(), assetId: asset.id, ownerId: actorUserId, projectId,
+          file: input.file, parentVersionIds: [...parentVersionIds],
+          idempotencyKey: input.idempotencyKey,
+          ...(metadata ? { metadata } : {}), createdAt: now(),
         };
-        await transaction.insertAsset(asset);
+        await transaction.insertVersion(version, input.requestDigest, input.metadata);
+        await transaction.insertParents(version, parentVersionIds);
+        const updatedAsset = await transaction.updateAssetCurrentVersion(
+          actorUserId, projectId, asset.id, version.id,
+        );
+        results.push({ asset: updatedAsset, version, reused: false });
       }
-
-      const parentVersionIds = input.parentVersionIds ?? [];
-      for (const parentVersionId of parentVersionIds) {
-        const parent = await transaction.findVersion(input.actorUserId, input.projectId, parentVersionId);
-        if (!parent || parent.assetId !== asset.id) notFound();
-      }
-
-      const version: AssetVersion = {
-        id: randomUUID(),
-        assetId: asset.id,
-        ownerId: input.actorUserId,
-        projectId: input.projectId,
-        file: input.file,
-        parentVersionIds: [...parentVersionIds],
-        idempotencyKey: input.idempotencyKey,
-        createdAt: now(),
-      };
-      await transaction.insertVersion(version, input.requestDigest, input.metadata);
-      await transaction.insertParents(version, parentVersionIds);
-      const updatedAsset = await transaction.updateAssetCurrentVersion(
-        input.actorUserId,
-        input.projectId,
-        asset.id,
-        version.id,
-      );
-      return { asset: updatedAsset, version, reused: false };
+      return results;
     });
   }
 
@@ -410,7 +417,7 @@ export class AssetService {
           input.projectId,
           parentVersionId,
         );
-        if (!parent || parent.assetId !== asset.id) notFound();
+        if (!parent) notFound();
       }
 
       const version: AssetVersion = {
@@ -421,6 +428,7 @@ export class AssetService {
         file,
         parentVersionIds: [...parentVersionIds],
         idempotencyKey: input.idempotencyKey,
+        ...(input.metadata ? { metadata: { ...input.metadata, requestDigest: input.requestDigest } } : {}),
         createdAt: now(),
       };
       await transaction.insertVersion(version, input.requestDigest, input.metadata);

@@ -71,6 +71,11 @@ type AssetService = {
     placement: WorkspacePlacement;
     reused: boolean;
   }>;
+  createAssetVersionsAtomically(inputs: readonly CreateAssetVersionInput[]): Promise<Array<{
+    asset: Asset;
+    version: AssetVersion;
+    reused: boolean;
+  }>>;
   bindWorkflowInputPlacement(input: CreatePlacementInput): Promise<{
     placement: WorkspacePlacement;
     reused: boolean;
@@ -1149,6 +1154,79 @@ describe('asset graph service', () => {
 
     expect(child.version.parentVersionIds).toEqual([second.version.id, first.version.id]);
     expect(storage.data.parents.get(child.version.id)).toEqual([second.version.id, first.version.id]);
+  });
+
+  it('allows a derived asset to reference a parent asset version in the same user project', async () => {
+    const ownerId = randomUUID();
+    const projectId = randomUUID();
+    const storage = new MemoryStorage(ownerId, projectId);
+    const { createAssetService } = await loadService();
+    const service = createAssetService(storage);
+    const source = await service.createAssetVersion(createVersionInput(ownerId, projectId));
+
+    const derived = await service.createAssetVersion(createVersionInput(ownerId, projectId, {
+      parentVersionIds: [source.version.id],
+      idempotencyKey: 'derived-cross-asset',
+    }));
+
+    expect(derived.asset.id).not.toBe(source.asset.id);
+    expect(derived.version.parentVersionIds).toEqual([source.version.id]);
+  });
+
+  it('keeps ordinary same-asset version lineage unchanged', async () => {
+    const ownerId = randomUUID();
+    const projectId = randomUUID();
+    const storage = new MemoryStorage(ownerId, projectId);
+    const { createAssetService } = await loadService();
+    const service = createAssetService(storage);
+    const first = await service.createAssetVersion(createVersionInput(ownerId, projectId));
+    const next = await service.createAssetVersion(createVersionInput(ownerId, projectId, {
+      assetId: first.asset.id,
+      parentVersionIds: [first.version.id],
+      idempotencyKey: 'ordinary-next',
+    }));
+
+    expect(next.asset.id).toBe(first.asset.id);
+    expect(next.version.parentVersionIds).toEqual([first.version.id]);
+  });
+
+  it('rolls back every version in an atomic batch when a later insert fails', async () => {
+    const ownerId = randomUUID();
+    const projectId = randomUUID();
+    const storage = new MemoryStorage(ownerId, projectId);
+    const originalInsert = storage.insertVersion.bind(storage);
+    let inserts = 0;
+    storage.insertVersion = async (...args) => {
+      inserts += 1;
+      if (inserts === 2) throw new Error('second insert failed');
+      return originalInsert(...args);
+    };
+    const { createAssetService } = await loadService();
+    const service = createAssetService(storage);
+
+    await expect(service.createAssetVersionsAtomically([
+      createVersionInput(ownerId, projectId, { idempotencyKey: 'batch-a' }),
+      createVersionInput(ownerId, projectId, { idempotencyKey: 'batch-b' }),
+    ])).rejects.toThrow('second insert failed');
+    expect(storage.data.versions.size).toBe(0);
+    expect(storage.data.assets.size).toBe(0);
+  });
+
+  it('does not reveal or accept a cross-project parent version', async () => {
+    const ownerId = randomUUID();
+    const projectId = randomUUID();
+    const storage = new MemoryStorage(ownerId, projectId);
+    const foreign = createVersionInput(ownerId, randomUUID());
+    const foreignVersion: AssetVersion = {
+      id: randomUUID(), assetId: randomUUID(), ownerId, projectId: foreign.projectId,
+      file: foreign.file, parentVersionIds: [], createdAt: new Date().toISOString(),
+    };
+    storage.data.versions.set(foreignVersion.id, foreignVersion);
+    const { createAssetService } = await loadService();
+    const service = createAssetService(storage);
+    await expect(service.createAssetVersion(createVersionInput(ownerId, projectId, {
+      parentVersionIds: [foreignVersion.id], idempotencyKey: 'foreign-parent',
+    }))).rejects.toMatchObject({ code: 'ASSET_NOT_FOUND' });
   });
 
   it('trashes only the placement while the shared asset remains actively placed', async () => {

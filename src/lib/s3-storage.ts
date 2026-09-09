@@ -142,6 +142,47 @@ export async function readImageFromS3(key: string): Promise<Buffer | null> {
   }
 }
 
+const BINARY_CONTENT_TYPES = new Set([
+  'image/png',
+  'image/jpeg',
+  'image/webp',
+  'application/json',
+  'application/zip',
+]);
+
+/** Upload one already-validated export artifact without routing it through image validation. */
+export async function uploadBinaryToS3(
+  buffer: Buffer,
+  fileName: string,
+  contentType: string,
+  signal?: AbortSignal,
+): Promise<string | null> {
+  if (!Buffer.isBuffer(buffer) || buffer.length === 0) throw new TypeError('S3_BINARY_INVALID');
+  if (!BINARY_CONTENT_TYPES.has(contentType)) throw new TypeError('S3_BINARY_MIME_INVALID');
+  if (
+    fileName !== fileName.normalize('NFC')
+    || fileName !== fileName.split(/[\\/]/u).at(-1)
+    || !/^[\p{L}\p{N}][\p{L}\p{N} ._-]{0,239}$/u.test(fileName)
+    || /[. ]$/u.test(fileName)
+  ) throw new TypeError('S3_BINARY_FILENAME_INVALID');
+  signal?.throwIfAborted();
+  const storage = getStorage();
+  if (!storage) return null;
+  const operation = storage.uploadFile({
+    fileContent: buffer,
+    fileName: `exports/${fileName}`,
+    contentType,
+  });
+  try {
+    const key = signal ? await waitForAbortable(operation, signal) : await operation;
+    signal?.throwIfAborted();
+    return key.startsWith('/') ? key : `/${key}`;
+  } catch (error) {
+    signal?.throwIfAborted();
+    throw new Error('S3_BINARY_UPLOAD_FAILED', { cause: error });
+  }
+}
+
 export type S3BoundedReadErrorCode =
   | 'S3_READ_ABORTED'
   | 'S3_READ_TIMEOUT'

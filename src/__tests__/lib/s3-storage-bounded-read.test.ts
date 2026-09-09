@@ -2,11 +2,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   generatePresignedUrl: vi.fn(),
+  uploadFile: vi.fn(),
 }));
 
 vi.mock('coze-coding-dev-sdk', () => ({
   S3Storage: class {
     generatePresignedUrl = mocks.generatePresignedUrl;
+    uploadFile = mocks.uploadFile;
   },
 }));
 
@@ -17,6 +19,7 @@ describe('readImageFromS3Bounded cancellation', () => {
     vi.resetModules();
     vi.restoreAllMocks();
     mocks.generatePresignedUrl.mockReset().mockResolvedValue('https://objects.test/exact.png');
+    mocks.uploadFile.mockReset().mockResolvedValue('exports/result.zip');
     process.env.COZE_BUCKET_ENDPOINT_URL = 'https://bucket.test';
     process.env.COZE_BUCKET_NAME = 'test-bucket';
   });
@@ -153,5 +156,26 @@ describe('readImageFromS3Bounded cancellation', () => {
     await expect(readImageFromS3Bounded('images/exact.png', 1024, 5, {
       strict: true,
     })).rejects.toMatchObject({ code: 'S3_READ_TIMEOUT' });
+  });
+
+  it('uploads an allowed binary artifact through the non-image path', async () => {
+    const { uploadBinaryToS3 } = await import('@/lib/s3-storage');
+    await expect(uploadBinaryToS3(
+      Buffer.from('PK\u0003\u0004zip'), 'result.zip', 'application/zip', new AbortController().signal,
+    )).resolves.toBe('/exports/result.zip');
+    expect(mocks.uploadFile).toHaveBeenCalledWith({
+      fileContent: Buffer.from('PK\u0003\u0004zip'),
+      fileName: 'exports/result.zip',
+      contentType: 'application/zip',
+    });
+  });
+
+  it('stops waiting for an in-flight binary upload when cancelled', async () => {
+    mocks.uploadFile.mockImplementation(() => new Promise(() => undefined));
+    const controller = new AbortController();
+    const { uploadBinaryToS3 } = await import('@/lib/s3-storage');
+    const pending = uploadBinaryToS3(Buffer.from('{}'), 'manifest.json', 'application/json', controller.signal);
+    controller.abort(new DOMException('cancelled', 'AbortError'));
+    await expect(pending).rejects.toMatchObject({ name: 'AbortError' });
   });
 });

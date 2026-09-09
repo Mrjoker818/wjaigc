@@ -8,6 +8,16 @@ import {
 import { canonicalComplianceReportJson } from '@/lib/platform-compliance/report-schema';
 import { validReport, wideReport } from '@/__tests__/helpers/platform-compliance-fixtures';
 
+const exportResult = () => ({
+  schemaVersion: 1,
+  runId: 'run-1',
+  outcome: 'completed',
+  imageAssetVersionIds: ['image-v2', 'image-v1'],
+  manifestAssetVersionId: 'manifest-v1',
+  zipAssetVersionId: 'zip-v1',
+  failures: [],
+});
+
 describe('bounded durable Skill outputs', () => {
   it('restores a registered schema-tagged JSON output in canonical form', () => {
     const output = parseDurableSkillOutput({
@@ -23,6 +33,27 @@ describe('bounded durable Skill outputs', () => {
       schemaId: 'platform-compliance-report-v1',
       content: canonicalComplianceReportJson(validReport()),
     });
+  });
+
+  it('restores multi-platform export results with stable image ordering', () => {
+    const output = parseDurableSkillOutput({
+      stepId: 'export', kind: 'json', schemaId: 'multi-platform-export-result-v1',
+      content: JSON.stringify(exportResult()),
+    });
+    expect(JSON.parse(output.content)).toEqual({
+      ...exportResult(), imageAssetVersionIds: ['image-v1', 'image-v2'],
+    });
+  });
+
+  it('rejects an export outcome inconsistent with its failure list', () => {
+    expect(() => parseDurableSkillOutput({
+      stepId: 'export', kind: 'json', schemaId: 'multi-platform-export-result-v1',
+      content: JSON.stringify({ ...exportResult(), failures: [{ sourceAssetVersionId: 'source-1', code: 'EXPORT_FAILED', retryable: false }] }),
+    })).toThrow('EXPORT_RESULT_SCHEMA_INVALID');
+    expect(() => parseDurableSkillOutput({
+      stepId: 'export', kind: 'json', schemaId: 'multi-platform-export-result-v1',
+      content: JSON.stringify({ ...exportResult(), outcome: 'partial_success' }),
+    })).toThrow('EXPORT_RESULT_SCHEMA_INVALID');
   });
 
   it.each([
