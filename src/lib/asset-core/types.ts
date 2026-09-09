@@ -85,6 +85,13 @@ export interface WorkspaceAssetReference {
   sourceTrace?: WorkspaceSourceTrace;
 }
 
+export interface RegisteredWorkspaceAssetReference extends WorkspaceAssetReference {
+  assetId: string;
+  assetVersionId: string;
+  placementId: string;
+  entityId: string;
+}
+
 /** Server-only readable reference returned after actor/project/version authorization. */
 export interface WorkspaceReadableAssetReference extends WorkspaceAssetReference {
   assetId: string;

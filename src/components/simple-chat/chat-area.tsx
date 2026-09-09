@@ -21,6 +21,7 @@ import {
   SimpleChatProject, SimpleChatTask, SimpleChatMessage, SimpleChatAgent, ChatAttachment, ChatArtifact,
   ProjectInstructions, ProjectKnowledgeItem,
   PRESET_SKILLS, PresetSkill, alignSimpleChatMediaSlots, buildSimpleChatMessageSourceTrace,
+  buildSimpleChatManagedAttachmentSelection,
   canSendSimpleChatMessageToNodeMode, canTransferSimpleChatMedia,
   mergeSimpleChatCanvasBridgeReferences, parseSimpleChatCanvasBridgePayload,
   readSimpleChatStreamAssetReference,
@@ -1286,18 +1287,8 @@ export default function ChatArea({
       createdAt: Date.now(),
     };
 
-    const currentSourceVersionIds = [...new Set(
-      (userMsg.imageRefs || []).flatMap(reference => (
-        reference.assetVersionId ? [reference.assetVersionId] : []
-      )),
-    )];
-    const currentSelectedEntityIds = [...new Set(
-      (userMsg.imageRefs || []).flatMap(reference => (
-        reference.assetVersionId && reference.placementId && reference.entityId
-          ? [reference.entityId]
-          : []
-      )),
-    )];
+    const { sourceVersionIds: currentSourceVersionIds, selectedEntityIds: currentSelectedEntityIds } =
+      buildSimpleChatManagedAttachmentSelection(userMsg.imageRefs || []);
     const exportRequestContext = resolveSimpleChatExportRequestContext({
       messages,
       currentSourceVersionIds,

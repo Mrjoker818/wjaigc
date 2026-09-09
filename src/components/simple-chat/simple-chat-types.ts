@@ -433,6 +433,21 @@ export function alignSimpleChatMediaSlots(
   return { images, imageRefs, attachments: alignedAttachments };
 }
 
+export function buildSimpleChatManagedAttachmentSelection(
+  references: readonly WorkspaceAssetReference[],
+): { sourceVersionIds: string[]; selectedEntityIds: string[] } {
+  return {
+    sourceVersionIds: [...new Set(references.flatMap(reference => (
+      reference.assetVersionId ? [reference.assetVersionId] : []
+    )))],
+    selectedEntityIds: [...new Set(references.flatMap(reference => (
+      reference.assetVersionId && reference.placementId && reference.entityId
+        ? [reference.entityId]
+        : []
+    )))],
+  };
+}
+
 export async function sendSimpleChatMediaToCanvas(input: {
   images: string[];
   imageRefs: WorkspaceAssetReference[];

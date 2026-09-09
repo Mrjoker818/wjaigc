@@ -10,7 +10,10 @@ import { resolveChatControls } from '@/lib/chat-generation-controls';
 import { getInternalRequestHeaders } from '@/lib/api-auth';
 import { AssetServiceError, createAssetService } from '@/lib/asset-core/service';
 import { parseWorkspaceSourceTrace, type WorkspaceSourceTrace } from '@/lib/asset-core/source-trace';
-import type { WorkspaceAssetReference } from '@/lib/asset-core/types';
+import type {
+  RegisteredWorkspaceAssetReference,
+  WorkspaceAssetReference,
+} from '@/lib/asset-core/types';
 import { getSafeImageTypeFromDataUrl, getSafeMediaTypeFromResponse } from '@/lib/media-validation';
 import {
   agentWorkspaceProjectionIdempotencyKey,
@@ -220,7 +223,7 @@ async function persistNewChatImage(
 async function registerStandaloneChatAsset(
   actor: { id: string; role?: string },
   input: AssetRegistrationRequest,
-): Promise<WorkspaceAssetReference> {
+): Promise<RegisteredWorkspaceAssetReference> {
   const service = createAssetService();
   const sourceDigest = assetMediaDigest(input.image.url);
   const created = await service.createVersionWithPlacement({
@@ -265,6 +268,7 @@ async function registerStandaloneChatAsset(
     assetId: created.version.assetId,
     assetVersionId: created.version.id,
     placementId: created.placement.id,
+    entityId: created.placement.entityId,
     url: created.version.file.url,
     ...(input.image.name ? { name: input.image.name } : {}),
     ...(sourceTrace ? { sourceTrace } : {}),

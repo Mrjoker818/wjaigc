@@ -166,13 +166,17 @@ describe('POST /api/simple-chat/chat', () => {
     });
     mocks.createVersionWithPlacement.mockImplementation(async (input: {
       resolveFile: () => Promise<{ url: string }>;
-      placement: { metadata?: Record<string, unknown> };
+      placement: { entityId: string; metadata?: Record<string, unknown> };
     }) => {
       const file = await input.resolveFile();
       return {
         asset: { id: 'asset-a' },
         version: { id: 'version-a', assetId: 'asset-a', file },
-        placement: { id: 'chat-placement-a', metadata: input.placement.metadata },
+        placement: {
+          id: 'chat-placement-a',
+          entityId: input.placement.entityId,
+          metadata: input.placement.metadata,
+        },
         reused: false,
       };
     });
@@ -238,6 +242,7 @@ describe('POST /api/simple-chat/chat', () => {
       assetId: 'asset-a',
       assetVersionId: 'version-a',
       placementId: 'chat-placement-a',
+      entityId: 'message-a:0',
       url: '/api/serve-upload/generated.png',
       name: 'Generated image',
     });

@@ -47,3 +47,17 @@
 - `pnpm ts-check`：通过。
 - 目标 ESLint `--quiet`：通过（0 errors）。
 - Scoped `git diff --check`：通过。
+
+## 最终 Important 修复
+
+- `assetAction=register` 现在返回 `createVersionWithPlacement` 实际创建或复用的 placement `entityId`，不再缺失该字段，也不回显请求值或暴露 owner 等内部字段。新增共享 `RegisteredWorkspaceAssetReference` 响应类型，明确已注册引用的四项受管标识均为必填。
+- 将 ChatArea 生成 `sourceVersionIds`/`selectedEntityIds` 的既有逻辑抽成共享构造函数，生产组件与集成测试使用同一实现，避免测试自行复制请求组装规则。
+- 新增完整集成测试，串联真实注册路由响应、ChatArea 请求构造、真实来源授权和同一 Skill Run 创建；错误 `entityId` 返回非枚举 404，且不会创建第二个 Run。测试夹具使用服务层返回的真实 placement 字段，注册响应精确断言同时确认不泄漏 `ownerId`。
+
+## 最终验证
+
+- TDD RED：注册 API 契约因响应缺少 `entityId` 失败；链路测试因 ChatArea 请求构造尚未共享而失败。最小实现后两项转绿。
+- Task 9 全套及 register/upload/context/auth、项目同步、刷新和 handoff 相关回归：18 个文件，399 项测试通过。
+- `pnpm ts-check`：通过。
+- 目标 ESLint `--quiet`：通过（0 errors）。
+- 本任务 scoped diff check：通过；Canvas Skill 目录隔离保持不变，未修改或暂存既有脏 SDD 文件与 `mpe-progress.md`。
