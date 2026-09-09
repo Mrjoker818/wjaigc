@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   dbGetSystemSetting: vi.fn(),
@@ -13,6 +13,7 @@ import { getRuntimeSettings } from '@/lib/runtime-settings';
 describe('runtime settings', () => {
   beforeEach(() => {
     mocks.dbGetSystemSetting.mockReset();
+    delete process.env.MULTI_PLATFORM_EXPORT_ENABLED;
   });
 
   it('returns the configured maximum image edge', async () => {
@@ -72,5 +73,21 @@ describe('runtime settings', () => {
       quickCreateImageModel: '',
       quickCreateChatModel: '',
     });
+  });
+
+  afterEach(() => {
+    delete process.env.MULTI_PLATFORM_EXPORT_ENABLED;
+  });
+
+  it('keeps multi-platform export disabled unless the environment flag is exactly true', async () => {
+    mocks.dbGetSystemSetting.mockResolvedValue(null);
+
+    await expect(getRuntimeSettings()).resolves.toMatchObject({ multiPlatformExportEnabled: false });
+
+    process.env.MULTI_PLATFORM_EXPORT_ENABLED = 'true';
+    await expect(getRuntimeSettings()).resolves.toMatchObject({ multiPlatformExportEnabled: true });
+
+    process.env.MULTI_PLATFORM_EXPORT_ENABLED = 'TRUE';
+    await expect(getRuntimeSettings()).resolves.toMatchObject({ multiPlatformExportEnabled: false });
   });
 });

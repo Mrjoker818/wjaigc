@@ -23,6 +23,7 @@ const expectedRoutes = [
   'groups/route.ts',
   'local-generation-records/route.ts',
   'op-log/route.ts',
+  'platform-export-presets/route.ts',
   'production-readiness/route.ts',
   'resources/route.ts',
   'settings/route.ts',

@@ -19,6 +19,7 @@ export interface RuntimeSettings {
   videoGenerationEnabled: boolean;
   threeDModelEnabled: boolean;
   registrationEnabled: boolean;
+  multiPlatformExportEnabled: boolean;
 }
 
 export async function getRuntimeSettings(): Promise<RuntimeSettings> {
@@ -70,5 +71,6 @@ export async function getRuntimeSettings(): Promise<RuntimeSettings> {
     videoGenerationEnabled: String(videoEnabled ?? 'true') !== 'false',
     threeDModelEnabled: String(threeDEnabled ?? 'true') !== 'false',
     registrationEnabled: String(registrationEnabled ?? 'false') === 'true',
+    multiPlatformExportEnabled: process.env.MULTI_PLATFORM_EXPORT_ENABLED === 'true',
   };
 }

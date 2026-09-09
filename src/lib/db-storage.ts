@@ -12,6 +12,7 @@ import {
   resolveSelectedModelsStorageKind,
 } from './api-provider-selected-models-storage';
 import type { PoolClient } from 'pg';
+import type { FrozenPlatformExportPreset, PlatformExportPreset } from './multi-platform-export/types';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -148,6 +149,24 @@ async function initializeCoreTables(): Promise<void> {
         key TEXT PRIMARY KEY,
         value JSONB,
         updated_at BIGINT NOT NULL
+      )
+    `);
+
+    await execSql(`
+      CREATE TABLE IF NOT EXISTS wujie_platform_export_presets (
+        preset_id TEXT NOT NULL,
+        version INTEGER NOT NULL,
+        platform TEXT NOT NULL,
+        usage TEXT NOT NULL,
+        label TEXT NOT NULL,
+        width INTEGER NOT NULL,
+        height INTEGER NOT NULL,
+        recommended_format TEXT NOT NULL,
+        supports_transparency BOOLEAN NOT NULL DEFAULT false,
+        enabled BOOLEAN NOT NULL DEFAULT true,
+        created_at BIGINT NOT NULL,
+        updated_at BIGINT NOT NULL,
+        PRIMARY KEY (preset_id, version)
       )
     `);
 
@@ -692,6 +711,103 @@ export async function dbSetSystemSetting(key: string, value: unknown): Promise<b
     return true;
   } catch (e) {
     console.error('[db-storage] dbSetSystemSetting error:', e);
+    return false;
+  }
+}
+
+// ─── Versioned platform export presets ──────────────────────────────────────
+
+interface DbPlatformExportPresetRow {
+  preset_id: string;
+  version: number;
+  platform: string;
+  usage: string;
+  label: string;
+  width: number;
+  height: number;
+  recommended_format: PlatformExportPreset['recommendedFormat'];
+  supports_transparency: boolean;
+  enabled: boolean;
+}
+
+function mapPlatformExportPreset(row: DbPlatformExportPresetRow): PlatformExportPreset {
+  return {
+    id: row.preset_id,
+    version: Number(row.version),
+    platform: row.platform,
+    usage: row.usage,
+    label: row.label,
+    width: Number(row.width),
+    height: Number(row.height),
+    recommendedFormat: row.recommended_format,
+    supportsTransparency: row.supports_transparency,
+    enabled: row.enabled,
+  };
+}
+
+export async function dbListPlatformExportPresets(): Promise<PlatformExportPreset[]> {
+  try {
+    const result = await execSql(`
+      SELECT preset_id, version, platform, usage, label, width, height,
+             recommended_format, supports_transparency, enabled
+      FROM wujie_platform_export_presets
+      ORDER BY preset_id ASC, version ASC
+    `);
+    return (result.rows as unknown as DbPlatformExportPresetRow[]).map(mapPlatformExportPreset);
+  } catch (error) {
+    console.error('[db-storage] dbListPlatformExportPresets error:', error);
+    return [];
+  }
+}
+
+export async function dbCreatePlatformExportPresetVersion(
+  preset: PlatformExportPreset,
+): Promise<PlatformExportPreset | null> {
+  try {
+    const now = Date.now();
+    const result = await execSql(`
+      INSERT INTO wujie_platform_export_presets (
+        preset_id, version, platform, usage, label, width, height,
+        recommended_format, supports_transparency, enabled, created_at, updated_at
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $11)
+      ON CONFLICT (preset_id, version) DO NOTHING
+      RETURNING preset_id, version, platform, usage, label, width, height,
+                recommended_format, supports_transparency, enabled
+    `, [
+      preset.id, preset.version, preset.platform, preset.usage, preset.label,
+      preset.width, preset.height, preset.recommendedFormat,
+      preset.supportsTransparency, preset.enabled, now,
+    ]);
+    const row = (result.rows as unknown as DbPlatformExportPresetRow[])[0];
+    return row ? mapPlatformExportPreset(row) : null;
+  } catch (error) {
+    console.error('[db-storage] dbCreatePlatformExportPresetVersion error:', error);
+    return null;
+  }
+}
+
+export async function dbSetPlatformExportPresetEnabled(
+  preset: FrozenPlatformExportPreset,
+  enabled: boolean,
+): Promise<boolean> {
+  try {
+    const now = Date.now();
+    await execSql(`
+      INSERT INTO wujie_platform_export_presets (
+        preset_id, version, platform, usage, label, width, height,
+        recommended_format, supports_transparency, enabled, created_at, updated_at
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $11)
+      ON CONFLICT (preset_id, version) DO UPDATE SET
+        enabled = EXCLUDED.enabled,
+        updated_at = EXCLUDED.updated_at
+    `, [
+      preset.id, preset.version, preset.platform, preset.usage, preset.label,
+      preset.width, preset.height, preset.recommendedFormat,
+      preset.supportsTransparency, enabled, now,
+    ]);
+    return true;
+  } catch (error) {
+    console.error('[db-storage] dbSetPlatformExportPresetEnabled error:', error);
     return false;
   }
 }
