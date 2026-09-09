@@ -19,7 +19,9 @@ interface MultiPlatformExportResultsProps {
     onProgress: (progress: number) => void,
   ) => void | Promise<void>;
   onAddToCanvas: (references: WorkspaceAssetReference[]) => void | Promise<void>;
-  onLocateSource?: (sourceVersionId: string) => void;
+  onLocateSource?: (
+    sourceVersionId: string,
+  ) => WorkspaceAssetReference | void | Promise<WorkspaceAssetReference | void>;
   onRetry?: () => void | Promise<void>;
 }
 
@@ -41,6 +43,7 @@ export function MultiPlatformExportResults({
   const [pendingAction, setPendingAction] = useState<string>();
   const [actionError, setActionError] = useState<string>();
   const [groupProgress, setGroupProgress] = useState<number>();
+  const [sourcePreview, setSourcePreview] = useState<WorkspaceAssetReference>();
   const runAction = async (key: string, action: () => void | Promise<void>): Promise<void> => {
     setPendingAction(key);
     setActionError(undefined);
@@ -103,7 +106,10 @@ export function MultiPlatformExportResults({
                           <button type="button" className="block min-h-10 max-w-full truncate text-left text-[10px] text-muted-foreground underline-offset-2 hover:underline"
                             aria-label={`定位来源 ${file.sourceAssetVersionId}`}
                             disabled={!onLocateSource || Boolean(pendingAction)}
-                            onClick={() => onLocateSource?.(file.sourceAssetVersionId)}>
+                            onClick={() => { void runAction(`source:${file.sourceAssetVersionId}`, async () => {
+                              const reference = await onLocateSource?.(file.sourceAssetVersionId);
+                              if (reference) setSourcePreview(reference);
+                            }); }}>
                             <LocateFixed className="mr-1 inline" aria-hidden="true" size={12} />来源 {file.sourceAssetVersionId}
                           </button>
                         )}
@@ -128,6 +134,27 @@ export function MultiPlatformExportResults({
       )}
 
       {actionError && <div role="alert" className="break-words text-xs text-destructive">{actionError}</div>}
+      {sourcePreview && (
+        <div aria-label="来源版本预览" className="flex min-w-0 items-center gap-3 border-t border-border/60 pt-3">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={sourcePreview.url}
+            alt={sourcePreview.name || '来源版本预览'}
+            className="h-16 w-16 shrink-0 rounded-lg border border-border object-cover"
+          />
+          <div className="min-w-0 text-xs">
+            <p className="truncate">{sourcePreview.name || sourcePreview.assetVersionId}</p>
+            <a
+              href={sourcePreview.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex min-h-10 items-center text-primary underline-offset-2 hover:underline"
+            >
+              查看来源版本
+            </a>
+          </div>
+        </div>
+      )}
       {typeof groupProgress === 'number' && (
         <div className="space-y-1 text-xs" role="status">
           <span>正在打包 {groupProgress}%</span>

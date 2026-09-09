@@ -14,12 +14,14 @@ import type { ExportManifestFile, MultiPlatformExportResultV1 } from '@/lib/mult
 import type { PlatformExportPreset } from '@/lib/multi-platform-export/types';
 import type { SkillRunCostEstimate } from '@/lib/skill-runtime/cost-estimator';
 import {
+  createMultiPlatformExportRequestFingerprint,
   downloadExportArtifact,
   downloadExportGroup,
   loadEnabledPlatformExportPresets,
   loadExportManifestFiles,
   parseMultiPlatformExportResult,
   previewMultiPlatformExportPlan,
+  resolveExportAssetReference,
   resolveExportImageReferences,
 } from '@/lib/skill-runtime/multi-platform-export-client';
 
@@ -32,6 +34,7 @@ interface MultiPlatformExportDrawerProps {
   sourceAssetVersionIds: readonly string[];
   values: Record<string, unknown>;
   estimate?: MultiPlatformExportEstimate;
+  estimateRequestFingerprint?: string;
   projection?: AgentRunProjection;
   busy?: boolean;
   error?: string;
@@ -42,7 +45,7 @@ interface MultiPlatformExportDrawerProps {
   onRetry?: (stepId: string) => void | Promise<void>;
   onAddToCanvas?: (references: WorkspaceAssetReference[]) => void | Promise<void>;
   onRestoreRun?: (run: SkillRunHistoryItem) => void | Promise<void>;
-  onLocateSource?: (sourceVersionId: string) => void;
+  onLocateSource?: (sourceVersionId: string) => boolean | void | Promise<boolean | void>;
   onClose: () => void;
   fetcher?: typeof fetch;
 }
@@ -98,6 +101,7 @@ export function MultiPlatformExportDrawer({
   sourceAssetVersionIds,
   values,
   estimate,
+  estimateRequestFingerprint,
   projection,
   busy = false,
   error,
@@ -118,14 +122,20 @@ export function MultiPlatformExportDrawer({
   const [manifestFiles, setManifestFiles] = useState<ExportManifestFile[]>([]);
   const [resultError, setResultError] = useState<string>();
   const [showRunLog, setShowRunLog] = useState(false);
+  const currentRequestFingerprint = useMemo(() => createMultiPlatformExportRequestFingerprint({
+    projectId,
+    sourceAssetVersionIds,
+    values,
+  }), [projectId, sourceAssetVersionIds, values]);
+  const boundEstimate = estimateRequestFingerprint === currentRequestFingerprint ? estimate : undefined;
   const [estimateState, setEstimateState] = useState<'idle' | 'checking' | 'success' | 'partial' | 'failed'>(
-    estimate ? (serverExportPlan(estimate) ? 'success' : 'partial') : 'idle',
+    boundEstimate ? (serverExportPlan(boundEstimate) ? 'success' : 'partial') : 'idle',
   );
-  const validatedExportPlan = serverExportPlan(estimate);
+  const validatedExportPlan = serverExportPlan(boundEstimate);
 
   useEffect(() => {
-    if (estimate) setEstimateState(serverExportPlan(estimate) ? 'success' : 'partial');
-  }, [estimate]);
+    setEstimateState(boundEstimate ? (serverExportPlan(boundEstimate) ? 'success' : 'partial') : 'idle');
+  }, [boundEstimate]);
 
   useEffect(() => {
     if (!open) return undefined;
@@ -142,14 +152,14 @@ export function MultiPlatformExportDrawer({
   const parsedResult = useMemo<{ result?: MultiPlatformExportResultV1; error?: string }>(() => {
     const outputs = projection?.result?.outputs;
     if (!outputs) {
-      return terminalStatuses.has(projection?.status || '')
+      return projection?.status === 'completed'
         ? { error: '结果数据损坏或版本不兼容' }
         : {};
     }
     try {
       return { result: parseMultiPlatformExportResult(outputs) };
     } catch {
-      return terminalStatuses.has(projection?.status || '')
+      return projection?.status === 'completed' || projection?.status === 'failed'
         ? { error: '结果数据损坏或版本不兼容' }
         : {};
     }
@@ -325,7 +335,7 @@ export function MultiPlatformExportDrawer({
             <SectionHeading icon={<FileArchive aria-hidden="true" size={15} />}>执行预览</SectionHeading>
             <dl className="grid grid-cols-2 gap-x-3 gap-y-2 text-xs">
               <div><dt className="text-muted-foreground">文件 · 本地预估</dt><dd>{preview.fileCount} 个文件</dd></div>
-              <div><dt className="text-muted-foreground">积分</dt><dd>{estimate ? `服务端 ${estimate.minimum}-${estimate.maximum}` : '积分 0'}</dd></div>
+              <div><dt className="text-muted-foreground">积分</dt><dd>{boundEstimate ? `服务端 ${boundEstimate.minimum}-${boundEstimate.maximum}` : '积分 0'}</dd></div>
               <div><dt className="text-muted-foreground">总像素 · 本地预估</dt><dd>{preview.totalPixels.toLocaleString('zh-CN')} 像素</dd></div>
               <div><dt className="text-muted-foreground">压缩包 · 本地预估</dt><dd>预计 ZIP {formatBytes(preview.estimatedZipBytes)}</dd></div>
             </dl>
@@ -398,7 +408,17 @@ export function MultiPlatformExportDrawer({
                 })}
                 onAddToCanvas={items => onAddToCanvas?.(items)}
                 onRetry={onRetry ? () => onRetry('export') : undefined}
-                onLocateSource={onLocateSource}
+                onLocateSource={async sourceVersionId => {
+                  const located = await onLocateSource?.(sourceVersionId);
+                  if (located === true) return undefined;
+                  const reference = await resolveExportAssetReference({
+                    projectId,
+                    versionId: sourceVersionId,
+                    fetcher,
+                  });
+                  if (reference.kind !== 'image') throw new Error('来源版本不是可预览图片');
+                  return reference;
+                }}
               />
             )}
             {onRestoreRun && (

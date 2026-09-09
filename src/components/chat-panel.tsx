@@ -75,6 +75,7 @@ import {
 } from '@/lib/skill-runtime/types';
 import { bindCanvasSkillSourceInputs, collectCanvasSkillSourceVersionIds } from '@/lib/skill-runtime/canvas-source-inputs';
 import { MULTI_PLATFORM_EXPORT_SKILL_ID } from '@/lib/skill-runtime/multi-platform-export-preset';
+import { createMultiPlatformExportRequestFingerprint } from '@/lib/skill-runtime/multi-platform-export-client';
 
 const CHAT_RENDER_WINDOW = 80;
 
@@ -1417,6 +1418,7 @@ export function ChatPanel({ themeStyle, projectId, onAddToPrompt, onAddImages, o
   const [skillCategoryFilter, setSkillCategoryFilter] = useState('');
   const [activeSkill, setActiveSkill] = useState<SkillDefinition | null>(null);
   const [skillParamValues, setSkillParamValues] = useState<Record<string, unknown>>({});
+  const [skillEstimateRequestFingerprint, setSkillEstimateRequestFingerprint] = useState<string>();
   const [skillRecheckUnavailableReason, setSkillRecheckUnavailableReason] = useState<string>();
   const skillRun = useSkillRun();
   const receiveSkillOutput = useSkillOutputReceiver(onAddGeneratedImage);
@@ -1443,6 +1445,7 @@ export function ChatPanel({ themeStyle, projectId, onAddToPrompt, onAddImages, o
     skillProjectionControllerRef.current?.abort();
     skillProjectionCoordinatorRef.current.cancel();
     activeCanvasSkillRunRef.current = null;
+    setSkillEstimateRequestFingerprint(undefined);
     setSkillRecheckUnavailableReason(undefined);
     resetSkillRun();
   }, [projectId, skillAccountKey, resetSkillRun]);
@@ -3911,6 +3914,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
     skillProjectionControllerRef.current?.abort();
     skillProjectionCoordinatorRef.current.cancel();
     activeCanvasSkillRunRef.current = null;
+    setSkillEstimateRequestFingerprint(undefined);
     setSkillRecheckUnavailableReason(undefined);
     skillRun.reset();
     setActiveSkill(skill);
@@ -3923,6 +3927,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
     skillProjectionControllerRef.current?.abort();
     skillProjectionCoordinatorRef.current.cancel();
     activeCanvasSkillRunRef.current = null;
+    setSkillEstimateRequestFingerprint(undefined);
     setSkillRecheckUnavailableReason(undefined);
     skillRun.reset();
     setActiveSkill(null);
@@ -4009,7 +4014,15 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
       toast.error('请先选择项目，并配置此 Skill 所需的聊天与图像模型');
       return undefined;
     }
-    return skillRun.estimateRun(request);
+    const estimate = await skillRun.estimateRun(request);
+    setSkillEstimateRequestFingerprint(estimate && request.skillId === MULTI_PLATFORM_EXPORT_SKILL_ID
+      ? createMultiPlatformExportRequestFingerprint({
+        projectId: request.projectId,
+        sourceAssetVersionIds: request.sourceVersionIds,
+        values: request.inputValues,
+      })
+      : undefined);
+    return estimate;
   }, [buildCanvasSkillRequest, canvasSkillModelUnavailableReason, hasRequiredCanvasSkillSource, skillRun]);
 
   const handleRestoreSkill = useCallback(async (record: SkillRunHistoryItem): Promise<void> => {
@@ -4104,6 +4117,13 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
       return;
     }
     onNavigateToImage?.(image.id);
+  }, [onNavigateToImage]);
+
+  const handleLocateExportSource = useCallback((sourceVersionId: string): boolean => {
+    const image = skillCanvasImagesRef.current.find(candidate => candidate.assetVersionId === sourceVersionId);
+    if (!image) return false;
+    onNavigateToImage?.(image.id);
+    return true;
   }, [onNavigateToImage]);
 
   const onAddExportImagesToCanvas = useCallback(async (
@@ -6413,6 +6433,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                 sourceAssetVersionIds={canvasSkillSourceVersionIds}
                 values={canvasSkillInputValues}
                 estimate={skillRun.estimate}
+                estimateRequestFingerprint={skillEstimateRequestFingerprint}
                 projection={skillRun.projection}
                 busy={skillRun.busy}
                 error={skillRun.error}
@@ -6423,7 +6444,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                 onRetry={handleRetryExport}
                 onAddToCanvas={onAddExportImagesToCanvas}
                 onRestoreRun={handleRestoreSkill}
-                onLocateSource={handleLocateComplianceSource}
+                onLocateSource={handleLocateExportSource}
                 onClose={handleCloseSkill}
               />,
               document.body,

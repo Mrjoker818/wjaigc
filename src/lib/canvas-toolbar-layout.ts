@@ -21,6 +21,56 @@ export interface BottomToolbarDrawerPlacement {
 
 export type CanvasToolHostPlacement = 'none' | 'floating' | 'bottom-drawer' | 'canvas-overlay';
 
+interface ToolbarTransitionFrameOptions {
+  requestFrame?: (callback: FrameRequestCallback) => number;
+  cancelFrame?: (id: number) => void;
+}
+
+export function trackToolbarTransitionFrames(
+  target: EventTarget,
+  measure: () => void,
+  options: ToolbarTransitionFrameOptions = {},
+): () => void {
+  const requestFrame = options.requestFrame ?? requestAnimationFrame;
+  const cancelFrame = options.cancelFrame ?? cancelAnimationFrame;
+  let frameId: number | undefined;
+
+  const stopFrames = (): void => {
+    if (frameId === undefined) return;
+    cancelFrame(frameId);
+    frameId = undefined;
+  };
+  const measureFrame: FrameRequestCallback = () => {
+    measure();
+    frameId = requestFrame(measureFrame);
+  };
+  const isToolbarPositionTransition = (event: Event): boolean => {
+    const propertyName = 'propertyName' in event ? String(event.propertyName) : '';
+    return propertyName === '' || propertyName === 'all' || propertyName === 'bottom';
+  };
+  const handleTransitionRun = (event: Event): void => {
+    if (!isToolbarPositionTransition(event)) return;
+    if (frameId !== undefined) return;
+    measure();
+    frameId = requestFrame(measureFrame);
+  };
+  const handleTransitionComplete = (event: Event): void => {
+    if (!isToolbarPositionTransition(event)) return;
+    stopFrames();
+    measure();
+  };
+
+  target.addEventListener('transitionrun', handleTransitionRun);
+  target.addEventListener('transitionend', handleTransitionComplete);
+  target.addEventListener('transitioncancel', handleTransitionComplete);
+  return () => {
+    stopFrames();
+    target.removeEventListener('transitionrun', handleTransitionRun);
+    target.removeEventListener('transitionend', handleTransitionComplete);
+    target.removeEventListener('transitioncancel', handleTransitionComplete);
+  };
+}
+
 export function getCanvasToolHostPlacementClassName(
   placement: CanvasToolHostPlacement,
 ): string {

@@ -12,6 +12,8 @@ import JSZip from 'jszip';
 import { loadCanvasExportImageAssets } from './canvas-client';
 
 const RESULT_SCHEMA_ID = 'multi-platform-export-result-v1';
+const DEFAULT_EXPORT_BACKGROUND = '#ffffffff';
+const DEFAULT_EXPORT_NAMING_TEMPLATE = '{project}-{asset}-{platform}-{size}-{index}';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -28,6 +30,29 @@ function isAssetReference(value: unknown): value is WorkspaceAssetReference {
     && typeof value.assetVersionId === 'string'
     && typeof value.url === 'string'
     && value.url.length > 0;
+}
+
+export function createMultiPlatformExportRequestFingerprint(input: {
+  projectId: string;
+  sourceAssetVersionIds: readonly string[];
+  values: Record<string, unknown>;
+}): string {
+  const targetPresetIds = Array.isArray(input.values.targetPresetIds)
+    ? input.values.targetPresetIds.filter((value): value is string => typeof value === 'string')
+    : [];
+  return JSON.stringify({
+    schemaVersion: 1,
+    projectId: input.projectId,
+    sourceAssetVersionIds: input.sourceAssetVersionIds.filter(value => typeof value === 'string'),
+    targetPresetIds,
+    fit: input.values.fit === 'contain' ? 'contain' : 'cover',
+    background: typeof input.values.background === 'string'
+      ? input.values.background
+      : DEFAULT_EXPORT_BACKGROUND,
+    namingTemplate: typeof input.values.namingTemplate === 'string'
+      ? input.values.namingTemplate
+      : DEFAULT_EXPORT_NAMING_TEMPLATE,
+  });
 }
 
 export function parseMultiPlatformExportResult(output: unknown): MultiPlatformExportResultV1 {

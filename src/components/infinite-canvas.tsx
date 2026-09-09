@@ -15,7 +15,7 @@ import {
   type VideoRetryPayload,
 } from '@/lib/video-processing-state';
 import { getConstrainedImageToolbarPosition, type FixedPanelPosition } from '@/lib/image-toolbar-position';
-import { getBottomToolbarDrawerPlacement, type BottomToolbarDrawerPlacement } from '@/lib/canvas-toolbar-layout';
+import { getBottomToolbarDrawerPlacement, trackToolbarTransitionFrames, type BottomToolbarDrawerPlacement } from '@/lib/canvas-toolbar-layout';
 import type { GenerationRouteAudit } from '@/lib/generation-route-audit';
 import {
   applyRecoveredCanvasMedia,
@@ -1559,9 +1559,11 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
     syncOffset();
     const observer = new ResizeObserver(syncOffset);
     observer.observe(toolbar);
+    const stopTransitionTracking = trackToolbarTransitionFrames(toolbar, syncOffset);
     window.addEventListener('resize', syncOffset);
     return () => {
       observer.disconnect();
+      stopTransitionTracking();
       window.removeEventListener('resize', syncOffset);
       root.style.removeProperty('--canvas-bottom-toolbar-offset');
     };

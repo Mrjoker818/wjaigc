@@ -138,3 +138,68 @@ pnpm ts-check：退出码 0
 ```
 
 本轮仍未执行云端真实导出与多浏览器视觉验收；不把这些项标记为通过。
+
+## 第二轮 NEEDS_FIXES 修复
+
+### 修复内容
+
+1. 新增规范导出请求指纹，固定绑定 `projectId`、来源 AssetVersion 顺序、目标平台、适配方式、背景和命名模板。只有指纹与当前表单完全一致时，服务端 estimate 和 `validatedExportPlan` 才能显示；任一字段变化立即回到“尚未校验”。
+2. 底部工具栏发生 `bottom` 过渡时，通过 `transitionrun` 启动逐帧测量，并在对应的 `transitionend` / `transitioncancel` 后停止及最终测量；组件卸载时移除监听并取消 rAF。无关属性结束不会提前终止位置跟随，未复制 300ms 或工具栏偏移魔法数。
+3. 来源版本不在当前画布时，抽屉使用当前 `projectId + sourceVersionId` 调用授权 `/api/assets`。成功后显示来源预览和“查看来源版本”操作；无权访问、已删除或非图片结果进入统一 UI 错误边界。
+4. `cancelled`、`timeout` 且没有输出时不再误报“结果数据损坏或版本不兼容”；只有应当携带结果的 `completed`，以及携带损坏输出的 `failed` 才显示该错误。
+5. 375px 契约不再使用 jsdom 中恒真的 `0 <= 0`。测试现在验证真实响应式结构：抽屉视口宽度约束、单列基础网格、`md`/`xl` 扩展、各区 `min-w-0` 和纵向滚动。
+6. 因生产 `chat-panel.tsx` 的 estimate 路径被本轮直接修改，按 Task7 简报仅更新了对应旧字符串断言；Simple Chat 目录隔离和其他 ChatPanel 功能保持不变。
+
+### TDD 证据
+
+首轮 RED：
+
+```text
+pnpm exec vitest run src/__tests__/components/multi-platform-export-drawer.test.tsx src/__tests__/components/multi-platform-export-results.test.tsx src/__tests__/lib/canvas-toolbar-layout.test.ts src/__tests__/components/chat-panel-multi-platform-export.test.tsx --reporter=dot
+4 个测试文件：3 failed / 1 passed
+29 项测试：7 failed / 22 passed
+```
+
+失败点分别为：请求指纹函数不存在、旧 estimate 未失效、取消/超时误报损坏、来源预览和异步错误边界缺失、工具栏过渡帧跟踪不存在。
+
+过渡细化 RED：
+
+```text
+pnpm exec vitest run src/__tests__/lib/canvas-toolbar-layout.test.ts --reporter=dot
+1 个测试文件失败
+6 项测试：1 failed / 5 passed
+```
+
+该失败证明无关属性的 `transitionend` 会提前停止 bottom 位置跟踪；实现按属性过滤后转为 GREEN。
+
+### 最终验证
+
+Task7 四项计划测试：
+
+```text
+pnpm exec vitest run src/__tests__/components/multi-platform-export-drawer.test.tsx src/__tests__/components/multi-platform-export-results.test.tsx src/__tests__/components/chat-panel-multi-platform-export.test.tsx src/__tests__/components/chat-panel-skill-runtime.test.tsx --reporter=dot
+4 个测试文件通过
+29/29 项测试通过
+```
+
+Task7、ChatPanel、Run History、useSkillRun 交互契约和画布 placement 回归：
+
+```text
+17 个测试文件通过
+159/159 项测试通过
+```
+
+静态门禁：
+
+```text
+pnpm ts-check：退出码 0
+Task7 目标 ESLint --quiet：退出码 0
+git diff --check -- <Task7 本轮生产文件与测试文件>：退出码 0
+```
+
+`eslint` 仅输出 `infinite-canvas.tsx` 超过 500KB 的 Babel deoptimised 提示，没有 lint error。全工作树中 3 个受保护 SDD 文件仍有任务开始前既存的 EOF 空行提示；这些文件未被本任务修改、暂存或提交。
+
+### 验证边界
+
+- 本轮未执行真实 375px 浏览器视觉验收、云端 Coze 导出或 Chromium/Firefox/WebKit 截图，因此这些项目仍明确为未验证。
+- 仅在 `main` 当前工作区修复；没有创建分支，没有触碰 `stable`，没有 push，也没有 amend。

@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { MultiPlatformExportDrawer } from '@/components/skill-runtime/MultiPlatformExportDrawer';
 import type { AgentRunProjection } from '@/lib/agent-runtime/types';
+import { createMultiPlatformExportRequestFingerprint } from '@/lib/skill-runtime/multi-platform-export-client';
 
 const enabledPresets = [
   {
@@ -95,9 +96,13 @@ describe('MultiPlatformExportDrawer', () => {
 
   it('does not present a credit-only estimate as an authoritative export-plan validation', async () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(Response.json({ success: true, presets: enabledPresets }));
+    const values = { targetPresetIds: ['instagram-post-v1'] };
     render(<MultiPlatformExportDrawer
       open projectId="project-1" accountKey="user-1" sourceAssetVersionIds={['version-source-1']}
-      values={{ targetPresetIds: ['instagram-post-v1'] }} estimate={{ minimum: 0, maximum: 0, steps: [{ stepId: 'export', cost: 0 }] }}
+      values={values} estimate={{ minimum: 0, maximum: 0, steps: [{ stepId: 'export', cost: 0 }] }}
+      estimateRequestFingerprint={createMultiPlatformExportRequestFingerprint({
+        projectId: 'project-1', sourceAssetVersionIds: ['version-source-1'], values,
+      })}
       projection={projection({ status: 'completed', progress: 100, result: { outputs: [
         { stepId: 'export', kind: 'json', schemaId: 'multi-platform-export-result-v1', content: '{broken' },
       ] } })}
@@ -113,13 +118,17 @@ describe('MultiPlatformExportDrawer', () => {
 
   it('renders authoritative server file, pixel, ZIP and credit estimates when supplied', async () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(Response.json({ success: true, presets: enabledPresets }));
+    const values = { targetPresetIds: ['instagram-post-v1'] };
     const estimate = {
       minimum: 0, maximum: 0, steps: [{ stepId: 'export', cost: 0 }],
       exportPlan: { fileCount: 2, totalPixels: 2_332_800, estimatedZipBytes: 1_680_000 },
     };
     render(<MultiPlatformExportDrawer
       open projectId="project-1" sourceAssetVersionIds={['version-source-1', 'version-source-2']}
-      values={{ targetPresetIds: ['instagram-post-v1'] }} estimate={estimate}
+      values={values} estimate={estimate}
+      estimateRequestFingerprint={createMultiPlatformExportRequestFingerprint({
+        projectId: 'project-1', sourceAssetVersionIds: ['version-source-1', 'version-source-2'], values,
+      })}
       onChange={vi.fn()} onEstimate={vi.fn()} onStart={vi.fn()} onClose={vi.fn()} fetcher={fetcher}
     />);
 
@@ -127,6 +136,33 @@ describe('MultiPlatformExportDrawer', () => {
     expect(screen.getByText('服务端 2 个文件')).not.toBeNull();
     expect(screen.getByText('服务端 2,332,800 像素')).not.toBeNull();
     expect(screen.getByText(/\u670d\u52a1\u7aef ZIP/)).not.toBeNull();
+  });
+
+  it('invalidates a server estimate when any canonical export request field changes', async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(Response.json({ success: true, presets: enabledPresets }));
+    const values = {
+      targetPresetIds: ['instagram-post-v1'], fit: 'cover',
+      background: '#ffffffff', namingTemplate: '{asset}-{size}',
+    };
+    const fingerprint = createMultiPlatformExportRequestFingerprint({
+      projectId: 'project-1', sourceAssetVersionIds: ['version-source-1'], values,
+    });
+    const estimate = {
+      minimum: 0, maximum: 0, steps: [{ stepId: 'export', cost: 0 }],
+      exportPlan: { fileCount: 1, totalPixels: 1_166_400, estimatedZipBytes: 840_000 },
+    };
+    const props = {
+      open: true, projectId: 'project-1', sourceAssetVersionIds: ['version-source-1'],
+      values, estimate, estimateRequestFingerprint: fingerprint,
+      onChange: vi.fn(), onEstimate: vi.fn(), onStart: vi.fn(), onClose: vi.fn(), fetcher,
+    } as const;
+    const { rerender } = render(<MultiPlatformExportDrawer {...props} />);
+    expect(screen.getByText('服务端校验成功')).not.toBeNull();
+
+    rerender(<MultiPlatformExportDrawer {...props} values={{ ...values, namingTemplate: '{asset}-{index}' }} />);
+    expect(screen.queryByText('服务端校验成功')).toBeNull();
+    expect(screen.queryByLabelText('服务端导出计划')).toBeNull();
+    expect(screen.getByText('尚未校验')).not.toBeNull();
   });
 
   it('shows a visible failed state when server validation does not return an estimate', async () => {
@@ -209,4 +245,15 @@ describe('MultiPlatformExportDrawer', () => {
     fireEvent.click(screen.getByRole('button', { name: '仅重试失败项' }));
     await waitFor(() => expect(onRetry).toHaveBeenCalledWith('export'));
   });
+
+  it.each(['cancelled', 'timeout'] as const)('does not report absent output as corruption for %s runs', status => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(Response.json({ success: true, presets: enabledPresets }));
+    render(<MultiPlatformExportDrawer
+      open projectId="project-1" sourceAssetVersionIds={['version-source-1']} values={{}}
+      projection={projection({ status, result: undefined })}
+      onChange={vi.fn()} onEstimate={vi.fn()} onStart={vi.fn()} onClose={vi.fn()} fetcher={fetcher}
+    />);
+    expect(screen.queryByText('结果数据损坏或版本不兼容')).toBeNull();
+  });
+
 });

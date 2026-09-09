@@ -5,10 +5,12 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { MultiPlatformExportResults } from '@/components/skill-runtime/MultiPlatformExportResults';
 import {
+  createMultiPlatformExportRequestFingerprint,
   downloadExportGroup,
   downloadExportArtifact,
   loadExportManifestFiles,
   parseMultiPlatformExportResult,
+  resolveExportAssetReference,
   resolveExportImageReferences,
 } from '@/lib/skill-runtime/multi-platform-export-client';
 import { projectExportImagesInBatches } from '@/lib/skill-runtime/canvas-client';
@@ -24,6 +26,23 @@ const result = {
 };
 
 describe('multi-platform export results', () => {
+  it('fingerprints every canonical request field that can change an export plan', () => {
+    const base = {
+      projectId: 'project-1', sourceAssetVersionIds: ['version-source-1'],
+      values: { targetPresetIds: ['instagram-post-v1'], fit: 'cover', background: '#ffffffff', namingTemplate: '{asset}' },
+    };
+    const fingerprint = createMultiPlatformExportRequestFingerprint(base);
+    const variants = [
+      { ...base, sourceAssetVersionIds: ['version-source-2'] },
+      { ...base, values: { ...base.values, targetPresetIds: ['youtube-cover-v1'] } },
+      { ...base, values: { ...base.values, fit: 'contain' } },
+      { ...base, values: { ...base.values, background: 'transparent' } },
+      { ...base, values: { ...base.values, namingTemplate: '{asset}-{index}' } },
+    ];
+    const variantFingerprints = variants.map(createMultiPlatformExportRequestFingerprint);
+    expect(variantFingerprints.every(value => value !== fingerprint)).toBe(true);
+    expect(new Set(variantFingerprints).size).toBe(variants.length);
+  });
   it('parses the structured durable output without accepting a different schema', () => {
     expect(parseMultiPlatformExportResult([
       { stepId: 'export', kind: 'json', schemaId: 'multi-platform-export-result-v1', content: JSON.stringify(result) },
@@ -49,6 +68,27 @@ describe('multi-platform export results', () => {
     });
     expect(references).toHaveLength(1);
     expect(references[0]).toMatchObject({ assetVersionId: 'version-image-1', kind: 'image' });
+  });
+
+  it('resolves an off-canvas source by project and version authorization, and rejects denied access', async () => {
+    const successFetcher = vi.fn<typeof fetch>().mockResolvedValue(Response.json({
+      assetId: 'asset-source-1', assetVersionId: 'version-source-1', kind: 'image',
+      url: '/api/serve-upload/source.png', name: '来源图',
+    }));
+    await expect(resolveExportAssetReference({
+      projectId: 'project-1', versionId: 'version-source-1', fetcher: successFetcher,
+    })).resolves.toMatchObject({ assetVersionId: 'version-source-1', kind: 'image' });
+    expect(successFetcher).toHaveBeenCalledWith(
+      '/api/assets?projectId=project-1&assetVersionId=version-source-1',
+      expect.objectContaining({ method: 'GET' }),
+    );
+
+    const deniedFetcher = vi.fn<typeof fetch>().mockResolvedValue(Response.json(
+      { error: 'forbidden' }, { status: 403 },
+    ));
+    await expect(resolveExportAssetReference({
+      projectId: 'project-1', versionId: 'version-source-1', fetcher: deniedFetcher,
+    })).rejects.toThrow('导出制品加载失败');
   });
 
   it('downloads a single image or ZIP through its authorized stable AssetVersion URL', async () => {
@@ -152,9 +192,48 @@ describe('multi-platform export results', () => {
     await waitFor(() => expect(onDownloadGroup).toHaveBeenCalledTimes(1));
     fireEvent.click(screen.getByRole('button', { name: '定位来源 version-source-1' }));
     expect(onLocateSource).toHaveBeenCalledWith('version-source-1');
+    await waitFor(() => expect(screen.getByRole('button', { name: '下载 帖子' }).hasAttribute('disabled')).toBe(false));
     fireEvent.click(screen.getByRole('button', { name: '下载 帖子' }));
     await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('下载被浏览器阻止'));
     expect(screen.getByRole('button', { name: '下载 帖子' }).hasAttribute('disabled')).toBe(false);
+  });
+
+  it('shows an authorized preview when the source version is not on the current canvas', async () => {
+    const onLocateSource = vi.fn().mockResolvedValue({
+      assetId: 'asset-source-1', assetVersionId: 'version-source-1', kind: 'image',
+      url: '/api/serve-upload/source.png', name: '来源图',
+    });
+    render(<MultiPlatformExportResults
+      projectId="project-1" result={result}
+      references={[{ assetVersionId: 'version-image-1', kind: 'image', url: '/a.png' }]}
+      files={[{
+        filename: 'instagram-post.png', sourceAssetVersionId: 'version-source-1',
+        derivedAssetVersionId: 'version-image-1', platform: 'Instagram', usage: 'post',
+        width: 1080, height: 1080, mimeType: 'image/png', byteSize: 1234,
+        sha256: `sha256:${'a'.repeat(64)}`,
+      }]}
+      onDownload={vi.fn()} onLocateSource={onLocateSource} onAddToCanvas={vi.fn()}
+    />);
+    fireEvent.click(screen.getByRole('button', { name: '定位来源 version-source-1' }));
+    expect(await screen.findByRole('img', { name: '来源图' })).not.toBeNull();
+    expect(screen.getByRole('link', { name: '查看来源版本' }).getAttribute('href')).toBe('/api/serve-upload/source.png');
+  });
+
+  it('shows an actionable error when an off-canvas source cannot be authorized', async () => {
+    render(<MultiPlatformExportResults
+      projectId="project-1" result={result}
+      references={[{ assetVersionId: 'version-image-1', kind: 'image', url: '/a.png' }]}
+      files={[{
+        filename: 'instagram-post.png', sourceAssetVersionId: 'version-source-1',
+        derivedAssetVersionId: 'version-image-1', platform: 'Instagram', usage: 'post',
+        width: 1080, height: 1080, mimeType: 'image/png', byteSize: 1234,
+        sha256: `sha256:${'a'.repeat(64)}`,
+      }]}
+      onDownload={vi.fn()} onLocateSource={vi.fn().mockRejectedValue(new Error('来源版本无权访问或已删除'))}
+      onAddToCanvas={vi.fn()}
+    />);
+    fireEvent.click(screen.getByRole('button', { name: '定位来源 version-source-1' }));
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('来源版本无权访问或已删除'));
   });
 
   it('builds a bounded platform ZIP from stable image references and reports progress', async () => {

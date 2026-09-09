@@ -1,7 +1,8 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   getBottomToolbarDrawerPlacement,
   getCanvasToolHostPlacementClassName,
+  trackToolbarTransitionFrames,
 } from '@/lib/canvas-toolbar-layout';
 
 describe('bottom toolbar drawer placement', () => {
@@ -60,6 +61,41 @@ describe('bottom toolbar drawer placement', () => {
     expect(placement.left).toBeGreaterThanOrEqual(8);
     expect(placement.left + placement.width).toBeLessThanOrEqual(382);
     expect(placement.top + placement.height).toBeLessThanOrEqual(836);
+  });
+
+  it('remeasures every animation frame while the toolbar position is transitioning and cleans up', () => {
+    const toolbar = new EventTarget();
+    const measuredTops: number[] = [];
+    const frames = new Map<number, FrameRequestCallback>();
+    let nextFrame = 1;
+    let top = 820;
+    const cancelFrame = vi.fn((id: number) => { frames.delete(id); });
+    const stop = trackToolbarTransitionFrames(toolbar, () => measuredTops.push(top), {
+      requestFrame: callback => { const id = nextFrame++; frames.set(id, callback); return id; },
+      cancelFrame,
+    });
+
+    const transitionEvent = (type: string, propertyName: string): Event => {
+      const event = new Event(type);
+      Object.defineProperty(event, 'propertyName', { value: propertyName });
+      return event;
+    };
+    toolbar.dispatchEvent(transitionEvent('transitionrun', 'bottom'));
+    expect(measuredTops).toEqual([820]);
+    top = 620;
+    const [frameId, frame] = [...frames.entries()][0];
+    frames.delete(frameId);
+    frame(16);
+    expect(measuredTops).toEqual([820, 620]);
+    toolbar.dispatchEvent(transitionEvent('transitionend', 'opacity'));
+    expect(frames.size).toBe(1);
+    toolbar.dispatchEvent(transitionEvent('transitionend', 'bottom'));
+    expect(measuredTops.at(-1)).toBe(620);
+    expect(cancelFrame).toHaveBeenCalled();
+
+    stop();
+    toolbar.dispatchEvent(transitionEvent('transitionrun', 'bottom'));
+    expect(measuredTops.at(-1)).toBe(620);
   });
 });
 

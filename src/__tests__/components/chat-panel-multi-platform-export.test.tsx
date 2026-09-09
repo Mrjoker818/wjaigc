@@ -57,7 +57,10 @@ describe('canvas ChatPanel multi-platform export integration', () => {
     expect(drawer.className).toContain('w-[min(960px,calc(100vw-16px))]');
     const content = drawer.querySelector(':scope > div');
     await waitFor(() => expect(content?.className).toContain('overflow-y-auto'));
-    expect(content?.querySelector('.grid-cols-1')).not.toBeNull();
-    expect(drawer.scrollWidth).toBeLessThanOrEqual(drawer.clientWidth);
+    const responsiveGrid = content?.querySelector('.grid.grid-cols-1');
+    expect(responsiveGrid?.className).toContain('md:grid-cols-2');
+    expect(responsiveGrid?.className).toContain('xl:grid-cols-3');
+    expect([...responsiveGrid!.children].every(section => section.className.includes('min-w-0'))).toBe(true);
+    expect(drawer.className).not.toMatch(/(?:^|\s)min-w-\[/);
   });
 });
