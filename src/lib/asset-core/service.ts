@@ -499,7 +499,7 @@ export class AssetService {
         input.projectId,
         version.assetId,
       );
-      if (!asset) notFound();
+      if (!asset || asset.status !== 'active' || version.file.availability !== 'ready') notFound();
       return {
         assetId: asset.id,
         assetVersionId: version.id,

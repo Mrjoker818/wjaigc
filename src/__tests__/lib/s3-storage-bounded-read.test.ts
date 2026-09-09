@@ -36,7 +36,10 @@ describe('readImageFromS3Bounded cancellation', () => {
     }));
     const controller = new AbortController();
     const { readImageFromS3Bounded } = await import('@/lib/s3-storage');
-    const pending = readImageFromS3Bounded('images/exact.png', 1024, 10_000, controller.signal);
+    const pending = readImageFromS3Bounded('images/exact.png', 1024, 10_000, {
+      signal: controller.signal,
+      strict: true,
+    });
 
     await vi.waitFor(() => expect(fetchSignal).toBeDefined());
     controller.abort(new DOMException('caller cancelled', 'AbortError'));
@@ -61,6 +64,7 @@ describe('readImageFromS3Bounded cancellation', () => {
       'images/exact.png',
       1024,
       5,
+      { strict: true },
     )).rejects.toMatchObject({
       name: 'S3BoundedReadError',
       code: 'S3_READ_TIMEOUT',
@@ -75,6 +79,7 @@ describe('readImageFromS3Bounded cancellation', () => {
       'images/exact.png',
       1024,
       1000,
+      { strict: true },
     )).rejects.toMatchObject({
       name: 'S3BoundedReadError',
       code: 'S3_READ_FAILED',
@@ -95,10 +100,58 @@ describe('readImageFromS3Bounded cancellation', () => {
       'images/exact.png',
       1024,
       1000,
-      signal,
+      { signal, strict: true },
     )).resolves.toEqual(Buffer.from([1, 2, 3]));
 
     expect(add).toHaveBeenCalledWith('abort', expect.any(Function), { once: true });
     expect(remove).toHaveBeenCalledWith('abort', expect.any(Function));
+  });
+
+  it('preserves legacy three-argument failure-as-null behavior', async () => {
+    mocks.generatePresignedUrl.mockRejectedValue(new Error('legacy storage failure'));
+    const { readImageFromS3Bounded } = await import('@/lib/s3-storage');
+
+    await expect(readImageFromS3Bounded(
+      'images/exact.png',
+      1024,
+      1000,
+    )).resolves.toBeNull();
+  });
+
+  it('classifies a strict byte overflow without changing legacy null behavior', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(
+      new Uint8Array([1, 2, 3]),
+      { status: 200, headers: { 'content-length': '3' } },
+    )));
+    const { readImageFromS3Bounded } = await import('@/lib/s3-storage');
+
+    await expect(readImageFromS3Bounded('images/exact.png', 2, 1000, {
+      strict: true,
+    })).rejects.toMatchObject({ code: 'S3_READ_SIZE_LIMIT' });
+    await expect(readImageFromS3Bounded('images/exact.png', 2, 1000))
+      .resolves.toBeNull();
+  });
+
+  it('cancels promptly while presigned URL generation is still pending', async () => {
+    mocks.generatePresignedUrl.mockImplementation(() => new Promise(() => undefined));
+    const controller = new AbortController();
+    const { readImageFromS3Bounded } = await import('@/lib/s3-storage');
+    const pending = readImageFromS3Bounded('images/exact.png', 1024, 10_000, {
+      signal: controller.signal,
+      strict: true,
+    });
+
+    controller.abort(new DOMException('caller cancelled', 'AbortError'));
+
+    await expect(pending).rejects.toMatchObject({ code: 'S3_READ_ABORTED' });
+  });
+
+  it('times out while presigned URL generation is still pending', async () => {
+    mocks.generatePresignedUrl.mockImplementation(() => new Promise(() => undefined));
+    const { readImageFromS3Bounded } = await import('@/lib/s3-storage');
+
+    await expect(readImageFromS3Bounded('images/exact.png', 1024, 5, {
+      strict: true,
+    })).rejects.toMatchObject({ code: 'S3_READ_TIMEOUT' });
   });
 });

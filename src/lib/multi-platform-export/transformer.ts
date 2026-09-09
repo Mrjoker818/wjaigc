@@ -1,18 +1,17 @@
 import { createHash } from 'node:crypto';
 
-import sharp from 'sharp';
-
 import {
   detectSupportedImageMimeType,
   type SupportedImageMimeType,
 } from '@/lib/image-tools/file';
-import { safeSharp } from '@/lib/safe-image-input';
+import { withSafeSharp } from '@/lib/safe-image-input';
 import type { ExportFormat, MultiPlatformExportInput } from './types';
 import type { AuthorizedExportImageSource } from './source-reader';
 
 export type { AuthorizedExportImageSource } from './source-reader';
 
 const DEFAULT_MAX_SOURCE_BYTES = 25 * 1024 * 1024;
+const DEFAULT_MAX_SOURCE_PIXELS = 40_000_000;
 const DEFAULT_MAX_OUTPUT_BYTES = 80 * 1024 * 1024;
 const DEFAULT_MAX_OUTPUT_PIXELS = 67_108_864;
 const MIME_BY_FORMAT: Record<ExportFormat, SupportedImageMimeType> = {
@@ -57,6 +56,7 @@ export interface TransformPlatformImageInput {
   signal?: AbortSignal;
   limits?: {
     maxSourceBytes?: number;
+    maxSourcePixels?: number;
     maxOutputBytes?: number;
     maxOutputPixels?: number;
   };
@@ -85,9 +85,11 @@ async function outputHasTransparency(
 ): Promise<boolean> {
   if (!hasAlpha) return false;
   signal?.throwIfAborted();
-  const stats = await safeSharp(bytes, { maxPixels, signal })
-    .extractChannel('alpha')
-    .stats();
+  const stats = await withSafeSharp(
+    bytes,
+    { maxPixels, signal },
+    pipeline => pipeline.extractChannel('alpha').stats(),
+  );
   signal?.throwIfAborted();
   return stats.channels[0].min < 255;
 }
@@ -97,6 +99,7 @@ export async function transformPlatformImage(
 ): Promise<TransformedExport> {
   input.signal?.throwIfAborted();
   const maxSourceBytes = positiveLimit(input.limits?.maxSourceBytes, DEFAULT_MAX_SOURCE_BYTES);
+  const maxSourcePixels = positiveLimit(input.limits?.maxSourcePixels, DEFAULT_MAX_SOURCE_PIXELS);
   const maxOutputBytes = positiveLimit(input.limits?.maxOutputBytes, DEFAULT_MAX_OUTPUT_BYTES);
   const maxOutputPixels = positiveLimit(input.limits?.maxOutputPixels, DEFAULT_MAX_OUTPUT_PIXELS);
   const { width, height, outputFormat } = input.target;
@@ -126,31 +129,47 @@ export async function transformPlatformImage(
 
   try {
     input.signal?.throwIfAborted();
-    let pipeline = safeSharp(input.source.bytes, {
-      maxPixels: maxOutputPixels,
-      signal: input.signal,
-    })
-      .rotate()
-      .resize(width, height, {
-        fit: input.fit,
-        position: 'centre',
-        background: input.background === 'transparent' ? '#00000000' : input.background,
-      });
+    const actualSourceSha256 = createHash('sha256').update(input.source.bytes).digest('hex');
+    if (input.source.sha256 !== actualSourceSha256) fail('EXPORT_SOURCE_INTEGRITY_INVALID');
+    const sourceMetadata = await withSafeSharp(
+      input.source.bytes,
+      { maxPixels: maxSourcePixels, signal: input.signal },
+      pipeline => pipeline.metadata(),
+    );
+    if (
+      sourceMetadata.width !== input.source.width
+      || sourceMetadata.height !== input.source.height
+      || sourceMetadata.format !== actualSourceMime.replace('image/', '').replace('jpg', 'jpeg')
+    ) fail('EXPORT_SOURCE_METADATA_INVALID');
 
-    if (outputFormat === 'jpeg') pipeline = pipeline.jpeg({ quality: 92, mozjpeg: true });
-    if (outputFormat === 'png') pipeline = pipeline.png({ compressionLevel: 9 });
-    if (outputFormat === 'webp') pipeline = pipeline.webp({ quality: 92 });
-    const bytes = await pipeline.toBuffer();
+    const bytes = await withSafeSharp(
+      input.source.bytes,
+      { maxPixels: maxSourcePixels, signal: input.signal },
+      async pipeline => {
+        let output = pipeline
+          .rotate()
+          .resize(width, height, {
+            fit: input.fit,
+            position: 'centre',
+            background: input.background === 'transparent' ? '#00000000' : input.background,
+          });
+        if (outputFormat === 'jpeg') output = output.jpeg({ quality: 92, mozjpeg: true });
+        if (outputFormat === 'png') output = output.png({ compressionLevel: 9 });
+        if (outputFormat === 'webp') output = output.webp({ quality: 92 });
+        return output.toBuffer();
+      },
+    );
     input.signal?.throwIfAborted();
     if (bytes.length < 1 || bytes.length > maxOutputBytes) fail('EXPORT_OUTPUT_BYTE_LIMIT');
 
     const mimeType = detectSupportedImageMimeType(bytes);
     const expectedMimeType = MIME_BY_FORMAT[outputFormat];
     if (!mimeType || mimeType !== expectedMimeType) fail('EXPORT_OUTPUT_FORMAT_INVALID');
-    const metadata = await sharp(bytes, {
-      failOn: 'error',
-      limitInputPixels: maxOutputPixels,
-    }).metadata();
+    const metadata = await withSafeSharp(
+      bytes,
+      { maxPixels: maxOutputPixels, signal: input.signal },
+      pipeline => pipeline.metadata(),
+    );
     input.signal?.throwIfAborted();
     if (
       metadata.width !== width
@@ -166,7 +185,14 @@ export async function transformPlatformImage(
     if (outputFormat === 'jpeg' && (metadata.hasAlpha || hasTransparency)) {
       fail('EXPORT_OUTPUT_ALPHA_INVALID');
     }
-    if (input.fit === 'contain' && backgroundAlpha < 255 && !hasTransparency) {
+    const containHasPadding = input.fit === 'contain'
+      && input.source.width * height !== input.source.height * width;
+    if (
+      input.fit === 'contain'
+      && backgroundAlpha < 255
+      && (containHasPadding || input.source.hasTransparency)
+      && !hasTransparency
+    ) {
       fail('EXPORT_OUTPUT_ALPHA_INVALID');
     }
 

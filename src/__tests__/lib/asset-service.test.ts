@@ -926,6 +926,77 @@ describe('asset graph service', () => {
     })).rejects.toMatchObject({ code: 'ASSET_NOT_FOUND' });
   });
 
+  it.each(['pending-persist', 'missing', 'recovering', 'unrecoverable'] as const)(
+    'hides a %s file behind ASSET_NOT_FOUND',
+    async (availability) => {
+      const ownerId = randomUUID();
+      const projectId = randomUUID();
+      const versionId = randomUUID();
+      const read = vi.fn(async (callback: (transaction: {
+        findProject: () => Promise<boolean>;
+        findAsset: () => Promise<Asset>;
+        findVersion: () => Promise<AssetVersion>;
+      }) => Promise<unknown>) => callback({
+        findProject: async () => true,
+        findAsset: async () => ({
+          id: 'asset-unavailable', ownerId, projectId, kind: 'image', status: 'active',
+          currentVersionId: versionId, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+        }),
+        findVersion: async () => ({
+          id: versionId,
+          assetId: 'asset-unavailable',
+          ownerId,
+          projectId,
+          file: { url: '/api/serve-upload/uploads/source.png', availability },
+          parentVersionIds: [],
+          createdAt: new Date().toISOString(),
+        }),
+      }));
+      const { createAssetService } = await loadService();
+      const service = createAssetService({ read, transaction: vi.fn() });
+
+      await expect(service.resolveReadableAssetReference({
+        actorUserId: ownerId,
+        projectId,
+        assetVersionId: versionId,
+      })).rejects.toMatchObject({ code: 'ASSET_NOT_FOUND' });
+    },
+  );
+
+  it('hides readable metadata when its asset is trashed', async () => {
+    const ownerId = randomUUID();
+    const projectId = randomUUID();
+    const versionId = randomUUID();
+    const read = vi.fn(async (callback: (transaction: {
+      findProject: () => Promise<boolean>;
+      findAsset: () => Promise<Asset>;
+      findVersion: () => Promise<AssetVersion>;
+    }) => Promise<unknown>) => callback({
+      findProject: async () => true,
+      findAsset: async () => ({
+        id: 'asset-trashed', ownerId, projectId, kind: 'image', status: 'trashed',
+        currentVersionId: versionId, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+      }),
+      findVersion: async () => ({
+        id: versionId,
+        assetId: 'asset-trashed',
+        ownerId,
+        projectId,
+        file: { url: '/api/serve-upload/uploads/source.png', availability: 'ready' },
+        parentVersionIds: [],
+        createdAt: new Date().toISOString(),
+      }),
+    }));
+    const { createAssetService } = await loadService();
+    const service = createAssetService({ read, transaction: vi.fn() });
+
+    await expect(service.resolveReadableAssetReference({
+      actorUserId: ownerId,
+      projectId,
+      assetVersionId: versionId,
+    })).rejects.toMatchObject({ code: 'ASSET_NOT_FOUND' });
+  });
+
   it('rebinds a workflow input atomically without changing either source asset status', async () => {
     const ownerId = randomUUID();
     const projectId = randomUUID();

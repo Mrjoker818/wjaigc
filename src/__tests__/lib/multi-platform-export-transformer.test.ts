@@ -1,4 +1,5 @@
 import { readFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
 import path from 'node:path';
 
 import sharp from 'sharp';
@@ -32,7 +33,7 @@ async function source(
     width: metadata.width!,
     height: metadata.height!,
     hasTransparency: Boolean(metadata.hasAlpha),
-    sha256: 'source-digest',
+    sha256: createHash('sha256').update(bytes).digest('hex'),
   };
 }
 
@@ -71,6 +72,42 @@ describe('transformPlatformImage', () => {
     });
     const alpha = await sharp(result.bytes).ensureAlpha().extractChannel('alpha').stats();
     expect(alpha.channels[0].min).toBe(0);
+  });
+
+  it('allows equal-ratio opaque PNG contain output with a transparent background request', async () => {
+    const result = await transformPlatformImage({
+      source: await source('landscape.jpg', 'image/jpeg'),
+      target: { width: 8, height: 4, outputFormat: 'png' },
+      fit: 'contain',
+      background: 'transparent',
+    });
+
+    expect(result.hasTransparency).toBe(false);
+    expect(result.metadata).toMatchObject({ width: 8, height: 4, format: 'png' });
+  });
+
+  it('rejects source bytes whose declared sha256 was altered by an internal caller', async () => {
+    const input = await source('portrait.png', 'image/png');
+    input.sha256 = '0'.repeat(64);
+
+    await expect(transformPlatformImage({
+      source: input,
+      target: { width: 8, height: 8, outputFormat: 'png' },
+      fit: 'cover',
+      background: '#ffffffff',
+    })).rejects.toThrow('EXPORT_SOURCE_INTEGRITY_INVALID');
+  });
+
+  it('rejects source dimensions that disagree with decoded metadata', async () => {
+    const input = await source('portrait.png', 'image/png');
+    input.width += 1;
+
+    await expect(transformPlatformImage({
+      source: input,
+      target: { width: 8, height: 8, outputFormat: 'png' },
+      fit: 'cover',
+      background: '#ffffffff',
+    })).rejects.toThrow('EXPORT_SOURCE_METADATA_INVALID');
   });
 
   it('rejects transparent JPEG instead of silently replacing it with white', async () => {

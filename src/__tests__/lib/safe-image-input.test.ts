@@ -1,6 +1,6 @@
 import { spawnSync } from 'node:child_process';
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import sharp from 'sharp';
 
 import {
@@ -11,6 +11,7 @@ import {
   resolveManagedMediaPath,
   SafeImageInputError,
   safeSharp,
+  withSafeSharp,
 } from '@/lib/safe-image-input';
 
 const PNG_1X1 = Buffer.from(
@@ -105,9 +106,9 @@ describe('safe edit image inputs', () => {
           create: { width: 5000, height: 5000, channels: 3, background: '#ffffff' },
         }).png().toBuffer();
         const controller = new AbortController();
-        const pending = safeImageInput.safeSharp(source, {
+        const pending = safeImageInput.withSafeSharp(source, {
           signal: controller.signal, maxPixels: 40_000_000,
-        }).resize(7000, 7000).blur(10).raw().toBuffer();
+        }, pipeline => pipeline.resize(7000, 7000).blur(10).raw().toBuffer());
         setImmediate(() => controller.abort(new Error('PROBE_ABORT')));
         try {
           await pending;
@@ -126,6 +127,21 @@ describe('safe edit image inputs', () => {
     expect(probe.stdout).toContain('SURVIVED');
     expect(probe.stderr).not.toContain("Unhandled 'error' event");
   }, 20_000);
+
+  it('removes its abort listener after a Sharp operation settles', async () => {
+    const controller = new AbortController();
+    const add = vi.spyOn(controller.signal, 'addEventListener');
+    const remove = vi.spyOn(controller.signal, 'removeEventListener');
+
+    await expect(withSafeSharp(
+      PNG_1X1,
+      { signal: controller.signal, maxPixels: 100 },
+      pipeline => pipeline.metadata(),
+    )).resolves.toMatchObject({ width: 1, height: 1 });
+
+    expect(add).toHaveBeenCalledWith('abort', expect.any(Function), { once: true });
+    expect(remove).toHaveBeenCalledWith('abort', expect.any(Function));
+  });
 
   it('does not swallow non-cancellation Sharp decode errors', async () => {
     await expect(safeSharp(Buffer.from('not-an-image')).metadata()).rejects.toThrow();

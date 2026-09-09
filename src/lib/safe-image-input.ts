@@ -1,4 +1,4 @@
-import { readFile, realpath } from 'node:fs/promises';
+import { readFile, realpath, stat } from 'node:fs/promises';
 import path from 'node:path';
 
 import sharp, { type Sharp } from 'sharp';
@@ -284,12 +284,43 @@ export function safeSharp(
   return pipeline;
 }
 
+export async function withSafeSharp<T>(
+  buffer: Buffer,
+  options: Pick<SafeImageInputOptions, 'maxPixels' | 'signal'>,
+  operation: (pipeline: Sharp) => Promise<T>,
+): Promise<T> {
+  options.signal?.throwIfAborted();
+  const pipeline = sharp(buffer, {
+    failOn: 'error',
+    limitInputPixels: options.maxPixels ?? DEFAULT_MAX_PIXELS,
+  });
+  const abortPipeline = () => {
+    const abortError = options.signal?.reason instanceof Error
+      ? options.signal.reason
+      : new SafeImageInputError('Image processing was aborted');
+    pipeline.once('error', () => undefined);
+    pipeline.destroy(abortError);
+  };
+  options.signal?.addEventListener('abort', abortPipeline, { once: true });
+  try {
+    const result = await operation(pipeline);
+    options.signal?.throwIfAborted();
+    return result;
+  } finally {
+    options.signal?.removeEventListener('abort', abortPipeline);
+  }
+}
+
 async function validateDecodedImage(
   image: DecodedSafeImage,
   options: SafeImageInputOptions,
 ): Promise<DecodedSafeImage> {
   try {
-    const metadata = await safeSharp(image.buffer, options).metadata();
+    const metadata = await withSafeSharp(
+      image.buffer,
+      options,
+      pipeline => pipeline.metadata(),
+    );
     options.signal?.throwIfAborted();
     assertSafePixelDimensions(metadata.width, metadata.height, options.maxPixels);
     const sharpMime = metadata.format ? MIME_BY_FORMAT[metadata.format] : undefined;
@@ -335,7 +366,14 @@ async function loadManagedMedia(
       ) {
         throw new SafeImageInputError('Managed image resolves outside the allowed media root');
       }
-      const buffer = await readFile(resolvedCandidate);
+      signal?.throwIfAborted();
+      const beforeRead = await stat(resolvedCandidate);
+      signal?.throwIfAborted();
+      if (!beforeRead.isFile() || beforeRead.size <= 0 || beforeRead.size > maxBytes) {
+        throw new SafeImageInputError('Managed image exceeds the size limit');
+      }
+      const buffer = await readFile(resolvedCandidate, { signal });
+      signal?.throwIfAborted();
       if (buffer.byteLength === 0 || buffer.byteLength > maxBytes) {
         throw new SafeImageInputError('Managed image exceeds the size limit');
       }
@@ -343,6 +381,7 @@ async function loadManagedMedia(
       if (!mimeType) throw new SafeImageInputError('Managed file is not a supported image');
       return { buffer, mimeType };
     } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') throw error;
       if (error instanceof SafeImageInputError) throw error;
     }
   }

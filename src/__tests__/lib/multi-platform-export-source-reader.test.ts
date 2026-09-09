@@ -6,6 +6,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { AssetServiceError } from '@/lib/asset-core/service';
 import { readAuthorizedExportSources } from '@/lib/multi-platform-export/source-reader';
 import { S3BoundedReadError } from '@/lib/s3-storage';
+import { SafeImageInputError } from '@/lib/safe-image-input';
 
 const fixtureRoot = path.join(
   process.cwd(),
@@ -109,9 +110,40 @@ describe('readAuthorizedExportSources', () => {
       'images/owners/user-1/exact.png',
       expect.any(Number),
       expect.any(Number),
-      undefined,
+      { signal: undefined, strict: true },
     );
     expect(dependencies.loadImage).not.toHaveBeenCalled();
+  });
+
+  it('fails closed when an authorized exact storage key cannot be read', async () => {
+    const dependencies = dependenciesFor({
+      url: 'https://mutable.example/source.png',
+      kind: 'image',
+      storageKey: 'images/owners/user-1/exact.png',
+      mimeType: 'image/png',
+    });
+    dependencies.readS3.mockResolvedValue(null);
+
+    await expect(readAuthorizedExportSources({
+      actorUserId: 'user-1',
+      projectId: 'project-1',
+      sourceVersionIds: ['asset-version-1'],
+      dependencies,
+    })).rejects.toMatchObject({ code: 'EXPORT_SOURCE_UNAVAILABLE' });
+    expect(dependencies.loadImage).not.toHaveBeenCalled();
+  });
+
+  it('keeps safe-loader byte limit failures in the source byte error class', async () => {
+    const dependencies = dependenciesFor(undefined, vi.fn().mockRejectedValue(
+      new SafeImageInputError('Managed image exceeds the size limit'),
+    ));
+
+    await expect(readAuthorizedExportSources({
+      actorUserId: 'user-1',
+      projectId: 'project-1',
+      sourceVersionIds: ['asset-version-1'],
+      dependencies,
+    })).rejects.toMatchObject({ code: 'EXPORT_SOURCE_BYTE_LIMIT' });
   });
 
   it('reports an exact S3 read timeout as source unavailability, not corrupt image bytes', async () => {
@@ -129,6 +161,23 @@ describe('readAuthorizedExportSources', () => {
       sourceVersionIds: ['asset-version-1'],
       dependencies,
     })).rejects.toMatchObject({ code: 'EXPORT_SOURCE_UNAVAILABLE' });
+  });
+
+  it('maps a strict S3 byte overflow to the source byte error class', async () => {
+    const dependencies = dependenciesFor({
+      url: '/api/serve-upload/uploads/source.png',
+      kind: 'image',
+      storageKey: 'images/owners/user-1/exact.png',
+      mimeType: 'image/png',
+    });
+    dependencies.readS3.mockRejectedValue(new S3BoundedReadError('S3_READ_SIZE_LIMIT'));
+
+    await expect(readAuthorizedExportSources({
+      actorUserId: 'user-1',
+      projectId: 'project-1',
+      sourceVersionIds: ['asset-version-1'],
+      dependencies,
+    })).rejects.toMatchObject({ code: 'EXPORT_SOURCE_BYTE_LIMIT' });
   });
 
   it('rejects a declared PNG whose real signature is JPEG', async () => {

@@ -12,11 +12,15 @@ import {
 } from '@/lib/image-tools/file';
 import {
   loadSafeImageInput,
-  safeSharp,
+  withSafeSharp,
   type DecodedSafeImage,
   type SafeImageInputOptions,
 } from '@/lib/safe-image-input';
-import { readImageFromS3Bounded, S3BoundedReadError } from '@/lib/s3-storage';
+import {
+  readImageFromS3Bounded,
+  S3BoundedReadError,
+  type S3BoundedReadOptions,
+} from '@/lib/s3-storage';
 
 const DEFAULT_MAX_SOURCE_BYTES = 25 * 1024 * 1024;
 const DEFAULT_MAX_SOURCE_PIXELS = 40_000_000;
@@ -53,7 +57,7 @@ export interface ExportSourceReaderDependencies {
     key: string,
     maxBytes: number,
     timeoutMs: number,
-    signal?: AbortSignal,
+    options?: S3BoundedReadOptions,
   ): Promise<Buffer | null>;
 }
 
@@ -99,9 +103,11 @@ async function hasTransparentPixels(
 ): Promise<boolean> {
   if (!metadataHasAlpha) return false;
   signal?.throwIfAborted();
-  const stats = await safeSharp(bytes, { maxPixels, signal })
-    .extractChannel('alpha')
-    .stats();
+  const stats = await withSafeSharp(
+    bytes,
+    { maxPixels, signal },
+    pipeline => pipeline.extractChannel('alpha').stats(),
+  );
   signal?.throwIfAborted();
   return stats.channels[0].min < 255;
 }
@@ -158,9 +164,12 @@ export async function readAuthorizedExportSources(
           reference.storageKey,
           maxSourceBytes,
           30_000,
-          input.signal,
+          { signal: input.signal, strict: true },
         )
         : null;
+      if (reference.storageKey && !storedBytes) {
+        fail('EXPORT_SOURCE_UNAVAILABLE');
+      }
       if (storedBytes) {
         const detectedMimeType = detectSupportedImageMimeType(storedBytes);
         image = {
@@ -177,7 +186,14 @@ export async function readAuthorizedExportSources(
     } catch (error) {
       input.signal?.throwIfAborted();
       if (error instanceof S3BoundedReadError) {
+        if (error.code === 'S3_READ_SIZE_LIMIT') {
+          fail('EXPORT_SOURCE_BYTE_LIMIT', error);
+        }
         fail('EXPORT_SOURCE_UNAVAILABLE', error);
+      }
+      if (error instanceof MultiPlatformExportSourceError) throw error;
+      if (errorChainContains(error, /size limit|byte limit|exceeds.*size/i)) {
+        fail('EXPORT_SOURCE_BYTE_LIMIT', error);
       }
       if (errorChainContains(error, /private or reserved address/i)) {
         fail('REMOTE_MEDIA_PRIVATE_ADDRESS', error);
@@ -209,10 +225,11 @@ export async function readAuthorizedExportSources(
 
     let metadata;
     try {
-      metadata = await safeSharp(image.buffer, {
-        maxPixels: maxSourcePixels,
-        signal: input.signal,
-      }).metadata();
+      metadata = await withSafeSharp(
+        image.buffer,
+        { maxPixels: maxSourcePixels, signal: input.signal },
+        pipeline => pipeline.metadata(),
+      );
     } catch (error) {
       input.signal?.throwIfAborted();
       if (errorChainContains(error, /pixel/i)) fail('EXPORT_SOURCE_PIXEL_LIMIT', error);

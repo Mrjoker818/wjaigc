@@ -145,6 +145,7 @@ export async function readImageFromS3(key: string): Promise<Buffer | null> {
 export type S3BoundedReadErrorCode =
   | 'S3_READ_ABORTED'
   | 'S3_READ_TIMEOUT'
+  | 'S3_READ_SIZE_LIMIT'
   | 'S3_READ_FAILED';
 
 export class S3BoundedReadError extends Error {
@@ -152,6 +153,11 @@ export class S3BoundedReadError extends Error {
     super(code, options);
     this.name = 'S3BoundedReadError';
   }
+}
+
+export interface S3BoundedReadOptions {
+  signal?: AbortSignal;
+  strict?: boolean;
 }
 
 async function getBoundedReadPresignedUrl(
@@ -170,59 +176,78 @@ async function getBoundedReadPresignedUrl(
   }
 }
 
-/** Read one exact object with an abortable byte limit. */
-export async function readImageFromS3Bounded(
+function waitForAbortable<T>(operation: Promise<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) return Promise.reject(signal.reason);
+  return new Promise<T>((resolve, reject) => {
+    let settled = false;
+    const cleanup = () => signal.removeEventListener('abort', onAbort);
+    const settle = (callback: () => void) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      callback();
+    };
+    const onAbort = () => settle(() => reject(signal.reason));
+    signal.addEventListener('abort', onAbort, { once: true });
+    operation.then(
+      value => settle(() => resolve(value)),
+      error => settle(() => reject(error)),
+    );
+  });
+}
+
+async function readImageFromS3BoundedStrict(
   key: string,
   maxBytes: number,
   timeoutMs: number,
-  signal?: AbortSignal,
+  options: S3BoundedReadOptions,
 ): Promise<Buffer | null> {
-  if (signal?.aborted) {
-    throw new S3BoundedReadError('S3_READ_ABORTED', { cause: signal.reason });
+  const callerSignal = options.signal;
+  if (callerSignal?.aborted) {
+    throw new S3BoundedReadError('S3_READ_ABORTED', { cause: callerSignal.reason });
   }
-  const url = await getBoundedReadPresignedUrl(key, timeoutMs);
-  if (signal?.aborted) {
-    throw new S3BoundedReadError('S3_READ_ABORTED', { cause: signal.reason });
-  }
-  if (!url) return null;
   const controller = new AbortController();
   let timedOut = false;
-  const abortFromCaller = () => controller.abort(signal?.reason);
-  signal?.addEventListener('abort', abortFromCaller, { once: true });
+  const abortFromCaller = () => controller.abort(callerSignal?.reason);
+  callerSignal?.addEventListener('abort', abortFromCaller, { once: true });
   const timer = setTimeout(() => {
     timedOut = true;
     controller.abort(new DOMException('S3 bounded read timed out', 'TimeoutError'));
   }, timeoutMs);
   try {
-    const response = await fetch(url, { redirect: 'error', signal: controller.signal });
+    const url = await waitForAbortable(
+      getBoundedReadPresignedUrl(key, timeoutMs),
+      controller.signal,
+    );
+    if (!url) return null;
+    const response = await waitForAbortable(
+      fetch(url, { redirect: 'error', signal: controller.signal }),
+      controller.signal,
+    );
     if (!response.ok || !response.body) return null;
     const declaredLength = Number(response.headers.get('content-length') || 0);
-    if (Number.isFinite(declaredLength) && declaredLength > maxBytes) return null;
+    if (Number.isFinite(declaredLength) && declaredLength > maxBytes) {
+      throw new S3BoundedReadError('S3_READ_SIZE_LIMIT');
+    }
     const reader = response.body.getReader();
     const chunks: Buffer[] = [];
     let total = 0;
     while (true) {
-      if (signal?.aborted) {
-        await reader.cancel(signal.reason).catch(() => undefined);
-        throw new S3BoundedReadError('S3_READ_ABORTED', { cause: signal.reason });
-      }
-      if (timedOut) {
-        await reader.cancel(controller.signal.reason).catch(() => undefined);
-        throw new S3BoundedReadError('S3_READ_TIMEOUT', { cause: controller.signal.reason });
-      }
-      const { done, value } = await reader.read();
+      callerSignal?.throwIfAborted();
+      if (timedOut) throw controller.signal.reason;
+      const { done, value } = await waitForAbortable(reader.read(), controller.signal);
       if (done) break;
       total += value.byteLength;
       if (total > maxBytes) {
         await reader.cancel().catch(() => undefined);
-        return null;
+        throw new S3BoundedReadError('S3_READ_SIZE_LIMIT');
       }
       chunks.push(Buffer.from(value));
     }
     return Buffer.concat(chunks, total);
   } catch (error) {
     if (error instanceof S3BoundedReadError) throw error;
-    if (signal?.aborted) {
+    if (callerSignal?.aborted) {
       throw new S3BoundedReadError('S3_READ_ABORTED', { cause: error });
     }
     if (timedOut) {
@@ -231,7 +256,22 @@ export async function readImageFromS3Bounded(
     throw new S3BoundedReadError('S3_READ_FAILED', { cause: error });
   } finally {
     clearTimeout(timer);
-    signal?.removeEventListener('abort', abortFromCaller);
+    callerSignal?.removeEventListener('abort', abortFromCaller);
+  }
+}
+
+/** Read one exact object with an abortable byte limit. */
+export async function readImageFromS3Bounded(
+  key: string,
+  maxBytes: number,
+  timeoutMs: number,
+  options: S3BoundedReadOptions = {},
+): Promise<Buffer | null> {
+  try {
+    return await readImageFromS3BoundedStrict(key, maxBytes, timeoutMs, options);
+  } catch (error) {
+    if (options.strict) throw error;
+    return null;
   }
 }
 
