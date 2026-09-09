@@ -3,7 +3,7 @@ import 'server-only';
 import JSZip from 'jszip';
 import { createHash } from 'node:crypto';
 
-import { persistAssetBytes, type PersistAssetBytesInput } from '@/lib/asset-core/binary-persistence';
+import { persistAssetBytes, type PersistAssetBytesInput, type PersistedAssetFile } from '@/lib/asset-core/binary-persistence';
 import { createAssetService, type CreateAssetVersionInput } from '@/lib/asset-core/service';
 import type { AssetFile, AssetVersion } from '@/lib/asset-core/types';
 import type { ExportFormat, MultiPlatformExportInput } from './types';
@@ -25,7 +25,12 @@ interface ExportAssetService {
   createAssetVersion(input: CreateAssetVersionInput): Promise<{ version: AssetVersion; reused: boolean; asset: unknown }>;
   createAssetVersionsAtomically(inputs: readonly CreateAssetVersionInput[]): Promise<Array<{ version: AssetVersion; reused: boolean; asset: unknown }>>;
 }
-type PersistBytes = (input: PersistAssetBytesInput) => Promise<AssetFile>;
+type ManagedAssetFile = AssetFile & Partial<Pick<PersistedAssetFile, 'createdThisCall' | 'cleanup'>>;
+type PersistBytes = (input: PersistAssetBytesInput) => Promise<ManagedAssetFile>;
+
+async function cleanupCreatedFile(file: ManagedAssetFile | undefined): Promise<void> {
+  if (file?.createdThisCall && file.cleanup) await file.cleanup();
+}
 
 function artifactDigest(requestDigest: string, kind: string, checksum: string): string {
   return createHash('sha256').update(`${requestDigest}\u0000${kind}\u0000${checksum}`).digest('hex');
@@ -47,7 +52,10 @@ export async function persistExportImageVersion(input: PersistExportImageVersion
   const file = await (input.persistBytes ?? persistAssetBytes)({
     bytes: input.transformed.bytes, filename: input.outputFilename, mimeType: input.transformed.mimeType, signal: input.signal,
   });
-  if (file.checksum !== input.transformed.sha256) throw new Error('EXPORT_STORAGE_CHECKSUM_MISMATCH');
+  if (file.checksum !== input.transformed.sha256) {
+    await cleanupCreatedFile(file);
+    throw new Error('EXPORT_STORAGE_CHECKSUM_MISMATCH');
+  }
   const metadata = {
     schemaId: 'multi-platform-export-v1', runId: input.runId,
     sourceAssetVersionId: input.sourceAssetVersionId, presetId: input.presetId,
@@ -56,12 +64,19 @@ export async function persistExportImageVersion(input: PersistExportImageVersion
     outputFormat: input.outputFormat, outputFilename: assertFlatExportFilename(input.outputFilename),
     requestDigest: input.requestDigest,
   };
-  const created = await (input.assetService ?? createAssetService()).createAssetVersion({
-    actorUserId: input.actorUserId, projectId: input.projectId, kind: 'image', file,
-    parentVersionIds: [input.sourceAssetVersionId],
-    idempotencyKey: `skill:${input.runId}:export:${input.sourceAssetVersionId}:${input.presetId}:v${input.presetVersion}`,
-    requestDigest: artifactDigest(input.requestDigest, 'image', input.transformed.sha256), metadata,
-  });
+  let created: Awaited<ReturnType<ExportAssetService['createAssetVersion']>>;
+  try {
+    created = await (input.assetService ?? createAssetService()).createAssetVersion({
+      actorUserId: input.actorUserId, projectId: input.projectId, kind: 'image', file,
+      parentVersionIds: [input.sourceAssetVersionId],
+      idempotencyKey: `skill:${input.runId}:export:${input.sourceAssetVersionId}:${input.presetId}:v${input.presetVersion}`,
+      requestDigest: artifactDigest(input.requestDigest, 'image', input.transformed.sha256), metadata,
+    });
+  } catch (error) {
+    await cleanupCreatedFile(file);
+    throw error;
+  }
+  if (created.reused) await cleanupCreatedFile(file);
   return { version: created.version.metadata ? created.version : { ...created.version, metadata }, reused: created.reused };
 }
 
@@ -118,6 +133,7 @@ export async function persistExportArtifacts(input: PersistExportArtifactsInput)
   input.signal?.throwIfAborted();
   for (const image of input.images) {
     const checksum = createHash('sha256').update(image.bytes).digest('hex');
+    const metadata = image.version.metadata;
     if (
       checksum !== image.sha256
       || image.version.file.checksum !== checksum
@@ -126,16 +142,42 @@ export async function persistExportArtifacts(input: PersistExportArtifactsInput)
       || image.version.ownerId !== input.actorUserId
       || image.version.projectId !== input.projectId
     ) throw new Error('EXPORT_IMAGE_ARTIFACT_INTEGRITY_INVALID');
+    if (
+      !metadata
+      || metadata.schemaId !== 'multi-platform-export-v1'
+      || metadata.runId !== input.runId
+      || metadata.requestDigest !== input.requestDigest
+      || metadata.sourceAssetVersionId !== image.sourceAssetVersionId
+      || image.version.parentVersionIds.length !== 1
+      || image.version.parentVersionIds[0] !== metadata.sourceAssetVersionId
+      || metadata.platform !== image.platform
+      || metadata.usage !== image.usage
+      || metadata.width !== image.width
+      || metadata.height !== image.height
+      || metadata.outputFilename !== image.filename
+      || metadata.outputFormat !== image.mimeType.split('/')[1]
+      || typeof metadata.presetId !== 'string'
+      || !Number.isSafeInteger(metadata.presetVersion)
+    ) throw new Error('EXPORT_IMAGE_DECLARATION_CONFLICT');
   }
   const manifest = buildMultiPlatformExportManifest({
     runId: input.runId, requestDigest: input.requestDigest, createdAt: input.createdAt,
     frozenParameters: input.frozenParameters,
-    files: input.images.map(image => ({
-      filename: image.filename, sourceAssetVersionId: image.sourceAssetVersionId,
-      derivedAssetVersionId: image.version.id, platform: image.platform, usage: image.usage,
-      width: image.width, height: image.height, mimeType: image.mimeType,
-      byteSize: image.bytes.length, sha256: image.sha256,
-    })), failures: [...input.failures],
+    files: input.images.map(image => {
+      const metadata = image.version.metadata as Record<string, unknown>;
+      return {
+        filename: metadata.outputFilename as string,
+        sourceAssetVersionId: image.version.parentVersionIds[0],
+        derivedAssetVersionId: image.version.id,
+        platform: metadata.platform as string,
+        usage: metadata.usage as string,
+        width: metadata.width as number,
+        height: metadata.height as number,
+        mimeType: image.version.file.mimeType as PersistedExportImage['mimeType'],
+        byteSize: image.version.file.byteSize as number,
+        sha256: image.version.file.checksum as string,
+      };
+    }), failures: [...input.failures],
   });
   const manifestJson = canonicalMultiPlatformExportManifestJson(manifest);
   const zipBytes = await buildExportArchive({
@@ -143,8 +185,15 @@ export async function persistExportArtifacts(input: PersistExportArtifactsInput)
     manifestJson, signal: input.signal,
   });
   const persist = input.persistBytes ?? persistAssetBytes;
-  const manifestFile = await persist({ bytes: Buffer.from(manifestJson), filename: 'manifest.json', mimeType: 'application/json', signal: input.signal });
-  const zipFile = await persist({ bytes: zipBytes, filename: 'multi-platform-export.zip', mimeType: 'application/zip', signal: input.signal });
+  let manifestFile: ManagedAssetFile | undefined;
+  let zipFile: ManagedAssetFile | undefined;
+  try {
+    manifestFile = await persist({ bytes: Buffer.from(manifestJson), filename: 'manifest.json', mimeType: 'application/json', signal: input.signal });
+    zipFile = await persist({ bytes: zipBytes, filename: 'multi-platform-export.zip', mimeType: 'application/zip', signal: input.signal });
+  } catch (error) {
+    await Promise.all([cleanupCreatedFile(manifestFile), cleanupCreatedFile(zipFile)]);
+    throw error;
+  }
   const manifestChecksum = createHash('sha256').update(manifestJson).digest('hex');
   const zipChecksum = createHash('sha256').update(zipBytes).digest('hex');
   if (
@@ -154,7 +203,10 @@ export async function persistExportArtifacts(input: PersistExportArtifactsInput)
     || zipFile.checksum !== zipChecksum
     || zipFile.byteSize !== zipBytes.length
     || zipFile.mimeType !== 'application/zip'
-  ) throw new Error('EXPORT_ARTIFACT_STORAGE_INTEGRITY_INVALID');
+  ) {
+    await Promise.all([cleanupCreatedFile(manifestFile), cleanupCreatedFile(zipFile)]);
+    throw new Error('EXPORT_ARTIFACT_STORAGE_INTEGRITY_INVALID');
+  }
   const service = input.assetService ?? createAssetService();
   const documentInput = (suffix: 'manifest' | 'zip', file: AssetFile): CreateAssetVersionInput => {
     const metadata = { schemaId: suffix === 'manifest' ? 'multi-platform-export-manifest-v1' : 'multi-platform-export-archive-v1', runId: input.runId, requestDigest: input.requestDigest };
@@ -165,10 +217,19 @@ export async function persistExportArtifacts(input: PersistExportArtifactsInput)
       requestDigest: artifactDigest(input.requestDigest, suffix, file.checksum as string), metadata,
     };
   };
-  const documents = await service.createAssetVersionsAtomically([
-    documentInput('manifest', manifestFile),
-    documentInput('zip', zipFile),
-  ]);
+  let documents: Awaited<ReturnType<ExportAssetService['createAssetVersionsAtomically']>>;
+  try {
+    documents = await service.createAssetVersionsAtomically([
+      documentInput('manifest', manifestFile),
+      documentInput('zip', zipFile),
+    ]);
+  } catch (error) {
+    await Promise.all([cleanupCreatedFile(manifestFile), cleanupCreatedFile(zipFile)]);
+    throw error;
+  }
+  await Promise.all(documents.map((created, index) => (
+    created.reused ? cleanupCreatedFile(index === 0 ? manifestFile : zipFile) : Promise.resolve()
+  )));
   const [manifestVersion, zipVersion] = documents.map(created => created.version);
   return {
     manifest, manifestVersion, zipVersion,

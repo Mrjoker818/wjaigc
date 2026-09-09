@@ -66,6 +66,9 @@ function positiveInteger(value: unknown, code: string): number {
   return value as number;
 }
 function normalizeFailure(value: ExportFailure): ExportFailure {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) fail('EXPORT_RESULT_SCHEMA_INVALID');
+  const allowed = new Set(['sourceAssetVersionId', 'code', 'retryable', 'presetId', 'presetVersion', 'outputFilename']);
+  if (Object.keys(value).some(key => !allowed.has(key))) fail('EXPORT_RESULT_SCHEMA_INVALID');
   const failure: ExportFailure = {
     sourceAssetVersionId: string(value.sourceAssetVersionId, 'EXPORT_MANIFEST_INVALID'),
     code: string(value.code, 'EXPORT_MANIFEST_INVALID', 64),
@@ -140,16 +143,19 @@ export function parseMultiPlatformExportResult(value: unknown): MultiPlatformExp
   if (Object.keys(record).some(key => !allowed.has(key)) || record.schemaVersion !== 1) fail('EXPORT_RESULT_SCHEMA_INVALID');
   if (record.outcome !== 'completed' && record.outcome !== 'partial_success') fail('EXPORT_RESULT_SCHEMA_INVALID');
   if (!Array.isArray(record.imageAssetVersionIds) || record.imageAssetVersionIds.some(id => typeof id !== 'string')) fail('EXPORT_RESULT_SCHEMA_INVALID');
+  const imageIds = record.imageAssetVersionIds.map(id => string(id, 'EXPORT_RESULT_SCHEMA_INVALID'));
+  if (new Set(imageIds).size !== imageIds.length) fail('EXPORT_RESULT_SCHEMA_INVALID');
   const failures = Array.isArray(record.failures) ? record.failures.map(item => normalizeFailure(item as ExportFailure)) : fail('EXPORT_RESULT_SCHEMA_INVALID');
   if (
     (record.outcome === 'completed' && failures.length !== 0)
+    || (record.outcome === 'completed' && imageIds.length === 0)
     || (record.outcome === 'partial_success' && failures.length === 0)
   ) fail('EXPORT_RESULT_SCHEMA_INVALID');
   return {
     schemaVersion: 1,
     runId: string(record.runId, 'EXPORT_RESULT_SCHEMA_INVALID'),
     outcome: record.outcome,
-    imageAssetVersionIds: [...new Set(record.imageAssetVersionIds.map(id => string(id, 'EXPORT_RESULT_SCHEMA_INVALID')))].sort(order),
+    imageAssetVersionIds: imageIds.sort(order),
     manifestAssetVersionId: string(record.manifestAssetVersionId, 'EXPORT_RESULT_SCHEMA_INVALID'),
     zipAssetVersionId: string(record.zipAssetVersionId, 'EXPORT_RESULT_SCHEMA_INVALID'),
     failures: failures.sort((a, b) => order(a.sourceAssetVersionId, b.sourceAssetVersionId) || order(a.code, b.code)),

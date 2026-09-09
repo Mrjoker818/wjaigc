@@ -150,13 +150,34 @@ const BINARY_CONTENT_TYPES = new Set([
   'application/zip',
 ]);
 
+export interface S3BinaryUploadResult {
+  storageKey: string;
+  createdThisCall: true;
+  cleanup(): Promise<void>;
+}
+
+async function* abortableBufferChunks(buffer: Buffer, signal?: AbortSignal): AsyncIterable<Buffer> {
+  const chunkSize = 1024 * 1024;
+  for (let offset = 0; offset < buffer.length; offset += chunkSize) {
+    signal?.throwIfAborted();
+    yield buffer.subarray(offset, Math.min(offset + chunkSize, buffer.length));
+  }
+  signal?.throwIfAborted();
+}
+
+async function deleteExactS3Key(storage: S3Storage, key: string): Promise<void> {
+  await storage.deleteFile({ fileKey: key }).catch(error => {
+    console.error(`[s3-storage] Failed to compensate ${key}:`, error);
+  });
+}
+
 /** Upload one already-validated export artifact without routing it through image validation. */
 export async function uploadBinaryToS3(
   buffer: Buffer,
   fileName: string,
   contentType: string,
   signal?: AbortSignal,
-): Promise<string | null> {
+): Promise<S3BinaryUploadResult | null> {
   if (!Buffer.isBuffer(buffer) || buffer.length === 0) throw new TypeError('S3_BINARY_INVALID');
   if (!BINARY_CONTENT_TYPES.has(contentType)) throw new TypeError('S3_BINARY_MIME_INVALID');
   if (
@@ -168,19 +189,42 @@ export async function uploadBinaryToS3(
   signal?.throwIfAborted();
   const storage = getStorage();
   if (!storage) return null;
-  const operation = storage.uploadFile({
-    fileContent: buffer,
+  const operation = storage.chunkUploadFile({
+    chunks: abortableBufferChunks(buffer, signal),
     fileName: `exports/${fileName}`,
     contentType,
   });
   try {
     const key = signal ? await waitForAbortable(operation, signal) : await operation;
     signal?.throwIfAborted();
-    return key.startsWith('/') ? key : `/${key}`;
+    const normalizedKey = key.replace(/^\/+/, '');
+    if (!/^exports\/[^/]+$/u.test(normalizedKey)) {
+      await deleteExactS3Key(storage, normalizedKey);
+      throw new Error('S3_BINARY_KEY_INVALID');
+    }
+    let cleaned = false;
+    return {
+      storageKey: normalizedKey,
+      createdThisCall: true,
+      cleanup: async () => {
+        if (cleaned) return;
+        cleaned = true;
+        await deleteExactS3Key(storage, normalizedKey);
+      },
+    };
   } catch (error) {
-    signal?.throwIfAborted();
+    if (signal?.aborted) {
+      void operation.then(key => deleteExactS3Key(storage, key.replace(/^\/+/, ''))).catch(() => undefined);
+      signal.throwIfAborted();
+    }
     throw new Error('S3_BINARY_UPLOAD_FAILED', { cause: error });
   }
+}
+
+/** Read an export artifact by its persisted exact key; never derives the legacy images namespace. */
+export async function readBinaryFromS3Exact(key: string): Promise<Buffer | null> {
+  if (!/^exports\/[a-f0-9]{16}-[A-Za-z0-9._-]+\.(?:json|zip)$/u.test(key)) return null;
+  return readImageFromS3(key);
 }
 
 export type S3BoundedReadErrorCode =

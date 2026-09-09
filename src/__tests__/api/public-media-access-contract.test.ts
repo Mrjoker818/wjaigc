@@ -56,4 +56,9 @@ describe('public media access security contract', () => {
     expect(mediaValidation).not.toContain('if (!isVideo || !video) return null;');
     expect(mediaValidation).toContain("if (!video || (!isVideo && !mimeType.startsWith('video/'))) return null;");
   });
+
+  it('keeps JSON and ZIP out of the generic public image/media allowlist', () => {
+    expect(mediaValidation).not.toMatch(/['"]\.json['"]/);
+    expect(mediaValidation).not.toMatch(/['"]\.zip['"]/);
+  });
 });

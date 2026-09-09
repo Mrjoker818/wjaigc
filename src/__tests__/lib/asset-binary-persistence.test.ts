@@ -3,6 +3,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import JSZip from 'jszip';
+import sharp from 'sharp';
 
 vi.mock('server-only', () => ({}));
 
@@ -26,7 +28,11 @@ describe('generic asset binary persistence', () => {
   beforeEach(async () => {
     root = await mkdtemp(join(tmpdir(), 'wujie-export-bytes-'));
     mocks.getServerDataRoot.mockReturnValue(root);
-    mocks.uploadBinaryToS3.mockResolvedValue('/exports/report.zip');
+    mocks.uploadBinaryToS3.mockImplementation(async (_bytes: Buffer, filename: string) => ({
+      storageKey: `exports/${filename}`,
+      createdThisCall: true,
+      cleanup: vi.fn(async () => undefined),
+    }));
   });
 
   afterEach(async () => {
@@ -35,7 +41,7 @@ describe('generic asset binary persistence', () => {
   });
 
   it('persists an allowed ZIP without using image validation and returns integrity metadata', async () => {
-    const bytes = Buffer.from('PK\u0003\u0004archive');
+    const bytes = await new JSZip().file('manifest.json', '{}').generateAsync({ type: 'nodebuffer' });
     const file = await persistAssetBytes({
       bytes,
       filename: 'delivery.zip',
@@ -43,7 +49,7 @@ describe('generic asset binary persistence', () => {
     });
 
     expect(file).toMatchObject({
-      storageKey: '/exports/report.zip',
+      createdThisCall: true,
       availability: 'ready',
       mimeType: 'application/zip',
       byteSize: bytes.length,
@@ -58,6 +64,36 @@ describe('generic asset binary persistence', () => {
       'application/zip',
       expect.any(AbortSignal),
     );
+  });
+
+  it.each([
+    [Buffer.from('not a png'), 'a.png', 'image/png'],
+    [Buffer.from([0xff, 0xd8, 0xff]), 'a.jpeg', 'image/jpeg'],
+    [Buffer.from('RIFFxxxxNOPE'), 'a.webp', 'image/webp'],
+    [Buffer.from('PK\u0003\u0004broken'), 'a.zip', 'application/zip'],
+    [Buffer.from('[]'), 'a.json', 'application/json'],
+    [Buffer.from('{broken'), 'a.json', 'application/json'],
+  ])('rejects bytes that do not match the declared format %#', async (bytes, filename, mimeType) => {
+    await expect(persistAssetBytes({ bytes, filename, mimeType })).rejects.toThrow('ASSET_BINARY_FORMAT_INVALID');
+    expect(mocks.uploadBinaryToS3).not.toHaveBeenCalled();
+  });
+
+  it('accepts signature-valid PNG, JPEG, and WebP bytes only under matching MIME and extension', async () => {
+    for (const [format, mimeType, filename] of [
+      ['png', 'image/png', 'a.png'],
+      ['jpeg', 'image/jpeg', 'a.jpg'],
+      ['webp', 'image/webp', 'a.webp'],
+    ] as const) {
+      const bytes = await sharp({ create: { width: 1, height: 1, channels: 4, background: '#ffffff' } })
+        [format]().toBuffer();
+      await expect(persistAssetBytes({ bytes, filename, mimeType })).resolves.toMatchObject({ mimeType });
+    }
+  });
+
+  it('rejects ZIP entries whose original path attempts traversal', async () => {
+    const bytes = await new JSZip().file('../secret.txt', 'x').generateAsync({ type: 'nodebuffer' });
+    await expect(persistAssetBytes({ bytes, filename: 'unsafe.zip', mimeType: 'application/zip' }))
+      .rejects.toThrow('ASSET_BINARY_FORMAT_INVALID');
   });
 
   it.each([
@@ -94,5 +130,18 @@ describe('generic asset binary persistence', () => {
     mocks.uploadBinaryToS3.mockRejectedValueOnce(new Error('storage unavailable'));
     await expect(persistAssetBytes(input)).rejects.toThrow('storage unavailable');
     expect(await readFile(join(root, 'exports', first.url.split('/').at(-1)!))).toEqual(input.bytes);
+  });
+
+  it('exposes idempotent cleanup that removes only objects created by this call', async () => {
+    const s3Cleanup = vi.fn(async () => undefined);
+    mocks.uploadBinaryToS3.mockImplementationOnce(async (_bytes: Buffer, filename: string) => ({ storageKey: `exports/${filename}`, createdThisCall: true, cleanup: s3Cleanup }));
+    const persisted = await persistAssetBytes({ bytes: Buffer.from('{}'), filename: 'manifest.json', mimeType: 'application/json' });
+    const localName = persisted.url.split('/').at(-1)!;
+
+    await persisted.cleanup();
+    await persisted.cleanup();
+
+    await expect(readFile(join(root, 'exports', localName))).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(s3Cleanup).toHaveBeenCalledOnce();
   });
 });

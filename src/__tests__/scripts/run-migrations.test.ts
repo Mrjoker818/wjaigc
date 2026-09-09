@@ -58,4 +58,22 @@ describe('migration runner connection contract', () => {
     expect(coreUsersIndex).toBeGreaterThanOrEqual(0);
     expect(credentialIndex).toBeGreaterThan(coreUsersIndex);
   });
+
+  it('migrates parent lineage to same-owner/project cross-Asset foreign keys', async () => {
+    const migration = await readFile(
+      resolve(process.cwd(), 'migrations', '20260909_mpe_cross_asset_parents.sql'),
+      'utf8',
+    );
+    const normalized = migration.replace(/\s+/g, ' ');
+
+    expect(normalized).toContain('DROP CONSTRAINT IF EXISTS wujie_asset_version_parents_parent_version_id_asset_id_owner_id_project_id_fkey');
+    expect(normalized).toMatch(/FOREIGN KEY \(parent_version_id, owner_id, project_id\)/);
+    expect(normalized).toMatch(/REFERENCES wujie_asset_versions\(id, owner_id, project_id\)/);
+    expect(normalized.match(/ADD CONSTRAINT wujie_asset_version_parents_parent_scope_fk FOREIGN KEY \(([^)]+)\)/)?.[1])
+      .toBe('parent_version_id, owner_id, project_id');
+    expect(normalized).not.toMatch(/\b(?:DELETE|UPDATE|TRUNCATE)\b/i);
+
+    const storage = await readFile(resolve(process.cwd(), 'src/lib/asset-core/storage.ts'), 'utf8');
+    expect(storage).toMatch(/FROM wujie_asset_versions parent\s+WHERE parent\.id = \$5 AND parent\.owner_id = \$2 AND parent\.project_id = \$3/);
+  });
 });

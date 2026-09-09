@@ -420,7 +420,10 @@ class PostgresAssetStorageTransaction implements AssetStorageTransaction {
       await this.client.query(
         `INSERT INTO wujie_asset_version_parents(
           asset_id, owner_id, project_id, version_id, parent_version_id, parent_order
-        ) VALUES ($1, $2, $3, $4, $5, $6)`,
+        )
+        SELECT $1, $2, $3, $4, parent.id, $6
+        FROM wujie_asset_versions parent
+        WHERE parent.id = $5 AND parent.owner_id = $2 AND parent.project_id = $3`,
         [version.assetId, version.ownerId, version.projectId, version.id, parentVersionId, parentOrder],
       );
     }

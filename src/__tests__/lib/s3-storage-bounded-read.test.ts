@@ -1,13 +1,19 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
+  chunkUploadFile: vi.fn(),
+  deleteFile: vi.fn(),
   generatePresignedUrl: vi.fn(),
+  readFile: vi.fn(),
   uploadFile: vi.fn(),
 }));
 
 vi.mock('coze-coding-dev-sdk', () => ({
   S3Storage: class {
+    chunkUploadFile = mocks.chunkUploadFile;
+    deleteFile = mocks.deleteFile;
     generatePresignedUrl = mocks.generatePresignedUrl;
+    readFile = mocks.readFile;
     uploadFile = mocks.uploadFile;
   },
 }));
@@ -19,6 +25,9 @@ describe('readImageFromS3Bounded cancellation', () => {
     vi.resetModules();
     vi.restoreAllMocks();
     mocks.generatePresignedUrl.mockReset().mockResolvedValue('https://objects.test/exact.png');
+    mocks.chunkUploadFile.mockReset().mockResolvedValue('exports/0123456789abcdef-result.zip');
+    mocks.deleteFile.mockReset().mockResolvedValue(true);
+    mocks.readFile.mockReset().mockResolvedValue(Buffer.from('exact'));
     mocks.uploadFile.mockReset().mockResolvedValue('exports/result.zip');
     process.env.COZE_BUCKET_ENDPOINT_URL = 'https://bucket.test';
     process.env.COZE_BUCKET_NAME = 'test-bucket';
@@ -161,21 +170,36 @@ describe('readImageFromS3Bounded cancellation', () => {
   it('uploads an allowed binary artifact through the non-image path', async () => {
     const { uploadBinaryToS3 } = await import('@/lib/s3-storage');
     await expect(uploadBinaryToS3(
-      Buffer.from('PK\u0003\u0004zip'), 'result.zip', 'application/zip', new AbortController().signal,
-    )).resolves.toBe('/exports/result.zip');
-    expect(mocks.uploadFile).toHaveBeenCalledWith({
-      fileContent: Buffer.from('PK\u0003\u0004zip'),
-      fileName: 'exports/result.zip',
+      Buffer.from('PK\u0003\u0004zip'), '0123456789abcdef-result.zip', 'application/zip', new AbortController().signal,
+    )).resolves.toMatchObject({ storageKey: 'exports/0123456789abcdef-result.zip', createdThisCall: true });
+    expect(mocks.chunkUploadFile).toHaveBeenCalledWith({
+      chunks: expect.any(Object),
+      fileName: 'exports/0123456789abcdef-result.zip',
       contentType: 'application/zip',
     });
+    const chunks = mocks.chunkUploadFile.mock.calls[0][0].chunks as AsyncIterable<Buffer>;
+    const received: Buffer[] = [];
+    for await (const chunk of chunks) received.push(chunk);
+    expect(Buffer.concat(received)).toEqual(Buffer.from('PK\u0003\u0004zip'));
+    expect(mocks.uploadFile).not.toHaveBeenCalled();
   });
 
-  it('stops waiting for an in-flight binary upload when cancelled', async () => {
-    mocks.uploadFile.mockImplementation(() => new Promise(() => undefined));
+  it('cleans a late uploaded object when cancellation wins the SDK race', async () => {
+    let resolveUpload!: (key: string) => void;
+    mocks.chunkUploadFile.mockImplementation(() => new Promise<string>(resolve => { resolveUpload = resolve; }));
     const controller = new AbortController();
     const { uploadBinaryToS3 } = await import('@/lib/s3-storage');
-    const pending = uploadBinaryToS3(Buffer.from('{}'), 'manifest.json', 'application/json', controller.signal);
+    const pending = uploadBinaryToS3(Buffer.from('{}'), '0123456789abcdef-manifest.json', 'application/json', controller.signal);
+    await vi.waitFor(() => expect(resolveUpload).toBeTypeOf('function'));
     controller.abort(new DOMException('cancelled', 'AbortError'));
     await expect(pending).rejects.toMatchObject({ name: 'AbortError' });
+    resolveUpload('exports/late.json');
+    await vi.waitFor(() => expect(mocks.deleteFile).toHaveBeenCalledWith({ fileKey: 'exports/late.json' }));
+  });
+
+  it('reads an export artifact by its exact key without deriving the images namespace', async () => {
+    const { readBinaryFromS3Exact } = await import('@/lib/s3-storage');
+    await expect(readBinaryFromS3Exact('exports/0123456789abcdef-report.zip')).resolves.toEqual(Buffer.from('exact'));
+    expect(mocks.readFile).toHaveBeenCalledWith({ fileKey: 'exports/0123456789abcdef-report.zip' });
   });
 });

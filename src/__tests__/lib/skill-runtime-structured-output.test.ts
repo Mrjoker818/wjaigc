@@ -57,6 +57,17 @@ describe('bounded durable Skill outputs', () => {
   });
 
   it.each([
+    ['duplicate image ids', { ...exportResult(), imageAssetVersionIds: ['image-v1', 'image-v1'] }],
+    ['empty completed result', { ...exportResult(), imageAssetVersionIds: [] }],
+    ['unknown failure field', { ...exportResult(), outcome: 'partial_success', imageAssetVersionIds: [], failures: [{ sourceAssetVersionId: 'source-1', code: 'EXPORT_FAILED', retryable: false, detail: 'private' }] }],
+  ])('rejects %s instead of silently normalizing it', (_label, value) => {
+    expect(() => parseDurableSkillOutput({
+      stepId: 'export', kind: 'json', schemaId: 'multi-platform-export-result-v1',
+      content: JSON.stringify(value),
+    })).toThrow('EXPORT_RESULT_SCHEMA_INVALID');
+  });
+
+  it.each([
     ['', 'SKILL_OUTPUT_SCHEMA_ID_INVALID'],
     ['unregistered-report-v1', 'SKILL_OUTPUT_SCHEMA_UNKNOWN'],
     ['__proto__', 'SKILL_OUTPUT_SCHEMA_UNKNOWN'],

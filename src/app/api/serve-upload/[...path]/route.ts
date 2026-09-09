@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerDataRoot } from '@/lib/server-data-root';
-import { downloadImageFromS3, getS3PresignedUrl, deriveS3Key, resolveS3Key } from '@/lib/s3-storage';
+import { downloadImageFromS3, getS3PresignedUrl, deriveS3Key, readBinaryFromS3Exact, resolveS3Key } from '@/lib/s3-storage';
 import { getImageSourceUrl } from '@/lib/image-source-map';
 import { isAllowedPublicMediaExtension } from '@/lib/media-validation';
 import { readExactRecoveryMedia } from '@/lib/asset-core/recovery-media';
@@ -20,8 +20,28 @@ export async function GET(
       return NextResponse.json({ error: 'Invalid path' }, { status: 400 });
     }
 
-    if (!isAllowedPublicMediaPath(pathParts)) {
+    const exportDocument = exportDocumentDescriptor(pathParts);
+    if (!exportDocument && !isAllowedPublicMediaPath(pathParts)) {
       return NextResponse.json({ error: 'File not found' }, { status: 404 });
+    }
+    if (exportDocument) {
+      const dataRoot = path.resolve(getServerDataRoot());
+      const exportsRoot = path.resolve(dataRoot, 'exports');
+      const localPath = path.resolve(exportsRoot, exportDocument.filename);
+      if (!localPath.startsWith(`${exportsRoot}${path.sep}`)) {
+        return NextResponse.json({ error: 'File not found' }, { status: 404 });
+      }
+      const bytes: Buffer | null = fs.existsSync(localPath)
+        ? await fs.promises.readFile(localPath)
+        : await readBinaryFromS3Exact(`exports/${exportDocument.filename}`);
+      if (!bytes) return NextResponse.json({ error: 'File not found' }, { status: 404 });
+      if (!fs.existsSync(localPath)) {
+        await fs.promises.mkdir(exportsRoot, { recursive: true });
+        await fs.promises.writeFile(localPath, bytes, { flag: 'wx' }).catch(error => {
+          if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+        });
+      }
+      return exportDocumentResponse(new Uint8Array(bytes), exportDocument.contentType, exportDocument.filename);
     }
 
     const isRecoveryPath = filePath.startsWith('recovery/');
@@ -183,6 +203,27 @@ function getContentType(ext: string): string {
     : ext === '.obj' ? 'model/obj'
     : ext === '.mtl' ? 'text/plain'
     : 'application/octet-stream';
+}
+
+function exportDocumentDescriptor(pathParts: string[]): { filename: string; contentType: string } | null {
+  if (pathParts.length !== 2 || pathParts[0] !== 'exports') return null;
+  const filename = pathParts[1];
+  if (!/^[a-f0-9]{16}-[A-Za-z0-9._-]+\.(?:json|zip)$/u.test(filename)) return null;
+  return {
+    filename,
+    contentType: filename.endsWith('.json') ? 'application/json' : 'application/zip',
+  };
+}
+
+function exportDocumentResponse(body: BodyInit, contentType: string, filename: string): NextResponse {
+  return new NextResponse(body, {
+    headers: {
+      'Content-Type': contentType,
+      'Content-Disposition': `attachment; filename="${filename}"`,
+      'Cache-Control': 'private, max-age=86400',
+      'X-Content-Type-Options': 'nosniff',
+    },
+  });
 }
 
 function isAllowedPublicMediaPath(pathParts: string[]): boolean {

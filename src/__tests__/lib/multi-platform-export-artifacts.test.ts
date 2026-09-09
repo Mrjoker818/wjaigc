@@ -54,6 +54,13 @@ const persistedFile = (filename: string, mimeType: string, bytes: Buffer): Asset
   byteSize: bytes.length, checksum: createHash('sha256').update(bytes).digest('hex'), storageKey: `/exports/${filename}`,
 });
 
+const exportMetadata = (overrides: Record<string, unknown> = {}) => ({
+  schemaId: 'multi-platform-export-v1', runId: 'run-1', sourceAssetVersionId: 'source-v1',
+  presetId: 'post', presetVersion: 1, platform: 'instagram', usage: 'post',
+  width: 10, height: 10, fit: 'cover', outputFormat: 'png', outputFilename: 'a.png',
+  requestDigest: 'a'.repeat(64), ...overrides,
+});
+
 describe('multi-platform export artifacts', () => {
   it('creates a new derived image Asset with a cross-Asset source parent and reuses it deterministically', async () => {
     const service = assetServiceDouble();
@@ -104,7 +111,7 @@ describe('multi-platform export artifacts', () => {
     const persistBytes = vi.fn(async ({ bytes, filename, mimeType }: { bytes: Buffer; filename: string; mimeType: string }) => persistedFile(filename, mimeType, bytes));
     const imageBytes = Buffer.from('a');
     const imageChecksum = createHash('sha256').update(imageBytes).digest('hex');
-    const imageVersion = { id: 'image-v1', assetId: 'asset-image', ownerId: 'user-1', projectId: 'project-1', file: { ...persistedFile('a.png', 'image/png', imageBytes), checksum: imageChecksum }, parentVersionIds: ['source-v1'], createdAt: 'now' } as AssetVersion;
+    const imageVersion = { id: 'image-v1', assetId: 'asset-image', ownerId: 'user-1', projectId: 'project-1', file: { ...persistedFile('a.png', 'image/png', imageBytes), checksum: imageChecksum }, parentVersionIds: ['source-v1'], metadata: exportMetadata(), createdAt: 'now' } as AssetVersion;
     const output = await persistExportArtifacts({
       actorUserId: 'user-1', projectId: 'project-1', runId: 'run-1', requestDigest: 'a'.repeat(64),
       createdAt: '2026-09-09T00:00:00.000Z', frozenParameters: { fit: 'cover' },
@@ -126,13 +133,32 @@ describe('multi-platform export artifacts', () => {
   it('does not publish only one document version when atomic artifact creation fails', async () => {
     const service = assetServiceDouble();
     service.createAssetVersionsAtomically.mockRejectedValueOnce(new Error('database failed'));
-    const persistBytes = vi.fn(async ({ bytes, filename, mimeType }: { bytes: Buffer; filename: string; mimeType: string }) => persistedFile(filename, mimeType, bytes));
+    const cleanup = vi.fn(async () => undefined);
+    const persistBytes = vi.fn(async ({ bytes, filename, mimeType }: { bytes: Buffer; filename: string; mimeType: string }) => ({ ...persistedFile(filename, mimeType, bytes), createdThisCall: true, cleanup }));
     await expect(persistExportArtifacts({
       actorUserId: 'user-1', projectId: 'project-1', runId: 'run-1', requestDigest: 'a'.repeat(64),
       createdAt: '2026-09-09T00:00:00.000Z', frozenParameters: {}, images: [], failures: [],
       assetService: service, persistBytes,
     })).rejects.toThrow('database failed');
     expect(service.createAssetVersion).not.toHaveBeenCalled();
+    expect(cleanup).toHaveBeenCalledTimes(2);
+  });
+
+  it('cleans the newly persisted manifest when ZIP persistence fails', async () => {
+    const service = assetServiceDouble();
+    const cleanup = vi.fn(async () => undefined);
+    const persistBytes = vi.fn()
+      .mockResolvedValueOnce({ ...persistedFile('manifest.json', 'application/json', Buffer.from('{}')), createdThisCall: true, cleanup })
+      .mockRejectedValueOnce(new Error('zip storage failed'));
+
+    await expect(persistExportArtifacts({
+      actorUserId: 'user-1', projectId: 'project-1', runId: 'run-1', requestDigest: 'a'.repeat(64),
+      createdAt: '2026-09-09T00:00:00.000Z', frozenParameters: {}, images: [],
+      failures: [{ sourceAssetVersionId: 'source-v1', code: 'EXPORT_FAILED', retryable: false }],
+      assetService: service, persistBytes,
+    })).rejects.toThrow('zip storage failed');
+    expect(cleanup).toHaveBeenCalledOnce();
+    expect(service.createAssetVersionsAtomically).not.toHaveBeenCalled();
   });
 
   it('enforces entry and pre/post compression byte limits before persistence', async () => {
@@ -162,13 +188,52 @@ describe('multi-platform export artifacts', () => {
   it('rejects an image whose manifest checksum disagrees with its persisted AssetFile', async () => {
     const service = assetServiceDouble();
     const bytes = Buffer.from('a');
-    const imageVersion = { id: 'image-v1', assetId: 'asset-image', ownerId: 'user-1', projectId: 'project-1', file: { ...persistedFile('a.png', 'image/png', bytes), checksum: 'c'.repeat(64) }, parentVersionIds: ['source-v1'], createdAt: 'now' } as AssetVersion;
+    const imageVersion = { id: 'image-v1', assetId: 'asset-image', ownerId: 'user-1', projectId: 'project-1', file: { ...persistedFile('a.png', 'image/png', bytes), checksum: 'c'.repeat(64) }, parentVersionIds: ['source-v1'], metadata: exportMetadata({ platform: 'p', usage: 'u', width: 1, height: 1 }), createdAt: 'now' } as AssetVersion;
     await expect(persistExportArtifacts({
       actorUserId: 'user-1', projectId: 'project-1', runId: 'run-1', requestDigest: 'a'.repeat(64),
       createdAt: '2026-09-09T00:00:00.000Z', frozenParameters: {}, failures: [],
       images: [{ version: imageVersion, filename: 'a.png', bytes, sourceAssetVersionId: 'source-v1', platform: 'p', usage: 'u', width: 1, height: 1, mimeType: 'image/png', sha256: createHash('sha256').update(bytes).digest('hex') }],
       assetService: service, persistBytes: vi.fn(),
     })).rejects.toThrow('EXPORT_IMAGE_ARTIFACT_INTEGRITY_INVALID');
+  });
+
+  it('uses frozen AssetVersion metadata as manifest facts and rejects caller conflicts', async () => {
+    const service = assetServiceDouble();
+    const bytes = Buffer.from('a');
+    const checksum = createHash('sha256').update(bytes).digest('hex');
+    const version = {
+      id: 'image-v1', assetId: 'asset-image', ownerId: 'user-1', projectId: 'project-1',
+      file: persistedFile('a.png', 'image/png', bytes), parentVersionIds: ['source-v1'],
+      metadata: exportMetadata(), createdAt: 'now',
+    } as AssetVersion;
+    await expect(persistExportArtifacts({
+      actorUserId: 'user-1', projectId: 'project-1', runId: 'run-1', requestDigest: 'a'.repeat(64),
+      createdAt: '2026-09-09T00:00:00.000Z', frozenParameters: {}, failures: [],
+      images: [{ version, filename: 'a.png', bytes, sourceAssetVersionId: 'source-v1', platform: 'tiktok', usage: 'post', width: 10, height: 10, mimeType: 'image/png', sha256: checksum }],
+      assetService: service, persistBytes: vi.fn(),
+    })).rejects.toThrow('EXPORT_IMAGE_DECLARATION_CONFLICT');
+    expect(service.createAssetVersionsAtomically).not.toHaveBeenCalled();
+  });
+
+  it('cleans a newly persisted derived image when the version is reused or DB creation fails', async () => {
+    const bytes = Buffer.from('png');
+    const sha256 = createHash('sha256').update(bytes).digest('hex');
+    const cleanup = vi.fn(async () => undefined);
+    const persistBytes = vi.fn(async () => ({ ...persistedFile('post.png', 'image/png', bytes), checksum: sha256, createdThisCall: true, cleanup }));
+    const service = assetServiceDouble();
+    const common = {
+      actorUserId: 'user-1', projectId: 'project-1', runId: 'run-1', sourceAssetVersionId: 'source-version-1',
+      presetId: 'instagram-post', presetVersion: 1, platform: 'instagram', usage: 'post', width: 1080, height: 1080,
+      fit: 'cover' as const, outputFormat: 'png' as const, outputFilename: 'post.png', requestDigest: 'd'.repeat(64),
+      transformed: { bytes, mimeType: 'image/png' as const, sha256 }, assetService: service, persistBytes,
+    };
+    await persistExportImageVersion(common);
+    await persistExportImageVersion(common);
+    expect(cleanup).toHaveBeenCalledOnce();
+
+    service.createAssetVersion.mockRejectedValueOnce(new Error('database failed'));
+    await expect(persistExportImageVersion({ ...common, runId: 'run-2' })).rejects.toThrow('database failed');
+    expect(cleanup).toHaveBeenCalledTimes(2);
   });
 
   it('rejects the same output idempotency key when transformed bytes change', async () => {
