@@ -466,7 +466,7 @@ describe('user-data asset graph sync route', () => {
     expect(placementUpdate?.[1]).toEqual(['user-1', []]);
     expect(projectUpdate?.[1]).toEqual(['user-1', []]);
     expect(String(assetUpdate?.[0])).toContain('NOT EXISTS');
-    expect(assetUpdate?.[1]).toEqual(['user-1']);
+    expect(assetUpdate?.[1]).toEqual(['user-1', []]);
     expect(sqlEvents).toEqual(expect.arrayContaining([
       'UPDATE wujie_workspace_placements SET',
       'UPDATE wujie_assets asset',
