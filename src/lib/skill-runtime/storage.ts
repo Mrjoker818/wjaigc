@@ -199,8 +199,9 @@ function isStoredStep(value: unknown): boolean {
     || !isBoundedString(value.label, 120)
     || !isBoundedString(value.toolId, 128, TOKEN_ID)
     || (value.execution !== 'sequential' && value.execution !== 'parallel')
-    || typeof value.promptTemplate !== 'string'
-    || value.promptTemplate.length > 32_768
+    || (runtime === 'local'
+      ? typeof value.promptTemplate !== 'string' || value.promptTemplate.length > 32_768
+      : !isBoundedString(value.promptTemplate, 32_768))
     || ('promptInstructionTemplate' in value
       && !isBoundedString(value.promptInstructionTemplate, 32_768))
     || (runtime !== 'model' && runtime !== 'local')

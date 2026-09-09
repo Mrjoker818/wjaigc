@@ -322,6 +322,9 @@ export async function loadPersistedSkillContinuation(input: {
     ? { ...requestBase, executionRuntime: 'local' }
     : {
         ...requestBase,
+        ...(created.payload.executionRuntime === 'model'
+          ? { executionRuntime: 'model' as const }
+          : {}),
         providerId: text(created.payload.providerId, 'providerId'),
         modelId: text(created.payload.modelId, 'modelId'),
       };

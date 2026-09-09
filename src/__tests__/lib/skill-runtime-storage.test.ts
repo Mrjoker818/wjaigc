@@ -422,6 +422,8 @@ describe('versioned user skill storage', () => {
       steps: Array<{
         id: string;
         modelRole: string;
+        runtime?: unknown;
+        promptTemplate: string;
         fanOut?: unknown;
         compiledFanOut?: unknown;
       }>;
@@ -440,6 +442,8 @@ describe('versioned user skill storage', () => {
         steps: Array<{
           id: string;
           modelRole: string;
+          runtime?: unknown;
+          promptTemplate: string;
           fanOut?: unknown;
           compiledFanOut?: unknown;
         }>;
@@ -547,6 +551,20 @@ describe('versioned user skill storage', () => {
   it('rejects recursively forged stored step enums', async () => {
     const store = await overwriteFirstStoredSkill(skill => {
       skill.steps[0]!.modelRole = 'root';
+    });
+
+    await expect(store.loadEnvelope('user-1')).rejects.toBeInstanceOf(SkillStorageError);
+  });
+
+  it.each([
+    ['legacy model with an empty template', undefined, ''],
+    ['explicit model with a whitespace template', 'model', '   '],
+  ])('rejects %s', async (_name, runtime, promptTemplate) => {
+    const store = await overwriteFirstStoredSkill(skill => {
+      const step = skill.steps[0]!;
+      if (runtime === undefined) delete step.runtime;
+      else step.runtime = runtime;
+      step.promptTemplate = promptTemplate;
     });
 
     await expect(store.loadEnvelope('user-1')).rejects.toBeInstanceOf(SkillStorageError);
