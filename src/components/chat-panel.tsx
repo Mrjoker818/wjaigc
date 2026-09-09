@@ -44,6 +44,7 @@ import {
 import { AgentProgressTimeline } from '@/components/agent-runtime/AgentProgressTimeline';
 import { useAgentRunEvents } from '@/components/agent-runtime/use-agent-run-events';
 import { SkillInputFields } from '@/components/skill-runtime/SkillInputFields';
+import { MultiPlatformExportDrawer } from '@/components/skill-runtime/MultiPlatformExportDrawer';
 import { SkillRunProgress } from '@/components/skill-runtime/SkillRunProgress';
 import { SkillRunHistory, type SkillRunHistoryItem } from '@/components/skill-runtime/SkillRunHistory';
 import {
@@ -71,6 +72,7 @@ import {
   type SkillDefinition,
 } from '@/lib/skill-runtime/types';
 import { bindCanvasSkillSourceInputs, collectCanvasSkillSourceVersionIds } from '@/lib/skill-runtime/canvas-source-inputs';
+import { MULTI_PLATFORM_EXPORT_SKILL_ID } from '@/lib/skill-runtime/multi-platform-export-preset';
 
 const CHAT_RENDER_WINDOW = 80;
 
@@ -4099,6 +4101,26 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
     onNavigateToImage?.(image.id);
   }, [onNavigateToImage]);
 
+  const onAddExportImagesToCanvas = useCallback(async (
+    references: WorkspaceAssetReference[],
+  ): Promise<void> => {
+    if (!projectId || !receiveSkillOutput) {
+      toast.error('画布暂时无法接收导出图片');
+      return;
+    }
+    const context = activeCanvasSkillRunRef.current;
+    for (const reference of references) {
+      const assetVersionId = reference.assetVersionId;
+      if (!assetVersionId || reference.kind !== 'image') continue;
+      if (skillCanvasImagesRef.current.some(image => image.assetVersionId === assetVersionId)) continue;
+      await Promise.resolve(receiveSkillOutput(reference, {
+        runId: context?.runId || skillRun.runId,
+        sourceVersionIds: context?.sourceVersionIds || canvasSkillSourceVersionIds,
+        restoreDeletedPlacement: true,
+      }));
+    }
+  }, [canvasSkillSourceVersionIds, projectId, receiveSkillOutput, skillRun.runId]);
+
   const handleRecheckCompliance = useCallback(async (report: PlatformComplianceReportV1): Promise<void> => {
     const context = activeCanvasSkillRunRef.current;
     if (!context || !context.sourceVersionIds.includes(report.sourceVersionId)) {
@@ -6288,7 +6310,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
               </div>
             )}
 
-            {activeSkill && (
+            {activeSkill && activeSkill.id !== MULTI_PLATFORM_EXPORT_SKILL_ID && (
               <div className={`rounded-lg p-3 space-y-3 ${
                 isGold ? 'bg-white/[0.03] border border-gold/20' : 'bg-white border border-blue-200'
               }`}>
@@ -6351,6 +6373,26 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                   theme={themeStyle === 'gold' ? 'dark' : 'light'}
                 />
               </div>
+            )}
+
+            {portalReady && activeSkill?.id === MULTI_PLATFORM_EXPORT_SKILL_ID && projectId && createPortal(
+              <MultiPlatformExportDrawer
+                open
+                projectId={projectId}
+                sourceAssetVersionIds={canvasSkillSourceVersionIds}
+                values={canvasSkillInputValues}
+                projection={skillRun.projection}
+                busy={skillRun.busy}
+                error={skillRun.error}
+                onChange={(key, value) => setSkillParamValues(current => ({ ...current, [key]: value }))}
+                onEstimate={() => { void handleEstimateSkill(); }}
+                onStart={() => { void handleStartSkill(); }}
+                onCancel={() => { void skillRun.cancel(); }}
+                onRetry={() => { void skillRun.retry('export'); }}
+                onAddToCanvas={onAddExportImagesToCanvas}
+                onClose={handleCloseSkill}
+              />,
+              document.body,
             )}
 
             {/* 推荐技能 — 来自 Lovart 设计方法论 */}

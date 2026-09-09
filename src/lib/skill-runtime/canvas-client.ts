@@ -353,3 +353,25 @@ export async function loadCompletedCanvasSkillAssets(input: {
   }));
   return resolved.filter((reference): reference is WorkspaceAssetReference => reference !== null);
 }
+
+export async function loadCanvasExportImageAssets(input: {
+  projectId: string;
+  assetVersionIds: readonly string[];
+  fetcher?: typeof fetch;
+  signal?: AbortSignal;
+}): Promise<WorkspaceAssetReference[]> {
+  const fetcher = input.fetcher ?? fetch;
+  const resolved = await Promise.all([...new Set(input.assetVersionIds)].map(async assetVersionId => {
+    const query = new URLSearchParams({ projectId: input.projectId, assetVersionId });
+    const reference = await readJson<WorkspaceAssetReference & { kind?: string }>(
+      await fetcher(`/api/assets?${query.toString()}`, { method: 'GET', signal: input.signal }),
+      '导出图片版本加载失败',
+    );
+    return reference.kind === 'image'
+      && isWorkspaceAssetReference(reference)
+      && reference.assetVersionId === assetVersionId
+      ? sanitizeWorkspaceAssetReference(reference)
+      : null;
+  }));
+  return resolved.filter((reference): reference is WorkspaceAssetReference => reference !== null);
+}

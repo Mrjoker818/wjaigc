@@ -49,7 +49,7 @@ describe('canvas chat shared Skill runtime wiring', () => {
     expect(source).not.toContain('skill.id === activeSkill.sourceSkillId && skill.builtIn');
     expect(source).toContain('skillId: executionSkill.id');
     expect(source).toContain('skillVersion: executionSkill.version');
-    expect(source).toContain("roles.add('orchestrator')");
+    expect(source).toContain('for (const role of requiredSkillModelRoles(executionSkill))');
     expect(source).toContain('sourceVersionIds: canvasSkillSourceVersionIds');
     expect(source).toContain('await skillRun.estimateRun(request)');
     expect(source).toContain('await startCanvasSkillRun(');
