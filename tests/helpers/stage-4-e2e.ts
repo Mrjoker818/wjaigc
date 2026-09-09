@@ -1,4 +1,4 @@
-import { copyFile, mkdir, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 
@@ -6,7 +6,11 @@ import { expect, test as base, type Page, type TestInfo } from '@playwright/test
 import { Pool } from 'pg';
 
 import type { Workflow } from '../../src/lib/workflow-engine';
-import { stage3SourceIdentity, stage3SourceState } from './stage-3-source-state';
+import {
+  stage3SourceIdentity,
+  stage3SourceState,
+  type Stage3SourceState,
+} from './stage-3-source-state';
 import { stage3RequestFingerprint } from './stage-3-evidence-filter';
 import { stage4RuntimeEvidenceFailures } from './stage-4-evidence-filter';
 
@@ -131,6 +135,33 @@ function evidenceDirectory(testInfo: TestInfo): string {
   );
 }
 
+export async function writeStage4EvidenceManifest(
+  directory: string,
+  sourceState: Stage3SourceState,
+): Promise<string> {
+  const entries = await readdir(directory, { withFileTypes: true });
+  const artifacts = [];
+  for (const entry of entries.filter(item => item.isFile() && item.name !== 'evidence-manifest.json')
+    .sort((left, right) => left.name.localeCompare(right.name))) {
+    const body = await readFile(join(directory, entry.name));
+    artifacts.push({
+      path: entry.name,
+      bytes: body.byteLength,
+      sha256: createHash('sha256').update(body).digest('hex'),
+    });
+  }
+  const manifestPath = join(directory, 'evidence-manifest.json');
+  await writeFile(manifestPath, JSON.stringify({
+    commit: sourceState.commit,
+    tree: sourceState.tree,
+    productTreeClean: sourceState.productTreeClean,
+    productStatus: sourceState.productStatus,
+    checksumAlgorithm: 'sha256',
+    artifacts,
+  }, null, 2), 'utf8');
+  return manifestPath;
+}
+
 async function readJson(response: import('@playwright/test').APIResponse): Promise<Record<string, unknown>> {
   return response.json().catch(() => ({})) as Promise<Record<string, unknown>>;
 }
@@ -139,10 +170,11 @@ export const test = base.extend<{ stage4Evidence: Stage4Evidence }>({
   stage4Evidence: [async ({ page }, useFixture, testInfo) => {
     const directory = evidenceDirectory(testInfo);
     const evidence: Stage4Evidence = { directory, console: [], network: [] };
+    const sourceStateAtStart = stage3SourceState();
     await mkdir(directory, { recursive: true });
     await writeFile(
       join(directory, 'source-state.json'),
-      JSON.stringify(stage3SourceState(), null, 2),
+      JSON.stringify(sourceStateAtStart, null, 2),
       'utf8',
     );
     page.on('console', message => {
@@ -219,6 +251,24 @@ export const test = base.extend<{ stage4Evidence: Stage4Evidence }>({
       }
       await writeFile(join(directory, 'console.json'), JSON.stringify(evidence.console, null, 2), 'utf8');
       await writeFile(join(directory, 'network.json'), JSON.stringify(evidence.network, null, 2), 'utf8');
+      const sourceStateAtEnd = stage3SourceState();
+      if (
+        sourceStateAtEnd.commit !== sourceStateAtStart.commit
+        || sourceStateAtEnd.tree !== sourceStateAtStart.tree
+      ) {
+        artifactErrors.push('source-state: candidate commit or tree changed during the E2E run');
+      }
+      if (
+        process.env.E2E_REQUIRE_CLEAN_PRODUCT_TREE === 'true'
+        && (!sourceStateAtStart.productTreeClean || !sourceStateAtEnd.productTreeClean)
+      ) {
+        artifactErrors.push('source-state: Task11 evidence requires a clean product tree');
+      }
+      try {
+        await writeStage4EvidenceManifest(directory, sourceStateAtEnd);
+      } catch (error) {
+        artifactErrors.push(`manifest: ${error instanceof Error ? error.message : String(error)}`);
+      }
       await testInfo.attach('stage-4-console.json', {
         body: Buffer.from(JSON.stringify(evidence.console, null, 2)),
         contentType: 'application/json',

@@ -1,8 +1,13 @@
+import { createHash } from 'node:crypto';
+import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   ensureStage4Session,
   seedStage4Baseline,
+  writeStage4EvidenceManifest,
   type Stage4AuthContext,
 } from '../../../tests/helpers/stage-4-e2e';
 
@@ -198,5 +203,45 @@ describe('Stage 4 browser fixture auth isolation', () => {
         expectedRevision: 7,
       }),
     });
+  });
+
+  it('binds every Stage 4 artifact checksum to a clean candidate commit and tree', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'stage4-evidence-'));
+    await writeFile(join(directory, 'final.png'), Buffer.from('final-image'));
+    await writeFile(join(directory, 'network.json'), '[]');
+
+    const manifestPath = await writeStage4EvidenceManifest(directory, {
+      commit: 'a'.repeat(40),
+      tree: 'b'.repeat(40),
+      productTreeClean: true,
+      productStatus: [],
+      excludedControllerPaths: [],
+    });
+    const manifest = JSON.parse(await readFile(manifestPath, 'utf8')) as {
+      commit: string;
+      tree: string;
+      productTreeClean: boolean;
+      checksumAlgorithm: string;
+      artifacts: Array<{ path: string; bytes: number; sha256: string }>;
+    };
+
+    expect(manifest).toMatchObject({
+      commit: 'a'.repeat(40),
+      tree: 'b'.repeat(40),
+      productTreeClean: true,
+      checksumAlgorithm: 'sha256',
+    });
+    expect(manifest.artifacts).toEqual([
+      {
+        path: 'final.png',
+        bytes: 11,
+        sha256: createHash('sha256').update('final-image').digest('hex'),
+      },
+      {
+        path: 'network.json',
+        bytes: 2,
+        sha256: createHash('sha256').update('[]').digest('hex'),
+      },
+    ]);
   });
 });
