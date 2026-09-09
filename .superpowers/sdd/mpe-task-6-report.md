@@ -196,15 +196,15 @@ TEST_PGDATABASE_URL is required for this dedicated Task 6 integration test.
 - 清理 outbox、租约、S3/serve-upload/instrumentation：`a3ea794a`、`6ef6d6a4`；
 - Task6 executor、manifest、preset、PostgreSQL 配置及复审修正：`50f337bf`、`d4ae202a`。
 
-精确新增路径为三项 MPE migration、两项 preset API、serve-upload 路由、instrumentation、四项 asset binary/cleanup 路径、image-tools file、十项 `src/lib/multi-platform-export/*` 文件、runtime-settings、s3-storage、Skill preset、专用 Vitest 配置及本报告。未登记 `.superpowers/sdd/mpe-progress.md` 或六个既有脏 SDD 文件。
+精确新增路径为三项 MPE migration、两项 preset API、serve-upload 路由、instrumentation、四项 asset binary/cleanup 路径、image-tools file、十项 `src/lib/multi-platform-export/*` 文件、runtime-settings、s3-storage、Skill preset、专用 Vitest 配置、本报告及 Task1-6 自身的 `.superpowers/sdd/mpe-progress.md`。后者仅授权已经进入 Task1-6 历史提交的计划记录；其当前工作区内容不暂存、不提交。六个其他既有脏 SDD 文件没有登记。
 
-由于保护门禁会扫描工作区，执行时临时 stash 七个既有脏 SDD 文件，并仅通过 CLI 精确豁免因换行过滤仍显示为脏的 `mpe-progress.md`；执行后立即恢复，恢复前后 diff SHA-256 均为：
+由于保护门禁会扫描工作区，首次执行时临时 stash 七个既有脏 SDD 文件，并通过 CLI 精确豁免 `mpe-progress.md`；执行后立即恢复，恢复前后 diff SHA-256 均为：
 
 ```text
 D82B76EAD4E505F215D13F7621544478E26B484D3F3C14368E1D08B0280673BC
 ```
 
-保护门禁结果：38/38 保护身份存在，0 未授权源码漂移，0 warning，退出码 0。最终提交后还需在干净临时工作树中以原始命令复验，不依赖上述 CLI 豁免。
+随后在提交 `691270b2` 的干净 detached worktree 中以原始命令复验，门禁 RED 且唯一阻断为历史已提交的 `.superpowers/sdd/mpe-progress.md` 尚未登记。该路径属于 Task1-6 本计划记录，不属于六个其他既有脏 SDD 文件，因此按精确路径补入授权；不修改门禁逻辑、不增加通配，也不提交其当前工作区 diff。补录后再次运行原始命令，结果为 38/38、0 未授权源码漂移、0 warning、退出码 0；六个脏 SDD 文件恢复前后 diff SHA-256 均为 `F9476C217B84031226F06A8CA9BDA5814F75F60570F303C6388F0D91F0251A2C`。
 
 ### 全量测试事实
 

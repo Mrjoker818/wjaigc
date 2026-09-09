@@ -385,6 +385,7 @@
   "src/lib/skill-runtime/structured-output.ts",
   ".superpowers/sdd/platform-compliance-task-11-report.md",
   ".superpowers/sdd/mpe-task-6-report.md",
+  ".superpowers/sdd/mpe-progress.md",
   "migrations/20260909_mpe_cross_asset_parents.sql",
   "migrations/20260909_mpe_export_cleanup_outbox.sql",
   "migrations/20260910_mpe_export_cleanup_leases.sql",
