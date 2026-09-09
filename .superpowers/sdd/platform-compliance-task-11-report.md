@@ -2,42 +2,40 @@
 
 ## 结论
 
-状态：**R2 代码候选已完成，干净候选 E2E 与完整门禁待重跑；云端未验证**。
+状态：**R2 本地通过，云端未验证**。
 
-R2 已按测试先行修复项目删除生命周期：属于已删除项目且没有活动 placement 的 `document`、Workflow 报告、PSD、视频等资产会进入回收状态；活动项目中尚无 placement 的报告、其他用户资产和仍有活动引用的资产保持 `active`。修复前单元测试与真实 PostgreSQL 测试均稳定失败，最小 SQL 修复后相关测试 50/50 通过。
+R2 的两个 P2 审查项均已关闭。项目删除协调器会回收属于已删除项目、且没有任何活动引用的 `document`、Workflow 报告、PSD、视频等资产；仍活动项目中的无 placement 资产、跨用户资产及仍有活动 placement 的共享资产保持 `active`。Chromium 生产态 E2E 已从干净候选提交重新执行，并生成绑定真实 commit、tree SHA、清洁状态及 SHA-256 校验和的新证据。
 
-以下 E2E 与完整门禁记录来自上一轮候选，仅作为历史记录；R2 必须在新的干净候选提交上重新取证后才能恢复“本地通过”结论。
+## R2 返修
 
-## 返修关闭项
+- 测试先行：单元 RED 为 1 失败/40 通过；真实 PostgreSQL 合并 RED 为 2 失败/48 通过。
+- 最小修复后，删除项目相关单元与 PostgreSQL 回归 50/50 通过。
+- 全量测试首次运行发现 API 路由仍断言旧单参数契约：703/704 文件、5805/5806 测试通过。同步该测试预期后，相关 PostgreSQL 回归 70/70 通过，最终全量测试 5806/5806 通过。
+- Canvas 与 Workflow 对同三张受管图片执行同一合规 Skill，并逐图断言相同 `ruleSetDigest`。
+- Workflow 合规报告输出真实连接到下游条件节点，执行终态证明报告摘要被下游消费。
+- 每张图片均生成 `document` AssetVersion，并验证来源版本、预览和下载。
+- Simple Chat 完成 16 项隔离断言，不暴露或复用 Canvas 专属 Skill。
 
-- Canvas 与 Workflow 对同三张受管图片执行同一合规 Skill，并逐份断言 `ruleSetDigest` 一致。
-- Workflow 中合规报告输出真实连接到下游条件节点，执行结果证明下游节点读取并消费报告摘要。
-- 每张图片均生成报告 `document` AssetVersion，并验证来源版本关系、预览和下载。
-- Simple Chat 完成 16 项隔离断言，确认不暴露或复用画布专属合规 Skill。
-- 修复 Canvas 同步误将没有画布 placement 的合规文档资产移入回收站的问题：仅清理曾有 `canvas-image` placement、现已从画布移除的资产。
-- 修正正式报告状态措辞，不再把已完成的本地验收写成“尚未通过”。
-
-## E2E 结果
+## 干净候选 E2E
 
 | 项目 | 结果 |
 |---|---|
-| Chromium 生产态 E2E | 退出码 0，1/1 通过，耗时 15.2 秒 |
-| 真实登录 | 通过 |
-| 三张受管图片 | 通过 |
-| Canvas / Workflow 同一合规 Skill | 通过 |
-| 逐图报告与 `ruleSetDigest` 一致性 | 通过 |
-| 报告输出连接及下游节点消费 | 通过 |
-| 报告 AssetVersion 预览与下载 | 通过 |
-| Simple Chat 16 项隔离 | 通过 |
-| 受控 provider 调用 | 8 次：6 次视觉评估、2 次编排 |
+| 被测提交 | `020339c8978f8c4e6fec63874490187c80a88e6b` |
+| 被测 tree | `b4b9a9e5209324605b23789a16719a7e988309fb` |
+| 产品树状态 | `productTreeClean=true`，`productStatus=[]` |
+| Chromium 生产态 E2E | 退出码 0，1/1 通过，测试 12.7 秒，总耗时 14.9 秒 |
+| Canvas / Workflow | 三张图片、六份报告 AssetVersion、逐图 digest 一致、下游消费均通过 |
+| Simple Chat | 16 项隔离通过 |
+| 受控 provider | 8 次调用：6 次视觉评估、2 次编排 |
+| 证据校验 | 7/7 文件 SHA-256 独立复算一致 |
 
-完整证据目录：
+精确证据目录：
 
-`test-results/stage-4-baseline/evidence/b1b244308db6cef5dbf7f1c6964024e60b00f561-worktree-0853803202d6/task11repair20/chromium/Canvas-Workflow-Simple-Chat/retry-0/repeat-0/`
+`test-results/stage-4-baseline/evidence/020339c8978f8c4e6fec63874490187c80a88e6b/task11r2final2/chromium/Canvas-Workflow-Simple-Chat/retry-0/repeat-0/`
 
-证据包含：`final.png`、`video.webm`、`trace.zip`、`console.json`、`network.json`、`source-state.json`、`platform-compliance-local-production.json`。其中 `console.json` 为空数组。
+证据包含 `final.png`、`video.webm`、`trace.zip`、`console.json`、`network.json`、`source-state.json`、`platform-compliance-local-production.json` 及 `evidence-manifest.json`；`console.json` 为空数组。首次以同一候选取证时，5018 进程遗漏 `DEPLOY_RUN_PORT=5018`，Workflow 内部请求默认访问 5000 并出现 `ECONNREFUSED`；该失败证据未重命名或冒充通过。补齐运行环境、重建一次性数据库后，以新 run ID `task11r2final2` 成功取证。
 
-## 完整本地门禁
+## 最终门禁
 
 | 命令 | 退出码 | 结果 |
 |---|---:|---|
@@ -45,22 +43,21 @@ R2 已按测试先行修复项目删除生命周期：属于已删除项目且�
 | `pnpm ts-check` | 0 | 通过 |
 | `pnpm lint` | 0 | 0 errors，943 warnings |
 | `pnpm run lint:build` | 0 | 通过 |
-| `pnpm test` | 0 | 704/704 测试文件、5804/5804 测试通过、0 跳过 |
+| `pnpm test` | 0 | 704/704 测试文件、5806/5806 测试通过 |
 | `pnpm run check:protected-baseline` | 0 | 38/38 保护项通过，0 warning |
-| `NODE_OPTIONS=--max-old-space-size=8192 pnpm build` | 0 | 编译成功，119/119 页面生成成功 |
+| `NODE_OPTIONS=--max-old-space-size=8192 pnpm build` | 0 | Webpack 12.7 分钟，TypeScript 54 秒，119/119 页面生成成功 |
 
-首次全量测试准确暴露了新增合规 Skill 清单与保护授权缺口；仅补充该 Skill 和 14 个既有 Task11 合规生产文件的精确授权后，全量测试通过。保护基线首次运行还识别出 Task11 报告未登记以及工作树中既有无关 SDD 改动；报告路径已登记，无关文件仅在门禁期间临时隐藏并随即原样恢复，未纳入本任务。
+## 提交与边界
 
-## 清理与边界
-
-- 本地生产服务端口 `5018` 已关闭。
-- 一次性 PostgreSQL（端口 `55511`）、受控 provider 和 Task11 临时数据在验证结束后停止并清理。
-- 未操作 Coze、云端预览页或云端证据。
-- 未修改或提交 `stable`；`origin/stable` 保持 `52f7c601ed150769e15d06fb435c6e360e28c9e7`。
-- 未纳入既有 `.superpowers/sdd/progress.md`、Task1-3 brief/review 改动。
+- `f3dcb7debc01e025975dbf2036410be3121cff63`：删除项目资产生命周期最小修复及测试。
+- `5d3ffa3112988dab34d6a2218af5f159061ef1cf`：证据清单与干净源码绑定。
+- `020339c8978f8c4e6fec63874490187c80a88e6b`：同步 API 路由测试的新参数契约，也是最终 E2E 与门禁候选。
+- 本报告将在门禁后以仅文档提交追加；因此最终 HEAD 的完整 Git tree 会因本报告变化而不同，但被测产品代码、测试代码及构建输入与 `020339c8` 完全一致，证据仍精确绑定该干净候选。
+- 5018 生产服务、55511 一次性 PostgreSQL、受控 provider、R2 临时数据库和 data 目录均已停止并删除；未发现遗留的 repair14-20 进程或目录。
+- 未推送，未修改 `stable`，未纳入既有 6 个无关 SDD 文件。
 
 ## 剩余风险
 
 1. 本报告只证明一次性 PostgreSQL 与受控 provider 下的本地 Chromium 生产态链路，不证明 Coze 或真实第三方 provider 的云端行为。
-2. `pnpm lint` 仍有 943 条历史 warning，但退出码为 0，且本轮没有新增 lint error。
-3. 云端部署、真实供应商计费及多浏览器验收不属于本次 Step1-2 通过结论。
+2. `pnpm lint` 仍有 943 条历史 warning，但本轮没有新增 lint error。
+3. 云端部署、真实供应商计费及多浏览器验收不属于本次 Step1-2 本地通过结论。
