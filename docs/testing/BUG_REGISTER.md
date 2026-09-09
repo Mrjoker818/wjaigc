@@ -4172,3 +4172,15 @@ Task 4 独立审查的两个 Minor 继续保留给最终审查：单元夹具 op
 | TDD | 三个兼容合同先 RED，再 GREEN；模型默认值和 Canvas Skill 相关扩大回归 `145/145`，TypeScript、构建版 ESLint、差异检查退出 0。 |
 | 云端回归 | Coze 精确运行 `main@536277f5737043444a6d4914007c094c3b0b9ff0`。同一浏览器仅写入旧记录 `model + modelName + apiProvider`，不补写 `providerId/compositeKey`，刷新后估价 `POST /api/skill-runs/estimate` 返回 HTTP 200（requestId `d1feb2db-3fb9-9f0a-8d01-aa2c03366cc0`），创建 `POST /api/skill-runs` 返回 HTTP 201（requestId `e8aa9f67-7575-9e87-b419-819b1b80f476`），服务端精确解析为 Pear `gpt-image-2`。Run `f46a23ea-aa72-400f-98ef-78f50bf832bd` 随后通过 `PATCH .../skill-runs/{runId}` HTTP 200 取消，终态为 `cancelled`。截图 `.playwright-cli/page-2026-09-07T01-22-49-727Z.png` SHA-256 为 `4FC3DEDE4E8A97D11EBD232C8DFC7834342C8BBD0FCE3FA11DA01A017F0783D9`。 |
 | 当前状态 | **已修复并完成 Coze 云端复验。** 旧浏览器记录无需手工迁移即可完成估价、创建和取消，`LOVART-CONTENT-004` 关闭。 |
+## 2026-09-09 TASK11-OBS-001：Skill 创建成功后 Coze 沙箱失联，终态与账务暂不可读
+
+| 字段 | 内容 |
+|---|---|
+| 严重等级与状态 | P1 候选，环境恢复后待定性；当前不重复提交 |
+| 环境 | Coze 预览 `62afe49a-...-5000.dev.coze.site`，`main@2093c70c` 同源码树，管理员 `Mr.joker` |
+| 复现步骤 | 通过生产 API 登录，读取项目三张受管图片，估价平台素材合规 Skill，再提交 Canvas Run 并只轮询该 Run |
+| 预期结果 | 创建后可持续查询同一 Run，最终进入 completed/failed/cancelled/timeout，并可核对单次积分结算 |
+| 实际结果 | 估价 HTTP 200、固定 32 积分；创建 HTTP 201，Run ID `42ac7d13-b473-450d-a3f3-3323942a5b0d`。运行期间预览实例转为 Coze 边缘层 404；连续 12 次约 56 秒根页均为 404，重新登录、`/api/auth/me`、运行列表和 Run 详情同样为 404 |
+| 已确认边界 | 提交冻结 APImartLLM `api_1778428130626_2qpg71v / gpt-4o` 的 orchestrator 与 vision；没有创建第二个 Run，没有把 404 归因于供应商模型 |
+| 待恢复核对 | 原 Run 终态、三个步骤、三份报告、AssetVersion、是否扣除 32、失败时是否一次退款、是否存在迟到结果 |
+| 当前结论 | 这是“创建后云端实例不可达”的真实证据；在恢复后读取同一 Run 前，不登记为业务修复完成，也不把它误报为模型失败 |

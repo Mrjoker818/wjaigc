@@ -2444,3 +2444,5 @@ BUG-018 已从未验证项移除。剩余顺序为 `002-B -> 002-D -> 002-E`；�
 - [ ] Workflow 运行同一 Skill、连接下游节点，并核对 Canvas/Workflow 均为 `28` 项。
 - [ ] 下载 JSON/HTML，核对文件并在整页刷新后恢复同一 document AssetVersion。
 - [ ] 保存新鲜截图、Console、Network、事件、Run/Task ID 与积分流水；Edge 扩展当前在无限画布页返回 `Debugger unattached`，不可冒充通过。
+- [ ] Coze 恢复后优先查询既有 Run `42ac7d13-b473-450d-a3f3-3323942a5b0d`，确认终态、三份报告、AssetVersion 与 32 积分结算；禁止为绕过 404 再建一个 Run。
+- [ ] `V588-ADMIN-003` 只剩真实 S3 恢复：当前扫描 32/32 本地文件存在、缺失 0；需建立一次性对象、移除其本地缓存并证明按精确 S3 key 恢复，不能用正常本地命中冒充。

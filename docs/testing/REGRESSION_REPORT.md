@@ -2931,3 +2931,11 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - 无限画布已配置 APImartLLM `gpt-4o` 显式视觉能力，并完成三张受管图片、Amazon/US/main、商品事实和中文报告参数填写；估价显示 `32` 积分，尚未提交付费运行。
 - 切换无限画布验收时 Edge 扩展返回 `Debugger unattached`。因此逐图报告、document AssetVersion、冻结 provider/model、实扣、取消退款、Workflow 下游、JSON/HTML 下载和刷新恢复仍未取得新鲜云端证据。
 - **回归判定：TASK 11 CLOUD CATALOG ISOLATION PASS / PAID EXECUTION PENDING。** 不提前关闭 Task 11，不更新 Obsidian 阶段结论。
+
+## 2026-09-09 Lovart 平台素材合规 Task 11 首次真实运行增量
+
+- 生产 API 只读恢复扫描为 HTTP 200：32 个项目图片引用全部存在，缺失为 0；当前无可直接复用的 S3 缺失样本。
+- 三张受管图片的合规 Skill 估价 HTTP 200，固定 32 积分；orchestrator 与 vision 均冻结 APImartLLM `gpt-4o`。
+- 创建请求 HTTP 201，Run ID `42ac7d13-b473-450d-a3f3-3323942a5b0d`。没有重放或创建第二个 Run。
+- 运行期间 Coze 预览实例变为边缘层 404，连续 12 次约 56 秒仍未恢复；登录、身份、列表和 Run 详情均不可达，故终态、报告、资产和账务尚不能核对。
+- **回归判定：REAL CREATE PASS / COZE INSTANCE LOST / TERMINAL AND BILLING UNVERIFIED。** 恢复后只读取同一 Run，不重新扣费。
