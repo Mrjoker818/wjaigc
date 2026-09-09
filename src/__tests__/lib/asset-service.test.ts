@@ -76,6 +76,9 @@ type AssetService = {
     version: AssetVersion;
     reused: boolean;
   }>>;
+  findAssetVersionByIdempotency(input: {
+    actorUserId: string; projectId: string; idempotencyKey: string; requestDigest: string;
+  }): Promise<AssetVersion | null>;
   bindWorkflowInputPlacement(input: CreatePlacementInput): Promise<{
     placement: WorkspacePlacement;
     reused: boolean;
@@ -1097,6 +1100,24 @@ describe('asset graph service', () => {
     expect(replay.reused).toBe(true);
     expect(replay.asset.id).toBe(first.asset.id);
     expect(replay.version.id).toBe(first.version.id);
+  });
+
+  it('authoritatively resolves a committed version by scope, idempotency key, and digest', async () => {
+    const ownerId = randomUUID();
+    const projectId = randomUUID();
+    const storage = new MemoryStorage(ownerId, projectId);
+    const { createAssetService } = await loadService();
+    const service = createAssetService(storage);
+    const input = createVersionInput(ownerId, projectId, {
+      idempotencyKey: 'authoritative-key', requestDigest: 'authoritative-digest',
+    });
+    const created = await service.createAssetVersion(input);
+
+    await expect(service.findAssetVersionByIdempotency(input)).resolves.toMatchObject({ id: created.version.id });
+    await expect(service.findAssetVersionByIdempotency({ ...input, requestDigest: 'wrong-digest' }))
+      .rejects.toMatchObject({ code: 'ASSET_IDEMPOTENCY_CONFLICT' });
+    await expect(service.findAssetVersionByIdempotency({ ...input, idempotencyKey: 'missing-key' }))
+      .resolves.toBeNull();
   });
 
   it('rejects an idempotency key reused with a different request digest', async () => {

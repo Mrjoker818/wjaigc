@@ -5,6 +5,14 @@
 
 export async function register() {
   if (process.env.NEXT_RUNTIME === 'nodejs') {
+    if (process.env.NEXT_PHASE !== 'phase-production-build') {
+      import('@/lib/asset-core/cleanup-worker').then(({ startAssetCleanupWorker }) => {
+        startAssetCleanupWorker();
+      }).catch(() => {
+        console.warn({ code: 'ASSET_CLEANUP_WORKER_START_FAILED' });
+      });
+    }
+
     // 数据库迁移和表初始化改为非阻塞，避免生产环境启动超时
     // 首次请求时会在对应 API 路由中自动完成初始化
     const dbInit = async () => {

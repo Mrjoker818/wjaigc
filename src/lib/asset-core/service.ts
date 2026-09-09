@@ -231,6 +231,24 @@ export class AssetService {
     return (await this.createAssetVersionsAtomically([input]))[0];
   }
 
+  async findAssetVersionByIdempotency(input: {
+    actorUserId: string;
+    projectId: string;
+    idempotencyKey: string;
+    requestDigest: string;
+  }): Promise<AssetVersion | null> {
+    return this.storage.transaction(async transaction => {
+      const existing = await transaction.findVersionByIdempotency(
+        input.actorUserId,
+        input.projectId,
+        input.idempotencyKey,
+      );
+      if (!existing) return null;
+      if (existing.requestDigest !== input.requestDigest) conflict();
+      return existing.version;
+    });
+  }
+
   async createAssetVersionsAtomically(inputs: readonly CreateAssetVersionInput[]): Promise<Array<{
     asset: Asset;
     version: AssetVersion;

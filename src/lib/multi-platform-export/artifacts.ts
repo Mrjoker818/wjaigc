@@ -4,6 +4,7 @@ import JSZip from 'jszip';
 import { createHash } from 'node:crypto';
 
 import { persistAssetBytes, type PersistAssetBytesInput, type PersistedAssetFile } from '@/lib/asset-core/binary-persistence';
+import { recordAssetCleanupFailure } from '@/lib/asset-core/cleanup-outbox';
 import { createAssetService, type CreateAssetVersionInput } from '@/lib/asset-core/service';
 import type { AssetFile, AssetVersion } from '@/lib/asset-core/types';
 import type { ExportFormat, MultiPlatformExportInput } from './types';
@@ -24,12 +25,38 @@ const ZIP_ENTRY_DATE = new Date('1980-01-01T00:00:00.000Z');
 interface ExportAssetService {
   createAssetVersion(input: CreateAssetVersionInput): Promise<{ version: AssetVersion; reused: boolean; asset: unknown }>;
   createAssetVersionsAtomically(inputs: readonly CreateAssetVersionInput[]): Promise<Array<{ version: AssetVersion; reused: boolean; asset: unknown }>>;
+  findAssetVersionByIdempotency(input: {
+    actorUserId: string; projectId: string; idempotencyKey: string; requestDigest: string;
+  }): Promise<AssetVersion | null>;
 }
 type ManagedAssetFile = AssetFile & Partial<Pick<PersistedAssetFile, 'createdThisCall' | 'cleanup'>>;
 type PersistBytes = (input: PersistAssetBytesInput) => Promise<ManagedAssetFile>;
 
 async function cleanupCreatedFile(file: ManagedAssetFile | undefined): Promise<void> {
   if (file?.createdThisCall && file.cleanup) await file.cleanup();
+}
+
+function isSamePersistedTarget(authoritative: AssetFile, candidate: AssetFile): boolean {
+  const authoritativeKey = authoritative.storageKey?.replace(/^\/+/, '');
+  const candidateKey = candidate.storageKey?.replace(/^\/+/, '');
+  if (authoritativeKey && candidateKey) return authoritativeKey === candidateKey;
+  return authoritative.url === candidate.url;
+}
+
+const UNCERTAIN_PUBLICATION_GRACE_MS = 5 * 60_000;
+
+async function deferCreatedFileCleanup(file: ManagedAssetFile | undefined, error: unknown): Promise<void> {
+  if (!file?.createdThisCall) return;
+  const storageKey = file.storageKey?.replace(/^\/+/, '');
+  const localPath = file.url.match(/^\/api\/serve-upload\/(exports\/[A-Za-z0-9._-]+)$/u)?.[1];
+  if (!storageKey && !localPath) throw new Error('EXPORT_CLEANUP_TARGET_UNAVAILABLE');
+  await recordAssetCleanupFailure({
+    rootId: 'server-data',
+    ...(storageKey ? { storageKey } : {}),
+    ...(localPath ? { localPath } : {}),
+    lastError: error instanceof Error ? error.message : String(error),
+    nextAttemptAt: new Date(Date.now() + UNCERTAIN_PUBLICATION_GRACE_MS),
+  });
 }
 
 function artifactDigest(requestDigest: string, kind: string, checksum: string): string {
@@ -64,17 +91,40 @@ export async function persistExportImageVersion(input: PersistExportImageVersion
     outputFormat: input.outputFormat, outputFilename: assertFlatExportFilename(input.outputFilename),
     requestDigest: input.requestDigest,
   };
+  const idempotencyKey = `skill:${input.runId}:export:${input.sourceAssetVersionId}:${input.presetId}:v${input.presetVersion}`;
+  const versionRequestDigest = artifactDigest(input.requestDigest, 'image', input.transformed.sha256);
+  const service = input.assetService ?? createAssetService();
   let created: Awaited<ReturnType<ExportAssetService['createAssetVersion']>>;
+  let publicationStarted = false;
   try {
     input.signal?.throwIfAborted();
-    created = await (input.assetService ?? createAssetService()).createAssetVersion({
+    publicationStarted = true;
+    created = await service.createAssetVersion({
       actorUserId: input.actorUserId, projectId: input.projectId, kind: 'image', file,
       parentVersionIds: [input.sourceAssetVersionId],
-      idempotencyKey: `skill:${input.runId}:export:${input.sourceAssetVersionId}:${input.presetId}:v${input.presetVersion}`,
-      requestDigest: artifactDigest(input.requestDigest, 'image', input.transformed.sha256), metadata,
+      idempotencyKey,
+      requestDigest: versionRequestDigest, metadata,
     });
   } catch (error) {
-    await cleanupCreatedFile(file);
+    if (!publicationStarted && input.signal?.aborted) {
+      await cleanupCreatedFile(file);
+      throw error;
+    }
+    try {
+      const authoritative = await service.findAssetVersionByIdempotency({
+        actorUserId: input.actorUserId,
+        projectId: input.projectId,
+        idempotencyKey,
+        requestDigest: versionRequestDigest,
+      });
+      if (authoritative) {
+        if (!isSamePersistedTarget(authoritative.file, file)) await cleanupCreatedFile(file);
+        return { version: authoritative, reused: true };
+      }
+    } catch {
+      // Publication remains uncertain; delayed cleanup rechecks authoritative references.
+    }
+    await deferCreatedFileCleanup(file, error);
     throw error;
   }
   if (created.reused) await cleanupCreatedFile(file);
@@ -220,16 +270,51 @@ export async function persistExportArtifacts(input: PersistExportArtifactsInput)
       requestDigest: artifactDigest(input.requestDigest, suffix, file.checksum as string), metadata,
     };
   };
+  const documentInputs = [
+    documentInput('manifest', manifestFile),
+    documentInput('zip', zipFile),
+  ] as const;
   let documents: Awaited<ReturnType<ExportAssetService['createAssetVersionsAtomically']>>;
+  let publicationStarted = false;
   try {
     input.signal?.throwIfAborted();
-    documents = await service.createAssetVersionsAtomically([
-      documentInput('manifest', manifestFile),
-      documentInput('zip', zipFile),
-    ]);
+    publicationStarted = true;
+    documents = await service.createAssetVersionsAtomically(documentInputs);
   } catch (error) {
-    await Promise.all([cleanupCreatedFile(manifestFile), cleanupCreatedFile(zipFile)]);
-    throw error;
+    if (!publicationStarted && input.signal?.aborted) {
+      await Promise.all([cleanupCreatedFile(manifestFile), cleanupCreatedFile(zipFile)]);
+      throw error;
+    }
+    try {
+      const authoritative = await Promise.all(documentInputs.map(document => (
+        service.findAssetVersionByIdempotency({
+          actorUserId: document.actorUserId,
+          projectId: document.projectId,
+          idempotencyKey: document.idempotencyKey,
+          requestDigest: document.requestDigest,
+        })
+      )));
+      if (authoritative.every((version): version is AssetVersion => version !== null)) {
+        documents = authoritative.map((version, index) => ({
+          version,
+          reused: !isSamePersistedTarget(version.file, index === 0 ? manifestFile : zipFile),
+          asset: { id: version.assetId },
+        }));
+      } else {
+        await Promise.all([
+          deferCreatedFileCleanup(manifestFile, error),
+          deferCreatedFileCleanup(zipFile, error),
+        ]);
+        throw error;
+      }
+    } catch (resolutionError) {
+      if (resolutionError === error) throw error;
+      await Promise.all([
+        deferCreatedFileCleanup(manifestFile, error),
+        deferCreatedFileCleanup(zipFile, error),
+      ]);
+      throw error;
+    }
   }
   await Promise.all(documents.map((created, index) => (
     created.reused ? cleanupCreatedFile(index === 0 ? manifestFile : zipFile) : Promise.resolve()

@@ -1,8 +1,14 @@
 import JSZip from 'jszip';
 import { createHash } from 'node:crypto';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('server-only', () => ({}));
+
+const cleanupOutboxMocks = vi.hoisted(() => ({
+  recordAssetCleanupFailure: vi.fn(async () => undefined),
+}));
+
+vi.mock('@/lib/asset-core/cleanup-outbox', () => cleanupOutboxMocks);
 
 import {
   buildExportArchive,
@@ -32,8 +38,17 @@ function assetServiceDouble() {
       byKey.set(input.idempotencyKey, { version, digest: input.requestDigest });
       return { asset: { id: version.assetId }, version, reused: false };
   });
+  const findAssetVersionByIdempotency = vi.fn(async (input: {
+    actorUserId: string; projectId: string; idempotencyKey: string; requestDigest: string;
+  }) => {
+    const stored = byKey.get(input.idempotencyKey);
+    if (!stored) return null;
+    if (stored.digest !== input.requestDigest) throw new Error('ASSET_IDEMPOTENCY_CONFLICT');
+    return stored.version;
+  });
   return {
     createAssetVersion,
+    findAssetVersionByIdempotency,
     createAssetVersionsAtomically: vi.fn(async (inputs: readonly CreateAssetVersionInput[]) => {
       const snapshot = new Map(byKey);
       const initialSequence = sequence;
@@ -62,6 +77,135 @@ const exportMetadata = (overrides: Record<string, unknown> = {}) => ({
 });
 
 describe('multi-platform export artifacts', () => {
+  beforeEach(() => {
+    cleanupOutboxMocks.recordAssetCleanupFailure.mockClear();
+  });
+  it('treats a single image commit-then-throw as published and never deletes its referenced file', async () => {
+    const service = assetServiceDouble();
+    const committedCreate = service.createAssetVersion.getMockImplementation()!;
+    service.createAssetVersion.mockImplementationOnce(async input => {
+      await committedCreate(input);
+      throw new Error('connection lost after commit');
+    });
+    const bytes = Buffer.from('png');
+    const sha256 = createHash('sha256').update(bytes).digest('hex');
+    const cleanup = vi.fn(async () => undefined);
+    const persistBytes = vi.fn(async () => ({
+      ...persistedFile('post.png', 'image/png', bytes), checksum: sha256,
+      createdThisCall: true, cleanup,
+    }));
+
+    await expect(persistExportImageVersion({
+      actorUserId: 'user-1', projectId: 'project-1', runId: 'commit-run', sourceAssetVersionId: 'source-v1',
+      presetId: 'post', presetVersion: 1, platform: 'instagram', usage: 'post', width: 10, height: 10,
+      fit: 'cover', outputFormat: 'png', outputFilename: 'post.png', requestDigest: 'd'.repeat(64),
+      transformed: { bytes, mimeType: 'image/png', sha256 }, assetService: service, persistBytes,
+    })).resolves.toMatchObject({ reused: true, version: { file: { checksum: sha256 } } });
+    expect(service.findAssetVersionByIdempotency).toHaveBeenCalledOnce();
+    expect(cleanup).not.toHaveBeenCalled();
+    expect(cleanupOutboxMocks.recordAssetCleanupFailure).not.toHaveBeenCalled();
+  });
+
+  it('does not delete a committed image when cancellation arrives after the DB call started', async () => {
+    const service = assetServiceDouble();
+    const committedCreate = service.createAssetVersion.getMockImplementation()!;
+    const controller = new AbortController();
+    service.createAssetVersion.mockImplementationOnce(async input => {
+      await committedCreate(input);
+      controller.abort(new DOMException('cancelled after commit', 'AbortError'));
+      throw new Error('connection lost after commit');
+    });
+    const bytes = Buffer.from('png');
+    const sha256 = createHash('sha256').update(bytes).digest('hex');
+    const cleanup = vi.fn(async () => undefined);
+    const persistBytes = vi.fn(async () => ({
+      ...persistedFile('post.png', 'image/png', bytes), checksum: sha256,
+      createdThisCall: true, cleanup,
+    }));
+
+    await expect(persistExportImageVersion({
+      actorUserId: 'user-1', projectId: 'project-1', runId: 'commit-abort-run', sourceAssetVersionId: 'source-v1',
+      presetId: 'post', presetVersion: 1, platform: 'instagram', usage: 'post', width: 10, height: 10,
+      fit: 'cover', outputFormat: 'png', outputFilename: 'post.png', requestDigest: 'd'.repeat(64),
+      transformed: { bytes, mimeType: 'image/png', sha256 }, signal: controller.signal,
+      assetService: service, persistBytes,
+    })).resolves.toMatchObject({ reused: true });
+    expect(cleanup).not.toHaveBeenCalled();
+  });
+
+  it('cleans only the new private file when authority resolves an older matching version', async () => {
+    const service = assetServiceDouble();
+    const bytes = Buffer.from('png');
+    const sha256 = createHash('sha256').update(bytes).digest('hex');
+    const firstInput = {
+      actorUserId: 'user-1', projectId: 'project-1', runId: 'replay-run', sourceAssetVersionId: 'source-v1',
+      presetId: 'post', presetVersion: 1, platform: 'instagram', usage: 'post', width: 10, height: 10,
+      fit: 'cover' as const, outputFormat: 'png' as const, outputFilename: 'post.png', requestDigest: 'd'.repeat(64),
+      transformed: { bytes, mimeType: 'image/png' as const, sha256 }, assetService: service,
+    };
+    await persistExportImageVersion({
+      ...firstInput,
+      persistBytes: vi.fn(async () => ({ ...persistedFile('old-post.png', 'image/png', bytes), checksum: sha256 })),
+    });
+    service.createAssetVersion.mockRejectedValueOnce(new Error('connection lost before replay result'));
+    const cleanup = vi.fn(async () => undefined);
+    await expect(persistExportImageVersion({
+      ...firstInput,
+      persistBytes: vi.fn(async () => ({
+        ...persistedFile('new-post.png', 'image/png', bytes), checksum: sha256, createdThisCall: true, cleanup,
+      })),
+    })).resolves.toMatchObject({ reused: true, version: { file: { url: expect.stringContaining('old-post.png') } } });
+    expect(cleanup).toHaveBeenCalledOnce();
+  });
+
+  it('recovers both manifest and ZIP when the atomic commit succeeds before the client throws', async () => {
+    cleanupOutboxMocks.recordAssetCleanupFailure.mockClear();
+    const service = assetServiceDouble();
+    const committedCreate = service.createAssetVersionsAtomically.getMockImplementation()!;
+    service.createAssetVersionsAtomically.mockImplementationOnce(async inputs => {
+      await committedCreate(inputs);
+      throw new Error('connection lost after commit');
+    });
+    const cleanup = vi.fn(async () => undefined);
+    const persistBytes = vi.fn(async ({ bytes, filename, mimeType }: { bytes: Buffer; filename: string; mimeType: string }) => ({
+      ...persistedFile(filename, mimeType, bytes), createdThisCall: true, cleanup,
+    }));
+
+    await expect(persistExportArtifacts({
+      actorUserId: 'user-1', projectId: 'project-1', runId: 'commit-run', requestDigest: 'a'.repeat(64),
+      createdAt: '2026-09-09T00:00:00.000Z', frozenParameters: {}, images: [],
+      failures: [{ sourceAssetVersionId: 'source-v1', code: 'EXPORT_FAILED', retryable: false }],
+      assetService: service, persistBytes,
+    })).resolves.toMatchObject({ manifestVersion: { id: 'version-1' }, zipVersion: { id: 'version-2' } });
+    expect(service.findAssetVersionByIdempotency).toHaveBeenCalledTimes(2);
+    expect(cleanup).not.toHaveBeenCalled();
+    expect(cleanupOutboxMocks.recordAssetCleanupFailure).not.toHaveBeenCalled();
+  });
+
+  it('defers cleanup with grace when DB publication cannot be authoritatively resolved', async () => {
+    cleanupOutboxMocks.recordAssetCleanupFailure.mockClear();
+    const service = assetServiceDouble();
+    service.createAssetVersion.mockRejectedValueOnce(new Error('database uncertain'));
+    service.findAssetVersionByIdempotency.mockResolvedValueOnce(null);
+    const bytes = Buffer.from('png');
+    const sha256 = createHash('sha256').update(bytes).digest('hex');
+    const cleanup = vi.fn(async () => undefined);
+    const persistBytes = vi.fn(async () => ({
+      ...persistedFile('post.png', 'image/png', bytes), checksum: sha256,
+      createdThisCall: true, cleanup,
+    }));
+
+    await expect(persistExportImageVersion({
+      actorUserId: 'user-1', projectId: 'project-1', runId: 'uncertain-run', sourceAssetVersionId: 'source-v1',
+      presetId: 'post', presetVersion: 1, platform: 'instagram', usage: 'post', width: 10, height: 10,
+      fit: 'cover', outputFormat: 'png', outputFilename: 'post.png', requestDigest: 'd'.repeat(64),
+      transformed: { bytes, mimeType: 'image/png', sha256 }, assetService: service, persistBytes,
+    })).rejects.toThrow('database uncertain');
+    expect(cleanup).not.toHaveBeenCalled();
+    expect(cleanupOutboxMocks.recordAssetCleanupFailure).toHaveBeenCalledWith(expect.objectContaining({
+      rootId: 'server-data', storageKey: 'exports/post.png', nextAttemptAt: expect.any(Date),
+    }));
+  });
   it('creates a new derived image Asset with a cross-Asset source parent and reuses it deterministically', async () => {
     const service = assetServiceDouble();
     const persistBytes = vi.fn(async ({ bytes, filename, mimeType }: { bytes: Buffer; filename: string; mimeType: string }) => ({
@@ -130,7 +274,7 @@ describe('multi-platform export artifacts', () => {
     expect(output.manifest.failures).toEqual([{ sourceAssetVersionId: 'bad-v1', code: 'EXPORT_SOURCE_CORRUPT', retryable: false }]);
   });
 
-  it('does not publish only one document version when atomic artifact creation fails', async () => {
+  it('does not immediately delete either document when atomic publication is uncertain', async () => {
     const service = assetServiceDouble();
     service.createAssetVersionsAtomically.mockRejectedValueOnce(new Error('database failed'));
     const cleanup = vi.fn(async () => undefined);
@@ -141,7 +285,8 @@ describe('multi-platform export artifacts', () => {
       assetService: service, persistBytes,
     })).rejects.toThrow('database failed');
     expect(service.createAssetVersion).not.toHaveBeenCalled();
-    expect(cleanup).toHaveBeenCalledTimes(2);
+    expect(cleanup).not.toHaveBeenCalled();
+    expect(cleanupOutboxMocks.recordAssetCleanupFailure).toHaveBeenCalledTimes(2);
   });
 
   it('cleans the newly persisted manifest when ZIP persistence fails', async () => {
@@ -215,7 +360,7 @@ describe('multi-platform export artifacts', () => {
     expect(service.createAssetVersionsAtomically).not.toHaveBeenCalled();
   });
 
-  it('cleans a newly persisted derived image when the version is reused or DB creation fails', async () => {
+  it('cleans a reused derived image but defers cleanup when DB creation is uncertain', async () => {
     const bytes = Buffer.from('png');
     const sha256 = createHash('sha256').update(bytes).digest('hex');
     const cleanup = vi.fn(async () => undefined);
@@ -233,7 +378,8 @@ describe('multi-platform export artifacts', () => {
 
     service.createAssetVersion.mockRejectedValueOnce(new Error('database failed'));
     await expect(persistExportImageVersion({ ...common, runId: 'run-2' })).rejects.toThrow('database failed');
-    expect(cleanup).toHaveBeenCalledTimes(2);
+    expect(cleanup).toHaveBeenCalledOnce();
+    expect(cleanupOutboxMocks.recordAssetCleanupFailure).toHaveBeenCalledOnce();
   });
 
   it('rechecks cancellation after image persistence and never publishes a DB version', async () => {
