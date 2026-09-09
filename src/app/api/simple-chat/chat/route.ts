@@ -39,6 +39,13 @@ import {
   SkillNotFoundError,
   SkillSurfaceForbiddenError,
 } from '@/lib/skill-runtime/catalog';
+import { listEnabledPlatformExportPresets } from '@/lib/multi-platform-export/presets';
+import {
+  isSimpleChatExportClarification,
+  parseSimpleChatExportIntent,
+} from '@/lib/multi-platform-export/simple-chat-intent';
+import { MULTI_PLATFORM_EXPORT_SKILL_ID } from '@/lib/skill-runtime/multi-platform-export-preset';
+import { createSkillRun, dispatchSkillRunExecution } from '@/lib/skill-runtime/service';
 
 const DEFAULT_SYSTEM_PROMPT = `你是无界AI的智能助手。你可以：
 1. 回答用户的各种问题
@@ -282,6 +289,16 @@ function errorMessage(error: unknown, fallback: string): string {
   return error instanceof Error && error.message ? error.message : fallback;
 }
 
+function simpleChatEventResponse(event: Record<string, unknown>): Response {
+  return new Response(`data: ${JSON.stringify(event)}\n\n`, {
+    status: 200,
+    headers: {
+      'Content-Type': 'text/event-stream; charset=utf-8',
+      'Cache-Control': 'no-cache',
+    },
+  });
+}
+
 export async function POST(request: NextRequest) {
   const agentRuntimeMode = resolveAgentRuntimeMode(process.env.WUJIE_AGENT_RUNTIME_MODE);
   const user = await getSessionUser(request);
@@ -370,6 +387,16 @@ export async function POST(request: NextRequest) {
     );
   }
   const skillId = typeof body.skillId === 'string' ? body.skillId.trim() : undefined;
+  if (skillId === MULTI_PLATFORM_EXPORT_SKILL_ID) {
+    return Response.json(
+      {
+        success: false,
+        code: 'SKILL_SURFACE_FORBIDDEN',
+        message: '此 Skill 不适用于当前工作区',
+      },
+      { status: 403 },
+    );
+  }
   if (skillId) {
     try {
       requireSkillForSurface(skillId, 'simple-chat');
@@ -395,6 +422,90 @@ export async function POST(request: NextRequest) {
     );
   }
   const requestIdempotencyKey = idempotencyKeyResolution.key;
+
+  const latestUserIndex = messages.findLastIndex(message => message.role === 'user');
+  const latestUserMessage = latestUserIndex >= 0 ? messages[latestUserIndex] : undefined;
+  const previousMessage = latestUserIndex > 0 ? messages[latestUserIndex - 1] : undefined;
+  const continuesExportClarification = previousMessage?.role === 'assistant'
+    && isSimpleChatExportClarification(previousMessage.content);
+  const previousUserMessage = continuesExportClarification
+    ? messages.slice(0, latestUserIndex - 1).findLast(message => message.role === 'user')
+    : undefined;
+  const exportUserMessages = [previousUserMessage, latestUserMessage].filter(
+    (message): message is { role: string; content: string; images?: string[] } => Boolean(message),
+  );
+  const exportMessage = exportUserMessages.map(message => message.content).join('\n');
+  const exportCandidate = parseSimpleChatExportIntent(exportMessage, []);
+  if (exportCandidate.kind !== 'none') {
+    const presets = await listEnabledPlatformExportPresets();
+    const exportIntent = parseSimpleChatExportIntent(exportMessage, presets);
+    if (exportIntent.kind === 'none') {
+      return simpleChatEventResponse({ type: 'text', content: '请重新说明批量导出的目标平台或尺寸。' });
+    }
+    const sourceVersionIds = Array.isArray(body.sourceVersionIds)
+      ? [...new Set(body.sourceVersionIds.filter((value): value is string => typeof value === 'string' && value.length > 0))]
+      : [];
+    const hasManagedSources = Boolean(
+      body.assetProjectId
+      && sourceVersionIds.length > 0
+      && exportUserMessages.some(message => Array.isArray(message.images) && message.images.length > 0),
+    );
+    const missing = exportIntent.kind === 'needs_clarification'
+      ? exportIntent.missing.filter(field => field !== 'sources' || !hasManagedSources)
+      : [];
+    if (!hasManagedSources && !missing.includes('sources')) missing.unshift('sources');
+    if (missing.length > 0) {
+      const question = missing.includes('sources') && missing.includes('targets')
+        ? '请先附加要导出的受管图片，并指定目标平台或尺寸。'
+        : missing.includes('sources')
+          ? '请先附加要导出的受管图片。'
+          : '请指定目标平台或尺寸。';
+      return simpleChatEventResponse({ type: 'text', content: question });
+    }
+
+    const projectId = body.assetProjectId!;
+    const result = await createSkillRun({
+      actor: user,
+      request: {
+        skillId: MULTI_PLATFORM_EXPORT_SKILL_ID,
+        skillVersion: 1,
+        surface: 'simple-chat',
+        projectId,
+        workspaceId: `standalone-chat:${body.projectId || body.taskId || 'chat'}`,
+        inputValues: {
+          sourceAssetVersionIds: sourceVersionIds,
+          targetPresetIds: exportIntent.targetPresetIds,
+          fit: exportIntent.fit,
+          background: exportIntent.background,
+          namingTemplate: exportIntent.namingTemplate,
+        },
+        sourceVersionIds,
+        modelBindings: {},
+        idempotencyKey: `simple-chat-export:${createHash('sha256').update(
+          requestIdempotencyKey || `${body.taskId || 'chat'}:${body.responseMessageId || exportMessage}`,
+        ).digest('hex')}`,
+      },
+    });
+    const execution = await dispatchSkillRunExecution({
+      actorUserId: user.id,
+      runId: result.runId,
+      recoveryOnly: result.reused,
+    });
+    if (execution.completion) {
+      void execution.completion.catch(error => {
+        console.error('[simple-chat] controlled export dispatch failed', {
+          runId: result.runId,
+          code: error instanceof Error ? error.name : 'UNKNOWN',
+        });
+      });
+    }
+    return simpleChatEventResponse({
+      type: 'multi_platform_export',
+      runId: result.runId,
+      projectId,
+      reused: result.reused,
+    });
+  }
 
   // 查找提供商
   let provider;

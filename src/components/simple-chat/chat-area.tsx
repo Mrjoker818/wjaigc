@@ -62,6 +62,8 @@ import {
   type SimpleChatRetryContextV1,
 } from '@/lib/simple-chat-retry';
 import { buildSimpleChatWorkspaceHandoffUrl } from '@/lib/simple-chat-workspace-handoff';
+import { MultiPlatformExportCard } from './multi-platform-export-card';
+import { resolveSimpleChatExportRequestContext } from '@/lib/multi-platform-export/simple-chat-intent';
 
 type ChatModelInfo = {
   id: string;
@@ -94,6 +96,7 @@ type SimpleChatStreamPayload = {
   imageRef?: unknown;
   prompt?: string;
   error?: string;
+  projectId?: string;
 };
 
 function readSimpleChatStreamPayload(value: unknown): SimpleChatStreamPayload | null {
@@ -1139,6 +1142,23 @@ export default function ChatArea({
                 }
                 : message
             )));
+          } else if (
+            parsed.type === 'multi_platform_export'
+            && typeof parsed.runId === 'string'
+            && typeof parsed.projectId === 'string'
+          ) {
+            setSearchStatus(null);
+            fullContent = '批量导出任务已提交。';
+            setMessages(previous => previous.map(message => (
+              message.id === context.assistantMessageId
+                ? {
+                    ...message,
+                    content: fullContent,
+                    multiPlatformExportRunId: parsed.runId,
+                    multiPlatformExportProjectId: parsed.projectId,
+                  }
+                : message
+            )));
           } else if (parsed.type === 'image' && typeof parsed.imageUrl === 'string') {
             setSearchStatus(null);
             const parsedImageUrl = parsed.imageUrl;
@@ -1263,11 +1283,17 @@ export default function ChatArea({
       createdAt: Date.now(),
     };
 
-    const requestSourceVersionIds = [...new Set(
+    const currentSourceVersionIds = [...new Set(
       (userMsg.imageRefs || []).flatMap(reference => (
         reference.assetVersionId ? [reference.assetVersionId] : []
       )),
     )];
+    const exportRequestContext = resolveSimpleChatExportRequestContext({
+      messages,
+      currentSourceVersionIds,
+      currentAssetProjectId: selectedCanvasProjectId,
+    });
+    const requestSourceVersionIds = exportRequestContext.sourceVersionIds;
     const requestSelectedEntityIds = [...new Set(
       (userMsg.imageRefs || []).flatMap(reference => (
         reference.assetVersionId && reference.placementId && reference.entityId
@@ -1331,7 +1357,7 @@ export default function ChatArea({
       webSearch,
       reasoningEffort,
       responseSpeed,
-      canvasProjectId: selectedCanvasProjectId || undefined,
+      canvasProjectId: exportRequestContext.assetProjectId || undefined,
       sourceVersionIds: requestSourceVersionIds,
       selectedEntityIds: requestSelectedEntityIds,
       historyMessageIds: messages.map(message => message.id),
@@ -2161,6 +2187,17 @@ export default function ChatArea({
                     <div className="mt-3">
                       <AgentRunMessageProgress runId={msg.agentRunId} />
                     </div>
+                  )}
+                  {msg.multiPlatformExportRunId && msg.multiPlatformExportProjectId && (
+                    <MultiPlatformExportCard
+                      runId={msg.multiPlatformExportRunId}
+                      projectId={msg.multiPlatformExportProjectId}
+                      onReturnToCanvas={references => sendImagesToCanvas({
+                        ...msg,
+                        images: references.map(reference => reference.url),
+                        imageRefs: references,
+                      })}
+                    />
                   )}
                   {msg.role === 'assistant' && msg.status === 'failed' && (
                     <div className="mt-3 flex items-center justify-between gap-3 border-t border-destructive/20 pt-2">

@@ -60,6 +60,8 @@ export interface SimpleChatMessage {
   parentMessageId?: string;
   branchId?: string;
   agentRunId?: string;
+  multiPlatformExportRunId?: string;
+  multiPlatformExportProjectId?: string;
   status?: SimpleChatMessageStatus;
   error?: SimpleChatFailure;
   retryContext?: SimpleChatRetryContextV1;
