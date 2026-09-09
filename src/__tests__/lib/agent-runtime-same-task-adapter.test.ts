@@ -9,7 +9,7 @@ import type {
   AgentDownstreamExecutionContext,
   AgentDownstreamOperation,
 } from '@/lib/agent-runtime/downstream-operations';
-import type { AgentEvent, AgentRunRequest } from '@/lib/agent-runtime/types';
+import type { AgentEvent, AgentRunRequest, ModelAgentRunRequest } from '@/lib/agent-runtime/types';
 import type { CloudTask } from '@/lib/cloud-task-storage';
 import type { User } from '@/lib/user-types';
 import {
@@ -28,12 +28,13 @@ const actor: User = {
   updatedAt: 1,
 };
 
-function request(overrides: Partial<AgentRunRequest> = {}): AgentRunRequest {
+function request(overrides: Partial<ModelAgentRunRequest> = {}): ModelAgentRunRequest {
   return {
     projectId: 'project-1',
     workspace: 'canvas',
     workspaceId: 'canvas-1',
     mode: 'agent',
+    executionRuntime: 'model',
     providerId: 'provider-image',
     modelId: 'model-image',
     prompt: 'Create an image',
@@ -129,6 +130,26 @@ function operationContextForResume(): AgentDownstreamExecutionContext {
 }
 
 describe('same-task Agent adoption adapter', () => {
+  it('rejects a local Skill request at the model-only same-task boundary', async () => {
+    const deps = dependencies();
+    const execute = vi.fn();
+    const localRequest: AgentRunRequest = {
+      projectId: 'project-1', workspace: 'canvas', workspaceId: 'canvas-1', mode: 'agent',
+      executionRuntime: 'local', prompt: 'Export locally', sourceVersionIds: [],
+      allowedToolIds: ['multi_platform_export'], idempotencyKey: 'local-request',
+      context: { selectedEntityIds: [], visibleVersionIds: [], locale: 'zh-CN' },
+      skill: { skillId: 'local-export', skillVersion: 1, inputValues: {}, modelBindings: {} },
+    };
+
+    await expect(createSameTaskAgentAdapter(deps).adoptAndExecute({
+      actor, taskId: 'task-1', request: localRequest,
+      toolId: 'multi_platform_export', execute,
+    })).rejects.toMatchObject({ code: 'AGENT_MODEL_RUNTIME_REQUIRED', status: 400 });
+    expect(deps.getTaskForUser).not.toHaveBeenCalled();
+    expect(deps.resolveTaskModel).not.toHaveBeenCalled();
+    expect(execute).not.toHaveBeenCalled();
+  });
+
   it('loads a normal durable Skill run without requiring adopted=true', async () => {
     const skillTask = task({ id: 'skill-run-1', type: 'agent-run' });
     const skillEvents: AgentEvent[] = [{

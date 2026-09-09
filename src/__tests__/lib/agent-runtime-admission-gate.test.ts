@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 vi.mock('server-only', () => ({}));
 
 import {
+  AgentModelRuntimeRequiredError,
   admitAuthorizedAgentExecution,
   type AgentExecutionAdmissionDependencies,
 } from '@/lib/agent-runtime/admission-gate';
@@ -42,6 +43,25 @@ function dependencies(
 }
 
 describe('Agent execution admission gate', () => {
+  it('rejects a local Skill request at the model-only admission boundary', async () => {
+    const localRequest: AgentRunRequest = {
+      projectId: 'project-1', workspace: 'canvas', workspaceId: 'canvas-1', mode: 'agent',
+      executionRuntime: 'local', prompt: 'Export locally', sourceVersionIds: [],
+      allowedToolIds: ['multi_platform_export'], idempotencyKey: 'local-request',
+      context: { selectedEntityIds: [], visibleVersionIds: [], locale: 'zh-CN' },
+      skill: { skillId: 'local-export', skillVersion: 1, inputValues: {}, modelBindings: {} },
+    };
+    const deps = dependencies();
+    const admit = vi.fn();
+
+    await expect(admitAuthorizedAgentExecution({
+      actor, request: localRequest, toolId: 'multi_platform_export', admit,
+    }, deps)).rejects.toBeInstanceOf(AgentModelRuntimeRequiredError);
+    expect(deps.authorizeContext).not.toHaveBeenCalled();
+    expect(deps.resolveTaskModel).not.toHaveBeenCalled();
+    expect(admit).not.toHaveBeenCalled();
+  });
+
   it('does not use an orchestrator chat model as a downstream image model', async () => {
     const canvasRequest = buildCanvasAgentRequest({
       projectId: 'project-1',

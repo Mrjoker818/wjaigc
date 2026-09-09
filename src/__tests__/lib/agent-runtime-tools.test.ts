@@ -18,7 +18,7 @@ import {
 } from '@/lib/agent-runtime/tool-registry';
 import { toAgentModelCapabilitySet } from '@/lib/agent-runtime/model-capability-set';
 import type { TaskModelDescriptor } from '@/lib/task-core/model-capability-contract';
-import type { AgentRunRequest } from '@/lib/agent-runtime/types';
+import type { ModelAgentRunRequest } from '@/lib/agent-runtime/types';
 import { executeToolCall, validateChatToolCall } from '@/lib/chat-tools';
 
 const registry: AgentToolDefinition[] = [
@@ -36,12 +36,13 @@ const registry: AgentToolDefinition[] = [
   },
 ];
 
-function request(overrides: Partial<AgentRunRequest> = {}): AgentRunRequest {
+function request(overrides: Partial<ModelAgentRunRequest> = {}): ModelAgentRunRequest {
   return {
     projectId: 'project-1',
     workspace: 'canvas',
     workspaceId: 'canvas-1',
     mode: 'agent',
+    executionRuntime: 'model',
     providerId: 'provider-1',
     modelId: 'model-1',
     prompt: 'Create a poster',

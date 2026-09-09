@@ -60,6 +60,7 @@ import type {
   AgentSkillInvocation,
   AgentWorkspace,
 } from './types';
+import { requireModelAgentRunRequest } from './types';
 import type { AgentExecutionFence } from './execution-fence';
 
 const WORKSPACES = new Set<AgentWorkspace>(['canvas', 'workflow', 'chat']);
@@ -347,19 +348,35 @@ export function parseAgentRunRequest(value: unknown): AgentRunRequest {
   if (!MODES.has(input.mode as AgentMode)) {
     throw new AgentRunRequestError('mode is invalid');
   }
-  return {
+  if (input.executionRuntime !== undefined
+    && input.executionRuntime !== 'model'
+    && input.executionRuntime !== 'local') {
+    throw new AgentRunRequestError('executionRuntime is invalid');
+  }
+  const executionRuntime = input.executionRuntime ?? 'model';
+  const base = {
     projectId: readString(input.projectId, 'projectId'),
     workspace: input.workspace as AgentWorkspace,
     workspaceId: readString(input.workspaceId, 'workspaceId'),
     mode: input.mode as AgentMode,
-    providerId: readString(input.providerId, 'providerId'),
-    modelId: readString(input.modelId, 'modelId'),
     prompt: readAgentPrompt(input.prompt),
     sourceVersionIds: readStringArray(input.sourceVersionIds, 'sourceVersionIds'),
     allowedToolIds: readStringArray(input.allowedToolIds, 'allowedToolIds', 64),
     idempotencyKey: readString(input.idempotencyKey, 'idempotencyKey'),
     context: readContext(input.context),
     skill: readSkill(input.skill),
+  };
+  if (executionRuntime === 'local') {
+    if (input.providerId !== undefined || input.modelId !== undefined) {
+      throw new AgentRunRequestError('local execution cannot specify providerId or modelId');
+    }
+    return { ...base, executionRuntime: 'local' };
+  }
+  return {
+    ...base,
+    ...(input.executionRuntime === 'model' ? { executionRuntime: 'model' as const } : {}),
+    providerId: readString(input.providerId, 'providerId'),
+    modelId: readString(input.modelId, 'modelId'),
   };
 }
 
@@ -765,18 +782,27 @@ export function createAgentRuntimeService(
             resolveTaskModel: dependencies.resolveTaskModel,
           })
         : null;
+      const executionRuntime = request.executionRuntime ?? 'model';
+      if (executionRuntime === 'local' && !skillAdmission) {
+        throw new AgentRunRequestError('local execution requires a Skill invocation');
+      }
+      const modelRequest = executionRuntime === 'model'
+        ? requireModelAgentRunRequest(request)
+        : undefined;
       await dependencies.authorizeContext({
         actorUserId: input.actor.id,
         request,
       });
-      const model = skillAdmission?.orchestratorModel ?? await dependencies.resolveTaskModel(
-        request.providerId, request.modelId, input.actor.id,
-      );
+      const model = modelRequest
+        ? skillAdmission?.orchestratorModel ?? await dependencies.resolveTaskModel(
+            modelRequest.providerId, modelRequest.modelId, input.actor.id,
+          )
+        : undefined;
       const authorization = authorizeAgentTools({
         requestedToolIds: request.allowedToolIds,
         workspace: request.workspace,
         userProductTypes: userProductTypes(input.actor),
-        modelCapabilities: [...toAgentModelCapabilitySet(model)],
+        modelCapabilities: model ? [...toAgentModelCapabilitySet(model)] : [],
         capabilityScope: 'orchestrator',
         skillAdmission: skillAdmission !== null,
       });
@@ -814,11 +840,11 @@ export function createAgentRuntimeService(
       }
       const creditCost = skillEstimate?.maximum
         ?? input.billingQuote?.creditCost
-        ?? await dependencies.calculateCreditCost(
+        ?? (modelRequest ? await dependencies.calculateCreditCost(
             'agent_edit',
-            request.modelId,
-            { providerId: request.providerId },
-          );
+            modelRequest.modelId,
+            { providerId: modelRequest.providerId },
+          ) : 0);
       const now = dependencies.now();
       const created = await dependencies.createBillableTask({
         userId: input.actor.id,
@@ -830,14 +856,17 @@ export function createAgentRuntimeService(
           projectId: request.projectId,
           type: 'agent-run',
           status: 'processing',
-          providerId: request.providerId,
-          model: request.modelId,
+          ...(modelRequest ? {
+            providerId: modelRequest.providerId,
+            model: modelRequest.modelId,
+          } : {}),
           progress: 0,
           label: 'Agent run',
           result: {
             workspace: request.workspace,
             workspaceId: request.workspaceId,
             mode: request.mode,
+            executionRuntime,
             context: request.context,
             allowedToolIds: authorization.tools.map(tool => tool.toolId),
           },
@@ -879,8 +908,11 @@ export function createAgentRuntimeService(
           workspace: request.workspace,
           workspaceId: request.workspaceId,
           mode: request.mode,
-          providerId: request.providerId,
-          modelId: request.modelId,
+          executionRuntime,
+          ...(modelRequest ? {
+            providerId: modelRequest.providerId,
+            modelId: modelRequest.modelId,
+          } : {}),
           prompt: request.prompt,
           sourceVersionIds: request.sourceVersionIds,
           allowedToolIds: authorization.tools.map(tool => tool.toolId),
@@ -913,6 +945,10 @@ export function createAgentRuntimeService(
               id: skillAdmission.skill.id,
               version: skillAdmission.skill.version,
               name: skillAdmission.skill.name,
+              allowedSurfaces: [...skillAdmission.skill.allowedSurfaces],
+              catalogSurfaces: [
+                ...(skillAdmission.skill.catalogSurfaces ?? skillAdmission.skill.allowedSurfaces),
+              ],
               steps: frozenSkillSteps.map(step => {
                 const compiledFanOut = parseCompiledSkillFanOut(step as unknown as Record<string, unknown>);
                 return {
@@ -925,6 +961,7 @@ export function createAgentRuntimeService(
                   ...(step.promptInstructionTemplate
                     ? { promptInstructionTemplate: step.promptInstructionTemplate }
                     : {}),
+                  ...(step.runtime ? { runtime: step.runtime } : {}),
                   ...(compiledFanOut ? {
                     compiledFanOut: {
                       inputKey: compiledFanOut.inputKey,
@@ -932,7 +969,7 @@ export function createAgentRuntimeService(
                       itemDigest: compiledFanOut.itemDigest,
                     },
                   } : {}),
-                  modelRole: step.modelRole,
+                  ...(step.modelRole ? { modelRole: step.modelRole } : {}),
                   qualityGateIds: [...step.qualityGateIds],
                   ...(skillStepCosts.has(step.id) ? { cost: skillStepCosts.get(step.id) } : {}),
                 };

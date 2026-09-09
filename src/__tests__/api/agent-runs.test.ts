@@ -5,7 +5,7 @@ import * as agentRuntime from '@/lib/agent-runtime/service';
 import type { AgentRuntimeDependencies } from '@/lib/agent-runtime/service';
 import { AgentEventConflictError } from '@/lib/agent-runtime/event-storage';
 import { assertAgentEventPayloadSafe } from '@/lib/agent-runtime/event-reducer';
-import type { AgentEvent, AgentRunRequest } from '@/lib/agent-runtime/types';
+import type { AgentEvent, AgentRunRequest, ModelAgentRunRequest } from '@/lib/agent-runtime/types';
 import type { CloudTask } from '@/lib/cloud-task-storage';
 import type { User } from '@/lib/user-types';
 import { requireSkillForSurface } from '@/lib/skill-runtime/catalog';
@@ -14,6 +14,8 @@ import { resolveSkillInputs } from '@/lib/skill-runtime/input-resolver';
 import { compileSkillPrompt } from '@/lib/skill-runtime/prompt-compiler';
 import { compileConditionalSkillSteps } from '@/lib/skill-runtime/step-compiler';
 import { authorizeAgentContext } from '@/lib/agent-runtime/context-adapters';
+import { AGENT_TOOL_REGISTRY, type AgentToolDefinition } from '@/lib/agent-runtime/tool-registry';
+import type { SkillDefinition } from '@/lib/skill-runtime/types';
 
 const authMocks = vi.hoisted(() => ({
   requireApiAuthOrReject: vi.fn(),
@@ -32,12 +34,13 @@ const user: User = {
   updatedAt: 1,
 };
 
-function request(overrides: Partial<AgentRunRequest> = {}): AgentRunRequest {
+function request(overrides: Partial<ModelAgentRunRequest> = {}): ModelAgentRunRequest {
   return {
     projectId: 'project-1',
     workspace: 'canvas',
     workspaceId: 'canvas-1',
     mode: 'agent',
+    executionRuntime: 'model',
     providerId: 'provider-exact',
     modelId: 'model-exact',
     prompt: 'Create a poster',
@@ -199,9 +202,9 @@ describe('Agent source media admission', () => {
 });
 
 function canvasSkillRequest(
-  overrides: Partial<AgentRunRequest> = {},
+  overrides: Partial<ModelAgentRunRequest> = {},
   bindingOverrides: Record<string, { providerId: string; modelId: string }> = {},
-): AgentRunRequest {
+): ModelAgentRunRequest {
   const definition = requireSkillForSurface('preset-ecommerce-listing', 'canvas');
   const inputValues = resolveSkillInputs(definition, {
     product: '耳机',
@@ -224,7 +227,7 @@ function canvasSkillRequest(
   });
 }
 
-function simpleChatSkillRequest(): AgentRunRequest {
+function simpleChatSkillRequest(): ModelAgentRunRequest {
   const definition = requireSkillForSurface('ppt-master', 'simple-chat');
   const inputValues = resolveSkillInputs(definition, {});
   return request({
@@ -244,6 +247,68 @@ function simpleChatSkillRequest(): AgentRunRequest {
 }
 
 describe('Agent runtime service', () => {
+  it('admits an authenticated local Skill with zero billing and no model identity', async () => {
+    const localSkill: SkillDefinition = {
+      id: 'local-export', version: 1, name: 'Local export', category: 'export',
+      description: 'test', systemPrompt: 'Run the local export',
+      allowedSurfaces: ['canvas'], catalogSurfaces: ['canvas'], inputs: [],
+      steps: [{
+        id: 'export', label: 'Export', toolId: 'multi_platform_export', runtime: 'local',
+        execution: 'sequential', promptTemplate: '', qualityGateIds: ['output-present'],
+      }],
+      enabled: true, builtIn: true, createdAt: 1, updatedAt: 1, usageCount: 0,
+    };
+    const catalogSpy = vi.spyOn(skillCatalog, 'requireSkillForSurface')
+      .mockImplementation((skillId, surface) => {
+        if (skillId === localSkill.id && localSkill.allowedSurfaces.includes(surface)) return localSkill;
+        return requireSkillForSurface(skillId, surface);
+      });
+    const registry = AGENT_TOOL_REGISTRY as unknown as AgentToolDefinition[];
+    registry.push({
+      toolId: 'multi_platform_export', skillOnly: true, workspaces: ['canvas'],
+      productTypes: ['canvas'], modelCapabilities: [],
+    });
+    const dependencies = serviceDependencies();
+    const service = agentRuntime.createAgentRuntimeService(dependencies);
+    const localRequest: AgentRunRequest = {
+      projectId: 'project-1', workspace: 'canvas', workspaceId: 'canvas-1', mode: 'agent',
+      executionRuntime: 'local', prompt: localSkill.systemPrompt, sourceVersionIds: [],
+      allowedToolIds: ['multi_platform_export'], idempotencyKey: 'local-skill-run',
+      context: { selectedEntityIds: [], visibleVersionIds: [], locale: 'zh-CN' },
+      skill: { skillId: localSkill.id, skillVersion: 1, inputValues: {}, modelBindings: {} },
+    };
+
+    try {
+      await expect(service.createRun({ actor: user, request: localRequest }))
+        .resolves.toMatchObject({ reused: false, charged: true });
+    } finally {
+      registry.pop();
+      catalogSpy.mockRestore();
+    }
+
+    expect(dependencies.authorizeContext).toHaveBeenCalledOnce();
+    expect(dependencies.resolveTaskModel).not.toHaveBeenCalled();
+    expect(dependencies.calculateCreditCost).not.toHaveBeenCalled();
+    const createdTask = dependencies.createBillableTask.mock.calls[0][0];
+    expect(createdTask.creditCost).toBe(0);
+    expect(createdTask.task).toMatchObject({
+      result: expect.objectContaining({ executionRuntime: 'local' }),
+    });
+    expect(createdTask.task).not.toHaveProperty('providerId');
+    expect(createdTask.task).not.toHaveProperty('model');
+    expect(dependencies.appendEvent).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'run.created', payload: expect.objectContaining({ executionRuntime: 'local' }),
+    }));
+    const createdPayload = dependencies.appendEvent.mock.calls[0][0].payload;
+    expect(createdPayload).not.toHaveProperty('providerId');
+    expect(createdPayload).not.toHaveProperty('modelId');
+    expect(createdPayload.skillSnapshot).toMatchObject({
+      allowedSurfaces: ['canvas'],
+      catalogSurfaces: ['canvas'],
+      steps: [expect.objectContaining({ runtime: 'local' })],
+    });
+  });
+
   it('parses a versioned Skill invocation into the durable run request', () => {
     const skill = {
       skillId: 'skill-poster',

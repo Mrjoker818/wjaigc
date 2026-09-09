@@ -6,6 +6,7 @@ import { calculateConfiguredCreditCost } from '@/lib/credits';
 import type {
   AgentRunBillingQuote,
   AgentRunRequest,
+  AgentRunRequestBase,
 } from '@/lib/agent-runtime/types';
 import {
   resolveTaskModel,
@@ -22,6 +23,8 @@ import {
 } from './cost-estimator';
 import { resolveSkillInputs, SkillInputError } from './input-resolver';
 import { compileSkillPrompt } from './prompt-compiler';
+import { requiredSkillModelRoles, skillStepModelRole } from './types';
+export { requiredSkillModelRoles } from './types';
 import type {
   SkillDefinition,
   SkillModelBinding,
@@ -70,7 +73,8 @@ async function resolveExecutableSkill(
 export interface AuthorizedSkillAgentRun {
   skill: SkillDefinition;
   modelBindings: FrozenBindings;
-  orchestratorModel: TaskModelDescriptor;
+  executionRuntime: 'model' | 'local';
+  orchestratorModel?: TaskModelDescriptor;
 }
 
 type CreateAgentRun = (input: {
@@ -117,12 +121,6 @@ const roleCapabilities: Record<SkillModelRole, readonly string[]> = {
   'three-d': ['3d'],
 };
 
-export function requiredSkillModelRoles(skill: SkillDefinition): SkillModelRole[] {
-  const roles = new Set<SkillModelRole>(['orchestrator']);
-  for (const step of skill.steps) roles.add(step.modelRole);
-  return [...roles];
-}
-
 function sameStringSet(actual: readonly string[], expected: readonly string[]): boolean {
   return actual.length === expected.length
     && actual.every(value => expected.includes(value));
@@ -144,7 +142,7 @@ function sameJson(left: unknown, right: unknown): boolean {
 
 function downstreamToolIds(skill: SkillDefinition): string[] {
   return [...new Set(skill.steps
-    .filter(step => step.modelRole !== 'orchestrator')
+    .filter(step => skillStepModelRole(step) !== 'orchestrator')
     .map(step => step.toolId))];
 }
 
@@ -293,21 +291,39 @@ export async function authorizeSkillAgentRunRequest(
       'Skill model bindings are not server-authorized canonical bindings',
     );
   }
-  const orchestrator = frozen.orchestrator!;
-  if (
-    request.providerId !== orchestrator.providerId
-    || request.modelId !== orchestrator.modelId
-  ) {
+  const executionRuntime = requiredSkillModelRoles(skill).length === 0 ? 'local' : 'model';
+  if ((request.executionRuntime ?? 'model') !== executionRuntime) {
     throw new SkillModelBindingError(
       'SKILL_MODEL_BINDINGS_INVALID',
       400,
-      'Agent model does not match the Skill orchestrator binding',
+      'Agent execution runtime does not match the Skill definition',
     );
+  }
+  if (executionRuntime === 'model') {
+    const orchestrator = frozen.orchestrator;
+    if (!orchestrator) {
+      throw new SkillModelBindingError(
+        'SKILL_MODEL_BINDING_REQUIRED',
+        400,
+        'Skill orchestrator binding is required',
+      );
+    }
+    if (
+      request.providerId !== orchestrator.providerId
+      || request.modelId !== orchestrator.modelId
+    ) {
+      throw new SkillModelBindingError(
+        'SKILL_MODEL_BINDINGS_INVALID',
+        400,
+        'Agent model does not match the Skill orchestrator binding',
+      );
+    }
   }
   return {
     skill,
     modelBindings: frozen,
-    orchestratorModel: models.orchestrator!,
+    executionRuntime,
+    ...(models.orchestrator ? { orchestratorModel: models.orchestrator } : {}),
   };
 }
 
@@ -328,14 +344,11 @@ export async function buildSkillAgentRunRequest(
     skill,
     dependencies,
   );
-  const orchestrator = bindings.orchestrator!;
-  return {
+  const base: AgentRunRequestBase = {
     projectId: input.projectId,
     workspace: input.surface === 'simple-chat' ? 'chat' : input.surface,
     workspaceId: input.workspaceId,
     mode: 'agent',
-    providerId: orchestrator.providerId,
-    modelId: orchestrator.modelId,
     prompt: readAgentPrompt(compileSkillPrompt(skill.systemPrompt, resolved)),
     sourceVersionIds,
     allowedToolIds: downstreamToolIds(skill),
@@ -351,6 +364,22 @@ export async function buildSkillAgentRunRequest(
       inputValues: resolved,
       modelBindings: bindings,
     },
+  };
+  if (requiredSkillModelRoles(skill).length === 0) {
+    return { ...base, executionRuntime: 'local' };
+  }
+  const orchestrator = bindings.orchestrator;
+  if (!orchestrator) {
+    throw new SkillModelBindingError(
+      'SKILL_MODEL_BINDING_REQUIRED',
+      400,
+      'Skill orchestrator binding is required',
+    );
+  }
+  return {
+    ...base,
+    providerId: orchestrator.providerId,
+    modelId: orchestrator.modelId,
   };
 }
 

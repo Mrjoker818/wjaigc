@@ -12,8 +12,10 @@ import {
 import { AgentModelRouteMismatchError } from './model-route-error';
 import { toAgentModelCapabilitySet } from './model-capability-set';
 import { authorizeAgentTools } from './tool-registry';
-import type { AgentRunRequest } from './types';
+import { requireModelAgentRunRequest, type AgentRunRequest } from './types';
 import type { AgentContextSnapshot } from './types';
+
+export { AgentModelRuntimeRequiredError } from './types';
 
 export interface AgentExecutionAdmissionDependencies {
   authorizeContext(input: AuthorizeAgentContextInput): Promise<AuthorizedAgentContext | AgentContextSnapshot>;
@@ -45,9 +47,10 @@ export async function admitAuthorizedAgentExecution<T>(
   input: AdmitAuthorizedAgentExecutionInput<T>,
   dependencies: AgentExecutionAdmissionDependencies = defaultDependencies,
 ): Promise<T> {
+  const request = requireModelAgentRunRequest(input.request);
   const authorizedValue = await dependencies.authorizeContext({
     actorUserId: input.actor.id,
-    request: input.request,
+    request,
   });
   const authorizedContext: AuthorizedAgentContext = 'snapshot' in authorizedValue
     ? authorizedValue
@@ -56,8 +59,8 @@ export async function admitAuthorizedAgentExecution<T>(
   let model: TaskModelDescriptor;
   try {
     model = await dependencies.resolveTaskModel(
-      input.request.providerId,
-      input.request.modelId,
+      request.providerId,
+      request.modelId,
       input.actor.id,
     );
   } catch {
@@ -65,12 +68,12 @@ export async function admitAuthorizedAgentExecution<T>(
   }
 
   const authorization = authorizeAgentTools({
-    requestedToolIds: input.request.allowedToolIds,
-    workspace: input.request.workspace,
+    requestedToolIds: request.allowedToolIds,
+    workspace: request.workspace,
     userProductTypes: userProductTypes(input.actor),
     modelCapabilities: [...toAgentModelCapabilitySet(model)],
     capabilityScope: 'downstream',
-    skillAdmission: input.request.skill !== undefined,
+    skillAdmission: request.skill !== undefined,
   });
   if (
     authorization.denials.length > 0

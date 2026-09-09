@@ -73,6 +73,36 @@ function result(id: string): SkillStepResult {
 }
 
 describe('durable Skill executor', () => {
+  it('executes a local step without reading a model binding', async () => {
+    const executeStep = vi.fn(async () => ({ assetVersionIds: ['exported'], media: [{}] }));
+    const executor = createSkillExecutor({ executeStep, appendEvent: vi.fn(async () => true) });
+    const modelBindings = new Proxy({}, {
+      get() {
+        throw new Error('local step read model bindings');
+      },
+    });
+    const localDefinition: SkillDefinition = {
+      ...definition,
+      id: 'local-export',
+      steps: [{
+        id: 'export', label: '批量导出', toolId: 'multi_platform_export',
+        runtime: 'local', execution: 'sequential', promptTemplate: '',
+        qualityGateIds: ['output-present'],
+      }],
+    };
+
+    await expect(executor.execute({
+      actorUserId: 'user-1', projectId: 'project-1', runId: 'run-1', workspace: 'canvas',
+      definition: localDefinition, inputValues: {}, modelBindings,
+      operationContext: operationContext(),
+    })).resolves.toMatchObject({ completedStepIds: ['export'], assetVersionIds: ['exported'] });
+
+    expect(executeStep).toHaveBeenCalledWith(expect.objectContaining({
+      step: expect.objectContaining({ id: 'export', runtime: 'local' }),
+      modelBinding: undefined,
+    }));
+  });
+
   it('persists a bounded schema-tagged JSON output', async () => {
     const completeRun = vi.fn(async () => true);
     const executor = createSkillExecutor({

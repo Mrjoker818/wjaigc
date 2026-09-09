@@ -65,7 +65,11 @@ import {
   updateCanvasSkill,
 } from '@/lib/skill-runtime/canvas-client';
 import type { SkillRunRequest } from '@/lib/skill-runtime/run-request';
-import type { SkillDefinition, SkillModelBinding } from '@/lib/skill-runtime/types';
+import {
+  requiredSkillModelRoles,
+  skillStepModelRole,
+  type SkillDefinition,
+} from '@/lib/skill-runtime/types';
 import { bindCanvasSkillSourceInputs, collectCanvasSkillSourceVersionIds } from '@/lib/skill-runtime/canvas-source-inputs';
 
 const CHAT_RENDER_WINDOW = 80;
@@ -3937,9 +3941,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
       ? imageModel.split('::').slice(1).join('::')
       : imageModel;
     const modelBindings: SkillRunRequest['modelBindings'] = {};
-    const roles = new Set<SkillModelBinding['role']>(executionSkill.steps.map(step => step.modelRole));
-    roles.add('orchestrator');
-    for (const role of roles) {
+    for (const role of requiredSkillModelRoles(executionSkill)) {
       if (role === 'orchestrator' && chatProviderId && chatModelId) {
         modelBindings.orchestrator = { providerId: chatProviderId, modelId: chatModelId };
       } else if (role === 'vision' && chatSelection?.supportsVision && chatProviderId && chatModelId) {
@@ -3978,7 +3980,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
   }, [activeSkill, canvasSkillSourceVersionIds.length]);
 
   const canvasSkillModelUnavailableReason = useCallback((): string | undefined => {
-    if (!activeSkill?.steps.some(step => step.modelRole === 'vision')) return undefined;
+    if (!activeSkill?.steps.some(step => skillStepModelRole(step) === 'vision')) return undefined;
     const selected = availableChatModels.find(candidate => candidate.id === model);
     if (selected?.supportsVision) return undefined;
     const visionModelNames = [...new Set(availableChatModels

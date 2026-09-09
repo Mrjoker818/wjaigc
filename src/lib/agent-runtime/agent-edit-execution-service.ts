@@ -59,7 +59,10 @@ import {
   type AgentEditExecutionDescriptorV1,
 } from '@/lib/agent-runtime/agent-edit-execution-descriptor';
 import type { ExecuteAgentEditContinuationInput } from '@/lib/agent-runtime/agent-edit-continuation';
-import type { AgentRunRequest } from '@/lib/agent-runtime/types';
+import {
+  requireModelAgentRunRequest,
+  type ModelAgentRunRequest,
+} from '@/lib/agent-runtime/types';
 import type { User } from '@/lib/user-types';
 import { runWithAbortSignalTimeout } from '@/lib/abort-signal';
 const MAX_AGENT_EDIT_ROUNDS = 8;
@@ -393,7 +396,7 @@ export async function executePersistedAgentEditDescriptor(
     input.descriptor.sourceVersionId,
     ...(input.descriptor.maskVersionId ? [input.descriptor.maskVersionId] : []),
   ];
-  const request: AgentRunRequest = {
+  const request: ModelAgentRunRequest = {
     projectId: input.projectId,
     workspace: 'canvas',
     workspaceId: `canvas:${input.projectId}`,
@@ -580,7 +583,8 @@ async function handleAgentEditRequest(
       ? [selectedEntityId]
       : [];
     const runtimeActor = sessionUser || authResult.user;
-    const buildRuntimeRequest = (stableIdempotencyKey: string) => buildAgentEditRequest({
+    const buildRuntimeRequest = (stableIdempotencyKey: string): ModelAgentRunRequest => (
+      requireModelAgentRunRequest(buildAgentEditRequest({
       projectId: typeof projectId === 'string' ? projectId : '',
       workspaceId: `canvas:${typeof projectId === 'string' ? projectId : requestId}`,
       providerId: typeof providerId === 'string' ? providerId : '',
@@ -590,8 +594,9 @@ async function handleAgentEditRequest(
       sourceVersionIds,
       visibleVersionIds: sourceVersionIds,
       conversationId: typeof sessionId === 'string' ? sessionId : undefined,
-      idempotencyKey: stableIdempotencyKey,
-    });
+        idempotencyKey: stableIdempotencyKey,
+      }))
+    );
     if (agentRuntimeMode === 'agent-v2') {
       if (
         typeof providerId !== 'string' || !providerId

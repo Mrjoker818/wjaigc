@@ -1,6 +1,6 @@
 import { buildWorkflowSkillRunRequest } from '@/lib/workflow-engine';
 import type { WorkflowExecutionScope } from '@/lib/workflow-execution-scope';
-import type { SkillDefinition, SkillModelBinding } from './types';
+import { requiredSkillModelRoles, type SkillDefinition } from './types';
 import type { FrozenBindings } from './cost-estimator';
 
 export interface WorkflowSkillQuote {
@@ -79,8 +79,7 @@ export async function estimateWorkflowSkills(
         || typeof binding.modelId !== 'string' || !binding.modelId) throw new Error('预估模型身份无效');
     }
     const selected = request.body.modelBindings as FrozenBindings;
-    const requiredRoles = new Set<SkillModelBinding['role']>(['orchestrator', ...skill.steps.map(step => step.modelRole)]);
-    for (const role of requiredRoles) {
+    for (const role of requiredSkillModelRoles(skill)) {
       const frozen = data.modelBindings[role];
       if (!frozen) throw new Error('费用预估缺少必需模型绑定');
       const original = selected[role];

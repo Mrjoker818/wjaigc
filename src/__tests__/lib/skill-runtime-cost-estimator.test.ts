@@ -1,6 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { estimateSkillRunCost, toolCostType } from '@/lib/skill-runtime/cost-estimator';
+import {
+  estimateSkillRunCost,
+  skillExecutionSteps,
+  skillStepCreditCost,
+  toolCostType,
+} from '@/lib/skill-runtime/cost-estimator';
 import type { SkillDefinition } from '@/lib/skill-runtime/types';
 
 const canvasSkill: SkillDefinition = {
@@ -20,6 +25,26 @@ const canvasSkill: SkillDefinition = {
 };
 
 describe('Skill runtime cost estimator', () => {
+  it('keeps a pure local Skill free and does not synthesize an orchestrator', async () => {
+    const calculateCreditCost = vi.fn(async () => 9);
+    const localSkill: SkillDefinition = {
+      ...canvasSkill,
+      id: 'local-cost-test',
+      steps: [{
+        id: 'export', label: '批量导出', toolId: 'multi_platform_export',
+        runtime: 'local', execution: 'sequential', promptTemplate: '',
+        qualityGateIds: ['output-present'],
+      }],
+    };
+
+    expect(skillExecutionSteps(localSkill)).toEqual(localSkill.steps);
+    await expect(estimateSkillRunCost(localSkill, {}, { calculateCreditCost }))
+      .resolves.toEqual({ minimum: 0, maximum: 0, steps: [{ stepId: 'export', cost: 0 }] });
+    await expect(skillStepCreditCost(localSkill.steps[0], {}, { calculateCreditCost }))
+      .resolves.toBe(0);
+    expect(calculateCreditCost).not.toHaveBeenCalled();
+  });
+
   it('prices each compliance audit image as one frozen vision chat call', async () => {
     expect(toolCostType('compliance_audit')).toBe('chat');
     const calculateCreditCost = vi.fn(async () => 3);

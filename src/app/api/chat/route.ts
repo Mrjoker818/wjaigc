@@ -20,6 +20,10 @@ import {
 import { prepareAdmittedAgentTaskExecution } from '@/lib/agent-runtime/surface-dispatch';
 import { admitAuthorizedAgentExecution } from '@/lib/agent-runtime/admission-gate';
 import { resolveAgentRuntimeMode, type AgentRuntimeMode } from '@/lib/agent-runtime/mode';
+import {
+  requireModelAgentRunRequest,
+  type ModelAgentRunRequest,
+} from '@/lib/agent-runtime/types';
 import type { User } from '@/lib/user-types';
 import { resolveTaskModel } from '@/lib/task-core/model-catalog';
 
@@ -74,8 +78,8 @@ async function executeCanvasChatTool(input: {
   const selectedModelId = toolId === 'analyze_image'
     ? input.chatModel
     : input.imageModel || '';
-  const buildRuntimeRequest = (taskId?: string) => ({
-    ...buildCanvasAgentRequest({
+  const buildRuntimeRequest = (taskId?: string): ModelAgentRunRequest => {
+    const request = requireModelAgentRunRequest(buildCanvasAgentRequest({
       projectId: input.taskContext.projectId || '',
       workspaceId: `embedded-chat:${input.taskContext.sessionId || 'chat'}`,
       providerId: selectedProviderId,
@@ -86,9 +90,13 @@ async function executeCanvasChatTool(input: {
       mode: toolId === 'analyze_image' ? 'vision' : 'agent',
       conversationId: input.taskContext.sessionId,
       idempotencyKey: taskId || idempotencyKey,
-    }),
-    allowedToolIds: toolId ? [toolId] : [],
-  });
+    }));
+    return {
+      ...request,
+      executionRuntime: 'model',
+      allowedToolIds: toolId ? [toolId] : [],
+    };
+  };
   const execute = (authorizedContext?: AuthorizedAgentContext) => executeToolCall(input.toolName, input.toolArgs, {
     chatApiKey: input.chatApiKey,
     chatBaseUrl: input.chatBaseUrl,

@@ -51,7 +51,11 @@ import {
 import type { WorkflowExecutionScope } from '@/lib/workflow-execution-scope';
 import { estimateWorkflowSkills, type WorkflowSkillQuote } from '@/lib/skill-runtime/workflow-estimate-client';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
-import type { SkillDefinition, SkillModelBinding } from '@/lib/skill-runtime/types';
+import {
+  requiredSkillModelRoles,
+  type SkillDefinition,
+  type SkillModelBinding,
+} from '@/lib/skill-runtime/types';
 import { getPromptTemplates, addPromptTemplate, type PromptTemplate } from '@/lib/prompt-templates';
 import {
   getVisibleWorkflowNodeIds,
@@ -4238,7 +4242,7 @@ function PropertyPanel({ node, models, modelCatalogIndex, modelsLoading, workflo
     ? workflowSkills.find(skill => skill.id === node.config.skillId && skill.version === Number(node.config.version))
     : undefined;
   const skillModelRoles = selectedSkill
-    ? [...new Set<SkillModelBinding['role']>(['orchestrator', ...selectedSkill.steps.map(step => step.modelRole)])]
+    ? requiredSkillModelRoles(selectedSkill)
     : [];
   const configuredSkillInputs = node.config.inputValues && typeof node.config.inputValues === 'object'
     && !Array.isArray(node.config.inputValues)

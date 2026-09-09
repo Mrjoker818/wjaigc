@@ -85,6 +85,28 @@ beforeEach(() => {
 });
 
 describe('Skill runtime frozen continuation', () => {
+  it('restores local runtime and catalog visibility while defaulting legacy steps to model', () => {
+    const local = frozenDefinition({
+      ...frozenSnapshot,
+      allowedSurfaces: ['canvas', 'simple-chat'],
+      catalogSurfaces: ['canvas'],
+      steps: [{
+        id: 'export', label: 'Export', toolId: 'multi_platform_export', runtime: 'local',
+        execution: 'sequential', promptTemplate: '', qualityGateIds: ['output-present'],
+      }],
+    }, 'canvas', frozenSnapshot.id, frozenSnapshot.version);
+
+    expect(local.allowedSurfaces).toEqual(['canvas', 'simple-chat']);
+    expect(local.catalogSurfaces).toEqual(['canvas']);
+    expect(local.steps[0]).toMatchObject({ runtime: 'local' });
+    expect(local.steps[0]).not.toHaveProperty('modelRole');
+
+    const legacy = frozenDefinition(frozenSnapshot, 'canvas', frozenSnapshot.id, frozenSnapshot.version);
+    expect(legacy.steps[0]).not.toHaveProperty('runtime');
+    expect(legacy.steps[0]?.modelRole).toBe('orchestrator');
+    expect(legacy.catalogSurfaces).toEqual(legacy.allowedSurfaces);
+  });
+
   it('restores a validated compiled image fan-out identity from the frozen snapshot', () => {
     const compiledFanOut = {
       inputKey: 'sources', itemIndex: 1, itemDigest: '0123456789abcdef',
@@ -355,6 +377,55 @@ describe('Skill runtime frozen continuation', () => {
         'version-2': '/api/serve-upload/version-2.png',
       },
     }));
+  });
+
+  it('reconstructs a persisted local Skill without provider or model identity', async () => {
+    const localSnapshot = {
+      id: 'local-export', version: 1, name: 'Local export', executionContextVersion: 1,
+      systemPrompt: 'Export locally', allowedSurfaces: ['canvas'], catalogSurfaces: ['canvas'],
+      inputs: [],
+      steps: [{
+        id: 'export', label: 'Export', toolId: 'multi_platform_export', runtime: 'local',
+        execution: 'sequential', promptTemplate: '', qualityGateIds: ['output-present'],
+      }],
+    };
+    const request: AgentRunRequest = {
+      projectId: 'project-1', workspace: 'canvas', workspaceId: 'canvas-1', mode: 'agent',
+      executionRuntime: 'local', prompt: 'Export locally', sourceVersionIds: [],
+      allowedToolIds: ['multi_platform_export'], idempotencyKey: 'local-continuation',
+      context: { selectedEntityIds: [], visibleVersionIds: [], locale: 'zh-CN' },
+      skill: {
+        skillId: localSnapshot.id, skillVersion: 1, inputValues: {}, modelBindings: {},
+      },
+    };
+    const requestDigest = agentRunRequestDigest(request);
+    const task: CloudTask = {
+      id: 'run-local', userId: actor.id, projectId: request.projectId, type: 'agent-run',
+      status: 'processing', progress: 40, creditStatus: 'charged', creditCost: 0,
+      createdAt: 1, updatedAt: 2, idempotencyKey: request.idempotencyKey, requestDigest,
+    };
+    const events: AgentEvent[] = [{
+      eventId: 'created-local', runId: task.id, sequence: 1, type: 'run.created', timestamp: 'now',
+      payload: {
+        workspace: request.workspace, workspaceId: request.workspaceId,
+        executionRuntime: 'local', prompt: request.prompt, sourceVersionIds: [],
+        allowedToolIds: request.allowedToolIds, context: request.context, requestDigest,
+        skill: request.skill, skillSnapshot: localSnapshot,
+      },
+    }];
+
+    const continuation = await loadPersistedSkillContinuation({
+      actorUserId: actor.id, projectId: request.projectId, runId: task.id, task, events,
+    });
+
+    expect(continuation.definition).toMatchObject({
+      allowedSurfaces: ['canvas'], catalogSurfaces: ['canvas'],
+      steps: [expect.objectContaining({ runtime: 'local' })],
+    });
+    expect(continuationMocks.authorizeAgentContext).toHaveBeenCalledWith({
+      actorUserId: actor.id,
+      request,
+    });
   });
 
   it('stops continuation before registry creation when source media reauthorization fails', async () => {

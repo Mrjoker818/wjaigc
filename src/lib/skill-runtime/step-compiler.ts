@@ -8,10 +8,34 @@ import {
 
 import type {
   SkillDefinition,
+  SkillModelBinding,
   SkillStepCondition,
   SkillStepDefinition,
   SkillStepFanOut,
 } from './types';
+import { skillStepRuntime } from './types';
+
+export { skillStepModelRole, skillStepRuntime } from './types';
+
+const MODEL_ROLES = new Set<SkillModelBinding['role']>([
+  'orchestrator', 'image', 'video', 'vision', 'edit', 'three-d',
+]);
+
+export function validateSkillStep(step: SkillStepDefinition): SkillStepDefinition {
+  if (step.runtime !== undefined && step.runtime !== 'model' && step.runtime !== 'local') {
+    throw new Error('SKILL_STEP_RUNTIME_INVALID');
+  }
+  if (skillStepRuntime(step) === 'local') {
+    if (step.modelRole !== undefined) {
+      throw new Error('SKILL_LOCAL_STEP_MODEL_ROLE_FORBIDDEN');
+    }
+    return step;
+  }
+  if (!step.modelRole || !MODEL_ROLES.has(step.modelRole)) {
+    throw new Error('SKILL_MODEL_BINDING_REQUIRED');
+  }
+  return step;
+}
 
 export class SkillStepConditionError extends Error {
   readonly code = 'SKILL_STEP_CONDITION_INVALID';
@@ -262,6 +286,7 @@ export function compileConditionalSkillSteps(
   inputValues: Readonly<Record<string, unknown>>,
 ): SkillStepDefinition[] {
   return definition.steps.flatMap(step => {
+    validateSkillStep(step);
     if (step.when && !conditionMatches(definition, step, step.when, inputValues)) return [];
     const compiled = { ...step };
     delete compiled.when;

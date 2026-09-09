@@ -10,6 +10,7 @@ import { LOVART_PLATFORM_COMPLIANCE_SKILLS } from '@/lib/skill-runtime/platform-
 import {
   buildSkillAgentRunRequest,
   createSkillRun,
+  requiredSkillModelRoles,
   type SkillRunRequest,
 } from '@/lib/skill-runtime/run-request';
 import { createMemorySkillStorageAdapter, createSkillStore } from '@/lib/skill-runtime/storage';
@@ -84,6 +85,40 @@ function runtimeDependencies() {
 }
 
 describe('Skill runtime run requests', () => {
+  it('builds a provider-free request for a pure local Skill', async () => {
+    const localSkill: SkillDefinition = {
+      id: 'local-export', version: 1, name: 'Local export', category: 'export',
+      description: 'test', systemPrompt: 'Run the local export', allowedSurfaces: ['canvas'], inputs: [],
+      steps: [{
+        id: 'export', label: '批量导出', toolId: 'multi_platform_export',
+        runtime: 'local', execution: 'sequential', promptTemplate: '',
+        qualityGateIds: ['output-present'],
+      }],
+      enabled: true, builtIn: true, createdAt: 1, updatedAt: 1, usageCount: 0,
+    };
+    const dependencies = runtimeDependencies();
+    const localRequest: SkillRunRequest = {
+      ...input,
+      skillId: localSkill.id,
+      inputValues: {},
+      sourceVersionIds: [],
+      modelBindings: {},
+    };
+
+    expect(requiredSkillModelRoles(localSkill)).toEqual([]);
+    const request = await buildSkillAgentRunRequest(
+      localRequest,
+      { actorUserId: actor.id, ...dependencies },
+      localSkill,
+    );
+
+    expect(request).toMatchObject({ executionRuntime: 'local', mode: 'agent' });
+    expect(request).not.toHaveProperty('providerId');
+    expect(request).not.toHaveProperty('modelId');
+    expect(request.skill?.modelBindings).toEqual({});
+    expect(dependencies.resolveTaskModel).not.toHaveBeenCalled();
+  });
+
   it('revalidates frozen v1 compliance values, sources, and models against the current v2 definition', async () => {
     const currentSkill = { ...LOVART_PLATFORM_COMPLIANCE_SKILLS[0], version: 2 };
     const resolveTaskModel = vi.fn(async (providerId: string, modelId: string) => ({

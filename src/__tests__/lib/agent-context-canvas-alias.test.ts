@@ -1,11 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
 import { authorizeAgentContext, type AgentContextTransaction } from '@/lib/agent-runtime/context-adapters';
-import type { AgentRunRequest } from '@/lib/agent-runtime/types';
+import type { AgentRunRequest, ModelAgentRunRequest } from '@/lib/agent-runtime/types';
 
-function request(overrides: Partial<AgentRunRequest> = {}): AgentRunRequest {
+function request(overrides: Partial<ModelAgentRunRequest> = {}): ModelAgentRunRequest {
   return {
     projectId: 'project-a', workspace: 'canvas', workspaceId: 'canvas:project-a',
-    mode: 'agent', providerId: 'provider-a', modelId: 'model-a', prompt: 'Keep the product',
+    mode: 'agent', executionRuntime: 'model', providerId: 'provider-a', modelId: 'model-a', prompt: 'Keep the product',
     sourceVersionIds: ['version-a'], allowedToolIds: [], idempotencyKey: 'request-a',
     context: { selectedEntityIds: ['image-a'], visibleVersionIds: [], locale: 'zh-CN' },
     ...overrides,

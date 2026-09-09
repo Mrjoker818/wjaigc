@@ -1,7 +1,11 @@
 import { calculateConfiguredCreditCost } from '@/lib/credits';
 import type { CreditOperation } from '@/lib/credits';
 import type { SkillDefinition, SkillModelBinding, SkillStepDefinition } from './types';
-import { compileConditionalSkillSteps } from './step-compiler';
+import {
+  compileConditionalSkillSteps,
+  skillStepModelRole,
+  skillStepRuntime,
+} from './step-compiler';
 
 export interface FrozenModelBinding {
   providerId: string;
@@ -58,7 +62,9 @@ export function skillExecutionSteps(
   inputValues: Readonly<Record<string, unknown>> = {},
 ): SkillStepDefinition[] {
   const compiled = compileConditionalSkillSteps(skill, inputValues);
-  if (compiled.some(step => step.modelRole === 'orchestrator')) {
+  const hasModelSteps = skill.steps.length === 0
+    || skill.steps.some(step => skillStepRuntime(step) === 'model');
+  if (!hasModelSteps || compiled.some(step => skillStepModelRole(step) === 'orchestrator')) {
     return compiled;
   }
   return [{
@@ -73,8 +79,29 @@ export function skillExecutionSteps(
 }
 
 export function skillStepCreditOperation(step: SkillStepDefinition): CreditOperation {
-  if (step.modelRole === 'orchestrator') return 'chat';
+  if (skillStepModelRole(step) === 'orchestrator') return 'chat';
   return toolCostType(step.toolId);
+}
+
+export async function skillStepCreditCost(
+  step: SkillStepDefinition,
+  bindings: FrozenBindings,
+  dependencies: SkillCostEstimatorDependencies = defaultDependencies,
+): Promise<number> {
+  if (skillStepRuntime(step) === 'local') return 0;
+  const modelRole = skillStepModelRole(step);
+  const binding = modelRole ? bindings[modelRole] : undefined;
+  if (!binding) {
+    throw new SkillCostEstimateError(
+      'SKILL_MODEL_BINDING_REQUIRED',
+      `Missing model binding for role: ${modelRole}`,
+    );
+  }
+  return dependencies.calculateCreditCost(
+    skillStepCreditOperation(step),
+    binding.modelId,
+    { providerId: binding.providerId },
+  );
 }
 
 export async function estimateSkillRunCost(
@@ -85,20 +112,9 @@ export async function estimateSkillRunCost(
 ): Promise<SkillRunCostEstimate> {
   const definitions = skillExecutionSteps(skill, inputValues);
   const steps = await Promise.all(definitions.map(async step => {
-    const binding = bindings[step.modelRole];
-    if (!binding) {
-      throw new SkillCostEstimateError(
-        'SKILL_MODEL_BINDING_REQUIRED',
-        `Missing model binding for role: ${step.modelRole}`,
-      );
-    }
     return {
       stepId: step.id,
-      cost: await dependencies.calculateCreditCost(
-        skillStepCreditOperation(step),
-        binding.modelId,
-        { providerId: binding.providerId },
-      ),
+      cost: await skillStepCreditCost(step, bindings, dependencies),
     };
   }));
   const total = steps.reduce((sum, step) => sum + step.cost, 0);

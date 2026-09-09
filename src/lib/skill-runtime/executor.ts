@@ -13,6 +13,7 @@ import {
   parseDurableSkillOutput,
 } from './structured-output';
 import { buildSkillStepPrompt, selectSkillPredecessorOutputs } from './execution-context';
+import { skillStepModelRole } from './step-compiler';
 import type {
   DurableSkillOutput,
   SkillDefinition,
@@ -384,7 +385,8 @@ export function createSkillExecutor(dependencies: SkillExecutorDependencies) {
             try {
               if (controller.signal.aborted) throw abortError(controller.signal);
               startedStepIds.push(step.id);
-              const modelBinding = input.modelBindings[step.modelRole];
+              const modelRole = skillStepModelRole(step);
+              const modelBinding = modelRole ? input.modelBindings[modelRole] : undefined;
               const previousOutputs = selectSkillPredecessorOutputs(input.definition.steps, step.id, outputs);
               const requestDigest = skillStepRequestDigest({
               previousOutputs,

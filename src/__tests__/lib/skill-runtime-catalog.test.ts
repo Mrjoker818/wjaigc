@@ -13,6 +13,7 @@ import {
   SkillSurfaceForbiddenError,
 } from '@/lib/skill-runtime/catalog';
 import { CANVAS_PRESET_CHAT_SKILLS } from '@/lib/skill-runtime/canvas-presets';
+import type { SkillDefinition } from '@/lib/skill-runtime/types';
 import presetBaseline from '@/__tests__/fixtures/skill-runtime-presets.baseline.json';
 
 const canvasIds = [
@@ -56,6 +57,21 @@ const canvasClientSource = readFileSync(
 );
 
 describe('skill runtime catalog', () => {
+  it('uses catalogSurfaces for listing while allowedSurfaces remains executable', () => {
+    const skill = CANVAS_WORKFLOW_SKILLS[0] as SkillDefinition;
+    const allowedSurfaces = skill.allowedSurfaces;
+    const catalogSurfaces = skill.catalogSurfaces;
+    skill.allowedSurfaces = ['canvas', 'workflow', 'simple-chat'];
+    skill.catalogSurfaces = ['canvas', 'workflow'];
+    try {
+      expect(listSkillsForSurface('simple-chat')).not.toContain(skill);
+      expect(requireSkillForSurface(skill.id, 'simple-chat')).toBe(skill);
+    } finally {
+      skill.allowedSurfaces = allowedSurfaces;
+      skill.catalogSurfaces = catalogSurfaces;
+    }
+  });
+
   it('保留原 27 项定义和顺序，仅在末尾追加平台合规 Skill', () => {
     expect(CANVAS_PRESET_SKILLS.map(skill => skill.id)).toEqual(canvasIds);
     expect(CANVAS_PRESET_SKILLS).toHaveLength(21);

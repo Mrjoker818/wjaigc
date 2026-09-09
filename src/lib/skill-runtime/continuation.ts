@@ -3,7 +3,12 @@ import 'server-only';
 import type { AgentDownstreamExecutionContext } from '@/lib/agent-runtime/downstream-operations';
 import { authorizeAgentContext } from '@/lib/agent-runtime/context-adapters';
 import { agentRunRequestDigest } from '@/lib/agent-runtime/service';
-import type { AgentEvent, AgentRunRequest, AgentWorkspace } from '@/lib/agent-runtime/types';
+import type {
+  AgentEvent,
+  AgentRunRequest,
+  AgentRunRequestBase,
+  AgentWorkspace,
+} from '@/lib/agent-runtime/types';
 import { getCloudTaskForUser, type CloudTask } from '@/lib/cloud-task-storage';
 import { listManagedUsers } from '@/lib/server-auth';
 import type { User } from '@/lib/user-types';
@@ -17,7 +22,7 @@ import {
   resolveSkillInputs,
 } from './input-resolver';
 import { parseCompiledSkillFanOut } from './compiled-fan-out';
-import { assertCompiledSkillFanOutValues } from './step-compiler';
+import { assertCompiledSkillFanOutValues, validateSkillStep } from './step-compiler';
 import { assertSourceVersionBindings } from './run-request';
 import type { SkillDefinition, SkillInputField, SkillStepDefinition, SkillSurface } from './types';
 import { listAgentRunEvents } from '@/lib/agent-runtime/service';
@@ -53,7 +58,8 @@ function parseFrozenSteps(value: unknown): SkillStepDefinition[] | null {
       || typeof step.promptTemplate !== 'string'
       || (step.promptInstructionTemplate !== undefined
         && typeof step.promptInstructionTemplate !== 'string')
-      || typeof step.modelRole !== 'string'
+      || (step.runtime !== undefined && step.runtime !== 'model' && step.runtime !== 'local')
+      || (step.modelRole !== undefined && typeof step.modelRole !== 'string')
       || !Array.isArray(step.qualityGateIds)
       || !step.qualityGateIds.every(gate => typeof gate === 'string')
     ) return null;
@@ -63,7 +69,7 @@ function parseFrozenSteps(value: unknown): SkillStepDefinition[] | null {
     } catch {
       return null;
     }
-    result.push({
+    const parsed: SkillStepDefinition = {
       id: step.id,
       label: step.label,
       toolId: step.toolId,
@@ -73,10 +79,18 @@ function parseFrozenSteps(value: unknown): SkillStepDefinition[] | null {
       ...(typeof step.promptInstructionTemplate === 'string'
         ? { promptInstructionTemplate: step.promptInstructionTemplate }
         : {}),
-      modelRole: step.modelRole as SkillStepDefinition['modelRole'],
+      ...(step.runtime !== undefined ? { runtime: step.runtime } : {}),
+      ...(typeof step.modelRole === 'string'
+        ? { modelRole: step.modelRole as SkillStepDefinition['modelRole'] }
+        : {}),
       qualityGateIds: step.qualityGateIds as string[],
       ...(compiledFanOut ? { compiledFanOut } : {}),
-    });
+    };
+    try {
+      result.push(validateSkillStep(parsed));
+    } catch {
+      return null;
+    }
   }
   return result;
 }
@@ -98,6 +112,26 @@ export function frozenDefinition(
   if (snapshot.executionContextVersion !== undefined && snapshot.executionContextVersion !== 1) {
     throw new SkillRunRequestError('Frozen Skill context version is unsupported');
   }
+  const isSurfaceList = (value: unknown): value is SkillSurface[] => Array.isArray(value)
+    && value.every(item => typeof item === 'string'
+      && ['canvas', 'workflow', 'simple-chat'].includes(item))
+    && new Set(value).size === value.length;
+  if (snapshot.allowedSurfaces !== undefined && !isSurfaceList(snapshot.allowedSurfaces)) {
+    throw new SkillRunRequestError('Frozen Skill surfaces are invalid');
+  }
+  const allowedSurfaces = snapshot.allowedSurfaces === undefined
+    ? [surface]
+    : snapshot.allowedSurfaces;
+  if (!allowedSurfaces.includes(surface)) {
+    throw new SkillRunRequestError('Frozen Skill surfaces are invalid');
+  }
+  if (snapshot.catalogSurfaces !== undefined && (
+    !isSurfaceList(snapshot.catalogSurfaces)
+    || !snapshot.catalogSurfaces.every(item => allowedSurfaces.includes(item))
+  )) {
+    throw new SkillRunRequestError('Frozen Skill surfaces are invalid');
+  }
+  const catalogSurfaces = snapshot.catalogSurfaces ?? allowedSurfaces;
   let inputs: SkillInputField[] = [];
   if (snapshot.executionContextVersion === 1) {
     if (!steps || typeof snapshot.systemPrompt !== 'string' || !Array.isArray(snapshot.inputs)) {
@@ -183,7 +217,8 @@ export function frozenDefinition(
       description: '',
       ...(snapshot.executionContextVersion === 1 ? { executionContextVersion: 1 as const } : {}),
       systemPrompt: snapshot.executionContextVersion === 1 ? snapshot.systemPrompt as string : '',
-      allowedSurfaces: [surface],
+      allowedSurfaces,
+      catalogSurfaces,
       inputs,
       steps,
       enabled: true,
@@ -260,13 +295,11 @@ export async function loadPersistedSkillContinuation(input: {
     parsedRequest.sourceVersionIds,
   );
   const request = { ...parsedRequest, inputValues, sourceVersionIds };
-  const agentRequest: AgentRunRequest = {
+  const requestBase: AgentRunRequestBase = {
     projectId: request.projectId,
     workspace,
     workspaceId: request.workspaceId,
     mode: 'agent',
-    providerId: text(created.payload.providerId, 'providerId'),
-    modelId: text(created.payload.modelId, 'modelId'),
     prompt: text(created.payload.prompt, 'prompt'),
     sourceVersionIds: request.sourceVersionIds,
     allowedToolIds: Array.isArray(created.payload.allowedToolIds)
@@ -281,6 +314,17 @@ export async function loadPersistedSkillContinuation(input: {
       modelBindings: request.modelBindings,
     },
   };
+  const executionRuntime = created.payload.executionRuntime ?? 'model';
+  if (executionRuntime !== 'model' && executionRuntime !== 'local') {
+    throw new SkillRunRequestError('executionRuntime is invalid');
+  }
+  const agentRequest: AgentRunRequest = executionRuntime === 'local'
+    ? { ...requestBase, executionRuntime: 'local' }
+    : {
+        ...requestBase,
+        providerId: text(created.payload.providerId, 'providerId'),
+        modelId: text(created.payload.modelId, 'modelId'),
+      };
   const requestDigest = agentRunRequestDigest(agentRequest);
   if (!task.requestDigest || task.requestDigest !== requestDigest || created.payload.requestDigest !== requestDigest) {
     throw new SkillRunRequestError('Persisted Skill request digest is invalid');

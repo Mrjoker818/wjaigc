@@ -27,7 +27,9 @@ import type {
   AgentEventType,
   AgentRunProjection,
   AgentRunRequest,
+  ModelAgentRunRequest,
 } from './types';
+import { requireModelAgentRunRequest } from './types';
 import { withAgentExecutionFence, type AgentExecutionFence } from './execution-fence';
 import type {
   AgentEditExecutionContinuationV1,
@@ -241,6 +243,7 @@ export function createSameTaskAgentAdapter(
   }
 
   async function adopt(input: AdoptSameTaskInput): Promise<SameTaskAgentAdoption> {
+    const request: ModelAgentRunRequest = requireModelAgentRunRequest(input.request);
       const admittedTask = await dependencies.getTaskForUser(
         input.taskId,
         input.actor.id,
@@ -248,13 +251,13 @@ export function createSameTaskAgentAdapter(
       if (
         !admittedTask
         || !admittedTask.projectId
-        || admittedTask.projectId !== input.request.projectId
+        || admittedTask.projectId !== request.projectId
       ) {
         throw new SameTaskAgentRunNotFoundError();
       }
       if (
-        admittedTask.providerId !== input.request.providerId
-        || admittedTask.model !== input.request.modelId
+        admittedTask.providerId !== request.providerId
+        || admittedTask.model !== request.modelId
       ) {
         throw new AgentModelRouteMismatchError();
       }
@@ -262,7 +265,7 @@ export function createSameTaskAgentAdapter(
         throw new SameTaskAgentRunTerminalError(admittedTask.status);
       }
       try {
-        assertAgentEventPayloadSafe(input.request as unknown as Record<string, unknown>);
+        assertAgentEventPayloadSafe(request as unknown as Record<string, unknown>);
       } catch (error) {
         if (error instanceof AgentEventPayloadError) {
           throw new SameTaskAgentRunRequestError();
@@ -272,20 +275,20 @@ export function createSameTaskAgentAdapter(
 
       await dependencies.authorizeContext({
         actorUserId: input.actor.id,
-        request: input.request,
+        request,
       });
       const model = await dependencies.resolveTaskModel(
-        input.request.providerId,
-        input.request.modelId,
+        request.providerId,
+        request.modelId,
         input.actor.id,
       );
       const authorization = authorizeAgentTools({
-        requestedToolIds: input.request.allowedToolIds,
-        workspace: input.request.workspace,
+        requestedToolIds: request.allowedToolIds,
+        workspace: request.workspace,
         userProductTypes: userProductTypes(input.actor),
         modelCapabilities: [...toAgentModelCapabilitySet(model)],
         capabilityScope: 'downstream',
-        skillAdmission: input.request.skill !== undefined,
+        skillAdmission: request.skill !== undefined,
       });
       if (
         authorization.denials.length > 0
@@ -296,9 +299,9 @@ export function createSameTaskAgentAdapter(
 
       const eventBase = {
         actorUserId: input.actor.id,
-        projectId: input.request.projectId,
+        projectId: request.projectId,
         runId: input.taskId,
-        workspace: input.request.workspace,
+        workspace: request.workspace,
       };
       const created = await dependencies.appendAdoptedEvent({
         ...eventBase,
@@ -306,22 +309,22 @@ export function createSameTaskAgentAdapter(
         type: 'run.created',
         payload: input.agentEditContinuation ? {
           adopted: true,
-          workspace: input.request.workspace,
+          workspace: request.workspace,
           rootToolId: 'agent_edit',
           continuation: input.agentEditContinuation,
           requestDigest: input.agentEditContinuation.descriptorDigest,
         } : {
           adopted: true,
-          workspace: input.request.workspace,
-          workspaceId: input.request.workspaceId,
-          mode: input.request.mode,
-          providerId: input.request.providerId,
-          modelId: input.request.modelId,
-          prompt: input.request.prompt,
-          sourceVersionIds: input.request.sourceVersionIds,
+          workspace: request.workspace,
+          workspaceId: request.workspaceId,
+          mode: request.mode,
+          providerId: request.providerId,
+          modelId: request.modelId,
+          prompt: request.prompt,
+          sourceVersionIds: request.sourceVersionIds,
           allowedToolIds: authorization.tools.map(tool => tool.toolId),
-          context: input.request.context,
-          requestDigest: createHash('sha256').update(JSON.stringify(input.request)).digest('hex'),
+          context: request.context,
+          requestDigest: createHash('sha256').update(JSON.stringify(request)).digest('hex'),
           ...(input.resumeExecution ? { resumeExecution: input.resumeExecution } : {}),
         },
       });
@@ -339,7 +342,7 @@ export function createSameTaskAgentAdapter(
       });
       const events = await dependencies.listEvents({
         actorUserId: input.actor.id,
-        projectId: input.request.projectId,
+        projectId: request.projectId,
         runId: input.taskId,
       });
       return {
@@ -349,10 +352,10 @@ export function createSameTaskAgentAdapter(
         projection: reduceAgentEvents(events),
         tools: authorization.tools,
         actorUserId: input.actor.id,
-        projectId: input.request.projectId,
-        workspace: input.request.workspace,
+        projectId: request.projectId,
+        workspace: request.workspace,
         toolId: input.toolId,
-        requestDigest: createHash('sha256').update(JSON.stringify(input.request)).digest('hex'),
+        requestDigest: createHash('sha256').update(JSON.stringify(request)).digest('hex'),
       };
   }
 

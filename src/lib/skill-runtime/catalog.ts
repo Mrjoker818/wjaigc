@@ -46,7 +46,7 @@ export class SkillSurfaceForbiddenError extends Error {
 
 export function listSkillsForSurface(surface: SkillSurface): SkillDefinition[] {
   return ALL_BUILT_IN_SKILLS.filter(
-    skill => skill.enabled && skill.allowedSurfaces.includes(surface),
+    skill => skill.enabled && (skill.catalogSurfaces ?? skill.allowedSurfaces).includes(surface),
   );
 }
 

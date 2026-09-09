@@ -53,19 +53,50 @@ export interface AgentContextSnapshot {
   locale: 'zh-CN' | 'en-US';
 }
 
-export interface AgentRunRequest {
+export interface AgentRunRequestBase {
   projectId: string;
   workspace: AgentWorkspace;
   workspaceId: string;
   mode: AgentMode;
-  providerId: string;
-  modelId: string;
   prompt: string;
   sourceVersionIds: string[];
   allowedToolIds: string[];
   idempotencyKey: string;
   context: AgentContextSnapshot;
   skill?: AgentSkillInvocation;
+}
+
+export type ModelAgentRunRequest = AgentRunRequestBase & {
+  executionRuntime?: 'model';
+  providerId: string;
+  modelId: string;
+};
+
+export type LocalAgentRunRequest = AgentRunRequestBase & {
+  executionRuntime: 'local';
+  providerId?: never;
+  modelId?: never;
+};
+
+export type AgentRunRequest = ModelAgentRunRequest | LocalAgentRunRequest;
+
+export class AgentModelRuntimeRequiredError extends Error {
+  readonly code = 'AGENT_MODEL_RUNTIME_REQUIRED';
+  readonly status = 400;
+
+  constructor() {
+    super('This Agent boundary requires model execution');
+    this.name = 'AgentModelRuntimeRequiredError';
+  }
+}
+
+export function requireModelAgentRunRequest(
+  request: AgentRunRequest,
+): ModelAgentRunRequest {
+  if (request.executionRuntime === 'local') {
+    throw new AgentModelRuntimeRequiredError();
+  }
+  return request;
 }
 
 export interface AgentRunBillingQuote {

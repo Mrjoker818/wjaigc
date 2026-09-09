@@ -34,6 +34,8 @@ export interface SkillModelBinding {
   requiredCapabilities: readonly string[];
 }
 
+export type SkillStepRuntime = 'model' | 'local';
+
 export interface SkillStepCondition {
   input: string;
   includes: readonly (string | number | boolean)[];
@@ -61,7 +63,8 @@ export interface SkillStepDefinition {
   parallelGroup?: string;
   promptTemplate: string;
   promptInstructionTemplate?: string;
-  modelRole: SkillModelBinding['role'];
+  runtime?: SkillStepRuntime;
+  modelRole?: SkillModelBinding['role'];
   qualityGateIds: readonly string[];
   when?: SkillStepCondition;
   fanOut?: SkillStepFanOut;
@@ -77,6 +80,7 @@ export interface SkillDefinition {
   description: string;
   systemPrompt: string;
   allowedSurfaces: readonly SkillSurface[];
+  catalogSurfaces?: readonly SkillSurface[];
   inputs: readonly SkillInputField[];
   steps: readonly SkillStepDefinition[];
   enabled: boolean;
@@ -87,6 +91,30 @@ export interface SkillDefinition {
   createdAt: number;
   updatedAt: number;
   usageCount: number;
+}
+
+export function skillStepRuntime(step: SkillStepDefinition): SkillStepRuntime {
+  return step.runtime ?? 'model';
+}
+
+export function skillStepModelRole(
+  step: SkillStepDefinition,
+): SkillModelBinding['role'] | undefined {
+  return skillStepRuntime(step) === 'model' ? step.modelRole : undefined;
+}
+
+export function requiredSkillModelRoles(
+  skill: SkillDefinition,
+): SkillModelBinding['role'][] {
+  const roles = new Set<SkillModelBinding['role']>();
+  const hasModelSteps = skill.steps.length === 0
+    || skill.steps.some(step => skillStepRuntime(step) === 'model');
+  if (hasModelSteps) roles.add('orchestrator');
+  for (const step of skill.steps) {
+    const role = skillStepModelRole(step);
+    if (role) roles.add(role);
+  }
+  return [...roles];
 }
 
 export interface SkillResultMedia {
