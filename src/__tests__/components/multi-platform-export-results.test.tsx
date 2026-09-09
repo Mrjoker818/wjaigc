@@ -25,6 +25,12 @@ const result = {
   failures: [],
 };
 
+function deferred<T>(): { promise: Promise<T>; reject: (reason: Error) => void } {
+  let reject!: (reason: Error) => void;
+  const promise = new Promise<T>((_resolve, fail) => { reject = fail; });
+  return { promise, reject };
+}
+
 describe('multi-platform export results', () => {
   it('fingerprints every canonical request field that can change an export plan', () => {
     const base = {
@@ -234,6 +240,48 @@ describe('multi-platform export results', () => {
     />);
     fireEvent.click(screen.getByRole('button', { name: '定位来源 version-source-1' }));
     await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('来源版本无权访问或已删除'));
+  });
+
+  it('clears source A preview as soon as source B lookup starts and keeps it cleared when B fails', async () => {
+    const pendingB = deferred<never>();
+    const twoImageResult = {
+      ...result,
+      imageAssetVersionIds: ['version-image-1', 'version-image-2'],
+    };
+    const onLocateSource = vi.fn((sourceVersionId: string) => sourceVersionId === 'version-source-a'
+      ? Promise.resolve({
+        assetVersionId: 'version-source-a', kind: 'image' as const,
+        url: '/source-a.png', name: '来源 A',
+      })
+      : pendingB.promise);
+    render(<MultiPlatformExportResults
+      projectId="project-1" result={twoImageResult}
+      references={[
+        { assetVersionId: 'version-image-1', kind: 'image', url: '/a.png' },
+        { assetVersionId: 'version-image-2', kind: 'image', url: '/b.png' },
+      ]}
+      files={[
+        {
+          filename: 'a.png', sourceAssetVersionId: 'version-source-a', derivedAssetVersionId: 'version-image-1',
+          platform: 'Instagram', usage: 'post', width: 1080, height: 1080, mimeType: 'image/png',
+          byteSize: 1234, sha256: `sha256:${'a'.repeat(64)}`,
+        },
+        {
+          filename: 'b.png', sourceAssetVersionId: 'version-source-b', derivedAssetVersionId: 'version-image-2',
+          platform: 'Instagram', usage: 'story', width: 1080, height: 1920, mimeType: 'image/png',
+          byteSize: 2345, sha256: `sha256:${'b'.repeat(64)}`,
+        },
+      ]}
+      onDownload={vi.fn()} onLocateSource={onLocateSource} onAddToCanvas={vi.fn()}
+    />);
+
+    fireEvent.click(screen.getByRole('button', { name: '定位来源 version-source-a' }));
+    expect(await screen.findByRole('img', { name: '来源 A' })).not.toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '定位来源 version-source-b' }));
+    expect(screen.queryByRole('img', { name: '来源 A' })).toBeNull();
+    pendingB.reject(new Error('来源 B 无权访问或已删除'));
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('来源 B 无权访问或已删除'));
+    expect(screen.queryByRole('img', { name: '来源 A' })).toBeNull();
   });
 
   it('builds a bounded platform ZIP from stable image references and reports progress', async () => {

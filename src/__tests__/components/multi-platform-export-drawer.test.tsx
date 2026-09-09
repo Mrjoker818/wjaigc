@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
 import { MultiPlatformExportDrawer } from '@/components/skill-runtime/MultiPlatformExportDrawer';
@@ -19,6 +19,12 @@ const enabledPresets = [
     recommendedFormat: 'jpeg' as const, supportsTransparency: false, enabled: true,
   },
 ];
+
+function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>(done => { resolve = done; });
+  return { promise, resolve };
+}
 
 function projection(overrides: Partial<AgentRunProjection> = {}): AgentRunProjection {
   return {
@@ -162,6 +168,43 @@ describe('MultiPlatformExportDrawer', () => {
     rerender(<MultiPlatformExportDrawer {...props} values={{ ...values, namingTemplate: '{asset}-{index}' }} />);
     expect(screen.queryByText('服务端校验成功')).toBeNull();
     expect(screen.queryByLabelText('服务端导出计划')).toBeNull();
+    expect(screen.getByText('尚未校验')).not.toBeNull();
+  });
+
+  it('does not let an estimate for request A validate request B after the form changes in flight', async () => {
+    const pending = deferred<{
+      minimum: number;
+      maximum: number;
+      steps: Array<{ stepId: string; cost: number }>;
+      exportPlan: { fileCount: number; totalPixels: number; estimatedZipBytes: number };
+    }>();
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(Response.json({ success: true, presets: enabledPresets }));
+    const valuesA = {
+      targetPresetIds: ['instagram-post-v1'], fit: 'cover',
+      background: '#ffffffff', namingTemplate: '{asset}-{size}',
+    };
+    const props = {
+      open: true, projectId: 'project-1', sourceAssetVersionIds: ['version-source-1'],
+      values: valuesA, onChange: vi.fn(), onEstimate: vi.fn(() => pending.promise),
+      onStart: vi.fn(), onClose: vi.fn(), fetcher,
+    } as const;
+    const { rerender } = render(<MultiPlatformExportDrawer {...props} />);
+    await waitFor(() => expect(screen.getByLabelText('Instagram 帖子')).not.toBeNull());
+
+    fireEvent.click(screen.getByRole('button', { name: '校验计划' }));
+    expect(screen.getByText('正在请求服务端校验')).not.toBeNull();
+    rerender(<MultiPlatformExportDrawer {...props} values={{ ...valuesA, namingTemplate: '{asset}-{index}' }} />);
+    await waitFor(() => expect(screen.getByText('尚未校验')).not.toBeNull());
+
+    await act(async () => {
+      pending.resolve({
+        minimum: 0, maximum: 0, steps: [{ stepId: 'export', cost: 0 }],
+        exportPlan: { fileCount: 1, totalPixels: 1_166_400, estimatedZipBytes: 840_000 },
+      });
+      await pending.promise;
+    });
+    expect(screen.queryByText('服务端校验成功')).toBeNull();
+    expect(screen.queryByText('积分已校验，导出计划尚未校验')).toBeNull();
     expect(screen.getByText('尚未校验')).not.toBeNull();
   });
 

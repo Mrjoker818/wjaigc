@@ -47,6 +47,7 @@ export function MultiPlatformExportResults({
   const runAction = async (key: string, action: () => void | Promise<void>): Promise<void> => {
     setPendingAction(key);
     setActionError(undefined);
+    if (key.startsWith('source:')) setSourcePreview(undefined);
     if (key.startsWith('group:')) setGroupProgress(0);
     try {
       await action();

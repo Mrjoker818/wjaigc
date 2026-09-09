@@ -203,3 +203,58 @@ git diff --check -- <Task7 本轮生产文件与测试文件>：退出码 0
 
 - 本轮未执行真实 375px 浏览器视觉验收、云端 Coze 导出或 Chromium/Firefox/WebKit 截图，因此这些项目仍明确为未验证。
 - 仅在 `main` 当前工作区修复；没有创建分支，没有触碰 `stable`，没有 push，也没有 amend。
+
+## Task7 最终竞态修复
+
+### 修复内容
+
+1. 校验开始时冻结请求 A 的规范指纹；await 返回后与 `useLayoutEffect` 同步的最新请求指纹比较。若用户期间已改为请求 B，A 的成功、部分成功或失败响应均不得覆盖 B 的“尚未校验”状态。
+2. estimate 和服务端导出计划仍只由与当前规范请求指纹匹配的数据派生，来源、平台、适配、背景或命名变化继续立即失效旧结果。
+3. 每次开始查看新来源版本时先清空旧预览。来源 B 查询失败后只显示 B 的错误，不继续展示来源 A。
+
+### TDD 证据
+
+RED 命令：
+
+```text
+pnpm exec vitest run src/__tests__/components/multi-platform-export-drawer.test.tsx src/__tests__/components/multi-platform-export-results.test.tsx --reporter=dot
+2 个测试文件失败
+24 项测试：2 failed / 22 passed
+```
+
+两个失败分别稳定证明：请求 A 飞行中切换到 B 后仍未回到“尚未校验”；开始查询来源 B 时来源 A 预览仍然存在。
+
+最小实现后专项 GREEN：
+
+```text
+pnpm exec vitest run src/__tests__/components/multi-platform-export-drawer.test.tsx src/__tests__/components/multi-platform-export-results.test.tsx --reporter=dot
+2 个测试文件通过
+24/24 项测试通过
+```
+
+### 最终验证
+
+Task7 四项计划测试：
+
+```text
+pnpm exec vitest run src/__tests__/components/multi-platform-export-drawer.test.tsx src/__tests__/components/multi-platform-export-results.test.tsx src/__tests__/components/chat-panel-multi-platform-export.test.tsx src/__tests__/components/chat-panel-skill-runtime.test.tsx --reporter=dot
+4 个测试文件通过
+31/31 项测试通过
+```
+
+Task7、drawer/results、ChatPanel、Run History、useSkillRun 与画布 placement 相关回归：
+
+```text
+17 个测试文件通过
+161/161 项测试通过
+```
+
+静态门禁：
+
+```text
+pnpm ts-check：退出码 0
+Task7 本轮目标 ESLint --quiet：退出码 0
+git diff --check -- <本轮 4 个生产/测试文件>：退出码 0
+```
+
+目标 ESLint 曾在 GREEN 后识别出 render 阶段写 ref 的 React 19 违规；已改为 `useLayoutEffect` 同步最新指纹，并重新执行上述全部测试和静态门禁。真实浏览器验收仍不在本轮范围内，不标记为已验证。

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   CheckSquare, Crop, FileArchive, FolderInput, Image as ImageIcon,
   Maximize2, PackageCheck, Play, Square, X,
@@ -127,6 +127,10 @@ export function MultiPlatformExportDrawer({
     sourceAssetVersionIds,
     values,
   }), [projectId, sourceAssetVersionIds, values]);
+  const latestRequestFingerprintRef = useRef(currentRequestFingerprint);
+  useLayoutEffect(() => {
+    latestRequestFingerprintRef.current = currentRequestFingerprint;
+  }, [currentRequestFingerprint]);
   const boundEstimate = estimateRequestFingerprint === currentRequestFingerprint ? estimate : undefined;
   const [estimateState, setEstimateState] = useState<'idle' | 'checking' | 'success' | 'partial' | 'failed'>(
     boundEstimate ? (serverExportPlan(boundEstimate) ? 'success' : 'partial') : 'idle',
@@ -135,7 +139,7 @@ export function MultiPlatformExportDrawer({
 
   useEffect(() => {
     setEstimateState(boundEstimate ? (serverExportPlan(boundEstimate) ? 'success' : 'partial') : 'idle');
-  }, [boundEstimate]);
+  }, [boundEstimate, currentRequestFingerprint]);
 
   useEffect(() => {
     if (!open) return undefined;
@@ -218,11 +222,14 @@ export function MultiPlatformExportDrawer({
   };
 
   const validatePlan = async (): Promise<void> => {
+    const requestedFingerprint = currentRequestFingerprint;
     setEstimateState('checking');
     try {
       const nextEstimate = await onEstimate();
+      if (latestRequestFingerprintRef.current !== requestedFingerprint) return;
       setEstimateState(nextEstimate ? (serverExportPlan(nextEstimate) ? 'success' : 'partial') : 'failed');
     } catch {
+      if (latestRequestFingerprintRef.current !== requestedFingerprint) return;
       setEstimateState('failed');
     }
   };
