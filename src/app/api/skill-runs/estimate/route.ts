@@ -136,19 +136,21 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       const bindings = await authorizeAndFreezeBindings(input.modelBindings, skill, {
         actorUserId: auth.userId, resolveTaskModel,
       });
-      const orchestrator = bindings.orchestrator!;
-      // Pricing depends on the frozen model roles, not on future upstream output.
-      // This context is authorization-only and is never submitted as a run.
-      await authorizeAgentContext({
-        actorUserId: auth.userId,
-        request: {
-          projectId: input.projectId, workspace: 'workflow', workspaceId: input.workspaceId,
-          mode: 'agent', providerId: orchestrator.providerId, modelId: orchestrator.modelId,
-          prompt: '', sourceVersionIds: input.sourceVersionIds, allowedToolIds: [],
-          idempotencyKey: input.idempotencyKey,
-          context: { selectedEntityIds: [], visibleVersionIds: input.sourceVersionIds, locale: 'zh-CN' },
-        },
-      });
+      const orchestrator = bindings.orchestrator;
+      if (orchestrator) {
+        // Pricing depends on the frozen model roles, not on future upstream output.
+        // This context is authorization-only and is never submitted as a run.
+        await authorizeAgentContext({
+          actorUserId: auth.userId,
+          request: {
+            projectId: input.projectId, workspace: 'workflow', workspaceId: input.workspaceId,
+            mode: 'agent', providerId: orchestrator.providerId, modelId: orchestrator.modelId,
+            prompt: '', sourceVersionIds: input.sourceVersionIds, allowedToolIds: [],
+            idempotencyKey: input.idempotencyKey,
+            context: { selectedEntityIds: [], visibleVersionIds: input.sourceVersionIds, locale: 'zh-CN' },
+          },
+        });
+      }
       return NextResponse.json({
         ...await estimateSkillRunCost(skill, bindings, undefined, input.inputValues), modelBindings: bindings,
         inputValidation: 'deferred-to-execution',

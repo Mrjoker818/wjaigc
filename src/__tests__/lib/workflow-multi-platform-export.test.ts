@@ -18,6 +18,9 @@ describe('workflow multi-platform export contract', () => {
         background: '#ffffffff',
         namingTemplate: '{asset}-{platform}-{size}',
       },
+      modelBindings: {
+        orchestrator: { providerId: 'stale-provider', modelId: 'stale-model' },
+      },
     };
 
     const request = buildWorkflowSkillRunRequest(node, {
@@ -30,10 +33,10 @@ describe('workflow multi-platform export contract', () => {
     });
 
     expect(request.body).toMatchObject({
-      modelBindings: {},
       sourceVersionIds: ['source-v1', 'source-v2'],
       inputValues: { sourceAssetVersionIds: ['source-v1', 'source-v2'] },
     });
+    expect(request.body.modelBindings).toEqual({});
   });
 
   it('projects export images, manifest, ZIP and outcome separately', () => {

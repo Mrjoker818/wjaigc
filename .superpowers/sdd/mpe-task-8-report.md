@@ -115,3 +115,64 @@ Task8 精确路径 git diff --check：退出码 0
 
 - 未执行云端 Coze、真实浏览器或 PostgreSQL 专项验收；这些不在 Task8 brief 的本地门禁范围内。
 - Vitest 在 jsdom 测试中打印既有 `--localstorage-file` 路径 warning，不影响退出码与断言结果。
+
+## NEEDS_FIXES 复审修复
+
+### 复审结论验证
+
+两项反馈均经代码路径核对确认：
+
+1. `workflow-node` estimate 冻结纯 local Skill 的空绑定后，仍以非空断言读取 `bindings.orchestrator`，导致请求进入统一 `500` 错误封装；
+2. `buildWorkflowSkillRunRequest()` 原样透传节点 `modelBindings`，旧工作流或导入节点可绕过 UI 过滤并携带无效 orchestrator。
+
+### TDD RED
+
+先新增真实 estimate route 测试，并把 Workflow 请求断言升级为严格空对象。生产代码修改前执行：
+
+```text
+pnpm exec vitest run src/__tests__/api/skill-run-estimate-local.test.ts src/__tests__/lib/workflow-multi-platform-export.test.ts
+
+2 个测试文件失败
+2 个测试失败，2 个测试通过
+```
+
+失败证据：
+
+- local multi-platform Skill 使用 `modelBindings: {}` 请求 Workflow estimate 时实际返回 `500`，预期 `200`；
+- 带历史残留 orchestrator 的 local Skill 底层请求实际输出该残留绑定，预期严格 `{}`。
+
+同一轮中非本地 model-backed estimate 测试通过，固定了旧路径行为。
+
+### 最小修复
+
+- estimate route 仅在权威冻结绑定中确有 orchestrator 时构建并授权模型 Agent 上下文；纯 local Skill 直接进入现有成本估算，返回零费用与空冻结绑定。
+- `buildWorkflowSkillRunRequest()` 使用 `requiredSkillModelRoles(skill)` 构造底层白名单绑定对象。UI 层过滤继续保留，但不再是唯一保护。
+- 非本地 Skill 的 orchestrator、image 等合法角色继续保留，并沿用既有授权与费用估算。
+
+### TDD GREEN 与回归
+
+直接 RED 套件修复后：
+
+```text
+2 个测试文件通过
+4 个测试通过
+0 失败
+```
+
+Task8 brief 全套加 estimate route、run-request、workflow estimate 与底层 Workflow Skill 回归：
+
+```text
+9 个测试文件通过
+157 个测试通过
+0 失败
+```
+
+复审修复提交前静态门禁：
+
+```text
+pnpm ts-check：退出码 0
+目标 ESLint --quiet：退出码 0
+本轮精确路径 git diff --check：退出码 0
+```
+
+本轮修复使用独立提交，不 amend，不 push。既有七个脏 SDD 文件继续保持未暂存、未还原。

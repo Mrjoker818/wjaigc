@@ -17,7 +17,7 @@ import { SHARED_ASPECT_RATIOS, calculateActualPixels } from './canvas-generation
 import { getModelParamType } from './canvas-generation-group';
 import { toAgentModelCapabilitySet } from './agent-runtime/model-capability-set';
 import { withImageOutputPreference, type ImageBackgroundMode } from './image-generation-output';
-import type { SkillDefinition, SkillInputField, SkillModelBinding } from './skill-runtime/types';
+import { requiredSkillModelRoles, type SkillDefinition, type SkillInputField, type SkillModelBinding } from './skill-runtime/types';
 import type { TaskModelDescriptor } from './task-core/model-capability-contract';
 
 // ==================== 节点类型 ====================
@@ -1859,10 +1859,14 @@ export function buildWorkflowSkillRunRequest(
     && !Array.isArray(node.config.inputValues)
     ? node.config.inputValues as Record<string, unknown>
     : {};
-  const modelBindings = node.config.modelBindings && typeof node.config.modelBindings === 'object'
+  const configuredModelBindings = node.config.modelBindings && typeof node.config.modelBindings === 'object'
     && !Array.isArray(node.config.modelBindings)
     ? node.config.modelBindings as Record<string, unknown>
     : {};
+  const requiredModelRoles = new Set<string>(requiredSkillModelRoles(skill));
+  const modelBindings = Object.fromEntries(
+    Object.entries(configuredModelBindings).filter(([role]) => requiredModelRoles.has(role)),
+  );
   const attempt = Math.max(0, Math.floor(context.attempt ?? 0));
   const sourceVersionIds = workflowSourceVersionIds(inputs);
   return {
