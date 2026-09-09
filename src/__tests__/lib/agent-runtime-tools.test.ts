@@ -144,6 +144,28 @@ describe('Agent tool authorization', () => {
     expect(toAgentModelCapabilitySet(model)).toEqual(new Set(['chat', 'vision']));
   });
 
+  it('uses an explicit vision capability on a multimodal chat model', () => {
+    const model: TaskModelDescriptor = {
+      providerId: 'apimart-chat',
+      modelId: 'gpt-4o',
+      kind: 'chat',
+      sourceType: 'chat',
+      protocol: 'chat-completions',
+      executionMode: 'sync',
+      allowedRatios: [],
+      allowedSizes: [],
+      qualityOptions: [],
+      maxOutputs: 1,
+      supportsReferenceImages: false,
+      supportsVision: true,
+      supportsMask: false,
+      outputKinds: ['text'],
+      capabilitySources: { supportsVision: 'admin' },
+    };
+
+    expect(toAgentModelCapabilitySet(model)).toEqual(new Set(['chat', 'vision']));
+  });
+
   it('uses the shared descriptor capability set in every Agent runtime admission path', () => {
     const runtimeFiles = [
       'src/lib/agent-runtime/admission-gate.ts',

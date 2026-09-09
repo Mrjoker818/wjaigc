@@ -35,6 +35,12 @@ const models: ModelInfo[] = [
     type: 'video',
     allowedDurationsSeconds: [7],
   },
+  {
+    id: 'gpt-4o',
+    name: 'GPT-4o',
+    providerId: 'provider-a',
+    type: 'chat',
+  },
 ];
 
 const initialValue: ProviderCapabilityOverridesV1 = {
@@ -178,6 +184,22 @@ describe('ModelCapabilityEditor', () => {
       version: 1,
       models: {
         'video-a': { allowedDurationsSeconds: [5, 7, 10], maxDurationSeconds: 10 },
+      },
+    });
+  });
+
+  it('lets an administrator explicitly mark a chat model as vision-capable', () => {
+    const onChange = vi.fn();
+    render(<ModelCapabilityEditor models={models} value={initialValue} onChange={onChange} />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'GPT-4o' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: '支持视觉理解' }));
+
+    expect(onChange).toHaveBeenLastCalledWith({
+      version: 1,
+      models: {
+        ...initialValue.models,
+        'gpt-4o': { supportsVision: true },
       },
     });
   });

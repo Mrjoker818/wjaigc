@@ -222,4 +222,28 @@ describe('unified task model capability resolution', () => {
       },
     });
   });
+
+  it('preserves an explicit vision capability on a chat model', () => {
+    const model: ModelInfo = {
+      id: 'gpt-4o',
+      name: 'GPT-4o',
+      providerId: 'apimart-chat',
+      type: 'chat',
+    };
+    const provider = createProvider({
+      id: 'apimart-chat',
+      type: 'chat',
+      model,
+      capabilities: { supportsVision: true },
+    });
+
+    const result = resolveTaskModelCatalogResultFromSnapshot([model], admin, [provider]);
+
+    expect(result.taskModelCatalog[0]).toMatchObject({
+      kind: 'chat',
+      sourceType: 'chat',
+      supportsVision: true,
+      capabilitySources: { supportsVision: 'admin' },
+    });
+  });
 });

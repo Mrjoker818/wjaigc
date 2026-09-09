@@ -56,7 +56,10 @@ function uniqueOptions<T>(...groups: Array<readonly T[] | undefined>): T[] {
 }
 
 function capabilityEditorModelType(providerType: string): ModelInfo['type'] {
-  return providerType === 'video' ? 'video' : 'image';
+  if (providerType === 'video' || providerType === 'chat' || providerType === 'vlm') {
+    return providerType;
+  }
+  return 'image';
 }
 
 export function buildCapabilityEditorModels(
@@ -68,7 +71,7 @@ export function buildCapabilityEditorModels(
   const discoveredById = new Map(discoveredModels.map(model => [model.id, model]));
   return Array.from(new Set(selectedModels)).map(modelId => {
     const discovered = discoveredById.get(modelId);
-    const type = discovered?.type === 'image' || discovered?.type === 'video'
+    const type = discovered && ['image', 'video', 'chat', 'vlm'].includes(discovered.type)
       ? discovered.type
       : capabilityEditorModelType(providerType);
     return discovered
@@ -124,13 +127,14 @@ function CapabilityCheckbox({
 
 export function ModelCapabilityEditor({ models, value, onChange }: ModelCapabilityEditorProps) {
   const editableModels = useMemo(
-    () => models.filter(model => model.type === 'image' || model.type === 'video'),
+    () => models.filter(model => ['image', 'video', 'chat', 'vlm'].includes(model.type)),
     [models],
   );
   const [selectedModelId, setSelectedModelId] = useState<string | null>(editableModels[0]?.id || null);
   const selectedModel = editableModels.find(model => model.id === selectedModelId) || editableModels[0];
   const selectedValue = selectedModel ? value.models[selectedModel.id] || {} : {};
   const isVideo = selectedModel?.type === 'video';
+  const isChatLike = selectedModel?.type === 'chat' || selectedModel?.type === 'vlm';
   const ratioOptions = uniqueOptions(
     IMAGE_RATIOS,
     selectedModel?.supportedAspectRatios,
@@ -219,7 +223,18 @@ export function ModelCapabilityEditor({ models, value, onChange }: ModelCapabili
         ))}
       </div>
 
-      {isVideo ? (
+      {isChatLike ? (
+        <div className="space-y-2">
+          <CapabilityCheckbox
+            label="支持视觉理解"
+            checked={selectedValue.supportsVision || false}
+            onChange={checked => patchSelected({ supportsVision: checked })}
+          />
+          <p className="text-xs text-muted-foreground">
+            仅在供应商文档明确支持当前模型读取图片时启用。
+          </p>
+        </div>
+      ) : isVideo ? (
         <div className="space-y-3">
           <fieldset className="space-y-1.5">
             <legend className="text-xs font-medium text-foreground">画面比例</legend>

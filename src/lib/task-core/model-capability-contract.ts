@@ -11,6 +11,7 @@ export const CAPABILITY_FIELDS = [
   'allowedSizes',
   'qualityOptions',
   'maxOutputs',
+  'supportsVision',
   'supportsReferenceImages',
   'maxReferenceImages',
   'supportsMask',
@@ -42,6 +43,7 @@ export interface TaskModelDescriptor {
   allowedSizes: string[];
   qualityOptions: string[];
   maxOutputs: number;
+  supportsVision?: boolean;
   supportsReferenceImages: boolean;
   maxReferenceImages?: number;
   supportsMask: boolean;

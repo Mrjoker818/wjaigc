@@ -148,6 +148,12 @@ export function readCapabilityOverride(value: unknown): CapabilityLayer {
   }
 
   if (
+    hasOwn(candidate, 'supportsVision')
+    && typeof candidate.supportsVision === 'boolean'
+  ) {
+    result.supportsVision = candidate.supportsVision;
+  }
+  if (
     hasOwn(candidate, 'supportsReferenceImages')
     && typeof candidate.supportsReferenceImages === 'boolean'
   ) {

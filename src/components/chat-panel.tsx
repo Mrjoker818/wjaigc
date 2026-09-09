@@ -2024,12 +2024,23 @@ export function ChatPanel({ themeStyle, projectId, onAddToPrompt, onAddImages, o
             [chatCatalog, false], [visionCatalog, true],
           ] as const) {
             if (!catalog?.models || !Array.isArray(catalog.models)) continue;
+            const descriptors = new Map(
+              (Array.isArray(catalog.taskModelCatalog) ? catalog.taskModelCatalog : [])
+                .filter((value): value is Record<string, unknown> => (
+                  Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+                ))
+                .map(descriptor => [
+                  `${String(descriptor.providerId || '')}::${String(descriptor.modelId || '')}`,
+                  descriptor,
+                ]),
+            );
             for (const raw of catalog.models as Array<Record<string, unknown>>) {
               const modelId = String(raw.id || raw.name || '');
               const providerId = typeof raw.providerId === 'string' ? raw.providerId : '';
               if (!modelId || !providerId) continue;
               const id = `${providerId}::${modelId}`;
               const existing = models.get(id);
+              const descriptor = descriptors.get(id);
               models.set(id, {
                 id,
                 name: raw.name && raw.name !== raw.id
@@ -2039,7 +2050,9 @@ export function ChatPanel({ themeStyle, projectId, onAddToPrompt, onAddImages, o
                 providerId,
                 ...(typeof raw.description === 'string' ? { description: raw.description } : {}),
                 ...(raw.isDefault === true ? { isDefault: true } : {}),
-                ...(supportsVision || existing?.supportsVision ? { supportsVision: true } : {}),
+                ...(supportsVision || descriptor?.supportsVision === true || existing?.supportsVision
+                  ? { supportsVision: true }
+                  : {}),
               });
             }
           }

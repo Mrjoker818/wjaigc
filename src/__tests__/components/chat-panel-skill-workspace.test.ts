@@ -92,6 +92,10 @@ function unavailableReasonFor(input: {
 }
 
 describe('Canvas Skill asset workspace identity', () => {
+  it('loads explicit vision capability from the unified task model catalog', () => {
+    expect(source).toContain('descriptor?.supportsVision === true');
+  });
+
   it.each(['session-old', 'session-new', ''])('uses the canvas placement regardless of chat session %s', async sessionId => {
     const request = requestFor(sessionId);
     expect(request.workspaceId).toBe('canvas:project-a');

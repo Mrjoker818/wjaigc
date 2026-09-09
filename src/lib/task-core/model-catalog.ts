@@ -426,6 +426,7 @@ function createBaseDescriptor(
         ...shared,
         kind,
         executionMode: 'sync',
+        supportsVision: sourceType === 'vlm',
         supportsReferenceImages: sourceType === 'vlm',
         outputKinds: ['text'],
       });

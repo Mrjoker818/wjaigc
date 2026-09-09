@@ -6,7 +6,7 @@ export function toAgentModelCapabilitySet(model: TaskModelDescriptor): Set<strin
   if (model.kind === 'edit') capabilities.add('edit');
   if (model.supportsReferenceImages) capabilities.add('reference-images');
   if (model.supportsMask) capabilities.add('edit');
-  if (model.sourceType === 'vlm') capabilities.add('vision');
+  if (model.supportsVision || model.sourceType === 'vlm') capabilities.add('vision');
   for (const operation of model.supportedOperations || []) capabilities.add(operation);
   return capabilities;
 }
