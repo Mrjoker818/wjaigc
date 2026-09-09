@@ -54,6 +54,27 @@
     "runListStatusAfterInterruption": 404,
     "runReadStatusAfterInterruption": 404
   },
+  "followUpProbe": {
+    "recordedAt": "2026-09-09T16:13:48+08:00",
+    "projectShellStatus": 200,
+    "previewProbeCount": 3,
+    "previewStatuses": [404, 404, 404],
+    "errorCode": "instance_not_found",
+    "errorMessage": "user specified sandbox instance not found",
+    "requestIds": [
+      "0709fd22-186d-962c-9993-e614ac956bd3",
+      "06294961-784d-97cc-b109-8e7b80f7a79d",
+      "a5e4b063-b3ba-964e-ab33-066b307e2d0e"
+    ],
+    "browserControl": {
+      "browser": "Microsoft Edge",
+      "extensionVersion": "1.26.901.11451",
+      "extensionProcessRunning": true,
+      "tabsEnumerated": true,
+      "attachResult": "Debugger unattached"
+    },
+    "classification": "Coze sandbox instance absent; request did not reach the application or provider"
+  },
   "unverified": [
     "run terminal status",
     "three per-image compliance reports",
@@ -65,5 +86,5 @@
     "JSON and HTML downloads",
     "refresh recovery"
   ],
-  "resumeInvariant": "When the Coze preview recovers, query the existing runId first. Do not create another paid run before its terminal and billing state are known."
+  "resumeInvariant": "Reinitialize the Coze sandbox from the project page, refresh the preview, then query the existing runId first. Do not create another paid run before its terminal and billing state are known."
 }

@@ -2119,6 +2119,13 @@ The focused gate test passes `7/7`; the actual protected-baseline command passes
 - 未关闭项：云端 Skill 成功产出与 AssetVersion、暂停恢复、失败步骤重试、取消退款、预览/下载、完整 Console/Network/Trace，以及 PostgreSQL/供应商相关的云端回执。
 - 禁止动作：不得更新 `stable`，不得以“本地 224 项通过”宣布 Task12 或全平台发布通过。
 
+## 2026-09-09 平台合规 Task 11 中断发布判断
+
+- Canvas 平台素材合规 Run `42ac7d13-b473-450d-a3f3-3323942a5b0d` 已完成 32 积分估价和 HTTP 201 创建，但终态、报告、AssetVersion 和积分结算仍未取证。
+- Coze 项目壳可访问，预览连续返回 `404 instance_not_found`，证明 sandbox 实例不存在；该响应没有进入应用或模型供应商。
+- Edge 扩展能够枚举既有标签，但调试附着返回 `Debugger unattached`。当前不能取得可信浏览器证据，也不得通过再建 Run 绕过阻塞。
+- **发布结论：不通过 Task 11 云端验收。** 恢复后先重建沙箱、刷新预览并读取原 Run；只有终态、账务、产物及刷新恢复证据齐全后才能关闭。
+
 ## 2026-09-06 Task12 发布增量
 
 - 旧 Skill 节点大图预览已在 Edge 云端通过；缺失的节点结果下载入口已在本地按 TDD 修复。

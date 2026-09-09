@@ -2938,4 +2938,6 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - 三张受管图片的合规 Skill 估价 HTTP 200，固定 32 积分；orchestrator 与 vision 均冻结 APImartLLM `gpt-4o`。
 - 创建请求 HTTP 201，Run ID `42ac7d13-b473-450d-a3f3-3323942a5b0d`。没有重放或创建第二个 Run。
 - 运行期间 Coze 预览实例变为边缘层 404，连续 12 次约 56 秒仍未恢复；登录、身份、列表和 Run 详情均不可达，故终态、报告、资产和账务尚不能核对。
+- 后续三次探针取得更精确的平台响应：HTTP 404、`error_code=instance_not_found`，明确说明目标 sandbox 实例不存在；Coze 项目壳仍为 HTTP 200。请求没有进入无界应用或供应商，不能登记为业务失败。
+- Edge 扩展 1.26.901.11451 的后台进程和标签枚举正常，但现有项目页与预览页均无法完成调试附着，返回 `Debugger unattached`。恢复时必须先由项目页重新初始化沙箱，再刷新预览，并优先读取原 Run。
 - **回归判定：REAL CREATE PASS / COZE INSTANCE LOST / TERMINAL AND BILLING UNVERIFIED。** 恢复后只读取同一 Run，不重新扣费。
