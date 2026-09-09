@@ -16,6 +16,12 @@ export const IMAGE_MODEL_CREDITS: Record<string, { credits: number; label: strin
     quality: { standard: 28, hd: 56 }, // HD ¥0.56/张
     resolution: { '1K': 28, '2K': 56, '4K': 112 },
   },
+  'gpt-image-2.5': {
+    credits: 60,
+    label: 'GPT Image 2.5',
+    quality: { low: 40, medium: 60, high: 100 },
+    resolution: { '1K': 60, '2K': 120, '4K': 240 },
+  },
   'gpt-image-2': {
     credits: 60, // ¥0.40-1.00/张，取中间值
     label: 'GPT Image 2',

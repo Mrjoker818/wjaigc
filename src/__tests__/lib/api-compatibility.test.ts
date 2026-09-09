@@ -43,6 +43,11 @@ describe('provider request contracts', () => {
       .toBe('2048x1152');
   });
 
+  it('maps APImart GPT Image 2.5 to documented pixel sizes by resolution tier', () => {
+    expect(resolveProviderPixelSize('16:9', '1K', '2K', 'gpt-image-2.5', PROFILE_APIMART)).toBe('1820x1024');
+    expect(resolveProviderPixelSize('16:9', '2K', '2K', 'gpt-image-2.5', PROFILE_APIMART)).toBe('3641x2048');
+    expect(resolveProviderPixelSize('16:9', '4K', '4K', 'gpt-image-2.5', PROFILE_APIMART)).toBe('7282x4096');
+  });
   it('hides the undocumented auto aspect ratio for 4SAPI while preserving it for APImart', () => {
     expect(getProviderAspectRatios('gpt-image-2', '4SAPI')).not.toContain('auto');
     expect(getProviderAspectRatios('gpt-image-2', 'APImart')).toContain('auto');

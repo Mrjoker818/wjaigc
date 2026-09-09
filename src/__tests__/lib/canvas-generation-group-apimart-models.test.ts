@@ -12,6 +12,21 @@ const APIMART = {
   requestStyle: 'images-generations',
 } as unknown as Parameters<typeof getProviderAspectRatios>[1];
 
+describe('apimart gpt-image-2.5 model capabilities (per apimart official docs)', () => {
+  it('exposes the documented 15 aspect ratios', () => {
+    expect(getProviderAspectRatios('gpt-image-2.5', APIMART)).toEqual([
+      'auto',
+      '1:1', '3:2', '2:3', '4:3', '3:4', '5:4', '4:5',
+      '16:9', '9:16', '2:1', '1:2', '3:1', '1:3', '21:9', '9:21',
+    ]);
+  });
+
+  it('supports resolution 1K/2K/4K and quality auto/low/medium/high', () => {
+    expect(getResolutionTierOptions('gpt-image-2.5', APIMART)).toEqual(['1K', '2K', '4K']);
+    expect(getQualityLevelOptions('gpt-image-2.5', APIMART)).toEqual(['auto', 'low', 'medium', 'high']);
+    expect(getModelParamType('gpt-image-2.5', APIMART)).toBe('both');
+  });
+});
 describe('apimart grok-imagine model capabilities (per apimart official docs)', () => {
   it('exposes the full 13-ratio list for grok-imagine-2.0-ext', () => {
     const ratios = getProviderAspectRatios('grok-imagine-2.0-ext', APIMART);

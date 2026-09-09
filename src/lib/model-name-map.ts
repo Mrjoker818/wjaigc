@@ -52,6 +52,7 @@ const MODEL_NAME_MAP: Array<{ pattern: string; entry: ModelNameEntry }> = [
   { pattern: 'dalle-2', entry: { name: 'DALL-E 2', type: 'image', provider: 'OpenAI' } },
   { pattern: 'gpt-4o-image', entry: { name: 'GPT-4o 图像', type: 'image', provider: 'OpenAI' } },
   // OpenAI GPT-image
+  { pattern: 'gpt-image-2.5', entry: { name: 'GPT Image 2.5', type: 'image', provider: 'APImart' } },
   { pattern: 'gpt-image-2-c', entry: { name: 'GPT Image 2 Chat', type: 'image', provider: 'OpenAI' } },
   { pattern: 'gpt-image-2', entry: { name: 'GPT Image 2', type: 'image', provider: 'OpenAI' } },
   { pattern: 'gpt-image-1.5', entry: { name: 'GPT Image 1.5', type: 'image', provider: 'OpenAI' } },

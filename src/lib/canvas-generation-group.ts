@@ -283,8 +283,9 @@ export const MODEL_ASPECT_RATIOS: Record<string, string[]> = {
     'seedance': ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3', '21:9'],
 
     // ===== GPT Image 系列（APIMart/PearAPI官方文档）=====
-    // 官方支持15种比例 + auto自动选择，resolution参数控制分辨率档位（1k/2k/4k）
-    // 参考：https://docs.apimart.ai/cn/api-reference/images/gpt-image-2/generation
+    // GPT Image 2.5 与 2 使用同一 APImart 参数契约：15种比例 + auto，resolution=1k|2k|4k，quality=auto|low|medium|high
+    // 参考：https://docs.apimart.ai/cn/api-reference/images/gpt-image-2.5/generation
+    'gpt-image-2.5': ['auto', '1:1', '3:2', '2:3', '4:3', '3:4', '5:4', '4:5', '16:9', '9:16', '2:1', '1:2', '3:1', '1:3', '21:9', '9:21'],
     'gpt-image-2': ['auto', '1:1', '3:2', '2:3', '4:3', '3:4', '5:4', '4:5', '16:9', '9:16', '2:1', '1:2', '3:1', '1:3', '21:9', '9:21'],
     'gpt-image-2-official': ['auto', '1:1', '3:2', '2:3', '4:3', '3:4', '5:4', '4:5', '16:9', '9:16', '2:1', '1:2', '3:1', '1:3', '21:9', '9:21'],
     'gpt-image-1': ['auto', '1:1', '3:2', '2:3', '4:3', '3:4', '5:4', '4:5', '16:9', '9:16', '2:1', '1:2', '3:1', '1:3', '21:9', '9:21'],
@@ -411,7 +412,8 @@ export const MODEL_QUALITIES: Record<string, string[]> = {
     'seedance': ['2K', '4K'],
 
     // ===== GPT Image 系列 =====
-    // 官方: quality="auto"|"low"|"medium"|"high"
+    // APImart GPT Image 2.5/2: quality="auto"|"low"|"medium"|"high"
+    'gpt-image-2.5': ['auto', 'low', 'medium', 'high'],
     'gpt-image-2': ['auto', 'low', 'medium', 'high'],
     'gpt-image-2-official': ['auto', 'low', 'medium', 'high'],
     'gpt-image-1': ['auto', 'low', 'medium', 'high'],
@@ -514,7 +516,7 @@ export const RESOLUTION_TIER_MODELS = [
 /** 质量级别型模型（参数值是"standard/hd/auto/low/medium/high"，控制细节增强） */
 export const QUALITY_LEVEL_MODELS = [
     // GPT-Image 系列
-    'gpt-image-2', 'gpt-image-2-official', 'gpt-image-1', 'gpt-image-2-c',
+    'gpt-image-2.5', 'gpt-image-2', 'gpt-image-2-official', 'gpt-image-1', 'gpt-image-2-c',
     // DALL-E 3
     'dall-e-3',
     // Ideogram
