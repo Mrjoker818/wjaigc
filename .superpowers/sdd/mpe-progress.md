@@ -5,4 +5,5 @@ Base: d98e2f0dd49275c8148b763da32215a1fdac6672
 Task 1: complete (`d98e2f0d..ad0e204d`, review APPROVED, 367/367 tests)
 Task 2: complete (`ae74dad3..865adafb`, review APPROVED, 46/46 tests)
 Task 3: complete (`e5f8a109..71c02a4e`, review APPROVED, 34/34 tests)
-Task 4: pending
+Task 4: complete (`fbbd2767..f53429dc`, review APPROVED, 115/115 security tests)
+Task 5: pending
