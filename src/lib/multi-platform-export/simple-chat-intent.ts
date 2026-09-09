@@ -85,28 +85,42 @@ interface SimpleChatExportContextMessage {
   content: string;
   retryContext?: {
     sourceVersionIds?: readonly string[];
+    selectedEntityIds?: readonly string[];
     canvasProjectId?: string;
+    exportSourceMessageId?: string;
+    userMessageId?: string;
   };
 }
 
 export function resolveSimpleChatExportRequestContext(input: {
   messages: readonly SimpleChatExportContextMessage[];
   currentSourceVersionIds: readonly string[];
+  currentSelectedEntityIds: readonly string[];
+  currentSourceMessageId: string;
   currentAssetProjectId: string;
-}): { sourceVersionIds: string[]; assetProjectId: string } {
+}): { sourceVersionIds: string[]; selectedEntityIds: string[]; sourceMessageId: string; assetProjectId: string } {
   const currentSourceVersionIds = [...new Set(input.currentSourceVersionIds.filter(Boolean))];
   if (currentSourceVersionIds.length > 0) {
     return {
       sourceVersionIds: currentSourceVersionIds,
+      selectedEntityIds: [...new Set(input.currentSelectedEntityIds.filter(Boolean))],
+      sourceMessageId: input.currentSourceMessageId,
       assetProjectId: input.currentAssetProjectId,
     };
   }
   const previous = input.messages.at(-1);
   if (previous?.role !== 'assistant' || !isSimpleChatExportClarification(previous.content)) {
-    return { sourceVersionIds: [], assetProjectId: input.currentAssetProjectId };
+    return {
+      sourceVersionIds: [], selectedEntityIds: [], sourceMessageId: input.currentSourceMessageId,
+      assetProjectId: input.currentAssetProjectId,
+    };
   }
   return {
     sourceVersionIds: [...new Set((previous.retryContext?.sourceVersionIds || []).filter(Boolean))],
+    selectedEntityIds: [...new Set((previous.retryContext?.selectedEntityIds || []).filter(Boolean))],
+    sourceMessageId: previous.retryContext?.exportSourceMessageId
+      || previous.retryContext?.userMessageId
+      || input.currentSourceMessageId,
     assetProjectId: previous.retryContext?.canvasProjectId || input.currentAssetProjectId,
   };
 }

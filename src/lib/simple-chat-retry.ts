@@ -39,6 +39,7 @@ export interface SimpleChatRetryContextV1 {
   reasoningEffort?: string;
   responseSpeed?: string;
   canvasProjectId?: string;
+  exportSourceMessageId?: string;
   sourceVersionIds: string[];
   selectedEntityIds: string[];
   historyMessageIds: string[];
@@ -200,6 +201,7 @@ export function readSimpleChatRetryContext(
   const reasoningEffort = readOptionalBoundedString(value.reasoningEffort);
   const responseSpeed = readOptionalBoundedString(value.responseSpeed);
   const canvasProjectId = readOptionalBoundedString(value.canvasProjectId);
+  const exportSourceMessageId = readOptionalBoundedString(value.exportSourceMessageId);
   const sourceVersionIds = readIdentifierArray(value.sourceVersionIds);
   const selectedEntityIds = readIdentifierArray(value.selectedEntityIds);
   const historyMessageIds = readIdentifierArray(value.historyMessageIds);
@@ -212,7 +214,7 @@ export function readSimpleChatRetryContext(
     !projectId || !taskId || !userMessageId || !assistantMessageId || !idempotencyKey
     || !IDEMPOTENCY_KEY_PATTERN.test(idempotencyKey) || !modelId || !providerId
     || imageModelId === null || imageProviderId === null || reasoningEffort === null
-    || responseSpeed === null || canvasProjectId === null || !sourceVersionIds
+    || responseSpeed === null || canvasProjectId === null || exportSourceMessageId === null || !sourceVersionIds
     || !selectedEntityIds || !historyMessageIds || !systemMessages || !knowledgeItems || !memories
     || query === null || (value.kind === 'deep-research' && !query)
     || typeof value.webSearch !== 'boolean'
@@ -245,6 +247,7 @@ export function readSimpleChatRetryContext(
     ...(reasoningEffort ? { reasoningEffort } : {}),
     ...(responseSpeed ? { responseSpeed } : {}),
     ...(canvasProjectId ? { canvasProjectId } : {}),
+    ...(exportSourceMessageId ? { exportSourceMessageId } : {}),
     sourceVersionIds,
     selectedEntityIds,
     historyMessageIds,

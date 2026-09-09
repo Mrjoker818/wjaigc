@@ -46,6 +46,7 @@ import {
 } from '@/lib/multi-platform-export/simple-chat-intent';
 import { MULTI_PLATFORM_EXPORT_SKILL_ID } from '@/lib/skill-runtime/multi-platform-export-preset';
 import { createSkillRun, dispatchSkillRunExecution } from '@/lib/skill-runtime/service';
+import { authorizeSimpleChatExportSources } from '@/lib/multi-platform-export/simple-chat-source-authorization';
 
 const DEFAULT_SYSTEM_PROMPT = `你是无界AI的智能助手。你可以：
 1. 回答用户的各种问题
@@ -307,7 +308,7 @@ export async function POST(request: NextRequest) {
   }
   let body: {
     assetAction?: string;
-    messages?: { role: string; content: string; images?: string[] }[];
+    messages?: { id?: string; role: string; content: string; images?: string[] }[];
     model?: string;
     providerId?: string;
     stream?: boolean;
@@ -330,6 +331,7 @@ export async function POST(request: NextRequest) {
     reasoningEffort?: string;
     responseSpeed?: string;
     sourceVersionIds?: string[];
+    sourceMessageId?: string;
     selectedEntityIds?: string[];
     skillId?: unknown;
   };
@@ -432,7 +434,7 @@ export async function POST(request: NextRequest) {
     ? messages.slice(0, latestUserIndex - 1).findLast(message => message.role === 'user')
     : undefined;
   const exportUserMessages = [previousUserMessage, latestUserMessage].filter(
-    (message): message is { role: string; content: string; images?: string[] } => Boolean(message),
+    (message): message is { id?: string; role: string; content: string; images?: string[] } => Boolean(message),
   );
   const exportMessage = exportUserMessages.map(message => message.content).join('\n');
   const exportCandidate = parseSimpleChatExportIntent(exportMessage, []);
@@ -445,10 +447,21 @@ export async function POST(request: NextRequest) {
     const sourceVersionIds = Array.isArray(body.sourceVersionIds)
       ? [...new Set(body.sourceVersionIds.filter((value): value is string => typeof value === 'string' && value.length > 0))]
       : [];
+    const selectedEntityIds = Array.isArray(body.selectedEntityIds)
+      ? body.selectedEntityIds.filter((value): value is string => typeof value === 'string' && value.length > 0)
+      : [];
+    const sourceMessageId = typeof body.sourceMessageId === 'string' ? body.sourceMessageId.trim() : '';
+    const sourceMessage = exportUserMessages.find(message => (
+      message.role === 'user' && message.id === sourceMessageId
+    ));
     const hasManagedSources = Boolean(
       body.assetProjectId
+      && body.taskId
+      && sourceMessageId
       && sourceVersionIds.length > 0
-      && exportUserMessages.some(message => Array.isArray(message.images) && message.images.length > 0),
+      && selectedEntityIds.length === sourceVersionIds.length
+      && Array.isArray(sourceMessage?.images)
+      && sourceMessage.images.length === sourceVersionIds.length,
     );
     const missing = exportIntent.kind === 'needs_clarification'
       ? exportIntent.missing.filter(field => field !== 'sources' || !hasManagedSources)
@@ -464,6 +477,26 @@ export async function POST(request: NextRequest) {
     }
 
     const projectId = body.assetProjectId!;
+    try {
+      await authorizeSimpleChatExportSources({
+        actorUserId: user.id,
+        projectId,
+        workspaceId: `standalone-chat:${body.projectId || 'chat'}`,
+        taskId: body.taskId!,
+        messageId: sourceMessageId,
+        sourceVersionIds,
+        entityIds: selectedEntityIds,
+        messageImageUrls: sourceMessage!.images!,
+      });
+    } catch (error) {
+      const authorization = error as { code?: unknown; status?: unknown };
+      return Response.json({
+        code: typeof authorization.code === 'string'
+          ? authorization.code
+          : 'SIMPLE_CHAT_EXPORT_SOURCE_FORBIDDEN',
+        error: 'Authorized chat attachment source was not found',
+      }, { status: authorization.status === 403 ? 403 : 404 });
+    }
     const result = await createSkillRun({
       actor: user,
       request: {
@@ -486,18 +519,20 @@ export async function POST(request: NextRequest) {
         ).digest('hex')}`,
       },
     });
-    const execution = await dispatchSkillRunExecution({
-      actorUserId: user.id,
-      runId: result.runId,
-      recoveryOnly: result.reused,
-    });
-    if (execution.completion) {
-      void execution.completion.catch(error => {
-        console.error('[simple-chat] controlled export dispatch failed', {
-          runId: result.runId,
-          code: error instanceof Error ? error.name : 'UNKNOWN',
-        });
+    if (!result.reused) {
+      const execution = await dispatchSkillRunExecution({
+        actorUserId: user.id,
+        runId: result.runId,
+        recoveryOnly: false,
       });
+      if (execution.completion) {
+        void execution.completion.catch(error => {
+          console.error('[simple-chat] controlled export dispatch failed', {
+            runId: result.runId,
+            code: error instanceof Error ? error.name : 'UNKNOWN',
+          });
+        });
+      }
     }
     return simpleChatEventResponse({
       type: 'multi_platform_export',

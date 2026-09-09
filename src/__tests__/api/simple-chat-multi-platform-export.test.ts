@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   findProviderForModel: vi.fn(),
   getSessionUser: vi.fn(),
   listEnabledPlatformExportPresets: vi.fn(),
+  authorizeSimpleChatExportSources: vi.fn(),
 }));
 
 vi.mock('server-only', () => ({}));
@@ -18,6 +19,13 @@ vi.mock('@/lib/server-api-config', () => ({
 vi.mock('@/lib/server-auth', () => ({ getSessionUser: mocks.getSessionUser }));
 vi.mock('@/lib/multi-platform-export/presets', () => ({
   listEnabledPlatformExportPresets: mocks.listEnabledPlatformExportPresets,
+}));
+vi.mock('@/lib/multi-platform-export/simple-chat-source-authorization', () => ({
+  authorizeSimpleChatExportSources: mocks.authorizeSimpleChatExportSources,
+  SimpleChatExportSourceAuthorizationError: class extends Error {
+    code = 'SIMPLE_CHAT_EXPORT_SOURCE_FORBIDDEN';
+    status = 404;
+  },
 }));
 vi.mock('@/lib/skill-runtime/service', () => ({
   createSkillRun: mocks.createSkillRun,
@@ -52,16 +60,19 @@ const presets = [
 function request(
   content: string,
   sourceVersionIds: string[] = ['version-source-1'],
-  history: Array<{ role: string; content: string; images?: string[] }> = [],
+  history: Array<{ id: string; role: string; content: string; images?: string[] }> = [],
+  sourceMessageId = 'user-message-1',
 ): NextRequest {
   return new NextRequest('http://localhost/api/simple-chat/chat', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'chat-request-1' },
     body: JSON.stringify({
-      messages: [...history, { role: 'user', content, images: sourceVersionIds.length ? ['/managed.png'] : [] }],
+      messages: [...history, { id: 'user-message-1', role: 'user', content, images: sourceVersionIds.length ? ['/managed.png'] : [] }],
       model: 'chat-model', providerId: 'provider-1',
       projectId: 'chat-project-1', taskId: 'task-1', responseMessageId: 'message-2',
       assetProjectId: 'project-1', sourceVersionIds,
+      sourceMessageId,
+      selectedEntityIds: sourceVersionIds.map((_, index) => `task-1:${sourceMessageId}:${index}`),
       idempotencyKey: 'chat-request-1',
     }),
   });
@@ -76,6 +87,9 @@ describe('POST /api/simple-chat/chat multi-platform export intent', () => {
     mocks.listEnabledPlatformExportPresets.mockResolvedValue(presets);
     mocks.createSkillRun.mockResolvedValue({ runId: 'run-export-1', reused: false });
     mocks.dispatchSkillRunExecution.mockResolvedValue({ started: true, completion: Promise.resolve() });
+    mocks.authorizeSimpleChatExportSources.mockResolvedValue({
+      sourceVersionIds: ['version-source-1'], mediaUrls: ['/managed.png'],
+    });
   });
 
   it('creates the shared local Skill Run with the Simple Chat surface and no model bindings', async () => {
@@ -99,6 +113,12 @@ describe('POST /api/simple-chat/chat multi-platform export intent', () => {
           namingTemplate: '{project}-{asset}-{platform}-{size}-{index}',
         },
       }),
+    });
+    expect(mocks.authorizeSimpleChatExportSources).toHaveBeenCalledWith({
+      actorUserId: 'user-1', projectId: 'project-1',
+      workspaceId: 'standalone-chat:chat-project-1', taskId: 'task-1',
+      messageId: 'user-message-1', sourceVersionIds: ['version-source-1'],
+      entityIds: ['task-1:user-message-1:0'], messageImageUrls: ['/managed.png'],
     });
     expect(mocks.dispatchSkillRunExecution).toHaveBeenCalledWith({
       actorUserId: 'user-1', runId: 'run-export-1', recoveryOnly: false,
@@ -126,11 +146,27 @@ describe('POST /api/simple-chat/chat multi-platform export intent', () => {
     expect(mocks.findProviderForModel).not.toHaveBeenCalled();
   });
 
+  it('rejects an attachment outside the exact source message before creating a Run', async () => {
+    mocks.authorizeSimpleChatExportSources.mockRejectedValue(
+      Object.assign(new Error('forbidden'), {
+        code: 'SIMPLE_CHAT_EXPORT_SOURCE_FORBIDDEN', status: 404,
+      }),
+    );
+    const response = await POST(request('把这些图片批量导出 Instagram 帖子尺寸'));
+
+    expect(response.status).toBe(404);
+    await expect(response.json()).resolves.toMatchObject({
+      code: 'SIMPLE_CHAT_EXPORT_SOURCE_FORBIDDEN',
+    });
+    expect(mocks.createSkillRun).not.toHaveBeenCalled();
+    expect(mocks.dispatchSkillRunExecution).not.toHaveBeenCalled();
+  });
+
   it('accepts a concise target answer only after the controlled clarification', async () => {
     const response = await POST(request('Instagram 帖子和故事尺寸', ['version-source-1'], [
-      { role: 'user', content: '把这些图片批量导出平台尺寸', images: ['/managed.png'] },
-      { role: 'assistant', content: '请指定目标平台或尺寸。' },
-    ]));
+      { id: 'source-message-1', role: 'user', content: '把这些图片批量导出平台尺寸', images: ['/managed.png'] },
+      { id: 'clarification-1', role: 'assistant', content: '请指定目标平台或尺寸。' },
+    ], 'source-message-1'));
 
     expect(response.status).toBe(200);
     expect(await response.text()).toContain('"runId":"run-export-1"');
@@ -140,12 +176,27 @@ describe('POST /api/simple-chat/chat multi-platform export intent', () => {
   it('does not reactivate an already submitted export from unrelated follow-up text', async () => {
     mocks.findProviderForModel.mockResolvedValue(null);
     const response = await POST(request('谢谢', [], [
-      { role: 'user', content: '把这些图片批量导出 Instagram 帖子尺寸', images: ['/managed.png'] },
-      { role: 'assistant', content: '批量导出任务已提交。' },
+      { id: 'source-message-1', role: 'user', content: '把这些图片批量导出 Instagram 帖子尺寸', images: ['/managed.png'] },
+      { id: 'result-message-1', role: 'assistant', content: '批量导出任务已提交。' },
     ]));
 
     expect(response.status).toBe(400);
     expect(mocks.createSkillRun).not.toHaveBeenCalled();
     expect(mocks.findProviderForModel).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not dispatch the same persisted Run twice for a duplicate idempotency key', async () => {
+    mocks.createSkillRun
+      .mockResolvedValueOnce({ runId: 'run-export-1', reused: false })
+      .mockResolvedValueOnce({ runId: 'run-export-1', reused: true });
+
+    const first = await POST(request('把这些图片批量导出 Instagram 帖子尺寸'));
+    const duplicate = await POST(request('把这些图片批量导出 Instagram 帖子尺寸'));
+
+    expect(first.status).toBe(200);
+    expect(duplicate.status).toBe(200);
+    expect(await duplicate.text()).toContain('"runId":"run-export-1"');
+    expect(mocks.createSkillRun).toHaveBeenCalledTimes(2);
+    expect(mocks.dispatchSkillRunExecution).toHaveBeenCalledTimes(1);
   });
 });

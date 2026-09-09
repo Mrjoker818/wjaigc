@@ -2609,6 +2609,40 @@ describe('simple chat project synchronization', () => {
   });
 });
 
+describe('multi-platform export message sync fields', () => {
+  it('round-trips the validated Run and project IDs through diff and replay', () => {
+    const chatTask = task('t1');
+    chatTask.messages = [{
+      ...message('m1'),
+      multiPlatformExportRunId: 'run-export-1',
+      multiPlatformExportProjectId: 'asset-project-1',
+    }];
+    const value = project('p1', [chatTask]);
+
+    expect(validateSimpleChatProjects([value])).toEqual({ success: true });
+    const operations = diffSimpleChatProjects([], [value], 1);
+    const replayed = replaySimpleChatOperations([], operations).projects;
+    expect(replayed[0]?.tasks[0]?.messages[0]).toMatchObject({
+      multiPlatformExportRunId: 'run-export-1',
+      multiPlatformExportProjectId: 'asset-project-1',
+    });
+  });
+
+  it.each([
+    ['multiPlatformExportRunId', 1],
+    ['multiPlatformExportProjectId', ''],
+    ['multiPlatformExportRunId', 'x'.repeat(SIMPLE_CHAT_SYNC_LIMITS.idCharacters + 1)],
+    ['multiPlatformExportProjectId', 'x'.repeat(SIMPLE_CHAT_SYNC_LIMITS.idCharacters + 1)],
+  ])('rejects invalid %s values', (field, invalid) => {
+    const chatMessage = message('m1') as unknown as Record<string, unknown>;
+    chatMessage[field] = invalid;
+    const chatTask = task('t1');
+    chatTask.messages = [chatMessage as unknown as SimpleChatMessage];
+
+    expect(validateSimpleChatProjects([project('p1', [chatTask])])).toMatchObject({ success: false });
+  });
+});
+
 describe('simple chat sync payload validation', () => {
   it('rejects a task reference carried both directly and in conflict audit metadata', () => {
     const value = project('p1', [task('t1')]);

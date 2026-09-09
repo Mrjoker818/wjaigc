@@ -56,6 +56,7 @@ const LIMITS = {
 const IDENTIFIER_FIELDS = new Set([
   'projectId', 'workspaceId', 'providerId', 'modelId', 'model', 'imageModel',
   'imageProviderId', 'idempotencyKey', 'selectedEntityId', 'sessionId', 'messageId',
+  'sourceMessageId',
 ]);
 const IDENTIFIER_ARRAY_FIELDS = new Set([
   'sourceVersionIds', 'visibleVersionIds', 'selectedEntityIds', 'assetParentVersionIds',

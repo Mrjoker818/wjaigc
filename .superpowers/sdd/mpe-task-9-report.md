@@ -31,3 +31,19 @@
 
 - 自动化测试使用受控 mock 验证 Skill Run、下载与 handoff 契约，未连接真实数据库、对象存储或外部生成服务执行端到端导出。
 - 多平台导出 Skill 仍遵循现有服务端功能开关；关闭时由统一 Skill Runtime 返回既有不可用错误。
+
+## 复审修复
+
+- 服务端不再以历史中任意 `images` 判定来源。客户端保留来源消息 ID，并按 `taskId:messageId:index` 注册附件实体；创建 Run 前按当前用户、共享项目、独立对话 workspace、任务、消息、槽位及 `chat-attachment` 类型精确读取 placement，同时校验 AssetVersion、图片资产状态、MIME 与规范 URL。其他消息、其他任务、`chat-result`、错版本和错 URL 均拒绝。
+- “返回画布”固定使用结果消息持久化的 Run `projectId`。同项目 transfer 必须返回原 AssetVersion ID；若后端返回复制版本则中止 bridge 写入并显示明确提示，不受用户之后切换的画布选择影响。
+- 同一幂等键重复 POST 仍由持久化 Skill Run 幂等创建返回同一 `runId`，但只在首次创建时 dispatch。结果卡刷新使用可恢复的 Run GET，使首次 dispatch 前中断也能由 Skill Runtime 接管；普通后续消息仍不重触发。
+- `multiPlatformExportRunId` 与 `multiPlatformExportProjectId` 已加入项目同步运行时校验，拒绝非字符串、空值和超过 256 code points 的值，并通过 diff/replay 与 ChatArea 卸载重载保持同一 Run。
+
+## 复审验证
+
+- 聚焦 RED/GREEN：8 个文件，292 项测试通过。
+- Brief、授权、asset transfer、Skill Run API、project sync、刷新和 handoff 主回归：15 个文件，392 项测试通过。
+- Skill Runtime、workspace transfer、同步客户端/服务端/存储及 handoff consumer 扩展回归：11 个文件，258 项测试通过。
+- `pnpm ts-check`：通过。
+- 目标 ESLint `--quiet`：通过（0 errors）。
+- Scoped `git diff --check`：通过。

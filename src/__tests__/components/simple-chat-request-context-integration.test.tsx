@@ -295,6 +295,32 @@ describe('simple-chat request context integration', () => {
     fireEvent.click(container.querySelectorAll('header button[aria-haspopup="listbox"]')[1]);
   }
 
+  it('restores the same multi-platform export Run card from a persisted message after remount', async () => {
+    const onUpdateTask = vi.fn();
+    mockStartupRequests();
+    const savedTask = createTask([{
+      id: 'export-result-message-1',
+      role: 'assistant',
+      content: '批量导出任务已提交。',
+      multiPlatformExportRunId: 'run-export-persisted',
+      multiPlatformExportProjectId: 'asset-project-persisted',
+      createdAt: 1,
+    }]);
+    const first = render(<ChatAreaHarness initialTask={savedTask} onUpdateTask={onUpdateTask} />);
+
+    expect(await first.findByText('Run run-export-persisted')).not.toBeNull();
+    expect(first.container.querySelector(
+      '[data-simple-chat-export-run-id="run-export-persisted"]',
+    )).not.toBeNull();
+    first.unmount();
+
+    const restored = render(<ChatAreaHarness initialTask={savedTask} onUpdateTask={onUpdateTask} />);
+    expect(await restored.findByText('Run run-export-persisted')).not.toBeNull();
+    expect(restored.container.querySelector(
+      '[data-simple-chat-export-run-id="run-export-persisted"]',
+    )).not.toBeNull();
+  });
+
   it('restores the saved exact image provider without overwriting it during catalog loading', async () => {
     const onUpdateTask = vi.fn();
     const deferred = createDeferred<Response>();
@@ -466,8 +492,14 @@ describe('simple-chat request context integration', () => {
     expect(registration).toBeTruthy();
     expect(request).toBeTruthy();
     const requestPayload = JSON.parse(String(request![1].body));
+    const registrationPayload = JSON.parse(String(registration![1].body));
     expect(requestPayload.messages.at(-1).images).toEqual(['/managed/current.png']);
     expect(requestPayload.sourceVersionIds).toEqual(['version-current']);
+    expect(requestPayload.sourceMessageId).toBe(requestPayload.messages.at(-1).id);
+    expect(requestPayload.selectedEntityIds).toEqual([registrationPayload.entityId]);
+    expect(registrationPayload.entityId).toBe(
+      `task-1:${requestPayload.sourceMessageId}:0`,
+    );
     expect(requestPayload.selectedEntityIds).toEqual([expect.stringContaining(':0')]);
   });
 

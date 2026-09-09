@@ -114,7 +114,7 @@ describe('Simple Chat multi-platform export result card', () => {
 
     expect(await screen.findByText('1 个成功 · 1 个失败')).not.toBeNull();
     expect(fetcher).toHaveBeenCalledWith(
-      '/api/skill-runs/run-export-1?observeOnly=true',
+      '/api/skill-runs/run-export-1',
       expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
     expect(screen.getByText('Run run-export-1')).not.toBeNull();

@@ -479,6 +479,38 @@ export async function sendSimpleChatMediaToCanvas(input: {
   return { ok: true, references };
 }
 
+export async function sendSimpleChatExportToCanvas(input: {
+  runProjectId: string;
+  imageRefs: WorkspaceAssetReference[];
+  sourceTrace: SimpleChatWorkspaceSourceTrace;
+  transfer: (input: {
+    sourceVersionId: string;
+    targetProjectId: string;
+    index: number;
+    sourceTrace?: WorkspaceAssetReference['sourceTrace'];
+  }) => Promise<WorkspaceAssetReference>;
+  writeBridge: (references: WorkspaceAssetReference[]) => void;
+}): Promise<{
+  ok: boolean;
+  references: WorkspaceAssetReference[];
+  reason?: 'UNMANAGED_IMAGE_SLOT';
+}> {
+  return sendSimpleChatMediaToCanvas({
+    images: input.imageRefs.map(reference => reference.url),
+    imageRefs: input.imageRefs,
+    targetProjectId: input.runProjectId,
+    sourceTrace: input.sourceTrace,
+    transfer: async transferInput => {
+      const reference = await input.transfer(transferInput);
+      if (reference.assetVersionId !== transferInput.sourceVersionId) {
+        throw new Error('EXPORT_ASSET_VERSION_MISMATCH');
+      }
+      return reference;
+    },
+    writeBridge: input.writeBridge,
+  });
+}
+
 export function canTransferSimpleChatMedia(
   images: string[],
   imageRefs: WorkspaceAssetReference[],

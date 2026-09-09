@@ -3643,6 +3643,8 @@ function validateMessageEntity(value: Record<string, unknown>): SimpleChatProjec
     validateOptionalId(value, 'parentMessageId'),
     validateOptionalId(value, 'branchId'),
     validateOptionalId(value, 'agentRunId'),
+    validateOptionalRuntimeId(value, 'multiPlatformExportRunId'),
+    validateOptionalRuntimeId(value, 'multiPlatformExportProjectId'),
     validateOptionalEnum(value, 'status', ['streaming', 'completed', 'failed']),
     validateMessageFailure(value.error),
     validateRetryContext(value.retryContext),
@@ -4054,6 +4056,17 @@ function validateOptionalId(
 ): SimpleChatProjectValidationResult | undefined {
   if (value[key] === undefined) return undefined;
   return validateRequiredId(value, key);
+}
+
+function validateOptionalRuntimeId(
+  value: Record<string, unknown>,
+  key: string,
+): SimpleChatProjectValidationResult | undefined {
+  if (value[key] === undefined) return undefined;
+  if (typeof value[key] !== 'string' || !(value[key] as string).trim()) {
+    return invalidValidation('value');
+  }
+  return validateStringLimit(value[key] as string, 'id', SIMPLE_CHAT_SYNC_LIMITS.idCharacters);
 }
 
 function validateRequiredName(

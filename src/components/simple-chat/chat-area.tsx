@@ -24,7 +24,7 @@ import {
   canSendSimpleChatMessageToNodeMode, canTransferSimpleChatMedia,
   mergeSimpleChatCanvasBridgeReferences, parseSimpleChatCanvasBridgePayload,
   readSimpleChatStreamAssetReference,
-  sendSimpleChatMediaToCanvas, serializeSimpleChatCanvasBridgePayload,
+  sendSimpleChatExportToCanvas, sendSimpleChatMediaToCanvas, serializeSimpleChatCanvasBridgePayload,
   type WorkspaceAssetReference
 } from "./simple-chat-types";
 import { User } from "@/lib/user-types";
@@ -971,7 +971,7 @@ export default function ChatArea({
           projectId: selectedCanvasProjectId,
           workspaceId: `standalone-chat:${chatProjectId}`,
           entityType: 'chat-attachment',
-          entityId: `${messageId}:${index}`,
+          entityId: `${chatTaskId}:${messageId}:${index}`,
           idempotencyKey: `simple-chat-attachment:${chatTaskId}:${messageId}:${index}`,
           image: {
             url: attachment.url,
@@ -1027,14 +1027,16 @@ export default function ChatArea({
       ? `已忽略 ${historyContext.rejectedCount} 张失效历史图片，本次请求继续发送。`
       : null);
 
-    const allMessages: Array<{ role: string; content: string; images?: string[] }> = [
+    const allMessages: Array<{ id?: string; role: string; content: string; images?: string[] }> = [
       ...context.systemMessages,
       ...historyContext.messages.map(message => ({
+        id: message.id,
         role: message.role,
         content: message.content,
         ...(message.images?.length ? { images: message.images } : {}),
       })),
       {
+        id: userMessage.id,
         role: 'user',
         content: userMessage.content,
         ...(userMessage.images?.length ? { images: userMessage.images } : {}),
@@ -1078,6 +1080,7 @@ export default function ChatArea({
           responseMessageId: context.assistantMessageId,
           idempotencyKey: context.idempotencyKey,
           sourceVersionIds: context.sourceVersionIds,
+          sourceMessageId: context.exportSourceMessageId || context.userMessageId,
           selectedEntityIds: context.selectedEntityIds,
           memories: context.memories,
           deepAnalysis: context.deepAnalysis,
@@ -1288,19 +1291,22 @@ export default function ChatArea({
         reference.assetVersionId ? [reference.assetVersionId] : []
       )),
     )];
-    const exportRequestContext = resolveSimpleChatExportRequestContext({
-      messages,
-      currentSourceVersionIds,
-      currentAssetProjectId: selectedCanvasProjectId,
-    });
-    const requestSourceVersionIds = exportRequestContext.sourceVersionIds;
-    const requestSelectedEntityIds = [...new Set(
+    const currentSelectedEntityIds = [...new Set(
       (userMsg.imageRefs || []).flatMap(reference => (
         reference.assetVersionId && reference.placementId && reference.entityId
           ? [reference.entityId]
           : []
       )),
     )];
+    const exportRequestContext = resolveSimpleChatExportRequestContext({
+      messages,
+      currentSourceVersionIds,
+      currentSelectedEntityIds,
+      currentSourceMessageId: userMessageId,
+      currentAssetProjectId: selectedCanvasProjectId,
+    });
+    const requestSourceVersionIds = exportRequestContext.sourceVersionIds;
+    const requestSelectedEntityIds = exportRequestContext.selectedEntityIds;
 
     const systemMessages: Array<{ role: 'system'; content: string }> = [];
     const instructions = project.instructions;
@@ -1358,6 +1364,7 @@ export default function ChatArea({
       reasoningEffort,
       responseSpeed,
       canvasProjectId: exportRequestContext.assetProjectId || undefined,
+      exportSourceMessageId: exportRequestContext.sourceMessageId,
       sourceVersionIds: requestSourceVersionIds,
       selectedEntityIds: requestSelectedEntityIds,
       historyMessageIds: messages.map(message => message.id),
@@ -1751,8 +1758,11 @@ export default function ChatArea({
     window.URL.revokeObjectURL(url);
   }, []);
 
-  const sendImagesToCanvas = useCallback(async (message: SimpleChatMessage) => {
-    const targetProjectId = selectedCanvasProjectId;
+  const sendImagesToCanvas = useCallback(async (
+    message: SimpleChatMessage,
+    options?: { runProjectId?: string },
+  ) => {
+    const targetProjectId = options?.runProjectId || selectedCanvasProjectId;
     if (!targetProjectId || !project || !task) {
       setControlNotice('请先选择目标画布项目');
       return;
@@ -1765,55 +1775,70 @@ export default function ChatArea({
     if (canvasTransferMessageId === message.id) return;
     setCanvasTransferMessageId(message.id);
     try {
-      const transferResult = await sendSimpleChatMediaToCanvas({
+      const transfer = async ({ sourceVersionId, targetProjectId: transferProjectId, index, sourceTrace }: {
+        sourceVersionId: string;
+        targetProjectId: string;
+        index: number;
+        sourceTrace?: WorkspaceAssetReference['sourceTrace'];
+      }): Promise<WorkspaceAssetReference> => {
+        const transferResponse = await fetch('/api/assets/transfer', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            sourceVersion: sourceVersionId,
+            targetProject: transferProjectId,
+            targetWorkspace: transferProjectId,
+            entityType: 'canvas-image',
+            entityId: `simple-chat:${task.id}:${message.id}:${index}`,
+            idempotencyKey: `simple-chat-canvas:${transferProjectId}:${task.id}:${message.id}:${index}:${sourceVersionId}`,
+            metadata: {
+              source: 'standalone-chat',
+              messageId: message.id,
+              imageIndex: index,
+              ...(sourceTrace ? { sourceTrace } : {}),
+            },
+          }),
+        });
+        if (!transferResponse.ok) throw new Error('Asset transfer failed');
+        const transferred = readWorkspaceAssetReference(await transferResponse.json());
+        if (!transferred?.assetVersionId || !transferred.placementId) {
+          throw new Error('Asset transfer returned an incomplete reference');
+        }
+        return transferred;
+      };
+      const writeBridge = (transferredImages: WorkspaceAssetReference[]): void => {
+        const rawExisting = localStorage.getItem('wujie_canvas_bridge');
+        let existingPayload: unknown = [];
+        try { existingPayload = rawExisting ? JSON.parse(rawExisting) : []; } catch {}
+        const existingProjectId = existingPayload && typeof existingPayload === 'object' && !Array.isArray(existingPayload)
+          && typeof (existingPayload as Record<string, unknown>).projectId === 'string'
+          ? (existingPayload as Record<string, unknown>).projectId as string
+          : null;
+        const existingImages = !existingProjectId || existingProjectId === targetProjectId
+          ? parseSimpleChatCanvasBridgePayload(existingPayload)
+          : [];
+        localStorage.setItem('wujie_canvas_bridge', JSON.stringify(
+          serializeSimpleChatCanvasBridgePayload(
+            targetProjectId,
+            mergeSimpleChatCanvasBridgeReferences(existingImages, transferredImages),
+          ),
+        ));
+      };
+      const transferResult = options?.runProjectId
+        ? await sendSimpleChatExportToCanvas({
+          runProjectId: options.runProjectId,
+          imageRefs: message.imageRefs || [],
+          sourceTrace,
+          transfer,
+          writeBridge,
+        })
+        : await sendSimpleChatMediaToCanvas({
         images: message.images || [],
         imageRefs: message.imageRefs || [],
         targetProjectId,
         sourceTrace,
-        transfer: async ({ sourceVersionId, targetProjectId: transferProjectId, index, sourceTrace }) => {
-          const transferResponse = await fetch('/api/assets/transfer', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              sourceVersion: sourceVersionId,
-              targetProject: transferProjectId,
-              targetWorkspace: transferProjectId,
-              entityType: 'canvas-image',
-              entityId: `simple-chat:${task.id}:${message.id}:${index}`,
-              idempotencyKey: `simple-chat-canvas:${transferProjectId}:${task.id}:${message.id}:${index}:${sourceVersionId}`,
-              metadata: {
-                source: 'standalone-chat',
-                messageId: message.id,
-                imageIndex: index,
-                ...(sourceTrace ? { sourceTrace } : {}),
-              },
-            }),
-          });
-          if (!transferResponse.ok) throw new Error('Asset transfer failed');
-          const transferred = readWorkspaceAssetReference(await transferResponse.json());
-          if (!transferred?.assetVersionId || !transferred.placementId) {
-            throw new Error('Asset transfer returned an incomplete reference');
-          }
-          return transferred;
-        },
-        writeBridge: transferredImages => {
-          const rawExisting = localStorage.getItem('wujie_canvas_bridge');
-          let existingPayload: unknown = [];
-          try { existingPayload = rawExisting ? JSON.parse(rawExisting) : []; } catch {}
-          const existingProjectId = existingPayload && typeof existingPayload === 'object' && !Array.isArray(existingPayload)
-            && typeof (existingPayload as Record<string, unknown>).projectId === 'string'
-            ? (existingPayload as Record<string, unknown>).projectId as string
-            : null;
-          const existingImages = !existingProjectId || existingProjectId === targetProjectId
-            ? parseSimpleChatCanvasBridgePayload(existingPayload)
-            : [];
-          localStorage.setItem('wujie_canvas_bridge', JSON.stringify(
-            serializeSimpleChatCanvasBridgePayload(
-              targetProjectId,
-              mergeSimpleChatCanvasBridgeReferences(existingImages, transferredImages),
-            ),
-          ));
-        },
+        transfer,
+        writeBridge,
       });
       if (!transferResult.ok) {
         setControlNotice('历史图片或登记失败的图片仅可查看，无法发送到画布');
@@ -1836,8 +1861,10 @@ export default function ChatArea({
       };
       document.body.appendChild(toast);
       setTimeout(() => toast.remove(), 8000);
-    } catch {
-      setControlNotice('图片无法发送到所选画布');
+    } catch (error) {
+      setControlNotice(error instanceof Error && error.message === 'EXPORT_ASSET_VERSION_MISMATCH'
+        ? '导出结果必须返回任务所属画布，未创建跨项目副本'
+        : '图片无法发送到所选画布');
     } finally {
       setCanvasTransferMessageId((current) => current === message.id ? null : current);
     }
@@ -2196,7 +2223,7 @@ export default function ChatArea({
                         ...msg,
                         images: references.map(reference => reference.url),
                         imageRefs: references,
-                      })}
+                      }, { runProjectId: msg.multiPlatformExportProjectId })}
                     />
                   )}
                   {msg.role === 'assistant' && msg.status === 'failed' && (

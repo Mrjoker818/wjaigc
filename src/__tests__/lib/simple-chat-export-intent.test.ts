@@ -82,13 +82,19 @@ describe('resolveSimpleChatExportRequestContext', () => {
         content: '请指定目标平台或尺寸。',
         retryContext: {
           sourceVersionIds: ['version-source-1'],
+          selectedEntityIds: ['task-1:message-1:0'],
           canvasProjectId: 'project-1',
+          exportSourceMessageId: 'message-1',
         },
       }],
       currentSourceVersionIds: [],
+      currentSelectedEntityIds: [],
+      currentSourceMessageId: 'message-2',
       currentAssetProjectId: '',
     })).toEqual({
       sourceVersionIds: ['version-source-1'],
+      selectedEntityIds: ['task-1:message-1:0'],
+      sourceMessageId: 'message-1',
       assetProjectId: 'project-1',
     });
 
@@ -102,7 +108,11 @@ describe('resolveSimpleChatExportRequestContext', () => {
         },
       }],
       currentSourceVersionIds: [],
+      currentSelectedEntityIds: [],
+      currentSourceMessageId: 'message-2',
       currentAssetProjectId: '',
-    })).toEqual({ sourceVersionIds: [], assetProjectId: '' });
+    })).toEqual({
+      sourceVersionIds: [], selectedEntityIds: [], sourceMessageId: 'message-2', assetProjectId: '',
+    });
   });
 });

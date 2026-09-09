@@ -91,6 +91,14 @@ type SendMediaToCanvas = (input: {
   writeBridge: (references: AssetReference[]) => void;
 }) => Promise<{ ok: boolean; references: AssetReference[]; reason?: string }>;
 
+type SendExportToCanvas = (input: {
+  runProjectId: string;
+  imageRefs: AssetReference[];
+  sourceTrace: WorkspaceSourceTrace;
+  transfer: Parameters<SendMediaToCanvas>[0]['transfer'];
+  writeBridge: Parameters<SendMediaToCanvas>[0]['writeBridge'];
+}) => Promise<{ ok: boolean; references: AssetReference[]; reason?: string }>;
+
 type CanTransferMedia = (images: string[], references: AssetReference[]) => boolean;
 
 type BuildCanvasBridgeImages = (
@@ -118,6 +126,11 @@ function sendMediaToCanvas(): SendMediaToCanvas | undefined {
     .sendSimpleChatMediaToCanvas;
 }
 
+function sendExportToCanvas(): SendExportToCanvas | undefined {
+  return (simpleChatTypes as unknown as { sendSimpleChatExportToCanvas?: SendExportToCanvas })
+    .sendSimpleChatExportToCanvas;
+}
+
 function canTransferMedia(): CanTransferMedia | undefined {
   return (simpleChatTypes as unknown as { canTransferSimpleChatMedia?: CanTransferMedia })
     .canTransferSimpleChatMedia;
@@ -136,6 +149,52 @@ function serializeCanvasBridgePayload(): SerializeCanvasBridgePayload | undefine
 }
 
 describe('standalone simple-chat asset transfer', () => {
+  it('returns export versions only to the Run project and rejects a copied version', async () => {
+    const send = sendExportToCanvas();
+    expect(send).toBeTypeOf('function');
+    if (!send) return;
+    const writeBridge = vi.fn();
+    const transfer = vi.fn(async ({ sourceVersionId, targetProjectId }: {
+      sourceVersionId: string;
+      targetProjectId: string;
+    }) => ({
+      url: '/export.png',
+      assetVersionId: sourceVersionId,
+      placementId: 'canvas-placement-1',
+      entityId: 'canvas-export-1',
+    }));
+
+    await expect(send({
+      runProjectId: 'run-project-1',
+      imageRefs: [{ url: '/export.png', assetVersionId: 'export-version-1', placementId: 'run-placement-1' }],
+      sourceTrace: sourceTraceFixture,
+      transfer,
+      writeBridge,
+    })).resolves.toMatchObject({ ok: true });
+    expect(transfer).toHaveBeenCalledWith(expect.objectContaining({
+      sourceVersionId: 'export-version-1', targetProjectId: 'run-project-1',
+    }));
+    expect(writeBridge).toHaveBeenCalledWith([
+      expect.objectContaining({ assetVersionId: 'export-version-1' }),
+    ]);
+
+    await expect(send({
+      runProjectId: 'run-project-1',
+      imageRefs: [{ url: '/export.png', assetVersionId: 'export-version-1', placementId: 'run-placement-1' }],
+      sourceTrace: sourceTraceFixture,
+      transfer: vi.fn(async () => ({
+        url: '/copied.png', assetVersionId: 'copied-version', placementId: 'copied-placement',
+      })),
+      writeBridge: vi.fn(),
+    })).rejects.toThrow('EXPORT_ASSET_VERSION_MISMATCH');
+  });
+
+  it('wires the export result card to its persisted Run project instead of the selected canvas', () => {
+    expect(chatAreaSource).toContain('sendSimpleChatExportToCanvas');
+    expect(chatAreaSource).toMatch(/runProjectId:\s*msg\.multiPlatformExportProjectId/u);
+    expect(chatAreaSource).toContain('导出结果必须返回任务所属画布，未创建跨项目副本');
+  });
+
   it('deduplicates managed bridge references by placement identity while preserving order', () => {
     const mergeReferences = (simpleChatTypes as unknown as {
       mergeSimpleChatCanvasBridgeReferences?: (

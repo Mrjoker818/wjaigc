@@ -47,7 +47,7 @@ export function MultiPlatformExportCard({
   useEffect(() => {
     if (projectedResult) return;
     const controller = new AbortController();
-    void fetch(`/api/skill-runs/${encodeURIComponent(runId)}?observeOnly=true`, {
+    void fetch(`/api/skill-runs/${encodeURIComponent(runId)}`, {
       signal: controller.signal,
     }).then(async response => {
       if (!response.ok) return;
