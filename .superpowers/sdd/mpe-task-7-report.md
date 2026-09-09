@@ -54,7 +54,7 @@
 - 保留 ChatPanel 现有功能和其他 Skill 的 `SkillInputFields`、运行进度与历史能力。
 - 独立 Simple Chat 未添加目录入口；既有 `catalogSurfaces: ['canvas', 'workflow']` 契约保持不变。
 - 因本任务直接修改 `chat-panel.tsx`，按简报要求仅更新一条已经过时的源码字符串断言，使其匹配当前 `requiredSkillModelRoles` 实现。
-- 未修改 `infinite-canvas.tsx`、底部工具栏生产文件、Workflow 或 Simple Chat 页面。
+- 首版未修改 `infinite-canvas.tsx`；复审后在用户明确批准的最小边界内，仅让真实底部工具栏发布动态位置 CSS 变量，未重构画布。Workflow 和 Simple Chat 页面仍未修改。
 
 ## 本地验证
 
@@ -105,3 +105,36 @@ Task7 scoped git diff --check：退出码 0
 - `.superpowers/sdd/task-3-brief.md`
 
 本报告受 `.superpowers/sdd/.gitignore` 覆盖，将仅对本报告使用精确强制暂存。提交完成后不执行 push。
+
+## NEEDS_FIXES 复审修复
+
+### TDD 证据
+
+- 首轮复审 RED：6 项失败，稳定覆盖嵌套 `label`、历史 Run、权威估算/损坏结果、整组下载/定位/错误展示、新 retry runId 和动态工具栏位置。
+- 客户端工具 RED：`downloadExportGroup`、`projectExportImagesInBatches`、`shouldAutoProjectCanvasSkill` 尚不存在。
+- 估算语义 RED：2 项失败，证明只有积分的响应被错误标成完整服务端校验，且未展示可选的服务端导出计划字段。
+- 整组下载授权 RED：1 项失败，证明下载前没有按项目与 AssetVersion 重新解析稳定 URL。
+
+### 复审项闭环
+
+1. 通用 completed 自动投影明确排除 `preset-multi-platform-export`；只有用户点击“批量放入画布”才投影。图片最多 100 项，默认每 10 项让出一次主线程，并复用既有 AssetVersion 布局/幂等投影。
+2. 专用抽屉接入既有 `SkillRunHistory`，可选择历史 Run；恢复使用原有输出版本，不重新导出，恢复异常会在 UI 显示。
+3. `useSkillRun.retryRun()` 返回服务端权威 runId；ChatPanel 在重试后立即同步 coordinator 和 `activeCanvasSkillRunRef`，新投影不再优先使用旧 ref。
+4. 真实底部工具栏通过 `ResizeObserver` 和窗口尺寸发布 `--canvas-bottom-toolbar-offset`；抽屉消费同一变量，图层/历史面板改变布局时会重新测量，无复制魔法数。
+5. 终态结果缺失、JSON/schema 解析失败会显示“结果数据损坏或版本不兼容”，并提供重试与运行日志入口。
+6. 单图、全局 ZIP、manifest、平台整组、放入画布与重试均由统一 async action 边界捕获；按钮有 loading/disabled，错误在抽屉显示，不产生 `unhandledrejection`。
+7. 结果操作已补齐：manifest、全局 ZIP、单图、按平台整组、来源版本定位。整组下载逐项重新通过 `/api/assets` 授权稳定 AssetVersion，客户端 JSZip 限制 100 件/256 MiB 并显示进度。
+8. 本地文件数/像素/ZIP 启发式值持续标注“本地预估”和“尚未校验”。抽屉可接收并展示 `skillRun.estimate.exportPlan` 的服务端文件数/像素/ZIP 估计与积分；当共享估算 API 只返回积分时，明确显示“积分已校验，导出计划尚未校验”，不再冒充完整服务端校验。
+9. 背景控件已消除嵌套 `label`。
+10. ChatPanel 测试已升级为真实 React 集成契约：渲染 ChatPanel、点击 Skill 目录与“多平台批量导出”，验证真实抽屉；375px 验证单列、纵向滚动和 DOM 不溢出。Simple Chat 目录隔离保持。
+
+### 复审后验证
+
+```text
+Task7 四项计划测试：4 文件，22/22 通过
+Task7 + history/useSkillRun/canvas placement/ChatPanel 回归：12 文件，127/127 通过
+pnpm ts-check：退出码 0
+目标 ESLint --quiet：退出码 0
+```
+
+本轮仍未执行云端真实导出与多浏览器视觉验收；不把这些项标记为通过。

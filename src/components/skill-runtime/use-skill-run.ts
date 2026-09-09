@@ -35,6 +35,7 @@ interface UseSkillRunResult {
   resume: () => Promise<boolean>;
   cancel: () => Promise<boolean>;
   retry: (stepId: string) => Promise<boolean>;
+  retryRun: (stepId: string) => Promise<string | undefined>;
   refreshRetryability: () => void;
   reset: () => void;
 }
@@ -382,9 +383,9 @@ export function useSkillRun({ fetcher = fetch }: UseSkillRunOptions = {}): UseSk
     }
   }, [refreshEventProjection, request, runId]);
 
-  const retry = useCallback(async (stepId: string): Promise<boolean> => {
+  const retryRun = useCallback(async (stepId: string): Promise<string | undefined> => {
     const active = activeRun.current;
-    if (!runId || active?.runId !== runId || active.generation !== startGeneration.current) return false;
+    if (!runId || active?.runId !== runId || active.generation !== startGeneration.current) return undefined;
     const expectedRunId = active.runId;
     const expectedGeneration = active.generation;
     const operationGeneration = ++busyGeneration.current;
@@ -418,7 +419,7 @@ export function useSkillRun({ fetcher = fetch }: UseSkillRunOptions = {}): UseSk
       } else if (accepted) {
         refreshEventProjection(expectedRunId, expectedGeneration);
       }
-      return accepted;
+      return accepted ? (result?.runId || expectedRunId) : undefined;
     } catch (requestError) {
       if (
         mounted.current
@@ -428,11 +429,15 @@ export function useSkillRun({ fetcher = fetch }: UseSkillRunOptions = {}): UseSk
       ) {
         setError(requestError instanceof Error ? requestError.message : '重试失败');
       }
-      return false;
+      return undefined;
     } finally {
       if (mounted.current && busyGeneration.current === operationGeneration) setBusy(false);
     }
   }, [refreshEventProjection, request, runId]);
+
+  const retry = useCallback(async (stepId: string): Promise<boolean> => (
+    Boolean(await retryRun(stepId))
+  ), [retryRun]);
 
   const reset = useCallback((): void => {
     startController.current?.abort();
@@ -468,6 +473,7 @@ export function useSkillRun({ fetcher = fetch }: UseSkillRunOptions = {}): UseSk
     resume: () => control('resume'),
     cancel: () => control('cancel'),
     retry,
+    retryRun,
     refreshRetryability,
     reset,
   };

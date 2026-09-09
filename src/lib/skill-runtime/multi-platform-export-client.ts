@@ -8,6 +8,7 @@ import {
   type MultiPlatformExportResultV1,
 } from '@/lib/multi-platform-export/manifest';
 import type { PlatformExportPreset } from '@/lib/multi-platform-export/types';
+import JSZip from 'jszip';
 import { loadCanvasExportImageAssets } from './canvas-client';
 
 const RESULT_SCHEMA_ID = 'multi-platform-export-result-v1';
@@ -172,4 +173,66 @@ export async function downloadExportArtifact(
   document.body.appendChild(anchor);
   anchor.click();
   anchor.remove();
+}
+
+const MAX_GROUP_FILES = 100;
+const MAX_GROUP_BYTES = 256 * 1_048_576;
+
+export async function downloadExportGroup(input: {
+  platform: string;
+  projectId: string;
+  references: readonly WorkspaceAssetReference[];
+  files: readonly ExportManifestFile[];
+  fetcher?: typeof fetch;
+  onProgress?: (progress: number) => void;
+}): Promise<void> {
+  if (input.references.length < 1 || input.references.length > MAX_GROUP_FILES) {
+    throw new Error('EXPORT_GROUP_FILE_LIMIT');
+  }
+  const fetcher = input.fetcher ?? fetch;
+  const fileByVersionId = new Map(input.files.map(file => [file.derivedAssetVersionId, file]));
+  const zip = new JSZip();
+  let totalBytes = 0;
+  for (let index = 0; index < input.references.length; index += 1) {
+    const reference = input.references[index];
+    const versionId = reference.assetVersionId;
+    const file = versionId ? fileByVersionId.get(versionId) : undefined;
+    if (!versionId || reference.kind !== 'image' || !file || file.platform !== input.platform) {
+      throw new Error('EXPORT_GROUP_REFERENCE_INVALID');
+    }
+    const stableReference = await resolveExportAssetReference({
+      projectId: input.projectId,
+      versionId,
+      fetcher,
+    });
+    if (stableReference.kind !== 'image') throw new Error('EXPORT_GROUP_REFERENCE_INVALID');
+    const response = await fetcher(stableReference.url, { method: 'GET', credentials: 'same-origin' });
+    if (!response.ok) throw new Error(`导出图片下载失败 (${response.status})`);
+    const contentLength = Number(response.headers.get('Content-Length') || 0);
+    if (Number.isFinite(contentLength) && contentLength > MAX_GROUP_BYTES - totalBytes) {
+      throw new Error('EXPORT_GROUP_BYTE_LIMIT');
+    }
+    const blob = await response.blob();
+    totalBytes += blob.size;
+    if (totalBytes > MAX_GROUP_BYTES) throw new Error('EXPORT_GROUP_BYTE_LIMIT');
+    zip.file(file.filename, blob);
+    input.onProgress?.(Math.round(((index + 1) / (input.references.length + 1)) * 100));
+  }
+  const archive = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 6 } }, metadata => {
+    const fileProgress = input.references.length / (input.references.length + 1) * 100;
+    input.onProgress?.(Math.min(99, Math.round(fileProgress + metadata.percent / (input.references.length + 1))));
+  });
+  const objectUrl = URL.createObjectURL(archive);
+  try {
+    const anchor = document.createElement('a');
+    anchor.href = objectUrl;
+    anchor.download = `${input.platform || 'platform'}-export.zip`;
+    anchor.rel = 'noopener';
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    input.onProgress?.(100);
+  } finally {
+    URL.revokeObjectURL(objectUrl);
+  }
 }

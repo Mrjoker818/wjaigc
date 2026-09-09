@@ -5,11 +5,13 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { MultiPlatformExportResults } from '@/components/skill-runtime/MultiPlatformExportResults';
 import {
+  downloadExportGroup,
   downloadExportArtifact,
   loadExportManifestFiles,
   parseMultiPlatformExportResult,
   resolveExportImageReferences,
 } from '@/lib/skill-runtime/multi-platform-export-client';
+import { projectExportImagesInBatches } from '@/lib/skill-runtime/canvas-client';
 
 const result = {
   schemaVersion: 1 as const,
@@ -111,6 +113,8 @@ describe('multi-platform export results', () => {
         }]}
         onDownload={onDownload}
         onAddToCanvas={onAddToCanvas}
+        onDownloadGroup={vi.fn()}
+        onLocateSource={vi.fn()}
       />,
     );
 
@@ -125,5 +129,79 @@ describe('multi-platform export results', () => {
     await waitFor(() => expect(onAddToCanvas).toHaveBeenCalledWith([
       expect.objectContaining({ assetVersionId: 'version-image-1', kind: 'image' }),
     ]));
+  });
+
+  it('downloads a platform group, locates its source, and contains async download failures', async () => {
+    const onDownload = vi.fn().mockRejectedValue(new Error('下载被浏览器阻止'));
+    const onDownloadGroup = vi.fn().mockResolvedValue(undefined);
+    const onLocateSource = vi.fn();
+    render(<MultiPlatformExportResults
+      projectId="project-1" result={result}
+      references={[{ assetVersionId: 'version-image-1', kind: 'image', url: '/a.png', name: '帖子' }]}
+      files={[{
+        filename: 'instagram-post.png', sourceAssetVersionId: 'version-source-1',
+        derivedAssetVersionId: 'version-image-1', platform: 'Instagram', usage: 'post',
+        width: 1080, height: 1080, mimeType: 'image/png', byteSize: 1234,
+        sha256: `sha256:${'a'.repeat(64)}`,
+      }]}
+      onDownload={onDownload} onDownloadGroup={onDownloadGroup}
+      onLocateSource={onLocateSource} onAddToCanvas={vi.fn()}
+    />);
+
+    fireEvent.click(screen.getByRole('button', { name: '下载 Instagram 整组' }));
+    await waitFor(() => expect(onDownloadGroup).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole('button', { name: '定位来源 version-source-1' }));
+    expect(onLocateSource).toHaveBeenCalledWith('version-source-1');
+    fireEvent.click(screen.getByRole('button', { name: '下载 帖子' }));
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('下载被浏览器阻止'));
+    expect(screen.getByRole('button', { name: '下载 帖子' }).hasAttribute('disabled')).toBe(false);
+  });
+
+  it('builds a bounded platform ZIP from stable image references and reports progress', async () => {
+    const files = [{
+      filename: 'instagram-post.png', sourceAssetVersionId: 'version-source-1',
+      derivedAssetVersionId: 'version-image-1', platform: 'Instagram', usage: 'post',
+      width: 1080, height: 1080, mimeType: 'image/png' as const, byteSize: 4,
+      sha256: `sha256:${'a'.repeat(64)}`,
+    }];
+    const fetcher = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(Response.json({
+        assetId: 'asset-image-1', assetVersionId: 'version-image-1', kind: 'image',
+        url: '/stable/image.png', name: 'instagram-post.png',
+      }))
+      .mockResolvedValueOnce(new Response(new Uint8Array([1, 2, 3, 4]), {
+        status: 200, headers: { 'Content-Type': 'image/png', 'Content-Length': '4' },
+      }));
+    Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: vi.fn(() => 'blob:group') });
+    Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: vi.fn() });
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
+    const progress = vi.fn();
+
+    await downloadExportGroup({
+      platform: 'Instagram', projectId: 'project-1', fetcher, files,
+      references: [{ assetVersionId: 'version-image-1', kind: 'image', url: '/stable/image.png' }],
+      onProgress: progress,
+    });
+    expect(fetcher).toHaveBeenNthCalledWith(1,
+      '/api/assets?projectId=project-1&assetVersionId=version-image-1',
+      expect.objectContaining({ method: 'GET' }),
+    );
+    expect(fetcher).toHaveBeenNthCalledWith(2, '/stable/image.png', expect.objectContaining({ method: 'GET' }));
+    expect(progress).toHaveBeenLastCalledWith(100);
+    expect(click).toHaveBeenCalledOnce();
+    click.mockRestore();
+  });
+
+  it('projects no more than 100 existing image versions in yielding batches', async () => {
+    const references = Array.from({ length: 100 }, (_, index) => ({
+      assetVersionId: `version-${index}`, kind: 'image' as const, url: `/image-${index}.png`,
+    }));
+    const project = vi.fn().mockResolvedValue(undefined);
+    const yieldToBrowser = vi.fn().mockResolvedValue(undefined);
+    await projectExportImagesInBatches(references, project, { batchSize: 12, yieldToBrowser });
+    expect(project).toHaveBeenCalledTimes(100);
+    expect(yieldToBrowser).toHaveBeenCalledTimes(8);
+    await expect(projectExportImagesInBatches([...references, references[0]], project))
+      .rejects.toThrow('EXPORT_CANVAS_ITEM_LIMIT');
   });
 });

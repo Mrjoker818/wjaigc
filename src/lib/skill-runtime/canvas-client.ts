@@ -2,6 +2,11 @@ import type { WorkspaceAssetReference } from '@/lib/asset-core/types';
 import { parseWorkspaceSourceTrace } from '@/lib/asset-core/source-trace';
 import type { SkillDefinition } from './types';
 import { parseDurableSkillOutputs } from './structured-output';
+import { MULTI_PLATFORM_EXPORT_SKILL_ID } from './multi-platform-export-preset';
+
+export function shouldAutoProjectCanvasSkill(skillId: string): boolean {
+  return skillId !== MULTI_PLATFORM_EXPORT_SKILL_ID;
+}
 
 interface SkillCatalogResponse {
   skills?: unknown;
@@ -374,4 +379,23 @@ export async function loadCanvasExportImageAssets(input: {
       : null;
   }));
   return resolved.filter((reference): reference is WorkspaceAssetReference => reference !== null);
+}
+
+export async function projectExportImagesInBatches(
+  references: readonly WorkspaceAssetReference[],
+  project: (reference: WorkspaceAssetReference) => void | Promise<void>,
+  options: {
+    batchSize?: number;
+    yieldToBrowser?: () => Promise<void>;
+  } = {},
+): Promise<void> {
+  if (references.length > 100) throw new Error('EXPORT_CANVAS_ITEM_LIMIT');
+  const images = references.filter(reference => reference.kind === 'image' && reference.assetVersionId);
+  const batchSize = Math.max(1, Math.min(25, Math.floor(options.batchSize ?? 10)));
+  const yieldToBrowser = options.yieldToBrowser ?? (() => new Promise(resolve => setTimeout(resolve, 0)));
+  for (let index = 0; index < images.length; index += batchSize) {
+    const batch = images.slice(index, index + batchSize);
+    for (const reference of batch) await project(reference);
+    if (index + batchSize < images.length) await yieldToBrowser();
+  }
 }

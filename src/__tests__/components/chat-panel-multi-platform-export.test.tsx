@@ -1,31 +1,63 @@
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+// @vitest-environment jsdom
 
-import { describe, expect, it } from 'vitest';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const source = readFileSync(resolve(process.cwd(), 'src/components/chat-panel.tsx'), 'utf8');
+import { ChatPanel } from '@/components/chat-panel';
+import { createMultiPlatformExportSkill } from '@/lib/skill-runtime/multi-platform-export-preset';
 
-describe('canvas multi-platform export drawer wiring', () => {
-  it('renders the dedicated bottom drawer only for the canvas export Skill', () => {
-    expect(source).toContain("import { MultiPlatformExportDrawer } from '@/components/skill-runtime/MultiPlatformExportDrawer';");
-    expect(source).toContain('activeSkill?.id === MULTI_PLATFORM_EXPORT_SKILL_ID');
-    expect(source).toContain('<MultiPlatformExportDrawer');
-    expect(source).toContain('sourceAssetVersionIds={canvasSkillSourceVersionIds}');
-    expect(source).toContain('projection={skillRun.projection}');
-    expect(source).toContain('onCancel={() => { void skillRun.cancel(); }}');
-    expect(source).toContain("onRetry={() => { void skillRun.retry('export'); }}");
+beforeEach(() => {
+  const values = new Map<string, string>();
+  const storage: Storage = {
+    get length() { return values.size; },
+    clear: () => values.clear(),
+    getItem: key => values.get(key) ?? null,
+    key: index => [...values.keys()][index] ?? null,
+    removeItem: key => { values.delete(key); },
+    setItem: (key, value) => { values.set(key, value); },
+  };
+  Object.defineProperty(window, 'localStorage', { configurable: true, value: storage });
+  vi.stubGlobal('localStorage', storage);
+  Object.defineProperty(window, 'innerWidth', { configurable: true, value: 375 });
+  Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: vi.fn() });
+  vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request): Promise<Response> => {
+    const url = String(input);
+    if (url.startsWith('/api/skills?')) return Response.json({ skills: [createMultiPlatformExportSkill(true)] });
+    if (url === '/api/platform-export-presets') return Response.json({ success: true, presets: [] });
+    if (url.startsWith('/api/user-data/sync')) return Response.json({ value: null });
+    return Response.json({});
+  }));
+});
+
+afterEach(() => {
+  cleanup();
+  localStorage.clear();
+  vi.unstubAllGlobals();
+});
+
+describe('canvas ChatPanel multi-platform export integration', () => {
+  it('opens the real bottom drawer after the user selects the export Skill', async () => {
+    render(<ChatPanel themeStyle="gold" projectId="project-1" canvasImages={[]} />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Skills技能库' }));
+    const skillName = await screen.findByText('多平台批量导出');
+    fireEvent.click(skillName.closest('[class*="cursor-pointer"]')!);
+
+    expect(await screen.findByRole('heading', { name: '多平台批量导出' })).not.toBeNull();
+    expect(screen.getByTestId('multi-platform-export-drawer').hasAttribute('data-bottom-toolbar-drawer')).toBe(true);
   });
 
-  it('keeps the generic Skill controls intact for every other canvas Skill', () => {
-    expect(source).toContain('<SkillInputFields');
-    expect(source).toContain('<SkillRunProgress');
-    expect(source).toContain('activeSkill.id !== MULTI_PLATFORM_EXPORT_SKILL_ID');
-    expect(source).toContain('onClick={handleCloseSkill}');
-  });
+  it('keeps the real drawer single-column and vertically scrollable at 375px', async () => {
+    render(<ChatPanel themeStyle="gold" projectId="project-1" canvasImages={[]} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Skills技能库' }));
+    const skillName = await screen.findByText('多平台批量导出');
+    fireEvent.click(skillName.closest('[class*="cursor-pointer"]')!);
 
-  it('adds exported images through authoritative existing AssetVersions without starting another export', () => {
-    expect(source).toContain('onAddExportImagesToCanvas');
-    expect(source).toContain('receiveSkillOutput(reference');
-    expect(source).not.toContain('reExportResult');
+    const drawer = await screen.findByTestId('multi-platform-export-drawer');
+    expect(drawer.className).toContain('w-[min(960px,calc(100vw-16px))]');
+    const content = drawer.querySelector(':scope > div');
+    await waitFor(() => expect(content?.className).toContain('overflow-y-auto'));
+    expect(content?.querySelector('.grid-cols-1')).not.toBeNull();
+    expect(drawer.scrollWidth).toBeLessThanOrEqual(drawer.clientWidth);
   });
 });

@@ -493,6 +493,19 @@ describe('useSkillRun', () => {
     });
   });
 
+  it('returns the authoritative run id from retryRun so canvas placement can switch identity', async () => {
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ runId: 'run-old', reused: false }))
+      .mockResolvedValueOnce(jsonResponse({ accepted: true, runId: 'run-new', newAttempt: true }));
+    const { result } = renderHook(() => useSkillRun({ fetcher: fetcher as typeof fetch }));
+    await act(async () => { await result.current.startRun(request); });
+
+    await act(async () => {
+      await expect(result.current.retryRun('export')).resolves.toBe('run-new');
+    });
+    expect(result.current.runId).toBe('run-new');
+  });
+
   it('isolates a delayed old start response after a newer run starts', async () => {
     let resolveOld!: (response: Response) => void;
     const fetcher = vi.fn()

@@ -92,6 +92,13 @@ describe('canvas toolbar floating windows', () => {
     expect(canvasSource).toContain('onMouseDown={(event) => event.stopPropagation()}');
   });
 
+  it('publishes the measured bottom toolbar offset for external skill drawers', () => {
+    expect(canvasSource).toContain("setProperty('--canvas-bottom-toolbar-offset'");
+    expect(canvasSource).toContain("removeProperty('--canvas-bottom-toolbar-offset'");
+    expect(canvasSource).toContain('data-canvas-bottom-toolbar-anchor');
+    expect(canvasSource).toContain('ResizeObserver');
+  });
+
   it('uses a bounded +N popover instead of expanding the selected-image toolbar', () => {
     expect(canvasSource).toContain('<CanvasImageActionToolbar');
     expect(canvasSource).toContain('overflowActions={overflowImageActions}');

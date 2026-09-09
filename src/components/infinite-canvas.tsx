@@ -1548,6 +1548,25 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
   const bottomToolbarRef = useRef<HTMLDivElement | null>(null);
   const [bottomToolbarDrawerPlacement, setBottomToolbarDrawerPlacement] = useState<BottomToolbarDrawerPlacement | null>(null);
 
+  useLayoutEffect(() => {
+    const toolbar = bottomToolbarRef.current;
+    if (!toolbar || typeof window === 'undefined') return undefined;
+    const root = document.documentElement;
+    const syncOffset = () => {
+      const rect = toolbar.getBoundingClientRect();
+      root.style.setProperty('--canvas-bottom-toolbar-offset', `${Math.max(0, window.innerHeight - rect.top + 8)}px`);
+    };
+    syncOffset();
+    const observer = new ResizeObserver(syncOffset);
+    observer.observe(toolbar);
+    window.addEventListener('resize', syncOffset);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('resize', syncOffset);
+      root.style.removeProperty('--canvas-bottom-toolbar-offset');
+    };
+  }, [showLayerPanel, showVersionHistory]);
+
   const updateBottomToolbarDrawerPlacement = useCallback(() => {
     const trigger = bottomToolbarRef.current?.getBoundingClientRect();
     if (!trigger || typeof window === 'undefined') return;
@@ -17544,6 +17563,7 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
       <div
         ref={bottomToolbarRef}
         data-toolbar="bottom-toolbar"
+        data-canvas-bottom-toolbar-anchor
         onMouseDown={(event) => event.stopPropagation()}
         onPointerDown={(event) => event.stopPropagation()}
         onClick={(event) => event.stopPropagation()}

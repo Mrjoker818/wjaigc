@@ -56,7 +56,7 @@ describe('MultiPlatformExportDrawer', () => {
     }
     const drawer = screen.getByTestId('multi-platform-export-drawer');
     expect(drawer.hasAttribute('data-bottom-toolbar-drawer')).toBe(true);
-    expect(drawer.className).toContain('bottom-');
+    expect(drawer.style.bottom).toBe('var(--canvas-bottom-toolbar-offset)');
     expect(drawer.querySelector('.grid-cols-1')).not.toBeNull();
     expect(screen.queryByRole('dialog')).toBeNull();
 
@@ -67,6 +67,78 @@ describe('MultiPlatformExportDrawer', () => {
     expect(screen.getByText('积分 0')).not.toBeNull();
     expect(screen.getByRole('button', { name: '裁切填充' }).className).toContain('min-h-10');
     expect(screen.getByRole('button', { name: '完整留白' }).className).toContain('min-h-10');
+    expect(drawer.querySelector('label label')).toBeNull();
+    expect(screen.getByText('尚未校验')).not.toBeNull();
+  });
+
+  it('keeps export history inside the dedicated drawer and restores the selected run', async () => {
+    const onRestoreRun = vi.fn();
+    const fetcher = vi.fn<typeof fetch>(async input => {
+      const url = String(input);
+      if (url.startsWith('/api/skill-runs?')) return Response.json({ runs: [{
+        runId: 'run-history-1', projectId: 'project-1', surface: 'canvas',
+        skillId: 'preset-multi-platform-export', status: 'completed', createdAt: 1,
+        sourceVersionIds: ['version-source-1'], outputs: [],
+      }] });
+      return Response.json({ success: true, presets: enabledPresets });
+    });
+    render(<MultiPlatformExportDrawer
+      open projectId="project-1" accountKey="user-1" activeRunId="run-current"
+      sourceAssetVersionIds={['version-source-1']} values={{}}
+      onChange={vi.fn()} onEstimate={vi.fn()} onStart={vi.fn()} onClose={vi.fn()}
+      onRestoreRun={onRestoreRun} fetcher={fetcher}
+    />);
+
+    fireEvent.click(await screen.findByRole('button', { name: '查看任务 run-history-1' }));
+    expect(onRestoreRun).toHaveBeenCalledWith(expect.objectContaining({ runId: 'run-history-1' }));
+  });
+
+  it('does not present a credit-only estimate as an authoritative export-plan validation', async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(Response.json({ success: true, presets: enabledPresets }));
+    render(<MultiPlatformExportDrawer
+      open projectId="project-1" accountKey="user-1" sourceAssetVersionIds={['version-source-1']}
+      values={{ targetPresetIds: ['instagram-post-v1'] }} estimate={{ minimum: 0, maximum: 0, steps: [{ stepId: 'export', cost: 0 }] }}
+      projection={projection({ status: 'completed', progress: 100, result: { outputs: [
+        { stepId: 'export', kind: 'json', schemaId: 'multi-platform-export-result-v1', content: '{broken' },
+      ] } })}
+      onChange={vi.fn()} onEstimate={vi.fn()} onStart={vi.fn()} onRetry={vi.fn()} onClose={vi.fn()}
+      fetcher={fetcher}
+    />);
+
+    expect(screen.getByText('积分已校验，导出计划尚未校验')).not.toBeNull();
+    expect(screen.getByRole('alert').textContent).toContain('结果数据损坏或版本不兼容');
+    expect(screen.getByRole('button', { name: '查看运行日志' })).not.toBeNull();
+    expect(screen.getByRole('button', { name: '重试导出' })).not.toBeNull();
+  });
+
+  it('renders authoritative server file, pixel, ZIP and credit estimates when supplied', async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(Response.json({ success: true, presets: enabledPresets }));
+    const estimate = {
+      minimum: 0, maximum: 0, steps: [{ stepId: 'export', cost: 0 }],
+      exportPlan: { fileCount: 2, totalPixels: 2_332_800, estimatedZipBytes: 1_680_000 },
+    };
+    render(<MultiPlatformExportDrawer
+      open projectId="project-1" sourceAssetVersionIds={['version-source-1', 'version-source-2']}
+      values={{ targetPresetIds: ['instagram-post-v1'] }} estimate={estimate}
+      onChange={vi.fn()} onEstimate={vi.fn()} onStart={vi.fn()} onClose={vi.fn()} fetcher={fetcher}
+    />);
+
+    expect(screen.getByText('服务端校验成功')).not.toBeNull();
+    expect(screen.getByText('服务端 2 个文件')).not.toBeNull();
+    expect(screen.getByText('服务端 2,332,800 像素')).not.toBeNull();
+    expect(screen.getByText(/\u670d\u52a1\u7aef ZIP/)).not.toBeNull();
+  });
+
+  it('shows a visible failed state when server validation does not return an estimate', async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(Response.json({ success: true, presets: enabledPresets }));
+    render(<MultiPlatformExportDrawer
+      open projectId="project-1" sourceAssetVersionIds={['version-source-1']}
+      values={{ targetPresetIds: ['instagram-post-v1'] }} onChange={vi.fn()}
+      onEstimate={vi.fn().mockResolvedValue(undefined)} onStart={vi.fn()} onClose={vi.fn()} fetcher={fetcher}
+    />);
+    await waitFor(() => expect(screen.getByText('1 个文件')).not.toBeNull());
+    fireEvent.click(screen.getByRole('button', { name: '校验计划' }));
+    await waitFor(() => expect(screen.getByText('服务端校验失败')).not.toBeNull());
   });
 
   it('uses selected public presets for the deterministic file, pixel and ZIP preview', async () => {
@@ -135,6 +207,6 @@ describe('MultiPlatformExportDrawer', () => {
     );
     expect(screen.getAllByText('部分成功')).toHaveLength(2);
     fireEvent.click(screen.getByRole('button', { name: '仅重试失败项' }));
-    expect(onRetry).toHaveBeenCalledWith('export');
+    await waitFor(() => expect(onRetry).toHaveBeenCalledWith('export'));
   });
 });

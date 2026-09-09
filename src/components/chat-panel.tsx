@@ -62,6 +62,8 @@ import {
   deleteCanvasSkillsSequentially,
   loadCanvasSkillCatalog,
   loadCompletedCanvasSkillAssets,
+  projectExportImagesInBatches,
+  shouldAutoProjectCanvasSkill,
   startCanvasSkillRun,
   updateCanvasSkill,
 } from '@/lib/skill-runtime/canvas-client';
@@ -1422,6 +1424,7 @@ export function ChatPanel({ themeStyle, projectId, onAddToPrompt, onAddImages, o
   const skillAccountKey = typeof window === 'undefined' ? '' : UserManager.getInstance().getCurrentUserId() || '';
   const activeCanvasSkillRunRef = useRef<{
     runId: string;
+    skillId: string;
     projectId: string;
     sourceVersionIds: string[];
     sourceImageId?: string;
@@ -3994,19 +3997,19 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
       : '当前未配置可用的视觉模型，请联系管理员配置 VLM';
   }, [activeSkill, availableChatModels, model]);
 
-  const handleEstimateSkill = useCallback(async (): Promise<void> => {
-    if (!hasRequiredCanvasSkillSource()) return;
+  const handleEstimateSkill = useCallback(async () => {
+    if (!hasRequiredCanvasSkillSource()) return undefined;
     const modelUnavailableReason = canvasSkillModelUnavailableReason();
     if (modelUnavailableReason) {
       toast.error(modelUnavailableReason);
-      return;
+      return undefined;
     }
     const request = buildCanvasSkillRequest();
     if (!request) {
       toast.error('请先选择项目，并配置此 Skill 所需的聊天与图像模型');
-      return;
+      return undefined;
     }
-    await skillRun.estimateRun(request);
+    return skillRun.estimateRun(request);
   }, [buildCanvasSkillRequest, canvasSkillModelUnavailableReason, hasRequiredCanvasSkillSource, skillRun]);
 
   const handleRestoreSkill = useCallback(async (record: SkillRunHistoryItem): Promise<void> => {
@@ -4035,6 +4038,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
       skillProjectionAttemptCountsRef.current.delete(runId);
       activeCanvasSkillRunRef.current = {
         runId,
+        skillId: record.skillId,
         projectId,
         sourceVersionIds: [...(record.sourceVersionIds || [])],
         restoreDeletedPlacement: true,
@@ -4084,6 +4088,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
     if (runId) {
       activeCanvasSkillRunRef.current = {
         runId,
+        skillId: request.skillId,
         projectId: request.projectId,
         sourceVersionIds: [...request.sourceVersionIds],
         sourceImageId,
@@ -4109,17 +4114,38 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
       return;
     }
     const context = activeCanvasSkillRunRef.current;
-    for (const reference of references) {
-      const assetVersionId = reference.assetVersionId;
-      if (!assetVersionId || reference.kind !== 'image') continue;
-      if (skillCanvasImagesRef.current.some(image => image.assetVersionId === assetVersionId)) continue;
-      await Promise.resolve(receiveSkillOutput(reference, {
-        runId: context?.runId || skillRun.runId,
-        sourceVersionIds: context?.sourceVersionIds || canvasSkillSourceVersionIds,
-        restoreDeletedPlacement: true,
-      }));
+    const activeRunId = skillRun.runId;
+    if (!context || !activeRunId || context.runId !== activeRunId || context.skillId !== MULTI_PLATFORM_EXPORT_SKILL_ID) {
+      throw new Error('导出运行上下文已变化，请重新选择运行记录');
     }
-  }, [canvasSkillSourceVersionIds, projectId, receiveSkillOutput, skillRun.runId]);
+    await projectExportImagesInBatches(references, async reference => {
+      const assetVersionId = reference.assetVersionId;
+      if (!assetVersionId || skillCanvasImagesRef.current.some(image => image.assetVersionId === assetVersionId)) return;
+      await Promise.resolve(receiveSkillOutput(reference, {
+        runId: context.runId,
+        sourceVersionIds: context.sourceVersionIds,
+        restoreDeletedPlacement: context.restoreDeletedPlacement,
+      }));
+    });
+  }, [projectId, receiveSkillOutput, skillRun.runId]);
+
+  const handleRetryExport = useCallback(async (): Promise<void> => {
+    const context = activeCanvasSkillRunRef.current;
+    if (!context || context.skillId !== MULTI_PLATFORM_EXPORT_SKILL_ID) {
+      throw new Error('无法确认导出运行上下文');
+    }
+    const nextRunId = await skillRun.retryRun('export');
+    if (!nextRunId) return;
+    skillProjectionCoordinatorRef.current.activate(nextRunId, context.projectId);
+    activeCanvasSkillRunRef.current = {
+      ...context,
+      runId: nextRunId,
+      restoreDeletedPlacement: false,
+      historyRecord: undefined,
+    };
+    skillProjectionAttemptCountsRef.current.delete(nextRunId);
+    setSkillProjectionRetry(value => value + 1);
+  }, [skillRun]);
 
   const handleRecheckCompliance = useCallback(async (report: PlatformComplianceReportV1): Promise<void> => {
     const context = activeCanvasSkillRunRef.current;
@@ -4154,6 +4180,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
     if (runId) {
       activeCanvasSkillRunRef.current = {
         runId,
+        skillId: request.skillId,
         projectId: request.projectId,
         sourceVersionIds: [...request.sourceVersionIds],
         sourceImageId: context.sourceImageId,
@@ -4168,6 +4195,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
     if (projection.runId !== activeCanvasSkillRunRef.current?.runId) return;
     const context = activeCanvasSkillRunRef.current;
     if (!context || context.projectId !== projectId || !skillProjectionCoordinatorRef.current.isActive(context.runId, context.projectId)) return;
+    if (!shouldAutoProjectCanvasSkill(context.skillId)) return;
     if (!receiveSkillOutput) {
       toast.error('画布暂时无法接收 Skill 资产版本');
       return;
@@ -6379,17 +6407,23 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
               <MultiPlatformExportDrawer
                 open
                 projectId={projectId}
+                accountKey={skillAccountKey}
+                activeRunId={skillRun.runId}
+                historyRefreshKey={`${skillRun.runId || ''}:${skillRun.projection?.status || ''}`}
                 sourceAssetVersionIds={canvasSkillSourceVersionIds}
                 values={canvasSkillInputValues}
+                estimate={skillRun.estimate}
                 projection={skillRun.projection}
                 busy={skillRun.busy}
                 error={skillRun.error}
                 onChange={(key, value) => setSkillParamValues(current => ({ ...current, [key]: value }))}
-                onEstimate={() => { void handleEstimateSkill(); }}
+                onEstimate={handleEstimateSkill}
                 onStart={() => { void handleStartSkill(); }}
                 onCancel={() => { void skillRun.cancel(); }}
-                onRetry={() => { void skillRun.retry('export'); }}
+                onRetry={handleRetryExport}
                 onAddToCanvas={onAddExportImagesToCanvas}
+                onRestoreRun={handleRestoreSkill}
+                onLocateSource={handleLocateComplianceSource}
                 onClose={handleCloseSkill}
               />,
               document.body,

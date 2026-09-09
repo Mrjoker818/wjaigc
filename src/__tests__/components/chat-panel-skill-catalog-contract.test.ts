@@ -9,6 +9,7 @@ import {
   deleteCanvasSkillsSequentially,
   loadCanvasSkillCatalog,
   loadCompletedCanvasSkillAssets,
+  shouldAutoProjectCanvasSkill,
   transferCanvasSkillAsset,
   startCanvasSkillRun,
 } from '@/lib/skill-runtime/canvas-client';
@@ -42,6 +43,11 @@ const contentCommerceSkillIds = [
   'preset-pinterest-pins',
   'preset-batch-sku-assets',
 ] as const;
+
+it('requires an explicit user action before projecting multi-platform export results', () => {
+  expect(shouldAutoProjectCanvasSkill('preset-multi-platform-export')).toBe(false);
+  expect(shouldAutoProjectCanvasSkill('preset-pinterest-pins')).toBe(true);
+});
 
 const originalCanvasWorkflowSkillIds = [
   'preset-ecommerce-listing', 'preset-logo-brand', 'preset-storyboard',

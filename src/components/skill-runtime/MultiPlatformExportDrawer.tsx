@@ -7,12 +7,15 @@ import {
 } from 'lucide-react';
 
 import { MultiPlatformExportResults } from './MultiPlatformExportResults';
+import { SkillRunHistory, type SkillRunHistoryItem } from './SkillRunHistory';
 import type { AgentRunProjection } from '@/lib/agent-runtime/types';
 import type { WorkspaceAssetReference } from '@/lib/asset-core/types';
 import type { ExportManifestFile, MultiPlatformExportResultV1 } from '@/lib/multi-platform-export/manifest';
 import type { PlatformExportPreset } from '@/lib/multi-platform-export/types';
+import type { SkillRunCostEstimate } from '@/lib/skill-runtime/cost-estimator';
 import {
   downloadExportArtifact,
+  downloadExportGroup,
   loadEnabledPlatformExportPresets,
   loadExportManifestFiles,
   parseMultiPlatformExportResult,
@@ -23,22 +26,48 @@ import {
 interface MultiPlatformExportDrawerProps {
   open: boolean;
   projectId: string;
+  accountKey?: string;
+  activeRunId?: string;
+  historyRefreshKey?: string;
   sourceAssetVersionIds: readonly string[];
   values: Record<string, unknown>;
+  estimate?: MultiPlatformExportEstimate;
   projection?: AgentRunProjection;
   busy?: boolean;
   error?: string;
   onChange: (key: string, value: unknown) => void;
-  onEstimate: () => void | Promise<void>;
+  onEstimate: () => MultiPlatformExportEstimate | undefined | Promise<MultiPlatformExportEstimate | undefined>;
   onStart: () => void | Promise<void>;
   onCancel?: () => void | Promise<void>;
   onRetry?: (stepId: string) => void | Promise<void>;
   onAddToCanvas?: (references: WorkspaceAssetReference[]) => void | Promise<void>;
+  onRestoreRun?: (run: SkillRunHistoryItem) => void | Promise<void>;
+  onLocateSource?: (sourceVersionId: string) => void;
   onClose: () => void;
   fetcher?: typeof fetch;
 }
 
 const terminalStatuses = new Set(['completed', 'failed', 'cancelled', 'timeout']);
+
+interface ServerExportPlanEstimate {
+  fileCount: number;
+  totalPixels: number;
+  estimatedZipBytes: number;
+}
+
+type MultiPlatformExportEstimate = SkillRunCostEstimate & {
+  exportPlan?: ServerExportPlanEstimate;
+};
+
+function serverExportPlan(estimate: MultiPlatformExportEstimate | undefined): ServerExportPlanEstimate | undefined {
+  const plan = estimate?.exportPlan;
+  if (!plan) return undefined;
+  return Number.isSafeInteger(plan.fileCount) && plan.fileCount >= 0
+    && Number.isSafeInteger(plan.totalPixels) && plan.totalPixels >= 0
+    && Number.isSafeInteger(plan.estimatedZipBytes) && plan.estimatedZipBytes >= 0
+    ? plan
+    : undefined;
+}
 const sectionClass = 'min-w-0 rounded-lg border border-border/70 bg-background/65 p-3';
 const touchClass = 'min-h-10 min-w-10 rounded-lg border border-border px-3 text-xs font-medium transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50';
 
@@ -63,8 +92,12 @@ function stringArray(value: unknown): string[] {
 export function MultiPlatformExportDrawer({
   open,
   projectId,
+  accountKey = '',
+  activeRunId,
+  historyRefreshKey,
   sourceAssetVersionIds,
   values,
+  estimate,
   projection,
   busy = false,
   error,
@@ -74,6 +107,8 @@ export function MultiPlatformExportDrawer({
   onCancel,
   onRetry,
   onAddToCanvas,
+  onRestoreRun,
+  onLocateSource,
   onClose,
   fetcher = fetch,
 }: MultiPlatformExportDrawerProps): React.ReactElement | null {
@@ -82,6 +117,15 @@ export function MultiPlatformExportDrawer({
   const [references, setReferences] = useState<WorkspaceAssetReference[]>([]);
   const [manifestFiles, setManifestFiles] = useState<ExportManifestFile[]>([]);
   const [resultError, setResultError] = useState<string>();
+  const [showRunLog, setShowRunLog] = useState(false);
+  const [estimateState, setEstimateState] = useState<'idle' | 'checking' | 'success' | 'partial' | 'failed'>(
+    estimate ? (serverExportPlan(estimate) ? 'success' : 'partial') : 'idle',
+  );
+  const validatedExportPlan = serverExportPlan(estimate);
+
+  useEffect(() => {
+    if (estimate) setEstimateState(serverExportPlan(estimate) ? 'success' : 'partial');
+  }, [estimate]);
 
   useEffect(() => {
     if (!open) return undefined;
@@ -95,13 +139,22 @@ export function MultiPlatformExportDrawer({
     return () => controller.abort();
   }, [fetcher, open]);
 
-  const result = useMemo<MultiPlatformExportResultV1 | undefined>(() => {
-    try {
-      return parseMultiPlatformExportResult(projection?.result?.outputs);
-    } catch {
-      return undefined;
+  const parsedResult = useMemo<{ result?: MultiPlatformExportResultV1; error?: string }>(() => {
+    const outputs = projection?.result?.outputs;
+    if (!outputs) {
+      return terminalStatuses.has(projection?.status || '')
+        ? { error: '结果数据损坏或版本不兼容' }
+        : {};
     }
-  }, [projection?.result?.outputs]);
+    try {
+      return { result: parseMultiPlatformExportResult(outputs) };
+    } catch {
+      return terminalStatuses.has(projection?.status || '')
+        ? { error: '结果数据损坏或版本不兼容' }
+        : {};
+    }
+  }, [projection?.result?.outputs, projection?.status]);
+  const result = parsedResult.result;
 
   useEffect(() => {
     if (!open || !result) {
@@ -154,12 +207,23 @@ export function MultiPlatformExportDrawer({
     onChange('targetPresetIds', next);
   };
 
+  const validatePlan = async (): Promise<void> => {
+    setEstimateState('checking');
+    try {
+      const nextEstimate = await onEstimate();
+      setEstimateState(nextEstimate ? (serverExportPlan(nextEstimate) ? 'success' : 'partial') : 'failed');
+    } catch {
+      setEstimateState('failed');
+    }
+  };
+
   return (
     <section
       data-testid="multi-platform-export-drawer"
       data-bottom-toolbar-drawer
       aria-label="多平台批量导出工具"
-      className="fixed bottom-20 left-1/2 z-[90] flex max-h-[min(72vh,720px)] w-[min(960px,calc(100vw-16px))] -translate-x-1/2 flex-col overflow-hidden rounded-lg border border-border bg-background/95 text-foreground shadow-2xl backdrop-blur-md"
+      style={{ bottom: 'var(--canvas-bottom-toolbar-offset)' }}
+      className="fixed left-1/2 z-[90] flex max-h-[min(72vh,720px)] w-[min(960px,calc(100vw-16px))] -translate-x-1/2 flex-col overflow-hidden rounded-lg border border-border bg-background/95 text-foreground shadow-2xl backdrop-blur-md"
     >
       <header className="flex min-h-12 shrink-0 items-center justify-between gap-3 border-b border-border px-4 py-2">
         <div className="flex min-w-0 items-center gap-2">
@@ -222,21 +286,24 @@ export function MultiPlatformExportDrawer({
                 完整留白
               </button>
             </div>
-            <label className="mt-3 flex min-h-10 items-center gap-2 text-xs">
+            <div className="mt-3 flex min-h-10 items-center gap-2 text-xs">
               <span className="shrink-0">背景</span>
-              <input
-                aria-label="背景颜色"
-                type="color"
-                value={/^#[0-9a-f]{8}$/iu.test(background) ? background.slice(0, 7) : '#ffffff'}
-                disabled={background === 'transparent'}
-                className="h-10 w-12 rounded-lg border border-border bg-transparent p-1"
-                onChange={event => onChange('background', `${event.target.value}ff`)}
-              />
+              <label className="flex min-h-10 items-center">
+                <span className="sr-only">背景颜色</span>
+                <input
+                  aria-label="背景颜色"
+                  type="color"
+                  value={/^#[0-9a-f]{8}$/iu.test(background) ? background.slice(0, 7) : '#ffffff'}
+                  disabled={background === 'transparent'}
+                  className="h-10 w-12 rounded-lg border border-border bg-transparent p-1"
+                  onChange={event => onChange('background', `${event.target.value}ff`)}
+                />
+              </label>
               <label className="flex min-h-10 min-w-0 items-center gap-2">
                 <input type="checkbox" checked={background === 'transparent'} onChange={event => onChange('background', event.target.checked ? 'transparent' : '#ffffffff')} />
                 <span className="truncate">透明背景</span>
               </label>
-            </label>
+            </div>
           </section>
 
           <section className={sectionClass}>
@@ -257,11 +324,21 @@ export function MultiPlatformExportDrawer({
           <section className={sectionClass}>
             <SectionHeading icon={<FileArchive aria-hidden="true" size={15} />}>执行预览</SectionHeading>
             <dl className="grid grid-cols-2 gap-x-3 gap-y-2 text-xs">
-              <div><dt className="text-muted-foreground">文件</dt><dd>{preview.fileCount} 个文件</dd></div>
-              <div><dt className="text-muted-foreground">积分</dt><dd>积分 0</dd></div>
-              <div><dt className="text-muted-foreground">总像素</dt><dd>{preview.totalPixels.toLocaleString('zh-CN')} 像素</dd></div>
-              <div><dt className="text-muted-foreground">压缩包</dt><dd>预计 ZIP {formatBytes(preview.estimatedZipBytes)}</dd></div>
+              <div><dt className="text-muted-foreground">文件 · 本地预估</dt><dd>{preview.fileCount} 个文件</dd></div>
+              <div><dt className="text-muted-foreground">积分</dt><dd>{estimate ? `服务端 ${estimate.minimum}-${estimate.maximum}` : '积分 0'}</dd></div>
+              <div><dt className="text-muted-foreground">总像素 · 本地预估</dt><dd>{preview.totalPixels.toLocaleString('zh-CN')} 像素</dd></div>
+              <div><dt className="text-muted-foreground">压缩包 · 本地预估</dt><dd>预计 ZIP {formatBytes(preview.estimatedZipBytes)}</dd></div>
             </dl>
+            {validatedExportPlan && (
+              <dl aria-label="服务端导出计划" className="mt-2 grid grid-cols-1 gap-1 text-[11px] text-emerald-500 sm:grid-cols-3">
+                <div><dt className="sr-only">服务端文件数</dt><dd>服务端 {validatedExportPlan.fileCount} 个文件</dd></div>
+                <div><dt className="sr-only">服务端总像素</dt><dd>服务端 {validatedExportPlan.totalPixels.toLocaleString('zh-CN')} 像素</dd></div>
+                <div><dt className="sr-only">服务端压缩包估计</dt><dd>服务端 ZIP {formatBytes(validatedExportPlan.estimatedZipBytes)}</dd></div>
+              </dl>
+            )}
+            <p className={`mt-2 text-[11px] ${estimateState === 'success' ? 'text-emerald-500' : estimateState === 'failed' ? 'text-destructive' : 'text-muted-foreground'}`}>
+              {estimateState === 'success' ? '服务端校验成功' : estimateState === 'partial' ? '积分已校验，导出计划尚未校验' : estimateState === 'failed' ? '服务端校验失败' : estimateState === 'checking' ? '正在请求服务端校验' : '尚未校验'}
+            </p>
             {projection && (
               <div className="mt-3 space-y-1" aria-live="polite">
                 <div className="flex justify-between text-[11px] text-muted-foreground">
@@ -272,7 +349,7 @@ export function MultiPlatformExportDrawer({
               </div>
             )}
             <div className="mt-3 flex flex-wrap gap-2">
-              <button type="button" className={touchClass} disabled={!canStart} onClick={() => { void onEstimate(); }}>
+              <button type="button" className={touchClass} disabled={!canStart || estimateState === 'checking'} onClick={() => { void validatePlan(); }}>
                 <Square aria-hidden="true" size={14} />
                 校验计划
               </button>
@@ -293,6 +370,20 @@ export function MultiPlatformExportDrawer({
           <section className={sectionClass}>
             <SectionHeading icon={<PackageCheck aria-hidden="true" size={15} />}>结果</SectionHeading>
             {!result && <p className="text-xs text-muted-foreground">完成后可逐张下载、下载 ZIP 或放入画布。</p>}
+            {parsedResult.error && (
+              <div className="space-y-2">
+                <div role="alert" className="break-words text-xs text-destructive">{parsedResult.error}</div>
+                <div className="flex flex-wrap gap-2">
+                  {onRetry && <button type="button" className={touchClass} onClick={() => {
+                    void Promise.resolve(onRetry('export')).catch(caught => {
+                      setResultError(caught instanceof Error ? caught.message : '重试失败');
+                    });
+                  }}>重试导出</button>}
+                  <button type="button" className={touchClass} onClick={() => setShowRunLog(current => !current)}>查看运行日志</button>
+                </div>
+                {showRunLog && <pre className="max-h-32 overflow-auto whitespace-pre-wrap break-words text-[10px] text-muted-foreground">{JSON.stringify({ status: projection?.status, plan: projection?.plan, error: projection?.error }, null, 2)}</pre>}
+              </div>
+            )}
             {resultError && <div role="alert" className="break-words text-xs text-destructive">{resultError}</div>}
             {result && (
               <MultiPlatformExportResults
@@ -302,8 +393,29 @@ export function MultiPlatformExportDrawer({
                 files={manifestFiles}
                 busy={busy}
                 onDownload={versionId => downloadExportArtifact(versionId, projectId, fetcher)}
+                onDownloadGroup={(items, platform, onProgress) => downloadExportGroup({
+                  projectId, platform, references: items, files: manifestFiles, fetcher, onProgress,
+                })}
                 onAddToCanvas={items => onAddToCanvas?.(items)}
-                onRetry={onRetry ? () => { void onRetry('export'); } : undefined}
+                onRetry={onRetry ? () => onRetry('export') : undefined}
+                onLocateSource={onLocateSource}
+              />
+            )}
+            {onRestoreRun && (
+              <SkillRunHistory
+                projectId={projectId}
+                surface="canvas"
+                skillId="preset-multi-platform-export"
+                accountKey={accountKey}
+                activeRunId={activeRunId}
+                refreshKey={historyRefreshKey}
+                busy={busy}
+                onSelect={run => {
+                  void Promise.resolve(onRestoreRun(run)).catch(caught => {
+                    setResultError(caught instanceof Error ? caught.message : '运行记录恢复失败');
+                  });
+                }}
+                fetcher={fetcher}
               />
             )}
           </section>

@@ -51,7 +51,7 @@ describe('canvas chat shared Skill runtime wiring', () => {
     expect(source).toContain('skillVersion: executionSkill.version');
     expect(source).toContain('for (const role of requiredSkillModelRoles(executionSkill))');
     expect(source).toContain('sourceVersionIds: canvasSkillSourceVersionIds');
-    expect(source).toContain('await skillRun.estimateRun(request)');
+    expect(source).toContain('return skillRun.estimateRun(request)');
     expect(source).toContain('await startCanvasSkillRun(');
     expect(source).toContain('() => skillRun.startRun(request)');
     expect(source).toContain('loadCompletedCanvasSkillAssets');
