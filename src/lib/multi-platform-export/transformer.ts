@@ -77,6 +77,20 @@ function alphaFromBackground(background: MultiPlatformExportInput['background'])
   return background === 'transparent' ? 0 : Number.parseInt(background.slice(-2), 16);
 }
 
+function autoOrientedDimensions(metadata: {
+  width?: number;
+  height?: number;
+  orientation?: number;
+}): { width: number; height: number } {
+  if (!metadata.width || !metadata.height) fail('EXPORT_SOURCE_METADATA_INVALID');
+  const swapsAxes = metadata.orientation !== undefined
+    && metadata.orientation >= 5
+    && metadata.orientation <= 8;
+  return swapsAxes
+    ? { width: metadata.height, height: metadata.width }
+    : { width: metadata.width, height: metadata.height };
+}
+
 async function outputHasTransparency(
   bytes: Buffer,
   hasAlpha: boolean | undefined,
@@ -141,6 +155,7 @@ export async function transformPlatformImage(
       || sourceMetadata.height !== input.source.height
       || sourceMetadata.format !== actualSourceMime.replace('image/', '').replace('jpg', 'jpeg')
     ) fail('EXPORT_SOURCE_METADATA_INVALID');
+    const orientedSource = autoOrientedDimensions(sourceMetadata);
 
     const bytes = await withSafeSharp(
       input.source.bytes,
@@ -186,7 +201,7 @@ export async function transformPlatformImage(
       fail('EXPORT_OUTPUT_ALPHA_INVALID');
     }
     const containHasPadding = input.fit === 'contain'
-      && input.source.width * height !== input.source.height * width;
+      && orientedSource.width * height !== orientedSource.height * width;
     if (
       input.fit === 'contain'
       && backgroundAlpha < 255

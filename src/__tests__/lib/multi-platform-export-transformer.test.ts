@@ -37,6 +37,31 @@ async function source(
   };
 }
 
+async function orientedJpegSource(orientation: 6 | 8): Promise<AuthorizedExportImageSource> {
+  const bytes = await sharp({
+    create: {
+      width: 12,
+      height: 6,
+      channels: 3,
+      background: '#336699',
+    },
+  })
+    .withMetadata({ orientation })
+    .jpeg()
+    .toBuffer();
+  const metadata = await sharp(bytes).metadata();
+  return {
+    versionId: `version-orientation-${orientation}`,
+    assetName: `orientation-${orientation}.jpg`,
+    bytes,
+    mimeType: 'image/jpeg',
+    width: metadata.width!,
+    height: metadata.height!,
+    hasTransparency: false,
+    sha256: createHash('sha256').update(bytes).digest('hex'),
+  };
+}
+
 describe('transformPlatformImage', () => {
   it('applies cover without stretching and emits exact target metadata', async () => {
     const result = await transformPlatformImage({
@@ -84,6 +109,34 @@ describe('transformPlatformImage', () => {
 
     expect(result.hasTransparency).toBe(false);
     expect(result.metadata).toMatchObject({ width: 8, height: 4, format: 'png' });
+  });
+
+  it.each([6, 8] as const)(
+    'uses auto-oriented dimensions for orientation %s contain padding checks',
+    async (orientation) => {
+      const result = await transformPlatformImage({
+        source: await orientedJpegSource(orientation),
+        target: { width: 6, height: 12, outputFormat: 'png' },
+        fit: 'contain',
+        background: 'transparent',
+      });
+
+      expect(result.hasTransparency).toBe(false);
+      expect(result.metadata).toMatchObject({ width: 6, height: 12, format: 'png' });
+    },
+  );
+
+  it('still requires alpha when an auto-oriented source has real contain padding', async () => {
+    const result = await transformPlatformImage({
+      source: await orientedJpegSource(6),
+      target: { width: 12, height: 12, outputFormat: 'png' },
+      fit: 'contain',
+      background: 'transparent',
+    });
+
+    expect(result.hasTransparency).toBe(true);
+    const alpha = await sharp(result.bytes).ensureAlpha().extractChannel('alpha').stats();
+    expect(alpha.channels[0].min).toBe(0);
   });
 
   it('rejects source bytes whose declared sha256 was altered by an internal caller', async () => {
