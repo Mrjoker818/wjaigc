@@ -4,6 +4,7 @@ import {
   type DurableSkillOutputError,
 } from './skill-runtime/structured-output';
 import { parsePlatformComplianceReport } from './platform-compliance/report-schema';
+import { parseMultiPlatformExportResult } from './multi-platform-export/manifest';
 
 interface WorkflowSkillRunProjection {
   runId: string;
@@ -195,6 +196,12 @@ export function projectWorkflowSkillRun(
   const complianceReports = outputs
     .filter(output => output.kind === 'json' && output.schemaId === 'platform-compliance-report-v1')
     .map(output => parsePlatformComplianceReport(JSON.parse(output.content) as unknown));
+  const exportResultOutput = outputs.findLast(output => (
+    output.kind === 'json' && output.schemaId === 'multi-platform-export-result-v1'
+  ));
+  const exportResult = exportResultOutput
+    ? parseMultiPlatformExportResult(JSON.parse(exportResultOutput.content) as unknown)
+    : undefined;
   const referencesByVersion = new Map<string, WorkflowSkillAssetReference>();
   for (const reference of references) {
     if (!referencesByVersion.has(reference.assetVersionId)) {
@@ -215,6 +222,16 @@ export function projectWorkflowSkillRun(
     assetReferences: dedupedReferences,
     ...(documentReferences.length > 0 ? {
       documentAssetVersionIds: documentReferences.map(reference => reference.assetVersionId),
+    } : {}),
+    ...(exportResult ? {
+      outcome: exportResult.outcome,
+      imageAssetVersionIds: exportResult.imageAssetVersionIds,
+      ...(exportResult.manifestAssetVersionId
+        ? { manifestAssetVersionId: exportResult.manifestAssetVersionId }
+        : {}),
+      ...(exportResult.zipAssetVersionId
+        ? { zipAssetVersionId: exportResult.zipAssetVersionId }
+        : {}),
     } : {}),
     ...(complianceReports.length > 0 ? { complianceReports } : {}),
     ...(text ? { prompt: text, text } : {}),

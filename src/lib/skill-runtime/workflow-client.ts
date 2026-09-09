@@ -1,6 +1,8 @@
 import type { SkillDefinition } from './types';
 import { projectWorkflowSkillRun, type WorkflowSkillAssetReference } from '../workflow-skill-execution';
 import { parseDurableSkillOutputsIsolated } from './structured-output';
+import { MULTI_PLATFORM_EXPORT_SKILL_ID } from './multi-platform-export-preset';
+import { loadEnabledPlatformExportPresets } from './multi-platform-export-client';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -36,7 +38,16 @@ export async function loadWorkflowSkillCatalog(
     throw new Error('节点 Skill 目录加载失败');
   }
   if (!payload.skills.every(isWorkflowSkill)) throw new Error('节点 Skill 目录格式无效');
-  return payload.skills.filter(skill => skill.enabled);
+  const skills = payload.skills.filter(skill => skill.enabled);
+  if (!skills.some(skill => skill.id === MULTI_PLATFORM_EXPORT_SKILL_ID)) return skills;
+  const presetOptions = (await loadEnabledPlatformExportPresets(fetcher, signal))
+    .map(preset => `${preset.id}-v${preset.version}`);
+  return skills.map(skill => skill.id !== MULTI_PLATFORM_EXPORT_SKILL_ID ? skill : {
+    ...skill,
+    inputs: skill.inputs.map(field => field.key === 'targetPresetIds'
+      ? { ...field, options: presetOptions }
+      : field),
+  });
 }
 
 export async function loadSavedWorkflowSkillResult(input: {

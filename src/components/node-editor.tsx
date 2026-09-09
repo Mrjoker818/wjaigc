@@ -2124,6 +2124,21 @@ ${contextInfo}
     }
     const executionNodes: WorkflowNode[] = [];
     for (const node of payload.nodes) {
+      if (node.type === 'ai-skill') {
+        const skill = workflowSkills.find(candidate => (
+          candidate.id === node.config.skillId && candidate.version === Number(node.config.version)
+        ));
+        const roles = new Set(skill ? requiredSkillModelRoles(skill) : []);
+        const configured = node.config.modelBindings && typeof node.config.modelBindings === 'object'
+          && !Array.isArray(node.config.modelBindings)
+          ? node.config.modelBindings as Record<string, unknown>
+          : {};
+        const modelBindings = Object.fromEntries(
+          Object.entries(configured).filter(([role]) => roles.has(role as SkillModelBinding['role'])),
+        );
+        executionNodes.push({ ...node, config: { ...node.config, modelBindings } });
+        continue;
+      }
       if (node.type !== 'ai-generate') {
         executionNodes.push(node);
         continue;
@@ -2170,7 +2185,7 @@ ${contextInfo}
     } catch {
       setExecStatus('failed');
     }
-  }, [projectId, imageModels, wf.id, WORKFLOW_EXEC_STATE_KEY]);
+  }, [projectId, imageModels, wf.id, workflowSkills, WORKFLOW_EXEC_STATE_KEY]);
 
   const startWorkflowExecution = useCallback(async (payload: WorkflowExecutionScope) => {
     if (skillExecutionLock.current || skillQuote || execStatus === 'running') return;

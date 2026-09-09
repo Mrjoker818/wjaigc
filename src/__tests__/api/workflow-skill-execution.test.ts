@@ -6,6 +6,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   cancelWorkflowSkillRun,
   executeWorkflowSkillRun,
+  projectWorkflowSkillRun,
   resumeWorkflowSkillRun,
   WorkflowSkillRunTerminalError,
 } from '@/lib/workflow-skill-execution';
@@ -26,6 +27,31 @@ const routeSource = readFileSync(
 ).replace(/\r\n/g, '\n');
 
 describe('workflow Skill Run execution', () => {
+  it('keeps legacy projections while exposing structured batch export artifacts', () => {
+    const projected = projectWorkflowSkillRun({
+      runId: 'export-run', status: 'completed',
+      assetVersionIds: ['image-v1', 'manifest-v1', 'zip-v1'],
+      outputs: [{
+        stepId: 'export', kind: 'json', schemaId: 'multi-platform-export-result-v1',
+        content: JSON.stringify({
+          schemaVersion: 1, runId: 'export-run', outcome: 'completed',
+          imageAssetVersionIds: ['image-v1'], manifestAssetVersionId: 'manifest-v1',
+          zipAssetVersionId: 'zip-v1', failures: [],
+        }),
+      }],
+    }, [
+      { assetVersionId: 'image-v1', url: '/image.png', kind: 'image' },
+      { assetVersionId: 'manifest-v1', url: '/manifest.json', kind: 'document' },
+      { assetVersionId: 'zip-v1', url: '/export.zip', kind: 'document' },
+    ]);
+
+    expect(projected).toMatchObject({
+      outcome: 'completed', imageAssetVersionIds: ['image-v1'],
+      manifestAssetVersionId: 'manifest-v1', zipAssetVersionId: 'zip-v1',
+      imageUrls: ['/image.png'], documentAssetVersionIds: ['manifest-v1', 'zip-v1'],
+    });
+  });
+
   it.each([
     ['oversized content', { stepId: 'audit:a', kind: 'json', schemaId: 'platform-compliance-report-v1', content: `${JSON.stringify(validReport())}${' '.repeat(256 * 1024)}` }, 'SKILL_OUTPUT_SIZE_LIMIT'],
     ['invalid report', { stepId: 'audit:a', kind: 'json', schemaId: 'platform-compliance-report-v1', content: JSON.stringify(wideReport(4097)) }, 'REPORT_KEY_LIMIT'],
