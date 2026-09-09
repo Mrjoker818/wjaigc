@@ -75,24 +75,23 @@ describe('skill runtime catalog', () => {
   it('保留原 27 项定义和顺序，仅在末尾追加平台合规 Skill', () => {
     expect(CANVAS_PRESET_SKILLS.map(skill => skill.id)).toEqual(canvasIds);
     expect(CANVAS_PRESET_SKILLS).toHaveLength(21);
-    expect(CANVAS_WORKFLOW_SKILLS).toHaveLength(28);
+    expect(CANVAS_WORKFLOW_SKILLS).toHaveLength(29);
     expect(CANVAS_WORKFLOW_SKILLS.slice(0, CANVAS_PRESET_SKILLS.length)).toEqual(
       CANVAS_PRESET_SKILLS,
     );
-    expect(listSkillsForSurface('canvas').map(skill => skill.id)).toEqual(
-      CANVAS_WORKFLOW_SKILLS.map(skill => skill.id),
-    );
-    expect(listSkillsForSurface('workflow').map(skill => skill.id)).toEqual(
-      CANVAS_WORKFLOW_SKILLS.map(skill => skill.id),
-    );
+    const enabledCatalogIds = CANVAS_WORKFLOW_SKILLS.filter(skill => skill.enabled).map(skill => skill.id);
+    expect(listSkillsForSurface('canvas').map(skill => skill.id)).toEqual(enabledCatalogIds);
+    expect(listSkillsForSurface('workflow').map(skill => skill.id)).toEqual(enabledCatalogIds);
     expect(CANVAS_PRESET_SKILLS.every(skill =>
       skill.allowedSurfaces.join(',') === 'canvas,workflow')).toBe(true);
     expect(CANVAS_WORKFLOW_SKILLS.slice(0, 27).map(skill => skill.id))
       .toEqual(preComplianceCanvasWorkflowIds);
+    expect(CANVAS_WORKFLOW_SKILLS.at(-1)?.id).toBe('preset-multi-platform-export');
     expect(CANVAS_WORKFLOW_SKILLS[27]).toBe(LOVART_PLATFORM_COMPLIANCE_SKILLS[0]);
-    expect(CANVAS_WORKFLOW_SKILLS.map(skill => skill.id).slice(-4)).toEqual([
+    expect(CANVAS_WORKFLOW_SKILLS.map(skill => skill.id).slice(-5)).toEqual([
       ...secondBatchIds,
       'preset-platform-compliance-audit',
+      'preset-multi-platform-export',
     ]);
     expect(listSkillsForSurface('canvas')).toHaveLength(28);
     expect(listSkillsForSurface('workflow')).toHaveLength(28);

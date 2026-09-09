@@ -40,6 +40,7 @@ import type { SkillRunRequest } from './run-request';
 import type { ExecuteSkillStepInput } from './executor';
 import type { SkillStepAdapter, SkillStepRecoveryFactory } from './service';
 import type { SkillStepResult } from './types';
+import { executeMultiPlatformExportStep } from '@/lib/multi-platform-export/executor';
 
 type ResolveSkillMediaMetadata = (input: {
   actorUserId: string;
@@ -660,12 +661,35 @@ export function createProductionSkillStepRegistry(input: {
       structured: { schemaId: 'platform-compliance-report-v1', value: completed.report },
     };
   };
+  const multiPlatformExport: SkillStepAdapter = step => executeMultiPlatformExportStep(step, {
+    ...(input.request.retryLineage ? { retryLineage: input.request.retryLineage } : {}),
+    onProgress: async progress => {
+      if (!step.operation.executionFence) throw new Error('Skill export execution fence is missing');
+      await appendAdoptedAgentEvent({
+        actorUserId: step.actorUserId,
+        projectId: step.projectId,
+        runId: step.runId,
+        workspace: input.request.surface === 'simple-chat' ? 'chat' : input.request.surface,
+        eventId: `skill:${step.runId}:step:${step.step.id}:progress:${progress.completed}:generation:${step.operation.executionFence.generation}`,
+        type: 'tool.progress',
+        payload: {
+          toolId: step.step.toolId,
+          stepId: step.step.id,
+          ...progress,
+          progress: progress.total > 0 ? progress.completed / progress.total : 0,
+          generation: step.operation.executionFence.generation,
+        },
+        executionFence: step.operation.executionFence,
+      });
+    },
+  });
   return {
     stepAdapters: {
       chat: executeOrchestratorStep,
       generate_image: generate,
       img2img,
       compliance_audit: complianceAudit,
+      multi_platform_export: multiPlatformExport,
     },
     stepRecoveries: { generate_image: recoverGenerate, img2img: recoverGenerate },
   };

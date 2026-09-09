@@ -24,6 +24,8 @@ import {
 import { resolveSkillInputs, SkillInputError } from './input-resolver';
 import { compileSkillPrompt } from './prompt-compiler';
 import { requiredSkillModelRoles, skillStepModelRole } from './types';
+import type { MultiPlatformExportRetryLineage } from '@/lib/multi-platform-export/manifest';
+import { createMultiPlatformExportSkill, MULTI_PLATFORM_EXPORT_SKILL_ID } from './multi-platform-export-preset';
 export { requiredSkillModelRoles } from './types';
 import type {
   SkillDefinition,
@@ -43,6 +45,8 @@ export interface SkillRunRequest {
   sourceVersionIds: string[];
   modelBindings: FrozenBindings;
   idempotencyKey: string;
+  /** Server-authored only. Public request parsing rejects this field. */
+  retryLineage?: MultiPlatformExportRetryLineage;
 }
 
 export interface SkillRunRequestDependencies {
@@ -252,7 +256,9 @@ export async function authorizeSkillAgentRunRequest(
   const surface: SkillSurface = request.workspace === 'chat'
     ? 'simple-chat'
     : request.workspace;
-  const skill = await resolveExecutableSkill({ skillId: invocation.skillId, surface }, dependencies);
+  const skill = invocation.skillId === MULTI_PLATFORM_EXPORT_SKILL_ID && request.retryLineage
+    ? createMultiPlatformExportSkill(true)
+    : await resolveExecutableSkill({ skillId: invocation.skillId, surface }, dependencies);
   if (skill.version !== invocation.skillVersion) throw new SkillRunVersionError();
 
   const resolved = resolveSkillInputs(skill, invocation.inputValues);
@@ -364,6 +370,7 @@ export async function buildSkillAgentRunRequest(
       inputValues: resolved,
       modelBindings: bindings,
     },
+    ...(input.retryLineage ? { retryLineage: structuredClone(input.retryLineage) } : {}),
   };
   if (requiredSkillModelRoles(skill).length === 0) {
     return { ...base, executionRuntime: 'local' };
@@ -394,13 +401,14 @@ const defaultCreateDependencies: CreateSkillRunDependencies = {
 export async function createSkillRun(
   input: { actor: User; request: SkillRunRequest },
   dependencies?: Omit<CreateSkillRunDependencies, 'actorUserId'> & { actorUserId?: string },
+  frozenSkill?: SkillDefinition,
 ): Promise<AgentRunCreateResult> {
   const effective: CreateSkillRunDependencies = {
     ...defaultCreateDependencies,
     ...dependencies,
     actorUserId: input.actor.id,
   };
-  const skill = await resolveExecutableSkill(input.request, effective);
+  const skill = frozenSkill ?? await resolveExecutableSkill(input.request, effective);
   const agentRequest = await buildSkillAgentRunRequest(input.request, effective, skill);
   await effective.authorizeContext({
     actorUserId: input.actor.id,

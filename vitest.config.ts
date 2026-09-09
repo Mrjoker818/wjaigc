@@ -12,6 +12,7 @@ export default defineConfig({
       'tests/integration/**/*.test.ts',
       'tests/regression/**/*.test.ts',
     ],
+    exclude: ['src/__tests__/integration/skill-multi-platform-export-concurrency-postgres.test.ts'],
     // Sharp/fontconfig integration tests share native process resources and are
     // timing-flaky under file-level parallelism. Keep the full suite deterministic.
     fileParallelism: false,

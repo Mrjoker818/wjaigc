@@ -3,6 +3,7 @@ import { LOVART_CONTENT_COMMERCE_SKILLS } from './content-commerce-presets';
 import { LOVART_MARKETING_SKILLS } from './marketing-presets';
 import { LOVART_PLATFORM_COMPLIANCE_SKILLS } from './platform-compliance-preset';
 import { SIMPLE_CHAT_PRESET_SKILLS } from './simple-chat-presets';
+import { MULTI_PLATFORM_EXPORT_SKILL } from './multi-platform-export-preset';
 import type { SkillDefinition, SkillSurface } from './types';
 
 export { CANVAS_PRESET_SKILLS } from './canvas-presets';
@@ -17,6 +18,7 @@ export const CANVAS_WORKFLOW_SKILLS: readonly SkillDefinition[] = [
   ...LOVART_MARKETING_SKILLS,
   ...LOVART_CONTENT_COMMERCE_SKILLS,
   ...LOVART_PLATFORM_COMPLIANCE_SKILLS,
+  MULTI_PLATFORM_EXPORT_SKILL,
 ];
 
 const ALL_BUILT_IN_SKILLS: readonly SkillDefinition[] = [

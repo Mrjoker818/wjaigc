@@ -270,6 +270,17 @@ describe('Skill run API', () => {
     });
   });
 
+  it('rejects client-forged partial retry lineage fields', async () => {
+    const route = await import('@/app/api/skill-runs/[runId]/retry/route');
+    const response = await route.POST(new NextRequest('http://localhost/api/skill-runs/run-export/retry', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ stepId: 'export', retryOfRunId: 'forged', reusedImageAssetVersionIds: ['forged'] }),
+    }), { params: Promise.resolve({ runId: 'run-export' }) });
+
+    expect(response.status).toBe(400);
+    expect(mocks.retrySkillStep).not.toHaveBeenCalled();
+  });
+
   it('returns authentication responses without invoking services', async () => {
     mocks.requireApiAuthOrReject.mockResolvedValue(NextResponse.json({ error: 'unauthorized' }, { status: 401 }));
     const route = await import('@/app/api/skill-runs/route');

@@ -872,6 +872,7 @@ export function createAgentRuntimeService(
             executionRuntime,
             context: request.context,
             allowedToolIds: authorization.tools.map(tool => tool.toolId),
+            ...(request.retryLineage ? { retryLineage: structuredClone(request.retryLineage) } : {}),
           },
           createdAt: now,
           updatedAt: now,
@@ -921,6 +922,7 @@ export function createAgentRuntimeService(
           allowedToolIds: authorization.tools.map(tool => tool.toolId),
           context: request.context,
           requestDigest: agentRunRequestDigest(request),
+          ...(request.retryLineage ? { retryLineage: structuredClone(request.retryLineage) } : {}),
           ...(skillAdmission ? {
             skillSnapshot: {
               executionContextVersion: 1,

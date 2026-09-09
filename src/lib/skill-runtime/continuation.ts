@@ -22,6 +22,7 @@ import {
   resolveSkillInputs,
 } from './input-resolver';
 import { parseCompiledSkillFanOut } from './compiled-fan-out';
+import { normalizeMultiPlatformExportRetryLineage } from '@/lib/multi-platform-export/manifest';
 import { assertCompiledSkillFanOutValues, validateSkillStep } from './step-compiler';
 import { assertSourceVersionBindings } from './run-request';
 import type { SkillDefinition, SkillInputField, SkillStepDefinition, SkillSurface } from './types';
@@ -294,7 +295,14 @@ export async function loadPersistedSkillContinuation(input: {
     inputValues,
     parsedRequest.sourceVersionIds,
   );
-  const request = { ...parsedRequest, inputValues, sourceVersionIds };
+  const request = {
+    ...parsedRequest,
+    inputValues,
+    sourceVersionIds,
+    ...(created.payload.retryLineage === undefined ? {} : {
+      retryLineage: normalizeMultiPlatformExportRetryLineage(created.payload.retryLineage),
+    }),
+  };
   const requestBase: AgentRunRequestBase = {
     projectId: request.projectId,
     workspace,
@@ -313,6 +321,7 @@ export async function loadPersistedSkillContinuation(input: {
       inputValues: request.inputValues,
       modelBindings: request.modelBindings,
     },
+    ...(request.retryLineage ? { retryLineage: request.retryLineage } : {}),
   };
   const executionRuntime = created.payload.executionRuntime ?? 'model';
   if (executionRuntime !== 'model' && executionRuntime !== 'local') {

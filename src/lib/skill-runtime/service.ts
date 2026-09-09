@@ -18,6 +18,7 @@ import type { AgentDownstreamRecovery } from '@/lib/agent-runtime/downstream-ope
 import type { AgentEvent, AgentRunProjection } from '@/lib/agent-runtime/types';
 import {
   getCloudTaskForUser,
+  getCloudTaskForUserByIdempotencyKey,
   listCloudTasks,
   type CloudTask,
   type CloudTaskCreditStatus,
@@ -47,6 +48,13 @@ import type {
 } from './types';
 import { abortTaskExecution } from '@/lib/task-core/task-abort';
 import { cancelSkillPrepaidChildren } from './prepaid-generation';
+import { SkillPartialSuccessError } from '@/lib/multi-platform-export/executor';
+import {
+  normalizeMultiPlatformExportRetryLineage,
+  parseMultiPlatformExportResult,
+  type MultiPlatformExportRetryLineage,
+} from '@/lib/multi-platform-export/manifest';
+import { listManagedUsers } from '@/lib/server-auth';
 
 export class SkillRunRequestError extends Error {
   readonly code = 'SKILL_RUN_REQUEST_INVALID';
@@ -122,6 +130,15 @@ export interface SkillRetryResult {
   scheduledStepIds: string[];
 }
 
+export interface SkillPartialRetryResult {
+  accepted: boolean;
+  startedStepIds: string[];
+  scheduledStepIds: string[];
+  runId: string;
+  reused: boolean;
+  newAttempt: true;
+}
+
 export type SkillStepAdapter = (input: ExecuteSkillStepInput) => Promise<import('./types').SkillStepResult>;
 export type SkillStepRecoveryFactory = (
   input: Omit<ExecuteSkillStepInput, 'operation'>,
@@ -140,6 +157,7 @@ export class SkillStepAdapterUnavailableError extends Error {
 export interface SkillRuntimeServiceDependencies {
   createAuthorizedSkillRun: typeof createAuthorizedSkillRun;
   getTaskForUser: typeof getCloudTaskForUser;
+  getTaskByIdempotencyKey?: typeof getCloudTaskForUserByIdempotencyKey;
   listTasks: typeof listCloudTasks;
   listEvents: typeof listAgentRunEvents;
   getProjection: typeof getAgentRunProjection;
@@ -154,11 +172,20 @@ export interface SkillRuntimeServiceDependencies {
     runId: string;
     nextStepId: string;
   }): Promise<unknown>;
+  getActor?(actorUserId: string): Promise<User | null>;
+  validatePartialRetry?(input: {
+    actorUserId: string;
+    projectId: string;
+    sourceAssetVersionIds: readonly string[];
+    targetPresetIds: readonly string[];
+    lineage: MultiPlatformExportRetryLineage;
+  }): Promise<void>;
 }
 
 const defaultDependencies: SkillRuntimeServiceDependencies = {
   createAuthorizedSkillRun,
   getTaskForUser: getCloudTaskForUser,
+  getTaskByIdempotencyKey: getCloudTaskForUserByIdempotencyKey,
   listTasks: listCloudTasks,
   listEvents: listAgentRunEvents,
   getProjection: getAgentRunProjection,
@@ -169,6 +196,10 @@ const defaultDependencies: SkillRuntimeServiceDependencies = {
   abortTaskExecution,
   prepareResume: input => import('./continuation').then(module => (
     module.loadPersistedSkillContinuation(input)
+  )),
+  getActor: async actorUserId => (await listManagedUsers()).find(user => user.id === actorUserId) ?? null,
+  validatePartialRetry: input => import('@/lib/multi-platform-export/artifacts').then(module => (
+    module.validateMultiPlatformExportRetryLineage(input)
   )),
 };
 
@@ -212,6 +243,10 @@ function assertExactFields(
 
 export function parseSkillRunRequest(value: unknown): SkillRunRequest {
   const input = objectValue(value, 'request');
+  assertExactFields(input, [
+    'skillId', 'skillVersion', 'surface', 'projectId', 'workspaceId', 'inputValues',
+    'sourceVersionIds', 'modelBindings', 'idempotencyKey',
+  ], 'request');
   if (!Number.isSafeInteger(input.skillVersion) || Number(input.skillVersion) < 1) {
     throw new SkillRunRequestError('skillVersion is invalid');
   }
@@ -303,6 +338,21 @@ function completedSkillOutputs(events: readonly AgentEvent[]): DurableSkillOutpu
   });
 }
 
+function persistedRetryLineage(events: readonly AgentEvent[]): MultiPlatformExportRetryLineage | undefined {
+  const value = events.find(event => event.type === 'run.created')?.payload.retryLineage;
+  return value === undefined ? undefined : normalizeMultiPlatformExportRetryLineage(value);
+}
+
+function authoritativePartialExportResult(events: readonly AgentEvent[]) {
+  const terminal = [...events].reverse().find(event => event.type === 'run.failed');
+  const error = terminal?.payload.error as { code?: unknown } | undefined;
+  if (error?.code !== 'SKILL_PARTIAL_SUCCESS') return null;
+  const output = [...completedSkillOutputs(events)].reverse().find(candidate => (
+    candidate.kind === 'json' && candidate.schemaId === 'multi-platform-export-result-v1'
+  ));
+  return output?.kind === 'json' ? parseMultiPlatformExportResult(JSON.parse(output.content)) : null;
+}
+
 function frozenExecutionSteps(events: readonly AgentEvent[]): {
   inputs: readonly unknown[];
   steps: SkillStepDefinition[];
@@ -324,7 +374,8 @@ function frozenExecutionSteps(events: readonly AgentEvent[]): {
       || typeof step.promptTemplate !== 'string'
       || (step.promptInstructionTemplate !== undefined
         && typeof step.promptInstructionTemplate !== 'string')
-      || typeof step.modelRole !== 'string'
+      || (step.runtime !== undefined && step.runtime !== 'model' && step.runtime !== 'local')
+      || (step.modelRole !== undefined && typeof step.modelRole !== 'string')
       || !Array.isArray(step.qualityGateIds)
       || !step.qualityGateIds.every(value => typeof value === 'string')
     ) return null;
@@ -342,7 +393,10 @@ function frozenExecutionSteps(events: readonly AgentEvent[]): {
       ...(typeof step.promptInstructionTemplate === 'string'
         ? { promptInstructionTemplate: step.promptInstructionTemplate }
         : {}),
-      modelRole: step.modelRole as SkillStepDefinition['modelRole'],
+      ...(step.runtime !== undefined ? { runtime: step.runtime } : {}),
+      ...(typeof step.modelRole === 'string'
+        ? { modelRole: step.modelRole as SkillStepDefinition['modelRole'] }
+        : {}),
       qualityGateIds: step.qualityGateIds as string[],
       ...(compiledFanOut ? { compiledFanOut } : {}),
     });
@@ -545,10 +599,103 @@ export function createSkillRuntimeService(
       actorUserId: string;
       runId: string;
       stepId: string;
-    }): Promise<SkillRetryResult> {
+    }): Promise<SkillRetryResult | SkillPartialRetryResult> {
       const run = await owned(input);
       const invocation = skillInvocation(run.events);
       if (!invocation) throw new SkillRunNotFoundError();
+      const authoritativeEvents = run.events.filter(event => !run.projection.ignoredEventIds.includes(event.eventId));
+      const partial = invocation.skillId === 'preset-multi-platform-export'
+        && run.projection.status === 'failed'
+        ? authoritativePartialExportResult(authoritativeEvents)
+        : null;
+      if (partial) {
+        if (input.stepId !== 'export') throw new SkillStepNotFoundError();
+        const created = authoritativeEvents.find(event => event.type === 'run.created')?.payload;
+        const surface = created?.workspace === 'chat' ? 'simple-chat' : created?.workspace;
+        if (surface !== 'canvas' && surface !== 'workflow' && surface !== 'simple-chat') {
+          throw new SkillRunRequestError('Persisted Skill surface is invalid');
+        }
+        const previous = persistedRetryLineage(authoritativeEvents);
+        const lineage: MultiPlatformExportRetryLineage = {
+          kind: 'multi-platform-export-retry-v1',
+          rootRunId: previous?.rootRunId ?? input.runId,
+          retryOfRunId: input.runId,
+          attempt: (previous?.attempt ?? 1) + 1,
+          failedItems: partial.failures,
+          reusedImageAssetVersionIds: partial.imageAssetVersionIds,
+        };
+        const sourceAssetVersionIds = Array.isArray(invocation.inputValues.sourceAssetVersionIds)
+          ? invocation.inputValues.sourceAssetVersionIds.filter((id): id is string => typeof id === 'string') : [];
+        const targetPresetIds = Array.isArray(invocation.inputValues.targetPresetIds)
+          ? invocation.inputValues.targetPresetIds.filter((id): id is string => typeof id === 'string') : [];
+        await dependencies.validatePartialRetry?.({
+          actorUserId: input.actorUserId,
+          projectId: run.task.projectId || '',
+          sourceAssetVersionIds,
+          targetPresetIds,
+          lineage,
+        });
+        const retryIdempotencyKey = `${run.task.idempotencyKey || input.runId}:partial-retry`;
+        const existingAttempt = await dependencies.getTaskByIdempotencyKey?.(
+          input.actorUserId,
+          retryIdempotencyKey,
+        );
+        if (existingAttempt) {
+          if (existingAttempt.type !== 'agent-run' || existingAttempt.projectId !== run.task.projectId) {
+            throw new SkillRunRequestError('Persisted Skill retry attempt is invalid');
+          }
+          const existingEvents = await dependencies.listEvents({
+            actorUserId: input.actorUserId,
+            runId: existingAttempt.id,
+          });
+          const existingCreated = existingEvents.find(event => event.type === 'run.created');
+          const existingSkill = existingCreated?.payload.skill as { skillId?: unknown } | undefined;
+          const existingLineage = existingCreated?.payload.retryLineage === undefined
+            ? undefined
+            : normalizeMultiPlatformExportRetryLineage(existingCreated.payload.retryLineage);
+          if (!existingCreated || existingSkill?.skillId !== invocation.skillId
+            || existingAttempt.requestDigest !== existingCreated.payload.requestDigest
+            || JSON.stringify(existingLineage) !== JSON.stringify(normalizeMultiPlatformExportRetryLineage(lineage))) {
+            throw new SkillRunRequestError('Persisted Skill retry attempt is invalid');
+          }
+          return {
+            accepted: true, startedStepIds: [], scheduledStepIds: ['export'],
+            runId: existingAttempt.id, reused: true, newAttempt: true,
+          };
+        }
+        const actor = await dependencies.getActor?.(input.actorUserId);
+        if (!actor) throw new SkillRunRequestError('Skill retry actor is unavailable');
+        const frozenSkill = (await import('./continuation')).frozenDefinition(
+          created?.skillSnapshot,
+          surface,
+          invocation.skillId,
+          invocation.skillVersion,
+        );
+        const createdRun = await dependencies.createAuthorizedSkillRun({
+          actor,
+          request: {
+            skillId: invocation.skillId,
+            skillVersion: invocation.skillVersion,
+            surface,
+            projectId: run.task.projectId || '',
+            workspaceId: stringValue(created?.workspaceId, 'workspaceId'),
+            inputValues: structuredClone(invocation.inputValues),
+            sourceVersionIds: Array.isArray(created?.sourceVersionIds)
+              ? created.sourceVersionIds.filter((id): id is string => typeof id === 'string') : [],
+            modelBindings: structuredClone(invocation.modelBindings),
+            idempotencyKey: retryIdempotencyKey,
+            retryLineage: lineage,
+          },
+        }, undefined, frozenSkill);
+        return {
+          accepted: true,
+          startedStepIds: createdRun.reused ? [] : ['export'],
+          scheduledStepIds: ['export'],
+          runId: createdRun.runId,
+          reused: createdRun.reused,
+          newAttempt: true,
+        };
+      }
       const executionSteps = executionStepsForRun(run.events, invocation);
       if (!executionSteps.some(step => step.id === input.stepId)) {
         throw new SkillStepNotFoundError();
@@ -618,11 +765,20 @@ export async function executeSkillRun(input: {
   const appendExecutionEvent = async (event: Parameters<typeof appendAdoptedAgentEvent>[0]) => (
     appendAdoptedAgentEvent(event)
   );
+  let partialSuccess: SkillPartialSuccessError | undefined;
   const executor = createSkillExecutor({
-    executeStep: stepInput => {
+    executeStep: async stepInput => {
       const adapter = input.stepAdapters[stepInput.step.toolId];
       if (!adapter) throw new SkillStepAdapterUnavailableError(stepInput.step.toolId);
-      return adapter(stepInput);
+      try {
+        return await adapter(stepInput);
+      } catch (error) {
+        if (error instanceof SkillPartialSuccessError) {
+          partialSuccess = error;
+          return error.result;
+        }
+        throw error;
+      }
     },
     recoverStep: stepInput => input.stepRecoveries?.[stepInput.step.toolId]?.(stepInput),
     appendEvent: event => appendExecutionEvent({
@@ -636,9 +792,23 @@ export async function executeSkillRun(input: {
     completeRun: ({ result, executionFence }) => appendRunEvent({
       actorUserId: input.actor.id,
       runId: input.runId,
-      eventId: `skill:${input.runId}:generation:${executionFence.generation}:completed`,
-      type: 'run.completed',
-      payload: {
+      eventId: partialSuccess
+        ? `skill:${input.runId}:generation:${executionFence.generation}:partial-failed`
+        : `skill:${input.runId}:generation:${executionFence.generation}:completed`,
+      type: partialSuccess ? 'run.failed' : 'run.completed',
+      payload: partialSuccess ? {
+        generation: executionFence.generation,
+        stepId: 'export',
+        error: {
+          code: partialSuccess.code,
+          message: partialSuccess.message,
+          retryable: true,
+        },
+        result: {
+          assetVersionIds: result.assetVersionIds,
+          outputs: result.outputs,
+        },
+      } : {
         generation: executionFence.generation,
         result: {
           assetVersionIds: result.assetVersionIds,

@@ -14,6 +14,7 @@ import {
   buildExportArchive,
   persistExportArtifacts,
   persistExportImageVersion,
+  validateMultiPlatformExportRetryLineage,
 } from '@/lib/multi-platform-export/artifacts';
 import type { AssetFile, AssetVersion } from '@/lib/asset-core/types';
 import type { CreateAssetVersionInput } from '@/lib/asset-core/service';
@@ -79,6 +80,81 @@ const exportMetadata = (overrides: Record<string, unknown> = {}) => ({
 describe('multi-platform export artifacts', () => {
   beforeEach(() => {
     cleanupOutboxMocks.recordAssetCleanupFailure.mockClear();
+  });
+
+  it('writes retry lineage and both reused and newly created images into the new manifest', async () => {
+    const service = assetServiceDouble();
+    const reusedBytes = Buffer.from('reused');
+    const newBytes = Buffer.from('new');
+    const reused = {
+      id: 'version-reused', assetId: 'asset-reused', ownerId: 'user-1', projectId: 'project-1',
+      file: persistedFile('reused.png', 'image/png', reusedBytes), parentVersionIds: ['source-v1'],
+      metadata: exportMetadata({ runId: 'run-old', requestDigest: 'b'.repeat(64), outputFilename: 'reused.png' }),
+      createdAt: '2026-09-09T00:00:00.000Z',
+    } as AssetVersion;
+    const created = {
+      id: 'version-new', assetId: 'asset-new', ownerId: 'user-1', projectId: 'project-1',
+      file: persistedFile('new.png', 'image/png', newBytes), parentVersionIds: ['source-v2'],
+      metadata: exportMetadata({
+        runId: 'run-new', requestDigest: 'c'.repeat(64), sourceAssetVersionId: 'source-v2',
+        presetId: 'story', usage: 'story', outputFilename: 'new.png',
+      }), createdAt: '2026-09-09T00:00:00.000Z',
+    } as AssetVersion;
+    const persistBytes = vi.fn(async ({ bytes, filename, mimeType }: { bytes: Buffer; filename: string; mimeType: string }) => (
+      persistedFile(filename, mimeType, bytes)
+    ));
+
+    const result = await persistExportArtifacts({
+      actorUserId: 'user-1', projectId: 'project-1', runId: 'run-new', requestDigest: 'c'.repeat(64),
+      createdAt: '2026-09-09T00:00:00.000Z', frozenParameters: {}, failures: [],
+      lineage: {
+        kind: 'multi-platform-export-retry-v1', rootRunId: 'run-old', retryOfRunId: 'run-old', attempt: 2,
+        failedItems: [{ sourceAssetVersionId: 'source-v2', presetId: 'story', presetVersion: 1, code: 'EXPORT_IMAGE_TRANSFORM_FAILED', retryable: true }],
+        reusedImageAssetVersionIds: ['version-reused'],
+      },
+      images: [
+        { version: reused, filename: 'reused.png', bytes: reusedBytes, sourceAssetVersionId: 'source-v1', platform: 'instagram', usage: 'post', width: 10, height: 10, mimeType: 'image/png', sha256: reused.file.checksum!, reusedFromRunId: 'run-old' },
+        { version: created, filename: 'new.png', bytes: newBytes, sourceAssetVersionId: 'source-v2', platform: 'instagram', usage: 'story', width: 10, height: 10, mimeType: 'image/png', sha256: created.file.checksum! },
+      ], assetService: service, persistBytes,
+    });
+
+    expect(result.manifest.lineage).toEqual(expect.objectContaining({
+      rootRunId: 'run-old', retryOfRunId: 'run-old', attempt: 2,
+      reusedImageAssetVersionIds: ['version-reused'],
+    }));
+    expect(result.manifest.files.map(file => file.derivedAssetVersionId).sort())
+      .toEqual(['version-new', 'version-reused']);
+  });
+
+  it('rejects reused versions whose authoritative preset/source matrix is incomplete or conflicting', async () => {
+    const bytes = Buffer.from('reused');
+    const reused = {
+      id: 'version-reused', assetId: 'asset-reused', ownerId: 'user-1', projectId: 'project-1',
+      file: persistedFile('reused.png', 'image/png', bytes), parentVersionIds: ['source-v1'],
+      metadata: exportMetadata({ runId: 'run-old', requestDigest: 'b'.repeat(64), outputFilename: 'reused.png' }),
+      createdAt: '2026-09-09T00:00:00.000Z',
+    } as AssetVersion;
+    const storage = {
+      read: async (callback: (transaction: unknown) => Promise<unknown>) => callback({
+        findProject: vi.fn(async () => true),
+        findVersion: vi.fn(async () => reused),
+      }),
+    } as never;
+    const lineage = {
+      kind: 'multi-platform-export-retry-v1' as const, rootRunId: 'run-old', retryOfRunId: 'run-old', attempt: 2,
+      reusedImageAssetVersionIds: ['version-reused'], failedItems: [{
+        sourceAssetVersionId: 'source-v1', presetId: 'story', presetVersion: 1,
+        outputFilename: 'story.png', code: 'EXPORT_IMAGE_TRANSFORM_FAILED', retryable: true,
+      }],
+    };
+    await expect(validateMultiPlatformExportRetryLineage({
+      actorUserId: 'user-1', projectId: 'project-1', sourceAssetVersionIds: ['source-v1'],
+      targetPresetIds: ['post-v1', 'story-v1'], lineage, storage,
+    })).resolves.toBeUndefined();
+    await expect(validateMultiPlatformExportRetryLineage({
+      actorUserId: 'user-1', projectId: 'project-1', sourceAssetVersionIds: ['source-v1'],
+      targetPresetIds: ['story-v1'], lineage, storage,
+    })).rejects.toThrow('EXPORT_RETRY_LINEAGE_INVALID');
   });
   it('treats a single image commit-then-throw as published and never deletes its referenced file', async () => {
     const service = assetServiceDouble();

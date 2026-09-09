@@ -64,6 +64,7 @@ export interface AgentRunRequestBase {
   idempotencyKey: string;
   context: AgentContextSnapshot;
   skill?: AgentSkillInvocation;
+  retryLineage?: import('@/lib/multi-platform-export/manifest').MultiPlatformExportRetryLineage;
 }
 
 export type ModelAgentRunRequest = AgentRunRequestBase & {

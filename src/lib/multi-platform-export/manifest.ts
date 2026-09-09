@@ -23,6 +23,15 @@ export interface ExportFailure {
   outputFilename?: string;
 }
 
+export interface MultiPlatformExportRetryLineage {
+  kind: 'multi-platform-export-retry-v1';
+  rootRunId: string;
+  retryOfRunId: string;
+  attempt: number;
+  failedItems: ExportFailure[];
+  reusedImageAssetVersionIds: string[];
+}
+
 export interface MultiPlatformExportManifestV1 {
   schemaVersion: 1;
   schemaId: typeof MULTI_PLATFORM_EXPORT_MANIFEST_SCHEMA_ID;
@@ -32,6 +41,7 @@ export interface MultiPlatformExportManifestV1 {
   frozenParameters: Record<string, unknown>;
   files: ExportManifestFile[];
   failures: ExportFailure[];
+  lineage?: MultiPlatformExportRetryLineage;
 }
 
 export interface MultiPlatformExportResultV1 {
@@ -39,9 +49,10 @@ export interface MultiPlatformExportResultV1 {
   runId: string;
   outcome: 'completed' | 'partial_success';
   imageAssetVersionIds: string[];
-  manifestAssetVersionId: string;
-  zipAssetVersionId: string;
+  manifestAssetVersionId?: string;
+  zipAssetVersionId?: string;
   failures: ExportFailure[];
+  lineage?: MultiPlatformExportRetryLineage;
 }
 
 const FLAT_FILENAME = /^[\p{L}\p{N}][\p{L}\p{N} ._-]{0,199}$/u;
@@ -79,6 +90,30 @@ function normalizeFailure(value: ExportFailure): ExportFailure {
   if (value.presetVersion !== undefined) failure.presetVersion = positiveInteger(value.presetVersion, 'EXPORT_MANIFEST_INVALID');
   if (value.outputFilename !== undefined) failure.outputFilename = assertFlatExportFilename(value.outputFilename);
   return failure;
+}
+
+export function normalizeMultiPlatformExportRetryLineage(value: unknown): MultiPlatformExportRetryLineage {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) fail('EXPORT_RETRY_LINEAGE_INVALID');
+  const record = value as Record<string, unknown>;
+  const allowed = new Set(['kind', 'rootRunId', 'retryOfRunId', 'attempt', 'failedItems', 'reusedImageAssetVersionIds']);
+  if (Object.keys(record).some(key => !allowed.has(key)) || record.kind !== 'multi-platform-export-retry-v1') fail('EXPORT_RETRY_LINEAGE_INVALID');
+  if (!Array.isArray(record.failedItems) || record.failedItems.length < 1 || record.failedItems.length > 100) fail('EXPORT_RETRY_LINEAGE_INVALID');
+  if (!Array.isArray(record.reusedImageAssetVersionIds) || record.reusedImageAssetVersionIds.length > 100
+    || record.reusedImageAssetVersionIds.some(id => typeof id !== 'string')) fail('EXPORT_RETRY_LINEAGE_INVALID');
+  const reused = record.reusedImageAssetVersionIds.map(id => string(id, 'EXPORT_RETRY_LINEAGE_INVALID'));
+  if (new Set(reused).size !== reused.length) fail('EXPORT_RETRY_LINEAGE_INVALID');
+  return {
+    kind: 'multi-platform-export-retry-v1',
+    rootRunId: string(record.rootRunId, 'EXPORT_RETRY_LINEAGE_INVALID'),
+    retryOfRunId: string(record.retryOfRunId, 'EXPORT_RETRY_LINEAGE_INVALID'),
+    attempt: (() => {
+      const attempt = positiveInteger(record.attempt, 'EXPORT_RETRY_LINEAGE_INVALID');
+      if (attempt < 2) fail('EXPORT_RETRY_LINEAGE_INVALID');
+      return attempt;
+    })(),
+    failedItems: record.failedItems.map(item => normalizeFailure(item as ExportFailure)),
+    reusedImageAssetVersionIds: reused.sort(order),
+  };
 }
 
 export function buildMultiPlatformExportManifest(input: Omit<MultiPlatformExportManifestV1, 'schemaVersion' | 'schemaId'>): MultiPlatformExportManifestV1 {
@@ -119,6 +154,7 @@ export function buildMultiPlatformExportManifest(input: Omit<MultiPlatformExport
     frozenParameters: JSON.parse(JSON.stringify(input.frozenParameters)) as Record<string, unknown>,
     files,
     failures,
+    ...(input.lineage ? { lineage: normalizeMultiPlatformExportRetryLineage(input.lineage) } : {}),
   };
 }
 
@@ -139,7 +175,7 @@ export function canonicalMultiPlatformExportManifestJson(value: MultiPlatformExp
 export function parseMultiPlatformExportResult(value: unknown): MultiPlatformExportResultV1 {
   if (!value || typeof value !== 'object' || Array.isArray(value)) fail('EXPORT_RESULT_SCHEMA_INVALID');
   const record = value as Record<string, unknown>;
-  const allowed = new Set(['schemaVersion', 'runId', 'outcome', 'imageAssetVersionIds', 'manifestAssetVersionId', 'zipAssetVersionId', 'failures']);
+  const allowed = new Set(['schemaVersion', 'runId', 'outcome', 'imageAssetVersionIds', 'manifestAssetVersionId', 'zipAssetVersionId', 'failures', 'lineage']);
   if (Object.keys(record).some(key => !allowed.has(key)) || record.schemaVersion !== 1) fail('EXPORT_RESULT_SCHEMA_INVALID');
   if (record.outcome !== 'completed' && record.outcome !== 'partial_success') fail('EXPORT_RESULT_SCHEMA_INVALID');
   if (!Array.isArray(record.imageAssetVersionIds) || record.imageAssetVersionIds.some(id => typeof id !== 'string')) fail('EXPORT_RESULT_SCHEMA_INVALID');
@@ -151,14 +187,17 @@ export function parseMultiPlatformExportResult(value: unknown): MultiPlatformExp
     || (record.outcome === 'completed' && imageIds.length === 0)
     || (record.outcome === 'partial_success' && failures.length === 0)
   ) fail('EXPORT_RESULT_SCHEMA_INVALID');
+  if (record.outcome === 'completed' && (record.manifestAssetVersionId === undefined || record.zipAssetVersionId === undefined)) fail('EXPORT_RESULT_SCHEMA_INVALID');
+  if ((record.manifestAssetVersionId === undefined) !== (record.zipAssetVersionId === undefined)) fail('EXPORT_RESULT_SCHEMA_INVALID');
   return {
     schemaVersion: 1,
     runId: string(record.runId, 'EXPORT_RESULT_SCHEMA_INVALID'),
     outcome: record.outcome,
     imageAssetVersionIds: imageIds.sort(order),
-    manifestAssetVersionId: string(record.manifestAssetVersionId, 'EXPORT_RESULT_SCHEMA_INVALID'),
-    zipAssetVersionId: string(record.zipAssetVersionId, 'EXPORT_RESULT_SCHEMA_INVALID'),
+    ...(record.manifestAssetVersionId === undefined ? {} : { manifestAssetVersionId: string(record.manifestAssetVersionId, 'EXPORT_RESULT_SCHEMA_INVALID') }),
+    ...(record.zipAssetVersionId === undefined ? {} : { zipAssetVersionId: string(record.zipAssetVersionId, 'EXPORT_RESULT_SCHEMA_INVALID') }),
     failures: failures.sort((a, b) => order(a.sourceAssetVersionId, b.sourceAssetVersionId) || order(a.code, b.code)),
+    ...(record.lineage === undefined ? {} : { lineage: normalizeMultiPlatformExportRetryLineage(record.lineage) }),
   };
 }
 

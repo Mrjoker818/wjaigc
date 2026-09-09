@@ -7,6 +7,7 @@ import { persistAssetBytes, type PersistAssetBytesInput, type PersistedAssetFile
 import { recordAssetCleanupFailure } from '@/lib/asset-core/cleanup-outbox';
 import { createAssetService, type CreateAssetVersionInput } from '@/lib/asset-core/service';
 import type { AssetFile, AssetVersion } from '@/lib/asset-core/types';
+import { createPostgresAssetStorage, type AssetStorage } from '@/lib/asset-core/storage';
 import type { ExportFormat, MultiPlatformExportInput } from './types';
 import {
   assertFlatExportFilename,
@@ -15,7 +16,10 @@ import {
   type ExportFailure,
   type MultiPlatformExportManifestV1,
   type MultiPlatformExportResultV1,
+  type MultiPlatformExportRetryLineage,
 } from './manifest';
+import { readAuthorizedExportSources } from './source-reader';
+import type { ExportPlan } from './types';
 
 const MAX_ZIP_ENTRIES = 101;
 const MAX_ZIP_UNCOMPRESSED_BYTES = 512 * 1024 * 1024;
@@ -168,12 +172,137 @@ export interface PersistedExportImage {
   version: AssetVersion; filename: string; bytes: Buffer; sourceAssetVersionId: string;
   platform: string; usage: string; width: number; height: number;
   mimeType: 'image/png' | 'image/jpeg' | 'image/webp'; sha256: string;
+  reusedFromRunId?: string;
+}
+
+export async function validateMultiPlatformExportRetryLineage(input: {
+  actorUserId: string;
+  projectId: string;
+  sourceAssetVersionIds: readonly string[];
+  targetPresetIds: readonly string[];
+  lineage: MultiPlatformExportRetryLineage;
+  storage?: AssetStorage;
+}): Promise<void> {
+  const storage = input.storage ?? createPostgresAssetStorage();
+  const sources = new Set(input.sourceAssetVersionIds);
+  const presets = new Set(input.targetPresetIds);
+  const expectedCount = sources.size * presets.size;
+  const failedKeys = new Set<string>();
+  for (const failure of input.lineage.failedItems) {
+    if (!sources.has(failure.sourceAssetVersionId)) throw new Error('EXPORT_RETRY_LINEAGE_INVALID');
+    if (failure.presetId === undefined) continue;
+    const presetReference = `${failure.presetId}-v${failure.presetVersion}`;
+    if (!presets.has(presetReference) || !failure.outputFilename) throw new Error('EXPORT_RETRY_LINEAGE_INVALID');
+    const key = `${failure.sourceAssetVersionId}\0${presetReference}\0${failure.outputFilename}`;
+    if (failedKeys.has(key)) throw new Error('EXPORT_RETRY_LINEAGE_INVALID');
+    failedKeys.add(key);
+  }
+  const versions = await storage.read(async transaction => {
+    if (!await transaction.findProject(input.actorUserId, input.projectId)) throw new Error('EXPORT_RETRY_LINEAGE_INVALID');
+    return Promise.all(input.lineage.reusedImageAssetVersionIds.map(async versionId => {
+      const version = await transaction.findVersion(input.actorUserId, input.projectId, versionId);
+      if (!version) throw new Error('EXPORT_RETRY_LINEAGE_INVALID');
+      return version;
+    }));
+  });
+  const versionKeys = new Set<string>();
+  const digests = new Set<string>();
+  for (const version of versions) {
+    const metadata = version.metadata;
+    if (!metadata || metadata.schemaId !== 'multi-platform-export-v1'
+      || typeof metadata.sourceAssetVersionId !== 'string' || !sources.has(metadata.sourceAssetVersionId)
+      || typeof metadata.presetId !== 'string' || !Number.isSafeInteger(metadata.presetVersion)
+      || !presets.has(`${metadata.presetId}-v${metadata.presetVersion}`)
+      || typeof metadata.outputFilename !== 'string' || typeof metadata.requestDigest !== 'string'
+      || !/^[a-f0-9]{64}$/u.test(metadata.requestDigest)
+      || version.parentVersionIds.length !== 1 || version.parentVersionIds[0] !== metadata.sourceAssetVersionId) {
+      throw new Error('EXPORT_RETRY_LINEAGE_INVALID');
+    }
+    const key = `${metadata.sourceAssetVersionId}\0${metadata.presetId}-v${metadata.presetVersion}\0${metadata.outputFilename}`;
+    if (versionKeys.has(key) || failedKeys.has(key)) throw new Error('EXPORT_RETRY_LINEAGE_INVALID');
+    versionKeys.add(key);
+    digests.add(metadata.requestDigest);
+  }
+  if (digests.size > 1) throw new Error('EXPORT_RETRY_LINEAGE_INVALID');
+  const archiveOnlyFailure = input.lineage.failedItems.some(failure => failure.presetId === undefined);
+  if (archiveOnlyFailure ? versionKeys.size !== expectedCount : versionKeys.size + failedKeys.size !== expectedCount) {
+    throw new Error('EXPORT_RETRY_LINEAGE_INVALID');
+  }
+}
+
+export async function loadPersistedExportImages(input: {
+  actorUserId: string; projectId: string; runId: string; requestDigest: string;
+  plan: ExportPlan; signal: AbortSignal; retryLineage?: MultiPlatformExportRetryLineage;
+  storage?: AssetStorage;
+  readSources?: typeof readAuthorizedExportSources;
+}): Promise<PersistedExportImage[]> {
+  input.signal.throwIfAborted();
+  const storage = input.storage ?? createPostgresAssetStorage();
+  const expectedByKey = new Map(input.plan.outputs.map(output => [
+    `${output.sourceVersionId}\0${output.presetId}\0${output.presetVersion}\0${output.outputFilename}`,
+    output,
+  ]));
+  const versions = await storage.read(async transaction => {
+    if (!await transaction.findProject(input.actorUserId, input.projectId)) throw new Error('EXPORT_REUSED_VERSION_INVALID');
+    if (input.retryLineage) {
+      return Promise.all(input.retryLineage.reusedImageAssetVersionIds.map(async id => {
+        const version = await transaction.findVersion(input.actorUserId, input.projectId, id);
+        if (!version) throw new Error('EXPORT_REUSED_VERSION_INVALID');
+        return version;
+      }));
+    }
+    const found = await Promise.all(input.plan.outputs.map(output => transaction.findVersionByIdempotency(
+      input.actorUserId,
+      input.projectId,
+      `skill:${input.runId}:export:${output.sourceVersionId}:${output.presetId}:v${output.presetVersion}`,
+    )));
+    return found.filter((item): item is NonNullable<typeof item> => item !== null).map(item => item.version);
+  });
+  if (new Set(versions.map(version => version.id)).size !== versions.length) throw new Error('EXPORT_REUSED_VERSION_INVALID');
+  const sources = [];
+  for (let offset = 0; offset < versions.length; offset += 20) {
+    sources.push(...await (input.readSources ?? readAuthorizedExportSources)({
+      actorUserId: input.actorUserId, projectId: input.projectId,
+      sourceVersionIds: versions.slice(offset, offset + 20).map(version => version.id), signal: input.signal,
+    }));
+  }
+  const bytesById = new Map(sources.map(source => [source.versionId, source]));
+  return versions.map(version => {
+    const metadata = version.metadata;
+    if (!metadata || metadata.schemaId !== 'multi-platform-export-v1'
+      || typeof metadata.runId !== 'string' || typeof metadata.requestDigest !== 'string'
+      || !/^[a-f0-9]{64}$/u.test(metadata.requestDigest)
+      || typeof metadata.sourceAssetVersionId !== 'string' || typeof metadata.presetId !== 'string'
+      || !Number.isSafeInteger(metadata.presetVersion) || typeof metadata.outputFilename !== 'string') {
+      throw new Error('EXPORT_REUSED_VERSION_INVALID');
+    }
+    if (!input.retryLineage && (metadata.runId !== input.runId || metadata.requestDigest !== input.requestDigest)) {
+      throw new Error('EXPORT_REUSED_VERSION_INVALID');
+    }
+    const key = `${metadata.sourceAssetVersionId}\0${metadata.presetId}\0${metadata.presetVersion}\0${metadata.outputFilename}`;
+    const expected = expectedByKey.get(key);
+    const source = bytesById.get(version.id);
+    if (!expected || !source || version.parentVersionIds.length !== 1
+      || version.parentVersionIds[0] !== expected.sourceVersionId
+      || metadata.platform !== expected.platform || metadata.usage !== expected.usage
+      || metadata.width !== expected.width || metadata.height !== expected.height
+      || version.file.mimeType !== source.mimeType || version.file.checksum !== source.sha256) {
+      throw new Error('EXPORT_REUSED_VERSION_INVALID');
+    }
+    return {
+      version, filename: expected.outputFilename, bytes: source.bytes,
+      sourceAssetVersionId: expected.sourceVersionId, platform: expected.platform, usage: expected.usage,
+      width: expected.width, height: expected.height, mimeType: source.mimeType, sha256: source.sha256,
+      ...(metadata.runId === input.runId ? {} : { reusedFromRunId: metadata.runId }),
+    };
+  });
 }
 
 export interface PersistExportArtifactsInput {
   actorUserId: string; projectId: string; runId: string; requestDigest: string; createdAt: string;
   frozenParameters: Record<string, unknown>; images: readonly PersistedExportImage[];
   failures: readonly ExportFailure[]; signal?: AbortSignal;
+  lineage?: MultiPlatformExportRetryLineage;
   assetService?: ExportAssetService; persistBytes?: PersistBytes;
 }
 
@@ -182,6 +311,13 @@ export async function persistExportArtifacts(input: PersistExportArtifactsInput)
   result: MultiPlatformExportResultV1;
 }> {
   input.signal?.throwIfAborted();
+  const reusedIds = new Set(input.images.filter(image => image.reusedFromRunId).map(image => image.version.id));
+  const frozenReusedIds = new Set(input.lineage?.reusedImageAssetVersionIds ?? []);
+  if ((input.lineage === undefined && reusedIds.size > 0)
+    || reusedIds.size !== frozenReusedIds.size
+    || [...reusedIds].some(id => !frozenReusedIds.has(id))) {
+    throw new Error('EXPORT_RETRY_LINEAGE_INVALID');
+  }
   for (const image of input.images) {
     const checksum = createHash('sha256').update(image.bytes).digest('hex');
     const metadata = image.version.metadata;
@@ -196,8 +332,8 @@ export async function persistExportArtifacts(input: PersistExportArtifactsInput)
     if (
       !metadata
       || metadata.schemaId !== 'multi-platform-export-v1'
-      || metadata.runId !== input.runId
-      || metadata.requestDigest !== input.requestDigest
+      || (image.reusedFromRunId ? metadata.runId !== image.reusedFromRunId : metadata.runId !== input.runId)
+      || (!image.reusedFromRunId && metadata.requestDigest !== input.requestDigest)
       || metadata.sourceAssetVersionId !== image.sourceAssetVersionId
       || image.version.parentVersionIds.length !== 1
       || image.version.parentVersionIds[0] !== metadata.sourceAssetVersionId
@@ -229,6 +365,7 @@ export async function persistExportArtifacts(input: PersistExportArtifactsInput)
         sha256: image.version.file.checksum as string,
       };
     }), failures: [...input.failures],
+    ...(input.lineage ? { lineage: input.lineage } : {}),
   });
   const manifestJson = canonicalMultiPlatformExportManifestJson(manifest);
   const zipBytes = await buildExportArchive({
@@ -328,6 +465,7 @@ export async function persistExportArtifacts(input: PersistExportArtifactsInput)
       imageAssetVersionIds: input.images.map(image => image.version.id).sort(),
       manifestAssetVersionId: manifestVersion.id, zipAssetVersionId: zipVersion.id,
       failures: [...manifest.failures],
+      ...(input.lineage ? { lineage: input.lineage } : {}),
     },
   };
 }
