@@ -75,6 +75,12 @@ function freezePreset(preset: PlatformExportPreset): FrozenPlatformExportPreset 
   return Object.freeze({ ...preset });
 }
 
+function builtInVersionFloor(id: string): number {
+  return DEFAULT_PLATFORM_EXPORT_PRESETS
+    .filter(preset => preset.id === id)
+    .reduce((highest, preset) => Math.max(highest, preset.version), 0);
+}
+
 export async function listAllPlatformExportPresets(): Promise<PlatformExportPreset[]> {
   let stored: PlatformExportPreset[];
   try {
@@ -129,7 +135,7 @@ export async function createPlatformExportPresetVersion(
   input: CreatePlatformExportPresetVersionInput,
 ): Promise<PlatformExportPreset> {
   try {
-    return await dbCreatePlatformExportPresetVersion(input);
+    return await dbCreatePlatformExportPresetVersion(input, builtInVersionFloor(input.id));
   } catch (error) {
     if ((error as { code?: unknown })?.code === 'PLATFORM_EXPORT_PRESET_VERSION_CONFLICT') {
       throw new PlatformExportPresetError(

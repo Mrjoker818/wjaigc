@@ -51,6 +51,7 @@ describe('versioned platform export presets', () => {
     await expect(freezePlatformExportPresets(['instagram-post-v1'])).resolves.toEqual(frozen);
     expect(mocks.dbCreatePlatformExportPresetVersion).toHaveBeenCalledWith(
       expect.objectContaining({ id: 'instagram-post', width: 1200 }),
+      1,
     );
   });
 
@@ -117,7 +118,28 @@ describe('versioned platform export presets', () => {
     expect(mocks.dbListPlatformExportPresets).not.toHaveBeenCalled();
     expect(mocks.dbCreatePlatformExportPresetVersion).toHaveBeenCalledWith(
       expect.not.objectContaining({ version: expect.anything() }),
+      0,
     );
+  });
+
+  it('reserves built-in v1 when creating the first stored version and keeps the frozen default unchanged', async () => {
+    mocks.dbCreatePlatformExportPresetVersion.mockResolvedValue({
+      id: 'instagram-post', version: 2, platform: 'instagram', usage: 'post',
+      label: 'Instagram 帖子新版', width: 1200, height: 1200,
+      recommendedFormat: 'jpeg', supportsTransparency: false, enabled: true,
+    });
+    const before = await freezePlatformExportPresets(['instagram-post-v1']);
+
+    await createPlatformExportPresetVersion({
+      id: 'instagram-post', platform: 'instagram', usage: 'post', label: 'Instagram 帖子新版',
+      width: 1200, height: 1200, recommendedFormat: 'jpeg', supportsTransparency: false, enabled: true,
+    });
+
+    expect(mocks.dbCreatePlatformExportPresetVersion).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'instagram-post' }),
+      1,
+    );
+    await expect(freezePlatformExportPresets(['instagram-post-v1'])).resolves.toEqual(before);
   });
 
   it('changes only enabled state and preserves immutable preset fields', async () => {

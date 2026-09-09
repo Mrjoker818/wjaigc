@@ -769,9 +769,19 @@ export async function dbListPlatformExportPresets(): Promise<PlatformExportPrese
 
 export async function dbCreatePlatformExportPresetVersion(
   preset: CreatePlatformExportPresetVersionInput,
+  trustedBuiltInVersionFloor: number,
 ): Promise<PlatformExportPreset> {
   let client: PoolClient | null = null;
   try {
+    if (
+      !Number.isSafeInteger(trustedBuiltInVersionFloor)
+      || trustedBuiltInVersionFloor < 0
+      || trustedBuiltInVersionFloor >= 2_147_483_647
+    ) {
+      throw Object.assign(new Error('Platform export preset built-in version floor is invalid'), {
+        code: 'PLATFORM_EXPORT_PRESET_VERSION_CONFLICT',
+      });
+    }
     client = await getPool().connect();
     await client.query('BEGIN');
     await client.query(
@@ -779,10 +789,10 @@ export async function dbCreatePlatformExportPresetVersion(
       [preset.id],
     );
     const versionResult = await client.query(
-      `SELECT COALESCE(MAX(version), 0) + 1 AS version
+      `SELECT GREATEST(COALESCE(MAX(version), 0), $2::integer) + 1 AS version
        FROM wujie_platform_export_presets
        WHERE preset_id = $1`,
-      [preset.id],
+      [preset.id, trustedBuiltInVersionFloor],
     );
     const version = Number(versionResult.rows[0]?.version);
     if (!Number.isSafeInteger(version) || version < 1 || version > 2_147_483_647) {

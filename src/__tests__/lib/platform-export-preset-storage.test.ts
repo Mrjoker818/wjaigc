@@ -78,11 +78,13 @@ describe('platform export preset PostgreSQL storage contract', () => {
 
     const input = { ...preset };
     delete (input as Partial<typeof input>).version;
-    await expect(dbCreatePlatformExportPresetVersion(input)).resolves.toEqual({ ...preset, version: 3 });
+    await expect(dbCreatePlatformExportPresetVersion(input, 1)).resolves.toEqual({ ...preset, version: 3 });
     const statements = client.query.mock.calls.map(([sql]) => String(sql));
     expect(statements[0]).toBe('BEGIN');
     expect(statements[1]).toContain('pg_advisory_xact_lock');
     expect(statements[2]).toContain('MAX(version)');
+    expect(statements[2]).toContain('GREATEST');
+    expect(client.query.mock.calls[2][1]).toEqual([preset.id, 1]);
     expect(statements[3]).toContain('INSERT INTO wujie_platform_export_presets');
     expect(statements[4]).toBe('COMMIT');
     expect(client.release).toHaveBeenCalledOnce();
@@ -99,7 +101,7 @@ describe('platform export preset PostgreSQL storage contract', () => {
     const input = { ...preset };
     delete (input as Partial<typeof input>).version;
 
-    await expect(dbCreatePlatformExportPresetVersion(input)).rejects.toMatchObject({
+    await expect(dbCreatePlatformExportPresetVersion(input, 0)).rejects.toMatchObject({
       code: 'PLATFORM_EXPORT_PRESET_VERSION_CONFLICT',
     });
     expect(client.query).toHaveBeenCalledWith('ROLLBACK');
@@ -115,10 +117,35 @@ describe('platform export preset PostgreSQL storage contract', () => {
     const input = { ...preset };
     delete (input as Partial<typeof input>).version;
 
-    await expect(dbCreatePlatformExportPresetVersion(input)).rejects.toMatchObject({
+    await expect(dbCreatePlatformExportPresetVersion(input, 0)).rejects.toMatchObject({
       code: 'PLATFORM_EXPORT_PRESET_STORAGE_UNAVAILABLE',
     });
     consoleError.mockRestore();
+  });
+
+  it.each([
+    { label: 'starts a new non-built-in preset at v1', floor: 0, databaseVersion: 1, expected: 1 },
+    { label: 'continues above a higher stored version', floor: 1, databaseVersion: 5, expected: 5 },
+  ])('$label', async ({ floor, databaseVersion, expected }) => {
+    client.query
+      .mockResolvedValueOnce({ rows: [], rowCount: 0 })
+      .mockResolvedValueOnce({ rows: [], rowCount: 0 })
+      .mockResolvedValueOnce({ rows: [{ version: databaseVersion }], rowCount: 1 })
+      .mockResolvedValueOnce({
+        rows: [{
+          preset_id: preset.id, version: expected, platform: preset.platform, usage: preset.usage,
+          label: preset.label, width: preset.width, height: preset.height,
+          recommended_format: preset.recommendedFormat,
+          supports_transparency: preset.supportsTransparency, enabled: preset.enabled,
+        }],
+        rowCount: 1,
+      })
+      .mockResolvedValueOnce({ rows: [], rowCount: 0 });
+    const input = { ...preset };
+    delete (input as Partial<typeof input>).version;
+
+    await expect(dbCreatePlatformExportPresetVersion(input, floor)).resolves.toMatchObject({ version: expected });
+    expect(client.query.mock.calls[2][1]).toEqual([preset.id, floor]);
   });
 
   it('does not turn a storage read failure into an empty override set', async () => {

@@ -120,6 +120,7 @@ describe('/api/admin/platform-export-presets', () => {
     [{ ...validPreset, label: 'l'.repeat(121) }],
     [{ ...validPreset, recommendedFormat: 'gif' }],
     [{ ...validPreset, unexpected: true }],
+    [{ ...validPreset, versionFloor: 99 }],
   ])('rejects invalid or undeclared creation fields', async body => {
     const response = await POST(request('POST', body));
 
