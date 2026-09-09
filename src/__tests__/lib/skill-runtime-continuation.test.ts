@@ -43,6 +43,7 @@ function persistedFixture(
   inputValues: Record<string, unknown>,
   sourceVersionIds: string[],
   executionRuntime?: 'model',
+  persistedExecutionRuntime: 'model' | undefined = executionRuntime,
 ): { task: CloudTask; events: AgentEvent[] } {
   const request: AgentRunRequest = {
     projectId: 'project-1', workspace: 'canvas', workspaceId: 'canvas-1', mode: 'agent',
@@ -66,7 +67,7 @@ function persistedFixture(
       eventId: 'created', runId: 'run-1', sequence: 1, type: 'run.created', timestamp: 'now',
       payload: {
         workspace: request.workspace, workspaceId: request.workspaceId,
-        ...(executionRuntime ? { executionRuntime } : {}),
+        ...(persistedExecutionRuntime ? { executionRuntime: persistedExecutionRuntime } : {}),
         providerId: request.providerId, modelId: request.modelId, prompt: request.prompt,
         sourceVersionIds, allowedToolIds: request.allowedToolIds, context: request.context,
         requestDigest, skill: request.skill, skillSnapshot: frozenSnapshot,
@@ -393,6 +394,20 @@ describe('Skill runtime frozen continuation', () => {
     expect(continuationMocks.authorizeAgentContext).toHaveBeenCalledWith({
       actorUserId: actor.id,
       request: expect.objectContaining({ executionRuntime: 'model' }),
+    });
+  });
+
+  it('accepts a normalized model event for a request digest that omitted executionRuntime', async () => {
+    const fixture = persistedFixture({
+      campaignName: 'Launch', channels: ['Web'], sources: ['version-1'],
+    }, ['version-1'], undefined, 'model');
+
+    await expect(loadPersistedSkillContinuation({
+      actorUserId: actor.id, projectId: 'project-1', runId: 'run-1', ...fixture,
+    })).resolves.toMatchObject({ requestDigest: fixture.task.requestDigest });
+    expect(continuationMocks.authorizeAgentContext).toHaveBeenCalledWith({
+      actorUserId: actor.id,
+      request: expect.not.objectContaining({ executionRuntime: 'model' }),
     });
   });
 

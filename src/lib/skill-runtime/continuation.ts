@@ -318,16 +318,24 @@ export async function loadPersistedSkillContinuation(input: {
   if (executionRuntime !== 'model' && executionRuntime !== 'local') {
     throw new SkillRunRequestError('executionRuntime is invalid');
   }
-  const agentRequest: AgentRunRequest = executionRuntime === 'local'
-    ? { ...requestBase, executionRuntime: 'local' }
-    : {
-        ...requestBase,
-        ...(created.payload.executionRuntime === 'model'
-          ? { executionRuntime: 'model' as const }
-          : {}),
-        providerId: text(created.payload.providerId, 'providerId'),
-        modelId: text(created.payload.modelId, 'modelId'),
-      };
+  let agentRequest: AgentRunRequest;
+  if (executionRuntime === 'local') {
+    agentRequest = { ...requestBase, executionRuntime: 'local' };
+  } else {
+    const modelRequest = {
+      ...requestBase,
+      providerId: text(created.payload.providerId, 'providerId'),
+      modelId: text(created.payload.modelId, 'modelId'),
+    };
+    const modelCandidates: AgentRunRequest[] = [
+      { ...modelRequest, executionRuntime: 'model' },
+      modelRequest,
+    ];
+    agentRequest = modelCandidates.find(candidate => {
+      const candidateDigest = agentRunRequestDigest(candidate);
+      return task.requestDigest === candidateDigest && created.payload.requestDigest === candidateDigest;
+    }) ?? modelCandidates[0];
+  }
   const requestDigest = agentRunRequestDigest(agentRequest);
   if (!task.requestDigest || task.requestDigest !== requestDigest || created.payload.requestDigest !== requestDigest) {
     throw new SkillRunRequestError('Persisted Skill request digest is invalid');
