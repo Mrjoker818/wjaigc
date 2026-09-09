@@ -1,0 +1,69 @@
+{
+  "schemaVersion": 1,
+  "scope": "Lovart platform compliance Task 11 interrupted cloud run",
+  "recordedAt": "2026-09-09T16:03:07+08:00",
+  "deployment": {
+    "url": "https://62afe49a-716e-4d9e-99cd-a0be49c4794c-5000.dev.coze.site/",
+    "githubCommit": "2093c70cfbb2046049717106275e917feadff511",
+    "cozeMergeHead": "7864d7c5c6b60b51d4f28360736ce4e47de86bdb",
+    "browser": "Microsoft Edge",
+    "actor": "Mr.joker",
+    "projectId": "project_1787549625844_nfmso3ts9"
+  },
+  "catalogEvidence": {
+    "simpleChatSkillCount": 16,
+    "simpleChatContainsPlatformCompliance": false
+  },
+  "request": {
+    "skillId": "preset-platform-compliance-audit",
+    "skillVersion": 1,
+    "surface": "canvas",
+    "sourceCount": 3,
+    "platform": "Amazon",
+    "region": "US",
+    "assetType": "main",
+    "modelBindings": {
+      "orchestrator": {
+        "providerId": "api_1778428130626_2qpg71v",
+        "modelId": "gpt-4o"
+      },
+      "vision": {
+        "providerId": "api_1778428130626_2qpg71v",
+        "modelId": "gpt-4o"
+      }
+    }
+  },
+  "estimate": {
+    "httpStatus": 200,
+    "minimumCredits": 32,
+    "maximumCredits": 32,
+    "stepCosts": [8, 8, 8, 8]
+  },
+  "create": {
+    "httpStatus": 201,
+    "runId": "42ac7d13-b473-450d-a3f3-3323942a5b0d",
+    "duplicateSubmissionCreated": false
+  },
+  "interruption": {
+    "rootProbeCount": 12,
+    "probeWindowSeconds": 56,
+    "statuses": [404, 404, 404, 404, 404, 404, 404, 404, 404, 404, 404, 404],
+    "edgeServer": "volc-dcdn",
+    "loginStatusAfterInterruption": 404,
+    "authStatusAfterInterruption": 404,
+    "runListStatusAfterInterruption": 404,
+    "runReadStatusAfterInterruption": 404
+  },
+  "unverified": [
+    "run terminal status",
+    "three per-image compliance reports",
+    "document AssetVersion delivery",
+    "actual credit charge",
+    "single refund on failure",
+    "late-result isolation",
+    "workflow downstream delivery",
+    "JSON and HTML downloads",
+    "refresh recovery"
+  ],
+  "resumeInvariant": "When the Coze preview recovers, query the existing runId first. Do not create another paid run before its terminal and billing state are known."
+}
