@@ -10,6 +10,8 @@ import {
   SKILL_CATALOG_KEY,
   SkillStorageError,
 } from '@/lib/skill-runtime/storage';
+import { CANVAS_WORKFLOW_SKILLS } from '@/lib/skill-runtime/catalog';
+import type { SkillDefinition } from '@/lib/skill-runtime/types';
 
 function legacySkill(id: string) {
   return {
@@ -27,6 +29,48 @@ function legacySkill(id: string) {
 }
 
 describe('versioned user skill storage', () => {
+  it('copies, stores, and resolves a catalog-hidden local Skill without exposing it in simple chat', async () => {
+    const source = CANVAS_WORKFLOW_SKILLS[0] as SkillDefinition;
+    const original = {
+      allowedSurfaces: source.allowedSurfaces,
+      catalogSurfaces: source.catalogSurfaces,
+      steps: source.steps,
+    };
+    source.allowedSurfaces = ['canvas', 'workflow', 'simple-chat'];
+    source.catalogSurfaces = ['canvas', 'workflow'];
+    source.steps = [{
+      id: 'export', label: 'Export', toolId: 'multi_platform_export', runtime: 'local',
+      execution: 'sequential', promptTemplate: '', qualityGateIds: ['output-present'],
+    }];
+    const adapter = createMemorySkillStorageAdapter();
+    const store = createSkillStore(adapter, { now: () => 100 });
+
+    try {
+      expect((await store.load('user-1', 'simple-chat')).some(skill => skill.id === source.id))
+        .toBe(false);
+      await expect(store.resolveExecutable('user-1', source.id, 'simple-chat'))
+        .resolves.toMatchObject({ id: source.id });
+
+      const copy = await store.copy({ actorUserId: 'user-1', sourceSkillId: source.id });
+      expect(copy).toMatchObject({
+        allowedSurfaces: ['canvas', 'workflow', 'simple-chat'],
+        catalogSurfaces: ['canvas', 'workflow'],
+        steps: [expect.objectContaining({ runtime: 'local' })],
+      });
+      expect(copy.steps[0]).not.toHaveProperty('modelRole');
+      expect((await store.load('user-1', 'canvas')).find(skill => skill.id === copy.id))
+        .toEqual(copy);
+      expect((await store.load('user-1', 'simple-chat')).some(skill => skill.id === copy.id))
+        .toBe(false);
+      await expect(store.resolveExecutable('user-1', copy.id, 'simple-chat'))
+        .resolves.toEqual(copy);
+    } finally {
+      source.allowedSurfaces = original.allowedSurfaces;
+      source.catalogSurfaces = original.catalogSurfaces;
+      source.steps = original.steps;
+    }
+  });
+
   it('copies a built-in skill into an owner-scoped versioned record without persisting presets', async () => {
     const adapter = createMemorySkillStorageAdapter();
     const store = createSkillStore(adapter, { now: () => 100 });

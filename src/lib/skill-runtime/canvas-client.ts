@@ -37,27 +37,41 @@ function isSkillInput(value: unknown): boolean {
 }
 
 function isSkillStep(value: unknown): boolean {
-  return isRecord(value)
-    && hasString(value, 'id')
+  if (!isRecord(value)) return false;
+  const runtime = value.runtime ?? 'model';
+  const modelRoles = new Set(['orchestrator', 'image', 'video', 'vision', 'edit', 'three-d']);
+  return (
+    hasString(value, 'id')
     && hasString(value, 'label')
     && hasString(value, 'toolId')
-    && hasString(value, 'execution')
+    && (value.execution === 'sequential' || value.execution === 'parallel')
     && hasString(value, 'promptTemplate')
-    && hasString(value, 'modelRole')
+    && (runtime === 'model' || runtime === 'local')
+    && (runtime === 'model'
+      ? typeof value.modelRole === 'string' && modelRoles.has(value.modelRole)
+      : value.modelRole === undefined)
     && Array.isArray(value.qualityGateIds)
-    && value.qualityGateIds.every(item => typeof item === 'string');
+    && value.qualityGateIds.every(item => typeof item === 'string')
+  );
 }
 
 function isCanvasSkill(value: unknown): value is SkillDefinition {
-  return isRecord(value)
-    && typeof value.id === 'string'
+  if (!isRecord(value) || !Array.isArray(value.allowedSurfaces)) return false;
+  const allowedSurfaces = value.allowedSurfaces;
+  return typeof value.id === 'string'
     && typeof value.version === 'number'
     && hasString(value, 'name')
     && hasString(value, 'category')
     && hasString(value, 'description')
     && hasString(value, 'systemPrompt')
-    && Array.isArray(value.allowedSurfaces)
-    && value.allowedSurfaces.includes('canvas')
+    && allowedSurfaces.every(surface => typeof surface === 'string')
+    && allowedSurfaces.includes('canvas')
+    && (value.catalogSurfaces === undefined || (
+      Array.isArray(value.catalogSurfaces)
+      && value.catalogSurfaces.every(surface => (
+        typeof surface === 'string' && allowedSurfaces.includes(surface)
+      ))
+    ))
     && Array.isArray(value.inputs)
     && value.inputs.every(isSkillInput)
     && Array.isArray(value.steps)
@@ -103,6 +117,7 @@ export async function loadCanvasSkillCatalog(
     isRecord(value)
     && Array.isArray(value.allowedSurfaces)
     && value.allowedSurfaces.includes('canvas')
+    && (!Array.isArray(value.catalogSurfaces) || value.catalogSurfaces.includes('canvas'))
   ));
   if (!canvasSkills.every(isCanvasSkill)) throw new Error('Canvas Skill 目录格式无效');
   return canvasSkills;

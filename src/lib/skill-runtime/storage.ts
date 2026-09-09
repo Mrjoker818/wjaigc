@@ -190,19 +190,24 @@ function isStoredInput(value: unknown): boolean {
 function isStoredStep(value: unknown): boolean {
   if (!isRecord(value) || !hasOnlyKeys(value, [
     'id', 'label', 'toolId', 'execution', 'parallelGroup', 'promptTemplate',
-    'promptInstructionTemplate', 'modelRole', 'qualityGateIds', 'when', 'fanOut',
+    'promptInstructionTemplate', 'runtime', 'modelRole', 'qualityGateIds', 'when', 'fanOut',
     'compiledFanOut',
   ])) return false;
+  const runtime = value.runtime ?? 'model';
   if (
     !isBoundedString(value.id, 128, STEP_ID)
     || !isBoundedString(value.label, 120)
     || !isBoundedString(value.toolId, 128, TOKEN_ID)
     || (value.execution !== 'sequential' && value.execution !== 'parallel')
-    || !isBoundedString(value.promptTemplate, 32_768)
+    || typeof value.promptTemplate !== 'string'
+    || value.promptTemplate.length > 32_768
     || ('promptInstructionTemplate' in value
       && !isBoundedString(value.promptInstructionTemplate, 32_768))
-    || typeof value.modelRole !== 'string'
-    || !MODEL_ROLES.has(value.modelRole)
+    || (runtime !== 'model' && runtime !== 'local')
+    || (runtime === 'model' && (
+      typeof value.modelRole !== 'string' || !MODEL_ROLES.has(value.modelRole)
+    ))
+    || (runtime === 'local' && value.modelRole !== undefined)
     || !Array.isArray(value.qualityGateIds)
     || value.qualityGateIds.length > 32
     || !value.qualityGateIds.every(id => isBoundedString(id, 128, TOKEN_ID))
@@ -260,6 +265,13 @@ function hasUniqueSurfaces(value: unknown): value is SkillSurface[] {
     && new Set(value).size === value.length;
 }
 
+function hasUniqueCatalogSurfaces(value: unknown): value is SkillSurface[] {
+  return Array.isArray(value)
+    && value.length <= SURFACES.length
+    && value.every(isSurface)
+    && new Set(value).size === value.length;
+}
+
 function sameSurfaces(left: readonly SkillSurface[], right: readonly SkillSurface[]): boolean {
   return left.length === right.length && left.every(surface => right.includes(surface));
 }
@@ -275,7 +287,7 @@ function expectedSourceSurfaces(sourceSkillId: string): readonly SkillSurface[] 
 function isStoredSkill(value: unknown): value is SkillDefinition {
   if (!isRecord(value) || !hasOnlyKeys(value, [
     'executionContextVersion', 'id', 'version', 'name', 'category', 'description', 'systemPrompt',
-    'allowedSurfaces', 'inputs', 'steps', 'enabled', 'builtIn', 'ownerId',
+    'allowedSurfaces', 'catalogSurfaces', 'inputs', 'steps', 'enabled', 'builtIn', 'ownerId',
     'sourceSkillId', 'sourceAllowedSurfaces', 'createdAt', 'updatedAt', 'usageCount',
   ])) return false;
   if (
@@ -285,11 +297,14 @@ function isStoredSkill(value: unknown): value is SkillDefinition {
   ) return false;
   const sourceAllowedSurfaces = value.sourceAllowedSurfaces;
   const allowedSurfaces = value.allowedSurfaces;
+  const catalogSurfaces = value.catalogSurfaces ?? allowedSurfaces;
   const expectedSurfaces = expectedSourceSurfaces(value.sourceSkillId);
   if (
     !expectedSurfaces
     || !sameSurfaces(sourceAllowedSurfaces, expectedSurfaces)
     || !allowedSurfaces.every(surface => sourceAllowedSurfaces.includes(surface))
+    || !hasUniqueCatalogSurfaces(catalogSurfaces)
+    || !catalogSurfaces.every(surface => allowedSurfaces.includes(surface))
   ) return false;
   const valid = isBoundedString(value.id, 30, GENERATED_SKILL_ID)
     && (!('executionContextVersion' in value) || value.executionContextVersion === 1)
@@ -434,7 +449,8 @@ function copyId(userId: string, sourceSkillId: string): string {
 
 function cloneBuiltIns(surface: SkillSurface): SkillDefinition[] {
   return BUILT_INS
-    .filter(skill => skill.enabled && skill.allowedSurfaces.includes(surface))
+    .filter(skill => skill.enabled
+      && (skill.catalogSurfaces ?? skill.allowedSurfaces).includes(surface))
     .map(skill => structuredClone(skill));
 }
 
@@ -538,7 +554,7 @@ export function createSkillStore(
       const envelope = await readEnvelope(adapter, userId);
       const userSkills = envelope.skills.filter(skill =>
         skill.ownerId === userId
-        && skill.allowedSurfaces.includes(surface),
+        && (skill.catalogSurfaces ?? skill.allowedSurfaces).includes(surface),
       );
       return [...cloneBuiltIns(surface), ...structuredClone(userSkills)];
     },
@@ -622,6 +638,9 @@ export function createSkillStore(
           description: source.description,
           systemPrompt: source.systemPrompt,
           allowedSurfaces: [...source.allowedSurfaces],
+          ...(source.catalogSurfaces === undefined
+            ? {}
+            : { catalogSurfaces: [...source.catalogSurfaces] }),
           inputs: source.inputs.map(field => ({
             key: field.key,
             label: field.label,
@@ -653,7 +672,8 @@ export function createSkillStore(
             ...(step.promptInstructionTemplate === undefined
               ? {}
               : { promptInstructionTemplate: step.promptInstructionTemplate }),
-            modelRole: step.modelRole,
+            ...(step.runtime === undefined ? {} : { runtime: step.runtime }),
+            ...(step.modelRole === undefined ? {} : { modelRole: step.modelRole }),
             qualityGateIds: [...step.qualityGateIds],
             ...(step.when === undefined ? {} : {
               when: {

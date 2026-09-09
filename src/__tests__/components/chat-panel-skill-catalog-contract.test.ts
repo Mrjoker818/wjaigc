@@ -158,6 +158,22 @@ describe('canvas chat Skill catalog contract', () => {
     expect(fetcher).toHaveBeenCalledWith('/api/skills?surface=canvas', expect.any(Object));
   });
 
+  it('accepts a canvas catalog Skill whose only step is local', async () => {
+    const localSkill: SkillDefinition = {
+      ...catalogSkill('local-export', ['canvas', 'workflow', 'simple-chat']),
+      catalogSurfaces: ['canvas', 'workflow'],
+      steps: [{
+        id: 'export', label: 'Export', toolId: 'multi_platform_export', runtime: 'local',
+        execution: 'sequential', promptTemplate: '', qualityGateIds: ['output-present'],
+      }],
+    };
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({
+      skills: [localSkill],
+    }), { status: 200 }));
+
+    await expect(loadCanvasSkillCatalog(fetcher)).resolves.toEqual([localSkill]);
+  });
+
   it('exposes marketing Skills returned by the shared canvas catalog without embedding their IDs in the component', async () => {
     const marketingSkills = [
       catalogSkill('preset-ad-ab-variants', ['canvas', 'workflow']),

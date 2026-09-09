@@ -614,7 +614,10 @@ export function createAgentRuntimeService(
           from: [...LIVE_TASK_STATUSES],
           to: 'completed',
           revision: settlementTask.revision ?? 0,
-          creditStatus: 'charged',
+          creditStatus: settlementTask.creditCost === 0
+            || settlementTask.creditStatus === 'not-applicable'
+            ? 'not-applicable'
+            : 'charged',
           result: result && typeof result === 'object' && !Array.isArray(result)
             ? result as Record<string, unknown>
             : undefined,

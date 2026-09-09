@@ -117,13 +117,13 @@ function serviceDependencies() {
       task: {
         ...input.task,
         userId: input.userId,
-        creditStatus: 'pending' as const,
+        creditStatus: input.creditCost === 0 ? 'not-applicable' as const : 'pending' as const,
         creditCost: input.creditCost,
         idempotencyKey: input.idempotencyKey,
         revision: input.task.revision ?? 0,
       },
       reused: false,
-      charged: true,
+      charged: input.creditCost > 0,
     })),
     appendEvent: vi.fn<AgentRuntimeDependencies['appendEvent']>(async () => created),
     transitionControl: vi.fn<NonNullable<AgentRuntimeDependencies['transitionControl']>>(async () => ({
@@ -280,7 +280,61 @@ describe('Agent runtime service', () => {
 
     try {
       await expect(service.createRun({ actor: user, request: localRequest }))
-        .resolves.toMatchObject({ reused: false, charged: true });
+        .resolves.toMatchObject({ reused: false, charged: false });
+
+      const createdTaskInput = dependencies.createBillableTask.mock.calls[0][0];
+      let persistedTask: CloudTask & {
+        status: 'processing' | 'completed';
+        creditStatus: 'not-applicable';
+        creditCost: 0;
+        revision: number;
+      } = {
+        ...createdTaskInput.task,
+        status: 'processing',
+        userId: user.id,
+        creditCost: 0,
+        creditStatus: 'not-applicable' as const,
+        idempotencyKey: localRequest.idempotencyKey,
+        revision: 0,
+      };
+      const createdEvent = event(1, 'run.created', {
+        workspace: 'canvas',
+        requestDigest: createdTaskInput.requestDigest,
+      });
+      dependencies.getTaskForUser.mockImplementation(async () => persistedTask);
+      dependencies.listEvents.mockResolvedValue([createdEvent]);
+      dependencies.transitionTask.mockImplementation(async transition => {
+        if (transition.to !== 'completed') throw new Error('unexpected transition');
+        if (transition.creditStatus !== 'not-applicable') {
+          throw new Error('zero-cost completion must remain not-applicable');
+        }
+        persistedTask = {
+          ...persistedTask,
+          status: 'completed',
+          creditStatus: 'not-applicable',
+          revision: persistedTask.revision + 1,
+        };
+        return { transitioned: true, task: persistedTask };
+      });
+      dependencies.appendEvent.mockResolvedValue(event(2, 'run.completed', {
+        result: { exported: true },
+      }));
+
+      await service.appendEvent({
+        actorUserId: user.id,
+        runId: persistedTask.id,
+        eventId: 'local-run-completed',
+        type: 'run.completed',
+        payload: { result: { exported: true } },
+      });
+
+      expect(dependencies.transitionTask).toHaveBeenCalledWith(expect.objectContaining({
+        to: 'completed',
+        creditStatus: 'not-applicable',
+      }));
+      expect(persistedTask).toMatchObject({
+        status: 'completed', creditStatus: 'not-applicable', creditCost: 0,
+      });
     } finally {
       registry.pop();
       catalogSpy.mockRestore();

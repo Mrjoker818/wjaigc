@@ -23,6 +23,8 @@ vi.mock('@/lib/skill-runtime/storage', () => ({
 import { GET, POST } from '@/app/api/skills/route';
 import { DELETE, PATCH } from '@/app/api/skills/[skillId]/route';
 import { readStrictJsonObject, SkillRequestError } from '@/app/api/skills/http';
+import { CANVAS_WORKFLOW_SKILLS } from '@/lib/skill-runtime/catalog';
+import type { SkillDefinition } from '@/lib/skill-runtime/types';
 
 const auth = {
   authenticated: true as const,
@@ -68,6 +70,33 @@ describe('/api/skills', () => {
     const invalid = await GET(new NextRequest('http://localhost/api/skills?surface=Canvas'));
     expect(invalid.status).toBe(400);
     expect(await invalid.json()).toMatchObject({ code: 'INVALID_SKILL_SURFACE' });
+  });
+
+  it('omits a simple-chat executable Skill when its catalog visibility excludes simple chat', async () => {
+    const source = CANVAS_WORKFLOW_SKILLS[0] as SkillDefinition;
+    const originalAllowed = source.allowedSurfaces;
+    const originalCatalog = source.catalogSurfaces;
+    source.allowedSurfaces = ['canvas', 'workflow', 'simple-chat'];
+    source.catalogSurfaces = ['canvas', 'workflow'];
+    try {
+      const actualStorage = await vi.importActual<typeof import('@/lib/skill-runtime/storage')>(
+        '@/lib/skill-runtime/storage',
+      );
+      const store = actualStorage.createSkillStore(actualStorage.createMemorySkillStorageAdapter());
+      mocks.loadUserSkillCatalog.mockImplementation((userId, surface) => store.load(userId, surface));
+
+      const response = await GET(new NextRequest('http://localhost/api/skills?surface=simple-chat'));
+
+      expect(response.status).toBe(200);
+      expect((await response.json()).skills).not.toEqual(expect.arrayContaining([
+        expect.objectContaining({ id: source.id }),
+      ]));
+      await expect(store.resolveExecutable('user-1', source.id, 'simple-chat'))
+        .resolves.toMatchObject({ id: source.id });
+    } finally {
+      source.allowedSurfaces = originalAllowed;
+      source.catalogSurfaces = originalCatalog;
+    }
   });
 
   it('creates a copy from a strict JSON body and rejects unknown fields', async () => {
