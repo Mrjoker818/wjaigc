@@ -85,6 +85,19 @@ export interface WorkspaceAssetReference {
   sourceTrace?: WorkspaceSourceTrace;
 }
 
+/** Server-only readable reference returned after actor/project/version authorization. */
+export interface WorkspaceReadableAssetReference extends WorkspaceAssetReference {
+  assetId: string;
+  assetVersionId: string;
+  kind: AssetKind;
+  storageKey?: string;
+  checksum?: string;
+  mimeType?: string;
+  byteSize?: number;
+  width?: number;
+  height?: number;
+}
+
 export type WorkspacePlacement = {
   [TWorkspace in WorkspaceKind]: WorkspacePlacementFor<TWorkspace>;
 }[WorkspaceKind];

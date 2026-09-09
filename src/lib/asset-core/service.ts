@@ -15,6 +15,7 @@ import {
   type AssetVersion,
   type WorkspaceEntityType,
   type WorkspaceAssetReference,
+  type WorkspaceReadableAssetReference,
   type WorkspaceKind,
   type WorkspacePlacement,
 } from './types';
@@ -479,6 +480,38 @@ export class AssetService {
         placementConflict();
       }
       return { placement, reused: false };
+    });
+  }
+
+  async resolveReadableAssetReference(
+    input: ResolveAssetReferenceInput,
+  ): Promise<WorkspaceReadableAssetReference> {
+    return this.storage.read(async transaction => {
+      if (!await transaction.findProject(input.actorUserId, input.projectId)) notFound();
+      const version = await transaction.findVersion(
+        input.actorUserId,
+        input.projectId,
+        input.assetVersionId,
+      );
+      if (!version) notFound();
+      const asset = await transaction.findAsset(
+        input.actorUserId,
+        input.projectId,
+        version.assetId,
+      );
+      if (!asset) notFound();
+      return {
+        assetId: asset.id,
+        assetVersionId: version.id,
+        kind: asset.kind,
+        url: version.file.url,
+        ...(version.file.storageKey ? { storageKey: version.file.storageKey } : {}),
+        ...(version.file.checksum ? { checksum: version.file.checksum } : {}),
+        ...(version.file.mimeType ? { mimeType: version.file.mimeType } : {}),
+        ...(version.file.byteSize === undefined ? {} : { byteSize: version.file.byteSize }),
+        ...(version.file.width === undefined ? {} : { width: version.file.width }),
+        ...(version.file.height === undefined ? {} : { height: version.file.height }),
+      };
     });
   }
 

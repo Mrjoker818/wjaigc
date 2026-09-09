@@ -94,6 +94,20 @@ type AssetService = {
     name?: string;
     sourceTrace?: WorkspaceSourceTrace;
   }>;
+  resolveReadableAssetReference(input: {
+    actorUserId: string;
+    projectId: string;
+    assetVersionId: string;
+  }): Promise<{
+    assetId: string;
+    assetVersionId: string;
+    kind: AssetKind;
+    url: string;
+    storageKey?: string;
+    checksum?: string;
+    mimeType?: string;
+    byteSize?: number;
+  }>;
   sendVersionToWorkspace(input: TransferVersionInput): Promise<{
     version: AssetVersion;
     placement: WorkspacePlacement;
@@ -836,6 +850,80 @@ describe('asset graph service', () => {
       entityId: 'input-b',
       requestDigest: 'digest-workflow-b',
     })).rejects.toMatchObject({ code: 'ASSET_IDEMPOTENCY_CONFLICT' });
+  });
+
+  it('returns exact readable file metadata only after the normal ownership checks', async () => {
+    const ownerId = randomUUID();
+    const projectId = randomUUID();
+    const versionId = randomUUID();
+    const versionFile: AssetFile = {
+      url: '/api/serve-upload/uploads/export-source.png',
+      availability: 'ready',
+      storageKey: 'images/owners/user-1/exact-source.png',
+      checksum: `sha256:${'a'.repeat(64)}`,
+      mimeType: 'image/png',
+      byteSize: 1234,
+      width: 640,
+      height: 480,
+    };
+    const read = vi.fn(async (callback: (transaction: {
+      findProject: () => Promise<boolean>;
+      findAsset: () => Promise<Asset>;
+      findVersion: () => Promise<AssetVersion>;
+    }) => Promise<unknown>) => callback({
+      findProject: async () => true,
+      findAsset: async () => ({
+        id: 'asset-readable', ownerId, projectId, kind: 'image', status: 'active',
+        currentVersionId: versionId, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+      }),
+      findVersion: async () => ({
+        id: versionId,
+        assetId: 'asset-readable',
+        ownerId,
+        projectId,
+        file: versionFile,
+        parentVersionIds: [],
+        createdAt: new Date().toISOString(),
+      }),
+    }));
+    const transaction = vi.fn(async () => {
+      throw new Error('write transaction must not serve readable references');
+    });
+    const { createAssetService } = await loadService();
+    const service = createAssetService({ read, transaction });
+
+    await expect(service.resolveReadableAssetReference({
+      actorUserId: ownerId,
+      projectId,
+      assetVersionId: versionId,
+    })).resolves.toEqual({
+      assetId: 'asset-readable',
+      assetVersionId: versionId,
+      kind: 'image',
+      url: versionFile.url,
+      storageKey: versionFile.storageKey,
+      checksum: versionFile.checksum,
+      mimeType: versionFile.mimeType,
+      byteSize: versionFile.byteSize,
+      width: versionFile.width,
+      height: versionFile.height,
+    });
+    expect(read).toHaveBeenCalledOnce();
+    expect(transaction).not.toHaveBeenCalled();
+  });
+
+  it('hides readable file metadata behind ASSET_NOT_FOUND when ownership fails', async () => {
+    const read = vi.fn(async (callback: (transaction: {
+      findProject: () => Promise<boolean>;
+    }) => Promise<unknown>) => callback({ findProject: async () => false }));
+    const { createAssetService } = await loadService();
+    const service = createAssetService({ read, transaction: vi.fn() });
+
+    await expect(service.resolveReadableAssetReference({
+      actorUserId: 'other-user',
+      projectId: 'other-project',
+      assetVersionId: 'hidden-version',
+    })).rejects.toMatchObject({ code: 'ASSET_NOT_FOUND' });
   });
 
   it('rebinds a workflow input atomically without changing either source asset status', async () => {
