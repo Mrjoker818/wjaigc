@@ -12,10 +12,14 @@ function request(overrides: Partial<AgentRunRequest> = {}): AgentRunRequest {
   };
 }
 
-function fixture(storedWorkspace: string, active = true): AgentContextTransaction {
+function fixture(
+  storedWorkspace: string,
+  active = true,
+  storedSurface: AgentRunRequest['workspace'] = 'canvas',
+): AgentContextTransaction {
   const matches = (owner: string, project: string, surface: string, workspace: string): boolean =>
     active && owner === 'owner-a' && project === 'project-a'
-      && surface === 'canvas' && workspace === storedWorkspace;
+      && surface === storedSurface && workspace === storedWorkspace;
   return {
     findProject: vi.fn(async (owner, project) => owner === 'owner-a' && project === 'project-a'),
     findAsset: vi.fn(async (owner, project, assetId) =>
@@ -85,5 +89,23 @@ describe('Agent context project Canvas aliases', () => {
     })).resolves.toMatchObject({
       mediaByVersionId: { 'version-a': '/api/serve-upload/legacy.png' },
     });
+  });
+
+  it.each([
+    ['workflow:workflow-a', 'workflow-a'],
+    ['workflow-a', 'workflow:workflow-a'],
+  ])('resolves Workflow request %s against persisted %s without broadening the project', async (
+    workspaceId,
+    storedWorkspace,
+  ) => {
+    const transaction = fixture(storedWorkspace, true, 'workflow');
+    const result = await authorizeAgentContext({
+      actorUserId: 'owner-a',
+      request: request({ workspace: 'workflow', workspaceId }),
+      storage: { transaction: async execute => execute(transaction) },
+    });
+
+    expect(result.mediaByVersionId['version-a']).toBe('/api/serve-upload/product.png');
+    expect(result.selectedEntityVersionIds['image-a']).toBe('version-a');
   });
 });

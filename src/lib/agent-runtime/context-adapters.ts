@@ -147,11 +147,20 @@ export async function authorizeAgentContext({
       throw new AgentContextNotFoundError();
     }
 
-    // Legacy migrations and current Canvas writers use these two project-scoped IDs.
+    // Current workspace writers store Canvas and Workflow IDs without a uniform prefix.
+    // Resolve only the exact prefixed/unprefixed alias inside the already-authorized project.
     const canonicalCanvasId = `canvas:${request.projectId}`;
+    const workflowPrefix = 'workflow:';
     const workspaceIds = request.workspace === 'canvas'
       && (request.workspaceId === request.projectId || request.workspaceId === canonicalCanvasId)
       ? [request.workspaceId, request.workspaceId === canonicalCanvasId ? request.projectId : canonicalCanvasId]
+      : request.workspace === 'workflow'
+        ? [
+          request.workspaceId,
+          request.workspaceId.startsWith(workflowPrefix)
+            ? request.workspaceId.slice(workflowPrefix.length)
+            : `${workflowPrefix}${request.workspaceId}`,
+        ]
       : [request.workspaceId];
 
     const versionIds = new Set([

@@ -492,7 +492,10 @@ export async function seedStage4Baseline(
     },
   });
   const saveProjectPayload = await readJson(saveProjects);
-  expect(saveProjects.ok(), `/api/user-data/sync projects save returned HTTP ${saveProjects.status()}`).toBe(true);
+  expect(
+    saveProjects.ok(),
+    `/api/user-data/sync projects save returned HTTP ${saveProjects.status()}: ${JSON.stringify(saveProjectPayload)}`,
+  ).toBe(true);
 
   const readChatProjects = await page.request.get('/api/user-data/sync?key=chat_simple_projects');
   const chatPayload = await readJson(readChatProjects);

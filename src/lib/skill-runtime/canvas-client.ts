@@ -326,11 +326,13 @@ export async function loadCompletedCanvasSkillAssets(input: {
 
   const resolved = await Promise.all(outputIds.map(async assetVersionId => {
     const query = new URLSearchParams({ projectId: input.projectId, assetVersionId });
-    const reference = await readJson<WorkspaceAssetReference>(
+    const reference = await readJson<WorkspaceAssetReference & { kind?: string }>(
       await fetcher(`/api/assets?${query.toString()}`, { method: 'GET', signal: input.signal }),
       'Skill 资产版本加载失败',
     );
-    return isWorkspaceAssetReference(reference) && reference.assetVersionId === assetVersionId
+    return reference.kind === 'image'
+      && isWorkspaceAssetReference(reference)
+      && reference.assetVersionId === assetVersionId
       ? reference
       : null;
   }));

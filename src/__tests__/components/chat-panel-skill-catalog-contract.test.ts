@@ -211,6 +211,7 @@ describe('canvas chat Skill catalog contract', () => {
       }
       if (url.includes('assetVersionId=output-version')) {
         return new Response(JSON.stringify({
+          kind: 'image',
           assetId: 'asset-output',
           assetVersionId: 'output-version',
           url: '/api/serve-upload/output.png',
@@ -225,10 +226,40 @@ describe('canvas chat Skill catalog contract', () => {
       runId: 'run-1',
       sourceVersionIds: ['source-version'],
     })).resolves.toEqual([{
+      kind: 'image',
       assetId: 'asset-output',
       assetVersionId: 'output-version',
       url: '/api/serve-upload/output.png',
     }]);
+  });
+
+  it('does not project completed document reports into Canvas image slots', async () => {
+    const fetcher = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url === '/api/skill-runs/run-report') {
+        return new Response(JSON.stringify({
+          run: {
+            runId: 'run-report',
+            status: 'completed',
+            assetVersionIds: ['report-version'],
+            outputs: [],
+          },
+        }), { status: 200 });
+      }
+      return new Response(JSON.stringify({
+        kind: 'document',
+        assetId: 'asset-report',
+        assetVersionId: 'report-version',
+        url: '/api/skill-reports/run-report/audit-image',
+      }), { status: 200 });
+    });
+
+    await expect(loadCompletedCanvasSkillAssets({
+      fetcher: fetcher as typeof fetch,
+      projectId: 'project-1',
+      runId: 'run-report',
+      sourceVersionIds: [],
+    })).resolves.toEqual([]);
   });
 
   it('rejects an unknown structured output schema during Canvas history restore', async () => {

@@ -368,5 +368,20 @@
   "src/components/skill-runtime/dataset-file-parser.ts",
   "src/lib/skill-runtime/content-commerce-presets.ts",
   "src/lib/skill-runtime/dataset-schema.ts",
-  "src/lib/skill-runtime/step-compiler.ts"
+  "src/lib/skill-runtime/step-compiler.ts",
+  "src/app/api/skill-reports/[runId]/[stepId]/route.ts",
+  "src/components/skill-runtime/PlatformComplianceReportCard.tsx",
+  "src/components/skill-runtime/platform-compliance-client.ts",
+  "src/lib/platform-compliance/media-audit.ts",
+  "src/lib/platform-compliance/report-asset.ts",
+  "src/lib/platform-compliance/report-builder.ts",
+  "src/lib/platform-compliance/report-schema.ts",
+  "src/lib/platform-compliance/rules.ts",
+  "src/lib/platform-compliance/technical-evaluator.ts",
+  "src/lib/platform-compliance/types.ts",
+  "src/lib/platform-compliance/vision-client.ts",
+  "src/lib/skill-runtime/compiled-fan-out.ts",
+  "src/lib/skill-runtime/platform-compliance-preset.ts",
+  "src/lib/skill-runtime/structured-output.ts",
+  ".superpowers/sdd/platform-compliance-task-11-report.md"
 ]

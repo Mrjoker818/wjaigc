@@ -77,6 +77,26 @@ describe('workflow execution scope', () => {
     expect(isWorkflowExecutionScopeCurrent(scope, hydrated.nodes, hydrated.connections)).toBe(true);
   });
 
+  it('keeps a pending estimate valid when JSONB hydration reorders model binding keys', () => {
+    const input = graph();
+    input.nodes[0].config = {
+      modelBindings: {
+        orchestrator: { providerId: 'provider-a', modelId: 'model-a' },
+        vision: { providerId: 'provider-a', modelId: 'model-a' },
+      },
+    };
+    const scope = resolveWorkflowExecutionScope(input);
+    const hydrated = structuredClone(input);
+    hydrated.nodes[0].config = {
+      modelBindings: {
+        vision: { modelId: 'model-a', providerId: 'provider-a' },
+        orchestrator: { modelId: 'model-a', providerId: 'provider-a' },
+      },
+    };
+
+    expect(isWorkflowExecutionScopeCurrent(scope, hydrated.nodes, hydrated.connections)).toBe(true);
+  });
+
   it('invalidates a pending estimate when execution-relevant configuration changes', () => {
     const input = graph();
     const scope = resolveWorkflowExecutionScope(input);

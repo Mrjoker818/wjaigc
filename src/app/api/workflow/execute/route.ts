@@ -184,14 +184,22 @@ async function executeSkillWorkflowTask(input: {
     },
       resolveAssetVersion: async (versionId: string) => {
       if (!input.execState.userId || !input.execState.projectId) return null;
-      const version = await storage.read(transaction => (
-        transaction.findVersion(input.execState.userId!, input.execState.projectId!, versionId)
-      ));
-      return version ? {
-        assetId: version.assetId,
-        assetVersionId: version.id,
-        url: version.file.url,
-      } : null;
+      return storage.read(async transaction => {
+        const version = await transaction.findVersion(
+          input.execState.userId!, input.execState.projectId!, versionId,
+        );
+        if (!version) return null;
+        const asset = await transaction.findAsset(
+          input.execState.userId!, input.execState.projectId!, version.assetId,
+        );
+        if (!asset) return null;
+        return {
+          assetId: version.assetId,
+          assetVersionId: version.id,
+          url: version.file.url,
+          kind: asset.kind,
+        };
+      });
       },
     };
     const output = input.resume

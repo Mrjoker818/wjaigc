@@ -41,6 +41,44 @@ describe('workflow Skill quote response validation', () => {
     expect(result.scope.nodes[0]).not.toBe(original.nodes[0]);
   });
 
+  it('includes every managed upstream image version when estimating a fan-out Skill', async () => {
+    const sources = [1, 2, 3].map(index => {
+      const node = createWorkflowNode('input-image', 0, index * 100);
+      node.config = {
+        ...node.config,
+        imageUrl: `/api/serve-upload/uploads/source-${index}.png`,
+        assetId: `asset-${index}`,
+        assetVersionId: `version-${index}`,
+      };
+      return node;
+    });
+    const skillScope = scope();
+    const skillNode = skillScope.nodes[0];
+    const graph = {
+      nodes: [...sources, skillNode],
+      connections: sources.map((source, index) => ({
+        id: `source-${index + 1}`,
+        fromNodeId: source.id,
+        fromPortId: 'out-image',
+        toNodeId: skillNode.id,
+        toPortId: 'in-image',
+        type: 'image' as const,
+      })),
+    };
+    const fetcher = vi.fn(async (_input: string | URL | Request, _init?: RequestInit) => {
+      void _input;
+      void _init;
+      return new Response(JSON.stringify({ minimum: 62, maximum: 62, modelBindings: bindings }));
+    });
+    vi.stubGlobal('fetch', fetcher);
+
+    await estimateWorkflowSkills(graph, [skill], context, new AbortController().signal);
+
+    const request = fetcher.mock.calls[0]?.[1];
+    const body = JSON.parse(String(request?.body)) as { sourceVersionIds?: string[] };
+    expect(body.sourceVersionIds).toEqual(['version-1', 'version-2', 'version-3']);
+  });
+
   it('rejects a late successful response after cancellation', async () => {
     const controller = new AbortController();
     vi.stubGlobal('fetch', vi.fn(async () => {

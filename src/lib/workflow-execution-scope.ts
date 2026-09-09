@@ -7,6 +7,15 @@ export interface WorkflowExecutionScope {
   tailNodeId?: string;
 }
 
+function canonicalizeWorkflowValue(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonicalizeWorkflowValue);
+  if (!value || typeof value !== 'object') return value;
+  return Object.fromEntries(Object.entries(value as Record<string, unknown>)
+    .filter(([, item]) => item !== undefined)
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([key, item]) => [key, canonicalizeWorkflowValue(item)]));
+}
+
 export function resolveWorkflowExecutionScope(input: WorkflowExecutionScope): WorkflowExecutionScope {
   if (input.startNodeId === undefined) return input;
   const ids = new Set(input.nodes.map(node => node.id));
@@ -73,7 +82,8 @@ export function isWorkflowExecutionScopeCurrent(
       ...(quotedScope.startNodeId === undefined ? {} : { startNodeId: quotedScope.startNodeId }),
       ...(quotedScope.tailNodeId === undefined ? {} : { tailNodeId: quotedScope.tailNodeId }),
     });
-    return JSON.stringify(currentScope) === JSON.stringify(quotedScope);
+    return JSON.stringify(canonicalizeWorkflowValue(currentScope))
+      === JSON.stringify(canonicalizeWorkflowValue(quotedScope));
   } catch {
     return false;
   }

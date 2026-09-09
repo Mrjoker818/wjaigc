@@ -6,12 +6,19 @@ import type { Page } from '@playwright/test';
 import { Pool } from 'pg';
 import sharp from 'sharp';
 
-import { createWorkflowNode, type WorkflowConnection, type WorkflowNode } from '../../src/lib/workflow-engine';
+import {
+  createEmptyWorkflow,
+  createWorkflowNode,
+  type Workflow,
+  type WorkflowConnection,
+  type WorkflowNode,
+} from '../../src/lib/workflow-engine';
 import type { PlatformComplianceReportV1 } from '../../src/lib/platform-compliance/types';
 import {
   expect,
   openStage4CanvasProject,
   openStage4ChatProject,
+  readStage4PersistedWorkflowNodeCount,
   seedStage4Baseline,
   stage4FixtureForProject,
   test,
@@ -243,11 +250,6 @@ async function seedTask11Runtime(input: {
       }])],
     );
     await pool.query(
-      `INSERT INTO wujie_projects(id, owner_id, name, status)
-       VALUES ($1, $2, 'Task 11 平台合规 E2E', 'active') ON CONFLICT (id) DO NOTHING`,
-      [input.projectId, input.auth.userId],
-    );
-    await pool.query(
       `INSERT INTO wujie_credits(id, user_id, balance, total_recharged, total_used, created_at, updated_at)
        VALUES ($1, $2, 1000, 1000, 0, $3, $3)
        ON CONFLICT (user_id) DO UPDATE SET balance = GREATEST(wujie_credits.balance, 1000),
@@ -265,31 +267,6 @@ async function seedTask11Runtime(input: {
         url,
       };
       sources.push(source);
-      await pool.query(
-        `INSERT INTO wujie_assets(id, owner_id, project_id, kind, status)
-         VALUES ($1, $2, $3, 'image', 'active') ON CONFLICT (id) DO NOTHING`,
-        [source.assetId, input.auth.userId, input.projectId],
-      );
-      await pool.query(
-        `INSERT INTO wujie_asset_versions(
-           id, asset_id, owner_id, project_id, file_url, mime_type, availability, idempotency_key
-         ) VALUES ($1, $2, $3, $4, $5, 'image/png', 'ready', $6)
-         ON CONFLICT (id) DO UPDATE SET file_url = EXCLUDED.file_url, availability = 'ready'`,
-        [source.assetVersionId, source.assetId, input.auth.userId, input.projectId, source.url,
-          `task11:${input.profile}:source:${index + 1}`],
-      );
-      await pool.query('UPDATE wujie_assets SET current_version_id = $2 WHERE id = $1', [
-        source.assetId, source.assetVersionId,
-      ]);
-      await pool.query(
-        `INSERT INTO wujie_workspace_placements(
-           id, owner_id, project_id, asset_id, asset_version_id, workspace_kind,
-           workspace_id, entity_type, entity_id, status
-         ) VALUES ($1, $2, $3, $4, $5, 'canvas', $6, 'canvas-image', $7, 'active')
-         ON CONFLICT (id) DO NOTHING`,
-        [source.placementId, input.auth.userId, input.projectId, source.assetId,
-          source.assetVersionId, `canvas:${input.projectId}`, source.entityId],
-      );
     }
   } finally {
     await pool.end();
@@ -297,24 +274,44 @@ async function seedTask11Runtime(input: {
   return sources;
 }
 
-function buildWorkflow(sources: ManagedSource[], projectId: string, profile: string): {
-  nodes: WorkflowNode[];
-  connections: WorkflowConnection[];
+async function buildWorkflow(page: Page, sources: ManagedSource[], projectId: string, profile: string): Promise<Workflow & {
   skillNode: WorkflowNode;
-  id: string;
-} {
-  const imageNodes = sources.map((source, index) => {
+  downstreamNode: WorkflowNode;
+}> {
+  const workflowId = `task11-workflow-${profile}`;
+  const imageNodes: WorkflowNode[] = [];
+  for (const [index, source] of sources.entries()) {
     const node = createWorkflowNode('input-image', 80, 80 + index * 240, `来源图 ${index + 1}`);
+    const transferResponse = await page.request.post('/api/assets/transfer', {
+      data: {
+        sourceVersion: source.assetVersionId,
+        targetProject: projectId,
+        targetWorkspace: workflowId,
+        entityType: 'workflow-input',
+        entityId: node.id,
+        idempotencyKey: `task11:${profile}:workflow-input:${index + 1}`,
+        metadata: { source: 'task11-e2e', sourceImageId: source.entityId },
+      },
+    });
+    expect(transferResponse.ok(), `第 ${index + 1} 张图片转入 Workflow 返回 HTTP ${transferResponse.status()}`)
+      .toBe(true);
+    const transferred = await transferResponse.json() as {
+      assetId: string;
+      assetVersionId: string;
+      placementId: string;
+      url: string;
+    };
+    expect(transferred.assetVersionId).toBe(source.assetVersionId);
     node.config = {
       ...node.config,
       projectId,
-      imageUrl: source.url,
-      assetId: source.assetId,
-      assetVersionId: source.assetVersionId,
-      placementId: source.placementId,
+      imageUrl: transferred.url,
+      assetId: transferred.assetId,
+      assetVersionId: transferred.assetVersionId,
+      placementId: transferred.placementId,
     };
-    return node;
-  });
+    imageNodes.push(node);
+  }
   const skillNode = createWorkflowNode('ai-skill', 480, 240, '平台素材合规检查');
   skillNode.config = {
     ...skillNode.config,
@@ -329,7 +326,9 @@ function buildWorkflow(sources: ManagedSource[], projectId: string, profile: str
       vision: { providerId: PROVIDER_ID, modelId: MODEL_ID },
     },
   };
-  const connections = imageNodes.map((node, index) => ({
+  const downstreamNode = createWorkflowNode('condition-if', 840, 240, '合规报告下游消费');
+  downstreamNode.condition = 'result.status == "completed"';
+  const connections: WorkflowConnection[] = imageNodes.map((node, index) => ({
     id: `task11-source-${profile}-${index + 1}`,
     fromNodeId: node.id,
     fromPortId: 'out-image',
@@ -337,11 +336,21 @@ function buildWorkflow(sources: ManagedSource[], projectId: string, profile: str
     toPortId: 'in-image',
     type: 'image' as const,
   }));
+  connections.push({
+    id: `task11-report-consumer-${profile}`,
+    fromNodeId: skillNode.id,
+    fromPortId: 'out-task',
+    toNodeId: downstreamNode.id,
+    toPortId: 'in-data',
+    type: 'data',
+  });
   return {
-    id: `task11-workflow-${profile}`,
-    nodes: [...imageNodes, skillNode],
+    ...createEmptyWorkflow('Task 11 平台合规工作流'),
+    id: workflowId,
+    nodes: [...imageNodes, skillNode, downstreamNode],
     connections,
     skillNode,
+    downstreamNode,
   };
 }
 
@@ -367,6 +376,12 @@ function parseReports(run: SkillRunEvidence): PlatformComplianceReportV1[] {
     .map(output => JSON.parse(output.content) as PlatformComplianceReportV1);
 }
 
+function reportDigestsBySource(reports: readonly PlatformComplianceReportV1[]): Record<string, string> {
+  return Object.fromEntries(reports
+    .map(report => [report.sourceVersionId, report.ruleSetDigest] as const)
+    .sort(([left], [right]) => left.localeCompare(right)));
+}
+
 async function assertReportDocuments(page: Page, projectId: string, run: SkillRunEvidence) {
   const reports = parseReports(run);
   expect(reports).toHaveLength(3);
@@ -389,6 +404,38 @@ async function assertReportDocuments(page: Page, projectId: string, run: SkillRu
   return { documents, reports };
 }
 
+async function readManagedSources(
+  page: Page,
+  projectId: string,
+  expectedSources: readonly ManagedSource[],
+): Promise<ManagedSource[]> {
+  const response = await page.request.get('/api/user-data/sync?key=projects');
+  expect(response.ok(), `同步后的项目快照返回 HTTP ${response.status()}`).toBe(true);
+  const payload = await readJson(response);
+  const projects = Array.isArray(payload.value) ? payload.value : [];
+  const project = projects.find(value => (
+    value && typeof value === 'object' && (value as Record<string, unknown>).id === projectId
+  )) as Record<string, unknown> | undefined;
+  const images = Array.isArray(project?.canvasImages) ? project.canvasImages : [];
+  return expectedSources.map(source => {
+    const image = images.find(value => (
+      value && typeof value === 'object' && (value as Record<string, unknown>).id === source.entityId
+    )) as Record<string, unknown> | undefined;
+    expect(image, `同步后缺少画布图片 ${source.entityId}`).toBeTruthy();
+    expect(typeof image?.assetId).toBe('string');
+    expect(typeof image?.assetVersionId).toBe('string');
+    expect(typeof image?.placementId).toBe('string');
+    expect(typeof image?.url).toBe('string');
+    return {
+      entityId: source.entityId,
+      assetId: String(image!.assetId),
+      assetVersionId: String(image!.assetVersionId),
+      placementId: String(image!.placementId),
+      url: String(image!.url),
+    };
+  });
+}
+
 test('Canvas 与 Workflow 交付同一版本的逐图平台合规报告并隔离 Simple Chat', async ({
   page,
   stage4Evidence,
@@ -396,37 +443,62 @@ test('Canvas 与 Workflow 交付同一版本的逐图平台合规报告并隔离
   const fixture = await stage4FixtureForProject(testInfo.project.name);
   const auth = await loginThroughProductionUi(page, fixture.username, fixture.password);
   const projectId = String(fixture.canvasProject.id);
-  const sources = await seedTask11Runtime({
-    auth, page, projectId, profile: fixture.browserProfile,
-  });
-  const workflow = buildWorkflow(sources, projectId, fixture.browserProfile);
   fixture.canvasProject = {
     ...fixture.canvasProject,
-    canvasImages: sources.map((source, index) => ({
-      id: source.entityId,
-      url: source.url,
-      x: 96 + index * 220,
-      y: 96,
-      width: 180,
-      height: 180,
-      originalWidth: 1600,
-      originalHeight: 1600,
-      rotation: 0,
-      zIndex: index + 1,
-      createdAt: Date.now() + index,
-      prompt: `Task 11 Amazon 主图 ${index + 1}`,
-      assetId: source.assetId,
-      assetVersionId: source.assetVersionId,
-      placementId: source.placementId,
-    })),
+    canvasImages: [],
+    metadata: Object.fromEntries(Object.entries(
+      fixture.canvasProject.metadata as Record<string, unknown>,
+    ).filter(([key]) => key !== 'workflow')),
+  };
+  await seedStage4Baseline(page, fixture, auth);
+
+  let sources = await seedTask11Runtime({
+    auth, page, projectId, profile: fixture.browserProfile,
+  });
+  const canvasImages = sources.map((source, index) => ({
+    id: source.entityId,
+    url: source.url,
+    x: 96 + index * 220,
+    y: 96,
+    width: 180,
+    height: 180,
+    originalWidth: 1600,
+    originalHeight: 1600,
+    rotation: 0,
+    zIndex: index + 1,
+    createdAt: Date.now() + index,
+    prompt: `Task 11 Amazon 主图 ${index + 1}`,
+  }));
+  fixture.canvasProject = {
+    ...fixture.canvasProject,
+    canvasImages,
+    metadata: Object.fromEntries(Object.entries(
+      fixture.canvasProject.metadata as Record<string, unknown>,
+    ).filter(([key]) => key !== 'workflow')),
+  };
+  await seedStage4Baseline(page, fixture, auth);
+  sources = await readManagedSources(page, projectId, sources);
+  const managedCanvasImages = sources.map((source, index) => ({
+    ...canvasImages[index],
+    url: source.url,
+    assetId: source.assetId,
+    assetVersionId: source.assetVersionId,
+    placementId: source.placementId,
+  }));
+
+  const workflow = await buildWorkflow(page, sources, projectId, fixture.browserProfile);
+  fixture.canvasProject = {
+    ...fixture.canvasProject,
+    canvasImages: managedCanvasImages,
     metadata: {
       ...(fixture.canvasProject.metadata as Record<string, unknown>),
-      workflow: { id: workflow.id, name: 'Task 11 平台合规工作流', version: 'v1.0',
-        nodes: workflow.nodes, connections: workflow.connections },
+      workflow: { ...workflow, name: 'Task 11 平台合规工作流' },
     },
   };
   fixture.nodeCount = workflow.nodes.length;
   await seedStage4Baseline(page, fixture, auth);
+  await expect.poll(() => readStage4PersistedWorkflowNodeCount(page, projectId))
+    .toBe(workflow.nodes.length);
   await openStage4CanvasProject(page, projectId);
 
   const canvasCatalogResponse = await page.request.get('/api/skills?surface=canvas');
@@ -504,7 +576,19 @@ test('Canvas 与 Workflow 交付同一版本的逐图平台合规报告并隔离
   expect(workflowStatusResponse.ok()).toBe(true);
   const workflowStatus = await workflowStatusResponse.json() as {
     status: string;
-    results: Record<string, { output?: { runId?: string; documentAssetVersionIds?: string[] } }>;
+    results: Record<string, {
+      status?: string;
+      output?: {
+        runId?: string;
+        documentAssetVersionIds?: string[];
+        complianceReports?: PlatformComplianceReportV1[];
+        result?: {
+          status?: string;
+          documentAssetVersionIds?: string[];
+          complianceReports?: PlatformComplianceReportV1[];
+        };
+      };
+    }>;
   };
   expect(workflowStatus.status).toBe('completed');
   const workflowOutput = workflowStatus.results[workflow.skillNode.id]?.output;
@@ -514,7 +598,17 @@ test('Canvas 与 Workflow 交付同一版本的逐图平台合规报告并隔离
   expect(workflowRun.skillId).toBe(canvasRun.skillId);
   expect(workflowRun.skillVersion).toBe(canvasRun.skillVersion);
   expect(workflowRun.sourceVersionIds).toEqual(canvasRun.sourceVersionIds);
-  await expect(page.getByRole('region', { name: '平台合规报告摘要' })).toContainText('3 份报告');
+  expect(reportDigestsBySource(workflowDocuments.reports))
+    .toEqual(reportDigestsBySource(canvasDocuments.reports));
+
+  const downstreamResult = workflowStatus.results[workflow.downstreamNode.id];
+  expect(downstreamResult?.status).toBe('success');
+  expect(downstreamResult?.output?.result?.status).toBe('completed');
+  expect(downstreamResult?.output?.result?.documentAssetVersionIds)
+    .toEqual(workflowOutput?.documentAssetVersionIds);
+  expect(reportDigestsBySource(downstreamResult?.output?.result?.complianceReports ?? []))
+    .toEqual(reportDigestsBySource(workflowDocuments.reports));
+  await expect(page.locator('[data-workflow-compliance-summary]')).toContainText('3 份报告');
 
   const simpleCatalogResponse = await page.request.get('/api/skills?surface=simple-chat');
   expect(simpleCatalogResponse.ok()).toBe(true);
@@ -526,10 +620,15 @@ test('Canvas 与 Workflow 交付同一版本的逐图平台合规报告并隔离
   await expect(page.locator('[data-simple-chat-skill-id]')).toHaveCount(16);
   await expect(page.getByText('平台素材合规检查', { exact: true })).toHaveCount(0);
 
-  expect(providerCalls).toHaveLength(6);
+  const visionProviderCalls = providerCalls.filter(call => call.imageInput?.startsWith('data:image/png;base64,'));
+  const orchestratorProviderCalls = providerCalls.filter(call => call.imageInput === null);
+  expect(providerCalls).toHaveLength(8);
+  expect(visionProviderCalls).toHaveLength(6);
+  expect(orchestratorProviderCalls).toHaveLength(2);
   expect(providerCalls.every(call => call.pathname.endsWith('/chat/completions'))).toBe(true);
-  expect(providerCalls.every(call => call.model === MODEL_ID && call.imageInput?.startsWith('data:image/png;base64,'))).toBe(true);
-  expect(new Set(providerCalls.map(call => call.requestId)).size).toBe(6);
+  expect(providerCalls.every(call => call.model === MODEL_ID)).toBe(true);
+  expect(visionProviderCalls.every(call => typeof call.requestId === 'string')).toBe(true);
+  expect(new Set(visionProviderCalls.map(call => call.requestId)).size).toBe(6);
 
   await writeStage4Metrics(stage4Evidence, testInfo, 'platform-compliance-local-production', {
     gitCommit: process.env.E2E_GIT_COMMIT || 'unknown',

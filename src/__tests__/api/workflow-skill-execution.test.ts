@@ -320,6 +320,8 @@ describe('workflow Skill Run execution', () => {
     expect(routeSource).toContain('isWorkflowSkillNodeEnabled');
     expect(routeSource).toMatch(/runId:[\s\S]+?persistWorkflowExecution/);
     expect(routeSource).toContain("success: retryResult.status === 'success'");
+    expect(routeSource).toContain('transaction.findAsset');
+    expect(routeSource).toContain('kind: asset.kind');
   });
 
   it('shares the root cancellation registry and project identity with nested executions', () => {

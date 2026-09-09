@@ -10,6 +10,40 @@ export interface WorkflowSkillQuote {
   maximum: number;
 }
 
+function managedUpstreamInputs(
+  scope: WorkflowExecutionScope,
+  targetNodeId: string,
+): Record<string, unknown> {
+  const ancestorIds = new Set<string>();
+  const pending = scope.connections
+    .filter(connection => connection.toNodeId === targetNodeId)
+    .map(connection => connection.fromNodeId);
+  while (pending.length > 0) {
+    const nodeId = pending.pop()!;
+    if (ancestorIds.has(nodeId)) continue;
+    ancestorIds.add(nodeId);
+    for (const connection of scope.connections) {
+      if (connection.toNodeId === nodeId) pending.push(connection.fromNodeId);
+    }
+  }
+  const assetReferences = scope.nodes
+    .filter(node => ancestorIds.has(node.id) && node.type === 'input-image')
+    .flatMap(node => {
+      const assetVersionId = typeof node.config.assetVersionId === 'string'
+        ? node.config.assetVersionId
+        : '';
+      const url = typeof node.config.imageUrl === 'string' ? node.config.imageUrl : '';
+      if (!assetVersionId || !url) return [];
+      return [{
+        assetVersionId,
+        url,
+        ...(typeof node.config.assetId === 'string' ? { assetId: node.config.assetId } : {}),
+        ...(typeof node.config.placementId === 'string' ? { placementId: node.config.placementId } : {}),
+      }];
+    });
+  return assetReferences.length > 0 ? { assetReferences } : {};
+}
+
 export async function estimateWorkflowSkills(
   scope: WorkflowExecutionScope,
   skills: SkillDefinition[],
@@ -23,7 +57,7 @@ export async function estimateWorkflowSkills(
     if (node.type !== 'ai-skill') continue;
     const skill = skills.find(item => item.id === node.config.skillId);
     if (!skill) throw new Error('请等待 Skill 目录加载并选择有效的 Skill');
-    const request = buildWorkflowSkillRunRequest(node, {}, skill, {
+    const request = buildWorkflowSkillRunRequest(node, managedUpstreamInputs(scope, node.id), skill, {
       projectId: context.projectId, workflowId: context.workflowId, executionId: context.requestKey,
     });
     const response = await fetch('/api/skill-runs/estimate', {

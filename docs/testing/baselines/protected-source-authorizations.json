@@ -217,6 +217,20 @@
     { "path": "src/components/skill-runtime/dataset-file-parser.ts", "sourceCommit": "21913c4a" },
     { "path": "src/lib/skill-runtime/content-commerce-presets.ts", "sourceCommit": "f760c3f7" },
     { "path": "src/lib/skill-runtime/dataset-schema.ts", "sourceCommit": "e6da017a" },
-    { "path": "src/lib/skill-runtime/step-compiler.ts", "sourceCommit": "f760c3f7" }
+    { "path": "src/lib/skill-runtime/step-compiler.ts", "sourceCommit": "f760c3f7" },
+    { "path": "src/app/api/skill-reports/[runId]/[stepId]/route.ts", "sourceCommit": "b6920680" },
+    { "path": "src/components/skill-runtime/PlatformComplianceReportCard.tsx", "sourceCommit": "835e155e" },
+    { "path": "src/components/skill-runtime/platform-compliance-client.ts", "sourceCommit": "835e155e" },
+    { "path": "src/lib/platform-compliance/media-audit.ts", "sourceCommit": "21701f84" },
+    { "path": "src/lib/platform-compliance/report-asset.ts", "sourceCommit": "b6920680" },
+    { "path": "src/lib/platform-compliance/report-builder.ts", "sourceCommit": "7019a60b" },
+    { "path": "src/lib/platform-compliance/report-schema.ts", "sourceCommit": "085be096" },
+    { "path": "src/lib/platform-compliance/rules.ts", "sourceCommit": "085be096" },
+    { "path": "src/lib/platform-compliance/technical-evaluator.ts", "sourceCommit": "21701f84" },
+    { "path": "src/lib/platform-compliance/types.ts", "sourceCommit": "085be096" },
+    { "path": "src/lib/platform-compliance/vision-client.ts", "sourceCommit": "7019a60b" },
+    { "path": "src/lib/skill-runtime/compiled-fan-out.ts", "sourceCommit": "c7afc22f" },
+    { "path": "src/lib/skill-runtime/platform-compliance-preset.ts", "sourceCommit": "ca434bd4" },
+    { "path": "src/lib/skill-runtime/structured-output.ts", "sourceCommit": "33c28202" }
   ]
 }

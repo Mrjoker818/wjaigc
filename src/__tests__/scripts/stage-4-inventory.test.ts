@@ -39,6 +39,7 @@ const expectedSkillIds = [
   'preset-mockup-showcase',
   'preset-omnichannel-campaign',
   'preset-pinterest-pins',
+  'preset-platform-compliance-audit',
   'preset-poster-design',
   'preset-ppt-design',
   'preset-product-packaging',

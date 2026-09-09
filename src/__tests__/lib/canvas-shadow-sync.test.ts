@@ -311,6 +311,7 @@ describe('continuous canvas shadow synchronization', () => {
       assets: [
         { id: 'asset-deleted-only', ownerId: 'user-1', status: 'active' },
         { id: 'asset-shared', ownerId: 'user-1', status: 'active' },
+        { id: 'asset-report-document', ownerId: 'user-1', status: 'active' },
         { id: 'asset-other-owner', ownerId: 'user-2', status: 'active' },
       ],
       projects: [
@@ -335,11 +336,20 @@ describe('continuous canvas shadow synchronization', () => {
         return { rows: [], rowCount: 2 };
       }
       if (sql.includes('UPDATE wujie_assets')) {
+        const limitsToCanvasAssets = sql.includes("canvas_placement.workspace_kind = 'canvas'")
+          && sql.includes("canvas_placement.entity_type = 'canvas-image'");
         for (const asset of state.assets) {
           const hasLiveReference = state.placements.some((placement) => (
             placement.ownerId === ownerId && placement.assetId === asset.id && placement.status === 'active'
           ));
-          if (asset.ownerId === ownerId && !hasLiveReference) asset.status = 'trashed';
+          const hasCanvasReference = state.placements.some((placement) => (
+            placement.ownerId === ownerId && placement.assetId === asset.id
+          ));
+          if (
+            asset.ownerId === ownerId
+            && (!limitsToCanvasAssets || hasCanvasReference)
+            && !hasLiveReference
+          ) asset.status = 'trashed';
         }
         return { rows: [], rowCount: 1 };
       }
@@ -364,6 +374,7 @@ describe('continuous canvas shadow synchronization', () => {
     expect(state.placements.find((item) => item.id === 'placement-other-owner')?.status).toBe('active');
     expect(state.assets.find((item) => item.id === 'asset-deleted-only')?.status).toBe('trashed');
     expect(state.assets.find((item) => item.id === 'asset-shared')?.status).toBe('active');
+    expect(state.assets.find((item) => item.id === 'asset-report-document')?.status).toBe('active');
     expect(state.assets.find((item) => item.id === 'asset-other-owner')?.status).toBe('active');
     expect(state.projects.find((item) => item.ownerId === 'user-1' && item.id === 'deleted-project')?.status).toBe('trashed');
     expect(state.projects.find((item) => item.ownerId === 'user-2' && item.id === 'deleted-project')?.status).toBe('active');
