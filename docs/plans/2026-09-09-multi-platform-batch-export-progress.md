@@ -11,6 +11,7 @@
 
 ## 2026-09-10 最终本地门禁增量
 
+- 实现候选提交：`207b0dd86b502e9d3d3895a07a8b2ba19b8589d6`。
 - 全仓 Vitest：`740` 个测试文件，`6157/6157` 通过，0 失败、0 跳过；绑定隔离 PostgreSQL `wujie_stage4_task12final`，数据库并发和账务测试均真实执行。
 - Playwright：Chromium、Firefox、WebKit、375px Mobile Chromium 合计 `16/16` 通过；证据目录 `test-results/multi-platform-export/working-tree-task12-matrix-isolated/`，包含 17 张截图、48 个视频、16 个 Trace 和 JUnit。
 - 构建：生产构建改为受控 Turbopack，并在构建后清理 NFT 中的本地证据目录引用；`120/120` 页面生成成功，222 个 NFT 清单残留泄漏为 0。
@@ -32,7 +33,7 @@
 
 ## 尚未完成
 
-- 尚未形成并推送本轮 exact commit。
+- 本地 exact commit 已形成，尚未推送并由 Coze 拉取。
 - Coze 尚未拉取 exact commit，未执行云端 ZIP、manifest、AssetVersion、取消/恢复、零积分与刷新恢复验证。
 
 ## 当前判断

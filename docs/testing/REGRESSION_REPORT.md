@@ -2,7 +2,7 @@
 
 ## 2026-09-10 多平台批量导出 Task10 最终本地门禁
 
-本轮以 `main@8a58ca2f` 为工作树基线完成 Task10 本地收尾。全仓 Vitest 绑定隔离 PostgreSQL `wujie_stage4_task12final`，`740` 个测试文件、`6157/6157` 通过，0 失败、0 跳过。Playwright 在 Chromium、Firefox、WebKit、375px Mobile Chromium 上 `16/16` 通过，JUnit 为 16 tests / 0 failures / 0 skipped，证据含 17 张截图、48 个视频和 16 个 Trace。
+本轮以 `main@8a58ca2f` 为工作树基线完成 Task10 本地收尾，实现候选为 `207b0dd86b502e9d3d3895a07a8b2ba19b8589d6`。全仓 Vitest 绑定隔离 PostgreSQL `wujie_stage4_task12final`，`740` 个测试文件、`6157/6157` 通过，0 失败、0 跳过。Playwright 在 Chromium、Firefox、WebKit、375px Mobile Chromium 上 `16/16` 通过，JUnit 为 16 tests / 0 failures / 0 skipped，证据含 17 张截图、48 个视频和 16 个 Trace。
 
 原 Webpack 生产构建在优化阶段出现原生内存异常；Turbopack 首次复核又暴露 Windows 中文代码框架字符边界 panic。最小修复保留运行时中文提示，使用等价 Unicode 源码转义，并增加构建后 NFT 清理器。最终 `pnpm build` 生成 `120/120` 页面，222 个 NFT 清单中 `.tmp`、`output`、Playwright 和测试证据引用为 0。生产服务真实调用 `/api/svg-trace` 返回 200、引擎 `wasm-vtracer`，确认 WASM 功能未因构建器切换丢失。TypeScript、Doctor、全仓构建版 ESLint 均退出 0。判定：`LOCAL PASS / CLOUD UNVERIFIED`。
 

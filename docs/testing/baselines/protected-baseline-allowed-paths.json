@@ -178,6 +178,7 @@
   "src/lib/image-toolbar-position.ts",
   "src/lib/image-toolbar-preferences.ts",
   "src/app/api/image/source/route.ts",
+  "src/app/api/image/health/route.ts",
   "src/lib/canvas-edit-image-source.ts",
   "src/app/api/svg-trace/route.ts",
   "src/app/api/svg-trace/wasm-budget.ts",
