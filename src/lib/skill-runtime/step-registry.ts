@@ -48,6 +48,14 @@ type ResolveSkillMediaMetadata = (input: {
   assetVersionIds: readonly string[];
 }) => Promise<SkillStepResult['media']>;
 
+export function multiPlatformExportProgressPercent(completed: number, total: number): number {
+  if (!Number.isFinite(completed) || !Number.isFinite(total) || total <= 0) {
+    return 0;
+  }
+
+  return Math.max(0, Math.min(100, (completed / total) * 100));
+}
+
 export interface PersistCompliancePartialReportInput {
   actorUserId: string;
   projectId: string;
@@ -676,7 +684,7 @@ export function createProductionSkillStepRegistry(input: {
           toolId: step.step.toolId,
           stepId: step.step.id,
           ...progress,
-          progress: progress.total > 0 ? progress.completed / progress.total : 0,
+          progress: multiPlatformExportProgressPercent(progress.completed, progress.total),
           generation: step.operation.executionFence.generation,
         },
         executionFence: step.operation.executionFence,

@@ -27,4 +27,16 @@ export default async function warmupServer(): Promise<void> {
   }
 
   await response.arrayBuffer();
+
+  if (process.env.E2E_MULTI_PLATFORM_EXPORT_RUN === '1') {
+    for (const path of ['/api/auth/register', '/api/session']) {
+      const authWarmup = await fetch(new URL(path, baseURL), {
+        signal: AbortSignal.timeout(60_000),
+      });
+      if (authWarmup.status >= 500) {
+        throw new Error(`E2E auth warmup failed for ${path} with HTTP ${authWarmup.status}`);
+      }
+      await authWarmup.arrayBuffer();
+    }
+  }
 }

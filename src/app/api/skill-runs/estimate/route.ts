@@ -19,6 +19,8 @@ import {
   SkillRequestError,
 } from '@/app/api/skills/http';
 import { errorResponse, getRequestId } from '@/lib/request-id';
+import { estimateMultiPlatformExportPlan } from '@/lib/multi-platform-export/estimate';
+import { MULTI_PLATFORM_EXPORT_SKILL_ID } from '@/lib/skill-runtime/multi-platform-export-preset';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -109,13 +111,25 @@ function skillRunHttpError(error: unknown, requestId: string): NextResponse {
     known = true;
     code = candidateCode;
     status = 422;
+  } else if (candidateCode === 'PLATFORM_EXPORT_PRESET_NOT_FOUND') {
+    known = true;
+    code = candidateCode;
+    status = 404;
+  } else if (candidateCode === 'PLATFORM_EXPORT_PRESET_STORAGE_UNAVAILABLE') {
+    known = true;
+    code = candidateCode;
+    status = 503;
+  } else if (candidateCode.startsWith('EXPORT_') || candidateCode.startsWith('PLATFORM_EXPORT_')) {
+    known = true;
+    code = candidateCode;
+    status = candidateCode.includes('_LIMIT') ? 413 : 422;
   }
   return errorResponse(
     status,
     code,
     known && error instanceof Error ? error.message : 'Skill run request failed',
     requestId,
-    !known,
+    status >= 500,
   );
 }
 
@@ -167,9 +181,20 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       undefined,
       agentRequest.skill!.inputValues,
     );
+    const exportPlan = skill.id === MULTI_PLATFORM_EXPORT_SKILL_ID
+      ? await estimateMultiPlatformExportPlan({
+        actorUserId: auth.userId,
+        projectId: input.projectId,
+        skillId: skill.id,
+        skillVersion: skill.version,
+        inputValues: agentRequest.skill!.inputValues,
+        signal: request.signal,
+      })
+      : undefined;
     return NextResponse.json({
       ...estimate,
       modelBindings: agentRequest.skill!.modelBindings,
+      ...(exportPlan ? { exportPlan } : {}),
     });
   } catch (error) {
     return skillRunHttpError(error, requestId);

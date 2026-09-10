@@ -101,7 +101,7 @@ import {
 import { taskEventsClient } from '@/lib/task-events-client';
 import { waitForTaskPollInterval } from '@/lib/task-polling-wait';
 import type { WorkflowCanvasInsertionItem } from '@/lib/asset-core/workspace-transfer';
-import { canvasSkillProjectionIdentity, transferCanvasSkillAsset } from '@/lib/skill-runtime/canvas-client';
+import { canvasSkillProjectionIdentity, transferCanvasSkillAsset, transferCanvasSkillAssets } from '@/lib/skill-runtime/canvas-client';
 import {
   buildSimpleChatCanvasBridgeImages,
   consumeSimpleChatCanvasBridge,
@@ -3669,6 +3669,67 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
     }], meta?.sourceImageId, { ...meta, beforeInsert });
   }, [currentProject?.id, handleAddImages]);
 
+  const handleAddEmbeddedChatImages = useCallback(async (
+    references: CoreWorkspaceAssetReference[],
+    meta?: {
+      sourceImageId?: string;
+      runId?: string;
+      sourceVersionIds?: readonly string[];
+      restoreDeletedPlacement?: boolean;
+      signal?: AbortSignal;
+    },
+  ): Promise<void> => {
+    if (references.length === 0) return;
+    if (!currentProject?.id || !meta?.runId || references.some(reference => !reference.assetVersionId)) {
+      await handleAddImages(references.map(reference => reference.url), meta?.sourceImageId, meta);
+      return;
+    }
+
+    const expectedProjectId = currentProject.id;
+    const deletionGenerations = new Map(references.map(reference => {
+      const identity = canvasSkillProjectionIdentity(meta.runId!, reference.assetVersionId!);
+      return [identity, imageDeletionGenerationRef.current.get(identity) ?? 0] as const;
+    }));
+    const transferred = await transferCanvasSkillAssets({
+      references,
+      projectId: expectedProjectId,
+      runId: meta.runId,
+      sourceVersionIds: meta.sourceVersionIds ?? [],
+      restoreDeletedPlacement: meta.restoreDeletedPlacement,
+      signal: meta.signal,
+    });
+    if (meta.signal?.aborted || !isWorkspaceResultScopeCurrent(expectedProjectId, currentProjectRef.current?.id)) return;
+
+    const insertionItems = transferred.map(reference => ({
+      outputNodeId: `embedded-chat:${reference.placementId}`,
+      url: reference.url,
+      assetReference: reference,
+    }));
+    const beforeInsert = meta.restoreDeletedPlacement ? (): void => {
+      const manager = UserManagerCore.getInstance();
+      const latestRevision = Math.max(
+        ...transferred.map(reference => Number.isSafeInteger(reference.projectRevision)
+          ? Number(reference.projectRevision)
+          : 0),
+      );
+      const deletionChanged = transferred.some(reference => {
+        const identity = canvasSkillProjectionIdentity(meta.runId!, reference.assetVersionId!);
+        return (imageDeletionGenerationRef.current.get(identity) ?? 0) !== deletionGenerations.get(identity);
+      });
+      if ((latestRevision > 0 && manager.getProjectSyncRevision() > latestRevision) || deletionChanged) {
+        throw new Error('画布已更新，请从运行记录重新选择需要恢复的结果');
+      }
+      if (latestRevision > 0) manager.advanceProjectSyncRevision(latestRevision);
+      const restoredEntityIds = transferred
+        .map(reference => reference.entityId)
+        .filter((value): value is string => Boolean(value));
+      for (const entityId of restoredEntityIds) recentlyDeletedIdsRef.current.delete(entityId);
+      manager.clearRecentlyDeletedImageIds(restoredEntityIds);
+    } : undefined;
+
+    await handleAddImages(insertionItems, meta.sourceImageId, { ...meta, beforeInsert });
+  }, [currentProject?.id, handleAddImages]);
+
   const handleUploadEffectReverseSource = useCallback(async (file: File): Promise<CanvasImage> => {
     if (!currentProject?.id) {
       throw new Error('请先保存或选择一个项目');
@@ -6476,7 +6537,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
               </div>
             </div>
             <div className={activePanel === 'chat' ? 'flex-1 overflow-hidden' : 'hidden'}>
-              <ChatPanel themeStyle={themeStyle} projectId={currentProject?.id} onAddToPrompt={handleAddToPrompt} onAddImages={handleAddImages} onAddGeneratedImage={handleAddEmbeddedChatImage} canvasImages={images} selectedCanvasImage={selectedImage} onResolveCanvasImageForChat={resolveCanvasImageForChat} onChatModelChange={setCurrentChatModelInfo} chatInitialImage={chatInitialImage} onChatInitialImageConsumed={() => setChatInitialImage(null)} chatTabOpen={chatTabOpen} onChatTabOpenChange={setChatTabOpen} onNavigateToImage={(id: string) => setNavigateToImageId(id)} onGenerateImage={handleChatGenerateImage} externalPrompt={externalChatPrompt} onExternalPromptConsumed={() => setExternalChatPrompt(undefined)} />
+              <ChatPanel themeStyle={themeStyle} projectId={currentProject?.id} onAddToPrompt={handleAddToPrompt} onAddImages={handleAddImages} onAddGeneratedImage={handleAddEmbeddedChatImage} onAddGeneratedImages={handleAddEmbeddedChatImages} canvasImages={images} selectedCanvasImage={selectedImage} onResolveCanvasImageForChat={resolveCanvasImageForChat} onChatModelChange={setCurrentChatModelInfo} chatInitialImage={chatInitialImage} onChatInitialImageConsumed={() => setChatInitialImage(null)} chatTabOpen={chatTabOpen} onChatTabOpenChange={setChatTabOpen} onNavigateToImage={(id: string) => setNavigateToImageId(id)} onGenerateImage={handleChatGenerateImage} externalPrompt={externalChatPrompt} onExternalPromptConsumed={() => setExternalChatPrompt(undefined)} />
             </div>
 
             {/* 固定在底部的开始生成按钮 */}

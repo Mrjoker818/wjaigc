@@ -40,9 +40,18 @@ function checkEraseModels(): Record<string, { available: boolean; path: string; 
         totalSize += fs.statSync(fp).size;
       }
       if (!allExist) {
-        models[m.id] = { available: false, path: modelPath, error: `模型文件不存在 (需要: ${m.files.join(', ')})` };
+        models[m.id] = {
+          available: false,
+          path: modelPath,
+          error: `\u6a21\u578b\u6587\u4ef6\u4e0d\u5b58\u5728 (\u9700\u8981: ${m.files.join(', ')})`,
+        };
       } else if (totalSize < 1_000_000) {
-        models[m.id] = { available: false, path: modelPath, size: totalSize, error: `文件过小 (${(totalSize / 1024).toFixed(0)}KB)` };
+        models[m.id] = {
+          available: false,
+          path: modelPath,
+          size: totalSize,
+          error: `\u6587\u4ef6\u8fc7\u5c0f (${(totalSize / 1024).toFixed(0)}KB)`,
+        };
       } else {
         models[m.id] = { available: true, path: modelPath, size: totalSize };
       }

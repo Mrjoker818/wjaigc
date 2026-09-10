@@ -14,7 +14,6 @@ import { resolveSkillInputs } from '@/lib/skill-runtime/input-resolver';
 import { compileSkillPrompt } from '@/lib/skill-runtime/prompt-compiler';
 import { compileConditionalSkillSteps } from '@/lib/skill-runtime/step-compiler';
 import { authorizeAgentContext } from '@/lib/agent-runtime/context-adapters';
-import { AGENT_TOOL_REGISTRY, type AgentToolDefinition } from '@/lib/agent-runtime/tool-registry';
 import type { SkillDefinition } from '@/lib/skill-runtime/types';
 
 const authMocks = vi.hoisted(() => ({
@@ -263,11 +262,6 @@ describe('Agent runtime service', () => {
         if (skillId === localSkill.id && localSkill.allowedSurfaces.includes(surface)) return localSkill;
         return requireSkillForSurface(skillId, surface);
       });
-    const registry = AGENT_TOOL_REGISTRY as unknown as AgentToolDefinition[];
-    registry.push({
-      toolId: 'multi_platform_export', skillOnly: true, workspaces: ['canvas'],
-      productTypes: ['canvas'], modelCapabilities: [],
-    });
     const dependencies = serviceDependencies();
     const service = agentRuntime.createAgentRuntimeService(dependencies);
     const localRequest: AgentRunRequest = {
@@ -336,7 +330,6 @@ describe('Agent runtime service', () => {
         status: 'completed', creditStatus: 'not-applicable', creditCost: 0,
       });
     } finally {
-      registry.pop();
       catalogSpy.mockRestore();
     }
 

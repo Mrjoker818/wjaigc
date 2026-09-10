@@ -137,7 +137,7 @@ export async function transformPlatformImage(
 
   const backgroundAlpha = alphaFromBackground(input.background);
   if (!Number.isInteger(backgroundAlpha)) fail('EXPORT_BACKGROUND_INVALID');
-  if (outputFormat === 'jpeg' && (backgroundAlpha < 255 || input.source.hasTransparency)) {
+  if (outputFormat === 'jpeg' && backgroundAlpha < 255) {
     fail('EXPORT_TRANSPARENCY_FORMAT_CONFLICT');
   }
 
@@ -168,6 +168,9 @@ export async function transformPlatformImage(
             position: 'centre',
             background: input.background === 'transparent' ? '#00000000' : input.background,
           });
+        if (backgroundAlpha === 255) {
+          output = output.flatten({ background: input.background.slice(0, 7) });
+        }
         if (outputFormat === 'jpeg') output = output.jpeg({ quality: 92, mozjpeg: true });
         if (outputFormat === 'png') output = output.png({ compressionLevel: 9 });
         if (outputFormat === 'webp') output = output.webp({ quality: 92 });

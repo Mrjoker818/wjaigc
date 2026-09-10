@@ -1,5 +1,11 @@
 # 无界AI — 回归测试报告 (REGRESSION REPORT)
 
+## 2026-09-10 多平台批量导出 Task10 最终本地门禁
+
+本轮以 `main@8a58ca2f` 为工作树基线完成 Task10 本地收尾。全仓 Vitest 绑定隔离 PostgreSQL `wujie_stage4_task12final`，`740` 个测试文件、`6157/6157` 通过，0 失败、0 跳过。Playwright 在 Chromium、Firefox、WebKit、375px Mobile Chromium 上 `16/16` 通过，JUnit 为 16 tests / 0 failures / 0 skipped，证据含 17 张截图、48 个视频和 16 个 Trace。
+
+原 Webpack 生产构建在优化阶段出现原生内存异常；Turbopack 首次复核又暴露 Windows 中文代码框架字符边界 panic。最小修复保留运行时中文提示，使用等价 Unicode 源码转义，并增加构建后 NFT 清理器。最终 `pnpm build` 生成 `120/120` 页面，222 个 NFT 清单中 `.tmp`、`output`、Playwright 和测试证据引用为 0。生产服务真实调用 `/api/svg-trace` 返回 200、引擎 `wasm-vtracer`，确认 WASM 功能未因构建器切换丢失。TypeScript、Doctor、全仓构建版 ESLint 均退出 0。判定：`LOCAL PASS / CLOUD UNVERIFIED`。
+
 ## 2026-09-06 Task12 暂停恢复子任务租约修复
 
 真实PostgreSQL先复现accepted子任务在暂停恢复后无法立即接管，再最小修复成功恢复事务清除旧子租约；保留原provider_task_id与账务。全仓5321通过、0失败、12因旧数据库变量跳过；补齐TEST_POSTGRES_URL后四个文件12/12通过，合计覆盖5333项。新增回归确认旧执行器写回拒绝、重复恢复不抢占新租约。类型检查、构建版Lint退出0；生产构建退出0、119/119页面、BuildID `qODy_KTeI8k1tbnsf48An`。机器证据及哈希见同日Task12专项记录。云端同一原任务恢复与交付仍未验证。
@@ -2941,3 +2947,15 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - 后续三次探针取得更精确的平台响应：HTTP 404、`error_code=instance_not_found`，明确说明目标 sandbox 实例不存在；Coze 项目壳仍为 HTTP 200。请求没有进入无界应用或供应商，不能登记为业务失败。
 - Edge 扩展 1.26.901.11451 的后台进程和标签枚举正常，但现有项目页与预览页均无法完成调试附着，返回 `Debugger unattached`。恢复时必须先由项目页重新初始化沙箱，再刷新预览，并优先读取原 Run。
 - **回归判定：REAL CREATE PASS / COZE INSTANCE LOST / TERMINAL AND BILLING UNVERIFIED。** 恢复后只读取同一 Run，不重新扣费。
+
+## 2026-09-10 多平台批量导出 Task10 本地回归
+
+- 基线：`main@8a58ca2fe91272c108dadfe014fd7a90ba0c6a2a`；候选为该基线上的 Task10 工作树，`stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 未触碰。
+- 最终原子批量传输增量后的专项单元、API、组件与 PostgreSQL 回归为 `103/103` 通过。
+- 最终增量前一轮全仓 Vitest 为 `736 passed / 4 skipped` 个测试文件，`6134 passed / 13 conditional skipped / 0 failed`；该结果不冒充最终增量后的新鲜全仓门禁。
+- 本地 Playwright 最近一次完整四项目轮次为 `15/16`；Firefox 最后一项因 Next 开发服务器 `_next/static/chunks/main-app.js` 未加载失败，随后隔离重跑通过，但不能写成同一轮 `16/16`。
+- 证据目录：`test-results/multi-platform-export/working-tree-final-2/`，共 140 个文件，包含 JUnit、HTML 报告、截图、录像、Trace、Console 与 Network 记录。
+- 最终增量后 TypeScript 和 quiet ESLint 均退出 0；完整 ESLint 为 `0 errors / 945 historical warnings`。
+- 全量 Playwright 聚合入口已执行，但 Stage 3 与 Stage 4 具有互斥的隔离账号/环境前置，加载阶段停止；已登记 `MPE-TEST-001`，没有把该入口写成通过。
+- 生产冷构建在 32 GiB Node 堆下运行 45 分钟仍停留于 webpack 优化阶段；复用纯缓存后重试 10 分钟仍无阶段输出，均受控终止且未产生可声明的生产构建。
+- **回归判定：LOCAL CODE GATES PASS / PRODUCTION BUILD, CLEAN BROWSER MATRIX AND CLOUD PENDING。**

@@ -74,7 +74,7 @@ describe('multi-platform export PostgreSQL concurrency', () => {
       );
       const sourceBytes = readFileSync(resolve(
         process.cwd(),
-        'src/__tests__/fixtures/multi-platform-export/transparent.png',
+        'src/__tests__/fixtures/multi-platform-export/landscape.jpg',
       ));
       const sourceChecksum = createHash('sha256').update(sourceBytes).digest('hex');
       await query(
@@ -84,21 +84,28 @@ describe('multi-platform export PostgreSQL concurrency', () => {
       );
       await query(
         `INSERT INTO wujie_asset_versions(id, asset_id, owner_id, project_id, file_url, availability,
-           mime_type, byte_size, checksum, idempotency_key, request_digest, metadata)
-         VALUES ($1, $2, $3, $4, $5, 'ready', 'image/png', $6, $7, $8, $9, '{}'::jsonb)`,
+           mime_type, byte_size, checksum, idempotency_key, metadata)
+         VALUES ($1, $2, $3, $4, $5, 'ready', 'image/jpeg', $6, $7, $8, $9::jsonb)`,
         [
           sourceId,
           sourceAssetId,
           userId,
           projectId,
-          `data:image/png;base64,${sourceBytes.toString('base64')}`,
+          `data:image/jpeg;base64,${sourceBytes.toString('base64')}`,
           sourceBytes.length,
           sourceChecksum,
           `seed-${sourceId}`,
-          'e'.repeat(64),
+          JSON.stringify({ requestDigest: 'e'.repeat(64) }),
         ],
       );
       await query('UPDATE wujie_assets SET current_version_id = $1 WHERE id = $2', [sourceId, sourceAssetId]);
+      await query(
+        `INSERT INTO wujie_workspace_placements(
+           id, owner_id, project_id, asset_id, asset_version_id, workspace_kind,
+           workspace_id, entity_type, entity_id, status
+         ) VALUES ($1, $2, $3, $4, $5, 'canvas', 'canvas-mpe', 'canvas-image', $6, 'active')`,
+        [`placement-${randomUUID()}`, userId, projectId, sourceAssetId, sourceId, `source-${sourceId}`],
+      );
 
       const request = (idempotencyKey: string, targetPresetIds = ['instagram-post-v1']): SkillRunRequest => ({
         skillId: 'preset-multi-platform-export',
@@ -130,10 +137,17 @@ describe('multi-platform export PostgreSQL concurrency', () => {
       )));
       expect(dispatches.filter(item => item.started)).toHaveLength(1);
       await Promise.all(dispatches.map(item => item.completion));
-      await expect(skillService.getSkillRun({
+      const completedRun = await skillService.getSkillRun({
         actorUserId: userId,
         runId: completedRunId,
-      })).resolves.toMatchObject({ status: 'completed' });
+      });
+      const completedEvents = await query<{ sequence: number; event_type: string; payload: unknown }>(
+        `SELECT sequence, event_type, payload FROM wujie_agent_events
+         WHERE task_id = $1 ORDER BY sequence ASC`,
+        [completedRunId],
+      );
+      expect(completedRun, JSON.stringify({ run: completedRun, events: completedEvents.rows }, null, 2))
+        .toMatchObject({ status: 'completed' });
 
       const versionsBeforeRecovery = await query<{ count: string }>(
         'SELECT COUNT(*)::text AS count FROM wujie_asset_versions WHERE owner_id = $1 AND project_id = $2',

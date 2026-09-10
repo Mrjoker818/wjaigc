@@ -245,6 +245,71 @@ export async function transferCanvasSkillAsset(input: {
     ...(transferred.projectRevision === undefined ? {} : { projectRevision: transferred.projectRevision }) };
 }
 
+export async function transferCanvasSkillAssets(input: {
+  references: readonly WorkspaceAssetReference[];
+  projectId: string;
+  runId: string;
+  sourceVersionIds: readonly string[];
+  restoreDeletedPlacement?: boolean;
+  fetcher?: typeof fetch;
+  signal?: AbortSignal;
+}): Promise<Array<WorkspaceAssetReference & { projectRevision?: number }>> {
+  if (input.references.length < 1 || input.references.length > 100
+    || input.references.some(reference => !reference.assetVersionId)) {
+    throw new Error('Skill 资产批次无效');
+  }
+  const response = await (input.fetcher ?? fetch)('/api/assets/batch-transfer', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      restoreDeletedPlacements: input.restoreDeletedPlacement === true,
+      transfers: input.references.map(reference => {
+        const identity = canvasSkillProjectionIdentity(input.runId, reference.assetVersionId!);
+        return {
+          sourceVersion: reference.assetVersionId,
+          targetProject: input.projectId,
+          targetWorkspace: `canvas:${input.projectId}`,
+          entityType: 'canvas-image',
+          entityId: identity,
+          idempotencyKey: identity,
+          metadata: {
+            source: 'canvas-skill',
+            runId: input.runId,
+            sourceVersionIds: [...input.sourceVersionIds],
+            ...(reference.sourceTrace ? { sourceTrace: reference.sourceTrace } : {}),
+          },
+        };
+      }),
+    }),
+    signal: input.signal,
+  });
+  const payload = await readJson<{ transfers?: unknown }>(response, 'Skill 资产批量加入画布失败');
+  if (!Array.isArray(payload.transfers) || payload.transfers.length !== input.references.length) {
+    throw new Error('Skill 资产批量加入画布返回格式无效');
+  }
+  const transferred = payload.transfers.map((value, index) => {
+    if (!isWorkspaceAssetReference(value)) {
+      throw new Error('Skill 资产批量加入画布返回格式无效');
+    }
+    const item = value as WorkspaceAssetReference & {
+      placementStatus?: string;
+      placementRevision?: string;
+      projectRevision?: number;
+    };
+    if (!item.assetId || !item.placementId) {
+      throw new Error('Skill 资产批量加入画布返回格式无效');
+    }
+    return { ...input.references[index], ...item };
+  });
+  if (transferred.some(item => item.placementStatus === 'trashed')) {
+    throw new Error('Skill 结果已删除，请从运行记录显式恢复');
+  }
+  return transferred.map(item => ({
+    ...sanitizeWorkspaceAssetReference(item),
+    ...(typeof item.projectRevision === 'number' ? { projectRevision: item.projectRevision } : {}),
+  }));
+}
+
 export function createCanvasSkillProjectionCoordinator() {
   let active: { runId: string; projectId: string; controller: AbortController } | null = null;
   const pending = new Map<string, AbortSignal>();

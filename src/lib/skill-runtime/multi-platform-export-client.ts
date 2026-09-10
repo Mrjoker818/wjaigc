@@ -191,17 +191,31 @@ export async function downloadExportArtifact(
   fetcher: typeof fetch = fetch,
 ): Promise<void> {
   const reference = await resolveExportAssetReference({ projectId, versionId, fetcher });
+  const response = await fetcher(reference.url, { method: 'GET', credentials: 'same-origin' });
+  if (!response.ok) throw new Error(`导出制品下载失败 (${response.status})`);
+  const objectUrl = URL.createObjectURL(await response.blob());
   const anchor = document.createElement('a');
-  anchor.href = reference.url;
-  anchor.download = reference.name || '';
+  anchor.href = objectUrl;
+  const encodedFilename = new URL(reference.url, window.location.href).pathname.split('/').filter(Boolean).at(-1) || '';
+  let fallbackFilename = encodedFilename;
+  try {
+    fallbackFilename = decodeURIComponent(encodedFilename);
+  } catch {
+    // Keep the encoded basename when a legacy URL contains malformed escapes.
+  }
+  anchor.download = reference.name?.trim() || fallbackFilename || `export-${versionId}`;
   anchor.rel = 'noopener';
   document.body.appendChild(anchor);
   anchor.click();
-  anchor.remove();
+  window.setTimeout(() => {
+    anchor.remove();
+    URL.revokeObjectURL(objectUrl);
+  }, 30_000);
 }
 
 const MAX_GROUP_FILES = 100;
-const MAX_GROUP_BYTES = 256 * 1_048_576;
+// JSZip holds source blobs and the generated archive concurrently in the browser.
+const MAX_GROUP_BYTES = 64 * 1_048_576;
 
 export async function downloadExportGroup(input: {
   platform: string;
@@ -248,16 +262,15 @@ export async function downloadExportGroup(input: {
     input.onProgress?.(Math.min(99, Math.round(fileProgress + metadata.percent / (input.references.length + 1))));
   });
   const objectUrl = URL.createObjectURL(archive);
-  try {
-    const anchor = document.createElement('a');
-    anchor.href = objectUrl;
-    anchor.download = `${input.platform || 'platform'}-export.zip`;
-    anchor.rel = 'noopener';
-    document.body.appendChild(anchor);
-    anchor.click();
+  const anchor = document.createElement('a');
+  anchor.href = objectUrl;
+  anchor.download = `${input.platform || 'platform'}-export.zip`;
+  anchor.rel = 'noopener';
+  document.body.appendChild(anchor);
+  anchor.click();
+  input.onProgress?.(100);
+  window.setTimeout(() => {
     anchor.remove();
-    input.onProgress?.(100);
-  } finally {
     URL.revokeObjectURL(objectUrl);
-  }
+  }, 0);
 }

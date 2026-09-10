@@ -1253,10 +1253,10 @@ describe('Skill run history', () => {
     events[0].payload.sourceVersionIds = ['original-version'];
     const projection: AgentRunProjection = {
       runId: 'run-1', status: 'completed', lastSequence: 4, plan: [],
-      assetVersionIds: ['result-version-1'], ignoredEventIds: [], missingSequences: [],
+      assetVersionIds: ['result-version-2', 'result-version-1'], ignoredEventIds: [], missingSequences: [],
       qualityChecks: [{ stepId: 'frozen-step', gateId: 'output-present', passed: true }],
       result: {
-        assetVersionIds: ['result-version-1'],
+        assetVersionIds: ['result-version-1', 'result-version-2'],
         outputs: [{ stepId: 'frozen-step', kind: 'text', content: 'durable response' }],
         apiKey: 'must-not-leak', upstreamResponse: { choices: ['must-not-leak'] },
       },
@@ -1273,7 +1273,7 @@ describe('Skill run history', () => {
       skillId: definition.id, skillVersion: 1, creditStatus: 'charged', creditCost: 7,
       inputValues: {},
       modelBindings: { vision: { providerId: 'frozen-provider', modelId: 'frozen-vision' } },
-      assetVersionIds: ['result-version-1'],
+      assetVersionIds: ['result-version-1', 'result-version-2'],
       outputs: [{ stepId: 'frozen-step', kind: 'text', content: 'durable response' }],
       steps: [{ id: 'frozen-step', label: 'Frozen step', status: 'pending' }],
       qualityEvents: [{ stepId: 'frozen-step', gateId: 'output-present', passed: true }],

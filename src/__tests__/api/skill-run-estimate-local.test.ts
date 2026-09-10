@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   resolveTaskModel: vi.fn(),
   authorizeAgentContext: vi.fn(),
   calculateConfiguredCreditCost: vi.fn(),
+  estimateMultiPlatformExportPlan: vi.fn(),
 }));
 
 vi.mock('server-only', () => ({}));
@@ -20,6 +21,9 @@ vi.mock('@/lib/agent-runtime/context-adapters', () => ({
 }));
 vi.mock('@/lib/credits', () => ({
   calculateConfiguredCreditCost: mocks.calculateConfiguredCreditCost,
+}));
+vi.mock('@/lib/multi-platform-export/estimate', () => ({
+  estimateMultiPlatformExportPlan: mocks.estimateMultiPlatformExportPlan,
 }));
 
 import { POST } from '@/app/api/skill-runs/estimate/route';
@@ -49,6 +53,30 @@ function request(skillId: string, modelBindings: Record<string, unknown>): NextR
   });
 }
 
+function canvasExportRequest(): NextRequest {
+  return new NextRequest('http://localhost/api/skill-runs/estimate', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      skillId: localSkill.id,
+      skillVersion: 1,
+      surface: 'canvas',
+      projectId: 'project-1',
+      workspaceId: 'canvas:project-1',
+      inputValues: {
+        sourceAssetVersionIds: ['version-1'],
+        targetPresetIds: ['instagram-post-v1'],
+        fit: 'contain',
+        background: '#ffffffff',
+        namingTemplate: '{asset}-{platform}-{size}-{index}',
+      },
+      sourceVersionIds: ['version-1'],
+      modelBindings: {},
+      idempotencyKey: 'estimate-local-export-plan',
+    }),
+  });
+}
+
 describe('POST /api/skill-runs/estimate local workflow Skill', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -68,6 +96,11 @@ describe('POST /api/skill-runs/estimate local workflow Skill', () => {
       snapshot: {}, mediaByVersionId: {}, selectedEntityVersionIds: {},
     });
     mocks.calculateConfiguredCreditCost.mockResolvedValue(4);
+    mocks.estimateMultiPlatformExportPlan.mockResolvedValue({
+      fileCount: 1,
+      totalPixels: 1_166_400,
+      estimatedZipBytes: 840_000,
+    });
   });
 
   it('returns a zero-cost empty frozen binding estimate for the local export Skill', async () => {
@@ -84,6 +117,59 @@ describe('POST /api/skill-runs/estimate local workflow Skill', () => {
     expect(mocks.resolveTaskModel).not.toHaveBeenCalled();
     expect(mocks.authorizeAgentContext).not.toHaveBeenCalled();
     expect(mocks.calculateConfiguredCreditCost).not.toHaveBeenCalled();
+  });
+
+  it('returns a server-validated export plan for a Canvas batch export', async () => {
+    const response = await POST(canvasExportRequest());
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      minimum: 0,
+      maximum: 0,
+      modelBindings: {},
+      exportPlan: {
+        fileCount: 1,
+        totalPixels: 1_166_400,
+        estimatedZipBytes: expect.any(Number),
+      },
+    });
+    expect(mocks.estimateMultiPlatformExportPlan).toHaveBeenCalledWith(expect.objectContaining({
+      actorUserId: 'user-1',
+      projectId: 'project-1',
+      skillId: localSkill.id,
+      skillVersion: 1,
+    }));
+  });
+
+  it('returns a controlled non-retryable response for an invalid export source', async () => {
+    mocks.estimateMultiPlatformExportPlan.mockRejectedValue(
+      Object.assign(new Error('EXPORT_SOURCE_FORMAT_INVALID'), { code: 'EXPORT_SOURCE_FORMAT_INVALID' }),
+    );
+
+    const response = await POST(canvasExportRequest());
+    const payload = await response.json();
+
+    expect(response.status).toBe(422);
+    expect(payload).toMatchObject({
+      success: false,
+      code: 'EXPORT_SOURCE_FORMAT_INVALID',
+      retryable: false,
+    });
+  });
+
+  it('marks temporary preset storage failures as retryable', async () => {
+    mocks.estimateMultiPlatformExportPlan.mockRejectedValue(Object.assign(
+      new Error('PLATFORM_EXPORT_PRESET_STORAGE_UNAVAILABLE'),
+      { code: 'PLATFORM_EXPORT_PRESET_STORAGE_UNAVAILABLE' },
+    ));
+
+    const response = await POST(canvasExportRequest());
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toMatchObject({
+      success: false,
+      code: 'PLATFORM_EXPORT_PRESET_STORAGE_UNAVAILABLE',
+      retryable: true,
+    });
   });
 
   it('keeps workflow context authorization for model-backed Skills', async () => {

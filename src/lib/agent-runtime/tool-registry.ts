@@ -86,6 +86,13 @@ export const AGENT_TOOL_REGISTRY: readonly AgentToolDefinition[] = [
     modelCapabilities: ['chat'],
     downstreamModelCapabilities: ['vision'],
   },
+  {
+    toolId: 'multi_platform_export',
+    skillOnly: true,
+    workspaces: ['canvas', 'workflow', 'chat'],
+    productTypes: ['canvas', 'chat', 'simple-chat'],
+    modelCapabilities: [],
+  },
 ] as const;
 
 export function authorizeAgentTools({

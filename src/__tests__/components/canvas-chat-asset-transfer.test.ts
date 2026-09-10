@@ -159,4 +159,13 @@ describe('canvas to embedded chat asset transfer', () => {
       handler.indexOf('await UserManagerCore.getInstance().flushProjectsToServer()'),
     );
   });
+
+  it('projects multi-platform export results through one atomic canvas batch insertion', () => {
+    expect(chatSource).toContain('onAddGeneratedImages?:');
+    expect(chatSource).toContain('await onAddGeneratedImages(references, {');
+    expect(workspaceSource).toContain('const handleAddEmbeddedChatImages = useCallback');
+    expect(workspaceSource).toContain('await transferCanvasSkillAssets({');
+    expect(workspaceSource).toContain('await handleAddImages(insertionItems');
+    expect(workspaceSource).toContain('onAddGeneratedImages={handleAddEmbeddedChatImages}');
+  });
 });

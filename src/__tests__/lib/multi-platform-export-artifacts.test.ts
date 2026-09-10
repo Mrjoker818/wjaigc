@@ -302,7 +302,10 @@ describe('multi-platform export artifacts', () => {
     const second = await persistExportImageVersion(input);
 
     expect(first.version.parentVersionIds).toEqual(['source-version-1']);
-    expect(first.version.metadata).toMatchObject({ schemaId: 'multi-platform-export-v1', runId: 'run-1', presetVersion: 1 });
+    expect(first.version.metadata).toMatchObject({
+      schemaId: 'multi-platform-export-v1', runId: 'run-1', presetVersion: 1,
+      exportRequestDigest: 'd'.repeat(64),
+    });
     expect(second.version.id).toBe(first.version.id);
     expect(second.reused).toBe(true);
     expect(service.createAssetVersion.mock.calls[0][0]).not.toHaveProperty('assetId');

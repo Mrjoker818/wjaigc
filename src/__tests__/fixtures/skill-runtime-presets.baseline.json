@@ -1172,5 +1172,16 @@
       "maximumItems": 20,
       "concurrency": 3
     }
+  },
+  "multiPlatformExport": {
+    "id": "preset-multi-platform-export",
+    "version": 1,
+    "runtime": "local",
+    "toolId": "multi_platform_export",
+    "modelRole": null,
+    "allowedSurfaces": ["canvas", "workflow", "simple-chat"],
+    "catalogSurfaces": ["canvas", "workflow"],
+    "featureFlag": "MULTI_PLATFORM_EXPORT_ENABLED",
+    "resultSchemaId": "multi-platform-export-result-v1"
   }
 }

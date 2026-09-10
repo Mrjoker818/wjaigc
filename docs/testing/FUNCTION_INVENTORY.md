@@ -921,3 +921,16 @@
 - 作用域清单由 `scripts/stage-4-inventory.mjs` 从实际 `allowedSurfaces` 绑定推导，注释或未接线变量不能形成虚假覆盖。
 - 当前本地候选：`main@366b90b2d66a2b1a524e11ad879a76ed82cf350c`；云端业务能力仍待 Task 12 真实验收。
 - 2026-09-03 Coze/Chrome 非付费目录验收：Canvas AI 对话展示 21 项；Workflow `Skill 执行`节点展示同一 21 项；独立 `/simple-chat` 展示自身 16 项且无 Canvas 目录项。该证据只证明入口和目录隔离，不证明真实任务、扣退、暂停恢复或资产版本链路。
+
+## 2026-09-10 多平台批量尺寸与命名导出
+
+| 工作区 | 入口与交互 | 共用运行结果 | 当前验证 |
+|---|---|---|---|
+| 无限画布 | Canvas AI 对话中的“多平台批量导出”；选择 1～20 个受管图片版本，在底部抽屉选择平台预设、`cover/contain`、背景与命名模板 | 同一 Skill Run、派生图片 AssetVersion、manifest、ZIP | 单元、组件、API 与开发模式浏览器证据已建立；干净四项目矩阵和云端待验 |
+| 节点模式 | `ai-skill` 节点选择同一 Skill；纯本地步骤不显示或提交模型绑定 | 投影 `imageAssetVersionIds`、`manifestAssetVersionId`、`zipAssetVersionId`、`outcome` | 组件与数据库投影合同通过；真实 UI 消费待云端验收 |
+| 独立智能对话 | 通过明确的批量/平台/尺寸/导出意图调用，不把 Canvas Skills 目录复制到独立页面 | 复用同一 Run 与 AssetVersion，支持返回画布 | 组件、API 与作用域隔离通过；真实 UI 消费待云端验收 |
+
+- 执行仅使用 Sharp、manifest 和 ZIP 打包，不调用 AI/GPU，预估、扣除和退款均为 0。
+- 支持平台预设版本冻结、中文及同名文件确定性命名、透明输出、部分成功、仅重试失败项、取消终态、刷新恢复、ZIP 重新下载和批量放入画布。
+- 资源上限：来源最多 20、平台目标最多 20、输出最多 100；每个输出及整批像素预算均在规划阶段校验。
+- 功能标志 `MULTI_PLATFORM_EXPORT_ENABLED` 默认关闭；云端 exact commit 验收前不得全量开放。

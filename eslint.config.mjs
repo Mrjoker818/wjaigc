@@ -54,6 +54,7 @@ const eslintConfig = defineConfig([
     'playwright-report/**',
     'test-results/**',
     'output/**',
+    '.tmp/**',
     // Script files (CommonJS):
     'scripts/**/*.js',
     // User assets (upgrade packages etc):

@@ -1,9 +1,21 @@
 import path from 'path';
 import type { NextConfig } from 'next';
 
+const LOCAL_BUILD_ARTIFACT_EXCLUDES = [
+  '.tmp/**/*',
+  '.playwright-cli/**/*',
+  'output/**/*',
+  'test-results/**/*',
+  'playwright-report/**/*',
+];
+
 const nextConfig: NextConfig = {
   turbopack: {},
   outputFileTracingRoot: path.resolve(__dirname),
+  outputFileTracingExcludes: {
+    '*': LOCAL_BUILD_ARTIFACT_EXCLUDES,
+    instrumentation: LOCAL_BUILD_ARTIFACT_EXCLUDES,
+  },
   serverExternalPackages: [
     'wasm_vtracer',
     '@aws-sdk/client-s3',

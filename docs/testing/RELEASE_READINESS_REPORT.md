@@ -1,5 +1,9 @@
 # 无界AI — 发布就绪报告 (RELEASE READINESS REPORT)
 
+## 2026-09-10 多平台批量导出 Task10 本地候选
+
+结论：**有条件通过，仅允许推送 `main` 并进入 Coze 隔离验收。** 本地全仓 `6157/6157`、四浏览器 `16/16`、TypeScript、Doctor、全仓构建版 ESLint、生产构建 `120/120` 与服务端 WASM 实际调用均通过。构建追踪已排除本地测试和证据目录，222 个 NFT 清单残留泄漏为 0。当前尚无 Coze exact commit、真实 ZIP/manifest/AssetVersion、取消恢复、零积分及刷新恢复证据，不能判定全平台发布通过；`stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 保持只读。
+
 ## 2026-09-06 Task12 恢复租约候选
 
 结论：不通过（全平台正式发布）。本次8行生产代码修复及真实数据库回归已完成本地门禁：全仓与补跑合计5333项通过，无失败；类型、构建版Lint、119/119生产构建通过。可提交main用于独立测试沙箱，不触碰stable。原云端run `f856bc01-6521-4204-9ed2-558316604418` 的成功恢复、AssetVersion、下载、刷新和账务终态仍无新验收证据。Edge标签接管返回Debugger unattached，控制会话重置后Edge未被枚举；不能将用户反馈Coze执行完毕等同业务通过。
@@ -2250,3 +2254,13 @@ The focused gate test passes `7/7`; the actual protected-baseline command passes
 - Edge 云端证明独立智能对话仍为 `16` 个独立 Skills，且不包含“平台素材合规检查”，工作区作用域隔离符合设计。
 - Canvas 三图 Amazon 主图检查已完成运行前配置并取得 `32` 积分估价，但尚无真实 Run、逐图报告、AssetVersion、实扣/退款、Workflow 和下载恢复证据。
 - **当前发布结论：有条件通过，仅允许继续 Task 11 云端验收。** Task 11 未关闭，全平台不能判定通过。
+
+## 2026-09-10 多平台批量导出发布判断
+
+- 最终原子传输增量后的聚焦回归 `103/103` 通过；TypeScript 与 quiet ESLint 退出 0。
+- 最终增量前一轮全仓 Vitest 为 `6134 passed / 13 conditional skipped / 0 failed`，不能当作最终增量后的新鲜全仓全绿。
+- 最近完整四项目 Playwright 为 `15/16`；Firefox 失败项隔离重跑通过，但尚未取得同一轮干净矩阵。
+- `pnpm run test:e2e` 单入口因 Stage 3/Stage 4 的互斥隔离前置不能整体执行，必须由分阶段编排器解决；不能标记为全量 E2E 通过。
+- 生产冷构建在 32 GiB Node 堆下运行 45 分钟仍无阶段进展；纯缓存重试 10 分钟仍停留于 webpack 优化阶段。没有退出码 0，登记为 `MPE-BUILD-001`。
+- 功能标志继续默认关闭。推送 `main` 后，Coze 必须拉取 exact commit、重启沙箱并强制刷新预览页，再验证真实 ZIP、manifest、AssetVersion 父子关系、取消/恢复、零积分流水与刷新恢复。
+- **当前结论：不具备发布条件；仅可作为 `main` 候选继续验证。不得更新 `stable`，不得宣称 Task10 或全平台发布通过。**

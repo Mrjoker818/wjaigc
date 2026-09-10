@@ -67,6 +67,10 @@ function artifactDigest(requestDigest: string, kind: string, checksum: string): 
   return createHash('sha256').update(`${requestDigest}\u0000${kind}\u0000${checksum}`).digest('hex');
 }
 
+function exportRequestDigest(metadata: Record<string, unknown>): unknown {
+  return metadata.exportRequestDigest ?? metadata.requestDigest;
+}
+
 export interface PersistExportImageVersionInput {
   actorUserId: string; projectId: string; runId: string; sourceAssetVersionId: string;
   presetId: string; presetVersion: number; platform: string; usage: string;
@@ -93,7 +97,7 @@ export async function persistExportImageVersion(input: PersistExportImageVersion
     presetVersion: input.presetVersion, platform: input.platform, usage: input.usage,
     width: input.width, height: input.height, fit: input.fit,
     outputFormat: input.outputFormat, outputFilename: assertFlatExportFilename(input.outputFilename),
-    requestDigest: input.requestDigest,
+    exportRequestDigest: input.requestDigest,
   };
   const idempotencyKey = `skill:${input.runId}:export:${input.sourceAssetVersionId}:${input.presetId}:v${input.presetVersion}`;
   const versionRequestDigest = artifactDigest(input.requestDigest, 'image', input.transformed.sha256);
@@ -213,15 +217,15 @@ export async function validateMultiPlatformExportRetryLineage(input: {
       || typeof metadata.sourceAssetVersionId !== 'string' || !sources.has(metadata.sourceAssetVersionId)
       || typeof metadata.presetId !== 'string' || !Number.isSafeInteger(metadata.presetVersion)
       || !presets.has(`${metadata.presetId}-v${metadata.presetVersion}`)
-      || typeof metadata.outputFilename !== 'string' || typeof metadata.requestDigest !== 'string'
-      || !/^[a-f0-9]{64}$/u.test(metadata.requestDigest)
+      || typeof metadata.outputFilename !== 'string' || typeof exportRequestDigest(metadata) !== 'string'
+      || !/^[a-f0-9]{64}$/u.test(exportRequestDigest(metadata) as string)
       || version.parentVersionIds.length !== 1 || version.parentVersionIds[0] !== metadata.sourceAssetVersionId) {
       throw new Error('EXPORT_RETRY_LINEAGE_INVALID');
     }
     const key = `${metadata.sourceAssetVersionId}\0${metadata.presetId}-v${metadata.presetVersion}\0${metadata.outputFilename}`;
     if (versionKeys.has(key) || failedKeys.has(key)) throw new Error('EXPORT_RETRY_LINEAGE_INVALID');
     versionKeys.add(key);
-    digests.add(metadata.requestDigest);
+    digests.add(exportRequestDigest(metadata) as string);
   }
   if (digests.size > 1) throw new Error('EXPORT_RETRY_LINEAGE_INVALID');
   const archiveOnlyFailure = failedKeys.size === 0
@@ -271,13 +275,13 @@ export async function loadPersistedExportImages(input: {
   return versions.map(version => {
     const metadata = version.metadata;
     if (!metadata || metadata.schemaId !== 'multi-platform-export-v1'
-      || typeof metadata.runId !== 'string' || typeof metadata.requestDigest !== 'string'
-      || !/^[a-f0-9]{64}$/u.test(metadata.requestDigest)
+      || typeof metadata.runId !== 'string' || typeof exportRequestDigest(metadata) !== 'string'
+      || !/^[a-f0-9]{64}$/u.test(exportRequestDigest(metadata) as string)
       || typeof metadata.sourceAssetVersionId !== 'string' || typeof metadata.presetId !== 'string'
       || !Number.isSafeInteger(metadata.presetVersion) || typeof metadata.outputFilename !== 'string') {
       throw new Error('EXPORT_REUSED_VERSION_INVALID');
     }
-    if (!input.retryLineage && (metadata.runId !== input.runId || metadata.requestDigest !== input.requestDigest)) {
+    if (!input.retryLineage && (metadata.runId !== input.runId || exportRequestDigest(metadata) !== input.requestDigest)) {
       throw new Error('EXPORT_REUSED_VERSION_INVALID');
     }
     const key = `${metadata.sourceAssetVersionId}\0${metadata.presetId}\0${metadata.presetVersion}\0${metadata.outputFilename}`;
@@ -334,7 +338,7 @@ export async function persistExportArtifacts(input: PersistExportArtifactsInput)
       !metadata
       || metadata.schemaId !== 'multi-platform-export-v1'
       || (image.reusedFromRunId ? metadata.runId !== image.reusedFromRunId : metadata.runId !== input.runId)
-      || (!image.reusedFromRunId && metadata.requestDigest !== input.requestDigest)
+      || (!image.reusedFromRunId && exportRequestDigest(metadata) !== input.requestDigest)
       || metadata.sourceAssetVersionId !== image.sourceAssetVersionId
       || image.version.parentVersionIds.length !== 1
       || image.version.parentVersionIds[0] !== metadata.sourceAssetVersionId
@@ -400,7 +404,11 @@ export async function persistExportArtifacts(input: PersistExportArtifactsInput)
   }
   const service = input.assetService ?? createAssetService();
   const documentInput = (suffix: 'manifest' | 'zip', file: AssetFile): CreateAssetVersionInput => {
-    const metadata = { schemaId: suffix === 'manifest' ? 'multi-platform-export-manifest-v1' : 'multi-platform-export-archive-v1', runId: input.runId, requestDigest: input.requestDigest };
+    const metadata = {
+      schemaId: suffix === 'manifest' ? 'multi-platform-export-manifest-v1' : 'multi-platform-export-archive-v1',
+      runId: input.runId,
+      exportRequestDigest: input.requestDigest,
+    };
     return {
       actorUserId: input.actorUserId, projectId: input.projectId, kind: 'document', file,
       parentVersionIds: input.images.map(image => image.version.id),

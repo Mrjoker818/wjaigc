@@ -5,6 +5,7 @@ import process from 'node:process';
 import dotenv from 'dotenv';
 import { Client } from 'pg';
 import { HeadBucketCommand, S3Client } from '@aws-sdk/client-s3';
+import sharp from 'sharp';
 import { getDoctorExitCode } from './doctor-status.mjs';
 import { collectAssetGraphDoctorFacts, resolveDoctorDatabaseUrl, summarizeAssetGraphDoctor } from './doctor-asset-status.mjs';
 import { connectionOptions } from './run-migrations.mjs';
@@ -356,6 +357,106 @@ async function checkObjectStorage() {
   }
 }
 
+async function checkMultiPlatformExport() {
+  const flagEnabled = process.env.MULTI_PLATFORM_EXPORT_ENABLED === 'true';
+  add(
+    flagEnabled ? 'PASS' : production ? 'FAIL' : 'WARN',
+    'multi-platform-export-feature-flag',
+    flagEnabled ? 'enabled' : 'MULTI_PLATFORM_EXPORT_ENABLED must be exactly true before release',
+  );
+
+  try {
+    const probe = await sharp({
+      create: {
+        width: 2,
+        height: 2,
+        channels: 4,
+        background: { r: 0, g: 0, b: 0, alpha: 0 },
+      },
+    }).png().toBuffer();
+    const pngSignature = probe.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
+    add(pngSignature ? 'PASS' : 'FAIL', 'multi-platform-export-sharp', pngSignature ? 'RGBA PNG transform succeeded' : 'invalid PNG output');
+  } catch (error) {
+    add('FAIL', 'multi-platform-export-sharp', `transform failed: ${error instanceof Error ? error.message : String(error)}`);
+  }
+
+  const exportDir = path.resolve(process.env.WUJIE_DATA_DIR || './data', 'exports');
+  const probePath = path.join(exportDir, `.doctor-${process.pid}-${Date.now()}`);
+  try {
+    await fs.mkdir(exportDir, { recursive: true });
+    await fs.writeFile(probePath, 'multi-platform-export-doctor', { flag: 'wx' });
+    await fs.rm(probePath, { force: true });
+    add('PASS', 'multi-platform-export-storage', `writable: ${exportDir}`);
+  } catch (error) {
+    await fs.rm(probePath, { force: true }).catch(() => undefined);
+    add('FAIL', 'multi-platform-export-storage', `not writable: ${error instanceof Error ? error.message : String(error)}`);
+  }
+
+  const connectionString = resolveDoctorDatabaseUrl(process.env);
+  if (!connectionString) {
+    add(production ? 'FAIL' : 'BLOCKED', 'multi-platform-export-database', 'PGDATABASE_URL or DATABASE_URL is required');
+    add(production ? 'FAIL' : 'BLOCKED', 'multi-platform-export-presets', 'preset table cannot be verified without PostgreSQL');
+    return;
+  }
+
+  let builtInPresets;
+  try {
+    const presetsSource = await fs.readFile(
+      path.resolve('src/lib/multi-platform-export/presets.ts'),
+      'utf8',
+    );
+    const DEFAULT_PLATFORM_EXPORT_PRESETS = presetsSource.match(
+      /const DEFAULT_PLATFORM_EXPORT_PRESETS:[\s\S]*?Object\.freeze\(\[([\s\S]*?)\]\);/,
+    )?.[1] || '';
+    builtInPresets = [...DEFAULT_PLATFORM_EXPORT_PRESETS.matchAll(
+      /\{\s*id:\s*'([^']+)'[\s\S]*?version:\s*(\d+)[\s\S]*?enabled:\s*(true|false)[\s\S]*?\}/g,
+    )].map(match => ({
+      reference: `${match[1]}-v${match[2]}`,
+      enabled: match[3] === 'true',
+    }));
+    if (builtInPresets.length === 0) throw new Error('built-in preset catalog is empty');
+  } catch (error) {
+    add('FAIL', 'multi-platform-export-presets', `built-in catalog invalid: ${error instanceof Error ? error.message : String(error)}`);
+    return;
+  }
+
+  const client = new Client({
+    ...connectionOptions(normalizePostgresConnectionString(connectionString)),
+    connectionTimeoutMillis: 5_000,
+  });
+  try {
+    await client.connect();
+    const tableResult = await client.query(
+      "SELECT to_regclass('wujie_platform_export_presets') AS table_name",
+    );
+    if (!tableResult.rows[0]?.table_name) {
+      add('FAIL', 'multi-platform-export-database', 'wujie_platform_export_presets is missing');
+      add('FAIL', 'multi-platform-export-presets', 'preset table is missing');
+      return;
+    }
+    add('PASS', 'multi-platform-export-database', 'preset storage table exists');
+    const presetResult = await client.query(
+      `SELECT preset_id, version, enabled
+       FROM wujie_platform_export_presets`,
+    );
+    const effectivePresets = new Map(builtInPresets.map(preset => [preset.reference, preset.enabled]));
+    for (const row of presetResult.rows) {
+      effectivePresets.set(`${row.preset_id}-v${row.version}`, row.enabled === true);
+    }
+    const effectiveEnabled = [...effectivePresets.values()].filter(Boolean).length;
+    add(
+      effectiveEnabled > 0 ? 'PASS' : 'FAIL',
+      'multi-platform-export-presets',
+      `effective=${effectivePresets.size}; enabled=${effectiveEnabled}; stored=${presetResult.rows.length}`,
+    );
+  } catch (error) {
+    add('FAIL', 'multi-platform-export-database', `verification failed: ${error instanceof Error ? error.message : String(error)}`);
+    add('FAIL', 'multi-platform-export-presets', 'query did not complete');
+  } finally {
+    await client.end().catch(() => undefined);
+  }
+}
+
 async function checkRemote() {
   if (!remoteUrl) {
     add('WARN', 'deployment-url', 'not supplied; use pnpm doctor -- --url=https://deployment.example');
@@ -609,6 +710,7 @@ async function main() {
   await checkDatabaseTables();
   await checkPostgresTestDatabase();
   await checkObjectStorage();
+  await checkMultiPlatformExport();
   await checkBuildArtifacts();
   await checkDirectoryStructure();
   await checkDependencies();

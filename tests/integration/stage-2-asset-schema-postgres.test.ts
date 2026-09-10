@@ -154,6 +154,12 @@ describe('Stage 2 asset schema migration', () => {
           asset_id, owner_id, project_id, version_id, parent_version_id, parent_order
         ) VALUES ($1, $2, $3, $4, $5, $6)`,
         [firstAssetId, ownerId, projectId, firstVersionId, secondVersionId, 0],
+      )).resolves.toMatchObject({ rowCount: 1 });
+      await expect(query(
+        `INSERT INTO wujie_asset_version_parents(
+          asset_id, owner_id, project_id, version_id, parent_version_id, parent_order
+        ) VALUES ($1, $2, $3, $4, $5, $6)`,
+        [firstAssetId, ownerId, projectId, firstVersionId, randomUUID(), 1],
       )).rejects.toThrow();
       await expect(query(
         `INSERT INTO wujie_asset_versions(

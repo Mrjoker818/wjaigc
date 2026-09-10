@@ -127,7 +127,7 @@ public/upscaled/
 public/outputs/
 public/data/
 !public/data/omp-resources/
-assets/
+/assets/
 
 # Preview files
 .preview

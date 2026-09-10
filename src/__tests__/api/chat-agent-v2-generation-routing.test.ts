@@ -47,6 +47,7 @@ vi.mock('@/lib/prompt-safety', () => ({
   logSafetyWarning: vi.fn(),
 }));
 vi.mock('@/lib/credits', () => ({
+  calculateConfiguredCreditCost: vi.fn().mockResolvedValue(1),
   consumeCredits: mocks.consumeCredits,
   refundCredits: vi.fn().mockResolvedValue(undefined),
   resolveConfiguredTokenPricing: vi.fn().mockResolvedValue(null),

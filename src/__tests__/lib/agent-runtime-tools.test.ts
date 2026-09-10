@@ -13,6 +13,7 @@ import {
   resolveSelectedAgentMediaUrl,
 } from '@/lib/agent-runtime/context-adapters';
 import {
+  AGENT_TOOL_REGISTRY,
   authorizeAgentTools,
   type AgentToolDefinition,
 } from '@/lib/agent-runtime/tool-registry';
@@ -59,6 +60,26 @@ function request(overrides: Partial<ModelAgentRunRequest> = {}): ModelAgentRunRe
 }
 
 describe('Agent tool authorization', () => {
+  it('registers multi-platform export for admitted Skills in every supported workspace', () => {
+    for (const [workspace, productType] of [
+      ['canvas', 'canvas'],
+      ['workflow', 'canvas'],
+      ['chat', 'simple-chat'],
+    ] as const) {
+      const authorization = authorizeAgentTools({
+        requestedToolIds: ['multi_platform_export'],
+        workspace,
+        userProductTypes: [productType],
+        modelCapabilities: [],
+        skillAdmission: true,
+        registry: AGENT_TOOL_REGISTRY,
+      });
+
+      expect(authorization.denials).toEqual([]);
+      expect(authorization.tools.map(tool => tool.toolId)).toEqual(['multi_platform_export']);
+    }
+  });
+
   it('authorizes the shared img2img tool for chat orchestration and reference-image execution', () => {
     const orchestrator = authorizeAgentTools({
       requestedToolIds: ['img2img'], workspace: 'canvas', userProductTypes: ['canvas'],

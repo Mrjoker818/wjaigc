@@ -15,6 +15,57 @@ function intersection(left: string[], right: string[]): string[] {
 }
 
 describe('scoped Skill runtime inventory', () => {
+  it('keeps the optional multi-platform export contract in the protected baseline', async () => {
+    const baseline = JSON.parse(await readFile(resolve(
+      process.cwd(),
+      'src/__tests__/fixtures/skill-runtime-presets.baseline.json',
+    ), 'utf8')) as {
+      multiPlatformExport?: Record<string, unknown>;
+    };
+
+    expect(baseline.multiPlatformExport).toEqual({
+      id: 'preset-multi-platform-export',
+      version: 1,
+      runtime: 'local',
+      toolId: 'multi_platform_export',
+      modelRole: null,
+      allowedSurfaces: ['canvas', 'workflow', 'simple-chat'],
+      catalogSurfaces: ['canvas', 'workflow'],
+      featureFlag: 'MULTI_PLATFORM_EXPORT_ENABLED',
+      resultSchemaId: 'multi-platform-export-result-v1',
+    });
+  });
+
+  it('requires doctor to inspect the export database, storage, Sharp, presets, and feature flag', async () => {
+    const source = await readFile(resolve(process.cwd(), 'scripts/doctor.mjs'), 'utf8');
+
+    for (const area of [
+      'multi-platform-export-database',
+      'multi-platform-export-storage',
+      'multi-platform-export-sharp',
+      'multi-platform-export-presets',
+      'multi-platform-export-feature-flag',
+    ]) {
+      expect(source).toContain(`'${area}'`);
+    }
+    expect(source).toContain('await checkMultiPlatformExport()');
+  });
+
+  it('counts the built-in export catalog when the database override table is empty', async () => {
+    const source = await readFile(resolve(process.cwd(), 'scripts/doctor.mjs'), 'utf8');
+
+    expect(source).toContain('DEFAULT_PLATFORM_EXPORT_PRESETS');
+    expect(source).toContain('effectiveEnabled');
+  });
+
+  it('scopes Playwright output to immutable multi-platform export evidence paths', async () => {
+    const source = await readFile(resolve(process.cwd(), 'playwright.config.ts'), 'utf8');
+
+    expect(source).toContain('multiPlatformExportRun');
+    expect(source).toContain('test-results/multi-platform-export');
+    expect(source).toContain('MPE_EVIDENCE_COMMIT');
+  });
+
   it('finds the real named array past declarations hidden in lexical trivia', () => {
     const source = [
       "// export const TARGET_SKILLS = [{ id: 'line-comment-decoy' }];",

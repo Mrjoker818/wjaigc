@@ -140,8 +140,7 @@ export function planMultiPlatformExport(
   const outputs = orderedSources.flatMap((source, sourceIndex) => orderedPresets.map(preset => {
     const backgroundNeedsTransparency = input.background === 'transparent'
       || input.background.slice(-2).toLowerCase() !== 'ff';
-    const needsTransparency = backgroundNeedsTransparency || source.hasTransparency;
-    if (needsTransparency && (
+    if (backgroundNeedsTransparency && (
       !preset.supportsTransparency || preset.recommendedFormat === 'jpeg'
     )) {
       fail('EXPORT_TRANSPARENCY_FORMAT_CONFLICT');

@@ -551,6 +551,13 @@ interface ChatPanelProps {
     restoreDeletedPlacement?: boolean;
     signal?: AbortSignal;
   }) => void | Promise<void>;
+  onAddGeneratedImages?: (references: WorkspaceAssetReference[], meta?: {
+    sourceImageId?: string;
+    runId?: string;
+    sourceVersionIds?: readonly string[];
+    restoreDeletedPlacement?: boolean;
+    signal?: AbortSignal;
+  }) => void | Promise<void>;
   canvasImages?: CanvasImage[];
   selectedCanvasImage?: CanvasImage | null;
   onResolveCanvasImageForChat?: (image: CanvasImage) => Promise<CanvasImage>;
@@ -1289,7 +1296,7 @@ function extractPromptForGeneration(content: string): string {
 /* ========== 智能体搭建弹窗 ========== */
 /* AgentBuilderDialog 已提取至 src/components/chat/AgentBuilderDialog.tsx */
 
-export function ChatPanel({ themeStyle, projectId, onAddToPrompt, onAddImages, onAddGeneratedImage, canvasImages = [], selectedCanvasImage, onResolveCanvasImageForChat, onChatModelChange, onSuggestionAction, onGenerateImage, brandDna, onInjectBrandDna, chatInitialImage, onChatInitialImageConsumed, chatTabOpen, onChatTabOpenChange, onNavigateToImage, externalPrompt, onExternalPromptConsumed }: ChatPanelProps) {
+export function ChatPanel({ themeStyle, projectId, onAddToPrompt, onAddImages, onAddGeneratedImage, onAddGeneratedImages, canvasImages = [], selectedCanvasImage, onResolveCanvasImageForChat, onChatModelChange, onSuggestionAction, onGenerateImage, brandDna, onInjectBrandDna, chatInitialImage, onChatInitialImageConsumed, chatTabOpen, onChatTabOpenChange, onNavigateToImage, externalPrompt, onExternalPromptConsumed }: ChatPanelProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [showFullHistory, setShowFullHistory] = useState(false);
   const visibleMessages = useMemo(() => (showFullHistory ? messages : messages.slice(-CHAT_RENDER_WINDOW)).filter(Boolean), [messages, showFullHistory]);
@@ -4138,6 +4145,14 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
     if (!context || !activeRunId || context.runId !== activeRunId || context.skillId !== MULTI_PLATFORM_EXPORT_SKILL_ID) {
       throw new Error('导出运行上下文已变化，请重新选择运行记录');
     }
+    if (onAddGeneratedImages) {
+      await onAddGeneratedImages(references, {
+        runId: context.runId,
+        sourceVersionIds: context.sourceVersionIds,
+        restoreDeletedPlacement: context.restoreDeletedPlacement,
+      });
+      return;
+    }
     await projectExportImagesInBatches(references, async reference => {
       const assetVersionId = reference.assetVersionId;
       if (!assetVersionId || skillCanvasImagesRef.current.some(image => image.assetVersionId === assetVersionId)) return;
@@ -4147,7 +4162,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
         restoreDeletedPlacement: context.restoreDeletedPlacement,
       }));
     });
-  }, [projectId, receiveSkillOutput, skillRun.runId]);
+  }, [onAddGeneratedImages, projectId, receiveSkillOutput, skillRun.runId]);
 
   const handleRetryExport = useCallback(async (): Promise<void> => {
     const context = activeCanvasSkillRunRef.current;

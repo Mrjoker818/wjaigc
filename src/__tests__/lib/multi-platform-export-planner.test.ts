@@ -167,12 +167,13 @@ describe('multi-platform export planner', () => {
     expect(() => planMultiPlatformExport(
       { ...oneSourceInput, background: '#ffffff80' }, [sources[0]], [jpegPreset], planningContext,
     )).toThrow('EXPORT_TRANSPARENCY_FORMAT_CONFLICT');
-    expect(() => planMultiPlatformExport(
+    const opaqueJpegPlan = planMultiPlatformExport(
       { ...oneSourceInput, background: '#ffffffff' },
       [{ ...sources[0], hasTransparency: true }],
       [jpegPreset],
       planningContext,
-    )).toThrow('EXPORT_TRANSPARENCY_FORMAT_CONFLICT');
+    );
+    expect(opaqueJpegPlan.outputs[0]).toMatchObject({ outputFormat: 'jpeg' });
     expect(() => planMultiPlatformExport(
       { ...oneSourceInput, background: '#ffffffff' }, [sources[0]], [jpegPreset], planningContext,
     )).not.toThrow();

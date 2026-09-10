@@ -1,5 +1,13 @@
 # 无界AI — 缺陷登记表 (BUG REGISTER)
 
+## 2026-09-10 生产构建原生内存失控与追踪污染
+
+- ID：MPE-BUILD-001，P1，构建与部署；本地已修复，Coze 构建待验。
+- 复现：`next build --webpack` 在优化阶段长期无进度，Node JS 堆未触顶但进程 RSS 持续增长；构建追踪还会把 `.tmp`、`output`、Playwright 和测试证据纳入 `instrumentation.js.nft.json`。
+- 根因：当前大型路由图在 Webpack/SWC 优化阶段产生异常原生内存压力；Next 16 的 `outputFileTracingExcludes` 不处理 instrumentation 入口。Turbopack 另有 Windows 中文诊断代码框架字符边界 panic。
+- 修复：生产构建使用 Turbopack；中文健康检查模板改为等价 Unicode 源码转义；新增受控 NFT 后处理，仅删除解析后位于项目本地证据根目录的引用；ESLint 忽略 `.tmp/**`。
+- 回归：生产构建 `120/120`，222 个 NFT 清单泄漏 0；服务端 `wasm-vtracer` 实际请求 200；构建契约与像素预算测试 17/17；全仓 `6157/6157`、四浏览器 `16/16`。Coze exact commit 构建仍未验证，故暂不关闭云端边界。
+
 ## 2026-09-06 画布带图片 Skill 使用聊天会话作为资产工作区
 
 - ID：TEST-SKILL-012，P1；云端两次稳定复现，当前本地最小修复，云端待重新部署验证。
@@ -4190,3 +4198,33 @@ Task 4 独立审查的两个 Minor 继续保留给最终审查：单元夹具 op
 - Coze 项目页仍为 HTTP 200，但预览域名连续三次返回 HTTP 404、`error_code=instance_not_found`，错误明确为目标 sandbox 实例不存在；请求 ID 分别为 `0709fd22-186d-962c-9993-e614ac956bd3`、`06294961-784d-97cc-b109-8e7b80f7a79d`、`a5e4b063-b3ba-964e-ab33-066b307e2d0e`。
 - Edge 1.26.901.11451 扩展后台进程存在并能枚举项目页、预览页，但接管现有标签返回 `Debugger unattached`。这属于浏览器调试附着阻塞，不能记为无界前端失败。
 - 恢复顺序固定为：从 Coze 项目页重新初始化沙箱，刷新预览页，首先查询既有 Run `42ac7d13-b473-450d-a3f3-3323942a5b0d` 的终态和积分；在此之前禁止创建第二个付费 Run。
+
+## MPE-TEST-001：全量 Playwright 聚合入口存在互斥隔离账号前置（2026-09-10）
+
+| 字段 | 内容 |
+|---|---|
+| 严重等级 | P2，测试基础设施；不表示多平台导出业务失败 |
+| 环境 | `main@8a58ca2` 加 Task10 候选工作树，本地 PostgreSQL `wujie_stage4_mpe_task10`，Playwright Chromium |
+| 稳定复现 | 执行 `pnpm run test:e2e -- --project=chromium`。加载测试文件阶段同时报 `Stage 3 project isolation requires E2E_STAGE3_PROJECT_IDS and E2E_STAGE3_RUN_ID` 与 `E2E_STAGE4_EXPECTED_AGENT_MODE must be legacy, shadow, or agent-v2`。 |
+| 根因 | 全量入口聚合了需要不同隔离账号、项目矩阵和模式参数的 Stage 3/Stage 4 发布门禁；Stage 4 安全合同会主动拒绝其他阶段账号，因此不能用一组全局环境变量覆盖全部套件。 |
+| 处理决定 | 不放宽账号隔离，不隐藏失败，不用固定等待绕过。各阶段继续按专用脚本独立执行；Task10 以自身四浏览器矩阵、专项单元/组件、真 PostgreSQL 并发和全仓 Vitest 作为本地证据。后续应增加显式的 E2E 编排器，为每阶段启动独立进程与环境。 |
+| 当前状态 | OPEN；不阻断本地多平台导出业务矩阵，但阻止宣称单命令 `pnpm run test:e2e` 全绿。 |
+
+## MPE-BUILD-001：生产构建内存异常增长（2026-09-10）
+
+| 字段 | 内容 |
+|---|---|
+| 严重等级 | P1 候选，发布工程 |
+| 复现 | 8 GiB Node 堆在 webpack 优化阶段 OOM；32 GiB 冷构建持续 45 分钟仍无阶段输出，复用纯缓存重试 10 分钟仍停留于同一阶段。两次长时间任务均受控终止。 |
+| 已排除 | 最终增量后 TypeScript、quiet ESLint 和聚焦回归 `103/103` 通过；旧 `.next` 与本轮未完成产物均已移出仓库，没有复用旧页面产物冒充成功。 |
+| 当前状态 | OPEN；P1 发布工程阻塞。在取得新鲜退出码 0 前不得登记生产构建通过。 |
+
+## MPE-BATCH-001：批量返回画布缺少单事务恢复边界（2026-09-10）
+
+| 字段 | 内容 |
+|---|---|
+| 严重等级 | P1：混合批次中新建投影可能先落库，随后恢复失败，形成部分写入；接口源码还曾被宽泛 `assets/` 忽略规则排除。 |
+| 根因 | 批量传输与显式恢复原本跨两个事务；锁顺序使用请求版本而非真实源资产，反序请求存在锁顺序风险。根目录与源码目录共用的 `assets/` 忽略规则又掩盖了新路由。 |
+| 修复 | 将传输与可选恢复合并进 `AssetService.sendVersionsToWorkspace()` 的同一数据库事务；先解析真实 `sourceAssetId`，按 `sourceAssetId + idempotencyKey` 加锁并按原请求顺序返回；接口增加 256 KiB 请求体及对象复杂度上限；`.gitignore` 改为只忽略根目录 `/assets/`。 |
+| 永久回归 | 混合“新投影 + 不可恢复删除投影”必须整体回滚；反序批次、过时 revision、超大 metadata、单端点原子恢复均有专项覆盖。最终增量后聚焦回归 `103/103`。 |
+| 当前状态 | 本地已修复；生产构建、干净浏览器矩阵和 Coze exact commit 云端验收待闭环。 |

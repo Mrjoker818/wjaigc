@@ -13,6 +13,13 @@ const scopedSkillRuntimeRun = process.env.E2E_SKILL_RUNTIME_RUN === '1'
   || argument.includes('skill-runtime-simple-chat-isolation.spec.ts')
   ));
 if (scopedSkillRuntimeRun) process.env.E2E_SKILL_RUNTIME_RUN = '1';
+const multiPlatformExportRun = process.env.E2E_MULTI_PLATFORM_EXPORT_RUN === '1'
+  || process.argv.some(argument => argument.includes('multi-platform-batch-export.spec.ts'));
+if (multiPlatformExportRun) process.env.E2E_MULTI_PLATFORM_EXPORT_RUN = '1';
+const multiPlatformExportEvidenceScope = (process.env.MPE_EVIDENCE_COMMIT || 'working-tree')
+  .trim()
+  .replace(/[^a-zA-Z0-9._-]+/g, '-')
+  .replace(/^-+|-+$/g, '') || 'working-tree';
 if (stage3Run && !process.env.E2E_STAGE3_EVIDENCE_EXECUTION_ID) {
   process.env.E2E_STAGE3_EVIDENCE_EXECUTION_ID = `${Date.now()}-${process.pid}`;
 }
@@ -27,13 +34,19 @@ const outputDir = stage3Run
   ? `./test-results/stage-3-baseline/${stage3EvidenceScope}/playwright-output`
   : scopedSkillRuntimeRun
     ? './test-results/skill-runtime/playwright-output'
-    : './.playwright-output';
+    : multiPlatformExportRun
+      ? `./test-results/multi-platform-export/${multiPlatformExportEvidenceScope}/playwright-output`
+      : './.playwright-output';
 const htmlOutput = stage3Run
   ? `test-results/stage-3-baseline/${stage3EvidenceScope}/playwright-report`
-  : 'playwright-report';
+  : multiPlatformExportRun
+    ? `test-results/multi-platform-export/${multiPlatformExportEvidenceScope}/playwright-report`
+    : 'playwright-report';
 const junitOutput = stage3Run
   ? `test-results/stage-3-baseline/${stage3EvidenceScope}/junit.xml`
-  : 'test-results/junit.xml';
+  : multiPlatformExportRun
+    ? `test-results/multi-platform-export/${multiPlatformExportEvidenceScope}/junit.xml`
+    : 'test-results/junit.xml';
 
 export default defineConfig({
   testDir: './tests/e2e',
@@ -63,6 +76,6 @@ export default defineConfig({
     { name: 'chromium-1080p', use: { ...devices['Desktop Chrome'], channel: 'chromium', viewport: { width: 1920, height: 1080 }, launchOptions: chromiumLaunchOptions } },
     { name: 'firefox', use: { ...devices['Desktop Firefox'] } },
     { name: 'webkit', use: { ...devices['Desktop Safari'] } },
-    { name: 'mobile-chromium', use: { ...devices['Pixel 7'], channel: 'chromium', launchOptions: chromiumLaunchOptions } },
+    { name: 'mobile-chromium', use: { ...devices['Pixel 7'], viewport: { width: 375, height: 812 }, channel: 'chromium', launchOptions: chromiumLaunchOptions } },
   ],
 });

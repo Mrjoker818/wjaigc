@@ -98,20 +98,44 @@ describe('multi-platform export results', () => {
   });
 
   it('downloads a single image or ZIP through its authorized stable AssetVersion URL', async () => {
-    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({
-      assetId: 'asset-zip-1', assetVersionId: 'version-zip-1', kind: 'document',
-      url: '/api/serve-upload/exports/export.zip', name: 'export.zip',
-    }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    const fetcher = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        assetId: 'asset-zip-1', assetVersionId: 'version-zip-1', kind: 'document',
+        url: '/api/serve-upload/exports/export.zip',
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+      .mockResolvedValueOnce(new Response(new Uint8Array([80, 75, 3, 4]), {
+        status: 200, headers: { 'Content-Type': 'application/zip' },
+      }));
+    const createObjectURL = vi.fn(() => 'blob:export-zip');
+    const revokeObjectURL = vi.fn();
+    Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: createObjectURL });
+    Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: revokeObjectURL });
     const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
+    const remove = vi.spyOn(HTMLAnchorElement.prototype, 'remove');
+    vi.useFakeTimers();
+    try {
+      await downloadExportArtifact('version-zip-1', 'project-1', fetcher);
 
-    await downloadExportArtifact('version-zip-1', 'project-1', fetcher);
-
-    expect(fetcher).toHaveBeenCalledWith(
-      '/api/assets?projectId=project-1&assetVersionId=version-zip-1',
-      expect.objectContaining({ method: 'GET' }),
-    );
-    expect(click).toHaveBeenCalledTimes(1);
-    click.mockRestore();
+      expect(fetcher).toHaveBeenCalledWith(
+        '/api/assets?projectId=project-1&assetVersionId=version-zip-1',
+        expect.objectContaining({ method: 'GET' }),
+      );
+      expect(fetcher).toHaveBeenCalledWith(
+        '/api/serve-upload/exports/export.zip',
+        expect.objectContaining({ method: 'GET', credentials: 'same-origin' }),
+      );
+      expect(createObjectURL).toHaveBeenCalledOnce();
+      expect(click).toHaveBeenCalledTimes(1);
+      expect((click.mock.contexts[0] as HTMLAnchorElement | undefined)?.download).toBe('export.zip');
+      expect(remove).not.toHaveBeenCalled();
+      await vi.runAllTimersAsync();
+      expect(remove).toHaveBeenCalledTimes(1);
+      expect(revokeObjectURL).toHaveBeenCalledWith('blob:export-zip');
+    } finally {
+      vi.useRealTimers();
+      click.mockRestore();
+      remove.mockRestore();
+    }
   });
 
   it('loads authoritative grouping metadata through the manifest AssetVersion', async () => {
@@ -300,7 +324,8 @@ describe('multi-platform export results', () => {
         status: 200, headers: { 'Content-Type': 'image/png', 'Content-Length': '4' },
       }));
     Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: vi.fn(() => 'blob:group') });
-    Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: vi.fn() });
+    const revokeObjectURL = vi.fn();
+    Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: revokeObjectURL });
     const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
     const progress = vi.fn();
 
@@ -316,6 +341,9 @@ describe('multi-platform export results', () => {
     expect(fetcher).toHaveBeenNthCalledWith(2, '/stable/image.png', expect.objectContaining({ method: 'GET' }));
     expect(progress).toHaveBeenLastCalledWith(100);
     expect(click).toHaveBeenCalledOnce();
+    expect(revokeObjectURL).not.toHaveBeenCalled();
+    await new Promise(resolve => window.setTimeout(resolve, 10));
+    expect(revokeObjectURL).toHaveBeenCalledWith('blob:group');
     click.mockRestore();
   });
 

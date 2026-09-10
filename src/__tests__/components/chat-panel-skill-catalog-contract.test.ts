@@ -11,6 +11,7 @@ import {
   loadCompletedCanvasSkillAssets,
   shouldAutoProjectCanvasSkill,
   transferCanvasSkillAsset,
+  transferCanvasSkillAssets,
   startCanvasSkillRun,
 } from '@/lib/skill-runtime/canvas-client';
 import {
@@ -432,6 +433,45 @@ describe('canvas chat Skill catalog contract', () => {
       idempotencyKey: 'canvas-skill:run-1:version-1',
       metadata: { source: 'canvas-skill', runId: 'run-1', sourceVersionIds: ['source-1'] },
     });
+  });
+
+  it('transfers a result batch through one atomic endpoint', async () => {
+    const references = [1, 2].map(index => ({
+      assetId: `asset-${index}`, assetVersionId: `version-${index}`, url: `/output-${index}.png`,
+    }));
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(Response.json({
+      transfers: references.map((reference, index) => ({
+        ...reference, placementId: `placement-${index + 1}`,
+        entityId: `canvas-skill:run-1:${reference.assetVersionId}`, placementStatus: 'active', reused: false,
+      })),
+    }));
+
+    await expect(transferCanvasSkillAssets({
+      references, projectId: 'project-1', runId: 'run-1', sourceVersionIds: ['source-1'], fetcher,
+    })).resolves.toHaveLength(2);
+    expect(fetcher).toHaveBeenCalledOnce();
+    expect(fetcher.mock.calls[0]?.[0]).toBe('/api/assets/batch-transfer');
+    expect(JSON.parse(String(fetcher.mock.calls[0]?.[1]?.body)).transfers).toHaveLength(2);
+  });
+
+  it('restores every deleted batch result through one atomic restore endpoint', async () => {
+    const references = [1, 2].map(index => ({
+      assetId: `asset-${index}`, assetVersionId: `version-${index}`, url: `/output-${index}.png`,
+    }));
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValueOnce(Response.json({
+      transfers: references.map((reference, index) => ({
+        ...reference, placementId: `placement-${index + 1}`, placementStatus: 'active',
+        projectRevision: index + 10,
+      })),
+    }));
+
+    await expect(transferCanvasSkillAssets({
+      references, projectId: 'project-1', runId: 'run-1', sourceVersionIds: [],
+      restoreDeletedPlacement: true, fetcher,
+    })).resolves.toHaveLength(2);
+    expect(fetcher).toHaveBeenCalledOnce();
+    expect(fetcher.mock.calls[0]?.[0]).toBe('/api/assets/batch-transfer');
+    expect(JSON.parse(String(fetcher.mock.calls[0]?.[1]?.body)).restoreDeletedPlacements).toBe(true);
   });
 
   it('sanitizes and freezes transfer response provenance before canvas hydration', async () => {

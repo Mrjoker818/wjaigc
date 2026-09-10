@@ -121,6 +121,15 @@ type AssetService = {
     placement: WorkspacePlacement;
     reused: boolean;
   }>;
+  sendVersionsToWorkspace(
+    inputs: readonly TransferVersionInput[],
+    options?: { restoreDeletedPlacements?: boolean },
+  ): Promise<Array<{
+    version: AssetVersion;
+    placement: WorkspacePlacement;
+    reused: boolean;
+    projectRevision?: number;
+  }>>;
   trashPlacement(input: PlacementCommand): Promise<{
     placementTrashed: boolean;
     assetTrashed: boolean;
@@ -860,6 +869,44 @@ describe('asset graph service', () => {
     })).rejects.toMatchObject({ code: 'ASSET_IDEMPOTENCY_CONFLICT' });
   });
 
+  it('locks the canvas snapshot before assets when an atomic batch may restore a deleted projection', async () => {
+    const ownerId = randomUUID();
+    const projectId = randomUUID();
+    const storage = new MemoryStorage(ownerId, projectId);
+    const { createAssetService } = await loadService();
+    const service = createAssetService(storage);
+    const created = await service.createAssetVersion(createVersionInput(ownerId, projectId));
+    const input: TransferVersionInput = {
+      actorUserId: ownerId,
+      sourceVersionId: created.version.id,
+      targetProjectId: projectId,
+      targetWorkspaceId: `canvas:${projectId}`,
+      entityType: 'canvas-image',
+      entityId: 'canvas-result',
+      idempotencyKey: 'canvas-result-transfer',
+      requestDigest: 'canvas-result-transfer-digest',
+    };
+    const transferred = await service.sendVersionToWorkspace(input);
+    await service.trashPlacement({
+      actorUserId: ownerId,
+      projectId,
+      placementId: transferred.placement.id,
+    });
+    const trashedPlacement = storage.data.placements.get(transferred.placement.id);
+    if (!trashedPlacement) throw new Error('missing trashed placement');
+    storage.data.placements.set(transferred.placement.id, {
+      ...trashedPlacement,
+      deletedAt: new Date().toISOString(),
+    });
+
+    storage.lifecycleCalls.length = 0;
+    await service.sendVersionsToWorkspace([input], { restoreDeletedPlacements: true });
+
+    expect(storage.lifecycleCalls.indexOf('lockCanvasProjectSnapshot')).toBeLessThan(
+      storage.lifecycleCalls.indexOf('lockAsset'),
+    );
+  });
+
   it('returns exact readable file metadata only after the normal ownership checks', async () => {
     const ownerId = randomUUID();
     const projectId = randomUUID();
@@ -1365,60 +1412,66 @@ describe('asset graph service', () => {
   });
 
   it('rejects restore when the selected version is unrecoverable', async () => {
-    const ownerId = randomUUID();
-    const projectId = randomUUID();
-    const storage = new MemoryStorage(ownerId, projectId);
-    const { createAssetService } = await loadService();
-    const service = createAssetService(storage);
-    const historical = await service.createAssetVersion(createVersionInput(ownerId, projectId));
-    const placed = await service.createWorkspacePlacement({
-      actorUserId: ownerId,
-      projectId,
-      assetVersionId: historical.version.id,
-      workspace: 'canvas',
-      workspaceId: 'canvas-a',
-      entityType: 'canvas-image',
-      entityId: 'image-a',
-    });
-    const current = await service.createAssetVersion(createVersionInput(ownerId, projectId, {
-      assetId: historical.asset.id,
-      file: file('https://canonical.test/current-ready.png'),
-      idempotencyKey: 'current-ready-version',
-      requestDigest: 'current-ready-version-digest',
-    }));
-    await service.trashPlacement({
-      actorUserId: ownerId,
-      projectId,
-      placementId: placed.placement.id,
-    });
-    storage.data.versions.set(historical.version.id, {
-      ...historical.version,
-      file: { ...historical.version.file, availability: 'unrecoverable' },
-    });
-    expect(current.asset.currentVersionId).toBe(current.version.id);
-    expect(current.version.id).not.toBe(historical.version.id);
-    expect(current.version.file.availability).toBe('ready');
-    storage.lifecycleCalls.length = 0;
-    storage.findVersionCalls.length = 0;
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-08-12T00:00:00.000Z'));
+    try {
+      const ownerId = randomUUID();
+      const projectId = randomUUID();
+      const storage = new MemoryStorage(ownerId, projectId);
+      const { createAssetService } = await loadService();
+      const service = createAssetService(storage);
+      const historical = await service.createAssetVersion(createVersionInput(ownerId, projectId));
+      const placed = await service.createWorkspacePlacement({
+        actorUserId: ownerId,
+        projectId,
+        assetVersionId: historical.version.id,
+        workspace: 'canvas',
+        workspaceId: 'canvas-a',
+        entityType: 'canvas-image',
+        entityId: 'image-a',
+      });
+      const current = await service.createAssetVersion(createVersionInput(ownerId, projectId, {
+        assetId: historical.asset.id,
+        file: file('https://canonical.test/current-ready.png'),
+        idempotencyKey: 'current-ready-version',
+        requestDigest: 'current-ready-version-digest',
+      }));
+      await service.trashPlacement({
+        actorUserId: ownerId,
+        projectId,
+        placementId: placed.placement.id,
+      });
+      storage.data.versions.set(historical.version.id, {
+        ...historical.version,
+        file: { ...historical.version.file, availability: 'unrecoverable' },
+      });
+      expect(current.asset.currentVersionId).toBe(current.version.id);
+      expect(current.version.id).not.toBe(historical.version.id);
+      expect(current.version.file.availability).toBe('ready');
+      storage.lifecycleCalls.length = 0;
+      storage.findVersionCalls.length = 0;
 
-    await expect(service.restorePlacement({
-      actorUserId: ownerId,
-      projectId,
-      placementId: placed.placement.id,
-    })).rejects.toMatchObject({ code: 'ASSET_MEDIA_UNRECOVERABLE' });
+      await expect(service.restorePlacement({
+        actorUserId: ownerId,
+        projectId,
+        placementId: placed.placement.id,
+      })).rejects.toMatchObject({ code: 'ASSET_MEDIA_UNRECOVERABLE' });
 
-    expect(storage.findVersionCalls).toEqual([
-      [ownerId, projectId, historical.version.id],
-    ]);
-    expect(storage.lifecycleCalls.indexOf('lockPlacement')).toBeLessThan(
-      storage.lifecycleCalls.indexOf('findVersion'),
-    );
-    expect(storage.lifecycleCalls).not.toContain('activateAsset');
-    expect(storage.lifecycleCalls).not.toContain('restorePlacement');
-    expect(storage.lifecycleCalls).not.toContain('restoreCanvasPlacementSnapshot');
-    expect(storage.data.placements.get(placed.placement.id)?.status).toBe('trashed');
-    expect(storage.data.assets.get(historical.asset.id)?.status).toBe('trashed');
-    expect(storage.restoredCanvasSnapshots).toEqual([]);
+      expect(storage.findVersionCalls).toEqual([
+        [ownerId, projectId, historical.version.id],
+      ]);
+      expect(storage.lifecycleCalls.indexOf('lockPlacement')).toBeLessThan(
+        storage.lifecycleCalls.indexOf('findVersion'),
+      );
+      expect(storage.lifecycleCalls).not.toContain('activateAsset');
+      expect(storage.lifecycleCalls).not.toContain('restorePlacement');
+      expect(storage.lifecycleCalls).not.toContain('restoreCanvasPlacementSnapshot');
+      expect(storage.data.placements.get(placed.placement.id)?.status).toBe('trashed');
+      expect(storage.data.assets.get(historical.asset.id)?.status).toBe('trashed');
+      expect(storage.restoredCanvasSnapshots).toEqual([]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('locks the asset before re-reading the placement for trash and restore decisions', async () => {

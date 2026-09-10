@@ -4,6 +4,7 @@ import { DEFAULT_TRASH_RETENTION_DAYS } from './media-health';
 import {
   createPostgresAssetStorage,
   type AssetStorage,
+  type AssetStorageTransaction,
   type StoredTransfer,
 } from './storage';
 import { parseWorkspaceSourceTrace } from './source-trace';
@@ -174,6 +175,133 @@ function createPlacement(
     createdAt: timestamp,
     updatedAt: timestamp,
   } as WorkspacePlacement;
+}
+
+type TransferVersionResult = {
+  version: AssetVersion;
+  placement: WorkspacePlacement;
+  reused: boolean;
+  projectRevision?: number;
+};
+
+export type RestorePlacementResult = {
+  placement: WorkspacePlacement;
+  asset: Asset;
+  projectRevision?: number;
+};
+
+async function restorePlacementInTransaction(
+  transaction: AssetStorageTransaction,
+  input: PlacementCommand,
+): Promise<RestorePlacementResult> {
+  const locatedPlacement = await transaction.findPlacement(input.actorUserId, input.projectId, input.placementId);
+  if (!locatedPlacement) notFound();
+  if (input.assetId && locatedPlacement.assetId !== input.assetId) notFound();
+  if (locatedPlacement.workspace === 'canvas' && locatedPlacement.entityType === 'canvas-image') {
+    await transaction.lockCanvasProjectSnapshot(input.actorUserId);
+  }
+  const lockedAsset = await transaction.lockAsset(input.actorUserId, input.projectId, locatedPlacement.assetId);
+  if (!lockedAsset) notFound();
+  const placement = await transaction.lockPlacement(input.actorUserId, input.projectId, input.placementId);
+  if (!placement || placement.assetId !== locatedPlacement.assetId) notFound();
+  if (input.assetId && placement.assetId !== input.assetId) notFound();
+  if (placement.status !== 'trashed' || !placement.deletedAt) restoreNotAllowed();
+  if (input.expectedPlacementRevision !== undefined
+    && input.expectedPlacementRevision !== placement.lifecycleRevision) placementConflict();
+  const retentionEndsAt = new Date(placement.deletedAt).getTime()
+    + DEFAULT_TRASH_RETENTION_DAYS * 24 * 60 * 60 * 1000;
+  if (!Number.isFinite(retentionEndsAt) || Date.now() >= retentionEndsAt) restoreNotAllowed();
+  const occupied = await transaction.findActivePlacement(
+    input.actorUserId, input.projectId, placement.workspace, placement.workspaceId,
+    placement.entityType, placement.entityId,
+  );
+  if (occupied && occupied.id !== placement.id) placementConflict();
+  const version = await transaction.findVersion(input.actorUserId, input.projectId, placement.assetVersionId);
+  if (!version || version.assetId !== placement.assetId) notFound();
+  if (version.file.availability === 'unrecoverable') mediaUnrecoverable();
+  const asset = lockedAsset.status === 'trashed'
+    ? await transaction.activateAsset(input.actorUserId, input.projectId, placement.assetId)
+    : lockedAsset;
+  if (!asset) notFound();
+  const restored = await transaction.restorePlacement(input.actorUserId, input.projectId, placement.id);
+  if (!restored) placementConflict();
+  const projectRevision = restored.workspace === 'canvas' && restored.entityType === 'canvas-image'
+    ? await transaction.restoreCanvasPlacementSnapshot(input.actorUserId, input.projectId, restored)
+    : undefined;
+  return { placement: restored, asset, ...(projectRevision === undefined ? {} : { projectRevision }) };
+}
+
+async function sendVersionToWorkspaceInTransaction(
+  transaction: AssetStorageTransaction,
+  input: TransferVersionInput,
+): Promise<TransferVersionResult> {
+  if (!await transaction.findProject(input.actorUserId, input.targetProjectId)) notFound();
+  const sourceProjectId = await transaction.resolveVersionProject(input.actorUserId, input.sourceVersionId);
+  if (!sourceProjectId) notFound();
+  const sourceVersion = await transaction.findVersion(input.actorUserId, sourceProjectId, input.sourceVersionId);
+  if (!sourceVersion) notFound();
+  const sourceAsset = await transaction.lockAsset(input.actorUserId, sourceProjectId, sourceVersion.assetId);
+  if (!sourceAsset) notFound();
+
+  await transaction.lockTransferIdempotency(input.actorUserId, input.idempotencyKey);
+  const existingTransfers = await transaction.findTransfersByIdempotency(input.actorUserId, input.idempotencyKey);
+  if (existingTransfers.length > 0) {
+    const existing = existingTransfers[0];
+    if (hasTransferIdempotencyConflict(existingTransfers, input)) conflict();
+    const targetVersion = await transaction.findVersion(
+      input.actorUserId, existing.placement.projectId, existing.placement.assetVersionId,
+    );
+    if (!targetVersion) notFound();
+    return { version: targetVersion, placement: existing.placement, reused: true };
+  }
+
+  let targetVersion = sourceVersion;
+  if (sourceProjectId === input.targetProjectId) {
+    if (sourceAsset.status === 'trashed'
+      && !await transaction.activateAsset(input.actorUserId, sourceProjectId, sourceAsset.id)) notFound();
+  } else {
+    const timestamp = now();
+    const targetAsset: Asset = {
+      id: randomUUID(), ownerId: input.actorUserId, projectId: input.targetProjectId,
+      kind: sourceAsset.kind, status: 'active', currentVersionId: null,
+      createdAt: timestamp, updatedAt: timestamp,
+    };
+    await transaction.insertAsset(targetAsset);
+    targetVersion = {
+      id: randomUUID(), assetId: targetAsset.id, ownerId: input.actorUserId,
+      projectId: input.targetProjectId, file: { ...sourceVersion.file },
+      parentVersionIds: [], createdAt: timestamp,
+    };
+    await transaction.insertVersion(targetVersion, input.requestDigest, {
+      ...input.metadata, sourceProjectId, sourceVersionId: sourceVersion.id,
+      transferIdempotencyKey: input.idempotencyKey,
+    });
+    await transaction.updateAssetCurrentVersion(
+      input.actorUserId, input.targetProjectId, targetAsset.id, targetVersion.id,
+    );
+  }
+
+  const placement = createPlacement(
+    input.actorUserId, input.targetProjectId, targetVersion,
+    workspaceForEntityType(input.entityType), input.targetWorkspaceId,
+    input.entityType, input.entityId, input.transform,
+    { ...input.metadata, idempotencyKey: input.idempotencyKey },
+  );
+  if (await transaction.insertTransferPlacement(
+    placement, sourceVersion.id, input.idempotencyKey, input.requestDigest,
+  )) return { version: targetVersion, placement, reused: false };
+
+  const racedTransfers = await transaction.findTransfersByIdempotency(input.actorUserId, input.idempotencyKey);
+  if (racedTransfers.length > 0) {
+    const raced = racedTransfers[0];
+    if (hasTransferIdempotencyConflict(racedTransfers, input)) conflict();
+    const racedVersion = await transaction.findVersion(
+      input.actorUserId, raced.placement.projectId, raced.placement.assetVersionId,
+    );
+    if (!racedVersion) notFound();
+    return { version: racedVersion, placement: raced.placement, reused: true };
+  }
+  placementConflict();
 }
 
 export class AssetService {
@@ -708,6 +836,75 @@ export class AssetService {
     });
   }
 
+  async sendVersionsToWorkspace(
+    inputs: readonly TransferVersionInput[],
+    options: { restoreDeletedPlacements?: boolean } = {},
+  ): Promise<TransferVersionResult[]> {
+    if (inputs.length < 1 || inputs.length > 100) {
+      throw new AssetServiceError('ASSET_PLACEMENT_CONFLICT');
+    }
+    const actorUserId = inputs[0].actorUserId;
+    if (inputs.some(input => input.actorUserId !== actorUserId)) notFound();
+    return this.storage.transaction(async transaction => {
+      if (options.restoreDeletedPlacements
+        && inputs.some(input => input.entityType === 'canvas-image')) {
+        await transaction.lockCanvasProjectSnapshot(actorUserId);
+      }
+      const indexed = await Promise.all(inputs.map(async (input, index) => {
+        const sourceProjectId = await transaction.resolveVersionProject(input.actorUserId, input.sourceVersionId);
+        if (!sourceProjectId) notFound();
+        const sourceVersion = await transaction.findVersion(input.actorUserId, sourceProjectId, input.sourceVersionId);
+        if (!sourceVersion) notFound();
+        return { input, index, sourceAssetId: sourceVersion.assetId };
+      }));
+      indexed.sort((left, right) => (
+        `${left.sourceAssetId}\0${left.input.idempotencyKey}`
+          .localeCompare(`${right.sourceAssetId}\0${right.input.idempotencyKey}`)
+      ));
+      const results: TransferVersionResult[] = new Array(inputs.length);
+      for (const item of indexed) {
+        const transferred = await sendVersionToWorkspaceInTransaction(transaction, item.input);
+        if (transferred.placement.status === 'trashed' && options.restoreDeletedPlacements) {
+          const restored = await restorePlacementInTransaction(transaction, {
+            actorUserId: item.input.actorUserId,
+            projectId: transferred.placement.projectId,
+            placementId: transferred.placement.id,
+            assetId: transferred.placement.assetId,
+            expectedPlacementRevision: transferred.placement.lifecycleRevision,
+          });
+          results[item.index] = {
+            ...transferred,
+            placement: restored.placement,
+            ...(restored.projectRevision === undefined ? {} : { projectRevision: restored.projectRevision }),
+          };
+        } else {
+          results[item.index] = transferred;
+        }
+      }
+      return results;
+    });
+  }
+
+  async restorePlacements(inputs: readonly PlacementCommand[]): Promise<RestorePlacementResult[]> {
+    if (inputs.length < 1 || inputs.length > 100) placementConflict();
+    const actorUserId = inputs[0].actorUserId;
+    if (inputs.some(input => input.actorUserId !== actorUserId)) notFound();
+    try {
+      return await this.storage.transaction(async transaction => {
+        const indexed = inputs.map((input, index) => ({ input, index }))
+          .sort((left, right) => left.input.placementId.localeCompare(right.input.placementId));
+        const results: RestorePlacementResult[] = new Array(inputs.length);
+        for (const item of indexed) {
+          results[item.index] = await restorePlacementInTransaction(transaction, item.input);
+        }
+        return results;
+      });
+    } catch (error) {
+      if (isDatabaseConflict(error, 'wujie_workspace_placements_active_entity_unique')) placementConflict();
+      throw error;
+    }
+  }
+
   async trashPlacement(input: PlacementCommand): Promise<{
     placementTrashed: boolean;
     assetTrashed: boolean;
@@ -758,68 +955,7 @@ export class AssetService {
     projectRevision?: number;
   }> {
     try {
-      return await this.storage.transaction(async (transaction) => {
-        const locatedPlacement = await transaction.findPlacement(input.actorUserId, input.projectId, input.placementId);
-        if (!locatedPlacement) notFound();
-        if (input.assetId && locatedPlacement.assetId !== input.assetId) notFound();
-        if (locatedPlacement.workspace === 'canvas' && locatedPlacement.entityType === 'canvas-image') {
-          await transaction.lockCanvasProjectSnapshot(input.actorUserId);
-        }
-        const lockedAsset = await transaction.lockAsset(
-          input.actorUserId,
-          input.projectId,
-          locatedPlacement.assetId,
-        );
-        if (!lockedAsset) notFound();
-        const placement = await transaction.lockPlacement(input.actorUserId, input.projectId, input.placementId);
-        if (!placement || placement.assetId !== locatedPlacement.assetId) notFound();
-        if (input.assetId && placement.assetId !== input.assetId) notFound();
-        if (placement.status !== 'trashed' || !placement.deletedAt) restoreNotAllowed();
-        // Compare after taking the row lock: an old history action cannot restore a newer deletion.
-        if (input.expectedPlacementRevision !== undefined
-          && input.expectedPlacementRevision !== placement.lifecycleRevision) placementConflict();
-        const retentionEndsAt = new Date(placement.deletedAt).getTime()
-          + DEFAULT_TRASH_RETENTION_DAYS * 24 * 60 * 60 * 1000;
-        if (!Number.isFinite(retentionEndsAt) || Date.now() >= retentionEndsAt) restoreNotAllowed();
-        const occupied = await transaction.findActivePlacement(
-          input.actorUserId,
-          input.projectId,
-          placement.workspace,
-          placement.workspaceId,
-          placement.entityType,
-          placement.entityId,
-        );
-        if (occupied && occupied.id !== placement.id) placementConflict();
-        const version = await transaction.findVersion(
-          input.actorUserId,
-          input.projectId,
-          placement.assetVersionId,
-        );
-        if (!version || version.assetId !== placement.assetId) notFound();
-        if (version.file.availability === 'unrecoverable') mediaUnrecoverable();
-        const asset = lockedAsset.status === 'trashed'
-          ? await transaction.activateAsset(input.actorUserId, input.projectId, placement.assetId)
-          : lockedAsset;
-        if (!asset) notFound();
-        const restored = await transaction.restorePlacement(
-          input.actorUserId,
-          input.projectId,
-          placement.id,
-        );
-        if (!restored) placementConflict();
-        const projectRevision = restored.workspace === 'canvas' && restored.entityType === 'canvas-image'
-          ? await transaction.restoreCanvasPlacementSnapshot(
-            input.actorUserId,
-            input.projectId,
-            restored,
-          )
-          : undefined;
-        return {
-          placement: restored,
-          asset,
-          ...(projectRevision === undefined ? {} : { projectRevision }),
-        };
-      });
+      return await this.storage.transaction(transaction => restorePlacementInTransaction(transaction, input));
     } catch (error) {
       if (isDatabaseConflict(error, 'wujie_workspace_placements_active_entity_unique')) {
         placementConflict();

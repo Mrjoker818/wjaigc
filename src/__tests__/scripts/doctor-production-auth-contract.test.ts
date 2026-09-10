@@ -56,7 +56,7 @@ describe('production doctor authentication contract', () => {
     const source = readFileSync(resolve(process.cwd(), 'scripts/doctor.mjs'), 'utf8');
     expect(source).toContain("searchParams.set('uselibpqcompat', 'true')");
     expect(source).toContain("import { connectionOptions } from './run-migrations.mjs'");
-    expect(source.match(/\.\.\.connectionOptions\(/g)).toHaveLength(4);
+    expect(source.match(/\.\.\.connectionOptions\(/g)).toHaveLength(5);
   });
 
   it('does not fail the GC output for normal due or physically deferred candidates', () => {

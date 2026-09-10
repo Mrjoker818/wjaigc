@@ -172,6 +172,19 @@ describe('transformPlatformImage', () => {
     })).rejects.toThrow('EXPORT_TRANSPARENCY_FORMAT_CONFLICT');
   });
 
+  it('flattens a transparent PNG onto an explicitly opaque background for JPEG presets', async () => {
+    const result = await transformPlatformImage({
+      source: await source('transparent.png', 'image/png'),
+      target: { width: 8, height: 8, outputFormat: 'jpeg' },
+      fit: 'contain',
+      background: '#ffffffff',
+    });
+    const metadata = await sharp(result.bytes).metadata();
+
+    expect(metadata).toMatchObject({ width: 8, height: 8, format: 'jpeg', hasAlpha: false });
+    expect(result.hasTransparency).toBe(false);
+  });
+
   it('rejects output dimensions above the single-output pixel budget', async () => {
     await expect(transformPlatformImage({
       source: await source('portrait.png', 'image/png'),

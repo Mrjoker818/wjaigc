@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest';
 import { authorizeAgentContext } from '@/lib/agent-runtime/context-adapters';
 import type { AgentRunRequest } from '@/lib/agent-runtime/types';
 import type { SkillRunRequest } from '@/lib/skill-runtime/run-request';
+import { requiredSkillModelRoles, skillStepModelRole } from '@/lib/skill-runtime/types';
 
 // Execute the actual component callback, without mounting the unrelated chat UI.
 const source = readFileSync(resolve(process.cwd(), 'src/components/chat-panel.tsx'), 'utf8');
@@ -48,6 +49,7 @@ function requestFor(sessionId: string): SkillRunRequest {
       sourceImages: ['version-a'],
     },
     createCanvasSkillIdempotencyKey: () => 'canvas-skill:test-request',
+    requiredSkillModelRoles,
     crypto: { randomUUID: () => 'test-request' },
   }) as () => SkillRunRequest;
   return build();
@@ -69,6 +71,7 @@ function visionRequestFor(input: {
     canvasSkillSourceVersionIds: ['version-a'],
     canvasSkillInputValues: { sourceImages: ['version-a'] },
     createCanvasSkillIdempotencyKey: () => 'canvas-skill:vision-request',
+    requiredSkillModelRoles,
     crypto: { randomUUID: () => 'vision-request' },
   }) as () => SkillRunRequest | null;
   return build();
@@ -87,6 +90,7 @@ function unavailableReasonFor(input: {
     availableChatModels: input.models,
     model: input.selectedModel,
     discoveredImageModels: [], imageModel: '', imageModelProviderId: '',
+    skillStepModelRole,
   }) as () => string | undefined;
   return reason();
 }

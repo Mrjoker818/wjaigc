@@ -1,5 +1,6 @@
 import 'server-only';
 
+import { AssetServiceError } from '@/lib/asset-core/service';
 import type { AssetVersion } from '@/lib/asset-core/types';
 import type { ExecuteSkillStepInput } from '@/lib/skill-runtime/executor';
 import type { SkillStepResult } from '@/lib/skill-runtime/types';
@@ -8,7 +9,11 @@ import { MULTI_PLATFORM_EXPORT_RESULT_SCHEMA_ID, type ExportFailure, type MultiP
 import { planMultiPlatformExport } from './planner';
 import { freezePlatformExportPresets } from './presets';
 import { parseMultiPlatformExportInput } from './schema';
-import { readAuthorizedExportSources, type AuthorizedExportImageSource } from './source-reader';
+import {
+  MultiPlatformExportSourceError,
+  readAuthorizedExportSources,
+  type AuthorizedExportImageSource,
+} from './source-reader';
 import { transformPlatformImage } from './transformer';
 import type { ExportPlan, ExportPlanOutput, MultiPlatformExportInput } from './types';
 
@@ -77,8 +82,12 @@ function matchesFailedItem(output: ExportPlanOutput, failure: ExportFailure): bo
 }
 
 function errorCode(error: unknown, fallback: string): string {
-  const code = error && typeof error === 'object' ? (error as { code?: unknown }).code : undefined;
-  return typeof code === 'string' && /^[A-Z][A-Z0-9_]{0,63}$/.test(code) ? code : fallback;
+  if (!error || typeof error !== 'object') return fallback;
+  const record = error as { code?: unknown; message?: unknown };
+  for (const candidate of [record.code, record.message]) {
+    if (typeof candidate === 'string' && /^[A-Z][A-Z0-9_]{0,63}$/.test(candidate)) return candidate;
+  }
+  return fallback;
 }
 
 function failureFor(output: ExportPlanOutput, error: unknown): ExportFailure {
@@ -134,6 +143,44 @@ function persistedImage(
   };
 }
 
+async function readSourcesWithIsolation(input: {
+  dependencies: MultiPlatformExportExecutorDependencies;
+  actorUserId: string;
+  projectId: string;
+  sourceVersionIds: readonly string[];
+  signal: AbortSignal;
+}): Promise<{
+  sources: AuthorizedExportImageSource[];
+  failures: Map<string, MultiPlatformExportSourceError>;
+}> {
+  const read = (sourceVersionIds: readonly string[]) => input.dependencies.readSources({
+    actorUserId: input.actorUserId,
+    projectId: input.projectId,
+    sourceVersionIds,
+    signal: input.signal,
+  });
+  try {
+    return { sources: await read(input.sourceVersionIds), failures: new Map() };
+  } catch (error) {
+    input.signal.throwIfAborted();
+    if (error instanceof AssetServiceError || !(error instanceof MultiPlatformExportSourceError)) throw error;
+  }
+
+  const sources: AuthorizedExportImageSource[] = [];
+  const failures = new Map<string, MultiPlatformExportSourceError>();
+  for (const sourceVersionId of input.sourceVersionIds) {
+    input.signal.throwIfAborted();
+    try {
+      sources.push(...await read([sourceVersionId]));
+    } catch (error) {
+      input.signal.throwIfAborted();
+      if (error instanceof AssetServiceError || !(error instanceof MultiPlatformExportSourceError)) throw error;
+      failures.set(sourceVersionId, error);
+    }
+  }
+  return { sources, failures };
+}
+
 export async function executeMultiPlatformExportStep(
   step: ExecuteSkillStepInput,
   overrides: Partial<MultiPlatformExportExecutorDependencies> = {},
@@ -142,18 +189,20 @@ export async function executeMultiPlatformExportStep(
   step.signal.throwIfAborted();
   const input: MultiPlatformExportInput = dependencies.parseInput(step.inputValues);
   const frozenPresets = await dependencies.freezePresets(input.targetPresetIds);
-  const sources = await dependencies.readSources({
+  const { sources, failures: sourceReadFailures } = await readSourcesWithIsolation({
+    dependencies,
     actorUserId: step.actorUserId,
     projectId: step.projectId,
     sourceVersionIds: input.sourceAssetVersionIds,
     signal: step.signal,
   });
   const sourceById = new Map<string, AuthorizedExportImageSource>(sources.map(source => [source.versionId, source]));
-  const plan = dependencies.plan(input, sources.map(source => ({
-    versionId: source.versionId,
-    assetName: source.assetName,
-    hasTransparency: source.hasTransparency,
-  })), frozenPresets, {
+  const plan = dependencies.plan(input, input.sourceAssetVersionIds.map(versionId => {
+    const source = sourceById.get(versionId);
+    return source
+      ? { versionId, assetName: source.assetName, hasTransparency: source.hasTransparency }
+      : { versionId, assetName: versionId, hasTransparency: false };
+  }), frozenPresets, {
     userId: step.actorUserId,
     projectId: step.projectId,
     projectName: step.projectId,
@@ -185,6 +234,11 @@ export async function executeMultiPlatformExportStep(
   let cursor = 0;
   let completed = 0;
   let succeeded = 0;
+  let progressWrites = Promise.resolve();
+  const reportProgress = (progress: MultiPlatformExportProgress): Promise<void> => {
+    progressWrites = progressWrites.then(async () => dependencies.onProgress?.(progress));
+    return progressWrites;
+  };
 
   const worker = async (): Promise<void> => {
     while (true) {
@@ -198,6 +252,8 @@ export async function executeMultiPlatformExportStep(
         if (reused) {
           images.push(reused);
         } else {
+          const sourceReadFailure = sourceReadFailures.get(output.sourceVersionId);
+          if (sourceReadFailure) throw sourceReadFailure;
           const source = sourceById.get(output.sourceVersionId);
           if (!source) throw Object.assign(new Error('Source unavailable'), { code: 'EXPORT_SOURCE_UNAVAILABLE' });
           const transformed = await dependencies.transform({
@@ -234,7 +290,7 @@ export async function executeMultiPlatformExportStep(
         failures.push(failureFor(output, error));
       }
       completed += 1;
-      await dependencies.onProgress?.({
+      await reportProgress({
         completed,
         total: outputs.length,
         succeeded,

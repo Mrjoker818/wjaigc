@@ -458,6 +458,15 @@ function frozenSteps(events: readonly AgentEvent[]): Array<{ id: string; label: 
   return parsed;
 }
 
+function orderedResultAssetVersionIds(projection: AgentRunProjection): string[] {
+  const value = projection.result?.assetVersionIds;
+  if (projection.status !== 'completed' || !Array.isArray(value)
+    || !value.every(id => typeof id === 'string' && id.length > 0)) {
+    return [...projection.assetVersionIds];
+  }
+  return [...new Set(value)];
+}
+
 function history(task: CloudTask, events: readonly AgentEvent[], projection: AgentRunProjection): SkillRunHistory {
   const invocation = skillInvocation(events);
   if (!invocation) throw new SkillRunNotFoundError();
@@ -518,7 +527,7 @@ function history(task: CloudTask, events: readonly AgentEvent[], projection: Age
             : 'pending',
     })),
     qualityEvents: projection.qualityChecks.map(check => ({ ...check })),
-    assetVersionIds: [...projection.assetVersionIds],
+    assetVersionIds: orderedResultAssetVersionIds(projection),
     outputs: mergeDurableSkillOutputs(steps, [
       ...completedSkillOutputs(events),
       ...parseDurableSkillOutputs(projection.result?.outputs),

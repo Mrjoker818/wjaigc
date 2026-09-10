@@ -8,6 +8,7 @@ import {
 import type { ExecuteSkillStepInput } from '@/lib/skill-runtime/executor';
 import type { AssetVersion } from '@/lib/asset-core/types';
 import type { PersistedExportImage } from '@/lib/multi-platform-export/artifacts';
+import { MultiPlatformExportSourceError } from '@/lib/multi-platform-export/source-reader';
 
 vi.mock('server-only', () => ({}));
 
@@ -146,6 +147,21 @@ describe('multi-platform export execution', () => {
     expect(result.structured?.value).toMatchObject({ outcome: 'completed' });
   });
 
+  it('commits progress callbacks in monotonic order when concurrent workers finish together', async () => {
+    const deps = dependencies(2);
+    const committed: number[] = [];
+    deps.onProgress = vi.fn(async progress => {
+      if (progress.completed === 1) {
+        await new Promise(resolve => setTimeout(resolve, 20));
+      }
+      committed.push(progress.completed);
+    });
+
+    await executeMultiPlatformExportStep(stepInput(), deps);
+
+    expect(committed).toEqual([1, 2]);
+  });
+
   it('does not acquire new items after abort', async () => {
     const controller = new AbortController();
     const deps = dependencies(4);
@@ -183,6 +199,63 @@ describe('multi-platform export execution', () => {
       return true;
     });
     expect(deps.persistImage).toHaveBeenCalledTimes(2);
+  });
+
+  it('isolates a corrupt authorized source and preserves outputs from valid sources', async () => {
+    const deps = dependencies(2);
+    const goodId = 'version-aaaaaaaaaaaaaaaa';
+    const badId = 'version-bbbbbbbbbbbbbbbb';
+    const goodSource = {
+      versionId: goodId, assetName: '有效素材', bytes: Buffer.from('src'),
+      mimeType: 'image/png' as const, width: 10, height: 10,
+      hasTransparency: false, sha256: 'b'.repeat(64),
+    };
+    const sourceError = new MultiPlatformExportSourceError('EXPORT_SOURCE_FORMAT_INVALID');
+    deps.readSources = vi.fn(async input => {
+      if (input.sourceVersionIds.length > 1 || input.sourceVersionIds[0] === badId) {
+        throw sourceError;
+      }
+      return [goodSource];
+    });
+    deps.plan = vi.fn((_input, sources) => ({
+      requestDigest: 'digest',
+      digestPayload: {
+        userId: 'user-1', projectId: 'project-1', projectName: 'project-1',
+        skillId: 'preset-multi-platform-export', skillVersion: 1,
+        sourceAssetVersionIds: [goodId, badId], sources, frozenPresets: [],
+        fit: 'cover' as const, background: '#ffffffff' as const, namingTemplate: '{asset}',
+      },
+      outputCount: 2,
+      totalPixels: 200,
+      outputs: [goodId, badId].map((sourceVersionId, index) => ({
+        sourceVersionId, presetId: 'square', presetVersion: 1,
+        platform: 'test', usage: 'post', width: 10, height: 10,
+        outputFormat: 'png' as const, outputFilename: `source-${index}.png`, pixelCount: 100,
+      })),
+    }));
+    const step = stepInput();
+    step.inputValues = {
+      ...step.inputValues,
+      sourceAssetVersionIds: [goodId, badId],
+    };
+
+    await expect(executeMultiPlatformExportStep(step, deps)).rejects.toSatisfy(error => {
+      expect(error).toBeInstanceOf(SkillPartialSuccessError);
+      expect((error as SkillPartialSuccessError).result).toMatchObject({
+        assetVersionIds: expect.arrayContaining(['image-source-0.png']),
+        structured: { value: {
+          outcome: 'partial_success',
+          imageAssetVersionIds: ['image-source-0.png'],
+          failures: [expect.objectContaining({
+            sourceAssetVersionId: badId,
+            code: 'EXPORT_SOURCE_FORMAT_INVALID',
+          })],
+        } },
+      });
+      return true;
+    });
+    expect(deps.transform).toHaveBeenCalledOnce();
+    expect(deps.persistImage).toHaveBeenCalledOnce();
   });
 
   it('reuses completed images and transforms only missing outputs during recovery', async () => {
@@ -268,6 +341,21 @@ describe('multi-platform export execution', () => {
         failures?: unknown[];
       };
       expect(structured.failures).toHaveLength(2);
+      return true;
+    });
+  });
+
+  it('preserves a controlled archive error carried by the thrown message', async () => {
+    const deps = dependencies(1);
+    vi.mocked(deps.persistArtifacts).mockRejectedValue(new TypeError('ASSET_BINARY_FORMAT_INVALID'));
+
+    await expect(executeMultiPlatformExportStep(stepInput(), deps)).rejects.toSatisfy(error => {
+      const value = (error as SkillPartialSuccessError).result.structured?.value as {
+        failures?: Array<{ code?: string }>;
+      };
+      expect(value.failures).toEqual([
+        expect.objectContaining({ code: 'ASSET_BINARY_FORMAT_INVALID' }),
+      ]);
       return true;
     });
   });

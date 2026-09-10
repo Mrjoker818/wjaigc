@@ -198,4 +198,85 @@ suite('Skill placement recovery against isolated PostgreSQL', () => {
     const placements = await pool.query('SELECT status FROM wujie_workspace_placements WHERE id=$1', [placementId]);
     expect(placements.rows).toEqual([{ status: 'trashed' }]);
   });
+
+  it('rolls back every placement when one item in a batch cannot be authorized', async () => {
+    const batchRunId = randomUUID();
+    const identity = `canvas-skill:${batchRunId}:${versionId}`;
+    await expect(service.sendVersionsToWorkspace([
+      {
+        actorUserId: ownerId, sourceVersionId: versionId, targetProjectId: projectId,
+        targetWorkspaceId: `canvas:${projectId}`, entityType: 'canvas-image', entityId: identity,
+        idempotencyKey: identity, requestDigest: 'batch-valid-digest',
+      },
+      {
+        actorUserId: ownerId, sourceVersionId: randomUUID(), targetProjectId: projectId,
+        targetWorkspaceId: `canvas:${projectId}`, entityType: 'canvas-image',
+        entityId: `canvas-skill:${batchRunId}:missing`, idempotencyKey: `canvas-skill:${batchRunId}:missing`,
+        requestDigest: 'batch-invalid-digest',
+      },
+    ])).rejects.toMatchObject({ code: 'ASSET_NOT_FOUND' });
+
+    const placements = await pool.query(
+      `SELECT id FROM wujie_workspace_placements WHERE owner_id=$1 AND entity_id LIKE $2`,
+      [ownerId, `canvas-skill:${batchRunId}:%`],
+    );
+    expect(placements.rows).toEqual([]);
+  });
+
+  it('rolls back every restore when one placement revision is stale', async () => {
+    const secondIdentity = `canvas-skill:${runId}:second-${versionId}`;
+    const second = await service.sendVersionToWorkspace({
+      actorUserId: ownerId, sourceVersionId: versionId, targetProjectId: projectId,
+      targetWorkspaceId: `canvas:${projectId}`, entityType: 'canvas-image', entityId: secondIdentity,
+      idempotencyKey: secondIdentity, requestDigest: 'batch-restore-second',
+    });
+    await service.trashPlacement({ actorUserId: ownerId, projectId, placementId, assetId });
+    await service.trashPlacement({ actorUserId: ownerId, projectId,
+      placementId: second.placement.id, assetId: second.version.assetId });
+    await pool.query('UPDATE wujie_workspace_placements SET deleted_at=NOW() WHERE id=$1', [placementId]);
+    const rows = await pool.query(
+      'SELECT id, xmin::text AS lifecycle_revision FROM wujie_workspace_placements WHERE id = ANY($1::text[])',
+      [[placementId, second.placement.id]],
+    );
+    const revisionById = new Map(rows.rows.map(row => [row.id, String(row.lifecycle_revision)]));
+
+    await expect(service.restorePlacements([
+      { actorUserId: ownerId, projectId, placementId, assetId,
+        expectedPlacementRevision: revisionById.get(placementId) },
+      { actorUserId: ownerId, projectId, placementId: second.placement.id,
+        assetId: second.version.assetId, expectedPlacementRevision: '999999' },
+    ])).rejects.toMatchObject({ code: 'ASSET_PLACEMENT_CONFLICT' });
+
+    const after = await pool.query(
+      'SELECT status FROM wujie_workspace_placements WHERE id = ANY($1::text[]) ORDER BY id',
+      [[placementId, second.placement.id]],
+    );
+    expect(after.rows).toEqual([{ status: 'trashed' }, { status: 'trashed' }]);
+  });
+
+  it('rolls back a new projection when a deleted projection cannot be restored', async () => {
+    const existing = await pool.query(
+      `SELECT entity_id FROM wujie_workspace_placements
+       WHERE owner_id=$1 AND status='trashed' AND entity_id LIKE $2 ORDER BY created_at DESC LIMIT 1`,
+      [ownerId, `canvas-skill:${runId}:second-%`],
+    );
+    expect(existing.rows).toHaveLength(1);
+    await pool.query("UPDATE wujie_asset_versions SET availability='unrecoverable' WHERE id=$1", [versionId]);
+    const freshIdentity = `canvas-skill:${runId}:fresh-${randomUUID()}`;
+
+    await expect(service.sendVersionsToWorkspace([
+      { actorUserId: ownerId, sourceVersionId: versionId, targetProjectId: projectId,
+        targetWorkspaceId: `canvas:${projectId}`, entityType: 'canvas-image', entityId: freshIdentity,
+        idempotencyKey: freshIdentity, requestDigest: 'mixed-fresh' },
+      { actorUserId: ownerId, sourceVersionId: versionId, targetProjectId: projectId,
+        targetWorkspaceId: `canvas:${projectId}`, entityType: 'canvas-image', entityId: existing.rows[0].entity_id,
+        idempotencyKey: existing.rows[0].entity_id, requestDigest: 'batch-restore-second' },
+    ], { restoreDeletedPlacements: true })).rejects.toMatchObject({ code: 'ASSET_MEDIA_UNRECOVERABLE' });
+
+    const fresh = await pool.query(
+      'SELECT id FROM wujie_workspace_placements WHERE owner_id=$1 AND entity_id=$2',
+      [ownerId, freshIdentity],
+    );
+    expect(fresh.rows).toEqual([]);
+  });
 });
