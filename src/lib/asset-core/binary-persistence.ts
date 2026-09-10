@@ -103,6 +103,36 @@ function exportTarget(filename: string): { directory: string; target: string } {
   return { directory, target };
 }
 
+const UNSUPPORTED_HARD_LINK_CODES = new Set(['EPERM', 'EXDEV', 'ENOTSUP', 'EOPNOTSUPP']);
+
+async function publishStagedFileExclusive(input: {
+  temporary: string;
+  target: string;
+  bytes: Buffer;
+  signal?: AbortSignal;
+}): Promise<boolean> {
+  try {
+    await assetBinaryFileOps.link(input.temporary, input.target);
+    return true;
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === 'EEXIST') return false;
+    if (!code || !UNSUPPORTED_HARD_LINK_CODES.has(code)) throw error;
+  }
+
+  input.signal?.throwIfAborted();
+  try {
+    await assetBinaryFileOps.writeFile(input.target, input.bytes, {
+      flag: 'wx',
+      ...(input.signal ? { signal: input.signal } : {}),
+    });
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'EEXIST') return false;
+    throw error;
+  }
+}
+
 /** Atomically restore one content-addressed export without exposing partial bytes. */
 export async function recoverExportAssetBytes(input: {
   bytes: Buffer;
@@ -122,10 +152,12 @@ export async function recoverExportAssetBytes(input: {
       fail('ASSET_RECOVERY_CHECKSUM_MISMATCH');
     }
     await validateAssetBinaryFormat(staged, input.mimeType);
-    try {
-      await assetBinaryFileOps.link(temporary, target);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+    const published = await publishStagedFileExclusive({
+      temporary,
+      target,
+      bytes: staged,
+    });
+    if (!published) {
       const existing = await assetBinaryFileOps.readFile(target);
       if (createHash('sha256').update(existing).digest('hex').slice(0, 16) !== match[1]) {
         fail('ASSET_RECOVERY_CHECKSUM_MISMATCH');
@@ -178,8 +210,11 @@ export async function persistAssetBytes(input: PersistAssetBytesInput): Promise<
     }
     target = path.resolve(directory, publicFilename);
     if (!target.startsWith(`${directory}${path.sep}`)) fail('ASSET_FILENAME_INVALID');
-    await assetBinaryFileOps.link(temporary, target).then(() => { publishedByThisCall = true; }).catch(error => {
-      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+    publishedByThisCall = await publishStagedFileExclusive({
+      temporary,
+      target,
+      bytes: input.bytes,
+      signal: input.signal,
     });
     await assetBinaryFileOps.rm(temporary, { force: true });
     const cleanupTarget = target;

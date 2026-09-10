@@ -76,6 +76,40 @@ describe('generic asset binary persistence', () => {
     );
   });
 
+  it('falls back to exclusive publication when the filesystem rejects hard links', async () => {
+    const bytes = Buffer.from('{}');
+    const linkSpy = vi.spyOn(assetBinaryFileOps, 'link').mockRejectedValue(
+      Object.assign(new Error('operation not permitted'), { code: 'EPERM' }),
+    );
+    try {
+      const file = await persistAssetBytes({
+        bytes,
+        filename: 'manifest.json',
+        mimeType: 'application/json',
+      });
+
+      const storedFilename = file.url.split('/').at(-1)!;
+      expect(await readFile(join(root, 'exports', storedFilename))).toEqual(bytes);
+      expect(file.createdThisCall).toBe(true);
+    } finally {
+      linkSpy.mockRestore();
+    }
+  });
+
+  it('uses the same exclusive fallback while recovering a content-addressed export', async () => {
+    const bytes = Buffer.from('{"schemaVersion":1}');
+    const filename = `${createHash('sha256').update(bytes).digest('hex').slice(0, 16)}-manifest.json`;
+    const linkSpy = vi.spyOn(assetBinaryFileOps, 'link').mockRejectedValue(
+      Object.assign(new Error('operation not permitted'), { code: 'EPERM' }),
+    );
+    try {
+      await recoverExportAssetBytes({ bytes, filename, mimeType: 'application/json' });
+      expect(await readFile(join(root, 'exports', filename))).toEqual(bytes);
+    } finally {
+      linkSpy.mockRestore();
+    }
+  });
+
   it.each([
     [Buffer.from('not a png'), 'a.png', 'image/png'],
     [Buffer.from([0xff, 0xd8, 0xff]), 'a.jpeg', 'image/jpeg'],
