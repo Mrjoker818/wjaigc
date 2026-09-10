@@ -5,6 +5,7 @@ import sharp, { type Sharp } from 'sharp';
 
 import { downloadPublicImage } from '@/lib/safe-image-download';
 import { getServerDataRoot } from '@/lib/server-data-root';
+import { readManagedImageFromS3Bounded } from '@/lib/s3-storage';
 
 const DEFAULT_MAX_BYTES = 25 * 1024 * 1024;
 const DEFAULT_MAX_PIXELS = 40_000_000;
@@ -386,6 +387,26 @@ async function loadManagedMedia(
       if (!mimeType) throw new SafeImageInputError('Managed file is not a supported image');
       return { buffer, mimeType };
     } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') throw error;
+      if (error instanceof SafeImageInputError) throw error;
+    }
+  }
+  if (managed.namespace === 'uploads') {
+    try {
+      const buffer = await readManagedImageFromS3Bounded(
+        managed.relativePath,
+        maxBytes,
+        30_000,
+        { signal, strict: true },
+      );
+      signal?.throwIfAborted();
+      if (buffer) {
+        const mimeType = detectImageMimeType(buffer);
+        if (!mimeType) throw new SafeImageInputError('Managed file is not a supported image');
+        return { buffer, mimeType };
+      }
+    } catch (error) {
+      signal?.throwIfAborted();
       if (error instanceof Error && error.name === 'AbortError') throw error;
       if (error instanceof SafeImageInputError) throw error;
     }

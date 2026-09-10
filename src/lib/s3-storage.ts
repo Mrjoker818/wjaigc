@@ -445,6 +445,35 @@ export async function readImageFromS3Bounded(
   }
 }
 
+/** Read a managed upload from its exact S3 namespace with the same byte and abort limits as local input. */
+export async function readManagedImageFromS3Bounded(
+  managedPath: string,
+  maxBytes: number,
+  timeoutMs: number,
+  options: S3BoundedReadOptions = {},
+): Promise<Buffer | null> {
+  const normalized = managedPath.replace(/^\/+/, '');
+  if (
+    !normalized
+    || normalized.includes('\\')
+    || normalized.split('/').some(segment => !segment || segment === '.' || segment === '..')
+  ) return null;
+
+  const candidates = [deriveS3Key(normalized)];
+  const basename = normalized.split('/').at(-1) || normalized;
+  const basenameKey = `images/${basename}`;
+  if (basenameKey !== candidates[0]) candidates.push(basenameKey);
+
+  for (const candidate of candidates) {
+    options.signal?.throwIfAborted();
+    const resolved = await resolveS3Key(candidate);
+    if (!resolved) continue;
+    const bytes = await readImageFromS3Bounded(resolved, maxBytes, timeoutMs, options);
+    if (bytes) return bytes;
+  }
+  return null;
+}
+
 /**
  * Check if a file exists in S3
  */

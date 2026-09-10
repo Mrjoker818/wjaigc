@@ -8,6 +8,8 @@ const mocks = vi.hoisted(() => ({
   chunkUploadFile: vi.fn(),
   deleteFile: vi.fn(),
   generatePresignedUrl: vi.fn(),
+  fileExists: vi.fn(),
+  listFiles: vi.fn(),
   readFile: vi.fn(),
   uploadFile: vi.fn(),
 }));
@@ -28,6 +30,8 @@ vi.mock('coze-coding-dev-sdk', () => ({
     chunkUploadFile = mocks.chunkUploadFile;
     deleteFile = mocks.deleteFile;
     generatePresignedUrl = mocks.generatePresignedUrl;
+    fileExists = mocks.fileExists;
+    listFiles = mocks.listFiles;
     readFile = mocks.readFile;
     uploadFile = mocks.uploadFile;
   },
@@ -43,6 +47,8 @@ describe('readImageFromS3Bounded cancellation', () => {
     vi.resetModules();
     vi.restoreAllMocks();
     mocks.generatePresignedUrl.mockReset().mockResolvedValue('https://objects.test/exact.png');
+    mocks.fileExists.mockReset().mockResolvedValue(true);
+    mocks.listFiles.mockReset().mockResolvedValue({ keys: [] });
     mocks.chunkUploadFile.mockReset().mockResolvedValue('exports/0123456789abcdef-result.zip');
     mocks.deleteFile.mockReset().mockResolvedValue(true);
     mocks.readFile.mockReset().mockResolvedValue(Buffer.from('exact'));
@@ -155,6 +161,40 @@ describe('readImageFromS3Bounded cancellation', () => {
       1024,
       1000,
     )).resolves.toBeNull();
+  });
+
+  it('reads a managed upload through its exact images namespace with byte limits', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(
+      new Uint8Array([1, 2, 3]),
+      { status: 200, headers: { 'content-length': '3' } },
+    )));
+    const { readManagedImageFromS3Bounded } = await import('@/lib/s3-storage');
+
+    await expect(readManagedImageFromS3Bounded(
+      'uploads/source.png',
+      1024,
+      1000,
+      { strict: true },
+    )).resolves.toEqual(Buffer.from([1, 2, 3]));
+
+    expect(mocks.fileExists).toHaveBeenCalledWith({ fileKey: 'images/uploads/source.png' });
+    expect(mocks.generatePresignedUrl).toHaveBeenCalledWith(expect.objectContaining({
+      key: 'images/uploads/source.png',
+    }));
+  });
+
+  it('rejects traversal before consulting object storage', async () => {
+    const { readManagedImageFromS3Bounded } = await import('@/lib/s3-storage');
+
+    await expect(readManagedImageFromS3Bounded(
+      'uploads/../private.png',
+      1024,
+      1000,
+      { strict: true },
+    )).resolves.toBeNull();
+
+    expect(mocks.fileExists).not.toHaveBeenCalled();
+    expect(mocks.generatePresignedUrl).not.toHaveBeenCalled();
   });
 
   it('classifies a strict byte overflow without changing legacy null behavior', async () => {
