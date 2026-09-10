@@ -201,6 +201,24 @@ describe('multi-platform export execution', () => {
     expect(deps.persistImage).toHaveBeenCalledTimes(2);
   });
 
+  it('publishes the concrete failed output code in its progress callback', async () => {
+    const deps = dependencies(1);
+    vi.mocked(deps.transform).mockRejectedValueOnce(Object.assign(new Error('persist failed'), {
+      code: 'EXPORT_IMAGE_PERSIST_FAILED',
+    }));
+
+    await expect(executeMultiPlatformExportStep(stepInput(), deps))
+      .rejects.toBeInstanceOf(SkillPartialSuccessError);
+
+    expect(deps.onProgress).toHaveBeenCalledWith(expect.objectContaining({
+      completed: 1,
+      failed: 1,
+      outputFilename: 'output-0.png',
+      failureCode: 'EXPORT_IMAGE_PERSIST_FAILED',
+      retryable: true,
+    }));
+  });
+
   it('isolates a corrupt authorized source and preserves outputs from valid sources', async () => {
     const deps = dependencies(2);
     const goodId = 'version-aaaaaaaaaaaaaaaa';

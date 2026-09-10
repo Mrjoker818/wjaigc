@@ -163,6 +163,24 @@ describe('safe edit image inputs', () => {
     expect(() => resolveManagedMediaPath('/api/serve-upload/users/private.png')).toThrow();
   });
 
+  it('loads a built-in gallery image from the public gallery root', async () => {
+    const decoded = await loadSafeImageInput('/gallery/cat-0/g1.jpg', {
+      maxBytes: 1024 * 1024,
+      maxPixels: 10_000_000,
+    });
+
+    expect(decoded.mimeType).toBe('image/jpeg');
+    expect(decoded.buffer.subarray(0, 3)).toEqual(Buffer.from([0xff, 0xd8, 0xff]));
+  });
+
+  it.each([
+    '/gallery/../package.json',
+    '/gallery/%2e%2e/package.json',
+    '/gallery/cat-0/../../package.json',
+  ])('rejects gallery traversal outside the public gallery root: %s', async (input) => {
+    await expect(loadSafeImageInput(input)).rejects.toBeInstanceOf(SafeImageInputError);
+  });
+
   it('normalizes only same-host managed media URLs to local managed paths', () => {
     expect(normalizeTrustedManagedMediaInput(
       'https://preview.example:8443/api/serve-upload/generated/image.png?download=1',

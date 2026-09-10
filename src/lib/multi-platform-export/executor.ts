@@ -23,6 +23,8 @@ export interface MultiPlatformExportProgress {
   succeeded: number;
   failed: number;
   outputFilename: string;
+  failureCode?: string;
+  retryable?: boolean;
 }
 
 export interface MultiPlatformExportExecutorDependencies {
@@ -248,6 +250,7 @@ export async function executeMultiPlatformExportStep(
       if (index >= outputs.length) return;
       const output = outputs[index];
       const reused = byOutput.get(outputKey(output));
+      let outputFailure: ExportFailure | undefined;
       try {
         if (reused) {
           images.push(reused);
@@ -287,7 +290,8 @@ export async function executeMultiPlatformExportStep(
         succeeded += 1;
       } catch (error) {
         if (step.signal.aborted) throw step.signal.reason;
-        failures.push(failureFor(output, error));
+        outputFailure = failureFor(output, error);
+        failures.push(outputFailure);
       }
       completed += 1;
       await reportProgress({
@@ -296,6 +300,10 @@ export async function executeMultiPlatformExportStep(
         succeeded,
         failed: failures.length,
         outputFilename: output.outputFilename,
+        ...(outputFailure ? {
+          failureCode: outputFailure.code,
+          retryable: outputFailure.retryable,
+        } : {}),
       });
     }
   };

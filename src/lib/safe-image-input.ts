@@ -50,11 +50,11 @@ export interface SafeImageInputOptions {
 }
 
 export interface ManagedMediaPath {
-  namespace: 'uploads';
+  namespace: 'uploads' | 'gallery';
   relativePath: string;
 }
 
-const MANAGED_MEDIA_PREFIXES = ['/uploads/', '/api/serve-upload/'];
+const MANAGED_MEDIA_PREFIXES = ['/uploads/', '/api/serve-upload/', '/gallery/'];
 const PRIVATE_MEDIA_ROOTS = new Set(['system', 'users']);
 
 function detectImageMimeType(buffer: Buffer): string | null {
@@ -226,7 +226,10 @@ export function resolveManagedMediaPath(input: string): ManagedMediaPath {
   ) {
     throw new SafeImageInputError('Managed image path contains traversal');
   }
-  return { namespace: 'uploads', relativePath: segments.join('/') };
+  return {
+    namespace: prefix === '/gallery/' ? 'gallery' : 'uploads',
+    relativePath: segments.join('/'),
+  };
 }
 
 export function normalizeTrustedManagedMediaInput(
@@ -344,9 +347,11 @@ async function loadManagedMedia(
   const serverDataRoot = path.resolve(getServerDataRoot());
   const dataUploadsRoot = path.resolve(serverDataRoot, managed.namespace);
   const publicRoot = path.resolve(process.cwd(), 'public', managed.namespace);
-  const roots = input.startsWith('/api/serve-upload/')
-    ? [dataUploadsRoot, serverDataRoot, publicRoot]
-    : [publicRoot, dataUploadsRoot];
+  const roots = managed.namespace === 'gallery'
+    ? [publicRoot]
+    : input.startsWith('/api/serve-upload/')
+      ? [dataUploadsRoot, serverDataRoot, publicRoot]
+      : [publicRoot, dataUploadsRoot];
 
   for (const root of roots) {
     signal?.throwIfAborted();
@@ -402,7 +407,7 @@ export async function loadSafeImageInput(
       allowRawBase64: options.allowRawBase64,
       maxBytes,
     });
-  } else if (value.startsWith('/uploads/') || value.startsWith('/api/serve-upload/')) {
+  } else if (MANAGED_MEDIA_PREFIXES.some(prefix => value.startsWith(prefix))) {
     image = await loadManagedMedia(value, maxBytes, options.signal);
   } else if (value.startsWith('http://') || value.startsWith('https://')) {
     const downloaded = await downloadPublicImage(value, {

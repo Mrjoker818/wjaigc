@@ -859,6 +859,12 @@ export async function executeSkillRun(input: {
         generation: executionFence.generation,
         stepId: error.stepId,
         error: { code: error.code, message: error.message, retryable: false },
+        ...(partialSuccess ? {
+          result: {
+            assetVersionIds: partialSuccess.result.assetVersionIds,
+            structured: partialSuccess.result.structured,
+          },
+        } : {}),
       },
       executionFence,
     }),
