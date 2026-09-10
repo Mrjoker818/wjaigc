@@ -1,5 +1,19 @@
 # 多平台批量导出实施进度
 
+## 2026-09-11 云端关闭记录
+
+- GitHub 候选为 `main@fb46a39f01c019a4dc332bd7961d53f62bf30fb8`，tree `ac874454893e877026562ce430170fec4ac0726c`；Coze 普通合并提交 `90795b97` 的 tree 与 GitHub 完全一致。`stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 未触碰。
+- Coze 聚焦测试、TypeScript、构建版 ESLint 和生产构建通过；Build ID `b2FXKouZLkO2t54FKGZVd`，5000 端口仅保留一个 Next 服务，功能标志 `MULTI_PLATFORM_EXPORT_ENABLED=true`。
+- 云端 Run `f85c2e7f-a62f-4cee-b30a-192454ad939e` 使用两张真实来源和两个平台预设生成四张 JPEG；文件尺寸、像素、SHA-256、Manifest 声明及 ZIP 条目集合逐项一致。ZIP 为 `281779` 字节，重复下载 SHA-256 均为 `5be27be3050dc7ff3888b5a1181e1dca3751a413e7ae0c6230cbc33b55fa8c23`。
+- 云端 PostgreSQL 证明四个派生图各有且仅有一个正确来源父版本，Manifest 与 ZIP 均以四个派生图为父版本；四个 Canvas placement 全部为 active。
+- 批量放入画布后项目快照为 11 张，其中本 Run 四张均为 ready。DOM 仅挂载 9 张是现有视口虚拟化行为，不是刷新丢失。
+- 取消 Run `53f4054f-42a7-4271-9e2b-06c703a5ab83` 进入持久 cancelled，未建立 AssetVersion；积分 `7872 -> 7872`，`creditCost=0`、`creditStatus=not-applicable`。新 Edge 会话可恢复完成 Run 并重新下载相同 ZIP。
+- 云端首次暴露 Coze 文件系统不允许 hard-link；已用 TDD 增加受限 `wx` 独占写入降级，仅在 `EPERM/EXDEV/ENOTSUP/EOPNOTSUPP` 时启用，保持不覆盖和幂等语义。最终本地全仓为 `5979 passed / 187 conditional skipped / 0 failed`，跳过项仍明确为缺少本轮隔离 PostgreSQL 变量；本候选相关真库与云端数据库证据已单独取得。
+- 机器可读摘要：`docs/testing/evidence/multi-platform-export-cloud-20260911.json`；原始截图、录像、Trace、Console 和 Network 位于 `output/playwright/cloud-mpe-managed-20260911/` 与 `output/playwright/cloud-mpe-managed-20260911-cancel-restore/`。
+- Console 中无无界业务错误或 warning；仍有 Coze 注入的 `page-editor-general-web`、`console-bridge`、`history-bridge` 被当前 CSP 拒绝，成功流程 6 条、取消/恢复流程 3 条。该宿主噪声不改写为应用通过，但继续阻止全平台“Console clean”结论。
+
+**本计划 Task 1～10 结论：CLOUD PASS / CLOSED。** 这只关闭多平台批量导出计划，不代表无界全平台十五阶段任务全部完成。
+
 ## 基本信息
 
 - 计划：`docs/superpowers/plans/2026-09-09-multi-platform-batch-export.md`

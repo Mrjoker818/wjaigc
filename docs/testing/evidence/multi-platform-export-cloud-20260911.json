@@ -1,0 +1,71 @@
+{
+  "schemaVersion": 1,
+  "testedAt": "2026-09-11",
+  "branch": "main",
+  "githubCommit": "fb46a39f01c019a4dc332bd7961d53f62bf30fb8",
+  "githubTree": "ac874454893e877026562ce430170fec4ac0726c",
+  "cozeCommit": "90795b973b29f41358235bf404e977d823399cf2",
+  "cozeTree": "ac874454893e877026562ce430170fec4ac0726c",
+  "stableCommit": "52f7c601ed150769e15d06fb435c6e360e28c9e7",
+  "buildId": "b2FXKouZLkO2t54FKGZVd",
+  "projectId": "project_1786500304299_8vix1z45f",
+  "completedRun": {
+    "runId": "f85c2e7f-a62f-4cee-b30a-192454ad939e",
+    "status": "completed",
+    "creditCost": 0,
+    "sourceAssetVersionIds": [
+      "66621b79-77c2-561f-966f-0c9870ba168a",
+      "d4e3cb84-6fb9-5cd0-9baf-a902a3da8ac3"
+    ],
+    "outputAssetVersionParents": {
+      "2a479794-3745-498a-b0de-fe941a600602": "d4e3cb84-6fb9-5cd0-9baf-a902a3da8ac3",
+      "70f91fff-a642-46e0-b911-3e7af6192f36": "d4e3cb84-6fb9-5cd0-9baf-a902a3da8ac3",
+      "732b2eb3-4d5f-4964-9317-39421954c212": "66621b79-77c2-561f-966f-0c9870ba168a",
+      "f6e74dde-fe9d-4320-9cee-9d214fb60e1c": "66621b79-77c2-561f-966f-0c9870ba168a"
+    },
+    "manifestAssetVersionId": "914f1ae4-ae8c-4668-a5d2-902548c6aea6",
+    "zipAssetVersionId": "368fd12a-4bf3-4500-a290-ab34dbbcd982",
+    "documentParentCount": 4,
+    "manifestFileCount": 4,
+    "zipByteSize": 281779,
+    "zipSha256": "5be27be3050dc7ff3888b5a1181e1dca3751a413e7ae0c6230cbc33b55fa8c23",
+    "repeatedDownloadSha256": "5be27be3050dc7ff3888b5a1181e1dca3751a413e7ae0c6230cbc33b55fa8c23",
+    "activeCanvasPlacements": 4,
+    "persistedCanvasImageCount": 11,
+    "persistedRunImageCount": 4,
+    "renderedViewportImageCount": 9,
+    "renderCountExplanation": "无限画布按视口虚拟化挂载 DOM；项目快照和数据库均保留四个新增结果。"
+  },
+  "cancelledRun": {
+    "runId": "53f4054f-42a7-4271-9e2b-06c703a5ab83",
+    "status": "cancelled",
+    "creditCost": 0,
+    "creditStatus": "not-applicable",
+    "assetVersionCount": 0,
+    "balanceBefore": 7872,
+    "balanceAfter": 7872,
+    "event": "run.cancelled",
+    "eventSequence": 3
+  },
+  "crossSessionRestore": {
+    "runId": "f85c2e7f-a62f-4cee-b30a-192454ad939e",
+    "zipAssetVersionId": "368fd12a-4bf3-4500-a290-ab34dbbcd982",
+    "zipByteSize": 281779,
+    "zipSha256": "5be27be3050dc7ff3888b5a1181e1dca3751a413e7ae0c6230cbc33b55fa8c23"
+  },
+  "console": {
+    "applicationErrors": 0,
+    "applicationWarnings": 0,
+    "cozeInjectedBridgeCspErrorsOnSuccessFlow": 6,
+    "cozeInjectedBridgeCspErrorsOnCancelRestoreFlow": 3,
+    "blockedScripts": [
+      "page-editor-general-web",
+      "console-bridge",
+      "history-bridge"
+    ]
+  },
+  "rawEvidence": [
+    "output/playwright/cloud-mpe-managed-20260911/",
+    "output/playwright/cloud-mpe-managed-20260911-cancel-restore/"
+  ]
+}

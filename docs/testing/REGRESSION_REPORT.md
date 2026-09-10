@@ -1,5 +1,17 @@
 # 无界AI — 回归测试报告 (REGRESSION REPORT)
 
+## 2026-09-11 多平台批量导出云端回归
+
+云端运行源码 tree `ac874454893e877026562ce430170fec4ac0726c` 与 GitHub `main@fb46a39f` 完全一致。Coze 聚焦测试、TypeScript、构建版 ESLint、生产构建和单实例健康检查通过，Build ID 为 `b2FXKouZLkO2t54FKGZVd`。
+
+真实 Edge 流程完成两来源、两预设、四结果导出。四个 JPEG 均重新解码并核对尺寸与 SHA-256；Manifest、ZIP 条目和重复下载哈希完全一致。PostgreSQL 读取证明四个输出版本各绑定唯一正确源版本，Manifest/ZIP 各绑定全部四个输出版本；四个 Canvas placement 为 active，项目刷新快照保留四个 ready 结果。刷新后 DOM 只挂载 9/11 是无限画布视口虚拟化，不是资产或项目数据丢失。
+
+取消流程产生持久 `run.cancelled`，零 AssetVersion、零积分变化；新浏览器会话恢复既有完成 Run 并下载相同 ZIP。原始证据包含截图、录像、Trace、Console、Network、Manifest 和 ZIP；机器摘要为 `docs/testing/evidence/multi-platform-export-cloud-20260911.json`。
+
+Console 中没有无界业务脚本错误或 warning，但记录到 Coze 注入的三个 bridge 脚本被应用 CSP 拒绝：成功流程 6 条、取消/恢复流程 3 条。它们不影响本功能 API、资产和下载结果，但全平台不能据此声明 Console clean。
+
+**结论：多平台批量导出 Task 1～10 通过并关闭。** 全平台其他开放项不随本结论关闭。
+
 ## 2026-09-10 多平台批量导出 Task10 最终本地门禁
 
 本轮以 `main@8a58ca2f` 为工作树基线完成 Task10 本地收尾，实现候选为 `207b0dd86b502e9d3d3895a07a8b2ba19b8589d6`。全仓 Vitest 绑定隔离 PostgreSQL `wujie_stage4_task12final`，`740` 个测试文件、`6157/6157` 通过，0 失败、0 跳过。Playwright 在 Chromium、Firefox、WebKit、375px Mobile Chromium 上 `16/16` 通过，JUnit 为 16 tests / 0 failures / 0 skipped，证据含 17 张截图、48 个视频和 16 个 Trace。

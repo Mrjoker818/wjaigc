@@ -1,5 +1,19 @@
 # 无界AI — 缺陷登记表 (BUG REGISTER)
 
+## MPE-STORAGE-001：Coze 文件系统拒绝 hard-link，导出任务无法发布制品（2026-09-11）
+
+| 字段 | 内容 |
+|---|---|
+| 严重等级 | P1：多平台导出核心链路无法完成 |
+| 发现环境 | Coze 独立测试项目，`main` 同 tree 生产服务 |
+| 稳定复现 | 导出已完成图片转换，但 `persistAssetBytes` 在临时文件发布为最终文件时返回 `EPERM`；Run 失败且没有可下载 ZIP。 |
+| 根因 | 原实现只允许 `fs.link` 原子发布；Coze 挂载允许独占创建文件，但禁止创建 hard-link。 |
+| TDD | 新增 hard-link `EPERM` 成功降级与目标文件已存在不覆盖两项失败测试；修复前 `2 failed / 9 passed`，修复后资产专项 `24/24`、相关安全与导出回归 `80/80`。 |
+| 最小修复 | `src/lib/asset-core/binary-persistence.ts` 先尝试 hard-link；仅对 `EPERM/EXDEV/ENOTSUP/EOPNOTSUPP` 使用 `writeFile(..., {flag:'wx'})`，`EEXIST` 继续复用既有内容，其余错误保持失败关闭。 |
+| 全量回归 | TypeScript、构建版 ESLint、保护基线 `38/38`、生产构建 `120/120`；全仓 `5979 passed / 187 conditional skipped / 0 failed`。 |
+| 云端结果 | Run `f85c2e7f...` 完成，四图、Manifest、ZIP、父子血缘、画布恢复和重复下载通过；取消 Run 零积分、零资产并可跨会话恢复历史。 |
+| 当前状态 | **已修复 / Coze 云端关闭。** |
+
 ## 2026-09-10 生产构建原生内存失控与追踪污染
 
 - ID：MPE-BUILD-001，P1，构建与部署；本地已修复，Coze 构建待验。

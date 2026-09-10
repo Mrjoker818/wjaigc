@@ -1,5 +1,11 @@
 # 无界AI — 未验证项目清单 (UNVERIFIED ITEMS)
 
+## 2026-09-11 多平台批量导出关闭说明
+
+2026-09-10 本文件顶部及后文列出的 exact commit、ZIP/Manifest、AssetVersion 父子关系、取消/恢复、零积分和刷新恢复缺口，已由 `main@fb46a39f` 同 tree 的 Coze 真实验收关闭。机器摘要见 `docs/testing/evidence/multi-platform-export-cloud-20260911.json`。
+
+本功能不再保留云端未验证项。生产环境没有为“部分失败”启用故障注入；该异常语义由本地确定性 E2E、组件、API 和真实 PostgreSQL 测试覆盖，未通过破坏真实供应商或生产数据重复制造故障。全平台其他章节中的未验证项继续有效。
+
 ## 2026-09-10 多平台批量导出云端剩余项
 
 - Coze 尚未拉取本轮 exact `main` 提交，云端源码、构建和运行实例身份未核验。
