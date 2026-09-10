@@ -17,7 +17,7 @@
 - 构建：生产构建改为受控 Turbopack，并在构建后清理 NFT 中的本地证据目录引用；`120/120` 页面生成成功，222 个 NFT 清单残留泄漏为 0。
 - WASM：本地生产服务真实调用 `/api/svg-trace`，返回 200 且引擎为 `wasm-vtracer`，确认 Turbopack 产物包含 `wasm_vtracer_bg.wasm`。
 - 其他门禁：TypeScript、Doctor、全仓构建版 ESLint 均退出 0。
-- 当前结论：`LOCAL PASS / CLOUD UNVERIFIED`。实现候选尚待形成 exact commit 并由 Coze 拉取验收；`stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 未触碰。
+- 当前结论：`LOCAL PASS / CLOUD UNVERIFIED`。实现与门禁记录已形成并推送 exact `main@a640b73234cd30440da66086da1622e309eeabcb`，尚待 Coze 拉取验收；`stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 未触碰。
 
 ## 已完成
 
@@ -33,8 +33,8 @@
 
 ## 尚未完成
 
-- 本地 exact commit 已形成，尚未推送并由 Coze 拉取。
-- Coze 尚未拉取 exact commit，未执行云端 ZIP、manifest、AssetVersion、取消/恢复、零积分与刷新恢复验证。
+- exact commit `main@a640b73234cd30440da66086da1622e309eeabcb` 已推送 GitHub，`origin/main` 与本地 HEAD 一致。
+- Coze 尚未确认拉取并运行该 exact commit，未执行云端 ZIP、manifest、AssetVersion、取消/恢复、零积分与刷新恢复验证。
 
 ## 当前判断
 
