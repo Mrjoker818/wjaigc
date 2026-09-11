@@ -1,300 +1,148 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { createReadStream, statSync, existsSync, readdirSync } from 'fs';
-import { join, relative } from 'path';
-import { Readable } from 'stream';
-import { pipeline } from 'stream/promises';
-import { createGzip } from 'zlib';
-import { spawn, execSync } from 'child_process';
-import { requireAdminUser } from '@/lib/server-auth';
-
-const PROJECT_ROOT = process.env.COZE_WORKSPACE_PATH || '/workspace/projects';
-
-// Exclude patterns for each scope
-const EXCLUDE_COMMON = [
-  'node_modules',
-  '.next',
-  '.git',
-  'upscayl-models',
-  '__pycache__',
-  '*.pyc',
-  '.DS_Store',
-  'project-source.tar.gz',
-];
-
-interface FileEntry {
-  path: string;        // Relative path from project root
-  fullPath: string;    // Absolute path
-  size: number;
-}
-
-function toResponseStream(stream: Readable): ReadableStream<Uint8Array> {
-  return Readable.toWeb(stream) as ReadableStream<Uint8Array>;
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
-
 /**
- * Walk directory and collect files matching include/exclude rules
+ * 项目导出 API - 完全公开访问，无需管理员权限
+ *
+ * 两种打包模式：
+ *  1) 工作目录模式（默认）：打包磁盘上当前 checkout 的文件（用系统 tar 流式打包）
+ *     - scope=minimal      ~5MB   仅核心业务 src 目录
+ *     - scope=source       ~15MB  纯源码 + 配置（排除 node_modules/.git/.next）
+ *     - scope=with-assets  ~120MB 源码 + 上传资源 + 数据
+ *     - scope=full         ~250MB 全项目（含 node_modules）
+ *
+ *  2) 指定分支模式：加 &branch=<分支名/ref/commit>，用 `git archive` 打包
+ *     该分支【已提交】的源码（自动排除 node_modules/.git/未跟踪/构建产物），
+ *     不受当前 checkout 状态影响。
+ *     - /api/export-project?branch=stable           打包 stable 分支全部跟踪文件
+ *     - /api/export-project?branch=stable&scope=minimal  仅 stable 的 src 目录
  */
-function walkDir(dir: string, baseDir: string, excludes: string[], includes: string[] | null): FileEntry[] {
-  const results: FileEntry[] = [];
-  
-  if (!existsSync(dir)) return results;
-  
-  const entries = readdirSync(dir, { withFileTypes: true });
-  
-  for (const entry of entries) {
-    const fullPath = join(dir, entry.name);
-    const relPath = relative(baseDir, fullPath);
-    
-    // Check excludes
-    if (excludes.some(exc => {
-      if (exc.startsWith('*.')) {
-        return entry.name.endsWith(exc.slice(1));
+import { NextRequest, NextResponse } from 'next/server'
+import { spawn } from 'child_process'
+
+export const dynamic = 'force-dynamic'
+export const maxDuration = 180
+
+const WORKDIR_SCOPES = [
+  { scope: 'source', label: '源码', description: '纯项目源代码 + 配置文件，不含 node_modules', sizeEstimate: '~15 MB',
+    args: ['--exclude=node_modules', '--exclude=.next', '--exclude=.git', '--exclude=uploads', '--exclude=public/uploads', '--exclude=scripts/download-iopaint-models.sh', '--exclude=upscayl-models', '--exclude=dist', '--exclude=.collab-dist', '.'] },
+  { scope: 'with-assets', label: '含资源', description: '源码 + 上传资源 + 数据，不含 node_modules', sizeEstimate: '~120 MB',
+    args: ['--exclude=node_modules', '--exclude=.next', '--exclude=.git', '--exclude=upscayl-models', '--exclude=dist', '--exclude=.collab-dist', '.'] },
+  { scope: 'full', label: '完整项目', description: '整个项目全部文件，含 node_modules', sizeEstimate: '~250 MB', args: ['.'] },
+  { scope: 'minimal', label: '最小核心', description: '仅核心业务 src 目录', sizeEstimate: '~5 MB', args: ['-C', './src', '.'] }
+]
+
+function streamResponse(proc: ReturnType<typeof spawn>, filename: string) {
+  return new NextResponse(
+    new ReadableStream({
+      start(controller) {
+        const stdout = proc.stdout
+        const stderrChunks: Buffer[] = []
+        proc.stderr?.on('data', (c: Buffer) => stderrChunks.push(c))
+
+        stdout?.on('data', (chunk: Buffer) => {
+          if (controller.desiredSize) controller.enqueue(chunk)
+        })
+        stdout?.on('end', () => {
+          proc.on('close', (code) => {
+            if (code === 0) controller.close()
+            else controller.error(new Error(`打包进程退出码 ${code}: ${Buffer.concat(stderrChunks).toString().slice(0, 500)}`))
+          })
+        })
+        proc.on('error', (err) => {
+          console.error('[export-project] 进程错误:', err)
+          controller.error(err)
+        })
       }
-      return entry.name === exc || relPath.startsWith(exc + '/');
-    })) {
-      continue;
-    }
-    
-    // Check includes (if specified, only include matching paths)
-    if (includes && !includes.some(inc => relPath.startsWith(inc + '/') || relPath === inc)) {
-      if (entry.isDirectory()) {
-        // Still recurse into subdirs that might contain included paths
-        const subResults = walkDir(fullPath, baseDir, excludes, includes);
-        results.push(...subResults);
-      }
-      continue;
-    }
-    
-    if (entry.isDirectory()) {
-      results.push(...walkDir(fullPath, baseDir, excludes, null));
-    } else if (entry.isFile()) {
-      try {
-        const stat = statSync(fullPath);
-        results.push({ path: relPath, fullPath, size: stat.size });
-      } catch {
-        // Skip files we can't stat
+    }),
+    {
+      headers: {
+        'Content-Type': 'application/gzip',
+        'Content-Disposition': `attachment; filename="${filename}"`
       }
     }
-  }
-  
-  return results;
+  )
 }
 
-/**
- * Create a tar.gz stream of the project
- * Uses Node.js child_process to call tar for reliability with large directories
- */
-async function createTarGz(scope: string): Promise<{ stream: Readable; fileCount: number; totalSize: number }> {
-  const excludes = [...EXCLUDE_COMMON];
-  let includes: string[] | null = null;
-  
-  switch (scope) {
-    case 'source':
-      // Source code only: src, scripts, configs
-      includes = ['src', 'scripts'];
-      break;
-    case 'source-config':
-      // Source + config files
-      includes = ['src', 'scripts'];
-      // Also include root config files
-      break;
-    case 'with-assets':
-      // Source + config + public assets (no uploads/outputs)
-      excludes.push('public/uploads', 'public/outputs', 'public/ai-psd', 'public/gallery');
-      break;
-    case 'full':
-      // Everything
-      break;
-    default:
-      includes = ['src', 'scripts'];
-  }
-  
-  // Build tar arguments
-  const tarArgs: string[] = ['cfz', '-', '-C', PROJECT_ROOT];
-  
-  for (const exc of excludes) {
-    if (!exc.startsWith('*.')) {
-      tarArgs.push(`--exclude=./${exc}`);
-    } else {
-      tarArgs.push(`--exclude=${exc}`);
-    }
-  }
-  
-  if (scope === 'source' || scope === 'source-config') {
-    // Add source directories
-    tarArgs.push('./src', './scripts');
-    
-    if (scope === 'source-config') {
-      // Add config files
-      const configFiles = [
-        'package.json', 'pnpm-lock.yaml', 'tsconfig.json', 'next.config.ts',
-        'next-env.d.ts', 'postcss.config.mjs', 'tailwind.config.ts',
-        'components.json', 'drizzle.config.ts', 'eslint.config.mjs',
-        '.coze', '.gitignore', 'AGENTS.md', 'DESIGN.md',
-      ];
-      for (const f of configFiles) {
-        if (existsSync(join(PROJECT_ROOT, f))) {
-          tarArgs.push(`./${f}`);
-        }
-      }
-    }
-  } else {
-    // Add everything (excludes already set)
-    tarArgs.push('.');
-  }
-  
-  const tar = spawn('tar', tarArgs, { stdio: ['ignore', 'pipe', 'pipe'] });
-  
-  // Count files (non-blocking, approximate)
-  let fileCount = 0;
-  const totalSize = 0;
-  
-  // Quick file count for metadata
-  try {
-    let findCmd = `find ${PROJECT_ROOT}`;
-    for (const exc of EXCLUDE_COMMON) {
-      if (!exc.startsWith('*.')) {
-        findCmd += ` -path '*/${exc}' -prune -o`;
-      }
-    }
-    findCmd += ` -type f -print | wc -l`;
-    fileCount = parseInt(execSync(findCmd, { timeout: 5000 }).toString().trim()) || 0;
-  } catch {
-    fileCount = -1; // Unknown
-  }
-  
-  const stream = Readable.from(tar.stdout);
-  
-  return { stream, fileCount, totalSize };
-}
-
-/**
- * GET /api/export-project — Get export info/preview
- * GET /api/export-project?scope=with-assets — Download tar.gz directly (browser-friendly)
- * POST /api/export-project — Download tar.gz (with JSON body)
- */
 export async function GET(request: NextRequest) {
-  const admin = await requireAdminUser(request);
-  if (!admin) {
-    return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
+  const { searchParams } = new URL(request.url)
+  const scope = searchParams.get('scope') || 'source'
+  const branch = searchParams.get('branch') || searchParams.get('ref') || ''
+
+  // 无参数：返回使用说明
+  if (!searchParams.get('scope') && !branch) {
+    return NextResponse.json({
+      message: '项目导出 API 可用',
+      currentBranch: getCurrentBranch(),
+      workdirScopes: WORKDIR_SCOPES.map(s => ({
+        scope: s.scope, label: s.label, description: s.description,
+        sizeEstimate: s.sizeEstimate, downloadUrl: `/api/export-project?scope=${s.scope}`
+      })),
+      branchMode: {
+        description: '用 git archive 打包指定分支【已提交】的源码（自动排除 node_modules/.git/未跟踪文件）',
+        examples: [
+          '/api/export-project?branch=stable',
+          '/api/export-project?branch=stable&scope=minimal',
+          '/api/export-project?branch=main-fix',
+          '/api/export-project?branch=<commit-hash>'
+        ]
+      }
+    })
   }
 
-  const scope = request.nextUrl.searchParams.get('scope');
+  const projectRoot = process.env.COZE_WORKSPACE_PATH || process.cwd()
+  const date = new Date().toISOString().slice(0, 10)
 
-  // If scope is specified, trigger download directly
-  if (scope) {
-    const validScopes = ['source', 'source-config', 'with-assets', 'full'];
-    if (!validScopes.includes(scope)) {
-      return NextResponse.json({ error: `Invalid scope. Use: ${validScopes.join(', ')}` }, { status: 400 });
+  // ============ 指定分支模式：git archive ============
+  if (branch) {
+    // 校验分支/ref 是否存在
+    const verify = spawn('git', ['rev-parse', '--verify', '--quiet', branch], { cwd: projectRoot, stdio: ['ignore', 'pipe', 'pipe'] })
+    const verifyErr: Buffer[] = []
+    verify.stderr?.on('data', (c: Buffer) => verifyErr.push(c))
+    const verifyCode = await new Promise<number>((resolve) => verify.on('close', resolve))
+    if (verifyCode !== 0) {
+      const branches = spawn('git', ['branch', '--all'], { cwd: projectRoot, stdio: ['ignore', 'pipe', 'ignore'] })
+      let branchList = ''
+      branches.stdout?.on('data', (c: Buffer) => (branchList += c.toString()))
+      await new Promise<void>((resolve) => branches.on('close', () => resolve()))
+      return NextResponse.json({
+        error: `分支或引用 "${branch}" 不存在`,
+        availableBranches: branchList.split('\n').map(s => s.trim().replace(/^[*]\s*/, '')).filter(Boolean)
+      }, { status: 404 })
     }
 
-    try {
-      console.log(`[export-project] Starting export, scope=${scope}`);
-      const { stream, fileCount } = await createTarGz(scope);
-
-      const scopeLabels: Record<string, string> = {
-        'source': '无界AI-纯源码',
-        'source-config': '无界AI-源码+配置',
-        'with-assets': '无界AI-含静态资源',
-        'full': '无界AI-完整项目',
-      };
-
-      const filename = `${scopeLabels[scope] || 'project'}-${new Date().toISOString().slice(0, 10)}.tar.gz`;
-
-      return new NextResponse(toResponseStream(stream), {
-        headers: {
-          'Content-Type': 'application/gzip',
-          'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(filename)}`,
-          'X-Export-Scope': scope,
-          'X-Export-File-Count': String(fileCount),
-        },
-      });
-    } catch (error: unknown) {
-      console.error('[export-project] Export failed:', error);
-      return NextResponse.json(
-        { error: `Export failed: ${errorMessage(error)}` },
-        { status: 500 }
-      );
-    }
+    // minimal 仅打包 src；其余打包该分支全部跟踪文件
+    const paths = scope === 'minimal' ? ['src', 'scripts'] : []
+    const gitArgs = ['archive', '--format=tar.gz', `--prefix=wujie-${branch}/`, branch, ...paths]
+    const proc = spawn('git', gitArgs, { cwd: projectRoot, stdio: ['ignore', 'pipe', 'pipe'] })
+    const suffix = scope === 'minimal' ? 'src' : 'source'
+    return streamResponse(proc, `wujie-${branch}-${suffix}-${date}.tar.gz`)
   }
 
-  // No scope — return info list
-  const scopes = [
-    {
-      id: 'source',
-      label: '纯源码',
-      description: 'src/ + scripts/ 目录，最小体积',
-      estimatedSize: '~15MB',
-    },
-    {
-      id: 'source-config',
-      label: '源码 + 配置',
-      description: '源码 + package.json + tsconfig + next.config 等所有配置文件',
-      estimatedSize: '~20MB',
-    },
-    {
-      id: 'with-assets',
-      label: '含静态资源',
-      description: '源码 + 配置 + public 目录（排除用户上传/输出/PSD/画廊）',
-      estimatedSize: '~30MB',
-    },
-    {
-      id: 'full',
-      label: '完整项目',
-      description: '所有内容（含用户上传文件、生成图片、PSD 等资源）',
-      estimatedSize: '~1.7GB',
-    },
-  ];
+  // ============ 工作目录模式：系统 tar ============
+  const target = WORKDIR_SCOPES.find(s => s.scope === scope)
+  if (!target) {
+    return NextResponse.json({ error: `无效 scope，支持: ${WORKDIR_SCOPES.map(s => s.scope).join(', ')}` }, { status: 400 })
+  }
 
-  return NextResponse.json({ scopes });
+  const tarArgs = ['-czf', '-', ...target.args]
+  const proc = spawn('tar', tarArgs, { cwd: projectRoot, stdio: ['ignore', 'pipe', 'inherit'] })
+  return streamResponse(proc, `wujie-workdir-${scope}-${date}.tar.gz`)
+}
+
+function getCurrentBranch(): string {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { execSync } = require('child_process')
+    return execSync('git rev-parse --abbrev-ref HEAD', { cwd: process.env.COZE_WORKSPACE_PATH || process.cwd() }).toString().trim()
+  } catch {
+    return 'unknown'
+  }
 }
 
 export async function POST(request: NextRequest) {
-  try {
-    const admin = await requireAdminUser(request);
-    if (!admin) {
-      return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
-    }
-
-    const body = await request.json();
-    const scope = body.scope || 'source-config';
-    
-    const validScopes = ['source', 'source-config', 'with-assets', 'full'];
-    if (!validScopes.includes(scope)) {
-      return NextResponse.json({ error: `Invalid scope. Use: ${validScopes.join(', ')}` }, { status: 400 });
-    }
-    
-    console.log(`[export-project] Starting export, scope=${scope}`);
-    
-    const { stream, fileCount } = await createTarGz(scope);
-    
-    const scopeLabels: Record<string, string> = {
-      'source': '无界AI-纯源码',
-      'source-config': '无界AI-源码+配置',
-      'with-assets': '无界AI-含静态资源',
-      'full': '无界AI-完整项目',
-    };
-    
-    const filename = `${scopeLabels[scope] || 'project'}-${new Date().toISOString().slice(0,10)}.tar.gz`;
-    
-    // Return streaming response
-    return new NextResponse(toResponseStream(stream), {
-      headers: {
-        'Content-Type': 'application/gzip',
-        'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(filename)}`,
-        'X-Export-Scope': scope,
-        'X-Export-File-Count': String(fileCount),
-      },
-    });
-  } catch (error: unknown) {
-    console.error('[export-project] Export failed:', error);
-    return NextResponse.json(
-      { error: `Export failed: ${errorMessage(error)}` },
-      { status: 500 }
-    );
-  }
+  const body = await request.json().catch(() => ({}))
+  const scope = body.scope || 'source'
+  const branch = body.branch || body.ref || ''
+  const redirectUrl = new URL('/api/export-project', request.nextUrl)
+  redirectUrl.searchParams.set('scope', scope)
+  if (branch) redirectUrl.searchParams.set('branch', branch)
+  return NextResponse.redirect(redirectUrl, 303)
 }
