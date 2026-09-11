@@ -814,8 +814,17 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
   }, []);
 
   const handleConfirmRename = useCallback(() => {
-    if (renamingProjectId && renameValue.trim()) {
-      mgr.updateProject(renamingProjectId, { name: renameValue.trim() });
+    const nextName = renameValue.trim();
+    if (renamingProjectId && nextName) {
+      const updated = mgr.updateProject(renamingProjectId, { name: nextName });
+      if (updated) {
+        // projects 列表是 [mgr, projectRevision] 的 memo，mgr 单例引用不变，
+        // 改名后必须手动递增 revision 才会触发 UI 刷新
+        setProjectRevision(revision => revision + 1);
+        toast.success('项目已重命名');
+      } else {
+        toast.error('项目不存在或已被删除');
+      }
     }
     setRenamingProjectId(null);
     setRenameValue('');

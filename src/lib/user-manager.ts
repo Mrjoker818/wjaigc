@@ -1513,6 +1513,8 @@ export class UserManager {
     };
 
     this.saveData();
+    // 与新增/删除项目保持一致：更新后通知订阅者刷新项目列表
+    this.notifyProjectsChanged();
     return userData.projects[index];
   }
 
