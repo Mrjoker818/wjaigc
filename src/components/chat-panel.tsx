@@ -8,6 +8,7 @@ import { toast } from 'sonner';
 import { extractTaskResultImageUrl } from '@/lib/task-result-url';
 import { CHAT_TASK_MAX_ATTEMPTS, getChatTaskPollIntervalMs } from '@/lib/chat-task-polling';
 import { getResumableChatGenerationTasks, mergeChatSessionMessages, mergeRecoveredChatTasks, updateChatSessionMessage, type ChatPendingGenerationTask, type RecoverableChatCloudTask } from '@/lib/chat-pending-generation';
+import { persistChatSessions } from '@/lib/chat-session-storage';
 import { UserManager } from '@/lib/user-manager';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -3176,7 +3177,7 @@ IP角色设计规范：
           setMessages(latest.messages);
           setModel(latest.model);
           setSystemPrompt(latest.systemPrompt);
-          localStorage.setItem('chat-sessions', JSON.stringify(merged));
+          persistChatSessions(merged);
         }
       } catch {
         // 服务器不可用时保留本地会话
@@ -3210,7 +3211,7 @@ IP角色设计规范：
       };
       const filtered = prev.filter(s => s.id !== id);
       const updated = [session, ...filtered].slice(0, 50);
-      localStorage.setItem('chat-sessions', JSON.stringify(updated));
+      persistChatSessions(updated);
       scheduleChatSync('chat_sessions', updated);
       return updated;
     });
@@ -3356,7 +3357,7 @@ IP角色设计规范：
     e.stopPropagation();
     setChatSessions(prev => {
       const updated = prev.filter(s => s.id !== sessionId);
-      localStorage.setItem('chat-sessions', JSON.stringify(updated));
+      persistChatSessions(updated);
       scheduleChatSync('chat_sessions', updated);
       return updated;
     });
