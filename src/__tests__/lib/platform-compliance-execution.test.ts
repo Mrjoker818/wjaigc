@@ -908,7 +908,7 @@ describe('platform compliance report execution', () => {
     expect(assetEvent).toMatchObject({
       actorUserId: 'user-1', projectId: 'project-1', runId: 'run-1', workspace: 'canvas',
       type: 'asset.created',
-      payload: { stepId: 'audit:a', assetVersionId: 'report-version-1' },
+      payload: { stepId: 'audit:a', assetVersionId: 'report-version-1', generation: 1 },
     });
     expect(progressEvent).toMatchObject({
       type: 'tool.progress',

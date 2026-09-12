@@ -104,7 +104,11 @@ async function persistCompliancePartialReport(
       workspace: input.workspace,
       eventId: `skill:${input.runId}:step:${input.stepId}:compliance:${input.phase}:asset:${input.assetVersionId}:generation:${input.executionFence.generation}`,
       type: 'asset.created',
-      payload: { stepId: input.stepId, assetVersionId: input.assetVersionId },
+      payload: {
+        stepId: input.stepId,
+        assetVersionId: input.assetVersionId,
+        generation: input.executionFence.generation,
+      },
       executionFence: input.executionFence,
     });
   }
