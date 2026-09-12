@@ -3,6 +3,8 @@ import { parseWorkspaceSourceTrace } from '@/lib/asset-core/source-trace';
 import type { SkillDefinition } from './types';
 import { parseDurableSkillOutputs } from './structured-output';
 import { MULTI_PLATFORM_EXPORT_SKILL_ID } from './multi-platform-export-preset';
+import { parseBriefToVideoResult } from '@/lib/brief-to-video/schema';
+import type { BriefToVideoResultV1 } from '@/lib/brief-to-video/types';
 
 export function shouldAutoProjectCanvasSkill(skillId: string): boolean {
   return skillId !== MULTI_PLATFORM_EXPORT_SKILL_ID;
@@ -422,6 +424,49 @@ export async function loadCompletedCanvasSkillAssets(input: {
       : null;
   }));
   return resolved.filter((reference): reference is WorkspaceAssetReference => reference !== null);
+}
+
+export async function loadCompletedCanvasBriefVideoResult(input: {
+  projectId: string;
+  runId: string;
+  fetcher?: typeof fetch;
+  signal?: AbortSignal;
+}): Promise<{ result: BriefToVideoResultV1; asset: WorkspaceAssetReference } | null> {
+  const fetcher = input.fetcher ?? fetch;
+  const payload = await readJson<SkillRunHistoryResponse>(
+    await fetcher(`/api/skill-runs/${encodeURIComponent(input.runId)}`, {
+      method: 'GET', signal: input.signal,
+    }),
+    '视频 Skill 运行结果加载失败',
+  );
+  const run = payload.run;
+  if (run?.runId !== input.runId || run.status !== 'completed') return null;
+  const outputs = parseDurableSkillOutputs(run.outputs);
+  const output = outputs.findLast(candidate => (
+    candidate.kind === 'json' && candidate.schemaId === 'brief-to-video-result-v1'
+  ));
+  if (!output || output.kind !== 'json') return null;
+  const result = parseBriefToVideoResult(JSON.parse(output.content) as unknown);
+  const assetVersionIds = Array.isArray(run.assetVersionIds)
+    ? run.assetVersionIds.filter((value): value is string => typeof value === 'string')
+    : [];
+  if (result.runId !== input.runId || !assetVersionIds.includes(result.videoAssetVersionId)) {
+    throw new Error('视频 Skill 成品版本不一致');
+  }
+  const query = new URLSearchParams({
+    projectId: input.projectId,
+    assetVersionId: result.videoAssetVersionId,
+  });
+  const asset = await readJson<WorkspaceAssetReference & { kind?: string }>(
+    await fetcher(`/api/assets?${query.toString()}`, { method: 'GET', signal: input.signal }),
+    '视频 Skill 资产版本加载失败',
+  );
+  if (!isWorkspaceAssetReference(asset)
+    || asset.assetVersionId !== result.videoAssetVersionId
+    || asset.kind !== 'video') {
+    throw new Error('视频 Skill 资产版本格式无效');
+  }
+  return { result, asset: sanitizeWorkspaceAssetReference(asset) };
 }
 
 export async function loadCanvasExportImageAssets(input: {

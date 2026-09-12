@@ -24,6 +24,11 @@ function projectionVersionIds(task: CloudTask): string[] {
     : [];
 }
 
+function optionalResultString(task: CloudTask, key: string): string | undefined {
+  const value = task.result?.[key];
+  return typeof value === 'string' && value ? value : undefined;
+}
+
 function assertKnownBriefVideoState(task: CloudTask | null): void {
   const taskError = task?.result?.taskError;
   if (task?.status === 'processing' && taskError && typeof taskError === 'object'
@@ -64,7 +69,11 @@ export async function recoverBriefToVideoOperation(
   taskId: string,
   input: ExecuteBriefToVideoStepInput,
   options: { maxPolls?: number; pollIntervalMs?: number } = {},
-): Promise<{ assetVersionIds: readonly string[] }> {
+): Promise<{
+  assetVersionIds: readonly string[];
+  remoteTaskId?: string;
+  thumbnailUrl?: string;
+}> {
   const maxPolls = options.maxPolls ?? 360;
   const pollIntervalMs = options.pollIntervalMs ?? 1_000;
   const headers = await getInternalRequestHeaders(input.actorUserId, input.actorRole);
@@ -78,7 +87,21 @@ export async function recoverBriefToVideoOperation(
       });
     }
     if (current.status === 'completed') {
-      return { assetVersionIds: projectionVersionIds(current) };
+      const assetVersionIds = projectionVersionIds(current);
+      if (assetVersionIds.length === 1) {
+        return {
+          assetVersionIds,
+          ...(current.remoteTaskId ? { remoteTaskId: current.remoteTaskId } : {}),
+          ...(optionalResultString(current, 'videoThumbnailUrl')
+            ? { thumbnailUrl: optionalResultString(current, 'videoThumbnailUrl') }
+            : {}),
+        };
+      }
+      if (assetVersionIds.length > 1) {
+        throw new AgentDownstreamProviderRejectedError(undefined, {
+          message: 'Brief video task produced multiple AssetVersions',
+        });
+      }
     }
     if (TERMINAL_FAILURES.has(current.status)) {
       throw new AgentDownstreamProviderRejectedError(undefined, {

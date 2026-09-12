@@ -66,6 +66,7 @@ import {
   startSkillPrepaidProviderRequest,
   type SkillPrepaidExecutionReference,
 } from '@/lib/skill-runtime/prepaid-generation';
+import { isAssetVersionId } from '@/lib/asset-core/asset-version-id';
 
 export const maxDuration = 300; // 5 min timeout
 
@@ -182,6 +183,10 @@ export async function POST(request: NextRequest) {
       directorMode,
       directorIntent,
       shotId,
+      assetWorkspace,
+      assetWorkspaceId,
+      assetSourceEntityId,
+      assetParentVersionIds,
     } = body;
 
     if (!prompt || !model) {
@@ -221,6 +226,19 @@ export async function POST(request: NextRequest) {
       || typeof sessionId !== 'string' || !sessionId
     )) {
       throw new SkillBillingAuthorizationError();
+    }
+    if (skillBillingContext) {
+      const expectedWorkspace = sessionId.startsWith('workflow:')
+        ? 'workflow'
+        : sessionId.startsWith('standalone-chat:') ? 'chat' : 'canvas';
+      if (assetWorkspace !== expectedWorkspace
+        || assetWorkspaceId !== sessionId
+        || assetSourceEntityId !== `${skillBillingContext.runId}:${skillBillingContext.stepId}`
+        || !Array.isArray(assetParentVersionIds)
+        || assetParentVersionIds.length > 2
+        || assetParentVersionIds.some((value: unknown) => !isAssetVersionId(value))) {
+        throw new SkillBillingAuthorizationError();
+      }
     }
 
     // 1. 查找视频 API 提供商
@@ -494,6 +512,12 @@ export async function POST(request: NextRequest) {
       projectId,
       sessionId,
       messageId,
+      ...(skillBillingContext ? {
+        assetWorkspace,
+        assetWorkspaceId,
+        assetSourceEntityId,
+        assetParentVersionIds,
+      } : {}),
     })).digest('hex');
     const submissionPayload = {
       prompt,
@@ -506,6 +530,12 @@ export async function POST(request: NextRequest) {
       generateAudio,
       negativePrompt,
       seed,
+      ...(skillBillingContext ? {
+        assetWorkspace,
+        assetWorkspaceId,
+        assetSourceEntityId,
+        assetParentVersionIds,
+      } : {}),
     };
     const migration = skillBillingContext ? await (async () => {
       const childIdempotencyKey = `${idempotencyKey}:0`;

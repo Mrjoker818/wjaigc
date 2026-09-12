@@ -232,3 +232,7 @@ export function parseBriefToVideoResult(value: unknown): BriefToVideoResultV1 {
     thumbnailUrl: optionalString(value.thumbnailUrl, 2_048, 'BRIEF_VIDEO_RESULT_THUMBNAIL_INVALID'),
   };
 }
+
+export function canonicalBriefToVideoResultJson(value: unknown): string {
+  return JSON.stringify(parseBriefToVideoResult(value));
+}

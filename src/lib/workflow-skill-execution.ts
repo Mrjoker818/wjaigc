@@ -5,6 +5,7 @@ import {
 } from './skill-runtime/structured-output';
 import { parsePlatformComplianceReport } from './platform-compliance/report-schema';
 import { parseMultiPlatformExportResult } from './multi-platform-export/manifest';
+import { parseBriefToVideoResult } from './brief-to-video/schema';
 
 interface WorkflowSkillRunProjection {
   runId: string;
@@ -202,6 +203,12 @@ export function projectWorkflowSkillRun(
   const exportResult = exportResultOutput
     ? parseMultiPlatformExportResult(JSON.parse(exportResultOutput.content) as unknown)
     : undefined;
+  const briefVideoResultOutput = outputs.findLast(output => (
+    output.kind === 'json' && output.schemaId === 'brief-to-video-result-v1'
+  ));
+  const briefVideoResult = briefVideoResultOutput
+    ? parseBriefToVideoResult(JSON.parse(briefVideoResultOutput.content) as unknown)
+    : undefined;
   const referencesByVersion = new Map<string, WorkflowSkillAssetReference>();
   for (const reference of references) {
     if (!referencesByVersion.has(reference.assetVersionId)) {
@@ -211,6 +218,17 @@ export function projectWorkflowSkillRun(
   const dedupedReferences = [...referencesByVersion.values()];
   const imageReferences = dedupedReferences.filter(reference => reference.kind === undefined || reference.kind === 'image');
   const documentReferences = dedupedReferences.filter(reference => reference.kind === 'document');
+  const videoReference = briefVideoResult
+    ? referencesByVersion.get(briefVideoResult.videoAssetVersionId)
+    : undefined;
+  if (briefVideoResult && (
+    briefVideoResult.runId !== run.runId
+    || !assetVersionIds.includes(briefVideoResult.videoAssetVersionId)
+    || !videoReference
+    || videoReference.kind !== 'video'
+  )) {
+    throw new Error('Brief 视频成品版本解析不一致');
+  }
   return {
     runId: run.runId,
     status: run.status,
@@ -222,6 +240,11 @@ export function projectWorkflowSkillRun(
     assetReferences: dedupedReferences,
     ...(documentReferences.length > 0 ? {
       documentAssetVersionIds: documentReferences.map(reference => reference.assetVersionId),
+    } : {}),
+    ...(briefVideoResult && videoReference ? {
+      videoAssetVersionId: briefVideoResult.videoAssetVersionId,
+      videoUrl: videoReference.url,
+      briefToVideoResult: briefVideoResult,
     } : {}),
     ...(exportResult ? {
       outcome: exportResult.outcome,

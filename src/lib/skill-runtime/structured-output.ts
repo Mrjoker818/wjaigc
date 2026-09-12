@@ -4,7 +4,10 @@ import {
 } from '../platform-compliance/report-schema';
 import type { DurableSkillOutput, SkillStructuredResult } from './types';
 import { canonicalMultiPlatformExportResultJson } from '../multi-platform-export/manifest';
-import { canonicalBriefToVideoPlanJson } from '../brief-to-video/schema';
+import {
+  canonicalBriefToVideoPlanJson,
+  canonicalBriefToVideoResultJson,
+} from '../brief-to-video/schema';
 
 const STRUCTURED_OUTPUT_SCHEMAS = new Map<string, (value: unknown) => string>([
   ['platform-compliance-report-v1', value => (
@@ -12,6 +15,7 @@ const STRUCTURED_OUTPUT_SCHEMAS = new Map<string, (value: unknown) => string>([
   )],
   ['multi-platform-export-result-v1', canonicalMultiPlatformExportResultJson],
   ['brief-to-video-plan-v1', canonicalBriefToVideoPlanJson],
+  ['brief-to-video-result-v1', canonicalBriefToVideoResultJson],
 ]);
 const MAX_STRUCTURED_OUTPUT_BYTES = 256 * 1024;
 

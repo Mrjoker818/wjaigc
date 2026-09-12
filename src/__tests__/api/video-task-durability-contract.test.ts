@@ -31,6 +31,9 @@ describe('video task durability contract', () => {
     expect(source).toContain('startSkillPrepaidProviderRequest({');
     expect(source).toContain('skillBillingContext ? 0 : await calculateConfiguredCreditCost(');
     expect(source).toContain('if (!provider && !skillBillingContext)');
+    expect(source).toContain("assetSourceEntityId !== `${skillBillingContext.runId}:${skillBillingContext.stepId}`");
+    expect(source).toContain('assetParentVersionIds.some((value: unknown) => !isAssetVersionId(value))');
+    expect(source).toContain('assetParentVersionIds,');
   });
 
   for (const routePath of [

@@ -309,7 +309,7 @@ git commit -m "feat: execute brief video tasks"
 - Produces: `buildBriefToVideoResult()` and schema `brief-to-video-result-v1`。
 - Produces: Canvas/Workflow projections containing `videoAssetVersionId`。
 
-- [ ] **Step 1: 写父版本、幂等投影和迟到结果 RED 测试**
+- [x] **Step 1: 写父版本、幂等投影和迟到结果 RED 测试**
 
 ```ts
 expect(videoVersion.kind).toBe('video');
@@ -318,17 +318,17 @@ expect(secondProjection.version.id).toBe(firstProjection.version.id);
 expect(lateCancelledProjection).toMatchObject({ created: false, audited: true });
 ```
 
-- [ ] **Step 2: 运行测试确认 RED**
+- [x] **Step 2: 运行测试确认 RED**
 
 Run: `pnpm exec vitest run src/__tests__/lib/brief-to-video-result.test.ts src/__tests__/lib/workflow-brief-to-video.test.ts src/__tests__/lib/canvas-brief-to-video-projection.test.ts`
 
 Expected: FAIL，结果 schema 和工作区投影尚不存在。
 
-- [ ] **Step 3: 实现同一视频 AssetVersion 投影**
+- [x] **Step 3: 实现同一视频 AssetVersion 投影**
 
 使用现有视频 task projector 建立版本；结构化结果只保存稳定 AssetVersion ID、计划 checksum、冻结模型与远程任务身份。Canvas 和 Workflow 读取同一版本，不复制远程 URL。
 
-- [ ] **Step 4: 运行测试并提交**
+- [x] **Step 4: 运行测试并提交**
 
 Run: `pnpm exec vitest run src/__tests__/lib/brief-to-video-result.test.ts src/__tests__/lib/workflow-brief-to-video.test.ts src/__tests__/lib/canvas-brief-to-video-projection.test.ts src/__tests__/lib/asset-task-projector.test.ts`
 

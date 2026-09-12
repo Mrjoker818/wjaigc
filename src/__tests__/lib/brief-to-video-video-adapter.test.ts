@@ -94,6 +94,7 @@ describe('Brief to video video adapter', () => {
     });
     expect(two.body).toMatchObject({
       imageUrl: '/api/assets/av_start/content', lastFrameImageUrl: '/api/assets/av_end/content',
+      assetParentVersionIds: ['av_start', 'av_end'],
     });
   });
 
@@ -182,7 +183,10 @@ describe('Brief to video video adapter', () => {
       },
       monitor: async taskId => {
         calls.push(`monitor:${taskId}`);
-        return { assetVersionIds: ['video-version-1'] };
+        return {
+          assetVersionIds: ['video-version-1'],
+          remoteTaskId: 'remote-video-1',
+        };
       },
     });
 
@@ -191,7 +195,21 @@ describe('Brief to video video adapter', () => {
       'accepted:video-child-1',
       'monitor:video-child-1',
     ]);
-    expect(result).toEqual({ assetVersionIds: ['video-version-1'], media: [{}] });
+    expect(result).toMatchObject({
+      assetVersionIds: ['video-version-1'],
+      media: [{}],
+      structured: {
+        schemaId: 'brief-to-video-result-v1',
+        value: {
+          runId: 'run-1',
+          videoAssetVersionId: 'video-version-1',
+          sourceAssetVersionIds: [],
+          providerId: 'pear-video',
+          modelId: 'video-model',
+          remoteTaskId: 'remote-video-1',
+        },
+      },
+    });
   });
 
   it('does not submit when the approved structured plan is missing', async () => {

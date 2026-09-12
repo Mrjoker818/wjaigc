@@ -7,6 +7,7 @@ import type { TaskModelDescriptor } from '@/lib/task-core/model-capability-contr
 import { validateTaskModelSelection } from '@/lib/task-core/model-capability-resolution';
 import { parseBriefToVideoInput, parseBriefToVideoPlan } from './schema';
 import type { BriefToVideoInput, BriefToVideoPlanV1 } from './types';
+import { buildBriefToVideoResult } from './result';
 
 interface BriefVideoStepOutput {
   stepId: string;
@@ -36,7 +37,11 @@ export interface ExecuteBriefToVideoStepInput {
 
 export interface ExecuteBriefToVideoStepDependencies {
   submit(submission: BriefVideoSubmission, input: ExecuteBriefToVideoStepInput): Promise<Response>;
-  monitor(taskId: string, input: ExecuteBriefToVideoStepInput): Promise<{ assetVersionIds: readonly string[] }>;
+  monitor(taskId: string, input: ExecuteBriefToVideoStepInput): Promise<{
+    assetVersionIds: readonly string[];
+    remoteTaskId?: string;
+    thumbnailUrl?: string;
+  }>;
 }
 
 export class BriefToVideoVideoAdmissionError extends Error {
@@ -269,6 +274,14 @@ export function buildBriefToVideoVideoSubmission(input: {
       skillRunId: input.runId,
       skillStepId: input.stepId,
       skillBillingContext: input.skillBillingContext,
+      assetWorkspace: input.workspaceId.startsWith('workflow:')
+        ? 'workflow'
+        : input.workspaceId.startsWith('standalone-chat:') ? 'chat' : 'canvas',
+      assetWorkspaceId: input.workspaceId,
+      assetSourceEntityId: `${input.runId}:${input.stepId}`,
+      assetParentVersionIds: [brief.startFrame, brief.endFrame].filter(
+        (value): value is string => Boolean(value),
+      ),
     },
   };
 }
@@ -294,8 +307,14 @@ function approvedBriefVideoPlan(outputs: readonly BriefVideoStepOutput[]): Brief
 export async function executeBriefToVideoStep(
   input: ExecuteBriefToVideoStepInput,
   dependencies: ExecuteBriefToVideoStepDependencies,
-): Promise<{ assetVersionIds: readonly string[]; media: readonly Record<string, never>[] }> {
+): Promise<{
+  assetVersionIds: readonly string[];
+  media: readonly Record<string, never>[];
+  structured: { schemaId: 'brief-to-video-result-v1'; value: unknown };
+}> {
   input.signal.throwIfAborted();
+  const brief = parseBriefToVideoInput(input.inputValues);
+  const plan = approvedBriefVideoPlan(input.previousOutputs);
   const submission = buildBriefToVideoVideoSubmission({
     runId: input.runId,
     stepId: input.stepId,
@@ -303,8 +322,8 @@ export async function executeBriefToVideoStep(
     workspaceId: input.workspaceId,
     idempotencyKey: input.idempotencyKey,
     modelBinding: input.modelBinding,
-    plan: approvedBriefVideoPlan(input.previousOutputs),
-    input: parseBriefToVideoInput(input.inputValues),
+    plan,
+    input: brief,
     sourceImageUrls: input.sourceImageUrls,
     skillBillingContext: {
       runId: input.runId,
@@ -320,8 +339,27 @@ export async function executeBriefToVideoStep(
     monitor: async () => undefined,
   });
   const completed = await dependencies.monitor(taskId, input);
+  if (completed.assetVersionIds.length !== 1) {
+    throw Object.assign(new Error('Brief video task did not produce exactly one AssetVersion'), {
+      code: 'BRIEF_VIDEO_RESULT_ASSET_INVALID',
+    });
+  }
+  const value = buildBriefToVideoResult({
+    runId: input.runId,
+    plan,
+    videoAssetVersionId: completed.assetVersionIds[0],
+    sourceAssetVersionIds: [brief.startFrame, brief.endFrame].filter(
+      (versionId): versionId is string => Boolean(versionId),
+    ),
+    providerId: input.modelBinding.providerId,
+    modelId: input.modelBinding.modelId,
+    ...(completed.remoteTaskId ? { remoteTaskId: completed.remoteTaskId } : {}),
+    ...(brief.resolution ? { resolution: brief.resolution } : {}),
+    ...(completed.thumbnailUrl ? { thumbnailUrl: completed.thumbnailUrl } : {}),
+  });
   return {
     assetVersionIds: completed.assetVersionIds,
     media: completed.assetVersionIds.map(() => ({})),
+    structured: { schemaId: 'brief-to-video-result-v1', value },
   };
 }
