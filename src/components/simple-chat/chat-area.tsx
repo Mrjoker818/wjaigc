@@ -65,6 +65,11 @@ import {
 import { buildSimpleChatWorkspaceHandoffUrl } from '@/lib/simple-chat-workspace-handoff';
 import { MultiPlatformExportCard } from './multi-platform-export-card';
 import { resolveSimpleChatExportRequestContext } from '@/lib/multi-platform-export/simple-chat-intent';
+import { BriefToVideoCard } from './brief-to-video-card';
+import {
+  isSimpleChatBriefVideoClarification,
+  resolveSimpleChatBriefVideoRequestContext,
+} from '@/lib/brief-to-video/simple-chat-intent';
 
 type ChatModelInfo = {
   id: string;
@@ -1163,6 +1168,18 @@ export default function ChatArea({
                   }
                 : message
             )));
+          } else if (
+            parsed.type === 'brief_to_video'
+            && typeof parsed.runId === 'string'
+            && typeof parsed.projectId === 'string'
+          ) {
+            setSearchStatus(null);
+            fullContent = '视频成片任务已提交。';
+            setMessages(previous => previous.map(message => (
+              message.id === context.assistantMessageId
+                ? { ...message, content: fullContent, agentRunId: parsed.runId }
+                : message
+            )));
           } else if (parsed.type === 'image' && typeof parsed.imageUrl === 'string') {
             setSearchStatus(null);
             const parsedImageUrl = parsed.imageUrl;
@@ -1296,8 +1313,21 @@ export default function ChatArea({
       currentSourceMessageId: userMessageId,
       currentAssetProjectId: selectedCanvasProjectId,
     });
-    const requestSourceVersionIds = exportRequestContext.sourceVersionIds;
-    const requestSelectedEntityIds = exportRequestContext.selectedEntityIds;
+    const briefVideoRequestContext = resolveSimpleChatBriefVideoRequestContext({
+      messages,
+      currentSourceVersionIds,
+      currentSelectedEntityIds,
+      currentSourceMessageId: userMessageId,
+      currentAssetProjectId: selectedCanvasProjectId,
+    });
+    const previousAssistantContent = messages.at(-1)?.role === 'assistant'
+      ? messages.at(-1)?.content || ''
+      : '';
+    const requestContext = isSimpleChatBriefVideoClarification(previousAssistantContent)
+      ? briefVideoRequestContext
+      : exportRequestContext;
+    const requestSourceVersionIds = requestContext.sourceVersionIds;
+    const requestSelectedEntityIds = requestContext.selectedEntityIds;
 
     const systemMessages: Array<{ role: 'system'; content: string }> = [];
     const instructions = project.instructions;
@@ -1354,8 +1384,8 @@ export default function ChatArea({
       webSearch,
       reasoningEffort,
       responseSpeed,
-      canvasProjectId: exportRequestContext.assetProjectId || undefined,
-      exportSourceMessageId: exportRequestContext.sourceMessageId,
+      canvasProjectId: requestContext.assetProjectId || undefined,
+      exportSourceMessageId: requestContext.sourceMessageId,
       sourceVersionIds: requestSourceVersionIds,
       selectedEntityIds: requestSelectedEntityIds,
       historyMessageIds: messages.map(message => message.id),
@@ -2201,11 +2231,24 @@ export default function ChatArea({
                   ) : (
                     <div className="whitespace-pre-wrap text-sm leading-relaxed">{msg.content}</div>
                   )}
-                  {msg.agentRunId && (
+                  {msg.agentRunId && msg.content !== '视频成片任务已提交。' && (
                     <div className="mt-3">
                       <AgentRunMessageProgress runId={msg.agentRunId} />
                     </div>
                   )}
+                  {msg.agentRunId
+                    && msg.content === '视频成片任务已提交。'
+                    && msg.retryContext?.canvasProjectId && (
+                      <BriefToVideoCard
+                        runId={msg.agentRunId}
+                        projectId={msg.retryContext.canvasProjectId}
+                        onReturnToCanvas={references => sendImagesToCanvas({
+                          ...msg,
+                          images: references.map(reference => reference.url),
+                          imageRefs: references,
+                        }, { runProjectId: msg.retryContext!.canvasProjectId })}
+                      />
+                    )}
                   {msg.multiPlatformExportRunId && msg.multiPlatformExportProjectId && (
                     <MultiPlatformExportCard
                       runId={msg.multiPlatformExportRunId}

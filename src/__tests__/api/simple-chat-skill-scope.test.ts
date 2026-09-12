@@ -45,6 +45,7 @@ import { POST } from '@/app/api/simple-chat/chat/route';
 import { CANVAS_PRESET_SKILLS } from '@/lib/skill-runtime/canvas-presets';
 import { SIMPLE_CHAT_PRESET_SKILLS } from '@/lib/skill-runtime/simple-chat-presets';
 import { MULTI_PLATFORM_EXPORT_SKILL_ID } from '@/lib/skill-runtime/multi-platform-export-preset';
+import { BRIEF_TO_VIDEO_SKILL_ID } from '@/lib/skill-runtime/brief-to-video-preset';
 
 function request(skillId: unknown): NextRequest {
   return new NextRequest('http://localhost/api/simple-chat/chat', {
@@ -112,6 +113,19 @@ describe('POST /api/simple-chat/chat Skill scope', () => {
 
   it('rejects direct client selection of the hidden multi-platform export Skill', async () => {
     const response = await POST(request(MULTI_PLATFORM_EXPORT_SKILL_ID));
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toEqual({
+      success: false,
+      code: 'SKILL_SURFACE_FORBIDDEN',
+      message: '此 Skill 不适用于当前工作区',
+    });
+    expect(mocks.findProviderForModel).not.toHaveBeenCalled();
+    expect(mocks.findProviderById).not.toHaveBeenCalled();
+  });
+
+  it('rejects direct client selection of the hidden Brief video Skill', async () => {
+    const response = await POST(request(BRIEF_TO_VIDEO_SKILL_ID));
 
     expect(response.status).toBe(403);
     await expect(response.json()).resolves.toEqual({

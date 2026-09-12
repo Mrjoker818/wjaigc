@@ -33,7 +33,7 @@ import { prepareAdmittedAgentTaskExecution } from '@/lib/agent-runtime/surface-d
 import { resolveAgentRuntimeMode } from '@/lib/agent-runtime/mode';
 import { admitAuthorizedAgentExecution } from '@/lib/agent-runtime/admission-gate';
 import { executeAdmittedToolCall } from '@/lib/chat-tools';
-import { resolveTaskModel } from '@/lib/task-core/model-catalog';
+import { resolveTaskModel, resolveTaskModelCatalog } from '@/lib/task-core/model-catalog';
 import { STRICT_AGENT_GENERATE_HEADER } from '@/lib/agent-runtime/generate-image-adapter';
 import { resolveSimpleChatRequestIdempotencyKey } from '@/lib/simple-chat-retry';
 import { runWithAbortSignalTimeout } from '@/lib/abort-signal';
@@ -48,8 +48,13 @@ import {
   parseSimpleChatExportIntent,
 } from '@/lib/multi-platform-export/simple-chat-intent';
 import { MULTI_PLATFORM_EXPORT_SKILL_ID } from '@/lib/skill-runtime/multi-platform-export-preset';
+import { BRIEF_TO_VIDEO_SKILL_ID } from '@/lib/skill-runtime/brief-to-video-preset';
 import { createSkillRun, dispatchSkillRunExecution } from '@/lib/skill-runtime/service';
 import { authorizeSimpleChatExportSources } from '@/lib/multi-platform-export/simple-chat-source-authorization';
+import {
+  isSimpleChatBriefVideoClarification,
+  parseSimpleChatBriefVideoIntent,
+} from '@/lib/brief-to-video/simple-chat-intent';
 
 const DEFAULT_SYSTEM_PROMPT = `你是无界AI的智能助手。你可以：
 1. 回答用户的各种问题
@@ -393,7 +398,7 @@ export async function POST(request: NextRequest) {
     );
   }
   const skillId = typeof body.skillId === 'string' ? body.skillId.trim() : undefined;
-  if (skillId === MULTI_PLATFORM_EXPORT_SKILL_ID) {
+  if (skillId === MULTI_PLATFORM_EXPORT_SKILL_ID || skillId === BRIEF_TO_VIDEO_SKILL_ID) {
     return Response.json(
       {
         success: false,
@@ -432,6 +437,137 @@ export async function POST(request: NextRequest) {
   const latestUserIndex = messages.findLastIndex(message => message.role === 'user');
   const latestUserMessage = latestUserIndex >= 0 ? messages[latestUserIndex] : undefined;
   const previousMessage = latestUserIndex > 0 ? messages[latestUserIndex - 1] : undefined;
+  const continuesBriefVideoClarification = previousMessage?.role === 'assistant'
+    && isSimpleChatBriefVideoClarification(previousMessage.content);
+  const latestBriefVideoCandidate = parseSimpleChatBriefVideoIntent(
+    latestUserMessage?.content || '', [], [],
+  );
+  const briefVideoStartIndex = continuesBriefVideoClarification
+    && latestBriefVideoCandidate.kind === 'none'
+    ? messages.findLastIndex((message, index) => (
+        index < latestUserIndex
+        && message.role === 'user'
+        && parseSimpleChatBriefVideoIntent(message.content, [], []).kind !== 'none'
+      ))
+    : latestUserIndex;
+  const briefVideoUserMessages = messages.slice(
+    briefVideoStartIndex >= 0 ? briefVideoStartIndex : latestUserIndex,
+    latestUserIndex + 1,
+  ).filter(
+    (message): message is { id?: string; role: string; content: string; images?: string[] } => Boolean(message),
+  ).filter(message => message.role === 'user');
+  const briefVideoMessage = briefVideoUserMessages.map(message => message.content).join('\n');
+  const briefVideoCandidate = parseSimpleChatBriefVideoIntent(briefVideoMessage, [], []);
+  if (briefVideoCandidate.kind !== 'none') {
+    const projectId = typeof body.assetProjectId === 'string' ? body.assetProjectId.trim() : '';
+    if (!projectId) {
+      return simpleChatEventResponse({ type: 'text', content: '请先选择目标画布项目。' });
+    }
+    const sourceVersionIds = Array.isArray(body.sourceVersionIds)
+      ? [...new Set(body.sourceVersionIds.filter((value): value is string => typeof value === 'string' && value.length > 0))]
+      : [];
+    const selectedEntityIds = Array.isArray(body.selectedEntityIds)
+      ? body.selectedEntityIds.filter((value): value is string => typeof value === 'string' && value.length > 0)
+      : [];
+    const sourceMessageId = typeof body.sourceMessageId === 'string' ? body.sourceMessageId.trim() : '';
+    const sourceMessage = briefVideoUserMessages.find(message => message.id === sourceMessageId);
+    const attachments = (sourceMessage?.images || []).map((url, index) => ({
+      url,
+      assetVersionId: sourceVersionIds[index],
+      placementId: selectedEntityIds[index],
+    }));
+    const videoCapabilities = (await resolveTaskModelCatalog([], user))
+      .filter(capability => capability.kind === 'video')
+      .map(capability => ({
+        providerId: capability.providerId,
+        modelId: capability.modelId,
+        allowedDurationsSeconds: capability.allowedDurationsSeconds,
+        allowedRatios: capability.allowedRatios,
+        allowedSizes: capability.allowedSizes,
+        supportedOperations: capability.supportedOperations,
+      }));
+    const briefVideoIntent = parseSimpleChatBriefVideoIntent(
+      briefVideoMessage,
+      attachments,
+      videoCapabilities,
+    );
+    if (briefVideoIntent.kind === 'needs_clarification') {
+      return simpleChatEventResponse({ type: 'text', content: briefVideoIntent.question });
+    }
+    if (briefVideoIntent.kind === 'ready') {
+      if (briefVideoIntent.sourceVersionIds.length > 0) {
+        const hasManagedSources = Boolean(
+          body.taskId
+          && sourceMessageId
+          && selectedEntityIds.length === briefVideoIntent.sourceVersionIds.length
+          && sourceMessage?.images?.length === briefVideoIntent.sourceVersionIds.length,
+        );
+        if (!hasManagedSources) {
+          return simpleChatEventResponse({ type: 'text', content: '请重新附加受管素材。' });
+        }
+        try {
+          await authorizeSimpleChatExportSources({
+            actorUserId: user.id,
+            projectId,
+            workspaceId: `standalone-chat:${body.projectId || 'chat'}`,
+            taskId: body.taskId!,
+            messageId: sourceMessageId,
+            sourceVersionIds: briefVideoIntent.sourceVersionIds,
+            entityIds: selectedEntityIds,
+            messageImageUrls: sourceMessage!.images!,
+          });
+        } catch (error) {
+          const authorization = error as { code?: unknown; status?: unknown };
+          return Response.json({
+            code: typeof authorization.code === 'string'
+              ? authorization.code
+              : 'SIMPLE_CHAT_BRIEF_VIDEO_SOURCE_FORBIDDEN',
+            error: 'Authorized chat attachment source was not found',
+          }, { status: authorization.status === 403 ? 403 : 404 });
+        }
+      }
+      const result = await createSkillRun({
+        actor: user,
+        request: {
+          skillId: briefVideoIntent.skillId,
+          skillVersion: briefVideoIntent.skillVersion,
+          surface: 'simple-chat',
+          projectId,
+          workspaceId: `standalone-chat:${body.projectId || body.taskId || 'chat'}`,
+          inputValues: briefVideoIntent.inputValues,
+          sourceVersionIds: briefVideoIntent.sourceVersionIds,
+          modelBindings: {
+            orchestrator: { providerId, modelId: model },
+            video: briefVideoIntent.modelBinding,
+          },
+          idempotencyKey: `simple-chat-brief-video:${createHash('sha256').update(
+            requestIdempotencyKey || `${body.taskId || 'chat'}:${body.responseMessageId || briefVideoMessage}`,
+          ).digest('hex')}`,
+        },
+      });
+      if (!result.reused) {
+        const execution = await dispatchSkillRunExecution({
+          actorUserId: user.id,
+          runId: result.runId,
+          recoveryOnly: false,
+        });
+        if (execution.completion) {
+          void execution.completion.catch(error => {
+            console.error('[simple-chat] controlled Brief video dispatch failed', {
+              runId: result.runId,
+              code: error instanceof Error ? error.name : 'UNKNOWN',
+            });
+          });
+        }
+      }
+      return simpleChatEventResponse({
+        type: 'brief_to_video',
+        runId: result.runId,
+        projectId,
+        reused: result.reused,
+      });
+    }
+  }
   const continuesExportClarification = previousMessage?.role === 'assistant'
     && isSimpleChatExportClarification(previousMessage.content);
   const previousUserMessage = continuesExportClarification
