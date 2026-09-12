@@ -939,10 +939,10 @@
 
 | 范围 | 入口与合同 | 本地证据 | 云端状态 |
 |---|---|---|---|
-| Canvas | 29 项目录中的“Brief 到视频成片”；文生视频、首帧、首尾帧，审批前零提交，修改、批准、取消和刷新恢复 | Chromium、Firefox、WebKit、375px Mobile Chromium 同轮 `4/4` 通过 | `CLOUD UNVERIFIED` |
-| Workflow | 同一 Skill 定义、暂停审批与下游投影；目录保持 29 项 | 受控 E2E 创建 Workflow Run 并确认审批前零下游提交；API、组件和数据库合同通过 | 真实下游视频与恢复未验证 |
-| Simple Chat | 目录保持 16 项且隐藏 Canvas Skill；明确 Brief 成片意图创建同一 Skill Run | 四项目均验证目录隔离和意图 Run | 真实聊天审批、成片与返回画布未验证 |
+| Canvas | 30 项目录中的“Brief 到视频成片”；文生视频、首帧、首尾帧均由 UI 创建，审批前查库确认零视频 child，覆盖修改、批准、取消和刷新恢复 | 原 29 项逐 ID 保留且不因 Brief flag 隐藏；复审后矩阵因缺隔离数据库未进入业务链 | `CLOUD UNVERIFIED` |
+| Workflow | 同一 30 项 Skill 定义、审批卡、批准后恢复下游并投影到 `output-video` | E2E 已实现审批前查库、批准、执行完成和 `videoAssetVersionId` 断言；本轮环境阻塞未执行到断言 | 真实供应商下游视频未验证 |
+| Simple Chat | 独立目录保持 16 项且不展示 Canvas Skill；明确 Brief 意图后覆盖审批卡、修改、取消、刷新恢复、成片与返回画布 | E2E 已实现完整 UI 链；本轮环境阻塞未执行到断言 | 云端真实聊天链未验证 |
 | 任务与账务 | 冻结 `providerId + modelId`，父 Run 预付，视频 child 零成本，单次结算或退款 | PostgreSQL 审批与 20 路竞争 `2/2`；预付及取消竞态 `15/15` | 真实供应商 taskId、交易和迟到终态未验证 |
-| 证据 | screenshot、video、trace、Console、Network、machine evidence 与 SHA-256 manifest | `test-results/brief-to-video/task10-candidate-tree-final/<project>/Brief/retry-0/` | 不得作为供应商成功证据 |
+| 证据 | 四项目 screenshot、video、trace、Console、Network、machine evidence 与 SHA-256 manifest；父提交及 `src/tests/scripts` 子树派生 candidate SHA | doctor 将在最终 HEAD 复算并校验精确四项目集合与全部哈希 | 不得作为供应商成功证据 |
 
 功能标志 `BRIEF_TO_VIDEO_SKILL_ENABLED` 仍由环境显式启用；真实云证据闭环前不得更新 `stable` 或宣布发布完成。

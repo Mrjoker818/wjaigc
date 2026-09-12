@@ -1,50 +1,34 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "feature": "brief-to-video-finished-film",
   "task": 10,
-  "generatedAt": "2026-09-13T03:56:28+08:00",
-  "sourceCommit": "cca721e5444094eb33079b923c3625f06cc10f0c",
-  "candidateIdentity": "task10-candidate-tree-final",
+  "generatedAt": "2026-09-13T04:24:00+08:00",
+  "candidateSha": "ddada611d22ce61daaa4f88176a754f87b6206d7dfd21ffd7302551e4f348128",
+  "sourceCommit": {
+    "scheme": "git-parent-subtrees-v1",
+    "expectedParentCommit": "7a669f20fd195448aaf3bf630814177defb1b617",
+    "candidateTrees": {
+      "src": "3cf99a62c6e591f941d84ac98fa5f7e073a515b0",
+      "tests": "9b87853bac04ebc42b91cd5091817800de30e628",
+      "scripts": "18172b42975de6c0df567ebdeee666caa6a510ec"
+    }
+  },
   "local": {
-    "verdict": "LOCAL PASS",
+    "verdict": "LOCAL BLOCKED",
     "cloudVerified": false,
     "supplierVerified": false,
-    "specializedTests": { "passed": 75, "failed": 0, "skipped": 0 },
-    "postgresApprovalAndConcurrency": { "passed": 2, "failed": 0, "skipped": 0 },
-    "postgresPrepaidRegression": { "passed": 15, "failed": 0, "skipped": 0 },
-    "playwright": {
-      "passed": 4,
+    "specializedTests": { "passed": 106, "failed": 0, "skipped": 0 },
+    "postgresApprovalAndConcurrency": {
+      "passed": 0,
       "failed": 0,
-      "projects": [
-        {
-          "name": "chromium",
-          "manifest": "test-results/brief-to-video/task10-candidate-tree-final/chromium/Brief/retry-0/evidence-manifest.json",
-          "machineEvidenceSha256": "da78ea2b1c490707eb8e97d91b980809d8f2bcd7f9eedc6cd8fc9eec42e112be"
-        },
-        {
-          "name": "firefox",
-          "manifest": "test-results/brief-to-video/task10-candidate-tree-final/firefox/Brief/retry-0/evidence-manifest.json",
-          "machineEvidenceSha256": "00a2934b91dfbe455cd178c1e49cdf71fef4339b0a349d199388be6a960afb21"
-        },
-        {
-          "name": "webkit",
-          "manifest": "test-results/brief-to-video/task10-candidate-tree-final/webkit/Brief/retry-0/evidence-manifest.json",
-          "machineEvidenceSha256": "2d81dd5906aac253a533f15700404f1bf9af8e392e58f8461b63695ffcd23516"
-        },
-        {
-          "name": "mobile-chromium",
-          "viewportWidth": 375,
-          "manifest": "test-results/brief-to-video/task10-candidate-tree-final/mobile-chromium/Brief/retry-0/evidence-manifest.json",
-          "machineEvidenceSha256": "895179aa13f6947e8258b399c2c1f8fabaac40ba22a2db4a7b3603d35f176af1"
-        }
-      ]
+      "skipped": 2,
+      "blocker": "POSTGRES_TEST_DATABASE_URL is not configured"
     },
-    "controlledProvider": {
-      "providerId": "brief-video-e2e-provider",
-      "modelId": "brief-video-e2e-model",
-      "requestSha256": "533f57ae37ce6a95f551ac893659194ffae5e5602ccd59a262eb92e84f3599d9",
-      "outcome": "processing-then-cancelled",
-      "producedRealVideo": false
+    "playwright": {
+      "passed": 0,
+      "failed": 4,
+      "projects": [],
+      "blocker": "DATABASE_URL or PGDATABASE_URL is required for isolated Brief-to-video E2E"
     }
   },
   "cloud": {
@@ -52,8 +36,28 @@
     "cloudVerified": false,
     "supplierVerified": false,
     "exactCommit": null,
-    "successfulRun": null,
-    "cancelledRun": null,
-    "reason": "未按约束创建或接管 Chrome 标签；尚未在 Coze 部署最终 exact commit 并执行真实供应商成功与取消。"
+    "successfulRun": {
+      "runId": null,
+      "internalTaskId": null,
+      "remoteTaskId": null,
+      "chargeTransactionId": null,
+      "videoAssetVersionId": null,
+      "parentVersionIds": [],
+      "mime": null,
+      "signature": null,
+      "durationSeconds": null,
+      "resolution": { "width": null, "height": null },
+      "artifact": { "sha256": null, "bytes": null }
+    },
+    "cancelledRun": {
+      "runId": null,
+      "internalTaskId": null,
+      "remoteTaskId": null,
+      "chargeTransactionId": null,
+      "refundTransactionId": null,
+      "refundAmount": null,
+      "lateCompletionSuppressed": null
+    },
+    "reason": "未创建或接管用户 Chrome 标签；未部署最终 exact commit，未执行真实供应商成功或可控取消。"
   }
 }

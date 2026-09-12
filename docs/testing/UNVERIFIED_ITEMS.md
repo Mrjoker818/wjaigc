@@ -2528,3 +2528,15 @@ BUG-018 已从未验证项移除。剩余顺序为 `002-B -> 002-D -> 002-E`；�
 - [ ] 真实成功单次扣费、取消至多一次退款及迟到终态不覆盖未核对。
 - [ ] 云端新鲜 Console、Network、Trace、截图、录像和机器证据未生成；本地受控证据不得冒充云证据。
 - [ ] 唯一下一动作：在现有 Coze 标签部署最终 exact commit 后，按 Task 10 Step 6 完成一成功一取消并回填本清单和聚合 JSON。
+
+### 独立审查后重开
+
+- [x] E2E 源码已改为 Canvas 三模式 UI、Workflow 审批恢复及 `output-video/videoAssetVersionId`、Simple Chat 审批卡完整链；批准前均有数据库零视频 child 断言。
+- [x] 375px 源码已包含模型菜单实际选择、三个审批操作实际点击、左右边界、重叠与纵向可达性断言。
+- [x] 清单合同已修正为 Canvas/Workflow `30/30`、Simple Chat `16`，并证明原 29 项不被 Brief flag 隐藏。
+- [ ] 复审后新四项目 browser matrix 已执行一次但 `0 passed / 4 blocked-as-failed`：缺 `DATABASE_URL/PGDATABASE_URL`，旧 `4/4` 不作为最终候选证明。
+- [ ] 复审后 PostgreSQL 专项为 `2/2 skipped`：缺 `POSTGRES_TEST_DATABASE_URL`，不计为通过。
+- [ ] 最终 HEAD 的四份 manifest、machine evidence 和聚合 JSON 尚待新矩阵生成并由 doctor 复算验证。
+- [ ] 云端成功 Run、取消 Run、退款交易、父版本、MIME/签名/时长/分辨率和制品哈希仍全部未验证。
+- [ ] 全仓最终轮次为 `6142 passed / 190 skipped / 1 failed`；旧清单断言修复后仅定向 `29/29`，按检查点要求未重复全仓，不能写全仓全绿。
+- [ ] protected baseline 的 38 项合同通过，但 3 个用户保护文件既有脏状态使门禁退出 1；这些文件未修改或暂存。

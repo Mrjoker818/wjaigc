@@ -29,4 +29,16 @@ describe('Canvas Skill source inputs', () => {
       campaignName: '秋季活动', sourceImages: ['version-manual'],
     });
   });
+
+  it('binds distinct single-image fields in source order without duplicating one frame', () => {
+    const frameFields: readonly SkillInputField[] = [
+      { key: 'startFrame', label: '首帧', kind: 'image', required: false, bindToSourceVersions: true },
+      { key: 'endFrame', label: '尾帧', kind: 'image', required: false, bindToSourceVersions: true },
+    ];
+
+    expect(bindCanvasSkillSourceInputs(frameFields, {}, ['version-a']))
+      .toEqual({ startFrame: 'version-a' });
+    expect(bindCanvasSkillSourceInputs(frameFields, {}, ['version-a', 'version-b']))
+      .toEqual({ startFrame: 'version-a', endFrame: 'version-b' });
+  });
 });

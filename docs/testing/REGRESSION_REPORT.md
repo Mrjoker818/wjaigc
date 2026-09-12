@@ -3011,3 +3011,12 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - 浏览器本地供应商固定返回 processing，用于验证审批前零提交、批准后唯一提交、精确模型/模式/时长/比例、取消与刷新恢复；不代表真实视频生成成功。
 - 最终全仓 `doctor / ts-check / lint:build / test / protected baseline / build` 数字在 Task 10 报告的最终门禁段登记。
 - **阶段判定：LOCAL PASS / CLOUD UNVERIFIED。**
+
+### 独立审查后续修复
+
+- 独立审查结论为 `CHANGES REQUIRED`（Critical 0 / Important 3 / Minor 1）：原 E2E 主要以 API 代替 Canvas UI，Workflow 未证明批准后下游及 `output-video/videoAssetVersionId`，Simple Chat 未覆盖审批卡完整链，375px 未做真实点击和几何检查。
+- 清单旧值 `29/29/16` 被判定错误；新合同要求 Canvas/Workflow `30/30`、Simple Chat `16`，并逐 ID 证明原 29 项在 flag 关闭时仍保留。
+- doctor 原证据只读聚合结论，未绑定精确四 manifest、制品哈希、项目集合及最终候选来源；云端字段也不完整。现改为父提交与 `src/tests/scripts` 子树哈希派生 candidate SHA，并严格校验成功、取消、退款、父版本和视频制品字段。
+- 首轮新增合同测试为 `5 failed / 19 passed`；Canvas 视频模型 UI 测试和来源帧映射测试也分别先 RED。最小实现后，当前定向集合 `32/32` GREEN，E2E `--list` 为四项目，TypeScript 退出 0。
+- 复审后最终专项为 15 文件 `106/106`。PostgreSQL 为 `2/2 skipped`（缺 `POSTGRES_TEST_DATABASE_URL`）；四项目矩阵均因缺 `DATABASE_URL/PGDATABASE_URL` 在 fixture 初始化阻塞，`0 passed / 4 blocked-as-failed`。这里不继承旧 `4/4`，也不声明 cloud pass。
+- full gate 中 doctor、TypeScript、quiet ESLint 与生产 build 退出 0；全仓为 `6142 passed / 190 skipped / 1 failed`，唯一失败是旧 inventory 期望漏两项，修复后相关 `29/29`。保护门禁最终只被 3 个用户保护脏文件阻塞；未重复全仓。

@@ -1,4 +1,5 @@
-import { createHash, randomUUID } from 'node:crypto';
+import { createHash } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
 import { copyFile, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo, Socket } from 'node:net';
@@ -6,6 +7,13 @@ import { join } from 'node:path';
 
 import { expect, test as base, type APIResponse, type Page, type TestInfo } from '@playwright/test';
 import { Pool } from 'pg';
+import {
+  configureWorkflowSkillNodePorts,
+  createEmptyWorkflow,
+  createWorkflowNode,
+  type WorkflowConnection,
+} from '../../src/lib/workflow-engine';
+import { createBriefToVideoSkill } from '../../src/lib/skill-runtime/brief-to-video-preset';
 
 import {
   ensureStage4Session,
@@ -21,7 +29,6 @@ const VIDEO_MODEL_ID = 'brief-video-e2e-model';
 const ORCHESTRATOR_PROVIDER_ID = 'stage4-chat-provider';
 const ORCHESTRATOR_MODEL_ID = 'stage4-chat-model';
 
-type Surface = 'canvas' | 'workflow' | 'simple-chat';
 type VideoMode = 'text-to-video' | 'image-to-video' | 'first-last-frame';
 
 interface ApprovalIdentity {
@@ -39,6 +46,8 @@ interface RunProjection {
     generation?: number;
     planChecksum?: string;
   };
+  assetVersionIds?: string[];
+  outputs?: Array<{ schemaId?: string; content?: string }>;
 }
 
 interface ProviderSubmission {
@@ -64,19 +73,26 @@ export interface BriefToVideoFixture {
   videoProviderId: string;
   videoModelId: string;
   openCanvas(): Promise<void>;
-  createRun(surface: Surface, mode: VideoMode): Promise<ApprovalIdentity>;
+  createCanvasRunFromUi(mode: VideoMode): Promise<ApprovalIdentity>;
   readRunStatus(runId: string): Promise<string>;
-  revise(runId: string): Promise<ApprovalIdentity>;
-  approve(identity: ApprovalIdentity): Promise<void>;
-  cancel(runId: string): Promise<void>;
+  reviseFromUi(runId: string): Promise<ApprovalIdentity>;
+  approveFromUi(identity: ApprovalIdentity): Promise<void>;
+  cancelFromUi(runId: string): Promise<void>;
+  assertNoVideoChildInDatabase(runId: string): Promise<void>;
   videoSubmissions(): ProviderSubmission[];
-  createWorkflowRun(): Promise<{ runId: string; status: string; downstreamDispatched: boolean }>;
-  verifySimpleChatIntentAndCatalog(): Promise<{
+  runWorkflowThroughUi(): Promise<{
+    runId: string;
+    outputNodeType: 'output-video';
+    videoAssetVersionId: string;
+  }>;
+  runSimpleChatThroughUi(): Promise<{
     catalogCount: number;
     catalogContainsBriefToVideo: boolean;
-    intentRunId: string;
+    cancelledRunId: string;
+    completedRunId: string;
+    videoAssetVersionId: string;
   }>;
-  assertMobileApprovalControls(): Promise<void>;
+  assertMobileApprovalExperience(): Promise<void>;
   writeMachineEvidence(ids: Record<string, string>): Promise<void>;
   dispose(): Promise<void>;
 }
@@ -85,8 +101,29 @@ function safe(value: string): string {
   return value.trim().replace(/[^a-zA-Z0-9._-]+/gu, '-').replace(/^-+|-+$/gu, '') || 'unknown';
 }
 
+function candidateProvenance(): Record<string, unknown> {
+  const supplied = process.env.BRIEF_TO_VIDEO_CANDIDATE_PROVENANCE?.trim();
+  if (supplied) return JSON.parse(supplied) as Record<string, unknown>;
+  const git = (...args: string[]): string => execFileSync('git', args, {
+    cwd: process.cwd(), encoding: 'utf8', windowsHide: true,
+  }).trim();
+  return {
+    scheme: 'git-parent-subtrees-v1',
+    expectedParentCommit: git('rev-parse', 'HEAD^'),
+    candidateTrees: {
+      src: git('rev-parse', 'HEAD:src'),
+      tests: git('rev-parse', 'HEAD:tests'),
+      scripts: git('rev-parse', 'HEAD:scripts'),
+    },
+  };
+}
+
+function candidateSha(): string {
+  return createHash('sha256').update(JSON.stringify(candidateProvenance())).digest('hex');
+}
+
 function commitIdentity(): string {
-  return safe(process.env.BRIEF_TO_VIDEO_EVIDENCE_COMMIT || process.env.GITHUB_SHA || 'working-tree');
+  return safe(process.env.BRIEF_TO_VIDEO_EVIDENCE_COMMIT || candidateSha());
 }
 
 function evidenceDirectory(testInfo: TestInfo): string {
@@ -165,7 +202,15 @@ async function startControlledProvider(submissions: ProviderSubmission[]): Promi
           requestSha256: createHash('sha256').update(raw).digest('hex'),
         });
         response.writeHead(200, { 'Content-Type': 'application/json' });
-        response.end(JSON.stringify({ task_id: `local-video-${submissions.length}`, status: 'processing' }));
+        response.end(JSON.stringify(submissions.length === 1
+          ? { task_id: 'local-video-cancel', status: 'processing' }
+          : { data: [{ url: `http://${request.headers.host}/fixture.mp4` }] }));
+        return;
+      }
+      if (request.method === 'GET' && pathname === '/fixture.mp4') {
+        const bytes = Buffer.from('000000206674797069736f6d0000020069736f6d69736f32', 'hex');
+        response.writeHead(200, { 'Content-Type': 'video/mp4', 'Content-Length': String(bytes.length) });
+        response.end(bytes);
         return;
       }
       if (request.method === 'GET' && pathname.includes('/tasks/')) {
@@ -224,6 +269,39 @@ async function setupFixture(page: Page, testInfo: TestInfo, directory: string): 
   const submissions: ProviderSubmission[] = [];
   const provider = await startControlledProvider(submissions);
   const fixture = await stage4FixtureForProject(testInfo.project.name);
+  const workflowSkill = configureWorkflowSkillNodePorts(
+    createWorkflowNode('ai-skill', 360, 180, 'Brief 视频 Skill'),
+    createBriefToVideoSkill(true),
+  );
+  workflowSkill.config = {
+    ...workflowSkill.config,
+    skillId: SKILL_ID,
+    version: 1,
+    inputValues: {
+      brief: '节点模式生成通勤防晒最终成片', goal: '产品转化', audience: '都市通勤人群',
+      platform: '抖音', style: '电影感、主体清晰、运动自然', durationSeconds: '5',
+      aspectRatio: '9:16', resolution: '1080p', generateAudio: false,
+    },
+    modelBindings: {
+      orchestrator: { providerId: ORCHESTRATOR_PROVIDER_ID, modelId: ORCHESTRATOR_MODEL_ID },
+      video: { providerId: VIDEO_PROVIDER_ID, modelId: VIDEO_MODEL_ID },
+    },
+  };
+  const workflowOutput = createWorkflowNode('output-video', 760, 180, '最终视频输出');
+  const workflowConnection: WorkflowConnection = {
+    id: `brief-video-output-${testInfo.project.name}`,
+    fromNodeId: workflowSkill.id,
+    fromPortId: 'out-video',
+    toNodeId: workflowOutput.id,
+    toPortId: 'in-video',
+    type: 'video',
+  };
+  fixture.canvasProject.workflow = {
+    ...createEmptyWorkflow('Brief 视频 E2E'),
+    id: `brief-video-workflow-${testInfo.project.name}`,
+    nodes: [workflowSkill, workflowOutput],
+    connections: [workflowConnection],
+  };
   await page.request.get('/api/auth/register', { timeout: 60_000 });
   const auth = await ensureStage4Session(page, fixture);
   await seedStage4RuntimeDependencies({
@@ -274,43 +352,6 @@ async function setupFixture(page: Page, testInfo: TestInfo, directory: string): 
 
   const projectId = String(fixture.canvasProject.id);
   const sourceVersionId = `stage4-version-${fixture.browserProfile}`;
-  const runRequest = async (surface: Surface, mode: VideoMode): Promise<ApprovalIdentity> => {
-    const withStart = mode !== 'text-to-video';
-    const withEnd = mode === 'first-last-frame';
-    const response = await page.request.post('/api/skill-runs', {
-      data: {
-        skillId: SKILL_ID,
-        skillVersion: 1,
-        surface,
-        projectId,
-        workspaceId: `${surface}:${projectId}`,
-        inputValues: {
-          brief: `${mode} 通勤防晒产品短片`,
-          goal: '产品转化',
-          audience: '都市通勤人群',
-          platform: '抖音',
-          style: '电影感、主体清晰、运动自然',
-          durationSeconds: '5',
-          aspectRatio: '9:16',
-          resolution: '1080p',
-          ...(withStart ? { startFrame: sourceVersionId } : {}),
-          ...(withEnd ? { endFrame: sourceVersionId } : {}),
-          generateAudio: false,
-        },
-        sourceVersionIds: withStart ? [sourceVersionId] : [],
-        modelBindings: {
-          orchestrator: { providerId: ORCHESTRATOR_PROVIDER_ID, modelId: ORCHESTRATOR_MODEL_ID },
-          video: { providerId: VIDEO_PROVIDER_ID, modelId: VIDEO_MODEL_ID },
-        },
-        idempotencyKey: `brief-video-e2e:${testInfo.project.name}:${surface}:${mode}:${randomUUID()}`,
-      },
-    });
-    const payload = await json(response);
-    expect(response.ok(), `create Skill Run returned HTTP ${response.status()}: ${JSON.stringify(payload)}`).toBe(true);
-    expect(payload.runId).toEqual(expect.any(String));
-    return waitForApproval(page, String(payload.runId));
-  };
-
   const openCanvas = async (): Promise<void> => {
     await page.request.get(`/?projectId=${encodeURIComponent(projectId)}`, { timeout: 120_000 });
     await page.request.get('/api/session', { timeout: 60_000 });
@@ -324,12 +365,88 @@ async function setupFixture(page: Page, testInfo: TestInfo, directory: string): 
         { timeout: 30_000 },
       );
     }
-    await page.locator('[data-canvas-image-id]').first().click();
     const expand = page.getByRole('button', { name: '展开面板', exact: true });
     if (await expand.isVisible().catch(() => false)) await expand.click();
-    await page.getByRole('button', { name: 'AI聊天', exact: true }).click();
-    await page.getByRole('button', { name: 'Skills技能库' }).click();
+    const skillSearch = page.getByPlaceholder('搜索 Skills...');
+    if (!await skillSearch.isVisible().catch(() => false)) {
+      await page.getByRole('button', { name: 'AI聊天', exact: true }).click();
+    }
+    if (!await skillSearch.isVisible().catch(() => false)) {
+      await page.getByRole('button', { name: 'Skills技能库' }).click();
+    }
+    await expect(skillSearch).toBeVisible({ timeout: 30_000 });
+    await skillSearch.fill('Brief 到视频');
+  };
+
+  const openCanvasSkill = async (): Promise<void> => {
+    await openCanvas();
+    const close = page.getByTitle('关闭 Skill');
+    if (await close.isVisible().catch(() => false)) await close.click();
     await page.getByPlaceholder('搜索 Skills...').fill('Brief 到视频');
+    await page.getByText('Brief 到视频成片', { exact: true }).last().click();
+    await expect(page.getByLabel('video 模型')).toBeVisible({ timeout: 30_000 });
+    await page.getByLabel('video 模型').selectOption(`${VIDEO_PROVIDER_ID}::${VIDEO_MODEL_ID}`);
+  };
+
+  const createCanvasRunFromUi = async (mode: VideoMode): Promise<ApprovalIdentity> => {
+    await page.keyboard.press('Escape');
+    if (mode !== 'text-to-video') await page.locator('[data-canvas-image-id]').first().click();
+    await openCanvasSkill();
+    await page.getByLabel('创作 Brief').fill(`${mode} 通勤防晒产品短片`);
+    await page.getByLabel('目标受众').fill('都市通勤人群');
+    await page.getByLabel('传播目标').selectOption('产品转化');
+    await page.getByLabel('发布平台').selectOption('抖音');
+    await page.getByLabel('视频时长').selectOption('5');
+    await page.getByLabel('画面比例').selectOption('9:16');
+    await page.getByLabel('分辨率').selectOption('1080p');
+    if (mode === 'first-last-frame') await page.getByLabel('尾帧').fill(sourceVersionId);
+    const submission = page.waitForResponse(response => (
+      response.request().method() === 'POST' && new URL(response.url()).pathname === '/api/skill-runs'
+    ));
+    await page.getByRole('button', { name: '运行 Skill', exact: true }).click();
+    const response = await submission;
+    const payload = await json(response);
+    expect(response.ok(), `Canvas UI Skill Run returned HTTP ${response.status()}: ${JSON.stringify(payload)}`).toBe(true);
+    return waitForApproval(page, String(payload.runId));
+  };
+
+  const assertNoVideoChildInDatabase = async (runId: string): Promise<void> => {
+    const result = await pool.query<{ count: string }>(
+      `SELECT count(*)::text AS count FROM cloud_tasks
+       WHERE type='video' AND result #>> '{skillBillingProvenance,runId}'=$1`,
+      [runId],
+    );
+    expect(result.rows[0]?.count).toBe('0');
+  };
+
+  const reviseFromUi = async (runId: string): Promise<ApprovalIdentity> => {
+    const current = await waitForApproval(page, runId);
+    await page.getByRole('button', { name: '修改脚本' }).click();
+    await page.getByLabel('脚本修改要求').fill('加快节奏');
+    await page.getByRole('button', { name: '提交修改要求' }).click();
+    await expect.poll(async () => (await readRun(page, runId)).approval?.planChecksum, {
+      timeout: 60_000,
+      intervals: [100, 250, 500, 1_000],
+    }).not.toBe(current.planChecksum);
+    return waitForApproval(page, runId);
+  };
+
+  const approveFromUi = async (identity: ApprovalIdentity): Promise<void> => {
+    const approval = page.getByRole('button', { name: '批准生成' });
+    await expect(approval).toBeVisible();
+    await approval.click();
+    await expect.poll(async () => (await readRun(page, identity.runId)).status, {
+      timeout: 60_000, intervals: [100, 250, 500, 1_000],
+    }).not.toBe('paused');
+  };
+
+  const cancelFromUi = async (runId: string): Promise<void> => {
+    const cancel = page.getByRole('button', { name: '取消任务' });
+    await expect(cancel).toBeVisible();
+    await cancel.click();
+    await expect.poll(async () => (await readRun(page, runId)).status, {
+      timeout: 60_000, intervals: [100, 250, 500, 1_000],
+    }).toBe('cancelled');
   };
 
   return {
@@ -337,119 +454,160 @@ async function setupFixture(page: Page, testInfo: TestInfo, directory: string): 
     videoProviderId: VIDEO_PROVIDER_ID,
     videoModelId: VIDEO_MODEL_ID,
     openCanvas,
-    createRun: runRequest,
+    createCanvasRunFromUi,
     async readRunStatus(runId) {
       return (await readRun(page, runId)).status;
     },
-    async revise(runId) {
-      const current = await waitForApproval(page, runId);
-      const response = await page.request.patch(`/api/skill-runs/${encodeURIComponent(runId)}`, {
-        data: {
-          action: 'revise',
-          revision: current.revision,
-          generation: current.generation,
-          planChecksum: current.planChecksum,
-          revisionInstruction: '加快节奏',
-        },
-      });
-      const payload = await json(response);
-      expect(response.ok(), `revise returned HTTP ${response.status()}: ${JSON.stringify(payload)}`).toBe(true);
-      await expect.poll(async () => (await readRun(page, runId)).approval?.planChecksum, {
-        timeout: 60_000,
-        intervals: [100, 250, 500, 1_000],
-      }).not.toBe(current.planChecksum);
-      return waitForApproval(page, runId);
-    },
-    async approve(identity) {
-      const response = await page.request.patch(`/api/skill-runs/${encodeURIComponent(identity.runId)}`, {
-        data: {
-          action: 'approve',
-          revision: identity.revision,
-          generation: identity.generation,
-          planChecksum: identity.planChecksum,
-        },
-      });
-      const payload = await json(response);
-      expect(response.ok(), `approve returned HTTP ${response.status()}: ${JSON.stringify(payload)}`).toBe(true);
-    },
-    async cancel(runId) {
-      const response = await page.request.patch(`/api/skill-runs/${encodeURIComponent(runId)}`, {
-        data: { action: 'cancel' },
-      });
-      expect(response.ok(), `cancel returned HTTP ${response.status()}`).toBe(true);
-    },
+    reviseFromUi,
+    approveFromUi,
+    cancelFromUi,
+    assertNoVideoChildInDatabase,
     videoSubmissions: () => structuredClone(submissions),
-    async createWorkflowRun() {
-      const submissionCount = submissions.length;
-      const run = await runRequest('workflow', 'text-to-video');
-      return {
-        runId: run.runId,
-        status: (await readRun(page, run.runId)).status,
-        downstreamDispatched: submissions.length > submissionCount,
-      };
-    },
-    async verifySimpleChatIntentAndCatalog() {
-      const catalogResponse = await page.request.get('/api/skills?surface=simple-chat');
-      const catalogPayload = await json(catalogResponse) as { skills?: Array<{ id?: string }> };
-      expect(catalogResponse.ok()).toBe(true);
-      const skills = catalogPayload.skills ?? [];
-      const intentResponse = await page.request.post('/api/simple-chat/chat', {
-        headers: { 'idempotency-key': `brief-video-simple-chat:${randomUUID()}` },
-        data: {
-          messages: [{
-            id: 'brief-video-message',
-            role: 'user',
-            content: `根据 Brief：展示轻薄防晒霜的通勤使用场景，生成最终成片。平台：抖音；时长：5秒；比例：9:16；视频模型：${VIDEO_MODEL_ID}；受众：都市通勤人群；目标：产品转化`,
-          }],
-          model: ORCHESTRATOR_MODEL_ID,
-          providerId: ORCHESTRATOR_PROVIDER_ID,
-          projectId: String(fixture.chatProject.id),
-          assetProjectId: projectId,
-          taskId: `brief-video-chat-${testInfo.project.name}`,
-          responseMessageId: `brief-video-response-${testInfo.project.name}`,
-          workspaceId: `standalone-chat:${fixture.chatProject.id}`,
-          stream: true,
-        },
-      });
-      const text = await intentResponse.text();
-      expect(intentResponse.ok(), `Simple Chat intent returned HTTP ${intentResponse.status()}: ${text}`).toBe(true);
-      const eventLine = text.split(/\r?\n/u).find(line => line.startsWith('data: '));
-      const event = JSON.parse(eventLine?.slice(6) || '{}') as Record<string, unknown>;
-      expect(event.type).toBe('brief_to_video');
-      return {
-        catalogCount: skills.length,
-        catalogContainsBriefToVideo: skills.some(skill => skill.id === SKILL_ID),
-        intentRunId: String(event.runId || ''),
-      };
-    },
-    async assertMobileApprovalControls() {
+    async runWorkflowThroughUi() {
       await openCanvas();
-      const pendingRuns = await page.request.get(`/api/skill-runs?projectId=${encodeURIComponent(projectId)}&skillId=${SKILL_ID}&surface=canvas&observeOnly=true`);
-      const pendingPayload = await json(pendingRuns) as { runs?: RunProjection[] };
-      const pending = pendingPayload.runs?.find(run => run.status === 'paused');
-      expect(pending?.runId).toEqual(expect.any(String));
-      await page.getByText('Brief 到视频成片', { exact: true }).last().click();
-      await page.getByRole('button', { name: `查看任务 ${pending!.runId}` }).click();
+      const collapse = page.getByRole('button', { name: '收起面板', exact: true });
+      if (await collapse.isVisible().catch(() => false)) await collapse.click();
+      await page.getByTitle('节点模式').first().click();
+      await page.getByLabel(workflowSkill.label).click();
+      await expect(page.getByRole('combobox', { name: 'Skill' })).toHaveValue(SKILL_ID);
+      await page.getByRole('combobox', { name: 'video 模型' }).selectOption(
+        `${VIDEO_PROVIDER_ID}::${VIDEO_MODEL_ID}`,
+      );
+      const started = page.waitForResponse(response => (
+        response.request().method() === 'POST'
+        && new URL(response.url()).pathname === '/api/workflow/execute'
+        && Boolean(response.request().postData()?.includes('"action":"start"'))
+      ));
+      await page.getByRole('button', { name: '执行工作流', exact: true }).click();
+      await expect(page.getByRole('heading', { name: 'Skill 费用预估', exact: true })).toBeVisible();
+      await page.getByRole('button', { name: '确认执行', exact: true }).click();
+      const startResponse = await started;
+      expect(startResponse.ok()).toBe(true);
+      const startPayload = await json(startResponse);
+      const executionId = String(startPayload.executionId || '');
+      await expect(page.getByRole('button', { name: '批准生成' })).toBeVisible({ timeout: 90_000 });
+      const pausedResponse = await page.request.post('/api/workflow/execute', {
+        data: { action: 'status', executionId },
+      });
+      const paused = await json(pausedResponse) as { results?: Record<string, { output?: { runId?: string } }> };
+      const runId = String(paused.results?.[workflowSkill.id]?.output?.runId || '');
+      expect(runId).not.toBe('');
+      await assertNoVideoChildInDatabase(runId);
+      await page.getByRole('button', { name: '批准生成' }).click();
+      await expect(page.getByText('执行完成', { exact: true })).toBeVisible({ timeout: 120_000 });
+      const completedResponse = await page.request.post('/api/workflow/execute', {
+        data: { action: 'status', executionId },
+      });
+      const completed = await json(completedResponse) as {
+        results?: Record<string, { output?: {
+          structured?: { value?: { videoAssetVersionId?: string } };
+          videoAssetVersionId?: string;
+        } }>;
+      };
+      const skillOutput = completed.results?.[workflowSkill.id]?.output;
+      const outputVideo = completed.results?.[workflowOutput.id]?.output;
+      const videoAssetVersionId = String(
+        outputVideo?.videoAssetVersionId
+        || outputVideo?.structured?.value?.videoAssetVersionId
+        || skillOutput?.videoAssetVersionId
+        || skillOutput?.structured?.value?.videoAssetVersionId
+        || '',
+      );
+      expect(videoAssetVersionId).not.toBe('');
+      return {
+        runId,
+        outputNodeType: 'output-video' as const,
+        videoAssetVersionId,
+      };
+    },
+    async runSimpleChatThroughUi() {
+      await page.goto(`/simple-chat?projectId=${encodeURIComponent(String(fixture.chatProject.id))}`, {
+        waitUntil: 'domcontentloaded',
+      });
+      await page.getByLabel('目标画布项目').selectOption(projectId);
+      await page.getByTitle('Skill').click();
+      const catalogItems = page.locator('[data-simple-chat-skill-id]');
+      await expect(catalogItems).toHaveCount(16);
+      const catalogContainsBriefToVideo = await catalogItems.evaluateAll(
+        items => items.some(item => item.getAttribute('data-simple-chat-skill-id') === 'preset-brief-to-video-film'),
+      );
+      await page.getByTitle('Skill').click();
+      const prompt = `根据 Brief：展示轻薄防晒霜通勤场景，生成最终成片。平台：抖音；时长：5秒；比例：9:16；视频模型：${VIDEO_MODEL_ID}；受众：都市通勤人群；目标：产品转化`;
+      const sendIntent = async (): Promise<string> => {
+        const input = page.getByPlaceholder('输入消息，Enter 发送，支持 Ctrl+V 粘贴图片');
+        await input.fill(prompt);
+        await input.press('Enter');
+        const cards = page.locator('[data-simple-chat-brief-video-run-id]');
+        await expect(cards.last()).toBeVisible({ timeout: 90_000 });
+        return String(await cards.last().getAttribute('data-simple-chat-brief-video-run-id'));
+      };
+      const cancelledRunId = await sendIntent();
+      await reviseFromUi(cancelledRunId);
+      await cancelFromUi(cancelledRunId);
+      await page.reload({ waitUntil: 'domcontentloaded' });
+      await expect(page.locator(`[data-simple-chat-brief-video-run-id="${cancelledRunId}"]`)).toBeVisible();
+
+      const completedRunId = await sendIntent();
+      await assertNoVideoChildInDatabase(completedRunId);
+      await approveFromUi(await waitForApproval(page, completedRunId));
+      await expect(page.getByRole('button', { name: '返回画布' })).toBeVisible({ timeout: 120_000 });
+      const completedRun = await readRun(page, completedRunId);
+      const resultOutput = completedRun.outputs?.find(output => output.schemaId === 'brief-to-video-result-v1');
+      const result = JSON.parse(resultOutput?.content || '{}') as { videoAssetVersionId?: string };
+      await page.reload({ waitUntil: 'domcontentloaded' });
+      await expect(page.getByRole('button', { name: '返回画布' })).toBeVisible({ timeout: 60_000 });
+      await page.getByRole('button', { name: '返回画布' }).click();
+      await expect(page).toHaveURL(new RegExp(`projectId=${projectId}`), { timeout: 60_000 });
+      return {
+        catalogCount: 16,
+        catalogContainsBriefToVideo,
+        cancelledRunId,
+        completedRunId,
+        videoAssetVersionId: String(result.videoAssetVersionId || ''),
+      };
+    },
+    async assertMobileApprovalExperience() {
+      const viewportWidth = page.viewportSize()?.width ?? 0;
+      expect(viewportWidth).toBe(375);
+      const modelMenu = page.getByLabel('video 模型');
+      await modelMenu.selectOption(`${VIDEO_PROVIDER_ID}::${VIDEO_MODEL_ID}`);
       const approve = page.getByRole('button', { name: '批准生成' });
       const revise = page.getByRole('button', { name: '修改脚本' });
       const cancel = page.getByRole('button', { name: '取消任务' });
       await expect(approve).toBeVisible({ timeout: 30_000 });
       await expect(revise).toBeVisible({ timeout: 30_000 });
       await expect(cancel).toBeVisible({ timeout: 30_000 });
-      for (const control of [approve, revise, cancel]) {
+      const controls = [modelMenu, approve, revise, cancel];
+      for (const control of controls) {
+        await control.scrollIntoViewIfNeeded();
         const box = await control.boundingBox();
         expect(box).not.toBeNull();
         expect(box!.height).toBeGreaterThanOrEqual(40);
-        expect(box!.x + box!.width).toBeLessThanOrEqual(375);
+        expect(box!.x).toBeGreaterThanOrEqual(0);
+        expect(box!.x + box!.width).toBeLessThanOrEqual(viewportWidth);
       }
+      const assertNoOverlap = async (): Promise<void> => {
+        const boxes = await Promise.all([approve, revise, cancel].map(control => control.boundingBox()));
+        for (let left = 0; left < boxes.length; left += 1) for (let right = left + 1; right < boxes.length; right += 1) {
+          const a = boxes[left]!; const b = boxes[right]!;
+          expect(a.x + a.width <= b.x || b.x + b.width <= a.x || a.y + a.height <= b.y || b.y + b.height <= a.y).toBe(true);
+        }
+      };
+      await assertNoOverlap();
+      await revise.click();
+      await expect(page.getByLabel('脚本修改要求')).toBeVisible();
+      await revise.click();
+      const vertical = await page.evaluate(() => ({ scrollHeight: document.documentElement.scrollHeight, viewportHeight: window.innerHeight }));
+      expect(vertical.scrollHeight).toBeGreaterThanOrEqual(vertical.viewportHeight);
     },
     async writeMachineEvidence(ids) {
       const body = {
-        schemaVersion: 1,
+        schemaVersion: 2,
         evidenceKind: 'controlled-local-playwright',
         cloudVerified: false,
         supplierVerified: false,
-        commit: commitIdentity(),
+        candidateSha: candidateSha(),
+        candidateProvenance: candidateProvenance(),
         project: testInfo.project.name,
         generatedAt: new Date().toISOString(),
         identities: ids,
@@ -539,11 +697,12 @@ export const test = base.extend<{ briefToVideo: BriefToVideoFixture }>({
           : { name, missing: true };
       }));
       await writeFile(join(directory, 'evidence-manifest.json'), JSON.stringify({
-        schemaVersion: 1,
+        schemaVersion: 2,
         evidenceKind: 'controlled-local-playwright',
         cloudVerified: false,
         supplierVerified: false,
-        commit: commitIdentity(),
+        candidateSha: candidateSha(),
+        candidateProvenance: candidateProvenance(),
         project: testInfo.project.name,
         status: fixtureError ? 'failed' : testInfo.status,
         artifactErrors,

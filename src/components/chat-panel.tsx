@@ -36,6 +36,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { Components } from 'react-markdown';
 import type { WorkspaceAssetReference } from '@/lib/asset-core/types';
+import type { TaskModelDescriptor } from '@/lib/task-core/model-capability-contract';
 import {
   extractTaskAssetReferences,
   findWorkspaceAssetReferenceByUrl,
@@ -1381,6 +1382,19 @@ export function ChatPanel({ themeStyle, projectId, onAddToPrompt, onAddImages, o
   const [thirdPartyChatModels, setThirdPartyChatModels] = useState<{id: string; name: string; provider: string; providerId: string; supportsVision?: boolean}[]>([]);
   // 服务器端发现的模型
   const [discoveredChatModels, setDiscoveredChatModels] = useState<{id: string; name: string; provider: string; providerId: string; description?: string; isDefault?: boolean; supportsVision?: boolean}[]>([]);
+  const [discoveredVideoModels, setDiscoveredVideoModels] = useState<Array<{
+    id: string;
+    modelId: string;
+    name: string;
+    provider: string;
+    providerId: string;
+    descriptor: TaskModelDescriptor;
+  }>>([]);
+  const [videoModel, setVideoModel] = useState('');
+  const selectedVideoDescriptor = useMemo(
+    () => discoveredVideoModels.find(candidate => candidate.id === videoModel)?.descriptor,
+    [discoveredVideoModels, videoModel],
+  );
   const availableChatModels = useMemo(() => {
     const uniqueModels = new Map<string, typeof discoveredChatModels[number]>();
     [...discoveredChatModels, ...thirdPartyChatModels].forEach((candidate) => {
@@ -2019,7 +2033,7 @@ export function ChatPanel({ themeStyle, projectId, onAddToPrompt, onAddImages, o
   // 从服务器加载可用聊天模型
   const loadServerModels = useCallback(async () => {
       try {
-        const loadCatalog = async (type: 'chat' | 'vlm'): Promise<Record<string, unknown> | null> => {
+        const loadCatalog = async (type: 'chat' | 'vlm' | 'video'): Promise<Record<string, unknown> | null> => {
           try {
             const response = await fetch(`/api/models?type=${type}`);
             return response.ok ? await response.json() as Record<string, unknown> : null;
@@ -2027,8 +2041,8 @@ export function ChatPanel({ themeStyle, projectId, onAddToPrompt, onAddImages, o
             return null;
           }
         };
-        const [chatCatalog, visionCatalog] = await Promise.all([
-          loadCatalog('chat'), loadCatalog('vlm'),
+        const [chatCatalog, visionCatalog, videoCatalog] = await Promise.all([
+          loadCatalog('chat'), loadCatalog('vlm'), loadCatalog('video'),
         ]);
         if (chatCatalog || visionCatalog) {
           const models = new Map<string, typeof discoveredChatModels[number]>();
@@ -2082,6 +2096,37 @@ export function ChatPanel({ themeStyle, projectId, onAddToPrompt, onAddImages, o
           setDiscoveredChatModels(available);
           // 如果有默认模型，自动选中
           setModel(current => selectInitialModel(current, available));
+        }
+        if (videoCatalog?.models && Array.isArray(videoCatalog.models)) {
+          const descriptors = new Map(
+            (Array.isArray(videoCatalog.taskModelCatalog) ? videoCatalog.taskModelCatalog : [])
+              .filter((value): value is TaskModelDescriptor => (
+                Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+              ))
+              .map(descriptor => [`${descriptor.providerId}::${descriptor.modelId}`, descriptor]),
+          );
+          const providers = new Map(
+            (Array.isArray(videoCatalog.providers) ? videoCatalog.providers : [])
+              .filter((value): value is Record<string, unknown> => (
+                Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+              ))
+              .map(provider => [String(provider.id || ''), String(provider.name || provider.displayName || '')]),
+          );
+          const available = (videoCatalog.models as Array<Record<string, unknown>>).flatMap(raw => {
+            const providerId = typeof raw.providerId === 'string' ? raw.providerId : '';
+            const modelId = String(raw.id || raw.name || '');
+            const id = `${providerId}::${modelId}`;
+            const descriptor = descriptors.get(id);
+            return providerId && modelId && descriptor ? [{
+              id, modelId, providerId, descriptor,
+              name: String(raw.name || modelId),
+              provider: providers.get(providerId) || providerId,
+            }] : [];
+          });
+          setDiscoveredVideoModels(available);
+          setVideoModel(current => available.some(candidate => candidate.id === current)
+            ? current
+            : available[0]?.id || '');
         }
       } catch {
         // 静默失败
@@ -3968,6 +4013,13 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
         modelBindings.vision = { providerId: chatProviderId, modelId: chatModelId };
       } else if (role === 'image' && imageProviderId && imageModelId) {
         modelBindings.image = { providerId: imageProviderId, modelId: imageModelId };
+      } else if (role === 'video') {
+        const selectedVideo = discoveredVideoModels.find(candidate => candidate.id === videoModel);
+        if (!selectedVideo) return null;
+        modelBindings.video = {
+          providerId: selectedVideo.providerId,
+          modelId: selectedVideo.modelId,
+        };
       } else {
         return null;
       }
@@ -3988,7 +4040,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
       inputValues: overrides.inputValues,
       sourceVersionIds: overrides.sourceVersionIds,
     } : request;
-  }, [activeSkill, availableChatModels, canvasSkillInputValues, canvasSkillSourceVersionIds, discoveredImageModels, imageModel, imageModelProviderId, model, projectId]);
+  }, [activeSkill, availableChatModels, canvasSkillInputValues, canvasSkillSourceVersionIds, discoveredImageModels, discoveredVideoModels, imageModel, imageModelProviderId, model, projectId, videoModel]);
 
   const hasRequiredCanvasSkillSource = useCallback((): boolean => {
     const requiresManagedSource = activeSkill?.inputs.some(field => (
@@ -6400,7 +6452,24 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                   onChange={(key, value) => setSkillParamValues(current => ({ ...current, [key]: value }))}
                   disabled={skillRun.busy || !chatSkills.some(skill => skill.id === activeSkill.id && skill.enabled)
                     || Boolean(skillRun.runId && skillRun.projection?.status !== 'completed' && skillRun.projection?.status !== 'failed' && skillRun.projection?.status !== 'cancelled' && skillRun.projection?.status !== 'timeout')}
+                  capabilityDescriptors={{ video: selectedVideoDescriptor }}
                 />
+                {requiredSkillModelRoles(activeSkill).includes('video') && (
+                  <label className="block space-y-1 text-sm font-medium">
+                    video 模型
+                    <select aria-label="video 模型" value={videoModel}
+                      onChange={event => setVideoModel(event.target.value)}
+                      disabled={skillRun.busy}
+                      className="w-full rounded border px-2 py-1.5 text-sm">
+                      <option value="">选择模型</option>
+                      {discoveredVideoModels.map(candidate => (
+                        <option key={candidate.id} value={candidate.id}>
+                          {candidate.name} ({candidate.provider})
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
                 <div className="flex gap-2">
                   <Button type="button" variant="outline" className="h-8 flex-1 text-xs" onClick={() => { void handleEstimateSkill(); }} disabled={skillRun.busy || !chatSkills.some(skill => skill.id === activeSkill.id && skill.enabled)}>
                     估算积分

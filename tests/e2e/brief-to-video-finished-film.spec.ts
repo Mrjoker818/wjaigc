@@ -15,20 +15,27 @@ test('Brief 到视频本地确定性门禁覆盖三工作区、审批和恢复',
   await briefToVideo.openCanvas();
   await expect(page.getByText('Brief 到视频成片', { exact: true }).last()).toBeVisible({ timeout: 30_000 });
 
-  const textRun = await briefToVideo.createRun('canvas', 'text-to-video');
-  const startRun = await briefToVideo.createRun('canvas', 'image-to-video');
-  const bothRun = await briefToVideo.createRun('canvas', 'first-last-frame');
+  const textRun = await briefToVideo.createCanvasRunFromUi('text-to-video');
+  await briefToVideo.assertNoVideoChildInDatabase(textRun.runId);
+  await briefToVideo.cancelFromUi(textRun.runId);
+  const startRun = await briefToVideo.createCanvasRunFromUi('image-to-video');
+  await briefToVideo.assertNoVideoChildInDatabase(startRun.runId);
+  await briefToVideo.cancelFromUi(startRun.runId);
+  const bothRun = await briefToVideo.createCanvasRunFromUi('first-last-frame');
+  await briefToVideo.assertNoVideoChildInDatabase(bothRun.runId);
 
-  for (const run of [textRun, startRun, bothRun]) {
-    await expect.poll(() => briefToVideo.readRunStatus(run.runId)).toBe('paused');
+  expect(briefToVideo.videoSubmissions()).toHaveLength(0);
+
+  if (testInfo.project.name === 'mobile-chromium') {
+    await briefToVideo.assertMobileApprovalExperience();
   }
-  expect(briefToVideo.videoSubmissions()).toHaveLength(0);
 
-  const revised = await briefToVideo.revise(bothRun.runId);
+  const revised = await briefToVideo.reviseFromUi(bothRun.runId);
   expect(revised.planChecksum).not.toBe(bothRun.planChecksum);
+  await briefToVideo.assertNoVideoChildInDatabase(revised.runId);
   expect(briefToVideo.videoSubmissions()).toHaveLength(0);
 
-  await briefToVideo.approve(revised);
+  await briefToVideo.approveFromUi(revised);
   await expect.poll(() => briefToVideo.videoSubmissions().length, {
     timeout: 60_000,
     intervals: [100, 250, 500, 1_000],
@@ -41,31 +48,29 @@ test('Brief 到视频本地确定性门禁覆盖三工作区、审批和恢复',
     aspectRatio: '9:16',
   });
 
-  await briefToVideo.cancel(revised.runId);
+  await briefToVideo.cancelFromUi(revised.runId);
   await expect.poll(() => briefToVideo.readRunStatus(revised.runId)).toBe('cancelled');
   await page.reload({ waitUntil: 'domcontentloaded' });
   expect(await briefToVideo.readRunStatus(revised.runId)).toBe('cancelled');
   expect(briefToVideo.videoSubmissions()).toHaveLength(1);
 
-  const workflow = await briefToVideo.createWorkflowRun();
-  expect(workflow.status).toBe('paused');
-  expect(workflow.downstreamDispatched).toBe(false);
-  expect(briefToVideo.videoSubmissions()).toHaveLength(1);
+  const workflow = await briefToVideo.runWorkflowThroughUi();
+  expect(workflow.outputNodeType).toBe('output-video');
+  expect(workflow.videoAssetVersionId).toEqual(expect.any(String));
 
-  const simpleChat = await briefToVideo.verifySimpleChatIntentAndCatalog();
+  const simpleChat = await briefToVideo.runSimpleChatThroughUi();
   expect(simpleChat.catalogCount).toBe(16);
   expect(simpleChat.catalogContainsBriefToVideo).toBe(false);
-  expect(simpleChat.intentRunId).toEqual(expect.any(String));
-
-  if (testInfo.project.name === 'mobile-chromium') {
-    await briefToVideo.assertMobileApprovalControls();
-  }
+  expect(simpleChat.videoAssetVersionId).toEqual(expect.any(String));
 
   await briefToVideo.writeMachineEvidence({
     textRunId: textRun.runId,
     startFrameRunId: startRun.runId,
     firstLastFrameRunId: revised.runId,
     workflowRunId: workflow.runId,
-    simpleChatRunId: simpleChat.intentRunId,
+    simpleChatCancelledRunId: simpleChat.cancelledRunId,
+    simpleChatRunId: simpleChat.completedRunId,
+    workflowVideoAssetVersionId: workflow.videoAssetVersionId,
+    simpleChatVideoAssetVersionId: simpleChat.videoAssetVersionId,
   });
 });

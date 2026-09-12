@@ -7,9 +7,16 @@ import { Client } from 'pg';
 import { HeadBucketCommand, S3Client } from '@aws-sdk/client-s3';
 import sharp from 'sharp';
 import { getDoctorExitCode } from './doctor-status.mjs';
+import {
+  readCandidateGitState,
+  validateBriefToVideoEvidence,
+  validateCandidateProvenance,
+} from './brief-to-video-evidence.mjs';
 import { collectAssetGraphDoctorFacts, resolveDoctorDatabaseUrl, summarizeAssetGraphDoctor } from './doctor-asset-status.mjs';
 import { connectionOptions } from './run-migrations.mjs';
 import { migrationChecksum } from './run-migrations.mjs';
+
+const BRIEF_TO_VIDEO_PLAYWRIGHT_PROJECTS = ['chromium', 'firefox', 'webkit', 'mobile-chromium'];
 
 const AGENT_EVENT_MIGRATION = '20260816_wj_stable_s4_agent_events.sql';
 
@@ -535,23 +542,26 @@ async function checkBriefToVideo() {
   );
   try {
     const evidence = JSON.parse(await fs.readFile(evidencePath, 'utf8'));
-    const localPass = evidence?.local?.verdict === 'LOCAL PASS';
+    const git = await readCandidateGitState(process.cwd(), {
+      index: process.env.BRIEF_TO_VIDEO_VERIFY_INDEX === '1',
+    });
+    const candidate = validateCandidateProvenance(evidence.sourceCommit, git);
+    const validation = await validateBriefToVideoEvidence(evidence, {
+      repositoryRoot: process.cwd(),
+      git,
+      expectedProjects: BRIEF_TO_VIDEO_PLAYWRIGHT_PROJECTS,
+    });
+    const localPass = validation.local.ok;
     add(
       localPass ? 'PASS' : production ? 'FAIL' : 'BLOCKED',
       'brief-to-video-local-evidence',
-      localPass ? `LOCAL PASS: ${evidencePath}` : `local evidence is not LOCAL PASS: ${evidencePath}`,
+      localPass ? `LOCAL PASS: ${candidate.detail}; ${validation.local.detail}` : validation.local.detail,
     );
-    const cloudPass = evidence?.cloud?.verdict === 'CLOUD PASS'
-      && typeof evidence?.cloud?.exactCommit === 'string'
-      && evidence.cloud.exactCommit.length >= 40
-      && typeof evidence?.cloud?.successfulRun?.runId === 'string'
-      && typeof evidence?.cloud?.successfulRun?.remoteTaskId === 'string'
-      && typeof evidence?.cloud?.successfulRun?.chargeTransactionId === 'string'
-      && typeof evidence?.cloud?.successfulRun?.videoAssetVersionId === 'string';
+    const cloudPass = validation.cloud.ok;
     add(
       cloudPass ? 'PASS' : production ? 'FAIL' : 'BLOCKED',
       'brief-to-video-cloud-evidence',
-      cloudPass ? 'CLOUD PASS with exact commit and linked Run/task/transaction/AssetVersion evidence' : 'CLOUD UNVERIFIED',
+      validation.cloud.detail,
     );
   } catch (error) {
     add(

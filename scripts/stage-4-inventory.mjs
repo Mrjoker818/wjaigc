@@ -443,6 +443,8 @@ async function collectWorkspaceSources(root) {
     readFile(join(root, 'src/lib/skill-runtime/content-commerce-presets.ts'), 'utf8'),
     readFile(join(root, 'src/lib/skill-runtime/platform-compliance-preset.ts'), 'utf8'),
     readFile(join(root, 'src/lib/skill-runtime/simple-chat-presets.ts'), 'utf8'),
+    readFile(join(root, 'src/lib/skill-runtime/multi-platform-export-preset.ts'), 'utf8'),
+    readFile(join(root, 'src/lib/skill-runtime/brief-to-video-preset.ts'), 'utf8'),
   ]);
 
   return {
@@ -459,6 +461,8 @@ async function collectWorkspaceSources(root) {
     contentCommerceSkillsSource: files[10],
     platformComplianceSkillsSource: files[11],
     simpleChatSkillsSource: files[12],
+    multiPlatformExportSkillSource: files[13],
+    briefToVideoSkillSource: files[14],
   };
 }
 
@@ -478,6 +482,8 @@ export async function collectStage4Inventory(root = process.cwd()) {
     contentCommerceSkillsSource,
     platformComplianceSkillsSource,
     simpleChatSkillsSource,
+    multiPlatformExportSkillSource,
+    briefToVideoSkillSource,
   } = await collectWorkspaceSources(root);
 
   const testFiles = await walk(
@@ -559,17 +565,31 @@ export async function collectStage4Inventory(root = process.cwd()) {
     'surfaces',
     'workflow',
   );
+  const optionalCanvasWorkflowSkills = [
+    stringValue(
+      topLevelConstInitializers(parseSkillSource(multiPlatformExportSkillSource, '').sourceFile)
+        .get('MULTI_PLATFORM_EXPORT_SKILL_ID'),
+      topLevelConstInitializers(parseSkillSource(multiPlatformExportSkillSource, '').sourceFile),
+    ),
+    stringValue(
+      topLevelConstInitializers(parseSkillSource(briefToVideoSkillSource, '').sourceFile)
+        .get('BRIEF_TO_VIDEO_SKILL_ID'),
+      topLevelConstInitializers(parseSkillSource(briefToVideoSkillSource, '').sourceFile),
+    ),
+  ].filter(Boolean);
   const canvasSkills = uniqueInOrder([
     ...legacyCanvasSkills,
     ...marketingCanvasSkills,
     ...contentCommerceCanvasSkills,
     ...platformComplianceCanvasSkills,
+    ...optionalCanvasWorkflowSkills,
   ]);
   const workflowSkills = uniqueInOrder([
     ...legacyWorkflowSkills,
     ...marketingWorkflowSkills,
     ...contentCommerceWorkflowSkills,
     ...platformComplianceWorkflowSkills,
+    ...optionalCanvasWorkflowSkills,
   ]);
   const simpleChatSkills = extractSkillIdsForSurface(
     simpleChatSkillsSource,

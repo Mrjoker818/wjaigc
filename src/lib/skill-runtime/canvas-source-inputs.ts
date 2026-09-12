@@ -26,10 +26,12 @@ export function bindCanvasSkillSourceInputs(
   sourceVersionIds: readonly string[],
 ): Record<string, unknown> {
   const contextualInputs = { ...values };
+  let imageSourceIndex = 0;
   for (const field of fields) {
     if (contextualInputs[field.key] !== undefined) continue;
-    if (field.kind === 'image' && sourceVersionIds[0]) {
-      contextualInputs[field.key] = sourceVersionIds[0];
+    if (field.kind === 'image' && sourceVersionIds[imageSourceIndex]) {
+      contextualInputs[field.key] = sourceVersionIds[imageSourceIndex];
+      imageSourceIndex += 1;
     } else if (field.kind === 'images' && sourceVersionIds.length > 0) {
       contextualInputs[field.key] = [...sourceVersionIds];
     }

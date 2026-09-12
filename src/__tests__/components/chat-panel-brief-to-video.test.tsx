@@ -15,4 +15,13 @@ describe('Canvas Brief 到视频成片 UI wiring', () => {
     expect(source).toContain('onCancel={skillRun.cancel}');
     expect(source).toContain('<BriefToVideoResultCard');
   });
+
+  it('loads a video capability catalog and freezes the selected video model for the Skill', () => {
+    expect(source).toContain("loadCatalog('video')");
+    expect(source).toContain('discoveredVideoModels');
+    expect(source).toContain("role === 'video'");
+    expect(source).toContain('modelBindings.video =');
+    expect(source).toContain('capabilityDescriptors={{ video: selectedVideoDescriptor }}');
+    expect(source).toContain('aria-label="video 模型"');
+  });
 });

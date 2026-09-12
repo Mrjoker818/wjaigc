@@ -54,6 +54,7 @@
   "migrations/20260903_unified_skill_task4_dispatch_lease.sql",
   "migrations/20260904_unified_skill_task4_agent_edit_descriptor.sql",
   "scripts/doctor.mjs",
+  "scripts/brief-to-video-evidence.mjs",
   "scripts/prune-build-traces.mjs",
   "scripts/run-migrations.mjs",
   "scripts/stage-4-inventory.mjs",

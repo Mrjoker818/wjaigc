@@ -167,7 +167,7 @@ describe('scoped Skill runtime inventory', () => {
     ]);
   });
 
-  it('keeps the original 28-item Canvas and Workflow inventory stable', async () => {
+  it('keeps all 29 pre-existing Skills and exposes Brief-to-video as item 30', async () => {
     const inventory = await collectStage4Inventory(process.cwd());
     const legacyCanvasIds = [
       'preset-ecommerce-listing', 'preset-logo-brand', 'preset-storyboard',
@@ -179,9 +179,11 @@ describe('scoped Skill runtime inventory', () => {
       'preset-illustration', 'preset-ui-design', 'preset-food-photography',
     ];
 
-    expect(inventory.skillCatalogs.canvas).toHaveLength(28);
+    expect(inventory.skillCatalogs.canvas).toHaveLength(30);
     expect(inventory.skillCatalogs.canvas.slice(0, legacyCanvasIds.length)).toEqual(legacyCanvasIds);
-    expect(inventory.skillCatalogs.canvas.at(-1)).toBe('preset-platform-compliance-audit');
+    expect(inventory.skillCatalogs.canvas.slice(0, 29)).not.toContain('preset-brief-to-video-film');
+    expect(inventory.skillCatalogs.canvas.slice(0, 29)).toContain('preset-multi-platform-export');
+    expect(inventory.skillCatalogs.canvas.at(-1)).toBe('preset-brief-to-video-film');
     expect(inventory.skillCatalogs.workflow).toEqual(inventory.skillCatalogs.canvas);
     expect(inventory.skillCatalogs.simpleChat).toHaveLength(16);
     expect(intersection(

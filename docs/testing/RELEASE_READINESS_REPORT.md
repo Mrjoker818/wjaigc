@@ -2307,3 +2307,10 @@ The focused gate test passes `7/7`; the actual protected-baseline command passes
 - 尚未在现有 Coze 标签部署 exact commit；没有真实成功视频、远程 taskId、视频 AssetVersion、首尾帧父版本、积分交易和真实可控取消证据。
 - 功能标志保持受控，`stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 只读。
 - **Task 10 当前发布结论：`DONE_WITH_CONCERNS / LOCAL PASS / CLOUD UNVERIFIED`；不得登记 `CLOUD PASS / CLOSED`。**
+
+### 独立审查后候选状态
+
+- 审查前的 `4/4` 只证明旧 helper，不再作为最终候选发布依据。新 E2E 已改为 Canvas UI 创建三模式、Workflow 批准后恢复到 `output-video`、Simple Chat 审批/修改/取消/刷新/返回画布完整链，并在每次批准前直接查 PostgreSQL 确认无提前视频 child。
+- 目录门禁修正为 `30/30/16`，原 29 项逐 ID 保留；doctor 绑定精确四项目 manifest、文件哈希及候选 provenance。
+- 最终专项 `106/106`；PostgreSQL `2/2 skipped`，四项目 browser matrix `0 passed / 4 blocked-as-failed`，共同原因是隔离数据库 URL/凭据不可用。真实云端成功/取消、资产和账务字段仍为 `CLOUD UNVERIFIED`。当前不得沿用 `LOCAL PASS` 或升级发布结论。
+- full gate 已执行：doctor/ts-check/lint/build 退出 0；全仓仍保留一次旧清单断言失败，定向修复后 `29/29` 但未重复全仓；保护门禁受 3 个用户保护脏文件阻塞。发布结论保持 `DONE_WITH_CONCERNS / LOCAL BLOCKED / CLOUD UNVERIFIED`。
