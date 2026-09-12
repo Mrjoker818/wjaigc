@@ -660,6 +660,50 @@ describe('Agent runtime service', () => {
     }));
   });
 
+  it('does not abort an active execution when the same resume is repeated', async () => {
+    const dependencies = serviceDependencies();
+    const created = event(1, 'run.created');
+    const paused = event(2, 'run.paused', { nextStepId: 'generate-2' });
+    const resumed = event(3, 'run.resumed', { nextStepId: 'generate-2', generation: 1 });
+    let resumePersisted = false;
+    let finishExecution: (() => void) | undefined;
+    const completion = new Promise<void>(resolve => {
+      finishExecution = resolve;
+    });
+    const executionSignals: AbortSignal[] = [];
+
+    dependencies.listEvents.mockImplementation(async () => (
+      resumePersisted ? [created, paused, resumed] : [created, paused]
+    ));
+    dependencies.transitionControl = vi.fn(async () => {
+      resumePersisted = true;
+      return {
+        accepted: true,
+        event: resumed,
+        events: [created, paused, resumed],
+        leaseOwner: 'lease-existing',
+      };
+    });
+    dependencies.dispatchExecution = vi.fn(async input => {
+      executionSignals.push(input.signal);
+      return { started: true, completion };
+    });
+    const service = agentRuntime.createAgentRuntimeService(dependencies);
+
+    try {
+      await service.resumeRun({ actorUserId: user.id, runId: 'run-1' });
+      expect(executionSignals[0]?.aborted).toBe(false);
+
+      await service.resumeRun({ actorUserId: user.id, runId: 'run-1' });
+
+      expect(executionSignals[0]?.aborted).toBe(false);
+      expect(dependencies.dispatchExecution).toHaveBeenCalledTimes(1);
+    } finally {
+      finishExecution?.();
+      await completion;
+    }
+  });
+
   it('cancels a paused run through the single terminal refund settlement', async () => {
     const dependencies = serviceDependencies();
     const paused = event(2, 'run.paused', { nextStepId: 'generate-2' });

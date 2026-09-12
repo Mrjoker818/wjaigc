@@ -81,6 +81,9 @@ const TERMINAL_TASK_STATUSES = new Set<string>([
   'timeout',
 ]);
 
+// Process-local duplicate suppression only; durable leases remain authoritative.
+const activeResumedRunSignals = new Map<string, AbortSignal>();
+
 export class AgentRunRequestError extends Error {
   readonly code = 'AGENT_RUN_REQUEST_INVALID';
   readonly status = 400;
@@ -726,7 +729,16 @@ export function createAgentRuntimeService(
     leaseOwner: string;
   }): Promise<{ started: boolean }> {
     if (!input.leaseOwner || !dependencies.dispatchExecution) return { started: false };
+    const existingSignal = activeResumedRunSignals.get(input.runId);
+    if (existingSignal && !existingSignal.aborted) return { started: false };
     const scope = createTaskAbortScope(input.runId);
+    activeResumedRunSignals.set(input.runId, scope.signal);
+    const disposeScope = () => {
+      if (activeResumedRunSignals.get(input.runId) === scope.signal) {
+        activeResumedRunSignals.delete(input.runId);
+      }
+      scope.dispose();
+    };
     try {
       const dispatchInput: AgentRunExecutionDispatchInput = {
         actorUserId: input.actorUserId,
@@ -751,13 +763,13 @@ export function createAgentRuntimeService(
         }).catch(error => {
           if (isExpectedResumedExecutionFenceRejection(error)) return;
           console.error('[agent-runtime] failed to persist resumed execution failure', error);
-        }).finally(scope.dispose);
+        }).finally(disposeScope);
       } else {
-        scope.dispose();
+        disposeScope();
       }
       return { started: started.started };
     } catch (error) {
-      scope.dispose();
+      disposeScope();
       throw error;
     }
   }
