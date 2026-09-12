@@ -305,9 +305,23 @@ async function setupFixture(page: Page, testInfo: TestInfo, directory: string): 
     nodes: [workflowSkill, workflowOutput],
     connections: [workflowConnection],
   };
+  const sourceImageId = `stage4-image-${fixture.browserProfile}`;
+  const sourceVersionId = `stage4-version-${fixture.browserProfile}`;
+  const endSourceImageId = `stage4-end-image-${fixture.browserProfile}`;
+  const endSourceVersionId = `stage4-end-version-${fixture.browserProfile}`;
+  const canvasImages = fixture.canvasProject.canvasImages as Array<Record<string, unknown>>;
+  const sourceImage = canvasImages.find(image => image.id === sourceImageId);
+  if (!sourceImage) throw new Error(`BLOCKED: missing controlled Canvas source image ${sourceImageId}`);
+  canvasImages.push({
+    ...sourceImage,
+    id: endSourceImageId,
+    x: 288,
+    assetVersionId: endSourceVersionId,
+    prompt: 'Stage 4 controlled end frame',
+  });
   await page.request.get('/api/auth/register', { timeout: 60_000 });
   const auth = await ensureStage4Session(page, fixture);
-  await seedStage4RuntimeDependencies({
+  const runtimeSource = await seedStage4RuntimeDependencies({
     auth,
     fixture,
     page,
@@ -318,6 +332,33 @@ async function setupFixture(page: Page, testInfo: TestInfo, directory: string): 
 
   const pool = new Pool({ connectionString });
   const now = Date.now();
+  await pool.query(
+    `INSERT INTO wujie_assets(id, owner_id, project_id, kind, status)
+     VALUES ($1, $2, $3, 'image', 'active') ON CONFLICT (id) DO NOTHING`,
+    [`stage4-end-asset-${fixture.browserProfile}`, auth.userId, fixture.canvasProject.id],
+  );
+  await pool.query(
+    `INSERT INTO wujie_asset_versions(
+       id, asset_id, owner_id, project_id, file_url, mime_type, availability, idempotency_key
+     ) VALUES ($1, $2, $3, $4, $5, 'image/png', 'ready', $6) ON CONFLICT (id) DO UPDATE SET
+       file_url = EXCLUDED.file_url, mime_type = EXCLUDED.mime_type, availability = EXCLUDED.availability`,
+    [endSourceVersionId, `stage4-end-asset-${fixture.browserProfile}`, auth.userId,
+      fixture.canvasProject.id, runtimeSource.canonicalUrl, `stage4:${fixture.browserProfile}:end-source`],
+  );
+  await pool.query(
+    'UPDATE wujie_assets SET current_version_id = $2 WHERE id = $1',
+    [`stage4-end-asset-${fixture.browserProfile}`, endSourceVersionId],
+  );
+  await pool.query(
+    `INSERT INTO wujie_workspace_placements(
+       id, owner_id, project_id, asset_id, asset_version_id, workspace_kind,
+       workspace_id, entity_type, entity_id, status
+     ) VALUES ($1, $2, $3, $4, $5, 'canvas', $6, 'canvas-image', $7, 'active')
+     ON CONFLICT (id) DO NOTHING`,
+    [`stage4-end-placement-${fixture.browserProfile}`, auth.userId, fixture.canvasProject.id,
+      `stage4-end-asset-${fixture.browserProfile}`, endSourceVersionId,
+      `canvas:${fixture.canvasProject.id}`, endSourceImageId],
+  );
   await pool.query(
     `INSERT INTO wujie_api_providers(
        id, name, display_name, base_url, api_key, is_enabled, type, model_type,
@@ -354,7 +395,6 @@ async function setupFixture(page: Page, testInfo: TestInfo, directory: string): 
   );
 
   const projectId = String(fixture.canvasProject.id);
-  const sourceVersionId = `stage4-version-${fixture.browserProfile}`;
   const openCanvas = async (): Promise<void> => {
     await page.request.get(`/?projectId=${encodeURIComponent(projectId)}`, { timeout: 120_000 });
     await page.request.get('/api/session', { timeout: 60_000 });
@@ -381,11 +421,17 @@ async function setupFixture(page: Page, testInfo: TestInfo, directory: string): 
     await skillSearch.fill('Brief 到视频');
   };
 
-  const openCanvasSkill = async (): Promise<void> => {
-    await openCanvas();
+  const activateCanvasSkill = async (): Promise<void> => {
+    const skillSearch = page.getByPlaceholder('搜索 Skills...');
+    if (!await skillSearch.isVisible().catch(() => false)) {
+      await page.getByRole('button', { name: 'AI聊天', exact: true }).click();
+    }
+    if (!await skillSearch.isVisible().catch(() => false)) {
+      await page.getByRole('button', { name: 'Skills技能库' }).click();
+    }
     const close = page.getByTitle('关闭 Skill');
     if (await close.isVisible().catch(() => false)) await close.click();
-    await page.getByPlaceholder('搜索 Skills...').fill('Brief 到视频');
+    await skillSearch.fill('Brief 到视频');
     await page.getByText('Brief 到视频成片', { exact: true }).last().click();
     await expect(page.getByLabel('video 模型', { exact: true })).toBeVisible({ timeout: 30_000 });
     await page.getByLabel('video 模型', { exact: true }).selectOption(`${VIDEO_PROVIDER_ID}::${VIDEO_MODEL_ID}`);
@@ -393,8 +439,16 @@ async function setupFixture(page: Page, testInfo: TestInfo, directory: string): 
 
   const createCanvasRunFromUi = async (mode: VideoMode): Promise<ApprovalIdentity> => {
     await page.keyboard.press('Escape');
-    if (mode !== 'text-to-video') await page.locator('[data-canvas-image-id]').first().click();
-    await openCanvasSkill();
+    await openCanvas();
+    if (mode !== 'text-to-video') {
+      await page.getByRole('button', { name: '收起面板', exact: true }).click();
+      const sourceImage = page.locator(`[data-canvas-image-id="${sourceImageId}"]`);
+      await expect(sourceImage).toBeVisible({ timeout: 30_000 });
+      await sourceImage.click();
+      await expect(sourceImage).toHaveAttribute('data-canvas-selected', 'true');
+      await page.getByRole('button', { name: '展开面板', exact: true }).click();
+    }
+    await activateCanvasSkill();
     await page.getByLabel('创作 Brief', { exact: true }).fill(`${mode} 通勤防晒产品短片`);
     await page.getByLabel('目标受众', { exact: true }).fill('都市通勤人群');
     await page.getByLabel('传播目标', { exact: true }).selectOption('产品转化');
@@ -402,7 +456,7 @@ async function setupFixture(page: Page, testInfo: TestInfo, directory: string): 
     await page.getByLabel('视频时长', { exact: true }).selectOption('5');
     await page.getByLabel('画面比例', { exact: true }).selectOption('9:16');
     await page.getByLabel('分辨率', { exact: true }).selectOption('1080p');
-    if (mode === 'first-last-frame') await page.getByLabel('尾帧', { exact: true }).fill(sourceVersionId);
+    if (mode === 'first-last-frame') await page.getByLabel('尾帧', { exact: true }).fill(endSourceVersionId);
     const submission = page.waitForResponse(response => (
       response.request().method() === 'POST' && new URL(response.url()).pathname === '/api/skill-runs'
     ));

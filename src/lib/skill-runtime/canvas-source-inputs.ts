@@ -38,3 +38,17 @@ export function bindCanvasSkillSourceInputs(
   }
   return contextualInputs;
 }
+
+export function collectCanvasSkillRequestSourceVersionIds(
+  fields: readonly SkillInputField[],
+  values: Readonly<Record<string, unknown>>,
+  contextualSourceVersionIds: readonly string[],
+): string[] {
+  const boundValues = fields.flatMap(field => {
+    if (!field.bindToSourceVersions) return [];
+    const value = values[field.key];
+    if (typeof value === 'string') return [value];
+    return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
+  });
+  return [...new Set([...contextualSourceVersionIds, ...boundValues].filter(value => value.length > 0))];
+}

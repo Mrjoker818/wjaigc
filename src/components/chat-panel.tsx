@@ -76,7 +76,11 @@ import {
   skillStepModelRole,
   type SkillDefinition,
 } from '@/lib/skill-runtime/types';
-import { bindCanvasSkillSourceInputs, collectCanvasSkillSourceVersionIds } from '@/lib/skill-runtime/canvas-source-inputs';
+import {
+  bindCanvasSkillSourceInputs,
+  collectCanvasSkillRequestSourceVersionIds,
+  collectCanvasSkillSourceVersionIds,
+} from '@/lib/skill-runtime/canvas-source-inputs';
 import { MULTI_PLATFORM_EXPORT_SKILL_ID } from '@/lib/skill-runtime/multi-platform-export-preset';
 import { BRIEF_TO_VIDEO_SKILL_ID } from '@/lib/skill-runtime/brief-to-video-preset';
 import { createMultiPlatformExportRequestFingerprint } from '@/lib/skill-runtime/multi-platform-export-client';
@@ -1570,6 +1574,11 @@ export function ChatPanel({ themeStyle, projectId, onAddToPrompt, onAddImages, o
     skillParamValues,
     canvasSkillSourceVersionIds,
   ), [activeSkill?.inputs, canvasSkillSourceVersionIds, skillParamValues]);
+  const canvasSkillRequestSourceVersionIds = useMemo(() => collectCanvasSkillRequestSourceVersionIds(
+    activeSkill?.inputs ?? [],
+    canvasSkillInputValues,
+    canvasSkillSourceVersionIds,
+  ), [activeSkill?.inputs, canvasSkillInputValues, canvasSkillSourceVersionIds]);
   const [mentionPickerOpen, setMentionPickerOpen] = useState(false);
   const [mentionPickerSearch, setMentionPickerSearch] = useState('');
   const [mentionPickerIndex, setMentionPickerIndex] = useState(0);
@@ -4031,7 +4040,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
       projectId,
       workspaceId: `canvas:${projectId}`,
       inputValues: canvasSkillInputValues,
-      sourceVersionIds: canvasSkillSourceVersionIds,
+      sourceVersionIds: canvasSkillRequestSourceVersionIds,
       modelBindings,
       idempotencyKey: createCanvasSkillIdempotencyKey(),
     };
@@ -4040,7 +4049,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
       inputValues: overrides.inputValues,
       sourceVersionIds: overrides.sourceVersionIds,
     } : request;
-  }, [activeSkill, availableChatModels, canvasSkillInputValues, canvasSkillSourceVersionIds, discoveredImageModels, discoveredVideoModels, imageModel, imageModelProviderId, model, projectId, videoModel]);
+  }, [activeSkill, availableChatModels, canvasSkillInputValues, canvasSkillRequestSourceVersionIds, discoveredImageModels, discoveredVideoModels, imageModel, imageModelProviderId, model, projectId, videoModel]);
 
   const hasRequiredCanvasSkillSource = useCallback((): boolean => {
     const requiresManagedSource = activeSkill?.inputs.some(field => (

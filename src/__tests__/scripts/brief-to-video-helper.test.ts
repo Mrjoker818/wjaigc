@@ -25,4 +25,19 @@ describe('Brief-to-video Simple Chat card selection', () => {
       expect(helper).toContain(`getByLabel('${label}', { exact: true })`);
     }
   });
+
+  it('loads Canvas before selecting a visible managed image and does not navigate afterward', async () => {
+    const helper = await readFile(resolve(process.cwd(), 'tests/helpers/brief-to-video.ts'), 'utf8');
+    const createRun = helper.slice(
+      helper.indexOf('const createCanvasRunFromUi'),
+      helper.indexOf('const assertNoVideoChildInDatabase'),
+    );
+
+    expect(createRun.indexOf('await openCanvas()')).toBeLessThan(createRun.indexOf("name: '收起面板'"));
+    expect(createRun.indexOf("name: '收起面板'")).toBeLessThan(createRun.indexOf("data-canvas-image-id=\"${sourceImageId}\""));
+    expect(createRun).toContain("toHaveAttribute('data-canvas-selected', 'true')");
+    expect(createRun).toContain("name: '展开面板'");
+    expect(createRun.indexOf('await activateCanvasSkill()')).toBeGreaterThan(createRun.indexOf("name: '展开面板'"));
+    expect(createRun).toContain("getByLabel('尾帧', { exact: true }).fill(endSourceVersionId)");
+  });
 });

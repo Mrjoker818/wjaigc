@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   bindCanvasSkillSourceInputs,
+  collectCanvasSkillRequestSourceVersionIds,
   collectCanvasSkillSourceVersionIds,
 } from '@/lib/skill-runtime/canvas-source-inputs';
 import type { SkillInputField } from '@/lib/skill-runtime/types';
@@ -40,5 +41,19 @@ describe('Canvas Skill source inputs', () => {
       .toEqual({ startFrame: 'version-a' });
     expect(bindCanvasSkillSourceInputs(frameFields, {}, ['version-a', 'version-b']))
       .toEqual({ startFrame: 'version-a', endFrame: 'version-b' });
+  });
+
+  it('includes explicit source-bound frame values in the submitted authorization list', () => {
+    const frameFields: readonly SkillInputField[] = [
+      { key: 'startFrame', label: '首帧', kind: 'image', required: false, bindToSourceVersions: true },
+      { key: 'endFrame', label: '尾帧', kind: 'image', required: false, bindToSourceVersions: true },
+      { key: 'notes', label: '备注', kind: 'text', required: false },
+    ];
+
+    expect(collectCanvasSkillRequestSourceVersionIds(
+      frameFields,
+      { startFrame: 'version-start', endFrame: 'version-end', notes: 'version-not-a-source' },
+      ['version-start'],
+    )).toEqual(['version-start', 'version-end']);
   });
 });

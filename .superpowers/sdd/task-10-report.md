@@ -43,3 +43,17 @@
 ## 发布判断
 
 本次只提交 Task 10 二次复审修复。当前不得登记本地发布通过或 `CLOUD PASS / CLOSED`。
+
+## 四浏览器业务链后续（本轮）
+
+- 父级使用 `BRIEF_TO_VIDEO_SKILL_ENABLED=true`、`MULTI_PLATFORM_EXPORT_ENABLED=true` 与隔离 PostgreSQL 重新执行真实四浏览器；PostgreSQL 专项保持 `2/2 PASS`，Canvas Skills `30` 已越过。
+- 该轮浏览器结果仍为 `0/4`，不得记为通过。Chromium、Firefox、WebKit 在第三种 `first-last-frame` Canvas UI 提交返回 HTTP 500 `SKILL_RUN_ERROR`；mobile-chromium 在第二种 `image-to-video` 前等待 `[data-canvas-image-id]` 15 秒超时。
+- trace 证明三次 Canvas POST 的 `sourceVersionIds` 均为空；第三次同时携带未纳入授权来源的 `endFrame=stage4-version-<browser>`，触发严格来源绑定拒绝。原因是 helper 先点击图像、随后 `openCanvasSkill()` 再次导航，清空了选中态。
+- 375px 截图与代码证明右侧面板展开宽度为 `min(480px, 100vw)`，画布虚拟化仍按 480px 占用宽度计算，375px 下可用宽度收缩为 1px，因此源图元素未挂载。
+
+### 本轮修复与 TDD
+
+- RED：`canvas-skill-source-inputs` 新增反例，要求显式首帧/尾帧字段并入提交授权列表；helper 合同要求最后一次 Canvas 导航发生在选图前，并要求真实收起面板、按稳定 image id 点击、断言选中、再展开面板。首次定向结果为 `2 failed / 6 passed`。
+- GREEN：Canvas 请求从上下文来源和所有 `bindToSourceVersions` 表单值合并、去重来源版本；Task 10 fixture 增加独立受管尾帧 Asset/AssetVersion/Placement；helper 在最后一次导航后收起面板，使 375px 源图重新进入虚拟化可见区，真实点击并确认 `data-canvas-selected=true` 后再展开、激活 Skill，尾帧通过 UI 填入独立版本。
+- 定向 Vitest：`src/__tests__/lib/canvas-skill-source-inputs.test.ts`、`src/__tests__/scripts/brief-to-video-helper.test.ts`、`src/__tests__/components/chat-panel-skill-runtime.test.tsx` 共 `13/13 PASS`。
+- `pnpm run ts-check` 退出 0。按父级要求未运行 Playwright 或全仓测试；本修复后的四浏览器结果等待父级复跑，当前状态继续为 `LOCAL BLOCKED / CLOUD UNVERIFIED`。

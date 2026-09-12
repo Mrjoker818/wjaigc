@@ -50,7 +50,7 @@ describe('canvas chat shared Skill runtime wiring', () => {
     expect(source).toContain('skillId: executionSkill.id');
     expect(source).toContain('skillVersion: executionSkill.version');
     expect(source).toContain('for (const role of requiredSkillModelRoles(executionSkill))');
-    expect(source).toContain('sourceVersionIds: canvasSkillSourceVersionIds');
+    expect(source).toContain('sourceVersionIds: canvasSkillRequestSourceVersionIds');
     expect(source).toContain('const estimate = await skillRun.estimateRun(request)');
     expect(source).toContain('setSkillEstimateRequestFingerprint(estimate && request.skillId === MULTI_PLATFORM_EXPORT_SKILL_ID');
     expect(source).toContain('await startCanvasSkillRun(');
@@ -71,13 +71,14 @@ describe('canvas chat shared Skill runtime wiring', () => {
     expect(source).toContain('deleteCanvasSkillsSequentially(userSkills.map(skill => skill.id))');
   });
 
-  it('shows the same selected canvas source versions that estimate and run submit', () => {
-    expect(source).toContain("import { bindCanvasSkillSourceInputs, collectCanvasSkillSourceVersionIds } from '@/lib/skill-runtime/canvas-source-inputs';");
+  it('shows and submits the same selected and explicitly bound canvas source versions', () => {
+    expect(source).toContain('collectCanvasSkillRequestSourceVersionIds,');
     expect(source).toContain('const canvasSkillSourceVersionIds = useMemo(() => collectCanvasSkillSourceVersionIds({');
     expect(source).toContain('const canvasSkillInputValues = useMemo(() => bindCanvasSkillSourceInputs(');
+    expect(source).toContain('const canvasSkillRequestSourceVersionIds = useMemo(() => collectCanvasSkillRequestSourceVersionIds(');
     expect(source).toContain('values={canvasSkillInputValues}');
     expect(source).toContain('inputValues: canvasSkillInputValues');
-    expect(source).toContain('sourceVersionIds: canvasSkillSourceVersionIds');
+    expect(source).toContain('sourceVersionIds: canvasSkillRequestSourceVersionIds');
   });
 
   it('reports a missing managed source version before estimate or run submission', () => {
