@@ -387,22 +387,22 @@ async function setupFixture(page: Page, testInfo: TestInfo, directory: string): 
     if (await close.isVisible().catch(() => false)) await close.click();
     await page.getByPlaceholder('搜索 Skills...').fill('Brief 到视频');
     await page.getByText('Brief 到视频成片', { exact: true }).last().click();
-    await expect(page.getByLabel('video 模型')).toBeVisible({ timeout: 30_000 });
-    await page.getByLabel('video 模型').selectOption(`${VIDEO_PROVIDER_ID}::${VIDEO_MODEL_ID}`);
+    await expect(page.getByLabel('video 模型', { exact: true })).toBeVisible({ timeout: 30_000 });
+    await page.getByLabel('video 模型', { exact: true }).selectOption(`${VIDEO_PROVIDER_ID}::${VIDEO_MODEL_ID}`);
   };
 
   const createCanvasRunFromUi = async (mode: VideoMode): Promise<ApprovalIdentity> => {
     await page.keyboard.press('Escape');
     if (mode !== 'text-to-video') await page.locator('[data-canvas-image-id]').first().click();
     await openCanvasSkill();
-    await page.getByLabel('创作 Brief').fill(`${mode} 通勤防晒产品短片`);
-    await page.getByLabel('目标受众').fill('都市通勤人群');
-    await page.getByLabel('传播目标').selectOption('产品转化');
-    await page.getByLabel('发布平台').selectOption('抖音');
-    await page.getByLabel('视频时长').selectOption('5');
-    await page.getByLabel('画面比例').selectOption('9:16');
-    await page.getByLabel('分辨率').selectOption('1080p');
-    if (mode === 'first-last-frame') await page.getByLabel('尾帧').fill(sourceVersionId);
+    await page.getByLabel('创作 Brief', { exact: true }).fill(`${mode} 通勤防晒产品短片`);
+    await page.getByLabel('目标受众', { exact: true }).fill('都市通勤人群');
+    await page.getByLabel('传播目标', { exact: true }).selectOption('产品转化');
+    await page.getByLabel('发布平台', { exact: true }).selectOption('抖音');
+    await page.getByLabel('视频时长', { exact: true }).selectOption('5');
+    await page.getByLabel('画面比例', { exact: true }).selectOption('9:16');
+    await page.getByLabel('分辨率', { exact: true }).selectOption('1080p');
+    if (mode === 'first-last-frame') await page.getByLabel('尾帧', { exact: true }).fill(sourceVersionId);
     const submission = page.waitForResponse(response => (
       response.request().method() === 'POST' && new URL(response.url()).pathname === '/api/skill-runs'
     ));
@@ -596,7 +596,7 @@ async function setupFixture(page: Page, testInfo: TestInfo, directory: string): 
     async assertMobileApprovalExperience() {
       const viewportWidth = page.viewportSize()?.width ?? 0;
       expect(viewportWidth).toBe(375);
-      const modelMenu = page.getByLabel('video 模型');
+      const modelMenu = page.getByLabel('video 模型', { exact: true });
       await modelMenu.selectOption(`${VIDEO_PROVIDER_ID}::${VIDEO_MODEL_ID}`);
       const approve = page.getByRole('button', { name: '批准生成' });
       const revise = page.getByRole('button', { name: '修改脚本' });

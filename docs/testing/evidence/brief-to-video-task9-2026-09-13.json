@@ -3,13 +3,13 @@
   "feature": "brief-to-video-finished-film",
   "task": 10,
   "generatedAt": "2026-09-13T04:24:00+08:00",
-  "candidateSha": "09295d0b78ab7143990b2954a0c7e7c35801fe0b5e048cecb0ffdea234d8e91a",
+  "candidateSha": "b7c39833275cc4041696040da2a617e26824360277ab08620ce111121e724d3a",
   "sourceCommit": {
     "scheme": "git-parent-subtrees-v1",
-    "expectedParentCommit": "b128ba5adfb81c86a6473305bc47a515b7d1e9cd",
+    "expectedParentCommit": "b64b85d26cf917f477f9fc8ac9a6d65c7bd98556",
     "candidateTrees": {
-      "src": "058348bd03b5954bd1736ea536a1d2cec22f72c2",
-      "tests": "6adca5320e59c655a741c58579d676b760f566ac",
+      "src": "257bc8023bc2852294bb19dd63d5b5dcb8e1e224",
+      "tests": "ee5ab5c7931f198044cdddf875a427c36079dd0e",
       "scripts": "d49111f3bad800c2553283a91f7761cd6ee380e7"
     }
   },

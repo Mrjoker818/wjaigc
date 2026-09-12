@@ -53,7 +53,7 @@ describe('Task 10 independent review contracts', () => {
     expect(helper).toContain('assertNoOverlap');
     expect(helper).toContain('viewportWidth');
     expect(helper).toContain('scrollHeight');
-    expect(helper).toContain("getByLabel('video 模型')");
+    expect(helper).toContain("getByLabel('video 模型', { exact: true })");
     expect(helper).toContain('.selectOption(');
     expect(helper).toContain('.click()');
   });

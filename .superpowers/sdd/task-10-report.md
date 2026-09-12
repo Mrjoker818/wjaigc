@@ -29,10 +29,16 @@
 
 ## 当前阻塞
 
-- 本轮四浏览器业务矩阵没有可用隔离数据库，因此未进入三工作区 UI 链。
-- PostgreSQL 专项缺 `POSTGRES_TEST_DATABASE_URL`，条件跳过不计为通过。
+- 父级已解除隔离数据库、账号、迁移和 feature flag 阻塞，PostgreSQL 专项真实执行 `2/2 PASS`。
+- 四浏览器已进入 Canvas 业务链且 Canvas 目录 `30` 均通过；该轮 `0/4`，四项目一致停在 `tests/helpers/brief-to-video.ts:403` 的“画面比例”宽松 label strict-mode 歧义，不能写成浏览器通过。
 - 保护门禁仍受三个既有用户保护脏文件阻塞；这些文件未被本任务修改或暂存。
 - 未部署云端 exact commit，真实供应商成功/取消、远程 task、退款交易、父版本、MIME、签名、时长、分辨率和制品哈希均未验证。
+
+## 定位器后续修复
+
+- RED：新增 helper 合同要求 Canvas Brief 表单 9 个可访问标签全部使用 `{ exact: true }`，初始为 `1 failed / 2 passed`。
+- GREEN：统一收紧 video 模型、创作 Brief、目标受众、传播目标、发布平台、视频时长、画面比例、分辨率和尾帧定位器；旧审查合同同步改为精确匹配，最终定向 `7/7 PASS`。
+- `pnpm run ts-check` 退出 0。按父级要求未运行 Playwright 或全仓测试，父级将从真实环境继续矩阵。
 
 ## 发布判断
 
