@@ -3,6 +3,7 @@ import { projectWorkflowSkillRun, type WorkflowSkillAssetReference } from '../wo
 import { parseDurableSkillOutputsIsolated } from './structured-output';
 import { MULTI_PLATFORM_EXPORT_SKILL_ID } from './multi-platform-export-preset';
 import { loadEnabledPlatformExportPresets } from './multi-platform-export-client';
+import { parseSkillApprovalState } from './approval';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -92,8 +93,11 @@ export async function loadSavedWorkflowSkillResult(input: {
   }
   input.signal.throwIfAborted();
   const parsedOutputs = parseDurableSkillOutputsIsolated(run.outputs);
+  const approval = run.approval === undefined ? undefined : parseSkillApprovalState(run.approval);
   return {
-    status: run.status === 'completed' ? 'success' : ['failed', 'timeout'].includes(run.status) ? 'error'
+    status: run.status === 'completed' ? 'success'
+      : run.status === 'paused' && run.approval !== undefined ? 'waiting-approval'
+      : ['failed', 'timeout'].includes(run.status) ? 'error'
       : ['created', 'queued', 'planning', 'awaiting-confirmation', 'executing', 'uploading'].includes(run.status) ? 'running' : run.status,
     output: projectWorkflowSkillRun({
       runId: input.runId,
@@ -101,6 +105,7 @@ export async function loadSavedWorkflowSkillResult(input: {
       assetVersionIds: run.assetVersionIds as string[],
       outputs: parsedOutputs.outputs,
       ...(parsedOutputs.errors.length > 0 ? { outputErrors: parsedOutputs.errors } : {}),
+      ...(approval ? { approval } : {}),
     }, references),
   };
 }

@@ -354,6 +354,7 @@ describe('workflow Skill Run execution', () => {
     const activeSkillRuns: Record<string, string> = {};
     const activeLayerTasks: Record<string, string> = {};
     const cancellationState = { cancelled: false };
+    const recoveryLeaseState = { lost: false };
     const persistActiveSkillRuns = vi.fn().mockResolvedValue(undefined);
     const parent = {
       userId: 'user-1',
@@ -364,6 +365,10 @@ describe('workflow Skill Run execution', () => {
       activeLayerTasks,
       cancellationState,
       persistActiveSkillRuns,
+      recoveryLeaseOwner: 'lease-owner',
+      recoveryLeaseTaskId: 'root-execution',
+      recoveryLeaseLost: false,
+      recoveryLeaseState,
     };
 
     const child = inheritNestedWorkflowExecutionContext(parent);
@@ -373,6 +378,10 @@ describe('workflow Skill Run execution', () => {
     expect(child.activeLayerTasks).toBe(activeLayerTasks);
     expect(child.cancellationState).toBe(cancellationState);
     expect(child.persistActiveSkillRuns).toBe(persistActiveSkillRuns);
+    expect(child.recoveryLeaseOwner).toBe('lease-owner');
+    expect(child.recoveryLeaseTaskId).toBe('root-execution');
+    expect(child.recoveryLeaseLost).toBe(false);
+    expect(child.recoveryLeaseState).toBe(recoveryLeaseState);
   });
 
   it('namespaces equal local node ids by nested execution identity', () => {

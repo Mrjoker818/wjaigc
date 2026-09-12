@@ -35,6 +35,7 @@ import { createPostgresAssetStorage } from '@/lib/asset-core/storage';
 import { resolveWorkflowExecutionScope } from '@/lib/workflow-execution-scope';
 import {
   cancelWorkflowSkillRun,
+  continueWorkflowSkillRun,
   executeWorkflowSkillRun,
   resumeWorkflowSkillRun,
   WorkflowSkillRunTerminalError,
@@ -51,14 +52,21 @@ import { findProviderForModel, findProviderForFeature, findProviderById } from '
 import { normalizeModelForApi } from '@/lib/model-capabilities';
 import { validateApiInputs } from '@/lib/api-validator';
 import { logError, OP_ACTIONS } from '@/lib/op-log';
-import { createCloudTask, getCloudTaskForUser, updateCloudTask } from '@/lib/cloud-task-storage';
+import {
+  claimCloudTaskLease,
+  createCloudTask,
+  getCloudTaskForUser,
+  releaseCloudTaskLease,
+  renewCloudTaskLease,
+  updateCloudTask,
+} from '@/lib/cloud-task-storage';
 import {
   buildWorkflowLayerIdempotencyKey,
   cancelLayerWorkflowTask,
   executeLayerWorkflowTask,
 } from '@/lib/workflow-layer-task';
 
-type WorkflowExecutionStatus = 'running' | 'completed' | 'failed' | 'cancelled';
+type WorkflowExecutionStatus = 'running' | 'paused' | 'completed' | 'failed' | 'cancelled';
 
 interface WorkflowExecutionState {
   status: WorkflowExecutionStatus;
@@ -79,6 +87,48 @@ interface WorkflowExecutionState {
   cancellationState?: { cancelled: boolean };
   persistActiveSkillRuns?: () => Promise<void>;
   retryAttempts?: Record<string, number>;
+  executionNodes?: WorkflowNode[];
+  executionConnections?: WorkflowConnection[];
+  recoveryStarted?: boolean;
+  recoveryLeaseOwner?: string;
+  recoveryLeaseTaskId?: string;
+  recoveryLeaseLost?: boolean;
+  recoveryLeaseState?: { lost: boolean };
+  loopResume?: {
+    loopNodeId: string;
+    iterationIndex: number;
+    nextNodeIndex: number;
+    pausedNodeId?: string;
+    lastLoopOutput?: Record<string, unknown>;
+  };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+async function renewRecoveryLeaseBeforeDispatch(
+  executionId: string,
+  execState: WorkflowExecutionState,
+): Promise<boolean> {
+  if (execState.recoveryLeaseState?.lost) {
+    execState.recoveryLeaseLost = true;
+    return false;
+  }
+  if (!execState.recoveryLeaseOwner) return true;
+  try {
+    const renewed = await renewCloudTaskLease(
+      execState.recoveryLeaseTaskId || executionId,
+      execState.recoveryLeaseOwner,
+      120_000,
+    );
+    if (renewed) return true;
+  } catch {
+    // A failed ownership check must stop this worker before it dispatches paid work.
+  }
+  execState.recoveryLeaseLost = true;
+  if (execState.recoveryLeaseState) execState.recoveryLeaseState.lost = true;
+  return false;
 }
 
 async function buildExecutableNodeRequest(
@@ -205,10 +255,11 @@ async function executeSkillWorkflowTask(input: {
     const output = input.resume
       ? await resumeWorkflowSkillRun({ ...runOptions, ...input.resume })
       : await executeWorkflowSkillRun({ ...runOptions, requestBody: input.requestBody });
-    activeRunTerminal = true;
+    const waitingApproval = output.status === 'waiting-approval';
+    activeRunTerminal = !waitingApproval;
     return {
       nodeId: input.node.id,
-      status: 'success',
+      status: waitingApproval ? 'waiting-approval' : 'success',
       output,
       durationMs: Date.now() - startedAt,
     };
@@ -230,6 +281,122 @@ async function executeSkillWorkflowTask(input: {
       delete input.execState.activeSkillRuns?.[activeRunKey];
       await persistActiveRuns();
     }
+  }
+}
+
+async function continueApprovedSkillWorkflow(input: {
+  executionId: string;
+  execState: WorkflowExecutionState;
+  node: WorkflowNode;
+  nodes: WorkflowNode[];
+  connections: WorkflowConnection[];
+  submitUrl: string;
+  headers: HeadersInit;
+  runId: string;
+  leaseOwner: string;
+}): Promise<void> {
+  const startedAt = Date.now();
+  let leaseLost = false;
+  const markLeaseLost = (): void => {
+    leaseLost = true;
+    input.execState.recoveryLeaseLost = true;
+    if (input.execState.recoveryLeaseState) input.execState.recoveryLeaseState.lost = true;
+  };
+  const leaseHeartbeat = setInterval(() => {
+    void renewCloudTaskLease(input.executionId, input.leaseOwner, 120_000)
+      .then(renewed => {
+        if (!renewed) markLeaseLost();
+      })
+      .catch(markLeaseLost);
+  }, 30_000);
+  leaseHeartbeat.unref?.();
+  try {
+    const storage = createPostgresAssetStorage();
+    const output = await continueWorkflowSkillRun({
+      submitUrl: input.submitUrl,
+      runId: input.runId,
+      headers: input.headers,
+      onProgress: async run => {
+        if (!await renewCloudTaskLease(input.executionId, input.leaseOwner, 120_000)) {
+          markLeaseLost();
+          throw new Error('Workflow 恢复租约已失效');
+        }
+        input.execState.results[input.node.id] = {
+          nodeId: input.node.id,
+          status: 'running',
+          output: { runId: run.runId, taskId: run.runId, status: run.status },
+          durationMs: Date.now() - startedAt,
+        };
+        await persistWorkflowExecution(input.executionId, input.execState);
+      },
+      resolveAssetVersion: async versionId => {
+        if (!input.execState.userId || !input.execState.projectId) return null;
+        return storage.read(async transaction => {
+          const version = await transaction.findVersion(
+            input.execState.userId!, input.execState.projectId!, versionId,
+          );
+          if (!version) return null;
+          const asset = await transaction.findAsset(
+            input.execState.userId!, input.execState.projectId!, version.assetId,
+          );
+          return asset ? {
+            assetId: version.assetId, assetVersionId: version.id,
+            url: version.file.url, kind: asset.kind,
+          } : null;
+        });
+      },
+    });
+    if (output.status === 'waiting-approval') {
+      input.execState.results[input.node.id] = {
+        nodeId: input.node.id, status: 'waiting-approval', output,
+        durationMs: Date.now() - startedAt,
+      };
+      input.execState.status = 'paused';
+      input.execState.currentNodeId = input.node.id;
+      await persistWorkflowExecution(input.executionId, input.execState);
+      return;
+    }
+    input.execState.results[input.node.id] = {
+      nodeId: input.node.id, status: 'success', output,
+      durationMs: Date.now() - startedAt,
+    };
+    if (input.execState.loopResume?.pausedNodeId === input.node.id) {
+      input.execState.loopResume.lastLoopOutput = output;
+    }
+    for (const [key, activeRunId] of Object.entries(input.execState.activeSkillRuns || {})) {
+      if (activeRunId === input.runId) delete input.execState.activeSkillRuns?.[key];
+    }
+    input.execState.status = 'running';
+    if (leaseLost) return;
+    input.execState.recoveryLeaseOwner = input.leaseOwner;
+    input.execState.recoveryLeaseTaskId = input.executionId;
+    input.execState.recoveryLeaseState = { lost: false };
+    await executeWorkflow(
+      input.executionId, input.execState, input.nodes, input.connections,
+    );
+  } catch (error) {
+    if (leaseLost) return;
+    const terminal = error instanceof WorkflowSkillRunTerminalError ? error : null;
+    input.execState.results[input.node.id] = {
+      nodeId: input.node.id,
+      status: 'failed',
+      ...(terminal ? { output: terminal.output } : {}),
+      error: error instanceof Error ? error.message : String(error),
+      durationMs: Date.now() - startedAt,
+    };
+    input.execState.status = 'failed';
+    input.execState.completedAt = Date.now();
+    for (const [key, activeRunId] of Object.entries(input.execState.activeSkillRuns || {})) {
+      if (activeRunId === input.runId) delete input.execState.activeSkillRuns?.[key];
+    }
+    await persistWorkflowExecution(input.executionId, input.execState);
+  } finally {
+    clearInterval(leaseHeartbeat);
+    delete input.execState.recoveryLeaseOwner;
+    delete input.execState.recoveryLeaseTaskId;
+    delete input.execState.recoveryLeaseState;
+    if (leaseLost || input.execState.recoveryLeaseLost) executionCache.delete(input.executionId);
+    await releaseCloudTaskLease(input.executionId, input.leaseOwner).catch(() => false);
   }
 }
 
@@ -330,7 +497,7 @@ if (wfCleanupTimer && typeof wfCleanupTimer === 'object' && 'unref' in wfCleanup
 }
 
 function toCloudWorkflowStatus(status: WorkflowExecutionStatus): 'processing' | 'completed' | 'failed' | 'cancelled' {
-  return status === 'running' ? 'processing' : status;
+  return status === 'running' || status === 'paused' ? 'processing' : status;
 }
 
 function fromCloudWorkflowStatus(status: string): WorkflowExecutionStatus {
@@ -344,17 +511,28 @@ async function persistWorkflowExecution(executionId: string, execState: Workflow
   try {
     await updateCloudTask(executionId, {
       status: toCloudWorkflowStatus(execState.status),
-      progress: execState.status === 'running'
+      progress: execState.status === 'running' || execState.status === 'paused'
         ? Math.min(99, Math.round((Object.keys(execState.results).length / Math.max(execState.totalNodes, 1)) * 100))
         : 100,
       label: execState.currentNodeId ? `执行节点 ${execState.currentNodeId}` : '工作流执行',
       result: {
+        workflowStatus: execState.status,
+        projectId: execState.projectId,
+        workflowId: execState.workflowId,
+        totalNodes: execState.totalNodes,
         currentNodeId: execState.currentNodeId,
         results: execState.results,
         startedAt: execState.startedAt,
-         completedAt: execState.completedAt,
-         activeSkillRuns: execState.activeSkillRuns,
-         submissionPayload: {
+        completedAt: execState.completedAt,
+        activeSkillRuns: execState.activeSkillRuns,
+        loopResume: execState.loopResume,
+        ...(execState.executionNodes?.some(node => node.type === 'ai-skill') ? {
+          executionGraph: {
+            nodes: execState.executionNodes,
+            connections: execState.executionConnections || [],
+          },
+        } : {}),
+        submissionPayload: {
           assetWorkspace: 'workflow',
           assetWorkspaceId: `workflow:${execState.projectId || executionId}`,
         },
@@ -364,6 +542,80 @@ async function persistWorkflowExecution(executionId: string, execState: Workflow
   } catch (error) {
     console.warn('[Workflow] 执行状态持久化失败:', error);
   }
+}
+
+async function restorePausedWorkflowExecution(input: {
+  executionId: string;
+  userId: string;
+  userRole: 'user' | 'admin';
+  userProductType?: string;
+  expectedProjectId?: string;
+  expectedWorkflowId?: string;
+}): Promise<WorkflowExecutionState | null> {
+  const persisted = await getCloudTaskForUser(input.executionId, input.userId);
+  if (!persisted || persisted.type !== 'workflow' || !isRecord(persisted.result)) return null;
+  const persistedResult = persisted.result;
+  if (!['paused', 'running'].includes(String(persistedResult.workflowStatus))
+    || !isRecord(persistedResult.executionGraph)) return null;
+  const graph = persistedResult.executionGraph;
+  if (!Array.isArray(graph.nodes) || !Array.isArray(graph.connections)
+    || !graph.nodes.every(node => isRecord(node) && typeof node.id === 'string')
+    || !graph.connections.every(connection => isRecord(connection))) return null;
+  const projectId = typeof persistedResult.projectId === 'string'
+    ? persistedResult.projectId
+    : persisted.projectId;
+  const workflowId = typeof persistedResult.workflowId === 'string'
+    ? persistedResult.workflowId
+    : undefined;
+  if ((input.expectedProjectId && projectId !== input.expectedProjectId)
+    || (input.expectedWorkflowId && workflowId !== input.expectedWorkflowId)
+    || !isRecord(persistedResult.results)) return null;
+  const activeSkillRuns = isRecord(persistedResult.activeSkillRuns)
+    ? Object.fromEntries(Object.entries(persistedResult.activeSkillRuns)
+      .filter((entry): entry is [string, string] => typeof entry[1] === 'string'))
+    : {};
+  const persistedLoopResume = isRecord(persistedResult.loopResume)
+    && typeof persistedResult.loopResume.loopNodeId === 'string'
+    && Number.isSafeInteger(persistedResult.loopResume.iterationIndex)
+    && Number.isSafeInteger(persistedResult.loopResume.nextNodeIndex)
+    ? {
+        loopNodeId: persistedResult.loopResume.loopNodeId,
+        iterationIndex: Number(persistedResult.loopResume.iterationIndex),
+        nextNodeIndex: Number(persistedResult.loopResume.nextNodeIndex),
+        ...(typeof persistedResult.loopResume.pausedNodeId === 'string'
+          ? { pausedNodeId: persistedResult.loopResume.pausedNodeId }
+          : {}),
+        ...(isRecord(persistedResult.loopResume.lastLoopOutput)
+          ? { lastLoopOutput: persistedResult.loopResume.lastLoopOutput }
+          : {}),
+      }
+    : undefined;
+  const restored: WorkflowExecutionState = {
+    status: persistedResult.workflowStatus as 'paused' | 'running',
+    results: persistedResult.results as Record<string, ExecutionResult>,
+    currentNodeId: typeof persistedResult.currentNodeId === 'string' ? persistedResult.currentNodeId : null,
+    startedAt: typeof persistedResult.startedAt === 'number' ? persistedResult.startedAt : persisted.createdAt,
+    completedAt: null,
+    userId: input.userId,
+    projectId,
+    workflowId,
+    userRole: input.userRole,
+    userProductType: input.userProductType,
+    totalNodes: typeof persistedResult.totalNodes === 'number'
+      ? persistedResult.totalNodes
+      : graph.nodes.length,
+    activeLayerTasks: {},
+    activeSkillRuns,
+    pendingSkillSubmissions: {},
+    cancellationState: { cancelled: false },
+    retryAttempts: {},
+    executionNodes: graph.nodes as WorkflowNode[],
+    executionConnections: graph.connections as unknown as WorkflowConnection[],
+    ...(persistedLoopResume ? { loopResume: persistedLoopResume } : {}),
+  };
+  restored.persistActiveSkillRuns = () => persistWorkflowExecution(input.executionId, restored);
+  executionCache.set(input.executionId, restored);
+  return restored;
 }
 
 function hydrateInlineSubgraphInputs(nodes: WorkflowNode[], parentInputs: Record<string, unknown>): WorkflowNode[] {
@@ -422,15 +674,73 @@ export async function POST(request: NextRequest) {
       if (!executionId) {
         return NextResponse.json({ error: '缺少 executionId' }, { status: 400 });
       }
-      const exec = executionCache.get(executionId);
+      let exec = executionCache.get(executionId);
       if (!exec) {
         if (auth.userId) {
+          exec = await restorePausedWorkflowExecution({
+            executionId,
+            userId: auth.userId,
+            userRole: auth.userRole === 'admin' ? 'admin' : 'user',
+            userProductType: auth.user.productType,
+          }) || undefined;
+          if (exec?.status === 'running' && !exec.recoveryStarted && exec.currentNodeId
+            && exec.executionNodes && exec.executionConnections) {
+            const node = exec.executionNodes.find(candidate => candidate.id === exec!.currentNodeId);
+            const runId = exec.results[exec.currentNodeId]?.output?.runId;
+            if (node?.type === 'ai-skill' && typeof runId === 'string') {
+              const leaseOwner = `workflow-recovery:${crypto.randomUUID()}`;
+              let leaseAcquired = false;
+              try {
+                const lease = await claimCloudTaskLease(executionId, leaseOwner, 120_000);
+                if (lease) {
+                  leaseAcquired = true;
+                  const internalHeaders = await getInternalRequestHeaders(
+                    auth.userId, auth.userRole === 'admin' ? 'admin' : 'user', auth.user.productType,
+                  );
+                  exec.recoveryStarted = true;
+                  void continueApprovedSkillWorkflow({
+                    executionId,
+                    execState: exec,
+                    node,
+                    nodes: exec.executionNodes,
+                    connections: exec.executionConnections,
+                    submitUrl: `http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}/api/skill-runs`,
+                    headers: { 'Content-Type': 'application/json', ...internalHeaders },
+                    runId,
+                    leaseOwner,
+                  });
+                  leaseAcquired = false;
+                } else {
+                  executionCache.delete(executionId);
+                  exec = undefined;
+                }
+              } catch (error) {
+                if (leaseAcquired) {
+                  await releaseCloudTaskLease(executionId, leaseOwner).catch(() => false);
+                }
+                executionCache.delete(executionId);
+                exec = undefined;
+                throw error;
+              }
+            }
+          }
+          if (exec) {
+            return NextResponse.json({
+              executionId,
+              status: exec.status,
+              currentNodeId: exec.currentNodeId,
+              results: exec.results,
+              startedAt: exec.startedAt,
+              completedAt: exec.completedAt,
+              error: exec.error,
+            });
+          }
           const persisted = await getCloudTaskForUser(executionId, auth.userId);
           if (persisted?.type === 'workflow') {
             const result = persisted.result || {};
             return NextResponse.json({
               executionId,
-              status: fromCloudWorkflowStatus(persisted.status),
+              status: result.workflowStatus === 'paused' ? 'paused' : fromCloudWorkflowStatus(persisted.status),
               currentNodeId: result.currentNodeId || null,
               results: result.results || {},
               startedAt: result.startedAt || persisted.createdAt,
@@ -740,12 +1050,94 @@ export async function POST(request: NextRequest) {
     }
 
     // ─── 启动执行 ───
-    if (action !== 'start') {
-      return NextResponse.json({ error: '无效的 action，支持: start, status, cancel, retry' }, { status: 400 });
+    if (action !== 'start' && action !== 'approve-skill') {
+      return NextResponse.json({ error: '无效的 action，支持: start, status, cancel, retry, approve-skill' }, { status: 400 });
     }
 
     if (!nodes || !Array.isArray(nodes) || nodes.length === 0) {
       return NextResponse.json({ error: '节点列表不能为空' }, { status: 400 });
+    }
+
+    if (action === 'approve-skill') {
+      if (!executionId || typeof body.nodeId !== 'string' || !Array.isArray(nodes) || !Array.isArray(connections)) {
+        return NextResponse.json({ error: '缺少 Workflow 审批上下文' }, { status: 400 });
+      }
+      const exec = executionCache.get(executionId) || await restorePausedWorkflowExecution({
+        executionId,
+        userId: auth.userId,
+        userRole: auth.userRole === 'admin' ? 'admin' : 'user',
+        userProductType: auth.user.productType,
+        expectedProjectId: typeof projectId === 'string' ? projectId : undefined,
+        expectedWorkflowId: typeof workflowId === 'string' ? workflowId : undefined,
+      });
+      if (!exec) return NextResponse.json({ error: '执行实例不存在、已过期或不在待审批状态' }, { status: 404 });
+      if (exec.userId && exec.userId !== auth.userId) {
+        return NextResponse.json({ error: '无权审批该执行记录' }, { status: 403 });
+      }
+      if (!exec.executionNodes || !exec.executionConnections) {
+        return NextResponse.json({ error: '执行快照缺失，无法安全继续审批' }, { status: 409 });
+      }
+      const approvalNodes = exec.executionNodes;
+      const approvalConnections = exec.executionConnections;
+      const node = approvalNodes.find((candidate: WorkflowNode) => candidate.id === body.nodeId);
+      const previous = exec.results[body.nodeId];
+      const runId = previous?.output?.runId;
+      if (exec.status !== 'paused' || !node || node.type !== 'ai-skill' || previous?.status !== 'waiting-approval'
+        || typeof runId !== 'string') {
+        return NextResponse.json({ error: '节点不在待审批状态' }, { status: 409 });
+      }
+      const controlAction = body.controlAction;
+      if (!['approve', 'revise', 'cancel'].includes(controlAction)) {
+        return NextResponse.json({ error: '审批操作无效' }, { status: 400 });
+      }
+      const leaseOwner = `workflow-approval:${crypto.randomUUID()}`;
+      const lease = await claimCloudTaskLease(executionId, leaseOwner, 120_000);
+      if (!lease) {
+        return NextResponse.json({ error: '该审批正在处理，请勿重复提交' }, { status: 409 });
+      }
+      let leaseTransferred = false;
+      try {
+      const internalHeaders = await getInternalRequestHeaders(
+        auth.userId, auth.userRole === 'admin' ? 'admin' : 'user', auth.user.productType,
+      );
+      const controlBody: Record<string, unknown> = { action: controlAction };
+      if (controlAction !== 'cancel') {
+        controlBody.revision = body.revision;
+        controlBody.generation = body.generation;
+        controlBody.planChecksum = body.planChecksum;
+      }
+      if (controlAction === 'revise') controlBody.revisionInstruction = body.revisionInstruction;
+      const submitUrl = `http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}/api/skill-runs`;
+      const response = await fetch(`${submitUrl}/${encodeURIComponent(runId)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', ...internalHeaders },
+        body: JSON.stringify(controlBody),
+      });
+      const payload = await response.json().catch(() => null) as Record<string, unknown> | null;
+      if (!response.ok) {
+        return NextResponse.json(payload || { error: 'Workflow 审批失败' }, { status: response.status });
+      }
+      if (controlAction === 'cancel') {
+        exec.status = 'cancelled';
+        exec.completedAt = Date.now();
+        exec.results[body.nodeId] = { ...previous, status: 'failed', error: '用户取消任务' };
+        await persistWorkflowExecution(executionId, exec);
+        return NextResponse.json({ accepted: true, executionId, status: 'cancelled' });
+      }
+      exec.status = 'running';
+      exec.currentNodeId = body.nodeId;
+      await persistWorkflowExecution(executionId, exec);
+      leaseTransferred = true;
+      void continueApprovedSkillWorkflow({
+        executionId, execState: exec, node, nodes: approvalNodes, connections: approvalConnections,
+        submitUrl, headers: { 'Content-Type': 'application/json', ...internalHeaders }, runId, leaseOwner,
+      });
+      return NextResponse.json({ accepted: true, executionId, status: 'running' });
+      } finally {
+        if (!leaseTransferred) {
+          await releaseCloudTaskLease(executionId, leaseOwner).catch(() => false);
+        }
+      }
     }
 
     let executionScope;
@@ -778,6 +1170,8 @@ export async function POST(request: NextRequest) {
       pendingSkillSubmissions: {},
       cancellationState: { cancelled: false },
       retryAttempts: {},
+      executionNodes: executionScope.nodes,
+      executionConnections: executionScope.connections,
     };
     execState.persistActiveSkillRuns = () => persistWorkflowExecution(executionIdNew, execState);
     executionCache.set(executionIdNew, execState);
@@ -793,10 +1187,20 @@ export async function POST(request: NextRequest) {
           progress: 0,
           label: '工作流执行',
           result: {
+            workflowStatus: 'running',
+            projectId: execState.projectId,
+            workflowId: execState.workflowId,
+            totalNodes: execState.totalNodes,
             currentNodeId: null,
             results: {},
             startedAt: execState.startedAt,
             completedAt: null,
+            ...(execState.executionNodes?.some(node => node.type === 'ai-skill') ? {
+              executionGraph: {
+                nodes: execState.executionNodes,
+                connections: execState.executionConnections || [],
+              },
+            } : {}),
             submissionPayload: {
               assetWorkspace: 'workflow',
               assetWorkspaceId: `workflow:${execState.projectId || executionIdNew}`,
@@ -807,6 +1211,10 @@ export async function POST(request: NextRequest) {
         });
       } catch (error) {
         console.warn('[Workflow] 创建持久化执行记录失败:', error);
+        executionCache.delete(executionIdNew);
+        return NextResponse.json({
+          error: '工作流持久化初始化失败，未启动执行',
+        }, { status: 503 });
       }
     }
 
@@ -851,7 +1259,17 @@ async function executeWorkflow(
 
   // 1. DAG拓扑排序
   const sorted = topologicalSort(nodes, connections);
-  const resultMap = new Map<string, ExecutionResult>();
+  const resultMap = new Map<string, ExecutionResult>(Object.entries(execState.results));
+
+  if (execState.recoveryLeaseLost) return;
+  const pendingApprovalNodeId = Object.entries(execState.results)
+    .find(([, result]) => result.status === 'waiting-approval')?.[0];
+  if (pendingApprovalNodeId) {
+    execState.status = 'paused';
+    execState.currentNodeId = pendingApprovalNodeId;
+    await persistWorkflowExecution(executionId, execState);
+    return;
+  }
 
   // P1: 循环上下文栈 — 跟踪嵌套循环节点
   const loopContextStack: Array<{ loopNodeId: string; index: number; total: number }> = [];
@@ -869,6 +1287,8 @@ async function executeWorkflow(
 
   // 3. 逐节点执行
   for (const node of sorted) {
+    if (execState.recoveryLeaseLost) return;
+    if (!await renewRecoveryLeaseBeforeDispatch(executionId, execState)) return;
     // 检查是否被取消
     if (execState.status === 'cancelled' || execState.cancellationState?.cancelled) {
       execState.status = 'cancelled';
@@ -1109,6 +1529,14 @@ async function executeWorkflow(
             resultMap.set(branch.nodeId, branchResult);
             execState.results[branch.nodeId] = branchResult;
           }
+          const pausedBranch = branchStates.find(branch => branch.state.status === 'paused');
+          if (pausedBranch) {
+            execState.status = 'paused';
+            execState.currentNodeId = pausedBranch.state.currentNodeId || pausedBranch.nodeId;
+            outputData.parallelResults = parallelResults;
+            await persistWorkflowExecution(executionId, execState);
+            return;
+          }
           outputData.parallelResults = parallelResults;
         }
 
@@ -1120,9 +1548,14 @@ async function executeWorkflow(
             : outgoing.filter(connection => connection.fromPortId !== 'out-done');
           const loopBodyIds = new Set(loopBodyConnections.map(connection => connection.toNodeId));
           const downstreamNodes = sorted.filter(candidate => loopBodyIds.has(candidate.id));
-          let lastLoopOutput: Record<string, unknown> | undefined;
+          const resumeCursor = execState.loopResume?.loopNodeId === node.id
+            ? execState.loopResume
+            : undefined;
+          let lastLoopOutput: Record<string, unknown> | undefined = resumeCursor?.lastLoopOutput;
           for (const loopIteration of loopIterations) {
-            if (node.type === 'loop-while' && loopIteration.index > 1) {
+            if (resumeCursor && loopIteration.index < resumeCursor.iterationIndex) continue;
+            if (node.type === 'loop-while' && loopIteration.index > 1
+              && !(resumeCursor && loopIteration.index === resumeCursor.iterationIndex)) {
               const condition = String(inputs.condition || node.config.condition || node.condition || '');
               if (!evaluateWorkflowCondition(condition, {
                 ...inputs,
@@ -1132,7 +1565,10 @@ async function executeWorkflow(
               }
             }
             loopContextStack.push({ loopNodeId: node.id, index: loopIteration.index, total: loopIteration.total });
-            for (const dsNode of downstreamNodes) {
+            for (let downstreamIndex = 0; downstreamIndex < downstreamNodes.length; downstreamIndex++) {
+              if (resumeCursor && loopIteration.index === resumeCursor.iterationIndex
+                && downstreamIndex < resumeCursor.nextNodeIndex) continue;
+              const dsNode = downstreamNodes[downstreamIndex];
               if ((execState.status as string) === 'cancelled') break;
               const dsInputs = getNodeInputs(dsNode, connections, resultMap);
               dsInputs._loopItem = loopIteration.item;
@@ -1209,6 +1645,7 @@ async function executeWorkflow(
                     : (dsApiKey ? { 'Authorization': `Bearer ${dsApiKey}` } : {});
 
                   if (dsNode.type === 'ai-skill') {
+                    if (!await renewRecoveryLeaseBeforeDispatch(executionId, execState)) return;
                     const dsResult = await executeSkillWorkflowTask({
                       apiUrl,
                       requestBody: dsReq.body,
@@ -1220,9 +1657,25 @@ async function executeWorkflow(
                     lastLoopOutput = dsResult.output;
                     resultMap.set(dsNode.id, dsResult);
                     execState.results[dsNode.id] = dsResult;
+                    if (dsResult.status === 'waiting-approval') {
+                      execState.status = 'paused';
+                      execState.currentNodeId = dsNode.id;
+                      execState.loopResume = {
+                        loopNodeId: node.id,
+                        iterationIndex: loopIteration.index,
+                        nextNodeIndex: downstreamIndex + 1,
+                        pausedNodeId: dsNode.id,
+                        ...(lastLoopOutput ? { lastLoopOutput } : {}),
+                      };
+                      resultMap.delete(node.id);
+                      delete execState.results[node.id];
+                      await persistWorkflowExecution(executionId, execState);
+                      return;
+                    }
                     continue;
                   }
 
+                  if (!await renewRecoveryLeaseBeforeDispatch(executionId, execState)) return;
                   const dsRes = await fetch(apiUrl, {
                     method: dsReq.method,
                     headers: {
@@ -1252,6 +1705,7 @@ async function executeWorkflow(
             loopContextStack.pop();
             if ((execState.status as string) === 'cancelled') break;
           }
+          delete execState.loopResume;
         }
         await persistWorkflowExecution(executionId, execState);
         continue;
@@ -1325,6 +1779,7 @@ async function executeWorkflow(
       // 对于异步API (generate, image-edit, edit, agent-edit, video/generate, video/extend)，使用提交+轮询模式
       const isAsyncApi = isAsyncWorkflowEndpoint(req.endpoint);
 
+      if (!await renewRecoveryLeaseBeforeDispatch(executionId, execState)) return;
       if (node.type === 'ai-skill') {
         const result = await executeSkillWorkflowTask({
           apiUrl,
@@ -1337,6 +1792,12 @@ async function executeWorkflow(
         resultMap.set(node.id, result);
         execState.results[node.id] = result;
         await persistWorkflowExecution(executionId, execState);
+        if (result.status === 'waiting-approval') {
+          execState.status = 'paused';
+          execState.currentNodeId = node.id;
+          await persistWorkflowExecution(executionId, execState);
+          return;
+        }
         continue;
       }
 
@@ -1359,6 +1820,7 @@ async function executeWorkflow(
 
         for (let si = 0; si < scenes.length; si++) {
           if ((execState.status as string) === 'cancelled') break;
+          if (!await renewRecoveryLeaseBeforeDispatch(executionId, execState)) return;
 
           const sceneDesc = scenes[si].trim();
           const fullPrompt = [storyboard.style && `${storyboard.style} style,`, storyboard.character && `character: ${storyboard.character},`, sceneDesc].filter(Boolean).join(' ');
@@ -1492,6 +1954,16 @@ async function executeWorkflow(
 
   if (execState.status === 'cancelled' || execState.cancellationState?.cancelled) {
     execState.status = 'cancelled';
+    await persistWorkflowExecution(executionId, execState);
+    return;
+  }
+
+  if (execState.recoveryLeaseLost) return;
+  const pendingApprovalNodeIdAtCompletion = Object.entries(execState.results)
+    .find(([, result]) => result.status === 'waiting-approval')?.[0];
+  if (pendingApprovalNodeIdAtCompletion) {
+    execState.status = 'paused';
+    execState.currentNodeId = pendingApprovalNodeIdAtCompletion;
     await persistWorkflowExecution(executionId, execState);
     return;
   }

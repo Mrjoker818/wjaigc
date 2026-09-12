@@ -618,6 +618,36 @@ function createDefaultPorts(type: NodeType): NodePort[] {
   return ports;
 }
 
+/** Projects definition-specific media ports onto the reusable Skill node. */
+export function configureWorkflowSkillNodePorts(
+  node: WorkflowNode,
+  skill: SkillDefinition | undefined,
+): WorkflowNode {
+  if (node.type !== 'ai-skill') return node;
+  const genericIds = new Set([
+    'in-prompt', 'in-image', 'in-reference', 'out-image', 'out-prompt', 'out-task',
+  ]);
+  const ports = node.ports.filter(port => genericIds.has(port.id));
+  if (!skill) return { ...node, ports };
+  for (const field of skill.inputs) {
+    if (field.kind !== 'image' || !field.bindToSourceVersions) continue;
+    ports.push({
+      id: `in-${field.key.replace(/[A-Z]/gu, match => `-${match.toLowerCase()}`)}`,
+      label: field.label,
+      type: 'image',
+      direction: 'in',
+    });
+  }
+  if (skill.steps.some(step => step.modelRole === 'video')) {
+    ports.push({ id: 'out-video', label: '视频', type: 'video', direction: 'out' });
+  }
+  const seen = new Set<string>();
+  return {
+    ...node,
+    ports: ports.filter(port => !seen.has(port.id) && Boolean(seen.add(port.id))),
+  };
+}
+
 /** 创建工作流节点 */
 export function createWorkflowNode(type: NodeType, x: number, y: number, label?: string): WorkflowNode {
   const cat = getNodeCategory(type);
@@ -1276,7 +1306,7 @@ export function getNodePropertyFields(type: NodeType): PropertyField[] {
 
 export interface ExecutionResult {
   nodeId: string;
-  status: 'running' | 'success' | 'failed' | 'skipped';
+  status: 'running' | 'waiting-approval' | 'success' | 'failed' | 'skipped';
   output?: Record<string, unknown>;
   error?: string;
   durationMs: number;
@@ -1658,6 +1688,21 @@ export function getNodeInputs(
       case 'image':
         // 图片连线: 优先传递imageUrl
         appendImageInputs(upstreamOutput, conn.fromNodeId, conn.toPortId);
+        if (node.type === 'ai-skill' && /^in-[a-z]+(?:-[a-z]+)*$/u.test(conn.toPortId)) {
+          const fieldKey = conn.toPortId.slice(3).replace(/-([a-z])/gu, (_match, letter: string) => letter.toUpperCase());
+          const sourceVersionId = typeof upstreamOutput.assetVersionId === 'string'
+            ? upstreamOutput.assetVersionId
+            : Array.isArray(upstreamOutput.assetVersionIds)
+              ? upstreamOutput.assetVersionIds.find((value): value is string => typeof value === 'string')
+              : undefined;
+          if (sourceVersionId && !['image', 'reference'].includes(fieldKey)) {
+            const current = inputs.skillSourceVersionIds && typeof inputs.skillSourceVersionIds === 'object'
+              && !Array.isArray(inputs.skillSourceVersionIds)
+              ? inputs.skillSourceVersionIds as Record<string, string>
+              : {};
+            inputs.skillSourceVersionIds = { ...current, [fieldKey]: sourceVersionId };
+          }
+        }
         if (conn.toPortId === 'in-image') {
           const upstreamSourceVersionId = typeof upstreamOutput.annotationVersionId === 'string'
             ? upstreamOutput.annotationVersionId
@@ -1679,6 +1724,13 @@ export function getNodeInputs(
       case 'mask':
         // 蒙版连线
         if (upstreamOutput.maskUrl) inputs.maskUrl = upstreamOutput.maskUrl;
+        break;
+      case 'video':
+        if (typeof upstreamOutput.videoUrl === 'string') inputs.videoUrl = upstreamOutput.videoUrl;
+        if (typeof upstreamOutput.videoAssetVersionId === 'string') {
+          inputs.videoAssetVersionId = upstreamOutput.videoAssetVersionId;
+        }
+        if (Array.isArray(upstreamOutput.videoUrls)) inputs.videoUrls = upstreamOutput.videoUrls;
         break;
       case 'data':
         // 数据连线: 传递所有输出
@@ -1812,6 +1864,11 @@ function skillInputValues(
   const referenceImageUrls = Array.isArray(inputs.referenceImageUrls)
     ? inputs.referenceImageUrls.filter((value): value is string => typeof value === 'string' && Boolean(value))
     : [];
+  const skillSourceVersionIds = inputs.skillSourceVersionIds
+    && typeof inputs.skillSourceVersionIds === 'object'
+    && !Array.isArray(inputs.skillSourceVersionIds)
+    ? inputs.skillSourceVersionIds as Record<string, unknown>
+    : {};
   const textField = fields.find(field => field.kind === 'text' && values[field.key] == null);
   if (textField && prompt) values[textField.key] = prompt;
   const imageFields = fields.filter(field => field.kind === 'image' || field.kind === 'brand-kit');
@@ -1826,7 +1883,14 @@ function skillInputValues(
   const imagesField = fields.find(field => field.kind === 'images' && values[field.key] == null);
   if (imagesField && imageUrls.length > 0) values[imagesField.key] = imageUrls;
   for (const field of fields) {
-    if (field.bindToSourceVersions) values[field.key] = [...sourceVersionIds];
+    if (!field.bindToSourceVersions) continue;
+    if (field.kind === 'image') {
+      const versionId = skillSourceVersionIds[field.key];
+      if (typeof versionId === 'string') values[field.key] = versionId;
+      else delete values[field.key];
+    } else {
+      values[field.key] = [...sourceVersionIds];
+    }
   }
   return values;
 }

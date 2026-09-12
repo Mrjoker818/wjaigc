@@ -11,6 +11,7 @@ import {
   getNodePropertyFields, getNodeCategory, NODE_TEMPLATES, getWorkflowNodeTemplates,
   canConnectPorts, autoLayoutWorkflow, parseComfyUIWorkflow, isImageGeneratingNode, getOutputNodeSize,
   mergeWorkflowNodeUpdate, resolveWorkflowOutputAssetReference, type WorkspaceAssetReference,
+  configureWorkflowSkillNodePorts,
   updateWorkflowSkillModelBinding, workflowModelSupportsSkillRole,
 } from '@/lib/workflow-engine';
 import {
@@ -43,7 +44,10 @@ import {
 import type { TaskModelCatalogModel } from '@/hooks/use-task-model-catalog';
 import { WorkspaceSourceTraceDetails } from '@/components/workspace-source-trace';
 import { SkillInputFields } from '@/components/skill-runtime/SkillInputFields';
+import { BriefToVideoApprovalCard } from '@/components/skill-runtime/BriefToVideoApprovalCard';
 import { loadWorkflowSkillCatalog, loadSavedWorkflowSkillResult } from '@/lib/skill-runtime/workflow-client';
+import { BRIEF_TO_VIDEO_SKILL_ID } from '@/lib/skill-runtime/brief-to-video-preset';
+import type { SkillApprovalIdentity } from '@/lib/skill-runtime/approval';
 import {
   isWorkflowExecutionScopeCurrent,
   resolveWorkflowExecutionScope,
@@ -1036,7 +1040,7 @@ export default function NodeEditor({ taskModelCatalog = [], taskModelOptions = [
   const [sidebarTab, setSidebarTab] = useState<'nodes' | 'props' | 'ai-build' | 'presets' | 'prompts' | 'assistant' | 'material' | 'prompt'>('nodes');
   const [searchQuery, setSearchQuery] = useState('');
   const [executionId, setExecutionId] = useState<string | null>(null);
-  const [execStatus, setExecStatus] = useState<'idle' | 'running' | 'completed' | 'failed'>('idle');
+  const [execStatus, setExecStatus] = useState<'idle' | 'running' | 'paused' | 'completed' | 'failed'>('idle');
   const [executionNodeIds, setExecutionNodeIds] = useState<string[]>([]);
   const [skillEstimating, setSkillEstimating] = useState(false);
   const [skillQuote, setSkillQuote] = useState<{
@@ -1056,6 +1060,7 @@ export default function NodeEditor({ taskModelCatalog = [], taskModelOptions = [
     }
   }, [skillQuote, wf.connections, wf.nodes]);
   const [execResults, setExecResults] = useState<Record<string, { status: string; output?: Record<string, unknown>; error?: string }>>({});
+  const [skillObservationRevision, setSkillObservationRevision] = useState(0);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const [showMinimap, setShowMinimap] = useState(true);
   const [imagePreviewUrl, setImagePreviewUrl] = useState<string | null>(null);
@@ -1086,6 +1091,8 @@ export default function NodeEditor({ taskModelCatalog = [], taskModelOptions = [
 
   // P1: 执行日志
   const [execLogs, setExecLogs] = useState<WorkflowExecutionLog[]>([]);
+  const execLogsRef = useRef(execLogs);
+  execLogsRef.current = execLogs;
 
   const executionViewScope = JSON.stringify([userId, projectId, wf.id]);
   const previousExecutionViewScope = useRef(executionViewScope);
@@ -1106,14 +1113,14 @@ export default function NodeEditor({ taskModelCatalog = [], taskModelOptions = [
       const saved = localStorage.getItem(WORKFLOW_EXEC_STATE_KEY);
       if (saved) {
         const state = JSON.parse(saved);
-        if (state.executionId && state.execStatus === 'running') {
+        if (state.executionId && ['running', 'paused'].includes(state.execStatus)) {
           setExecutionId(state.executionId);
-          setExecStatus('running');
+          setExecStatus(state.execStatus);
           setExecLogs(state.execLogs || []);
           setExecResults(state.execResults || {});
           setExecutionNodeIds(Array.isArray(state.nodeIds) ? state.nodeIds : Object.keys(state.execResults || {}));
-          // 清除已持久化的running状态，由polling恢复
-          localStorage.removeItem(WORKFLOW_EXEC_STATE_KEY);
+          // running 由轮询重新持久化终态；paused 必须保留以支持刷新后继续审批。
+          if (state.execStatus === 'running') localStorage.removeItem(WORKFLOW_EXEC_STATE_KEY);
         }
       }
     } catch {}
@@ -1178,7 +1185,7 @@ export default function NodeEditor({ taskModelCatalog = [], taskModelOptions = [
     };
     void observe(nodes);
     return () => { disposed = true; lifecycle.abort(); clearTimeout(observerTimer); };
-  }, [projectId, userId, wf.id, savedSkillRunKey, execStatus]);
+  }, [projectId, userId, wf.id, savedSkillRunKey, execStatus, skillObservationRevision]);
   const [clipboard, setClipboard] = useState<WorkflowClipboardSnapshot | null>(null);
   // 右键菜单状态
   const [contextMenu, setContextMenu] = useState<{ type: 'canvas' | 'node'; x: number; y: number; nodeId?: string } | null>(null);
@@ -2188,7 +2195,7 @@ ${contextInfo}
   }, [projectId, imageModels, wf.id, workflowSkills, WORKFLOW_EXEC_STATE_KEY]);
 
   const startWorkflowExecution = useCallback(async (payload: WorkflowExecutionScope) => {
-    if (skillExecutionLock.current || skillQuote || execStatus === 'running') return;
+    if (skillExecutionLock.current || skillQuote || ['running', 'paused'].includes(execStatus)) return;
     skillExecutionLock.current = true;
     const controller = new AbortController();
     skillEstimateController.current = controller;
@@ -2810,6 +2817,58 @@ ${contextInfo}
     }
   }, [executionId, wf]);
 
+  const handleWorkflowSkillApproval = useCallback(async (
+    nodeId: string,
+    runId: string,
+    action: 'approve' | 'revise' | 'cancel',
+    identity?: SkillApprovalIdentity,
+    revisionInstruction?: string,
+  ): Promise<boolean> => {
+    const body: Record<string, unknown> = executionId
+      ? {
+          action: 'approve-skill', controlAction: action, executionId, nodeId,
+          nodes: wf.nodes, connections: wf.connections,
+        }
+      : { action };
+    if (identity) Object.assign(body, identity);
+    if (action === 'revise') body.revisionInstruction = revisionInstruction;
+    const response = await fetch(executionId
+      ? '/api/workflow/execute'
+      : `/api/skill-runs/${encodeURIComponent(runId)}`, {
+      method: executionId ? 'POST' : 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const payload = await response.json().catch(() => null) as { accepted?: unknown; error?: unknown } | null;
+    if (!response.ok) {
+      throw new Error(typeof payload?.error === 'string' ? payload.error : '视频脚本操作失败');
+    }
+    if (action === 'cancel') {
+      setExecResults(previous => ({ ...previous, [nodeId]: {
+        status: 'cancelled', output: { runId, status: 'cancelled' },
+      } }));
+      if (executionId) {
+        setExecStatus('idle');
+        localStorage.removeItem(WORKFLOW_EXEC_STATE_KEY);
+      }
+    } else if (executionId) {
+      setExecStatus('running');
+      localStorage.setItem(WORKFLOW_EXEC_STATE_KEY, JSON.stringify({
+        executionId,
+        execStatus: 'running',
+        execResults,
+        execLogs: execLogsRef.current,
+        nodeIds: executionNodeIds.length > 0 ? executionNodeIds : Object.keys(execResults),
+      }));
+    } else {
+      setExecResults(previous => ({ ...previous, [nodeId]: {
+        status: 'running', output: { runId, status: 'running' },
+      } }));
+      setSkillObservationRevision(value => value + 1);
+    }
+    return payload?.accepted !== false;
+  }, [WORKFLOW_EXEC_STATE_KEY, execResults, executionId, executionNodeIds, wf.connections, wf.nodes]);
+
   // 轮询执行状态
   useEffect(() => {
     if (execStatus !== 'running' || !executionId) return;
@@ -2841,6 +2900,18 @@ ${contextInfo}
             });
             return changed ? { ...current, nodes } : current;
           });
+        }
+        if (data.status === 'paused') {
+          setExecStatus('paused');
+          setExecResults(data.results || {});
+          localStorage.setItem(WORKFLOW_EXEC_STATE_KEY, JSON.stringify({
+            executionId,
+            execStatus: 'paused',
+            execResults: data.results || {},
+            execLogs: execLogsRef.current,
+            nodeIds: executionNodeIds.length > 0 ? executionNodeIds : Object.keys(data.results || {}),
+          }));
+          return;
         }
         if (data.status === 'completed' || data.status === 'failed') {
           setExecStatus(data.status === 'completed' ? 'completed' : 'failed');
@@ -3374,9 +3445,15 @@ ${contextInfo}
             <span>AI 建图</span>
           </button>
           {/* 执行/停止 */}
-          <button onClick={execStatus === 'running' ? handleStopWorkflow : handleRunWorkflow} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors cursor-pointer ${execStatus === 'running' ? 'bg-destructive/10 text-destructive hover:bg-destructive/20' : 'bg-[var(--color-success,#3fb950)]/10 text-[var(--color-success,#3fb950)] hover:bg-[var(--color-success,#3fb950)]/20'}`} title={execStatus === 'running' ? '停止执行 (Ctrl+.)' : '执行工作流 (Ctrl+Enter)'} aria-label={execStatus === 'running' ? '停止执行' : '执行工作流'}>
+          <button
+            onClick={execStatus === 'running' ? handleStopWorkflow : handleRunWorkflow}
+            disabled={execStatus === 'paused'}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-50 ${execStatus === 'running' ? 'bg-destructive/10 text-destructive hover:bg-destructive/20' : 'bg-[var(--color-success,#3fb950)]/10 text-[var(--color-success,#3fb950)] hover:bg-[var(--color-success,#3fb950)]/20'}`}
+            title={execStatus === 'running' ? '停止执行 (Ctrl+.)' : execStatus === 'paused' ? '请先确认视频脚本' : '执行工作流 (Ctrl+Enter)'}
+            aria-label={execStatus === 'running' ? '停止执行' : execStatus === 'paused' ? '等待脚本确认' : '执行工作流'}
+          >
             {execStatus === 'running' ? <Square size={16} /> : <Play size={16} />}
-            <span>{execStatus === 'running' ? '停止' : '执行'}</span>
+            <span>{execStatus === 'running' ? '停止' : execStatus === 'paused' ? '待确认' : '执行'}</span>
           </button>
           <div className="w-px h-6 bg-border/20 mx-1" aria-hidden="true" />
           {/* 撤销/重做 */}
@@ -3437,10 +3514,11 @@ ${contextInfo}
           {execStatus !== 'idle' && (
             <div aria-live="polite" className="flex items-center gap-1.5 rounded-md border border-border/20 bg-muted/50 px-2 py-1 text-[11px]">
               {execStatus === 'running' && <Loader2 size={12} className="animate-spin text-primary" />}
+              {execStatus === 'paused' && <AlertCircle size={12} className="text-[#d4af37]" />}
               {execStatus === 'completed' && <Check size={12} className="text-green-400" />}
               {execStatus === 'failed' && <AlertCircle size={12} className="text-red-400" />}
-              <span className={execStatus === 'running' ? 'text-primary' : execStatus === 'completed' ? 'text-green-400' : 'text-red-400'}>
-                {execStatus === 'running' ? '执行中' : execStatus === 'completed' ? '执行完成' : '执行失败'}
+              <span className={execStatus === 'running' ? 'text-primary' : execStatus === 'paused' ? 'text-[#d4af37]' : execStatus === 'completed' ? 'text-green-400' : 'text-red-400'}>
+                {execStatus === 'running' ? '执行中' : execStatus === 'paused' ? '等待脚本确认' : execStatus === 'completed' ? '执行完成' : '执行失败'}
               </span>
               <span className="text-muted-foreground">{executionNodeIds.filter(id => ['success', 'error', 'failed', 'timeout', 'skipped', 'cancelled'].includes(execResults[id]?.status)).length}/{executionNodeIds.length}</span>
               <button
@@ -3783,6 +3861,9 @@ ${contextInfo}
               onImageUpload={handleImageUpload}
               canvasImages={allCanvasImages}
               onCanvasImageSelect={transferCanvasImageToWorkflow}
+              projectId={projectId}
+              execResult={execResults[selectedNode.id]}
+              onSkillApproval={handleWorkflowSkillApproval}
             />
           ) : (
             <div className="flex flex-col items-center justify-center h-full text-muted-foreground gap-2">
@@ -4221,9 +4302,18 @@ interface PropertyPanelProps {
   /** P0: 画布图片列表，用于@图片引用 */
   canvasImages?: CanvasImageRef[];
   onCanvasImageSelect: (nodeId: string, image: CanvasImageRef) => Promise<void>;
+  projectId?: string;
+  execResult?: { status: string; output?: Record<string, unknown>; error?: string };
+  onSkillApproval: (
+    nodeId: string,
+    runId: string,
+    action: 'approve' | 'revise' | 'cancel',
+    identity?: SkillApprovalIdentity,
+    revisionInstruction?: string,
+  ) => Promise<boolean>;
 }
 
-function PropertyPanel({ node, models, modelCatalogIndex, modelsLoading, workflowSkills, workflowSkillsLoading, workflowSkillsError, boundSourceVersionIds, onUpdate, onDelete, onImageUpload, canvasImages, onCanvasImageSelect }: PropertyPanelProps) {
+function PropertyPanel({ node, models, modelCatalogIndex, modelsLoading, workflowSkills, workflowSkillsLoading, workflowSkillsError, boundSourceVersionIds, onUpdate, onDelete, onImageUpload, canvasImages, onCanvasImageSelect, projectId, execResult, onSkillApproval }: PropertyPanelProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [localTextValues, setLocalTextValues] = useState<Record<string, string>>({});
   const [focusedField, setFocusedField] = useState<string | null>(null);
@@ -4698,7 +4788,8 @@ function PropertyPanel({ node, models, modelCatalogIndex, modelsLoading, workflo
               disabled={workflowSkillsLoading}
               onChange={event => {
                 const skill = workflowSkills.find(item => item.id === event.target.value);
-                onUpdate(node.id, { config: {
+                const configuredNode = configureWorkflowSkillNodePorts(node, skill);
+                onUpdate(node.id, { ports: configuredNode.ports, config: {
                   skillId: skill?.id,
                   version: skill?.version,
                   inputValues: {},
@@ -4755,6 +4846,25 @@ function PropertyPanel({ node, models, modelCatalogIndex, modelsLoading, workflo
                   </div>
                 );
               })}
+              {selectedSkill.id === BRIEF_TO_VIDEO_SKILL_ID
+                && projectId
+                && execResult?.status === 'waiting-approval'
+                && typeof execResult.output?.runId === 'string'
+                && (
+                  <BriefToVideoApprovalCard
+                    runId={execResult.output.runId}
+                    projectId={projectId!}
+                    onApprove={identity => onSkillApproval(
+                      node.id, String(execResult.output?.runId), 'approve', identity,
+                    )}
+                    onRevise={(identity, revisionInstruction) => onSkillApproval(
+                      node.id, String(execResult.output?.runId), 'revise', identity, revisionInstruction,
+                    )}
+                    onCancel={() => onSkillApproval(
+                      node.id, String(execResult.output?.runId), 'cancel',
+                    )}
+                  />
+                )}
             </>
           )}
         </div>

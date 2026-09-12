@@ -6,8 +6,9 @@ import {
 import { parsePlatformComplianceReport } from './platform-compliance/report-schema';
 import { parseMultiPlatformExportResult } from './multi-platform-export/manifest';
 import { parseBriefToVideoResult } from './brief-to-video/schema';
+import { parseSkillApprovalState, type SkillApprovalStateV1 } from './skill-runtime/approval';
 
-interface WorkflowSkillRunProjection {
+export interface WorkflowSkillRunProjection {
   runId: string;
   status: string;
   assetVersionIds?: string[];
@@ -15,6 +16,7 @@ interface WorkflowSkillRunProjection {
   outputErrors?: DurableSkillOutputError[];
   currentStepId?: string;
   resumeFromStepId?: string;
+  approval?: SkillApprovalStateV1;
 }
 
 export class WorkflowSkillRunTerminalError extends Error {
@@ -95,6 +97,9 @@ function readWorkflowSkillRunProjection(payload: unknown): WorkflowSkillRunProje
     ...(parsedOutputs.errors.length > 0 ? { outputErrors: parsedOutputs.errors } : {}),
     ...(typeof candidate.currentStepId === 'string' ? { currentStepId: candidate.currentStepId } : {}),
     ...(typeof candidate.resumeFromStepId === 'string' ? { resumeFromStepId: candidate.resumeFromStepId } : {}),
+    ...(candidate.approval !== undefined
+      ? { approval: parseSkillApprovalState(candidate.approval) }
+      : {}),
   };
 }
 
@@ -229,9 +234,12 @@ export function projectWorkflowSkillRun(
   )) {
     throw new Error('Brief 视频成品版本解析不一致');
   }
+  const projectedStatus = run.status === 'paused' && run.approval
+    ? 'waiting-approval'
+    : run.status;
   return {
     runId: run.runId,
-    status: run.status,
+    status: projectedStatus,
     taskId: run.runId,
     ...(imageReferences[0]?.url ? { imageUrl: imageReferences[0].url } : {}),
     ...(imageReferences.length > 0 ? { imageUrls: imageReferences.map(reference => reference.url) } : {}),
@@ -262,7 +270,12 @@ export function projectWorkflowSkillRun(
     ...(outputErrors.length > 0 ? { outputErrors } : {}),
     ...(run.currentStepId ? { currentStepId: run.currentStepId } : {}),
     ...(run.resumeFromStepId ? { resumeFromStepId: run.resumeFromStepId } : {}),
+    ...(run.approval ? { approval: run.approval } : {}),
   };
+}
+
+export function shouldDeferWorkflowDownstream(output: Record<string, unknown>): boolean {
+  return output.status === 'waiting-approval';
 }
 
 async function waitForWorkflowSkillRun(
@@ -308,6 +321,9 @@ async function waitForWorkflowSkillRun(
     run = parsedRun;
     await input.onProgress?.(run);
     if (run.status === 'completed') break;
+    if (run.status === 'paused' && run.approval) {
+      return projectWorkflowSkillRun(run, []);
+    }
     if (['failed', 'cancelled', 'paused', 'timeout'].includes(run.status)) {
       throw new WorkflowSkillRunTerminalError(run);
     }
@@ -356,6 +372,12 @@ export async function executeWorkflowSkillRun(input: ExecuteWorkflowSkillRunInpu
   }
   await input.onRunId?.(submission.runId);
   return waitForWorkflowSkillRun({ ...input, runId: submission.runId });
+}
+
+export async function continueWorkflowSkillRun(
+  input: Omit<ExecuteWorkflowSkillRunInput, 'requestBody' | 'onRunId'> & { runId: string },
+): Promise<Record<string, unknown>> {
+  return waitForWorkflowSkillRun(input);
 }
 
 export async function resumeWorkflowSkillRun(input: ResumeWorkflowSkillRunInput): Promise<Record<string, unknown>> {

@@ -399,7 +399,7 @@ git commit -m "feat: review brief video plans on canvas"
 - Produces: Workflow node status `waiting-approval` as a UI projection of paused Run, not a new task terminal。
 - Produces: downstream `videoAssetVersionId` and `videoUrl` resolved from the authorized version。
 
-- [ ] **Step 1: 写双图片端口、暂停下游和恢复 RED 测试**
+- [x] **Step 1: 写双图片端口、暂停下游和恢复 RED 测试**
 
 ```tsx
 expect(skillNode.inputs).toEqual(expect.arrayContaining(['startFrame', 'endFrame']));
@@ -408,17 +408,17 @@ expect(downstream.execute).not.toHaveBeenCalled();
 expect(afterApproval.output.videoAssetVersionId).toBe('video-v1');
 ```
 
-- [ ] **Step 2: 运行测试确认 RED**
+- [x] **Step 2: 运行测试确认 RED**
 
 Run: `pnpm exec vitest run src/__tests__/components/node-editor-brief-to-video.test.tsx src/__tests__/api/workflow-brief-to-video.test.ts`
 
 Expected: FAIL，Workflow 尚未映射审批暂停和视频结果。
 
-- [ ] **Step 3: 实现节点属性、审批和下游等待**
+- [x] **Step 3: 实现节点属性、审批和下游等待**
 
 复用 `ai-skill` 节点，分别绑定首尾帧；暂停时 Workflow 保持可恢复而不执行下游。批准后恢复同一 Run，并向 `output-video` 或数据消费者投影同一 AssetVersion。
 
-- [ ] **Step 4: 运行测试并提交**
+- [x] **Step 4: 运行测试并提交**
 
 Run: `pnpm exec vitest run src/__tests__/components/node-editor-brief-to-video.test.tsx src/__tests__/api/workflow-brief-to-video.test.ts src/__tests__/components/node-editor-skill-node.test.tsx src/__tests__/api/workflow-skill-execution.test.ts`
 

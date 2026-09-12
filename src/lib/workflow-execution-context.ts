@@ -9,6 +9,10 @@ export interface NestedWorkflowExecutionContext {
   pendingSkillSubmissions?: Record<string, Promise<void>>;
   cancellationState?: { cancelled: boolean };
   persistActiveSkillRuns?: () => Promise<void>;
+  recoveryLeaseOwner?: string;
+  recoveryLeaseTaskId?: string;
+  recoveryLeaseLost?: boolean;
+  recoveryLeaseState?: { lost: boolean };
 }
 
 export function inheritNestedWorkflowExecutionContext<T extends NestedWorkflowExecutionContext>(
@@ -33,6 +37,10 @@ export function inheritNestedWorkflowExecutionContext<T extends NestedWorkflowEx
     pendingSkillSubmissions,
     cancellationState,
     persistActiveSkillRuns: parent.persistActiveSkillRuns,
+    recoveryLeaseOwner: parent.recoveryLeaseOwner,
+    recoveryLeaseTaskId: parent.recoveryLeaseTaskId,
+    recoveryLeaseLost: parent.recoveryLeaseLost,
+    recoveryLeaseState: parent.recoveryLeaseState,
   };
 }
 
