@@ -49,12 +49,20 @@ describe('Brief-to-video evidence validation', () => {
     for (const project of projects) {
       const directory = join(root, project);
       await mkdir(directory, { recursive: true });
+      const artifactBodies = new Map<string, string>([
+        ['console.json', '[]'],
+        ['network.json', '[]'],
+        ['final.png', 'png-bytes'],
+        ['trace.zip', 'trace-bytes'],
+        ['video.webm', 'video-bytes'],
+      ]);
       const machine = JSON.stringify({
         project,
         candidateSha: provenanceSha(),
         candidateProvenance: provenance(),
       });
-      await writeFile(join(directory, 'machine-evidence.json'), machine);
+      artifactBodies.set('machine-evidence.json', machine);
+      for (const [name, body] of artifactBodies) await writeFile(join(directory, name), body);
       const manifest = {
         schemaVersion: 2,
         project,
@@ -64,7 +72,9 @@ describe('Brief-to-video evidence validation', () => {
         candidateSha: provenanceSha(),
         candidateProvenance: provenance(),
         artifactErrors: [],
-        files: [{ name: 'machine-evidence.json', bytes: Buffer.byteLength(machine), sha256: sha256(machine) }],
+        files: [...artifactBodies].map(([name, body]) => ({
+          name, bytes: Buffer.byteLength(body), sha256: sha256(body),
+        })),
       };
       const manifestPath = join(directory, 'evidence-manifest.json');
       await writeFile(manifestPath, JSON.stringify(manifest));
@@ -96,6 +106,21 @@ describe('Brief-to-video evidence validation', () => {
     })).resolves.toMatchObject({ local: { ok: false } });
 
     evidence.local.playwright.projects[0].machineEvidenceSha256 = originalDigest;
+    const firstManifestPath = evidence.local.playwright.projects[0].manifest;
+    const firstManifest = JSON.parse(await (await import('node:fs/promises')).readFile(firstManifestPath, 'utf8'));
+    firstManifest.files = firstManifest.files.filter((file: { name: string }) => file.name === 'machine-evidence.json');
+    await writeFile(firstManifestPath, JSON.stringify(firstManifest));
+    evidence.candidateSha = provenanceSha();
+    await expect(validateBriefToVideoEvidence(evidence, {
+      repositoryRoot: root,
+      git: {
+        parentCommit: '1'.repeat(40),
+        candidateTrees: { src: '2'.repeat(40), tests: '3'.repeat(40), scripts: '4'.repeat(40) },
+      },
+    })).resolves.toMatchObject({
+      local: { ok: false, detail: expect.stringContaining('required artifact set') },
+    });
+
     evidence.candidateSha = hex('f');
     await expect(validateBriefToVideoEvidence(evidence, {
       repositoryRoot: root,
@@ -124,9 +149,11 @@ describe('Brief-to-video evidence validation', () => {
         refundAmount: 60, lateCompletionSuppressed: true,
       },
     };
-    expect(validateCloudEvidence(complete)).toEqual({ ok: true, blocked: false, detail: expect.stringContaining('CLOUD PASS') });
-    expect(validateCloudEvidence({ ...complete, cancelledRun: { ...complete.cancelledRun, refundTransactionId: undefined } }).ok).toBe(false);
-    expect(validateCloudEvidence({ ...complete, successfulRun: { ...complete.successfulRun, parentVersionIds: [] } }).ok).toBe(false);
+    expect(validateCloudEvidence(complete, { expectedExactCommit: '5'.repeat(40) }))
+      .toEqual({ ok: true, blocked: false, detail: expect.stringContaining('CLOUD PASS') });
+    expect(validateCloudEvidence(complete, { expectedExactCommit: '6'.repeat(40) }).ok).toBe(false);
+    expect(validateCloudEvidence({ ...complete, cancelledRun: { ...complete.cancelledRun, refundTransactionId: undefined } }, { expectedExactCommit: '5'.repeat(40) }).ok).toBe(false);
+    expect(validateCloudEvidence({ ...complete, successfulRun: { ...complete.successfulRun, parentVersionIds: [] } }, { expectedExactCommit: '5'.repeat(40) }).ok).toBe(false);
     expect(validateCloudEvidence({ verdict: 'CLOUD UNVERIFIED' })).toMatchObject({ ok: false, blocked: true });
   });
 });

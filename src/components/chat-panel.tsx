@@ -6577,6 +6577,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                     return (
                       <div
                         key={skill.id}
+                        data-canvas-skill-id={skill.id}
                         className={`rounded-lg p-2.5 transition-all cursor-pointer hover:scale-[1.01] active:scale-[0.99] ${
                           isGold ? 'bg-white/[0.03] border border-white/[0.04] hover:border-gold/30' : 'bg-white border border-gray-100 hover:border-blue-200'
                         }`}
@@ -6635,6 +6636,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                   .map(skill => (
                   <div
                     key={skill.id}
+                    data-canvas-skill-id={skill.id}
                     className={`rounded-lg p-2.5 transition-all ${
                       activeSkill?.id === skill.id
                         ? isGold ? 'bg-gold/12 border border-gold/30' : 'bg-blue-50 border border-blue-200'

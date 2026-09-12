@@ -550,6 +550,7 @@ async function checkBriefToVideo() {
       repositoryRoot: process.cwd(),
       git,
       expectedProjects: BRIEF_TO_VIDEO_PLAYWRIGHT_PROJECTS,
+      expectedExactCommit: process.env.BRIEF_TO_VIDEO_EXPECTED_EXACT_COMMIT || git.candidateCommit,
     });
     const localPass = validation.local.ok;
     add(

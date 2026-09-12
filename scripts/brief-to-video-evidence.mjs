@@ -6,6 +6,7 @@ import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
 const EXPECTED_PROJECTS = ['chromium', 'firefox', 'webkit', 'mobile-chromium'];
+const REQUIRED_ARTIFACTS = ['console.json', 'network.json', 'final.png', 'trace.zip', 'video.webm', 'machine-evidence.json'];
 const HEX_40 = /^[a-f0-9]{40}$/u;
 const HEX_64 = /^[a-f0-9]{64}$/u;
 
@@ -62,10 +63,11 @@ export async function readCandidateGitState(repositoryRoot, options = {}) {
     git('rev-parse', `${candidateTree}:tests`),
     git('rev-parse', `${candidateTree}:scripts`),
   ]);
-  return { parentCommit, candidateTrees: { src, tests, scripts } };
+  const candidateCommit = indexMode ? undefined : await git('rev-parse', 'HEAD');
+  return { parentCommit, candidateCommit, candidateTrees: { src, tests, scripts } };
 }
 
-export function validateCloudEvidence(raw) {
+export function validateCloudEvidence(raw, options = {}) {
   const cloud = record(raw);
   if (cloud?.verdict !== 'CLOUD PASS') {
     return { ok: false, blocked: true, detail: 'CLOUD UNVERIFIED' };
@@ -74,7 +76,8 @@ export function validateCloudEvidence(raw) {
   const cancelled = record(cloud.cancelledRun);
   const resolution = record(successful?.resolution);
   const artifact = record(successful?.artifact);
-  const successOk = HEX_40.test(String(cloud.exactCommit || ''))
+  const successOk = HEX_40.test(String(options.expectedExactCommit || ''))
+    && cloud.exactCommit === options.expectedExactCommit
     && ['runId', 'internalTaskId', 'remoteTaskId', 'chargeTransactionId', 'videoAssetVersionId']
       .every(key => string(successful?.[key]))
     && Array.isArray(successful?.parentVersionIds)
@@ -125,6 +128,11 @@ export async function validateBriefToVideoEvidence(evidence, options) {
           continue;
         }
         const files = Array.isArray(manifest.files) ? manifest.files : [];
+        const artifactNames = files.map(file => file?.name).sort();
+        if (JSON.stringify(artifactNames) !== JSON.stringify([...REQUIRED_ARTIFACTS].sort())) {
+          errors.push(`${project.name}: required artifact set is incomplete or contains duplicates`);
+          continue;
+        }
         const machine = files.find(file => file?.name === 'machine-evidence.json');
         if (!machine || machine.sha256 !== project.machineEvidenceSha256) {
           errors.push(`${project.name}: machine evidence digest mismatch`);
@@ -153,7 +161,9 @@ export async function validateBriefToVideoEvidence(evidence, options) {
   }
   return {
     local: { ok: errors.length === 0, detail: errors.length === 0 ? `four manifests and hashes verified; ${provenance.detail}` : errors.join('; ') },
-    cloud: validateCloudEvidence(evidence?.cloud),
+    cloud: validateCloudEvidence(evidence?.cloud, {
+      expectedExactCommit: options.expectedExactCommit,
+    }),
   };
 }
 

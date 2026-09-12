@@ -22,6 +22,7 @@ import {
   seedStage4RuntimeDependencies,
   stage4FixtureForProject,
 } from './stage-4-e2e';
+import { findNewBriefVideoRunId } from './brief-to-video-card-selection';
 
 const SKILL_ID = 'preset-brief-to-video-film';
 const VIDEO_PROVIDER_ID = 'brief-video-e2e-provider';
@@ -73,6 +74,7 @@ export interface BriefToVideoFixture {
   videoProviderId: string;
   videoModelId: string;
   openCanvas(): Promise<void>;
+  assertCanvasSkillCatalogCount(expected: number): Promise<void>;
   createCanvasRunFromUi(mode: VideoMode): Promise<ApprovalIdentity>;
   readRunStatus(runId: string): Promise<string>;
   reviseFromUi(runId: string): Promise<ApprovalIdentity>;
@@ -82,6 +84,7 @@ export interface BriefToVideoFixture {
   videoSubmissions(): ProviderSubmission[];
   runWorkflowThroughUi(): Promise<{
     runId: string;
+    catalogCount: number;
     outputNodeType: 'output-video';
     videoAssetVersionId: string;
   }>;
@@ -454,6 +457,11 @@ async function setupFixture(page: Page, testInfo: TestInfo, directory: string): 
     videoProviderId: VIDEO_PROVIDER_ID,
     videoModelId: VIDEO_MODEL_ID,
     openCanvas,
+    async assertCanvasSkillCatalogCount(expected) {
+      await openCanvas();
+      await page.getByPlaceholder('搜索 Skills...').fill('');
+      await expect(page.locator('[data-canvas-skill-id]')).toHaveCount(expected);
+    },
     createCanvasRunFromUi,
     async readRunStatus(runId) {
       return (await readRun(page, runId)).status;
@@ -469,6 +477,9 @@ async function setupFixture(page: Page, testInfo: TestInfo, directory: string): 
       if (await collapse.isVisible().catch(() => false)) await collapse.click();
       await page.getByTitle('节点模式').first().click();
       await page.getByLabel(workflowSkill.label).click();
+      const workflowCatalog = page.locator('[data-workflow-skill-id]');
+      await expect(workflowCatalog).toHaveCount(30);
+      const catalogCount = await workflowCatalog.count();
       await expect(page.getByRole('combobox', { name: 'Skill' })).toHaveValue(SKILL_ID);
       await page.getByRole('combobox', { name: 'video 模型' }).selectOption(
         `${VIDEO_PROVIDER_ID}::${VIDEO_MODEL_ID}`,
@@ -516,6 +527,7 @@ async function setupFixture(page: Page, testInfo: TestInfo, directory: string): 
       expect(videoAssetVersionId).not.toBe('');
       return {
         runId,
+        catalogCount,
         outputNodeType: 'output-video' as const,
         videoAssetVersionId,
       };
@@ -534,12 +546,27 @@ async function setupFixture(page: Page, testInfo: TestInfo, directory: string): 
       await page.getByTitle('Skill').click();
       const prompt = `根据 Brief：展示轻薄防晒霜通勤场景，生成最终成片。平台：抖音；时长：5秒；比例：9:16；视频模型：${VIDEO_MODEL_ID}；受众：都市通勤人群；目标：产品转化`;
       const sendIntent = async (): Promise<string> => {
+        const cards = page.locator('[data-simple-chat-brief-video-run-id]');
+        const beforeCount = await cards.count();
+        const beforeRunIds = await cards.evaluateAll(items => items.map(
+          item => item.getAttribute('data-simple-chat-brief-video-run-id') || '',
+        ));
         const input = page.getByPlaceholder('输入消息，Enter 发送，支持 Ctrl+V 粘贴图片');
         await input.fill(prompt);
         await input.press('Enter');
-        const cards = page.locator('[data-simple-chat-brief-video-run-id]');
-        await expect(cards.last()).toBeVisible({ timeout: 90_000 });
-        return String(await cards.last().getAttribute('data-simple-chat-brief-video-run-id'));
+        let newRunId: string | undefined;
+        await expect.poll(async () => {
+          const currentRunIds = await cards.evaluateAll(items => items.map(
+            item => item.getAttribute('data-simple-chat-brief-video-run-id') || '',
+          ));
+          newRunId = findNewBriefVideoRunId(beforeRunIds, currentRunIds);
+          return { count: currentRunIds.length, newRunId };
+        }, { timeout: 90_000, intervals: [100, 250, 500, 1_000] }).toMatchObject({
+          count: expect.any(Number),
+          newRunId: expect.any(String),
+        });
+        expect(await cards.count()).toBeGreaterThan(beforeCount);
+        return newRunId!;
       };
       const cancelledRunId = await sendIntent();
       await reviseFromUi(cancelledRunId);

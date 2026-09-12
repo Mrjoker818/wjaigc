@@ -13,6 +13,7 @@ test('Brief 到视频本地确定性门禁覆盖三工作区、审批和恢复',
   );
 
   await briefToVideo.openCanvas();
+  await briefToVideo.assertCanvasSkillCatalogCount(30);
   await expect(page.getByText('Brief 到视频成片', { exact: true }).last()).toBeVisible({ timeout: 30_000 });
 
   const textRun = await briefToVideo.createCanvasRunFromUi('text-to-video');
@@ -55,6 +56,7 @@ test('Brief 到视频本地确定性门禁覆盖三工作区、审批和恢复',
   expect(briefToVideo.videoSubmissions()).toHaveLength(1);
 
   const workflow = await briefToVideo.runWorkflowThroughUi();
+  expect(workflow.catalogCount).toBe(30);
   expect(workflow.outputNodeType).toBe('output-video');
   expect(workflow.videoAssetVersionId).toEqual(expect.any(String));
 
