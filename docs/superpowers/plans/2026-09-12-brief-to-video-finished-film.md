@@ -36,7 +36,7 @@
 - Produces: `parseBriefToVideoInput()`、`parseBriefToVideoPlan()`、`parseBriefToVideoResult()`、`canonicalBriefToVideoPlanJson()`。
 - Produces: `SkillInputField.capabilityOptions?: { modelRole: 'video'; field: 'durationSeconds' | 'aspectRatio' | 'resolution' }`。
 
-- [ ] **Step 1: 写严格输入、计划和结果失败测试**
+- [x] **Step 1: 写严格输入、计划和结果失败测试**
 
 ```ts
 expect(() => parseBriefToVideoInput({ ...valid, brief: '' })).toThrow('BRIEF_VIDEO_BRIEF_INVALID');
@@ -45,13 +45,13 @@ expect(() => parseBriefToVideoPlan({ ...plan, scenes: [] })).toThrow('BRIEF_VIDE
 expect(parseBriefToVideoResult(result).videoAssetVersionId).toBe('video-v1');
 ```
 
-- [ ] **Step 2: 运行测试确认 RED**
+- [x] **Step 2: 运行测试确认 RED**
 
 Run: `pnpm exec vitest run src/__tests__/lib/brief-to-video-schema.test.ts src/__tests__/lib/skill-capability-input.test.ts`
 
 Expected: FAIL，领域模块和 capability 元数据尚不存在。
 
-- [ ] **Step 3: 实现无未知字段的解析器和规范化 JSON**
+- [x] **Step 3: 实现无未知字段的解析器和规范化 JSON**
 
 ```ts
 export interface SkillCapabilityOptions {
@@ -66,7 +66,7 @@ export function canonicalBriefToVideoPlanJson(value: unknown): string {
 
 限制 Brief 4000、修改要求 2000、负面约束 1000、最多两张来源图片；所有 ID、数组、场景和字符串均设置确定上限。
 
-- [ ] **Step 4: 运行聚焦测试并提交**
+- [x] **Step 4: 运行聚焦测试并提交**
 
 Run: `pnpm exec vitest run src/__tests__/lib/brief-to-video-schema.test.ts src/__tests__/lib/skill-capability-input.test.ts`
 

@@ -11,6 +11,11 @@ export type SkillInputKind =
   | 'number'
   | 'boolean';
 
+export interface SkillCapabilityOptions {
+  modelRole: 'video';
+  field: 'durationSeconds' | 'aspectRatio' | 'resolution';
+}
+
 export interface SkillInputField {
   key: string;
   label: string;
@@ -25,6 +30,7 @@ export interface SkillInputField {
     inputKey: string;
     values: Readonly<Record<string, readonly string[]>>;
   };
+  capabilityOptions?: SkillCapabilityOptions;
   bindToSourceVersions?: boolean;
   datasetSchema?: 'sku-v1';
 }
