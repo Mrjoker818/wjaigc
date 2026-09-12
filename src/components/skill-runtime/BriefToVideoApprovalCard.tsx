@@ -1,7 +1,7 @@
 'use client';
 
 import { Check, Pencil, X } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { parseBriefToVideoPlan } from '@/lib/brief-to-video/schema';
 import type { BriefToVideoPlanV1 } from '@/lib/brief-to-video/types';
@@ -88,30 +88,50 @@ export function BriefToVideoApprovalCard({
   const [editing, setEditing] = useState(false);
   const [revisionInstruction, setRevisionInstruction] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const loadControllerRef = useRef<AbortController | null>(null);
+  const mountedRef = useRef(false);
+  const submittingRef = useRef(false);
 
-  useEffect(() => {
+  const reloadApproval = useCallback(async (): Promise<void> => {
+    if (!mountedRef.current) return;
+    loadControllerRef.current?.abort();
     const controller = new AbortController();
+    loadControllerRef.current = controller;
     setView(undefined);
     setError(undefined);
-    void loadApproval(runId, projectId, fetcher, controller.signal)
-      .then(setView)
-      .catch(cause => {
-        if (!controller.signal.aborted) {
-          setError(cause instanceof Error ? cause.message : '视频脚本加载失败');
-        }
-      });
-    return () => controller.abort();
+    try {
+      const nextView = await loadApproval(runId, projectId, fetcher, controller.signal);
+      if (!controller.signal.aborted && mountedRef.current) setView(nextView);
+    } catch (cause) {
+      if (!controller.signal.aborted) throw cause;
+    }
   }, [fetcher, projectId, runId]);
 
+  useEffect(() => {
+    mountedRef.current = true;
+    void reloadApproval().catch(cause => {
+      if (mountedRef.current) {
+        setError(cause instanceof Error ? cause.message : '视频脚本加载失败');
+      }
+    });
+    return () => {
+      mountedRef.current = false;
+      loadControllerRef.current?.abort();
+    };
+  }, [reloadApproval]);
+
   const perform = async (operation: () => Promise<boolean>): Promise<void> => {
+    if (submittingRef.current) return;
+    submittingRef.current = true;
     setSubmitting(true);
     setError(undefined);
     try {
-      if (!await operation()) setError('操作未被接受，请刷新后重试');
+      if (!await operation() && mountedRef.current) setError('操作未被接受，请刷新后重试');
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : '操作失败，请重试');
+      if (mountedRef.current) setError(cause instanceof Error ? cause.message : '操作失败，请重试');
     } finally {
-      setSubmitting(false);
+      submittingRef.current = false;
+      if (mountedRef.current) setSubmitting(false);
     }
   };
 
@@ -153,9 +173,14 @@ export function BriefToVideoApprovalCard({
             className="w-full resize-y rounded-lg border border-current/20 bg-transparent px-3 py-2 text-xs outline-none focus-visible:border-[#d4af37]"
           />
           <button type="button" className={`${primaryAction} w-full`} disabled={disabled || !revisionInstruction.trim()}
-            onClick={() => { void perform(() => onRevise(
-              approvalIdentity(view.approval), revisionInstruction.trim(),
-            )); }}>
+            onClick={() => { void perform(async () => {
+              const revised = await onRevise(
+                approvalIdentity(view.approval), revisionInstruction.trim(),
+              );
+              if (!revised) return false;
+              await reloadApproval();
+              return true;
+            }); }}>
             提交修改要求
           </button>
         </div>}

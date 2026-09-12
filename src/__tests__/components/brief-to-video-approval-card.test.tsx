@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
 import { BriefToVideoApprovalCard } from '@/components/skill-runtime/BriefToVideoApprovalCard';
@@ -27,11 +27,18 @@ const approval = {
   planChecksum: 'a'.repeat(64), revision: 3, generation: 1, allowRevision: true,
 };
 
-function approvalResponse(): Response {
+function approvalResponse(
+  approvalOverride: Partial<typeof approval> = {},
+  planOverride: Partial<typeof plan> = {},
+): Response {
   return Response.json({ run: {
-    runId: 'run-video-1', projectId: 'project-1', status: 'paused', approval,
+    runId: 'run-video-1', projectId: 'project-1', status: 'paused',
+    approval: { ...approval, ...approvalOverride },
     steps: [{ id: 'plan-film', cost: 5 }, { id: 'generate-film', cost: 120 }],
-    outputs: [{ stepId: 'plan-film', kind: 'json', schemaId: 'brief-to-video-plan-v1', content: JSON.stringify(plan) }],
+    outputs: [{
+      stepId: 'plan-film', kind: 'json', schemaId: 'brief-to-video-plan-v1',
+      content: JSON.stringify({ ...plan, ...planOverride }),
+    }],
   } });
 }
 
@@ -83,6 +90,62 @@ describe('BriefToVideoApprovalCard', () => {
     />);
 
     expect(await screen.findByText('视频步骤预计 120 积分')).not.toBeNull();
+  });
+
+  it('reloads the authoritative approval identity after a successful revision', async () => {
+    const revisedChecksum = 'b'.repeat(64);
+    const fetcher = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(approvalResponse())
+      .mockResolvedValueOnce(approvalResponse(
+        { revision: 11, generation: 1, planChecksum: revisedChecksum },
+        { title: '修改后的夏日新品短片' },
+      ));
+    const onApprove = vi.fn().mockResolvedValue(true);
+    const onRevise = vi.fn().mockResolvedValue(true);
+
+    render(<BriefToVideoApprovalCard
+      runId="run-video-1" projectId="project-1" onApprove={onApprove}
+      onRevise={onRevise} onCancel={vi.fn()} fetcher={fetcher}
+    />);
+
+    expect(await screen.findByRole('heading', { name: '夏日新品短片' })).not.toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '修改脚本' }));
+    fireEvent.change(screen.getByLabelText('脚本修改要求'), { target: { value: '减少字幕' } });
+    fireEvent.click(screen.getByRole('button', { name: '提交修改要求' }));
+
+    await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(2));
+    expect(fetcher).toHaveBeenLastCalledWith(
+      '/api/skill-runs/run-video-1?observeOnly=true',
+      expect.objectContaining({ method: 'GET', cache: 'no-store' }),
+    );
+    expect(await screen.findByRole('heading', { name: '修改后的夏日新品短片' })).not.toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: '批准生成' }));
+    await waitFor(() => expect(onApprove).toHaveBeenCalledWith({
+      revision: 11, generation: 1, planChecksum: revisedChecksum,
+    }));
+  });
+
+  it('does not reload approval after unmounting during a revision', async () => {
+    let resolveRevision: (accepted: boolean) => void = () => undefined;
+    const onRevise = vi.fn().mockReturnValue(new Promise<boolean>(resolve => {
+      resolveRevision = resolve;
+    }));
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(approvalResponse());
+    const { unmount } = render(<BriefToVideoApprovalCard
+      runId="run-video-1" projectId="project-1" onApprove={vi.fn()}
+      onRevise={onRevise} onCancel={vi.fn()} fetcher={fetcher}
+    />);
+
+    expect(await screen.findByRole('heading', { name: '夏日新品短片' })).not.toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '修改脚本' }));
+    fireEvent.change(screen.getByLabelText('脚本修改要求'), { target: { value: '减少字幕' } });
+    fireEvent.click(screen.getByRole('button', { name: '提交修改要求' }));
+    await waitFor(() => expect(onRevise).toHaveBeenCalledOnce());
+
+    unmount();
+    await act(async () => resolveRevision(true));
+    expect(fetcher).toHaveBeenCalledOnce();
   });
 
   it('rejects a history payload from a different project', async () => {
