@@ -1,0 +1,56 @@
+{
+  "schemaVersion": 1,
+  "scope": "Lovart platform compliance Task 11 runtime hardening cloud verification",
+  "recordedAt": "2026-09-12T22:30:17+08:00",
+  "deployment": {
+    "url": "https://62afe49a-716e-4d9e-99cd-a0be49c4794c-5000.dev.coze.site/",
+    "githubCommit": "f92c3c18b7d097076b2660653ae5f34a9b10048d",
+    "cozeMergeHead": "afc37710",
+    "buildId": "Uvvoer4PpS3Jj7YgHpXjc",
+    "servicePid": 18720,
+    "browser": "Playwright controlled existing Edge session",
+    "actor": "Mr.joker"
+  },
+  "run": {
+    "runId": "a4343b6f-7dbd-47f7-b06c-f9840bd0ab94",
+    "status": "paused",
+    "lastSequence": 56,
+    "currentStepId": "audit-image:37211c3ecee5cfb7",
+    "assetVersionIds": [
+      "3bbc6443-0b82-4c46-9c94-ed7b8fb829c6",
+      "19e3c87a-9b83-4a35-b383-a5fc38b75323",
+      "aa734481-5270-4ce9-b565-52e588e118cb"
+    ],
+    "generation6": {
+      "resumedAt": "2026-09-12T14:30:12.984Z",
+      "outerToolStartedAt": "2026-09-12T14:30:13.138Z",
+      "innerToolStartedAt": "2026-09-12T14:30:13.272Z",
+      "technicalProgressAt": "2026-09-12T14:30:17.001Z",
+      "pausedAt": "2026-09-12T14:30:17.145Z",
+      "outerToInnerStartMilliseconds": 134,
+      "resumeToBoundedPauseMilliseconds": 4161,
+      "errorCode": "SKILL_SUBMISSION_UNKNOWN",
+      "retryable": false,
+      "message": "供应商提交结果尚未确认，请核对原任务，勿重复生成"
+    }
+  },
+  "billing": {
+    "balanceBeforeGeneration6": 7808,
+    "balanceAfterGeneration6": 7808,
+    "duplicateChargeObserved": false
+  },
+  "assertions": {
+    "pausedBlankOwnerLeaseReleased": true,
+    "sameGenerationInnerToolStartedImmediately": true,
+    "stalledResponseBodyBounded": true,
+    "blindProviderReplayPrevented": true,
+    "newAssetCreatedByGeneration6": false,
+    "providerVisionSucceeded": false
+  },
+  "console": {
+    "applicationErrors": 0,
+    "hostCspErrors": 3,
+    "classification": "Coze host bridge scripts blocked by the application CSP; not a Wujie business request failure, but the page is not console-clean."
+  },
+  "conclusion": "Runtime hardening cloud pass; platform-compliance successful third report, final document delivery, downloads, refresh recovery and final billing settlement remain unverified."
+}

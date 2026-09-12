@@ -2273,6 +2273,14 @@ The focused gate test passes `7/7`; the actual protected-baseline command passes
 - 原 Run `42ac7d13-b473-450d-a3f3-3323942a5b0d` 必须在 exact commit 部署后通过专用 retry 接口继续；不得创建新 Run 或重复扣费。
 - **当前发布结论：不通过 Task 11 云端验收。** 本地修复不能替代云端三份报告、AssetVersion、JSON/HTML 下载、刷新恢复和单次账务结算证据；全平台仍不可发布。
 
+## 2026-09-12 平台素材合规运行时修复发布判断
+
+- COZE 积分阻塞已解除，`main@f92c3c18` 已完成云端构建和重启；受管图片 S3 回源、暂停态空 owner 租约释放及响应体截止保护均在真实旧 Run 上进入执行路径。
+- generation 6 在 `134ms` 内进入内层合规工具，并在 `4161ms` 内以不可盲重试的 `SKILL_SUBMISSION_UNKNOWN` 有界暂停；余额维持 `7808`，无重复扣费和新增资产。
+- 这关闭了“恢复后租约卡死”和“收到响应头后无限读取”两个运行时发布风险，但没有证明第三张视觉报告业务成功。当前 Run 仍为 paused，最终文档、下载、刷新恢复和结算没有闭环。
+- 三条 Console Error 来自 Coze 宿主桥接脚本被 CSP 拒绝，未观察到无界业务 Console Error；在形成宿主豁免或调整注入策略前仍不能声明页面 Console clean。
+- **发布结论：Task12 维持 100% 已关闭；Task11 运行时加固通过但业务链路仍不通过。全平台结论仍为不通过。**
+
 ## 2026-09-10 多平台批量导出发布判断
 
 - 最终原子传输增量后的聚焦回归 `103/103` 通过；TypeScript 与 quiet ESLint 退出 0。

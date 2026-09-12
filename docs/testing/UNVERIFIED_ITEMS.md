@@ -2472,6 +2472,17 @@ BUG-018 已从未验证项移除。剩余顺序为 `002-B -> 002-D -> 002-E`；�
 - [ ] 下载并校验 JSON/HTML，在整页刷新后恢复同一 document AssetVersion，保存新鲜截图、录像、Trace、Console、Network 和事件证据。
 - [ ] 上述云端证据闭环后，才允许勾选 Task 11、更新唯一 Obsidian 检查点并提交阶段完成记录。
 
+### 2026-09-12 COZE 积分恢复后的精确状态
+
+- [x] COZE 已拉取、构建并重启 `main@f92c3c18`；受管图片 S3 回源进入真实旧 Run。
+- [x] generation 6 的外层到内层工具启动间隔为 `134ms`，证明暂停后空 owner 租约可由同 generation 正常释放。
+- [x] generation 6 在 `4161ms` 内以 `SKILL_SUBMISSION_UNKNOWN` 有界暂停；不可盲重试、无新增 AssetVersion，余额前后均为 `7808`。
+- [ ] 第三张图片仍缺少成功视觉结论；不得把技术检查 partial report 或供应商提交未知写成业务通过。
+- [ ] Run 完成后生成最终 document AssetVersion，并下载校验 JSON/HTML，整页刷新恢复同一结果。
+- [ ] 核对最终 32 积分结算；若最终失败或取消，必须只有一次退款且迟到结果不得覆盖终态。
+- [ ] Coze 三条宿主 bridge CSP Error 需治理或形成正式受控豁免；当前页面不能标记 Console clean。
+- [x] Task12 已于 2026-09-06 完成并关闭，状态为 `100% / CLOUD PASS`；本清单属于后续 Task11，不得回退或重复 Task12。
+
 ## 2026-09-10 多平台批量导出剩余验证
 
 - [x] 最终原子批量传输增量后的专项单元、API、组件与 PostgreSQL 回归 `103/103`。

@@ -2970,6 +2970,16 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - 旧 Run `42ac7d13-b473-450d-a3f3-3323942a5b0d` 继续作为唯一付费验收对象；没有创建新 Run，也没有产生第二次扣费。
 - **回归判定：LOCAL FIX PASS / CLOUD DEPLOYMENT BLOCKED BY COZE CREDITS。** Task 11 云端报告、AssetVersion、下载、刷新恢复与账务终态仍未验证，不更新 Obsidian 阶段结论。
 
+## 2026-09-12 平台素材合规 Task 11 运行时加固云端复验
+
+- COZE 编程积分恢复后，云端已同步并运行 `main@f92c3c18b7d097076b2660653ae5f34a9b10048d`；Coze merge HEAD `afc37710`，Build ID `Uvvoer4PpS3Jj7YgHpXjc`，唯一服务 PID `18720`，首页和鉴权接口均为 HTTP 200；`stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 未触碰。
+- 两个缺陷均先 RED 再最小修复：`5c2c8bcc` 允许同 generation 在暂停态、父租约 owner 已清空时释放操作租约；`f92c3c18` 将合规视觉响应体读取纳入同一 AbortSignal 和截止时间，禁止收到响应头后无限等待。
+- 复用唯一 Run `a4343b6f-7dbd-47f7-b06c-f9840bd0ab94` 的同一步骤执行 generation 6。外层 `tool.started` 到内层 `compliance_audit` 启动仅 `134ms`，证明暂停租约不再阻塞；从恢复到 `SKILL_SUBMISSION_UNKNOWN` 暂停共 `4161ms`，错误为不可盲重试，证明响应体停滞不会再次形成僵尸执行。
+- 该轮执行前后余额均为 `7808`，没有第二次扣费，也没有新增 AssetVersion。原 Run 保留前两张成功报告和 3 个既有 AssetVersion；第三张视觉供应商仍未给出可确认结果，因此不能把运行时保护通过写成合规业务成功。
+- 当前页面 Console 为 `3 errors / 0 warnings`，三条均为 Coze `page-editor-general-web`、`console-bridge`、`history-bridge` 注入脚本被应用 CSP 拒绝。它们未进入无界业务请求，但页面不满足“Console clean”，继续单列为宿主环境残余。
+- 机器证据：[lovart-platform-compliance-task11-runtime-hardening-20260912.json](evidence/lovart-platform-compliance-task11-runtime-hardening-20260912.json)。
+- **回归判定：RUNTIME HARDENING CLOUD PASS / TASK 11 BUSINESS FLOW PENDING。** 仍需第三份视觉报告成功、最终 document AssetVersion、JSON/HTML 下载、刷新恢复和 32 积分最终结算；不得创建新 Run 绕过供应商未确认状态。
+
 ## 2026-09-10 多平台批量导出 Task10 本地回归
 
 - 基线：`main@8a58ca2fe91272c108dadfe014fd7a90ba0c6a2a`；候选为该基线上的 Task10 工作树，`stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 未触碰。
