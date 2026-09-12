@@ -2281,6 +2281,14 @@ The focused gate test passes `7/7`; the actual protected-baseline command passes
 - 三条 Console Error 来自 Coze 宿主桥接脚本被 CSP 拒绝，未观察到无界业务 Console Error；在形成宿主豁免或调整注入策略前仍不能声明页面 Console clean。
 - **发布结论：Task12 维持 100% 已关闭；Task11 运行时加固通过但业务链路仍不通过。全平台结论仍为不通过。**
 
+## 2026-09-12 平台素材合规 Task 11 最终发布判断
+
+- Canvas 原 Run 已完成三份结构化合规报告、三个 document AssetVersion、JSON/HTML 浏览器下载和整页刷新恢复；冻结模型、来源追踪、报告校验和及 32 积分单次结算均已核对。
+- 新鲜取消 Run 证明按已交付步骤结算：32 积分预扣、8 积分单次退款、净消费 24，无重复扣退。Workflow 真实运行完成，Skill 节点与下游数据消费者均成功，16 积分单次结算，刷新后状态和资产一致。
+- Canvas/Workflow 当前各 29 Skills；Simple Chat 保持 16 Skills，并继续排除画布专用合规 Skill，三工作区边界未漂移。
+- **Task 11 发布判断：CLOUD PASS / CLOSED。Task12 保持 100% / CLOUD PASS / CLOSED。**
+- **全平台发布判断仍为不通过。** 当前项目页仍存在旧媒体 `MEDIA_LOAD_FAILED` 与 Coze 宿主 bridge CSP Error，且正式总目标中的其他发布门禁尚未全部关闭；本结论只关闭 Task 11，不扩大为整站通过。
+
 ## 2026-09-10 多平台批量导出发布判断
 
 - 最终原子传输增量后的聚焦回归 `103/103` 通过；TypeScript 与 quiet ESLint 退出 0。

@@ -2980,6 +2980,16 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - 机器证据：[lovart-platform-compliance-task11-runtime-hardening-20260912.json](evidence/lovart-platform-compliance-task11-runtime-hardening-20260912.json)。
 - **回归判定：RUNTIME HARDENING CLOUD PASS / TASK 11 BUSINESS FLOW PENDING。** 仍需第三份视觉报告成功、最终 document AssetVersion、JSON/HTML 下载、刷新恢复和 32 积分最终结算；不得创建新 Run 绕过供应商未确认状态。
 
+## 2026-09-12 平台素材合规 Task 11 云端业务闭环
+
+- Edge 真实复验原 Canvas Run `42ac7d13-b473-450d-a3f3-3323942a5b0d` 已为 `completed`：三份结构化报告、三个 document AssetVersion、来源版本和 APImartLLM `gpt-4o` 精确绑定均恢复；32 积分只扣一次，无退款。
+- 三份报告分别正确输出 `unknown / blocked / blocked`，没有 technical error 或 partial 标记；六个 JSON/HTML 下载端点均为 HTTP 200，JSON 哈希与服务端 checksum 一致，并具有 attachment、nosniff 和 private/no-store 响应头。浏览器实际点击导出 JSON 与 HTML 均成功落盘。
+- 整页刷新后同一 Run、四项输出、三份报告及三个 AssetVersion 保持一致。Canvas/Workflow 目录各 `29` 项，Simple Chat 保持独立 `16` 项且不包含该画布专用 Skill。
+- 新鲜取消 Run `fc0bc02f-2ae8-42a6-9583-b98228e94f50` 最终为 `cancelled`：预扣 32、仅退款 8、净消费已交付步骤的 24；没有重复扣费、重复退款或盲目重试。
+- Workflow `exec-1789224512541-hjfm6e` 与 Skill Run `3f14247c-1f27-4407-92cc-d8ca9125a954` 均完成；下游节点真实收到结构化 `complianceReports` 和 document AssetVersion `0f054365-b2f2-4164-8ac8-c0c5d672b0ae`，16 积分只扣一次，刷新后恢复一致。
+- 新鲜截图、Trace、Network、下载文件及哈希已写入 [lovart-platform-compliance-task11-runtime-hardening-20260912.json](evidence/lovart-platform-compliance-task11-runtime-hardening-20260912.json)。当前页面仍有 Coze 宿主 CSP 和旧项目 `MEDIA_LOAD_FAILED`，因此不宣称 Console clean 或全平台发布通过。
+- **回归判定：TASK 11 CLOUD PASS / CLOSED。Task12 继续保持 100% / CLOUD PASS / CLOSED；全平台仍有独立发布阻断项。**
+
 ## 2026-09-10 多平台批量导出 Task10 本地回归
 
 - 基线：`main@8a58ca2fe91272c108dadfe014fd7a90ba0c6a2a`；候选为该基线上的 Task10 工作树，`stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 未触碰。

@@ -1,56 +1,132 @@
 {
-  "schemaVersion": 1,
-  "scope": "Lovart platform compliance Task 11 runtime hardening cloud verification",
-  "recordedAt": "2026-09-12T22:30:17+08:00",
+  "schemaVersion": 2,
+  "scope": "Lovart platform compliance Task 11 cloud business closure",
+  "recordedAt": "2026-09-12T23:15:00+08:00",
   "deployment": {
     "url": "https://62afe49a-716e-4d9e-99cd-a0be49c4794c-5000.dev.coze.site/",
     "githubCommit": "f92c3c18b7d097076b2660653ae5f34a9b10048d",
     "cozeMergeHead": "afc37710",
     "buildId": "Uvvoer4PpS3Jj7YgHpXjc",
     "servicePid": 18720,
-    "browser": "Playwright controlled existing Edge session",
+    "browser": "Playwright-controlled existing Microsoft Edge session",
     "actor": "Mr.joker"
   },
-  "run": {
-    "runId": "a4343b6f-7dbd-47f7-b06c-f9840bd0ab94",
-    "status": "paused",
-    "lastSequence": 56,
-    "currentStepId": "audit-image:37211c3ecee5cfb7",
-    "assetVersionIds": [
-      "3bbc6443-0b82-4c46-9c94-ed7b8fb829c6",
-      "19e3c87a-9b83-4a35-b383-a5fc38b75323",
-      "aa734481-5270-4ce9-b565-52e588e118cb"
+  "catalog": {
+    "canvasCount": 29,
+    "workflowCount": 29,
+    "simpleChatCount": 16,
+    "platformComplianceInCanvas": true,
+    "platformComplianceInWorkflow": true,
+    "platformComplianceInSimpleChat": false
+  },
+  "canvasSuccessRun": {
+    "runId": "42ac7d13-b473-450d-a3f3-3323942a5b0d",
+    "projectId": "project_1787549625844_nfmso3ts9",
+    "status": "completed",
+    "surface": "canvas",
+    "creditCost": 32,
+    "creditStatus": "charged",
+    "chargeTransactionId": "ctx_charge_f9ce81ad4607378e1ce556481dd40072",
+    "chargeCount": 1,
+    "refundCount": 0,
+    "providerId": "api_1778428130626_2qpg71v",
+    "modelId": "gpt-4o",
+    "eventSequence": 59,
+    "completedEventId": "skill:42ac7d13-b473-450d-a3f3-3323942a5b0d:generation:6:completed",
+    "outputCount": 4,
+    "reportCount": 3,
+    "documentAssetVersionIds": [
+      "7b1900c9-f4a2-40c1-b94d-b443fd2b7c36",
+      "c686d48c-5383-4ae0-9902-463b8d34b14f",
+      "244a3e00-511c-4f10-8ca4-493371cb26fc"
     ],
-    "generation6": {
-      "resumedAt": "2026-09-12T14:30:12.984Z",
-      "outerToolStartedAt": "2026-09-12T14:30:13.138Z",
-      "innerToolStartedAt": "2026-09-12T14:30:13.272Z",
-      "technicalProgressAt": "2026-09-12T14:30:17.001Z",
-      "pausedAt": "2026-09-12T14:30:17.145Z",
-      "outerToInnerStartMilliseconds": 134,
-      "resumeToBoundedPauseMilliseconds": 4161,
-      "errorCode": "SKILL_SUBMISSION_UNKNOWN",
-      "retryable": false,
-      "message": "供应商提交结果尚未确认，请核对原任务，勿重复生成"
-    }
+    "sourceAssetVersionIds": [
+      "364dd089-09f1-5f94-901b-cfe9c58c6243",
+      "f8f7365a-18ff-5113-b309-44478422c11f",
+      "19fe1944-aeae-5220-8144-c10888302b2f"
+    ],
+    "reportVerdicts": ["unknown", "blocked", "blocked"],
+    "reportChecksums": [
+      "3a0c21851d39dd4ab3e5e07da6993a84ad156c5b9bf3da6dec0ee3013665e1a9",
+      "e10b96bccca2c5c45d8b55c6dd5085dfec1b2fa7d28c6609e7994cbf8271afef",
+      "2eece6776dde94653f127393c62cd2f292e6310ab0a1d74cb3f91b2be652d16c"
+    ],
+    "reportJsonBytes": [4017, 4052, 4121],
+    "allTechnicalErrorsEmpty": true,
+    "allPartialFalse": true,
+    "refreshRecovery": true
   },
-  "billing": {
-    "balanceBeforeGeneration6": 7808,
-    "balanceAfterGeneration6": 7808,
-    "duplicateChargeObserved": false
+  "canvasCancellation": {
+    "runId": "fc0bc02f-2ae8-42a6-9583-b98228e94f50",
+    "status": "cancelled",
+    "creditCost": 32,
+    "chargeTransactionId": "ctx_charge_ff40c8c5f28816107f5994895e121466",
+    "refundTransactionId": "ctx_refund_891bed77e053042a23eeb04ead3bb50f",
+    "refundAmount": 8,
+    "balanceBeforeRefund": 7784,
+    "balanceAfterRefund": 7792,
+    "deliveredStepNetCharge": 24,
+    "duplicateChargeObserved": false,
+    "duplicateRefundObserved": false,
+    "retryPerformed": false
   },
-  "assertions": {
-    "pausedBlankOwnerLeaseReleased": true,
-    "sameGenerationInnerToolStartedImmediately": true,
-    "stalledResponseBodyBounded": true,
-    "blindProviderReplayPrevented": true,
-    "newAssetCreatedByGeneration6": false,
-    "providerVisionSucceeded": false
+  "workflowSuccessRun": {
+    "workflowId": "wf-1787202451433-jarch4",
+    "executionId": "exec-1789224512541-hjfm6e",
+    "runId": "3f14247c-1f27-4407-92cc-d8ca9125a954",
+    "status": "completed",
+    "surface": "workflow",
+    "workspaceId": "workflow:wf-1787202451433-jarch4",
+    "creditCost": 16,
+    "creditStatus": "charged",
+    "chargeTransactionId": "ctx_charge_86a8c03ecdf3b6c0a4a2f7c389e9ffcc",
+    "balanceBefore": 7792,
+    "balanceAfter": 7776,
+    "chargeCount": 1,
+    "refundCount": 0,
+    "providerId": "api_1778428130626_2qpg71v",
+    "modelId": "gpt-4o",
+    "skillNodeStatus": "success",
+    "downstreamNodeStatus": "success",
+    "downstreamReportCount": 1,
+    "documentAssetVersionId": "0f054365-b2f2-4164-8ac8-c0c5d672b0ae",
+    "reportChecksum": "aa421d454fa98bd05b1e98f446ed3758cb5a4145fcb570e54093cb5522ff9bd4",
+    "reportJsonBytes": 3956,
+    "reportHtmlBytes": 3545,
+    "refreshRecovery": true
+  },
+  "downloads": {
+    "jsonPath": ".playwright-cli/compliance-42ac7d13-b473-450d-a3f3-3323942a5b0d-audit-image-9bd1a153391c7007.json",
+    "jsonBytes": 4017,
+    "jsonSha256": "3A0C21851D39DD4AB3E5E07DA6993A84AD156C5B9BF3DA6DEC0EE3013665E1A9",
+    "htmlPath": ".playwright-cli/compliance-42ac7d13-b473-450d-a3f3-3323942a5b0d-audit-image-9bd1a153391c7007.html",
+    "htmlBytes": 3613,
+    "htmlSha256": "963201815D207AD7526137ECB5227926A624B148ACFCE2C129479E12F13F5935",
+    "allSixEndpointsHttp200": true,
+    "securityHeadersVerified": true
+  },
+  "browserEvidence": {
+    "screenshotPath": ".playwright-cli/page-2026-09-12T14-51-32-765Z.png",
+    "screenshotBytes": 153695,
+    "screenshotSha256": "FC478214788901997B9AB7A4D50C75E54064C9E60641EFA41E4AF1F184DF079A",
+    "tracePath": ".playwright-cli/traces/trace-1789206023903.trace",
+    "traceBytes": 110198410,
+    "traceSha256": "3B71D46F66904D6F78CDCD5CBFC49F0E35B22B64150FF616E954985A8497FFF1",
+    "networkPath": ".playwright-cli/traces/trace-1789206023903.network",
+    "networkBytes": 52673042,
+    "networkSha256": "EE30EA1F02413DE6BA6671670C69776D198A16DB05BC555BF9B6DAACE636C139"
   },
   "console": {
-    "applicationErrors": 0,
-    "hostCspErrors": 3,
-    "classification": "Coze host bridge scripts blocked by the application CSP; not a Wujie business request failure, but the page is not console-clean."
+    "cozeHostCspErrors": 3,
+    "historicalProjectMediaErrorsObserved": true,
+    "mediaErrorCode": "MEDIA_LOAD_FAILED",
+    "consoleClean": false,
+    "classification": "Task 11 business requests completed, but Coze host bridge CSP errors and historical project media recovery errors keep the page from a console-clean release state."
   },
-  "conclusion": "Runtime hardening cloud pass; platform-compliance successful third report, final document delivery, downloads, refresh recovery and final billing settlement remain unverified."
+  "conclusion": {
+    "task12": "100% / CLOUD PASS / CLOSED",
+    "task11": "CLOUD PASS / CLOSED",
+    "platformRelease": "NOT PASSED",
+    "reason": "Task 11 is closed, while historical project media recovery and broader platform release gates remain open."
+  }
 }

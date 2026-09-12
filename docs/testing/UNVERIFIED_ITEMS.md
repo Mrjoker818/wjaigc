@@ -2483,6 +2483,19 @@ BUG-018 已从未验证项移除。剩余顺序为 `002-B -> 002-D -> 002-E`；�
 - [ ] Coze 三条宿主 bridge CSP Error 需治理或形成正式受控豁免；当前页面不能标记 Console clean。
 - [x] Task12 已于 2026-09-06 完成并关闭，状态为 `100% / CLOUD PASS`；本清单属于后续 Task11，不得回退或重复 Task12。
 
+### 2026-09-12 Task 11 最终关闭状态
+
+- [x] Canvas 原 Run `42ac7d13-b473-450d-a3f3-3323942a5b0d` 已完成三份逐图报告，硬规则、视觉结论、`unknown`、规则版本和来源 AssetVersion 均有云端证据。
+- [x] APImartLLM `api_1778428130626_2qpg71v / gpt-4o` 在 orchestrator 与 vision 路径精确冻结；成功 Run 只扣 32 积分一次。
+- [x] 新鲜取消 Run 只退款一次且按已交付步骤净结算 24；无重复扣费、退款或盲重试。
+- [x] Workflow 真实执行同一 Skill，下游节点收到结构化报告与 document AssetVersion；单次结算 16 积分，刷新恢复一致。
+- [x] Canvas/Workflow 当前各 29 Skills；Simple Chat 仍为独立 16 Skills，未包含平台素材合规检查。
+- [x] JSON/HTML 六个端点及浏览器实际下载完成哈希校验；整页刷新恢复同一 Run 和 AssetVersion。
+- [x] 已保存截图、Trace、Network、事件、Run/Task ID、AssetVersion 和积分流水证据。
+- [ ] Coze 三条宿主 bridge CSP Error 尚未治理或形成正式豁免；页面不能标记 Console clean。
+- [ ] 旧项目仍存在 `MEDIA_LOAD_FAILED` 空白媒体框和恢复错误；属于独立项目媒体恢复问题，不回退 Task 11，但继续阻止全平台发布。
+- [x] **Task 11 状态：`CLOUD PASS / CLOSED`。Task12 继续为 `100% / CLOUD PASS / CLOSED`。**
+
 ## 2026-09-10 多平台批量导出剩余验证
 
 - [x] 最终原子批量传输增量后的专项单元、API、组件与 PostgreSQL 回归 `103/103`。
