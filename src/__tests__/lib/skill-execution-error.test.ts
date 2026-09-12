@@ -27,6 +27,24 @@ describe('safe Skill execution errors', () => {
       code: 'SKILL_PARAMETERS_REJECTED', retryable: false,
     });
   });
+  it('preserves compliance vision retryability without exposing provider details', () => {
+    expect(safeSkillExecutionError({
+      code: 'COMPLIANCE_AUDIT_VISION_FAILED',
+      retryable: true,
+    })).toMatchObject({
+      code: 'COMPLIANCE_AUDIT_VISION_FAILED',
+      retryable: true,
+    });
+    expect(safeSkillExecutionError({
+      code: 'COMPLIANCE_AUDIT_VISION_FAILED',
+      retryable: false,
+      providerStatus: 403,
+    })).toMatchObject({
+      code: 'SKILL_PROVIDER_AUTH_REJECTED',
+      retryable: false,
+      providerStatus: 403,
+    });
+  });
   it('does not serialize arbitrary exceptions or invalid metadata', () => {
     const result = safeSkillExecutionError({ providerStatus: Infinity, providerCode: 'sk-secret', message: 'private' });
     expect(result).toMatchObject({ code: 'SKILL_EXECUTION_FAILED', retryable: false });
@@ -64,5 +82,36 @@ describe('safe Skill execution errors', () => {
       runId: 'run-1', stepId: 'audit-image:one', generation: 4,
     }, diagnosticRecord => records.push(diagnosticRecord));
     expect(records).toEqual([diagnostic]);
+  });
+
+  it('records bounded compliance failure metadata and its safe cause', () => {
+    const cause = Object.assign(new Error('COMPLIANCE_VISION_RESPONSE_INVALID'), {
+      name: 'ComplianceVisionError',
+      code: 'COMPLIANCE_VISION_RESPONSE_INVALID',
+      retryable: true,
+      requestId: 'agent-provider:request-1',
+    });
+    const error = Object.assign(new Error('The frozen compliance vision check failed', {
+      cause,
+    }), {
+      name: 'ComplianceAuditVisionFailedError',
+      code: 'COMPLIANCE_AUDIT_VISION_FAILED',
+      retryable: true,
+      requestId: 'agent-provider:request-1',
+    });
+
+    expect(skillExecutionDiagnostic(error, {
+      runId: 'run-1', stepId: 'audit-image:one', generation: 0,
+    })).toMatchObject({
+      errorCode: 'COMPLIANCE_AUDIT_VISION_FAILED',
+      retryable: true,
+      requestId: 'agent-provider:request-1',
+      cause: {
+        errorName: 'ComplianceVisionError',
+        errorCode: 'COMPLIANCE_VISION_RESPONSE_INVALID',
+        retryable: true,
+        requestId: 'agent-provider:request-1',
+      },
+    });
   });
 });

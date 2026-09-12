@@ -11,7 +11,14 @@ export interface SkillExecutionDiagnostic extends SkillExecutionDiagnosticContex
   errorCode?: string;
   message: string;
   stack?: string;
+  retryable?: boolean;
+  providerStatus?: number;
+  requestId?: string;
+  cause?: Omit<SkillExecutionDiagnostic, keyof SkillExecutionDiagnosticContext | 'cause'>;
 }
+
+const SAFE_DIAGNOSTIC_CODE = /^[A-Z0-9_.-]{1,80}$/u;
+const SAFE_DIAGNOSTIC_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u;
 
 function redactDiagnosticText(value: string, limit: number): string {
   return value
@@ -23,26 +30,64 @@ function redactDiagnosticText(value: string, limit: number): string {
     .slice(0, limit);
 }
 
-export function skillExecutionDiagnostic(
+function buildSkillExecutionDiagnostic(
   error: unknown,
   context: SkillExecutionDiagnosticContext,
+  includeCause: boolean,
 ): SkillExecutionDiagnostic {
   const details = error && typeof error === 'object' ? error as Record<string, unknown> : {};
   const errorName = error instanceof Error && error.name
     ? redactDiagnosticText(error.name, 80)
     : 'UnknownError';
   const rawMessage = error instanceof Error ? error.message : String(error);
-  const rawCode = typeof details.code === 'string' && /^[A-Z0-9_.-]{1,80}$/u.test(details.code)
+  const rawCode = typeof details.code === 'string' && SAFE_DIAGNOSTIC_CODE.test(details.code)
     ? details.code
     : undefined;
+  const retryable = typeof details.retryable === 'boolean' ? details.retryable : undefined;
+  const providerStatus = typeof details.providerStatus === 'number'
+    && Number.isInteger(details.providerStatus)
+    && details.providerStatus >= 400
+    && details.providerStatus <= 599
+    ? details.providerStatus
+    : undefined;
+  const requestId = typeof details.requestId === 'string' && SAFE_DIAGNOSTIC_ID.test(details.requestId)
+    ? details.requestId
+    : undefined;
   const rawStack = error instanceof Error && typeof error.stack === 'string' ? error.stack : undefined;
+  const rawCause = includeCause && error instanceof Error ? error.cause : undefined;
+  const cause = rawCause === undefined ? undefined : buildSkillExecutionDiagnostic(rawCause, {
+    runId: context.runId,
+    stepId: context.stepId,
+    generation: context.generation,
+  }, false);
   return {
     ...context,
     errorName,
     ...(rawCode ? { errorCode: rawCode } : {}),
     message: redactDiagnosticText(rawMessage, 600),
     ...(rawStack ? { stack: redactDiagnosticText(rawStack, 4_000) } : {}),
+    ...(retryable === undefined ? {} : { retryable }),
+    ...(providerStatus === undefined ? {} : { providerStatus }),
+    ...(requestId === undefined ? {} : { requestId }),
+    ...(cause === undefined ? {} : {
+      cause: {
+        errorName: cause.errorName,
+        ...(cause.errorCode ? { errorCode: cause.errorCode } : {}),
+        message: cause.message,
+        ...(cause.stack ? { stack: cause.stack } : {}),
+        ...(cause.retryable === undefined ? {} : { retryable: cause.retryable }),
+        ...(cause.providerStatus === undefined ? {} : { providerStatus: cause.providerStatus }),
+        ...(cause.requestId === undefined ? {} : { requestId: cause.requestId }),
+      },
+    }),
   };
+}
+
+export function skillExecutionDiagnostic(
+  error: unknown,
+  context: SkillExecutionDiagnosticContext,
+): SkillExecutionDiagnostic {
+  return buildSkillExecutionDiagnostic(error, context, true);
 }
 
 export function recordSkillExecutionDiagnostic(
@@ -83,6 +128,14 @@ export function safeSkillExecutionError(error: unknown): AgentRunError & { provi
   }
   if (status !== undefined && status >= 500) {
     return { code: 'SKILL_PROVIDER_UNAVAILABLE', message: '模型提供商服务暂时不可用，请稍后重试', retryable: true, ...metadata };
+  }
+  if (details.code === 'COMPLIANCE_AUDIT_VISION_FAILED') {
+    return {
+      code: 'COMPLIANCE_AUDIT_VISION_FAILED',
+      message: '平台合规视觉检查未完成，请检查任务记录后重试',
+      retryable: details.retryable === true,
+      ...metadata,
+    };
   }
   // Never persist raw provider text, prompts, or credentials into public run events.
   return { code: 'SKILL_EXECUTION_FAILED', message: '当前步骤执行失败，请检查任务记录后重试', retryable: false, ...metadata };
