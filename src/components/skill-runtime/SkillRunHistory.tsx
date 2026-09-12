@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { History, RefreshCw } from 'lucide-react';
 import type { DurableSkillOutput, SkillSurface } from '@/lib/skill-runtime/types';
 import type { SkillRunRequest } from '@/lib/skill-runtime/run-request';
+import { parseSkillApprovalState, type SkillApprovalStateV1 } from '@/lib/skill-runtime/approval';
 import type { SkillRunRestoreIdentity } from './use-skill-run';
 
 export interface SkillRunHistoryItem extends SkillRunRestoreIdentity {
@@ -15,6 +16,7 @@ export interface SkillRunHistoryItem extends SkillRunRestoreIdentity {
   inputValues?: Record<string, unknown>;
   modelBindings?: SkillRunRequest['modelBindings'];
   outputs?: DurableSkillOutput[];
+  approval?: SkillApprovalStateV1;
 }
 
 interface SkillRunHistoryProps {
@@ -57,6 +59,7 @@ function parseHistoryItem(value: unknown, scope: {
     ? [...item.sourceVersionIds] as string[] : undefined;
   const outputs = Array.isArray(item.outputs)
     ? structuredClone(item.outputs) as DurableSkillOutput[] : undefined;
+  const approval = item.approval === undefined ? undefined : parseSkillApprovalState(item.approval);
   return {
     runId: item.runId,
     projectId: scope.projectId,
@@ -72,7 +75,12 @@ function parseHistoryItem(value: unknown, scope: {
     ...(optionalRecord(item.modelBindings)
       ? { modelBindings: optionalRecord(item.modelBindings) as SkillRunRequest['modelBindings'] } : {}),
     ...(outputs ? { outputs } : {}),
+    ...(approval ? { approval } : {}),
   };
+}
+
+function runStatusLabel(run: SkillRunHistoryItem): string {
+  return run.status === 'paused' && run.approval ? '待审批' : labels[run.status];
 }
 
 export function SkillRunHistory({ projectId, surface, skillId, accountKey, activeRunId,
@@ -129,7 +137,7 @@ export function SkillRunHistory({ projectId, surface, skillId, accountKey, activ
         <button type="button" aria-label={`查看任务 ${run.runId}`} aria-pressed={run.runId === activeRunId}
           disabled={busy} onClick={() => onSelect(run)}
           className="flex min-h-9 w-full flex-wrap items-center justify-between gap-x-2 gap-y-1 px-1 py-2 text-left hover:bg-current/10 focus-visible:outline focus-visible:outline-2 disabled:opacity-50">
-          <span>{labels[run.status]}</span><time dateTime={new Date(run.createdAt).toISOString()}>{new Date(run.createdAt).toLocaleString('zh-CN')}</time>
+          <span>{runStatusLabel(run)}</span><time dateTime={new Date(run.createdAt).toISOString()}>{new Date(run.createdAt).toLocaleString('zh-CN')}</time>
           <span className="w-full break-all font-mono text-[10px]">{run.runId}</span>
         </button>
       </li>)}

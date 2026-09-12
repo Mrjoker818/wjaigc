@@ -315,6 +315,22 @@ describe('SkillInputFields', () => {
 });
 
 describe('SkillRunProgress', () => {
+  it('delegates approval pauses to the dedicated approval card', () => {
+    render(<SkillRunProgress
+      projection={projection({
+        status: 'paused',
+        error: { code: 'SKILL_APPROVAL_REQUIRED', message: 'approval required', retryable: false },
+        resumeFromStepId: 'generate-film',
+      })}
+      onResume={vi.fn()}
+      onCancel={vi.fn()}
+    />);
+
+    expect(screen.queryByRole('button', { name: '继续' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '取消' })).toBeNull();
+    expect(screen.queryByText('SKILL_APPROVAL_REQUIRED')).toBeNull();
+  });
+
   it('keeps completed siblings visible while a later batch item is still running', () => {
     render(<SkillRunProgress projection={projection({
       progress: 67,

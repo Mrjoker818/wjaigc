@@ -47,6 +47,8 @@ import { SkillInputFields } from '@/components/skill-runtime/SkillInputFields';
 import { MultiPlatformExportDrawer } from '@/components/skill-runtime/MultiPlatformExportDrawer';
 import { SkillRunProgress } from '@/components/skill-runtime/SkillRunProgress';
 import { SkillRunHistory, type SkillRunHistoryItem } from '@/components/skill-runtime/SkillRunHistory';
+import { BriefToVideoApprovalCard } from '@/components/skill-runtime/BriefToVideoApprovalCard';
+import { BriefToVideoResultCard } from '@/components/skill-runtime/BriefToVideoResultCard';
 import {
   createCanvasSkillIdempotencyKey,
   createPlatformComplianceRecheckRequest,
@@ -75,6 +77,7 @@ import {
 } from '@/lib/skill-runtime/types';
 import { bindCanvasSkillSourceInputs, collectCanvasSkillSourceVersionIds } from '@/lib/skill-runtime/canvas-source-inputs';
 import { MULTI_PLATFORM_EXPORT_SKILL_ID } from '@/lib/skill-runtime/multi-platform-export-preset';
+import { BRIEF_TO_VIDEO_SKILL_ID } from '@/lib/skill-runtime/brief-to-video-preset';
 import { createMultiPlatformExportRequestFingerprint } from '@/lib/skill-runtime/multi-platform-export-client';
 
 const CHAT_RENDER_WINDOW = 80;
@@ -6435,6 +6438,27 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                   complianceRecheckUnavailableReason={skillRecheckUnavailableReason}
                   theme={themeStyle === 'gold' ? 'dark' : 'light'}
                 />
+                {activeSkill.id === BRIEF_TO_VIDEO_SKILL_ID
+                  && projectId
+                  && skillRun.runId
+                  && skillRun.projection?.status === 'paused'
+                  && skillRun.projection.error?.code === 'SKILL_APPROVAL_REQUIRED' && (
+                    <BriefToVideoApprovalCard
+                      runId={skillRun.runId}
+                      projectId={projectId}
+                      estimate={skillRun.estimate}
+                      busy={skillRun.busy}
+                      onApprove={skillRun.approve}
+                      onRevise={skillRun.revise}
+                      onCancel={skillRun.cancel}
+                    />
+                  )}
+                {activeSkill.id === BRIEF_TO_VIDEO_SKILL_ID
+                  && projectId
+                  && skillRun.runId
+                  && skillRun.projection?.status === 'completed' && (
+                    <BriefToVideoResultCard runId={skillRun.runId} projectId={projectId} />
+                  )}
               </div>
             )}
 

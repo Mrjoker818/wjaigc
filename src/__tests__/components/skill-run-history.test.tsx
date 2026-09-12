@@ -13,6 +13,21 @@ const run = { runId: 'old-run', projectId: 'p1', surface: 'canvas', skillId: 'fo
 const response = (runs: unknown[]): Response => ({ ok: true, json: async () => ({ runs }) }) as Response;
 
 describe('Skill run history list', () => {
+  it('labels an approval pause as pending approval', async () => {
+    const approvalRun = {
+      ...run,
+      approval: {
+        schemaId: 'skill-approval-state-v1', status: 'pending', stepId: 'plan-film',
+        nextStepId: 'generate-film', outputSchemaId: 'brief-to-video-plan-v1',
+        planChecksum: 'a'.repeat(64), revision: 1, generation: 0, allowRevision: true,
+      },
+    };
+    render(<SkillRunHistory {...scope} fetcher={vi.fn().mockResolvedValue(response([approvalRun]))} onSelect={vi.fn()} />);
+
+    expect(await screen.findByText('待审批')).not.toBeNull();
+    expect(screen.queryByText('已暂停')).toBeNull();
+  });
+
   it('loads scoped history read-only and requires a click to observe an old run', async () => {
     const fetcher = vi.fn().mockResolvedValue(response([run]));
     const onSelect = vi.fn();

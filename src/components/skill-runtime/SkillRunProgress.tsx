@@ -96,6 +96,8 @@ export function SkillRunProgress({
 
   if (!estimate && !projection) return null;
   const terminal = projection ? terminalStatuses.has(projection.status) : false;
+  const approvalRequired = projection?.status === 'paused'
+    && projection.error?.code === 'SKILL_APPROVAL_REQUIRED';
   const retryablePausedStep = projection?.status === 'paused'
     && projection.resumeFromStepId === retryableStepId
     ? retryableStepId
@@ -124,7 +126,7 @@ export function SkillRunProgress({
               </li>
             ))}
           </ol>
-          {projection.error && (
+          {projection.error && !approvalRequired && (
             <div role="alert" className="text-destructive">
               <div>{projection.error.code}</div>
               <div>{projection.error.message}</div>
@@ -133,7 +135,7 @@ export function SkillRunProgress({
           {projection.status === 'paused' && retryabilityError && (
             <div role="alert" className="text-destructive">{retryabilityError}</div>
           )}
-          <div className="flex gap-2">
+          {!approvalRequired && <div className="flex gap-2">
             {projection.status === 'paused' && !retryablePausedStep && onResume && (
               <button type="button" disabled={busy} onClick={onResume}>继续</button>
             )}
@@ -167,7 +169,7 @@ export function SkillRunProgress({
                   重新检查
                 </button>
               )}
-          </div>
+          </div>}
           {complianceError && <div role="alert" className={`flex items-center gap-2 ${complianceAlertClass(theme)}`}>
             <span>{complianceError}</span>
             <button type="button" className="underline" onClick={() => setComplianceRevision(value => value + 1)}>重新加载报告</button>

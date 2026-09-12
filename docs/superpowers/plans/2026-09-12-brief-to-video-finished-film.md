@@ -354,7 +354,7 @@ git commit -m "feat: project finished video assets"
 - Produces: approval/revision/cancel controls using `useSkillRun()`。
 - Produces: playable/downloadable finished-video result card。
 
-- [ ] **Step 1: 写 UI 状态、积分和 375px RED 测试**
+- [x] **Step 1: 写 UI 状态、积分和 375px RED 测试**
 
 ```tsx
 expect(screen.getByRole('button', { name: '批准生成' })).toBeEnabled();
@@ -364,17 +364,17 @@ expect(screen.getByRole('button', { name: '取消任务' })).toBeEnabled();
 expect(screen.queryByText('生成中')).not.toBeInTheDocument();
 ```
 
-- [ ] **Step 2: 运行测试确认 RED**
+- [x] **Step 2: 运行测试确认 RED**
 
 Run: `pnpm exec vitest run src/__tests__/components/brief-to-video-approval-card.test.tsx src/__tests__/components/chat-panel-brief-to-video.test.tsx`
 
 Expected: FAIL，审批卡和结果卡尚不存在。
 
-- [ ] **Step 3: 实现 Canvas 表单、审批、真实进度和结果卡**
+- [x] **Step 3: 实现 Canvas 表单、审批、真实进度和结果卡**
 
 审批前显示计划，不显示虚假视频进度。批准后仅使用服务器事件；结果卡使用稳定 AssetVersion 播放和下载。布局复用 Skill 视觉变量，375px 单列且按钮高至少 40px。
 
-- [ ] **Step 4: 运行测试并提交**
+- [x] **Step 4: 运行测试并提交**
 
 Run: `pnpm exec vitest run src/__tests__/components/brief-to-video-approval-card.test.tsx src/__tests__/components/chat-panel-brief-to-video.test.tsx src/__tests__/components/chat-panel-skill-runtime.test.tsx`
 
