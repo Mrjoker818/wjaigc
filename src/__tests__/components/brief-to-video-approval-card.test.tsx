@@ -57,8 +57,10 @@ describe('BriefToVideoApprovalCard', () => {
     expect((screen.getByRole('button', { name: '修改脚本' }) as HTMLButtonElement).disabled).toBe(false);
     expect((screen.getByRole('button', { name: '取消任务' }) as HTMLButtonElement).disabled).toBe(false);
     expect(screen.queryByText('生成中')).toBeNull();
-    expect(screen.getByTestId('brief-video-approval-actions').className).toContain('grid-cols-1');
-    expect(screen.getByRole('button', { name: '批准生成' }).className).toContain('min-h-10');
+    expect(screen.getByTestId('brief-video-approval-actions').className).toContain('grid-cols-1 gap-2');
+    for (const name of ['批准生成', '修改脚本', '取消任务']) {
+      expect(screen.getByRole('button', { name }).className).toContain('min-h-[44px]');
+    }
 
     fireEvent.click(screen.getByRole('button', { name: '批准生成' }));
     await waitFor(() => expect(onApprove).toHaveBeenCalledWith({

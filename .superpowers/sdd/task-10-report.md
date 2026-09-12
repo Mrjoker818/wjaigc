@@ -57,3 +57,16 @@
 - GREEN：Canvas 请求从上下文来源和所有 `bindToSourceVersions` 表单值合并、去重来源版本；Task 10 fixture 增加独立受管尾帧 Asset/AssetVersion/Placement；helper 在最后一次导航后收起面板，使 375px 源图重新进入虚拟化可见区，真实点击并确认 `data-canvas-selected=true` 后再展开、激活 Skill，尾帧通过 UI 填入独立版本。
 - 定向 Vitest：`src/__tests__/lib/canvas-skill-source-inputs.test.ts`、`src/__tests__/scripts/brief-to-video-helper.test.ts`、`src/__tests__/components/chat-panel-skill-runtime.test.tsx` 共 `13/13 PASS`。
 - `pnpm run ts-check` 退出 0。按父级要求未运行 Playwright 或全仓测试；本修复后的四浏览器结果等待父级复跑，当前状态继续为 `LOCAL BLOCKED / CLOUD UNVERIFIED`。
+
+## 来源修复后的真实轮次
+
+- 父级真实四浏览器仍为 `0/4`，不得登记为通过。Chromium、Firefox、WebKit 均已越过 Canvas 图片选择、来源绑定、审批与恢复，事件推进至 `run.resumed` / `tool.started`，随后停在 `run.paused`，`execution-error=SKILL_SUBMISSION_UNKNOWN`，受控 provider submissions 为 0。
+- 桌面三项目的原因已确认是父级启动本地环境时遗漏 `DEPLOY_RUN_PORT=5010`：内部 API URL 仍默认指向 5000，而测试服务实际运行于 5010。该项由父级下轮补齐环境变量，不修改业务提交或错误断言。
+- mobile-chromium 同样已越过图片选择和来源绑定，但 `assertMobileApprovalExperience` 实测批准、修改、取消控件高度仅 33px，低于规格要求的 40px；这是本轮唯一需要产品代码修复的真实移动 UI 缺陷。
+
+### 移动审批控件修复
+
+- 根因：审批卡使用 Tailwind `min-h-10`（2.5rem），移动环境根字号缩放后实际高度约为 33px，rem 下限不能保证 40px 触控目标。
+- RED：组件测试要求批准生成、修改脚本、取消任务三个按钮均具有固定 `min-h-[44px]`，首次结果 `1 failed / 3 passed`，失败值为旧 `min-h-10`。
+- GREEN：审批卡主、次操作共享样式改为固定 `min-h-[44px]`；移动端继续采用单列 `grid-cols-1 gap-2`，避免三个控件重叠并保持纵向可达。展开后的“提交修改要求”按钮复用同一主操作样式。
+- 定向 Vitest：审批卡、Canvas 接入、Simple Chat 接入共 `9/9 PASS`；`pnpm run ts-check` 退出 0。按要求未运行 Playwright 或全仓测试，44px 的真实移动浏览器结果等待父级复跑。

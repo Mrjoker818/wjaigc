@@ -26,8 +26,8 @@ interface ApprovalView {
   videoCost?: number;
 }
 
-const primaryAction = 'inline-flex min-h-10 items-center justify-center gap-2 rounded-lg bg-[#d4af37] px-3 text-xs font-semibold text-[#0a0a0b] hover:bg-[#e2c45c] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#d4af37] disabled:cursor-not-allowed disabled:opacity-50';
-const secondaryAction = 'inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-current/20 px-3 text-xs font-medium hover:bg-current/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 disabled:cursor-not-allowed disabled:opacity-50';
+const primaryAction = 'inline-flex min-h-[44px] items-center justify-center gap-2 rounded-lg bg-[#d4af37] px-3 text-xs font-semibold text-[#0a0a0b] hover:bg-[#e2c45c] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#d4af37] disabled:cursor-not-allowed disabled:opacity-50';
+const secondaryAction = 'inline-flex min-h-[44px] items-center justify-center gap-2 rounded-lg border border-current/20 px-3 text-xs font-medium hover:bg-current/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 disabled:cursor-not-allowed disabled:opacity-50';
 
 function approvalIdentity(approval: SkillApprovalStateV1): SkillApprovalIdentity {
   return {
