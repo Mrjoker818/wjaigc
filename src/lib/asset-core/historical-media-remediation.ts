@@ -41,6 +41,13 @@ const MAX_CANDIDATE_PLACEMENTS = Math.floor(
   / (MAX_CANONICAL_PLACEMENT_BYTES + 1),
 );
 const INVALID_REQUEST = 'HISTORICAL_MEDIA_REQUEST_INVALID';
+
+export function shouldTrashHistoricalCanvasPlacementSnapshot(
+  placement: Pick<WorkspacePlacement, 'workspace' | 'entityType'>,
+): boolean {
+  return placement.workspace === 'canvas'
+    && (placement.entityType === 'canvas-image' || placement.entityType === 'canvas-video');
+}
 const HISTORICAL_MEDIA_ELIGIBILITY_WHERE = `
   asset.status = 'active'
   AND nullif(btrim(coalesce(version.storage_key, '')), '') IS NULL
@@ -1149,10 +1156,7 @@ export async function archiveHistoricalMedia(input: {
       for (const placement of locked.placements) {
         await softTrashPlacement(client, placement);
         archivedPlacementCount += 1;
-        if (
-          placement.workspace === 'canvas'
-          && placement.entityType === 'canvas-image'
-        ) {
+        if (shouldTrashHistoricalCanvasPlacementSnapshot(placement)) {
           projectRevisions[locked.projectId] = await trashCanvasPlacementSnapshotInTransaction(
             client,
             locked.ownerId,

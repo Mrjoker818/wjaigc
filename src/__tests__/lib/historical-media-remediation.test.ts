@@ -5,6 +5,7 @@ import {
   buildHistoricalMediaCandidateDigest,
   classifyHistoricalMediaUrl,
   parseHistoricalMediaArchiveRequest,
+  shouldTrashHistoricalCanvasPlacementSnapshot,
 } from '@/lib/asset-core/historical-media-remediation';
 
 const candidate = {
@@ -33,6 +34,11 @@ const request = {
 };
 
 describe('historical media remediation domain', () => {
+  it('synchronizes legacy and shadow snapshot deletion for image and video canvas placements', () => {
+    expect(shouldTrashHistoricalCanvasPlacementSnapshot({ workspace: 'canvas', entityType: 'canvas-image' })).toBe(true);
+    expect(shouldTrashHistoricalCanvasPlacementSnapshot({ workspace: 'canvas', entityType: 'canvas-video' })).toBe(true);
+    expect(shouldTrashHistoricalCanvasPlacementSnapshot({ workspace: 'chat', entityType: 'chat-result' })).toBe(false);
+  });
   it.each([
     ['', 'empty'],
     ['   ', 'empty'],

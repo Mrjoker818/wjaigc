@@ -689,11 +689,23 @@ class PostgresAssetStorageTransaction implements AssetStorageTransaction {
     if (!project) throw new Error('Canvas project snapshot is unavailable');
     const version = await this.findVersion(ownerId, projectId, placement.assetVersionId);
     if (!version) throw new Error('Canvas asset version is unavailable');
+    const asset = await this.findAsset(ownerId, projectId, placement.assetId);
+    if (!asset) throw new Error('Canvas asset is unavailable');
     const metadataImage = placement.metadata?.legacyImage;
     const base = metadataImage && typeof metadataImage === 'object' && !Array.isArray(metadataImage)
       ? metadataImage as Record<string, unknown>
       : {};
     const transform = placement.transform ?? {};
+    const isVideo = placement.entityType === 'canvas-video' || asset.kind === 'video';
+    const videoPosterUrl = isVideo
+      ? typeof base.videoThumbnailUrl === 'string' && base.videoThumbnailUrl
+        ? base.videoThumbnailUrl
+        : typeof base.thumbnailUrl === 'string' && base.thumbnailUrl
+          ? base.thumbnailUrl
+          : typeof base.url === 'string' && base.url !== base.videoUrl
+            ? base.url
+            : undefined
+      : undefined;
     const restoredDimensions: Record<string, number> = {};
     for (const [key, fallback] of [
       ['originalWidth', version.file.width],
@@ -710,7 +722,13 @@ class PostgresAssetStorageTransaction implements AssetStorageTransaction {
       ...transform,
       ...restoredDimensions,
       id: placement.entityId,
-      url: version.file.url,
+      url: isVideo ? videoPosterUrl ?? '' : version.file.url,
+      ...(isVideo ? {
+        mediaType: 'video',
+        videoUrl: version.file.url,
+        thumbnailUrl: videoPosterUrl,
+        videoThumbnailUrl: videoPosterUrl,
+      } : {}),
       sourceUrl: version.file.recoverySourceUrl ?? base.sourceUrl,
       mediaAvailability: version.file.availability,
       assetId: placement.assetId,

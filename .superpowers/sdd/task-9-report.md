@@ -123,3 +123,36 @@ Task 9 指定套件加 asset transfer、batch transfer、canvas bridge、视频�
 - 视频节点语义由权威 Asset `kind` 恢复，Placement 使用 `canvas-video`，画布快照查询同时覆盖两类 canvas entity。
 - 9 个 PostgreSQL Placement 恢复测试因当前环境无数据库而跳过；对应 API、服务语义和 bridge 回归均已通过。
 - 未修改或暂存受保护文件，未触碰 `stable`。
+
+## 第二轮复审修复（2026-09-13）
+
+提交信息：`fix: restore legacy canvas video snapshots`。
+
+### 改动
+
+- `restoreCanvasPlacementSnapshot` 同时读取 AssetVersion 与 Asset kind；当 Asset kind 为 video 或 Placement 为 `canvas-video` 时，重建 `mediaType: 'video'`、当前版本 `videoUrl`，并按项目既有 `videoThumbnailUrl → thumbnailUrl → poster url` 语义保留缩略图。
+- legacy 项目快照刷新后仍保持 poster 与真实视频 URL 分离；`canvas-image` 继续沿用原恢复形态。
+- historical media remediation 将 `canvas-image` 与 `canvas-video` 都纳入快照同步删除，Placement shadow 状态与 legacy canvas snapshot 一并清理，避免 ghost video。
+
+### TDD 与验证
+
+RED：
+
+```bash
+pnpm exec vitest run src/__tests__/lib/asset-storage-canvas-restore.test.ts src/__tests__/lib/historical-media-remediation.test.ts
+```
+
+结果：退出码 1；3 个失败、20 个通过。失败证明视频恢复把 mp4 写入 poster `url`、保留旧 `videoUrl`，且 remediation 不识别 `canvas-video`。
+
+GREEN：同一命令 2 个测试文件、23 个测试全部通过。
+
+相关 asset storage、remediation、project reader、canvas shadow 与 Task 9 回归：16 个测试文件、284 个测试全部通过。
+
+- `pnpm ts-check`：退出码 0。
+- changed-files `pnpm exec eslint --quiet ...`：退出码 0。
+- 本轮文件 `git diff --check`：通过。
+
+### 关注点
+
+- 本轮相关测试全部执行，无跳过项。
+- 受保护文件保持原哈希且未暂存；未触碰 `stable`。
