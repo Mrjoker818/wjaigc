@@ -93,6 +93,13 @@ export const AGENT_TOOL_REGISTRY: readonly AgentToolDefinition[] = [
     productTypes: ['canvas', 'chat', 'simple-chat'],
     modelCapabilities: [],
   },
+  {
+    toolId: 'brief_video_plan',
+    skillOnly: true,
+    workspaces: ['canvas', 'workflow', 'chat'],
+    productTypes: ['canvas', 'chat', 'simple-chat'],
+    modelCapabilities: ['chat'],
+  },
 ] as const;
 
 export function authorizeAgentTools({

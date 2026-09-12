@@ -148,7 +148,7 @@ git commit -m "feat: register brief to video skill"
 - Produces: `parseBriefToVideoPlanResponse(response)`。
 - Registers: `brief_video_plan` Skill adapter and `brief-to-video-plan-v1` structured output schema。
 
-- [ ] **Step 1: 写 JSON、SSE、围栏文本和非法计划失败测试**
+- [x] **Step 1: 写 JSON、SSE、围栏文本和非法计划失败测试**
 
 ```ts
 expect(parseBriefToVideoPlanResponse(jsonResponse)).toEqual(expectedPlan);
@@ -157,17 +157,17 @@ expect(() => parseBriefToVideoPlanResponse('{"scenes":[]}')).toThrow('BRIEF_VIDE
 expect(adapterOutput.structured?.schemaId).toBe('brief-to-video-plan-v1');
 ```
 
-- [ ] **Step 2: 运行测试确认 RED**
+- [x] **Step 2: 运行测试确认 RED**
 
 Run: `pnpm exec vitest run src/__tests__/lib/brief-to-video-planner.test.ts src/__tests__/lib/skill-brief-video-plan-adapter.test.ts`
 
 Expected: FAIL，规划器和 adapter 尚不存在。
 
-- [ ] **Step 3: 实现有界结构化解析与冻结 orchestrator 调用**
+- [x] **Step 3: 实现有界结构化解析与冻结 orchestrator 调用**
 
 规划请求只使用 Run 冻结的 orchestrator binding；响应体沿用统一 AbortSignal、超时和最大字节读取。解析失败返回安全错误 `BRIEF_VIDEO_PLAN_INVALID`，不得降级成自由文本后继续视频步骤。
 
-- [ ] **Step 4: 运行测试并提交**
+- [x] **Step 4: 运行测试并提交**
 
 Run: `pnpm exec vitest run src/__tests__/lib/brief-to-video-planner.test.ts src/__tests__/lib/skill-brief-video-plan-adapter.test.ts src/__tests__/lib/skill-runtime-executor.test.ts`
 

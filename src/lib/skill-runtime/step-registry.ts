@@ -41,6 +41,8 @@ import type { ExecuteSkillStepInput } from './executor';
 import type { SkillStepAdapter, SkillStepRecoveryFactory } from './service';
 import type { SkillStepResult } from './types';
 import { executeMultiPlatformExportStep } from '@/lib/multi-platform-export/executor';
+import { invokeBriefToVideoPlanner } from '@/lib/brief-to-video/planner';
+import { parseBriefToVideoInput } from '@/lib/brief-to-video/schema';
 
 type ResolveSkillMediaMetadata = (input: {
   actorUserId: string;
@@ -418,6 +420,37 @@ export function createProductionSkillStepRegistry(input: {
     );
   };
 
+  const briefVideoPlan: SkillStepAdapter = async step => {
+    if (!step.modelBinding) {
+      throw new AgentDownstreamProviderRejectedError(undefined, {
+        message: 'Skill brief video planner model binding is missing',
+      });
+    }
+    const provider = (await getApiProviders()).find(candidate => (
+      candidate.id === step.modelBinding!.providerId && candidate.isEnabled
+    ));
+    if (!provider || !provider.apiKey || !provider.baseUrl) {
+      throw new AgentDownstreamProviderRejectedError(undefined, {
+        message: 'Skill brief video planner provider is unavailable',
+      });
+    }
+    const planInput = parseBriefToVideoInput(step.inputValues);
+    await step.operation.beginSubmission();
+    const plan = await invokeBriefToVideoPlanner({
+      baseUrl: provider.baseUrl,
+      apiKey: provider.apiKey,
+      modelId: step.modelBinding.modelId,
+      requestId: step.operation.idempotencyKey,
+      planInput,
+      signal: step.signal,
+    });
+    return {
+      assetVersionIds: [],
+      media: [],
+      structured: { schemaId: 'brief-to-video-plan-v1', value: plan },
+    };
+  };
+
   const complianceAudit: SkillStepAdapter = async step => {
     const fanOut = step.step.compiledFanOut;
     const sourceValues = fanOut ? step.inputValues[fanOut.inputKey] : undefined;
@@ -702,6 +735,7 @@ export function createProductionSkillStepRegistry(input: {
       img2img,
       compliance_audit: complianceAudit,
       multi_platform_export: multiPlatformExport,
+      brief_video_plan: briefVideoPlan,
     },
     stepRecoveries: { generate_image: recoverGenerate, img2img: recoverGenerate },
   };
