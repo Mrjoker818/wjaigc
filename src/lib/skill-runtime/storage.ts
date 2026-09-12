@@ -134,7 +134,8 @@ function isBoundedJsonValue(value: unknown, depth = 0): boolean {
 function isStoredInput(value: unknown): boolean {
   if (!isRecord(value) || !hasOnlyKeys(value, [
     'key', 'label', 'kind', 'required', 'defaultValue', 'options', 'maximumItems',
-    'uniqueItems', 'maximumLength', 'dependentOptions', 'bindToSourceVersions', 'datasetSchema',
+    'uniqueItems', 'maximumLength', 'dependentOptions', 'capabilityOptions',
+    'bindToSourceVersions', 'datasetSchema',
   ])) return false;
   if (
     !isBoundedString(value.key, 64, TOKEN_ID)
@@ -153,7 +154,9 @@ function isStoredInput(value: unknown): boolean {
       || !value.options.every(option => isBoundedString(option, 200))
     ) return false;
   } else if (value.kind === 'multi-select'
-    || (value.kind === 'select' && !('dependentOptions' in value))) return false;
+    || (value.kind === 'select'
+      && !('dependentOptions' in value)
+      && !('capabilityOptions' in value))) return false;
   if ('maximumItems' in value) {
     if (
       (value.kind !== 'images' && value.kind !== 'multi-select' && value.kind !== 'dataset')
@@ -178,6 +181,15 @@ function isStoredInput(value: unknown): boolean {
     || !Object.hasOwn(descriptors.dependentOptions, 'value')
     || !isRecord(descriptors.dependentOptions.value)
   )) return false;
+  if ('capabilityOptions' in value && (
+    value.kind !== 'select'
+    || !isRecord(value.capabilityOptions)
+    || !hasOnlyKeys(value.capabilityOptions, ['modelRole', 'field'])
+    || value.capabilityOptions.modelRole !== 'video'
+    || !['durationSeconds', 'aspectRatio', 'resolution'].includes(
+      String(value.capabilityOptions.field),
+    )
+  )) return false;
   if ('bindToSourceVersions' in value && typeof value.bindToSourceVersions !== 'boolean') {
     return false;
   }
@@ -191,7 +203,7 @@ function isStoredStep(value: unknown): boolean {
   if (!isRecord(value) || !hasOnlyKeys(value, [
     'id', 'label', 'toolId', 'execution', 'parallelGroup', 'promptTemplate',
     'promptInstructionTemplate', 'runtime', 'modelRole', 'qualityGateIds', 'when', 'fanOut',
-    'compiledFanOut',
+    'compiledFanOut', 'approvalCheckpoint',
   ])) return false;
   const runtime = value.runtime ?? 'model';
   if (
@@ -216,6 +228,16 @@ function isStoredStep(value: unknown): boolean {
   if ('parallelGroup' in value && !isBoundedString(value.parallelGroup, 128, GROUP_ID)) {
     return false;
   }
+  if ('approvalCheckpoint' in value && (
+    !isRecord(value.approvalCheckpoint)
+    || !hasOnlyKeys(value.approvalCheckpoint, [
+      'kind', 'outputSchemaId', 'nextStepId', 'allowRevision',
+    ])
+    || value.approvalCheckpoint.kind !== 'user-approval'
+    || !isBoundedString(value.approvalCheckpoint.outputSchemaId, 128, TOKEN_ID)
+    || !isBoundedString(value.approvalCheckpoint.nextStepId, 128, STEP_ID)
+    || typeof value.approvalCheckpoint.allowRevision !== 'boolean'
+  )) return false;
   if ('when' in value) {
     if (!isRecord(value.when) || !hasOnlyKeys(value.when, ['input', 'includes'])) return false;
     if (!isBoundedString(value.when.input, 64, TOKEN_ID)) return false;

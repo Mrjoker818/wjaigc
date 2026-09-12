@@ -14,6 +14,7 @@ describe('runtime settings', () => {
   beforeEach(() => {
     mocks.dbGetSystemSetting.mockReset();
     delete process.env.MULTI_PLATFORM_EXPORT_ENABLED;
+    delete process.env.BRIEF_TO_VIDEO_SKILL_ENABLED;
   });
 
   it('returns the configured maximum image edge', async () => {
@@ -77,6 +78,7 @@ describe('runtime settings', () => {
 
   afterEach(() => {
     delete process.env.MULTI_PLATFORM_EXPORT_ENABLED;
+    delete process.env.BRIEF_TO_VIDEO_SKILL_ENABLED;
   });
 
   it('keeps multi-platform export disabled unless the environment flag is exactly true', async () => {
@@ -89,5 +91,17 @@ describe('runtime settings', () => {
 
     process.env.MULTI_PLATFORM_EXPORT_ENABLED = 'TRUE';
     await expect(getRuntimeSettings()).resolves.toMatchObject({ multiPlatformExportEnabled: false });
+  });
+
+  it('keeps brief to video disabled unless the environment flag is exactly true', async () => {
+    mocks.dbGetSystemSetting.mockResolvedValue(null);
+
+    await expect(getRuntimeSettings()).resolves.toMatchObject({ briefToVideoSkillEnabled: false });
+
+    process.env.BRIEF_TO_VIDEO_SKILL_ENABLED = 'true';
+    await expect(getRuntimeSettings()).resolves.toMatchObject({ briefToVideoSkillEnabled: true });
+
+    process.env.BRIEF_TO_VIDEO_SKILL_ENABLED = 'TRUE';
+    await expect(getRuntimeSettings()).resolves.toMatchObject({ briefToVideoSkillEnabled: false });
   });
 });

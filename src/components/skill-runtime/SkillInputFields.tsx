@@ -10,6 +10,8 @@ import {
   SKILL_INPUT_LIMITS,
 } from '@/lib/skill-runtime/input-resolver';
 import type { SkillInputField } from '@/lib/skill-runtime/types';
+import type { TaskModelDescriptor } from '@/lib/task-core/model-capability-contract';
+import { resolveVideoCapabilityFieldOptions } from '@/lib/brief-to-video/capabilities';
 
 const FORBIDDEN_DATASET_KEYS = new Set(['__proto__', 'prototype', 'constructor']);
 
@@ -19,6 +21,7 @@ interface SkillInputFieldsProps {
   errors?: Readonly<Record<string, string | undefined>>;
   onChange: (key: string, value: unknown) => void;
   disabled?: boolean;
+  capabilityDescriptors?: Partial<Record<'video', TaskModelDescriptor>>;
 }
 
 function textValue(value: unknown): string {
@@ -88,6 +91,7 @@ export function SkillInputFields({
   errors = {},
   onChange,
   disabled = false,
+  capabilityDescriptors = {},
 }: SkillInputFieldsProps): React.ReactElement {
   const instanceId = useId();
   const initialDrafts = structuredDrafts(fields, values);
@@ -362,7 +366,12 @@ export function SkillInputFields({
             );
             break;
           case 'select': {
-            const selectOptions = resolveSkillInputOptions(fields, values, field.key);
+            const selectOptions = field.capabilityOptions
+              ? resolveVideoCapabilityFieldOptions(
+                capabilityDescriptors[field.capabilityOptions.modelRole],
+                field.capabilityOptions.field,
+              )
+              : resolveSkillInputOptions(fields, values, field.key);
             control = (
               <select
                 {...common}

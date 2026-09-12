@@ -287,6 +287,18 @@ export function compileConditionalSkillSteps(
 ): SkillStepDefinition[] {
   return definition.steps.flatMap(step => {
     validateSkillStep(step);
+    if (step.approvalCheckpoint) {
+      const checkpoint = step.approvalCheckpoint;
+      const currentIndex = definition.steps.findIndex(candidate => candidate.id === step.id);
+      const nextIndex = definition.steps.findIndex(candidate => candidate.id === checkpoint.nextStepId);
+      if (
+        checkpoint.kind !== 'user-approval'
+        || checkpoint.allowRevision !== true
+        || !/^[A-Za-z][A-Za-z0-9_-]*$/.test(checkpoint.outputSchemaId)
+        || nextIndex <= currentIndex
+        || step.execution !== 'sequential'
+      ) throw new Error('SKILL_APPROVAL_CHECKPOINT_INVALID');
+    }
     if (step.when && !conditionMatches(definition, step, step.when, inputValues)) return [];
     const compiled = { ...step };
     delete compiled.when;

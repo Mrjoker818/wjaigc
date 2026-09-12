@@ -252,6 +252,31 @@ export function cloneSkillInputDependentOptions(
   return { inputKey, values };
 }
 
+function cloneSkillCapabilityOptions(
+  value: unknown,
+  fieldKey: string,
+): NonNullable<SkillInputField['capabilityOptions']> {
+  if (!isPlainObject(value)) return invalidDefinition(fieldKey);
+  const { descriptors, keys } = ownDescriptorSnapshot(value);
+  if (keys.length !== 2 || keys.some(key => (
+    typeof key !== 'string' || (key !== 'modelRole' && key !== 'field')
+  ))) return invalidDefinition(fieldKey);
+  const modelRole = descriptors.modelRole;
+  const capabilityField = descriptors.field;
+  if (
+    !modelRole?.enumerable
+    || !Object.hasOwn(modelRole, 'value')
+    || modelRole.value !== 'video'
+    || !capabilityField?.enumerable
+    || !Object.hasOwn(capabilityField, 'value')
+    || !['durationSeconds', 'aspectRatio', 'resolution'].includes(String(capabilityField.value))
+  ) return invalidDefinition(fieldKey);
+  return {
+    modelRole: 'video',
+    field: capabilityField.value as NonNullable<SkillInputField['capabilityOptions']>['field'],
+  };
+}
+
 export function assertSkillInputDefinitions(fields: readonly SkillInputField[]): void {
   const parsed = fields.map(field => {
     if (!isPlainObject(field)) return invalidDefinition('unknown');
@@ -259,7 +284,7 @@ export function assertSkillInputDefinitions(fields: readonly SkillInputField[]):
     const key = descriptors.key?.value;
     const kind = descriptors.kind?.value;
     if (typeof key !== 'string' || typeof kind !== 'string') return invalidDefinition('unknown');
-    for (const property of ['uniqueItems', 'maximumLength', 'dependentOptions'] as const) {
+    for (const property of ['uniqueItems', 'maximumLength', 'dependentOptions', 'capabilityOptions'] as const) {
       const descriptor = descriptors[property];
       if (descriptor && (!descriptor.enumerable || !Object.hasOwn(descriptor, 'value'))) {
         return invalidDefinition(key);
@@ -271,15 +296,20 @@ export function assertSkillInputDefinitions(fields: readonly SkillInputField[]):
     const dependentOptions = descriptors.dependentOptions
       ? cloneSkillInputDependentOptions(descriptors.dependentOptions.value, key)
       : undefined;
+    const capabilityOptions = descriptors.capabilityOptions
+      ? cloneSkillCapabilityOptions(descriptors.capabilityOptions.value, key)
+      : undefined;
     return {
-      field, key, kind, options, dependentOptions,
+      field, key, kind, options, dependentOptions, capabilityOptions,
       uniqueItems: descriptors.uniqueItems?.value,
       maximumLength: descriptors.maximumLength?.value,
     };
   });
   const byKey = new Map(parsed.map(item => [item.key, item]));
   for (const item of parsed) {
-    const { field, key, kind, options, dependentOptions, uniqueItems, maximumLength } = item;
+    const {
+      field, key, kind, options, dependentOptions, capabilityOptions, uniqueItems, maximumLength,
+    } = item;
     if (maximumLength !== undefined && (
       !['text', 'image', 'brand-kit'].includes(kind)
       || !Number.isSafeInteger(maximumLength)
@@ -288,6 +318,12 @@ export function assertSkillInputDefinitions(fields: readonly SkillInputField[]):
     if (uniqueItems !== undefined && (
       (kind !== 'images' && kind !== 'multi-select')
       || typeof uniqueItems !== 'boolean'
+    )) throw new SkillInputError('SKILL_INPUT_INVALID_DEFINITION', field.key);
+    if (capabilityOptions !== undefined && (
+      kind !== 'select'
+      || options !== undefined
+      || dependentOptions !== undefined
+      || capabilityOptions.modelRole !== 'video'
     )) throw new SkillInputError('SKILL_INPUT_INVALID_DEFINITION', field.key);
     if (!dependentOptions) continue;
     const dependency = byKey.get(dependentOptions.inputKey);

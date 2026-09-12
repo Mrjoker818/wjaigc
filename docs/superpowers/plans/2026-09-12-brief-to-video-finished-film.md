@@ -96,7 +96,7 @@ git commit -m "feat: define brief to video contracts"
 - Produces: `resolveVideoCapabilityFieldOptions(descriptor, field)`。
 - Produces: `RuntimeSettings.briefToVideoSkillEnabled`，读取 `BRIEF_TO_VIDEO_SKILL_ENABLED`，默认 `false`。
 
-- [ ] **Step 1: 写目录、表面隔离和动态选项失败测试**
+- [x] **Step 1: 写目录、表面隔离和动态选项失败测试**
 
 ```ts
 expect(listSkills('canvas')).toContainEqual(expect.objectContaining({ id: 'preset-brief-to-video-film' }));
@@ -105,13 +105,13 @@ expect(listSkills('simple-chat')).not.toContainEqual(expect.objectContaining({ i
 expect(resolveVideoCapabilityFieldOptions(descriptor, 'durationSeconds')).toEqual(['5', '10', '15']);
 ```
 
-- [ ] **Step 2: 运行测试确认 RED**
+- [x] **Step 2: 运行测试确认 RED**
 
 Run: `pnpm exec vitest run src/__tests__/lib/brief-to-video-preset.test.ts src/__tests__/components/skill-video-capability-fields.test.tsx src/__tests__/scripts/skill-runtime-inventory.test.ts`
 
 Expected: FAIL，Skill、功能标志和动态字段尚未注册。
 
-- [ ] **Step 3: 实现两步骤 Skill 和能力字段**
+- [x] **Step 3: 实现两步骤 Skill 和能力字段**
 
 ```ts
 steps: [
@@ -122,7 +122,7 @@ steps: [
 
 `allowedSurfaces` 为三工作区，`catalogSurfaces` 仅 Canvas/Workflow。功能关闭时不进入新运行目录，但历史 Run 仍可读取。
 
-- [ ] **Step 4: 运行测试并提交**
+- [x] **Step 4: 运行测试并提交**
 
 Run: `pnpm exec vitest run src/__tests__/lib/brief-to-video-preset.test.ts src/__tests__/components/skill-video-capability-fields.test.tsx src/__tests__/scripts/skill-runtime-inventory.test.ts`
 

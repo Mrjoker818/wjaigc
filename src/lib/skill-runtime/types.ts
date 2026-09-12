@@ -55,6 +55,13 @@ export interface SkillStepFanOut {
   concurrency: number;
 }
 
+export interface SkillApprovalCheckpoint {
+  kind: 'user-approval';
+  outputSchemaId: string;
+  nextStepId: string;
+  allowRevision: boolean;
+}
+
 export interface CompiledSkillStepFanOut {
   inputKey: string;
   itemIndex: number;
@@ -75,6 +82,7 @@ export interface SkillStepDefinition {
   when?: SkillStepCondition;
   fanOut?: SkillStepFanOut;
   compiledFanOut?: CompiledSkillStepFanOut;
+  approvalCheckpoint?: SkillApprovalCheckpoint;
 }
 
 export interface SkillDefinition {

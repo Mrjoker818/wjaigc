@@ -14,6 +14,7 @@ import {
 } from '@/lib/skill-runtime/catalog';
 import { CANVAS_PRESET_CHAT_SKILLS } from '@/lib/skill-runtime/canvas-presets';
 import { MULTI_PLATFORM_EXPORT_SKILL } from '@/lib/skill-runtime/multi-platform-export-preset';
+import { BRIEF_TO_VIDEO_SKILL } from '@/lib/skill-runtime/brief-to-video-preset';
 import type { SkillDefinition } from '@/lib/skill-runtime/types';
 import presetBaseline from '@/__tests__/fixtures/skill-runtime-presets.baseline.json';
 
@@ -77,7 +78,7 @@ describe('skill runtime catalog', () => {
     const coreIds = [...preComplianceCanvasWorkflowIds, 'preset-platform-compliance-audit'];
     expect(CANVAS_PRESET_SKILLS.map(skill => skill.id)).toEqual(canvasIds);
     expect(CANVAS_PRESET_SKILLS).toHaveLength(21);
-    expect(CANVAS_WORKFLOW_SKILLS).toHaveLength(29);
+    expect(CANVAS_WORKFLOW_SKILLS).toHaveLength(30);
     expect(CANVAS_WORKFLOW_SKILLS.slice(0, CANVAS_PRESET_SKILLS.length)).toEqual(
       CANVAS_PRESET_SKILLS,
     );
@@ -86,9 +87,12 @@ describe('skill runtime catalog', () => {
     expect(CANVAS_WORKFLOW_SKILLS.slice(0, 28).map(skill => skill.id)).toEqual(coreIds);
     expect(CANVAS_WORKFLOW_SKILLS[27]).toBe(LOVART_PLATFORM_COMPLIANCE_SKILLS[0]);
     expect(CANVAS_WORKFLOW_SKILLS[28]).toBe(MULTI_PLATFORM_EXPORT_SKILL);
+    expect(CANVAS_WORKFLOW_SKILLS[29]).toBe(BRIEF_TO_VIDEO_SKILL);
 
     const previous = MULTI_PLATFORM_EXPORT_SKILL.enabled;
+    const previousBrief = BRIEF_TO_VIDEO_SKILL.enabled;
     try {
+      BRIEF_TO_VIDEO_SKILL.enabled = false;
       MULTI_PLATFORM_EXPORT_SKILL.enabled = false;
       expect(listSkillsForSurface('canvas').map(skill => skill.id)).toEqual(coreIds);
       expect(listSkillsForSurface('workflow').map(skill => skill.id)).toEqual(coreIds);
@@ -103,6 +107,7 @@ describe('skill runtime catalog', () => {
         .not.toContain('preset-multi-platform-export');
     } finally {
       MULTI_PLATFORM_EXPORT_SKILL.enabled = previous;
+      BRIEF_TO_VIDEO_SKILL.enabled = previousBrief;
     }
   });
 
