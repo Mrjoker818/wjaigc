@@ -107,7 +107,9 @@ describe('Agent event and downstream storage execution fences', () => {
     expect(operationQueries.length).toBeGreaterThanOrEqual(7);
     for (const { sql, params } of operationQueries) {
       expect(sql).toContain('wujie_agent_execution_leases');
-      expect(sql).toContain('paused_at = 0');
+      if (!sql.includes('lease_expires_at = 0')) {
+        expect(sql).toContain('paused_at = 0');
+      }
       expect(sql).toContain('completed_at = 0');
       expect(sql).toContain('generation');
       expect(sql).toContain('lease_owner');
@@ -115,6 +117,18 @@ describe('Agent event and downstream storage execution fences', () => {
         executionFence.runId, executionFence.leaseOwner, executionFence.generation,
       ]));
     }
+  });
+
+  it('releases the matching downstream lease after the run pauses for retry', async () => {
+    await releaseAgentDownstreamOperation(identity, { knownSubmissionOutcome: true });
+
+    const releaseQuery = mocks.queries.find(({ sql }) => sql.includes('lease_expires_at = 0'));
+    expect(releaseQuery?.sql).toContain('wujie_agent_execution_leases');
+    expect(releaseQuery?.sql).not.toContain('paused_at = 0');
+    expect(releaseQuery?.sql).toContain('completed_at = 0');
+    expect(releaseQuery?.params).toEqual(expect.arrayContaining([
+      executionFence.runId, executionFence.leaseOwner, executionFence.generation,
+    ]));
   });
 
   it('fences execution-owned event appends with the claimed generation and owner', async () => {

@@ -1048,6 +1048,7 @@ function downstreamFenceSql(
   runIdIndex: number,
   leaseOwnerIndex: number,
   generationIndex: number,
+  options: { allowPaused?: boolean } = {},
 ): string {
   return `EXISTS (
     SELECT 1 FROM wujie_agent_execution_leases agent_lease
@@ -1057,7 +1058,7 @@ function downstreamFenceSql(
       AND agent_lease.project_id = ${alias}.project_id
       AND agent_lease.lease_owner = $${leaseOwnerIndex}
       AND agent_lease.generation = $${generationIndex}
-      AND agent_lease.paused_at = 0
+      ${options.allowPaused ? '' : 'AND agent_lease.paused_at = 0'}
       AND agent_lease.completed_at = 0
   )`;
 }
@@ -1337,7 +1338,7 @@ export async function releaseAgentDownstreamOperation(
     `UPDATE wujie_agent_downstream_operations operation
      SET ${statusAssignment} lease_owner = '', lease_expires_at = 0, updated_at = $3
      WHERE operation_key = $1 AND lease_owner = $2 AND ${allowedStatuses}
-       AND ${downstreamFenceSql('operation', 4, 5, 6)}`,
+       AND ${downstreamFenceSql('operation', 4, 5, 6, { allowPaused: true })}`,
     [input.operationKey, input.leaseOwner, input.now ?? Date.now(),
       input.executionFence.runId, input.executionFence.leaseOwner,
       input.executionFence.generation],
