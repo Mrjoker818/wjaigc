@@ -445,7 +445,7 @@ git commit -m "feat: run brief videos in workflows"
 - Produces: `parseSimpleChatBriefVideoIntent(message, attachments, capabilities)`。
 - Produces: `needs_clarification | ready`，ready 创建 `surface: 'simple-chat'` 的同一 Skill Run。
 
-- [ ] **Step 1: 写明确意图、缺参追问和目录隔离 RED 测试**
+- [x] **Step 1: 写明确意图、缺参追问和目录隔离 RED 测试**
 
 ```ts
 expect(parseIntent('根据这份 Brief 生成最终视频', context)).toMatchObject({ kind: 'needs_clarification' });
@@ -454,17 +454,17 @@ expect(simpleChatCatalog).toHaveLength(16);
 expect(simpleChatCatalog.some(skill => skill.id === 'preset-brief-to-video-film')).toBe(false);
 ```
 
-- [ ] **Step 2: 运行测试确认 RED**
+- [x] **Step 2: 运行测试确认 RED**
 
 Run: `pnpm exec vitest run src/__tests__/lib/simple-chat-brief-video-intent.test.ts src/__tests__/components/simple-chat-brief-to-video.test.tsx src/__tests__/api/simple-chat-brief-to-video.test.ts`
 
 Expected: FAIL，意图适配器和卡片尚不存在。
 
-- [ ] **Step 3: 实现确定性意图、逐项追问和同 Run 卡片**
+- [x] **Step 3: 实现确定性意图、逐项追问和同 Run 卡片**
 
 只有“Brief/脚本 + 视频/成片 + 生成”明确组合才触发。附件必须先转为受管 AssetVersion；计划、审批和成片卡复用同一 Run API。返回画布仅创建或恢复 Placement，不复制资产。
 
-- [ ] **Step 4: 运行测试并提交**
+- [x] **Step 4: 运行测试并提交**
 
 Run: `pnpm exec vitest run src/__tests__/lib/simple-chat-brief-video-intent.test.ts src/__tests__/components/simple-chat-brief-to-video.test.tsx src/__tests__/api/simple-chat-brief-to-video.test.ts src/__tests__/api/simple-chat-skill-scope.test.ts src/__tests__/components/simple-chat-skill-isolation.test.tsx`
 
