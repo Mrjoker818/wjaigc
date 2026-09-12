@@ -1056,7 +1056,10 @@ function downstreamFenceSql(
       AND agent_lease.task_id = $${runIdIndex}
       AND agent_lease.owner_id = ${alias}.owner_id
       AND agent_lease.project_id = ${alias}.project_id
-      AND agent_lease.lease_owner = $${leaseOwnerIndex}
+      AND ${options.allowPaused
+    ? `(agent_lease.lease_owner = $${leaseOwnerIndex}
+        OR (agent_lease.paused_at > 0 AND agent_lease.lease_owner = ''))`
+    : `agent_lease.lease_owner = $${leaseOwnerIndex}`}
       AND agent_lease.generation = $${generationIndex}
       ${options.allowPaused ? '' : 'AND agent_lease.paused_at = 0'}
       AND agent_lease.completed_at = 0
