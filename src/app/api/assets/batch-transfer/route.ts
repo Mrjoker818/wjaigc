@@ -14,7 +14,7 @@ const TRANSFER_FIELDS = new Set([
   'idempotencyKey', 'transform', 'metadata',
 ]);
 const ENTITY_TYPES = new Set<WorkspaceEntityType>([
-  'canvas-image', 'workflow-input', 'workflow-output', 'chat-attachment', 'chat-result',
+  'canvas-image', 'canvas-video', 'workflow-input', 'workflow-output', 'chat-attachment', 'chat-result',
 ]);
 
 type ParsedTransfer = Omit<TransferVersionInput, 'actorUserId' | 'requestDigest'>;
@@ -56,7 +56,8 @@ function parseTransfer(value: unknown): ParsedTransfer | null {
   const idempotencyKey = requiredString(value, 'idempotencyKey');
   if (!sourceVersionId || !targetProjectId || !targetWorkspaceId || !ENTITY_TYPES.has(entityType)
     || !entityId || !idempotencyKey) return null;
-  if (entityType === 'canvas-image' && targetWorkspaceId !== `canvas:${targetProjectId}`) return null;
+  if ((entityType === 'canvas-image' || entityType === 'canvas-video')
+    && targetWorkspaceId !== `canvas:${targetProjectId}`) return null;
   if (value.transform !== undefined && (!isRecord(value.transform) || !isBoundedJson(value.transform))) return null;
   if (value.metadata !== undefined && (!isRecord(value.metadata) || !isBoundedJson(value.metadata))) return null;
   const metadata = sanitizeMetadata(value.metadata);

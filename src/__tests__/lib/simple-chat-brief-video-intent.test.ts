@@ -11,6 +11,12 @@ const capabilities = [{
   supportedOperations: ['text-to-video', 'image-to-video', 'first-last-frame'],
 }] as const;
 
+const ambiguousCapabilities = [
+  ...capabilities,
+  { ...capabilities[0], providerId: 'video-provider-2' },
+  { ...capabilities[0], providerId: 'video-provider-3', modelId: 'video-model-10' },
+] as const;
+
 describe('parseSimpleChatBriefVideoIntent', () => {
   it('only recognizes an explicit Brief or script plus video plus generation request', () => {
     expect(parseSimpleChatBriefVideoIntent('根据这份 Brief 生成最终视频', [], capabilities))
@@ -69,5 +75,16 @@ describe('parseSimpleChatBriefVideoIntent', () => {
       missing: ['attachments', 'durationSeconds', 'aspectRatio'],
       question: '请重新附加受管素材。',
     });
+  });
+
+  it('matches a full provider/model exactly and accepts a bare model only when unique', () => {
+    const request = '根据 Brief：新品通勤短片，生成最终视频。平台：抖音；时长：5秒；比例：9:16；视频模型：';
+
+    expect(parseSimpleChatBriefVideoIntent(`${request}video-provider-2/video-model-1`, [], ambiguousCapabilities))
+      .toMatchObject({ kind: 'ready', modelBinding: { providerId: 'video-provider-2', modelId: 'video-model-1' } });
+    expect(parseSimpleChatBriefVideoIntent(`${request}video-model-1`, [], ambiguousCapabilities))
+      .toMatchObject({ kind: 'needs_clarification', missing: ['videoModel'] });
+    expect(parseSimpleChatBriefVideoIntent(`${request}video-model-10`, [], ambiguousCapabilities))
+      .toMatchObject({ kind: 'ready', modelBinding: { providerId: 'video-provider-3', modelId: 'video-model-10' } });
   });
 });

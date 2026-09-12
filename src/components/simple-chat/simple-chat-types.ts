@@ -173,6 +173,7 @@ function toWorkspaceAssetReference(value: unknown): WorkspaceAssetReference | nu
   return {
     url,
     ...(typeof value.name === 'string' ? { name: value.name } : {}),
+    ...(value.kind === 'image' || value.kind === 'video' ? { kind: value.kind } : {}),
     ...(typeof value.assetId === 'string' ? { assetId: value.assetId } : {}),
     ...(typeof value.assetVersionId === 'string' ? { assetVersionId: value.assetVersionId } : {}),
     ...(typeof value.placementId === 'string' ? { placementId: value.placementId } : {}),
@@ -287,13 +288,20 @@ export function buildSimpleChatCanvasBridgeImages(
   assetId?: string;
   assetVersionId?: string;
   placementId?: string;
+  entityType?: 'canvas-image' | 'canvas-video';
+  mediaType?: 'image' | 'video';
+  videoUrl?: string;
   sourceTrace?: WorkspaceSourceTrace;
 }> {
   return references.map((reference, index) => {
     const sourceTrace = parseWorkspaceSourceTrace(reference.sourceTrace);
+    const isVideo = reference.kind === 'video';
     return {
       id: reference.entityId || `chat-bridge-${timestamp}-${index}`,
       url: reference.url,
+      entityType: isVideo ? 'canvas-video' : 'canvas-image',
+      mediaType: isVideo ? 'video' : 'image',
+      ...(isVideo ? { videoUrl: reference.url } : {}),
       prompt: reference.name || '',
       model: '',
       quality: 'standard',
@@ -458,6 +466,7 @@ export async function sendSimpleChatMediaToCanvas(input: {
     targetProjectId: string;
     index: number;
     sourceTrace?: WorkspaceAssetReference['sourceTrace'];
+    kind?: WorkspaceAssetReference['kind'];
   }) => Promise<WorkspaceAssetReference>;
   writeBridge: (references: WorkspaceAssetReference[]) => void;
 }): Promise<{
@@ -483,6 +492,7 @@ export async function sendSimpleChatMediaToCanvas(input: {
       sourceVersionId: reference.assetVersionId,
       targetProjectId: input.targetProjectId,
       index,
+      ...(reference.kind ? { kind: reference.kind } : {}),
       ...(imageSourceTrace ? { sourceTrace: imageSourceTrace } : {}),
     });
     if (!hasManagedAssetIdentity(transferred)) {
@@ -503,6 +513,7 @@ export async function sendSimpleChatExportToCanvas(input: {
     targetProjectId: string;
     index: number;
     sourceTrace?: WorkspaceAssetReference['sourceTrace'];
+    kind?: WorkspaceAssetReference['kind'];
   }) => Promise<WorkspaceAssetReference>;
   writeBridge: (references: WorkspaceAssetReference[]) => void;
 }): Promise<{

@@ -22,13 +22,14 @@ export type WorkspaceKind = 'canvas' | 'workflow' | 'chat';
 
 export type WorkspaceEntityType =
   | 'canvas-image'
+  | 'canvas-video'
   | 'workflow-input'
   | 'workflow-output'
   | 'chat-attachment'
   | 'chat-result';
 
 export interface WorkspaceEntityTypes {
-  canvas: 'canvas-image';
+  canvas: 'canvas-image' | 'canvas-video';
   workflow: 'workflow-input' | 'workflow-output';
   chat: 'chat-attachment' | 'chat-result';
 }
@@ -129,7 +130,7 @@ export interface WorkspacePlacementFor<TWorkspace extends WorkspaceKind> {
 }
 
 const WORKSPACE_ENTITY_TYPES = {
-  canvas: new Set<WorkspaceEntityTypeFor<'canvas'>>(['canvas-image']),
+  canvas: new Set<WorkspaceEntityTypeFor<'canvas'>>(['canvas-image', 'canvas-video']),
   workflow: new Set<WorkspaceEntityTypeFor<'workflow'>>([
     'workflow-input',
     'workflow-output',

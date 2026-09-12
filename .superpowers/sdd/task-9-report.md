@@ -82,3 +82,44 @@ pnpm exec vitest run src/__tests__/lib/simple-chat-brief-video-intent.test.ts sr
 
 - 全仓 `git diff --check` 会被用户已有的 task-2/task-3 文档尾部空行变更阻断；限定本任务文件后通过，按约束未修改这些受保护文件。
 - 全仓 lint 保留 948 条既有 warning，退出码为 0，不影响本任务门禁。
+
+## 独立审查修复（2026-09-13）
+
+提交信息：`fix: preserve brief video canvas placements`。
+
+### 改动
+
+- 视频返回画布改用 `/api/assets/batch-transfer`，明确请求 `canvas-video`、`canvas:{projectId}` 与 `restoreDeletedPlacements: true`；同项目返回继续校验并保留原视频 AssetVersion，已删除 Placement 由批量 transfer 事务恢复。
+- Asset Core 增加 `canvas-video` 实体类型，并让画布快照的创建、删除、恢复和查询同时覆盖图片与视频 Placement。
+- Simple Chat bridge 保留受管引用的 `kind`，视频重建为带 `mediaType: 'video'`、`videoUrl` 和 `entityType: 'canvas-video'` 的可播放节点，不创建资产副本。
+- Brief 缺参追问后允许用户直接粘贴裸正文；该兼容仅在上一条助手消息是固定 Brief 追问时生效，普通对话仍不触发。
+- Skill Run history 透传冻结步骤的权威 `cost`，审批卡从同一 Run 的 `generate-film` 步骤显示预计积分。
+- 视频模型改为精确解析：完整 `providerId/modelId` 优先，裸 `modelId` 仅在能力目录中唯一时采用。
+
+### RED / GREEN
+
+RED：
+
+```bash
+pnpm vitest run src/__tests__/lib/simple-chat-brief-video-intent.test.ts src/__tests__/api/simple-chat-brief-to-video.test.ts src/__tests__/components/brief-to-video-approval-card.test.tsx src/__tests__/api/workspace-batch-transfer.test.ts src/__tests__/components/simple-chat-asset-transfer.test.ts
+```
+
+结果：退出码 1；5 个测试文件均失败，共 6 个失败、42 个通过。失败分别证明裸 Brief 未续接、同名/公共前缀模型误匹配、审批卡无 Run estimate、`canvas-video` 被拒绝、返回仍使用单项 transfer、bridge 仍生成图片节点。
+
+GREEN：同一命令结果 5 个测试文件、48 个测试全部通过。
+
+### 完整回归
+
+Task 9 指定套件加 asset transfer、batch transfer、canvas bridge、视频审批卡及 Placement 恢复相关套件：12 个测试文件通过、1 个数据库套件跳过；146 个测试通过，9 个因未配置 PostgreSQL 跳过。补跑 `skill-runtime-executor.test.ts`：49/49 通过。合计 195 个测试通过。
+
+- `pnpm ts-check`：退出码 0。
+- changed-files `pnpm exec eslint --quiet ...`：退出码 0。
+- 本任务文件 `git diff --check`：通过；全仓检查仍仅命中受保护用户文档的既有 EOF 空行。
+- Simple Chat 目录隔离回归通过：保持 16 项且不显示 Brief Skill。
+
+### 自审与关注点
+
+- 返回路径的幂等键、entityId 和源 AssetVersion 保持稳定；再次返回会命中原 trashed Placement 并在同一批量事务中恢复为 active。
+- 视频节点语义由权威 Asset `kind` 恢复，Placement 使用 `canvas-video`，画布快照查询同时覆盖两类 canvas entity。
+- 9 个 PostgreSQL Placement 恢复测试因当前环境无数据库而跳过；对应 API、服务语义和 bridge 回归均已通过。
+- 未修改或暂存受保护文件，未触碰 `stable`。

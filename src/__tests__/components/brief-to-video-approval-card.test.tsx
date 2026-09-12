@@ -30,6 +30,7 @@ const approval = {
 function approvalResponse(): Response {
   return Response.json({ run: {
     runId: 'run-video-1', projectId: 'project-1', status: 'paused', approval,
+    steps: [{ id: 'plan-film', cost: 5 }, { id: 'generate-film', cost: 120 }],
     outputs: [{ stepId: 'plan-film', kind: 'json', schemaId: 'brief-to-video-plan-v1', content: JSON.stringify(plan) }],
   } });
 }
@@ -71,6 +72,15 @@ describe('BriefToVideoApprovalCard', () => {
       { revision: 3, generation: 1, planChecksum: 'a'.repeat(64) },
       '减少字幕，强化产品特写',
     ));
+  });
+
+  it('shows the authoritative video estimate loaded from the same Run', async () => {
+    render(<BriefToVideoApprovalCard
+      runId="run-video-1" projectId="project-1" onApprove={vi.fn()}
+      onRevise={vi.fn()} onCancel={vi.fn()} fetcher={vi.fn<typeof fetch>().mockResolvedValue(approvalResponse())}
+    />);
+
+    expect(await screen.findByText('视频步骤预计 120 积分')).not.toBeNull();
   });
 
   it('rejects a history payload from a different project', async () => {

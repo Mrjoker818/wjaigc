@@ -110,6 +110,7 @@ export class SkillStepAlreadyCompletedError extends Error {
 export interface SkillRunStepHistory {
   id: string;
   label: string;
+  cost?: number;
   status: 'pending' | 'processing' | 'completed' | 'failed' | 'cancelled' | 'timeout';
 }
 
@@ -460,17 +461,19 @@ function executionStepsForRun(events: readonly AgentEvent[], invocation: {
   return skillExecutionSteps(current);
 }
 
-function frozenSteps(events: readonly AgentEvent[]): Array<{ id: string; label: string }> | null {
+function frozenSteps(events: readonly AgentEvent[]): Array<{ id: string; label: string; cost?: number }> | null {
   const snapshot = events.find(event => event.type === 'run.created')?.payload.skillSnapshot;
   if (!snapshot || typeof snapshot !== 'object' || Array.isArray(snapshot)) return null;
   const steps = (snapshot as Record<string, unknown>).steps;
   if (!Array.isArray(steps)) return null;
-  const parsed: Array<{ id: string; label: string }> = [];
+  const parsed: Array<{ id: string; label: string; cost?: number }> = [];
   for (const step of steps) {
     if (!step || typeof step !== 'object' || Array.isArray(step)) return null;
     const candidate = step as Record<string, unknown>;
     if (typeof candidate.id !== 'string' || typeof candidate.label !== 'string') return null;
-    parsed.push({ id: candidate.id, label: candidate.label });
+    const cost = candidate.cost;
+    if (cost !== undefined && (typeof cost !== 'number' || !Number.isSafeInteger(cost) || cost < 0)) return null;
+    parsed.push({ id: candidate.id, label: candidate.label, ...(typeof cost === 'number' ? { cost } : {}) });
   }
   return parsed;
 }
@@ -516,7 +519,7 @@ function history(task: CloudTask, events: readonly AgentEvent[], projection: Age
   const surface = created?.workspace === 'chat' ? 'simple-chat'
     : created?.workspace === 'canvas' || created?.workspace === 'workflow' ? created.workspace : undefined;
   const snapshotSteps = frozenSteps(events);
-  const steps: readonly { id: string; label: string }[] = snapshotSteps || (() => {
+  const steps: readonly { id: string; label: string; cost?: number }[] = snapshotSteps || (() => {
     const workspace = events.find(event => event.type === 'run.created')?.payload.workspace;
     const surface = workspace === 'chat' ? 'simple-chat' : workspace as SkillSurface;
     return requireSkillForSurface(invocation.skillId, surface).steps;
@@ -564,6 +567,7 @@ function history(task: CloudTask, events: readonly AgentEvent[], projection: Age
     steps: steps.map(step => ({
       id: step.id,
       label: step.label,
+      ...(typeof step.cost === 'number' ? { cost: step.cost } : {}),
       status: completed.has(step.id)
         ? 'completed'
         : failed.has(step.id)

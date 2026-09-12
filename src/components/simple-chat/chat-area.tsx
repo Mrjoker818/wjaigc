@@ -1796,20 +1796,22 @@ export default function ChatArea({
     if (canvasTransferMessageId === message.id) return;
     setCanvasTransferMessageId(message.id);
     try {
-      const transfer = async ({ sourceVersionId, targetProjectId: transferProjectId, index, sourceTrace }: {
+      const transfer = async ({ sourceVersionId, targetProjectId: transferProjectId, index, sourceTrace, kind }: {
         sourceVersionId: string;
         targetProjectId: string;
         index: number;
         sourceTrace?: WorkspaceAssetReference['sourceTrace'];
+        kind?: WorkspaceAssetReference['kind'];
       }): Promise<WorkspaceAssetReference> => {
-        const transferResponse = await fetch('/api/assets/transfer', {
+        const entityType = kind === 'video' ? 'canvas-video' : 'canvas-image';
+        const transferResponse = await fetch('/api/assets/batch-transfer', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
+          body: JSON.stringify({ transfers: [{
             sourceVersion: sourceVersionId,
             targetProject: transferProjectId,
-            targetWorkspace: transferProjectId,
-            entityType: 'canvas-image',
+            targetWorkspace: `canvas:${transferProjectId}`,
+            entityType,
             entityId: `simple-chat:${task.id}:${message.id}:${index}`,
             idempotencyKey: `simple-chat-canvas:${transferProjectId}:${task.id}:${message.id}:${index}:${sourceVersionId}`,
             metadata: {
@@ -1818,14 +1820,15 @@ export default function ChatArea({
               imageIndex: index,
               ...(sourceTrace ? { sourceTrace } : {}),
             },
-          }),
+          }], restoreDeletedPlacements: true }),
         });
         if (!transferResponse.ok) throw new Error('Asset transfer failed');
-        const transferred = readWorkspaceAssetReference(await transferResponse.json());
+        const payload = await transferResponse.json() as { transfers?: unknown[] };
+        const transferred = readWorkspaceAssetReference(payload.transfers?.[0]);
         if (!transferred?.assetVersionId || !transferred.placementId) {
           throw new Error('Asset transfer returned an incomplete reference');
         }
-        return transferred;
+        return { ...transferred, ...(kind ? { kind } : {}) };
       };
       const writeBridge = (transferredImages: WorkspaceAssetReference[]): void => {
         const rawExisting = localStorage.getItem('wujie_canvas_bridge');

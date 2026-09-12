@@ -88,12 +88,14 @@ function findCapability(
   message: string,
   capabilities: readonly SimpleChatBriefVideoCapability[],
 ): SimpleChatBriefVideoCapability | undefined {
-  const text = normalize(message);
-  const matches = capabilities.filter(capability => (
-    text.includes(normalize(capability.modelId))
-    || text.includes(normalize(`${capability.providerId}/${capability.modelId}`))
+  const requested = normalize(extractLabeledValue(message, '(?:视频模型|模型)'));
+  if (!requested) return undefined;
+  const fullMatch = capabilities.find(capability => (
+    normalize(`${capability.providerId}/${capability.modelId}`) === requested
   ));
-  return matches.length === 1 ? matches[0] : undefined;
+  if (fullMatch) return fullMatch;
+  const bareMatches = capabilities.filter(capability => normalize(capability.modelId) === requested);
+  return bareMatches.length === 1 ? bareMatches[0] : undefined;
 }
 
 function supportsSourceCount(

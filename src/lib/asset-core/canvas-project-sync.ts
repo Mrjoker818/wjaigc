@@ -81,7 +81,7 @@ export async function readCanvasShadowSnapshot(actorUserId: string, database: Pi
     JOIN wujie_asset_versions v ON v.id = p.asset_version_id AND v.asset_id = p.asset_id
       AND v.owner_id = p.owner_id AND v.project_id = p.project_id
     WHERE p.owner_id = $1 AND p.status = 'trashed' AND p.deleted_at IS NOT NULL
-      AND p.workspace_kind = 'canvas' AND p.entity_type = 'canvas-image'
+      AND p.workspace_kind = 'canvas' AND p.entity_type IN ('canvas-image', 'canvas-video')
       AND p.workspace_id IN (p.project_id, 'canvas:' || p.project_id)), '[]'::jsonb) AS deleted_placements`,
   [actorUserId, PROJECT_REVISION_DATA_KEY]);
   const row = result.rows[0];
@@ -289,7 +289,7 @@ async function verifyProjectMappings(
       WHERE placement.owner_id = $1 AND placement.project_id = $2
         AND placement.workspace_kind = 'canvas'
         AND placement.workspace_id IN ($2, 'canvas:' || $2)
-        AND placement.entity_type = 'canvas-image'
+        AND placement.entity_type IN ('canvas-image', 'canvas-video')
         AND placement.status = 'active'
       ORDER BY asset.id, version.id, placement.id
       FOR UPDATE OF asset, version, placement`,
@@ -346,7 +346,7 @@ export async function reconcileDeletedCanvasProjectsInTransaction(
            WHERE canvas_placement.asset_id = asset.id
              AND canvas_placement.owner_id = asset.owner_id
              AND canvas_placement.workspace_kind = 'canvas'
-             AND canvas_placement.entity_type = 'canvas-image'
+             AND canvas_placement.entity_type IN ('canvas-image', 'canvas-video')
          )
        )
        AND NOT EXISTS (
@@ -635,7 +635,7 @@ function assetV3PlacementQuery(includeThumbnailVariants: boolean): string {
      WHERE placement.owner_id = $1
        AND placement.project_id = ANY($2::text[])
        AND placement.workspace_kind = 'canvas'
-       AND placement.entity_type = 'canvas-image'
+       AND placement.entity_type IN ('canvas-image', 'canvas-video')
        AND placement.status = 'active'
      ORDER BY placement.created_at, placement.id`;
 }

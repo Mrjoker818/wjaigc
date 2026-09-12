@@ -23,6 +23,7 @@ interface BriefToVideoApprovalCardProps {
 interface ApprovalView {
   approval: SkillApprovalStateV1;
   plan: BriefToVideoPlanV1;
+  videoCost?: number;
 }
 
 const primaryAction = 'inline-flex min-h-10 items-center justify-center gap-2 rounded-lg bg-[#d4af37] px-3 text-xs font-semibold text-[#0a0a0b] hover:bg-[#e2c45c] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#d4af37] disabled:cursor-not-allowed disabled:opacity-50';
@@ -60,7 +61,16 @@ async function loadApproval(
   if (!output || output.kind !== 'json' || output.schemaId !== 'brief-to-video-plan-v1') {
     throw new Error('视频脚本数据缺失或版本不兼容');
   }
-  return { approval, plan: parseBriefToVideoPlan(JSON.parse(output.content) as unknown) };
+  const videoStep = Array.isArray(run.steps)
+    ? run.steps.find(step => typeof step === 'object' && step !== null
+      && (step as Record<string, unknown>).id === 'generate-film') as Record<string, unknown> | undefined
+    : undefined;
+  const videoCost = videoStep?.cost;
+  return {
+    approval,
+    plan: parseBriefToVideoPlan(JSON.parse(output.content) as unknown),
+    ...(typeof videoCost === 'number' && Number.isSafeInteger(videoCost) && videoCost >= 0 ? { videoCost } : {}),
+  };
 }
 
 export function BriefToVideoApprovalCard({
@@ -105,7 +115,7 @@ export function BriefToVideoApprovalCard({
     }
   };
 
-  const videoCost = estimate?.steps.find(step => step.stepId === 'generate-film')?.cost;
+  const videoCost = estimate?.steps.find(step => step.stepId === 'generate-film')?.cost ?? view?.videoCost;
   const disabled = busy || submitting || !view;
 
   return (

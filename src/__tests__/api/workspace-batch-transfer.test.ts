@@ -76,6 +76,26 @@ describe('POST /api/assets/batch-transfer', () => {
     expect(mocks.sendVersionsToWorkspace.mock.calls[0][1]).toEqual({ restoreDeletedPlacements: true });
   });
 
+  it('accepts video canvas placements and restores a deleted placement without copying its version', async () => {
+    mocks.sendVersionsToWorkspace.mockResolvedValueOnce([{
+      version: { id: 'version-1', assetId: 'asset-1', file: { url: '/video-1.mp4' } },
+      placement: { id: 'placement-1', entityId: 'simple-chat:task-1:message-1:0', status: 'active' },
+      reused: true,
+    }]);
+    const response = await POST(request({
+      transfers: [{ ...transfer(1), entityType: 'canvas-video', entityId: 'simple-chat:task-1:message-1:0' }],
+      restoreDeletedPlacements: true,
+    }));
+
+    expect(response.status).toBe(200);
+    expect(mocks.sendVersionsToWorkspace).toHaveBeenCalledWith([
+      expect.objectContaining({ sourceVersionId: 'version-1', entityType: 'canvas-video' }),
+    ], { restoreDeletedPlacements: true });
+    await expect(response.json()).resolves.toMatchObject({
+      transfers: [{ assetVersionId: 'version-1', placementId: 'placement-1', placementStatus: 'active' }],
+    });
+  });
+
   it('rejects oversized nested metadata before reaching storage', async () => {
     const oversized = { ...transfer(1), metadata: { value: 'x'.repeat(2_049) } };
     expect((await POST(request({ transfers: [oversized] }))).status).toBe(400);

@@ -1246,7 +1246,7 @@ describe('Skill run history', () => {
           modelBindings: { vision: { providerId: 'frozen-provider', modelId: 'frozen-vision' } } },
         skillSnapshot: {
           id: definition.id, version: 1, name: 'Frozen name',
-          steps: [{ id: 'frozen-step', label: 'Frozen step' }],
+          steps: [{ id: 'frozen-step', label: 'Frozen step', cost: 120 }],
         },
       },
     }];
@@ -1275,7 +1275,7 @@ describe('Skill run history', () => {
       modelBindings: { vision: { providerId: 'frozen-provider', modelId: 'frozen-vision' } },
       assetVersionIds: ['result-version-1', 'result-version-2'],
       outputs: [{ stepId: 'frozen-step', kind: 'text', content: 'durable response' }],
-      steps: [{ id: 'frozen-step', label: 'Frozen step', status: 'pending' }],
+      steps: [{ id: 'frozen-step', label: 'Frozen step', cost: 120, status: 'pending' }],
       qualityEvents: [{ stepId: 'frozen-step', gateId: 'output-present', passed: true }],
     });
     expect(history).not.toHaveProperty('descriptor');

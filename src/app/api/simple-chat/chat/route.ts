@@ -456,7 +456,11 @@ export async function POST(request: NextRequest) {
   ).filter(
     (message): message is { id?: string; role: string; content: string; images?: string[] } => Boolean(message),
   ).filter(message => message.role === 'user');
-  const briefVideoMessage = briefVideoUserMessages.map(message => message.content).join('\n');
+  const acceptsBareBrief = previousMessage?.role === 'assistant'
+    && previousMessage.content.trim() === '请提供具体 Brief 或脚本内容。';
+  const briefVideoMessage = briefVideoUserMessages.map(message => (
+    acceptsBareBrief && message === latestUserMessage ? `Brief：${message.content}` : message.content
+  )).join('\n');
   const briefVideoCandidate = parseSimpleChatBriefVideoIntent(briefVideoMessage, [], []);
   if (briefVideoCandidate.kind !== 'none') {
     const projectId = typeof body.assetProjectId === 'string' ? body.assetProjectId.trim() : '';

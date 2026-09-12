@@ -38,6 +38,7 @@ type BridgeReader = (value: unknown) => Array<{
 
 type AssetReference = {
   url: string;
+  kind?: 'image' | 'video';
   name?: string;
   assetId?: string;
   assetVersionId?: string;
@@ -104,7 +105,7 @@ type CanTransferMedia = (images: string[], references: AssetReference[]) => bool
 type BuildCanvasBridgeImages = (
   references: AssetReference[],
   timestamp: number,
-) => Array<{ id: string; url: string; sourceTrace?: WorkspaceSourceTrace }>;
+) => Array<{ id: string; url: string; mediaType?: 'image' | 'video'; videoUrl?: string; assetVersionId?: string; sourceTrace?: WorkspaceSourceTrace }>;
 
 type SerializeCanvasBridgePayload = (
   projectId: string,
@@ -446,16 +447,31 @@ describe('standalone simple-chat asset transfer', () => {
       .toEqual(sourceTraceFixture);
   });
 
-  it('uses authorized resolve and Task 5 transfer without re-uploading managed media', () => {
-    expect(chatAreaSource).toMatch(/fetch\(\s*['"]\/api\/assets\/transfer['"]/);
+  it('uses restoring batch transfer without re-uploading managed media', () => {
+    expect(chatAreaSource).toMatch(/fetch\(\s*['"]\/api\/assets\/batch-transfer['"]/);
     expect(chatAreaSource).not.toMatch(/fetch\(\s*['"]\/api\/assets['"]\s*,/);
     expect(chatAreaSource).not.toMatch(/fetch\(\s*['"]\/api\/save-image['"]/);
     expect(chatAreaSource).toContain('sendSimpleChatMediaToCanvas');
     expect(chatAreaSource).not.toMatch(/imageRefs\?\.find\(/);
     expect(chatAreaSource).not.toMatch(/transferred\.assetVersionId\s*!==/);
     expect(chatAreaSource).toMatch(/targetProject:\s*transferProjectId/);
-    expect(chatAreaSource).toMatch(/entityType:\s*['"]canvas-image['"]/);
+    expect(chatAreaSource).toContain("kind === 'video' ? 'canvas-video' : 'canvas-image'");
+    expect(chatAreaSource).toMatch(/restoreDeletedPlacements:\s*true/);
     expect(chatAreaSource).toMatch(/sourceTrace\s*\?\s*\{ sourceTrace \}/);
+  });
+
+  it('builds a playable video canvas node while preserving the same AssetVersion', () => {
+    const build = buildCanvasBridgeImages();
+    expect(build).toBeTypeOf('function');
+    if (!build) return;
+
+    expect(build([{
+      url: '/final.mp4', kind: 'video', assetId: 'asset-video-1',
+      assetVersionId: 'version-video-1', placementId: 'placement-video-1', entityId: 'simple-chat:task-1:message-1:0',
+    }], 1234)).toEqual([expect.objectContaining({
+      mediaType: 'video', videoUrl: '/final.mp4', assetVersionId: 'version-video-1',
+      placementId: 'placement-video-1', entityType: 'canvas-video',
+    })]);
   });
 
   it('passes each validated message reference trace into the canvas transfer metadata', async () => {

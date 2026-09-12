@@ -125,7 +125,7 @@ function now(): string {
 }
 
 function workspaceForEntityType(entityType: WorkspaceEntityType): WorkspaceKind {
-  if (entityType === 'canvas-image') return 'canvas';
+  if (entityType === 'canvas-image' || entityType === 'canvas-video') return 'canvas';
   if (entityType === 'workflow-input' || entityType === 'workflow-output') return 'workflow';
   return 'chat';
 }
@@ -197,7 +197,7 @@ async function restorePlacementInTransaction(
   const locatedPlacement = await transaction.findPlacement(input.actorUserId, input.projectId, input.placementId);
   if (!locatedPlacement) notFound();
   if (input.assetId && locatedPlacement.assetId !== input.assetId) notFound();
-  if (locatedPlacement.workspace === 'canvas' && locatedPlacement.entityType === 'canvas-image') {
+  if (locatedPlacement.workspace === 'canvas') {
     await transaction.lockCanvasProjectSnapshot(input.actorUserId);
   }
   const lockedAsset = await transaction.lockAsset(input.actorUserId, input.projectId, locatedPlacement.assetId);
@@ -225,7 +225,7 @@ async function restorePlacementInTransaction(
   if (!asset) notFound();
   const restored = await transaction.restorePlacement(input.actorUserId, input.projectId, placement.id);
   if (!restored) placementConflict();
-  const projectRevision = restored.workspace === 'canvas' && restored.entityType === 'canvas-image'
+  const projectRevision = restored.workspace === 'canvas'
     ? await transaction.restoreCanvasPlacementSnapshot(input.actorUserId, input.projectId, restored)
     : undefined;
   return { placement: restored, asset, ...(projectRevision === undefined ? {} : { projectRevision }) };
@@ -847,7 +847,7 @@ export class AssetService {
     if (inputs.some(input => input.actorUserId !== actorUserId)) notFound();
     return this.storage.transaction(async transaction => {
       if (options.restoreDeletedPlacements
-        && inputs.some(input => input.entityType === 'canvas-image')) {
+        && inputs.some(input => input.entityType === 'canvas-image' || input.entityType === 'canvas-video')) {
         await transaction.lockCanvasProjectSnapshot(actorUserId);
       }
       const indexed = await Promise.all(inputs.map(async (input, index) => {
@@ -913,14 +913,14 @@ export class AssetService {
     return this.storage.transaction(async (transaction) => {
       const locatedPlacement = await transaction.findPlacement(input.actorUserId, input.projectId, input.placementId);
       if (!locatedPlacement) notFound();
-      if (locatedPlacement.workspace === 'canvas' && locatedPlacement.entityType === 'canvas-image') {
+      if (locatedPlacement.workspace === 'canvas') {
         await transaction.lockCanvasProjectSnapshot(input.actorUserId);
       }
       if (!await transaction.lockAsset(input.actorUserId, input.projectId, locatedPlacement.assetId)) notFound();
       const placement = await transaction.lockPlacement(input.actorUserId, input.projectId, input.placementId);
       if (!placement || placement.assetId !== locatedPlacement.assetId) notFound();
       if (placement.status === 'trashed') {
-        const projectRevision = placement.workspace === 'canvas' && placement.entityType === 'canvas-image'
+        const projectRevision = placement.workspace === 'canvas'
           ? await transaction.readPlacementTrashProjectRevision(placement)
           : undefined;
         return {
@@ -931,7 +931,7 @@ export class AssetService {
       }
       const trashed = await transaction.trashPlacement(input.actorUserId, input.projectId, placement.id);
       if (!trashed) return { placementTrashed: false, assetTrashed: false };
-      const projectRevision = trashed.workspace === 'canvas' && trashed.entityType === 'canvas-image'
+      const projectRevision = trashed.workspace === 'canvas'
         ? await transaction.trashCanvasPlacementSnapshot(input.actorUserId, input.projectId, trashed)
         : undefined;
       const assetTrashed = await transaction.countActivePlacements(

@@ -153,6 +153,21 @@ describe('POST /api/simple-chat/chat Brief to video intent', () => {
     expect(mocks.createSkillRun).toHaveBeenCalledTimes(1);
   });
 
+  it('accepts bare Brief text immediately after asking for the missing Brief', async () => {
+    const response = await POST(historyRequest([
+      { id: 'user-0', role: 'user', content: '根据这份 Brief 生成最终视频' },
+      { id: 'assistant-0', role: 'assistant', content: '请提供具体 Brief 或脚本内容。' },
+    ], '新品通勤短片。平台：抖音；时长：5秒；比例：9:16；视频模型：video-model-1'));
+
+    expect(response.status).toBe(200);
+    expect(await response.text()).toContain('"runId":"run-video-1"');
+    expect(mocks.createSkillRun).toHaveBeenCalledWith(expect.objectContaining({
+      request: expect.objectContaining({
+        inputValues: expect.objectContaining({ brief: '新品通勤短片' }),
+      }),
+    }));
+  });
+
   it('does not intercept an ambiguous video discussion', async () => {
     mocks.findProviderForModel.mockResolvedValue(null);
     const response = await POST(request('请分析这份 Brief 的视频方向', false));
