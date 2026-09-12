@@ -15,6 +15,7 @@ import { compileSkillPrompt } from '@/lib/skill-runtime/prompt-compiler';
 import { compileConditionalSkillSteps } from '@/lib/skill-runtime/step-compiler';
 import { authorizeAgentContext } from '@/lib/agent-runtime/context-adapters';
 import type { SkillDefinition } from '@/lib/skill-runtime/types';
+import { createBriefToVideoSkill } from '@/lib/skill-runtime/brief-to-video-preset';
 
 const authMocks = vi.hoisted(() => ({
   requireApiAuthOrReject: vi.fn(),
@@ -246,6 +247,69 @@ function simpleChatSkillRequest(): ModelAgentRunRequest {
 }
 
 describe('Agent runtime service', () => {
+  it('persists exact authorized video capabilities in the frozen Skill snapshot', async () => {
+    const definition = createBriefToVideoSkill(true);
+    const catalogSpy = vi.spyOn(skillCatalog, 'requireSkillForSurface')
+      .mockImplementation((skillId, surface) => (
+        skillId === definition.id ? definition : requireSkillForSurface(skillId, surface)
+      ));
+    const inputValues = resolveSkillInputs(definition, {
+      brief: '新品广告', goal: '产品转化', audience: '年轻用户', platform: '抖音',
+      style: '电影感', durationSeconds: '10', aspectRatio: '16:9', resolution: '1080p',
+      generateAudio: false,
+    });
+    const dependencies = serviceDependencies();
+    dependencies.resolveTaskModel.mockImplementation(async (providerId, modelId) => (
+      providerId === 'pear-video'
+        ? {
+            providerId, modelId, kind: 'video' as const, sourceType: 'video' as const,
+            protocol: 'video', executionMode: 'async' as const,
+            allowedRatios: ['16:9'], allowedSizes: ['1080p'], qualityOptions: [], maxOutputs: 1,
+            supportsReferenceImages: true, maxReferenceImages: 2, supportsMask: false,
+            allowedDurationsSeconds: [5, 10],
+            supportedOperations: ['text-to-video', 'image-to-video', 'first-last-frame'] as const,
+            outputKinds: ['mp4'], capabilitySources: {},
+          }
+        : {
+            providerId, modelId, kind: 'chat' as const, sourceType: 'chat' as const,
+            protocol: 'chat-completions', executionMode: 'sync' as const,
+            allowedRatios: [], allowedSizes: [], qualityOptions: [], maxOutputs: 1,
+            supportsReferenceImages: false, supportsMask: false,
+            outputKinds: ['text'], capabilitySources: {},
+          }
+    ));
+    const service = agentRuntime.createAgentRuntimeService(dependencies);
+
+    try {
+      await service.createRun({
+        actor: user,
+        request: request({
+          prompt: compileSkillPrompt(definition.systemPrompt, inputValues),
+          allowedToolIds: ['video_generate'],
+          skill: {
+            skillId: definition.id, skillVersion: definition.version, inputValues,
+            modelBindings: {
+              orchestrator: { providerId: 'provider-exact', modelId: 'model-exact' },
+              video: { providerId: 'pear-video', modelId: 'video-model' },
+            },
+          },
+        }),
+      });
+    } finally {
+      catalogSpy.mockRestore();
+    }
+
+    const snapshot = dependencies.appendEvent.mock.calls[0][0].payload.skillSnapshot as {
+      modelCapabilities?: Record<string, unknown>;
+    };
+    expect(snapshot.modelCapabilities?.video).toMatchObject({
+      providerId: 'pear-video', modelId: 'video-model', kind: 'video',
+      allowedDurationsSeconds: [5, 10], supportedOperations: [
+        'text-to-video', 'image-to-video', 'first-last-frame',
+      ],
+    });
+  });
+
   it('admits an authenticated local Skill with zero billing and no model identity', async () => {
     const localSkill: SkillDefinition = {
       id: 'local-export', version: 1, name: 'Local export', category: 'export',

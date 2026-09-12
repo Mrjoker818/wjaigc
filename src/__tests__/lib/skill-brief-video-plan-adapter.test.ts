@@ -11,12 +11,21 @@ vi.mock('@/lib/server-api-config', () => ({ getApiProviders: mocks.getApiProvide
 
 import { createProductionSkillStepRegistry } from '@/lib/skill-runtime/step-registry';
 import { authorizeAgentTools } from '@/lib/agent-runtime/tool-registry';
+import type { TaskModelDescriptor } from '@/lib/task-core/model-capability-contract';
 
 const plan = {
   schemaId: 'brief-to-video-plan-v1', title: '产品发布', logline: '一条完整成片。',
   durationSeconds: 10, aspectRatio: '16:9',
   scenes: [{ order: 1, timeRange: '0-10s', visual: '产品特写', camera: '推进', action: '旋转' }],
   finalVideoPrompt: '高品质产品视频', negativePrompt: '闪烁', factualConstraints: [],
+};
+
+const videoDescriptor: TaskModelDescriptor = {
+  providerId: 'pear-video', modelId: 'video-model', kind: 'video', sourceType: 'video',
+  protocol: 'video', executionMode: 'async', allowedRatios: ['16:9'], allowedSizes: ['1080p'],
+  qualityOptions: [], maxOutputs: 1, supportsReferenceImages: true, maxReferenceImages: 2,
+  supportsMask: false, allowedDurationsSeconds: [10], supportedOperations: ['text-to-video'],
+  outputKinds: ['mp4'], capabilitySources: {},
 };
 
 describe('brief video plan Skill adapter', () => {
@@ -105,5 +114,57 @@ describe('brief video plan Skill adapter', () => {
     });
     expect(authorizeAgentTools({ ...request, skillAdmission: true }).tools)
       .toContainEqual(expect.objectContaining({ toolId: 'brief_video_plan', skillOnly: true }));
+  });
+
+  it('registers video execution and recovery against the same accepted child task', async () => {
+    const submit = vi.fn(async () => new Response(JSON.stringify({ taskId: 'video-child-1' }), {
+      status: 200, headers: { 'content-type': 'application/json' },
+    }));
+    const monitor = vi.fn(async () => ({ assetVersionIds: ['video-version-1'] }));
+    const request = {
+      skillId: 'preset-brief-to-video-film', skillVersion: 1, surface: 'canvas' as const,
+      projectId: 'project-1', workspaceId: 'canvas-1',
+      inputValues: {
+        brief: '产品发布', goal: '产品转化', audience: '消费者', platform: '通用',
+        durationSeconds: '10', aspectRatio: '16:9', resolution: '1080p',
+      },
+      sourceVersionIds: [], modelBindings: {}, idempotencyKey: 'run-key',
+    };
+    const registry = createProductionSkillStepRegistry({
+      actor: { id: 'user-1', name: 'User', role: 'user', status: 'active', productType: 'canvas', createdAt: 1, updatedAt: 1 },
+      request,
+      videoModelBinding: { providerId: 'pear-video', modelId: 'video-model', descriptor: videoDescriptor },
+      videoExecution: { submit, monitor },
+    });
+    const step = {
+      actorUserId: 'user-1', projectId: 'project-1', runId: 'run-1',
+      definition: { id: request.skillId, version: 1, name: 'Brief', category: 'video', description: '', systemPrompt: '', allowedSurfaces: ['canvas' as const], inputs: [], steps: [], enabled: true, builtIn: true, createdAt: 0, updatedAt: 0, usageCount: 0 },
+      step: { id: 'generate-film', label: '生成', toolId: 'video_generate', execution: 'sequential' as const, promptTemplate: '', modelRole: 'video' as const, qualityGateIds: ['output-present'] },
+      inputValues: request.inputValues,
+      previousOutputs: [{ stepId: 'plan-film', kind: 'json' as const, schemaId: 'brief-to-video-plan-v1', content: JSON.stringify(plan) }],
+      modelBinding: { providerId: 'pear-video', modelId: 'video-model' },
+      requestDigest: 'digest', signal: new AbortController().signal,
+      operation: {
+        idempotencyKey: 'provider-key', operationKey: 'operation-video', recovery: false,
+        executionFence: { runId: 'run-1', leaseOwner: 'lease-1', generation: 2 },
+        beginSubmission: vi.fn(), recordAccepted: vi.fn(), recordLocalAccepted: vi.fn(async () => undefined),
+        executeOperation: vi.fn(),
+      },
+    };
+
+    expect(await registry.stepAdapters.video_generate(step)).toEqual({
+      assetVersionIds: ['video-version-1'], media: [{}],
+    });
+    expect(submit).toHaveBeenCalledTimes(1);
+
+    const recovery = registry.stepRecoveries.video_generate({
+      ...step,
+      operation: undefined,
+    } as never);
+    expect(await recovery.reconcile('video-child-1', step.operation)).toEqual({
+      assetVersionIds: ['video-version-1'], media: [{}],
+    });
+    expect(submit).toHaveBeenCalledTimes(1);
+    expect(monitor).toHaveBeenCalledTimes(2);
   });
 });

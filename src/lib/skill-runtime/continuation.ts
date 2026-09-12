@@ -12,6 +12,7 @@ import type {
 import { getCloudTaskForUser, type CloudTask } from '@/lib/cloud-task-storage';
 import { listManagedUsers } from '@/lib/server-auth';
 import type { User } from '@/lib/user-types';
+import { parseFrozenBriefVideoBinding } from '@/lib/brief-to-video/video-adapter';
 import { requireSkillForSurface } from './catalog';
 import { skillExecutionSteps } from './cost-estimator';
 import { parseSkillRunRequest, executeSkillRun, SkillRunRequestError } from './service';
@@ -317,6 +318,16 @@ export async function loadPersistedSkillContinuation(input: {
       retryLineage: normalizeMultiPlatformExportRetryLineage(created.payload.retryLineage),
     }),
   };
+  const videoBinding = request.modelBindings.video;
+  const videoModelBinding = videoBinding
+    ? parseFrozenBriefVideoBinding(
+        record(
+          record(created.payload.skillSnapshot, 'skillSnapshot').modelCapabilities,
+          'skillSnapshot.modelCapabilities',
+        ).video,
+        videoBinding,
+      )
+    : undefined;
   const requestBase: AgentRunRequestBase = {
     projectId: request.projectId,
     workspace,
@@ -375,6 +386,7 @@ export async function loadPersistedSkillContinuation(input: {
     actor,
     request,
     mediaByVersionId: authorizedContext.mediaByVersionId,
+    ...(videoModelBinding ? { videoModelBinding } : {}),
   });
   const latestResume = [...events].reverse().find(event => event.type === 'run.resumed');
   const resumeApproval = latestResume?.payload.approval;

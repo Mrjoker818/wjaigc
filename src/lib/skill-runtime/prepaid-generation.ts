@@ -95,7 +95,7 @@ export async function reconcileSkillPrepaidDispatch(child: CloudTask, requestId:
       result=COALESCE(result,'{}'::jsonb) || jsonb_build_object('taskError', $6::jsonb),
       label='供应商提交结果尚未确认，请核对原任务，勿重复生成', revision=revision+1
     WHERE id=$1 AND user_id=$2 AND project_id=$3 AND status='processing'
-      AND type='generate-async' AND COALESCE(remote_task_id,'')=''
+      AND type IN ('generate-async', 'video') AND COALESCE(remote_task_id,'')=''
       AND result #>> '{skillProviderDispatch,token}'=$4
       AND result #>> '{skillBillingProvenance,runId}'=$5
       AND NOT COALESCE(result ? 'skillDeferredCompletion', false)
@@ -302,7 +302,7 @@ export async function cancelSkillPrepaidChildren(input: {
         updated_at = $3
     WHERE user_id = $2
       AND project_id = $4
-      AND type = 'generate-async'
+      AND type IN ('generate-async', 'video')
       AND status IN ('queued', 'pending', 'processing')
       AND credit_status = 'not-applicable'
       AND credit_cost = 0
@@ -334,7 +334,7 @@ export async function createSkillPrepaidGeneration(
   context: SkillBillingContext,
   idempotencyKey: string,
 ): Promise<boolean> {
-  if (!task.projectId || !task.providerId || !task.model || task.type !== 'generate-async'
+  if (!task.projectId || !task.providerId || !task.model || !['generate-async', 'video'].includes(task.type)
     || task.idempotencyKey !== `${idempotencyKey}:0`) throw new SkillBillingAuthorizationError();
   await ensureCloudTaskTables();
   const client = await getPool().connect();

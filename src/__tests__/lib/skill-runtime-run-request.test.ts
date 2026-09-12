@@ -8,11 +8,14 @@ import type { User } from '@/lib/user-types';
 import type { SkillDefinition } from '@/lib/skill-runtime/types';
 import { LOVART_PLATFORM_COMPLIANCE_SKILLS } from '@/lib/skill-runtime/platform-compliance-preset';
 import {
+  assertSourceVersionBindings,
+  authorizeSkillAgentRunRequest,
   buildSkillAgentRunRequest,
   createSkillRun,
   requiredSkillModelRoles,
   type SkillRunRequest,
 } from '@/lib/skill-runtime/run-request';
+import { createBriefToVideoSkill } from '@/lib/skill-runtime/brief-to-video-preset';
 import { createMemorySkillStorageAdapter, createSkillStore } from '@/lib/skill-runtime/storage';
 
 function descriptor(
@@ -85,6 +88,66 @@ function runtimeDependencies() {
 }
 
 describe('Skill runtime run requests', () => {
+  it('binds optional single-image fields to the exact frozen source version list', () => {
+    const skill = createBriefToVideoSkill(true);
+    expect(assertSourceVersionBindings(skill, {
+      startFrame: 'version-start', endFrame: 'version-end',
+    }, ['version-start', 'version-end'])).toEqual(['version-start', 'version-end']);
+    expect(() => assertSourceVersionBindings(skill, {
+      startFrame: 'version-start', endFrame: 'version-end',
+    }, ['version-start'])).toThrowError(expect.objectContaining({
+      code: 'SKILL_INPUT_INVALID_VALUE', field: 'endFrame',
+    }));
+  });
+
+  it('returns the exact authorized video capability for the frozen Run snapshot', async () => {
+    const skill = createBriefToVideoSkill(true);
+    const video: TaskModelDescriptor = {
+      ...descriptor('pear-video', 'video-model', 'video'),
+      sourceType: 'video' as const,
+      protocol: 'video',
+      executionMode: 'async' as const,
+      allowedRatios: ['16:9'],
+      allowedSizes: ['1080p'],
+      allowedDurationsSeconds: [5, 10],
+      supportsReferenceImages: true,
+      maxReferenceImages: 2,
+      supportedOperations: ['text-to-video', 'image-to-video', 'first-last-frame'],
+      outputKinds: ['mp4'],
+    };
+    const orchestrator = descriptor('pear-chat', 'gemini-3.1-flash', 'chat');
+    const request = await buildSkillAgentRunRequest({
+      skillId: skill.id, skillVersion: skill.version, surface: 'canvas',
+      projectId: 'project-1', workspaceId: 'canvas-1', sourceVersionIds: [],
+      inputValues: {
+        brief: '新品广告', goal: '产品转化', audience: '年轻用户', platform: '抖音',
+        style: '电影感', durationSeconds: '10', aspectRatio: '16:9', resolution: '1080p',
+        generateAudio: false,
+      },
+      modelBindings: {
+        orchestrator: { providerId: orchestrator.providerId, modelId: orchestrator.modelId },
+        video: { providerId: video.providerId, modelId: video.modelId },
+      },
+      idempotencyKey: 'brief-video-run-1',
+    }, {
+      actorUserId: actor.id,
+      resolveTaskModel: vi.fn(async (providerId, modelId) => (
+        providerId === video.providerId && modelId === video.modelId ? video : orchestrator
+      )),
+      resolveSkill: vi.fn(async () => skill),
+    });
+
+    const admitted = await authorizeSkillAgentRunRequest(request, {
+      actorUserId: actor.id,
+      resolveTaskModel: vi.fn(async (providerId, modelId) => (
+        providerId === video.providerId && modelId === video.modelId ? video : orchestrator
+      )),
+      resolveSkill: vi.fn(async () => skill),
+    });
+
+    expect(admitted.modelCapabilities).toEqual({ orchestrator, video });
+  });
+
   it('builds a provider-free request for a pure local Skill', async () => {
     const localSkill: SkillDefinition = {
       id: 'local-export', version: 1, name: 'Local export', category: 'export',

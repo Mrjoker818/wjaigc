@@ -44,6 +44,7 @@ export function toolCostType(toolId: string): CreditOperation {
   switch (toolId) {
     case 'generate_image':
     case 'img2img': return 'image_generate';
+    case 'video_generate': return 'video_generate';
     case 'edit_image': return 'image_edit';
     case 'analyze_image': return 'chat';
     case 'compliance_audit': return 'chat';
@@ -87,6 +88,7 @@ export async function skillStepCreditCost(
   step: SkillStepDefinition,
   bindings: FrozenBindings,
   dependencies: SkillCostEstimatorDependencies = defaultDependencies,
+  inputValues: Readonly<Record<string, unknown>> = {},
 ): Promise<number> {
   if (skillStepRuntime(step) === 'local') return 0;
   const modelRole = skillStepModelRole(step);
@@ -100,7 +102,12 @@ export async function skillStepCreditCost(
   return dependencies.calculateCreditCost(
     skillStepCreditOperation(step),
     binding.modelId,
-    { providerId: binding.providerId },
+    {
+      providerId: binding.providerId,
+      ...(step.toolId === 'video_generate' && Number.isSafeInteger(inputValues.durationSeconds)
+        ? { durationSeconds: Number(inputValues.durationSeconds) }
+        : {}),
+    },
   );
 }
 
@@ -114,7 +121,7 @@ export async function estimateSkillRunCost(
   const steps = await Promise.all(definitions.map(async step => {
     return {
       stepId: step.id,
-      cost: await skillStepCreditCost(step, bindings, dependencies),
+      cost: await skillStepCreditCost(step, bindings, dependencies, inputValues),
     };
   }));
   const total = steps.reduce((sum, step) => sum + step.cost, 0);

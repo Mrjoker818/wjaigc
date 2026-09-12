@@ -77,6 +77,7 @@ async function resolveExecutableSkill(
 export interface AuthorizedSkillAgentRun {
   skill: SkillDefinition;
   modelBindings: FrozenBindings;
+  modelCapabilities: Partial<Record<SkillModelRole, TaskModelDescriptor>>;
   executionRuntime: 'model' | 'local';
   orchestratorModel?: TaskModelDescriptor;
 }
@@ -156,17 +157,42 @@ export function assertSourceVersionBindings(
   sourceVersionIds: readonly string[],
 ): string[] {
   const canonicalSourceVersionIds = [...new Set(sourceVersionIds)];
+  const singleImageBindings: Array<{ fieldKey: string; versionId: string }> = [];
+  let hasSingleImageBinding = false;
+  let hasCollectionBinding = false;
+  if (canonicalSourceVersionIds.some(item => !isAssetVersionId(item))) {
+    const field = skill.inputs.find(candidate => candidate.bindToSourceVersions);
+    throw new SkillInputError('SKILL_INPUT_INVALID_VALUE', field?.key || 'sourceVersionIds');
+  }
   for (const field of skill.inputs) {
     if (!field.bindToSourceVersions) continue;
     const value = resolvedInputs[field.key];
+    if (field.kind === 'image') {
+      hasSingleImageBinding = true;
+      if (value === undefined || value === null || value === '') continue;
+      if (!isAssetVersionId(value) || !canonicalSourceVersionIds.includes(value)) {
+        throw new SkillInputError('SKILL_INPUT_INVALID_VALUE', field.key);
+      }
+      singleImageBindings.push({ fieldKey: field.key, versionId: value });
+      continue;
+    }
+    hasCollectionBinding = true;
     if (!Array.isArray(value)
       || value.length === 0
-      || canonicalSourceVersionIds.some(item => !isAssetVersionId(item))
       || value.some(item => !isAssetVersionId(item))
       || new Set(value).size !== value.length
       || value.length !== canonicalSourceVersionIds.length
       || value.some((item, index) => item !== canonicalSourceVersionIds[index])) {
       throw new SkillInputError('SKILL_INPUT_INVALID_VALUE', field.key);
+    }
+  }
+  if (hasSingleImageBinding && !hasCollectionBinding) {
+    const boundVersionIds = [...new Set(singleImageBindings.map(binding => binding.versionId))];
+    if (!sameStringSet(canonicalSourceVersionIds, boundVersionIds)) {
+      const fieldKey = singleImageBindings[0]?.fieldKey
+        || skill.inputs.find(field => field.bindToSourceVersions)?.key
+        || 'sourceVersionIds';
+      throw new SkillInputError('SKILL_INPUT_INVALID_VALUE', fieldKey);
     }
   }
   return canonicalSourceVersionIds;
@@ -328,6 +354,7 @@ export async function authorizeSkillAgentRunRequest(
   return {
     skill,
     modelBindings: frozen,
+    modelCapabilities: models,
     executionRuntime,
     ...(models.orchestrator ? { orchestratorModel: models.orchestrator } : {}),
   };

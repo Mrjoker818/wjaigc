@@ -89,6 +89,64 @@ beforeEach(() => {
 });
 
 describe('Skill runtime frozen continuation', () => {
+  it('passes an exact persisted video capability to the registry and rejects a swapped provider', async () => {
+    const fixture = persistedFixture({
+      campaignName: 'Launch', channels: ['Web'], sources: ['version-1'],
+    }, ['version-1']);
+    const created = fixture.events[0]!.payload;
+    const descriptor = {
+      providerId: 'pear-video', modelId: 'video-model', kind: 'video', sourceType: 'video',
+      protocol: 'video', executionMode: 'async', allowedRatios: ['16:9'], allowedSizes: ['1080p'],
+      qualityOptions: [], maxOutputs: 1, supportsReferenceImages: true, maxReferenceImages: 2,
+      supportsMask: false, allowedDurationsSeconds: [5, 10],
+      supportedOperations: ['text-to-video', 'image-to-video', 'first-last-frame'],
+      outputKinds: ['mp4'], capabilitySources: {},
+    };
+    created.allowedToolIds = ['video_generate'];
+    created.skill = {
+      ...(created.skill as Record<string, unknown>),
+      modelBindings: {
+        orchestrator: { providerId: 'provider-1', modelId: 'model-1' },
+        video: { providerId: 'pear-video', modelId: 'video-model' },
+      },
+    };
+    created.skillSnapshot = {
+      ...frozenSnapshot,
+      steps: [{
+        id: 'generate-film', label: 'Generate', toolId: 'video_generate', execution: 'sequential',
+        promptTemplate: 'Generate', modelRole: 'video', qualityGateIds: [],
+      }],
+      modelCapabilities: { video: descriptor },
+    };
+    const request: AgentRunRequest = {
+      projectId: 'project-1', workspace: 'canvas', workspaceId: 'canvas-1', mode: 'agent',
+      providerId: 'provider-1', modelId: 'model-1', prompt: 'Persisted prompt',
+      sourceVersionIds: ['version-1'], allowedToolIds: ['video_generate'],
+      idempotencyKey: 'continuation-1',
+      context: { selectedEntityIds: [], visibleVersionIds: ['version-1'], locale: 'zh-CN' },
+      skill: created.skill as AgentRunRequest['skill'],
+    };
+    const digest = agentRunRequestDigest(request);
+    created.requestDigest = digest;
+    fixture.task.requestDigest = digest;
+
+    await loadPersistedSkillContinuation({
+      actorUserId: actor.id, projectId: 'project-1', runId: 'run-1', ...fixture,
+    });
+    expect(continuationMocks.createRegistry).toHaveBeenCalledWith(expect.objectContaining({
+      videoModelBinding: {
+        providerId: 'pear-video', modelId: 'video-model', descriptor,
+      },
+    }));
+
+    continuationMocks.createRegistry.mockClear();
+    (descriptor as Record<string, unknown>).providerId = 'swapped-provider';
+    await expect(loadPersistedSkillContinuation({
+      actorUserId: actor.id, projectId: 'project-1', runId: 'run-1', ...fixture,
+    })).rejects.toMatchObject({ code: 'BRIEF_VIDEO_MODEL_CAPABILITY_MISMATCH' });
+    expect(continuationMocks.createRegistry).not.toHaveBeenCalled();
+  });
+
   it('restores local runtime and catalog visibility while defaulting legacy steps to model', () => {
     const local = frozenDefinition({
       ...frozenSnapshot,

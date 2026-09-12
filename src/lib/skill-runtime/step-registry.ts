@@ -43,6 +43,12 @@ import type { SkillStepResult } from './types';
 import { executeMultiPlatformExportStep } from '@/lib/multi-platform-export/executor';
 import { invokeBriefToVideoPlanner } from '@/lib/brief-to-video/planner';
 import { parseBriefToVideoInput } from '@/lib/brief-to-video/schema';
+import {
+  executeBriefToVideoStep,
+  type ExecuteBriefToVideoStepDependencies,
+  type FrozenBriefVideoBinding,
+} from '@/lib/brief-to-video/video-adapter';
+import { productionBriefVideoExecution } from '@/lib/brief-to-video/video-recovery';
 
 type ResolveSkillMediaMetadata = (input: {
   actorUserId: string;
@@ -375,6 +381,8 @@ async function executeGenerationStep(
 export function createProductionSkillStepRegistry(input: {
   actor: User;
   request: SkillRunRequest;
+  videoModelBinding?: FrozenBriefVideoBinding;
+  videoExecution?: ExecuteBriefToVideoStepDependencies;
   mediaByVersionId?: Readonly<Record<string, string>>;
   resolveMediaMetadata?: ResolveSkillMediaMetadata;
   persistCompliancePartialReport?: PersistCompliancePartialReport;
@@ -451,6 +459,53 @@ export function createProductionSkillStepRegistry(input: {
       structured: { schemaId: 'brief-to-video-plan-v1', value: plan },
     };
   };
+
+  const briefVideoInput = (
+    step: Omit<ExecuteSkillStepInput, 'operation'>,
+    operation: ExecuteSkillStepInput['operation'],
+  ) => {
+    const frozen = input.videoModelBinding;
+    if (!frozen || !step.modelBinding
+      || frozen.providerId !== step.modelBinding.providerId
+      || frozen.modelId !== step.modelBinding.modelId) {
+      throw imageAdmissionError('Skill video model binding is missing or changed');
+    }
+    if (!operation.executionFence || !operation.recordLocalAccepted) {
+      throw imageAdmissionError('Skill video execution fence is unavailable');
+    }
+    return {
+      actorUserId: step.actorUserId,
+      actorRole: input.actor.role === 'admin' ? 'admin' as const : 'user' as const,
+      projectId: step.projectId,
+      workspaceId: input.request.workspaceId,
+      runId: step.runId,
+      stepId: step.step.id,
+      requestDigest: step.requestDigest,
+      idempotencyKey: operation.idempotencyKey,
+      operationKey: operation.operationKey,
+      executionFence: operation.executionFence,
+      inputValues: step.inputValues,
+      previousOutputs: step.previousOutputs || [],
+      modelBinding: frozen,
+      sourceImageUrls: input.mediaByVersionId || {},
+      signal: step.signal,
+      recordLocalAccepted: operation.recordLocalAccepted,
+    };
+  };
+  const videoExecution = input.videoExecution || productionBriefVideoExecution;
+  const briefVideo: SkillStepAdapter = step => executeBriefToVideoStep(
+    briefVideoInput(step, step.operation),
+    videoExecution,
+  );
+  const recoverBriefVideo: SkillStepRecoveryFactory = step => ({
+    reconcile: async (taskId, operation) => {
+      const completed = await videoExecution.monitor(taskId, briefVideoInput(step, operation));
+      return {
+        assetVersionIds: completed.assetVersionIds,
+        media: completed.assetVersionIds.map(() => ({})),
+      };
+    },
+  });
 
   const complianceAudit: SkillStepAdapter = async step => {
     const fanOut = step.step.compiledFanOut;
@@ -737,7 +792,12 @@ export function createProductionSkillStepRegistry(input: {
       compliance_audit: complianceAudit,
       multi_platform_export: multiPlatformExport,
       brief_video_plan: briefVideoPlan,
+      video_generate: briefVideo,
     },
-    stepRecoveries: { generate_image: recoverGenerate, img2img: recoverGenerate },
+    stepRecoveries: {
+      generate_image: recoverGenerate,
+      img2img: recoverGenerate,
+      video_generate: recoverBriefVideo,
+    },
   };
 }

@@ -939,6 +939,7 @@ export function createAgentRuntimeService(
             skillSnapshot: {
               executionContextVersion: 1,
               systemPrompt: skillAdmission.skill.systemPrompt,
+              modelCapabilities: structuredClone(skillAdmission.modelCapabilities),
               inputs: skillAdmission.skill.inputs.map(field => ({
                 key: field.key, label: field.label, kind: field.kind, required: field.required,
                 ...(field.defaultValue !== undefined ? { defaultValue: field.defaultValue } : {}),

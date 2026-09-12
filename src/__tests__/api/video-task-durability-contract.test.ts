@@ -19,6 +19,20 @@ describe('video task durability contract', () => {
     );
   });
 
+  it('admits Skill video work as one prepaid child and guards the provider side effect', () => {
+    const source = readSource('src/app/api/video/generate/route.ts');
+
+    expect(source).toContain('parseSkillBillingContext(body.skillBillingContext)');
+    expect(source).toContain('createSkillPrepaidGeneration(');
+    expect(source).toContain("type: 'video'");
+    expect(source).toContain("creditStatus: 'not-applicable'");
+    expect(source).toContain('claimCloudTaskLease(');
+    expect(source).toContain('await inspectSkillPrepaidPoll(child)');
+    expect(source).toContain('startSkillPrepaidProviderRequest({');
+    expect(source).toContain('skillBillingContext ? 0 : await calculateConfiguredCreditCost(');
+    expect(source).toContain('if (!provider && !skillBillingContext)');
+  });
+
   for (const routePath of [
     'src/app/api/video/generate/route.ts',
     'src/app/api/video/extend/route.ts',

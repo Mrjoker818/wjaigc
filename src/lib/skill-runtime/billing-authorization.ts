@@ -56,8 +56,12 @@ export function assertSkillBillingAuthorization(input: SkillBillingAuthorization
     && charge.type === 'consume' && charge.amount === -task.creditCost;
   const configuredFree = task.creditCost === 0 && task.creditStatus === 'not-applicable'
     && task.chargedTransactionId === '' && charge === null;
-  const isImageGenerationTool = (toolId: string): boolean => (
+  const generationRole = (toolId: string): 'image' | 'video' | undefined => (
     toolId === 'generate_image' || toolId === 'img2img'
+      ? 'image'
+      : toolId === 'video_generate'
+        ? 'video'
+        : undefined
   );
   const identifiers = [
     input.actorUserId, input.projectId, input.providerId, input.modelId, input.idempotencyKey,
@@ -77,10 +81,11 @@ export function assertSkillBillingAuthorization(input: SkillBillingAuthorization
     || lease.generation !== fence.generation || lease.pausedAt !== 0 || lease.completedAt !== 0
     || operation.operationKey !== context.operationKey || operation.runId !== context.runId
     || operation.actorUserId !== input.actorUserId || operation.projectId !== input.projectId
-    || operation.stepId !== context.stepId || !isImageGenerationTool(operation.toolId)
+    || operation.stepId !== context.stepId || !generationRole(operation.toolId)
     || operation.requestDigest !== context.requestDigest || operation.idempotencyKey !== input.idempotencyKey
     || !['prepared', 'submitted'].includes(operation.status)
-    || !step || step.toolId !== operation.toolId || !isImageGenerationTool(step.toolId) || step.modelRole !== 'image'
+    || !step || step.toolId !== operation.toolId || !generationRole(step.toolId)
+    || step.modelRole !== generationRole(step.toolId)
     || !binding || binding.providerId !== input.providerId || binding.modelId !== input.modelId
   ) {
     throw new Error('SKILL_BILLING_NOT_AUTHORIZED');

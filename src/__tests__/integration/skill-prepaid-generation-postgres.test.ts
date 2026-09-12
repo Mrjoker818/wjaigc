@@ -7,6 +7,94 @@ vi.mock('server-only', () => ({}));
 const postgresIt = process.env.POSTGRES_TEST_DATABASE_URL?.trim() ? it : it.skip;
 
 describe('Skill prepaid generation database admission', () => {
+  postgresIt('admits only an exactly authorized prepaid video child', async () => {
+    await withIsolatedPostgres('skill_prepaid_video', async ({ databaseUrl, query }) => {
+      const storage = await import('@/lib/cloud-task-storage');
+      const { ensureCoreTables } = await import('@/lib/db-storage');
+      await ensureCoreTables();
+      await storage.ensureCloudTaskTables();
+      const migration = spawnSync(process.execPath, [resolve('scripts/run-migrations.mjs')], {
+        encoding: 'utf8', env: { ...process.env, DATABASE_URL: databaseUrl, PGDATABASE_URL: databaseUrl },
+      });
+      expect(migration.status, migration.stderr || migration.stdout).toBe(0);
+      const { createBillableTask } = await import('@/lib/task-core/billing-service');
+      const {
+        cancelSkillPrepaidChildren,
+        createSkillPrepaidGeneration,
+      } = await import('@/lib/skill-runtime/prepaid-generation');
+      const now = Date.now();
+      await query(`INSERT INTO wujie_credits(id,user_id,balance,total_recharged,total_used,created_at,updated_at)
+        VALUES ('video-credits','video-user',30,30,0,$1,$1)`, [now]);
+      await createBillableTask({
+        userId: 'video-user', idempotencyKey: 'video-parent-key', requestDigest: 'video-parent-digest', creditCost: 15,
+        task: { id: 'video-run', projectId: 'video-project', type: 'agent-run', status: 'processing',
+          progress: 0, createdAt: now, updatedAt: now },
+      });
+      await query(`INSERT INTO wujie_agent_execution_leases
+        (task_id,owner_id,project_id,tool_id,lease_owner,generation,updated_at)
+        VALUES ('video-run','video-user','video-project','video_generate','video-lease',1,$1)`, [now]);
+      await query(`INSERT INTO wujie_agent_events
+        (event_id,task_id,owner_id,project_id,workspace,sequence,event_type,request_digest,payload,created_at)
+        VALUES ('video-created','video-run','video-user','video-project','canvas',1,'run.created',
+          'video-parent-digest',$1::jsonb,$2)`, [JSON.stringify({
+        workspaceId: 'canvas:video-project',
+        skill: { modelBindings: { video: { providerId: 'video-provider', modelId: 'video-model' } } },
+        skillSnapshot: { steps: [{ id: 'video-step', toolId: 'video_generate', modelRole: 'video' }] },
+      }), now]);
+      await query(`INSERT INTO wujie_agent_downstream_operations
+        (operation_key,owner_id,project_id,task_id,tool_id,step_id,request_digest,idempotency_key,status,created_at,updated_at)
+        VALUES ('video-operation','video-user','video-project','video-run','video_generate','video-step',
+          'video-step-digest','video-provider-key','prepared',$1,$1)`, [now]);
+      const context = {
+        runId: 'video-run', stepId: 'video-step', requestDigest: 'video-step-digest', operationKey: 'video-operation',
+        executionFence: { runId: 'video-run', leaseOwner: 'video-lease', generation: 1 },
+      };
+      const child = {
+        id: 'video-child', userId: 'video-user', projectId: 'video-project', sessionId: 'canvas:video-project',
+        type: 'video', status: 'pending' as const, progress: 0,
+        model: 'video-model', providerId: 'video-provider', idempotencyKey: 'video-provider-key:0',
+        result: { submissionPayload: { prompt: 'authorized video' } }, createdAt: now, updatedAt: now,
+      };
+
+      await expect(createSkillPrepaidGeneration(
+        { ...child, id: 'forbidden-child', type: 'edit' }, context, 'video-provider-key',
+      )).rejects.toMatchObject({ code: 'SKILL_BILLING_NOT_AUTHORIZED' });
+      await expect(createSkillPrepaidGeneration(child, context, 'video-provider-key')).resolves.toBe(true);
+
+      const persisted = await storage.getCloudTaskForUser(child.id, child.userId);
+      expect(persisted).toMatchObject({
+        type: 'video', userId: 'video-user', projectId: 'video-project', providerId: 'video-provider',
+        model: 'video-model', idempotencyKey: 'video-provider-key:0', creditStatus: 'not-applicable', creditCost: 0,
+      });
+      expect(persisted?.result?.skillBillingProvenance).toMatchObject({
+        runId: 'video-run', stepId: 'video-step', operationKey: 'video-operation',
+      });
+      expect((await query(`SELECT balance FROM wujie_credits WHERE user_id='video-user'`)).rows[0].balance).toBe(15);
+      expect((await query(`SELECT type,amount FROM wujie_credit_transactions`)).rows)
+        .toEqual([{ type: 'consume', amount: -15 }]);
+
+      const siblingBase = {
+        userId: child.userId, projectId: child.projectId, sessionId: child.sessionId,
+        status: 'processing' as const, progress: 10, model: child.model, providerId: child.providerId,
+        creditStatus: 'not-applicable' as const, creditCost: 0,
+        result: { skillBillingProvenance: { runId: context.runId } }, createdAt: now, updatedAt: now,
+      };
+      await storage.createCloudTask({
+        ...siblingBase, id: 'image-sibling', type: 'generate-async', idempotencyKey: 'image-sibling-key',
+      });
+      await storage.createCloudTask({
+        ...siblingBase, id: 'unrelated-sibling', type: 'edit', idempotencyKey: 'unrelated-sibling-key',
+      });
+      await query(`UPDATE cloud_tasks SET status='cancelled' WHERE id='video-run'`);
+
+      expect(new Set(await cancelSkillPrepaidChildren({ actorUserId: child.userId, runId: context.runId })))
+        .toEqual(new Set(['video-child', 'image-sibling']));
+      expect((await storage.getCloudTaskForUser('video-child', child.userId))?.status).toBe('cancelled');
+      expect((await storage.getCloudTaskForUser('image-sibling', child.userId))?.status).toBe('cancelled');
+      expect((await storage.getCloudTaskForUser('unrelated-sibling', child.userId))?.status).toBe('processing');
+    });
+  }, 120_000);
+
   postgresIt.each(['complete-first', 'cancel-first', 'dispatch-first', 'cancel-before-dispatch',
     'pause-complete', 'pause-cas', 'pause-update', 'pause-race', 'pause-budget', 'dispatch-rate-limit', 'dispatch-ambiguous-429',
     'dispatch-network-error', 'dispatch-timeout-lease', 'dispatch-timeout-race'])('serializes prepaid child operations and parent cancellation (%s)', async (scenario) => {

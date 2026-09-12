@@ -11,6 +11,7 @@ import {
   cancelSkillPrepaidChildren,
   inspectSkillPrepaidPoll,
   getSkillPrepaidSubmissionDeadline,
+  reconcileSkillPrepaidDispatch,
 } from '@/lib/skill-runtime/prepaid-generation';
 
 const child: CloudTask = {
@@ -65,6 +66,25 @@ describe('prepaid child polling lifecycle', () => {
       .toEqual({ expired: true, deadlineAt: 600_000, remainingMs: 0 });
     expect(mocks.query).not.toHaveBeenCalled();
   });
+  it('reconciles an orphaned video dispatch without admitting unrelated task types', async () => {
+    mocks.query.mockResolvedValue({ rows: [{ id: 'video-child' }] });
+    const videoChild: CloudTask = {
+      ...child,
+      id: 'video-child',
+      type: 'video',
+      result: {
+        skillBillingProvenance: { runId: 'parent', stepId: 'video-step', operationKey: 'video-op' },
+        skillProviderDispatch: { token: 'video-dispatch' },
+      },
+    };
+
+    await expect(reconcileSkillPrepaidDispatch(videoChild, 'request-video')).resolves.toBe(true);
+    expect(mocks.query).toHaveBeenCalledWith(
+      expect.stringMatching(/UPDATE cloud_tasks[\s\S]*type IN \('generate-async', 'video'\)[\s\S]*skillProviderDispatch,token/),
+      expect.arrayContaining(['video-child', 'user', 'project', 'video-dispatch', 'parent']),
+    );
+    expect(mocks.query.mock.calls[0]?.[0]).not.toMatch(/'edit'|'agent-run'|'workflow'/);
+  });
   it('clips pauses at child creation and ignores duplicate pauses and unmatched resumes', async () => {
     mocks.query.mockResolvedValue({ rows: [
       { event_type: 'run.resumed', created_at: 1 },
@@ -91,9 +111,10 @@ describe('prepaid child polling lifecycle', () => {
     expect(mocks.ensureTables).toHaveBeenCalledTimes(1);
     expect(mocks.getParent).toHaveBeenCalledWith('parent', 'user');
     expect(mocks.query).toHaveBeenCalledWith(
-      expect.stringMatching(/UPDATE cloud_tasks[\s\S]*status IN \('queued', 'pending', 'processing'\)[\s\S]*credit_status = 'not-applicable'[\s\S]*skillBillingProvenance,runId/),
+      expect.stringMatching(/UPDATE cloud_tasks[\s\S]*type IN \('generate-async', 'video'\)[\s\S]*status IN \('queued', 'pending', 'processing'\)[\s\S]*credit_status = 'not-applicable'[\s\S]*skillBillingProvenance,runId/),
       ['parent', 'user', expect.any(Number), 'project'],
     );
+    expect(mocks.query.mock.calls[0]?.[0]).not.toMatch(/'edit'|'agent-run'|'workflow'/);
     expect(mocks.query.mock.calls[0]?.[0]).not.toMatch(/FROM cloud_tasks parent/);
   });
 

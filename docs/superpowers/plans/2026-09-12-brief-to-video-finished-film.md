@@ -235,10 +235,16 @@ git commit -m "feat: add skill approval checkpoints"
 **Files:**
 - Create: `src/lib/brief-to-video/video-adapter.ts`
 - Create: `src/lib/brief-to-video/video-recovery.ts`
+- Modify: `src/lib/skill-runtime/run-request.ts`
+- Modify: `src/lib/agent-runtime/service.ts`
+- Modify: `src/lib/agent-runtime/types.ts`
+- Modify: `src/lib/skill-runtime/executor.ts`
 - Modify: `src/lib/skill-runtime/step-registry.ts`
 - Modify: `src/lib/skill-runtime/cost-estimator.ts`
 - Modify: `src/lib/skill-runtime/billing-authorization.ts`
+- Modify: `src/lib/skill-runtime/prepaid-generation.ts`
 - Modify: `src/lib/skill-runtime/execution-error.ts`
+- Modify: `src/app/api/video/generate/route.ts`
 - Test: `src/__tests__/lib/brief-to-video-video-adapter.test.ts`
 - Test: `src/__tests__/lib/brief-to-video-billing.test.ts`
 - Test: `src/__tests__/integration/brief-to-video-concurrency-postgres.test.ts`
@@ -248,7 +254,7 @@ git commit -m "feat: add skill approval checkpoints"
 - Produces: `recoverBriefToVideoOperation(operation, context)`。
 - Registers: `video_generate` adapter and recovery handler。
 
-- [ ] **Step 1: 写精确模型、参数能力和幂等提交 RED 测试**
+- [x] **Step 1: 写精确模型、参数能力和幂等提交 RED 测试**
 
 ```ts
 expect(submit.providerId).toBe('pear-video');
@@ -260,21 +266,21 @@ expect(fallbackProviderLookup).not.toHaveBeenCalled();
 
 同时覆盖 text-to-video、image-to-video、first-last-frame、不支持参数 400、响应头后卡住、accepted 后断线和 `SKILL_SUBMISSION_UNKNOWN`。
 
-- [ ] **Step 2: 运行测试确认 RED**
+- [x] **Step 2: 运行测试确认 RED**
 
 Run: `pnpm exec vitest run src/__tests__/lib/brief-to-video-video-adapter.test.ts src/__tests__/lib/brief-to-video-billing.test.ts`
 
 Expected: FAIL，Skill Runtime 尚无视频步骤 adapter。
 
-- [ ] **Step 3: 实现现有视频 API 的同任务适配**
+- [x] **Step 3: 实现现有视频 API 的同任务适配**
 
 只从冻结 binding 构造 `/api/video/generate` 请求，传递 project/session/Run provenance 和 operation idempotency key。accepted taskId 先持久化再轮询；恢复从同一远程 taskId 继续，不重新 POST。
 
-- [ ] **Step 4: 实现步骤级结算与迟到终态保护**
+- [x] **Step 4: 实现步骤级结算与迟到终态保护**
 
 规划取消只保留规划成本；未执行视频步骤退款一次。accepted 后取消、失败、超时使用数据库条件终态；迟到 completed 仅写审计。
 
-- [ ] **Step 5: 运行聚焦和 PostgreSQL 并发测试并提交**
+- [x] **Step 5: 运行聚焦和 PostgreSQL 并发测试并提交**
 
 Run: `pnpm exec vitest run src/__tests__/lib/brief-to-video-video-adapter.test.ts src/__tests__/lib/brief-to-video-billing.test.ts src/__tests__/lib/skill-runtime-execution-error.test.ts`
 

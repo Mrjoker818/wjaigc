@@ -6,7 +6,7 @@
  * 异步提交 + 轮询模式，复用 task-registry
  */
 
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { after, NextRequest, NextResponse } from 'next/server';
 import { findProviderForFeature, findProviderForModel, findProviderById } from '@/lib/server-api-config';
 import {
@@ -33,7 +33,11 @@ import { validateApiInputs } from '@/lib/api-validator';
 import { recordVideoTaskRemotePolling, recordVideoTaskSubmitted } from '@/lib/cloud-task-persistence';
 import {
   chargeCloudTaskCredits,
+  claimCloudTaskLease,
   completeCloudTask,
+  getCloudTaskForUser,
+  getCloudTaskForUserByIdempotencyKey,
+  releaseCloudTaskLease,
   terminateCloudTaskAndRefund,
   updateCloudTask,
 } from '@/lib/cloud-task-storage';
@@ -54,8 +58,45 @@ import {
   ModelCapabilityError,
   type SupportedOperation,
 } from '@/lib/task-core/model-capability-contract';
+import {
+  createSkillPrepaidGeneration,
+  inspectSkillPrepaidPoll,
+  parseSkillBillingContext,
+  SkillBillingAuthorizationError,
+  startSkillPrepaidProviderRequest,
+  type SkillPrepaidExecutionReference,
+} from '@/lib/skill-runtime/prepaid-generation';
 
 export const maxDuration = 300; // 5 min timeout
+
+async function waitForSkillVideoAcceptance(
+  taskId: string,
+  userId: string,
+  signal: AbortSignal,
+): Promise<void> {
+  for (let attempt = 0; attempt < 200; attempt += 1) {
+    signal.throwIfAborted();
+    const child = await getCloudTaskForUser(taskId, userId);
+    if (!child) throw new SkillBillingAuthorizationError();
+    const state = await inspectSkillPrepaidPoll(child);
+    if (state.action === 'allow') return;
+    if (state.action === 'stop') throw Object.assign(new Error(state.message), { code: 'SKILL_PARENT_ENDED' });
+    await new Promise<void>((resolve, reject) => {
+      const onAbort = () => {
+        clearTimeout(timer);
+        reject(signal.reason);
+      };
+      const timer = setTimeout(() => {
+        signal.removeEventListener('abort', onAbort);
+        resolve();
+      }, 25);
+      signal.addEventListener('abort', onAbort, { once: true });
+    });
+  }
+  throw Object.assign(new Error('Skill video acceptance was not confirmed in time'), {
+    code: 'SKILL_ACCEPTANCE_TIMEOUT',
+  });
+}
 
 function errorMessage(error: unknown, fallback: string): string {
   return error instanceof Error && error.message ? error.message : fallback;
@@ -169,19 +210,31 @@ export async function POST(request: NextRequest) {
     if (!sessionUser) {
       return NextResponse.json({ error: '请先登录后再生成视频' }, { status: 401 });
     }
+    const skillBillingContext = body.skillBillingContext === undefined
+      ? undefined
+      : parseSkillBillingContext(body.skillBillingContext);
+    const requestedIdempotencyKey = request.headers.get('idempotency-key')?.trim() || '';
+    if (skillBillingContext && (
+      !requestedIdempotencyKey
+      || !effectiveProviderId
+      || typeof projectId !== 'string' || !projectId
+      || typeof sessionId !== 'string' || !sessionId
+    )) {
+      throw new SkillBillingAuthorizationError();
+    }
 
     // 1. 查找视频 API 提供商
     let provider;
     if (effectiveProviderId) {
       provider = await findProviderById(effectiveProviderId);
     }
-    if (!provider) {
+    if (!provider && !skillBillingContext) {
       provider = await findProviderForModel(pureModel, 'video', effectiveProviderId);
     }
-    if (!provider) {
+    if (!provider && !skillBillingContext) {
       provider = await findProviderForFeature('video');
     }
-    if (!provider) {
+    if (!provider && !skillBillingContext) {
       // Fallback: 尝试 image 类型提供商（某些提供商同时支持图片和视频）
       provider = await findProviderForFeature('imageEdit');
     }
@@ -399,12 +452,12 @@ export async function POST(request: NextRequest) {
       characterReferences,
       motionStrength,
     };
-    plannedCreditCost = sessionUser
-      ? await calculateConfiguredCreditCost('video_generate', pureModel, {
+    plannedCreditCost = skillBillingContext ? 0 : await calculateConfiguredCreditCost(
+      'video_generate', pureModel, {
           durationSeconds: Number(duration),
           providerId: provider.id,
-        })
-      : 0;
+      },
+    );
     let taskEntryAudit = createTaskEntryAudit({
       entry: 'video',
       mode: taskCoreMode,
@@ -419,10 +472,12 @@ export async function POST(request: NextRequest) {
     });
 
     // 5. 注册任务
-    let taskId = `video_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+    let taskId = skillBillingContext
+      ? `video_skill_${createHash('sha256').update(requestedIdempotencyKey).digest('hex').slice(0, 24)}`
+      : `video_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
     const modeLabel = imageUrl ? '图生视频' : '文生视频';
     const modelName = modelInfo?.name || model;
-    const idempotencyKey = request.headers.get('idempotency-key')?.trim() || taskId;
+    const idempotencyKey = requestedIdempotencyKey || taskId;
     const requestDigest = createHash('sha256').update(JSON.stringify({
       providerId: provider.id,
       model: pureModel,
@@ -452,7 +507,57 @@ export async function POST(request: NextRequest) {
       negativePrompt,
       seed,
     };
-    const migration = await executeTaskEntryMigration({
+    const migration = skillBillingContext ? await (async () => {
+      const childIdempotencyKey = `${idempotencyKey}:0`;
+      const now = Date.now();
+      const created = await createSkillPrepaidGeneration({
+        id: taskId,
+        userId: sessionUser.id,
+        projectId,
+        sessionId,
+        messageId: typeof messageId === 'string' ? messageId : undefined,
+        type: 'video',
+        status: 'processing',
+        providerId: provider.id,
+        model: pureModel,
+        progress: 0,
+        label: `${modeLabel} - ${modelName}`,
+        result: { taskEntryAudit, submissionPayload },
+        creditStatus: 'not-applicable',
+        creditCost: 0,
+        idempotencyKey: childIdempotencyKey,
+        requestDigest,
+        createdAt: now,
+        updatedAt: now,
+      }, skillBillingContext, idempotencyKey);
+      if (!created) {
+        const existing = await getCloudTaskForUserByIdempotencyKey(sessionUser.id, childIdempotencyKey);
+        if (!existing || existing.requestDigest !== requestDigest || existing.type !== 'video'
+          || existing.providerId !== provider.id || existing.model !== pureModel) {
+          throw new IdempotencyConflictError({
+            userId: sessionUser.id,
+            idempotencyKey: childIdempotencyKey,
+            requestDigest,
+            existingDigest: existing?.requestDigest || 'missing',
+          });
+        }
+        taskId = existing.id;
+        return { value: {
+          taskId: existing.id,
+          creditCost: 0,
+          accepted: true,
+          reused: true,
+          status: existing.status,
+        }, comparison: undefined };
+      }
+      return { value: {
+        taskId,
+        creditCost: 0,
+        accepted: true,
+        reused: false,
+        status: 'processing' as const,
+      }, comparison: undefined };
+    })() : await executeTaskEntryMigration({
       mode: taskCoreMode,
       legacy: async () => {
         await recordVideoTaskSubmitted({
@@ -580,29 +685,58 @@ export async function POST(request: NextRequest) {
         retryable: true,
       }, { status: 503 });
     }
+    let skillPrepaidExecution: SkillPrepaidExecutionReference | undefined;
     // 6. 异步提交到第三方 API
     after(async () => {
       const submitController = new AbortController();
       registerTaskAbortController(taskId, submitController);
       try {
+        if (skillBillingContext) {
+          await waitForSkillVideoAcceptance(taskId, sessionUser!.id, submitController.signal);
+          const workerId = randomUUID();
+          const lease = await claimCloudTaskLease(taskId, workerId, 120_000);
+          if (!lease) throw Object.assign(new Error('Skill video child lease is unavailable'), {
+            code: 'SKILL_CHILD_LEASE_UNAVAILABLE',
+          });
+          skillPrepaidExecution = {
+            taskId,
+            workerId,
+            attemptCount: lease.attemptCount,
+            parentGeneration: skillBillingContext.executionFence.generation,
+          };
+        }
         updateTaskProgress(taskId, { progress: 5, label: `${modeLabel} · ${modelName} · 提交中...` });
 
         const req = buildVideoSubmitRequest(profile, videoParams);
         console.log(`[video/generate] Submit request: url=${req.url}, method=${req.method}`);
         const submitSignal = AbortSignal.any([submitController.signal, AbortSignal.timeout(30000)]);
 
-        let response = await fetch(req.url, {
-          method: req.method,
-          headers: req.headers,
-          body: req.body,
-          signal: submitSignal,
-        });
+        let response = skillPrepaidExecution
+          ? await startSkillPrepaidProviderRequest({
+              ...skillPrepaidExecution,
+              userId: sessionUser!.id,
+              providerId: provider.id,
+              modelId: pureModel,
+              requestBody: submissionPayload,
+              signal: submitSignal,
+            }, signal => fetch(req.url, {
+              method: req.method,
+              headers: req.headers,
+              body: req.body,
+              signal,
+            }))
+          : await fetch(req.url, {
+              method: req.method,
+              headers: req.headers,
+              body: req.body,
+              signal: submitSignal,
+            });
 
         let usedImagesEndpoint = req.url.includes('/v1/images/');
         
         // Auto-fallback: try /v1/images/generations when /v1/video/generations fails
         // Many third-party API proxies only expose video models via the images endpoint
-        if (!response.ok && profile === 'rest-generic' && !req.url.includes('/v1/images/')) {
+        if (!response.ok && !skillBillingContext && profile === 'rest-generic' && !req.url.includes('/v1/images/')) {
           const errorBody = await response.text().catch(() => '');
           const isModelNotFound = errorBody.includes('model_not_found') || errorBody.includes('Model not found');
           const isEndpointNotFound = response.status === 404;
@@ -713,6 +847,9 @@ export async function POST(request: NextRequest) {
         if (!settled.transitioned) return;
         updateTaskProgress(taskId, { status: 'failed', error: errorMsg, progress: 0 });
       } finally {
+        if (skillPrepaidExecution) {
+          await releaseCloudTaskLease(taskId, skillPrepaidExecution.workerId).catch(() => false);
+        }
         unregisterTaskAbortController(taskId, submitController);
       }
     });
@@ -742,7 +879,9 @@ export async function POST(request: NextRequest) {
       targetType: 'video',
       durationMs: opTimer.end(),
     });
-    const status = err instanceof InsufficientCreditsError
+    const status = err instanceof SkillBillingAuthorizationError
+      ? 403
+      : err instanceof InsufficientCreditsError
       ? 402
       : err instanceof IdempotencyConflictError
         ? 409
