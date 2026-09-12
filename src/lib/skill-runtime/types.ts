@@ -62,6 +62,8 @@ export interface SkillApprovalCheckpoint {
   allowRevision: boolean;
 }
 
+export type { SkillApprovalStateV1 } from './approval';
+
 export interface CompiledSkillStepFanOut {
   inputKey: string;
   itemIndex: number;

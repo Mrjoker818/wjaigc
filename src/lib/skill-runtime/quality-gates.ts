@@ -60,6 +60,15 @@ export const QUALITY_GATES = {
   'valid-html': (result: SkillStepResult) => (
     typeof result.html === 'string' && result.html.length > 0
   ),
+  'structured-output-present': (result: SkillStepResult) => {
+    if (!result.structured) return false;
+    try {
+      durableSkillOutputFromStructuredResult('quality-gate', result.structured);
+      return true;
+    } catch {
+      return false;
+    }
+  },
   'structured-report-present': (result: SkillStepResult) => {
     if (result.structured?.schemaId !== 'platform-compliance-report-v1') return false;
     try {

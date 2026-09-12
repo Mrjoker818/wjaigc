@@ -442,6 +442,7 @@ export function createProductionSkillStepRegistry(input: {
       modelId: step.modelBinding.modelId,
       requestId: step.operation.idempotencyKey,
       planInput,
+      revisionInstruction: step.revisionInstruction,
       signal: step.signal,
     });
     return {

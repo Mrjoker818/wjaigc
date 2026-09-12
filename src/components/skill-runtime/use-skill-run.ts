@@ -7,6 +7,7 @@ import { reduceSkillEvents } from './skill-event-projection';
 import type { AgentEvent, AgentRunProjection } from '@/lib/agent-runtime/types';
 import type { SkillRunCostEstimate } from '@/lib/skill-runtime/cost-estimator';
 import type { SkillRunRequest } from '@/lib/skill-runtime/run-request';
+import type { SkillApprovalIdentity } from '@/lib/skill-runtime/approval';
 
 interface UseSkillRunOptions {
   fetcher?: typeof fetch;
@@ -34,6 +35,8 @@ interface UseSkillRunResult {
   pause: () => Promise<boolean>;
   resume: () => Promise<boolean>;
   cancel: () => Promise<boolean>;
+  approve: (identity: SkillApprovalIdentity) => Promise<boolean>;
+  revise: (identity: SkillApprovalIdentity, revisionInstruction: string) => Promise<boolean>;
   retry: (stepId: string) => Promise<boolean>;
   retryRun: (stepId: string) => Promise<string | undefined>;
   refreshRetryability: () => void;
@@ -334,7 +337,8 @@ export function useSkillRun({ fetcher = fetch }: UseSkillRunOptions = {}): UseSk
   }, [request]);
 
   const control = useCallback(async (
-    action: 'pause' | 'resume' | 'cancel',
+    action: 'pause' | 'resume' | 'cancel' | 'approve' | 'revise',
+    payload: Record<string, unknown> = {},
   ): Promise<boolean> => {
     const active = activeRun.current;
     if (!runId || active?.runId !== runId || active.generation !== startGeneration.current) return false;
@@ -352,7 +356,7 @@ export function useSkillRun({ fetcher = fetch }: UseSkillRunOptions = {}): UseSk
         {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action }),
+          body: JSON.stringify({ action, ...payload }),
         },
         controller,
       );
@@ -472,6 +476,10 @@ export function useSkillRun({ fetcher = fetch }: UseSkillRunOptions = {}): UseSk
     pause: () => control('pause'),
     resume: () => control('resume'),
     cancel: () => control('cancel'),
+    approve: identity => control('approve', { ...identity }),
+    revise: (identity, revisionInstruction) => control('revise', {
+      ...identity, revisionInstruction,
+    }),
     retry,
     retryRun,
     refreshRetryability,

@@ -86,6 +86,19 @@ function parseFrozenSteps(value: unknown): SkillStepDefinition[] | null {
         : {}),
       qualityGateIds: step.qualityGateIds as string[],
       ...(compiledFanOut ? { compiledFanOut } : {}),
+      ...(step.approvalCheckpoint && typeof step.approvalCheckpoint === 'object'
+        && !Array.isArray(step.approvalCheckpoint) ? {
+          approvalCheckpoint: {
+            kind: (step.approvalCheckpoint as Record<string, unknown>).kind as 'user-approval',
+            outputSchemaId: String(
+              (step.approvalCheckpoint as Record<string, unknown>).outputSchemaId || '',
+            ),
+            nextStepId: String(
+              (step.approvalCheckpoint as Record<string, unknown>).nextStepId || '',
+            ),
+            allowRevision: (step.approvalCheckpoint as Record<string, unknown>).allowRevision === true,
+          },
+        } : {}),
     };
     try {
       result.push(validateSkillStep(parsed));
@@ -243,6 +256,7 @@ export interface PersistedSkillContinuation {
   workspace: AgentWorkspace;
   requestDigest: string;
   toolId: string;
+  revisionInstruction?: string;
   execute(context: AgentDownstreamExecutionContext): Promise<void>;
 }
 
@@ -362,6 +376,14 @@ export async function loadPersistedSkillContinuation(input: {
     request,
     mediaByVersionId: authorizedContext.mediaByVersionId,
   });
+  const latestResume = [...events].reverse().find(event => event.type === 'run.resumed');
+  const resumeApproval = latestResume?.payload.approval;
+  const revisionInstruction = resumeApproval && typeof resumeApproval === 'object'
+    && !Array.isArray(resumeApproval)
+    && (resumeApproval as Record<string, unknown>).action === 'revise'
+    && typeof (resumeApproval as Record<string, unknown>).revisionInstruction === 'string'
+    ? (resumeApproval as Record<string, unknown>).revisionInstruction as string
+    : undefined;
   return {
     actor,
     request,
@@ -369,6 +391,7 @@ export async function loadPersistedSkillContinuation(input: {
     workspace,
     requestDigest,
     toolId,
+    ...(revisionInstruction ? { revisionInstruction } : {}),
     async execute(context) {
       try {
         await executeSkillRun({
@@ -380,6 +403,7 @@ export async function loadPersistedSkillContinuation(input: {
           stepRecoveries: registry.stepRecoveries,
           resumeFromStepId: input.nextStepId,
           definition,
+          revisionInstruction,
         });
       } catch (error) {
         if (error && typeof error === 'object' && context.executionFence) {

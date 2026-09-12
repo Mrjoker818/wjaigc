@@ -273,12 +273,14 @@ export function reduceAgentEvents(events: readonly AgentEvent[]): AgentRunProjec
       }
       case 'run.paused': {
         projection.status = 'paused';
+        projection.error = readError(current.payload);
         const nextStepId = readPayloadString(current.payload, 'nextStepId');
         if (nextStepId) projection.resumeFromStepId = nextStepId;
         break;
       }
       case 'run.resumed': {
         projection.status = 'queued';
+        projection.error = undefined;
         const nextStepId = readPayloadString(current.payload, 'nextStepId');
         if (nextStepId) projection.resumeFromStepId = nextStepId;
         const generation = current.payload.generation;

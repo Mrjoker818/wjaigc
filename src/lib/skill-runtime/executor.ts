@@ -45,6 +45,7 @@ export interface ExecuteSkillStepInput {
   requestDigest: string;
   operation: AgentDownstreamExecutionContext;
   signal: AbortSignal;
+  revisionInstruction?: string;
 }
 
 export interface SkillExecutorDependencies {
@@ -73,6 +74,17 @@ export interface SkillExecutorDependencies {
     error: unknown;
     executionFence: NonNullable<AgentDownstreamExecutionContext['executionFence']>;
   }): Promise<unknown>;
+  pauseForApproval?(input: {
+    actorUserId: string;
+    runId: string;
+    stepId: string;
+    nextStepId: string;
+    outputSchemaId: string;
+    planChecksum: string;
+    generation: number;
+    allowRevision: boolean;
+    executionFence: NonNullable<AgentDownstreamExecutionContext['executionFence']>;
+  }): Promise<unknown>;
 }
 
 export interface ExecuteSkillRunInput {
@@ -88,6 +100,7 @@ export interface ExecuteSkillRunInput {
   resumeFromStepId?: string;
   existingAssetVersionIds?: readonly string[];
   existingOutputs?: readonly DurableSkillOutput[];
+  revisionInstruction?: string;
 }
 
 export interface ExecuteSkillRunResult {
@@ -175,6 +188,7 @@ export function skillStepRequestDigest(input: {
   step: SkillStepDefinition;
   inputValues: Record<string, unknown>;
   modelBinding?: { providerId: string; modelId: string };
+  revisionInstruction?: string;
 }): string {
   return createHash('sha256').update(JSON.stringify(canonicalize({
     runId: input.runId,
@@ -184,6 +198,7 @@ export function skillStepRequestDigest(input: {
     promptTemplate: input.step.promptTemplate,
     inputValues: input.inputValues,
     modelBinding: input.modelBinding || null,
+    revisionInstruction: input.revisionInstruction || null,
     ...(input.definition.executionContextVersion === 1 ? {
       executionContextVersion: 1,
       executionPrompt: buildSkillStepPrompt(input),
@@ -368,6 +383,7 @@ export function createSkillExecutor(dependencies: SkillExecutorDependencies) {
       const startedStepIds: string[] = [];
       const assetVersionIds: string[] = [...new Set(input.existingAssetVersionIds || [])];
       const outputs: DurableSkillOutput[] = [...(input.existingOutputs || [])];
+      let pausedForApproval = false;
 
       try {
         for (const group of groupSkillSteps(eligible)) {
@@ -395,6 +411,7 @@ export function createSkillExecutor(dependencies: SkillExecutorDependencies) {
               step,
               inputValues: input.inputValues,
               modelBinding,
+              revisionInstruction: input.revisionInstruction,
             });
               await dependencies.appendEvent({
               actorUserId: input.actorUserId,
@@ -415,6 +432,7 @@ export function createSkillExecutor(dependencies: SkillExecutorDependencies) {
                 modelBinding,
                 requestDigest,
                 signal: controller.signal,
+                revisionInstruction: input.revisionInstruction,
               };
               try {
                 result = await input.operationContext.executeOperation({
@@ -440,6 +458,7 @@ export function createSkillExecutor(dependencies: SkillExecutorDependencies) {
               requestDigest,
               operation: input.operationContext,
               signal: controller.signal,
+              revisionInstruction: input.revisionInstruction,
             };
               const qualityGateIds = step.toolId === 'chat' && step.modelRole === 'orchestrator'
                 ? [...new Set([...step.qualityGateIds, 'text-output-present'])]
@@ -502,6 +521,29 @@ export function createSkillExecutor(dependencies: SkillExecutorDependencies) {
             assetVersionIds.push(...(groupAssets.get(step.id) || []));
             outputs.push(...(groupOutputs.get(step.id) || []));
           }
+          const checkpointStep = group.steps.find(step => step.approvalCheckpoint);
+          if (checkpointStep?.approvalCheckpoint) {
+            const checkpoint = checkpointStep.approvalCheckpoint;
+            const output = (groupOutputs.get(checkpointStep.id) || []).find(candidate => (
+              candidate.kind === 'json' && candidate.schemaId === checkpoint.outputSchemaId
+            ));
+            if (!output || output.kind !== 'json' || !dependencies.pauseForApproval) {
+              throw new Error('SKILL_APPROVAL_OUTPUT_INVALID');
+            }
+            await dependencies.pauseForApproval({
+              actorUserId: input.actorUserId,
+              runId: input.runId,
+              stepId: checkpointStep.id,
+              nextStepId: checkpoint.nextStepId,
+              outputSchemaId: checkpoint.outputSchemaId,
+              planChecksum: createHash('sha256').update(output.content).digest('hex'),
+              generation: executionFence.generation,
+              allowRevision: checkpoint.allowRevision,
+              executionFence,
+            });
+            pausedForApproval = true;
+            break;
+          }
         } catch (error) {
           groupError = error;
           controller.abort(error);
@@ -547,6 +589,7 @@ export function createSkillExecutor(dependencies: SkillExecutorDependencies) {
       if (input.operationContext.signal?.aborted) {
         throw abortError(input.operationContext.signal);
       }
+      if (pausedForApproval) return executionResult;
       await dependencies.completeRun?.({
         actorUserId: input.actorUserId,
         runId: input.runId,

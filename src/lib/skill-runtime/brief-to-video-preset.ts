@@ -63,7 +63,7 @@ export function createBriefToVideoSkill(enabled: boolean): SkillDefinition {
         execution: 'sequential',
         promptTemplate: '根据创作 Brief 生成严格的结构化视频脚本。',
         modelRole: 'orchestrator',
-        qualityGateIds: ['output-present'],
+        qualityGateIds: ['structured-output-present'],
         approvalCheckpoint: {
           kind: 'user-approval',
           outputSchemaId: 'brief-to-video-plan-v1',

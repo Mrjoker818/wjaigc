@@ -36,7 +36,7 @@ import {
   selectSkillStepsForExecution,
   type ExecuteSkillStepInput,
 } from './executor';
-import { parseDurableSkillOutputs } from './structured-output';
+import { durableSkillOutputKey, parseDurableSkillOutputs } from './structured-output';
 import { skillExecutionSteps } from './cost-estimator';
 import { parseCompiledSkillFanOut } from './compiled-fan-out';
 import { assertCompiledSkillFanOutValues } from './step-compiler';
@@ -57,6 +57,15 @@ import {
 import { listManagedUsers } from '@/lib/server-auth';
 import { createHash } from 'node:crypto';
 import { recordSkillExecutionDiagnostic } from './execution-error';
+import {
+  assertSkillApprovalIdentity,
+  createSkillApprovalState,
+  parseSkillApprovalState,
+  parseSkillRevisionInstruction,
+  SkillApprovalConflictError,
+  type SkillApprovalIdentity,
+  type SkillApprovalStateV1,
+} from './approval';
 
 export class SkillRunRequestError extends Error {
   readonly code = 'SKILL_RUN_REQUEST_INVALID';
@@ -115,6 +124,8 @@ export interface SkillRunHistory {
   inputValues: Record<string, unknown>;
   modelBindings: SkillRunRequest['modelBindings'];
   status: AgentRunProjection['status'];
+  error?: AgentRunProjection['error'];
+  approval?: SkillApprovalStateV1;
   resumeFromStepId?: string;
   steps: SkillRunStepHistory[];
   qualityEvents: Array<{ stepId: string; gateId: string; passed: boolean }>;
@@ -345,7 +356,9 @@ function completedAssetVersionIds(events: readonly AgentEvent[]): string[] {
 }
 
 function completedSkillOutputs(events: readonly AgentEvent[]): DurableSkillOutput[] {
-  return events.flatMap(event => {
+  const outputs = new Map<string, DurableSkillOutput>();
+  for (const event of events) {
+    const eventOutputs = (() => {
     if (event.type === 'tool.completed') {
       return parseDurableSkillOutputs(event.payload.outputs);
     }
@@ -353,7 +366,10 @@ function completedSkillOutputs(events: readonly AgentEvent[]): DurableSkillOutpu
     const result = event.payload.result;
     if (!result || typeof result !== 'object' || Array.isArray(result)) return [];
     return parseDurableSkillOutputs((result as Record<string, unknown>).outputs);
-  });
+    })();
+    for (const output of eventOutputs) outputs.set(durableSkillOutputKey(output), output);
+  }
+  return [...outputs.values()];
 }
 
 function persistedRetryLineage(events: readonly AgentEvent[]): MultiPlatformExportRetryLineage | undefined {
@@ -468,6 +484,31 @@ function orderedResultAssetVersionIds(projection: AgentRunProjection): string[] 
   return [...new Set(value)];
 }
 
+function pendingApproval(events: readonly AgentEvent[]): SkillApprovalStateV1 | undefined {
+  const pause = [...events].reverse().find(event => event.type === 'run.paused');
+  if (!pause || pause.payload.pauseReason !== 'approval') return undefined;
+  try {
+    return parseSkillApprovalState(pause.payload.approval);
+  } catch {
+    throw new SkillRunRequestError('Persisted Skill approval state is invalid');
+  }
+}
+
+function isApprovalReplay(
+  events: readonly AgentEvent[],
+  action: 'approve' | 'revise',
+  identity: SkillApprovalIdentity,
+): boolean {
+  return [...events].reverse().some(event => {
+    if (event.type !== 'run.resumed' || !event.payload.approval
+      || typeof event.payload.approval !== 'object' || Array.isArray(event.payload.approval)) return false;
+    const approval = event.payload.approval as Record<string, unknown>;
+    return approval.action === action && approval.revision === identity.revision
+      && approval.generation === identity.generation
+      && approval.planChecksum === identity.planChecksum;
+  });
+}
+
 function history(task: CloudTask, events: readonly AgentEvent[], projection: AgentRunProjection): SkillRunHistory {
   const invocation = skillInvocation(events);
   if (!invocation) throw new SkillRunNotFoundError();
@@ -515,6 +556,10 @@ function history(task: CloudTask, events: readonly AgentEvent[], projection: Age
     ...(typeof created?.workspaceId === 'string' ? { workspaceId: created.workspaceId } : {}),
     ...invocation,
     status: projection.status,
+    ...(projection.error ? { error: projection.error } : {}),
+    ...(projection.status === 'paused' && pendingApproval(events)
+      ? { approval: pendingApproval(events) }
+      : {}),
     ...(projection.resumeFromStepId ? { resumeFromStepId: projection.resumeFromStepId } : {}),
     steps: steps.map(step => ({
       id: step.id,
@@ -613,6 +658,61 @@ export function createSkillRuntimeService(
         nextStepId,
       });
       return dependencies.resumeRun(input);
+    },
+    async approve(input: { actorUserId: string; runId: string } & SkillApprovalIdentity) {
+      let run = await owned(input);
+      if (isApprovalReplay(run.events, 'approve', input)) {
+        return { accepted: true, dispatched: false, replayed: true };
+      }
+      const approval = pendingApproval(run.events);
+      if (run.projection.status !== 'paused' || !approval) throw new SkillApprovalConflictError();
+      assertSkillApprovalIdentity(approval, input);
+      if ((run.task.revision ?? 0) !== input.revision) throw new SkillApprovalConflictError();
+      await dependencies.prepareResume?.({
+        actorUserId: input.actorUserId, projectId: run.task.projectId || '',
+        runId: input.runId, nextStepId: approval.nextStepId,
+      });
+      const resumed = await dependencies.resumeRun({
+        actorUserId: input.actorUserId, runId: input.runId, nextStepId: approval.nextStepId,
+        approval: { action: 'approve', revision: input.revision, generation: input.generation,
+          planChecksum: input.planChecksum },
+      });
+      if (!resumed.accepted) {
+        run = await owned(input);
+        if (isApprovalReplay(run.events, 'approve', input)) {
+          return { accepted: true, dispatched: false, replayed: true };
+        }
+      }
+      return { ...resumed, dispatched: resumed.accepted && resumed.dispatch?.started === true };
+    },
+    async revise(input: { actorUserId: string; runId: string; revisionInstruction: string } & SkillApprovalIdentity) {
+      let run = await owned(input);
+      if (isApprovalReplay(run.events, 'revise', input)) {
+        return { accepted: true, dispatched: false, replayed: true };
+      }
+      const approval = pendingApproval(run.events);
+      if (run.projection.status !== 'paused' || !approval || !approval.allowRevision) {
+        throw new SkillApprovalConflictError();
+      }
+      assertSkillApprovalIdentity(approval, input);
+      if ((run.task.revision ?? 0) !== input.revision) throw new SkillApprovalConflictError();
+      const revisionInstruction = parseSkillRevisionInstruction(input.revisionInstruction);
+      await dependencies.prepareResume?.({
+        actorUserId: input.actorUserId, projectId: run.task.projectId || '',
+        runId: input.runId, nextStepId: approval.stepId,
+      });
+      const resumed = await dependencies.resumeRun({
+        actorUserId: input.actorUserId, runId: input.runId, nextStepId: approval.stepId,
+        approval: { action: 'revise', revision: input.revision, generation: input.generation,
+          planChecksum: input.planChecksum, revisionInstruction },
+      });
+      if (!resumed.accepted) {
+        run = await owned(input);
+        if (isApprovalReplay(run.events, 'revise', input)) {
+          return { accepted: true, dispatched: false, replayed: true };
+        }
+      }
+      return { ...resumed, dispatched: resumed.accepted && resumed.dispatch?.started === true };
     },
     async cancel(input: { actorUserId: string; runId: string }) {
       const result = await dependencies.cancelRun(input);
@@ -776,6 +876,7 @@ export async function executeSkillRun(input: {
   resumeFromStepId?: string;
   definition?: import('./types').SkillDefinition;
   appendRunEvent?: typeof appendAgentRunEvent;
+  revisionInstruction?: string;
 }): Promise<import('./executor').ExecuteSkillRunResult> {
   const definition = input.definition || (() => {
     const current = requireSkillForSurface(input.request.skillId, input.request.surface);
@@ -791,6 +892,9 @@ export async function executeSkillRun(input: {
   const workspace = input.request.surface === 'simple-chat' ? 'chat' : input.request.surface;
   const events = await listAgentRunEvents({ actorUserId: input.actor.id, runId: input.runId });
   const completed = completedStepIds(events);
+  if (input.revisionInstruction && input.resumeFromStepId) {
+    completed.delete(input.resumeFromStepId);
+  }
   const appendRunEvent = input.appendRunEvent || appendAgentRunEvent;
   const fence = input.operationContext.executionFence;
   if (!fence || fence.runId !== input.runId) {
@@ -884,6 +988,32 @@ export async function executeSkillRun(input: {
         executionFence,
       });
     },
+    pauseForApproval: async approval => {
+      const task = await getCloudTaskForUser(input.runId, input.actor.id);
+      if (!task) throw new SkillRunNotFoundError();
+      const state = createSkillApprovalState({
+        stepId: approval.stepId,
+        nextStepId: approval.nextStepId,
+        outputSchemaId: approval.outputSchemaId,
+        planChecksum: approval.planChecksum,
+        revision: (task.revision ?? 0) + 1,
+        generation: approval.generation,
+        allowRevision: approval.allowRevision,
+      });
+      return pauseAgentRun({
+        actorUserId: input.actor.id,
+        runId: input.runId,
+        nextStepId: approval.nextStepId,
+        pauseReason: 'approval',
+        approval: state as unknown as Record<string, unknown>,
+        error: {
+          code: 'SKILL_APPROVAL_REQUIRED',
+          message: 'Skill plan requires user approval',
+          retryable: false,
+        },
+        executionFence: approval.executionFence,
+      });
+    },
     qualityContext: () => ({
       ...(typeof invocation.inputValues.aspectRatio === 'string'
         ? { expectedAspectRatio: invocation.inputValues.aspectRatio }
@@ -902,7 +1032,10 @@ export async function executeSkillRun(input: {
     completedStepIds: [...completed],
     resumeFromStepId: input.resumeFromStepId,
     existingAssetVersionIds: completedAssetVersionIds(events),
-    existingOutputs: completedSkillOutputs(events),
+    existingOutputs: completedSkillOutputs(events).filter(output => (
+      !input.revisionInstruction || output.stepId !== input.resumeFromStepId
+    )),
+    revisionInstruction: input.revisionInstruction,
   });
 }
 
@@ -1074,6 +1207,8 @@ export const listSkillRuns = runtimeService.list;
 export const getSkillRun = runtimeService.get;
 export const pauseSkillRun = runtimeService.pause;
 export const resumeSkillRun = runtimeService.resume;
+export const approveSkillRunPlan = runtimeService.approve;
+export const reviseSkillRunPlan = runtimeService.revise;
 export const cancelSkillRun = runtimeService.cancel;
 export const retrySkillStep = runtimeService.retry;
 

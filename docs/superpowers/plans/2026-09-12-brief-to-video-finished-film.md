@@ -197,7 +197,7 @@ git commit -m "feat: plan structured brief videos"
 - Produces: `approveSkillRunPlan()`、`reviseSkillRunPlan()`。
 - Extends: `PATCH /api/skill-runs/:runId` actions `approve` and `revise`。
 
-- [ ] **Step 1: 写暂停、重复批准、旧 revision 和跨用户 RED 测试**
+- [x] **Step 1: 写暂停、重复批准、旧 revision 和跨用户 RED 测试**
 
 ```ts
 expect(afterPlan.status).toBe('paused');
@@ -207,17 +207,17 @@ await expect(approveAsOtherUser()).rejects.toMatchObject({ code: 'SKILL_RUN_NOT_
 await expect(approveOldChecksum()).rejects.toMatchObject({ code: 'SKILL_APPROVAL_CONFLICT' });
 ```
 
-- [ ] **Step 2: 运行测试确认 RED**
+- [x] **Step 2: 运行测试确认 RED**
 
 Run: `pnpm exec vitest run src/__tests__/lib/skill-runtime-approval.test.ts src/__tests__/api/skill-run-approval.test.ts`
 
 Expected: FAIL，当前 PATCH 仅支持 pause/resume/cancel。
 
-- [ ] **Step 3: 实现数据库条件式审批和恢复**
+- [x] **Step 3: 实现数据库条件式审批和恢复**
 
 审批状态绑定 `runId + revision + generation + planChecksum`。`approve` 原子写入批准事件并只派发一次下一步骤；`revise` 记录受限修改要求、增加 generation 并重新运行规划步骤。审批前 executor 不允许越过 checkpoint。
 
-- [ ] **Step 4: 运行单元/API/隔离 PostgreSQL 测试并提交**
+- [x] **Step 4: 运行单元/API/隔离 PostgreSQL 测试并提交**
 
 Run: `pnpm exec vitest run src/__tests__/lib/skill-runtime-approval.test.ts src/__tests__/api/skill-run-approval.test.ts`
 

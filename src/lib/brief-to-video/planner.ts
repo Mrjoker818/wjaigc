@@ -18,7 +18,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
-export function buildBriefToVideoPlanPrompt(input: BriefToVideoInput): string {
+export function buildBriefToVideoPlanPrompt(
+  input: BriefToVideoInput,
+  revisionInstruction?: string,
+): string {
   const prompt = [
     '你是商业视频脚本规划器。仅返回一个 JSON 对象，不要 Markdown、解释或额外字段。',
     `schemaId 必须为 ${BRIEF_TO_VIDEO_PLAN_SCHEMA_ID}。`,
@@ -26,6 +29,7 @@ export function buildBriefToVideoPlanPrompt(input: BriefToVideoInput): string {
     'scenes 每项字段严格为：order,timeRange,visual,camera,action,textOverlay；order 从 1 连续递增。',
     '必须保持用户给定的时长、比例、事实约束和素材关系，不得臆造品牌事实。',
     `用户输入：${JSON.stringify(input)}`,
+    ...(revisionInstruction ? [`上一版修改要求：${revisionInstruction}`] : []),
   ].join('\n');
   if (prompt.length >= MAX_PROMPT_CHARACTERS) invalidPlan();
   return prompt;
@@ -122,6 +126,7 @@ export async function invokeBriefToVideoPlanner(input: {
   modelId: string;
   requestId: string;
   planInput: BriefToVideoInput;
+  revisionInstruction?: string;
   signal: AbortSignal;
 }): Promise<BriefToVideoPlanV1> {
   const signal = AbortSignal.any([input.signal, AbortSignal.timeout(PLANNER_TIMEOUT_MS)]);
@@ -134,7 +139,10 @@ export async function invokeBriefToVideoPlanner(input: {
     },
     body: JSON.stringify({
       model: input.modelId,
-      messages: [{ role: 'user', content: buildBriefToVideoPlanPrompt(input.planInput) }],
+      messages: [{
+        role: 'user',
+        content: buildBriefToVideoPlanPrompt(input.planInput, input.revisionInstruction),
+      }],
       stream: false,
       response_format: { type: 'json_object' },
     }),

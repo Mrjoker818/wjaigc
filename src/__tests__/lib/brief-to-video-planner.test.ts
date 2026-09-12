@@ -33,6 +33,11 @@ describe('brief to video planner', () => {
     expect(prompt.length).toBeLessThan(16_000);
   });
 
+  it('includes a bounded user revision in the next planning request', () => {
+    expect(buildBriefToVideoPlanPrompt(input, '减少首镜头时长，强化产品特写'))
+      .toContain('上一版修改要求：减少首镜头时长，强化产品特写');
+  });
+
   it.each([
     ['direct JSON', JSON.stringify(plan)],
     ['JSON fence', `\n\`\`\`json\n${JSON.stringify(plan)}\n\`\`\`\n`],

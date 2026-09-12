@@ -1040,8 +1040,9 @@ export function createAgentRuntimeService(
       actorUserId: string;
       runId: string;
       nextStepId: string;
-      pauseReason?: 'user' | 'execution-error';
+      pauseReason?: 'user' | 'execution-error' | 'approval';
       error?: unknown;
+      approval?: Record<string, unknown>;
       executionFence?: AgentExecutionFence;
     }): Promise<AgentRunControlResult> {
       const run = await ownedRun(input.actorUserId, input.runId);
@@ -1069,8 +1070,8 @@ export function createAgentRuntimeService(
         workspace: run.workspace,
         type: 'run.paused',
         payload: { nextStepId, pauseReason,
-          ...(pauseReason === 'execution-error' && input.error !== undefined
-            ? { error: safeSkillExecutionError(input.error) } : {}),
+          ...(input.error !== undefined ? { error: safeSkillExecutionError(input.error) } : {}),
+          ...(input.approval ? { approval: input.approval } : {}),
         },
         expectedRevision: run.task.revision ?? 0,
         executionFence: input.executionFence,
@@ -1089,6 +1090,8 @@ export function createAgentRuntimeService(
     async resumeRun(input: {
       actorUserId: string;
       runId: string;
+      nextStepId?: string;
+      approval?: Record<string, unknown>;
     }): Promise<AgentRunControlResult> {
       const run = await ownedRun(input.actorUserId, input.runId);
       const projection = reduceAgentEvents(run.events);
@@ -1131,7 +1134,7 @@ export function createAgentRuntimeService(
         }
         throw new AgentRunRequestError('Agent run is not paused');
       }
-      const nextStepId = projection.resumeFromStepId;
+      const nextStepId = input.nextStepId || projection.resumeFromStepId;
       if (!nextStepId) throw new AgentRunRequestError('Paused run has no next step');
       const generation = run.events.filter(event => event.type === 'run.resumed').length + 1;
       const leaseOwner = dependencies.randomUUID();
@@ -1142,10 +1145,20 @@ export function createAgentRuntimeService(
         eventId: `agent:${input.runId}:resumed:${generation}`,
         workspace: run.workspace,
         type: 'run.resumed',
-        payload: { nextStepId, generation },
+        payload: { nextStepId, generation,
+          ...(input.approval ? { approval: input.approval } : {}),
+        },
         expectedRevision: run.task.revision ?? 0,
         leaseOwner,
       });
+      if (!transitioned.accepted) {
+        return {
+          accepted: false,
+          event: transitioned.event,
+          projection: reduceAgentEvents(transitioned.events),
+          leaseOwner: '',
+        };
+      }
       const dispatch = await dispatchResumedRun({
         actorUserId: input.actorUserId,
         run,
@@ -1271,8 +1284,9 @@ export function pauseAgentRun(input: {
   actorUserId: string;
   runId: string;
   nextStepId: string;
-  pauseReason?: 'user' | 'execution-error';
+  pauseReason?: 'user' | 'execution-error' | 'approval';
   error?: unknown;
+  approval?: Record<string, unknown>;
   executionFence?: AgentExecutionFence;
 }): Promise<AgentRunControlResult> {
   return runtimeService.pauseRun(input);
@@ -1281,6 +1295,8 @@ export function pauseAgentRun(input: {
 export function resumeAgentRun(input: {
   actorUserId: string;
   runId: string;
+  nextStepId?: string;
+  approval?: Record<string, unknown>;
 }): Promise<AgentRunControlResult> {
   return runtimeService.resumeRun(input);
 }
