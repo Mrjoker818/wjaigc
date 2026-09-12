@@ -36,6 +36,13 @@ describe('video task durability contract', () => {
     expect(source).toContain('assetParentVersionIds,');
   });
 
+  it('accepts authenticated internal Skill calls through the shared API auth boundary', () => {
+    const source = readSource('src/app/api/video/generate/route.ts');
+
+    expect(source).toContain('requireApiAuthOrReject(request)');
+    expect(source).not.toContain('sessionUser = await getSessionUser(request)');
+  });
+
   for (const routePath of [
     'src/app/api/video/generate/route.ts',
     'src/app/api/video/extend/route.ts',

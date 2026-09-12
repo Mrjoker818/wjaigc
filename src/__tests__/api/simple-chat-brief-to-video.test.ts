@@ -116,7 +116,7 @@ describe('POST /api/simple-chat/chat Brief to video intent', () => {
         },
         inputValues: expect.objectContaining({
           brief: '展示轻薄防晒霜的通勤使用场景', platform: '抖音',
-          durationSeconds: 5, aspectRatio: '9:16', startFrame: 'frame-v1',
+          durationSeconds: '5', aspectRatio: '9:16', startFrame: 'frame-v1',
         }),
       }),
     });

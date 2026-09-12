@@ -1470,6 +1470,15 @@ describe('Agent runtime service', () => {
         ...base.inputs,
         { key: 'sourceImages', label: 'Sources', kind: 'images' as const, required: true, bindToSourceVersions: true },
       ],
+      steps: base.steps.map((step, index) => index === 0 ? {
+        ...step,
+        approvalCheckpoint: {
+          kind: 'user-approval' as const,
+          outputSchemaId: 'approval-plan-v1',
+          nextStepId: base.steps[1]!.id,
+          allowRevision: true,
+        },
+      } : step),
     };
     const requireOriginal = skillCatalog.requireSkillForSurface;
     const catalogSpy = vi.spyOn(skillCatalog, 'requireSkillForSurface')
@@ -1513,10 +1522,12 @@ describe('Agent runtime service', () => {
 
     const snapshot = dependencies.appendEvent.mock.calls[0][0].payload.skillSnapshot as {
       inputs: Array<{ key: string; bindToSourceVersions?: boolean }>;
+      steps: Array<{ approvalCheckpoint?: unknown }>;
     };
     expect(snapshot.inputs.find(field => field.key === 'sourceImages')).toMatchObject({
       bindToSourceVersions: true,
     });
+    expect(snapshot.steps[0]?.approvalCheckpoint).toEqual(definition.steps[0]?.approvalCheckpoint);
   });
 
   it('persists compiled image fan-out identity without leaking source AssetVersion ids', async () => {

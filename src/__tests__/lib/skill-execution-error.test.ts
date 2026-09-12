@@ -6,6 +6,18 @@ import {
 } from '@/lib/skill-runtime/execution-error';
 
 describe('safe Skill execution errors', () => {
+  it('preserves the public approval-required sentinel used by approval surfaces', () => {
+    expect(safeSkillExecutionError({
+      code: 'SKILL_APPROVAL_REQUIRED',
+      message: 'private approval details',
+      retryable: true,
+    })).toEqual({
+      code: 'SKILL_APPROVAL_REQUIRED',
+      message: 'Skill plan requires user approval',
+      retryable: false,
+    });
+  });
+
   it('does not suggest resubmission for an unknown provider outcome', () => {
     expect(safeSkillExecutionError({ code: 'AGENT_DOWNSTREAM_SUBMISSION_UNKNOWN' })).toMatchObject({
       code: 'SKILL_SUBMISSION_UNKNOWN', retryable: false,

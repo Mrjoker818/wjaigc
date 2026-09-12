@@ -25,8 +25,7 @@ import {
   type VideoGenerateParams,
 } from '@/lib/video-api';
 import { buildDirectorPrompt, type VideoDirectorMode } from '@/lib/video-director';
-import { getSessionUser } from '@/lib/server-auth';
-import { getInternalRequestHeaders } from '@/lib/api-auth';
+import { getInternalRequestHeaders, requireApiAuthOrReject } from '@/lib/api-auth';
 import { calculateConfiguredCreditCost, InsufficientCreditsError } from '@/lib/credits';
 import { logError, OP_ACTIONS, startTimer } from '@/lib/op-log';
 import { validateApiInputs } from '@/lib/api-validator';
@@ -211,10 +210,9 @@ export async function POST(request: NextRequest) {
 
     // 仅确认用户身份。积分在持久化任务创建后以数据库原子语句扣除，
     // 防止任务未落库或并发请求时产生不可追溯的重复扣费。
-    sessionUser = await getSessionUser(request);
-    if (!sessionUser) {
-      return NextResponse.json({ error: '请先登录后再生成视频' }, { status: 401 });
-    }
+    const auth = await requireApiAuthOrReject(request);
+    if (auth instanceof NextResponse) return auth;
+    sessionUser = auth.user;
     const skillBillingContext = body.skillBillingContext === undefined
       ? undefined
       : parseSkillBillingContext(body.skillBillingContext);

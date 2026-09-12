@@ -1183,5 +1183,17 @@
     "catalogSurfaces": ["canvas", "workflow"],
     "featureFlag": "MULTI_PLATFORM_EXPORT_ENABLED",
     "resultSchemaId": "multi-platform-export-result-v1"
+  },
+  "briefToVideo": {
+    "id": "preset-brief-to-video-film",
+    "version": 1,
+    "allowedSurfaces": ["canvas", "workflow", "simple-chat"],
+    "catalogSurfaces": ["canvas", "workflow"],
+    "featureFlag": "BRIEF_TO_VIDEO_SKILL_ENABLED",
+    "planSchemaId": "brief-to-video-plan-v1",
+    "resultSchemaId": "brief-to-video-result-v1",
+    "planStepId": "plan-film",
+    "videoStepId": "generate-film",
+    "videoToolId": "video_generate"
   }
 }

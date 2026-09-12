@@ -1,0 +1,59 @@
+{
+  "schemaVersion": 1,
+  "feature": "brief-to-video-finished-film",
+  "task": 10,
+  "generatedAt": "2026-09-13T03:56:28+08:00",
+  "sourceCommit": "cca721e5444094eb33079b923c3625f06cc10f0c",
+  "candidateIdentity": "task10-candidate-tree-final",
+  "local": {
+    "verdict": "LOCAL PASS",
+    "cloudVerified": false,
+    "supplierVerified": false,
+    "specializedTests": { "passed": 75, "failed": 0, "skipped": 0 },
+    "postgresApprovalAndConcurrency": { "passed": 2, "failed": 0, "skipped": 0 },
+    "postgresPrepaidRegression": { "passed": 15, "failed": 0, "skipped": 0 },
+    "playwright": {
+      "passed": 4,
+      "failed": 0,
+      "projects": [
+        {
+          "name": "chromium",
+          "manifest": "test-results/brief-to-video/task10-candidate-tree-final/chromium/Brief/retry-0/evidence-manifest.json",
+          "machineEvidenceSha256": "da78ea2b1c490707eb8e97d91b980809d8f2bcd7f9eedc6cd8fc9eec42e112be"
+        },
+        {
+          "name": "firefox",
+          "manifest": "test-results/brief-to-video/task10-candidate-tree-final/firefox/Brief/retry-0/evidence-manifest.json",
+          "machineEvidenceSha256": "00a2934b91dfbe455cd178c1e49cdf71fef4339b0a349d199388be6a960afb21"
+        },
+        {
+          "name": "webkit",
+          "manifest": "test-results/brief-to-video/task10-candidate-tree-final/webkit/Brief/retry-0/evidence-manifest.json",
+          "machineEvidenceSha256": "2d81dd5906aac253a533f15700404f1bf9af8e392e58f8461b63695ffcd23516"
+        },
+        {
+          "name": "mobile-chromium",
+          "viewportWidth": 375,
+          "manifest": "test-results/brief-to-video/task10-candidate-tree-final/mobile-chromium/Brief/retry-0/evidence-manifest.json",
+          "machineEvidenceSha256": "895179aa13f6947e8258b399c2c1f8fabaac40ba22a2db4a7b3603d35f176af1"
+        }
+      ]
+    },
+    "controlledProvider": {
+      "providerId": "brief-video-e2e-provider",
+      "modelId": "brief-video-e2e-model",
+      "requestSha256": "533f57ae37ce6a95f551ac893659194ffae5e5602ccd59a262eb92e84f3599d9",
+      "outcome": "processing-then-cancelled",
+      "producedRealVideo": false
+    }
+  },
+  "cloud": {
+    "verdict": "CLOUD UNVERIFIED",
+    "cloudVerified": false,
+    "supplierVerified": false,
+    "exactCommit": null,
+    "successfulRun": null,
+    "cancelledRun": null,
+    "reason": "未按约束创建或接管 Chrome 标签；尚未在 Coze 部署最终 exact commit 并执行真实供应商成功与取消。"
+  }
+}

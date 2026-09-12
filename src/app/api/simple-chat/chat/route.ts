@@ -538,7 +538,10 @@ export async function POST(request: NextRequest) {
           surface: 'simple-chat',
           projectId,
           workspaceId: `standalone-chat:${body.projectId || body.taskId || 'chat'}`,
-          inputValues: briefVideoIntent.inputValues,
+          inputValues: {
+            ...briefVideoIntent.inputValues,
+            durationSeconds: String(briefVideoIntent.inputValues.durationSeconds),
+          },
           sourceVersionIds: briefVideoIntent.sourceVersionIds,
           modelBindings: {
             orchestrator: { providerId, modelId: model },

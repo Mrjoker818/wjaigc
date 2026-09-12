@@ -4251,3 +4251,16 @@ Task 4 独立审查的两个 Minor 继续保留给最终审查：单元夹具 op
 | 修复 | 将传输与可选恢复合并进 `AssetService.sendVersionsToWorkspace()` 的同一数据库事务；先解析真实 `sourceAssetId`，按 `sourceAssetId + idempotencyKey` 加锁并按原请求顺序返回；接口增加 256 KiB 请求体及对象复杂度上限；`.gitignore` 改为只忽略根目录 `/assets/`。 |
 | 永久回归 | 混合“新投影 + 不可恢复删除投影”必须整体回滚；反序批次、过时 revision、超大 metadata、单端点原子恢复均有专项覆盖。最终增量后聚焦回归 `103/103`。 |
 | 当前状态 | 本地已修复；生产构建、干净浏览器矩阵和 Coze exact commit 云端验收待闭环。 |
+
+## 2026-09-13 Brief 到视频成片 Task 10
+
+| 编号 | 严重级别 | 缺陷与影响 | RED / 修复 | 状态 |
+|---|---|---|---|---|
+| BTV-010-01 | P0 | 可选 Skill 输入以 `undefined` 写入严格事件 JSON，运行创建失败 | 适配器回归 RED；持久化前删除未提供字段 | 已修复 |
+| BTV-010-02 | P0 | 冻结步骤遗漏 approval checkpoint，恢复后可越过审批 | Agent Run 快照回归 RED；冻结完整 checkpoint | 已修复 |
+| BTV-010-03 | P0 | 结构化前序输出未传给视频步骤，批准后报 `BRIEF_VIDEO_PLAN_MISSING` | execution context 回归 RED；按前序 step 传递全部输出 | 已修复 |
+| BTV-010-04 | P0 | 内部 Skill 调用视频生成仅认 Cookie，服务端授权请求返回 401 | API 合同 RED；统一使用共享 API auth | 已修复 |
+| BTV-010-05 | P0 | 本地接纳仅允许图像 child，预付视频 child 无法登记 | PostgreSQL 回归 RED；按工具登记 `video` child | 已修复 |
+| BTV-010-06 | P1 | Simple Chat 将视频时长作为数字传给 select 输入 | API 回归 RED；意图输入规范化为字符串 | 已修复 |
+| BTV-010-07 | P0 | 审批暂停错误码被安全层降级为 `SKILL_EXECUTION_FAILED`，审批卡不渲染 | 移动 E2E 和安全错误单测 RED；仅保留固定 `SKILL_APPROVAL_REQUIRED` 哨兵 | 已修复 |
+| BTV-010-08 | P0 | 尚无 exact commit 的真实供应商成功、成片资产和账务证据 | 不适用；禁止用本地受控供应商替代 | `CLOUD UNVERIFIED` |

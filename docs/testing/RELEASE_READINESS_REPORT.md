@@ -2298,3 +2298,12 @@ The focused gate test passes `7/7`; the actual protected-baseline command passes
 - 生产冷构建在 32 GiB Node 堆下运行 45 分钟仍无阶段进展；纯缓存重试 10 分钟仍停留于 webpack 优化阶段。没有退出码 0，登记为 `MPE-BUILD-001`。
 - 功能标志继续默认关闭。推送 `main` 后，Coze 必须拉取 exact commit、重启沙箱并强制刷新预览页，再验证真实 ZIP、manifest、AssetVersion 父子关系、取消/恢复、零积分流水与刷新恢复。
 - **当前结论：不具备发布条件；仅可作为 `main` 候选继续验证。不得更新 `stable`，不得宣称 Task10 或全平台发布通过。**
+
+## 2026-09-13 Brief 到视频成片 Task 10 发布判断
+
+- 本地专项性证据已覆盖三种 Canvas 来源模式、审批前零供应商请求、修改后批准、唯一视频提交、取消/刷新恢复、Workflow 暂停和 Simple Chat 16 项目录隔离。
+- 隔离 PostgreSQL 已覆盖 20 路重复审批、20 路 child 接纳竞争、预付视频 child、父任务取消、单次结算/退款和迟到终态保护。
+- 四浏览器项目同轮通过，375px 审批按钮可见、可点击且不越界；证据清单带 SHA-256，`cloudVerified=false`、`supplierVerified=false`。
+- 尚未在现有 Coze 标签部署 exact commit；没有真实成功视频、远程 taskId、视频 AssetVersion、首尾帧父版本、积分交易和真实可控取消证据。
+- 功能标志保持受控，`stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 只读。
+- **Task 10 当前发布结论：`DONE_WITH_CONCERNS / LOCAL PASS / CLOUD UNVERIFIED`；不得登记 `CLOUD PASS / CLOSED`。**

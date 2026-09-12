@@ -19,8 +19,7 @@ export function selectSkillPredecessorOutputs(
       && steps[boundary - 1].parallelGroup === current.parallelGroup) boundary -= 1;
   }
   return steps.slice(0, boundary).flatMap(step => {
-    const output = outputs.find(item => item.stepId === step.id && item.kind === 'text');
-    return output ? [output] : [];
+    return outputs.filter(item => item.stepId === step.id);
   });
 }
 

@@ -1254,9 +1254,10 @@ export async function markAgentLocalDownstreamOperationAccepted(
 ): Promise<AgentDownstreamOperation> {
   const input = validateDownstreamIdentity(rawInput);
   const childId = validateIdentifier('providerTaskId', rawInput.providerTaskId);
-  if (input.toolId !== 'generate_image' && input.toolId !== 'img2img') {
+  if (input.toolId !== 'generate_image' && input.toolId !== 'img2img' && input.toolId !== 'video_generate') {
     throw new Error('Unsupported local downstream task');
   }
+  const childType = input.toolId === 'video_generate' ? 'video' : 'generate-async';
   const client = await getPool().connect();
   try {
     await client.query('BEGIN');
@@ -1279,7 +1280,7 @@ export async function markAgentLocalDownstreamOperationAccepted(
          AND (status='prepared' OR (status='accepted' AND provider_task_id=$3))
          AND EXISTS (SELECT 1 FROM cloud_tasks child
            WHERE child.id=$3 AND child.user_id=operation.owner_id AND child.project_id=operation.project_id
-             AND child.type='generate-async' AND child.idempotency_key=operation.idempotency_key || ':0'
+             AND child.type=$12 AND child.idempotency_key=operation.idempotency_key || ':0'
              AND child.credit_cost=0 AND child.credit_status='not-applicable'
              AND child.result #>> '{skillBillingProvenance,runId}'=operation.task_id
              AND child.result #>> '{skillBillingProvenance,stepId}'=operation.step_id
@@ -1289,7 +1290,7 @@ export async function markAgentLocalDownstreamOperationAccepted(
                  lease_owner, attempt_count`,
       [input.operationKey, input.leaseOwner, childId, input.now ?? Date.now(),
         input.actorUserId, input.projectId, input.runId, input.stepId, input.requestDigest, input.idempotencyKey,
-        input.toolId],
+        input.toolId, childType],
     );
     if (!result.rows[0]) throw new Error('Local downstream task identity or operation lease was lost');
     await client.query('COMMIT');

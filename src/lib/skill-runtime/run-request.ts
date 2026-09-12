@@ -371,6 +371,9 @@ export async function buildSkillAgentRunRequest(
   const skill = resolvedSkill ?? await resolveExecutableSkill(input, dependencies);
   if (skill.version !== input.skillVersion) throw new SkillRunVersionError();
   const resolved = resolveSkillInputs(skill, input.inputValues);
+  const persistedInputValues = Object.fromEntries(
+    Object.entries(resolved).filter(([, value]) => value !== undefined),
+  );
   const sourceVersionIds = assertSourceVersionBindings(skill, resolved, input.sourceVersionIds);
   const bindings = await authorizeAndFreezeBindings(
     input.modelBindings,
@@ -394,7 +397,7 @@ export async function buildSkillAgentRunRequest(
     skill: {
       skillId: skill.id,
       skillVersion: skill.version,
-      inputValues: resolved,
+      inputValues: persistedInputValues,
       modelBindings: bindings,
     },
     ...(input.retryLineage ? { retryLineage: structuredClone(input.retryLineage) } : {}),

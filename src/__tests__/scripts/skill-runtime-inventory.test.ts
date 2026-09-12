@@ -37,6 +37,62 @@ describe('scoped Skill runtime inventory', () => {
     });
   });
 
+  it('keeps the optional Brief-to-video contract in the protected baseline', async () => {
+    const baseline = JSON.parse(await readFile(resolve(
+      process.cwd(),
+      'src/__tests__/fixtures/skill-runtime-presets.baseline.json',
+    ), 'utf8')) as {
+      briefToVideo?: Record<string, unknown>;
+    };
+
+    expect(baseline.briefToVideo).toEqual({
+      id: 'preset-brief-to-video-film',
+      version: 1,
+      allowedSurfaces: ['canvas', 'workflow', 'simple-chat'],
+      catalogSurfaces: ['canvas', 'workflow'],
+      featureFlag: 'BRIEF_TO_VIDEO_SKILL_ENABLED',
+      planSchemaId: 'brief-to-video-plan-v1',
+      resultSchemaId: 'brief-to-video-result-v1',
+      planStepId: 'plan-film',
+      videoStepId: 'generate-film',
+      videoToolId: 'video_generate',
+    });
+  });
+
+  it('requires doctor to inspect Brief-to-video release dependencies without claiming cloud proof', async () => {
+    const source = await readFile(resolve(process.cwd(), 'scripts/doctor.mjs'), 'utf8');
+
+    for (const area of [
+      'brief-to-video-feature-flag',
+      'brief-to-video-database',
+      'brief-to-video-provider-capability',
+      'brief-to-video-local-evidence',
+      'brief-to-video-cloud-evidence',
+    ]) {
+      expect(source).toContain(`'${area}'`);
+    }
+    expect(source).toContain('await checkBriefToVideo()');
+    expect(source).toContain('CLOUD UNVERIFIED');
+  });
+
+  it('keeps Brief-to-video browser evidence commit- and project-scoped', async () => {
+    const [helper, spec] = await Promise.all([
+      readFile(resolve(process.cwd(), 'tests/helpers/brief-to-video.ts'), 'utf8'),
+      readFile(resolve(process.cwd(), 'tests/e2e/brief-to-video-finished-film.spec.ts'), 'utf8'),
+    ]);
+
+    expect(helper).toContain("'test-results'");
+    expect(helper).toContain("'brief-to-video'");
+    expect(helper).toContain('commitIdentity()');
+    expect(helper).toContain('safe(testInfo.project.name)');
+    expect(helper).toContain("evidenceKind: 'controlled-local-playwright'");
+    expect(helper).toContain('cloudVerified: false');
+    expect(helper).toContain('supplierVerified: false');
+    expect(spec).toContain("expect(briefToVideo.videoSubmissions()).toHaveLength(0)");
+    expect(spec).toContain("mode: 'first-last-frame'");
+    expect(spec).toContain('catalogCount).toBe(16)');
+  });
+
   it('requires doctor to inspect the export database, storage, Sharp, presets, and feature flag', async () => {
     const source = await readFile(resolve(process.cwd(), 'scripts/doctor.mjs'), 'utf8');
 

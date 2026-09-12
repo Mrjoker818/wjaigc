@@ -14,7 +14,7 @@ describe('workflow annotation internal authentication wiring', () => {
       /getInternalRequestHeaders\(\s*(?:auth|execState)\.userId!?/g,
     ) || [];
 
-    expect(signedHeaderCalls).toHaveLength(6);
+    expect(signedHeaderCalls).toHaveLength(8);
     expect(source).toMatch(
       /const internalHeaders = await getInternalRequestHeaders\(\s*auth\.userId/,
     );

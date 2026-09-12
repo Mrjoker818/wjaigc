@@ -10,6 +10,8 @@ vi.mock('@/lib/api-helpers', () => ({ fetchWithV1Retry: mocks.fetchWithV1Retry }
 vi.mock('@/lib/server-api-config', () => ({ getApiProviders: mocks.getApiProviders }));
 
 import { createProductionSkillStepRegistry } from '@/lib/skill-runtime/step-registry';
+import { buildSkillAgentRunRequest } from '@/lib/skill-runtime/run-request';
+import { createBriefToVideoSkill } from '@/lib/skill-runtime/brief-to-video-preset';
 import { authorizeAgentTools } from '@/lib/agent-runtime/tool-registry';
 import type { TaskModelDescriptor } from '@/lib/task-core/model-capability-contract';
 
@@ -37,6 +39,40 @@ describe('brief video plan Skill adapter', () => {
     mocks.fetchWithV1Retry.mockResolvedValue(new Response(JSON.stringify({
       choices: [{ message: { content: JSON.stringify(plan) } }],
     }), { status: 200, headers: { 'content-type': 'application/json' } }));
+  });
+
+  it('removes absent optional inputs from the persisted Agent event snapshot', async () => {
+    const chatDescriptor: TaskModelDescriptor = {
+      ...videoDescriptor,
+      providerId: 'frozen-chat', modelId: 'gpt-4o', kind: 'chat', sourceType: 'chat',
+      protocol: 'chat-completions', executionMode: 'sync', supportsReferenceImages: false,
+      allowedRatios: [], allowedSizes: [], allowedDurationsSeconds: undefined,
+      supportedOperations: undefined, outputKinds: ['text'],
+    };
+    const request = await buildSkillAgentRunRequest({
+      skillId: 'preset-brief-to-video-film', skillVersion: 1, surface: 'canvas',
+      projectId: 'project-1', workspaceId: 'canvas:project-1',
+      inputValues: {
+        brief: '产品发布', goal: '产品转化', audience: '消费者', platform: '通用',
+        durationSeconds: '10', aspectRatio: '16:9',
+      },
+      sourceVersionIds: [],
+      modelBindings: {
+        orchestrator: { providerId: 'frozen-chat', modelId: 'gpt-4o' },
+        video: { providerId: 'pear-video', modelId: 'video-model' },
+      },
+      idempotencyKey: 'brief-video-optional-json',
+    }, {
+      actorUserId: 'user-1',
+      resolveTaskModel: vi.fn(async (providerId: string) => (
+        providerId === 'frozen-chat' ? chatDescriptor : videoDescriptor
+      )),
+    }, createBriefToVideoSkill(true));
+
+    expect(request.skill?.inputValues).not.toHaveProperty('callToAction');
+    expect(request.skill?.inputValues).not.toHaveProperty('startFrame');
+    expect(request.skill?.inputValues).not.toHaveProperty('endFrame');
+    expect(request.skill?.inputValues).not.toHaveProperty('negativeConstraints');
   });
 
   it('uses only the frozen orchestrator and returns structured plan output', async () => {
@@ -152,8 +188,12 @@ describe('brief video plan Skill adapter', () => {
       },
     };
 
-    expect(await registry.stepAdapters.video_generate(step)).toEqual({
+    expect(await registry.stepAdapters.video_generate(step)).toMatchObject({
       assetVersionIds: ['video-version-1'], media: [{}],
+      structured: {
+        schemaId: 'brief-to-video-result-v1',
+        value: { runId: 'run-1', videoAssetVersionId: 'video-version-1' },
+      },
     });
     expect(submit).toHaveBeenCalledTimes(1);
 

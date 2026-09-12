@@ -2516,3 +2516,15 @@ BUG-018 已从未验证项移除。剩余顺序为 `002-B -> 002-D -> 002-E`；�
 - [x] 浏览器 ZIP 聚合上限降至 64MB，Blob URL 回收宽限改为 30 秒。
 - [ ] Workflow 与独立智能对话对同一 Run/AssetVersion 的真实 UI 消费仍需云端页面证据；当前只有真实 PostgreSQL 身份投影证据。
 - [ ] 最新增量后的生产构建未完成，不能启动生产模式 Playwright；开发模式证据不能替代该项。
+
+## 2026-09-13 Brief 到视频成片 Task 10 未验证项
+
+- [x] 需求指定专项 `75/75`，隔离 PostgreSQL审批/并发 `2/2`，预付账务竞态 `15/15`。
+- [x] Chromium、Firefox、WebKit、375px Mobile Chromium 同轮 `4/4`，本地证据文件和 SHA-256 manifest 完整。
+- [x] Canvas 三种输入模式、审批前零提交、修改、批准后唯一提交、取消/刷新恢复、Workflow 暂停、Simple Chat 意图与 16 项目录隔离。
+- [ ] Coze 尚未拉取并部署本任务 exact commit；按用户约束未创建或接管 Chrome 标签。
+- [ ] 真实供应商一次成功和一次可控取消未执行；远程 taskId、MIME、签名、时长、分辨率、播放和下载未核对。
+- [ ] 真实视频 `videoAssetVersionId`、首尾帧父版本、Canvas/Workflow/Simple Chat 同一 Run 恢复未核对。
+- [ ] 真实成功单次扣费、取消至多一次退款及迟到终态不覆盖未核对。
+- [ ] 云端新鲜 Console、Network、Trace、截图、录像和机器证据未生成；本地受控证据不得冒充云证据。
+- [ ] 唯一下一动作：在现有 Coze 标签部署最终 exact commit 后，按 Task 10 Step 6 完成一成功一取消并回填本清单和聚合 JSON。

@@ -980,6 +980,9 @@ export function createAgentRuntimeService(
                     ? { promptInstructionTemplate: step.promptInstructionTemplate }
                     : {}),
                   ...(step.runtime ? { runtime: step.runtime } : {}),
+                  ...(step.approvalCheckpoint ? {
+                    approvalCheckpoint: structuredClone(step.approvalCheckpoint),
+                  } : {}),
                   ...(compiledFanOut ? {
                     compiledFanOut: {
                       inputKey: compiledFanOut.inputKey,

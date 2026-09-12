@@ -92,6 +92,19 @@ describe('frozen Skill execution context', () => {
     expect(selectSkillPredecessorOutputs(steps, 'b', outputs)).toEqual([outputs[0]]);
   });
 
+  it('passes structured predecessor output to a downstream deterministic adapter', () => {
+    const steps = [definition.steps[0], { ...step, id: 'generate-film' }];
+    const structured = {
+      stepId: definition.steps[0].id,
+      kind: 'json' as const,
+      schemaId: 'brief-to-video-plan-v1',
+      content: '{"schemaId":"brief-to-video-plan-v1"}',
+    };
+
+    expect(selectSkillPredecessorOutputs(steps, 'generate-film', [structured]))
+      .toEqual([structured]);
+  });
+
   it('is independent of input property insertion order', () => {
     const base = { definition, step };
     expect(buildSkillStepPrompt({ ...base, inputValues: { dish: 'cake', purpose: 'menu' } }))

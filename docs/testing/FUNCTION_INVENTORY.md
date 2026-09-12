@@ -934,3 +934,15 @@
 - 支持平台预设版本冻结、中文及同名文件确定性命名、透明输出、部分成功、仅重试失败项、取消终态、刷新恢复、ZIP 重新下载和批量放入画布。
 - 资源上限：来源最多 20、平台目标最多 20、输出最多 100；每个输出及整批像素预算均在规划阶段校验。
 - 功能标志 `MULTI_PLATFORM_EXPORT_ENABLED` 默认关闭；云端 exact commit 验收前不得全量开放。
+
+## 2026-09-13 Brief 到视频成片 Task 10 门禁
+
+| 范围 | 入口与合同 | 本地证据 | 云端状态 |
+|---|---|---|---|
+| Canvas | 29 项目录中的“Brief 到视频成片”；文生视频、首帧、首尾帧，审批前零提交，修改、批准、取消和刷新恢复 | Chromium、Firefox、WebKit、375px Mobile Chromium 同轮 `4/4` 通过 | `CLOUD UNVERIFIED` |
+| Workflow | 同一 Skill 定义、暂停审批与下游投影；目录保持 29 项 | 受控 E2E 创建 Workflow Run 并确认审批前零下游提交；API、组件和数据库合同通过 | 真实下游视频与恢复未验证 |
+| Simple Chat | 目录保持 16 项且隐藏 Canvas Skill；明确 Brief 成片意图创建同一 Skill Run | 四项目均验证目录隔离和意图 Run | 真实聊天审批、成片与返回画布未验证 |
+| 任务与账务 | 冻结 `providerId + modelId`，父 Run 预付，视频 child 零成本，单次结算或退款 | PostgreSQL 审批与 20 路竞争 `2/2`；预付及取消竞态 `15/15` | 真实供应商 taskId、交易和迟到终态未验证 |
+| 证据 | screenshot、video、trace、Console、Network、machine evidence 与 SHA-256 manifest | `test-results/brief-to-video/task10-candidate-tree-final/<project>/Brief/retry-0/` | 不得作为供应商成功证据 |
+
+功能标志 `BRIEF_TO_VIDEO_SKILL_ENABLED` 仍由环境显式启用；真实云证据闭环前不得更新 `stable` 或宣布发布完成。

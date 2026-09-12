@@ -61,6 +61,19 @@ describe('Skill prepaid generation database admission', () => {
       )).rejects.toMatchObject({ code: 'SKILL_BILLING_NOT_AUTHORIZED' });
       await expect(createSkillPrepaidGeneration(child, context, 'video-provider-key')).resolves.toBe(true);
 
+      const { markAgentLocalDownstreamOperationAccepted } = await import('@/lib/agent-runtime/event-storage');
+      await query(`UPDATE wujie_agent_downstream_operations SET lease_owner='video-operation-lease'
+        WHERE operation_key='video-operation'`);
+      await expect(markAgentLocalDownstreamOperationAccepted({
+        ...context,
+        actorUserId: 'video-user',
+        projectId: 'video-project',
+        toolId: 'video_generate',
+        idempotencyKey: 'video-provider-key',
+        leaseOwner: 'video-operation-lease',
+        providerTaskId: child.id,
+      })).resolves.toMatchObject({ status: 'accepted', providerTaskId: child.id });
+
       const persisted = await storage.getCloudTaskForUser(child.id, child.userId);
       expect(persisted).toMatchObject({
         type: 'video', userId: 'video-user', projectId: 'video-project', providerId: 'video-provider',

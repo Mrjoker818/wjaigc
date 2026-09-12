@@ -102,6 +102,13 @@ export function recordSkillExecutionDiagnostic(
 
 export function safeSkillExecutionError(error: unknown): AgentRunError & { providerStatus?: number } {
   const details = error && typeof error === 'object' ? error as Record<string, unknown> : {};
+  if (details.code === 'SKILL_APPROVAL_REQUIRED') {
+    return {
+      code: 'SKILL_APPROVAL_REQUIRED',
+      message: 'Skill plan requires user approval',
+      retryable: false,
+    };
+  }
   if (details.code === 'AGENT_DOWNSTREAM_SUBMISSION_UNKNOWN') {
     return { code: 'SKILL_SUBMISSION_UNKNOWN', message: '供应商提交结果尚未确认，请核对原任务，勿重复生成', retryable: false };
   }

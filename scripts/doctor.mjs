@@ -457,6 +457,112 @@ async function checkMultiPlatformExport() {
   }
 }
 
+async function checkBriefToVideo() {
+  const flagEnabled = process.env.BRIEF_TO_VIDEO_SKILL_ENABLED === 'true';
+  add(
+    flagEnabled ? 'PASS' : production ? 'FAIL' : 'WARN',
+    'brief-to-video-feature-flag',
+    flagEnabled ? 'enabled' : 'BRIEF_TO_VIDEO_SKILL_ENABLED must be exactly true before release',
+  );
+
+  const connectionString = resolveDoctorDatabaseUrl(process.env);
+  if (!connectionString) {
+    add(production ? 'FAIL' : 'BLOCKED', 'brief-to-video-database', 'PGDATABASE_URL or DATABASE_URL is required');
+    add(production ? 'FAIL' : 'BLOCKED', 'brief-to-video-provider-capability', 'video capability cannot be verified without PostgreSQL');
+  } else {
+    const client = new Client({
+      ...connectionOptions(normalizePostgresConnectionString(connectionString)),
+      connectionTimeoutMillis: 5_000,
+    });
+    try {
+      await client.connect();
+      const requiredTables = [
+        'cloud_tasks',
+        'wujie_agent_events',
+        'wujie_asset_versions',
+        'wujie_credit_transactions',
+      ];
+      const tables = await client.query(
+        `SELECT table_name
+         FROM information_schema.tables
+         WHERE table_schema = current_schema()
+           AND table_name = ANY($1::text[])`,
+        [requiredTables],
+      );
+      const present = new Set(tables.rows.map(row => row.table_name));
+      const missing = requiredTables.filter(table => !present.has(table));
+      add(
+        missing.length === 0 ? 'PASS' : 'FAIL',
+        'brief-to-video-database',
+        missing.length === 0 ? `required tables verified: ${requiredTables.join(',')}` : `missing tables: ${missing.join(',')}`,
+      );
+
+      const providers = await client.query(
+        `SELECT id, selected_models, discovered_models
+         FROM wujie_api_providers
+         WHERE is_enabled = true AND (type = 'video' OR model_type = 'video')`,
+      );
+      const capable = providers.rows.some(row => {
+        const discovered = Array.isArray(row.discovered_models) ? row.discovered_models : [];
+        return discovered.some(model => {
+          if (!model || typeof model !== 'object' || Array.isArray(model)) return false;
+          const operations = Array.isArray(model.supportedOperations) ? model.supportedOperations : [];
+          const durations = Array.isArray(model.allowedDurationsSeconds) ? model.allowedDurationsSeconds : [];
+          const ratios = Array.isArray(model.supportedAspectRatios) ? model.supportedAspectRatios : [];
+          return ['text-to-video', 'image-to-video', 'first-last-frame'].every(operation => operations.includes(operation))
+            && durations.length > 0
+            && ratios.length > 0;
+        });
+      });
+      add(
+        capable ? 'PASS' : production ? 'FAIL' : 'BLOCKED',
+        'brief-to-video-provider-capability',
+        capable
+          ? 'an enabled video model declares text, first-frame, first-last-frame, duration, and ratio capabilities'
+          : 'no enabled video model declares the complete Brief-to-video capability contract',
+      );
+    } catch (error) {
+      add('FAIL', 'brief-to-video-database', `verification failed: ${error instanceof Error ? error.message : String(error)}`);
+      add('FAIL', 'brief-to-video-provider-capability', 'query did not complete');
+    } finally {
+      await client.end().catch(() => undefined);
+    }
+  }
+
+  const evidencePath = path.resolve(
+    process.env.BRIEF_TO_VIDEO_EVIDENCE_FILE
+      || 'docs/testing/evidence/brief-to-video-task9-2026-09-13.json',
+  );
+  try {
+    const evidence = JSON.parse(await fs.readFile(evidencePath, 'utf8'));
+    const localPass = evidence?.local?.verdict === 'LOCAL PASS';
+    add(
+      localPass ? 'PASS' : production ? 'FAIL' : 'BLOCKED',
+      'brief-to-video-local-evidence',
+      localPass ? `LOCAL PASS: ${evidencePath}` : `local evidence is not LOCAL PASS: ${evidencePath}`,
+    );
+    const cloudPass = evidence?.cloud?.verdict === 'CLOUD PASS'
+      && typeof evidence?.cloud?.exactCommit === 'string'
+      && evidence.cloud.exactCommit.length >= 40
+      && typeof evidence?.cloud?.successfulRun?.runId === 'string'
+      && typeof evidence?.cloud?.successfulRun?.remoteTaskId === 'string'
+      && typeof evidence?.cloud?.successfulRun?.chargeTransactionId === 'string'
+      && typeof evidence?.cloud?.successfulRun?.videoAssetVersionId === 'string';
+    add(
+      cloudPass ? 'PASS' : production ? 'FAIL' : 'BLOCKED',
+      'brief-to-video-cloud-evidence',
+      cloudPass ? 'CLOUD PASS with exact commit and linked Run/task/transaction/AssetVersion evidence' : 'CLOUD UNVERIFIED',
+    );
+  } catch (error) {
+    add(
+      production ? 'FAIL' : 'BLOCKED',
+      'brief-to-video-local-evidence',
+      `evidence unavailable: ${error instanceof Error ? error.message : String(error)}`,
+    );
+    add(production ? 'FAIL' : 'BLOCKED', 'brief-to-video-cloud-evidence', 'CLOUD UNVERIFIED');
+  }
+}
+
 async function checkRemote() {
   if (!remoteUrl) {
     add('WARN', 'deployment-url', 'not supplied; use pnpm doctor -- --url=https://deployment.example');
@@ -711,6 +817,7 @@ async function main() {
   await checkPostgresTestDatabase();
   await checkObjectStorage();
   await checkMultiPlatformExport();
+  await checkBriefToVideo();
   await checkBuildArtifacts();
   await checkDirectoryStructure();
   await checkDependencies();

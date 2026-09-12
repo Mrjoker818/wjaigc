@@ -70,7 +70,7 @@ describe('platform compliance report assets', () => {
     expect(source).toContain('report: complianceReportFromAssetVersion(version)');
     expect(source).toContain("structured: { schemaId: 'platform-compliance-report-v1', value: completed.report }");
     expect(source).toContain("type: 'asset.created'");
-    expect(source).toContain('payload: { stepId: input.stepId, assetVersionId: input.assetVersionId }');
+    expect(source).toMatch(/type: 'asset\.created',[\s\S]*?payload: \{[\s\S]*?stepId: input\.stepId,[\s\S]*?assetVersionId: input\.assetVersionId,[\s\S]*?generation: input\.executionFence\.generation,[\s\S]*?\}/u);
   });
 
   it('creates an independent document version with canonical content and metadata-only lineage', async () => {

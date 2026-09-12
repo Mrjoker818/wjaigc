@@ -3001,3 +3001,13 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - 全量 Playwright 聚合入口已执行，但 Stage 3 与 Stage 4 具有互斥的隔离账号/环境前置，加载阶段停止；已登记 `MPE-TEST-001`，没有把该入口写成通过。
 - 生产冷构建在 32 GiB Node 堆下运行 45 分钟仍停留于 webpack 优化阶段；复用纯缓存后重试 10 分钟仍无阶段输出，均受控终止且未产生可声明的生产构建。
 - **回归判定：LOCAL CODE GATES PASS / PRODUCTION BUILD, CLEAN BROWSER MATRIX AND CLOUD PENDING。**
+
+## 2026-09-13 Brief 到视频成片 Task 10
+
+- 需求指定专项：11 个文件，`75/75 PASS`，0 failed，0 skipped。
+- 新增运行时回归：可选输入、冻结审批、结构化前序、共享授权、Simple Chat 参数和审批错误码均已执行 RED/GREEN；最终目标集合无已知失败。
+- 隔离 PostgreSQL：审批和 20 路竞争 `2/2 PASS`，0 skipped；预付视频 child、取消和终态竞态 `15/15 PASS`。
+- Playwright：Chromium、Firefox、WebKit、375px Mobile Chromium 同一候选树 `4/4 PASS`；四组证据均含 screenshot、video、trace、Console、Network、machine evidence 与哈希 manifest。
+- 浏览器本地供应商固定返回 processing，用于验证审批前零提交、批准后唯一提交、精确模型/模式/时长/比例、取消与刷新恢复；不代表真实视频生成成功。
+- 最终全仓 `doctor / ts-check / lint:build / test / protected baseline / build` 数字在 Task 10 报告的最终门禁段登记。
+- **阶段判定：LOCAL PASS / CLOUD UNVERIFIED。**
