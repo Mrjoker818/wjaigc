@@ -56,6 +56,7 @@ import {
 } from '@/lib/multi-platform-export/manifest';
 import { listManagedUsers } from '@/lib/server-auth';
 import { createHash } from 'node:crypto';
+import { recordSkillExecutionDiagnostic } from './execution-error';
 
 export class SkillRunRequestError extends Error {
   readonly code = 'SKILL_RUN_REQUEST_INVALID';
@@ -868,14 +869,21 @@ export async function executeSkillRun(input: {
       },
       executionFence,
     }),
-    pauseForRetry: ({ stepId, executionFence, error }) => pauseAgentRun({
-      actorUserId: input.actor.id,
-      runId: input.runId,
-      nextStepId: stepId,
-      pauseReason: 'execution-error',
-      error,
-      executionFence,
-    }),
+    pauseForRetry: ({ stepId, executionFence, error }) => {
+      recordSkillExecutionDiagnostic(error, {
+        runId: input.runId,
+        stepId,
+        generation: executionFence.generation,
+      });
+      return pauseAgentRun({
+        actorUserId: input.actor.id,
+        runId: input.runId,
+        nextStepId: stepId,
+        pauseReason: 'execution-error',
+        error,
+        executionFence,
+      });
+    },
     qualityContext: () => ({
       ...(typeof invocation.inputValues.aspectRatio === 'string'
         ? { expectedAspectRatio: invocation.inputValues.aspectRatio }

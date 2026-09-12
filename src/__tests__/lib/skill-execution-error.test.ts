@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { safeSkillExecutionError } from '@/lib/skill-runtime/execution-error';
+import {
+  recordSkillExecutionDiagnostic,
+  safeSkillExecutionError,
+  skillExecutionDiagnostic,
+} from '@/lib/skill-runtime/execution-error';
 
 describe('safe Skill execution errors', () => {
   it('does not suggest resubmission for an unknown provider outcome', () => {
@@ -28,5 +32,37 @@ describe('safe Skill execution errors', () => {
     expect(result).toMatchObject({ code: 'SKILL_EXECUTION_FAILED', retryable: false });
     expect(result).not.toHaveProperty('providerStatus');
     expect(JSON.stringify(result)).not.toMatch(/private|sk-secret/);
+  });
+
+  it('keeps actionable internal diagnostics while redacting credentials and media payloads', () => {
+    const error = new TypeError(
+      'decode failed for https://cdn.example.test/image.png?token=private-token '
+      + 'Bearer bearer-secret sk-secret-token data:image/png;base64,AAAA',
+    );
+    error.stack = `TypeError: ${error.message}\n    at loadSafeImageInput (/app/src/lib/safe-image-input.ts:323:17)`;
+
+    const diagnostic = skillExecutionDiagnostic(error, {
+      runId: 'run-1',
+      stepId: 'audit-image:one',
+      generation: 4,
+    });
+
+    expect(diagnostic).toMatchObject({
+      runId: 'run-1',
+      stepId: 'audit-image:one',
+      generation: 4,
+      errorName: 'TypeError',
+    });
+    expect(diagnostic.message).toContain('decode failed');
+    expect(diagnostic.stack).toContain('safe-image-input.ts:323:17');
+    expect(JSON.stringify(diagnostic)).not.toMatch(
+      /private-token|bearer-secret|sk-secret-token|base64,AAAA/,
+    );
+
+    const records: unknown[] = [];
+    recordSkillExecutionDiagnostic(error, {
+      runId: 'run-1', stepId: 'audit-image:one', generation: 4,
+    }, diagnosticRecord => records.push(diagnosticRecord));
+    expect(records).toEqual([diagnostic]);
   });
 });

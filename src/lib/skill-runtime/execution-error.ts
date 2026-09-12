@@ -1,5 +1,60 @@
 import type { AgentRunError } from '@/lib/agent-runtime/types';
 
+export interface SkillExecutionDiagnosticContext {
+  runId: string;
+  stepId: string;
+  generation: number;
+}
+
+export interface SkillExecutionDiagnostic extends SkillExecutionDiagnosticContext {
+  errorName: string;
+  errorCode?: string;
+  message: string;
+  stack?: string;
+}
+
+function redactDiagnosticText(value: string, limit: number): string {
+  return value
+    .replace(/data:[^;,\s]+(?:;[^,\s]+)*;base64,[a-z0-9+/=]+/giu, '[REDACTED_DATA_URL]')
+    .replace(/\bBearer\s+[^\s]+/giu, 'Bearer [REDACTED]')
+    .replace(/\bsk-[a-z0-9_-]+/giu, 'sk-[REDACTED]')
+    .replace(/https?:\/\/[^\s)]+/giu, '[REDACTED_URL]')
+    .replace(/\b(?:api[_-]?key|token|secret|password)\s*[:=]\s*[^\s,;]+/giu, '$1=[REDACTED]')
+    .slice(0, limit);
+}
+
+export function skillExecutionDiagnostic(
+  error: unknown,
+  context: SkillExecutionDiagnosticContext,
+): SkillExecutionDiagnostic {
+  const details = error && typeof error === 'object' ? error as Record<string, unknown> : {};
+  const errorName = error instanceof Error && error.name
+    ? redactDiagnosticText(error.name, 80)
+    : 'UnknownError';
+  const rawMessage = error instanceof Error ? error.message : String(error);
+  const rawCode = typeof details.code === 'string' && /^[A-Z0-9_.-]{1,80}$/u.test(details.code)
+    ? details.code
+    : undefined;
+  const rawStack = error instanceof Error && typeof error.stack === 'string' ? error.stack : undefined;
+  return {
+    ...context,
+    errorName,
+    ...(rawCode ? { errorCode: rawCode } : {}),
+    message: redactDiagnosticText(rawMessage, 600),
+    ...(rawStack ? { stack: redactDiagnosticText(rawStack, 4_000) } : {}),
+  };
+}
+
+export function recordSkillExecutionDiagnostic(
+  error: unknown,
+  context: SkillExecutionDiagnosticContext,
+  write: (diagnostic: SkillExecutionDiagnostic) => void = diagnostic => {
+    console.error('[skill-runtime] step execution failed', diagnostic);
+  },
+): void {
+  write(skillExecutionDiagnostic(error, context));
+}
+
 export function safeSkillExecutionError(error: unknown): AgentRunError & { providerStatus?: number } {
   const details = error && typeof error === 'object' ? error as Record<string, unknown> : {};
   if (details.code === 'AGENT_DOWNSTREAM_SUBMISSION_UNKNOWN') {
