@@ -81,13 +81,16 @@ describe('platform compliance rules', () => {
     expect(first.digest).toMatch(/^[a-f0-9]{64}$/u);
   });
 
-  it('rejects unpublished non-empty categories instead of applying generic rules', () => {
-    expect(() => resolveComplianceRuleSet({
+  it('keeps descriptive product categories when the published rules are category-agnostic', () => {
+    const resolved = resolveComplianceRuleSet({
       platform: 'Amazon',
       region: 'US',
       assetType: 'main',
-      productCategory: '  __unpublished__  ',
-    })).toThrow('UNSUPPORTED_COMPLIANCE_CATEGORY');
+      productCategory: '  马克杯与饮具  ',
+    });
+
+    expect(resolved.productCategory).toBe('马克杯与饮具');
+    expect(resolved.rules.map(rule => rule.id)).toEqual(AMAZON_RULES.map(rule => rule.id));
   });
 
   it('copies and recursively freezes mutable registry rules at the resolution boundary', () => {

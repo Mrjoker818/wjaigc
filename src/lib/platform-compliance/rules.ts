@@ -215,21 +215,21 @@ export function resolveComplianceRuleSet(
     throw new Error('UNSUPPORTED_COMPLIANCE_RULESET');
   }
   const productCategory = input.productCategory.trim();
-  if (productCategory !== '') {
-    const categoryIsPublished = registry.some(rule => (
-      rule.platform === input.platform
-      && rule.regions.includes(input.region)
-      && rule.assetTypes.includes(input.assetType)
-      && rule.categories?.includes(productCategory) === true
-    ));
-    if (!categoryIsPublished) throw new Error('UNSUPPORTED_COMPLIANCE_CATEGORY');
-  }
-  const rules = registry.filter(rule => (
+  const applicableRules = registry.filter(rule => (
     rule.platform === input.platform
     && rule.regions.includes(input.region)
     && rule.assetTypes.includes(input.assetType)
-    && (rule.categories === undefined || rule.categories.includes(productCategory))
   ));
+  const categoryRules = applicableRules.filter(rule => rule.categories !== undefined);
+  if (productCategory !== '' && categoryRules.length > 0) {
+    const categoryIsPublished = categoryRules.some(
+      rule => rule.categories?.includes(productCategory) === true,
+    );
+    if (!categoryIsPublished) throw new Error('UNSUPPORTED_COMPLIANCE_CATEGORY');
+  }
+  const rules = applicableRules.filter(
+    rule => rule.categories === undefined || rule.categories.includes(productCategory),
+  );
   const frozenRules = Object.freeze(rules.map(rule => freezeRule({
     ...rule,
     regions: [...rule.regions],
