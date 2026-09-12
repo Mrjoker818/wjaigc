@@ -156,3 +156,37 @@ GREEN：同一命令 2 个测试文件、23 个测试全部通过。
 
 - 本轮相关测试全部执行，无跳过项。
 - 受保护文件保持原哈希且未暂存；未触碰 `stable`。
+
+## 第三轮复审修复（2026-09-13）
+
+提交信息：`fix: adopt managed canvas videos in legacy sync`。
+
+### 改动
+
+- legacy migration 的受管 Canvas Placement 采纳 SELECT/UPDATE 同时接受 `canvas-image` 与 `canvas-video`。
+- continuous shadow/asset-v3 的 checkpoint 更新、任务投影采纳、Placement 完整性检查、删除与 stale sweep 同步兼容两类 Canvas entity。
+- workspace、entity、AssetVersion 任一不匹配仍 fail closed，并返回 `LEGACY_MIGRATION_INTEGRITY_CONFLICT`。
+- 新建 legacy Placement 仍使用既有 `canvas-image` 默认，图片及非 Canvas 路径不变。
+
+### TDD 与验证
+
+RED：
+
+```bash
+pnpm exec vitest run src/__tests__/lib/canvas-shadow-sync.test.ts
+```
+
+结果：退出码 1；合法受管 `canvas-video` adopt 用例失败，44 个既有/错配测试通过。
+
+GREEN：同一命令 45/45 通过。
+
+legacy migration、canvas project sync、Task 9 与 asset 相关回归：16 个测试文件通过、1 个 PostgreSQL 集成文件跳过；288 个测试通过，9 个因未配置数据库跳过。
+
+- `pnpm ts-check`：退出码 0。
+- changed-files `pnpm exec eslint --quiet ...`：退出码 0。
+- 本轮文件 `git diff --check`：通过。
+
+### 关注点
+
+- PostgreSQL reconciliation 的 9 项集成测试因当前环境未配置数据库而跳过；对应纯单元 SQL 条件、采纳和 fail-closed 回归已通过。
+- 受保护文件保持原哈希且未暂存；未触碰 `stable`。

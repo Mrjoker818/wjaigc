@@ -484,6 +484,59 @@ describe('continuous canvas shadow synchronization', () => {
     });
   });
 
+  it('adopts an exact managed canvas-video placement for continuous shadow sync', async () => {
+    const query = vi.fn(async (sql: string) => {
+      if (sql.includes('FROM wujie_assets asset')) return { rows: [{ id: 'asset-video' }], rowCount: 1 };
+      if (sql.includes('FROM wujie_asset_versions')) {
+        return { rows: [{ asset_id: 'asset-video', asset_version_id: 'version-video' }], rowCount: 1 };
+      }
+      if (sql.includes('FROM wujie_workspace_placements')) {
+        return sql.includes("entity_type = 'canvas-video'")
+          ? { rows: [{ asset_id: 'asset-video', asset_version_id: 'version-video', placement_id: 'placement-video' }], rowCount: 1 }
+          : { rows: [], rowCount: 0 };
+      }
+      if (sql.includes('UPDATE wujie_workspace_placements')) {
+        expect(sql).toContain("entity_type = 'canvas-video'");
+        return { rows: [], rowCount: 1 };
+      }
+      throw new Error(`Unexpected SQL: ${sql}`);
+    });
+
+    await expect(legacyMigration.adoptManagedCanvasMapping(
+      { query } as never,
+      { actorUserId: 'user-1', projectId: 'project-1' },
+      image('chat-video', {
+        url: '/media/poster.jpg', mediaType: 'video', videoUrl: '/media/final.mp4',
+        assetId: 'asset-video', assetVersionId: 'version-video', placementId: 'placement-video',
+      }),
+    )).resolves.toEqual({
+      assetId: 'asset-video', versionId: 'version-video', placementId: 'placement-video',
+    });
+  });
+
+  it.each(['workspace', 'entity', 'version'] as const)(
+    'fails closed when a managed canvas-video has a %s mismatch',
+    async (mismatch) => {
+      const query = vi.fn(async (sql: string) => {
+        if (sql.includes('FROM wujie_assets asset')) return { rows: [{ id: 'asset-video' }], rowCount: 1 };
+        if (sql.includes('FROM wujie_asset_versions')) {
+          return { rows: [{ asset_id: 'asset-video', asset_version_id: 'version-video' }], rowCount: 1 };
+        }
+        if (sql.includes('FROM wujie_workspace_placements')) return { rows: [], rowCount: 0 };
+        throw new Error(`Unexpected SQL: ${sql}`);
+      });
+
+      await expect(legacyMigration.adoptManagedCanvasMapping(
+        { query } as never,
+        { actorUserId: 'user-1', projectId: 'project-1' },
+        image(`chat-video-${mismatch}`, {
+          mediaType: 'video', videoUrl: '/media/final.mp4', assetId: 'asset-video',
+          assetVersionId: 'version-video', placementId: 'placement-video',
+        }),
+      )).rejects.toMatchObject({ code: 'LEGACY_MIGRATION_INTEGRITY_CONFLICT' });
+    },
+  );
+
   it('reconciles unchanged graph data when the project schema version changes', async () => {
     const retained = image('retained', {
       assetId: 'asset-retained',

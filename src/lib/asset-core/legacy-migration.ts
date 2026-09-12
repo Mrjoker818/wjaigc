@@ -201,6 +201,10 @@ function isProjectCanvasWorkspace(workspaceId: string, projectId: string): boole
   return workspaceId === projectId || workspaceId === `canvas:${projectId}`;
 }
 
+function isCanvasPlacementEntityType(entityType: string): boolean {
+  return entityType === 'canvas-image' || entityType === 'canvas-video';
+}
+
 export async function adoptManagedCanvasMapping(
   client: Pick<PoolClient, 'query'>,
   input: Pick<LegacyMigrationInput, 'actorUserId' | 'projectId'>,
@@ -242,7 +246,7 @@ export async function adoptManagedCanvasMapping(
       WHERE id = $1 AND owner_id = $2 AND project_id = $3
         AND asset_id = $4 AND asset_version_id = $5
         AND workspace_kind = 'canvas' AND workspace_id IN ($3, 'canvas:' || $3)
-        AND entity_type = 'canvas-image'
+        AND (entity_type = 'canvas-image' OR entity_type = 'canvas-video')
        AND entity_id = $6 AND status = 'active'
      FOR UPDATE`,
     [
@@ -266,7 +270,8 @@ export async function adoptManagedCanvasMapping(
      WHERE id = $1 AND owner_id = $2 AND project_id = $3
        AND asset_id = $6 AND asset_version_id = $7
        AND workspace_kind = 'canvas' AND workspace_id IN ($3, 'canvas:' || $3)
-       AND entity_type = 'canvas-image' AND entity_id = $8 AND status = 'active'`,
+       AND (entity_type = 'canvas-image' OR entity_type = 'canvas-video')
+       AND entity_id = $8 AND status = 'active'`,
     [
       mapping.placementId,
       input.actorUserId,
@@ -341,7 +346,7 @@ export async function adoptTaskProjectedCanvasMapping(
       WHERE placement.owner_id = $1 AND placement.project_id = $2
          AND placement.workspace_kind = 'canvas'
          AND placement.workspace_id IN ($2, 'canvas:' || $2)
-        AND placement.entity_type = 'canvas-image'
+        AND (placement.entity_type = 'canvas-image' OR placement.entity_type = 'canvas-video')
         AND placement.entity_id = $3
         AND placement.status = 'active'
         AND placement.asset_id = $4
@@ -363,7 +368,8 @@ export async function adoptTaskProjectedCanvasMapping(
      WHERE id = $1 AND owner_id = $2 AND project_id = $3
        AND asset_id = $6 AND asset_version_id = $7
        AND workspace_kind = 'canvas' AND workspace_id IN ($3, 'canvas:' || $3)
-       AND entity_type = 'canvas-image' AND entity_id = $8 AND status = 'active'`,
+       AND (entity_type = 'canvas-image' OR entity_type = 'canvas-video')
+       AND entity_id = $8 AND status = 'active'`,
     [
       row.placement_id,
       input.actorUserId,
@@ -627,7 +633,8 @@ async function existingCompletedMigration(
        WHERE id = $1 AND owner_id = $2 AND project_id = $3
          AND asset_id = $4
          AND workspace_kind = 'canvas' AND workspace_id IN ($3, 'canvas:' || $3)
-         AND entity_type = 'canvas-image' AND entity_id = $5 AND status = 'active'`,
+         AND (entity_type = 'canvas-image' OR entity_type = 'canvas-video')
+         AND entity_id = $5 AND status = 'active'`,
       [
         checkpointMapping.placementId,
         input.actorUserId,
@@ -842,7 +849,7 @@ async function updateGraphForImage(
     || placementRow.project_id !== input.projectId
     || placementRow.workspace_kind !== 'canvas'
     || !isProjectCanvasWorkspace(placementRow.workspace_id, input.projectId)
-    || placementRow.entity_type !== 'canvas-image'
+    || !isCanvasPlacementEntityType(placementRow.entity_type)
     || placementRow.entity_id !== image.id
   )) {
     throw migrationError('LEGACY_MIGRATION_INTEGRITY_CONFLICT');
@@ -993,7 +1000,7 @@ async function trashGraphForImage(
     placementRow.asset_id !== mapping.assetId
     || placementRow.workspace_kind !== 'canvas'
     || !isProjectCanvasWorkspace(placementRow.workspace_id, input.projectId)
-    || placementRow.entity_type !== 'canvas-image'
+    || !isCanvasPlacementEntityType(placementRow.entity_type)
     || placementRow.entity_id !== imageId
   )) {
     throw migrationError('LEGACY_MIGRATION_INTEGRITY_CONFLICT');
@@ -1004,7 +1011,8 @@ async function trashGraphForImage(
      WHERE id = $1 AND owner_id = $2 AND project_id = $3
        AND asset_id = $4 AND workspace_kind = 'canvas'
        AND workspace_id IN ($3, 'canvas:' || $3)
-       AND entity_type = 'canvas-image' AND entity_id = $5 AND status = 'active'`,
+       AND (entity_type = 'canvas-image' OR entity_type = 'canvas-video')
+       AND entity_id = $5 AND status = 'active'`,
     [mapping.placementId, input.actorUserId, input.projectId, mapping.assetId, imageId],
   );
   await client.query(
@@ -1036,7 +1044,8 @@ async function trashStaleCanvasPlacements(
          WHERE placement.owner_id = $1 AND placement.project_id = $2
            AND placement.workspace_kind = 'canvas'
            AND placement.workspace_id IN ($2, 'canvas:' || $2)
-           AND placement.entity_type = 'canvas-image' AND placement.status = 'active'
+           AND (placement.entity_type = 'canvas-image' OR placement.entity_type = 'canvas-video')
+           AND placement.status = 'active'
        )
      ORDER BY asset.id
      FOR UPDATE`,
@@ -1053,7 +1062,7 @@ async function trashStaleCanvasPlacements(
      FROM wujie_workspace_placements
      WHERE owner_id = $1 AND project_id = $2
        AND workspace_kind = 'canvas' AND workspace_id IN ($2, 'canvas:' || $2)
-       AND entity_type = 'canvas-image' AND status = 'active'
+       AND (entity_type = 'canvas-image' OR entity_type = 'canvas-video') AND status = 'active'
      ORDER BY id
      FOR UPDATE`,
     [input.actorUserId, input.projectId],
@@ -1081,7 +1090,7 @@ async function trashStaleCanvasPlacements(
      SET status = 'trashed', deleted_at = COALESCE(deleted_at, now()), updated_at = now()
      WHERE owner_id = $1 AND project_id = $2 AND id = ANY($3::text[])
        AND workspace_kind = 'canvas' AND workspace_id IN ($2, 'canvas:' || $2)
-       AND entity_type = 'canvas-image' AND status = 'active'`,
+       AND (entity_type = 'canvas-image' OR entity_type = 'canvas-video') AND status = 'active'`,
     [input.actorUserId, input.projectId, stalePlacementIds],
   );
   await client.query(
