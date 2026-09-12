@@ -176,6 +176,7 @@ async function readBoundedResponse(
   response: Response,
   input: ComplianceVisionInput,
   requestId: string,
+  requestSignal: AbortSignal,
 ): Promise<string> {
   const declaredLength = response.headers.get('content-length');
   if (declaredLength !== null && (
@@ -190,15 +191,21 @@ async function readBoundedResponse(
   const reader = response.body.getReader();
   const chunks: Uint8Array[] = [];
   let byteLength = 0;
-  const cancelForCaller = () => {
-    void reader.cancel(input.signal.reason).catch(() => undefined);
+  const cancelForRequest = () => {
+    void reader.cancel(requestSignal.reason).catch(() => undefined);
   };
-  input.signal.addEventListener('abort', cancelForCaller, { once: true });
+  requestSignal.addEventListener('abort', cancelForRequest, { once: true });
   try {
     while (true) {
-      if (input.signal.aborted) throw cancellationError(input, requestId);
+      if (requestSignal.aborted) {
+        if (input.signal.aborted) throw cancellationError(input, requestId);
+        throw submissionUnknownError(input, requestId, requestSignal.reason);
+      }
       const chunk = await reader.read();
-      if (input.signal.aborted) throw cancellationError(input, requestId);
+      if (requestSignal.aborted) {
+        if (input.signal.aborted) throw cancellationError(input, requestId);
+        throw submissionUnknownError(input, requestId, requestSignal.reason);
+      }
       if (chunk.done) break;
       byteLength += chunk.value.byteLength;
       if (byteLength > MAX_RESPONSE_BYTES) {
@@ -212,10 +219,14 @@ async function readBoundedResponse(
       await reader.cancel(input.signal.reason).catch(() => undefined);
       throw cancellationError(input, requestId);
     }
+    if (requestSignal.aborted) {
+      await reader.cancel(requestSignal.reason).catch(() => undefined);
+      throw submissionUnknownError(input, requestId, requestSignal.reason);
+    }
     if (error instanceof ComplianceVisionError) throw error;
     throw submissionUnknownError(input, requestId, error);
   } finally {
-    input.signal.removeEventListener('abort', cancelForCaller);
+    requestSignal.removeEventListener('abort', cancelForRequest);
   }
 
   const bytes = new Uint8Array(byteLength);
@@ -415,7 +426,7 @@ export async function invokeComplianceVision(
   }
   let envelope: unknown;
   try {
-    const responseText = await readBoundedResponse(response, input, requestId);
+    const responseText = await readBoundedResponse(response, input, requestId, requestSignal);
     if (input.signal.aborted) throw cancellationError(input, requestId);
     envelope = JSON.parse(responseText) as unknown;
     assertBoundedJsonStructure(envelope);

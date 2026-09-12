@@ -178,6 +178,41 @@ describe('platform compliance frozen vision client', () => {
     });
   });
 
+  it('bounds a stalled response body with the same request timeout signal', async () => {
+    const timeoutController = new AbortController();
+    const callerController = new AbortController();
+    const timeoutSpy = vi.spyOn(AbortSignal, 'timeout')
+      .mockReturnValue(timeoutController.signal);
+    const cancel = vi.fn(async () => undefined);
+    const body = new ReadableStream<Uint8Array>({ pull() {}, cancel });
+    const fetcher = vi.fn(async () => new Response(body, {
+      headers: { 'x-request-id': 'stalled-body-request-1' },
+    }));
+    const execution = invokeComplianceVision({
+      provider, modelId: 'gemini-vision-stable', imageInput: '/uploads/authorized.png', rules,
+      requestId: 'local-request-1', signal: callerController.signal,
+    }, { fetcher });
+
+    try {
+      await vi.waitFor(() => expect(fetcher).toHaveBeenCalledTimes(1));
+      timeoutController.abort(new DOMException('request timed out', 'TimeoutError'));
+      const guard = new Promise<never>((_, reject) => {
+        setTimeout(() => reject(new Error('stalled response body did not honor request timeout')), 100);
+      });
+      await expect(Promise.race([execution, guard])).rejects.toMatchObject({
+        code: 'COMPLIANCE_VISION_SUBMISSION_UNKNOWN',
+        requestId: 'stalled-body-request-1',
+        retryable: false,
+        submissionUnknown: true,
+      });
+      expect(cancel).toHaveBeenCalledTimes(1);
+    } finally {
+      callerController.abort(new DOMException('test cleanup', 'AbortError'));
+      await execution.catch(() => undefined);
+      timeoutSpy.mockRestore();
+    }
+  });
+
   it('classifies an already-aborted caller signal without attempting submission', async () => {
     const controller = new AbortController();
     controller.abort(new DOMException('cancelled by user', 'AbortError'));
