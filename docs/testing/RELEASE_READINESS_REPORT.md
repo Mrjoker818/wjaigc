@@ -2265,6 +2265,14 @@ The focused gate test passes `7/7`; the actual protected-baseline command passes
 - Canvas 三图 Amazon 主图检查已完成运行前配置并取得 `32` 积分估价，但尚无真实 Run、逐图报告、AssetVersion、实扣/退款、Workflow 和下载恢复证据。
 - **当前发布结论：有条件通过，仅允许继续 Task 11 云端验收。** Task 11 未关闭，全平台不能判定通过。
 
+## 2026-09-12 Lovart 平台素材合规 Task 11 发布判断更新
+
+- 受管图片在沙箱重启后无法供 Skill 直接读取的根因已由 `main@9f4c181e` 最小修复，本地聚焦、扩大、全仓、TypeScript、构建版 ESLint 与生产构建均通过。
+- 当前 GitHub `main` 已包含修复，`stable@52f7c601` 未触碰；但 Coze 编程积分用尽导致项目对话禁用，云端尚未按规定拉取和部署该候选。
+- Edge 控制与沙箱页面已经恢复，当前阻塞不再是浏览器附着或 `instance_not_found`，而是无法通过 Coze 对话执行受控拉取、构建和重启。
+- 原 Run `42ac7d13-b473-450d-a3f3-3323942a5b0d` 必须在 exact commit 部署后通过专用 retry 接口继续；不得创建新 Run 或重复扣费。
+- **当前发布结论：不通过 Task 11 云端验收。** 本地修复不能替代云端三份报告、AssetVersion、JSON/HTML 下载、刷新恢复和单次账务结算证据；全平台仍不可发布。
+
 ## 2026-09-10 多平台批量导出发布判断
 
 - 最终原子传输增量后的聚焦回归 `103/103` 通过；TypeScript 与 quiet ESLint 退出 0。

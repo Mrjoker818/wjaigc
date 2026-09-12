@@ -4213,6 +4213,15 @@ Task 4 独立审查的两个 Minor 继续保留给最终审查：单元夹具 op
 - Edge 1.26.901.11451 扩展后台进程存在并能枚举项目页、预览页，但接管现有标签返回 `Debugger unattached`。这属于浏览器调试附着阻塞，不能记为无界前端失败。
 - 恢复顺序固定为：从 Coze 项目页重新初始化沙箱，刷新预览页，首先查询既有 Run `42ac7d13-b473-450d-a3f3-3323942a5b0d` 的终态和积分；在此之前禁止创建第二个付费 Run。
 
+### 2026-09-12 根因修复与环境阻塞更新
+
+- 后续恢复同一 Run 后确认：Skill 读取受管上传图片时只访问沙箱本地文件。Coze 重启后本地缓存丢失，虽然 `/api/serve-upload` 可以从 S3 恢复，Skill 的 `loadSafeImageInput` 却没有相同的 S3 回源能力，导致运行无法继续。
+- `main@9f4c181ef5ca525d944a198c9c0d7394e4a01903` 已为受管图片增加精确 S3 key 回源，并保留路径、MIME、字节数、超时、取消和 Sharp 像素上限；没有放宽公网 URL 或任意对象读取边界。
+- 修复后聚焦测试 `73/73`、平台合规扩大回归 `147/147`、全仓 `5983 passed / 187 PostgreSQL-gated skipped / 0 failed`；TypeScript、构建版 ESLint 和生产构建 `120/120` 通过。
+- Edge Playwright 已能够控制 Coze 项目页，沙箱页面也已恢复；原来的 `instance_not_found` 与 `Debugger unattached` 不再是当前阻塞。
+- 当前 Coze 项目显示“因积分用尽已部署的项目已停服”，编程对话输入和发送被禁用，无法按既定要求在 Coze 对话内拉取并部署 `9f4c181e`。未使用项目内终端绕过该约束，也未购买积分。
+- **当前状态：代码根因本地已修复 / 云端候选尚未部署 / 原 Run 尚未重试。** 恢复 Coze 编程积分后，只允许拉取 exact commit 并通过 `/api/skill-runs/42ac7d13-b473-450d-a3f3-3323942a5b0d/retry` 继续原 Run；不得创建第二个付费 Run。
+
 ## MPE-TEST-001：全量 Playwright 聚合入口存在互斥隔离账号前置（2026-09-10）
 
 | 字段 | 内容 |

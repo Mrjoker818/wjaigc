@@ -2960,6 +2960,16 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - Edge 扩展 1.26.901.11451 的后台进程和标签枚举正常，但现有项目页与预览页均无法完成调试附着，返回 `Debugger unattached`。恢复时必须先由项目页重新初始化沙箱，再刷新预览，并优先读取原 Run。
 - **回归判定：REAL CREATE PASS / COZE INSTANCE LOST / TERMINAL AND BILLING UNVERIFIED。** 恢复后只读取同一 Run，不重新扣费。
 
+## 2026-09-12 Lovart 平台素材合规 Task 11 受管图片恢复增量
+
+- 当前本地与 GitHub 均为 `main@9f4c181ef5ca525d944a198c9c0d7394e4a01903`；`origin/stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 未变化。
+- 已定位原 Run 无法继续的代码根因：Skill 安全图片加载器对受管上传仅查沙箱本地文件，Coze 重启后不能像 `/api/serve-upload` 一样从对象存储恢复。
+- 最小修复新增受控 S3 回源和有界读取，继续执行精确 key、MIME、字节数、超时、AbortSignal、路径与像素上限检查；未引入任意桶浏览或公网下载降级。
+- 新鲜门禁：聚焦 `73/73`、平台合规扩大回归 `147/147`、全仓 Vitest `5983 passed / 187 PostgreSQL-gated skipped / 0 failed`；`pnpm ts-check`、`pnpm lint:build` 和生产构建 `120/120` 通过。38 项保护门禁只被六个既有 `.superpowers/sdd` 用户修改阻止，未修改或回滚这些文件。
+- Edge Playwright 现可控制 Coze 项目页，沙箱 UI 已恢复；但 Coze 页面明确显示编程积分用尽，项目对话输入被禁用，当前云端仍未拉取 `9f4c181e`。遵守用户约束，未使用项目终端替代对话拉取。
+- 旧 Run `42ac7d13-b473-450d-a3f3-3323942a5b0d` 继续作为唯一付费验收对象；没有创建新 Run，也没有产生第二次扣费。
+- **回归判定：LOCAL FIX PASS / CLOUD DEPLOYMENT BLOCKED BY COZE CREDITS。** Task 11 云端报告、AssetVersion、下载、刷新恢复与账务终态仍未验证，不更新 Obsidian 阶段结论。
+
 ## 2026-09-10 多平台批量导出 Task10 本地回归
 
 - 基线：`main@8a58ca2fe91272c108dadfe014fd7a90ba0c6a2a`；候选为该基线上的 Task10 工作树，`stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 未触碰。
