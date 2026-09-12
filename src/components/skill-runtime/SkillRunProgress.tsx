@@ -149,7 +149,7 @@ export function SkillRunProgress({
               </button>
             )}
             {!terminal && onCancel && (
-              <button type="button" disabled={busy} onClick={onCancel}>取消</button>
+              <button type="button" disabled={busy} onClick={onCancel}>取消任务</button>
             )}
             {projection.status === 'paused'
               && retryablePausedStep

@@ -43,8 +43,8 @@ it('restores a persisted paused task from UI, then cancels only that task and re
   vi.stubGlobal('fetch', fetcher);
   render(<HistoryControls />);
   fireEvent.click(await screen.findByRole('button', { name: '查看任务 old-run' }));
-  fireEvent.click(await screen.findByRole('button', { name: '取消' }));
-  await waitFor(() => expect(screen.queryByRole('button', { name: '取消' })).toBeNull());
+  fireEvent.click(await screen.findByRole('button', { name: '取消任务' }));
+  await waitFor(() => expect(screen.queryByRole('button', { name: '取消任务' })).toBeNull());
   expect(screen.getByText('已取消')).toBeTruthy();
   expect(fetcher.mock.calls.filter(([, init]) => init?.method === 'PATCH')).toHaveLength(1);
   expect(fetcher.mock.calls.some(([, init]) => init?.method === 'POST')).toBe(false);

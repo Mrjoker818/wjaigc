@@ -315,6 +315,14 @@ describe('SkillInputFields', () => {
 });
 
 describe('SkillRunProgress', () => {
+  it('exposes the executing cancel action as 取消任务 and invokes onCancel', () => {
+    const onCancel = vi.fn();
+    render(<SkillRunProgress projection={projection()} onCancel={onCancel} />);
+
+    fireEvent.click(screen.getByRole('button', { name: '取消任务' }));
+    expect(onCancel).toHaveBeenCalledOnce();
+  });
+
   it('delegates approval pauses to the dedicated approval card', () => {
     render(<SkillRunProgress
       projection={projection({
@@ -327,7 +335,7 @@ describe('SkillRunProgress', () => {
     />);
 
     expect(screen.queryByRole('button', { name: '继续' })).toBeNull();
-    expect(screen.queryByRole('button', { name: '取消' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '取消任务' })).toBeNull();
     expect(screen.queryByText('SKILL_APPROVAL_REQUIRED')).toBeNull();
   });
 
@@ -363,7 +371,7 @@ describe('SkillRunProgress', () => {
     expect(screen.getByText('生成画面')).toBeTruthy();
     expect(screen.getByRole('progressbar').getAttribute('aria-valuenow')).toBe('45');
     fireEvent.click(screen.getByRole('button', { name: '暂停' }));
-    fireEvent.click(screen.getByRole('button', { name: '取消' }));
+    fireEvent.click(screen.getByRole('button', { name: '取消任务' }));
     expect(onPause).toHaveBeenCalledWith('render');
     expect(onCancel).toHaveBeenCalledOnce();
   });
@@ -408,7 +416,7 @@ describe('SkillRunProgress', () => {
     expect(screen.getByRole('alert').textContent).toContain('RENDER_FAILED');
     expect(screen.getByText('执行失败')).toBeTruthy();
     expect(screen.queryByRole('button', { name: '从失败步骤重试' })).toBeNull();
-    expect(screen.queryByRole('button', { name: '取消' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '取消任务' })).toBeNull();
   });
 
   it('renders retryability lookup failures as an accessible controlled error', () => {
