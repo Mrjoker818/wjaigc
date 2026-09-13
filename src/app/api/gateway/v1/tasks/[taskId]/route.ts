@@ -1,7 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { recordGatewayAttempt } from '@/lib/media-gateway/admission';
-import { authenticateGatewayBearer } from '@/lib/media-gateway/key-service';
+import { auditGatewayEvent } from '@/lib/media-gateway/audit';
+import {
+  authenticateGatewayBearer,
+  type GatewayPrincipal,
+} from '@/lib/media-gateway/key-service';
 import { getGatewayTaskProjection } from '@/lib/media-gateway/task-projection';
 import { GatewayError, type GatewayErrorCode } from '@/lib/media-gateway/types';
 import { getRequestId } from '@/lib/request-id';
@@ -36,26 +40,58 @@ function errorResponse(
   }, { status });
 }
 
+async function auditedResponse(
+  response: NextResponse,
+  requestId: string,
+  principal?: GatewayPrincipal,
+): Promise<NextResponse> {
+  try {
+    await auditGatewayEvent({
+      action: 'gateway_task_query',
+      outcome: response.status >= 200 && response.status < 300 ? 'success' : 'failure',
+      requestId,
+      ...(principal ? { gatewayKeyId: principal.keyId, userId: principal.userId } : {}),
+      responseStatus: response.status,
+    });
+  } catch {
+    // Audit storage is best-effort and cannot alter the authoritative response.
+  }
+  return response;
+}
+
 export async function GET(request: NextRequest, context: RouteContext): Promise<NextResponse> {
   const requestId = getRequestId(request);
   if (process.env.GATEWAY_ENABLED !== 'true') {
-    return errorResponse(requestId, 'GATEWAY_DISABLED', 503);
+    return auditedResponse(errorResponse(requestId, 'GATEWAY_DISABLED', 503), requestId);
   }
 
+  let principal: GatewayPrincipal | undefined;
   try {
     const authorization = request.headers.get('authorization');
     if (!authorization) {
       throw new GatewayError('GATEWAY_AUTH_REQUIRED', 401, 'Authentication required');
     }
-    const principal = await authenticateGatewayBearer(authorization);
+    principal = await authenticateGatewayBearer(authorization);
     await recordGatewayAttempt(principal);
     const { taskId } = await context.params;
     const task = await getGatewayTaskProjection(principal, taskId);
-    return NextResponse.json({ success: true, requestId, ...task });
+    return auditedResponse(
+      NextResponse.json({ success: true, requestId, ...task }),
+      requestId,
+      principal,
+    );
   } catch (error) {
     if (error instanceof GatewayError) {
-      return errorResponse(requestId, error.code, error.status, error.retryable);
+      return auditedResponse(
+        errorResponse(requestId, error.code, error.status, error.retryable),
+        requestId,
+        principal,
+      );
     }
-    return errorResponse(requestId, 'GATEWAY_INTERNAL_UNAVAILABLE', 503, true);
+    return auditedResponse(
+      errorResponse(requestId, 'GATEWAY_INTERNAL_UNAVAILABLE', 503, true),
+      requestId,
+      principal,
+    );
   }
 }

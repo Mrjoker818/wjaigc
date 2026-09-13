@@ -3,12 +3,14 @@ import { dbAddAuditLog } from '@/lib/db-storage';
 export type GatewayAuditAction =
   | 'gateway_key_issue'
   | 'gateway_key_update'
-  | 'gateway_key_revoke';
+  | 'gateway_key_revoke'
+  | 'gateway_task_query'
+  | 'gateway_task_cancel';
 
-export interface GatewayAuditEvent {
+interface GatewayKeyAuditEvent {
   actorId: string;
   actorName?: string;
-  action: GatewayAuditAction;
+  action: 'gateway_key_issue' | 'gateway_key_update' | 'gateway_key_revoke';
   outcome: 'success' | 'failure';
   gatewayKeyId?: string;
   keyPrefix?: string;
@@ -16,6 +18,17 @@ export interface GatewayAuditEvent {
   errorCode?: string | null;
   responseStatus?: number;
 }
+
+interface GatewayTaskAuditEvent {
+  action: 'gateway_task_query' | 'gateway_task_cancel';
+  outcome: 'success' | 'failure';
+  requestId: string;
+  gatewayKeyId?: string;
+  userId?: string;
+  responseStatus: number;
+}
+
+export type GatewayAuditEvent = GatewayKeyAuditEvent | GatewayTaskAuditEvent;
 
 const SECRET_PATTERNS = [
   /wmg_[A-Za-z0-9_-]{43,}/g,
@@ -32,7 +45,54 @@ function sanitizeAuditText(value: string | undefined | null): string | null {
   );
 }
 
+function sanitizeAuditIdentifier(value: string | undefined): string | null {
+  const sanitized = sanitizeAuditText(value);
+  if (sanitized === null) return null;
+  if (Buffer.byteLength(sanitized) > 200 || /[\u0000-\u001f\u007f]/.test(sanitized)) {
+    return '[REDACTED]';
+  }
+  return sanitized;
+}
+
+function isTaskAuditEvent(event: GatewayAuditEvent): event is GatewayTaskAuditEvent {
+  return event.action === 'gateway_task_query' || event.action === 'gateway_task_cancel';
+}
+
 export async function auditGatewayEvent(event: GatewayAuditEvent): Promise<boolean> {
+  if (isTaskAuditEvent(event)) {
+    const requestId = sanitizeAuditIdentifier(event.requestId) ?? '[REDACTED]';
+    const gatewayKeyId = sanitizeAuditIdentifier(event.gatewayKeyId);
+    const userId = sanitizeAuditIdentifier(event.userId);
+    const responseStatus = Number.isInteger(event.responseStatus) ? event.responseStatus : 500;
+    const facts = {
+      action: event.action,
+      outcome: event.outcome,
+      requestId,
+      gatewayKeyId,
+      userId,
+      responseStatus,
+    };
+
+    try {
+      const auditId = await dbAddAuditLog({
+        user_id: userId ?? 'anonymous',
+        user_name: null,
+        action: event.action,
+        target_type: 'media_gateway_task',
+        target_id: gatewayKeyId,
+        detail: JSON.stringify(facts),
+        ip_address: null,
+        created_at: Date.now(),
+        level: event.outcome === 'success' ? 'info' : 'warn',
+        request_data: facts,
+        response_status: responseStatus,
+      });
+      return auditId.length > 0;
+    } catch {
+      return false;
+    }
+  }
+
   const actorId = sanitizeAuditText(event.actorId) ?? '[REDACTED]';
   const gatewayKeyId = sanitizeAuditText(event.gatewayKeyId);
   const facts = {

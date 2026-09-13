@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   getCloudTaskForUser: vi.fn(),
   terminateCloudTaskAndRefund: vi.fn(),
   getInternalRequestHeaders: vi.fn(),
+  auditGatewayEvent: vi.fn(),
 }));
 
 vi.mock('@/lib/media-gateway/key-service', () => ({
@@ -23,6 +24,9 @@ vi.mock('@/lib/cloud-task-storage', () => ({
 }));
 vi.mock('@/lib/api-auth', () => ({
   getInternalRequestHeaders: mocks.getInternalRequestHeaders,
+}));
+vi.mock('@/lib/media-gateway/audit', () => ({
+  auditGatewayEvent: mocks.auditGatewayEvent,
 }));
 
 import { POST } from '@/app/api/gateway/v1/tasks/[taskId]/cancel/route';
@@ -43,6 +47,7 @@ function gatewayCancelRequest(taskId: string, authorization = 'Bearer wmg_valid-
       'x-internal-request': 'true',
       'x-internal-user-id': 'attacker',
       'x-wujie-internal-secret': 'forged',
+      'x-request-id': 'req_task_cancel_01',
     },
   });
 }
@@ -51,7 +56,7 @@ function context(taskId: string): { params: Promise<{ taskId: string }> } {
   return { params: Promise.resolve({ taskId }) };
 }
 
-function task(status: 'processing' | 'cancelled' | 'completed' | 'failed') {
+function task(status: 'queued' | 'pending' | 'processing' | 'cancelled' | 'completed' | 'failed' | 'timeout') {
   return {
     id: 'task-1',
     userId: 'user-a',
@@ -78,6 +83,7 @@ describe('POST /api/gateway/v1/tasks/[taskId]/cancel', () => {
       'x-internal-user-role': 'user',
       'x-wujie-internal-secret': 'trusted-secret',
     });
+    mocks.auditGatewayEvent.mockResolvedValue(true);
   });
 
   afterEach(() => {
@@ -94,6 +100,10 @@ describe('POST /api/gateway/v1/tasks/[taskId]/cancel', () => {
     expect(response.status).toBe(503);
     expect(await response.json()).toMatchObject({ code: 'GATEWAY_DISABLED' });
     expect(mocks.authenticateGatewayBearer).not.toHaveBeenCalled();
+    expect(mocks.auditGatewayEvent).toHaveBeenCalledWith({
+      action: 'gateway_task_cancel', outcome: 'failure', requestId: 'req_task_cancel_01',
+      responseStatus: 503,
+    });
   });
 
   it('does not allow a revoked or disabled key to cancel', async () => {
@@ -108,6 +118,10 @@ describe('POST /api/gateway/v1/tasks/[taskId]/cancel', () => {
     expect(response.status).toBe(401);
     expect(await response.json()).toMatchObject({ code: 'GATEWAY_KEY_INVALID' });
     expect(internalFetch).not.toHaveBeenCalled();
+    expect(mocks.auditGatewayEvent).toHaveBeenCalledWith({
+      action: 'gateway_task_cancel', outcome: 'failure', requestId: 'req_task_cancel_01',
+      responseStatus: 401,
+    });
   });
 
   it('returns 404 for an unknown or non-owned task without delegating cancellation', async () => {
@@ -121,6 +135,10 @@ describe('POST /api/gateway/v1/tasks/[taskId]/cancel', () => {
     expect(await response.json()).toMatchObject({ code: 'GATEWAY_TASK_NOT_FOUND' });
     expect(mocks.getCloudTaskForUser).toHaveBeenCalledWith('task-user-b', 'user-a');
     expect(internalFetch).not.toHaveBeenCalled();
+    expect(mocks.auditGatewayEvent).toHaveBeenCalledWith({
+      action: 'gateway_task_cancel', outcome: 'failure', requestId: 'req_task_cancel_01',
+      gatewayKeyId: 'gwkey_1', userId: 'user-a', responseStatus: 404,
+    });
   });
 
   it('delegates through trusted internal user auth and ignores forged external headers', async () => {
@@ -155,6 +173,10 @@ describe('POST /api/gateway/v1/tasks/[taskId]/cancel', () => {
     expect(init.headers).not.toMatchObject({ 'x-internal-user-id': 'attacker' });
     expect(JSON.stringify(body)).not.toContain('must-not-leak');
     expect(mocks.terminateCloudTaskAndRefund).not.toHaveBeenCalled();
+    expect(mocks.auditGatewayEvent).toHaveBeenCalledWith({
+      action: 'gateway_task_cancel', outcome: 'success', requestId: 'req_task_cancel_01',
+      gatewayKeyId: 'gwkey_1', userId: 'user-a', responseStatus: 200,
+    });
   });
 
   it('delegates repeated cancellation and leaves exactly-once settlement to the cancel route', async () => {
@@ -172,6 +194,66 @@ describe('POST /api/gateway/v1/tasks/[taskId]/cancel', () => {
     expect(internalFetch).toHaveBeenCalledTimes(2);
     expect(mocks.terminateCloudTaskAndRefund).not.toHaveBeenCalled();
   });
+
+  it.each([
+    ['queued', ''],
+    ['pending', JSON.stringify({ success: true, status: 'cancelled' })],
+    ['processing', '{malformed-json'],
+  ] as const)(
+    'returns retryable 503 when a 2xx cancellation leaves durable state %s',
+    async (status, responseBody) => {
+      mocks.getCloudTaskForUser
+        .mockResolvedValueOnce(task('processing'))
+        .mockResolvedValueOnce(task(status));
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(responseBody, {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      })));
+
+      const response = await POST(gatewayCancelRequest('task-1'), context('task-1'));
+
+      expect(response.status).toBe(503);
+      await expect(response.json()).resolves.toMatchObject({
+        success: false,
+        code: 'GATEWAY_INTERNAL_UNAVAILABLE',
+        retryable: true,
+      });
+      expect(mocks.auditGatewayEvent).toHaveBeenCalledWith({
+        action: 'gateway_task_cancel', outcome: 'failure', requestId: 'req_task_cancel_01',
+        gatewayKeyId: 'gwkey_1', userId: 'user-a', responseStatus: 503,
+      });
+    },
+  );
+
+  it.each(['completed', 'failed', 'timeout'] as const)(
+    'returns stable 409 when a 2xx cancellation rereads durable status %s',
+    async (status) => {
+      mocks.getCloudTaskForUser
+        .mockResolvedValueOnce(task('processing'))
+        .mockResolvedValueOnce(task(status));
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
+        success: true,
+        status: 'cancelled',
+        result: { apiKey: 'untrusted-internal-body' },
+      }), { status: 200, headers: { 'content-type': 'application/json' } })));
+
+      const response = await POST(gatewayCancelRequest('task-1'), context('task-1'));
+      const body = await response.json();
+
+      expect(response.status).toBe(409);
+      expect(body).toMatchObject({
+        success: false,
+        code: 'GATEWAY_INVALID_REQUEST',
+        message: 'Task cannot be cancelled',
+        status,
+      });
+      expect(JSON.stringify(body)).not.toContain('untrusted-internal-body');
+      expect(mocks.auditGatewayEvent).toHaveBeenCalledWith({
+        action: 'gateway_task_cancel', outcome: 'failure', requestId: 'req_task_cancel_01',
+        gatewayKeyId: 'gwkey_1', userId: 'user-a', responseStatus: 409,
+      });
+    },
+  );
 
   it.each([
     ['completed', 'completed'],
@@ -214,5 +296,18 @@ describe('POST /api/gateway/v1/tasks/[taskId]/cancel', () => {
     });
     expect(JSON.stringify(body)).not.toContain('secret');
     expect(JSON.stringify(body)).not.toContain('providerApiKey');
+  });
+
+  it('keeps a confirmed cancellation response when audit persistence fails', async () => {
+    mocks.getCloudTaskForUser
+      .mockResolvedValueOnce(task('processing'))
+      .mockResolvedValueOnce(task('cancelled'));
+    mocks.auditGatewayEvent.mockRejectedValue(new Error('audit database failed'));
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(null, { status: 204 })));
+
+    const response = await POST(gatewayCancelRequest('task-1'), context('task-1'));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ success: true, status: 'cancelled' });
   });
 });

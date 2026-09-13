@@ -103,4 +103,67 @@ describe('media gateway audit', () => {
       gatewayKeyId: 'gwkey_1',
     })).resolves.toBe(false);
   });
+
+  it.each(['gateway_task_query', 'gateway_task_cancel'] as const)(
+    'persists only redacted lifecycle facts for %s',
+    async (action) => {
+      const fullSecret = `wmg_${'q'.repeat(43)}`;
+      await expect(auditGatewayEvent({
+        action,
+        outcome: 'failure',
+        requestId: `req-${fullSecret}`,
+        gatewayKeyId: 'gwkey_1',
+        userId: 'user-1',
+        responseStatus: 503,
+        taskResult: { imageUrl: 'https://private.example/result.png' },
+        providerApiKey: 'provider-secret',
+        rawError: 'postgres://private-host/internal-error',
+        authorization: `Bearer ${fullSecret}`,
+      } as never)).resolves.toBe(true);
+
+      const persisted = mocks.dbAddAuditLog.mock.calls[0][0];
+      expect(persisted).toMatchObject({
+        user_id: 'user-1',
+        action,
+        target_type: 'media_gateway_task',
+        target_id: 'gwkey_1',
+        level: 'warn',
+        response_status: 503,
+      });
+      expect(persisted.request_data).toEqual({
+        action,
+        outcome: 'failure',
+        requestId: 'req-[REDACTED]',
+        gatewayKeyId: 'gwkey_1',
+        userId: 'user-1',
+        responseStatus: 503,
+      });
+      const serialized = JSON.stringify(persisted);
+      expect(serialized).not.toContain(fullSecret);
+      expect(serialized).not.toContain('private.example');
+      expect(serialized).not.toContain('provider-secret');
+      expect(serialized).not.toContain('private-host');
+      expect(serialized).not.toContain('internal-error');
+    },
+  );
+
+  it('bounds invalid lifecycle identifiers instead of persisting oversized values', async () => {
+    await auditGatewayEvent({
+      action: 'gateway_task_query',
+      outcome: 'success',
+      requestId: `req-${'a'.repeat(500)}`,
+      gatewayKeyId: `gwkey-${'b'.repeat(500)}`,
+      userId: `user-${'c'.repeat(500)}`,
+      responseStatus: 200,
+    } as never);
+
+    expect(mocks.dbAddAuditLog.mock.calls[0][0].request_data).toEqual({
+      action: 'gateway_task_query',
+      outcome: 'success',
+      requestId: '[REDACTED]',
+      gatewayKeyId: '[REDACTED]',
+      userId: '[REDACTED]',
+      responseStatus: 200,
+    });
+  });
 });
