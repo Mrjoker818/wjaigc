@@ -157,7 +157,7 @@ describe('media gateway lifecycle on PostgreSQL', () => {
     });
   }, 45_000);
 
-  postgresIt('allows one failure terminal and one refund while rejecting a late completion', async () => {
+  postgresIt('records provider submission and rejects a controlled late completion after cancellation', async () => {
     const { withIsolatedPostgres } = await import('../helpers/postgres-test-database');
     await withIsolatedPostgres('gateway-terminal-race', async ({ query }) => {
       const now = Date.now();
@@ -174,16 +174,47 @@ describe('media gateway lifecycle on PostgreSQL', () => {
         task: { id: 'charged-race-task', type: 'generate', status: 'processing', progress: 20, createdAt: now + 1, updatedAt: now + 1 },
       });
 
-      const settlements = await Promise.all([
-        settleFailedTask({ taskId: charged.task.id, status: 'failed', error: { code: 'PROVIDER_FAILED', message: 'provider failed' } }),
-        settleFailedTask({ taskId: charged.task.id, status: 'timeout', error: { code: 'MODEL_TIMEOUT', message: 'provider timed out' } }),
-        settleFailedTask({ taskId: charged.task.id, status: 'cancelled', error: { code: 'USER_CANCELLED', message: 'user cancelled' } }),
-      ]);
-      expect(settlements.filter(result => result.transitioned)).toHaveLength(1);
-      expect(settlements.filter(result => result.refunded)).toHaveLength(1);
+      const { updateCloudTask } = await import('@/lib/cloud-task-storage');
+      await expect(updateCloudTask(charged.task.id, {
+        remoteTaskId: 'provider-task-before-cancel',
+      })).resolves.toBe(true);
+      const { waitForProviderSubmissionState, attemptControlledLateCompletionWriteback } = await import('../helpers/media-gateway-late-writeback');
+      const providerStateBeforeCancel = await waitForProviderSubmissionState(charged.task.id);
+      expect(providerStateBeforeCancel).toMatchObject({
+        taskId: charged.task.id,
+        remoteTaskId: 'provider-task-before-cancel',
+        status: 'processing',
+      });
 
-      const { completeCloudTask } = await import('@/lib/cloud-task-storage');
-      await expect(completeCloudTask(charged.task.id, { imageUrl: '/uploads/late.png' })).resolves.toBe(false);
+      const cancellation = await settleFailedTask({
+        taskId: charged.task.id,
+        status: 'cancelled',
+        error: { code: 'USER_CANCELLED', message: 'user cancelled' },
+      });
+      expect(cancellation).toEqual({ transitioned: true, refunded: true });
+
+      const lateBoundary = await attemptControlledLateCompletionWriteback(
+        charged.task.id,
+        providerStateBeforeCancel,
+      );
+      expect(lateBoundary).toMatchObject({
+        providerStateBeforeCancel: {
+          remoteTaskId: 'provider-task-before-cancel',
+          status: 'processing',
+        },
+        providerStateAfterCancel: {
+          remoteTaskId: 'provider-task-before-cancel',
+          status: 'cancelled',
+        },
+        completionWritebackAttempt: {
+          providerRemoteTaskId: 'provider-task-before-cancel',
+          accepted: false,
+        },
+        authoritativeDatabaseStatus: {
+          beforeWriteback: 'cancelled',
+          afterWriteback: 'cancelled',
+        },
+      });
       const repeats = await Promise.all(Array.from({ length: 20 }, () => settleFailedTask({
         taskId: charged.task.id, status: 'cancelled', error: { code: 'USER_CANCELLED', message: 'repeat' },
       })));
@@ -195,8 +226,7 @@ describe('media gateway lifecycle on PostgreSQL', () => {
         credits.balance, credits.total_used
         FROM cloud_tasks task JOIN wujie_credits credits ON credits.user_id = task.user_id
         WHERE task.id = $1`, [charged.task.id]);
-      expect(['failed', 'timeout', 'cancelled']).toContain(row.rows[0]?.status);
-      expect(row.rows[0]).toMatchObject({ credit_status: 'refunded', refunds: '1', balance: 50, total_used: 0 });
+      expect(row.rows[0]).toMatchObject({ status: 'cancelled', credit_status: 'refunded', refunds: '1', balance: 50, total_used: 0 });
     });
   }, 45_000);
 

@@ -1,7 +1,15 @@
 import { expect, test, type APIRequestContext, type Page, type TestInfo } from '@playwright/test';
 import sharp from 'sharp';
 
-import { createMediaGatewayEvidence } from '../helpers/media-gateway-e2e-evidence';
+import {
+  createMediaGatewayEvidence,
+  createRecordedApiRequest,
+  type RecordedApiRequest,
+} from '../helpers/media-gateway-e2e-evidence';
+import {
+  attemptControlledLateCompletionWriteback,
+  waitForProviderSubmissionState,
+} from '../helpers/media-gateway-late-writeback';
 
 test.use({ trace: 'on', video: 'on', screenshot: 'on' });
 
@@ -53,13 +61,13 @@ function headers(key: string, idempotencyKey?: string): Record<string, string> {
   };
 }
 
-async function readTask(request: APIRequestContext, key: string, taskId: string): Promise<TaskProjection> {
+async function readTask(request: RecordedApiRequest, key: string, taskId: string): Promise<TaskProjection> {
   const response = await request.get(`/api/gateway/v1/tasks/${encodeURIComponent(taskId)}`, { headers: headers(key) });
   expect(response.ok(), `task ${taskId} returned HTTP ${response.status()}`).toBe(true);
   return response.json() as Promise<TaskProjection>;
 }
 
-async function waitForTerminal(request: APIRequestContext, key: string, taskId: string): Promise<TaskProjection> {
+async function waitForTerminal(request: RecordedApiRequest, key: string, taskId: string): Promise<TaskProjection> {
   let latest: TaskProjection | undefined;
   await expect.poll(async () => {
     latest = await readTask(request, key, taskId);
@@ -85,7 +93,7 @@ async function showArtifactBeforeBatchTerminal(page: Page, url: string): Promise
 
 async function waitForProgressiveImageCompletion(
   page: Page,
-  request: APIRequestContext,
+  request: RecordedApiRequest,
   key: string,
   taskIds: string[],
 ): Promise<{ completed: TaskProjection[]; firstVisibleBeforeBatchTerminal: true }> {
@@ -113,7 +121,7 @@ async function waitForProgressiveImageCompletion(
 }
 
 async function assertMediaArtifact(
-  request: APIRequestContext,
+  request: RecordedApiRequest,
   url: string,
   kind: 'image' | 'video',
   expectedMaxDimension?: 256 | 512,
@@ -133,15 +141,15 @@ async function assertMediaArtifact(
   }
 }
 
-async function readTransactions(page: Page): Promise<CreditTransaction[]> {
-  const response = await page.request.get('/api/credits?transactions=true&limit=100');
+async function readTransactions(request: RecordedApiRequest): Promise<CreditTransaction[]> {
+  const response = await request.get('/api/credits?transactions=true&limit=100');
   expect(response.ok()).toBe(true);
   const payload = await response.json() as { success?: boolean; transactions?: CreditTransaction[] };
   expect(payload.success).toBe(true);
   return payload.transactions || [];
 }
 
-async function loginAndOpenCanvas(page: Page): Promise<void> {
+async function loginAndOpenCanvas(page: Page, request: RecordedApiRequest): Promise<void> {
   expect(env.username).toBeTruthy();
   expect(env.password).toBeTruthy();
   await page.context().clearCookies();
@@ -156,7 +164,7 @@ async function loginAndOpenCanvas(page: Page): Promise<void> {
     await page.getByRole('button', { name: /^登录$/ }).click();
     expect((await loginResponse).ok()).toBe(true);
   }
-  const me = await page.request.get('/api/auth/me');
+  const me = await request.get('/api/auth/me');
   expect(me.ok()).toBe(true);
   const identity = await me.json() as { user?: { id?: string } };
   if (expectedUserId) expect(identity.user?.id).toBe(expectedUserId);
@@ -165,8 +173,8 @@ async function loginAndOpenCanvas(page: Page): Promise<void> {
   await expect(page.getByRole('button', { name: '图像生成器', exact: true })).toBeVisible();
 }
 
-async function assertLegacyUiCompatibility(page: Page): Promise<void> {
-  await loginAndOpenCanvas(page);
+async function assertLegacyUiCompatibility(page: Page, request: RecordedApiRequest): Promise<void> {
+  await loginAndOpenCanvas(page, request);
   await expect(page.locator('input[type="file"]').first()).toBeAttached();
   await page.getByRole('button', { name: '图像生成器', exact: true }).click();
   await expect(page.getByText('图像生成器', { exact: true }).last()).toBeVisible();
@@ -176,50 +184,55 @@ async function assertLegacyUiCompatibility(page: Page): Promise<void> {
 }
 
 async function assertAuthoritativeCancellation(
-  page: Page,
-  request: APIRequestContext,
+  request: RecordedApiRequest,
   taskId: string,
   transactionIdsBefore: Set<string>,
-): Promise<{ lateCompletionRejected: true; refundCount: 1; ledger: CreditTransaction[] }> {
+  providerStateBeforeCancel: Awaited<ReturnType<typeof waitForProviderSubmissionState>>,
+) {
   const response = await request.post(`/api/gateway/v1/tasks/${encodeURIComponent(taskId)}/cancel`, { headers: headers(env.gatewayKey!) });
   expect(response.status()).toBe(200);
   expect(await response.json()).toMatchObject({ success: true, taskId, status: 'cancelled' });
   await expect.poll(async () => (await readTask(request, env.gatewayKey!, taskId)).status, {
     timeout: 30_000, intervals: [500, 1_000, 2_000],
   }).toBe('cancelled');
-  let lateCompletionRejected = false;
-  await expect.poll(async () => {
-    const status = (await readTask(request, env.gatewayKey!, taskId)).status;
-    lateCompletionRejected = status === 'cancelled';
-    return status;
-  }, { timeout: 20_000, intervals: [1_000, 2_000, 5_000] }).toBe('cancelled');
+  const lateBoundary = await attemptControlledLateCompletionWriteback(taskId, providerStateBeforeCancel);
+  expect(lateBoundary.completionWritebackAttempt.accepted).toBe(false);
+  expect(lateBoundary.authoritativeDatabaseStatus).toMatchObject({
+    beforeWriteback: 'cancelled',
+    afterWriteback: 'cancelled',
+  });
   let ledger: CreditTransaction[] = [];
   await expect.poll(async () => {
-    ledger = (await readTransactions(page)).filter(entry => !transactionIdsBefore.has(entry.id));
+    ledger = (await readTransactions(request)).filter(entry => !transactionIdsBefore.has(entry.id));
     return { consume: ledger.filter(entry => entry.type === 'consume').length, refund: ledger.filter(entry => entry.type === 'refund').length };
   }, { timeout: 30_000, intervals: [500, 1_000, 2_000] }).toEqual({ consume: 1, refund: 1 });
   const consume = ledger.find(entry => entry.type === 'consume')!;
   const refund = ledger.find(entry => entry.type === 'refund')!;
   expect(Number(consume.amount) + Number(refund.amount)).toBe(0);
-  return { lateCompletionRejected: true, refundCount: 1, ledger };
+  return { ...lateBoundary, refundCount: 1 as const, ledger };
 }
 
 async function withEvidence(
   page: Page,
+  request: APIRequestContext,
   testInfo: TestInfo,
-  work: (evidence: ReturnType<typeof createMediaGatewayEvidence>) => Promise<void>,
+  work: (
+    evidence: ReturnType<typeof createMediaGatewayEvidence>,
+    request: RecordedApiRequest,
+  ) => Promise<void>,
 ): Promise<void> {
   const evidence = createMediaGatewayEvidence(page, testInfo);
-  try { await work(evidence); } finally { await evidence.finalize(); }
+  const recordedRequest = createRecordedApiRequest(request, evidence);
+  try { await work(evidence, recordedRequest); } finally { await evidence.finalize(); }
 }
 
 test.describe('V588-MEDIA-001 cloud rollout evidence', () => {
   test.skip(!cloudRun, '仅在 exact SHA 部署并显式设置 E2E_MEDIA_GATEWAY_RUN=1 后执行');
 
   test('default-disabled rollout preserves the original login and canvas entry', async ({ page, request }, testInfo) => {
-    await withEvidence(page, testInfo, async evidence => {
+    await withEvidence(page, request, testInfo, async (evidence, api) => {
       test.skip(expectedMode !== 'disabled', '仅用于默认关闭态部署检查');
-      const response = await request.post('/api/gateway/v1/images', {
+      const response = await api.post('/api/gateway/v1/images', {
         headers: { 'content-type': 'application/json' },
         data: { prompt: 'release probe', providerId: 'probe', modelId: 'probe' },
       });
@@ -227,7 +240,7 @@ test.describe('V588-MEDIA-001 cloud rollout evidence', () => {
       const payload = await response.json();
       expect(payload).toMatchObject({ success: false, code: 'GATEWAY_DISABLED', retryable: false, requestId: expect.any(String) });
       evidence.record(payload);
-      await assertLegacyUiCompatibility(page);
+      await assertLegacyUiCompatibility(page, api);
     });
   });
 
@@ -238,24 +251,24 @@ test.describe('V588-MEDIA-001 cloud rollout evidence', () => {
     });
 
     test('preserves original login, canvas, image, and video entry compatibility', async ({ page, request }, testInfo) => {
-      await withEvidence(page, testInfo, async evidence => {
-        await assertLegacyUiCompatibility(page);
-        const health = await request.get('/api/auth/me');
+      await withEvidence(page, request, testInfo, async (evidence, api) => {
+        await assertLegacyUiCompatibility(page, api);
+        const health = await api.get('/api/auth/me');
         expect(health.ok()).toBe(true);
         evidence.record(await health.json());
       });
     });
 
     test('rejects missing, invalid, and revoked credentials', async ({ page, request }, testInfo) => {
-      await withEvidence(page, testInfo, async evidence => {
+      await withEvidence(page, request, testInfo, async (evidence, api) => {
         const payload = { prompt: 'authentication boundary', providerId: env.imageProviderId!, modelId: env.imageModelId! };
-        const missing = await request.post('/api/gateway/v1/images', { data: payload });
+        const missing = await api.post('/api/gateway/v1/images', { data: payload });
         expect(missing.status()).toBe(401);
         expect(await missing.json()).toMatchObject({ success: false, code: 'GATEWAY_AUTH_REQUIRED' });
-        const invalid = await request.post('/api/gateway/v1/images', { headers: headers(`wmg_${'x'.repeat(43)}`, `invalid-${Date.now()}`), data: payload });
+        const invalid = await api.post('/api/gateway/v1/images', { headers: headers(`wmg_${'x'.repeat(43)}`, `invalid-${Date.now()}`), data: payload });
         expect(invalid.status()).toBe(401);
         expect(await invalid.json()).toMatchObject({ success: false, code: 'GATEWAY_KEY_INVALID' });
-        const revoked = await request.post('/api/gateway/v1/images', { headers: headers(env.revokedKey!, `revoked-${Date.now()}`), data: payload });
+        const revoked = await api.post('/api/gateway/v1/images', { headers: headers(env.revokedKey!, `revoked-${Date.now()}`), data: payload });
         expect(revoked.status()).toBe(401);
         const revokedPayload = await revoked.json();
         expect(revokedPayload).toMatchObject({ success: false, code: 'GATEWAY_KEY_INVALID' });
@@ -264,12 +277,12 @@ test.describe('V588-MEDIA-001 cloud rollout evidence', () => {
     });
 
     test('enforces rate limit and UTC daily quota', async ({ page, request }, testInfo) => {
-      await withEvidence(page, testInfo, async evidence => {
+      await withEvidence(page, request, testInfo, async (evidence, api) => {
         const payload = { prompt: 'admission boundary', providerId: env.imageProviderId!, modelId: env.imageModelId! };
-        const rate = await request.post('/api/gateway/v1/images', { headers: headers(env.rateLimitedKey!, `rate-${Date.now()}`), data: payload });
+        const rate = await api.post('/api/gateway/v1/images', { headers: headers(env.rateLimitedKey!, `rate-${Date.now()}`), data: payload });
         expect(rate.status()).toBe(429);
         expect(await rate.json()).toMatchObject({ success: false, code: 'GATEWAY_RATE_LIMITED' });
-        const quota = await request.post('/api/gateway/v1/images', { headers: headers(env.dailyQuotaKey!, `quota-${Date.now()}`), data: payload });
+        const quota = await api.post('/api/gateway/v1/images', { headers: headers(env.dailyQuotaKey!, `quota-${Date.now()}`), data: payload });
         expect(quota.status()).toBe(429);
         const quotaPayload = await quota.json();
         expect(quotaPayload).toMatchObject({ success: false, code: 'GATEWAY_DAILY_QUOTA_EXCEEDED' });
@@ -279,36 +292,36 @@ test.describe('V588-MEDIA-001 cloud rollout evidence', () => {
 
     test('returns n=2 progressively, rejects same-key different digest, and verifies owned artifacts', async ({ page, request }, testInfo) => {
       test.setTimeout(12 * 60_000);
-      await withEvidence(page, testInfo, async evidence => {
+      await withEvidence(page, request, testInfo, async (evidence, api) => {
         const idempotencyKey = `e2e-image-${Date.now()}`;
         const payload = { prompt: 'Two clean product photographs on a neutral studio background', providerId: env.imageProviderId!, modelId: env.imageModelId!, n: 2, aspectRatio: '1:1' };
-        const first = await request.post('/api/gateway/v1/images', { headers: headers(env.gatewayKey!, idempotencyKey), data: payload });
+        const first = await api.post('/api/gateway/v1/images', { headers: headers(env.gatewayKey!, idempotencyKey), data: payload });
         expect(first.status()).toBe(202);
         const submission = await first.json() as Submission;
         expect(submission.taskIds).toHaveLength(2);
         evidence.record(submission);
-        const replay = await request.post('/api/gateway/v1/images', { headers: headers(env.gatewayKey!, idempotencyKey), data: payload });
+        const replay = await api.post('/api/gateway/v1/images', { headers: headers(env.gatewayKey!, idempotencyKey), data: payload });
         expect(replay.status()).toBe(202);
         expect(await replay.json()).toMatchObject({ gatewayRequestId: submission.gatewayRequestId, taskIds: submission.taskIds });
-        const conflict = await request.post('/api/gateway/v1/images', { headers: headers(env.gatewayKey!, idempotencyKey), data: { ...payload, prompt: `${payload.prompt} altered` } });
+        const conflict = await api.post('/api/gateway/v1/images', { headers: headers(env.gatewayKey!, idempotencyKey), data: { ...payload, prompt: `${payload.prompt} altered` } });
         expect(conflict.status()).toBe(409);
         expect(await conflict.json()).toMatchObject({ success: false, code: 'GATEWAY_IDEMPOTENCY_CONFLICT' });
-        const progressive = await waitForProgressiveImageCompletion(page, request, env.gatewayKey!, submission.taskIds);
+        const progressive = await waitForProgressiveImageCompletion(page, api, env.gatewayKey!, submission.taskIds);
         evidence.record({ firstVisibleBeforeBatchTerminal: progressive.firstVisibleBeforeBatchTerminal });
         for (const task of progressive.completed) {
           expect(task.status).toBe('completed');
           expect(task.assetVersionId).toEqual(expect.any(String));
-          const forbidden = await request.get(`/api/gateway/v1/tasks/${encodeURIComponent(task.taskId)}`, { headers: headers(env.secondUserKey!) });
+          const forbidden = await api.get(`/api/gateway/v1/tasks/${encodeURIComponent(task.taskId)}`, { headers: headers(env.secondUserKey!) });
           expect(forbidden.status()).toBe(404);
           const assetVersionOwnerVerified = forbidden.status() === 404;
           const thumbnail256 = task.thumbnailUrls?.['256'];
           const thumbnail512 = task.thumbnailUrls?.['512'];
           expect(thumbnail256).toEqual(expect.any(String));
           expect(thumbnail512).toEqual(expect.any(String));
-          await assertMediaArtifact(request, task.previewUrl!, 'image');
-          await assertMediaArtifact(request, task.downloadUrl!, 'image');
-          await assertMediaArtifact(request, thumbnail256!, 'image', 256);
-          await assertMediaArtifact(request, thumbnail512!, 'image', 512);
+          await assertMediaArtifact(api, task.previewUrl!, 'image');
+          await assertMediaArtifact(api, task.downloadUrl!, 'image');
+          await assertMediaArtifact(api, thumbnail256!, 'image', 256);
+          await assertMediaArtifact(api, thumbnail512!, 'image', 512);
           evidence.record({ ...task, assetVersionOwnerVerified });
         }
       });
@@ -316,38 +329,44 @@ test.describe('V588-MEDIA-001 cloud rollout evidence', () => {
 
     test('submits a video and downloads its projected terminal result', async ({ page, request }, testInfo) => {
       test.setTimeout(12 * 60_000);
-      await withEvidence(page, testInfo, async evidence => {
-        const response = await request.post('/api/gateway/v1/videos', {
+      await withEvidence(page, request, testInfo, async (evidence, api) => {
+        const response = await api.post('/api/gateway/v1/videos', {
           headers: headers(env.gatewayKey!, `e2e-video-${Date.now()}`),
           data: { prompt: 'A slow cinematic camera move across a quiet product display', providerId: env.videoProviderId!, modelId: env.videoModelId!, duration: 5, aspectRatio: '16:9' },
         });
         expect(response.status()).toBe(202);
         const submission = await response.json() as Submission;
         evidence.record(submission);
-        const terminal = await waitForTerminal(request, env.gatewayKey!, submission.taskIds[0]!);
+        const terminal = await waitForTerminal(api, env.gatewayKey!, submission.taskIds[0]!);
         expect(terminal.status).toBe('completed');
-        await assertMediaArtifact(request, terminal.downloadUrl || String(terminal.result?.videoUrl || ''), 'video');
+        await assertMediaArtifact(api, terminal.downloadUrl || String(terminal.result?.videoUrl || ''), 'video');
         evidence.record(terminal);
       });
     });
 
     test('cancels authoritatively, rejects late completion, and refunds exactly once', async ({ page, request }, testInfo) => {
       test.setTimeout(3 * 60_000);
-      await withEvidence(page, testInfo, async evidence => {
-        await loginAndOpenCanvas(page);
-        const before = await readTransactions(page);
-        const response = await request.post('/api/gateway/v1/images', {
+      await withEvidence(page, request, testInfo, async (evidence, api) => {
+        await loginAndOpenCanvas(page, api);
+        const before = await readTransactions(api);
+        const response = await api.post('/api/gateway/v1/images', {
           headers: headers(env.gatewayKey!, `e2e-cancel-${Date.now()}`),
           data: { prompt: 'A cancellable media gateway release probe', providerId: env.imageProviderId!, modelId: env.imageModelId! },
         });
         expect(response.status()).toBe(202);
         const submission = await response.json() as Submission;
         const taskId = submission.taskIds[0]!;
-        const forbidden = await request.get(`/api/gateway/v1/tasks/${encodeURIComponent(taskId)}`, { headers: headers(env.secondUserKey!) });
+        const providerStateBeforeCancel = await waitForProviderSubmissionState(taskId);
+        const forbidden = await api.get(`/api/gateway/v1/tasks/${encodeURIComponent(taskId)}`, { headers: headers(env.secondUserKey!) });
         expect(forbidden.status()).toBe(404);
-        const cancellation = await assertAuthoritativeCancellation(page, request, taskId, new Set(before.map(entry => entry.id)));
+        const cancellation = await assertAuthoritativeCancellation(
+          api,
+          taskId,
+          new Set(before.map(entry => entry.id)),
+          providerStateBeforeCancel,
+        );
         evidence.record(submission);
-        evidence.record({ taskId, lateCompletionRejected: cancellation.lateCompletionRejected, refundCount: 1 });
+        evidence.record({ taskId, ...cancellation, ledger: undefined });
         evidence.recordLedger(cancellation.ledger);
       });
     });

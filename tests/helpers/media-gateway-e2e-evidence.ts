@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { copyFile, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { basename, resolve } from 'node:path';
 
-import type { Page, TestInfo } from '@playwright/test';
+import type { APIRequestContext, APIResponse, Page, TestInfo } from '@playwright/test';
 import type { Reporter, TestCase, TestResult } from '@playwright/test/reporter';
 
 interface EvidenceFacts {
@@ -11,6 +11,14 @@ interface EvidenceFacts {
   taskIds: string[];
   redactedLedger?: unknown;
   [key: string]: unknown;
+}
+
+type GetOptions = Parameters<APIRequestContext['get']>[1];
+type PostOptions = Parameters<APIRequestContext['post']>[1];
+
+export interface RecordedApiRequest {
+  get(url: string, options?: GetOptions): Promise<APIResponse>;
+  post(url: string, options?: PostOptions): Promise<APIResponse>;
 }
 
 function unique(values: string[]): string[] {
@@ -47,6 +55,23 @@ function collectIdentifiers(value: unknown, facts: EvidenceFacts): void {
   }
 }
 
+function safeNetworkUrl(value: string): string {
+  const parsed = new URL(value, 'http://playwright-relative.invalid');
+  return parsed.origin === 'http://playwright-relative.invalid'
+    ? parsed.pathname
+    : `${parsed.origin}${parsed.pathname}`;
+}
+
+function firstIdentifier(value: unknown, key: 'requestId' | 'gatewayRequestId' | 'taskId'): string | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  if (typeof record[key] === 'string') return record[key] as string;
+  if (key === 'taskId' && Array.isArray(record.taskIds)) {
+    return record.taskIds.find((entry): entry is string => typeof entry === 'string') || null;
+  }
+  return null;
+}
+
 export function createMediaGatewayEvidence(page: Page, testInfo: TestInfo) {
   const consoleEntries: Array<Record<string, unknown>> = [];
   const networkEntries: Array<Record<string, unknown>> = [];
@@ -74,6 +99,11 @@ export function createMediaGatewayEvidence(page: Page, testInfo: TestInfo) {
     recordLedger(value: unknown): void {
       facts.redactedLedger = redact(value);
     },
+    recordNetwork(value: Record<string, unknown>): void {
+      const safe = redact(value) as Record<string, unknown>;
+      networkEntries.push(safe);
+      collectIdentifiers(safe, facts);
+    },
     async finalize(): Promise<void> {
       facts.requestIds = unique(facts.requestIds);
       facts.gatewayRequestIds = unique(facts.gatewayRequestIds);
@@ -95,6 +125,47 @@ export function createMediaGatewayEvidence(page: Page, testInfo: TestInfo) {
         contentType: 'image/png',
       });
     },
+  };
+}
+
+export function createRecordedApiRequest(
+  request: APIRequestContext,
+  evidence: ReturnType<typeof createMediaGatewayEvidence>,
+): RecordedApiRequest {
+  async function execute(
+    method: 'GET' | 'POST',
+    url: string,
+    options?: GetOptions | PostOptions,
+  ): Promise<APIResponse> {
+    const timestamp = new Date().toISOString();
+    const response = method === 'GET'
+      ? await request.get(url, options as GetOptions)
+      : await request.post(url, options as PostOptions);
+    let payload: unknown;
+    try {
+      const contentType = response.headers()['content-type'] || '';
+      if (contentType.includes('json')) payload = await response.json();
+    } catch {
+      payload = undefined;
+    }
+    evidence.recordNetwork({
+      timestamp,
+      method,
+      url: safeNetworkUrl(url),
+      status: response.status(),
+      mimeType: response.headers()['content-type']?.split(';')[0] || null,
+      requestId: firstIdentifier(payload, 'requestId') || response.headers()['x-request-id'] || null,
+      gatewayRequestId: firstIdentifier(payload, 'gatewayRequestId'),
+      taskId: firstIdentifier(payload, 'taskId'),
+    });
+    if (payload && typeof payload === 'object' && !Array.isArray(payload)) {
+      evidence.record(redact(payload) as Record<string, unknown>);
+    }
+    return response;
+  }
+  return {
+    get: (url, options) => execute('GET', url, options),
+    post: (url, options) => execute('POST', url, options),
   };
 }
 
