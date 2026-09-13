@@ -2659,6 +2659,6 @@ BUG-018 已从未验证项移除。剩余顺序为 `002-B -> 002-D -> 002-E`；�
 - [x] Coze 已 fetch 并无冲突合并 exact `main@583c96295e48276b52473f58d98277bb36e87caf`；`origin/stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 未触碰。
 - [x] 外部预览首页连续三次 200；`/api/auth/me` 返回 200；图像和视频网关默认关闭均返回 503 `GATEWAY_DISABLED`。
 - [ ] 从 Coze 最终输出补录 Build ID、唯一 5000 PID、云端 `117/117`、TypeScript、Lint、保护基线和构建计数；当前不得根据指令内容推断通过。
-- [ ] 使用隔离测试 PostgreSQL 完成 Doctor 与多实例并发门禁；不得使用生产库。
+- [x] 使用一次性 PostgreSQL 18.4 集群完成 Doctor、20 路准入并发、完整生命周期与 Outbox，4 文件 `25/25`；结束后已停止删除，未使用生产库。
 - [ ] 临时启用后完成 PearAPI/APIMart 图像、同步直返、`n=2` 逐槽、视频、取消与一次退款、跨用户、吊销、限流和 UTC 日配额。
 - [ ] 核对唯一 AssetVersion、原图、256/512 缩略图、下载、刷新、S3 重启恢复和清理 Outbox，并保存浏览器与脱敏账务证据。

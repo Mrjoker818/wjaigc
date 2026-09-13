@@ -2442,3 +2442,9 @@ The focused gate test passes `7/7`; the actual protected-baseline command passes
 - 图像与视频网关在默认关闭态均返回 503 `GATEWAY_DISABLED`，证明本轮候选的默认失败关闭边界生效。
 - 本轮没有证据证明原登录后的画布、原图像和视频业务入口全部通过，也没有启用态真实供应商、缩略图、S3、并发和账务证据。
 - **发布结论保持不通过。** 当前只把 Coze exact-SHA 与默认关闭态从未验证改为部分通过；Task 9 整体约 80%，`stable` 继续保持只读。
+
+### 2026-09-14 媒体网关 Task 9 隔离 PostgreSQL 判断
+
+- 当前候选已在一次性 PostgreSQL 18.4 集群通过 Doctor、20 路幂等/限流/配额、任务终态、取消退款和 Outbox 合同：4 文件、`25/25`。
+- 临时集群已停止并删除，既有 PostgreSQL 与生产数据未接触。
+- **发布结论仍不通过。** 数据库门禁已关闭，但 Coze 启用态真实图像/视频、`n=2`、AssetVersion、256/512 缩略图、S3 恢复及成功态浏览器制品仍缺失；Task 9 整体约 85%。

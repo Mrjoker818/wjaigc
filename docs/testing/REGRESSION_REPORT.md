@@ -3187,3 +3187,13 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - 等待期间浏览器控制内核重置，未能读取 Coze 最终 Build ID、PID 与完整云端测试计数；临时启用后的真实供应商、AssetVersion、缩略图、S3、`n=2` 和账务链路仍未执行。
 
 **判定：`LOCAL CODE PASS / COZE DEFAULT-OFF PASS / ENABLED E2E UNVERIFIED`。** Task 9 尚不能关闭或更新 `stable`。
+
+### 2026-09-14 Task 9 当前候选隔离 PostgreSQL 复验
+
+- 在系统临时目录创建 PostgreSQL 18.4 一次性集群，仅监听 `127.0.0.1:55433`；没有连接或修改本机既有 55432 实例及任何生产数据库。
+- 仓库迁移 `20260913_v588_media_gateway.sql` 在测试基库成功建立三张网关表。
+- Doctor、准入并发、完整生命周期和清理 Outbox 共 4 个文件、`25/25` 通过。
+- 真实覆盖：非 UTC 会话统计口径、20 路同幂等键只执行一次、分钟限流、UTC 日配额、跨用户隔离、Key 吊销、一次扣费与一次退款、取消后迟到完成拒绝、仅 processing 可完成、数据库失联失败关闭。
+- 测试结束后已停止并删除一次性集群，确认 55433 无监听。
+
+**判定：当前候选隔离 PostgreSQL 门禁通过。** Task 9 剩余阻断仅为 Coze 启用态真实供应商、资产/缩略图/S3、账务和浏览器证据。
