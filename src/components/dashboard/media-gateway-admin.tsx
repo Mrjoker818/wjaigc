@@ -65,6 +65,11 @@ interface KeyFormState {
   enabled: boolean;
 }
 
+interface BoundedJsonResponse {
+  response: Response;
+  body: Record<string, unknown>;
+}
+
 type DrawerMode = 'issue' | 'edit' | null;
 type MutationScope = 'issue' | `edit:${string}` | `revoke:${string}`;
 
@@ -199,17 +204,33 @@ export default function MediaGatewayAdmin() {
     });
   }, []);
 
-  const runBoundedFetch = useCallback(async (
+  const runBoundedJsonRequest = useCallback(async (
     scope: string,
     input: RequestInfo | URL,
     init?: RequestInit,
-  ): Promise<Response> => {
+  ): Promise<BoundedJsonResponse> => {
     requestControllers.current.get(scope)?.abort();
     const controller = new AbortController();
     requestControllers.current.set(scope, controller);
     const timeout = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+    const aborted = new Promise<never>((_resolve, reject) => {
+      controller.signal.addEventListener('abort', () => {
+        reject(new DOMException('Request cancelled', 'AbortError'));
+      }, { once: true });
+    });
     try {
-      return await fetch(input, { ...init, signal: controller.signal });
+      const response = await Promise.race([
+        fetch(input, { ...init, signal: controller.signal }),
+        aborted,
+      ]);
+      const body = await Promise.race([responseBody(response), aborted]);
+      if (
+        controller.signal.aborted
+        || requestControllers.current.get(scope) !== controller
+      ) {
+        throw new DOMException('Request cancelled', 'AbortError');
+      }
+      return { response, body };
     } finally {
       window.clearTimeout(timeout);
       if (requestControllers.current.get(scope) === controller) {
@@ -223,16 +244,15 @@ export default function MediaGatewayAdmin() {
   }, []);
 
   const readAuthoritativeKeys = useCallback(async (scope: string): Promise<GatewayKeyView[]> => {
-    const response = await runBoundedFetch(scope, '/api/admin/gateway/keys');
+    const { response, body } = await runBoundedJsonRequest(scope, '/api/admin/gateway/keys');
     if (!response.ok) throw new Error('request failed');
-    const body = await responseBody(response);
     if (body.success !== true || !Array.isArray(body.keys)) {
       throw new UntrustedResponseError('untrusted response');
     }
     const parsedKeys = body.keys.map(parseKey);
     if (parsedKeys.some(key => key === null)) throw new UntrustedResponseError('untrusted response');
     return parsedKeys as GatewayKeyView[];
-  }, [runBoundedFetch]);
+  }, [runBoundedJsonRequest]);
 
   const loadKeys = useCallback(async (): Promise<void> => {
     setLoading(true);
@@ -334,7 +354,7 @@ export default function MediaGatewayAdmin() {
       const isIssue = drawerMode === 'issue';
       const submittedLabel = form.label.trim();
       const submittedUserId = form.userId.trim();
-      const response = await runBoundedFetch(
+      const { response, body } = await runBoundedJsonRequest(
         scope,
         isIssue ? '/api/admin/gateway/keys' : `/api/admin/gateway/keys/${editingKey?.id ?? ''}`,
         {
@@ -353,7 +373,6 @@ export default function MediaGatewayAdmin() {
           }),
         },
       );
-      const body = await responseBody(response);
       if (!response.ok) {
         await reconcileAmbiguousMutation(scope, isIssue ? '签发结果无法确认。' : '保存结果无法确认。', setSheetError);
         return;
@@ -435,12 +454,11 @@ export default function MediaGatewayAdmin() {
     setRevoking(true);
     setRevokeError(null);
     try {
-      const response = await runBoundedFetch(
+      const { response, body } = await runBoundedJsonRequest(
         scope,
         `/api/admin/gateway/keys/${revokeKey.id}`,
         { method: 'DELETE' },
       );
-      const body = await responseBody(response);
       if (!response.ok) {
         await reconcileAmbiguousMutation(scope, '吊销结果无法确认。', setRevokeError);
         return;
