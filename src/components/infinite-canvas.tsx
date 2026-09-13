@@ -109,6 +109,7 @@ import { CanvasMediaNode } from '@/components/canvas/CanvasMediaNode';
 import { CanvasSurface } from '@/components/canvas/CanvasSurface';
 import { CanvasToolHost } from '@/components/canvas/CanvasToolHost';
 import { CanvasZoomCluster } from '@/components/canvas/CanvasZoomCluster';
+import { MobileBottomToolbar } from '@/components/canvas/mobile-bottom-toolbar';
 import { CanvasEmptyState } from '@/components/canvas/CanvasEmptyState';
 import { CanvasImageActionToolbar } from '@/components/canvas/CanvasImageActionToolbar';
 import { CanvasEditUpscaleSvgPanel } from '@/components/canvas/CanvasEditUpscaleSvgPanel';
@@ -156,6 +157,7 @@ import {
   type CanvasCommand,
 } from '@/lib/canvas-kernel/commands';
 import { resolveActiveCanvasImage } from '@/lib/canvas-active-image';
+import type { CanvasToolbarAction } from '@/lib/mobile-canvas-toolbar';
 import {
   THREE_D_POLL_INTERVAL_MS,
   THREE_D_TASK_TIMEOUT_MS,
@@ -11541,6 +11543,51 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
     });
   };
 
+  const mobileBottomToolbarActions: CanvasToolbarAction[] = [
+    {
+      id: 'select', label: '选择', group: '基础', icon: <MousePointer2 className="h-4 w-4" />,
+      active: activePointerTool === 'select' && !isPanning, onActivate: activateSelectPointerTool,
+    },
+    {
+      id: 'pan', label: '平移', group: '基础', icon: <Hand className="h-4 w-4" />,
+      active: activePointerTool === 'hand' || isPanning, onActivate: activateHandPointerTool,
+    },
+    {
+      id: 'upload', label: '上传图片', group: '基础', icon: <Upload className="h-4 w-4" />,
+      onActivate: () => uploadFileInputRef.current?.click(),
+    },
+    { id: 'zoom-out', label: '缩小', group: '视图', icon: <Minus className="h-4 w-4" />, onActivate: handleZoomOut },
+    { id: 'zoom-in', label: '放大', group: '视图', icon: <ZoomIn className="h-4 w-4" />, onActivate: handleZoomIn },
+    { id: 'reset-view', label: '重置视图', group: '视图', icon: <Maximize2 className="h-4 w-4" />, onActivate: resetViewToContent },
+    { id: 'minimap', label: '小地图', group: '视图', icon: <Camera className="h-4 w-4" />, hidden: !minimapAvailable, active: minimapOpen, onActivate: toggleCanvasMinimap },
+    { id: 'command-palette', label: '命令面板', group: '视图', icon: <LayoutDashboard className="h-4 w-4" />, onActivate: () => setCommandPaletteOpen(true) },
+    { id: 'grid', label: '切换网格', group: '视图', icon: <LayoutGrid className="h-4 w-4" />, onActivate: cycleGridMode },
+    { id: 'connections', label: '显示连线', group: '视图', icon: <GitMerge className="h-4 w-4" />, active: showConnections, onActivate: () => setShowConnections(previous => !previous) },
+    { id: 'layers', label: '图层面板', group: '视图', icon: <Layers className="h-4 w-4" />, active: showLayerPanel, onActivate: () => toggleLayerPanel('bottom-toolbar') },
+    { id: 'history', label: '版本历史', group: '视图', icon: <RotateCcw className="h-4 w-4" />, active: showVersionHistory, onActivate: () => toggleVersionHistory('bottom-toolbar') },
+    { id: 'engine-settings', label: 'AI引擎设置', group: '视图', icon: <Settings className="h-4 w-4" />, onActivate: () => setEngineDialog('upscale') },
+    { id: 'generate', label: '图像生成器', group: 'AI 创作', icon: <Sparkles className="h-4 w-4" />, active: showCanvasGenerator, onActivate: handleOpenCanvasGenerator },
+    { id: 'image-to-3d', label: '图转3D工厂', group: 'AI 创作', icon: <BoxIcon className="h-4 w-4" />, active: show3DModal, onActivate: () => handleOpen3D(true) },
+    { id: 'language-edit', label: '语言修图', group: 'AI 创作', icon: <Pencil className="h-4 w-4" />, onActivate: () => onEditImage?.(null) },
+    { id: 'agent', label: 'Agent编排', group: 'AI 创作', icon: <Bot className="h-4 w-4" />, onActivate: () => { if (!activateCanvasToolSession('agent', 'bottom-toolbar', [])) return; setAgentEditImage(null); setShowAgentEditor(true); } },
+    { id: 'video', label: '视频生成', group: 'AI 创作', icon: <Film className="h-4 w-4" />, onActivate: () => { onOpenVideoPanel?.(); window.dispatchEvent(new Event('wujie:open-video-panel')); } },
+    { id: 'brand-ecommerce', label: '品牌电商', group: '品牌设计', icon: <ShoppingBag className="h-4 w-4" />, onActivate: () => { if (activateCanvasToolSession('brand-ecommerce', 'bottom-toolbar', [])) setShowBrandEcommerce(true); } },
+    { id: 'product-refine', label: '精修引擎', group: '品牌设计', icon: <Scan className="h-4 w-4" />, onActivate: () => { if (!activateCanvasToolSession('product-refine', 'bottom-toolbar', [])) return; setRefineEngineImageUrl(''); setShowRefineEngine(true); } },
+    { id: 'human-refine', label: '人物精修', group: '品牌设计', icon: <UserRoundCheck className="h-4 w-4" />, onActivate: () => { const image = selectedImageData || selectedImage; if (!activateCanvasToolSession('human-refine', 'bottom-toolbar', image ? [image.id] : [])) return; setHumanRepairImageUrl(image?.url || ''); setShowHumanRepair(true); } },
+    { id: 'font-design', label: '字境大师', group: '品牌设计', icon: <span className="text-sm font-bold">字</span>, onActivate: () => { if (activateCanvasToolSession('font-design', 'bottom-toolbar', [])) setShowFontDesign(true); } },
+    { id: 'brand-factory', label: '品牌工厂', group: '品牌设计', icon: <Building2 className="h-4 w-4" />, onActivate: () => { if (activateCanvasToolSession('brand-factory', 'bottom-toolbar', [])) setShowBrandFactory(true); } },
+    { id: 'brand-ip', label: '品牌IP', group: '品牌设计', icon: <Sparkles className="h-4 w-4" />, onActivate: () => { if (activateCanvasToolSession('brand-ip', 'bottom-toolbar', [])) setShowBrandIp(true); } },
+    { id: 'logo-pro', label: 'Logo Pro', group: '品牌设计', icon: <PenTool className="h-4 w-4" />, onActivate: () => { if (activateCanvasToolSession('logo-pro', 'bottom-toolbar', [])) setShowLogoSkill(true); } },
+    { id: 'scene-studio', label: '3D构图', group: '专业工具', icon: <Boxes className="h-4 w-4" />, onActivate: () => { if (activateCanvasToolSession('scene-studio', 'bottom-toolbar', [])) setShowSceneStudio(true); } },
+    { id: 'packaging-pro', label: '包装Pro', group: '专业工具', icon: <Package className="h-4 w-4" />, onActivate: () => { if (activateCanvasToolSession('packaging-pro', 'bottom-toolbar', [])) setShowBrandPackaging(true); } },
+    { id: 'display-pro', label: '展陈Pro', group: '专业工具', icon: <Store className="h-4 w-4" />, onActivate: () => { if (activateCanvasToolSession('display-pro', 'bottom-toolbar', [])) setShowDisplay3D(true); } },
+    { id: 'effect-reverse', label: '反向拆图Pro', group: '专业工具', icon: <Scan className="h-4 w-4" />, onActivate: openEffectReverseEngineering },
+    { id: 'ai-psd', label: 'AI PSD', group: '专业工具', icon: <FileImage className="h-4 w-4" />, onActivate: () => { if (activateCanvasToolSession('ai-psd', 'bottom-toolbar', [])) setShowAiPsd(true); } },
+    { id: 'sticker', label: '表情助手', group: '专业工具', icon: <Heart className="h-4 w-4" />, onActivate: () => { if (activateCanvasToolSession('sticker-assistant', 'bottom-toolbar', [])) setShowStickerAssistant(true); } },
+    { id: 'hex-cube', label: '六面体', group: '画布工具', icon: <Boxes className="h-4 w-4" />, onActivate: handleCreateHexCube },
+    { id: 'annotation', label: 'ChatCanvas', group: '画布工具', icon: <MessageCircle className="h-4 w-4" />, active: annotationMode, onActivate: () => handleToggleCanvasAnnotation('bottom-toolbar') },
+  ];
+
   return (
     <div
       className="w-full h-full relative"
@@ -17704,6 +17751,12 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
         </Suspense>
       )}
 
+      <MobileBottomToolbar
+        actions={mobileBottomToolbarActions}
+        zoomLabel={`${Math.round(zoom * 100)}%`}
+        isMonochrome={isMonochrome}
+      />
+
         {/* Floating pill toolbar - semi-collapsed, expand on hover */}
       <div
         ref={bottomToolbarRef}
@@ -17716,7 +17769,7 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
         onMouseEnter={() => setBottomBarHovered(true)}
         onMouseLeave={() => setBottomBarHovered(false)}
         style={{ bottom: (showLayerPanel || showVersionHistory) ? 'calc(min(30dvh, 260px) + 28px)' : undefined }}
-        className={`absolute bottom-5 left-1/2 -translate-x-1/2 z-50 flex max-w-[calc(100%-2rem)] items-center overflow-visible rounded-full px-2.5 py-1.5 transition-all duration-300 ease-[cubic-bezier(0.25,0.1,0.25,1)] ${isMonochrome ? 'bg-white/95 border border-gray-200 shadow-lg' : 'bg-[#1a1a1a]/95 border border-white/[0.08] shadow-2xl backdrop-blur-md'} ${bottomBarHovered ? (isMonochrome ? 'shadow-xl' : 'shadow-2xl ring-1 ring-white/[0.06]') : ''}`}
+        className={`absolute bottom-5 left-1/2 -translate-x-1/2 z-50 hidden max-w-[calc(100%-2rem)] items-center overflow-visible rounded-full px-2.5 py-1.5 transition-all duration-300 ease-[cubic-bezier(0.25,0.1,0.25,1)] md:flex ${isMonochrome ? 'bg-white/95 border border-gray-200 shadow-lg' : 'bg-[#1a1a1a]/95 border border-white/[0.08] shadow-2xl backdrop-blur-md'} ${bottomBarHovered ? (isMonochrome ? 'shadow-xl' : 'shadow-2xl ring-1 ring-white/[0.06]') : ''}`}
       >
         {/* ── Center: Main function buttons (always visible) ── */}
         <button
