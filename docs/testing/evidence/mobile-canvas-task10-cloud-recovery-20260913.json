@@ -59,7 +59,24 @@
     "lintBuild": "passed",
     "protectedBaseline": "38/38 passed, 0 drift",
     "productionBuild": "120/120 pages, exit 0",
-    "cloudStatus": "pending deployment and real old-document lazy-chunk recovery evidence"
+    "cloudStatus": "passed",
+    "githubMain": "7bed6e2196ae43f1f22be16cf7b36d5541622a28",
+    "cozeHead": "3cdcbc9a048462296cab561360641b64f258938c",
+    "buildId": "89oMVeKh9njdq7IcMrFnL",
+    "servicePid": 21381,
+    "localhostRoot": "HTTP 200",
+    "oldDocumentTimeOrigin": 1789290616258.7,
+    "missingChunkUrl": "/_next/static/chunks/0mccmsu_4g2uc.js",
+    "missingChunkStatus": 404,
+    "retryUrl": "/?projectId=demo-project&_chunk_retry=1789290970028",
+    "recoveredDocumentTimeOrigin": 1789290970029,
+    "reloadCountObserved": 1,
+    "recoveredPanelDialog": true,
+    "recoveredCloseButton": true,
+    "navigationOnSecondPanelOpen": false,
+    "runtimeExceptionsAfterRecovery": 0,
+    "screenshot": "docs/testing/evidence/task10-cloud-cross-deploy-7bed6e21.png",
+    "screenshotSha256": "2EA3CBE6CCB88261D356104622E24E8F7E60338E31C5A5FED1C5FA39F5792AC9"
   },
   "mobileViewport": [
     {

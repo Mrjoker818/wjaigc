@@ -3115,3 +3115,11 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - 为构造真实且可重复的边界，新增版本历史面板可访问性合同：实现前测试 `1 failed`，实现后聚焦 `14/14`；面板现在具有 `role="dialog" / aria-label="版本历史"`，关闭按钮具有 `aria-label="关闭版本历史"`。这是独立有效的产品修正，也会合法改变懒加载 chunk。
 - 本候选完整 Vitest：`6219 passed / 190 PostgreSQL 条件 skipped / 0 failed`；TypeScript、构建版 ESLint、38 项保护基线均退出 0；生产构建生成 `120/120` 页面并退出 0。既有 Turbopack 动态文件追踪警告继续保留。
 - **判定：第三次跨部署候选 `LOCAL PASS / CLOUD PENDING`。** 只有 Coze 部署后，由部署前未加载该懒组件的旧页面首次打开版本历史并观察到一次 `_chunk_retry`、新 Build 恢复且无循环，才可关闭真实跨部署恢复项。
+
+### 2026-09-13 Task 10 第三次真实跨部署闭环
+
+- GitHub `main@7bed6e2196ae43f1f22be16cf7b36d5541622a28` 已由 Coze 合并为同 tree 提交 `3cdcbc9a048462296cab561360641b64f258938c`；Build ID `89oMVeKh9njdq7IcMrFnL`，唯一 PID `21381`，localhost 首页 HTTP 200，`stable@52f7c601` 未修改。
+- 部署前旧文档 `timeOrigin=1789290616258.7` 保持未刷新且未加载版本历史；部署后首次触发该懒边界，旧 chunk `/_next/static/chunks/0mccmsu_4g2uc.js` 真实返回 HTTP 404。
+- 客户端自动导航至 `/?projectId=demo-project&_chunk_retry=1789290970028`，新文档 `timeOrigin=1789290970029`；只观察到一次页面导航。恢复后版本历史以 `role="dialog" / aria-label="版本历史"` 打开，关闭按钮可访问，画布仍可用。
+- 在恢复后的同一文档再次打开面板，`timeOrigin` 与 URL 均未变化，没有第二次导航、刷新循环或 Runtime exception。截图：`docs/testing/evidence/task10-cloud-cross-deploy-7bed6e21.png`（SHA-256 `2EA3CBE6CCB88261D356104622E24E8F7E60338E31C5A5FED1C5FA39F5792AC9`）；机器证据已更新。
+- **判定：真实旧页面跨部署一次性 Chunk 恢复 `CLOUD PASS / CLOSED`。** Task 10 总状态仍为 `CONDITIONAL PASS / PHYSICAL DEVICE GATE OPEN`，只剩实体触屏、软键盘和 190 项隔离 PostgreSQL 条件测试，不进入媒体网关。

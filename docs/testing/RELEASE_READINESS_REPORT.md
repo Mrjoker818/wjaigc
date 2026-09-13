@@ -2384,3 +2384,9 @@ The focused gate test passes `7/7`; the actual protected-baseline command passes
 - 新候选仅对 `VersionHistoryPanel` 增加可访问的对话框名称和关闭按钮名称，并新增 RED/GREEN 回归测试；没有改变画布、任务、供应商、积分或项目数据链路。
 - 新鲜本地门禁：聚焦 `14/14`、全量 Vitest `6219 passed / 190 conditional skipped / 0 failed`、TypeScript、构建版 ESLint、保护基线 `38/38`、生产构建 `120/120` 均通过。
 - **发布状态保持 `CONDITIONAL PASS / PHYSICAL DEVICE GATE OPEN`。** 第三次 Coze 真实跨部署、实体触屏、软键盘和 190 项隔离 PostgreSQL 测试仍为开放项。
+
+### 2026-09-13 Task 10 真实跨部署发布门禁结论
+
+- Coze 已运行与 `main@7bed6e21` 同 tree 的 Build `89oMVeKh9njdq7IcMrFnL`；云端聚焦 `14/14`、TypeScript、构建版 ESLint、保护基线 `38/38`、生产构建 `120/120` 和首页 HTTP 200 均通过。
+- 部署前旧页面首次请求未缓存的版本历史懒 chunk 得到 HTTP 404，客户端只执行一次带 `_chunk_retry` 的恢复；新页面打开版本历史成功，重复操作无第二次导航、无异常、画布可用。
+- **跨部署 Chunk 恢复门禁：通过 / CLOSED。** Task 10 及全平台仍不能判定完全通过，实体触屏、真实软键盘和 190 项隔离 PostgreSQL 测试继续作为发布条件；`stable` 保持只读。
