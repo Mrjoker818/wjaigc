@@ -8,6 +8,14 @@ const MAX_IDENTIFIER_LENGTH = 200;
 const MAX_REFERENCE_IMAGES = 16;
 const IDENTIFIER_PATTERN = /^[A-Za-z0-9](?:[A-Za-z0-9._:/-]*[A-Za-z0-9])?$/;
 const SECRET_FIELD_PATTERN = /^(?:api[_-]?key|authorization|gateway[_-]?key|key[_-]?hash|provider[_-]?(?:api[_-]?)?key|secret)$/i;
+const IMAGE_REQUEST_FIELDS = new Set([
+  'prompt', 'providerId', 'modelId', 'n', 'aspectRatio', 'size', 'quality', 'referenceImages',
+  'apiKey', 'sourceChannel',
+]);
+const VIDEO_REQUEST_FIELDS = new Set([
+  'prompt', 'providerId', 'modelId', 'duration', 'aspectRatio', 'firstFrameImageUrl',
+  'lastFrameImageUrl', 'referenceImages', 'apiKey', 'sourceChannel',
+]);
 
 export interface GatewayImageRequest {
   prompt: string;
@@ -40,6 +48,15 @@ function asRecord(value: unknown): Record<string, unknown> {
     throw invalidRequest();
   }
   return value as Record<string, unknown>;
+}
+
+function assertAllowedFields(
+  input: Record<string, unknown>,
+  allowedFields: ReadonlySet<string>,
+): void {
+  if (Object.keys(input).some(field => !allowedFields.has(field))) {
+    throw invalidRequest('Gateway request contains an undeclared field');
+  }
 }
 
 function boundedText(value: unknown, field: string, maximum: number): string {
@@ -105,6 +122,7 @@ function assignDefined<T extends object, K extends keyof T>(
 
 export function normalizeGatewayImageRequest(value: unknown): GatewayImageRequest {
   const input = asRecord(value);
+  assertAllowedFields(input, IMAGE_REQUEST_FIELDS);
   const output: GatewayImageRequest = {
     prompt: boundedText(input.prompt, 'prompt', MAX_PROMPT_LENGTH),
     providerId: identifier(input.providerId, 'providerId'),
@@ -130,6 +148,7 @@ export function normalizeGatewayImageRequest(value: unknown): GatewayImageReques
 
 export function normalizeGatewayVideoRequest(value: unknown): GatewayVideoRequest {
   const input = asRecord(value);
+  assertAllowedFields(input, VIDEO_REQUEST_FIELDS);
   const output: GatewayVideoRequest = {
     prompt: boundedText(input.prompt, 'prompt', MAX_PROMPT_LENGTH),
     providerId: identifier(input.providerId, 'providerId'),

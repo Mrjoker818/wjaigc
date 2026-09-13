@@ -4,6 +4,7 @@ vi.mock('server-only', () => ({}));
 
 import { readGatewayJson } from '@/lib/media-gateway/http';
 import { trustedGatewayContext } from '@/lib/media-gateway/internal-client';
+import { authenticateGatewayBearer } from '@/lib/media-gateway/key-service';
 import {
   normalizeGatewayImageRequest,
   normalizeGatewayVideoRequest,
@@ -18,6 +19,16 @@ function jsonRequest(body: string, headers: Record<string, string> = {}): Reques
 }
 
 describe('media gateway external security boundary', () => {
+  it.each([null, '', 'Basic abc', 'Bearer short'])(
+    'rejects missing or malformed gateway credentials before storage access: %j',
+    async authorization => {
+      await expect(authenticateGatewayBearer(authorization)).rejects.toMatchObject({
+        code: 'GATEWAY_KEY_INVALID',
+        status: 401,
+      });
+    },
+  );
+
   it('rejects declared and streamed request bodies larger than one MiB', async () => {
     const declared = jsonRequest('{}', { 'content-length': '1048577' });
     await expect(readGatewayJson(declared)).rejects.toMatchObject({

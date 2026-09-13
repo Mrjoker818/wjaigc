@@ -32,11 +32,20 @@ describe('media gateway lifecycle on PostgreSQL', () => {
       });
       const principal = await authenticateGatewayBearer(`Bearer ${issued.secret}`);
       const { recordGatewayAttempt, reserveGatewayRequest, markGatewayAdmitted } = await import('@/lib/media-gateway/admission');
+      const { digestGatewayRequest } = await import('@/lib/media-gateway/schema');
+      const privatePrompt = 'private prompt task8';
+      const privateReference = '/api/serve-upload/private-reference-task8.png';
+      const requestDigest = digestGatewayRequest({
+        prompt: privatePrompt,
+        providerId: 'pear',
+        modelId: 'image-model',
+        referenceImages: [privateReference],
+      });
       const permits = await Promise.all(Array.from({ length: 20 }, () => recordGatewayAttempt(principal)));
       const decisions = await Promise.all(permits.map(attemptPermit => reserveGatewayRequest({
         principal,
         idempotencyKey: 'task-8-identical',
-        requestDigest: 'a'.repeat(64),
+        requestDigest,
         mediaType: 'image',
         attemptPermit,
       })));
@@ -55,7 +64,7 @@ describe('media gateway lifecycle on PostgreSQL', () => {
       const task = await createBillableTask({
         userId: 'gateway-user',
         idempotencyKey: gatewayRequestId,
-        requestDigest: 'a'.repeat(64),
+        requestDigest,
         creditCost: 15,
         task: {
           id: 'gateway-task-8', type: 'generate', status: 'processing', progress: 10,
@@ -75,7 +84,7 @@ describe('media gateway lifecycle on PostgreSQL', () => {
       const replays = await Promise.all(Array.from({ length: 20 }, async () => {
         const attemptPermit = await recordGatewayAttempt(principal);
         return reserveGatewayRequest({
-          principal, idempotencyKey: 'task-8-identical', requestDigest: 'a'.repeat(64),
+          principal, idempotencyKey: 'task-8-identical', requestDigest,
           mediaType: 'image', attemptPermit,
         });
       }));
@@ -83,8 +92,8 @@ describe('media gateway lifecycle on PostgreSQL', () => {
         && decision.request.taskIds[0] === 'gateway-task-8')).toBe(true);
 
       expect(JSON.stringify(await query('SELECT * FROM wujie_gateway_keys'))).not.toContain(issued.secret);
-      expect(JSON.stringify(await query('SELECT * FROM wujie_gateway_requests'))).not.toContain('private prompt');
-      expect(JSON.stringify(await query('SELECT * FROM cloud_tasks'))).not.toContain('private-reference');
+      expect(JSON.stringify(await query('SELECT * FROM wujie_gateway_requests'))).not.toContain(privatePrompt);
+      expect(JSON.stringify(await query('SELECT * FROM cloud_tasks'))).not.toContain(privateReference);
     });
   }, 45_000);
 
