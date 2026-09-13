@@ -26,6 +26,7 @@ const databaseRow = {
   created_at: '2026-09-13T00:00:00.000Z',
   last_used_at: null,
   revoked_at: null,
+  today_usage: 12,
 };
 
 const validInput = {
@@ -51,6 +52,7 @@ describe('media gateway key service', () => {
           id: params[0],
           key_hash: params[2],
           key_prefix: params[3],
+          today_usage: 0,
         }],
         rowCount: 1,
       }))
@@ -70,8 +72,23 @@ describe('media gateway key service', () => {
     expect(inserted.keyHash).toBe(createHash('sha256').update(issued.secret).digest('hex'));
     expect(JSON.stringify(inserted)).not.toContain(issued.secret);
     expect(JSON.stringify(issued.key)).not.toContain(issued.secret);
+    expect(issued.key.todayUsage).toBe(0);
     expect(JSON.stringify(await listGatewayKeys())).not.toContain(issued.secret);
     expect(String(insert[0])).toContain('RETURNING');
+  });
+
+  it('lists keys with authoritative usage aggregated for the current UTC date', async () => {
+    mocks.execSql.mockResolvedValueOnce({ rows: [databaseRow], rowCount: 1 });
+
+    await expect(listGatewayKeys()).resolves.toEqual([expect.objectContaining({
+      id: 'gwkey_123',
+      todayUsage: 12,
+    })]);
+
+    const sql = String(mocks.execSql.mock.calls[0][0]);
+    expect(sql).toContain('wujie_media_gateway_usage_daily');
+    expect(sql).toMatch(/SUM\s*\(.*request_count.*\)/i);
+    expect(sql).toMatch(/AT TIME ZONE\s+'UTC'/i);
   });
 
   it('authenticates and updates last_used_at atomically without enumerating plaintext keys', async () => {

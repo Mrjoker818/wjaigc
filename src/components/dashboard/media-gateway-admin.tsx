@@ -51,6 +51,7 @@ interface GatewayKeyView {
   dailyQuota: number;
   todayUsage: number;
   enabled: boolean;
+  createdBy: string;
   createdAt: string;
   lastUsedAt: string | null;
   revokedAt: string | null;
@@ -80,8 +81,29 @@ function objectValue(value: unknown): Record<string, unknown> | null {
     : null;
 }
 
+const FULL_SECRET_PATTERN = /wmg_[A-Za-z0-9_-]{43,}/;
+const SECRET_PATTERN = /^wmg_[A-Za-z0-9_-]{43}$/;
+
 function safeText(value: unknown, maximum: number): string | null {
-  return typeof value === 'string' && value.length > 0 && value.length <= maximum ? value : null;
+  return typeof value === 'string'
+    && value.trim().length > 0
+    && value.length <= maximum
+    && !FULL_SECRET_PATTERN.test(value)
+    ? value
+    : null;
+}
+
+function safeInteger(value: unknown, minimum: number, maximum: number): number | null {
+  return Number.isSafeInteger(value) && Number(value) >= minimum && Number(value) <= maximum
+    ? Number(value)
+    : null;
+}
+
+function safeTimestamp(value: unknown, nullable = false): string | null {
+  if (nullable && value === null) return null;
+  if (typeof value !== 'string' || FULL_SECRET_PATTERN.test(value)) return null;
+  const parsed = new Date(value);
+  return !Number.isNaN(parsed.getTime()) && parsed.toISOString() === value ? value : null;
 }
 
 function parseKey(value: unknown): GatewayKeyView | null {
@@ -89,25 +111,39 @@ function parseKey(value: unknown): GatewayKeyView | null {
   if (!record) return null;
   const id = safeText(record.id, 100);
   const userId = safeText(record.userId, 200);
-  const rawPrefix = safeText(record.keyPrefix, 100);
+  const keyPrefix = safeText(record.keyPrefix, 12);
   const label = safeText(record.label, 100);
+  const createdBy = safeText(record.createdBy, 200);
+  const requestsPerMinute = safeInteger(record.requestsPerMinute, 1, 600);
+  const dailyQuota = safeInteger(record.dailyQuota, 0, 100_000);
+  const todayUsage = safeInteger(record.todayUsage, 0, Number.MAX_SAFE_INTEGER);
+  const createdAt = safeTimestamp(record.createdAt);
+  const lastUsedAt = safeTimestamp(record.lastUsedAt, true);
+  const revokedAt = safeTimestamp(record.revokedAt, true);
   if (
-    !id || !userId || !rawPrefix || !label
-    || typeof record.requestsPerMinute !== 'number'
-    || typeof record.dailyQuota !== 'number'
+    !id || !/^gwkey_[A-Za-z0-9_-]+$/.test(id)
+    || !userId || !keyPrefix || !/^wmg_[A-Za-z0-9_-]{8}$/.test(keyPrefix)
+    || !label || !createdBy
+    || requestsPerMinute === null || dailyQuota === null || todayUsage === null
+    || typeof record.enabled !== 'boolean'
+    || createdAt === null
+    || (record.lastUsedAt !== null && lastUsedAt === null)
+    || (record.revokedAt !== null && revokedAt === null)
+    || (revokedAt !== null && record.enabled)
   ) return null;
   return {
     id,
     userId,
-    keyPrefix: rawPrefix.slice(0, 12),
+    keyPrefix,
     label,
-    requestsPerMinute: record.requestsPerMinute,
-    dailyQuota: record.dailyQuota,
-    todayUsage: typeof record.todayUsage === 'number' ? record.todayUsage : 0,
-    enabled: record.enabled === true,
-    createdAt: safeText(record.createdAt, 100) ?? '',
-    lastUsedAt: safeText(record.lastUsedAt, 100),
-    revokedAt: safeText(record.revokedAt, 100),
+    requestsPerMinute,
+    dailyQuota,
+    todayUsage,
+    enabled: record.enabled,
+    createdBy,
+    createdAt,
+    lastUsedAt,
+    revokedAt,
   };
 }
 
@@ -131,28 +167,40 @@ async function responseBody(response: Response): Promise<Record<string, unknown>
 export default function MediaGatewayAdmin() {
   const [keys, setKeys] = useState<GatewayKeyView[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [listError, setListError] = useState<string | null>(null);
+  const [sheetError, setSheetError] = useState<string | null>(null);
+  const [secretError, setSecretError] = useState<string | null>(null);
+  const [revokeError, setRevokeError] = useState<string | null>(null);
   const [drawerMode, setDrawerMode] = useState<DrawerMode>(null);
   const [editingKey, setEditingKey] = useState<GatewayKeyView | null>(null);
   const [form, setForm] = useState<KeyFormState>(initialForm);
   const [saving, setSaving] = useState(false);
   const [issuedSecret, setIssuedSecret] = useState<string | null>(null);
-  const [copiedValue, setCopiedValue] = useState<string | null>(null);
+  const [secretCopied, setSecretCopied] = useState(false);
+  const [copiedKeyId, setCopiedKeyId] = useState<string | null>(null);
   const [revokeKey, setRevokeKey] = useState<GatewayKeyView | null>(null);
   const [revoking, setRevoking] = useState(false);
+  const [mutationLocked, setMutationLocked] = useState(false);
 
   const loadKeys = useCallback(async (): Promise<void> => {
     setLoading(true);
-    setError(null);
+    setListError(null);
     try {
       const response = await fetch('/api/admin/gateway/keys');
       const body = await responseBody(response);
       if (!response.ok || body.success !== true || !Array.isArray(body.keys)) {
         throw new Error('invalid response');
       }
-      setKeys(body.keys.map(parseKey).filter((key): key is GatewayKeyView => key !== null));
+      const parsedKeys = body.keys.map(parseKey);
+      if (parsedKeys.some(key => key === null)) {
+        setKeys([]);
+        setListError('服务器响应不可信，未显示任何媒体网关密钥。');
+        return;
+      }
+      setKeys(parsedKeys as GatewayKeyView[]);
     } catch {
-      setError('加载媒体网关密钥失败，请稍后重试。');
+      setKeys([]);
+      setListError('加载媒体网关密钥失败，请稍后重试。');
     } finally {
       setLoading(false);
     }
@@ -160,7 +208,6 @@ export default function MediaGatewayAdmin() {
 
   useEffect(() => {
     void loadKeys();
-    return () => setIssuedSecret(null);
   }, [loadKeys]);
 
   const summary = useMemo(() => ({
@@ -173,7 +220,7 @@ export default function MediaGatewayAdmin() {
   const openIssueDrawer = (): void => {
     setEditingKey(null);
     setForm(initialForm);
-    setError(null);
+    setSheetError(null);
     setDrawerMode('issue');
   };
 
@@ -186,8 +233,21 @@ export default function MediaGatewayAdmin() {
       dailyQuota: String(key.dailyQuota),
       enabled: key.enabled,
     });
-    setError(null);
+    setSheetError(null);
     setDrawerMode('edit');
+  };
+
+  const closeSecretDialog = (): void => {
+    setIssuedSecret(null);
+    setSecretCopied(false);
+    setSecretError(null);
+  };
+
+  const reconcileAmbiguousMutation = async (message: string): Promise<void> => {
+    setMutationLocked(true);
+    setSheetError(message);
+    setRevokeError(message);
+    await loadKeys();
   };
 
   const submitForm = async (): Promise<void> => {
@@ -198,25 +258,28 @@ export default function MediaGatewayAdmin() {
       || !Number.isInteger(requestsPerMinute) || requestsPerMinute < 1 || requestsPerMinute > 600
       || !Number.isInteger(dailyQuota) || dailyQuota < 0 || dailyQuota > 100_000
     ) {
-      setError('请填写有效的用户、标签、RPM 和日配额。');
+      setSheetError('请填写有效的用户、标签、RPM 和日配额。');
       return;
     }
+    if (mutationLocked) return;
     setSaving(true);
-    setError(null);
+    setSheetError(null);
     try {
       const isIssue = drawerMode === 'issue';
+      const submittedLabel = form.label.trim();
+      const submittedUserId = form.userId.trim();
       const response = await fetch(
         isIssue ? '/api/admin/gateway/keys' : `/api/admin/gateway/keys/${editingKey?.id ?? ''}`,
         {
           method: isIssue ? 'POST' : 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(isIssue ? {
-            userId: form.userId.trim(),
-            label: form.label.trim(),
+            userId: submittedUserId,
+            label: submittedLabel,
             requestsPerMinute,
             dailyQuota,
           } : {
-            label: form.label.trim(),
+            label: submittedLabel,
             requestsPerMinute,
             dailyQuota,
             enabled: form.enabled,
@@ -224,52 +287,97 @@ export default function MediaGatewayAdmin() {
         },
       );
       const body = await responseBody(response);
-      if (!response.ok || body.success !== true) throw new Error('request failed');
+      if (!response.ok) throw new Error('request failed');
       const returnedKey = parseKey(body.key);
-      if (returnedKey) {
-        setKeys(current => isIssue
-          ? [returnedKey, ...current.filter(key => key.id !== returnedKey.id)]
-          : current.map(key => key.id === returnedKey.id ? returnedKey : key));
+      const secret = isIssue && typeof body.secret === 'string' && SECRET_PATTERN.test(body.secret)
+        ? body.secret
+        : null;
+      const keyMatchesRequest = returnedKey !== null
+        && returnedKey.userId === submittedUserId
+        && returnedKey.label === submittedLabel
+        && returnedKey.requestsPerMinute === requestsPerMinute
+        && returnedKey.dailyQuota === dailyQuota
+        && (isIssue
+          ? secret !== null
+            && returnedKey.keyPrefix === secret.slice(0, 12)
+            && returnedKey.todayUsage === 0
+            && returnedKey.enabled
+            && returnedKey.revokedAt === null
+          : returnedKey.id === editingKey?.id
+            && returnedKey.enabled === form.enabled);
+      if (body.success !== true || !keyMatchesRequest || (isIssue && secret === null)) {
+        await reconcileAmbiguousMutation(
+          isIssue
+            ? '签发结果无法确认。已锁定重复签发并重新加载权威列表。'
+            : '保存结果无法确认。已锁定重复提交并重新加载权威列表。',
+        );
+        return;
       }
+
+      setKeys(current => isIssue
+        ? [returnedKey, ...current.filter(key => key.id !== returnedKey.id)]
+        : current.map(key => key.id === returnedKey.id ? returnedKey : key));
       if (isIssue) {
-        const secret = safeText(body.secret, 200);
-        if (!secret?.startsWith('wmg_')) throw new Error('missing secret');
         setIssuedSecret(secret);
+        setSecretCopied(false);
+        setSecretError(null);
       }
       setDrawerMode(null);
       setEditingKey(null);
     } catch {
-      setError(drawerMode === 'issue' ? '签发密钥失败，请重试。' : '保存密钥失败，请重试。');
+      setSheetError(drawerMode === 'issue' ? '签发密钥失败，请重试。' : '保存密钥失败，请重试。');
     } finally {
       setSaving(false);
     }
   };
 
-  const copyValue = async (value: string): Promise<void> => {
+  const copyPrefix = async (key: GatewayKeyView): Promise<void> => {
     try {
-      await navigator.clipboard?.writeText(value);
-      setCopiedValue(value);
-      window.setTimeout(() => setCopiedValue(current => current === value ? null : current), 1500);
+      if (!navigator.clipboard?.writeText) throw new Error('clipboard unavailable');
+      await navigator.clipboard.writeText(key.keyPrefix);
+      setCopiedKeyId(key.id);
+      window.setTimeout(() => setCopiedKeyId(current => current === key.id ? null : current), 1500);
     } catch {
-      setError('复制失败，请手动复制。');
+      setListError('复制前缀失败，请手动复制。');
+    }
+  };
+
+  const copySecret = async (): Promise<void> => {
+    if (!issuedSecret) return;
+    try {
+      if (!navigator.clipboard?.writeText) throw new Error('clipboard unavailable');
+      await navigator.clipboard.writeText(issuedSecret);
+      setSecretCopied(true);
+      window.setTimeout(() => setSecretCopied(false), 1500);
+    } catch {
+      setSecretError('复制失败，请手动复制。');
     }
   };
 
   const confirmRevoke = async (): Promise<void> => {
     if (!revokeKey) return;
+    if (mutationLocked) return;
     setRevoking(true);
-    setError(null);
+    setRevokeError(null);
     try {
       const response = await fetch(`/api/admin/gateway/keys/${revokeKey.id}`, { method: 'DELETE' });
       const body = await responseBody(response);
-      if (!response.ok || body.success !== true) throw new Error('request failed');
+      if (!response.ok) throw new Error('request failed');
       const returnedKey = parseKey(body.key);
-      if (returnedKey) {
-        setKeys(current => current.map(key => key.id === returnedKey.id ? returnedKey : key));
+      if (
+        body.success !== true
+        || !returnedKey
+        || returnedKey.id !== revokeKey.id
+        || returnedKey.enabled
+        || returnedKey.revokedAt === null
+      ) {
+        await reconcileAmbiguousMutation('吊销结果无法确认。已锁定重复提交并重新加载权威列表。');
+        return;
       }
+      setKeys(current => current.map(key => key.id === returnedKey.id ? returnedKey : key));
       setRevokeKey(null);
     } catch {
-      setError('吊销密钥失败，请重试。');
+      setRevokeError('吊销密钥失败，请重试。');
     } finally {
       setRevoking(false);
     }
@@ -294,7 +402,7 @@ export default function MediaGatewayAdmin() {
               <RefreshCw className={loading ? 'animate-spin' : ''} />
               刷新
             </Button>
-            <Button size="sm" onClick={openIssueDrawer}>
+            <Button size="sm" onClick={openIssueDrawer} disabled={mutationLocked}>
               <Plus />
               签发密钥
             </Button>
@@ -315,10 +423,10 @@ export default function MediaGatewayAdmin() {
           ))}
         </div>
 
-        {error && (
+        {listError && (
           <div role="alert" className="flex items-start gap-2 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300">
             <AlertTriangle className="mt-0.5 size-4 shrink-0" />
-            <span>{error}</span>
+            <span>{listError}</span>
           </div>
         )}
 
@@ -349,18 +457,18 @@ export default function MediaGatewayAdmin() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
-                {keys.map(key => <KeyTableRow key={key.id} gatewayKey={key} copiedValue={copiedValue} onCopy={copyValue} onEdit={openEditDrawer} onRevoke={setRevokeKey} />)}
+                {keys.map(key => <KeyTableRow key={key.id} gatewayKey={key} copiedKeyId={copiedKeyId} onCopy={copyPrefix} onEdit={openEditDrawer} onRevoke={gatewayKey => { setRevokeError(null); setRevokeKey(gatewayKey); }} />)}
               </tbody>
             </table>
             <div data-testid="media-gateway-mobile-list" className="divide-y divide-border md:hidden">
-              {keys.map(key => <KeyMobileRow key={key.id} gatewayKey={key} copiedValue={copiedValue} onCopy={copyValue} onEdit={openEditDrawer} onRevoke={setRevokeKey} />)}
+              {keys.map(key => <KeyMobileRow key={key.id} gatewayKey={key} copiedKeyId={copiedKeyId} onCopy={copyPrefix} onEdit={openEditDrawer} onRevoke={gatewayKey => { setRevokeError(null); setRevokeKey(gatewayKey); }} />)}
             </div>
           </div>
         )}
       </div>
 
-      <Sheet open={drawerMode !== null} onOpenChange={open => { if (!open) setDrawerMode(null); }}>
-        <SheetContent className="w-[calc(100%-1rem)] max-w-md overflow-y-auto border-border sm:w-full">
+      <Sheet open={drawerMode !== null} onOpenChange={open => { if (!open && !saving) { setDrawerMode(null); setSheetError(null); } }}>
+        <SheetContent className="w-[calc(100%-1rem)] max-w-md overflow-x-hidden overflow-y-auto border-border sm:w-full">
           <SheetHeader>
             <SheetTitle>{drawerMode === 'issue' ? '签发媒体网关密钥' : '编辑媒体网关密钥'}</SheetTitle>
             <SheetDescription>{drawerMode === 'issue' ? 'Secret 只在签发成功后显示一次。' : '用户与密钥前缀不可修改。'}</SheetDescription>
@@ -386,9 +494,10 @@ export default function MediaGatewayAdmin() {
                 <input type="checkbox" checked={form.enabled} onChange={event => setForm(current => ({ ...current, enabled: event.target.checked }))} className="size-4 accent-primary" />
               </label>
             )}
+            {sheetError && <ContextError message={sheetError} />}
           </div>
           <SheetFooter>
-            <Button onClick={() => void submitForm()} disabled={saving}>
+            <Button onClick={() => void submitForm()} disabled={saving || mutationLocked}>
               {saving ? '提交中...' : drawerMode === 'issue' ? '确认签发' : '保存修改'}
             </Button>
             <Button variant="outline" onClick={() => setDrawerMode(null)} disabled={saving}>取消</Button>
@@ -396,8 +505,8 @@ export default function MediaGatewayAdmin() {
         </SheetContent>
       </Sheet>
 
-      <Dialog open={issuedSecret !== null} onOpenChange={open => { if (!open) setIssuedSecret(null); }}>
-        <DialogContent showCloseButton={false} className="border-border sm:max-w-md">
+      <Dialog open={issuedSecret !== null} onOpenChange={open => { if (!open) closeSecretDialog(); }}>
+        <DialogContent showCloseButton={false} className="max-w-[calc(100%-1rem)] overflow-x-hidden border-border sm:max-w-md">
           <DialogHeader>
             <DialogTitle>密钥签发成功</DialogTitle>
             <DialogDescription>这是唯一一次显示完整 Secret。关闭后无法再次查看。</DialogDescription>
@@ -407,16 +516,17 @@ export default function MediaGatewayAdmin() {
               <code className="min-w-0 flex-1 break-all text-sm text-amber-200">{issuedSecret}</code>
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <Button size="icon-sm" variant="ghost" aria-label="复制 Secret" onClick={() => void copyValue(issuedSecret)}>
-                    {copiedValue === issuedSecret ? <Check /> : <Copy />}
+                  <Button size="icon-sm" variant="ghost" aria-label="复制 Secret" onClick={() => void copySecret()}>
+                    {secretCopied ? <Check /> : <Copy />}
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent>复制 Secret</TooltipContent>
               </Tooltip>
             </div>
           )}
+          {secretError && <ContextError message={secretError} />}
           <DialogFooter>
-            <Button onClick={() => setIssuedSecret(null)}>关闭</Button>
+            <Button onClick={closeSecretDialog}>关闭</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -427,9 +537,10 @@ export default function MediaGatewayAdmin() {
             <AlertDialogTitle>吊销 {revokeKey?.label}</AlertDialogTitle>
             <AlertDialogDescription>吊销后无法恢复，使用该密钥的请求会立即被拒绝。</AlertDialogDescription>
           </AlertDialogHeader>
+          {revokeError && <ContextError message={revokeError} />}
           <AlertDialogFooter>
             <AlertDialogCancel disabled={revoking}>取消</AlertDialogCancel>
-            <AlertDialogAction className="bg-destructive text-white hover:bg-destructive/90" disabled={revoking} onClick={event => { event.preventDefault(); void confirmRevoke(); }}>
+            <AlertDialogAction className="bg-destructive text-white hover:bg-destructive/90" disabled={revoking || mutationLocked} onClick={event => { event.preventDefault(); void confirmRevoke(); }}>
               {revoking ? '吊销中...' : '确认吊销'}
             </AlertDialogAction>
           </AlertDialogFooter>
@@ -441,20 +552,20 @@ export default function MediaGatewayAdmin() {
 
 interface RowProps {
   gatewayKey: GatewayKeyView;
-  copiedValue: string | null;
-  onCopy: (value: string) => Promise<void>;
+  copiedKeyId: string | null;
+  onCopy: (key: GatewayKeyView) => Promise<void>;
   onEdit: (key: GatewayKeyView) => void;
   onRevoke: (key: GatewayKeyView) => void;
 }
 
-function PrefixCopy({ gatewayKey, copiedValue, onCopy }: Pick<RowProps, 'gatewayKey' | 'copiedValue' | 'onCopy'>) {
+function PrefixCopy({ gatewayKey, copiedKeyId, onCopy }: Pick<RowProps, 'gatewayKey' | 'copiedKeyId' | 'onCopy'>) {
   return (
     <span className="inline-flex min-w-0 items-center gap-1">
       <code className="truncate font-mono text-xs">{gatewayKey.keyPrefix}</code>
       <Tooltip>
         <TooltipTrigger asChild>
-          <Button size="icon-sm" variant="ghost" aria-label="复制前缀" onClick={() => void onCopy(gatewayKey.keyPrefix)}>
-            {copiedValue === gatewayKey.keyPrefix ? <Check /> : <Copy />}
+          <Button size="icon-sm" variant="ghost" aria-label="复制前缀" onClick={() => void onCopy(gatewayKey)}>
+            {copiedKeyId === gatewayKey.id ? <Check /> : <Copy />}
           </Button>
         </TooltipTrigger>
         <TooltipContent>复制前缀</TooltipContent>
@@ -525,6 +636,15 @@ function FormField({ label, htmlFor, children }: { label: string; htmlFor: strin
     <div className="space-y-1.5">
       <label htmlFor={htmlFor} className="text-sm font-medium">{label}</label>
       {children}
+    </div>
+  );
+}
+
+function ContextError({ message }: { message: string }) {
+  return (
+    <div role="alert" className="flex items-start gap-2 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300">
+      <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+      <span className="min-w-0 break-words">{message}</span>
     </div>
   );
 }

@@ -501,11 +501,14 @@ git commit -m "feat: project existing thumbnails through media gateway"
 
 **Files:**
 - Modify: `src/lib/media-gateway/audit.ts`
+- Modify: `src/lib/media-gateway/key-service.ts`
 - Create: `src/components/dashboard/media-gateway-admin.tsx`
 - Modify: `src/components/dashboard/dashboard-view.tsx`
 - Test: `src/__tests__/lib/media-gateway-audit.test.ts`
+- Test: `src/__tests__/lib/media-gateway-key-service.test.ts`
 - Test: `src/__tests__/components/media-gateway-admin.test.tsx`
 - Test: `src/__tests__/components/dashboard-media-gateway-contract.test.ts`
+- Test: `tests/e2e/media-gateway-admin-responsive.spec.ts`
 
 **Interfaces:**
 - Produces admin view: 汇总、密钥表、签发/编辑抽屉、一次性密钥模态框。
@@ -538,11 +541,13 @@ Run: `pnpm exec vitest run src/__tests__/lib/media-gateway-audit.test.ts src/__t
 
 - [ ] **Step 4: 实现管理员 UI**
 
-在现有管理员导航增加“媒体网关”，不重构 dashboard。表格显示标签、用户、前缀、状态、RPM、日配额、今日使用、最近使用；签发/编辑使用抽屉，一次性 Secret 使用模态框，复制使用 Lucide `Copy` 图标和 Tooltip。
+在现有管理员导航增加“媒体网关”，不重构 dashboard。既有 Key 查询服务从 `wujie_media_gateway_usage_daily` 按当前 UTC 日期聚合真实 `todayUsage`，缺失或非法值不得伪装为 0。表格显示标签、用户、前缀、状态、RPM、日配额、今日使用、最近使用；签发/编辑使用抽屉，一次性 Secret 使用模态框，复制使用 Lucide `Copy` 图标和 Tooltip。GET/POST/PATCH/DELETE 响应必须整体失败关闭；权威 mutation 已成功但响应不可信时，禁止重复提交并重新加载权威列表。表单、复制和吊销错误必须显示在当前模态上下文中。
 
 - [ ] **Step 5: UI 回归与提交**
 
 Run: `pnpm exec vitest run src/__tests__/components/media-gateway-admin.test.tsx src/__tests__/components/dashboard-media-gateway-contract.test.ts src/__tests__/components/dashboard-model-authorization-contract.test.ts`
+
+Run: `pnpm exec playwright test tests/e2e/media-gateway-admin-responsive.spec.ts --project=chromium`
 
 ```bash
 git add src/lib/media-gateway/audit.ts src/components/dashboard/media-gateway-admin.tsx src/components/dashboard/dashboard-view.tsx src/__tests__/lib/media-gateway-audit.test.ts src/__tests__/components/media-gateway-admin.test.tsx src/__tests__/components/dashboard-media-gateway-contract.test.ts

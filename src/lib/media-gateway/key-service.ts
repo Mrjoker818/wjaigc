@@ -10,6 +10,7 @@ export interface GatewayKeyView {
   label: string;
   requestsPerMinute: number;
   dailyQuota: number;
+  todayUsage: number;
   enabled: boolean;
   createdBy: string;
   createdAt: string;
@@ -51,6 +52,7 @@ type GatewayKeyRow = {
   created_at: string | Date;
   last_used_at: string | Date | null;
   revoked_at: string | Date | null;
+  today_usage?: unknown;
 };
 
 const PUBLIC_COLUMNS = `
@@ -76,6 +78,14 @@ function nullableIso(value: string | Date | null): string | null {
 }
 
 function toView(row: GatewayKeyRow): GatewayKeyView {
+  if (!Number.isSafeInteger(row.today_usage) || Number(row.today_usage) < 0) {
+    throw new GatewayError(
+      'GATEWAY_INTERNAL_UNAVAILABLE',
+      503,
+      'Gateway key usage is unavailable',
+      true,
+    );
+  }
   return {
     id: row.id,
     userId: row.user_id,
@@ -83,6 +93,7 @@ function toView(row: GatewayKeyRow): GatewayKeyView {
     label: row.label,
     requestsPerMinute: row.requests_per_minute,
     dailyQuota: row.daily_quota,
+    todayUsage: Number(row.today_usage),
     enabled: row.enabled,
     createdBy: row.created_by,
     createdAt: iso(row.created_at),
@@ -133,7 +144,7 @@ export async function issueGatewayKey(
     `INSERT INTO wujie_gateway_keys (
        id, user_id, key_hash, key_prefix, label, requests_per_minute, daily_quota, created_by
      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-     RETURNING ${PUBLIC_COLUMNS}`,
+     RETURNING ${PUBLIC_COLUMNS}, 0::integer AS today_usage`,
     [
       id,
       input.userId,
@@ -175,9 +186,18 @@ export async function authenticateGatewayBearer(value: string | null): Promise<G
 
 export async function listGatewayKeys(): Promise<GatewayKeyView[]> {
   const result = await execSql(
-    `SELECT ${PUBLIC_COLUMNS}
-       FROM wujie_gateway_keys
-      ORDER BY created_at DESC, id ASC`,
+    `SELECT keys.*, COALESCE(usage.today_usage, 0)::integer AS today_usage
+       FROM (
+         SELECT ${PUBLIC_COLUMNS}
+           FROM wujie_gateway_keys
+       ) AS keys
+       LEFT JOIN (
+         SELECT gateway_key_id, SUM(request_count)::integer AS today_usage
+           FROM wujie_media_gateway_usage_daily
+          WHERE usage_date = (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')::date
+          GROUP BY gateway_key_id
+       ) AS usage ON usage.gateway_key_id = keys.id
+      ORDER BY keys.created_at DESC, keys.id ASC`,
   );
   return (result.rows as GatewayKeyRow[]).map(toView);
 }
@@ -209,10 +229,19 @@ export async function updateGatewayKey(
   const assignments = entries.map(([column], index) => `${column} = $${index + 2}`);
   const rejectRevokedEnable = input.enabled === true;
   const result = await execSql(
-    `UPDATE wujie_gateway_keys
-        SET ${assignments.join(', ')}
-      WHERE id = $1${rejectRevokedEnable ? ' AND revoked_at IS NULL' : ''}
-      RETURNING ${PUBLIC_COLUMNS}`,
+    `WITH changed AS (
+       UPDATE wujie_gateway_keys
+          SET ${assignments.join(', ')}
+        WHERE id = $1${rejectRevokedEnable ? ' AND revoked_at IS NULL' : ''}
+        RETURNING ${PUBLIC_COLUMNS}
+     )
+     SELECT changed.*, COALESCE((
+       SELECT SUM(usage.request_count)
+         FROM wujie_media_gateway_usage_daily AS usage
+        WHERE usage.gateway_key_id = changed.id
+          AND usage.usage_date = (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')::date
+     ), 0)::integer AS today_usage
+       FROM changed`,
     [keyId, ...entries.map(([, value]) => value)],
   );
   const row = result.rows[0] as GatewayKeyRow | undefined;
@@ -233,10 +262,19 @@ export async function updateGatewayKey(
 export async function revokeGatewayKey(keyId: string): Promise<GatewayKeyView> {
   validateKeyId(keyId);
   const result = await execSql(
-    `UPDATE wujie_gateway_keys
-        SET enabled = FALSE, revoked_at = COALESCE(revoked_at, now())
-      WHERE id = $1
-      RETURNING ${PUBLIC_COLUMNS}`,
+    `WITH changed AS (
+       UPDATE wujie_gateway_keys
+          SET enabled = FALSE, revoked_at = COALESCE(revoked_at, now())
+        WHERE id = $1
+        RETURNING ${PUBLIC_COLUMNS}
+     )
+     SELECT changed.*, COALESCE((
+       SELECT SUM(usage.request_count)
+         FROM wujie_media_gateway_usage_daily AS usage
+        WHERE usage.gateway_key_id = changed.id
+          AND usage.usage_date = (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')::date
+     ), 0)::integer AS today_usage
+       FROM changed`,
     [keyId],
   );
   const row = result.rows[0] as GatewayKeyRow | undefined;
