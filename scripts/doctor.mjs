@@ -116,10 +116,50 @@ async function checkDataDir() {
   }
 }
 
+async function checkMediaGateway(client) {
+  if (process.env.GATEWAY_ENABLED !== 'true') {
+    add('WARN', 'media-gateway', 'disabled; set GATEWAY_ENABLED=true only for an approved rollout');
+    return;
+  }
+
+  add('PASS', 'media-gateway', 'enabled');
+  if (!client) {
+    add('FAIL', 'media-gateway-database', 'verification failed');
+    return;
+  }
+
+  const requiredTables = [
+    'wujie_gateway_keys',
+    'wujie_gateway_rate_windows',
+    'wujie_gateway_requests',
+  ];
+  try {
+    const tableResult = await client.query(
+      `SELECT table_name
+       FROM information_schema.tables
+       WHERE table_schema = current_schema()
+         AND table_name = ANY($1::text[])`,
+      [requiredTables],
+    );
+    const present = new Set(tableResult.rows.map(row => row.table_name));
+    const missing = requiredTables.filter(table => !present.has(table));
+    add(
+      missing.length === 0 ? 'PASS' : 'FAIL',
+      'media-gateway-database',
+      missing.length === 0
+        ? `required gateway tables verified: ${requiredTables.join(',')}`
+        : `missing gateway tables: ${missing.join(',')}`,
+    );
+  } catch {
+    add('FAIL', 'media-gateway-database', 'verification failed');
+  }
+}
+
 async function checkDatabase() {
   const connectionString = resolveDoctorDatabaseUrl(process.env);
   if (!connectionString) {
     add(production ? 'FAIL' : 'WARN', 'database', 'PGDATABASE_URL or DATABASE_URL is not configured');
+    await checkMediaGateway();
     return;
   }
   const normalizedConnectionString = normalizePostgresConnectionString(connectionString);
@@ -128,8 +168,10 @@ async function checkDatabase() {
     await client.connect();
     await client.query('SELECT 1 AS healthcheck');
     add('PASS', 'database', 'connection and query succeeded');
+    await checkMediaGateway(client);
   } catch (error) {
     add('FAIL', 'database', `connection failed: ${error instanceof Error ? error.message : String(error)}`);
+    await checkMediaGateway();
   } finally {
     await client.end().catch(() => undefined);
   }
