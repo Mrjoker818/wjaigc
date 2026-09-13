@@ -2314,3 +2314,18 @@ The focused gate test passes `7/7`; the actual protected-baseline command passes
 - 目录门禁修正为 `30/30/16`，原 29 项逐 ID 保留；doctor 绑定精确四项目 manifest、文件哈希及候选 provenance。
 - 最终专项 `106/106`；PostgreSQL `2/2 skipped`，四项目 browser matrix `0 passed / 4 blocked-as-failed`，共同原因是隔离数据库 URL/凭据不可用。真实云端成功/取消、资产和账务字段仍为 `CLOUD UNVERIFIED`。当前不得沿用 `LOCAL PASS` 或升级发布结论。
 - full gate 已执行：doctor/ts-check/lint/build 退出 0；全仓仍保留一次旧清单断言失败，定向修复后 `29/29` 但未重复全仓；保护门禁受 3 个用户保护脏文件阻塞。发布结论保持 `DONE_WITH_CONCERNS / LOCAL BLOCKED / CLOUD UNVERIFIED`。
+
+### 最终本地发布门禁
+
+- 最终源码候选 `e4316f8f` 已通过 Task 10 专项 `147/147`、隔离 PostgreSQL 审批与并发 `2/2`、全仓 `6350/6350`、四浏览器 `4/4`、TypeScript、构建版 ESLint 和生产构建 `120/120`。
+- 四浏览器证据由 provenance SHA `a5126a6e40fc7e20e609eeb53e0eed0635fe67f57b6b4f852ec3eed5ea8ac386` 绑定，包含必需的截图、录像、Trace、Console、Network、machine evidence 与逐文件哈希。
+- 六个用户自有 `.superpowers/sdd/` 文件没有纳入候选、没有暂存或回滚；保护门禁须在最终提交的干净工作树重跑，避免将用户脏文件误判为产品漂移。
+- `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 保持只读。当前仅允许推送 `main` 候选供 Coze exact-SHA 验收。
+- **Task 10 发布结论：`DONE_WITH_CONCERNS / LOCAL PASS / CLOUD UNVERIFIED`。** 本地开发与证据阶段完成；真实供应商、云端账务和成片资产证据未闭环，因此不宣布全平台发布通过。
+
+### 2026-09-13 最终审查候选发布判断
+
+- 最终 Task 10 候选已关闭暂停恢复、generation 资产隔离和审批监听器清理三项审查问题；专项 `160/160`、真实 PostgreSQL `34/34`、全仓 `6352/6352`、四浏览器项目均通过。
+- 四浏览器证据绑定 provenance `5fd5ab26bdecb4e73a49723ea414f5726a3c8f5c84d822bd8bee141dd7f9050f`，含截图、录像、Trace、Console、Network 与逐文件哈希；桌面三项目为服务器预热后的分次通过。
+- Coze 积分已经恢复，但云端尚未运行最终 exact commit，也未取得真实供应商成功成片、可控取消、单次扣退、视频 AssetVersion、父版本、播放、下载和刷新恢复证据。
+- **发布结论保持 `DONE_WITH_CONCERNS / LOCAL PASS / CLOUD UNVERIFIED`。** Task 10 本地部分完成，云端约占剩余 10%；全平台仍不允许标记为通过。

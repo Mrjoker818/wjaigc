@@ -89,6 +89,7 @@
     { "path": "src/components/third-party-model-dialog.tsx", "sourceCommit": "96c1907b" },
     { "path": "src/components/video-generation-panel.tsx", "sourceCommit": "ecb0d95c" },
     { "path": "src/components/simple-chat/canvas-editor.tsx", "sourceCommit": "ffa41558" },
+    { "path": "src/components/simple-chat/sidebar.tsx", "sourceCommit": "e4316f8f" },
     { "path": "src/components/simple-chat/simple-chat-sync-status.tsx", "sourceCommit": "37fb6d12" },
     { "path": "src/hooks/use-task-model-catalog.ts", "sourceCommit": "47090886" },
     { "path": "src/lib/auth/auth-errors.ts", "sourceCommit": "f5dfdfc4" },

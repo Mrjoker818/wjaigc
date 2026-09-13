@@ -37,11 +37,15 @@ function waitForApprovalRefresh(signal: AbortSignal): Promise<void> {
       reject(signal.reason);
       return;
     }
-    const timeout = window.setTimeout(resolve, APPROVAL_REFRESH_INTERVAL_MS);
-    signal.addEventListener('abort', () => {
+    const onAbort = () => {
       window.clearTimeout(timeout);
       reject(signal.reason);
-    }, { once: true });
+    };
+    const timeout = window.setTimeout(() => {
+      signal.removeEventListener('abort', onAbort);
+      resolve();
+    }, APPROVAL_REFRESH_INTERVAL_MS);
+    signal.addEventListener('abort', onAbort, { once: true });
   });
 }
 

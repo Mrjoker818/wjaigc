@@ -3020,3 +3020,21 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - 首轮新增合同测试为 `5 failed / 19 passed`；Canvas 视频模型 UI 测试和来源帧映射测试也分别先 RED。最小实现后，当前定向集合 `32/32` GREEN，E2E `--list` 为四项目，TypeScript 退出 0。
 - 复审后最终专项为 15 文件 `106/106`。PostgreSQL 为 `2/2 skipped`（缺 `POSTGRES_TEST_DATABASE_URL`）；四项目矩阵均因缺 `DATABASE_URL/PGDATABASE_URL` 在 fixture 初始化阻塞，`0 passed / 4 blocked-as-failed`。这里不继承旧 `4/4`，也不声明 cloud pass。
 - full gate 中 doctor、TypeScript、quiet ESLint 与生产 build 退出 0；全仓为 `6142 passed / 190 skipped / 1 failed`，唯一失败是旧 inventory 期望漏两项，修复后相关 `29/29`。保护门禁最终只被 3 个用户保护脏文件阻塞；未重复全仓。
+
+### 最终本地门禁补验
+
+- 候选源码提交为 `e4316f8f7656f1a3ea36d69884b72fe0bd480ebd`，证据 provenance SHA 为 `a5126a6e40fc7e20e609eeb53e0eed0635fe67f57b6b4f852ec3eed5ea8ac386`；`src/tests/scripts` 子树与四份浏览器 manifest 精确绑定。
+- Task 10 专项为 `147/147`，审批与 20 路并发 PostgreSQL 为 `2/2`，完整 Vitest 为 767 个文件、`6350/6350`，均为 0 失败、0 跳过。
+- Chromium、Firefox、WebKit 与 375px Mobile Chromium 最终同轮 `4/4`；每个项目均保留 Console、Network、截图、录像、Trace、machine evidence 和 SHA-256 manifest。
+- `pnpm ts-check`、`pnpm run lint:build` 退出 0；生产构建生成 `120/120` 页面。Turbopack 保留 48 条动态文件追踪警告，作为发布工程风险记录，不写成构建失败。
+- 最终本地 E2E 使用隔离数据库、完整功能标志及正确 `DEPLOY_RUN_PORT`。此前缺数据库、运行 ID、认证密钥或端口自调用错误的轮次属于环境门禁阻止，没有冒充业务缺陷或通过结果。
+- **回归判定：`LOCAL PASS / CLOUD UNVERIFIED`。** 云端仍需 exact commit、真实供应商成功成片、取消及一次扣退、AssetVersion、播放下载、刷新恢复和新鲜浏览器证据。
+
+### 2026-09-13 独立审查修复后的最终候选
+
+- 当前最终候选的直接父提交为 `e4316f8f7656f1a3ea36d69884b72fe0bd480ebd`；源码、测试与脚本树绑定的 evidence provenance SHA 为 `5fd5ab26bdecb4e73a49723ea414f5726a3c8f5c84d822bd8bee141dd7f9050f`，最终提交以 GitHub `main` HEAD 为准。
+- 独立审查发现并修复三项：暂停 Workflow 的旧输出终态误判、跨 generation 资产串用、审批刷新 AbortSignal 监听器泄漏。三项均先取得失败测试再最小修复。
+- 最终专项 `160/160`，真实 PostgreSQL 审批、并发与账务集合 `34/34`，全仓 Vitest 为 `768` 个文件、`6352/6352`，均为 0 失败、0 跳过。
+- Chromium、Firefox、WebKit、375px Mobile Chromium 均在同一候选与同一隔离数据库上通过；移动项目在首次运行通过，桌面三项目在开发服务器预热后分次重跑通过，不写成单次冷启动矩阵全绿。
+- TypeScript、构建版 ESLint 与生产构建均退出 0，生产构建生成 `120/120` 页面；Turbopack 动态文件追踪警告继续作为发布工程风险保留。
+- **回归判定：`LOCAL PASS / CLOUD UNVERIFIED`。** 积分恢复只解除云端测试前置，不能代替 Coze exact commit 与真实视频供应商证据。

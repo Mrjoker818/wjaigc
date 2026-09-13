@@ -2,33 +2,54 @@
   "schemaVersion": 2,
   "feature": "brief-to-video-finished-film",
   "task": 10,
-  "generatedAt": "2026-09-13T04:24:00+08:00",
-  "candidateSha": "b7c39833275cc4041696040da2a617e26824360277ab08620ce111121e724d3a",
+  "generatedAt": "2026-09-13T09:35:26+08:00",
+  "candidateSha": "5fd5ab26bdecb4e73a49723ea414f5726a3c8f5c84d822bd8bee141dd7f9050f",
   "sourceCommit": {
     "scheme": "git-parent-subtrees-v1",
-    "expectedParentCommit": "b64b85d26cf917f477f9fc8ac9a6d65c7bd98556",
+    "expectedParentCommit": "e4316f8f7656f1a3ea36d69884b72fe0bd480ebd",
     "candidateTrees": {
-      "src": "257bc8023bc2852294bb19dd63d5b5dcb8e1e224",
-      "tests": "ee5ab5c7931f198044cdddf875a427c36079dd0e",
+      "src": "8530b52f8cd111bd1dddaca71ce3c9bef038e195",
+      "tests": "17e3a9b6caec32f0ca573edf5d2db47d6412d891",
       "scripts": "d49111f3bad800c2553283a91f7761cd6ee380e7"
     }
   },
   "local": {
-    "verdict": "LOCAL BLOCKED",
+    "verdict": "LOCAL PASS",
     "cloudVerified": false,
     "supplierVerified": false,
-    "specializedTests": { "passed": 106, "failed": 0, "skipped": 0 },
+    "specializedTests": { "passed": 160, "failed": 0, "skipped": 0 },
     "postgresApprovalAndConcurrency": {
-      "passed": 0,
+      "passed": 34,
       "failed": 0,
-      "skipped": 2,
-      "blocker": "POSTGRES_TEST_DATABASE_URL is not configured"
+      "skipped": 0,
+      "blocker": null
     },
+    "fullRegression": { "files": 768, "passed": 6352, "failed": 0, "skipped": 0 },
     "playwright": {
-      "passed": 0,
-      "failed": 4,
-      "projects": [],
-      "blocker": "DATABASE_URL or PGDATABASE_URL is required for isolated Brief-to-video E2E"
+      "passed": 4,
+      "failed": 0,
+      "projects": [
+        {
+          "name": "chromium",
+          "manifest": "test-results/brief-to-video/5fd5ab26bdecb4e73a49723ea414f5726a3c8f5c84d822bd8bee141dd7f9050f/chromium/Brief/retry-0/evidence-manifest.json",
+          "machineEvidenceSha256": "a0493f3593f0627e048ae249dfdb75e4be339befe7f039e8beae55575a20a7cd"
+        },
+        {
+          "name": "firefox",
+          "manifest": "test-results/brief-to-video/5fd5ab26bdecb4e73a49723ea414f5726a3c8f5c84d822bd8bee141dd7f9050f/firefox/Brief/retry-0/evidence-manifest.json",
+          "machineEvidenceSha256": "2cedfc5cc3ffd13b5176031562804324ec3291a54130d6bb490dd0dd3e0a3b8f"
+        },
+        {
+          "name": "webkit",
+          "manifest": "test-results/brief-to-video/5fd5ab26bdecb4e73a49723ea414f5726a3c8f5c84d822bd8bee141dd7f9050f/webkit/Brief/retry-0/evidence-manifest.json",
+          "machineEvidenceSha256": "0004c8ff7601e94dd9b814d8dbfa59cfa4dd24a1deb838d1ee44f65a615f6551"
+        },
+        {
+          "name": "mobile-chromium",
+          "manifest": "test-results/brief-to-video/5fd5ab26bdecb4e73a49723ea414f5726a3c8f5c84d822bd8bee141dd7f9050f/mobile-chromium/Brief/retry-0/evidence-manifest.json",
+          "machineEvidenceSha256": "033ceef52af867daa4146ca4d4b723866909e891934c05c44e6c090101ee2938"
+        }
+      ]
     }
   },
   "cloud": {
@@ -58,6 +79,6 @@
       "refundAmount": null,
       "lateCompletionSuppressed": null
     },
-    "reason": "未创建或接管用户 Chrome 标签；未部署最终 exact commit，未执行真实供应商成功或可控取消。"
+    "reason": "尚未在 Coze 部署最终 exact commit，也未取得真实供应商成功成片、取消、扣费退款、AssetVersion 和云端浏览器证据。"
   }
 }

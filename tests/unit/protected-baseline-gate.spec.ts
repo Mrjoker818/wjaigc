@@ -160,6 +160,7 @@ const historicalSourceAuthorizations = [
   ['src/components/third-party-model-dialog.tsx', '96c1907b'],
   ['src/components/video-generation-panel.tsx', 'ecb0d95c'],
   ['src/components/simple-chat/canvas-editor.tsx', 'ffa41558'],
+  ['src/components/simple-chat/sidebar.tsx', 'e4316f8f'],
   ['src/hooks/use-task-model-catalog.ts', '47090886'],
   ['src/lib/auth/auth-errors.ts', 'f5dfdfc4'],
   ['src/lib/auth/auth-password.ts', 'c518aa29'],

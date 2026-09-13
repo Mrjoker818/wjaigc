@@ -2540,3 +2540,24 @@ BUG-018 已从未验证项移除。剩余顺序为 `002-B -> 002-D -> 002-E`；�
 - [ ] 云端成功 Run、取消 Run、退款交易、父版本、MIME/签名/时长/分辨率和制品哈希仍全部未验证。
 - [ ] 全仓最终轮次为 `6142 passed / 190 skipped / 1 failed`；旧清单断言修复后仅定向 `29/29`，按检查点要求未重复全仓，不能写全仓全绿。
 - [ ] protected baseline 的 38 项合同通过，但 3 个用户保护文件既有脏状态使门禁退出 1；这些文件未修改或暂存。
+
+### 2026-09-13 最终本地门禁后
+
+- [x] 最终 Task 10 专项 `147/147`，隔离 PostgreSQL 审批与并发 `2/2`，全仓 `6350/6350`，均无失败或跳过。
+- [x] Chromium、Firefox、WebKit、375px Mobile Chromium 最终同轮 `4/4`，四份 manifest 与制品哈希已绑定候选 provenance。
+- [x] TypeScript、构建版 ESLint 与生产构建 `120/120` 已取得退出码 0；此前复审后的阻塞轮次不再代表当前本地状态。
+- [ ] Coze 拉取并运行最终 `main` exact commit，强制刷新预览后确认功能标志与构建身份。
+- [ ] 使用真实稳定视频供应商完成一次成功 Run：核对 remote task、视频 MIME/签名/时长/分辨率、唯一 video AssetVersion、首尾帧父版本、播放、下载和刷新恢复。
+- [ ] 使用可控取消完成一次取消 Run：核对一次扣费、至多一次退款、迟到完成不覆盖取消终态，并归档云端 Console、Network、Trace、截图、录像及哈希。
+- [ ] 云端证据完成前保持 `LOCAL PASS / CLOUD UNVERIFIED`；不更新 `stable`，不宣称全平台发布通过。
+
+### 2026-09-13 最终审查候选状态
+
+- [x] 暂停 Workflow 恢复不再被旧输出误判为终态。
+- [x] 重试结果仅投影当前 generation 的 AssetVersion，历史无 generation 事件保持兼容。
+- [x] 审批刷新定时器清理 AbortSignal 监听器。
+- [x] 专项 `160/160`、真实 PostgreSQL `34/34`、全仓 `6352/6352`、四浏览器项目、TypeScript、构建版 ESLint、生产构建 `120/120`。
+- [ ] Coze 拉取最终 exact commit 后强制刷新预览页，确认运行版本与功能标志。
+- [ ] PearAPI 或 APIMart 稳定视频供应商完成一次真实成功 Run，并核对 remote task、视频制品、AssetVersion、父版本、播放、下载与刷新恢复。
+- [ ] 完成一次真实可控取消并核对单次扣费、至多一次退款、迟到结果不覆盖终态。
+- [ ] 保存云端 Console、Network、Trace、截图、录像、requestId、taskId、交易 ID 与制品哈希。

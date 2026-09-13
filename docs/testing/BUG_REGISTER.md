@@ -4264,7 +4264,10 @@ Task 4 独立审查的两个 Minor 继续保留给最终审查：单元夹具 op
 | BTV-010-06 | P1 | Simple Chat 将视频时长作为数字传给 select 输入 | API 回归 RED；意图输入规范化为字符串 | 已修复 |
 | BTV-010-07 | P0 | 审批暂停错误码被安全层降级为 `SKILL_EXECUTION_FAILED`，审批卡不渲染 | 移动 E2E 和安全错误单测 RED；仅保留固定 `SKILL_APPROVAL_REQUIRED` 哨兵 | 已修复 |
 | BTV-010-08 | P0 | 尚无 exact commit 的真实供应商成功、成片资产和账务证据 | 不适用；禁止用本地受控供应商替代 | `CLOUD UNVERIFIED` |
-| BTV-010-09 | P1 | E2E 以 API 代替主要 UI，Workflow/Simple Chat 完整链与 375px 交互未被证明 | 审查合同 RED；改为三工作区真实控件、批准前查库和移动几何断言 | 待新矩阵验证 |
+| BTV-010-09 | P1 | E2E 以 API 代替主要 UI，Workflow/Simple Chat 完整链与 375px 交互未被证明 | 审查合同 RED；改为三工作区真实控件、批准前查库和移动几何断言；最终四项目矩阵 `4/4` | 本地已修复 |
 | BTV-010-10 | P1 | 清单把新增 Brief 后的目录误写为 29，且未证明旧项不受 flag 影响 | 清单合同 RED；从实际源码收集 MPE 与 Brief，断言原 29 ID 保留及 30/30/16 | 已修复 |
-| BTV-010-11 | P1 | doctor 未校验四 manifest、项目集合、文件哈希和最终候选来源；云端字段不足 | 证据验证 RED；增加 provenance 派生 SHA、精确项目/哈希及完整云字段校验 | 待最终 HEAD doctor 验证 |
+| BTV-010-11 | P1 | doctor 未校验四 manifest、项目集合、文件哈希和最终候选来源；云端字段不足 | 证据验证 RED；增加 provenance 派生 SHA、精确项目/哈希及完整云字段校验 | 本地已修复；云端字段待回填 |
 | BTV-010-12 | P2 | 进度文档沿用“按钮可点击”和“全量门禁待执行”的不实状态 | 文档合同 RED；改为区分旧结果、已实现断言与本轮待执行门禁 | 已修复 |
+| BTV-010-13 | P0 | 暂停的 Workflow Run 携带旧输出时可能被误判为终态，跳过新一代审批恢复 | 恢复回归先 RED；终态判断改为以当前 generation 的事件与暂停状态为准 | 已修复，真 PostgreSQL 与全量回归通过 |
+| BTV-010-14 | P0 | Skill 结果资产仅按 stepId 关联，重试后可能把旧 generation 的 AssetVersion 投影到新结果 | 资产世代隔离回归先 RED；按 stepId + generation 精确配对，兼容无 generation 的历史事件 | 已修复，真 PostgreSQL 与全量回归通过 |
+| BTV-010-15 | P2 | Brief 审批刷新定时器完成后未移除 AbortSignal 监听，长会话可能累积监听器 | 组件回归先 RED；每次定时器完成、取消或卸载时成对清理监听器 | 已修复，组件与全量回归通过 |

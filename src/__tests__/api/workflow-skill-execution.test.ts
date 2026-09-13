@@ -579,6 +579,10 @@ describe('workflow Skill Run execution', () => {
         run: {
           runId: 'run-terminal',
           status,
+          ...(status === 'paused' ? {
+            pauseReason: 'execution-error',
+            error: { code: 'SKILL_STEP_FAILED', message: '步骤执行失败', retryable: true },
+          } : {}),
           assetVersionIds: ['version-terminal'],
           outputs: [{ stepId: 'copy', kind: 'text', content: '终态输出' }],
         },
@@ -612,6 +616,10 @@ describe('workflow Skill Run execution', () => {
       .mockResolvedValueOnce(new Response(JSON.stringify({ runId: 'run-partial-terminal' }), { status: 201 }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ run: {
         runId: 'run-partial-terminal', status, assetVersionIds: ['report-version'],
+        ...(status === 'paused' ? {
+          pauseReason: 'execution-error',
+          error: { code: 'SKILL_STEP_FAILED', message: '步骤执行失败', retryable: true },
+        } : {}),
         outputs: [
           { stepId: 'copy', kind: 'text', content: '终态可用文本' },
           { stepId: 'audit:bad', kind: 'json', schemaId: 'platform-compliance-report-v1', content: '{bad' },
@@ -643,6 +651,10 @@ describe('workflow Skill Run execution', () => {
       .mockResolvedValueOnce(new Response(JSON.stringify({ runId: 'run-untrusted-errors' }), { status: 201 }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ run: {
         runId: 'run-untrusted-errors', status, assetVersionIds: [], outputErrors,
+        ...(status === 'paused' ? {
+          pauseReason: 'execution-error',
+          error: { code: 'SKILL_STEP_FAILED', message: '步骤执行失败', retryable: true },
+        } : {}),
         outputs: [{ stepId: 'copy', kind: 'text', content: '可信部分输出' }],
       } }), { status: 200 }));
 

@@ -17,6 +17,8 @@ export interface WorkflowSkillRunProjection {
   currentStepId?: string;
   resumeFromStepId?: string;
   approval?: SkillApprovalStateV1;
+  pauseReason?: string;
+  error?: { code?: string; message?: string; retryable?: boolean };
 }
 
 export class WorkflowSkillRunTerminalError extends Error {
@@ -99,6 +101,10 @@ function readWorkflowSkillRunProjection(payload: unknown): WorkflowSkillRunProje
     ...(typeof candidate.resumeFromStepId === 'string' ? { resumeFromStepId: candidate.resumeFromStepId } : {}),
     ...(candidate.approval !== undefined
       ? { approval: parseSkillApprovalState(candidate.approval) }
+      : {}),
+    ...(typeof candidate.pauseReason === 'string' ? { pauseReason: candidate.pauseReason } : {}),
+    ...(candidate.error && typeof candidate.error === 'object' && !Array.isArray(candidate.error)
+      ? { error: candidate.error as WorkflowSkillRunProjection['error'] }
       : {}),
   };
 }
@@ -325,9 +331,13 @@ async function waitForWorkflowSkillRun(
       return projectWorkflowSkillRun(run, []);
     }
     if (run.status === 'paused') {
-      const hasDurableEvidence = (run.assetVersionIds?.length || 0) > 0
-        || (run.outputs?.length || 0) > 0;
-      if (hasDurableEvidence) throw new WorkflowSkillRunTerminalError(run);
+      const isApprovalTransition = run.pauseReason === 'approval'
+        || run.error?.code === 'SKILL_APPROVAL_REQUIRED';
+      const isExecutionFailure = run.pauseReason === 'execution-error'
+        || Boolean(run.error?.code && run.error.code !== 'SKILL_APPROVAL_REQUIRED');
+      if (!isApprovalTransition && isExecutionFailure) {
+        throw new WorkflowSkillRunTerminalError(run, run.error?.message);
+      }
       await wait(Math.min(input.pollIntervalMs ?? 1_000, Math.max(0, deadline - Date.now())), input.signal);
       continue;
     }

@@ -45,6 +45,35 @@ function approvalResponse(
 }
 
 describe('BriefToVideoApprovalCard', () => {
+  it('removes each approval refresh abort listener after its timer resolves', async () => {
+    const addSpy = vi.spyOn(AbortSignal.prototype, 'addEventListener');
+    const removeSpy = vi.spyOn(AbortSignal.prototype, 'removeEventListener');
+    try {
+      const fetcher = vi.fn()
+        .mockResolvedValueOnce(approvalResponse())
+        .mockResolvedValueOnce(new Response(JSON.stringify({ run: {
+          ...(await approvalResponse().json()).run,
+          status: 'queued',
+        } }), { status: 200 }))
+        .mockResolvedValueOnce(approvalResponse());
+      const onRevise = vi.fn(async () => true);
+      render(<BriefToVideoApprovalCard
+        runId="run-video-1" projectId="project-1" fetcher={fetcher as typeof fetch}
+        onApprove={vi.fn(async () => true)} onRevise={onRevise} onCancel={vi.fn(async () => true)}
+      />);
+      expect(await screen.findByRole('heading', { name: '夏日新品短片' })).not.toBeNull();
+      fireEvent.click(screen.getByRole('button', { name: '修改脚本' }));
+      fireEvent.change(screen.getByRole('textbox'), { target: { value: '加快节奏' } });
+      fireEvent.click(screen.getByRole('button', { name: '提交修改要求' }));
+      await waitFor(() => expect(onRevise).toHaveBeenCalledOnce());
+      await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(3));
+      expect(removeSpy.mock.calls.length).toBeGreaterThanOrEqual(addSpy.mock.calls.length);
+    } finally {
+      addSpy.mockRestore();
+      removeSpy.mockRestore();
+    }
+  });
+
   it('shows the approved plan boundary and responsive controls without fake generation progress', async () => {
     const onApprove = vi.fn().mockResolvedValue(true);
     const onRevise = vi.fn().mockResolvedValue(true);

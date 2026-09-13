@@ -405,11 +405,16 @@ describe('Workflow Brief 到视频审批执行', () => {
     const fetcher = vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify({ runId: 'run-video-race' }), { status: 201 }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ run: {
-        runId: 'run-video-race', status: 'paused', assetVersionIds: [], outputs: [],
+        runId: 'run-video-race', status: 'paused', pauseReason: 'approval',
+        error: { code: 'SKILL_APPROVAL_REQUIRED', message: 'approval pending', retryable: false },
+        assetVersionIds: ['plan-version'],
+        outputs: [{ stepId: 'plan-film', kind: 'text', content: '已冻结的视频脚本' }],
       } }), { status: 200 }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ run: {
-        runId: 'run-video-race', status: 'paused', assetVersionIds: [], approval,
-        resumeFromStepId: 'generate-film', outputs: [],
+        runId: 'run-video-race', status: 'paused', pauseReason: 'approval',
+        assetVersionIds: ['plan-version'], approval,
+        resumeFromStepId: 'generate-film',
+        outputs: [{ stepId: 'plan-film', kind: 'text', content: '已冻结的视频脚本' }],
       } }), { status: 200 }));
 
     const projected = await executeWorkflowSkillRun({
@@ -426,6 +431,7 @@ describe('Workflow Brief 到视频审批执行', () => {
       status: 'waiting-approval',
       approval,
       resumeFromStepId: 'generate-film',
+      assetVersionIds: ['plan-version'],
     });
     expect(fetcher).toHaveBeenCalledTimes(3);
   });

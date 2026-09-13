@@ -350,12 +350,19 @@ function completedStepIds(events: readonly AgentEvent[]): Set<string> {
     .filter((stepId): stepId is string => typeof stepId === 'string'));
 }
 
-function completedAssetVersionIds(events: readonly AgentEvent[]): string[] {
-  const completed = completedStepIds(events);
+function stepGenerationKey(payload: Record<string, unknown>): string | undefined {
+  if (typeof payload.stepId !== 'string') return undefined;
+  const generation = Number.isSafeInteger(payload.generation) ? String(payload.generation) : 'legacy';
+  return `${payload.stepId}\u0000${generation}`;
+}
+
+export function completedAssetVersionIds(events: readonly AgentEvent[]): string[] {
+  const completed = new Set(events.filter(event => event.type === 'tool.completed')
+    .map(event => stepGenerationKey(event.payload))
+    .filter((key): key is string => typeof key === 'string'));
   return [...new Set(events.filter(event => (
     event.type === 'asset.created'
-    && typeof event.payload.stepId === 'string'
-    && completed.has(event.payload.stepId)
+    && completed.has(stepGenerationKey(event.payload) || '')
   ))
     .map(event => event.payload.assetVersionId)
     .filter((versionId): versionId is string => typeof versionId === 'string' && Boolean(versionId)))];
