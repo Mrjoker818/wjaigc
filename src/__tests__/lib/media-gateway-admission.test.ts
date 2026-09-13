@@ -9,6 +9,7 @@ vi.mock('@/lib/db-client', () => ({
 import {
   markGatewayAdmitted,
   markGatewayRejected,
+  recordGatewayAttempt,
   reserveGatewayRequest,
 } from '@/lib/media-gateway/admission';
 
@@ -18,7 +19,9 @@ interface ScriptedResult {
 }
 
 function clientWith(results: ScriptedResult[]) {
-  const query = vi.fn(async (_text: string, _values?: unknown[]) => {
+  const query = vi.fn(async (text: string, values?: unknown[]) => {
+    void text;
+    void values;
     const next = results.shift();
     if (!next) return { rows: [], rowCount: 0 };
     return { rows: next.rows ?? [], rowCount: next.rowCount ?? next.rows?.length ?? 0 };
@@ -45,6 +48,82 @@ const reservedRow = {
 
 describe('media gateway admission transactions', () => {
   beforeEach(() => vi.clearAllMocks());
+
+  it('records one atomic RPM attempt and consumes its permit without incrementing again', async () => {
+    const attemptClient = clientWith([
+      {},
+      { rows: [{ id: principal.keyId, user_id: principal.userId, requests_per_minute: 10, enabled: true, revoked_at: null }] },
+      { rows: [{ attempt_count: 1 }] },
+      {},
+    ]);
+    const reserveClient = clientWith([
+      {},
+      { rows: [{ id: principal.keyId, user_id: principal.userId, requests_per_minute: 10, daily_quota: 5, enabled: true, revoked_at: null }] },
+      { rows: [] },
+      { rows: [reservedRow] },
+      { rows: [reservedRow] },
+      {},
+    ]);
+    mocks.connect.mockResolvedValueOnce(attemptClient).mockResolvedValueOnce(reserveClient);
+
+    const attemptPermit = await recordGatewayAttempt(principal);
+    await expect(reserveGatewayRequest({
+      principal, attemptPermit, idempotencyKey: 'request-1',
+      requestDigest: 'a'.repeat(64), mediaType: 'image', requestId: 'gwreq_test',
+    })).resolves.toMatchObject({ kind: 'execute' });
+
+    expect(attemptClient.query.mock.calls.filter(([sql]) => (
+      /wujie_gateway_rate_windows/i.test(String(sql))
+    ))).toHaveLength(1);
+    expect(reserveClient.query.mock.calls.some(([sql]) => (
+      /wujie_gateway_rate_windows/i.test(String(sql))
+    ))).toBe(false);
+  });
+
+  it('fails closed for forged, cross-principal, and reused attempt permits', async () => {
+    await expect(reserveGatewayRequest({
+      principal, attemptPermit: {} as never, idempotencyKey: 'request-1',
+      requestDigest: 'a'.repeat(64), mediaType: 'image',
+    })).rejects.toMatchObject({ code: 'GATEWAY_INTERNAL_UNAVAILABLE', status: 503 });
+    expect(mocks.connect).not.toHaveBeenCalled();
+
+    const crossAttemptClient = clientWith([
+      {},
+      { rows: [{ id: principal.keyId, user_id: principal.userId, requests_per_minute: 10, enabled: true, revoked_at: null }] },
+      { rows: [{ attempt_count: 1 }] },
+      {},
+    ]);
+    mocks.connect.mockResolvedValueOnce(crossAttemptClient);
+    const crossPermit = await recordGatewayAttempt(principal);
+    await expect(reserveGatewayRequest({
+      principal: { ...principal, userId: 'other-user' }, attemptPermit: crossPermit,
+      idempotencyKey: 'request-1', requestDigest: 'a'.repeat(64), mediaType: 'image',
+    })).rejects.toMatchObject({ code: 'GATEWAY_INTERNAL_UNAVAILABLE', status: 503 });
+
+    const validAttemptClient = clientWith([
+      {},
+      { rows: [{ id: principal.keyId, user_id: principal.userId, requests_per_minute: 10, enabled: true, revoked_at: null }] },
+      { rows: [{ attempt_count: 1 }] },
+      {},
+    ]);
+    const validReserveClient = clientWith([
+      {},
+      { rows: [{ id: principal.keyId, user_id: principal.userId, requests_per_minute: 10, daily_quota: 5, enabled: true, revoked_at: null }] },
+      { rows: [reservedRow] },
+      {},
+    ]);
+    mocks.connect.mockResolvedValueOnce(validAttemptClient).mockResolvedValueOnce(validReserveClient);
+    const usedPermit = await recordGatewayAttempt(principal);
+    await reserveGatewayRequest({
+      principal, attemptPermit: usedPermit, idempotencyKey: 'request-1',
+      requestDigest: 'a'.repeat(64), mediaType: 'image',
+    });
+    await expect(reserveGatewayRequest({
+      principal, attemptPermit: usedPermit, idempotencyKey: 'request-1',
+      requestDigest: 'a'.repeat(64), mediaType: 'image',
+    })).rejects.toMatchObject({ code: 'GATEWAY_INTERNAL_UNAVAILABLE', status: 503 });
+    expect(mocks.connect).toHaveBeenCalledTimes(3);
+  });
 
   it('locks the key, increments the minute, reserves idempotency, then locks quota', async () => {
     const client = clientWith([

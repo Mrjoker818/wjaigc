@@ -196,14 +196,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // ★ 从 model 中提取纯 modelId（前端可能传 providerId::modelId 格式）
     let pureModel = model;
-    const extractedProviderId = model.includes('::') ? model.split('::')[0] : '';
-    if (model.includes('::')) {
-      pureModel = model.split('::').pop()!;
-      console.log(`[video/generate] Stripped provider prefix from model: "${model}" → "${pureModel}"`);
-    }
-    const effectiveProviderId = providerId || extractedProviderId || '';
     const parsedDuration = Number(duration);
     if (parsedDuration > runtimeSettings.maxVideoDuration) {
       return NextResponse.json({ error: `Video duration exceeds the ${runtimeSettings.maxVideoDuration}s platform limit` }, { status: 400 });
@@ -215,6 +208,23 @@ export async function POST(request: NextRequest) {
     if (auth instanceof NextResponse) return auth;
     sessionUser = auth.user;
     const gatewayContext = trustedGatewayContext(auth.source, request.headers);
+    const strictGatewayRouting = Boolean(gatewayContext);
+    const extractedProviderId = !strictGatewayRouting && model.includes('::')
+      ? model.split('::')[0]
+      : '';
+    if (!strictGatewayRouting && model.includes('::')) {
+      pureModel = model.split('::').pop()!;
+      console.log(`[video/generate] Stripped provider prefix from model: "${model}" → "${pureModel}"`);
+    }
+    const effectiveProviderId = providerId || extractedProviderId || '';
+    if (strictGatewayRouting && (!effectiveProviderId || !pureModel)) {
+      return NextResponse.json({
+        success: false,
+        code: 'MODEL_PROVIDER_MISMATCH',
+        error: 'Gateway video generation requires an exact provider and model',
+        retryable: false,
+      }, { status: 400 });
+    }
     const skillBillingContext = body.skillBillingContext === undefined
       ? undefined
       : parseSkillBillingContext(body.skillBillingContext);
@@ -247,16 +257,26 @@ export async function POST(request: NextRequest) {
       provider = await findProviderById(effectiveProviderId);
     }
     if (!provider && !skillBillingContext) {
-      provider = await findProviderForModel(pureModel, 'video', effectiveProviderId);
+      if (!strictGatewayRouting) {
+        provider = await findProviderForModel(pureModel, 'video', effectiveProviderId);
+      }
     }
     if (!provider && !skillBillingContext) {
-      provider = await findProviderForFeature('video');
+      if (!strictGatewayRouting) provider = await findProviderForFeature('video');
     }
     if (!provider && !skillBillingContext) {
       // Fallback: 尝试 image 类型提供商（某些提供商同时支持图片和视频）
-      provider = await findProviderForFeature('imageEdit');
+      if (!strictGatewayRouting) provider = await findProviderForFeature('imageEdit');
     }
     if (!provider) {
+      if (strictGatewayRouting) {
+        return NextResponse.json({
+          success: false,
+          code: 'MODEL_PROVIDER_MISMATCH',
+          error: 'The requested gateway video provider is unavailable',
+          retryable: false,
+        }, { status: 400 });
+      }
       return NextResponse.json(
         { error: '未找到可用的视频 API 提供商，请先在管理员后台添加视频模型 API' },
         { status: 404 },
@@ -264,6 +284,17 @@ export async function POST(request: NextRequest) {
     }
 
     const descriptor = await resolveTaskModelForUser(provider.id, pureModel, sessionUser);
+    if (strictGatewayRouting && (
+      descriptor.providerId !== effectiveProviderId
+      || descriptor.modelId !== pureModel
+    )) {
+      return NextResponse.json({
+        success: false,
+        code: 'MODEL_PROVIDER_MISMATCH',
+        error: 'The requested gateway video model is unavailable',
+        retryable: false,
+      }, { status: 400 });
+    }
     const referenceImageCount = [
       imageUrl,
       lastFrameImageUrl,

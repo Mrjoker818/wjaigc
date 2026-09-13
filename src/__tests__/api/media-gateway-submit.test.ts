@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   authenticateGatewayBearer: vi.fn(),
+  recordGatewayAttempt: vi.fn(),
   reserveGatewayRequest: vi.fn(),
   markGatewayAdmitted: vi.fn(),
   markGatewayRejected: vi.fn(),
@@ -10,15 +11,18 @@ const mocks = vi.hoisted(() => ({
   submitGatewayVideo: vi.fn(),
 }));
 
+vi.mock('server-only', () => ({}));
 vi.mock('@/lib/media-gateway/key-service', () => ({
   authenticateGatewayBearer: mocks.authenticateGatewayBearer,
 }));
 vi.mock('@/lib/media-gateway/admission', () => ({
+  recordGatewayAttempt: mocks.recordGatewayAttempt,
   reserveGatewayRequest: mocks.reserveGatewayRequest,
   markGatewayAdmitted: mocks.markGatewayAdmitted,
   markGatewayRejected: mocks.markGatewayRejected,
 }));
-vi.mock('@/lib/media-gateway/internal-client', () => ({
+vi.mock('@/lib/media-gateway/internal-client', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/media-gateway/internal-client')>()),
   submitGatewayImage: mocks.submitGatewayImage,
   submitGatewayVideo: mocks.submitGatewayVideo,
 }));
@@ -30,6 +34,7 @@ import { GatewayError } from '@/lib/media-gateway/types';
 const principal = {
   keyId: 'gwkey_1', userId: 'user-1', requestsPerMinute: 10, dailyQuota: 100,
 };
+const attemptPermit = Object.freeze({ permit: 'opaque-test-value' });
 const reserved = {
   id: 'gwreq_1', gatewayKeyId: 'gwkey_1', userId: 'user-1',
   idempotencyKey: 'idem-1', requestDigest: 'a'.repeat(64), mediaType: 'image' as const,
@@ -71,6 +76,7 @@ describe('media gateway submission routes', () => {
     vi.clearAllMocks();
     process.env.GATEWAY_ENABLED = 'true';
     mocks.authenticateGatewayBearer.mockResolvedValue(principal);
+    mocks.recordGatewayAttempt.mockResolvedValue(attemptPermit);
     mocks.reserveGatewayRequest.mockResolvedValue({ kind: 'execute', request: reserved });
     mocks.markGatewayAdmitted.mockResolvedValue({ ...reserved, admissionStatus: 'admitted' });
     mocks.markGatewayRejected.mockResolvedValue({ ...reserved, admissionStatus: 'rejected' });
@@ -96,6 +102,7 @@ describe('media gateway submission routes', () => {
       success: false, code: 'GATEWAY_DISABLED', requestId: 'req_12345678', retryable: false,
     });
     expect(mocks.authenticateGatewayBearer).not.toHaveBeenCalled();
+    expect(mocks.recordGatewayAttempt).not.toHaveBeenCalled();
     expect(mocks.reserveGatewayRequest).not.toHaveBeenCalled();
     expect(mocks.submitGatewayImage).not.toHaveBeenCalled();
     expect(mocks.submitGatewayVideo).not.toHaveBeenCalled();
@@ -109,6 +116,7 @@ describe('media gateway submission routes', () => {
     expect(response.status).toBe(401);
     expect(await response.json()).toMatchObject({ code: 'GATEWAY_AUTH_REQUIRED' });
     expect(mocks.authenticateGatewayBearer).not.toHaveBeenCalled();
+    expect(mocks.recordGatewayAttempt).not.toHaveBeenCalled();
     expect(mocks.reserveGatewayRequest).not.toHaveBeenCalled();
   });
 
@@ -120,6 +128,8 @@ describe('media gateway submission routes', () => {
     expect(response.status).toBe(400);
     expect(await response.json()).toMatchObject({ code: 'GATEWAY_IDEMPOTENCY_REQUIRED' });
     expect(mocks.authenticateGatewayBearer).toHaveBeenCalledTimes(1);
+    expect(mocks.recordGatewayAttempt).toHaveBeenCalledOnce();
+    expect(mocks.recordGatewayAttempt).toHaveBeenCalledWith(principal);
     expect(mocks.reserveGatewayRequest).not.toHaveBeenCalled();
   });
 
@@ -133,7 +143,7 @@ describe('media gateway submission routes', () => {
 
     expect(mocks.authenticateGatewayBearer).toHaveBeenCalledWith(expect.stringMatching(/^Bearer wmg_/));
     expect(mocks.reserveGatewayRequest).toHaveBeenCalledWith(expect.objectContaining({
-      principal, idempotencyKey: 'idem-1', mediaType: 'image',
+      principal, attemptPermit, idempotencyKey: 'idem-1', mediaType: 'image',
     }));
     expect(mocks.submitGatewayImage).toHaveBeenCalledWith(expect.objectContaining({
       principal,
@@ -187,8 +197,8 @@ describe('media gateway submission routes', () => {
 
   it('marks rejected only after an explicit authoritative response with zero task ids', async () => {
     mocks.submitGatewayImage.mockResolvedValue({
-      kind: 'rejected', taskIds: [], code: 'GATEWAY_INVALID_REQUEST', status: 403,
-      retryable: false, rejectionCode: 'MODEL_NOT_AUTHORIZED',
+      kind: 'rejected', taskIds: [], code: 'GATEWAY_INVALID_REQUEST', status: 400,
+      retryable: false, rejectionCode: 'GATEWAY_INVALID_REQUEST',
     });
 
     const response = await submitImage(request('images', {
@@ -196,10 +206,10 @@ describe('media gateway submission routes', () => {
     }));
 
     expect(mocks.markGatewayRejected).toHaveBeenCalledWith({
-      gatewayRequestId: 'gwreq_1', rejectionCode: 'MODEL_NOT_AUTHORIZED', outcome: 'explicit',
+      gatewayRequestId: 'gwreq_1', rejectionCode: 'GATEWAY_INVALID_REQUEST', outcome: 'explicit',
     });
     expect(mocks.markGatewayAdmitted).not.toHaveBeenCalled();
-    expect(response.status).toBe(403);
+    expect(response.status).toBe(400);
   });
 
   it('keeps the reservation on an ambiguous internal failure and redacts internal details', async () => {
@@ -228,6 +238,7 @@ describe('media gateway submission routes', () => {
     expect(response.status).toBe(400);
     expect(await response.json()).toMatchObject({ success: false, code: 'GATEWAY_INVALID_REQUEST' });
     expect(mocks.reserveGatewayRequest).not.toHaveBeenCalled();
+    expect(mocks.recordGatewayAttempt).toHaveBeenCalledOnce();
     expect(mocks.markGatewayAdmitted).not.toHaveBeenCalled();
     expect(mocks.submitGatewayImage).not.toHaveBeenCalled();
     expect(mocks.submitGatewayVideo).not.toHaveBeenCalled();
@@ -239,8 +250,91 @@ describe('media gateway submission routes', () => {
     }));
 
     expect(response.status).toBe(400);
+    expect(mocks.recordGatewayAttempt).toHaveBeenCalledOnce();
     expect(mocks.markGatewayAdmitted).not.toHaveBeenCalled();
+    expect(mocks.reserveGatewayRequest).not.toHaveBeenCalled();
     expect(mocks.submitGatewayVideo).not.toHaveBeenCalled();
+  });
+
+  it.each(['images', 'videos'] as const)(
+    'counts malformed and oversized authenticated %s bodies exactly once before parsing',
+    async (path) => {
+      const submit = path === 'images' ? submitImage : submitVideo;
+      const invalidJson = new NextRequest(`http://localhost/api/gateway/v1/${path}`, {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer wmg_${'a'.repeat(43)}`,
+          'idempotency-key': 'idem-1',
+          'content-type': 'application/json',
+        },
+        body: '{bad json',
+      });
+      const malformedResponse = await submit(invalidJson);
+      expect(malformedResponse.status).toBe(400);
+      expect(mocks.recordGatewayAttempt).toHaveBeenCalledTimes(1);
+      expect(mocks.reserveGatewayRequest).not.toHaveBeenCalled();
+
+      vi.clearAllMocks();
+      mocks.authenticateGatewayBearer.mockResolvedValue(principal);
+      mocks.recordGatewayAttempt.mockResolvedValue(attemptPermit);
+      const oversized = new NextRequest(`http://localhost/api/gateway/v1/${path}`, {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer wmg_${'a'.repeat(43)}`,
+          'idempotency-key': 'idem-2',
+          'content-type': 'application/json',
+          'content-length': '1048577',
+        },
+        body: '{}',
+      });
+      const oversizedResponse = await submit(oversized);
+      expect(oversizedResponse.status).toBe(413);
+      expect(mocks.recordGatewayAttempt).toHaveBeenCalledTimes(1);
+      expect(mocks.reserveGatewayRequest).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(['images', 'videos'] as const)(
+    'rejects nested forbidden fields for %s after counting one RPM attempt',
+    async (path) => {
+      const response = await (path === 'images' ? submitImage : submitVideo)(request(path, {
+        prompt: 'draw', providerId: 'provider-1', modelId: 'model-1',
+        options: { transport: { apiKey: 'nested-provider-secret' } },
+      }));
+
+      expect(response.status).toBe(400);
+      expect(mocks.recordGatewayAttempt).toHaveBeenCalledOnce();
+      expect(mocks.reserveGatewayRequest).not.toHaveBeenCalled();
+      expect(mocks.submitGatewayImage).not.toHaveBeenCalled();
+      expect(mocks.submitGatewayVideo).not.toHaveBeenCalled();
+    },
+  );
+
+  it('returns the same stable explicit rejection on first response and replay', async () => {
+    mocks.submitGatewayImage.mockResolvedValue({
+      kind: 'rejected', taskIds: [], code: 'GATEWAY_INVALID_REQUEST', status: 400,
+      retryable: false, rejectionCode: 'GATEWAY_INVALID_REQUEST',
+    });
+    const first = await submitImage(request('images', {
+      prompt: 'draw', providerId: 'provider-1', modelId: 'missing-model',
+    }));
+    const firstBody = await first.json();
+
+    mocks.reserveGatewayRequest.mockResolvedValueOnce({
+      kind: 'reuse',
+      request: {
+        ...reserved,
+        admissionStatus: 'rejected',
+        rejectionCode: 'GATEWAY_INVALID_REQUEST',
+      },
+    });
+    const replay = await submitImage(request('images', {
+      prompt: 'draw', providerId: 'provider-1', modelId: 'missing-model',
+    }));
+
+    expect(replay.status).toBe(first.status);
+    expect(await replay.json()).toEqual(firstBody);
+    expect(mocks.submitGatewayImage).toHaveBeenCalledTimes(1);
   });
 
   it('maps authentication and admission domain errors to stable gateway responses', async () => {

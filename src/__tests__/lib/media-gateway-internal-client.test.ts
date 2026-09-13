@@ -53,6 +53,8 @@ describe('media gateway authoritative internal client', () => {
     expect(url).toBe('http://localhost:5123/api/generate');
     expect(init.headers).toMatchObject({
       'x-internal-request': 'true',
+      'x-wujie-agent-strict-routing': 'true',
+      'idempotency-key': 'gwreq_1',
       'x-wujie-source-channel': 'gateway',
       'x-wujie-gateway-request-id': 'gwreq_1',
       'x-wujie-gateway-key-id': 'gwkey_1',
@@ -92,7 +94,7 @@ describe('media gateway authoritative internal client', () => {
     });
   });
 
-  it('returns an explicit rejection only for a completed authoritative response with no task ids', async () => {
+  it('normalizes a structurally explicit 4xx rejection to the stable gateway contract', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
       success: false, code: 'MODEL_NOT_AUTHORIZED', error: 'private provider detail',
     }), { status: 403, headers: { 'content-type': 'application/json' } })));
@@ -106,10 +108,93 @@ describe('media gateway authoritative internal client', () => {
       kind: 'rejected',
       taskIds: [],
       code: 'GATEWAY_INVALID_REQUEST',
-      status: 403,
+      status: 400,
       retryable: false,
-      rejectionCode: 'MODEL_NOT_AUTHORIZED',
+      rejectionCode: 'GATEWAY_INVALID_REQUEST',
     });
+  });
+
+  it('recognizes an authoritative structured 4xx error object as an explicit rejection', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      error: { code: 'invalid_model', message: 'private provider detail' },
+    }), { status: 400, headers: { 'content-type': 'application/json' } })));
+
+    await expect(submitGatewayImage({
+      principal,
+      requestId: 'req_12345678',
+      gatewayRequestId: 'gwreq_1',
+      input: { prompt: 'draw', providerId: 'provider-1', modelId: 'model-1' },
+    })).resolves.toMatchObject({
+      kind: 'rejected', code: 'GATEWAY_INVALID_REQUEST', status: 400, retryable: false,
+    });
+  });
+
+  it.each([
+    null,
+    [],
+    {},
+    { unexpected: true },
+  ])('treats parseable malformed response %# as ambiguous', async (body) => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify(body), {
+      status: 400,
+      headers: { 'content-type': 'application/json' },
+    })));
+
+    await expect(submitGatewayImage({
+      principal,
+      requestId: 'req_12345678',
+      gatewayRequestId: 'gwreq_1',
+      input: { prompt: 'draw', providerId: 'provider-1', modelId: 'model-1' },
+    })).rejects.toMatchObject({ code: 'GATEWAY_INTERNAL_UNAVAILABLE', status: 503 });
+  });
+
+  it.each([500, 502, 503, 504])('treats explicit-looking %i without task ids as ambiguous', async (status) => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      success: false, code: 'MODEL_NOT_AUTHORIZED', error: 'internal failure',
+    }), { status, headers: { 'content-type': 'application/json' } })));
+
+    await expect(submitGatewayVideo({
+      principal,
+      requestId: 'req_12345678',
+      gatewayRequestId: 'gwreq_2',
+      input: { prompt: 'animate', providerId: 'provider-1', modelId: 'model-1' },
+    })).rejects.toMatchObject({ code: 'GATEWAY_INTERNAL_UNAVAILABLE', status: 503 });
+  });
+
+  it.each([
+    { taskId: '../invalid' },
+    { taskIds: ['task-1', 'bad task'] },
+    { taskIds: 'task-1' },
+  ])('treats invalid task-id response %# as ambiguous', async (body) => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify(body), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    })));
+
+    await expect(submitGatewayImage({
+      principal,
+      requestId: 'req_12345678',
+      gatewayRequestId: 'gwreq_1',
+      input: { prompt: 'draw', providerId: 'provider-1', modelId: 'model-1' },
+    })).rejects.toMatchObject({ code: 'GATEWAY_INTERNAL_UNAVAILABLE', status: 503 });
+  });
+
+  it.each([
+    ['queued', 'queued'],
+    ['processing', 'processing'],
+    ['provider-private-state', 'queued'],
+    [null, 'queued'],
+  ])('bounds accepted status %j to %s', async (status, expected) => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      taskId: 'task-1', status,
+    }), { status: 200, headers: { 'content-type': 'application/json' } })));
+
+    await expect(submitGatewayImage({
+      principal,
+      requestId: 'req_12345678',
+      gatewayRequestId: 'gwreq_1',
+      input: { prompt: 'draw', providerId: 'provider-1', modelId: 'model-1' },
+    })).resolves.toMatchObject({ kind: 'accepted', status: expected });
   });
 
   it.each([

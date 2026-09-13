@@ -14,6 +14,12 @@ export type GatewayAdmissionDecision =
   | { kind: 'execute'; request: GatewayRequestRecord }
   | { kind: 'reuse'; request: GatewayRequestRecord };
 
+declare const gatewayAttemptPermitBrand: unique symbol;
+
+export interface GatewayAttemptPermit {
+  readonly [gatewayAttemptPermitBrand]: true;
+}
+
 export interface ReserveGatewayRequestInput {
   principal: GatewayPrincipal;
   idempotencyKey: string;
@@ -21,6 +27,7 @@ export interface ReserveGatewayRequestInput {
   mediaType: GatewayMediaType;
   now?: Date;
   requestId?: string;
+  attemptPermit?: GatewayAttemptPermit;
 }
 
 export interface MarkGatewayAdmittedInput {
@@ -55,6 +62,11 @@ const REQUEST_COLUMNS = `
 const IDEMPOTENCY_PATTERN = /^[A-Za-z0-9](?:[A-Za-z0-9._:-]*[A-Za-z0-9])?$/;
 const RECORD_ID_PATTERN = /^gwreq_[A-Za-z0-9-]{1,100}$/;
 const TASK_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/;
+const attemptPermits = new WeakMap<GatewayAttemptPermit, {
+  keyId: string;
+  userId: string;
+  used: boolean;
+}>();
 
 function iso(value: string | Date): string {
   return value instanceof Date ? value.toISOString() : value;
@@ -113,9 +125,121 @@ async function commitCountedError(client: PoolClient, error: GatewayError): Prom
   return error;
 }
 
+async function lockAdmissionKey(
+  client: PoolClient,
+  principal: GatewayPrincipal,
+): Promise<{
+  id: string;
+  user_id: string;
+  requests_per_minute: number;
+  daily_quota: number;
+  enabled: boolean;
+  revoked_at: string | Date | null;
+}> {
+  const keyResult = await client.query<{
+    id: string;
+    user_id: string;
+    requests_per_minute: number;
+    daily_quota: number;
+    enabled: boolean;
+    revoked_at: string | Date | null;
+  }>(
+    `SELECT id, user_id, requests_per_minute, daily_quota, enabled, revoked_at
+       FROM wujie_gateway_keys
+      WHERE id = $1
+      FOR UPDATE`,
+    [principal.keyId],
+  );
+  const key = keyResult.rows[0];
+  if (!key || key.user_id !== principal.userId || !key.enabled || key.revoked_at !== null) {
+    throw new GatewayError('GATEWAY_KEY_INVALID', 401, 'Gateway key is invalid');
+  }
+  return key;
+}
+
+async function incrementGatewayAttempt(
+  client: PoolClient,
+  key: { id: string; requests_per_minute: number },
+  now: Date,
+): Promise<void> {
+  const rateResult = await client.query<{ attempt_count: number }>(
+    `INSERT INTO wujie_gateway_rate_windows (gateway_key_id, window_start, attempt_count)
+     VALUES ($1, date_trunc('minute', $2::timestamptz), 1)
+     ON CONFLICT (gateway_key_id, window_start)
+     DO UPDATE SET attempt_count = wujie_gateway_rate_windows.attempt_count + 1
+     RETURNING attempt_count`,
+    [key.id, now.toISOString()],
+  );
+  const attemptCount = Number(rateResult.rows[0]?.attempt_count);
+  if (!Number.isInteger(attemptCount)) throw unavailable();
+  if (attemptCount > key.requests_per_minute) {
+    throw new GatewayError(
+      'GATEWAY_RATE_LIMITED',
+      429,
+      '请求过于频繁，请稍后重试',
+      true,
+    );
+  }
+}
+
+export async function recordGatewayAttempt(
+  principal: GatewayPrincipal,
+): Promise<GatewayAttemptPermit> {
+  let client: PoolClient | undefined;
+  let transactionOpen = false;
+  try {
+    client = await getPool().connect();
+    await client.query('BEGIN');
+    transactionOpen = true;
+    let key;
+    try {
+      key = await lockAdmissionKey(client, principal);
+      await incrementGatewayAttempt(client, key, new Date());
+    } catch (error) {
+      if (error instanceof GatewayError) {
+        const committedError = await commitCountedError(client, error);
+        transactionOpen = false;
+        throw committedError;
+      }
+      throw error;
+    }
+    await client.query('COMMIT');
+    transactionOpen = false;
+    const permit = Object.freeze({}) as GatewayAttemptPermit;
+    attemptPermits.set(permit, {
+      keyId: key.id,
+      userId: key.user_id,
+      used: false,
+    });
+    return permit;
+  } catch (error) {
+    await rollback(client, transactionOpen);
+    if (error instanceof GatewayError) throw error;
+    throw unavailable();
+  } finally {
+    client?.release();
+  }
+}
+
+function consumeAttemptPermit(
+  permit: GatewayAttemptPermit,
+  principal: GatewayPrincipal,
+): void {
+  const state = attemptPermits.get(permit);
+  if (!state || state.used) throw unavailable();
+  state.used = true;
+  if (state.keyId !== principal.keyId || state.userId !== principal.userId) {
+    throw unavailable();
+  }
+}
+
 export async function reserveGatewayRequest(
   input: ReserveGatewayRequestInput,
 ): Promise<GatewayAdmissionDecision> {
+  const hasRecordedAttempt = input.attemptPermit !== undefined;
+  if (input.attemptPermit !== undefined) {
+    consumeAttemptPermit(input.attemptPermit, input.principal);
+  }
   let client: PoolClient | undefined;
   let transactionOpen = false;
   try {
@@ -123,49 +247,30 @@ export async function reserveGatewayRequest(
     await client.query('BEGIN');
     transactionOpen = true;
 
-    const keyResult = await client.query<{
-      id: string;
-      user_id: string;
-      requests_per_minute: number;
-      daily_quota: number;
-      enabled: boolean;
-      revoked_at: string | Date | null;
-    }>(
-      `SELECT id, user_id, requests_per_minute, daily_quota, enabled, revoked_at
-         FROM wujie_gateway_keys
-        WHERE id = $1
-        FOR UPDATE`,
-      [input.principal.keyId],
-    );
-    const key = keyResult.rows[0];
-    if (!key || key.user_id !== input.principal.userId || !key.enabled || key.revoked_at !== null) {
-      const error = await commitCountedError(client, new GatewayError(
-        'GATEWAY_KEY_INVALID', 401, 'Gateway key is invalid',
-      ));
-      transactionOpen = false;
+    let key;
+    try {
+      key = await lockAdmissionKey(client, input.principal);
+    } catch (error) {
+      if (error instanceof GatewayError) {
+        const committedError = await commitCountedError(client, error);
+        transactionOpen = false;
+        throw committedError;
+      }
       throw error;
     }
 
     const now = input.now ?? new Date();
-    const rateResult = await client.query<{ attempt_count: number }>(
-      `INSERT INTO wujie_gateway_rate_windows (gateway_key_id, window_start, attempt_count)
-       VALUES ($1, date_trunc('minute', $2::timestamptz), 1)
-       ON CONFLICT (gateway_key_id, window_start)
-       DO UPDATE SET attempt_count = wujie_gateway_rate_windows.attempt_count + 1
-       RETURNING attempt_count`,
-      [key.id, now.toISOString()],
-    );
-    const attemptCount = Number(rateResult.rows[0]?.attempt_count);
-    if (!Number.isInteger(attemptCount)) throw unavailable();
-    if (attemptCount > key.requests_per_minute) {
-      const error = await commitCountedError(client, new GatewayError(
-        'GATEWAY_RATE_LIMITED',
-        429,
-        '请求过于频繁，请稍后重试',
-        true,
-      ));
-      transactionOpen = false;
-      throw error;
+    if (!hasRecordedAttempt) {
+      try {
+        await incrementGatewayAttempt(client, key, now);
+      } catch (error) {
+        if (error instanceof GatewayError) {
+          const committedError = await commitCountedError(client, error);
+          transactionOpen = false;
+          throw committedError;
+        }
+        throw error;
+      }
     }
 
     try {
