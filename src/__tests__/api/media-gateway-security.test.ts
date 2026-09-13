@@ -57,6 +57,9 @@ describe('media gateway external security boundary', () => {
   it.each([
     ['image', normalizeGatewayImageRequest, { prompt: 'safe', providerId: 'pear', modelId: 'image', metadata: { role: 'admin' } }],
     ['video', normalizeGatewayVideoRequest, { prompt: 'safe', providerId: 'pear', modelId: 'video', constructor: { prototype: { trusted: true } } }],
+    ['image authorization', normalizeGatewayImageRequest, { prompt: 'safe', providerId: 'pear', modelId: 'image', authorization: 'Bearer private' }],
+    ['video access token', normalizeGatewayVideoRequest, { prompt: 'safe', providerId: 'pear', modelId: 'video', accessToken: 'private' }],
+    ['image password', normalizeGatewayImageRequest, { prompt: 'safe', providerId: 'pear', modelId: 'image', password: 'private' }],
   ] as const)('rejects undeclared %s request fields instead of silently dropping them', (_kind, normalize, body) => {
     expect(() => normalize(body)).toThrowError(expect.objectContaining({
       code: 'GATEWAY_INVALID_REQUEST',
