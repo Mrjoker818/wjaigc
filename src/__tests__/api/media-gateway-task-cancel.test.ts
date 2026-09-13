@@ -94,16 +94,18 @@ describe('POST /api/gateway/v1/tasks/[taskId]/cancel', () => {
 
   it('is disabled by default before attempting authentication', async () => {
     delete process.env.GATEWAY_ENABLED;
+    const internalFetch = vi.fn();
+    vi.stubGlobal('fetch', internalFetch);
 
     const response = await POST(gatewayCancelRequest('task-1'), context('task-1'));
 
     expect(response.status).toBe(503);
     expect(await response.json()).toMatchObject({ code: 'GATEWAY_DISABLED' });
     expect(mocks.authenticateGatewayBearer).not.toHaveBeenCalled();
-    expect(mocks.auditGatewayEvent).toHaveBeenCalledWith({
-      action: 'gateway_task_cancel', outcome: 'failure', requestId: 'req_task_cancel_01',
-      responseStatus: 503,
-    });
+    expect(mocks.auditGatewayEvent).not.toHaveBeenCalled();
+    expect(mocks.recordGatewayAttempt).not.toHaveBeenCalled();
+    expect(mocks.getCloudTaskForUser).not.toHaveBeenCalled();
+    expect(internalFetch).not.toHaveBeenCalled();
   });
 
   it('does not allow a revoked or disabled key to cancel', async () => {

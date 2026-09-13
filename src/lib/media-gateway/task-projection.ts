@@ -17,10 +17,11 @@ const MAX_MEDIA_URL_BYTES = 2_048;
 const MAX_MEDIA_URLS = 16;
 const MAX_PROJECTED_RESULT_BYTES = 16_384;
 const CONTROLLED_MEDIA_PATHS = ['/api/serve-upload/', '/uploads/'] as const;
-const SENSITIVE_QUERY_MARKERS = [
-  'auth', 'credential', 'password', 'passwd', 'policy', 'secret', 'signature',
-  'signed', 'token', 'apikey', 'accesskey', 'xamz', 'xgoog',
+const BLOCKED_DOMAIN_SUFFIXES = [
+  'localhost', 'local', 'internal', 'home', 'lan', 'test', 'example', 'invalid',
 ] as const;
+const MAX_PERCENT_DECODE_ROUNDS = 4;
+const DANGEROUS_ENCODED_PATH = /%(?:0[0-9a-f]|1[0-9a-f]|2e|2f|5c|7f)/i;
 const IMAGE_EXTENSION = /\.(?:avif|bmp|gif|jpe?g|png|svg|tiff?|webp)$/i;
 const VIDEO_EXTENSION = /\.(?:m4v|mkv|mov|mp4|webm)$/i;
 const PUBLIC_MIME_TYPE = /^(?:image\/(?:avif|bmp|gif|jpeg|png|svg\+xml|tiff|webp)|video\/(?:mp4|quicktime|webm))$/;
@@ -59,81 +60,46 @@ function unavailable(): GatewayError {
   );
 }
 
-function isPublicIpv4(hostname: string): boolean {
-  const octets = hostname.split('.').map(Number);
-  if (octets.length !== 4 || octets.some(value => !Number.isInteger(value))) return false;
-  const [a, b] = octets;
-  return !(
-    a === 0
-    || a === 10
-    || a === 127
-    || (a === 100 && b >= 64 && b <= 127)
-    || (a === 169 && b === 254)
-    || (a === 172 && b >= 16 && b <= 31)
-    || (a === 192 && (b === 0 || b === 168))
-    || (a === 198 && (b === 18 || b === 19 || b === 51))
-    || (a === 203 && b === 0)
-    || a >= 224
-  );
-}
-
-function ipv6Words(hostname: string): number[] | null {
-  const normalized = hostname.replace(/^\[|\]$/g, '').toLowerCase();
-  const halves = normalized.split('::');
-  if (halves.length > 2) return null;
-  const left = halves[0] ? halves[0].split(':') : [];
-  const right = halves.length === 2 && halves[1] ? halves[1].split(':') : [];
-  const missing = 8 - left.length - right.length;
-  if ((halves.length === 1 && missing !== 0) || missing < 0) return null;
-  const words = [...left, ...Array.from({ length: missing }, () => '0'), ...right]
-    .map(value => Number.parseInt(value, 16));
-  return words.length === 8 && words.every(value => Number.isInteger(value) && value >= 0 && value <= 0xffff)
-    ? words
-    : null;
-}
-
-function isPublicIpv6(hostname: string): boolean {
-  const words = ipv6Words(hostname);
-  if (!words) return false;
-  if ((words[0] & 0xe000) !== 0x2000) return false;
-  return !(words[0] === 0x2001 && words[1] === 0x0db8);
-}
-
 function isPublicHostname(hostname: string): boolean {
   const normalized = hostname.replace(/^\[|\]$/g, '').replace(/\.+$/, '').toLowerCase();
-  const ipVersion = isIP(normalized);
-  if (ipVersion === 4) return isPublicIpv4(normalized);
-  if (ipVersion === 6) return isPublicIpv6(normalized);
-  return normalized.includes('.')
-    && !normalized.endsWith('.localhost')
-    && !normalized.endsWith('.local')
-    && !normalized.endsWith('.internal')
-    && !normalized.endsWith('.home')
-    && !normalized.endsWith('.lan')
-    && !normalized.endsWith('.test')
-    && !normalized.endsWith('.example')
-    && !normalized.endsWith('.invalid');
-}
-
-function hasSafeQuery(url: URL): boolean {
-  return [...url.searchParams.keys()].every((key) => {
-    const normalized = key.toLowerCase().replace(/[^a-z0-9]/g, '');
-    return normalized !== 'sig'
-      && !SENSITIVE_QUERY_MARKERS.some(marker => normalized.includes(marker));
-  });
-}
-
-function isMediaPath(pathname: string, kind: 'image' | 'video'): boolean {
-  let decoded: string;
-  try {
-    decoded = decodeURIComponent(pathname);
-  } catch {
+  if (isIP(normalized) !== 0 || normalized.length > 253) return false;
+  const labels = normalized.split('.');
+  if (labels.length < 2 || labels.some(label => !/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(label))) {
     return false;
   }
-  if (decoded.includes('\\') || decoded.includes('\0')) return false;
+  if (BLOCKED_DOMAIN_SUFFIXES.some(suffix => normalized === suffix || normalized.endsWith(`.${suffix}`))) {
+    return false;
+  }
+  const topLevel = labels.at(-1) ?? '';
+  return /^[a-z]{2,63}$/.test(topLevel) || /^xn--[a-z0-9-]{2,59}$/.test(topLevel);
+}
+
+function decodeMediaPath(pathname: string): string | undefined {
+  let decoded = pathname;
+  for (let round = 0; round < MAX_PERCENT_DECODE_ROUNDS; round += 1) {
+    if (DANGEROUS_ENCODED_PATH.test(decoded)) return undefined;
+    let next: string;
+    try {
+      next = decodeURIComponent(decoded);
+    } catch {
+      return undefined;
+    }
+    if (next === decoded) return decoded;
+    decoded = next;
+  }
+  return DANGEROUS_ENCODED_PATH.test(decoded) || /%[0-9a-f]{2}/i.test(decoded)
+    ? undefined
+    : decoded;
+}
+
+function safeMediaPath(pathname: string, kind: 'image' | 'video'): string | undefined {
+  const decoded = decodeMediaPath(pathname);
+  if (!decoded || decoded.includes('\\') || /[\u0000-\u001f\u007f]/.test(decoded)) return undefined;
   const segments = decoded.split('/');
-  if (segments.includes('.') || segments.includes('..')) return false;
-  return (kind === 'image' ? IMAGE_EXTENSION : VIDEO_EXTENSION).test(decoded);
+  if (segments.includes('.') || segments.includes('..')) return undefined;
+  return (kind === 'image' ? IMAGE_EXTENSION : VIDEO_EXTENSION).test(decoded)
+    ? decoded
+    : undefined;
 }
 
 function safeMediaUrl(value: unknown, kind: 'image' | 'video'): string | undefined {
@@ -141,17 +107,22 @@ function safeMediaUrl(value: unknown, kind: 'image' | 'video'): string | undefin
     return undefined;
   }
   const relative = value.startsWith('/') && !value.startsWith('//');
+  if (relative) {
+    if (value.includes('?') || value.includes('#')) return undefined;
+    const mediaPath = safeMediaPath(value, kind);
+    return mediaPath && CONTROLLED_MEDIA_PATHS.some(prefix => mediaPath.startsWith(prefix))
+      ? value
+      : undefined;
+  }
   let url: URL;
   try {
-    url = new URL(value, 'https://gateway.invalid');
+    url = new URL(value);
   } catch {
     return undefined;
   }
-  if (url.hash || url.username || url.password || !hasSafeQuery(url) || !isMediaPath(url.pathname, kind)) {
+  const mediaPath = safeMediaPath(url.pathname, kind);
+  if (url.search || url.hash || url.username || url.password || !mediaPath) {
     return undefined;
-  }
-  if (relative) {
-    return CONTROLLED_MEDIA_PATHS.some(prefix => url.pathname.startsWith(prefix)) ? value : undefined;
   }
   return url.protocol === 'https:' && isPublicHostname(url.hostname) ? value : undefined;
 }

@@ -62,7 +62,7 @@ async function auditedResponse(
 export async function GET(request: NextRequest, context: RouteContext): Promise<NextResponse> {
   const requestId = getRequestId(request);
   if (process.env.GATEWAY_ENABLED !== 'true') {
-    return auditedResponse(errorResponse(requestId, 'GATEWAY_DISABLED', 503), requestId);
+    return errorResponse(requestId, 'GATEWAY_DISABLED', 503);
   }
 
   let principal: GatewayPrincipal | undefined;

@@ -70,10 +70,9 @@ describe('GET /api/gateway/v1/tasks/[taskId]', () => {
     expect(response.status).toBe(503);
     expect(await response.json()).toMatchObject({ code: 'GATEWAY_DISABLED' });
     expect(mocks.authenticateGatewayBearer).not.toHaveBeenCalled();
-    expect(mocks.auditGatewayEvent).toHaveBeenCalledWith({
-      action: 'gateway_task_query', outcome: 'failure', requestId: 'req_task_status_01',
-      responseStatus: 503,
-    });
+    expect(mocks.auditGatewayEvent).not.toHaveBeenCalled();
+    expect(mocks.recordGatewayAttempt).not.toHaveBeenCalled();
+    expect(mocks.getCloudTaskForUser).not.toHaveBeenCalled();
   });
 
   it('requires Bearer key authentication', async () => {
@@ -289,8 +288,17 @@ describe('GET /api/gateway/v1/tasks/[taskId]', () => {
     ['link-local literal', 'https://169.254.169.254/result.png'],
     ['reserved literal', 'https://192.0.2.10/result.png'],
     ['IPv6 loopback', 'https://[::1]/result.png'],
+    ['IPv6 benchmark literal', 'https://[2001:2::]/result.png'],
+    ['IPv6 documentation literal', 'https://[3fff::]/result.png'],
+    ['6to4 loopback literal', 'https://[2002:7f00:1::]/result.png'],
     ['non-media path', 'https://cdn.openai.com/account'],
     ['path traversal', '/api/serve-upload/%2e%2e/private.png'],
+    ['literal dot segment', '/uploads/./safe.png'],
+    ['literal dot-dot segment', '/uploads/public/../safe.png'],
+    ['double-encoded traversal', '/uploads/%252e%252e/private.png'],
+    ['triple-encoded traversal', '/uploads/%25252e%25252e/private.png'],
+    ['double-encoded separator', '/uploads/safe%252fprivate.png'],
+    ['double-encoded backslash', '/uploads/safe%255cprivate.png'],
   ])('omits an unsafe %s from media URL fields without fetching it', async (_, unsafeUrl) => {
     mocks.getCloudTaskForUser.mockResolvedValue({
       id: 'task-unsafe-url', userId: 'user-a', type: 'generate-async',
@@ -317,6 +325,10 @@ describe('GET /api/gateway/v1/tasks/[taskId]', () => {
     'https://cdn.openai.com/result.png?credential=private-credential',
     'https://cdn.openai.com/result.png?apiKey=private-api-key',
     'https://cdn.openai.com/result.png?AWSAccessKeyId=private-access-key',
+    'https://cdn.openai.com/result.png?key=private-key',
+    'https://cdn.openai.com/result.png?subscription-key=private-key',
+    'https://cdn.openai.com/result.png?ocp-apim-subscription-key=private-key',
+    'https://cdn.openai.com/result.png?key-id=private-key-id',
     '/api/serve-upload/result.png?authorization=Bearer-private',
   ])('omits media URLs with sensitive credential or signature queries', async (unsafeUrl) => {
     mocks.getCloudTaskForUser.mockResolvedValue({
@@ -435,15 +447,15 @@ describe('GET /api/gateway/v1/tasks/[taskId]', () => {
     expect((await response.json()).result).toEqual({});
   });
 
-  it('keeps bounded controlled paths and public HTTPS media URLs with benign queries', async () => {
+  it('keeps bounded controlled paths and public domain HTTPS media URLs without queries', async () => {
     mocks.getCloudTaskForUser.mockResolvedValue({
       id: 'task-safe-results', userId: 'user-a', type: 'generate-async',
       status: 'completed', progress: 100, creditStatus: 'charged', createdAt: 1, updatedAt: 2,
       result: {
-        imageUrl: '/api/serve-upload/results/image.png?v=2',
+        imageUrl: '/api/serve-upload/results/image.png',
         imageUrls: [
           '/uploads/result.webp',
-          'https://cdn.openai.com/result.jpg?width=1024',
+          'https://cdn.openai.com/result.jpg',
         ],
         videoUrl: 'https://media.openai.com/result.mp4',
         mimeType: 'image/png',
@@ -459,10 +471,10 @@ describe('GET /api/gateway/v1/tasks/[taskId]', () => {
 
     expect(await response.json()).toMatchObject({
       result: {
-        imageUrl: '/api/serve-upload/results/image.png?v=2',
+        imageUrl: '/api/serve-upload/results/image.png',
         imageUrls: [
           '/uploads/result.webp',
-          'https://cdn.openai.com/result.jpg?width=1024',
+          'https://cdn.openai.com/result.jpg',
         ],
         videoUrl: 'https://media.openai.com/result.mp4',
         mimeType: 'image/png',
