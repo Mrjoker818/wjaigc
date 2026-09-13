@@ -319,8 +319,10 @@ git commit -m "feat: enforce media gateway admission controls"
 - Create: `src/lib/media-gateway/internal-client.ts`
 - Create: `src/app/api/gateway/v1/images/route.ts`
 - Create: `src/app/api/gateway/v1/videos/route.ts`
+- Modify: `src/lib/media-gateway/admission.ts`
 - Modify: `src/app/api/generate/route.ts`
 - Modify: `src/app/api/video/generate/route.ts`
+- Test: `src/__tests__/lib/media-gateway-admission.test.ts`
 - Test: `src/__tests__/lib/media-gateway-internal-client.test.ts`
 - Test: `src/__tests__/api/media-gateway-submit.test.ts`
 - Test: `src/__tests__/api/media-gateway-trusted-context.test.ts`
@@ -329,6 +331,9 @@ git commit -m "feat: enforce media gateway admission controls"
 - Consumes: `GatewayPrincipal`、准入接口、现有 `getInternalRequestHeaders()`。
 - Produces: `submitGatewayImage()`、`submitGatewayVideo()`。
 - Produces trusted metadata: `sourceChannel='gateway'`、`gatewayRequestId`、`gatewayKeyId`。
+- Produces: `recordGatewayAttempt(principal)` 返回模块内不可伪造、绑定 key/user 的一次性尝试凭证；`reserveGatewayRequest()` 携该凭证时不得再次增加 RPM。
+
+> 审查修正：Task 3 原接口同时负责 RPM 与需要正文摘要的准入，无法满足“认证后、读取正文前计数”。Task 4 必须以最小扩展拆出原子尝试计数：认证成功后先记录 RPM，再读取/校验正文；正文有效时携凭证进入原准入事务。缺失、伪造、跨 key/user 或重复使用的凭证必须失败关闭。原有不带凭证的 `reserveGatewayRequest()` 行为保持兼容。
 
 - [ ] **Step 1: 写提交和 Header 欺骗失败测试**
 
@@ -342,7 +347,7 @@ it('ignores gateway headers from cookie callers and accepts them only for intern
 });
 ```
 
-覆盖：默认关闭 503、显式 provider/model、`n=2/3/4` taskIds 不折叠、内部错误不泄密、参数拒绝不占日配额。
+覆盖：默认关闭 503、所有已认证尝试（含缺少幂等键、超大/非法 JSON、禁用字段及 schema 错误）均计入 RPM、显式 provider/model、`n=2/3/4` taskIds 不折叠、内部错误不泄密、参数拒绝不占日配额。
 
 - [ ] **Step 2: 运行并确认 RED**
 
@@ -363,11 +368,11 @@ async function gatewayHeaders(principal: GatewayPrincipal, requestId: string, ga
 }
 ```
 
-调用地址沿用项目现有 `http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}` 约定；设置有界提交超时。响应不明确时返回 `GATEWAY_INTERNAL_UNAVAILABLE` 且保持 `reserved`；仅当内核明确返回且没有任何 taskId 时标记 rejected。
+调用地址沿用项目现有 `http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}` 约定；设置有界提交超时。响应不明确、不可解析、结构异常或 5xx 时返回 `GATEWAY_INTERNAL_UNAVAILABLE` 且保持 `reserved`；仅当内核返回结构明确的 4xx 失败且没有任何 taskId 时标记 rejected。首次拒绝和重放统一映射为同一稳定的网关错误语义；成功状态只允许网关公开状态集合，其他内部字符串归一为默认状态。
 
 - [ ] **Step 4: 实现两个提交路由**
 
-固定顺序：feature flag → Bearer 鉴权 → 分钟尝试计数 → 读取/校验请求 → 准入 → execute 或 reuse → 权威内核提交 → 保存 taskIds → 稳定响应。外部 body 中的 `_skipCredits`、`_skipCloudTaskPersistence`、`sourceChannel`、API Key 字段必须被 schema 拒绝。
+固定顺序：feature flag → Bearer 鉴权 → 原子记录分钟尝试并取得一次性凭证 → 读取/校验请求 → 携凭证准入 → execute 或 reuse → 权威内核提交 → 保存 taskIds → 稳定响应。外部 body 中的 `_skipCredits`、`_skipCloudTaskPersistence`、`sourceChannel`、API Key 字段必须被 schema 拒绝。图像与视频都必须按显式 `providerId + modelId` 失败关闭；现有权威路由不得为网关调用发现或降级到其他供应商/模型。
 
 - [ ] **Step 5: 只在内部认证下持久化来源标签**
 
