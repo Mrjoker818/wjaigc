@@ -190,6 +190,47 @@ describe('standalone simple-chat asset transfer', () => {
     })).rejects.toThrow('EXPORT_ASSET_VERSION_MISMATCH');
   });
 
+  it('transfers a completed Run video by AssetVersion when the source has no placement', async () => {
+    const send = sendExportToCanvas();
+    expect(send).toBeTypeOf('function');
+    if (!send) return;
+    const writeBridge = vi.fn();
+    const transfer = vi.fn(async ({ sourceVersionId }: { sourceVersionId: string }) => ({
+      url: '/videos/final.mp4',
+      assetId: 'video-asset-1',
+      assetVersionId: sourceVersionId,
+      placementId: 'canvas-video-placement-1',
+      entityId: 'canvas-video-1',
+      kind: 'video' as const,
+    }));
+
+    await expect(send({
+      runProjectId: 'run-project-1',
+      imageRefs: [{
+        url: '/videos/final.mp4',
+        assetId: 'video-asset-1',
+        assetVersionId: 'video-version-1',
+        kind: 'video',
+      }],
+      sourceTrace: sourceTraceFixture,
+      transfer,
+      writeBridge,
+    })).resolves.toMatchObject({
+      ok: true,
+      references: [expect.objectContaining({
+        assetVersionId: 'video-version-1',
+        placementId: 'canvas-video-placement-1',
+        kind: 'video',
+      })],
+    });
+    expect(transfer).toHaveBeenCalledWith(expect.objectContaining({
+      sourceVersionId: 'video-version-1',
+      targetProjectId: 'run-project-1',
+      kind: 'video',
+    }));
+    expect(writeBridge).toHaveBeenCalledOnce();
+  });
+
   it('wires the export result card to its persisted Run project instead of the selected canvas', () => {
     expect(chatAreaSource).toContain('sendSimpleChatExportToCanvas');
     expect(chatAreaSource).toMatch(/runProjectId:\s*msg\.multiPlatformExportProjectId/u);

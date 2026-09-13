@@ -3,8 +3,28 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import { findNewBriefVideoRunId } from '../../../tests/helpers/brief-to-video-card-selection';
+import { readWithTransientTransportRetry } from '../../../tests/helpers/transient-api-read';
 
 describe('Brief-to-video Simple Chat card selection', () => {
+  it('retries a transient read reset without hiding business failures', async () => {
+    let attempts = 0;
+    const result = await readWithTransientTransportRetry(async () => {
+      attempts += 1;
+      if (attempts === 1) throw new Error('apiRequestContext.get: read ECONNRESET');
+      return 'cancelled';
+    });
+
+    expect(result).toBe('cancelled');
+    expect(attempts).toBe(2);
+
+    let businessAttempts = 0;
+    await expect(readWithTransientTransportRetry(async () => {
+      businessAttempts += 1;
+      throw new Error('Skill Run returned HTTP 500');
+    })).rejects.toThrow('HTTP 500');
+    expect(businessAttempts).toBe(1);
+  });
+
   it('selects only a run card that appeared after the current send', () => {
     expect(findNewBriefVideoRunId(['cancelled-old'], ['cancelled-old', 'fresh-run']))
       .toBe('fresh-run');
@@ -39,5 +59,16 @@ describe('Brief-to-video Simple Chat card selection', () => {
     expect(createRun).toContain("name: '展开面板'");
     expect(createRun.indexOf('await activateCanvasSkill()')).toBeGreaterThan(createRun.indexOf("name: '展开面板'"));
     expect(createRun).toContain("getByLabel('尾帧', { exact: true }).fill(endSourceVersionId)");
+  });
+
+  it('scopes paused approval cancellation to the stable approval region', async () => {
+    const helper = await readFile(resolve(process.cwd(), 'tests/helpers/brief-to-video.ts'), 'utf8');
+    const cancelFlow = helper.slice(
+      helper.indexOf('const cancelFromUi'),
+      helper.indexOf('return {', helper.indexOf('const cancelFromUi')),
+    );
+
+    expect(cancelFlow).toContain("getByRole('region', { name: '视频脚本审批' })");
+    expect(cancelFlow).toContain("projection.status === 'paused'");
   });
 });

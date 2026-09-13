@@ -66,7 +66,7 @@ export default function Sidebar({
   if (!sidebarOpen) return null;
 
   return (
-    <aside className="w-[280px] bg-sidebar-background border-r border-sidebar-border flex flex-col h-screen shrink-0">
+    <aside className="fixed inset-y-0 left-0 z-50 w-[min(280px,calc(100vw-48px))] bg-sidebar-background border-r border-sidebar-border flex flex-col h-screen shrink-0 shadow-xl md:static md:z-auto md:w-[280px] md:shadow-none">
       {/* Header */}
       <div className="flex items-center justify-between p-4 border-b border-sidebar-border">
         <div className="flex items-center gap-2">

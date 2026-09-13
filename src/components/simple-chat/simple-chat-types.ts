@@ -521,20 +521,32 @@ export async function sendSimpleChatExportToCanvas(input: {
   references: WorkspaceAssetReference[];
   reason?: 'UNMANAGED_IMAGE_SLOT';
 }> {
-  return sendSimpleChatMediaToCanvas({
-    images: input.imageRefs.map(reference => reference.url),
-    imageRefs: input.imageRefs,
-    targetProjectId: input.runProjectId,
-    sourceTrace: input.sourceTrace,
-    transfer: async transferInput => {
-      const reference = await input.transfer(transferInput);
-      if (reference.assetVersionId !== transferInput.sourceVersionId) {
-        throw new Error('EXPORT_ASSET_VERSION_MISMATCH');
-      }
-      return reference;
-    },
-    writeBridge: input.writeBridge,
-  });
+  if (!input.runProjectId || input.imageRefs.length === 0
+    || input.imageRefs.some(reference => !reference.url || !reference.assetVersionId)) {
+    return { ok: false, references: [], reason: 'UNMANAGED_IMAGE_SLOT' };
+  }
+
+  const references: WorkspaceAssetReference[] = [];
+  const parsedSourceTrace = parseWorkspaceSourceTrace(input.sourceTrace);
+  const sourceTrace = parsedSourceTrace?.source === 'simple-chat' ? parsedSourceTrace : undefined;
+  for (const [index, reference] of input.imageRefs.entries()) {
+    const transferred = await input.transfer({
+      sourceVersionId: reference.assetVersionId!,
+      targetProjectId: input.runProjectId,
+      index,
+      ...(reference.kind ? { kind: reference.kind } : {}),
+      ...(sourceTrace ? {
+        sourceTrace: bindWorkspaceSourceTraceToChat(reference.sourceTrace, sourceTrace),
+      } : {}),
+    });
+    if (!hasManagedAssetIdentity(transferred)) throw new Error('ASSET_TRANSFER_INVALID');
+    if (transferred.assetVersionId !== reference.assetVersionId) {
+      throw new Error('EXPORT_ASSET_VERSION_MISMATCH');
+    }
+    references.push(transferred);
+  }
+  input.writeBridge(references);
+  return { ok: true, references };
 }
 
 export function canTransferSimpleChatMedia(

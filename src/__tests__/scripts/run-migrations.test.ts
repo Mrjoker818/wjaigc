@@ -76,4 +76,18 @@ describe('migration runner connection contract', () => {
     const storage = await readFile(resolve(process.cwd(), 'src/lib/asset-core/storage.ts'), 'utf8');
     expect(storage).toMatch(/FROM wujie_asset_versions parent\s+WHERE parent\.id = \$5 AND parent\.owner_id = \$2 AND parent\.project_id = \$3/);
   });
+
+  it('allows video AssetVersions to be placed on the canvas', async () => {
+    const migration = await readFile(
+      resolve(process.cwd(), 'migrations', '20260913_canvas_video_placements.sql'),
+      'utf8',
+    );
+    const normalized = migration.replace(/\s+/g, ' ');
+
+    expect(normalized).toContain('DROP CONSTRAINT IF EXISTS wujie_workspace_placements_entity_type_check');
+    expect(normalized).toContain('DROP CONSTRAINT IF EXISTS wujie_workspace_placements_workspace_entity_pair_check');
+    expect(normalized).toMatch(/entity_type IN \([^)]*'canvas-image'[^)]*'canvas-video'/);
+    expect(normalized).toMatch(/workspace_kind = 'canvas' AND entity_type IN \('canvas-image', 'canvas-video'\)/);
+    expect(normalized).not.toMatch(/\b(?:DELETE|UPDATE|TRUNCATE)\b/i);
+  });
 });

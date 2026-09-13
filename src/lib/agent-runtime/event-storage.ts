@@ -1342,6 +1342,7 @@ export async function releaseAgentDownstreamOperation(
     `UPDATE wujie_agent_downstream_operations operation
      SET ${statusAssignment} lease_owner = '', lease_expires_at = 0, updated_at = $3
      WHERE operation_key = $1 AND lease_owner = $2 AND ${allowedStatuses}
+       AND (operation.status <> 'accepted' OR ${downstreamFenceSql('operation', 4, 5, 6)})
        AND ${downstreamFenceSql('operation', 4, 5, 6, { allowPaused: true })}`,
     [input.operationKey, input.leaseOwner, input.now ?? Date.now(),
       input.executionFence.runId, input.executionFence.leaseOwner,

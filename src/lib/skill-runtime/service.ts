@@ -351,7 +351,12 @@ function completedStepIds(events: readonly AgentEvent[]): Set<string> {
 }
 
 function completedAssetVersionIds(events: readonly AgentEvent[]): string[] {
-  return [...new Set(events.filter(event => event.type === 'asset.created')
+  const completed = completedStepIds(events);
+  return [...new Set(events.filter(event => (
+    event.type === 'asset.created'
+    && typeof event.payload.stepId === 'string'
+    && completed.has(event.payload.stepId)
+  ))
     .map(event => event.payload.assetVersionId)
     .filter((versionId): versionId is string => typeof versionId === 'string' && Boolean(versionId)))];
 }

@@ -324,7 +324,14 @@ async function waitForWorkflowSkillRun(
     if (run.status === 'paused' && run.approval) {
       return projectWorkflowSkillRun(run, []);
     }
-    if (['failed', 'cancelled', 'paused', 'timeout'].includes(run.status)) {
+    if (run.status === 'paused') {
+      const hasDurableEvidence = (run.assetVersionIds?.length || 0) > 0
+        || (run.outputs?.length || 0) > 0;
+      if (hasDurableEvidence) throw new WorkflowSkillRunTerminalError(run);
+      await wait(Math.min(input.pollIntervalMs ?? 1_000, Math.max(0, deadline - Date.now())), input.signal);
+      continue;
+    }
+    if (['failed', 'cancelled', 'timeout'].includes(run.status)) {
       throw new WorkflowSkillRunTerminalError(run);
     }
     await wait(Math.min(input.pollIntervalMs ?? 1_000, Math.max(0, deadline - Date.now())), input.signal);

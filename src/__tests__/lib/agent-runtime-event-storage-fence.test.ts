@@ -124,7 +124,8 @@ describe('Agent event and downstream storage execution fences', () => {
 
     const releaseQuery = mocks.queries.find(({ sql }) => sql.includes('lease_expires_at = 0'));
     expect(releaseQuery?.sql).toContain('wujie_agent_execution_leases');
-    expect(releaseQuery?.sql).not.toContain('paused_at = 0');
+    expect(releaseQuery?.sql).toContain("operation.status <> 'accepted'");
+    expect(releaseQuery?.sql).toContain('agent_lease.paused_at = 0');
     expect(releaseQuery?.sql).toContain('agent_lease.paused_at > 0');
     expect(releaseQuery?.sql).toContain("agent_lease.lease_owner = ''");
     expect(releaseQuery?.sql).toMatch(

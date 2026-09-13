@@ -7,6 +7,7 @@ import {
   AgentDownstreamSubmissionUnknownError,
 } from '@/lib/agent-runtime/downstream-operations';
 import { getCloudTaskForUser, type CloudTask } from '@/lib/cloud-task-storage';
+import { projectPersistedCompletedTask } from '@/lib/cloud-task-persistence';
 import type {
   BriefVideoSubmission,
   ExecuteBriefToVideoStepDependencies,
@@ -79,7 +80,7 @@ export async function recoverBriefToVideoOperation(
   const headers = await getInternalRequestHeaders(input.actorUserId, input.actorRole);
   for (let attempt = 0; attempt < maxPolls; attempt += 1) {
     input.signal.throwIfAborted();
-    const current = await getCloudTaskForUser(taskId, input.actorUserId);
+    let current = await getCloudTaskForUser(taskId, input.actorUserId);
     assertKnownBriefVideoState(current);
     if (!current || current.projectId !== input.projectId || current.type !== 'video') {
       throw new AgentDownstreamProviderRejectedError(undefined, {
@@ -87,7 +88,17 @@ export async function recoverBriefToVideoOperation(
       });
     }
     if (current.status === 'completed') {
-      const assetVersionIds = projectionVersionIds(current);
+      let assetVersionIds = projectionVersionIds(current);
+      if (assetVersionIds.length === 0 && optionalResultString(current, 'videoUrl')) {
+        await projectPersistedCompletedTask(taskId, input.actorUserId);
+        current = await getCloudTaskForUser(taskId, input.actorUserId);
+        if (!current || current.projectId !== input.projectId || current.type !== 'video') {
+          throw new AgentDownstreamProviderRejectedError(undefined, {
+            message: 'Accepted Brief video task is unavailable',
+          });
+        }
+        assetVersionIds = projectionVersionIds(current);
+      }
       if (assetVersionIds.length === 1) {
         return {
           assetVersionIds,

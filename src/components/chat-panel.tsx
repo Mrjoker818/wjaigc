@@ -6469,7 +6469,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                     <select aria-label="video 模型" value={videoModel}
                       onChange={event => setVideoModel(event.target.value)}
                       disabled={skillRun.busy}
-                      className="w-full rounded border px-2 py-1.5 text-sm">
+                      className="min-h-[44px] w-full rounded border px-2 py-1.5 text-sm">
                       <option value="">选择模型</option>
                       {discoveredVideoModels.map(candidate => (
                         <option key={candidate.id} value={candidate.id}>

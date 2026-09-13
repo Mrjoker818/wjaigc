@@ -44,6 +44,7 @@ function requestFor(sessionId: string): SkillRunRequest {
     selectedCanvasImage: { id: 'image-a', assetVersionId: 'version-a' },
     pendingImages: [], activeMentions: [], skillParamValues: { designContent: 'Keep the selected product' },
     canvasSkillSourceVersionIds: ['version-a'],
+    canvasSkillRequestSourceVersionIds: ['version-a'],
     canvasSkillInputValues: {
       designContent: 'Keep the selected product',
       sourceImages: ['version-a'],
@@ -69,6 +70,7 @@ function visionRequestFor(input: {
     model: input.selectedModel,
     discoveredImageModels: [], imageModel: '', imageModelProviderId: '',
     canvasSkillSourceVersionIds: ['version-a'],
+    canvasSkillRequestSourceVersionIds: ['version-a'],
     canvasSkillInputValues: { sourceImages: ['version-a'] },
     createCanvasSkillIdempotencyKey: () => 'canvas-skill:vision-request',
     requiredSkillModelRoles,

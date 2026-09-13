@@ -36,4 +36,16 @@ describe('simple chat document and theme contract', () => {
     expect(chatArea).toContain('onClick={() => setShowAgentPanel(true)}');
     expect(chatArea).not.toContain("{(project.agents.length > 0 || activeAgent) && (");
   });
+
+  it('keeps the mobile conversation surface full-width while the sidebar behaves as an overlay', async () => {
+    const page = await source('src/app/simple-chat/page.tsx');
+    const sidebar = await source('src/components/simple-chat/sidebar.tsx');
+    const chatArea = await source('src/components/simple-chat/chat-area.tsx');
+
+    expect(page).toContain('window.innerWidth < 768');
+    expect(page).toContain('setSidebarOpen(false)');
+    expect(sidebar).toContain('fixed inset-y-0 left-0 z-50');
+    expect(sidebar).toContain('md:static md:z-auto md:w-[280px]');
+    expect(chatArea).toContain('flex-1 min-w-0 flex flex-col h-screen');
+  });
 });

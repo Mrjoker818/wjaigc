@@ -401,6 +401,35 @@ describe('Workflow Brief 到视频审批执行', () => {
     expect(downstream.execute).not.toHaveBeenCalled();
   });
 
+  it('在 paused 状态先于审批载荷可见时继续等待同一 Run', async () => {
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ runId: 'run-video-race' }), { status: 201 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ run: {
+        runId: 'run-video-race', status: 'paused', assetVersionIds: [], outputs: [],
+      } }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ run: {
+        runId: 'run-video-race', status: 'paused', assetVersionIds: [], approval,
+        resumeFromStepId: 'generate-film', outputs: [],
+      } }), { status: 200 }));
+
+    const projected = await executeWorkflowSkillRun({
+      submitUrl: 'http://localhost:5000/api/skill-runs',
+      requestBody: { skillId: 'preset-brief-to-video-film' },
+      headers: { 'Content-Type': 'application/json' },
+      fetcher,
+      pollIntervalMs: 0,
+      resolveAssetVersion: async () => null,
+    });
+
+    expect(projected).toMatchObject({
+      runId: 'run-video-race',
+      status: 'waiting-approval',
+      approval,
+      resumeFromStepId: 'generate-film',
+    });
+    expect(fetcher).toHaveBeenCalledTimes(3);
+  });
+
   it('批准后继续同一个 Run，并只投影授权视频 AssetVersion', async () => {
     const fetcher = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({ run: {
       runId: 'run-video-1', status: 'completed', assetVersionIds: ['video-v1'],

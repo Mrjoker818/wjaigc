@@ -1,6 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const mocks = vi.hoisted(() => ({ getCloudTaskForUser: vi.fn() }));
+const mocks = vi.hoisted(() => ({
+  getCloudTaskForUser: vi.fn(),
+  projectPersistedCompletedTask: vi.fn(),
+}));
 
 vi.mock('server-only', () => ({}));
 vi.mock('@/lib/api-auth', () => ({
@@ -11,6 +14,9 @@ vi.mock('@/lib/api-helpers', () => ({
 }));
 vi.mock('@/lib/cloud-task-storage', () => ({
   getCloudTaskForUser: mocks.getCloudTaskForUser,
+}));
+vi.mock('@/lib/cloud-task-persistence', () => ({
+  projectPersistedCompletedTask: mocks.projectPersistedCompletedTask,
 }));
 
 import { recoverBriefToVideoOperation } from '@/lib/brief-to-video/video-recovery';
@@ -29,6 +35,30 @@ const input = {
 describe('Brief to video recovery', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  it('projects an already completed video task before polling the provider again', async () => {
+    mocks.getCloudTaskForUser
+      .mockResolvedValueOnce({
+        id: 'video-child-1', userId: 'user-1', projectId: 'project-1', type: 'video',
+        status: 'completed', result: { videoUrl: '/video.mp4' }, remoteTaskId: 'remote-video-1',
+      })
+      .mockResolvedValueOnce({
+        id: 'video-child-1', userId: 'user-1', projectId: 'project-1', type: 'video',
+        status: 'completed', remoteTaskId: 'remote-video-1',
+        result: { videoUrl: '/video.mp4', assetProjection: { versionIds: ['video-v1'] } },
+      });
+    const fetcher = vi.spyOn(globalThis, 'fetch');
+
+    await expect(recoverBriefToVideoOperation('video-child-1', input, {
+      maxPolls: 1, pollIntervalMs: 0,
+    })).resolves.toEqual({
+      assetVersionIds: ['video-v1'],
+      remoteTaskId: 'remote-video-1',
+    });
+    expect(mocks.projectPersistedCompletedTask).toHaveBeenCalledWith('video-child-1', 'user-1');
+    expect(fetcher).not.toHaveBeenCalled();
+    fetcher.mockRestore();
   });
 
   it('waits for the existing completed task projection instead of returning an empty result', async () => {

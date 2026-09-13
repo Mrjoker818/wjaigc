@@ -26,6 +26,25 @@ interface ApprovalView {
   videoCost?: number;
 }
 
+class ApprovalTransitionPendingError extends Error {}
+
+const APPROVAL_REFRESH_INTERVAL_MS = 250;
+const APPROVAL_REFRESH_ATTEMPTS = 240;
+
+function waitForApprovalRefresh(signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal.aborted) {
+      reject(signal.reason);
+      return;
+    }
+    const timeout = window.setTimeout(resolve, APPROVAL_REFRESH_INTERVAL_MS);
+    signal.addEventListener('abort', () => {
+      window.clearTimeout(timeout);
+      reject(signal.reason);
+    }, { once: true });
+  });
+}
+
 const primaryAction = 'inline-flex min-h-[44px] items-center justify-center gap-2 rounded-lg bg-[#d4af37] px-3 text-xs font-semibold text-[#0a0a0b] hover:bg-[#e2c45c] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#d4af37] disabled:cursor-not-allowed disabled:opacity-50';
 const secondaryAction = 'inline-flex min-h-[44px] items-center justify-center gap-2 rounded-lg border border-current/20 px-3 text-xs font-medium hover:bg-current/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 disabled:cursor-not-allowed disabled:opacity-50';
 
@@ -52,6 +71,9 @@ async function loadApproval(
   if (!run || run.runId !== runId || run.projectId !== projectId) {
     throw new Error('审批数据与当前项目不一致');
   }
+  if (run.status === 'queued' || run.status === 'planning' || run.status === 'executing') {
+    throw new ApprovalTransitionPendingError('视频脚本正在重新生成');
+  }
   if (run.status !== 'paused') throw new Error('视频脚本已不在待审批状态');
   const approval = parseSkillApprovalState(run.approval);
   const outputs = parseDurableSkillOutputs(run.outputs);
@@ -73,7 +95,7 @@ async function loadApproval(
   };
 }
 
-export function BriefToVideoApprovalCard({
+function BriefToVideoApprovalCardInstance({
   runId,
   projectId,
   estimate,
@@ -90,48 +112,81 @@ export function BriefToVideoApprovalCard({
   const [submitting, setSubmitting] = useState(false);
   const loadControllerRef = useRef<AbortController | null>(null);
   const mountedRef = useRef(false);
+  const scopeRef = useRef(1);
+  const identityKeyRef = useRef(`${runId}\u0000${projectId}`);
   const submittingRef = useRef(false);
+  const identityKey = `${runId}\u0000${projectId}`;
+  if (identityKeyRef.current !== identityKey) {
+    identityKeyRef.current = identityKey;
+    scopeRef.current += 1;
+  }
 
-  const reloadApproval = useCallback(async (): Promise<void> => {
-    if (!mountedRef.current) return;
+  const reloadApproval = useCallback(async (options?: {
+    waitForPaused?: boolean;
+    scope?: number;
+  }): Promise<void> => {
+    const scope = options?.scope ?? scopeRef.current;
+    if (!mountedRef.current || scopeRef.current !== scope) return;
     loadControllerRef.current?.abort();
     const controller = new AbortController();
     loadControllerRef.current = controller;
     setView(undefined);
     setError(undefined);
-    try {
-      const nextView = await loadApproval(runId, projectId, fetcher, controller.signal);
-      if (!controller.signal.aborted && mountedRef.current) setView(nextView);
-    } catch (cause) {
-      if (!controller.signal.aborted) throw cause;
+    for (let attempt = 0; attempt < APPROVAL_REFRESH_ATTEMPTS; attempt += 1) {
+      try {
+        const nextView = await loadApproval(runId, projectId, fetcher, controller.signal);
+        if (!controller.signal.aborted && mountedRef.current && scopeRef.current === scope) {
+          setView(nextView);
+        }
+        return;
+      } catch (cause) {
+        if (controller.signal.aborted || !mountedRef.current || scopeRef.current !== scope) return;
+        if (!(cause instanceof ApprovalTransitionPendingError) || !options?.waitForPaused) throw cause;
+        if (attempt === APPROVAL_REFRESH_ATTEMPTS - 1) {
+          throw new Error('脚本修改超时，请刷新后查看最新状态');
+        }
+        await waitForApprovalRefresh(controller.signal);
+      }
     }
   }, [fetcher, projectId, runId]);
 
   useEffect(() => {
+    const scope = scopeRef.current;
     mountedRef.current = true;
-    void reloadApproval().catch(cause => {
-      if (mountedRef.current) {
+    submittingRef.current = false;
+    setSubmitting(false);
+    setEditing(false);
+    setRevisionInstruction('');
+    void reloadApproval({ scope }).catch(cause => {
+      if (mountedRef.current && scopeRef.current === scope) {
         setError(cause instanceof Error ? cause.message : '视频脚本加载失败');
       }
     });
     return () => {
-      mountedRef.current = false;
+      if (scopeRef.current === scope) mountedRef.current = false;
       loadControllerRef.current?.abort();
     };
   }, [reloadApproval]);
 
   const perform = async (operation: () => Promise<boolean>): Promise<void> => {
     if (submittingRef.current) return;
+    const scope = scopeRef.current;
     submittingRef.current = true;
     setSubmitting(true);
     setError(undefined);
     try {
-      if (!await operation() && mountedRef.current) setError('操作未被接受，请刷新后重试');
+      if (!await operation() && mountedRef.current && scopeRef.current === scope) {
+        setError('操作未被接受，请刷新后重试');
+      }
     } catch (cause) {
-      if (mountedRef.current) setError(cause instanceof Error ? cause.message : '操作失败，请重试');
+      if (mountedRef.current && scopeRef.current === scope) {
+        setError(cause instanceof Error ? cause.message : '操作失败，请重试');
+      }
     } finally {
-      submittingRef.current = false;
-      if (mountedRef.current) setSubmitting(false);
+      if (scopeRef.current === scope) {
+        submittingRef.current = false;
+        if (mountedRef.current) setSubmitting(false);
+      }
     }
   };
 
@@ -178,7 +233,7 @@ export function BriefToVideoApprovalCard({
                 approvalIdentity(view.approval), revisionInstruction.trim(),
               );
               if (!revised) return false;
-              await reloadApproval();
+              await reloadApproval({ waitForPaused: true, scope: scopeRef.current });
               return true;
             }); }}>
             提交修改要求
@@ -201,4 +256,11 @@ export function BriefToVideoApprovalCard({
       </>}
     </section>
   );
+}
+
+export function BriefToVideoApprovalCard(props: BriefToVideoApprovalCardProps): React.ReactElement {
+  return <BriefToVideoApprovalCardInstance
+    key={`${props.runId}\u0000${props.projectId}`}
+    {...props}
+  />;
 }

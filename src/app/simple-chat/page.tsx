@@ -90,6 +90,10 @@ export default function SimpleChatPage() {
   const activeTaskIdRef = useRef<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
 
+  useEffect(() => {
+    if (window.innerWidth < 768) setSidebarOpen(false);
+  }, []);
+
   const visibleProjects = user && dataOwnerUserId === user.id
     ? projects
     : user && preReadyCandidate?.userId === user.id
@@ -522,7 +526,7 @@ export default function SimpleChatPage() {
         onRenameTask={handleRenameTask}
         onLogout={() => { void handleLogout(); }}
       />
-      <div className="flex-1 flex flex-col min-w-0">
+      <div className="flex-1 flex flex-col min-w-0 w-full">
         <div className="flex h-7 shrink-0 items-center justify-end border-b border-border/60 px-3">
           <SimpleChatSyncStatusView
             status={syncSnapshot.status}

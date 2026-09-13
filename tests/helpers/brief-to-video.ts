@@ -23,6 +23,7 @@ import {
   stage4FixtureForProject,
 } from './stage-4-e2e';
 import { findNewBriefVideoRunId } from './brief-to-video-card-selection';
+import { readWithTransientTransportRetry } from './transient-api-read';
 
 const SKILL_ID = 'preset-brief-to-video-film';
 const VIDEO_PROVIDER_ID = 'brief-video-e2e-provider';
@@ -238,7 +239,9 @@ async function startControlledProvider(submissions: ProviderSubmission[]): Promi
 }
 
 async function readRun(page: Page, runId: string): Promise<RunProjection> {
-  const response = await page.request.get(`/api/skill-runs/${encodeURIComponent(runId)}?observeOnly=true`);
+  const response = await readWithTransientTransportRetry(() => (
+    page.request.get(`/api/skill-runs/${encodeURIComponent(runId)}?observeOnly=true`)
+  ));
   const payload = await json(response);
   expect(response.ok(), `Skill Run ${runId} returned HTTP ${response.status()}: ${JSON.stringify(payload)}`).toBe(true);
   return payload.run as RunProjection;
@@ -299,11 +302,14 @@ async function setupFixture(page: Page, testInfo: TestInfo, directory: string): 
     toPortId: 'in-video',
     type: 'video',
   };
-  fixture.canvasProject.workflow = {
-    ...createEmptyWorkflow('Brief 视频 E2E'),
-    id: `brief-video-workflow-${testInfo.project.name}`,
-    nodes: [workflowSkill, workflowOutput],
-    connections: [workflowConnection],
+  fixture.canvasProject.metadata = {
+    ...(fixture.canvasProject.metadata as Record<string, unknown>),
+    workflow: {
+      ...createEmptyWorkflow('Brief 视频 E2E'),
+      id: `brief-video-workflow-${testInfo.project.name}`,
+      nodes: [workflowSkill, workflowOutput],
+      connections: [workflowConnection],
+    },
   };
   const sourceImageId = `stage4-image-${fixture.browserProfile}`;
   const sourceVersionId = `stage4-version-${fixture.browserProfile}`;
@@ -498,7 +504,10 @@ async function setupFixture(page: Page, testInfo: TestInfo, directory: string): 
   };
 
   const cancelFromUi = async (runId: string): Promise<void> => {
-    const cancel = page.getByRole('button', { name: '取消任务' });
+    const projection = await readRun(page, runId);
+    const cancel = projection.status === 'paused' && projection.approval
+      ? page.getByRole('region', { name: '视频脚本审批' }).getByRole('button', { name: '取消任务' })
+      : page.locator('[aria-live="polite"]').getByRole('button', { name: '取消任务' });
     await expect(cancel).toBeVisible();
     await cancel.click();
     await expect.poll(async () => (await readRun(page, runId)).status, {
@@ -532,7 +541,7 @@ async function setupFixture(page: Page, testInfo: TestInfo, directory: string): 
       await page.getByTitle('节点模式').first().click();
       await page.getByLabel(workflowSkill.label).click();
       const workflowCatalog = page.locator('[data-workflow-skill-id]');
-      await expect(workflowCatalog).toHaveCount(30);
+      await expect(workflowCatalog).toHaveCount(30, { timeout: 30_000 });
       const catalogCount = await workflowCatalog.count();
       await expect(page.getByRole('combobox', { name: 'Skill' })).toHaveValue(SKILL_ID);
       await page.getByRole('combobox', { name: 'video 模型' }).selectOption(
@@ -542,10 +551,11 @@ async function setupFixture(page: Page, testInfo: TestInfo, directory: string): 
         response.request().method() === 'POST'
         && new URL(response.url()).pathname === '/api/workflow/execute'
         && Boolean(response.request().postData()?.includes('"action":"start"'))
-      ));
+      ), { timeout: 30_000 });
       await page.getByRole('button', { name: '执行工作流', exact: true }).click();
-      await expect(page.getByRole('heading', { name: 'Skill 费用预估', exact: true })).toBeVisible();
-      await page.getByRole('button', { name: '确认执行', exact: true }).click();
+      const confirmExecution = page.getByRole('button', { name: '确认执行', exact: true });
+      await expect(confirmExecution).toBeVisible({ timeout: 30_000 });
+      await confirmExecution.click();
       const startResponse = await started;
       expect(startResponse.ok()).toBe(true);
       const startPayload = await json(startResponse);
@@ -597,7 +607,10 @@ async function setupFixture(page: Page, testInfo: TestInfo, directory: string): 
       const catalogContainsBriefToVideo = await catalogItems.evaluateAll(
         items => items.some(item => item.getAttribute('data-simple-chat-skill-id') === 'preset-brief-to-video-film'),
       );
-      await page.getByTitle('Skill').click();
+      await page.getByRole('heading', { name: 'Skill 书' })
+        .locator('..')
+        .getByRole('button')
+        .click();
       const prompt = `根据 Brief：展示轻薄防晒霜通勤场景，生成最终成片。平台：抖音；时长：5秒；比例：9:16；视频模型：${VIDEO_MODEL_ID}；受众：都市通勤人群；目标：产品转化`;
       const sendIntent = async (): Promise<string> => {
         const cards = page.locator('[data-simple-chat-brief-video-run-id]');

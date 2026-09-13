@@ -30,6 +30,7 @@ const approval = {
 function approvalResponse(
   approvalOverride: Partial<typeof approval> = {},
   planOverride: Partial<typeof plan> = {},
+  runOverride: Record<string, unknown> = {},
 ): Response {
   return Response.json({ run: {
     runId: 'run-video-1', projectId: 'project-1', status: 'paused',
@@ -39,6 +40,7 @@ function approvalResponse(
       stepId: 'plan-film', kind: 'json', schemaId: 'brief-to-video-plan-v1',
       content: JSON.stringify({ ...plan, ...planOverride }),
     }],
+    ...runOverride,
   } });
 }
 
@@ -124,6 +126,76 @@ describe('BriefToVideoApprovalCard', () => {
     await waitFor(() => expect(onApprove).toHaveBeenCalledWith({
       revision: 11, generation: 1, planChecksum: revisedChecksum,
     }));
+  });
+
+  it('waits for the revised run to pause again before exposing its new approval identity', async () => {
+    const revisedChecksum = 'c'.repeat(64);
+    const fetcher = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(approvalResponse())
+      .mockResolvedValueOnce(approvalResponse({}, {}, { status: 'executing' }))
+      .mockResolvedValueOnce(approvalResponse({}, {}, { status: 'planning' }))
+      .mockResolvedValueOnce(approvalResponse(
+        { revision: 12, generation: 2, planChecksum: revisedChecksum },
+        { title: '异步修订后的脚本' },
+      ));
+    const onApprove = vi.fn().mockResolvedValue(true);
+
+    render(<BriefToVideoApprovalCard
+      runId="run-video-1" projectId="project-1" onApprove={onApprove}
+      onRevise={vi.fn().mockResolvedValue(true)} onCancel={vi.fn()} fetcher={fetcher}
+    />);
+
+    expect(await screen.findByRole('heading', { name: '夏日新品短片' })).not.toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '修改脚本' }));
+    fireEvent.change(screen.getByLabelText('脚本修改要求'), { target: { value: '异步重写脚本' } });
+    fireEvent.click(screen.getByRole('button', { name: '提交修改要求' }));
+
+    expect(await screen.findByRole('heading', { name: '异步修订后的脚本' }, { timeout: 2_000 })).not.toBeNull();
+    expect(fetcher).toHaveBeenCalledTimes(4);
+    fireEvent.click(screen.getByRole('button', { name: '批准生成' }));
+    await waitFor(() => expect(onApprove).toHaveBeenCalledWith({
+      revision: 12, generation: 2, planChecksum: revisedChecksum,
+    }));
+  });
+
+  it('does not let a completed revision from the previous run overwrite the current run', async () => {
+    let resolveRevision: (accepted: boolean) => void = () => undefined;
+    const onRevise = vi.fn().mockReturnValue(new Promise<boolean>(resolve => {
+      resolveRevision = resolve;
+    }));
+    const fetcher = vi.fn<typeof fetch>(async input => {
+      const url = String(input);
+      if (url.includes('run-video-2')) {
+        return approvalResponse(
+          { revision: 20, generation: 4, planChecksum: 'd'.repeat(64) },
+          { title: '第二个 Run 的脚本' },
+          { runId: 'run-video-2', projectId: 'project-2' },
+        );
+      }
+      return approvalResponse();
+    });
+    const props = {
+      onApprove: vi.fn(), onRevise, onCancel: vi.fn(), fetcher,
+    };
+    const { rerender } = render(<BriefToVideoApprovalCard
+      runId="run-video-1" projectId="project-1" {...props}
+    />);
+
+    expect(await screen.findByRole('heading', { name: '夏日新品短片' })).not.toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '修改脚本' }));
+    fireEvent.change(screen.getByLabelText('脚本修改要求'), { target: { value: '延迟完成' } });
+    fireEvent.click(screen.getByRole('button', { name: '提交修改要求' }));
+    await waitFor(() => expect(onRevise).toHaveBeenCalledOnce());
+
+    rerender(<BriefToVideoApprovalCard
+      runId="run-video-2" projectId="project-2" {...props}
+    />);
+    await waitFor(() => expect(fetcher.mock.calls.some(([input]) => String(input).includes('run-video-2'))).toBe(true));
+    expect(await screen.findByRole('heading', { name: '第二个 Run 的脚本' })).not.toBeNull();
+    await act(async () => resolveRevision(true));
+
+    await waitFor(() => expect(screen.getByRole('heading', { name: '第二个 Run 的脚本' })).not.toBeNull());
+    expect(fetcher.mock.calls.filter(([input]) => String(input).includes('run-video-1'))).toHaveLength(1);
   });
 
   it('does not reload approval after unmounting during a revision', async () => {

@@ -1781,7 +1781,7 @@ export default function ChatArea({
 
   const sendImagesToCanvas = useCallback(async (
     message: SimpleChatMessage,
-    options?: { runProjectId?: string },
+    options?: { runProjectId?: string; navigateAfterTransfer?: boolean },
   ) => {
     const targetProjectId = options?.runProjectId || selectedCanvasProjectId;
     if (!targetProjectId || !project || !task) {
@@ -1869,6 +1869,10 @@ export default function ChatArea({
         return;
       }
       const transferredImages = transferResult.references;
+      if (options?.navigateAfterTransfer) {
+        window.location.assign(`/?projectId=${encodeURIComponent(targetProjectId)}`);
+        return;
+      }
       const toast = document.createElement('div');
       toast.className = 'fixed bottom-20 right-6 z-[9999] bg-blue-600 text-white px-4 py-3 rounded-lg shadow-lg cursor-pointer hover:bg-blue-700 transition-colors text-sm flex items-center gap-2';
       // P3 fix: 用 DOM API 构建子节点，避免 innerHTML 拼接（低风险但非最佳实践）
@@ -1990,7 +1994,7 @@ export default function ChatArea({
   } : undefined;
 
   return (
-    <div className="flex-1 flex flex-col h-screen bg-background">
+    <div className="flex-1 min-w-0 flex flex-col h-screen bg-background">
       {/* Top Bar */}
       <header className="relative z-50 flex flex-wrap items-center gap-2 px-3 py-2 border-b border-border bg-background/80 backdrop-blur-sm shrink-0">
         <button onClick={onToggleSidebar} className="p-2 rounded-lg hover:bg-muted transition-colors" title="切换侧边栏">
@@ -2249,7 +2253,10 @@ export default function ChatArea({
                           ...msg,
                           images: references.map(reference => reference.url),
                           imageRefs: references,
-                        }, { runProjectId: msg.retryContext!.canvasProjectId })}
+                        }, {
+                          runProjectId: msg.retryContext!.canvasProjectId,
+                          navigateAfterTransfer: true,
+                        })}
                       />
                     )}
                   {msg.multiPlatformExportRunId && msg.multiPlatformExportProjectId && (

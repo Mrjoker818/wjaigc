@@ -23,5 +23,6 @@ describe('Canvas Brief 到视频成片 UI wiring', () => {
     expect(source).toContain('modelBindings.video =');
     expect(source).toContain('capabilityDescriptors={{ video: selectedVideoDescriptor }}');
     expect(source).toContain('aria-label="video 模型"');
+    expect(source).toMatch(/aria-label="video 模型"[\s\S]*?className="[^"]*min-h-\[44px\][^"]*"/u);
   });
 });
