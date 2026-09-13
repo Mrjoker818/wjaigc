@@ -149,6 +149,9 @@ describe('media gateway admission transactions', () => {
     expect(sql[3]).toMatch(/FROM wujie_gateway_requests.+idempotency_key/i);
     expect(sql[4]).toMatch(/INSERT INTO wujie_gateway_requests/i);
     expect(sql[5]).toMatch(/FROM wujie_gateway_requests.+FOR UPDATE/i);
+    expect(sql[5]).toContain("date_trunc('day', $2::timestamptz AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'");
+    expect(sql[5]).toContain("date_trunc('day', $2::timestamptz AT TIME ZONE 'UTC') + interval '1 day'");
+    expect(sql[5]).not.toContain("date_trunc('day', $2::timestamptz)");
     expect(sql[6]).toBe('COMMIT');
     expect(client.release).toHaveBeenCalledOnce();
   });

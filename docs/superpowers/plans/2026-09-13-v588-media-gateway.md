@@ -502,13 +502,18 @@ git commit -m "feat: project existing thumbnails through media gateway"
 **Files:**
 - Modify: `src/lib/media-gateway/audit.ts`
 - Modify: `src/lib/media-gateway/key-service.ts`
+- Modify: `src/lib/media-gateway/admission.ts`
+- Create: `src/lib/media-gateway/utc-day-window.ts`
 - Create: `src/components/dashboard/media-gateway-admin.tsx`
 - Modify: `src/components/dashboard/dashboard-view.tsx`
 - Test: `src/__tests__/lib/media-gateway-audit.test.ts`
 - Test: `src/__tests__/lib/media-gateway-key-service.test.ts`
+- Test: `src/__tests__/lib/media-gateway-admission.test.ts`
+- Test: `src/__tests__/lib/media-gateway-utc-day-window.test.ts`
 - Test: `src/__tests__/components/media-gateway-admin.test.tsx`
 - Test: `src/__tests__/components/dashboard-media-gateway-contract.test.ts`
 - Test: `tests/e2e/media-gateway-admin-responsive.spec.ts`
+- Test: `tests/integration/media-gateway-admission-postgres.test.ts`
 
 **Interfaces:**
 - Produces admin view: 汇总、密钥表、签发/编辑抽屉、一次性密钥模态框。

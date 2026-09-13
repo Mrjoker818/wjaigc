@@ -26,6 +26,50 @@ function input(overrides: Record<string, unknown> = {}) {
 }
 
 describe('media gateway admission on PostgreSQL', () => {
+  postgresIt('keeps admission and admin usage aligned in a non-UTC session', async () => {
+    const { withIsolatedPostgres } = await import('../helpers/postgres-test-database');
+    await withIsolatedPostgres('gateway-non-utc-day-window', async ({ databaseUrl, query }) => {
+      await prepareSchema(query);
+      await query(`INSERT INTO wujie_users (id) VALUES ('gateway-user')`);
+      await query(`INSERT INTO wujie_gateway_keys
+        (id, user_id, key_hash, key_prefix, label, requests_per_minute, daily_quota, created_by)
+        VALUES ('gwkey_timezone', 'gateway-user', 'hash', 'wmg_time0000', 'timezone', 100, 1, 'admin')`);
+      const boundary = await query(
+        `SELECT date_trunc('day', CURRENT_TIMESTAMP AT TIME ZONE 'UTC') AT TIME ZONE 'UTC' AS utc_start`,
+      ) as { rows: Array<{ utc_start: Date }> };
+      const utcStart = new Date(boundary.rows[0].utc_start);
+      const previousDay = new Date(utcStart.getTime() - 30 * 60_000);
+      const currentDay = new Date(utcStart.getTime() + 30 * 60_000);
+      await query(`INSERT INTO wujie_gateway_requests
+        (id, gateway_key_id, user_id, idempotency_key, request_digest, media_type, admission_status, created_at)
+        VALUES ('gwreq_previous_timezone', 'gwkey_timezone', 'gateway-user', 'previous', repeat('b', 64),
+          'image', 'admitted', $1)`, [previousDay.toISOString()]);
+
+      const nonUtcUrl = new URL(databaseUrl);
+      const existingOptions = nonUtcUrl.searchParams.get('options');
+      nonUtcUrl.searchParams.set(
+        'options',
+        [existingOptions, '-cTimeZone=Asia/Shanghai'].filter(Boolean).join(' '),
+      );
+      const { closePool, execSql } = await import('@/lib/db-client');
+      await closePool();
+      process.env.DATABASE_URL = nonUtcUrl.toString();
+      process.env.PGDATABASE_URL = nonUtcUrl.toString();
+      expect((await execSql('SHOW TIME ZONE')).rows[0]?.TimeZone).toBe('Asia/Shanghai');
+
+      const { reserveGatewayRequest } = await import('@/lib/media-gateway/admission');
+      const { listGatewayKeys } = await import('@/lib/media-gateway/key-service');
+      await expect(reserveGatewayRequest(input({
+        principal: { ...input().principal, keyId: 'gwkey_timezone', dailyQuota: 1 },
+        idempotencyKey: 'current',
+        now: currentDay,
+      }))).resolves.toMatchObject({ kind: 'execute' });
+
+      const keys = await listGatewayKeys();
+      expect(keys.find((candidate) => candidate.id === 'gwkey_timezone')?.todayUsage).toBe(1);
+    });
+  }, 30_000);
+
   postgresIt('projects authoritative UTC daily usage from reserved and admitted requests only', async () => {
     const { withIsolatedPostgres } = await import('../helpers/postgres-test-database');
     await withIsolatedPostgres('gateway-admin-daily-usage', async ({ query }) => {

@@ -62,6 +62,7 @@ describe('MediaGatewayAdmin', () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     vi.unstubAllGlobals();
   });
 
@@ -204,7 +205,63 @@ describe('MediaGatewayAdmin', () => {
 
     const sheet = screen.getByRole('dialog', { name: '签发媒体网关密钥' });
     expect((await within(sheet).findByRole('alert')).textContent).toContain('签发结果无法确认');
-    expect((within(sheet).getByRole('button', { name: '确认签发' }) as HTMLButtonElement).disabled).toBe(true);
+    await waitFor(() => expect(
+      (within(sheet).getByRole('button', { name: '确认签发' }) as HTMLButtonElement).disabled,
+    ).toBe(false));
+    expect(getCount).toBe(2);
+  });
+
+  it('treats a rejected issue fetch as ambiguous and reconciles before allowing another issue', async () => {
+    let getCount = 0;
+    vi.stubGlobal('fetch', vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      if ((init?.method ?? 'GET') === 'GET') {
+        getCount += 1;
+        return jsonResponse({ success: true, keys: [] });
+      }
+      throw new TypeError('connection reset after send');
+    }));
+    render(<MediaGatewayAdmin />);
+    await screen.findByText('尚未签发媒体网关密钥');
+    fireEvent.click(screen.getByRole('button', { name: '签发密钥' }));
+    fireEvent.change(screen.getByLabelText('用户 ID'), { target: { value: 'user-1' } });
+    fireEvent.change(screen.getByLabelText('标签'), { target: { value: 'Production' } });
+    fireEvent.click(screen.getByRole('button', { name: '确认签发' }));
+
+    const sheet = screen.getByRole('dialog', { name: '签发媒体网关密钥' });
+    const alert = await within(sheet).findByRole('alert');
+    expect(alert.textContent).toContain('签发结果无法确认');
+    expect(alert.textContent).not.toContain('请重试');
+    await waitFor(() => expect(getCount).toBe(2));
+    expect((within(sheet).getByRole('button', { name: '确认签发' }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('times out a pending issue request into ambiguity and performs an authoritative refresh', async () => {
+    vi.useFakeTimers();
+    let getCount = 0;
+    vi.stubGlobal('fetch', vi.fn((_input: RequestInfo | URL, init?: RequestInit) => {
+      if ((init?.method ?? 'GET') === 'GET') {
+        getCount += 1;
+        return Promise.resolve(jsonResponse({ success: true, keys: [] }));
+      }
+      return new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => reject(new DOMException('Timed out', 'AbortError')));
+      });
+    }));
+    render(<MediaGatewayAdmin />);
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(screen.getByText('尚未签发媒体网关密钥')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '签发密钥' }));
+    fireEvent.change(screen.getByLabelText('用户 ID'), { target: { value: 'user-1' } });
+    fireEvent.change(screen.getByLabelText('标签'), { target: { value: 'Production' } });
+    fireEvent.click(screen.getByRole('button', { name: '确认签发' }));
+
+    await act(async () => vi.advanceTimersByTimeAsync(5_000));
+    vi.useRealTimers();
+    const sheet = screen.getByRole('dialog', { name: '签发媒体网关密钥' });
+    expect((await within(sheet).findByRole('alert')).textContent).toContain('签发结果无法确认');
     expect(getCount).toBe(2);
   });
 
@@ -239,8 +296,34 @@ describe('MediaGatewayAdmin', () => {
     fireEvent.click(within(sheet).getByRole('button', { name: '保存修改' }));
 
     expect((await within(sheet).findByRole('alert')).textContent).toContain('保存结果无法确认');
-    expect((within(sheet).getByRole('button', { name: '保存修改' }) as HTMLButtonElement).disabled).toBe(true);
+    await waitFor(() => expect(
+      (within(sheet).getByRole('button', { name: '保存修改' }) as HTMLButtonElement).disabled,
+    ).toBe(false));
     expect(screen.queryByText('Renamed')).toBeNull();
+  });
+
+  it('treats a patch response read failure as ambiguous and refreshes authority', async () => {
+    let getCount = 0;
+    vi.stubGlobal('fetch', vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      if ((init?.method ?? 'GET') === 'GET') {
+        getCount += 1;
+        return jsonResponse({ success: true, keys: [key] });
+      }
+      return {
+        ok: true,
+        status: 200,
+        json: vi.fn().mockRejectedValue(new TypeError('body stream failed')),
+      } as unknown as Response;
+    }));
+    render(<MediaGatewayAdmin />);
+    await screen.findAllByText('Production');
+    fireEvent.click(screen.getAllByRole('button', { name: '编辑 Production' })[0]);
+    const sheet = screen.getByRole('dialog', { name: '编辑媒体网关密钥' });
+    fireEvent.change(within(sheet).getByLabelText('标签'), { target: { value: 'Renamed' } });
+    fireEvent.click(within(sheet).getByRole('button', { name: '保存修改' }));
+
+    expect((await within(sheet).findByRole('alert')).textContent).toContain('保存结果无法确认');
+    await waitFor(() => expect(getCount).toBe(2));
   });
 
   it('requires confirmation before revoking a key', async () => {
@@ -272,7 +355,9 @@ describe('MediaGatewayAdmin', () => {
     fireEvent.click(screen.getAllByRole('button', { name: '吊销 Production' })[0]);
     const dialog = screen.getByRole('alertdialog');
     fireEvent.click(within(dialog).getByRole('button', { name: '确认吊销' }));
-    expect((await within(dialog).findByRole('alert')).textContent).toContain('吊销密钥失败');
+    const alert = await within(dialog).findByRole('alert');
+    expect(alert.textContent).toContain('吊销结果无法确认');
+    expect(alert.textContent).not.toContain('请重试');
   });
 
   it('locks duplicate revoke attempts after an untrusted success response', async () => {
@@ -291,8 +376,40 @@ describe('MediaGatewayAdmin', () => {
     fireEvent.click(within(dialog).getByRole('button', { name: '确认吊销' }));
 
     expect((await within(dialog).findByRole('alert')).textContent).toContain('吊销结果无法确认');
-    expect((within(dialog).getByRole('button', { name: '确认吊销' }) as HTMLButtonElement).disabled).toBe(true);
+    await waitFor(() => expect(
+      (within(dialog).getByRole('button', { name: '确认吊销' }) as HTMLButtonElement).disabled,
+    ).toBe(false));
     expect(getCount).toBe(2);
+  });
+
+  it('keeps an ambiguous issue lock local and lets the sheet exit while authority is pending', async () => {
+    let getCount = 0;
+    let authoritySignal: AbortSignal | null = null;
+    vi.stubGlobal('fetch', vi.fn((_input: RequestInfo | URL, init?: RequestInit) => {
+      if ((init?.method ?? 'GET') === 'GET') {
+        getCount += 1;
+        if (getCount === 1) return Promise.resolve(jsonResponse({ success: true, keys: [key] }));
+        authoritySignal = init?.signal ?? null;
+        return new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () => reject(new DOMException('Cancelled', 'AbortError')));
+        });
+      }
+      return Promise.resolve(jsonResponse({ success: true, key, secret: 'wmg_too-short' }, 201));
+    }));
+    render(<MediaGatewayAdmin />);
+    await screen.findAllByText('Production');
+    fireEvent.click(screen.getByRole('button', { name: '签发密钥' }));
+    fireEvent.change(screen.getByLabelText('用户 ID'), { target: { value: 'user-1' } });
+    fireEvent.change(screen.getByLabelText('标签'), { target: { value: 'Production' } });
+    fireEvent.click(screen.getByRole('button', { name: '确认签发' }));
+
+    const sheet = screen.getByRole('dialog', { name: '签发媒体网关密钥' });
+    expect((await within(sheet).findByRole('alert')).textContent).toContain('签发结果无法确认');
+    expect((within(sheet).getByRole('button', { name: '取消' }) as HTMLButtonElement).disabled).toBe(false);
+    expect((screen.getAllByRole('button', { name: '编辑 Production' })[0] as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(within(sheet).getByRole('button', { name: '取消' }));
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '签发媒体网关密钥' })).toBeNull());
+    expect(authoritySignal?.aborted).toBe(true);
   });
 
   it('uses a bounded mobile layout at 375px without a horizontally scrolling root', async () => {
