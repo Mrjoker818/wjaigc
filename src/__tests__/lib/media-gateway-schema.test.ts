@@ -124,15 +124,37 @@ describe('media gateway schema normalization', () => {
   it('normalizes the supported image request fields', () => {
     expect(normalizeGatewayImageRequest({
       prompt: '  draw this  ', providerId: 'provider/a', modelId: 'model:v1',
-      n: 4, aspectRatio: '16:9', size: '1536x1024', quality: 'high',
+      n: 4, aspectRatio: '16:9', size: '1536x1024', quality: 'high', resolution: '2K',
       referenceImages: [' https://images.example/a.png ', '/uploads/b.png'],
       apiKey: 'must-not-pass-through', sourceChannel: 'must-not-pass-through',
     })).toEqual({
       prompt: 'draw this', providerId: 'provider/a', modelId: 'model:v1',
-      n: 4, aspectRatio: '16:9', size: '1536x1024', quality: 'high',
+      n: 4, aspectRatio: '16:9', size: '1536x1024', quality: 'high', resolution: '2K',
       referenceImages: ['https://images.example/a.png', '/uploads/b.png'],
     });
   });
+
+  it.each(['1K', '2K', '4K', '1k', '2k', '4k'])(
+    'accepts the supported image resolution tier %s',
+    (resolution) => {
+      expect(normalizeGatewayImageRequest({
+        prompt: 'draw', providerId: 'provider', modelId: 'model', resolution,
+      })).toMatchObject({ resolution: resolution.toUpperCase() });
+    },
+  );
+
+  it.each(['8K', 'high', '1024x1024', '2.5K'])(
+    'rejects unsupported image resolution %s',
+    (resolution) => {
+      expectGatewayError(
+        () => normalizeGatewayImageRequest({
+          prompt: 'draw', providerId: 'provider', modelId: 'model', resolution,
+        }),
+        'GATEWAY_INVALID_REQUEST',
+        400,
+      );
+    },
+  );
 
   it('enforces prompt boundaries from 1 through 20000 trimmed characters', () => {
     expect(normalizeGatewayImageRequest({

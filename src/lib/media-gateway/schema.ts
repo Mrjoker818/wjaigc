@@ -9,7 +9,7 @@ const MAX_REFERENCE_IMAGES = 16;
 const IDENTIFIER_PATTERN = /^[A-Za-z0-9](?:[A-Za-z0-9._:/-]*[A-Za-z0-9])?$/;
 const SECRET_FIELD_PATTERN = /^(?:api[_-]?key|authorization|gateway[_-]?key|key[_-]?hash|provider[_-]?(?:api[_-]?)?key|secret)$/i;
 const IMAGE_REQUEST_FIELDS = new Set([
-  'prompt', 'providerId', 'modelId', 'n', 'aspectRatio', 'size', 'quality', 'referenceImages',
+  'prompt', 'providerId', 'modelId', 'n', 'aspectRatio', 'size', 'quality', 'resolution', 'referenceImages',
   'apiKey', 'sourceChannel',
 ]);
 const VIDEO_REQUEST_FIELDS = new Set([
@@ -25,6 +25,7 @@ export interface GatewayImageRequest {
   aspectRatio?: string;
   size?: string;
   quality?: string;
+  resolution?: string;
   referenceImages?: string[];
 }
 
@@ -142,6 +143,11 @@ export function normalizeGatewayImageRequest(value: unknown): GatewayImageReques
   }
   assignDefined(output, 'size', size);
   assignDefined(output, 'quality', optionalText(input.quality, 'quality', 50));
+  const resolution = optionalText(input.resolution, 'resolution', 10);
+  if (resolution !== undefined && !/^[124]K$/i.test(resolution)) {
+    throw invalidRequest('resolution is invalid');
+  }
+  assignDefined(output, 'resolution', resolution?.toUpperCase());
   assignDefined(output, 'referenceImages', referenceImages(input.referenceImages));
   return output;
 }

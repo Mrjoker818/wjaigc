@@ -227,7 +227,7 @@ function successResponse(
     taskId: taskIds[0],
     taskIds,
     status,
-  });
+  }, { status: 202 });
 }
 
 function assertSafeExternalBody(value: unknown, ancestors = new Set<object>()): void {

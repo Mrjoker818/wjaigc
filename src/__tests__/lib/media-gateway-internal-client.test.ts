@@ -45,7 +45,7 @@ describe('media gateway authoritative internal client', () => {
       principal,
       requestId: 'req_12345678',
       gatewayRequestId: 'gwreq_1',
-      input: { prompt: 'draw', providerId: 'provider-1', modelId: 'model-1', n },
+      input: { prompt: 'draw', providerId: 'provider-1', modelId: 'model-1', n, resolution: '2K' },
     });
 
     expect(result).toEqual({ kind: 'accepted', taskIds, status: 'queued' });
@@ -66,6 +66,7 @@ describe('media gateway authoritative internal client', () => {
       n,
       outputCount: n,
       submitOnly: true,
+      resolution: '2K',
     });
     expect(JSON.parse(String(init.body))).not.toHaveProperty('modelId');
   });

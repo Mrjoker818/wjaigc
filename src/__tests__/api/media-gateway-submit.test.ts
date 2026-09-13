@@ -151,6 +151,7 @@ describe('media gateway submission routes', () => {
       input: expect.objectContaining({ providerId: 'provider-1', modelId: 'model-1', n: 4 }),
     }));
     expect(mocks.markGatewayAdmitted).toHaveBeenCalledWith({ gatewayRequestId: 'gwreq_1', taskIds });
+    expect(response.status).toBe(202);
     expect(await response.json()).toEqual({
       success: true,
       requestId: 'req_12345678',
@@ -192,6 +193,7 @@ describe('media gateway submission routes', () => {
 
     expect(mocks.submitGatewayImage).not.toHaveBeenCalled();
     expect(mocks.markGatewayAdmitted).not.toHaveBeenCalled();
+    expect(response.status).toBe(202);
     expect(await response.json()).toMatchObject({ taskId: 'task-1', taskIds: ['task-1', 'task-2'] });
   });
 
