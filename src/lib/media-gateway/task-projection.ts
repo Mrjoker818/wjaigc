@@ -1,5 +1,3 @@
-import { isIP } from 'node:net';
-
 import { getInternalRequestHeaders } from '@/lib/api-auth';
 import {
   getCloudTaskForUser,
@@ -17,9 +15,7 @@ const MAX_MEDIA_URL_BYTES = 2_048;
 const MAX_MEDIA_URLS = 16;
 const MAX_PROJECTED_RESULT_BYTES = 16_384;
 const CONTROLLED_MEDIA_PATHS = ['/api/serve-upload/', '/uploads/'] as const;
-const BLOCKED_DOMAIN_SUFFIXES = [
-  'localhost', 'local', 'internal', 'home', 'lan', 'test', 'example', 'invalid',
-] as const;
+const PUBLIC_MEDIA_HOSTS = new Set(['cdn.openai.com', 'media.openai.com']);
 const MAX_PERCENT_DECODE_ROUNDS = 4;
 const DANGEROUS_ENCODED_PATH = /%(?:0[0-9a-f]|1[0-9a-f]|2e|2f|5c|7f)/i;
 const IMAGE_EXTENSION = /\.(?:avif|bmp|gif|jpe?g|png|svg|tiff?|webp)$/i;
@@ -60,20 +56,6 @@ function unavailable(): GatewayError {
   );
 }
 
-function isPublicHostname(hostname: string): boolean {
-  const normalized = hostname.replace(/^\[|\]$/g, '').replace(/\.+$/, '').toLowerCase();
-  if (isIP(normalized) !== 0 || normalized.length > 253) return false;
-  const labels = normalized.split('.');
-  if (labels.length < 2 || labels.some(label => !/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(label))) {
-    return false;
-  }
-  if (BLOCKED_DOMAIN_SUFFIXES.some(suffix => normalized === suffix || normalized.endsWith(`.${suffix}`))) {
-    return false;
-  }
-  const topLevel = labels.at(-1) ?? '';
-  return /^[a-z]{2,63}$/.test(topLevel) || /^xn--[a-z0-9-]{2,59}$/.test(topLevel);
-}
-
 function decodeMediaPath(pathname: string): string | undefined {
   let decoded = pathname;
   for (let round = 0; round < MAX_PERCENT_DECODE_ROUNDS; round += 1) {
@@ -106,9 +88,9 @@ function safeMediaUrl(value: unknown, kind: 'image' | 'video'): string | undefin
   if (typeof value !== 'string' || value.length === 0 || Buffer.byteLength(value) > MAX_MEDIA_URL_BYTES) {
     return undefined;
   }
+  if (value.includes('?') || value.includes('#')) return undefined;
   const relative = value.startsWith('/') && !value.startsWith('//');
   if (relative) {
-    if (value.includes('?') || value.includes('#')) return undefined;
     const mediaPath = safeMediaPath(value, kind);
     return mediaPath && CONTROLLED_MEDIA_PATHS.some(prefix => mediaPath.startsWith(prefix))
       ? value
@@ -124,7 +106,7 @@ function safeMediaUrl(value: unknown, kind: 'image' | 'video'): string | undefin
   if (url.search || url.hash || url.username || url.password || !mediaPath) {
     return undefined;
   }
-  return url.protocol === 'https:' && isPublicHostname(url.hostname) ? value : undefined;
+  return url.protocol === 'https:' && PUBLIC_MEDIA_HOSTS.has(url.hostname) ? value : undefined;
 }
 
 function safeMediaArray(value: unknown, kind: 'image' | 'video'): string[] | undefined {

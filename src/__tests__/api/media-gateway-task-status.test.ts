@@ -291,6 +291,12 @@ describe('GET /api/gateway/v1/tasks/[taskId]', () => {
     ['IPv6 benchmark literal', 'https://[2001:2::]/result.png'],
     ['IPv6 documentation literal', 'https://[3fff::]/result.png'],
     ['6to4 loopback literal', 'https://[2002:7f00:1::]/result.png'],
+    ['onion host', 'https://media.onion/result.png'],
+    ['alt host', 'https://media.alt/result.png'],
+    ['home.arpa host', 'https://home.arpa/result.png'],
+    ['nonexistent TLD', 'https://cdn.definitelynotatld/result.png'],
+    ['empty query delimiter', 'https://cdn.openai.com/result.png?'],
+    ['empty fragment delimiter', 'https://cdn.openai.com/result.png#'],
     ['non-media path', 'https://cdn.openai.com/account'],
     ['path traversal', '/api/serve-upload/%2e%2e/private.png'],
     ['literal dot segment', '/uploads/./safe.png'],
@@ -483,4 +489,26 @@ describe('GET /api/gateway/v1/tasks/[taskId]', () => {
       },
     });
   });
+
+  it.each(['cdn.openai.com', 'media.openai.com'])(
+    'keeps media URLs from the exact allowlisted CDN host %s',
+    async (host) => {
+      const imageUrl = `https://${host}/result.png`;
+      mocks.getCloudTaskForUser.mockResolvedValue({
+        id: 'task-allowlisted-cdn', userId: 'user-a', type: 'generate-async',
+        status: 'completed', progress: 100, creditStatus: 'charged', createdAt: 1, updatedAt: 2,
+        result: { imageUrl },
+      });
+
+      const response = await GET(
+        gatewayTaskRequest('task-allowlisted-cdn'),
+        context('task-allowlisted-cdn'),
+      );
+
+      expect(await response.json()).toMatchObject({
+        result: { imageUrl },
+        previewUrl: imageUrl,
+      });
+    },
+  );
 });
