@@ -4271,3 +4271,38 @@ Task 4 独立审查的两个 Minor 继续保留给最终审查：单元夹具 op
 | BTV-010-13 | P0 | 暂停的 Workflow Run 携带旧输出时可能被误判为终态，跳过新一代审批恢复 | 恢复回归先 RED；终态判断改为以当前 generation 的事件与暂停状态为准 | 已修复，真 PostgreSQL 与全量回归通过 |
 | BTV-010-14 | P0 | Skill 结果资产仅按 stepId 关联，重试后可能把旧 generation 的 AssetVersion 投影到新结果 | 资产世代隔离回归先 RED；按 stepId + generation 精确配对，兼容无 generation 的历史事件 | 已修复，真 PostgreSQL 与全量回归通过 |
 | BTV-010-15 | P2 | Brief 审批刷新定时器完成后未移除 AbortSignal 监听，长会话可能累积监听器 | 组件回归先 RED；每次定时器完成、取消或卸载时成对清理监听器 | 已修复，组件与全量回归通过 |
+## 2026-09-13 Brief 到视频成片云端最终验收
+
+### BRIEF-VIDEO-ASSET-001：真实视频 AssetVersion 缺少文件元数据
+
+| 字段 | 内容 |
+|---|---|
+| 严重等级 | P1，真实成片虽可下载，但资产层无法证明文件大小和分辨率。 |
+| 稳定复现 | 旧云端成功 Run `10f5f844-b440-40b3-9529-24895a5b601e` 的 MP4 可解码为 `720×1280`，对应 AssetVersion 的 `byte_size/width/height` 均为 NULL。 |
+| 根因 | 视频轮询完成后只保存 URL；任务投影器只消费 `result.images/result.image`，没有消费视频结果中的权威媒体元数据。 |
+| 修复 | `main@a2e691d172e3d0edd49f2b5aebb7085f1074c587` 在持久文件完成后调用受控 `ffprobe`，将 `video.url/byteSize/mimeType/width/height` 写入任务结果，并由投影器创建 AssetVersion。 |
+| 永久回归 | 新增视频文件元数据与投影测试；聚焦 `35/35`、视频扩大回归 `414/414`、类型、构建版 ESLint、保护基线和生产构建 `120/120` 通过。 |
+| 云端证据 | Coze Build `jTvAuJls7yFBPgjVOKgIQ` 的 Run `5617ab85-13eb-4099-88e9-152af40ed8cc` 完成；AssetVersion `87fd800d-9e0c-4872-8776-204ee57c2385` 为 `ready/video/mp4/1440796 bytes/720×1280`。下载文件为 5 秒 H.264，SHA-256 `1335C729FBA46F65D13EE936F085ACE59287BE4A2258BA46E112263BE690A378`。 |
+| 当前状态 | **CLOSED / CLOUD PASS**。 |
+
+### BRIEF-VIDEO-UI-001：取消成功后卡片状态未立即刷新
+
+| 字段 | 内容 |
+|---|---|
+| 严重等级 | P2，权威取消与退款成功，但用户短时间仍看到“正在排队”。 |
+| 稳定复现 | Run `002a01f2-d518-41dd-8a6b-a00ee375b125` 点击取消；PATCH HTTP 200 返回 `run.cancelled` 与 `projection.status=cancelled`，卡片仍显示排队；整页刷新后显示“已取消”。 |
+| 数据边界 | 数据库为 `cancelled/refunded`，`children=0`、`assets=0`、一次消费与一次全额退款、净额 0；取消后 270 秒复核仍未发生迟到完成。 |
+| 修复与回归 | `main@15ee74a5038653a6701a881f9d938e73d1ac9abd` 在取消请求成功后统一刷新卡片投影；组件测试先 RED 后 GREEN，Brief 到视频相关 14 个测试文件最终 `107/107` 通过。 |
+| 云端证据 | Coze 同树提交 `60ee04f9`、Build ID `5KEqWBNmGIO0eIURT6veG`。Run `f3744b05-73f4-4a88-a5ad-e9a463df2644` 点击取消后约 1.8 秒内、未刷新页面即显示“已取消”。数据库为 `cancelled/refunded`，一次消费 253、一次退款 253、净额 0，0 视频子任务、0 AssetVersion，事件序列止于 `run.cancelled`，没有迟到完成。截图：`test-results/brief-to-video/15ee74a5/simple-chat/cancel-immediate-cloud.png`。 |
+| 当前状态 | **CLOSED / CLOUD PASS / P2**。权威终态、即时 UI、退款及迟到结果边界均已闭环。 |
+
+### BRIEF-VIDEO-INTENT-001：重复模型名的补充对话无法完成模型绑定
+
+| 字段 | 内容 |
+|---|---|
+| 严重等级 | P2，用户只输入界面可见的裸模型名时可能反复被要求指定模型。 |
+| 稳定复现 | 在 Simple Chat 使用 `doubao-seedance-2-0-mini-260615` 裸模型名，完整 Brief 与模型补充轮次交替得到“请指定模型/请提供 Brief”；使用精确 `providerId/modelId` 后立即创建 Run。 |
+| 根因证据 | 同一 modelId 可属于多个已授权 provider，`findCapability()` 只在裸模型唯一时接受；新一轮仍含显式生成意图时，上轮字段不会并入本轮。 |
+| 修复与回归 | `main@15ee74a5038653a6701a881f9d938e73d1ac9abd` 在裸 modelId 命中多个供应商时列出精确 `providerId/modelId` 候选，并读取多轮对话中最后一次明确回答；同键仍不静默选择首个供应商。意图测试先 RED 后 GREEN，聚焦 `9/9`、Brief 到视频扩大回归 `107/107` 通过。 |
+| 云端适用性 | 当前云端授权目录中 `doubao-seedance-2-0-mini-260615` 仅有一个可用绑定，裸模型名会直接创建 Run，无法制造真实重复供应商分支。精确 provider/model 的云端提交此前已通过；重复分支由确定性自动化永久覆盖，不把当前目录的“唯一命中”冒充重复场景。 |
+| 当前状态 | **CLOSED / LOCAL REGRESSION PASS / CLOUD N/A**。当前云端配置不存在触发前提；未来管理员配置重复 modelId 时由新增候选选择合同保护。 |

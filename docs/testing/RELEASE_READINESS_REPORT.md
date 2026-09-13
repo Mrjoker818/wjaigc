@@ -2329,3 +2329,19 @@ The focused gate test passes `7/7`; the actual protected-baseline command passes
 - 四浏览器证据绑定 provenance `5fd5ab26bdecb4e73a49723ea414f5726a3c8f5c84d822bd8bee141dd7f9050f`，含截图、录像、Trace、Console、Network 与逐文件哈希；桌面三项目为服务器预热后的分次通过。
 - Coze 积分已经恢复，但云端尚未运行最终 exact commit，也未取得真实供应商成功成片、可控取消、单次扣退、视频 AssetVersion、父版本、播放、下载和刷新恢复证据。
 - **发布结论保持 `DONE_WITH_CONCERNS / LOCAL PASS / CLOUD UNVERIFIED`。** Task 10 本地部分完成，云端约占剩余 10%；全平台仍不允许标记为通过。
+## 2026-09-13 Brief 到视频成片最终发布判断
+
+- `main@a2e691d172e3d0edd49f2b5aebb7085f1074c587` 已在 Coze Build `jTvAuJls7yFBPgjVOKgIQ` 运行，功能标志保持开启，`stable@52f7c601` 未触碰。
+- 真实成功 Run 已证明：唯一远端视频任务、单次 252 积分消费、零退款、唯一 ready AssetVersion、`video/mp4`、`720×1280`、5 秒、可分段播放、可下载及刷新恢复。
+- 真实取消 Run 已证明：取消接口 HTTP 200、数据库取消终态、零视频子任务、零资产、一次全额退款、净额 0，未观察到迟到完成覆盖。
+- 本阶段发布结论：**通过 / CLOUD PASS / CLOSED**。
+- 剩余 P2：取消成功后卡片需刷新才更新；重复供应商拥有同名视频模型时，裸模型名的多轮补充体验不完整。
+- 范围限定：本结论只适用于 Brief 到视频成片阶段。全平台仍受其他报告中未关闭的旧媒体、聚合 E2E、支付/管理员及供应商外部依赖项目约束，不能据此宣布全平台发布通过。
+
+### 2026-09-13 Task12 P2 最终发布判断
+
+- `main@15ee74a5038653a6701a881f9d938e73d1ac9abd` 已完成取消卡片即时刷新及重复 modelId 确定性补充选择；Coze 同树提交 `60ee04f9`、Build ID `5KEqWBNmGIO0eIURT6veG`。
+- 云端 Run `f3744b05-73f4-4a88-a5ad-e9a463df2644` 无需刷新即在约 1.8 秒内显示取消；数据库确认一次消费、一次全额退款、净额 0、无视频子任务、无 AssetVersion、无迟到完成。
+- 当前生产模型目录没有重复 modelId 授权样本，故重复供应商分支标记为云端不适用；新增自动化锁定精确候选与最后一次明确回答，禁止不确定回退。
+- 本地新鲜门禁为相关 `107/107`、TypeScript、构建版 ESLint、干净保护基线 `38/38` 和生产构建 `120/120`。
+- **Task12 发布结论：通过 / CLOUD PASS / CLOSED。** 全平台发布结论仍为不通过，不能据此更新 `stable`。

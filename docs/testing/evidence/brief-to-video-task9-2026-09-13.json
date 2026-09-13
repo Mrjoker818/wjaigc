@@ -2,7 +2,7 @@
   "schemaVersion": 2,
   "feature": "brief-to-video-finished-film",
   "task": 10,
-  "generatedAt": "2026-09-13T09:35:26+08:00",
+  "generatedAt": "2026-09-13T11:32:00+08:00",
   "candidateSha": "5fd5ab26bdecb4e73a49723ea414f5726a3c8f5c84d822bd8bee141dd7f9050f",
   "sourceCommit": {
     "scheme": "git-parent-subtrees-v1",
@@ -25,6 +25,15 @@
       "blocker": null
     },
     "fullRegression": { "files": 768, "passed": 6352, "failed": 0, "skipped": 0 },
+    "p2Closure": {
+      "exactCommit": "15ee74a5038653a6701a881f9d938e73d1ac9abd",
+      "focusedTests": { "passed": 9, "failed": 0, "skipped": 0 },
+      "expandedTests": { "files": 14, "passed": 107, "failed": 0, "skipped": 0 },
+      "typecheck": "pass",
+      "lintBuild": "pass",
+      "protectedBaseline": { "passed": 38, "drift": 0, "warnings": 0 },
+      "productionBuildPages": { "generated": 120, "total": 120 }
+    },
     "playwright": {
       "passed": 4,
       "failed": 0,
@@ -53,32 +62,81 @@
     }
   },
   "cloud": {
-    "verdict": "CLOUD UNVERIFIED",
-    "cloudVerified": false,
-    "supplierVerified": false,
-    "exactCommit": null,
+    "verdict": "CLOUD PASS",
+    "cloudVerified": true,
+    "supplierVerified": true,
+    "exactCommit": "15ee74a5038653a6701a881f9d938e73d1ac9abd",
+    "cozeMergeCommit": "60ee04f9",
+    "buildId": "5KEqWBNmGIO0eIURT6veG",
     "successfulRun": {
-      "runId": null,
-      "internalTaskId": null,
-      "remoteTaskId": null,
-      "chargeTransactionId": null,
-      "videoAssetVersionId": null,
+      "runId": "5617ab85-13eb-4099-88e9-152af40ed8cc",
+      "internalTaskId": "video_skill_0dff539408ad8b9948908a75",
+      "remoteTaskId": "d5484077-7e49-4a78-a4be-4fd3e7394376",
+      "providerId": "api_1781140778520_hmu8s39",
+      "modelId": "doubao-seedance-2-0-mini-260615",
+      "chargeTransactionId": "ctx_charge_ba8493aee1d7f3608d37431b92d75472",
+      "chargeAmount": 252,
+      "refundCount": 0,
+      "videoAssetVersionId": "87fd800d-9e0c-4872-8776-204ee57c2385",
       "parentVersionIds": [],
-      "mime": null,
-      "signature": null,
-      "durationSeconds": null,
-      "resolution": { "width": null, "height": null },
-      "artifact": { "sha256": null, "bytes": null }
+      "mime": "video/mp4",
+      "signature": "000000206674797069736F6D (ftypisom)",
+      "durationSeconds": 5,
+      "resolution": { "width": 720, "height": 1280 },
+      "artifact": {
+        "sha256": "1335C729FBA46F65D13EE936F085ACE59287BE4A2258BA46E112263BE690A378",
+        "bytes": 1440796,
+        "url": "/api/serve-upload/video/video_skill_0dff539408ad8b9948908a75/video_video_skill_0dff539408ad8b9948908a75_1789267349568_ovrq24.mp4"
+      },
+      "browser": {
+        "refreshRestored": true,
+        "downloadEventTriggered": true,
+        "videoRangeStatus": 206,
+        "sameOriginRequestCount": 46,
+        "failedSameOriginRequests": 0,
+        "recentConsoleErrorsOrWarnings": 0
+      }
     },
     "cancelledRun": {
-      "runId": null,
+      "runId": "002a01f2-d518-41dd-8a6b-a00ee375b125",
       "internalTaskId": null,
       "remoteTaskId": null,
-      "chargeTransactionId": null,
-      "refundTransactionId": null,
-      "refundAmount": null,
-      "lateCompletionSuppressed": null
+      "chargeTransactionId": "ctx_charge_8beeabc86da98c2850a87aac8a1fe5f6",
+      "refundTransactionId": "ctx_refund_40e6d51e87f516e79ec9fa25a0a23402",
+      "chargeAmount": 252,
+      "refundAmount": 252,
+      "netAmount": 0,
+      "childTaskCount": 0,
+      "assetVersionCount": 0,
+      "lateWindowSeconds": 270,
+      "lateCompletionSuppressed": true
     },
-    "reason": "尚未在 Coze 部署最终 exact commit，也未取得真实供应商成功成片、取消、扣费退款、AssetVersion 和云端浏览器证据。"
+    "p2Closure": {
+      "immediateCancellationRun": {
+        "runId": "f3744b05-73f4-4a88-a5ad-e9a463df2644",
+        "ownerUserId": "admin_mr_joker",
+        "projectId": "project_1787549625844_nfmso3ts9",
+        "uiUpdatedWithoutReload": true,
+        "observedUiLatencySeconds": 1.8,
+        "status": "cancelled",
+        "creditStatus": "refunded",
+        "chargeAmount": 253,
+        "refundAmount": 253,
+        "netAmount": 0,
+        "childTaskCount": 0,
+        "assetVersionCount": 0,
+        "eventSequence": ["run.created", "tool.started:plan-film", "run.cancelled"],
+        "lateCompletionObserved": false,
+        "screenshot": "test-results/brief-to-video/15ee74a5/simple-chat/cancel-immediate-cloud.png"
+      },
+      "duplicateModelIntent": {
+        "automatedRegression": "pass",
+        "cloudApplicability": "not-applicable-current-catalog",
+        "reason": "当前云端授权目录中目标 modelId 只有一个可用 provider 绑定",
+        "silentFirstProviderFallback": false
+      }
+    },
+    "knownIssue": null,
+    "evidenceRoot": "test-results/brief-to-video/a2e691d1/simple-chat/"
   }
 }

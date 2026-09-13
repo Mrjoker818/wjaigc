@@ -3038,3 +3038,25 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - Chromium、Firefox、WebKit、375px Mobile Chromium 均在同一候选与同一隔离数据库上通过；移动项目在首次运行通过，桌面三项目在开发服务器预热后分次重跑通过，不写成单次冷启动矩阵全绿。
 - TypeScript、构建版 ESLint 与生产构建均退出 0，生产构建生成 `120/120` 页面；Turbopack 动态文件追踪警告继续作为发布工程风险保留。
 - **回归判定：`LOCAL PASS / CLOUD UNVERIFIED`。** 积分恢复只解除云端测试前置，不能代替 Coze exact commit 与真实视频供应商证据。
+## 2026-09-13 Brief 到视频成片云端闭环
+
+- 运行版本：GitHub `main@a2e691d172e3d0edd49f2b5aebb7085f1074c587`；Coze 同树提交 `63b79dae`；Build ID `jTvAuJls7yFBPgjVOKgIQ`；`stable@52f7c601` 未修改。
+- 本地增量：视频元数据/投影 `35/35`，视频相关扩大回归 `414/414`，TypeScript、构建版 ESLint、38 项保护合同与生产构建 `120/120` 通过。全仓最终增量为 `6165 passed / 190 PostgreSQL-gated skipped / 0 failed`；这 190 项不冒充新通过，Task10 既有隔离 PostgreSQL 最终证据仍为 `34/34`。
+- 成功 Run：`5617ab85-13eb-4099-88e9-152af40ed8cc`，唯一子任务 `video_skill_0dff539408ad8b9948908a75`，远端任务 `d5484077-7e49-4a78-a4be-4fd3e7394376`，固定 `api_1781140778520_hmu8s39 / doubao-seedance-2-0-mini-260615`。
+- 成品：AssetVersion `87fd800d-9e0c-4872-8776-204ee57c2385`，`ready`、`video/mp4`、`1440796` 字节、`720×1280`；文件 `ftypisom`、H.264、5 秒，SHA-256 `1335C729FBA46F65D13EE936F085ACE59287BE4A2258BA46E112263BE690A378`。
+- 浏览器：刷新后结果卡恢复；视频 Range 请求 HTTP 206；46 个同源请求无失败；刷新后两分钟内 Console error/warning 为 0；“下载成片”真实触发 download 事件。
+- 成功账务：父任务 `completed/charged`，一次消费 252、零退款；子任务 `not-applicable/0`，无重复扣费。
+- 取消 Run：`002a01f2-d518-41dd-8a6b-a00ee375b125`，PATCH 200 返回 `run.cancelled`；数据库 `cancelled/refunded`，0 子任务、0 AssetVersion、一次消费 252、一次退款 252、净额 0；取消后 270 秒复核仍无迟到子任务或资产。
+- 非阻断新增：取消接口成功后卡片未立即从“正在排队”刷新，整页刷新才显示“已取消”；重复 modelId 的裸模型名补充体验不完整。两项登记为 P2，不改写权威终态和账务结论。
+- 机器证据：`docs/testing/evidence/brief-to-video-task9-2026-09-13.json`；截图目录 `test-results/brief-to-video/a2e691d1/simple-chat/`。
+
+**本功能结论：通过。** 该结论仅关闭 Brief 到视频成片的 Task12 剩余云端门禁，不代表全平台发布通过。
+
+### 2026-09-13 Task12 剩余 P2 收尾
+
+- 修复候选与 GitHub `main` 均为 `15ee74a5038653a6701a881f9d938e73d1ac9abd`；Coze 同树提交 `60ee04f9`，Build ID `5KEqWBNmGIO0eIURT6veG`；`stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 未修改。
+- TDD 聚焦 `9/9`；Brief 到视频相关 14 个测试文件 `107/107`；TypeScript、构建版 ESLint、生产构建 `120/120` 页面均退出 0。干净提交工作树的 38 项功能保护检查全部通过、0 漂移、0 警告。
+- Run `f3744b05-73f4-4a88-a5ad-e9a463df2644` 在现有 Edge 预览页点击取消后约 1.8 秒内直接显示“已取消”，没有整页刷新；本次观察流程未出现新的应用 Console error/warning。
+- 数据库只读核验：父 Run 为 `cancelled/refunded`，事件序列为 `run.created -> tool.started(plan-film) -> run.cancelled`；0 视频子任务、0 AssetVersion；唯一消费 253、唯一退款 253、净额 0，未出现迟到完成。
+- 当前云端模型目录中目标 modelId 只有一个授权绑定，因此重复供应商交互分支不适用；自动化已证明重复时显示精确候选、后续回答取最后一次明确 `providerId/modelId`，并保持禁止静默选首个供应商。
+- **回归判定：Task12 `LOCAL PASS / CLOUD PASS / CLOSED`。** 该结论只关闭 Task12；全平台其他发布阻断继续保留。
