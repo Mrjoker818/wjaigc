@@ -157,9 +157,11 @@ git commit -m "feat: add media gateway persistence schema"
 
 **Files:**
 - Create: `src/lib/media-gateway/key-service.ts`
+- Create: `src/lib/media-gateway/audit.ts`
 - Create: `src/app/api/admin/gateway/keys/route.ts`
 - Create: `src/app/api/admin/gateway/keys/[keyId]/route.ts`
 - Test: `src/__tests__/lib/media-gateway-key-service.test.ts`
+- Test: `src/__tests__/lib/media-gateway-audit.test.ts`
 - Test: `src/__tests__/api/admin-media-gateway-keys.test.ts`
 - Modify: `src/__tests__/api/admin-route-authorization-contract.test.ts`
 
@@ -168,6 +170,7 @@ git commit -m "feat: add media gateway persistence schema"
 - Produces: `issueGatewayKey(input): Promise<{ key: GatewayKeyView; secret: string }>`。
 - Produces: `authenticateGatewayBearer(value): Promise<GatewayPrincipal>`。
 - Produces: `listGatewayKeys()`、`updateGatewayKey()`、`revokeGatewayKey()`。
+- Produces: `auditGatewayEvent()`，仅接受脱敏网关标识和操作结果。
 
 - [ ] **Step 1: 写密钥安全失败测试**
 
@@ -212,20 +215,20 @@ export async function authenticateGatewayBearer(header: string | null) {
 }
 ```
 
-查询必须使用 `key_hash = $1`，不得枚举明文；所有返回对象只含 `keyPrefix`。
+查询必须使用 `key_hash = $1`，不得枚举明文；成功鉴权以同一条条件式 SQL 更新 `last_used_at` 并返回 principal，失败、停用或吊销鉴权不得更新时间；所有返回对象只含 `keyPrefix`。
 
 - [ ] **Step 4: 实现管理员路由**
 
-`GET/POST` 和 `PATCH/DELETE` 首行调用 `requireAdminUser(request)`；POST 只在 201 响应返回 `secret`，PATCH 白名单仅允许 `label/requestsPerMinute/dailyQuota/enabled`，DELETE 将 `enabled=false, revoked_at=now()`。
+`GET/POST` 和 `PATCH/DELETE` 首行调用 `requireAdminUser(request)`；POST 只在 201 响应返回 `secret`，PATCH 白名单仅允许 `label/requestsPerMinute/dailyQuota/enabled`，已吊销记录拒绝重新启用，DELETE 将 `enabled=false, revoked_at=now()`。POST/PATCH/DELETE 均调用 `auditGatewayEvent()` 写入操作者、action、outcome、keyId/keyPrefix 等脱敏事实，不记录 secret/hash。
 
 - [ ] **Step 5: GREEN、鉴权回归和提交**
 
-Run: `pnpm exec vitest run src/__tests__/lib/media-gateway-key-service.test.ts src/__tests__/api/admin-media-gateway-keys.test.ts src/__tests__/api/admin-route-authorization-contract.test.ts`
+Run: `pnpm exec vitest run src/__tests__/lib/media-gateway-key-service.test.ts src/__tests__/lib/media-gateway-audit.test.ts src/__tests__/api/admin-media-gateway-keys.test.ts src/__tests__/api/admin-route-authorization-contract.test.ts`
 
 Expected: PASS，管理接口均要求管理员，原始 Key 不可再次获取。
 
 ```bash
-git add src/lib/media-gateway/key-service.ts src/app/api/admin/gateway/keys src/__tests__/lib/media-gateway-key-service.test.ts src/__tests__/api/admin-media-gateway-keys.test.ts
+git add src/lib/media-gateway/key-service.ts src/lib/media-gateway/audit.ts src/app/api/admin/gateway/keys src/__tests__/lib/media-gateway-key-service.test.ts src/__tests__/lib/media-gateway-audit.test.ts src/__tests__/api/admin-media-gateway-keys.test.ts src/__tests__/api/admin-route-authorization-contract.test.ts
 git commit -m "feat: add media gateway key management"
 ```
 
@@ -488,7 +491,7 @@ git commit -m "feat: project existing thumbnails through media gateway"
 ### Task 7: MEDIA-001A/D 管理员界面与脱敏审计
 
 **Files:**
-- Create: `src/lib/media-gateway/audit.ts`
+- Modify: `src/lib/media-gateway/audit.ts`
 - Create: `src/components/dashboard/media-gateway-admin.tsx`
 - Modify: `src/components/dashboard/dashboard-view.tsx`
 - Test: `src/__tests__/lib/media-gateway-audit.test.ts`
