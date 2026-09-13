@@ -5,7 +5,7 @@ import {
   updateTaskProgress,
 } from '@/lib/task-registry';
 import { cancelEditTask } from '@/lib/edit-task-store';
-import { getSessionUser as getAuthUser } from '@/lib/server-auth';
+import { requireApiAuthOrReject } from '@/lib/api-auth';
 import { refundCredits } from '@/lib/credits';
 import { recordCloudTaskCancelled } from '@/lib/cloud-task-persistence';
 import {
@@ -32,14 +32,10 @@ export const dynamic = 'force-dynamic';
 export async function POST(request: NextRequest) {
   const requestId = getRequestId(request);
   try {
-    // 认证检查：只有登录用户才能取消任务
-    const user = await getAuthUser(request);
-    if (!user) {
-      return NextResponse.json(
-        { success: false, error: '未登录，请先登录' },
-        { status: 401 }
-      );
-    }
+    // Cookie、桌面令牌和经过共享密钥验证的内部调用使用同一鉴权边界。
+    const auth = await requireApiAuthOrReject(request);
+    if (auth instanceof NextResponse) return auth;
+    const user = auth.user;
 
     const body = await request.json();
     const { taskId } = body;

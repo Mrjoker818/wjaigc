@@ -1,8 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { NextRequest } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 
 const mocks = vi.hoisted(() => ({
   getSessionUser: vi.fn(),
+  requireApiAuthOrReject: vi.fn(),
   getTaskInfo: vi.fn(),
   isTaskCancelled: vi.fn(),
   cancelTask: vi.fn(),
@@ -15,7 +16,9 @@ const mocks = vi.hoisted(() => ({
   recordCloudTaskCancelled: vi.fn(),
 }));
 
-vi.mock('@/lib/server-auth', () => ({ getSessionUser: mocks.getSessionUser }));
+vi.mock('@/lib/api-auth', () => ({
+  requireApiAuthOrReject: mocks.requireApiAuthOrReject,
+}));
 vi.mock('@/lib/task-registry', () => ({
   getTaskInfo: mocks.getTaskInfo,
   isTaskCancelled: mocks.isTaskCancelled,
@@ -33,13 +36,18 @@ vi.mock('@/lib/cloud-task-persistence', () => ({ recordCloudTaskCancelled: mocks
 
 import { POST } from '@/app/api/cancel-task/route';
 
-function request(taskId: string, requestId?: string): NextRequest {
+function request(
+  taskId: string,
+  requestId?: string,
+  headers: Record<string, string> = {},
+): NextRequest {
   return new NextRequest('http://localhost/api/cancel-task', {
     method: 'POST',
     body: JSON.stringify({ taskId }),
     headers: {
       'Content-Type': 'application/json',
       ...(requestId ? { 'x-request-id': requestId } : {}),
+      ...headers,
     },
   });
 }
@@ -47,6 +55,18 @@ function request(taskId: string, requestId?: string): NextRequest {
 describe('POST /api/cancel-task', () => {
   beforeEach(() => {
     Object.values(mocks).forEach(mock => mock.mockReset());
+    mocks.requireApiAuthOrReject.mockImplementation(async (incomingRequest: NextRequest) => {
+      const user = await mocks.getSessionUser(incomingRequest);
+      return user
+        ? {
+            authenticated: true,
+            userId: user.id,
+            userRole: user.role || 'user',
+            user,
+            source: 'cookie',
+          }
+        : NextResponse.json({ error: 'Authentication required' }, { status: 401 });
+    });
     mocks.isTaskCancelled.mockReturnValue(false);
     mocks.recordCloudTaskCancelled.mockResolvedValue({
       transitioned: true,
@@ -344,6 +364,82 @@ describe('POST /api/cancel-task', () => {
     );
     expect(mocks.refundCloudTaskCredits).not.toHaveBeenCalled();
     expect(mocks.recordCloudTaskCancelled).not.toHaveBeenCalled();
+  });
+
+  it('accepts a trusted internal user without requiring a cookie', async () => {
+    mocks.requireApiAuthOrReject.mockResolvedValue({
+      authenticated: true,
+      userId: 'user-a',
+      userRole: 'user',
+      user: { id: 'user-a', role: 'user' },
+      source: 'internal',
+    });
+    mocks.getTaskInfo.mockReturnValue(undefined);
+    mocks.getCloudTaskForUser.mockResolvedValue({
+      id: 'task-owned',
+      userId: 'user-a',
+      type: 'video',
+      status: 'processing',
+      progress: 20,
+      creditStatus: 'pending',
+      creditCost: 8,
+      createdAt: 1,
+      updatedAt: 2,
+    });
+
+    const response = await POST(request('task-owned'));
+
+    expect(response.status).toBe(200);
+    expect(mocks.terminateCloudTaskAndRefund).toHaveBeenCalledOnce();
+    expect(mocks.getSessionUser).not.toHaveBeenCalled();
+  });
+
+  it('rejects forged internal headers when shared-secret authentication fails', async () => {
+    mocks.getSessionUser.mockResolvedValue(null);
+
+    const response = await POST(request('task-owned', undefined, {
+      'x-internal-request': 'true',
+      'x-internal-user-id': 'user-a',
+      'x-wujie-internal-secret': 'forged',
+    }));
+
+    expect(response.status).toBe(401);
+    expect(mocks.getCloudTaskForUser).not.toHaveBeenCalled();
+    expect(mocks.cancelTask).not.toHaveBeenCalled();
+  });
+
+  it('keeps repeated durable cancellation idempotent through atomic settlement', async () => {
+    mocks.getSessionUser.mockResolvedValue({ id: 'user-a', role: 'user' });
+    mocks.getTaskInfo.mockReturnValue(undefined);
+    mocks.getCloudTaskForUser
+      .mockResolvedValueOnce({
+        id: 'task-repeat', userId: 'user-a', type: 'video', status: 'processing',
+        progress: 20, creditStatus: 'pending', creditCost: 8, createdAt: 1, updatedAt: 2,
+      })
+      .mockResolvedValueOnce({
+        id: 'task-repeat', userId: 'user-a', type: 'video', status: 'cancelled',
+        progress: 0, creditStatus: 'refunded', creditCost: 8, createdAt: 1, updatedAt: 3,
+      })
+      .mockResolvedValueOnce({
+        id: 'task-repeat', userId: 'user-a', type: 'video', status: 'cancelled',
+        progress: 0, creditStatus: 'refunded', creditCost: 8, createdAt: 1, updatedAt: 3,
+      });
+    mocks.terminateCloudTaskAndRefund
+      .mockResolvedValueOnce({
+        status: 'cancelled', transitioned: true, refunded: true, creditCost: 8,
+      })
+      .mockResolvedValueOnce({
+        status: 'cancelled', transitioned: false, refunded: false, creditCost: 8,
+      });
+
+    const first = await POST(request('task-repeat'));
+    const second = await POST(request('task-repeat'));
+
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(200);
+    expect(mocks.terminateCloudTaskAndRefund).toHaveBeenCalledTimes(2);
+    expect(mocks.refundCloudTaskCredits).not.toHaveBeenCalled();
+    expect(mocks.refundCredits).not.toHaveBeenCalled();
   });
 
   it.each([
