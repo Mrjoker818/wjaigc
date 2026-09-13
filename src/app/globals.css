@@ -1754,3 +1754,51 @@ input[type="range"]::-moz-range-thumb {
     transition: none;
   }
 }
+
+/* Mobile canvas interaction is isolated from ordinary page controls. */
+[data-canvas-interaction-surface] {
+  touch-action: none;
+}
+
+[data-simple-create-page] {
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+}
+
+@media (max-width: 767px) {
+  [data-mobile-canvas-toolbar] {
+    max-width: calc(100vw - 16px);
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  [data-mobile-canvas-toolbar-drawer] {
+    max-height: calc(100dvh - 96px - env(safe-area-inset-bottom));
+    overscroll-behavior: contain;
+  }
+
+  [data-mobile-image-actions],
+  [data-mobile-image-actions-drawer] {
+    max-width: calc(100vw - 16px);
+  }
+
+  [data-mobile-image-actions-drawer] {
+    max-height: calc(100dvh - 152px - env(safe-area-inset-bottom));
+    overscroll-behavior: contain;
+  }
+
+  [data-simple-create-page] {
+    overflow-y: auto;
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-mobile-canvas-toolbar],
+  [data-mobile-canvas-toolbar-drawer],
+  [data-mobile-image-actions],
+  [data-mobile-image-actions-drawer] {
+    animation: none !important;
+    transition-duration: 0ms !important;
+  }
+}

@@ -123,7 +123,7 @@ export function SimpleCreatePage({ dependencies, initialProjectId }: SimpleCreat
   }
 
   return (
-    <main className="min-h-dvh bg-[#0d1016] text-white">
+    <main data-simple-create-page className="min-h-dvh bg-[#0d1016] text-white">
       <div className="mx-auto w-full max-w-3xl px-4 pb-12 pt-[max(1rem,env(safe-area-inset-top))] sm:px-6">
         <header className="mb-7 flex items-center gap-3 border-b border-zinc-800 pb-4">
           <button
