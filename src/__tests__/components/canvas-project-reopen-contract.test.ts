@@ -34,7 +34,7 @@ describe('canvas project reopen contract', () => {
 
   it('uses content fitting rather than resetting every populated project to the origin', () => {
     expect(canvas).toContain("import { normalizeCanvasViewState, resolveCanvasUsableViewportSize } from '@/lib/canvas-view-state';");
-    expect(canvas).toContain("import { useCanvasViewport } from '@/components/canvas/use-canvas-viewport';");
+    expect(canvas).toMatch(/import\s*\{[\s\S]*?\buseCanvasViewport\b[\s\S]*?\}\s*from\s*['"]@\/components\/canvas\/use-canvas-viewport['"]/);
     expect(canvas).toContain('fitContent: fitViewportContent');
     expect(canvas).toContain('const resetViewToContent = useCallback');
     expect(canvas).toContain('fitViewportContent(');

@@ -232,6 +232,18 @@
     { "path": "src/lib/platform-compliance/vision-client.ts", "sourceCommit": "7019a60b" },
     { "path": "src/lib/skill-runtime/compiled-fan-out.ts", "sourceCommit": "c7afc22f" },
     { "path": "src/lib/skill-runtime/platform-compliance-preset.ts", "sourceCommit": "ca434bd4" },
-    { "path": "src/lib/skill-runtime/structured-output.ts", "sourceCommit": "33c28202" }
+    { "path": "src/lib/skill-runtime/structured-output.ts", "sourceCommit": "33c28202" },
+    { "path": "src/app/api/tasks/recover/route.ts", "sourceCommit": "70c93f6b" },
+    { "path": "src/app/simple-create/page.tsx", "sourceCommit": "70c93f6b" },
+    { "path": "src/components/canvas/mobile-bottom-toolbar.tsx", "sourceCommit": "ca923edd" },
+    { "path": "src/components/canvas/mobile-image-actions.tsx", "sourceCommit": "2e309a05" },
+    { "path": "src/components/canvas/use-canvas-viewport.ts", "sourceCommit": "2c315950" },
+    { "path": "src/components/simple-create/simple-create-form.tsx", "sourceCommit": "70c93f6b" },
+    { "path": "src/components/simple-create/simple-create-page.tsx", "sourceCommit": "f67b20be" },
+    { "path": "src/components/simple-create/simple-create-results.tsx", "sourceCommit": "70c93f6b" },
+    { "path": "src/lib/canvas-touch-gestures.ts", "sourceCommit": "061f2257" },
+    { "path": "src/lib/image-generation-session.ts", "sourceCommit": "70c93f6b" },
+    { "path": "src/lib/mobile-canvas-toolbar.ts", "sourceCommit": "ca923edd" },
+    { "path": "src/lib/simple-create-navigation.ts", "sourceCommit": "70c93f6b" }
   ]
 }

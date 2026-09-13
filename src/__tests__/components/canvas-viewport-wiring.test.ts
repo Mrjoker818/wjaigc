@@ -14,7 +14,8 @@ const workspaceSource = readFileSync(
 
 describe('infinite canvas viewport controller wiring', () => {
   it('delegates viewport state and coordinate transforms to the hook', () => {
-    expect(canvasSource).toContain("import { useCanvasViewport } from '@/components/canvas/use-canvas-viewport'");
+    expect(canvasSource).toContain("from '@/components/canvas/use-canvas-viewport'");
+    expect(canvasSource).toMatch(/import\s*\{[\s\S]*?\buseCanvasViewport\b[\s\S]*?\}\s*from\s*['"]@\/components\/canvas\/use-canvas-viewport['"]/);
     expect(canvasSource).toContain('useCanvasViewport({');
     expect(canvasSource).toContain('screenToCanvas: viewportScreenToCanvas');
     expect(canvasSource).not.toContain('const [viewOffset, setViewOffset] = useState(');

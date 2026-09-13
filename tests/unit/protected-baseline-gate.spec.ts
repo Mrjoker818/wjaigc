@@ -277,6 +277,18 @@ const historicalSourceAuthorizations = [
   ['src/lib/skill-runtime/storage.ts', 'e196d039'],
   ['src/lib/skill-runtime/types.ts', 'e196d039'],
   ['src/lib/task-core/durable-generation-kickoff.ts', 'd0bf0dc3'],
+  ['src/app/api/tasks/recover/route.ts', '70c93f6b'],
+  ['src/app/simple-create/page.tsx', '70c93f6b'],
+  ['src/components/canvas/mobile-bottom-toolbar.tsx', 'ca923edd'],
+  ['src/components/canvas/mobile-image-actions.tsx', '2e309a05'],
+  ['src/components/canvas/use-canvas-viewport.ts', '2c315950'],
+  ['src/components/simple-create/simple-create-form.tsx', '70c93f6b'],
+  ['src/components/simple-create/simple-create-page.tsx', 'f67b20be'],
+  ['src/components/simple-create/simple-create-results.tsx', '70c93f6b'],
+  ['src/lib/canvas-touch-gestures.ts', '061f2257'],
+  ['src/lib/image-generation-session.ts', '70c93f6b'],
+  ['src/lib/mobile-canvas-toolbar.ts', 'ca923edd'],
+  ['src/lib/simple-create-navigation.ts', '70c93f6b'],
 ] as const;
 
 const unifiedSkillRuntimeArtifactPaths = [

@@ -61,7 +61,8 @@ describe('canvas kernel component boundaries', () => {
     expect(boundaries.infiniteCanvas).not.toContain("el.addEventListener('wheel', (e: WheelEvent)");
     expect(boundaries.infiniteCanvas).toContain("removeEventListener('wheel', editCanvasWheelHandler)");
     expect(boundaries.infiniteCanvas).toContain('annotationTaskAbortRef.current?.abort()');
-    expect(boundaries.infiniteCanvas).toContain('clearTimeout(canvasLongPressTimerRef.current)');
+    expect(boundaries.infiniteCanvas).toContain('touchGestureController.dispose()');
+    expect(boundaries.infiniteCanvas).toContain('touchGestureControllerRef.current = null!');
     expect(boundaries.infiniteCanvas).toContain('cancelAnimationFrame(brushRafRef.current)');
     expect(boundaries.infiniteCanvas).toContain('cancelAnimationFrame(groupDragRafRef.current)');
     expect(boundaries.infiniteCanvas).toContain('cancelAnimationFrame(genGroupDragRafRef.current)');
