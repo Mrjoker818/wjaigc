@@ -13,8 +13,23 @@ function toRecoveryTask(task: Awaited<ReturnType<typeof listCloudTasks>>[number]
     : undefined;
 
   const recovery = getTaskRecoveryBackoff(task);
+  const result = task.result;
+  const safeResult = result ? {
+    ...(typeof result.imageUrl === 'string' ? { imageUrl: result.imageUrl } : {}),
+    ...(Array.isArray(result.imageUrls)
+      ? { imageUrls: result.imageUrls.filter((value): value is string => typeof value === 'string') }
+      : {}),
+    ...(typeof result.videoUrl === 'string' ? { videoUrl: result.videoUrl } : {}),
+    ...(typeof result.videoThumbnailUrl === 'string'
+      ? { videoThumbnailUrl: result.videoThumbnailUrl }
+      : {}),
+    ...(result.assetProjection && typeof result.assetProjection === 'object'
+      ? { assetProjection: result.assetProjection }
+      : {}),
+  } : undefined;
   return {
     id: task.id,
+    projectId: task.projectId,
     type: task.type,
     status: task.status,
     providerId: task.providerId,
@@ -24,6 +39,8 @@ function toRecoveryTask(task: Awaited<ReturnType<typeof listCloudTasks>>[number]
     createdAt: task.createdAt,
     updatedAt: task.updatedAt,
     prompt: typeof prompt === 'string' ? prompt : undefined,
+    ...(safeResult && Object.keys(safeResult).length > 0 ? { result: safeResult } : {}),
+    ...(typeof task.error === 'string' && task.error ? { error: task.error } : {}),
     recoveryAllowed: recovery.recoveryAllowed,
     retryAfterMs: recovery.retryAfterMs,
     nextRecoveryAt: recovery.nextRecoveryAt,

@@ -56,6 +56,7 @@ describe('GET /api/tasks/recover recovery backoff', () => {
       tasks: [
         expect.objectContaining({
           id: 'task-active-lease',
+          projectId: 'project-a',
           recoveryAllowed: false,
           retryAfterMs: 8_000,
           nextRecoveryAt: 18_000,
@@ -63,5 +64,49 @@ describe('GET /api/tasks/recover recovery backoff', () => {
         }),
       ],
     }));
+  });
+
+  it('returns only safe managed result fields for completed image restoration', async () => {
+    mocks.listCloudTasks.mockResolvedValue([{
+      id: 'task-complete',
+      userId: 'user-a',
+      projectId: 'project-a',
+      type: 'generate',
+      status: 'completed',
+      providerId: 'provider-a',
+      model: 'model-a',
+      progress: 100,
+      result: {
+        imageUrl: '/media/result.png',
+        apiKey: 'must-not-leak',
+        submissionPayload: { prompt: 'hello', apiKey: 'also-private' },
+        assetProjection: {
+          references: [{
+            url: '/media/result.png',
+            assetVersionId: 'version-1',
+            placementId: 'placement-1',
+          }],
+        },
+      },
+      createdAt: 1_000,
+      updatedAt: 9_000,
+    }]);
+
+    const response = await GET(new NextRequest(
+      'http://localhost/api/tasks/recover?projectId=project-a',
+    ));
+    const body = await response.json();
+
+    expect(body.tasks[0]).toMatchObject({
+      projectId: 'project-a',
+      result: {
+        imageUrl: '/media/result.png',
+        assetProjection: {
+          references: [{ assetVersionId: 'version-1', placementId: 'placement-1' }],
+        },
+      },
+    });
+    expect(JSON.stringify(body.tasks[0])).not.toContain('must-not-leak');
+    expect(JSON.stringify(body.tasks[0])).not.toContain('also-private');
   });
 });

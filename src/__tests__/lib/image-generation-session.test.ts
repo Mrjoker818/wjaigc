@@ -124,6 +124,27 @@ describe('image generation session', () => {
     expect(session.snapshot()[0]).toMatchObject({ projectId: 'p1', taskId: 'task-a', status: 'processing' });
   });
 
+  it('does not restore a completed task without a managed asset projection as successful', async () => {
+    const fake = harness();
+    vi.mocked(fake.dependencies.restoreTasks).mockResolvedValue([{
+      id: 'restore-empty',
+      projectId: 'p1',
+      taskId: 'task-empty',
+      status: 'completed',
+      progress: 100,
+      result: { imageUrl: '/unmanaged/result.png' },
+    }]);
+    const session = createImageGenerationSession(fake.dependencies);
+
+    await session.restore('p1');
+
+    expect(session.snapshot()[0]).toMatchObject({
+      status: 'failed',
+      taskId: 'task-empty',
+      error: { code: 'MISSING_ASSET_PROJECTION', retryable: false },
+    });
+  });
+
   it('retries a failed slot in place with a fresh task identity', async () => {
     const fake = harness();
     const session = createImageGenerationSession(fake.dependencies);

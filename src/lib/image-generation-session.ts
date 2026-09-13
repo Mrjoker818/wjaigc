@@ -296,7 +296,9 @@ export function createImageGenerationSession(
       const restored = (await dependencies.restoreTasks(projectId)).filter(task => task.projectId === projectId);
       slots = restored.map((task): ImageGenerationSlot => {
         const reference = dependencies.extractAssetReferences(task.result)[0];
-        const status = normalizeStatus(task.status);
+        const restoredStatus = normalizeStatus(task.status);
+        const missingCompletedProjection = restoredStatus === 'completed' && !reference?.assetVersionId;
+        const status = missingCompletedProjection ? 'failed' : restoredStatus;
         const slot: ImageGenerationSlot = {
           id: task.id || createSlotId(),
           projectId,
@@ -306,8 +308,16 @@ export function createImageGenerationSession(
           ...(reference?.assetVersionId ? { assetVersionId: reference.assetVersionId } : {}),
           ...(reference?.placementId ? { placementId: reference.placementId } : {}),
           ...(reference?.url ? { url: reference.url } : {}),
-          ...((status === 'failed' || status === 'timeout')
-            ? { error: normalizeError(task.error, '生成任务失败') }
+          ...(missingCompletedProjection
+            ? {
+                error: {
+                  code: 'MISSING_ASSET_PROJECTION',
+                  message: '已完成任务尚未生成可管理的资产版本',
+                  retryable: Boolean(task.request),
+                },
+              }
+            : (status === 'failed' || status === 'timeout')
+              ? { error: normalizeError(task.error, '生成任务失败') }
             : {}),
         };
         taskToSlot.set(task.taskId, slot.id);
