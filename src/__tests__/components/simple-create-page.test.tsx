@@ -23,7 +23,24 @@ const pearModel: SimpleCreateModel = {
   maxReferenceImages: 2,
 };
 
-function harness(options: { authenticated?: boolean; slots?: ImageGenerationSlot[] } = {}) {
+const apimartResolutionModel: SimpleCreateModel = {
+  providerId: 'apimart',
+  providerName: 'APImart',
+  modelId: 'gpt-image-2',
+  modelName: 'GPT Image 2',
+  allowedRatios: ['1:1', '16:9'],
+  allowedSizes: ['1K', '2K', '4K'],
+  qualityOptions: ['1K', '2K', '4K'],
+  maxOutputs: 4,
+  supportsReferenceImages: true,
+  maxReferenceImages: 16,
+};
+
+function harness(options: {
+  authenticated?: boolean;
+  slots?: ImageGenerationSlot[];
+  models?: SimpleCreateModel[];
+} = {}) {
   let listener: ((slots: ImageGenerationSlot[]) => void) | null = null;
   const initialSlots = options.slots ?? [];
   const session: ImageGenerationSession = {
@@ -43,7 +60,7 @@ function harness(options: { authenticated?: boolean; slots?: ImageGenerationSlot
   };
   const dependencies: SimpleCreateDependencies = {
     getSession: vi.fn(async () => ({ authenticated: options.authenticated !== false })),
-    loadModels: vi.fn(async () => [pearModel]),
+    loadModels: vi.fn(async () => options.models ?? [pearModel]),
     uploadReference: vi.fn(async () => ({ url: '/uploads/reference.png', assetVersionId: 'ref-v1' })),
     session,
     navigate: vi.fn(),
@@ -91,6 +108,33 @@ describe('SimpleCreatePage', () => {
       model: 'gpt-image-2',
       referenceImages: ['/uploads/reference.png'],
     })));
+  });
+
+  it('submits resolution tiers separately from pixel size and quality', async () => {
+    const fake = harness({ models: [apimartResolutionModel] });
+    render(<SimpleCreatePage dependencies={fake.dependencies} initialProjectId="p1" />);
+
+    await screen.findByLabelText('模型');
+    expect(screen.getByLabelText('图片尺寸').querySelectorAll('option')).toHaveLength(3);
+    expect(screen.queryByLabelText('图片质量')).toBeNull();
+
+    fireEvent.change(screen.getByLabelText('提示词'), { target: { value: '商业产品摄影' } });
+    fireEvent.change(screen.getByLabelText('图片尺寸'), { target: { value: '2K' } });
+    fireEvent.change(screen.getByLabelText('生成数量'), { target: { value: '2' } });
+    fireEvent.click(screen.getByRole('button', { name: '开始生成' }));
+
+    await waitFor(() => expect(fake.dependencies.session.submit).toHaveBeenCalled());
+    const request = vi.mocked(fake.dependencies.session.submit).mock.calls[0][0];
+    expect(request).toMatchObject({
+      projectId: 'p1',
+      providerId: 'apimart',
+      model: 'gpt-image-2',
+      outputCount: 2,
+      aspectRatio: '1:1',
+      size: '',
+      resolution: '2K',
+    });
+    expect(request).not.toHaveProperty('quality');
   });
 
   it('restores slots and exposes cancel and retry independently', async () => {

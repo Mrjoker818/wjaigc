@@ -3,6 +3,8 @@
 import { ImagePlus, LoaderCircle, Sparkles, X } from 'lucide-react';
 import React from 'react';
 
+import { isResolutionTier } from '@/lib/canvas-generation-group';
+
 import type { SimpleCreateModel } from './simple-create-page';
 
 export interface SimpleCreateFormValue {
@@ -11,7 +13,8 @@ export interface SimpleCreateFormValue {
   model: string;
   aspectRatio: string;
   size: string;
-  quality: string;
+  quality?: string;
+  resolution?: string;
   outputCount: number;
   referenceImages: string[];
 }
@@ -44,6 +47,10 @@ export function SimpleCreateForm({
 
   const selected = models.find(model => `${model.providerId}::${model.modelId}` === selectedKey)
     || models[0];
+  const qualityOptions = React.useMemo(
+    () => selected?.qualityOptions.filter(option => !isResolutionTier(option)) || [],
+    [selected],
+  );
 
   React.useEffect(() => {
     if (!selected) return;
@@ -51,9 +58,9 @@ export function SimpleCreateForm({
     if (selectedKey !== key) setSelectedKey(key);
     setAspectRatio(current => selected.allowedRatios.includes(current) ? current : selected.allowedRatios[0] || '1:1');
     setSize(current => selected.allowedSizes.includes(current) ? current : selected.allowedSizes[0] || '1024x1024');
-    setQuality(current => selected.qualityOptions.includes(current) ? current : selected.qualityOptions[0] || 'standard');
+    setQuality(current => qualityOptions.includes(current) ? current : qualityOptions[0] || '');
     setOutputCount(current => Math.min(Math.max(current, 1), Math.min(selected.maxOutputs, 4)));
-  }, [selected, selectedKey]);
+  }, [qualityOptions, selected, selectedKey]);
 
   const maxReferences = selected?.supportsReferenceImages
     ? Math.max(1, selected.maxReferenceImages || 1)
@@ -66,13 +73,17 @@ export function SimpleCreateForm({
       onSubmit={(event) => {
         event.preventDefault();
         if (!selected || !canSubmit) return;
+        const resolution = isResolutionTier(size)
+          ? size.toUpperCase()
+          : isResolutionTier(quality) ? quality.toUpperCase() : undefined;
         void onSubmit({
           prompt: prompt.trim(),
           providerId: selected.providerId,
           model: selected.modelId,
           aspectRatio,
-          size,
-          quality,
+          size: isResolutionTier(size) ? '' : size,
+          ...(quality && !isResolutionTier(quality) ? { quality } : {}),
+          ...(resolution ? { resolution } : {}),
           outputCount,
           referenceImages,
         });
@@ -109,7 +120,9 @@ export function SimpleCreateForm({
       <div className="grid grid-cols-2 gap-3">
         <SelectField label="画面比例" value={aspectRatio} values={selected?.allowedRatios || []} onChange={setAspectRatio} />
         <SelectField label="图片尺寸" value={size} values={selected?.allowedSizes || []} onChange={setSize} />
-        <SelectField label="图片质量" value={quality} values={selected?.qualityOptions || []} onChange={setQuality} />
+        {qualityOptions.length > 0 && (
+          <SelectField label="图片质量" value={quality} values={qualityOptions} onChange={setQuality} />
+        )}
         <SelectField
           label="生成数量"
           value={String(outputCount)}

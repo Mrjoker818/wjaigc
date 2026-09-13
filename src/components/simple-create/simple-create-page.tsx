@@ -104,7 +104,8 @@ export function SimpleCreatePage({ dependencies, initialProjectId }: SimpleCreat
         model: value.model,
         aspectRatio: value.aspectRatio,
         size: value.size,
-        quality: value.quality,
+        ...(value.quality ? { quality: value.quality } : {}),
+        ...(value.resolution ? { resolution: value.resolution } : {}),
         referenceImages: value.referenceImages,
       }));
     } catch (cause) {
