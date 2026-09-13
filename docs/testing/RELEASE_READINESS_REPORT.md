@@ -2323,6 +2323,15 @@ The focused gate test passes `7/7`; the actual protected-baseline command passes
 - `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 保持只读。当前仅允许推送 `main` 候选供 Coze exact-SHA 验收。
 - **Task 10 发布结论：`DONE_WITH_CONCERNS / LOCAL PASS / CLOUD UNVERIFIED`。** 本地开发与证据阶段完成；真实供应商、云端账务和成片资产证据未闭环，因此不宣布全平台发布通过。
 
+## 2026-09-13 V5.8.8 Batch B 移动画布 Task 10 发布判断更新
+
+- `main@c83afe7f` 已由 Coze 以同 tree 构建运行，Build ID `FBTDIYcQD8uzZOoXe5y13`，5000 唯一服务与首页 HTTP 200 已核对；`stable@52f7c601` 未触碰。
+- APImart `gpt-image-2` 真实 `n=2` 已逐槽返回；受管结果进入画布、URL 一次消费、项目刷新恢复及下载均取得云端证据。
+- 取消任务 `async-1789285516022-0-ci2k2k` 为 `cancelled`，消费 60、退款 60、净额 0，30 秒后无迟到终态和资产。该项关闭 Task 10 的真实取消/退款门禁。
+- 重启后发生一次旧 chunk 引用导致的渲染错误，缓存穿透后恢复；部署原子性/缓存一致性仍是独立发布风险。
+- 云端 320/375/393 窄视口与实体触屏设备未执行。桌面合成触摸和本地 Playwright 不能代替实体手感证据。
+- **发布判断：`CONDITIONAL PASS / DEVICE GATE OPEN`。** 不因核心云端链路通过而宣称 Task 10 或全平台完全发布通过；`stable` 保持只读。
+
 ### 2026-09-13 最终审查候选发布判断
 
 - 最终 Task 10 候选已关闭暂停恢复、generation 资产隔离和审批监听器清理三项审查问题；专项 `160/160`、真实 PostgreSQL `34/34`、全仓 `6352/6352`、四浏览器项目均通过。

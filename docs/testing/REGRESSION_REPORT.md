@@ -3071,3 +3071,13 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - `pnpm ts-check`、`pnpm lint:build`、38 项保护基线和 `pnpm build` 均退出 0；生产构建生成 120 个页面并包含 `/simple-create`。Turbopack 的 53 条动态文件追踪警告和 `infinite-canvas.tsx` 超 500KB 提示保留为工程风险。
 - 全量首轮发现 4 个旧保护/源码字符串契约失败；已更新为语义导入断言、触摸控制器 `dispose()` 清理合同及 12 个新增生产路径的精确来源授权，聚焦 `26/26` 后全量重新通过，没有删除或跳过失败测试。
 - **本阶段判定：Task 9 `LOCAL PASS / CLOUD UNVERIFIED`。** Task 10 的 Coze exact-SHA、真实移动端 UI、真实 `n=2` 付费生成、取消退款和实体触屏手感尚未执行。
+
+## 2026-09-13 V5.8.8 Batch B 移动画布 Task 10 云端核心回归
+
+- GitHub 运行候选为 `main@c83afe7f9c6b863ed2f54bb147fbab5a7a91411a`；Coze 合并提交为 `a3aa126`，源码 tree 与 `origin/main` 一致；`stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 未修改。生产 Build ID 为 `FBTDIYcQD8uzZOoXe5y13`，唯一 5000 服务 PID 为 `9743`，首页返回 HTTP 200。
+- 本地重新执行交接专项 `22/22`、移动画布与快速创作 Playwright `22/22`、TypeScript、构建版 ESLint、38 项保护基线和生产构建，均通过。Playwright 首轮保留了桌面 Chromium `20/22` 的 RED 证据；Trace 证明测试在 fit-to-view 完成前读取旧坐标，等待连续两帧几何稳定后完整矩阵通过，未修改画布业务框选实现。
+- 真实 APImart `gpt-image-2` 的 `n=2` 任务已证明两个槽位逐张到达、两个远程图片结果、下载和刷新恢复。`c83afe7f` 云端继续复用其中受管 AssetVersion 验证“在画布中打开”：画布从 2 张变为 3 张，新增图片为真实 APImart 结果，成功后 URL 只移除 `assetVersionId/placementId`，整页刷新后图片仍存在。
+- 真实取消任务为 `async-1789285516022-0-ci2k2k`，绑定 `api_1778430731224_533e09a / gpt-image-2`。UI 在提交后直接进入“已取消”；数据库首查及 30 秒复查均为 `cancelled`，一次消费 60、一次退款 60、净额 0，0 AssetVersion、0 Asset，无迟到 completed 或新增资产。
+- 沙箱重启后的第一次普通刷新真实出现 `ChunkLoadError`，旧 HTML 引用了已删除 chunk `06-azuyjidcip.js`。同标签加入 Build ID 缓存参数后恢复；该证据继续归入既有部署 Chunk 可靠性问题，不能因业务回归通过而忽略。
+- 证据截图：`test-results/screenshots/cloud-simple-create-canvas-handoff-c83afe7f.png`、`test-results/screenshots/cloud-simple-create-cancel-c83afe7f.png`；本地矩阵保留 HTML、Trace、录像、Console 和 Network 制品。
+- **判定：Task 10 核心云端生成、交接、恢复及取消账务通过；整体仍为 `CONDITIONAL PASS / DEVICE GATE OPEN`。** 云端 320/375/393 窄视口和实体触屏手感尚无真实设备证据，不登记为关闭。
