@@ -41,8 +41,15 @@ describe('media gateway audit', () => {
       response_status: 201,
     });
     expect(persisted.user_id).toBe('[REDACTED]');
-    expect(persisted.user_name).toBe('Administrator [REDACTED]');
+    expect(persisted.user_name).toBeNull();
     expect(persisted.target_id).toBe('[REDACTED]');
+    expect(persisted.request_data).toEqual({
+      action: 'gateway_key_issue',
+      outcome: 'success',
+      gatewayKeyId: '[REDACTED]',
+      keyPrefix: '[REDACTED]',
+      userId: '[REDACTED]',
+    });
     expect(JSON.stringify(persisted.request_data)).not.toContain(fullSecret);
     expect(String(persisted.detail)).not.toContain(fullSecret);
     expect(serialized).not.toContain(fullSecret);
@@ -65,6 +72,12 @@ describe('media gateway audit', () => {
     const persisted = mocks.dbAddAuditLog.mock.calls[0][0];
     expect(persisted.level).toBe('warn');
     expect(persisted.response_status).toBe(503);
+    expect(persisted.request_data).toEqual({
+      action: 'gateway_key_revoke',
+      outcome: 'failure',
+      gatewayKeyId: 'gwkey_1',
+      errorCode: 'GATEWAY_INTERNAL_UNAVAILABLE',
+    });
     expect(JSON.stringify(persisted)).toContain('GATEWAY_INTERNAL_UNAVAILABLE');
     expect(persisted).not.toHaveProperty('error_message');
     expect(persisted).not.toHaveProperty('stack_trace');
@@ -133,10 +146,9 @@ describe('media gateway audit', () => {
       expect(persisted.request_data).toEqual({
         action,
         outcome: 'failure',
-        requestId: 'req-[REDACTED]',
+        gatewayRequestId: 'req-[REDACTED]',
         gatewayKeyId: 'gwkey_1',
         userId: 'user-1',
-        responseStatus: 503,
       });
       const serialized = JSON.stringify(persisted);
       expect(serialized).not.toContain(fullSecret);
@@ -160,10 +172,70 @@ describe('media gateway audit', () => {
     expect(mocks.dbAddAuditLog.mock.calls[0][0].request_data).toEqual({
       action: 'gateway_task_query',
       outcome: 'success',
-      requestId: '[REDACTED]',
+      gatewayRequestId: '[REDACTED]',
       gatewayKeyId: '[REDACTED]',
       userId: '[REDACTED]',
-      responseStatus: 200,
+    });
+  });
+
+  it('keeps only allowlisted facts and drops nested credentials, prompts, and references', async () => {
+    const credential = `wmg_${'z'.repeat(43)}`;
+    await auditGatewayEvent({
+      actorId: 'admin-1',
+      action: 'gateway_key_update',
+      outcome: 'failure',
+      gatewayKeyId: 'gwkey_1',
+      keyPrefix: 'wmg_abcd1234',
+      errorCode: 'GATEWAY_INVALID_REQUEST',
+      payload: {
+        authorization: `Bearer ${credential}`,
+        apiKey: credential,
+        accessToken: credential,
+        secret: credential,
+        password: credential,
+        prompt: 'private prompt',
+        referenceImages: [{ url: 'https://private.example/reference.png' }],
+      },
+    } as never);
+
+    const persisted = mocks.dbAddAuditLog.mock.calls[0][0];
+    expect(persisted.request_data).toEqual({
+      action: 'gateway_key_update',
+      outcome: 'failure',
+      gatewayKeyId: 'gwkey_1',
+      keyPrefix: 'wmg_abcd1234',
+      errorCode: 'GATEWAY_INVALID_REQUEST',
+    });
+    const serialized = JSON.stringify(persisted);
+    for (const forbidden of [
+      credential,
+      'authorization',
+      'apiKey',
+      'accessToken',
+      'secret',
+      'password',
+      'private prompt',
+      'private.example',
+    ]) {
+      expect(serialized).not.toContain(forbidden);
+    }
+  });
+
+  it('drops nested objects supplied in identifier fields without throwing', async () => {
+    await expect(auditGatewayEvent({
+      actorId: 'admin-1',
+      action: 'gateway_key_update',
+      outcome: 'failure',
+      gatewayKeyId: { secret: `wmg_${'n'.repeat(43)}` },
+      keyPrefix: { prompt: 'private prompt' },
+      userId: ['data:image/png;base64,reference'],
+      errorCode: 'GATEWAY_INVALID_REQUEST',
+    } as never)).resolves.toBe(true);
+
+    expect(mocks.dbAddAuditLog.mock.calls[0][0].request_data).toEqual({
+      action: 'gateway_key_update',
+      outcome: 'failure',
+      errorCode: 'GATEWAY_INVALID_REQUEST',
     });
   });
 });

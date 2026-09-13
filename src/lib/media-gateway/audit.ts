@@ -37,15 +37,15 @@ const SECRET_PATTERNS = [
   /\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/g,
 ];
 
-function sanitizeAuditText(value: string | undefined | null): string | null {
-  if (value === undefined || value === null) return null;
+function sanitizeAuditText(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
   return SECRET_PATTERNS.reduce(
     (sanitized, pattern) => sanitized.replace(pattern, '[REDACTED]'),
     value,
   );
 }
 
-function sanitizeAuditIdentifier(value: string | undefined): string | null {
+function sanitizeAuditIdentifier(value: unknown): string | null {
   const sanitized = sanitizeAuditText(value);
   if (sanitized === null) return null;
   if (Buffer.byteLength(sanitized) > 200 || /[\u0000-\u001f\u007f]/.test(sanitized)) {
@@ -60,18 +60,17 @@ function isTaskAuditEvent(event: GatewayAuditEvent): event is GatewayTaskAuditEv
 
 export async function auditGatewayEvent(event: GatewayAuditEvent): Promise<boolean> {
   if (isTaskAuditEvent(event)) {
-    const requestId = sanitizeAuditIdentifier(event.requestId) ?? '[REDACTED]';
+    const gatewayRequestId = sanitizeAuditIdentifier(event.requestId) ?? '[REDACTED]';
     const gatewayKeyId = sanitizeAuditIdentifier(event.gatewayKeyId);
     const userId = sanitizeAuditIdentifier(event.userId);
     const responseStatus = Number.isInteger(event.responseStatus) ? event.responseStatus : 500;
-    const facts = {
+    const facts = Object.fromEntries(Object.entries({
       action: event.action,
       outcome: event.outcome,
-      requestId,
+      gatewayRequestId,
       gatewayKeyId,
       userId,
-      responseStatus,
-    };
+    }).filter(([, value]) => value !== null));
 
     try {
       const auditId = await dbAddAuditLog({
@@ -94,20 +93,20 @@ export async function auditGatewayEvent(event: GatewayAuditEvent): Promise<boole
   }
 
   const actorId = sanitizeAuditText(event.actorId) ?? '[REDACTED]';
-  const gatewayKeyId = sanitizeAuditText(event.gatewayKeyId);
-  const facts = {
+  const gatewayKeyId = sanitizeAuditIdentifier(event.gatewayKeyId);
+  const facts = Object.fromEntries(Object.entries({
+    action: event.action,
     outcome: event.outcome,
     gatewayKeyId,
-    keyPrefix: sanitizeAuditText(event.keyPrefix),
-    userId: sanitizeAuditText(event.userId),
-    errorCode: sanitizeAuditText(event.errorCode),
-    responseStatus: Number.isInteger(event.responseStatus) ? event.responseStatus : null,
-  };
+    keyPrefix: sanitizeAuditIdentifier(event.keyPrefix),
+    userId: sanitizeAuditIdentifier(event.userId),
+    errorCode: sanitizeAuditIdentifier(event.errorCode ?? undefined),
+  }).filter(([, value]) => value !== null));
 
   try {
     const auditEntry = {
       user_id: actorId,
-      user_name: sanitizeAuditText(event.actorName),
+      user_name: null,
       action: event.action,
       target_type: 'media_gateway_key',
       target_id: gatewayKeyId,

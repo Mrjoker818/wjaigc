@@ -7,6 +7,7 @@ import DataManagerTab from './data-manager-tab';
 import DesktopAdminTab from './desktop-admin-tab';
 import UserSettingsTab from './user-settings-tab';
 import UserCreditsTab from './user-credits-tab';
+import MediaGatewayAdmin from './media-gateway-admin';
 import { formatPaymentTimestamp } from '@/lib/payment-order-time';
 import {
   FolderOpen, Plus, Search, Star, Trash2, MoreVertical, MoreHorizontal, Image,
@@ -49,7 +50,7 @@ import type { ProviderCapabilityOverridesV1 } from '@/lib/task-core/model-capabi
 import { readProviderCapabilityOverrides } from '@/lib/task-core/model-capability-resolution';
 import JSZip from 'jszip';
 
-type TabType = 'projects' | 'templates' | 'assets' | 'stats' | 'credits' | 'settings' | 'users' | 'apis' | 'data' | 'ecom-templates' | 'payment-config' | 'audit' | 'overview' | 'desktop-admin' | 'connector-admin' | 'groups' | 'chat';
+type TabType = 'projects' | 'templates' | 'assets' | 'stats' | 'credits' | 'settings' | 'users' | 'apis' | 'data' | 'ecom-templates' | 'payment-config' | 'audit' | 'overview' | 'desktop-admin' | 'connector-admin' | 'groups' | 'chat' | 'media-gateway';
 type ProjectFilter = 'all' | 'recent' | 'starred';
 type AssetSubTab = 'images' | 'prompts' | 'brands';
 type ApiKind = 'general' | 'image' | 'chat' | '3d' | 'vectorize' | 'layer' | 'video' | 'vlm' | 'upscaler' | 'removebg' | 'universal' | 'audio';
@@ -2290,6 +2291,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                 { key: 'credits' as TabType, label: '积分管理', icon: Wallet, count: null },
                 { key: 'audit' as TabType, label: '操作日志', icon: ShieldCheck, count: null },
                 { key: 'apis' as TabType, label: 'API 管理', icon: Server, count: providers.length },
+                { key: 'media-gateway' as TabType, label: '媒体网关', icon: KeyRound, count: null },
                 { key: 'desktop-admin' as TabType, label: '本地无界', icon: HardDrive, count: desktopAdminData.devices.length },
                 { key: 'connector-admin' as TabType, label: '插件连接器', icon: Plug, count: null },
                 { key: 'data' as TabType, label: '数据管理', icon: Database, count: null },
@@ -3796,6 +3798,10 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
             accentTextOnBgClass={accentClass}
             accentHoverBgClass={isMonochrome ? 'hover:bg-[#3b82f6]/20' : 'hover:bg-[#d4af37]/20'}
           />
+        )}
+
+        {activeTab === 'media-gateway' && isAdmin && (
+          <MediaGatewayAdmin />
         )}
 
         {/* ── Tab: Connector Admin (DCC / Creative) ── */}
