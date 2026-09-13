@@ -68,6 +68,10 @@ import { getRequestId } from '@/lib/request-id';
 import type { GenerationRouteAudit } from '@/lib/generation-route-audit';
 import { STRICT_AGENT_GENERATE_HEADER } from '@/lib/agent-runtime/generate-image-adapter';
 import { enrichCompletedImageResult } from '@/lib/asset-core/image-result-metadata';
+import {
+  inspectPersistedVideoFile,
+  type PersistedVideoFileMetadata,
+} from '@/lib/asset-core/video-file-metadata';
 
 export const dynamic = 'force-dynamic';
 
@@ -2093,6 +2097,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
             if (videoResult.videoUrl) {
               // 持久化视频文件（直接下载保存，不经过sharp压缩）
               let persistedVideoUrl = videoResult.videoUrl;
+              let persistedVideoMetadata: PersistedVideoFileMetadata | undefined;
               try {
                 const path = await import('path');
                 const fs = await import('fs/promises');
@@ -2133,8 +2138,13 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
                           const filename = `video_${taskId}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}${ext}`;
                           const dirPath = path.join(dataRoot, 'uploads', 'video', taskId);
                           await fs.mkdir(dirPath, { recursive: true });
-                          await fs.writeFile(path.join(dirPath, filename), videoBuffer);
+                          const persistedPath = path.join(dirPath, filename);
+                          await fs.writeFile(persistedPath, videoBuffer);
                           persistedVideoUrl = `/api/serve-upload/video/${taskId}/${filename}`;
+                          persistedVideoMetadata = await inspectPersistedVideoFile(
+                            persistedPath,
+                            videoBuffer.byteLength,
+                          );
                           console.log(`[poll-task/video] Persisted video from fallback URL: ${persistedVideoUrl} (${(videoBuffer.length / 1024 / 1024).toFixed(1)}MB)`);
                         }
                       }
@@ -2149,8 +2159,13 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
                     const filename = `video_${taskId}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}${ext}`;
                     const dirPath = path.join(dataRoot, 'uploads', 'video', taskId);
                     await fs.mkdir(dirPath, { recursive: true });
-                    await fs.writeFile(path.join(dirPath, filename), videoBuffer);
+                    const persistedPath = path.join(dirPath, filename);
+                    await fs.writeFile(persistedPath, videoBuffer);
                     persistedVideoUrl = `/api/serve-upload/video/${taskId}/${filename}`;
+                    persistedVideoMetadata = await inspectPersistedVideoFile(
+                      persistedPath,
+                      videoBuffer.byteLength,
+                    );
                     console.log(`[poll-task/video] Persisted video: ${persistedVideoUrl} (${(videoBuffer.length / 1024 / 1024).toFixed(1)}MB)`);
                   }
                 } else {
@@ -2166,6 +2181,12 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
               const completedResult = sanitizeCompletedTaskResult({
                 ...regResult,
                 videoUrl: persistedVideoUrl,
+                ...(persistedVideoMetadata ? {
+                  video: {
+                    url: persistedVideoUrl,
+                    ...persistedVideoMetadata,
+                  },
+                } : {}),
                 videoDuration: videoResult.duration,
                 videoThumbnailUrl: videoResult.thumbnailUrl,
               });

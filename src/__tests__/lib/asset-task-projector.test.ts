@@ -296,6 +296,38 @@ describe('completed task asset projection', () => {
     expect(repository.creates[0].file.url).toBe(expectedUrl);
   });
 
+  it('preserves authoritative video dimensions and byte size in the projected AssetVersion file', async () => {
+    const repository = new MemoryProjectionRepository(task({
+      type: 'video',
+      result: {
+        videoUrl: '/api/serve-upload/video/task-1/result.mp4',
+        video: {
+          url: '/api/serve-upload/video/task-1/result.mp4',
+          width: 720,
+          height: 1280,
+          mimeType: 'video/mp4',
+          byteSize: 3_448_080,
+        },
+      },
+    }));
+
+    const result = await projector(repository).projectCompletedTaskToAssets({
+      actorUserId: 'user-1',
+      taskId: 'task-1',
+      targetProjectId: 'project-1',
+      workspace: 'chat',
+      parentVersionIds: [],
+    });
+
+    expect(result.versions[0]?.file).toMatchObject({
+      url: '/api/serve-upload/video/task-1/result.mp4',
+      width: 720,
+      height: 1280,
+      mimeType: 'video/mp4',
+      byteSize: 3_448_080,
+    });
+  });
+
   it('projects nested image-edit result objects in their returned order', async () => {
     const repository = new MemoryProjectionRepository(task({
       type: 'edit',

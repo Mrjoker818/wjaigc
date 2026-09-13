@@ -202,6 +202,7 @@ function outputFileMetadata(result: Record<string, unknown>, url: string): Parti
   const candidates = [
     ...(Array.isArray(result.images) ? result.images : []),
     result.image,
+    result.video,
   ];
   const match = candidates.find((item) => (
     item
