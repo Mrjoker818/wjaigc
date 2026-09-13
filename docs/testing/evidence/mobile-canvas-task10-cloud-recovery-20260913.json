@@ -1,0 +1,68 @@
+{
+  "capturedAt": "2026-09-13T08:37:50.4059089Z",
+  "environment": "Coze preview / Edge extension",
+  "previewUrl": "https://62afe49a-716e-4d9e-99cd-a0be49c4794c-5000.dev.coze.site",
+  "githubMain": "15b738fb088a2dcb330d3076fcdb5b49c15f8121",
+  "githubStable": "52f7c601ed150769e15d06fb435c6e360e28c9e7",
+  "cozeMergeCommit": "0b780db",
+  "buildId": "-2B5y0lYEKTRPybjEMKtO",
+  "servicePid": 14499,
+  "cozeGates": {
+    "focusedTests": "9/9 passed",
+    "typecheck": "passed",
+    "lintBuild": "passed",
+    "protectedBaseline": "38/38 passed, 0 drift",
+    "productionBuild": "120 pages",
+    "localhostRoot": "HTTP 200"
+  },
+  "chunkRecovery": {
+    "method": "Cloud bundle controlled ChunkLoadError injection through Edge CDP",
+    "initialUrl": "/simple-create?projectId=demo-project",
+    "recoveredUrl": "/simple-create?projectId=demo-project&_chunk_retry=1789288438095",
+    "firstAttemptReloaded": true,
+    "secondAttemptReloaded": false,
+    "ordinaryFetchFailureReloaded": false,
+    "pageRecovered": true,
+    "realOldDocumentAcrossDeployment": "unverified"
+  },
+  "mobileViewport": [
+    {
+      "width": 320,
+      "height": 844,
+      "documentHorizontalOverflow": false,
+      "toolDrawer": { "left": 8, "right": 312, "clippedButtons": 0 },
+      "imageActionDrawer": { "left": 8, "right": 312, "clippedButtons": 0 }
+    },
+    {
+      "width": 375,
+      "height": 844,
+      "documentHorizontalOverflow": false,
+      "toolDrawer": { "left": 8, "right": 367, "clippedButtons": 0 },
+      "imageActionDrawer": { "left": 8, "right": 367, "clippedButtons": 0 }
+    },
+    {
+      "width": 393,
+      "height": 844,
+      "documentHorizontalOverflow": false,
+      "toolDrawer": { "left": 8, "right": 385, "clippedButtons": 0 },
+      "imageActionDrawer": { "left": 8, "right": 385, "clippedButtons": 0 }
+    }
+  ],
+  "touchEmulation": {
+    "singleFingerPanTransformBefore": "matrix(1, 0, 0, 1, -2, -3.5)",
+    "singleFingerPanTransformAfter": "matrix(1, 0, 0, 1, -8, -5.5)",
+    "pinchZoomBefore": "100%",
+    "pinchZoomAfter": "157%",
+    "imageLongPressMenuOpened": true,
+    "physicalTouchDevice": "unverified",
+    "softKeyboard": "unverified"
+  },
+  "console": {
+    "applicationErrors": 0,
+    "applicationWarnings": 0,
+    "hostWarnings": [
+      "[SDK] already inited from Coze slardar host script"
+    ]
+  },
+  "verdict": "CONDITIONAL PASS / PHYSICAL DEVICE GATE OPEN"
+}

@@ -3090,3 +3090,13 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - 恢复器仅识别 `ChunkLoadError`、`Loading chunk ... failed` 和 `/_next/static/chunks/*.js`，普通 `Failed to fetch` 不触发刷新；通过 sessionStorage 指纹与 `_chunk_retry` URL 参数共同限制为一次，存储不可用时仍可安全退化。
 - 全局未捕获异常与 React 错误边界均接入恢复器，错误上报和可见错误态继续保留，没有吞掉异常。
 - **判定：`LOCAL PASS / CLOUD UNVERIFIED`。** 该修复缓解长驻旧页面与新部署资源错配，不等同于证明 Coze 静态资源发布已原子化；仍需在旧页面跨部署场景验证只刷新一次并恢复。
+
+### 2026-09-13 Task 10 云端恢复与移动视口补验
+
+- Coze 已合入 GitHub `main@15b738fb088a2dcb330d3076fcdb5b49c15f8121`，tree 一致；Coze 合并提交 `0b780db`，Build ID `-2B5y0lYEKTRPybjEMKtO`，唯一服务 PID `14499`，localhost `/` 为 HTTP 200；`stable@52f7c601` 未修改。
+- 云端聚焦 `9/9`、TypeScript、构建版 ESLint、38 项保护基线和 120 页面生产构建均通过。
+- 在实际云端 bundle 中受控触发 Chunk 错误后，页面一次性追加 `_chunk_retry=1789288438095` 并恢复；第二次相同错误和普通 `Failed to fetch` 均未再次刷新，页面保持可用。
+- Edge CDP 在 320/375/393×844 下验证快速创作页、移动工具抽屉和图片动作抽屉均无横向溢出或按钮裁切；全部既有图片工具入口仍存在。
+- 触摸仿真证明单指操作改变画布平移矩阵，双指缩放由 100% 变为 157%，图片长按打开完整菜单。Console 仅有 Coze 宿主 Slardar `already inited` warning，未发现无界应用 error/warning。
+- 机器证据：[mobile-canvas-task10-cloud-recovery-20260913.json](evidence/mobile-canvas-task10-cloud-recovery-20260913.json)。
+- **判定：`CONDITIONAL PASS / PHYSICAL DEVICE GATE OPEN`。** 真实旧页面跨部署、实体触屏手感和软键盘弹起后的可达性尚未证明；190 项隔离 PostgreSQL 条件测试亦未执行。

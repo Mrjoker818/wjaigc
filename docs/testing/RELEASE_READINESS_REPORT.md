@@ -2370,3 +2370,10 @@ The focused gate test passes `7/7`; the actual protected-baseline command passes
 - 该措施不会把普通网络失败误判为部署版本错配，也不会无限刷新；异常仍会进入现有监控与错误边界。
 - 由于尚未在 Coze 保留旧页面并跨本次新部署取得真实 Network/Console 证据，部署 Chunk 风险仅从“无恢复”降为“已有本地受控恢复候选”，不能关闭。
 - **Task 10 仍为 `CONDITIONAL PASS / DEVICE GATE OPEN`。** 320/375/393 云端窄视口、实体触屏手感、190 项隔离 PostgreSQL 条件测试和跨部署自恢复均保持开放；全平台发布结论不因此升级。
+
+### 2026-09-13 Task 10 云端候选更新
+
+- `main@15b738fb` 已在 Coze 以同 tree 构建运行，Build ID `-2B5y0lYEKTRPybjEMKtO`；云端恢复聚焦测试、类型、Lint、保护基线和 120 页面构建通过。
+- 云端实际 bundle 的一次性 Chunk 恢复、防循环及普通网络错误隔离已经通过受控触发验证；320/375/393 云端窄视口无横向溢出，移动工具和图片动作抽屉无按钮裁切。
+- CDP 触摸仿真验证单指平移、双指 100%→157% 缩放及图片长按菜单；这不是实体触屏或真实软键盘证据。
+- **发布状态仍为 `CONDITIONAL PASS / PHYSICAL DEVICE GATE OPEN`。** 真正旧页面跨部署恢复、实体触屏、软键盘以及 190 项隔离 PostgreSQL 测试仍未关闭，全平台仍不能判定通过。
