@@ -178,6 +178,10 @@ import { shouldInitiallyCollapseWorkspacePanel } from '@/lib/workspace-panel-lay
 import { sendUserDataRecord } from '@/lib/user-data-record-client';
 import { withClientImageOutputPreference } from '@/lib/image-generation-output-preference';
 import { getTransparentOutputWarning } from '@/lib/image-generation-output';
+import {
+  createImageGenerationSession,
+  type ImageGenerationRequest,
+} from '@/lib/image-generation-session';
 
 import { LoginPanel } from '@/components/dashboard/login-panel';
 
@@ -1751,6 +1755,165 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
   const currentUserRef = useRef(currentUser);
   currentUserRef.current = currentUser;
 
+  const generationSessionPendingSlotIdsRef = useRef<string[]>([]);
+  const generationSessionManagedTaskIdsRef = useRef<Set<string>>(new Set());
+  const generationSessionSlotContextRef = useRef<Map<string, {
+    placeholderId: string;
+    params: GenerationParams;
+  }>>(new Map());
+  const imageGenerationSession = useMemo(() => createImageGenerationSession({
+    submit: async (request: ImageGenerationRequest & { submitOnly: true }) => {
+      const payload = request.payload && typeof request.payload === 'object'
+        ? request.payload
+        : request;
+      const response = await fetch('/api/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+        signal: AbortSignal.timeout(600_000),
+      });
+      const data = await response.json().catch(() => null) as Record<string, unknown> | null;
+      if (!response.ok || data?.success !== true) {
+        throw new Error(
+          typeof data?.error === 'string'
+            ? data.error
+            : `图像生成任务提交失败 (${response.status})`,
+        );
+      }
+      return data;
+    },
+    subscribeTaskEvents: listener => taskEventsClient.onTaskEvent(event => listener({
+      taskId: event.taskId,
+      status: event.task.status,
+      progress: event.task.progress,
+      result: event.task.result,
+      error: event.task.error,
+    })),
+    isTaskEventsConnected: () => taskEventsClient.isConnected(),
+    cancelTask: taskId => taskEventsClient.cancelTask(taskId),
+    restoreTasks: async (projectId) => {
+      const response = await fetch(`/api/tasks/recover?projectId=${encodeURIComponent(projectId)}`);
+      const data = await response.json().catch(() => null) as {
+        success?: boolean;
+        tasks?: Array<Record<string, unknown>>;
+      } | null;
+      if (!response.ok || data?.success !== true || !Array.isArray(data.tasks)) return [];
+      return data.tasks.flatMap((task) => {
+        const taskId = typeof task.id === 'string'
+          ? task.id
+          : typeof task.taskId === 'string' ? task.taskId : '';
+        const taskProjectId = typeof task.projectId === 'string' ? task.projectId : '';
+        if (!taskId || taskProjectId !== projectId || typeof task.status !== 'string') return [];
+        return [{
+          id: typeof task.slotId === 'string' ? task.slotId : undefined,
+          projectId: taskProjectId,
+          taskId,
+          status: task.status,
+          progress: typeof task.progress === 'number' ? task.progress : 0,
+          result: task.result,
+          error: typeof task.error === 'string' ? task.error : undefined,
+        }];
+      });
+    },
+    extractAssetReferences: extractTaskAssetReferences,
+    pollTask: async (taskId) => {
+      const response = await requestCanvasTaskPoll({ taskId });
+      const data = await response.json().catch(() => null) as Record<string, unknown> | null;
+      if (!data) {
+        return {
+          taskId,
+          status: 'failed',
+          error: { code: 'INVALID_TASK_RESPONSE', message: '任务状态响应无效', retryable: true },
+        };
+      }
+      return {
+        taskId,
+        status: typeof data.status === 'string' ? data.status : (response.ok ? 'processing' : 'failed'),
+        progress: typeof data.progress === 'number' ? data.progress : undefined,
+        result: data,
+        error: typeof data.error === 'string'
+          ? {
+              code: typeof data.code === 'string' ? data.code : undefined,
+              message: data.error,
+              retryable: data.retryable === true,
+            }
+          : undefined,
+      };
+    },
+    createSlotId: () => generationSessionPendingSlotIdsRef.current.shift()
+      || `generation-slot-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+  }), [requestCanvasTaskPoll]);
+
+  useEffect(() => imageGenerationSession.subscribe((sessionSlots) => {
+    setImages((current) => {
+      let next = current;
+      for (const slot of sessionSlots) {
+        const context = generationSessionSlotContextRef.current.get(slot.id);
+        if (!context) continue;
+        if (slot.taskId) generationSessionManagedTaskIdsRef.current.add(slot.taskId);
+        next = next.map((image) => image.id !== context.placeholderId || !image.processing
+          ? image
+          : {
+              ...image,
+              processing: {
+                ...image.processing,
+                taskId: slot.taskId || image.processing.taskId,
+                status: slot.status,
+                progress: slot.progress,
+                label: slot.status === 'completed'
+                  ? '生成完成'
+                  : slot.status === 'failed' ? '生成失败' : image.processing.label,
+              },
+            });
+        if (!slot.taskId) {
+          if (['completed', 'failed', 'cancelled', 'timeout'].includes(slot.status)) {
+            generationSessionSlotContextRef.current.delete(slot.id);
+          }
+          continue;
+        }
+        next = applyCanvasTaskEventToProcessingPlaceholders(next, {
+          taskId: slot.taskId,
+          outputIndex: 0,
+          status: slot.status,
+          progress: slot.progress,
+          source: 'sse',
+          providerId: context.params.providerId,
+          modelId: context.params.model,
+          ...(slot.status === 'completed' && slot.url ? {
+            result: {
+              url: slot.url,
+              sourceUrl: slot.url,
+              assetVersionId: slot.assetVersionId,
+              placementId: slot.placementId,
+              metadata: {
+                prompt: context.params.prompt,
+                quality: context.params.quality,
+                aspectRatio: context.params.aspectRatio,
+                stylePreset: context.params.stylePreset,
+                size: context.params.size,
+                createdAt: Date.now(),
+              },
+            },
+          } : {}),
+          ...((slot.status === 'failed' || slot.status === 'cancelled' || slot.status === 'timeout') ? {
+            error: createCanvasTaskEventError(slot.error?.message, {
+              code: slot.error?.code || (slot.status === 'timeout' ? 'TASK_TIMEOUT' : 'TASK_FAILED'),
+              message: slot.error?.message || (slot.status === 'cancelled' ? '任务已取消' : '图像生成任务失败'),
+              source: 'provider',
+              retryable: slot.error?.retryable === true,
+            }),
+          } : {}),
+        });
+        if (['completed', 'failed', 'cancelled', 'timeout'].includes(slot.status)) {
+          generationSessionSlotContextRef.current.delete(slot.id);
+        }
+      }
+      return next;
+    });
+  }), [imageGenerationSession, setImages]);
+
+  useEffect(() => () => imageGenerationSession.dispose(), [imageGenerationSession]);
+
   const resumedTaskIdsRef = useRef<Set<string>>(new Set());
   const resumedTaskPollingGenerationRef = useRef(0);
   const legacyRecoveryAttemptedRef = useRef<Set<string>>(new Set());
@@ -2309,6 +2472,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
   }, []);
 
   useEffect(() => taskEventsClient.onTaskEvent((event) => {
+    if (generationSessionManagedTaskIdsRef.current.has(event.taskId)) return;
     const status = event.task.status === 'pending' ? 'submitting' : event.task.status;
     const resultRecord = event.task.result && typeof event.task.result === 'object'
       ? event.task.result as Record<string, unknown>
@@ -2418,6 +2582,40 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
       // 检查是否使用第三方模型
       const isThirdParty = !!(params as GenerationParams & { universalBaseUrl?: string }).universalBaseUrl;
       const apiEndpoint = isThirdParty ? '/api/universal-generate' : '/api/generate';
+
+      if (!isThirdParty && currentProject?.id) {
+        generationSessionPendingSlotIdsRef.current.push(...placeholderIds);
+        placeholderIds.forEach((placeholderId) => generationSessionSlotContextRef.current.set(
+          placeholderId,
+          { placeholderId, params },
+        ));
+        const payload = withClientImageOutputPreference(
+          {
+            ...params,
+            userId: currentUserRef.current?.id,
+            projectId: currentProject.id,
+            submitOnly: true,
+          },
+          params.model,
+          { background: params.background, outputFormat: params.outputFormat },
+        );
+        const submitted = await imageGenerationSession.submit({
+          projectId: currentProject.id,
+          outputCount,
+          prompt: params.prompt,
+          providerId: params.providerId || '',
+          model: params.model,
+          payload,
+        });
+        const failed = submitted.filter(slot => slot.status === 'failed');
+        if (failed.length > 0) {
+          toast.error('生成失败', {
+            description: failed[0].error?.message || '图像生成任务提交失败',
+            className: 'bg-[#141414] border border-red-900 text-white',
+          });
+        }
+        return;
+      }
 
       // 提交生成请求（带超时保护，避免网络异常导致无限等待）
       // 超时需匹配后端 maxDuration (600s=10分钟)，部分第三方API出图可达90秒+
@@ -3293,7 +3491,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
     } finally {
       setActiveGenerationCount(prev => Math.max(0, prev - 1));
     }
-  }, [projectWorkspaceTaskEvent, setImages, stabilizeCanvasImages, themeStyle]);
+  }, [currentProject?.id, imageGenerationSession, projectWorkspaceTaskEvent, setImages, stabilizeCanvasImages, themeStyle]);
 
   // 添加参考图到画布
   const handleAddToCanvas = useCallback(async (imageUrl: string) => {

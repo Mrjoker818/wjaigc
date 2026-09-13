@@ -1,0 +1,216 @@
+import { describe, expect, it, vi } from 'vitest';
+
+import {
+  createImageGenerationSession,
+  type ImageGenerationSessionDependencies,
+  type ImageGenerationTaskUpdate,
+} from '@/lib/image-generation-session';
+import { extractTaskAssetReferences } from '@/lib/asset-core/workspace-transfer';
+
+function managedResult(versionId: string, placementId: string, url = `/media/${versionId}.png`) {
+  return {
+    assetProjection: {
+      references: [{
+        assetId: `asset-${versionId}`,
+        assetVersionId: versionId,
+        placementId,
+        url,
+      }],
+    },
+  };
+}
+
+function harness() {
+  let listener: ((update: ImageGenerationTaskUpdate) => void) | null = null;
+  const submit = vi.fn(async (request: { outputCount: number }) => ({
+    batchId: 'batch-1',
+    slots: Array.from({ length: request.outputCount }, (_, slotIndex) => ({
+      taskId: `task-${slotIndex + 1}`,
+      slotId: `server-slot-${slotIndex + 1}`,
+      slotIndex,
+      status: 'processing',
+    })),
+  }));
+  const dependencies: ImageGenerationSessionDependencies = {
+    submit,
+    subscribeTaskEvents: callback => { listener = callback; return () => { listener = null; }; },
+    isTaskEventsConnected: () => true,
+    cancelTask: vi.fn(async () => ({ success: true })),
+    restoreTasks: vi.fn(async () => []),
+    extractAssetReferences: extractTaskAssetReferences,
+    schedulePoll: () => 0,
+    clearScheduledPoll: vi.fn(),
+  };
+  return {
+    dependencies,
+    emit: (update: ImageGenerationTaskUpdate) => listener?.(update),
+  };
+}
+
+describe('image generation session', () => {
+  it('binds independent slots and projects each completed image immediately', async () => {
+    const fake = harness();
+    const session = createImageGenerationSession(fake.dependencies);
+
+    await session.submit({
+      projectId: 'p1', outputCount: 2, prompt: '海报', providerId: 'pear', model: 'gpt-image-2',
+    });
+    expect(session.snapshot().map(slot => slot.status)).toEqual(['processing', 'processing']);
+
+    fake.emit({ taskId: 'task-2', status: 'completed', progress: 100, result: managedResult('v2', 'pl2') });
+
+    expect(session.snapshot()[1]).toMatchObject({
+      status: 'completed', assetVersionId: 'v2', placementId: 'pl2', url: '/media/v2.png',
+    });
+    expect(session.snapshot()[0].status).toBe('processing');
+  });
+
+  it('applies the same terminal event once', async () => {
+    const fake = harness();
+    const session = createImageGenerationSession(fake.dependencies);
+    const listener = vi.fn();
+    session.subscribe(listener);
+    await session.submit({ projectId: 'p1', outputCount: 1, prompt: '海报', providerId: 'pear', model: 'm' });
+    const before = listener.mock.calls.length;
+    const event = { taskId: 'task-1', status: 'completed' as const, progress: 100, result: managedResult('v1', 'pl1') };
+
+    fake.emit(event);
+    fake.emit(event);
+
+    expect(listener.mock.calls.length - before).toBe(1);
+  });
+
+  it('rejects a late completion after cancellation', async () => {
+    const fake = harness();
+    const session = createImageGenerationSession(fake.dependencies);
+    await session.submit({ projectId: 'p1', outputCount: 1, prompt: '海报', providerId: 'pear', model: 'm' });
+    const slotId = session.snapshot()[0].id;
+
+    await session.cancel(slotId);
+    fake.emit({ taskId: 'task-1', status: 'completed', progress: 100, result: managedResult('late', 'late-placement') });
+
+    expect(session.snapshot()[0]).toMatchObject({ status: 'cancelled', taskId: 'task-1' });
+    expect(session.snapshot()[0].assetVersionId).toBeUndefined();
+    expect(fake.dependencies.cancelTask).toHaveBeenCalledWith('task-1');
+  });
+
+  it('preserves task identity and retry metadata on failure', async () => {
+    const fake = harness();
+    const session = createImageGenerationSession(fake.dependencies);
+    await session.submit({ projectId: 'p1', outputCount: 1, prompt: '海报', providerId: 'pear', model: 'm' });
+
+    fake.emit({
+      taskId: 'task-1', status: 'failed', progress: 37,
+      error: { code: 'PROVIDER_TIMEOUT', message: '上游超时', retryable: true },
+    });
+
+    expect(session.snapshot()[0]).toMatchObject({
+      taskId: 'task-1', status: 'failed', progress: 37,
+      error: { code: 'PROVIDER_TIMEOUT', message: '上游超时', retryable: true },
+    });
+  });
+
+  it('restores only authoritative tasks for the requested project', async () => {
+    const fake = harness();
+    vi.mocked(fake.dependencies.restoreTasks).mockResolvedValue([
+      { id: 'restore-1', projectId: 'p1', taskId: 'task-a', status: 'processing', progress: 30 },
+      { id: 'restore-2', projectId: 'p2', taskId: 'task-b', status: 'completed', progress: 100, result: managedResult('v-other', 'pl-other') },
+    ]);
+    const session = createImageGenerationSession(fake.dependencies);
+
+    await session.restore('p1');
+
+    expect(session.snapshot()).toHaveLength(1);
+    expect(session.snapshot()[0]).toMatchObject({ projectId: 'p1', taskId: 'task-a', status: 'processing' });
+  });
+
+  it('retries a failed slot in place with a fresh task identity', async () => {
+    const fake = harness();
+    const session = createImageGenerationSession(fake.dependencies);
+    await session.submit({ projectId: 'p1', outputCount: 2, prompt: '海报', providerId: 'pear', model: 'm' });
+    const slotId = session.snapshot()[1].id;
+    fake.emit({
+      taskId: 'task-2', status: 'failed',
+      error: { code: 'UPSTREAM', message: '上游失败', retryable: true },
+    });
+    vi.mocked(fake.dependencies.submit).mockResolvedValueOnce({
+      batchId: 'retry-batch',
+      slots: [{ taskId: 'retry-task', slotIndex: 0, status: 'processing' }],
+    });
+
+    await session.retry(slotId);
+
+    expect(session.snapshot()).toHaveLength(2);
+    expect(session.snapshot()[1]).toMatchObject({ id: slotId, taskId: 'retry-task', status: 'processing' });
+    expect(fake.dependencies.submit).toHaveBeenLastCalledWith(expect.objectContaining({ outputCount: 1, submitOnly: true }));
+  });
+
+  it('polls active tasks when the event stream is disconnected', async () => {
+    const fake = harness();
+    const scheduled: Array<() => void> = [];
+    fake.dependencies.isTaskEventsConnected = () => false;
+    fake.dependencies.pollTask = vi.fn(async taskId => ({
+      taskId,
+      status: 'completed',
+      progress: 100,
+      result: managedResult('polled-version', 'polled-placement'),
+    }));
+    fake.dependencies.schedulePoll = callback => {
+      scheduled.push(callback);
+      return scheduled.length;
+    };
+    fake.dependencies.clearScheduledPoll = vi.fn();
+    const session = createImageGenerationSession(fake.dependencies);
+
+    await session.submit({ projectId: 'p1', outputCount: 1, prompt: '海报', providerId: 'pear', model: 'm' });
+    expect(scheduled).toHaveLength(1);
+    await scheduled[0]();
+
+    expect(session.snapshot()[0]).toMatchObject({
+      status: 'completed',
+      assetVersionId: 'polled-version',
+      placementId: 'polled-placement',
+    });
+  });
+
+  it('fails an unbound slot instead of leaving it submitting forever', async () => {
+    const fake = harness();
+    vi.mocked(fake.dependencies.submit).mockResolvedValueOnce({
+      batchId: 'short-batch',
+      slots: [{ taskId: 'only-task', slotIndex: 0, status: 'processing' }],
+    });
+    const session = createImageGenerationSession(fake.dependencies);
+
+    await session.submit({ projectId: 'p1', outputCount: 2, prompt: '海报', providerId: 'pear', model: 'm' });
+
+    expect(session.snapshot()[1]).toMatchObject({
+      status: 'failed',
+      error: { code: 'MISSING_GENERATION_TASK', retryable: true },
+    });
+  });
+
+  it('starts fallback polling when SSE disconnects after submission', async () => {
+    const fake = harness();
+    let connected = true;
+    const scheduled: Array<() => void | Promise<void>> = [];
+    fake.dependencies.isTaskEventsConnected = () => connected;
+    fake.dependencies.pollTask = vi.fn(async taskId => ({
+      taskId,
+      status: 'completed',
+      result: managedResult('late-poll', 'late-placement'),
+    }));
+    fake.dependencies.schedulePoll = callback => {
+      scheduled.push(callback);
+      return scheduled.length;
+    };
+    const session = createImageGenerationSession(fake.dependencies);
+    await session.submit({ projectId: 'p1', outputCount: 1, prompt: '海报', providerId: 'pear', model: 'm' });
+
+    expect(scheduled).toHaveLength(1);
+    connected = false;
+    await scheduled[0]();
+
+    expect(fake.dependencies.pollTask).toHaveBeenCalledWith('task-1');
+    expect(session.snapshot()[0].status).toBe('completed');
+  });
+});
