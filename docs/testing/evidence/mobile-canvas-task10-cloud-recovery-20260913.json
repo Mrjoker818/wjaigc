@@ -37,6 +37,30 @@
     "automaticChunkRetryObserved": false,
     "conclusion": "Deployment mismatch was real, but the chosen interactions did not request an uncached lazy chunk; a second attempt will use the unopened VersionHistoryPanel React.lazy boundary."
   },
+  "realCrossDeploymentAttempt2": {
+    "fromBuildId": "k1NowrCUOg4TAuMtTLS-8",
+    "toBuildId": "frKbYXpKW0sdDtSO9EjZa",
+    "githubMain": "202be7ea09b378931a09653caab16b3563c6b974",
+    "cozeHead": "cfc8cfdca6f4d9538888d3bd3b6e6d184e82d4fa",
+    "newServicePid": 19364,
+    "oldDocumentWasKeptOpenDuringDeployment": true,
+    "lazyBoundary": "VersionHistoryPanel",
+    "lazyPanelOpenedAfterDeployment": true,
+    "automaticChunkRetryObserved": false,
+    "reason": "The deployment changed documentation only, so the VersionHistoryPanel client chunk hash stayed stable and remained available.",
+    "conclusion": "The second attempt proved the lazy boundary remained usable, but it was not a missing-chunk sample. The next candidate intentionally changes the lazy component through a tested accessibility correction."
+  },
+  "deterministicAttempt3Candidate": {
+    "baseCommit": "202be7ea09b378931a09653caab16b3563c6b974",
+    "change": "VersionHistoryPanel now exposes a named dialog and an accessible close button.",
+    "redGreen": "1 failed before implementation; focused suite 14/14 passed after implementation.",
+    "fullVitest": "6219 passed, 190 PostgreSQL-gated skipped, 0 failed.",
+    "typecheck": "passed",
+    "lintBuild": "passed",
+    "protectedBaseline": "38/38 passed, 0 drift",
+    "productionBuild": "120/120 pages, exit 0",
+    "cloudStatus": "pending deployment and real old-document lazy-chunk recovery evidence"
+  },
   "mobileViewport": [
     {
       "width": 320,

@@ -149,6 +149,8 @@ export function VersionHistoryPanel({
 
   return (
     <div
+      role="dialog"
+      aria-label="版本历史"
       className={`${placementClass} z-[80] flex flex-col ${themeClass}`}
       style={{ width: isBottom ? (rightInset ? `calc(100% - ${rightInset}px)` : '100%') : width, maxWidth: isBottom ? undefined : (floating ? 'calc(100dvw - 2rem)' : 'min(100%, calc(100dvw - 1rem))') }}
       data-popup={floating || isBottom ? 'version-history' : undefined}
@@ -162,6 +164,7 @@ export function VersionHistoryPanel({
           </span>
         </div>
         <button
+          aria-label="关闭版本历史"
           onClick={onClose}
           className={`p-1 rounded ${isMonochrome ? 'hover:bg-gray-100' : 'hover:bg-white/5'}`}
         >

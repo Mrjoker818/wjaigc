@@ -463,5 +463,7 @@
   "src/lib/canvas-touch-gestures.ts",
   "src/lib/image-generation-session.ts",
   "src/lib/mobile-canvas-toolbar.ts",
-  "src/lib/simple-create-navigation.ts"
+  "src/lib/simple-create-navigation.ts",
+  "src/components/version-history-panel.tsx",
+  "src/__tests__/components/version-history-panel-accessibility.test.ts"
 ]

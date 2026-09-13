@@ -3107,3 +3107,11 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - 旧文档引用的 6 个 chunk 重新请求时出现 `500, 500, 200, 200, 200, 200`，证明旧文档与新静态资源的部署错配真实存在；旧画布、节点模式和工作台仍保持可操作。
 - 独立智能对话入口采用完整页面导航直接载入新构建，没有触发旧文档恢复器，因此本次不能把真实 `_chunk_retry` 写成通过。
 - 下一次确定性样本固定为部署前保持 `VersionHistoryPanel` 未打开，部署后点击“版本历史”触发其 `React.lazy` 边界；避免继续随机尝试已缓存入口。
+
+### 2026-09-13 Task 10 真实跨部署第二次尝试与确定性候选
+
+- 第二次从 Build `k1NowrCUOg4TAuMtTLS-8` 跨到 `frKbYXpKW0sdDtSO9EjZa`，旧页面保持打开；部署后首次点击 `VersionHistoryPanel` 能正常打开，但没有 `_chunk_retry` 或页面重载。
+- 原因已经收敛：该轮只修改文档，`VersionHistoryPanel` 客户端 chunk 哈希未变化，因此不是“旧 chunk 已删除”的有效样本，不能据此宣称自动恢复通过或失败。
+- 为构造真实且可重复的边界，新增版本历史面板可访问性合同：实现前测试 `1 failed`，实现后聚焦 `14/14`；面板现在具有 `role="dialog" / aria-label="版本历史"`，关闭按钮具有 `aria-label="关闭版本历史"`。这是独立有效的产品修正，也会合法改变懒加载 chunk。
+- 本候选完整 Vitest：`6219 passed / 190 PostgreSQL 条件 skipped / 0 failed`；TypeScript、构建版 ESLint、38 项保护基线均退出 0；生产构建生成 `120/120` 页面并退出 0。既有 Turbopack 动态文件追踪警告继续保留。
+- **判定：第三次跨部署候选 `LOCAL PASS / CLOUD PENDING`。** 只有 Coze 部署后，由部署前未加载该懒组件的旧页面首次打开版本历史并观察到一次 `_chunk_retry`、新 Build 恢复且无循环，才可关闭真实跨部署恢复项。

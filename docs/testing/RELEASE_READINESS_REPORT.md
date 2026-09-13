@@ -2377,3 +2377,10 @@ The focused gate test passes `7/7`; the actual protected-baseline command passes
 - 云端实际 bundle 的一次性 Chunk 恢复、防循环及普通网络错误隔离已经通过受控触发验证；320/375/393 云端窄视口无横向溢出，移动工具和图片动作抽屉无按钮裁切。
 - CDP 触摸仿真验证单指平移、双指 100%→157% 缩放及图片长按菜单；这不是实体触屏或真实软键盘证据。
 - **发布状态仍为 `CONDITIONAL PASS / PHYSICAL DEVICE GATE OPEN`。** 真正旧页面跨部署恢复、实体触屏、软键盘以及 190 项隔离 PostgreSQL 测试仍未关闭，全平台仍不能判定通过。
+
+### 2026-09-13 Task 10 第三次跨部署候选发布门禁
+
+- 第二次真实跨部署没有触发恢复，已确认是文档变更未改变懒加载 chunk 哈希，不将该结果冒充应用恢复通过。
+- 新候选仅对 `VersionHistoryPanel` 增加可访问的对话框名称和关闭按钮名称，并新增 RED/GREEN 回归测试；没有改变画布、任务、供应商、积分或项目数据链路。
+- 新鲜本地门禁：聚焦 `14/14`、全量 Vitest `6219 passed / 190 conditional skipped / 0 failed`、TypeScript、构建版 ESLint、保护基线 `38/38`、生产构建 `120/120` 均通过。
+- **发布状态保持 `CONDITIONAL PASS / PHYSICAL DEVICE GATE OPEN`。** 第三次 Coze 真实跨部署、实体触屏、软键盘和 190 项隔离 PostgreSQL 测试仍为开放项。
