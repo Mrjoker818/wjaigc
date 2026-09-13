@@ -4,12 +4,18 @@ import { render } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { GlobalErrorMonitor } from '@/components/global-error-monitor';
+import { attemptChunkLoadRecovery } from '@/lib/chunk-load-recovery';
+
+vi.mock('@/lib/chunk-load-recovery', () => ({
+  attemptChunkLoadRecovery: vi.fn(() => false),
+}));
 
 describe('GlobalErrorMonitor', () => {
   const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
 
   beforeEach(() => {
     fetchMock.mockClear();
+    vi.mocked(attemptChunkLoadRecovery).mockClear();
     vi.stubGlobal('fetch', fetchMock);
   });
 
@@ -40,6 +46,18 @@ describe('GlobalErrorMonitor', () => {
     window.dispatchEvent(event);
 
     expect(event.defaultPrevented).toBe(false);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('offers unhandled promise failures to the chunk recovery guard', () => {
+    render(<GlobalErrorMonitor />);
+    const error = new Error('Loading chunk 5504 failed');
+    const event = new Event('unhandledrejection') as PromiseRejectionEvent;
+    Object.defineProperty(event, 'reason', { value: error });
+
+    window.dispatchEvent(event);
+
+    expect(attemptChunkLoadRecovery).toHaveBeenCalledWith(error);
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });

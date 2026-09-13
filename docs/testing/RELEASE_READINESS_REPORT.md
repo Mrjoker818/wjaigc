@@ -2363,3 +2363,10 @@ The focused gate test passes `7/7`; the actual protected-baseline command passes
 - 本地受控生成链路证明模型能力约束、`n=2`、逐槽完成和 AssetVersion/placement 投影 UI 合同；它不证明 PearAPI/APIMart 的真实付费成功、供应商取消或退款。
 - 190 项 PostgreSQL 条件测试未执行；53 条 Turbopack 动态文件追踪警告、超大画布组件及实体触屏手感仍是明确风险。
 - **Task 9 结论：有条件通过 / `LOCAL PASS / CLOUD UNVERIFIED`。** 未完成 Coze exact-SHA、真实 `n=2` 生成、单次扣退、实体触屏和云端新鲜证据前，不得关闭 `V588-MOBILE-001～003`，不得更新 `stable`，全平台发布结论仍为不通过。
+
+## 2026-09-13 Task 10 部署资源恢复门禁更新
+
+- 已对沙箱重启后旧页面引用已删除 Next.js chunk 的已复现问题增加一次性客户端自恢复；本地聚焦 `9/9`、全量 `6218 passed / 190 PostgreSQL 条件 skipped / 0 failed`，TypeScript、构建版 ESLint、保护基线及 `120/120` 生产构建通过。
+- 该措施不会把普通网络失败误判为部署版本错配，也不会无限刷新；异常仍会进入现有监控与错误边界。
+- 由于尚未在 Coze 保留旧页面并跨本次新部署取得真实 Network/Console 证据，部署 Chunk 风险仅从“无恢复”降为“已有本地受控恢复候选”，不能关闭。
+- **Task 10 仍为 `CONDITIONAL PASS / DEVICE GATE OPEN`。** 320/375/393 云端窄视口、实体触屏手感、190 项隔离 PostgreSQL 条件测试和跨部署自恢复均保持开放；全平台发布结论不因此升级。

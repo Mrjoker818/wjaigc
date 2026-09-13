@@ -3081,3 +3081,12 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - 沙箱重启后的第一次普通刷新真实出现 `ChunkLoadError`，旧 HTML 引用了已删除 chunk `06-azuyjidcip.js`。同标签加入 Build ID 缓存参数后恢复；该证据继续归入既有部署 Chunk 可靠性问题，不能因业务回归通过而忽略。
 - 证据截图：`test-results/screenshots/cloud-simple-create-canvas-handoff-c83afe7f.png`、`test-results/screenshots/cloud-simple-create-cancel-c83afe7f.png`；本地矩阵保留 HTML、Trace、录像、Console 和 Network 制品。
 - **判定：Task 10 核心云端生成、交接、恢复及取消账务通过；整体仍为 `CONDITIONAL PASS / DEVICE GATE OPEN`。** 云端 320/375/393 窄视口和实体触屏手感尚无真实设备证据，不登记为关闭。
+
+### 2026-09-13 Task 10 部署 Chunk 自恢复本地回归
+
+- 基线为 `main@7881c2c0182fe4fa5e7ccfe59ca8245d4b3e7ba7`；本轮仅增加旧页面加载已删除 Next.js chunk 时的一次性受控恢复，`stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 未修改。
+- TDD 聚焦回归 `9/9`；全量 Vitest 为 `745 passed / 36 skipped` 个文件、`6218 passed / 190 skipped / 0 failed`。190 项均因缺少隔离 `POSTGRES_TEST_DATABASE_URL` 跳过，未冒充通过。
+- `pnpm ts-check`、`pnpm lint:build`、38 项保护基线和生产构建均退出 0；构建生成 `120/120` 页面。
+- 恢复器仅识别 `ChunkLoadError`、`Loading chunk ... failed` 和 `/_next/static/chunks/*.js`，普通 `Failed to fetch` 不触发刷新；通过 sessionStorage 指纹与 `_chunk_retry` URL 参数共同限制为一次，存储不可用时仍可安全退化。
+- 全局未捕获异常与 React 错误边界均接入恢复器，错误上报和可见错误态继续保留，没有吞掉异常。
+- **判定：`LOCAL PASS / CLOUD UNVERIFIED`。** 该修复缓解长驻旧页面与新部署资源错配，不等同于证明 Coze 静态资源发布已原子化；仍需在旧页面跨部署场景验证只刷新一次并恢复。

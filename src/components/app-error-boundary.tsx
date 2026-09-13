@@ -1,6 +1,7 @@
 'use client';
 
 import React, { Component, ReactNode } from 'react';
+import { attemptChunkLoadRecovery } from '@/lib/chunk-load-recovery';
 
 interface Props {
   children: ReactNode;
@@ -28,6 +29,7 @@ export class AppErrorBoundary extends Component<Props, State> {
   }
 
   componentDidCatch(error: Error, errorInfo: React.ErrorInfo): void {
+    attemptChunkLoadRecovery(error);
     console.error('[AppErrorBoundary] 捕获渲染错误:', error, errorInfo);
     // 可选：上报错误到监控服务
   }

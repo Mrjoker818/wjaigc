@@ -6,6 +6,7 @@
  */
 
 import { useEffect } from 'react';
+import { attemptChunkLoadRecovery } from '@/lib/chunk-load-recovery';
 
 interface ErrorReport {
   type: 'error' | 'unhandledrejection';
@@ -47,6 +48,7 @@ export function GlobalErrorMonitor() {
         event.preventDefault();
         return;
       }
+      attemptChunkLoadRecovery(event.error ?? event.message);
       sendErrorReport({
         type: 'error',
         message: event.message || 'Unknown error',
@@ -62,6 +64,7 @@ export function GlobalErrorMonitor() {
 
     const handleRejection = (event: PromiseRejectionEvent) => {
       const reason = event.reason;
+      attemptChunkLoadRecovery(reason);
       sendErrorReport({
         type: 'unhandledrejection',
         message: reason instanceof Error ? reason.message : String(reason),
