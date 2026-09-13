@@ -28,6 +28,10 @@ function errorCode(error: unknown): string {
   return error instanceof GatewayError ? error.code : 'GATEWAY_INTERNAL_UNAVAILABLE';
 }
 
+function errorStatus(error: unknown): number {
+  return error instanceof GatewayError ? error.status : 503;
+}
+
 async function safeAudit(event: GatewayAuditEvent): Promise<void> {
   await auditGatewayEvent(event).catch(() => false);
 }
@@ -75,9 +79,20 @@ async function readJson(request: NextRequest): Promise<unknown> {
 export async function PATCH(request: NextRequest, context: RouteContext) {
   const admin = await requireAdminUser(request);
   if (!admin) return responseError(403, 'ADMIN_REQUIRED', 'Administrator access required');
-  const input = parseUpdate(await readJson(request));
-  if (!input) return responseError(400, 'GATEWAY_INVALID_REQUEST', 'Invalid gateway key request');
   const { keyId } = await context.params;
+  const input = parseUpdate(await readJson(request));
+  if (!input) {
+    await safeAudit({
+      actorId: admin.id,
+      actorName: admin.name,
+      action: 'gateway_key_update',
+      outcome: 'failure',
+      gatewayKeyId: keyId,
+      errorCode: 'GATEWAY_INVALID_REQUEST',
+      responseStatus: 400,
+    });
+    return responseError(400, 'GATEWAY_INVALID_REQUEST', 'Invalid gateway key request');
+  }
   try {
     const key = await updateGatewayKey(keyId, input);
     await safeAudit({
@@ -88,6 +103,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
       gatewayKeyId: key.id,
       keyPrefix: key.keyPrefix,
       userId: key.userId,
+      responseStatus: 200,
     });
     return NextResponse.json({ success: true, key });
   } catch (error) {
@@ -98,6 +114,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
       outcome: 'failure',
       gatewayKeyId: keyId,
       errorCode: errorCode(error),
+      responseStatus: errorStatus(error),
     });
     return serviceError(error);
   }
@@ -117,6 +134,7 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
       gatewayKeyId: key.id,
       keyPrefix: key.keyPrefix,
       userId: key.userId,
+      responseStatus: 200,
     });
     return NextResponse.json({ success: true, key });
   } catch (error) {
@@ -127,6 +145,7 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
       outcome: 'failure',
       gatewayKeyId: keyId,
       errorCode: errorCode(error),
+      responseStatus: errorStatus(error),
     });
     return serviceError(error);
   }

@@ -47,6 +47,14 @@ function request(method: string, body?: unknown): NextRequest {
   });
 }
 
+function rawRequest(method: string, body: string): NextRequest {
+  return new NextRequest('http://localhost/api/admin/gateway/keys/gwkey_1', {
+    method,
+    headers: { 'Content-Type': 'application/json' },
+    body,
+  });
+}
+
 const context = { params: Promise.resolve({ keyId: 'gwkey_1' }) };
 
 describe('admin media gateway key routes', () => {
@@ -110,6 +118,7 @@ describe('admin media gateway key routes', () => {
       gatewayKeyId: 'gwkey_1',
       keyPrefix: 'wmg_abcd1234',
       userId: 'user-1',
+      responseStatus: 201,
     });
     expect(JSON.stringify(mocks.auditGatewayEvent.mock.calls)).not.toContain(`wmg_${'a'.repeat(43)}`);
   });
@@ -118,11 +127,35 @@ describe('admin media gateway key routes', () => {
     [{ userId: 'user-1', label: '', requestsPerMinute: 60, dailyQuota: 1000 }],
     [{ userId: 'user-1', label: 'Production', requestsPerMinute: 0, dailyQuota: 1000 }],
     [{ userId: 'user-1', label: 'Production', requestsPerMinute: 60, dailyQuota: 100001 }],
-    [{ userId: 'user-1', label: 'Production', requestsPerMinute: 60, dailyQuota: 1000, secret: 'chosen' }],
+    [{ userId: 'user-1', label: 'Production', requestsPerMinute: 60, dailyQuota: 1000, secret: `wmg_${'x'.repeat(43)}` }],
   ])('rejects invalid issuance input', async body => {
     const response = await POST(request('POST', body));
     expect(response.status).toBe(400);
     expect(mocks.issueGatewayKey).not.toHaveBeenCalled();
+    expect(mocks.auditGatewayEvent).toHaveBeenCalledWith({
+      actorId: 'admin-1',
+      actorName: undefined,
+      action: 'gateway_key_issue',
+      outcome: 'failure',
+      errorCode: 'GATEWAY_INVALID_REQUEST',
+      responseStatus: 400,
+    });
+    expect(JSON.stringify(mocks.auditGatewayEvent.mock.calls)).not.toContain(JSON.stringify(body));
+  });
+
+  it('audits invalid JSON after authentication without persisting the raw body', async () => {
+    const rawBody = `{"secret":"wmg_${'j'.repeat(43)}"`;
+
+    const response = await POST(rawRequest('POST', rawBody));
+
+    expect(response.status).toBe(400);
+    expect(mocks.auditGatewayEvent).toHaveBeenCalledWith(expect.objectContaining({
+      action: 'gateway_key_issue',
+      outcome: 'failure',
+      errorCode: 'GATEWAY_INVALID_REQUEST',
+      responseStatus: 400,
+    }));
+    expect(JSON.stringify(mocks.auditGatewayEvent.mock.calls)).not.toContain(rawBody);
   });
 
   it('patches only mutable fields', async () => {
@@ -137,6 +170,7 @@ describe('admin media gateway key routes', () => {
       outcome: 'success',
       gatewayKeyId: 'gwkey_1',
       keyPrefix: 'wmg_abcd1234',
+      responseStatus: 200,
     }));
   });
 
@@ -150,6 +184,16 @@ describe('admin media gateway key routes', () => {
     const response = await PATCH(request('PATCH', body), context);
     expect(response.status).toBe(400);
     expect(mocks.updateGatewayKey).not.toHaveBeenCalled();
+    expect(mocks.auditGatewayEvent).toHaveBeenCalledWith({
+      actorId: 'admin-1',
+      actorName: undefined,
+      action: 'gateway_key_update',
+      outcome: 'failure',
+      gatewayKeyId: 'gwkey_1',
+      errorCode: 'GATEWAY_INVALID_REQUEST',
+      responseStatus: 400,
+    });
+    expect(JSON.stringify(mocks.auditGatewayEvent.mock.calls)).not.toContain(JSON.stringify(body));
   });
 
   it('revokes a key idempotently without returning secret material', async () => {
@@ -166,6 +210,7 @@ describe('admin media gateway key routes', () => {
       outcome: 'success',
       gatewayKeyId: 'gwkey_1',
       keyPrefix: 'wmg_abcd1234',
+      responseStatus: 200,
     }));
   });
 
@@ -188,6 +233,7 @@ describe('admin media gateway key routes', () => {
       outcome: 'failure',
       gatewayKeyId: 'gwkey_1',
       errorCode: 'GATEWAY_INVALID_REQUEST',
+      responseStatus: 404,
     }));
   });
 
@@ -204,5 +250,25 @@ describe('admin media gateway key routes', () => {
     expect(response.status).toBe(201);
     expect(mocks.issueGatewayKey).toHaveBeenCalledTimes(1);
     expect(await response.json()).toMatchObject({ success: true, key });
+  });
+
+  it('does not reverse a successful patch when audit persistence throws', async () => {
+    mocks.auditGatewayEvent.mockRejectedValue(new Error('audit unavailable'));
+
+    const response = await PATCH(request('PATCH', { enabled: false }), context);
+
+    expect(response.status).toBe(200);
+    expect(mocks.updateGatewayKey).toHaveBeenCalledTimes(1);
+    expect(await response.json()).toEqual({ success: true, key });
+  });
+
+  it('does not reverse a successful revoke when audit persistence throws', async () => {
+    mocks.auditGatewayEvent.mockRejectedValue(new Error('audit unavailable'));
+
+    const response = await DELETE(request('DELETE'), context);
+
+    expect(response.status).toBe(200);
+    expect(mocks.revokeGatewayKey).toHaveBeenCalledTimes(1);
+    expect(await response.json()).toMatchObject({ success: true, key: { enabled: false } });
   });
 });

@@ -27,6 +27,10 @@ function errorCode(error: unknown): string {
   return error instanceof GatewayError ? error.code : 'GATEWAY_INTERNAL_UNAVAILABLE';
 }
 
+function errorStatus(error: unknown): number {
+  return error instanceof GatewayError ? error.status : 503;
+}
+
 async function safeAudit(event: GatewayAuditEvent): Promise<void> {
   await auditGatewayEvent(event).catch(() => false);
 }
@@ -73,7 +77,17 @@ export async function POST(request: NextRequest) {
   const admin = await requireAdminUser(request);
   if (!admin) return responseError(403, 'ADMIN_REQUIRED', 'Administrator access required');
   const input = parseCreate(await readJson(request));
-  if (!input) return responseError(400, 'GATEWAY_INVALID_REQUEST', 'Invalid gateway key request');
+  if (!input) {
+    await safeAudit({
+      actorId: admin.id,
+      actorName: admin.name,
+      action: 'gateway_key_issue',
+      outcome: 'failure',
+      errorCode: 'GATEWAY_INVALID_REQUEST',
+      responseStatus: 400,
+    });
+    return responseError(400, 'GATEWAY_INVALID_REQUEST', 'Invalid gateway key request');
+  }
   try {
     const issued = await issueGatewayKey({ ...input, createdBy: admin.id });
     await safeAudit({
@@ -84,6 +98,7 @@ export async function POST(request: NextRequest) {
       gatewayKeyId: issued.key.id,
       keyPrefix: issued.key.keyPrefix,
       userId: issued.key.userId,
+      responseStatus: 201,
     });
     return NextResponse.json({ success: true, ...issued }, { status: 201 });
   } catch (error) {
@@ -94,6 +109,7 @@ export async function POST(request: NextRequest) {
       outcome: 'failure',
       userId: input.userId,
       errorCode: errorCode(error),
+      responseStatus: errorStatus(error),
     });
     return serviceError(error);
   }

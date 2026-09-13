@@ -12,17 +12,19 @@ describe('media gateway audit', () => {
     mocks.dbAddAuditLog.mockResolvedValue('audit-1');
   });
 
-  it('persists only an allowlisted redacted gateway event', async () => {
+  it('redacts secret-shaped values even inside allowlisted audit fields', async () => {
+    const fullSecret = `wmg_${'s'.repeat(43)}`;
     const unsafe = {
-      actorId: 'admin-1',
-      actorName: 'Administrator',
+      actorId: fullSecret,
+      actorName: `Administrator ${fullSecret}`,
       action: 'gateway_key_issue',
       outcome: 'success',
-      gatewayKeyId: 'gwkey_1',
-      keyPrefix: 'wmg_abcd1234',
-      userId: 'user-1',
+      gatewayKeyId: fullSecret,
+      keyPrefix: fullSecret,
+      userId: fullSecret,
       errorCode: null,
-      secret: `wmg_${'s'.repeat(43)}`,
+      responseStatus: 201,
+      secret: fullSecret,
       keyHash: 'sha256-private-hash',
       prompt: 'private creative prompt',
       image: 'data:image/png;base64,private-image-content',
@@ -33,14 +35,17 @@ describe('media gateway audit', () => {
     const persisted = mocks.dbAddAuditLog.mock.calls[0][0];
     const serialized = JSON.stringify(persisted);
     expect(persisted).toMatchObject({
-      user_id: 'admin-1',
-      user_name: 'Administrator',
       action: 'gateway_key_issue',
       target_type: 'media_gateway_key',
-      target_id: 'gwkey_1',
       level: 'info',
+      response_status: 201,
     });
-    expect(serialized).toContain('wmg_abcd1234');
+    expect(persisted.user_id).toBe('[REDACTED]');
+    expect(persisted.user_name).toBe('Administrator [REDACTED]');
+    expect(persisted.target_id).toBe('[REDACTED]');
+    expect(JSON.stringify(persisted.request_data)).not.toContain(fullSecret);
+    expect(String(persisted.detail)).not.toContain(fullSecret);
+    expect(serialized).not.toContain(fullSecret);
     expect(serialized).not.toContain(unsafe.secret);
     expect(serialized).not.toContain(unsafe.keyHash);
     expect(serialized).not.toContain(unsafe.prompt);
@@ -54,13 +59,27 @@ describe('media gateway audit', () => {
       outcome: 'failure',
       gatewayKeyId: 'gwkey_1',
       errorCode: 'GATEWAY_INTERNAL_UNAVAILABLE',
+      responseStatus: 503,
     });
 
     const persisted = mocks.dbAddAuditLog.mock.calls[0][0];
     expect(persisted.level).toBe('warn');
+    expect(persisted.response_status).toBe(503);
     expect(JSON.stringify(persisted)).toContain('GATEWAY_INTERNAL_UNAVAILABLE');
     expect(persisted).not.toHaveProperty('error_message');
     expect(persisted).not.toHaveProperty('stack_trace');
+  });
+
+  it('omits response_status when the caller cannot supply an exact status', async () => {
+    await auditGatewayEvent({
+      actorId: 'admin-1',
+      action: 'gateway_key_update',
+      outcome: 'failure',
+      gatewayKeyId: 'gwkey_1',
+      errorCode: 'GATEWAY_INTERNAL_UNAVAILABLE',
+    });
+
+    expect(mocks.dbAddAuditLog.mock.calls[0][0]).not.toHaveProperty('response_status');
   });
 
   it('returns false instead of throwing when persistent audit storage fails', async () => {
