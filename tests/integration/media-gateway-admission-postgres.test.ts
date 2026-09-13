@@ -26,6 +26,38 @@ function input(overrides: Record<string, unknown> = {}) {
 }
 
 describe('media gateway admission on PostgreSQL', () => {
+  postgresIt('projects authoritative UTC daily usage from reserved and admitted requests only', async () => {
+    const { withIsolatedPostgres } = await import('../helpers/postgres-test-database');
+    await withIsolatedPostgres('gateway-admin-daily-usage', async ({ query }) => {
+      await prepareSchema(query);
+      await query(`INSERT INTO wujie_users (id) VALUES ('gateway-user'), ('other-user')`);
+      await query(`INSERT INTO wujie_gateway_keys
+        (id, user_id, key_hash, key_prefix, label, requests_per_minute, daily_quota, created_by)
+        VALUES
+          ('gwkey_usage_target', 'gateway-user', 'hash-target', 'wmg_target00', 'target', 100, 100, 'admin'),
+          ('gwkey_usage_other', 'other-user', 'hash-other', 'wmg_other000', 'other', 100, 100, 'admin')`);
+      await query(`INSERT INTO wujie_gateway_requests
+        (id, gateway_key_id, user_id, idempotency_key, request_digest, media_type, admission_status, created_at)
+        VALUES
+          ('gwreq_reserved', 'gwkey_usage_target', 'gateway-user', 'reserved', repeat('a', 64), 'image', 'reserved',
+           (date_trunc('day', CURRENT_TIMESTAMP AT TIME ZONE 'UTC') + interval '1 hour') AT TIME ZONE 'UTC'),
+          ('gwreq_admitted', 'gwkey_usage_target', 'gateway-user', 'admitted', repeat('b', 64), 'video', 'admitted',
+           (date_trunc('day', CURRENT_TIMESTAMP AT TIME ZONE 'UTC') + interval '2 hours') AT TIME ZONE 'UTC'),
+          ('gwreq_rejected', 'gwkey_usage_target', 'gateway-user', 'rejected', repeat('c', 64), 'image', 'rejected',
+           (date_trunc('day', CURRENT_TIMESTAMP AT TIME ZONE 'UTC') + interval '3 hours') AT TIME ZONE 'UTC'),
+          ('gwreq_previous', 'gwkey_usage_target', 'gateway-user', 'previous', repeat('d', 64), 'image', 'admitted',
+           (date_trunc('day', CURRENT_TIMESTAMP AT TIME ZONE 'UTC') - interval '1 second') AT TIME ZONE 'UTC'),
+          ('gwreq_other', 'gwkey_usage_other', 'other-user', 'other', repeat('e', 64), 'image', 'admitted',
+           (date_trunc('day', CURRENT_TIMESTAMP AT TIME ZONE 'UTC') + interval '4 hours') AT TIME ZONE 'UTC')`);
+      const { listGatewayKeys } = await import('@/lib/media-gateway/key-service');
+
+      const keys = await listGatewayKeys();
+
+      expect(keys.find(key => key.id === 'gwkey_usage_target')?.todayUsage).toBe(2);
+      expect(keys.find(key => key.id === 'gwkey_usage_other')?.todayUsage).toBe(1);
+    });
+  }, 30_000);
+
   postgresIt('allows exactly one execute across 20 identical concurrent reservations', async () => {
     const { withIsolatedPostgres } = await import('../helpers/postgres-test-database');
     await withIsolatedPostgres('gateway-same-idempotency', async ({ query }) => {

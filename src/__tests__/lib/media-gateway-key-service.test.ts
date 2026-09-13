@@ -37,6 +37,18 @@ const validInput = {
   createdBy: 'admin-1',
 };
 
+function expectAuthoritativeUsageSql(sql: string): void {
+  expect(sql).toContain('wujie_gateway_requests');
+  expect(sql).not.toContain('wujie_media_gateway_usage_daily');
+  expect(sql).toMatch(/COUNT\s*\(\s*\*\s*\)/i);
+  expect(sql).toContain("admission_status IN ('reserved', 'admitted')");
+  expect(sql).toMatch(/created_at\s*>=/i);
+  expect(sql).toMatch(/created_at\s*</i);
+  expect(sql).toMatch(/date_trunc\s*\(\s*'day'/i);
+  expect(sql).toMatch(/AT TIME ZONE\s+'UTC'/i);
+  expect(sql).toMatch(/interval\s+'1 day'/i);
+}
+
 describe('media gateway key service', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -85,10 +97,7 @@ describe('media gateway key service', () => {
       todayUsage: 12,
     })]);
 
-    const sql = String(mocks.execSql.mock.calls[0][0]);
-    expect(sql).toContain('wujie_media_gateway_usage_daily');
-    expect(sql).toMatch(/SUM\s*\(.*request_count.*\)/i);
-    expect(sql).toMatch(/AT TIME ZONE\s+'UTC'/i);
+    expectAuthoritativeUsageSql(String(mocks.execSql.mock.calls[0][0]));
   });
 
   it('authenticates and updates last_used_at atomically without enumerating plaintext keys', async () => {
@@ -179,7 +188,9 @@ describe('media gateway key service', () => {
 
     expect(result).toMatchObject({ id: 'gwkey_123', label: 'Renamed', requestsPerMinute: 12, enabled: false });
     expect(result).not.toHaveProperty('keyHash');
-    expect(String(mocks.execSql.mock.calls[0][0])).not.toContain('key_hash =');
+    const sql = String(mocks.execSql.mock.calls[0][0]);
+    expect(sql).not.toContain('key_hash =');
+    expectAuthoritativeUsageSql(sql);
   });
 
   it('rejects re-enabling a revoked key and leaves its state disabled', async () => {
@@ -213,5 +224,6 @@ describe('media gateway key service', () => {
     expect(first).toEqual(second);
     expect(first).not.toHaveProperty('keyHash');
     expect(String(mocks.execSql.mock.calls[0][0])).toContain('COALESCE(revoked_at, now())');
+    expectAuthoritativeUsageSql(String(mocks.execSql.mock.calls[0][0]));
   });
 });

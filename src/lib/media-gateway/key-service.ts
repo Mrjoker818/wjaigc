@@ -192,9 +192,11 @@ export async function listGatewayKeys(): Promise<GatewayKeyView[]> {
            FROM wujie_gateway_keys
        ) AS keys
        LEFT JOIN (
-         SELECT gateway_key_id, SUM(request_count)::integer AS today_usage
-           FROM wujie_media_gateway_usage_daily
-          WHERE usage_date = (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')::date
+         SELECT gateway_key_id, COUNT(*)::integer AS today_usage
+           FROM wujie_gateway_requests
+          WHERE admission_status IN ('reserved', 'admitted')
+            AND created_at >= date_trunc('day', CURRENT_TIMESTAMP AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'
+            AND created_at < (date_trunc('day', CURRENT_TIMESTAMP AT TIME ZONE 'UTC') + interval '1 day') AT TIME ZONE 'UTC'
           GROUP BY gateway_key_id
        ) AS usage ON usage.gateway_key_id = keys.id
       ORDER BY keys.created_at DESC, keys.id ASC`,
@@ -236,10 +238,12 @@ export async function updateGatewayKey(
         RETURNING ${PUBLIC_COLUMNS}
      )
      SELECT changed.*, COALESCE((
-       SELECT SUM(usage.request_count)
-         FROM wujie_media_gateway_usage_daily AS usage
+       SELECT COUNT(*)
+         FROM wujie_gateway_requests AS usage
         WHERE usage.gateway_key_id = changed.id
-          AND usage.usage_date = (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')::date
+          AND usage.admission_status IN ('reserved', 'admitted')
+          AND usage.created_at >= date_trunc('day', CURRENT_TIMESTAMP AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'
+          AND usage.created_at < (date_trunc('day', CURRENT_TIMESTAMP AT TIME ZONE 'UTC') + interval '1 day') AT TIME ZONE 'UTC'
      ), 0)::integer AS today_usage
        FROM changed`,
     [keyId, ...entries.map(([, value]) => value)],
@@ -269,10 +273,12 @@ export async function revokeGatewayKey(keyId: string): Promise<GatewayKeyView> {
         RETURNING ${PUBLIC_COLUMNS}
      )
      SELECT changed.*, COALESCE((
-       SELECT SUM(usage.request_count)
-         FROM wujie_media_gateway_usage_daily AS usage
+       SELECT COUNT(*)
+         FROM wujie_gateway_requests AS usage
         WHERE usage.gateway_key_id = changed.id
-          AND usage.usage_date = (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')::date
+          AND usage.admission_status IN ('reserved', 'admitted')
+          AND usage.created_at >= date_trunc('day', CURRENT_TIMESTAMP AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'
+          AND usage.created_at < (date_trunc('day', CURRENT_TIMESTAMP AT TIME ZONE 'UTC') + interval '1 day') AT TIME ZONE 'UTC'
      ), 0)::integer AS today_usage
        FROM changed`,
     [keyId],

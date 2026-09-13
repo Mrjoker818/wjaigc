@@ -541,7 +541,7 @@ Run: `pnpm exec vitest run src/__tests__/lib/media-gateway-audit.test.ts src/__t
 
 - [ ] **Step 4: 实现管理员 UI**
 
-在现有管理员导航增加“媒体网关”，不重构 dashboard。既有 Key 查询服务从 `wujie_media_gateway_usage_daily` 按当前 UTC 日期聚合真实 `todayUsage`，缺失或非法值不得伪装为 0。表格显示标签、用户、前缀、状态、RPM、日配额、今日使用、最近使用；签发/编辑使用抽屉，一次性 Secret 使用模态框，复制使用 Lucide `Copy` 图标和 Tooltip。GET/POST/PATCH/DELETE 响应必须整体失败关闭；权威 mutation 已成功但响应不可信时，禁止重复提交并重新加载权威列表。表单、复制和吊销错误必须显示在当前模态上下文中。
+在现有管理员导航增加“媒体网关”，不重构 dashboard。既有 Key 查询服务从 Task 3 权威 `wujie_gateway_requests` 按当前 UTC 日期聚合 `admission_status IN ('reserved', 'admitted')` 的真实 `todayUsage`，与日配额消耗口径一致；缺失或非法值不得伪装为 0。表格显示标签、用户、前缀、状态、RPM、日配额、今日使用、最近使用；签发/编辑使用抽屉，一次性 Secret 使用模态框，复制使用 Lucide `Copy` 图标和 Tooltip。GET/POST/PATCH/DELETE 响应必须整体失败关闭；权威 mutation 已成功但响应不可信时，禁止重复提交并重新加载权威列表。表单、复制和吊销错误必须显示在当前模态上下文中。
 
 - [ ] **Step 5: UI 回归与提交**
 
