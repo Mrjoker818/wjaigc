@@ -3166,3 +3166,14 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - Playwright 成功解析 11 项目展开的 77 项云端规格；所有提交已加入显式 `E2E_MEDIA_GATEWAY_PROJECT_ID`，缩略图按 ready 验证、pending 回退原图。
 - TypeScript、构建版 ESLint、精确保护基线 `38/38 / 0 drift / 0 warning`、生产构建 `120/120` 均通过。构建既有 Turbopack 动态路径 warning 保留。
 - **判定：修复候选 `LOCAL PASS / CLOUD REVALIDATION REQUIRED`。** 需部署 exact SHA 后重新证明受管图片、AssetVersion、原图回退/缩略图、`n=2`、视频和取消账务。
+
+## 2026-09-14 V588-MEDIA-001 Task 9 最终本地回归
+
+- 最终独立只读复审：P0/P1/P2 均为 0；恢复租约、同步直返、受管 URL、部分多图清理和 Outbox 重入问题均已关闭。
+- TDD 证据：复审问题先形成失败合同；清理专项最终 `21/21`。全量门禁暴露精修测试 Mock 漂移后，稳定复现 `1 failed / 23 passed`，补齐 `releaseCloudTaskLease` Mock 与断言后 `24/24`。
+- 最终相关回归：9 个文件、`117/117` 通过，覆盖网关终态制品、同步直返、任务恢复租约、资产投影、清理 Outbox 和精修恢复。
+- `pnpm ts-check`、`pnpm lint:build` 均退出 0；`pnpm build` 退出 0，静态页面 `120/120`。
+- 全量 `pnpm test`：`767 passed files / 38 skipped / 2 failed files`，测试 `6585 passed / 202 skipped / 2 failed`。精修 Mock 失败已在同轮修复并由聚焦回归关闭；剩余强制失败是缺少 `POSTGRES_TEST_DATABASE_URL`。为保留真实证据，不把该轮改写成全量全绿。
+- 构建保留 50 条既有 Turbopack 动态文件追踪告警；本轮没有关闭检查或扩大忽略规则。
+
+**判定：`LOCAL CODE PASS / POSTGRESQL AND CLOUD UNVERIFIED`。** 本地可执行代码门禁已通过，但媒体网关 Task 9 尚不能关闭。

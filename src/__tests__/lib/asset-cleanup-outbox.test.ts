@@ -10,6 +10,27 @@ import {
 } from '@/lib/asset-core/cleanup-outbox';
 
 describe('asset cleanup outbox', () => {
+  it('accepts tightly scoped gateway image paths for durable cleanup retry', async () => {
+    const store = {
+      enqueue: vi.fn(async () => undefined), claim: vi.fn(async () => []),
+      complete: vi.fn(async () => true), retry: vi.fn(async () => true),
+      hasAssetReference: vi.fn(async () => false),
+    };
+    const service = createAssetCleanupOutboxService({
+      store,
+      deleteS3: vi.fn(),
+      removeLocal: vi.fn(),
+    });
+
+    await expect(service.recordFailure({
+      storageKey: 'images/gateway/task-1-0-0123456789ab.png',
+      localPath: 'gateway/task-1-0-0123456789ab.png',
+      rootId: 'server-data',
+      lastError: 'delete unavailable',
+    })).resolves.toBeUndefined();
+    expect(store.enqueue).toHaveBeenCalledOnce();
+  });
+
   it('persists a failed cleanup and a new service instance drains it after restart', async () => {
     const records = new Map<string, AssetCleanupOutboxRecord>();
     const store = {
@@ -58,6 +79,19 @@ describe('asset cleanup outbox', () => {
     expect(source).toContain('lease_token = gen_random_uuid()');
     expect(source.match(/WHERE id = \$1 AND status = 'processing' AND lease_token = \$2/gu)).toHaveLength(2);
     expect(source).toContain('return result.rowCount === 1');
+  });
+
+  it('requeues the same artifact when cleanup fails again after an earlier completion', async () => {
+    const source = await readFile(resolve('src/lib/asset-core/cleanup-outbox.ts'), 'utf8');
+    const upsert = source.slice(
+      source.indexOf('ON CONFLICT (target_hash) DO UPDATE SET'),
+      source.indexOf('async claim(', source.indexOf('ON CONFLICT (target_hash) DO UPDATE SET')),
+    );
+
+    expect(upsert).toContain("status = 'pending'");
+    expect(upsert).toContain('lease_token = NULL');
+    expect(upsert).toContain('completed_at = NULL');
+    expect(upsert).not.toContain("status = CASE WHEN wujie_asset_cleanup_outbox.status = 'completed'");
   });
 
   it('does not delete a target that has become referenced by an AssetVersion', async () => {

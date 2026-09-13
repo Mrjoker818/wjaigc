@@ -92,7 +92,7 @@ describe('task result asset projection wiring', () => {
 
   it('checks the durable terminal winner before publishing a non-slot image completion', () => {
     const route = source('src/app/api/poll-task/route.ts');
-    const terminalWrite = route.indexOf('if (!durableAtomicTask) {', route.indexOf('const completedTaskResult'));
+    const terminalWrite = route.indexOf('if (!durableAtomicTask) {', route.indexOf('let completedTaskResult'));
     const auditWrite = route.indexOf("await appendUserJsonl(userId, 'images'");
     const completion = route.slice(terminalWrite, route.indexOf('updateTaskProgress(taskId', terminalWrite));
     expect(completion).toContain('const imageTerminal = await recordImageTaskTerminal(taskId, {');
@@ -104,9 +104,9 @@ describe('task result asset projection wiring', () => {
 
   it('captures completed image metadata before the durable terminal projection transaction', () => {
     const route = source('src/app/api/poll-task/route.ts');
-    const resultStart = route.indexOf('const completedTaskResult = sanitizeCompletedTaskResult({');
+    const resultStart = route.indexOf('let completedTaskResult = sanitizeCompletedTaskResult({');
     const metadata = route.indexOf('await enrichCompletedImageResult(completedTaskResult)', resultStart);
-    const terminal = route.indexOf('completeCloudTask(taskId, completedTaskResult)', resultStart);
+    const terminal = route.indexOf('const generationCompletion = await completeCloudTask(', resultStart);
 
     expect(resultStart).toBeGreaterThan(-1);
     expect(metadata).toBeGreaterThan(resultStart);
@@ -220,7 +220,7 @@ describe('task result asset projection wiring', () => {
       route.indexOf('// direct tasks', route.indexOf("if (registryTask.type === 'video')")),
     );
     const mainImage = route.slice(
-      route.indexOf('const completedTaskResult = sanitizeCompletedTaskResult({'),
+      route.indexOf('let completedTaskResult = sanitizeCompletedTaskResult({'),
       route.indexOf('const cachedImageUrl = imageUrls[0]'),
     );
 
@@ -233,7 +233,7 @@ describe('task result asset projection wiring', () => {
     expect(video).toContain('sanitizeCompletedTaskResult(registryTask.result as Record<string, unknown>)');
     expect(video).toContain('const completedResult = sanitizeCompletedTaskResult({');
     expect(video).not.toContain("(({ apiKey: _ak, apiBaseUrl: _abu, ...rest }) => rest)");
-    expect(mainImage).toContain('const completedTaskResult = sanitizeCompletedTaskResult({');
+    expect(mainImage).toContain('let completedTaskResult = sanitizeCompletedTaskResult({');
     expect(mainImage).toContain('updateTaskProgress(taskId, { status: \'completed\', progress: 100, result: authoritativeCompletedResult })');
     expect(mainImage).not.toContain('Object.assign(completedTaskResult, authoritativeCompletedResult)');
 
@@ -248,7 +248,7 @@ describe('task result asset projection wiring', () => {
       route.indexOf('if (directImageUrls.length > 0)'),
       route.indexOf('const remoteTaskIds = Array.isArray(resumedData.taskIds)'),
     );
-    expect(recoveryDirect).toContain('const completedResult = sanitizeCompletedTaskResult({');
+    expect(recoveryDirect).toContain('let completedResult = sanitizeCompletedTaskResult({');
   });
 
   it('projects asynchronous standalone chat results with the provider task identity', () => {

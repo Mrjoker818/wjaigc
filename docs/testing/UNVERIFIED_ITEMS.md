@@ -2642,3 +2642,14 @@ BUG-018 已从未验证项移除。剩余顺序为 `002-B -> 002-D -> 002-E`；�
 - [ ] 本机缺少 `POSTGRES_TEST_DATABASE_URL`，本轮真实 PostgreSQL 网关表与并发门禁未重跑；历史真库证据不冒充本候选证据。
 - [ ] Coze 拉取本候选 exact SHA 后，使用属于 Key 用户的真实项目执行图像、`n=2`、视频、取消退款、跨用户隔离、缩略图与刷新恢复。
 - [ ] 云端验收完成后删除临时网关 Key，并移除 Coze `.env.local` 中临时 `GATEWAY_ENABLED=true`，验证默认关闭 503 与原 UI 不受影响。
+
+### 2026-09-14 Task 9 最终复审后的未验证项
+
+- [x] 最终独立复审未发现剩余或新增 P0/P1/P2；相关回归 `117/117`、TypeScript、构建版 ESLint、生产构建 `120/120` 通过。
+- [x] 精修恢复失败已确认是测试 Mock 缺少新增租约释放导出；只修复测试替身并增加调用断言，生产精修代码未改。
+- [ ] 使用独立 `POSTGRES_TEST_DATABASE_URL` 执行媒体网关 Doctor、20 路幂等/配额、终态竞争、一次扣退和清理 Outbox 重入；禁止连接生产库。
+- [ ] Coze 拉取最终 exact SHA 后先保持 `GATEWAY_ENABLED=false`，验证网关 503 且登录、画布、原图像和视频入口不受影响。
+- [ ] 临时开启网关后，使用 PearAPI 或 APIMart 完成真实图像、同步直返、`n=2` 逐槽、视频、取消退款、跨用户隔离、吊销 Key、限流和 UTC 日配额。
+- [ ] 验证供应商临时 URL 固化为受管文件和唯一 AssetVersion；检查原图、256/512 缩略图、下载、刷新和沙箱重启后的 S3 恢复。
+- [ ] 制造多图第二张固化失败及清理失败，确认 Outbox 可重复入队、worker 排空且不删除已被 AssetVersion 引用的制品。
+- [ ] 保存本候选截图、录像、Trace、Console、Network、Build ID、requestId、gatewayRequestId、taskId、AssetVersion 和脱敏积分流水。

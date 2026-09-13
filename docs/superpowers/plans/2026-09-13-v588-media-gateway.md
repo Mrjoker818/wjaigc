@@ -613,19 +613,19 @@ git commit -m "test: prove media gateway concurrency boundaries"
 - `npm run doctor`/`pnpm doctor` reports gateway enabled/database readiness without revealing secrets。
 - Playwright evidence proves cloud behavior; no production code is introduced after the gate except a reproduced defect fix。
 
-- [ ] **Step 1: 为 doctor 写 RED 测试并实现环境检查**
+- [x] **Step 1: 为 doctor 写 RED 测试并实现环境检查**
 
 当 `GATEWAY_ENABLED=true` 时，doctor 要求数据库连接和迁移表存在；关闭时输出警告而非失败。任何输出不得包含 Key 或数据库密码。
 
 Run: `pnpm exec vitest run src/__tests__/scripts/doctor-production-auth-contract.test.ts src/__tests__/scripts/media-gateway-doctor.test.ts`
 
-- [ ] **Step 2: 运行专项测试全集**
+- [x] **Step 2: 运行专项测试全集（非 PostgreSQL 部分通过；真库项仍按 Step 6 保留未验证）**
 
 Run: `pnpm exec vitest run src/__tests__/lib/media-gateway-*.test.ts src/__tests__/api/media-gateway-*.test.ts src/__tests__/api/admin-media-gateway-keys.test.ts src/__tests__/components/media-gateway-admin.test.tsx src/__tests__/components/dashboard-media-gateway-contract.test.ts`
 
 Expected: 0 failed、0 skipped。
 
-- [ ] **Step 3: 运行全量本地门禁**
+- [x] **Step 3: 运行全量本地门禁（可执行项通过；强制 PostgreSQL Doctor 因缺少隔离 URL 保留失败）**
 
 ```bash
 pnpm ts-check

@@ -2423,3 +2423,15 @@ The focused gate test passes `7/7`; the actual protected-baseline command passes
 - 权威 AssetVersion 从 `assetProjection.versionIds` 投影；缩略图 pending 不阻塞完成，预览和下载回退原图。S3 备份有 2 秒边界，不再拖住任务终态。
 - 新鲜门禁：核心 `126/126`、资产交付 `17/17`、扩大回归 `359 passed / 1 environment failed`；TypeScript、构建版 ESLint、保护基线 `38/38` 和生产构建 `120/120` 通过。唯一环境失败是缺少强制隔离 PostgreSQL URL，未隐藏。
 - **发布结论仍为不通过。** 当前只允许推送 `main` 并在 Coze 测试沙箱验收；云端 exact SHA、真实资产、`n=2`、视频、取消退款及临时开关清理完成前，不更新 `stable`。
+
+## 2026-09-14 媒体网关 Task 9 候选发布结论
+
+当前结论：**不通过发布 / 本地代码可进入云端候选验收**。
+
+- 已满足：最终独立复审 P0/P1/P2 为 0；相关回归 `117/117`；TypeScript、构建版 ESLint、生产构建 `120/120` 均退出 0。
+- 未满足：本机没有 `POSTGRES_TEST_DATABASE_URL`，媒体网关真 PostgreSQL 多实例、幂等、配额、终态和退款竞态未在本候选重跑。
+- 未满足：Coze 尚未拉取本候选 exact SHA；默认关闭 503、临时开启、PearAPI/APIMart 图像/视频、`n=2` 逐槽、取消退款、跨用户/吊销/配额、AssetVersion、256/512 缩略图、下载和重启恢复均无本候选云端证据。
+- 残余工程风险：50 条既有 Turbopack 动态路径追踪告警仍需后续专项收敛，但未发现由本轮改动新增。
+- `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 保持只读；媒体网关仍默认关闭。
+
+在 PostgreSQL 与云端门禁完成前，不得把 `V588-MEDIA-001` 标记为发布通过。

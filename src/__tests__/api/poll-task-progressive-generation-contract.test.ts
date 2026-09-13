@@ -205,14 +205,16 @@ describe('progressive generation recovery contract', () => {
       completedBranch,
     );
 
-    expect(source).toContain("import { stabilizeGatewayImageResult } from '@/lib/media-gateway/artifact-persistence';");
+    expect(source).toMatch(
+      /import \{[\s\S]*?stabilizeGatewayImageResult,[\s\S]*?\} from '@\/lib\/media-gateway\/artifact-persistence';/,
+    );
     expect(stabilization).toBeGreaterThan(completedBranch);
     expect(durableCompletion).toBeGreaterThan(stabilization);
     expect(source.slice(completedBranch, durableCompletion)).toContain(
       'completedTaskResult = await stabilizeGatewayImageResult({',
     );
     expect(source.slice(stabilization, durableCompletion)).toMatch(
-      /terminateCloudTaskAndRefund\(\s*taskId,\s*'failed',\s*gatewayPersistenceError,?\s*\)/,
+      /terminateCloudTaskAndRefund\(\s*taskId,\s*'failed',\s*gatewayPersistenceError,\s*gatewayArtifactLeaseOwner,?\s*\)/,
     );
   });
 });

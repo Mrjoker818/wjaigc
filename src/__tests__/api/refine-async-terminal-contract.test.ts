@@ -14,6 +14,7 @@ const io = vi.hoisted(() => ({
   create: vi.fn(),
   poll: vi.fn(),
   atomic: vi.fn(), quote: vi.fn(), settle: vi.fn(), update: vi.fn(),
+  releaseLease: vi.fn(),
 }));
 
 vi.mock('server-only', () => ({}));
@@ -62,6 +63,7 @@ vi.mock('@/lib/cloud-task-storage', () => ({
     return { transitioned: true, task: completed };
   }),
   claimCloudTaskLease: vi.fn(async () => ({ owner: 'test-recovery', expiresAt: Date.now() + 60000, attemptCount: 1 })),
+  releaseCloudTaskLease: io.releaseLease,
   completeCloudTask: vi.fn(),
   deferCloudTaskRecovery: vi.fn(),
   refundCloudTaskCredits: vi.fn(),
@@ -277,6 +279,7 @@ describe('refine async submission to authoritative completion', () => {
     const response = await poll(request('/api/poll-task', { taskId }));
     expect(await response.json()).toMatchObject({ success: true, status: 'completed' });
     expect(String(io.poll.mock.calls[0]?.[0])).toContain('remote-refine-contract');
+    expect(io.releaseLease).toHaveBeenCalledWith(taskId, expect.any(String));
     expect(io.submit).toHaveBeenCalledTimes(1);
     expect(io.atomic).toHaveBeenCalledTimes(1);
   });

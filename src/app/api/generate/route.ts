@@ -552,6 +552,7 @@ export async function POST(request: NextRequest) {
       submitOnly
       && generationChannel !== 'canvas-direct'
       && !deferAgentExecution
+      && !gatewayContext
       && process.env.WUJIE_ENABLE_LEGACY_SUBMIT_ONLY_WRAPPER === 'true'
     ) {
       const idempotencyKey = request.headers.get('idempotency-key')?.trim() || '';
@@ -579,7 +580,6 @@ export async function POST(request: NextRequest) {
       // Keep only the request fields required to resume provider submission after
       // a cloud runtime releases this request. Provider credentials stay server-side.
       const submissionPayload: Record<string, unknown> = {
-        ...gatewayContext,
         prompt,
         aspectRatio,
         size: normalizedRequestedPixelSize,

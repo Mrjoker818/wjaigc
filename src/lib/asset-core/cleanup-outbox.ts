@@ -9,6 +9,8 @@ import { getServerDataRoot } from '@/lib/server-data-root';
 
 const SAFE_EXPORT_PATH = /^exports\/[a-f0-9]{16}-[A-Za-z0-9._-]+\.(?:png|jpe?g|webp|json|zip)$/u;
 const SAFE_EXPORT_TEMP_PATH = /^exports\/\.[A-Za-z0-9._-]+\.(?:tmp|recover\.tmp)$/u;
+const SAFE_GATEWAY_LOCAL_PATH = /^gateway\/[A-Za-z0-9._-]+\.(?:png|jpe?g|webp|gif|bmp|avif)$/u;
+const SAFE_GATEWAY_STORAGE_KEY = /^images\/gateway\/[A-Za-z0-9._-]+\.(?:png|jpe?g|webp|gif|bmp|avif)$/u;
 
 export interface AssetCleanupOutboxRecord {
   id: string;
@@ -49,10 +51,15 @@ function assertSafeTarget(input: Pick<RecordAssetCleanupFailureInput, 'storageKe
   if (input.rootId !== 'server-data' || (!input.storageKey && !input.localPath)) {
     throw new TypeError('ASSET_CLEANUP_TARGET_INVALID');
   }
-  if (input.storageKey && !SAFE_EXPORT_PATH.test(input.storageKey)) {
+  if (input.storageKey && !SAFE_EXPORT_PATH.test(input.storageKey) && !SAFE_GATEWAY_STORAGE_KEY.test(input.storageKey)) {
     throw new TypeError('ASSET_CLEANUP_STORAGE_KEY_INVALID');
   }
-  if (input.localPath && !SAFE_EXPORT_PATH.test(input.localPath) && !SAFE_EXPORT_TEMP_PATH.test(input.localPath)) {
+  if (
+    input.localPath
+    && !SAFE_EXPORT_PATH.test(input.localPath)
+    && !SAFE_EXPORT_TEMP_PATH.test(input.localPath)
+    && !SAFE_GATEWAY_LOCAL_PATH.test(input.localPath)
+  ) {
     throw new TypeError('ASSET_CLEANUP_LOCAL_PATH_INVALID');
   }
 }
@@ -133,8 +140,12 @@ const postgresStore: AssetCleanupOutboxStore = {
          attempt_count, next_attempt_at, last_error, created_at, updated_at
        ) VALUES ($1, $2, $3, $4, $5, 'pending', 0, $7, $6, NOW(), NOW())
        ON CONFLICT (target_hash) DO UPDATE SET
-         status = CASE WHEN wujie_asset_cleanup_outbox.status = 'completed' THEN 'completed' ELSE 'pending' END,
-         next_attempt_at = CASE WHEN wujie_asset_cleanup_outbox.status = 'completed' THEN wujie_asset_cleanup_outbox.next_attempt_at ELSE EXCLUDED.next_attempt_at END,
+         status = 'pending',
+         lease_token = NULL,
+         completed_at = NULL,
+         local_path = COALESCE(EXCLUDED.local_path, wujie_asset_cleanup_outbox.local_path),
+         storage_key = COALESCE(EXCLUDED.storage_key, wujie_asset_cleanup_outbox.storage_key),
+         next_attempt_at = EXCLUDED.next_attempt_at,
          last_error = EXCLUDED.last_error,
          updated_at = NOW()`,
       [record.id, record.targetHash, record.rootId, record.localPath ?? null, record.storageKey ?? null, record.lastError, record.nextAttemptAt],
@@ -196,12 +207,14 @@ const postgresStore: AssetCleanupOutboxStore = {
   },
 };
 
-async function removeLocalExport(localPath: string): Promise<void> {
+async function removeLocalArtifact(localPath: string): Promise<void> {
   assertSafeTarget({ rootId: 'server-data', localPath });
   const root = path.resolve(getServerDataRoot());
-  const exportsRoot = path.resolve(root, 'exports');
   const target = path.resolve(root, localPath);
-  if (!target.startsWith(`${exportsRoot}${path.sep}`)) throw new TypeError('ASSET_CLEANUP_LOCAL_PATH_INVALID');
+  const relative = path.relative(root, target);
+  if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) {
+    throw new TypeError('ASSET_CLEANUP_LOCAL_PATH_INVALID');
+  }
   await rm(target, { force: true });
 }
 
@@ -209,10 +222,14 @@ function defaultService() {
   return createAssetCleanupOutboxService({
     store: postgresStore,
     deleteS3: async storageKey => {
-      const { deleteBinaryFromS3Exact } = await import('@/lib/s3-storage');
-      await deleteBinaryFromS3Exact(storageKey);
+      const { deleteBinaryFromS3Exact, deleteGatewayImageFromS3Exact } = await import('@/lib/s3-storage');
+      if (SAFE_GATEWAY_STORAGE_KEY.test(storageKey)) {
+        await deleteGatewayImageFromS3Exact(storageKey);
+      } else {
+        await deleteBinaryFromS3Exact(storageKey);
+      }
     },
-    removeLocal: removeLocalExport,
+    removeLocal: removeLocalArtifact,
   });
 }
 

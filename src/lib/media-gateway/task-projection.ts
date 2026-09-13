@@ -175,14 +175,32 @@ function publicIdentifier(value: unknown): string | undefined {
 }
 
 function projectedAssetVersionId(result: Record<string, unknown> | undefined): string | undefined {
-  const direct = publicIdentifier(result?.assetVersionId);
-  if (direct) return direct;
   const assetProjection = result?.assetProjection;
-  if (!assetProjection || typeof assetProjection !== 'object' || Array.isArray(assetProjection)) {
-    return undefined;
+  if (assetProjection && typeof assetProjection === 'object' && !Array.isArray(assetProjection)) {
+    const versionIds = (assetProjection as Record<string, unknown>).versionIds;
+    const projected = Array.isArray(versionIds) ? publicIdentifier(versionIds[0]) : undefined;
+    if (projected) return projected;
   }
-  const versionIds = (assetProjection as Record<string, unknown>).versionIds;
-  return Array.isArray(versionIds) ? publicIdentifier(versionIds[0]) : undefined;
+  return publicIdentifier(result?.assetVersionId);
+}
+
+async function ownsAssetVersion(
+  assetVersionId: string,
+  ownerId: string,
+  projectId: string | undefined,
+): Promise<boolean> {
+  if (!projectId) return false;
+  try {
+    const result = await getPool().query(
+      `SELECT id
+       FROM wujie_asset_versions
+       WHERE id = $1 AND owner_id = $2 AND project_id = $3`,
+      [assetVersionId, ownerId, projectId],
+    );
+    return (result.rowCount ?? result.rows.length) === 1;
+  } catch {
+    return false;
+  }
 }
 
 function projectTask(task: CloudTask): GatewayTaskProjection {
@@ -243,6 +261,7 @@ export async function getGatewayTaskProjection(
   if (projection.status !== 'completed') return projection;
   const assetVersionId = projectedAssetVersionId(task.result);
   if (!assetVersionId) return projection;
+  if (!await ownsAssetVersion(assetVersionId, principal.userId, task.projectId)) return projection;
   const downloadUrl = [projection.result.imageUrl, projection.result.videoUrl]
     .find(value => typeof value === 'string' && value.length > 0) as string | undefined;
   const thumbnailUrls = await readyThumbnailUrls(assetVersionId, principal.userId);

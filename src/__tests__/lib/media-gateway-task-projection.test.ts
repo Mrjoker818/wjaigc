@@ -32,6 +32,7 @@ describe('media gateway task thumbnail projection', () => {
     mocks.getCloudTaskForUser.mockResolvedValue({
       id: 'task-1',
       userId: 'user-1',
+      projectId: 'project-1',
       type: 'generate-async',
       status: 'completed',
       progress: 100,
@@ -43,13 +44,15 @@ describe('media gateway task thumbnail projection', () => {
       createdAt: 1,
       updatedAt: 2,
     });
-    mocks.query.mockImplementation(() => Promise.resolve({
-      rows: mocks.thumbnailState === 'ready'
-        ? [
-            { size: 256, file_url: '/uploads/thumb-256.webp' },
-            { size: 512, file_url: '/uploads/thumb-512.webp' },
-          ]
-        : [],
+    mocks.query.mockImplementation((sql: string) => Promise.resolve({
+      rows: sql.includes('FROM wujie_asset_versions')
+        ? [{ id: 'version-1' }]
+        : mocks.thumbnailState === 'ready'
+          ? [
+              { size: 256, file_url: '/uploads/thumb-256.webp' },
+              { size: 512, file_url: '/uploads/thumb-512.webp' },
+            ]
+          : [],
     }));
   });
 
@@ -78,7 +81,9 @@ describe('media gateway task thumbnail projection', () => {
   );
 
   it('keeps the owner-scoped asset identity and original download while thumbnails are pending', async () => {
-    mocks.query.mockResolvedValue({ rows: [] });
+    mocks.query.mockImplementation((sql: string) => Promise.resolve({
+      rows: sql.includes('FROM wujie_asset_versions') ? [{ id: 'version-1' }] : [],
+    }));
 
     const projection = await getGatewayTaskProjection(principal, 'task-1');
 
@@ -94,10 +99,55 @@ describe('media gateway task thumbnail projection', () => {
   it('queries only ready 256 and 512 variants owned by the task principal', async () => {
     await getGatewayTaskProjection(principal, 'task-1');
 
+    expect(mocks.query).toHaveBeenCalledTimes(2);
+    expect(mocks.query.mock.calls[0][0]).toContain('FROM wujie_asset_versions');
+    expect(mocks.query.mock.calls[0][1]).toEqual(['version-1', 'user-1', 'project-1']);
+    expect(mocks.query.mock.calls[1][0]).toContain("status = 'ready'");
+    expect(mocks.query.mock.calls[1][0]).toMatch(/size\s+IN\s*\(256,\s*512\)/);
+    expect(mocks.query.mock.calls[1][1]).toEqual(['version-1', 'user-1']);
+  });
+
+  it('does not expose an asset version outside the task owner and project', async () => {
+    mocks.query.mockImplementation((sql: string) => Promise.resolve({
+      rows: sql.includes('FROM wujie_asset_versions')
+        ? []
+        : [{ size: 512, file_url: '/uploads/thumb-512.webp' }],
+    }));
+
+    const projection = await getGatewayTaskProjection(principal, 'task-1');
+
+    expect(projection.assetVersionId).toBeUndefined();
+    expect(projection.thumbnailUrls).toEqual({});
     expect(mocks.query).toHaveBeenCalledOnce();
-    expect(mocks.query.mock.calls[0][0]).toContain("status = 'ready'");
-    expect(mocks.query.mock.calls[0][0]).toMatch(/size\s+IN\s*\(256,\s*512\)/);
-    expect(mocks.query.mock.calls[0][1]).toEqual(['version-1', 'user-1']);
+  });
+
+  it('prefers the current asset projection over the legacy top-level version id', async () => {
+    mocks.getCloudTaskForUser.mockResolvedValue({
+      id: 'task-1',
+      userId: 'user-1',
+      projectId: 'project-1',
+      type: 'generate-async',
+      status: 'completed',
+      progress: 100,
+      result: {
+        assetVersionId: 'legacy-version',
+        assetProjection: { versionIds: ['current-version'] },
+        imageUrl: '/uploads/original.png',
+      },
+      creditStatus: 'charged',
+      createdAt: 1,
+      updatedAt: 2,
+    });
+    mocks.query.mockImplementation((sql: string) => Promise.resolve({
+      rows: sql.includes('FROM wujie_asset_versions')
+        ? [{ id: 'current-version' }]
+        : [],
+    }));
+
+    await expect(getGatewayTaskProjection(principal, 'task-1')).resolves.toMatchObject({
+      assetVersionId: 'current-version',
+    });
+    expect(mocks.query.mock.calls[0][1]).toEqual(['current-version', 'user-1', 'project-1']);
   });
 
   it.each(['processing', 'cancelled'] as const)(
@@ -141,12 +191,14 @@ describe('media gateway task thumbnail projection', () => {
 
   it('uses a safe 256 thumbnail when the 512 URL is unsafe', async () => {
     const unsafeUrl = 'https://127.0.0.1/private.webp';
-    mocks.query.mockResolvedValue({
-      rows: [
-        { size: 256, file_url: '/uploads/thumb-256.webp' },
-        { size: 512, file_url: unsafeUrl },
-      ],
-    });
+    mocks.query.mockImplementation((sql: string) => Promise.resolve({
+      rows: sql.includes('FROM wujie_asset_versions')
+        ? [{ id: 'version-1' }]
+        : [
+            { size: 256, file_url: '/uploads/thumb-256.webp' },
+            { size: 512, file_url: unsafeUrl },
+          ],
+    }));
 
     const projection = await getGatewayTaskProjection(principal, 'task-1');
 
@@ -159,7 +211,9 @@ describe('media gateway task thumbnail projection', () => {
   });
 
   it('fails closed on thumbnail storage errors without changing completed status', async () => {
-    mocks.query.mockRejectedValue(new Error('thumbnail storage unavailable'));
+    mocks.query
+      .mockResolvedValueOnce({ rows: [{ id: 'version-1' }] })
+      .mockRejectedValueOnce(new Error('thumbnail storage unavailable'));
 
     await expect(getGatewayTaskProjection(principal, 'task-1')).resolves.toMatchObject({
       status: 'completed',

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse, after } from 'next/server';
+import { randomUUID } from 'node:crypto';
 
 export const maxDuration = 1800; // 30分钟 - 支持长时间轮询慢速API（apimart等需要260s+任务）
 
@@ -68,7 +69,10 @@ import { getRequestId } from '@/lib/request-id';
 import type { GenerationRouteAudit } from '@/lib/generation-route-audit';
 import { STRICT_AGENT_GENERATE_HEADER } from '@/lib/agent-runtime/generate-image-adapter';
 import { enrichCompletedImageResult } from '@/lib/asset-core/image-result-metadata';
-import { stabilizeGatewayImageResult } from '@/lib/media-gateway/artifact-persistence';
+import {
+  isGatewayImageResult,
+  stabilizeGatewayImageResult,
+} from '@/lib/media-gateway/artifact-persistence';
 import {
   inspectPersistedVideoFile,
   type PersistedVideoFileMetadata,
@@ -1498,6 +1502,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
             modelName: recovery.model,
           },
         });
+        if (!requiresSubmissionRecovery) {
+          await releaseCloudTaskLease(recovered.taskId, TASK_RECOVERY_WORKER_ID);
+        }
         if (requiresSubmissionRecovery) {
           after(async () => {
             const recoveryAbort = createTaskAbortScope(recovered.taskId, {
@@ -1576,7 +1583,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
               ...(Array.isArray(resumedData.directImageUrls) ? resumedData.directImageUrls : []),
             ].filter((url): url is string => typeof url === 'string' && url.length > 0);
             if (directImageUrls.length > 0) {
-              const completedResult = sanitizeCompletedTaskResult({
+              let completedResult = sanitizeCompletedTaskResult({
                 ...(submissionPayload as Record<string, unknown>),
                 submissionPayload,
                 imageUrl: directImageUrls[0],
@@ -1586,6 +1593,15 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
                 providerId: resumedData.providerId || recovery.providerId,
                 providerName: resumedData.providerName,
               });
+              completedResult = await stabilizeGatewayImageResult({
+                taskId: recovered.taskId,
+                result: completedResult,
+              });
+              const stabilizedDirectImageUrls = Array.isArray(completedResult.imageUrls)
+                ? completedResult.imageUrls.filter(
+                    (url): url is string => typeof url === 'string' && url.length > 0,
+                  )
+                : directImageUrls;
               const committed = await completeCloudTask(
                 recovered.taskId,
                 completedResult,
@@ -1614,8 +1630,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
               });
               completedTaskCache.set(recovered.taskId, {
                 userId: recovery.userId,
-                imageUrl: directImageUrls[0],
-                imageUrls: directImageUrls,
+                imageUrl: stabilizedDirectImageUrls[0],
+                imageUrls: stabilizedDirectImageUrls,
                 modelName: typeof authoritativeCompletedResult.modelName === 'string'
                   ? authoritativeCompletedResult.modelName
                   : undefined,
@@ -1661,6 +1677,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
               });
               return;
             }
+            await releaseCloudTaskLease(recovered.taskId, TASK_RECOVERY_WORKER_ID);
             updateTaskProgress(recovered.taskId, { status: 'processing', progress: 10, result: recoveredResult });
           } catch (error) {
             if (persistedTask.result?.skillBillingProvenance) {
@@ -3313,6 +3330,26 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         providerName: finalProviderName,
         generationRouteAudit: existingResult.generationRouteAudit,
       });
+      let gatewayArtifactLeaseOwner: string | undefined;
+      if (durableAtomicTask && isGatewayImageResult(completedTaskResult)) {
+        gatewayArtifactLeaseOwner = `gateway-artifact-${process.pid}-${randomUUID()}`;
+        const artifactLease = await claimCloudTaskLease(
+          taskId,
+          gatewayArtifactLeaseOwner,
+          TASK_RECOVERY_LEASE_MS,
+        );
+        if (!artifactLease) {
+          const persistedResponse = await getDurableGenerationSlotResponse(taskId, userId);
+          if (persistedResponse) return persistedResponse;
+          return NextResponse.json({
+            success: true,
+            status: 'processing',
+            progress: Math.min(99, Math.max(registryTask?.progress || 0, 95)),
+            label: '正在持久化生成结果',
+            retryable: true,
+          }, { status: 200 });
+        }
+      }
       try {
         completedTaskResult = await stabilizeGatewayImageResult({
           taskId,
@@ -3338,15 +3375,29 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
           taskId,
           'failed',
           gatewayPersistenceError,
+          gatewayArtifactLeaseOwner,
         );
         const terminatedTask = await getCloudTaskForUser(taskId, userId);
-        updateTaskProgress(taskId, {
-          status: 'failed',
-          progress: 100,
-          error: gatewayPersistenceError,
-          result: terminatedTask?.result,
-        });
-        releaseQueueSlot(taskId);
+        if (!termination.transitioned && terminatedTask?.status !== 'failed') {
+          const persistedResponse = await getDurableGenerationSlotResponse(taskId, userId);
+          if (persistedResponse) return persistedResponse;
+          return NextResponse.json(withGenerationSlotMetadata({
+            success: terminatedTask?.status === 'completed',
+            status: terminatedTask?.status || 'processing',
+            progress: terminatedTask?.progress || 0,
+            error: terminatedTask?.error || undefined,
+            retryable: true,
+          }, terminatedTask?.result, taskId), { status: 200 });
+        }
+        if (terminatedTask?.status === 'failed') {
+          updateTaskProgress(taskId, {
+            status: 'failed',
+            progress: 100,
+            error: gatewayPersistenceError,
+            result: terminatedTask.result,
+          });
+          releaseQueueSlot(taskId);
+        }
         return NextResponse.json(withGenerationSlotMetadata({
           success: false,
           status: termination.status || terminatedTask?.status || 'failed',
@@ -3358,7 +3409,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       if (durableAtomicTask) {
         const metadataEnrichedResult = await enrichCompletedImageResult(completedTaskResult);
         completedTaskResult.images = metadataEnrichedResult.images;
-        const generationCompletion = await completeCloudTask(taskId, completedTaskResult);
+        const generationCompletion = await completeCloudTask(
+          taskId,
+          completedTaskResult,
+          gatewayArtifactLeaseOwner,
+        );
         if (!generationCompletion) {
           const persistedResponse = await getDurableGenerationSlotResponse(taskId, userId);
           if (persistedResponse) return persistedResponse;

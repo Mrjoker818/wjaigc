@@ -175,6 +175,36 @@ export async function readImageFromS3(key: string): Promise<Buffer | null> {
   }
 }
 
+/**
+ * Uploads a gateway artifact through the AWS client so timeout/cancellation
+ * actively aborts the underlying request instead of leaving a detached upload.
+ */
+export async function uploadImageToS3Abortable(
+  buffer: Buffer,
+  fileName: string,
+  contentType: string = 'image/png',
+  signal?: AbortSignal,
+): Promise<string | null> {
+  const storage = getBinaryStorage();
+  if (!storage) return null;
+  const safeName = fileName.replace(/[^a-zA-Z0-9._\-/]/g, '_');
+  const key = `images/${safeName}`;
+  try {
+    signal?.throwIfAborted();
+    await storage.client.send(new PutObjectCommand({
+      Bucket: storage.bucket,
+      Key: key,
+      Body: buffer,
+      ContentType: contentType,
+    }), { abortSignal: signal });
+    return `/${key}`;
+  } catch (error) {
+    if (signal?.aborted) throw signal.reason ?? error;
+    console.error('[s3-storage] Abortable upload failed:', error);
+    return null;
+  }
+}
+
 const BINARY_CONTENT_TYPES = new Set([
   'image/png',
   'image/jpeg',
@@ -212,6 +242,16 @@ async function deleteExactS3Key(client: S3Client, bucket: string, key: string): 
 export async function deleteBinaryFromS3Exact(key: string): Promise<void> {
   if (!/^exports\/[a-f0-9]{16}-[A-Za-z0-9._-]+\.(?:png|jpe?g|webp|json|zip)$/u.test(key)) {
     throw new TypeError('S3_BINARY_KEY_INVALID');
+  }
+  const storage = getBinaryStorage();
+  if (!storage) throw new Error('S3_BINARY_STORAGE_UNAVAILABLE');
+  await deleteExactS3Key(storage.client, storage.bucket, key);
+}
+
+/** Deletes only gateway-created image objects; caller must provide the exact persisted key. */
+export async function deleteGatewayImageFromS3Exact(key: string): Promise<void> {
+  if (!/^images\/gateway\/[A-Za-z0-9._-]+\.(?:png|jpe?g|webp|gif|bmp|avif)$/u.test(key)) {
+    throw new TypeError('S3_GATEWAY_IMAGE_KEY_INVALID');
   }
   const storage = getBinaryStorage();
   if (!storage) throw new Error('S3_BINARY_STORAGE_UNAVAILABLE');
