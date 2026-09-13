@@ -77,5 +77,11 @@ export default defineConfig({
     { name: 'firefox', use: { ...devices['Desktop Firefox'] } },
     { name: 'webkit', use: { ...devices['Desktop Safari'] } },
     { name: 'mobile-chromium', use: { ...devices['Pixel 7'], viewport: { width: 375, height: 812 }, channel: 'chromium', launchOptions: chromiumLaunchOptions } },
+    { name: 'mobile-320-chromium', use: { ...devices['Desktop Chrome'], channel: 'chromium', viewport: { width: 320, height: 568 }, hasTouch: true, isMobile: true, launchOptions: chromiumLaunchOptions } },
+    { name: 'mobile-375-chromium', use: { ...devices['Desktop Chrome'], channel: 'chromium', viewport: { width: 375, height: 667 }, hasTouch: true, isMobile: true, launchOptions: chromiumLaunchOptions } },
+    { name: 'mobile-393-chromium', use: { ...devices['Desktop Chrome'], channel: 'chromium', viewport: { width: 393, height: 852 }, hasTouch: true, isMobile: true, launchOptions: chromiumLaunchOptions } },
+    { name: 'desktop-1440-chromium', use: { ...devices['Desktop Chrome'], channel: 'chromium', viewport: { width: 1440, height: 900 }, launchOptions: chromiumLaunchOptions } },
+    { name: 'mobile-375-firefox', use: { ...devices['Desktop Firefox'], viewport: { width: 375, height: 667 }, hasTouch: true } },
+    { name: 'mobile-375-webkit', use: { ...devices['Desktop Safari'], viewport: { width: 375, height: 667 }, hasTouch: true, isMobile: true } },
   ],
 });

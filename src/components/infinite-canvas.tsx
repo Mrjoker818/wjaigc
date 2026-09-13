@@ -104,6 +104,14 @@ import {
   createCanvasTouchGestureController,
   type CanvasTouchIntent,
 } from '@/lib/canvas-touch-gestures';
+
+function createBoundTouchGestureController(
+  handlerRef: { current: (intent: CanvasTouchIntent) => void },
+) {
+  return createCanvasTouchGestureController({
+    onIntent: intent => handlerRef.current(intent),
+  });
+}
 import { useCanvasSelection } from '@/components/canvas/use-canvas-selection';
 import { CanvasMediaNode } from '@/components/canvas/CanvasMediaNode';
 import { CanvasSurface } from '@/components/canvas/CanvasSurface';
@@ -1412,9 +1420,7 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
   const touchGestureIntentHandlerRef = useRef<(intent: CanvasTouchIntent) => void>(() => {});
   const touchGestureControllerRef = useRef<ReturnType<typeof createCanvasTouchGestureController>>(null!);
   if (touchGestureControllerRef.current === null) {
-    touchGestureControllerRef.current = createCanvasTouchGestureController({
-      onIntent: intent => touchGestureIntentHandlerRef.current(intent),
-    });
+    touchGestureControllerRef.current = createBoundTouchGestureController(touchGestureIntentHandlerRef);
   }
 
   // Ctrl key tracking for reference selection hint
@@ -2520,6 +2526,9 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
   // P2-4: 追踪所有活跃的setInterval，确保组件卸载时清理
   const activeIntervalsRef = useRef<Set<ReturnType<typeof setInterval>>>(new Set());
   useEffect(() => {
+    if (touchGestureControllerRef.current === null) {
+      touchGestureControllerRef.current = createBoundTouchGestureController(touchGestureIntentHandlerRef);
+    }
     isMountedRef.current = true;
     const set = activeIntervalsRef.current;
     const canvasGenerationAbortControllers = canvasGenerationAbortControllersRef.current;
@@ -2572,6 +2581,9 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
       activeTouchPointerIds.clear();
       touchGestureExclusiveRef.current = false;
       touchGestureController.dispose();
+      if (touchGestureControllerRef.current === touchGestureController) {
+        touchGestureControllerRef.current = null!;
+      }
     };
   }, []);
 
@@ -11617,6 +11629,7 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
     <div
       className="w-full h-full relative"
       data-canvas-tool-host-state={canvasToolSession.status}
+      data-canvas-history-pending={isHistoryTransitionPending ? 'true' : 'false'}
     >
       <CanvasToolHost
         session={canvasToolSession}
