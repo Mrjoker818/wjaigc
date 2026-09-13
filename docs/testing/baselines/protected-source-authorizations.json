@@ -244,6 +244,26 @@
     { "path": "src/lib/canvas-touch-gestures.ts", "sourceCommit": "061f2257" },
     { "path": "src/lib/image-generation-session.ts", "sourceCommit": "70c93f6b" },
     { "path": "src/lib/mobile-canvas-toolbar.ts", "sourceCommit": "ca923edd" },
-    { "path": "src/lib/simple-create-navigation.ts", "sourceCommit": "70c93f6b" }
+    { "path": "src/lib/simple-create-navigation.ts", "sourceCommit": "70c93f6b" },
+    { "path": "src/app/api/admin/gateway/keys/[keyId]/route.ts", "sourceCommit": "6f41d2a9" },
+    { "path": "src/app/api/admin/gateway/keys/route.ts", "sourceCommit": "6f41d2a9" },
+    { "path": "src/app/api/gateway/v1/images/route.ts", "sourceCommit": "fbaa13d9" },
+    { "path": "src/app/api/gateway/v1/tasks/[taskId]/cancel/route.ts", "sourceCommit": "1071de17" },
+    { "path": "src/app/api/gateway/v1/tasks/[taskId]/route.ts", "sourceCommit": "1071de17" },
+    { "path": "src/app/api/gateway/v1/videos/route.ts", "sourceCommit": "fbaa13d9" },
+    { "path": "src/components/dashboard/media-gateway-admin.tsx", "sourceCommit": "0ae86da8" },
+    { "path": "src/lib/media-gateway/admission.ts", "sourceCommit": "301fc4af" },
+    { "path": "src/lib/media-gateway/audit.ts", "sourceCommit": "752b2504" },
+    { "path": "src/lib/media-gateway/http.ts", "sourceCommit": "031c6a58" },
+    { "path": "src/lib/media-gateway/internal-client.ts", "sourceCommit": "54e21e65" },
+    { "path": "src/lib/media-gateway/key-service.ts", "sourceCommit": "301fc4af" },
+    { "path": "src/lib/media-gateway/schema.ts", "sourceCommit": "d387736d" },
+    { "path": "src/lib/media-gateway/task-projection.ts", "sourceCommit": "9ecb8a06" },
+    { "path": "src/lib/media-gateway/types.ts", "sourceCommit": "91c1f6c2" },
+    { "path": "src/lib/media-gateway/utc-day-window.ts", "sourceCommit": "301fc4af" },
+    { "path": ".superpowers/sdd/media-gateway-task-7-fix-review-package.md", "sourceCommit": "a790f953" },
+    { "path": ".superpowers/sdd/media-gateway-task-7-report.md", "sourceCommit": "4a6ae9da" },
+    { "path": ".superpowers/sdd/media-gateway-task-8-report.md", "sourceCommit": "74716cb9" },
+    { "path": "migrations/20260913_v588_media_gateway.sql", "sourceCommit": "91c1f6c2" }
   ]
 }

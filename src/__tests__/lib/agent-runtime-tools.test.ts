@@ -4,6 +4,13 @@ import { resolve } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 
 vi.mock('server-only', () => ({}));
+vi.mock('@/lib/api-auth', () => ({
+  getInternalRequestHeaders: vi.fn(async () => ({
+    'x-internal-request': 'true',
+    'x-internal-user-id': 'user-1',
+    'x-wujie-internal-secret': 'test-only-internal-secret',
+  })),
+}));
 
 import {
   AgentContextNotFoundError,
