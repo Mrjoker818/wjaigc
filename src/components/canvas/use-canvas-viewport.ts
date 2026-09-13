@@ -11,6 +11,7 @@ import {
   type SetStateAction,
 } from 'react';
 import type { CanvasKernelMode } from '@/lib/canvas-kernel/mode';
+import type { CanvasTouchIntent } from '@/lib/canvas-touch-gestures';
 import {
   beginPan as beginKernelPan,
   cancelPan as cancelKernelPan,
@@ -61,6 +62,7 @@ interface UseCanvasViewportResult {
   commitPan: (pointer?: Pick<CanvasPointerSample, 'pointerId'>) => void;
   cancelPan: (pointer?: Pick<CanvasPointerSample, 'pointerId'>) => void;
   zoomAtPoint: (anchor: CanvasPoint, nextZoom: number) => void;
+  translateBy: (delta: CanvasPoint) => void;
   fitContent: (rects: CanvasViewportRect[], viewport: CanvasViewportSize, padding?: number) => void;
   screenToCanvas: (point: CanvasPoint) => CanvasPoint;
   canvasToScreen: (point: CanvasPoint) => CanvasPoint;
@@ -73,6 +75,62 @@ interface UseCanvasViewportResult {
   ) => ReturnType<typeof resolveCanvasCullingBounds>;
   resolveRenderOffset: (isPanning: boolean, isMiddlePanning: boolean) => CanvasPoint;
   getViewportMarginFactor: (isPanning: boolean, isMiddlePanning: boolean) => number;
+}
+
+export interface CanvasTouchIntentDependencies {
+  getZoom: () => number;
+  beginPan: (pointer: CanvasPointerSample) => boolean;
+  previewPan: (pointer: CanvasPointerSample) => void;
+  commitPan: (pointer?: Pick<CanvasPointerSample, 'pointerId'>) => void;
+  cancelPan: (pointer?: Pick<CanvasPointerSample, 'pointerId'>) => void;
+  zoomAtPoint: (anchor: CanvasPoint, nextZoom: number) => void;
+  translateBy: (delta: CanvasPoint) => void;
+  cancelSelectionGesture: () => void;
+  cancelImageDrag: () => void;
+  openLongPressMenu: (point: CanvasPoint, target: 'blank' | 'image') => void;
+}
+
+export function applyCanvasTouchIntent(
+  intent: CanvasTouchIntent,
+  dependencies: CanvasTouchIntentDependencies,
+): void {
+  if (intent.type === 'pan-start') {
+    dependencies.beginPan({
+      pointerId: intent.pointerId,
+      clientX: intent.point.x,
+      clientY: intent.point.y,
+    });
+    return;
+  }
+  if (intent.type === 'pan-move') {
+    dependencies.previewPan({
+      pointerId: intent.pointerId,
+      clientX: intent.point.x,
+      clientY: intent.point.y,
+    });
+    return;
+  }
+  if (intent.type === 'pan-end') {
+    dependencies.commitPan({ pointerId: intent.pointerId });
+    return;
+  }
+  if (intent.type === 'pinch') {
+    const nextZoom = Math.round(dependencies.getZoom() * intent.scale * 1_000_000) / 1_000_000;
+    dependencies.zoomAtPoint(intent.midpoint, nextZoom);
+    dependencies.translateBy(intent.midpointDelta);
+    return;
+  }
+  if (intent.type === 'cancel-default-interaction') {
+    dependencies.cancelSelectionGesture();
+    dependencies.cancelImageDrag();
+    dependencies.cancelPan();
+    return;
+  }
+  if (intent.type === 'long-press') {
+    dependencies.cancelSelectionGesture();
+    dependencies.cancelImageDrag();
+    dependencies.openLongPressMenu(intent.point, intent.target);
+  }
 }
 
 function legacyBeginPan(state: CanvasViewportState, pointer: CanvasPointerSample): CanvasViewportState {
@@ -227,6 +285,13 @@ export function useCanvasViewport({
       setViewportZoom(kernelRef.current, nextZoom),
     );
   }, [activeRef, publish]);
+
+  const translateBy = useCallback((delta: CanvasPoint) => {
+    setViewOffset(current => ({
+      x: current.x + delta.x,
+      y: current.y + delta.y,
+    }));
+  }, [setViewOffset]);
 
   const beginPan = useCallback((pointer: CanvasPointerSample) => {
     const active = activeRef();
@@ -388,6 +453,7 @@ export function useCanvasViewport({
     commitPan,
     cancelPan,
     zoomAtPoint,
+    translateBy,
     fitContent,
     screenToCanvas,
     canvasToScreen,

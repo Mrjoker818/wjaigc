@@ -18,10 +18,11 @@ describe('canvas group gesture contract', () => {
     expect(source).toContain('addFusionImageToGenGroupRef.current(modifierImage);');
   });
 
-  it('restores blank-canvas long-press panning without stealing a moved box-selection gesture', () => {
-    expect(source).toContain('canvasLongPressTimerRef');
-    expect(source).toContain('startBlankCanvasLongPress');
-    expect(source).toContain('clearBlankCanvasLongPress');
+  it('routes touch long-press and pan through the touch controller without replacing desktop box selection', () => {
+    expect(source).toContain('createCanvasTouchGestureController');
+    expect(source).toContain("intent.type === 'long-press'");
+    expect(source).toContain("if (resolveBlankCanvasGesture(e.pointerType) === 'box-select') {");
+    expect(source).toContain('openLongPressMenu: point => openContextMenuAt(point)');
     expect(source).toContain('setIsPanning(true);');
   });
 

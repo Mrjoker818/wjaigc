@@ -99,7 +99,11 @@ import {
 } from '@/lib/canvas-spatial-index';
 import { UserManager } from '@/lib/user-manager';
 import { beginCanvasSpacePan, resetCanvasSpacePan } from '@/lib/canvas-pan-virtualization';
-import { useCanvasViewport } from '@/components/canvas/use-canvas-viewport';
+import { applyCanvasTouchIntent, useCanvasViewport } from '@/components/canvas/use-canvas-viewport';
+import {
+  createCanvasTouchGestureController,
+  type CanvasTouchIntent,
+} from '@/lib/canvas-touch-gestures';
 import { useCanvasSelection } from '@/components/canvas/use-canvas-selection';
 import { CanvasMediaNode } from '@/components/canvas/CanvasMediaNode';
 import { CanvasSurface } from '@/components/canvas/CanvasSurface';
@@ -860,6 +864,7 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
     commitPan: commitViewportPan,
     cancelPan: cancelViewportPan,
     zoomAtPoint: zoomViewportAtPoint,
+    translateBy: translateViewportBy,
     fitContent: fitViewportContent,
     screenToCanvas: viewportScreenToCanvas,
     resolveCullingBounds: resolveViewportCullingBounds,
@@ -871,6 +876,8 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
     transformRef: canvasTransformRef,
     onPanViewportSync: handlePanViewportSync,
   });
+  const zoomRef = useRef(zoom);
+  zoomRef.current = zoom;
 
   // Persist view state changes (debounced)
   const viewStateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -1394,41 +1401,15 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
   const mouseDownPosRef = useRef({ x: 0, y: 0 });
   const mouseDownOnImageRef = useRef(false);
   const imageDragReadyRef = useRef(false);
-  const canvasLongPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const blankCanvasPointerRef = useRef<number | null>(null);
-
-  const clearBlankCanvasLongPress = useCallback((pointerId?: number) => {
-    if (pointerId !== undefined && blankCanvasPointerRef.current !== pointerId) {
-      return;
-    }
-    if (canvasLongPressTimerRef.current) {
-      clearTimeout(canvasLongPressTimerRef.current);
-      canvasLongPressTimerRef.current = null;
-    }
-    blankCanvasPointerRef.current = null;
-  }, []);
-
-  const startBlankCanvasLongPress = useCallback((
-    pointerId: number,
-    clientX: number,
-    clientY: number,
-  ) => {
-    clearBlankCanvasLongPress();
-    blankCanvasPointerRef.current = pointerId;
-    canvasLongPressTimerRef.current = setTimeout(() => {
-      if (blankCanvasPointerRef.current !== pointerId) return;
-      if (getBoxSelectionPreview()?.active) {
-        clearBlankCanvasLongPress(pointerId);
-        return;
-      }
-      canvasLongPressTimerRef.current = null;
-      cancelSelectionGesture(pointerId);
-      if (!beginViewportPan({ pointerId, clientX, clientY })) return;
-      viewportPanPointerIdRef.current = pointerId;
-      setIsPanning(true);
-      setIsLongPressing(true);
-    }, 250);
-  }, [beginViewportPan, cancelSelectionGesture, clearBlankCanvasLongPress, getBoxSelectionPreview]);
+  const activeTouchPointerIdsRef = useRef<Set<number>>(new Set());
+  const touchGestureExclusiveRef = useRef(false);
+  const touchGestureIntentHandlerRef = useRef<(intent: CanvasTouchIntent) => void>(() => {});
+  const touchGestureControllerRef = useRef<ReturnType<typeof createCanvasTouchGestureController>>(null!);
+  if (touchGestureControllerRef.current === null) {
+    touchGestureControllerRef.current = createCanvasTouchGestureController({
+      onIntent: intent => touchGestureIntentHandlerRef.current(intent),
+    });
+  }
 
   // Ctrl key tracking for reference selection hint
   const [ctrlKeyHeld, setCtrlKeyHeld] = useState(false);
@@ -2536,6 +2517,8 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
     isMountedRef.current = true;
     const set = activeIntervalsRef.current;
     const canvasGenerationAbortControllers = canvasGenerationAbortControllersRef.current;
+    const activeTouchPointerIds = activeTouchPointerIdsRef.current;
+    const touchGestureController = touchGestureControllerRef.current;
     return () => {
       isMountedRef.current = false;
       annotationTaskAbortRef.current?.abort();
@@ -2547,8 +2530,6 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
       set.forEach((id) => clearInterval(id));
       set.clear();
 
-      if (canvasLongPressTimerRef.current) clearTimeout(canvasLongPressTimerRef.current);
-      canvasLongPressTimerRef.current = null;
       if (hoverToolbarTimerRef.current) clearTimeout(hoverToolbarTimerRef.current);
       hoverToolbarTimerRef.current = null;
       if (viewStateTimerRef.current) clearTimeout(viewStateTimerRef.current);
@@ -2576,12 +2557,15 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
       for (const pointerId of [
         annotationPointerIdRef.current,
         imageDragPointerIdRef.current,
-        blankCanvasPointerRef.current,
+        ...activeTouchPointerIds,
       ]) {
         if (pointerId !== null && surface?.hasPointerCapture(pointerId)) {
           surface.releasePointerCapture(pointerId);
         }
       }
+      activeTouchPointerIds.clear();
+      touchGestureExclusiveRef.current = false;
+      touchGestureController.dispose();
     };
   }, []);
 
@@ -4155,6 +4139,122 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
     setCropDragOrigin(null);
   }, [cropDragMode]);
 
+  const openContextMenuAt = useCallback((point: { x: number; y: number }) => {
+    const canvasPos = screenToCanvas(point.x, point.y);
+    const hitId = hitTestImage(canvasPos.x, canvasPos.y);
+
+    if (hitId) {
+      contextMenuTargetRef.current = hitId;
+      if (!selectedIds.has(hitId)) {
+        setSelectedIds(current => (
+          current.size > 1 ? new Set([...current, hitId]) : new Set([hitId])
+        ));
+        selectImage(hitId);
+      }
+      setContextMenuPos(point);
+      setShowContextMenu(true);
+      setShowCanvasMenu(false);
+      return;
+    }
+
+    setCanvasMenuPos(point);
+    setShowCanvasMenu(true);
+    setShowContextMenu(false);
+  }, [hitTestImage, screenToCanvas, selectImage, selectedIds, setSelectedIds]);
+
+  const applyTouchGestureIntent = useCallback((intent: CanvasTouchIntent) => {
+    if (
+      intent.type === 'cancel-default-interaction'
+      || intent.type === 'pan-start'
+      || intent.type === 'pinch'
+      || intent.type === 'long-press'
+    ) {
+      touchGestureExclusiveRef.current = true;
+    }
+
+    applyCanvasTouchIntent(intent, {
+      getZoom: () => zoomRef.current,
+      beginPan: pointer => {
+        const began = beginViewportPan(pointer);
+        if (began) {
+          viewportPanPointerIdRef.current = pointer.pointerId;
+          directPanPointerIdRef.current = pointer.pointerId;
+          setIsPanning(true);
+        }
+        return began;
+      },
+      previewPan: previewViewportPan,
+      commitPan: pointer => {
+        commitViewportPan(pointer);
+        if (!pointer || viewportPanPointerIdRef.current === pointer.pointerId) {
+          viewportPanPointerIdRef.current = null;
+          directPanPointerIdRef.current = null;
+          setIsPanning(false);
+          setIsLongPressing(false);
+        }
+      },
+      cancelPan: pointer => {
+        cancelViewportPan(pointer);
+        viewportPanPointerIdRef.current = null;
+        directPanPointerIdRef.current = null;
+        setIsPanning(false);
+        setIsMiddlePanning(false);
+        setIsLongPressing(false);
+      },
+      zoomAtPoint: (point, nextZoom) => {
+        const rect = canvasRef.current?.getBoundingClientRect();
+        zoomViewportAtPoint({
+          x: point.x - (rect?.left ?? 0),
+          y: point.y - (rect?.top ?? 0),
+        }, nextZoom);
+      },
+      translateBy: translateViewportBy,
+      cancelSelectionGesture: () => cancelSelectionGesture(),
+      cancelImageDrag: () => {
+        const pointerId = imageDragPointerIdRef.current;
+        if (pointerId !== null) rollbackHistoryTransaction(pointerId);
+        cancelImageDragPreview();
+      },
+      openLongPressMenu: point => openContextMenuAt(point),
+    });
+  }, [
+    beginViewportPan,
+    cancelImageDragPreview,
+    cancelSelectionGesture,
+    cancelViewportPan,
+    commitViewportPan,
+    openContextMenuAt,
+    previewViewportPan,
+    rollbackHistoryTransaction,
+    translateViewportBy,
+    zoomViewportAtPoint,
+  ]);
+  touchGestureIntentHandlerRef.current = applyTouchGestureIntent;
+
+  const resetTouchGesture = useCallback(() => {
+    const controller = touchGestureControllerRef.current;
+    const pointerId = activeTouchPointerIdsRef.current.values().next().value as number | undefined;
+    if (controller && pointerId !== undefined) {
+      controller.pointerCancel({
+        pointerId,
+        pointerType: 'touch',
+        point: { x: 0, y: 0 },
+        target: 'blank',
+      }).reverse().forEach(applyTouchGestureIntent);
+    }
+    const surface = canvasRef.current;
+    activeTouchPointerIdsRef.current.forEach(activePointerId => {
+      if (surface?.hasPointerCapture(activePointerId)) surface.releasePointerCapture(activePointerId);
+    });
+    activeTouchPointerIdsRef.current.clear();
+    touchGestureExclusiveRef.current = false;
+  }, [applyTouchGestureIntent]);
+
+  useEffect(() => {
+    window.addEventListener('blur', resetTouchGesture);
+    return () => window.removeEventListener('blur', resetTouchGesture);
+  }, [resetTouchGesture]);
+
   // Unified pointer handlers keep annotation gestures active for mouse, pen, and touch.
   const handlePointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
     if (isEventFromOverlay(e.nativeEvent)) return;
@@ -4375,6 +4475,29 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
 
     if (e.button === 2) return;
 
+    // Resolve the painted target once so touch and desktop manipulation share
+    // the same hit source while retaining their separate gesture semantics.
+    const renderedHitElement = (e.target as Element).closest<HTMLElement>('[data-canvas-image-id]');
+    const hitId = renderedHitElement?.dataset.canvasImageId || null;
+    if (e.pointerType === 'touch') {
+      activeTouchPointerIdsRef.current.add(e.pointerId);
+      const intents = touchGestureControllerRef.current.pointerDown({
+        pointerId: e.pointerId,
+        pointerType: e.pointerType,
+        point: { x: e.clientX, y: e.clientY },
+        target: hitId ? 'image' : 'blank',
+      });
+      intents.forEach(applyTouchGestureIntent);
+      if (!e.currentTarget.hasPointerCapture(e.pointerId)) {
+        e.currentTarget.setPointerCapture(e.pointerId);
+      }
+      if (!hitId || activeTouchPointerIdsRef.current.size > 1 || intents.length > 0) {
+        touchGestureExclusiveRef.current = true;
+        e.preventDefault();
+        return;
+      }
+    }
+
     // Middle button: pan canvas
     if (e.button === 1) {
       e.preventDefault();
@@ -4429,8 +4552,6 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
     // During fit-to-view React state can trail the already-painted transform by
     // one frame, so a logical-coordinate hit test can turn blank-space box
     // selection into an image drag.
-    const renderedHitElement = (e.target as Element).closest<HTMLElement>('[data-canvas-image-id]');
-    const hitId = renderedHitElement?.dataset.canvasImageId || null;
     if (hitId) {
       // Image compare: selecting second image
       if (compareSelecting && compareImages.left && hitId !== compareImages.left.id) {
@@ -4484,18 +4605,18 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
       imageDragReadyRef.current = false;
       setActiveTool('none');
       setShowDownloadPopup(false);
-      // Box select: left-click drag on blank area immediately starts box selection
-      beginSelectionBox({
-        pointerId: e.pointerId,
-        point: { x: e.clientX, y: e.clientY },
-        additive: e.ctrlKey || e.metaKey,
-      });
-      e.currentTarget.setPointerCapture(e.pointerId);
-      if (resolveBlankCanvasGesture(e.pointerType) === 'long-press-pan') {
-        startBlankCanvasLongPress(e.pointerId, e.clientX, e.clientY);
+      // Desktop/pen blank gestures keep box selection. Touch blank gestures
+      // are handled by the dedicated controller above.
+      if (resolveBlankCanvasGesture(e.pointerType) === 'box-select') {
+        beginSelectionBox({
+          pointerId: e.pointerId,
+          point: { x: e.clientX, y: e.clientY },
+          additive: e.ctrlKey || e.metaKey,
+        });
+        e.currentTarget.setPointerCapture(e.pointerId);
       }
     }
-  }, [viewOffset, selectedIds, images, screenToCanvas, hitTestImage, selectImage, editMode, zoom, handleEditMouseDown, compareSelecting, compareImages, annotationMode, annotationTool, annotationBrushSize, annotationBrushColor, annotations, beginViewportPan, annotationV2State.isOpen, annotationV2State.annotations, annotationV2State.sourceLock, annotationV2State.tool, beginCanvasAnnotationV2Gesture, brandProject?.id, projectId, setAnnotationV2State, startBlankCanvasLongPress, beginImageSelectionGesture, beginSelectionBox, isEventFromOverlay, selectSelectionHit, showRefFusion, beginHistoryTransaction, isHistoryTransitionPending]);
+  }, [viewOffset, selectedIds, images, screenToCanvas, hitTestImage, selectImage, editMode, zoom, handleEditMouseDown, compareSelecting, compareImages, annotationMode, annotationTool, annotationBrushSize, annotationBrushColor, annotations, beginViewportPan, annotationV2State.isOpen, annotationV2State.annotations, annotationV2State.sourceLock, annotationV2State.tool, beginCanvasAnnotationV2Gesture, brandProject?.id, projectId, setAnnotationV2State, setSelectedIds, applyTouchGestureIntent, beginImageSelectionGesture, beginSelectionBox, isEventFromOverlay, showRefFusion, beginHistoryTransaction, isHistoryTransitionPending]);
 
   const handlePointerMove = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
     if (
@@ -4586,6 +4707,23 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
       return;
     }
 
+    if (e.pointerType === 'touch' && activeTouchPointerIdsRef.current.has(e.pointerId)) {
+      const target = (e.target as Element).closest<HTMLElement>('[data-canvas-image-id]')
+        ? 'image'
+        : 'blank';
+      const intents = touchGestureControllerRef.current.pointerMove({
+        pointerId: e.pointerId,
+        pointerType: e.pointerType,
+        point: { x: e.clientX, y: e.clientY },
+        target,
+      });
+      intents.forEach(applyTouchGestureIntent);
+      if (touchGestureExclusiveRef.current) {
+        e.preventDefault();
+        return;
+      }
+    }
+
     if (isMiddlePanning && viewportPanPointerIdRef.current === e.pointerId) {
       middlePanMovedRef.current = true;
       previewViewportPan({ pointerId: e.pointerId, clientX: e.clientX, clientY: e.clientY });
@@ -4601,15 +4739,6 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
     }
 
     const canvasPos = screenToCanvas(e.clientX, e.clientY);
-    if (blankCanvasPointerRef.current === e.pointerId) {
-      const movedDistance = Math.hypot(
-        e.clientX - mouseDownPosRef.current.x,
-        e.clientY - mouseDownPosRef.current.y,
-      );
-      if (movedDistance > 6) {
-        clearBlankCanvasLongPress(e.pointerId);
-      }
-    }
 
     // Box select (left-click drag on blank area)
     if (getBoxSelectionPreview()) {
@@ -4617,7 +4746,6 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
         pointerId: e.pointerId,
         point: { x: e.clientX, y: e.clientY },
       });
-      if (getBoxSelectionPreview()?.active) clearBlankCanvasLongPress(e.pointerId);
       return;
     }
 
@@ -4764,10 +4892,9 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
         });
       }
     }
-  }, [annotationMode, annotationRegionStart, editMode, screenToCanvas, isMiddlePanning, isPanning, resizingImage, resizeCorner, groupDragTarget, genGroupDragTarget, hexCubeDragTarget, annotations, images, annotationBrushSize, zoom, viewOffset.x, viewOffset.y, handleEditMouseMove, resizeStart.x, resizeStart.w, resizeStart.h, resizeStart.imgX, resizeStart.imgY, groupDragStart.x, groupDragStart.y, genGroupDragStart.x, genGroupDragStart.y, hexCubeDragStart.x, hexCubeDragStart.y, previewViewportPan, annotationV2State.annotations, annotationV2State.gesture.kind, updateAnnotationV2Gesture, moveAnnotationV2Text, clearBlankCanvasLongPress, getBoxSelectionPreview, updateSelectionBox]);
+  }, [annotationMode, annotationRegionStart, editMode, screenToCanvas, isMiddlePanning, isPanning, resizingImage, resizeCorner, groupDragTarget, genGroupDragTarget, hexCubeDragTarget, annotations, images, annotationBrushSize, zoom, viewOffset.x, viewOffset.y, handleEditMouseMove, resizeStart.x, resizeStart.w, resizeStart.h, resizeStart.imgX, resizeStart.imgY, groupDragStart.x, groupDragStart.y, genGroupDragStart.x, genGroupDragStart.y, hexCubeDragStart.x, hexCubeDragStart.y, previewViewportPan, annotationV2State.annotations, annotationV2State.gesture.kind, updateAnnotationV2Gesture, moveAnnotationV2Text, applyTouchGestureIntent, getBoxSelectionPreview, updateSelectionBox]);
 
   const handlePointerUp = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
-    clearBlankCanvasLongPress(e.pointerId);
     const releaseAnnotationPointer = () => {
       if (e.currentTarget.hasPointerCapture(e.pointerId)) {
         e.currentTarget.releasePointerCapture(e.pointerId);
@@ -4907,6 +5034,31 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
     if (editMode !== 'none') {
       handleEditMouseUp();
       return;
+    }
+
+    if (e.pointerType === 'touch' && activeTouchPointerIdsRef.current.has(e.pointerId)) {
+      const wasExclusive = touchGestureExclusiveRef.current;
+      const target = (e.target as Element).closest<HTMLElement>('[data-canvas-image-id]')
+        ? 'image'
+        : 'blank';
+      const intents = touchGestureControllerRef.current.pointerUp({
+        pointerId: e.pointerId,
+        pointerType: e.pointerType,
+        point: { x: e.clientX, y: e.clientY },
+        target,
+      });
+      activeTouchPointerIdsRef.current.delete(e.pointerId);
+      intents.forEach(applyTouchGestureIntent);
+      if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+        e.currentTarget.releasePointerCapture(e.pointerId);
+      }
+      if (activeTouchPointerIdsRef.current.size === 0) {
+        touchGestureExclusiveRef.current = false;
+      }
+      if (wasExclusive) {
+        e.preventDefault();
+        return;
+      }
     }
 
     // Middle button up: stop middle panning
@@ -5215,10 +5367,24 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
 
     commitHistoryTransaction(e.pointerId);
     mouseDownOnImageRef.current = false;
-  }, [annotationRegionStart, annotationMode, isDraggingRegion, annotationRegionCurrent, editMode, isMiddlePanning, isPanning, resizingImage, resizePreview, groupDragTarget, genGroupDragTarget, hexCubeDragTarget, hitTestImage, images, annotationTool, screenToCanvas, handleEditMouseUp, genGroups, onImagesChange, onForceSave, onPreviewImage, zoom, viewOffset.x, viewOffset.y, commitViewportPan, annotationV2State.annotations, annotationV2State.gesture, annotationV2State.prompt, commitAnnotationV2Text, commitAnnotationV2Gesture, moveAnnotationV2Text, resolveActiveSemanticGesture, clearBlankCanvasLongPress, cancelImageDragPreview, commitSelectionBox, finishCanvasPointerGesture, getBoxSelectionPreview, getSelectionState, selectImage, commitHistoryTransaction]);
+  }, [annotationRegionStart, annotationMode, isDraggingRegion, annotationRegionCurrent, editMode, isMiddlePanning, isPanning, resizingImage, resizePreview, groupDragTarget, genGroupDragTarget, hexCubeDragTarget, hitTestImage, images, annotationTool, screenToCanvas, handleEditMouseUp, genGroups, onImagesChange, onForceSave, onPreviewImage, zoom, viewOffset.x, viewOffset.y, commitViewportPan, annotationV2State.annotations, annotationV2State.gesture, annotationV2State.prompt, commitAnnotationV2Text, commitAnnotationV2Gesture, moveAnnotationV2Text, resolveActiveSemanticGesture, applyTouchGestureIntent, cancelImageDragPreview, commitSelectionBox, finishCanvasPointerGesture, getBoxSelectionPreview, getSelectionState, selectImage, commitHistoryTransaction]);
 
   const handlePointerCancel = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
-    clearBlankCanvasLongPress(e.pointerId);
+    if (e.pointerType === 'touch' && activeTouchPointerIdsRef.current.has(e.pointerId)) {
+      touchGestureControllerRef.current.pointerCancel({
+        pointerId: e.pointerId,
+        pointerType: e.pointerType,
+        point: { x: e.clientX, y: e.clientY },
+        target: 'blank',
+      }).reverse().forEach(applyTouchGestureIntent);
+      activeTouchPointerIdsRef.current.forEach(pointerId => {
+        if (e.currentTarget.hasPointerCapture(pointerId)) {
+          e.currentTarget.releasePointerCapture(pointerId);
+        }
+      });
+      activeTouchPointerIdsRef.current.clear();
+      touchGestureExclusiveRef.current = false;
+    }
     cancelSelectionGesture(e.pointerId);
     if (imageDragPointerIdRef.current === e.pointerId) {
       cancelImageDragPreview();
@@ -5243,14 +5409,13 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
     if (e.currentTarget.hasPointerCapture(e.pointerId)) {
       e.currentTarget.releasePointerCapture(e.pointerId);
     }
-  }, [annotationV2State.gesture.kind, cancelViewportPan, clearBlankCanvasLongPress, escapeAnnotationV2, isMiddlePanning, isPanning, cancelGroupDragPreviews, cancelImageDragPreview, cancelSelectionGesture, finishCanvasPointerGesture, rollbackHistoryTransaction]);
+  }, [annotationV2State.gesture.kind, applyTouchGestureIntent, cancelViewportPan, escapeAnnotationV2, cancelGroupDragPreviews, cancelImageDragPreview, cancelSelectionGesture, finishCanvasPointerGesture, rollbackHistoryTransaction]);
 
   const handlePointerLeave = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
     if (annotationPointerIdRef.current !== null) return;
     if (e.currentTarget.hasPointerCapture(e.pointerId)) return;
     const activeImagePointerId = imageDragPointerIdRef.current;
     if (activeImagePointerId !== null && e.currentTarget.hasPointerCapture(activeImagePointerId)) return;
-    clearBlankCanvasLongPress();
     if (editMode !== 'none') {
       handleEditMouseUp();
       return;
@@ -5272,7 +5437,7 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
       cancelImageDragPreview();
     }
     cancelGroupDragPreviews();
-  }, [editMode, handleEditMouseUp, isMiddlePanning, isPanning, commitViewportPan, clearBlankCanvasLongPress, cancelGroupDragPreviews, cancelImageDragPreview, cancelSelectionGesture, rollbackHistoryTransaction]);
+  }, [editMode, handleEditMouseUp, commitViewportPan, cancelGroupDragPreviews, cancelImageDragPreview, cancelSelectionGesture, rollbackHistoryTransaction]);
 
   const handleWheel = useCallback((e: React.WheelEvent) => {
     // Prevent scroll from affecting canvas when cursor is over a modal/overlay/popup
@@ -5326,31 +5491,8 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
 
   const handleContextMenu = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
-    const canvasPos = screenToCanvas(e.clientX, e.clientY);
-    const hitId = hitTestImage(canvasPos.x, canvasPos.y);
-
-    if (hitId) {
-      // 记录右键命中的图片 id，供菜单动作（元素拆解等）精确定位目标
-      contextMenuTargetRef.current = hitId;
-      if (!selectedIds.has(hitId)) {
-        // If multi-select is active, add the clicked image to selection instead of replacing
-        if (selectedIds.size > 1) {
-          setSelectedIds(new Set([...selectedIds, hitId]));
-          selectImage(hitId);
-        } else {
-          setSelectedIds(new Set([hitId]));
-          selectImage(hitId);
-        }
-      }
-      setContextMenuPos({ x: e.clientX, y: e.clientY });
-      setShowContextMenu(true);
-      setShowCanvasMenu(false);
-    } else {
-      setCanvasMenuPos({ x: e.clientX, y: e.clientY });
-      setShowCanvasMenu(true);
-      setShowContextMenu(false);
-    }
-  }, [screenToCanvas, hitTestImage, selectedIds, selectImage]);
+    openContextMenuAt({ x: e.clientX, y: e.clientY });
+  }, [openContextMenuAt]);
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -11414,12 +11556,13 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
       <div
         ref={(el) => { canvasRef.current = el; canvasContainerRef.current = el; }}
         data-canvas-viewport
+        data-canvas-interaction-surface
         data-canvas-kernel-mode={canvasKernelMode}
         data-canvas-active-tool={canvasToolSession.toolId || ''}
         data-canvas-occupied-right={canvasOccupiedRight}
         data-project-id={projectId || brandProject?.id || ''}
         style={{
-          touchAction: annotationMode ? 'none' : 'auto',
+          touchAction: 'none',
         } as React.CSSProperties}
         className={`absolute inset-0 overflow-clip select-none data-[space-pan=true]:!cursor-grab data-[space-pan=true]:active:!cursor-grabbing ${
           annotationMode

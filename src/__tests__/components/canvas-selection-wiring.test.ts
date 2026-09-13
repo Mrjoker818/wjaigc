@@ -61,13 +61,12 @@ describe('canvas selection gesture wiring', () => {
     expect(canvasSource).toContain('if (suppressSelectionClickRef.current)');
   });
 
-  it('does not let long-press panning steal an active box selection', () => {
-    expect(canvasSource).toContain('if (getBoxSelectionPreview()?.active)');
-    expect(canvasSource).toContain('if (movedDistance > 6) {\n        clearBlankCanvasLongPress(e.pointerId);');
-    expect(canvasSource).toContain("if (resolveBlankCanvasGesture(e.pointerType) === 'long-press-pan') {");
-    expect(canvasSource).toContain(
-      'updateSelectionBox({\n        pointerId: e.pointerId,\n        point: { x: e.clientX, y: e.clientY },\n      });\n      if (getBoxSelectionPreview()?.active) clearBlankCanvasLongPress(e.pointerId);',
-    );
+  it('keeps desktop box selection while touch blank-canvas gestures use the touch controller', () => {
+    expect(canvasSource).toContain("if (e.pointerType === 'touch') {");
+    expect(canvasSource).toContain('touchGestureControllerRef.current.pointerDown(');
+    expect(canvasSource).toContain("if (resolveBlankCanvasGesture(e.pointerType) === 'box-select') {");
+    expect(canvasSource).toContain('updateSelectionBox({\n        pointerId: e.pointerId,');
+    expect(canvasSource).not.toContain('startBlankCanvasLongPress(e.pointerId');
   });
 
   it('routes Ctrl/Meta to fusion only in fusion mode and otherwise toggles selection', () => {
