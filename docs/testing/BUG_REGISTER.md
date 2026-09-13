@@ -4306,3 +4306,9 @@ Task 4 独立审查的两个 Minor 继续保留给最终审查：单元夹具 op
 | 修复与回归 | `main@15ee74a5038653a6701a881f9d938e73d1ac9abd` 在裸 modelId 命中多个供应商时列出精确 `providerId/modelId` 候选，并读取多轮对话中最后一次明确回答；同键仍不静默选择首个供应商。意图测试先 RED 后 GREEN，聚焦 `9/9`、Brief 到视频扩大回归 `107/107` 通过。 |
 | 云端适用性 | 当前云端授权目录中 `doubao-seedance-2-0-mini-260615` 仅有一个可用绑定，裸模型名会直接创建 Run，无法制造真实重复供应商分支。精确 provider/model 的云端提交此前已通过；重复分支由确定性自动化永久覆盖，不把当前目录的“唯一命中”冒充重复场景。 |
 | 当前状态 | **CLOSED / LOCAL REGRESSION PASS / CLOUD N/A**。当前云端配置不存在触发前提；未来管理员配置重复 modelId 时由新增候选选择合同保护。 |
+## 2026-09-14 V588-MEDIA-001 Task 9 本地门禁缺陷
+
+| 编号 | 等级 | 问题 | 修复与永久回归 | 状态 |
+|---|---|---|---|---|
+| MEDIA-T9-001 | P1 发布工程 | `npm run doctor` 未在媒体网关开启时验证数据库及三张迁移表，可能允许缺表部署进入运行期 | Doctor 测试先得到 `3 failed / 20 passed`；增加启用/禁用、真实 PostgreSQL、三表和脱敏合同后 `24/24` | 本地已关闭，云端待验 |
+| MEDIA-T9-002 | P2 测试治理 | 全仓首轮出现 5 个失败与 13 个 PostgreSQL skip：媒体网关来源未纳入保护清单、测试鉴权 mock 缺失、旧套件只读取 `TEST_POSTGRES_URL` | 增加精确来源授权与测试隔离；最终全仓 `802 files / 6745 tests / 0 failed / 0 skipped` | 已关闭 |

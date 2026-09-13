@@ -2401,3 +2401,9 @@ The focused gate test passes `7/7`; the actual protected-baseline command passes
 
 - 用户确认将实体触屏和真实软键盘作为发布前延期验证项，并允许进入下一阶段；这不是设备验收通过。
 - **Task 10：有条件完成 / `DONE WITH DEVICE DEFERRAL`。** 全平台发布结论仍受该延期项及后续媒体网关、协作等阶段约束。
+## 2026-09-14 V588-MEDIA-001 Task 9 发布判断
+
+- 本地 Doctor、专项、真实 PostgreSQL 和五条全量门禁均通过；最终全仓为 `6745/6745`、0 skipped，生产构建为 `120/120`。
+- 构建保留 53 条 Turbopack 动态文件追踪 warning，属于后续构建性能与打包范围风险，不在本任务中猜测性重构。
+- 当前候选仅具备本地发布资格。尚无 Coze exact commit、默认关闭兼容、真实 PearAPI/APIMart 图像与视频、逐槽返回、取消退款、AssetVersion、缩略图及浏览器证据。
+- **发布结论：有条件通过本地门禁 / 全平台仍不通过。** Task 9 状态为 `LOCAL PASS / CLOUD UNVERIFIED`，不得据此更新 `stable`。

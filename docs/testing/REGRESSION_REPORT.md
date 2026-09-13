@@ -3137,3 +3137,11 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - 用户书面确认采用方案 1：实体触屏手感与真实软键盘可达性作为发布前延期验证点，不再阻塞下一开发阶段。
 - **Task 10 状态：`DONE WITH DEVICE DEFERRAL / CLOSED`。** 已通过的云端、数据库和跨浏览器证据不扩大为实体设备通过；延期项继续保留在未验证清单。
 - 下一阶段固定为 `V588-MEDIA-001`，不重开 Task12，不重复移动画布已关闭测试，不修改 `stable`。
+## 2026-09-14 V588-MEDIA-001 Task 9 本地回归
+
+- Doctor 严格 TDD：RED `20 passed / 3 failed`；GREEN `24/24`，使用真实 PostgreSQL 18.4，验证网关关闭警告、开启时数据库与三张迁移表失败关闭及输出脱敏。
+- 云端 E2E 已建立 5 个逻辑规格，在 11 个配置项目中展开为 55 项并可被 Playwright 解析；因本阶段明确不做 Coze，`E2E_MEDIA_GATEWAY_RUN=1` 未开启，不能登记为云端通过。
+- 媒体网关专项为 18 文件 `327/327`，0 failed，0 skipped。
+- 全仓 Vitest 为 802 文件 `6745/6745`，0 failed，0 skipped，耗时 931.73 秒。长跑期间文件与断言计数持续增加，未挂起、未增加超长超时。
+- 五条门禁全部 exit 0：TypeScript、构建版 ESLint、全仓 Vitest、保护基线 `38/38 / 0 drift / 0 warning`、生产构建 `120/120` 页面。
+- **判定：`LOCAL PASS / CLOUD UNVERIFIED`。** 云端 exact SHA、供应商、账务、资产版本、缩略图和浏览器证据保持 pending。
