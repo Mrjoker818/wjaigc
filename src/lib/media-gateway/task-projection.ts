@@ -226,10 +226,8 @@ export async function getGatewayTaskProjection(
   principal: GatewayPrincipal,
   taskId: string,
 ): Promise<GatewayTaskProjection> {
-  if (!TASK_ID_PATTERN.test(taskId)) throw taskNotFound();
-  const task = await getCloudTaskForUser(taskId, principal.userId);
-  if (!task) throw taskNotFound();
-  const projection = projectTask(task);
+  const { task, projection } = await readGatewayTaskWithoutThumbnails(principal, taskId);
+  if (projection.status !== 'completed') return projection;
   const assetVersionId = publicIdentifier(task.result?.assetVersionId);
   if (!assetVersionId) return projection;
   const thumbnailUrls = await readyThumbnailUrls(assetVersionId, principal.userId);
@@ -241,11 +239,21 @@ export async function getGatewayTaskProjection(
   };
 }
 
+async function readGatewayTaskWithoutThumbnails(
+  principal: GatewayPrincipal,
+  taskId: string,
+): Promise<{ task: CloudTask; projection: GatewayTaskProjection }> {
+  if (!TASK_ID_PATTERN.test(taskId)) throw taskNotFound();
+  const task = await getCloudTaskForUser(taskId, principal.userId);
+  if (!task) throw taskNotFound();
+  return { task, projection: projectTask(task) };
+}
+
 export async function cancelGatewayTask(
   principal: GatewayPrincipal,
   taskId: string,
 ): Promise<GatewayTaskCancellation> {
-  await getGatewayTaskProjection(principal, taskId);
+  await readGatewayTaskWithoutThumbnails(principal, taskId);
   let response: Response;
   try {
     response = await fetch(
@@ -269,7 +277,7 @@ export async function cancelGatewayTask(
 
   let confirmed: GatewayTaskProjection;
   try {
-    confirmed = await getGatewayTaskProjection(principal, taskId);
+    confirmed = (await readGatewayTaskWithoutThumbnails(principal, taskId)).projection;
   } catch {
     throw unavailable();
   }

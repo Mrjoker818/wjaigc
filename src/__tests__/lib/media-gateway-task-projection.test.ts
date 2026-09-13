@@ -84,6 +84,64 @@ describe('media gateway task thumbnail projection', () => {
     expect(mocks.query.mock.calls[0][1]).toEqual(['version-1', 'user-1']);
   });
 
+  it.each(['processing', 'cancelled'] as const)(
+    'does not query thumbnails while the authoritative task is %s',
+    async (status) => {
+      mocks.getCloudTaskForUser.mockResolvedValue({
+        id: 'task-1',
+        userId: 'user-1',
+        type: 'generate-async',
+        status,
+        progress: 50,
+        result: {
+          assetVersionId: 'version-1',
+          imageUrl: '/uploads/original.png',
+        },
+        creditStatus: status === 'cancelled' ? 'refunded' : 'pending',
+        createdAt: 1,
+        updatedAt: 2,
+      });
+
+      await expect(getGatewayTaskProjection(principal, 'task-1')).resolves.toMatchObject({
+        status,
+        previewUrl: '/uploads/original.png',
+        thumbnailUrls: {},
+      });
+      expect(mocks.query).not.toHaveBeenCalled();
+    },
+  );
+
+  it('uses a safe 256 thumbnail when no 512 variant exists', async () => {
+    mocks.query.mockResolvedValue({
+      rows: [{ size: 256, file_url: '/uploads/thumb-256.webp' }],
+    });
+
+    await expect(getGatewayTaskProjection(principal, 'task-1')).resolves.toMatchObject({
+      status: 'completed',
+      previewUrl: '/uploads/thumb-256.webp',
+      thumbnailUrls: { '256': '/uploads/thumb-256.webp' },
+    });
+  });
+
+  it('uses a safe 256 thumbnail when the 512 URL is unsafe', async () => {
+    const unsafeUrl = 'https://127.0.0.1/private.webp';
+    mocks.query.mockResolvedValue({
+      rows: [
+        { size: 256, file_url: '/uploads/thumb-256.webp' },
+        { size: 512, file_url: unsafeUrl },
+      ],
+    });
+
+    const projection = await getGatewayTaskProjection(principal, 'task-1');
+
+    expect(projection).toMatchObject({
+      status: 'completed',
+      previewUrl: '/uploads/thumb-256.webp',
+      thumbnailUrls: { '256': '/uploads/thumb-256.webp' },
+    });
+    expect(JSON.stringify(projection)).not.toContain(unsafeUrl);
+  });
+
   it('fails closed on thumbnail storage errors without changing completed status', async () => {
     mocks.query.mockRejectedValue(new Error('thumbnail storage unavailable'));
 

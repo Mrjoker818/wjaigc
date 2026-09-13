@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   terminateCloudTaskAndRefund: vi.fn(),
   getInternalRequestHeaders: vi.fn(),
   auditGatewayEvent: vi.fn(),
+  thumbnailQuery: vi.fn(),
 }));
 
 vi.mock('@/lib/media-gateway/key-service', () => ({
@@ -27,6 +28,9 @@ vi.mock('@/lib/api-auth', () => ({
 }));
 vi.mock('@/lib/media-gateway/audit', () => ({
   auditGatewayEvent: mocks.auditGatewayEvent,
+}));
+vi.mock('@/lib/db-client', () => ({
+  getPool: () => ({ query: mocks.thumbnailQuery }),
 }));
 
 import { POST } from '@/app/api/gateway/v1/tasks/[taskId]/cancel/route';
@@ -56,7 +60,10 @@ function context(taskId: string): { params: Promise<{ taskId: string }> } {
   return { params: Promise.resolve({ taskId }) };
 }
 
-function task(status: 'queued' | 'pending' | 'processing' | 'cancelled' | 'completed' | 'failed' | 'timeout') {
+function task(
+  status: 'queued' | 'pending' | 'processing' | 'cancelled' | 'completed' | 'failed' | 'timeout',
+  withAssetVersion = false,
+) {
   return {
     id: 'task-1',
     userId: 'user-a',
@@ -66,6 +73,12 @@ function task(status: 'queued' | 'pending' | 'processing' | 'cancelled' | 'compl
     providerId: 'provider-1',
     model: 'model-1',
     creditStatus: status === 'cancelled' ? 'refunded' : 'pending',
+    ...(withAssetVersion ? {
+      result: {
+        assetVersionId: 'version-1',
+        imageUrl: '/uploads/original.png',
+      },
+    } : {}),
     createdAt: 1,
     updatedAt: 2,
   };
@@ -84,6 +97,7 @@ describe('POST /api/gateway/v1/tasks/[taskId]/cancel', () => {
       'x-wujie-internal-secret': 'trusted-secret',
     });
     mocks.auditGatewayEvent.mockResolvedValue(true);
+    mocks.thumbnailQuery.mockResolvedValue({ rows: [] });
   });
 
   afterEach(() => {
@@ -179,6 +193,51 @@ describe('POST /api/gateway/v1/tasks/[taskId]/cancel', () => {
       action: 'gateway_task_cancel', outcome: 'success', requestId: 'req_task_cancel_01',
       gatewayKeyId: 'gwkey_1', userId: 'user-a', responseStatus: 200,
     });
+  });
+
+  it('cancels a processing asset task without querying thumbnails before or after cancellation', async () => {
+    mocks.getCloudTaskForUser
+      .mockResolvedValueOnce(task('processing', true))
+      .mockResolvedValueOnce(task('cancelled', true));
+    const internalFetch = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
+    vi.stubGlobal('fetch', internalFetch);
+
+    const response = await POST(gatewayCancelRequest('task-1'), context('task-1'));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ status: 'cancelled' });
+    expect(internalFetch).toHaveBeenCalledOnce();
+    expect(mocks.getCloudTaskForUser).toHaveBeenCalledTimes(2);
+    expect(mocks.thumbnailQuery).not.toHaveBeenCalled();
+  });
+
+  it('repeats cancellation for a cancelled asset task without querying thumbnails', async () => {
+    mocks.getCloudTaskForUser.mockResolvedValue(task('cancelled', true));
+    const internalFetch = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
+    vi.stubGlobal('fetch', internalFetch);
+
+    const response = await POST(gatewayCancelRequest('task-1'), context('task-1'));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ status: 'cancelled' });
+    expect(internalFetch).toHaveBeenCalledOnce();
+    expect(mocks.thumbnailQuery).not.toHaveBeenCalled();
+  });
+
+  it('confirms a completed asset task after cancellation without querying thumbnails', async () => {
+    mocks.getCloudTaskForUser
+      .mockResolvedValueOnce(task('processing', true))
+      .mockResolvedValueOnce(task('completed', true));
+    const internalFetch = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
+    vi.stubGlobal('fetch', internalFetch);
+
+    const response = await POST(gatewayCancelRequest('task-1'), context('task-1'));
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({ status: 'completed' });
+    expect(internalFetch).toHaveBeenCalledOnce();
+    expect(mocks.getCloudTaskForUser).toHaveBeenCalledTimes(2);
+    expect(mocks.thumbnailQuery).not.toHaveBeenCalled();
   });
 
   it('delegates repeated cancellation and leaves exactly-once settlement to the cancel route', async () => {
