@@ -318,3 +318,10 @@ TypeScript：`pnpm ts-check` 退出码 0。目标 ESLint（key-service、其单�
 ### 关注
 
 - 当前环境缺少 `POSTGRES_TEST_DATABASE_URL`，所以 7 个真实 PostgreSQL 用例未执行；其中新增的 `Asia/Shanghai` 会话 UTC 边界交叉验证必须由 Task 8 真库门禁执行。除此之外未发现未关闭的 Task 7 Important。
+
+## 最后 1 个 Important：body 生命周期 RED（2026-09-14）
+
+- 命令：`pnpm exec vitest run src/__tests__/components/media-gateway-admin.test.tsx`。
+- 结果：退出码 1；1 个测试文件失败，34 项中 `30 passed / 4 failed`。
+- 四个预期失败分别证明：mutation 已取得响应头后 body 永不 resolve 时不会超时进入歧义；authority GET 的 body 永不 resolve 时仍停在“正在核对”；退出 Sheet 无法 abort 已开始读取的 mutation body；退出后 authority signal 未取消，迟到 body 仍存在污染状态的通路。
+- 本轮仍未修改生产代码；RED 测试只增加在既有授权的 `src/__tests__/components/media-gateway-admin.test.tsx`。

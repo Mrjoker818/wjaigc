@@ -29,6 +29,17 @@ function jsonResponse(body: unknown, status = 200): Response {
   });
 }
 
+function deferred<T>(): {
+  promise: Promise<T>;
+  resolve: (value: T) => void;
+} {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((resolver) => {
+    resolve = resolver;
+  });
+  return { promise, resolve };
+}
+
 function mockApi(initialKeys: Array<Record<string, unknown>> = [key]): ReturnType<typeof vi.fn> {
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
@@ -444,6 +455,137 @@ describe('MediaGatewayAdmin', () => {
     fireEvent.click(within(sheet).getByRole('button', { name: '取消' }));
     await waitFor(() => expect(screen.queryByRole('dialog', { name: '签发媒体网关密钥' })).toBeNull());
     expect((screen.getByRole('button', { name: '签发密钥' }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('keeps the issue timeout active until a pending mutation body is fully read', async () => {
+    vi.useFakeTimers();
+    let getCount = 0;
+    vi.stubGlobal('fetch', vi.fn((_input: RequestInfo | URL, init?: RequestInit) => {
+      if ((init?.method ?? 'GET') === 'GET') {
+        getCount += 1;
+        return Promise.resolve(jsonResponse({ success: true, keys: [] }));
+      }
+      return Promise.resolve({
+        ok: true,
+        status: 201,
+        json: () => new Promise<unknown>(() => undefined),
+      } as Response);
+    }));
+    render(<MediaGatewayAdmin />);
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    fireEvent.click(screen.getByRole('button', { name: '签发密钥' }));
+    fireEvent.change(screen.getByLabelText('用户 ID'), { target: { value: 'user-1' } });
+    fireEvent.change(screen.getByLabelText('标签'), { target: { value: 'Production' } });
+    fireEvent.click(screen.getByRole('button', { name: '确认签发' }));
+
+    await act(async () => vi.advanceTimersByTimeAsync(5_000));
+    vi.useRealTimers();
+    const sheet = screen.getByRole('dialog', { name: '签发媒体网关密钥' });
+    expect((await within(sheet).findByRole('alert')).textContent).toContain('签发结果无法确认');
+    expect(getCount).toBe(2);
+  });
+
+  it('keeps the authority timeout active until its pending body is fully read', async () => {
+    vi.useFakeTimers();
+    let getCount = 0;
+    vi.stubGlobal('fetch', vi.fn((_input: RequestInfo | URL, init?: RequestInit) => {
+      if ((init?.method ?? 'GET') === 'GET') {
+        getCount += 1;
+        if (getCount === 1) return Promise.resolve(jsonResponse({ success: true, keys: [] }));
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: () => new Promise<unknown>(() => undefined),
+        } as Response);
+      }
+      return Promise.resolve(jsonResponse({ success: true, key, secret: 'wmg_too-short' }, 201));
+    }));
+    render(<MediaGatewayAdmin />);
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    fireEvent.click(screen.getByRole('button', { name: '签发密钥' }));
+    fireEvent.change(screen.getByLabelText('用户 ID'), { target: { value: 'user-1' } });
+    fireEvent.change(screen.getByLabelText('标签'), { target: { value: 'Production' } });
+    fireEvent.click(screen.getByRole('button', { name: '确认签发' }));
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const sheet = screen.getByRole('dialog', { name: '签发媒体网关密钥' });
+    expect(within(sheet).getByRole('alert').textContent).toContain('正在核对权威列表');
+    await act(async () => vi.advanceTimersByTimeAsync(5_000));
+    vi.useRealTimers();
+    expect((await within(sheet).findByRole('alert')).textContent).toContain('权威列表暂时无法确认');
+  });
+
+  it('aborts a pending mutation body when the sheet exits', async () => {
+    let mutationSignal: AbortSignal | null = null;
+    vi.stubGlobal('fetch', vi.fn((_input: RequestInfo | URL, init?: RequestInit) => {
+      if ((init?.method ?? 'GET') === 'GET') {
+        return Promise.resolve(jsonResponse({ success: true, keys: [] }));
+      }
+      mutationSignal = init?.signal ?? null;
+      return Promise.resolve({
+        ok: true,
+        status: 201,
+        json: () => new Promise<unknown>(() => undefined),
+      } as Response);
+    }));
+    render(<MediaGatewayAdmin />);
+    await screen.findByText('尚未签发媒体网关密钥');
+    fireEvent.click(screen.getByRole('button', { name: '签发密钥' }));
+    fireEvent.change(screen.getByLabelText('用户 ID'), { target: { value: 'user-1' } });
+    fireEvent.change(screen.getByLabelText('标签'), { target: { value: 'Production' } });
+    fireEvent.click(screen.getByRole('button', { name: '确认签发' }));
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const sheet = screen.getByRole('dialog', { name: '签发媒体网关密钥' });
+    fireEvent.click(within(sheet).getByRole('button', { name: '取消' }));
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '签发媒体网关密钥' })).toBeNull());
+    expect((mutationSignal as AbortSignal | null)?.aborted).toBe(true);
+  });
+
+  it('ignores a late authority body after the sheet cancels its request', async () => {
+    const lateBody = deferred<unknown>();
+    let getCount = 0;
+    let authoritySignal: AbortSignal | null = null;
+    vi.stubGlobal('fetch', vi.fn((_input: RequestInfo | URL, init?: RequestInit) => {
+      if ((init?.method ?? 'GET') === 'GET') {
+        getCount += 1;
+        if (getCount === 1) return Promise.resolve(jsonResponse({ success: true, keys: [key] }));
+        authoritySignal = init?.signal ?? null;
+        return Promise.resolve({ ok: true, status: 200, json: () => lateBody.promise } as Response);
+      }
+      return Promise.resolve(jsonResponse({ success: true, key, secret: 'wmg_too-short' }, 201));
+    }));
+    render(<MediaGatewayAdmin />);
+    await screen.findAllByText('Production');
+    fireEvent.click(screen.getByRole('button', { name: '签发密钥' }));
+    fireEvent.change(screen.getByLabelText('用户 ID'), { target: { value: 'user-1' } });
+    fireEvent.change(screen.getByLabelText('标签'), { target: { value: 'Production' } });
+    fireEvent.click(screen.getByRole('button', { name: '确认签发' }));
+    const sheet = screen.getByRole('dialog', { name: '签发媒体网关密钥' });
+    expect((await within(sheet).findByRole('alert')).textContent).toContain('正在核对权威列表');
+    fireEvent.click(within(sheet).getByRole('button', { name: '取消' }));
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '签发媒体网关密钥' })).toBeNull());
+
+    await act(async () => {
+      lateBody.resolve({ success: true, keys: [{ ...key, label: 'Stale Authority' }] });
+      await lateBody.promise;
+      await Promise.resolve();
+    });
+    expect((authoritySignal as AbortSignal | null)?.aborted).toBe(true);
+    expect(screen.queryByText('Stale Authority')).toBeNull();
+    expect(screen.getAllByText('Production').length).toBeGreaterThan(0);
   });
 
   it('uses a bounded mobile layout at 375px without a horizontally scrolling root', async () => {
