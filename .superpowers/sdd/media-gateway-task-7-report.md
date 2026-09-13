@@ -325,3 +325,19 @@ TypeScript：`pnpm ts-check` 退出码 0。目标 ESLint（key-service、其单�
 - 结果：退出码 1；1 个测试文件失败，34 项中 `30 passed / 4 failed`。
 - 四个预期失败分别证明：mutation 已取得响应头后 body 永不 resolve 时不会超时进入歧义；authority GET 的 body 永不 resolve 时仍停在“正在核对”；退出 Sheet 无法 abort 已开始读取的 mutation body；退出后 authority signal 未取消，迟到 body 仍存在污染状态的通路。
 - 本轮仍未修改生产代码；RED 测试只增加在既有授权的 `src/__tests__/components/media-gateway-admin.test.tsx`。
+
+### GREEN 与验证
+
+- RED 提交：`392f44922f2218f25a3b48b488f7a11fe77c0613`；生产修复提交：`0ae86da83602e91fa721c3f387807969ff3130cc`。
+- 最小 GREEN：`pnpm exec vitest run src/__tests__/components/media-gateway-admin.test.tsx`，1 个文件、`34 passed (34)`。
+- Task 7 目标：`pnpm exec vitest run src/__tests__/api/admin-media-gateway-keys.test.ts src/__tests__/lib/media-gateway-audit.test.ts src/__tests__/lib/media-gateway-key-service.test.ts src/__tests__/lib/media-gateway-admission.test.ts src/__tests__/lib/media-gateway-utc-day-window.test.ts src/__tests__/components/media-gateway-admin.test.tsx src/__tests__/components/dashboard-media-gateway-contract.test.ts`，7 个文件、`102 passed (102)`。
+- TypeScript：`pnpm ts-check` 退出码 0；`next typegen` 与 `tsc -p tsconfig.json` 通过。
+- Scoped ESLint：`pnpm exec eslint src/components/dashboard/media-gateway-admin.tsx src/__tests__/components/media-gateway-admin.test.tsx` 退出码 0，`0 errors / 0 warnings`。
+- Scoped diff-check：组件及组件测试 `git diff --check`、生产 staged diff-check 均退出码 0。
+- 未重复运行全媒体网关、Playwright 或 PostgreSQL；按控制器要求避免无关门禁。非 UTC PostgreSQL 用例仍保留给 Task 8，UTC、Secret、审计及局部锁实现未改动。
+
+### 实现自审
+
+- 单一 `AbortController` 与 5 秒 timeout 现在覆盖 `fetch`、body 完整读取及 `response.json()` 解析，controller 仅在整个操作结束后从 scope Map 移除。
+- abort Promise 与 JSON 读取竞速，因此测试中的永不 resolve body 能按时收敛；返回前同时检查 `signal.aborted` 和当前 scope controller 身份，即使 mock 无视 abort 后迟到 resolve，也无法进入状态更新。
+- mutation 与 authority GET 均通过同一个 `runBoundedJsonRequest`；退出 Sheet/AlertDialog 仍按原局部 scope abort 并解锁，Secret 状态与持久化边界没有变化。
