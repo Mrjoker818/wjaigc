@@ -9,11 +9,12 @@ export async function readGatewayJson(
   maxBytes = 1_048_576,
 ): Promise<unknown> {
   const contentLength = request.headers.get('content-length');
-  const declared = contentLength === null ? 0 : Number(contentLength);
-  if (!Number.isFinite(declared) || declared < 0) {
+  if (contentLength !== null && !/^\d+$/.test(contentLength)) {
     throw new GatewayError('GATEWAY_INVALID_REQUEST', 400, '请求体长度无效');
   }
-  if (declared > maxBytes) throw bodyTooLarge();
+  if (contentLength !== null && BigInt(contentLength) > BigInt(maxBytes)) {
+    throw bodyTooLarge();
+  }
 
   const reader = request.body?.getReader();
   const chunks: Uint8Array[] = [];
@@ -30,7 +31,8 @@ export async function readGatewayJson(
   }
 
   try {
-    return JSON.parse(Buffer.concat(chunks).toString('utf8')) as unknown;
+    const json = new TextDecoder('utf-8', { fatal: true }).decode(Buffer.concat(chunks));
+    return JSON.parse(json) as unknown;
   } catch {
     throw new GatewayError(
       'GATEWAY_INVALID_REQUEST',

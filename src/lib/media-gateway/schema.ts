@@ -89,9 +89,10 @@ function referenceImages(value: unknown): string[] | undefined {
 
 function aspectRatio(value: unknown): string | undefined {
   if (value === undefined || value === null) return undefined;
+  if (typeof value !== 'string') throw invalidRequest('aspectRatio is invalid');
   const error = validateAspectRatio(value);
   if (error) throw invalidRequest(error);
-  return (value as string).trim();
+  return value.trim();
 }
 
 function assignDefined<T extends object, K extends keyof T>(
