@@ -67,6 +67,10 @@ import {
 } from '@/lib/skill-runtime/prepaid-generation';
 import { isAssetVersionId } from '@/lib/asset-core/asset-version-id';
 import { trustedGatewayContext } from '@/lib/media-gateway/internal-client';
+import {
+  cleanupPersistedGatewayVideoResult,
+  persistDirectGatewayVideoResult,
+} from '@/lib/media-gateway/artifact-persistence';
 
 export const maxDuration = 300; // 5 min timeout
 
@@ -849,15 +853,62 @@ export async function POST(request: NextRequest) {
 
         // 同步返回：API直接返回了视频URL，无需轮询
         if (submitResult.status === 'succeeded' && submitResult.videoUrl) {
+          let directGatewayVideo: Awaited<ReturnType<typeof persistDirectGatewayVideoResult>> | undefined;
+          if (gatewayContext) {
+            try {
+              directGatewayVideo = await persistDirectGatewayVideoResult({
+                taskId,
+                sourceUrl: submitResult.videoUrl,
+              });
+            } catch (error) {
+              console.error('[video/generate] Direct gateway video persistence failed:', error);
+              const gatewayVideoError = '网关视频结果持久化失败';
+              const settled = await terminateCloudTaskAndRefund(taskId, 'failed', gatewayVideoError);
+              if (!settled.transitioned) return;
+              updateTaskProgress(taskId, {
+                status: 'failed',
+                progress: 100,
+                error: gatewayVideoError,
+              });
+              return;
+            }
+          }
           const completedResult = {
-            videoUrl: submitResult.videoUrl,
+            ...(directGatewayVideo || { videoUrl: submitResult.videoUrl }),
+            videoUrl: directGatewayVideo?.videoUrl ?? submitResult.videoUrl,
             model,
             modelName,
             providerId: provider.id,
             type: 'video',
           };
-          const completed = await completeCloudTask(taskId, completedResult);
-          if (!completed) return;
+          let completed: boolean;
+          try {
+            completed = await completeCloudTask(taskId, completedResult);
+          } catch (completionError) {
+            if (directGatewayVideo) {
+              await cleanupPersistedGatewayVideoResult({
+                videoUrl: directGatewayVideo.videoUrl,
+                storageKey: directGatewayVideo.video.storageKey,
+              }).catch(error => {
+                console.error('[video/generate] Direct gateway video cleanup failed:', error);
+              });
+            }
+            throw completionError;
+          }
+          if (!completed) {
+            if (directGatewayVideo) {
+              const current = await getCloudTaskForUser(taskId, sessionUser!.id);
+              if (current?.status !== 'completed') {
+                await cleanupPersistedGatewayVideoResult({
+                  videoUrl: directGatewayVideo.videoUrl,
+                  storageKey: directGatewayVideo.video.storageKey,
+                }).catch(error => {
+                  console.error('[video/generate] Direct gateway video cleanup failed:', error);
+                });
+              }
+            }
+            return;
+          }
           updateTaskProgress(taskId, {
             status: 'completed',
             progress: 100,

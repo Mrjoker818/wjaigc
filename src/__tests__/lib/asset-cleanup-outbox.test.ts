@@ -31,6 +31,38 @@ describe('asset cleanup outbox', () => {
     expect(store.enqueue).toHaveBeenCalledOnce();
   });
 
+  it('accepts only tightly scoped gateway video paths for durable cleanup retry', async () => {
+    const store = {
+      enqueue: vi.fn(async () => undefined), claim: vi.fn(async () => []),
+      complete: vi.fn(async () => true), retry: vi.fn(async () => true),
+      hasAssetReference: vi.fn(async () => false),
+    };
+    const service = createAssetCleanupOutboxService({
+      store,
+      deleteS3: vi.fn(),
+      removeLocal: vi.fn(),
+    });
+
+    await expect(service.recordFailure({
+      storageKey: 'images/video/video_task-1/direct-0123456789ab.mp4',
+      localPath: 'video/video_task-1/direct-0123456789ab.mp4',
+      rootId: 'server-data',
+      lastError: 'delete unavailable',
+    })).resolves.toBeUndefined();
+    await expect(service.recordFailure({
+      storageKey: 'images/video/../../secret.mp4',
+      rootId: 'server-data',
+      lastError: 'invalid target',
+    })).rejects.toThrow('ASSET_CLEANUP_STORAGE_KEY_INVALID');
+    await expect(service.recordFailure({
+      storageKey: 'images/video/video_task-1/direct-0123456789ab.m4v',
+      localPath: 'video/video_task-1/direct-0123456789ab.m4v',
+      rootId: 'server-data',
+      lastError: 'delete unavailable',
+    })).resolves.toBeUndefined();
+    expect(store.enqueue).toHaveBeenCalledTimes(2);
+  });
+
   it('persists a failed cleanup and a new service instance drains it after restart', async () => {
     const records = new Map<string, AssetCleanupOutboxRecord>();
     const store = {

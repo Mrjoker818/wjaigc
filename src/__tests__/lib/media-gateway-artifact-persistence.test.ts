@@ -3,12 +3,137 @@ import sharp from 'sharp';
 
 vi.mock('server-only', () => ({}));
 
-import { stabilizeGatewayImageResult } from '@/lib/media-gateway/artifact-persistence';
+import {
+  downloadSafeVideoArtifact,
+  isGatewayLocalStorageDurable,
+  persistDirectGatewayVideoResult,
+  persistGatewayVideoArtifact,
+  stabilizeGatewayImageResult,
+} from '@/lib/media-gateway/artifact-persistence';
 
 describe('media gateway artifact persistence', () => {
   const validPng = () => sharp({
     create: { width: 2, height: 2, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } },
   }).png().toBuffer();
+
+  it('does not trust a writable platform path without an explicit durability declaration', () => {
+    expect(isGatewayLocalStorageDurable(() => true, undefined)).toBe(false);
+    expect(isGatewayLocalStorageDurable(() => true, 'false')).toBe(false);
+    expect(isGatewayLocalStorageDurable(() => true, 'true')).toBe(true);
+    expect(isGatewayLocalStorageDurable(() => false, 'true')).toBe(false);
+  });
+
+  it('requires a durable destination before publishing a gateway video artifact', async () => {
+    const buffer = Buffer.from('video-bytes');
+    await expect(persistGatewayVideoArtifact({
+      buffer,
+      fileName: 'video/task-1/result.mp4',
+      mimeType: 'video/mp4',
+      upload: vi.fn().mockResolvedValue(null),
+      isDurable: () => false,
+      uploadTimeoutMs: 5,
+    })).rejects.toThrow('GATEWAY_ARTIFACT_PERSIST_FAILED');
+
+    await expect(persistGatewayVideoArtifact({
+      buffer,
+      fileName: 'video/task-1/result.mp4',
+      mimeType: 'video/mp4',
+      upload: vi.fn().mockResolvedValue('/images/video/task-1/result.mp4'),
+      isDurable: () => false,
+    })).resolves.toEqual({ storageKey: 'images/video/task-1/result.mp4' });
+  });
+
+  it('downloads, validates, and durably persists a direct gateway video result', async () => {
+    const buffer = Buffer.concat([
+      Buffer.from([0, 0, 0, 24]),
+      Buffer.from('ftypisom'),
+      Buffer.alloc(32),
+    ]);
+    const download = vi.fn().mockResolvedValue({ buffer, mimeType: 'video/mp4' });
+    const save = vi.fn().mockReturnValue('/api/serve-upload/video/task-1/direct.mp4');
+    const upload = vi.fn().mockResolvedValue('/images/video/task-1/direct.mp4');
+
+    await expect(persistDirectGatewayVideoResult({
+      taskId: 'task-1',
+      sourceUrl: 'https://provider.example/direct.mp4?expires=1',
+      download,
+      save,
+      upload,
+      isDurable: () => false,
+    })).resolves.toEqual({
+      videoUrl: '/api/serve-upload/video/task-1/direct.mp4',
+      video: {
+        url: '/api/serve-upload/video/task-1/direct.mp4',
+        recoverySourceUrl: 'https://provider.example/direct.mp4?expires=1',
+        storageKey: 'images/video/task-1/direct.mp4',
+        mimeType: 'video/mp4',
+        byteSize: buffer.byteLength,
+      },
+    });
+    expect(download).toHaveBeenCalledWith(
+      'https://provider.example/direct.mp4?expires=1',
+      expect.objectContaining({
+        maxBytes: 512 * 1024 * 1024,
+        allowedMimeTypes: ['video/mp4', 'video/webm', 'video/quicktime', 'video/x-m4v'],
+        signal: expect.any(AbortSignal),
+      }),
+    );
+  });
+
+  it('keeps AI Link credentials on the exact content host and strips them from a JSON fallback', async () => {
+    const video = Buffer.concat([
+      Buffer.from([0, 0, 0, 24]),
+      Buffer.from('ftypisom'),
+      Buffer.alloc(32),
+    ]);
+    const download = vi.fn()
+      .mockResolvedValueOnce({
+        buffer: Buffer.from(JSON.stringify({ data: { url: 'https://cdn.example/video.mp4' } })),
+        mimeType: 'application/json',
+      })
+      .mockResolvedValueOnce({ buffer: video, mimeType: 'video/mp4' });
+
+    await expect(downloadSafeVideoArtifact({
+      sourceUrl: 'https://api.example/v1/videos/task/content',
+      download,
+      authorizationHeader: 'Bearer secret',
+      authorizationHost: 'api.example',
+      allowJsonVideoUrlFallback: true,
+    })).resolves.toMatchObject({
+      buffer: video,
+      resolvedSourceUrl: 'https://cdn.example/video.mp4',
+      mediaType: { mimeType: 'video/mp4' },
+    });
+    expect(download.mock.calls[0]?.[1]).toMatchObject({
+      authorizationHeader: 'Bearer secret',
+      authorizationHost: 'api.example',
+      maxBytesByMimeType: { 'application/json': 1024 * 1024 },
+    });
+    expect(download.mock.calls[1]?.[1]).not.toHaveProperty('authorizationHeader');
+    expect(download.mock.calls[0]?.[1]?.signal).toBe(download.mock.calls[1]?.[1]?.signal);
+  });
+
+  it('removes the local direct video when durable persistence fails', async () => {
+    const buffer = Buffer.concat([
+      Buffer.from([0, 0, 0, 24]),
+      Buffer.from('ftypisom'),
+      Buffer.alloc(32),
+    ]);
+    const cleanup = vi.fn().mockResolvedValue(undefined);
+
+    await expect(persistDirectGatewayVideoResult({
+      taskId: 'task-1',
+      sourceUrl: 'https://provider.example/direct.mp4',
+      download: vi.fn().mockResolvedValue({ buffer, mimeType: 'video/mp4' }),
+      save: vi.fn().mockReturnValue('/api/serve-upload/video/task-1/direct.mp4'),
+      upload: vi.fn().mockResolvedValue(null),
+      isDurable: () => false,
+      cleanup,
+    })).rejects.toThrow('GATEWAY_ARTIFACT_PERSIST_FAILED');
+    expect(cleanup).toHaveBeenCalledWith({
+      url: '/api/serve-upload/video/task-1/direct.mp4',
+    });
+  });
 
   it('replaces temporary provider images with managed URLs and preserves recovery metadata', async () => {
     const image = await validPng();

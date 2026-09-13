@@ -70,7 +70,10 @@ import type { GenerationRouteAudit } from '@/lib/generation-route-audit';
 import { STRICT_AGENT_GENERATE_HEADER } from '@/lib/agent-runtime/generate-image-adapter';
 import { enrichCompletedImageResult } from '@/lib/asset-core/image-result-metadata';
 import {
+  cleanupPersistedGatewayVideoResult,
+  downloadSafeVideoArtifact,
   isGatewayImageResult,
+  persistGatewayVideoArtifact,
   stabilizeGatewayImageResult,
 } from '@/lib/media-gateway/artifact-persistence';
 import {
@@ -1904,6 +1907,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       if (registryTask.type === 'video') {
         const regResult = (registryTask.result as Record<string, unknown>) || {};
         const persistedVideoTask = await getCloudTaskForUser(taskId, userId);
+        const gatewayVideoTask = isGatewayImageResult(regResult)
+          || isGatewayImageResult(persistedVideoTask?.result ?? {});
         const hasDurableVideoTask = Boolean(persistedVideoTask);
         const getDurableVideoTerminalResponse = async (): Promise<NextResponse> => {
           const current = await getCloudTaskForUser(taskId, userId);
@@ -2101,99 +2106,139 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
             // AI Link: video content is NOT in the poll response.
             // When status is "completed", fetch GET /v1/videos/{task_id}/content with auth header.
+            let aiLinkContentHost: string | undefined;
             if (!videoResult.videoUrl && videoProfile === 'ai-link') {
               try {
                 const { getAiLinkContentUrl } = await import('@/lib/video-api');
                 const contentUrl = getAiLinkContentUrl(vBaseUrl, thirdPartyTaskId);
                 console.log(`[poll-task/video] AI Link: fetching content from ${contentUrl}`);
                 videoResult.videoUrl = contentUrl;
+                aiLinkContentHost = new URL(contentUrl).hostname;
               } catch (aiLinkErr) {
                 console.warn(`[poll-task/video] AI Link content URL construction failed:`, aiLinkErr);
               }
             }
             
             if (videoResult.videoUrl) {
-              // 持久化视频文件（直接下载保存，不经过sharp压缩）
+              let gatewayVideoArtifactLeaseOwner: string | undefined;
+              if (gatewayVideoTask && hasDurableVideoTask) {
+                gatewayVideoArtifactLeaseOwner = `gateway-video-artifact-${process.pid}-${randomUUID()}`;
+                const artifactLease = await claimCloudTaskLease(
+                  taskId,
+                  gatewayVideoArtifactLeaseOwner,
+                  600_000,
+                );
+                if (!artifactLease) return getDurableVideoTerminalResponse();
+              }
+              // 视频制品先经过 DNS 固定、类型/签名和流式字节上限校验，再发布终态。
               let persistedVideoUrl = videoResult.videoUrl;
               let persistedVideoMetadata: PersistedVideoFileMetadata | undefined;
+              let persistedVideoLocalPath: string | undefined;
+              let gatewayVideoStorageKey: string | undefined;
+              let videoRecoverySourceUrl = videoResult.videoUrl;
+              let videoPersistenceError: unknown;
               try {
                 const path = await import('path');
                 const fs = await import('fs/promises');
                 const { getServerDataRoot } = await import('@/lib/server-data-root');
                 const dataRoot = getServerDataRoot();
-                
-                // AI Link content endpoint requires Authorization header
-                const videoFetchHeaders: Record<string, string> = {};
-                if (videoProfile === 'ai-link') {
-                  videoFetchHeaders['Authorization'] = `Bearer ${vApiKey}`;
-                }
-
-                const videoResp = await fetch(videoResult.videoUrl, {
-                  headers: videoFetchHeaders,
-                  signal: AbortSignal.timeout(120000),
+                const downloaded = await downloadSafeVideoArtifact({
+                  sourceUrl: videoResult.videoUrl,
+                  ...(aiLinkContentHost ? {
+                    authorizationHeader: `Bearer ${vApiKey}`,
+                    authorizationHost: aiLinkContentHost,
+                    allowJsonVideoUrlFallback: true,
+                  } : {}),
                 });
-                if (videoResp.ok) {
-                  // Guard against error JSON being returned with a 200 status
-                  // (some AI Link gateways return errors as JSON with 200)
-                  const contentType = videoResp.headers.get('content-type') || '';
-                  if (contentType.includes('application/json') && videoProfile === 'ai-link') {
-                    const errorBody = await videoResp.text();
-                    console.warn(`[poll-task/video] AI Link content endpoint returned JSON instead of binary: ${errorBody.slice(0, 500)}`);
-                    // Try to extract a video URL from the JSON error/response
-                    try {
-                      const parsed = JSON.parse(errorBody);
-                      const fallbackUrl = parsed?.data?.video_url || parsed?.data?.url || parsed?.video_url || parsed?.url;
-                      if (typeof fallbackUrl === 'string' && fallbackUrl.startsWith('http')) {
-                        console.log(`[poll-task/video] AI Link: extracted fallback URL from JSON: ${fallbackUrl.slice(0, 100)}`);
-                        const retryResp = await fetch(fallbackUrl, {
-                          headers: videoFetchHeaders,
-                          signal: AbortSignal.timeout(120000),
-                        });
-                        if (retryResp.ok && !retryResp.headers.get('content-type')?.includes('application/json')) {
-                          const videoBuffer = Buffer.from(await retryResp.arrayBuffer());
-                          const origPath = new URL(fallbackUrl).pathname;
-                          const ext = path.extname(origPath).toLowerCase() || '.mp4';
-                          const filename = `video_${taskId}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}${ext}`;
-                          const dirPath = path.join(dataRoot, 'uploads', 'video', taskId);
-                          await fs.mkdir(dirPath, { recursive: true });
-                          const persistedPath = path.join(dirPath, filename);
-                          await fs.writeFile(persistedPath, videoBuffer);
-                          persistedVideoUrl = `/api/serve-upload/video/${taskId}/${filename}`;
-                          persistedVideoMetadata = await inspectPersistedVideoFile(
-                            persistedPath,
-                            videoBuffer.byteLength,
-                          );
-                          console.log(`[poll-task/video] Persisted video from fallback URL: ${persistedVideoUrl} (${(videoBuffer.length / 1024 / 1024).toFixed(1)}MB)`);
-                        }
-                      }
-                    } catch {
-                      // JSON parse failed — nothing more we can do
-                    }
-                  } else {
-                    const videoBuffer = Buffer.from(await videoResp.arrayBuffer());
-                    // 从原始URL或Content-Type推断视频扩展名
-                    const origPath = new URL(videoResult.videoUrl).pathname;
-                    const ext = path.extname(origPath).toLowerCase() || '.mp4';
-                    const filename = `video_${taskId}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}${ext}`;
-                    const dirPath = path.join(dataRoot, 'uploads', 'video', taskId);
-                    await fs.mkdir(dirPath, { recursive: true });
-                    const persistedPath = path.join(dirPath, filename);
-                    await fs.writeFile(persistedPath, videoBuffer);
-                    persistedVideoUrl = `/api/serve-upload/video/${taskId}/${filename}`;
-                    persistedVideoMetadata = await inspectPersistedVideoFile(
-                      persistedPath,
-                      videoBuffer.byteLength,
-                    );
-                    console.log(`[poll-task/video] Persisted video: ${persistedVideoUrl} (${(videoBuffer.length / 1024 / 1024).toFixed(1)}MB)`);
-                  }
-                } else {
-                  // Read error body for diagnostics
-                  let errorDetail = '';
-                  try { errorDetail = await videoResp.text(); } catch { /* ignore */ }
-                  console.warn(`[poll-task/video] Failed to download video: ${videoResp.status} ${videoResp.statusText}`, errorDetail.slice(0, 300));
+                videoRecoverySourceUrl = downloaded.resolvedSourceUrl;
+                const filename = `video_${taskId}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.${downloaded.mediaType.extension}`;
+                const dirPath = path.join(dataRoot, 'uploads', 'video', taskId);
+                await fs.mkdir(dirPath, { recursive: true });
+                const persistedPath = path.join(dirPath, filename);
+                persistedVideoLocalPath = persistedPath;
+                persistedVideoUrl = `/api/serve-upload/video/${taskId}/${filename}`;
+                await fs.writeFile(persistedPath, downloaded.buffer, {
+                  signal: AbortSignal.timeout(60_000),
+                });
+                persistedVideoMetadata = {
+                  ...await inspectPersistedVideoFile(persistedPath, downloaded.buffer.byteLength),
+                  mimeType: downloaded.mediaType.mimeType,
+                };
+                if (gatewayVideoTask) {
+                  const persisted = await persistGatewayVideoArtifact({
+                    buffer: downloaded.buffer,
+                    fileName: `video/${taskId}/${filename}`,
+                    mimeType: downloaded.mediaType.mimeType,
+                  });
+                  gatewayVideoStorageKey = persisted.storageKey;
                 }
+                console.log(`[poll-task/video] Persisted verified video: ${persistedVideoUrl} (${(downloaded.buffer.length / 1024 / 1024).toFixed(1)}MB)`);
               } catch (persistErr) {
-                console.warn('[poll-task] Video persist failed, using source URL:', persistErr);
+                console.warn('[poll-task] Video persist failed:', persistErr);
+                videoPersistenceError = persistErr;
+              }
+
+              if (videoPersistenceError && persistedVideoLocalPath) {
+                await cleanupPersistedGatewayVideoResult({
+                  videoUrl: persistedVideoUrl,
+                  storageKey: gatewayVideoStorageKey,
+                });
+              }
+              if (!gatewayVideoTask && videoPersistenceError) {
+                persistedVideoUrl = videoResult.videoUrl;
+                persistedVideoMetadata = undefined;
+                gatewayVideoStorageKey = undefined;
+              }
+
+              if (gatewayVideoTask && (
+                videoPersistenceError
+                || !persistedVideoUrl.startsWith('/api/serve-upload/video/')
+              )) {
+                const gatewayVideoError = '网关视频结果持久化失败';
+                if (!videoPersistenceError && persistedVideoLocalPath) {
+                  await cleanupPersistedGatewayVideoResult({
+                    videoUrl: persistedVideoUrl,
+                    storageKey: gatewayVideoStorageKey,
+                  });
+                }
+                if (hasDurableVideoTask) {
+                  const settled = await terminateCloudTaskAndRefund(
+                    taskId,
+                    'failed',
+                    gatewayVideoError,
+                    gatewayVideoArtifactLeaseOwner,
+                  );
+                  if (!settled.transitioned) return getDurableVideoTerminalResponse();
+                } else {
+                  const creditStatus = await refundTaskCredits(
+                    taskId,
+                    getTaskInfo(taskId)?.creditCost,
+                    `视频结果持久化失败退款 (taskId: ${taskId})`,
+                  );
+                  await recordVideoTaskTerminal(taskId, {
+                    status: 'failed',
+                    error: gatewayVideoError,
+                    creditStatus,
+                  });
+                }
+                updateTaskProgress(taskId, {
+                  status: 'failed',
+                  progress: 100,
+                  error: gatewayVideoError,
+                });
+                releaseQueueSlot(taskId);
+                failedTaskCache.set(taskId, {
+                  userId,
+                  error: gatewayVideoError,
+                  timestamp: Date.now(),
+                });
+                return NextResponse.json({
+                  success: false,
+                  status: 'failed',
+                  progress: 100,
+                  error: gatewayVideoError,
+                  retryable: true,
+                }, { status: 200 });
               }
 
               const completedResult = sanitizeCompletedTaskResult({
@@ -2203,14 +2248,39 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
                   video: {
                     url: persistedVideoUrl,
                     ...persistedVideoMetadata,
+                    ...(gatewayVideoStorageKey ? { storageKey: gatewayVideoStorageKey } : {}),
+                    ...(gatewayVideoTask ? { recoverySourceUrl: videoRecoverySourceUrl } : {}),
                   },
                 } : {}),
                 videoDuration: videoResult.duration,
                 videoThumbnailUrl: videoResult.thumbnailUrl,
               });
               if (hasDurableVideoTask) {
-                const completed = await completeCloudTask(taskId, completedResult);
-                if (!completed) return getDurableVideoTerminalResponse();
+                let completed: boolean;
+                try {
+                  completed = await completeCloudTask(
+                    taskId,
+                    completedResult,
+                    gatewayVideoArtifactLeaseOwner,
+                  );
+                } catch (completionError) {
+                  if (persistedVideoUrl.startsWith('/api/serve-upload/video/')) {
+                    await cleanupPersistedGatewayVideoResult({
+                      videoUrl: persistedVideoUrl,
+                      storageKey: gatewayVideoStorageKey,
+                    });
+                  }
+                  throw completionError;
+                }
+                if (!completed) {
+                  if (persistedVideoUrl.startsWith('/api/serve-upload/video/')) {
+                    await cleanupPersistedGatewayVideoResult({
+                      videoUrl: persistedVideoUrl,
+                      storageKey: gatewayVideoStorageKey,
+                    });
+                  }
+                  return getDurableVideoTerminalResponse();
+                }
                 await projectPersistedCompletedTask(taskId, userId);
               } else {
                 await recordVideoTaskTerminal(taskId, {

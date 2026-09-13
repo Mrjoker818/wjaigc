@@ -16,8 +16,13 @@ function positiveSafeInteger(value: unknown): number | undefined {
   return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : undefined;
 }
 
-function mimeTypeForVideoPath(filePath: string): string {
-  return extname(filePath).toLowerCase() === '.webm' ? 'video/webm' : 'video/mp4';
+export function mimeTypeForVideoPath(filePath: string): string {
+  switch (extname(filePath).toLowerCase()) {
+    case '.webm': return 'video/webm';
+    case '.mov': return 'video/quicktime';
+    case '.m4v': return 'video/x-m4v';
+    default: return 'video/mp4';
+  }
 }
 
 export function parseFfprobeVideoDimensions(value: unknown): {

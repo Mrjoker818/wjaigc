@@ -258,6 +258,16 @@ export async function deleteGatewayImageFromS3Exact(key: string): Promise<void> 
   await deleteExactS3Key(storage.client, storage.bucket, key);
 }
 
+/** Deletes only gateway-created video objects; caller must provide the exact persisted key. */
+export async function deleteGatewayVideoFromS3Exact(key: string): Promise<void> {
+  if (!/^images\/video\/[A-Za-z0-9_-]{1,128}\/[A-Za-z0-9._-]+\.(?:m4v|mov|mp4|webm)$/u.test(key)) {
+    throw new TypeError('S3_GATEWAY_VIDEO_KEY_INVALID');
+  }
+  const storage = getBinaryStorage();
+  if (!storage) throw new Error('S3_BINARY_STORAGE_UNAVAILABLE');
+  await deleteExactS3Key(storage.client, storage.bucket, key);
+}
+
 async function deleteBinaryWithPersistentFallback(key: string): Promise<void> {
   try {
     await deleteBinaryFromS3Exact(key);

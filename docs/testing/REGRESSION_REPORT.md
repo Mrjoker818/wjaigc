@@ -3197,3 +3197,28 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - 测试结束后已停止并删除一次性集群，确认 55433 无监听。
 
 **判定：当前候选隔离 PostgreSQL 门禁通过。** Task 9 剩余阻断仅为 Coze 启用态真实供应商、资产/缩略图/S3、账务和浏览器证据。
+
+### 2026-09-14 Task 9 视频持久化与恢复补丁回归
+
+- RED 阶段稳定复现同步直返绕过持久化、轮询终态无数据库租约、视频安全下载拒绝/误收类型、S3/本地清理边界缺失等失败。
+- GREEN 聚焦回归：安全下载、视频生成/轮询终态、网关制品持久化和清理 Outbox 共 `78/78` 通过；Outbox 扩大回归 `46/46` 通过。
+- 一次性 PostgreSQL 18.4（`127.0.0.1:55433`）完成全部迁移后，Doctor、准入、生命周期、清理和并发合同 `26/26` 通过；测试结束后服务与目录均已删除。
+- 使用同一隔离 PostgreSQL 运行完整 `pnpm test`：`807/807` 测试文件、`6802/6802` 测试通过，0 失败、0 跳过，退出码 0。
+- 上文缺少 `POSTGRES_TEST_DATABASE_URL` 的阶段性失败已由本轮真库证据取代；历史原始结果继续保留，不回写成当时全绿。
+
+**判定：`LOCAL + POSTGRESQL PASS / COZE ENABLED E2E UNVERIFIED`。** 本地代码与数据库门禁已闭环；真实云端 `n=2` 资产投影、视频重启恢复、S3 URL、同步直返及账务证据仍须验证。
+
+- 最终静态与构建门禁：`pnpm ts-check` 退出 0，`pnpm lint:build` 退出 0，`pnpm build` 退出 0并生成 `120/120` 页面。
+- 构建保留 54 条既有 Turbopack 动态文件追踪告警；未通过扩大忽略、关闭检查或修改无关业务代码消除这些告警。
+
+### 2026-09-14 Task 9 最终安全复审与真库全量回归
+
+- 独立复审首轮发现 3 个 Important 与 1 个 Minor：数据库终态异常后的制品清理、下载绝对截止、非网关视频兼容、部分写盘清理登记。四项均先形成失败回归，再完成最小修复。
+- 视频下载现在共享 300 秒绝对 `AbortSignal`，写盘限制 60 秒、ffprobe 15 秒、S3 15 秒，受控阶段上界低于 600 秒数据库租约；AI Link JSON 跳转沿用同一绝对截止且不向 CDN 转发认证头。
+- `completeCloudTask` 返回竞态失败或直接抛出数据库异常时，轮询与同步直返链路都会精确清理本地/S3制品；删除失败进入持久化 Outbox。非网关旧视频在本地固化失败时恢复供应商源 URL，不被网关失败关闭策略误伤。
+- 最终独立复审：`APPROVED`，Critical `0`、Important `0`、Minor `0`；专项 `125/125` 通过。
+- 修改后的最终候选在一次性 PostgreSQL 18.4 上应用全部迁移后运行完整 `pnpm test`：`807/807` 文件、`6810/6810` 测试通过，0 失败、0 跳过。测试库随后停止并删除，`127.0.0.1:55433` 无监听。
+
+**判定：`LOCAL + POSTGRESQL + INDEPENDENT REVIEW PASS / COZE ENABLED E2E UNVERIFIED`。** Task 9 本地部分已闭环，仍不能把 Coze 真实供应商、`n=2`、AssetVersion/缩略图、S3 重启恢复和一次扣退标记为通过。
+
+- 最终静态门禁：`pnpm ts-check`、`pnpm lint:build`、目标差异检查均退出 0；`pnpm build` 退出 0并生成 `120/120` 页面。构建保留 56 条既有 Turbopack 动态文件追踪告警。

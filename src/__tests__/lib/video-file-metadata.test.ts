@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
-import { parseFfprobeVideoDimensions } from '@/lib/asset-core/video-file-metadata';
+import {
+  mimeTypeForVideoPath,
+  parseFfprobeVideoDimensions,
+} from '@/lib/asset-core/video-file-metadata';
 
 describe('persisted video metadata', () => {
   it('selects the video stream instead of an earlier audio stream', () => {
@@ -17,5 +20,12 @@ describe('persisted video metadata', () => {
       streams: [{ codec_type: 'video', width: 0, height: 1279.5 }],
     })).toEqual({});
     expect(parseFfprobeVideoDimensions({ streams: [] })).toEqual({});
+  });
+
+  it('preserves the MIME type implied by MP4, WebM, MOV, and M4V files', () => {
+    expect(mimeTypeForVideoPath('/tmp/result.mp4')).toBe('video/mp4');
+    expect(mimeTypeForVideoPath('/tmp/result.webm')).toBe('video/webm');
+    expect(mimeTypeForVideoPath('/tmp/result.mov')).toBe('video/quicktime');
+    expect(mimeTypeForVideoPath('/tmp/result.m4v')).toBe('video/x-m4v');
   });
 });

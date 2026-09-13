@@ -219,11 +219,24 @@ function outputFileMetadata(result: Record<string, unknown>, url: string): Parti
   const mimeType = typeof metadata.mimeType === 'string' && metadata.mimeType.length <= 128
     ? metadata.mimeType
     : undefined;
+  const storageKey = typeof metadata.storageKey === 'string'
+    && metadata.storageKey.length <= 1_024
+    && !metadata.storageKey.startsWith('/')
+    && !metadata.storageKey.split('/').some(segment => !segment || segment === '.' || segment === '..')
+    ? metadata.storageKey
+    : undefined;
+  const recoverySourceUrl = typeof metadata.recoverySourceUrl === 'string'
+    && metadata.recoverySourceUrl.length <= 4_096
+    && /^https:\/\//u.test(metadata.recoverySourceUrl)
+    ? metadata.recoverySourceUrl
+    : undefined;
   return {
     ...(width === undefined ? {} : { width }),
     ...(height === undefined ? {} : { height }),
     ...(byteSize === undefined ? {} : { byteSize }),
     ...(mimeType ? { mimeType } : {}),
+    ...(storageKey ? { storageKey } : {}),
+    ...(recoverySourceUrl ? { recoverySourceUrl } : {}),
   };
 }
 

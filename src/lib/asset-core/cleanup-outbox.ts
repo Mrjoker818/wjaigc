@@ -11,6 +11,8 @@ const SAFE_EXPORT_PATH = /^exports\/[a-f0-9]{16}-[A-Za-z0-9._-]+\.(?:png|jpe?g|w
 const SAFE_EXPORT_TEMP_PATH = /^exports\/\.[A-Za-z0-9._-]+\.(?:tmp|recover\.tmp)$/u;
 const SAFE_GATEWAY_LOCAL_PATH = /^gateway\/[A-Za-z0-9._-]+\.(?:png|jpe?g|webp|gif|bmp|avif)$/u;
 const SAFE_GATEWAY_STORAGE_KEY = /^images\/gateway\/[A-Za-z0-9._-]+\.(?:png|jpe?g|webp|gif|bmp|avif)$/u;
+const SAFE_GATEWAY_VIDEO_LOCAL_PATH = /^video\/[A-Za-z0-9_-]{1,128}\/[A-Za-z0-9._-]+\.(?:m4v|mov|mp4|webm)$/u;
+const SAFE_GATEWAY_VIDEO_STORAGE_KEY = /^images\/video\/[A-Za-z0-9_-]{1,128}\/[A-Za-z0-9._-]+\.(?:m4v|mov|mp4|webm)$/u;
 
 export interface AssetCleanupOutboxRecord {
   id: string;
@@ -51,7 +53,12 @@ function assertSafeTarget(input: Pick<RecordAssetCleanupFailureInput, 'storageKe
   if (input.rootId !== 'server-data' || (!input.storageKey && !input.localPath)) {
     throw new TypeError('ASSET_CLEANUP_TARGET_INVALID');
   }
-  if (input.storageKey && !SAFE_EXPORT_PATH.test(input.storageKey) && !SAFE_GATEWAY_STORAGE_KEY.test(input.storageKey)) {
+  if (
+    input.storageKey
+    && !SAFE_EXPORT_PATH.test(input.storageKey)
+    && !SAFE_GATEWAY_STORAGE_KEY.test(input.storageKey)
+    && !SAFE_GATEWAY_VIDEO_STORAGE_KEY.test(input.storageKey)
+  ) {
     throw new TypeError('ASSET_CLEANUP_STORAGE_KEY_INVALID');
   }
   if (
@@ -59,6 +66,7 @@ function assertSafeTarget(input: Pick<RecordAssetCleanupFailureInput, 'storageKe
     && !SAFE_EXPORT_PATH.test(input.localPath)
     && !SAFE_EXPORT_TEMP_PATH.test(input.localPath)
     && !SAFE_GATEWAY_LOCAL_PATH.test(input.localPath)
+    && !SAFE_GATEWAY_VIDEO_LOCAL_PATH.test(input.localPath)
   ) {
     throw new TypeError('ASSET_CLEANUP_LOCAL_PATH_INVALID');
   }
@@ -222,9 +230,15 @@ function defaultService() {
   return createAssetCleanupOutboxService({
     store: postgresStore,
     deleteS3: async storageKey => {
-      const { deleteBinaryFromS3Exact, deleteGatewayImageFromS3Exact } = await import('@/lib/s3-storage');
+      const {
+        deleteBinaryFromS3Exact,
+        deleteGatewayImageFromS3Exact,
+        deleteGatewayVideoFromS3Exact,
+      } = await import('@/lib/s3-storage');
       if (SAFE_GATEWAY_STORAGE_KEY.test(storageKey)) {
         await deleteGatewayImageFromS3Exact(storageKey);
+      } else if (SAFE_GATEWAY_VIDEO_STORAGE_KEY.test(storageKey)) {
+        await deleteGatewayVideoFromS3Exact(storageKey);
       } else {
         await deleteBinaryFromS3Exact(storageKey);
       }

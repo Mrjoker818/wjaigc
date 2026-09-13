@@ -80,6 +80,25 @@ describe('video task durability contract', () => {
       expect(missingTaskId).toBeGreaterThan(directCompletion);
     });
 
+    if (routePath === 'src/app/api/video/generate/route.ts') {
+      it('stabilizes a direct gateway video before publishing its terminal state', () => {
+        const source = readSource(routePath);
+        const directCompletion = source.indexOf(
+          "if (submitResult.status === 'succeeded' && submitResult.videoUrl)",
+        );
+        const directBlock = source.slice(directCompletion, directCompletion + 5000);
+        const persistence = directBlock.indexOf('await persistDirectGatewayVideoResult({');
+        const completion = directBlock.indexOf('await completeCloudTask(');
+
+        expect(persistence).toBeGreaterThan(-1);
+        expect(completion).toBeGreaterThan(persistence);
+        expect(directBlock).toContain("terminateCloudTaskAndRefund(taskId, 'failed'");
+        expect(directBlock).toMatch(
+          /catch \(completionError\)[\s\S]*cleanupPersistedGatewayVideoResult\([\s\S]*throw completionError/u,
+        );
+      });
+    }
+
     it(`${routePath} durably records the provider task ID before exposing it to the in-memory poller`, () => {
       const source = readSource(routePath);
       const providerTaskPersistence = source.indexOf('await recordVideoTaskRemotePolling(taskId,');

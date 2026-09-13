@@ -65,6 +65,32 @@ function mockHttpsResponses(
 }
 
 describe('safe remote image download transport', () => {
+  it('sends credentials only to the exact explicitly authorized hostname', async () => {
+    const observedAuthorization: Array<string | undefined> = [];
+    mockHttpsResponses((requestOptions) => {
+      const headers = requestOptions.headers as Record<string, string>;
+      observedAuthorization.push(headers.Authorization);
+      return {
+        statusCode: 200,
+        headers: { 'content-type': 'video/mp4', 'content-length': '12' },
+        body: Buffer.from('0000ftypisom'),
+      };
+    });
+
+    await expect(downloadPublicImage('https://video.example.com/content', {
+      allowedMimeTypes: ['video/mp4'],
+      authorizationHeader: 'Bearer secret',
+      authorizationHost: 'video.example.com',
+    })).resolves.toMatchObject({ mimeType: 'video/mp4' });
+    expect(observedAuthorization).toEqual(['Bearer secret']);
+
+    await expect(downloadPublicImage('https://cdn.example.com/content', {
+      allowedMimeTypes: ['video/mp4'],
+      authorizationHeader: 'Bearer secret',
+      authorizationHost: 'video.example.com',
+    })).rejects.toThrow(/authorization host/i);
+  });
+
   it('downloads a slow remote artifact through bounded sequential range requests', async () => {
     const payload = Buffer.from('0123456789ab');
     const observedRanges: string[] = [];
@@ -316,6 +342,16 @@ describe('safe remote image download address policy', () => {
     'application/zip',
     'application/x-zip-compressed',
   ])('allows Pear ZIP artifacts only through an explicit safe allowlist: %s', (mimeType) => {
+    expect(isAllowedRemoteMimeType(mimeType)).toBe(false);
+    expect(isAllowedRemoteMimeType(mimeType, [mimeType])).toBe(true);
+  });
+
+  it.each([
+    'video/mp4',
+    'video/webm',
+    'video/quicktime',
+    'video/x-m4v',
+  ])('allows video artifacts only through an explicit safe allowlist: %s', (mimeType) => {
     expect(isAllowedRemoteMimeType(mimeType)).toBe(false);
     expect(isAllowedRemoteMimeType(mimeType, [mimeType])).toBe(true);
   });

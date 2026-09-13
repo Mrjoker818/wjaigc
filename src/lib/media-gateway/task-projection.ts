@@ -1,4 +1,6 @@
 import { getInternalRequestHeaders } from '@/lib/api-auth';
+import { getInternalApiUrl } from '@/lib/api-helpers';
+import { projectPersistedCompletedTask } from '@/lib/cloud-task-persistence';
 import {
   getCloudTaskForUser,
   type CloudTask,
@@ -27,6 +29,8 @@ const PUBLIC_FORMATS = new Set([
   'm4v', 'mkv', 'mov', 'mp4', 'webm',
 ]);
 const INTERNAL_CANCEL_TIMEOUT_MS = 30_000;
+const INTERNAL_POLL_TIMEOUT_MS = 15_000;
+const LIVE_TASK_STATUSES = new Set<CloudTaskStatus>(['queued', 'pending', 'processing']);
 
 export interface GatewayTaskProjection {
   taskId: string;
@@ -184,6 +188,53 @@ function projectedAssetVersionId(result: Record<string, unknown> | undefined): s
   return publicIdentifier(result?.assetVersionId);
 }
 
+function isGatewayTask(task: CloudTask): boolean {
+  const payload = task.result?.submissionPayload;
+  return Boolean(
+    payload
+    && typeof payload === 'object'
+    && !Array.isArray(payload)
+    && (payload as Record<string, unknown>).sourceChannel === 'gateway',
+  );
+}
+
+function projectionNeedsRetry(task: CloudTask): boolean {
+  if (task.status !== 'completed' || !task.projectId || !isGatewayTask(task)) return false;
+  const projection = task.result?.assetProjection;
+  if (!projection || typeof projection !== 'object' || Array.isArray(projection)) return true;
+  const record = projection as Record<string, unknown>;
+  return record.status === 'projection_pending'
+    || !Array.isArray(record.versionIds)
+    || record.versionIds.length === 0;
+}
+
+async function advanceGatewayTask(principal: GatewayPrincipal, task: CloudTask): Promise<void> {
+  if (!isGatewayTask(task) || !LIVE_TASK_STATUSES.has(task.status)) return;
+  try {
+    await fetch(getInternalApiUrl('/api/poll-task'), {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        ...await getInternalRequestHeaders(principal.userId, 'user'),
+      },
+      body: JSON.stringify({ taskId: task.id }),
+      cache: 'no-store',
+      signal: AbortSignal.timeout(INTERNAL_POLL_TIMEOUT_MS),
+    });
+  } catch {
+    // The durable task remains authoritative; a later status request can retry.
+  }
+}
+
+async function retryGatewayProjection(principal: GatewayPrincipal, task: CloudTask): Promise<void> {
+  if (!projectionNeedsRetry(task)) return;
+  try {
+    await projectPersistedCompletedTask(task.id, principal.userId);
+  } catch {
+    // Projection is presentation metadata and must not erase a completed task.
+  }
+}
+
 async function ownsAssetVersion(
   assetVersionId: string,
   ownerId: string,
@@ -257,7 +308,15 @@ export async function getGatewayTaskProjection(
   principal: GatewayPrincipal,
   taskId: string,
 ): Promise<GatewayTaskProjection> {
-  const { task, projection } = await readGatewayTaskWithoutThumbnails(principal, taskId);
+  let { task, projection } = await readGatewayTaskWithoutThumbnails(principal, taskId);
+  if (LIVE_TASK_STATUSES.has(task.status) && isGatewayTask(task)) {
+    await advanceGatewayTask(principal, task);
+    ({ task, projection } = await readGatewayTaskWithoutThumbnails(principal, taskId));
+  }
+  if (projectionNeedsRetry(task)) {
+    await retryGatewayProjection(principal, task);
+    ({ task, projection } = await readGatewayTaskWithoutThumbnails(principal, taskId));
+  }
   if (projection.status !== 'completed') return projection;
   const assetVersionId = projectedAssetVersionId(task.result);
   if (!assetVersionId) return projection;

@@ -15,6 +15,11 @@ const IMAGE_MIME_TYPES = new Set([
 ]);
 const SAFE_REMOTE_ASSET_MIME_TYPES = new Set([
   ...IMAGE_MIME_TYPES,
+  'video/mp4',
+  'video/quicktime',
+  'video/webm',
+  'video/x-m4v',
+  'application/json',
   'application/octet-stream',
   'application/x-zip-compressed',
   'application/zip',
@@ -45,6 +50,9 @@ export interface DownloadPublicImageOptions {
   signal?: AbortSignal;
   allowedMimeTypes?: readonly string[];
   rangeChunkBytes?: number;
+  authorizationHeader?: string;
+  authorizationHost?: string;
+  maxBytesByMimeType?: Readonly<Record<string, number>>;
 }
 
 export function isAllowedRemoteMimeType(
@@ -158,6 +166,13 @@ export async function downloadPublicImage(
   if (url.username || url.password) {
     throw new SafeImageDownloadError('Credentials in image URLs are not allowed');
   }
+  const authorizationHeader = options.authorizationHeader?.trim();
+  const authorizationHost = options.authorizationHost?.trim().toLowerCase();
+  if (authorizationHeader || authorizationHost) {
+    if (!authorizationHeader || !authorizationHost || url.hostname.toLowerCase() !== authorizationHost) {
+      throw new SafeImageDownloadError('Remote authorization host does not match the request URL');
+    }
+  }
 
   const addresses = await lookup(url.hostname, { all: true, verbatim: true });
   options.signal?.throwIfAborted();
@@ -216,6 +231,7 @@ export async function downloadPublicImage(
       headers: {
         Accept: acceptedMimeTypes.join(','),
         'User-Agent': 'WujieAI-SafeImageDownloader/1.0',
+        ...(authorizationHeader ? { Authorization: authorizationHeader } : {}),
         ...headers,
       },
       lookup: (_hostname, lookupOptions, callback) => {
@@ -255,7 +271,11 @@ export async function downloadPublicImage(
         return;
       }
       const declaredBytes = Number(response.headers['content-length'] || 0);
-      const responseLimit = status === 206 ? rangeResponseLimit : maxBytes;
+      const mimeLimit = options.maxBytesByMimeType?.[mimeType];
+      const responseLimit = Math.min(
+        status === 206 ? rangeResponseLimit : maxBytes,
+        Number.isSafeInteger(mimeLimit) && Number(mimeLimit) > 0 ? Number(mimeLimit) : maxBytes,
+      );
       if (declaredBytes > responseLimit) {
         response.resume();
         rejectOnce(new SafeImageDownloadError('Remote image exceeds the size limit'));

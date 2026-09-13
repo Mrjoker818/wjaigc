@@ -135,6 +135,8 @@ describe('completed task asset projection', () => {
           height: 1254,
           mimeType: 'image/png',
           byteSize: 456789,
+          storageKey: 'images/gateway/task-1-result.png',
+          recoverySourceUrl: 'https://cdn.openai.com/result-1.png',
         }],
       },
     }));
@@ -155,6 +157,8 @@ describe('completed task asset projection', () => {
       height: 1254,
       mimeType: 'image/png',
       byteSize: 456789,
+      storageKey: 'images/gateway/task-1-result.png',
+      recoverySourceUrl: 'https://cdn.openai.com/result-1.png',
     });
   });
 
@@ -307,6 +311,8 @@ describe('completed task asset projection', () => {
           height: 1280,
           mimeType: 'video/mp4',
           byteSize: 3_448_080,
+          storageKey: 'images/video/task-1/result.mp4',
+          recoverySourceUrl: 'https://media.openai.com/result.mp4',
         },
       },
     }));
@@ -325,6 +331,8 @@ describe('completed task asset projection', () => {
       height: 1280,
       mimeType: 'video/mp4',
       byteSize: 3_448_080,
+      storageKey: 'images/video/task-1/result.mp4',
+      recoverySourceUrl: 'https://media.openai.com/result.mp4',
     });
   });
 

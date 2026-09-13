@@ -11,8 +11,9 @@ import { uploadImageToS3Abortable } from '@/lib/s3-storage';
 
 const MAX_IMAGE_BYTES = 25 * 1024 * 1024;
 const MAX_IMAGE_PIXELS = 40_000_000;
+const MAX_VIDEO_BYTES = 512 * 1024 * 1024;
 const DOWNLOAD_TIMEOUT_MS = 12_000;
-const S3_BACKUP_TIMEOUT_MS = 2_000;
+const S3_BACKUP_TIMEOUT_MS = 15_000;
 const MANAGED_PREFIXES = ['/api/serve-upload/', '/uploads/'];
 
 type Download = (
@@ -43,6 +44,267 @@ interface StabilizeGatewayImageResultInput {
   recordCleanupFailure?: RecordCleanupFailure;
   uploadTimeoutMs?: number;
   isDurable?: () => boolean;
+}
+
+export function isGatewayLocalStorageDurable(
+  isDurable: () => boolean = isServerDataRootDurable,
+  durabilityDeclaration: string | undefined = process.env.WUJIE_DATA_DIR_DURABLE,
+): boolean {
+  return durabilityDeclaration?.trim().toLowerCase() === 'true' && isDurable();
+}
+
+interface PersistGatewayVideoArtifactInput {
+  buffer: Buffer;
+  fileName: string;
+  mimeType: string;
+  upload?: Upload;
+  uploadTimeoutMs?: number;
+  isDurable?: () => boolean;
+}
+
+interface PersistDirectGatewayVideoResultInput {
+  taskId: string;
+  sourceUrl: string;
+  download?: Download;
+  save?: typeof saveImageFile;
+  upload?: Upload;
+  cleanup?: Cleanup;
+  recordCleanupFailure?: RecordCleanupFailure;
+  uploadTimeoutMs?: number;
+  isDurable?: () => boolean;
+  authorizationHeader?: string;
+  authorizationHost?: string;
+  allowJsonVideoUrlFallback?: boolean;
+}
+
+interface DownloadSafeVideoArtifactInput {
+  sourceUrl: string;
+  download?: Download;
+  authorizationHeader?: string;
+  authorizationHost?: string;
+  allowJsonVideoUrlFallback?: boolean;
+  signal?: AbortSignal;
+  totalTimeoutMs?: number;
+}
+
+const GATEWAY_VIDEO_MIME_TYPES = [
+  'video/mp4',
+  'video/webm',
+  'video/quicktime',
+  'video/x-m4v',
+] as const;
+
+const MAX_VIDEO_JSON_BYTES = 1024 * 1024;
+
+function extractVideoUrlFromJson(buffer: Buffer): string {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(buffer.toString('utf8'));
+  } catch {
+    throw new Error('GATEWAY_VIDEO_JSON_INVALID');
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('GATEWAY_VIDEO_JSON_INVALID');
+  }
+  const record = parsed as Record<string, unknown>;
+  const data = record.data && typeof record.data === 'object' && !Array.isArray(record.data)
+    ? record.data as Record<string, unknown>
+    : undefined;
+  const candidate = data?.video_url ?? data?.url ?? record.video_url ?? record.url;
+  if (typeof candidate !== 'string' || candidate.length > 4_096) {
+    throw new Error('GATEWAY_VIDEO_JSON_INVALID');
+  }
+  const url = new URL(candidate);
+  if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) {
+    throw new Error('GATEWAY_VIDEO_JSON_INVALID');
+  }
+  return url.toString();
+}
+
+export async function downloadSafeVideoArtifact(
+  input: DownloadSafeVideoArtifactInput,
+): Promise<{
+  buffer: Buffer;
+  mediaType: NonNullable<ReturnType<typeof getSafeMediaTypeFromResponse>>;
+  resolvedSourceUrl: string;
+}> {
+  const download = input.download ?? downloadPublicImage;
+  const deadlineController = new AbortController();
+  const abortFromCaller = () => deadlineController.abort(input.signal?.reason);
+  input.signal?.addEventListener('abort', abortFromCaller, { once: true });
+  if (input.signal?.aborted) abortFromCaller();
+  const deadline = setTimeout(
+    () => deadlineController.abort(new Error('Gateway video download deadline exceeded')),
+    input.totalTimeoutMs ?? 300_000,
+  );
+  const allowedMimeTypes = [
+    ...GATEWAY_VIDEO_MIME_TYPES,
+    ...(input.allowJsonVideoUrlFallback ? ['application/json'] as const : []),
+  ];
+  try {
+    let resolvedSourceUrl = input.sourceUrl;
+    let downloaded = await download(resolvedSourceUrl, {
+      maxBytes: MAX_VIDEO_BYTES,
+      timeoutMs: 120_000,
+      allowedMimeTypes,
+      authorizationHeader: input.authorizationHeader,
+      authorizationHost: input.authorizationHost,
+      maxBytesByMimeType: input.allowJsonVideoUrlFallback
+        ? { 'application/json': MAX_VIDEO_JSON_BYTES }
+        : undefined,
+      signal: deadlineController.signal,
+    });
+    if (downloaded.mimeType === 'application/json') {
+      resolvedSourceUrl = extractVideoUrlFromJson(downloaded.buffer);
+      downloaded = await download(resolvedSourceUrl, {
+        maxBytes: MAX_VIDEO_BYTES,
+        timeoutMs: 120_000,
+        allowedMimeTypes: [...GATEWAY_VIDEO_MIME_TYPES],
+        signal: deadlineController.signal,
+      });
+    }
+    const mediaType = getSafeMediaTypeFromResponse(downloaded.mimeType, downloaded.buffer, true);
+    if (
+      !mediaType
+      || mediaType.kind !== 'video'
+      || !GATEWAY_VIDEO_MIME_TYPES.includes(mediaType.mimeType as typeof GATEWAY_VIDEO_MIME_TYPES[number])
+    ) {
+      throw new Error('Gateway video MIME does not match its bytes');
+    }
+    return { buffer: downloaded.buffer, mediaType, resolvedSourceUrl };
+  } finally {
+    clearTimeout(deadline);
+    input.signal?.removeEventListener('abort', abortFromCaller);
+  }
+}
+
+export async function persistGatewayVideoArtifact(
+  input: PersistGatewayVideoArtifactInput,
+): Promise<{ storageKey?: string }> {
+  if (
+    input.buffer.byteLength === 0
+    || input.buffer.byteLength > MAX_VIDEO_BYTES
+    || !/^video\/(?:mp4|webm|quicktime|x-m4v)$/u.test(input.mimeType)
+    || !/^video\/[A-Za-z0-9._/-]+\.(?:m4v|mov|mp4|webm)$/u.test(input.fileName)
+    || input.fileName.split('/').some(segment => !segment || segment === '.' || segment === '..')
+  ) {
+    throw new Error('GATEWAY_ARTIFACT_PERSIST_FAILED');
+  }
+  const storageKey = await bestEffortUpload(
+    input.upload ?? uploadImageToS3Abortable,
+    input.buffer,
+    input.fileName,
+    input.mimeType,
+    input.uploadTimeoutMs ?? S3_BACKUP_TIMEOUT_MS,
+  );
+  if (!storageKey && !(input.isDurable ?? isGatewayLocalStorageDurable)()) {
+    throw new Error('GATEWAY_ARTIFACT_PERSIST_FAILED');
+  }
+  return storageKey
+    ? { storageKey: storageKey.replace(/^\/+/, '') }
+    : {};
+}
+
+async function cleanupDirectGatewayVideoArtifact(
+  artifact: { url: string; storageKey?: string },
+): Promise<void> {
+  const match = artifact.url.match(
+    /^\/api\/serve-upload\/(video\/([A-Za-z0-9_-]{1,128})\/([^/?#]+))$/u,
+  );
+  if (match) {
+    const { deleteImageFile } = await import('@/lib/server-data-root');
+    if (!deleteImageFile(match[3], `video/${match[2]}`)) {
+      throw new Error('Gateway video local artifact cleanup failed');
+    }
+  }
+  if (artifact.storageKey) {
+    const { deleteGatewayVideoFromS3Exact } = await import('@/lib/s3-storage');
+    await deleteGatewayVideoFromS3Exact(artifact.storageKey);
+  }
+}
+
+export async function cleanupPersistedGatewayVideoResult(input: {
+  videoUrl: string;
+  storageKey?: string;
+}): Promise<void> {
+  const artifact = {
+    url: input.videoUrl,
+    ...(input.storageKey ? { storageKey: input.storageKey } : {}),
+  };
+  try {
+    await cleanupDirectGatewayVideoArtifact(artifact);
+  } catch (error) {
+    await recordGatewayCleanupFailure(artifact, error);
+  }
+}
+
+export async function persistDirectGatewayVideoResult(
+  input: PersistDirectGatewayVideoResultInput,
+): Promise<{
+  videoUrl: string;
+  video: {
+    url: string;
+    recoverySourceUrl: string;
+    storageKey?: string;
+    mimeType: string;
+    byteSize: number;
+  };
+}> {
+  if (!/^[A-Za-z0-9_-]{1,128}$/u.test(input.taskId)) {
+    throw new Error('GATEWAY_ARTIFACT_PERSIST_FAILED');
+  }
+  const download = input.download ?? downloadPublicImage;
+  const save = input.save ?? saveImageFile;
+  const cleanup = input.cleanup ?? cleanupDirectGatewayVideoArtifact;
+  const recordCleanupFailure = input.recordCleanupFailure ?? recordGatewayCleanupFailure;
+  let artifact: { url: string; storageKey?: string } | undefined;
+  try {
+    const downloaded = await downloadSafeVideoArtifact({
+      sourceUrl: input.sourceUrl,
+      download,
+      authorizationHeader: input.authorizationHeader,
+      authorizationHost: input.authorizationHost,
+      allowJsonVideoUrlFallback: input.allowJsonVideoUrlFallback,
+    });
+    const { mediaType } = downloaded;
+    const digest = createHash('sha256').update(input.sourceUrl).digest('hex').slice(0, 12);
+    const filename = `direct-${digest}.${mediaType.extension}`;
+    const videoUrl = save(downloaded.buffer, filename, `video/${input.taskId}`);
+    artifact = { url: videoUrl };
+    const persisted = await persistGatewayVideoArtifact({
+      buffer: downloaded.buffer,
+      fileName: `video/${input.taskId}/${filename}`,
+      mimeType: mediaType.mimeType,
+      upload: input.upload,
+      uploadTimeoutMs: input.uploadTimeoutMs,
+      isDurable: input.isDurable,
+    });
+    if (persisted.storageKey) artifact.storageKey = persisted.storageKey;
+    return {
+      videoUrl,
+      video: {
+        url: videoUrl,
+        recoverySourceUrl: downloaded.resolvedSourceUrl,
+        ...(persisted.storageKey ? { storageKey: persisted.storageKey } : {}),
+        mimeType: mediaType.mimeType,
+        byteSize: downloaded.buffer.byteLength,
+      },
+    };
+  } catch (error) {
+    if (artifact) {
+      try {
+        await cleanup(artifact);
+      } catch (cleanupError) {
+        await recordCleanupFailure(artifact, cleanupError).catch(recordError => {
+          console.error('[media-gateway] Unable to record direct video cleanup failure', {
+            taskId: input.taskId,
+            error: recordError instanceof Error ? recordError.message : String(recordError),
+          });
+        });
+      }
+    }
+    throw new Error('GATEWAY_ARTIFACT_PERSIST_FAILED', { cause: error });
+  }
 }
 
 async function bestEffortUpload(
@@ -138,7 +400,9 @@ async function recordGatewayCleanupFailure(
   artifact: { url: string; storageKey?: string },
   error: unknown,
 ): Promise<void> {
-  const match = artifact.url.match(/^\/api\/serve-upload\/(gateway\/[^/?#]+)$/u);
+  const match = artifact.url.match(
+    /^\/api\/serve-upload\/((?:gateway\/[^/?#]+)|(?:video\/[A-Za-z0-9_-]{1,128}\/[^/?#]+))$/u,
+  );
   const { recordAssetCleanupFailure } = await import('@/lib/asset-core/cleanup-outbox');
   await recordAssetCleanupFailure({
     rootId: 'server-data',
@@ -169,7 +433,7 @@ export async function stabilizeGatewayImageResult(
   const cleanup = input.cleanup ?? cleanupGatewayArtifact;
   const recordCleanupFailure = input.recordCleanupFailure ?? recordGatewayCleanupFailure;
   const uploadTimeoutMs = input.uploadTimeoutMs ?? S3_BACKUP_TIMEOUT_MS;
-  const isDurable = input.isDurable ?? isServerDataRootDurable;
+  const isDurable = input.isDurable ?? isGatewayLocalStorageDurable;
   const createdArtifacts: Array<{ url: string; storageKey?: string }> = [];
   try {
     const images: Array<{

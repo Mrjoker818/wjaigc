@@ -2,6 +2,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   getCloudTaskForUser: vi.fn(),
+  projectPersistedCompletedTask: vi.fn(),
+  getInternalRequestHeaders: vi.fn(),
   query: vi.fn(),
   thumbnailState: 'ready' as 'ready' | 'pending' | 'failed',
 }));
@@ -13,7 +15,10 @@ vi.mock('@/lib/db-client', () => ({
   getPool: () => ({ query: mocks.query }),
 }));
 vi.mock('@/lib/api-auth', () => ({
-  getInternalRequestHeaders: vi.fn(),
+  getInternalRequestHeaders: mocks.getInternalRequestHeaders,
+}));
+vi.mock('@/lib/cloud-task-persistence', () => ({
+  projectPersistedCompletedTask: mocks.projectPersistedCompletedTask,
 }));
 
 import { getGatewayTaskProjection } from '@/lib/media-gateway/task-projection';
@@ -28,7 +33,15 @@ const principal = {
 describe('media gateway task thumbnail projection', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.unstubAllGlobals();
     mocks.thumbnailState = 'ready';
+    mocks.getInternalRequestHeaders.mockResolvedValue({
+      'x-internal-user-id': 'user-1',
+    });
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(
+      JSON.stringify({ success: true, status: 'processing' }),
+      { status: 200, headers: { 'content-type': 'application/json' } },
+    )));
     mocks.getCloudTaskForUser.mockResolvedValue({
       id: 'task-1',
       userId: 'user-1',
@@ -148,6 +161,81 @@ describe('media gateway task thumbnail projection', () => {
       assetVersionId: 'current-version',
     });
     expect(mocks.query.mock.calls[0][1]).toEqual(['current-version', 'user-1', 'project-1']);
+  });
+
+  it('retries a missing completed projection before returning the gateway task', async () => {
+    const completedWithoutProjection = {
+      id: 'task-1',
+      userId: 'user-1',
+      projectId: 'project-1',
+      type: 'generate-async',
+      status: 'completed',
+      progress: 100,
+      result: {
+        imageUrl: '/uploads/original.png',
+        submissionPayload: { sourceChannel: 'gateway' },
+      },
+      creditStatus: 'charged',
+      createdAt: 1,
+      updatedAt: 2,
+    };
+    mocks.getCloudTaskForUser
+      .mockResolvedValueOnce(completedWithoutProjection)
+      .mockResolvedValueOnce({
+        ...completedWithoutProjection,
+        result: {
+          ...completedWithoutProjection.result,
+          assetProjection: { status: 'projected', versionIds: ['version-1'] },
+        },
+      });
+
+    await expect(getGatewayTaskProjection(principal, 'task-1')).resolves.toMatchObject({
+      status: 'completed',
+      assetVersionId: 'version-1',
+    });
+    expect(mocks.projectPersistedCompletedTask).toHaveBeenCalledOnce();
+    expect(mocks.projectPersistedCompletedTask).toHaveBeenCalledWith('task-1', 'user-1');
+  });
+
+  it('advances a persisted video task through the internal poll route after restart', async () => {
+    const processing = {
+      id: 'video-1', userId: 'user-1', projectId: 'project-1', type: 'video',
+      status: 'processing', progress: 10, providerId: 'provider-1', model: 'video-model',
+      remoteTaskId: 'remote-video-1', creditStatus: 'charged', createdAt: 1, updatedAt: 2,
+      result: { submissionPayload: { sourceChannel: 'gateway' } },
+    };
+    mocks.getCloudTaskForUser
+      .mockResolvedValueOnce(processing)
+      .mockResolvedValueOnce({
+        ...processing,
+        status: 'completed',
+        progress: 100,
+        result: {
+          ...processing.result,
+          videoUrl: '/api/serve-upload/video/video-1.mp4',
+          assetProjection: { status: 'projected', versionIds: ['version-1'] },
+        },
+      });
+    const internalPoll = vi.fn().mockResolvedValue(new Response(
+      JSON.stringify({ success: true, status: 'completed' }),
+      { status: 200, headers: { 'content-type': 'application/json' } },
+    ));
+    vi.stubGlobal('fetch', internalPoll);
+
+    await expect(getGatewayTaskProjection(principal, 'video-1')).resolves.toMatchObject({
+      taskId: 'video-1',
+      status: 'completed',
+      progress: 100,
+      downloadUrl: '/api/serve-upload/video/video-1.mp4',
+    });
+    expect(internalPoll).toHaveBeenCalledOnce();
+    expect(internalPoll).toHaveBeenCalledWith(
+      expect.stringContaining('/api/poll-task'),
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ taskId: 'video-1' }),
+      }),
+    );
   });
 
   it.each(['processing', 'cancelled'] as const)(
