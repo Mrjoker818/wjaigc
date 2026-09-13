@@ -14,12 +14,20 @@ const read = (path: string): string => {
 describe('V588-MEDIA-001 Task 9 independent review contracts', () => {
   it('requires progressive n=2 visibility, authoritative cancellation, media bytes, ownership, limits, and legacy UI compatibility', () => {
     const source = read('tests/e2e/v588-media-gateway.spec.ts');
+    const lateWriteback = read('tests/helpers/media-gateway-late-writeback.ts');
 
     expect(source).toContain('waitForProgressiveImageCompletion');
     expect(source).toContain('firstVisibleBeforeBatchTerminal');
     expect(source).not.toContain('Promise.all(submission.taskIds.map');
     expect(source).toContain('assertAuthoritativeCancellation');
-    expect(source).toContain('lateCompletionRejected');
+    expect(source).toContain('attemptControlledLateCompletionWriteback');
+    expect(source).toContain('providerStateBeforeCancel');
+    expect(source).toContain('completionWritebackAttempt');
+    expect(source).toContain('authoritativeDatabaseStatus');
+    expect(source).not.toContain('lateCompletionRejected = status ===');
+    expect(lateWriteback).toContain("await import('@/lib/cloud-task-storage')");
+    expect(lateWriteback).toContain('completeCloudTask');
+    expect(lateWriteback).toContain('accepted: false');
     expect(source).toContain('refundCount: 1');
     expect(source).toContain('assertMediaArtifact');
     expect(source).toContain('assetVersionOwnerVerified');
@@ -47,6 +55,25 @@ describe('V588-MEDIA-001 Task 9 independent review contracts', () => {
     expect(helper).toContain('taskIds');
     expect(helper).toContain('redactedLedger');
     expect(helper).toContain("createHash('sha256')");
+    expect(helper).toContain('createRecordedApiRequest');
+    expect(helper).toContain('method');
+    expect(helper).toContain('url');
+    expect(helper).toContain('status');
+    expect(helper).toContain('timestamp');
+    expect(helper).toContain('requestId');
+    expect(helper).toContain('gatewayRequestId');
+    expect(helper).toContain('taskId');
+    expect(source).toContain('createRecordedApiRequest(request, evidence)');
+    expect(source).not.toMatch(/await request\.(?:get|post)\(['"]\/api\/gateway\/v1\//);
+  });
+
+  it('archives raw evidence as binary diff data and authorizes only the exact attributes file', () => {
+    const attributes = read('.gitattributes');
+    const allowedPaths = JSON.parse(read('docs/testing/baselines/protected-baseline-allowed-paths.json')) as string[];
+
+    expect(attributes).toContain('docs/testing/evidence/v588-media-gateway-task9-review-*/** -text -diff');
+    expect(allowedPaths).toContain('.gitattributes');
+    expect(allowedPaths).not.toContain('*.gitattributes');
   });
 
   it('requires a reproducible gate recorder with command, commit, timestamps, exit code, raw streams, and SHA-256 manifest entries', () => {
