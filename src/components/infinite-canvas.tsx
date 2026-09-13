@@ -112,6 +112,10 @@ import { CanvasZoomCluster } from '@/components/canvas/CanvasZoomCluster';
 import { MobileBottomToolbar } from '@/components/canvas/mobile-bottom-toolbar';
 import { CanvasEmptyState } from '@/components/canvas/CanvasEmptyState';
 import { CanvasImageActionToolbar } from '@/components/canvas/CanvasImageActionToolbar';
+import {
+  MobileImageActions,
+  type MobileImageAction,
+} from '@/components/canvas/mobile-image-actions';
 import { CanvasEditUpscaleSvgPanel } from '@/components/canvas/CanvasEditUpscaleSvgPanel';
 import { CanvasEditEraseMaskPanel } from '@/components/canvas/CanvasEditEraseMaskPanel';
 import { CanvasEditColorRemoveBgPanel } from '@/components/canvas/CanvasEditColorRemoveBgPanel';
@@ -11587,6 +11591,27 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
     { id: 'hex-cube', label: '六面体', group: '画布工具', icon: <Boxes className="h-4 w-4" />, onActivate: handleCreateHexCube },
     { id: 'annotation', label: 'ChatCanvas', group: '画布工具', icon: <MessageCircle className="h-4 w-4" />, active: annotationMode, onActivate: () => handleToggleCanvasAnnotation('bottom-toolbar') },
   ];
+  const mobileImageActions: MobileImageAction[] = selectedImageData ? [
+    {
+      id: 'preview',
+      label: '预览',
+      icon: <Maximize2 className="h-4 w-4" />,
+      onActivate: () => onPreviewImage(selectedImageData),
+    },
+    ...visibleImageActions.map(action => ({
+      id: action.label === '下载' ? 'download' : action.testId || `image-action-${action.label}`,
+      label: action.label,
+      icon: action.icon,
+      description: action.desc,
+      onActivate: action.action,
+    })),
+    {
+      id: 'delete',
+      label: '删除',
+      icon: <Trash2 className="h-4 w-4" />,
+      onActivate: deleteSelectedImages,
+    },
+  ] : [];
 
   return (
     <div
@@ -16974,32 +16999,39 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
           && !showDownloadPopup
           && !anyPanelOpen
           && selectedImageData && (
-            <CanvasImageActionToolbar
-              toolbarRef={imageToolbarRef}
-              position={getToolbarPosition()}
-              isMonochrome={isMonochrome}
-              displayedActions={displayedActions}
-              overflowActions={overflowImageActions}
-              expanded={toolbarExpanded}
-              onExpandedChange={setToolbarExpanded}
-              onBeforeOpenOverlay={(overlay) => {
-                setBottomToolbarDrawerOpen(false);
-                if (overlay === 'overflow') setShowToolbarCustomize(false);
-                else setToolbarExpanded(false);
-              }}
-              onDelete={deleteSelectedImages}
-              customizeOpen={showToolbarCustomize}
-              onCustomizeOpenChange={setShowToolbarCustomize}
-              toolbarItemOrder={toolbarItemOrder}
-              onToolbarItemOrderChange={setToolbarItemOrder}
-              toolbarHiddenItems={toolbarHiddenItems}
-              onToolbarHiddenItemsChange={setToolbarHiddenItems}
-              allActionLabels={allActionLabels}
-              onResetPreferences={() => {
-                setToolbarItemOrder([...allActionLabels]);
-                setToolbarHiddenItems(new Set());
-              }}
-            />
+            <>
+              <MobileImageActions
+                actions={mobileImageActions}
+                viewportWidth={canvasSize.width || undefined}
+                isMonochrome={isMonochrome}
+              />
+              <CanvasImageActionToolbar
+                toolbarRef={imageToolbarRef}
+                position={getToolbarPosition()}
+                isMonochrome={isMonochrome}
+                displayedActions={displayedActions}
+                overflowActions={overflowImageActions}
+                expanded={toolbarExpanded}
+                onExpandedChange={setToolbarExpanded}
+                onBeforeOpenOverlay={(overlay) => {
+                  setBottomToolbarDrawerOpen(false);
+                  if (overlay === 'overflow') setShowToolbarCustomize(false);
+                  else setToolbarExpanded(false);
+                }}
+                onDelete={deleteSelectedImages}
+                customizeOpen={showToolbarCustomize}
+                onCustomizeOpenChange={setShowToolbarCustomize}
+                toolbarItemOrder={toolbarItemOrder}
+                onToolbarItemOrderChange={setToolbarItemOrder}
+                toolbarHiddenItems={toolbarHiddenItems}
+                onToolbarHiddenItemsChange={setToolbarHiddenItems}
+                allActionLabels={allActionLabels}
+                onResetPreferences={() => {
+                  setToolbarItemOrder([...allActionLabels]);
+                  setToolbarHiddenItems(new Set());
+                }}
+              />
+            </>
           )}
         {/* 元素拆解面板 — 独立 fixed 浮层，不依赖 toolbar 条件 */}
         {showDisplayDecomposePanel && typeof document !== 'undefined' && createPortal(

@@ -86,7 +86,7 @@ export function CanvasImageActionToolbar({
       ref={toolbarRef}
       data-toolbar="image-action-toolbar"
       data-theme={isMonochrome ? 'mono' : 'dark'}
-      className={`pointer-events-auto absolute z-50 flex max-w-[calc(100vw-24px)] items-center gap-0.5 overflow-visible rounded-lg border px-1.5 py-1 shadow-xl transition-colors motion-reduce:transition-none ${
+      className={`pointer-events-auto absolute z-50 hidden max-w-[calc(100vw-24px)] items-center gap-0.5 overflow-visible rounded-lg border px-1.5 py-1 shadow-xl transition-colors motion-reduce:transition-none md:flex ${
         isMonochrome
           ? 'border-gray-200 bg-white text-gray-700'
           : 'border-white/[0.12] bg-[#1a1a1a] text-gold-muted'
