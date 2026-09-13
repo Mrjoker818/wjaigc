@@ -161,6 +161,7 @@ git commit -m "feat: add media gateway persistence schema"
 - Create: `src/app/api/admin/gateway/keys/[keyId]/route.ts`
 - Test: `src/__tests__/lib/media-gateway-key-service.test.ts`
 - Test: `src/__tests__/api/admin-media-gateway-keys.test.ts`
+- Modify: `src/__tests__/api/admin-route-authorization-contract.test.ts`
 
 **Interfaces:**
 - Consumes: `GatewayKeyRecord`、`GatewayError`。
