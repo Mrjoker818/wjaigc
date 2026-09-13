@@ -1,5 +1,8 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { existsSync, mkdtempSync, readFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
+import { spawnSync } from 'node:child_process';
 
 import { describe, expect, it } from 'vitest';
 
@@ -59,5 +62,28 @@ describe('V588-MEDIA-001 Task 9 independent review contracts', () => {
     expect(runner).toContain('stderr.log');
     expect(runner).toContain("createHash('sha256')");
     expect(runner).toContain('manifest.json');
+  });
+
+  it('records exact child output and independently verifiable hashes', () => {
+    const output = mkdtempSync(resolve(tmpdir(), 'task9-gate-'));
+    const result = spawnSync(process.execPath, [
+      resolve(process.cwd(), 'scripts/run-task9-gate-with-evidence.mjs'),
+      '--name', 'contract-probe', '--output', output, '--',
+      process.execPath, '-e', "process.stdout.write('out\\n');process.stderr.write('err\\n')",
+    ], { cwd: process.cwd(), encoding: 'utf8' });
+
+    expect(result.status).toBe(0);
+    const directory = resolve(output, 'contract-probe');
+    const manifest = JSON.parse(readFileSync(resolve(directory, 'manifest.json'), 'utf8')) as {
+      exitCode: number;
+      artifacts: Record<string, { sha256: string }>;
+    };
+    const stdout = readFileSync(resolve(directory, 'stdout.log'));
+    const stderr = readFileSync(resolve(directory, 'stderr.log'));
+    expect(manifest.exitCode).toBe(0);
+    expect(stdout.toString('utf8')).toBe('out\n');
+    expect(stderr.toString('utf8')).toBe('err\n');
+    expect(manifest.artifacts.stdout.sha256).toBe(createHash('sha256').update(stdout).digest('hex'));
+    expect(manifest.artifacts.stderr.sha256).toBe(createHash('sha256').update(stderr).digest('hex'));
   });
 });

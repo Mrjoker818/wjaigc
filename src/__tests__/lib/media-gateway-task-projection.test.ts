@@ -55,6 +55,8 @@ describe('media gateway task thumbnail projection', () => {
 
   it.each([
     ['ready', {
+      assetVersionId: 'version-1',
+      downloadUrl: '/uploads/original.png',
       thumbnailUrls: {
         '256': '/uploads/thumb-256.webp',
         '512': '/uploads/thumb-512.webp',
@@ -74,6 +76,15 @@ describe('media gateway task thumbnail projection', () => {
       });
     },
   );
+
+  it('does not expose an asset identity when no owner-scoped ready derivative proves ownership', async () => {
+    mocks.query.mockResolvedValue({ rows: [] });
+
+    const projection = await getGatewayTaskProjection(principal, 'task-1');
+
+    expect(projection).not.toHaveProperty('assetVersionId');
+    expect(projection).not.toHaveProperty('downloadUrl');
+  });
 
   it('queries only ready 256 and 512 variants owned by the task principal', async () => {
     await getGatewayTaskProjection(principal, 'task-1');

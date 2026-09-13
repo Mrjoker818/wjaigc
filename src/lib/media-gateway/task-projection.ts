@@ -36,7 +36,9 @@ export interface GatewayTaskProjection {
   modelId?: string;
   result: Record<string, unknown>;
   error?: string;
+  assetVersionId?: string;
   previewUrl?: string;
+  downloadUrl?: string;
   thumbnailUrls?: Partial<Record<'256' | '512', string>>;
 }
 
@@ -231,10 +233,15 @@ export async function getGatewayTaskProjection(
   const assetVersionId = publicIdentifier(task.result?.assetVersionId);
   if (!assetVersionId) return projection;
   const thumbnailUrls = await readyThumbnailUrls(assetVersionId, principal.userId);
+  if (!thumbnailUrls) return { ...projection, thumbnailUrls: undefined };
   const previewUrl = thumbnailUrls?.['512'] || thumbnailUrls?.['256'] || projection.previewUrl;
+  const downloadUrl = [projection.result.imageUrl, projection.result.videoUrl]
+    .find(value => typeof value === 'string' && value.length > 0) as string | undefined;
   return {
     ...projection,
+    assetVersionId,
     ...(previewUrl ? { previewUrl } : {}),
+    ...(downloadUrl ? { downloadUrl } : {}),
     thumbnailUrls,
   };
 }

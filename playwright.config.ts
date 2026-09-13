@@ -15,6 +15,8 @@ const scopedSkillRuntimeRun = process.env.E2E_SKILL_RUNTIME_RUN === '1'
 if (scopedSkillRuntimeRun) process.env.E2E_SKILL_RUNTIME_RUN = '1';
 const multiPlatformExportRun = process.env.E2E_MULTI_PLATFORM_EXPORT_RUN === '1'
   || process.argv.some(argument => argument.includes('multi-platform-batch-export.spec.ts'));
+const mediaGatewayRun = process.env.E2E_MEDIA_GATEWAY_RUN === '1'
+  || process.argv.some(argument => argument.includes('v588-media-gateway.spec.ts'));
 if (multiPlatformExportRun) process.env.E2E_MULTI_PLATFORM_EXPORT_RUN = '1';
 const multiPlatformExportEvidenceScope = (process.env.MPE_EVIDENCE_COMMIT || 'working-tree')
   .trim()
@@ -36,6 +38,8 @@ const outputDir = stage3Run
     ? './test-results/skill-runtime/playwright-output'
     : multiPlatformExportRun
       ? `./test-results/multi-platform-export/${multiPlatformExportEvidenceScope}/playwright-output`
+      : mediaGatewayRun
+        ? './test-results/media-gateway/playwright-output'
       : './.playwright-output';
 const htmlOutput = stage3Run
   ? `test-results/stage-3-baseline/${stage3EvidenceScope}/playwright-report`
@@ -44,9 +48,11 @@ const htmlOutput = stage3Run
     : 'playwright-report';
 const junitOutput = stage3Run
   ? `test-results/stage-3-baseline/${stage3EvidenceScope}/junit.xml`
-  : multiPlatformExportRun
-    ? `test-results/multi-platform-export/${multiPlatformExportEvidenceScope}/junit.xml`
-    : 'test-results/junit.xml';
+    : multiPlatformExportRun
+      ? `test-results/multi-platform-export/${multiPlatformExportEvidenceScope}/junit.xml`
+      : mediaGatewayRun
+        ? 'test-results/media-gateway/junit.xml'
+      : 'test-results/junit.xml';
 
 export default defineConfig({
   testDir: './tests/e2e',
@@ -62,6 +68,7 @@ export default defineConfig({
     ['list'],
     ['html', { outputFolder: htmlOutput, open: 'never' }],
     ['junit', { outputFile: junitOutput }],
+    ...(mediaGatewayRun ? [['./tests/helpers/media-gateway-e2e-evidence.ts'] as const] : []),
   ],
   use: {
     baseURL,
