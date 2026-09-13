@@ -294,3 +294,27 @@ TypeScript：`pnpm ts-check` 退出码 0。目标 ESLint（key-service、其单�
 - `pnpm exec vitest run src/__tests__/lib/media-gateway-utc-day-window.test.ts src/__tests__/lib/media-gateway-admission.test.ts`：退出码 1；2 个测试文件失败。已收集的 16 项 admission 测试中 15 通过、1 失败；新增 helper 测试文件因生产模块尚不存在而 suite 失败。失败精确指向 admission 仍使用受会话时区影响的 `date_trunc('day', $2::timestamptz)`。
 - `pnpm exec vitest run src/__tests__/components/media-gateway-admin.test.tsx`：退出码 1；1 个测试文件失败，29 项中 22 通过、7 失败。失败覆盖：权威刷新后不解锁、POST fetch 拒绝仍提示安全重试、POST pending 无超时、PATCH 权威确认后不解锁、DELETE 非 2xx 仍提示安全重试、DELETE 权威确认后不解锁、权威 GET pending 时取消按钮与无关操作被全局锁定。
 - `pnpm exec vitest run tests/integration/media-gateway-admission-postgres.test.ts`：退出码 0；1 个测试文件及 7 项全部 skip，明确阻塞原因为未配置 `POSTGRES_TEST_DATABASE_URL`。新增非 UTC PostgreSQL 会话交叉验证已保留为可执行用例，不能记为通过。
+
+## 最终复审 GREEN 与交付
+
+- RED 证据提交：`ac65ca82fbc808b9f40409821a5bc6ee863bf37b`。
+- 生产修复提交：`301fc4af008ffdce44e6dc7d6f787b8a45970a02`。
+- UTC 最小 GREEN：`pnpm exec vitest run src/__tests__/lib/media-gateway-utc-day-window.test.ts src/__tests__/lib/media-gateway-admission.test.ts src/__tests__/lib/media-gateway-key-service.test.ts`，3 个文件、37 项全部通过。
+- 管理员 mutation GREEN：`pnpm exec vitest run src/__tests__/components/media-gateway-admin.test.tsx`，1 个文件、30 项全部通过。覆盖 POST fetch 拒绝/超时、PATCH 响应读取失败、DELETE 非 2xx、三种响应结构歧义、authority GET 超时/取消、局部锁、确认后解锁与模态退出。
+- 原 Task 7 目标：`pnpm exec vitest run src/__tests__/lib/media-gateway-audit.test.ts src/__tests__/lib/media-gateway-key-service.test.ts src/__tests__/components/media-gateway-admin.test.tsx src/__tests__/components/dashboard-media-gateway-contract.test.ts`，4 个文件、61 项全部通过。
+- 扩大媒体网关回归：`pnpm exec vitest run media-gateway`，16 个文件通过、1 个真库文件跳过；301 项通过、7 项跳过，共 308 项。
+- 真实 PostgreSQL：`pnpm exec vitest run tests/integration/media-gateway-admission-postgres.test.ts --reporter=verbose`，新增非 UTC 会话交叉验证在内共 7 项全部 skip；原因仅为当前环境没有 `POSTGRES_TEST_DATABASE_URL`，用例保留给 Task 8 必跑。
+- TypeScript：`pnpm ts-check` 退出码 0，`next typegen` 与 `tsc -p tsconfig.json` 通过。
+- Scoped ESLint：对 helper、admission、key-service、管理员组件及对应测试共 9 个文件执行，退出码 0，`0 errors / 0 warnings`。
+- 真实 Chromium 375px：首次因 `127.0.0.1:5000` 未启动而 warmup `ECONNREFUSED`、0 项执行；启动 dev server 后重跑同一 `mobile-375-chromium` 项目，`1 passed (1)`，39.7 秒。dev server 已关闭。
+- Scoped `git diff --check` 与 staged `git diff --cached --check` 均退出码 0；全工作树中的 6 个既有 SDD dirty 文件未修改、未暂存、未提交。
+
+### 三项 Important 修复自审
+
+1. `admission.ts` 与 `key-service.ts` 共同调用受限 `postgresUtcDayWindow`，统一生成显式 UTC 半开区间；状态仍仅为 `reserved`/`admitted`，未新增表或计数口径。非 UTC 真库测试把业务连接固定为 `Asia/Shanghai`，构造 UTC 前日与当日边界，并交叉断言准入成功及管理员 `todayUsage === 1`。
+2. POST/PATCH/DELETE 共用 5 秒有界 fetch；fetch reject、Abort timeout、body read failure、非 2xx 与 2xx 不可信结构全部进入歧义核对，不再显示“请重试”或先改变本地权威状态。
+3. 锁键为 `issue`、`edit:<keyId>`、`revoke:<keyId>`；authority GET 同样有超时和 AbortController。核对成功立即刷新列表并解除对应锁；核对失败只保留对应 scope，当前 Sheet/AlertDialog 可随时取消，退出会 abort 并解锁，手动权威列表刷新成功也会清除锁。
+
+### 关注
+
+- 当前环境缺少 `POSTGRES_TEST_DATABASE_URL`，所以 7 个真实 PostgreSQL 用例未执行；其中新增的 `Asia/Shanghai` 会话 UTC 边界交叉验证必须由 Task 8 真库门禁执行。除此之外未发现未关闭的 Task 7 Important。
