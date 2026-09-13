@@ -2345,3 +2345,12 @@ The focused gate test passes `7/7`; the actual protected-baseline command passes
 - 当前生产模型目录没有重复 modelId 授权样本，故重复供应商分支标记为云端不适用；新增自动化锁定精确候选与最后一次明确回答，禁止不确定回退。
 - 本地新鲜门禁为相关 `107/107`、TypeScript、构建版 ESLint、干净保护基线 `38/38` 和生产构建 `120/120`。
 - **Task12 发布结论：通过 / CLOUD PASS / CLOSED。** 全平台发布结论仍为不通过，不能据此更新 `stable`。
+
+## 2026-09-13 V5.8.8 Batch B 移动画布 Task 9 发布判断
+
+- 本地候选 `main@5c41d0ff40238bded7eb2e1cdb6a672f039e9176` 已完成 Tasks 1～8；`stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 保持只读。
+- 六项目 Playwright 矩阵 `22/22`，全量 Vitest `6206 passed / 190 PostgreSQL-gated skipped / 0 failed`，TypeScript、构建版 ESLint、38 项保护基线和生产构建均退出 0；构建包含 `/simple-create`。
+- 本地浏览器证据已覆盖 320/375/393 移动 Chromium、1440 桌面 Chromium、375 Firefox 和 375 WebKit，并保存 HTML、截图、录像、Trace、Console 与 Network 制品。
+- 本地受控生成链路证明模型能力约束、`n=2`、逐槽完成和 AssetVersion/placement 投影 UI 合同；它不证明 PearAPI/APIMart 的真实付费成功、供应商取消或退款。
+- 190 项 PostgreSQL 条件测试未执行；53 条 Turbopack 动态文件追踪警告、超大画布组件及实体触屏手感仍是明确风险。
+- **Task 9 结论：有条件通过 / `LOCAL PASS / CLOUD UNVERIFIED`。** 未完成 Coze exact-SHA、真实 `n=2` 生成、单次扣退、实体触屏和云端新鲜证据前，不得关闭 `V588-MOBILE-001～003`，不得更新 `stable`，全平台发布结论仍为不通过。

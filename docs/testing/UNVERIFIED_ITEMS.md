@@ -2573,3 +2573,15 @@ BUG-018 已从未验证项移除。剩余顺序为 `002-B -> 002-D -> 002-E`；�
 - [x] P2：重复 modelId 的补充选择已由 RED/GREEN 自动化锁定为精确候选及最后一次明确回答；当前云端目录只有唯一授权绑定，该重复分支为 `N/A`，没有伪造重复供应商实测。
 - [ ] CDP 环境未提供可直接导出的 Playwright Trace/录像；本轮保留截图、网络事件、Console、下载事件、数据库只读结果和文件哈希。既有四浏览器本地矩阵仍保留完整 Trace/录像，不将其冒充本次云端录像。
 - [x] **Brief 到视频成片阶段剩余 20% 已关闭；状态为 `LOCAL PASS / CLOUD PASS / CLOSED`。**
+
+## 2026-09-13 V5.8.8 Batch B 移动画布 Task 10 待验证
+
+- [x] Task 9 本地六项目 Playwright `22/22`，HTML、截图、视频、Trace、Console 和 Network 制品已归档。
+- [x] Task 9 全量 Vitest `6206 passed / 0 failed`，TypeScript、构建版 ESLint、38 项保护基线和生产构建 120 页面已通过。
+- [ ] 配置独立 `POSTGRES_TEST_DATABASE_URL` 后执行 190 项条件 PostgreSQL 测试；当前不得把 skip 记作通过。
+- [ ] Coze 拉取 Task 9 最终 exact `main` SHA、重启沙箱并强制刷新现有预览页，核对运行 commit、Build ID、唯一 5000 服务和首页 HTTP 200。
+- [ ] 在 320/375/393 云端视口验证单指平移、双指缩放、图片/空白长按、底部工具抽屉、图片动作抽屉、无横向溢出及 Console 0 未处理错误。
+- [ ] 仅使用 PearAPI 或 APIMart 执行一次真实 `n=2` 快速生图，记录 providerId/modelId、两个 taskId、逐张到达时间、两个 AssetVersion/placement、积分前后、刷新恢复和下载。
+- [ ] 执行一次真实取消与退款，证明一次扣费、一次退款、取消终态不被迟到结果覆盖且不产生 AssetVersion。
+- [ ] 使用实体触屏设备补验双指中点锚定、长按误触率、页面滚动边界和软键盘打开后的控件可达性；合成触摸不得冒充实体手感。
+- [ ] 评估并后续收敛 53 条 Turbopack 动态文件追踪警告及 `infinite-canvas.tsx` 超 500KB 的构建/维护风险；本阶段不做无复现的大范围重构。

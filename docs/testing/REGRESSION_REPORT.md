@@ -3060,3 +3060,14 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - 数据库只读核验：父 Run 为 `cancelled/refunded`，事件序列为 `run.created -> tool.started(plan-film) -> run.cancelled`；0 视频子任务、0 AssetVersion；唯一消费 253、唯一退款 253、净额 0，未出现迟到完成。
 - 当前云端模型目录中目标 modelId 只有一个授权绑定，因此重复供应商交互分支不适用；自动化已证明重复时显示精确候选、后续回答取最后一次明确 `providerId/modelId`，并保持禁止静默选首个供应商。
 - **回归判定：Task12 `LOCAL PASS / CLOUD PASS / CLOSED`。** 该结论只关闭 Task12；全平台其他发布阻断继续保留。
+
+## 2026-09-13 V5.8.8 Batch B 移动画布 Task 9 本地门禁
+
+- 候选源码：`main@5c41d0ff40238bded7eb2e1cdb6a672f039e9176`；`stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 未修改。
+- `V588-MOBILE-001～003` 的 Tasks 1～8 已按 TDD 落地：Pointer Events 触摸状态机、单指平移与双指缩放、移动底部工具抽屉、图片动作抽屉、共享权威生成会话、`/simple-create`、响应式/减少动态效果和六项目浏览器矩阵。
+- Playwright 同轮矩阵 `22/22 PASS`、0 failed、0 skipped：320/375/393 Mobile Chromium、1440 Desktop Chromium、375 Firefox、375 WebKit。覆盖画布触摸/桌面连续性、工具入口和受控 `n=2` 快速创作逐槽投影；受控 API 只验证应用合同，不冒充真实供应商成功。
+- Playwright 报告：`playwright-report/index.html`。标准证据目录当前包含截图 16、视频 24、Trace 22、Console 44、Network 38；本轮归档 ID 为 `2026-09-13T06-48-15-586Z`。
+- 全量 Vitest 最终为 778 个文件：`742 passed / 36 skipped / 0 failed`；测试 `6206 passed / 190 skipped / 0 failed`。190 项全部受 `POSTGRES_TEST_DATABASE_URL` 条件约束，继续列为未验证，未冒充通过。
+- `pnpm ts-check`、`pnpm lint:build`、38 项保护基线和 `pnpm build` 均退出 0；生产构建生成 120 个页面并包含 `/simple-create`。Turbopack 的 53 条动态文件追踪警告和 `infinite-canvas.tsx` 超 500KB 提示保留为工程风险。
+- 全量首轮发现 4 个旧保护/源码字符串契约失败；已更新为语义导入断言、触摸控制器 `dispose()` 清理合同及 12 个新增生产路径的精确来源授权，聚焦 `26/26` 后全量重新通过，没有删除或跳过失败测试。
+- **本阶段判定：Task 9 `LOCAL PASS / CLOUD UNVERIFIED`。** Task 10 的 Coze exact-SHA、真实移动端 UI、真实 `n=2` 付费生成、取消退款和实体触屏手感尚未执行。
