@@ -3131,3 +3131,9 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - 覆盖范围包含 Skill 幂等与并发、任务终态竞争、单次扣费/退款、Pear 分层、批注、元素拆解、工作流、管理员投影、认证与历史媒体修复等 PostgreSQL 套件。
 - 临时数据库在测试结束后已正常停止；机器证据：[mobile-canvas-task10-postgres-20260913.json](evidence/mobile-canvas-task10-postgres-20260913.json)。
 - **判定：Task 10 PostgreSQL 门禁 `LOCAL PASS / CLOSED`。** Task 10 仅剩实体触屏手感及真实软键盘可达性，不把 CDP 触摸仿真冒充实体设备证据。
+
+### 2026-09-13 Task 10 设备门禁延期决定
+
+- 用户书面确认采用方案 1：实体触屏手感与真实软键盘可达性作为发布前延期验证点，不再阻塞下一开发阶段。
+- **Task 10 状态：`DONE WITH DEVICE DEFERRAL / CLOSED`。** 已通过的云端、数据库和跨浏览器证据不扩大为实体设备通过；延期项继续保留在未验证清单。
+- 下一阶段固定为 `V588-MEDIA-001`，不重开 Task12，不重复移动画布已关闭测试，不修改 `stable`。

@@ -2396,3 +2396,8 @@ The focused gate test passes `7/7`; the actual protected-baseline command passes
 - 独立临时 PostgreSQL 18 集群中的全量 Vitest 为 `782/782 files`、`6409/6409 tests`、0 失败、0 跳过；生产数据库未被使用，测试后临时服务已停止。
 - 原 190 项条件 PostgreSQL 测试已从“未执行”更新为“真实通过”，并覆盖并发幂等、任务终态、扣费退款和主要持久化链路。
 - **PostgreSQL 门禁：通过 / CLOSED。** Task 10 当前只保留实体触屏与真实软键盘设备门禁；全平台其他历史阻断不因本项关闭而自动升级。
+
+### 2026-09-13 Task 10 设备门禁延期
+
+- 用户确认将实体触屏和真实软键盘作为发布前延期验证项，并允许进入下一阶段；这不是设备验收通过。
+- **Task 10：有条件完成 / `DONE WITH DEVICE DEFERRAL`。** 全平台发布结论仍受该延期项及后续媒体网关、协作等阶段约束。
