@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "name": "scoped-lint",
+  "command": [
+    "pnpm",
+    "exec",
+    "eslint",
+    "tests/e2e/v588-media-gateway.spec.ts",
+    "tests/helpers/media-gateway-e2e-evidence.ts",
+    "tests/helpers/media-gateway-late-writeback.ts",
+    "tests/integration/media-gateway-lifecycle-postgres.test.ts",
+    "src/__tests__/helpers/media-gateway-e2e-evidence.test.ts",
+    "src/__tests__/scripts/media-gateway-task9-review-contract.test.ts"
+  ],
+  "cwd": "J:\\无界本地版\\projects\\_upstream-wjaigc-restore",
+  "commit": "6181991c18bb9fa255661971df7460a2377eb177",
+  "startedAt": "2026-09-13T19:16:29.470Z",
+  "finishedAt": "2026-09-13T19:16:34.617Z",
+  "durationMs": 5144,
+  "exitCode": 0,
+  "signal": null,
+  "artifacts": {
+    "stdout": {
+      "path": "J:\\无界本地版\\projects\\_upstream-wjaigc-restore\\docs\\testing\\evidence\\v588-media-gateway-task9-review-6181991c-round2\\scoped-lint\\stdout.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "stderr": {
+      "path": "J:\\无界本地版\\projects\\_upstream-wjaigc-restore\\docs\\testing\\evidence\\v588-media-gateway-task9-review-6181991c-round2\\scoped-lint\\stderr.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  }
+}

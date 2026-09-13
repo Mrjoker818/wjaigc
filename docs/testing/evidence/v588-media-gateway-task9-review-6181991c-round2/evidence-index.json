@@ -1,0 +1,67 @@
+{
+  "schemaVersion": 1,
+  "feature": "V588-MEDIA-001",
+  "task": 9,
+  "reviewRound": 2,
+  "generatedAt": "2026-09-14T03:16:43+08:00",
+  "candidateCommit": "6181991c18bb9fa255661971df7460a2377eb177",
+  "stableCommit": "52f7c601ed150769e15d06fb435c6e360e28c9e7",
+  "cloud": {
+    "status": "pending",
+    "executed": false
+  },
+  "runs": [
+    {
+      "name": "media-gateway-focused",
+      "manifest": "media-gateway-focused/manifest.json",
+      "manifestSha256": "a7c0c70b07fe9305fe6d596becc35f2736062a1782331175e470bbde53ad6770",
+      "exitCode": 0,
+      "stdout": { "bytes": 8593, "sha256": "413023094a2ccf2ab91f55a8c03cbef5498875aefd0dc93f264a6b8a0ea06745" },
+      "stderr": { "bytes": 1608, "sha256": "72ecfa226e72033319cff91bd7951f6df2ca79b12c3c2c1fb985206aad3f6737" }
+    },
+    {
+      "name": "ts-check",
+      "manifest": "ts-check/manifest.json",
+      "manifestSha256": "38f9a520e39e00a5c4a75f3b23963b279b1ccb6752ca220e06c9e8d51868912d",
+      "exitCode": 0,
+      "stdout": { "bytes": 179, "sha256": "41dc552019fc285bb858332fa0b91c76467c56920b2b0d0a519bea59520b7b9a" },
+      "stderr": { "bytes": 0, "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" }
+    },
+    {
+      "name": "scoped-lint",
+      "manifest": "scoped-lint/manifest.json",
+      "manifestSha256": "a78c88501b107068318e447ac2d33b4c4b444be851938bf3a1bbf9fa5d98e6ed",
+      "exitCode": 0,
+      "stdout": { "bytes": 0, "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" },
+      "stderr": { "bytes": 0, "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" }
+    },
+    {
+      "name": "protected-baseline",
+      "manifest": "protected-baseline/manifest.json",
+      "manifestSha256": "a1193c402698f0f89760568a8f461e4ed89029a81acd0bad2d518fa6131ea6d5",
+      "exitCode": 0,
+      "stdout": { "bytes": 730, "sha256": "2de681a1fb9f3cf772695f1ded1e77e3a735ff4ccbf974a2a392a14e286917cf" },
+      "stderr": { "bytes": 0, "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" }
+    },
+    {
+      "name": "diff-check-full",
+      "manifest": "diff-check-full/manifest.json",
+      "manifestSha256": "8ce9e46fcc380e198143ff9148b9b3174e7fb42a0edc5d63e6589aa734b2afb9",
+      "exitCode": 0,
+      "stdout": { "bytes": 0, "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" },
+      "stderr": { "bytes": 0, "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" }
+    }
+  ],
+  "postgresql": {
+    "host": "127.0.0.1",
+    "port": 55493,
+    "serviceIdentity": "NT AUTHORITY\\NetworkService",
+    "productionDatabaseUsed": false,
+    "conditionalTestsSkipped": 0,
+    "cleanup": {
+      "createdGatewayTablesDropped": true,
+      "serviceDeleted": true,
+      "portListening": false
+    }
+  }
+}

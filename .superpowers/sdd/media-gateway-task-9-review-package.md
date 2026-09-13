@@ -37,3 +37,12 @@
 ## 当前判定
 
 3 个 Important 已形成可复审的本地修复候选，允许重新独立审查。结论仍限定为 `LOCAL PASS / CLOUD UNVERIFIED`；没有 Coze exact-SHA 与真实供应商浏览器制品前，不得写成云端通过或全平台可发布。
+
+## 第二轮复审包
+
+- RED：`0b850a8e`；GREEN：`6181991c18bb9fa255661971df7460a2377eb177`。
+- 复审取消边界：`tests/helpers/media-gateway-late-writeback.ts` 仅为测试 helper，无生产路由；检查其等待 `remoteTaskId`、调用真实条件式 `completeCloudTask`、返回 `accepted=false` 且数据库保持 `cancelled`。
+- 复审 Network：所有核心 `APIRequestContext` 调用使用 `createRecordedApiRequest`，记录 method/url/status/timestamp 与三个 ID；查询参数、凭据和私有请求内容不归档。
+- 复审门禁：目标回归 `340/340`、TypeScript、scoped lint、保护 `38/38`、`git diff --check 74716cb9..HEAD` 全部 exit 0。
+- 原始证据与 SHA-256 索引：`docs/testing/evidence/v588-media-gateway-task9-review-6181991c-round2/evidence-index.json`，索引 SHA-256 `1cc390695cdee790a4773aac5d9de11898a01af0f13710ae6f70bda24ef40f6e`。
+- 本轮未执行全仓、构建、Coze 或真实供应商；云端结论保持 `PENDING`。

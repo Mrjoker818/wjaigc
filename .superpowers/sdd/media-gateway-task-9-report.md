@@ -51,3 +51,13 @@
 ## 未关闭项
 
 Coze exact commit、默认关闭兼容、PearAPI/APIMart 真实图像与视频、逐槽到达时间、真实取消退款、AssetVersion/缩略图资源、刷新恢复及浏览器成功态制品仍为 `pending`。本地规格和 PostgreSQL 证据不能冒充云端证据，因此 Task 9 仍不得标记为 `CLOUD PASS`，也不得更新 `stable`。
+
+## 第二轮独立复审修复
+
+- RED 合同：`0b850a8e`，3 failed、2 passed；GREEN 实现：`6181991c18bb9fa255661971df7460a2377eb177`。
+- 取消 E2E 等待真实远端任务标识后取消，并通过测试目录内受控 helper 调用既有 `completeCloudTask` 制造迟到完成写回。证据保存取消前后供应商状态、写回尝试、数据库 revision 与终态；不存在生产后门。
+- APIRequestContext 统一经过证据包装器，核心提交、查询、取消、限流、配额、冲突和媒体读取均可进入脱敏 `network.json`。
+- 原始日志目录使用精确 `-text -diff`；只授权 `.gitattributes` 本身，没有泛化保护路径，旧日志字节未改。
+- 新鲜门禁绑定 `6181991c`：Task9 目标 `22 files / 340 tests`、0 skip，TypeScript、scoped lint、保护基线 `38/38`、完整 diff-check 全部 exit 0。按最新指令未重跑全仓或构建。
+- 测试 PostgreSQL 由 `NetworkService` 在 127.0.0.1:55493 临时运行；未使用生产库，已删除本轮表和服务并确认端口关闭。
+- 第二轮证据：`docs/testing/evidence/v588-media-gateway-task9-review-6181991c-round2/evidence-index.json`，SHA-256 `1cc390695cdee790a4773aac5d9de11898a01af0f13710ae6f70bda24ef40f6e`。云端仍为 pending。

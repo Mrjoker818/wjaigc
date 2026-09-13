@@ -4315,3 +4315,11 @@ Task 4 独立审查的两个 Minor 继续保留给最终审查：单元夹具 op
 | MEDIA-T9-003 | P1 验收假通过风险 | 原 E2E 用 `Promise.all` 只证明双任务最终完成；取消接受 409；资源 URL 只验证字符串，无法证明逐槽、权威取消、一次退款和真实资源 | 先提交 3 项失败合同；改为顺序轮询首槽可见、权威 cancelled/迟到拒绝/净零流水，并真实请求 preview/download/256/512 与验证 AssetVersion 所有权 | 本地合同与 PostgreSQL 已关闭，云端待验 |
 | MEDIA-T9-004 | P1 证据缺失 | 原成功运行不会自动保留截图、录像、Trace、Console、Network 或 ID/账务 manifest | 新增 page+request 混合 E2E 证据采集器；成功态强制保留全部制品，记录 requestId/gatewayRequestId/taskId 和脱敏流水 | 本地规格已关闭，云端制品待生成 |
 | MEDIA-T9-005 | P2 发布证据不可复核 | 原全仓/构建汇总缺原始 stdout/stderr、命令、commit、时间、退出码和哈希 | 新增门禁记录器与 SHA-256 索引；保留 `244ee15d` 失败轮次及 `65601afc` 最终通过轮次 | 已关闭 |
+
+### 2026-09-14 Task 9 第二轮独立复审
+
+| 编号 | 等级 | 问题 | 修复与永久回归 | 状态 |
+|---|---|---|---|---|
+| MEDIA-T9-006 | P1 验收真实性 | 取消 E2E 在首次读到 `cancelled` 后用常量声称拒绝迟到完成，没有发生完成回写 | 测试先 RED；受控 E2E helper 等待真实 `remoteTaskId`，取消后直接调用既有 `completeCloudTask` 条件更新并保存回写前后供应商状态、尝试结果和权威数据库终态。真 PostgreSQL 回归证明返回 `false`、终态保持 `cancelled`、退款一次 | 本地已关闭，云端供应商回调仍待验 |
+| MEDIA-T9-007 | P1 证据完整性 | APIRequestContext 的网关请求未进入 `network.json` | 增加受控请求包装器，逐请求记录 method、去查询参数 URL、status、timestamp 与 requestId/gatewayRequestId/taskId；行为测试证明密钥、Authorization、私有 prompt 和查询参数不进入证据 | 本地已关闭，云端制品待生成 |
+| MEDIA-T9-008 | P2 发布门禁 | 当前 HEAD 未授权 `.gitattributes`，原始日志空白导致完整 diff-check 失败 | 仅精确授权 `.gitattributes`；Task9 原始日志目录设置 `-text -diff`，原字节未改。`6181991c` 的保护基线 `38/38`、0 drift、完整 `74716cb9..HEAD` diff-check 0 | 已关闭 |

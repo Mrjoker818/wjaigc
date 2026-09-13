@@ -2408,3 +2408,11 @@ The focused gate test passes `7/7`; the actual protected-baseline command passes
 - 构建保留 55 条 Turbopack 动态文件追踪 warning，属于后续构建性能与打包范围风险，不在本任务中猜测性重构。
 - 当前候选 `65601afc` 仅具备本地复审资格。尚无 Coze exact commit、默认关闭兼容、真实 PearAPI/APIMart 图像与视频、逐槽返回、取消退款、AssetVersion、缩略图及成功态浏览器制品。
 - **发布结论：有条件通过本地门禁 / 全平台仍不通过。** Task 9 状态为 `LOCAL PASS / CLOUD UNVERIFIED`，不得据此更新 `stable`。
+
+### 2026-09-14 Task 9 第二轮复审发布判断
+
+- `main@6181991c` 已关闭第二轮 3 个 Important：真实受控迟到完成写回、APIRequestContext 网络证据、当前 HEAD 保护与完整 diff 门禁。
+- 本轮按收尾约束只执行目标回归 `340/340`、TypeScript、scoped lint、保护基线 `38/38` 和完整 diff-check，全部 exit 0；没有借用旧提交门禁，也没有重跑全仓或构建。
+- `late-writeback` helper 仅位于测试目录，直接复用既有数据库条件更新；没有新增生产路由、管理接口、运行时开关或外部可调用后门。
+- `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 与 donor 未修改；未执行 Coze、未推送。
+- **发布结论保持：Task 9 本地可复审 / 云端未验证 / 全平台仍不通过。**

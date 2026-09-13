@@ -3147,3 +3147,13 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - 五条门禁全部 exit 0：TypeScript、构建版 ESLint、全仓 Vitest、保护基线 `38/38 / 0 drift / 0 warning`、生产构建 `120/120` 页面。
 - 每条门禁均保存原始 stdout/stderr、命令、候选 commit、起止时间、退出码与 SHA-256；证据索引同时保留此前保护基线 exit 1 的失败轮次。构建原始 stderr 保留 55 条 Turbopack warning。
 - **判定：`LOCAL PASS / CLOUD UNVERIFIED`。** 云端 exact SHA、供应商、账务、资产版本、缩略图和浏览器证据保持 pending。
+
+### 2026-09-14 Task 9 第二轮复审回归
+
+- RED 合同提交 `0b850a8e` 精确暴露 3 个缺口；GREEN 实现提交 `6181991c18bb9fa255661971df7460a2377eb177`。
+- 取消用例不再从常量推导迟到拒绝。受控测试等待持久化 `remoteTaskId`，取消后调用生产既有 `completeCloudTask` 条件更新；真实 PostgreSQL 证明完成回写返回 `false`，取消前后供应商标识被保留，权威终态始终为 `cancelled`，一次消费只对应一次退款。
+- APIRequestContext 全部核心调用经过记录包装器，`network.json` 可保存 method、无查询字符串 URL、status、timestamp、requestId、gatewayRequestId、taskId；行为回归证明 Authorization、API Key、token 查询参数和私有 prompt 不泄漏。
+- Task9 目标回归为 `22/22` 文件、`340/340` 测试、0 failed、0 skipped；TypeScript、scoped lint、当前 HEAD 保护基线 `38/38 / 0 drift / 0 warning`、完整 `74716cb9..HEAD` diff-check 均 exit 0。按指令未重跑全仓 Vitest或生产构建。
+- 第一次目标回归使用了隔离集群中不存在的 `Administrator` 角色而失败，改用既有测试角色后成功；该失败属于测试连接配置，不删除、不冒充业务通过。临时 PostgreSQL 以 `NetworkService` 运行，未连接生产库，结束后删除本轮表、服务并确认端口无监听。
+- 原始日志未改字节，通过精确 `.gitattributes` 二进制 diff 规则归档。机器证据：`docs/testing/evidence/v588-media-gateway-task9-review-6181991c-round2/evidence-index.json`。
+- **判定：第二轮 3 Important 本地关闭，`LOCAL PASS / CLOUD UNVERIFIED`。** 未执行 Coze 或真实供应商，云端字段继续为 pending。

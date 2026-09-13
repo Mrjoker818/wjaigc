@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "name": "media-gateway-focused",
+  "command": [
+    "pnpm",
+    "exec",
+    "vitest",
+    "run",
+    "src/__tests__\\api\\admin-media-gateway-keys.test.ts",
+    "src/__tests__\\api\\media-gateway-security.test.ts",
+    "src/__tests__\\api\\media-gateway-submit.test.ts",
+    "src/__tests__\\api\\media-gateway-task-cancel.test.ts",
+    "src/__tests__\\api\\media-gateway-task-status.test.ts",
+    "src/__tests__\\api\\media-gateway-trusted-context.test.ts",
+    "src/__tests__\\components\\dashboard-media-gateway-contract.test.ts",
+    "src/__tests__\\components\\media-gateway-admin.test.tsx",
+    "src/__tests__\\lib\\media-gateway-admission.test.ts",
+    "src/__tests__\\lib\\media-gateway-audit.test.ts",
+    "src/__tests__\\lib\\media-gateway-internal-client.test.ts",
+    "src/__tests__\\lib\\media-gateway-key-service.test.ts",
+    "src/__tests__\\lib\\media-gateway-schema.test.ts",
+    "src/__tests__\\lib\\media-gateway-task-projection.test.ts",
+    "src/__tests__\\lib\\media-gateway-types.test.ts",
+    "src/__tests__\\lib\\media-gateway-utc-day-window.test.ts",
+    "src/__tests__\\scripts\\media-gateway-doctor.test.ts",
+    "src/__tests__\\scripts\\media-gateway-migration.test.ts",
+    "src/__tests__\\scripts\\media-gateway-task9-review-contract.test.ts",
+    "tests/integration\\media-gateway-admission-postgres.test.ts",
+    "tests/integration\\media-gateway-lifecycle-postgres.test.ts",
+    "src/__tests__/helpers/media-gateway-e2e-evidence.test.ts"
+  ],
+  "cwd": "J:\\无界本地版\\projects\\_upstream-wjaigc-restore",
+  "commit": "6181991c18bb9fa255661971df7460a2377eb177",
+  "startedAt": "2026-09-13T19:15:36.101Z",
+  "finishedAt": "2026-09-13T19:16:04.332Z",
+  "durationMs": 28228,
+  "exitCode": 0,
+  "signal": null,
+  "artifacts": {
+    "stdout": {
+      "path": "J:\\无界本地版\\projects\\_upstream-wjaigc-restore\\docs\\testing\\evidence\\v588-media-gateway-task9-review-6181991c-round2\\media-gateway-focused\\stdout.log",
+      "bytes": 8593,
+      "sha256": "413023094a2ccf2ab91f55a8c03cbef5498875aefd0dc93f264a6b8a0ea06745"
+    },
+    "stderr": {
+      "path": "J:\\无界本地版\\projects\\_upstream-wjaigc-restore\\docs\\testing\\evidence\\v588-media-gateway-task9-review-6181991c-round2\\media-gateway-focused\\stderr.log",
+      "bytes": 1608,
+      "sha256": "72ecfa226e72033319cff91bd7951f6df2ca79b12c3c2c1fb985206aad3f6737"
+    }
+  }
+}

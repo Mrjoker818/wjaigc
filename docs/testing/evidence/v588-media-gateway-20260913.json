@@ -2,15 +2,21 @@
   "schemaVersion": 2,
   "feature": "v588-media-gateway",
   "task": 9,
-  "generatedAt": "2026-09-14T02:50:02+08:00",
+  "generatedAt": "2026-09-14T03:16:43+08:00",
   "baselineCommit": "74716cb99e3972d27c9fac7fd4aa22c0f1130d83",
   "contractRedCommit": "0afeccd8",
-  "gateCandidateCommit": "65601afc63025ae9eb3173910befaa693fe8f99d",
+  "gateCandidateCommit": "6181991c18bb9fa255661971df7460a2377eb177",
   "branch": "main",
   "stableCommit": "52f7c601ed150769e15d06fb435c6e360e28c9e7",
   "local": {
     "verdict": "LOCAL PASS",
-    "reviewFindings": { "importantTotal": 3, "importantAddressedLocally": 3, "cloudVerified": 0 },
+    "reviewFindings": {
+      "importantTotal": 3,
+      "importantAddressedLocally": 3,
+      "secondReviewImportantTotal": 3,
+      "secondReviewImportantAddressedLocally": 3,
+      "cloudVerified": 0
+    },
     "tdd": {
       "contractRed": { "passed": 0, "failed": 3, "skipped": 0 },
       "assetProjectionRed": { "passed": 12, "failed": 1, "skipped": 0 },
@@ -28,7 +34,7 @@
       "cloudStatus": "pending"
     },
     "doctorFocused": { "files": 2, "passed": 24, "failed": 0, "skipped": 0, "exitCode": 0 },
-    "focusedRegression": { "files": 21, "passed": 338, "failed": 0, "skipped": 0, "exitCode": 0 },
+    "focusedRegression": { "files": 22, "passed": 340, "failed": 0, "skipped": 0, "exitCode": 0 },
     "fullRegression": { "files": 803, "passed": 6750, "failed": 0, "skipped": 0, "durationSeconds": 931.18, "exitCode": 0 },
     "gates": {
       "typecheck": { "status": "pass", "exitCode": 0 },
@@ -36,6 +42,16 @@
       "vitest": { "status": "pass", "exitCode": 0 },
       "protectedBaseline": { "status": "pass", "features": 38, "drift": 0, "warnings": 0, "exitCode": 0 },
       "productionBuild": { "status": "pass", "generatedPages": 120, "totalPages": 120, "turbopackWarnings": 55, "exitCode": 0 }
+    },
+    "secondReviewGates": {
+      "commit": "6181991c18bb9fa255661971df7460a2377eb177",
+      "targetRegression": { "status": "pass", "files": 22, "tests": 340, "skipped": 0, "exitCode": 0 },
+      "typecheck": { "status": "pass", "exitCode": 0 },
+      "scopedLint": { "status": "pass", "exitCode": 0 },
+      "protectedBaseline": { "status": "pass", "features": 38, "drift": 0, "warnings": 0, "exitCode": 0 },
+      "fullDiffCheck": { "status": "pass", "range": "74716cb9..HEAD", "exitCode": 0 },
+      "fullVitestRerun": false,
+      "productionBuildRerun": false
     },
     "postgresql": {
       "version": "18.4",
@@ -55,7 +71,10 @@
       "index": "docs/testing/evidence/v588-media-gateway-task9-review-65601afc/evidence-index.json",
       "indexSha256": "209b0fddf2d8ebc3c92d8b8b63f9fca7da8bf7714ea5dffa62f2f11537df2fb7",
       "historicalFailureRoot": "docs/testing/evidence/v588-media-gateway-task9-review-244ee15d",
-      "finalRoot": "docs/testing/evidence/v588-media-gateway-task9-review-65601afc"
+      "finalRoot": "docs/testing/evidence/v588-media-gateway-task9-review-65601afc",
+      "secondReviewIndex": "docs/testing/evidence/v588-media-gateway-task9-review-6181991c-round2/evidence-index.json",
+      "secondReviewIndexSha256": "1cc390695cdee790a4773aac5d9de11898a01af0f13710ae6f70bda24ef40f6e",
+      "secondReviewRoot": "docs/testing/evidence/v588-media-gateway-task9-review-6181991c-round2"
     }
   },
   "cloud": {
