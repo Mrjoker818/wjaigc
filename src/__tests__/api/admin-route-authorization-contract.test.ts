@@ -20,6 +20,8 @@ const expectedRoutes = [
   'dashboard-stats/route.ts',
   'desktop-devices/route.ts',
   'desktop-update/route.ts',
+  'gateway/keys/[keyId]/route.ts',
+  'gateway/keys/route.ts',
   'groups/route.ts',
   'local-generation-records/route.ts',
   'op-log/route.ts',
