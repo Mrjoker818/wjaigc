@@ -107,6 +107,11 @@ import {
   consumeSimpleChatCanvasBridge,
   resolveSimpleChatCanvasReference,
 } from '@/components/simple-chat/simple-chat-types';
+import {
+  clearSimpleCreateCanvasHandoff,
+  consumeSimpleCreateCanvasHandoff,
+  parseSimpleCreateCanvasHandoff,
+} from '@/lib/simple-create-navigation';
 
 interface FavoriteItem {
   id: number;
@@ -5976,6 +5981,49 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
   // Workflow state for node mode
   const [nodeWorkflow, setNodeWorkflow] = useState<Workflow | null>(null);
   const workspaceLocationSearch = useWorkspaceLocationSearch();
+  useEffect(() => {
+    if (!currentProject?.id) return;
+    const handoff = parseSimpleCreateCanvasHandoff(workspaceLocationSearch);
+    if (!handoff) return;
+    let cancelled = false;
+
+    void consumeSimpleCreateCanvasHandoff({
+      handoff,
+      currentProjectId: currentProject.id,
+      resolveReference: resolveSimpleChatCanvasReference,
+      merge: reference => {
+        if (cancelled || currentProjectRef.current?.id !== handoff.projectId) {
+          throw new Error('SIMPLE_CREATE_HANDOFF_CANCELLED');
+        }
+        setImages(previous => {
+          if (previous.some(image => (
+            image.placementId === reference.placementId
+            || image.assetVersionId === reference.assetVersionId
+          ))) return previous;
+          return [
+            ...previous,
+            ...buildSimpleChatCanvasBridgeImages([reference], Date.now()),
+          ];
+        });
+      },
+      cleanUrl: () => replaceWorkspaceHistoryState(
+        window,
+        clearSimpleCreateCanvasHandoff(window.location.href),
+      ),
+    }).then(result => {
+      if (!cancelled && result.status === 'consumed') {
+        toast.success('生成结果已定位到画布');
+      }
+    }).catch(error => {
+      if (cancelled) return;
+      console.error('快速生图结果导入失败:', error);
+      toast.error('生成结果导入失败', {
+        description: '素材交接信息已保留，刷新页面可重试。',
+      });
+    });
+
+    return () => { cancelled = true; };
+  }, [currentProject?.id, setImages, workspaceLocationSearch]);
   const handoffBootstrapWorkflow = useMemo(() => {
     if (nodeWorkflow || !currentProject?.id) return null;
     const intent = parseSimpleChatWorkspaceHandoffIntent(workspaceLocationSearch);

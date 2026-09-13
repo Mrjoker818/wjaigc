@@ -103,6 +103,22 @@ async function readGridTransform(page: Page): Promise<string> {
   ));
 }
 
+async function waitForStableBox(page: Page, selector: string): Promise<void> {
+  await expect.poll(async () => {
+    const element = page.locator(selector);
+    const before = await element.boundingBox();
+    await page.evaluate(() => new Promise<void>(resolve => (
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+    )));
+    const after = await element.boundingBox();
+    return before && after
+      ? [before.x, before.y, before.width, before.height].every((value, index) => (
+        Math.abs(value - [after.x, after.y, after.width, after.height][index]) < 0.5
+      ))
+      : false;
+  }).toBe(true);
+}
+
 async function findBlankCanvasPoint(page: Page): Promise<{ x: number; y: number }> {
   return page.evaluate(() => {
     const surface = document.querySelector<HTMLElement>('[data-canvas-interaction-surface]');
@@ -171,11 +187,16 @@ test.describe('V588 mobile canvas browser matrix', () => {
       } else {
         const surface = page.locator('[data-canvas-interaction-surface]');
         const image = page.locator('[data-canvas-image-id="v588-mobile-image"]');
+        await waitForStableBox(page, '[data-canvas-image-id="v588-mobile-image"]');
         const box = await image.boundingBox();
         expect(box).not.toBeNull();
         await page.mouse.move(box!.x - 24, box!.y - 24);
         await page.mouse.down();
-        await page.mouse.move(box!.x + box!.width + 24, box!.y + box!.height + 24);
+        await page.mouse.move(
+          box!.x + box!.width + 24,
+          box!.y + box!.height + 24,
+          { steps: 12 },
+        );
         await page.mouse.up();
         await expect(image).toHaveAttribute('data-canvas-selected', 'true');
         await expect(page.locator('[data-toolbar="image-action-toolbar"]')).toBeVisible();
