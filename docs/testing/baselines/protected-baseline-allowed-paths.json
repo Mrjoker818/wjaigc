@@ -60,6 +60,7 @@
   "scripts/brief-to-video-evidence.mjs",
   "scripts/prune-build-traces.mjs",
   "scripts/run-migrations.mjs",
+  "scripts/run-task9-gate-with-evidence.mjs",
   "scripts/stage-4-inventory.mjs",
   "scripts/stage-4-e2e-fixtures.mjs",
   "scripts/task12-skill-run-audit.sql",
