@@ -2615,9 +2615,11 @@ BUG-018 已从未验证项移除。剩余顺序为 `002-B -> 002-D -> 002-E`；�
 ## 2026-09-14 V588-MEDIA-001 Task 9 待验证
 
 - [x] Doctor RED/GREEN、真实 PostgreSQL、脱敏和迁移表门禁。
-- [x] 媒体网关专项 `327/327`、全仓 `6745/6745`、0 failed、0 skipped。
+- [x] 独立复审 3 Important 已由失败合同锁定并形成最小修复：逐槽/取消/资源、成功态证据、原始门禁日志。
+- [x] 媒体网关专项 `338/338`、全仓 `6750/6750`、0 failed、0 skipped。
 - [x] TypeScript、构建版 ESLint、38 项保护基线和生产构建 `120/120`。
-- [x] 建立 5 项 Playwright 云端规格；仅确认可解析，未冒充云端执行。
+- [x] 建立 7 项 Playwright 云端规格、11 项目展开 77 项；仅确认可解析，未冒充云端执行。
+- [x] 门禁原始 stdout/stderr、命令、commit、起止、exit code 与 SHA-256 已归档；失败轮次未删除。
 - [ ] Coze 拉取最终 exact `main` SHA，核对运行 tree、Build ID、唯一服务和首页健康。
 - [ ] 默认 `GATEWAY_ENABLED=false` 下验证 503 与原登录、画布、图像、视频入口兼容。
 - [ ] 临时开启后使用 PearAPI/APIMart 验证图像、视频、`n=2` 逐槽、查询和错误边界。

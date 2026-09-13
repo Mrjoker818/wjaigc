@@ -1,0 +1,79 @@
+Listing tests:
+  [chromium] › v588-media-gateway.spec.ts:219:7 › V588-MEDIA-001 cloud rollout evidence › default-disabled rollout preserves the original login and canvas entry
+  [chromium] › v588-media-gateway.spec.ts:240:9 › V588-MEDIA-001 cloud rollout evidence › temporarily enabled rollout › preserves original login, canvas, image, and video entry compatibility
+  [chromium] › v588-media-gateway.spec.ts:249:9 › V588-MEDIA-001 cloud rollout evidence › temporarily enabled rollout › rejects missing, invalid, and revoked credentials
+  [chromium] › v588-media-gateway.spec.ts:266:9 › V588-MEDIA-001 cloud rollout evidence › temporarily enabled rollout › enforces rate limit and UTC daily quota
+  [chromium] › v588-media-gateway.spec.ts:280:9 › V588-MEDIA-001 cloud rollout evidence › temporarily enabled rollout › returns n=2 progressively, rejects same-key different digest, and verifies owned artifacts
+  [chromium] › v588-media-gateway.spec.ts:317:9 › V588-MEDIA-001 cloud rollout evidence › temporarily enabled rollout › submits a video and downloads its projected terminal result
+  [chromium] › v588-media-gateway.spec.ts:334:9 › V588-MEDIA-001 cloud rollout evidence › temporarily enabled rollout › cancels authoritatively, rejects late completion, and refunds exactly once
+  [chromium-1080p] › v588-media-gateway.spec.ts:219:7 › V588-MEDIA-001 cloud rollout evidence › default-disabled rollout preserves the original login and canvas entry
+  [chromium-1080p] › v588-media-gateway.spec.ts:240:9 › V588-MEDIA-001 cloud rollout evidence › temporarily enabled rollout › preserves original login, canvas, image, and video entry compatibility
+  [chromium-1080p] › v588-media-gateway.spec.ts:249:9 › V588-MEDIA-001 cloud rollout evidence › temporarily enabled rollout › rejects missing, invalid, and revoked credentials
+  [chromium-1080p] › v588-media-gateway.spec.ts:266:9 › V588-MEDIA-001 cloud rollout evidence › temporarily enabled rollout › enforces rate limit and UTC daily quota
+  [chromium-1080p] › v588-media-gateway.spec.ts:280:9 › V588-MEDIA-001 cloud rollout evidence › temporarily enabled rollout › returns n=2 progressively, rejects same-key different digest, and verifies owned artifacts
+  [chromium-1080p] › v588-media-gateway.spec.ts:317:9 › V588-MEDIA-001 cloud rollout evidence › temporarily enabled rollout › submits a video and downloads its projected terminal result
+  [chromium-1080p] › v588-media-gateway.spec.ts:334:9 › V588-MEDIA-001 cloud rollout evidence › temporarily enabled rollout › cancels authoritatively, rejects late completion, and refunds exactly once
+  [firefox] › v588-media-gateway.spec.ts:219:7 › V588-MEDIA-001 cloud rollout evidence › default-disabled rollout preserves the original login and canvas entry
+  [firefox] › v588-media-gateway.spec.ts:240:9 › V588-MEDIA-001 cloud rollout evidence › temporarily enabled rollout › preserves original login, canvas, image, and video entry compatibility
+  [firefox] › v588-media-gateway.spec.ts:249:9 › V588-MEDIA-001 cloud rollout evidence › temporarily enabled rollout › rejects missing, invalid, and revoked credentials
+  [firefox] › v588-media-gateway.spec.ts:266:9 › V588-MEDIA-001 cloud rollout evidence › temporarily enabled rollout › enforces rate limit and UTC daily quota
+  [firefox] › v588-media-gateway.spec.ts:280:9 › V588-MEDIA-001 cloud rollout evidence › temporarily enabled rollout › returns n=2 progressively, rejects same-key different digest, and verifies owned artifacts
+  [firefox] › v588-media-gateway.spec.ts:317:9 › V588-MEDIA-001 cloud rollout evidence › temporarily enabled rollout › submits a video and downloads its projected terminal result
+  [firefox] › v588-media-gateway.spec.ts:334:9 › V588-MEDIA-001 cloud rollout evidence › temporarily enabled rollout › cancels authoritatively, rejects late completion, and refunds exactly once
+  [webkit] › v588-media-gateway.spec.ts:219:7 › V588-MEDIA-001 cloud rollout evidence › default-disabled rollout preserves the original login and canvas entry
+  [webkit] › v588-media-gateway.spec.ts:240:9 › V588-MEDIA-001 cloud rollout evidence › temporarily enabled rollout › preserves original login, canvas, image, and video entry compatibility
+  [webkit] › v588-media-gateway.spec.ts:249:9 › V588-MEDIA-001 cloud rollout evidence › temporarily enabled rollout › rejects missing, invalid, and revoked credentials
+  [webkit] › v588-media-gateway.spec.ts:266:9 › V588-MEDIA-001 cloud rollout evidence › temporarily enabled rollout › enforces rate limit and UTC daily quota
+  [webkit] › v588-media-gateway.spec.ts:280:9 › V588-MEDIA-001 cloud rollout evidence › temporarily enabled rollout › returns n=2 progressively, rejects same-key different digest, and verifies owned artifacts
+  [webkit] › v588-media-gateway.spec.ts:317:9 › V588-MEDIA-001 cloud rollout evidence › temporarily enabled rollout › submits a video and downloads its projected terminal result
+  [webkit] › v588-media-gateway.spec.ts:334:9 › V588-MEDIA-001 cloud rollout evidence › temporarily enabled rollout › cancels authoritatively, rejects late completion, and refunds exactly once
+  [mobile-chromium] › v588-media-gateway.spec.ts:219:7 › V588-MEDIA-001 cloud rollout evidence › default-disabled rollout preserves the original login and canvas entry
+  [mobile-chromium] › v588-media-gateway.spec.ts:240:9 › V588-MEDIA-001 cloud rollout evidence › temporarily enabled rollout › preserves original login, canvas, image, and video entry compatibility
+  [mobile-chromium] › v588-media-gateway.spec.ts:249:9 › V588-MEDIA-001 cloud rollout evidence › temporarily enabled rollout › rejects missing, invalid, and revoked credentials
+  [mobile-chromium] › v588-media-gateway.spec.ts:266:9 › V588-MEDIA-001 cloud rollout evidence › temporarily enabled rollout › enforces rate limit and UTC daily quota
+  [mobile-chromium] › v588-media-gateway.spec.ts:280:9 › V588-MEDIA-001 cloud rollout evidence › temporarily enabled rollout › returns n=2 progressively, rejects same-key different digest, and verifies owned artifacts
+  [mobile-chromium] › v588-media-gateway.spec.ts:317:9 › V588-MEDIA-001 cloud rollout evidence › temporarily enabled rollout › submits a video and downloads its projected terminal result
+  [mobile-chromium] › v588-media-gateway.spec.ts:334:9 › V588-MEDIA-001 cloud rollout evidence › temporarily enabled rollout › cancels authoritatively, rejects late completion, and refunds exactly once
+  [mobile-320-chromium] › v588-media-gateway.spec.ts:219:7 › V588-MEDIA-001 cloud rollout evidence › default-disabled rollout preserves the original login and canvas entry
+  [mobile-320-chromium] › v588-media-gateway.spec.ts:240:9 › V588-MEDIA-001 cloud rollout evidence › temporarily enabled rollout › preserves original login, canvas, image, and video entry compatibility
+  [mobile-320-chromium] › v588-media-gateway.spec.ts:249:9 › V588-MEDIA-001 cloud rollout evidence › temporarily enabled rollout › rejects missing, invalid, and revoked credentials
+  [mobile-320-chromium] › v588-media-gateway.spec.ts:266:9 › V588-MEDIA-001 cloud rollout evidence › temporarily enabled rollout › enforces rate limit and UTC daily quota
+  [mobile-320-chromium] › v588-media-gateway.spec.ts:280:9 › V588-MEDIA-001 cloud rollout evidence › temporarily enabled rollout › returns n=2 progressively, rejects same-key different digest, and verifies owned artifacts
+  [mobile-320-chromium] › v588-media-gateway.spec.ts:317:9 › V588-MEDIA-001 cloud rollout evidence › temporarily enabled rollout › submits a video and downloads its projected terminal result
+  [mobile-320-chromium] › v588-media-gateway.spec.ts:334:9 › V588-MEDIA-001 cloud rollout evidence › temporarily enabled rollout › cancels authoritatively, rejects late completion, and refunds exactly once
+  [mobile-375-chromium] › v588-media-gateway.spec.ts:219:7 › V588-MEDIA-001 cloud rollout evidence › default-disabled rollout preserves the original login and canvas entry
+  [mobile-375-chromium] › v588-media-gateway.spec.ts:240:9 › V588-MEDIA-001 cloud rollout evidence › temporarily enabled rollout › preserves original login, canvas, image, and video entry compatibility
+  [mobile-375-chromium] › v588-media-gateway.spec.ts:249:9 › V588-MEDIA-001 cloud rollout evidence › temporarily enabled rollout › rejects missing, invalid, and revoked credentials
+  [mobile-375-chromium] › v588-media-gateway.spec.ts:266:9 › V588-MEDIA-001 cloud rollout evidence › temporarily enabled rollout › enforces rate limit and UTC daily quota
+  [mobile-375-chromium] › v588-media-gateway.spec.ts:280:9 › V588-MEDIA-001 cloud rollout evidence › temporarily enabled rollout › returns n=2 progressively, rejects same-key different digest, and verifies owned artifacts
+  [mobile-375-chromium] › v588-media-gateway.spec.ts:317:9 › V588-MEDIA-001 cloud rollout evidence › temporarily enabled rollout › submits a video and downloads its projected terminal result
+  [mobile-375-chromium] › v588-media-gateway.spec.ts:334:9 › V588-MEDIA-001 cloud rollout evidence › temporarily enabled rollout › cancels authoritatively, rejects late completion, and refunds exactly once
+  [mobile-393-chromium] › v588-media-gateway.spec.ts:219:7 › V588-MEDIA-001 cloud rollout evidence › default-disabled rollout preserves the original login and canvas entry
+  [mobile-393-chromium] › v588-media-gateway.spec.ts:240:9 › V588-MEDIA-001 cloud rollout evidence › temporarily enabled rollout › preserves original login, canvas, image, and video entry compatibility
+  [mobile-393-chromium] › v588-media-gateway.spec.ts:249:9 › V588-MEDIA-001 cloud rollout evidence › temporarily enabled rollout › rejects missing, invalid, and revoked credentials
+  [mobile-393-chromium] › v588-media-gateway.spec.ts:266:9 › V588-MEDIA-001 cloud rollout evidence › temporarily enabled rollout › enforces rate limit and UTC daily quota
+  [mobile-393-chromium] › v588-media-gateway.spec.ts:280:9 › V588-MEDIA-001 cloud rollout evidence › temporarily enabled rollout › returns n=2 progressively, rejects same-key different digest, and verifies owned artifacts
+  [mobile-393-chromium] › v588-media-gateway.spec.ts:317:9 › V588-MEDIA-001 cloud rollout evidence › temporarily enabled rollout › submits a video and downloads its projected terminal result
+  [mobile-393-chromium] › v588-media-gateway.spec.ts:334:9 › V588-MEDIA-001 cloud rollout evidence › temporarily enabled rollout › cancels authoritatively, rejects late completion, and refunds exactly once
+  [desktop-1440-chromium] › v588-media-gateway.spec.ts:219:7 › V588-MEDIA-001 cloud rollout evidence › default-disabled rollout preserves the original login and canvas entry
+  [desktop-1440-chromium] › v588-media-gateway.spec.ts:240:9 › V588-MEDIA-001 cloud rollout evidence › temporarily enabled rollout › preserves original login, canvas, image, and video entry compatibility
+  [desktop-1440-chromium] › v588-media-gateway.spec.ts:249:9 › V588-MEDIA-001 cloud rollout evidence › temporarily enabled rollout › rejects missing, invalid, and revoked credentials
+  [desktop-1440-chromium] › v588-media-gateway.spec.ts:266:9 › V588-MEDIA-001 cloud rollout evidence › temporarily enabled rollout › enforces rate limit and UTC daily quota
+  [desktop-1440-chromium] › v588-media-gateway.spec.ts:280:9 › V588-MEDIA-001 cloud rollout evidence › temporarily enabled rollout › returns n=2 progressively, rejects same-key different digest, and verifies owned artifacts
+  [desktop-1440-chromium] › v588-media-gateway.spec.ts:317:9 › V588-MEDIA-001 cloud rollout evidence › temporarily enabled rollout › submits a video and downloads its projected terminal result
+  [desktop-1440-chromium] › v588-media-gateway.spec.ts:334:9 › V588-MEDIA-001 cloud rollout evidence › temporarily enabled rollout › cancels authoritatively, rejects late completion, and refunds exactly once
+  [mobile-375-firefox] › v588-media-gateway.spec.ts:219:7 › V588-MEDIA-001 cloud rollout evidence › default-disabled rollout preserves the original login and canvas entry
+  [mobile-375-firefox] › v588-media-gateway.spec.ts:240:9 › V588-MEDIA-001 cloud rollout evidence › temporarily enabled rollout › preserves original login, canvas, image, and video entry compatibility
+  [mobile-375-firefox] › v588-media-gateway.spec.ts:249:9 › V588-MEDIA-001 cloud rollout evidence › temporarily enabled rollout › rejects missing, invalid, and revoked credentials
+  [mobile-375-firefox] › v588-media-gateway.spec.ts:266:9 › V588-MEDIA-001 cloud rollout evidence › temporarily enabled rollout › enforces rate limit and UTC daily quota
+  [mobile-375-firefox] › v588-media-gateway.spec.ts:280:9 › V588-MEDIA-001 cloud rollout evidence › temporarily enabled rollout › returns n=2 progressively, rejects same-key different digest, and verifies owned artifacts
+  [mobile-375-firefox] › v588-media-gateway.spec.ts:317:9 › V588-MEDIA-001 cloud rollout evidence › temporarily enabled rollout › submits a video and downloads its projected terminal result
+  [mobile-375-firefox] › v588-media-gateway.spec.ts:334:9 › V588-MEDIA-001 cloud rollout evidence › temporarily enabled rollout › cancels authoritatively, rejects late completion, and refunds exactly once
+  [mobile-375-webkit] › v588-media-gateway.spec.ts:219:7 › V588-MEDIA-001 cloud rollout evidence › default-disabled rollout preserves the original login and canvas entry
+  [mobile-375-webkit] › v588-media-gateway.spec.ts:240:9 › V588-MEDIA-001 cloud rollout evidence › temporarily enabled rollout › preserves original login, canvas, image, and video entry compatibility
+  [mobile-375-webkit] › v588-media-gateway.spec.ts:249:9 › V588-MEDIA-001 cloud rollout evidence › temporarily enabled rollout › rejects missing, invalid, and revoked credentials
+  [mobile-375-webkit] › v588-media-gateway.spec.ts:266:9 › V588-MEDIA-001 cloud rollout evidence › temporarily enabled rollout › enforces rate limit and UTC daily quota
+  [mobile-375-webkit] › v588-media-gateway.spec.ts:280:9 › V588-MEDIA-001 cloud rollout evidence › temporarily enabled rollout › returns n=2 progressively, rejects same-key different digest, and verifies owned artifacts
+  [mobile-375-webkit] › v588-media-gateway.spec.ts:317:9 › V588-MEDIA-001 cloud rollout evidence › temporarily enabled rollout › submits a video and downloads its projected terminal result
+  [mobile-375-webkit] › v588-media-gateway.spec.ts:334:9 › V588-MEDIA-001 cloud rollout evidence › temporarily enabled rollout › cancels authoritatively, rejects late completion, and refunds exactly once
+Total: 77 tests in 1 file

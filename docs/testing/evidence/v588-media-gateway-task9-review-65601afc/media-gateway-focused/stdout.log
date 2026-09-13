@@ -1,0 +1,103 @@
+
+ RUN  v3.2.4 J:/无界本地版/projects/_upstream-wjaigc-restore
+
+ ✓ src/__tests__/scripts/media-gateway-doctor.test.ts (4 tests) 4893ms
+   ✓ media gateway doctor > reports the default-disabled gateway as a non-failing warning  1084ms
+   ✓ media gateway doctor > fails closed when the enabled gateway database cannot be reached  1081ms
+   ✓ media gateway doctor > verifies all gateway tables against the required real PostgreSQL test database  2726ms
+stdout | tests/integration/media-gateway-lifecycle-postgres.test.ts > media gateway lifecycle on PostgreSQL > admits 20 identical requests into one charged authoritative task and one gateway row
+[db-storage] Core tables ensured
+
+stdout | tests/integration/media-gateway-lifecycle-postgres.test.ts > media gateway lifecycle on PostgreSQL > isolates users and rejects digest conflicts, revoked keys, and cross-user task ids
+[db-storage] Core tables ensured
+
+stdout | tests/integration/media-gateway-lifecycle-postgres.test.ts > media gateway lifecycle on PostgreSQL > isolates users and rejects digest conflicts, revoked keys, and cross-user task ids
+[DataRoot] Using persistent storage: /space/wujie-data
+
+stdout | tests/integration/media-gateway-lifecycle-postgres.test.ts > media gateway lifecycle on PostgreSQL > allows one failure terminal and one refund while rejecting a late completion
+[db-storage] Core tables ensured
+
+stdout | tests/integration/media-gateway-lifecycle-postgres.test.ts > media gateway lifecycle on PostgreSQL > permits completion only from processing and rejects every other durable status
+[db-storage] Core tables ensured
+
+ ✓ tests/integration/media-gateway-lifecycle-postgres.test.ts (5 tests) 4819ms
+   ✓ media gateway lifecycle on PostgreSQL > admits 20 identical requests into one charged authoritative task and one gateway row  1606ms
+   ✓ media gateway lifecycle on PostgreSQL > isolates users and rejects digest conflicts, revoked keys, and cross-user task ids  1135ms
+   ✓ media gateway lifecycle on PostgreSQL > allows one failure terminal and one refund while rejecting a late completion  1284ms
+   ✓ media gateway lifecycle on PostgreSQL > permits completion only from processing and rejects every other durable status  746ms
+ ✓ tests/integration/media-gateway-admission-postgres.test.ts (7 tests) 4064ms
+   ✓ media gateway admission on PostgreSQL > keeps admission and admin usage aligned in a non-UTC session  665ms
+   ✓ media gateway admission on PostgreSQL > projects authoritative UTC daily usage from reserved and admitted requests only  521ms
+   ✓ media gateway admission on PostgreSQL > allows exactly one execute across 20 identical concurrent reservations  787ms
+   ✓ media gateway admission on PostgreSQL > never exceeds the minute limit under 20-way contention  776ms
+   ✓ media gateway admission on PostgreSQL > does not oversell daily quota to 20 distinct concurrent reservations  780ms
+   ✓ media gateway admission on PostgreSQL > returns 409 for a different digest and keeps ambiguous timeout reserved  532ms
+ ✓ src/__tests__/scripts/media-gateway-task9-review-contract.test.ts (4 tests) 788ms
+   ✓ V588-MEDIA-001 Task 9 independent review contracts > records exact child output and independently verifiable hashes  783ms
+ ✓ src/__tests__/api/media-gateway-task-status.test.ts (59 tests) 41ms
+stdout | src/__tests__/api/media-gateway-submit.test.ts
+[DataRoot] Using persistent storage: /space/wujie-data
+
+ ✓ src/__tests__/api/media-gateway-submit.test.ts (32 tests) 35ms
+stdout | src/__tests__/api/media-gateway-trusted-context.test.ts > trusted gateway source context > does not persist forged gateway metadata for an authenticated cookie image request
+[generate] model=Exact::Image, providerId=image-provider, referenceImages.length=0, referenceMode=undefined
+[generate] Stripped provider prefix from model: "Exact::Image" → "Image" (providerId via field: "image-provider")
+
+stdout | src/__tests__/api/media-gateway-trusted-context.test.ts > trusted gateway source context > does not persist forged gateway metadata for an authenticated desktop-token image request
+[generate] model=Exact::Image, providerId=image-provider, referenceImages.length=0, referenceMode=undefined
+[generate] Stripped provider prefix from model: "Exact::Image" → "Image" (providerId via field: "image-provider")
+
+stdout | src/__tests__/api/media-gateway-trusted-context.test.ts > trusted gateway source context > persists sanitized gateway metadata for an internal-authenticated image request
+[generate] model=Exact::Image, providerId=image-provider, referenceImages.length=0, referenceMode=undefined
+
+stdout | src/__tests__/api/media-gateway-trusted-context.test.ts > trusted gateway source context > does not persist forged gateway metadata for an authenticated cookie video request
+[video/generate] Stripped provider prefix from model: "Exact::Video" → "Video"
+
+stdout | src/__tests__/api/media-gateway-trusted-context.test.ts > trusted gateway source context > does not persist forged gateway metadata for an authenticated cookie video request
+[video/generate] model=Video, providerId=video-provider, baseUrl=https://provider.example, profile=rest-generic, compatProfile=(none)
+
+stdout | src/__tests__/api/media-gateway-trusted-context.test.ts > trusted gateway source context > does not persist forged gateway metadata for an authenticated cookie video request
+[video/generate] Director user-message length=143, mode=text2video, finalPrompt length=168
+
+stdout | src/__tests__/api/media-gateway-trusted-context.test.ts > trusted gateway source context > does not persist forged gateway metadata for an authenticated desktop-token video request
+[video/generate] Stripped provider prefix from model: "Exact::Video" → "Video"
+
+stdout | src/__tests__/api/media-gateway-trusted-context.test.ts > trusted gateway source context > does not persist forged gateway metadata for an authenticated desktop-token video request
+[video/generate] model=Video, providerId=video-provider, baseUrl=https://provider.example, profile=rest-generic, compatProfile=(none)
+
+stdout | src/__tests__/api/media-gateway-trusted-context.test.ts > trusted gateway source context > does not persist forged gateway metadata for an authenticated desktop-token video request
+[video/generate] Director user-message length=143, mode=text2video, finalPrompt length=168
+
+stdout | src/__tests__/api/media-gateway-trusted-context.test.ts > trusted gateway source context > persists sanitized gateway metadata for an internal-authenticated video request
+[video/generate] model=Exact::Video, providerId=video-provider, baseUrl=https://provider.example, profile=rest-generic, compatProfile=(none)
+
+stdout | src/__tests__/api/media-gateway-trusted-context.test.ts > trusted gateway source context > persists sanitized gateway metadata for an internal-authenticated video request
+[video/generate] Director user-message length=150, mode=text2video, finalPrompt length=175
+
+stdout | src/__tests__/api/media-gateway-trusted-context.test.ts > trusted gateway source context > rejects an image model whose exact case is not configured
+[generate] model=exact::image, providerId=image-provider, referenceImages.length=0, referenceMode=undefined
+
+ ✓ src/__tests__/api/media-gateway-trusted-context.test.ts (11 tests) 30ms
+ ✓ src/__tests__/api/media-gateway-task-cancel.test.ts (18 tests) 27ms
+ ✓ src/__tests__/api/admin-media-gateway-keys.test.ts (19 tests) 25ms
+ ✓ src/__tests__/lib/media-gateway-internal-client.test.ts (28 tests) 19ms
+ ✓ src/__tests__/lib/media-gateway-schema.test.ts (37 tests) 19ms
+stdout | src/__tests__/api/media-gateway-security.test.ts
+[DataRoot] Using persistent storage: /space/wujie-data
+
+ ✓ src/__tests__/api/media-gateway-security.test.ts (12 tests) 13ms
+ ✓ src/__tests__/lib/media-gateway-admission.test.ts (16 tests) 13ms
+ ✓ src/__tests__/lib/media-gateway-key-service.test.ts (19 tests) 12ms
+ ✓ src/__tests__/lib/media-gateway-task-projection.test.ts (13 tests) 9ms
+ ✓ src/__tests__/lib/media-gateway-audit.test.ts (10 tests) 8ms
+ ✓ src/__tests__/scripts/media-gateway-migration.test.ts (2 tests) 5ms
+ ✓ src/__tests__/lib/media-gateway-types.test.ts (4 tests) 4ms
+ ✓ src/__tests__/components/dashboard-media-gateway-contract.test.ts (2 tests) 3ms
+ ✓ src/__tests__/lib/media-gateway-utc-day-window.test.ts (2 tests) 3ms
+ ✓ src/__tests__/components/media-gateway-admin.test.tsx (34 tests) 2719ms
+
+ Test Files  21 passed (21)
+      Tests  338 passed (338)
+   Start at  02:46:16
+   Duration  29.63s (transform 1.24s, setup 0ms, collect 3.17s, tests 17.55s, environment 1.22s, prepare 2.88s)
+

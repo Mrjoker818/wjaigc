@@ -1,0 +1,6 @@
+
+> projects@4.0.0 ts-check J:\无界本地版\projects\_upstream-wjaigc-restore
+> next typegen && tsc -p tsconfig.json
+
+Generating route types...
+✓ Types generated successfully

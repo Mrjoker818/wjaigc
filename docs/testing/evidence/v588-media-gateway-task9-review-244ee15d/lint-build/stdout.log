@@ -1,0 +1,4 @@
+
+> projects@4.0.0 lint:build J:\无界本地版\projects\_upstream-wjaigc-restore
+> eslint . --quiet
+

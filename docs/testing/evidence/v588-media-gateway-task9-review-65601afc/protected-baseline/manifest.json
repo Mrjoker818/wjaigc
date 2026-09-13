@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "name": "protected-baseline",
+  "command": [
+    "pnpm",
+    "check:protected-baseline"
+  ],
+  "cwd": "J:\\无界本地版\\projects\\_upstream-wjaigc-restore",
+  "commit": "65601afc63025ae9eb3173910befaa693fe8f99d",
+  "startedAt": "2026-09-13T18:28:21.654Z",
+  "finishedAt": "2026-09-13T18:28:24.004Z",
+  "durationMs": 2348,
+  "exitCode": 0,
+  "signal": null,
+  "artifacts": {
+    "stdout": {
+      "path": "J:\\无界本地版\\projects\\_upstream-wjaigc-restore\\docs\\testing\\evidence\\v588-media-gateway-task9-review-65601afc\\protected-baseline\\stdout.log",
+      "bytes": 730,
+      "sha256": "b73151f5e57e3abb04e35cbc6205158fc8d70b0b51c2641e404d7fc973a73ea6"
+    },
+    "stderr": {
+      "path": "J:\\无界本地版\\projects\\_upstream-wjaigc-restore\\docs\\testing\\evidence\\v588-media-gateway-task9-review-65601afc\\protected-baseline\\stderr.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  }
+}

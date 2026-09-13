@@ -1,49 +1,61 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "feature": "v588-media-gateway",
   "task": 9,
-  "generatedAt": "2026-09-14T01:56:52+08:00",
+  "generatedAt": "2026-09-14T02:50:02+08:00",
   "baselineCommit": "74716cb99e3972d27c9fac7fd4aa22c0f1130d83",
-  "implementationCommit": "a8d7f3bbced570d218ba066f7fc00b6a93abb14d",
+  "contractRedCommit": "0afeccd8",
+  "gateCandidateCommit": "65601afc63025ae9eb3173910befaa693fe8f99d",
   "branch": "main",
   "stableCommit": "52f7c601ed150769e15d06fb435c6e360e28c9e7",
   "local": {
     "verdict": "LOCAL PASS",
-    "doctorTdd": {
-      "red": { "passed": 20, "failed": 3, "skipped": 0 },
-      "green": { "passed": 24, "failed": 0, "skipped": 0 },
-      "directRun": { "passedChecks": 57, "warnings": 13, "failedChecks": 0, "externalBlockers": 2, "exitCode": 0 }
+    "reviewFindings": { "importantTotal": 3, "importantAddressedLocally": 3, "cloudVerified": 0 },
+    "tdd": {
+      "contractRed": { "passed": 0, "failed": 3, "skipped": 0 },
+      "assetProjectionRed": { "passed": 12, "failed": 1, "skipped": 0 },
+      "assetProjectionGreen": { "passed": 13, "failed": 0, "skipped": 0 },
+      "protectedBaselineRedExitCode": 1,
+      "protectedBaselineGreenExitCode": 0
     },
     "playwrightSpecification": {
       "file": "tests/e2e/v588-media-gateway.spec.ts",
-      "logicalCases": 5,
-      "listedProjectCases": 55,
+      "logicalCases": 7,
+      "listedProjectCases": 77,
       "executedAgainstCloud": false,
-      "cloudRunGuard": "E2E_MEDIA_GATEWAY_RUN=1"
+      "cloudRunGuard": "E2E_MEDIA_GATEWAY_RUN=1",
+      "successArtifacts": ["screenshot", "video", "trace", "console", "network", "manifest"],
+      "cloudStatus": "pending"
     },
-    "focusedRegression": { "files": 18, "passed": 327, "failed": 0, "skipped": 0 },
-    "fullRegression": { "files": 802, "passed": 6745, "failed": 0, "skipped": 0, "durationSeconds": 931.73 },
+    "doctorFocused": { "files": 2, "passed": 24, "failed": 0, "skipped": 0, "exitCode": 0 },
+    "focusedRegression": { "files": 21, "passed": 338, "failed": 0, "skipped": 0, "exitCode": 0 },
+    "fullRegression": { "files": 803, "passed": 6750, "failed": 0, "skipped": 0, "durationSeconds": 931.18, "exitCode": 0 },
     "gates": {
       "typecheck": { "status": "pass", "exitCode": 0 },
       "lintBuild": { "status": "pass", "exitCode": 0 },
       "vitest": { "status": "pass", "exitCode": 0 },
       "protectedBaseline": { "status": "pass", "features": 38, "drift": 0, "warnings": 0, "exitCode": 0 },
-      "productionBuild": { "status": "pass", "generatedPages": 120, "totalPages": 120, "turbopackWarnings": 53, "exitCode": 0 }
+      "productionBuild": { "status": "pass", "generatedPages": 120, "totalPages": 120, "turbopackWarnings": 55, "exitCode": 0 }
     },
     "postgresql": {
       "version": "18.4",
       "host": "127.0.0.1",
-      "port": 55439,
-      "nonAdministratorAccount": "wujie_pg_task9",
+      "port": 55443,
+      "nonAdministratorAccount": "wujie_pg_t9_914",
       "conditionalTestsSkipped": 0,
       "cleanup": {
         "status": "complete",
         "portListening": false,
         "temporaryUserExists": false,
         "dataPathExists": false,
-        "logPathExists": false,
-        "profilePathExists": false
+        "logPathExists": false
       }
+    },
+    "evidence": {
+      "index": "docs/testing/evidence/v588-media-gateway-task9-review-65601afc/evidence-index.json",
+      "indexSha256": "209b0fddf2d8ebc3c92d8b8b63f9fca7da8bf7714ea5dffa62f2f11537df2fb7",
+      "historicalFailureRoot": "docs/testing/evidence/v588-media-gateway-task9-review-244ee15d",
+      "finalRoot": "docs/testing/evidence/v588-media-gateway-task9-review-65601afc"
     }
   },
   "cloud": {

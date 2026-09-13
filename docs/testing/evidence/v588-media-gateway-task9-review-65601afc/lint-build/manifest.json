@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "name": "lint-build",
+  "command": [
+    "pnpm",
+    "lint:build"
+  ],
+  "cwd": "J:\\无界本地版\\projects\\_upstream-wjaigc-restore",
+  "commit": "65601afc63025ae9eb3173910befaa693fe8f99d",
+  "startedAt": "2026-09-13T18:28:21.645Z",
+  "finishedAt": "2026-09-13T18:29:36.884Z",
+  "durationMs": 75237,
+  "exitCode": 0,
+  "signal": null,
+  "artifacts": {
+    "stdout": {
+      "path": "J:\\无界本地版\\projects\\_upstream-wjaigc-restore\\docs\\testing\\evidence\\v588-media-gateway-task9-review-65601afc\\lint-build\\stdout.log",
+      "bytes": 102,
+      "sha256": "1fb800e1ad2e0fbe69cb397482f42e9f17fb3f07cdf50d9d98fcb31cf5bebecb"
+    },
+    "stderr": {
+      "path": "J:\\无界本地版\\projects\\_upstream-wjaigc-restore\\docs\\testing\\evidence\\v588-media-gateway-task9-review-65601afc\\lint-build\\stderr.log",
+      "bytes": 184,
+      "sha256": "6e6fe7dad2022706e9725d1b19da85dd2f595591eeb814972792854c97dc4d95"
+    }
+  }
+}

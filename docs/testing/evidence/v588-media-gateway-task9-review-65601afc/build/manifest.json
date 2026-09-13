@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "name": "build",
+  "command": [
+    "pnpm",
+    "build"
+  ],
+  "cwd": "J:\\无界本地版\\projects\\_upstream-wjaigc-restore",
+  "commit": "65601afc63025ae9eb3173910befaa693fe8f99d",
+  "startedAt": "2026-09-13T18:46:50.342Z",
+  "finishedAt": "2026-09-13T18:49:19.992Z",
+  "durationMs": 149647,
+  "exitCode": 0,
+  "signal": null,
+  "artifacts": {
+    "stdout": {
+      "path": "J:\\无界本地版\\projects\\_upstream-wjaigc-restore\\docs\\testing\\evidence\\v588-media-gateway-task9-review-65601afc\\build\\stdout.log",
+      "bytes": 8266,
+      "sha256": "16cb1afb4698ca7cffff0c6203d0b0924efbd14c5cfe26d54ffc6b2c8fa1a0fe"
+    },
+    "stderr": {
+      "path": "J:\\无界本地版\\projects\\_upstream-wjaigc-restore\\docs\\testing\\evidence\\v588-media-gateway-task9-review-65601afc\\build\\stderr.log",
+      "bytes": 69129,
+      "sha256": "ddbcde2155b09ad031143e098d1d65096199d0d1c572b49e147e0d4278543043"
+    }
+  }
+}

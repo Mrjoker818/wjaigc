@@ -1,0 +1,11 @@
+
+> projects@4.0.0 check:protected-baseline J:\无界本地版\projects\_upstream-wjaigc-restore
+> node scripts/check-protected-baseline.mjs --base 7fdc0108952fb3a68415ca3a2a26b5d33641dc6b --allow-path-file docs/testing/baselines/protected-baseline-allowed-paths.json
+
+Protected baseline gate: 7fdc0108952fb3a68415ca3a2a26b5d33641dc6b (7fdc0108952fb3a68415ca3a2a26b5d33641dc6b) -> HEAD (65601afc63025ae9eb3173910befaa693fe8f99d)
+PASS  All 38 baseline feature IDs remain present.
+PASS  No unapproved source drift was detected.
+PASS  All literal protected component paths are present.
+PASS  All required evidence contracts are present.
+PASS  Base and candidate Git refs are confirmed.
+PASS  Release gate completed with 0 warning(s).

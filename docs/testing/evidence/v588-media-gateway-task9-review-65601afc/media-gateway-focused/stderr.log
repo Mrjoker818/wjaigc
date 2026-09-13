@@ -1,0 +1,23 @@
+stderr | tests/integration/media-gateway-lifecycle-postgres.test.ts > media gateway lifecycle on PostgreSQL > fails closed when the database is unavailable
+{ code: 'DB_SQL_QUERY_FAILED' }
+
+stderr | tests/integration/media-gateway-lifecycle-postgres.test.ts > media gateway lifecycle on PostgreSQL > fails closed when the database is unavailable
+{ code: 'DB_SQL_QUERY_FAILED' }
+
+stderr | tests/integration/media-gateway-lifecycle-postgres.test.ts > media gateway lifecycle on PostgreSQL > fails closed when the database is unavailable
+[db-storage] dbAddAuditLog error: Error: connect ECONNREFUSED 127.0.0.1:1
+    at J:\无界本地版\projects\_upstream-wjaigc-restore\node_modules\pg-pool\index.js:45:11
+    at processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at execSql (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\db-client.ts:67:22)
+    at dbAddAuditLog (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\db-storage.ts:2131:5)
+    at auditGatewayEvent (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\media-gateway\audit.ts:76:23)
+    at auditedResponse (J:\无界本地版\projects\_upstream-wjaigc-restore\src\app\api\gateway\v1\tasks\[taskId]\route.ts:49:5)
+    at J:\无界本地版\projects\_upstream-wjaigc-restore\tests\integration\media-gateway-lifecycle-postgres.test.ts:248:24
+    at file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/@vitest/runner/dist/chunk-hooks.js:752:20 {
+  errno: -4078,
+  code: 'ECONNREFUSED',
+  syscall: 'connect',
+  address: '127.0.0.1',
+  port: 1
+}
+

@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "name": "ts-check",
+  "command": [
+    "pnpm",
+    "ts-check"
+  ],
+  "cwd": "J:\\无界本地版\\projects\\_upstream-wjaigc-restore",
+  "commit": "65601afc63025ae9eb3173910befaa693fe8f99d",
+  "startedAt": "2026-09-13T18:28:21.657Z",
+  "finishedAt": "2026-09-13T18:28:33.247Z",
+  "durationMs": 11588,
+  "exitCode": 0,
+  "signal": null,
+  "artifacts": {
+    "stdout": {
+      "path": "J:\\无界本地版\\projects\\_upstream-wjaigc-restore\\docs\\testing\\evidence\\v588-media-gateway-task9-review-65601afc\\ts-check\\stdout.log",
+      "bytes": 179,
+      "sha256": "41dc552019fc285bb858332fa0b91c76467c56920b2b0d0a519bea59520b7b9a"
+    },
+    "stderr": {
+      "path": "J:\\无界本地版\\projects\\_upstream-wjaigc-restore\\docs\\testing\\evidence\\v588-media-gateway-task9-review-65601afc\\ts-check\\stderr.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  }
+}

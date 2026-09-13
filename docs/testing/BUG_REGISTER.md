@@ -4311,4 +4311,7 @@ Task 4 独立审查的两个 Minor 继续保留给最终审查：单元夹具 op
 | 编号 | 等级 | 问题 | 修复与永久回归 | 状态 |
 |---|---|---|---|---|
 | MEDIA-T9-001 | P1 发布工程 | `npm run doctor` 未在媒体网关开启时验证数据库及三张迁移表，可能允许缺表部署进入运行期 | Doctor 测试先得到 `3 failed / 20 passed`；增加启用/禁用、真实 PostgreSQL、三表和脱敏合同后 `24/24` | 本地已关闭，云端待验 |
-| MEDIA-T9-002 | P2 测试治理 | 全仓首轮出现 5 个失败与 13 个 PostgreSQL skip：媒体网关来源未纳入保护清单、测试鉴权 mock 缺失、旧套件只读取 `TEST_POSTGRES_URL` | 增加精确来源授权与测试隔离；最终全仓 `802 files / 6745 tests / 0 failed / 0 skipped` | 已关闭 |
+| MEDIA-T9-002 | P2 测试治理 | 全仓首轮出现 5 个失败与 13 个 PostgreSQL skip：媒体网关来源未纳入保护清单、测试鉴权 mock 缺失、旧套件只读取 `TEST_POSTGRES_URL` | 增加精确来源授权与测试隔离；最终全仓 `803 files / 6750 tests / 0 failed / 0 skipped` | 已关闭 |
+| MEDIA-T9-003 | P1 验收假通过风险 | 原 E2E 用 `Promise.all` 只证明双任务最终完成；取消接受 409；资源 URL 只验证字符串，无法证明逐槽、权威取消、一次退款和真实资源 | 先提交 3 项失败合同；改为顺序轮询首槽可见、权威 cancelled/迟到拒绝/净零流水，并真实请求 preview/download/256/512 与验证 AssetVersion 所有权 | 本地合同与 PostgreSQL 已关闭，云端待验 |
+| MEDIA-T9-004 | P1 证据缺失 | 原成功运行不会自动保留截图、录像、Trace、Console、Network 或 ID/账务 manifest | 新增 page+request 混合 E2E 证据采集器；成功态强制保留全部制品，记录 requestId/gatewayRequestId/taskId 和脱敏流水 | 本地规格已关闭，云端制品待生成 |
+| MEDIA-T9-005 | P2 发布证据不可复核 | 原全仓/构建汇总缺原始 stdout/stderr、命令、commit、时间、退出码和哈希 | 新增门禁记录器与 SHA-256 索引；保留 `244ee15d` 失败轮次及 `65601afc` 最终通过轮次 | 已关闭 |

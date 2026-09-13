@@ -1,0 +1,1446 @@
+stderr | src/__tests__/integration/skill-platform-compliance-concurrency-postgres.test.ts > platform compliance accounting on isolated PostgreSQL > retries only the failed HTTP vision image and preserves real report versions
+[skill-runtime] step execution failed {
+  runId: '4f6ce595-d4c1-4ffe-b9fe-9a96896a2fca',
+  stepId: 'audit-image:db80a422bfc63ed1',
+  generation: 0,
+  errorName: 'ComplianceAuditVisionFailedError',
+  errorCode: 'COMPLIANCE_AUDIT_VISION_FAILED',
+  message: 'The frozen compliance vision check failed',
+  stack: 'ComplianceAuditVisionFailedError: The frozen compliance vision check failed\n' +
+    '    at persistVisionFailure (J:\\无界本地版\\projects\\_upstream-wjaigc-restore\\src\\lib\\skill-runtime\\step-registry.ts:718:13)\n' +
+    '    at processTicksAndRejections (node:internal/process/task_queues:103:5)\n' +
+    '    at executeDurableAgentDownstreamOperation (J:\\无界本地版\\projects\\_upstream-wjaigc-restore\\src\\lib\\agent-runtime\\downstream-operations.ts:294:22)\n' +
+    '    at complianceAudit (J:\\无界本地版\\projects\\_upstream-wjaigc-restore\\src\\lib\\skill-runtime\\step-registry.ts:735:26)\n' +
+    '    at Object.executeStep (J:\\无界本地版\\projects\\_upstream-wjaigc-restore\\src\\lib\\skill-runtime\\service.ts:928:16)\n' +
+    '    at executeDurableAgentDownstreamOperation (J:\\无界本地版\\projects\\_upstream-wjaigc-restore\\src\\lib\\agent-runtime\\downstream-operations.ts:294:22)\n' +
+    '    at J:\\无界本地版\\projects\\_upstream-wjaigc-restore\\src\\lib\\skill-runtime\\executor.ts:438:26\n' +
+    '    at async Promise.allSettled (index 1)\n' +
+    '    at Object.execute (J:\\无界本地版\\projects\\_upstream-wjaigc-restore\\src\\lib\\skill-runtime\\executor.ts:400:27)\n' +
+    '    at execute (J:\\无界本地版\\projects\\_upstream-wjaigc-restore\\src\\lib\\skill-runtime\\continuation.ts:409:9)',
+  retryable: true,
+  providerStatus: 500,
+  requestId: 'provider-source-b-1',
+  cause: {
+    errorName: 'ComplianceVisionError',
+    errorCode: 'COMPLIANCE_VISION_PROVIDER_UNAVAILABLE',
+    message: 'COMPLIANCE_VISION_PROVIDER_UNAVAILABLE',
+    stack: 'ComplianceVisionError: COMPLIANCE_VISION_PROVIDER_UNAVAILABLE\n' +
+      '    at httpError (J:\\无界本地版\\projects\\_upstream-wjaigc-restore\\src\\lib\\platform-compliance\\vision-client.ts:369:10)\n' +
+      '    at invokeComplianceVision (J:\\无界本地版\\projects\\_upstream-wjaigc-restore\\src\\lib\\platform-compliance\\vision-client.ts:425:11)\n' +
+      '    at processTicksAndRejections (node:internal/process/task_queues:103:5)\n' +
+      '    at J:\\无界本地版\\projects\\_upstream-wjaigc-restore\\src\\lib\\skill-runtime\\step-registry.ts:742:16\n' +
+      '    at executeDurableAgentDownstreamOperation (J:\\无界本地版\\projects\\_upstream-wjaigc-restore\\src\\lib\\agent-runtime\\downstream-operations.ts:294:22)\n' +
+      '    at complianceAudit (J:\\无界本地版\\projects\\_upstream-wjaigc-restore\\src\\lib\\skill-runtime\\step-registry.ts:735:26)\n' +
+      '    at Object.executeStep (J:\\无界本地版\\projects\\_upstream-wjaigc-restore\\src\\lib\\skill-runtime\\service.ts:928:16)\n' +
+      '    at executeDurableAgentDownstreamOperation (J:\\无界本地版\\projects\\_upstream-wjaigc-restore\\src\\lib\\agent-runtime\\downstream-operations.ts:294:22)\n' +
+      '    at J:\\无界本地版\\projects\\_upstream-wjaigc-restore\\src\\lib\\skill-runtime\\executor.ts:438:26\n' +
+      '    at async Promise.allSettled (index 1)',
+    retryable: true,
+    providerStatus: 500,
+    requestId: 'provider-source-b-1'
+  }
+}
+
+stderr | src/__tests__/integration/skill-platform-compliance-concurrency-postgres.test.ts > platform compliance accounting on isolated PostgreSQL > recovers a report persistence failure without repeating completed vision calls
+[skill-runtime] step execution failed {
+  runId: '18aa2660-5c87-409d-89d4-d9ff5694358b',
+  stepId: 'audit-image:db80a422bfc63ed1',
+  generation: 0,
+  errorName: 'error',
+  errorCode: 'P0001',
+  message: 'controlled report persistence failure',
+  stack: 'error: controlled report persistence failure\n' +
+    '    at J:\\无界本地版\\projects\\_upstream-wjaigc-restore\\node_modules\\pg\\lib\\client.js:588:17\n' +
+    '    at processTicksAndRejections (node:internal/process/task_queues:103:5)\n' +
+    '    at PostgresAssetStorageTransaction.insertVersion (J:\\无界本地版\\projects\\_upstream-wjaigc-restore\\src\\lib\\asset-core\\storage.ts:400:5)\n' +
+    '    at J:\\无界本地版\\projects\\_upstream-wjaigc-restore\\src\\lib\\asset-core\\service.ts:440:9\n' +
+    '    at PostgresAssetStorage.runTransaction (J:\\无界本地版\\projects\\_upstream-wjaigc-restore\\src\\lib\\asset-core\\storage.ts:795:22)\n' +
+    '    at AssetService.createAssetVersion (J:\\无界本地版\\projects\\_upstream-wjaigc-restore\\src\\lib\\asset-core\\service.ts:359:13)\n' +
+    '    at persistComplianceReportAsset (J:\\无界本地版\\projects\\_upstream-wjaigc-restore\\src\\lib\\platform-compliance\\report-asset.ts:133:19)\n' +
+    '    at persistReportAsset (J:\\无界本地版\\projects\\_upstream-wjaigc-restore\\src\\lib\\skill-runtime\\step-registry.ts:610:23)\n' +
+    '    at complianceAudit (J:\\无界本地版\\projects\\_upstream-wjaigc-restore\\src\\lib\\skill-runtime\\step-registry.ts:758:23)\n' +
+    '    at Object.executeStep (J:\\无界本地版\\projects\\_upstream-wjaigc-restore\\src\\lib\\skill-runtime\\service.ts:928:16)'
+}
+
+stderr | src/__tests__/integration/skill-platform-compliance-concurrency-postgres.test.ts > platform compliance accounting on isolated PostgreSQL > races a real paused-step retry with duplicate cancel and settles once
+[skill-runtime] step execution failed {
+  runId: '35b570d0-5739-467f-ad67-356b5021ad31',
+  stepId: 'audit-image:db80a422bfc63ed1',
+  generation: 0,
+  errorName: 'ComplianceAuditVisionFailedError',
+  errorCode: 'COMPLIANCE_AUDIT_VISION_FAILED',
+  message: 'The frozen compliance vision check failed',
+  stack: 'ComplianceAuditVisionFailedError: The frozen compliance vision check failed\n' +
+    '    at persistVisionFailure (J:\\无界本地版\\projects\\_upstream-wjaigc-restore\\src\\lib\\skill-runtime\\step-registry.ts:718:13)\n' +
+    '    at processTicksAndRejections (node:internal/process/task_queues:103:5)\n' +
+    '    at executeDurableAgentDownstreamOperation (J:\\无界本地版\\projects\\_upstream-wjaigc-restore\\src\\lib\\agent-runtime\\downstream-operations.ts:294:22)\n' +
+    '    at complianceAudit (J:\\无界本地版\\projects\\_upstream-wjaigc-restore\\src\\lib\\skill-runtime\\step-registry.ts:735:26)\n' +
+    '    at Object.executeStep (J:\\无界本地版\\projects\\_upstream-wjaigc-restore\\src\\lib\\skill-runtime\\service.ts:928:16)\n' +
+    '    at executeDurableAgentDownstreamOperation (J:\\无界本地版\\projects\\_upstream-wjaigc-restore\\src\\lib\\agent-runtime\\downstream-operations.ts:294:22)\n' +
+    '    at J:\\无界本地版\\projects\\_upstream-wjaigc-restore\\src\\lib\\skill-runtime\\executor.ts:438:26\n' +
+    '    at async Promise.allSettled (index 1)\n' +
+    '    at Object.execute (J:\\无界本地版\\projects\\_upstream-wjaigc-restore\\src\\lib\\skill-runtime\\executor.ts:400:27)\n' +
+    '    at execute (J:\\无界本地版\\projects\\_upstream-wjaigc-restore\\src\\lib\\skill-runtime\\continuation.ts:409:9)',
+  retryable: true,
+  providerStatus: 500,
+  requestId: 'provider-source-b-1',
+  cause: {
+    errorName: 'ComplianceVisionError',
+    errorCode: 'COMPLIANCE_VISION_PROVIDER_UNAVAILABLE',
+    message: 'COMPLIANCE_VISION_PROVIDER_UNAVAILABLE',
+    stack: 'ComplianceVisionError: COMPLIANCE_VISION_PROVIDER_UNAVAILABLE\n' +
+      '    at httpError (J:\\无界本地版\\projects\\_upstream-wjaigc-restore\\src\\lib\\platform-compliance\\vision-client.ts:369:10)\n' +
+      '    at invokeComplianceVision (J:\\无界本地版\\projects\\_upstream-wjaigc-restore\\src\\lib\\platform-compliance\\vision-client.ts:425:11)\n' +
+      '    at processTicksAndRejections (node:internal/process/task_queues:103:5)\n' +
+      '    at J:\\无界本地版\\projects\\_upstream-wjaigc-restore\\src\\lib\\skill-runtime\\step-registry.ts:742:16\n' +
+      '    at executeDurableAgentDownstreamOperation (J:\\无界本地版\\projects\\_upstream-wjaigc-restore\\src\\lib\\agent-runtime\\downstream-operations.ts:294:22)\n' +
+      '    at complianceAudit (J:\\无界本地版\\projects\\_upstream-wjaigc-restore\\src\\lib\\skill-runtime\\step-registry.ts:735:26)\n' +
+      '    at Object.executeStep (J:\\无界本地版\\projects\\_upstream-wjaigc-restore\\src\\lib\\skill-runtime\\service.ts:928:16)\n' +
+      '    at executeDurableAgentDownstreamOperation (J:\\无界本地版\\projects\\_upstream-wjaigc-restore\\src\\lib\\agent-runtime\\downstream-operations.ts:294:22)\n' +
+      '    at J:\\无界本地版\\projects\\_upstream-wjaigc-restore\\src\\lib\\skill-runtime\\executor.ts:438:26\n' +
+      '    at async Promise.allSettled (index 1)',
+    retryable: true,
+    providerStatus: 500,
+    requestId: 'provider-source-b-1'
+  }
+}
+
+stderr | src/__tests__/integration/skill-platform-compliance-concurrency-postgres.test.ts > platform compliance accounting on isolated PostgreSQL > refunds the exact unfinished cost once after a real vision failure is cancelled
+[skill-runtime] step execution failed {
+  runId: 'ab50f3bd-b35e-404c-8b49-7392345820ed',
+  stepId: 'audit-image:db80a422bfc63ed1',
+  generation: 0,
+  errorName: 'ComplianceAuditVisionFailedError',
+  errorCode: 'COMPLIANCE_AUDIT_VISION_FAILED',
+  message: 'The frozen compliance vision check failed',
+  stack: 'ComplianceAuditVisionFailedError: The frozen compliance vision check failed\n' +
+    '    at persistVisionFailure (J:\\无界本地版\\projects\\_upstream-wjaigc-restore\\src\\lib\\skill-runtime\\step-registry.ts:718:13)\n' +
+    '    at processTicksAndRejections (node:internal/process/task_queues:103:5)\n' +
+    '    at executeDurableAgentDownstreamOperation (J:\\无界本地版\\projects\\_upstream-wjaigc-restore\\src\\lib\\agent-runtime\\downstream-operations.ts:294:22)\n' +
+    '    at complianceAudit (J:\\无界本地版\\projects\\_upstream-wjaigc-restore\\src\\lib\\skill-runtime\\step-registry.ts:735:26)\n' +
+    '    at Object.executeStep (J:\\无界本地版\\projects\\_upstream-wjaigc-restore\\src\\lib\\skill-runtime\\service.ts:928:16)\n' +
+    '    at executeDurableAgentDownstreamOperation (J:\\无界本地版\\projects\\_upstream-wjaigc-restore\\src\\lib\\agent-runtime\\downstream-operations.ts:294:22)\n' +
+    '    at J:\\无界本地版\\projects\\_upstream-wjaigc-restore\\src\\lib\\skill-runtime\\executor.ts:438:26\n' +
+    '    at async Promise.allSettled (index 1)\n' +
+    '    at Object.execute (J:\\无界本地版\\projects\\_upstream-wjaigc-restore\\src\\lib\\skill-runtime\\executor.ts:400:27)\n' +
+    '    at execute (J:\\无界本地版\\projects\\_upstream-wjaigc-restore\\src\\lib\\skill-runtime\\continuation.ts:409:9)',
+  retryable: true,
+  providerStatus: 500,
+  requestId: 'provider-source-b-1',
+  cause: {
+    errorName: 'ComplianceVisionError',
+    errorCode: 'COMPLIANCE_VISION_PROVIDER_UNAVAILABLE',
+    message: 'COMPLIANCE_VISION_PROVIDER_UNAVAILABLE',
+    stack: 'ComplianceVisionError: COMPLIANCE_VISION_PROVIDER_UNAVAILABLE\n' +
+      '    at httpError (J:\\无界本地版\\projects\\_upstream-wjaigc-restore\\src\\lib\\platform-compliance\\vision-client.ts:369:10)\n' +
+      '    at invokeComplianceVision (J:\\无界本地版\\projects\\_upstream-wjaigc-restore\\src\\lib\\platform-compliance\\vision-client.ts:425:11)\n' +
+      '    at processTicksAndRejections (node:internal/process/task_queues:103:5)\n' +
+      '    at J:\\无界本地版\\projects\\_upstream-wjaigc-restore\\src\\lib\\skill-runtime\\step-registry.ts:742:16\n' +
+      '    at executeDurableAgentDownstreamOperation (J:\\无界本地版\\projects\\_upstream-wjaigc-restore\\src\\lib\\agent-runtime\\downstream-operations.ts:294:22)\n' +
+      '    at complianceAudit (J:\\无界本地版\\projects\\_upstream-wjaigc-restore\\src\\lib\\skill-runtime\\step-registry.ts:735:26)\n' +
+      '    at Object.executeStep (J:\\无界本地版\\projects\\_upstream-wjaigc-restore\\src\\lib\\skill-runtime\\service.ts:928:16)\n' +
+      '    at executeDurableAgentDownstreamOperation (J:\\无界本地版\\projects\\_upstream-wjaigc-restore\\src\\lib\\agent-runtime\\downstream-operations.ts:294:22)\n' +
+      '    at J:\\无界本地版\\projects\\_upstream-wjaigc-restore\\src\\lib\\skill-runtime\\executor.ts:438:26\n' +
+      '    at async Promise.allSettled (index 1)',
+    retryable: true,
+    providerStatus: 500,
+    requestId: 'provider-source-b-1'
+  }
+}
+
+stderr | tests/integration/stage-2-task-projection-postgres.test.ts > Stage 2 authoritative task projection PostgreSQL > keeps reference assets immutable and reuses one result version across workspaces
+[s3-storage] S3 not configured: missing COZE_BUCKET_ENDPOINT_URL or COZE_BUCKET_NAME
+
+warning: in the working copy of 'source.txt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'source.txt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'source.txt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'source.txt', LF will be replaced by CRLF the next time Git touches it
+stderr | tests/integration/media-gateway-lifecycle-postgres.test.ts > media gateway lifecycle on PostgreSQL > fails closed when the database is unavailable
+{ code: 'DB_SQL_QUERY_FAILED' }
+
+stderr | tests/integration/media-gateway-lifecycle-postgres.test.ts > media gateway lifecycle on PostgreSQL > fails closed when the database is unavailable
+{ code: 'DB_SQL_QUERY_FAILED' }
+
+stderr | tests/integration/media-gateway-lifecycle-postgres.test.ts > media gateway lifecycle on PostgreSQL > fails closed when the database is unavailable
+[db-storage] dbAddAuditLog error: Error: connect ECONNREFUSED 127.0.0.1:1
+    at J:\无界本地版\projects\_upstream-wjaigc-restore\node_modules\pg-pool\index.js:45:11
+    at processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at execSql (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\db-client.ts:67:22)
+    at dbAddAuditLog (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\db-storage.ts:2131:5)
+    at auditGatewayEvent (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\media-gateway\audit.ts:76:23)
+    at auditedResponse (J:\无界本地版\projects\_upstream-wjaigc-restore\src\app\api\gateway\v1\tasks\[taskId]\route.ts:49:5)
+    at J:\无界本地版\projects\_upstream-wjaigc-restore\tests\integration\media-gateway-lifecycle-postgres.test.ts:248:24
+    at file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/@vitest/runner/dist/chunk-hooks.js:752:20 {
+  errno: -4078,
+  code: 'ECONNREFUSED',
+  syscall: 'connect',
+  address: '127.0.0.1',
+  port: 1
+}
+
+stderr | src/__tests__/api/agent-edit-production-recovery.test.ts > Agent route default-adapter production recovery > fails closed when adopted terminal replay identity cannot be resolved
+[agent-edit] POST error: AgentReplayStateUnavailableError: Agent replay state is temporarily unavailable
+    at resolveAdoptedReplayRunId (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\agent-edit-execution-service.ts:117:11)
+    at processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at handleAgentEditRequest (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\agent-edit-execution-service.ts:517:23)
+    at J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\api\agent-edit-production-recovery.test.ts:776:22
+    at file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/@vitest/runner/dist/chunk-hooks.js:752:20 {
+  code: 'AGENT_REPLAY_STATE_UNAVAILABLE',
+  status: 503,
+  [cause]: Error: controlled event store outage
+      at J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\api\agent-edit-production-recovery.test.ts:374:39
+      at mockCall (file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/@vitest/spy/dist/index.js:96:15)
+      at spy (file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/tinyspy/dist/index.js:47:80)
+      at resolveAdoptedReplayRunId (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\agent-edit-execution-service.ts:111:20)
+      at handleAgentEditRequest (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\agent-edit-execution-service.ts:517:29)
+      at processTicksAndRejections (node:internal/process/task_queues:103:5)
+      at J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\api\agent-edit-production-recovery.test.ts:776:22
+      at file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/@vitest/runner/dist/chunk-hooks.js:752:20
+}
+
+stderr | src/__tests__/api/agent-edit-production-recovery.test.ts > Agent route default-adapter production recovery > does not settle or refund a reused processing task when replay identity lookup fails
+[agent-edit] POST error: AgentReplayStateUnavailableError: Agent replay state is temporarily unavailable
+    at resolveAdoptedReplayRunId (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\agent-edit-execution-service.ts:117:11)
+    at processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at handleAgentEditRequest (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\agent-edit-execution-service.ts:826:11)
+    at J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\api\agent-edit-production-recovery.test.ts:810:22
+    at file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/@vitest/runner/dist/chunk-hooks.js:752:20 {
+  code: 'AGENT_REPLAY_STATE_UNAVAILABLE',
+  status: 503,
+  [cause]: Error: controlled event store outage
+      at J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\api\agent-edit-production-recovery.test.ts:374:39
+      at mockCall (file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/@vitest/spy/dist/index.js:96:15)
+      at spy (file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/tinyspy/dist/index.js:47:80)
+      at resolveAdoptedReplayRunId (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\agent-edit-execution-service.ts:111:20)
+      at handleAgentEditRequest (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\agent-edit-execution-service.ts:826:17)
+      at processTicksAndRejections (node:internal/process/task_queues:103:5)
+      at J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\api\agent-edit-production-recovery.test.ts:810:22
+      at file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/@vitest/runner/dist/chunk-hooks.js:752:20
+}
+
+stderr | src/__tests__/api/agent-edit-production-recovery.test.ts > Agent route default-adapter production recovery > retains both accepted submitOnly children and reconciles them without resubmit
+[agent-edit] Tool generate_image execution failed: Error: simulated crash after second acceptance
+    at dispatchFetch (J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\api\agent-edit-production-recovery.test.ts:562:15)
+    at processTicksAndRejections (node:internal/process/task_queues:103:5)
+[agent-edit] Error: simulated crash after second acceptance
+
+stderr | src/__tests__/api/agent-edit-production-recovery.test.ts > Agent route default-adapter production recovery > retains both accepted submitOnly children and reconciles them without resubmit
+[agent-edit] admitted task execution failed: Error: simulated crash after second acceptance
+    at dispatchFetch (J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\api\agent-edit-production-recovery.test.ts:562:15)
+    at processTicksAndRejections (node:internal/process/task_queues:103:5)
+
+stderr | src/__tests__/api/agent-edit-production-recovery.test.ts > Agent route default-adapter production recovery > uses default submission_unknown settlement and refunds the parent once
+[agent-edit] Error: Agent downstream submission state is unknown; manual reconciliation is required
+
+stderr | src/__tests__/api/agent-edit-production-recovery.test.ts > Agent route default-adapter production recovery > uses default submission_unknown settlement and refunds the parent once
+[agent-edit] admitted task execution failed: AgentDownstreamSubmissionUnknownError: Agent downstream submission state is unknown; manual reconciliation is required
+    at executeDurableAgentDownstreamOperation (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\downstream-operations.ts:311:13)
+    at llmCall (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\agent-edit-execution-service.ts:1052:20)
+    at J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\api\agent-edit-production-recovery.test.ts:163:7 {
+  code: 'AGENT_DOWNSTREAM_SUBMISSION_UNKNOWN',
+  [cause]: Error: connection lost after chat provider submit
+      at dispatchFetch (J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\api\agent-edit-production-recovery.test.ts:575:11)
+      at mockCall (file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/@vitest/spy/dist/index.js:96:15)
+      at dispatchFetch (file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/tinyspy/dist/index.js:47:80)
+      at fetchWithV1Retry (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\api-helpers.ts:114:26)
+      at J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\agent-edit-execution-service.ts:1064:15
+      at runWithAbortSignalTimeout (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\abort-signal.ts:20:18)
+      at J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\agent-edit-execution-service.ts:1063:32
+      at executeDurableAgentDownstreamOperation (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\downstream-operations.ts:294:22)
+      at llmCall (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\agent-edit-execution-service.ts:1052:20)
+      at J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\api\agent-edit-production-recovery.test.ts:163:7
+}
+
+stderr | src/__tests__/api/agent-edit-production-recovery.test.ts > Agent route default-adapter production recovery > persists remove_background acceptance and recovers by exact authenticated poll without resubmit
+[agent-edit] Tool remove_background execution failed: Error: simulated crash after second acceptance
+    at dispatchFetch (J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\api\agent-edit-production-recovery.test.ts:562:15)
+[agent-edit] Error: simulated crash after second acceptance
+
+stderr | src/__tests__/api/agent-edit-production-recovery.test.ts > Agent route default-adapter production recovery > persists remove_background acceptance and recovers by exact authenticated poll without resubmit
+[agent-edit] admitted task execution failed: Error: simulated crash after second acceptance
+    at dispatchFetch (J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\api\agent-edit-production-recovery.test.ts:562:15)
+
+stderr | src/__tests__/api/agent-edit-production-recovery.test.ts > Agent route default-adapter production recovery > keeps direct async image_edit accepted after poll failure and reconciles without resubmit
+[agent-edit] Image edit step 1 failed: Error: simulated direct image edit poll timeout after acceptance
+    at dispatchFetch (J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\api\agent-edit-production-recovery.test.ts:593:15)
+    at mockCall (file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/@vitest/spy/dist/index.js:96:15)
+    at dispatchFetch (file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/tinyspy/dist/index.js:47:80)
+    at fetchWithV1Retry (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\api-helpers.ts:114:26)
+    at J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\agent-edit-execution-service.ts:2128:13
+    at runWithAbortSignalTimeout (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\abort-signal.ts:20:18)
+    at performImageEdit (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\agent-edit-execution-service.ts:2127:34)
+    at executeDurableAgentDownstreamOperation (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\downstream-operations.ts:294:22)
+    at executeAgentEditTask (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\agent-edit-execution-service.ts:1165:34)
+    at executeDurableAgentDownstreamOperation (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\downstream-operations.ts:294:22)
+[agent-edit] Error: simulated direct image edit poll timeout after acceptance
+
+stderr | src/__tests__/api/agent-edit-production-recovery.test.ts > Agent route default-adapter production recovery > keeps direct async image_edit accepted after poll failure and reconciles without resubmit
+[agent-edit] admitted task execution failed: Error: simulated direct image edit poll timeout after acceptance
+    at dispatchFetch (J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\api\agent-edit-production-recovery.test.ts:593:15)
+    at mockCall (file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/@vitest/spy/dist/index.js:96:15)
+    at dispatchFetch (file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/tinyspy/dist/index.js:47:80)
+    at fetchWithV1Retry (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\api-helpers.ts:114:26)
+    at J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\agent-edit-execution-service.ts:2128:13
+    at runWithAbortSignalTimeout (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\abort-signal.ts:20:18)
+    at performImageEdit (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\agent-edit-execution-service.ts:2127:34)
+    at executeDurableAgentDownstreamOperation (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\downstream-operations.ts:294:22)
+    at executeAgentEditTask (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\agent-edit-execution-service.ts:1165:34)
+    at executeDurableAgentDownstreamOperation (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\downstream-operations.ts:294:22)
+
+stderr | src/__tests__/api/agent-edit-production-recovery.test.ts > Agent route default-adapter production recovery > durably terminalizes an accepted direct async image_edit rejection during concurrent recovery
+[agent-edit] Image edit step 1 failed: Error: simulated direct image edit poll timeout after acceptance
+    at dispatchFetch (J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\api\agent-edit-production-recovery.test.ts:593:15)
+    at mockCall (file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/@vitest/spy/dist/index.js:96:15)
+    at dispatchFetch (file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/tinyspy/dist/index.js:47:80)
+    at fetchWithV1Retry (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\api-helpers.ts:114:26)
+    at J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\agent-edit-execution-service.ts:2128:13
+    at runWithAbortSignalTimeout (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\abort-signal.ts:20:18)
+    at performImageEdit (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\agent-edit-execution-service.ts:2127:34)
+    at executeDurableAgentDownstreamOperation (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\downstream-operations.ts:294:22)
+    at executeAgentEditTask (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\agent-edit-execution-service.ts:1165:34)
+    at executeDurableAgentDownstreamOperation (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\downstream-operations.ts:294:22)
+[agent-edit] Error: simulated direct image edit poll timeout after acceptance
+
+stderr | src/__tests__/api/agent-edit-production-recovery.test.ts > Agent route default-adapter production recovery > durably terminalizes an accepted direct async image_edit rejection during concurrent recovery
+[agent-edit] admitted task execution failed: Error: simulated direct image edit poll timeout after acceptance
+    at dispatchFetch (J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\api\agent-edit-production-recovery.test.ts:593:15)
+    at mockCall (file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/@vitest/spy/dist/index.js:96:15)
+    at dispatchFetch (file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/tinyspy/dist/index.js:47:80)
+    at fetchWithV1Retry (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\api-helpers.ts:114:26)
+    at J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\agent-edit-execution-service.ts:2128:13
+    at runWithAbortSignalTimeout (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\abort-signal.ts:20:18)
+    at performImageEdit (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\agent-edit-execution-service.ts:2127:34)
+    at executeDurableAgentDownstreamOperation (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\downstream-operations.ts:294:22)
+    at executeAgentEditTask (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\agent-edit-execution-service.ts:1165:34)
+    at executeDurableAgentDownstreamOperation (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\downstream-operations.ts:294:22)
+
+stderr | src/__tests__/api/agent-edit-production-recovery.test.ts > Agent route default-adapter production recovery > durably terminalizes an accepted direct async image_edit rejection during concurrent recovery
+[agent-edit] Image edit step 1 failed: AgentDownstreamProviderRejectedError: controlled accepted image edit rejection
+    at knownProviderTaskRejection (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\agent-edit-execution-service.ts:160:10)
+    at reconcileAcceptedAgentProviderTask (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\agent-edit-execution-service.ts:298:13)
+    at Object.reconcile (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\agent-edit-execution-service.ts:1193:29)
+    at executeDurableAgentDownstreamOperation (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\downstream-operations.ts:278:24)
+    at executeAgentEditTask (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\agent-edit-execution-service.ts:1165:34)
+    at executeDurableAgentDownstreamOperation (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\downstream-operations.ts:294:22)
+    at Object.executeAdoption (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\same-task-adapter.ts:436:25)
+    at Object.execute (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\surface-dispatch.ts:78:22) {
+  providerStatus: undefined,
+  code: 'AGENT_DOWNSTREAM_PROVIDER_REJECTED',
+  providerCode: 'IMAGE_EDIT_REJECTED'
+}
+[agent-edit] Error: controlled accepted image edit rejection
+
+stderr | src/__tests__/api/agent-edit-production-recovery.test.ts > Agent route default-adapter production recovery > durably terminalizes an accepted direct async image_edit rejection during concurrent recovery
+[agent-edit] admitted task execution failed: AgentDownstreamProviderRejectedError: controlled accepted image edit rejection
+    at knownProviderTaskRejection (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\agent-edit-execution-service.ts:160:10)
+    at reconcileAcceptedAgentProviderTask (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\agent-edit-execution-service.ts:298:13)
+    at Object.reconcile (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\agent-edit-execution-service.ts:1193:29)
+    at executeDurableAgentDownstreamOperation (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\downstream-operations.ts:278:24)
+    at executeAgentEditTask (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\agent-edit-execution-service.ts:1165:34)
+    at executeDurableAgentDownstreamOperation (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\downstream-operations.ts:294:22)
+    at Object.executeAdoption (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\same-task-adapter.ts:436:25)
+    at Object.execute (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\surface-dispatch.ts:78:22) {
+  providerStatus: undefined,
+  code: 'AGENT_DOWNSTREAM_PROVIDER_REJECTED',
+  providerCode: 'IMAGE_EDIT_REJECTED'
+}
+
+stderr | src/__tests__/api/agent-edit-production-recovery.test.ts > Agent route default-adapter production recovery > retains accepted image_edit after a retryable poll error and completes by exact later poll
+[agent-edit] Image edit step 1 failed: Error: simulated direct image edit poll timeout after acceptance
+    at dispatchFetch (J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\api\agent-edit-production-recovery.test.ts:593:15)
+    at mockCall (file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/@vitest/spy/dist/index.js:96:15)
+    at dispatchFetch (file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/tinyspy/dist/index.js:47:80)
+    at fetchWithV1Retry (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\api-helpers.ts:114:26)
+    at J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\agent-edit-execution-service.ts:2128:13
+    at runWithAbortSignalTimeout (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\abort-signal.ts:20:18)
+    at performImageEdit (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\agent-edit-execution-service.ts:2127:34)
+    at executeDurableAgentDownstreamOperation (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\downstream-operations.ts:294:22)
+    at executeAgentEditTask (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\agent-edit-execution-service.ts:1165:34)
+    at executeDurableAgentDownstreamOperation (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\downstream-operations.ts:294:22)
+[agent-edit] Error: simulated direct image edit poll timeout after acceptance
+
+stderr | src/__tests__/api/agent-edit-production-recovery.test.ts > Agent route default-adapter production recovery > retains accepted image_edit after a retryable poll error and completes by exact later poll
+[agent-edit] admitted task execution failed: Error: simulated direct image edit poll timeout after acceptance
+    at dispatchFetch (J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\api\agent-edit-production-recovery.test.ts:593:15)
+    at mockCall (file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/@vitest/spy/dist/index.js:96:15)
+    at dispatchFetch (file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/tinyspy/dist/index.js:47:80)
+    at fetchWithV1Retry (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\api-helpers.ts:114:26)
+    at J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\agent-edit-execution-service.ts:2128:13
+    at runWithAbortSignalTimeout (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\abort-signal.ts:20:18)
+    at performImageEdit (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\agent-edit-execution-service.ts:2127:34)
+    at executeDurableAgentDownstreamOperation (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\downstream-operations.ts:294:22)
+    at executeAgentEditTask (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\agent-edit-execution-service.ts:1165:34)
+    at executeDurableAgentDownstreamOperation (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\downstream-operations.ts:294:22)
+
+stderr | src/__tests__/api/agent-edit-production-recovery.test.ts > Agent route default-adapter production recovery > retains accepted image_edit after a retryable poll error and completes by exact later poll
+[agent-edit] Image edit step 1 failed: Error: controlled transient provider poll failure
+    at retryableProviderTaskPollError (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\agent-edit-execution-service.ts:167:10)
+    at pollAcceptedAgentGeneration (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\agent-edit-execution-service.ts:197:15)
+    at Object.reconcile (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\agent-edit-execution-service.ts:1193:29)
+    at executeDurableAgentDownstreamOperation (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\downstream-operations.ts:278:24)
+    at executeAgentEditTask (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\agent-edit-execution-service.ts:1165:34)
+    at executeDurableAgentDownstreamOperation (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\downstream-operations.ts:294:22)
+    at Object.executeAdoption (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\same-task-adapter.ts:436:25)
+    at Object.execute (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\surface-dispatch.ts:78:22)
+[agent-edit] Error: controlled transient provider poll failure
+
+stderr | src/__tests__/api/agent-edit-production-recovery.test.ts > Agent route default-adapter production recovery > retains accepted image_edit after a retryable poll error and completes by exact later poll
+[agent-edit] admitted task execution failed: Error: controlled transient provider poll failure
+    at retryableProviderTaskPollError (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\agent-edit-execution-service.ts:167:10)
+    at pollAcceptedAgentGeneration (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\agent-edit-execution-service.ts:197:15)
+    at Object.reconcile (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\agent-edit-execution-service.ts:1193:29)
+    at executeDurableAgentDownstreamOperation (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\downstream-operations.ts:278:24)
+    at executeAgentEditTask (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\agent-edit-execution-service.ts:1165:34)
+    at executeDurableAgentDownstreamOperation (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\downstream-operations.ts:294:22)
+    at Object.executeAdoption (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\same-task-adapter.ts:436:25)
+    at Object.execute (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\surface-dispatch.ts:78:22)
+
+stderr | src/__tests__/api/agent-edit-production-recovery.test.ts > Agent route default-adapter production recovery > retains accepted image_edit when the initial direct provider poll is retryable
+[agent-edit] Image edit step 1 failed: Error: controlled transient direct provider poll failure
+    at retryableProviderTaskPollError (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\agent-edit-execution-service.ts:167:10)
+    at performImageEdit (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\agent-edit-execution-service.ts:2170:23)
+    at executeDurableAgentDownstreamOperation (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\downstream-operations.ts:294:22)
+    at executeAgentEditTask (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\agent-edit-execution-service.ts:1165:34)
+    at executeDurableAgentDownstreamOperation (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\downstream-operations.ts:294:22)
+    at Object.executeAdoption (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\same-task-adapter.ts:436:25)
+    at Object.execute (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\surface-dispatch.ts:78:22)
+[agent-edit] Error: controlled transient direct provider poll failure
+
+stderr | src/__tests__/api/agent-edit-production-recovery.test.ts > Agent route default-adapter production recovery > retains accepted image_edit when the initial direct provider poll is retryable
+[agent-edit] admitted task execution failed: Error: controlled transient direct provider poll failure
+    at retryableProviderTaskPollError (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\agent-edit-execution-service.ts:167:10)
+    at performImageEdit (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\agent-edit-execution-service.ts:2170:23)
+    at executeDurableAgentDownstreamOperation (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\downstream-operations.ts:294:22)
+    at executeAgentEditTask (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\agent-edit-execution-service.ts:1165:34)
+    at executeDurableAgentDownstreamOperation (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\downstream-operations.ts:294:22)
+    at Object.executeAdoption (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\same-task-adapter.ts:436:25)
+    at Object.execute (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\surface-dispatch.ts:78:22)
+
+stderr | src/__tests__/api/agent-edit-production-recovery.test.ts > Agent route default-adapter production recovery > durably terminalizes an accepted video provider rejection without another submit or poll
+[agent-edit] Tool generate_video execution failed: Error: simulated crash after second acceptance
+    at dispatchFetch (J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\api\agent-edit-production-recovery.test.ts:562:15)
+[agent-edit] Error: simulated crash after second acceptance
+
+stderr | src/__tests__/api/agent-edit-production-recovery.test.ts > Agent route default-adapter production recovery > durably terminalizes an accepted video provider rejection without another submit or poll
+[agent-edit] admitted task execution failed: Error: simulated crash after second acceptance
+    at dispatchFetch (J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\api\agent-edit-production-recovery.test.ts:562:15)
+
+stderr | src/__tests__/api/agent-edit-production-recovery.test.ts > Agent route default-adapter production recovery > durably terminalizes an accepted video provider rejection without another submit or poll
+[agent-edit] Tool generate_video execution failed: AgentDownstreamProviderRejectedError: controlled video provider rejection
+    at knownProviderTaskRejection (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\agent-edit-execution-service.ts:160:10)
+    at pollAcceptedAgentVideo (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\agent-edit-execution-service.ts:234:13)
+    at executeDurableAgentDownstreamOperation (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\downstream-operations.ts:278:24)
+    at executeAgentEditTask (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\agent-edit-execution-service.ts:1407:32)
+    at executeDurableAgentDownstreamOperation (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\downstream-operations.ts:294:22)
+    at Object.executeAdoption (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\same-task-adapter.ts:436:25)
+    at Object.execute (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\surface-dispatch.ts:78:22) {
+  providerStatus: undefined,
+  code: 'AGENT_DOWNSTREAM_PROVIDER_REJECTED',
+  providerCode: undefined
+}
+[agent-edit] Error: controlled video provider rejection
+
+stderr | src/__tests__/api/agent-edit-production-recovery.test.ts > Agent route default-adapter production recovery > durably terminalizes an accepted video provider rejection without another submit or poll
+[agent-edit] admitted task execution failed: AgentDownstreamProviderRejectedError: controlled video provider rejection
+    at knownProviderTaskRejection (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\agent-edit-execution-service.ts:160:10)
+    at pollAcceptedAgentVideo (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\agent-edit-execution-service.ts:234:13)
+    at executeDurableAgentDownstreamOperation (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\downstream-operations.ts:278:24)
+    at executeAgentEditTask (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\agent-edit-execution-service.ts:1407:32)
+    at executeDurableAgentDownstreamOperation (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\downstream-operations.ts:294:22)
+    at Object.executeAdoption (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\same-task-adapter.ts:436:25)
+    at Object.execute (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\surface-dispatch.ts:78:22) {
+  providerStatus: undefined,
+  code: 'AGENT_DOWNSTREAM_PROVIDER_REJECTED',
+  providerCode: undefined
+}
+
+stderr | src/__tests__/api/agent-edit-production-recovery.test.ts > Agent route default-adapter production recovery > retains accepted video after a retryable poll error and completes by exact later poll
+[agent-edit] Tool generate_video execution failed: Error: controlled transient provider poll failure
+    at retryableProviderTaskPollError (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\agent-edit-execution-service.ts:167:10)
+    at pollAcceptedAgentVideo (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\agent-edit-execution-service.ts:232:15)
+    at executeDurableAgentDownstreamOperation (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\downstream-operations.ts:294:22)
+    at executeAgentEditTask (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\agent-edit-execution-service.ts:1407:32)
+    at executeDurableAgentDownstreamOperation (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\downstream-operations.ts:294:22)
+    at Object.executeAdoption (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\same-task-adapter.ts:436:25)
+    at Object.execute (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\surface-dispatch.ts:78:22)
+[agent-edit] Error: controlled transient provider poll failure
+
+stderr | src/__tests__/api/agent-edit-production-recovery.test.ts > Agent route default-adapter production recovery > retains accepted video after a retryable poll error and completes by exact later poll
+[agent-edit] admitted task execution failed: Error: controlled transient provider poll failure
+    at retryableProviderTaskPollError (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\agent-edit-execution-service.ts:167:10)
+    at pollAcceptedAgentVideo (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\agent-edit-execution-service.ts:232:15)
+    at executeDurableAgentDownstreamOperation (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\downstream-operations.ts:294:22)
+    at executeAgentEditTask (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\agent-edit-execution-service.ts:1407:32)
+    at executeDurableAgentDownstreamOperation (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\downstream-operations.ts:294:22)
+    at Object.executeAdoption (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\same-task-adapter.ts:436:25)
+    at Object.execute (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\surface-dispatch.ts:78:22)
+
+stderr | src/__tests__/api/agent-edit-production-recovery.test.ts > Agent route default-adapter production recovery > fails closed when acceptance persistence fails after an async image task ID is returned
+[agent-edit] Image edit step 1 failed: AgentDownstreamSubmissionUnknownError: Agent downstream submission state is unknown; manual reconciliation is required
+    at executeDurableAgentDownstreamOperation (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\downstream-operations.ts:311:13)
+    at executeAgentEditTask (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\agent-edit-execution-service.ts:1165:34)
+    ... 2 lines matching cause stack trace ...
+    at Object.execute (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\surface-dispatch.ts:78:22) {
+  code: 'AGENT_DOWNSTREAM_SUBMISSION_UNKNOWN',
+  [cause]: Error: simulated acceptance persistence failure
+      at Object.<anonymous> (J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\api\agent-edit-production-recovery.test.ts:420:13)
+      at Object.mockCall (file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/@vitest/spy/dist/index.js:96:15)
+      at Object.spy [as markAccepted] (file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/tinyspy/dist/index.js:47:80)
+      at recordAccepted (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\downstream-operations.ts:237:26)
+      at performImageEdit (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\agent-edit-execution-service.ts:2117:15)
+      at executeDurableAgentDownstreamOperation (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\downstream-operations.ts:294:22)
+      at executeAgentEditTask (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\agent-edit-execution-service.ts:1165:34)
+      at executeDurableAgentDownstreamOperation (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\downstream-operations.ts:294:22)
+      at Object.executeAdoption (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\same-task-adapter.ts:436:25)
+      at Object.execute (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\surface-dispatch.ts:78:22)
+}
+[agent-edit] Error: Agent downstream submission state is unknown; manual reconciliation is required
+
+stderr | src/__tests__/api/agent-edit-production-recovery.test.ts > Agent route default-adapter production recovery > fails closed when acceptance persistence fails after an async image task ID is returned
+[agent-edit] admitted task execution failed: AgentDownstreamSubmissionUnknownError: Agent downstream submission state is unknown; manual reconciliation is required
+    at executeDurableAgentDownstreamOperation (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\downstream-operations.ts:311:13)
+    at executeAgentEditTask (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\agent-edit-execution-service.ts:1165:34)
+    ... 2 lines matching cause stack trace ...
+    at Object.execute (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\surface-dispatch.ts:78:22) {
+  code: 'AGENT_DOWNSTREAM_SUBMISSION_UNKNOWN',
+  [cause]: Error: simulated acceptance persistence failure
+      at Object.<anonymous> (J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\api\agent-edit-production-recovery.test.ts:420:13)
+      at Object.mockCall (file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/@vitest/spy/dist/index.js:96:15)
+      at Object.spy [as markAccepted] (file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/tinyspy/dist/index.js:47:80)
+      at recordAccepted (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\downstream-operations.ts:237:26)
+      at performImageEdit (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\agent-edit-execution-service.ts:2117:15)
+      at executeDurableAgentDownstreamOperation (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\downstream-operations.ts:294:22)
+      at executeAgentEditTask (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\agent-edit-execution-service.ts:1165:34)
+      at executeDurableAgentDownstreamOperation (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\downstream-operations.ts:294:22)
+      at Object.executeAdoption (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\same-task-adapter.ts:436:25)
+      at Object.execute (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\surface-dispatch.ts:78:22)
+}
+
+stderr | src/__tests__/api/agent-edit-production-recovery.test.ts > Agent route default-adapter production recovery > fails closed after synchronous image_edit loses the connection after send
+[agent-edit] Image edit step 1 failed: AgentDownstreamSubmissionUnknownError: Agent downstream submission state is unknown; manual reconciliation is required
+    at executeDurableAgentDownstreamOperation (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\downstream-operations.ts:311:13)
+    at executeAgentEditTask (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\agent-edit-execution-service.ts:1165:34)
+    at executeDurableAgentDownstreamOperation (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\downstream-operations.ts:294:22)
+    at Object.executeAdoption (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\same-task-adapter.ts:436:25)
+    at Object.execute (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\surface-dispatch.ts:78:22) {
+  code: 'AGENT_DOWNSTREAM_SUBMISSION_UNKNOWN',
+  [cause]: Error: connection lost after synchronous image edit submit
+      at dispatchFetch (J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\api\agent-edit-production-recovery.test.ts:615:13)
+      at mockCall (file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/@vitest/spy/dist/index.js:96:15)
+      at dispatchFetch (file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/tinyspy/dist/index.js:47:80)
+      at fetchWithV1Retry (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\api-helpers.ts:114:26)
+      at submitAgentImageProviderRequest (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\provider-submission.ts:37:10)
+      at J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\agent-edit-execution-service.ts:1912:9
+      at runWithAbortSignalTimeout (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\abort-signal.ts:20:18)
+      at performImageEdit (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\agent-edit-execution-service.ts:1911:26)
+      at executeDurableAgentDownstreamOperation (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\downstream-operations.ts:294:22)
+      at executeAgentEditTask (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\agent-edit-execution-service.ts:1165:34)
+}
+[agent-edit] Error: Agent downstream submission state is unknown; manual reconciliation is required
+
+stderr | src/__tests__/api/agent-edit-production-recovery.test.ts > Agent route default-adapter production recovery > fails closed after synchronous image_edit loses the connection after send
+[agent-edit] admitted task execution failed: AgentDownstreamSubmissionUnknownError: Agent downstream submission state is unknown; manual reconciliation is required
+    at executeDurableAgentDownstreamOperation (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\downstream-operations.ts:311:13)
+    at executeAgentEditTask (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\agent-edit-execution-service.ts:1165:34)
+    at executeDurableAgentDownstreamOperation (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\downstream-operations.ts:294:22)
+    at Object.executeAdoption (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\same-task-adapter.ts:436:25)
+    at Object.execute (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\surface-dispatch.ts:78:22) {
+  code: 'AGENT_DOWNSTREAM_SUBMISSION_UNKNOWN',
+  [cause]: Error: connection lost after synchronous image edit submit
+      at dispatchFetch (J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\api\agent-edit-production-recovery.test.ts:615:13)
+      at mockCall (file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/@vitest/spy/dist/index.js:96:15)
+      at dispatchFetch (file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/tinyspy/dist/index.js:47:80)
+      at fetchWithV1Retry (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\api-helpers.ts:114:26)
+      at submitAgentImageProviderRequest (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\provider-submission.ts:37:10)
+      at J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\agent-edit-execution-service.ts:1912:9
+      at runWithAbortSignalTimeout (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\abort-signal.ts:20:18)
+      at performImageEdit (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\agent-edit-execution-service.ts:1911:26)
+      at executeDurableAgentDownstreamOperation (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\downstream-operations.ts:294:22)
+      at executeAgentEditTask (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\agent-edit-execution-service.ts:1165:34)
+}
+
+stderr | src/__tests__/api/agent-edit-production-recovery.test.ts > Agent route default-adapter production recovery > fails closed when the real Agent loop sees chat connection loss after send
+[agent-engine] Round 1: LLM call failed: Agent downstream submission state is unknown; manual reconciliation is required
+
+stderr | src/__tests__/api/agent-edit-production-recovery.test.ts > Agent route default-adapter production recovery > fails closed when the real Agent loop sees chat connection loss after send
+[agent-edit] Error: Agent downstream submission state is unknown; manual reconciliation is required
+
+stderr | src/__tests__/api/agent-edit-production-recovery.test.ts > Agent route default-adapter production recovery > fails closed when the real Agent loop sees chat connection loss after send
+[agent-edit] admitted task execution failed: AgentDownstreamSubmissionUnknownError: Agent downstream submission state is unknown; manual reconciliation is required
+    at executeDurableAgentDownstreamOperation (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\downstream-operations.ts:311:13)
+    at llmCall (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\agent-edit-execution-service.ts:1052:20)
+    at Module.executeAgentLoop (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-engine.ts:237:21) {
+  code: 'AGENT_DOWNSTREAM_SUBMISSION_UNKNOWN',
+  [cause]: Error: connection lost after chat provider submit
+      at dispatchFetch (J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\api\agent-edit-production-recovery.test.ts:575:11)
+      at mockCall (file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/@vitest/spy/dist/index.js:96:15)
+      at dispatchFetch (file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/tinyspy/dist/index.js:47:80)
+      at fetchWithV1Retry (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\api-helpers.ts:114:26)
+      at J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\agent-edit-execution-service.ts:1064:15
+      at runWithAbortSignalTimeout (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\abort-signal.ts:20:18)
+      at J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\agent-edit-execution-service.ts:1063:32
+      at executeDurableAgentDownstreamOperation (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\downstream-operations.ts:294:22)
+      at llmCall (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\agent-edit-execution-service.ts:1052:20)
+      at Module.executeAgentLoop (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-engine.ts:237:21)
+}
+
+stderr | src/__tests__/api/agent-edit-production-recovery.test.ts > Agent route default-adapter production recovery > durably terminalizes an explicit chat provider rejection without resubmit
+[agent-edit] LLM API rejected request: 429 {"error":{"message":"controlled chat rejection"}}
+
+stderr | src/__tests__/api/agent-edit-production-recovery.test.ts > Agent route default-adapter production recovery > durably terminalizes an explicit chat provider rejection without resubmit
+[agent-engine] Round 1: LLM call failed: Agent downstream provider rejected the request
+
+stderr | src/__tests__/api/agent-edit-production-recovery.test.ts > Agent route default-adapter production recovery > durably terminalizes an explicit chat provider rejection without resubmit
+[agent-edit] Error: Agent downstream provider rejected the request
+
+stderr | src/__tests__/api/agent-edit-production-recovery.test.ts > Agent route default-adapter production recovery > durably terminalizes an explicit chat provider rejection without resubmit
+[agent-edit] admitted task execution failed: AgentDownstreamProviderRejectedError: Agent downstream provider rejected the request
+    at J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\agent-edit-execution-service.ts:1076:21
+    at executeDurableAgentDownstreamOperation (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\downstream-operations.ts:294:22)
+    at llmCall (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\agent-edit-execution-service.ts:1052:20)
+    at Module.executeAgentLoop (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-engine.ts:237:21) {
+  providerStatus: 429,
+  code: 'AGENT_DOWNSTREAM_PROVIDER_REJECTED',
+  providerCode: undefined
+}
+
+stderr | src/__tests__/api/agent-edit-production-recovery.test.ts > Agent route default-adapter production recovery > durably terminalizes an explicit direct image_edit rejection without resubmit
+[agent-edit] Path A: API error 422 {"error":{"message":"controlled image edit rejection"}}
+
+stderr | src/__tests__/api/agent-edit-production-recovery.test.ts > Agent route default-adapter production recovery > durably terminalizes an explicit direct image_edit rejection without resubmit
+[agent-edit] Image edit step 1 failed: AgentDownstreamProviderRejectedError: Agent downstream provider rejected the request
+    at performImageEdit (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\agent-edit-execution-service.ts:1926:40)
+    at executeDurableAgentDownstreamOperation (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\downstream-operations.ts:294:22)
+    at executeAgentEditTask (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\agent-edit-execution-service.ts:1165:34)
+    at executeDurableAgentDownstreamOperation (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\downstream-operations.ts:294:22)
+    at Object.executeAdoption (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\same-task-adapter.ts:436:25)
+    at Object.execute (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\surface-dispatch.ts:78:22) {
+  providerStatus: 422,
+  code: 'AGENT_DOWNSTREAM_PROVIDER_REJECTED',
+  providerCode: undefined
+}
+[agent-edit] Error: Agent downstream provider rejected the request
+
+stderr | src/__tests__/api/agent-edit-production-recovery.test.ts > Agent route default-adapter production recovery > durably terminalizes an explicit direct image_edit rejection without resubmit
+[agent-edit] admitted task execution failed: AgentDownstreamProviderRejectedError: Agent downstream provider rejected the request
+    at performImageEdit (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\agent-edit-execution-service.ts:1926:40)
+    at executeDurableAgentDownstreamOperation (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\downstream-operations.ts:294:22)
+    at executeAgentEditTask (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\agent-edit-execution-service.ts:1165:34)
+    at executeDurableAgentDownstreamOperation (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\downstream-operations.ts:294:22)
+    at Object.executeAdoption (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\same-task-adapter.ts:436:25)
+    at Object.execute (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\surface-dispatch.ts:78:22) {
+  providerStatus: 422,
+  code: 'AGENT_DOWNSTREAM_PROVIDER_REJECTED',
+  providerCode: undefined
+}
+
+stderr | src/__tests__/api/agent-edit-production-recovery.test.ts > Agent route default-adapter production recovery > durably terminalizes an explicit generate_image rejection without resubmit
+API submit error: 429 {"error":{"message":"controlled image generation rejection"}}
+
+stderr | src/__tests__/api/agent-edit-production-recovery.test.ts > Agent route default-adapter production recovery > durably terminalizes an explicit generate_image rejection without resubmit
+[agent-edit] Tool generate_image execution failed: AgentDownstreamProviderRejectedError: 上游服务暂时不可用，正在自动重试
+    at knownProviderTaskRejection (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\agent-edit-execution-service.ts:160:10)
+    at pollAcceptedAgentGeneration (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\agent-edit-execution-service.ts:199:13)
+    at operationContext.executeOperation.reconcile.success (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\agent-edit-execution-service.ts:1367:29)
+    at executeDurableAgentDownstreamOperation (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\downstream-operations.ts:294:22)
+    at executeAgentEditTask (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\agent-edit-execution-service.ts:1339:40)
+    at executeDurableAgentDownstreamOperation (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\downstream-operations.ts:294:22)
+    at Object.executeAdoption (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\same-task-adapter.ts:436:25)
+    at Object.execute (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\surface-dispatch.ts:78:22) {
+  providerStatus: undefined,
+  code: 'AGENT_DOWNSTREAM_PROVIDER_REJECTED',
+  providerCode: undefined
+}
+[agent-edit] Error: 上游服务暂时不可用，正在自动重试
+
+stderr | src/__tests__/api/agent-edit-production-recovery.test.ts > Agent route default-adapter production recovery > durably terminalizes an explicit generate_image rejection without resubmit
+[agent-edit] admitted task execution failed: AgentDownstreamProviderRejectedError: 上游服务暂时不可用，正在自动重试
+    at knownProviderTaskRejection (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\agent-edit-execution-service.ts:160:10)
+    at pollAcceptedAgentGeneration (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\agent-edit-execution-service.ts:199:13)
+    at operationContext.executeOperation.reconcile.success (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\agent-edit-execution-service.ts:1367:29)
+    at executeDurableAgentDownstreamOperation (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\downstream-operations.ts:294:22)
+    at executeAgentEditTask (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\agent-edit-execution-service.ts:1339:40)
+    at executeDurableAgentDownstreamOperation (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\downstream-operations.ts:294:22)
+    at Object.executeAdoption (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\same-task-adapter.ts:436:25)
+    at Object.execute (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\agent-runtime\surface-dispatch.ts:78:22) {
+  providerStatus: undefined,
+  code: 'AGENT_DOWNSTREAM_PROVIDER_REJECTED',
+  providerCode: undefined
+}
+
+stderr | tests/integration/v588-admin-user-projection-postgres.test.ts > administrator projection with real PostgreSQL > returns a business failure when an authoritative table is unavailable
+{ code: 'DB_SQL_QUERY_FAILED' }
+
+stderr | tests/integration/v588-admin-user-projection-postgres.test.ts > administrator projection with real PostgreSQL > returns a business failure when an authoritative table is unavailable
+{
+  code: 'ADMIN_USER_PROJECTION_FAILED',
+  message: '关系 "wujie_credits" 不存在'
+}
+
+stderr | src/__tests__/api/user-data-sync-asset-graph.test.ts > user-data asset graph sync route > normalizes a legacy string snapshot before delivering shadow mode and filtering ownership
+[Sync] GET projects: filtered out 1 cross-user projects for user user-1 (response only, not persisted)
+
+stderr | src/__tests__/lib/user-manager-sync-epoch.test.ts > UserManager project sync response isolation > does not adopt a revision or remote winner when a required conflict backup exceeds quota
+[Sync] loadProjectsFromServer error: DOMException [QuotaExceededError]: quota
+    at new DOMException (node:internal/per_context/domexception:76:18)
+    at Object.setItem (J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\lib\user-manager-sync-epoch.test.ts:310:60)
+    at UserManager.writeProjectAdoptionCommit (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\user-manager.ts:999:18)
+    at UserManager.commitProjectAdoption (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\user-manager.ts:1213:10)
+    at UserManager.loadProjectsFromServer (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\user-manager.ts:2042:12)
+    at processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\lib\user-manager-sync-epoch.test.ts:316:5
+    at file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/@vitest/runner/dist/chunk-hooks.js:752:20
+
+stderr | src/__tests__/lib/user-manager-sync-epoch.test.ts > UserManager project sync response isolation > rejects a malformed per-user conflict backup before adopting remote conflict state
+[Sync] loadProjectsFromServer error: Error: PROJECT_SYNC_ADOPTION_COMMIT_INVALID
+    at UserManager.readProjectAdoptionCommit (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\user-manager.ts:966:13)
+    at UserManager.loadProjectsFromServer (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\user-manager.ts:1745:36)
+    at processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\lib\user-manager-sync-epoch.test.ts:352:5
+    at file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/@vitest/runner/dist/chunk-hooks.js:752:20
+
+stderr | src/__tests__/lib/user-manager-sync-epoch.test.ts > UserManager project sync response isolation > does not let a successful in-flight GET patch update, create, delete, or import mutations
+[Sync] syncToServer: conflict recovery exhausted; local draft retained
+
+stderr | src/__tests__/lib/user-manager-sync-epoch.test.ts > UserManager project sync response isolation > fails adoption when the canonical draft key cannot be written and recovers the local draft on reload
+[saveData] localStorage quota exceeded, retrying without data:/blob: URLs
+[saveData] localStorage still exceeded after trimming data URLs: DOMException [QuotaExceededError]: quota
+    at new DOMException (node:internal/per_context/domexception:76:18)
+    at Object.setItem (J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\lib\user-manager-sync-epoch.test.ts:1462:17)
+    at UserManager.commitLocalDataOnly (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\user-manager.ts:722:26)
+    at UserManager.commitProjectAdoption (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\user-manager.ts:1219:33)
+    at UserManager.loadProjectsFromServer (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\user-manager.ts:2042:12)
+    at processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\lib\user-manager-sync-epoch.test.ts:1469:5
+    at file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/@vitest/runner/dist/chunk-hooks.js:752:20
+[saveData] localStorage quota exceeded, retrying without data:/blob: URLs
+[saveData] localStorage still exceeded after trimming data URLs: DOMException [QuotaExceededError]: quota
+    at new DOMException (node:internal/per_context/domexception:76:18)
+    at Object.setItem (J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\lib\user-manager-sync-epoch.test.ts:1462:17)
+    at UserManager.commitLocalDataOnly (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\user-manager.ts:722:26)
+    at UserManager.commitProjectAdoption (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\user-manager.ts:1253:29)
+    at UserManager.loadProjectsFromServer (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\user-manager.ts:2042:12)
+    at processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\lib\user-manager-sync-epoch.test.ts:1469:5
+    at file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/@vitest/runner/dist/chunk-hooks.js:752:20
+[Sync] project draft rollback will be completed from pending envelope on reload: DOMException [QuotaExceededError]: quota
+    at new DOMException (node:internal/per_context/domexception:76:18)
+    at Object.setItem (J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\lib\user-manager-sync-epoch.test.ts:1462:17)
+    at UserManager.commitLocalDataOnly (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\user-manager.ts:722:26)
+    at UserManager.commitProjectAdoption (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\user-manager.ts:1253:29)
+    at UserManager.loadProjectsFromServer (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\user-manager.ts:2042:12)
+    at processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\lib\user-manager-sync-epoch.test.ts:1469:5
+    at file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/@vitest/runner/dist/chunk-hooks.js:752:20
+[Sync] loadProjectsFromServer error: DOMException [QuotaExceededError]: quota
+    at new DOMException (node:internal/per_context/domexception:76:18)
+    at Object.setItem (J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\lib\user-manager-sync-epoch.test.ts:1462:17)
+    at UserManager.commitLocalDataOnly (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\user-manager.ts:722:26)
+    at UserManager.commitProjectAdoption (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\user-manager.ts:1219:33)
+    at UserManager.loadProjectsFromServer (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\user-manager.ts:2042:12)
+    at processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\lib\user-manager-sync-epoch.test.ts:1469:5
+    at file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/@vitest/runner/dist/chunk-hooks.js:752:20
+
+stderr | src/__tests__/lib/user-manager-sync-epoch.test.ts > UserManager project sync response isolation > recovers the pre-adoption draft when the single commit envelope write fails after the main write
+[Sync] loadProjectsFromServer error: DOMException [QuotaExceededError]: quota
+    at new DOMException (node:internal/per_context/domexception:76:18)
+    at Object.setItem (J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\lib\user-manager-sync-epoch.test.ts:1513:44)
+    at UserManager.writeProjectAdoptionCommit (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\user-manager.ts:999:18)
+    at UserManager.commitProjectAdoption (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\user-manager.ts:1241:12)
+    at UserManager.loadProjectsFromServer (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\user-manager.ts:2042:12)
+    at processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\lib\user-manager-sync-epoch.test.ts:1520:5
+    at file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/@vitest/runner/dist/chunk-hooks.js:752:20
+
+stderr | src/__tests__/lib/user-manager-sync-epoch.test.ts > UserManager project sync response isolation > settles a rollback-failure pending marker before updateProject and preserves the mutation on reload
+[saveData] localStorage quota exceeded, retrying without data:/blob: URLs
+[saveData] localStorage still exceeded after trimming data URLs: DOMException [QuotaExceededError]: rollback quota
+    at new DOMException (node:internal/per_context/domexception:76:18)
+    at Object.setItem (J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\lib\user-manager-sync-epoch.test.ts:115:17)
+    at UserManager.commitLocalDataOnly (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\user-manager.ts:722:26)
+    at UserManager.commitProjectAdoption (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\user-manager.ts:1253:29)
+    at UserManager.loadProjectsFromServer (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\user-manager.ts:2042:12)
+    at processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at leaveUnsettledAdoptionPending (J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\lib\user-manager-sync-epoch.test.ts:134:3)
+    at J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\lib\user-manager-sync-epoch.test.ts:1545:36
+    at file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/@vitest/runner/dist/chunk-hooks.js:752:20
+[Sync] project draft rollback will be completed from pending envelope on reload: DOMException [QuotaExceededError]: rollback quota
+    at new DOMException (node:internal/per_context/domexception:76:18)
+    at Object.setItem (J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\lib\user-manager-sync-epoch.test.ts:115:17)
+    at UserManager.commitLocalDataOnly (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\user-manager.ts:722:26)
+    at UserManager.commitProjectAdoption (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\user-manager.ts:1253:29)
+    at UserManager.loadProjectsFromServer (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\user-manager.ts:2042:12)
+    at processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at leaveUnsettledAdoptionPending (J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\lib\user-manager-sync-epoch.test.ts:134:3)
+    at J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\lib\user-manager-sync-epoch.test.ts:1545:36
+    at file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/@vitest/runner/dist/chunk-hooks.js:752:20
+[Sync] loadProjectsFromServer error: DOMException [QuotaExceededError]: envelope quota
+    at new DOMException (node:internal/per_context/domexception:76:18)
+    at Object.setItem (J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\lib\user-manager-sync-epoch.test.ts:121:17)
+    at UserManager.writeProjectAdoptionCommit (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\user-manager.ts:999:18)
+    at UserManager.commitProjectAdoption (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\user-manager.ts:1241:12)
+    at UserManager.loadProjectsFromServer (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\user-manager.ts:2042:12)
+    at processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at leaveUnsettledAdoptionPending (J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\lib\user-manager-sync-epoch.test.ts:134:3)
+    at J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\lib\user-manager-sync-epoch.test.ts:1545:36
+    at file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/@vitest/runner/dist/chunk-hooks.js:752:20
+
+stderr | src/__tests__/lib/user-manager-sync-epoch.test.ts > UserManager project sync response isolation > settles a rollback-failure pending marker before createProject and preserves the mutation on reload
+[saveData] localStorage quota exceeded, retrying without data:/blob: URLs
+[saveData] localStorage still exceeded after trimming data URLs: DOMException [QuotaExceededError]: rollback quota
+    at new DOMException (node:internal/per_context/domexception:76:18)
+    at Object.setItem (J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\lib\user-manager-sync-epoch.test.ts:115:17)
+    at UserManager.commitLocalDataOnly (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\user-manager.ts:722:26)
+    at UserManager.commitProjectAdoption (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\user-manager.ts:1253:29)
+    at UserManager.loadProjectsFromServer (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\user-manager.ts:2042:12)
+    at processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at leaveUnsettledAdoptionPending (J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\lib\user-manager-sync-epoch.test.ts:134:3)
+    at J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\lib\user-manager-sync-epoch.test.ts:1545:36
+    at file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/@vitest/runner/dist/chunk-hooks.js:752:20
+[Sync] project draft rollback will be completed from pending envelope on reload: DOMException [QuotaExceededError]: rollback quota
+    at new DOMException (node:internal/per_context/domexception:76:18)
+    at Object.setItem (J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\lib\user-manager-sync-epoch.test.ts:115:17)
+    at UserManager.commitLocalDataOnly (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\user-manager.ts:722:26)
+    at UserManager.commitProjectAdoption (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\user-manager.ts:1253:29)
+    at UserManager.loadProjectsFromServer (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\user-manager.ts:2042:12)
+    at processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at leaveUnsettledAdoptionPending (J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\lib\user-manager-sync-epoch.test.ts:134:3)
+    at J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\lib\user-manager-sync-epoch.test.ts:1545:36
+    at file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/@vitest/runner/dist/chunk-hooks.js:752:20
+[Sync] loadProjectsFromServer error: DOMException [QuotaExceededError]: envelope quota
+    at new DOMException (node:internal/per_context/domexception:76:18)
+    at Object.setItem (J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\lib\user-manager-sync-epoch.test.ts:121:17)
+    at UserManager.writeProjectAdoptionCommit (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\user-manager.ts:999:18)
+    at UserManager.commitProjectAdoption (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\user-manager.ts:1241:12)
+    at UserManager.loadProjectsFromServer (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\user-manager.ts:2042:12)
+    at processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at leaveUnsettledAdoptionPending (J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\lib\user-manager-sync-epoch.test.ts:134:3)
+    at J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\lib\user-manager-sync-epoch.test.ts:1545:36
+    at file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/@vitest/runner/dist/chunk-hooks.js:752:20
+
+stderr | src/__tests__/lib/user-manager-sync-epoch.test.ts > UserManager project sync response isolation > settles a rollback-failure pending marker before deleteProject and preserves the mutation on reload
+[saveData] localStorage quota exceeded, retrying without data:/blob: URLs
+[saveData] localStorage still exceeded after trimming data URLs: DOMException [QuotaExceededError]: rollback quota
+    at new DOMException (node:internal/per_context/domexception:76:18)
+    at Object.setItem (J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\lib\user-manager-sync-epoch.test.ts:115:17)
+    at UserManager.commitLocalDataOnly (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\user-manager.ts:722:26)
+    at UserManager.commitProjectAdoption (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\user-manager.ts:1253:29)
+    at UserManager.loadProjectsFromServer (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\user-manager.ts:2042:12)
+    at processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at leaveUnsettledAdoptionPending (J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\lib\user-manager-sync-epoch.test.ts:134:3)
+    at J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\lib\user-manager-sync-epoch.test.ts:1545:36
+    at file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/@vitest/runner/dist/chunk-hooks.js:752:20
+[Sync] project draft rollback will be completed from pending envelope on reload: DOMException [QuotaExceededError]: rollback quota
+    at new DOMException (node:internal/per_context/domexception:76:18)
+    at Object.setItem (J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\lib\user-manager-sync-epoch.test.ts:115:17)
+    at UserManager.commitLocalDataOnly (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\user-manager.ts:722:26)
+    at UserManager.commitProjectAdoption (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\user-manager.ts:1253:29)
+    at UserManager.loadProjectsFromServer (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\user-manager.ts:2042:12)
+    at processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at leaveUnsettledAdoptionPending (J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\lib\user-manager-sync-epoch.test.ts:134:3)
+    at J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\lib\user-manager-sync-epoch.test.ts:1545:36
+    at file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/@vitest/runner/dist/chunk-hooks.js:752:20
+[Sync] loadProjectsFromServer error: DOMException [QuotaExceededError]: envelope quota
+    at new DOMException (node:internal/per_context/domexception:76:18)
+    at Object.setItem (J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\lib\user-manager-sync-epoch.test.ts:121:17)
+    at UserManager.writeProjectAdoptionCommit (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\user-manager.ts:999:18)
+    at UserManager.commitProjectAdoption (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\user-manager.ts:1241:12)
+    at UserManager.loadProjectsFromServer (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\user-manager.ts:2042:12)
+    at processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at leaveUnsettledAdoptionPending (J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\lib\user-manager-sync-epoch.test.ts:134:3)
+    at J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\lib\user-manager-sync-epoch.test.ts:1545:36
+    at file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/@vitest/runner/dist/chunk-hooks.js:752:20
+
+stderr | src/__tests__/lib/user-manager-sync-epoch.test.ts > UserManager project sync response isolation > settles a rollback-failure pending marker before importProjectFromWujie and preserves the mutation on reload
+[saveData] localStorage quota exceeded, retrying without data:/blob: URLs
+[saveData] localStorage still exceeded after trimming data URLs: DOMException [QuotaExceededError]: rollback quota
+    at new DOMException (node:internal/per_context/domexception:76:18)
+    at Object.setItem (J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\lib\user-manager-sync-epoch.test.ts:115:17)
+    at UserManager.commitLocalDataOnly (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\user-manager.ts:722:26)
+    at UserManager.commitProjectAdoption (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\user-manager.ts:1253:29)
+    at UserManager.loadProjectsFromServer (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\user-manager.ts:2042:12)
+    at processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at leaveUnsettledAdoptionPending (J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\lib\user-manager-sync-epoch.test.ts:134:3)
+    at J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\lib\user-manager-sync-epoch.test.ts:1545:36
+    at file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/@vitest/runner/dist/chunk-hooks.js:752:20
+[Sync] project draft rollback will be completed from pending envelope on reload: DOMException [QuotaExceededError]: rollback quota
+    at new DOMException (node:internal/per_context/domexception:76:18)
+    at Object.setItem (J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\lib\user-manager-sync-epoch.test.ts:115:17)
+    at UserManager.commitLocalDataOnly (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\user-manager.ts:722:26)
+    at UserManager.commitProjectAdoption (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\user-manager.ts:1253:29)
+    at UserManager.loadProjectsFromServer (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\user-manager.ts:2042:12)
+    at processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at leaveUnsettledAdoptionPending (J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\lib\user-manager-sync-epoch.test.ts:134:3)
+    at J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\lib\user-manager-sync-epoch.test.ts:1545:36
+    at file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/@vitest/runner/dist/chunk-hooks.js:752:20
+[Sync] loadProjectsFromServer error: DOMException [QuotaExceededError]: envelope quota
+    at new DOMException (node:internal/per_context/domexception:76:18)
+    at Object.setItem (J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\lib\user-manager-sync-epoch.test.ts:121:17)
+    at UserManager.writeProjectAdoptionCommit (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\user-manager.ts:999:18)
+    at UserManager.commitProjectAdoption (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\user-manager.ts:1241:12)
+    at UserManager.loadProjectsFromServer (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\user-manager.ts:2042:12)
+    at processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at leaveUnsettledAdoptionPending (J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\lib\user-manager-sync-epoch.test.ts:134:3)
+    at J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\lib\user-manager-sync-epoch.test.ts:1545:36
+    at file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/@vitest/runner/dist/chunk-hooks.js:752:20
+
+stderr | src/__tests__/lib/user-manager-sync-epoch.test.ts > UserManager project sync response isolation > rejects updateProject without changing memory when a pending marker cannot settle or be removed
+[Sync] failed to clear unsettled project adoption commit: DOMException [InvalidStateError]: remove blocked
+    at new DOMException (node:internal/per_context/domexception:76:18)
+    at Object.removeItem (J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\lib\user-manager-sync-epoch.test.ts:128:15)
+    at UserManager.settleProjectAdoptionCommit (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\user-manager.ts:1018:24)
+    at UserManager.commitProjectAdoption (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\user-manager.ts:1258:16)
+    at UserManager.loadProjectsFromServer (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\user-manager.ts:2042:12)
+    at processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at leaveUnsettledAdoptionPending (J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\lib\user-manager-sync-epoch.test.ts:134:3)
+    at J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\lib\user-manager-sync-epoch.test.ts:1582:36
+    at file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/@vitest/runner/dist/chunk-hooks.js:752:20
+[Sync] failed to settle rolled-back project adoption commit: DOMException [QuotaExceededError]: envelope quota
+    at new DOMException (node:internal/per_context/domexception:76:18)
+    at Object.setItem (J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\lib\user-manager-sync-epoch.test.ts:121:17)
+    at UserManager.writeProjectAdoptionCommit (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\user-manager.ts:999:18)
+    at UserManager.settleProjectAdoptionCommit (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\user-manager.ts:1010:12)
+    at UserManager.commitProjectAdoption (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\user-manager.ts:1258:16)
+    at UserManager.loadProjectsFromServer (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\user-manager.ts:2042:12)
+    at processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at leaveUnsettledAdoptionPending (J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\lib\user-manager-sync-epoch.test.ts:134:3)
+    at J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\lib\user-manager-sync-epoch.test.ts:1582:36
+    at file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/@vitest/runner/dist/chunk-hooks.js:752:20
+[Sync] loadProjectsFromServer error: DOMException [QuotaExceededError]: envelope quota
+    at new DOMException (node:internal/per_context/domexception:76:18)
+    at Object.setItem (J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\lib\user-manager-sync-epoch.test.ts:121:17)
+    at UserManager.writeProjectAdoptionCommit (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\user-manager.ts:999:18)
+    at UserManager.commitProjectAdoption (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\user-manager.ts:1241:12)
+    at UserManager.loadProjectsFromServer (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\user-manager.ts:2042:12)
+    at processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at leaveUnsettledAdoptionPending (J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\lib\user-manager-sync-epoch.test.ts:134:3)
+    at J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\lib\user-manager-sync-epoch.test.ts:1582:36
+    at file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/@vitest/runner/dist/chunk-hooks.js:752:20
+
+stderr | src/__tests__/lib/user-manager-sync-epoch.test.ts > UserManager project sync response isolation > rejects updateProject without changing memory when a pending marker cannot settle or be removed
+[Sync] failed to clear unsettled project adoption commit: DOMException [InvalidStateError]: remove blocked
+    at new DOMException (node:internal/per_context/domexception:76:18)
+    at Object.removeItem (J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\lib\user-manager-sync-epoch.test.ts:128:15)
+    at UserManager.settleProjectAdoptionCommit (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\user-manager.ts:1018:24)
+    at UserManager.ensureProjectAdoptionReadyForMutation (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\user-manager.ts:1138:12)
+    at UserManager.updateProjectInMemory (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\user-manager.ts:2457:10)
+    at UserManager.updateProject (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\user-manager.ts:2473:26)
+    at mutate (J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\lib\user-manager-sync-epoch.test.ts:1587:17)
+    at J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\lib\user-manager-sync-epoch.test.ts:1602:18
+    at processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/@vitest/runner/dist/chunk-hooks.js:752:20
+
+stderr | src/__tests__/lib/user-manager-sync-epoch.test.ts > UserManager project sync response isolation > rejects createProject without changing memory when a pending marker cannot settle or be removed
+[Sync] failed to clear unsettled project adoption commit: DOMException [InvalidStateError]: remove blocked
+    at new DOMException (node:internal/per_context/domexception:76:18)
+    at Object.removeItem (J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\lib\user-manager-sync-epoch.test.ts:128:15)
+    at UserManager.settleProjectAdoptionCommit (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\user-manager.ts:1018:24)
+    at UserManager.commitProjectAdoption (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\user-manager.ts:1258:16)
+    at UserManager.loadProjectsFromServer (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\user-manager.ts:2042:12)
+    at processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at leaveUnsettledAdoptionPending (J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\lib\user-manager-sync-epoch.test.ts:134:3)
+    at J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\lib\user-manager-sync-epoch.test.ts:1582:36
+    at file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/@vitest/runner/dist/chunk-hooks.js:752:20
+[Sync] failed to settle rolled-back project adoption commit: DOMException [QuotaExceededError]: envelope quota
+    at new DOMException (node:internal/per_context/domexception:76:18)
+    at Object.setItem (J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\lib\user-manager-sync-epoch.test.ts:121:17)
+    at UserManager.writeProjectAdoptionCommit (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\user-manager.ts:999:18)
+    at UserManager.settleProjectAdoptionCommit (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\user-manager.ts:1010:12)
+    at UserManager.commitProjectAdoption (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\user-manager.ts:1258:16)
+    at UserManager.loadProjectsFromServer (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\user-manager.ts:2042:12)
+    at processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at leaveUnsettledAdoptionPending (J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\lib\user-manager-sync-epoch.test.ts:134:3)
+    at J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\lib\user-manager-sync-epoch.test.ts:1582:36
+    at file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/@vitest/runner/dist/chunk-hooks.js:752:20
+[Sync] loadProjectsFromServer error: DOMException [QuotaExceededError]: envelope quota
+    at new DOMException (node:internal/per_context/domexception:76:18)
+    at Object.setItem (J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\lib\user-manager-sync-epoch.test.ts:121:17)
+    at UserManager.writeProjectAdoptionCommit (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\user-manager.ts:999:18)
+    at UserManager.commitProjectAdoption (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\user-manager.ts:1241:12)
+    at UserManager.loadProjectsFromServer (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\user-manager.ts:2042:12)
+    at processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at leaveUnsettledAdoptionPending (J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\lib\user-manager-sync-epoch.test.ts:134:3)
+    at J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\lib\user-manager-sync-epoch.test.ts:1582:36
+    at file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/@vitest/runner/dist/chunk-hooks.js:752:20
+
+stderr | src/__tests__/lib/user-manager-sync-epoch.test.ts > UserManager project sync response isolation > rejects createProject without changing memory when a pending marker cannot settle or be removed
+[Sync] failed to clear unsettled project adoption commit: DOMException [InvalidStateError]: remove blocked
+    at new DOMException (node:internal/per_context/domexception:76:18)
+    at Object.removeItem (J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\lib\user-manager-sync-epoch.test.ts:128:15)
+    at UserManager.settleProjectAdoptionCommit (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\user-manager.ts:1018:24)
+    at UserManager.ensureProjectAdoptionReadyForMutation (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\user-manager.ts:1138:12)
+    at UserManager.createProject (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\user-manager.ts:2357:10)
+    at mutate (J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\lib\user-manager-sync-epoch.test.ts:1589:17)
+    at J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\lib\user-manager-sync-epoch.test.ts:1602:18
+    at processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/@vitest/runner/dist/chunk-hooks.js:752:20
+
+stderr | src/__tests__/lib/user-manager-sync-epoch.test.ts > UserManager project sync response isolation > rejects deleteProject without changing memory when a pending marker cannot settle or be removed
+[Sync] failed to clear unsettled project adoption commit: DOMException [InvalidStateError]: remove blocked
+    at new DOMException (node:internal/per_context/domexception:76:18)
+    at Object.removeItem (J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\lib\user-manager-sync-epoch.test.ts:128:15)
+    at UserManager.settleProjectAdoptionCommit (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\user-manager.ts:1018:24)
+    at UserManager.commitProjectAdoption (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\user-manager.ts:1258:16)
+    at UserManager.loadProjectsFromServer (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\user-manager.ts:2042:12)
+    at processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at leaveUnsettledAdoptionPending (J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\lib\user-manager-sync-epoch.test.ts:134:3)
+    at J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\lib\user-manager-sync-epoch.test.ts:1582:36
+    at file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/@vitest/runner/dist/chunk-hooks.js:752:20
+[Sync] failed to settle rolled-back project adoption commit: DOMException [QuotaExceededError]: envelope quota
+    at new DOMException (node:internal/per_context/domexception:76:18)
+    at Object.setItem (J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\lib\user-manager-sync-epoch.test.ts:121:17)
+    at UserManager.writeProjectAdoptionCommit (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\user-manager.ts:999:18)
+    at UserManager.settleProjectAdoptionCommit (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\user-manager.ts:1010:12)
+    at UserManager.commitProjectAdoption (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\user-manager.ts:1258:16)
+    at UserManager.loadProjectsFromServer (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\user-manager.ts:2042:12)
+    at processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at leaveUnsettledAdoptionPending (J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\lib\user-manager-sync-epoch.test.ts:134:3)
+    at J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\lib\user-manager-sync-epoch.test.ts:1582:36
+    at file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/@vitest/runner/dist/chunk-hooks.js:752:20
+[Sync] loadProjectsFromServer error: DOMException [QuotaExceededError]: envelope quota
+    at new DOMException (node:internal/per_context/domexception:76:18)
+    at Object.setItem (J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\lib\user-manager-sync-epoch.test.ts:121:17)
+    at UserManager.writeProjectAdoptionCommit (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\user-manager.ts:999:18)
+    at UserManager.commitProjectAdoption (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\user-manager.ts:1241:12)
+    at UserManager.loadProjectsFromServer (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\user-manager.ts:2042:12)
+    at processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at leaveUnsettledAdoptionPending (J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\lib\user-manager-sync-epoch.test.ts:134:3)
+    at J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\lib\user-manager-sync-epoch.test.ts:1582:36
+    at file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/@vitest/runner/dist/chunk-hooks.js:752:20
+
+stderr | src/__tests__/lib/user-manager-sync-epoch.test.ts > UserManager project sync response isolation > rejects deleteProject without changing memory when a pending marker cannot settle or be removed
+[Sync] failed to clear unsettled project adoption commit: DOMException [InvalidStateError]: remove blocked
+    at new DOMException (node:internal/per_context/domexception:76:18)
+    at Object.removeItem (J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\lib\user-manager-sync-epoch.test.ts:128:15)
+    at UserManager.settleProjectAdoptionCommit (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\user-manager.ts:1018:24)
+    at UserManager.ensureProjectAdoptionReadyForMutation (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\user-manager.ts:1138:12)
+    at UserManager.deleteProjects (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\user-manager.ts:2488:10)
+    at UserManager.deleteProject (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\user-manager.ts:2480:31)
+    at mutate (J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\lib\user-manager-sync-epoch.test.ts:1591:23)
+    at J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\lib\user-manager-sync-epoch.test.ts:1602:18
+    at processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/@vitest/runner/dist/chunk-hooks.js:752:20
+
+stderr | src/__tests__/lib/user-manager-sync-epoch.test.ts > UserManager project sync response isolation > rejects importProjectFromWujie without changing memory when a pending marker cannot settle or be removed
+[Sync] failed to clear unsettled project adoption commit: DOMException [InvalidStateError]: remove blocked
+    at new DOMException (node:internal/per_context/domexception:76:18)
+    at Object.removeItem (J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\lib\user-manager-sync-epoch.test.ts:128:15)
+    at UserManager.settleProjectAdoptionCommit (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\user-manager.ts:1018:24)
+    at UserManager.commitProjectAdoption (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\user-manager.ts:1258:16)
+    at UserManager.loadProjectsFromServer (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\user-manager.ts:2042:12)
+    at processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at leaveUnsettledAdoptionPending (J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\lib\user-manager-sync-epoch.test.ts:134:3)
+    at J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\lib\user-manager-sync-epoch.test.ts:1582:36
+    at file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/@vitest/runner/dist/chunk-hooks.js:752:20
+[Sync] failed to settle rolled-back project adoption commit: DOMException [QuotaExceededError]: envelope quota
+    at new DOMException (node:internal/per_context/domexception:76:18)
+    at Object.setItem (J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\lib\user-manager-sync-epoch.test.ts:121:17)
+    at UserManager.writeProjectAdoptionCommit (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\user-manager.ts:999:18)
+    at UserManager.settleProjectAdoptionCommit (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\user-manager.ts:1010:12)
+    at UserManager.commitProjectAdoption (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\user-manager.ts:1258:16)
+    at UserManager.loadProjectsFromServer (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\user-manager.ts:2042:12)
+    at processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at leaveUnsettledAdoptionPending (J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\lib\user-manager-sync-epoch.test.ts:134:3)
+    at J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\lib\user-manager-sync-epoch.test.ts:1582:36
+    at file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/@vitest/runner/dist/chunk-hooks.js:752:20
+[Sync] loadProjectsFromServer error: DOMException [QuotaExceededError]: envelope quota
+    at new DOMException (node:internal/per_context/domexception:76:18)
+    at Object.setItem (J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\lib\user-manager-sync-epoch.test.ts:121:17)
+    at UserManager.writeProjectAdoptionCommit (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\user-manager.ts:999:18)
+    at UserManager.commitProjectAdoption (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\user-manager.ts:1241:12)
+    at UserManager.loadProjectsFromServer (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\user-manager.ts:2042:12)
+    at processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at leaveUnsettledAdoptionPending (J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\lib\user-manager-sync-epoch.test.ts:134:3)
+    at J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\lib\user-manager-sync-epoch.test.ts:1582:36
+    at file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/@vitest/runner/dist/chunk-hooks.js:752:20
+
+stderr | src/__tests__/lib/user-manager-sync-epoch.test.ts > UserManager project sync response isolation > rejects importProjectFromWujie without changing memory when a pending marker cannot settle or be removed
+[Sync] failed to clear unsettled project adoption commit: DOMException [InvalidStateError]: remove blocked
+    at new DOMException (node:internal/per_context/domexception:76:18)
+    at Object.removeItem (J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\lib\user-manager-sync-epoch.test.ts:128:15)
+    at UserManager.settleProjectAdoptionCommit (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\user-manager.ts:1018:24)
+    at UserManager.ensureProjectAdoptionReadyForMutation (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\user-manager.ts:1138:12)
+    at UserManager.importProjectFromWujie (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\user-manager.ts:3132:10)
+    at mutate (J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\lib\user-manager-sync-epoch.test.ts:1593:17)
+    at J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\lib\user-manager-sync-epoch.test.ts:1602:18
+    at processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/@vitest/runner/dist/chunk-hooks.js:752:20
+
+stderr | src/__tests__/lib/user-manager-sync-epoch.test.ts > UserManager project sync response isolation > fails remote-wins adoption when browser storage becomes unavailable
+[Sync] loadProjectsFromServer error: Error: PROJECT_SYNC_STORAGE_UNAVAILABLE
+    at UserManager.commitProjectAdoption (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\user-manager.ts:1170:38)
+    at UserManager.loadProjectsFromServer (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\user-manager.ts:2042:12)
+    at processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\lib\user-manager-sync-epoch.test.ts:1625:5
+    at file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/@vitest/runner/dist/chunk-hooks.js:752:20
+
+stderr | src/__tests__/api/workflow-brief-to-video.test.ts > Workflow Brief 到视频审批执行 > 真实路由在 CloudTask 初始化失败时返回 503
+[Workflow] 创建持久化执行记录失败: Error: database unavailable
+    at J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\api\workflow-brief-to-video.test.ts:115:54
+    at file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/@vitest/runner/dist/chunk-hooks.js:155:11
+    at file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/@vitest/runner/dist/chunk-hooks.js:752:26
+    at file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/@vitest/runner/dist/chunk-hooks.js:1897:20
+    at new Promise (<anonymous>)
+    at runWithTimeout (file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/@vitest/runner/dist/chunk-hooks.js:1863:10)
+    at runTest (file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/@vitest/runner/dist/chunk-hooks.js:1574:12)
+    at processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at runSuite (file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)
+    at runSuite (file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)
+
+stderr | src/__tests__/api/workflow-brief-to-video.test.ts > Workflow Brief 到视频审批执行 > 恢复抢租抛错后下一次状态查询仍会重新尝试
+[Workflow] 请求处理失败: Error: database unavailable
+    at J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\api\workflow-brief-to-video.test.ts:223:30
+    at file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/@vitest/runner/dist/chunk-hooks.js:155:11
+    at file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/@vitest/runner/dist/chunk-hooks.js:752:26
+    at file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/@vitest/runner/dist/chunk-hooks.js:1897:20
+    at new Promise (<anonymous>)
+    at runWithTimeout (file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/@vitest/runner/dist/chunk-hooks.js:1863:10)
+    at runTest (file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/@vitest/runner/dist/chunk-hooks.js:1574:12)
+    at runSuite (file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)
+    at runSuite (file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)
+    at runFiles (file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/@vitest/runner/dist/chunk-hooks.js:1787:3)
+
+stderr | src/__tests__/api/workflow-brief-to-video.test.ts > Workflow Brief 到视频审批执行 > 恢复请求头读取失败后释放租约并允许下一次状态查询重试
+[Workflow] 请求处理失败: Error: header unavailable
+    at J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\api\workflow-brief-to-video.test.ts:248:30
+    at file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/@vitest/runner/dist/chunk-hooks.js:155:11
+    at file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/@vitest/runner/dist/chunk-hooks.js:752:26
+    at file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/@vitest/runner/dist/chunk-hooks.js:1897:20
+    at new Promise (<anonymous>)
+    at runWithTimeout (file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/@vitest/runner/dist/chunk-hooks.js:1863:10)
+    at runTest (file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/@vitest/runner/dist/chunk-hooks.js:1574:12)
+    at runSuite (file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)
+    at runSuite (file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)
+    at runFiles (file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/@vitest/runner/dist/chunk-hooks.js:1787:3)
+
+stderr | src/__tests__/api/skill-runs.test.ts > Skill run API > controls a rejected dispatch completion without writing a second terminal state
+[skill-runtime] controlled dispatch completion failed { runId: 'run-chat', code: 'Error' }
+
+stderr | src/__tests__/api/refine-async-terminal-contract.test.ts > refine async submission to authoritative completion > persists synchronous results before exposing completed images
+[s3-storage] S3 not configured: missing COZE_BUCKET_ENDPOINT_URL or COZE_BUCKET_NAME
+
+stderr | src/__tests__/api/refine-async-terminal-contract.test.ts > refine async submission to authoritative completion > persists synchronous results before exposing completed images
+[s3-storage] S3 not configured: missing COZE_BUCKET_ENDPOINT_URL or COZE_BUCKET_NAME
+
+stderr | src/__tests__/api/refine-async-terminal-contract.test.ts > refine async submission to authoritative completion > settles a synchronous provider failure against the task instead of a separate refund
+[refine-engine] submitRefineToApi FAILED taskId=refine-1789324625922-7a8hy0: Provider connection failed
+
+stderr | src/__tests__/api/refine-async-terminal-contract.test.ts > refine async submission to authoritative completion > repeated completed polls do not create, charge or submit again
+[s3-storage] S3 not configured: missing COZE_BUCKET_ENDPOINT_URL or COZE_BUCKET_NAME
+
+stderr | src/__tests__/api/refine-async-terminal-contract.test.ts > refine async submission to authoritative completion > repeated completed polls do not create, charge or submit again
+[s3-storage] S3 not configured: missing COZE_BUCKET_ENDPOINT_URL or COZE_BUCKET_NAME
+
+stderr | src/__tests__/api/refine-async-terminal-contract.test.ts > refine async submission to authoritative completion > after losing process memory polls the persisted remote ID without submitting again
+[s3-storage] S3 not configured: missing COZE_BUCKET_ENDPOINT_URL or COZE_BUCKET_NAME
+
+stderr | src/__tests__/api/refine-async-terminal-contract.test.ts > refine async submission to authoritative completion > after losing process memory polls the persisted remote ID without submitting again
+[s3-storage] S3 not configured: missing COZE_BUCKET_ENDPOINT_URL or COZE_BUCKET_NAME
+
+stderr | src/__tests__/api/refine-async-terminal-contract.test.ts > refine async submission to authoritative completion > retries a remote linkage write without refunding or resubmitting accepted work
+[refine-engine] submitRefineToApi FAILED taskId=refine-1789324625954-towh9b: Temporary storage failure
+
+stderr | src/__tests__/api/refine-async-terminal-contract.test.ts > refine async submission to authoritative completion > retries a remote linkage write without refunding or resubmitting accepted work
+[s3-storage] S3 not configured: missing COZE_BUCKET_ENDPOINT_URL or COZE_BUCKET_NAME
+
+stderr | src/__tests__/api/refine-async-terminal-contract.test.ts > refine async submission to authoritative completion > retries a remote linkage write without refunding or resubmitting accepted work
+[s3-storage] S3 not configured: missing COZE_BUCKET_ENDPOINT_URL or COZE_BUCKET_NAME
+
+stderr | src/__tests__/api/refine-async-terminal-contract.test.ts > refine async submission to authoritative completion > retries a failed settlement without polling the provider or losing the reason
+[refine-engine] submitRefineToApi FAILED taskId=refine-1789324625959-a6kv2f: Provider connection failed
+
+stderr | src/__tests__/api/refine-async-terminal-contract.test.ts > refine async submission to authoritative completion > retries a failed settlement without polling the provider or losing the reason
+[refine-engine] Refund failed: Error: Temporary settlement failure
+    at J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\api\refine-async-terminal-contract.test.ts:315:37
+    at file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/@vitest/runner/dist/chunk-hooks.js:155:11
+    at file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/@vitest/runner/dist/chunk-hooks.js:752:26
+    at file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/@vitest/runner/dist/chunk-hooks.js:1897:20
+    at new Promise (<anonymous>)
+    at runWithTimeout (file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/@vitest/runner/dist/chunk-hooks.js:1863:10)
+    at runTest (file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/@vitest/runner/dist/chunk-hooks.js:1574:12)
+    at runSuite (file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)
+    at runSuite (file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)
+    at runFiles (file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/@vitest/runner/dist/chunk-hooks.js:1787:3)
+
+stderr | src/__tests__/api/refine-async-terminal-contract.test.ts > refine async submission to authoritative completion > exposes all recovered synchronous images in the existing panel result format
+[s3-storage] S3 not configured: missing COZE_BUCKET_ENDPOINT_URL or COZE_BUCKET_NAME
+
+stderr | src/__tests__/api/refine-async-terminal-contract.test.ts > refine async submission to authoritative completion > exposes all recovered synchronous images in the existing panel result format
+[s3-storage] S3 not configured: missing COZE_BUCKET_ENDPOINT_URL or COZE_BUCKET_NAME
+
+stderr | src/__tests__/api/refine-async-terminal-contract.test.ts > refine async submission to authoritative completion > delivers a provider-completed image through the real poll terminal guard
+[s3-storage] S3 not configured: missing COZE_BUCKET_ENDPOINT_URL or COZE_BUCKET_NAME
+
+stderr | src/__tests__/api/refine-async-terminal-contract.test.ts > refine async submission to authoritative completion > delivers a provider-completed image through the real poll terminal guard
+[s3-storage] S3 not configured: missing COZE_BUCKET_ENDPOINT_URL or COZE_BUCKET_NAME
+
+stderr | src/__tests__/api/refine-async-terminal-contract.test.ts > refine async submission to authoritative completion > control: the unchanged terminal guard delivers a task with a durable record
+[s3-storage] S3 not configured: missing COZE_BUCKET_ENDPOINT_URL or COZE_BUCKET_NAME
+
+stderr | src/__tests__/api/refine-async-terminal-contract.test.ts > refine async submission to authoritative completion > control: the unchanged terminal guard delivers a task with a durable record
+[s3-storage] S3 not configured: missing COZE_BUCKET_ENDPOINT_URL or COZE_BUCKET_NAME
+
+stderr | src/__tests__/api/tool-image-preflight-billing.test.ts > image tool preflight rejects without charging > does not refund again when refine inner failure response enters the outer catch
+[refine-engine] submitRefineToApi FAILED taskId=refine-1789324631305-mhkcli: Provider connection failed
+
+stderr | src/__tests__/api/tool-image-preflight-billing.test.ts > image tool preflight rejects without charging > refunds refine synchronous provider failure once without hiding the business error
+[refine-engine] submitRefineToApi FAILED taskId=refine-1789324631307-lf2ncg: Provider connection failed
+
+stderr | src/__tests__/api/tool-image-preflight-billing.test.ts > brand billing controls > does not create a task or refund an unsuccessful charge
+[brand-ecommerce] Error: InsufficientCreditsError: Insufficient credits: required 12, available 0
+    at J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\api\tool-image-preflight-billing.test.ts:167:36
+    at file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/@vitest/runner/dist/chunk-hooks.js:155:11
+    at file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/@vitest/runner/dist/chunk-hooks.js:752:26
+    at file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/@vitest/runner/dist/chunk-hooks.js:1897:20
+    at new Promise (<anonymous>)
+    at runWithTimeout (file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/@vitest/runner/dist/chunk-hooks.js:1863:10)
+    at runTest (file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/@vitest/runner/dist/chunk-hooks.js:1574:12)
+    at processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at runSuite (file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)
+    at runSuite (file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8) {
+  userId: 'billing-test-user',
+  required: 12,
+  balance: 0,
+  code: 'INSUFFICIENT_CREDITS',
+  status: 402,
+  statusCode: 402
+}
+
+stderr | src/__tests__/api/tool-image-preflight-billing.test.ts > brand billing controls > refunds a synchronous task registration exception once
+[brand-ecommerce] Error: Error: Registration unavailable
+    at J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\api\tool-image-preflight-billing.test.ts:173:53
+    at mockCall (file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/@vitest/spy/dist/index.js:96:15)
+    at spy (file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/tinyspy/dist/index.js:47:80)
+    at POST (J:\无界本地版\projects\_upstream-wjaigc-restore\src\app\api\brand-ecommerce\route.ts:852:7)
+    at processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\api\tool-image-preflight-billing.test.ts:174:13
+    at file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/@vitest/runner/dist/chunk-hooks.js:752:20
+
+stderr | src/__tests__/api/tool-image-preflight-billing.test.ts > font billing controls > does not create a task or refund an unsuccessful charge
+[font-design/generate-image] Error: InsufficientCreditsError: Insufficient credits: required 12, available 0
+    at J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\api\tool-image-preflight-billing.test.ts:167:36
+    at file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/@vitest/runner/dist/chunk-hooks.js:155:11
+    at file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/@vitest/runner/dist/chunk-hooks.js:752:26
+    at file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/@vitest/runner/dist/chunk-hooks.js:1897:20
+    at new Promise (<anonymous>)
+    at runWithTimeout (file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/@vitest/runner/dist/chunk-hooks.js:1863:10)
+    at runTest (file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/@vitest/runner/dist/chunk-hooks.js:1574:12)
+    at processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at runSuite (file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)
+    at runSuite (file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8) {
+  userId: 'billing-test-user',
+  required: 12,
+  balance: 0,
+  code: 'INSUFFICIENT_CREDITS',
+  status: 402,
+  statusCode: 402
+}
+
+stderr | src/__tests__/api/tool-image-preflight-billing.test.ts > font billing controls > refunds a synchronous task registration exception once
+[font-design/generate-image] Error: Error: Registration unavailable
+    at J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\api\tool-image-preflight-billing.test.ts:173:53
+    at mockCall (file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/@vitest/spy/dist/index.js:96:15)
+    at spy (file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/tinyspy/dist/index.js:47:80)
+    at POST (J:\无界本地版\projects\_upstream-wjaigc-restore\src\app\api\font-design\generate-image\route.ts:290:5)
+    at processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\api\tool-image-preflight-billing.test.ts:174:13
+    at file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/@vitest/runner/dist/chunk-hooks.js:752:20
+
+stderr | src/__tests__/lib/task-billing.test.ts > task billing initialization and legacy safety > serializes concurrent core table initialization and retries after failure
+[db-storage] ensureCoreTables error: Error: core ddl failed
+    at J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\lib\task-billing.test.ts:306:28
+    at processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/@vitest/runner/dist/chunk-hooks.js:752:20
+
+stderr | src/__tests__/lib/user-manager-admin-folder.test.ts > user login server synchronization > does not call an administrator-only folder endpoint for a regular user
+[Sync] loadProjectsFromServer error: Error: PROJECT_SYNC_STORAGE_UNAVAILABLE
+    at UserManager.commitProjectAdoption (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\user-manager.ts:1170:38)
+    at UserManager.loadProjectsFromServer (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\user-manager.ts:1777:14)
+    at processTicksAndRejections (node:internal/process/task_queues:103:5)
+
+stderr | src/__tests__/api/tool-sync-failure-billing.test.ts > prompt optimization preflight and synchronous compensation > refunds upstream rejection and preserves 429
+Optimize prompt API error: 429 Busy
+
+stderr | src/__tests__/api/tool-sync-failure-billing.test.ts > prompt optimization preflight and synchronous compensation > refunds thrown upstream errors once
+Optimize prompt error: Error: Network failed
+    at J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\api\tool-sync-failure-billing.test.ts:147:38
+    at file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/@vitest/runner/dist/chunk-hooks.js:155:11
+    at file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/@vitest/runner/dist/chunk-hooks.js:752:26
+    at file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/@vitest/runner/dist/chunk-hooks.js:1897:20
+    at new Promise (<anonymous>)
+    at runWithTimeout (file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/@vitest/runner/dist/chunk-hooks.js:1863:10)
+    at runTest (file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/@vitest/runner/dist/chunk-hooks.js:1574:12)
+    at processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at runSuite (file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)
+    at runSuite (file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)
+
+stderr | src/__tests__/api/tool-sync-failure-billing.test.ts > prompt optimization preflight and synchronous compensation > refunds non-JSON upstream result once
+Optimize prompt error: SyntaxError: Unexpected token '<', "<html>failed</html>" is not valid JSON
+    at JSON.parse (<anonymous>)
+    at parseJSONFromBytes (node:internal/deps/undici/undici:6433:19)
+    at successSteps (node:internal/deps/undici/undici:6414:27)
+    at readAllBytes (node:internal/deps/undici/undici:5380:13)
+    at processTicksAndRejections (node:internal/process/task_queues:103:5)
+
+stderr | src/__tests__/api/tool-sync-failure-billing.test.ts > optimize refund failure observability > does not refund twice when constructing the failure response throws after refund
+Optimize prompt API error: 429 Busy
+
+stderr | src/__tests__/api/tool-sync-failure-billing.test.ts > optimize refund failure observability > does not refund twice when constructing the failure response throws after refund
+Optimize prompt error: Error: Response serialization failed
+    at NextResponse.<anonymous> (J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\api\tool-sync-failure-billing.test.ts:178:73)
+    at NextResponse.mockCall (file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/@vitest/spy/dist/index.js:96:15)
+    at NextResponse.json (file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/tinyspy/dist/index.js:47:80)
+    at POST (J:\无界本地版\projects\_upstream-wjaigc-restore\src\app\api\optimize-prompt\route.ts:178:27)
+    at processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\api\tool-sync-failure-billing.test.ts:179:22
+    at file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/@vitest/runner/dist/chunk-hooks.js:752:20
+
+stderr | src/__tests__/api/agent-generate-provider-path.test.ts > real Agent generate_image provider path > preserves a provider parameter rejection as HTTP 400 instead of a retryable 500
+API submit error: 400 {"error":{"code":"invalid_quality","message":"This model only supports auto, low, medium or high quality (got: 1K)."}}
+
+stderr | src/__tests__/api/agent-generate-provider-path.test.ts > real Agent generate_image provider path > does not retry or fall back after the strict external submit is rejected
+API submit error: 500 {"error":{"message":"provider rejected once"}}
+
+stderr | src/__tests__/api/brand-ecommerce-result-identity.test.ts > brand ecommerce server result identity > reports an oversized idempotency key as a client error
+[brand-ecommerce] Error: RangeError: idempotencyKey must not exceed 256 characters
+    at validatePart (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\task-core\idempotency.ts:64:11)
+    at validateIdempotencyIdentity (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\task-core\idempotency.ts:38:21)
+    at Module.POST (J:\无界本地版\projects\_upstream-wjaigc-restore\src\app\api\brand-ecommerce\route.ts:809:32)
+    at J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\api\brand-ecommerce-result-identity.test.ts:207:22
+    at file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/@vitest/runner/dist/chunk-hooks.js:752:20
+
+stderr | src/__tests__/api/font-design-exact-provider.test.ts > font design exact provider routing > does not switch providers when the explicitly selected provider fails
+[font-design] All 1 providers failed. Last error: API错误 503: selected provider unavailable
+
+stderr | src/__tests__/api/font-design-exact-provider.test.ts > font design exact provider routing > reports an oversized idempotency key as a client error
+[font-design/generate-image] Error: RangeError: idempotencyKey must not exceed 256 characters
+    at validatePart (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\task-core\idempotency.ts:64:11)
+    at validateIdempotencyIdentity (J:\无界本地版\projects\_upstream-wjaigc-restore\src\lib\task-core\idempotency.ts:38:21)
+    at Module.POST (J:\无界本地版\projects\_upstream-wjaigc-restore\src\app\api\font-design\generate-image\route.ts:248:30)
+    at processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\api\font-design-exact-provider.test.ts:266:22
+    at file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/@vitest/runner/dist/chunk-hooks.js:752:20
+
+stderr | src/__tests__/api/cancel-task.test.ts > POST /api/cancel-task > does not project cancelled when authoritative persistence fails
+[cancel-task] Error: {
+  requestId: 'req_b07e1d43fb814c55',
+  source: 'database',
+  errorName: 'Error'
+}
+
+stderr | src/__tests__/api/cancel-task.test.ts > POST /api/cancel-task > does not touch the registry when durable task lookup fails
+[cancel-task] Error: {
+  requestId: 'req_4c977ac0de7348e0',
+  source: 'database',
+  errorName: 'Error'
+}
+
+stderr | src/__tests__/api/cancel-task.test.ts > POST /api/cancel-task > returns a safe unified database error with the caller requestId
+[cancel-task] Error: {
+  requestId: 'req_cancel_contract_01',
+  source: 'database',
+  errorName: 'Error'
+}
+
+stderr | src/__tests__/api/brand-ecommerce-assist-provider-route.test.ts > brand ecommerce assist provider route > preserves an invalid upstream SSE body instead of reporting an empty success
+[brand-ecommerce] Error: Error: LLM API 响应无法解析: data: upstream-not-json data: [DONE]
+    at parseAssistResponse (J:\无界本地版\projects\_upstream-wjaigc-restore\src\app\api\brand-ecommerce\route.ts:514:9)
+    at processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at Module.POST (J:\无界本地版\projects\_upstream-wjaigc-restore\src\app\api\brand-ecommerce\route.ts:1299:23)
+    at J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\api\brand-ecommerce-assist-provider-route.test.ts:178:22
+    at file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/@vitest/runner/dist/chunk-hooks.js:752:20
+
+stderr | src/__tests__/lib/cloud-task-persistence.test.ts > cloud-task-persistence > does not fail an already completed task when the projection-pending audit cannot be written
+[task-projection] Unable to persist projection_pending audit Error: database unavailable
+    at J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\lib\cloud-task-persistence.test.ts:359:55
+    at file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/@vitest/runner/dist/chunk-hooks.js:155:11
+    at file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/@vitest/runner/dist/chunk-hooks.js:752:26
+    at file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/@vitest/runner/dist/chunk-hooks.js:1897:20
+    at new Promise (<anonymous>)
+    at runWithTimeout (file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/@vitest/runner/dist/chunk-hooks.js:1863:10)
+    at runTest (file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/@vitest/runner/dist/chunk-hooks.js:1574:12)
+    at processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at runSuite (file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)
+    at runSuite (file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)
+
+stderr | src/__tests__/api/analyze-psd-route.test.ts > POST /api/analyze-psd > returns the durable task id when execution fails after billing admission
+[analyze-psd] request failed {
+  requestId: 'req_a18881fd-e2de-422a-9ba7-c344e0f75f87',
+  code: 'PSD_ANALYSIS_TIMEOUT',
+  error: 'PSD 分析超过 45 秒总截止时间'
+}
+
+stderr | src/__tests__/api/admin-user-projection.test.ts > GET /api/admin/users authoritative projection > fails closed when an authoritative projection query fails
+{
+  code: 'ADMIN_USER_PROJECTION_FAILED',
+  message: 'database unavailable'
+}
+
+stderr | src/__tests__/lib/db-storage-file-migration.test.ts > file to database user migration > continues migrating later users when one file row is invalid
+[db-storage] Skipped invalid user migration row at index 0
+
+stderr | src/__tests__/lib/db-storage-file-migration.test.ts > file to database user migration > preserves the existing rollback file when the database read fails
+{ code: 'DB_READ_USERS_FAILED' }
+
+stderr | src/__tests__/lib/db-storage-file-migration.test.ts > file to database user migration > preserves the existing rollback file when the database read fails
+[db-storage] User file migration could not be read or parsed
+
+(node:16128) Warning: `--localstorage-file` was provided without a valid path
+(Use `node --trace-warnings ...` to show where the warning was created)
+stderr | src/__tests__/components/workflow-inline-model-selection.test.tsx > workflow inline exact model selection > sends the optimizer exact pair to the application API, not a composite model name
+LLM优化失败: TypeError: Body is unusable: Body has already been read
+    at consumeBody (node:internal/deps/undici/undici:6405:31)
+    at _Response.json (node:internal/deps/undici/undici:6356:18)
+    at J:\无界本地版\projects\_upstream-wjaigc-restore\src\components\node-editor.tsx:2108:30
+    at processTicksAndRejections (node:internal/process/task_queues:103:5)
+
+(node:27128) Warning: `--localstorage-file` was provided without a valid path
+(Use `node --trace-warnings ...` to show where the warning was created)
+stderr | src/__tests__/components/workflow-inline-model-selection.test.tsx > workflow inline exact model selection > keeps an ambiguous legacy image selection unselected in both card and properties
+An update to NodeEditor inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/__tests__/components/workflow-inline-model-selection.test.tsx > workflow inline exact model selection > keeps an ambiguous legacy image selection unselected in both card and properties
+An update to NodeEditor inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+(node:25804) Warning: `--localstorage-file` was provided without a valid path
+(Use `node --trace-warnings ...` to show where the warning was created)
+stderr | src/__tests__/components/refine-engine-panel-lifecycle.test.tsx > RefineEnginePanel lifecycle > shows a nested platform error instead of an empty result state
+[refine-engine-panel] API error: no sandbox ID found for taskID
+
+stderr | src/__tests__/components/refine-engine-panel-lifecycle.test.tsx > RefineEnginePanel lifecycle > clears the simulated progress interval after submit transport failure
+Refine failed: TypeError: Network interrupted
+    at J:\无界本地版\projects\_upstream-wjaigc-restore\src\__tests__\components\refine-engine-panel-lifecycle.test.tsx:346:86
+    at mockCall (file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/@vitest/spy/dist/index.js:96:15)
+    at spy (file:///J:/%E6%97%A0%E7%95%8C%E6%9C%AC%E5%9C%B0%E7%89%88/projects/_upstream-wjaigc-restore/node_modules/tinyspy/dist/index.js:47:80)
+    at handleRefine (J:\无界本地版\projects\_upstream-wjaigc-restore\src\components\refine-engine-panel.tsx:528:26)
+    at executeDispatch (J:\无界本地版\projects\_upstream-wjaigc-restore\node_modules\react-dom\cjs\react-dom-client.development.js:19116:9)
+    at runWithFiberInDEV (J:\无界本地版\projects\_upstream-wjaigc-restore\node_modules\react-dom\cjs\react-dom-client.development.js:874:13)
+    at processDispatchQueue (J:\无界本地版\projects\_upstream-wjaigc-restore\node_modules\react-dom\cjs\react-dom-client.development.js:19166:19)
+    at J:\无界本地版\projects\_upstream-wjaigc-restore\node_modules\react-dom\cjs\react-dom-client.development.js:19767:9
+    at batchedUpdates$1 (J:\无界本地版\projects\_upstream-wjaigc-restore\node_modules\react-dom\cjs\react-dom-client.development.js:3255:40)
+    at dispatchEventForPluginEventSystem (J:\无界本地版\projects\_upstream-wjaigc-restore\node_modules\react-dom\cjs\react-dom-client.development.js:19320:7)
+
+(node:15160) Warning: `--localstorage-file` was provided without a valid path
+(Use `node --trace-warnings ...` to show where the warning was created)
+stderr | src/__tests__/lib/psd-analysis-client.test.ts > PSD analysis browser client > returns null after a dedicated endpoint failure without a second paid request
+PSD analysis endpoint failed: 502
+

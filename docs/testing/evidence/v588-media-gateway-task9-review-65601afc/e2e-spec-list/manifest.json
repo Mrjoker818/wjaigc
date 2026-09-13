@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "name": "e2e-spec-list",
+  "command": [
+    "pnpm",
+    "exec",
+    "playwright",
+    "test",
+    "tests/e2e/v588-media-gateway.spec.ts",
+    "--list"
+  ],
+  "cwd": "J:\\无界本地版\\projects\\_upstream-wjaigc-restore",
+  "commit": "65601afc63025ae9eb3173910befaa693fe8f99d",
+  "startedAt": "2026-09-13T18:49:28.306Z",
+  "finishedAt": "2026-09-13T18:49:30.569Z",
+  "durationMs": 2258,
+  "exitCode": 0,
+  "signal": null,
+  "artifacts": {
+    "stdout": {
+      "path": "J:\\无界本地版\\projects\\_upstream-wjaigc-restore\\docs\\testing\\evidence\\v588-media-gateway-task9-review-65601afc\\e2e-spec-list\\stdout.log",
+      "bytes": 15108,
+      "sha256": "2b7215a3059545c15866aa92bb506691783af7f7fca1dd0c6007ac33f5ae18b2"
+    },
+    "stderr": {
+      "path": "J:\\无界本地版\\projects\\_upstream-wjaigc-restore\\docs\\testing\\evidence\\v588-media-gateway-task9-review-65601afc\\e2e-spec-list\\stderr.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  }
+}

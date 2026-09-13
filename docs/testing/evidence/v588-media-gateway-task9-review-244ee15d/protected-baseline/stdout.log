@@ -1,0 +1,12 @@
+
+> projects@4.0.0 check:protected-baseline J:\无界本地版\projects\_upstream-wjaigc-restore
+> node scripts/check-protected-baseline.mjs --base 7fdc0108952fb3a68415ca3a2a26b5d33641dc6b --allow-path-file docs/testing/baselines/protected-baseline-allowed-paths.json
+
+Protected baseline gate: 7fdc0108952fb3a68415ca3a2a26b5d33641dc6b (7fdc0108952fb3a68415ca3a2a26b5d33641dc6b) -> HEAD (244ee15dd2cae651b2ffa4d004e5131dd328152c)
+PASS  All 38 baseline feature IDs remain present.
+PASS  All literal protected component paths are present.
+PASS  All required evidence contracts are present.
+PASS  Base and candidate Git refs are confirmed.
+BLOCK Unapproved source drift: scripts/run-task9-gate-with-evidence.mjs
+BLOCK Release gate found 1 blocking issue(s).
+ ELIFECYCLE  Command failed with exit code 1.

@@ -1,0 +1,266 @@
+
+> projects@4.0.0 build J:\无界本地版\projects\_upstream-wjaigc-restore
+> next build --turbopack && node scripts/prune-build-traces.mjs
+
+▲ Next.js 16.2.11 (Turbopack)
+- Experiments (use with caution):
+  · proxyClientMaxBodySize: "50mb"
+  · proxyTimeout: 600000
+
+  Creating an optimized production build ...
+✓ Compiled successfully in 69s
+  Running TypeScript ...
+  Finished TypeScript in 53s ...
+  Collecting page data using 11 workers ...
+[DataRoot] Using persistent storage: /space/wujie-data
+[DataRoot] Using persistent storage: /space/wujie-data
+[DataRoot] Using persistent storage: /space/wujie-data
+[DataRoot] Using persistent storage: /space/wujie-data
+[DataRoot] Using local data dir: J:\无界本地版\projects\_upstream-wjaigc-restore\data (data will NOT survive redeployment!)
+[DataRoot] Using persistent storage: /space/wujie-data
+[DataRoot] Using persistent storage: /space/wujie-data
+[DataRoot] Using persistent storage: /space/wujie-data
+[DataRoot] Using persistent storage: /space/wujie-data
+[DataRoot] Using persistent storage: /space/wujie-data
+[DataRoot] Using persistent storage: /space/wujie-data
+  Generating static pages using 11 workers (0/120) ...
+  Generating static pages using 11 workers (30/120) 
+  Generating static pages using 11 workers (60/120) 
+  Generating static pages using 11 workers (90/120) 
+✓ Generating static pages using 11 workers (120/120) in 894ms
+  Finalizing page optimization ...
+
+Route (app)
+┌ ƒ /
+├ ƒ /_not-found
+├ ƒ /api/activity
+├ ƒ /api/activity-venue/analyze
+├ ƒ /api/activity-venue/lock-design
+├ ƒ /api/activity-venue/proposals
+├ ƒ /api/activity-venue/qc
+├ ƒ /api/admin/api-balance
+├ ƒ /api/admin/apis
+├ ƒ /api/admin/assets/orphans
+├ ƒ /api/admin/assets/remediation
+├ ƒ /api/admin/audit
+├ ƒ /api/admin/backfill-thumbnails
+├ ƒ /api/admin/backups
+├ ƒ /api/admin/backups/[id]
+├ ƒ /api/admin/backups/[id]/download
+├ ƒ /api/admin/cloud-tasks
+├ ƒ /api/admin/credits/overview
+├ ƒ /api/admin/credits/pricing
+├ ƒ /api/admin/credits/recharge
+├ ƒ /api/admin/dashboard-stats
+├ ƒ /api/admin/desktop-devices
+├ ƒ /api/admin/desktop-update
+├ ƒ /api/admin/gateway/keys
+├ ƒ /api/admin/gateway/keys/[keyId]
+├ ƒ /api/admin/groups
+├ ƒ /api/admin/local-generation-records
+├ ƒ /api/admin/op-log
+├ ƒ /api/admin/platform-export-presets
+├ ƒ /api/admin/production-readiness
+├ ƒ /api/admin/resources
+├ ƒ /api/admin/settings
+├ ƒ /api/admin/test-all-providers
+├ ƒ /api/admin/user-folder
+├ ƒ /api/admin/user-images
+├ ƒ /api/admin/users
+├ ƒ /api/agent-edit
+├ ƒ /api/agent-runs
+├ ƒ /api/agent-runs/[runId]
+├ ƒ /api/agent-runs/[runId]/events
+├ ƒ /api/ai-psd/create
+├ ƒ /api/ai-psd/result
+├ ƒ /api/ai-psd/status
+├ ƒ /api/analyze
+├ ƒ /api/analyze-psd
+├ ƒ /api/annotations/execute
+├ ƒ /api/annotations/resolve-target
+├ ƒ /api/announcement
+├ ƒ /api/artifacts
+├ ƒ /api/aspect-recompose
+├ ƒ /api/assets
+├ ƒ /api/assets/[assetId]/purge
+├ ƒ /api/assets/[assetId]/restore
+├ ƒ /api/assets/adopt-canvas-image
+├ ƒ /api/assets/batch-transfer
+├ ƒ /api/assets/media/recover
+├ ƒ /api/assets/placements/[placementId]
+├ ƒ /api/assets/transfer
+├ ƒ /api/audio/generate
+├ ƒ /api/auth/login
+├ ƒ /api/auth/logout
+├ ƒ /api/auth/me
+├ ƒ /api/auth/register
+├ ƒ /api/brand-assets
+├ ƒ /api/brand-ecommerce
+├ ƒ /api/brand-factory
+├ ƒ /api/brand-ip/generate
+├ ƒ /api/brand-ip/projects
+├ ƒ /api/brand-ip/strategy
+├ ƒ /api/brand-ip/tasks
+├ ƒ /api/brand-kit
+├ ƒ /api/brand-packaging/generate
+├ ƒ /api/brand-packaging/tasks
+├ ƒ /api/cache-image
+├ ƒ /api/cancel-task
+├ ƒ /api/chat
+├ ƒ /api/chat-tasks
+├ ƒ /api/client-error
+├ ƒ /api/connector/auth/login
+├ ƒ /api/connector/auth/me
+├ ƒ /api/creative/health
+├ ƒ /api/creative/illustrator
+├ ƒ /api/creative/photoshop
+├ ƒ /api/creative/templates
+├ ƒ /api/credits
+├ ƒ /api/credits/pay-redirect
+├ ƒ /api/credits/payment-config
+├ ƒ /api/credits/payment-notify
+├ ƒ /api/credits/payment-qr
+├ ƒ /api/credits/payment-status
+├ ƒ /api/dcc/health
+├ ƒ /api/dcc/preflight
+├ ƒ /api/dcc/templates
+├ ƒ /api/design/layer-split
+├ ƒ /api/design/vectorize
+├ ƒ /api/desktop/backup/download/[id]
+├ ƒ /api/desktop/backup/list
+├ ƒ /api/desktop/backup/upload
+├ ƒ /api/desktop/config
+├ ƒ /api/desktop/device/heartbeat
+├ ƒ /api/desktop/generation-records
+├ ƒ /api/desktop/login
+├ ƒ /api/desktop/resources
+├ ƒ /api/desktop/update
+├ ƒ /api/desktop/update/download/[id]
+├ ƒ /api/diag/storage
+├ ƒ /api/diagnostics/export
+├ ƒ /api/display-3d/decompose
+├ ƒ /api/display-3d/generate
+├ ƒ /api/ecom-templates
+├ ƒ /api/edit
+├ ƒ /api/effect-reverse-engineering
+├ ƒ /api/element-decompose
+├ ƒ /api/excel/generate
+├ ƒ /api/export-project
+├ ƒ /api/export/annotation-image
+├ ƒ /api/export/bom
+├ ƒ /api/export/pdf
+├ ƒ /api/export/to-canvas
+├ ƒ /api/favorites
+├ ƒ /api/flowchart/generate
+├ ƒ /api/font-design/gallery
+├ ƒ /api/font-design/gallery-image
+├ ƒ /api/font-design/generate-image
+├ ƒ /api/font-design/plan
+├ ƒ /api/font-design/prompt
+├ ƒ /api/gateway/v1/images
+├ ƒ /api/gateway/v1/tasks/[taskId]
+├ ƒ /api/gateway/v1/tasks/[taskId]/cancel
+├ ƒ /api/gateway/v1/videos
+├ ƒ /api/generate
+├ ƒ /api/help-image
+├ ƒ /api/human/analyze
+├ ƒ /api/human/repair
+├ ƒ /api/human/select
+├ ƒ /api/human/task/[id]
+├ ƒ /api/image-edit
+├ ƒ /api/image-to-3d
+├ ƒ /api/image-to-3d/auto-multi-view
+├ ƒ /api/image-to-3d/meshy-stream
+├ ƒ /api/image-to-3d/poll-post-process
+├ ƒ /api/image-to-3d/post-process
+├ ƒ /api/image/color-adjust
+├ ƒ /api/image/health
+├ ƒ /api/image/source
+├ ƒ /api/image/start-services
+├ ƒ /api/image/upscale
+├ ƒ /api/image/upscale-pro
+├ ƒ /api/knowledge/extract-text
+├ ƒ /api/layer-documents
+├ ƒ /api/layered-decompose
+├ ƒ /api/logo-skill
+├ ƒ /api/mindmap/generate
+├ ƒ /api/models
+├ ƒ /api/omp-agent
+├ ƒ /api/omp-resources
+├ ƒ /api/optimize-prompt
+├ ƒ /api/pdf/generate
+├ ƒ /api/platform-export-presets
+├ ƒ /api/poll-3d-task
+├ ƒ /api/poll-task
+├ ƒ /api/ppt/generate
+├ ƒ /api/ppt/template/upload
+├ ƒ /api/proxy-3d-model
+├ ƒ /api/queue-position
+├ ƒ /api/quick-create/compile
+├ ƒ /api/recharge/[orderId]
+├ ƒ /api/recover-images
+├ ƒ /api/refine-engine
+├ ƒ /api/save-image
+├ ƒ /api/scene-studio
+├ ƒ /api/scene-studio/generate
+├ ƒ /api/segment-elements
+├ ƒ /api/serve-upload/[...path]
+├ ƒ /api/session
+├ ƒ /api/simple-chat/chat
+├ ƒ /api/simple-chat/deep-research
+├ ƒ /api/simple-chat/memory
+├ ƒ /api/simple-chat/share
+├ ƒ /api/simple-chat/share/[shareId]
+├ ƒ /api/simple-chat/upload-file
+├ ƒ /api/simple-chat/workspace-handoff
+├ ƒ /api/skill-reports/[runId]/[stepId]
+├ ƒ /api/skill-runs
+├ ƒ /api/skill-runs/[runId]
+├ ƒ /api/skill-runs/[runId]/retry
+├ ƒ /api/skill-runs/estimate
+├ ƒ /api/skills
+├ ƒ /api/skills/[skillId]
+├ ƒ /api/story-assets/plan
+├ ƒ /api/svg-convert
+├ ƒ /api/svg-trace
+├ ƒ /api/task-events
+├ ƒ /api/tasks/recover
+├ ƒ /api/test-provider-connection
+├ ƒ /api/universal-discover
+├ ƒ /api/universal-generate
+├ ƒ /api/upload
+├ ƒ /api/upscayl
+├ ƒ /api/user-data/record
+├ ƒ /api/user-data/sync
+├ ƒ /api/user/change-password
+├ ƒ /api/vector-design
+├ ƒ /api/verify-protocol
+├ ƒ /api/video/director/diagnose
+├ ƒ /api/video/director/prompt
+├ ƒ /api/video/director/shot-plan
+├ ƒ /api/video/download
+├ ƒ /api/video/extend
+├ ƒ /api/video/extract-frame
+├ ƒ /api/video/extract-frames
+├ ƒ /api/video/generate
+├ ƒ /api/video/tools
+├ ƒ /api/vision-prompt
+├ ƒ /api/wasm/vtracer
+├ ƒ /api/word/generate
+├ ƒ /api/workflow/ai-build
+├ ƒ /api/workflow/execute
+├ ƒ /api/workflow/models
+├ ƒ /api/workflow/save
+├ ƒ /recharge/[orderId]
+├ ○ /robots.txt
+├ ƒ /shared/[shareId]
+├ ƒ /simple-chat
+└ ƒ /simple-create
+
+
+ƒ Proxy (Middleware)
+
+○  (Static)   prerendered as static content
+ƒ  (Dynamic)  server-rendered on demand
+
+[build-trace] inspected 229 traces; removed 20804 local artifact references

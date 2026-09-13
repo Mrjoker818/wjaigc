@@ -1,0 +1,1109 @@
+Turbopack build encountered 55 warnings:
+./src/app/api/generate/route.ts:1944:36
+The file pattern ('' | <dynamic> '/uploads/' <dynamic> | <dynamic> 'uploads/' <dynamic> | <dynamic> '/uploads' <dynamic> | <dynamic> 'uploads' <dynamic> | <dynamic> '/' <dynamic> | <dynamic> | <dynamic> '/public/' <dynamic> | '/workspace/projects/public/' <dynamic> | <dynamic> 'public/' <dynamic> | '/workspace/projectspublic/' <dynamic> | <dynamic> '/public' <dynamic> | '/workspace/projects/public' <dynamic> | <dynamic> 'public' <dynamic> | '/workspace/projectspublic' <dynamic> | <dynamic> '/public/' <dynamic> | '/workspace/projects/public/' <dynamic> | <dynamic> 'public/' <dynamic> | '/workspace/projectspublic/' <dynamic> | <dynamic> '/public' <dynamic> | '/workspace/projects/public' <dynamic> | <dynamic> 'public' <dynamic> | '/workspace/projectspublic' <dynamic>) matches 24674 files in [project]/
+  [90m1942 |[0m ...         [36mconst[0m dataRoot = getServerDataRoot();
+  [90m1943 |[0m ...         [36mif[0m (resolved.startsWith(publicDir) || resolved.startsWith(dataRoot)) {
+[31m[1m>[0m [90m1944 |[0m ...           [36mconst[0m imgBuf = [36mawait[0m fs.readFile(resolved);
+  [90m     |[0m                                    [31m[1m^^^^^^^^^^^^^^^^^^^^^[0m
+  [90m1945 |[0m ...           [36mconst[0m ext = path.extname(resolved).toLowerCase();
+  [90m1946 |[0m ...           [36mconst[0m mimeMap: [33mRecord[0m<string, string> = { [32m'.png'[0m: [32m'image/png'[0m, [32m'.jpg'[0m: [32m'im...[0m
+  [90m1947 |[0m ...           [36mconst[0m mime = mimeMap[ext] || [32m'image/png'[0m;
+
+Overly broad patterns can lead to build performance issues and over bundling.
+
+Import trace:
+  App Route:
+    ./src/app/api/generate/route.ts
+    ./src/app/api/refine-engine/route.ts
+
+
+./src/app/api/refine-engine/route.ts:503:32
+The file pattern ('' | <dynamic> '/uploads/' <dynamic> | <dynamic> 'uploads/' <dynamic> | <dynamic> '/uploads' <dynamic> | <dynamic> 'uploads' <dynamic> | <dynamic> '/' <dynamic> | <dynamic> | <dynamic> '/public/' <dynamic> | '/workspace/projects/public/' <dynamic> | <dynamic> 'public/' <dynamic> | '/workspace/projectspublic/' <dynamic> | <dynamic> '/public' <dynamic> | '/workspace/projects/public' <dynamic> | <dynamic> 'public' <dynamic> | '/workspace/projectspublic' <dynamic> | <dynamic> '/public/' <dynamic> | '/workspace/projects/public/' <dynamic> | <dynamic> 'public/' <dynamic> | '/workspace/projectspublic/' <dynamic> | <dynamic> '/public' <dynamic> | '/workspace/projects/public' <dynamic> | <dynamic> 'public' <dynamic> | '/workspace/projectspublic' <dynamic>) matches 24674 files in [project]/
+  [90m501 |[0m         [36mconst[0m dataRoot = getServerDataRoot();
+  [90m502 |[0m         [36mif[0m (resolved.startsWith(publicDir) || resolved.startsWith(dataRoot)) {
+[31m[1m>[0m [90m503 |[0m           [36mconst[0m imgBuf = [36mawait[0m fs.readFile(resolved);
+  [90m    |[0m                                [31m[1m^^^^^^^^^^^^^^^^^^^^^[0m
+  [90m504 |[0m           [36mconst[0m ext = path.extname(resolved).toLowerCase();
+  [90m505 |[0m           [36mconst[0m mimeMap: [33mRecord[0m<string, string> = { [32m'.png'[0m: [32m'image/png'[0m, [32m'.jpg'[0m: [32m'image/j...[0m
+  [90m506 |[0m           [36mconst[0m mime = mimeMap[ext] || [32m'image/png'[0m;
+
+Overly broad patterns can lead to build performance issues and over bundling.
+
+Import trace:
+  App Route:
+    ./src/app/api/refine-engine/route.ts
+    ./src/app/api/refine-engine/route.ts
+
+
+./src/app/api/generate/route.ts:1940:30
+The file pattern ('' | <dynamic> '/uploads/' <dynamic> | <dynamic> 'uploads/' <dynamic> | <dynamic> '/uploads' <dynamic> | <dynamic> 'uploads' <dynamic> | <dynamic> '/' <dynamic> | <dynamic> | <dynamic> '/public/' <dynamic> | '/workspace/projects/public/' <dynamic> | <dynamic> 'public/' <dynamic> | '/workspace/projectspublic/' <dynamic> | <dynamic> '/public' <dynamic> | '/workspace/projects/public' <dynamic> | <dynamic> 'public' <dynamic> | '/workspace/projectspublic' <dynamic> | <dynamic> '/public/' <dynamic> | '/workspace/projects/public/' <dynamic> | <dynamic> 'public/' <dynamic> | '/workspace/projectspublic/' <dynamic> | <dynamic> '/public' <dynamic> | '/workspace/projects/public' <dynamic> | <dynamic> 'public' <dynamic> | '/workspace/projectspublic' <dynamic>) matches 50675 files in [project]/
+  [90m1938 |[0m               }
+  [90m1939 |[0m             }
+[31m[1m>[0m [90m1940 |[0m             [36mconst[0m resolved = path.resolve(filePath);
+  [90m     |[0m                              [31m[1m^^^^^^^^^^^^^^^^^^^^^^[0m
+  [90m1941 |[0m             [36mconst[0m { getServerDataRoot } = [36mawait[0m [36mimport[0m([32m'@/lib/server-data-root'[0m);
+  [90m1942 |[0m             [36mconst[0m dataRoot = getServerDataRoot();
+  [90m1943 |[0m             [36mif[0m (resolved.startsWith(publicDir) || resolved.startsWith(dataRoot)) {
+
+Overly broad patterns can lead to build performance issues and over bundling.
+
+Import trace:
+  App Route:
+    ./src/app/api/generate/route.ts
+    ./src/app/api/refine-engine/route.ts
+
+
+./src/app/api/refine-engine/route.ts:498:26
+The file pattern ('' | <dynamic> '/uploads/' <dynamic> | <dynamic> 'uploads/' <dynamic> | <dynamic> '/uploads' <dynamic> | <dynamic> 'uploads' <dynamic> | <dynamic> '/' <dynamic> | <dynamic> | <dynamic> '/public/' <dynamic> | '/workspace/projects/public/' <dynamic> | <dynamic> 'public/' <dynamic> | '/workspace/projectspublic/' <dynamic> | <dynamic> '/public' <dynamic> | '/workspace/projects/public' <dynamic> | <dynamic> 'public' <dynamic> | '/workspace/projectspublic' <dynamic> | <dynamic> '/public/' <dynamic> | '/workspace/projects/public/' <dynamic> | <dynamic> 'public/' <dynamic> | '/workspace/projectspublic/' <dynamic> | <dynamic> '/public' <dynamic> | '/workspace/projects/public' <dynamic> | <dynamic> 'public' <dynamic> | '/workspace/projectspublic' <dynamic>) matches 50675 files in [project]/
+  [90m496 |[0m           }
+  [90m497 |[0m         }
+[31m[1m>[0m [90m498 |[0m         [36mconst[0m resolved = path.resolve(filePath);
+  [90m    |[0m                          [31m[1m^^^^^^^^^^^^^^^^^^^^^^[0m
+  [90m499 |[0m         [90m// 安全校验：允许 publicDir 和 dataRoot 两个合法目录[0m
+  [90m500 |[0m         [36mconst[0m { getServerDataRoot } = [36mawait[0m [36mimport[0m([32m'@/lib/server-data-root'[0m);
+  [90m501 |[0m         [36mconst[0m dataRoot = getServerDataRoot();
+
+Overly broad patterns can lead to build performance issues and over bundling.
+
+Import trace:
+  App Route:
+    ./src/app/api/refine-engine/route.ts
+    ./src/app/api/refine-engine/route.ts
+
+
+./src/lib/server-data-root.ts:195:16
+The file pattern ('null' | <dynamic> | '/space/wujie-data' | <dynamic> '/data' | '/ROOT//data' | <dynamic> 'data' | '/ROOT/data' | '/tmp/wujie-data') matches 24676 files in [project]/
+  [90m193 |[0m     [36mreturn[0m [36mfalse[0m;
+  [90m194 |[0m   }
+[31m[1m>[0m [90m195 |[0m   [36mconst[0m root = path.resolve(getServerDataRoot());
+  [90m    |[0m                [31m[1m^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^[0m
+  [90m196 |[0m   [36mconst[0m filePath = path.resolve(root, subDir, filename);
+  [90m197 |[0m   [36mconst[0m relative = path.relative(root, filePath);
+  [90m198 |[0m   [36mif[0m (!relative || relative.startsWith([32m'..'[0m) || path.isAbsolute(relative)) {
+
+Overly broad patterns can lead to build performance issues and over bundling.
+
+Import traces:
+  #1 [App Route]:
+    ./src/lib/server-data-root.ts
+    ./src/app/api/vision-prompt/route.ts
+
+  #2 [App Route]:
+    ./src/lib/server-data-root.ts
+    ./src/app/api/save-image/route.ts
+
+  #3 [Instrumentation]:
+    ./src/lib/server-data-root.ts
+    ./src/lib/asset-core/cleanup-outbox.ts
+    ./src/lib/asset-core/cleanup-worker.ts
+    ./src/instrumentation.ts
+
+
+./src/lib/server-data-root.ts:171:20
+The file pattern ('null/' <dynamic> '/' <dynamic> | <dynamic> '/' <dynamic> '/' <dynamic> | '/space/wujie-data/' <dynamic> '/' <dynamic> | '/tmp/wujie-data/' <dynamic> '/' <dynamic> | 'null' <dynamic> '/' <dynamic> | <dynamic> '/' <dynamic> | '/space/wujie-data' <dynamic> '/' <dynamic> | '/tmp/wujie-data' <dynamic> '/' <dynamic> | 'null/' <dynamic> | <dynamic> '/' <dynamic> | '/space/wujie-data/' <dynamic> | '/tmp/wujie-data/' <dynamic> | 'null' <dynamic> | <dynamic> | '/space/wujie-data' <dynamic> | '/tmp/wujie-data' <dynamic>) matches 98149 files in [project]/
+  [90m169 |[0m   }
+  [90m170 |[0m   
+[31m[1m>[0m [90m171 |[0m   [36mconst[0m filePath = path.join(dir, filename);
+  [90m    |[0m                    [31m[1m^^^^^^^^^^^^^^^^^^^^^^^^[0m
+  [90m172 |[0m   [36mconst[0m data = [36mtypeof[0m buffer === [32m'string'[0m ? [33mBuffer[0m.[36mfrom[0m(buffer, [32m'base64'[0m) : buffer;
+  [90m173 |[0m   fs.writeFileSync(filePath, data);
+  [90m174 |[0m
+
+Overly broad patterns can lead to build performance issues and over bundling.
+
+Import traces:
+  #1 [App Route]:
+    ./src/lib/server-data-root.ts
+    ./src/app/api/vision-prompt/route.ts
+
+  #2 [App Route]:
+    ./src/lib/server-data-root.ts
+    ./src/app/api/save-image/route.ts
+
+  #3 [Instrumentation]:
+    ./src/lib/server-data-root.ts
+    ./src/lib/asset-core/cleanup-outbox.ts
+    ./src/lib/asset-core/cleanup-worker.ts
+    ./src/instrumentation.ts
+
+
+./src/lib/server-data-root.ts:167:8
+The file pattern ('null/' <dynamic> | <dynamic> '/' <dynamic> | '/space/wujie-data/' <dynamic> | '/tmp/wujie-data/' <dynamic> | 'null' <dynamic> | <dynamic> | '/space/wujie-data' <dynamic> | '/tmp/wujie-data' <dynamic>) matches 24674 files in [project]/
+  [90m165 |[0m   
+  [90m166 |[0m   [90m// 确保目录存在[0m
+[31m[1m>[0m [90m167 |[0m   [36mif[0m (!fs.existsSync(dir)) {
+  [90m    |[0m        [31m[1m^^^^^^^^^^^^^^^^^^[0m
+  [90m168 |[0m     fs.mkdirSync(dir, { recursive: [36mtrue[0m });
+  [90m169 |[0m   }
+  [90m170 |[0m
+
+Overly broad patterns can lead to build performance issues and over bundling.
+
+Import traces:
+  #1 [App Route]:
+    ./src/lib/server-data-root.ts
+    ./src/app/api/vision-prompt/route.ts
+
+  #2 [App Route]:
+    ./src/lib/server-data-root.ts
+    ./src/app/api/save-image/route.ts
+
+  #3 [Instrumentation]:
+    ./src/lib/server-data-root.ts
+    ./src/lib/asset-core/cleanup-outbox.ts
+    ./src/lib/asset-core/cleanup-worker.ts
+    ./src/instrumentation.ts
+
+
+./src/lib/server-data-root.ts:213:8
+The file pattern ('null/' <dynamic> | <dynamic> '/' <dynamic> | '/space/wujie-data/' <dynamic> | '/tmp/wujie-data/' <dynamic> | 'null' <dynamic> | <dynamic> | '/space/wujie-data' <dynamic> | '/tmp/wujie-data' <dynamic>) matches 24674 files in [project]/
+  [90m211 |[0m   [36mconst[0m root = getServerDataRoot();
+  [90m212 |[0m   [36mconst[0m dir = path.join(root, subDir);
+[31m[1m>[0m [90m213 |[0m   [36mif[0m (!fs.existsSync(dir)) {
+  [90m    |[0m        [31m[1m^^^^^^^^^^^^^^^^^^[0m
+  [90m214 |[0m     fs.mkdirSync(dir, { recursive: [36mtrue[0m });
+  [90m215 |[0m   }
+  [90m216 |[0m   [36mreturn[0m dir;
+
+Overly broad patterns can lead to build performance issues and over bundling.
+
+Import traces:
+  #1 [App Route]:
+    ./src/lib/server-data-root.ts
+    ./src/app/api/vision-prompt/route.ts
+
+  #2 [App Route]:
+    ./src/lib/server-data-root.ts
+    ./src/app/api/save-image/route.ts
+
+  #3 [Instrumentation]:
+    ./src/lib/server-data-root.ts
+    ./src/lib/asset-core/cleanup-outbox.ts
+    ./src/lib/asset-core/cleanup-worker.ts
+    ./src/instrumentation.ts
+
+
+./src/lib/server-data-root.ts:164:15
+The file pattern ('null/' <dynamic> | <dynamic> '/' <dynamic> | '/space/wujie-data/' <dynamic> | '/tmp/wujie-data/' <dynamic> | 'null' <dynamic> | <dynamic> | '/space/wujie-data' <dynamic> | '/tmp/wujie-data' <dynamic>) matches 49306 files in [project]/
+  [90m162 |[0m ): string {
+  [90m163 |[0m   [36mconst[0m root = getServerDataRoot();
+[31m[1m>[0m [90m164 |[0m   [36mconst[0m dir = path.join(root, subDir);
+  [90m    |[0m               [31m[1m^^^^^^^^^^^^^^^^^^^^^^^[0m
+  [90m165 |[0m   
+  [90m166 |[0m   [90m// 确保目录存在[0m
+  [90m167 |[0m   [36mif[0m (!fs.existsSync(dir)) {
+
+Overly broad patterns can lead to build performance issues and over bundling.
+
+Import traces:
+  #1 [App Route]:
+    ./src/lib/server-data-root.ts
+    ./src/app/api/vision-prompt/route.ts
+
+  #2 [App Route]:
+    ./src/lib/server-data-root.ts
+    ./src/app/api/save-image/route.ts
+
+  #3 [Instrumentation]:
+    ./src/lib/server-data-root.ts
+    ./src/lib/asset-core/cleanup-outbox.ts
+    ./src/lib/asset-core/cleanup-worker.ts
+    ./src/instrumentation.ts
+
+
+./src/lib/server-data-root.ts:212:15
+The file pattern ('null/' <dynamic> | <dynamic> '/' <dynamic> | '/space/wujie-data/' <dynamic> | '/tmp/wujie-data/' <dynamic> | 'null' <dynamic> | <dynamic> | '/space/wujie-data' <dynamic> | '/tmp/wujie-data' <dynamic>) matches 49306 files in [project]/
+  [90m210 |[0m [36mexport[0m [36mfunction[0m getImageWriteDir(subDir: string): string {
+  [90m211 |[0m   [36mconst[0m root = getServerDataRoot();
+[31m[1m>[0m [90m212 |[0m   [36mconst[0m dir = path.join(root, subDir);
+  [90m    |[0m               [31m[1m^^^^^^^^^^^^^^^^^^^^^^^[0m
+  [90m213 |[0m   [36mif[0m (!fs.existsSync(dir)) {
+  [90m214 |[0m     fs.mkdirSync(dir, { recursive: [36mtrue[0m });
+  [90m215 |[0m   }
+
+Overly broad patterns can lead to build performance issues and over bundling.
+
+Import traces:
+  #1 [App Route]:
+    ./src/lib/server-data-root.ts
+    ./src/app/api/vision-prompt/route.ts
+
+  #2 [App Route]:
+    ./src/lib/server-data-root.ts
+    ./src/app/api/save-image/route.ts
+
+  #3 [Instrumentation]:
+    ./src/lib/server-data-root.ts
+    ./src/lib/asset-core/cleanup-outbox.ts
+    ./src/lib/asset-core/cleanup-worker.ts
+    ./src/instrumentation.ts
+
+
+./src/lib/image-tools/file.ts:213:28
+The file pattern (<dynamic> '/' <dynamic> '/' <dynamic> '-' <dynamic> '-' <dynamic> '.' <dynamic> | <dynamic> '/' <dynamic> '-' <dynamic> '-' <dynamic> '.' <dynamic> | <dynamic> '/' <dynamic> '-' <dynamic> '-' <dynamic> '.' <dynamic> | <dynamic> '-' <dynamic> '-' <dynamic> '.' <dynamic>) matches 12334 files in [project]/
+  [90m211 |[0m   [36mif[0m (process.env.[33mCOZE_PROJECT_ENV[0m !== [32m'PROD'[0m && !filepath.startsWith([33mPUBLIC_DIR[0m)) {
+  [90m212 |[0m     [36mtry[0m {
+[31m[1m>[0m [90m213 |[0m       [36mconst[0m publicTarget = path.join([33mPUBLIC_DIR[0m, urlPrefix.replace([35m/^\//[0m, [32m''[0m), filename);
+  [90m    |[0m                            [31m[1m^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^[0m
+  [90m214 |[0m       fs.mkdirSync(path.dirname(publicTarget), { recursive: [36mtrue[0m });
+  [90m215 |[0m       fs.copyFileSync(filepath, publicTarget);
+  [90m216 |[0m     } [36mcatch[0m { [90m/* best effort */[0m }
+
+Overly broad patterns can lead to build performance issues and over bundling.
+
+Import traces:
+  #1 [App Route]:
+    ./src/lib/image-tools/file.ts
+    ./src/app/api/vision-prompt/route.ts
+
+  #2 [App Route]:
+    ./src/lib/image-tools/file.ts
+    ./src/lib/multi-platform-export/source-reader.ts
+    ./src/lib/multi-platform-export/estimate.ts
+    ./src/app/api/skill-runs/estimate/route.ts
+
+
+./src/app/api/user-data/record/route.ts:76:22
+The file pattern (<dynamic> '/' <dynamic> '/' <dynamic> '_' <dynamic> | <dynamic> '/' <dynamic> '_' <dynamic> | <dynamic> '/' <dynamic> '_' <dynamic> | <dynamic> '_' <dynamic> | <dynamic> '/' <dynamic> '/' <dynamic> '_asset' | <dynamic> '/' <dynamic> '_asset' | <dynamic> '/' <dynamic> '_asset' | <dynamic> '_asset') matches 10861 files in [project]/
+  [90m74 |[0m     } [36melse[0m [36mif[0m ([36mtypeof[0m body.content === [32m'string'[0m) {
+  [90m75 |[0m       [36mconst[0m filename = safeFilename([33mString[0m(body.filename || [32m`[0m${[33mDate[0m.now()[32m}.json`[0m));
+[31m[1m>[0m [90m76 |[0m       [36mconst[0m target = path.join(getUserDataDir(userId), area, [32m`[0m${[33mDate[0m.now()[32m}_[0m${filename[32m}`[0m);
+  [90m   |[0m                      [31m[1m^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^[0m
+  [90m77 |[0m       [36mawait[0m writeFile(target, body.content, [32m'utf8'[0m);
+  [90m78 |[0m       storedFile = target;
+  [90m79 |[0m     }
+
+Overly broad patterns can lead to build performance issues and over bundling.
+
+Import trace:
+  App Route:
+    ./src/app/api/user-data/record/route.ts
+    ./src/app/api/refine-engine/route.ts
+
+
+./src/app/api/credits/payment-config/route.ts:91:15
+The file pattern (<dynamic> '/' <dynamic> | '/ROOT/public/uploads/' <dynamic> | <dynamic> | '/ROOT/public/uploads' <dynamic>) matches 25968 files in [project]/
+  [90m89 |[0m         [36mfor[0m ([36mconst[0m dir [36mof[0m possibleDirs) {
+  [90m90 |[0m           [36mconst[0m fullPath = path.join(dir, relativePath);
+[31m[1m>[0m [90m91 |[0m           [36mif[0m (fs.existsSync(fullPath)) {
+  [90m   |[0m               [31m[1m^^^^^^^^^^^^^^^^^^^^^^^[0m
+  [90m92 |[0m             [36mtry[0m {
+  [90m93 |[0m               [36mconst[0m buffer = [36mawait[0m fs.promises.readFile(fullPath);
+  [90m94 |[0m               [36mconst[0m ext = path.extname(fullPath).toLowerCase();
+
+Overly broad patterns can lead to build performance issues and over bundling.
+
+Import trace:
+  App Route:
+    ./src/app/api/credits/payment-config/route.ts
+    ./src/app/api/refine-engine/route.ts
+
+
+./src/app/api/credits/payment-config/route.ts:93:36
+The file pattern (<dynamic> '/' <dynamic> | '/ROOT/public/uploads/' <dynamic> | <dynamic> | '/ROOT/public/uploads' <dynamic>) matches 25968 files in [project]/
+  [90m91 |[0m           [36mif[0m (fs.existsSync(fullPath)) {
+  [90m92 |[0m             [36mtry[0m {
+[31m[1m>[0m [90m93 |[0m               [36mconst[0m buffer = [36mawait[0m fs.promises.readFile(fullPath);
+  [90m   |[0m                                    [31m[1m^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^[0m
+  [90m94 |[0m               [36mconst[0m ext = path.extname(fullPath).toLowerCase();
+  [90m95 |[0m               [36mconst[0m mimeType = ext === [32m'.jpg'[0m || ext === [32m'.jpeg'[0m ? [32m'image/jpeg'[0m
+  [90m96 |[0m                 : ext === [32m'.webp'[0m ? [32m'image/webp'[0m
+
+Overly broad patterns can lead to build performance issues and over bundling.
+
+Import trace:
+  App Route:
+    ./src/app/api/credits/payment-config/route.ts
+    ./src/app/api/refine-engine/route.ts
+
+
+./src/app/api/credits/payment-config/route.ts:90:28
+The file pattern (<dynamic> '/' <dynamic> | '/ROOT/public/uploads/' <dynamic> | <dynamic> | '/ROOT/public/uploads' <dynamic>) matches 54482 files in [project]/
+  [90m88 |[0m         ];
+  [90m89 |[0m         [36mfor[0m ([36mconst[0m dir [36mof[0m possibleDirs) {
+[31m[1m>[0m [90m90 |[0m           [36mconst[0m fullPath = path.join(dir, relativePath);
+  [90m   |[0m                            [31m[1m^^^^^^^^^^^^^^^^^^^^^^^^^^^^[0m
+  [90m91 |[0m           [36mif[0m (fs.existsSync(fullPath)) {
+  [90m92 |[0m             [36mtry[0m {
+  [90m93 |[0m               [36mconst[0m buffer = [36mawait[0m fs.promises.readFile(fullPath);
+
+Overly broad patterns can lead to build performance issues and over bundling.
+
+Import trace:
+  App Route:
+    ./src/app/api/credits/payment-config/route.ts
+    ./src/app/api/refine-engine/route.ts
+
+
+./src/app/api/image/start-services/route.ts:42:69
+The file pattern (<dynamic> '/' <dynamic> | '/workspace/projects/' <dynamic> | <dynamic> | '/workspace/projects' <dynamic>) matches 49306 files in [project]/
+  [90m40 |[0m ...
+  [90m41 |[0m ...[33mCOZE_WORKSPACE_PATH[0m || [32m'/workspace/projects'[0m;
+[31m[1m>[0m [90m42 |[0m ...te(modelDir) ? modelDir : path.join(workspacePath, modelDir);
+  [90m   |[0m                              [31m[1m^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^[0m
+  [90m43 |[0m ...{
+  [90m44 |[0m ...ursive: [36mtrue[0m });
+  [90m45 |[0m ...
+
+Overly broad patterns can lead to build performance issues and over bundling.
+
+Import trace:
+  App Route:
+    ./src/app/api/image/start-services/route.ts
+    ./src/app/api/refine-engine/route.ts
+
+
+./src/app/api/image/health/route.ts:27:10
+The file pattern (<dynamic> '/' <dynamic> | <dynamic> | <dynamic> '/hub/checkpoints/' <dynamic> | <dynamic> 'hub/checkpoints/' <dynamic> | <dynamic> '/hub/checkpoints' <dynamic> | <dynamic> 'hub/checkpoints' <dynamic>) matches 24674 files in [project]/
+  [90m25 |[0m     [90m// 查找模型文件: 先查 root 目录，再查 hub/checkpoints/ 子目录[0m
+  [90m26 |[0m     [36mlet[0m modelPath = path.join(modelsDir, primaryFile);
+[31m[1m>[0m [90m27 |[0m     [36mif[0m (!fs.existsSync(modelPath)) {
+  [90m   |[0m          [31m[1m^^^^^^^^^^^^^^^^^^^^^^^^[0m
+  [90m28 |[0m       modelPath = path.join(hubCkptDir, primaryFile);
+  [90m29 |[0m     }
+  [90m30 |[0m     [36mtry[0m {
+
+Overly broad patterns can lead to build performance issues and over bundling.
+
+Import trace:
+  App Route:
+    ./src/app/api/image/health/route.ts
+    ./src/app/api/refine-engine/route.ts
+
+
+./src/app/api/image/health/route.ts:36:14
+The file pattern (<dynamic> '/' <dynamic> | <dynamic> | <dynamic> '/hub/checkpoints/' <dynamic> | <dynamic> 'hub/checkpoints/' <dynamic> | <dynamic> '/hub/checkpoints' <dynamic> | <dynamic> 'hub/checkpoints' <dynamic>) matches 24674 files in [project]/
+  [90m34 |[0m       [36mfor[0m ([36mconst[0m f [36mof[0m m.files) {
+  [90m35 |[0m         [36mlet[0m fp = path.join(modelsDir, f);
+[31m[1m>[0m [90m36 |[0m         [36mif[0m (!fs.existsSync(fp)) {
+  [90m   |[0m              [31m[1m^^^^^^^^^^^^^^^^^[0m
+  [90m37 |[0m           fp = path.join(hubCkptDir, f);
+  [90m38 |[0m         }
+  [90m39 |[0m         [36mif[0m (!fs.existsSync(fp)) { allExist = [36mfalse[0m; [36mbreak[0m; }
+
+Overly broad patterns can lead to build performance issues and over bundling.
+
+Import trace:
+  App Route:
+    ./src/app/api/image/health/route.ts
+    ./src/app/api/refine-engine/route.ts
+
+
+./src/app/api/image/health/route.ts:39:14
+The file pattern (<dynamic> '/' <dynamic> | <dynamic> | <dynamic> '/hub/checkpoints/' <dynamic> | <dynamic> 'hub/checkpoints/' <dynamic> | <dynamic> '/hub/checkpoints' <dynamic> | <dynamic> 'hub/checkpoints' <dynamic>) matches 24674 files in [project]/
+  [90m37 |[0m           fp = path.join(hubCkptDir, f);
+  [90m38 |[0m         }
+[31m[1m>[0m [90m39 |[0m         [36mif[0m (!fs.existsSync(fp)) { allExist = [36mfalse[0m; [36mbreak[0m; }
+  [90m   |[0m              [31m[1m^^^^^^^^^^^^^^^^^[0m
+  [90m40 |[0m         totalSize += fs.statSync(fp).size;
+  [90m41 |[0m       }
+  [90m42 |[0m       [36mif[0m (!allExist) {
+
+Overly broad patterns can lead to build performance issues and over bundling.
+
+Import trace:
+  App Route:
+    ./src/app/api/image/health/route.ts
+    ./src/app/api/refine-engine/route.ts
+
+
+./src/app/api/image/health/route.ts:40:22
+The file pattern (<dynamic> '/' <dynamic> | <dynamic> | <dynamic> '/hub/checkpoints/' <dynamic> | <dynamic> 'hub/checkpoints/' <dynamic> | <dynamic> '/hub/checkpoints' <dynamic> | <dynamic> 'hub/checkpoints' <dynamic>) matches 24674 files in [project]/
+  [90m38 |[0m         }
+  [90m39 |[0m         [36mif[0m (!fs.existsSync(fp)) { allExist = [36mfalse[0m; [36mbreak[0m; }
+[31m[1m>[0m [90m40 |[0m         totalSize += fs.statSync(fp).size;
+  [90m   |[0m                      [31m[1m^^^^^^^^^^^^^^^[0m
+  [90m41 |[0m       }
+  [90m42 |[0m       [36mif[0m (!allExist) {
+  [90m43 |[0m         models[m.id] = {
+
+Overly broad patterns can lead to build performance issues and over bundling.
+
+Import trace:
+  App Route:
+    ./src/app/api/image/health/route.ts
+    ./src/app/api/refine-engine/route.ts
+
+
+./src/app/api/image-edit/route.ts:2001:33
+The file pattern (<dynamic> '/' <dynamic> | <dynamic> | <dynamic> '/public/' <dynamic> | <dynamic> 'public/' <dynamic> | <dynamic> '/public' <dynamic> | <dynamic> 'public' <dynamic> | <dynamic> '/public/' <dynamic> | '/workspace/projects/public/' <dynamic> | <dynamic> 'public/' <dynamic> | '/workspace/projectspublic/' <dynamic> | <dynamic> '/public' <dynamic> | '/workspace/projects/public' <dynamic> | <dynamic> 'public' <dynamic> | '/workspace/projectspublic' <dynamic>) matches 24674 files in [project]/
+  [90m1999 |[0m       ];
+  [90m2000 |[0m       [36mfor[0m ([36mconst[0m fp [36mof[0m searchPaths) {
+[31m[1m>[0m [90m2001 |[0m         [36mtry[0m { [36mconst[0m buf = [36mawait[0m fs.readFile(fp); [36mconst[0m ext = relPath.split([32m'.'[0m).pop()?.t...
+  [90m     |[0m                                 [31m[1m^^^^^^^^^^^^^^^[0m
+  [90m2002 |[0m       }
+  [90m2003 |[0m       [90m// 文件系统未找到，尝试 localhost fetch 兜底[0m
+  [90m2004 |[0m       [36mconst[0m port = process.env.[33mDEPLOY_RUN_PORT[0m || [35m5000[0m;
+
+Overly broad patterns can lead to build performance issues and over bundling.
+
+Import trace:
+  App Route:
+    ./src/app/api/image-edit/route.ts
+    ./src/app/api/refine-engine/route.ts
+
+
+./src/app/api/vision-prompt/route.ts:154:13
+The file pattern (<dynamic> '/' <dynamic> | <dynamic> | <dynamic> '/uploads/' <dynamic> | <dynamic> 'uploads/' <dynamic> | <dynamic> '/uploads' <dynamic> | <dynamic> 'uploads' <dynamic> | <dynamic> '/public/uploads/' <dynamic> | '/workspace/projects/public/uploads/' <dynamic> | <dynamic> 'public/uploads/' <dynamic> | '/workspace/projectspublic/uploads/' <dynamic> | <dynamic> '/public/uploads' <dynamic> | '/workspace/projects/public/uploads' <dynamic> | <dynamic> 'public/uploads' <dynamic> | '/workspace/projectspublic/uploads' <dynamic>) matches 24674 files in [project]/
+  [90m152 |[0m       ];
+  [90m153 |[0m       [36mfor[0m ([36mconst[0m persistentPath [36mof[0m possiblePaths) {
+[31m[1m>[0m [90m154 |[0m         [36mif[0m (fsSync.existsSync(persistentPath)) {
+  [90m    |[0m             [31m[1m^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^[0m
+  [90m155 |[0m           [36mconst[0m buffer = [36mawait[0m fsPromises.readFile(persistentPath);
+  [90m156 |[0m           [36mconst[0m ext = path.extname(persistentPath).toLowerCase();
+  [90m157 |[0m           [36mconst[0m mimeMap: [33mRecord[0m<string, string> = {
+
+Overly broad patterns can lead to build performance issues and over bundling.
+
+Import trace:
+  App Route:
+    ./src/app/api/vision-prompt/route.ts
+    ./src/app/api/refine-engine/route.ts
+
+
+./src/app/api/vision-prompt/route.ts:155:32
+The file pattern (<dynamic> '/' <dynamic> | <dynamic> | <dynamic> '/uploads/' <dynamic> | <dynamic> 'uploads/' <dynamic> | <dynamic> '/uploads' <dynamic> | <dynamic> 'uploads' <dynamic> | <dynamic> '/public/uploads/' <dynamic> | '/workspace/projects/public/uploads/' <dynamic> | <dynamic> 'public/uploads/' <dynamic> | '/workspace/projectspublic/uploads/' <dynamic> | <dynamic> '/public/uploads' <dynamic> | '/workspace/projects/public/uploads' <dynamic> | <dynamic> 'public/uploads' <dynamic> | '/workspace/projectspublic/uploads' <dynamic>) matches 24674 files in [project]/
+  [90m153 |[0m       [36mfor[0m ([36mconst[0m persistentPath [36mof[0m possiblePaths) {
+  [90m154 |[0m         [36mif[0m (fsSync.existsSync(persistentPath)) {
+[31m[1m>[0m [90m155 |[0m           [36mconst[0m buffer = [36mawait[0m fsPromises.readFile(persistentPath);
+  [90m    |[0m                                [31m[1m^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^[0m
+  [90m156 |[0m           [36mconst[0m ext = path.extname(persistentPath).toLowerCase();
+  [90m157 |[0m           [36mconst[0m mimeMap: [33mRecord[0m<string, string> = {
+  [90m158 |[0m             [32m'.png'[0m: [32m'image/png'[0m, [32m'.jpg'[0m: [32m'image/jpeg'[0m, [32m'.jpeg'[0m: [32m'image/jpeg'[0m,
+
+Overly broad patterns can lead to build performance issues and over bundling.
+
+Import trace:
+  App Route:
+    ./src/app/api/vision-prompt/route.ts
+    ./src/app/api/refine-engine/route.ts
+
+
+./src/app/api/image-edit/route.ts:1954:31
+The file pattern (<dynamic> '/' <dynamic> | <dynamic> | <dynamic> '/uploads/' <dynamic> | <dynamic> 'uploads/' <dynamic> | <dynamic> '/uploads' <dynamic> | <dynamic> 'uploads' <dynamic>) matches 24674 files in [project]/
+  [90m1952 |[0m         [36mfor[0m ([36mconst[0m fp [36mof[0m fsSearchPaths) {
+  [90m1953 |[0m           [36mtry[0m {
+[31m[1m>[0m [90m1954 |[0m             [36mconst[0m buf = [36mawait[0m fs.readFile(fp);
+  [90m     |[0m                               [31m[1m^^^^^^^^^^^^^^^[0m
+  [90m1955 |[0m             [36mconst[0m ext = path.extname(fp).slice([35m1[0m).toLowerCase() || [32m'png'[0m;
+  [90m1956 |[0m             [36mconst[0m mime = ext === [32m'jpg'[0m || ext === [32m'jpeg'[0m ? [32m'image/jpeg'[0m : ext === [32m'webp'[0m...
+  [90m1957 |[0m             [36mreturn[0m [32m`data:[0m${mime[32m};base64,[0m${buf.toString([32m'base64'[0m)[32m}`[0m;
+
+Overly broad patterns can lead to build performance issues and over bundling.
+
+Import trace:
+  App Route:
+    ./src/app/api/image-edit/route.ts
+    ./src/app/api/refine-engine/route.ts
+
+
+./src/app/api/export-project/route.ts:140:13
+The file pattern (<dynamic> '/package.json' | '/workspace/projects/package.json' | <dynamic> 'package.json' | '/workspace/projectspackage.json' | <dynamic> '/pnpm-lock.yaml' | '/workspace/projects/pnpm-lock.yaml' | <dynamic> 'pnpm-lock.yaml' | '/workspace/projectspnpm-lock.yaml' | <dynamic> '/tsconfig.json' | '/workspace/projects/tsconfig.json' | <dynamic> 'tsconfig.json' | '/workspace/projectstsconfig.json' | <dynamic> '/next.config.ts' | '/workspace/projects/next.config.ts' | <dynamic> 'next.config.ts' | '/workspace/projectsnext.config.ts' | <dynamic> '/next-env.d.ts' | '/workspace/projects/next-env.d.ts' | <dynamic> 'next-env.d.ts' | '/workspace/projectsnext-env.d.ts' | <dynamic> '/postcss.config.mjs' | '/workspace/projects/postcss.config.mjs' | <dynamic> 'postcss.config.mjs' | '/workspace/projectspostcss.config.mjs' | <dynamic> '/tailwind.config.ts' | '/workspace/projects/tailwind.config.ts' | <dynamic> 'tailwind.config.ts' | '/workspace/projectstailwind.config.ts' | <dynamic> '/components.json' | '/workspace/projects/components.json' | <dynamic> 'components.json' | '/workspace/projectscomponents.json' | <dynamic> '/drizzle.config.ts' | '/workspace/projects/drizzle.config.ts' | <dynamic> 'drizzle.config.ts' | '/workspace/projectsdrizzle.config.ts' | <dynamic> '/eslint.config.mjs' | '/workspace/projects/eslint.config.mjs' | <dynamic> 'eslint.config.mjs' | '/workspace/projectseslint.config.mjs' | <dynamic> '/.coze' | '/workspace/projects/.coze' | <dynamic> '.coze' | '/workspace/projects.coze' | <dynamic> '/.gitignore' | '/workspace/projects/.gitignore' | <dynamic> '.gitignore' | '/workspace/projects.gitignore' | <dynamic> '/AGENTS.md' | '/workspace/projects/AGENTS.md' | <dynamic> 'AGENTS.md' | '/workspace/projectsAGENTS.md' | <dynamic> '/DESIGN.md' | '/workspace/projects/DESIGN.md' | <dynamic> 'DESIGN.md' | '/workspace/projectsDESIGN.md' | <dynamic> '/' <dynamic> | '/workspace/projects/' <dynamic> | <dynamic> | '/workspace/projects' <dynamic>) matches 24677 files in [project]/
+  [90m138 |[0m       ];
+  [90m139 |[0m       [36mfor[0m ([36mconst[0m f [36mof[0m configFiles) {
+[31m[1m>[0m [90m140 |[0m         [36mif[0m (existsSync(join([33mPROJECT_ROOT[0m, f))) {
+  [90m    |[0m             [31m[1m^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^[0m
+  [90m141 |[0m           tarArgs.push([32m`./[0m${f[32m}`[0m);
+  [90m142 |[0m         }
+  [90m143 |[0m       }
+
+Overly broad patterns can lead to build performance issues and over bundling.
+
+Import trace:
+  App Route:
+    ./src/app/api/export-project/route.ts
+    ./src/app/api/refine-engine/route.ts
+
+
+./src/app/api/export-project/route.ts:140:24
+The file pattern (<dynamic> '/package.json' | '/workspace/projects/package.json' | <dynamic> 'package.json' | '/workspace/projectspackage.json' | <dynamic> '/pnpm-lock.yaml' | '/workspace/projects/pnpm-lock.yaml' | <dynamic> 'pnpm-lock.yaml' | '/workspace/projectspnpm-lock.yaml' | <dynamic> '/tsconfig.json' | '/workspace/projects/tsconfig.json' | <dynamic> 'tsconfig.json' | '/workspace/projectstsconfig.json' | <dynamic> '/next.config.ts' | '/workspace/projects/next.config.ts' | <dynamic> 'next.config.ts' | '/workspace/projectsnext.config.ts' | <dynamic> '/next-env.d.ts' | '/workspace/projects/next-env.d.ts' | <dynamic> 'next-env.d.ts' | '/workspace/projectsnext-env.d.ts' | <dynamic> '/postcss.config.mjs' | '/workspace/projects/postcss.config.mjs' | <dynamic> 'postcss.config.mjs' | '/workspace/projectspostcss.config.mjs' | <dynamic> '/tailwind.config.ts' | '/workspace/projects/tailwind.config.ts' | <dynamic> 'tailwind.config.ts' | '/workspace/projectstailwind.config.ts' | <dynamic> '/components.json' | '/workspace/projects/components.json' | <dynamic> 'components.json' | '/workspace/projectscomponents.json' | <dynamic> '/drizzle.config.ts' | '/workspace/projects/drizzle.config.ts' | <dynamic> 'drizzle.config.ts' | '/workspace/projectsdrizzle.config.ts' | <dynamic> '/eslint.config.mjs' | '/workspace/projects/eslint.config.mjs' | <dynamic> 'eslint.config.mjs' | '/workspace/projectseslint.config.mjs' | <dynamic> '/.coze' | '/workspace/projects/.coze' | <dynamic> '.coze' | '/workspace/projects.coze' | <dynamic> '/.gitignore' | '/workspace/projects/.gitignore' | <dynamic> '.gitignore' | '/workspace/projects.gitignore' | <dynamic> '/AGENTS.md' | '/workspace/projects/AGENTS.md' | <dynamic> 'AGENTS.md' | '/workspace/projectsAGENTS.md' | <dynamic> '/DESIGN.md' | '/workspace/projects/DESIGN.md' | <dynamic> 'DESIGN.md' | '/workspace/projectsDESIGN.md' | <dynamic> '/' <dynamic> | '/workspace/projects/' <dynamic> | <dynamic> | '/workspace/projects' <dynamic>) matches 49309 files in [project]/
+  [90m138 |[0m       ];
+  [90m139 |[0m       [36mfor[0m ([36mconst[0m f [36mof[0m configFiles) {
+[31m[1m>[0m [90m140 |[0m         [36mif[0m (existsSync(join([33mPROJECT_ROOT[0m, f))) {
+  [90m    |[0m                        [31m[1m^^^^^^^^^^^^^^^^^^^^^[0m
+  [90m141 |[0m           tarArgs.push([32m`./[0m${f[32m}`[0m);
+  [90m142 |[0m         }
+  [90m143 |[0m       }
+
+Overly broad patterns can lead to build performance issues and over bundling.
+
+Import trace:
+  App Route:
+    ./src/app/api/export-project/route.ts
+    ./src/app/api/refine-engine/route.ts
+
+
+./src/app/api/diag/storage/route.ts:60:13
+The file pattern (<dynamic> '/uploads' | <dynamic> 'uploads' | <dynamic> '/images' | <dynamic> 'images' | <dynamic> '/image' | <dynamic> 'image' | <dynamic> '/generate' | <dynamic> 'generate' | <dynamic> '/outpaint' | <dynamic> 'outpaint' | <dynamic> '/upscale' | <dynamic> 'upscale' | <dynamic> '/video' | <dynamic> 'video' | <dynamic> '/svg-trace-tmp' | <dynamic> 'svg-trace-tmp' | <dynamic> '/' <dynamic> | <dynamic>) matches 24674 files in [project]/
+  [90m58 |[0m       [36mconst[0m dirPath = path.join(dataRoot, dir);
+  [90m59 |[0m       [36mtry[0m {
+[31m[1m>[0m [90m60 |[0m         [36mif[0m (fs.existsSync(dirPath)) {
+  [90m   |[0m             [31m[1m^^^^^^^^^^^^^^^^^^^^^^[0m
+  [90m61 |[0m           [36mconst[0m files = fs.readdirSync(dirPath);
+  [90m62 |[0m           [36mconst[0m fileCount = files.length;
+  [90m63 |[0m           [36mconst[0m sampleFiles = files.slice([35m0[0m, [35m10[0m);
+
+Overly broad patterns can lead to build performance issues and over bundling.
+
+Import trace:
+  App Route:
+    ./src/app/api/diag/storage/route.ts
+    ./src/app/api/refine-engine/route.ts
+
+
+./src/app/api/diag/storage/route.ts:58:23
+The file pattern (<dynamic> '/uploads' | <dynamic> 'uploads' | <dynamic> '/images' | <dynamic> 'images' | <dynamic> '/image' | <dynamic> 'image' | <dynamic> '/generate' | <dynamic> 'generate' | <dynamic> '/outpaint' | <dynamic> 'outpaint' | <dynamic> '/upscale' | <dynamic> 'upscale' | <dynamic> '/video' | <dynamic> 'video' | <dynamic> '/svg-trace-tmp' | <dynamic> 'svg-trace-tmp' | <dynamic> '/' <dynamic> | <dynamic>) matches 49306 files in [project]/
+  [90m56 |[0m     [36mconst[0m dirsToCheck = [[32m'uploads'[0m, [32m'images'[0m, [32m'image'[0m, [32m'generate'[0m, [32m'outpaint'[0m, [32m'upscale'[0m, [32m...[0m
+  [90m57 |[0m     [36mfor[0m ([36mconst[0m dir [36mof[0m dirsToCheck) {
+[31m[1m>[0m [90m58 |[0m       [36mconst[0m dirPath = path.join(dataRoot, dir);
+  [90m   |[0m                       [31m[1m^^^^^^^^^^^^^^^^^^^^^^^^[0m
+  [90m59 |[0m       [36mtry[0m {
+  [90m60 |[0m         [36mif[0m (fs.existsSync(dirPath)) {
+  [90m61 |[0m           [36mconst[0m files = fs.readdirSync(dirPath);
+
+Overly broad patterns can lead to build performance issues and over bundling.
+
+Import trace:
+  App Route:
+    ./src/app/api/diag/storage/route.ts
+    ./src/app/api/refine-engine/route.ts
+
+
+./src/app/api/serve-upload/[...path]/route.ts:98:32
+The file pattern (<dynamic> '/uploads' | <dynamic> 'uploads' | <dynamic>) matches 24674 files in [project]/
+  [90m 96 |[0m       [36mconst[0m fullPath = path.resolve(path.join(dir, filePath));
+  [90m 97 |[0m       [90m// 二次安全校验：解析后的绝对路径必须在允许的目录内[0m
+[31m[1m>[0m [90m 98 |[0m       [36mif[0m (!fullPath.startsWith(path.resolve(dir))) {
+  [90m    |[0m                                [31m[1m^^^^^^^^^^^^^^^^^[0m
+  [90m 99 |[0m         [36mcontinue[0m;
+  [90m100 |[0m       }
+  [90m101 |[0m       [36mif[0m (fs.existsSync(fullPath)) {
+
+Overly broad patterns can lead to build performance issues and over bundling.
+
+Import trace:
+  App Route:
+    ./src/app/api/serve-upload/[...path]/route.ts
+    ./src/app/api/refine-engine/route.ts
+
+
+./src/app/api/diag/storage/route.ts:65:32
+The file pattern (<dynamic> '/uploads/' <dynamic> | <dynamic> 'uploads/' <dynamic> | <dynamic> '/images/' <dynamic> | <dynamic> 'images/' <dynamic> | <dynamic> '/image/' <dynamic> | <dynamic> 'image/' <dynamic> | <dynamic> '/generate/' <dynamic> | <dynamic> 'generate/' <dynamic> | <dynamic> '/outpaint/' <dynamic> | <dynamic> 'outpaint/' <dynamic> | <dynamic> '/upscale/' <dynamic> | <dynamic> 'upscale/' <dynamic> | <dynamic> '/video/' <dynamic> | <dynamic> 'video/' <dynamic> | <dynamic> '/svg-trace-tmp/' <dynamic> | <dynamic> 'svg-trace-tmp/' <dynamic> | <dynamic> '/' <dynamic> '/' <dynamic> | <dynamic> '/' <dynamic> | <dynamic> '/uploads' <dynamic> | <dynamic> 'uploads' <dynamic> | <dynamic> '/images' <dynamic> | <dynamic> 'images' <dynamic> | <dynamic> '/image' <dynamic> | <dynamic> 'image' <dynamic> | <dynamic> '/generate' <dynamic> | <dynamic> 'generate' <dynamic> | <dynamic> '/outpaint' <dynamic> | <dynamic> 'outpaint' <dynamic> | <dynamic> '/upscale' <dynamic> | <dynamic> 'upscale' <dynamic> | <dynamic> '/video' <dynamic> | <dynamic> 'video' <dynamic> | <dynamic> '/svg-trace-tmp' <dynamic> | <dynamic> 'svg-trace-tmp' <dynamic> | <dynamic> '/' <dynamic> | <dynamic>) matches 49306 files in [project]/
+  [90m63 |[0m ...     [36mconst[0m sampleFiles = files.slice([35m0[0m, [35m10[0m);
+  [90m64 |[0m ...     [36mconst[0m totalSize = files.reduce((sum, f) => {
+[31m[1m>[0m [90m65 |[0m ...       [36mtry[0m { [36mreturn[0m sum + fs.statSync(path.join(dirPath, f)).size; } [36mcatch[0m { [36mreturn[0m sum; }
+  [90m   |[0m                              [31m[1m^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^[0m
+  [90m66 |[0m ...     }, [35m0[0m);
+  [90m67 |[0m ...     results.directories[dir] = {
+  [90m68 |[0m ...       exists: [36mtrue[0m,
+
+Overly broad patterns can lead to build performance issues and over bundling.
+
+Import trace:
+  App Route:
+    ./src/app/api/diag/storage/route.ts
+    ./src/app/api/refine-engine/route.ts
+
+
+./src/app/api/diag/storage/route.ts:76:26
+The file pattern (<dynamic> '/uploads/' <dynamic> | <dynamic> 'uploads/' <dynamic> | <dynamic> '/images/' <dynamic> | <dynamic> 'images/' <dynamic> | <dynamic> '/image/' <dynamic> | <dynamic> 'image/' <dynamic> | <dynamic> '/generate/' <dynamic> | <dynamic> 'generate/' <dynamic> | <dynamic> '/outpaint/' <dynamic> | <dynamic> 'outpaint/' <dynamic> | <dynamic> '/upscale/' <dynamic> | <dynamic> 'upscale/' <dynamic> | <dynamic> '/video/' <dynamic> | <dynamic> 'video/' <dynamic> | <dynamic> '/svg-trace-tmp/' <dynamic> | <dynamic> 'svg-trace-tmp/' <dynamic> | <dynamic> '/' <dynamic> '/' <dynamic> | <dynamic> '/' <dynamic> | <dynamic> '/uploads' <dynamic> | <dynamic> 'uploads' <dynamic> | <dynamic> '/images' <dynamic> | <dynamic> 'images' <dynamic> | <dynamic> '/image' <dynamic> | <dynamic> 'image' <dynamic> | <dynamic> '/generate' <dynamic> | <dynamic> 'generate' <dynamic> | <dynamic> '/outpaint' <dynamic> | <dynamic> 'outpaint' <dynamic> | <dynamic> '/upscale' <dynamic> | <dynamic> 'upscale' <dynamic> | <dynamic> '/video' <dynamic> | <dynamic> 'video' <dynamic> | <dynamic> '/svg-trace-tmp' <dynamic> | <dynamic> 'svg-trace-tmp' <dynamic> | <dynamic> '/' <dynamic> | <dynamic>) matches 49306 files in [project]/
+  [90m74 |[0m           [90m// Check subdirectories too[0m
+  [90m75 |[0m           [36mconst[0m subdirs = files.filter(f => {
+[31m[1m>[0m [90m76 |[0m             [36mtry[0m { [36mreturn[0m fs.statSync(path.join(dirPath, f)).isDirectory(); } [36mcatch[0m { [36mretur.[0m.[36m.[0m
+  [90m   |[0m                          [31m[1m^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^[0m
+  [90m77 |[0m           });
+  [90m78 |[0m           [36mfor[0m ([36mconst[0m sub [36mof[0m subdirs.slice([35m0[0m, [35m5[0m)) {
+  [90m79 |[0m             [36mconst[0m subPath = path.join(dirPath, sub);
+
+Overly broad patterns can lead to build performance issues and over bundling.
+
+Import trace:
+  App Route:
+    ./src/app/api/diag/storage/route.ts
+    ./src/app/api/refine-engine/route.ts
+
+
+./src/app/api/diag/storage/route.ts:65:44
+The file pattern (<dynamic> '/uploads/' <dynamic> | <dynamic> 'uploads/' <dynamic> | <dynamic> '/images/' <dynamic> | <dynamic> 'images/' <dynamic> | <dynamic> '/image/' <dynamic> | <dynamic> 'image/' <dynamic> | <dynamic> '/generate/' <dynamic> | <dynamic> 'generate/' <dynamic> | <dynamic> '/outpaint/' <dynamic> | <dynamic> 'outpaint/' <dynamic> | <dynamic> '/upscale/' <dynamic> | <dynamic> 'upscale/' <dynamic> | <dynamic> '/video/' <dynamic> | <dynamic> 'video/' <dynamic> | <dynamic> '/svg-trace-tmp/' <dynamic> | <dynamic> 'svg-trace-tmp/' <dynamic> | <dynamic> '/' <dynamic> '/' <dynamic> | <dynamic> '/' <dynamic> | <dynamic> '/uploads' <dynamic> | <dynamic> 'uploads' <dynamic> | <dynamic> '/images' <dynamic> | <dynamic> 'images' <dynamic> | <dynamic> '/image' <dynamic> | <dynamic> 'image' <dynamic> | <dynamic> '/generate' <dynamic> | <dynamic> 'generate' <dynamic> | <dynamic> '/outpaint' <dynamic> | <dynamic> 'outpaint' <dynamic> | <dynamic> '/upscale' <dynamic> | <dynamic> 'upscale' <dynamic> | <dynamic> '/video' <dynamic> | <dynamic> 'video' <dynamic> | <dynamic> '/svg-trace-tmp' <dynamic> | <dynamic> 'svg-trace-tmp' <dynamic> | <dynamic> '/' <dynamic> | <dynamic>) matches 98276 files in [project]/
+  [90m63 |[0m ...[36mconst[0m sampleFiles = files.slice([35m0[0m, [35m10[0m);
+  [90m64 |[0m ...[36mconst[0m totalSize = files.reduce((sum, f) => {
+[31m[1m>[0m [90m65 |[0m ...  [36mtry[0m { [36mreturn[0m sum + fs.statSync(path.join(dirPath, f)).size; } [36mcatch[0m { [36mreturn[0m sum; }
+  [90m   |[0m                                     [31m[1m^^^^^^^^^^^^^^^^^^^^^[0m
+  [90m66 |[0m ...}, [35m0[0m);
+  [90m67 |[0m ...results.directories[dir] = {
+  [90m68 |[0m ...  exists: [36mtrue[0m,
+
+Overly broad patterns can lead to build performance issues and over bundling.
+
+Import trace:
+  App Route:
+    ./src/app/api/diag/storage/route.ts
+    ./src/app/api/refine-engine/route.ts
+
+
+./src/app/api/diag/storage/route.ts:76:38
+The file pattern (<dynamic> '/uploads/' <dynamic> | <dynamic> 'uploads/' <dynamic> | <dynamic> '/images/' <dynamic> | <dynamic> 'images/' <dynamic> | <dynamic> '/image/' <dynamic> | <dynamic> 'image/' <dynamic> | <dynamic> '/generate/' <dynamic> | <dynamic> 'generate/' <dynamic> | <dynamic> '/outpaint/' <dynamic> | <dynamic> 'outpaint/' <dynamic> | <dynamic> '/upscale/' <dynamic> | <dynamic> 'upscale/' <dynamic> | <dynamic> '/video/' <dynamic> | <dynamic> 'video/' <dynamic> | <dynamic> '/svg-trace-tmp/' <dynamic> | <dynamic> 'svg-trace-tmp/' <dynamic> | <dynamic> '/' <dynamic> '/' <dynamic> | <dynamic> '/' <dynamic> | <dynamic> '/uploads' <dynamic> | <dynamic> 'uploads' <dynamic> | <dynamic> '/images' <dynamic> | <dynamic> 'images' <dynamic> | <dynamic> '/image' <dynamic> | <dynamic> 'image' <dynamic> | <dynamic> '/generate' <dynamic> | <dynamic> 'generate' <dynamic> | <dynamic> '/outpaint' <dynamic> | <dynamic> 'outpaint' <dynamic> | <dynamic> '/upscale' <dynamic> | <dynamic> 'upscale' <dynamic> | <dynamic> '/video' <dynamic> | <dynamic> 'video' <dynamic> | <dynamic> '/svg-trace-tmp' <dynamic> | <dynamic> 'svg-trace-tmp' <dynamic> | <dynamic> '/' <dynamic> | <dynamic>) matches 98276 files in [project]/
+  [90m74 |[0m ...      [90m// Check subdirectories too[0m
+  [90m75 |[0m ...      [36mconst[0m subdirs = files.filter(f => {
+[31m[1m>[0m [90m76 |[0m ...        [36mtry[0m { [36mreturn[0m fs.statSync(path.join(dirPath, f)).isDirectory(); } [36mcatch[0m { [36mreturn[0m.[36m..[0m
+  [90m   |[0m                                     [31m[1m^^^^^^^^^^^^^^^^^^^^^[0m
+  [90m77 |[0m ...      });
+  [90m78 |[0m ...      [36mfor[0m ([36mconst[0m sub [36mof[0m subdirs.slice([35m0[0m, [35m5[0m)) {
+  [90m79 |[0m ...        [36mconst[0m subPath = path.join(dirPath, sub);
+
+Overly broad patterns can lead to build performance issues and over bundling.
+
+Import trace:
+  App Route:
+    ./src/app/api/diag/storage/route.ts
+    ./src/app/api/refine-engine/route.ts
+
+
+./src/app/api/diag/storage/route.ts:79:29
+The file pattern (<dynamic> '/uploads/' <dynamic> | <dynamic> 'uploads/' <dynamic> | <dynamic> '/images/' <dynamic> | <dynamic> 'images/' <dynamic> | <dynamic> '/image/' <dynamic> | <dynamic> 'image/' <dynamic> | <dynamic> '/generate/' <dynamic> | <dynamic> 'generate/' <dynamic> | <dynamic> '/outpaint/' <dynamic> | <dynamic> 'outpaint/' <dynamic> | <dynamic> '/upscale/' <dynamic> | <dynamic> 'upscale/' <dynamic> | <dynamic> '/video/' <dynamic> | <dynamic> 'video/' <dynamic> | <dynamic> '/svg-trace-tmp/' <dynamic> | <dynamic> 'svg-trace-tmp/' <dynamic> | <dynamic> '/' <dynamic> '/' <dynamic> | <dynamic> '/' <dynamic> | <dynamic> '/uploads' <dynamic> | <dynamic> 'uploads' <dynamic> | <dynamic> '/images' <dynamic> | <dynamic> 'images' <dynamic> | <dynamic> '/image' <dynamic> | <dynamic> 'image' <dynamic> | <dynamic> '/generate' <dynamic> | <dynamic> 'generate' <dynamic> | <dynamic> '/outpaint' <dynamic> | <dynamic> 'outpaint' <dynamic> | <dynamic> '/upscale' <dynamic> | <dynamic> 'upscale' <dynamic> | <dynamic> '/video' <dynamic> | <dynamic> 'video' <dynamic> | <dynamic> '/svg-trace-tmp' <dynamic> | <dynamic> 'svg-trace-tmp' <dynamic> | <dynamic> '/' <dynamic> | <dynamic>) matches 98276 files in [project]/
+  [90m77 |[0m           });
+  [90m78 |[0m           [36mfor[0m ([36mconst[0m sub [36mof[0m subdirs.slice([35m0[0m, [35m5[0m)) {
+[31m[1m>[0m [90m79 |[0m             [36mconst[0m subPath = path.join(dirPath, sub);
+  [90m   |[0m                             [31m[1m^^^^^^^^^^^^^^^^^^^^^^^[0m
+  [90m80 |[0m             [36mtry[0m {
+  [90m81 |[0m               [36mconst[0m subFiles = fs.readdirSync(subPath);
+  [90m82 |[0m               results.directories[[32m`[0m${dir[32m}/[0m${sub[32m}`[0m] = {
+
+Overly broad patterns can lead to build performance issues and over bundling.
+
+Import trace:
+  App Route:
+    ./src/app/api/diag/storage/route.ts
+    ./src/app/api/refine-engine/route.ts
+
+
+./src/app/api/generate/route.ts:1881:40
+The file pattern (<dynamic> '/uploads/' <dynamic> | <dynamic> 'uploads/' <dynamic> | <dynamic> '/uploads' <dynamic> | <dynamic> 'uploads' <dynamic> | <dynamic> '/' <dynamic> | <dynamic> | <dynamic> '/public/' <dynamic> | '/workspace/projects/public/' <dynamic> | <dynamic> 'public/' <dynamic> | '/workspace/projectspublic/' <dynamic> | <dynamic> '/public' <dynamic> | '/workspace/projects/public' <dynamic> | <dynamic> 'public' <dynamic> | '/workspace/projectspublic' <dynamic> | <dynamic> '/public/uploads/' <dynamic> | '/workspace/projects/public/uploads/' <dynamic> | <dynamic> 'public/uploads/' <dynamic> | '/workspace/projectspublic/uploads/' <dynamic> | <dynamic> '/publicuploads/' <dynamic> | '/workspace/projects/publicuploads/' <dynamic> | <dynamic> 'publicuploads/' <dynamic> | '/workspace/projectspublicuploads/' <dynamic> | <dynamic> '/public/uploads' <dynamic> | '/workspace/projects/public/uploads' <dynamic> | <dynamic> 'public/uploads' <dynamic> | '/workspace/projectspublic/uploads' <dynamic> | <dynamic> '/publicuploads' <dynamic> | '/workspace/projects/publicuploads' <dynamic> | <dynamic> 'publicuploads' <dynamic> | '/workspace/projectspublicuploads' <dynamic>) matches 24674 files in [project]/
+  [90m1879 |[0m ...         [36mconst[0m resolved = path.resolve(candidate);
+  [90m1880 |[0m ...         [36mif[0m (resolved.startsWith(publicDir) || resolved.startsWith(dataRoot)) {
+[31m[1m>[0m [90m1881 |[0m ...           [36mconst[0m imgBuf = [36mawait[0m fs.readFile(resolved);
+  [90m     |[0m                                    [31m[1m^^^^^^^^^^^^^^^^^^^^^[0m
+  [90m1882 |[0m ...           [36mconst[0m ext = path.extname(resolved).toLowerCase();
+  [90m1883 |[0m ...           [36mconst[0m mimeMap: [33mRecord[0m<string, string> = { [32m'.png'[0m: [32m'image/png'[0m, [32m'.jpg'[0m: [32m'im...[0m
+  [90m1884 |[0m ...           [36mconst[0m mime = mimeMap[ext] || [32m'image/png'[0m;
+
+Overly broad patterns can lead to build performance issues and over bundling.
+
+Import trace:
+  App Route:
+    ./src/app/api/generate/route.ts
+    ./src/app/api/refine-engine/route.ts
+
+
+./src/app/api/generate/route.ts:1879:34
+The file pattern (<dynamic> '/uploads/' <dynamic> | <dynamic> 'uploads/' <dynamic> | <dynamic> '/uploads' <dynamic> | <dynamic> 'uploads' <dynamic> | <dynamic> '/' <dynamic> | <dynamic> | <dynamic> '/public/' <dynamic> | '/workspace/projects/public/' <dynamic> | <dynamic> 'public/' <dynamic> | '/workspace/projectspublic/' <dynamic> | <dynamic> '/public' <dynamic> | '/workspace/projects/public' <dynamic> | <dynamic> 'public' <dynamic> | '/workspace/projectspublic' <dynamic> | <dynamic> '/public/uploads/' <dynamic> | '/workspace/projects/public/uploads/' <dynamic> | <dynamic> 'public/uploads/' <dynamic> | '/workspace/projectspublic/uploads/' <dynamic> | <dynamic> '/publicuploads/' <dynamic> | '/workspace/projects/publicuploads/' <dynamic> | <dynamic> 'publicuploads/' <dynamic> | '/workspace/projectspublicuploads/' <dynamic> | <dynamic> '/public/uploads' <dynamic> | '/workspace/projects/public/uploads' <dynamic> | <dynamic> 'public/uploads' <dynamic> | '/workspace/projectspublic/uploads' <dynamic> | <dynamic> '/publicuploads' <dynamic> | '/workspace/projects/publicuploads' <dynamic> | <dynamic> 'publicuploads' <dynamic> | '/workspace/projectspublicuploads' <dynamic>) matches 50675 files in [project]/
+  [90m1877 |[0m               [36mtry[0m {
+  [90m1878 |[0m                 [36mawait[0m fs.access(candidate);
+[31m[1m>[0m [90m1879 |[0m                 [36mconst[0m resolved = path.resolve(candidate);
+  [90m     |[0m                                  [31m[1m^^^^^^^^^^^^^^^^^^^^^^^[0m
+  [90m1880 |[0m                 [36mif[0m (resolved.startsWith(publicDir) || resolved.startsWith(dataRoot)) {
+  [90m1881 |[0m                   [36mconst[0m imgBuf = [36mawait[0m fs.readFile(resolved);
+  [90m1882 |[0m                   [36mconst[0m ext = path.extname(resolved).toLowerCase();
+
+Overly broad patterns can lead to build performance issues and over bundling.
+
+Import trace:
+  App Route:
+    ./src/app/api/generate/route.ts
+    ./src/app/api/refine-engine/route.ts
+
+
+./src/lib/image-tools/file.ts:116:11
+The file pattern (<dynamic> '/uploads/' <dynamic> | <dynamic> 'uploads/' <dynamic> | <dynamic> '/uploads' <dynamic> | <dynamic> 'uploads' <dynamic> | <dynamic> '/outputs/' <dynamic> | <dynamic> 'outputs/' <dynamic> | <dynamic> '/outputs' <dynamic> | <dynamic> 'outputs' <dynamic> | <dynamic>) matches 24674 files in [project]/
+  [90m114 |[0m     [36mlet[0m found = [36mfalse[0m;
+  [90m115 |[0m     [36mfor[0m ([36mconst[0m p [36mof[0m candidates) {
+[31m[1m>[0m [90m116 |[0m       [36mif[0m (fs.existsSync(p)) {
+  [90m    |[0m           [31m[1m^^^^^^^^^^^^^^^^[0m
+  [90m117 |[0m         buffer = [36mawait[0m fs.promises.readFile(p);
+  [90m118 |[0m         found = [36mtrue[0m;
+  [90m119 |[0m         [36mbreak[0m;
+
+Overly broad patterns can lead to build performance issues and over bundling.
+
+Import traces:
+  #1 [App Route]:
+    ./src/lib/image-tools/file.ts
+    ./src/app/api/vision-prompt/route.ts
+
+  #2 [App Route]:
+    ./src/lib/image-tools/file.ts
+    ./src/lib/multi-platform-export/source-reader.ts
+    ./src/lib/multi-platform-export/estimate.ts
+    ./src/app/api/skill-runs/estimate/route.ts
+
+
+./src/lib/image-tools/file.ts:117:24
+The file pattern (<dynamic> '/uploads/' <dynamic> | <dynamic> 'uploads/' <dynamic> | <dynamic> '/uploads' <dynamic> | <dynamic> 'uploads' <dynamic> | <dynamic> '/outputs/' <dynamic> | <dynamic> 'outputs/' <dynamic> | <dynamic> '/outputs' <dynamic> | <dynamic> 'outputs' <dynamic> | <dynamic>) matches 24674 files in [project]/
+  [90m115 |[0m     [36mfor[0m ([36mconst[0m p [36mof[0m candidates) {
+  [90m116 |[0m       [36mif[0m (fs.existsSync(p)) {
+[31m[1m>[0m [90m117 |[0m         buffer = [36mawait[0m fs.promises.readFile(p);
+  [90m    |[0m                        [31m[1m^^^^^^^^^^^^^^^^^^^^^^^[0m
+  [90m118 |[0m         found = [36mtrue[0m;
+  [90m119 |[0m         [36mbreak[0m;
+  [90m120 |[0m       }
+
+Overly broad patterns can lead to build performance issues and over bundling.
+
+Import traces:
+  #1 [App Route]:
+    ./src/lib/image-tools/file.ts
+    ./src/app/api/vision-prompt/route.ts
+
+  #2 [App Route]:
+    ./src/lib/image-tools/file.ts
+    ./src/lib/multi-platform-export/source-reader.ts
+    ./src/lib/multi-platform-export/estimate.ts
+    ./src/app/api/skill-runs/estimate/route.ts
+
+
+./src/app/api/image/upscale-pro/route.ts:819:11
+The file pattern (<dynamic> | '' | 'data:image/png;base64,' <dynamic> | 'data:image/png;base64,' <dynamic>) matches 24674 files in [project]/
+  [90m817 |[0m     [90m// 始终精确调整到 origW*scale × origH*scale[0m
+  [90m818 |[0m     {
+[31m[1m>[0m [90m819 |[0m       [36mif[0m (fs.existsSync(resultUrl)) {
+  [90m    |[0m           [31m[1m^^^^^^^^^^^^^^^^^^^^^^^^[0m
+  [90m820 |[0m         [36mconst[0m resizedBuf = [36mawait[0m sharp.[36mdefault[0m(resultUrl)
+  [90m821 |[0m           .resize(targetW, targetH, { kernel: [32m'lanczos3'[0m })
+  [90m822 |[0m           .png()
+
+Overly broad patterns can lead to build performance issues and over bundling.
+
+Import trace:
+  App Route:
+    ./src/app/api/image/upscale-pro/route.ts
+    ./src/app/api/refine-engine/route.ts
+
+
+./src/app/api/image/upscale-pro/route.ts:842:9
+The file pattern (<dynamic> | '' | 'data:image/png;base64,' <dynamic> | 'data:image/png;base64,' <dynamic>) matches 24674 files in [project]/
+  [90m840 |[0m
+  [90m841 |[0m     [90m// 如果输出是文件路径，保存到持久化目录[0m
+[31m[1m>[0m [90m842 |[0m     [36mif[0m (fs.existsSync(resultUrl)) {
+  [90m    |[0m         [31m[1m^^^^^^^^^^^^^^^^^^^^^^^^[0m
+  [90m843 |[0m       [36mconst[0m fileName = path.basename(resultUrl);
+  [90m844 |[0m       [36mconst[0m outputDir = [33mUPSCALE_OUTPUT_DIR[0m;
+  [90m845 |[0m       [36mif[0m (!fs.existsSync(outputDir)) {
+
+Overly broad patterns can lead to build performance issues and over bundling.
+
+Import trace:
+  App Route:
+    ./src/app/api/image/upscale-pro/route.ts
+    ./src/app/api/refine-engine/route.ts
+
+
+./src/lib/image-tools/upscayl.ts:83:8
+The file pattern (<dynamic> | '/ROOT/onnx-models') matches 24674 files in [project]/
+  [90m81 |[0m }> {
+  [90m82 |[0m   [36mconst[0m modelsDir = getOnnxModelsDir();
+[31m[1m>[0m [90m83 |[0m   [36mif[0m (!fs.existsSync(modelsDir)) {
+  [90m   |[0m        [31m[1m^^^^^^^^^^^^^^^^^^^^^^^^[0m
+  [90m84 |[0m     [36mreturn[0m { available: [36mfalse[0m, error: [32m'ONNX 模型目录不存在'[0m };
+  [90m85 |[0m   }
+  [90m86 |[0m
+
+Overly broad patterns can lead to build performance issues and over bundling.
+
+Import traces:
+  #1 [App Route]:
+    ./src/lib/image-tools/upscayl.ts
+    ./src/app/api/vision-prompt/route.ts
+
+  #2 [App Route]:
+    ./src/lib/image-tools/upscayl.ts
+    ./src/app/api/upscayl/route.ts
+
+
+./src/app/api/image/start-services/route.ts:104:11
+The file pattern (<dynamic> | <dynamic> '/onnx-models' | '/workspace/projects/onnx-models' | <dynamic> 'onnx-models' | '/workspace/projectsonnx-models' | <dynamic> '/upscayl-models' | '/workspace/projects/upscayl-models' | <dynamic> 'upscayl-models' | '/workspace/projectsupscayl-models') matches 24674 files in [project]/
+  [90m102 |[0m     [36mlet[0m onnxModelsFound = [36mfalse[0m;
+  [90m103 |[0m     [36mfor[0m ([36mconst[0m dir [36mof[0m [onnxModelsDir, modelsDir]) {
+[31m[1m>[0m [90m104 |[0m       [36mif[0m (fs.existsSync(dir)) {
+  [90m    |[0m           [31m[1m^^^^^^^^^^^^^^^^^^[0m
+  [90m105 |[0m         [36mconst[0m files = fs.readdirSync(dir);
+  [90m106 |[0m         [36mif[0m (files.some(f => f.endsWith([32m'.onnx'[0m))) {
+  [90m107 |[0m           onnxModelsFound = [36mtrue[0m;
+
+Overly broad patterns can lead to build performance issues and over bundling.
+
+Import trace:
+  App Route:
+    ./src/app/api/image/start-services/route.ts
+    ./src/app/api/refine-engine/route.ts
+
+
+./src/app/api/cache-image/route.ts:117:10
+The file pattern (<dynamic> | <dynamic> '/uploads' | <dynamic> 'uploads' | '/ROOT/public/uploads') matches 24674 files in [project]/
+  [90m115 |[0m     }
+  [90m116 |[0m
+[31m[1m>[0m [90m117 |[0m     [36mif[0m (!existsSync(uploadDir)) {
+  [90m    |[0m          [31m[1m^^^^^^^^^^^^^^^^^^^^^[0m
+  [90m118 |[0m       [36mawait[0m mkdir(uploadDir, { recursive: [36mtrue[0m });
+  [90m119 |[0m     }
+  [90m120 |[0m
+
+Overly broad patterns can lead to build performance issues and over bundling.
+
+Import trace:
+  App Route:
+    ./src/app/api/cache-image/route.ts
+    ./src/app/api/refine-engine/route.ts
+
+
+./src/app/api/recover-images/route.ts:280:20
+The file pattern (<dynamic> | <dynamic> '/uploads' | <dynamic> 'uploads' | <dynamic> '/generate' | <dynamic> 'generate') matches 24674 files in [project]/
+  [90m278 |[0m             [36mconst[0m buffer = [36mawait[0m storage.readFile({ fileKey: s3Key });
+  [90m279 |[0m             [36mif[0m (buffer && buffer.length > [35m0[0m) {
+[31m[1m>[0m [90m280 |[0m               [36mif[0m (!fs.existsSync(localDir)) fs.mkdirSync(localDir, { recursive: [36mtrue[0m });
+  [90m    |[0m                    [31m[1m^^^^^^^^^^^^^^^^^^^^^^^[0m
+  [90m281 |[0m               fs.writeFileSync(localPath, buffer);
+  [90m282 |[0m               downloaded++;
+  [90m283 |[0m             } [36melse[0m {
+
+Overly broad patterns can lead to build performance issues and over bundling.
+
+Import trace:
+  App Route:
+    ./src/app/api/recover-images/route.ts
+    ./src/app/api/serve-upload/[...path]/route.ts
+
+
+./next.config.ts
+Encountered unexpected file in NFT list
+A file was traced that indicates that the whole project was traced unintentionally. Somewhere in the import trace below, there are:
+- filesystem operations (like path.join, path.resolve or fs.readFile), or
+- very dynamic requires (like require('./' + foo)).
+To resolve this, you can
+- remove them if possible, or
+- only use them in development, or
+- make sure they are statically scoped to some subfolder: path.join(process.cwd(), 'data', bar), or
+- add ignore comments: path.join(/*turbopackIgnore: true*/ process.cwd(), bar)
+
+Import trace:
+  App Route:
+    ./next.config.ts
+    ./src/app/api/refine-engine/route.ts
+
+
+./next.config.ts
+Encountered unexpected file in NFT list
+A file was traced that indicates that the whole project was traced unintentionally. Somewhere in the import trace below, there are:
+- filesystem operations (like path.join, path.resolve or fs.readFile), or
+- very dynamic requires (like require('./' + foo)).
+To resolve this, you can
+- remove them if possible, or
+- only use them in development, or
+- make sure they are statically scoped to some subfolder: path.join(process.cwd(), 'data', bar), or
+- add ignore comments: path.join(/*turbopackIgnore: true*/ process.cwd(), bar)
+
+Output asset trace:
+  [output]/.next/server/app/api/agent-edit/route.js
+  [output]/.next/server/chunks/[root-of-the-server]__01e1fs1._.js
+  [output]/.next/server/chunks/[root-of-the-server]__1vne03e._.js
+
+Import trace:
+  App Route:
+    ./next.config.ts
+    ./src/app/api/refine-engine/route.ts
+
+
+./next.config.ts
+Encountered unexpected file in NFT list
+A file was traced that indicates that the whole project was traced unintentionally. Somewhere in the import trace below, there are:
+- filesystem operations (like path.join, path.resolve or fs.readFile), or
+- very dynamic requires (like require('./' + foo)).
+To resolve this, you can
+- remove them if possible, or
+- only use them in development, or
+- make sure they are statically scoped to some subfolder: path.join(process.cwd(), 'data', bar), or
+- add ignore comments: path.join(/*turbopackIgnore: true*/ process.cwd(), bar)
+
+Output asset trace:
+  [output]/.next/server/app/api/agent-runs/[runId]/events/route.js
+  [output]/.next/server/chunks/[root-of-the-server]__0hj3m4o._.js
+  [output]/.next/server/chunks/[root-of-the-server]__0x5jdxy._.js
+
+Import trace:
+  App Route:
+    ./next.config.ts
+    ./src/app/api/refine-engine/route.ts
+
+
+./next.config.ts
+Encountered unexpected file in NFT list
+A file was traced that indicates that the whole project was traced unintentionally. Somewhere in the import trace below, there are:
+- filesystem operations (like path.join, path.resolve or fs.readFile), or
+- very dynamic requires (like require('./' + foo)).
+To resolve this, you can
+- remove them if possible, or
+- only use them in development, or
+- make sure they are statically scoped to some subfolder: path.join(process.cwd(), 'data', bar), or
+- add ignore comments: path.join(/*turbopackIgnore: true*/ process.cwd(), bar)
+
+Output asset trace:
+  [output]/.next/server/app/api/agent-runs/[runId]/route.js
+  [output]/.next/server/chunks/[root-of-the-server]__006bco-._.js
+  [output]/.next/server/chunks/[root-of-the-server]__1dkfcbf._.js
+
+Import trace:
+  App Route:
+    ./next.config.ts
+    ./src/app/api/refine-engine/route.ts
+
+
+./next.config.ts
+Encountered unexpected file in NFT list
+A file was traced that indicates that the whole project was traced unintentionally. Somewhere in the import trace below, there are:
+- filesystem operations (like path.join, path.resolve or fs.readFile), or
+- very dynamic requires (like require('./' + foo)).
+To resolve this, you can
+- remove them if possible, or
+- only use them in development, or
+- make sure they are statically scoped to some subfolder: path.join(process.cwd(), 'data', bar), or
+- add ignore comments: path.join(/*turbopackIgnore: true*/ process.cwd(), bar)
+
+Output asset trace:
+  [output]/.next/server/app/api/agent-runs/route.js
+  [output]/.next/server/chunks/[root-of-the-server]__0onmphi._.js
+
+Import trace:
+  App Route:
+    ./next.config.ts
+    ./src/app/api/refine-engine/route.ts
+
+
+./next.config.ts
+Encountered unexpected file in NFT list
+A file was traced that indicates that the whole project was traced unintentionally. Somewhere in the import trace below, there are:
+- filesystem operations (like path.join, path.resolve or fs.readFile), or
+- very dynamic requires (like require('./' + foo)).
+To resolve this, you can
+- remove them if possible, or
+- only use them in development, or
+- make sure they are statically scoped to some subfolder: path.join(process.cwd(), 'data', bar), or
+- add ignore comments: path.join(/*turbopackIgnore: true*/ process.cwd(), bar)
+
+Output asset trace:
+  [output]/.next/server/app/api/announcement/route.js
+  [output]/.next/server/chunks/[root-of-the-server]__1r945c7._.js
+
+Import trace:
+  App Route:
+    ./next.config.ts
+    ./src/app/api/refine-engine/route.ts
+
+
+./next.config.ts
+Encountered unexpected file in NFT list
+A file was traced that indicates that the whole project was traced unintentionally. Somewhere in the import trace below, there are:
+- filesystem operations (like path.join, path.resolve or fs.readFile), or
+- very dynamic requires (like require('./' + foo)).
+To resolve this, you can
+- remove them if possible, or
+- only use them in development, or
+- make sure they are statically scoped to some subfolder: path.join(process.cwd(), 'data', bar), or
+- add ignore comments: path.join(/*turbopackIgnore: true*/ process.cwd(), bar)
+
+Output asset trace:
+  [output]/.next/server/app/api/image-edit/route.js
+  [output]/.next/server/chunks/[root-of-the-server]__0f-kcec._.js
+
+Import trace:
+  App Route:
+    ./next.config.ts
+    ./src/app/api/refine-engine/route.ts
+
+
+./next.config.ts
+Encountered unexpected file in NFT list
+A file was traced that indicates that the whole project was traced unintentionally. Somewhere in the import trace below, there are:
+- filesystem operations (like path.join, path.resolve or fs.readFile), or
+- very dynamic requires (like require('./' + foo)).
+To resolve this, you can
+- remove them if possible, or
+- only use them in development, or
+- make sure they are statically scoped to some subfolder: path.join(process.cwd(), 'data', bar), or
+- add ignore comments: path.join(/*turbopackIgnore: true*/ process.cwd(), bar)
+
+Output asset trace:
+  [output]/.next/server/app/api/image/health/route.js
+  [output]/.next/server/chunks/[root-of-the-server]__1un74jr._.js
+
+Import trace:
+  App Route:
+    ./next.config.ts
+    ./src/app/api/refine-engine/route.ts
+
+
+./next.config.ts
+Encountered unexpected file in NFT list
+A file was traced that indicates that the whole project was traced unintentionally. Somewhere in the import trace below, there are:
+- filesystem operations (like path.join, path.resolve or fs.readFile), or
+- very dynamic requires (like require('./' + foo)).
+To resolve this, you can
+- remove them if possible, or
+- only use them in development, or
+- make sure they are statically scoped to some subfolder: path.join(process.cwd(), 'data', bar), or
+- add ignore comments: path.join(/*turbopackIgnore: true*/ process.cwd(), bar)
+
+Output asset trace:
+  [output]/.next/server/app/api/image/upscale/route.js
+  [output]/.next/server/chunks/[root-of-the-server]__0lwfs_n._.js
+
+Import trace:
+  App Route:
+    ./next.config.ts
+    ./src/app/api/refine-engine/route.ts
+
+
+./next.config.ts
+Encountered unexpected file in NFT list
+A file was traced that indicates that the whole project was traced unintentionally. Somewhere in the import trace below, there are:
+- filesystem operations (like path.join, path.resolve or fs.readFile), or
+- very dynamic requires (like require('./' + foo)).
+To resolve this, you can
+- remove them if possible, or
+- only use them in development, or
+- make sure they are statically scoped to some subfolder: path.join(process.cwd(), 'data', bar), or
+- add ignore comments: path.join(/*turbopackIgnore: true*/ process.cwd(), bar)
+
+Output asset trace:
+  [output]/.next/server/app/api/skill-reports/[runId]/[stepId]/route.js
+  [output]/.next/server/chunks/[root-of-the-server]__1fl8uhf._.js
+
+Import trace:
+  App Route:
+    ./next.config.ts
+    ./src/app/api/refine-engine/route.ts
+
+
+./next.config.ts
+Encountered unexpected file in NFT list
+A file was traced that indicates that the whole project was traced unintentionally. Somewhere in the import trace below, there are:
+- filesystem operations (like path.join, path.resolve or fs.readFile), or
+- very dynamic requires (like require('./' + foo)).
+To resolve this, you can
+- remove them if possible, or
+- only use them in development, or
+- make sure they are statically scoped to some subfolder: path.join(process.cwd(), 'data', bar), or
+- add ignore comments: path.join(/*turbopackIgnore: true*/ process.cwd(), bar)
+
+Output asset trace:
+  [output]/.next/server/app/api/upscayl/route.js
+  [output]/.next/server/chunks/[root-of-the-server]__0if6q4h._.js
+
+Import trace:
+  App Route:
+    ./next.config.ts
+    ./src/app/api/refine-engine/route.ts
+
+
+(node:26952) Warning: `--localstorage-file` was provided without a valid path
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:27576) Warning: `--localstorage-file` was provided without a valid path
+(Use `node --trace-warnings ...` to show where the warning was created)

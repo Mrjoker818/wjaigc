@@ -1,0 +1,32 @@
+
+ RUN  v3.2.4 J:/无界本地版/projects/_upstream-wjaigc-restore
+
+ ✓ src/__tests__/scripts/doctor-production-auth-contract.test.ts (20 tests) 18668ms
+   ✓ production doctor authentication contract > accepts NEXTAUTH_SECRET when WUJIE_AUTH_SECRET is absent  1062ms
+   ✓ production doctor authentication contract > keeps credential findings visible but non-blocking during an existing Coze startup  1041ms
+   ✓ production doctor authentication contract > allows Coze startup to use managed object-storage credentials  1046ms
+   ✓ production doctor authentication contract > resolves an omitted production mode to DB_ONLY when a database URL exists  1029ms
+   ✓ production doctor authentication contract > fails an omitted production mode when its no-database default is FILE_ONLY  1029ms
+   ✓ production doctor authentication contract > requires a database URL for production mode DB_ONLY  1034ms
+   ✓ production doctor authentication contract > requires a database URL for production mode DB_PLUS_FILE  1038ms
+   ✓ production doctor authentication contract > accepts production mode DB_ONLY with PGDATABASE_URL  1048ms
+   ✓ production doctor authentication contract > accepts production mode DB_PLUS_FILE with DATABASE_URL  1042ms
+   ✓ production doctor authentication contract > fails explicit FILE_ONLY in production  1033ms
+   ✓ production doctor authentication contract > fails an unsupported persistence mode without echoing its value  1030ms
+   ✓ production doctor authentication contract > retains the non-production FILE_ONLY default  1028ms
+   ✓ production doctor authentication contract > accepts the exact previous-session value true  1025ms
+   ✓ production doctor authentication contract > accepts the exact previous-session value false  1050ms
+   ✓ production doctor authentication contract > fails invalid previous-session value "TRUE" without echoing it  1040ms
+   ✓ production doctor authentication contract > fails invalid previous-session value " true" without echoing it  1028ms
+   ✓ production doctor authentication contract > fails invalid previous-session value "false " without echoing it  1034ms
+   ✓ production doctor authentication contract > fails invalid previous-session value "SENSITIVE_PREVIOUS_SESSION_VALUE" without echoing it  1025ms
+ ✓ src/__tests__/scripts/media-gateway-doctor.test.ts (4 tests) 4979ms
+   ✓ media gateway doctor > reports the default-disabled gateway as a non-failing warning  1041ms
+   ✓ media gateway doctor > fails closed when the enabled gateway database cannot be reached  1040ms
+   ✓ media gateway doctor > verifies all gateway tables against the required real PostgreSQL test database  2896ms
+
+ Test Files  2 passed (2)
+      Tests  24 passed (24)
+   Start at  02:45:38
+   Duration  24.48s (transform 43ms, setup 0ms, collect 66ms, tests 23.65s, environment 0ms, prepare 270ms)
+

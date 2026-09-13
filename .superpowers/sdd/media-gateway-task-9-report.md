@@ -4,34 +4,50 @@
 
 - 状态：`LOCAL PASS / CLOUD UNVERIFIED`
 - 基线：`main@74716cb99e3972d27c9fac7fd4aa22c0f1130d83`
-- 本地实现提交：`2b19d3f6`、`a8d7f3bb`
-- `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 未修改，donor 未修改。
+- 首个失败合同提交：`0afeccd8`
+- 复审修复提交：`b1c87276`、`244ee15d`、`65601afc`
+- 最终门禁候选：`65601afc63025ae9eb3173910befaa693fe8f99d`
+- `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 未修改，donor 未修改，用户既有 dirty 文件未触碰。
 - 本阶段未执行 Coze、真实供应商调用或云端浏览器验收。
 
-## TDD 与实现
+## 独立复审 3 Important 修复
 
-Doctor 首次 RED 为 `20 passed / 3 failed / 0 skipped`，失败精确覆盖启用网关时缺少数据库检查、三张迁移表检查和失败关闭。GREEN 为 `24/24`，使用真实 PostgreSQL 18.4，验证关闭时仅警告、开启时检查数据库与 `wujie_gateway_keys`、`wujie_gateway_rate_windows`、`wujie_gateway_requests`，输出不泄露连接串。
+1. E2E 不再用 `Promise.all` 冒充逐槽返回：`n=2` 顺序轮询并要求观察到“首槽已完成、另一槽仍未终态”，首张结果还会在真实 `page` 中加载并可见。
+2. 取消只接受权威 `cancelled`：继续轮询确认终态，采样拒绝迟到结果，并核对自身账务流水恰好一次消费、一次退款、净额为零。
+3. 预览、下载、256/512 缩略图均实际发起 HTTP 请求，校验状态、MIME、字节与 Sharp 尺寸；AssetVersion 仅在数据库已证明 `asset_version_id + owner_id` 归属且缩略图 ready 后投影。
+4. 新增限流、UTC 日配额、同键异摘要 409、吊销凭据、跨用户隔离和原登录/画布/图像/视频入口兼容规格。
+5. 成功态证据采集器会自动保存 screenshot、video、trace、console、network 和机器 manifest，并记录 requestId、gatewayRequestId、taskId 与脱敏账务流水。`request` 保留 API 边界，`page` 承担真实 UI 流程。
+6. 新增门禁记录器，原样保存 stdout/stderr、命令、commit、起止时间、退出码和 SHA-256。证据索引同时保留失败轮次与最终通过轮次，禁止只展示成功结果。
 
-新增 `tests/e2e/v588-media-gateway.spec.ts`，共 5 个逻辑云端规格，在 11 个配置项目中展开为 55 项，并由 `E2E_MEDIA_GATEWAY_RUN=1` 显式保护。本地只完成 Playwright 规格解析，没有将未执行的云端流程记为通过。
+## TDD 证据
 
-## 回归与门禁
+- 合同 RED：`3 failed / 0 passed`，提交为 `0afeccd8`。
+- AssetVersion 所有权投影 RED：`1 failed / 12 passed`；最小实现后 GREEN 为 `13/13`。
+- Windows 门禁记录器 RED：Node 25 直接启动 pnpm 出现 `spawn EINVAL`；改为解析 pnpm JS 入口后 GREEN。
+- 保护基线 RED：`244ee15d` 轮次 exit 1，原因是新门禁脚本未进入精确白名单；仅授权该脚本路径后 `65601afc` 轮次 `38/38`、0 drift、0 warning、exit 0。
 
-- 媒体网关专项：18 文件，`327/327`，0 failed，0 skipped。
-- 全仓 Vitest：802 文件，`6745/6745`，0 failed，0 skipped，耗时 931.73 秒。单 worker 持续推进，未发生挂起。
-- `pnpm ts-check`：exit 0。
-- `pnpm lint:build`：exit 0。
-- `pnpm check:protected-baseline`：38/38，0 drift，0 warning，exit 0。
-- `pnpm build`：120/120 页面，exit 0。
-- `git diff --check 74716cb9..a8d7f3bb`：exit 0。
+## 最终本地门禁
 
-全仓首轮曾暴露 5 个失败与 13 个 PostgreSQL skip：保护清单缺少媒体网关精确来源、两个测试缺少鉴权 mock，以及旧测试只读取 `TEST_POSTGRES_URL`。均以最小测试/治理修复关闭；最终四个 PostgreSQL 环境变量统一指向隔离实例，0 skip。
+| 门禁 | 结果 |
+|---|---|
+| Doctor 专项 | 2 文件，`24/24`，0 failed，0 skipped，exit 0 |
+| 媒体网关专项 | 21 文件，`338/338`，0 failed，0 skipped，exit 0 |
+| 全仓 Vitest | 803 文件，`6750/6750`，0 failed，0 skipped，931.18 秒，exit 0 |
+| TypeScript | `pnpm ts-check`，exit 0 |
+| 构建版 ESLint | `pnpm lint:build`，exit 0 |
+| 保护基线 | `38/38`，0 drift，0 warning，exit 0 |
+| 生产构建 | `120/120` 页面，exit 0 |
+| E2E 规格发现 | 7 个逻辑场景，11 个项目展开为 77 项，exit 0；未执行云端 |
 
-## 关注点
+所有 PostgreSQL 条件测试均连接一次性非管理员 PostgreSQL 18.4 实例真实执行，未 skip。测试后已确认 55443 无监听、临时账户不存在、数据目录和日志均不存在。构建保留 55 条 Turbopack 动态文件追踪 warning，原始 stderr 已归档；该风险未通过隐藏警告或猜测性重构处理。
 
-1. 构建仍报告 53 条 Turbopack 动态文件追踪警告，主要是动态文件系统路径导致过宽 NFT 追踪；本任务未在无稳定复现的情况下改写业务读取链路。
-2. Doctor 的 2 个 blocker 来自既有 Brief 到视频外部证据规则，不是媒体网关本地失败。
-3. Coze exact SHA、默认关闭兼容、PearAPI/APIMart、真实图像/视频、`n=2` 逐槽、取消退款、AssetVersion、256/512 缩略图和浏览器证据全部为 `pending`。
+## 证据
 
-## 本地 PostgreSQL
+- 最终证据目录：`docs/testing/evidence/v588-media-gateway-task9-review-65601afc/`
+- 历史失败目录：`docs/testing/evidence/v588-media-gateway-task9-review-244ee15d/`
+- 证据索引：`docs/testing/evidence/v588-media-gateway-task9-review-65601afc/evidence-index.json`
+- 索引 SHA-256：`209b0fddf2d8ebc3c92d8b8b63f9fca7da8bf7714ea5dffa62f2f11537df2fb7`
 
-使用 `127.0.0.1:55439` 上的 PostgreSQL 18.4 和一次性非管理员账户 `wujie_pg_task9`。所有条件 PostgreSQL 测试均真实执行，未 skip。最终验证后已停止实例；复核结果为端口未监听、临时账户不存在、用户 profile 不存在、数据目录和日志均不存在。
+## 未关闭项
+
+Coze exact commit、默认关闭兼容、PearAPI/APIMart 真实图像与视频、逐槽到达时间、真实取消退款、AssetVersion/缩略图资源、刷新恢复及浏览器成功态制品仍为 `pending`。本地规格和 PostgreSQL 证据不能冒充云端证据，因此 Task 9 仍不得标记为 `CLOUD PASS`，也不得更新 `stable`。

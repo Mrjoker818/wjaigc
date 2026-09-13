@@ -1,0 +1,245 @@
+{
+  "schemaVersion": 1,
+  "feature": "V588-MEDIA-001",
+  "task": 9,
+  "generatedAt": "2026-09-13T18:50:02.2380105Z",
+  "finalCandidateCommit": "65601afc63025ae9eb3173910befaa693fe8f99d",
+  "stableCommit": "52f7c601ed150769e15d06fb435c6e360e28c9e7",
+  "cloud": {
+    "status": "pending",
+    "executed": false
+  },
+  "runs": [
+    {
+      "run": "v588-media-gateway-task9-review-244ee15d",
+      "name": "lint-build",
+      "manifest": "docs/testing/evidence/v588-media-gateway-task9-review-244ee15d/lint-build/manifest.json",
+      "manifestSha256": "a56467d3bf0cf24041c7c9ad410e91a6d9673b6f5b71c7964ecc1b01398855a1",
+      "commit": "244ee15dd2cae651b2ffa4d004e5131dd328152c",
+      "startedAt": "2026-09-13T18:26:40.173Z",
+      "finishedAt": "2026-09-13T18:27:55.665Z",
+      "durationMs": 75489,
+      "exitCode": 0,
+      "stdout": {
+        "path": "docs/testing/evidence/v588-media-gateway-task9-review-244ee15d/lint-build/stdout.log",
+        "bytes": 102,
+        "sha256": "1fb800e1ad2e0fbe69cb397482f42e9f17fb3f07cdf50d9d98fcb31cf5bebecb"
+      },
+      "stderr": {
+        "path": "docs/testing/evidence/v588-media-gateway-task9-review-244ee15d/lint-build/stderr.log",
+        "bytes": 184,
+        "sha256": "6e6fe7dad2022706e9725d1b19da85dd2f595591eeb814972792854c97dc4d95"
+      }
+    },
+    {
+      "run": "v588-media-gateway-task9-review-244ee15d",
+      "name": "protected-baseline",
+      "manifest": "docs/testing/evidence/v588-media-gateway-task9-review-244ee15d/protected-baseline/manifest.json",
+      "manifestSha256": "e11356916c91b7cb9b2d3a37b2a9a32e35c5d4dd621be3aaa2d84d28fe746279",
+      "commit": "244ee15dd2cae651b2ffa4d004e5131dd328152c",
+      "startedAt": "2026-09-13T18:26:40.185Z",
+      "finishedAt": "2026-09-13T18:26:42.851Z",
+      "durationMs": 2664,
+      "exitCode": 1,
+      "stdout": {
+        "path": "docs/testing/evidence/v588-media-gateway-task9-review-244ee15d/protected-baseline/stdout.log",
+        "bytes": 803,
+        "sha256": "75527d334a8fa545160238de03e8818842ef674675d658a5af0c8f7abb14b627"
+      },
+      "stderr": {
+        "path": "docs/testing/evidence/v588-media-gateway-task9-review-244ee15d/protected-baseline/stderr.log",
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    {
+      "run": "v588-media-gateway-task9-review-244ee15d",
+      "name": "ts-check",
+      "manifest": "docs/testing/evidence/v588-media-gateway-task9-review-244ee15d/ts-check/manifest.json",
+      "manifestSha256": "c091d296b455b446f80e58ca57255f68f1b6060179be4a162d5faa895d580ace",
+      "commit": "244ee15dd2cae651b2ffa4d004e5131dd328152c",
+      "startedAt": "2026-09-13T18:26:40.164Z",
+      "finishedAt": "2026-09-13T18:26:51.793Z",
+      "durationMs": 11627,
+      "exitCode": 0,
+      "stdout": {
+        "path": "docs/testing/evidence/v588-media-gateway-task9-review-244ee15d/ts-check/stdout.log",
+        "bytes": 179,
+        "sha256": "41dc552019fc285bb858332fa0b91c76467c56920b2b0d0a519bea59520b7b9a"
+      },
+      "stderr": {
+        "path": "docs/testing/evidence/v588-media-gateway-task9-review-244ee15d/ts-check/stderr.log",
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    {
+      "run": "v588-media-gateway-task9-review-65601afc",
+      "name": "build",
+      "manifest": "docs/testing/evidence/v588-media-gateway-task9-review-65601afc/build/manifest.json",
+      "manifestSha256": "6ec374abad737c42030dc67d7b7cb0c0278b5839890ebeecb83392ec1cdbc090",
+      "commit": "65601afc63025ae9eb3173910befaa693fe8f99d",
+      "startedAt": "2026-09-13T18:46:50.342Z",
+      "finishedAt": "2026-09-13T18:49:19.992Z",
+      "durationMs": 149647,
+      "exitCode": 0,
+      "stdout": {
+        "path": "docs/testing/evidence/v588-media-gateway-task9-review-65601afc/build/stdout.log",
+        "bytes": 8266,
+        "sha256": "16cb1afb4698ca7cffff0c6203d0b0924efbd14c5cfe26d54ffc6b2c8fa1a0fe"
+      },
+      "stderr": {
+        "path": "docs/testing/evidence/v588-media-gateway-task9-review-65601afc/build/stderr.log",
+        "bytes": 69129,
+        "sha256": "ddbcde2155b09ad031143e098d1d65096199d0d1c572b49e147e0d4278543043"
+      }
+    },
+    {
+      "run": "v588-media-gateway-task9-review-65601afc",
+      "name": "doctor-focused",
+      "manifest": "docs/testing/evidence/v588-media-gateway-task9-review-65601afc/doctor-focused/manifest.json",
+      "manifestSha256": "6d3e41ea04dfecd543d81353956171cc1ca06cfde08d160ba1651bc38ec4de67",
+      "commit": "65601afc63025ae9eb3173910befaa693fe8f99d",
+      "startedAt": "2026-09-13T18:45:36.673Z",
+      "finishedAt": "2026-09-13T18:46:03.563Z",
+      "durationMs": 26887,
+      "exitCode": 0,
+      "stdout": {
+        "path": "docs/testing/evidence/v588-media-gateway-task9-review-65601afc/doctor-focused/stdout.log",
+        "bytes": 2886,
+        "sha256": "9dc7f6953868049f0095342ab1262282f4efbba2d5d53caa2b108619c1b23b51"
+      },
+      "stderr": {
+        "path": "docs/testing/evidence/v588-media-gateway-task9-review-65601afc/doctor-focused/stderr.log",
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    {
+      "run": "v588-media-gateway-task9-review-65601afc",
+      "name": "e2e-spec-list",
+      "manifest": "docs/testing/evidence/v588-media-gateway-task9-review-65601afc/e2e-spec-list/manifest.json",
+      "manifestSha256": "64177c13eab3899fe03cf2afc80e25e807677af6cb1845cb8b392fcfb18cb626",
+      "commit": "65601afc63025ae9eb3173910befaa693fe8f99d",
+      "startedAt": "2026-09-13T18:49:28.306Z",
+      "finishedAt": "2026-09-13T18:49:30.569Z",
+      "durationMs": 2258,
+      "exitCode": 0,
+      "stdout": {
+        "path": "docs/testing/evidence/v588-media-gateway-task9-review-65601afc/e2e-spec-list/stdout.log",
+        "bytes": 15108,
+        "sha256": "2b7215a3059545c15866aa92bb506691783af7f7fca1dd0c6007ac33f5ae18b2"
+      },
+      "stderr": {
+        "path": "docs/testing/evidence/v588-media-gateway-task9-review-65601afc/e2e-spec-list/stderr.log",
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    {
+      "run": "v588-media-gateway-task9-review-65601afc",
+      "name": "lint-build",
+      "manifest": "docs/testing/evidence/v588-media-gateway-task9-review-65601afc/lint-build/manifest.json",
+      "manifestSha256": "3ea24cf7fb456e121660a182d8f5778a472ab0a92fe6bf2c14d253b0c7f95a81",
+      "commit": "65601afc63025ae9eb3173910befaa693fe8f99d",
+      "startedAt": "2026-09-13T18:28:21.645Z",
+      "finishedAt": "2026-09-13T18:29:36.884Z",
+      "durationMs": 75237,
+      "exitCode": 0,
+      "stdout": {
+        "path": "docs/testing/evidence/v588-media-gateway-task9-review-65601afc/lint-build/stdout.log",
+        "bytes": 102,
+        "sha256": "1fb800e1ad2e0fbe69cb397482f42e9f17fb3f07cdf50d9d98fcb31cf5bebecb"
+      },
+      "stderr": {
+        "path": "docs/testing/evidence/v588-media-gateway-task9-review-65601afc/lint-build/stderr.log",
+        "bytes": 184,
+        "sha256": "6e6fe7dad2022706e9725d1b19da85dd2f595591eeb814972792854c97dc4d95"
+      }
+    },
+    {
+      "run": "v588-media-gateway-task9-review-65601afc",
+      "name": "media-gateway-focused",
+      "manifest": "docs/testing/evidence/v588-media-gateway-task9-review-65601afc/media-gateway-focused/manifest.json",
+      "manifestSha256": "aeb1610d8e3bb1974d0b7b79e79736ae5e01a583d39c4587d1148ecfdf5f2eef",
+      "commit": "65601afc63025ae9eb3173910befaa693fe8f99d",
+      "startedAt": "2026-09-13T18:46:14.289Z",
+      "finishedAt": "2026-09-13T18:46:46.34Z",
+      "durationMs": 32048,
+      "exitCode": 0,
+      "stdout": {
+        "path": "docs/testing/evidence/v588-media-gateway-task9-review-65601afc/media-gateway-focused/stdout.log",
+        "bytes": 8632,
+        "sha256": "9c44f019f1d526ebd839b48bc9ce28315dcf1332ab79cf03f3a35f917a95e85a"
+      },
+      "stderr": {
+        "path": "docs/testing/evidence/v588-media-gateway-task9-review-65601afc/media-gateway-focused/stderr.log",
+        "bytes": 1608,
+        "sha256": "23e701ff6b13ebd1798d9d845502cae00ec31b9f4683dd32298126efb5785b99"
+      }
+    },
+    {
+      "run": "v588-media-gateway-task9-review-65601afc",
+      "name": "protected-baseline",
+      "manifest": "docs/testing/evidence/v588-media-gateway-task9-review-65601afc/protected-baseline/manifest.json",
+      "manifestSha256": "dfb96c3242bf1b7675561f8bef572f776326c1b2f5cf58ffd1eba36e1b688510",
+      "commit": "65601afc63025ae9eb3173910befaa693fe8f99d",
+      "startedAt": "2026-09-13T18:28:21.654Z",
+      "finishedAt": "2026-09-13T18:28:24.004Z",
+      "durationMs": 2348,
+      "exitCode": 0,
+      "stdout": {
+        "path": "docs/testing/evidence/v588-media-gateway-task9-review-65601afc/protected-baseline/stdout.log",
+        "bytes": 730,
+        "sha256": "b73151f5e57e3abb04e35cbc6205158fc8d70b0b51c2641e404d7fc973a73ea6"
+      },
+      "stderr": {
+        "path": "docs/testing/evidence/v588-media-gateway-task9-review-65601afc/protected-baseline/stderr.log",
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    {
+      "run": "v588-media-gateway-task9-review-65601afc",
+      "name": "ts-check",
+      "manifest": "docs/testing/evidence/v588-media-gateway-task9-review-65601afc/ts-check/manifest.json",
+      "manifestSha256": "ee39ae711ef6149844054f454d4017fb88857d59603d053b3fd48f5a20d51aa5",
+      "commit": "65601afc63025ae9eb3173910befaa693fe8f99d",
+      "startedAt": "2026-09-13T18:28:21.657Z",
+      "finishedAt": "2026-09-13T18:28:33.247Z",
+      "durationMs": 11588,
+      "exitCode": 0,
+      "stdout": {
+        "path": "docs/testing/evidence/v588-media-gateway-task9-review-65601afc/ts-check/stdout.log",
+        "bytes": 179,
+        "sha256": "41dc552019fc285bb858332fa0b91c76467c56920b2b0d0a519bea59520b7b9a"
+      },
+      "stderr": {
+        "path": "docs/testing/evidence/v588-media-gateway-task9-review-65601afc/ts-check/stderr.log",
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    {
+      "run": "v588-media-gateway-task9-review-65601afc",
+      "name": "vitest-full",
+      "manifest": "docs/testing/evidence/v588-media-gateway-task9-review-65601afc/vitest-full/manifest.json",
+      "manifestSha256": "8fd1398fb47babd9920abdfe350402384aae1e7fa56b4547462dcb5f47cc2bf0",
+      "commit": "65601afc63025ae9eb3173910befaa693fe8f99d",
+      "startedAt": "2026-09-13T18:29:43.255Z",
+      "finishedAt": "2026-09-13T18:45:16.927Z",
+      "durationMs": 933669,
+      "exitCode": 0,
+      "stdout": {
+        "path": "docs/testing/evidence/v588-media-gateway-task9-review-65601afc/vitest-full/stdout.log",
+        "bytes": 301714,
+        "sha256": "f41c338bc298df7c4872a9099e219c1aabcf7e38158a93fb3759b90928e8a3cc"
+      },
+      "stderr": {
+        "path": "docs/testing/evidence/v588-media-gateway-task9-review-65601afc/vitest-full/stderr.log",
+        "bytes": 152422,
+        "sha256": "827048dab83ac915545cac60c398affaeac45ade7d9fb1a6144d0699317a3012"
+      }
+    }
+  ]
+}

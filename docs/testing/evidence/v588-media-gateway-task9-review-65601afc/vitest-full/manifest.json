@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "name": "vitest-full",
+  "command": [
+    "pnpm",
+    "test"
+  ],
+  "cwd": "J:\\无界本地版\\projects\\_upstream-wjaigc-restore",
+  "commit": "65601afc63025ae9eb3173910befaa693fe8f99d",
+  "startedAt": "2026-09-13T18:29:43.255Z",
+  "finishedAt": "2026-09-13T18:45:16.927Z",
+  "durationMs": 933669,
+  "exitCode": 0,
+  "signal": null,
+  "artifacts": {
+    "stdout": {
+      "path": "J:\\无界本地版\\projects\\_upstream-wjaigc-restore\\docs\\testing\\evidence\\v588-media-gateway-task9-review-65601afc\\vitest-full\\stdout.log",
+      "bytes": 301714,
+      "sha256": "f41c338bc298df7c4872a9099e219c1aabcf7e38158a93fb3759b90928e8a3cc"
+    },
+    "stderr": {
+      "path": "J:\\无界本地版\\projects\\_upstream-wjaigc-restore\\docs\\testing\\evidence\\v588-media-gateway-task9-review-65601afc\\vitest-full\\stderr.log",
+      "bytes": 152422,
+      "sha256": "827048dab83ac915545cac60c398affaeac45ade7d9fb1a6144d0699317a3012"
+    }
+  }
+}

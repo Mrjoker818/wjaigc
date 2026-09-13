@@ -2403,7 +2403,8 @@ The focused gate test passes `7/7`; the actual protected-baseline command passes
 - **Task 10：有条件完成 / `DONE WITH DEVICE DEFERRAL`。** 全平台发布结论仍受该延期项及后续媒体网关、协作等阶段约束。
 ## 2026-09-14 V588-MEDIA-001 Task 9 发布判断
 
-- 本地 Doctor、专项、真实 PostgreSQL 和五条全量门禁均通过；最终全仓为 `6745/6745`、0 skipped，生产构建为 `120/120`。
-- 构建保留 53 条 Turbopack 动态文件追踪 warning，属于后续构建性能与打包范围风险，不在本任务中猜测性重构。
-- 当前候选仅具备本地发布资格。尚无 Coze exact commit、默认关闭兼容、真实 PearAPI/APIMart 图像与视频、逐槽返回、取消退款、AssetVersion、缩略图及浏览器证据。
+- 独立复审 3 个 Important 均已按 RED/GREEN 形成本地修复候选：逐槽可见与权威取消、成功态浏览器证据采集、全门禁原始日志与 SHA-256 索引。
+- 本地 Doctor `24/24`、媒体网关专项 `338/338`、真实 PostgreSQL 和五条全量门禁均通过；最终全仓为 `6750/6750`、0 skipped，生产构建为 `120/120`。
+- 构建保留 55 条 Turbopack 动态文件追踪 warning，属于后续构建性能与打包范围风险，不在本任务中猜测性重构。
+- 当前候选 `65601afc` 仅具备本地复审资格。尚无 Coze exact commit、默认关闭兼容、真实 PearAPI/APIMart 图像与视频、逐槽返回、取消退款、AssetVersion、缩略图及成功态浏览器制品。
 - **发布结论：有条件通过本地门禁 / 全平台仍不通过。** Task 9 状态为 `LOCAL PASS / CLOUD UNVERIFIED`，不得据此更新 `stable`。

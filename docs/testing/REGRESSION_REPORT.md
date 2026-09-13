@@ -3140,8 +3140,10 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 ## 2026-09-14 V588-MEDIA-001 Task 9 本地回归
 
 - Doctor 严格 TDD：RED `20 passed / 3 failed`；GREEN `24/24`，使用真实 PostgreSQL 18.4，验证网关关闭警告、开启时数据库与三张迁移表失败关闭及输出脱敏。
-- 云端 E2E 已建立 5 个逻辑规格，在 11 个配置项目中展开为 55 项并可被 Playwright 解析；因本阶段明确不做 Coze，`E2E_MEDIA_GATEWAY_RUN=1` 未开启，不能登记为云端通过。
-- 媒体网关专项为 18 文件 `327/327`，0 failed，0 skipped。
-- 全仓 Vitest 为 802 文件 `6745/6745`，0 failed，0 skipped，耗时 931.73 秒。长跑期间文件与断言计数持续增加，未挂起、未增加超长超时。
+- 独立复审合同先得到 `3 failed / 0 passed`；随后补齐逐槽可见、权威取消与一次退款、真实资源与 AssetVersion 所有权、成功态证据制品及门禁原始日志。
+- 云端 E2E 已强化为 7 个逻辑规格，在 11 个配置项目中展开为 77 项并可被 Playwright 解析；因本阶段明确不做 Coze，`E2E_MEDIA_GATEWAY_RUN=1` 未开启，不能登记为云端通过。
+- 媒体网关专项为 21 文件 `338/338`，0 failed，0 skipped。
+- 全仓 Vitest 为 803 文件 `6750/6750`，0 failed，0 skipped，耗时 931.18 秒。单 worker 全程持续增加文件与断言计数，未挂起、未增加超长超时。
 - 五条门禁全部 exit 0：TypeScript、构建版 ESLint、全仓 Vitest、保护基线 `38/38 / 0 drift / 0 warning`、生产构建 `120/120` 页面。
+- 每条门禁均保存原始 stdout/stderr、命令、候选 commit、起止时间、退出码与 SHA-256；证据索引同时保留此前保护基线 exit 1 的失败轮次。构建原始 stderr 保留 55 条 Turbopack warning。
 - **判定：`LOCAL PASS / CLOUD UNVERIFIED`。** 云端 exact SHA、供应商、账务、资产版本、缩略图和浏览器证据保持 pending。
