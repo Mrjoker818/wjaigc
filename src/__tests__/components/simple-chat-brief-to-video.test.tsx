@@ -102,6 +102,7 @@ describe('Simple Chat Brief to video card', () => {
       '/api/skill-runs/run-video-1',
       expect.objectContaining({ method: 'PATCH', body: JSON.stringify({ action: 'cancel' }) }),
     ));
+    await waitFor(() => expect(mocks.runEvents).toHaveBeenCalledWith('run-video-1', 1));
     expect(mocks.cancel).not.toHaveBeenCalled();
   });
 });

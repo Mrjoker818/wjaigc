@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
-import { parseSimpleChatBriefVideoIntent } from '@/lib/brief-to-video/simple-chat-intent';
+import {
+  isSimpleChatBriefVideoClarification,
+  parseSimpleChatBriefVideoIntent,
+} from '@/lib/brief-to-video/simple-chat-intent';
 
 const capabilities = [{
   providerId: 'video-provider-1',
@@ -82,9 +85,32 @@ describe('parseSimpleChatBriefVideoIntent', () => {
 
     expect(parseSimpleChatBriefVideoIntent(`${request}video-provider-2/video-model-1`, [], ambiguousCapabilities))
       .toMatchObject({ kind: 'ready', modelBinding: { providerId: 'video-provider-2', modelId: 'video-model-1' } });
-    expect(parseSimpleChatBriefVideoIntent(`${request}video-model-1`, [], ambiguousCapabilities))
-      .toMatchObject({ kind: 'needs_clarification', missing: ['videoModel'] });
+    const ambiguous = parseSimpleChatBriefVideoIntent(
+      `${request}video-model-1`, [], ambiguousCapabilities,
+    );
+    expect(ambiguous).toMatchObject({
+      kind: 'needs_clarification',
+      missing: ['videoModel'],
+      question: expect.stringContaining('video-provider-1/video-model-1'),
+    });
+    expect(ambiguous).toMatchObject({
+      question: expect.stringContaining('video-provider-2/video-model-1'),
+    });
+    expect(ambiguous.kind === 'needs_clarification'
+      && isSimpleChatBriefVideoClarification(ambiguous.question)).toBe(true);
     expect(parseSimpleChatBriefVideoIntent(`${request}video-model-10`, [], ambiguousCapabilities))
       .toMatchObject({ kind: 'ready', modelBinding: { providerId: 'video-provider-3', modelId: 'video-model-10' } });
+  });
+
+  it('uses the latest exact provider/model answer after an ambiguous model clarification', () => {
+    const conversation = [
+      '根据 Brief：新品通勤短片，生成最终视频。平台：抖音；时长：5秒；比例：9:16；视频模型：video-model-1',
+      '视频模型：video-provider-2/video-model-1',
+    ].join('\n');
+
+    expect(parseSimpleChatBriefVideoIntent(conversation, [], ambiguousCapabilities)).toMatchObject({
+      kind: 'ready',
+      modelBinding: { providerId: 'video-provider-2', modelId: 'video-model-1' },
+    });
   });
 });

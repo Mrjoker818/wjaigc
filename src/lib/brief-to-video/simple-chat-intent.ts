@@ -63,6 +63,7 @@ const CLARIFICATION_QUESTIONS: Readonly<Record<BriefVideoIntentMissingField, str
   aspectRatio: '请指定画面比例。',
   videoModel: '请指定要使用的视频模型。',
 };
+const AMBIGUOUS_VIDEO_MODEL_QUESTION_PREFIX = '检测到同名视频模型，请按“供应商ID/模型ID”选择：';
 
 function normalize(value: string): string {
   return value.normalize('NFKC').toLocaleLowerCase('zh-CN');
@@ -80,8 +81,23 @@ function extractBrief(message: string): string {
 }
 
 function extractLabeledValue(message: string, label: string): string {
-  const match = message.match(new RegExp(`${label}\\s*[：:]\\s*([^，,。；;\\n]+)`, 'iu'));
-  return match?.[1]?.trim() || '';
+  const matches = [...message.matchAll(
+    new RegExp(`${label}\\s*[：:]\\s*([^，,。；;\\n]+)`, 'giu'),
+  )];
+  return matches.at(-1)?.[1]?.trim() || '';
+}
+
+function ambiguousVideoModelQuestion(
+  message: string,
+  capabilities: readonly SimpleChatBriefVideoCapability[],
+): string | undefined {
+  const requested = normalize(extractLabeledValue(message, '(?:视频模型|模型)'));
+  if (!requested || requested.includes('/')) return undefined;
+  const matches = capabilities.filter(capability => normalize(capability.modelId) === requested);
+  if (matches.length < 2) return undefined;
+  return `${AMBIGUOUS_VIDEO_MODEL_QUESTION_PREFIX}${matches
+    .map(capability => `${capability.providerId}/${capability.modelId}`)
+    .join('、')}。`;
 }
 
 function findCapability(
@@ -109,7 +125,9 @@ function supportsSourceCount(
 }
 
 export function isSimpleChatBriefVideoClarification(content: string): boolean {
-  return Object.values(CLARIFICATION_QUESTIONS).includes(content.trim());
+  const normalized = content.trim();
+  return Object.values(CLARIFICATION_QUESTIONS).includes(normalized)
+    || normalized.startsWith(AMBIGUOUS_VIDEO_MODEL_QUESTION_PREFIX);
 }
 
 interface SimpleChatBriefVideoContextMessage {
@@ -188,7 +206,14 @@ export function parseSimpleChatBriefVideoIntent(
   }
   if (!capability || !supportsSourceCount(capability, sourceVersionIds.length)) missing.push('videoModel');
   if (missing.length > 0) {
-    return { kind: 'needs_clarification', missing, question: CLARIFICATION_QUESTIONS[missing[0]] };
+    const firstMissing = missing[0];
+    return {
+      kind: 'needs_clarification',
+      missing,
+      question: firstMissing === 'videoModel'
+        ? ambiguousVideoModelQuestion(message, capabilities) || CLARIFICATION_QUESTIONS.videoModel
+        : CLARIFICATION_QUESTIONS[firstMissing],
+    };
   }
   if (!brief || !platform || !duration || !aspectRatio || !capability) {
     throw new Error('Brief video intent validation did not narrow required values');

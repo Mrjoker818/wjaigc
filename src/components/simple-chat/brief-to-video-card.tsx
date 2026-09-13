@@ -42,7 +42,7 @@ export function BriefToVideoCard({
     if (!response.ok) throw new Error('视频任务控制失败');
     const payload = await response.json() as { accepted?: boolean; success?: boolean };
     const accepted = payload.accepted === true || payload.success === true;
-    if (accepted && action !== 'cancel') setRefreshVersion(value => value + 1);
+    if (accepted) setRefreshVersion(value => value + 1);
     return accepted;
   };
 
