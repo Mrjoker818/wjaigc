@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 
+import { auditGatewayEvent, type GatewayAuditEvent } from '@/lib/media-gateway/audit';
 import { updateGatewayKey, revokeGatewayKey } from '@/lib/media-gateway/key-service';
 import { GatewayError } from '@/lib/media-gateway/types';
 import { requireAdminUser } from '@/lib/server-auth';
@@ -21,6 +22,14 @@ function serviceError(error: unknown): NextResponse {
     return responseError(error.status, error.code, message, error.retryable);
   }
   return responseError(503, 'GATEWAY_INTERNAL_UNAVAILABLE', 'Media gateway is unavailable', true);
+}
+
+function errorCode(error: unknown): string {
+  return error instanceof GatewayError ? error.code : 'GATEWAY_INTERNAL_UNAVAILABLE';
+}
+
+async function safeAudit(event: GatewayAuditEvent): Promise<void> {
+  await auditGatewayEvent(event).catch(() => false);
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -68,10 +77,28 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
   if (!admin) return responseError(403, 'ADMIN_REQUIRED', 'Administrator access required');
   const input = parseUpdate(await readJson(request));
   if (!input) return responseError(400, 'GATEWAY_INVALID_REQUEST', 'Invalid gateway key request');
+  const { keyId } = await context.params;
   try {
-    const { keyId } = await context.params;
-    return NextResponse.json({ success: true, key: await updateGatewayKey(keyId, input) });
+    const key = await updateGatewayKey(keyId, input);
+    await safeAudit({
+      actorId: admin.id,
+      actorName: admin.name,
+      action: 'gateway_key_update',
+      outcome: 'success',
+      gatewayKeyId: key.id,
+      keyPrefix: key.keyPrefix,
+      userId: key.userId,
+    });
+    return NextResponse.json({ success: true, key });
   } catch (error) {
+    await safeAudit({
+      actorId: admin.id,
+      actorName: admin.name,
+      action: 'gateway_key_update',
+      outcome: 'failure',
+      gatewayKeyId: keyId,
+      errorCode: errorCode(error),
+    });
     return serviceError(error);
   }
 }
@@ -79,10 +106,28 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
 export async function DELETE(request: NextRequest, context: RouteContext) {
   const admin = await requireAdminUser(request);
   if (!admin) return responseError(403, 'ADMIN_REQUIRED', 'Administrator access required');
+  const { keyId } = await context.params;
   try {
-    const { keyId } = await context.params;
-    return NextResponse.json({ success: true, key: await revokeGatewayKey(keyId) });
+    const key = await revokeGatewayKey(keyId);
+    await safeAudit({
+      actorId: admin.id,
+      actorName: admin.name,
+      action: 'gateway_key_revoke',
+      outcome: 'success',
+      gatewayKeyId: key.id,
+      keyPrefix: key.keyPrefix,
+      userId: key.userId,
+    });
+    return NextResponse.json({ success: true, key });
   } catch (error) {
+    await safeAudit({
+      actorId: admin.id,
+      actorName: admin.name,
+      action: 'gateway_key_revoke',
+      outcome: 'failure',
+      gatewayKeyId: keyId,
+      errorCode: errorCode(error),
+    });
     return serviceError(error);
   }
 }

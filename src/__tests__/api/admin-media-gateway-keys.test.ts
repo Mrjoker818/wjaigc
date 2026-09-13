@@ -3,6 +3,7 @@ import { NextRequest } from 'next/server';
 import { GatewayError } from '@/lib/media-gateway/types';
 
 const mocks = vi.hoisted(() => ({
+  auditGatewayEvent: vi.fn(),
   issueGatewayKey: vi.fn(),
   listGatewayKeys: vi.fn(),
   requireAdminUser: vi.fn(),
@@ -11,6 +12,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock('@/lib/server-auth', () => ({ requireAdminUser: mocks.requireAdminUser }));
+vi.mock('@/lib/media-gateway/audit', () => ({ auditGatewayEvent: mocks.auditGatewayEvent }));
 vi.mock('@/lib/media-gateway/key-service', () => ({
   issueGatewayKey: mocks.issueGatewayKey,
   listGatewayKeys: mocks.listGatewayKeys,
@@ -51,6 +53,7 @@ describe('admin media gateway key routes', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.requireAdminUser.mockResolvedValue({ id: 'admin-1', role: 'admin' });
+    mocks.auditGatewayEvent.mockResolvedValue(true);
     mocks.listGatewayKeys.mockResolvedValue([key]);
     mocks.issueGatewayKey.mockResolvedValue({ key, secret: `wmg_${'a'.repeat(43)}` });
     mocks.updateGatewayKey.mockResolvedValue(key);
@@ -75,6 +78,7 @@ describe('admin media gateway key routes', () => {
     expect(mocks.issueGatewayKey).not.toHaveBeenCalled();
     expect(mocks.updateGatewayKey).not.toHaveBeenCalled();
     expect(mocks.revokeGatewayKey).not.toHaveBeenCalled();
+    expect(mocks.auditGatewayEvent).not.toHaveBeenCalled();
   });
 
   it('lists only secret-free key views', async () => {
@@ -98,6 +102,16 @@ describe('admin media gateway key routes', () => {
       key,
       secret: `wmg_${'a'.repeat(43)}`,
     });
+    expect(mocks.auditGatewayEvent).toHaveBeenCalledWith({
+      actorId: 'admin-1',
+      actorName: undefined,
+      action: 'gateway_key_issue',
+      outcome: 'success',
+      gatewayKeyId: 'gwkey_1',
+      keyPrefix: 'wmg_abcd1234',
+      userId: 'user-1',
+    });
+    expect(JSON.stringify(mocks.auditGatewayEvent.mock.calls)).not.toContain(`wmg_${'a'.repeat(43)}`);
   });
 
   it.each([
@@ -117,6 +131,13 @@ describe('admin media gateway key routes', () => {
 
     expect(response.status).toBe(200);
     expect(mocks.updateGatewayKey).toHaveBeenCalledWith('gwkey_1', body);
+    expect(mocks.auditGatewayEvent).toHaveBeenCalledWith(expect.objectContaining({
+      actorId: 'admin-1',
+      action: 'gateway_key_update',
+      outcome: 'success',
+      gatewayKeyId: 'gwkey_1',
+      keyPrefix: 'wmg_abcd1234',
+    }));
   });
 
   it.each([
@@ -139,6 +160,13 @@ describe('admin media gateway key routes', () => {
     expect(second.status).toBe(200);
     expect(mocks.revokeGatewayKey).toHaveBeenCalledTimes(2);
     expect(JSON.stringify(await first.json())).not.toContain('secret');
+    expect(mocks.auditGatewayEvent).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      actorId: 'admin-1',
+      action: 'gateway_key_revoke',
+      outcome: 'success',
+      gatewayKeyId: 'gwkey_1',
+      keyPrefix: 'wmg_abcd1234',
+    }));
   });
 
   it('maps domain errors without leaking internal error messages', async () => {
@@ -154,5 +182,27 @@ describe('admin media gateway key routes', () => {
     const body = await response.json();
     expect(body).toMatchObject({ success: false, code: 'GATEWAY_INVALID_REQUEST' });
     expect(JSON.stringify(body)).not.toContain('postgres host secret');
+    expect(mocks.auditGatewayEvent).toHaveBeenCalledWith(expect.objectContaining({
+      actorId: 'admin-1',
+      action: 'gateway_key_update',
+      outcome: 'failure',
+      gatewayKeyId: 'gwkey_1',
+      errorCode: 'GATEWAY_INVALID_REQUEST',
+    }));
+  });
+
+  it('does not turn a successful issuance into a retryable response when audit persistence fails', async () => {
+    mocks.auditGatewayEvent.mockRejectedValue(new Error('audit unavailable'));
+
+    const response = await POST(request('POST', {
+      userId: 'user-1',
+      label: 'Production',
+      requestsPerMinute: 60,
+      dailyQuota: 1000,
+    }));
+
+    expect(response.status).toBe(201);
+    expect(mocks.issueGatewayKey).toHaveBeenCalledTimes(1);
+    expect(await response.json()).toMatchObject({ success: true, key });
   });
 });

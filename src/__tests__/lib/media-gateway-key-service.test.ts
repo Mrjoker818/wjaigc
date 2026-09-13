@@ -74,7 +74,7 @@ describe('media gateway key service', () => {
     expect(String(insert[0])).toContain('RETURNING');
   });
 
-  it('authenticates by hash lookup without enumerating plaintext keys', async () => {
+  it('authenticates and updates last_used_at atomically without enumerating plaintext keys', async () => {
     const secret = `wmg_${'a'.repeat(43)}`;
     mocks.execSql.mockResolvedValueOnce({ rows: [databaseRow], rowCount: 1 });
 
@@ -86,9 +86,12 @@ describe('media gateway key service', () => {
     });
 
     const [sql, params] = mocks.execSql.mock.calls[0];
+    expect(String(sql).trimStart()).toMatch(/^UPDATE wujie_gateway_keys/);
+    expect(String(sql)).toContain('SET last_used_at = now()');
     expect(String(sql)).toContain('key_hash = $1');
     expect(String(sql)).toContain('enabled = TRUE');
     expect(String(sql)).toContain('revoked_at IS NULL');
+    expect(String(sql)).toContain('RETURNING');
     expect(params).toEqual([createHash('sha256').update(secret).digest('hex')]);
     expect(JSON.stringify(mocks.execSql.mock.calls)).not.toContain(secret);
   });
@@ -104,14 +107,19 @@ describe('media gateway key service', () => {
     },
   );
 
-  it('rejects unknown, disabled, or revoked keys with the same redacted error', async () => {
+  it('rejects unknown, disabled, or revoked keys without updating their last-used time', async () => {
     const secret = `wmg_${'b'.repeat(43)}`;
-    for (const rows of [[], [{ ...databaseRow, enabled: false }], [{ ...databaseRow, revoked_at: '2026-09-13T01:00:00Z' }]]) {
-      mocks.execSql.mockReset().mockResolvedValue({ rows, rowCount: rows.length });
+    for (const lifecycleState of ['unknown', 'disabled', 'revoked']) {
+      mocks.execSql.mockReset().mockResolvedValue({ rows: [], rowCount: 0 });
       await expect(authenticateGatewayBearer(`Bearer ${secret}`)).rejects.toMatchObject({
         code: 'GATEWAY_KEY_INVALID',
         message: 'Gateway key is invalid',
       });
+      expect(mocks.execSql, lifecycleState).toHaveBeenCalledTimes(1);
+      const sql = String(mocks.execSql.mock.calls[0][0]);
+      expect(sql).toContain('SET last_used_at = now()');
+      expect(sql).toContain('enabled = TRUE');
+      expect(sql).toContain('revoked_at IS NULL');
     }
   });
 
@@ -155,6 +163,25 @@ describe('media gateway key service', () => {
     expect(result).toMatchObject({ id: 'gwkey_123', label: 'Renamed', requestsPerMinute: 12, enabled: false });
     expect(result).not.toHaveProperty('keyHash');
     expect(String(mocks.execSql.mock.calls[0][0])).not.toContain('key_hash =');
+  });
+
+  it('rejects re-enabling a revoked key and leaves its state disabled', async () => {
+    mocks.execSql
+      .mockResolvedValueOnce({ rows: [], rowCount: 0 })
+      .mockResolvedValueOnce({
+        rows: [{ ...databaseRow, enabled: false, revoked_at: '2026-09-13T02:00:00.000Z' }],
+        rowCount: 1,
+      });
+
+    await expect(updateGatewayKey('gwkey_123', { enabled: true })).rejects.toMatchObject({
+      code: 'GATEWAY_INVALID_REQUEST',
+      status: 409,
+    });
+
+    const updateSql = String(mocks.execSql.mock.calls[0][0]);
+    expect(updateSql).toContain('revoked_at IS NULL');
+    expect(mocks.execSql.mock.calls[0][1]).toEqual(['gwkey_123', true]);
+    expect(mocks.execSql).toHaveBeenCalledTimes(2);
   });
 
   it('revokes idempotently and never exposes a hash or secret', async () => {

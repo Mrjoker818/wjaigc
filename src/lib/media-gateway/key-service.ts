@@ -157,10 +157,10 @@ export async function authenticateGatewayBearer(value: string | null): Promise<G
 
   const digest = createHash('sha256').update(secret).digest('hex');
   const result = await execSql(
-    `SELECT ${PUBLIC_COLUMNS}
-       FROM wujie_gateway_keys
+    `UPDATE wujie_gateway_keys
+        SET last_used_at = now()
       WHERE key_hash = $1 AND enabled = TRUE AND revoked_at IS NULL
-      LIMIT 1`,
+      RETURNING ${PUBLIC_COLUMNS}`,
     [digest],
   );
   const row = result.rows[0] as GatewayKeyRow | undefined;
@@ -207,14 +207,25 @@ export async function updateGatewayKey(
   if (entries.length === 0) throw invalidRequest();
 
   const assignments = entries.map(([column], index) => `${column} = $${index + 2}`);
+  const rejectRevokedEnable = input.enabled === true;
   const result = await execSql(
     `UPDATE wujie_gateway_keys
         SET ${assignments.join(', ')}
-      WHERE id = $1
+      WHERE id = $1${rejectRevokedEnable ? ' AND revoked_at IS NULL' : ''}
       RETURNING ${PUBLIC_COLUMNS}`,
     [keyId, ...entries.map(([, value]) => value)],
   );
   const row = result.rows[0] as GatewayKeyRow | undefined;
+  if (!row && rejectRevokedEnable) {
+    const existing = await execSql(
+      `SELECT ${PUBLIC_COLUMNS} FROM wujie_gateway_keys WHERE id = $1 LIMIT 1`,
+      [keyId],
+    );
+    const existingRow = existing.rows[0] as GatewayKeyRow | undefined;
+    if (existingRow?.revoked_at !== null && existingRow?.revoked_at !== undefined) {
+      throw invalidRequest('Revoked gateway keys cannot be enabled', 409);
+    }
+  }
   if (!row) throw invalidRequest('Gateway key was not found', 404);
   return toView(row);
 }

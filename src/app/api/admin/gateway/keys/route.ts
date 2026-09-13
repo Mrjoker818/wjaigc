@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 
+import { auditGatewayEvent, type GatewayAuditEvent } from '@/lib/media-gateway/audit';
 import { GatewayError } from '@/lib/media-gateway/types';
 import { issueGatewayKey, listGatewayKeys } from '@/lib/media-gateway/key-service';
 import { requireAdminUser } from '@/lib/server-auth';
@@ -20,6 +21,14 @@ function serviceError(error: unknown): NextResponse {
     return responseError(error.status, error.code, message, error.retryable);
   }
   return responseError(503, 'GATEWAY_INTERNAL_UNAVAILABLE', 'Media gateway is unavailable', true);
+}
+
+function errorCode(error: unknown): string {
+  return error instanceof GatewayError ? error.code : 'GATEWAY_INTERNAL_UNAVAILABLE';
+}
+
+async function safeAudit(event: GatewayAuditEvent): Promise<void> {
+  await auditGatewayEvent(event).catch(() => false);
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -67,8 +76,25 @@ export async function POST(request: NextRequest) {
   if (!input) return responseError(400, 'GATEWAY_INVALID_REQUEST', 'Invalid gateway key request');
   try {
     const issued = await issueGatewayKey({ ...input, createdBy: admin.id });
+    await safeAudit({
+      actorId: admin.id,
+      actorName: admin.name,
+      action: 'gateway_key_issue',
+      outcome: 'success',
+      gatewayKeyId: issued.key.id,
+      keyPrefix: issued.key.keyPrefix,
+      userId: issued.key.userId,
+    });
     return NextResponse.json({ success: true, ...issued }, { status: 201 });
   } catch (error) {
+    await safeAudit({
+      actorId: admin.id,
+      actorName: admin.name,
+      action: 'gateway_key_issue',
+      outcome: 'failure',
+      userId: input.userId,
+      errorCode: errorCode(error),
+    });
     return serviceError(error);
   }
 }
