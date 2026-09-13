@@ -4,6 +4,7 @@ import {
   type CloudTask,
   type CloudTaskStatus,
 } from '@/lib/cloud-task-storage';
+import { getPool } from '@/lib/db-client';
 import type { GatewayPrincipal } from '@/lib/media-gateway/key-service';
 import { GatewayError } from '@/lib/media-gateway/types';
 
@@ -36,7 +37,12 @@ export interface GatewayTaskProjection {
   result: Record<string, unknown>;
   error?: string;
   previewUrl?: string;
-  thumbnailUrls: Record<string, string>;
+  thumbnailUrls?: Partial<Record<'256' | '512', string>>;
+}
+
+interface ThumbnailVariantRow {
+  size: number;
+  file_url: string;
 }
 
 export type GatewayTaskCancellation =
@@ -186,6 +192,32 @@ function projectTask(task: CloudTask): GatewayTaskProjection {
   };
 }
 
+async function readyThumbnailUrls(
+  assetVersionId: string,
+  ownerId: string,
+): Promise<GatewayTaskProjection['thumbnailUrls']> {
+  try {
+    const result = await getPool().query<ThumbnailVariantRow>(
+      `SELECT size, file_url
+       FROM wujie_asset_thumbnail_variants
+       WHERE asset_version_id = $1
+         AND owner_id = $2
+         AND status = 'ready'
+         AND size IN (256, 512)`,
+      [assetVersionId, ownerId],
+    );
+    const thumbnailUrls: NonNullable<GatewayTaskProjection['thumbnailUrls']> = {};
+    for (const row of result.rows) {
+      if (row.size !== 256 && row.size !== 512) continue;
+      const url = safeMediaUrl(row.file_url, 'image');
+      if (url) thumbnailUrls[String(row.size) as '256' | '512'] = url;
+    }
+    return Object.keys(thumbnailUrls).length > 0 ? thumbnailUrls : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function validStatus(value: unknown): value is CloudTaskStatus {
   return typeof value === 'string' && PUBLIC_TASK_STATUSES.has(value as CloudTaskStatus);
 }
@@ -197,7 +229,16 @@ export async function getGatewayTaskProjection(
   if (!TASK_ID_PATTERN.test(taskId)) throw taskNotFound();
   const task = await getCloudTaskForUser(taskId, principal.userId);
   if (!task) throw taskNotFound();
-  return projectTask(task);
+  const projection = projectTask(task);
+  const assetVersionId = publicIdentifier(task.result?.assetVersionId);
+  if (!assetVersionId) return projection;
+  const thumbnailUrls = await readyThumbnailUrls(assetVersionId, principal.userId);
+  const previewUrl = thumbnailUrls?.['512'] || thumbnailUrls?.['256'] || projection.previewUrl;
+  return {
+    ...projection,
+    ...(previewUrl ? { previewUrl } : {}),
+    thumbnailUrls,
+  };
 }
 
 export async function cancelGatewayTask(
