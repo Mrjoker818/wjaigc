@@ -264,6 +264,8 @@
     { "path": ".superpowers/sdd/media-gateway-task-7-fix-review-package.md", "sourceCommit": "a790f953" },
     { "path": ".superpowers/sdd/media-gateway-task-7-report.md", "sourceCommit": "4a6ae9da" },
     { "path": ".superpowers/sdd/media-gateway-task-8-report.md", "sourceCommit": "74716cb9" },
+    { "path": ".superpowers/sdd/media-gateway-task-9-report.md", "sourceCommit": "b108312b" },
+    { "path": ".superpowers/sdd/media-gateway-task-9-review-package.md", "sourceCommit": "b108312b" },
     { "path": "migrations/20260913_v588_media_gateway.sql", "sourceCommit": "91c1f6c2" }
   ]
 }

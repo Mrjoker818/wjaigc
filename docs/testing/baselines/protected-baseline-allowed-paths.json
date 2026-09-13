@@ -485,5 +485,7 @@
   ".superpowers/sdd/media-gateway-task-7-fix-review-package.md",
   ".superpowers/sdd/media-gateway-task-7-report.md",
   ".superpowers/sdd/media-gateway-task-8-report.md",
+  ".superpowers/sdd/media-gateway-task-9-report.md",
+  ".superpowers/sdd/media-gateway-task-9-review-package.md",
   "migrations/20260913_v588_media_gateway.sql"
 ]

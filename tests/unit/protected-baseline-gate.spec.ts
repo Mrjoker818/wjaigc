@@ -308,6 +308,8 @@ const historicalSourceAuthorizations = [
   ['.superpowers/sdd/media-gateway-task-7-fix-review-package.md', 'a790f953'],
   ['.superpowers/sdd/media-gateway-task-7-report.md', '4a6ae9da'],
   ['.superpowers/sdd/media-gateway-task-8-report.md', '74716cb9'],
+  ['.superpowers/sdd/media-gateway-task-9-report.md', 'b108312b'],
+  ['.superpowers/sdd/media-gateway-task-9-review-package.md', 'b108312b'],
   ['migrations/20260913_v588_media_gateway.sql', '91c1f6c2'],
 ] as const;
 
