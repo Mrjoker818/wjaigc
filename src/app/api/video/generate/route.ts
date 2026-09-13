@@ -66,6 +66,7 @@ import {
   type SkillPrepaidExecutionReference,
 } from '@/lib/skill-runtime/prepaid-generation';
 import { isAssetVersionId } from '@/lib/asset-core/asset-version-id';
+import { trustedGatewayContext } from '@/lib/media-gateway/internal-client';
 
 export const maxDuration = 300; // 5 min timeout
 
@@ -213,6 +214,7 @@ export async function POST(request: NextRequest) {
     const auth = await requireApiAuthOrReject(request);
     if (auth instanceof NextResponse) return auth;
     sessionUser = auth.user;
+    const gatewayContext = trustedGatewayContext(auth.source, request.headers);
     const skillBillingContext = body.skillBillingContext === undefined
       ? undefined
       : parseSkillBillingContext(body.skillBillingContext);
@@ -518,6 +520,7 @@ export async function POST(request: NextRequest) {
       } : {}),
     })).digest('hex');
     const submissionPayload = {
+      ...gatewayContext,
       prompt,
       imageUrl,
       lastFrameImageUrl,

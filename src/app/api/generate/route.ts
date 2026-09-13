@@ -70,6 +70,7 @@ import {
   ModelCapabilityError,
   type TaskModelDescriptor,
 } from '@/lib/task-core/model-capability-contract';
+import { trustedGatewayContext } from '@/lib/media-gateway/internal-client';
 
 // 直接模式（OpenAI兼容API返回图片需60-120秒）
 // 异步模式（返回task_id只需几秒）两者共存，取较大值
@@ -206,6 +207,7 @@ export async function POST(request: NextRequest) {
   const opTimer = startTimer();
   const authResult = await requireApiAuthOrReject(request);
   if (authResult instanceof NextResponse) return authResult;
+  const gatewayContext = trustedGatewayContext(authResult.source, request.headers);
   const deferAgentExecution = authResult.source === 'internal'
     && request.headers.get('x-wujie-agent-defer-execution') === 'true';
   const strictAgentRouting = authResult.source === 'internal'
@@ -577,6 +579,7 @@ export async function POST(request: NextRequest) {
       // Keep only the request fields required to resume provider submission after
       // a cloud runtime releases this request. Provider credentials stay server-side.
       const submissionPayload: Record<string, unknown> = {
+        ...gatewayContext,
         prompt,
         aspectRatio,
         size: normalizedRequestedPixelSize,
@@ -1181,6 +1184,7 @@ export async function POST(request: NextRequest) {
       }
 
       const submissionPayload: Record<string, unknown> = {
+        ...gatewayContext,
         prompt,
         aspectRatio,
         size: normalizedRequestedPixelSize,
