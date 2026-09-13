@@ -2390,3 +2390,9 @@ The focused gate test passes `7/7`; the actual protected-baseline command passes
 - Coze 已运行与 `main@7bed6e21` 同 tree 的 Build `89oMVeKh9njdq7IcMrFnL`；云端聚焦 `14/14`、TypeScript、构建版 ESLint、保护基线 `38/38`、生产构建 `120/120` 和首页 HTTP 200 均通过。
 - 部署前旧页面首次请求未缓存的版本历史懒 chunk 得到 HTTP 404，客户端只执行一次带 `_chunk_retry` 的恢复；新页面打开版本历史成功，重复操作无第二次导航、无异常、画布可用。
 - **跨部署 Chunk 恢复门禁：通过 / CLOSED。** Task 10 及全平台仍不能判定完全通过，实体触屏、真实软键盘和 190 项隔离 PostgreSQL 测试继续作为发布条件；`stable` 保持只读。
+
+### 2026-09-13 Task 10 PostgreSQL 发布门禁结论
+
+- 独立临时 PostgreSQL 18 集群中的全量 Vitest 为 `782/782 files`、`6409/6409 tests`、0 失败、0 跳过；生产数据库未被使用，测试后临时服务已停止。
+- 原 190 项条件 PostgreSQL 测试已从“未执行”更新为“真实通过”，并覆盖并发幂等、任务终态、扣费退款和主要持久化链路。
+- **PostgreSQL 门禁：通过 / CLOSED。** Task 10 当前只保留实体触屏与真实软键盘设备门禁；全平台其他历史阻断不因本项关闭而自动升级。

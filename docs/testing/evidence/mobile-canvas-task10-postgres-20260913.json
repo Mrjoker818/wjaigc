@@ -1,0 +1,32 @@
+{
+  "recordedAt": "2026-09-13",
+  "scope": "V5.8.8 Batch B mobile canvas Task 10 final PostgreSQL gate",
+  "sourceCommit": "3297862ede442abad07bc0528229d90d50280b3c",
+  "productCommit": "7bed6e2196ae43f1f22be16cf7b36d5541622a28",
+  "stableCommit": "52f7c601ed150769e15d06fb435c6e360e28c9e7",
+  "database": {
+    "engine": "PostgreSQL 18",
+    "host": "127.0.0.1",
+    "port": 55439,
+    "database": "wujie_task10_test",
+    "isolatedTemporaryCluster": true,
+    "productionDatabaseUsed": false,
+    "stoppedAfterRun": true
+  },
+  "command": "pnpm test",
+  "environment": [
+    "POSTGRES_TEST_DATABASE_URL",
+    "TEST_POSTGRES_URL"
+  ],
+  "result": {
+    "exitCode": 0,
+    "testFilesPassed": 782,
+    "testFilesFailed": 0,
+    "testFilesSkipped": 0,
+    "testsPassed": 6409,
+    "testsFailed": 0,
+    "testsSkipped": 0,
+    "durationSeconds": 774.3
+  },
+  "conclusion": "PASS"
+}

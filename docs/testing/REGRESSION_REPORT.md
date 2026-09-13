@@ -3123,3 +3123,11 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - 客户端自动导航至 `/?projectId=demo-project&_chunk_retry=1789290970028`，新文档 `timeOrigin=1789290970029`；只观察到一次页面导航。恢复后版本历史以 `role="dialog" / aria-label="版本历史"` 打开，关闭按钮可访问，画布仍可用。
 - 在恢复后的同一文档再次打开面板，`timeOrigin` 与 URL 均未变化，没有第二次导航、刷新循环或 Runtime exception。截图：`docs/testing/evidence/task10-cloud-cross-deploy-7bed6e21.png`（SHA-256 `2EA3CBE6CCB88261D356104622E24E8F7E60338E31C5A5FED1C5FA39F5792AC9`）；机器证据已更新。
 - **判定：真实旧页面跨部署一次性 Chunk 恢复 `CLOUD PASS / CLOSED`。** Task 10 总状态仍为 `CONDITIONAL PASS / PHYSICAL DEVICE GATE OPEN`，只剩实体触屏、软键盘和 190 项隔离 PostgreSQL 条件测试，不进入媒体网关。
+
+### 2026-09-13 Task 10 隔离 PostgreSQL 全量门禁
+
+- 在独立临时 PostgreSQL 18 集群执行完整 `pnpm test`，同时设置 `POSTGRES_TEST_DATABASE_URL` 与 `TEST_POSTGRES_URL`；未连接或修改生产数据库。
+- 最终结果为 `782/782` 测试文件、`6409/6409` 测试通过，0 失败、0 跳过，退出码 0，耗时 774.30 秒。此前 190 项条件测试已真实执行，不再列为未验证。
+- 覆盖范围包含 Skill 幂等与并发、任务终态竞争、单次扣费/退款、Pear 分层、批注、元素拆解、工作流、管理员投影、认证与历史媒体修复等 PostgreSQL 套件。
+- 临时数据库在测试结束后已正常停止；机器证据：[mobile-canvas-task10-postgres-20260913.json](evidence/mobile-canvas-task10-postgres-20260913.json)。
+- **判定：Task 10 PostgreSQL 门禁 `LOCAL PASS / CLOSED`。** Task 10 仅剩实体触屏手感及真实软键盘可达性，不把 CDP 触摸仿真冒充实体设备证据。
