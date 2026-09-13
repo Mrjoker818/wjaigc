@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertTriangle,
   Check,
@@ -66,6 +66,9 @@ interface KeyFormState {
 }
 
 type DrawerMode = 'issue' | 'edit' | null;
+type MutationScope = 'issue' | `edit:${string}` | `revoke:${string}`;
+
+const REQUEST_TIMEOUT_MS = 5_000;
 
 const initialForm: KeyFormState = {
   userId: '',
@@ -83,6 +86,8 @@ function objectValue(value: unknown): Record<string, unknown> | null {
 
 const FULL_SECRET_PATTERN = /wmg_[A-Za-z0-9_-]{43,}/;
 const SECRET_PATTERN = /^wmg_[A-Za-z0-9_-]{43}$/;
+
+class UntrustedResponseError extends Error {}
 
 function safeText(value: unknown, maximum: number): string | null {
   return typeof value === 'string'
@@ -160,8 +165,10 @@ function keyStatus(key: GatewayKeyView): { label: string; className: string } {
 }
 
 async function responseBody(response: Response): Promise<Record<string, unknown>> {
-  const value: unknown = await response.json().catch(() => null);
-  return objectValue(value) ?? {};
+  const value: unknown = await response.json();
+  const body = objectValue(value);
+  if (!body) throw new UntrustedResponseError('untrusted response');
+  return body;
 }
 
 export default function MediaGatewayAdmin() {
@@ -180,34 +187,79 @@ export default function MediaGatewayAdmin() {
   const [copiedKeyId, setCopiedKeyId] = useState<string | null>(null);
   const [revokeKey, setRevokeKey] = useState<GatewayKeyView | null>(null);
   const [revoking, setRevoking] = useState(false);
-  const [mutationLocked, setMutationLocked] = useState(false);
+  const [lockedMutations, setLockedMutations] = useState<ReadonlySet<MutationScope>>(new Set());
+  const requestControllers = useRef(new Map<string, AbortController>());
+
+  const setMutationLocked = useCallback((scope: MutationScope, locked: boolean): void => {
+    setLockedMutations(current => {
+      const next = new Set(current);
+      if (locked) next.add(scope);
+      else next.delete(scope);
+      return next;
+    });
+  }, []);
+
+  const runBoundedFetch = useCallback(async (
+    scope: string,
+    input: RequestInfo | URL,
+    init?: RequestInit,
+  ): Promise<Response> => {
+    requestControllers.current.get(scope)?.abort();
+    const controller = new AbortController();
+    requestControllers.current.set(scope, controller);
+    const timeout = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+    try {
+      return await fetch(input, { ...init, signal: controller.signal });
+    } finally {
+      window.clearTimeout(timeout);
+      if (requestControllers.current.get(scope) === controller) {
+        requestControllers.current.delete(scope);
+      }
+    }
+  }, []);
+
+  const cancelRequest = useCallback((scope: string): void => {
+    requestControllers.current.get(scope)?.abort();
+  }, []);
+
+  const readAuthoritativeKeys = useCallback(async (scope: string): Promise<GatewayKeyView[]> => {
+    const response = await runBoundedFetch(scope, '/api/admin/gateway/keys');
+    if (!response.ok) throw new Error('request failed');
+    const body = await responseBody(response);
+    if (body.success !== true || !Array.isArray(body.keys)) {
+      throw new UntrustedResponseError('untrusted response');
+    }
+    const parsedKeys = body.keys.map(parseKey);
+    if (parsedKeys.some(key => key === null)) throw new UntrustedResponseError('untrusted response');
+    return parsedKeys as GatewayKeyView[];
+  }, [runBoundedFetch]);
 
   const loadKeys = useCallback(async (): Promise<void> => {
     setLoading(true);
     setListError(null);
     try {
-      const response = await fetch('/api/admin/gateway/keys');
-      const body = await responseBody(response);
-      if (!response.ok || body.success !== true || !Array.isArray(body.keys)) {
-        throw new Error('invalid response');
-      }
-      const parsedKeys = body.keys.map(parseKey);
-      if (parsedKeys.some(key => key === null)) {
-        setKeys([]);
-        setListError('服务器响应不可信，未显示任何媒体网关密钥。');
-        return;
-      }
-      setKeys(parsedKeys as GatewayKeyView[]);
-    } catch {
+      const parsedKeys = await readAuthoritativeKeys('list');
+      setKeys(parsedKeys);
+      setLockedMutations(new Set());
+    } catch (error) {
       setKeys([]);
-      setListError('加载媒体网关密钥失败，请稍后重试。');
+      setListError(
+        error instanceof UntrustedResponseError
+          ? '服务器响应不可信，未显示任何媒体网关密钥。'
+          : '加载媒体网关密钥失败，请稍后重试。',
+      );
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [readAuthoritativeKeys]);
 
   useEffect(() => {
+    const controllers = requestControllers.current;
     void loadKeys();
+    return () => {
+      controllers.forEach(controller => controller.abort());
+      controllers.clear();
+    };
   }, [loadKeys]);
 
   const summary = useMemo(() => ({
@@ -243,11 +295,22 @@ export default function MediaGatewayAdmin() {
     setSecretError(null);
   };
 
-  const reconcileAmbiguousMutation = async (message: string): Promise<void> => {
-    setMutationLocked(true);
-    setSheetError(message);
-    setRevokeError(message);
-    await loadKeys();
+  const reconcileAmbiguousMutation = async (
+    scope: MutationScope,
+    message: string,
+    setContextError: (value: string) => void,
+  ): Promise<void> => {
+    setMutationLocked(scope, true);
+    setContextError(`${message}正在核对权威列表，请勿重复提交。`);
+    try {
+      const authoritativeKeys = await readAuthoritativeKeys(scope);
+      setKeys(authoritativeKeys);
+      setListError(null);
+      setMutationLocked(scope, false);
+      setContextError(`${message}权威列表已刷新，请核对当前状态。`);
+    } catch {
+      setContextError(`${message}权威列表暂时无法确认，请先退出并刷新列表，勿重复提交。`);
+    }
   };
 
   const submitForm = async (): Promise<void> => {
@@ -261,14 +324,18 @@ export default function MediaGatewayAdmin() {
       setSheetError('请填写有效的用户、标签、RPM 和日配额。');
       return;
     }
-    if (mutationLocked) return;
+    const scope: MutationScope = drawerMode === 'issue'
+      ? 'issue'
+      : `edit:${editingKey?.id ?? ''}`;
+    if (lockedMutations.has(scope)) return;
     setSaving(true);
     setSheetError(null);
     try {
       const isIssue = drawerMode === 'issue';
       const submittedLabel = form.label.trim();
       const submittedUserId = form.userId.trim();
-      const response = await fetch(
+      const response = await runBoundedFetch(
+        scope,
         isIssue ? '/api/admin/gateway/keys' : `/api/admin/gateway/keys/${editingKey?.id ?? ''}`,
         {
           method: isIssue ? 'POST' : 'PATCH',
@@ -287,7 +354,10 @@ export default function MediaGatewayAdmin() {
         },
       );
       const body = await responseBody(response);
-      if (!response.ok) throw new Error('request failed');
+      if (!response.ok) {
+        await reconcileAmbiguousMutation(scope, isIssue ? '签发结果无法确认。' : '保存结果无法确认。', setSheetError);
+        return;
+      }
       const returnedKey = parseKey(body.key);
       const secret = isIssue && typeof body.secret === 'string' && SECRET_PATTERN.test(body.secret)
         ? body.secret
@@ -307,9 +377,9 @@ export default function MediaGatewayAdmin() {
             && returnedKey.enabled === form.enabled);
       if (body.success !== true || !keyMatchesRequest || (isIssue && secret === null)) {
         await reconcileAmbiguousMutation(
-          isIssue
-            ? '签发结果无法确认。已锁定重复签发并重新加载权威列表。'
-            : '保存结果无法确认。已锁定重复提交并重新加载权威列表。',
+          scope,
+          isIssue ? '签发结果无法确认。' : '保存结果无法确认。',
+          setSheetError,
         );
         return;
       }
@@ -325,7 +395,11 @@ export default function MediaGatewayAdmin() {
       setDrawerMode(null);
       setEditingKey(null);
     } catch {
-      setSheetError(drawerMode === 'issue' ? '签发密钥失败，请重试。' : '保存密钥失败，请重试。');
+      await reconcileAmbiguousMutation(
+        scope,
+        drawerMode === 'issue' ? '签发结果无法确认。' : '保存结果无法确认。',
+        setSheetError,
+      );
     } finally {
       setSaving(false);
     }
@@ -356,13 +430,21 @@ export default function MediaGatewayAdmin() {
 
   const confirmRevoke = async (): Promise<void> => {
     if (!revokeKey) return;
-    if (mutationLocked) return;
+    const scope: MutationScope = `revoke:${revokeKey.id}`;
+    if (lockedMutations.has(scope)) return;
     setRevoking(true);
     setRevokeError(null);
     try {
-      const response = await fetch(`/api/admin/gateway/keys/${revokeKey.id}`, { method: 'DELETE' });
+      const response = await runBoundedFetch(
+        scope,
+        `/api/admin/gateway/keys/${revokeKey.id}`,
+        { method: 'DELETE' },
+      );
       const body = await responseBody(response);
-      if (!response.ok) throw new Error('request failed');
+      if (!response.ok) {
+        await reconcileAmbiguousMutation(scope, '吊销结果无法确认。', setRevokeError);
+        return;
+      }
       const returnedKey = parseKey(body.key);
       if (
         body.success !== true
@@ -371,16 +453,42 @@ export default function MediaGatewayAdmin() {
         || returnedKey.enabled
         || returnedKey.revokedAt === null
       ) {
-        await reconcileAmbiguousMutation('吊销结果无法确认。已锁定重复提交并重新加载权威列表。');
+        await reconcileAmbiguousMutation(scope, '吊销结果无法确认。', setRevokeError);
         return;
       }
       setKeys(current => current.map(key => key.id === returnedKey.id ? returnedKey : key));
       setRevokeKey(null);
     } catch {
-      setRevokeError('吊销密钥失败，请重试。');
+      await reconcileAmbiguousMutation(scope, '吊销结果无法确认。', setRevokeError);
     } finally {
       setRevoking(false);
     }
+  };
+
+  const formScope: MutationScope | null = drawerMode === 'issue'
+    ? 'issue'
+    : editingKey ? `edit:${editingKey.id}` : null;
+
+  const closeDrawer = (): void => {
+    if (formScope) {
+      cancelRequest(formScope);
+      setMutationLocked(formScope, false);
+    }
+    setSaving(false);
+    setDrawerMode(null);
+    setEditingKey(null);
+    setSheetError(null);
+  };
+
+  const closeRevokeDialog = (): void => {
+    if (revokeKey) {
+      const scope: MutationScope = `revoke:${revokeKey.id}`;
+      cancelRequest(scope);
+      setMutationLocked(scope, false);
+    }
+    setRevoking(false);
+    setRevokeError(null);
+    setRevokeKey(null);
   };
 
   return (
@@ -402,7 +510,7 @@ export default function MediaGatewayAdmin() {
               <RefreshCw className={loading ? 'animate-spin' : ''} />
               刷新
             </Button>
-            <Button size="sm" onClick={openIssueDrawer} disabled={mutationLocked}>
+            <Button size="sm" onClick={openIssueDrawer} disabled={lockedMutations.has('issue')}>
               <Plus />
               签发密钥
             </Button>
@@ -467,7 +575,7 @@ export default function MediaGatewayAdmin() {
         )}
       </div>
 
-      <Sheet open={drawerMode !== null} onOpenChange={open => { if (!open && !saving) { setDrawerMode(null); setSheetError(null); } }}>
+      <Sheet open={drawerMode !== null} onOpenChange={open => { if (!open) closeDrawer(); }}>
         <SheetContent className="w-[calc(100%-1rem)] max-w-md overflow-x-hidden overflow-y-auto border-border sm:w-full">
           <SheetHeader>
             <SheetTitle>{drawerMode === 'issue' ? '签发媒体网关密钥' : '编辑媒体网关密钥'}</SheetTitle>
@@ -497,10 +605,10 @@ export default function MediaGatewayAdmin() {
             {sheetError && <ContextError message={sheetError} />}
           </div>
           <SheetFooter>
-            <Button onClick={() => void submitForm()} disabled={saving || mutationLocked}>
+            <Button onClick={() => void submitForm()} disabled={saving || (formScope !== null && lockedMutations.has(formScope))}>
               {saving ? '提交中...' : drawerMode === 'issue' ? '确认签发' : '保存修改'}
             </Button>
-            <Button variant="outline" onClick={() => setDrawerMode(null)} disabled={saving}>取消</Button>
+            <Button variant="outline" onClick={closeDrawer}>取消</Button>
           </SheetFooter>
         </SheetContent>
       </Sheet>
@@ -531,7 +639,7 @@ export default function MediaGatewayAdmin() {
         </DialogContent>
       </Dialog>
 
-      <AlertDialog open={revokeKey !== null} onOpenChange={open => { if (!open && !revoking) setRevokeKey(null); }}>
+      <AlertDialog open={revokeKey !== null} onOpenChange={open => { if (!open) closeRevokeDialog(); }}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>吊销 {revokeKey?.label}</AlertDialogTitle>
@@ -539,8 +647,8 @@ export default function MediaGatewayAdmin() {
           </AlertDialogHeader>
           {revokeError && <ContextError message={revokeError} />}
           <AlertDialogFooter>
-            <AlertDialogCancel disabled={revoking}>取消</AlertDialogCancel>
-            <AlertDialogAction className="bg-destructive text-white hover:bg-destructive/90" disabled={revoking || mutationLocked} onClick={event => { event.preventDefault(); void confirmRevoke(); }}>
+            <AlertDialogCancel>取消</AlertDialogCancel>
+            <AlertDialogAction className="bg-destructive text-white hover:bg-destructive/90" disabled={revoking || (revokeKey !== null && lockedMutations.has(`revoke:${revokeKey.id}`))} onClick={event => { event.preventDefault(); void confirmRevoke(); }}>
               {revoking ? '吊销中...' : '确认吊销'}
             </AlertDialogAction>
           </AlertDialogFooter>

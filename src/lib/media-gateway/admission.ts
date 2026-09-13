@@ -4,6 +4,7 @@ import type { PoolClient, QueryResultRow } from 'pg';
 
 import { getPool } from '@/lib/db-client';
 import type { GatewayPrincipal } from '@/lib/media-gateway/key-service';
+import { postgresUtcDayWindow } from '@/lib/media-gateway/utc-day-window';
 import {
   GatewayError,
   type GatewayMediaType,
@@ -54,6 +55,8 @@ interface GatewayRequestRow extends QueryResultRow {
   created_at: string | Date;
   updated_at: string | Date;
 }
+
+const ADMISSION_UTC_DAY = postgresUtcDayWindow('$2::timestamptz');
 
 const REQUEST_COLUMNS = `
   id, gateway_key_id, user_id, idempotency_key, request_digest, media_type,
@@ -331,8 +334,8 @@ export async function reserveGatewayRequest(
          FROM wujie_gateway_requests
         WHERE gateway_key_id = $1
           AND admission_status IN ('reserved', 'admitted')
-          AND created_at >= date_trunc('day', $2::timestamptz)
-          AND created_at < date_trunc('day', $2::timestamptz) + interval '1 day'
+          AND created_at >= ${ADMISSION_UTC_DAY.startSql}
+          AND created_at < ${ADMISSION_UTC_DAY.endSql}
         ORDER BY created_at, id
         FOR UPDATE`,
       [key.id, now.toISOString()],

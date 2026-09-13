@@ -55,7 +55,9 @@ describe('media gateway admission on PostgreSQL', () => {
       await closePool();
       process.env.DATABASE_URL = nonUtcUrl.toString();
       process.env.PGDATABASE_URL = nonUtcUrl.toString();
-      expect((await execSql('SHOW TIME ZONE')).rows[0]?.TimeZone).toBe('Asia/Shanghai');
+      expect((await execSql(
+        `SELECT current_setting('TimeZone') AS timezone`,
+      )).rows[0]?.timezone).toBe('Asia/Shanghai');
 
       const { reserveGatewayRequest } = await import('@/lib/media-gateway/admission');
       const { listGatewayKeys } = await import('@/lib/media-gateway/key-service');

@@ -406,10 +406,44 @@ describe('MediaGatewayAdmin', () => {
     const sheet = screen.getByRole('dialog', { name: '签发媒体网关密钥' });
     expect((await within(sheet).findByRole('alert')).textContent).toContain('签发结果无法确认');
     expect((within(sheet).getByRole('button', { name: '取消' }) as HTMLButtonElement).disabled).toBe(false);
-    expect((screen.getAllByRole('button', { name: '编辑 Production' })[0] as HTMLButtonElement).disabled).toBe(false);
+    const unrelatedEdit = document.querySelector<HTMLButtonElement>('[aria-label="编辑 Production"]');
+    expect(unrelatedEdit?.disabled).toBe(false);
     fireEvent.click(within(sheet).getByRole('button', { name: '取消' }));
     await waitFor(() => expect(screen.queryByRole('dialog', { name: '签发媒体网关密钥' })).toBeNull());
-    expect(authoritySignal?.aborted).toBe(true);
+    expect((authoritySignal as AbortSignal | null)?.aborted).toBe(true);
+  });
+
+  it('bounds an unavailable authority refresh and releases its local lock on exit', async () => {
+    vi.useFakeTimers();
+    let getCount = 0;
+    vi.stubGlobal('fetch', vi.fn((_input: RequestInfo | URL, init?: RequestInit) => {
+      if ((init?.method ?? 'GET') === 'GET') {
+        getCount += 1;
+        if (getCount === 1) return Promise.resolve(jsonResponse({ success: true, keys: [] }));
+        return new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () => reject(new DOMException('Timed out', 'AbortError')));
+        });
+      }
+      return Promise.resolve(jsonResponse({ success: true, key, secret: 'wmg_too-short' }, 201));
+    }));
+    render(<MediaGatewayAdmin />);
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    fireEvent.click(screen.getByRole('button', { name: '签发密钥' }));
+    fireEvent.change(screen.getByLabelText('用户 ID'), { target: { value: 'user-1' } });
+    fireEvent.change(screen.getByLabelText('标签'), { target: { value: 'Production' } });
+    fireEvent.click(screen.getByRole('button', { name: '确认签发' }));
+
+    await act(async () => vi.advanceTimersByTimeAsync(5_000));
+    vi.useRealTimers();
+    const sheet = screen.getByRole('dialog', { name: '签发媒体网关密钥' });
+    expect((await within(sheet).findByRole('alert')).textContent).toContain('权威列表暂时无法确认');
+    expect((within(sheet).getByRole('button', { name: '确认签发' }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(within(sheet).getByRole('button', { name: '取消' }));
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '签发媒体网关密钥' })).toBeNull());
+    expect((screen.getByRole('button', { name: '签发密钥' }) as HTMLButtonElement).disabled).toBe(false);
   });
 
   it('uses a bounded mobile layout at 375px without a horizontally scrolling root', async () => {

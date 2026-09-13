@@ -2,6 +2,7 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto';
 
 import { execSql } from '@/lib/db-client';
 import { GatewayError, type GatewayKeyRecord } from '@/lib/media-gateway/types';
+import { postgresUtcDayWindow } from '@/lib/media-gateway/utc-day-window';
 
 export interface GatewayKeyView {
   id: string;
@@ -60,6 +61,7 @@ const PUBLIC_COLUMNS = `
   enabled, created_by, created_at, last_used_at, revoked_at
 `;
 const SECRET_PATTERN = /^wmg_[A-Za-z0-9_-]{43,}$/;
+const CURRENT_UTC_DAY = postgresUtcDayWindow('CURRENT_TIMESTAMP');
 
 function invalidRequest(message = 'Invalid gateway key request', status = 400): GatewayError {
   return new GatewayError('GATEWAY_INVALID_REQUEST', status, message);
@@ -195,8 +197,8 @@ export async function listGatewayKeys(): Promise<GatewayKeyView[]> {
          SELECT gateway_key_id, COUNT(*)::integer AS today_usage
            FROM wujie_gateway_requests
           WHERE admission_status IN ('reserved', 'admitted')
-            AND created_at >= date_trunc('day', CURRENT_TIMESTAMP AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'
-            AND created_at < (date_trunc('day', CURRENT_TIMESTAMP AT TIME ZONE 'UTC') + interval '1 day') AT TIME ZONE 'UTC'
+            AND created_at >= ${CURRENT_UTC_DAY.startSql}
+            AND created_at < ${CURRENT_UTC_DAY.endSql}
           GROUP BY gateway_key_id
        ) AS usage ON usage.gateway_key_id = keys.id
       ORDER BY keys.created_at DESC, keys.id ASC`,
@@ -242,8 +244,8 @@ export async function updateGatewayKey(
          FROM wujie_gateway_requests AS usage
         WHERE usage.gateway_key_id = changed.id
           AND usage.admission_status IN ('reserved', 'admitted')
-          AND usage.created_at >= date_trunc('day', CURRENT_TIMESTAMP AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'
-          AND usage.created_at < (date_trunc('day', CURRENT_TIMESTAMP AT TIME ZONE 'UTC') + interval '1 day') AT TIME ZONE 'UTC'
+          AND usage.created_at >= ${CURRENT_UTC_DAY.startSql}
+          AND usage.created_at < ${CURRENT_UTC_DAY.endSql}
      ), 0)::integer AS today_usage
        FROM changed`,
     [keyId, ...entries.map(([, value]) => value)],
@@ -277,8 +279,8 @@ export async function revokeGatewayKey(keyId: string): Promise<GatewayKeyView> {
          FROM wujie_gateway_requests AS usage
         WHERE usage.gateway_key_id = changed.id
           AND usage.admission_status IN ('reserved', 'admitted')
-          AND usage.created_at >= date_trunc('day', CURRENT_TIMESTAMP AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'
-          AND usage.created_at < (date_trunc('day', CURRENT_TIMESTAMP AT TIME ZONE 'UTC') + interval '1 day') AT TIME ZONE 'UTC'
+          AND usage.created_at >= ${CURRENT_UTC_DAY.startSql}
+          AND usage.created_at < ${CURRENT_UTC_DAY.endSql}
      ), 0)::integer AS today_usage
        FROM changed`,
     [keyId],
