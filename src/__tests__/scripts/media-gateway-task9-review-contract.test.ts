@@ -69,7 +69,7 @@ describe('V588-MEDIA-001 Task 9 independent review contracts', () => {
     const result = spawnSync(process.execPath, [
       resolve(process.cwd(), 'scripts/run-task9-gate-with-evidence.mjs'),
       '--name', 'contract-probe', '--output', output, '--',
-      process.execPath, '-e', "process.stdout.write('out\\n');process.stderr.write('err\\n')",
+      'pnpm', 'exec', process.execPath, '-e', "process.stdout.write('out\\n');process.stderr.write('err\\n')",
     ], { cwd: process.cwd(), encoding: 'utf8' });
 
     expect(result.status).toBe(0);

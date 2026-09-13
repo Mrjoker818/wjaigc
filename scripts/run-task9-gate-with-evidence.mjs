@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { spawn, spawnSync } from 'node:child_process';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 function fail(message) {
@@ -42,8 +42,18 @@ const commitProbe = spawnSync('git', ['rev-parse', 'HEAD'], {
   windowsHide: true,
 });
 const commit = commitProbe.status === 0 ? commitProbe.stdout.trim() : 'unknown';
-const executable = process.platform === 'win32' && command[0] === 'pnpm' ? 'pnpm.cmd' : command[0];
-const child = spawn(executable, command.slice(1), {
+let executable = command[0];
+let childArguments = command.slice(1);
+if (process.platform === 'win32' && command[0] === 'pnpm') {
+  const pnpmEntrypoint = [
+    process.env.npm_execpath,
+    ...(process.env.PATH || '').split(';').map(directory => resolve(directory, 'node_modules', 'pnpm', 'bin', 'pnpm.cjs')),
+  ].find(candidate => candidate && existsSync(candidate));
+  if (!pnpmEntrypoint) fail('Unable to resolve the pnpm JavaScript entrypoint on Windows');
+  executable = process.execPath;
+  childArguments = [pnpmEntrypoint, ...childArguments];
+}
+const child = spawn(executable, childArguments, {
   cwd: process.cwd(),
   env: process.env,
   shell: false,
