@@ -3177,3 +3177,13 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - 构建保留 50 条既有 Turbopack 动态文件追踪告警；本轮没有关闭检查或扩大忽略规则。
 
 **判定：`LOCAL CODE PASS / POSTGRESQL AND CLOUD UNVERIFIED`。** 本地可执行代码门禁已通过，但媒体网关 Task 9 尚不能关闭。
+
+### 2026-09-14 Task 9 Coze 默认关闭态复验
+
+- GitHub `main@583c96295e48276b52473f58d98277bb36e87caf` 已由 Coze 项目页确认 fetch 并无冲突合并；`origin/stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 保持只读。
+- Coze 构建切换期间外部预览短暂返回 502；服务恢复后首页连续三次返回 200，响应长度稳定为 19751 字节。
+- 外部预览 `/api/auth/me` 返回 200；未登录状态返回 `user: null`，证明认证端点可达但不冒充已登录验证。
+- 默认关闭态下，外部预览 `/api/gateway/v1/images` 与 `/api/gateway/v1/videos` 均真实返回 503、`GATEWAY_DISABLED`、`retryable: false`，并各自提供 requestId。
+- 等待期间浏览器控制内核重置，未能读取 Coze 最终 Build ID、PID 与完整云端测试计数；临时启用后的真实供应商、AssetVersion、缩略图、S3、`n=2` 和账务链路仍未执行。
+
+**判定：`LOCAL CODE PASS / COZE DEFAULT-OFF PASS / ENABLED E2E UNVERIFIED`。** Task 9 尚不能关闭或更新 `stable`。

@@ -2435,3 +2435,10 @@ The focused gate test passes `7/7`; the actual protected-baseline command passes
 - `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 保持只读；媒体网关仍默认关闭。
 
 在 PostgreSQL 与云端门禁完成前，不得把 `V588-MEDIA-001` 标记为发布通过。
+
+### 2026-09-14 媒体网关 Task 9 Coze 默认关闭态判断
+
+- Coze 已确认拉取并合并 `main@583c96295e48276b52473f58d98277bb36e87caf`；外部预览构建恢复后首页连续 200，`/api/auth/me` 可达。
+- 图像与视频网关在默认关闭态均返回 503 `GATEWAY_DISABLED`，证明本轮候选的默认失败关闭边界生效。
+- 本轮没有证据证明原登录后的画布、原图像和视频业务入口全部通过，也没有启用态真实供应商、缩略图、S3、并发和账务证据。
+- **发布结论保持不通过。** 当前只把 Coze exact-SHA 与默认关闭态从未验证改为部分通过；Task 9 整体约 80%，`stable` 继续保持只读。
