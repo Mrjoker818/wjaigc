@@ -135,7 +135,7 @@ External client
 - `GET /api/gateway/v1/tasks/{taskId}`
 - `POST /api/gateway/v1/tasks/{taskId}/cancel`
 
-提交请求必须显式携带 `providerId` 和 `modelId`，禁止网关静默选择或切换供应商。图像请求允许现有生成入口支持的 prompt、数量、比例、尺寸、质量和参考图字段；视频请求允许现有视频入口支持的 prompt、时长、比例、首帧、尾帧和参考图字段。
+提交请求必须显式携带 `providerId`、`modelId` 和 `projectId`，禁止网关静默选择或切换供应商。`projectId` 必须属于网关密钥对应的真实用户，并在准入、创建任务和扣费之前完成数据库归属校验；不存在或跨用户项目统一返回 `400 GATEWAY_INVALID_REQUEST`。图像请求允许现有生成入口支持的 prompt、数量、比例、尺寸、质量和参考图字段；视频请求允许现有视频入口支持的 prompt、时长、比例、首帧、尾帧和参考图字段。
 
 状态查询与取消先用网关密钥解析真实 `user_id`，再调用现有用户归属查询。其他用户的 taskId 统一返回 `404 GATEWAY_TASK_NOT_FOUND`，避免泄漏资源存在性。
 
@@ -184,7 +184,7 @@ External client
 
 - JSON 请求体上限 1 MiB；超过上限返回 `413 GATEWAY_BODY_TOO_LARGE`。
 - prompt 去除首尾空白后长度为 1～20000 字符。
-- `providerId/modelId/idempotencyKey` 采用明确长度和字符边界。
+- `providerId/modelId/projectId/idempotencyKey` 采用明确长度和字符边界。
 - 图像数量沿用现有模型能力上限且平台硬上限为 4。
 - 参考图数量和 URL/data URL 字节限制复用现有输入校验，不新增远程下载捷径。
 - 网关密钥比较基于哈希查询，不进行明文扫描。
@@ -204,7 +204,9 @@ External client
 }
 ```
 
-变体尚未 ready 时不阻塞任务完成，返回原图/视频封面作为 `previewUrl`。缩略图失败不改变生成任务终态。
+图像供应商返回临时 URL 时，权威任务在进入 `completed` 前必须通过安全下载器固化到受控媒体目录，并保留恢复来源；固化失败必须进入失败终态并按现有账务逻辑只退款一次。S3 只作为有界的尽力备份，不得阻塞轮询终态。
+
+AssetVersion 标识从权威任务的 `result.assetProjection.versionIds` 读取，同时兼容旧的 `result.assetVersionId`。变体尚未 ready 时不阻塞任务完成，仍返回 `assetVersionId` 和原图下载地址，并以原图/视频封面作为 `previewUrl`；缩略图失败不改变生成任务终态。
 
 ## 10. 故障与竞态处理
 

@@ -124,21 +124,39 @@ describe('media gateway schema normalization', () => {
   it('normalizes the supported image request fields', () => {
     expect(normalizeGatewayImageRequest({
       prompt: '  draw this  ', providerId: 'provider/a', modelId: 'model:v1',
+      projectId: 'project-1',
       n: 4, aspectRatio: '16:9', size: '1536x1024', quality: 'high', resolution: '2K',
       referenceImages: [' https://images.example/a.png ', '/uploads/b.png'],
       apiKey: 'must-not-pass-through', sourceChannel: 'must-not-pass-through',
     })).toEqual({
       prompt: 'draw this', providerId: 'provider/a', modelId: 'model:v1',
+      projectId: 'project-1',
       n: 4, aspectRatio: '16:9', size: '1536x1024', quality: 'high', resolution: '2K',
       referenceImages: ['https://images.example/a.png', '/uploads/b.png'],
     });
   });
 
+  it.each([normalizeGatewayImageRequest, normalizeGatewayVideoRequest])(
+    'requires an explicit owned project identity at the gateway boundary',
+    (normalize) => {
+      expectGatewayError(
+        () => normalize({ prompt: 'draw', providerId: 'provider', modelId: 'model' }),
+        'GATEWAY_INVALID_REQUEST',
+        400,
+      );
+      expectGatewayError(
+        () => normalize({ prompt: 'draw', providerId: 'provider', modelId: 'model', projectId: '../escape' }),
+        'GATEWAY_INVALID_REQUEST',
+        400,
+      );
+    },
+  );
+
   it.each(['1K', '2K', '4K', '1k', '2k', '4k'])(
     'accepts the supported image resolution tier %s',
     (resolution) => {
       expect(normalizeGatewayImageRequest({
-        prompt: 'draw', providerId: 'provider', modelId: 'model', resolution,
+        prompt: 'draw', providerId: 'provider', modelId: 'model', projectId: 'project-1', resolution,
       })).toMatchObject({ resolution: resolution.toUpperCase() });
     },
   );
@@ -148,7 +166,7 @@ describe('media gateway schema normalization', () => {
     (resolution) => {
       expectGatewayError(
         () => normalizeGatewayImageRequest({
-          prompt: 'draw', providerId: 'provider', modelId: 'model', resolution,
+          prompt: 'draw', providerId: 'provider', modelId: 'model', projectId: 'project-1', resolution,
         }),
         'GATEWAY_INVALID_REQUEST',
         400,
@@ -158,7 +176,7 @@ describe('media gateway schema normalization', () => {
 
   it('enforces prompt boundaries from 1 through 20000 trimmed characters', () => {
     expect(normalizeGatewayImageRequest({
-      prompt: ` ${'x'.repeat(20_000)} `, providerId: 'p', modelId: 'm',
+      prompt: ` ${'x'.repeat(20_000)} `, providerId: 'p', modelId: 'm', projectId: 'project-1',
     }).prompt).toHaveLength(20_000);
     for (const prompt of ['', '   ', 'x'.repeat(20_001)]) {
       expectGatewayError(
@@ -171,7 +189,7 @@ describe('media gateway schema normalization', () => {
   it('enforces provider and model identifier character and length boundaries', () => {
     const validId = `a${'b'.repeat(198)}z`;
     expect(normalizeGatewayImageRequest({
-      prompt: 'x', providerId: validId, modelId: 'vendor/model:v1.2_test',
+      prompt: 'x', providerId: validId, modelId: 'vendor/model:v1.2_test', projectId: 'project-1',
     })).toMatchObject({ providerId: validId, modelId: 'vendor/model:v1.2_test' });
 
     for (const value of ['', 'contains space', '../escape', 'x'.repeat(201)]) {
@@ -184,7 +202,7 @@ describe('media gateway schema normalization', () => {
 
   it('enforces the platform image output ceiling', () => {
     expect(normalizeGatewayImageRequest({
-      prompt: 'x', providerId: 'p', modelId: 'm', n: 1,
+      prompt: 'x', providerId: 'p', modelId: 'm', projectId: 'project-1', n: 1,
     }).n).toBe(1);
     for (const n of [0, 5, 1.5, '2']) {
       expectGatewayError(
@@ -197,6 +215,7 @@ describe('media gateway schema normalization', () => {
   it('reuses the existing image URL validator and preserves reference order', () => {
     expect(normalizeGatewayImageRequest({
       prompt: 'x', providerId: 'p', modelId: 'm',
+      projectId: 'project-1',
       referenceImages: ['/uploads/first.png', 'data:image/png;base64,AAAA'],
     }).referenceImages).toEqual(['/uploads/first.png', 'data:image/png;base64,AAAA']);
     expectGatewayError(
@@ -210,12 +229,14 @@ describe('media gateway schema normalization', () => {
   it('normalizes video duration, frames, and reference images', () => {
     expect(normalizeGatewayVideoRequest({
       prompt: '  animate  ', providerId: 'video-provider', modelId: 'video/model',
+      projectId: 'project-1',
       duration: 10, aspectRatio: '16:9',
       firstFrameImageUrl: '/uploads/first.png',
       lastFrameImageUrl: 'https://images.example/last.png',
       referenceImages: ['/api/serve-upload/reference.png'],
     })).toEqual({
       prompt: 'animate', providerId: 'video-provider', modelId: 'video/model',
+      projectId: 'project-1',
       duration: 10, aspectRatio: '16:9',
       firstFrameImageUrl: '/uploads/first.png',
       lastFrameImageUrl: 'https://images.example/last.png',
@@ -234,7 +255,7 @@ describe('media gateway schema normalization', () => {
     ['video', normalizeGatewayVideoRequest],
   ] as const)('treats null aspectRatio as omission for %s requests', (_mediaType, normalize) => {
     expect(normalize({
-      prompt: 'x', providerId: 'p', modelId: 'm', aspectRatio: null,
+      prompt: 'x', providerId: 'p', modelId: 'm', projectId: 'project-1', aspectRatio: null,
     })).not.toHaveProperty('aspectRatio');
   });
 

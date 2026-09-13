@@ -4323,3 +4323,11 @@ Task 4 独立审查的两个 Minor 继续保留给最终审查：单元夹具 op
 | MEDIA-T9-006 | P1 验收真实性 | 取消 E2E 在首次读到 `cancelled` 后用常量声称拒绝迟到完成，没有发生完成回写 | 测试先 RED；受控 E2E helper 等待真实 `remoteTaskId`，取消后直接调用既有 `completeCloudTask` 条件更新并保存回写前后供应商状态、尝试结果和权威数据库终态。真 PostgreSQL 回归证明返回 `false`、终态保持 `cancelled`、退款一次 | 本地已关闭，云端供应商回调仍待验 |
 | MEDIA-T9-007 | P1 证据完整性 | APIRequestContext 的网关请求未进入 `network.json` | 增加受控请求包装器，逐请求记录 method、去查询参数 URL、status、timestamp 与 requestId/gatewayRequestId/taskId；行为测试证明密钥、Authorization、私有 prompt 和查询参数不进入证据 | 本地已关闭，云端制品待生成 |
 | MEDIA-T9-008 | P2 发布门禁 | 当前 HEAD 未授权 `.gitattributes`，原始日志空白导致完整 diff-check 失败 | 仅精确授权 `.gitattributes`；Task9 原始日志目录设置 `-text -diff`，原字节未改。`6181991c` 的保护基线 `38/38`、0 drift、完整 `74716cb9..HEAD` diff-check 0 | 已关闭 |
+
+### 2026-09-14 Task 9 云端资产交付复现与本地修复
+
+| 编号 | 等级 | 问题 | 修复与永久回归 | 状态 |
+|---|---|---|---|---|
+| MEDIA-T9-009 | P1 核心交付 | 云端网关图像任务真实完成，但查询只返回 `maskUrls/aspectRatio`，没有可访问图片、AssetVersion 或下载地址 | 网关请求强制携带所属 `projectId` 并在准入/扣费前校验；供应商临时图片在完成终态前经安全下载器固化，失败进入 failed 并复用一次退款；专项合同覆盖 | 本地已修复，云端待验 |
+| MEDIA-T9-010 | P1 资产投影 | 任务投影只读取旧 `result.assetVersionId`，权威投影实际写入 `result.assetProjection.versionIds` | 同时支持新旧字段；缩略图 pending 时仍返回 AssetVersion、原图预览与下载，不阻塞 completed | 本地已关闭，云端待验 |
+| MEDIA-T9-011 | P2 终态时延 | 可选 S3 备份无时限等待，可能拖住轮询终态；异常还会覆盖已成功的受控本地固化 | S3 改为 2 秒有界尽力备份，超时/异常不覆盖受控文件；永久测试用永不结束的上传 Promise 证明快速返回 | 本地已关闭 |

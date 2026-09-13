@@ -2633,3 +2633,12 @@ BUG-018 已从未验证项移除。剩余顺序为 `002-B -> 002-D -> 002-E`；�
 - [x] `main@6181991c` 目标回归 `340/340`、TypeScript、scoped lint、保护基线 `38/38`、完整 diff-check 均通过。
 - [ ] 云端真实供应商在取消后的迟到回调/轮询窗口仍未执行；本地受控数据库写回不冒充该云端证据。
 - [ ] Coze exact SHA、真实图像/视频、逐槽返回、实际媒体资源和成功态浏览器制品继续 pending。
+
+### 2026-09-14 Task 9 资产交付修复后的精确剩余项
+
+- [x] 云端旧候选已稳定复现“供应商完成但网关无图片/AssetVersion”的真实缺陷，保留 taskId、requestId 与 gatewayRequestId。
+- [x] 本地补齐显式项目归属、临时图片安全固化、固化失败终态退款、AssetVersion 新字段投影、原图回退和 S3 有界备份合同。
+- [x] 新候选通过专项、TypeScript、构建版 ESLint、保护基线和 `120/120` 构建。
+- [ ] 本机缺少 `POSTGRES_TEST_DATABASE_URL`，本轮真实 PostgreSQL 网关表与并发门禁未重跑；历史真库证据不冒充本候选证据。
+- [ ] Coze 拉取本候选 exact SHA 后，使用属于 Key 用户的真实项目执行图像、`n=2`、视频、取消退款、跨用户隔离、缩略图与刷新恢复。
+- [ ] 云端验收完成后删除临时网关 Key，并移除 Coze `.env.local` 中临时 `GATEWAY_ENABLED=true`，验证默认关闭 503 与原 UI 不受影响。

@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   markGatewayRejected: vi.fn(),
   submitGatewayImage: vi.fn(),
   submitGatewayVideo: vi.fn(),
+  assertGatewayProjectAccess: vi.fn(),
 }));
 
 vi.mock('server-only', () => ({}));
@@ -25,6 +26,9 @@ vi.mock('@/lib/media-gateway/internal-client', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/media-gateway/internal-client')>()),
   submitGatewayImage: mocks.submitGatewayImage,
   submitGatewayVideo: mocks.submitGatewayVideo,
+}));
+vi.mock('@/lib/media-gateway/project-access', () => ({
+  assertGatewayProjectAccess: mocks.assertGatewayProjectAccess,
 }));
 
 import { POST as submitImage } from '@/app/api/gateway/v1/images/route';
@@ -43,6 +47,9 @@ const reserved = {
 };
 
 function request(path: 'images' | 'videos', body: unknown, headers: Record<string, string> = {}): NextRequest {
+  const normalizedBody = body && typeof body === 'object' && !Array.isArray(body)
+    ? { projectId: 'project-1', ...body as Record<string, unknown> }
+    : body;
   return new NextRequest(`http://localhost/api/gateway/v1/${path}`, {
     method: 'POST',
     headers: {
@@ -52,7 +59,7 @@ function request(path: 'images' | 'videos', body: unknown, headers: Record<strin
       'x-request-id': 'req_12345678',
       ...headers,
     },
-    body: JSON.stringify(body),
+    body: JSON.stringify(normalizedBody),
   });
 }
 
@@ -86,6 +93,7 @@ describe('media gateway submission routes', () => {
     mocks.submitGatewayVideo.mockResolvedValue({
       kind: 'accepted', taskIds: ['video-task-1'], status: 'queued',
     });
+    mocks.assertGatewayProjectAccess.mockResolvedValue(undefined);
   });
 
   it.each(['images', 'videos'] as const)(
@@ -138,7 +146,7 @@ describe('media gateway submission routes', () => {
     mocks.submitGatewayImage.mockResolvedValue({ kind: 'accepted', taskIds, status: 'queued' });
 
     const response = await submitImage(request('images', {
-      prompt: 'draw', providerId: 'provider-1', modelId: 'model-1', n: 4,
+      prompt: 'draw', providerId: 'provider-1', modelId: 'model-1', projectId: 'project-1', n: 4,
     }));
 
     expect(mocks.authenticateGatewayBearer).toHaveBeenCalledWith(expect.stringMatching(/^Bearer wmg_/));
@@ -160,6 +168,22 @@ describe('media gateway submission routes', () => {
       taskIds,
       status: 'queued',
     });
+  });
+
+  it('rejects a project not owned by the gateway principal before reservation or submission', async () => {
+    mocks.assertGatewayProjectAccess.mockRejectedValueOnce(new GatewayError(
+      'GATEWAY_INVALID_REQUEST', 400, 'Project is unavailable',
+    ));
+
+    const response = await submitImage(request('images', {
+      prompt: 'draw', providerId: 'provider-1', modelId: 'model-1', projectId: 'foreign-project',
+    }));
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({ code: 'GATEWAY_INVALID_REQUEST' });
+    expect(mocks.assertGatewayProjectAccess).toHaveBeenCalledWith(principal, 'foreign-project');
+    expect(mocks.reserveGatewayRequest).not.toHaveBeenCalled();
+    expect(mocks.submitGatewayImage).not.toHaveBeenCalled();
   });
 
   it('delegates video to the authoritative route and returns its task id', async () => {

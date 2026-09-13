@@ -36,7 +36,7 @@ describe('media gateway task thumbnail projection', () => {
       status: 'completed',
       progress: 100,
       result: {
-        assetVersionId: 'version-1',
+        assetProjection: { versionIds: ['version-1'] },
         imageUrl: '/uploads/original.png',
       },
       creditStatus: 'charged',
@@ -77,13 +77,18 @@ describe('media gateway task thumbnail projection', () => {
     },
   );
 
-  it('does not expose an asset identity when no owner-scoped ready derivative proves ownership', async () => {
+  it('keeps the owner-scoped asset identity and original download while thumbnails are pending', async () => {
     mocks.query.mockResolvedValue({ rows: [] });
 
     const projection = await getGatewayTaskProjection(principal, 'task-1');
 
-    expect(projection).not.toHaveProperty('assetVersionId');
-    expect(projection).not.toHaveProperty('downloadUrl');
+    expect(projection).toMatchObject({
+      status: 'completed',
+      assetVersionId: 'version-1',
+      previewUrl: '/uploads/original.png',
+      downloadUrl: '/uploads/original.png',
+      thumbnailUrls: undefined,
+    });
   });
 
   it('queries only ready 256 and 512 variants owned by the task principal', async () => {

@@ -19,6 +19,7 @@ import {
 } from '@/lib/media-gateway/schema';
 import { GatewayError, type GatewayErrorCode } from '@/lib/media-gateway/types';
 import { getRequestId } from '@/lib/request-id';
+import { assertGatewayProjectAccess } from '@/lib/media-gateway/project-access';
 
 const INTERNAL_SUBMIT_TIMEOUT_MS = 30_000;
 const TASK_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/;
@@ -270,6 +271,7 @@ export async function handleGatewaySubmission<T extends object>(
     const rawBody = await readGatewayJson(request);
     assertSafeExternalBody(rawBody);
     const input = config.normalize(rawBody);
+    await assertGatewayProjectAccess(principal, (input as { projectId: string }).projectId);
     const decision = await reserveGatewayRequest({
       principal,
       idempotencyKey,

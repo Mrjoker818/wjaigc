@@ -3157,3 +3157,12 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - 第一次目标回归使用了隔离集群中不存在的 `Administrator` 角色而失败，改用既有测试角色后成功；该失败属于测试连接配置，不删除、不冒充业务通过。临时 PostgreSQL 以 `NetworkService` 运行，未连接生产库，结束后删除本轮表、服务并确认端口无监听。
 - 原始日志未改字节，通过精确 `.gitattributes` 二进制 diff 规则归档。机器证据：`docs/testing/evidence/v588-media-gateway-task9-review-6181991c-round2/evidence-index.json`。
 - **判定：第二轮 3 Important 本地关闭，`LOCAL PASS / CLOUD UNVERIFIED`。** 未执行 Coze 或真实供应商，云端字段继续为 pending。
+
+### 2026-09-14 Task 9 资产交付修复回归
+
+- 云端真实样本 `async-1789329864001-0-imttai` 已证明图像提交为 HTTP 202、精确 Pear `gpt-image-2` 且最终进度 100；同时稳定复现完成响应缺少图片 URL、AssetVersion 与缩略图。
+- 请求合同、项目归属、安全固化、终态退款、资产投影及 S3 有界备份均按 RED/GREEN 补齐。核心聚焦 `126/126`，资产投影与固化 `17/17` 通过。
+- 媒体网关扩大回归执行 23 文件、360 项：`359 passed / 1 failed`；唯一失败为本机缺少强制 `POSTGRES_TEST_DATABASE_URL`，没有跳过或伪装。其余 22 文件全部通过。
+- Playwright 成功解析 11 项目展开的 77 项云端规格；所有提交已加入显式 `E2E_MEDIA_GATEWAY_PROJECT_ID`，缩略图按 ready 验证、pending 回退原图。
+- TypeScript、构建版 ESLint、精确保护基线 `38/38 / 0 drift / 0 warning`、生产构建 `120/120` 均通过。构建既有 Turbopack 动态路径 warning 保留。
+- **判定：修复候选 `LOCAL PASS / CLOUD REVALIDATION REQUIRED`。** 需部署 exact SHA 后重新证明受管图片、AssetVersion、原图回退/缩略图、`n=2`、视频和取消账务。

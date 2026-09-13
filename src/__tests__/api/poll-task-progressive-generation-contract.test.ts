@@ -142,7 +142,7 @@ describe('progressive generation recovery contract', () => {
 
   it('uses the durable provider id to correct stale provider display names before completing a slot', () => {
     const durableResponse = source.indexOf('async function getDurableGenerationSlotResponse');
-    const terminalResult = source.indexOf('const completedTaskResult = sanitizeCompletedTaskResult({');
+    const terminalResult = source.indexOf('let completedTaskResult = sanitizeCompletedTaskResult({');
 
     expect(source).toContain("import { resolveTaskProviderDisplayName } from '@/lib/task-provider-display';");
     expect(source.indexOf('await findProviderById', durableResponse)).toBeGreaterThan(durableResponse);
@@ -195,5 +195,24 @@ describe('progressive generation recovery contract', () => {
     expect(memoryCompletion).toBeGreaterThan(durableCompletion);
     expect(failureTermination).toBeGreaterThan(remoteFailure);
     expect(cancelledTermination).toBeGreaterThan(cancelledBranch);
+  });
+
+  it('stabilizes gateway image artifacts before the authoritative completed transition', () => {
+    const completedBranch = source.indexOf('let completedTaskResult = sanitizeCompletedTaskResult({');
+    const stabilization = source.indexOf('await stabilizeGatewayImageResult({', completedBranch);
+    const durableCompletion = source.indexOf(
+      'const generationCompletion = await completeCloudTask(',
+      completedBranch,
+    );
+
+    expect(source).toContain("import { stabilizeGatewayImageResult } from '@/lib/media-gateway/artifact-persistence';");
+    expect(stabilization).toBeGreaterThan(completedBranch);
+    expect(durableCompletion).toBeGreaterThan(stabilization);
+    expect(source.slice(completedBranch, durableCompletion)).toContain(
+      'completedTaskResult = await stabilizeGatewayImageResult({',
+    );
+    expect(source.slice(stabilization, durableCompletion)).toMatch(
+      /terminateCloudTaskAndRefund\(\s*taskId,\s*'failed',\s*gatewayPersistenceError,?\s*\)/,
+    );
   });
 });

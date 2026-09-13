@@ -68,6 +68,7 @@ import { getRequestId } from '@/lib/request-id';
 import type { GenerationRouteAudit } from '@/lib/generation-route-audit';
 import { STRICT_AGENT_GENERATE_HEADER } from '@/lib/agent-runtime/generate-image-adapter';
 import { enrichCompletedImageResult } from '@/lib/asset-core/image-result-metadata';
+import { stabilizeGatewayImageResult } from '@/lib/media-gateway/artifact-persistence';
 import {
   inspectPersistedVideoFile,
   type PersistedVideoFileMetadata,
@@ -3298,7 +3299,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       (pollResult as Record<string, unknown>).maskUrls = maskUrls;
       const gridImageUrl = typeof pollResult.gridImageUrl === 'string' ? pollResult.gridImageUrl : '';
       const buttons = Array.isArray(pollResult.buttons) ? pollResult.buttons : [];
-      const completedTaskResult = sanitizeCompletedTaskResult({
+      let completedTaskResult = sanitizeCompletedTaskResult({
         ...existingResult,
         imageUrl: imageUrls[0],
         imageUrls,
@@ -3312,6 +3313,48 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         providerName: finalProviderName,
         generationRouteAudit: existingResult.generationRouteAudit,
       });
+      try {
+        completedTaskResult = await stabilizeGatewayImageResult({
+          taskId,
+          result: completedTaskResult,
+        });
+        const stabilizedUrls = Array.isArray(completedTaskResult.imageUrls)
+          ? completedTaskResult.imageUrls.filter(
+              (url): url is string => typeof url === 'string' && url.length > 0,
+            )
+          : [];
+        if (stabilizedUrls.length > 0) {
+          imageUrls.splice(0, imageUrls.length, ...stabilizedUrls);
+          pollResult.imageUrl = stabilizedUrls[0];
+          (pollResult as Record<string, unknown>).imageUrls = stabilizedUrls;
+        }
+      } catch (error) {
+        const gatewayPersistenceError = '网关生成结果持久化失败';
+        console.error('[poll-task] gateway artifact persistence failed', {
+          taskId,
+          error: error instanceof Error ? error.message : 'unknown error',
+        });
+        const termination = await terminateCloudTaskAndRefund(
+          taskId,
+          'failed',
+          gatewayPersistenceError,
+        );
+        const terminatedTask = await getCloudTaskForUser(taskId, userId);
+        updateTaskProgress(taskId, {
+          status: 'failed',
+          progress: 100,
+          error: gatewayPersistenceError,
+          result: terminatedTask?.result,
+        });
+        releaseQueueSlot(taskId);
+        return NextResponse.json(withGenerationSlotMetadata({
+          success: false,
+          status: termination.status || terminatedTask?.status || 'failed',
+          progress: 100,
+          error: gatewayPersistenceError,
+          retryable: true,
+        }, terminatedTask?.result, taskId), { status: 200 });
+      }
       if (durableAtomicTask) {
         const metadataEnrichedResult = await enrichCompletedImageResult(completedTaskResult);
         completedTaskResult.images = metadataEnrichedResult.images;

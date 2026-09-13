@@ -2,10 +2,15 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   getInternalRequestHeaders: vi.fn(),
+  assertGatewayProjectAccess: vi.fn(),
 }));
 
 vi.mock('@/lib/api-auth', () => ({
   getInternalRequestHeaders: mocks.getInternalRequestHeaders,
+}));
+
+vi.mock('@/lib/media-gateway/project-access', () => ({
+  assertGatewayProjectAccess: mocks.assertGatewayProjectAccess,
 }));
 
 import {
@@ -28,6 +33,7 @@ describe('media gateway authoritative internal client', () => {
       'x-internal-user-id': 'user-1',
       'x-wujie-internal-secret': 'internal-only',
     });
+    mocks.assertGatewayProjectAccess.mockResolvedValue(undefined);
     process.env.DEPLOY_RUN_PORT = '5123';
   });
 
@@ -45,7 +51,7 @@ describe('media gateway authoritative internal client', () => {
       principal,
       requestId: 'req_12345678',
       gatewayRequestId: 'gwreq_1',
-      input: { prompt: 'draw', providerId: 'provider-1', modelId: 'model-1', n, resolution: '2K' },
+      input: { prompt: 'draw', providerId: 'provider-1', modelId: 'model-1', projectId: 'project-1', n, resolution: '2K' },
     });
 
     expect(result).toEqual({ kind: 'accepted', taskIds, status: 'queued' });
@@ -63,6 +69,7 @@ describe('media gateway authoritative internal client', () => {
       prompt: 'draw',
       providerId: 'provider-1',
       model: 'model-1',
+      projectId: 'project-1',
       n,
       outputCount: n,
       submitOnly: true,
@@ -83,6 +90,7 @@ describe('media gateway authoritative internal client', () => {
       gatewayRequestId: 'gwreq_2',
       input: {
         prompt: 'animate', providerId: 'video-provider', modelId: 'video-model',
+        projectId: 'project-1',
         duration: 8, firstFrameImageUrl: '/uploads/first.png',
       },
     })).resolves.toEqual({ kind: 'accepted', taskIds: ['video-task-1'], status: 'queued' });
@@ -104,7 +112,7 @@ describe('media gateway authoritative internal client', () => {
       principal,
       requestId: 'req_12345678',
       gatewayRequestId: 'gwreq_1',
-      input: { prompt: 'draw', providerId: 'provider-1', modelId: 'model-1' },
+      input: { prompt: 'draw', providerId: 'provider-1', modelId: 'model-1', projectId: 'project-1' },
     })).resolves.toEqual({
       kind: 'rejected',
       taskIds: [],
@@ -124,7 +132,7 @@ describe('media gateway authoritative internal client', () => {
       principal,
       requestId: 'req_12345678',
       gatewayRequestId: 'gwreq_1',
-      input: { prompt: 'draw', providerId: 'provider-1', modelId: 'model-1' },
+      input: { prompt: 'draw', providerId: 'provider-1', modelId: 'model-1', projectId: 'project-1' },
     })).resolves.toMatchObject({
       kind: 'rejected', code: 'GATEWAY_INVALID_REQUEST', status: 400, retryable: false,
     });
@@ -145,7 +153,7 @@ describe('media gateway authoritative internal client', () => {
       principal,
       requestId: 'req_12345678',
       gatewayRequestId: 'gwreq_1',
-      input: { prompt: 'draw', providerId: 'provider-1', modelId: 'model-1' },
+      input: { prompt: 'draw', providerId: 'provider-1', modelId: 'model-1', projectId: 'project-1' },
     })).rejects.toMatchObject({ code: 'GATEWAY_INTERNAL_UNAVAILABLE', status: 503 });
   });
 
@@ -158,7 +166,7 @@ describe('media gateway authoritative internal client', () => {
       principal,
       requestId: 'req_12345678',
       gatewayRequestId: 'gwreq_2',
-      input: { prompt: 'animate', providerId: 'provider-1', modelId: 'model-1' },
+      input: { prompt: 'animate', providerId: 'provider-1', modelId: 'model-1', projectId: 'project-1' },
     })).rejects.toMatchObject({ code: 'GATEWAY_INTERNAL_UNAVAILABLE', status: 503 });
   });
 
@@ -171,7 +179,7 @@ describe('media gateway authoritative internal client', () => {
       principal,
       requestId: 'req_12345678',
       gatewayRequestId: 'gwreq_1',
-      input: { prompt: 'draw', providerId: 'provider-1', modelId: 'model-1', n: 2 },
+      input: { prompt: 'draw', providerId: 'provider-1', modelId: 'model-1', projectId: 'project-1', n: 2 },
     })).rejects.toMatchObject({
       code: 'GATEWAY_INTERNAL_UNAVAILABLE',
       status: 503,
@@ -194,7 +202,7 @@ describe('media gateway authoritative internal client', () => {
       principal,
       requestId: 'req_12345678',
       gatewayRequestId: 'gwreq_1',
-      input: { prompt: 'draw', providerId: 'provider-1', modelId: 'model-1' },
+      input: { prompt: 'draw', providerId: 'provider-1', modelId: 'model-1', projectId: 'project-1' },
     })).rejects.toMatchObject({ code: 'GATEWAY_INTERNAL_UNAVAILABLE', status: 503 });
   });
 
@@ -212,7 +220,7 @@ describe('media gateway authoritative internal client', () => {
       principal,
       requestId: 'req_12345678',
       gatewayRequestId: 'gwreq_1',
-      input: { prompt: 'draw', providerId: 'provider-1', modelId: 'model-1' },
+      input: { prompt: 'draw', providerId: 'provider-1', modelId: 'model-1', projectId: 'project-1' },
     })).resolves.toMatchObject({ kind: 'accepted', status: expected });
   });
 
@@ -226,7 +234,7 @@ describe('media gateway authoritative internal client', () => {
       principal,
       requestId: 'req_12345678',
       gatewayRequestId: 'gwreq_1',
-      input: { prompt: 'draw', providerId: 'provider-1', modelId: 'model-1' },
+      input: { prompt: 'draw', providerId: 'provider-1', modelId: 'model-1', projectId: 'project-1' },
     })).rejects.toMatchObject({
       code: 'GATEWAY_INTERNAL_UNAVAILABLE',
       status: 503,
@@ -245,7 +253,7 @@ describe('media gateway authoritative internal client', () => {
       principal,
       requestId: 'req_12345678',
       gatewayRequestId: 'gwreq_2',
-      input: { prompt: 'animate', providerId: 'provider-1', modelId: 'model-1' },
+      input: { prompt: 'animate', providerId: 'provider-1', modelId: 'model-1', projectId: 'project-1' },
     })).rejects.toMatchObject({
       code: 'GATEWAY_INTERNAL_UNAVAILABLE',
       status: 503,

@@ -14,7 +14,7 @@
 - 实现基线为已批准规格提交 `main@9d5b3564492bd3ca31a2e3578d4546c0b4e59117`；`J:\无界云端0820` 仅作只读供体。
 - 不复制 donor 的 `api-compatibility.ts`、`video-api.ts` 或 `wujie-media-gateway` 状态机。
 - `GATEWAY_ENABLED` 默认不为 `true`；关闭态下外部数据面统一返回 `503 GATEWAY_DISABLED`，现有 UI 与内部 API 行为不变。
-- 网关必须显式接收并透传 `providerId + modelId`，不得静默选择、切换或降级供应商。
+- 网关必须显式接收并透传 `providerId + modelId + projectId`，不得静默选择、切换或降级供应商；项目归属必须在准入和扣费前验证。
 - 网关不得直接扣费、退款、写 AssetVersion 或生成缩略图；全部复用现有权威内核。
 - 原始 `wmg_` 密钥只在签发响应出现一次；数据库、日志、浏览器持久化和列表接口不得保存或输出明文。
 - 所有提交必须携带 `Idempotency-Key`；同密钥同摘要复用，同密钥异摘要返回 409。
@@ -35,6 +35,8 @@
 | `src/lib/media-gateway/admission.ts` | 分钟限流、日配额、幂等准入和任务映射事务 |
 | `src/lib/media-gateway/internal-client.ts` | 可信内部 Header 与现有权威路由调用 |
 | `src/lib/media-gateway/task-projection.ts` | 任务归属、终态、预览和缩略图响应投影 |
+| `src/lib/media-gateway/project-access.ts` | 网关用户与目标项目的数据库归属校验 |
+| `src/lib/media-gateway/artifact-persistence.ts` | 临时供应商图片的安全下载、受控固化和有界 S3 备份 |
 | `src/lib/media-gateway/http.ts` | 1 MiB JSON 读取、requestId 和稳定错误响应 |
 | `src/lib/media-gateway/audit.ts` | 脱敏网关操作审计 |
 | `src/app/api/admin/gateway/keys/route.ts` | 管理员密钥列表与签发 |
@@ -486,7 +488,7 @@ Run: `pnpm exec vitest run src/__tests__/lib/media-gateway-task-projection.test.
 
 - [ ] **Step 3: 复用现有投影，不新增 worker**
 
-根据任务结果中的 `assetVersionId` 查询既有 `wujie_asset_thumbnail_variants`；仅 `status='ready'` 且 URL 可用时返回对应尺寸。否则以权威图片 URL 或视频封面作为 `previewUrl`；缩略图异常不得改变任务 completed 状态。
+根据任务结果中的 `assetProjection.versionIds`（兼容旧 `assetVersionId`）查询既有 `wujie_asset_thumbnail_variants`；仅 `status='ready'` 且 URL 可用时返回对应尺寸。否则仍返回资产标识和原图下载地址，并以权威图片 URL 或视频封面作为 `previewUrl`；缩略图异常不得改变任务 completed 状态。
 
 - [ ] **Step 4: 回归并提交**
 
@@ -641,7 +643,7 @@ Expected: 每条退出码 0；记录测试数、页面数、commit 和时间。�
 
 - [ ] **Step 5: 临时开启真实云端验证**
 
-使用 PearAPI 或 APIMart 稳定模型：签发测试 Key；图像提交并查询完成；稳定视频提交；`n=2` 逐槽返回；取消一次且仅退款一次；错误 Key、吊销 Key、限流、日配额、跨用户 taskId；AssetVersion、256/512 缩略图、刷新恢复。保存截图、Trace、Console、Network、requestId、gatewayRequestId、taskId 和脱敏积分流水。
+使用 PearAPI 或 APIMart 稳定模型：签发测试 Key；使用属于该用户的显式 `projectId` 提交图像并查询完成；稳定视频提交；`n=2` 逐槽返回；取消一次且仅退款一次；错误 Key、吊销 Key、限流、日配额、跨用户 projectId/taskId；AssetVersion、原图回退、已 ready 的 256/512 缩略图、刷新恢复。缩略图 pending 不阻断 completed。保存截图、Trace、Console、Network、requestId、gatewayRequestId、taskId 和脱敏积分流水。
 
 - [ ] **Step 6: 更新中文报告与结论**
 

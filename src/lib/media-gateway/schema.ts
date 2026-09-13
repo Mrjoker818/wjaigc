@@ -9,11 +9,11 @@ const MAX_REFERENCE_IMAGES = 16;
 const IDENTIFIER_PATTERN = /^[A-Za-z0-9](?:[A-Za-z0-9._:/-]*[A-Za-z0-9])?$/;
 const SECRET_FIELD_PATTERN = /^(?:api[_-]?key|authorization|gateway[_-]?key|key[_-]?hash|provider[_-]?(?:api[_-]?)?key|secret)$/i;
 const IMAGE_REQUEST_FIELDS = new Set([
-  'prompt', 'providerId', 'modelId', 'n', 'aspectRatio', 'size', 'quality', 'resolution', 'referenceImages',
+  'prompt', 'providerId', 'modelId', 'projectId', 'n', 'aspectRatio', 'size', 'quality', 'resolution', 'referenceImages',
   'apiKey', 'sourceChannel',
 ]);
 const VIDEO_REQUEST_FIELDS = new Set([
-  'prompt', 'providerId', 'modelId', 'duration', 'aspectRatio', 'firstFrameImageUrl',
+  'prompt', 'providerId', 'modelId', 'projectId', 'duration', 'aspectRatio', 'firstFrameImageUrl',
   'lastFrameImageUrl', 'referenceImages', 'apiKey', 'sourceChannel',
 ]);
 
@@ -21,6 +21,7 @@ export interface GatewayImageRequest {
   prompt: string;
   providerId: string;
   modelId: string;
+  projectId: string;
   n?: number;
   aspectRatio?: string;
   size?: string;
@@ -33,6 +34,7 @@ export interface GatewayVideoRequest {
   prompt: string;
   providerId: string;
   modelId: string;
+  projectId: string;
   duration?: number;
   aspectRatio?: string;
   firstFrameImageUrl?: string;
@@ -128,6 +130,7 @@ export function normalizeGatewayImageRequest(value: unknown): GatewayImageReques
     prompt: boundedText(input.prompt, 'prompt', MAX_PROMPT_LENGTH),
     providerId: identifier(input.providerId, 'providerId'),
     modelId: identifier(input.modelId, 'modelId'),
+    projectId: identifier(input.projectId, 'projectId'),
   };
 
   if (input.n !== undefined) {
@@ -159,6 +162,7 @@ export function normalizeGatewayVideoRequest(value: unknown): GatewayVideoReques
     prompt: boundedText(input.prompt, 'prompt', MAX_PROMPT_LENGTH),
     providerId: identifier(input.providerId, 'providerId'),
     modelId: identifier(input.modelId, 'modelId'),
+    projectId: identifier(input.projectId, 'projectId'),
   };
 
   if (input.duration !== undefined) {

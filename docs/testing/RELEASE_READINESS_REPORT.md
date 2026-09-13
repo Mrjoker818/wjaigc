@@ -2416,3 +2416,10 @@ The focused gate test passes `7/7`; the actual protected-baseline command passes
 - `late-writeback` helper 仅位于测试目录，直接复用既有数据库条件更新；没有新增生产路由、管理接口、运行时开关或外部可调用后门。
 - `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 与 donor 未修改；未执行 Coze、未推送。
 - **发布结论保持：Task 9 本地可复审 / 云端未验证 / 全平台仍不通过。**
+
+### 2026-09-14 Task 9 资产交付修复发布判断
+
+- 已真实复现旧云端任务完成但结果没有可访问图片和 AssetVersion；本地候选现要求 `projectId` 归属在准入与扣费前验证，并在 completed 前把临时供应商图片固化到受控媒体目录。
+- 权威 AssetVersion 从 `assetProjection.versionIds` 投影；缩略图 pending 不阻塞完成，预览和下载回退原图。S3 备份有 2 秒边界，不再拖住任务终态。
+- 新鲜门禁：核心 `126/126`、资产交付 `17/17`、扩大回归 `359 passed / 1 environment failed`；TypeScript、构建版 ESLint、保护基线 `38/38` 和生产构建 `120/120` 通过。唯一环境失败是缺少强制隔离 PostgreSQL URL，未隐藏。
+- **发布结论仍为不通过。** 当前只允许推送 `main` 并在 Coze 测试沙箱验收；云端 exact SHA、真实资产、`n=2`、视频、取消退款及临时开关清理完成前，不更新 `stable`。

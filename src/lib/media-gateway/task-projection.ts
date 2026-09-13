@@ -174,6 +174,17 @@ function publicIdentifier(value: unknown): string | undefined {
     : undefined;
 }
 
+function projectedAssetVersionId(result: Record<string, unknown> | undefined): string | undefined {
+  const direct = publicIdentifier(result?.assetVersionId);
+  if (direct) return direct;
+  const assetProjection = result?.assetProjection;
+  if (!assetProjection || typeof assetProjection !== 'object' || Array.isArray(assetProjection)) {
+    return undefined;
+  }
+  const versionIds = (assetProjection as Record<string, unknown>).versionIds;
+  return Array.isArray(versionIds) ? publicIdentifier(versionIds[0]) : undefined;
+}
+
 function projectTask(task: CloudTask): GatewayTaskProjection {
   if (!validStatus(task.status)) throw unavailable();
   const result = publicResult(task.result);
@@ -230,13 +241,20 @@ export async function getGatewayTaskProjection(
 ): Promise<GatewayTaskProjection> {
   const { task, projection } = await readGatewayTaskWithoutThumbnails(principal, taskId);
   if (projection.status !== 'completed') return projection;
-  const assetVersionId = publicIdentifier(task.result?.assetVersionId);
+  const assetVersionId = projectedAssetVersionId(task.result);
   if (!assetVersionId) return projection;
-  const thumbnailUrls = await readyThumbnailUrls(assetVersionId, principal.userId);
-  if (!thumbnailUrls) return { ...projection, thumbnailUrls: undefined };
-  const previewUrl = thumbnailUrls?.['512'] || thumbnailUrls?.['256'] || projection.previewUrl;
   const downloadUrl = [projection.result.imageUrl, projection.result.videoUrl]
     .find(value => typeof value === 'string' && value.length > 0) as string | undefined;
+  const thumbnailUrls = await readyThumbnailUrls(assetVersionId, principal.userId);
+  if (!thumbnailUrls) {
+    return {
+      ...projection,
+      assetVersionId,
+      ...(downloadUrl ? { downloadUrl } : {}),
+      thumbnailUrls: undefined,
+    };
+  }
+  const previewUrl = thumbnailUrls?.['512'] || thumbnailUrls?.['256'] || projection.previewUrl;
   return {
     ...projection,
     assetVersionId,
