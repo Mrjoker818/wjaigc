@@ -406,12 +406,14 @@ git commit -m "feat: route gateway submissions through authoritative tasks"
 
 **Files:**
 - Create: `src/lib/media-gateway/task-projection.ts`
+- Modify: `src/lib/media-gateway/audit.ts`
 - Create: `src/app/api/gateway/v1/tasks/[taskId]/route.ts`
 - Create: `src/app/api/gateway/v1/tasks/[taskId]/cancel/route.ts`
 - Modify: `src/app/api/cancel-task/route.ts`
 - Test: `src/__tests__/api/media-gateway-task-status.test.ts`
 - Test: `src/__tests__/api/media-gateway-task-cancel.test.ts`
 - Test: `src/__tests__/api/cancel-task.test.ts`
+- Test: `src/__tests__/lib/media-gateway-audit.test.ts`
 
 **Interfaces:**
 - Produces: `getGatewayTaskProjection(principal, taskId)`。
@@ -437,7 +439,9 @@ Run: `pnpm exec vitest run src/__tests__/api/media-gateway-task-status.test.ts s
 
 - [ ] **Step 3: 实现状态与取消门面**
 
-状态接口从网关 Key 解析 `userId`，只返回安全字段：`taskId/status/progress/providerId/modelId/result/error/previewUrl/thumbnailUrls`。取消接口用内部用户身份调用现有取消路由，不自行退款；权威 409、失败和已取消状态原样映射到稳定网关合同。
+状态接口从网关 Key 解析 `userId`，只返回安全字段：`taskId/status/progress/providerId/modelId/result/error/previewUrl/thumbnailUrls`。媒体 URL 只允许有界的受控站内媒体路径，或无 userinfo、无敏感 query、非 loopback/私网字面地址的有界公网 HTTPS；字符串、数组元素数、单元素和总序列化体积均须受限，不满足时省略而非泄漏。取消接口用内部用户身份调用现有取消路由，不自行退款；权威 409、失败和已取消状态映射到稳定网关合同。任意 2xx 只在取消后持久化重读确认为 `cancelled` 时返回成功；其他终态返回稳定 409，活动态或不确定状态返回可重试 503。
+
+任务查询和取消必须复用现有网关脱敏审计，记录 requestId、gatewayKeyId、userId、动作、结果和真实状态码；鉴权失败不得记录 Bearer，成功/404/409/503 均不得写任务结果、媒体 URL、供应商凭据或内部错误。审计失败不得改变权威查询/取消响应。
 
 - [ ] **Step 4: 为现有取消路由补齐可信内部认证**
 
