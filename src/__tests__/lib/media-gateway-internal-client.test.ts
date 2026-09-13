@@ -161,6 +161,24 @@ describe('media gateway authoritative internal client', () => {
     })).rejects.toMatchObject({ code: 'GATEWAY_INTERNAL_UNAVAILABLE', status: 503 });
   });
 
+  it.each([500, 502, 503, 504])('treats %i with valid authoritative task ids as ambiguous', async (status) => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      taskId: 'task-1', taskIds: ['task-1', 'task-2'], status: 'queued',
+    }), { status, headers: { 'content-type': 'application/json' } })));
+
+    await expect(submitGatewayImage({
+      principal,
+      requestId: 'req_12345678',
+      gatewayRequestId: 'gwreq_1',
+      input: { prompt: 'draw', providerId: 'provider-1', modelId: 'model-1', n: 2 },
+    })).rejects.toMatchObject({
+      code: 'GATEWAY_INTERNAL_UNAVAILABLE',
+      status: 503,
+      retryable: true,
+      message: 'Media gateway internal submission is unavailable',
+    });
+  });
+
   it.each([
     { taskId: '../invalid' },
     { taskIds: ['task-1', 'bad task'] },

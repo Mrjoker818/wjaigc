@@ -213,7 +213,12 @@ describe('media gateway submission routes', () => {
   });
 
   it('keeps the reservation on an ambiguous internal failure and redacts internal details', async () => {
-    mocks.submitGatewayImage.mockRejectedValue(new Error('postgres://secret@internal providerApiKey=abc'));
+    mocks.submitGatewayImage.mockRejectedValue(new GatewayError(
+      'GATEWAY_INTERNAL_UNAVAILABLE',
+      503,
+      'postgres://secret@internal providerApiKey=abc',
+      true,
+    ));
 
     const response = await submitImage(request('images', {
       prompt: 'draw', providerId: 'provider-1', modelId: 'model-1',

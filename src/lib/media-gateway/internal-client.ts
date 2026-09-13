@@ -164,6 +164,8 @@ async function submitAuthoritative(
     throw unavailable();
   }
 
+  if (response.status >= 500 && response.status <= 599) throw unavailable();
+
   let responseBody: unknown;
   try {
     responseBody = await response.json();

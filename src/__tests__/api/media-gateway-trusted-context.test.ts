@@ -24,6 +24,7 @@ const mocks = vi.hoisted(() => ({
   findProviderForModel: vi.fn(),
   findProviderForFeature: vi.fn(),
   recordImageTaskSubmitted: vi.fn(),
+  recordVideoTaskSubmitted: vi.fn(),
   resolveTaskModelForUser: vi.fn(),
 }));
 
@@ -65,7 +66,7 @@ vi.mock('@/lib/task-core/model-catalog', () => ({
 vi.mock('@/lib/cloud-task-persistence', () => ({
   recordImageTaskSubmitted: mocks.recordImageTaskSubmitted,
   recordImageTaskTerminal: vi.fn(),
-  recordVideoTaskSubmitted: vi.fn(),
+  recordVideoTaskSubmitted: mocks.recordVideoTaskSubmitted,
   recordVideoTaskRemotePolling: vi.fn(),
 }));
 vi.mock('@/lib/task-registry', () => ({
@@ -129,12 +130,14 @@ describe('trusted gateway source context', () => {
     mocks.findProviderForModel.mockResolvedValue(mocks.videoProvider);
     mocks.findProviderForFeature.mockResolvedValue(mocks.videoProvider);
     mocks.recordImageTaskSubmitted.mockResolvedValue(true);
+    mocks.recordVideoTaskSubmitted.mockResolvedValue(undefined);
     mocks.resolveTaskModelForUser.mockImplementation(async (providerId: string, modelId: string) => ({
       providerId, modelId, kind: providerId === 'video-provider' ? 'video' : 'image',
       sourceType: providerId === 'video-provider' ? 'video' : 'image',
       protocol: 'openai', executionMode: 'async', allowedRatios: ['1:1', '16:9'],
       allowedSizes: [], qualityOptions: [], maxOutputs: 4, supportsReferenceImages: true,
-      supportsMask: false, supportedOperations: ['text-to-image', 'text-to-video'],
+      supportsMask: false, allowedDurationsSeconds: [5],
+      supportedOperations: ['text-to-image', 'text-to-video'],
       outputKinds: ['png', 'mp4'], capabilitySources: {},
     }));
   });
@@ -178,6 +181,39 @@ describe('trusted gateway source context', () => {
         sourceChannel: 'gateway', gatewayRequestId: 'gwreq_1', gatewayKeyId: 'gwkey_1',
       }),
     }));
+  });
+
+  it.each(['cookie', 'desktop-token'] as const)(
+    'does not persist forged gateway metadata for an authenticated %s video request',
+    async (source) => {
+      mocks.source = source;
+      const providerFetch = vi.fn();
+      vi.stubGlobal('fetch', providerFetch);
+
+      const response = await generateVideo(videoRequest() as never);
+
+      expect(response.status).toBe(200);
+      const submitted = mocks.recordVideoTaskSubmitted.mock.calls[0]?.[0];
+      expect(submitted?.submissionPayload).not.toHaveProperty('sourceChannel');
+      expect(submitted?.submissionPayload).not.toHaveProperty('gatewayRequestId');
+      expect(submitted?.submissionPayload).not.toHaveProperty('gatewayKeyId');
+      expect(providerFetch).not.toHaveBeenCalled();
+    },
+  );
+
+  it('persists sanitized gateway metadata for an internal-authenticated video request', async () => {
+    const providerFetch = vi.fn();
+    vi.stubGlobal('fetch', providerFetch);
+
+    const response = await generateVideo(videoRequest() as never);
+
+    expect(response.status).toBe(200);
+    expect(mocks.recordVideoTaskSubmitted).toHaveBeenCalledWith(expect.objectContaining({
+      submissionPayload: expect.objectContaining({
+        sourceChannel: 'gateway', gatewayRequestId: 'gwreq_1', gatewayKeyId: 'gwkey_1',
+      }),
+    }));
+    expect(providerFetch).not.toHaveBeenCalled();
   });
 
   it('does not discover a fallback video provider for trusted gateway context', async () => {
