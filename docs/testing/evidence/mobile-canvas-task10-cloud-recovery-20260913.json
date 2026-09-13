@@ -25,6 +25,18 @@
     "pageRecovered": true,
     "realOldDocumentAcrossDeployment": "unverified"
   },
+  "realCrossDeploymentAttempt1": {
+    "fromBuildId": "-2B5y0lYEKTRPybjEMKtO",
+    "toBuildId": "k1NowrCUOg4TAuMtTLS-8",
+    "cozeHead": "b780353f14dc19587006faa6b8d86109ada52a6e",
+    "newServicePid": 17259,
+    "oldDocumentWasKeptOpenDuringDeployment": true,
+    "oldChunkProbeStatuses": [500, 500, 200, 200, 200, 200],
+    "existingCanvasAndNodeModeStayedUsable": true,
+    "simpleChatTransitionUsedFullNavigation": true,
+    "automaticChunkRetryObserved": false,
+    "conclusion": "Deployment mismatch was real, but the chosen interactions did not request an uncached lazy chunk; a second attempt will use the unopened VersionHistoryPanel React.lazy boundary."
+  },
   "mobileViewport": [
     {
       "width": 320,

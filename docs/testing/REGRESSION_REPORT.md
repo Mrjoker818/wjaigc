@@ -3100,3 +3100,10 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - 触摸仿真证明单指操作改变画布平移矩阵，双指缩放由 100% 变为 157%，图片长按打开完整菜单。Console 仅有 Coze 宿主 Slardar `already inited` warning，未发现无界应用 error/warning。
 - 机器证据：[mobile-canvas-task10-cloud-recovery-20260913.json](evidence/mobile-canvas-task10-cloud-recovery-20260913.json)。
 - **判定：`CONDITIONAL PASS / PHYSICAL DEVICE GATE OPEN`。** 真实旧页面跨部署、实体触屏手感和软键盘弹起后的可达性尚未证明；190 项隔离 PostgreSQL 条件测试亦未执行。
+
+### 2026-09-13 Task 10 真实跨部署第一次尝试
+
+- 保留 Build ID `-2B5y0lYEKTRPybjEMKtTLS-8` 的画布页面不刷新，Coze 将同 tree 的文档增量重新构建为 `k1NowrCUOg4TAuMtTLS-8`，服务 PID 由 `15357` 切换为 `17259`。
+- 旧文档引用的 6 个 chunk 重新请求时出现 `500, 500, 200, 200, 200, 200`，证明旧文档与新静态资源的部署错配真实存在；旧画布、节点模式和工作台仍保持可操作。
+- 独立智能对话入口采用完整页面导航直接载入新构建，没有触发旧文档恢复器，因此本次不能把真实 `_chunk_retry` 写成通过。
+- 下一次确定性样本固定为部署前保持 `VersionHistoryPanel` 未打开，部署后点击“版本历史”触发其 `React.lazy` 边界；避免继续随机尝试已缓存入口。
