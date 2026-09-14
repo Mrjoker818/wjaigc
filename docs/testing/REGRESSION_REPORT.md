@@ -3236,3 +3236,13 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - Edge 截图和 Console 已归档；应用 error 为 0，唯一 warning 来自 Coze 页面 SDK 的重复初始化。脱敏机器证据见 `docs/testing/evidence/v588-media-task9-cloud-20260914.json`。
 
 **判定：Task 9 云端核心持久化、重启恢复和取消账务通过；状态提升为 `LOCAL + POSTGRESQL + CLOUD CORE PASS / CLOUD EVIDENCE PARTIAL`。** 尚未闭环 256/512 缩略图、同步直返视频供应商、跨用户/限流的本轮云端复验，以及录像、Trace、Network 制品，因此 Task 9 不能标记完全关闭，全平台发布结论不变。
+
+#### Task 9 无付费安全与配额补验
+
+- 当前候选云端真实返回：错误 Key 401 `GATEWAY_KEY_INVALID`；吊销 Key 再使用仍为 401；跨用户 projectId 为 400；跨用户 taskId 为 404 `GATEWAY_TASK_NOT_FOUND`。
+- RPM=1 的 Key 首次无幂等键请求返回 400，第二次返回 429 `GATEWAY_RATE_LIMITED`，证明失败请求也计入分钟滥用防护。
+- UTC 日配额为 1 的 Key 首次准入真实任务 `async-1789344281470-0-9ovjwt` 后立即取消，流水恰好一次 `-60/+60`；第二个新幂等请求返回 429 `GATEWAY_DAILY_QUOTA_EXCEEDED`。
+- 所有本轮 Key 均已撤销，临时凭据与开关清理；重启后图像网关再次返回 503 `GATEWAY_DISABLED`，requestId `req_e4a0c526-1d76-4037-8dac-b7788fcce1b8`。
+- 数据库中没有“任务归属可追溯且缩略图 ready”的既有样本，不能从网关状态接口真实证明 ready 缩略图投影；该缺口继续保留。
+
+**增量判定：错误/吊销 Key、分钟限流、UTC 日配额、跨用户项目与任务隔离已在当前云端候选关闭。** Task 9 剩余仅为 ready 缩略图投影、同步直返视频、`n=2` 浏览器逐槽时间差及录像/Trace/Network 证据。

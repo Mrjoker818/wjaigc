@@ -75,7 +75,30 @@
   "thumbnails": {
     "newAssetVariants": 0,
     "historicalBacklogPreview": 100,
+    "readyTaskForGatewayProjectionFound": false,
     "status": "unverified"
+  },
+  "securityAndQuota": {
+    "invalidKey": {"http": 401, "code": "GATEWAY_KEY_INVALID"},
+    "revokedKey": {"http": 401, "code": "GATEWAY_KEY_INVALID"},
+    "foreignProject": {"http": 400, "code": "GATEWAY_INVALID_REQUEST"},
+    "foreignTask": {"http": 404, "code": "GATEWAY_TASK_NOT_FOUND"},
+    "minuteRateLimit": {
+      "first": {"http": 400, "code": "GATEWAY_IDEMPOTENCY_REQUIRED"},
+      "second": {"http": 429, "code": "GATEWAY_RATE_LIMITED"}
+    },
+    "utcDailyQuota": {
+      "firstTaskId": "async-1789344281470-0-9ovjwt",
+      "firstSubmitHttp": 202,
+      "firstCancelHttp": 200,
+      "firstFinalStatus": "cancelled",
+      "second": {"http": 429, "code": "GATEWAY_DAILY_QUOTA_EXCEEDED"},
+      "transactions": [
+        {"type": "consume", "count": 1, "total": -60},
+        {"type": "refund", "count": 1, "total": 60}
+      ],
+      "net": 0
+    }
   },
   "cleanup": {
     "temporaryGatewayKeyId": "gwkey_5a7873c1-ff24-4c30-bff1-012c6bfa0a2c",
@@ -84,12 +107,14 @@
     "gatewayEnvironmentOverrideRemoved": true,
     "gatewayDisabledStatus": 503,
     "gatewayDisabledCode": "GATEWAY_DISABLED",
-    "gatewayDisabledRequestId": "req_a94836b5-97f7-415c-9198-aed709e9bfaa"
+    "gatewayDisabledRequestId": "req_e4a0c526-1d76-4037-8dac-b7788fcce1b8"
   },
   "browserArtifacts": {
     "browser": "Edge",
     "screenshot": "test-results/evidence/v588-media-task9-cloud-20260914/coze-task9-final.png",
     "console": "test-results/evidence/v588-media-task9-cloud-20260914/edge-console.json",
+    "finalBoundaryScreenshot": "test-results/evidence/v588-media-task9-cloud-20260914/coze-task9-boundaries-final.png",
+    "finalConsole": "test-results/evidence/v588-media-task9-cloud-20260914/edge-console-final.json",
     "applicationErrors": 0,
     "externalWarnings": 1,
     "video": null,

@@ -2479,3 +2479,7 @@ The focused gate test passes `7/7`; the actual protected-baseline command passes
 - 256/512 缩略图仍未生成；云端存在至少 100 个历史待处理变体。本轮没有通过批量处理旧数据掩盖该缺口。同步直返视频、同轮跨用户/限流复验及浏览器 Trace/录像也仍缺证据。
 
 **发布结论：有条件通过 Task 9 核心云端链路，但 Task 9 尚未完全关闭，全平台仍不通过。** `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 保持只读；不得因本轮核心链路通过而更新 stable 或宣布整个平台可发布。
+
+- 当前候选补充通过错误/吊销 Key、RPM 限流、UTC 日配额、跨用户 project/task 隔离；配额首个任务取消后只产生一次消费和一次退款，净额 0。
+- 所有临时 Key 已撤销、临时开关已移除，最终默认关闭态复核为 503 `GATEWAY_DISABLED`。
+- Task 9 当前约 98%。ready 缩略图任务样本、同步直返视频以及录像/Trace/Network 仍缺失，所以仍不能完整关闭。
