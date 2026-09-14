@@ -3222,3 +3222,17 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 **判定：`LOCAL + POSTGRESQL + INDEPENDENT REVIEW PASS / COZE ENABLED E2E UNVERIFIED`。** Task 9 本地部分已闭环，仍不能把 Coze 真实供应商、`n=2`、AssetVersion/缩略图、S3 重启恢复和一次扣退标记为通过。
 
 - 最终静态门禁：`pnpm ts-check`、`pnpm lint:build`、目标差异检查均退出 0；`pnpm build` 退出 0并生成 `120/120` 页面。构建保留 56 条既有 Turbopack 动态文件追踪告警。
+
+### 2026-09-14 Task 9 Coze 启用态真实 E2E
+
+- Coze 从旧云端提交非破坏性合并 GitHub `origin/main@5a424761296dcf9c067226b96918010e4d38e29d`；云端合并提交为 `90d797f8247256db04d61be6e267ffbd4aa283c8`，与 `origin/main` 的唯一文件差异是既有临时验收脚本 `scripts/t9-e2e-runner.mjs`，运行时代码无差异。构建成功，Build ID 为 `-srU8hpRV5XCb7n0Gp3J9`，首页 HTTP 200。
+- APIMart `gpt-image-2` 真实图像 `n=1` 完成，任务 `async-1789343318868-0-3pa2pv` 产生唯一 AssetVersion `d2d11b23-9265-43f0-b1c5-2cc48994d978`；预览、下载均为 HTTP 200。
+- 同模型真实图像 `n=2` 返回两个独立 taskId；两个子任务均完成并产生两个不同 AssetVersion，预览和下载均为 HTTP 200。4 秒采样粒度下两项在同一次轮询完成，因此只证明独立任务与独立资产，不把“逐张可见时间差”记为通过。
+- 重启 Next 服务后，上述三个图像任务仍为 `completed`，AssetVersion ID 不变，预览与下载继续返回 HTTP 200，证明本轮制品不依赖易失的 `serve-upload` 本地文件。
+- 旧视频任务 `video_1789335797083_mptoh9` 原为 `processing/10%`；最新网关查询触发权威恢复后进入 `completed/100%`，产生 AssetVersion `b51b7711-027f-4ed7-9f3d-13a6d4ba4f60`，预览和下载均返回 HTTP 200、`video/mp4`。
+- 真实取消任务 `async-1789343654183-0-oohcu9` 返回 200 `cancelled`；45 秒后仍为 cancelled、无 AssetVersion。脱敏流水只有一次 consume `-60` 和一次 refund `+60`，净额 0，迟到结果未复活任务。
+- 新资产暂未产生 `wujie_asset_thumbnail_variants`；预检发现历史待处理缩略图至少 100 项。本轮未批量处理历史数据，因此 256/512 缩略图仍未验证，不冒充通过。
+- 验收结束后临时 Key `gwkey_5a7873c1-ff24-4c30-bff1-012c6bfa0a2c` 已撤销，临时凭据和响应文件已删除，`.env.local` 临时开关已移除；重启后网关返回 503 `GATEWAY_DISABLED`。
+- Edge 截图和 Console 已归档；应用 error 为 0，唯一 warning 来自 Coze 页面 SDK 的重复初始化。脱敏机器证据见 `docs/testing/evidence/v588-media-task9-cloud-20260914.json`。
+
+**判定：Task 9 云端核心持久化、重启恢复和取消账务通过；状态提升为 `LOCAL + POSTGRESQL + CLOUD CORE PASS / CLOUD EVIDENCE PARTIAL`。** 尚未闭环 256/512 缩略图、同步直返视频供应商、跨用户/限流的本轮云端复验，以及录像、Trace、Network 制品，因此 Task 9 不能标记完全关闭，全平台发布结论不变。

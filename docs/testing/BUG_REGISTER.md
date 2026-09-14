@@ -4367,3 +4367,16 @@ Task 4 独立审查的两个 Minor 继续保留给最终审查：单元夹具 op
 | MEDIA-T9-026 | P2 | 文件部分写入后抛错时，清理目标尚未登记 | 在 `writeFile` 前登记精确本地路径与受控 URL，失败后统一进入清理/Outbox | 已关闭 |
 
 最终独立只读复审结论：`APPROVED`，Critical `0`、Important `0`、Minor `0`。修改后的真实 PostgreSQL 全仓回归为 `807/807` 文件、`6810/6810` 测试通过。
+
+### 2026-09-14 Task 9 Coze 核心缺陷复验
+
+| 编号 | 最新云端证据 | 状态 |
+|---|---|---|
+| MEDIA-T9-010 / 018 | APIMart `n=1` 与 `n=2` 共三个任务产生三个唯一 AssetVersion；预览与下载均为 200 | **CLOUD PASS** |
+| MEDIA-T9-014 / 019 | Next 服务重启后，三个图像任务的 AssetVersion 不变，预览与下载仍为 200 | **CLOUD PASS** |
+| MEDIA-T9-017 / 020 | 旧视频任务从 `processing/10%` 被同一任务恢复为 completed，产生 AssetVersion；MP4 预览/下载为 200 | **CLOUD PASS** |
+| 取消与退款边界 | 真实取消后 45 秒仍为 cancelled；一次 consume `-60`、一次 refund `+60`、无 AssetVersion | **CLOUD PASS** |
+| MEDIA-T9-021 | 本轮恢复的是异步视频任务，没有可证明同步直返的稳定视频供应商 | **未验证** |
+| 256/512 缩略图 | 新资产无变体；云端预检至少 100 项历史积压，未批量执行以免污染验收结论 | **未验证，独立处理** |
+
+临时验收 Key 已撤销，临时开关和凭据已清理，重启后网关恢复 503 `GATEWAY_DISABLED`。本节关闭核心 P1 云端复验，但不关闭缩略图、同步直返视频、故障注入清理和浏览器制品缺口。

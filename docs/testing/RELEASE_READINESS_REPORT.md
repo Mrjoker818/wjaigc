@@ -2468,3 +2468,14 @@ The focused gate test passes `7/7`; the actual protected-baseline command passes
 - `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 仍为只读；本候选只允许推送 `main`。
 - **发布结论仍为有条件通过本地门禁 / 全平台不通过。** Coze 启用态真实 E2E 未完成前，不更新 `stable`，不宣称媒体网关或 Task 9 完成。
 - 最终 TypeScript、构建版 ESLint、差异检查与生产构建均退出 0；构建生成 `120/120` 页面并保留 56 条既有 Turbopack 动态追踪告警。
+
+### 2026-09-14 Task 9 Coze 核心云端门禁判断
+
+- Coze 运行时代码已与 `origin/main@5a424761296dcf9c067226b96918010e4d38e29d` 对齐；云端仅保留一个不参与运行的 Task9 临时脚本差异，Build ID `-srU8hpRV5XCb7n0Gp3J9`，首页 200。
+- APIMart 图像 `n=1` 与 `n=2` 共三个真实任务全部完成，产生三个唯一 AssetVersion；重启后任务、预览和下载仍可恢复且返回 200。
+- 旧 `processing/10%` 视频任务由最新版状态恢复链路推进为 completed，产生 AssetVersion，MP4 预览/下载返回 200。
+- 真实取消任务在 45 秒后仍不可复活；流水恰好一次消费和一次退款，净额 0。
+- 临时 Key 已撤销，临时文件与启用开关已清除；默认关闭态重新返回 503 `GATEWAY_DISABLED`。
+- 256/512 缩略图仍未生成；云端存在至少 100 个历史待处理变体。本轮没有通过批量处理旧数据掩盖该缺口。同步直返视频、同轮跨用户/限流复验及浏览器 Trace/录像也仍缺证据。
+
+**发布结论：有条件通过 Task 9 核心云端链路，但 Task 9 尚未完全关闭，全平台仍不通过。** `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 保持只读；不得因本轮核心链路通过而更新 stable 或宣布整个平台可发布。

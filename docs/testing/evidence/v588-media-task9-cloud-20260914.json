@@ -1,0 +1,100 @@
+{
+  "testId": "V588-MEDIA-001-TASK9-CLOUD-CORE",
+  "testedAt": "2026-09-14",
+  "githubMain": "5a424761296dcf9c067226b96918010e4d38e29d",
+  "cozeHead": "90d797f8247256db04d61be6e267ffbd4aa283c8",
+  "cozeBuildId": "-srU8hpRV5XCb7n0Gp3J9",
+  "runtimeDiffFromGithubMain": ["scripts/t9-e2e-runner.mjs"],
+  "runtimeSourceEquivalent": true,
+  "provider": {
+    "providerId": "api_1778430731224_533e09a",
+    "modelId": "gpt-image-2"
+  },
+  "imageN1": {
+    "requestId": "req_63fb1e63-08cc-4304-b06e-fc3b85ecc1ac",
+    "gatewayRequestId": "gwreq_557ad1cc-1dcf-4b6f-a205-83eeacffa1cd",
+    "tasks": [
+      {
+        "taskId": "async-1789343318868-0-3pa2pv",
+        "status": "completed",
+        "assetVersionId": "d2d11b23-9265-43f0-b1c5-2cc48994d978",
+        "previewStatus": 200,
+        "downloadStatus": 200,
+        "afterRestartStatus": "completed"
+      }
+    ]
+  },
+  "imageN2": {
+    "requestId": "req_d52f4a66-c3e9-4606-9566-b83fa99c62fd",
+    "gatewayRequestId": "gwreq_6d7dc0c2-99f2-4b6e-9386-2a8a884f3a33",
+    "tasks": [
+      {
+        "taskId": "async-1789343437587-0-s1wbtm",
+        "status": "completed",
+        "assetVersionId": "83837e7e-5816-4ea0-ab86-fd5d2ae8e1bb",
+        "previewStatus": 200,
+        "downloadStatus": 200,
+        "afterRestartStatus": "completed"
+      },
+      {
+        "taskId": "async-1789343437587-1-2fnubw",
+        "status": "completed",
+        "assetVersionId": "f7dbd4b2-b411-4e18-92b0-c4a4cb280791",
+        "previewStatus": 200,
+        "downloadStatus": 200,
+        "afterRestartStatus": "completed"
+      }
+    ],
+    "distinctAssetVersionCount": 2,
+    "progressiveVisibility": "unverified_same_poll_sample"
+  },
+  "recoveredVideo": {
+    "taskId": "video_1789335797083_mptoh9",
+    "before": {"status": "processing", "progress": 10},
+    "after": {
+      "status": "completed",
+      "progress": 100,
+      "assetVersionId": "b51b7711-027f-4ed7-9f3d-13a6d4ba4f60",
+      "previewStatus": 200,
+      "downloadStatus": 200,
+      "contentType": "video/mp4"
+    }
+  },
+  "cancelAccounting": {
+    "taskId": "async-1789343654183-0-oohcu9",
+    "status": "cancelled",
+    "lateCheckAfterSeconds": 45,
+    "lateStatus": "cancelled",
+    "assetVersionId": null,
+    "transactions": [
+      {"type": "consume", "count": 1, "total": -60},
+      {"type": "refund", "count": 1, "total": 60}
+    ],
+    "net": 0
+  },
+  "thumbnails": {
+    "newAssetVariants": 0,
+    "historicalBacklogPreview": 100,
+    "status": "unverified"
+  },
+  "cleanup": {
+    "temporaryGatewayKeyId": "gwkey_5a7873c1-ff24-4c30-bff1-012c6bfa0a2c",
+    "temporaryGatewayKeyRevoked": true,
+    "temporaryFilesDeleted": true,
+    "gatewayEnvironmentOverrideRemoved": true,
+    "gatewayDisabledStatus": 503,
+    "gatewayDisabledCode": "GATEWAY_DISABLED",
+    "gatewayDisabledRequestId": "req_a94836b5-97f7-415c-9198-aed709e9bfaa"
+  },
+  "browserArtifacts": {
+    "browser": "Edge",
+    "screenshot": "test-results/evidence/v588-media-task9-cloud-20260914/coze-task9-final.png",
+    "console": "test-results/evidence/v588-media-task9-cloud-20260914/edge-console.json",
+    "applicationErrors": 0,
+    "externalWarnings": 1,
+    "video": null,
+    "trace": null,
+    "networkArchive": null
+  },
+  "verdict": "LOCAL_POSTGRESQL_CLOUD_CORE_PASS_CLOUD_EVIDENCE_PARTIAL"
+}

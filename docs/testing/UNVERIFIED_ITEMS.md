@@ -2680,3 +2680,17 @@ BUG-018 已从未验证项移除。剩余顺序为 `002-B -> 002-D -> 002-E`；�
 - 已不再属于未验证：本地 PostgreSQL、全量 Vitest、下载绝对截止、终态异常清理、非网关兼容、MOV/M4V 清理与 MIME 一致性；最终真库全量为 `6810/6810`，独立复审为 `APPROVED`。
 - 仍未验证：Coze exact SHA 启用态下 PearAPI/APIMart 真实图像与视频；`n=2` 两个子任务逐槽完成且各自拥有 AssetVersion；256/512 缩略图；S3 URL 在沙箱重启后仍为 200；同步直返视频；取消后只退款一次且迟到结果不复活；Console、Network、Trace、截图与账务证据。
 - 以上云端缺口不得由本地测试、Mock、默认关闭态 503 或历史截图替代。
+
+### 2026-09-14 Task 9 Coze 核心 E2E 后剩余项
+
+- [x] Coze 运行时代码与 `origin/main@5a424761296dcf9c067226b96918010e4d38e29d` 一致；唯一额外文件为不参与运行的 `scripts/t9-e2e-runner.mjs`。构建成功，Build ID `-srU8hpRV5XCb7n0Gp3J9`，首页 200。
+- [x] APIMart 图像 `n=1` 与 `n=2` 共三个任务完成，产生三个唯一 AssetVersion；预览/下载在服务重启前后均为 200。
+- [x] 旧视频任务从 `processing/10%` 恢复为 completed，产生唯一 AssetVersion，MP4 预览/下载为 200。
+- [x] 真实取消任务仅消费一次、退款一次，45 秒后仍为 cancelled 且无 AssetVersion。
+- [x] 临时 Key 已撤销，临时凭据已删除，临时 `GATEWAY_ENABLED` 已移除；重启后网关为 503 `GATEWAY_DISABLED`。
+- [ ] 新资产的 256/512 缩略图未产生；历史待处理变体至少 100 项。需要在独立批次验证 backfill worker、失败重试、原图回退与 S3 变体 URL，不能把历史积压批量处理冒充本轮即时通过。
+- [ ] `n=2` 两项在 4 秒采样粒度下同轮完成，尚未取得浏览器逐槽可见时间差证据。
+- [x] 当前候选 Edge 截图和 Console 已归档；应用 error 为 0，唯一 warning 来自 Coze 页面 SDK。
+- [ ] 仍缺少当前候选的录像、Trace 和 Network 归档；终端 requestId/taskId/AssetVersion/账务证据及截图/Console 不能替代这些制品。
+- [ ] 没有可确认同步直返的视频供应商，本轮未验证同步直返视频路径；不得用旧异步视频恢复结果替代。
+- [ ] 跨用户隔离、Key 吊销、限流和 UTC 日配额已有本地真 PostgreSQL 证据及旧云端证据，但未在 `5a424761` 同一云端验收轮次重跑。
