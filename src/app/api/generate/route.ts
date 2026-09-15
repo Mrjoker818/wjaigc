@@ -1777,9 +1777,41 @@ export async function POST(request: NextRequest) {
         // ★ 将所有参考图 URL 转为 base64，确保第三方 API 一定能下载到图片
         // 这是最关键的修复：第三方 API 可能无法访问 coze.site 域名的图片 URL
         const base64RefImages: string[] = [];
+        const unusableSelfRefs: string[] = [];
+        const selfDomainBase = (process.env.COZE_PROJECT_DOMAIN_DEFAULT || '').replace(/^https?:\/\//, '').replace(/\/+$/, '');
         for (const refUrl of accessibleReferenceImages) {
           const base64 = await resolveImageToBase64(refUrl);
-          base64RefImages.push(base64 || refUrl); // 转换失败时保留原始 URL
+          if (base64) {
+            base64RefImages.push(base64);
+            continue;
+          }
+          // 转换失败时区分图片来源：
+          // - 自建域名/本地路径：服务器上已找不到该文件（本地盘丢失 + S3 恢复失败），
+          //   把 URL 兜底传给供应商只会得到"远程图片下载或CDN缓存失败"这类
+          //   无法定位问题的报错 → 必须直接给出明确错误。
+          // - 外部 URL：供应商可以自行下载，保留原 URL 作为兜底。
+          const isSelfHosted = refUrl.startsWith('/api/serve-upload/')
+            || refUrl.startsWith('/uploads/')
+            || (selfDomainBase.length > 0 && refUrl.includes(selfDomainBase));
+          if (isSelfHosted) {
+            unusableSelfRefs.push(refUrl);
+            console.error('[generate] Self-hosted reference image unresolvable (file missing and S3 recovery failed):', refUrl);
+          } else {
+            base64RefImages.push(refUrl);
+          }
+        }
+        if (unusableSelfRefs.length > 0) {
+          const names = unusableSelfRefs.map(u => {
+            try {
+              return decodeURIComponent(new URL(u, 'http://self.local').pathname.split('/').pop() || u);
+            } catch {
+              return u;
+            }
+          }).join(', ');
+          // ★ 确定性错误：不重试、不切换备选模型，由提交循环的 catch 短路返回明确 400
+          const refErr = new Error(`参考图片已失效，无法从服务器恢复：${names}。请在画布重新上传这些参考图后再生成。`) as Error & { referenceImageFailure?: boolean };
+          refErr.referenceImageFailure = true;
+          throw refErr;
         }
         // 始终提供 image_urls（使用 base64 版本，确保 API 可访问）
         requestBody.image_urls = base64RefImages;
@@ -2776,6 +2808,10 @@ export async function POST(request: NextRequest) {
         }
         submitted = true;
       } catch (singleError: unknown) {
+        // ★ 参考图失效属于确定性错误：直接短路返回明确 400（不重试、不切换备选模型）
+        if (singleError instanceof Error && (singleError as Error & { referenceImageFailure?: boolean }).referenceImageFailure) {
+          return NextResponse.json({ success: false, error: singleError.message }, { status: 400 });
+        }
         const errMsg = singleError instanceof Error ? singleError.message : String(singleError);
         const isRetryable = singleError instanceof Error && (singleError as Error & { retryable?: boolean }).retryable;
         

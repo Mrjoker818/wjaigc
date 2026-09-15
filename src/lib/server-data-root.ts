@@ -160,7 +160,36 @@ export function saveImageFile(
   const filePath = path.join(dir, filename);
   const data = typeof buffer === 'string' ? Buffer.from(buffer, 'base64') : buffer;
   fs.writeFileSync(filePath, data);
-  
+
+  // ★ 写穿 S3 备份（异步、不阻塞返回）：生产环境数据根可能落在 /tmp（易失）
+  // 且多实例本地盘互不可见，本地写成功不代表文件持久存在。
+  // serve-upload 在本地缺失时会自动从 S3 恢复；备份失败仅记录告警。
+  try {
+    const ext = path.extname(filename).toLowerCase();
+    const mimeByExt: Record<string, string> = {
+      '.png': 'image/png',
+      '.jpg': 'image/jpeg',
+      '.jpeg': 'image/jpeg',
+      '.webp': 'image/webp',
+      '.gif': 'image/gif',
+      '.svg': 'image/svg+xml',
+    };
+    const contentType = mimeByExt[ext] || 'application/octet-stream';
+    void import('./s3-storage')
+      .then(async ({ uploadImageToS3, isS3Available }) => {
+        if (!isS3Available()) return; // S3 未配置时跳过备份，属正常情况
+        const ok = await uploadImageToS3(data, filename, contentType);
+        if (!ok) {
+          console.warn(`[data-root] S3 backup failed for ${subDir}/${filename}`);
+        }
+      })
+      .catch(err => {
+        console.warn(`[data-root] S3 backup failed for ${subDir}/${filename}:`, err instanceof Error ? err.message : err);
+      });
+  } catch {
+    // 备份准备失败不影响主流程
+  }
+
   // 统一通过 serve-upload API 访问，确保开发和生产环境路径一致可达
   return `/api/serve-upload/${subDir}/${filename}`;
 }

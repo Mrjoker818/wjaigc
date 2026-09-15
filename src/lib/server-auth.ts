@@ -350,6 +350,17 @@ function normalizeStoredUser(user: StoredUser): StoredUser {
   };
 }
 
+// ★ 进程内存中的用户存储快照（最近一次成功加载的结果）
+// 用途：
+// 1. readStore 在每个已认证请求上都会执行，缓存可显著减少对数据库的逐请求读取，
+//    避免生产环境 Postgres 网络抖动被逐请求放大为大量 ETIMEDOUT。
+// 2. 当数据库与本地文件同时临时不可用时（生产 /tmp 易失 + DB 抖动叠加），
+//    使用最近一次成功加载的用户快照完成会话校验，保证已登录用户不因瞬时
+//    故障被误判为未认证（线上曾因此出现 "Authentication required"）。
+//    快照仅存在于进程内存，实例重启后由首次成功读取重建。
+let _usersCache: { data: StoredUsersFile; ts: number } | null = null;
+const USERS_CACHE_TTL_MS = Number(process.env.WUJIE_USERS_CACHE_TTL_MS) || 30_000;
+
 async function writeStore(file: StoredUsersFile): Promise<void> {
   const data = { ...file, updatedAt: Date.now() };
   // Write to file (backward compatible) — file system failures should not block DB writes
@@ -421,9 +432,11 @@ async function writeStore(file: StoredUsersFile): Promise<void> {
     updatedAt: u.updatedAt || Date.now(),
     })));
   }
+  // 刷新内存快照，使后续读取（含降级场景）立即看到最新用户列表
+  _usersCache = { data, ts: Date.now() };
 }
 
-async function readStore(): Promise<StoredUsersFile> {
+async function readStoreFresh(): Promise<StoredUsersFile> {
   let file: StoredUsersFile;
   let usedFallback = false;
 
@@ -600,6 +613,27 @@ async function readStore(): Promise<StoredUsersFile> {
   }
 
   return file;
+}
+
+// ★ 带内存快照的读取入口（readStoreFresh 为原始实现）
+// - TTL 内直接返回快照，避免每个已认证请求都读一次 DB；
+// - 数据库与本地文件同时读取失败（快照后新一轮读取为空）时降级用最近快照，
+//   已登录用户的会话校验不再因瞬时 DB 故障返回 401 "Authentication required"。
+async function readStore(): Promise<StoredUsersFile> {
+  const now = Date.now();
+  if (_usersCache && now - _usersCache.ts < USERS_CACHE_TTL_MS) {
+    return _usersCache.data;
+  }
+  const fresh = await readStoreFresh();
+  if (fresh.users.length > 0) {
+    _usersCache = { data: fresh, ts: now };
+    return fresh;
+  }
+  if (_usersCache && _usersCache.data.users.length > 0) {
+    console.warn('[auth] Store read returned no users; using last known in-memory snapshot (DB/file may be temporarily unavailable)');
+    return _usersCache.data;
+  }
+  return fresh;
 }
 
 export async function authenticateUser(input: {

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerDataRoot } from '@/lib/server-data-root';
-import { downloadImageFromS3, getS3PresignedUrl, deriveS3Key, resolveS3Key } from '@/lib/s3-storage';
+import { downloadImageFromS3, getS3PresignedUrl, deriveS3Key, resolveS3Key, isS3Available } from '@/lib/s3-storage';
 import { getImageSourceUrl } from '@/lib/image-source-map';
 import { isAllowedPublicMediaExtension } from '@/lib/media-validation';
 import path from 'path';
@@ -145,7 +145,15 @@ export async function GET(
         return NextResponse.redirect(presignedUrl);
       }
     }
-    
+
+    // ★ 可观测性：本地 / public / S3 恢复 / sourceUrl / presigned 全部失败时，
+    // 记录明确的错误日志。此前该路径完全静默（只有恢复成功才有日志），
+    // 导致线上"远程图片下载或CDN缓存失败"类问题难以归因：
+    // 该文件缺失时，generate 提交参考图给上游供应商，供应商下载不到即报 400。
+    console.error(
+      `[serve-upload] File miss: ${filePath} | local=miss s3=${isS3Available() ? 'configured-but-recovery-failed' : 'not-configured'} sourceMap=${sourceUrl ? 'found-but-fetch-failed' : 'none'} | 若该文件被用作生成参考图，上游会报"远程图片下载或CDN缓存失败"`
+    );
+
     return NextResponse.json({ error: 'File not found' }, { status: 404 });
   } catch (error) {
     console.error('serve-upload error:', error);
