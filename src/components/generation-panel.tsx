@@ -586,7 +586,7 @@ export function GenerationPanel(
         // 通用回退
         if (SHARED_ASPECT_RATIO_TO_PIXELS[ratio]) return SHARED_ASPECT_RATIO_TO_PIXELS[ratio];
         const fallback: Record<string, string> = {
-            "1:1": "1024x1024", "4:3": "1536x1024", "3:4": "1024x1536",
+            "1:1": "1024x1024", "4:3": "1365x1024", "3:4": "1024x1365",
             "16:9": "2048x1152", "9:16": "1152x2048", "3:2": "1536x1024",
             "2:3": "1024x1536", "21:9": "2048x878", "9:21": "878x2048",
         };

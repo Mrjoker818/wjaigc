@@ -1157,8 +1157,9 @@ export const QUALITY_TO_SIZE: Record<string, Record<string, string>> = {
 /** 画面比例到默认像素尺寸的映射 */
 export const ASPECT_RATIO_TO_PIXELS: Record<string, string> = {
     '1:1': '1024x1024',
-    '4:3': '1536x1024',
-    '3:4': '1024x1536',
+    // ★ 4:3/3:4 必须与真实比例一致（1.3333/0.75），不得复用 3:2/2:3 的像素值
+    '4:3': '1365x1024',
+    '3:4': '1024x1365',
     '16:9': '2048x1152',
     '9:16': '1152x2048',
     '3:2': '1536x1024',
