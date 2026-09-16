@@ -163,7 +163,8 @@ export function saveImageFile(
 
   // ★ 写穿 S3 备份（异步、不阻塞返回）：生产环境数据根可能落在 /tmp（易失）
   // 且多实例本地盘互不可见，本地写成功不代表文件持久存在。
-  // serve-upload 在本地缺失时会自动从 S3 恢复；备份失败仅记录告警。
+  // serve-upload 在本地缺失时会自动从 S3 恢复；S3 是参考图跨实例恢复的唯一来源，
+  // 因此带 3 次指数退避重试，全部失败时输出 error 级日志便于告警。
   try {
     const ext = path.extname(filename).toLowerCase();
     const mimeByExt: Record<string, string> = {
@@ -175,17 +176,26 @@ export function saveImageFile(
       '.svg': 'image/svg+xml',
     };
     const contentType = mimeByExt[ext] || 'application/octet-stream';
-    void import('./s3-storage')
-      .then(async ({ uploadImageToS3, isS3Available }) => {
-        if (!isS3Available()) return; // S3 未配置时跳过备份，属正常情况
-        const ok = await uploadImageToS3(data, filename, contentType);
-        if (!ok) {
-          console.warn(`[data-root] S3 backup failed for ${subDir}/${filename}`);
+    void (async () => {
+      const { uploadImageToS3, isS3Available } = await import('./s3-storage');
+      if (!isS3Available()) return; // S3 未配置时跳过备份，属正常情况
+      const backoffsMs = [200, 800, 3200];
+      for (let attempt = 0; attempt <= backoffsMs.length; attempt++) {
+        if (attempt > 0) {
+          await new Promise(resolve => setTimeout(resolve, backoffsMs[attempt - 1]));
         }
-      })
-      .catch(err => {
-        console.warn(`[data-root] S3 backup failed for ${subDir}/${filename}:`, err instanceof Error ? err.message : err);
-      });
+        const ok = await uploadImageToS3(data, filename, contentType);
+        if (ok) return;
+        console.warn(
+          `[data-root] S3 backup attempt ${attempt + 1}/${backoffsMs.length + 1} failed for ${subDir}/${filename}`,
+        );
+      }
+      console.error(
+        `[data-root] S3 backup permanently failed for ${subDir}/${filename} — 文件仅存在于本地单实例，实例漂移/重启后将无法恢复（表现为 serve-upload 404 → 生成报"远程图片下载或CDN缓存失败"）`,
+      );
+    })().catch(err => {
+      console.warn(`[data-root] S3 backup failed for ${subDir}/${filename}:`, err instanceof Error ? err.message : err);
+    });
   } catch {
     // 备份准备失败不影响主流程
   }
