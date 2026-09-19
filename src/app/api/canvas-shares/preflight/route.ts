@@ -28,6 +28,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         : { requestedViewport: input.requestedViewport }),
     });
     return canvasShareSuccess(request, {
+      projectName: result.projectName,
       projectRevision: result.projectRevision,
       itemCount: result.itemCount,
       viewport: {

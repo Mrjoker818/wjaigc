@@ -2,9 +2,11 @@ import { describe, expect, it, vi } from 'vitest';
 
 import type { Asset, AssetVersion, WorkspacePlacement } from '@/lib/asset-core/types';
 import {
+  inspectCanvasSharePreflightInTransaction,
   patchCanvasSharePolicy,
   preflightCanvasShare,
 } from '@/lib/canvas-share/service';
+import type { AssetCoreSqlTransaction } from '@/lib/asset-core/storage';
 import {
   buildCanvasShareSnapshot,
   inspectCanvasShareReadiness,
@@ -119,6 +121,43 @@ function source(input: {
 }
 
 describe('canvas-share owner lifecycle service', () => {
+  it('reads the canonical project name through the owner-scoped preflight transaction', async () => {
+    const queries: Array<{ sql: string; values: unknown[] }> = [];
+    const client = {
+      query: vi.fn(async (sql: string, values: unknown[] = []) => {
+        queries.push({ sql, values });
+        if (sql.includes('SELECT name') && sql.includes('FROM wujie_projects')) {
+          return { rows: [{ name: '服务端规范项目名' }], rowCount: 1 };
+        }
+        if (sql.includes('FROM wujie_user_data')) {
+          return { rows: [{ data_value: 12 }], rowCount: 1 };
+        }
+        if (sql.includes('FROM wujie_workspace_placements placement')) {
+          return { rows: [], rowCount: 0 };
+        }
+        return { rows: [], rowCount: 0 };
+      }),
+    } as unknown as AssetCoreSqlTransaction;
+
+    const result = await inspectCanvasSharePreflightInTransaction({
+      ownerId: 'owner-1',
+      projectId: 'project-1',
+      requestedViewport: { offsetX: 3, offsetY: 4, zoom: 2 },
+    }, client);
+
+    expect(result).toEqual({
+      projectName: '服务端规范项目名',
+      projectRevision: 12,
+      itemCount: 0,
+      viewport: { offsetX: 3, offsetY: 4, zoom: 2 },
+      readiness: { ready: true, failures: [] },
+    });
+    expect(queries).toContainEqual(expect.objectContaining({
+      sql: expect.stringMatching(/SELECT name[\s\S]*FROM wujie_projects/iu),
+      values: ['project-1', 'owner-1', 'active'],
+    }));
+  });
+
   it('runs production preflight service through real snapshot readiness inspection', async () => {
     const authoritativeSource = source();
 
@@ -127,10 +166,14 @@ describe('canvas-share owner lifecycle service', () => {
       projectId: 'project-1',
       requestedViewport: { offsetX: Number.NaN, offsetY: -0, zoom: 999 },
     }, {
-      inspect: input => inspectCanvasShareReadiness(input, authoritativeSource),
+      inspect: async input => ({
+        projectName: '服务端规范项目名',
+        ...await inspectCanvasShareReadiness(input, authoritativeSource),
+      }),
     });
 
     expect(result).toEqual({
+      projectName: '服务端规范项目名',
       projectRevision: 12,
       itemCount: 1,
       viewport: { offsetX: 0, offsetY: 0, zoom: 5 },
@@ -161,10 +204,14 @@ describe('canvas-share owner lifecycle service', () => {
       actorUserId: 'owner-1',
       projectId: 'project-1',
     }, {
-      inspect: input => inspectCanvasShareReadiness(input, pendingSource),
+      inspect: async input => ({
+        projectName: '服务端规范项目名',
+        ...await inspectCanvasShareReadiness(input, pendingSource),
+      }),
     });
 
     expect(result).toEqual({
+      projectName: '服务端规范项目名',
       projectRevision: 12,
       itemCount: 2,
       viewport: { offsetX: 0, offsetY: 0, zoom: 1 },

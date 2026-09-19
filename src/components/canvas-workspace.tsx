@@ -968,6 +968,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
   const [showProjectData, setShowProjectData] = useState(false);
   const [navigateToImageId, setNavigateToImageId] = useState<string | null>(null);
   const [showHelpGuide, setShowHelpGuide] = useState(false);
+
   const [showFavorites, setShowFavorites] = useState(false);
   const [showPromptTemplate, setShowPromptTemplate] = useState(false);
   const [favoriteParams, setFavoriteParams] = useState<{
@@ -1377,6 +1378,11 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
   historyProjectIdRef.current = currentProject?.id ?? null;
   const currentProjectRef = useRef(currentProject);
   currentProjectRef.current = currentProject;
+  useEffect(() => {
+    setShareCreateOpen(false);
+    setShareManageOpen(false);
+    setCreatedShareAccess(undefined);
+  }, [currentProject?.id]);
   const hydrationAutosaveGuardRef = useRef<CanvasHydrationGuard | null>(null);
   const immediateSaveGuardRef = useRef<CanvasHydrationGuard | null>(null);
   const recoveredCanvasPersistenceRef = useRef<{
@@ -6395,10 +6401,22 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
               </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="center" className="w-40">
-              <DropdownMenuItem onSelect={() => setShareCreateOpen(true)}>
+              <DropdownMenuItem
+                className="min-h-11"
+                onSelect={() => {
+                  setCreatedShareAccess(undefined);
+                  setShareCreateOpen(true);
+                }}
+              >
                 <Share2 aria-hidden="true" />分享画布
               </DropdownMenuItem>
-              <DropdownMenuItem onSelect={() => setShareManageOpen(true)}>
+              <DropdownMenuItem
+                className="min-h-11"
+                onSelect={() => {
+                  setCreatedShareAccess(undefined);
+                  setShareManageOpen(true);
+                }}
+              >
                 <Settings2 aria-hidden="true" />管理分享
               </DropdownMenuItem>
             </DropdownMenuContent>
@@ -6625,7 +6643,6 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
             open={shareCreateOpen}
             onOpenChange={setShareCreateOpen}
             projectId={currentProject.id}
-            projectName={currentProject.name}
             requestedViewport={viewStateRef.current}
             onOpenManagement={(access) => {
               setCreatedShareAccess(access);

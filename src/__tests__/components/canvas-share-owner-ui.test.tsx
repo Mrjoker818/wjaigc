@@ -3,6 +3,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { useRef, useState, type ComponentProps } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const apiMocks = vi.hoisted(() => ({
@@ -54,22 +55,44 @@ const newerShare = {
   revokedAt: null,
 };
 
+function createdShare(shareId: string, shareUrl: string, title: string) {
+  return {
+    shareUrl,
+    shareId,
+    expiresAt: '2026-10-19T00:00:00.000Z',
+    allowDownload: false,
+    snapshot: {
+      title,
+      status: 'active' as const,
+      projectRevision: 17,
+      itemCount: 3,
+      createdAt: '2026-09-19T08:00:00.000Z',
+    },
+  };
+}
+
 function deferred<T>(): {
   promise: Promise<T>;
   resolve: (value: T) => void;
+  reject: (reason?: unknown) => void;
 } {
   let resolve!: (value: T) => void;
-  const promise = new Promise<T>((resolver) => { resolve = resolver; });
-  return { promise, resolve };
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolver, rejecter) => {
+    resolve = resolver;
+    reject = rejecter;
+  });
+  return { promise, resolve, reject };
 }
 
-function renderCreateDialog(overrides: Record<string, unknown> = {}) {
+function renderCreateDialog(
+  overrides: Partial<ComponentProps<typeof CanvasShareCreateDialog>> = {},
+) {
   return render(
     <CanvasShareCreateDialog
       open
       onOpenChange={vi.fn()}
       projectId="project-1"
-      projectName="客户端旧名"
       requestedViewport={{ offsetX: 10, offsetY: 20, zoom: 1.25 }}
       onOpenManagement={vi.fn()}
       {...overrides}
@@ -100,6 +123,7 @@ describe('canvas share owner UI', () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
   });
 
   it('keeps share entry points at project level only', () => {
@@ -111,6 +135,10 @@ describe('canvas share owner UI', () => {
       resolve(process.cwd(), 'src/components/dashboard/dashboard-view.tsx'),
       'utf8',
     );
+    const dashboardProjectMenu = readFileSync(
+      resolve(process.cwd(), 'src/components/dashboard/project-actions-menu.tsx'),
+      'utf8',
+    );
     const forbiddenSurfaces = [
       'src/components/canvas/CanvasImageActionToolbar.tsx',
       'src/components/simple-chat/share-dialog.tsx',
@@ -120,7 +148,8 @@ describe('canvas share owner UI', () => {
     expect(canvasWorkspace).toContain('<CanvasShareCreateDialog');
     expect(canvasWorkspace).toContain('分享画布');
     expect(dashboard).toContain('<CanvasShareManagePanel');
-    expect(dashboard).toContain('管理分享');
+    expect(dashboard).toContain('<DashboardProjectActionsMenu');
+    expect(dashboardProjectMenu).toContain('管理分享');
     expect(forbiddenSurfaces).not.toContain('分享画布');
     expect(forbiddenSurfaces).not.toContain('管理分享');
   });
@@ -140,11 +169,24 @@ describe('canvas share owner UI', () => {
     expect(screen.getByRole('switch', { name: '允许访问者下载' }).getAttribute('aria-checked')).toBe('false');
     expect(screen.getByText(/创建后将绑定当前修订和素材快照，后续编辑不会改变此分享/)).toBeTruthy();
     expect(screen.getByRole('button', { name: '管理已有分享' })).toBeTruthy();
-    expect(apiMocks.preflightCanvasShare).toHaveBeenCalledWith({
-      projectId: 'project-1',
-      requestedViewport: { offsetX: 10, offsetY: 20, zoom: 1.25 },
-      displayContext: { projectName: '客户端旧名' },
-    });
+    expect(apiMocks.preflightCanvasShare).toHaveBeenCalledWith(
+      {
+        projectId: 'project-1',
+        requestedViewport: { offsetX: 10, offsetY: 20, zoom: 1.25 },
+      },
+      expect.any(AbortSignal),
+    );
+  });
+
+  it('derives date defaults from the local calendar instead of UTC', async () => {
+    vi.stubEnv('TZ', 'America/Los_Angeles');
+    vi.setSystemTime(new Date('2026-01-01T01:00:00.000Z'));
+    renderCreateDialog();
+
+    await screen.findByText('媒体已就绪');
+    const expiry = screen.getByLabelText('有效期');
+    expect(expiry.getAttribute('min')).toBe('2025-12-31');
+    expect(expiry.getAttribute('value')).toBe('2026-01-30');
   });
 
   it('keeps focus inside the dialog and closes through Escape', async () => {
@@ -155,6 +197,108 @@ describe('canvas share owner UI', () => {
     await waitFor(() => expect(dialog.contains(document.activeElement)).toBe(true));
     fireEvent.keyDown(document, { key: 'Escape' });
     expect(onOpenChange).toHaveBeenCalledWith(false);
+  });
+
+  it('aborts and ignores a late create result after switching projects', async () => {
+    const pendingCreate = deferred<ReturnType<typeof createdShare>>();
+    apiMocks.createCanvasShare.mockReturnValueOnce(pendingCreate.promise);
+    apiMocks.preflightCanvasShare.mockImplementation(async (input: { projectId: string }) => ({
+      ...readyPreflight,
+      projectName: input.projectId === 'project-b' ? '项目 B' : '项目 A',
+    }));
+    const { rerender } = renderCreateDialog({ projectId: 'project-a' });
+
+    await screen.findByText('项目 A');
+    fireEvent.click(screen.getByRole('button', { name: '创建分享' }));
+    const createSignal = apiMocks.createCanvasShare.mock.calls[0]?.[1] as AbortSignal | undefined;
+
+    rerender(
+      <CanvasShareCreateDialog
+        open
+        onOpenChange={vi.fn()}
+        projectId="project-b"
+        onOpenManagement={vi.fn()}
+      />,
+    );
+    expect(await screen.findByText('项目 B')).toBeTruthy();
+    expect(createSignal?.aborted).toBe(true);
+
+    await act(async () => pendingCreate.resolve(createdShare(
+      'share-a',
+      'https://example.test/shared/canvas/raw-project-a',
+      '项目 A 分享',
+    )));
+    expect(screen.queryByText('分享已创建')).toBeNull();
+    expect(document.body.textContent).not.toContain('raw-project-a');
+  });
+
+  it('aborts and ignores a late create result after closing', async () => {
+    const pendingCreate = deferred<ReturnType<typeof createdShare>>();
+    apiMocks.createCanvasShare.mockReturnValueOnce(pendingCreate.promise);
+    const { rerender } = renderCreateDialog();
+
+    await screen.findByText('媒体已就绪');
+    fireEvent.click(screen.getByRole('button', { name: '创建分享' }));
+    const createSignal = apiMocks.createCanvasShare.mock.calls[0]?.[1] as AbortSignal | undefined;
+    rerender(
+      <CanvasShareCreateDialog
+        open={false}
+        onOpenChange={vi.fn()}
+        projectId="project-1"
+        onOpenManagement={vi.fn()}
+      />,
+    );
+    expect(createSignal?.aborted).toBe(true);
+
+    await act(async () => pendingCreate.resolve(createdShare(
+      'share-closed',
+      'https://example.test/shared/canvas/raw-closed',
+      '已关闭分享',
+    )));
+    expect(document.body.textContent).not.toContain('raw-closed');
+  });
+
+  it('ignores a late clipboard rejection from the previous project', async () => {
+    const clipboardWrite = deferred<void>();
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText: vi.fn().mockReturnValue(clipboardWrite.promise) },
+    });
+    apiMocks.createCanvasShare
+      .mockResolvedValueOnce(createdShare(
+        'share-a',
+        'https://example.test/shared/canvas/raw-project-a',
+        '项目 A 分享',
+      ))
+      .mockResolvedValueOnce(createdShare(
+        'share-b',
+        'https://example.test/shared/canvas/raw-project-b',
+        '项目 B 分享',
+      ));
+    apiMocks.preflightCanvasShare.mockImplementation(async (input: { projectId: string }) => ({
+      ...readyPreflight,
+      projectName: input.projectId === 'project-b' ? '项目 B' : '项目 A',
+    }));
+    const { rerender } = renderCreateDialog({ projectId: 'project-a' });
+
+    await screen.findByText('项目 A');
+    fireEvent.click(screen.getByRole('button', { name: '创建分享' }));
+    fireEvent.click(await screen.findByRole('button', { name: '复制完整链接' }));
+
+    rerender(
+      <CanvasShareCreateDialog
+        open
+        onOpenChange={vi.fn()}
+        projectId="project-b"
+        onOpenManagement={vi.fn()}
+      />,
+    );
+    await screen.findByText('项目 B');
+    fireEvent.click(screen.getByRole('button', { name: '创建分享' }));
+    expect(await screen.findByText('项目 B 分享')).toBeTruthy();
+
+    await act(async () => clipboardWrite.reject(new Error('late clipboard rejection')));
+    expect(screen.queryByRole('textbox', { name: '手动复制完整链接' })).toBeNull();
   });
 
   it('locks duplicate submission and keeps the raw URL only in one-time success UI', async () => {
@@ -245,6 +389,188 @@ describe('canvas share owner UI', () => {
     expect(within(policy).queryByLabelText(/修订|素材|标题|视口/)).toBeNull();
   });
 
+  it('aborts and ignores a late list result after switching projects', async () => {
+    const pendingList = deferred<typeof olderShare[]>();
+    apiMocks.listCanvasShares
+      .mockReturnValueOnce(pendingList.promise)
+      .mockResolvedValueOnce([{ ...newerShare, shareId: 'share-b', title: '项目 B 分享' }]);
+    const { rerender } = render(
+      <CanvasShareManagePanel
+        open
+        onOpenChange={vi.fn()}
+        projectId="project-a"
+        projectName="项目 A"
+      />,
+    );
+
+    rerender(
+      <CanvasShareManagePanel
+        open
+        onOpenChange={vi.fn()}
+        projectId="project-b"
+        projectName="项目 B"
+      />,
+    );
+    expect(await screen.findByText('项目 B 分享')).toBeTruthy();
+    const firstListSignal = apiMocks.listCanvasShares.mock.calls[0]?.[1] as AbortSignal | undefined;
+    expect(firstListSignal?.aborted).toBe(true);
+
+    await act(async () => pendingList.resolve([{ ...olderShare, title: '项目 A 旧分享' }]));
+    expect(screen.queryByText('项目 A 旧分享')).toBeNull();
+  });
+
+  it('aborts and ignores a late list result after closing management', async () => {
+    const pendingList = deferred<typeof olderShare[]>();
+    apiMocks.listCanvasShares.mockReturnValueOnce(pendingList.promise);
+    const { rerender } = render(
+      <CanvasShareManagePanel
+        open
+        onOpenChange={vi.fn()}
+        projectId="project-a"
+        projectName="项目 A"
+      />,
+    );
+    const listSignal = apiMocks.listCanvasShares.mock.calls[0]?.[1] as AbortSignal | undefined;
+
+    rerender(
+      <CanvasShareManagePanel
+        open={false}
+        onOpenChange={vi.fn()}
+        projectId="project-a"
+        projectName="项目 A"
+      />,
+    );
+    expect(listSignal?.aborted).toBe(true);
+    await act(async () => pendingList.resolve([{ ...olderShare, title: '关闭后返回的分享' }]));
+    expect(screen.queryByText('关闭后返回的分享')).toBeNull();
+  });
+
+  it('ignores a late clipboard rejection from the previous managed project', async () => {
+    const clipboardWrite = deferred<void>();
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText: vi.fn().mockReturnValue(clipboardWrite.promise) },
+    });
+    apiMocks.listCanvasShares
+      .mockResolvedValueOnce([{ ...newerShare, shareId: 'share-a', title: '项目 A 分享' }])
+      .mockResolvedValueOnce([{ ...newerShare, shareId: 'share-b', title: '项目 B 分享' }]);
+    const { rerender } = render(
+      <CanvasShareManagePanel
+        open
+        onOpenChange={vi.fn()}
+        projectId="project-a"
+        projectName="项目 A"
+        createdShareAccess={{
+          shareId: 'share-a',
+          shareUrl: 'https://example.test/shared/canvas/raw-project-a',
+        }}
+      />,
+    );
+
+    const projectARow = (await screen.findByText('项目 A 分享')).closest('article') as HTMLElement;
+    fireEvent.click(within(projectARow).getByRole('button', { name: '复制链接 项目 A 分享' }));
+    rerender(
+      <CanvasShareManagePanel
+        open
+        onOpenChange={vi.fn()}
+        projectId="project-b"
+        projectName="项目 B"
+      />,
+    );
+    expect(await screen.findByText('项目 B 分享')).toBeTruthy();
+
+    await act(async () => clipboardWrite.reject(new Error('late clipboard rejection')));
+    expect(screen.queryByRole('textbox', { name: '手动复制完整链接' })).toBeNull();
+    expect(document.body.textContent).not.toContain('raw-project-a');
+  });
+
+  it('renders policy failures inside the active policy dialog', async () => {
+    apiMocks.patchCanvasSharePolicy.mockRejectedValue({ code: 'CANVAS_SHARE_POLICY_CONFLICT' });
+    render(
+      <CanvasShareManagePanel
+        open
+        onOpenChange={vi.fn()}
+        projectId="project-1"
+        projectName="服务端项目名"
+      />,
+    );
+
+    const row = (await screen.findAllByTestId('canvas-share-row'))[0];
+    fireEvent.click(within(row).getByRole('button', { name: '编辑策略 新版审阅' }));
+    const policy = screen.getByRole('dialog', { name: '编辑分享策略' });
+    fireEvent.click(within(policy).getByRole('button', { name: '保存策略' }));
+
+    const alert = await within(policy).findByRole('alert');
+    expect(alert.textContent).toContain('取消后刷新列表');
+  });
+
+  it('renders revoke failures inside the active confirmation alert', async () => {
+    apiMocks.revokeCanvasShare.mockRejectedValue({ code: 'CANVAS_SHARE_NOT_FOUND' });
+    render(
+      <CanvasShareManagePanel
+        open
+        onOpenChange={vi.fn()}
+        projectId="project-1"
+        projectName="服务端项目名"
+      />,
+    );
+
+    const row = (await screen.findAllByTestId('canvas-share-row'))[0];
+    fireEvent.click(within(row).getByRole('button', { name: '撤销分享 新版审阅' }));
+    const confirmation = screen.getByRole('alertdialog', { name: '确认撤销分享' });
+    fireEvent.click(within(confirmation).getByRole('button', { name: '确认撤销' }));
+
+    const alert = await within(confirmation).findByRole('alert');
+    expect(alert.textContent).toContain('取消后刷新列表');
+  });
+
+  it('restores focus to a persistent project-menu trigger after management closes', async () => {
+    function FocusHarness() {
+      const [open, setOpen] = useState(false);
+      const triggerRef = useRef<HTMLButtonElement>(null);
+      return (
+        <>
+          <button ref={triggerRef} type="button">项目菜单</button>
+          {!open && <button type="button" onClick={() => setOpen(true)}>临时管理菜单项</button>}
+          <CanvasShareManagePanel
+            open={open}
+            onOpenChange={setOpen}
+            projectId="project-1"
+            projectName="服务端项目名"
+            returnFocusRef={triggerRef}
+          />
+        </>
+      );
+    }
+    render(<FocusHarness />);
+    fireEvent.click(screen.getByRole('button', { name: '临时管理菜单项' }));
+    await screen.findByRole('dialog', { name: '管理画布分享' });
+    fireEvent.click(screen.getByRole('button', { name: '关闭' }));
+
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '管理画布分享' })).toBeNull());
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: '项目菜单' }));
+  });
+
+  it('shows popup-blocked feedback and a selectable link', async () => {
+    apiMocks.createCanvasShare.mockResolvedValue(createdShare(
+      'share-popup',
+      'https://example.test/shared/canvas/raw-popup',
+      '弹窗测试',
+    ));
+    vi.stubGlobal('open', vi.fn().mockReturnValue(null));
+    renderCreateDialog();
+
+    await screen.findByText('媒体已就绪');
+    fireEvent.click(screen.getByRole('button', { name: '创建分享' }));
+    fireEvent.click(await screen.findByRole('button', { name: '打开查看器' }));
+
+    expect((await screen.findByRole('alert')).textContent).toContain('浏览器阻止了新窗口');
+    expect(screen.getByRole('textbox', { name: '手动复制完整链接' })).toHaveProperty(
+      'value',
+      'https://example.test/shared/canvas/raw-popup',
+    );
+  });
+
   it('requires irreversible confirmation before revoking', async () => {
     render(
       <CanvasShareManagePanel
@@ -261,7 +587,10 @@ describe('canvas share owner UI', () => {
     expect(confirmation.textContent).toContain('撤销后无法恢复');
     fireEvent.click(within(confirmation).getByRole('button', { name: '确认撤销' }));
 
-    await waitFor(() => expect(apiMocks.revokeCanvasShare).toHaveBeenCalledWith('share-new'));
+    await waitFor(() => expect(apiMocks.revokeCanvasShare).toHaveBeenCalledWith(
+      'share-new',
+      expect.any(AbortSignal),
+    ));
   });
 
   it('offers selectable fallback text after clipboard failure without logging the URL', async () => {
@@ -343,5 +672,35 @@ describe('canvas share owner UI', () => {
     expect(JSON.stringify(consoleError.mock.calls)).not.toContain(shareUrl);
     expect(JSON.stringify(consoleLog.mock.calls)).not.toContain('private.example');
     expect(JSON.stringify(consoleError.mock.calls)).not.toContain('private.example');
+  });
+
+  it('passes one AbortSignal through every owner API client method', async () => {
+    const actualClient = await vi.importActual<typeof import(
+      '@/components/canvas-share/share-api-client'
+    )>('@/components/canvas-share/share-api-client');
+    const controller = new AbortController();
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      success: false,
+      code: 'CANVAS_SHARE_REQUEST_FAILED',
+    }), { status: 500, headers: { 'Content-Type': 'application/json' } }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const calls = [
+      actualClient.preflightCanvasShare({ projectId: 'project-1' }, controller.signal),
+      actualClient.createCanvasShare({
+        projectId: 'project-1',
+        title: '测试分享',
+        allowDownload: false,
+      }, controller.signal),
+      actualClient.listCanvasShares('project-1', controller.signal),
+      actualClient.patchCanvasSharePolicy('share-1', { allowDownload: true }, controller.signal),
+      actualClient.revokeCanvasShare('share-1', controller.signal),
+    ];
+    await Promise.all(calls.map(call => call.catch(() => undefined)));
+
+    expect(fetchMock).toHaveBeenCalledTimes(5);
+    for (const [, init] of fetchMock.mock.calls) {
+      expect(init.signal).toBe(controller.signal);
+    }
   });
 });

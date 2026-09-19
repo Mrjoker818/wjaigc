@@ -125,6 +125,7 @@ describe('canvas-share owner API', () => {
       revokedAt: '2026-09-19T04:00:00.000Z',
     });
     mocks.preflightCanvasShare.mockResolvedValue({
+      projectName: '服务端规范项目名',
       projectRevision: 9,
       itemCount: 2,
       viewport: { offsetX: 10, offsetY: 20, zoom: 1 },
@@ -429,6 +430,7 @@ describe('canvas-share owner API', () => {
     });
     expect(mocks.createCanvasShare).not.toHaveBeenCalled();
     expect(body).toEqual(expect.objectContaining({
+      projectName: '服务端规范项目名',
       projectRevision: 9,
       itemCount: 2,
       viewport: { offsetX: 10, offsetY: 20, zoom: 1 },
@@ -461,6 +463,7 @@ describe('canvas-share owner API', () => {
 
   it('returns projected safe readiness failure details without creating a share', async () => {
     mocks.preflightCanvasShare.mockResolvedValue({
+      projectName: '服务端规范项目名',
       projectRevision: 12,
       itemCount: 2,
       viewport: { offsetX: 0, offsetY: 0, zoom: 1 },
@@ -485,6 +488,7 @@ describe('canvas-share owner API', () => {
 
     expect(response.status).toBe(200);
     expect(body).toEqual(expect.objectContaining({
+      projectName: '服务端规范项目名',
       projectRevision: 12,
       itemCount: 2,
       viewport: { offsetX: 0, offsetY: 0, zoom: 1 },

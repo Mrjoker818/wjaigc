@@ -82,7 +82,7 @@ export interface CreateCanvasShareResult {
   itemCount: number;
 }
 
-interface CanvasShareSnapshotInspectionInput {
+export interface CanvasShareSnapshotInspectionInput {
   ownerId: string;
   projectId: string;
   requestedViewport?: Partial<CanvasShareViewport> | null;
@@ -123,23 +123,33 @@ function normalizeExpiry(value: string | null | undefined, now: Date): string | 
 async function prepareCanvasShareSnapshotSource(
   input: CanvasShareSnapshotInspectionInput,
   client: AssetCoreSqlTransaction,
-): Promise<CanvasShareSnapshotSource> {
+): Promise<{ source: CanvasShareSnapshotSource; projectName: string }> {
   await lockAssetGraphWriteGate(client, 'shared');
   await lockCanvasProjectRevision(client, input.ownerId);
   const assetStorage = createAssetStorageTransaction(client);
-  if (!await assetStorage.findProject(input.ownerId, input.projectId)) unauthorized();
+  const projectResult = await client.query(
+    `SELECT name
+       FROM wujie_projects
+      WHERE id = $1 AND owner_id = $2 AND status = $3`,
+    [input.projectId, input.ownerId, 'active'],
+  );
+  const projectName = projectResult.rows[0]?.name;
+  if (typeof projectName !== 'string' || !projectName.trim()) unauthorized();
   return {
-    readProjectRevision: ownerId => readCanvasProjectRevision(ownerId, client),
-    listActiveCanvasPlacements: (ownerId, projectId) => (
-      assetStorage.listActiveCanvasPlacements(ownerId, projectId)
-    ),
-    findAsset: (ownerId, projectId, assetId) => (
-      assetStorage.findAsset(ownerId, projectId, assetId)
-    ),
-    findVersion: (ownerId, projectId, versionId) => (
-      assetStorage.findVersion(ownerId, projectId, versionId)
-    ),
-    getMediaDescriptor: (version, kind) => getManagedAssetMediaDescriptor(version, kind),
+    projectName: projectName.trim(),
+    source: {
+      readProjectRevision: ownerId => readCanvasProjectRevision(ownerId, client),
+      listActiveCanvasPlacements: (ownerId, projectId) => (
+        assetStorage.listActiveCanvasPlacements(ownerId, projectId)
+      ),
+      findAsset: (ownerId, projectId, assetId) => (
+        assetStorage.findAsset(ownerId, projectId, assetId)
+      ),
+      findVersion: (ownerId, projectId, versionId) => (
+        assetStorage.findVersion(ownerId, projectId, versionId)
+      ),
+      getMediaDescriptor: (version, kind) => getManagedAssetMediaDescriptor(version, kind),
+    },
   };
 }
 
@@ -147,7 +157,7 @@ async function buildCanvasShareSnapshotInTransaction(
   input: CanvasShareSnapshotInspectionInput,
   client: AssetCoreSqlTransaction,
 ): Promise<Readonly<CanvasShareSnapshot>> {
-  const source = await prepareCanvasShareSnapshotSource(input, client);
+  const { source } = await prepareCanvasShareSnapshotSource(input, client);
   return buildCanvasShareSnapshot(input, source);
 }
 
@@ -188,13 +198,23 @@ async function createSnapshotAndInsertPostgres(
   });
 }
 
+export async function inspectCanvasSharePreflightInTransaction(
+  input: CanvasShareSnapshotInspectionInput,
+  client: AssetCoreSqlTransaction,
+): Promise<Readonly<CanvasSharePreflightResult>> {
+  const { source, projectName } = await prepareCanvasShareSnapshotSource(input, client);
+  return {
+    projectName,
+    ...await inspectCanvasShareReadiness(input, source),
+  };
+}
+
 async function inspectCanvasSharePostgres(
   input: CanvasShareSnapshotInspectionInput,
-): Promise<Readonly<CanvasShareReadinessInspection>> {
-  return withAssetCoreTransaction(async client => {
-    const source = await prepareCanvasShareSnapshotSource(input, client);
-    return inspectCanvasShareReadiness(input, source);
-  });
+): Promise<Readonly<CanvasSharePreflightResult>> {
+  return withAssetCoreTransaction(client => (
+    inspectCanvasSharePreflightInTransaction(input, client)
+  ));
 }
 
 export interface PreflightCanvasShareInput {
@@ -203,12 +223,14 @@ export interface PreflightCanvasShareInput {
   requestedViewport?: Partial<CanvasShareViewport> | null;
 }
 
-export type CanvasSharePreflightResult = CanvasShareReadinessInspection;
+export type CanvasSharePreflightResult = CanvasShareReadinessInspection & {
+  projectName: string;
+};
 
 export interface PreflightCanvasShareDependencies {
   inspect(
     input: CanvasShareSnapshotInspectionInput,
-  ): Promise<Readonly<CanvasShareReadinessInspection>>;
+  ): Promise<Readonly<CanvasSharePreflightResult>>;
 }
 
 export async function preflightCanvasShare(

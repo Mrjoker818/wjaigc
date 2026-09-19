@@ -14,7 +14,7 @@ export interface CanvasShareReadinessFailure {
 }
 
 export interface CanvasSharePreflightResult {
-  projectName?: string;
+  projectName: string;
   projectRevision: number;
   itemCount: number;
   viewport: CanvasShareViewport;
@@ -60,7 +60,6 @@ export interface CanvasShareCreatedAccess {
 export interface CanvasSharePreflightInput {
   projectId: string;
   requestedViewport?: Partial<CanvasShareViewport> | null;
-  displayContext?: { projectName?: string };
 }
 
 export interface CanvasShareCreateInput {
@@ -152,6 +151,8 @@ function parsePreflight(payload: Record<string, unknown>): CanvasSharePreflightR
   if (
     projectRevision === null
     || itemCount === null
+    || typeof payload.projectName !== 'string'
+    || !payload.projectName.trim()
     || offsetX === null
     || offsetY === null
     || zoom === null
@@ -182,9 +183,7 @@ function parsePreflight(payload: Record<string, unknown>): CanvasSharePreflightR
     throw new CanvasShareApiError('CANVAS_SHARE_RESPONSE_INVALID', 502);
   }
   return {
-    ...(typeof payload.projectName === 'string' && payload.projectName.trim()
-      ? { projectName: payload.projectName.trim() }
-      : {}),
+    projectName: payload.projectName.trim(),
     projectRevision,
     itemCount,
     viewport: { offsetX, offsetY, zoom },
@@ -228,20 +227,24 @@ function parseOwnerRecord(value: unknown): CanvasShareOwnerRecord {
 
 export async function preflightCanvasShare(
   input: CanvasSharePreflightInput,
+  signal?: AbortSignal,
 ): Promise<CanvasSharePreflightResult> {
   const payload = await requestJson('/api/canvas-shares/preflight', {
     method: 'POST',
     body: JSON.stringify(input),
+    signal,
   });
   return parsePreflight(payload);
 }
 
 export async function createCanvasShare(
   input: CanvasShareCreateInput,
+  signal?: AbortSignal,
 ): Promise<CanvasShareCreateResult> {
   const payload = await requestJson('/api/canvas-shares', {
     method: 'POST',
     body: JSON.stringify(input),
+    signal,
   });
   const snapshot = isRecord(payload.snapshot) ? payload.snapshot : null;
   const shareUrl = trustedShareUrl(payload.shareUrl);
@@ -272,9 +275,13 @@ export async function createCanvasShare(
   };
 }
 
-export async function listCanvasShares(projectId: string): Promise<CanvasShareOwnerRecord[]> {
+export async function listCanvasShares(
+  projectId: string,
+  signal?: AbortSignal,
+): Promise<CanvasShareOwnerRecord[]> {
   const payload = await requestJson(
     `/api/canvas-shares?projectId=${encodeURIComponent(projectId)}`,
+    { signal },
   );
   if (!Array.isArray(payload.shares)) {
     throw new CanvasShareApiError('CANVAS_SHARE_RESPONSE_INVALID', 502);
@@ -285,18 +292,23 @@ export async function listCanvasShares(projectId: string): Promise<CanvasShareOw
 export async function patchCanvasSharePolicy(
   shareId: string,
   patch: CanvasSharePolicyPatch,
+  signal?: AbortSignal,
 ): Promise<CanvasShareOwnerRecord> {
   const payload = await requestJson(`/api/canvas-shares/${encodeURIComponent(shareId)}`, {
     method: 'PATCH',
     body: JSON.stringify(patch),
+    signal,
   });
   return parseOwnerRecord(payload.share);
 }
 
-export async function revokeCanvasShare(shareId: string): Promise<CanvasShareOwnerRecord> {
+export async function revokeCanvasShare(
+  shareId: string,
+  signal?: AbortSignal,
+): Promise<CanvasShareOwnerRecord> {
   const payload = await requestJson(
     `/api/canvas-shares/${encodeURIComponent(shareId)}/revoke`,
-    { method: 'POST', body: '{}' },
+    { method: 'POST', body: '{}', signal },
   );
   return parseOwnerRecord(payload.share);
 }

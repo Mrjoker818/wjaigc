@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo, useCallback, useEffect } from 'react';
+import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { toast } from 'sonner';
 import AdminTabs, { type AdminGroup as AdminTabsGroup, type AdminProvider as AdminTabsProvider, type AdminUser as AdminTabsUser } from './admin-tabs';
 import DataManagerTab from './data-manager-tab';
@@ -10,7 +10,7 @@ import UserCreditsTab from './user-credits-tab';
 import MediaGatewayAdmin from './media-gateway-admin';
 import { formatPaymentTimestamp } from '@/lib/payment-order-time';
 import {
-  FolderOpen, Plus, Search, Star, Trash2, MoreVertical, MoreHorizontal, Image,
+  FolderOpen, Plus, Search, Star, Trash2, MoreHorizontal, Image,
   Sparkles, LayoutTemplate, Layers, Clock, ChevronRight, ArrowRight,
   Box, Copy, Check, Palette, Type, BookOpen,
   LogOut, Shield, X, Eye, Mail, Calendar, KeyRound, Zap, Pencil, EyeOff, Key, Link2, Bot, Edit3, Save, Info,
@@ -25,7 +25,7 @@ import {
   // Admin prototype icons
   LayoutDashboard, Flame, Coins, TrendingUp, TrendingDown,
   SlidersHorizontal, HardDrive, Megaphone,
-  Brain, Link, Lock, LogIn, ChevronLeft, Globe2, ListChecks, MessageSquareMore, Share2,
+  Brain, Link, Lock, LogIn, ChevronLeft, Globe2, ListChecks, MessageSquareMore,
 } from 'lucide-react';
 import { UserManager } from '@/lib/user-manager';
 import { RECHARGE_PACKAGES } from '@/lib/credits-constants';
@@ -50,6 +50,7 @@ import type { ProviderCapabilityOverridesV1 } from '@/lib/task-core/model-capabi
 import { readProviderCapabilityOverrides } from '@/lib/task-core/model-capability-resolution';
 import JSZip from 'jszip';
 import { CanvasShareManagePanel } from '@/components/canvas-share/manage-panel';
+import { DashboardProjectActionsMenu } from '@/components/dashboard/project-actions-menu';
 
 type TabType = 'projects' | 'templates' | 'assets' | 'stats' | 'credits' | 'settings' | 'users' | 'apis' | 'data' | 'ecom-templates' | 'payment-config' | 'audit' | 'overview' | 'desktop-admin' | 'connector-admin' | 'groups' | 'chat' | 'media-gateway';
 type ProjectFilter = 'all' | 'recent' | 'starred';
@@ -320,8 +321,9 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
   const [assetManageMode, setAssetManageMode] = useState(false);
   const [selectedAssetIds, setSelectedAssetIds] = useState<Set<string>>(new Set());
   const [assetCopiedId, setAssetCopiedId] = useState<string | null>(null);
-  const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
   const [shareManagementProject, setShareManagementProject] = useState<Project | null>(null);
+  const [shareManagementOpen, setShareManagementOpen] = useState(false);
+  const shareManagementReturnFocusRef = useRef<HTMLButtonElement | null>(null);
   const [projectManageMode, setProjectManageMode] = useState(false);
   const [selectedProjectIds, setSelectedProjectIds] = useState<Set<string>>(new Set());
   const [projectDeleteLoading, setProjectDeleteLoading] = useState(false);
@@ -751,8 +753,6 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
       toast.success('项目已删除');
     } catch (error) {
       toast.error(errorMessage(error, '删除项目失败'));
-    } finally {
-      setMenuOpenId(null);
     }
   }, [mgr]);
 
@@ -961,7 +961,6 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
   const handleRenameProject = useCallback((projectId: string, currentName: string) => {
     setRenamingProjectId(projectId);
     setRenameValue(currentName);
-    setMenuOpenId(null);
   }, []);
 
   const handleConfirmRename = useCallback(() => {
@@ -987,7 +986,6 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
     } catch (err) {
       console.error('导出项目失败:', err);
     }
-    setMenuOpenId(null);
   }, [mgr]);
 
   // ─── Import project ───
@@ -1012,18 +1010,6 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
     };
     input.click();
   }, [mgr]);
-
-  // Close menus on outside click
-  useEffect(() => {
-    const handleClick = (e: MouseEvent) => {
-      const target = e.target as HTMLElement;
-      if (menuOpenId && !target.closest('[data-project-menu]')) {
-        setMenuOpenId(null);
-      }
-    };
-    document.addEventListener('click', handleClick);
-    return () => document.removeEventListener('click', handleClick);
-  }, [menuOpenId]);
 
   // ─── Admin: Data fetching ───
   const refreshAdmin = useCallback(async (signal?: AbortSignal) => {
@@ -2429,35 +2415,28 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                           <div className={`flex items-center justify-between mt-1`}>
                             <span className={`text-xs ${textSecondary}`}>{imgs.length} 张图片</span>
                             {!projectManageMode && (
-                              <div className="flex items-center gap-1">
-                               <button onClick={(e) => toggleStar(project.id, e)} className={`p-1 rounded ${isDark ? 'hover:bg-white/10' : 'hover:bg-gray-100'}`}>
-                                 <Star className={`w-3 h-3 ${starredIds.has(project.id) ? accentClass : textSecondary}`} style={starredIds.has(project.id) ? { color: accentHex, fill: accentHex } : undefined} />
-                               </button>
-                              <div className="relative" data-project-menu>
-                                <button onClick={(e) => { e.stopPropagation(); setMenuOpenId(menuOpenId === project.id ? null : project.id); }} className={`p-1 rounded ${isDark ? 'hover:bg-white/10' : 'hover:bg-gray-100'}`}>
-                                  <MoreVertical className={`w-3 h-3 ${textSecondary}`} />
+                              <div className="flex items-center gap-2">
+                                <button
+                                  type="button"
+                                  aria-label={`${starredIds.has(project.id) ? '取消星标' : '添加星标'} ${project.name}`}
+                                  onClick={(event) => toggleStar(project.id, event)}
+                                  className={`flex size-11 items-center justify-center rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 ${isDark ? 'hover:bg-white/10' : 'hover:bg-gray-100'}`}
+                                >
+                                  <Star className={`size-4 ${starredIds.has(project.id) ? accentClass : textSecondary}`} style={starredIds.has(project.id) ? { color: accentHex, fill: accentHex } : undefined} />
                                 </button>
-                                {menuOpenId === project.id && (
-                                  <div className={`absolute right-0 top-6 z-20 rounded-xl border shadow-xl py-1 min-w-[120px] ${isDark ? 'bg-[#1a1a2e] border-white/10' : 'bg-white border-gray-200'}`}>
-                                    <button onClick={(e) => { e.stopPropagation(); handleRenameProject(project.id, project.name); }} className={`w-full text-left px-3 py-1.5 text-xs flex items-center gap-2 ${isDark ? 'hover:bg-white/5' : 'hover:bg-gray-50'}`}><Pencil className="w-3 h-3" />重命名</button>
-                                    <button onClick={(e) => { e.stopPropagation(); handleExportProject(project); }} className={`w-full text-left px-3 py-1.5 text-xs flex items-center gap-2 ${isDark ? 'hover:bg-white/5' : 'hover:bg-gray-50'}`}><ArrowRight className="w-3 h-3" />导出 .wujie</button>
-                                    <button
-                                      type="button"
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        setMenuOpenId(null);
-                                        setShareManagementProject(project);
-                                      }}
-                                      className={`w-full text-left px-3 py-1.5 text-xs flex items-center gap-2 ${isDark ? 'hover:bg-white/5' : 'hover:bg-gray-50'}`}
-                                    >
-                                      <Share2 className="w-3 h-3" aria-hidden="true" />管理分享
-                                    </button>
-                                    <button onClick={(e) => { e.stopPropagation(); handleDelete(project.id); }} className="w-full text-left px-3 py-1.5 text-xs flex items-center gap-2 text-red-400 hover:bg-red-500/10"><Trash2 className="w-3 h-3" />删除</button>
-                                  </div>
-                                )}
+                                <DashboardProjectActionsMenu
+                                  projectName={project.name}
+                                  onRename={() => handleRenameProject(project.id, project.name)}
+                                  onExport={() => void handleExportProject(project)}
+                                  onManageShare={(returnFocusTarget) => {
+                                    shareManagementReturnFocusRef.current = returnFocusTarget;
+                                    setShareManagementProject(project);
+                                    setShareManagementOpen(true);
+                                  }}
+                                  onDelete={() => void handleDelete(project.id)}
+                                />
                               </div>
-                            </div>
-                          )}
+                            )}
                         </div>
                         </div>
                       </div>
@@ -4331,12 +4310,11 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
 
       {shareManagementProject && (
         <CanvasShareManagePanel
-          open
-          onOpenChange={(nextOpen) => {
-            if (!nextOpen) setShareManagementProject(null);
-          }}
+          open={shareManagementOpen}
+          onOpenChange={setShareManagementOpen}
           projectId={shareManagementProject.id}
           projectName={shareManagementProject.name}
+          returnFocusRef={shareManagementReturnFocusRef}
         />
       )}
 
