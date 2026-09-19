@@ -99,20 +99,78 @@ function abortError(): DOMException {
 }
 
 interface SensitiveCommitSnapshot {
+  source: 'current' | 'added' | 'removed' | 'attribute' | 'characterData';
   text: string;
   fieldValues: string[];
   alerts: string[];
 }
 
-function readSensitiveCommit(): SensitiveCommitSnapshot {
+function readSensitiveNodes(
+  nodes: Node[],
+  source: SensitiveCommitSnapshot['source'],
+  oldValue: string | null = null,
+  attributeName: string | null = null,
+): SensitiveCommitSnapshot {
+  const elements = nodes.flatMap(node => {
+    if (!(node instanceof Element)) return [];
+    return [node, ...Array.from(node.querySelectorAll('*'))];
+  });
+  const fieldValues = elements
+    .filter((element): element is HTMLInputElement | HTMLTextAreaElement => (
+      element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement
+    ))
+    .map(field => field.value);
+  const alerts = elements
+    .filter((element): element is HTMLElement => (
+      element instanceof HTMLElement && element.getAttribute('role') === 'alert'
+    ))
+    .map(alert => alert.textContent ?? '');
+
+  if (attributeName === 'value' && oldValue !== null) fieldValues.push(oldValue);
+  if (attributeName === 'role' && oldValue === 'alert') {
+    alerts.push(nodes.map(node => node.textContent ?? '').join(''));
+  }
+
   return {
-    text: document.body.textContent ?? '',
-    fieldValues: Array.from(document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>(
-      'input, textarea',
-    )).map(field => field.value),
-    alerts: Array.from(document.querySelectorAll<HTMLElement>('[role="alert"]'))
-      .map(alert => alert.textContent ?? ''),
+    source,
+    text: [oldValue, ...nodes.map(node => node.textContent ?? '')]
+      .filter((value): value is string => value !== null)
+      .join(''),
+    fieldValues,
+    alerts,
   };
+}
+
+function readSensitiveCommit(): SensitiveCommitSnapshot {
+  return readSensitiveNodes([document.body], 'current');
+}
+
+function readMutationRecords(records: MutationRecord[]): SensitiveCommitSnapshot[] {
+  return records.flatMap(record => {
+    if (record.type === 'childList') {
+      const snapshots: SensitiveCommitSnapshot[] = [];
+      if (record.addedNodes.length > 0) {
+        snapshots.push(readSensitiveNodes(Array.from(record.addedNodes), 'added'));
+      }
+      if (record.removedNodes.length > 0) {
+        snapshots.push(readSensitiveNodes(Array.from(record.removedNodes), 'removed'));
+      }
+      return snapshots;
+    }
+    if (record.type === 'attributes') {
+      return [readSensitiveNodes(
+        [record.target],
+        'attribute',
+        record.oldValue,
+        record.attributeName,
+      )];
+    }
+    return [readSensitiveNodes(
+      [record.target.parentNode ?? record.target],
+      'characterData',
+      record.oldValue,
+    )];
+  });
 }
 
 function CommitRecorder({
@@ -124,10 +182,14 @@ function CommitRecorder({
 }) {
   useEffect(() => {
     commits.push(readSensitiveCommit());
-    const observer = new MutationObserver(() => commits.push(readSensitiveCommit()));
+    const observer = new MutationObserver(records => {
+      commits.push(...readMutationRecords(records), readSensitiveCommit());
+    });
     observer.observe(document.body, {
       attributes: true,
+      attributeOldValue: true,
       characterData: true,
+      characterDataOldValue: true,
       childList: true,
       subtree: true,
     });
@@ -141,9 +203,10 @@ function expectNoSensitiveCommit(
   forbiddenValues: string[],
 ): void {
   expect(commits.length).toBeGreaterThan(0);
-  expect(commits.flatMap(commit => commit.alerts)).toEqual([]);
+  const observableCommits = commits.filter(commit => commit.source !== 'removed');
+  expect(observableCommits.flatMap(commit => commit.alerts)).toEqual([]);
   for (const forbiddenValue of forbiddenValues) {
-    expect(commits.some(commit => (
+    expect(observableCommits.some(commit => (
       commit.text.includes(forbiddenValue)
       || commit.fieldValues.some(value => value.includes(forbiddenValue))
     ))).toBe(false);
@@ -189,6 +252,76 @@ describe('canvas share owner UI', () => {
     vi.useRealTimers();
     vi.unstubAllGlobals();
     vi.unstubAllEnvs();
+  });
+
+  it('records sensitive nodes that are synchronously inserted and removed before observer delivery', async () => {
+    const commits: SensitiveCommitSnapshot[] = [];
+    render(
+      <CommitRecorder commits={commits}>
+        <div>recorder host</div>
+      </CommitRecorder>,
+    );
+
+    const transient = document.createElement('section');
+    transient.textContent = '瞬时旧对话框';
+    const alert = document.createElement('p');
+    alert.setAttribute('role', 'alert');
+    alert.textContent = '瞬时敏感错误';
+    const input = document.createElement('input');
+    input.value = 'https://example.test/shared/canvas/transient-raw-url';
+    transient.append(alert, input);
+
+    document.body.appendChild(transient);
+    transient.remove();
+
+    await waitFor(() => {
+      for (const source of ['added', 'removed'] as const) {
+        expect(commits.some(commit => (
+          commit.source === source
+          && commit.text.includes('瞬时旧对话框')
+          && commit.alerts.includes('瞬时敏感错误')
+          && commit.fieldValues.includes('https://example.test/shared/canvas/transient-raw-url')
+        ))).toBe(true);
+      }
+    });
+  });
+
+  it('records transient alert, field value, and text mutations after the DOM is restored', async () => {
+    const commits: SensitiveCommitSnapshot[] = [];
+    render(
+      <CommitRecorder commits={commits}>
+        <div>
+          <div data-testid="attribute-target">瞬时属性错误</div>
+          <input data-testid="value-target" defaultValue="" />
+          <span data-testid="text-target">baseline</span>
+        </div>
+      </CommitRecorder>,
+    );
+
+    const attributeTarget = screen.getByTestId('attribute-target');
+    const valueTarget = screen.getByTestId('value-target');
+    const textNode = screen.getByTestId('text-target').firstChild as Text;
+    attributeTarget.setAttribute('role', 'alert');
+    attributeTarget.removeAttribute('role');
+    valueTarget.setAttribute('value', 'https://example.test/shared/canvas/transient-value');
+    valueTarget.removeAttribute('value');
+    textNode.data = '瞬时字符敏感文本';
+    textNode.data = 'baseline';
+
+    await waitFor(() => {
+      expect(commits.some(commit => (
+        commit.source === 'attribute'
+        && commit.alerts.includes('瞬时属性错误')
+      ))).toBe(true);
+      expect(commits.some(commit => (
+        commit.source === 'attribute'
+        && commit.fieldValues.includes('https://example.test/shared/canvas/transient-value')
+      ))).toBe(true);
+      expect(commits.some(commit => (
+        commit.source === 'characterData'
+        && commit.text.includes('瞬时字符敏感文本')
+      ))).toBe(true);
+    });
   });
 
   it('keeps share entry points at project level only', () => {
