@@ -8,6 +8,7 @@ import {
   readCanvasProjectRevision,
 } from '@/lib/asset-core/canvas-project-sync';
 import {
+  type AssetCoreSqlTransaction,
   createAssetStorageTransaction,
   lockAssetGraphWriteGate,
   withAssetCoreTransaction,
@@ -23,7 +24,9 @@ import {
   listCanvasShares as listCanvasSharesInStorage,
   revokeCanvasShare as revokeCanvasShareInStorage,
   type StoredCanvasShareSnapshot,
-  updateCanvasSharePolicy as updateCanvasSharePolicyInStorage,
+  updateCanvasSharePolicyIfCurrent as updateCanvasSharePolicyIfCurrentInStorage,
+  type CanvasShareExpectedPolicy,
+  type CanvasShareOwnerRecord,
 } from './storage';
 import { createCanvasShareToken, hashCanvasShareToken } from './token';
 import type {
@@ -33,6 +36,7 @@ import type {
   CanvasShareRecord,
   CanvasShareViewport,
 } from './types';
+import type { CanvasShareSnapshot } from './snapshot';
 
 const DEFAULT_EXPIRY_DAYS = 30;
 
@@ -73,6 +77,12 @@ export interface CreateCanvasShareResult {
   itemCount: number;
 }
 
+interface CanvasShareSnapshotInspectionInput {
+  ownerId: string;
+  projectId: string;
+  requestedViewport?: Partial<CanvasShareViewport> | null;
+}
+
 function unauthorized(): never {
   throw new CanvasShareError('CANVAS_SHARE_UNAUTHORIZED');
 }
@@ -105,31 +115,38 @@ function normalizeExpiry(value: string | null | undefined, now: Date): string | 
   return parsed.toISOString();
 }
 
+async function buildCanvasShareSnapshotInTransaction(
+  input: CanvasShareSnapshotInspectionInput,
+  client: AssetCoreSqlTransaction,
+): Promise<Readonly<CanvasShareSnapshot>> {
+  await lockAssetGraphWriteGate(client, 'shared');
+  await lockCanvasProjectRevision(client, input.ownerId);
+  const assetStorage = createAssetStorageTransaction(client);
+  if (!await assetStorage.findProject(input.ownerId, input.projectId)) unauthorized();
+  return buildCanvasShareSnapshot(input, {
+    readProjectRevision: ownerId => readCanvasProjectRevision(ownerId, client),
+    listActiveCanvasPlacements: (ownerId, projectId) => (
+      assetStorage.listActiveCanvasPlacements(ownerId, projectId)
+    ),
+    findAsset: (ownerId, projectId, assetId) => (
+      assetStorage.findAsset(ownerId, projectId, assetId)
+    ),
+    findVersion: (ownerId, projectId, versionId) => (
+      assetStorage.findVersion(ownerId, projectId, versionId)
+    ),
+    getMediaDescriptor: (version, kind) => getManagedAssetMediaDescriptor(version, kind),
+  });
+}
+
 async function createSnapshotAndInsertPostgres(
   input: CanvasShareCreatePersistenceInput,
 ): Promise<StoredCanvasShareSnapshot> {
   return withAssetCoreTransaction(async client => {
-    await lockAssetGraphWriteGate(client, 'shared');
-    await lockCanvasProjectRevision(client, input.ownerId);
-    const assetStorage = createAssetStorageTransaction(client);
-    if (!await assetStorage.findProject(input.ownerId, input.projectId)) unauthorized();
-    const snapshot = await buildCanvasShareSnapshot({
+    const snapshot = await buildCanvasShareSnapshotInTransaction({
       ownerId: input.ownerId,
       projectId: input.projectId,
       requestedViewport: input.requestedViewport,
-    }, {
-      readProjectRevision: (ownerId) => readCanvasProjectRevision(ownerId, client),
-      listActiveCanvasPlacements: (ownerId, projectId) => (
-        assetStorage.listActiveCanvasPlacements(ownerId, projectId)
-      ),
-      findAsset: (ownerId, projectId, assetId) => (
-        assetStorage.findAsset(ownerId, projectId, assetId)
-      ),
-      findVersion: (ownerId, projectId, versionId) => (
-        assetStorage.findVersion(ownerId, projectId, versionId)
-      ),
-      getMediaDescriptor: (version, kind) => getManagedAssetMediaDescriptor(version, kind),
-    });
+    }, client);
     const record: CanvasShareRecord = {
       id: input.id,
       ownerId: input.ownerId,
@@ -156,6 +173,53 @@ async function createSnapshotAndInsertPostgres(
     }));
     return insertCanvasShare(record, items, client);
   });
+}
+
+async function inspectCanvasSharePostgres(
+  input: CanvasShareSnapshotInspectionInput,
+): Promise<Readonly<CanvasShareSnapshot>> {
+  return withAssetCoreTransaction(
+    client => buildCanvasShareSnapshotInTransaction(input, client),
+  );
+}
+
+export interface PreflightCanvasShareInput {
+  actorUserId: string;
+  projectId: string;
+  requestedViewport?: Partial<CanvasShareViewport> | null;
+}
+
+export interface CanvasSharePreflightResult {
+  projectRevision: number;
+  itemCount: number;
+  viewport: CanvasShareViewport;
+  readiness: {
+    ready: true;
+    failures: readonly never[];
+  };
+}
+
+export interface PreflightCanvasShareDependencies {
+  inspect(input: CanvasShareSnapshotInspectionInput): Promise<Readonly<CanvasShareSnapshot>>;
+}
+
+export async function preflightCanvasShare(
+  input: PreflightCanvasShareInput,
+  dependencies: PreflightCanvasShareDependencies = { inspect: inspectCanvasSharePostgres },
+): Promise<CanvasSharePreflightResult> {
+  const snapshot = await dependencies.inspect({
+    ownerId: input.actorUserId,
+    projectId: input.projectId,
+    ...(input.requestedViewport === undefined
+      ? {}
+      : { requestedViewport: input.requestedViewport }),
+  });
+  return {
+    projectRevision: snapshot.projectRevision,
+    itemCount: snapshot.items.length,
+    viewport: snapshot.viewport,
+    readiness: { ready: true, failures: [] },
+  };
 }
 
 function defaultCreateDependencies(): CreateCanvasShareDependencies {
@@ -201,7 +265,10 @@ export interface ListCanvasSharesInput {
 
 export interface ListCanvasSharesDependencies {
   now(): Date;
-  list(ownerId: string, projectId: string): Promise<CanvasShareRecord[]>;
+  list(
+    ownerId: string,
+    projectId: string,
+  ): Promise<Array<CanvasShareRecord | CanvasShareOwnerRecord>>;
 }
 
 function effectiveRecord(record: CanvasShareRecord, now: Date): CanvasShareRecord {
@@ -221,7 +288,7 @@ export async function listCanvasShares(
     now: () => new Date(),
     list: listCanvasSharesInStorage,
   },
-): Promise<CanvasShareRecord[]> {
+): Promise<Array<CanvasShareRecord | CanvasShareOwnerRecord>> {
   const records = await dependencies.list(input.actorUserId, input.projectId);
   return records.map(record => effectiveRecord(record, dependencies.now()));
 }
@@ -235,10 +302,16 @@ export interface PatchCanvasSharePolicyInput {
 export interface PatchCanvasSharePolicyDependencies {
   now(): Date;
   find(ownerId: string, shareId: string): Promise<StoredCanvasShareSnapshot | null>;
-  update(
+  update?(
     ownerId: string,
     shareId: string,
     patch: CanvasSharePolicyPatch,
+  ): Promise<CanvasShareRecord | null>;
+  updateIfCurrent?(
+    ownerId: string,
+    shareId: string,
+    patch: CanvasSharePolicyPatch,
+    expected: CanvasShareExpectedPolicy,
   ): Promise<CanvasShareRecord | null>;
 }
 
@@ -247,7 +320,7 @@ export async function patchCanvasSharePolicy(
   dependencies: PatchCanvasSharePolicyDependencies = {
     now: () => new Date(),
     find: findCanvasShareForOwnerInStorage,
-    update: updateCanvasSharePolicyInStorage,
+    updateIfCurrent: updateCanvasSharePolicyIfCurrentInStorage,
   },
 ): Promise<CanvasShareRecord> {
   const stored = await dependencies.find(input.actorUserId, input.shareId);
@@ -264,7 +337,19 @@ export async function patchCanvasSharePolicy(
       : { expiresAt: normalizeExpiry(input.patch.expiresAt, now) }),
   };
   if (Object.keys(patch).length === 0) return policyConflict();
-  const updated = await dependencies.update(input.actorUserId, input.shareId, patch);
+  const updated = dependencies.updateIfCurrent
+    ? await dependencies.updateIfCurrent(input.actorUserId, input.shareId, patch, {
+      expiresAt: current.expiresAt,
+      allowDownload: current.allowDownload,
+    })
+    : dependencies.update
+      ? await dependencies.update(input.actorUserId, input.shareId, patch)
+      : await updateCanvasSharePolicyIfCurrentInStorage(
+        input.actorUserId,
+        input.shareId,
+        patch,
+        { expiresAt: current.expiresAt, allowDownload: current.allowDownload },
+      );
   return updated ?? policyConflict();
 }
 

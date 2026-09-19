@@ -39,6 +39,14 @@ interface CanvasShareRow extends QueryResultRow {
   revoked_at: Date | string | null;
 }
 
+interface CanvasShareOwnerRow extends CanvasShareRow {
+  item_count: string | number;
+}
+
+export interface CanvasShareOwnerRecord extends CanvasShareRecord {
+  itemCount: number;
+}
+
 interface CanvasShareItemRow extends QueryResultRow {
   id: string;
   share_id: string;
@@ -205,14 +213,17 @@ export async function listCanvasShares(
   ownerId: string,
   projectId: string,
   database: Pick<Pool, 'query'> = getPool(),
-): Promise<CanvasShareRecord[]> {
-  const result = await database.query<CanvasShareRow>(
-    `SELECT * FROM wujie_canvas_shares
-     WHERE owner_id = $1 AND project_id = $2
-     ORDER BY created_at DESC, id DESC`,
+): Promise<CanvasShareOwnerRecord[]> {
+  const result = await database.query<CanvasShareOwnerRow>(
+    `SELECT share_record.*, count(item.id)::bigint AS item_count
+     FROM wujie_canvas_shares share_record
+     LEFT JOIN wujie_canvas_share_items item ON item.share_id = share_record.id
+     WHERE share_record.owner_id = $1 AND share_record.project_id = $2
+     GROUP BY share_record.id
+     ORDER BY share_record.created_at DESC, share_record.id DESC`,
     [ownerId, projectId],
   );
-  return result.rows.map(mapShare);
+  return result.rows.map(row => ({ ...mapShare(row), itemCount: Number(row.item_count) }));
 }
 
 export async function findCanvasShareForOwner(
@@ -262,6 +273,41 @@ export async function updateCanvasSharePolicy(
       patch.expiresAt ?? null,
       patch.allowDownload !== undefined,
       patch.allowDownload ?? false,
+    ],
+  );
+  return result.rows[0] ? mapShare(result.rows[0]) : null;
+}
+
+export interface CanvasShareExpectedPolicy {
+  expiresAt: string | null;
+  allowDownload: boolean;
+}
+
+export async function updateCanvasSharePolicyIfCurrent(
+  ownerId: string,
+  shareId: string,
+  patch: CanvasSharePolicyPatch,
+  expected: CanvasShareExpectedPolicy,
+  database: Pick<Pool, 'query'> = getPool(),
+): Promise<CanvasShareRecord | null> {
+  const result = await database.query<CanvasShareRow>(
+    `UPDATE wujie_canvas_shares
+     SET expires_at = CASE WHEN $3::boolean THEN $4::timestamptz ELSE expires_at END,
+         allow_download = CASE WHEN $5::boolean THEN $6::boolean ELSE allow_download END
+     WHERE id = $1 AND owner_id = $2 AND status = 'active'
+       AND (expires_at IS NULL OR expires_at > now())
+       AND expires_at IS NOT DISTINCT FROM $7::timestamptz
+       AND allow_download = $8::boolean
+     RETURNING *`,
+    [
+      shareId,
+      ownerId,
+      patch.expiresAt !== undefined,
+      patch.expiresAt ?? null,
+      patch.allowDownload !== undefined,
+      patch.allowDownload ?? false,
+      expected.expiresAt,
+      expected.allowDownload,
     ],
   );
   return result.rows[0] ? mapShare(result.rows[0]) : null;
