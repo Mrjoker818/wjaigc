@@ -5,6 +5,7 @@ import { Download, Expand, Maximize2, Minimize2, Minus, Plus } from 'lucide-reac
 interface SharedCanvasToolbarProps {
   scale: number;
   isFullscreen: boolean;
+  fullscreenSupported: boolean;
   downloadPath?: string;
   onFit(): void;
   onZoomOut(): void;
@@ -17,6 +18,7 @@ const controlClassName = 'inline-flex h-11 min-h-11 min-w-11 cursor-pointer item
 export function SharedCanvasToolbar({
   scale,
   isFullscreen,
+  fullscreenSupported,
   downloadPath,
   onFit,
   onZoomOut,
@@ -44,17 +46,19 @@ export function SharedCanvasToolbar({
       <button type="button" className={controlClassName} onClick={onZoomIn} aria-label="放大画布" title="放大画布">
         <Plus className="h-5 w-5" aria-hidden="true" />
       </button>
-      <button
-        type="button"
-        className={controlClassName}
-        onClick={onToggleFullscreen}
-        aria-label={isFullscreen ? '退出全屏' : '进入全屏'}
-        title={isFullscreen ? '退出全屏' : '进入全屏'}
-      >
-        {isFullscreen
-          ? <Minimize2 className="h-5 w-5" aria-hidden="true" />
-          : <Maximize2 className="h-5 w-5" aria-hidden="true" />}
-      </button>
+      {fullscreenSupported ? (
+        <button
+          type="button"
+          className={controlClassName}
+          onClick={onToggleFullscreen}
+          aria-label={isFullscreen ? '退出全屏' : '进入全屏'}
+          title={isFullscreen ? '退出全屏' : '进入全屏'}
+        >
+          {isFullscreen
+            ? <Minimize2 className="h-5 w-5" aria-hidden="true" />
+            : <Maximize2 className="h-5 w-5" aria-hidden="true" />}
+        </button>
+      ) : null}
       {downloadPath ? (
         <a
           href={downloadPath}

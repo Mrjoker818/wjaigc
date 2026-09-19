@@ -26,6 +26,7 @@ const MIN_SCALE = 0.1;
 const MAX_SCALE = 8;
 const ZOOM_STEP = 1.2;
 const FIT_PADDING = 48;
+const GESTURE_IGNORE_SELECTOR = '[data-toolbar], [data-shared-media], [data-shared-preview-interactive]';
 
 type PublicAssetPathKind = 'media' | 'download';
 
@@ -43,6 +44,13 @@ interface Point {
 interface GestureState {
   centroid: Point;
   distance: number | null;
+}
+
+interface Bounds {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
 }
 
 export interface SharedCanvasViewerProps {
@@ -69,6 +77,55 @@ function gestureState(points: readonly Point[]): GestureState | null {
     centroid,
     distance: Math.hypot(points[0].x - points[1].x, points[0].y - points[1].y),
   };
+}
+
+function shouldIgnoreCanvasGesture(target: EventTarget | null): boolean {
+  return target instanceof Element && target.closest(GESTURE_IGNORE_SELECTOR) !== null;
+}
+
+function clientPointToViewportLocal(
+  viewportElement: HTMLElement,
+  clientX: number,
+  clientY: number,
+): Point {
+  const rect = viewportElement.getBoundingClientRect();
+  return { x: clientX - rect.left, y: clientY - rect.top };
+}
+
+function rotatedItemBounds(item: CanvasSharePublicItem): Bounds | null {
+  const { x, y, width, height, rotation } = item.transform;
+  if (![x, y, width, height, rotation].every(Number.isFinite)) return null;
+  const normalizedRotation = ((rotation % 360) + 360) % 360;
+  const radians = normalizedRotation * Math.PI / 180;
+  const halfWidth = Math.abs(width) / 2;
+  const halfHeight = Math.abs(height) / 2;
+  const centerX = x + width / 2;
+  const centerY = y + height / 2;
+  const extentX = Math.abs(Math.cos(radians)) * halfWidth
+    + Math.abs(Math.sin(radians)) * halfHeight;
+  const extentY = Math.abs(Math.sin(radians)) * halfWidth
+    + Math.abs(Math.cos(radians)) * halfHeight;
+  return {
+    left: centerX - extentX,
+    top: centerY - extentY,
+    right: centerX + extentX,
+    bottom: centerY + extentY,
+  };
+}
+
+function sharedCanvasBounds(items: readonly ResolvedSharedItem[]): Bounds | null {
+  let bounds: Bounds | null = null;
+  for (const { item } of items) {
+    const itemBounds = rotatedItemBounds(item);
+    if (!itemBounds) continue;
+    bounds = bounds ? {
+      left: Math.min(bounds.left, itemBounds.left),
+      top: Math.min(bounds.top, itemBounds.top),
+      right: Math.max(bounds.right, itemBounds.right),
+      bottom: Math.max(bounds.bottom, itemBounds.bottom),
+    } : itemBounds;
+  }
+  return bounds;
 }
 
 export function resolveCanvasShareAssetPath(
@@ -114,6 +171,8 @@ export function SharedCanvasViewer({
   const [previewItemRef, setPreviewItemRef] = useState<string | null>(null);
   const [previewTrigger, setPreviewTrigger] = useState<HTMLElement | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [fullscreenSupported, setFullscreenSupported] = useState(false);
+  const [fullscreenMessage, setFullscreenMessage] = useState<string | null>(null);
   const [isPanning, setIsPanning] = useState(false);
   const [reducedMotion, setReducedMotion] = useState(false);
 
@@ -138,7 +197,13 @@ export function SharedCanvasViewer({
   }, []);
 
   useEffect(() => {
-    const update = (): void => setIsFullscreen(document.fullscreenElement === rootRef.current);
+    setFullscreenSupported(Boolean(
+      rootRef.current?.requestFullscreen && typeof document.exitFullscreen === 'function',
+    ));
+    const update = (): void => {
+      setIsFullscreen(document.fullscreenElement === rootRef.current);
+      setFullscreenMessage(null);
+    };
     document.addEventListener('fullscreenchange', update);
     return () => document.removeEventListener('fullscreenchange', update);
   }, []);
@@ -157,28 +222,11 @@ export function SharedCanvasViewer({
     const element = viewportRef.current;
     if (!element) return;
     const rect = element.getBoundingClientRect();
-    if (resolvedItems.length === 0 || rect.width <= 0 || rect.height <= 0) {
+    const bounds = sharedCanvasBounds(resolvedItems);
+    if (!bounds || rect.width <= 0 || rect.height <= 0) {
       setViewport({ offsetX: 0, offsetY: 0, zoom: 1 });
       return;
     }
-    const bounds = resolvedItems.reduce((current, { item }, index) => {
-      const right = item.transform.x + item.transform.width;
-      const bottom = item.transform.y + item.transform.height;
-      if (index === 0) {
-        return {
-          left: item.transform.x,
-          top: item.transform.y,
-          right,
-          bottom,
-        };
-      }
-      return {
-        left: Math.min(current.left, item.transform.x),
-        top: Math.min(current.top, item.transform.y),
-        right: Math.max(current.right, right),
-        bottom: Math.max(current.bottom, bottom),
-      };
-    }, { left: 0, top: 0, right: 0, bottom: 0 });
     const width = Math.max(1, bounds.right - bounds.left);
     const height = Math.max(1, bounds.bottom - bounds.top);
     const nextScale = clampScale(Math.min(
@@ -211,7 +259,7 @@ export function SharedCanvasViewer({
   }, []);
 
   const handlePointerDown = useCallback((event: ReactPointerEvent<HTMLDivElement>): void => {
-    if ((event.target as Element).closest('[data-shared-media], [data-toolbar]')) return;
+    if (shouldIgnoreCanvasGesture(event.target)) return;
     const id = pointerId(event);
     activePointersRef.current.set(id, { x: event.clientX, y: event.clientY });
     gestureRef.current = gestureState([...activePointersRef.current.values()]);
@@ -228,15 +276,27 @@ export function SharedCanvasViewer({
     if (!nextGesture || !previousGesture) return;
     setViewport(current => {
       if (nextGesture.distance !== null && previousGesture.distance !== null && previousGesture.distance > 0) {
+        const viewportElement = viewportRef.current;
+        if (!viewportElement) return current;
         const nextScale = clampScale(
           current.zoom * (nextGesture.distance / previousGesture.distance),
         );
-        const worldX = (previousGesture.centroid.x - current.offsetX) / current.zoom;
-        const worldY = (previousGesture.centroid.y - current.offsetY) / current.zoom;
+        const previousLocal = clientPointToViewportLocal(
+          viewportElement,
+          previousGesture.centroid.x,
+          previousGesture.centroid.y,
+        );
+        const nextLocal = clientPointToViewportLocal(
+          viewportElement,
+          nextGesture.centroid.x,
+          nextGesture.centroid.y,
+        );
+        const worldX = (previousLocal.x - current.offsetX) / current.zoom;
+        const worldY = (previousLocal.y - current.offsetY) / current.zoom;
         return {
           zoom: nextScale,
-          offsetX: nextGesture.centroid.x - worldX * nextScale,
-          offsetY: nextGesture.centroid.y - worldY * nextScale,
+          offsetX: nextLocal.x - worldX * nextScale,
+          offsetY: nextLocal.y - worldY * nextScale,
         };
       }
       return {
@@ -257,21 +317,36 @@ export function SharedCanvasViewer({
   }, []);
 
   const handleWheel = useCallback((event: ReactWheelEvent<HTMLDivElement>): void => {
+    if (shouldIgnoreCanvasGesture(event.target)) return;
     event.preventDefault();
-    const rect = event.currentTarget.getBoundingClientRect();
-    zoomAt(event.deltaY < 0 ? ZOOM_STEP : 1 / ZOOM_STEP, {
-      x: event.clientX - rect.left,
-      y: event.clientY - rect.top,
-    });
+    zoomAt(
+      event.deltaY < 0 ? ZOOM_STEP : 1 / ZOOM_STEP,
+      clientPointToViewportLocal(event.currentTarget, event.clientX, event.clientY),
+    );
   }, [zoomAt]);
 
   const toggleFullscreen = useCallback((): void => {
     void (async (): Promise<void> => {
+      const entering = !document.fullscreenElement;
+      setFullscreenMessage(null);
       try {
-        if (document.fullscreenElement) await document.exitFullscreen?.();
-        else await rootRef.current?.requestFullscreen?.();
+        if (entering) {
+          if (!rootRef.current?.requestFullscreen) {
+            setFullscreenSupported(false);
+            return;
+          }
+          await rootRef.current.requestFullscreen();
+        } else {
+          if (typeof document.exitFullscreen !== 'function') {
+            setFullscreenSupported(false);
+            return;
+          }
+          await document.exitFullscreen();
+        }
       } catch {
-        // 浏览器拒绝全屏时保持当前只读视图。
+        setFullscreenMessage(entering
+          ? '无法进入全屏，请使用浏览器菜单重试。'
+          : '无法退出全屏，请使用浏览器菜单重试。');
       }
     })();
   }, []);
@@ -287,7 +362,7 @@ export function SharedCanvasViewer({
 
   const preview = resolvedItems.find(({ item }) => item.itemRef === previewItemRef);
   const selectedDownload = resolvedItems.find(({ item }) => item.itemRef === focusedItemRef)
-    ?.downloadUrl ?? resolvedItems.find(candidate => candidate.downloadUrl)?.downloadUrl ?? undefined;
+    ?.downloadUrl ?? undefined;
 
   return (
     <div
@@ -323,10 +398,17 @@ export function SharedCanvasViewer({
         onPointerCancel={releasePointer}
         onWheel={handleWheel}
         onDoubleClick={event => {
+          if (shouldIgnoreCanvasGesture(event.target)) return;
           if (event.shiftKey) fitCanvas();
-          else zoomAt(ZOOM_STEP, { x: event.clientX, y: event.clientY });
+          else zoomAt(
+            ZOOM_STEP,
+            clientPointToViewportLocal(event.currentTarget, event.clientX, event.clientY),
+          );
         }}
-        onContextMenu={event => event.preventDefault()}
+        onContextMenu={event => {
+          if (shouldIgnoreCanvasGesture(event.target)) return;
+          event.preventDefault();
+        }}
         onKeyDown={event => {
           if (event.key === '+' || event.key === '=') {
             event.preventDefault();
@@ -344,6 +426,7 @@ export function SharedCanvasViewer({
           data-testid="shared-canvas-content"
           data-offset-x={viewport.offsetX}
           data-offset-y={viewport.offsetY}
+          data-scale={viewport.zoom}
           className="absolute left-0 top-0 origin-top-left"
           style={{
             transform: `translate3d(${viewport.offsetX}px, ${viewport.offsetY}px, 0) scale(${viewport.zoom})`,
@@ -410,6 +493,7 @@ export function SharedCanvasViewer({
           <SharedCanvasToolbar
             scale={viewport.zoom}
             isFullscreen={isFullscreen}
+            fullscreenSupported={fullscreenSupported}
             downloadPath={selectedDownload}
             onFit={fitCanvas}
             onZoomOut={() => zoomAt(1 / ZOOM_STEP)}
@@ -417,6 +501,16 @@ export function SharedCanvasViewer({
             onToggleFullscreen={toggleFullscreen}
           />
         </div>
+
+        {fullscreenMessage ? (
+          <p
+            role="status"
+            aria-live="polite"
+            className="absolute left-1/2 top-3 z-20 max-w-[calc(100%-1.5rem)] -translate-x-1/2 rounded-lg border border-border bg-card px-3 py-2 text-center text-sm text-card-foreground shadow-float"
+          >
+            {fullscreenMessage}
+          </p>
+        ) : null}
       </div>
 
       {preview && preview.mediaUrl && !failedItems.has(preview.item.itemRef) ? (

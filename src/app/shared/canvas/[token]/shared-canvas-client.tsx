@@ -1,18 +1,27 @@
 'use client';
 
 import { useParams } from 'next/navigation';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, LoaderCircle, RefreshCw } from 'lucide-react';
 
 import { SharedCanvasViewer } from '@/components/canvas-share/shared-canvas-viewer';
 import { canvasSharePublicDocumentSchema } from '@/lib/canvas-share/schema';
 import type { CanvasSharePublicDocument } from '@/lib/canvas-share/types';
 
-type LoadState =
+type LoadStateValue =
   | { kind: 'loading' }
   | { kind: 'ready'; document: CanvasSharePublicDocument }
   | { kind: 'invalid' }
   | { kind: 'error'; requestId?: string };
+
+type LoadState = LoadStateValue & { scopeKey: string };
+
+interface ActiveRequest {
+  generation: number;
+  endpoint: string;
+  scopeKey: string;
+  signal: AbortSignal;
+}
 
 const SAFE_REQUEST_ID_PATTERN = /^req_[a-f0-9]{16}$/u;
 
@@ -99,54 +108,83 @@ export function SharedCanvasClient(): React.ReactElement {
     token ? `/api/public/canvas-shares/${encodeURIComponent(token)}` : null
   ), [token]);
   const [retryCount, setRetryCount] = useState(0);
-  const [state, setState] = useState<LoadState>({ kind: 'loading' });
+  const scopeKey = `${metadataEndpoint ?? 'missing'}::${retryCount}`;
+  const [state, setState] = useState<LoadState>({ kind: 'loading', scopeKey: '' });
+  const requestGenerationRef = useRef(0);
+  const activeRequestRef = useRef<ActiveRequest | null>(null);
 
   useEffect(() => {
     if (!metadataEndpoint) {
-      setState({ kind: 'invalid' });
+      activeRequestRef.current = null;
       return undefined;
     }
 
     const controller = new AbortController();
-    setState({ kind: 'loading' });
+    const request: ActiveRequest = {
+      generation: requestGenerationRef.current + 1,
+      endpoint: metadataEndpoint,
+      scopeKey,
+      signal: controller.signal,
+    };
+    requestGenerationRef.current = request.generation;
+    activeRequestRef.current = request;
+    const commit = (nextState: LoadStateValue): void => {
+      const active = activeRequestRef.current;
+      if (
+        request.signal.aborted
+        || active?.generation !== request.generation
+        || active.endpoint !== request.endpoint
+        || active.scopeKey !== request.scopeKey
+        || active.signal !== request.signal
+      ) return;
+      setState({ ...nextState, scopeKey: request.scopeKey });
+    };
+    commit({ kind: 'loading' });
 
     void (async (): Promise<void> => {
       try {
-        const response = await fetch(metadataEndpoint, {
+        const response = await fetch(request.endpoint, {
           method: 'GET',
           headers: { Accept: 'application/json' },
           cache: 'no-store',
-          signal: controller.signal,
+          signal: request.signal,
         });
         const body: unknown = await response.json().catch(() => null);
-        if (controller.signal.aborted) return;
         if (response.status === 404) {
-          setState({ kind: 'invalid' });
+          commit({ kind: 'invalid' });
           return;
         }
         if (!response.ok) {
-          setState({ kind: 'error', requestId: safeRequestId(response, body) });
+          commit({ kind: 'error', requestId: safeRequestId(response, body) });
           return;
         }
         const parsed = canvasSharePublicDocumentSchema.safeParse(body);
         if (!parsed.success) {
-          setState({ kind: 'error', requestId: safeRequestId(response, body) });
+          commit({ kind: 'error', requestId: safeRequestId(response, body) });
           return;
         }
-        setState({ kind: 'ready', document: parsed.data });
+        commit({ kind: 'ready', document: parsed.data });
       } catch (error) {
-        if (controller.signal.aborted) return;
+        if (request.signal.aborted) return;
         if (error instanceof DOMException && error.name === 'AbortError') return;
-        setState({ kind: 'error' });
+        commit({ kind: 'error' });
       }
     })();
 
-    return () => controller.abort();
-  }, [metadataEndpoint, retryCount]);
+    return () => {
+      controller.abort();
+      if (activeRequestRef.current?.generation === request.generation) {
+        activeRequestRef.current = null;
+      }
+    };
+  }, [metadataEndpoint, scopeKey]);
 
   const retry = useCallback((): void => setRetryCount(value => value + 1), []);
 
-  if (state.kind === 'loading') return <SharedCanvasLoading />;
+  if (!metadataEndpoint) {
+    return <SharedCanvasMessage kind="invalid" onRetry={retry} />;
+  }
+  if (state.scopeKey !== scopeKey || state.kind === 'loading') return <SharedCanvasLoading />;
   if (state.kind === 'invalid') {
     return <SharedCanvasMessage kind="invalid" onRetry={retry} />;
   }
