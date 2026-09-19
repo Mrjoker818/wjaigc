@@ -308,6 +308,112 @@ describe('canvas-share explicit public projection', () => {
     expect(JSON.stringify(projected)).not.toMatch(/[\u200D\u{E0020}-\u{E007F}]/u);
   });
 
+  it('removes standalone emoji-only components without removing ordinary text or punctuation', () => {
+    const unsafeComponents = '中文 🏽 🇨 \u20E3 English 123 !?';
+    const projected = projectCanvasShareForPublic({
+      ...record,
+      title: unsafeComponents,
+    }, [{
+      ...item,
+      displayMetadata: {
+        label: unsafeComponents,
+        altText: unsafeComponents,
+      },
+    }]);
+
+    expect(projected.title).toBe('中文 English 123 !?');
+    expect(projected.items[0].display).toEqual({
+      label: '中文 English 123 !?',
+      altText: '中文 English 123 !?',
+    });
+    expect(JSON.stringify(projected)).not.toMatch(/[\p{Emoji_Modifier}\p{Regional_Indicator}\u20E3]/u);
+  });
+
+  it('truncates title, label, and alt text only at grapheme boundaries', () => {
+    const titlePrefix = '中'.repeat(197);
+    const labelPrefix = 'L'.repeat(198);
+    const altPrefix = '文'.repeat(998);
+    const legalEmojiSet = '👩‍💻 ❤️ 1️⃣ 🇨🇳 👍🏽';
+    const projected = projectCanvasShareForPublic({
+      ...record,
+      title: `${titlePrefix}${legalEmojiSet} title-tail`,
+    }, [{
+      ...item,
+      displayMetadata: {
+        label: `${labelPrefix}1️⃣ 👩‍💻 ❤️ 🇨🇳 👍🏽 label-tail`,
+        altText: `${altPrefix}🇨🇳 👩‍💻 ❤️ 1️⃣ 👍🏽 alt-tail`,
+      },
+    }]);
+
+    expect(projected.title).toBe(titlePrefix);
+    expect(projected.items[0].display).toEqual({
+      label: labelPrefix,
+      altText: altPrefix,
+    });
+    expect(projected.title.length).toBeLessThanOrEqual(200);
+    expect(projected.items[0].display.label?.length).toBeLessThanOrEqual(200);
+    expect(projected.items[0].display.altText?.length).toBeLessThanOrEqual(1_000);
+    const serialized = JSON.stringify(projected);
+    expect(serialized).not.toMatch(/[\u200D\uFE0F\p{Emoji_Modifier}\p{Regional_Indicator}\u20E3]/u);
+    expect(serialized).not.toMatch(
+      /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/u,
+    );
+
+    for (const emoji of ['👩‍💻', '❤️', '1️⃣', '🇨🇳', '👍🏽']) {
+      const exactTitlePrefix = '中'.repeat(200 - emoji.length);
+      const overflowTitlePrefix = '中'.repeat(201 - emoji.length);
+      expect(projectCanvasShareForPublic({
+        ...record,
+        title: `${exactTitlePrefix}${emoji}`,
+      }, [item]).title).toBe(`${exactTitlePrefix}${emoji}`);
+      expect(projectCanvasShareForPublic({
+        ...record,
+        title: `${overflowTitlePrefix}${emoji}`,
+      }, [item]).title).toBe(overflowTitlePrefix);
+
+      const exactLabelPrefix = 'L'.repeat(200 - emoji.length);
+      const overflowLabelPrefix = 'L'.repeat(201 - emoji.length);
+      expect(projectCanvasShareForPublic(record, [{
+        ...item,
+        displayMetadata: { label: `${exactLabelPrefix}${emoji}` },
+      }]).items[0].display.label).toBe(`${exactLabelPrefix}${emoji}`);
+      expect(projectCanvasShareForPublic(record, [{
+        ...item,
+        displayMetadata: { label: `${overflowLabelPrefix}${emoji}` },
+      }]).items[0].display.label).toBe(overflowLabelPrefix);
+
+      const exactAltPrefix = '文'.repeat(1_000 - emoji.length);
+      const overflowAltPrefix = '文'.repeat(1_001 - emoji.length);
+      expect(projectCanvasShareForPublic(record, [{
+        ...item,
+        displayMetadata: { altText: `${exactAltPrefix}${emoji}` },
+      }]).items[0].display.altText).toBe(`${exactAltPrefix}${emoji}`);
+      expect(projectCanvasShareForPublic(record, [{
+        ...item,
+        displayMetadata: { altText: `${overflowAltPrefix}${emoji}` },
+      }]).items[0].display.altText).toBe(overflowAltPrefix);
+    }
+  });
+
+  it('keeps ordinary Chinese and English text within the public schema length limits', () => {
+    const title = `${'中文'.repeat(100)}尾部`;
+    const label = `${'Ab'.repeat(100)}tail`;
+    const altText = `${'说明'.repeat(500)}尾部`;
+    const projected = projectCanvasShareForPublic({
+      ...record,
+      title,
+    }, [{
+      ...item,
+      displayMetadata: { label, altText },
+    }]);
+
+    expect(projected.title).toBe('中文'.repeat(100));
+    expect(projected.items[0].display).toEqual({
+      label: 'Ab'.repeat(100),
+      altText: '说明'.repeat(500),
+    });
+  });
+
   it('uses a different item reference for the same internal item under another share digest', () => {
     expect(createCanvasSharePublicItemRef('b'.repeat(64), item.id)).not.toBe(itemRef);
   });

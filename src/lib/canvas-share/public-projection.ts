@@ -13,6 +13,8 @@ const PUBLIC_ITEM_REF_PREFIX = 'csr_';
 const PUBLIC_ITEM_REF_PATTERN = /^csr_[A-Za-z0-9_-]{43}$/u;
 const PUBLIC_TEXT_CONTROL_PATTERN = /[\u0000-\u001f\u007f-\u009f]/gu;
 const PUBLIC_TEXT_IGNORABLE_OR_FORMAT_PATTERN = /[\p{Cf}\p{Default_Ignorable_Code_Point}]/gu;
+const PUBLIC_TEXT_EMOJI_ONLY_COMPONENT_PATTERN =
+  /[\p{Emoji_Modifier}\p{Regional_Indicator}\u20E3]/gu;
 const PUBLIC_TEXT_EMOJI_TAG_PATTERN = /[\u{e0020}-\u{e007f}]/gu;
 const PUBLIC_TEXT_EMOJI_ATOM = String.raw`(?:\p{Emoji_Modifier_Base}(?:\uFE0E|\uFE0F)?\p{Emoji_Modifier}|\p{Extended_Pictographic}(?:\uFE0E|\uFE0F)?)`;
 const PUBLIC_TEXT_STRUCTURED_EMOJI_PATTERN = new RegExp(
@@ -133,7 +135,23 @@ export function resolveCanvasSharePublicItem(
 function sanitizePublicTextGrapheme(segment: string): string {
   const withoutTags = segment.replace(PUBLIC_TEXT_EMOJI_TAG_PATTERN, '');
   if (PUBLIC_TEXT_STRUCTURED_EMOJI_PATTERN.test(withoutTags)) return withoutTags;
-  return withoutTags.replace(PUBLIC_TEXT_IGNORABLE_OR_FORMAT_PATTERN, '');
+  return withoutTags
+    .replace(PUBLIC_TEXT_IGNORABLE_OR_FORMAT_PATTERN, '')
+    .replace(PUBLIC_TEXT_EMOJI_ONLY_COMPONENT_PATTERN, '');
+}
+
+function truncatePublicTextAtGraphemeBoundary(value: string, maxLength: number): string {
+  let candidate = '';
+
+  for (const { segment } of PUBLIC_TEXT_GRAPHEME_SEGMENTER.segment(value)) {
+    if (candidate.length + segment.length > maxLength) {
+      break;
+    }
+
+    candidate += segment;
+  }
+
+  return candidate.trim();
 }
 
 function sanitizePublicTextGraphemes(value: string): string {
@@ -177,7 +195,7 @@ function publicSafeText(value: string | undefined, maxLength: number): string | 
     .replace(/\s+/gu, ' ')
     .trim();
   if (containsUnsafePublicText(publicTextInspectionValue(normalized))) return undefined;
-  const candidate = normalized.slice(0, maxLength).trim();
+  const candidate = truncatePublicTextAtGraphemeBoundary(normalized, maxLength);
   if (!candidate || containsUnsafePublicText(publicTextInspectionValue(candidate))) return undefined;
   return candidate;
 }
