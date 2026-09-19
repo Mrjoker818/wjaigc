@@ -205,7 +205,7 @@ describe('canvas-share explicit public projection', () => {
       ...item,
       displayMetadata: {
         label: '<img src=x onerror=alert(1)>',
-        altText: '正常\u0000中文\u202E说明',
+        altText: '正常\u0000中\u200B文\u2060\u202E说明',
       },
     }]);
 
@@ -214,18 +214,24 @@ describe('canvas-share explicit public projection', () => {
     const serialized = JSON.stringify(projected);
     for (const forbidden of [
       'https://private.example/', '<script>', '</script>', '<img', 'onerror',
-      '\u0000', '\u202E',
+      '\u0000', '\u200B', '\u2060', '\u202E',
     ]) expect(serialized).not.toContain(forbidden);
   });
 
   it.each([
     ['scheme without slashes', 'https:private-secret'],
     ['arbitrary absolute scheme', 'ftp:private-secret'],
+    ['custom compact scheme', 'custom:private-secret'],
     ['javascript scheme', 'javascript:alert(1)'],
     ['data scheme', 'data:text/html,private-secret'],
     ['bidi-hidden scheme', 'java\u202Escript:alert(1)'],
+    ['zero-width-hidden scheme', 'https\u200B:private-secret'],
+    ['word-joiner-hidden scheme', 'java\u2060script:alert(1)'],
+    ['generic format-hidden scheme', 'https\u0600:private-secret'],
     ['scheme-relative URL', '//private.example/secret'],
     ['URL-like host', 'www.private.example/secret'],
+    ['Unicode IDN host', '例子.公司/private-secret'],
+    ['bracketed IPv6 host', '[::1]/private-secret'],
     ['HTML-like markup', '<svg onload=alert(1)>'],
   ])('rejects normalized public text containing %s', (_caseName, unsafeText) => {
     const projected = projectCanvasShareForPublic({
@@ -242,22 +248,22 @@ describe('canvas-share explicit public projection', () => {
     expect(JSON.stringify(projected)).not.toContain('alert(1)');
   });
 
-  it('preserves ordinary Chinese, accessible alt text, and numeric colon notation', () => {
+  it('preserves spaced prose colons, ordinary multilingual alt text, numeric colons, and emoji graphemes', () => {
     const projected = projectCanvasShareForPublic({
       ...record,
-      title: '客户审阅画布 16:9',
+      title: '版本 A: 正式稿 👩‍💻',
     }, [{
       ...item,
       displayMetadata: {
-        label: '主视觉海报',
-        altText: '蓝色产品海报，画面比例 16:9，时间 10:30',
+        label: 'Poster: blue product ❤️',
+        altText: '蓝色产品海报 Blue product poster，画面比例 16:9，时间 10:30',
       },
     }]);
 
-    expect(projected.title).toBe('客户审阅画布 16:9');
+    expect(projected.title).toBe('版本 A: 正式稿 👩‍💻');
     expect(projected.items[0].display).toEqual({
-      label: '主视觉海报',
-      altText: '蓝色产品海报，画面比例 16:9，时间 10:30',
+      label: 'Poster: blue product ❤️',
+      altText: '蓝色产品海报 Blue product poster，画面比例 16:9，时间 10:30',
     });
   });
 

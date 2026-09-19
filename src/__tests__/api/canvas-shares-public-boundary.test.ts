@@ -10,31 +10,51 @@ import type {
 } from '@/lib/canvas-share/types';
 
 const database = vi.hoisted(() => {
+  interface BoundaryTransactionState {
+    pendingRateCount: number | null;
+  }
   const state: {
     shareRow: Record<string, unknown> | null;
     itemRow: Record<string, unknown> | null;
+    assetRow: Record<string, unknown> | null;
+    versionRow: Record<string, unknown> | null;
     queries: string[];
     activeLeases: number;
     barrierTarget: number;
     barrierArrivals: number;
     barrierWaiters: Array<() => void>;
     globalPoolQueries: number;
+    persistedRateCount: number;
   } = {
     shareRow: null,
     itemRow: null,
+    assetRow: null,
+    versionRow: null,
     queries: [],
     activeLeases: 0,
     barrierTarget: 0,
     barrierArrivals: 0,
     barrierWaiters: [],
     globalPoolQueries: 0,
+    persistedRateCount: 0,
   };
-  const runQuery = async (queryText: string): Promise<{ rows: unknown[] }> => {
+  const runQuery = async (
+    queryText: string,
+    _values: readonly unknown[] | undefined,
+    transaction: BoundaryTransactionState | null,
+  ): Promise<{ rows: unknown[] }> => {
     const normalized = queryText.replace(/\s+/gu, ' ').trim();
     state.queries.push(normalized);
-    if (normalized === 'BEGIN' || normalized === 'COMMIT' || normalized === 'ROLLBACK') {
+    if (normalized === 'BEGIN') {
       return { rows: [] };
     }
+    if (normalized === 'COMMIT') {
+      if (transaction?.pendingRateCount !== null && transaction?.pendingRateCount !== undefined) {
+        state.persistedRateCount = transaction.pendingRateCount;
+      }
+      return { rows: [] };
+    }
+    if (normalized === 'ROLLBACK') return { rows: [] };
     if (normalized.includes('FROM wujie_canvas_shares share_record')) {
       return { rows: state.shareRow ? [state.shareRow] : [] };
     }
@@ -50,7 +70,16 @@ const database = vi.hoisted(() => {
       return { rows: state.itemRow ? [state.itemRow] : [] };
     }
     if (normalized.includes('INSERT INTO wujie_canvas_share_rate_windows')) {
-      return { rows: [{ attempt_count: 1 }] };
+      const attemptCount = (transaction?.pendingRateCount ?? state.persistedRateCount) + 1;
+      if (transaction) transaction.pendingRateCount = attemptCount;
+      else state.persistedRateCount = attemptCount;
+      return { rows: [{ attempt_count: attemptCount }] };
+    }
+    if (normalized.includes('FROM wujie_assets')) {
+      return { rows: state.assetRow ? [state.assetRow] : [] };
+    }
+    if (normalized.includes('FROM wujie_asset_versions v')) {
+      return { rows: state.versionRow ? [state.versionRow] : [] };
     }
     if (normalized.startsWith('UPDATE wujie_canvas_shares SET view_count')) {
       return {
@@ -65,8 +94,11 @@ const database = vi.hoisted(() => {
     if (state.activeLeases >= 5) throw new Error('BOUNDARY_POOL_MAX_EXCEEDED');
     state.activeLeases += 1;
     let released = false;
+    const transaction: BoundaryTransactionState = { pendingRateCount: null };
     return {
-      query: transactionQuery,
+      query: (queryText: string, values?: readonly unknown[]) => (
+        transactionQuery(queryText, values, transaction)
+      ),
       release: () => {
         if (released) return;
         released = true;
@@ -75,10 +107,10 @@ const database = vi.hoisted(() => {
       },
     };
   });
-  const poolQuery = vi.fn(async (queryText: string) => {
+  const poolQuery = vi.fn(async (queryText: string, values?: readonly unknown[]) => {
     state.globalPoolQueries += 1;
     if (state.activeLeases >= 5) throw new Error('BOUNDARY_POOL_STARVATION');
-    return runQuery(queryText);
+    return runQuery(queryText, values, null);
   });
   const pool = {
     connect,
@@ -93,10 +125,15 @@ vi.mock('@/lib/db-client', () => ({
 
 import { GET as getPublicShare } from '@/app/api/public/canvas-shares/[token]/route';
 import {
+  CanvasSharePublicRangeError,
   computeCanvasShareSnapshotDigestForRead,
+  readPublicCanvasShareMedia,
 } from '@/lib/canvas-share/service';
 import { createCanvasSharePublicItemRef } from '@/lib/canvas-share/public-projection';
-import { enforceCanvasSharePublicRateLimit } from '@/lib/canvas-share/public-rate-limit';
+import {
+  CanvasSharePublicRateLimitError,
+  enforceCanvasSharePublicRateLimit,
+} from '@/lib/canvas-share/public-rate-limit';
 import { withActiveCanvasShareMediaSnapshot } from '@/lib/canvas-share/storage';
 
 const rawToken = 'B'.repeat(43);
@@ -116,6 +153,7 @@ describe('canvas-share public route/service/storage boundary', () => {
     database.state.barrierArrivals = 0;
     database.state.barrierWaiters.length = 0;
     database.state.globalPoolQueries = 0;
+    database.state.persistedRateCount = 0;
     database.transactionQuery.mockClear();
     database.poolQuery.mockClear();
     database.release.mockClear();
@@ -128,13 +166,13 @@ describe('canvas-share public route/service/storage boundary', () => {
       assetId: 'boundary-asset-private',
       assetVersionId: 'boundary-version-private',
       entityType: 'canvas-image',
-      assetKind: 'image',
+      assetKind: 'video',
       transform: { x: 1, y: 2, width: 3, height: 4, rotation: 0, zIndex: 0 },
       displayMetadata: { label: '边界测试' },
-      mimeType: 'image/png',
+      mimeType: 'video/mp4',
       width: 3,
       height: 4,
-      byteSize: 4,
+      byteSize: 10 * 1024 * 1024,
       checksum: 'boundary-checksum-private',
       availability: 'ready',
       sortOrder: 0,
@@ -149,7 +187,7 @@ describe('canvas-share public route/service/storage boundary', () => {
       title: '真实边界画布',
       status: 'active',
       expiresAt: '2026-10-19T00:00:00.000Z',
-      allowDownload: false,
+      allowDownload: true,
       viewport: { offsetX: 0, offsetY: 0, zoom: 1 },
       snapshotDigest: '',
       viewCount: 0,
@@ -197,6 +235,36 @@ describe('canvas-share public route/service/storage boundary', () => {
       availability: item.availability,
       sort_order: item.sortOrder,
       created_at: item.createdAt,
+    };
+    database.state.assetRow = {
+      id: item.assetId,
+      owner_id: record.ownerId,
+      project_id: record.projectId,
+      kind: item.assetKind,
+      status: 'active',
+      current_version_id: item.assetVersionId,
+      created_at: new Date(record.createdAt),
+      updated_at: new Date(record.createdAt),
+    };
+    database.state.versionRow = {
+      id: item.assetVersionId,
+      asset_id: item.assetId,
+      owner_id: record.ownerId,
+      project_id: record.projectId,
+      file_url: '/api/serve-upload/uploads/boundary.mp4',
+      storage_key: null,
+      checksum: item.checksum,
+      mime_type: item.mimeType,
+      byte_size: String(item.byteSize),
+      width: item.width,
+      height: item.height,
+      availability: 'ready',
+      recovery_source_url: null,
+      task_id: null,
+      idempotency_key: null,
+      metadata: {},
+      parent_version_ids: [],
+      created_at: new Date(record.createdAt),
     };
   });
 
@@ -287,6 +355,79 @@ describe('canvas-share public route/service/storage boundary', () => {
     expect(rollbackIndex).toBeGreaterThan(rateIndex);
     expect(database.state.queries).not.toContain('COMMIT');
     expect(database.state.globalPoolQueries).toBe(0);
+    expect(database.state.persistedRateCount).toBe(0);
     expect(database.release).toHaveBeenCalledOnce();
+  });
+
+  it('commits invalid GET and HEAD ranges before throwing 416 and reaches a stable 429', async () => {
+    const itemRef = createCanvasSharePublicItemRef(tokenDigest, 'boundary-item-private');
+    const readMedia = vi.fn();
+    const requestInvalidRange = (rangeHeader: string, headOnly: boolean) => (
+      readPublicCanvasShareMedia({
+        token: rawToken,
+        itemRef,
+        download: true,
+        rangeHeader,
+        headOnly,
+        onAuthorized: transactionDatabase => enforceCanvasSharePublicRateLimit({
+          tokenDigest,
+          itemScope: itemRef,
+          ipAddress: 'unknown',
+          routeBucket: 'download',
+          now: new Date('2026-09-19T12:00:00.000Z'),
+          database: transactionDatabase,
+        }),
+      }, {
+        now: () => new Date('2026-09-19T12:00:00.000Z'),
+        hashToken: () => tokenDigest,
+        withActiveSnapshot: (digest, accessedAt, operation) => (
+          withActiveCanvasShareMediaSnapshot(digest, accessedAt, operation, database.pool)
+        ),
+        getMediaDescriptor: vi.fn().mockResolvedValue({
+          assetVersionId: 'boundary-version-private',
+          assetKind: 'video',
+          mimeType: 'video/mp4',
+          byteSize: 10 * 1024 * 1024,
+          width: 3,
+          height: 4,
+          checksum: 'boundary-checksum-private',
+          source: { kind: 'local', absolutePath: 'managed', dataRoot: 'managed-root' },
+        }),
+        readMedia,
+      })
+    );
+
+    await expect(requestInvalidRange('bytes=invalid', false)).rejects.toBeInstanceOf(
+      CanvasSharePublicRangeError,
+    );
+    const firstRequestQueries = [...database.state.queries];
+    expect(database.state.persistedRateCount).toBe(1);
+    const lockIndex = firstRequestQueries.findIndex(query => query.includes('FOR SHARE'));
+    const rateIndex = firstRequestQueries.findIndex(
+      query => query.includes('INSERT INTO wujie_canvas_share_rate_windows'),
+    );
+    const commitIndex = firstRequestQueries.indexOf('COMMIT');
+    expect(lockIndex).toBeGreaterThan(-1);
+    expect(rateIndex).toBeGreaterThan(lockIndex);
+    expect(commitIndex).toBeGreaterThan(rateIndex);
+    expect(firstRequestQueries).not.toContain('ROLLBACK');
+
+    for (let attempt = 2; attempt <= 20; attempt += 1) {
+      const rangeHeader = attempt % 2 === 0 ? 'bytes=0-8388608' : 'bytes=invalid';
+      await expect(requestInvalidRange(rangeHeader, attempt % 2 === 0)).rejects.toBeInstanceOf(
+        CanvasSharePublicRangeError,
+      );
+      expect(database.state.persistedRateCount).toBe(attempt);
+    }
+
+    await expect(requestInvalidRange('bytes=invalid', false)).rejects.toBeInstanceOf(
+      CanvasSharePublicRateLimitError,
+    );
+    await expect(requestInvalidRange('bytes=0-8388608', true)).rejects.toBeInstanceOf(
+      CanvasSharePublicRateLimitError,
+    );
+    expect(database.state.persistedRateCount).toBe(20);
+    expect(database.state.globalPoolQueries).toBe(0);
+    expect(readMedia).not.toHaveBeenCalled();
   });
 });

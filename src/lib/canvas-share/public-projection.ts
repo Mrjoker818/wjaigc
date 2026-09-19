@@ -12,11 +12,22 @@ import type {
 const PUBLIC_ITEM_REF_PREFIX = 'csr_';
 const PUBLIC_ITEM_REF_PATTERN = /^csr_[A-Za-z0-9_-]{43}$/u;
 const PUBLIC_TEXT_CONTROL_PATTERN = /[\u0000-\u001f\u007f-\u009f]/gu;
-const PUBLIC_TEXT_BIDI_PATTERN = /[\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/gu;
-const PUBLIC_TEXT_SCHEME_PATTERN = /\b[a-z][a-z\d+.-]*:/iu;
+const PUBLIC_TEXT_IGNORABLE_OR_FORMAT_PATTERN = /[\p{Cf}\p{Default_Ignorable_Code_Point}]/gu;
+const PUBLIC_TEXT_EXTENDED_PICTOGRAPHIC_PATTERN = /\p{Extended_Pictographic}/u;
+const PUBLIC_TEXT_ASCII_WORD_PATTERN = /[A-Za-z0-9]/u;
+const PUBLIC_TEXT_EMOJI_FORMAT_PATTERN = /[\u200d\ufe0e\ufe0f\u{e0020}-\u{e007f}]/u;
+const PUBLIC_TEXT_DANGEROUS_SCHEME_PATTERN = /\b(?:https?|ftps?|sftp|wss?|ssh|git|javascript|data|blob|file|mailto|tel):/iu;
+const PUBLIC_TEXT_COMPACT_SCHEME_PATTERN = /\b[a-z][a-z\d+.-]*:[^\s]/iu;
 const PUBLIC_TEXT_SCHEME_RELATIVE_PATTERN = /\/\//u;
-const PUBLIC_TEXT_HOST_PATTERN = /(?:\bwww\.|\b(?:[a-z\d](?:[a-z\d-]{0,62}[a-z\d])?\.)+[a-z]{2,63}(?::\d{1,5})?(?:[/?#]|\b)|\b(?:\d{1,3}\.){3}\d{1,3}(?::\d{1,5})?(?:[/?#]|\b))/iu;
+const PUBLIC_TEXT_DOMAIN_LABEL = String.raw`[\p{L}\p{N}](?:[\p{L}\p{N}-]{0,61}[\p{L}\p{N}])?`;
+const PUBLIC_TEXT_DOMAIN_PATTERN = new RegExp(
+  String.raw`(?:^|[^\p{L}\p{N}_-])(?:www\.)?(?:${PUBLIC_TEXT_DOMAIN_LABEL}\.)+${PUBLIC_TEXT_DOMAIN_LABEL}(?::\d{1,5})?(?=$|[\s/?#])`,
+  'iu',
+);
+const PUBLIC_TEXT_IPV4_PATTERN = /(?:^|[^\d.])(?:\d{1,3}\.){3}\d{1,3}(?::\d{1,5})?(?=$|[\s/?#])/u;
+const PUBLIC_TEXT_BRACKETED_IPV6_PATTERN = /\[[0-9a-f:.]*:[0-9a-f:.]*\](?::\d{1,5})?(?=$|[\s/?#])/iu;
 const PUBLIC_TEXT_HTML_PATTERN = /[<>]|&(?:lt|gt|#0*60|#0*62|#x0*3c|#x0*3e);/iu;
+const PUBLIC_TEXT_GRAPHEME_SEGMENTER = new Intl.Segmenter('und', { granularity: 'grapheme' });
 
 function invalidShare(): never {
   throw new CanvasShareError('CANVAS_SHARE_NOT_FOUND');
@@ -114,24 +125,44 @@ export function resolveCanvasSharePublicItem(
   return invalidShare();
 }
 
+function removePublicTextDefaultIgnorables(value: string): string {
+  return Array.from(PUBLIC_TEXT_GRAPHEME_SEGMENTER.segment(value), ({ segment }) => {
+    const canPreserveEmojiFormat = PUBLIC_TEXT_EXTENDED_PICTOGRAPHIC_PATTERN.test(segment)
+      && !PUBLIC_TEXT_ASCII_WORD_PATTERN.test(segment);
+    return segment.replace(PUBLIC_TEXT_IGNORABLE_OR_FORMAT_PATTERN, character => (
+      canPreserveEmojiFormat && PUBLIC_TEXT_EMOJI_FORMAT_PATTERN.test(character)
+        ? character
+        : ''
+    ));
+  }).join('');
+}
+
+function publicTextInspectionValue(value: string): string {
+  return value
+    .replace(PUBLIC_TEXT_IGNORABLE_OR_FORMAT_PATTERN, '')
+    .normalize('NFKC');
+}
+
+function containsUnsafePublicText(value: string): boolean {
+  return PUBLIC_TEXT_DANGEROUS_SCHEME_PATTERN.test(value)
+    || PUBLIC_TEXT_COMPACT_SCHEME_PATTERN.test(value)
+    || PUBLIC_TEXT_SCHEME_RELATIVE_PATTERN.test(value)
+    || PUBLIC_TEXT_DOMAIN_PATTERN.test(value)
+    || PUBLIC_TEXT_IPV4_PATTERN.test(value)
+    || PUBLIC_TEXT_BRACKETED_IPV6_PATTERN.test(value)
+    || PUBLIC_TEXT_HTML_PATTERN.test(value);
+}
+
 function publicSafeText(value: string | undefined, maxLength: number): string | undefined {
   if (value === undefined) return undefined;
-  const normalized = value
-    .normalize('NFC')
+  const normalized = removePublicTextDefaultIgnorables(value.normalize('NFC'))
     .replace(PUBLIC_TEXT_CONTROL_PATTERN, ' ')
-    .replace(PUBLIC_TEXT_BIDI_PATTERN, '')
     .replace(/\s+/gu, ' ')
-    .trim()
-    .slice(0, maxLength)
     .trim();
-  const inspectionValue = normalized.normalize('NFKC');
-  if (
-    PUBLIC_TEXT_SCHEME_PATTERN.test(inspectionValue)
-    || PUBLIC_TEXT_SCHEME_RELATIVE_PATTERN.test(inspectionValue)
-    || PUBLIC_TEXT_HOST_PATTERN.test(inspectionValue)
-    || PUBLIC_TEXT_HTML_PATTERN.test(inspectionValue)
-  ) return undefined;
-  return normalized || undefined;
+  if (containsUnsafePublicText(publicTextInspectionValue(normalized))) return undefined;
+  const candidate = normalized.slice(0, maxLength).trim();
+  if (!candidate || containsUnsafePublicText(publicTextInspectionValue(candidate))) return undefined;
+  return candidate;
 }
 
 export function projectCanvasShareForPublic(

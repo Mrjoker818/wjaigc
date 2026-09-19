@@ -505,6 +505,11 @@ export interface CanvasSharePublicMediaResult {
   fileName: string;
 }
 
+const CANVAS_SHARE_DEFERRED_RANGE_ERROR = Symbol('CANVAS_SHARE_DEFERRED_RANGE_ERROR');
+type CanvasSharePublicMediaTransactionResult =
+  | CanvasSharePublicMediaResult
+  | typeof CANVAS_SHARE_DEFERRED_RANGE_ERROR;
+
 export interface ReadPublicCanvasShareMediaDependencies {
   now(): Date;
   hashToken(token: string): string;
@@ -532,18 +537,27 @@ function invalidRange(): never {
   throw new CanvasSharePublicRangeError();
 }
 
+interface PublicMediaRangeDecision {
+  valid: boolean;
+  range?: { start: number; end: number };
+}
+
+function invalidRangeDecision(): PublicMediaRangeDecision {
+  return { valid: false };
+}
+
 function resolvePublicMediaRange(
   rangeHeader: string | null,
   kind: 'image' | 'video',
   totalBytes: number,
-): { start: number; end: number } | undefined {
+): PublicMediaRangeDecision {
   if (rangeHeader === null) {
-    if (kind === 'video' && totalBytes > PUBLIC_VIDEO_MAX_BYTES) return invalidRange();
-    return undefined;
+    if (kind === 'video' && totalBytes > PUBLIC_VIDEO_MAX_BYTES) return invalidRangeDecision();
+    return { valid: true };
   }
-  if (kind !== 'video') return invalidRange();
+  if (kind !== 'video') return invalidRangeDecision();
   const match = /^bytes=(\d+)-(\d*)$/u.exec(rangeHeader.trim());
-  if (!match) return invalidRange();
+  if (!match) return invalidRangeDecision();
   const start = Number(match[1]);
   const requestedEnd = match[2] ? Number(match[2]) : start + PUBLIC_VIDEO_RANGE_MAX_BYTES - 1;
   if (
@@ -552,10 +566,10 @@ function resolvePublicMediaRange(
     || start < 0
     || requestedEnd < start
     || start >= totalBytes
-  ) return invalidRange();
+  ) return invalidRangeDecision();
   const end = Math.min(requestedEnd, totalBytes - 1);
-  if (end - start + 1 > PUBLIC_VIDEO_RANGE_MAX_BYTES) return invalidRange();
-  return { start, end };
+  if (end - start + 1 > PUBLIC_VIDEO_RANGE_MAX_BYTES) return invalidRangeDecision();
+  return { valid: true, range: { start, end } };
 }
 
 function descriptorMatchesSnapshot(
@@ -606,7 +620,9 @@ export async function readPublicCanvasShareMedia(
 ): Promise<CanvasSharePublicMediaResult> {
   const accessedAt = dependencies.now();
   if (!Number.isFinite(accessedAt.getTime())) return notFound();
-  return dependencies.withActiveSnapshot(
+  const transactionResult = await dependencies.withActiveSnapshot<
+    CanvasSharePublicMediaTransactionResult
+  >(
     dependencies.hashToken(input.token),
     accessedAt.toISOString(),
     async context => {
@@ -632,11 +648,13 @@ export async function readPublicCanvasShareMedia(
       }
       if (!descriptorMatchesSnapshot(descriptor, version, item)) return mediaUnavailable();
       await input.onAuthorized?.(context.database);
-      const range = resolvePublicMediaRange(
+      const rangeDecision = resolvePublicMediaRange(
         input.rangeHeader,
         item.assetKind,
         descriptor.byteSize,
       );
+      if (!rangeDecision.valid) return CANVAS_SHARE_DEFERRED_RANGE_ERROR;
+      const { range } = rangeDecision;
       const expectedBytes = range
         ? range.end - range.start + 1
         : descriptor.byteSize;
@@ -685,4 +703,6 @@ export async function readPublicCanvasShareMedia(
       };
     },
   );
+  if (transactionResult === CANVAS_SHARE_DEFERRED_RANGE_ERROR) return invalidRange();
+  return transactionResult;
 }
