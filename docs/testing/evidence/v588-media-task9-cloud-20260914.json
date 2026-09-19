@@ -73,10 +73,31 @@
     "net": 0
   },
   "thumbnails": {
-    "newAssetVariants": 0,
     "historicalBacklogPreview": 100,
-    "readyTaskForGatewayProjectionFound": false,
-    "status": "unverified"
+    "backfillWorker": "existing_asset_thumbnail_backfill",
+    "finalVariantTotals": {
+      "ready": 764,
+      "failed": 36
+    },
+    "failedVariantReason": "Remote image returned HTTP 403",
+    "task9AssetVersionIds": [
+      "d2d11b23-9265-43f0-b1c5-2cc48994d978",
+      "83837e7e-5816-4ea0-ab86-fd5d2ae8e1bb",
+      "f7dbd4b2-b411-4e18-92b0-c4a4cb280791"
+    ],
+    "expectedTargetVariants": 6,
+    "observedReadyTargetVariants": [
+      {
+        "assetVersionId": "f7dbd4b2-b411-4e18-92b0-c4a4cb280791",
+        "size": 512,
+        "status": "ready",
+        "hasUrl": true
+      }
+    ],
+    "allTargetVariantsEnumerated": false,
+    "enumerationLimitation": "The retained terminal output starts inside the final target row, so the other five rows cannot be reconstructed without a fresh database query.",
+    "gatewayProjection": "unverified_gateway_disabled_and_preview_unhealthy",
+    "status": "partial"
   },
   "securityAndQuota": {
     "invalidKey": {"http": 401, "code": "GATEWAY_KEY_INVALID"},

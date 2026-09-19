@@ -2483,3 +2483,9 @@ The focused gate test passes `7/7`; the actual protected-baseline command passes
 - 当前候选补充通过错误/吊销 Key、RPM 限流、UTC 日配额、跨用户 project/task 隔离；配额首个任务取消后只产生一次消费和一次退款，净额 0。
 - 所有临时 Key 已撤销、临时开关已移除，最终默认关闭态复核为 503 `GATEWAY_DISABLED`。
 - Task 9 当前约 98%。ready 缩略图任务样本、同步直返视频以及录像/Trace/Network 仍缺失，所以仍不能完整关闭。
+
+## 2026-09-19 V588-MEDIA-001 Task 9 缩略图发布补充
+
+- 云端既有 worker 已把缩略图表推进到 `764 ready / 36 failed`；失败全部为历史源图 HTTP 403，不是网关任务状态机或新 AssetVersion 投影失败。
+- 当前只能逐条证明一个 Task 9 目标变体为 ready 且有 URL，不能从截断输出推断其余五条。网关默认关闭与沙箱 HTTP 500 也意味着 `thumbnailUrls`/`previewUrl` 尚未取得新鲜响应证据。
+- **发布结论不变：Task 9 约 98%，全平台仍不通过。** 沙箱恢复后只需无付费复核六条目标变体和三个既有任务的网关缩略图投影；同步直返视频、`n=2` 浏览器逐槽时间差以及录像/Trace/Network 继续明确列为未验证。`stable` 保持只读。
