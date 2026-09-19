@@ -13,6 +13,10 @@ import { createAssetStorageTransaction } from '@/lib/asset-core/storage';
 import { canonicalJson, hashCanonicalJson } from '@/lib/canvas-share/canonical-json';
 import { CanvasShareError } from '@/lib/canvas-share/errors';
 import {
+  computeCanvasShareSnapshotDigestForRead,
+  createCanvasSharePublicItemRef,
+} from '@/lib/canvas-share/public-projection';
+import {
   createCanvasShare,
   listCanvasShares,
   patchCanvasSharePolicy,
@@ -947,17 +951,27 @@ describe('canvas-share service creation boundary', () => {
       sortOrder: 0,
       createdAt: record.createdAt,
     };
-    const incrementView = vi.fn(async () => ({ ...record, viewCount: 1 }));
+    const validRecord = {
+      ...record,
+      snapshotDigest: computeCanvasShareSnapshotDigestForRead(record, [item]),
+    };
+    const incrementView = vi.fn(async () => ({ ...validRecord, viewCount: 1 }));
     const result = await readPublicCanvasShare(token, {
       now: () => new Date('2026-09-19T12:00:00.000Z'),
       hashToken: () => record.tokenHash,
-      findByTokenHash: async () => ({ record, items: [item] }),
-      incrementView,
+      withActiveSnapshot: async (_tokenHash, _accessedAt, operation) => operation({
+        snapshot: { record: validRecord, items: [item] },
+        expectedItemCount: 1,
+        incrementView,
+        findAsset: vi.fn(),
+        findVersion: vi.fn(),
+      }),
     });
 
+    const scopedItemRef = createCanvasSharePublicItemRef(record.tokenHash, item.id);
     expect(result.items[0]).toMatchObject({
-      itemRef: item.id,
-      mediaPath: `/api/public/canvas-shares/${token}/media/${item.id}`,
+      itemRef: scopedItemRef,
+      mediaPath: `/api/public/canvas-shares/${token}/media/${scopedItemRef}`,
     });
     expect(result.items[0]).not.toHaveProperty('downloadPath');
     const serialized = JSON.stringify(result);
@@ -967,6 +981,6 @@ describe('canvas-share service creation boundary', () => {
     expect(serialized).not.toContain(item.assetVersionId);
     expect(serialized).not.toContain(item.placementId);
     expect(serialized).not.toContain(item.checksum!);
-    expect(incrementView).toHaveBeenCalledWith(record.id, '2026-09-19T12:00:00.000Z');
+    expect(incrementView).toHaveBeenCalledWith();
   });
 });

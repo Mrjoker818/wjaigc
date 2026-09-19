@@ -2,10 +2,13 @@ import type { Pool, QueryResultRow } from 'pg';
 
 import {
   type AssetCoreSqlTransaction,
+  createAssetStorageTransaction,
   withAssetCoreTransaction,
 } from '@/lib/asset-core/storage';
+import type { Asset, AssetVersion } from '@/lib/asset-core/types';
 import { getPool } from '@/lib/db-client';
 
+import { CanvasShareError } from './errors';
 import type {
   CanvasShareItemRecord,
   CanvasSharePolicyPatch,
@@ -40,6 +43,10 @@ interface CanvasShareRow extends QueryResultRow {
 }
 
 interface CanvasShareOwnerRow extends CanvasShareRow {
+  item_count: string | number;
+}
+
+interface CanvasSharePublicRow extends CanvasShareRow {
   item_count: string | number;
 }
 
@@ -344,4 +351,56 @@ export async function incrementCanvasShareView(
     [shareId, viewedAt],
   );
   return result.rows[0] ? mapShare(result.rows[0]) : null;
+}
+
+export interface CanvasSharePublicSnapshotContext {
+  snapshot: StoredCanvasShareSnapshot;
+  expectedItemCount: number;
+  incrementView(): Promise<CanvasShareRecord | null>;
+  findAsset(ownerId: string, projectId: string, assetId: string): Promise<Asset | null>;
+  findVersion(ownerId: string, projectId: string, versionId: string): Promise<AssetVersion | null>;
+}
+
+export type CanvasSharePublicSnapshotOperation<T> = (
+  context: CanvasSharePublicSnapshotContext,
+) => Promise<T>;
+
+export async function withActiveCanvasShareSnapshot<T>(
+  tokenHash: string,
+  accessedAt: string,
+  operation: CanvasSharePublicSnapshotOperation<T>,
+  pool: Pool = getPool(),
+): Promise<T> {
+  return withAssetCoreTransaction(async client => {
+    const result = await client.query<CanvasSharePublicRow>(
+      `SELECT share_record.*,
+              (SELECT count(*)::bigint
+                 FROM wujie_canvas_share_items item
+                WHERE item.share_id = share_record.id) AS item_count
+         FROM wujie_canvas_shares share_record
+        WHERE share_record.token_hash = $1
+          AND share_record.status = 'active'
+          AND (share_record.expires_at IS NULL OR share_record.expires_at > $2::timestamptz)
+        FOR UPDATE`,
+      [tokenHash, accessedAt],
+    );
+    const row = result.rows[0];
+    if (!row) throw new CanvasShareError('CANVAS_SHARE_NOT_FOUND');
+    const snapshot: StoredCanvasShareSnapshot = {
+      record: mapShare(row),
+      items: await readItems(client, row.id),
+    };
+    const assetStorage = createAssetStorageTransaction(client);
+    return operation({
+      snapshot,
+      expectedItemCount: Number(row.item_count),
+      incrementView: () => incrementCanvasShareView(row.id, accessedAt, client),
+      findAsset: (ownerId, projectId, assetId) => (
+        assetStorage.findAsset(ownerId, projectId, assetId)
+      ),
+      findVersion: (ownerId, projectId, versionId) => (
+        assetStorage.findVersion(ownerId, projectId, versionId)
+      ),
+    });
+  }, pool);
 }

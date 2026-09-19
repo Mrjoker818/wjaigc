@@ -2,7 +2,12 @@ import { randomUUID } from 'node:crypto';
 
 import {
   getManagedAssetMediaDescriptor,
+  readManagedAssetVersionBytes,
+  type ManagedAssetMediaDescriptor,
+  type ManagedMediaReadOptions,
+  type ManagedMediaReadResult,
 } from '@/lib/asset-core/managed-media-read';
+import type { Asset, AssetVersion } from '@/lib/asset-core/types';
 import {
   lockCanvasProjectRevision,
   readCanvasProjectRevision,
@@ -22,17 +27,24 @@ import {
   type CanvasShareSnapshotSource,
 } from './snapshot';
 import {
-  findCanvasShareByTokenHash as findCanvasShareByTokenHashInStorage,
   findCanvasShareForOwner as findCanvasShareForOwnerInStorage,
-  incrementCanvasShareView as incrementCanvasShareViewInStorage,
   insertCanvasShare,
   listCanvasShares as listCanvasSharesInStorage,
   revokeCanvasShare as revokeCanvasShareInStorage,
+  type CanvasSharePublicSnapshotContext,
   type StoredCanvasShareSnapshot,
   updateCanvasSharePolicyIfCurrent as updateCanvasSharePolicyIfCurrentInStorage,
   type CanvasShareExpectedPolicy,
   type CanvasShareOwnerRecord,
+  withActiveCanvasShareSnapshot,
 } from './storage';
+import {
+  assertCanvasShareSnapshotIntegrity,
+  computeCanvasShareSnapshotDigestForRead,
+  createCanvasShareDownloadFileName,
+  projectCanvasShareForPublic,
+  resolveCanvasSharePublicItem,
+} from './public-projection';
 import { createCanvasShareToken, hashCanvasShareToken } from './token';
 import type {
   CanvasShareItemRecord,
@@ -419,45 +431,235 @@ export async function revokeCanvasShare(
 export interface ReadPublicCanvasShareDependencies {
   now(): Date;
   hashToken(token: string): string;
-  findByTokenHash(tokenHash: string): Promise<StoredCanvasShareSnapshot | null>;
-  incrementView(shareId: string, viewedAt: string): Promise<CanvasShareRecord | null>;
+  withActiveSnapshot<T>(
+    tokenHash: string,
+    accessedAt: string,
+    operation: (context: CanvasSharePublicSnapshotContext) => Promise<T>,
+  ): Promise<T>;
 }
+
+export { computeCanvasShareSnapshotDigestForRead };
 
 export async function readPublicCanvasShare(
   token: string,
   dependencies: ReadPublicCanvasShareDependencies = {
     now: () => new Date(),
     hashToken: hashCanvasShareToken,
-    findByTokenHash: findCanvasShareByTokenHashInStorage,
-    incrementView: incrementCanvasShareViewInStorage,
+    withActiveSnapshot: withActiveCanvasShareSnapshot,
   },
 ): Promise<CanvasSharePublicDocument> {
-  const stored = await dependencies.findByTokenHash(dependencies.hashToken(token));
-  if (!stored) return notFound();
   const now = dependencies.now();
-  if (effectiveRecord(stored.record, now).status !== 'active') return notFound();
-  const viewed = await dependencies.incrementView(stored.record.id, now.toISOString());
-  if (!viewed) return notFound();
-  return {
-    title: viewed.title,
-    revisionLabel: `修订 ${viewed.projectRevision}`,
-    createdAt: viewed.createdAt,
-    allowDownload: viewed.allowDownload,
-    viewport: viewed.viewport,
-    items: stored.items.map(item => {
-      const mediaPath = `/api/public/canvas-shares/${token}/media/${item.id}`;
+  if (!Number.isFinite(now.getTime())) return notFound();
+  return dependencies.withActiveSnapshot(
+    dependencies.hashToken(token),
+    now.toISOString(),
+    async context => {
+      assertCanvasShareSnapshotIntegrity(
+        context.snapshot.record,
+        context.snapshot.items,
+        context.expectedItemCount,
+      );
+      const viewed = await context.incrementView();
+      if (!viewed) return notFound();
+      return projectCanvasShareForPublic(viewed, context.snapshot.items, token);
+    },
+  );
+}
+
+const PUBLIC_IMAGE_MAX_BYTES = 32 * 1024 * 1024;
+const PUBLIC_VIDEO_MAX_BYTES = 16 * 1024 * 1024;
+const PUBLIC_VIDEO_RANGE_MAX_BYTES = 8 * 1024 * 1024;
+
+export class CanvasSharePublicRangeError extends Error {
+  readonly code = 'CANVAS_SHARE_RANGE_NOT_SATISFIABLE';
+  readonly status = 416;
+
+  constructor() {
+    super('媒体范围请求无效');
+    this.name = 'CanvasSharePublicRangeError';
+  }
+}
+
+export interface ReadPublicCanvasShareMediaInput {
+  token: string;
+  itemRef: string;
+  download: boolean;
+  rangeHeader: string | null;
+}
+
+export interface CanvasSharePublicMediaResult {
+  bytes: Buffer;
+  mimeType: string;
+  totalBytes: number;
+  range?: { start: number; end: number };
+  fileName: string;
+}
+
+export interface ReadPublicCanvasShareMediaDependencies {
+  now(): Date;
+  hashToken(token: string): string;
+  withActiveSnapshot<T>(
+    tokenHash: string,
+    accessedAt: string,
+    operation: (context: CanvasSharePublicSnapshotContext) => Promise<T>,
+  ): Promise<T>;
+  getMediaDescriptor(
+    version: AssetVersion,
+    kind: Asset['kind'],
+  ): Promise<ManagedAssetMediaDescriptor>;
+  readMedia(
+    version: AssetVersion,
+    kind: Asset['kind'],
+    options: ManagedMediaReadOptions,
+  ): Promise<ManagedMediaReadResult>;
+}
+
+function mediaUnavailable(): never {
+  throw new CanvasShareError('CANVAS_SHARE_MEDIA_UNAVAILABLE');
+}
+
+function invalidRange(): never {
+  throw new CanvasSharePublicRangeError();
+}
+
+function resolvePublicMediaRange(
+  rangeHeader: string | null,
+  kind: 'image' | 'video',
+  totalBytes: number,
+): { start: number; end: number } | undefined {
+  if (rangeHeader === null) {
+    if (kind === 'video' && totalBytes > PUBLIC_VIDEO_MAX_BYTES) return invalidRange();
+    return undefined;
+  }
+  if (kind !== 'video') return invalidRange();
+  const match = /^bytes=(\d+)-(\d*)$/u.exec(rangeHeader.trim());
+  if (!match) return invalidRange();
+  const start = Number(match[1]);
+  const requestedEnd = match[2] ? Number(match[2]) : start + PUBLIC_VIDEO_RANGE_MAX_BYTES - 1;
+  if (
+    !Number.isSafeInteger(start)
+    || !Number.isSafeInteger(requestedEnd)
+    || start < 0
+    || requestedEnd < start
+    || start >= totalBytes
+  ) return invalidRange();
+  const end = Math.min(requestedEnd, totalBytes - 1);
+  if (end - start + 1 > PUBLIC_VIDEO_RANGE_MAX_BYTES) return invalidRange();
+  return { start, end };
+}
+
+function descriptorMatchesSnapshot(
+  descriptor: ManagedAssetMediaDescriptor,
+  version: AssetVersion,
+  item: CanvasShareItemRecord,
+): boolean {
+  return descriptor.assetVersionId === version.id
+    && descriptor.assetKind === item.assetKind
+    && descriptor.mimeType === item.mimeType
+    && descriptor.byteSize === item.byteSize
+    && descriptor.width === item.width
+    && descriptor.height === item.height
+    && descriptor.checksum === item.checksum;
+}
+
+function assetMatchesSnapshot(
+  asset: Asset | null,
+  version: AssetVersion | null,
+  context: CanvasSharePublicSnapshotContext,
+  item: CanvasShareItemRecord,
+): asset is Asset {
+  const { record } = context.snapshot;
+  return Boolean(
+    asset
+    && version
+    && asset.id === item.assetId
+    && asset.ownerId === record.ownerId
+    && asset.projectId === record.projectId
+    && asset.kind === item.assetKind
+    && version.id === item.assetVersionId
+    && version.assetId === item.assetId
+    && version.ownerId === record.ownerId
+    && version.projectId === record.projectId
+    && version.file.availability === 'ready',
+  );
+}
+
+export async function readPublicCanvasShareMedia(
+  input: ReadPublicCanvasShareMediaInput,
+  dependencies: ReadPublicCanvasShareMediaDependencies = {
+    now: () => new Date(),
+    hashToken: hashCanvasShareToken,
+    withActiveSnapshot: withActiveCanvasShareSnapshot,
+    getMediaDescriptor: getManagedAssetMediaDescriptor,
+    readMedia: readManagedAssetVersionBytes,
+  },
+): Promise<CanvasSharePublicMediaResult> {
+  const accessedAt = dependencies.now();
+  if (!Number.isFinite(accessedAt.getTime())) return notFound();
+  return dependencies.withActiveSnapshot(
+    dependencies.hashToken(input.token),
+    accessedAt.toISOString(),
+    async context => {
+      const { record, items } = context.snapshot;
+      assertCanvasShareSnapshotIntegrity(record, items, context.expectedItemCount);
+      if (input.download && !record.allowDownload) {
+        throw new CanvasShareError('CANVAS_SHARE_DOWNLOAD_DISABLED');
+      }
+      const item = resolveCanvasSharePublicItem(record, items, input.itemRef);
+      const [asset, version] = await Promise.all([
+        context.findAsset(record.ownerId, record.projectId, item.assetId),
+        context.findVersion(record.ownerId, record.projectId, item.assetVersionId),
+      ]);
+      if (!assetMatchesSnapshot(asset, version, context, item) || !version) {
+        return mediaUnavailable();
+      }
+      let descriptor: ManagedAssetMediaDescriptor;
+      try {
+        descriptor = await dependencies.getMediaDescriptor(version, item.assetKind);
+      } catch (error) {
+        if (error instanceof CanvasShareError) return mediaUnavailable();
+        throw error;
+      }
+      if (!descriptorMatchesSnapshot(descriptor, version, item)) return mediaUnavailable();
+      const range = resolvePublicMediaRange(
+        input.rangeHeader,
+        item.assetKind,
+        descriptor.byteSize,
+      );
+      const maxBytes = item.assetKind === 'image'
+        ? PUBLIC_IMAGE_MAX_BYTES
+        : range
+          ? PUBLIC_VIDEO_RANGE_MAX_BYTES
+          : PUBLIC_VIDEO_MAX_BYTES;
+      let result: ManagedMediaReadResult;
+      try {
+        result = await dependencies.readMedia(version, item.assetKind, {
+          maxBytes,
+          ...(range ? { range } : {}),
+        });
+      } catch (error) {
+        if (error instanceof CanvasShareError) return mediaUnavailable();
+        throw error;
+      }
+      const expectedBytes = range
+        ? range.end - range.start + 1
+        : descriptor.byteSize;
+      if (
+        result.mimeType !== descriptor.mimeType
+        || result.totalBytes !== descriptor.byteSize
+        || result.bytes.byteLength !== expectedBytes
+        || (range && (
+          result.range?.start !== range.start
+          || result.range.end !== range.end
+        ))
+      ) return mediaUnavailable();
       return {
-        itemRef: item.id,
-        entityType: item.entityType,
-        assetKind: item.assetKind,
-        transform: item.transform,
-        display: item.displayMetadata,
-        mimeType: item.mimeType,
-        width: item.width,
-        height: item.height,
-        mediaPath,
-        ...(viewed.allowDownload ? { downloadPath: `${mediaPath}/download` } : {}),
+        bytes: result.bytes,
+        mimeType: result.mimeType,
+        totalBytes: result.totalBytes,
+        ...(range ? { range } : {}),
+        fileName: createCanvasShareDownloadFileName(record, item),
       };
-    }),
-  };
+    },
+  );
 }

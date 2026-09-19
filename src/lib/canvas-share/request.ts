@@ -133,6 +133,94 @@ export function canvasShareErrorResponse(
   return withPrivateNoStore(response);
 }
 
+const PUBLIC_ROBOTS_POLICY = 'noindex, nofollow, noarchive';
+
+export function applyCanvasSharePublicHeaders(response: NextResponse): NextResponse {
+  response.headers.set('Cache-Control', 'private, no-store');
+  response.headers.set('Pragma', 'no-cache');
+  response.headers.set('X-Content-Type-Options', 'nosniff');
+  response.headers.set('X-Robots-Tag', PUBLIC_ROBOTS_POLICY);
+  return response;
+}
+
+export function canvasSharePublicDataResponse(
+  data: unknown,
+  status = 200,
+): NextResponse {
+  return applyCanvasSharePublicHeaders(NextResponse.json(data, { status }));
+}
+
+interface CanvasSharePublicTransportError {
+  code: string;
+  message: string;
+  status: number;
+  retryAfterSeconds?: number;
+}
+
+function isCanvasSharePublicTransportError(
+  error: unknown,
+): error is CanvasSharePublicTransportError {
+  return typeof error === 'object'
+    && error !== null
+    && 'code' in error
+    && typeof error.code === 'string'
+    && 'message' in error
+    && typeof error.message === 'string'
+    && 'status' in error
+    && typeof error.status === 'number';
+}
+
+function normalizePublicCanvasShareError(error: unknown): CanvasSharePublicTransportError {
+  if (error instanceof CanvasShareError) {
+    if (error.code === 'CANVAS_SHARE_DOWNLOAD_DISABLED') return error;
+    if (error.code === 'CANVAS_SHARE_MEDIA_UNAVAILABLE') return error;
+    return new CanvasShareError('CANVAS_SHARE_NOT_FOUND');
+  }
+  if (isCanvasSharePublicTransportError(error)) {
+    if (error.code === 'CANVAS_SHARE_RATE_LIMITED' && error.status === 429) {
+      return {
+        code: error.code,
+        message: '请求过于频繁，请稍后重试',
+        status: 429,
+        retryAfterSeconds: Number.isFinite(error.retryAfterSeconds)
+          ? Math.max(1, Math.ceil(error.retryAfterSeconds ?? 1))
+          : 60,
+      };
+    }
+    if (error.code === 'CANVAS_SHARE_RANGE_NOT_SATISFIABLE' && error.status === 416) {
+      return {
+        code: error.code,
+        message: '媒体范围请求无效',
+        status: 416,
+      };
+    }
+  }
+  return {
+    code: 'CANVAS_SHARE_REQUEST_FAILED',
+    message: '画布分享请求失败',
+    status: 500,
+  };
+}
+
+export function canvasSharePublicErrorResponse(
+  request: NextRequest,
+  error: unknown,
+): NextResponse {
+  const requestId = getRequestId(request);
+  const resolved = normalizePublicCanvasShareError(error);
+  const response = NextResponse.json({
+    success: false,
+    code: resolved.code,
+    message: resolved.message,
+    requestId,
+  }, { status: resolved.status });
+  response.headers.set('x-request-id', requestId);
+  if (resolved.status === 429) {
+    response.headers.set('Retry-After', String(resolved.retryAfterSeconds ?? 60));
+  }
+  return applyCanvasSharePublicHeaders(response);
+}
+
 export function isCanvasShareEnabled(): boolean {
   return process.env.WUJIE_CANVAS_SHARE_ENABLED === 'true';
 }
