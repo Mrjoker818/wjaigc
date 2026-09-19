@@ -29,7 +29,7 @@ export function SharedCanvasToolbar({
     <nav
       data-toolbar="shared-canvas"
       aria-label="只读画布工具栏"
-      className="pointer-events-auto flex max-w-[calc(100%-1rem)] flex-wrap items-center justify-center gap-2 rounded-xl border border-border bg-toolbar-bg/95 p-2 shadow-float backdrop-blur"
+      className="pointer-events-auto flex max-w-[calc(100vw-1rem)] flex-nowrap items-center justify-center gap-1 rounded-xl border border-border bg-toolbar-bg/95 p-1 shadow-float backdrop-blur sm:gap-2 sm:p-2"
     >
       <button type="button" className={controlClassName} onClick={onFit} aria-label="适应画面" title="适应画面">
         <Expand className="h-5 w-5" aria-hidden="true" />
@@ -39,7 +39,7 @@ export function SharedCanvasToolbar({
       </button>
       <output
         aria-label="当前比例"
-        className="flex h-11 min-w-16 items-center justify-center rounded-lg px-2 text-sm font-medium tabular-nums text-muted-foreground"
+        className="flex h-11 min-w-12 items-center justify-center rounded-lg px-1 text-xs font-medium tabular-nums text-muted-foreground sm:min-w-16 sm:px-2 sm:text-sm"
       >
         {Math.round(scale * 100)}%
       </output>

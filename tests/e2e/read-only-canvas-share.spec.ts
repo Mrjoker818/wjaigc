@@ -1,108 +1,114 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect } from '@playwright/test';
 
-const fixtureToken = 'T'.repeat(43);
-const fixtureItemRef = `csr_${'I'.repeat(43)}`;
-const metadataPath = `/api/public/canvas-shares/${fixtureToken}`;
-const mediaPath = `${metadataPath}/media/${fixtureItemRef}`;
-const onePixelPng = Buffer.from(
-  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
-  'base64',
-);
+import {
+  downloadPath,
+  expectNoForbiddenRequests,
+  fixtureToken,
+  imagePath,
+  installReadOnlyShareFixture,
+  metadataPath,
+  publicShareFixture,
+  test,
+  videoPath,
+} from '../helpers/read-only-canvas-share-e2e';
 
-const publicFixture = {
-  title: '基础只读画布夹具',
-  revisionLabel: '修订 3',
-  createdAt: '2026-09-19T00:00:00.000Z',
-  allowDownload: false,
-  viewport: { offsetX: 32, offsetY: 48, zoom: 1 },
-  items: [{
-    itemRef: fixtureItemRef,
-    entityType: 'canvas-image',
-    assetKind: 'image',
-    transform: { x: 40, y: 60, width: 320, height: 240, rotation: 0, zIndex: 1 },
-    display: { label: '夹具图片', altText: '基础测试夹具图片' },
-    mimeType: 'image/png',
-    width: 320,
-    height: 240,
-    mediaPath: `media/${fixtureItemRef}`,
-  }],
-};
+const desktopProjects = new Set(['chromium', 'firefox', 'webkit']);
 
-async function installValidShareFixture(page: Page): Promise<void> {
-  await page.route('**/api/public/canvas-shares/**', async route => {
-    const url = new URL(route.request().url());
-    if (url.pathname === mediaPath) {
-      await route.fulfill({
-        status: 200,
-        contentType: 'image/png',
-        body: onePixelPng,
-        headers: { 'Cache-Control': 'private, no-store' },
-      });
-      return;
-    }
-    if (url.pathname === metadataPath) {
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify(publicFixture),
-      });
-      return;
-    }
-    await route.fulfill({ status: 404, body: '' });
+test.use({ trace: 'on', screenshot: 'on' });
+
+test.describe('只读画布分享桌面浏览器矩阵', () => {
+  test.beforeEach(async ({}, testInfo) => {
+    test.skip(!desktopProjects.has(testInfo.project.name), '桌面分享矩阵只在既有 Chromium/Firefox/WebKit 项目运行');
   });
-}
 
-test.describe('只读画布分享基础夹具', () => {
-  test('渲染公开快照并保持请求只读', async ({ page }) => {
-    const requests: Array<{ method: string; pathname: string }> = [];
-    page.on('request', request => {
-      const url = new URL(request.url());
-      if (url.pathname.startsWith('/api/')) {
-        requests.push({ method: request.method(), pathname: url.pathname });
-      }
-    });
-    await installValidShareFixture(page);
-
+  test('有效分享：fit、zoom、pan、preview 均保持只读', async ({ page, shareEvidence }) => {
+    await installReadOnlyShareFixture(page);
     await page.goto(`/shared/canvas/${fixtureToken}`);
 
-    await expect(page.getByRole('heading', { name: publicFixture.title })).toBeVisible();
-    await expect(page.getByText(publicFixture.revisionLabel, { exact: false })).toBeVisible();
+    const fixture = publicShareFixture();
+    await expect(page.getByRole('heading', { name: fixture.title })).toBeVisible();
+    await expect(page.getByText(fixture.revisionLabel, { exact: false })).toBeVisible();
     await expect(page.getByRole('navigation', { name: '只读画布工具栏' })).toBeVisible();
     await expect(page.getByAltText('基础测试夹具图片')).toBeVisible();
-    await expect(page.getByRole('link', { name: '下载当前内容' })).toHaveCount(0);
+    const video = page.getByLabel('基础测试夹具视频');
+    await expect(video).toHaveAttribute('playsinline', '');
+    await expect(video).not.toHaveAttribute('autoplay', '');
+    await expect(page.getByText('此内容暂不可用')).toBeVisible();
 
+    const content = page.getByTestId('shared-canvas-content');
+    const initialScale = Number(await content.getAttribute('data-scale'));
+    await page.getByRole('button', { name: '适应画面' }).click();
+    const fittedScale = Number(await content.getAttribute('data-scale'));
+    expect(fittedScale).not.toBe(initialScale);
     await page.getByRole('button', { name: '放大画布' }).click();
-    await expect(page.getByLabel('当前比例')).toHaveText('120%');
-    await page.getByRole('button', { name: '预览夹具图片' }).click();
+    await expect.poll(async () => Number(await content.getAttribute('data-scale'))).toBeCloseTo(fittedScale * 1.2, 5);
+
+    const viewport = page.getByRole('region', { name: '共享画布视口' });
+    const viewportBox = await viewport.boundingBox();
+    expect(viewportBox).not.toBeNull();
+    const offsetBefore = await content.getAttribute('data-offset-x');
+    await page.mouse.move(viewportBox!.x + viewportBox!.width - 80, viewportBox!.y + 80);
+    await page.mouse.down();
+    await page.mouse.move(viewportBox!.x + viewportBox!.width - 32, viewportBox!.y + 112, { steps: 4 });
+    await page.mouse.up();
+    await expect(content).not.toHaveAttribute('data-offset-x', offsetBefore ?? '');
+
+    const previewTrigger = page.getByRole('button', { name: '预览夹具图片' });
+    await previewTrigger.click();
     await expect(page.getByRole('dialog', { name: '媒体预览' })).toBeVisible();
     await page.keyboard.press('Escape');
     await expect(page.getByRole('dialog', { name: '媒体预览' })).toHaveCount(0);
+    await expect(previewTrigger).toBeFocused();
 
-    expect(requests).toEqual(expect.arrayContaining([
+    expect(shareEvidence.apiRequests).toEqual(expect.arrayContaining([
       { method: 'GET', pathname: metadataPath },
-      { method: 'GET', pathname: mediaPath },
+      { method: 'GET', pathname: imagePath },
+      { method: 'GET', pathname: videoPath },
     ]));
-    expect(requests.every(request => request.method === 'GET')).toBe(true);
-    expect(requests.every(request => (
-      request.pathname === metadataPath || request.pathname === mediaPath
-    ))).toBe(true);
+    expectNoForbiddenRequests(shareEvidence);
   });
 
-  test('统一显示失效链接', async ({ page }) => {
-    await page.route(`**${metadataPath}`, route => route.fulfill({
-      status: 404,
-      contentType: 'application/json',
-      body: JSON.stringify({
-        code: 'CANVAS_SHARE_NOT_FOUND',
-        message: '画布分享不存在或已失效',
-        requestId: 'req_0123456789abcdef',
-      }),
-    }));
-
+  test('失效分享：统一错误且不触发写入或编辑请求', async ({ page, shareEvidence }) => {
+    await installReadOnlyShareFixture(page, { invalid: true });
     await page.goto(`/shared/canvas/${fixtureToken}`);
 
     await expect(page.getByRole('heading', { name: '分享不存在或已失效' })).toBeVisible();
     await expect(page.getByText('已撤销')).toHaveCount(0);
     await expect(page.getByText('已过期')).toHaveCount(0);
+    expectNoForbiddenRequests(shareEvidence);
+  });
+
+  test('下载关闭：按钮不存在且受控下载接口拒绝', async ({ page, shareEvidence }) => {
+    await installReadOnlyShareFixture(page);
+    await page.goto(`/shared/canvas/${fixtureToken}`);
+    await expect(page.getByRole('heading', { name: publicShareFixture().title })).toBeVisible();
+
+    await expect(page.getByRole('link', { name: /下载/u })).toHaveCount(0);
+    const responseStatus = await page.evaluate(async path => (await fetch(path)).status, downloadPath);
+    expect(responseStatus).toBe(403);
+    expect(shareEvidence.apiRequests.filter(request => request.pathname === downloadPath)).toEqual([
+      { method: 'GET', pathname: downloadPath },
+    ]);
+    expectNoForbiddenRequests(shareEvidence);
+  });
+
+  test('下载开启：下载按钮只调用分享作用域受控路径', async ({ page, shareEvidence }) => {
+    await installReadOnlyShareFixture(page, { allowDownload: true });
+    await page.goto(`/shared/canvas/${fixtureToken}`);
+    await expect(page.getByRole('heading', { name: publicShareFixture(true).title })).toBeVisible();
+
+    await page.getByRole('button', { name: '预览夹具图片' }).click();
+    const downloadLink = page.getByRole('link', { name: '下载预览内容' });
+    await expect(downloadLink).toHaveAttribute('href', downloadPath);
+    const downloadEvent = page.waitForEvent('download');
+    await downloadLink.click();
+    const download = await downloadEvent;
+    expect(download.suggestedFilename()).toBe('share-image.png');
+    await download.cancel();
+
+    expect(shareEvidence.apiRequests.filter(request => request.pathname.endsWith('/download'))).toEqual([
+      { method: 'GET', pathname: downloadPath },
+    ]);
+    expectNoForbiddenRequests(shareEvidence);
   });
 });

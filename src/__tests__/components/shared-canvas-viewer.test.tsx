@@ -581,7 +581,7 @@ describe('shared canvas viewer', () => {
     expect(document.activeElement).toBe(trigger);
   });
 
-  it('traps forward and reverse focus inside the media preview without a backdrop tab stop', async () => {
+  it('wraps Tab from the last preview control to the first and Shift+Tab back to the last', async () => {
     renderViewer({
       ...publicDocument,
       allowDownload: true,
@@ -591,24 +591,40 @@ describe('shared canvas viewer', () => {
       }],
     });
     const trigger = screen.getByRole('button', { name: '预览主视觉' });
-    const outsideControl = screen.getByRole('button', { name: '放大画布' });
     fireEvent.click(trigger);
-    const dialog = screen.getByRole('dialog', { name: '媒体预览' });
     const close = screen.getByRole('button', { name: '关闭预览' });
     const download = screen.getByRole('link', { name: '下载预览内容' });
 
     expect(screen.queryByRole('button', { name: '关闭媒体预览背景' })).toBeNull();
-    expect(dialog.contains(document.activeElement)).toBe(true);
-
     close.focus();
     fireEvent.keyDown(close, { key: 'Tab' });
-    outsideControl.focus();
-    expect(dialog.contains(document.activeElement)).toBe(true);
+    await waitFor(() => expect(document.activeElement).toBe(download));
 
     download.focus();
     fireEvent.keyDown(download, { key: 'Tab', shiftKey: true });
-    outsideControl.focus();
-    expect(dialog.contains(document.activeElement)).toBe(true);
+    await waitFor(() => expect(document.activeElement).toBe(close));
+  });
+
+  it('prevents a media long-press context menu without exposing editor actions', () => {
+    renderViewer();
+    const media = screen.getByRole('button', { name: '预览主视觉' });
+    const contextMenu = new MouseEvent('contextmenu', { bubbles: true, cancelable: true });
+
+    expect(media.dispatchEvent(contextMenu)).toBe(false);
+    expect(contextMenu.defaultPrevented).toBe(true);
+    expect(screen.queryByRole('menu')).toBeNull();
+    expect(document.querySelector('[data-toolbar="image-actions"]')).toBeNull();
+  });
+
+  it('closes an open preview on browser back without leaving the shared page', async () => {
+    renderViewer();
+    fireEvent.click(screen.getByRole('button', { name: '预览主视觉' }));
+    expect(screen.getByRole('dialog', { name: '媒体预览' })).toBeTruthy();
+
+    fireEvent.popState(window);
+
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '媒体预览' })).toBeNull());
+    expect(screen.getByText(publicDocument.title)).toBeTruthy();
   });
 
   it('renders video inline, muted, without audible autoplay', () => {

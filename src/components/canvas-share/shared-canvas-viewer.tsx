@@ -46,6 +46,16 @@ interface GestureState {
   distance: number | null;
 }
 
+interface TouchTapCandidate {
+  pointerId: number;
+  start: Point;
+}
+
+interface CompletedTouchTap {
+  at: number;
+  point: Point;
+}
+
 interface Bounds {
   left: number;
   top: number;
@@ -161,6 +171,10 @@ export function SharedCanvasViewer({
   const viewportRef = useRef<HTMLDivElement>(null);
   const activePointersRef = useRef(new Map<number, Point>());
   const gestureRef = useRef<GestureState | null>(null);
+  const touchTapCandidateRef = useRef<TouchTapCandidate | null>(null);
+  const completedTouchTapRef = useRef<CompletedTouchTap | null>(null);
+  const suppressDoubleClickUntilRef = useRef(0);
+  const previewHistoryEntryRef = useRef(false);
   const [viewport, setViewport] = useState<CanvasShareViewport>(() => ({
     offsetX: shareDocument.viewport.offsetX,
     offsetY: shareDocument.viewport.offsetY,
@@ -194,6 +208,16 @@ export function SharedCanvasViewer({
     update();
     media.addEventListener?.('change', update);
     return () => media.removeEventListener?.('change', update);
+  }, []);
+
+  useEffect(() => {
+    const closeFromBrowserBack = (): void => {
+      if (!previewHistoryEntryRef.current) return;
+      previewHistoryEntryRef.current = false;
+      setPreviewItemRef(null);
+    };
+    window.addEventListener('popstate', closeFromBrowserBack);
+    return () => window.removeEventListener('popstate', closeFromBrowserBack);
   }, []);
 
   useEffect(() => {
@@ -262,6 +286,15 @@ export function SharedCanvasViewer({
     if (shouldIgnoreCanvasGesture(event.target)) return;
     const id = pointerId(event);
     activePointersRef.current.set(id, { x: event.clientX, y: event.clientY });
+    if (event.pointerType === 'touch' && activePointersRef.current.size === 1) {
+      touchTapCandidateRef.current = {
+        pointerId: id,
+        start: { x: event.clientX, y: event.clientY },
+      };
+    } else if (activePointersRef.current.size > 1) {
+      touchTapCandidateRef.current = null;
+      completedTouchTapRef.current = null;
+    }
     gestureRef.current = gestureState([...activePointersRef.current.values()]);
     setIsPanning(true);
     event.currentTarget.setPointerCapture?.(id);
@@ -271,6 +304,13 @@ export function SharedCanvasViewer({
     const id = pointerId(event);
     if (!activePointersRef.current.has(id)) return;
     activePointersRef.current.set(id, { x: event.clientX, y: event.clientY });
+    const tapCandidate = touchTapCandidateRef.current;
+    if (
+      tapCandidate?.pointerId === id
+      && Math.hypot(event.clientX - tapCandidate.start.x, event.clientY - tapCandidate.start.y) > 10
+    ) {
+      touchTapCandidateRef.current = null;
+    }
     const nextGesture = gestureState([...activePointersRef.current.values()]);
     const previousGesture = gestureRef.current;
     if (!nextGesture || !previousGesture) return;
@@ -310,11 +350,32 @@ export function SharedCanvasViewer({
 
   const releasePointer = useCallback((event: ReactPointerEvent<HTMLDivElement>): void => {
     const id = pointerId(event);
+    const tapCandidate = touchTapCandidateRef.current;
+    if (event.pointerType === 'touch' && tapCandidate?.pointerId === id) {
+      const now = performance.now();
+      const previousTap = completedTouchTapRef.current;
+      const localPoint = clientPointToViewportLocal(event.currentTarget, event.clientX, event.clientY);
+      if (
+        previousTap
+        && now - previousTap.at <= 320
+        && Math.hypot(event.clientX - previousTap.point.x, event.clientY - previousTap.point.y) <= 32
+      ) {
+        completedTouchTapRef.current = null;
+        suppressDoubleClickUntilRef.current = now + 400;
+        zoomAt(ZOOM_STEP, localPoint);
+      } else {
+        completedTouchTapRef.current = {
+          at: now,
+          point: { x: event.clientX, y: event.clientY },
+        };
+      }
+    }
+    touchTapCandidateRef.current = null;
     activePointersRef.current.delete(id);
     gestureRef.current = gestureState([...activePointersRef.current.values()]);
     setIsPanning(activePointersRef.current.size > 0);
     event.currentTarget.releasePointerCapture?.(id);
-  }, []);
+  }, [zoomAt]);
 
   const handleWheel = useCallback((event: ReactWheelEvent<HTMLDivElement>): void => {
     if (shouldIgnoreCanvasGesture(event.target)) return;
@@ -355,9 +416,24 @@ export function SharedCanvasViewer({
     itemRefValue: string,
     trigger: HTMLElement,
   ): void => {
+    if (!previewHistoryEntryRef.current) {
+      const currentState = window.history.state;
+      const nextState = currentState && typeof currentState === 'object'
+        ? { ...currentState, __wujieSharedCanvasPreview: true }
+        : { __wujieSharedCanvasPreview: true };
+      window.history.pushState(nextState, '', window.location.href);
+      previewHistoryEntryRef.current = true;
+    }
     setPreviewTrigger(trigger);
     setFocusedItemRef(itemRefValue);
     setPreviewItemRef(itemRefValue);
+  }, []);
+
+  const closePreview = useCallback((): void => {
+    setPreviewItemRef(null);
+    if (!previewHistoryEntryRef.current) return;
+    previewHistoryEntryRef.current = false;
+    window.history.back();
   }, []);
 
   const preview = resolvedItems.find(({ item }) => item.itemRef === previewItemRef);
@@ -368,7 +444,7 @@ export function SharedCanvasViewer({
     <div
       ref={rootRef}
       data-shared-canvas-viewer
-      className="flex h-[100dvh] min-h-[100dvh] w-full flex-col overflow-hidden bg-background text-foreground"
+      className="flex h-[100dvh] min-h-[100dvh] w-full select-none flex-col overflow-hidden overscroll-none bg-background text-foreground"
     >
       <header className="flex min-h-16 shrink-0 items-center justify-between gap-3 border-b border-border bg-panel-bg/95 px-3 py-2 backdrop-blur sm:px-6">
         <div className="flex min-w-0 items-center gap-3">
@@ -377,7 +453,13 @@ export function SharedCanvasViewer({
           </div>
           <div className="min-w-0">
             <h1 className="truncate text-sm font-semibold text-text-bright sm:text-base">{shareDocument.title}</h1>
-            <p className="truncate text-xs text-muted-foreground">{shareDocument.revisionLabel} · 只读分享</p>
+            <p
+              className="truncate text-xs text-muted-foreground"
+              aria-label={`${shareDocument.revisionLabel} · 只读分享`}
+            >
+              <span className="hidden min-[376px]:inline">{shareDocument.revisionLabel} · </span>
+              <span>只读分享</span>
+            </p>
           </div>
         </div>
         <span className="shrink-0 rounded-full border border-border bg-muted px-3 py-1 text-xs text-muted-foreground">
@@ -399,6 +481,7 @@ export function SharedCanvasViewer({
         onWheel={handleWheel}
         onDoubleClick={event => {
           if (shouldIgnoreCanvasGesture(event.target)) return;
+          if (performance.now() < suppressDoubleClickUntilRef.current) return;
           if (event.shiftKey) fitCanvas();
           else zoomAt(
             ZOOM_STEP,
@@ -406,7 +489,6 @@ export function SharedCanvasViewer({
           );
         }}
         onContextMenu={event => {
-          if (shouldIgnoreCanvasGesture(event.target)) return;
           event.preventDefault();
         }}
         onKeyDown={event => {
@@ -489,7 +571,10 @@ export function SharedCanvasViewer({
           </div>
         ) : null}
 
-        <div className="pointer-events-none absolute inset-x-0 bottom-0 flex justify-center p-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] sm:p-4">
+        <div
+          data-shared-toolbar-shell
+          className="pointer-events-none absolute inset-x-0 bottom-0 flex justify-center px-2 pt-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] sm:p-4"
+        >
           <SharedCanvasToolbar
             scale={viewport.zoom}
             isFullscreen={isFullscreen}
@@ -519,7 +604,7 @@ export function SharedCanvasViewer({
           source={preview.mediaUrl}
           downloadPath={preview.downloadUrl ?? undefined}
           returnFocusTo={previewTrigger}
-          onClose={() => setPreviewItemRef(null)}
+          onClose={closePreview}
           onError={() => markFailed(preview.item.itemRef)}
         />
       ) : null}

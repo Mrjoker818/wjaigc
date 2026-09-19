@@ -37,6 +37,7 @@ export function SharedCanvasMedia({
         className={className}
         playsInline
         muted
+        draggable={false}
         controls={controls}
         preload="metadata"
         onError={onError}
