@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { CanvasShareError } from '@/lib/canvas-share/errors';
 import {
@@ -9,6 +9,28 @@ import {
 import type { CanvasShareRecord } from '@/lib/canvas-share/types';
 
 describe('canvas share token contract', () => {
+  it('requests exactly 32 bytes from node:crypto for every token', async () => {
+    vi.resetModules();
+    const actualCrypto = await vi.importActual<typeof import('node:crypto')>('node:crypto');
+    const randomBytes = vi.fn((size: number) => actualCrypto.randomBytes(size));
+    vi.doMock('node:crypto', () => ({
+      ...actualCrypto,
+      randomBytes,
+    }));
+
+    try {
+      const tokenModule = await import('@/lib/canvas-share/token');
+      const token = tokenModule.createCanvasShareToken();
+
+      expect(randomBytes).toHaveBeenCalledOnce();
+      expect(randomBytes).toHaveBeenCalledWith(32);
+      expect(Buffer.from(token, 'base64url')).toHaveLength(32);
+    } finally {
+      vi.doUnmock('node:crypto');
+      vi.resetModules();
+    }
+  });
+
   it('generates URL-safe tokens backed by at least 32 random bytes', () => {
     const tokens = Array.from({ length: 32 }, () => createCanvasShareToken());
 

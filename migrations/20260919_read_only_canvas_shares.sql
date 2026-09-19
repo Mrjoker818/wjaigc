@@ -20,7 +20,10 @@ CREATE TABLE IF NOT EXISTS wujie_canvas_shares (
   CONSTRAINT wujie_canvas_shares_revision_check
     CHECK (project_revision >= 0),
   CONSTRAINT wujie_canvas_shares_token_hash_check
-    CHECK (char_length(token_hash) BETWEEN 1 AND 128),
+    CHECK (
+      char_length(token_hash) = 64
+      AND token_hash ~ '^[0-9a-f]{64}$'
+    ),
   CONSTRAINT wujie_canvas_shares_title_check
     CHECK (char_length(btrim(title)) BETWEEN 1 AND 200),
   CONSTRAINT wujie_canvas_shares_status_check
@@ -40,6 +43,11 @@ CREATE TABLE IF NOT EXISTS wujie_canvas_shares (
   CONSTRAINT wujie_canvas_shares_expiry_check
     CHECK (expires_at IS NULL OR expires_at > created_at)
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS wujie_workspace_placements_share_source_unique
+  ON wujie_workspace_placements (id, asset_id, asset_version_id, entity_type);
+CREATE UNIQUE INDEX IF NOT EXISTS wujie_assets_share_kind_unique
+  ON wujie_assets (id, kind);
 
 CREATE TABLE IF NOT EXISTS wujie_canvas_share_items (
   id TEXT PRIMARY KEY,
@@ -63,19 +71,21 @@ CREATE TABLE IF NOT EXISTS wujie_canvas_share_items (
     FOREIGN KEY (share_id)
     REFERENCES wujie_canvas_shares(id)
     ON DELETE CASCADE,
-  CONSTRAINT wujie_canvas_share_items_placement_fk
-    FOREIGN KEY (placement_id)
-    REFERENCES wujie_workspace_placements(id),
-  CONSTRAINT wujie_canvas_share_items_asset_fk
-    FOREIGN KEY (asset_id)
-    REFERENCES wujie_assets(id),
-  CONSTRAINT wujie_canvas_share_items_asset_version_fk
-    FOREIGN KEY (asset_version_id)
-    REFERENCES wujie_asset_versions(id),
+  CONSTRAINT wujie_canvas_share_items_source_fk
+    FOREIGN KEY (placement_id, asset_id, asset_version_id, entity_type)
+    REFERENCES wujie_workspace_placements(id, asset_id, asset_version_id, entity_type),
+  CONSTRAINT wujie_canvas_share_items_asset_kind_fk
+    FOREIGN KEY (asset_id, asset_kind)
+    REFERENCES wujie_assets(id, kind),
   CONSTRAINT wujie_canvas_share_items_entity_type_check
     CHECK (entity_type IN ('canvas-image', 'canvas-video')),
   CONSTRAINT wujie_canvas_share_items_asset_kind_check
     CHECK (asset_kind IN ('image', 'video')),
+  CONSTRAINT wujie_canvas_share_items_entity_asset_pair_check
+    CHECK (
+      (entity_type = 'canvas-image' AND asset_kind = 'image')
+      OR (entity_type = 'canvas-video' AND asset_kind = 'video')
+    ),
   CONSTRAINT wujie_canvas_share_items_transform_check
     CHECK (jsonb_typeof(transform) = 'object'),
   CONSTRAINT wujie_canvas_share_items_display_metadata_check
@@ -101,7 +111,10 @@ CREATE TABLE IF NOT EXISTS wujie_canvas_share_rate_windows (
   window_start TIMESTAMPTZ NOT NULL,
   attempt_count BIGINT NOT NULL DEFAULT 0,
   CONSTRAINT wujie_canvas_share_rate_windows_scope_digest_check
-    CHECK (char_length(scope_digest) BETWEEN 1 AND 128),
+    CHECK (
+      char_length(scope_digest) = 64
+      AND scope_digest ~ '^[0-9a-f]{64}$'
+    ),
   CONSTRAINT wujie_canvas_share_rate_windows_route_bucket_check
     CHECK (char_length(route_bucket) BETWEEN 1 AND 100),
   CONSTRAINT wujie_canvas_share_rate_windows_attempt_count_check
