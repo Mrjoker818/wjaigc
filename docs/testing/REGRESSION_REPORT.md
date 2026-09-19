@@ -3256,3 +3256,16 @@ Result: local Stage 4 Task 4 regression **passed**. This does not replace Coze e
 - 本轮未创建供应商任务、未扣积分、未修改 `stable`，也未重复已经通过的图像、视频恢复、取消退款和配额测试。
 
 **回归判定：缩略图回填机制已有真实云端增量证据，但 Task 9 的目标六变体精确枚举与网关投影仍未闭环；状态保持 `CLOUD EVIDENCE PARTIAL`。**
+
+## 2026-09-19 V588-MEDIA-001 Task 9 缩略图与网关投影闭环
+
+- 在已恢复的 Coze 沙箱中执行了新的只读数据库验收。三个 Task 9 图像 AssetVersion 的 `256/512` 六条目标记录全部存在且均为 `ready`；没有 `failed`、`pending` 或 `processing` 行。
+- 六个受管缩略图 URL 均返回 HTTP 200、`image/webp`，并通过 `RIFF...WEBP` 文件魔数校验。实际读取字节依次为：`83837e7e/256=14128`、`83837e7e/512=43538`、`d2d11b23/256=1294`、`d2d11b23/512=3130`、`f7dbd4b2/256=14128`、`f7dbd4b2/512=43538`。
+- 完整复用 `thumbnail-backfill.ts` 的候选条件执行只读计数，`undiscovered candidate count=0`。历史 36 条失败仍统一为不可恢复的远端 HTTP 403，未重复提交或重试。
+- 在不修改 `.env.local`、不重启 5000 主服务的前提下，以临时 5001 进程启用网关。短期 Key `gwkey_4dc47979...` 仅用于读取三个既有任务；三个接口均返回 HTTP 200、`completed`，每项都包含 `thumbnailUrls.256` 与 `thumbnailUrls.512`，且 `previewUrl` 严格等于 512 变体。
+- 网关投影返回的六个变体 URL 再次通过 HTTP 200 与 `image/webp` 验证。本轮没有创建、取消或重试供应商任务，没有积分消费。
+- 清理阶段已撤销临时 Key，数据库确认 `enabled=false` 且 `revoked_at` 非空；撤销记录作为审计行保留。Secret、原始响应、临时脚本和临时凭据均已删除，5001 已停止且无监听。
+- 验收清理完成时 5000 主服务仍为 PID `3070`；Coze 随后为“无仓库变更”的验收记录生成版本 `be002b6c4ca8`，平台生命周期把 5000 服务换为 PID `4344`。最终任务接口仍返回 HTTP 503、`GATEWAY_DISABLED`，5001 仍无监听；因此记录为“主服务最终健康且默认关闭”，不把 PID 写成未变化。云端工作区保持 clean，`stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 未修改。
+- 脱敏临时证据写入 `/tmp/task9-thumbnail-readonly-evidence.json` 与 `/tmp/task9-gateway-projection-evidence.json`，未进入云端仓库。独立 SQL 复核临时 Key `gwkey_4dc47979-eed9-4abe-9a9c-90da0625f3ed` 为 `enabled=false`、`revoked=true`；Secret 未输出。
+
+**回归判定：Task 9 的缩略图回填、目标六变体交付和网关投影缺口已闭环，功能范围更新为 `CLOUD PASS / CLOSED WITH EVIDENCE DEFERRALS`。** 同步直返视频因当前没有可确认供应商、`n=2` 浏览器逐槽时间差以及本轮录像/Trace/Network 仍明确标记未验证，不得由本次结果替代；这些证据延期不回退已经验证的网关功能，也不代表全平台发布通过。

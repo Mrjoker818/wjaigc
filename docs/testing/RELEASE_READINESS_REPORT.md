@@ -2489,3 +2489,13 @@ The focused gate test passes `7/7`; the actual protected-baseline command passes
 - 云端既有 worker 已把缩略图表推进到 `764 ready / 36 failed`；失败全部为历史源图 HTTP 403，不是网关任务状态机或新 AssetVersion 投影失败。
 - 当前只能逐条证明一个 Task 9 目标变体为 ready 且有 URL，不能从截断输出推断其余五条。网关默认关闭与沙箱 HTTP 500 也意味着 `thumbnailUrls`/`previewUrl` 尚未取得新鲜响应证据。
 - **发布结论不变：Task 9 约 98%，全平台仍不通过。** 沙箱恢复后只需无付费复核六条目标变体和三个既有任务的网关缩略图投影；同步直返视频、`n=2` 浏览器逐槽时间差以及录像/Trace/Network 继续明确列为未验证。`stable` 保持只读。
+
+## 2026-09-19 V588-MEDIA-001 Task 9 最终发布补充
+
+- Coze 真库已重新精确枚举三个 Task 9 AssetVersion 的六条 `256/512` 记录：`6/6 ready`。六个 URL 均为 HTTP 200、`image/webp`，且 WebP 文件魔数有效。
+- 使用与生产 worker 完全一致的发现条件执行只读计数，未发现新的缩略图候选：`undiscovered candidate count=0`。历史 36 条远端 HTTP 403 失败没有被再次重试。
+- 独立临时 5001 网关实例对三个既有任务均返回 HTTP 200、`completed`；每个任务都投影 `thumbnailUrls.256/.512`，并以 512 变体作为 `previewUrl`。六个投影 URL 全部可交付。
+- 临时 Key 已撤销并保留撤销审计行，Secret 与临时文件已删除；5001 无残留监听。验收清理时 5000 为 PID `3070`，随后 Coze 的无源码变更验收版本触发平台服务换代为 PID `4344`；最终 5000 仍健康并返回 503 `GATEWAY_DISABLED`。`stable` 未修改，本轮无供应商任务和积分消费。
+- **Task 9 功能验收范围更新为 100%，状态为 `CLOUD PASS / CLOSED WITH EVIDENCE DEFERRALS`。** 同步直返视频供应商不可用、`n=2` 浏览器逐槽时间差以及本轮录像/Trace/Network 继续列为未验证证据项，不冒充通过。
+
+**发布结论：媒体网关 Task 9 可关闭，但全平台仍不通过。** 后续阶段、既有未验证模块及全平台回归仍需按正式目标继续；不得更新或修改 `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7`。

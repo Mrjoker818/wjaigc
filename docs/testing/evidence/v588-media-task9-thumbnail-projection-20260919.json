@@ -1,0 +1,130 @@
+{
+  "task": "V588-MEDIA-001 Task 9 thumbnail projection closeout",
+  "testedAt": "2026-09-19T18:48:59+08:00",
+  "environment": {
+    "cozeProject": "7671964106919837702",
+    "cloudRuntimeHeadBeforeAcceptance": "90d797f8247256db04d61be6e267ffbd4aa283c8",
+    "cloudHeadAfterNoSourceChangeAcceptanceVersion": "be002b6c4ca8",
+    "runtimeCodeBase": "5a424761296dcf9c067226b96918010e4d38e29d",
+    "stable": "52f7c601ed150769e15d06fb435c6e360e28c9e7",
+    "mainServicePort": 5000,
+    "mainServicePidAtAcceptanceCleanup": 3070,
+    "mainServicePidAtIndependentFinalVerification": 4344,
+    "temporaryGatewayPort": 5001,
+    "temporaryGatewayPid": 3211
+  },
+  "thumbnailVariants": [
+    {
+      "assetVersionId": "83837e7e-5816-4ea0-ab86-fd5d2ae8e1bb",
+      "size": 256,
+      "status": "ready",
+      "httpStatus": 200,
+      "contentType": "image/webp",
+      "bytesRead": 14128,
+      "webpMagicValid": true
+    },
+    {
+      "assetVersionId": "83837e7e-5816-4ea0-ab86-fd5d2ae8e1bb",
+      "size": 512,
+      "status": "ready",
+      "httpStatus": 200,
+      "contentType": "image/webp",
+      "bytesRead": 43538,
+      "webpMagicValid": true
+    },
+    {
+      "assetVersionId": "d2d11b23-9265-43f0-b1c5-2cc48994d978",
+      "size": 256,
+      "status": "ready",
+      "httpStatus": 200,
+      "contentType": "image/webp",
+      "bytesRead": 1294,
+      "webpMagicValid": true
+    },
+    {
+      "assetVersionId": "d2d11b23-9265-43f0-b1c5-2cc48994d978",
+      "size": 512,
+      "status": "ready",
+      "httpStatus": 200,
+      "contentType": "image/webp",
+      "bytesRead": 3130,
+      "webpMagicValid": true
+    },
+    {
+      "assetVersionId": "f7dbd4b2-b411-4e18-92b0-c4a4cb280791",
+      "size": 256,
+      "status": "ready",
+      "httpStatus": 200,
+      "contentType": "image/webp",
+      "bytesRead": 14128,
+      "webpMagicValid": true
+    },
+    {
+      "assetVersionId": "f7dbd4b2-b411-4e18-92b0-c4a4cb280791",
+      "size": 512,
+      "status": "ready",
+      "httpStatus": 200,
+      "contentType": "image/webp",
+      "bytesRead": 43538,
+      "webpMagicValid": true
+    }
+  ],
+  "undiscoveredCandidateCount": 0,
+  "gatewayProjection": [
+    {
+      "taskId": "async-1789343318868-0-3pa2pv",
+      "status": "completed",
+      "httpStatus": 200,
+      "assetVersionId": "d2d11b23-9265-43f0-b1c5-2cc48994d978",
+      "thumbnail256": true,
+      "thumbnail512": true,
+      "previewUses512": true
+    },
+    {
+      "taskId": "async-1789343437587-0-s1wbtm",
+      "status": "completed",
+      "httpStatus": 200,
+      "assetVersionId": "83837e7e-5816-4ea0-ab86-fd5d2ae8e1bb",
+      "thumbnail256": true,
+      "thumbnail512": true,
+      "previewUses512": true
+    },
+    {
+      "taskId": "async-1789343437587-1-2fnubw",
+      "status": "completed",
+      "httpStatus": 200,
+      "assetVersionId": "f7dbd4b2-b411-4e18-92b0-c4a4cb280791",
+      "thumbnail256": true,
+      "thumbnail512": true,
+      "previewUses512": true
+    }
+  ],
+  "temporaryCredential": {
+    "keyId": "gwkey_4dc47979-eed9-4abe-9a9c-90da0625f3ed",
+    "secretPrinted": false,
+    "revoked": true,
+    "enabledAfterCleanup": false,
+    "revokedAtPresent": true
+  },
+  "cleanup": {
+    "secretDeleted": true,
+    "rawResponsesDeleted": true,
+    "temporaryScriptsDeleted": true,
+    "temporaryGatewayStopped": true,
+    "port5001ListeningAfterCleanup": false,
+    "port5000PidUnchanged": false,
+    "mainServiceRestartRequested": false,
+    "mainServiceRecycledByCozeAcceptanceVersion": true,
+    "port5000GatewayHttpStatus": 503,
+    "port5000GatewayCode": "GATEWAY_DISABLED",
+    "paidProviderTaskCreated": false,
+    "creditsConsumed": false,
+    "stableModified": false
+  },
+  "deferredEvidence": [
+    "synchronous direct-return video provider path",
+    "browser-visible n=2 per-slot completion time gap",
+    "fresh video, trace and full network artifacts"
+  ],
+  "verdict": "CLOUD_PASS_CLOSED_WITH_EVIDENCE_DEFERRALS"
+}
