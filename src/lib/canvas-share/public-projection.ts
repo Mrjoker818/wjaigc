@@ -13,8 +13,10 @@ const PUBLIC_ITEM_REF_PREFIX = 'csr_';
 const PUBLIC_ITEM_REF_PATTERN = /^csr_[A-Za-z0-9_-]{43}$/u;
 const PUBLIC_TEXT_CONTROL_PATTERN = /[\u0000-\u001f\u007f-\u009f]/gu;
 const PUBLIC_TEXT_BIDI_PATTERN = /[\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/gu;
-const PUBLIC_TEXT_URL_PATTERN = /(?:\b[a-z][a-z\d+.-]*:\/\/|(?:data|blob|javascript|file|mailto):|\/\/)/iu;
-const PUBLIC_TEXT_HTML_PATTERN = /[<>]/u;
+const PUBLIC_TEXT_SCHEME_PATTERN = /\b[a-z][a-z\d+.-]*:/iu;
+const PUBLIC_TEXT_SCHEME_RELATIVE_PATTERN = /\/\//u;
+const PUBLIC_TEXT_HOST_PATTERN = /(?:\bwww\.|\b(?:[a-z\d](?:[a-z\d-]{0,62}[a-z\d])?\.)+[a-z]{2,63}(?::\d{1,5})?(?:[/?#]|\b)|\b(?:\d{1,3}\.){3}\d{1,3}(?::\d{1,5})?(?:[/?#]|\b))/iu;
+const PUBLIC_TEXT_HTML_PATTERN = /[<>]|&(?:lt|gt|#0*60|#0*62|#x0*3c|#x0*3e);/iu;
 
 function invalidShare(): never {
   throw new CanvasShareError('CANVAS_SHARE_NOT_FOUND');
@@ -114,7 +116,6 @@ export function resolveCanvasSharePublicItem(
 
 function publicSafeText(value: string | undefined, maxLength: number): string | undefined {
   if (value === undefined) return undefined;
-  if (PUBLIC_TEXT_URL_PATTERN.test(value) || PUBLIC_TEXT_HTML_PATTERN.test(value)) return undefined;
   const normalized = value
     .normalize('NFC')
     .replace(PUBLIC_TEXT_CONTROL_PATTERN, ' ')
@@ -123,6 +124,13 @@ function publicSafeText(value: string | undefined, maxLength: number): string | 
     .trim()
     .slice(0, maxLength)
     .trim();
+  const inspectionValue = normalized.normalize('NFKC');
+  if (
+    PUBLIC_TEXT_SCHEME_PATTERN.test(inspectionValue)
+    || PUBLIC_TEXT_SCHEME_RELATIVE_PATTERN.test(inspectionValue)
+    || PUBLIC_TEXT_HOST_PATTERN.test(inspectionValue)
+    || PUBLIC_TEXT_HTML_PATTERN.test(inspectionValue)
+  ) return undefined;
   return normalized || undefined;
 }
 

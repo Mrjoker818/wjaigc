@@ -962,6 +962,7 @@ describe('canvas-share service creation boundary', () => {
       withActiveSnapshot: async (_tokenHash, _accessedAt, operation) => operation({
         snapshot: { record: validRecord, items: [item] },
         expectedItemCount: 1,
+        database: { query: vi.fn() },
         incrementView,
         findAsset: vi.fn(),
         findVersion: vi.fn(),

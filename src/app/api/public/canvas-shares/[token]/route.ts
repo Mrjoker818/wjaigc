@@ -31,11 +31,12 @@ export async function GET(
     const token = parseCanvasSharePublicToken((await context.params).token);
     const tokenDigest = hashCanvasShareToken(token);
     const document = await readPublicCanvasShare(token, {
-      onAuthorized: () => enforceCanvasSharePublicRateLimit({
+      onAuthorized: database => enforceCanvasSharePublicRateLimit({
         tokenDigest,
         itemScope: 'metadata',
         ipAddress: getCanvasShareRequestIp(request.headers),
         routeBucket: 'metadata',
+        database,
       }),
     });
     return canvasSharePublicDataResponse(document);

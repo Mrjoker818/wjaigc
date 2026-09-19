@@ -14,12 +14,22 @@ const database = vi.hoisted(() => {
     shareRow: Record<string, unknown> | null;
     itemRow: Record<string, unknown> | null;
     queries: string[];
+    activeLeases: number;
+    barrierTarget: number;
+    barrierArrivals: number;
+    barrierWaiters: Array<() => void>;
+    globalPoolQueries: number;
   } = {
     shareRow: null,
     itemRow: null,
     queries: [],
+    activeLeases: 0,
+    barrierTarget: 0,
+    barrierArrivals: 0,
+    barrierWaiters: [],
+    globalPoolQueries: 0,
   };
-  const query = vi.fn(async (queryText: string) => {
+  const runQuery = async (queryText: string): Promise<{ rows: unknown[] }> => {
     const normalized = queryText.replace(/\s+/gu, ' ').trim();
     state.queries.push(normalized);
     if (normalized === 'BEGIN' || normalized === 'COMMIT' || normalized === 'ROLLBACK') {
@@ -29,6 +39,14 @@ const database = vi.hoisted(() => {
       return { rows: state.shareRow ? [state.shareRow] : [] };
     }
     if (normalized.includes('FROM wujie_canvas_share_items')) {
+      if (state.barrierTarget > 0) {
+        state.barrierArrivals += 1;
+        if (state.barrierArrivals === state.barrierTarget) {
+          for (const releaseBarrier of state.barrierWaiters.splice(0)) releaseBarrier();
+        } else {
+          await new Promise<void>(resolve => state.barrierWaiters.push(resolve));
+        }
+      }
       return { rows: state.itemRow ? [state.itemRow] : [] };
     }
     if (normalized.includes('INSERT INTO wujie_canvas_share_rate_windows')) {
@@ -40,14 +58,33 @@ const database = vi.hoisted(() => {
       };
     }
     throw new Error(`Unexpected boundary SQL: ${normalized}`);
+  };
+  const transactionQuery = vi.fn(runQuery);
+  const release = vi.fn();
+  const connect = vi.fn(async () => {
+    if (state.activeLeases >= 5) throw new Error('BOUNDARY_POOL_MAX_EXCEEDED');
+    state.activeLeases += 1;
+    let released = false;
+    return {
+      query: transactionQuery,
+      release: () => {
+        if (released) return;
+        released = true;
+        state.activeLeases -= 1;
+        release();
+      },
+    };
   });
-  const client = { query, release: vi.fn() };
-  const connect = vi.fn(async () => client);
+  const poolQuery = vi.fn(async (queryText: string) => {
+    state.globalPoolQueries += 1;
+    if (state.activeLeases >= 5) throw new Error('BOUNDARY_POOL_STARVATION');
+    return runQuery(queryText);
+  });
   const pool = {
     connect,
-    query,
+    query: poolQuery,
   } as unknown as Pool;
-  return { state, query, client, connect, pool };
+  return { state, transactionQuery, poolQuery, release, connect, pool };
 });
 
 vi.mock('@/lib/db-client', () => ({
@@ -59,6 +96,8 @@ import {
   computeCanvasShareSnapshotDigestForRead,
 } from '@/lib/canvas-share/service';
 import { createCanvasSharePublicItemRef } from '@/lib/canvas-share/public-projection';
+import { enforceCanvasSharePublicRateLimit } from '@/lib/canvas-share/public-rate-limit';
+import { withActiveCanvasShareMediaSnapshot } from '@/lib/canvas-share/storage';
 
 const rawToken = 'B'.repeat(43);
 const tokenDigest = createHash('sha256').update(rawToken).digest('hex');
@@ -72,8 +111,14 @@ describe('canvas-share public route/service/storage boundary', () => {
   beforeEach(() => {
     vi.stubEnv('WUJIE_CANVAS_SHARE_ENABLED', 'true');
     database.state.queries.length = 0;
-    database.query.mockClear();
-    database.client.release.mockClear();
+    database.state.activeLeases = 0;
+    database.state.barrierTarget = 0;
+    database.state.barrierArrivals = 0;
+    database.state.barrierWaiters.length = 0;
+    database.state.globalPoolQueries = 0;
+    database.transactionQuery.mockClear();
+    database.poolQuery.mockClear();
+    database.release.mockClear();
     database.connect.mockClear();
 
     const item: CanvasShareItemRecord = {
@@ -195,6 +240,53 @@ describe('canvas-share public route/service/storage boundary', () => {
     expect(lifecycleIndex).toBeGreaterThan(-1);
     expect(rateIndex).toBeGreaterThan(lifecycleIndex);
     expect(viewIndex).toBeGreaterThan(rateIndex);
-    expect(database.client.release).toHaveBeenCalledOnce();
+    expect(database.release).toHaveBeenCalledOnce();
+  });
+
+  it('reuses each locked transaction client at max pool concurrency', async () => {
+    database.state.barrierTarget = 5;
+
+    const responses = await Promise.all(Array.from({ length: 5 }, () => getPublicShare(
+      new NextRequest(`http://localhost/api/public/canvas-shares/${rawToken}`),
+      routeContext(),
+    )));
+
+    expect(responses.map(response => response.status)).toEqual([200, 200, 200, 200, 200]);
+    expect(database.connect).toHaveBeenCalledTimes(5);
+    expect(database.release).toHaveBeenCalledTimes(5);
+    expect(database.state.globalPoolQueries).toBe(0);
+  });
+
+  it('rolls back the transaction-scoped rate write if locked media work later fails', async () => {
+    const mediaFailure = new Error('managed media read failed');
+
+    await expect(withActiveCanvasShareMediaSnapshot(
+      tokenDigest,
+      '2026-09-19T12:00:00.000Z',
+      async context => {
+        await enforceCanvasSharePublicRateLimit({
+          tokenDigest,
+          itemScope: 'media:boundary-item',
+          ipAddress: 'unknown',
+          routeBucket: 'media',
+          now: new Date('2026-09-19T12:00:00.000Z'),
+          database: context.database,
+        });
+        throw mediaFailure;
+      },
+      database.pool,
+    )).rejects.toBe(mediaFailure);
+
+    const lockIndex = database.state.queries.findIndex(query => query.includes('FOR SHARE'));
+    const rateIndex = database.state.queries.findIndex(
+      query => query.includes('INSERT INTO wujie_canvas_share_rate_windows'),
+    );
+    const rollbackIndex = database.state.queries.indexOf('ROLLBACK');
+    expect(lockIndex).toBeGreaterThan(-1);
+    expect(rateIndex).toBeGreaterThan(lockIndex);
+    expect(rollbackIndex).toBeGreaterThan(rateIndex);
+    expect(database.state.queries).not.toContain('COMMIT');
+    expect(database.state.globalPoolQueries).toBe(0);
+    expect(database.release).toHaveBeenCalledOnce();
   });
 });

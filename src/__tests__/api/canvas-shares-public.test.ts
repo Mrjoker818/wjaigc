@@ -26,6 +26,7 @@ const mocks = vi.hoisted(() => ({
   readPublicCanvasShareMedia: vi.fn(),
   enforceCanvasSharePublicRateLimit: vi.fn(),
 }));
+const transactionDatabase = { query: vi.fn() };
 
 vi.mock('@/lib/canvas-share/service', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/canvas-share/service')>()),
@@ -217,6 +218,49 @@ describe('canvas-share explicit public projection', () => {
     ]) expect(serialized).not.toContain(forbidden);
   });
 
+  it.each([
+    ['scheme without slashes', 'https:private-secret'],
+    ['arbitrary absolute scheme', 'ftp:private-secret'],
+    ['javascript scheme', 'javascript:alert(1)'],
+    ['data scheme', 'data:text/html,private-secret'],
+    ['bidi-hidden scheme', 'java\u202Escript:alert(1)'],
+    ['scheme-relative URL', '//private.example/secret'],
+    ['URL-like host', 'www.private.example/secret'],
+    ['HTML-like markup', '<svg onload=alert(1)>'],
+  ])('rejects normalized public text containing %s', (_caseName, unsafeText) => {
+    const projected = projectCanvasShareForPublic({
+      ...record,
+      title: unsafeText,
+    }, [{
+      ...item,
+      displayMetadata: { label: unsafeText, altText: unsafeText },
+    }]);
+
+    expect(projected.title).toBe('共享画布');
+    expect(projected.items[0].display).toEqual({});
+    expect(JSON.stringify(projected)).not.toContain('private-secret');
+    expect(JSON.stringify(projected)).not.toContain('alert(1)');
+  });
+
+  it('preserves ordinary Chinese, accessible alt text, and numeric colon notation', () => {
+    const projected = projectCanvasShareForPublic({
+      ...record,
+      title: '客户审阅画布 16:9',
+    }, [{
+      ...item,
+      displayMetadata: {
+        label: '主视觉海报',
+        altText: '蓝色产品海报，画面比例 16:9，时间 10:30',
+      },
+    }]);
+
+    expect(projected.title).toBe('客户审阅画布 16:9');
+    expect(projected.items[0].display).toEqual({
+      label: '主视觉海报',
+      altText: '蓝色产品海报，画面比例 16:9，时间 10:30',
+    });
+  });
+
   it('uses a different item reference for the same internal item under another share digest', () => {
     expect(createCanvasSharePublicItemRef('b'.repeat(64), item.id)).not.toBe(itemRef);
   });
@@ -355,15 +399,15 @@ describe('canvas-share public API', () => {
     mocks.enforceCanvasSharePublicRateLimit.mockResolvedValue(undefined);
     mocks.readPublicCanvasShare.mockImplementation(async (
       _token: string,
-      options?: { onAuthorized?(): Promise<void> },
+      options?: { onAuthorized?(database: typeof transactionDatabase): Promise<void> },
     ) => {
-      await options?.onAuthorized?.();
+      await options?.onAuthorized?.(transactionDatabase);
       return publicDocument;
     });
     mocks.readPublicCanvasShareMedia.mockImplementation(async (
-      input: { onAuthorized?(): Promise<void> },
+      input: { onAuthorized?(database: typeof transactionDatabase): Promise<void> },
     ) => {
-      await input.onAuthorized?.();
+      await input.onAuthorized?.(transactionDatabase);
       return {
         bytes: Buffer.from([1, 2, 3, 4]),
         mimeType: 'image/png',
@@ -398,6 +442,7 @@ describe('canvas-share public API', () => {
       itemScope: 'metadata',
       ipAddress: '203.0.113.7',
       routeBucket: 'metadata',
+      database: transactionDatabase,
     }));
     expect(JSON.stringify(mocks.enforceCanvasSharePublicRateLimit.mock.calls)).not.toContain(rawToken);
   });
@@ -423,15 +468,27 @@ describe('canvas-share public API', () => {
     expect(mocks.enforceCanvasSharePublicRateLimit).toHaveBeenCalledTimes(3);
     expect(mocks.enforceCanvasSharePublicRateLimit).toHaveBeenNthCalledWith(
       1,
-      expect.objectContaining({ routeBucket: 'metadata', itemScope: 'metadata' }),
+      expect.objectContaining({
+        routeBucket: 'metadata',
+        itemScope: 'metadata',
+        database: transactionDatabase,
+      }),
     );
     expect(mocks.enforceCanvasSharePublicRateLimit).toHaveBeenNthCalledWith(
       2,
-      expect.objectContaining({ routeBucket: 'media', itemScope: itemRef }),
+      expect.objectContaining({
+        routeBucket: 'media',
+        itemScope: itemRef,
+        database: transactionDatabase,
+      }),
     );
     expect(mocks.enforceCanvasSharePublicRateLimit).toHaveBeenNthCalledWith(
       3,
-      expect.objectContaining({ routeBucket: 'download', itemScope: itemRef }),
+      expect.objectContaining({
+        routeBucket: 'download',
+        itemScope: itemRef,
+        database: transactionDatabase,
+      }),
     );
   });
 
@@ -583,9 +640,9 @@ describe('canvas-share public API', () => {
     if (!mediaHead || !downloadHead) return;
 
     mocks.readPublicCanvasShareMedia.mockImplementation(async (
-      input: { onAuthorized?(): Promise<void> },
+      input: { onAuthorized?(database: typeof transactionDatabase): Promise<void> },
     ) => {
-      await input.onAuthorized?.();
+      await input.onAuthorized?.(transactionDatabase);
       return {
         bytes: null,
         mimeType: 'image/png',
@@ -806,6 +863,7 @@ describe('canvas-share public media authorization', () => {
       withActiveSnapshot: async (_digest, _accessedAt, operation) => operation({
         snapshot: { record: validRecord, items: [item] },
         expectedItemCount: 1,
+        database: transactionDatabase,
         incrementView: vi.fn(),
         findAsset: vi.fn().mockResolvedValue(asset),
         findVersion: vi.fn().mockResolvedValue(version),
@@ -871,6 +929,7 @@ describe('canvas-share public media authorization', () => {
     const context = {
       snapshot: { record: { ...record, snapshotDigest: '' }, items: [item] },
       expectedItemCount: 1,
+      database: transactionDatabase,
       incrementView: vi.fn(),
       findAsset: vi.fn().mockResolvedValue(asset),
       findVersion: vi.fn().mockResolvedValue(version),
@@ -945,6 +1004,7 @@ describe('canvas-share public media authorization', () => {
     const context = {
       snapshot: { record: { ...record, snapshotDigest: '' }, items: [item] },
       expectedItemCount: 1,
+      database: transactionDatabase,
       incrementView: vi.fn(),
       findAsset: vi.fn(),
       findVersion: vi.fn(),
@@ -990,6 +1050,7 @@ describe('canvas-share public media authorization', () => {
       withActiveSnapshot: async (_digest, _accessedAt, operation) => operation({
         snapshot: { record: validRecord, items: [item] },
         expectedItemCount: 1,
+        database: transactionDatabase,
         incrementView: vi.fn(),
         findAsset: vi.fn().mockResolvedValue(null),
         findVersion: vi.fn().mockResolvedValue(null),
@@ -1043,6 +1104,7 @@ describe('canvas-share public media authorization', () => {
       withActiveSnapshot: async (_digest, _accessedAt, operation) => operation({
         snapshot: { record: validRecord, items: [item] },
         expectedItemCount: 1,
+        database: transactionDatabase,
         incrementView: vi.fn(),
         findAsset: vi.fn().mockResolvedValue(asset),
         findVersion: vi.fn().mockResolvedValue(version),

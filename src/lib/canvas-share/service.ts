@@ -440,7 +440,7 @@ export interface ReadPublicCanvasShareDependencies {
 }
 
 export interface ReadPublicCanvasShareOptions {
-  onAuthorized?(): Promise<void>;
+  onAuthorized?(database: CanvasSharePublicSnapshotContext['database']): Promise<void>;
 }
 
 export { computeCanvasShareSnapshotDigestForRead };
@@ -465,7 +465,7 @@ export async function readPublicCanvasShare(
         context.snapshot.items,
         context.expectedItemCount,
       );
-      await options.onAuthorized?.();
+      await options.onAuthorized?.(context.database);
       const viewed = await context.incrementView();
       if (!viewed) return notFound();
       return projectCanvasShareForPublic(viewed, context.snapshot.items);
@@ -493,7 +493,7 @@ export interface ReadPublicCanvasShareMediaInput {
   download: boolean;
   rangeHeader: string | null;
   headOnly?: boolean;
-  onAuthorized?(): Promise<void>;
+  onAuthorized?(database: CanvasSharePublicSnapshotContext['database']): Promise<void>;
 }
 
 export interface CanvasSharePublicMediaResult {
@@ -631,7 +631,7 @@ export async function readPublicCanvasShareMedia(
         throw error;
       }
       if (!descriptorMatchesSnapshot(descriptor, version, item)) return mediaUnavailable();
-      await input.onAuthorized?.();
+      await input.onAuthorized?.(context.database);
       const range = resolvePublicMediaRange(
         input.rangeHeader,
         item.assetKind,

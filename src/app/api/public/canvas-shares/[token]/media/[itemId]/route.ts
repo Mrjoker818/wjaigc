@@ -40,11 +40,12 @@ async function handleMediaRequest(
       download: false,
       rangeHeader: request.headers.get('range'),
       headOnly,
-      onAuthorized: () => enforceCanvasSharePublicRateLimit({
+      onAuthorized: database => enforceCanvasSharePublicRateLimit({
         tokenDigest,
         itemScope: itemRef,
         ipAddress: getCanvasShareRequestIp(request.headers),
         routeBucket: 'media',
+        database,
       }),
     });
     if (!headOnly && media.bytes === null) {

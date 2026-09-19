@@ -356,6 +356,7 @@ export async function incrementCanvasShareView(
 export interface CanvasSharePublicSnapshotContext {
   snapshot: StoredCanvasShareSnapshot;
   expectedItemCount: number;
+  database: Pick<Pool, 'query'>;
   incrementView(): Promise<CanvasShareRecord | null>;
   findAsset(ownerId: string, projectId: string, assetId: string): Promise<Asset | null>;
   findVersion(ownerId: string, projectId: string, versionId: string): Promise<AssetVersion | null>;
@@ -396,6 +397,7 @@ async function withLockedActiveCanvasShareSnapshot<T>(
     return operation({
       snapshot,
       expectedItemCount: Number(row.item_count),
+      database: client,
       incrementView: () => incrementCanvasShareView(row.id, accessedAt, client),
       findAsset: (ownerId, projectId, assetId) => (
         assetStorage.findAsset(ownerId, projectId, assetId)
