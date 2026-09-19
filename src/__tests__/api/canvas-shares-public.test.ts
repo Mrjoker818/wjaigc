@@ -231,6 +231,12 @@ describe('canvas-share explicit public projection', () => {
     ['scheme-relative URL', '//private.example/secret'],
     ['URL-like host', 'www.private.example/secret'],
     ['Unicode IDN host', '例子.公司/private-secret'],
+    ['Unicode IDNA ideographic dot host', '例子。公司/private-secret'],
+    ['Unicode IDNA fullwidth dot host', '例子．公司/private-secret'],
+    ['Unicode IDNA halfwidth dot host', '例子｡公司/private-secret'],
+    ['ASCII host before comma', 'visit example.com, private-secret'],
+    ['ASCII host before closing parenthesis', 'visit (example.com) private-secret'],
+    ['ASCII host before sentence period', 'visit example.com. private-secret'],
     ['bracketed IPv6 host', '[::1]/private-secret'],
     ['HTML-like markup', '<svg onload=alert(1)>'],
   ])('rejects normalized public text containing %s', (_caseName, unsafeText) => {
@@ -248,10 +254,29 @@ describe('canvas-share explicit public projection', () => {
     expect(JSON.stringify(projected)).not.toContain('alert(1)');
   });
 
+  it.each([
+    'http', 'https', 'ftp', 'ftps', 'file', 'data', 'javascript', 'vbscript',
+    'blob', 'ws', 'wss', 'irc', 'ircs', 'mailto', 'tel', 'ssh', 'sftp',
+    'ldap', 'ldaps', 'news', 'nntp', 'magnet', 'intent', 'about',
+  ])('rejects known network or executable scheme %s even with spaced payload', scheme => {
+    const unsafeText = `${scheme}: public-secret`;
+    const projected = projectCanvasShareForPublic({
+      ...record,
+      title: unsafeText,
+    }, [{
+      ...item,
+      displayMetadata: { label: unsafeText, altText: unsafeText },
+    }]);
+
+    expect(projected.title).toBe('共享画布');
+    expect(projected.items[0].display).toEqual({});
+    expect(JSON.stringify(projected)).not.toContain('public-secret');
+  });
+
   it('preserves spaced prose colons, ordinary multilingual alt text, numeric colons, and emoji graphemes', () => {
     const projected = projectCanvasShareForPublic({
       ...record,
-      title: '版本 A: 正式稿 👩‍💻',
+      title: '版本 A: 正式稿，版本 1.2 正式稿 👩‍💻 ❤️ 1️⃣ 🇨🇳 👍🏽',
     }, [{
       ...item,
       displayMetadata: {
@@ -260,11 +285,27 @@ describe('canvas-share explicit public projection', () => {
       },
     }]);
 
-    expect(projected.title).toBe('版本 A: 正式稿 👩‍💻');
+    expect(projected.title).toBe('版本 A: 正式稿，版本 1.2 正式稿 👩‍💻 ❤️ 1️⃣ 🇨🇳 👍🏽');
     expect(projected.items[0].display).toEqual({
       label: 'Poster: blue product ❤️',
       altText: '蓝色产品海报 Blue product poster，画面比例 16:9，时间 10:30',
     });
+  });
+
+  it('removes invalid emoji tags and leading, trailing, or repeated ZWJ while keeping base glyphs', () => {
+    const projected = projectCanvasShareForPublic({
+      ...record,
+      title: '🏴\u{E0061}\u{E007F} 👩\u200D',
+    }, [{
+      ...item,
+      displayMetadata: {
+        label: '\u200D👩 👩\u200D\u200D💻',
+      },
+    }]);
+
+    expect(projected.title).toBe('🏴 👩');
+    expect(projected.items[0].display).toEqual({ label: '👩 👩💻' });
+    expect(JSON.stringify(projected)).not.toMatch(/[\u200D\u{E0020}-\u{E007F}]/u);
   });
 
   it('uses a different item reference for the same internal item under another share digest', () => {

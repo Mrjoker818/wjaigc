@@ -13,20 +13,25 @@ const PUBLIC_ITEM_REF_PREFIX = 'csr_';
 const PUBLIC_ITEM_REF_PATTERN = /^csr_[A-Za-z0-9_-]{43}$/u;
 const PUBLIC_TEXT_CONTROL_PATTERN = /[\u0000-\u001f\u007f-\u009f]/gu;
 const PUBLIC_TEXT_IGNORABLE_OR_FORMAT_PATTERN = /[\p{Cf}\p{Default_Ignorable_Code_Point}]/gu;
-const PUBLIC_TEXT_EXTENDED_PICTOGRAPHIC_PATTERN = /\p{Extended_Pictographic}/u;
-const PUBLIC_TEXT_ASCII_WORD_PATTERN = /[A-Za-z0-9]/u;
-const PUBLIC_TEXT_EMOJI_FORMAT_PATTERN = /[\u200d\ufe0e\ufe0f\u{e0020}-\u{e007f}]/u;
-const PUBLIC_TEXT_DANGEROUS_SCHEME_PATTERN = /\b(?:https?|ftps?|sftp|wss?|ssh|git|javascript|data|blob|file|mailto|tel):/iu;
+const PUBLIC_TEXT_EMOJI_TAG_PATTERN = /[\u{e0020}-\u{e007f}]/gu;
+const PUBLIC_TEXT_EMOJI_ATOM = String.raw`(?:\p{Emoji_Modifier_Base}(?:\uFE0E|\uFE0F)?\p{Emoji_Modifier}|\p{Extended_Pictographic}(?:\uFE0E|\uFE0F)?)`;
+const PUBLIC_TEXT_STRUCTURED_EMOJI_PATTERN = new RegExp(
+  String.raw`^(?:[#*0-9]\uFE0F?\u20E3|\p{Regional_Indicator}{2}|${PUBLIC_TEXT_EMOJI_ATOM}(?:\u200D${PUBLIC_TEXT_EMOJI_ATOM})*)$`,
+  'u',
+);
+const PUBLIC_TEXT_DANGEROUS_SCHEME_PATTERN = /\b(?:https?|ftps?|file|data|javascript|vbscript|blob|wss?|ircs?|mailto|tel|ssh|sftp|ldaps?|news|nntp|magnet|intent|about|git):/iu;
 const PUBLIC_TEXT_COMPACT_SCHEME_PATTERN = /\b[a-z][a-z\d+.-]*:[^\s]/iu;
 const PUBLIC_TEXT_SCHEME_RELATIVE_PATTERN = /\/\//u;
 const PUBLIC_TEXT_DOMAIN_LABEL = String.raw`[\p{L}\p{N}](?:[\p{L}\p{N}-]{0,61}[\p{L}\p{N}])?`;
-const PUBLIC_TEXT_DOMAIN_PATTERN = new RegExp(
-  String.raw`(?:^|[^\p{L}\p{N}_-])(?:www\.)?(?:${PUBLIC_TEXT_DOMAIN_LABEL}\.)+${PUBLIC_TEXT_DOMAIN_LABEL}(?::\d{1,5})?(?=$|[\s/?#])`,
-  'iu',
+const PUBLIC_TEXT_DOMAIN_CANDIDATE_PATTERN = new RegExp(
+  String.raw`(?:^|[^\p{L}\p{N}_-])((?:www\.)?(?:${PUBLIC_TEXT_DOMAIN_LABEL}\.)+${PUBLIC_TEXT_DOMAIN_LABEL}(?::\d{1,5})?)`,
+  'giu',
 );
-const PUBLIC_TEXT_IPV4_PATTERN = /(?:^|[^\d.])(?:\d{1,3}\.){3}\d{1,3}(?::\d{1,5})?(?=$|[\s/?#])/u;
-const PUBLIC_TEXT_BRACKETED_IPV6_PATTERN = /\[[0-9a-f:.]*:[0-9a-f:.]*\](?::\d{1,5})?(?=$|[\s/?#])/iu;
+const PUBLIC_TEXT_LETTER_PATTERN = /\p{L}/u;
+const PUBLIC_TEXT_IPV4_PATTERN = /(?:^|[^\d.])(?:\d{1,3}\.){3}\d{1,3}(?::\d{1,5})?/u;
+const PUBLIC_TEXT_BRACKETED_IPV6_PATTERN = /\[[0-9a-f:.]*:[0-9a-f:.]*\](?::\d{1,5})?/iu;
 const PUBLIC_TEXT_HTML_PATTERN = /[<>]|&(?:lt|gt|#0*60|#0*62|#x0*3c|#x0*3e);/iu;
+const PUBLIC_TEXT_IDNA_DOT_PATTERN = /[\u3002\uff0e\uff61]/gu;
 const PUBLIC_TEXT_GRAPHEME_SEGMENTER = new Intl.Segmenter('und', { granularity: 'grapheme' });
 
 function invalidShare(): never {
@@ -125,29 +130,41 @@ export function resolveCanvasSharePublicItem(
   return invalidShare();
 }
 
-function removePublicTextDefaultIgnorables(value: string): string {
+function sanitizePublicTextGrapheme(segment: string): string {
+  const withoutTags = segment.replace(PUBLIC_TEXT_EMOJI_TAG_PATTERN, '');
+  if (PUBLIC_TEXT_STRUCTURED_EMOJI_PATTERN.test(withoutTags)) return withoutTags;
+  return withoutTags.replace(PUBLIC_TEXT_IGNORABLE_OR_FORMAT_PATTERN, '');
+}
+
+function sanitizePublicTextGraphemes(value: string): string {
   return Array.from(PUBLIC_TEXT_GRAPHEME_SEGMENTER.segment(value), ({ segment }) => {
-    const canPreserveEmojiFormat = PUBLIC_TEXT_EXTENDED_PICTOGRAPHIC_PATTERN.test(segment)
-      && !PUBLIC_TEXT_ASCII_WORD_PATTERN.test(segment);
-    return segment.replace(PUBLIC_TEXT_IGNORABLE_OR_FORMAT_PATTERN, character => (
-      canPreserveEmojiFormat && PUBLIC_TEXT_EMOJI_FORMAT_PATTERN.test(character)
-        ? character
-        : ''
-    ));
+    return sanitizePublicTextGrapheme(segment);
   }).join('');
 }
 
 function publicTextInspectionValue(value: string): string {
   return value
     .replace(PUBLIC_TEXT_IGNORABLE_OR_FORMAT_PATTERN, '')
-    .normalize('NFKC');
+    .normalize('NFKC')
+    .replace(PUBLIC_TEXT_IDNA_DOT_PATTERN, '.');
+}
+
+function containsPublicTextDomain(value: string): boolean {
+  for (const match of value.matchAll(PUBLIC_TEXT_DOMAIN_CANDIDATE_PATTERN)) {
+    const candidate = match[1];
+    if (!candidate) continue;
+    const host = candidate.replace(/:\d{1,5}$/u, '');
+    const finalLabel = host.split('.').at(-1);
+    if (finalLabel && PUBLIC_TEXT_LETTER_PATTERN.test(finalLabel)) return true;
+  }
+  return false;
 }
 
 function containsUnsafePublicText(value: string): boolean {
   return PUBLIC_TEXT_DANGEROUS_SCHEME_PATTERN.test(value)
     || PUBLIC_TEXT_COMPACT_SCHEME_PATTERN.test(value)
     || PUBLIC_TEXT_SCHEME_RELATIVE_PATTERN.test(value)
-    || PUBLIC_TEXT_DOMAIN_PATTERN.test(value)
+    || containsPublicTextDomain(value)
     || PUBLIC_TEXT_IPV4_PATTERN.test(value)
     || PUBLIC_TEXT_BRACKETED_IPV6_PATTERN.test(value)
     || PUBLIC_TEXT_HTML_PATTERN.test(value);
@@ -155,7 +172,7 @@ function containsUnsafePublicText(value: string): boolean {
 
 function publicSafeText(value: string | undefined, maxLength: number): string | undefined {
   if (value === undefined) return undefined;
-  const normalized = removePublicTextDefaultIgnorables(value.normalize('NFC'))
+  const normalized = sanitizePublicTextGraphemes(value.normalize('NFC'))
     .replace(PUBLIC_TEXT_CONTROL_PATTERN, ' ')
     .replace(/\s+/gu, ' ')
     .trim();
