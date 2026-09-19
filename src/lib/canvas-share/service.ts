@@ -15,7 +15,12 @@ import {
 } from '@/lib/asset-core/storage';
 
 import { CanvasShareError } from './errors';
-import { buildCanvasShareSnapshot } from './snapshot';
+import {
+  buildCanvasShareSnapshot,
+  inspectCanvasShareReadiness,
+  type CanvasShareReadinessInspection,
+  type CanvasShareSnapshotSource,
+} from './snapshot';
 import {
   findCanvasShareByTokenHash as findCanvasShareByTokenHashInStorage,
   findCanvasShareForOwner as findCanvasShareForOwnerInStorage,
@@ -115,15 +120,15 @@ function normalizeExpiry(value: string | null | undefined, now: Date): string | 
   return parsed.toISOString();
 }
 
-async function buildCanvasShareSnapshotInTransaction(
+async function prepareCanvasShareSnapshotSource(
   input: CanvasShareSnapshotInspectionInput,
   client: AssetCoreSqlTransaction,
-): Promise<Readonly<CanvasShareSnapshot>> {
+): Promise<CanvasShareSnapshotSource> {
   await lockAssetGraphWriteGate(client, 'shared');
   await lockCanvasProjectRevision(client, input.ownerId);
   const assetStorage = createAssetStorageTransaction(client);
   if (!await assetStorage.findProject(input.ownerId, input.projectId)) unauthorized();
-  return buildCanvasShareSnapshot(input, {
+  return {
     readProjectRevision: ownerId => readCanvasProjectRevision(ownerId, client),
     listActiveCanvasPlacements: (ownerId, projectId) => (
       assetStorage.listActiveCanvasPlacements(ownerId, projectId)
@@ -135,7 +140,15 @@ async function buildCanvasShareSnapshotInTransaction(
       assetStorage.findVersion(ownerId, projectId, versionId)
     ),
     getMediaDescriptor: (version, kind) => getManagedAssetMediaDescriptor(version, kind),
-  });
+  };
+}
+
+async function buildCanvasShareSnapshotInTransaction(
+  input: CanvasShareSnapshotInspectionInput,
+  client: AssetCoreSqlTransaction,
+): Promise<Readonly<CanvasShareSnapshot>> {
+  const source = await prepareCanvasShareSnapshotSource(input, client);
+  return buildCanvasShareSnapshot(input, source);
 }
 
 async function createSnapshotAndInsertPostgres(
@@ -177,10 +190,11 @@ async function createSnapshotAndInsertPostgres(
 
 async function inspectCanvasSharePostgres(
   input: CanvasShareSnapshotInspectionInput,
-): Promise<Readonly<CanvasShareSnapshot>> {
-  return withAssetCoreTransaction(
-    client => buildCanvasShareSnapshotInTransaction(input, client),
-  );
+): Promise<Readonly<CanvasShareReadinessInspection>> {
+  return withAssetCoreTransaction(async client => {
+    const source = await prepareCanvasShareSnapshotSource(input, client);
+    return inspectCanvasShareReadiness(input, source);
+  });
 }
 
 export interface PreflightCanvasShareInput {
@@ -189,37 +203,25 @@ export interface PreflightCanvasShareInput {
   requestedViewport?: Partial<CanvasShareViewport> | null;
 }
 
-export interface CanvasSharePreflightResult {
-  projectRevision: number;
-  itemCount: number;
-  viewport: CanvasShareViewport;
-  readiness: {
-    ready: true;
-    failures: readonly never[];
-  };
-}
+export type CanvasSharePreflightResult = CanvasShareReadinessInspection;
 
 export interface PreflightCanvasShareDependencies {
-  inspect(input: CanvasShareSnapshotInspectionInput): Promise<Readonly<CanvasShareSnapshot>>;
+  inspect(
+    input: CanvasShareSnapshotInspectionInput,
+  ): Promise<Readonly<CanvasShareReadinessInspection>>;
 }
 
 export async function preflightCanvasShare(
   input: PreflightCanvasShareInput,
   dependencies: PreflightCanvasShareDependencies = { inspect: inspectCanvasSharePostgres },
 ): Promise<CanvasSharePreflightResult> {
-  const snapshot = await dependencies.inspect({
+  return dependencies.inspect({
     ownerId: input.actorUserId,
     projectId: input.projectId,
     ...(input.requestedViewport === undefined
       ? {}
       : { requestedViewport: input.requestedViewport }),
   });
-  return {
-    projectRevision: snapshot.projectRevision,
-    itemCount: snapshot.items.length,
-    viewport: snapshot.viewport,
-    readiness: { ready: true, failures: [] },
-  };
 }
 
 function defaultCreateDependencies(): CreateCanvasShareDependencies {

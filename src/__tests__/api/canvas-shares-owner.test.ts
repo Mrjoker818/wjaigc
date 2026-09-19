@@ -52,17 +52,48 @@ const activeShare: CanvasShareRecord = {
 function mutationRequest(
   path: string,
   body: unknown,
-  init: { method?: string; origin?: string; contentType?: string } = {},
+  init: {
+    method?: string;
+    origin?: string;
+    contentType?: string;
+    contentLength?: string;
+  } = {},
 ): NextRequest {
   const headers: Record<string, string> = {
     'Content-Type': init.contentType ?? 'application/json',
   };
   if (init.origin !== '') headers.Origin = init.origin ?? 'http://localhost';
+  if (init.contentLength !== undefined) headers['Content-Length'] = init.contentLength;
   return new NextRequest(`http://localhost${path}`, {
     method: init.method ?? 'POST',
     headers,
     body: typeof body === 'string' ? body : JSON.stringify(body),
   });
+}
+
+function streamedMutationRequest(path: string, chunks: string[]): NextRequest {
+  const encoder = new TextEncoder();
+  let index = 0;
+  const body = new ReadableStream<Uint8Array>({
+    pull(controller) {
+      const chunk = chunks[index];
+      if (chunk === undefined) {
+        controller.close();
+        return;
+      }
+      index += 1;
+      controller.enqueue(encoder.encode(chunk));
+    },
+  });
+  return new NextRequest(`http://localhost${path}`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Origin: 'http://localhost',
+    },
+    body,
+    duplex: 'half',
+  } as unknown as ConstructorParameters<typeof NextRequest>[1]);
 }
 
 function routeContext(shareId = activeShare.id) {
@@ -168,6 +199,33 @@ describe('canvas-share owner API', () => {
     expect(body).toEqual(expect.objectContaining({ code: 'CANVAS_SHARE_REQUEST_INVALID' }));
     expect(JSON.stringify(body)).not.toMatch(/SyntaxError|JSON|position|not-json/iu);
     expect(mocks.createCanvasShare).not.toHaveBeenCalled();
+  });
+
+  it('rejects a declared request body larger than 64 KiB before reading it', async () => {
+    const response = await preflightShare(mutationRequest(
+      '/api/canvas-shares/preflight',
+      { projectId: 'project-1' },
+      { contentLength: String(64 * 1024 + 1) },
+    ));
+
+    expect(response.status).toBe(400);
+    expect(await expectPrivateJson(response)).toEqual(expect.objectContaining({
+      code: 'CANVAS_SHARE_REQUEST_INVALID',
+    }));
+    expect(mocks.preflightCanvasShare).not.toHaveBeenCalled();
+  });
+
+  it('rejects a streamed request body once it exceeds 64 KiB', async () => {
+    const response = await preflightShare(streamedMutationRequest(
+      '/api/canvas-shares/preflight',
+      ['{"projectId":"project-1","padding":"', 'x'.repeat(64 * 1024), '"}'],
+    ));
+
+    expect(response.status).toBe(400);
+    expect(await expectPrivateJson(response)).toEqual(expect.objectContaining({
+      code: 'CANVAS_SHARE_REQUEST_INVALID',
+    }));
+    expect(mocks.preflightCanvasShare).not.toHaveBeenCalled();
   });
 
   it('rejects forged create authority and media relations before the service boundary', async () => {
@@ -382,21 +440,67 @@ describe('canvas-share owner API', () => {
     expect(serialized).not.toContain('version-forged');
   });
 
-  it('returns safe readiness failure details without creating a share', async () => {
-    mocks.preflightCanvasShare.mockRejectedValue(
-      new CanvasShareError('CANVAS_SHARE_MEDIA_NOT_READY'),
-    );
+  it.each([
+    ['unknown top-level field', { projectId: 'project-1', projectNmae: 'typo' }],
+    ['unknown display field', {
+      projectId: 'project-1',
+      displayContext: { projectNmae: 'typo' },
+    }],
+  ])('rejects a preflight %s instead of silently stripping it', async (_name, requestBody) => {
+    const response = await preflightShare(mutationRequest(
+      '/api/canvas-shares/preflight',
+      requestBody,
+    ));
+
+    expect(response.status).toBe(400);
+    expect(await expectPrivateJson(response)).toEqual(expect.objectContaining({
+      code: 'CANVAS_SHARE_REQUEST_INVALID',
+    }));
+    expect(mocks.preflightCanvasShare).not.toHaveBeenCalled();
+  });
+
+  it('returns projected safe readiness failure details without creating a share', async () => {
+    mocks.preflightCanvasShare.mockResolvedValue({
+      projectRevision: 12,
+      itemCount: 2,
+      viewport: { offsetX: 0, offsetY: 0, zoom: 1 },
+      readiness: {
+        ready: false,
+        failures: [{
+          itemIndex: 1,
+          display: { label: '待处理图片' },
+          code: 'CANVAS_SHARE_MEDIA_NOT_READY',
+          message: '画布中有媒体尚未就绪',
+          internalId: 'placement-private',
+          mediaUrl: 'https://private.example/media.png',
+        }],
+      },
+      snapshotDigest: 'private-digest',
+    });
 
     const response = await preflightShare(mutationRequest('/api/canvas-shares/preflight', {
       projectId: 'project-1',
     }));
     const body = await expectPrivateJson(response);
 
-    expect(response.status).toBe(409);
+    expect(response.status).toBe(200);
     expect(body).toEqual(expect.objectContaining({
-      code: 'CANVAS_SHARE_MEDIA_NOT_READY',
-      message: '画布中有媒体尚未就绪',
+      projectRevision: 12,
+      itemCount: 2,
+      viewport: { offsetX: 0, offsetY: 0, zoom: 1 },
+      readiness: {
+        ready: false,
+        failures: [{
+          itemIndex: 1,
+          display: { label: '待处理图片' },
+          code: 'CANVAS_SHARE_MEDIA_NOT_READY',
+          message: '画布中有媒体尚未就绪',
+        }],
+      },
     }));
+    expect(JSON.stringify(body)).not.toContain('placement-private');
+    expect(JSON.stringify(body)).not.toContain('private.example');
+    expect(JSON.stringify(body)).not.toContain('private-digest');
     expect(mocks.createCanvasShare).not.toHaveBeenCalled();
   });
 

@@ -27,7 +27,33 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         ? {}
         : { requestedViewport: input.requestedViewport }),
     });
-    return canvasShareSuccess(request, { ...result });
+    return canvasShareSuccess(request, {
+      projectRevision: result.projectRevision,
+      itemCount: result.itemCount,
+      viewport: {
+        offsetX: result.viewport.offsetX,
+        offsetY: result.viewport.offsetY,
+        zoom: result.viewport.zoom,
+      },
+      readiness: {
+        ready: result.readiness.ready,
+        failures: result.readiness.failures.map(failure => ({
+          itemIndex: failure.itemIndex,
+          ...(failure.display === undefined ? {} : {
+            display: {
+              ...(failure.display.label === undefined
+                ? {}
+                : { label: failure.display.label }),
+              ...(failure.display.altText === undefined
+                ? {}
+                : { altText: failure.display.altText }),
+            },
+          }),
+          code: failure.code,
+          message: failure.message,
+        })),
+      },
+    });
   } catch (error) {
     return canvasShareErrorResponse(request, error);
   }

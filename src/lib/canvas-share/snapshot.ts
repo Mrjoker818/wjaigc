@@ -41,6 +41,28 @@ export interface CanvasShareSnapshot {
   snapshotDigest: string;
 }
 
+export type CanvasShareReadinessFailureCode =
+  | 'CANVAS_SHARE_MEDIA_NOT_READY'
+  | 'CANVAS_SHARE_MEDIA_UNAVAILABLE'
+  | 'CANVAS_SHARE_UNSUPPORTED_ELEMENT';
+
+export interface CanvasShareReadinessFailure {
+  itemIndex: number;
+  display?: CanvasShareSafeDisplayMetadata;
+  code: CanvasShareReadinessFailureCode;
+  message: string;
+}
+
+export interface CanvasShareReadinessInspection {
+  projectRevision: number;
+  itemCount: number;
+  viewport: CanvasShareViewport;
+  readiness: {
+    ready: boolean;
+    failures: readonly Readonly<CanvasShareReadinessFailure>[];
+  };
+}
+
 export interface CanvasShareSnapshotSource {
   readProjectRevision(ownerId: string, projectId: string): Promise<number>;
   listActiveCanvasPlacements(ownerId: string, projectId: string): Promise<WorkspacePlacement[]>;
@@ -220,52 +242,117 @@ function deepFreeze<T>(value: T): Readonly<T> {
   return value;
 }
 
+async function readSnapshotScope(
+  input: BuildCanvasShareSnapshotInput,
+  source: CanvasShareSnapshotSource,
+): Promise<{
+  projectRevision: number;
+  placements: WorkspacePlacement[];
+  viewport: CanvasShareViewport;
+}> {
+  const projectRevision = await source.readProjectRevision(input.ownerId, input.projectId);
+  if (!Number.isSafeInteger(projectRevision) || projectRevision < 0) projectConflict();
+  const placements = await source.listActiveCanvasPlacements(input.ownerId, input.projectId);
+  return {
+    projectRevision,
+    placements,
+    viewport: normalizeViewport(input.requestedViewport),
+  };
+}
+
+async function buildSnapshotItem(
+  input: BuildCanvasShareSnapshotInput,
+  source: CanvasShareSnapshotSource,
+  placement: WorkspacePlacement,
+  sortOrder: number,
+): Promise<CanvasShareSnapshotItem> {
+  assertPlacementScope(placement, input.ownerId, input.projectId);
+  const { entityType, assetKind } = expectedKind(placement);
+  const asset = await source.findAsset(input.ownerId, input.projectId, placement.assetId);
+  assertAssetScope(asset, placement, input.ownerId, input.projectId, assetKind);
+  const version = await source.findVersion(
+    input.ownerId,
+    input.projectId,
+    placement.assetVersionId,
+  );
+  assertVersionScope(version, placement, input.ownerId, input.projectId);
+  const descriptor = await source.getMediaDescriptor(version, assetKind);
+  if (
+    descriptor.assetVersionId !== version.id
+    || descriptor.assetKind !== assetKind
+  ) {
+    projectConflict();
+  }
+  return {
+    placementId: placement.id,
+    assetId: asset.id,
+    assetVersionId: version.id,
+    entityType,
+    assetKind,
+    transform: normalizeTransform(placement, descriptor, sortOrder),
+    displayMetadata: safeDisplayMetadata(placement.metadata),
+    mimeType: descriptor.mimeType,
+    width: descriptor.width,
+    height: descriptor.height,
+    byteSize: descriptor.byteSize,
+    checksum: descriptor.checksum,
+    availability: 'ready',
+    sortOrder,
+  };
+}
+
+function isReadinessFailure(
+  error: unknown,
+): error is CanvasShareError & { code: CanvasShareReadinessFailureCode } {
+  return error instanceof CanvasShareError && [
+    'CANVAS_SHARE_MEDIA_NOT_READY',
+    'CANVAS_SHARE_MEDIA_UNAVAILABLE',
+    'CANVAS_SHARE_UNSUPPORTED_ELEMENT',
+  ].includes(error.code);
+}
+
+export async function inspectCanvasShareReadiness(
+  input: BuildCanvasShareSnapshotInput,
+  source: CanvasShareSnapshotSource,
+): Promise<Readonly<CanvasShareReadinessInspection>> {
+  const { projectRevision, placements, viewport } = await readSnapshotScope(input, source);
+  const failures: CanvasShareReadinessFailure[] = [];
+  for (const [itemIndex, placement] of placements.entries()) {
+    try {
+      await buildSnapshotItem(input, source, placement, itemIndex);
+    } catch (error) {
+      if (!isReadinessFailure(error)) throw error;
+      const display = safeDisplayMetadata(placement.metadata);
+      failures.push({
+        itemIndex,
+        ...(Object.keys(display).length > 0 ? { display } : {}),
+        code: error.code,
+        message: error.message,
+      });
+    }
+  }
+  return deepFreeze({
+    projectRevision,
+    itemCount: placements.length,
+    viewport,
+    readiness: {
+      ready: failures.length === 0,
+      failures,
+    },
+  });
+}
+
 export async function buildCanvasShareSnapshot(
   input: BuildCanvasShareSnapshotInput,
   source: CanvasShareSnapshotSource,
 ): Promise<Readonly<CanvasShareSnapshot>> {
-  const projectRevision = await source.readProjectRevision(input.ownerId, input.projectId);
-  if (!Number.isSafeInteger(projectRevision) || projectRevision < 0) projectConflict();
-  const placements = await source.listActiveCanvasPlacements(input.ownerId, input.projectId);
+  const { projectRevision, placements, viewport } = await readSnapshotScope(input, source);
   const items: CanvasShareSnapshotItem[] = [];
 
   for (const [sortOrder, placement] of placements.entries()) {
-    assertPlacementScope(placement, input.ownerId, input.projectId);
-    const { entityType, assetKind } = expectedKind(placement);
-    const asset = await source.findAsset(input.ownerId, input.projectId, placement.assetId);
-    assertAssetScope(asset, placement, input.ownerId, input.projectId, assetKind);
-    const version = await source.findVersion(
-      input.ownerId,
-      input.projectId,
-      placement.assetVersionId,
-    );
-    assertVersionScope(version, placement, input.ownerId, input.projectId);
-    const descriptor = await source.getMediaDescriptor(version, assetKind);
-    if (
-      descriptor.assetVersionId !== version.id
-      || descriptor.assetKind !== assetKind
-    ) {
-      projectConflict();
-    }
-    items.push({
-      placementId: placement.id,
-      assetId: asset.id,
-      assetVersionId: version.id,
-      entityType,
-      assetKind,
-      transform: normalizeTransform(placement, descriptor, sortOrder),
-      displayMetadata: safeDisplayMetadata(placement.metadata),
-      mimeType: descriptor.mimeType,
-      width: descriptor.width,
-      height: descriptor.height,
-      byteSize: descriptor.byteSize,
-      checksum: descriptor.checksum,
-      availability: 'ready',
-      sortOrder,
-    });
+    items.push(await buildSnapshotItem(input, source, placement, sortOrder));
   }
 
-  const viewport = normalizeViewport(input.requestedViewport);
   const snapshotDigest = hashCanonicalJson(digestInput(projectRevision, viewport, items));
   return deepFreeze({ projectRevision, viewport, items, snapshotDigest });
 }

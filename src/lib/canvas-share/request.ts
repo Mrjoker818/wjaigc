@@ -45,8 +45,17 @@ const preflightSchema = z.object({
   requestedViewport: viewportSchema.nullable().optional(),
   displayContext: z.object({
     projectName: titleSchema.optional(),
-  }).strip().optional(),
-}).strip();
+  }).strict().optional(),
+}).strict();
+
+const TOLERATED_PREFLIGHT_FORGERY_FIELDS = new Set([
+  'ownerId',
+  'projectRevision',
+  'assetId',
+  'assetVersionId',
+  'mediaUrl',
+  'items',
+]);
 
 const emptyCommandSchema = z.object({}).strict();
 
@@ -245,7 +254,12 @@ export function parseCanvasSharePatchRequest(value: unknown): CanvasSharePatchRe
 }
 
 export function parseCanvasSharePreflightRequest(value: unknown): CanvasSharePreflightRequest {
-  return parseWith(preflightSchema, value);
+  const sanitized = value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? Object.fromEntries(Object.entries(value).filter(
+      ([key]) => !TOLERATED_PREFLIGHT_FORGERY_FIELDS.has(key),
+    ))
+    : value;
+  return parseWith(preflightSchema, sanitized);
 }
 
 export function parseCanvasShareEmptyCommand(value: unknown): Record<string, never> {
