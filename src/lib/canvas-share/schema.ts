@@ -31,12 +31,12 @@ const canvasShareSafeDisplaySchema = z.object({
 }).strict();
 
 const controlledMediaPathSchema = z.string().max(2_048).regex(
-  /^\/api\/public\/canvas-shares\/[A-Za-z0-9_-]+\/media\/[A-Za-z0-9_-]+$/,
+  /^media\/csr_[A-Za-z0-9_-]{43}$/u,
   '媒体地址必须是受控的相对读取路径',
 );
 
 const controlledDownloadPathSchema = z.string().max(2_048).regex(
-  /^\/api\/public\/canvas-shares\/[A-Za-z0-9_-]+\/media\/[A-Za-z0-9_-]+\/download$/,
+  /^media\/csr_[A-Za-z0-9_-]{43}\/download$/u,
   '下载地址必须是受控的相对下载路径',
 );
 

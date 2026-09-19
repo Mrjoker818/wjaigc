@@ -100,9 +100,26 @@ const publicDocument: CanvasSharePublicDocument = {
     mimeType: item.mimeType,
     width: item.width,
     height: item.height,
-    mediaPath: `/api/public/canvas-shares/${rawToken}/media/${itemRef}`,
+    mediaPath: `media/${itemRef}`,
   }],
 };
+
+function expectNoRecursiveToken(value: unknown, token: string): void {
+  if (typeof value === 'string') {
+    expect(value).not.toContain(token);
+    return;
+  }
+  if (Array.isArray(value)) {
+    for (const itemValue of value) expectNoRecursiveToken(itemValue, token);
+    return;
+  }
+  if (value !== null && typeof value === 'object') {
+    for (const [key, nestedValue] of Object.entries(value)) {
+      expect(key).not.toContain(token);
+      expectNoRecursiveToken(nestedValue, token);
+    }
+  }
+}
 
 function routeContext(token = rawToken) {
   return { params: Promise.resolve({ token }) };
@@ -119,6 +136,14 @@ function assertPublicHeaders(response: Response): void {
   expect(response.headers.get('access-control-allow-origin')).toBeNull();
 }
 
+async function invalidResponseSignature(response: Response): Promise<unknown> {
+  const body = await response.json() as Record<string, unknown>;
+  const { requestId: _requestId, ...stableBody } = body;
+  const stableHeaders = [...response.headers.entries()]
+    .filter(([name]) => name !== 'x-request-id');
+  return { status: response.status, body: stableBody, headers: stableHeaders };
+}
+
 describe('canvas-share explicit public projection', () => {
   it('returns only the documented allowlist with a share-scoped item reference', () => {
     const projected = projectCanvasShareForPublic(record, [{
@@ -131,7 +156,7 @@ describe('canvas-share explicit public projection', () => {
       storageKey: 'private/storage/key.png',
       sourceUrl: 'https://private.example/source.png',
       metadata: { billing: 99, apiKey: 'sk-private' },
-    } as CanvasShareItemRecord], rawToken);
+    } as CanvasShareItemRecord]);
 
     expect(projected).toEqual(publicDocument);
     expect(Object.keys(projected).sort()).toEqual([
@@ -143,10 +168,13 @@ describe('canvas-share explicit public projection', () => {
     ]);
     expect(projected.items[0].itemRef).not.toBe(item.id);
     expect(projected.items[0].itemRef).toMatch(/^csr_[A-Za-z0-9_-]{43}$/u);
+    expect(projected.items[0].mediaPath).toBe(`media/${itemRef}`);
+    expect(projected.items[0].mediaPath).not.toMatch(/^(?:[a-z][a-z\d+.-]*:|\/|\.\.)/iu);
+    expectNoRecursiveToken(projected, rawToken);
   });
 
   it('never exposes private keys or values from records and JSON metadata', () => {
-    const projected = projectCanvasShareForPublic(record, [item], rawToken);
+    const projected = projectCanvasShareForPublic(record, [item]);
     const serialized = JSON.stringify(projected);
     const forbiddenValues = [
       record.id,
@@ -154,6 +182,7 @@ describe('canvas-share explicit public projection', () => {
       record.projectId,
       record.tokenHash,
       record.snapshotDigest,
+      rawToken,
       item.id,
       item.shareId,
       item.placementId,
@@ -165,6 +194,27 @@ describe('canvas-share explicit public projection', () => {
     expect(serialized).not.toMatch(
       /"(?:owner|user|project|placement|assetId|assetVersion|versionId|task|provider|model|prompt|apiKey|billing|storageKey|sourceUrl|metadata)"/iu,
     );
+  });
+
+  it('removes unsafe URLs, controls, bidi controls, and HTML-like display text', () => {
+    const projected = projectCanvasShareForPublic({
+      ...record,
+      title: 'https://private.example/<script>secret</script>',
+    }, [{
+      ...item,
+      displayMetadata: {
+        label: '<img src=x onerror=alert(1)>',
+        altText: '正常\u0000中文\u202E说明',
+      },
+    }]);
+
+    expect(projected.title).toBe('共享画布');
+    expect(projected.items[0].display).toEqual({ altText: '正常 中文说明' });
+    const serialized = JSON.stringify(projected);
+    for (const forbidden of [
+      'https://private.example/', '<script>', '</script>', '<img', 'onerror',
+      '\u0000', '\u202E',
+    ]) expect(serialized).not.toContain(forbidden);
   });
 
   it('uses a different item reference for the same internal item under another share digest', () => {
@@ -201,6 +251,44 @@ describe('canvas-share durable public rate limit', () => {
       async () => undefined,
       database,
     )).rejects.toBe(lockObserved);
+    expect(release).toHaveBeenCalledTimes(1);
+  });
+
+  it('uses a concurrent shared lifecycle lock for media without a lock upgrade', async () => {
+    const actualStorage = await vi.importActual<typeof import('@/lib/canvas-share/storage')>(
+      '@/lib/canvas-share/storage',
+    );
+    const mediaSnapshot = (
+      actualStorage as typeof actualStorage & {
+        withActiveCanvasShareMediaSnapshot?: typeof withActiveCanvasShareSnapshot;
+      }
+    ).withActiveCanvasShareMediaSnapshot;
+    expect(mediaSnapshot).toBeTypeOf('function');
+    if (!mediaSnapshot) return;
+
+    const lockObserved = new Error('shared lock observed');
+    const query = vi.fn(async (sql: string) => {
+      if (sql === 'BEGIN' || sql === 'ROLLBACK') return { rows: [] };
+      expect(sql).toMatch(/FOR SHARE/iu);
+      expect(sql).not.toMatch(/FOR UPDATE/iu);
+      throw lockObserved;
+    });
+    const release = vi.fn();
+    const database = {
+      connect: vi.fn(async () => ({ query, release })),
+    } as unknown as Pool;
+
+    await expect(mediaSnapshot(
+      tokenDigest,
+      now,
+      async () => undefined,
+      database,
+    )).rejects.toBe(lockObserved);
+    expect(query.mock.calls.map(([sql]) => sql)).toEqual([
+      'BEGIN',
+      expect.stringMatching(/FOR SHARE/iu),
+      'ROLLBACK',
+    ]);
     expect(release).toHaveBeenCalledTimes(1);
   });
 
@@ -265,12 +353,24 @@ describe('canvas-share public API', () => {
     vi.stubEnv('WUJIE_CANVAS_SHARE_ENABLED', 'true');
     vi.stubEnv('WUJIE_TRUST_PROXY_IP_HEADERS', 'true');
     mocks.enforceCanvasSharePublicRateLimit.mockResolvedValue(undefined);
-    mocks.readPublicCanvasShare.mockResolvedValue(publicDocument);
-    mocks.readPublicCanvasShareMedia.mockResolvedValue({
-      bytes: Buffer.from([1, 2, 3, 4]),
-      mimeType: 'image/png',
-      totalBytes: 4,
-      fileName: 'main-visual.png',
+    mocks.readPublicCanvasShare.mockImplementation(async (
+      _token: string,
+      options?: { onAuthorized?(): Promise<void> },
+    ) => {
+      await options?.onAuthorized?.();
+      return publicDocument;
+    });
+    mocks.readPublicCanvasShareMedia.mockImplementation(async (
+      input: { onAuthorized?(): Promise<void> },
+    ) => {
+      await input.onAuthorized?.();
+      return {
+        bytes: Buffer.from([1, 2, 3, 4]),
+        mimeType: 'image/png',
+        totalBytes: 4,
+        contentLength: 4,
+        fileName: 'main-visual.png',
+      };
     });
   });
 
@@ -290,7 +390,9 @@ describe('canvas-share public API', () => {
     expect(response.status).toBe(200);
     assertPublicHeaders(response);
     expect(await response.json()).toEqual(publicDocument);
-    expect(mocks.readPublicCanvasShare).toHaveBeenCalledWith(rawToken);
+    expect(mocks.readPublicCanvasShare).toHaveBeenCalledWith(rawToken, expect.objectContaining({
+      onAuthorized: expect.any(Function),
+    }));
     expect(mocks.enforceCanvasSharePublicRateLimit).toHaveBeenCalledWith(expect.objectContaining({
       tokenDigest,
       itemScope: 'metadata',
@@ -298,6 +400,39 @@ describe('canvas-share public API', () => {
       routeBucket: 'metadata',
     }));
     expect(JSON.stringify(mocks.enforceCanvasSharePublicRateLimit.mock.calls)).not.toContain(rawToken);
+  });
+
+  it('keeps metadata, media, and download rate buckets isolated', async () => {
+    await getPublicShare(
+      new NextRequest(`http://localhost/api/public/canvas-shares/${rawToken}`),
+      routeContext(),
+    );
+    await getPublicMedia(
+      new NextRequest(
+        `http://localhost/api/public/canvas-shares/${rawToken}/media/${itemRef}`,
+      ),
+      mediaRouteContext(),
+    );
+    await downloadPublicMedia(
+      new NextRequest(
+        `http://localhost/api/public/canvas-shares/${rawToken}/media/${itemRef}/download`,
+      ),
+      mediaRouteContext(),
+    );
+
+    expect(mocks.enforceCanvasSharePublicRateLimit).toHaveBeenCalledTimes(3);
+    expect(mocks.enforceCanvasSharePublicRateLimit).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ routeBucket: 'metadata', itemScope: 'metadata' }),
+    );
+    expect(mocks.enforceCanvasSharePublicRateLimit).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ routeBucket: 'media', itemScope: itemRef }),
+    );
+    expect(mocks.enforceCanvasSharePublicRateLimit).toHaveBeenNthCalledWith(
+      3,
+      expect.objectContaining({ routeBucket: 'download', itemScope: itemRef }),
+    );
   });
 
   it.each([
@@ -320,6 +455,30 @@ describe('canvas-share public API', () => {
     }));
   });
 
+  it('generates public request IDs server-side without reflecting a raw token header', async () => {
+    mocks.readPublicCanvasShare.mockRejectedValue(
+      new CanvasShareError('CANVAS_SHARE_NOT_FOUND'),
+    );
+    const responses = await Promise.all([1, 2].map(() => getPublicShare(
+      new NextRequest(`http://localhost/api/public/canvas-shares/${rawToken}`, {
+        headers: { 'x-request-id': rawToken },
+      }),
+      routeContext(),
+    )));
+    const responseIds: string[] = [];
+
+    for (const response of responses) {
+      const body = await response.json() as Record<string, unknown>;
+      const responseId = response.headers.get('x-request-id');
+      expect(responseId).toMatch(/^req_[a-f0-9]{16}$/u);
+      expect(body.requestId).toBe(responseId);
+      expectNoRecursiveToken(body, rawToken);
+      expect(JSON.stringify([...response.headers.entries()])).not.toContain(rawToken);
+      responseIds.push(responseId!);
+    }
+    expect(new Set(responseIds)).toHaveLength(2);
+  });
+
   it('keeps the public feature flag default-off with the same invalid semantic', async () => {
     vi.stubEnv('WUJIE_CANVAS_SHARE_ENABLED', 'false');
 
@@ -338,6 +497,60 @@ describe('canvas-share public API', () => {
     expect(mocks.enforceCanvasSharePublicRateLimit).not.toHaveBeenCalled();
   });
 
+  it('keeps every invalid lifecycle state indistinguishable and outside all rate buckets', async () => {
+    const invalidCases = [
+      { name: 'malformed', token: 'bad!', featureEnabled: true, rejectLookup: false },
+      { name: 'random', token: rawToken, featureEnabled: true, rejectLookup: true },
+      { name: 'revoked', token: rawToken, featureEnabled: true, rejectLookup: true },
+      { name: 'expired', token: rawToken, featureEnabled: true, rejectLookup: true },
+      { name: 'flag-off', token: rawToken, featureEnabled: false, rejectLookup: false },
+    ] as const;
+    let expectedSignature: unknown;
+
+    for (const invalidCase of invalidCases) {
+      vi.stubEnv('WUJIE_CANVAS_SHARE_ENABLED', String(invalidCase.featureEnabled));
+      mocks.enforceCanvasSharePublicRateLimit.mockReset().mockRejectedValue(
+        new CanvasSharePublicRateLimitError(60),
+      );
+      mocks.readPublicCanvasShare.mockReset();
+      mocks.readPublicCanvasShareMedia.mockReset();
+      if (invalidCase.rejectLookup) {
+        const invalid = new CanvasShareError('CANVAS_SHARE_NOT_FOUND');
+        mocks.readPublicCanvasShare.mockRejectedValue(invalid);
+        mocks.readPublicCanvasShareMedia.mockRejectedValue(invalid);
+      }
+      const requests = [
+        () => getPublicShare(
+          new NextRequest(`http://localhost/api/public/canvas-shares/${invalidCase.token}`),
+          routeContext(invalidCase.token),
+        ),
+        () => getPublicMedia(
+          new NextRequest(
+            `http://localhost/api/public/canvas-shares/${invalidCase.token}/media/${itemRef}`,
+          ),
+          mediaRouteContext(invalidCase.token),
+        ),
+        () => downloadPublicMedia(
+          new NextRequest(
+            `http://localhost/api/public/canvas-shares/${invalidCase.token}/media/${itemRef}/download`,
+          ),
+          mediaRouteContext(invalidCase.token),
+        ),
+      ];
+
+      for (const request of requests) {
+        for (let attempt = 0; attempt < 2; attempt += 1) {
+          const signature = await invalidResponseSignature(await request());
+          expectedSignature ??= signature;
+          expect(signature, `${invalidCase.name} attempt ${attempt + 1}`).toEqual(
+            expectedSignature,
+          );
+        }
+      }
+      expect(mocks.enforceCanvasSharePublicRateLimit, invalidCase.name).not.toHaveBeenCalled();
+    }
+  });
+
   it('serves preview bytes inline with exact safe headers', async () => {
     const response = await getPublicMedia(
       new NextRequest(
@@ -354,6 +567,63 @@ describe('canvas-share public API', () => {
     expect(Buffer.from(await response.arrayBuffer())).toEqual(Buffer.from([1, 2, 3, 4]));
   });
 
+  it('handles media and download HEAD explicitly without a response body', async () => {
+    const mediaRoute = await vi.importActual<
+      typeof import('@/app/api/public/canvas-shares/[token]/media/[itemId]/route')
+    >('@/app/api/public/canvas-shares/[token]/media/[itemId]/route');
+    const downloadRoute = await vi.importActual<
+      typeof import('@/app/api/public/canvas-shares/[token]/media/[itemId]/download/route')
+    >('@/app/api/public/canvas-shares/[token]/media/[itemId]/download/route');
+    const mediaHead = (mediaRoute as typeof mediaRoute & { HEAD?: typeof mediaRoute.GET }).HEAD;
+    const downloadHead = (
+      downloadRoute as typeof downloadRoute & { HEAD?: typeof downloadRoute.GET }
+    ).HEAD;
+    expect(mediaHead).toBeTypeOf('function');
+    expect(downloadHead).toBeTypeOf('function');
+    if (!mediaHead || !downloadHead) return;
+
+    mocks.readPublicCanvasShareMedia.mockImplementation(async (
+      input: { onAuthorized?(): Promise<void> },
+    ) => {
+      await input.onAuthorized?.();
+      return {
+        bytes: null,
+        mimeType: 'image/png',
+        totalBytes: 4,
+        contentLength: 4,
+        fileName: 'main-visual.png',
+      };
+    });
+    const preview = await mediaHead(
+      new NextRequest(`http://localhost/api/public/canvas-shares/${rawToken}/media/${itemRef}`),
+      mediaRouteContext(),
+    );
+    const download = await downloadHead(
+      new NextRequest(
+        `http://localhost/api/public/canvas-shares/${rawToken}/media/${itemRef}/download`,
+      ),
+      mediaRouteContext(),
+    );
+
+    for (const response of [preview, download]) {
+      expect(response.status).toBe(200);
+      assertPublicHeaders(response);
+      expect(response.headers.get('content-type')).toBe('image/png');
+      expect(response.headers.get('content-length')).toBe('4');
+      expect(await response.text()).toBe('');
+    }
+    expect(preview.headers.get('content-disposition')).toBeNull();
+    expect(download.headers.get('content-disposition')).toContain('attachment;');
+    expect(mocks.readPublicCanvasShareMedia).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      headOnly: true,
+      download: false,
+    }));
+    expect(mocks.readPublicCanvasShareMedia).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      headOnly: true,
+      download: true,
+    }));
+  });
+
   it('does not let query IDs, URLs, source URLs, or Range redirect the server lookup', async () => {
     const fetchSpy = vi.spyOn(globalThis, 'fetch');
     const request = new NextRequest(
@@ -366,12 +636,12 @@ describe('canvas-share public API', () => {
 
     await getPublicMedia(request, mediaRouteContext());
 
-    expect(mocks.readPublicCanvasShareMedia).toHaveBeenCalledWith({
+    expect(mocks.readPublicCanvasShareMedia).toHaveBeenCalledWith(expect.objectContaining({
       token: rawToken,
       itemRef,
       download: false,
       rangeHeader: 'bytes=0-3',
-    });
+    }));
     expect(JSON.stringify(mocks.readPublicCanvasShareMedia.mock.calls)).not.toMatch(
       /item-forged|asset-forged|attacker\.example|127\.0\.0\.1/iu,
     );
@@ -418,12 +688,12 @@ describe('canvas-share public API', () => {
     expect(response.headers.get('content-disposition')).toBe(
       `attachment; filename="main-visual.png"; filename*=UTF-8''main-visual.png`,
     );
-    expect(mocks.readPublicCanvasShareMedia).toHaveBeenCalledWith({
+    expect(mocks.readPublicCanvasShareMedia).toHaveBeenCalledWith(expect.objectContaining({
       token: rawToken,
       itemRef,
       download: true,
       rangeHeader: null,
-    });
+    }));
   });
 
   it('returns stable bounded video range headers and rejects malformed ranges safely', async () => {
@@ -431,6 +701,7 @@ describe('canvas-share public API', () => {
       bytes: Buffer.from([5, 6, 7, 8]),
       mimeType: 'video/mp4',
       totalBytes: 100,
+      contentLength: 4,
       range: { start: 20, end: 23 },
       fileName: 'clip.mp4',
     });
@@ -486,6 +757,79 @@ describe('canvas-share public API', () => {
 });
 
 describe('canvas-share public media authorization', () => {
+  it('authorizes HEAD metadata without invoking the managed byte reader', async () => {
+    const actualService = await vi.importActual<typeof import('@/lib/canvas-share/service')>(
+      '@/lib/canvas-share/service',
+    );
+    const validRecord = {
+      ...record,
+      snapshotDigest: actualService.computeCanvasShareSnapshotDigestForRead(record, [item]),
+    };
+    const asset: Asset = {
+      id: item.assetId,
+      ownerId: record.ownerId,
+      projectId: record.projectId,
+      kind: item.assetKind,
+      status: 'active',
+      currentVersionId: item.assetVersionId,
+      createdAt: record.createdAt,
+      updatedAt: record.createdAt,
+    };
+    const version: AssetVersion = {
+      id: item.assetVersionId,
+      assetId: item.assetId,
+      ownerId: record.ownerId,
+      projectId: record.projectId,
+      file: {
+        url: '/api/serve-upload/uploads/ready.png',
+        availability: 'ready',
+        mimeType: item.mimeType,
+        byteSize: item.byteSize ?? undefined,
+        width: item.width ?? undefined,
+        height: item.height ?? undefined,
+        checksum: item.checksum ?? undefined,
+      },
+      parentVersionIds: [],
+      createdAt: record.createdAt,
+    };
+    const readMedia = vi.fn();
+
+    await expect(actualService.readPublicCanvasShareMedia({
+      token: rawToken,
+      itemRef,
+      download: false,
+      rangeHeader: null,
+      headOnly: true,
+    }, {
+      now: () => new Date(now),
+      hashToken: () => tokenDigest,
+      withActiveSnapshot: async (_digest, _accessedAt, operation) => operation({
+        snapshot: { record: validRecord, items: [item] },
+        expectedItemCount: 1,
+        incrementView: vi.fn(),
+        findAsset: vi.fn().mockResolvedValue(asset),
+        findVersion: vi.fn().mockResolvedValue(version),
+      }),
+      getMediaDescriptor: vi.fn().mockResolvedValue({
+        assetVersionId: version.id,
+        assetKind: asset.kind,
+        mimeType: item.mimeType,
+        byteSize: item.byteSize,
+        width: item.width,
+        height: item.height,
+        checksum: item.checksum,
+        source: { kind: 'local', absolutePath: 'managed', dataRoot: 'managed-root' },
+      }),
+      readMedia,
+    })).resolves.toMatchObject({
+      bytes: null,
+      contentLength: 4,
+      mimeType: 'image/png',
+      totalBytes: 4,
+    });
+    expect(readMedia).not.toHaveBeenCalled();
+  });
+
   it('binds the scoped item to authoritative asset/version/descriptor data and never fetches source URLs', async () => {
     const actualService = await vi.importActual<typeof import('@/lib/canvas-share/service')>(
       '@/lib/canvas-share/service',

@@ -36,6 +36,7 @@ import {
   updateCanvasSharePolicyIfCurrent as updateCanvasSharePolicyIfCurrentInStorage,
   type CanvasShareExpectedPolicy,
   type CanvasShareOwnerRecord,
+  withActiveCanvasShareMediaSnapshot,
   withActiveCanvasShareSnapshot,
 } from './storage';
 import {
@@ -438,10 +439,15 @@ export interface ReadPublicCanvasShareDependencies {
   ): Promise<T>;
 }
 
+export interface ReadPublicCanvasShareOptions {
+  onAuthorized?(): Promise<void>;
+}
+
 export { computeCanvasShareSnapshotDigestForRead };
 
 export async function readPublicCanvasShare(
   token: string,
+  options: ReadPublicCanvasShareOptions = {},
   dependencies: ReadPublicCanvasShareDependencies = {
     now: () => new Date(),
     hashToken: hashCanvasShareToken,
@@ -459,9 +465,10 @@ export async function readPublicCanvasShare(
         context.snapshot.items,
         context.expectedItemCount,
       );
+      await options.onAuthorized?.();
       const viewed = await context.incrementView();
       if (!viewed) return notFound();
-      return projectCanvasShareForPublic(viewed, context.snapshot.items, token);
+      return projectCanvasShareForPublic(viewed, context.snapshot.items);
     },
   );
 }
@@ -485,12 +492,15 @@ export interface ReadPublicCanvasShareMediaInput {
   itemRef: string;
   download: boolean;
   rangeHeader: string | null;
+  headOnly?: boolean;
+  onAuthorized?(): Promise<void>;
 }
 
 export interface CanvasSharePublicMediaResult {
-  bytes: Buffer;
+  bytes: Buffer | null;
   mimeType: string;
   totalBytes: number;
+  contentLength: number;
   range?: { start: number; end: number };
   fileName: string;
 }
@@ -589,7 +599,7 @@ export async function readPublicCanvasShareMedia(
   dependencies: ReadPublicCanvasShareMediaDependencies = {
     now: () => new Date(),
     hashToken: hashCanvasShareToken,
-    withActiveSnapshot: withActiveCanvasShareSnapshot,
+    withActiveSnapshot: withActiveCanvasShareMediaSnapshot,
     getMediaDescriptor: getManagedAssetMediaDescriptor,
     readMedia: readManagedAssetVersionBytes,
   },
@@ -621,11 +631,26 @@ export async function readPublicCanvasShareMedia(
         throw error;
       }
       if (!descriptorMatchesSnapshot(descriptor, version, item)) return mediaUnavailable();
+      await input.onAuthorized?.();
       const range = resolvePublicMediaRange(
         input.rangeHeader,
         item.assetKind,
         descriptor.byteSize,
       );
+      const expectedBytes = range
+        ? range.end - range.start + 1
+        : descriptor.byteSize;
+      const fileName = createCanvasShareDownloadFileName(record, item);
+      if (input.headOnly) {
+        return {
+          bytes: null,
+          mimeType: descriptor.mimeType,
+          totalBytes: descriptor.byteSize,
+          contentLength: expectedBytes,
+          ...(range ? { range } : {}),
+          fileName,
+        };
+      }
       const maxBytes = item.assetKind === 'image'
         ? PUBLIC_IMAGE_MAX_BYTES
         : range
@@ -641,9 +666,6 @@ export async function readPublicCanvasShareMedia(
         if (error instanceof CanvasShareError) return mediaUnavailable();
         throw error;
       }
-      const expectedBytes = range
-        ? range.end - range.start + 1
-        : descriptor.byteSize;
       if (
         result.mimeType !== descriptor.mimeType
         || result.totalBytes !== descriptor.byteSize
@@ -657,8 +679,9 @@ export async function readPublicCanvasShareMedia(
         bytes: result.bytes,
         mimeType: result.mimeType,
         totalBytes: result.totalBytes,
+        contentLength: expectedBytes,
         ...(range ? { range } : {}),
-        fileName: createCanvasShareDownloadFileName(record, item),
+        fileName,
       };
     },
   );

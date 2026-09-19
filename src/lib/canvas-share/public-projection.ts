@@ -11,6 +11,10 @@ import type {
 
 const PUBLIC_ITEM_REF_PREFIX = 'csr_';
 const PUBLIC_ITEM_REF_PATTERN = /^csr_[A-Za-z0-9_-]{43}$/u;
+const PUBLIC_TEXT_CONTROL_PATTERN = /[\u0000-\u001f\u007f-\u009f]/gu;
+const PUBLIC_TEXT_BIDI_PATTERN = /[\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/gu;
+const PUBLIC_TEXT_URL_PATTERN = /(?:\b[a-z][a-z\d+.-]*:\/\/|(?:data|blob|javascript|file|mailto):|\/\/)/iu;
+const PUBLIC_TEXT_HTML_PATTERN = /[<>]/u;
 
 function invalidShare(): never {
   throw new CanvasShareError('CANVAS_SHARE_NOT_FOUND');
@@ -108,14 +112,27 @@ export function resolveCanvasSharePublicItem(
   return invalidShare();
 }
 
+function publicSafeText(value: string | undefined, maxLength: number): string | undefined {
+  if (value === undefined) return undefined;
+  if (PUBLIC_TEXT_URL_PATTERN.test(value) || PUBLIC_TEXT_HTML_PATTERN.test(value)) return undefined;
+  const normalized = value
+    .normalize('NFC')
+    .replace(PUBLIC_TEXT_CONTROL_PATTERN, ' ')
+    .replace(PUBLIC_TEXT_BIDI_PATTERN, '')
+    .replace(/\s+/gu, ' ')
+    .trim()
+    .slice(0, maxLength)
+    .trim();
+  return normalized || undefined;
+}
+
 export function projectCanvasShareForPublic(
   record: CanvasShareRecord,
   items: readonly CanvasShareItemRecord[],
-  token: string,
 ): CanvasSharePublicDocument {
-  const publicToken = parseCanvasSharePublicToken(token);
+  const title = publicSafeText(record.title, 200) ?? '共享画布';
   const projected: CanvasSharePublicDocument = {
-    title: record.title,
+    title,
     revisionLabel: `修订 ${record.projectRevision}`,
     createdAt: record.createdAt,
     allowDownload: record.allowDownload,
@@ -126,7 +143,9 @@ export function projectCanvasShareForPublic(
     },
     items: items.map(item => {
       const itemRef = createCanvasSharePublicItemRef(record.tokenHash, item.id);
-      const mediaPath = `/api/public/canvas-shares/${publicToken}/media/${itemRef}`;
+      const mediaPath = `media/${itemRef}`;
+      const label = publicSafeText(item.displayMetadata.label, 200);
+      const altText = publicSafeText(item.displayMetadata.altText, 1_000);
       return {
         itemRef,
         entityType: item.entityType,
@@ -140,12 +159,8 @@ export function projectCanvasShareForPublic(
           zIndex: item.transform.zIndex,
         },
         display: {
-          ...(item.displayMetadata.label === undefined
-            ? {}
-            : { label: item.displayMetadata.label }),
-          ...(item.displayMetadata.altText === undefined
-            ? {}
-            : { altText: item.displayMetadata.altText }),
+          ...(label === undefined ? {} : { label }),
+          ...(altText === undefined ? {} : { altText }),
         },
         mimeType: item.mimeType,
         width: item.width,

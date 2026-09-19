@@ -8,7 +8,7 @@ import {
 } from '@/lib/canvas-share/schema';
 
 const validPublicItem = {
-  itemRef: 'item-1',
+  itemRef: `csr_${'A'.repeat(43)}`,
   entityType: 'canvas-image',
   assetKind: 'image',
   transform: {
@@ -26,7 +26,7 @@ const validPublicItem = {
   mimeType: 'image/png',
   width: 640,
   height: 480,
-  mediaPath: '/api/public/canvas-shares/share-token/media/item-1',
+  mediaPath: `media/csr_${'A'.repeat(43)}`,
 } as const;
 
 const validPublicDocument = {
@@ -72,7 +72,7 @@ describe('canvas share runtime schemas', () => {
     expect(canvasSharePublicItemSchema.safeParse(validPublicItem).success).toBe(true);
     expect(canvasSharePublicItemSchema.safeParse({
       ...validPublicItem,
-      downloadPath: '/api/public/canvas-shares/share-token/media/item-1/download',
+      downloadPath: `media/csr_${'A'.repeat(43)}/download`,
     }).success).toBe(true);
 
     for (const path of [
@@ -80,6 +80,9 @@ describe('canvas share runtime schemas', () => {
       '//provider.example/private.png',
       'data:image/png;base64,private',
       'blob:https://example.test/private',
+      '/media/item-1',
+      '../media/item-1',
+      'media/../item-1',
       '/api/public/../private.png',
     ]) {
       expect(canvasSharePublicItemSchema.safeParse({

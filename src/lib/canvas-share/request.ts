@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 
@@ -203,10 +205,10 @@ function normalizePublicCanvasShareError(error: unknown): CanvasSharePublicTrans
 }
 
 export function canvasSharePublicErrorResponse(
-  request: NextRequest,
+  _request: NextRequest,
   error: unknown,
 ): NextResponse {
-  const requestId = getRequestId(request);
+  const requestId = `req_${randomUUID().replaceAll('-', '').slice(0, 16)}`;
   const resolved = normalizePublicCanvasShareError(error);
   const response = NextResponse.json({
     success: false,

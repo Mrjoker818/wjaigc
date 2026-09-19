@@ -956,7 +956,7 @@ describe('canvas-share service creation boundary', () => {
       snapshotDigest: computeCanvasShareSnapshotDigestForRead(record, [item]),
     };
     const incrementView = vi.fn(async () => ({ ...validRecord, viewCount: 1 }));
-    const result = await readPublicCanvasShare(token, {
+    const result = await readPublicCanvasShare(token, {}, {
       now: () => new Date('2026-09-19T12:00:00.000Z'),
       hashToken: () => record.tokenHash,
       withActiveSnapshot: async (_tokenHash, _accessedAt, operation) => operation({
@@ -971,7 +971,7 @@ describe('canvas-share service creation boundary', () => {
     const scopedItemRef = createCanvasSharePublicItemRef(record.tokenHash, item.id);
     expect(result.items[0]).toMatchObject({
       itemRef: scopedItemRef,
-      mediaPath: `/api/public/canvas-shares/${token}/media/${scopedItemRef}`,
+      mediaPath: `media/${scopedItemRef}`,
     });
     expect(result.items[0]).not.toHaveProperty('downloadPath');
     const serialized = JSON.stringify(result);
@@ -981,6 +981,7 @@ describe('canvas-share service creation boundary', () => {
     expect(serialized).not.toContain(item.assetVersionId);
     expect(serialized).not.toContain(item.placementId);
     expect(serialized).not.toContain(item.checksum!);
+    expect(serialized).not.toContain(token);
     expect(incrementView).toHaveBeenCalledWith();
   });
 });

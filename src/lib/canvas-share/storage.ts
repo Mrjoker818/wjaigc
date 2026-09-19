@@ -365,12 +365,14 @@ export type CanvasSharePublicSnapshotOperation<T> = (
   context: CanvasSharePublicSnapshotContext,
 ) => Promise<T>;
 
-export async function withActiveCanvasShareSnapshot<T>(
+async function withLockedActiveCanvasShareSnapshot<T>(
   tokenHash: string,
   accessedAt: string,
   operation: CanvasSharePublicSnapshotOperation<T>,
-  pool: Pool = getPool(),
+  lockMode: 'update' | 'share',
+  pool: Pool,
 ): Promise<T> {
+  const lockClause = lockMode === 'update' ? 'FOR UPDATE' : 'FOR SHARE';
   return withAssetCoreTransaction(async client => {
     const result = await client.query<CanvasSharePublicRow>(
       `SELECT share_record.*,
@@ -381,7 +383,7 @@ export async function withActiveCanvasShareSnapshot<T>(
         WHERE share_record.token_hash = $1
           AND share_record.status = 'active'
           AND (share_record.expires_at IS NULL OR share_record.expires_at > $2::timestamptz)
-        FOR UPDATE`,
+        ${lockClause}`,
       [tokenHash, accessedAt],
     );
     const row = result.rows[0];
@@ -403,4 +405,34 @@ export async function withActiveCanvasShareSnapshot<T>(
       ),
     });
   }, pool);
+}
+
+export async function withActiveCanvasShareSnapshot<T>(
+  tokenHash: string,
+  accessedAt: string,
+  operation: CanvasSharePublicSnapshotOperation<T>,
+  pool: Pool = getPool(),
+): Promise<T> {
+  return withLockedActiveCanvasShareSnapshot(
+    tokenHash,
+    accessedAt,
+    operation,
+    'update',
+    pool,
+  );
+}
+
+export async function withActiveCanvasShareMediaSnapshot<T>(
+  tokenHash: string,
+  accessedAt: string,
+  operation: CanvasSharePublicSnapshotOperation<T>,
+  pool: Pool = getPool(),
+): Promise<T> {
+  return withLockedActiveCanvasShareSnapshot(
+    tokenHash,
+    accessedAt,
+    operation,
+    'share',
+    pool,
+  );
 }

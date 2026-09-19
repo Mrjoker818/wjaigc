@@ -29,9 +29,10 @@ function encodeDispositionFileName(fileName: string): string {
   ));
 }
 
-export async function GET(
+async function handleDownloadRequest(
   request: NextRequest,
   context: RouteContext,
+  headOnly: boolean,
 ): Promise<NextResponse> {
   try {
     if (!isCanvasShareEnabled()) throw new CanvasShareError('CANVAS_SHARE_NOT_FOUND');
@@ -39,33 +40,54 @@ export async function GET(
     const token = parseCanvasSharePublicToken(params.token);
     const itemRef = parseCanvasSharePublicItemRef(params.itemId);
     const tokenDigest = hashCanvasShareToken(token);
-    await enforceCanvasSharePublicRateLimit({
-      tokenDigest,
-      itemScope: itemRef,
-      ipAddress: getCanvasShareRequestIp(request.headers),
-      routeBucket: 'download',
-    });
     const media = await readPublicCanvasShareMedia({
       token,
       itemRef,
       download: true,
       rangeHeader: request.headers.get('range'),
+      headOnly,
+      onAuthorized: () => enforceCanvasSharePublicRateLimit({
+        tokenDigest,
+        itemScope: itemRef,
+        ipAddress: getCanvasShareRequestIp(request.headers),
+        routeBucket: 'download',
+      }),
     });
+    if (!headOnly && media.bytes === null) {
+      throw new CanvasShareError('CANVAS_SHARE_MEDIA_UNAVAILABLE');
+    }
     const encodedName = encodeDispositionFileName(media.fileName);
-    const response = new NextResponse(new Uint8Array(media.bytes), {
-      status: media.range ? 206 : 200,
-      headers: {
-        'Content-Type': media.mimeType,
-        'Content-Length': String(media.bytes.byteLength),
-        'Content-Disposition': `attachment; filename="${media.fileName}"; filename*=UTF-8''${encodedName}`,
-        ...(media.range ? {
-          'Accept-Ranges': 'bytes',
-          'Content-Range': `bytes ${media.range.start}-${media.range.end}/${media.totalBytes}`,
-        } : {}),
+    const response = new NextResponse(
+      headOnly || media.bytes === null ? null : new Uint8Array(media.bytes),
+      {
+        status: media.range ? 206 : 200,
+        headers: {
+          'Content-Type': media.mimeType,
+          'Content-Length': String(media.contentLength),
+          'Content-Disposition': `attachment; filename="${media.fileName}"; filename*=UTF-8''${encodedName}`,
+          ...(media.range ? {
+            'Accept-Ranges': 'bytes',
+            'Content-Range': `bytes ${media.range.start}-${media.range.end}/${media.totalBytes}`,
+          } : {}),
+        },
       },
-    });
+    );
     return applyCanvasSharePublicHeaders(response);
   } catch (error) {
     return canvasSharePublicErrorResponse(request, error);
   }
+}
+
+export async function GET(
+  request: NextRequest,
+  context: RouteContext,
+): Promise<NextResponse> {
+  return handleDownloadRequest(request, context, false);
+}
+
+export async function HEAD(
+  request: NextRequest,
+  context: RouteContext,
+): Promise<NextResponse> {
+  return handleDownloadRequest(request, context, true);
 }

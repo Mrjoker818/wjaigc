@@ -30,13 +30,14 @@ export async function GET(
     if (!isCanvasShareEnabled()) throw new CanvasShareError('CANVAS_SHARE_NOT_FOUND');
     const token = parseCanvasSharePublicToken((await context.params).token);
     const tokenDigest = hashCanvasShareToken(token);
-    await enforceCanvasSharePublicRateLimit({
-      tokenDigest,
-      itemScope: 'metadata',
-      ipAddress: getCanvasShareRequestIp(request.headers),
-      routeBucket: 'metadata',
+    const document = await readPublicCanvasShare(token, {
+      onAuthorized: () => enforceCanvasSharePublicRateLimit({
+        tokenDigest,
+        itemScope: 'metadata',
+        ipAddress: getCanvasShareRequestIp(request.headers),
+        routeBucket: 'metadata',
+      }),
     });
-    const document = await readPublicCanvasShare(token);
     return canvasSharePublicDataResponse(document);
   } catch (error) {
     return canvasSharePublicErrorResponse(request, error);
