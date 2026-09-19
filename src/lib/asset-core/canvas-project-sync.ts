@@ -397,14 +397,28 @@ async function claimProjectRevision(
   return nextRevision;
 }
 
-export async function readCanvasProjectRevision(actorUserId: string): Promise<number> {
-  const result = await getPool().query<ProjectRevisionRow>(
+export async function readCanvasProjectRevision(
+  actorUserId: string,
+  database: Pick<Pool, 'query'> = getPool(),
+): Promise<number> {
+  const result = await database.query<ProjectRevisionRow>(
     `SELECT data_value
        FROM wujie_user_data
       WHERE user_id = $1 AND data_key = $2`,
     [actorUserId, PROJECT_REVISION_DATA_KEY],
   );
   return parseProjectRevision(result.rows[0]?.data_value);
+}
+
+/** Serializes a share snapshot with the same per-owner revision CAS used by project sync. */
+export async function lockCanvasProjectRevision(
+  client: Pick<PoolClient, 'query'>,
+  actorUserId: string,
+): Promise<void> {
+  await client.query(
+    'SELECT pg_advisory_xact_lock(hashtext($1), hashtext($2))',
+    [actorUserId, PROJECT_REVISION_DATA_KEY],
+  );
 }
 
 class PostgresCanvasProjectSyncStorage implements CanvasProjectSyncStorage {
