@@ -81,7 +81,7 @@ import {
 
 import { Toaster } from '@/components/ui/sonner';
 import { toast } from 'sonner';
-import { Image as ImageIcon, MessageSquare, Sparkles, ChevronLeft, ChevronRight, X, Bell } from 'lucide-react';
+import { Image as ImageIcon, MessageSquare, Sparkles, ChevronLeft, ChevronRight, X, Bell, MoreHorizontal, Share2, Settings2 } from 'lucide-react';
 import { type Workflow, type WorkspaceAssetReference } from '@/lib/workflow-engine';
 import type { WorkspaceAssetReference as CoreWorkspaceAssetReference } from '@/lib/asset-core/types';
 import {
@@ -189,6 +189,15 @@ import {
 } from '@/lib/image-generation-session';
 
 import { LoginPanel } from '@/components/dashboard/login-panel';
+import { CanvasShareCreateDialog } from '@/components/canvas-share/create-dialog';
+import { CanvasShareManagePanel } from '@/components/canvas-share/manage-panel';
+import type { CanvasShareCreatedAccess } from '@/components/canvas-share/share-api-client';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 
 // Heavy components — lazy-loaded to keep initial JS bundle small.
 const InfiniteCanvas = dynamic(() => import('@/components/infinite-canvas').then(m => m.InfiniteCanvas), { loading: () => null });
@@ -946,6 +955,9 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
   }, [setImages]);
 
   const [appMode, setAppMode] = useState<WorkspaceMode>(getInitialWorkspaceMode);
+  const [shareCreateOpen, setShareCreateOpen] = useState(false);
+  const [shareManageOpen, setShareManageOpen] = useState(false);
+  const [createdShareAccess, setCreatedShareAccess] = useState<CanvasShareCreatedAccess>();
   const [pendingModeSwitch, setPendingModeSwitch] = useState<'node' | 'workflow-hub' | 'dashboard' | null>(null);
   // Start with true so SSR renders the login panel (not a blank spinner).
   // The useEffect below will update currentUser if a valid session exists.
@@ -6364,6 +6376,35 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
           </button>
         </div>
       )}
+      {currentProject && (
+        <div
+          data-canvas-project-menu
+          className={`absolute left-1/2 top-3 z-[70] flex max-w-[calc(100vw-7rem)] -translate-x-1/2 items-center rounded-xl border px-2 py-1 shadow-lg backdrop-blur-md ${themeStyle === 'monochrome' ? 'border-gray-200 bg-white/90 text-gray-900' : 'border-white/10 bg-[#171717]/90 text-white'}`}
+        >
+          <span className="max-w-52 truncate px-2 text-sm font-medium" title={currentProject.name}>
+            {currentProject.name}
+          </span>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                className="flex size-11 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                aria-label={`${currentProject.name} 项目菜单`}
+              >
+                <MoreHorizontal className="size-4" aria-hidden="true" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="center" className="w-40">
+              <DropdownMenuItem onSelect={() => setShareCreateOpen(true)}>
+                <Share2 aria-hidden="true" />分享画布
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => setShareManageOpen(true)}>
+                <Settings2 aria-hidden="true" />管理分享
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+      )}
       {/* System Announcement - Popup mode (center modal) */}
       {announcement && showAnnouncement && announcement.displayMode === 'popup' && (
         <div className="fixed inset-0 z-[500] flex items-center justify-center bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
@@ -6577,6 +6618,32 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
           onRetryProcessing={handleRetryVideoProcessing}
         />
       </div>
+
+      {currentProject && (
+        <>
+          <CanvasShareCreateDialog
+            open={shareCreateOpen}
+            onOpenChange={setShareCreateOpen}
+            projectId={currentProject.id}
+            projectName={currentProject.name}
+            requestedViewport={viewStateRef.current}
+            onOpenManagement={(access) => {
+              setCreatedShareAccess(access);
+              setShareManageOpen(true);
+            }}
+          />
+          <CanvasShareManagePanel
+            open={shareManageOpen}
+            onOpenChange={(nextOpen) => {
+              setShareManageOpen(nextOpen);
+              if (!nextOpen) setCreatedShareAccess(undefined);
+            }}
+            projectId={currentProject.id}
+            projectName={currentProject.name}
+            createdShareAccess={createdShareAccess}
+          />
+        </>
+      )}
 
       {/* Language-based Image Editor */}
       {showImageEditor && (

@@ -25,7 +25,7 @@ import {
   // Admin prototype icons
   LayoutDashboard, Flame, Coins, TrendingUp, TrendingDown,
   SlidersHorizontal, HardDrive, Megaphone,
-  Brain, Link, Lock, LogIn, ChevronLeft, Globe2, ListChecks, MessageSquareMore,
+  Brain, Link, Lock, LogIn, ChevronLeft, Globe2, ListChecks, MessageSquareMore, Share2,
 } from 'lucide-react';
 import { UserManager } from '@/lib/user-manager';
 import { RECHARGE_PACKAGES } from '@/lib/credits-constants';
@@ -49,6 +49,7 @@ import {
 import type { ProviderCapabilityOverridesV1 } from '@/lib/task-core/model-capability-contract';
 import { readProviderCapabilityOverrides } from '@/lib/task-core/model-capability-resolution';
 import JSZip from 'jszip';
+import { CanvasShareManagePanel } from '@/components/canvas-share/manage-panel';
 
 type TabType = 'projects' | 'templates' | 'assets' | 'stats' | 'credits' | 'settings' | 'users' | 'apis' | 'data' | 'ecom-templates' | 'payment-config' | 'audit' | 'overview' | 'desktop-admin' | 'connector-admin' | 'groups' | 'chat' | 'media-gateway';
 type ProjectFilter = 'all' | 'recent' | 'starred';
@@ -320,6 +321,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
   const [selectedAssetIds, setSelectedAssetIds] = useState<Set<string>>(new Set());
   const [assetCopiedId, setAssetCopiedId] = useState<string | null>(null);
   const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
+  const [shareManagementProject, setShareManagementProject] = useState<Project | null>(null);
   const [projectManageMode, setProjectManageMode] = useState(false);
   const [selectedProjectIds, setSelectedProjectIds] = useState<Set<string>>(new Set());
   const [projectDeleteLoading, setProjectDeleteLoading] = useState(false);
@@ -2439,6 +2441,17 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                                   <div className={`absolute right-0 top-6 z-20 rounded-xl border shadow-xl py-1 min-w-[120px] ${isDark ? 'bg-[#1a1a2e] border-white/10' : 'bg-white border-gray-200'}`}>
                                     <button onClick={(e) => { e.stopPropagation(); handleRenameProject(project.id, project.name); }} className={`w-full text-left px-3 py-1.5 text-xs flex items-center gap-2 ${isDark ? 'hover:bg-white/5' : 'hover:bg-gray-50'}`}><Pencil className="w-3 h-3" />重命名</button>
                                     <button onClick={(e) => { e.stopPropagation(); handleExportProject(project); }} className={`w-full text-left px-3 py-1.5 text-xs flex items-center gap-2 ${isDark ? 'hover:bg-white/5' : 'hover:bg-gray-50'}`}><ArrowRight className="w-3 h-3" />导出 .wujie</button>
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setMenuOpenId(null);
+                                        setShareManagementProject(project);
+                                      }}
+                                      className={`w-full text-left px-3 py-1.5 text-xs flex items-center gap-2 ${isDark ? 'hover:bg-white/5' : 'hover:bg-gray-50'}`}
+                                    >
+                                      <Share2 className="w-3 h-3" aria-hidden="true" />管理分享
+                                    </button>
                                     <button onClick={(e) => { e.stopPropagation(); handleDelete(project.id); }} className="w-full text-left px-3 py-1.5 text-xs flex items-center gap-2 text-red-400 hover:bg-red-500/10"><Trash2 className="w-3 h-3" />删除</button>
                                   </div>
                                 )}
@@ -4315,6 +4328,17 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
           )}
 
       </main>
+
+      {shareManagementProject && (
+        <CanvasShareManagePanel
+          open
+          onOpenChange={(nextOpen) => {
+            if (!nextOpen) setShareManagementProject(null);
+          }}
+          projectId={shareManagementProject.id}
+          projectName={shareManagementProject.name}
+        />
+      )}
 
       <ConfirmDialog open={confirmDlg.open} title={confirmDlg.title} message={confirmDlg.message} variant={confirmDlg.variant} onConfirm={confirmDlg.onConfirm} onCancel={confirmDlg.onCancel} />
     </div>
