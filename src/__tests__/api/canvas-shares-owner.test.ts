@@ -442,6 +442,26 @@ describe('canvas-share owner API', () => {
     expect(serialized).not.toContain('version-forged');
   });
 
+  it('projects the server fallback for an authorized unnamed project', async () => {
+    mocks.preflightCanvasShare.mockResolvedValue({
+      projectName: '未命名项目',
+      projectRevision: 9,
+      itemCount: 0,
+      viewport: { offsetX: 0, offsetY: 0, zoom: 1 },
+      readiness: { ready: true, failures: [] },
+    });
+
+    const response = await preflightShare(mutationRequest('/api/canvas-shares/preflight', {
+      projectId: 'project-empty-name',
+    }));
+
+    expect(response.status).toBe(200);
+    expect(await expectPrivateJson(response)).toEqual(expect.objectContaining({
+      projectName: '未命名项目',
+      readiness: { ready: true, failures: [] },
+    }));
+  });
+
   it.each([
     ['unknown top-level field', { projectId: 'project-1', projectNmae: 'typo' }],
     ['unknown display field', {

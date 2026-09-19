@@ -158,6 +158,34 @@ describe('canvas-share owner lifecycle service', () => {
     }));
   });
 
+  it('keeps an authorized empty-name project shareable with a safe server fallback', async () => {
+    const client = {
+      query: vi.fn(async (sql: string) => {
+        if (sql.includes('SELECT name') && sql.includes('FROM wujie_projects')) {
+          return { rows: [{ name: '' }], rowCount: 1 };
+        }
+        if (sql.includes('FROM wujie_user_data')) {
+          return { rows: [{ data_value: 12 }], rowCount: 1 };
+        }
+        if (sql.includes('FROM wujie_workspace_placements placement')) {
+          return { rows: [], rowCount: 0 };
+        }
+        return { rows: [], rowCount: 0 };
+      }),
+    } as unknown as AssetCoreSqlTransaction;
+
+    await expect(inspectCanvasSharePreflightInTransaction({
+      ownerId: 'owner-1',
+      projectId: 'project-empty-name',
+    }, client)).resolves.toEqual({
+      projectName: '未命名项目',
+      projectRevision: 12,
+      itemCount: 0,
+      viewport: { offsetX: 0, offsetY: 0, zoom: 1 },
+      readiness: { ready: true, failures: [] },
+    });
+  });
+
   it('runs production preflight service through real snapshot readiness inspection', async () => {
     const authoritativeSource = source();
 

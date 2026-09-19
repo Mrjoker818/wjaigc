@@ -133,10 +133,13 @@ async function prepareCanvasShareSnapshotSource(
       WHERE id = $1 AND owner_id = $2 AND status = $3`,
     [input.projectId, input.ownerId, 'active'],
   );
-  const projectName = projectResult.rows[0]?.name;
-  if (typeof projectName !== 'string' || !projectName.trim()) unauthorized();
+  const project = projectResult.rows[0];
+  if (!project) unauthorized();
+  const projectName = typeof project.name === 'string' && project.name.trim()
+    ? project.name.trim()
+    : '未命名项目';
   return {
-    projectName: projectName.trim(),
+    projectName,
     source: {
       readProjectRevision: ownerId => readCanvasProjectRevision(ownerId, client),
       listActiveCanvasPlacements: (ownerId, projectId) => (

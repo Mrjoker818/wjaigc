@@ -36,6 +36,13 @@ interface CanvasShareCreateDialogProps {
 interface OperationState {
   generation: number;
   controller: AbortController | null;
+  scopeKey: string;
+}
+
+interface ActiveOperation {
+  generation: number;
+  signal: AbortSignal;
+  scopeKey: string;
 }
 
 const ERROR_ACTIONS: Readonly<Record<string, string>> = {
@@ -56,6 +63,15 @@ function errorCode(error: unknown): string {
 
 function safeErrorAction(error: unknown): string {
   return ERROR_ACTIONS[errorCode(error)] ?? '操作未完成，请稍后重试。';
+}
+
+function isAbortError(error: unknown): boolean {
+  return error !== null && typeof error === 'object' && 'name' in error
+    && error.name === 'AbortError';
+}
+
+function operationScopeKey(open: boolean, projectId: string): string {
+  return JSON.stringify([open, projectId]);
 }
 
 function localCalendarDate(date: Date): string {
@@ -86,6 +102,7 @@ export function CanvasShareCreateDialog({
   requestedViewport,
   onOpenManagement,
 }: CanvasShareCreateDialogProps) {
+  const scopeKey = operationScopeKey(open, projectId);
   const [preflight, setPreflight] = useState<CanvasSharePreflightResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -96,33 +113,46 @@ export function CanvasShareCreateDialog({
   const [created, setCreated] = useState<CanvasShareCreateResult | null>(null);
   const [manualCopy, setManualCopy] = useState(false);
   const [popupBlocked, setPopupBlocked] = useState(false);
+  const [stateScopeKey, setStateScopeKey] = useState(scopeKey);
   const copyInputRef = useRef<HTMLInputElement>(null);
   const requestedViewportRef = useRef(requestedViewport);
-  const operationRef = useRef<OperationState>({ generation: 0, controller: null });
+  const renderScopeRef = useRef(scopeKey);
+  const operationRef = useRef<OperationState>({
+    generation: 0,
+    controller: null,
+    scopeKey,
+  });
   requestedViewportRef.current = requestedViewport;
+  renderScopeRef.current = scopeKey;
 
   const invalidateOperation = useCallback((): void => {
     operationRef.current.controller?.abort();
     operationRef.current = {
       generation: operationRef.current.generation + 1,
       controller: null,
+      scopeKey: renderScopeRef.current,
     };
   }, []);
 
-  const beginOperation = useCallback((): { generation: number; signal: AbortSignal } => {
+  const beginOperation = useCallback((): ActiveOperation => {
     operationRef.current.controller?.abort();
     const controller = new AbortController();
     const generation = operationRef.current.generation + 1;
-    operationRef.current = { generation, controller };
-    return { generation, signal: controller.signal };
+    const currentScopeKey = renderScopeRef.current;
+    operationRef.current = { generation, controller, scopeKey: currentScopeKey };
+    return { generation, signal: controller.signal, scopeKey: currentScopeKey };
   }, []);
 
-  const isCurrentOperation = useCallback((generation: number): boolean => (
-    operationRef.current.generation === generation
+  const isCurrentOperation = useCallback((operation: ActiveOperation): boolean => (
+    operationRef.current.generation === operation.generation
+    && operation.scopeKey === renderScopeRef.current
+    && operationRef.current.scopeKey === operation.scopeKey
+    && !operation.signal.aborted
     && operationRef.current.controller?.signal.aborted === false
   ), []);
 
   const clearState = useCallback((): void => {
+    setStateScopeKey(renderScopeRef.current);
     setPreflight(null);
     setLoading(false);
     setSubmitting(false);
@@ -137,6 +167,7 @@ export function CanvasShareCreateDialog({
 
   const runPreflight = useCallback(async (): Promise<void> => {
     const operation = beginOperation();
+    setStateScopeKey(operation.scopeKey);
     setLoading(true);
     setError('');
     setPreflight(null);
@@ -147,14 +178,14 @@ export function CanvasShareCreateDialog({
           ? {}
           : { requestedViewport: requestedViewportRef.current }),
       }, operation.signal);
-      if (!isCurrentOperation(operation.generation)) return;
+      if (!isCurrentOperation(operation)) return;
       setPreflight(result);
       setTitle(`${result.projectName} 分享`);
     } catch (requestError) {
-      if (!isCurrentOperation(operation.generation)) return;
+      if (!isCurrentOperation(operation) || isAbortError(requestError)) return;
       setError(safeErrorAction(requestError));
     } finally {
-      if (isCurrentOperation(operation.generation)) setLoading(false);
+      if (isCurrentOperation(operation)) setLoading(false);
     }
   }, [beginOperation, isCurrentOperation, projectId]);
 
@@ -166,14 +197,23 @@ export function CanvasShareCreateDialog({
   }, [clearState, invalidateOperation, open, projectId, runPreflight]);
 
   useEffect(() => {
-    if (manualCopy) {
+    if (stateScopeKey === scopeKey && manualCopy) {
       copyInputRef.current?.focus();
       copyInputRef.current?.select();
     }
-  }, [manualCopy]);
+  }, [manualCopy, scopeKey, stateScopeKey]);
+
+  const stateIsCurrent = stateScopeKey === scopeKey;
+  const visiblePreflight = stateIsCurrent ? preflight : null;
+  const visibleCreated = stateIsCurrent ? created : null;
+  const visibleLoading = open && (!stateIsCurrent || loading);
+  const visibleSubmitting = stateIsCurrent && submitting;
+  const visibleError = stateIsCurrent ? error : '';
+  const visibleManualCopy = stateIsCurrent && manualCopy;
+  const visiblePopupBlocked = stateIsCurrent && popupBlocked;
 
   const handleCreate = async (): Promise<void> => {
-    if (submitting || !preflight?.readiness.ready || !title.trim()) return;
+    if (visibleSubmitting || !visiblePreflight?.readiness.ready || !title.trim()) return;
     const operation = beginOperation();
     setSubmitting(true);
     setError('');
@@ -187,33 +227,33 @@ export function CanvasShareCreateDialog({
         expiresAt: expiryIso(expiresOn),
         allowDownload,
       }, operation.signal);
-      if (!isCurrentOperation(operation.generation)) return;
+      if (!isCurrentOperation(operation)) return;
       setCreated(result);
     } catch (requestError) {
-      if (!isCurrentOperation(operation.generation)) return;
+      if (!isCurrentOperation(operation) || isAbortError(requestError)) return;
       setError(safeErrorAction(requestError));
     } finally {
-      if (isCurrentOperation(operation.generation)) setSubmitting(false);
+      if (isCurrentOperation(operation)) setSubmitting(false);
     }
   };
 
   const handleCopy = async (): Promise<void> => {
-    if (!created) return;
+    if (!visibleCreated) return;
     const operation = beginOperation();
     try {
       if (!navigator.clipboard?.writeText) throw new Error('clipboard unavailable');
-      await navigator.clipboard.writeText(created.shareUrl);
-      if (!isCurrentOperation(operation.generation)) return;
+      await navigator.clipboard.writeText(visibleCreated.shareUrl);
+      if (!isCurrentOperation(operation)) return;
       toast.success('分享链接已复制');
-    } catch {
-      if (!isCurrentOperation(operation.generation)) return;
+    } catch (copyError) {
+      if (!isCurrentOperation(operation) || isAbortError(copyError)) return;
       setManualCopy(true);
     }
   };
 
   const handleOpen = (): void => {
-    if (!created) return;
-    const opened = window.open(created.shareUrl, '_blank', 'noopener,noreferrer');
+    if (!visibleCreated) return;
+    const opened = window.open(visibleCreated.shareUrl, '_blank', 'noopener,noreferrer');
     if (opened === null) {
       setPopupBlocked(true);
       setManualCopy(true);
@@ -227,14 +267,14 @@ export function CanvasShareCreateDialog({
   };
 
   const handleOpenManagement = (): void => {
-    const access = created
-      ? { shareId: created.shareId, shareUrl: created.shareUrl }
+    const access = visibleCreated
+      ? { shareId: visibleCreated.shareId, shareUrl: visibleCreated.shareUrl }
       : undefined;
     closeAndClear();
     onOpenManagement(access);
   };
 
-  const readinessFailure = preflight?.readiness.failures[0];
+  const readinessFailure = visiblePreflight?.readiness.failures[0];
 
   return (
     <Dialog
@@ -251,7 +291,7 @@ export function CanvasShareCreateDialog({
         className="max-h-[calc(100dvh-1rem)] max-w-[calc(100%-1rem)] overflow-y-auto p-4 pr-12 sm:max-w-lg sm:p-6 sm:pr-12 [&_[data-slot=dialog-close]]:flex [&_[data-slot=dialog-close]]:size-11 [&_[data-slot=dialog-close]]:items-center [&_[data-slot=dialog-close]]:justify-center"
         data-modal="true"
       >
-        {created ? (
+        {visibleCreated ? (
           <>
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
@@ -263,17 +303,17 @@ export function CanvasShareCreateDialog({
               </DialogDescription>
             </DialogHeader>
             <div className="rounded-lg border bg-muted/40 p-3 text-sm">
-              <p className="font-medium text-foreground">{created.snapshot.title}</p>
+              <p className="font-medium text-foreground">{visibleCreated.snapshot.title}</p>
               <p className="mt-1 text-muted-foreground">
-                修订 {created.snapshot.projectRevision} · {created.snapshot.itemCount} 个素材
+                修订 {visibleCreated.snapshot.projectRevision} · {visibleCreated.snapshot.itemCount} 个素材
               </p>
             </div>
-            {popupBlocked && (
+            {visiblePopupBlocked && (
               <p role="alert" className="rounded-lg bg-amber-500/10 p-3 text-sm text-amber-800 dark:text-amber-300">
                 浏览器阻止了新窗口，请手动复制链接后打开。
               </p>
             )}
-            {manualCopy && (
+            {visibleManualCopy && (
               <div className="min-w-0 space-y-2" role="status">
                 <label htmlFor="canvas-share-manual-copy" className="text-sm font-medium">
                   手动复制完整链接
@@ -283,7 +323,7 @@ export function CanvasShareCreateDialog({
                   id="canvas-share-manual-copy"
                   className="h-11"
                   readOnly
-                  value={created.shareUrl}
+                  value={visibleCreated.shareUrl}
                   onFocus={event => event.currentTarget.select()}
                 />
                 <p className="text-xs text-muted-foreground">链接已选中，可使用系统复制命令。</p>
@@ -308,27 +348,27 @@ export function CanvasShareCreateDialog({
               </DialogDescription>
             </DialogHeader>
 
-            {loading && (
+            {visibleLoading && (
               <div className="flex min-h-28 items-center justify-center gap-2 text-sm text-muted-foreground" role="status" aria-label="正在检查画布分享条件">
                 <Loader2 className="size-4 animate-spin motion-reduce:animate-none" aria-hidden="true" />
                 正在检查项目与媒体状态…
               </div>
             )}
 
-            {!loading && preflight && (
+            {!visibleLoading && visiblePreflight && (
               <div className="space-y-4">
                 <section className="rounded-lg border bg-muted/30 p-3" aria-label="分享快照检查结果">
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
-                      <p className="break-words text-sm font-medium text-foreground">{preflight.projectName}</p>
+                      <p className="break-words text-sm font-medium text-foreground">{visiblePreflight.projectName}</p>
                       <p className="mt-1 flex flex-wrap gap-x-1 text-xs text-muted-foreground">
-                        <span>修订 {preflight.projectRevision}</span>
+                        <span>修订 {visiblePreflight.projectRevision}</span>
                         <span aria-hidden="true">·</span>
-                        <span>{preflight.itemCount} 个素材</span>
+                        <span>{visiblePreflight.itemCount} 个素材</span>
                       </p>
                     </div>
-                    <span className={`shrink-0 rounded-full px-2 py-1 text-xs font-medium ${preflight.readiness.ready ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' : 'bg-amber-500/10 text-amber-700 dark:text-amber-400'}`}>
-                      {preflight.readiness.ready ? '媒体已就绪' : '媒体未就绪'}
+                    <span className={`shrink-0 rounded-full px-2 py-1 text-xs font-medium ${visiblePreflight.readiness.ready ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' : 'bg-amber-500/10 text-amber-700 dark:text-amber-400'}`}>
+                      {visiblePreflight.readiness.ready ? '媒体已就绪' : '媒体未就绪'}
                     </span>
                   </div>
                   {readinessFailure && (
@@ -382,13 +422,13 @@ export function CanvasShareCreateDialog({
               </div>
             )}
 
-            {error && <p role="alert" className="rounded-lg bg-destructive/10 p-3 text-sm text-destructive">{error}</p>}
+            {visibleError && <p role="alert" className="rounded-lg bg-destructive/10 p-3 text-sm text-destructive">{visibleError}</p>}
 
             <DialogFooter>
               <Button className="min-h-11" type="button" variant="outline" onClick={handleOpenManagement}>
                 管理已有分享
               </Button>
-              {(!preflight || !preflight.readiness.ready) && !loading && (
+              {(!visiblePreflight || !visiblePreflight.readiness.ready) && !visibleLoading && (
                 <Button className="min-h-11" type="button" variant="outline" onClick={() => void runPreflight()}>
                   重新检查
                 </Button>
@@ -396,11 +436,11 @@ export function CanvasShareCreateDialog({
               <Button
                 className="min-h-11"
                 type="button"
-                disabled={loading || submitting || !preflight?.readiness.ready || !title.trim()}
+                disabled={visibleLoading || visibleSubmitting || !visiblePreflight?.readiness.ready || !title.trim()}
                 onClick={() => void handleCreate()}
               >
-                {submitting && <Loader2 className="animate-spin motion-reduce:animate-none" aria-hidden="true" />}
-                {submitting ? '创建中…' : '创建分享'}
+                {visibleSubmitting && <Loader2 className="animate-spin motion-reduce:animate-none" aria-hidden="true" />}
+                {visibleSubmitting ? '创建中…' : '创建分享'}
               </Button>
             </DialogFooter>
           </>

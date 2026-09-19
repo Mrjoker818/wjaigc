@@ -53,6 +53,13 @@ interface CanvasShareManagePanelProps {
 interface OperationState {
   generation: number;
   controller: AbortController | null;
+  scopeKey: string;
+}
+
+interface ActiveOperation {
+  generation: number;
+  signal: AbortSignal;
+  scopeKey: string;
 }
 
 const SAFE_ERRORS: Readonly<Record<string, string>> = {
@@ -69,6 +76,15 @@ function safeError(error: unknown): string {
     ? error.code
     : 'CANVAS_SHARE_REQUEST_FAILED';
   return SAFE_ERRORS[code] ?? '操作未完成，请稍后重试。';
+}
+
+function isAbortError(error: unknown): boolean {
+  return error !== null && typeof error === 'object' && 'name' in error
+    && error.name === 'AbortError';
+}
+
+function operationScopeKey(open: boolean, projectId: string): string {
+  return JSON.stringify([open, projectId]);
 }
 
 function formatDate(value: string | null): string {
@@ -111,6 +127,7 @@ export function CanvasShareManagePanel({
   createdShareAccess,
   returnFocusRef,
 }: CanvasShareManagePanelProps) {
+  const scopeKey = operationScopeKey(open, projectId);
   const [shares, setShares] = useState<CanvasShareOwnerRecord[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -124,31 +141,44 @@ export function CanvasShareManagePanel({
   const [popupBlocked, setPopupBlocked] = useState(false);
   const [policyError, setPolicyError] = useState('');
   const [revokeError, setRevokeError] = useState('');
+  const [stateScopeKey, setStateScopeKey] = useState(scopeKey);
   const manualCopyRef = useRef<HTMLInputElement>(null);
-  const operationRef = useRef<OperationState>({ generation: 0, controller: null });
+  const renderScopeRef = useRef(scopeKey);
+  const operationRef = useRef<OperationState>({
+    generation: 0,
+    controller: null,
+    scopeKey,
+  });
+  renderScopeRef.current = scopeKey;
 
   const invalidateOperation = useCallback((): void => {
     operationRef.current.controller?.abort();
     operationRef.current = {
       generation: operationRef.current.generation + 1,
       controller: null,
+      scopeKey: renderScopeRef.current,
     };
   }, []);
 
-  const beginOperation = useCallback((): { generation: number; signal: AbortSignal } => {
+  const beginOperation = useCallback((): ActiveOperation => {
     operationRef.current.controller?.abort();
     const controller = new AbortController();
     const generation = operationRef.current.generation + 1;
-    operationRef.current = { generation, controller };
-    return { generation, signal: controller.signal };
+    const currentScopeKey = renderScopeRef.current;
+    operationRef.current = { generation, controller, scopeKey: currentScopeKey };
+    return { generation, signal: controller.signal, scopeKey: currentScopeKey };
   }, []);
 
-  const isCurrentOperation = useCallback((generation: number): boolean => (
-    operationRef.current.generation === generation
+  const isCurrentOperation = useCallback((operation: ActiveOperation): boolean => (
+    operationRef.current.generation === operation.generation
+    && operation.scopeKey === renderScopeRef.current
+    && operationRef.current.scopeKey === operation.scopeKey
+    && !operation.signal.aborted
     && operationRef.current.controller?.signal.aborted === false
   ), []);
 
   const clearState = useCallback((): void => {
+    setStateScopeKey(renderScopeRef.current);
     setShares([]);
     setLoading(false);
     setError('');
@@ -166,20 +196,21 @@ export function CanvasShareManagePanel({
 
   const refresh = useCallback(async (): Promise<void> => {
     const operation = beginOperation();
+    setStateScopeKey(operation.scopeKey);
     setLoading(true);
     setError('');
     try {
       const records = await listCanvasShares(projectId, operation.signal);
-      if (!isCurrentOperation(operation.generation)) return;
+      if (!isCurrentOperation(operation)) return;
       setShares([...records].sort((a, b) => (
         new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
       )));
     } catch (requestError) {
-      if (!isCurrentOperation(operation.generation)) return;
+      if (!isCurrentOperation(operation) || isAbortError(requestError)) return;
       setShares([]);
       setError(safeError(requestError));
     } finally {
-      if (isCurrentOperation(operation.generation)) setLoading(false);
+      if (isCurrentOperation(operation)) setLoading(false);
     }
   }, [beginOperation, isCurrentOperation, projectId]);
 
@@ -191,11 +222,24 @@ export function CanvasShareManagePanel({
   }, [clearState, invalidateOperation, open, projectId, refresh]);
 
   useEffect(() => {
-    if (manualCopyUrl) {
+    if (stateScopeKey === scopeKey && manualCopyUrl) {
       manualCopyRef.current?.focus();
       manualCopyRef.current?.select();
     }
-  }, [manualCopyUrl]);
+  }, [manualCopyUrl, scopeKey, stateScopeKey]);
+
+  const stateIsCurrent = stateScopeKey === scopeKey;
+  const visibleShares = stateIsCurrent ? shares : [];
+  const visibleLoading = open && (!stateIsCurrent || loading);
+  const visibleError = stateIsCurrent ? error : '';
+  const visibleEditing = stateIsCurrent ? editing : null;
+  const visibleSaving = stateIsCurrent && saving;
+  const visibleRevoking = stateIsCurrent ? revoking : null;
+  const visibleRevokePending = stateIsCurrent && revokePending;
+  const visibleManualCopyUrl = stateIsCurrent ? manualCopyUrl : null;
+  const visiblePopupBlocked = stateIsCurrent && popupBlocked;
+  const visiblePolicyError = stateIsCurrent ? policyError : '';
+  const visibleRevokeError = stateIsCurrent ? revokeError : '';
 
   const replaceShare = (record: CanvasShareOwnerRecord): void => {
     setShares(current => current.map(share => (
@@ -212,43 +256,45 @@ export function CanvasShareManagePanel({
   };
 
   const savePolicy = async (): Promise<void> => {
-    if (!editing || saving) return;
+    if (!visibleEditing || visibleSaving) return;
     const operation = beginOperation();
+    const shareId = visibleEditing.shareId;
     setSaving(true);
     setPolicyError('');
     try {
-      const updated = await patchCanvasSharePolicy(editing.shareId, {
+      const updated = await patchCanvasSharePolicy(shareId, {
         expiresAt: toExpiryIso(editExpiry),
         allowDownload: editDownload,
       }, operation.signal);
-      if (!isCurrentOperation(operation.generation)) return;
+      if (!isCurrentOperation(operation)) return;
       replaceShare(updated);
       setEditing(null);
       toast.success('分享策略已更新');
     } catch (requestError) {
-      if (!isCurrentOperation(operation.generation)) return;
+      if (!isCurrentOperation(operation) || isAbortError(requestError)) return;
       setPolicyError(safeError(requestError));
     } finally {
-      if (isCurrentOperation(operation.generation)) setSaving(false);
+      if (isCurrentOperation(operation)) setSaving(false);
     }
   };
 
   const confirmRevoke = async (): Promise<void> => {
-    if (!revoking || revokePending) return;
+    if (!visibleRevoking || visibleRevokePending) return;
     const operation = beginOperation();
+    const shareId = visibleRevoking.shareId;
     setRevokePending(true);
     setRevokeError('');
     try {
-      const updated = await revokeCanvasShare(revoking.shareId, operation.signal);
-      if (!isCurrentOperation(operation.generation)) return;
+      const updated = await revokeCanvasShare(shareId, operation.signal);
+      if (!isCurrentOperation(operation)) return;
       replaceShare(updated);
       setRevoking(null);
       toast.success('分享已撤销');
     } catch (requestError) {
-      if (!isCurrentOperation(operation.generation)) return;
+      if (!isCurrentOperation(operation) || isAbortError(requestError)) return;
       setRevokeError(safeError(requestError));
     } finally {
-      if (isCurrentOperation(operation.generation)) setRevokePending(false);
+      if (isCurrentOperation(operation)) setRevokePending(false);
     }
   };
 
@@ -257,10 +303,10 @@ export function CanvasShareManagePanel({
     try {
       if (!navigator.clipboard?.writeText) throw new Error('clipboard unavailable');
       await navigator.clipboard.writeText(url);
-      if (!isCurrentOperation(operation.generation)) return;
+      if (!isCurrentOperation(operation)) return;
       toast.success('分享链接已复制');
-    } catch {
-      if (!isCurrentOperation(operation.generation)) return;
+    } catch (copyError) {
+      if (!isCurrentOperation(operation) || isAbortError(copyError)) return;
       setManualCopyUrl(url);
     }
   };
@@ -301,31 +347,31 @@ export function CanvasShareManagePanel({
           </DialogHeader>
 
           <div className="px-4 py-4 sm:px-6">
-            {loading && (
+            {visibleLoading && (
               <div className="flex min-h-32 items-center justify-center gap-2 text-sm text-muted-foreground" role="status" aria-label="正在加载画布分享">
                 <Loader2 className="size-4 animate-spin motion-reduce:animate-none" aria-hidden="true" />
                 正在加载分享…
               </div>
             )}
 
-            {!loading && error && (
+            {!visibleLoading && visibleError && (
               <div role="alert" className="space-y-3 rounded-lg bg-destructive/10 p-3 text-sm text-destructive">
-                <p>{error}</p>
+                <p>{visibleError}</p>
                 <Button className="min-h-11" type="button" size="sm" variant="outline" onClick={() => void refresh()}>
                   <RefreshCw aria-hidden="true" />刷新列表
                 </Button>
               </div>
             )}
 
-            {!loading && !error && shares.length === 0 && (
+            {!visibleLoading && !visibleError && visibleShares.length === 0 && (
               <div className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">
                 当前项目还没有分享。
               </div>
             )}
 
-            {!loading && shares.length > 0 && (
+            {!visibleLoading && visibleShares.length > 0 && (
               <div className="space-y-3">
-                {shares.map(share => {
+                {visibleShares.map(share => {
                   const access = createdShareAccess?.shareId === share.shareId
                     ? createdShareAccess
                     : null;
@@ -416,13 +462,13 @@ export function CanvasShareManagePanel({
               </div>
             )}
 
-            {popupBlocked && (
+            {visiblePopupBlocked && (
               <p role="alert" className="mt-4 rounded-lg bg-amber-500/10 p-3 text-sm text-amber-800 dark:text-amber-300">
                 浏览器阻止了新窗口，请手动复制链接后打开。
               </p>
             )}
 
-            {manualCopyUrl && (
+            {visibleManualCopyUrl && (
               <div className="mt-4 space-y-2 rounded-lg border p-3" role="status">
                 <label htmlFor="canvas-share-manual-manage-copy" className="text-sm font-medium">
                   手动复制完整链接
@@ -432,7 +478,7 @@ export function CanvasShareManagePanel({
                   id="canvas-share-manual-manage-copy"
                   className="h-11"
                   readOnly
-                  value={manualCopyUrl}
+                  value={visibleManualCopyUrl}
                   onFocus={event => event.currentTarget.select()}
                 />
                 <p className="text-xs text-muted-foreground">剪贴板不可用，链接已选中。</p>
@@ -442,16 +488,17 @@ export function CanvasShareManagePanel({
         </DialogContent>
       </Dialog>
 
-      <Dialog open={editing !== null} onOpenChange={next => {
-        if (!next && !saving) {
-          setEditing(null);
-          setPolicyError('');
-        }
-      }}>
-        <DialogContent
-          className="max-h-[calc(100dvh-1rem)] max-w-[calc(100%-1rem)] overflow-y-auto sm:max-w-md [&_[data-slot=dialog-close]]:flex [&_[data-slot=dialog-close]]:size-11 [&_[data-slot=dialog-close]]:items-center [&_[data-slot=dialog-close]]:justify-center"
-          data-modal="true"
-        >
+      {visibleEditing && (
+        <Dialog open onOpenChange={next => {
+          if (!next && !visibleSaving) {
+            setEditing(null);
+            setPolicyError('');
+          }
+        }}>
+          <DialogContent
+            className="max-h-[calc(100dvh-1rem)] max-w-[calc(100%-1rem)] overflow-y-auto sm:max-w-md [&_[data-slot=dialog-close]]:flex [&_[data-slot=dialog-close]]:size-11 [&_[data-slot=dialog-close]]:items-center [&_[data-slot=dialog-close]]:justify-center"
+            data-modal="true"
+          >
           <DialogHeader>
             <DialogTitle>编辑分享策略</DialogTitle>
             <DialogDescription>只可修改有效期和下载权限，快照内容保持不变。</DialogDescription>
@@ -479,55 +526,58 @@ export function CanvasShareManagePanel({
               </span>
             </label>
           </div>
-          {policyError && (
+          {visiblePolicyError && (
             <p role="alert" className="rounded-lg bg-destructive/10 p-3 text-sm text-destructive">
-              {policyError}
+              {visiblePolicyError}
             </p>
           )}
           <DialogFooter>
-            <Button className="min-h-11" type="button" variant="outline" disabled={saving} onClick={() => setEditing(null)}>取消</Button>
-            <Button className="min-h-11" type="button" disabled={saving} onClick={() => void savePolicy()}>
-              {saving && <Loader2 className="animate-spin motion-reduce:animate-none" aria-hidden="true" />}
-              {saving ? '保存中…' : '保存策略'}
+            <Button className="min-h-11" type="button" variant="outline" disabled={visibleSaving} onClick={() => setEditing(null)}>取消</Button>
+            <Button className="min-h-11" type="button" disabled={visibleSaving} onClick={() => void savePolicy()}>
+              {visibleSaving && <Loader2 className="animate-spin motion-reduce:animate-none" aria-hidden="true" />}
+              {visibleSaving ? '保存中…' : '保存策略'}
             </Button>
           </DialogFooter>
-        </DialogContent>
-      </Dialog>
+          </DialogContent>
+        </Dialog>
+      )}
 
-      <AlertDialog open={revoking !== null} onOpenChange={next => {
-        if (!next && !revokePending) {
-          setRevoking(null);
-          setRevokeError('');
-        }
-      }}>
-        <AlertDialogContent className="max-h-[calc(100dvh-1rem)] max-w-[calc(100%-1rem)] overflow-y-auto">
+      {visibleRevoking && (
+        <AlertDialog open onOpenChange={next => {
+          if (!next && !visibleRevokePending) {
+            setRevoking(null);
+            setRevokeError('');
+          }
+        }}>
+          <AlertDialogContent className="max-h-[calc(100dvh-1rem)] max-w-[calc(100%-1rem)] overflow-y-auto">
           <AlertDialogHeader>
             <AlertDialogTitle>确认撤销分享</AlertDialogTitle>
             <AlertDialogDescription>
-              撤销后无法恢复。“{revoking?.title}”的原链接将立即失效，此操作不会删除项目。
+              撤销后无法恢复。“{visibleRevoking?.title}”的原链接将立即失效，此操作不会删除项目。
             </AlertDialogDescription>
           </AlertDialogHeader>
-          {revokeError && (
+          {visibleRevokeError && (
             <p role="alert" className="rounded-lg bg-destructive/10 p-3 text-sm text-destructive">
-              {revokeError}
+              {visibleRevokeError}
             </p>
           )}
           <AlertDialogFooter>
-            <AlertDialogCancel className="min-h-11" disabled={revokePending}>取消</AlertDialogCancel>
+            <AlertDialogCancel className="min-h-11" disabled={visibleRevokePending}>取消</AlertDialogCancel>
             <AlertDialogAction
               className="min-h-11 bg-destructive text-white hover:bg-destructive/90"
-              disabled={revokePending}
+              disabled={visibleRevokePending}
               onClick={event => {
                 event.preventDefault();
                 void confirmRevoke();
               }}
             >
-              {revokePending && <Loader2 className="animate-spin motion-reduce:animate-none" aria-hidden="true" />}
-              {revokePending ? '撤销中…' : '确认撤销'}
+              {visibleRevokePending && <Loader2 className="animate-spin motion-reduce:animate-none" aria-hidden="true" />}
+              {visibleRevokePending ? '撤销中…' : '确认撤销'}
             </AlertDialogAction>
           </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+          </AlertDialogContent>
+        </AlertDialog>
+      )}
     </>
   );
 }

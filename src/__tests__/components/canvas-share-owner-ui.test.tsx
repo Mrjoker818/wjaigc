@@ -3,7 +3,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { useRef, useState, type ComponentProps } from 'react';
+import { useLayoutEffect, useRef, useState, type ComponentProps } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const apiMocks = vi.hoisted(() => ({
@@ -83,6 +83,10 @@ function deferred<T>(): {
     reject = rejecter;
   });
   return { promise, resolve, reject };
+}
+
+function abortError(): DOMException {
+  return new DOMException('The operation was aborted.', 'AbortError');
 }
 
 function renderCreateDialog(
@@ -197,6 +201,97 @@ describe('canvas share owner UI', () => {
     await waitFor(() => expect(dialog.contains(document.activeElement)).toBe(true));
     fireEvent.keyDown(document, { key: 'Escape' });
     expect(onOpenChange).toHaveBeenCalledWith(false);
+  });
+
+  it('does not render project A create state during the first project B commit', async () => {
+    const layoutSnapshots: string[] = [];
+    apiMocks.createCanvasShare.mockResolvedValue(createdShare(
+      'share-a',
+      'https://example.test/shared/canvas/raw-project-a',
+      '项目 A 分享',
+    ));
+    apiMocks.preflightCanvasShare.mockImplementation(async (input: { projectId: string }) => ({
+      ...readyPreflight,
+      projectName: input.projectId === 'project-b' ? '项目 B' : '项目 A',
+    }));
+
+    function LayoutProbe({ projectId }: { projectId: string }) {
+      useLayoutEffect(() => {
+        if (projectId === 'project-b') layoutSnapshots.push(document.body.textContent ?? '');
+      }, [projectId]);
+      return (
+        <CanvasShareCreateDialog
+          open
+          onOpenChange={vi.fn()}
+          projectId={projectId}
+          onOpenManagement={vi.fn()}
+        />
+      );
+    }
+
+    const { rerender } = render(<LayoutProbe projectId="project-a" />);
+    await screen.findByText('项目 A');
+    fireEvent.click(screen.getByRole('button', { name: '创建分享' }));
+    expect(await screen.findByText('分享已创建')).toBeTruthy();
+
+    await act(async () => rerender(<LayoutProbe projectId="project-b" />));
+
+    expect(layoutSnapshots).toHaveLength(1);
+    expect(layoutSnapshots[0]).not.toContain('分享已创建');
+    expect(layoutSnapshots[0]).not.toContain('项目 A 分享');
+    expect(layoutSnapshots[0]).not.toContain('raw-project-a');
+    expect(await screen.findByText('项目 B')).toBeTruthy();
+  });
+
+  it('ignores a late preflight result after project change without flashing project A state', async () => {
+    const pendingPreflight = deferred<typeof readyPreflight>();
+    const layoutAbortStates: boolean[] = [];
+    let preflightSignal: AbortSignal | undefined;
+    apiMocks.preflightCanvasShare
+      .mockImplementationOnce((_input: unknown, signal: AbortSignal) => {
+        preflightSignal = signal;
+        return pendingPreflight.promise;
+      })
+      .mockResolvedValueOnce({ ...readyPreflight, projectName: '项目 B' });
+
+    function LayoutProbe({ projectId }: { projectId: string }) {
+      useLayoutEffect(() => {
+        if (projectId !== 'project-b') return;
+        layoutAbortStates.push(preflightSignal?.aborted ?? true);
+        pendingPreflight.resolve({
+          ...readyPreflight,
+          projectName: '项目 A 迟到预检',
+        });
+      }, [projectId]);
+      return (
+        <CanvasShareCreateDialog
+          open
+          onOpenChange={vi.fn()}
+          projectId={projectId}
+          onOpenManagement={vi.fn()}
+        />
+      );
+    }
+
+    const { rerender } = render(<LayoutProbe projectId="project-a" />);
+    await waitFor(() => expect(apiMocks.preflightCanvasShare).toHaveBeenCalledTimes(1));
+
+    await act(async () => rerender(<LayoutProbe projectId="project-b" />));
+
+    expect(layoutAbortStates).toEqual([false]);
+    expect(await screen.findByText('项目 B')).toBeTruthy();
+    expect(screen.queryByText('项目 A 迟到预检')).toBeNull();
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('treats an AbortError from preflight as cancellation without an error flash', async () => {
+    apiMocks.preflightCanvasShare.mockRejectedValueOnce(abortError());
+    renderCreateDialog();
+
+    await waitFor(() => expect(screen.queryByRole('status', {
+      name: '正在检查画布分享条件',
+    })).toBeNull());
+    expect(screen.queryByRole('alert')).toBeNull();
   });
 
   it('aborts and ignores a late create result after switching projects', async () => {
@@ -504,6 +599,69 @@ describe('canvas share owner UI', () => {
     expect(alert.textContent).toContain('取消后刷新列表');
   });
 
+  it('hides project A policy state on the first project B commit and ignores its late failure', async () => {
+    const pendingPolicy = deferred<typeof newerShare>();
+    const layoutSnapshots: string[] = [];
+    const layoutAbortStates: boolean[] = [];
+    apiMocks.patchCanvasSharePolicy.mockReturnValueOnce(pendingPolicy.promise);
+    apiMocks.listCanvasShares
+      .mockResolvedValueOnce([newerShare])
+      .mockResolvedValueOnce([{ ...newerShare, shareId: 'share-b', title: '项目 B 分享' }]);
+
+    function LayoutProbe({ projectId }: { projectId: string }) {
+      useLayoutEffect(() => {
+        if (projectId !== 'project-b') return;
+        layoutSnapshots.push(document.body.textContent ?? '');
+        layoutAbortStates.push(policySignal?.aborted ?? true);
+        pendingPolicy.reject({ code: 'CANVAS_SHARE_POLICY_CONFLICT' });
+      }, [projectId]);
+      return (
+        <CanvasShareManagePanel
+          open
+          onOpenChange={vi.fn()}
+          projectId={projectId}
+          projectName={projectId === 'project-b' ? '项目 B' : '项目 A'}
+        />
+      );
+    }
+
+    const { rerender } = render(<LayoutProbe projectId="project-a" />);
+    const row = (await screen.findAllByTestId('canvas-share-row'))[0];
+    fireEvent.click(within(row).getByRole('button', { name: '编辑策略 新版审阅' }));
+    fireEvent.click(within(screen.getByRole('dialog', { name: '编辑分享策略' }))
+      .getByRole('button', { name: '保存策略' }));
+    const policySignal = apiMocks.patchCanvasSharePolicy.mock.calls[0]?.[2] as AbortSignal | undefined;
+
+    await act(async () => rerender(<LayoutProbe projectId="project-b" />));
+    expect(layoutSnapshots).toHaveLength(1);
+    expect(layoutAbortStates).toEqual([false]);
+    expect(layoutSnapshots[0]).not.toContain('编辑分享策略');
+    expect(layoutSnapshots[0]).not.toContain('新版审阅');
+
+    expect(await screen.findByText('项目 B 分享')).toBeTruthy();
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('treats an AbortError from policy update as cancellation without a nested error', async () => {
+    apiMocks.patchCanvasSharePolicy.mockRejectedValueOnce(abortError());
+    render(
+      <CanvasShareManagePanel
+        open
+        onOpenChange={vi.fn()}
+        projectId="project-1"
+        projectName="服务端项目名"
+      />,
+    );
+    const row = (await screen.findAllByTestId('canvas-share-row'))[0];
+    fireEvent.click(within(row).getByRole('button', { name: '编辑策略 新版审阅' }));
+    const policy = screen.getByRole('dialog', { name: '编辑分享策略' });
+    fireEvent.click(within(policy).getByRole('button', { name: '保存策略' }));
+
+    await waitFor(() => expect(within(policy).getByRole('button', { name: '保存策略' }))
+      .toHaveProperty('disabled', false));
+    expect(within(policy).queryByRole('alert')).toBeNull();
+  });
+
   it('renders revoke failures inside the active confirmation alert', async () => {
     apiMocks.revokeCanvasShare.mockRejectedValue({ code: 'CANVAS_SHARE_NOT_FOUND' });
     render(
@@ -522,6 +680,69 @@ describe('canvas share owner UI', () => {
 
     const alert = await within(confirmation).findByRole('alert');
     expect(alert.textContent).toContain('取消后刷新列表');
+  });
+
+  it('hides project A revoke state on the first project B commit and ignores its late failure', async () => {
+    const pendingRevoke = deferred<typeof newerShare>();
+    const layoutSnapshots: string[] = [];
+    const layoutAbortStates: boolean[] = [];
+    apiMocks.revokeCanvasShare.mockReturnValueOnce(pendingRevoke.promise);
+    apiMocks.listCanvasShares
+      .mockResolvedValueOnce([newerShare])
+      .mockResolvedValueOnce([{ ...newerShare, shareId: 'share-b', title: '项目 B 分享' }]);
+
+    function LayoutProbe({ projectId }: { projectId: string }) {
+      useLayoutEffect(() => {
+        if (projectId !== 'project-b') return;
+        layoutSnapshots.push(document.body.textContent ?? '');
+        layoutAbortStates.push(revokeSignal?.aborted ?? true);
+        pendingRevoke.reject({ code: 'CANVAS_SHARE_NOT_FOUND' });
+      }, [projectId]);
+      return (
+        <CanvasShareManagePanel
+          open
+          onOpenChange={vi.fn()}
+          projectId={projectId}
+          projectName={projectId === 'project-b' ? '项目 B' : '项目 A'}
+        />
+      );
+    }
+
+    const { rerender } = render(<LayoutProbe projectId="project-a" />);
+    const row = (await screen.findAllByTestId('canvas-share-row'))[0];
+    fireEvent.click(within(row).getByRole('button', { name: '撤销分享 新版审阅' }));
+    fireEvent.click(within(screen.getByRole('alertdialog', { name: '确认撤销分享' }))
+      .getByRole('button', { name: '确认撤销' }));
+    const revokeSignal = apiMocks.revokeCanvasShare.mock.calls[0]?.[1] as AbortSignal | undefined;
+
+    await act(async () => rerender(<LayoutProbe projectId="project-b" />));
+    expect(layoutSnapshots).toHaveLength(1);
+    expect(layoutAbortStates).toEqual([false]);
+    expect(layoutSnapshots[0]).not.toContain('确认撤销分享');
+    expect(layoutSnapshots[0]).not.toContain('新版审阅');
+
+    expect(await screen.findByText('项目 B 分享')).toBeTruthy();
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('treats an AbortError from revoke as cancellation without a nested error', async () => {
+    apiMocks.revokeCanvasShare.mockRejectedValueOnce(abortError());
+    render(
+      <CanvasShareManagePanel
+        open
+        onOpenChange={vi.fn()}
+        projectId="project-1"
+        projectName="服务端项目名"
+      />,
+    );
+    const row = (await screen.findAllByTestId('canvas-share-row'))[0];
+    fireEvent.click(within(row).getByRole('button', { name: '撤销分享 新版审阅' }));
+    const confirmation = screen.getByRole('alertdialog', { name: '确认撤销分享' });
+    fireEvent.click(within(confirmation).getByRole('button', { name: '确认撤销' }));
+
+    await waitFor(() => expect(within(confirmation).getByRole('button', { name: '确认撤销' }))
+      .toHaveProperty('disabled', false));
+    expect(within(confirmation).queryByRole('alert')).toBeNull();
   });
 
   it('restores focus to a persistent project-menu trigger after management closes', async () => {
