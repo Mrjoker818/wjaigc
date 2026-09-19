@@ -232,6 +232,13 @@ export function SharedCanvasViewer({
     return () => document.removeEventListener('fullscreenchange', update);
   }, []);
 
+  const closePreview = useCallback((): void => {
+    setPreviewItemRef(null);
+    if (!previewHistoryEntryRef.current) return;
+    previewHistoryEntryRef.current = false;
+    window.history.back();
+  }, []);
+
   const markFailed = useCallback((ref: string): void => {
     setFailedItems(current => {
       if (current.has(ref)) return current;
@@ -239,8 +246,8 @@ export function SharedCanvasViewer({
       next.add(ref);
       return next;
     });
-    setPreviewItemRef(current => current === ref ? null : current);
-  }, []);
+    if (previewItemRef === ref) closePreview();
+  }, [closePreview, previewItemRef]);
 
   const fitCanvas = useCallback((): void => {
     const element = viewportRef.current;
@@ -429,13 +436,6 @@ export function SharedCanvasViewer({
     setPreviewItemRef(itemRefValue);
   }, []);
 
-  const closePreview = useCallback((): void => {
-    setPreviewItemRef(null);
-    if (!previewHistoryEntryRef.current) return;
-    previewHistoryEntryRef.current = false;
-    window.history.back();
-  }, []);
-
   const preview = resolvedItems.find(({ item }) => item.itemRef === previewItemRef);
   const selectedDownload = resolvedItems.find(({ item }) => item.itemRef === focusedItemRef)
     ?.downloadUrl ?? undefined;
@@ -573,7 +573,7 @@ export function SharedCanvasViewer({
 
         <div
           data-shared-toolbar-shell
-          className="pointer-events-none absolute inset-x-0 bottom-0 flex justify-center px-2 pt-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] sm:p-4"
+          className="pointer-events-none absolute inset-x-0 bottom-0 flex justify-center pt-2 pr-[max(0.5rem,env(safe-area-inset-right))] pb-[max(0.5rem,env(safe-area-inset-bottom))] pl-[max(0.5rem,env(safe-area-inset-left))] sm:pt-4 sm:pr-[max(1rem,env(safe-area-inset-right))] sm:pb-[max(1rem,env(safe-area-inset-bottom))] sm:pl-[max(1rem,env(safe-area-inset-left))]"
         >
           <SharedCanvasToolbar
             scale={viewport.zoom}

@@ -627,6 +627,35 @@ describe('shared canvas viewer', () => {
     expect(screen.getByText(publicDocument.title)).toBeTruthy();
   });
 
+  it('removes the preview history entry after preview media fails before opening another preview', async () => {
+    const pushState = vi.spyOn(window.history, 'pushState').mockImplementation(() => undefined);
+    const back = vi.spyOn(window.history, 'back').mockImplementation(() => undefined);
+    renderViewer({
+      ...publicDocument,
+      items: [
+        publicDocument.items[0],
+        {
+          ...publicDocument.items[0],
+          itemRef: secondItemRef,
+          transform: { x: 700, y: 20, width: 320, height: 240, rotation: 0, zIndex: 3 },
+          display: { label: '辅助视觉', altText: '辅助海报' },
+          mediaPath: `media/${secondItemRef}`,
+        },
+      ],
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: '预览主视觉' }));
+    const firstDialog = screen.getByRole('dialog', { name: '媒体预览' });
+    fireEvent.error(firstDialog.querySelector('img')!);
+
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '媒体预览' })).toBeNull());
+    expect(back).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole('button', { name: '预览辅助视觉' }));
+    expect(screen.getByRole('dialog', { name: '媒体预览' })).toBeTruthy();
+    expect(pushState).toHaveBeenCalledTimes(2);
+  });
+
   it('renders video inline, muted, without audible autoplay', () => {
     renderViewer({
       ...publicDocument,

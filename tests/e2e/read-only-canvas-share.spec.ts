@@ -14,7 +14,7 @@ import {
 
 const desktopProjects = new Set(['chromium', 'firefox', 'webkit']);
 
-test.use({ trace: 'on', screenshot: 'on' });
+test.use({ trace: 'on', screenshot: 'on', serviceWorkers: 'block' });
 
 test.describe('只读画布分享桌面浏览器矩阵', () => {
   test.beforeEach(async ({}, testInfo) => {
@@ -34,6 +34,37 @@ test.describe('只读画布分享桌面浏览器矩阵', () => {
     await expect(video).toHaveAttribute('playsinline', '');
     await expect(video).not.toHaveAttribute('autoplay', '');
     await expect(page.getByText('此内容暂不可用')).toBeVisible();
+
+    const videoProtocol = await page.evaluate(async path => {
+      const head = await fetch(path, { method: 'HEAD' });
+      const partial = await fetch(path, { headers: { Range: 'bytes=2-5' } });
+      const invalid = await fetch(path, { headers: { Range: 'bytes=999999-1000000' } });
+      return {
+        head: {
+          status: head.status,
+          type: head.headers.get('content-type'),
+          length: head.headers.get('content-length'),
+          ranges: head.headers.get('accept-ranges'),
+          bodyLength: (await head.arrayBuffer()).byteLength,
+        },
+        partial: {
+          status: partial.status,
+          range: partial.headers.get('content-range'),
+          length: partial.headers.get('content-length'),
+          ranges: partial.headers.get('accept-ranges'),
+          bytes: [...new Uint8Array(await partial.arrayBuffer())],
+        },
+        invalid: {
+          status: invalid.status,
+          range: invalid.headers.get('content-range'),
+        },
+      };
+    }, videoPath);
+    expect(videoProtocol).toEqual({
+      head: { status: 200, type: 'video/mp4', length: '1542', ranges: 'bytes', bodyLength: 0 },
+      partial: { status: 206, range: 'bytes 2-5/1542', length: '4', ranges: 'bytes', bytes: [0, 32, 102, 116] },
+      invalid: { status: 416, range: 'bytes */1542' },
+    });
 
     const content = page.getByTestId('shared-canvas-content');
     const initialScale = Number(await content.getAttribute('data-scale'));
@@ -103,6 +134,7 @@ test.describe('只读画布分享桌面浏览器矩阵', () => {
     const downloadEvent = page.waitForEvent('download');
     await downloadLink.click();
     const download = await downloadEvent;
+    expect(download.url()).toBe(new URL(downloadPath, page.url()).toString());
     expect(download.suggestedFilename()).toBe('share-image.png');
     await download.cancel();
 

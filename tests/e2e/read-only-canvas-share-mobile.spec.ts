@@ -14,7 +14,7 @@ const portraitProjects = new Set([
   'mobile-393-chromium',
 ]);
 
-test.use({ trace: 'on', screenshot: 'on' });
+test.use({ trace: 'on', screenshot: 'on', serviceWorkers: 'block' });
 
 async function dispatchTouch(
   session: CDPSession,
@@ -29,6 +29,37 @@ async function dispatchTouch(
 
 async function nextFrame(page: Page): Promise<void> {
   await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => resolve())));
+}
+
+async function waitForCanvasTransformToSettle(page: Page): Promise<void> {
+  const content = page.getByTestId('shared-canvas-content');
+  await expect.poll(async () => content.evaluate(element => {
+    const matrix = new DOMMatrixReadOnly(getComputedStyle(element).transform);
+    const expectedScale = Number(element.dataset.scale);
+    const expectedOffsetX = Number(element.dataset.offsetX);
+    const expectedOffsetY = Number(element.dataset.offsetY);
+    return Math.abs(matrix.a - expectedScale) < 0.01
+      && Math.abs(matrix.d - expectedScale) < 0.01
+      && Math.abs(matrix.e - expectedOffsetX) < 0.5
+      && Math.abs(matrix.f - expectedOffsetY) < 0.5;
+  })).toBe(true);
+}
+
+async function mediaTouchPoint(page: Page): Promise<{ x: number; y: number }> {
+  return page.getByRole('button', { name: '预览夹具图片' }).evaluate(element => {
+    const rect = element.getBoundingClientRect();
+    const candidates = [
+      { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 },
+      { x: rect.left + rect.width / 3, y: rect.top + rect.height / 3 },
+      { x: rect.right - rect.width / 3, y: rect.bottom - rect.height / 3 },
+    ];
+    const hit = candidates.find(point => {
+      const target = document.elementFromPoint(point.x, point.y);
+      return target instanceof Node && element.contains(target);
+    });
+    if (!hit) throw new Error('media has no unobscured touch point');
+    return { x: Math.round(hit.x), y: Math.round(hit.y) };
+  });
 }
 
 async function blankViewerPoints(page: Page, count: 1 | 2): Promise<Array<{ x: number; y: number }>> {
@@ -53,7 +84,7 @@ async function blankViewerPoints(page: Page, count: 1 | 2): Promise<Array<{ x: n
   }, count);
 }
 
-async function assertCompactToolbar(page: Page): Promise<void> {
+async function assertCompactToolbar(page: Page, expectedBasePadding: 8 | 16): Promise<void> {
   const viewportSize = page.viewportSize();
   expect(viewportSize).not.toBeNull();
   const toolbar = page.getByRole('navigation', { name: '只读画布工具栏' });
@@ -75,8 +106,24 @@ async function assertCompactToolbar(page: Page): Promise<void> {
 
   const safeAreaShell = page.locator('[data-shared-toolbar-shell]');
   await expect(safeAreaShell).toBeVisible();
-  const paddingBottom = await safeAreaShell.evaluate(element => Number.parseFloat(getComputedStyle(element).paddingBottom));
-  expect(paddingBottom).toBeGreaterThanOrEqual(8);
+  const shellContract = await safeAreaShell.evaluate(element => {
+    const style = getComputedStyle(element);
+    return {
+      className: element.className,
+      paddingBottom: Number.parseFloat(style.paddingBottom),
+      paddingLeft: Number.parseFloat(style.paddingLeft),
+      paddingRight: Number.parseFloat(style.paddingRight),
+    };
+  });
+  expect(shellContract.paddingBottom).toBe(expectedBasePadding);
+  expect(shellContract.paddingLeft).toBe(expectedBasePadding);
+  expect(shellContract.paddingRight).toBe(expectedBasePadding);
+  expect(shellContract.className).toContain('pb-[max(0.5rem,env(safe-area-inset-bottom))]');
+  expect(shellContract.className).toContain('pl-[max(0.5rem,env(safe-area-inset-left))]');
+  expect(shellContract.className).toContain('pr-[max(0.5rem,env(safe-area-inset-right))]');
+  expect(shellContract.className).toContain('sm:pb-[max(1rem,env(safe-area-inset-bottom))]');
+  expect(shellContract.className).toContain('sm:pl-[max(1rem,env(safe-area-inset-left))]');
+  expect(shellContract.className).toContain('sm:pr-[max(1rem,env(safe-area-inset-right))]');
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 }
 
@@ -93,7 +140,7 @@ test.describe('只读画布分享移动端矩阵', () => {
     await installReadOnlyShareFixture(page, { allowDownload: true });
     await page.goto(`/shared/canvas/${fixtureToken}`);
     await expect(page.getByRole('heading', { name: publicShareFixture(true).title })).toBeVisible();
-    await assertCompactToolbar(page);
+    await assertCompactToolbar(page, 8);
 
     const viewerStyles = await page.locator('[data-shared-canvas-viewer]').evaluate(element => {
       const root = getComputedStyle(element);
@@ -148,15 +195,70 @@ test.describe('只读画布分享移动端矩阵', () => {
       await page.getByRole('button', { name: '适应画面' }).click();
       await expect.poll(async () => Number(await content.getAttribute('data-scale'))).not.toBeCloseTo(tapScale * 1.2, 5);
 
-      const contextMenuAllowed = await page.getByRole('button', { name: '预览夹具图片' }).evaluate(element => (
-        element.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }))
+      await waitForCanvasTransformToSettle(page);
+
+      const media = page.getByRole('button', { name: '预览夹具图片' });
+      const mediaPoint = await mediaTouchPoint(page);
+      await media.evaluate(element => {
+        const state = {
+          touchStarts: 0,
+          contextMenus: 0,
+          defaultPrevented: false,
+          contextTargetWasMedia: false,
+          suppressClick: true,
+        };
+        (window as typeof window & { __task7MediaProbe?: typeof state }).__task7MediaProbe = state;
+        element.addEventListener('touchstart', () => { state.touchStarts += 1; });
+        element.addEventListener('click', event => {
+          if (!state.suppressClick) return;
+          event.preventDefault();
+          event.stopImmediatePropagation();
+        }, { capture: true });
+        document.addEventListener('contextmenu', event => {
+          if (!(event.target instanceof Node) || !element.contains(event.target)) return;
+          queueMicrotask(() => {
+            state.contextMenus += 1;
+            state.defaultPrevented = event.defaultPrevented;
+            state.contextTargetWasMedia = true;
+          });
+        });
+      });
+      const readMediaProbe = () => page.evaluate(() => (
+        (window as typeof window & { __task7MediaProbe?: {
+          touchStarts: number;
+          contextMenus: number;
+          defaultPrevented: boolean;
+          contextTargetWasMedia: boolean;
+          suppressClick: boolean;
+        } }).__task7MediaProbe
       ));
-      expect(contextMenuAllowed).toBe(false);
-      const [longPressPoint] = await blankViewerPoints(page, 1);
-      await dispatchTouch(cdp, 'touchStart', [{ id: 6, ...longPressPoint }]);
-      await page.waitForTimeout(650);
+      const beforeLongPressUrl = page.url();
+      await dispatchTouch(cdp, 'touchStart', [{ id: 6, ...mediaPoint }]);
+      await expect.poll(async () => (await readMediaProbe())?.touchStarts ?? 0).toBe(1);
+      const nativeContextMenuSynthesized = await expect.poll(
+        async () => (await readMediaProbe())?.contextMenus ?? 0,
+        { timeout: 800, intervals: [50, 100, 200] },
+      ).toBeGreaterThan(0).then(() => true, () => false);
       await dispatchTouch(cdp, 'touchEnd', []);
-      await expect(page.locator('[role="menu"], [data-toolbar="image-actions"], [data-toolbar="bottom-toolbar"]')).toHaveCount(0);
+      if (!nativeContextMenuSynthesized) {
+        await media.evaluate(element => {
+          element.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+        });
+      }
+      await expect.poll(async () => (await readMediaProbe())?.contextMenus ?? 0).toBeGreaterThan(0);
+      const mediaProbe = await readMediaProbe();
+      expect(mediaProbe).toMatchObject({ defaultPrevented: true, contextTargetWasMedia: true });
+      expect(page.url()).toBe(beforeLongPressUrl);
+      await expect.poll(async () => page.locator('[role="menu"], [data-toolbar="image-actions"], [data-toolbar="bottom-toolbar"]').count()).toBe(0);
+      shareEvidence.details.mediaLongPress = { nativeContextMenuSynthesized, mediaProbe };
+      await testInfo.attach('media-long-press-event-chain', {
+        body: JSON.stringify({ nativeContextMenuSynthesized, mediaProbe }, null, 2),
+        contentType: 'application/json',
+      });
+      await media.evaluate(() => {
+        const state = (window as typeof window & { __task7MediaProbe?: { suppressClick: boolean } }).__task7MediaProbe;
+        if (state) state.suppressClick = false;
+      });
     } finally {
       await cdp.detach();
     }
@@ -175,7 +277,7 @@ test.describe('只读画布分享移动端矩阵', () => {
     await installReadOnlyShareFixture(page, { allowDownload: true });
     await page.goto(`/shared/canvas/${fixtureToken}`);
     await expect(page.getByRole('heading', { name: publicShareFixture(true).title })).toBeVisible();
-    await assertCompactToolbar(page);
+    await assertCompactToolbar(page, 16);
 
     await page.getByRole('button', { name: '预览夹具图片' }).click();
     await expect(page.getByRole('dialog', { name: '媒体预览' })).toBeVisible();

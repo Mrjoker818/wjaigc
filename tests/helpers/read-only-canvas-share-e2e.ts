@@ -1,7 +1,15 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-import { expect, test as base, type Page, type Route, type TestInfo } from '@playwright/test';
+import {
+  expect,
+  test as base,
+  type BrowserContext,
+  type Page,
+  type Request,
+  type Route,
+  type TestInfo,
+} from '@playwright/test';
 
 export const fixtureToken = 'T'.repeat(43);
 export const imageItemRef = `csr_${'I'.repeat(43)}`;
@@ -12,6 +20,12 @@ export const imagePath = `${metadataPath}/media/${imageItemRef}`;
 export const videoPath = `${metadataPath}/media/${videoItemRef}`;
 export const unavailablePath = `${metadataPath}/media/${unavailableItemRef}`;
 export const downloadPath = `${imagePath}/download`;
+export const evidenceRoot = resolve(
+  process.cwd(),
+  'output',
+  'playwright',
+  'task7-fix1-final-evidence',
+);
 
 const onePixelPng = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
@@ -79,25 +93,80 @@ interface FixtureOptions {
   invalid?: boolean;
 }
 
-async function fulfillMediaRoute(route: Route, pathname: string): Promise<void> {
-  if (pathname === imagePath) {
-    await route.fulfill({ status: 200, contentType: 'image/png', body: onePixelPng, headers: { 'Cache-Control': 'private, no-store' } });
+function commonMediaHeaders(contentType: string, contentLength: number): Record<string, string> {
+  return {
+    'Accept-Ranges': 'bytes',
+    'Cache-Control': 'private, no-store',
+    'Content-Length': String(contentLength),
+    'Content-Type': contentType,
+  };
+}
+
+async function fulfillBytes(
+  route: Route,
+  bytes: Buffer,
+  contentType: string,
+  acceptRanges = false,
+): Promise<void> {
+  const method = route.request().method();
+  const baseHeaders = acceptRanges
+    ? commonMediaHeaders(contentType, bytes.length)
+    : {
+        'Cache-Control': 'private, no-store',
+        'Content-Length': String(bytes.length),
+        'Content-Type': contentType,
+      };
+  if (method === 'HEAD') {
+    await route.fulfill({ status: 200, headers: baseHeaders, body: '' });
     return;
   }
-  if (pathname === videoPath) {
+  const rangeHeader = route.request().headers().range;
+  if (acceptRanges && rangeHeader) {
+    const match = /^bytes=(\d+)-(\d*)$/u.exec(rangeHeader);
+    const start = match ? Number(match[1]) : Number.NaN;
+    const requestedEnd = match?.[2] ? Number(match[2]) : bytes.length - 1;
+    if (!match || !Number.isSafeInteger(start) || !Number.isSafeInteger(requestedEnd)
+      || start < 0 || requestedEnd < start || start >= bytes.length || requestedEnd >= bytes.length) {
+      await route.fulfill({
+        status: 416,
+        contentType: 'application/json',
+        headers: {
+          'Accept-Ranges': 'bytes',
+          'Cache-Control': 'private, no-store',
+          'Content-Range': `bytes */${bytes.length}`,
+        },
+        body: JSON.stringify({ code: 'CANVAS_SHARE_RANGE_NOT_SATISFIABLE' }),
+      });
+      return;
+    }
+    const slice = bytes.subarray(start, requestedEnd + 1);
     await route.fulfill({
-      status: 200,
-      contentType: 'video/mp4',
-      body: tinyMp4,
-      headers: { 'Accept-Ranges': 'bytes', 'Cache-Control': 'private, no-store', 'Content-Length': String(tinyMp4.length) },
+      status: 206,
+      body: slice,
+      headers: {
+        ...commonMediaHeaders(contentType, slice.length),
+        'Content-Range': `bytes ${start}-${requestedEnd}/${bytes.length}`,
+      },
     });
     return;
   }
+  await route.fulfill({ status: 200, body: bytes, headers: baseHeaders });
+}
+
+async function fulfillMediaRoute(route: Route, pathname: string): Promise<boolean> {
+  if (pathname === imagePath) {
+    await fulfillBytes(route, onePixelPng, 'image/png');
+    return true;
+  }
+  if (pathname === videoPath) {
+    await fulfillBytes(route, tinyMp4, 'video/mp4', true);
+    return true;
+  }
   if (pathname === unavailablePath) {
     await route.fulfill({ status: 415, body: '' });
-    return;
+    return true;
   }
-  await route.fulfill({ status: 404, body: '' });
+  return false;
 }
 
 export async function installReadOnlyShareFixture(page: Page, options: FixtureOptions = {}): Promise<void> {
@@ -126,39 +195,122 @@ export async function installReadOnlyShareFixture(page: Page, options: FixtureOp
         await route.fulfill({ status: 403, contentType: 'application/json', body: JSON.stringify({ code: 'CANVAS_SHARE_DOWNLOAD_DISABLED' }) });
         return;
       }
-      await route.fulfill({
-        status: 200,
-        contentType: 'image/png',
-        body: onePixelPng,
-        headers: {
-          'Cache-Control': 'private, no-store',
-          'Content-Disposition': 'attachment; filename="share-image.png"',
-          'X-Content-Type-Options': 'nosniff',
-        },
-      });
+      if (route.request().method() === 'HEAD') {
+        await route.fulfill({
+          status: 200,
+          headers: {
+            'Cache-Control': 'private, no-store',
+            'Content-Disposition': 'attachment; filename="share-image.png"',
+            'Content-Length': String(onePixelPng.length),
+            'Content-Type': 'image/png',
+            'X-Content-Type-Options': 'nosniff',
+          },
+          body: '',
+        });
+      } else {
+        await route.fulfill({
+          status: 200,
+          contentType: 'image/png',
+          body: onePixelPng,
+          headers: {
+            'Cache-Control': 'private, no-store',
+            'Content-Disposition': 'attachment; filename="share-image.png"',
+            'X-Content-Type-Options': 'nosniff',
+          },
+        });
+      }
       return;
     }
-    await fulfillMediaRoute(route, pathname);
+    if (await fulfillMediaRoute(route, pathname)) return;
+    await route.fulfill({
+      status: 418,
+      contentType: 'application/json',
+      headers: { 'Cache-Control': 'private, no-store' },
+      body: JSON.stringify({ code: 'TASK7_UNEXPECTED_PUBLIC_SHARE_PATH' }),
+    });
   });
 }
 
-export interface ShareEvidence {
-  apiRequests: Array<{ method: string; pathname: string }>;
-  forbiddenRequests: Array<{ method: string; pathname: string }>;
-  consoleErrors: string[];
+export type ForbiddenReason =
+  | 'unsafe-method'
+  | 'cross-origin'
+  | 'unexpected-navigation'
+  | 'unexpected-public-share-path'
+  | 'unexpected-request';
+
+export interface ShareRequestRecord {
+  method: string;
+  origin: string;
+  pathname: string;
+  resourceType: string;
+  navigation: boolean;
+  reason?: ForbiddenReason;
 }
 
-function isForbiddenRequest(method: string, pathname: string): boolean {
-  if (method !== 'GET' && method !== 'HEAD') return true;
-  return [
-    /^\/api\/generate(?:\/|$)/u,
-    /^\/api\/(?:edit|image-edit)(?:\/|$)/u,
-    /^\/api\/(?:delete|save|save-image)(?:\/|$)/u,
-    /^\/api\/(?:credit|credits)(?:\/|$)/u,
-    /^\/api\/(?:model|models)(?:\/|$)/u,
-    /^\/api\/(?:provider|providers)(?:\/|$)/u,
-    /^\/api\/canvas-shares(?:\/|$)/u,
-  ].some(pattern => pattern.test(pathname));
+export interface ShareEvidence {
+  startedAt: string;
+  requests: ShareRequestRecord[];
+  apiRequests: Array<{ method: string; pathname: string }>;
+  forbiddenRequests: ShareRequestRecord[];
+  consoleErrors: string[];
+  details: Record<string, unknown>;
+}
+
+export function createShareEvidence(startedAt = new Date().toISOString()): ShareEvidence {
+  return {
+    startedAt,
+    requests: [],
+    apiRequests: [],
+    forbiddenRequests: [],
+    consoleErrors: [],
+    details: {},
+  };
+}
+
+function requestReason(request: Request, expectedOrigin: string): ForbiddenReason | null {
+  const method = request.method();
+  const url = new URL(request.url());
+  if (method !== 'GET' && method !== 'HEAD') return 'unsafe-method';
+  if (url.origin !== expectedOrigin) return 'cross-origin';
+  if ([metadataPath, imagePath, videoPath, unavailablePath, downloadPath].includes(url.pathname)) return null;
+  const expectedSharePath = `/shared/canvas/${fixtureToken}`;
+  if (request.isNavigationRequest()) {
+    return url.pathname === expectedSharePath && !url.search ? null : 'unexpected-navigation';
+  }
+  if (
+    url.pathname.startsWith('/_next/static/')
+    || url.pathname === '/_next/webpack-hmr'
+    || url.pathname === '/favicon.ico'
+  ) return null;
+  if (url.pathname.startsWith('/api/public/canvas-shares/')) return 'unexpected-public-share-path';
+  return 'unexpected-request';
+}
+
+export function observeReadOnlyShareRequests(
+  context: BrowserContext,
+  evidence: ShareEvidence,
+  baseURL: string,
+): () => void {
+  const expectedOrigin = new URL(baseURL).origin;
+  const onRequest = (request: Request): void => {
+    const url = new URL(request.url());
+    const reason = requestReason(request, expectedOrigin);
+    const record: ShareRequestRecord = {
+      method: request.method(),
+      origin: url.origin,
+      pathname: url.pathname,
+      resourceType: request.resourceType(),
+      navigation: request.isNavigationRequest(),
+      ...(reason ? { reason } : {}),
+    };
+    evidence.requests.push(record);
+    if (url.pathname.startsWith('/api/')) {
+      evidence.apiRequests.push({ method: record.method, pathname: record.pathname });
+    }
+    if (reason) evidence.forbiddenRequests.push(record);
+  };
+  context.on('request', onRequest);
+  return () => context.off('request', onRequest);
 }
 
 function redactFixturePath(pathname: string): string {
@@ -169,45 +321,95 @@ function redactFixturePath(pathname: string): string {
     .replace(unavailableItemRef, ':unavailable-item');
 }
 
-async function attachEvidence(page: Page, evidence: ShareEvidence, testInfo: TestInfo): Promise<void> {
+type EvidenceStatus = 'passed' | 'failed' | 'timedOut' | 'interrupted' | 'unexpected';
+
+function evidenceStatus(testInfo: TestInfo, hasForbiddenRequests: boolean): EvidenceStatus {
+  if (hasForbiddenRequests) return 'failed';
+  if (testInfo.status === 'passed' && testInfo.expectedStatus === 'passed') return 'passed';
+  if (testInfo.status === 'timedOut') return 'timedOut';
+  if (testInfo.status === 'interrupted') return 'interrupted';
+  if (testInfo.status === 'failed') return 'failed';
+  return 'unexpected';
+}
+
+async function attachEvidence(
+  page: Page,
+  evidence: ShareEvidence,
+  testInfo: TestInfo,
+  status: EvidenceStatus,
+): Promise<void> {
+  const completedAt = new Date().toISOString();
   const body = JSON.stringify({
+    status,
+    startedAt: evidence.startedAt,
+    completedAt,
     testTitle: testInfo.titlePath,
     project: testInfo.project.name,
     viewport: page.viewportSize(),
+    requests: evidence.requests.map(request => ({
+      ...request,
+      origin: request.origin === new URL(String(testInfo.project.use.baseURL)).origin ? ':same-origin' : request.origin,
+      pathname: redactFixturePath(request.pathname),
+    })),
     apiRequests: evidence.apiRequests.map(request => ({ ...request, pathname: redactFixturePath(request.pathname) })),
     forbiddenRequestCount: evidence.forbiddenRequests.length,
+    forbiddenRequests: evidence.forbiddenRequests.map(request => ({
+      ...request,
+      origin: request.origin === new URL(String(testInfo.project.use.baseURL)).origin ? ':same-origin' : request.origin,
+      pathname: redactFixturePath(request.pathname),
+    })),
     consoleErrors: evidence.consoleErrors,
+    details: evidence.details,
   }, null, 2);
   const safeTitle = testInfo.title.replace(/[^a-zA-Z0-9\u4e00-\u9fff_-]+/gu, '-');
-  const evidenceDirectory = resolve(
-    process.cwd(),
-    'output',
-    'playwright',
-    'read-only-canvas-share-evidence',
-    testInfo.project.name,
-  );
-  const evidencePath = resolve(evidenceDirectory, `${safeTitle}.json`);
+  const evidenceDirectory = resolve(evidenceRoot, testInfo.project.name);
+  const evidencePath = resolve(evidenceDirectory, `${safeTitle}--${status}.json`);
   mkdirSync(evidenceDirectory, { recursive: true });
   writeFileSync(evidencePath, body, 'utf8');
-  await testInfo.attach(`只读分享证据-${safeTitle}`, { path: evidencePath, contentType: 'application/json' });
+  await testInfo.attach(`只读分享证据-${safeTitle}-${status}`, { path: evidencePath, contentType: 'application/json' });
 }
 
 export const test = base.extend<{ shareEvidence: ShareEvidence }>({
-  shareEvidence: [async ({ page }, use, testInfo) => {
-    const evidence: ShareEvidence = { apiRequests: [], forbiddenRequests: [], consoleErrors: [] };
-    page.on('request', request => {
-      const pathname = new URL(request.url()).pathname;
-      if (!pathname.startsWith('/api/')) return;
-      const entry = { method: request.method(), pathname };
-      evidence.apiRequests.push(entry);
-      if (isForbiddenRequest(entry.method, entry.pathname)) evidence.forbiddenRequests.push(entry);
-    });
-    page.on('console', message => {
-      if (message.type() === 'error') evidence.consoleErrors.push(redactFixturePath(message.text()).slice(0, 2_000));
-    });
-    page.on('pageerror', error => evidence.consoleErrors.push(redactFixturePath(error.message).slice(0, 2_000)));
-    await use(evidence);
-    await attachEvidence(page, evidence, testInfo);
+  shareEvidence: [async ({ context, page }, runTest, testInfo) => {
+    const evidence = createShareEvidence();
+    const stopObserving = observeReadOnlyShareRequests(
+      context,
+      evidence,
+      String(testInfo.project.use.baseURL),
+    );
+    const attachConsole = (targetPage: Page): void => {
+      targetPage.on('console', message => {
+        if (message.type() === 'error') evidence.consoleErrors.push(redactFixturePath(message.text()).slice(0, 2_000));
+      });
+    };
+    const attachPageError = (targetPage: Page): void => {
+      targetPage.on('pageerror', error => {
+        evidence.consoleErrors.push(redactFixturePath(error.message).slice(0, 2_000));
+      });
+    };
+    const observePage = (targetPage: Page): void => {
+      attachConsole(targetPage);
+      attachPageError(targetPage);
+    };
+    context.pages().forEach(observePage);
+    context.on('page', observePage);
+    try {
+      await runTest(evidence);
+    } finally {
+      stopObserving();
+      context.off('page', observePage);
+      const skipped = testInfo.status === 'skipped'
+        || testInfo.expectedStatus === 'skipped'
+        || testInfo.annotations.some(annotation => annotation.type === 'skip');
+      if (!skipped) {
+        const status = evidenceStatus(testInfo, evidence.forbiddenRequests.length > 0);
+        await attachEvidence(page, evidence, testInfo, status);
+        expect(
+          evidence.forbiddenRequests,
+          `只读分享出现未允许请求：${evidence.forbiddenRequests.map(request => `${request.method} ${request.origin}${request.pathname} (${request.reason})`).join(', ')}`,
+        ).toEqual([]);
+      }
+    }
   }, { auto: true }],
 });
 
