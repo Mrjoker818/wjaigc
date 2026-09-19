@@ -177,6 +177,14 @@ describe('canonical canvas-share JSON', () => {
     expect(() => canonicalJson([, 'second'])).toThrow(TypeError);
     expect(canonicalJson([])).toBe('[]');
   });
+
+  it('rejects a sparse array whose missing index is inherited from its prototype', () => {
+    const inherited = new Array(1);
+    Object.setPrototypeOf(inherited, { 0: 'inherited' });
+
+    expect(() => canonicalJson(inherited)).toThrow(TypeError);
+    expect(canonicalJson(['inherited'])).toBe('["inherited"]');
+  });
 });
 
 describe('immutable canvas-share snapshot', () => {
@@ -453,6 +461,12 @@ describe('immutable canvas-share snapshot', () => {
       byteSize: 127,
       contentType: 'image/png',
       eTag: '"wrong-size"',
+      versionId: null,
+    }],
+    ['no usable exact object identity', {
+      byteSize: 128,
+      contentType: 'image/png',
+      eTag: null,
       versionId: null,
     }],
   ])('blocks snapshot creation for an S3 object with %s', async (_label, inspected) => {

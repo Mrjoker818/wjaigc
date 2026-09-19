@@ -417,6 +417,11 @@ function isS3MissingObject(error: unknown): boolean {
     || candidate.$metadata?.httpStatusCode === 404;
 }
 
+function normalizeS3IdentityToken(value: string | null | undefined): string | null {
+  const normalized = value?.trim();
+  return normalized ? normalized : null;
+}
+
 async function withExactS3Deadline<T>(
   timeoutMs: number,
   callerSignal: AbortSignal | undefined,
@@ -430,14 +435,26 @@ async function withExactS3Deadline<T>(
   }
   const controller = new AbortController();
   let timedOut = false;
-  const abortFromCaller = () => controller.abort(callerSignal?.reason);
+  let rejectBoundary: (error: S3BoundedReadError) => void = () => undefined;
+  const boundary = new Promise<never>((_resolve, reject) => {
+    rejectBoundary = reject;
+  });
+  const abortFromCaller = () => {
+    const error = new S3BoundedReadError('S3_READ_ABORTED', {
+      cause: callerSignal?.reason,
+    });
+    controller.abort(error);
+    rejectBoundary(error);
+  };
   callerSignal?.addEventListener('abort', abortFromCaller, { once: true });
   const timer = setTimeout(() => {
     timedOut = true;
-    controller.abort(new DOMException('S3 exact operation timed out', 'TimeoutError'));
+    const error = new S3BoundedReadError('S3_READ_TIMEOUT');
+    controller.abort(error);
+    rejectBoundary(error);
   }, timeoutMs);
   try {
-    return await operation(controller.signal);
+    return await Promise.race([operation(controller.signal), boundary]);
   } catch (error) {
     if (error instanceof S3BoundedReadError) throw error;
     if (callerSignal?.aborted) {
@@ -472,11 +489,14 @@ export async function inspectS3ObjectExact(
     if (!Number.isSafeInteger(result.ContentLength) || (result.ContentLength ?? -1) < 0) {
       throw new S3BoundedReadError('S3_READ_FAILED');
     }
+    const eTag = normalizeS3IdentityToken(result.ETag);
+    const versionId = normalizeS3IdentityToken(result.VersionId);
+    if (!eTag && !versionId) throw new S3BoundedReadError('S3_READ_FAILED');
     return {
       byteSize: result.ContentLength!,
       contentType: result.ContentType?.trim().toLowerCase() || null,
-      eTag: result.ETag ?? null,
-      versionId: result.VersionId ?? null,
+      eTag,
+      versionId,
     };
   } catch (error) {
     if (isS3MissingObject(error)) return null;
@@ -485,21 +505,60 @@ export async function inspectS3ObjectExact(
   }
 }
 
-async function collectExactS3Body(body: unknown, maxBytes: number): Promise<Buffer> {
+async function nextExactS3Chunk(
+  iterator: AsyncIterator<Uint8Array>,
+  signal: AbortSignal,
+): Promise<IteratorResult<Uint8Array>> {
+  if (signal.aborted) throw signal.reason;
+  let rejectAbort: (reason: unknown) => void = () => undefined;
+  const aborted = new Promise<never>((_resolve, reject) => {
+    rejectAbort = reject;
+  });
+  const onAbort = () => rejectAbort(signal.reason);
+  signal.addEventListener('abort', onAbort, { once: true });
+  try {
+    return await Promise.race([iterator.next(), aborted]);
+  } finally {
+    signal.removeEventListener('abort', onAbort);
+  }
+}
+
+async function collectExactS3Body(
+  body: unknown,
+  maxBytes: number,
+  signal: AbortSignal,
+): Promise<Buffer> {
   if (
     body
     && typeof body === 'object'
     && Symbol.asyncIterator in body
     && typeof body[Symbol.asyncIterator] === 'function'
   ) {
+    const iterator = (body as AsyncIterable<Uint8Array>)[Symbol.asyncIterator]();
     const chunks: Buffer[] = [];
     let total = 0;
-    for await (const chunk of body as AsyncIterable<Uint8Array>) {
-      total += chunk.byteLength;
-      if (total > maxBytes) throw new S3BoundedReadError('S3_READ_SIZE_LIMIT');
-      chunks.push(Buffer.from(chunk));
+    let exhausted = false;
+    try {
+      while (true) {
+        const entry = await nextExactS3Chunk(iterator, signal);
+        if (entry.done) {
+          exhausted = true;
+          break;
+        }
+        total += entry.value.byteLength;
+        if (total > maxBytes) throw new S3BoundedReadError('S3_READ_SIZE_LIMIT');
+        chunks.push(Buffer.from(entry.value));
+      }
+      return Buffer.concat(chunks, total);
+    } finally {
+      if (!exhausted && typeof iterator.return === 'function') {
+        try {
+          void Promise.resolve(iterator.return()).catch(() => undefined);
+        } catch {
+          // The primary read error remains authoritative during best-effort stream cleanup.
+        }
+      }
     }
-    return Buffer.concat(chunks, total);
   }
   throw new S3BoundedReadError('S3_READ_FAILED');
 }
@@ -511,6 +570,9 @@ export async function readS3ObjectRangeExact(
   options: S3ExactRangeReadOptions,
 ): Promise<S3ExactRangeReadResult | null> {
   if (!isSafeExactObjectKey(key)) return null;
+  const eTag = normalizeS3IdentityToken(options.eTag);
+  const versionId = normalizeS3IdentityToken(options.versionId);
+  if (!eTag && !versionId) throw new S3BoundedReadError('S3_READ_FAILED');
   const length = range.end - range.start + 1;
   if (
     !Number.isSafeInteger(range.start)
@@ -536,8 +598,8 @@ export async function readS3ObjectRangeExact(
           Bucket: storage.bucket,
           Key: key,
           Range: `bytes=${range.start}-${range.end}`,
-          ...(options.eTag ? { IfMatch: options.eTag } : {}),
-          ...(options.versionId ? { VersionId: options.versionId } : {}),
+          ...(eTag ? { IfMatch: eTag } : {}),
+          ...(versionId ? { VersionId: versionId } : {}),
         }), { abortSignal });
         const contentRange = result.ContentRange?.match(/^bytes (\d+)-(\d+)\/(\d+)$/u);
         if (
@@ -550,7 +612,7 @@ export async function readS3ObjectRangeExact(
         ) {
           throw new S3BoundedReadError('S3_READ_FAILED');
         }
-        const bytes = await collectExactS3Body(result.Body, options.maxBytes);
+        const bytes = await collectExactS3Body(result.Body, options.maxBytes, abortSignal);
         if (bytes.byteLength !== length) throw new S3BoundedReadError('S3_READ_FAILED');
         return { bytes, totalBytes: options.expectedTotalBytes };
       },

@@ -250,18 +250,21 @@ async function resolveVerifiedS3Source(
       options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
       options.signal,
     );
+    const eTag = inspected?.eTag?.trim() || null;
+    const versionId = inspected?.versionId?.trim() || null;
     if (
       !inspected
       || inspected.byteSize !== expectedByteSize
       || (inspected.contentType !== null && inspected.contentType !== mimeType)
+      || (!eTag && !versionId)
     ) {
       return mediaNotReady();
     }
     return {
       kind: 's3',
       storageKey,
-      eTag: inspected.eTag,
-      versionId: inspected.versionId,
+      eTag,
+      versionId,
     };
   } catch (error) {
     if (error instanceof CanvasShareError) throw error;

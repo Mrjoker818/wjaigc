@@ -24,7 +24,7 @@ function serializeCanonical(value: unknown, seen: Set<object>): string {
     if (Array.isArray(value)) {
       const entries: string[] = [];
       for (let index = 0; index < value.length; index += 1) {
-        if (!(index in value)) {
+        if (!Object.hasOwn(value, index)) {
           throw new TypeError('Canonical JSON does not support sparse arrays');
         }
         entries.push(serializeCanonical(value[index], seen));

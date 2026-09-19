@@ -245,6 +245,38 @@ describe('readImageFromS3Bounded cancellation', () => {
     expect(mocks.listFiles).not.toHaveBeenCalled();
   });
 
+  it('rejects HEAD metadata without a usable ETag or VersionId', async () => {
+    mocks.awsSend.mockResolvedValueOnce({
+      ContentLength: 123,
+      ContentType: 'image/png',
+      ETag: '   ',
+      VersionId: '',
+    });
+    const { inspectS3ObjectExact } = await import('@/lib/s3-storage');
+
+    await expect(inspectS3ObjectExact(
+      'images/gateway/unidentified.png',
+      1000,
+    )).rejects.toMatchObject({ code: 'S3_READ_FAILED' });
+  });
+
+  it('rejects an exact range before GetObject when no identity condition is available', async () => {
+    const { readS3ObjectRangeExact } = await import('@/lib/s3-storage');
+
+    await expect(readS3ObjectRangeExact(
+      'images/gateway/unidentified.png',
+      { start: 0, end: 0 },
+      {
+        expectedTotalBytes: 1,
+        maxBytes: 1,
+        timeoutMs: 1000,
+        eTag: null,
+        versionId: null,
+      },
+    )).rejects.toMatchObject({ code: 'S3_READ_FAILED' });
+    expect(mocks.awsSend).not.toHaveBeenCalled();
+  });
+
   it('streams only the requested exact-key byte range and validates object identity', async () => {
     async function* body(): AsyncGenerator<Uint8Array> {
       yield new Uint8Array([2, 3]);
@@ -320,9 +352,41 @@ describe('readImageFromS3Bounded cancellation', () => {
         expectedTotalBytes: 1,
         maxBytes: 1,
         timeoutMs: 5,
+        eTag: '"etag-1"',
       }),
       hung,
     ])).rejects.toMatchObject({ code: 'S3_READ_TIMEOUT' });
+  });
+
+  it('times out and closes a stalled response iterator that ignores SDK abort', async () => {
+    const closeIterator = vi.fn(async () => ({ done: true, value: undefined }));
+    mocks.awsSend.mockResolvedValueOnce({
+      ContentLength: 1,
+      ContentRange: 'bytes 0-0/1',
+      Body: {
+        [Symbol.asyncIterator]() {
+          return {
+            next: () => new Promise<IteratorResult<Uint8Array>>(() => undefined),
+            return: closeIterator,
+          };
+        },
+      },
+    });
+    const { readS3ObjectRangeExact } = await import('@/lib/s3-storage');
+    const hung = new Promise<never>((_resolve, reject) => {
+      setTimeout(() => reject(new Error('non-cooperative range body escaped deadline')), 100);
+    });
+
+    await expect(Promise.race([
+      readS3ObjectRangeExact('images/gateway/exact.png', { start: 0, end: 0 }, {
+        expectedTotalBytes: 1,
+        maxBytes: 1,
+        timeoutMs: 5,
+        eTag: '"etag-1"',
+      }),
+      hung,
+    ])).rejects.toMatchObject({ code: 'S3_READ_TIMEOUT' });
+    await vi.waitFor(() => expect(closeIterator).toHaveBeenCalledOnce());
   });
 
   it('cancels promptly while presigned URL generation is still pending', async () => {
