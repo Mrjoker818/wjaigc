@@ -3,7 +3,16 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { useLayoutEffect, useRef, useState, type ComponentProps } from 'react';
+import {
+  Suspense,
+  startTransition,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ComponentProps,
+  type ReactNode,
+} from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const apiMocks = vi.hoisted(() => ({
@@ -87,6 +96,58 @@ function deferred<T>(): {
 
 function abortError(): DOMException {
   return new DOMException('The operation was aborted.', 'AbortError');
+}
+
+interface SensitiveCommitSnapshot {
+  text: string;
+  fieldValues: string[];
+  alerts: string[];
+}
+
+function readSensitiveCommit(): SensitiveCommitSnapshot {
+  return {
+    text: document.body.textContent ?? '',
+    fieldValues: Array.from(document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>(
+      'input, textarea',
+    )).map(field => field.value),
+    alerts: Array.from(document.querySelectorAll<HTMLElement>('[role="alert"]'))
+      .map(alert => alert.textContent ?? ''),
+  };
+}
+
+function CommitRecorder({
+  children,
+  commits,
+}: {
+  children: ReactNode;
+  commits: SensitiveCommitSnapshot[];
+}) {
+  useEffect(() => {
+    commits.push(readSensitiveCommit());
+    const observer = new MutationObserver(() => commits.push(readSensitiveCommit()));
+    observer.observe(document.body, {
+      attributes: true,
+      characterData: true,
+      childList: true,
+      subtree: true,
+    });
+    return () => observer.disconnect();
+  }, [commits]);
+  return children;
+}
+
+function expectNoSensitiveCommit(
+  commits: SensitiveCommitSnapshot[],
+  forbiddenValues: string[],
+): void {
+  expect(commits.length).toBeGreaterThan(0);
+  expect(commits.flatMap(commit => commit.alerts)).toEqual([]);
+  for (const forbiddenValue of forbiddenValues) {
+    expect(commits.some(commit => (
+      commit.text.includes(forbiddenValue)
+      || commit.fieldValues.some(value => value.includes(forbiddenValue))
+    ))).toBe(false);
+  }
 }
 
 function renderCreateDialog(
@@ -205,6 +266,11 @@ describe('canvas share owner UI', () => {
 
   it('does not render project A create state during the first project B commit', async () => {
     const layoutSnapshots: string[] = [];
+    const commits: SensitiveCommitSnapshot[] = [];
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText: vi.fn().mockRejectedValue(new Error('clipboard denied')) },
+    });
     apiMocks.createCanvasShare.mockResolvedValue(createdShare(
       'share-a',
       'https://example.test/shared/canvas/raw-project-a',
@@ -229,23 +295,44 @@ describe('canvas share owner UI', () => {
       );
     }
 
-    const { rerender } = render(<LayoutProbe projectId="project-a" />);
+    const { rerender } = render(
+      <CommitRecorder commits={commits}>
+        <LayoutProbe projectId="project-a" />
+      </CommitRecorder>,
+    );
     await screen.findByText('项目 A');
     fireEvent.click(screen.getByRole('button', { name: '创建分享' }));
     expect(await screen.findByText('分享已创建')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '复制完整链接' }));
+    expect(await screen.findByRole('textbox', { name: '手动复制完整链接' }))
+      .toHaveProperty('value', 'https://example.test/shared/canvas/raw-project-a');
+    await waitFor(() => expect(commits.some(commit => commit.fieldValues.includes(
+      'https://example.test/shared/canvas/raw-project-a',
+    ))).toBe(true));
+    const projectBCommitStart = commits.length;
 
-    await act(async () => rerender(<LayoutProbe projectId="project-b" />));
+    await act(async () => rerender(
+      <CommitRecorder commits={commits}>
+        <LayoutProbe projectId="project-b" />
+      </CommitRecorder>,
+    ));
 
     expect(layoutSnapshots).toHaveLength(1);
     expect(layoutSnapshots[0]).not.toContain('分享已创建');
     expect(layoutSnapshots[0]).not.toContain('项目 A 分享');
     expect(layoutSnapshots[0]).not.toContain('raw-project-a');
     expect(await screen.findByText('项目 B')).toBeTruthy();
+    expectNoSensitiveCommit(commits.slice(projectBCommitStart), [
+      '分享已创建',
+      '项目 A 分享',
+      'raw-project-a',
+    ]);
   });
 
   it('ignores a late preflight result after project change without flashing project A state', async () => {
     const pendingPreflight = deferred<typeof readyPreflight>();
     const layoutAbortStates: boolean[] = [];
+    const commits: SensitiveCommitSnapshot[] = [];
     let preflightSignal: AbortSignal | undefined;
     apiMocks.preflightCanvasShare
       .mockImplementationOnce((_input: unknown, signal: AbortSignal) => {
@@ -273,25 +360,90 @@ describe('canvas share owner UI', () => {
       );
     }
 
-    const { rerender } = render(<LayoutProbe projectId="project-a" />);
+    const { rerender } = render(
+      <CommitRecorder commits={commits}>
+        <LayoutProbe projectId="project-a" />
+      </CommitRecorder>,
+    );
     await waitFor(() => expect(apiMocks.preflightCanvasShare).toHaveBeenCalledTimes(1));
+    const projectBCommitStart = commits.length;
 
-    await act(async () => rerender(<LayoutProbe projectId="project-b" />));
+    await act(async () => rerender(
+      <CommitRecorder commits={commits}>
+        <LayoutProbe projectId="project-b" />
+      </CommitRecorder>,
+    ));
 
     expect(layoutAbortStates).toEqual([false]);
     expect(await screen.findByText('项目 B')).toBeTruthy();
     expect(screen.queryByText('项目 A 迟到预检')).toBeNull();
     expect(screen.queryByRole('alert')).toBeNull();
+    expectNoSensitiveCommit(commits.slice(projectBCommitStart), [
+      '项目 A 迟到预检',
+      'raw-project-a',
+    ]);
   });
 
   it('treats an AbortError from preflight as cancellation without an error flash', async () => {
+    const commits: SensitiveCommitSnapshot[] = [];
     apiMocks.preflightCanvasShare.mockRejectedValueOnce(abortError());
-    renderCreateDialog();
+    render(
+      <CommitRecorder commits={commits}>
+        <CanvasShareCreateDialog
+          open
+          onOpenChange={vi.fn()}
+          projectId="project-1"
+          onOpenManagement={vi.fn()}
+        />
+      </CommitRecorder>,
+    );
 
     await waitFor(() => expect(screen.queryByRole('status', {
       name: '正在检查画布分享条件',
     })).toBeNull());
     expect(screen.queryByRole('alert')).toBeNull();
+    expectNoSensitiveCommit(commits, ['操作未完成，请稍后重试。']);
+  });
+
+  it('keeps the committed project scope when a different project render is discarded', async () => {
+    const pendingPreflight = deferred<typeof readyPreflight>();
+    const neverCommit = new Promise<never>(() => undefined);
+    apiMocks.preflightCanvasShare.mockReturnValueOnce(pendingPreflight.promise);
+
+    function SuspendProject({ projectId }: { projectId: string }) {
+      if (projectId === 'project-b') throw neverCommit;
+      return null;
+    }
+
+    function Harness({ projectId }: { projectId: string }) {
+      return (
+        <Suspense fallback={<div>discarded project render</div>}>
+          <CanvasShareCreateDialog
+            open
+            onOpenChange={vi.fn()}
+            projectId={projectId}
+            onOpenManagement={vi.fn()}
+          />
+          <SuspendProject projectId={projectId} />
+        </Suspense>
+      );
+    }
+
+    const { rerender } = render(<Harness projectId="project-a" />);
+    await waitFor(() => expect(apiMocks.preflightCanvasShare).toHaveBeenCalledTimes(1));
+
+    act(() => {
+      startTransition(() => rerender(<Harness projectId="project-b" />));
+    });
+    expect(screen.queryByText('discarded project render')).toBeNull();
+
+    await act(async () => pendingPreflight.resolve({
+      ...readyPreflight,
+      projectName: '项目 A 已提交作用域',
+    }));
+
+    expect(await screen.findByText('项目 A 已提交作用域')).toBeTruthy();
+    expect(apiMocks.preflightCanvasShare).toHaveBeenCalledTimes(1);
   });
 
   it('aborts and ignores a late create result after switching projects', async () => {
@@ -580,14 +732,17 @@ describe('canvas share owner UI', () => {
   });
 
   it('renders policy failures inside the active policy dialog', async () => {
+    const commits: SensitiveCommitSnapshot[] = [];
     apiMocks.patchCanvasSharePolicy.mockRejectedValue({ code: 'CANVAS_SHARE_POLICY_CONFLICT' });
     render(
-      <CanvasShareManagePanel
-        open
-        onOpenChange={vi.fn()}
-        projectId="project-1"
-        projectName="服务端项目名"
-      />,
+      <CommitRecorder commits={commits}>
+        <CanvasShareManagePanel
+          open
+          onOpenChange={vi.fn()}
+          projectId="project-1"
+          projectName="服务端项目名"
+        />
+      </CommitRecorder>,
     );
 
     const row = (await screen.findAllByTestId('canvas-share-row'))[0];
@@ -597,12 +752,16 @@ describe('canvas share owner UI', () => {
 
     const alert = await within(policy).findByRole('alert');
     expect(alert.textContent).toContain('取消后刷新列表');
+    await waitFor(() => expect(commits.some(commit => commit.alerts.some(
+      text => text.includes('取消后刷新列表'),
+    ))).toBe(true));
   });
 
   it('hides project A policy state on the first project B commit and ignores its late failure', async () => {
     const pendingPolicy = deferred<typeof newerShare>();
     const layoutSnapshots: string[] = [];
     const layoutAbortStates: boolean[] = [];
+    const commits: SensitiveCommitSnapshot[] = [];
     apiMocks.patchCanvasSharePolicy.mockReturnValueOnce(pendingPolicy.promise);
     apiMocks.listCanvasShares
       .mockResolvedValueOnce([newerShare])
@@ -625,14 +784,25 @@ describe('canvas share owner UI', () => {
       );
     }
 
-    const { rerender } = render(<LayoutProbe projectId="project-a" />);
+    const { rerender } = render(
+      <CommitRecorder commits={commits}>
+        <LayoutProbe projectId="project-a" />
+      </CommitRecorder>,
+    );
     const row = (await screen.findAllByTestId('canvas-share-row'))[0];
     fireEvent.click(within(row).getByRole('button', { name: '编辑策略 新版审阅' }));
     fireEvent.click(within(screen.getByRole('dialog', { name: '编辑分享策略' }))
       .getByRole('button', { name: '保存策略' }));
+    await waitFor(() => expect(commits.some(commit => commit.text.includes('编辑分享策略')))
+      .toBe(true));
     const policySignal = apiMocks.patchCanvasSharePolicy.mock.calls[0]?.[2] as AbortSignal | undefined;
+    const projectBCommitStart = commits.length;
 
-    await act(async () => rerender(<LayoutProbe projectId="project-b" />));
+    await act(async () => rerender(
+      <CommitRecorder commits={commits}>
+        <LayoutProbe projectId="project-b" />
+      </CommitRecorder>,
+    ));
     expect(layoutSnapshots).toHaveLength(1);
     expect(layoutAbortStates).toEqual([false]);
     expect(layoutSnapshots[0]).not.toContain('编辑分享策略');
@@ -640,26 +810,40 @@ describe('canvas share owner UI', () => {
 
     expect(await screen.findByText('项目 B 分享')).toBeTruthy();
     expect(screen.queryByRole('alert')).toBeNull();
+    expectNoSensitiveCommit(commits.slice(projectBCommitStart), [
+      '新版审阅',
+      '编辑分享策略',
+      '分享策略已更新，请取消后刷新列表，再重新编辑。',
+      'raw-project-a',
+    ]);
   });
 
   it('treats an AbortError from policy update as cancellation without a nested error', async () => {
+    const commits: SensitiveCommitSnapshot[] = [];
     apiMocks.patchCanvasSharePolicy.mockRejectedValueOnce(abortError());
     render(
-      <CanvasShareManagePanel
-        open
-        onOpenChange={vi.fn()}
-        projectId="project-1"
-        projectName="服务端项目名"
-      />,
+      <CommitRecorder commits={commits}>
+        <CanvasShareManagePanel
+          open
+          onOpenChange={vi.fn()}
+          projectId="project-1"
+          projectName="服务端项目名"
+        />
+      </CommitRecorder>,
     );
     const row = (await screen.findAllByTestId('canvas-share-row'))[0];
     fireEvent.click(within(row).getByRole('button', { name: '编辑策略 新版审阅' }));
     const policy = screen.getByRole('dialog', { name: '编辑分享策略' });
+    const mutationStart = commits.length;
     fireEvent.click(within(policy).getByRole('button', { name: '保存策略' }));
 
     await waitFor(() => expect(within(policy).getByRole('button', { name: '保存策略' }))
       .toHaveProperty('disabled', false));
     expect(within(policy).queryByRole('alert')).toBeNull();
+    expectNoSensitiveCommit(commits.slice(mutationStart), [
+      '操作未完成，请稍后重试。',
+      '分享策略已更新，请取消后刷新列表，再重新编辑。',
+    ]);
   });
 
   it('renders revoke failures inside the active confirmation alert', async () => {
@@ -686,6 +870,7 @@ describe('canvas share owner UI', () => {
     const pendingRevoke = deferred<typeof newerShare>();
     const layoutSnapshots: string[] = [];
     const layoutAbortStates: boolean[] = [];
+    const commits: SensitiveCommitSnapshot[] = [];
     apiMocks.revokeCanvasShare.mockReturnValueOnce(pendingRevoke.promise);
     apiMocks.listCanvasShares
       .mockResolvedValueOnce([newerShare])
@@ -708,14 +893,25 @@ describe('canvas share owner UI', () => {
       );
     }
 
-    const { rerender } = render(<LayoutProbe projectId="project-a" />);
+    const { rerender } = render(
+      <CommitRecorder commits={commits}>
+        <LayoutProbe projectId="project-a" />
+      </CommitRecorder>,
+    );
     const row = (await screen.findAllByTestId('canvas-share-row'))[0];
     fireEvent.click(within(row).getByRole('button', { name: '撤销分享 新版审阅' }));
     fireEvent.click(within(screen.getByRole('alertdialog', { name: '确认撤销分享' }))
       .getByRole('button', { name: '确认撤销' }));
+    await waitFor(() => expect(commits.some(commit => commit.text.includes('确认撤销分享')))
+      .toBe(true));
     const revokeSignal = apiMocks.revokeCanvasShare.mock.calls[0]?.[1] as AbortSignal | undefined;
+    const projectBCommitStart = commits.length;
 
-    await act(async () => rerender(<LayoutProbe projectId="project-b" />));
+    await act(async () => rerender(
+      <CommitRecorder commits={commits}>
+        <LayoutProbe projectId="project-b" />
+      </CommitRecorder>,
+    ));
     expect(layoutSnapshots).toHaveLength(1);
     expect(layoutAbortStates).toEqual([false]);
     expect(layoutSnapshots[0]).not.toContain('确认撤销分享');
@@ -723,26 +919,40 @@ describe('canvas share owner UI', () => {
 
     expect(await screen.findByText('项目 B 分享')).toBeTruthy();
     expect(screen.queryByRole('alert')).toBeNull();
+    expectNoSensitiveCommit(commits.slice(projectBCommitStart), [
+      '新版审阅',
+      '确认撤销分享',
+      '分享不存在或已失效，请取消后刷新列表。',
+      'raw-project-a',
+    ]);
   });
 
   it('treats an AbortError from revoke as cancellation without a nested error', async () => {
+    const commits: SensitiveCommitSnapshot[] = [];
     apiMocks.revokeCanvasShare.mockRejectedValueOnce(abortError());
     render(
-      <CanvasShareManagePanel
-        open
-        onOpenChange={vi.fn()}
-        projectId="project-1"
-        projectName="服务端项目名"
-      />,
+      <CommitRecorder commits={commits}>
+        <CanvasShareManagePanel
+          open
+          onOpenChange={vi.fn()}
+          projectId="project-1"
+          projectName="服务端项目名"
+        />
+      </CommitRecorder>,
     );
     const row = (await screen.findAllByTestId('canvas-share-row'))[0];
     fireEvent.click(within(row).getByRole('button', { name: '撤销分享 新版审阅' }));
     const confirmation = screen.getByRole('alertdialog', { name: '确认撤销分享' });
+    const mutationStart = commits.length;
     fireEvent.click(within(confirmation).getByRole('button', { name: '确认撤销' }));
 
     await waitFor(() => expect(within(confirmation).getByRole('button', { name: '确认撤销' }))
       .toHaveProperty('disabled', false));
     expect(within(confirmation).queryByRole('alert')).toBeNull();
+    expectNoSensitiveCommit(commits.slice(mutationStart), [
+      '操作未完成，请稍后重试。',
+      '分享不存在或已失效，请取消后刷新列表。',
+    ]);
   });
 
   it('restores focus to a persistent project-menu trigger after management closes', async () => {

@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { CheckCircle2, Copy, ExternalLink, Loader2, ShieldCheck } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -116,21 +116,24 @@ export function CanvasShareCreateDialog({
   const [stateScopeKey, setStateScopeKey] = useState(scopeKey);
   const copyInputRef = useRef<HTMLInputElement>(null);
   const requestedViewportRef = useRef(requestedViewport);
-  const renderScopeRef = useRef(scopeKey);
+  const committedScopeRef = useRef(scopeKey);
   const operationRef = useRef<OperationState>({
     generation: 0,
     controller: null,
     scopeKey,
   });
-  requestedViewportRef.current = requestedViewport;
-  renderScopeRef.current = scopeKey;
+
+  useLayoutEffect(() => {
+    committedScopeRef.current = scopeKey;
+    requestedViewportRef.current = requestedViewport;
+  }, [requestedViewport, scopeKey]);
 
   const invalidateOperation = useCallback((): void => {
     operationRef.current.controller?.abort();
     operationRef.current = {
       generation: operationRef.current.generation + 1,
       controller: null,
-      scopeKey: renderScopeRef.current,
+      scopeKey: committedScopeRef.current,
     };
   }, []);
 
@@ -138,21 +141,21 @@ export function CanvasShareCreateDialog({
     operationRef.current.controller?.abort();
     const controller = new AbortController();
     const generation = operationRef.current.generation + 1;
-    const currentScopeKey = renderScopeRef.current;
+    const currentScopeKey = committedScopeRef.current;
     operationRef.current = { generation, controller, scopeKey: currentScopeKey };
     return { generation, signal: controller.signal, scopeKey: currentScopeKey };
   }, []);
 
   const isCurrentOperation = useCallback((operation: ActiveOperation): boolean => (
     operationRef.current.generation === operation.generation
-    && operation.scopeKey === renderScopeRef.current
+    && operation.scopeKey === committedScopeRef.current
     && operationRef.current.scopeKey === operation.scopeKey
     && !operation.signal.aborted
     && operationRef.current.controller?.signal.aborted === false
   ), []);
 
   const clearState = useCallback((): void => {
-    setStateScopeKey(renderScopeRef.current);
+    setStateScopeKey(committedScopeRef.current);
     setPreflight(null);
     setLoading(false);
     setSubmitting(false);

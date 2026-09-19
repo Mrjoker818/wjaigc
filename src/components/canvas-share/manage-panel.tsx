@@ -1,6 +1,13 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type RefObject,
+} from 'react';
 import {
   Copy,
   ExternalLink,
@@ -143,20 +150,23 @@ export function CanvasShareManagePanel({
   const [revokeError, setRevokeError] = useState('');
   const [stateScopeKey, setStateScopeKey] = useState(scopeKey);
   const manualCopyRef = useRef<HTMLInputElement>(null);
-  const renderScopeRef = useRef(scopeKey);
+  const committedScopeRef = useRef(scopeKey);
   const operationRef = useRef<OperationState>({
     generation: 0,
     controller: null,
     scopeKey,
   });
-  renderScopeRef.current = scopeKey;
+
+  useLayoutEffect(() => {
+    committedScopeRef.current = scopeKey;
+  }, [scopeKey]);
 
   const invalidateOperation = useCallback((): void => {
     operationRef.current.controller?.abort();
     operationRef.current = {
       generation: operationRef.current.generation + 1,
       controller: null,
-      scopeKey: renderScopeRef.current,
+      scopeKey: committedScopeRef.current,
     };
   }, []);
 
@@ -164,21 +174,21 @@ export function CanvasShareManagePanel({
     operationRef.current.controller?.abort();
     const controller = new AbortController();
     const generation = operationRef.current.generation + 1;
-    const currentScopeKey = renderScopeRef.current;
+    const currentScopeKey = committedScopeRef.current;
     operationRef.current = { generation, controller, scopeKey: currentScopeKey };
     return { generation, signal: controller.signal, scopeKey: currentScopeKey };
   }, []);
 
   const isCurrentOperation = useCallback((operation: ActiveOperation): boolean => (
     operationRef.current.generation === operation.generation
-    && operation.scopeKey === renderScopeRef.current
+    && operation.scopeKey === committedScopeRef.current
     && operationRef.current.scopeKey === operation.scopeKey
     && !operation.signal.aborted
     && operationRef.current.controller?.signal.aborted === false
   ), []);
 
   const clearState = useCallback((): void => {
-    setStateScopeKey(renderScopeRef.current);
+    setStateScopeKey(committedScopeRef.current);
     setShares([]);
     setLoading(false);
     setError('');
