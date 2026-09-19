@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, open, realpath, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -9,6 +9,7 @@ import {
   getManagedAssetMediaDescriptor,
   readManagedAssetVersionBytes,
 } from '@/lib/asset-core/managed-media-read';
+import { createAssetStorageTransaction } from '@/lib/asset-core/storage';
 import { canonicalJson, hashCanonicalJson } from '@/lib/canvas-share/canonical-json';
 import { CanvasShareError } from '@/lib/canvas-share/errors';
 import {
@@ -138,7 +139,14 @@ function makeSource(input: {
     },
     async getMediaDescriptor(candidate, kind) {
       calls.push({ method: 'media', values: [candidate.id, kind] });
-      return getManagedAssetMediaDescriptor(candidate, kind);
+      return getManagedAssetMediaDescriptor(candidate, kind, {}, {
+        inspectS3Exact: async () => ({
+          byteSize: candidate.file.byteSize!,
+          contentType: candidate.file.mimeType ?? null,
+          eTag: '"test-etag"',
+          versionId: null,
+        }),
+      } as never);
     },
   };
 }
@@ -162,6 +170,12 @@ describe('canonical canvas-share JSON', () => {
 
   it('rejects non-finite values instead of silently converting them to null', () => {
     expect(() => canonicalJson({ value: Number.POSITIVE_INFINITY })).toThrow(TypeError);
+  });
+
+  it('rejects sparse arrays instead of emitting invalid or collapsed JSON', () => {
+    expect(() => canonicalJson(new Array(1))).toThrow(TypeError);
+    expect(() => canonicalJson([, 'second'])).toThrow(TypeError);
+    expect(canonicalJson([])).toBe('[]');
   });
 });
 
@@ -323,6 +337,139 @@ describe('immutable canvas-share snapshot', () => {
     }, source)).rejects.toBeInstanceOf(CanvasShareError);
   });
 
+  it.each([
+    {
+      label: 'unsupported active placement',
+      entityType: 'workflow-input',
+      expectedCode: 'CANVAS_SHARE_UNSUPPORTED_ELEMENT',
+      asset: makeAsset(),
+      version: makeVersion(),
+    },
+    {
+      label: 'active placement whose asset relationship is broken',
+      entityType: 'canvas-image',
+      expectedCode: 'CANVAS_SHARE_PROJECT_CONFLICT',
+      asset: null,
+      version: makeVersion(),
+    },
+  ])('does not let the production placement query hide $label', async ({
+    entityType,
+    expectedCode,
+    asset,
+    version,
+  }) => {
+    const placementRow = {
+      id: 'placement-production-path',
+      owner_id: 'owner-authoritative',
+      project_id: 'project-authoritative',
+      asset_id: 'asset-authoritative',
+      asset_version_id: 'version-authoritative',
+      workspace_kind: 'canvas',
+      workspace_id: 'project-authoritative',
+      entity_type: entityType,
+      entity_id: 'entity-production-path',
+      status: 'active',
+      deleted_at: null,
+      transform: {},
+      metadata: {},
+      created_at: new Date('2026-09-19T00:00:00.000Z'),
+      updated_at: new Date('2026-09-19T00:00:00.000Z'),
+    };
+    const query = vi.fn(async (text: string) => {
+      const legacyFilteringQuery = text.includes('JOIN wujie_assets')
+        || text.includes("entity_type IN ('canvas-image', 'canvas-video')");
+      return {
+        rows: legacyFilteringQuery ? [] : [placementRow],
+        rowCount: legacyFilteringQuery ? 0 : 1,
+      };
+    });
+    const storage = createAssetStorageTransaction({ query } as never);
+
+    await expect(buildCanvasShareSnapshot({
+      ownerId: 'owner-authoritative',
+      projectId: 'project-authoritative',
+    }, {
+      readProjectRevision: async () => 41,
+      listActiveCanvasPlacements: (ownerId, projectId) => (
+        storage.listActiveCanvasPlacements(ownerId, projectId)
+      ),
+      findAsset: async () => asset,
+      findVersion: async () => version,
+      getMediaDescriptor: async candidate => ({
+        assetVersionId: candidate.id,
+        assetKind: 'image',
+        mimeType: 'image/png',
+        byteSize: 128,
+        width: 640,
+        height: 480,
+        checksum: null,
+        source: {
+          kind: 's3',
+          storageKey: 'images/gateway/ready.png',
+          eTag: '"test-etag"',
+          versionId: null,
+        },
+      }),
+    })).rejects.toMatchObject({ code: expectedCode });
+  });
+
+  it('keeps production placement enumeration stable for multiple active rows', async () => {
+    const createdAt = new Date('2026-09-19T00:00:00.000Z');
+    const placementRow = (id: string) => ({
+      id,
+      owner_id: 'owner-authoritative',
+      project_id: 'project-authoritative',
+      asset_id: `asset-${id}`,
+      asset_version_id: `version-${id}`,
+      workspace_kind: 'canvas',
+      workspace_id: 'project-authoritative',
+      entity_type: 'canvas-image',
+      entity_id: `entity-${id}`,
+      status: 'active',
+      deleted_at: null,
+      transform: {},
+      metadata: {},
+      created_at: createdAt,
+      updated_at: createdAt,
+    });
+    const query = vi.fn(async (_text: string) => ({
+      rows: [placementRow('a'), placementRow('b')],
+      rowCount: 2,
+    }));
+    const storage = createAssetStorageTransaction({ query } as never);
+
+    await expect(storage.listActiveCanvasPlacements(
+      'owner-authoritative',
+      'project-authoritative',
+    )).resolves.toMatchObject([{ id: 'a' }, { id: 'b' }]);
+    expect(query.mock.calls[0]?.[0]).toContain(
+      'ORDER BY placement.created_at, placement.id',
+    );
+  });
+
+  it.each([
+    ['missing exact object', null],
+    ['wrong exact object size', {
+      byteSize: 127,
+      contentType: 'image/png',
+      eTag: '"wrong-size"',
+      versionId: null,
+    }],
+  ])('blocks snapshot creation for an S3 object with %s', async (_label, inspected) => {
+    const source = makeSource();
+    source.getMediaDescriptor = (version, kind) => getManagedAssetMediaDescriptor(
+      version,
+      kind,
+      {},
+      { inspectS3Exact: async () => inspected } as never,
+    );
+
+    await expect(buildCanvasShareSnapshot({
+      ownerId: 'owner-authoritative',
+      projectId: 'project-authoritative',
+    }, source)).rejects.toMatchObject({ code: 'CANVAS_SHARE_MEDIA_NOT_READY' });
+  });
+
   it('blocks a ready local URL when the verified data-root file is missing', async () => {
     const dataRoot = await mkdtemp(path.join(tmpdir(), 'canvas-share-missing-'));
     temporaryDirectories.push(dataRoot);
@@ -430,12 +577,81 @@ describe('controlled managed-media reader', () => {
     });
   });
 
+  it('rejects a local file when the opened handle identity differs from the verified path', async () => {
+    const dataRoot = await mkdtemp(path.join(tmpdir(), 'canvas-share-identity-root-'));
+    const outsideRoot = await mkdtemp(path.join(tmpdir(), 'canvas-share-identity-outside-'));
+    temporaryDirectories.push(dataRoot, outsideRoot);
+    const managedFile = path.join(dataRoot, 'uploads', 'identity.png');
+    const racedFile = path.join(outsideRoot, 'replacement.png');
+    await mkdir(path.dirname(managedFile), { recursive: true });
+    await writeFile(managedFile, Buffer.from([1, 2, 3]));
+    await writeFile(racedFile, Buffer.from([4, 5, 6]));
+
+    await expect(readManagedAssetVersionBytes(makeVersion({
+      file: {
+        url: '/api/serve-upload/uploads/identity.png',
+        availability: 'ready',
+        mimeType: 'image/png',
+        byteSize: 3,
+      },
+    }), 'image', { dataRoot }, {
+      openLocal: () => open(racedFile, 'r'),
+      realpathLocal: realpath,
+      statLocal: (filePath: string) => stat(filePath, { bigint: true }),
+    } as never)).rejects.toMatchObject({
+      code: 'CANVAS_SHARE_MEDIA_UNAVAILABLE',
+    });
+  });
+
+  it('uses an exact S3 byte range and permits a bounded full image above 16 MiB', async () => {
+    const byteSize = 20 * 1024 * 1024;
+    const bytes = Buffer.alloc(byteSize, 7);
+    const inspectS3Exact = vi.fn(async () => ({
+      byteSize,
+      contentType: 'image/png',
+      eTag: '"image-etag"',
+      versionId: 'image-version',
+    }));
+    const readS3RangeExact = vi.fn(async () => ({ bytes, totalBytes: byteSize }));
+
+    const result = await readManagedAssetVersionBytes(makeVersion({
+      file: {
+        url: '/api/serve-upload/uploads/large.png',
+        storageKey: 'images/gateway/large.png',
+        availability: 'ready',
+        mimeType: 'image/png',
+        byteSize,
+      },
+    }), 'image', {}, {
+      inspectS3Exact,
+      readS3RangeExact,
+    } as never);
+
+    expect(result.bytes.byteLength).toBe(byteSize);
+    expect(readS3RangeExact).toHaveBeenCalledWith(
+      'images/gateway/large.png',
+      { start: 0, end: byteSize - 1 },
+      expect.objectContaining({
+        expectedTotalBytes: byteSize,
+        maxBytes: byteSize,
+        eTag: '"image-etag"',
+        versionId: 'image-version',
+      }),
+    );
+  });
+
   it('caps concurrent video reads before calling the exact-key reader', async () => {
     let releaseReads: (() => void) | undefined;
     const blocked = new Promise<void>(resolve => { releaseReads = resolve; });
-    const readS3Exact = vi.fn(async () => {
+    const inspectS3Exact = vi.fn(async () => ({
+      byteSize: 1,
+      contentType: 'video/mp4',
+      eTag: '"video-etag"',
+      versionId: null,
+    }));
+    const readS3RangeExact = vi.fn(async () => {
       await blocked;
-      return Buffer.from([1]);
+      return { bytes: Buffer.from([1]), totalBytes: 1 };
     });
     const version = makeVersion({
       file: {
@@ -450,13 +666,14 @@ describe('controlled managed-media reader', () => {
       version,
       'video',
       {},
-      { readS3Exact },
+      { inspectS3Exact, readS3RangeExact } as never,
     ));
-    await vi.waitFor(() => expect(readS3Exact).toHaveBeenCalledTimes(4));
+    await vi.waitFor(() => expect(readS3RangeExact).toHaveBeenCalledTimes(4));
 
     await expect(readManagedAssetVersionBytes(version, 'video', {}, {
-      readS3Exact,
-    })).rejects.toMatchObject({ code: 'CANVAS_SHARE_MEDIA_UNAVAILABLE' });
+      inspectS3Exact,
+      readS3RangeExact,
+    } as never)).rejects.toMatchObject({ code: 'CANVAS_SHARE_MEDIA_UNAVAILABLE' });
     releaseReads?.();
     await expect(Promise.all(reads)).resolves.toHaveLength(4);
   });
@@ -618,6 +835,64 @@ describe('canvas-share service creation boundary', () => {
       revoke,
     })).resolves.toEqual(revokedRecord);
     expect(revoke).not.toHaveBeenCalled();
+  });
+
+  it('returns the revoked record to both concurrent revoke callers', async () => {
+    const active: CanvasShareRecord = {
+      id: 'share-concurrent-revoke',
+      ownerId: 'owner-authoritative',
+      projectId: 'project-authoritative',
+      projectRevision: 7,
+      tokenHash: 'b'.repeat(64),
+      title: '并发撤销',
+      status: 'active',
+      expiresAt: null,
+      allowDownload: false,
+      viewport: { offsetX: 0, offsetY: 0, zoom: 1 },
+      snapshotDigest: 'e'.repeat(64),
+      viewCount: 0,
+      lastViewedAt: null,
+      createdAt: '2026-09-19T00:00:00.000Z',
+      revokedAt: null,
+    };
+    const revoked: CanvasShareRecord = {
+      ...active,
+      status: 'revoked',
+      revokedAt: '2026-09-19T13:00:00.000Z',
+    };
+    let persisted = active;
+    let initialReads = 0;
+    let releaseInitialReads: (() => void) | undefined;
+    const bothReadActive = new Promise<void>(resolve => { releaseInitialReads = resolve; });
+    const find = vi.fn(async () => {
+      if (initialReads < 2) {
+        initialReads += 1;
+        if (initialReads === 2) releaseInitialReads?.();
+        await bothReadActive;
+        return { record: active, items: [] };
+      }
+      return { record: persisted, items: [] };
+    });
+    let revokeCalls = 0;
+    const revoke = vi.fn(async () => {
+      revokeCalls += 1;
+      if (revokeCalls === 1) {
+        persisted = revoked;
+        return revoked;
+      }
+      return null;
+    });
+    const dependencies = {
+      now: () => new Date('2026-09-19T13:00:00.000Z'),
+      find,
+      revoke,
+    };
+
+    await expect(Promise.all([
+      revokeCanvasShare({ actorUserId: active.ownerId, shareId: active.id }, dependencies),
+      revokeCanvasShare({ actorUserId: active.ownerId, shareId: active.id }, dependencies),
+    ])).resolves.toEqual([revoked, revoked]);
+    expect(find).toHaveBeenCalledTimes(3);
   });
 
   it('returns only controlled public paths and safe frozen fields after lifecycle checks', async () => {

@@ -23,6 +23,7 @@ vi.mock('@aws-sdk/client-s3', () => ({
   PutObjectCommand: class { constructor(readonly input: unknown) {} },
   DeleteObjectCommand: class { constructor(readonly input: unknown) {} },
   GetObjectCommand: class { constructor(readonly input: unknown) {} },
+  HeadObjectCommand: class { constructor(readonly input: unknown) {} },
 }));
 
 vi.mock('coze-coding-dev-sdk', () => ({
@@ -209,6 +210,119 @@ describe('readImageFromS3Bounded cancellation', () => {
     })).rejects.toMatchObject({ code: 'S3_READ_SIZE_LIMIT' });
     await expect(readImageFromS3Bounded('images/exact.png', 2, 1000))
       .resolves.toBeNull();
+  });
+
+  it('inspects one exact object without listing or fetching a URL', async () => {
+    mocks.awsSend.mockResolvedValueOnce({
+      ContentLength: 123,
+      ContentType: 'image/png',
+      ETag: '"etag-1"',
+      VersionId: 'version-1',
+    });
+    const storageModule = await import('@/lib/s3-storage');
+    const inspect = (storageModule as unknown as {
+      inspectS3ObjectExact: (
+        key: string,
+        timeoutMs: number,
+        signal?: AbortSignal,
+      ) => Promise<unknown>;
+    }).inspectS3ObjectExact;
+
+    expect(typeof inspect).toBe('function');
+    await expect(inspect('images/gateway/exact.png', 1000)).resolves.toEqual({
+      byteSize: 123,
+      contentType: 'image/png',
+      eTag: '"etag-1"',
+      versionId: 'version-1',
+    });
+    expect(mocks.awsSend).toHaveBeenCalledWith(
+      expect.objectContaining({
+        input: { Bucket: 'test-bucket', Key: 'images/gateway/exact.png' },
+      }),
+      expect.objectContaining({ abortSignal: expect.any(AbortSignal) }),
+    );
+    expect(mocks.generatePresignedUrl).not.toHaveBeenCalled();
+    expect(mocks.listFiles).not.toHaveBeenCalled();
+  });
+
+  it('streams only the requested exact-key byte range and validates object identity', async () => {
+    async function* body(): AsyncGenerator<Uint8Array> {
+      yield new Uint8Array([2, 3]);
+      yield new Uint8Array([4]);
+    }
+    mocks.awsSend.mockResolvedValueOnce({
+      Body: body(),
+      ContentLength: 3,
+      ContentRange: 'bytes 2-4/10',
+    });
+    const storageModule = await import('@/lib/s3-storage');
+    const readRange = (storageModule as unknown as {
+      readS3ObjectRangeExact: (
+        key: string,
+        range: { start: number; end: number },
+        options: Record<string, unknown>,
+      ) => Promise<unknown>;
+    }).readS3ObjectRangeExact;
+
+    expect(typeof readRange).toBe('function');
+    await expect(readRange(
+      'images/video/task/exact.mp4',
+      { start: 2, end: 4 },
+      {
+        expectedTotalBytes: 10,
+        maxBytes: 3,
+        timeoutMs: 1000,
+        eTag: '"etag-2"',
+        versionId: 'version-2',
+      },
+    )).resolves.toEqual({ bytes: Buffer.from([2, 3, 4]), totalBytes: 10 });
+    expect(mocks.awsSend).toHaveBeenCalledWith(
+      expect.objectContaining({
+        input: {
+          Bucket: 'test-bucket',
+          Key: 'images/video/task/exact.mp4',
+          Range: 'bytes=2-4',
+          IfMatch: '"etag-2"',
+          VersionId: 'version-2',
+        },
+      }),
+      expect.objectContaining({ abortSignal: expect.any(AbortSignal) }),
+    );
+    expect(mocks.generatePresignedUrl).not.toHaveBeenCalled();
+  });
+
+  it('keeps the exact-range deadline active while the response body is streaming', async () => {
+    mocks.awsSend.mockImplementationOnce(async (
+      _command: unknown,
+      options: { abortSignal: AbortSignal },
+    ) => ({
+      ContentLength: 1,
+      ContentRange: 'bytes 0-0/1',
+      Body: {
+        async *[Symbol.asyncIterator](): AsyncGenerator<Uint8Array> {
+          await new Promise<void>((_resolve, reject) => {
+            options.abortSignal.addEventListener(
+              'abort',
+              () => reject(options.abortSignal.reason),
+              { once: true },
+            );
+          });
+        },
+      },
+    }));
+    const { readS3ObjectRangeExact } = await import('@/lib/s3-storage');
+    const hung = new Promise<never>((_resolve, reject) => {
+      setTimeout(() => reject(new Error('range body deadline was cleared too early')), 100);
+    });
+
+    await expect(Promise.race([
+      readS3ObjectRangeExact('images/gateway/exact.png', { start: 0, end: 0 }, {
+        expectedTotalBytes: 1,
+        maxBytes: 1,
+        timeoutMs: 5,
+      }),
+      hung,
+    ])).rejects.toMatchObject({ code: 'S3_READ_TIMEOUT' });
   });
 
   it('cancels promptly while presigned URL generation is still pending', async () => {

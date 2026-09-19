@@ -471,22 +471,12 @@ class PostgresAssetStorageTransaction implements AssetStorageTransaction {
     const result = await this.client.query<PlacementRow>(
       `SELECT placement.*
        FROM wujie_workspace_placements placement
-       JOIN wujie_assets asset
-         ON asset.id = placement.asset_id
-        AND asset.owner_id = placement.owner_id
-        AND asset.project_id = placement.project_id
-        AND asset.status = 'active'
-       JOIN wujie_asset_versions version
-         ON version.id = placement.asset_version_id
-        AND version.asset_id = placement.asset_id
-        AND version.owner_id = placement.owner_id
-        AND version.project_id = placement.project_id
        WHERE placement.owner_id = $1
          AND placement.project_id = $2
          AND placement.workspace_kind = 'canvas'
          AND placement.workspace_id IN ($2, 'canvas:' || $2)
-         AND placement.entity_type IN ('canvas-image', 'canvas-video')
          AND placement.status = 'active'
+         AND placement.deleted_at IS NULL
        ORDER BY placement.created_at, placement.id`,
       [ownerId, projectId],
     );

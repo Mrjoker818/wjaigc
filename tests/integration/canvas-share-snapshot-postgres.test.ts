@@ -1,7 +1,9 @@
-import { readFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 
 import { Client } from 'pg';
-import { describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { createCanvasShare } from '../../src/lib/canvas-share/service';
 import { insertCanvasShare } from '../../src/lib/canvas-share/storage';
@@ -9,10 +11,27 @@ import type { CanvasShareItemRecord, CanvasShareRecord } from '../../src/lib/can
 
 const databaseUrl = process.env.POSTGRES_TEST_DATABASE_URL?.trim();
 const postgresIt = databaseUrl ? it : it.skip;
+const originalDataRoot = process.env.WUJIE_DATA_DIR;
+let testDataRoot: string | undefined;
 
 if (!databaseUrl) {
   console.warn('BLOCKED: canvas share snapshot PostgreSQL verification requires POSTGRES_TEST_DATABASE_URL');
 }
+
+beforeAll(async () => {
+  if (!databaseUrl) return;
+  testDataRoot = await mkdtemp(path.join(tmpdir(), 'canvas-share-postgres-media-'));
+  process.env.WUJIE_DATA_DIR = testDataRoot;
+  const uploadDirectory = path.join(testDataRoot, 'uploads');
+  await mkdir(uploadDirectory, { recursive: true });
+  await writeFile(path.join(uploadDirectory, 'ready.png'), Buffer.alloc(128, 1));
+});
+
+afterAll(async () => {
+  if (originalDataRoot === undefined) delete process.env.WUJIE_DATA_DIR;
+  else process.env.WUJIE_DATA_DIR = originalDataRoot;
+  if (testDataRoot) await rm(testDataRoot, { recursive: true, force: true });
+});
 
 async function applyMigrations(
   query: (text: string, values?: unknown[]) => Promise<unknown>,
@@ -60,7 +79,7 @@ async function seedReadyCanvas(
       checksum, mime_type, byte_size, width, height, availability
     ) VALUES (
       'version-1', 'asset-1', 'owner-1', 'project-1',
-      '/api/serve-upload/uploads/ready.png', 'images/gateway/ready.png',
+      '/api/serve-upload/uploads/ready.png', NULL,
       'checksum-1', 'image/png', 128, 640, 480, 'ready'
     )
   `);
@@ -201,6 +220,58 @@ describe('canvas-share snapshot transaction on PostgreSQL', () => {
     });
   }, 30_000);
 
+  postgresIt('returns project conflict when a mutation wins before snapshot enumeration', async () => {
+    const { withIsolatedPostgres } = await import('../helpers/postgres-test-database');
+    await withIsolatedPostgres('canvas-share-mutation-first-conflict', async ({
+      databaseUrl: isolatedUrl,
+      query,
+    }) => {
+      await applyMigrations(query);
+      await seedReadyCanvas(query);
+      const mutator = new Client({ connectionString: isolatedUrl });
+      await mutator.connect();
+      try {
+        await mutator.query('BEGIN');
+        await mutator.query(
+          "SELECT pg_advisory_xact_lock_shared(hashtextextended($1, 0))",
+          ['wujie:asset-graph-write-gate:v1'],
+        );
+        await mutator.query(
+          'SELECT pg_advisory_xact_lock(hashtext($1), hashtext($2))',
+          ['owner-1', '__asset_graph_projects_revision'],
+        );
+        await mutator.query(`
+          UPDATE wujie_assets SET status = 'trashed' WHERE id = 'asset-1'
+        `);
+        await mutator.query(`
+          UPDATE wujie_user_data SET data_value = '2'::jsonb
+          WHERE user_id = 'owner-1' AND data_key = '__asset_graph_projects_revision'
+        `);
+
+        const creation = createCanvasShare({
+          actorUserId: 'owner-1',
+          projectId: 'project-1',
+          title: 'Mutation-first conflict',
+        });
+        await new Promise(resolve => setTimeout(resolve, 25));
+        await mutator.query('COMMIT');
+
+        await expect(creation).rejects.toMatchObject({
+          code: 'CANVAS_SHARE_PROJECT_CONFLICT',
+        });
+        const counts = await query<{ shares: string; items: string }>(`
+          SELECT
+            (SELECT count(*) FROM wujie_canvas_shares)::text AS shares,
+            (SELECT count(*) FROM wujie_canvas_share_items)::text AS items
+        `);
+        expect(counts.rows).toEqual([{ shares: '0', items: '0' }]);
+      } finally {
+        await mutator.query('ROLLBACK').catch(() => undefined);
+        await mutator.end();
+      }
+    });
+  }, 30_000);
+
   postgresIt('rolls back an inserted main row when any item insert fails', async () => {
     const { withIsolatedPostgres } = await import('../helpers/postgres-test-database');
     await withIsolatedPostgres('canvas-share-item-insert-rollback', async ({ query }) => {
@@ -257,7 +328,7 @@ describe('canvas-share snapshot transaction on PostgreSQL', () => {
     });
   }, 30_000);
 
-  postgresIt('rolls back the share row and every item when media preparation fails', async () => {
+  postgresIt('rejects unready media before inserting a share row or item', async () => {
     const { withIsolatedPostgres } = await import('../helpers/postgres-test-database');
     await withIsolatedPostgres('canvas-share-snapshot-rollback', async ({ query }) => {
       await applyMigrations(query);

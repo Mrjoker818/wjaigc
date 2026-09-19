@@ -17,6 +17,7 @@ import { S3Storage } from 'coze-coding-dev-sdk';
 import {
   DeleteObjectCommand,
   GetObjectCommand,
+  HeadObjectCommand,
   PutObjectCommand,
   S3Client,
 } from '@aws-sdk/client-s3';
@@ -378,6 +379,187 @@ export class S3BoundedReadError extends Error {
 export interface S3BoundedReadOptions {
   signal?: AbortSignal;
   strict?: boolean;
+}
+
+export interface S3ExactObjectMetadata {
+  byteSize: number;
+  contentType: string | null;
+  eTag: string | null;
+  versionId: string | null;
+}
+
+export interface S3ExactRangeReadOptions {
+  expectedTotalBytes: number;
+  maxBytes: number;
+  timeoutMs: number;
+  eTag?: string | null;
+  versionId?: string | null;
+  signal?: AbortSignal;
+}
+
+export interface S3ExactRangeReadResult {
+  bytes: Buffer;
+  totalBytes: number;
+}
+
+function isSafeExactObjectKey(key: string): boolean {
+  return key === key.trim()
+    && key.length <= 1_024
+    && /^(?:images|exports)\/[A-Za-z0-9._/-]+$/u.test(key)
+    && !key.split('/').some(segment => !segment || segment === '.' || segment === '..');
+}
+
+function isS3MissingObject(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+  const candidate = error as { name?: string; $metadata?: { httpStatusCode?: number } };
+  return candidate.name === 'NoSuchKey'
+    || candidate.name === 'NotFound'
+    || candidate.$metadata?.httpStatusCode === 404;
+}
+
+async function withExactS3Deadline<T>(
+  timeoutMs: number,
+  callerSignal: AbortSignal | undefined,
+  operation: (signal: AbortSignal) => Promise<T>,
+): Promise<T> {
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0) {
+    throw new S3BoundedReadError('S3_READ_FAILED');
+  }
+  if (callerSignal?.aborted) {
+    throw new S3BoundedReadError('S3_READ_ABORTED', { cause: callerSignal.reason });
+  }
+  const controller = new AbortController();
+  let timedOut = false;
+  const abortFromCaller = () => controller.abort(callerSignal?.reason);
+  callerSignal?.addEventListener('abort', abortFromCaller, { once: true });
+  const timer = setTimeout(() => {
+    timedOut = true;
+    controller.abort(new DOMException('S3 exact operation timed out', 'TimeoutError'));
+  }, timeoutMs);
+  try {
+    return await operation(controller.signal);
+  } catch (error) {
+    if (error instanceof S3BoundedReadError) throw error;
+    if (callerSignal?.aborted) {
+      throw new S3BoundedReadError('S3_READ_ABORTED', { cause: error });
+    }
+    if (timedOut) throw new S3BoundedReadError('S3_READ_TIMEOUT', { cause: error });
+    throw error;
+  } finally {
+    clearTimeout(timer);
+    callerSignal?.removeEventListener('abort', abortFromCaller);
+  }
+}
+
+/** Inspect one persisted exact key without listing prefixes or resolving client URLs. */
+export async function inspectS3ObjectExact(
+  key: string,
+  timeoutMs: number,
+  signal?: AbortSignal,
+): Promise<S3ExactObjectMetadata | null> {
+  if (!isSafeExactObjectKey(key)) return null;
+  const storage = getBinaryStorage();
+  if (!storage) return null;
+  try {
+    const result = await withExactS3Deadline(
+      timeoutMs,
+      signal,
+      abortSignal => storage.client.send(new HeadObjectCommand({
+        Bucket: storage.bucket,
+        Key: key,
+      }), { abortSignal }),
+    );
+    if (!Number.isSafeInteger(result.ContentLength) || (result.ContentLength ?? -1) < 0) {
+      throw new S3BoundedReadError('S3_READ_FAILED');
+    }
+    return {
+      byteSize: result.ContentLength!,
+      contentType: result.ContentType?.trim().toLowerCase() || null,
+      eTag: result.ETag ?? null,
+      versionId: result.VersionId ?? null,
+    };
+  } catch (error) {
+    if (isS3MissingObject(error)) return null;
+    if (error instanceof S3BoundedReadError) throw error;
+    throw new S3BoundedReadError('S3_READ_FAILED', { cause: error });
+  }
+}
+
+async function collectExactS3Body(body: unknown, maxBytes: number): Promise<Buffer> {
+  if (
+    body
+    && typeof body === 'object'
+    && Symbol.asyncIterator in body
+    && typeof body[Symbol.asyncIterator] === 'function'
+  ) {
+    const chunks: Buffer[] = [];
+    let total = 0;
+    for await (const chunk of body as AsyncIterable<Uint8Array>) {
+      total += chunk.byteLength;
+      if (total > maxBytes) throw new S3BoundedReadError('S3_READ_SIZE_LIMIT');
+      chunks.push(Buffer.from(chunk));
+    }
+    return Buffer.concat(chunks, total);
+  }
+  throw new S3BoundedReadError('S3_READ_FAILED');
+}
+
+/** Read only one inclusive range from one exact persisted key. */
+export async function readS3ObjectRangeExact(
+  key: string,
+  range: { start: number; end: number },
+  options: S3ExactRangeReadOptions,
+): Promise<S3ExactRangeReadResult | null> {
+  if (!isSafeExactObjectKey(key)) return null;
+  const length = range.end - range.start + 1;
+  if (
+    !Number.isSafeInteger(range.start)
+    || !Number.isSafeInteger(range.end)
+    || !Number.isSafeInteger(options.expectedTotalBytes)
+    || !Number.isSafeInteger(options.maxBytes)
+    || range.start < 0
+    || range.end < range.start
+    || range.end >= options.expectedTotalBytes
+    || length > options.maxBytes
+    || options.maxBytes <= 0
+  ) {
+    throw new S3BoundedReadError('S3_READ_SIZE_LIMIT');
+  }
+  const storage = getBinaryStorage();
+  if (!storage) return null;
+  try {
+    return await withExactS3Deadline(
+      options.timeoutMs,
+      options.signal,
+      async abortSignal => {
+        const result = await storage.client.send(new GetObjectCommand({
+          Bucket: storage.bucket,
+          Key: key,
+          Range: `bytes=${range.start}-${range.end}`,
+          ...(options.eTag ? { IfMatch: options.eTag } : {}),
+          ...(options.versionId ? { VersionId: options.versionId } : {}),
+        }), { abortSignal });
+        const contentRange = result.ContentRange?.match(/^bytes (\d+)-(\d+)\/(\d+)$/u);
+        if (
+          !contentRange
+          || Number(contentRange[1]) !== range.start
+          || Number(contentRange[2]) !== range.end
+          || Number(contentRange[3]) !== options.expectedTotalBytes
+          || result.ContentLength !== length
+          || !result.Body
+        ) {
+          throw new S3BoundedReadError('S3_READ_FAILED');
+        }
+        const bytes = await collectExactS3Body(result.Body, options.maxBytes);
+        if (bytes.byteLength !== length) throw new S3BoundedReadError('S3_READ_FAILED');
+        return { bytes, totalBytes: options.expectedTotalBytes };
+      },
+    );
+  } catch (error) {
+    if (isS3MissingObject(error)) return null;
+    if (error instanceof S3BoundedReadError) throw error;
+    throw new S3BoundedReadError('S3_READ_FAILED', { cause: error });
+  }
 }
 
 async function getBoundedReadPresignedUrl(

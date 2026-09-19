@@ -1,8 +1,15 @@
+import { constants, type BigIntStats } from 'node:fs';
 import { open, realpath, stat } from 'node:fs/promises';
 import path from 'node:path';
 
 import { CanvasShareError } from '@/lib/canvas-share/errors';
-import { readImageFromS3Bounded } from '@/lib/s3-storage';
+import {
+  inspectS3ObjectExact,
+  readS3ObjectRangeExact,
+  type S3ExactObjectMetadata,
+  type S3ExactRangeReadOptions,
+  type S3ExactRangeReadResult,
+} from '@/lib/s3-storage';
 import { getServerDataRoot } from '@/lib/server-data-root';
 
 import type { AssetKind, AssetVersion } from './types';
@@ -39,7 +46,12 @@ export interface ManagedAssetMediaDescriptor {
   checksum: string | null;
   source:
     | { kind: 'local'; absolutePath: string; dataRoot: string }
-    | { kind: 's3'; storageKey: string };
+    | {
+        kind: 's3';
+        storageKey: string;
+        eTag: string | null;
+        versionId: string | null;
+      };
 }
 
 export interface ManagedMediaByteRange {
@@ -63,12 +75,19 @@ export interface ManagedMediaReadResult {
 }
 
 export interface ManagedMediaReadDependencies {
-  readS3Exact?: (
+  inspectS3Exact?: (
     storageKey: string,
-    maxBytes: number,
     timeoutMs: number,
-    options: { signal?: AbortSignal; strict: true },
-  ) => Promise<Buffer | null>;
+    signal?: AbortSignal,
+  ) => Promise<S3ExactObjectMetadata | null>;
+  readS3RangeExact?: (
+    storageKey: string,
+    range: { start: number; end: number },
+    options: S3ExactRangeReadOptions,
+  ) => Promise<S3ExactRangeReadResult | null>;
+  openLocal?: typeof open;
+  realpathLocal?: typeof realpath;
+  statLocal?: (filePath: string) => Promise<BigIntStats>;
 }
 
 function mediaNotReady(): never {
@@ -138,25 +157,112 @@ async function resolveVerifiedManagedLocalSource(
   relativePath: string,
   dataRoot: string,
   expectedByteSize: number,
+  dependencies: ManagedMediaReadDependencies,
 ): Promise<ManagedAssetMediaDescriptor['source']> {
+  let file: Awaited<ReturnType<typeof open>> | undefined;
   try {
     const absolutePath = resolveManagedLocalPath(relativePath, dataRoot);
-    const [resolvedRoot, resolvedFile] = await Promise.all([
-      realpath(dataRoot),
-      realpath(absolutePath),
+    const verified = await openVerifiedManagedLocalFile(
+      absolutePath,
+      dataRoot,
+      expectedByteSize,
+      dependencies,
+    );
+    file = verified.file;
+    const { resolvedRoot, resolvedFile } = verified;
+    return { kind: 'local', absolutePath: resolvedFile, dataRoot: resolvedRoot };
+  } catch (error) {
+    if (error instanceof CanvasShareError) throw error;
+    return mediaNotReady();
+  } finally {
+    await file?.close().catch(() => undefined);
+  }
+}
+
+function isInsideRoot(resolvedRoot: string, resolvedFile: string): boolean {
+  const relative = path.relative(resolvedRoot, resolvedFile);
+  return Boolean(relative)
+    && relative !== '..'
+    && !relative.startsWith(`..${path.sep}`)
+    && !path.isAbsolute(relative);
+}
+
+function sameFileIdentity(opened: BigIntStats, resolved: BigIntStats): boolean {
+  return opened.ino > BigInt(0)
+    && opened.dev === resolved.dev
+    && opened.ino === resolved.ino;
+}
+
+async function openVerifiedManagedLocalFile(
+  absolutePath: string,
+  dataRoot: string,
+  expectedByteSize: number,
+  dependencies: ManagedMediaReadDependencies,
+): Promise<{
+  file: Awaited<ReturnType<typeof open>>;
+  resolvedRoot: string;
+  resolvedFile: string;
+  fileStat: BigIntStats;
+}> {
+  const openLocal = dependencies.openLocal ?? open;
+  const realpathLocal = dependencies.realpathLocal ?? realpath;
+  const statLocal = dependencies.statLocal
+    ?? ((filePath: string) => stat(filePath, { bigint: true }));
+  const resolvedRoot = await realpathLocal(dataRoot);
+  const noFollow = constants.O_NOFOLLOW ?? 0;
+  const file = await openLocal(absolutePath, constants.O_RDONLY | noFollow);
+  try {
+    const [fileStat, resolvedFile] = await Promise.all([
+      file.stat({ bigint: true }),
+      realpathLocal(absolutePath),
     ]);
-    const relative = path.relative(resolvedRoot, resolvedFile);
+    if (!isInsideRoot(resolvedRoot, resolvedFile)) {
+      throw new Error('MANAGED_LOCAL_MEDIA_OUTSIDE_ROOT');
+    }
+    const resolvedStat = await statLocal(resolvedFile);
     if (
-      !relative
-      || relative === '..'
-      || relative.startsWith(`..${path.sep}`)
-      || path.isAbsolute(relative)
+      !fileStat.isFile()
+      || !resolvedStat.isFile()
+      || fileStat.size !== BigInt(expectedByteSize)
+      || resolvedStat.size !== BigInt(expectedByteSize)
+      || !sameFileIdentity(fileStat, resolvedStat)
+    ) {
+      throw new Error('MANAGED_LOCAL_MEDIA_IDENTITY_MISMATCH');
+    }
+    return { file, resolvedRoot, resolvedFile, fileStat };
+  } catch (error) {
+    await file.close().catch(() => undefined);
+    throw error;
+  }
+}
+
+async function resolveVerifiedS3Source(
+  storageKey: string,
+  mimeType: string,
+  expectedByteSize: number,
+  options: Pick<ManagedMediaReadOptions, 'timeoutMs' | 'signal'>,
+  dependencies: ManagedMediaReadDependencies,
+): Promise<ManagedAssetMediaDescriptor['source']> {
+  try {
+    const inspectS3Exact = dependencies.inspectS3Exact ?? inspectS3ObjectExact;
+    const inspected = await inspectS3Exact(
+      storageKey,
+      options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+      options.signal,
+    );
+    if (
+      !inspected
+      || inspected.byteSize !== expectedByteSize
+      || (inspected.contentType !== null && inspected.contentType !== mimeType)
     ) {
       return mediaNotReady();
     }
-    const fileStat = await stat(resolvedFile);
-    if (!fileStat.isFile() || fileStat.size !== expectedByteSize) return mediaNotReady();
-    return { kind: 'local', absolutePath: resolvedFile, dataRoot: resolvedRoot };
+    return {
+      kind: 's3',
+      storageKey,
+      eTag: inspected.eTag,
+      versionId: inspected.versionId,
+    };
   } catch (error) {
     if (error instanceof CanvasShareError) throw error;
     return mediaNotReady();
@@ -166,7 +272,8 @@ async function resolveVerifiedManagedLocalSource(
 export async function getManagedAssetMediaDescriptor(
   version: AssetVersion,
   kind: AssetKind,
-  options: Pick<ManagedMediaReadOptions, 'dataRoot'> = {},
+  options: Pick<ManagedMediaReadOptions, 'dataRoot' | 'timeoutMs' | 'signal'> = {},
+  dependencies: ManagedMediaReadDependencies = {},
 ): Promise<ManagedAssetMediaDescriptor> {
   const assetKind = supportedAssetKind(kind);
   if (version.file.availability !== 'ready') return mediaNotReady();
@@ -181,11 +288,12 @@ export async function getManagedAssetMediaDescriptor(
   const relativePath = controlledRelativePath(version.file.url);
   if (!relativePath) return mediaNotReady();
   const source = storageKey
-    ? { kind: 's3' as const, storageKey }
+    ? await resolveVerifiedS3Source(storageKey, mimeType, byteSize!, options, dependencies)
     : await resolveVerifiedManagedLocalSource(
         relativePath,
         path.resolve(options.dataRoot ?? getServerDataRoot()),
         byteSize!,
+        dependencies,
       );
 
   return {
@@ -226,31 +334,22 @@ async function readLocalRange(
   dataRoot: string,
   expectedTotalBytes: number,
   range: { start: number; end: number },
+  dependencies: ManagedMediaReadDependencies,
 ): Promise<{ bytes: Buffer; totalBytes: number }> {
-  const [resolvedRoot, resolvedFile] = await Promise.all([
-    realpath(dataRoot),
-    realpath(absolutePath),
-  ]);
-  const relative = path.relative(resolvedRoot, resolvedFile);
-  if (
-    !relative
-    || relative === '..'
-    || relative.startsWith(`..${path.sep}`)
-    || path.isAbsolute(relative)
-  ) {
-    return mediaUnavailable();
-  }
-  const file = await open(resolvedFile, 'r');
+  const verified = await openVerifiedManagedLocalFile(
+    absolutePath,
+    dataRoot,
+    expectedTotalBytes,
+    dependencies,
+  );
+  const { file, fileStat } = verified;
   try {
-    const stat = await file.stat();
-    if (!stat.isFile() || stat.size !== expectedTotalBytes || range.start >= stat.size) {
-      return mediaUnavailable();
-    }
-    const end = Math.min(range.end, stat.size - 1);
+    if (range.start >= expectedTotalBytes) return mediaUnavailable();
+    const end = Math.min(range.end, expectedTotalBytes - 1);
     const bytes = Buffer.alloc(end - range.start + 1);
     const result = await file.read(bytes, 0, bytes.length, range.start);
     if (result.bytesRead !== bytes.length) return mediaUnavailable();
-    return { bytes, totalBytes: stat.size };
+    return { bytes, totalBytes: expectedTotalBytes };
   } finally {
     await file.close();
   }
@@ -268,20 +367,24 @@ async function readDescriptor(
       descriptor.source.dataRoot,
       descriptor.byteSize,
       range,
+      dependencies,
     );
   }
-  const readS3Exact = dependencies.readS3Exact ?? readImageFromS3Bounded;
-  const complete = await readS3Exact(
+  const readS3RangeExact = dependencies.readS3RangeExact ?? readS3ObjectRangeExact;
+  const result = await readS3RangeExact(
     descriptor.source.storageKey,
-    descriptor.byteSize,
-    options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
-    { signal: options.signal, strict: true },
+    range,
+    {
+      expectedTotalBytes: descriptor.byteSize,
+      maxBytes: range.end - range.start + 1,
+      timeoutMs: options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+      eTag: descriptor.source.eTag,
+      versionId: descriptor.source.versionId,
+      signal: options.signal,
+    },
   );
-  if (!complete || complete.byteLength !== descriptor.byteSize) return mediaUnavailable();
-  return {
-    bytes: complete.subarray(range.start, range.end + 1),
-    totalBytes: complete.byteLength,
-  };
+  if (!result || result.totalBytes !== descriptor.byteSize) return mediaUnavailable();
+  return result;
 }
 
 export async function readManagedAssetVersionBytes(
@@ -292,12 +395,15 @@ export async function readManagedAssetVersionBytes(
 ): Promise<ManagedMediaReadResult> {
   let descriptor: ManagedAssetMediaDescriptor;
   try {
-    descriptor = await getManagedAssetMediaDescriptor(version, kind, options);
+    descriptor = await getManagedAssetMediaDescriptor(version, kind, options, dependencies);
   } catch {
     return mediaUnavailable();
   }
-  const maxBytes = options.maxBytes ?? DEFAULT_RESPONSE_MAX_BYTES;
-  if (!Number.isSafeInteger(maxBytes) || maxBytes <= 0 || maxBytes > DEFAULT_RESPONSE_MAX_BYTES) {
+  const responseMaxBytes = descriptor.assetKind === 'image'
+    ? IMAGE_MAX_BYTES
+    : DEFAULT_RESPONSE_MAX_BYTES;
+  const maxBytes = options.maxBytes ?? responseMaxBytes;
+  if (!Number.isSafeInteger(maxBytes) || maxBytes <= 0 || maxBytes > responseMaxBytes) {
     return mediaUnavailable();
   }
   const range = normalizeRange(options.range, descriptor.byteSize, maxBytes);

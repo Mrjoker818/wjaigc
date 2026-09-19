@@ -22,7 +22,14 @@ function serializeCanonical(value: unknown, seen: Set<object>): string {
   seen.add(value);
   try {
     if (Array.isArray(value)) {
-      return `[${value.map(entry => serializeCanonical(entry, seen)).join(',')}]`;
+      const entries: string[] = [];
+      for (let index = 0; index < value.length; index += 1) {
+        if (!(index in value)) {
+          throw new TypeError('Canonical JSON does not support sparse arrays');
+        }
+        entries.push(serializeCanonical(value[index], seen));
+      }
+      return `[${entries.join(',')}]`;
     }
     const record = value as Record<string, unknown>;
     const keys = Object.keys(record).sort((left, right) => (

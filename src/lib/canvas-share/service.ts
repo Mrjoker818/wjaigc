@@ -289,15 +289,19 @@ export async function revokeCanvasShare(
 ): Promise<CanvasShareRecord> {
   const stored = await dependencies.find(input.actorUserId, input.shareId);
   if (!stored) return notFound();
-  const current = effectiveRecord(stored.record, dependencies.now());
+  const now = dependencies.now();
+  const current = effectiveRecord(stored.record, now);
   if (current.status === 'revoked') return current;
   if (current.status !== 'active') return policyConflict();
   const revoked = await dependencies.revoke(
     input.actorUserId,
     input.shareId,
-    dependencies.now().toISOString(),
+    now.toISOString(),
   );
-  return revoked ?? policyConflict();
+  if (revoked) return revoked;
+  const latest = await dependencies.find(input.actorUserId, input.shareId);
+  if (latest?.record.status === 'revoked') return latest.record;
+  return policyConflict();
 }
 
 export interface ReadPublicCanvasShareDependencies {
