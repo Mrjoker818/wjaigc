@@ -1,6 +1,6 @@
 # 只读画布分享发布证据
 
-> 状态：本地候选与隔离 PostgreSQL 门禁已完成；真实账号、跨浏览器、云端 main 等外部门禁仍未验证，发布保持关闭。本文不包含 raw token、媒体 URL、storage key、供应商载荷或个人标识。
+> 状态：本地候选、隔离 PostgreSQL、GitHub main、Coze exact-tree 构建与 Firefox/WebKit route-fixture 矩阵已完成；真实账号与真实 token trace 仍未验证，发布保持关闭。本文不包含 raw token、媒体 URL、storage key、供应商载荷或个人标识。
 
 ## 先列阻断与未验证项
 
@@ -9,8 +9,8 @@
 | 隔离 PostgreSQL 并发、迁移重复执行、事务竞态 | **本地通过** | PostgreSQL 18 隔离实例上迁移连续执行两次成功；5 个 Canvas Share 真库套件 18/18，通过全量真库回归。该结果不是云端生产数据库证据。 |
 | P0 真实账号流程 | **未验证** | 缺少受控账号、密码和生成模型前置。 |
 | Stage 2 真实资产生命周期 | **未验证** | 缺少受控 fixture、账号和真实数据库前置。 |
-| Firefox / WebKit 功能矩阵 | **未验证** | 本阶段只取得 Chromium 功能证据；launch-only 结果不等价于功能通过。 |
-| 云端 / Coze / GitHub main | **未验证** | 候选尚未推送或合入 main，不能把本地 worktree 当作云端证据。 |
+| Firefox / WebKit route-fixture 功能矩阵 | **通过** | Firefox 4/4、Coze Linux WebKit 4/4；覆盖有效只读、失效分享、下载关闭、下载开启与无写请求。该结果不是实际账号或真实 token 证据。 |
+| 云端 / Coze / GitHub main | **构建门禁通过** | `main@67873cdf…` 已推送；Coze exact-tree、127/127、validate、38 项基线、生产构建、服务 200 均通过。真实账号流程仍单列未验证。 |
 | 真实 token 的 trace 脱敏 | **未验证** | Playwright 使用合成 token/ref；只能证明合成 fixture 不泄漏。 |
 | 发布开关 | **关闭** | `WUJIE_CANVAS_SHARE_ENABLED` 仅在精确值 `true` 时开启；当前没有授权启用。 |
 
@@ -21,8 +21,8 @@
 - Task 8 实现与完整本地门禁提交：`dd4880bc87ac13e723d7cd36d71b9e0a484bfbeb`。
 - 本地候选分支：`codex/read-only-canvas-share`；真库门禁修正提交为 `41a52b921d9d45e9f26cfda78c76781a73179387`。
 - 本地 `main` 已从 `953bd6309a571a6af7bfbac330ec6f31663779eb` 纯快进整合至 `41a52b921d9d45e9f26cfda78c76781a73179387`；整合前 6 个用户自有 `.superpowers/sdd` 改动与候选 67 个路径零重叠并得到保留。
-- 本地 `main@3f75c3fcb1158711d3b2438fa1943a21d33b9be8` 已快进推送，推送后重新读取确认 `origin/main` 与本地一致；本段发布状态修正文档将作为后续纯文档提交一并同步，Coze 验收前必须再次读取最终 exact SHA。
-- 运行模式：本地 Next.js / Vitest / Playwright 合成 fixture；没有真实云端或真实账号声明。
+- GitHub `main@67873cdf9506c55886f5325f8d4d7e58102e9716` 已推送，tree 为 `1c781dfdd2d5675a1557e927e542c91c904f4b95`；Coze 合并 HEAD `75024663267aa354656b01bc81d6062933210af7` 的 tree 与 `origin/main` 严格一致。`stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 未变。
+- 运行模式：本地/Coze Next.js、Vitest 与 Playwright route fixture；没有真实账号或真实 token 链路声明。
 - 迁移版本：`migrations/20260919_read_only_canvas_shares.sql`。
 
 ## 冻结契约
@@ -67,6 +67,10 @@
 | Task 8 Desktop Chromium | `tests/e2e/read-only-canvas-share.spec.ts` | 4/4 passed at `dd4880bc…`。 |
 | Task 8 Mobile Chromium | 320、375、393 portrait 与 Pixel landscape 项目 | 4 actual passed，4 个互斥 skip。 |
 | Task 8 network no-write gate | `tests/e2e/read-only-canvas-share-network.spec.ts` | 1/1 passed。 |
+| Firefox route-fixture matrix | `E2E_BASE_URL=http://127.0.0.1:5101 pnpm exec playwright test tests/e2e/read-only-canvas-share-cross-browser.spec.ts --project=firefox --reporter=line` | 4/4 passed；VP8/WebM 夹具，四类功能与 request audit 通过。 |
+| Coze WebKit route-fixture matrix | `E2E_BASE_URL=http://127.0.0.1:5000 pnpm exec playwright test tests/e2e/read-only-canvas-share-cross-browser.spec.ts --project=webkit --reporter=line` | 4/4 passed；H.264 MP4 夹具，四类功能与 request audit 通过。 |
+| Coze exact-main focused | 3-file Vitest | 127/127 passed。 |
+| Coze exact-main release gates | `pnpm validate`、`pnpm check:protected-baseline`、`NODE_OPTIONS=--max-old-space-size=8192 pnpm build` | 全部 passed；38 项基线，Build ID `wGHiJDWBQ42XEPFNwqKrJ`。 |
 
 Task 7 的不可变证据目录：
 
@@ -111,4 +115,4 @@ pnpm exec vitest run `
 
 ## 发布判定
 
-GitHub `main` 已接收本地候选，并具备安全、类型、保护基线、Chromium 合成证据、隔离 PostgreSQL 迁移与全量真库回归证据；全量为 826 files / 7123 tests，0 failed。真实账号/资产、Firefox/WebKit、真实 token trace 和 Coze exact-main 运行验收仍未验证。因此发布开关必须保持默认关闭；本文不授权启用或对外发布，也不授权提前进入 WebSocket 阶段。
+GitHub `main` 已接收候选，并具备安全、类型、保护基线、Chromium 合成证据、隔离 PostgreSQL 迁移与全量真库回归、Firefox/WebKit route-fixture 4/4+4/4，以及 Coze exact-tree 构建/服务证据；全量真库为 826 files / 7123 tests，0 failed。真实账号 P0/Stage 2/3/4、真实资产生命周期与真实 token trace 仍未验证。因此发布开关必须保持默认关闭；本文不授权启用或对外发布，也不授权提前进入 WebSocket 阶段。
