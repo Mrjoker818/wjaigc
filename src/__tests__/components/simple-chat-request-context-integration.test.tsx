@@ -110,9 +110,11 @@ function createProject(task: SimpleChatTask): SimpleChatProject {
 function ChatAreaHarness({
   initialTask,
   onUpdateTask,
+  onPersistTask = async () => {},
 }: {
   initialTask: SimpleChatTask;
   onUpdateTask: ReturnType<typeof vi.fn>;
+  onPersistTask?: (task: SimpleChatTask) => Promise<void>;
 }) {
   const [task, setTask] = useState(initialTask);
   const project = useMemo(() => createProject(task), [task]);
@@ -126,7 +128,7 @@ function ChatAreaHarness({
         onUpdateTask(nextTask);
         setTask(nextTask);
       }}
-      onPersistTask={async () => {}}
+      onPersistTask={onPersistTask}
       onUpdateProject={vi.fn()}
       onCreateTask={vi.fn()}
       onSelectTask={vi.fn()}
@@ -294,6 +296,60 @@ describe('simple-chat request context integration', () => {
   function openImageMenu(container: HTMLElement): void {
     fireEvent.click(container.querySelectorAll('header button[aria-haspopup="listbox"]')[1]);
   }
+
+  it('persists the current chat snapshot before exposing a completed Canvas transfer', async () => {
+    const onUpdateTask = vi.fn();
+    const persistence = createDeferred<void>();
+    const onPersistTask = vi.fn<(task: SimpleChatTask) => Promise<void>>(() => persistence.promise);
+    mockStartupRequests();
+    const managedMessage = {
+      id: 'generated-message-1',
+      role: 'assistant' as const,
+      content: '图片已生成',
+      images: ['/managed/generated.png'],
+      imageRefs: [{
+        url: '/managed/generated.png',
+        assetId: 'asset-generated',
+        assetVersionId: 'version-generated',
+        placementId: 'placement-generated',
+      }],
+      status: 'completed' as const,
+      createdAt: 1,
+    };
+
+    render(<ChatAreaHarness
+      initialTask={createTask([managedMessage])}
+      onUpdateTask={onUpdateTask}
+      onPersistTask={onPersistTask}
+    />);
+    await waitFor(() => expect((screen.getByLabelText('目标画布项目') as HTMLSelectElement).value)
+      .toBe('canvas-project-1'));
+
+    fireEvent.click(screen.getByTitle('添加到画布'));
+
+    await waitFor(() => expect(onPersistTask).toHaveBeenCalledOnce());
+    expect(globalThis.fetch).not.toHaveBeenCalledWith('/api/assets/batch-transfer', expect.anything());
+
+    persistence.resolve();
+    await waitFor(() => expect(globalThis.fetch).toHaveBeenCalledWith(
+      '/api/assets/batch-transfer',
+      expect.anything(),
+    ));
+    expect(onPersistTask.mock.calls[0]?.[0]).toMatchObject({
+      id: 'task-1',
+      messages: [managedMessage],
+    });
+  });
+
+  it('guards a workflow return from stale generic task synchronization until persistence settles', () => {
+    expect(chatAreaSource).toContain('workflowReturnPersistenceGuardRef');
+    expect(chatAreaSource).toMatch(
+      /workflowReturnPersistenceGuardRef\.current = \{\s*taskId: task\.id,\s*messageId: returned\.id,\s*\};[\s\S]*await onPersistTask/,
+    );
+    expect(chatAreaSource).toMatch(
+      /const workflowReturnGuard = workflowReturnPersistenceGuardRef\.current;[\s\S]*if \(workflowReturnGuard\?\.taskId === task\.id\)[\s\S]*return;[\s\S]*onUpdateTask/,
+    );
+  });
 
   it('restores the same multi-platform export Run card from a persisted message after remount', async () => {
     const onUpdateTask = vi.fn();

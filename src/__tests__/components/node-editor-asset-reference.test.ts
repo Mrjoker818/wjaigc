@@ -41,4 +41,28 @@ describe('node editor asset references', () => {
     expect(workspaceSource).toContain('...(transferredReference?.assetVersionId');
     expect(workspaceSource).not.toContain('assetReferences?.find(reference => reference.url');
   });
+
+  it('waits for workflow output canvas persistence before navigating back to chat', () => {
+    expect(editorSource).toContain('workflowCanvasPersistenceRef');
+    expect(editorSource).toContain('!canvasPersistence.settled');
+    expect(editorSource).toContain('canvasPersistence.failedOutputNodeIds.has(nodeId)');
+    expect(editorSource).toMatch(
+      /workflowCanvasPersistenceRef\.current = \{\s*executionId: data\.executionId,\s*settled: false,\s*failedOutputNodeIds: new Set<string>\(\),\s*\};\s*setExecutionId\(data\.executionId\);/,
+    );
+    expect(editorSource).toContain('workflowCanvasPersistenceRef.current?.executionId === executionId');
+    expect(editorSource.indexOf('const canvasPersistence = workflowCanvasPersistenceRef.current'))
+      .toBeLessThan(editorSource.indexOf('buildWorkflowChatReturnIntentUrl({'));
+  });
+
+  it('uses the latest workflow snapshot when a fast execution completes', () => {
+    expect(editorSource).toContain('const completedWorkflow = wfRef.current;');
+    expect(editorSource).toMatch(/const outputCandidates = completedWorkflow\.nodes[\s\S]*completedWorkflow\.connections/);
+    expect(editorSource).toContain('workflowId: completedWorkflow.id');
+  });
+
+  it('submits the latest workflow snapshot when execution follows a node insertion', () => {
+    expect(editorSource).toMatch(
+      /const handleRunWorkflow = useCallback\(async \(\) => \{\s*const latestWorkflow = wfRef\.current;\s*await startWorkflowExecution\(\{ nodes: latestWorkflow\.nodes, connections: latestWorkflow\.connections \}\);/,
+    );
+  });
 });

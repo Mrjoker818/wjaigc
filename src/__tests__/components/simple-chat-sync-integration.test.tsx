@@ -225,6 +225,41 @@ describe('simple chat synchronization integration', () => {
     vi.unstubAllGlobals();
   });
 
+  it('preserves the latest tasks when stale project metadata is updated after task persistence', async () => {
+    const harness = createCoordinatorHarness(createSnapshot('synced', [createProject()]));
+    await renderAuthenticatedPage(harness);
+
+    const staleProject = mocks.chatAreaProps?.project;
+    const activeTask = mocks.chatAreaProps?.task;
+    if (!staleProject || !activeTask) throw new Error('Expected an active simple-chat project and task');
+    const returnedMessage = {
+      id: 'workflow-return-message',
+      role: 'assistant' as const,
+      content: '工作流结果已返回：图片输出',
+      createdAt: 2,
+    };
+
+    await act(async () => {
+      await mocks.chatAreaProps?.onPersistTask({
+        ...activeTask,
+        messages: [...(activeTask.messages || []), returnedMessage],
+      });
+    });
+    await waitFor(() => expect(mocks.chatAreaProps?.task?.messages).toContainEqual(returnedMessage));
+
+    act(() => {
+      mocks.chatAreaProps?.onUpdateProject({
+        ...staleProject,
+        knowledgeItems: [{
+          id: 'knowledge-1', projectId: staleProject.id, name: 'Late metadata', type: 'note',
+          enabled: true, tags: [], createdAt: 2, updatedAt: 2,
+        }],
+      });
+    });
+
+    await waitFor(() => expect(mocks.chatAreaProps?.task?.messages).toContainEqual(returnedMessage));
+  });
+
   it('merges a failed-state local project with the first successful online snapshot', async () => {
     const project = createProject();
     const harness = createCoordinatorHarness(createSnapshot('failed', []));

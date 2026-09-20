@@ -6,6 +6,11 @@ import { NextResponse } from 'next/server';
 import { getDesktopAuth, tokenFromHeader } from './desktop-cloud';
 import { getAuthSecretForInternalRequests, getSessionUser } from './server-auth';
 import type { User } from './user-types';
+import {
+  getAgentExecutionFenceHeaders,
+  parseAgentExecutionFenceHeaders,
+  type AgentExecutionFence,
+} from './agent-runtime/execution-fence';
 
 /**
  * Server-only API authentication helpers.
@@ -54,6 +59,7 @@ export async function getInternalRequestHeaders(
       ? { 'x-internal-user-product-type': userProductType.trim().slice(0, 256) }
       : {}),
     'x-wujie-internal-secret': secret,
+    ...getAgentExecutionFenceHeaders(),
   };
 }
 
@@ -121,6 +127,15 @@ export async function getRequestUser(request: Request | NextRequest): Promise<{
   if (!token) return null;
   const auth = await getDesktopAuth(token);
   return auth ? { user: auth.user, source: 'desktop-token' } : null;
+}
+
+export async function getTrustedRequestAgentExecutionFence(
+  request: Request | NextRequest,
+): Promise<AgentExecutionFence | undefined> {
+  const auth = await getRequestUser(request);
+  return auth?.source === 'internal'
+    ? parseAgentExecutionFenceHeaders(request.headers)
+    : undefined;
 }
 
 /**

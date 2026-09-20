@@ -459,6 +459,7 @@ export default function ChatArea({
   const taskIdRef = useRef(task?.id);
   const latestTaskRef = useRef(task);
   const workflowReturnHandledRef = useRef<string | null>(null);
+  const workflowReturnPersistenceGuardRef = useRef<{ taskId: string; messageId: string } | null>(null);
   projectIdRef.current = project?.id;
   taskIdRef.current = task?.id;
   latestTaskRef.current = task;
@@ -476,6 +477,7 @@ export default function ChatArea({
     if (workflowReturnHandledRef.current === intentKey) return;
     workflowReturnHandledRef.current = intentKey;
     let cancelled = false;
+    let guardedMessageId: string | null = null;
     void (async () => {
       try {
         const response = await fetch('/api/assets/transfer', {
@@ -495,6 +497,11 @@ export default function ChatArea({
         const persistedMessages = (latestTask.messages || []).some(message => message.id === returned.id)
           ? latestTask.messages
           : [...(latestTask.messages || []), returned];
+        guardedMessageId = returned.id;
+        workflowReturnPersistenceGuardRef.current = {
+          taskId: task.id,
+          messageId: returned.id,
+        };
         await onPersistTask({ ...latestTask, messages: persistedMessages, updatedAt: Date.now() });
         if (cancelled || projectIdRef.current !== project.id || taskIdRef.current !== task.id) return;
         setMessages(persistedMessages);
@@ -508,7 +515,12 @@ export default function ChatArea({
         if (!cancelled) setSearchStatus('工作流结果返回失败，请重试');
       }
     })();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+      if (workflowReturnPersistenceGuardRef.current?.messageId === guardedMessageId) {
+        workflowReturnPersistenceGuardRef.current = null;
+      }
+    };
   }, [onPersistTask, project?.id, task?.id]);
 
   // Sync when task changes
@@ -742,6 +754,13 @@ export default function ChatArea({
   // Sync task to parent（临时聊天模式下跳过保存）
   useEffect(() => {
     if (!task || !project || tempChat || messagesTaskId !== task.id) return;
+    const workflowReturnGuard = workflowReturnPersistenceGuardRef.current;
+    if (workflowReturnGuard?.taskId === task.id) {
+      if (messages.some(message => message.id === workflowReturnGuard.messageId)) {
+        workflowReturnPersistenceGuardRef.current = null;
+      }
+      return;
+    }
     onUpdateTask({ ...task, messages, model: selectedModel, providerId: selectedProviderId, reasoningEffort, responseSpeed, appliedChatControls, updatedAt: Date.now() });
   }, [messages, messagesTaskId, selectedModel, selectedProviderId, reasoningEffort, responseSpeed, appliedChatControls, tempChat]);
 
@@ -1797,6 +1816,15 @@ export default function ChatArea({
     if (canvasTransferMessageId === message.id) return;
     setCanvasTransferMessageId(message.id);
     try {
+      const latestTask = latestTaskRef.current;
+      if (!latestTask || latestTask.id !== task.id) {
+        throw new Error('Chat task changed before Canvas transfer');
+      }
+      await onPersistTask({
+        ...latestTask,
+        messages: messagesRef.current,
+        updatedAt: Date.now(),
+      });
       const transfer = async ({ sourceVersionId, targetProjectId: transferProjectId, index, sourceTrace, kind }: {
         sourceVersionId: string;
         targetProjectId: string;
@@ -1904,7 +1932,7 @@ export default function ChatArea({
     } finally {
       setCanvasTransferMessageId((current) => current === message.id ? null : current);
     }
-  }, [canvasTransferMessageId, project, selectedCanvasProjectId, task]);
+  }, [canvasTransferMessageId, onPersistTask, project, selectedCanvasProjectId, task]);
 
   // Message operations
   const copyMessage = (content: string) => { navigator.clipboard.writeText(content); };

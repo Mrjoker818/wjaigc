@@ -12,6 +12,11 @@ interface TaskAbortScopeOptions {
   timeoutMs?: number;
   requestId?: string;
   signals?: AbortSignal[];
+  /**
+   * Keep an active scope for the same task and inherit its cancellation.
+   * Used by nested recovery work that must not abort its parent execution.
+   */
+  preserveExisting?: boolean;
 }
 
 export interface TaskAbortScope {
@@ -126,10 +131,17 @@ export function createTaskAbortScope(
   const cleanupCallbacks: Array<() => void> = [];
   let timer: ReturnType<typeof setTimeout> | undefined;
   let disposed = false;
+  const existingController = options.preserveExisting
+    ? getTaskAbortStore().controllers.get(taskId)
+    : undefined;
+  const ownsRegistration = !existingController;
 
-  registerTaskAbortController(taskId, controller);
+  if (ownsRegistration) registerTaskAbortController(taskId, controller);
 
-  for (const signal of options.signals || []) {
+  const inheritedSignals = existingController
+    ? [existingController.signal, ...(options.signals || [])]
+    : options.signals || [];
+  for (const signal of inheritedSignals) {
     if (signal.aborted) {
       controller.abort(signal.reason);
       break;
@@ -163,7 +175,7 @@ export function createTaskAbortScope(
       disposed = true;
       if (timer) clearTimeout(timer);
       cleanupCallbacks.forEach((cleanup) => cleanup());
-      unregisterTaskAbortController(taskId, controller);
+      if (ownsRegistration) unregisterTaskAbortController(taskId, controller);
     },
   };
 }

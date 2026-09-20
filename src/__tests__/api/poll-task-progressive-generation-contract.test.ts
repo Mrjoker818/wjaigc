@@ -19,7 +19,10 @@ function indexOfCompletedProgress(start: number, taskExpression: string): number
 describe('progressive generation recovery contract', () => {
   it('schedules provider submission after returning the recovery acknowledgement', () => {
     const recoveryStart = source.indexOf('if (requiresSubmissionRecovery)');
-    const scheduledWork = source.indexOf('after(async () => {', recoveryStart);
+    const scheduledWork = source.indexOf(
+      'afterWithAgentExecutionFence(async recoveryExecutionFence => {',
+      recoveryStart,
+    );
     const resumedSubmission = source.indexOf('const resumed = await fetch', recoveryStart);
     const acknowledgement = source.indexOf('recoveryPending: true', scheduledWork);
 
@@ -159,11 +162,14 @@ describe('progressive generation recovery contract', () => {
     const recoveryStart = source.indexOf('if (requiresSubmissionRecovery)');
     const scope = source.indexOf('const recoveryAbort = createTaskAbortScope(', recoveryStart);
     const timeout = source.indexOf('timeoutMs: 600_000', scope);
+    const preserveExisting = source.indexOf('preserveExisting: true', timeout);
     const fetchSignal = source.indexOf('signal: recoveryAbort.signal', timeout);
     const cleanup = source.indexOf('recoveryAbort.dispose()', fetchSignal);
 
     expect(scope).toBeGreaterThan(recoveryStart);
     expect(timeout).toBeGreaterThan(scope);
+    expect(preserveExisting).toBeGreaterThan(timeout);
+    expect(preserveExisting).toBeLessThan(fetchSignal);
     expect(fetchSignal).toBeGreaterThan(timeout);
     expect(cleanup).toBeGreaterThan(fetchSignal);
     expect(source.slice(scope, fetchSignal)).not.toContain('request.signal');

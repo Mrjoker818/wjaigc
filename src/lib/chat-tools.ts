@@ -332,6 +332,10 @@ export type { AgentAdmittedExecution as AdmittedToolExecution } from '@/lib/agen
 export async function executeAdmittedToolCall(
   input: ToolCallResult | AdmittedToolExecution,
   signal?: AbortSignal,
+  options: {
+    waitForTerminal?: boolean;
+    executionFence?: import('@/lib/agent-runtime/execution-fence').AgentExecutionFence;
+  } = {},
 ): Promise<void> {
   const execution = 'kind' in input ? input : input.admittedExecution;
   if (!execution) return;
@@ -342,6 +346,8 @@ export async function executeAdmittedToolCall(
       userId: execution.userId,
       userRole: execution.userRole,
       ...(signal ? { signal } : {}),
+      ...(options.waitForTerminal === false ? { waitForTerminal: false } : {}),
+      ...(options.executionFence ? { executionFence: options.executionFence } : {}),
     });
     if (result.failed.length > 0) {
       throw new Error(`Generation continuation was rejected for ${result.failed.join(', ')}`);

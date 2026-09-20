@@ -5,7 +5,11 @@ export const maxDuration = 1800; // 30分钟 - 支持长时间轮询慢速API（
 
 import { appendUserJsonl } from '@/lib/server-user-storage';
 import { findProviderForModel, findProviderById, normalizeApiBaseUrl } from '@/lib/server-api-config';
-import { getInternalRequestHeaders, getRequestUser } from '@/lib/api-auth';
+import {
+  getInternalRequestHeaders,
+  getRequestUser,
+  getTrustedRequestAgentExecutionFence,
+} from '@/lib/api-auth';
 import { resolveCompatProfile, buildPollUrl, extractImageUrl, type ApiCompatProfile } from '@/lib/api-compatibility';
 import { postProcessAIRemoveBG } from '@/lib/remove-bg-postprocess';
 import { fetchImageBuffer } from '@/lib/fetch-image-buffer';
@@ -68,6 +72,11 @@ import { requiresAtomicTerminalSettlement } from '@/lib/task-core/terminal-settl
 import { getRequestId } from '@/lib/request-id';
 import type { GenerationRouteAudit } from '@/lib/generation-route-audit';
 import { STRICT_AGENT_GENERATE_HEADER } from '@/lib/agent-runtime/generate-image-adapter';
+import {
+  getAgentExecutionFence,
+  withAgentExecutionFence,
+  type AgentExecutionFence,
+} from '@/lib/agent-runtime/execution-fence';
 import { enrichCompletedImageResult } from '@/lib/asset-core/image-result-metadata';
 import {
   cleanupPersistedGatewayVideoResult,
@@ -113,6 +122,15 @@ const TASK_RECOVERY_WORKER_ID = process.env.WUJIE_WORKER_ID || `poll-task-${proc
 // provider again. Only a worker that stopped updating for longer than the 600s
 // background submission timeout is considered dead and eligible for recovery.
 const SUBMISSION_STALE_MS = 12 * 60_000;
+
+function afterWithAgentExecutionFence(
+  callback: (executionFence: AgentExecutionFence | undefined) => Promise<void>,
+): void {
+  const executionFence = getAgentExecutionFence();
+  after(() => executionFence
+    ? withAgentExecutionFence(executionFence, () => callback(executionFence))
+    : callback(undefined));
+}
 
 async function refundTaskCredits(
   taskId: string,
@@ -308,7 +326,7 @@ if (typeof setInterval !== 'undefined') {
 
 // 轮询异步任务状态 - 由前端调用
 // 通用化设计：支持不同提供商的任务状态查询格式
-export async function POST(request: NextRequest): Promise<NextResponse> {
+async function handlePost(request: NextRequest): Promise<NextResponse> {
   const requestId = getRequestId(request);
   try {
     const { taskId, model: rawModel, userId: requestUserId, providerId, engine: requestEngine, apiKey: bodyApiKey, apiBaseUrl: bodyApiBaseUrl } = await request.json();
@@ -1509,10 +1527,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
           await releaseCloudTaskLease(recovered.taskId, TASK_RECOVERY_WORKER_ID);
         }
         if (requiresSubmissionRecovery) {
-          after(async () => {
+          afterWithAgentExecutionFence(async recoveryExecutionFence => {
             const recoveryAbort = createTaskAbortScope(recovered.taskId, {
               timeoutMs: 600_000,
               requestId,
+              preserveExisting: true,
             });
             let recoveryResponseStatus: number | undefined;
             let recoveryResponseData: Record<string, unknown> | null = null;
@@ -1608,7 +1627,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
               const committed = await completeCloudTask(
                 recovered.taskId,
                 completedResult,
-                TASK_RECOVERY_WORKER_ID,
+                {
+                  leaseOwner: TASK_RECOVERY_WORKER_ID,
+                  agentExecutionFence: recoveryExecutionFence,
+                },
               );
               if (!committed) {
                 console.info('[poll-task] Late recovery result ignored', {
@@ -3720,4 +3742,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       retryable: classifiedErr.isRetryable,
     }, { status: 500 });
   }
+}
+
+export async function POST(request: NextRequest): Promise<NextResponse> {
+  const executionFence = await getTrustedRequestAgentExecutionFence(request);
+  return executionFence
+    ? withAgentExecutionFence(executionFence, () => handlePost(request))
+    : handlePost(request);
 }

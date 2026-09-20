@@ -874,6 +874,11 @@ const nodeThemes = {
 export default function NodeEditor({ taskModelCatalog = [], taskModelOptions = [], catalogStatus = { loading: false, error: null }, workflow, userId, projectId, onBack, onWorkflowChange, onWorkflowSaved, onWorkflowSaveRequest, onBeforeWorkflowChatNavigation, canvasImages, onCanvasImageAssetReferenceAdopted, themeStyle = 'gold', onAddImages, preferredAnnotationModelId = '', rendererMode = 'legacy' }: NodeEditorProps) {
   const T = nodeThemes[themeStyle];
   const projectIdRef = useRef(projectId);
+  const workflowCanvasPersistenceRef = useRef<{
+    executionId: string;
+    settled: boolean;
+    failedOutputNodeIds: Set<string>;
+  } | null>(null);
   projectIdRef.current = projectId;
   // CSS自定义属性，供Tailwind中 var(--ne-xxx) 引用
   const neVars = {
@@ -2181,6 +2186,11 @@ ${contextInfo}
         setExecStatus('failed');
         return;
       }
+      workflowCanvasPersistenceRef.current = {
+        executionId: data.executionId,
+        settled: false,
+        failedOutputNodeIds: new Set<string>(),
+      };
       setExecutionId(data.executionId);
       localStorage.setItem(WORKFLOW_EXEC_STATE_KEY, JSON.stringify({
         executionId: data.executionId,
@@ -2355,6 +2365,22 @@ ${contextInfo}
         status: 'error', message: '工作流结果尚未完成，无法发送到智能对话',
       }]));
       return;
+    }
+    const canvasPersistence = workflowCanvasPersistenceRef.current;
+    if (canvasPersistence?.executionId === executionId) {
+      for (let attempt = 0; attempt < 300 && !canvasPersistence.settled; attempt += 1) {
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+      if (
+        !canvasPersistence.settled
+        || canvasPersistence.failedOutputNodeIds.has(nodeId)
+      ) {
+        setExecLogs(prev => mergeExecutionLogs(prev, [{
+          time: Date.now(), nodeId, label: wf.nodes.find(node => node.id === nodeId)?.label || nodeId,
+          status: 'error', message: '工作流结果尚未完成画布持久化，无法发送到智能对话',
+        }]));
+        return;
+      }
     }
     const reference = resolveWorkflowOutputAssetReference(
       nodeId,
@@ -2767,8 +2793,9 @@ ${contextInfo}
   // ─── 执行工作流 ───
 
   const handleRunWorkflow = useCallback(async () => {
-    await startWorkflowExecution({ nodes: wf.nodes, connections: wf.connections });
-  }, [startWorkflowExecution, wf.connections, wf.nodes]);
+    const latestWorkflow = wfRef.current;
+    await startWorkflowExecution({ nodes: latestWorkflow.nodes, connections: latestWorkflow.connections });
+  }, [startWorkflowExecution]);
 
   const handleStopWorkflow = useCallback(async () => {
     if (executionId) {
@@ -2914,13 +2941,25 @@ ${contextInfo}
           return;
         }
         if (data.status === 'completed' || data.status === 'failed') {
+          const completedWorkflow = wfRef.current;
+          const existingCanvasPersistence = workflowCanvasPersistenceRef.current?.executionId === executionId
+            ? workflowCanvasPersistenceRef.current
+            : null;
+          const canvasPersistence = existingCanvasPersistence || {
+            executionId,
+            settled: false,
+            failedOutputNodeIds: new Set<string>(),
+          };
+          canvasPersistence.settled = false;
+          canvasPersistence.failedOutputNodeIds.clear();
+          workflowCanvasPersistenceRef.current = canvasPersistence;
           setExecStatus(data.status === 'completed' ? 'completed' : 'failed');
           setExecResults(data.results || {});
           // P1: 记录执行日志
           let finalLogs: WorkflowExecutionLog[] = [];
           if (data.results) {
             finalLogs = Object.entries(data.results as Record<string, { status: string; output?: Record<string, unknown>; error?: string }>).map(([nodeId, result]) => {
-              const node = wf.nodes.find(n => n.id === nodeId);
+              const node = completedWorkflow.nodes.find(n => n.id === nodeId);
               return { time: Date.now(), nodeId, label: node?.label || nodeId, status: result.status, message: result.error || (result.output ? '完成' : '未知') };
             });
             setExecLogs(prev => mergeExecutionLogs(prev, finalLogs));
@@ -2946,15 +2985,15 @@ ${contextInfo}
                 if (!workflowApiProvider && result.output.apiProvider) workflowApiProvider = result.output.apiProvider as string;
               }
             }
-            const outputCandidates = wf.nodes
+            const outputCandidates = completedWorkflow.nodes
               .filter(node => getNodeCategory(node.type) === 'output')
               .flatMap(outputNode => {
                 const result = workflowResults[outputNode.id];
                 if (result?.status !== 'success' || !result.output) return [];
                 const outputReference = resolveWorkflowOutputAssetReference(
                   outputNode.id,
-                  wf.nodes,
-                  wf.connections,
+                  completedWorkflow.nodes,
+                  completedWorkflow.connections,
                   workflowResults,
                 );
                 if (outputReference?.assetVersionId) {
@@ -2984,7 +3023,7 @@ ${contextInfo}
               const insertion = await prepareWorkflowCanvasInsertions(outputCandidates, async (outputReference, candidate) => {
                 if (!projectId) throw new Error('Missing target project');
                 const outputNodeId = candidate.outputNodeId.split(':')[0];
-                const outputNode = wf.nodes.find(node => node.id === outputNodeId);
+                const outputNode = completedWorkflow.nodes.find(node => node.id === outputNodeId);
                 const response = await fetch('/api/assets/transfer', {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
@@ -2998,7 +3037,7 @@ ${contextInfo}
                     metadata: {
                       name: outputNode?.label || candidate.outputNodeId,
                       source: 'workflow',
-                      workflowId: wf.id,
+                      workflowId: completedWorkflow.id,
                       executionId,
                       outputNodeId: candidate.outputNodeId,
                     },
@@ -3008,17 +3047,20 @@ ${contextInfo}
                 return response.json() as Promise<WorkspaceAssetReference>;
               });
               if (insertion.failedOutputNodeIds.length > 0) {
+                insertion.failedOutputNodeIds.forEach(nodeId => {
+                  canvasPersistence.failedOutputNodeIds.add(nodeId.split(':')[0]);
+                });
                 setExecLogs(prev => mergeExecutionLogs(prev, insertion.failedOutputNodeIds.map(nodeId => ({
                   time: Date.now(),
                   nodeId,
-                  label: wf.nodes.find(node => node.id === nodeId)?.label || nodeId,
+                  label: completedWorkflow.nodes.find(node => node.id === nodeId)?.label || nodeId,
                   status: 'error',
                   message: 'Asset transfer failed; retry is available',
                 }))));
               }
               // ★ 如果输出没有模型信息，从工作流节点中查找
-              if (!workflowModelName && wf.nodes) {
-                const genNode = wf.nodes.find(n => n.type === 'ai-generate' && n.config?.model);
+              if (!workflowModelName && completedWorkflow.nodes) {
+                const genNode = completedWorkflow.nodes.find(n => n.type === 'ai-generate' && n.config?.model);
                 if (genNode?.config?.model) {
                   const model = genNode.config.model as string;
                   workflowModelName = model.includes('::') ? model.split('::').pop()! : model;
@@ -3033,6 +3075,7 @@ ${contextInfo}
               }
             }
           }
+          canvasPersistence.settled = true;
           return; // done, don't schedule next poll
         } else if (data.results) {
           setExecResults(data.results);

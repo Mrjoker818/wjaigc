@@ -66,6 +66,21 @@ describe('poll-task recovery lease contract', () => {
     expect(memoryUpdate).toBeGreaterThan(completed);
   });
 
+  it('keeps the authenticated Agent fence inside the deferred recovery worker', () => {
+    const source = readFileSync(path.resolve(process.cwd(), 'src/app/api/poll-task/route.ts'), 'utf8');
+    const helper = source.indexOf('function afterWithAgentExecutionFence');
+    const deferredRecovery = source.indexOf('afterWithAgentExecutionFence(async recoveryExecutionFence =>');
+
+    expect(helper).toBeGreaterThan(-1);
+    expect(source.slice(helper, helper + 650)).toContain(
+      'withAgentExecutionFence(executionFence, () => callback(executionFence))',
+    );
+    expect(deferredRecovery).toBeGreaterThan(helper);
+    expect(source.slice(deferredRecovery, deferredRecovery + 8_000)).toContain(
+      'agentExecutionFence: recoveryExecutionFence',
+    );
+  });
+
   it('classifies recovery aborts before settling the database terminal state', () => {
     const source = readFileSync(path.resolve(process.cwd(), 'src/app/api/poll-task/route.ts'), 'utf8');
     const recoveryStart = source.indexOf('if (requiresSubmissionRecovery)');

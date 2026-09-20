@@ -133,9 +133,14 @@ describe('chat tool governance', () => {
 
     await executeAdmittedToolCall({
       kind: 'generation', taskIds: ['task-1'], userId: 'user-1', userRole: 'user',
-    }, controller.signal);
+    }, controller.signal, {
+      waitForTerminal: false,
+      executionFence: { runId: 'task-1', leaseOwner: 'lease-1', generation: 0 },
+    });
     expect(kickoffDurableGenerationTasks).toHaveBeenLastCalledWith(expect.objectContaining({
       signal: controller.signal,
+      waitForTerminal: false,
+      executionFence: { runId: 'task-1', leaseOwner: 'lease-1', generation: 0 },
     }));
   });
 

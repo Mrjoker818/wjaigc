@@ -1,6 +1,6 @@
 # 只读画布分享发布证据
 
-> 状态：本地候选、隔离 PostgreSQL、GitHub main、Coze exact-tree 构建、Firefox/WebKit route-fixture 与一条真实 token 匿名链路已完成；真实账号 P0/Stage 2/3/4 及完整八项云端发布矩阵仍未验证，发布保持关闭。本文不包含 raw token、分享 URL、媒体 URL、storage key、供应商载荷或个人标识。
+> 状态：本地候选、隔离 PostgreSQL、GitHub main、Coze exact-tree 构建、Firefox/WebKit route-fixture、一条真实 token 匿名链路，以及 Stage 2/4 受控本地矩阵已完成；真实账号 P0、Stage 3、Stage 2/4 云端 exact-candidate 与完整八项云端发布矩阵仍未验证，发布保持关闭。本文不包含 raw token、分享 URL、媒体 URL、storage key、供应商载荷或个人标识。
 
 ## 先列阻断与未验证项
 
@@ -8,7 +8,8 @@
 | --- | --- | --- |
 | 隔离 PostgreSQL 并发、迁移重复执行、事务竞态 | **本地通过** | PostgreSQL 18 隔离实例上迁移连续执行两次成功；5 个 Canvas Share 真库套件 18/18，通过全量真库回归。该结果不是云端生产数据库证据。 |
 | P0 真实账号流程 | **未验证** | 缺少受控账号、密码和生成模型前置。 |
-| Stage 2 真实资产生命周期 | **未验证** | 缺少受控 fixture、账号和真实数据库前置。 |
+| Stage 2 真实资产生命周期 | **受控本地矩阵通过 / 真实账号未验证** | 独立 PostgreSQL + 受控 fixture 下 Chromium、1080p Chromium、Firefox、Mobile Chromium 共 44/44；current-candidate WebKit 与真实账号/云端仍未验证。 |
+| Stage 4 节点、聊天与 Agent | **受控本地四浏览器通过 / 云端未验证** | 独立 PostgreSQL + 受控 provider 下 Chromium 1080p、Firefox、Mobile Chromium 9/9，项目专用 WebKit 3/3；真实账号付费路径和 Coze exact-candidate 尚未验证。 |
 | Firefox / WebKit route-fixture 功能矩阵 | **通过** | Firefox 4/4、Coze Linux WebKit 4/4；覆盖有效只读、失效分享、下载关闭、下载开启与无写请求。该结果不是实际账号或真实 token 证据。 |
 | 云端 / Coze / GitHub main | **构建与当前功能运行门禁通过** | 普通上传元数据修复已推送为 `main@291ea67a…`；Coze 运行 tree 与对应 `origin/main` tree 一致，聚焦回归、validate、生产构建及服务 200 通过。真实账号流程仍单列未验证。 |
 | 真实 token 的 trace 脱敏 | **单链路通过 / 完整矩阵未完成** | 临时真实分享在隔离匿名浏览器中完成查看、媒体 GET、允许下载、375px 窄屏、撤销和旧链接 404；匿名重载与撤销复查均为 0 写请求。默认禁止下载、过期、旧快照不变、失效媒体占位及 320/393 真实 token 仍未验证。 |
@@ -62,9 +63,10 @@
 | 统一校验 | `pnpm validate` | passed；`ts-check` 与 ESLint 均通过。仅有既有 `infinite-canvas.tsx` 超过 500 KB 的 Babel 提示。 |
 | 迁移执行 | `pnpm migrate` 连续执行两次 | PostgreSQL 18 隔离实例上两次均退出 0；首次应用 26 个迁移，第二次全部安全跳过，含 `20260919_read_only_canvas_shares.sql`。 |
 | Chromium P0 | `pnpm exec playwright test tests/e2e/p0-core.spec.ts --project=chromium --reporter=line` | **未验证**；缺少 `E2E_TEST_USERNAME`、`E2E_TEST_PASSWORD`、`E2E_GENERATION_MODEL`。 |
-| Chromium Stage 2 | `pnpm exec playwright test tests/e2e/stage-2-asset-lifecycle.spec.ts tests/e2e/stage-2-cross-workspace.spec.ts --project=chromium --reporter=line` | 11 skipped；缺少真实 fixture、账号与数据库前置，**未验证**。 |
+| Stage 2 受控本地矩阵 | 隔离 PostgreSQL + `tests/e2e/stage-2-asset-lifecycle.spec.ts`、`stage-2-cross-workspace.spec.ts` | Chromium、1080p Chromium、Firefox、Mobile Chromium 各 11/11，共 44/44；真实账号与 current-candidate WebKit 仍未验证。 |
 | Chromium Stage 3 | `pnpm exec playwright test tests/e2e/stage-3-canvas-kernel.spec.ts --project=chromium --reporter=line` | 收集阶段因缺少 `E2E_STAGE3_PROJECT_IDS`、`E2E_STAGE3_RUN_ID` 阻断，**未验证**。 |
-| Chromium Stage 4 | `pnpm exec playwright test tests/e2e/stage-4-node-chat-agent.spec.ts --project=chromium --reporter=line` | 收集阶段因缺少 `E2E_STAGE4_EXPECTED_AGENT_MODE` 阻断，**未验证**。 |
+| Stage 4 受控本地矩阵 | `tests/e2e/stage-4-node-chat-agent.spec.ts`，每轮独立 PostgreSQL 与受控 provider | `stage4-local_20260920_r41` 为 Chromium 1080p / Firefox / Mobile Chromium 9/9；项目专用 WebKit 运行时的 `stage4-local_20260920_r40` 为 3/3。移动端链路通过真实节点选择、关闭面板及“发送到智能对话”点击完成，无 DOM 点击绕过；真实账号与 Coze exact-candidate 仍未验证。 |
+| Stage 4 候选相关回归 | 11 个 API、任务租约、工作流与聊天持久化测试文件 | 126/126 passed；TypeScript、生产构建（121/121 静态页）及 ESLint quiet 门禁通过。 |
 | Task 8 Desktop Chromium | `tests/e2e/read-only-canvas-share.spec.ts` | 4/4 passed at `dd4880bc…`。 |
 | Task 8 Mobile Chromium | 320、375、393 portrait 与 Pixel landscape 项目 | 4 actual passed，4 个互斥 skip。 |
 | Task 8 network no-write gate | `tests/e2e/read-only-canvas-share-network.spec.ts` | 1/1 passed。 |
@@ -122,4 +124,4 @@ pnpm exec vitest run `
 
 ## 发布判定
 
-GitHub `main` 已接收功能候选，并具备安全、类型、保护基线、Chromium 合成证据、隔离 PostgreSQL 迁移与全量真库回归、Firefox/WebKit route-fixture 4/4+4/4、Coze exact-tree 构建/服务证据，以及一条真实 token 匿名查看/下载/375px/撤销链路；全量真库为 826 files / 7123 tests，0 failed。真实账号 P0/Stage 2/3/4、真实资产生命周期和完整八项真实 token 云端矩阵仍未验证。因此发布开关必须保持默认关闭；本文不授权对外发布，也不授权提前进入 WebSocket 阶段。
+GitHub `main` 已接收只读分享与 Stage 2 候选，并具备安全、类型、保护基线、Chromium 合成证据、隔离 PostgreSQL 迁移与全量真库回归、Firefox/WebKit route-fixture 4/4+4/4、Coze exact-tree 构建/服务证据，以及一条真实 token 匿名查看/下载/375px/撤销链路。Stage 2 受控本地矩阵和当前未提交 Stage 4 候选的四浏览器受控矩阵也已通过；Stage 4 最终本地证据为主矩阵 `r41` 9/9 与项目专用 WebKit `r40` 3/3。真实账号 P0、Stage 3、Stage 2/4 云端 exact-candidate、完整八项真实 token 云端矩阵仍未验证。因此发布开关必须保持默认关闭；本文不授权对外发布，也不授权提前进入 WebSocket 阶段。

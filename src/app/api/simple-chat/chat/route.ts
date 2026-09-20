@@ -38,6 +38,10 @@ import { STRICT_AGENT_GENERATE_HEADER } from '@/lib/agent-runtime/generate-image
 import { resolveSimpleChatRequestIdempotencyKey } from '@/lib/simple-chat-retry';
 import { runWithAbortSignalTimeout } from '@/lib/abort-signal';
 import {
+  getAgentExecutionFenceHeaders,
+  type AgentExecutionFence,
+} from '@/lib/agent-runtime/execution-fence';
+import {
   requireSkillForSurface,
   SkillNotFoundError,
   SkillSurfaceForbiddenError,
@@ -1145,6 +1149,7 @@ export async function POST(request: NextRequest) {
                 : await admitGeneration();
               const imgData = await imgRes.json() as {
                 success?: boolean;
+                error?: string;
                 taskIds?: string[];
                 imageUrls?: string[];
                 directImageUrls?: string[];
@@ -1160,7 +1165,17 @@ export async function POST(request: NextRequest) {
 
               // 直接返回图片的情况（同步提供商）
               const directUrls = imgData.directImageUrls || imgData.imageUrls;
-              if (imgData.success && directUrls?.length && !imgData.taskIds?.length) {
+              if (!imgRes.ok || imgData.success !== true) {
+                const reason = typeof imgData.error === 'string' && imgData.error.trim()
+                  ? imgData.error.trim()
+                  : `生成请求失败（HTTP ${imgRes.status}）`;
+                send({
+                  type: 'tool_status',
+                  tool: 'generating_image',
+                  status: 'failed',
+                  label: `图片生成失败: ${reason}`,
+                });
+              } else if (directUrls?.length && !imgData.taskIds?.length) {
                 await sendGeneratedImage(
                   directUrls[0],
                   imgPrompt,
@@ -1169,9 +1184,12 @@ export async function POST(request: NextRequest) {
                   actualModelId,
                   actualProviderId,
                 );
-              } else if (imgData.success && imgData.taskIds?.length) {
+              } else if (imgData.taskIds?.length) {
                 const taskId = imgData.taskIds[0];
-                const pollExistingTask = async (signal?: AbortSignal): Promise<void> => {
+                const pollExistingTask = async (
+                  signal?: AbortSignal,
+                  executionFence?: AgentExecutionFence,
+                ): Promise<void> => {
                   let attempts = 0;
                   while (attempts < 100) {
                     signal?.throwIfAborted();
@@ -1180,7 +1198,11 @@ export async function POST(request: NextRequest) {
                     const pollRes = await runWithAbortSignalTimeout(signal, 30_000, requestSignal => (
                       fetch(getInternalApiUrl('/api/poll-task'), {
                         method: 'POST',
-                        headers: { 'Content-Type': 'application/json', ...internalHeaders },
+                        headers: {
+                          'Content-Type': 'application/json',
+                          ...internalHeaders,
+                          ...getAgentExecutionFenceHeaders(executionFence),
+                        },
                         body: JSON.stringify({ taskId, model: imageModel, providerId: imageProviderId }),
                         signal: requestSignal,
                       })
@@ -1245,9 +1267,12 @@ export async function POST(request: NextRequest) {
                             taskIds: [taskId],
                             userId: user.id,
                             userRole: user.role === 'admin' ? 'admin' : 'user',
-                          }, context?.signal);
+                          }, context?.signal, {
+                            waitForTerminal: false,
+                            executionFence: context?.executionFence,
+                          });
                         }
-                        await pollExistingTask(context?.signal);
+                        await pollExistingTask(context?.signal, context?.executionFence);
                       },
                     })
                   : { execute: pollExistingTask, runId: undefined };

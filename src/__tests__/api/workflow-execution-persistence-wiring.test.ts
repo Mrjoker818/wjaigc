@@ -16,4 +16,16 @@ describe('workflow execution persistence wiring', () => {
     expect(source).toMatch(/execState\.currentNodeId = node\.id;\r?\n    await persistWorkflowExecution\(executionId, execState\);/);
     expect(source).toMatch(/await persistWorkflowExecution\(executionId, execState\);\r?\n        continue;/);
   });
+
+  it('reuses the persisted workflow workspace identity while resolving input assets', () => {
+    expect(source).toContain(
+      'workspaceId: execState.workflowId || execState.projectId || executionId',
+    );
+    expect(source).toContain(
+      'workspaceId: exec.workflowId || String(workflowId || projectId || executionId)',
+    );
+    expect(source).not.toContain(
+      'workspaceId: `workflow:${execState.workflowId || execState.projectId || executionId}`',
+    );
+  });
 });

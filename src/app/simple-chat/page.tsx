@@ -298,7 +298,11 @@ export default function SimpleChatPage() {
   }, [commitProjects]);
 
   const handleUpdateProject = useCallback((project: Project) => {
-    commitProjects(prev => prev.map(p => p.id === project.id ? { ...project, updatedAt: Date.now() } : p));
+    commitProjects(prev => prev.map(p => p.id === project.id ? {
+      ...project,
+      tasks: p.tasks,
+      updatedAt: Date.now(),
+    } : p));
   }, [commitProjects]);
 
   const handleDeleteProject = useCallback((id: string) => {

@@ -38,6 +38,11 @@ describe('durable generation server kickoff', () => {
       userId: 'user-a',
       userRole: 'admin',
       fetchImpl,
+      executionFence: {
+        runId: 'task-1',
+        leaseOwner: 'agent-lease-1',
+        generation: 3,
+      },
     });
 
     expect(mocks.getInternalRequestHeaders).toHaveBeenCalledWith('user-a', 'admin');
@@ -48,6 +53,9 @@ describe('durable generation server kickoff', () => {
       headers: expect.objectContaining({
         'Content-Type': 'application/json',
         'x-internal-request': 'true',
+        'x-wujie-agent-run-id': 'task-1',
+        'x-wujie-agent-lease-owner': 'agent-lease-1',
+        'x-wujie-agent-generation': '3',
       }),
     }));
     expect(fetchImpl).toHaveBeenNthCalledWith(2, 'http://internal/api/poll-task', expect.objectContaining({
@@ -73,6 +81,26 @@ describe('durable generation server kickoff', () => {
     expect(result.attempted).toBe(2);
     expect(result.accepted).toBe(1);
     expect(result.failed).toEqual([{ taskId: 'task-1', error: 'temporary disconnect' }]);
+  });
+
+  it('can return after the recovery route accepts a queued slot without waiting for terminal state', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      success: true,
+      status: 'processing',
+      recoveryPending: true,
+      retryAfterMs: 3_000,
+    }), { status: 200 }));
+
+    const result = await kickoffDurableGenerationTasks({
+      taskIds: ['task-1'],
+      userId: 'user-a',
+      userRole: 'admin',
+      fetchImpl,
+      waitForTerminal: false,
+    });
+
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(result).toEqual({ attempted: 1, accepted: 1, failed: [] });
   });
 
   it('keeps driving a slot after recovery backoff until it reaches a terminal state', async () => {

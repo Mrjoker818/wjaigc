@@ -18,7 +18,16 @@ vi.mock('@/lib/desktop-cloud', () => ({
   tokenFromHeader: mocks.tokenFromHeader,
 }));
 
-import { getInternalRequestHeaders, getRequestUser, requireApiAuthOrReject } from '@/lib/api-auth';
+import {
+  getInternalRequestHeaders,
+  getRequestUser,
+  getTrustedRequestAgentExecutionFence,
+  requireApiAuthOrReject,
+} from '@/lib/api-auth';
+import {
+  parseAgentExecutionFenceHeaders,
+  withAgentExecutionFence,
+} from '@/lib/agent-runtime/execution-fence';
 
 const originalEnvironment = { ...process.env };
 
@@ -103,6 +112,41 @@ describe('internal request authentication', () => {
       source: 'internal',
       user: { id: 'worker-2', role: 'admin' },
     });
+  });
+
+  it('propagates the active Agent execution fence only through authenticated internal headers', async () => {
+    const fence = {
+      runId: 'agent-run-1',
+      leaseOwner: 'lease-owner-1',
+      generation: 2,
+    };
+    const headers = await withAgentExecutionFence(fence, () => (
+      getInternalRequestHeaders('worker-2', 'admin')
+    ));
+
+    expect(headers).toMatchObject({
+      'x-wujie-agent-run-id': fence.runId,
+      'x-wujie-agent-lease-owner': fence.leaseOwner,
+      'x-wujie-agent-generation': '2',
+    });
+    expect(parseAgentExecutionFenceHeaders(new Headers(headers))).toEqual(fence);
+    const internalRequest = new NextRequest('http://localhost/api/poll-task', { headers });
+    await expect(getTrustedRequestAgentExecutionFence(internalRequest)).resolves.toEqual(fence);
+
+    mocks.getSessionUser.mockResolvedValueOnce({ id: 'cookie-user', role: 'admin' });
+    const forgedCookieRequest = new NextRequest('http://localhost/api/poll-task', {
+      headers: {
+        'x-wujie-agent-run-id': fence.runId,
+        'x-wujie-agent-lease-owner': fence.leaseOwner,
+        'x-wujie-agent-generation': '2',
+      },
+    });
+    await expect(getTrustedRequestAgentExecutionFence(forgedCookieRequest)).resolves.toBeUndefined();
+    expect(parseAgentExecutionFenceHeaders(new Headers({
+      'x-wujie-agent-run-id': fence.runId,
+      'x-wujie-agent-lease-owner': fence.leaseOwner,
+      'x-wujie-agent-generation': '-1',
+    }))).toBeUndefined();
   });
 
   it('rejects an anonymous request when the internal auth secret is unavailable', async () => {

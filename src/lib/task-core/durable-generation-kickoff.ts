@@ -3,6 +3,10 @@ import 'server-only';
 import { getInternalRequestHeaders } from '@/lib/api-auth';
 import { getInternalApiUrl } from '@/lib/api-helpers';
 import { runWithAbortSignalTimeout } from '@/lib/abort-signal';
+import {
+  getAgentExecutionFenceHeaders,
+  type AgentExecutionFence,
+} from '@/lib/agent-runtime/execution-fence';
 
 interface DurableGenerationKickoffInput {
   taskIds: readonly string[];
@@ -10,6 +14,9 @@ interface DurableGenerationKickoffInput {
   userRole: 'user' | 'admin';
   fetchImpl?: typeof fetch;
   signal?: AbortSignal;
+  /** Return after poll-task accepts recovery instead of monitoring to terminal. */
+  waitForTerminal?: boolean;
+  executionFence?: AgentExecutionFence;
 }
 
 interface DurableGenerationKickoffFailure {
@@ -72,7 +79,10 @@ export async function kickoffDurableGenerationTasks(
   const taskIds = normalizeTaskIds(input.taskIds);
   if (taskIds.length === 0) return { attempted: 0, accepted: 0, failed: [] };
 
-  const internalHeaders = await getInternalRequestHeaders(input.userId, input.userRole);
+  const internalHeaders = {
+    ...await getInternalRequestHeaders(input.userId, input.userRole),
+    ...getAgentExecutionFenceHeaders(input.executionFence),
+  };
   const fetchImpl = input.fetchImpl ?? fetch;
   const pollUrl = getInternalApiUrl('/api/poll-task');
   const results = await Promise.all(taskIds.map(async (taskId) => {
@@ -106,7 +116,7 @@ export async function kickoffDurableGenerationTasks(
         }
 
         const status = typeof data?.status === 'string' ? data.status.toLowerCase() : '';
-        if (!status || TERMINAL_STATUSES.has(status)) return null;
+        if (input.waitForTerminal === false || !status || TERMINAL_STATUSES.has(status)) return null;
         await sleep(nextPollDelay(data || {}), input.signal);
       }
       throw new Error('Durable task monitoring timed out before reaching a terminal state');

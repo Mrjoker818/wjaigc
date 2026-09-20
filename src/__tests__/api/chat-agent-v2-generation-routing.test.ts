@@ -121,9 +121,9 @@ const standaloneChatProvider = {
   advancedParams: {},
 };
 
-function jsonResponse(body: Record<string, unknown>): Response {
+function jsonResponse(body: Record<string, unknown>, status = 200): Response {
   return new Response(JSON.stringify(body), {
-    status: 200,
+    status,
     headers: { 'Content-Type': 'application/json' },
   });
 }
@@ -406,14 +406,21 @@ describe('chat-originated Agent generation routing', () => {
 
   it('reuses the authoritative poll projection instead of projecting the same task twice', async () => {
     process.env.WUJIE_AGENT_RUNTIME_MODE = 'agent-v2';
+    const executionFence = {
+      runId: 'durable-task-1', leaseOwner: 'agent-lease-1', generation: 0,
+    };
+    const pollHeaders: Headers[] = [];
     const timeoutSpy = vi.spyOn(globalThis, 'setTimeout').mockImplementation(((callback: () => void) => {
       queueMicrotask(callback);
       return 0;
     }) as typeof setTimeout);
     mocks.fetchWithTimeout.mockReset().mockResolvedValueOnce(standaloneToolCallResponse());
     mocks.prepareAdmittedAgentTaskExecution.mockImplementationOnce(async (input: {
-      execute: () => Promise<void>;
-    }) => ({ runId: 'durable-task-1', execute: input.execute }));
+      execute: (context: { executionFence: typeof executionFence }) => Promise<void>;
+    }) => ({
+      runId: 'durable-task-1',
+      execute: () => input.execute({ executionFence }),
+    }));
     vi.stubGlobal('fetch', vi.fn<typeof fetch>(async (input, init) => {
       const url = String(input);
       if (url.endsWith('/api/generate')) {
@@ -424,6 +431,7 @@ describe('chat-originated Agent generation routing', () => {
         return jsonResponse({ success: true, taskIds: ['durable-task-1'] });
       }
       if (url.endsWith('/api/poll-task')) {
+        pollHeaders.push(new Headers(init?.headers));
         return jsonResponse({
           success: true,
           status: 'completed',
@@ -447,6 +455,12 @@ describe('chat-originated Agent generation routing', () => {
     const events = await response.text();
 
     expect(mocks.projectCompletedTaskToAssets).not.toHaveBeenCalled();
+    expect(pollHeaders.length).toBeGreaterThanOrEqual(2);
+    for (const headers of pollHeaders) {
+      expect(headers.get('x-wujie-agent-run-id')).toBe(executionFence.runId);
+      expect(headers.get('x-wujie-agent-lease-owner')).toBe(executionFence.leaseOwner);
+      expect(headers.get('x-wujie-agent-generation')).toBe('0');
+    }
     expect(events).toContain('"assetVersionId":"version-generated"');
     expect(events).toContain('"placementId":"placement-generated"');
     timeoutSpy.mockRestore();
@@ -475,6 +489,23 @@ describe('chat-originated Agent generation routing', () => {
       assetWorkspaceId: 'standalone-chat:standalone-project',
       assetSourceEntityId: 'standalone-message',
     });
+  });
+
+  it('surfaces a rejected standalone generation instead of leaving the UI generating', async () => {
+    process.env.WUJIE_AGENT_RUNTIME_MODE = 'agent-v2';
+    mocks.fetchWithTimeout.mockReset().mockResolvedValueOnce(standaloneToolCallResponse());
+    vi.stubGlobal('fetch', vi.fn<typeof fetch>(async input => {
+      const url = String(input);
+      if (!url.endsWith('/api/generate')) throw new Error(`Unexpected fetch URL: ${url}`);
+      return jsonResponse({ success: false, error: 'Controlled generation rejection' }, 400);
+    }));
+
+    const response = await standaloneChatPost(standaloneRequest());
+    const events = await response.text();
+
+    expect(events).toContain('"tool":"generating_image"');
+    expect(events).toContain('"status":"failed"');
+    expect(events).toContain('Controlled generation rejection');
   });
 
   it.each(['legacy', 'shadow'] as const)(

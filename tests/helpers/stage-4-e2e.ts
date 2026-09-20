@@ -614,13 +614,14 @@ export async function seedStage4RuntimeDependencies(input: {
          ('stage4-chat-provider', 'Stage 4 Chat Provider', 'Stage 4 Chat Provider', $1, 'controlled-key', true,
           'general', 'general', 'chat-completions', $2::text[], '{}'::jsonb, true, $3, $3, 'connected', '[]'::jsonb, 1),
          ('stage4-image-provider', 'Stage 4 Image Provider', 'Stage 4 Image Provider', $1, 'controlled-key', true,
-          'image', 'image', 'images-generations', $4::text[], '{}'::jsonb, true, $3, $3, 'connected', $5::jsonb, 2)
+          'image', 'image', 'images-generations', $4::text[], $6::jsonb, true, $3, $3, 'connected', $5::jsonb, 2)
        ON CONFLICT (id) DO UPDATE SET
          base_url = EXCLUDED.base_url, api_key = EXCLUDED.api_key,
          type = EXCLUDED.type, model_type = EXCLUDED.model_type,
-         selected_models = EXCLUDED.selected_models,
-         discovered_models = EXCLUDED.discovered_models,
-         is_enabled = true, updated_at = EXCLUDED.updated_at`,
+          selected_models = EXCLUDED.selected_models,
+          discovered_models = EXCLUDED.discovered_models,
+          advanced_params = EXCLUDED.advanced_params,
+          is_enabled = true, updated_at = EXCLUDED.updated_at`,
       [
         input.providerBaseUrl,
         ['stage4-chat-model', 'stage4-gemini-vision-model'],
@@ -634,10 +635,23 @@ export async function seedStage4RuntimeDependencies(input: {
           supportedQualities: ['1K'],
           maxImages: 1,
           capabilities: ['image'],
-          supportedOperations: ['image-to-image'],
+          supportedOperations: ['text-to-image', 'image-to-image'],
           maxReferenceImages: 1,
           outputKinds: ['png'],
         }]),
+        JSON.stringify({
+          taskModelCapabilities: JSON.stringify({
+            version: 1,
+            models: {
+              'stage4-image-model': {
+                allowedSizes: ['1024x1024'],
+                supportedOperations: ['text-to-image', 'image-to-image'],
+                supportsReferenceImages: true,
+                maxReferenceImages: 1,
+              },
+            },
+          }),
+        }),
       ],
     );
     await pool.query(

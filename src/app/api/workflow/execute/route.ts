@@ -904,7 +904,7 @@ export async function POST(request: NextRequest) {
         if (retryNode.type === 'input-image') {
           const output = await resolveWorkflowInputImageForActor(auth.userId, retryNode, {
             projectId: exec.projectId || String(projectId || executionId),
-            workspaceId: `workflow:${exec.workflowId || String(workflowId || projectId || executionId)}`,
+            workspaceId: exec.workflowId || String(workflowId || projectId || executionId),
             entityId: retryNode.id,
             requireManagedAsset: Array.isArray(body.nodes)
               && body.nodes.some((node: WorkflowNode) => node.type === 'ai-skill'),
@@ -1405,7 +1405,7 @@ async function executeWorkflow(
       if (node.type === 'input-image') {
         const output = await resolveWorkflowInputImageForActor(execState.userId!, node, {
           projectId: execState.projectId || executionId,
-          workspaceId: `workflow:${execState.workflowId || execState.projectId || executionId}`,
+          workspaceId: execState.workflowId || execState.projectId || executionId,
           entityId: node.id,
           requireManagedAsset: nodes.some(candidate => candidate.type === 'ai-skill'),
         });

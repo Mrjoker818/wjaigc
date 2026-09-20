@@ -31,6 +31,7 @@ let providerServer: Server | undefined;
 let providerBaseUrl = '';
 let evidencePool: Pool | undefined;
 const providerSockets = new Set<Socket>();
+const sourceImageUrls = new Map<string, string>();
 const providerCounts = new Map<string, {
   ordinary: number;
   visionMain: number;
@@ -72,6 +73,16 @@ function counts(profile: string) {
   };
   providerCounts.set(profile, created);
   return created;
+}
+
+function bindControlledSourceImage(
+  fixture: Awaited<ReturnType<typeof stage4FixtureForProject>>,
+  source: { selectedEntityId: string; canonicalUrl: string },
+): void {
+  const canvasProject = fixture.canvasProject as { canvasImages?: Array<{ id?: unknown; url?: unknown }> };
+  const image = canvasProject.canvasImages?.find(candidate => candidate.id === source.selectedEntityId);
+  if (!image) throw new Error(`Controlled Stage 4 source image ${source.selectedEntityId} is missing`);
+  image.url = source.canonicalUrl;
 }
 
 function sse(response: import('node:http').ServerResponse, chunks: Record<string, unknown>[]): void {
@@ -150,8 +161,14 @@ test.beforeAll(async () => {
           sse(response, [{ choices: [{ delta: { content: 'CONTROLLED_CONTINUATION_SHOULD_NOT_EXIST' }, finish_reason: 'stop' }] }]);
           return;
         }
+        const sourceImageUrl = sourceImageUrls.get(profile);
+        if (!sourceImageUrl) {
+          response.writeHead(500, { 'Content-Type': 'application/json' });
+          response.end(JSON.stringify({ error: `missing controlled source image for ${profile}` }));
+          return;
+        }
         sse(response, [
-          { choices: [{ delta: { tool_calls: [{ index: 0, id: 'vision-tool-1', type: 'function', function: { name: 'analyze_image', arguments: JSON.stringify({ image_url: '/logo.png', question: `VISION_FAILURE_E2E E2E_PROFILE:${profile}` }) } }] }, finish_reason: null }] },
+          { choices: [{ delta: { tool_calls: [{ index: 0, id: 'vision-tool-1', type: 'function', function: { name: 'analyze_image', arguments: JSON.stringify({ image_url: sourceImageUrl, question: `VISION_FAILURE_E2E E2E_PROFILE:${profile}` }) } }] }, finish_reason: null }] },
           { choices: [{ delta: {}, finish_reason: 'tool_calls' }] },
         ]);
         return;
@@ -199,13 +216,15 @@ test('executes ordinary chat, vision stop, agent cancel, and refresh recovery', 
   const fixture = await stage4FixtureForProject(testInfo.project.name);
   providerCounts.delete(fixture.browserProfile);
   const auth = await ensureStage4Session(page, fixture);
-  await seedStage4Baseline(page, fixture, auth);
   const asset = await seedStage4RuntimeDependencies({
     auth,
     fixture,
     page,
     providerBaseUrl: `${providerBaseUrl}/v1`,
   });
+  bindControlledSourceImage(fixture, asset);
+  await seedStage4Baseline(page, fixture, auth);
+  sourceImageUrls.set(fixture.browserProfile, asset.canonicalUrl);
 
   await openStage4ChatProject(page, String(fixture.chatProject.id));
   const measuredCeilingFps = await sampleRawFps(page);
@@ -249,6 +268,15 @@ test('executes ordinary chat, vision stop, agent cancel, and refresh recovery', 
     const canvasImage = page.locator(`[data-canvas-image-id="${asset.selectedEntityId}"]`);
     await expect(canvasImage).toBeVisible({ timeout: 20_000 });
     await canvasImage.click({ force: true });
+    if ((page.viewportSize()?.width ?? 1280) < 768) {
+      const mobileActions = page.locator('[data-mobile-image-actions]');
+      await expect(mobileActions).toBeVisible({ timeout: 10_000 });
+      await mobileActions.getByRole('button', { name: '更多', exact: true }).click();
+      await page.getByRole('dialog', { name: '图片工具' })
+        .getByRole('button', { name: 'Agent编排', exact: true }).click();
+      await expect(page.getByText('Agent 编排', { exact: true })).toBeVisible({ timeout: 20_000 });
+      return;
+    }
     const imageToolbar = page.locator('[data-toolbar="image-action-toolbar"]');
     await expect(imageToolbar).toBeVisible({ timeout: 10_000 });
     await imageToolbar.getByTitle('展开更多工具').click();
@@ -397,13 +425,14 @@ test('completes chat to canvas to workflow to chat with durable lineage and refr
       name: `Stage 4 UI chain ${fixture.browserProfile}`,
     },
   };
-  await seedStage4Baseline(page, chainFixture, auth);
-  await seedStage4RuntimeDependencies({
+  const asset = await seedStage4RuntimeDependencies({
     auth,
     fixture: chainFixture,
     page,
     providerBaseUrl: `${providerBaseUrl}/v1`,
   });
+  bindControlledSourceImage(chainFixture, asset);
+  await seedStage4Baseline(page, chainFixture, auth);
   const canvasProjectId = String(fixture.canvasProject.id);
   const chatProjectId = String(fixture.chatProject.id);
 
@@ -420,7 +449,9 @@ test('completes chat to canvas to workflow to chat with durable lineage and refr
   const chatInput = page.getByPlaceholder(/输入消息/);
   await chatInput.fill(`WORKSPACE_CHAIN_E2E E2E_PROFILE:${fixture.browserProfile}`);
   await chatInput.press('Enter');
+  await expect.poll(() => counts(fixture.browserProfile).workspaceVision, { timeout: 20_000 }).toBe(1);
   await expect(page.getByText('图片已生成', { exact: true })).toBeVisible({ timeout: 90_000 });
+  expect(counts(fixture.browserProfile).imageGeneration).toBe(1);
   const addToCanvas = page.getByTitle('添加到画布').last();
   await expect(addToCanvas).toBeAttached();
   await addToCanvas.click({ force: true });
@@ -566,14 +597,23 @@ test('completes chat to canvas to workflow to chat with durable lineage and refr
     assetVersionId: generatedTask.asset_version_id,
     placementId: expect.any(String),
   });
+  const isMobileViewport = (page.viewportSize()?.width ?? 1280) < 768;
   const inputNode = page.locator('[data-node-id]').filter({ hasText: '图片输入' }).last();
   await expect(inputNode).toBeVisible({ timeout: 20_000 });
-  await inputNode.click({ position: { x: 48, y: 20 } });
+  if (isMobileViewport) {
+    await expect(inputNode).toHaveClass(/selected/);
+  } else {
+    await inputNode.click({ position: { x: 48, y: 20 } });
+  }
   const outputNodeType = page.locator('[data-node-type="output-image"]');
   if (await outputNodeType.count() === 0) {
     await page.getByRole('button', { name: '切换节点库面板', exact: true }).click();
   }
-  await outputNodeType.click();
+  if (isMobileViewport) {
+    await outputNodeType.click({ position: { x: 16, y: 20 } });
+  } else {
+    await outputNodeType.click();
+  }
   const outputNode = page.locator('[data-node-id]').filter({ hasText: '图片输出' }).last();
   await expect(outputNode).toBeVisible({ timeout: 20_000 });
 
@@ -589,6 +629,13 @@ test('completes chat to canvas to workflow to chat with durable lineage and refr
   expect(typeof workflowSubmission.executionId).toBe('string');
   const workflowExecutionId = String(workflowSubmission.executionId);
   const sendToChat = outputNode.getByRole('button', { name: '发送到智能对话', exact: true });
+  if (isMobileViewport) {
+    const nodeLibraryToggle = page.getByRole('button', { name: '切换节点库面板', exact: true });
+    if (await nodeLibraryToggle.getAttribute('aria-pressed') === 'true') {
+      await nodeLibraryToggle.click();
+    }
+    await page.getByRole('button', { name: '关闭节点属性', exact: true }).click();
+  }
   await expect(sendToChat).toBeVisible({ timeout: 60_000 });
 
   const returnedTransferResponse = page.waitForResponse(response => {
