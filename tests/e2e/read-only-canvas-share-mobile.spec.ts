@@ -1,6 +1,7 @@
 import { expect, type CDPSession, type Page } from '@playwright/test';
 
 import {
+  configureShareEvidence,
   expectNoForbiddenRequests,
   fixtureToken,
   installReadOnlyShareFixture,
@@ -137,6 +138,7 @@ test.describe('只读画布分享移动端矩阵', () => {
 
   test('320/375/393：单指、双指、双击、底栏、视频和长按均只读', async ({ page, shareEvidence }, testInfo) => {
     test.skip(!portraitProjects.has(testInfo.project.name), '此用例只覆盖 320/375/393 竖屏项目');
+    configureShareEvidence(shareEvidence, 'mobile-portrait', `mobile/${testInfo.project.name}/portrait`);
     await installReadOnlyShareFixture(page, { allowDownload: true });
     await page.goto(`/shared/canvas/${fixtureToken}`);
     await expect(page.getByRole('heading', { name: publicShareFixture(true).title })).toBeVisible();
@@ -273,6 +275,7 @@ test.describe('只读画布分享移动端矩阵', () => {
 
   test('812×375 横屏：工具栏、安全区、无溢出和预览关闭可用', async ({ page, shareEvidence }, testInfo) => {
     test.skip(testInfo.project.name !== 'mobile-chromium', '横屏只在既有 mobile-chromium 项目运行');
+    configureShareEvidence(shareEvidence, 'mobile-landscape', `mobile/${testInfo.project.name}/landscape`);
     await page.setViewportSize({ width: 812, height: 375 });
     await installReadOnlyShareFixture(page, { allowDownload: true });
     await page.goto(`/shared/canvas/${fixtureToken}`);

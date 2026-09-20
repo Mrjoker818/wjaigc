@@ -1,6 +1,7 @@
 import { expect } from '@playwright/test';
 
 import {
+  configureShareEvidence,
   downloadPath,
   expectNoForbiddenRequests,
   fixtureToken,
@@ -21,7 +22,8 @@ test.describe('只读画布分享桌面浏览器矩阵', () => {
     test.skip(!desktopProjects.has(testInfo.project.name), '桌面分享矩阵只在既有 Chromium/Firefox/WebKit 项目运行');
   });
 
-  test('有效分享：fit、zoom、pan、preview 均保持只读', async ({ page, shareEvidence }) => {
+  test('有效分享：fit、zoom、pan、preview 均保持只读', async ({ page, shareEvidence }, testInfo) => {
+    configureShareEvidence(shareEvidence, 'desktop-valid', `desktop/${testInfo.project.name}/valid`);
     await installReadOnlyShareFixture(page);
     await page.goto(`/shared/canvas/${fixtureToken}`);
 
@@ -38,6 +40,7 @@ test.describe('只读画布分享桌面浏览器矩阵', () => {
     const videoProtocol = await page.evaluate(async path => {
       const head = await fetch(path, { method: 'HEAD' });
       const partial = await fetch(path, { headers: { Range: 'bytes=2-5' } });
+      const clamped = await fetch(path, { headers: { Range: 'bytes=1540-999999' } });
       const invalid = await fetch(path, { headers: { Range: 'bytes=999999-1000000' } });
       return {
         head: {
@@ -54,6 +57,13 @@ test.describe('只读画布分享桌面浏览器矩阵', () => {
           ranges: partial.headers.get('accept-ranges'),
           bytes: [...new Uint8Array(await partial.arrayBuffer())],
         },
+        clamped: {
+          status: clamped.status,
+          range: clamped.headers.get('content-range'),
+          length: clamped.headers.get('content-length'),
+          ranges: clamped.headers.get('accept-ranges'),
+          bytes: [...new Uint8Array(await clamped.arrayBuffer())],
+        },
         invalid: {
           status: invalid.status,
           range: invalid.headers.get('content-range'),
@@ -61,8 +71,9 @@ test.describe('只读画布分享桌面浏览器矩阵', () => {
       };
     }, videoPath);
     expect(videoProtocol).toEqual({
-      head: { status: 200, type: 'video/mp4', length: '1542', ranges: 'bytes', bodyLength: 0 },
+      head: { status: 200, type: 'video/mp4', length: '1542', ranges: null, bodyLength: 0 },
       partial: { status: 206, range: 'bytes 2-5/1542', length: '4', ranges: 'bytes', bytes: [0, 32, 102, 116] },
+      clamped: { status: 206, range: 'bytes 1540-1541/1542', length: '2', ranges: 'bytes', bytes: [97, 185] },
       invalid: { status: 416, range: 'bytes */1542' },
     });
 
@@ -99,7 +110,8 @@ test.describe('只读画布分享桌面浏览器矩阵', () => {
     expectNoForbiddenRequests(shareEvidence);
   });
 
-  test('失效分享：统一错误且不触发写入或编辑请求', async ({ page, shareEvidence }) => {
+  test('失效分享：统一错误且不触发写入或编辑请求', async ({ page, shareEvidence }, testInfo) => {
+    configureShareEvidence(shareEvidence, 'desktop-invalid', `desktop/${testInfo.project.name}/invalid`);
     await installReadOnlyShareFixture(page, { invalid: true });
     await page.goto(`/shared/canvas/${fixtureToken}`);
 
@@ -109,7 +121,8 @@ test.describe('只读画布分享桌面浏览器矩阵', () => {
     expectNoForbiddenRequests(shareEvidence);
   });
 
-  test('下载关闭：按钮不存在且受控下载接口拒绝', async ({ page, shareEvidence }) => {
+  test('下载关闭：按钮不存在且受控下载接口拒绝', async ({ page, shareEvidence }, testInfo) => {
+    configureShareEvidence(shareEvidence, 'desktop-download-off', `desktop/${testInfo.project.name}/download-off`);
     await installReadOnlyShareFixture(page);
     await page.goto(`/shared/canvas/${fixtureToken}`);
     await expect(page.getByRole('heading', { name: publicShareFixture().title })).toBeVisible();
@@ -123,7 +136,8 @@ test.describe('只读画布分享桌面浏览器矩阵', () => {
     expectNoForbiddenRequests(shareEvidence);
   });
 
-  test('下载开启：下载按钮只调用分享作用域受控路径', async ({ page, shareEvidence }) => {
+  test('下载开启：下载按钮只调用分享作用域受控路径', async ({ page, shareEvidence }, testInfo) => {
+    configureShareEvidence(shareEvidence, 'desktop-download-on', `desktop/${testInfo.project.name}/download-on`);
     await installReadOnlyShareFixture(page, { allowDownload: true });
     await page.goto(`/shared/canvas/${fixtureToken}`);
     await expect(page.getByRole('heading', { name: publicShareFixture(true).title })).toBeVisible();
