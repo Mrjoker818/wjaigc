@@ -132,3 +132,27 @@ GitHub Actions 工作流: `.github/workflows/ci.yml`
 - [x] 每个菜单模块都有测试结果
 - [x] 修复后的 Bug 都有永久回归测试
 - [x] 所有未验证项目被明确列出
+
+---
+
+## V5.8.8 只读画布分享发布门禁
+
+详细证据与诚实边界见 `docs/testing/read-only-canvas-share-evidence.md`。本功能在以下全部条件完成前保持 `WUJIE_CANVAS_SHARE_ENABLED` 默认关闭：
+
+1. 公开 JSON、日志、错误体和测试 artifact 的私密字段扫描通过。
+2. 使用真实 `POSTGRES_TEST_DATABASE_URL` 完成 schema、快照、owner/public 生命周期和并发竞态测试。
+3. Chromium 桌面及 320/375/393 移动矩阵、no-write 网络门禁通过。
+4. Firefox / WebKit 功能矩阵取得真实证据。
+5. P0、Stage 2、Stage 3、Stage 4 与完整本地测试没有回归。
+6. 云端仅对已推送的 exact main commit 验收，不接受未提交 worktree 或合成 fixture 代替。
+
+本地核心命令：
+
+```bash
+pnpm exec vitest run src/__tests__/lib/canvas-share-security-regression.test.ts tests/integration/canvas-share-concurrency-postgres.test.ts
+pnpm check:protected-baseline
+pnpm test
+pnpm validate
+```
+
+真库命令必须显式设置隔离的 `POSTGRES_TEST_DATABASE_URL`；环境变量缺失时 PostgreSQL 用例的 skip 只表示“未验证”，不表示通过。云端验收顺序固定为：匿名有效链接、默认无下载、显式下载、撤销、过期、旧快照不可变、媒体失效占位、320/375/393。
