@@ -124,4 +124,4 @@ pnpm exec vitest run `
 
 ## 发布判定
 
-GitHub `main` 已接收只读分享与 Stage 2 候选，并具备安全、类型、保护基线、Chromium 合成证据、隔离 PostgreSQL 迁移与全量真库回归、Firefox/WebKit route-fixture 4/4+4/4、Coze exact-tree 构建/服务证据，以及一条真实 token 匿名查看/下载/375px/撤销链路。Stage 2 受控本地矩阵和当前未提交 Stage 4 候选的四浏览器受控矩阵也已通过；Stage 4 最终本地证据为主矩阵 `r41` 9/9 与项目专用 WebKit `r40` 3/3。真实账号 P0、Stage 3、Stage 2/4 云端 exact-candidate、完整八项真实 token 云端矩阵仍未验证。因此发布开关必须保持默认关闭；本文不授权对外发布，也不授权提前进入 WebSocket 阶段。
+GitHub `main` 已接收只读分享、Stage 2 候选与 Stage 4 生命周期修正；Stage 4 实现提交为 `8cc902b831686c7331b49630442f0bf30049ff42`。现有证据包括安全、类型、保护基线、Chromium 合成证据、隔离 PostgreSQL 迁移与全量真库回归、Firefox/WebKit route-fixture 4/4+4/4、Coze exact-tree 构建/服务、一条真实 token 匿名查看/下载/375px/撤销链路，以及 Stage 2/4 受控本地矩阵；Stage 4 最终本地证据为主矩阵 `r41` 9/9 与项目专用 WebKit `r40` 3/3。真实账号 P0、Stage 3、Stage 2/4 云端 exact-candidate、完整八项真实 token 云端矩阵仍未验证。因此发布开关必须保持默认关闭；本文不授权对外发布，也不授权提前进入 WebSocket 阶段。
