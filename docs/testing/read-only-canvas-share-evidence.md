@@ -1,6 +1,6 @@
 # 只读画布分享发布证据
 
-> 状态：本地候选、隔离 PostgreSQL、GitHub main、Coze exact-tree 构建与 Firefox/WebKit route-fixture 矩阵已完成；真实账号与真实 token trace 仍未验证，发布保持关闭。本文不包含 raw token、媒体 URL、storage key、供应商载荷或个人标识。
+> 状态：本地候选、隔离 PostgreSQL、GitHub main、Coze exact-tree 构建、Firefox/WebKit route-fixture 与一条真实 token 匿名链路已完成；真实账号 P0/Stage 2/3/4 及完整八项云端发布矩阵仍未验证，发布保持关闭。本文不包含 raw token、分享 URL、媒体 URL、storage key、供应商载荷或个人标识。
 
 ## 先列阻断与未验证项
 
@@ -10,9 +10,9 @@
 | P0 真实账号流程 | **未验证** | 缺少受控账号、密码和生成模型前置。 |
 | Stage 2 真实资产生命周期 | **未验证** | 缺少受控 fixture、账号和真实数据库前置。 |
 | Firefox / WebKit route-fixture 功能矩阵 | **通过** | Firefox 4/4、Coze Linux WebKit 4/4；覆盖有效只读、失效分享、下载关闭、下载开启与无写请求。该结果不是实际账号或真实 token 证据。 |
-| 云端 / Coze / GitHub main | **构建门禁通过** | `main@67873cdf…` 已推送；Coze exact-tree、127/127、validate、38 项基线、生产构建、服务 200 均通过。真实账号流程仍单列未验证。 |
-| 真实 token 的 trace 脱敏 | **未验证** | Playwright 使用合成 token/ref；只能证明合成 fixture 不泄漏。 |
-| 发布开关 | **关闭** | `WUJIE_CANVAS_SHARE_ENABLED` 仅在精确值 `true` 时开启；当前没有授权启用。 |
+| 云端 / Coze / GitHub main | **构建与当前功能运行门禁通过** | 普通上传元数据修复已推送为 `main@291ea67a…`；Coze 运行 tree 与对应 `origin/main` tree 一致，聚焦回归、validate、生产构建及服务 200 通过。真实账号流程仍单列未验证。 |
+| 真实 token 的 trace 脱敏 | **单链路通过 / 完整矩阵未完成** | 临时真实分享在隔离匿名浏览器中完成查看、媒体 GET、允许下载、375px 窄屏、撤销和旧链接 404；匿名重载与撤销复查均为 0 写请求。默认禁止下载、过期、旧快照不变、失效媒体占位及 320/393 真实 token 仍未验证。 |
+| 发布开关 | **已恢复默认关闭** | `WUJIE_CANVAS_SHARE_ENABLED` 仅在精确值 `true` 时开启；真实链路结束后进程变量已清除，Owner 预检重新返回 503。 |
 
 ## 候选身份与运行模式
 
@@ -22,7 +22,8 @@
 - 本地候选分支：`codex/read-only-canvas-share`；真库门禁修正提交为 `41a52b921d9d45e9f26cfda78c76781a73179387`。
 - 本地 `main` 已从 `953bd6309a571a6af7bfbac330ec6f31663779eb` 纯快进整合至 `41a52b921d9d45e9f26cfda78c76781a73179387`；整合前 6 个用户自有 `.superpowers/sdd` 改动与候选 67 个路径零重叠并得到保留。
 - GitHub `main@67873cdf9506c55886f5325f8d4d7e58102e9716` 已推送，tree 为 `1c781dfdd2d5675a1557e927e542c91c904f4b95`；Coze 合并 HEAD `75024663267aa354656b01bc81d6062933210af7` 的 tree 与 `origin/main` 严格一致。`stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 未变。
-- 运行模式：本地/Coze Next.js、Vitest 与 Playwright route fixture；没有真实账号或真实 token 链路声明。
+- 真实媒体边界修复：`main@291ea67aa7b4605839bf20b1efc00bd96d967929`，tree `dbfe46ddf35a92bcce5a5f107f5378c81ce230e5`。Coze 合并 HEAD `f10b94252d3ebbde856f767afce8c1c588564442` 使用同一 tree，Build ID `ob_hVUtHhxo9d9vKFbHjB`；`stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 未变。
+- 运行模式：本地/Coze Next.js、Vitest、Playwright route fixture，以及现有 active admin 会话创建的一条临时真实 token；匿名端使用隔离 IAB 且请求不携带 Owner 凭据。真实分享已撤销，完整链接和 raw token 未落盘。
 - 迁移版本：`migrations/20260919_read_only_canvas_shares.sql`。
 
 ## 冻结契约
@@ -71,6 +72,8 @@
 | Coze WebKit route-fixture matrix | `E2E_BASE_URL=http://127.0.0.1:5000 pnpm exec playwright test tests/e2e/read-only-canvas-share-cross-browser.spec.ts --project=webkit --reporter=line` | 4/4 passed；H.264 MP4 夹具，四类功能与 request audit 通过。 |
 | Coze exact-main focused | 3-file Vitest | 127/127 passed。 |
 | Coze exact-main release gates | `pnpm validate`、`pnpm check:protected-baseline`、`NODE_OPTIONS=--max-old-space-size=8192 pnpm build` | 全部 passed；38 项基线，Build ID `wGHiJDWBQ42XEPFNwqKrJ`。 |
+| 普通上传元数据修复复核 | 6 个聚焦文件、`pnpm validate`、`pnpm build` | 137/137、validate 退出 0、build 退出 0，121/121 静态页；`HEAD == origin/main@291ea67a…`，工作区 clean。 |
+| 真实 token 匿名链路 | Owner 预检/创建 → 隔离匿名查看与媒体请求 → 允许下载 → 375×812 → 撤销 → 旧链接复查 → 默认关闭复查 | Owner 预检 200、公开快照 200、媒体 200、匿名写请求 0；下载 GET 200、`image/png`、attachment、72 bytes；375px 无横向溢出；撤销后公开 API 404；恢复默认关闭后 Owner 预检 503。 |
 
 Task 7 的不可变证据目录：
 
@@ -111,8 +114,12 @@ pnpm exec vitest run `
 
 ## 云端验收固定顺序
 
-仅对已推送且与运行时迁移一致的 exact main commit 执行：匿名有效链接 → 默认无下载 → 显式下载 → 撤销 → 过期 → 后续项目编辑不改变旧快照 → 媒体失效占位 → 320/375/393。当前全部为 **未验证**。
+仅对已推送且与运行时迁移一致的 exact main commit 执行：匿名有效链接 → 默认无下载 → 显式下载 → 撤销 → 过期 → 后续项目编辑不改变旧快照 → 媒体失效占位 → 320/375/393。
+
+- **真实 token 已验证：** 匿名有效链接、显式允许下载、撤销、375px；同时证明公开快照/媒体均为 GET 且匿名链路 0 写请求。
+- **真实 token 未验证：** 默认无下载、过期、后续项目编辑不改变旧快照、媒体失效占位、320px、393px。上述行为已有 route-fixture 证据，但不能替代真实 token。
+- 临时分享已撤销，运行时恢复默认关闭；后续若补剩余真实 token 项，必须重新按权限变更规则取得动作时确认，不能复用已失效链接或把本次单链路扩大为完整矩阵。
 
 ## 发布判定
 
-GitHub `main` 已接收候选，并具备安全、类型、保护基线、Chromium 合成证据、隔离 PostgreSQL 迁移与全量真库回归、Firefox/WebKit route-fixture 4/4+4/4，以及 Coze exact-tree 构建/服务证据；全量真库为 826 files / 7123 tests，0 failed。真实账号 P0/Stage 2/3/4、真实资产生命周期与真实 token trace 仍未验证。因此发布开关必须保持默认关闭；本文不授权启用或对外发布，也不授权提前进入 WebSocket 阶段。
+GitHub `main` 已接收功能候选，并具备安全、类型、保护基线、Chromium 合成证据、隔离 PostgreSQL 迁移与全量真库回归、Firefox/WebKit route-fixture 4/4+4/4、Coze exact-tree 构建/服务证据，以及一条真实 token 匿名查看/下载/375px/撤销链路；全量真库为 826 files / 7123 tests，0 failed。真实账号 P0/Stage 2/3/4、真实资产生命周期和完整八项真实 token 云端矩阵仍未验证。因此发布开关必须保持默认关闭；本文不授权对外发布，也不授权提前进入 WebSocket 阶段。
