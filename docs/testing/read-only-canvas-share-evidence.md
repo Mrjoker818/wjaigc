@@ -19,9 +19,9 @@
 - 计划基线：`main@953bd6309a571a6af7bfbac330ec6f31663779eb`。
 - Task 7 审查基线：`7848c01a82dab2543ede38c779c7def8a5696401`。
 - Task 8 实现与完整本地门禁提交：`dd4880bc87ac13e723d7cd36d71b9e0a484bfbeb`。
-- 本地分支：`codex/read-only-canvas-share`；不把 feature worktree 记作 main。
-- 本地 `main`：`953bd6309a571a6af7bfbac330ec6f31663779eb`，候选领先 28 个提交。
-- `origin/main`：`9b6077b72f0661b68054c5b4709dc7e25997f9f2`，候选领先 30 个提交。
+- 本地候选分支：`codex/read-only-canvas-share`；真库门禁修正提交为 `41a52b921d9d45e9f26cfda78c76781a73179387`。
+- 本地 `main` 已从 `953bd6309a571a6af7bfbac330ec6f31663779eb` 纯快进整合至 `41a52b921d9d45e9f26cfda78c76781a73179387`；整合前 6 个用户自有 `.superpowers/sdd` 改动与候选 67 个路径零重叠并得到保留。
+- `origin/main` 仍为 `9b6077b72f0661b68054c5b4709dc7e25997f9f2`；本轮未推送。
 - 运行模式：本地 Next.js / Vitest / Playwright 合成 fixture；没有真实云端或真实账号声明。
 - 迁移版本：`migrations/20260919_read_only_canvas_shares.sql`。
 
@@ -111,4 +111,4 @@ pnpm exec vitest run `
 
 ## 发布判定
 
-本地候选已具备安全、类型、保护基线、Chromium 合成证据、隔离 PostgreSQL 迁移与全量真库回归证据；全量为 826 files / 7123 tests，0 failed。真实账号/资产、Firefox/WebKit、真实 token trace 和云端 exact-main 仍未验证，候选也尚未整合进 `main`。因此发布开关必须保持默认关闭；本文不授权启用或对外发布，也不授权提前进入 WebSocket 阶段。
+本地 `main` 已具备安全、类型、保护基线、Chromium 合成证据、隔离 PostgreSQL 迁移与全量真库回归证据；全量为 826 files / 7123 tests，0 failed。真实账号/资产、Firefox/WebKit、真实 token trace 和云端 exact-main 仍未验证，本地 `main` 也尚未推送到 `origin/main`。因此发布开关必须保持默认关闭；本文不授权启用或对外发布，也不授权提前进入 WebSocket 阶段。
