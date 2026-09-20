@@ -1,49 +1,100 @@
-import { mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { spawnSync } from 'node:child_process';
+import { mkdir, mkdtemp, readFile, readdir, rm, symlink, unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { isAbsolute, join, relative } from 'node:path';
+import { join } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
 import {
   finalizeTask7Evidence,
   initializeTask7EvidenceRun,
+  invalidateTask7EvidencePromotionLock,
+  task7EvidenceDescriptors,
   task7EvidenceFilename,
   task7StagingRecordsDirectory,
   writeTask7EvidenceRecord,
   type Task7EvidenceRecord,
+  type Task7ExpectedRequest,
 } from '../helpers/read-only-canvas-share-evidence';
 
 const temporaryRoots: string[] = [];
-const validCommit = 'a'.repeat(40);
 const runId = 'run-001';
 
 afterEach(async () => {
   await Promise.all(temporaryRoots.splice(0).map(path => rm(path, { recursive: true, force: true })));
 });
 
-async function createRoot(): Promise<string> {
-  const root = await mkdtemp(join(tmpdir(), 'task7-evidence-'));
-  temporaryRoots.push(root);
-  return root;
+function git(cwd: string, args: string[]): string {
+  const result = spawnSync('git', args, { cwd, encoding: 'utf8' });
+  if (result.status !== 0) throw new Error(result.stderr || `git ${args.join(' ')} failed`);
+  return result.stdout.trim();
 }
 
-function completeRecord(identity: string, executionNonce: string): Task7EvidenceRecord {
+async function createRepository(): Promise<{ repositoryRoot: string; rootDirectory: string; head: string }> {
+  const repositoryRoot = await mkdtemp(join(tmpdir(), 'task7-evidence-repo-'));
+  temporaryRoots.push(repositoryRoot);
+  git(repositoryRoot, ['init', '-q']);
+  git(repositoryRoot, ['config', 'user.email', 'task7@example.invalid']);
+  git(repositoryRoot, ['config', 'user.name', 'Task 7 Test']);
+  await writeFile(join(repositoryRoot, '.gitignore'), 'output/\n', 'utf8');
+  await writeFile(join(repositoryRoot, 'tracked.txt'), 'clean\n', 'utf8');
+  git(repositoryRoot, ['add', '.gitignore', 'tracked.txt']);
+  git(repositoryRoot, ['commit', '-qm', 'test fixture']);
+  return {
+    repositoryRoot,
+    rootDirectory: join(repositoryRoot, 'output', 'playwright', 'read-only-canvas-share-evidence'),
+    head: git(repositoryRoot, ['rev-parse', 'HEAD']).toLowerCase(),
+  };
+}
+
+function materializeRequest(expected: Task7ExpectedRequest): Task7EvidenceRecord['requests'][number] {
+  const search = expected.search === 'next-build-query'
+    ? '?v=1234567890'
+    : expected.search === 'favicon-hash-query'
+      ? '?603d046c9a6fdfbb'
+      : expected.search;
+  return {
+    method: expected.method,
+    origin: ':same-origin',
+    pathname: expected.pathname,
+    search,
+    resourceType: expected.resourceType,
+    navigation: expected.navigation,
+    pageRole: 'primary',
+    frameRole: 'main',
+    range: expected.range,
+  };
+}
+
+function completeRecord(
+  identity: keyof typeof task7EvidenceDescriptors,
+  executionNonce: string,
+  candidateCommit: string,
+): Task7EvidenceRecord {
+  const descriptor = task7EvidenceDescriptors[identity];
+  const requests = descriptor.requestContract.flatMap(expected => (
+    Array.from({ length: expected.count }, () => materializeRequest(expected))
+  ));
   return {
     schemaVersion: 3,
     runId,
-    candidateCommit: validCommit,
+    candidateCommit,
     executionNonce,
     identity,
-    scenario: 'desktop-invalid',
+    scenario: descriptor.scenario,
     status: 'passed',
     startedAt: '2026-09-20T00:00:00.000Z',
     completedAt: '2026-09-20T00:00:01.000Z',
+    durationMs: 1_000,
     testTitle: ['read-only canvas', identity],
-    project: 'chromium',
-    viewport: { width: 1280, height: 720 },
-    requests: [],
+    project: descriptor.project,
+    viewport: { ...descriptor.viewport },
+    requests,
     frameNavigations: [],
-    apiRequests: [],
+    apiRequests: requests
+      .filter(request => request.pathname.startsWith('/api/public/'))
+      .map(({ method, pathname }) => ({ method, pathname })),
     forbiddenRequestCount: 0,
     forbiddenRequests: [],
     forbiddenFrameNavigationCount: 0,
@@ -51,295 +102,303 @@ function completeRecord(identity: string, executionNonce: string): Task7Evidence
     requestContractValid: true,
     requestContract: { valid: true, errors: [], expected: [], actual: [] },
     consoleErrors: [],
-    details: {},
+    details: descriptor.longPress === 'required'
+      ? {
+          mediaLongPress: {
+            nativeContextMenuSynthesized: false,
+            mediaProbe: {
+              touchStarts: 1,
+              contextMenus: 1,
+              defaultPrevented: true,
+              contextTargetWasMedia: true,
+              suppressClick: true,
+            },
+          },
+        }
+      : {},
   };
 }
 
-async function initialize(rootDirectory: string, expectedIdentities = ['desktop/valid']) {
+async function initialize(repository: Awaited<ReturnType<typeof createRepository>>) {
   return initializeTask7EvidenceRun({
-    rootDirectory,
-    candidateCommit: validCommit,
+    rootDirectory: repository.rootDirectory,
+    repositoryRoot: repository.repositoryRoot,
+    candidateCommit: repository.head,
     runId,
-    expectedIdentities,
   });
 }
 
-async function writeValidRecord(rootDirectory: string, identity: string, nonce: string): Promise<void> {
-  await writeTask7EvidenceRecord({ rootDirectory, record: completeRecord(identity, nonce) });
+async function writeMatrix(
+  repository: Awaited<ReturnType<typeof createRepository>>,
+  executionNonce: string,
+): Promise<void> {
+  for (const identity of Object.keys(task7EvidenceDescriptors) as Array<keyof typeof task7EvidenceDescriptors>) {
+    await writeTask7EvidenceRecord({
+      rootDirectory: repository.rootDirectory,
+      record: completeRecord(identity, executionNonce, repository.head),
+    });
+  }
 }
 
-async function manualRecordPath(rootDirectory: string, identity: string): Promise<string> {
-  return join(task7StagingRecordsDirectory(rootDirectory, validCommit, runId), task7EvidenceFilename(identity));
+function finalizeOptions(repository: Awaited<ReturnType<typeof createRepository>>, executionNonce: string) {
+  return {
+    rootDirectory: repository.rootDirectory,
+    repositoryRoot: repository.repositoryRoot,
+    candidateCommit: repository.head,
+    runId,
+    executionNonce,
+  };
 }
 
-describe('Task 7 evidence path hardening', () => {
-  it.each(['abc12345', 'g'.repeat(40), `${'a'.repeat(39)}/`, 'a'.repeat(41), ` ${'a'.repeat(40)}`])(
-    'rejects non-40-hex candidate commit %j',
-    candidateCommit => {
-      expect(() => task7StagingRecordsDirectory('C:/evidence', candidateCommit, runId)).toThrow(/40.*hex/iu);
+async function overwriteRecord(
+  repository: Awaited<ReturnType<typeof createRepository>>,
+  identity: keyof typeof task7EvidenceDescriptors,
+  record: Task7EvidenceRecord,
+): Promise<void> {
+  const recordPath = join(
+    task7StagingRecordsDirectory(repository.rootDirectory, repository.head, runId),
+    task7EvidenceFilename(identity),
+  );
+  await writeFile(recordPath, `${JSON.stringify(record, null, 2)}\n`, 'utf8');
+}
+
+describe('Task 7 trusted semantic evidence validation', () => {
+  it.each(['.', '..', 'a/b', 'a\\b', 'C:\\absolute', '\\\\server\\share', 'line\nbreak', 'CON', '/absolute'])(
+    'rejects unsafe run id %j',
+    unsafeRunId => {
+      expect(() => task7StagingRecordsDirectory('C:/evidence', 'a'.repeat(40), unsafeRunId)).toThrow(/run id/iu);
     },
   );
 
-  it('normalizes a valid uppercase candidate commit', () => {
-    expect(task7StagingRecordsDirectory('C:/evidence', validCommit.toUpperCase(), runId))
-      .toContain(join('staging', validCommit, runId, 'records'));
+  it.each([
+    ['scenario', (record: Task7EvidenceRecord) => ({ ...record, scenario: 'desktop-invalid' as const })],
+    ['project', (record: Task7EvidenceRecord) => ({ ...record, project: 'forged-project' })],
+    ['viewport', (record: Task7EvidenceRecord) => ({ ...record, viewport: { width: 1, height: 1 } })],
+    ['zero requests', (record: Task7EvidenceRecord) => ({ ...record, requests: [], apiRequests: [] })],
+  ])('rejects a valid identity with forged %s despite passing summaries', async (_label, mutate) => {
+    const repository = await createRepository();
+    const initialized = await initialize(repository);
+    await writeMatrix(repository, initialized.executionNonce);
+    const identity = 'desktop/chromium/valid' as const;
+    await overwriteRecord(repository, identity, mutate(completeRecord(identity, initialized.executionNonce, repository.head)));
+    await expect(finalizeTask7Evidence(finalizeOptions(repository, initialized.executionNonce)))
+      .rejects.toThrow(/semantic|descriptor|request contract/iu);
   });
 
   it.each([
-    '.', '..', 'segment..segment', 'a/b', 'a\\b', 'C:\\absolute', '\\\\server\\share',
-    'line\nbreak', ' CON', 'CON', 'nul.txt', '/absolute',
-  ])('rejects unsafe run id %j', unsafeRunId => {
-    expect(() => task7StagingRecordsDirectory('C:/evidence', validCommit, unsafeRunId)).toThrow(/run id/iu);
-  });
-
-  it('encodes an identity with traversal text into one contained regular filename', async () => {
-    const rootDirectory = await createRoot();
-    const identity = '../../outside';
-    const initialized = await initialize(rootDirectory, [identity]);
-    const { recordPath } = await writeTask7EvidenceRecord({
-      rootDirectory,
-      record: completeRecord(identity, initialized.executionNonce),
-    });
-    const records = await realpath(task7StagingRecordsDirectory(rootDirectory, validCommit, runId));
-    expect(relative(records, recordPath)).not.toMatch(/^\.\./u);
-    expect(task7EvidenceFilename(identity)).not.toMatch(/[\\/]/u);
-  });
-});
-
-describe('Task 7 exclusive evidence lifecycle', () => {
-  it('exclusively initializes a fresh run with a cryptographic nonce', async () => {
-    const rootDirectory = await createRoot();
-    const options = { rootDirectory, candidateCommit: validCommit.toUpperCase(), runId, expectedIdentities: ['desktop/valid'] };
-    const initialized = await initializeTask7EvidenceRun(options);
-    expect(initialized.executionNonce).toMatch(/^[a-f0-9]{64}$/u);
-    await expect(initializeTask7EvidenceRun(options)).rejects.toThrow(/already initialized/iu);
-  });
-
-  it('binds writes and finalization to commit, run id, nonce, and expected identities', async () => {
-    const rootDirectory = await createRoot();
-    const initialized = await initialize(rootDirectory);
-    await expect(writeTask7EvidenceRecord({
-      rootDirectory,
-      record: completeRecord('desktop/valid', 'b'.repeat(64)),
-    })).rejects.toThrow(/nonce/iu);
-    await writeValidRecord(rootDirectory, 'desktop/valid', initialized.executionNonce);
-    await expect(finalizeTask7Evidence({
-      rootDirectory,
-      candidateCommit: validCommit,
-      runId,
-      executionNonce: 'b'.repeat(64),
-      expectedIdentities: ['desktop/valid'],
-    })).rejects.toThrow(/nonce/iu);
-  });
-
-  it('prevents a partial retry from overwriting an existing identity', async () => {
-    const rootDirectory = await createRoot();
-    const initialized = await initialize(rootDirectory);
-    await writeValidRecord(rootDirectory, 'desktop/valid', initialized.executionNonce);
-    await expect(writeValidRecord(rootDirectory, 'desktop/valid', initialized.executionNonce))
-      .rejects.toThrow(/already written/iu);
-  });
-
-  it('promotes only a complete exact passing run with root-relative metadata', async () => {
-    const rootDirectory = await createRoot();
-    const identities = ['desktop/valid', 'mobile/portrait'];
-    const initialized = await initialize(rootDirectory, identities);
-    await writeValidRecord(rootDirectory, identities[0], initialized.executionNonce);
-    await writeValidRecord(rootDirectory, identities[1], initialized.executionNonce);
-    const result = await finalizeTask7Evidence({
-      rootDirectory,
-      candidateCommit: validCommit,
-      runId,
-      executionNonce: initialized.executionNonce,
-      expectedIdentities: identities,
-    });
-    const manifest = JSON.parse(await readFile(result.manifestPath, 'utf8')) as {
-      stagingRecords: string;
-      expectedCount: number;
-      executedCount: number;
-      records: Array<{ identity: string; status: string }>;
-    };
-    expect(manifest).toMatchObject({ expectedCount: 2, executedCount: 2 });
-    expect(manifest.records).toEqual([
-      { identity: 'desktop/valid', status: 'passed' },
-      { identity: 'mobile/portrait', status: 'passed' },
-    ]);
-    expect(isAbsolute(manifest.stagingRecords)).toBe(false);
-    expect(manifest.stagingRecords).toBe(`staging/${validCommit}/${runId}/records`);
-  });
-
-  it('serializes concurrent promotion and rejects a later double promotion', async () => {
-    const rootDirectory = await createRoot();
-    const initialized = await initialize(rootDirectory);
-    await writeValidRecord(rootDirectory, 'desktop/valid', initialized.executionNonce);
-    const options = {
-      rootDirectory,
-      candidateCommit: validCommit,
-      runId,
-      executionNonce: initialized.executionNonce,
-      expectedIdentities: ['desktop/valid'],
-    };
-    const results = await Promise.allSettled([finalizeTask7Evidence(options), finalizeTask7Evidence(options)]);
-    expect(results.filter(result => result.status === 'fulfilled')).toHaveLength(1);
-    expect(results.filter(result => result.status === 'rejected')).toHaveLength(1);
-    await expect(finalizeTask7Evidence(options)).rejects.toThrow(/already exists/iu);
-    expect(await readdir(join(rootDirectory, 'promoted', validCommit))).toEqual([runId]);
-  });
-
-  it('never removes a promotion lock owned by another finalizer', async () => {
-    const rootDirectory = await createRoot();
-    const initialized = await initialize(rootDirectory);
-    await writeValidRecord(rootDirectory, 'desktop/valid', initialized.executionNonce);
-    const promotedParent = join(rootDirectory, 'promoted', validCommit);
-    await mkdir(promotedParent, { recursive: true });
-    const lockPath = join(promotedParent, `${runId}.lock`);
-    await writeFile(lockPath, 'other-finalizer\n', 'utf8');
-
-    await expect(finalizeTask7Evidence({
-      rootDirectory,
-      candidateCommit: validCommit,
-      runId,
-      executionNonce: initialized.executionNonce,
-      expectedIdentities: ['desktop/valid'],
-    })).rejects.toThrow(/already in progress/iu);
-    expect(await readFile(lockPath, 'utf8')).toBe('other-finalizer\n');
-  });
-});
-
-describe('Task 7 complete runtime record validation', () => {
-  it.each([
-    ['null scenario', { scenario: null }],
-    ['numeric project', { project: 7 }],
-    ['string requestContractValid', { requestContractValid: 'true' }],
-    ['malformed nested request', { requests: [{ method: 7 }] }],
-    ['malformed nested contract', { requestContract: { valid: true, errors: [], expected: [{ label: 7, count: 1 }], actual: [] } }],
-    ['forbidden count mismatch', { forbiddenRequestCount: 1 }],
+    ['invalid timestamp', { startedAt: 'not-a-date' }],
+    ['reverse timestamps', { startedAt: '2026-09-20T00:00:02.000Z', completedAt: '2026-09-20T00:00:01.000Z' }],
+    ['insane duration', { durationMs: 99_999_999 }],
   ])('rejects %s', async (_label, override) => {
-    const rootDirectory = await createRoot();
-    const initialized = await initialize(rootDirectory);
-    const recordPath = await manualRecordPath(rootDirectory, 'desktop/valid');
-    await writeFile(recordPath, JSON.stringify({
-      ...completeRecord('desktop/valid', initialized.executionNonce),
-      ...override,
-    }), 'utf8');
-    await expect(finalizeTask7Evidence({
-      rootDirectory,
-      candidateCommit: validCommit,
-      runId,
-      executionNonce: initialized.executionNonce,
-      expectedIdentities: ['desktop/valid'],
-    })).rejects.toThrow(/invalid evidence record schema/iu);
+    const repository = await createRepository();
+    const initialized = await initialize(repository);
+    await writeMatrix(repository, initialized.executionNonce);
+    const identity = 'desktop/chromium/valid' as const;
+    await overwriteRecord(repository, identity, { ...completeRecord(identity, initialized.executionNonce, repository.head), ...override });
+    await expect(finalizeTask7Evidence(finalizeOptions(repository, initialized.executionNonce))).rejects.toThrow();
   });
 
   it.each([
-    ['failed', { status: 'failed' }],
-    ['stale run', { runId: 'stale-run' }],
-    ['stale commit', { candidateCommit: 'b'.repeat(40) }],
-    ['stale nonce', { executionNonce: 'b'.repeat(64) }],
-    ['invalid contract', { requestContractValid: false, requestContract: { valid: false, errors: ['bad'], expected: [], actual: [] } }],
-  ])('refuses a fully formed but non-promotable %s record', async (_label, override) => {
-    const rootDirectory = await createRoot();
-    const initialized = await initialize(rootDirectory);
-    await writeFile(await manualRecordPath(rootDirectory, 'desktop/valid'), JSON.stringify({
-      ...completeRecord('desktop/valid', initialized.executionNonce),
-      ...override,
-    }), 'utf8');
-    await expect(finalizeTask7Evidence({
-      rootDirectory,
-      candidateCommit: validCommit,
-      runId,
-      executionNonce: initialized.executionNonce,
-      expectedIdentities: ['desktop/valid'],
-    })).rejects.toThrow();
+    ['portrait missing probe', 'mobile/mobile-320-chromium/portrait', {}],
+    ['portrait target mismatch', 'mobile/mobile-375-chromium/portrait', {
+      mediaLongPress: {
+        nativeContextMenuSynthesized: false,
+        mediaProbe: { touchStarts: 1, contextMenus: 1, defaultPrevented: true, contextTargetWasMedia: false, suppressClick: true },
+      },
+    }],
+    ['desktop unexpected probe', 'desktop/chromium/valid', {
+      mediaLongPress: {
+        nativeContextMenuSynthesized: false,
+        mediaProbe: { touchStarts: 1, contextMenus: 1, defaultPrevented: true, contextTargetWasMedia: true, suppressClick: true },
+      },
+    }],
+  ])('rejects %s', async (_label, identityValue, details) => {
+    const repository = await createRepository();
+    const initialized = await initialize(repository);
+    await writeMatrix(repository, initialized.executionNonce);
+    const identity = identityValue as keyof typeof task7EvidenceDescriptors;
+    await overwriteRecord(repository, identity, { ...completeRecord(identity, initialized.executionNonce, repository.head), details });
+    await expect(finalizeTask7Evidence(finalizeOptions(repository, initialized.executionNonce)))
+      .rejects.toThrow(/long.?press|media probe/iu);
   });
+
+  it('rejects an arbitrary 40-hex commit and dirty tracked/index state while permitting ignored artifacts', async () => {
+    const repository = await createRepository();
+    await expect(initializeTask7EvidenceRun({
+      rootDirectory: repository.rootDirectory,
+      repositoryRoot: repository.repositoryRoot,
+      candidateCommit: 'a'.repeat(40),
+      runId,
+    })).rejects.toThrow(/HEAD|candidate commit/iu);
+
+    await writeFile(join(repository.repositoryRoot, 'tracked.txt'), 'dirty\n', 'utf8');
+    await expect(initialize(repository)).rejects.toThrow(/dirty/iu);
+    await writeFile(join(repository.repositoryRoot, 'tracked.txt'), 'clean\n', 'utf8');
+    await mkdir(repository.rootDirectory, { recursive: true });
+    await writeFile(join(repository.rootDirectory, 'ignored.txt'), 'allowed\n', 'utf8');
+    await expect(initialize(repository)).resolves.toMatchObject({ executionNonce: expect.stringMatching(/^[a-f0-9]{64}$/u) });
+  });
+
+  it('rejects unexpected entries, malformed nested records, duplicate identities, and record symlinks', async () => {
+    const extraRepository = await createRepository();
+    const extraRun = await initialize(extraRepository);
+    await writeMatrix(extraRepository, extraRun.executionNonce);
+    await writeFile(join(
+      task7StagingRecordsDirectory(extraRepository.rootDirectory, extraRepository.head, runId),
+      'unexpected.txt',
+    ), 'unexpected\n', 'utf8');
+    await expect(finalizeTask7Evidence(finalizeOptions(extraRepository, extraRun.executionNonce)))
+      .rejects.toThrow(/unexpected directory entry/iu);
+
+    const malformedRepository = await createRepository();
+    const malformedRun = await initialize(malformedRepository);
+    await writeMatrix(malformedRepository, malformedRun.executionNonce);
+    const malformedIdentity = 'desktop/chromium/valid' as const;
+    await overwriteRecord(malformedRepository, malformedIdentity, {
+      ...completeRecord(malformedIdentity, malformedRun.executionNonce, malformedRepository.head),
+      requests: [{ method: 7 }],
+    } as unknown as Task7EvidenceRecord);
+    await expect(finalizeTask7Evidence(finalizeOptions(malformedRepository, malformedRun.executionNonce)))
+      .rejects.toThrow(/invalid evidence record schema/iu);
+
+    const duplicateRepository = await createRepository();
+    const duplicateRun = await initialize(duplicateRepository);
+    await writeMatrix(duplicateRepository, duplicateRun.executionNonce);
+    const sourceIdentity = 'desktop/chromium/invalid' as const;
+    const targetIdentity = 'desktop/chromium/valid' as const;
+    await overwriteRecord(
+      duplicateRepository,
+      targetIdentity,
+      completeRecord(sourceIdentity, duplicateRun.executionNonce, duplicateRepository.head),
+    );
+    await expect(finalizeTask7Evidence(finalizeOptions(duplicateRepository, duplicateRun.executionNonce)))
+      .rejects.toThrow(/duplicate evidence identity/iu);
+
+    const symlinkRepository = await createRepository();
+    const symlinkRun = await initialize(symlinkRepository);
+    await writeMatrix(symlinkRepository, symlinkRun.executionNonce);
+    const symlinkIdentity = 'desktop/chromium/valid' as const;
+    const recordPath = join(
+      task7StagingRecordsDirectory(symlinkRepository.rootDirectory, symlinkRepository.head, runId),
+      task7EvidenceFilename(symlinkIdentity),
+    );
+    const external = join(symlinkRepository.rootDirectory, 'external.json');
+    await writeFile(external, await readFile(recordPath));
+    await unlink(recordPath);
+    await symlink(external, recordPath, 'file');
+    await expect(finalizeTask7Evidence(finalizeOptions(symlinkRepository, symlinkRun.executionNonce)))
+      .rejects.toThrow(/regular file|link|reparse/iu);
+  }, 20_000);
 });
 
-describe('Task 7 staging directory audit', () => {
-  it('rejects missing and unexpected records', async () => {
-    const missingRoot = await createRoot();
-    const missing = await initialize(missingRoot, ['desktop/valid', 'mobile/portrait']);
-    await writeValidRecord(missingRoot, 'desktop/valid', missing.executionNonce);
+describe('Task 7 immutable promotion', () => {
+  it('publishes once-read bytes with SHA-256 digests and semantic summaries', async () => {
+    const repository = await createRepository();
+    const initialized = await initialize(repository);
+    await writeMatrix(repository, initialized.executionNonce);
+    const originalPath = join(
+      task7StagingRecordsDirectory(repository.rootDirectory, repository.head, runId),
+      task7EvidenceFilename('desktop/chromium/valid'),
+    );
+    const originalBytes = await readFile(originalPath);
+    const result = await finalizeTask7Evidence({
+      ...finalizeOptions(repository, initialized.executionNonce),
+      hooks: {
+        afterSourceValidation: async () => {
+          await writeFile(originalPath, '{"replaced":true}\n', 'utf8');
+        },
+      },
+    });
+    const promotedBytes = await readFile(join(result.finalDirectory, 'records', task7EvidenceFilename('desktop/chromium/valid')));
+    expect(promotedBytes.equals(originalBytes)).toBe(true);
+    const manifest = JSON.parse(await readFile(result.manifestPath, 'utf8')) as {
+      records: Array<{ identity: string; sha256: string; semantic: unknown }>;
+    };
+    const promoted = manifest.records.find(record => record.identity === 'desktop/chromium/valid');
+    expect(promoted).toEqual(expect.objectContaining({
+      sha256: createHash('sha256').update(originalBytes).digest('hex'),
+      semantic: expect.objectContaining({ scenario: 'desktop-valid', project: 'chromium', requestCount: 17 }),
+    }));
+    expect(JSON.stringify(manifest)).not.toContain(repository.repositoryRoot);
+  });
+
+  it('does not remove a foreign replacement lock and aborts promotion', async () => {
+    const repository = await createRepository();
+    const initialized = await initialize(repository);
+    await writeMatrix(repository, initialized.executionNonce);
+    let lockPath = '';
     await expect(finalizeTask7Evidence({
-      rootDirectory: missingRoot,
-      candidateCommit: validCommit,
+      ...finalizeOptions(repository, initialized.executionNonce),
+      hooks: {
+        afterLockAcquired: async lock => {
+          lockPath = lock.lockPath;
+          await unlink(lock.lockPath);
+          await writeFile(lock.lockPath, '{"ownerId":"foreign"}\n', 'utf8');
+        },
+      },
+    })).rejects.toThrow(/lock ownership/iu);
+    expect(await readFile(lockPath, 'utf8')).toContain('foreign');
+  });
+
+  it('refuses destination creation during promotion without exposing its own partial directory', async () => {
+    const repository = await createRepository();
+    const initialized = await initialize(repository);
+    await writeMatrix(repository, initialized.executionNonce);
+    await expect(finalizeTask7Evidence({
+      ...finalizeOptions(repository, initialized.executionNonce),
+      hooks: {
+        beforePromotionRename: async ({ finalDirectory }) => {
+          await mkdir(finalDirectory);
+          await writeFile(join(finalDirectory, 'foreign.txt'), 'foreign\n', 'utf8');
+        },
+      },
+    })).rejects.toThrow(/exist|destination|rename/iu);
+    const finalDirectory = join(repository.rootDirectory, 'promoted', repository.head, runId);
+    expect(await readdir(finalDirectory)).toEqual(['foreign.txt']);
+  });
+
+  it('allows exactly one concurrent promotion winner', async () => {
+    const repository = await createRepository();
+    const initialized = await initialize(repository);
+    await writeMatrix(repository, initialized.executionNonce);
+    const options = finalizeOptions(repository, initialized.executionNonce);
+    const outcomes = await Promise.allSettled([finalizeTask7Evidence(options), finalizeTask7Evidence(options)]);
+    expect(outcomes.filter(outcome => outcome.status === 'fulfilled')).toHaveLength(1);
+    expect(outcomes.filter(outcome => outcome.status === 'rejected')).toHaveLength(1);
+  });
+
+  it('never auto-deletes an unknown abandoned lock and only quarantines an exact owner match', async () => {
+    const repository = await createRepository();
+    const initialized = await initialize(repository);
+    await writeMatrix(repository, initialized.executionNonce);
+    let acquired: { lockPath: string; ownerId: string } | undefined;
+    await expect(finalizeTask7Evidence({
+      ...finalizeOptions(repository, initialized.executionNonce),
+      hooks: {
+        afterLockAcquired: async lock => {
+          acquired = { lockPath: lock.lockPath, ownerId: lock.ownerId };
+          const bytes = await readFile(lock.lockPath);
+          await unlink(lock.lockPath);
+          await writeFile(lock.lockPath, bytes);
+          throw new Error('simulate crash after lock acquisition');
+        },
+      },
+    })).rejects.toThrow(/simulate crash/iu);
+    expect(acquired).toBeDefined();
+    await expect(invalidateTask7EvidencePromotionLock({
+      rootDirectory: repository.rootDirectory,
+      candidateCommit: repository.head,
       runId,
-      executionNonce: missing.executionNonce,
-      expectedIdentities: ['desktop/valid', 'mobile/portrait'],
-    })).rejects.toThrow(/missing.*mobile\/portrait/iu);
-
-    const extraRoot = await createRoot();
-    const extra = await initialize(extraRoot);
-    await writeValidRecord(extraRoot, 'desktop/valid', extra.executionNonce);
-    await writeFile(join(task7StagingRecordsDirectory(extraRoot, validCommit, runId), 'stale.txt'), 'stale', 'utf8');
-    await expect(finalizeTask7Evidence({
-      rootDirectory: extraRoot,
-      candidateCommit: validCommit,
+      expectedOwnerId: 'wrong-owner',
+    })).rejects.toThrow(/owner/iu);
+    expect(await readFile(acquired!.lockPath, 'utf8')).toContain(acquired!.ownerId);
+    const recovery = await invalidateTask7EvidencePromotionLock({
+      rootDirectory: repository.rootDirectory,
+      candidateCommit: repository.head,
       runId,
-      executionNonce: extra.executionNonce,
-      expectedIdentities: ['desktop/valid'],
-    })).rejects.toThrow(/unexpected directory entry.*stale\.txt/iu);
-  });
-
-  it('rejects a wrong filename, malformed JSON, and duplicate identity', async () => {
-    const wrongRoot = await createRoot();
-    const wrong = await initialize(wrongRoot);
-    await writeFile(join(task7StagingRecordsDirectory(wrongRoot, validCommit, runId), 'wrong-name.json'), '{}', 'utf8');
-    await expect(finalizeTask7Evidence({
-      rootDirectory: wrongRoot, candidateCommit: validCommit, runId,
-      executionNonce: wrong.executionNonce, expectedIdentities: ['desktop/valid'],
-    })).rejects.toThrow(/unexpected directory entry.*wrong-name/iu);
-
-    const malformedRoot = await createRoot();
-    const malformed = await initialize(malformedRoot);
-    await writeFile(await manualRecordPath(malformedRoot, 'desktop/valid'), '{', 'utf8');
-    await expect(finalizeTask7Evidence({
-      rootDirectory: malformedRoot, candidateCommit: validCommit, runId,
-      executionNonce: malformed.executionNonce, expectedIdentities: ['desktop/valid'],
-    })).rejects.toThrow(/malformed JSON/iu);
-
-    const duplicateRoot = await createRoot();
-    const duplicate = await initialize(duplicateRoot, ['desktop/valid', 'mobile/portrait']);
-    const duplicateRecord = completeRecord('desktop/valid', duplicate.executionNonce);
-    await writeFile(await manualRecordPath(duplicateRoot, 'desktop/valid'), JSON.stringify(duplicateRecord), 'utf8');
-    await writeFile(await manualRecordPath(duplicateRoot, 'mobile/portrait'), JSON.stringify(duplicateRecord), 'utf8');
-    await expect(finalizeTask7Evidence({
-      rootDirectory: duplicateRoot, candidateCommit: validCommit, runId,
-      executionNonce: duplicate.executionNonce, expectedIdentities: ['desktop/valid', 'mobile/portrait'],
-    })).rejects.toThrow(/duplicate evidence identity/iu);
-  });
-
-  it('rejects symlinks and directories where regular records are required', async () => {
-    const symlinkRoot = await createRoot();
-    const linked = await initialize(symlinkRoot);
-    const externalRecord = join(symlinkRoot, 'external.json');
-    await writeFile(externalRecord, JSON.stringify(completeRecord('desktop/valid', linked.executionNonce)), 'utf8');
-    await symlink(externalRecord, await manualRecordPath(symlinkRoot, 'desktop/valid'), 'file');
-    await expect(finalizeTask7Evidence({
-      rootDirectory: symlinkRoot, candidateCommit: validCommit, runId,
-      executionNonce: linked.executionNonce, expectedIdentities: ['desktop/valid'],
-    })).rejects.toThrow(/symbolic link|reparse/iu);
-
-    const directoryRoot = await createRoot();
-    const directory = await initialize(directoryRoot);
-    await mkdir(await manualRecordPath(directoryRoot, 'desktop/valid'));
-    await expect(finalizeTask7Evidence({
-      rootDirectory: directoryRoot, candidateCommit: validCommit, runId,
-      executionNonce: directory.executionNonce, expectedIdentities: ['desktop/valid'],
-    })).rejects.toThrow(/regular file/iu);
-  });
-
-  it('leaves no final-looking temp or lock entry after promotion validation failure', async () => {
-    const rootDirectory = await createRoot();
-    const initialized = await initialize(rootDirectory);
-    await writeFile(await manualRecordPath(rootDirectory, 'desktop/valid'), JSON.stringify({
-      ...completeRecord('desktop/valid', initialized.executionNonce),
-      status: 'failed',
-    }), 'utf8');
-    await expect(finalizeTask7Evidence({
-      rootDirectory, candidateCommit: validCommit, runId,
-      executionNonce: initialized.executionNonce, expectedIdentities: ['desktop/valid'],
-    })).rejects.toThrow(/status.*failed/iu);
-    const promoted = join(rootDirectory, 'promoted', validCommit);
-    expect(await readdir(promoted).catch(() => [])).toEqual([]);
+      expectedOwnerId: acquired!.ownerId,
+    });
+    expect(recovery.quarantinedLockPath).toContain(join('invalidated', 'locks'));
+    await expect(readFile(acquired!.lockPath)).rejects.toMatchObject({ code: 'ENOENT' });
   });
 });

@@ -1,38 +1,31 @@
 import { resolve } from 'node:path';
 
 import {
+  discoverGitRepositoryRoot,
   finalizeTask7Evidence,
-  task7ChromiumMatrixIdentities,
 } from '../tests/helpers/read-only-canvas-share-evidence';
-
-function argument(argv: string[], name: string): string {
-  const index = argv.indexOf(name);
-  const value = index >= 0 ? argv[index + 1] : undefined;
-  if (!value || value.startsWith('--')) throw new Error(`Missing required argument: ${name}`);
-  return value;
-}
+import { parseStrictCliOptions } from './read-only-canvas-share-evidence-cli';
 
 export async function main(argv = process.argv.slice(2)): Promise<void> {
-  const runId = argument(argv, '--run-id');
-  const candidateCommit = argument(argv, '--commit');
-  const executionNonce = argument(argv, '--nonce');
-  const rootArgument = argv.includes('--root') ? argument(argv, '--root') : undefined;
-  const rootDirectory = resolve(
-    rootArgument ?? resolve(process.cwd(), 'output', 'playwright', 'read-only-canvas-share-evidence'),
-  );
+  const options = parseStrictCliOptions(argv, ['--run-id', '--commit', '--nonce'] as const);
+  const runId = options['--run-id'];
+  const candidateCommit = options['--commit'];
+  const executionNonce = options['--nonce'];
+  const repositoryRoot = await discoverGitRepositoryRoot(process.cwd());
+  const rootDirectory = resolve(repositoryRoot, 'output', 'playwright', 'read-only-canvas-share-evidence');
   const result = await finalizeTask7Evidence({
     rootDirectory,
+    repositoryRoot,
     runId,
     candidateCommit,
     executionNonce,
-    expectedIdentities: [...task7ChromiumMatrixIdentities],
   });
 
   process.stdout.write(`${JSON.stringify({
     status: 'passed',
     runId,
     candidateCommit: candidateCommit.toLowerCase(),
-    expectedCount: task7ChromiumMatrixIdentities.length,
+    expectedCount: 8,
     finalDirectory: result.finalDirectory,
     manifestPath: result.manifestPath,
   }, null, 2)}\n`);
