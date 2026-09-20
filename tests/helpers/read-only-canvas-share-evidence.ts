@@ -176,6 +176,7 @@ const completionMarkerSchema = z.object({
   candidateCommit: z.string().regex(commitPattern),
   executionNonce: z.string().regex(noncePattern),
   ownerId: z.string().uuid(),
+  ownerSha256: z.string().regex(digestPattern),
   manifestSha256: z.string().regex(digestPattern),
   completedAt: z.iso.datetime(),
 }).strict();
@@ -645,6 +646,7 @@ export async function finalizeTask7Evidence(options: FinalizeTask7EvidenceOption
     candidateCommit,
     executionNonce,
     ownerId,
+    ownerSha256: sha256(ownerBytes),
     manifestSha256: sha256(manifestBytes),
     completedAt: new Date().toISOString(),
   });
@@ -687,6 +689,7 @@ export async function verifyCompletedTask7EvidenceRun(options: Omit<FinalizeTask
   if (!completion.success) throw new Error(`invalid publication completion marker: ${z.prettifyError(completion.error)}`);
   assertBinding(completion.data, binding, 'publication completion marker');
   if (completion.data.ownerId !== owner.data.ownerId) throw new Error('publication completion owner mismatch');
+  if (completion.data.ownerSha256 !== sha256(ownerSnapshot.bytes)) throw new Error('publication owner digest mismatch');
   if (completion.data.manifestSha256 !== sha256(manifestSnapshot.bytes)) throw new Error('publication manifest digest mismatch');
 
   const recordsDirectory = join(finalDirectory, 'records');

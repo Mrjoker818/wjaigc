@@ -238,7 +238,11 @@ describe('Task 7 append-only completion-marker publication', () => {
     expect(await readdir(result.finalDirectory)).toEqual(['complete.json', 'manifest.json', 'owner.json', 'records']);
     const promotedBytes = await readFile(join(result.finalDirectory, 'records', task7EvidenceFilename('desktop/chromium/valid')));
     expect(promotedBytes.equals(sourceBytes)).toBe(true);
-    const marker = JSON.parse(await readFile(result.completionMarkerPath, 'utf8')) as { manifestSha256: string };
+    const marker = JSON.parse(await readFile(result.completionMarkerPath, 'utf8')) as {
+      manifestSha256: string;
+      ownerSha256: string;
+    };
+    expect(marker.ownerSha256).toBe(createHash('sha256').update(await readFile(join(result.finalDirectory, 'owner.json'))).digest('hex'));
     expect(marker.manifestSha256).toBe(createHash('sha256').update(await readFile(result.manifestPath)).digest('hex'));
     const verified = await verifyCompletedTask7EvidenceRun(options(repository, initialized.executionNonce));
     expect(verified.completionMarkerPath).toBe(result.completionMarkerPath);
@@ -246,6 +250,20 @@ describe('Task 7 append-only completion-marker publication', () => {
       nativeContextMenuSynthesis: { observedTrue: number; observedFalse: number; portraitTotal: number };
     };
     expect(manifest.nativeContextMenuSynthesis).toEqual({ observedTrue: 0, observedFalse: 3, portraitTotal: 3 });
+  });
+
+  it('rejects a completed run when the owner marker bytes change without changing its binding', async () => {
+    const repository = await createRepository();
+    const initialized = await initializedMatrix(repository);
+    const result = await finalizeTask7Evidence(options(repository, initialized.executionNonce));
+    const owner = JSON.parse(await readFile(join(result.finalDirectory, 'owner.json'), 'utf8')) as {
+      claimedAt: string;
+    };
+    owner.claimedAt = new Date(Date.parse(owner.claimedAt) + 1_000).toISOString();
+    await writeFile(join(result.finalDirectory, 'owner.json'), `${JSON.stringify(owner)}\n`, 'utf8');
+
+    await expect(verifyCompletedTask7EvidenceRun(options(repository, initialized.executionNonce)))
+      .rejects.toThrow(/owner.*digest|digest.*owner/iu);
   });
 
   it('leaves an immutable incomplete run when owner or tree is replaced before completion', async () => {
