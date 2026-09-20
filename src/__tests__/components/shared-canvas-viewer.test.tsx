@@ -595,6 +595,7 @@ describe('shared canvas viewer', () => {
     const close = screen.getByRole('button', { name: '关闭预览' });
     const download = screen.getByRole('link', { name: '下载预览内容' });
 
+    expect(download.getAttribute('download')).toBe('');
     expect(screen.queryByRole('button', { name: '关闭媒体预览背景' })).toBeNull();
     close.focus();
     fireEvent.keyDown(close, { key: 'Tab' });
@@ -706,5 +707,6 @@ describe('shared canvas viewer', () => {
     expect(download.getAttribute('href')).toBe(
       `/api/public/canvas-shares/${routeToken}/media/${itemRef}/download`,
     );
+    expect(download.getAttribute('download')).toBe('');
   });
 });

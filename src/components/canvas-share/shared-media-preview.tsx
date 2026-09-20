@@ -98,6 +98,7 @@ export function SharedMediaPreview({
             {downloadPath ? (
               <a
                 href={downloadPath}
+                download
                 data-shared-preview-interactive
                 className="inline-flex h-11 min-h-11 min-w-11 cursor-pointer items-center justify-center rounded-lg text-foreground outline-none transition-colors hover:bg-toolbar-hover focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none"
                 aria-label="下载预览内容"

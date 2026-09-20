@@ -69,11 +69,12 @@ test.describe('只读画布分享跨浏览器功能矩阵', () => {
     test.skip(!crossBrowserProjects.has(testInfo.project.name), '跨浏览器规格只在 Firefox/WebKit 项目运行');
   });
 
-  test('有效分享保持只读，并支持 fit、zoom、pan、preview', async ({ page, shareRequestAudit }) => {
-    await installReadOnlyShareFixture(page, { videoFormat: 'webm' });
+  test('有效分享保持只读，并支持 fit、zoom、pan、preview', async ({ browserName, page, shareRequestAudit }) => {
+    const videoFormat = browserName === 'webkit' ? 'mp4' : 'webm';
+    await installReadOnlyShareFixture(page, { videoFormat });
     await page.goto(`/shared/canvas/${fixtureToken}`);
 
-    const fixture = publicShareFixture(false, 'webm');
+    const fixture = publicShareFixture(false, videoFormat);
     await expect(page.getByRole('heading', { name: fixture.title })).toBeVisible();
     await expect(page.getByText(fixture.revisionLabel, { exact: false })).toBeVisible();
     await expect(page.getByRole('navigation', { name: '只读画布工具栏' })).toBeVisible();
@@ -116,8 +117,11 @@ test.describe('只读画布分享跨浏览器功能矩阵', () => {
     ]));
   });
 
-  test('失效分享显示统一错误且不触发写入请求', async ({ page }) => {
-    await installReadOnlyShareFixture(page, { invalid: true, videoFormat: 'webm' });
+  test('失效分享显示统一错误且不触发写入请求', async ({ browserName, page }) => {
+    await installReadOnlyShareFixture(page, {
+      invalid: true,
+      videoFormat: browserName === 'webkit' ? 'mp4' : 'webm',
+    });
     await page.goto(`/shared/canvas/${fixtureToken}`);
 
     await expect(page.getByRole('heading', { name: '分享不存在或已失效' })).toBeVisible();
@@ -125,8 +129,8 @@ test.describe('只读画布分享跨浏览器功能矩阵', () => {
     await expect(page.getByText('已过期')).toHaveCount(0);
   });
 
-  test('下载关闭时隐藏入口并拒绝受控下载', async ({ page, shareRequestAudit }) => {
-    await installReadOnlyShareFixture(page, { videoFormat: 'webm' });
+  test('下载关闭时隐藏入口并拒绝受控下载', async ({ browserName, page, shareRequestAudit }) => {
+    await installReadOnlyShareFixture(page, { videoFormat: browserName === 'webkit' ? 'mp4' : 'webm' });
     await page.goto(`/shared/canvas/${fixtureToken}`);
     await expect(page.getByRole('heading', { name: publicShareFixture().title })).toBeVisible();
 
@@ -138,14 +142,18 @@ test.describe('只读画布分享跨浏览器功能矩阵', () => {
     ]);
   });
 
-  test('下载开启时只使用分享作用域受控路径', async ({ page, shareRequestAudit }) => {
-    await installReadOnlyShareFixture(page, { allowDownload: true, videoFormat: 'webm' });
+  test('下载开启时只使用分享作用域受控路径', async ({ browserName, page, shareRequestAudit }) => {
+    await installReadOnlyShareFixture(page, {
+      allowDownload: true,
+      videoFormat: browserName === 'webkit' ? 'mp4' : 'webm',
+    });
     await page.goto(`/shared/canvas/${fixtureToken}`);
     await expect(page.getByRole('heading', { name: publicShareFixture(true).title })).toBeVisible();
 
     await page.getByRole('button', { name: '预览夹具图片' }).click();
     const downloadLink = page.getByRole('link', { name: '下载预览内容' });
     await expect(downloadLink).toHaveAttribute('href', downloadPath);
+    await expect(downloadLink).toHaveAttribute('download', '');
     const downloadEvent = page.waitForEvent('download');
     await downloadLink.click();
     const download = await downloadEvent;

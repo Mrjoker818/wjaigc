@@ -62,6 +62,7 @@ export function SharedCanvasToolbar({
       {downloadPath ? (
         <a
           href={downloadPath}
+          download
           className={controlClassName}
           aria-label="下载当前内容"
           title="下载当前内容"
