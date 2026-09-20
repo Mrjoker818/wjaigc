@@ -1237,8 +1237,8 @@ await page.evaluate(() => {
 | **稳定复现** | 打开包含多张生成图的项目仪表盘与画布恢复页，观察 Console。 |
 | **实际结果** | 重复出现 `QuotaExceededError: Failed to execute 'setItem' on 'Storage': Setting the value of 'wujie_autosave_snapshots_v1' exceeded the quota.`，调用栈来自 `protectAgainstDataLoss -> saveData -> loadProjectsFromServer`。 |
 | **预期结果** | 自动保存快照必须有容量预算、裁剪/淘汰策略和可观测提示，不能在项目加载过程中反复写入超过浏览器配额的数据。 |
-| **根因** | 待定位；已确认错误发生在本地快照写入边界，而非远端项目读取失败。 |
-| **状态** | 已登记，待在画布/项目可靠性阶段单独复现、限额设计和回归测试。 |
+| **根因** | `protectAgainstDataLoss()` 在每次保存前最多写入 4 份完整项目快照；大项目的坐标变化会反复序列化同一媒体拓扑，既没有拓扑去重，也没有总字节预算，因而在同步热路径触发配额异常和主线程成本。 |
+| **状态** | **FIXED LOCALLY ON EXACT CANDIDATE `1b1fd4ca`.** 浏览器部署复验仍需绑定同一候选，不能用本地矩阵替代云端证据。 |
 
 ### BUG-032: 底部“图像生成器”多图请求被旧提交包装器折叠为单个外层任务
 
@@ -1320,9 +1320,10 @@ await page.evaluate(() => {
 
 | Field | Detail |
 |---|---|
-| Fix | Autosave snapshots now strip `data:` and `blob:` image URLs before serialization, retain at most four snapshots, and evict oldest snapshots before retrying a failed storage write. |
-| Regression tests | `user-manager-autosave-quota-contract.test.ts`. |
-| Status | Fixed locally; pending deployed browser-console verification. |
+| Fix | Autosave snapshots strip transient image URLs, deduplicate coordinate-only changes by a fixed-length topology signature, retain at most four snapshots under a 750 KB aggregate budget, evict oldest entries first, and skip a single oversize recovery snapshot without throwing. Empty sync responses also bypass deep response-patch cloning and project-change notification. |
+| Regression tests | `user-manager-autosave-quota-contract.test.ts`, `user-manager-data-loss-snapshots.test.ts`, `user-manager-sync-response-patches.test.ts`, and the existing sync-epoch suite. The focused unit bundle passes `55/55`. |
+| Exact candidate evidence | `1b1fd4ca01c35fda0c4bd5b0112ee05a02297acb`: `shadow`, `canvas-v2`, and `legacy` each pass `60/60` across Chromium, Chromium 1080p, Firefox, Mobile Chromium, and WebKit. All 75 performance records report `longestTaskMs=0`, `longestSaveTaskMs=0`, no disappeared or unclickable nodes, and no `QuotaExceeded`/`DataLossGuard` evidence hits. |
+| Status | **FIXED LOCALLY / EXACT-CANDIDATE MATRIX PASS / CLOUD UNVERIFIED.** |
 
 ### BUG-037: Empty provider metadata from task polling was displayed as the default FHL provider
 

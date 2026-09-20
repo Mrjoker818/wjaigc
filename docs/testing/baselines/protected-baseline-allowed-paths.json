@@ -147,6 +147,7 @@
   "src/lib/node-canvas-virtualization.ts",
   "src/lib/task-core/billing-service.ts",
   "src/lib/task-core/model-catalog.ts",
+  "src/lib/task-core/task-abort.ts",
   "src/lib/task-core/task-service.ts",
   "src/lib/task-core/task-state.ts",
   "src/lib/user-manager.ts",

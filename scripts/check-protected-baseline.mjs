@@ -165,9 +165,11 @@ function literalProtectedComponents(features) {
   )];
 }
 
-function findArgument(args, name, fallback = null) {
-  const index = args.indexOf(name);
-  return index === -1 ? fallback : args[index + 1] || fallback;
+export function findArgument(args, name, fallback = null) {
+  for (let index = args.length - 2; index >= 0; index -= 1) {
+    if (args[index] === name && args[index + 1]) return args[index + 1];
+  }
+  return fallback;
 }
 
 function findRepeatedArguments(args, name) {

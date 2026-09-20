@@ -121,6 +121,7 @@
     { "path": "src/lib/task-core/model-capability-contract.ts", "sourceCommit": "c7db96f1" },
     { "path": "src/lib/task-core/model-capability-resolution.ts", "sourceCommit": "96c1907b" },
     { "path": "src/lib/task-core/provider-capability-adapters.ts", "sourceCommit": "15827a50" },
+    { "path": "src/lib/task-core/task-abort.ts", "sourceCommit": "8cc902b8" },
     { "path": "src/lib/task-events-client.ts", "sourceCommit": "b0cd946f" },
     { "path": "src/lib/universal-api-manager.ts", "sourceCommit": "96c1907b" },
     { "path": "src/lib/universal-api-types.ts", "sourceCommit": "1798d252" },

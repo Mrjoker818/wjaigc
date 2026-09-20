@@ -15,6 +15,7 @@ async function loadGateModule() {
     'scripts/check-protected-baseline.mjs',
   );
   return import(pathToFileURL(scriptPath).href) as Promise<{
+    findArgument: (args: string[], name: string, fallback?: string | null) => string | null;
     evaluateProtectedBaseline: (input: {
       baselineFeatures: Feature[];
       candidateFeatures: Feature[];
@@ -192,6 +193,7 @@ const historicalSourceAuthorizations = [
   ['src/lib/task-core/model-capability-contract.ts', 'c7db96f1'],
   ['src/lib/task-core/model-capability-resolution.ts', '96c1907b'],
   ['src/lib/task-core/provider-capability-adapters.ts', '15827a50'],
+  ['src/lib/task-core/task-abort.ts', '8cc902b8'],
   ['src/lib/task-events-client.ts', 'b0cd946f'],
   ['src/lib/universal-api-manager.ts', '96c1907b'],
   ['src/lib/universal-api-types.ts', '1798d252'],
@@ -326,6 +328,17 @@ const unifiedSkillRuntimeArtifactPaths = [
 ] as const;
 
 describe('protected baseline release gate', () => {
+  it('lets a workflow-supplied argument override the package default', async () => {
+    const { findArgument } = await loadGateModule();
+
+    expect(findArgument([
+      '--base',
+      'recorded-baseline',
+      '--base',
+      'workflow-event-base',
+    ], '--base', 'origin/main')).toBe('workflow-event-base');
+  });
+
   it('authorizes the nine reviewed unified Skill runtime artifacts by exact path', async () => {
     const allowedPaths = JSON.parse(await readFile(
       resolve(process.cwd(), 'docs/testing/baselines/protected-baseline-allowed-paths.json'),
