@@ -226,7 +226,7 @@ export function isTask7VolatileInfrastructureRequest(actual: Task7RequestRecord)
   if (/^\/_next\/static\/webpack\/[a-f0-9]+\.webpack\.hot-update\.json$/u.test(actual.pathname)) {
     return actual.resourceType === 'fetch' && actual.search === '';
   }
-  if (/^\/_next\/static\/webpack\/webpack\.[a-f0-9]+\.hot-update\.js$/u.test(actual.pathname)) {
+  if (/^\/_next\/static\/webpack\/.+\.[a-f0-9]+\.hot-update\.js$/u.test(actual.pathname)) {
     return actual.resourceType === 'script' && actual.search === '';
   }
   if (actual.pathname === task7CanonicalPaths.share && /^\?_rsc=[a-zA-Z0-9_-]+$/u.test(actual.search)) {

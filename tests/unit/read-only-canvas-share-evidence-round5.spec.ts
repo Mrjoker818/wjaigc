@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import {
+  classifyTask7Request,
   deriveTask7CanonicalSummary,
   task7EvidenceDescriptors,
   type Task7EvidenceIdentity,
@@ -155,6 +156,27 @@ async function overwriteRecord(
 }
 
 describe('Task 7 canonical Round 5 semantics', () => {
+  it('accepts only the shaped nested Next dev hot-update script lifecycle', () => {
+    const baseRequest = {
+      method: 'GET',
+      origin: ':same-origin',
+      search: '',
+      resourceType: 'script',
+      navigation: false,
+      pageRole: 'primary' as const,
+      frameRole: 'main' as const,
+      range: null,
+    };
+    expect(classifyTask7Request('desktop-invalid', {
+      ...baseRequest,
+      pathname: '/_next/static/webpack/app/layout.2a8eca47453452d4.hot-update.js',
+    })).toBeNull();
+    expect(classifyTask7Request('desktop-invalid', {
+      ...baseRequest,
+      pathname: '/_next/static/webpack/app/layout.not-a-hash.hot-update.js',
+    })).toBe('unexpected-request');
+  });
+
   it('derives portrait native synthesis as an observation, not a pass requirement', () => {
     const record = completeRecord('mobile/mobile-320-chromium/portrait', 'a'.repeat(40), 'b'.repeat(64));
     const summary = deriveTask7CanonicalSummary(record);
