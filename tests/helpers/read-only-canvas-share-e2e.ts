@@ -52,6 +52,13 @@ const tinyMp4 = Buffer.from(
   'base64',
 );
 
+const tinyVp8Webm = Buffer.from(
+  'GkXfo59ChoEBQveBAULygQRC84EIQoKEd2VibUKHgQJChYECGFOAZwEAAAAAAAIAEU2bdLpNu4tTq4QVSalmU6yBoU27i1OrhBZUrmtTrIHYTbuMU6uEElTDZ1OsggElTbuMU6uEHFO7a1OsggHq7AEAAAAAAABZAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAVSalmsirXsYMPQkBNgI1MYXZmNjIuMTIuMTAwV0GNTGF2ZjYyLjEyLjEwMESJiEB5AAAAAAAAFlSua8iuAQAAAAAAAD/XgQFzxYjDf2Npxa2mRZyBACK1nIN1bmSIgQCGhVZfVlA4g4EBI+ODhAvrwgDgkLCBELqBEJqBAlW5gQESVMNn/HNzoGPAgGfImkWjh0VOQ09ERVJEh41MYXZmNjIuMTIuMTAwc3PWY8CLY8WIw39jacWtpkVnyKFFo4dFTkNPREVSRIeUTGF2YzYyLjI4LjEwMCBsaWJ2cHhnyKFFo4hEVVJBVElPTkSHkzAwOjAwOjAwLjQwMDAwMDAwMAAfQ7Z1v+eBAKOjgQAAgBACAJ0BKhAAEAAARwiFhYiFhIgCAgAMDWAA/v+rUICjlYEAyACxAQABEBAAGAAYWC/0AAgAABxTu2uRu4+zgQC3iveBAfGCAabwgQM=',
+  'base64',
+);
+
+type FixtureVideoFormat = 'mp4' | 'webm';
+
 const baseItems = [
   {
     itemRef: imageItemRef,
@@ -88,24 +95,29 @@ const baseItems = [
   },
 ];
 
-export function publicShareFixture(allowDownload = false) {
+export function publicShareFixture(allowDownload = false, videoFormat: FixtureVideoFormat = 'mp4') {
   return {
     title: '跨浏览器只读画布夹具',
     revisionLabel: '修订 2026-09-19-超长移动端安全标签',
     createdAt: '2026-09-19T00:00:00.000Z',
     allowDownload,
     viewport: { offsetX: 32, offsetY: 48, zoom: 1 },
-    items: baseItems.map(item => (
-      item.itemRef === imageItemRef && allowDownload
-        ? { ...item, downloadPath: `media/${imageItemRef}/download` }
-        : item
-    )),
+    items: baseItems.map(item => {
+      if (item.itemRef === imageItemRef && allowDownload) {
+        return { ...item, downloadPath: `media/${imageItemRef}/download` };
+      }
+      if (item.itemRef === videoItemRef && videoFormat === 'webm') {
+        return { ...item, mimeType: 'video/webm' };
+      }
+      return item;
+    }),
   };
 }
 
 interface FixtureOptions {
   allowDownload?: boolean;
   invalid?: boolean;
+  videoFormat?: FixtureVideoFormat;
 }
 
 function commonMediaHeaders(contentType: string, contentLength: number): Record<string, string> {
@@ -163,13 +175,20 @@ async function fulfillBytes(
   await route.fulfill({ status: 200, body: bytes, headers: baseHeaders });
 }
 
-async function fulfillMediaRoute(route: Route, pathname: string): Promise<boolean> {
+async function fulfillMediaRoute(
+  route: Route,
+  pathname: string,
+  videoFormat: FixtureVideoFormat,
+): Promise<boolean> {
   if (pathname === imagePath) {
     await fulfillBytes(route, onePixelPng, 'image/png');
     return true;
   }
   if (pathname === videoPath) {
-    await fulfillBytes(route, tinyMp4, 'video/mp4', true);
+    const video = videoFormat === 'webm'
+      ? { bytes: tinyVp8Webm, contentType: 'video/webm' }
+      : { bytes: tinyMp4, contentType: 'video/mp4' };
+    await fulfillBytes(route, video.bytes, video.contentType, true);
     return true;
   }
   if (pathname === unavailablePath) {
@@ -181,6 +200,7 @@ async function fulfillMediaRoute(route: Route, pathname: string): Promise<boolea
 
 export async function installReadOnlyShareFixture(page: Page, options: FixtureOptions = {}): Promise<void> {
   const allowDownload = options.allowDownload ?? false;
+  const videoFormat = options.videoFormat ?? 'mp4';
   await page.route('**/api/public/canvas-shares/**', async route => {
     const pathname = new URL(route.request().url()).pathname;
     if (pathname === metadataPath) {
@@ -195,7 +215,7 @@ export async function installReadOnlyShareFixture(page: Page, options: FixtureOp
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
-        body: JSON.stringify(publicShareFixture(allowDownload)),
+        body: JSON.stringify(publicShareFixture(allowDownload, videoFormat)),
         headers: { 'Cache-Control': 'private, no-store' },
       });
       return;
@@ -231,7 +251,7 @@ export async function installReadOnlyShareFixture(page: Page, options: FixtureOp
       }
       return;
     }
-    if (await fulfillMediaRoute(route, pathname)) return;
+    if (await fulfillMediaRoute(route, pathname, videoFormat)) return;
     await route.fulfill({
       status: 418,
       contentType: 'application/json',
