@@ -1,8 +1,65 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { enrichCompletedImageResult } from '@/lib/asset-core/image-result-metadata';
+import * as imageResultMetadata from '@/lib/asset-core/image-result-metadata';
+
+const { createCachedCompletedImageInspector, enrichCompletedImageResult } = imageResultMetadata;
 
 describe('completed image result metadata', () => {
+  it('inspects authoritative MIME, byte size, and dimensions from image bytes', async () => {
+    const inspectCompletedImage = Reflect.get(imageResultMetadata, 'inspectCompletedImage') as
+      | undefined
+      | ((url: string) => Promise<{ width?: number; height?: number; mimeType?: string; byteSize?: number }>);
+    const png = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAD0lEQVR4nGNgaPgPQhAKACX2Bf2gcp/LAAAAAElFTkSuQmCC';
+
+    expect(inspectCompletedImage).toBeTypeOf('function');
+    if (!inspectCompletedImage) return;
+    await expect(inspectCompletedImage(png)).resolves.toEqual({
+      width: 2,
+      height: 2,
+      mimeType: 'image/png',
+      byteSize: 72,
+    });
+  });
+
+  it('accepts BMP bytes used by ordinary canvas uploads', async () => {
+    const bmp = Buffer.from(
+      '424d3a0000000000000036000000280000000100000001000000010018000000000004000000130b0000130b000000000000000000000000ff00',
+      'hex',
+    );
+    const url = `data:image/bmp;base64,${bmp.toString('base64')}`;
+
+    await expect(imageResultMetadata.inspectCompletedImage(url)).resolves.toMatchObject({
+      width: 1,
+      height: 1,
+      mimeType: 'image/bmp',
+      byteSize: bmp.byteLength,
+    });
+  });
+
+  it('caches only successful server inspections by immutable managed URL', async () => {
+    const inspect = vi.fn().mockResolvedValue({
+      width: 2,
+      height: 2,
+      mimeType: 'image/png',
+      byteSize: 72,
+    });
+    const cachedInspect = createCachedCompletedImageInspector(inspect, 2);
+
+    const first = '/api/serve-upload/uploads/first.png';
+    const second = '/api/serve-upload/uploads/second.png';
+    const third = '/api/serve-upload/uploads/third.png';
+    await expect(Promise.all([
+      cachedInspect(first),
+      cachedInspect(first),
+    ])).resolves.toHaveLength(2);
+    await cachedInspect(second);
+    await cachedInspect(first);
+    await cachedInspect(third);
+    await cachedInspect(second);
+
+    expect(inspect).toHaveBeenCalledTimes(4);
+  });
+
   it('adds authoritative metadata for every completed image URL in output order', async () => {
     const inspect = vi.fn()
       .mockResolvedValueOnce({ width: 1254, height: 1254, mimeType: 'image/png', byteSize: 456789 })

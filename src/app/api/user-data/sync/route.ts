@@ -17,6 +17,10 @@ import {
 import type { Project } from '@/lib/user-types';
 import type { AssetGraphMode } from '@/lib/asset-core/types';
 import type { LegacyMediaPersistenceInput, LegacyMediaPersistenceResult } from '@/lib/asset-core/legacy-migration';
+import {
+  inspectCompletedImage,
+  inspectManagedImageMetadata,
+} from '@/lib/asset-core/image-result-metadata';
 import { resolveCanvasKernelMode } from '@/lib/canvas-kernel/mode';
 import { resolveDeliveredWorkflowRendererMode } from '@/lib/workflow-renderer/mode';
 import {
@@ -419,7 +423,7 @@ async function persistCanvasDataUrl(
   if (!url || url.startsWith('data:') || url.startsWith('blob:')) {
     throw new Error('LEGACY_MEDIA_PERSIST_FAILED');
   }
-  return { url };
+  return { url, ...await inspectCompletedImage(url) };
 }
 
 /**
@@ -779,6 +783,9 @@ export async function POST(request: NextRequest) {
         projects: value as Project[],
         expectedRevision: Number(body.projectRevision),
         persistMedia: persistCanvasDataUrl,
+        inspectManagedMedia: async ({ url, kind }) => kind === 'image'
+          ? { url, ...await inspectManagedImageMetadata(url) }
+          : null,
       });
       value = result.projects;
       if (shouldWriteAssetShadow(assetGraphMode)) {

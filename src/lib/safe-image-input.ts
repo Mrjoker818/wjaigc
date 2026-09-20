@@ -12,6 +12,7 @@ const DEFAULT_MAX_PIXELS = 40_000_000;
 const BASE64_DECODE_CHUNK_CHARS = 64 * 1024;
 const DATA_URL_MIME_BY_HEADER: Readonly<Record<string, string>> = {
   'data:image/avif;base64,': 'image/avif',
+  'data:image/bmp;base64,': 'image/bmp',
   'data:image/gif;base64,': 'image/gif',
   'data:image/jpeg;base64,': 'image/jpeg',
   'data:image/png;base64,': 'image/png',
@@ -21,6 +22,7 @@ const DATA_URL_MIME_BY_HEADER: Readonly<Record<string, string>> = {
 
 const MIME_BY_FORMAT: Record<string, string> = {
   avif: 'image/avif',
+  bmp: 'image/bmp',
   gif: 'image/gif',
   jpeg: 'image/jpeg',
   jpg: 'image/jpeg',
@@ -55,10 +57,16 @@ export interface ManagedMediaPath {
   relativePath: string;
 }
 
+export interface SafeImageDimensions {
+  width: number;
+  height: number;
+}
+
 const MANAGED_MEDIA_PREFIXES = ['/uploads/', '/api/serve-upload/', '/gallery/'];
 const PRIVATE_MEDIA_ROOTS = new Set(['system', 'users']);
 
 function detectImageMimeType(buffer: Buffer): string | null {
+  if (buffer.length >= 2 && buffer[0] === 0x42 && buffer[1] === 0x4d) return 'image/bmp';
   if (
     buffer.length >= 8
     && buffer.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))
@@ -90,6 +98,34 @@ function detectImageMimeType(buffer: Buffer): string | null {
     )
   ) return 'image/tiff';
   return null;
+}
+
+export function readSafeBmpDimensions(buffer: Buffer): SafeImageDimensions {
+  if (buffer.length < 30 || buffer[0] !== 0x42 || buffer[1] !== 0x4d) {
+    throw new SafeImageInputError('BMP header is invalid');
+  }
+  const declaredSize = buffer.readUInt32LE(2);
+  const pixelOffset = buffer.readUInt32LE(10);
+  const dibSize = buffer.readUInt32LE(14);
+  if (declaredSize !== buffer.byteLength || pixelOffset >= buffer.byteLength) {
+    throw new SafeImageInputError('BMP file bounds are invalid');
+  }
+  let width: number;
+  let height: number;
+  if (dibSize === 12) {
+    if (buffer.length < 26) throw new SafeImageInputError('BMP core header is truncated');
+    width = buffer.readUInt16LE(18);
+    height = buffer.readUInt16LE(20);
+  } else if (dibSize >= 40 && buffer.length >= 54) {
+    width = buffer.readInt32LE(18);
+    height = Math.abs(buffer.readInt32LE(22));
+  } else {
+    throw new SafeImageInputError('BMP DIB header is unsupported');
+  }
+  if (!Number.isSafeInteger(width) || width <= 0 || !Number.isSafeInteger(height) || height <= 0) {
+    throw new SafeImageInputError('BMP dimensions are invalid');
+  }
+  return { width, height };
 }
 
 function isBase64Character(code: number): boolean {
@@ -320,6 +356,11 @@ async function validateDecodedImage(
   options: SafeImageInputOptions,
 ): Promise<DecodedSafeImage> {
   try {
+    if (image.mimeType === 'image/bmp') {
+      const dimensions = readSafeBmpDimensions(image.buffer);
+      assertSafePixelDimensions(dimensions.width, dimensions.height, options.maxPixels);
+      return image;
+    }
     const metadata = await withSafeSharp(
       image.buffer,
       options,

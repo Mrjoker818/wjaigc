@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   readCanvasShadowSnapshot: vi.fn(),
   readAssetV3Projects: vi.fn(),
   persistResultImage: vi.fn(),
+  inspectCompletedImage: vi.fn(),
   readSimpleChatSnapshot: vi.fn(),
   compareAndSetSimpleChatSnapshot: vi.fn(),
   CanvasProjectSyncConflictError: class CanvasProjectSyncConflictError extends Error {
@@ -41,6 +42,9 @@ vi.mock('@/lib/asset-core/canvas-project-sync', () => ({
   readAssetV3Projects: mocks.readAssetV3Projects,
 }));
 vi.mock('@/lib/persist-result-image', () => ({ persistResultImage: mocks.persistResultImage }));
+vi.mock('@/lib/asset-core/image-result-metadata', () => ({
+  inspectCompletedImage: mocks.inspectCompletedImage,
+}));
 vi.mock('@/lib/simple-chat-sync-server', () => ({
   readSimpleChatSnapshot: mocks.readSimpleChatSnapshot,
   compareAndSetSimpleChatSnapshot: mocks.compareAndSetSimpleChatSnapshot,
@@ -79,6 +83,12 @@ describe('user-data asset graph sync route', () => {
       deletedCanvasPlacements: [],
     }));
     mocks.persistResultImage.mockImplementation(async (url: string) => url);
+    mocks.inspectCompletedImage.mockResolvedValue({
+      width: 2,
+      height: 2,
+      mimeType: 'image/png',
+      byteSize: 72,
+    });
   });
 
   afterEach(() => {
@@ -352,13 +362,26 @@ describe('user-data asset graph sync route', () => {
     expect(response.status).toBe(200);
     const input = mocks.executeCanvasProjectSync.mock.calls[0][0] as {
       expectedRevision?: number;
-      persistMedia?: (value: { dataUrl: string }) => Promise<{ url: string }>;
+      persistMedia?: (value: { dataUrl: string }) => Promise<{
+        url: string;
+        width?: number;
+        height?: number;
+        mimeType?: string;
+        byteSize?: number;
+      }>;
     };
     expect(input.expectedRevision).toBe(0);
     expect(input.persistMedia).toBeTypeOf('function');
     mocks.persistResultImage.mockResolvedValue('/api/serve-upload/uploads/persisted.png');
     await expect(input.persistMedia!({ dataUrl: 'data:image/png;base64,AAAA' }))
-      .resolves.toEqual({ url: '/api/serve-upload/uploads/persisted.png' });
+      .resolves.toEqual({
+        url: '/api/serve-upload/uploads/persisted.png',
+        width: 2,
+        height: 2,
+        mimeType: 'image/png',
+        byteSize: 72,
+      });
+    expect(mocks.inspectCompletedImage).toHaveBeenCalledWith('/api/serve-upload/uploads/persisted.png');
 
     mocks.persistResultImage.mockClear();
     await expect(input.persistMedia!({ dataUrl: 'https://remote.test/image.png' }))

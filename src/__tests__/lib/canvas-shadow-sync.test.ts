@@ -791,34 +791,40 @@ describe('continuous canvas shadow synchronization', () => {
     })).toEqual({ action: 'reuse', mapping, parentVersionIds: [] });
   });
 
-  it('executes append-only reconciliation with lineage, current, placement, and checkpoint in one transaction state', async () => {
+  it('repairs an incomplete mapped version append-only and switches every graph pointer', async () => {
     const previousMapping = {
       assetId: 'asset-a',
       versionId: 'version-old',
       placementId: 'placement-a',
     };
     const rawProject = project([image('retained', {
-      url: '/media/replacement.png',
-      sourceUrl: 'https://recovery.test/replacement.png',
-      originalWidth: 1200,
-      originalHeight: 800,
+      url: '/api/serve-upload/uploads/original.png',
+      originalWidth: 2,
+      originalHeight: 2,
     })]);
     const oldVersion = {
       id: 'version-old',
-      file_url: '/media/original.png',
+      file_url: '/api/serve-upload/uploads/original.png',
       storage_key: 'original-key',
       checksum: 'old-checksum',
-      mime_type: 'image/png',
-      byte_size: '1234',
-      width: 600,
-      height: 400,
+      mime_type: null,
+      byte_size: null,
+      width: 2,
+      height: 2,
       availability: 'ready' as const,
       recovery_source_url: 'https://recovery.test/original.png',
       metadata: { immutable: 'old-version-metadata' },
     };
     const originalVersionSnapshot = structuredClone(oldVersion);
     const state: {
-      childVersion?: { id: string; assetId: string; fileUrl: string; metadata: unknown };
+      childVersion?: {
+        id: string;
+        assetId: string;
+        fileUrl: string;
+        mimeType: unknown;
+        byteSize: unknown;
+        metadata: unknown;
+      };
       parent?: { versionId: string; parentVersionId: string };
       currentVersionId?: string;
       placementVersionId?: string;
@@ -870,6 +876,8 @@ describe('continuous canvas shadow synchronization', () => {
           id: String(params[0]),
           assetId: String(params[1]),
           fileUrl: String(params[4]),
+          mimeType: params[7],
+          byteSize: params[8],
           metadata: JSON.parse(String(params[14])),
         };
         return { rows: [], rowCount: 1 };
@@ -907,13 +915,24 @@ describe('continuous canvas shadow synchronization', () => {
     const result = await legacyMigration.migrateLegacyProjectOnWriteInTransaction(client, {
       actorUserId: 'user-1',
       projectId: 'project-1',
+      verifiedMediaByImageId: {
+        retained: {
+          url: '/api/serve-upload/uploads/original.png',
+          mimeType: 'image/png',
+          byteSize: 72,
+          width: 2,
+          height: 2,
+        },
+      },
     });
 
     expect(oldVersion).toEqual(originalVersionSnapshot);
     expect(query.mock.calls.some(([sql]) => String(sql).includes('UPDATE wujie_asset_versions'))).toBe(false);
     expect(state.childVersion).toMatchObject({
       assetId: 'asset-a',
-      fileUrl: '/media/replacement.png',
+      fileUrl: '/api/serve-upload/uploads/original.png',
+      mimeType: 'image/png',
+      byteSize: 72,
       metadata: expect.objectContaining({ legacyImageId: 'retained' }),
     });
     expect(state.childVersion?.id).not.toBe('version-old');
@@ -1376,6 +1395,234 @@ describe('continuous canvas shadow synchronization', () => {
       thumbnailUrl: '/api/serve-upload/uploads/cccc.png',
     });
     expect(JSON.stringify(synchronizedMedia)).not.toContain('data:image');
+  });
+
+  it('resolves controlled canvas image metadata before opening the database transaction', async () => {
+    const verified = {
+      url: '/api/serve-upload/uploads/uploaded.png',
+      mimeType: 'image/png',
+      byteSize: 72,
+      width: 2,
+      height: 2,
+    };
+    let transactionStarted = false;
+    let receivedMedia: Record<string, typeof verified> | undefined;
+    const inspectManagedMedia = vi.fn(async (input: { url: string; kind: 'image' | 'video' }) => {
+      expect(transactionStarted).toBe(false);
+      expect(input).toEqual({ url: verified.url, kind: 'image' });
+      return verified;
+    });
+    const storage: CanvasProjectSyncStorage = {
+      async transaction(callback) {
+        transactionStarted = true;
+        return callback({
+          async writeProjects() {},
+          async syncProject(nextProject: Project, media?: Record<string, typeof verified>) {
+            receivedMedia = media;
+            return {
+              project: nextProject,
+              sourceSchemaVersion: 3,
+              migrated: false,
+              reused: true,
+              mappings: {
+                uploaded: { assetId: 'asset-a', versionId: 'version-a', placementId: 'placement-a' },
+              },
+            };
+          },
+        } as CanvasProjectSyncTransaction);
+      },
+    };
+
+    await executeCanvasProjectSync({
+      actorUserId: 'user-1',
+      projects: [project([{
+        ...image('uploaded', {
+          url: verified.url,
+          originalWidth: 2,
+          originalHeight: 2,
+          assetId: 'asset-a',
+          assetVersionId: 'version-a',
+          placementId: 'placement-a',
+        }),
+        mediaMetadataUrl: verified.url,
+        mediaMimeType: 'image/png',
+        mediaByteSize: 72,
+      } as CanvasImage])],
+      inspectManagedMedia,
+    } as Parameters<typeof executeCanvasProjectSync>[0] & {
+      inspectManagedMedia: typeof inspectManagedMedia;
+    }, storage);
+
+    expect(inspectManagedMedia).toHaveBeenCalledOnce();
+    expect(receivedMedia).toEqual({ uploaded: verified });
+  });
+
+  it('reuses verified persistence metadata without reading the managed file twice', async () => {
+    const verified = {
+      url: '/api/serve-upload/uploads/persisted.png',
+      mimeType: 'image/png',
+      byteSize: 72,
+      width: 2,
+      height: 2,
+    };
+    const persistMedia = vi.fn().mockResolvedValue(verified);
+    const inspectManagedMedia = vi.fn();
+    let receivedMedia: Record<string, typeof verified> | undefined;
+    const storage: CanvasProjectSyncStorage = {
+      async transaction(callback) {
+        return callback({
+          async writeProjects() {},
+          async syncProject(nextProject: Project, media?: Record<string, typeof verified>) {
+            receivedMedia = media;
+            return {
+              project: nextProject,
+              sourceSchemaVersion: 3,
+              migrated: false,
+              reused: true,
+              mappings: {
+                uploaded: { assetId: 'asset-a', versionId: 'version-a', placementId: 'placement-a' },
+              },
+            };
+          },
+        } as CanvasProjectSyncTransaction);
+      },
+    };
+
+    await executeCanvasProjectSync({
+      actorUserId: 'user-1',
+      projects: [project([image('uploaded', { url: 'data:image/png;base64,AAAA' })])],
+      persistMedia,
+      inspectManagedMedia,
+    } as Parameters<typeof executeCanvasProjectSync>[0], storage);
+
+    expect(inspectManagedMedia).not.toHaveBeenCalled();
+    expect(receivedMedia).toEqual({ uploaded: verified });
+  });
+
+  it('fails closed when managed media changes after preflight verification', async () => {
+    const rawProject = project([image('uploaded', {
+      url: '/api/serve-upload/uploads/new.png',
+      originalWidth: 2,
+      originalHeight: 2,
+    })]);
+    const query = vi.fn(async (sql: string) => {
+      if (sql.includes('SELECT legacy.value AS legacy_project')) {
+        return { rows: [{ legacy_project: rawProject }], rowCount: 1 };
+      }
+      if (sql.includes('SELECT status, checkpoint')) return { rows: [], rowCount: 0 };
+      if (sql.includes('SELECT schema_version, metadata')) return { rows: [], rowCount: 0 };
+      return { rows: [], rowCount: 1 };
+    });
+    const client = { query } as unknown as Parameters<
+      typeof legacyMigration.migrateLegacyProjectOnWriteInTransaction
+    >[0];
+
+    await expect(legacyMigration.migrateLegacyProjectOnWriteInTransaction(client, {
+      actorUserId: 'user-1',
+      projectId: 'project-1',
+      verifiedMediaByImageId: {
+        uploaded: {
+          url: '/api/serve-upload/uploads/old.png',
+          mimeType: 'image/png',
+          byteSize: 72,
+        },
+      },
+    })).rejects.toMatchObject({ code: 'LEGACY_MEDIA_PERSIST_FAILED' });
+    expect(query.mock.calls.some(([sql]) => String(sql).includes('INSERT INTO wujie_asset_versions'))).toBe(false);
+  });
+
+  it('allows non-ready controlled media to remain fail-closed without blocking migration', async () => {
+    const rawProject = project([image('missing', {
+      url: '/api/serve-upload/uploads/missing.png',
+      mediaAvailability: 'missing',
+      mediaErrorCode: 'MEDIA_LOAD_FAILED',
+    })]);
+    const inspectManagedMedia = vi.fn();
+    const database = {
+      query: vi.fn().mockResolvedValue({ rows: [{ legacy_project: rawProject }], rowCount: 1 }),
+    };
+
+    await expect(legacyMigration.prepareVerifiedLegacyProjectMedia({
+      actorUserId: 'user-1',
+      projectId: 'project-1',
+      inspectManagedMedia,
+    }, database as never)).resolves.toEqual({});
+    expect(inspectManagedMedia).not.toHaveBeenCalled();
+
+    const transactionQuery = vi.fn(async (sql: string) => {
+      if (sql.includes('SELECT legacy.value AS legacy_project')) {
+        return { rows: [{ legacy_project: rawProject }], rowCount: 1 };
+      }
+      if (sql.includes('SELECT status, checkpoint')) return { rows: [], rowCount: 0 };
+      if (sql.includes('SELECT schema_version, metadata')) return { rows: [], rowCount: 0 };
+      return { rows: [], rowCount: 1 };
+    });
+    const client = { query: transactionQuery } as unknown as Parameters<
+      typeof legacyMigration.migrateLegacyProjectOnWriteInTransaction
+    >[0];
+
+    await expect(legacyMigration.migrateLegacyProjectOnWriteInTransaction(client, {
+      actorUserId: 'user-1',
+      projectId: 'project-1',
+    })).resolves.toMatchObject({ migrated: true });
+  });
+
+  it('writes verified controlled image metadata into the immutable asset version', async () => {
+    const verified = {
+      url: '/api/serve-upload/uploads/uploaded.png',
+      mimeType: 'image/png',
+      byteSize: 72,
+      width: 2,
+      height: 2,
+    };
+    const rawProject = project([image('uploaded', {
+      url: verified.url,
+      originalWidth: 2,
+      originalHeight: 2,
+    })]);
+    let versionFile: {
+      url: unknown;
+      mimeType: unknown;
+      byteSize: unknown;
+      width: unknown;
+      height: unknown;
+    } | undefined;
+    const query = vi.fn(async (sql: string, params: unknown[] = []) => {
+      if (sql.includes('SELECT legacy.value AS legacy_project')) {
+        return { rows: [{ legacy_project: rawProject }], rowCount: 1 };
+      }
+      if (sql.includes('SELECT status, checkpoint')) return { rows: [], rowCount: 0 };
+      if (sql.includes('SELECT schema_version, metadata')) return { rows: [], rowCount: 0 };
+      if (sql.includes('INSERT INTO wujie_asset_versions')) {
+        versionFile = {
+          url: params[4],
+          mimeType: params[7],
+          byteSize: params[8],
+          width: params[9],
+          height: params[10],
+        };
+      }
+      return { rows: [], rowCount: 1 };
+    });
+    const client = { query } as unknown as Parameters<
+      typeof legacyMigration.migrateLegacyProjectOnWriteInTransaction
+    >[0];
+
+    await legacyMigration.migrateLegacyProjectOnWriteInTransaction(client, {
+      actorUserId: 'user-1',
+      projectId: 'project-1',
+      verifiedMediaByImageId: { uploaded: verified },
+    } as Parameters<typeof legacyMigration.migrateLegacyProjectOnWriteInTransaction>[1] & {
+      verifiedMediaByImageId: Record<string, typeof verified>;
+    });
+
+    expect(versionFile).toEqual({
+      url: verified.url,
+      mimeType: 'image/png',
+      byteSize: 72,
+      width: 2,
+      height: 2,
+    });
   });
 
   it('rejects an older pre-transaction sync after a newer deletion commits', async () => {

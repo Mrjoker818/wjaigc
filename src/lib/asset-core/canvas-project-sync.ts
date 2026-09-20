@@ -14,6 +14,8 @@ import {
   type LegacyImageMapping,
   type LegacyMigrationInput,
   type MigrationResult,
+  type InspectManagedLegacyMedia,
+  type VerifiedLegacyMedia,
 } from './legacy-migration';
 import { lockAssetGraphWriteGate } from './storage';
 import type { AssetKind, MediaAvailability } from './types';
@@ -35,9 +37,13 @@ export interface CanvasProjectSyncTransaction {
   verifyProjectMappings?(
     project: Project,
     mappings: Record<string, LegacyImageMapping>,
+    verifiedMediaByImageId?: Readonly<Record<string, VerifiedLegacyMedia>>,
   ): Promise<boolean>;
   writeProjects(projects: Project[]): Promise<void>;
-  syncProject(project: Project): Promise<MigrationResult>;
+  syncProject(
+    project: Project,
+    verifiedMediaByImageId?: Readonly<Record<string, VerifiedLegacyMedia>>,
+  ): Promise<MigrationResult>;
   reconcileDeletedProjects?(activeProjectIds: string[]): Promise<void>;
 }
 
@@ -56,6 +62,7 @@ export interface CanvasProjectSyncInput {
   projects: Project[];
   expectedRevision?: number;
   persistMedia?: LegacyMigrationInput['persistMedia'];
+  inspectManagedMedia?: InspectManagedLegacyMedia;
 }
 
 const PROJECT_REVISION_DATA_KEY = '__asset_graph_projects_revision';
@@ -113,24 +120,40 @@ export class CanvasProjectSyncConflictError extends Error {
   }
 }
 
-async function persistCanvasProjectMedia(input: CanvasProjectSyncInput): Promise<Project[]> {
+interface PreparedCanvasProjectMedia {
+  projects: Project[];
+  verifiedMediaByProject: Record<string, Record<string, VerifiedLegacyMedia>>;
+}
+
+function inferCanvasAssetKind(image: CanvasImage): AssetKind {
+  return image.mediaType === 'video' || Boolean(image.videoUrl) ? 'video' : 'image';
+}
+
+function selectCanvasPrimaryMediaUrl(image: CanvasImage): string {
+  return inferCanvasAssetKind(image) === 'video' && image.videoUrl
+    ? image.videoUrl
+    : image.url;
+}
+
+async function persistCanvasProjectMedia(input: CanvasProjectSyncInput): Promise<PreparedCanvasProjectMedia> {
   const projects: Project[] = [];
+  const verifiedMediaByProject: Record<string, Record<string, VerifiedLegacyMedia>> = {};
   for (const project of input.projects) {
     const canvasImages: CanvasImage[] = [];
+    const verifiedMediaByImageId: Record<string, VerifiedLegacyMedia> = {};
     for (const image of project.canvasImages) {
       const dataUrls = [image.url, image.sourceUrl, image.thumbnailUrl]
         .filter((url): url is string => typeof url === 'string' && url.startsWith('data:'));
-      if (dataUrls.length === 0) {
-        canvasImages.push(image);
-        continue;
+      let persistedImage = image;
+      if (dataUrls.length > 0 && !input.persistMedia) {
+        throw new LegacyMigrationError('LEGACY_MEDIA_PERSIST_FAILED');
       }
-      if (!input.persistMedia) throw new LegacyMigrationError('LEGACY_MEDIA_PERSIST_FAILED');
       try {
         const persistedByDataUrl = new Map<string, Awaited<ReturnType<NonNullable<CanvasProjectSyncInput['persistMedia']>>>>();
         const mapping = mappingForLegacyImage({ actorUserId: input.actorUserId, projectId: project.id }, image.id);
         for (const dataUrl of new Set(dataUrls)) {
           if (persistedByDataUrl.has(dataUrl)) continue;
-          const persisted = await input.persistMedia({
+          const persisted = await input.persistMedia!({
             actorUserId: input.actorUserId,
             projectId: project.id,
             legacyImageId: image.id,
@@ -143,7 +166,7 @@ async function persistCanvasProjectMedia(input: CanvasProjectSyncInput): Promise
           persistedByDataUrl.set(dataUrl, persisted);
         }
         const persistedPrimary = persistedByDataUrl.get(image.url);
-        canvasImages.push({
+        persistedImage = {
           ...image,
           url: persistedPrimary?.url ?? image.url,
           ...(image.sourceUrl?.startsWith('data:')
@@ -156,14 +179,53 @@ async function persistCanvasProjectMedia(input: CanvasProjectSyncInput): Promise
           originalHeight: persistedPrimary?.height ?? image.originalHeight,
           mediaAvailability: persistedPrimary ? 'ready' : image.mediaAvailability,
           mediaErrorCode: persistedPrimary ? undefined : image.mediaErrorCode,
-        });
+        };
+        if (
+          persistedPrimary
+          && typeof persistedPrimary.mimeType === 'string'
+          && Number.isSafeInteger(persistedPrimary.byteSize)
+          && (persistedPrimary.byteSize ?? 0) > 0
+        ) {
+          verifiedMediaByImageId[image.id] = {
+            url: persistedPrimary.url,
+            mimeType: persistedPrimary.mimeType,
+            byteSize: persistedPrimary.byteSize!,
+            ...(persistedPrimary.width === undefined ? {} : { width: persistedPrimary.width }),
+            ...(persistedPrimary.height === undefined ? {} : { height: persistedPrimary.height }),
+          };
+        }
       } catch (error) {
         throw new LegacyMigrationError('LEGACY_MEDIA_PERSIST_FAILED', { cause: error });
       }
+
+      const primaryUrl = selectCanvasPrimaryMediaUrl(persistedImage);
+      const shouldInspect = input.inspectManagedMedia
+        && !verifiedMediaByImageId[persistedImage.id]
+        && inferCanvasAssetKind(persistedImage) === 'image'
+        && (primaryUrl.startsWith('/api/serve-upload/') || primaryUrl.startsWith('/uploads/'));
+      if (shouldInspect) {
+        try {
+          const verified = await input.inspectManagedMedia!({ url: primaryUrl, kind: 'image' });
+          if (verified?.url === primaryUrl) {
+            verifiedMediaByImageId[persistedImage.id] = verified;
+            persistedImage = {
+              ...persistedImage,
+              ...(verified.width ? { originalWidth: verified.width } : {}),
+              ...(verified.height ? { originalHeight: verified.height } : {}),
+            };
+          }
+        } catch {
+          // Preserve the existing fail-closed asset state; sharing will reject incomplete metadata.
+        }
+      }
+      canvasImages.push(persistedImage);
+    }
+    if (Object.keys(verifiedMediaByImageId).length > 0) {
+      verifiedMediaByProject[project.id] = verifiedMediaByImageId;
     }
     projects.push({ ...project, canvasImages });
   }
-  return projects;
+  return { projects, verifiedMediaByProject };
 }
 
 function applyMappings(projects: Project[], mappings: AssetGraphMappings): Project[] {
@@ -239,6 +301,11 @@ interface ProjectMappingRow extends QueryResultRow {
   asset_id: string;
   asset_version_id: string;
   placement_id: string;
+  file_url: string;
+  mime_type: string | null;
+  byte_size: string | null;
+  width: number | null;
+  height: number | null;
 }
 
 interface ProjectCheckpointRow extends QueryResultRow {
@@ -257,6 +324,7 @@ async function verifyProjectMappings(
   actorUserId: string,
   project: Project,
   mappings: Record<string, LegacyImageMapping>,
+  verifiedMediaByImageId: Readonly<Record<string, VerifiedLegacyMedia>> = {},
 ): Promise<boolean> {
   const checkpoint = await client.query<ProjectCheckpointRow>(
     `SELECT status, checkpoint
@@ -274,7 +342,8 @@ async function verifyProjectMappings(
   }
   const result = await client.query<ProjectMappingRow>(
     `SELECT placement.entity_id, placement.asset_id, placement.asset_version_id,
-            placement.id AS placement_id
+            placement.id AS placement_id, version.file_url, version.mime_type,
+            version.byte_size, version.width, version.height
        FROM wujie_workspace_placements placement
        JOIN wujie_assets asset
          ON asset.id = placement.asset_id
@@ -299,9 +368,16 @@ async function verifyProjectMappings(
   const rowsByEntity = new Map(result.rows.map((row) => [row.entity_id, row]));
   return Object.entries(mappings).every(([entityId, mapping]) => {
     const row = rowsByEntity.get(entityId);
-    return row?.asset_id === mapping.assetId
+    const verified = verifiedMediaByImageId[entityId];
+    const identityMatches = row?.asset_id === mapping.assetId
       && row.asset_version_id === mapping.versionId
       && row.placement_id === mapping.placementId;
+    if (!identityMatches || !verified) return identityMatches;
+    return row.file_url === verified.url
+      && row.mime_type === verified.mimeType
+      && Number(row.byte_size) === verified.byteSize
+      && (verified.width === undefined || row.width === verified.width)
+      && (verified.height === undefined || row.height === verified.height);
   });
 }
 
@@ -432,16 +508,18 @@ class PostgresCanvasProjectSyncStorage implements CanvasProjectSyncStorage {
       const result = await callback({
         claimRevision: (expectedRevision) => claimProjectRevision(client, this.actorUserId, expectedRevision),
         readProjects: () => readProjects(client, this.actorUserId),
-        verifyProjectMappings: (project, mappings) => verifyProjectMappings(
+        verifyProjectMappings: (project, mappings, verifiedMediaByImageId) => verifyProjectMappings(
           client,
           this.actorUserId,
           project,
           mappings,
+          verifiedMediaByImageId,
         ),
         writeProjects: (projects) => writeProjects(client, this.actorUserId, projects),
-        syncProject: (project) => migrateLegacyProjectOnWriteInTransaction(client, {
+        syncProject: (project, verifiedMediaByImageId) => migrateLegacyProjectOnWriteInTransaction(client, {
           actorUserId: this.actorUserId,
           projectId: project.id,
+          verifiedMediaByImageId,
         }),
         reconcileDeletedProjects: (activeProjectIds) => reconcileDeletedCanvasProjectsInTransaction(
           client,
@@ -464,7 +542,8 @@ export async function executeCanvasProjectSync(
   input: CanvasProjectSyncInput,
   storage: CanvasProjectSyncStorage = new PostgresCanvasProjectSyncStorage(input.actorUserId),
 ): Promise<CanvasProjectSyncResult> {
-  const persistedProjects = await persistCanvasProjectMedia(input);
+  const prepared = await persistCanvasProjectMedia(input);
+  const persistedProjects = prepared.projects;
   return storage.transaction(async (transaction) => {
     let revision: number | undefined;
     if (input.expectedRevision !== undefined) {
@@ -487,13 +566,20 @@ export async function executeCanvasProjectSync(
         && hasUnchangedProjectGraph(previous, project);
       const mappingsAreCurrent = graphIsUnchanged
         && transaction.verifyProjectMappings
-        ? await transaction.verifyProjectMappings(project, reusableMappings)
+        ? await transaction.verifyProjectMappings(
+          project,
+          reusableMappings,
+          prepared.verifiedMediaByProject[project.id],
+        )
         : false;
       if (mappingsAreCurrent && reusableMappings) {
         mappings[project.id] = reusableMappings;
         continue;
       }
-      const result = await transaction.syncProject(project);
+      const result = await transaction.syncProject(
+        project,
+        prepared.verifiedMediaByProject[project.id],
+      );
       mappings[project.id] = result.mappings;
     }
     await transaction.reconcileDeletedProjects?.(persistedProjects.map((project) => project.id));
@@ -507,7 +593,10 @@ export async function executeLegacyCanvasProjectSync(
   input: CanvasProjectSyncInput,
   storage: CanvasProjectSyncStorage = new PostgresCanvasProjectSyncStorage(input.actorUserId),
 ): Promise<CanvasProjectSyncResult> {
-  const persistedProjects = await persistCanvasProjectMedia(input);
+  const persistedProjects = (await persistCanvasProjectMedia({
+    ...input,
+    inspectManagedMedia: undefined,
+  })).projects;
   return storage.transaction(async (transaction) => {
     if (input.expectedRevision === undefined) {
       throw new Error('Canvas project revision is required');

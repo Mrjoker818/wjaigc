@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 
-import type { PoolClient, QueryResultRow } from 'pg';
+import type { Pool, PoolClient, QueryResultRow } from 'pg';
 
 import { getPool } from '@/lib/db-client';
 import type { CanvasImage, Project } from '@/lib/user-types';
@@ -41,12 +41,26 @@ export interface LegacyMediaPersistenceResult {
   height?: number;
 }
 
+export interface VerifiedLegacyMedia {
+  url: string;
+  mimeType: string;
+  byteSize: number;
+  width?: number;
+  height?: number;
+}
+
+export type InspectManagedLegacyMedia = (input: {
+  url: string;
+  kind: 'image' | 'video';
+}) => Promise<VerifiedLegacyMedia | null>;
+
 export interface LegacyMigrationInput {
   actorUserId: string;
   projectId: string;
   persistMedia?: (
     input: LegacyMediaPersistenceInput,
   ) => Promise<LegacyMediaPersistenceResult>;
+  verifiedMediaByImageId?: Readonly<Record<string, VerifiedLegacyMedia>>;
 }
 
 export interface LegacyImageMapping {
@@ -526,12 +540,36 @@ async function fileForImage(
   const availability = image.mediaAvailability ?? 'ready';
   const mediaUrl = selectLegacyCanvasMediaUrl(image);
   if (!mediaUrl.startsWith('data:')) {
+    const kind = inferAssetKind(image);
+    const isControlledImage = kind === 'image'
+      && (mediaUrl.startsWith('/api/serve-upload/') || mediaUrl.startsWith('/uploads/'));
+    const supplied = input.verifiedMediaByImageId?.[image.id];
+    const verified = kind === 'image'
+      && supplied?.url === mediaUrl
+      && /^image\/(?:png|jpeg|webp|gif|avif|bmp)$/u.test(supplied.mimeType)
+      && Number.isSafeInteger(supplied.byteSize)
+      && supplied.byteSize > 0
+      ? supplied
+      : null;
+    if (isControlledImage && availability === 'ready' && !verified) {
+      throw migrationError('LEGACY_MEDIA_PERSIST_FAILED');
+    }
     return {
       url: mediaUrl,
       availability,
       ...(image.sourceUrl ? { recoverySourceUrl: image.sourceUrl } : {}),
       ...(image.originalWidth >= 0 ? { width: image.originalWidth } : {}),
       ...(image.originalHeight >= 0 ? { height: image.originalHeight } : {}),
+      ...(verified ? {
+        mimeType: verified.mimeType,
+        byteSize: verified.byteSize,
+        ...(Number.isSafeInteger(verified.width) && (verified.width ?? 0) > 0
+          ? { width: verified.width }
+          : {}),
+        ...(Number.isSafeInteger(verified.height) && (verified.height ?? 0) > 0
+          ? { height: verified.height }
+          : {}),
+      } : {}),
     };
   }
   if (!input.persistMedia) throw migrationError('LEGACY_MEDIA_PERSIST_FAILED');
@@ -558,6 +596,61 @@ async function fileForImage(
     width: persisted.width ?? image.originalWidth,
     height: persisted.height ?? image.originalHeight,
   };
+}
+
+export async function prepareVerifiedLegacyProjectMedia(
+  input: {
+    actorUserId: string;
+    projectId: string;
+    legacyImageId?: string;
+    inspectManagedMedia: InspectManagedLegacyMedia;
+  },
+  database: Pick<Pool, 'query'> = getPool(),
+): Promise<Record<string, VerifiedLegacyMedia>> {
+  const result = await database.query<LegacyProjectRow>(
+    `SELECT legacy.value AS legacy_project
+     FROM wujie_user_data user_data
+     CROSS JOIN LATERAL jsonb_array_elements(
+       CASE
+         WHEN jsonb_typeof(user_data.data_value) = 'array' THEN user_data.data_value
+         ELSE '[]'::jsonb
+       END
+     ) legacy(value)
+     WHERE user_data.user_id = $1
+       AND user_data.data_key = 'projects'
+       AND legacy.value->>'id' = $2
+       AND (
+         NOT legacy.value ? 'userId'
+         OR legacy.value->>'userId' = $1
+       )`,
+    [input.actorUserId, input.projectId],
+  );
+  const rawProject = result.rows[0]?.legacy_project;
+  if (!rawProject) throw migrationError('LEGACY_PROJECT_NOT_FOUND');
+  const read = readProjectSnapshot(rawProject);
+  if (!read.project) throw migrationError('LEGACY_PROJECT_QUARANTINED');
+
+  const verifiedByImageId: Record<string, VerifiedLegacyMedia> = {};
+  for (const image of selectCanvasImagesForAssetGraph(read.project.canvasImages)) {
+    if (input.legacyImageId && image.id !== input.legacyImageId) continue;
+    if ((image.mediaAvailability ?? 'ready') !== 'ready') continue;
+    const url = selectLegacyCanvasMediaUrl(image);
+    if (
+      inferAssetKind(image) !== 'image'
+      || (!url.startsWith('/api/serve-upload/') && !url.startsWith('/uploads/'))
+    ) continue;
+    const inspected = await input.inspectManagedMedia({ url, kind: 'image' });
+    if (
+      inspected?.url !== url
+      || !/^image\/(?:png|jpeg|webp|gif|avif|bmp)$/u.test(inspected.mimeType)
+      || !Number.isSafeInteger(inspected.byteSize)
+      || inspected.byteSize <= 0
+    ) {
+      throw migrationError('LEGACY_MEDIA_PERSIST_FAILED');
+    }
+    verifiedByImageId[image.id] = inspected;
+  }
+  return verifiedByImageId;
 }
 
 function readCompletedProject(

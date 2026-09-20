@@ -1,4 +1,4 @@
-import { loadSafeImageInput, safeSharp } from '@/lib/safe-image-input';
+import { loadSafeImageInput, readSafeBmpDimensions, safeSharp } from '@/lib/safe-image-input';
 
 export interface CompletedImageDescriptor {
   url: string;
@@ -8,7 +8,17 @@ export interface CompletedImageDescriptor {
   byteSize?: number;
 }
 
+export interface InspectedCompletedImageDescriptor {
+  width?: number;
+  height?: number;
+  mimeType: string;
+  byteSize: number;
+}
+
 export type InspectCompletedImage = (url: string) => Promise<Omit<CompletedImageDescriptor, 'url'>>;
+export type InspectCompletedImageStrict = (
+  url: string,
+) => Promise<InspectedCompletedImageDescriptor>;
 
 const MAX_COMPLETED_IMAGES = 16;
 
@@ -41,11 +51,19 @@ function isComplete(value: CompletedImageDescriptor): boolean {
     && value.byteSize !== undefined;
 }
 
-async function inspectSafeImage(url: string): Promise<Omit<CompletedImageDescriptor, 'url'>> {
+export async function inspectCompletedImage(url: string): Promise<InspectedCompletedImageDescriptor> {
   const decoded = await loadSafeImageInput(url, {
     maxBytes: 25 * 1024 * 1024,
     maxPixels: 80_000_000,
   });
+  if (decoded.mimeType === 'image/bmp') {
+    const dimensions = readSafeBmpDimensions(decoded.buffer);
+    return {
+      ...dimensions,
+      mimeType: decoded.mimeType,
+      byteSize: decoded.buffer.byteLength,
+    };
+  }
   const metadata = await safeSharp(decoded.buffer, { maxPixels: 80_000_000 }).metadata();
   return {
     width: metadata.width,
@@ -55,9 +73,39 @@ async function inspectSafeImage(url: string): Promise<Omit<CompletedImageDescrip
   };
 }
 
+export function createCachedCompletedImageInspector(
+  inspect: InspectCompletedImageStrict = inspectCompletedImage,
+  maxEntries = 512,
+): InspectCompletedImageStrict {
+  const cache = new Map<string, Promise<InspectedCompletedImageDescriptor>>();
+  return async (url) => {
+    const existing = cache.get(url);
+    if (existing) {
+      cache.delete(url);
+      cache.set(url, existing);
+      return existing;
+    }
+    const pending = inspect(url).catch((error) => {
+      if (cache.get(url) === pending) cache.delete(url);
+      throw error;
+    });
+    cache.set(url, pending);
+    while (cache.size > Math.max(1, maxEntries)) {
+      const oldest = cache.keys().next().value as string | undefined;
+      if (oldest === undefined) break;
+      cache.delete(oldest);
+    }
+    return pending;
+  };
+}
+
+// Managed upload URLs are immutable object identities. Cache successful inspections
+// server-side so autosave never has to trust client-provided metadata hints.
+export const inspectManagedImageMetadata = createCachedCompletedImageInspector();
+
 export async function enrichCompletedImageResult(
   result: Record<string, unknown>,
-  inspect: InspectCompletedImage = inspectSafeImage,
+  inspect: InspectCompletedImage = inspectCompletedImage,
 ): Promise<Record<string, unknown>> {
   const urls = Array.from(new Set([
     ...(Array.isArray(result.imageUrls) ? result.imageUrls : []),

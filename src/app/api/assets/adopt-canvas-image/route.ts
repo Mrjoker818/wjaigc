@@ -3,9 +3,14 @@ import { NextRequest, NextResponse } from 'next/server';
 import {
   LegacyMigrationError,
   migrateLegacyProjectOnWrite,
+  prepareVerifiedLegacyProjectMedia,
   type LegacyMediaPersistenceInput,
   type LegacyMediaPersistenceResult,
 } from '@/lib/asset-core/legacy-migration';
+import {
+  inspectCompletedImage,
+  inspectManagedImageMetadata,
+} from '@/lib/asset-core/image-result-metadata';
 import { persistResultImage } from '@/lib/persist-result-image';
 import { getSessionUser } from '@/lib/server-auth';
 
@@ -31,7 +36,7 @@ async function persistLegacyMedia(
   if (!url || url.startsWith('data:') || url.startsWith('blob:')) {
     throw new Error('LEGACY_MEDIA_PERSIST_FAILED');
   }
-  return { url };
+  return { url, ...await inspectCompletedImage(url) };
 }
 
 function migrationErrorResponse(error: unknown): NextResponse {
@@ -62,10 +67,18 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (!body) return NextResponse.json({ error: 'ASSET_REQUEST_INVALID' }, { status: 400 });
 
   try {
+    const verifiedMediaByImageId = await prepareVerifiedLegacyProjectMedia({
+      actorUserId: sessionUser.id,
+      projectId: body.projectId,
+      inspectManagedMedia: async ({ url, kind }) => kind === 'image'
+        ? { url, ...await inspectManagedImageMetadata(url) }
+        : null,
+    });
     const result = await migrateLegacyProjectOnWrite({
       actorUserId: sessionUser.id,
       projectId: body.projectId,
       persistMedia: persistLegacyMedia,
+      verifiedMediaByImageId,
     });
     const mapping = result.mappings[body.imageId];
     const image = result.project.canvasImages.find(candidate => candidate.id === body.imageId);
