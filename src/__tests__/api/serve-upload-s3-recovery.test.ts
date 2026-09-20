@@ -1,7 +1,7 @@
 import { NextRequest } from 'next/server';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   readBinaryFromS3Exact: vi.fn(),
@@ -80,6 +80,36 @@ describe('serve-upload S3 thumbnail recovery', () => {
     expect(mocks.writeFileSync).toHaveBeenCalledWith(
       path.join('C:/wujie-data', 'thumbnails/version-a/512.webp'),
       thumbnail,
+    );
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('does not cache an empty S3 object and falls back to the recorded source URL', async () => {
+    const recoveredVideo = Buffer.from('source-video');
+    mocks.downloadImageFromS3.mockResolvedValue(Buffer.alloc(0));
+    mocks.getImageSourceUrl.mockResolvedValue('https://media.example/recovery.mp4');
+    const fetchMock = vi.fn().mockResolvedValue(new Response(recoveredVideo, { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const response = await GET(
+      new NextRequest('http://localhost/api/serve-upload/video/missing.mp4'),
+      { params: Promise.resolve({ path: ['video', 'missing.mp4'] }) },
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get('content-type')).toBe('video/mp4');
+    expect(Buffer.from(await response.arrayBuffer())).toEqual(recoveredVideo);
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://media.example/recovery.mp4',
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
+    expect(mocks.writeFileSync).toHaveBeenCalledTimes(1);
+    expect(mocks.writeFileSync).toHaveBeenCalledWith(
+      path.join('C:/wujie-data', 'video/missing.mp4'),
+      recoveredVideo,
     );
   });
 

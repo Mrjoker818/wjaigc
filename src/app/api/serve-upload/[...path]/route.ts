@@ -127,7 +127,7 @@ export async function GET(
     
     // 2. 本地文件不存在，尝试从 S3 下载
     const s3Buffer = await downloadImageFromS3(filePath);
-    if (s3Buffer) {
+    if (s3Buffer && s3Buffer.length > 0) {
       console.log(`[serve-upload] Recovered from S3: ${filePath}`);
       const ext = path.extname(filePath).toLowerCase();
       const contentType = getContentType(ext);

@@ -876,14 +876,20 @@ export async function downloadImageFromS3(filenameOrPath: string): Promise<Buffe
   // Try with full relative path first (preserves subdirectory like uploads/)
   const key = deriveS3Key(filenameOrPath);
   const resolvedKey = await resolveS3Key(key);
-  if (resolvedKey) return readImageFromS3(resolvedKey);
+  if (resolvedKey) {
+    const buffer = await readImageFromS3(resolvedKey);
+    if (buffer && buffer.length > 0) return buffer;
+  }
   
   // Fallback: try with just the basename (old format without subdirectory)
   const basename = filenameOrPath.split('/').pop() || filenameOrPath;
   if (basename !== filenameOrPath) {
     const basenameKey = `images/${basename}`;
     const basenameResolvedKey = await resolveS3Key(basenameKey);
-    if (basenameResolvedKey) return readImageFromS3(basenameResolvedKey);
+    if (basenameResolvedKey) {
+      const buffer = await readImageFromS3(basenameResolvedKey);
+      if (buffer && buffer.length > 0) return buffer;
+    }
   }
   
   return null;

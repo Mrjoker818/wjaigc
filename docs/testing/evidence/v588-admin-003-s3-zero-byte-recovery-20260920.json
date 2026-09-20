@@ -1,0 +1,62 @@
+{
+  "id": "V588-ADMIN-003-S3-ZERO-BYTE-RECOVERY",
+  "recordedAt": "2026-09-20T16:38:00+08:00",
+  "status": "LOCAL_PASS_CLOUD_REVERIFY_PENDING",
+  "scope": "ADMIN-003 remaining S3 recovery edge",
+  "cloudDiscovery": {
+    "paidTasksCreated": 0,
+    "filesDeleted": 0,
+    "databaseWrites": 0,
+    "s3Configuration": {
+      "endpointPresent": true,
+      "bucketPresent": true,
+      "staticAccessKeyPresent": false,
+      "staticSecretKeyPresent": false,
+      "workloadIdentityPresent": true
+    },
+    "thumbnailVariants": {
+      "readyWithStorageKey": 764,
+      "naturallyMissingLocalCache": 0,
+      "note": "No thumbnail was deleted to manufacture a recovery sample."
+    },
+    "assetVersions": {
+      "readyWithStorageKey": 7,
+      "naturallyMissingLocalAndPublicCache": 1,
+      "candidateMimeType": "video/mp4",
+      "databaseByteSize": 1870188,
+      "s3HeadByteSize": 0,
+      "s3HeadMimeType": "video/mp4",
+      "routeRequestSentBeforeFix": false,
+      "localCacheWrittenBeforeFix": false
+    },
+    "rootCause": "downloadImageFromS3 returned Buffer.alloc(0), which is truthy; serve-upload therefore treated a zero-byte S3 object as a successful recovery and would have cached an empty file instead of continuing to the recorded source URL."
+  },
+  "tdd": {
+    "red": {
+      "command": "pnpm exec vitest run src/__tests__/api/serve-upload-s3-recovery.test.ts",
+      "result": "1 failed, 12 passed",
+      "failure": "Expected source recovery bytes but received an empty response while the route logged Recovered from S3."
+    },
+    "fix": [
+      "serve-upload only returns and caches S3 buffers whose length is greater than zero",
+      "downloadImageFromS3 treats zero-byte exact and basename objects as unavailable"
+    ],
+    "regressions": {
+      "command": "pnpm exec vitest run src/__tests__/api/serve-upload-s3-recovery.test.ts src/__tests__/api/recover-images-admin-contract.test.ts src/__tests__/lib/s3-storage-bounded-read.test.ts src/__tests__/lib/fetch-image-buffer.test.ts",
+      "result": "4 files, 49 tests passed"
+    }
+  },
+  "gates": {
+    "typescript": "PASS",
+    "lint": "PASS_WITH_EXISTING_WARNINGS_948_AND_ZERO_ERRORS",
+    "productionBuild": "PASS_121_OF_121_STATIC_PAGES",
+    "cloudPostDeploy": "PENDING"
+  },
+  "files": [
+    "src/app/api/serve-upload/[...path]/route.ts",
+    "src/lib/s3-storage.ts",
+    "src/__tests__/api/serve-upload-s3-recovery.test.ts",
+    "src/__tests__/lib/s3-storage-bounded-read.test.ts"
+  ],
+  "conclusion": "A real cloud S3 integrity edge was found without deleting data or spending credits. The local fix is verified; ADMIN-003 remains open until the exact main candidate is deployed and the naturally missing object recovers through the existing source fallback without caching zero bytes."
+}

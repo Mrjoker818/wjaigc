@@ -72,6 +72,15 @@ describe('readImageFromS3Bounded cancellation', () => {
     vi.unstubAllGlobals();
   });
 
+  it('treats an empty legacy object as unavailable', async () => {
+    mocks.readFile.mockResolvedValue(Buffer.alloc(0));
+    const { downloadImageFromS3 } = await import('@/lib/s3-storage');
+
+    await expect(downloadImageFromS3('video/missing.mp4')).resolves.toBeNull();
+    expect(mocks.readFile).toHaveBeenNthCalledWith(1, { fileKey: 'images/video/missing.mp4' });
+    expect(mocks.readFile).toHaveBeenNthCalledWith(2, { fileKey: 'images/missing.mp4' });
+  });
+
   it('propagates caller cancellation distinctly and aborts the underlying fetch', async () => {
     let fetchSignal: AbortSignal | undefined;
     vi.stubGlobal('fetch', vi.fn((_url: string, init?: RequestInit) => {
