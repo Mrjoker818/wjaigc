@@ -1,5 +1,6 @@
 import { readdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 const EXCLUDED_PROJECT_DIRS = [
   '.tmp',
@@ -24,6 +25,28 @@ async function collectTraceFiles(directory) {
   return nested.flat();
 }
 
+export async function readTraceWhenAvailable(
+  traceFile,
+  { pollIntervalMs = 50, timeoutMs = 5_000 } = {},
+) {
+  const startedAt = Date.now();
+
+  while (true) {
+    try {
+      return JSON.parse(await readFile(traceFile, 'utf8'));
+    } catch (error) {
+      if (error?.code !== 'ENOENT' || Date.now() - startedAt >= timeoutMs) {
+        throw error;
+      }
+
+      const remainingMs = timeoutMs - (Date.now() - startedAt);
+      await new Promise((resolve) => {
+        setTimeout(resolve, Math.min(pollIntervalMs, remainingMs));
+      });
+    }
+  }
+}
+
 async function main() {
   const projectRoot = process.cwd();
   const traceRoot = path.join(projectRoot, '.next', 'server');
@@ -34,7 +57,7 @@ async function main() {
   let removed = 0;
 
   for (const traceFile of traceFiles) {
-    const trace = JSON.parse(await readFile(traceFile, 'utf8'));
+    const trace = await readTraceWhenAvailable(traceFile);
     const files = Array.isArray(trace.files) ? trace.files : [];
     const filtered = files.filter((file) => {
       const resolved = path.resolve(path.dirname(traceFile), file);
@@ -51,7 +74,10 @@ async function main() {
   console.log(`[build-trace] inspected ${traceFiles.length} traces; removed ${removed} local artifact references`);
 }
 
-main().catch((error) => {
-  console.error('[build-trace] failed to prune local artifact references', error);
-  process.exitCode = 1;
-});
+if (process.argv[1]
+  && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
+  main().catch((error) => {
+    console.error('[build-trace] failed to prune local artifact references', error);
+    process.exitCode = 1;
+  });
+}
