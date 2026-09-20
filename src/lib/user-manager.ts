@@ -21,6 +21,8 @@ const PROJECT_SYNC_STORAGE_VERSION = 1;
 const PROJECT_ADOPTION_COMMIT_VERSION = 2;
 const MAX_PROJECT_CONFLICT_BACKUPS = 50;
 const MAX_PROJECT_ADOPTION_COMMIT_BYTES = 12_000_000;
+const MAX_DATA_LOSS_SNAPSHOTS = 4;
+const MAX_DATA_LOSS_SNAPSHOT_BYTES = 750_000;
 const DEFAULT_ADMIN_NAME = 'Mr.joker';
 const PROJECT_SYNC_TIMEOUT_MS = 8_000;
 // Default admin password is no longer stored in client code for security.
@@ -59,6 +61,22 @@ interface SnapshotUserData {
   projects?: SnapshotProject[];
 }
 
+interface DataLossSnapshotSource {
+  userData?: Record<string, {
+    projects?: Array<{
+      id?: string;
+      projectId?: string;
+      canvasImages?: Array<{ id?: string }>;
+    }>;
+  }>;
+}
+
+export interface DataLossSnapshotRecord {
+  t: number;
+  payload: string;
+  signature?: string;
+}
+
 interface ProjectSyncResponse {
   success?: boolean;
   error?: string;
@@ -85,6 +103,16 @@ interface ProjectSyncResponse {
   assetGraphMode?: AssetGraphMode;
   canvasKernelMode?: CanvasKernelMode;
   workflowRendererMode?: WorkflowRendererMode;
+}
+
+export function hasProjectSyncResponsePatches(response: {
+  projectIdMap?: Record<string, unknown>;
+  assetGraphMappings?: Record<string, unknown>;
+  assetGraphUpdates?: Record<string, unknown>;
+}): boolean {
+  return Object.keys(response.projectIdMap ?? {}).length > 0
+    || Object.keys(response.assetGraphMappings ?? {}).length > 0
+    || Object.keys(response.assetGraphUpdates ?? {}).length > 0;
 }
 
 export interface ProjectSyncResult {
@@ -286,6 +314,62 @@ function isValidConflictBackup(value: unknown, userId: string): value is Project
 
 function serializedByteLength(value: string): number {
   return new TextEncoder().encode(value).byteLength;
+}
+
+export function dataLossSnapshotSignature(source: DataLossSnapshotSource | null | undefined): string {
+  let hashA = 0x811c9dc5;
+  let hashB = 0x9e3779b9;
+  let projectCount = 0;
+  let imageCount = 0;
+  const mixRaw = (value: string): void => {
+    for (let index = 0; index < value.length; index += 1) {
+      const code = value.charCodeAt(index);
+      hashA = Math.imul(hashA ^ code, 0x01000193);
+      hashB = Math.imul(hashB ^ code, 0x5bd1e995);
+    }
+  };
+  const mixToken = (value: string): void => {
+    mixRaw(String(value.length));
+    mixRaw(':');
+    mixRaw(value);
+  };
+  const users = Object.entries(source?.userData ?? {})
+    .sort(([left], [right]) => left.localeCompare(right));
+  for (const [userId, userData] of users) {
+    mixToken(userId);
+    for (const project of userData.projects ?? []) {
+      projectCount += 1;
+      mixToken(project.id ?? project.projectId ?? '');
+      for (const image of project.canvasImages ?? []) {
+        imageCount += 1;
+        mixToken(image.id ?? '');
+      }
+    }
+  }
+  return [
+    'v1',
+    users.length,
+    projectCount,
+    imageCount,
+    (hashA >>> 0).toString(16).padStart(8, '0'),
+    (hashB >>> 0).toString(16).padStart(8, '0'),
+  ].join(':');
+}
+
+export function compactDataLossSnapshots(
+  snapshots: DataLossSnapshotRecord[],
+  maxSnapshots: number,
+  maxSerializedBytes: number,
+): DataLossSnapshotRecord[] {
+  if (maxSnapshots <= 0 || maxSerializedBytes <= 0) return [];
+  let retained = snapshots.slice(-Math.max(0, maxSnapshots));
+  while (
+    retained.length > 0
+    && serializedByteLength(JSON.stringify(retained)) > Math.max(0, maxSerializedBytes)
+  ) {
+    retained = retained.slice(1);
+  }
+  return retained;
 }
 
 function projectWithoutImages(project: Project): Omit<Project, 'canvasImages'> {
@@ -750,16 +834,19 @@ export class UserManager {
    *  策略：
    *   1. 记录上次已知的项目图片数快照（lastProjectImageCounts）
    *   2. 保存前比较：某项目此前 ≥10 张图、现在变成 0 → 判定异常，保留内存但不阻断
-   *   3. 每次 save 都写一份最近 N=5 份 autosave 快照到 localStorage（__AUTOSAVE_KEY__）
+   *   3. 仅在用户/项目/图片拓扑变化时刷新快照，并限制快照总字节数
    */
   private lastProjectImageCounts: Map<string, number> = new Map();
+  private lastDataLossSnapshotSignature: string | null = null;
   private protectAgainstDataLoss(): void {
     try {
       if (!this.multiUserData?.userData) return;
+      let snapshotSignature = dataLossSnapshotSignature(this.multiUserData);
+      if (snapshotSignature === this.lastDataLossSnapshotSignature) return;
+
       const AUTOSAVE_KEY = 'wujie_autosave_snapshots_v1';
-      const MAX_SNAPSHOTS = 4;
       // 读取历史快照
-      let snapshots: Array<{ t: number; payload: string }> = [];
+      let snapshots: DataLossSnapshotRecord[] = [];
       try {
         const raw = localStorage.getItem(AUTOSAVE_KEY);
         if (raw) snapshots = JSON.parse(raw);
@@ -795,24 +882,48 @@ export class UserManager {
         }
       }
 
+      snapshotSignature = dataLossSnapshotSignature(this.multiUserData);
+      const persistedSignature = snapshots.at(-1)?.signature;
+      if (
+        snapshotSignature === this.lastDataLossSnapshotSignature
+        || snapshotSignature === persistedSignature
+      ) {
+        this.lastDataLossSnapshotSignature = snapshotSignature;
+        return;
+      }
+
       // 写新快照（在恢复后写，这样快照里是恢复后的健康数据）
       try {
         const snapshotData = JSON.parse(JSON.stringify(this.multiUserData));
         this.trimDataUrls(snapshotData);
-        snapshots.push({ t: Date.now(), payload: JSON.stringify(snapshotData) });
-        if (snapshots.length > MAX_SNAPSHOTS) snapshots = snapshots.slice(-MAX_SNAPSHOTS);
+        snapshots = compactDataLossSnapshots([
+          ...snapshots,
+          {
+            t: Date.now(),
+            payload: JSON.stringify(snapshotData),
+            signature: snapshotSignature,
+          },
+        ], MAX_DATA_LOSS_SNAPSHOTS, MAX_DATA_LOSS_SNAPSHOT_BYTES);
+        if (snapshots.length === 0) {
+          this.lastDataLossSnapshotSignature = snapshotSignature;
+          console.info('[DataLossGuard] Autosave snapshot exceeds the recovery byte budget; skipping it.');
+          return;
+        }
         localStorage.setItem(AUTOSAVE_KEY, JSON.stringify(snapshots));
+        this.lastDataLossSnapshotSignature = snapshotSignature;
       } catch (e) {
         // 快照写失败不影响主流程
         while (snapshots.length > 1) {
           snapshots = snapshots.slice(1);
           try {
             localStorage.setItem(AUTOSAVE_KEY, JSON.stringify(snapshots));
+            this.lastDataLossSnapshotSignature = snapshotSignature;
             return;
           } catch {
             // Keep evicting the oldest recovery point until a bounded snapshot fits.
           }
         }
+        this.lastDataLossSnapshotSignature = snapshotSignature;
         console.warn('[DataLossGuard] Failed to write autosave snapshot:', e);
       }
     } catch (e) {
@@ -860,6 +971,7 @@ export class UserManager {
     this._workflowRendererMode = 'legacy';
     this._recentlyDeletedImageIds.clear();
     this._projectHydration = null;
+    this.lastDataLossSnapshotSignature = null;
   }
 
   private beginProjectSyncRequest(): {
@@ -1152,7 +1264,7 @@ export class UserManager {
       const stored = localStorage.getItem(STORAGE_KEY);
       if (!stored) return false;
       const parsed = JSON.parse(stored) as MultiUserData;
-      return snapshotsEqual(parsed.userData?.[userId]?.projects, projects);
+      return JSON.stringify(parsed.userData?.[userId]?.projects) === JSON.stringify(projects);
     } catch {
       return false;
     }
@@ -1186,13 +1298,11 @@ export class UserManager {
     );
     if (input.revision < acceptedRevision) throw new Error('PROJECT_SYNC_STALE_REVISION');
 
-    const previousProjects = cloneProjects(userData.projects);
-    const previousBase = cloneProjects(
-      this._lastAuthoritativeProjects.get(input.userId)
+    const previousProjects = userData.projects;
+    const previousBase = this._lastAuthoritativeProjects.get(input.userId)
       ?? existing?.authoritativeBase
       ?? legacyBase?.projects
-      ?? [],
-    );
+      ?? [];
     const previousBackups = (
       existing?.conflictBackups
       ?? this.readLegacyConflictBackups(input.userId)
@@ -1213,27 +1323,26 @@ export class UserManager {
     this.writeProjectAdoptionCommit(prepared);
     this._projectAdoptionPendingUsers.add(input.userId);
     try {
-      userData.projects = cloneProjects(input.adoptedDraft);
-      let persistedDraft = cloneProjects(input.adoptedDraft);
+      userData.projects = input.adoptedDraft;
+      let persistedDraft = input.adoptedDraft;
       if (!this.hasPersistedProjectDraft(input.userId, input.adoptedDraft)) {
         const mainCommit = this.commitLocalDataOnly(true);
         if (!mainCommit.ok) throw mainCommit.error ?? new Error('PROJECT_SYNC_DRAFT_PERSIST_FAILED');
-        persistedDraft = cloneProjects(
-          mainCommit.persistedData?.userData[input.userId]?.projects ?? input.adoptedDraft,
-        );
+        persistedDraft = mainCommit.persistedData?.userData[input.userId]?.projects ?? input.adoptedDraft;
       }
       const retainedExistingCount = Math.max(0, MAX_PROJECT_CONFLICT_BACKUPS - input.requiredBackups.length);
       const conflictBackups = [
         ...previousBackups.slice(-retainedExistingCount),
         ...input.requiredBackups,
       ];
+      const authoritativeBase = cloneProjects(input.authoritativeBase);
       const committed: ProjectAdoptionCommitEnvelope = {
         version: PROJECT_ADOPTION_COMMIT_VERSION,
         userId: input.userId,
         revision: input.revision,
         assetGraphMode: input.assetGraphMode,
         canvasKernelMode: input.canvasKernelMode,
-        authoritativeBase: cloneProjects(input.authoritativeBase),
+        authoritativeBase,
         adoptedDraft: persistedDraft,
         conflictBackups,
         updatedAt: Date.now(),
@@ -1246,7 +1355,7 @@ export class UserManager {
       this._acceptedProjectMutationGeneration = this._projectMutationGeneration;
       this._assetGraphMode = input.assetGraphMode;
       this._canvasKernelMode = input.canvasKernelMode;
-      this._lastAuthoritativeProjects.set(input.userId, cloneProjects(input.authoritativeBase));
+      this._lastAuthoritativeProjects.set(input.userId, authoritativeBase);
       this._serverSyncReady = true;
     } catch (error) {
       userData.projects = previousProjects;
@@ -1430,10 +1539,13 @@ export class UserManager {
     const userData = userId ? this.multiUserData?.userData[userId] : undefined;
     if (!userId || !userData) throw new Error('PROJECT_SYNC_SESSION_CHANGED');
     const hasNewerLocalMutation = this._projectMutationGeneration !== requestMutationGeneration;
-    const adoptedDraft = hasNewerLocalMutation
-      ? this.applyProjectSyncResponseToProjects(userData.projects, data, userData, false)
-      : this.applyProjectSyncResponseToProjects(userData.projects, data, userData);
-    const authoritativeBase = this.applyProjectSyncResponseToProjects(acceptedProjects, data, userData);
+    const hasResponsePatches = hasProjectSyncResponsePatches(data);
+    const adoptedDraft = hasResponsePatches
+      ? this.applyProjectSyncResponseToProjects(userData.projects, data, userData, !hasNewerLocalMutation)
+      : userData.projects;
+    const authoritativeBase = hasResponsePatches
+      ? this.applyProjectSyncResponseToProjects(acceptedProjects, data, userData)
+      : acceptedProjects;
     this.commitProjectAdoption({
       userId,
       revision: nextRevision,
@@ -1450,7 +1562,7 @@ export class UserManager {
       this._acceptedProjectMutationGeneration,
       requestMutationGeneration,
     );
-    this.notifyProjectsChanged();
+    if (hasResponsePatches) this.notifyProjectsChanged();
   }
 
   async flushProjectsToServer(): Promise<ProjectSyncResult> {
