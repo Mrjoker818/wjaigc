@@ -1,6 +1,6 @@
 # 只读画布分享发布证据
 
-> 状态：本地候选门禁进行中；发布保持关闭。本文不包含 raw token、媒体 URL、storage key、供应商载荷或个人标识。
+> 状态：本地候选门禁已完成；存在明确的真实环境未验证项，发布保持关闭。本文不包含 raw token、媒体 URL、storage key、供应商载荷或个人标识。
 
 ## 先列阻断与未验证项
 
@@ -17,8 +17,8 @@
 ## 候选身份与运行模式
 
 - 计划基线：`main@953bd6309a571a6af7bfbac330ec6f31663779eb`。
-- 当前实现基线（Task 7 已审查）：`7848c01a82dab2543ede38c779c7def8a5696401`。
-- Task 8 实现证据提交：`TASK8_IMPLEMENTATION_COMMIT_PENDING`（提交后用只改文档的绑定提交替换）。
+- Task 7 审查基线：`7848c01a82dab2543ede38c779c7def8a5696401`。
+- Task 8 实现与完整本地门禁提交：`dd4880bc87ac13e723d7cd36d71b9e0a484bfbeb`。
 - 本地分支：`codex/read-only-canvas-share`；不把 feature worktree 记作 main。
 - 本地 `main`：`953bd6309a571a6af7bfbac330ec6f31663779eb`，候选领先 28 个提交。
 - `origin/main`：`9b6077b72f0661b68054c5b4709dc7e25997f9f2`，候选领先 30 个提交。
@@ -56,7 +56,16 @@
 | Desktop Chromium | Task 7 desktop matrix | 4/4 passed。 |
 | Mobile Chromium | Task 7 mobile matrix | 4 actual passed，4 个互斥 skip；实际 viewport 320×568、375×667、393×852、812×375。 |
 | Network no-write gate | Task 7 network gate | 1/1 passed。 |
-| 完整本地门禁 | `pnpm test`、`pnpm validate`、迁移检查、P0 / Stage 2 / Stage 3 / Stage 4 | Task 8 提交后执行并在下节绑定 exact commit。 |
+| 全量 Vitest | `pnpm test` | 782 files passed、43 skipped、1 failed；6902 tests passed、220 skipped、1 failed。唯一失败为既有 PostgreSQL doctor 因缺少 `POSTGRES_TEST_DATABASE_URL` 主动阻断，不能记作全绿。 |
+| 统一校验 | `pnpm validate` | passed；`ts-check` 与 ESLint 均通过。仅有既有 `infinite-canvas.tsx` 超过 500 KB 的 Babel 提示。 |
+| 迁移执行 | `pnpm migrate` | **未验证**；缺少 `DATABASE_URL` / `PGDATABASE_URL`，命令在运行迁移前退出。 |
+| Chromium P0 | `pnpm exec playwright test tests/e2e/p0-core.spec.ts --project=chromium --reporter=line` | **未验证**；缺少 `E2E_TEST_USERNAME`、`E2E_TEST_PASSWORD`、`E2E_GENERATION_MODEL`。 |
+| Chromium Stage 2 | `pnpm exec playwright test tests/e2e/stage-2-asset-lifecycle.spec.ts tests/e2e/stage-2-cross-workspace.spec.ts --project=chromium --reporter=line` | 11 skipped；缺少真实 fixture、账号与数据库前置，**未验证**。 |
+| Chromium Stage 3 | `pnpm exec playwright test tests/e2e/stage-3-canvas-kernel.spec.ts --project=chromium --reporter=line` | 收集阶段因缺少 `E2E_STAGE3_PROJECT_IDS`、`E2E_STAGE3_RUN_ID` 阻断，**未验证**。 |
+| Chromium Stage 4 | `pnpm exec playwright test tests/e2e/stage-4-node-chat-agent.spec.ts --project=chromium --reporter=line` | 收集阶段因缺少 `E2E_STAGE4_EXPECTED_AGENT_MODE` 阻断，**未验证**。 |
+| Task 8 Desktop Chromium | `tests/e2e/read-only-canvas-share.spec.ts` | 4/4 passed at `dd4880bc…`。 |
+| Task 8 Mobile Chromium | 320、375、393 portrait 与 Pixel landscape 项目 | 4 actual passed，4 个互斥 skip。 |
+| Task 8 network no-write gate | `tests/e2e/read-only-canvas-share-network.spec.ts` | 1/1 passed。 |
 
 Task 7 的不可变证据目录：
 
@@ -67,6 +76,18 @@ output/playwright/read-only-canvas-share-evidence/promoted/
 ```
 
 该目录的 manifest 为 passed、8/8/8、desktop/mobile 4/4、forbidden request/frame 0/0；`complete.json.ownerSha256` 与 `owner.json` 原始字节 SHA-256 一致。证据内容使用合成 fixture，不扩大为真实 token 证明。
+
+Task 8 的精确提交证据目录：
+
+```text
+output/playwright/read-only-canvas-share-evidence/promoted/
+  dd4880bc87ac13e723d7cd36d71b9e0a484bfbeb/
+  task8-local-final-20260920-dd4880bc/
+```
+
+该目录在 exact commit `dd4880bc87ac13e723d7cd36d71b9e0a484bfbeb` 上由 finalizer 完成：manifest `passed`，expected/executed 为 8/8，8 条 record 全部 passed，desktop/mobile 各 4，forbidden request/frame 0/0。`complete.json` 记录的 owner SHA-256 `1187520110b1e296cfc136051afb15012d783cbeffb4ed500474f55ae9f81548` 与 `owner.json` 原始字节一致；记录的 manifest SHA-256 `79f4c043ab53f869f02aa6cbce3c06746cb49d08186688c198925db65058f02f` 与 `manifest.json` 原始字节一致。
+
+同一 exact commit 上再次运行 `pnpm check:protected-baseline` 通过且 0 warning，38 个 baseline feature ID 与 evidence contract 均保留。证据绑定后的提交只修改文档，不改变受测实现。
 
 ## 真库复现（取得数据库后必须执行）
 
@@ -89,4 +110,4 @@ pnpm exec vitest run `
 
 ## 发布判定
 
-本地候选已具备安全、类型、保护基线和 Chromium 合成证据，但真实 PostgreSQL、真实账号/资产、Firefox/WebKit 和云端 main 尚缺失。因此发布开关必须保持默认关闭；本文不授权启用或对外发布。
+本地候选已具备安全、类型、保护基线和 Chromium 合成证据；`pnpm validate` 通过。全量 Vitest 唯一失败是缺少真实 PostgreSQL 测试连接触发的环境门禁，迁移、真实 PostgreSQL、真实账号/资产、Firefox/WebKit 和云端 main 仍未验证。因此发布开关必须保持默认关闭；本文不授权启用或对外发布。
