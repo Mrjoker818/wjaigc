@@ -109,6 +109,7 @@ async function expectPrivateJson(response: Response): Promise<Record<string, unk
 describe('canvas-share owner API', () => {
   beforeEach(() => {
     Object.values(mocks).forEach(mock => mock.mockReset());
+    vi.stubEnv('COZE_PROJECT_DOMAIN_DEFAULT', '');
     vi.stubEnv('WUJIE_CANVAS_SHARE_ENABLED', 'true');
     mocks.getSessionUser.mockResolvedValue({ id: 'owner-1', name: '所有者', role: 'user' });
     mocks.dbAddAuditLog.mockResolvedValue('audit-1');
