@@ -15,6 +15,16 @@ import {
   writeTask7EvidenceRecord,
   type Task7EvidenceStatus,
 } from './read-only-canvas-share-evidence';
+import {
+  classifyTask7Request,
+  evaluateTask7RequestContract,
+  type Task7ForbiddenReason,
+  type Task7FrameNavigationRecord,
+  type Task7FrameRole,
+  type Task7PageRole,
+  type Task7RequestRecord,
+  type Task7Scenario,
+} from './read-only-canvas-share-contract';
 
 export const fixtureToken = 'T'.repeat(43);
 export const imageItemRef = `csr_${'I'.repeat(43)}`;
@@ -231,52 +241,12 @@ export async function installReadOnlyShareFixture(page: Page, options: FixtureOp
   });
 }
 
-export type ForbiddenReason =
-  | 'unsafe-method'
-  | 'cross-origin'
-  | 'contract-not-configured'
-  | 'unexpected-page'
-  | 'unexpected-frame'
-  | 'unexpected-search'
-  | 'unexpected-navigation'
-  | 'request-contract-mismatch'
-  | 'scenario-forbidden-endpoint'
-  | 'unexpected-public-share-path'
-  | 'unexpected-request';
-
-export type ShareScenario =
-  | 'desktop-valid'
-  | 'desktop-invalid'
-  | 'desktop-download-off'
-  | 'desktop-download-on'
-  | 'mobile-portrait'
-  | 'mobile-landscape';
-
-type PageRole = 'primary' | 'secondary' | 'no-frame';
-type FrameRole = 'main' | 'child' | 'none';
-
-export interface ShareRequestRecord {
-  method: string;
-  origin: string;
-  pathname: string;
-  search: string;
-  resourceType: string;
-  navigation: boolean;
-  pageRole: PageRole;
-  frameRole: FrameRole;
-  range: string | null;
-  reason?: ForbiddenReason;
-}
-
-export interface ShareFrameNavigationRecord {
-  origin: string;
-  pathname: string;
-  search: string;
-  hash: string;
-  pageRole: PageRole;
-  frameRole: FrameRole;
-  reason?: ForbiddenReason;
-}
+export type ForbiddenReason = Task7ForbiddenReason;
+export type ShareScenario = Task7Scenario;
+type PageRole = Task7PageRole;
+type FrameRole = Task7FrameRole;
+export type ShareRequestRecord = Task7RequestRecord;
+export type ShareFrameNavigationRecord = Task7FrameNavigationRecord;
 
 export interface ShareEvidence {
   startedAt: string;
@@ -317,111 +287,12 @@ export function configureShareEvidence(
   evidence.identity = identity;
 }
 
-interface ExpectedRequest {
-  method: 'GET' | 'HEAD';
-  pathname: string;
-  search: string;
-  resourceType: string;
-  navigation: boolean;
-  ranges: Array<string | null>;
-  count: number;
-  label: string;
-}
-
-const expectedSharePath = `/shared/canvas/${fixtureToken}`;
-const publicEndpointPaths = new Set([metadataPath, imagePath, videoPath, unavailablePath, downloadPath]);
-
-function expectedRequest(
-  label: string,
-  pathname: string,
-  resourceType: string,
-  count = 1,
-  options: Partial<Omit<ExpectedRequest, 'label' | 'pathname' | 'resourceType' | 'count'>> = {},
-): ExpectedRequest {
+function canonicalRequest(record: ShareRequestRecord, expectedOrigin: string): ShareRequestRecord {
   return {
-    label,
-    pathname,
-    resourceType,
-    count,
-    method: options.method ?? 'GET',
-    search: options.search ?? '',
-    navigation: options.navigation ?? false,
-    ranges: options.ranges ?? [null],
+    ...record,
+    origin: record.origin === expectedOrigin ? ':same-origin' : record.origin,
+    pathname: redactFixturePath(record.pathname),
   };
-}
-
-function expectedScenarioRequests(scenario: ShareScenario): ExpectedRequest[] {
-  const base = [
-    expectedRequest('share document', expectedSharePath, 'document', 1, { navigation: true }),
-    expectedRequest('metadata', metadataPath, 'fetch'),
-  ];
-  if (scenario === 'desktop-invalid') return base;
-
-  const media = [
-    expectedRequest('initial image media', imagePath, 'image', scenario === 'desktop-download-off' ? 1 : 2),
-    expectedRequest('unavailable image media', unavailablePath, 'image'),
-    expectedRequest('browser video lifecycle', videoPath, 'media', 1, { ranges: [null, 'bytes=0-'] }),
-  ];
-  if (scenario === 'desktop-valid') {
-    return [
-      ...base,
-      ...media,
-      expectedRequest('video HEAD probe', videoPath, 'fetch', 1, { method: 'HEAD' }),
-      expectedRequest('video partial probe', videoPath, 'fetch', 1, { ranges: ['bytes=2-5'] }),
-      expectedRequest('video clamped probe', videoPath, 'fetch', 1, { ranges: ['bytes=1540-999999'] }),
-      expectedRequest('video unsatisfiable probe', videoPath, 'fetch', 1, { ranges: ['bytes=999999-1000000'] }),
-    ];
-  }
-  if (scenario === 'desktop-download-off') {
-    return [...base, ...media, expectedRequest('disabled download probe', downloadPath, 'fetch')];
-  }
-  if (scenario === 'desktop-download-on') {
-    return [...base, ...media, expectedRequest('controlled download', downloadPath, 'document', 1, { navigation: true })];
-  }
-  return [...base, ...media];
-}
-
-function isInfrastructureRequest(record: ShareRequestRecord): boolean {
-  return record.pathname.startsWith('/_next/static/')
-    || record.pathname === '/_next/webpack-hmr'
-    || /^\/__nextjs_font\/geist(?:-mono)?-latin\.woff2$/u.test(record.pathname)
-    || (record.pathname === expectedSharePath && record.search.startsWith('?_rsc='))
-    || record.pathname === '/favicon.ico';
-}
-
-function hasApprovedInfrastructureSearch(record: ShareRequestRecord): boolean {
-  if (record.search === '') return true;
-  if (record.pathname.startsWith('/_next/static/')) return /^\?v=\d+$/u.test(record.search);
-  if (record.pathname === expectedSharePath) return /^\?_rsc=[a-zA-Z0-9_-]+$/u.test(record.search);
-  if (record.pathname === '/favicon.ico') return /^\?[a-f0-9]+$/u.test(record.search);
-  return false;
-}
-
-function hasApprovedInfrastructureShape(record: ShareRequestRecord): boolean {
-  if (record.navigation) return false;
-  if (/^\/__nextjs_font\/geist(?:-mono)?-latin\.woff2$/u.test(record.pathname)) {
-    return record.resourceType === 'font';
-  }
-  if (record.pathname === expectedSharePath && record.search.startsWith('?_rsc=')) {
-    return record.resourceType === 'fetch';
-  }
-  if (/^\/_next\/static\/webpack\/[a-f0-9]+\.webpack\.hot-update\.json$/u.test(record.pathname)) {
-    return record.resourceType === 'fetch';
-  }
-  return ['script', 'stylesheet', 'image', 'other'].includes(record.resourceType);
-}
-
-function matchesExpected(record: ShareRequestRecord, expected: ExpectedRequest): boolean {
-  return record.method === expected.method
-    && record.pathname === expected.pathname
-    && record.search === expected.search
-    && record.resourceType === expected.resourceType
-    && record.navigation === expected.navigation
-    && expected.ranges.includes(record.range);
-}
-
-function scenarioAllowsPath(scenario: ShareScenario, pathname: string): boolean {
-  return expectedScenarioRequests(scenario).some(expected => expected.pathname === pathname);
 }
 
 function requestReason(
@@ -429,33 +300,7 @@ function requestReason(
   expectedOrigin: string,
   scenario: ShareScenario | null,
 ): ForbiddenReason | null {
-  if (record.method !== 'GET' && record.method !== 'HEAD') return 'unsafe-method';
-  if (record.origin !== expectedOrigin) return 'cross-origin';
-  if (!scenario) return 'contract-not-configured';
-  if (record.pageRole !== 'primary') return 'unexpected-page';
-  if (record.frameRole !== 'main') return 'unexpected-frame';
-  if (isInfrastructureRequest(record)) {
-    return !hasApprovedInfrastructureSearch(record)
-      ? 'unexpected-search'
-      : !hasApprovedInfrastructureShape(record)
-      ? 'request-contract-mismatch'
-      : null;
-  }
-  if (record.search !== '') return 'unexpected-search';
-  if (record.navigation && record.pathname !== expectedSharePath && record.pathname !== downloadPath) {
-    return 'unexpected-navigation';
-  }
-  if (publicEndpointPaths.has(record.pathname) && !scenarioAllowsPath(scenario, record.pathname)) {
-    return 'scenario-forbidden-endpoint';
-  }
-  const expected = expectedScenarioRequests(scenario);
-  if (expected.some(contract => matchesExpected(record, contract))) return null;
-  if (record.pathname.startsWith('/api/public/canvas-shares/')) {
-    return publicEndpointPaths.has(record.pathname) ? 'request-contract-mismatch' : 'unexpected-public-share-path';
-  }
-  if (record.pathname === expectedSharePath) return 'request-contract-mismatch';
-  if (record.navigation) return 'unexpected-navigation';
-  return 'unexpected-request';
+  return classifyTask7Request(scenario, canonicalRequest(record, expectedOrigin));
 }
 
 export interface ShareRequestContractValidation {
@@ -465,30 +310,16 @@ export interface ShareRequestContractValidation {
   actual: Array<{ label: string; count: number }>;
 }
 
-export function validateShareRequestContract(evidence: ShareEvidence): ShareRequestContractValidation {
+export function validateShareRequestContract(evidence: ShareEvidence, expectedOrigin: string): ShareRequestContractValidation {
   if (!evidence.scenario) {
     return { valid: false, errors: ['request contract is not configured'], expected: [], actual: [] };
   }
-  const expected = expectedScenarioRequests(evidence.scenario);
-  const relevant = evidence.requests.filter(record => !isInfrastructureRequest(record));
-  const errors: string[] = [];
-  const actual = expected.map(contract => {
-    const count = relevant.filter(record => matchesExpected(record, contract)).length;
-    if (count !== contract.count) errors.push(`${contract.label}: expected ${contract.count}, received ${count}`);
-    return { label: contract.label, count };
-  });
-  const matched = relevant.filter(record => expected.some(contract => matchesExpected(record, contract))).length;
-  if (matched !== relevant.length) errors.push(`unexpected scenario requests: ${relevant.length - matched}`);
-  if (evidence.forbiddenRequests.length > 0) errors.push(`forbidden requests: ${evidence.forbiddenRequests.length}`);
-  if (evidence.forbiddenFrameNavigations.length > 0) {
-    errors.push(`forbidden frame navigations: ${evidence.forbiddenFrameNavigations.length}`);
-  }
-  return {
-    valid: errors.length === 0,
-    errors,
-    expected: expected.map(contract => ({ label: contract.label, count: contract.count })),
-    actual,
-  };
+  return evaluateTask7RequestContract(
+    evidence.scenario,
+    evidence.requests.map(record => canonicalRequest(record, expectedOrigin)),
+    evidence.forbiddenRequests.length,
+    evidence.forbiddenFrameNavigations.length,
+  );
 }
 
 function requestFrameRoles(request: Request, primaryPage: Page): { pageRole: PageRole; frameRole: FrameRole } {
@@ -667,13 +498,12 @@ async function attachEvidence(
   evidence: ShareEvidence,
   testInfo: TestInfo,
   status: Task7EvidenceStatus,
-  validation: ShareRequestContractValidation,
 ): Promise<void> {
   const { runId, candidateCommit, executionNonce } = requiredEvidenceRunBinding();
   const completedAt = new Date().toISOString();
   const identity = evidence.identity ?? `${testInfo.project.name}/${testInfo.title}`;
   const record = {
-    schemaVersion: 3 as const,
+    schemaVersion: 4 as const,
     runId,
     candidateCommit,
     executionNonce,
@@ -695,7 +525,6 @@ async function attachEvidence(
       origin: navigation.origin === new URL(String(testInfo.project.use.baseURL)).origin ? ':same-origin' : navigation.origin,
       pathname: redactFixturePath(navigation.pathname),
     })),
-    apiRequests: evidence.apiRequests.map(request => ({ ...request, pathname: redactFixturePath(request.pathname) })),
     forbiddenRequestCount: evidence.forbiddenRequests.length,
     forbiddenRequests: evidence.forbiddenRequests.map(request => ({
       ...request,
@@ -708,8 +537,6 @@ async function attachEvidence(
       origin: navigation.origin === new URL(String(testInfo.project.use.baseURL)).origin ? ':same-origin' : navigation.origin,
       pathname: redactFixturePath(navigation.pathname),
     })),
-    requestContractValid: validation.valid,
-    requestContract: validation,
     consoleErrors: evidence.consoleErrors,
     details: evidence.details,
   };
@@ -753,9 +580,12 @@ export const test = base.extend<{ shareEvidence: ShareEvidence }>({
         || testInfo.expectedStatus === 'skipped'
         || testInfo.annotations.some(annotation => annotation.type === 'skip');
       if (!skipped) {
-        const validation = validateShareRequestContract(evidence);
+        const validation = validateShareRequestContract(
+          evidence,
+          new URL(String(testInfo.project.use.baseURL)).origin,
+        );
         const status = evidenceStatus(testInfo, validation.valid);
-        await attachEvidence(viewport, evidence, testInfo, status, validation);
+        await attachEvidence(viewport, evidence, testInfo, status);
         if (!validation.valid) {
           throw new Error(`只读分享请求契约失败：${validation.errors.join('; ')}`);
         }

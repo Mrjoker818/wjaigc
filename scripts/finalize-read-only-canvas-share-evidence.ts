@@ -28,6 +28,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     expectedCount: 8,
     finalDirectory: result.finalDirectory,
     manifestPath: result.manifestPath,
+    completionMarkerPath: result.completionMarkerPath,
   }, null, 2)}\n`);
 }
 

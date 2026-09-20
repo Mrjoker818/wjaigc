@@ -1,6 +1,5 @@
-import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
-import { mkdir, mkdtemp, readFile, readdir, rm, symlink, unlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, symlink, unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -9,7 +8,6 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
   finalizeTask7Evidence,
   initializeTask7EvidenceRun,
-  invalidateTask7EvidencePromotionLock,
   task7EvidenceDescriptors,
   task7EvidenceFilename,
   task7StagingRecordsDirectory,
@@ -63,7 +61,7 @@ function materializeRequest(expected: Task7ExpectedRequest): Task7EvidenceRecord
     navigation: expected.navigation,
     pageRole: 'primary',
     frameRole: 'main',
-    range: expected.range,
+    range: expected.ranges[0] ?? null,
   };
 }
 
@@ -77,7 +75,7 @@ function completeRecord(
     Array.from({ length: expected.count }, () => materializeRequest(expected))
   ));
   return {
-    schemaVersion: 3,
+    schemaVersion: 4,
     runId,
     candidateCommit,
     executionNonce,
@@ -92,15 +90,10 @@ function completeRecord(
     viewport: { ...descriptor.viewport },
     requests,
     frameNavigations: [],
-    apiRequests: requests
-      .filter(request => request.pathname.startsWith('/api/public/'))
-      .map(({ method, pathname }) => ({ method, pathname })),
     forbiddenRequestCount: 0,
     forbiddenRequests: [],
     forbiddenFrameNavigationCount: 0,
     forbiddenFrameNavigations: [],
-    requestContractValid: true,
-    requestContract: { valid: true, errors: [], expected: [], actual: [] },
     consoleErrors: [],
     details: descriptor.longPress === 'required'
       ? {
@@ -174,7 +167,7 @@ describe('Task 7 trusted semantic evidence validation', () => {
     ['scenario', (record: Task7EvidenceRecord) => ({ ...record, scenario: 'desktop-invalid' as const })],
     ['project', (record: Task7EvidenceRecord) => ({ ...record, project: 'forged-project' })],
     ['viewport', (record: Task7EvidenceRecord) => ({ ...record, viewport: { width: 1, height: 1 } })],
-    ['zero requests', (record: Task7EvidenceRecord) => ({ ...record, requests: [], apiRequests: [] })],
+    ['zero requests', (record: Task7EvidenceRecord) => ({ ...record, requests: [] })],
   ])('rejects a valid identity with forged %s despite passing summaries', async (_label, mutate) => {
     const repository = await createRepository();
     const initialized = await initialize(repository);
@@ -289,116 +282,4 @@ describe('Task 7 trusted semantic evidence validation', () => {
     await expect(finalizeTask7Evidence(finalizeOptions(symlinkRepository, symlinkRun.executionNonce)))
       .rejects.toThrow(/regular file|link|reparse/iu);
   }, 20_000);
-});
-
-describe('Task 7 immutable promotion', () => {
-  it('publishes once-read bytes with SHA-256 digests and semantic summaries', async () => {
-    const repository = await createRepository();
-    const initialized = await initialize(repository);
-    await writeMatrix(repository, initialized.executionNonce);
-    const originalPath = join(
-      task7StagingRecordsDirectory(repository.rootDirectory, repository.head, runId),
-      task7EvidenceFilename('desktop/chromium/valid'),
-    );
-    const originalBytes = await readFile(originalPath);
-    const result = await finalizeTask7Evidence({
-      ...finalizeOptions(repository, initialized.executionNonce),
-      hooks: {
-        afterSourceValidation: async () => {
-          await writeFile(originalPath, '{"replaced":true}\n', 'utf8');
-        },
-      },
-    });
-    const promotedBytes = await readFile(join(result.finalDirectory, 'records', task7EvidenceFilename('desktop/chromium/valid')));
-    expect(promotedBytes.equals(originalBytes)).toBe(true);
-    const manifest = JSON.parse(await readFile(result.manifestPath, 'utf8')) as {
-      records: Array<{ identity: string; sha256: string; semantic: unknown }>;
-    };
-    const promoted = manifest.records.find(record => record.identity === 'desktop/chromium/valid');
-    expect(promoted).toEqual(expect.objectContaining({
-      sha256: createHash('sha256').update(originalBytes).digest('hex'),
-      semantic: expect.objectContaining({ scenario: 'desktop-valid', project: 'chromium', requestCount: 17 }),
-    }));
-    expect(JSON.stringify(manifest)).not.toContain(repository.repositoryRoot);
-  });
-
-  it('does not remove a foreign replacement lock and aborts promotion', async () => {
-    const repository = await createRepository();
-    const initialized = await initialize(repository);
-    await writeMatrix(repository, initialized.executionNonce);
-    let lockPath = '';
-    await expect(finalizeTask7Evidence({
-      ...finalizeOptions(repository, initialized.executionNonce),
-      hooks: {
-        afterLockAcquired: async lock => {
-          lockPath = lock.lockPath;
-          await unlink(lock.lockPath);
-          await writeFile(lock.lockPath, '{"ownerId":"foreign"}\n', 'utf8');
-        },
-      },
-    })).rejects.toThrow(/lock ownership/iu);
-    expect(await readFile(lockPath, 'utf8')).toContain('foreign');
-  });
-
-  it('refuses destination creation during promotion without exposing its own partial directory', async () => {
-    const repository = await createRepository();
-    const initialized = await initialize(repository);
-    await writeMatrix(repository, initialized.executionNonce);
-    await expect(finalizeTask7Evidence({
-      ...finalizeOptions(repository, initialized.executionNonce),
-      hooks: {
-        beforePromotionRename: async ({ finalDirectory }) => {
-          await mkdir(finalDirectory);
-          await writeFile(join(finalDirectory, 'foreign.txt'), 'foreign\n', 'utf8');
-        },
-      },
-    })).rejects.toThrow(/exist|destination|rename/iu);
-    const finalDirectory = join(repository.rootDirectory, 'promoted', repository.head, runId);
-    expect(await readdir(finalDirectory)).toEqual(['foreign.txt']);
-  });
-
-  it('allows exactly one concurrent promotion winner', async () => {
-    const repository = await createRepository();
-    const initialized = await initialize(repository);
-    await writeMatrix(repository, initialized.executionNonce);
-    const options = finalizeOptions(repository, initialized.executionNonce);
-    const outcomes = await Promise.allSettled([finalizeTask7Evidence(options), finalizeTask7Evidence(options)]);
-    expect(outcomes.filter(outcome => outcome.status === 'fulfilled')).toHaveLength(1);
-    expect(outcomes.filter(outcome => outcome.status === 'rejected')).toHaveLength(1);
-  });
-
-  it('never auto-deletes an unknown abandoned lock and only quarantines an exact owner match', async () => {
-    const repository = await createRepository();
-    const initialized = await initialize(repository);
-    await writeMatrix(repository, initialized.executionNonce);
-    let acquired: { lockPath: string; ownerId: string } | undefined;
-    await expect(finalizeTask7Evidence({
-      ...finalizeOptions(repository, initialized.executionNonce),
-      hooks: {
-        afterLockAcquired: async lock => {
-          acquired = { lockPath: lock.lockPath, ownerId: lock.ownerId };
-          const bytes = await readFile(lock.lockPath);
-          await unlink(lock.lockPath);
-          await writeFile(lock.lockPath, bytes);
-          throw new Error('simulate crash after lock acquisition');
-        },
-      },
-    })).rejects.toThrow(/simulate crash/iu);
-    expect(acquired).toBeDefined();
-    await expect(invalidateTask7EvidencePromotionLock({
-      rootDirectory: repository.rootDirectory,
-      candidateCommit: repository.head,
-      runId,
-      expectedOwnerId: 'wrong-owner',
-    })).rejects.toThrow(/owner/iu);
-    expect(await readFile(acquired!.lockPath, 'utf8')).toContain(acquired!.ownerId);
-    const recovery = await invalidateTask7EvidencePromotionLock({
-      rootDirectory: repository.rootDirectory,
-      candidateCommit: repository.head,
-      runId,
-      expectedOwnerId: acquired!.ownerId,
-    });
-    expect(recovery.quarantinedLockPath).toContain(join('invalidated', 'locks'));
-    await expect(readFile(acquired!.lockPath)).rejects.toMatchObject({ code: 'ENOENT' });
-  });
 });
