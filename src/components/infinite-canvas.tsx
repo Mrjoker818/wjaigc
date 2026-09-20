@@ -12375,6 +12375,7 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
                       <button
                         type="button"
                         className={`px-3 py-1 text-xs font-medium transition-colors ${isMonochrome ? 'bg-red-700 text-white hover:bg-red-800' : 'bg-red-500 text-white hover:bg-red-400'}`}
+                        onPointerDown={(e) => e.stopPropagation()}
                         onClick={(e) => {
                           e.stopPropagation();
                           void recoverMissingMedia(image);
@@ -12385,6 +12386,7 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
                       <button
                         type="button"
                         className={`px-3 py-1 text-xs font-medium transition-colors ${isMonochrome ? 'bg-white text-red-800 ring-1 ring-red-200 hover:bg-red-100' : 'bg-white/10 text-red-100 hover:bg-white/20'}`}
+                        onPointerDown={(e) => e.stopPropagation()}
                         onClick={(e) => {
                           e.stopPropagation();
                           void recoverMissingMedia(image);

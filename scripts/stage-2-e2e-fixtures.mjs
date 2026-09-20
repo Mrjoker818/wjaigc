@@ -318,7 +318,9 @@ function simpleChatProject(plan, browser, role, sourceRole) {
 }
 
 export function stage2PlacementEntityId(asset, entityType) {
-  return entityType === 'canvas-image' ? asset.entityId : `${asset.entityId}:${entityType}`;
+  if (entityType === 'canvas-image') return asset.entityId;
+  if (entityType === 'workflow-input') return `${asset.entityId}-input`;
+  return `${asset.entityId}:${entityType}`;
 }
 
 async function insertPlacement(client, asset, ownerId, workspace, workspaceId, entityType, placementId) {
@@ -405,7 +407,7 @@ async function seedDatabase(plan, options) {
         await insertPlacement(client, asset, options.userId, 'canvas', `canvas:${asset.projectId}`, 'canvas-image', asset.placementId);
       }
       if (['workflow', 'shared'].includes(asset.role)) {
-        await insertPlacement(client, asset, options.userId, 'workflow', `workflow:${asset.projectId}`, 'workflow-input', asset.workflowPlacementId);
+        await insertPlacement(client, asset, options.userId, 'workflow', `workflow:${asset.entityId}-workflow`, 'workflow-input', asset.workflowPlacementId);
       }
       if (['embedded-chat', 'standalone-chat', 'shared'].includes(asset.role)) {
         await insertPlacement(client, asset, options.userId, 'chat', `chat:${asset.projectId}`, 'chat-result', asset.chatPlacementId);

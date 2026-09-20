@@ -17,9 +17,12 @@ import {
 } from '../helpers/stage-2-e2e';
 
 async function recordJsonResponse(response: import('@playwright/test').Response, record: (payload: unknown) => void): Promise<Record<string, unknown>> {
-  expect(response.ok(), `${response.url()} returned HTTP ${response.status()}`).toBeTruthy();
   const payload = await response.json().catch(() => ({})) as Record<string, unknown>;
   record(payload);
+  expect(
+    response.ok(),
+    `${response.url()} returned HTTP ${response.status()}: ${JSON.stringify(payload)} request=${response.request().postData() || '<empty>'}`,
+  ).toBeTruthy();
   return payload;
 }
 
@@ -30,6 +33,12 @@ function expectTransfer(payload: Record<string, unknown>): { assetId: string; as
   expect(typeof payload.entityId === 'string' && payload.entityId.length > 0).toBe(true);
   expect(typeof payload.url === 'string' && payload.url.length > 0).toBe(true);
   return payload as { assetId: string; assetVersionId: string; placementId: string; entityId: string; url: string };
+}
+
+function expectSingleBatchTransfer(payload: Record<string, unknown>): { assetId: string; assetVersionId: string; placementId: string; entityId: string; url: string } {
+  expect(Array.isArray(payload.transfers)).toBe(true);
+  expect(payload.transfers).toHaveLength(1);
+  return expectTransfer((payload.transfers as Record<string, unknown>[])[0]);
 }
 
 function observeProjectGraphSaves(
@@ -155,11 +164,11 @@ test.describe('Stage 2 cross-workspace flows', () => {
     const placementIds = new Set<string>();
     const saves = observeProjectGraphSaves(page, targetProjectId);
     try {
-      const transfer = page.waitForResponse(response => response.url().includes('/api/assets/transfer') && response.request().method() === 'POST');
+      const transfer = page.waitForResponse(response => response.url().includes('/api/assets/batch-transfer') && response.request().method() === 'POST');
       await addButton.click();
       const payload = await recordJsonResponse(await transfer, value => stage2Evidence.recordPayload(value));
-      if (typeof payload.placementId === 'string') placementIds.add(payload.placementId);
-      const created = expectTransfer(payload);
+      const created = expectSingleBatchTransfer(payload);
+      placementIds.add(created.placementId);
       await openCanvasProject(page, targetProjectId);
       await expect(await canvasImageByUrl(page, created.url)).toBeVisible({ timeout: 20_000 });
       await saves.waitFor(created);
@@ -186,7 +195,7 @@ test.describe('Stage 2 cross-workspace flows', () => {
     try {
       const deleted = page.waitForResponse(response => response.url().includes(`/api/assets/placements/${placementId}`) && response.request().method() === 'DELETE');
       const saved = page.waitForResponse(response => response.url().includes('/api/user-data/sync') && response.request().method() === 'POST');
-      await page.getByTestId('selected-image-delete').click();
+      await page.locator('[data-testid="selected-image-delete"]:visible, [data-mobile-image-actions]:visible button[aria-label="删除"]').click();
       const deleteResponse = await deleted;
       const deletePayload = await deleteResponse.json().catch(() => ({})) as Record<string, unknown>;
       stage2Evidence.recordApi('DELETE', deleteResponse.url(), deleteResponse.status(), deletePayload);

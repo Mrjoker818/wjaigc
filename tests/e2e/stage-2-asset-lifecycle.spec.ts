@@ -156,7 +156,7 @@ test.describe('Stage 2 asset lifecycle', () => {
     try {
       const deleted = page.waitForResponse(response => response.url().includes(`/api/assets/placements/${placementId}`) && response.request().method() === 'DELETE');
       const saved = page.waitForResponse(response => isProjectSnapshotSaveWithoutPlacement(response, projectId, placementId));
-      await page.getByTestId('selected-image-delete').click();
+      await page.locator('[data-testid="selected-image-delete"]:visible, [data-mobile-image-actions]:visible button[aria-label="删除"]').click();
       const deleteResponse = await deleted;
       const deletePayload = await deleteResponse.json().catch(() => ({})) as Record<string, unknown>;
       stage2Evidence.recordApi('DELETE', deleteResponse.url(), deleteResponse.status(), deletePayload);
@@ -199,7 +199,7 @@ test.describe('Stage 2 asset lifecycle', () => {
 
     try {
       const deleted = page.waitForResponse(response => response.url().includes(`/api/assets/placements/${placementId}`) && response.request().method() === 'DELETE');
-      await page.getByTestId('selected-image-delete').click();
+      await page.locator('[data-testid="selected-image-delete"]:visible, [data-mobile-image-actions]:visible button[aria-label="删除"]').click();
       expect((await deleted).ok()).toBe(true);
       await expect(image).toHaveCount(0);
 

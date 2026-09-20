@@ -105,8 +105,9 @@ describe('Stage 2 E2E fixture plan', () => {
     expect(first.length).toBeLessThanOrEqual(64);
   });
 
-  it('uses the canvas image id as the graph entity identity without a type suffix', () => {
+  it('matches seeded placement identities to the entity ids used by each workspace UI', () => {
     expect(stage2PlacementEntityId({ entityId: 'image-1' }, 'canvas-image')).toBe('image-1');
+    expect(stage2PlacementEntityId({ entityId: 'image-1' }, 'workflow-input')).toBe('image-1-input');
     expect(stage2PlacementEntityId({ entityId: 'image-1' }, 'chat-result')).toBe('image-1:chat-result');
   });
 

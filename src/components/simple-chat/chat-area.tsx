@@ -63,6 +63,7 @@ import {
   type SimpleChatRetryContextV1,
 } from '@/lib/simple-chat-retry';
 import { buildSimpleChatWorkspaceHandoffUrl } from '@/lib/simple-chat-workspace-handoff';
+import { buildSimpleChatCanvasTransferIdentity } from '@/lib/simple-chat-workspace-handoff-client';
 import { MultiPlatformExportCard } from './multi-platform-export-card';
 import { resolveSimpleChatExportRequestContext } from '@/lib/multi-platform-export/simple-chat-intent';
 import { BriefToVideoCard } from './brief-to-video-card';
@@ -1804,6 +1805,13 @@ export default function ChatArea({
         kind?: WorkspaceAssetReference['kind'];
       }): Promise<WorkspaceAssetReference> => {
         const entityType = kind === 'video' ? 'canvas-video' : 'canvas-image';
+        const transferIdentity = buildSimpleChatCanvasTransferIdentity({
+          targetProjectId: transferProjectId,
+          chatTaskId: task.id,
+          messageId: message.id,
+          imageIndex: index,
+          sourceVersionId,
+        });
         const transferResponse = await fetch('/api/assets/batch-transfer', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -1812,8 +1820,8 @@ export default function ChatArea({
             targetProject: transferProjectId,
             targetWorkspace: `canvas:${transferProjectId}`,
             entityType,
-            entityId: `simple-chat:${task.id}:${message.id}:${index}`,
-            idempotencyKey: `simple-chat-canvas:${transferProjectId}:${task.id}:${message.id}:${index}:${sourceVersionId}`,
+            entityId: transferIdentity.entityId,
+            idempotencyKey: transferIdentity.idempotencyKey,
             metadata: {
               source: 'standalone-chat',
               messageId: message.id,

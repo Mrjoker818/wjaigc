@@ -7,6 +7,7 @@ import {
   type SimpleChatWorkspaceHandoffIntent,
 } from './simple-chat-workspace-handoff';
 import type { Workflow } from './workflow-engine';
+import { stableContentSha256Hex } from './platform-compliance/rules';
 
 export interface SimpleChatWorkflowTransferRequest {
   sourceVersion: string;
@@ -99,6 +100,45 @@ export function getSimpleChatWorkspaceHandoffIdentity(
     intent.chatTaskId,
     intent.chatMessageId,
   ]);
+}
+
+function boundedSimpleChatIdentity(scope: string, readable: string, canonicalParts: string[]): string {
+  if (readable.length <= 256) return readable;
+  const digest = stableContentSha256Hex(JSON.stringify([scope, ...canonicalParts]));
+  const boundedScope = scope.slice(0, 64);
+  return boundedScope ? `${boundedScope}:${digest}` : digest;
+}
+
+export function buildBoundedSimpleChatTransferIdempotencyKey(
+  scope: string,
+  parts: string[],
+): string {
+  const readable = [scope, ...parts].join(':');
+  return boundedSimpleChatIdentity(scope, readable, parts);
+}
+
+export function buildSimpleChatCanvasTransferIdentity(input: {
+  targetProjectId: string;
+  chatTaskId: string;
+  messageId: string;
+  imageIndex: number;
+  sourceVersionId: string;
+}): { entityId: string; idempotencyKey: string } {
+  const imageIndex = String(input.imageIndex);
+  return {
+    entityId: buildBoundedSimpleChatTransferIdempotencyKey('simple-chat', [
+      input.chatTaskId,
+      input.messageId,
+      imageIndex,
+    ]),
+    idempotencyKey: buildBoundedSimpleChatTransferIdempotencyKey('simple-chat-canvas', [
+      input.targetProjectId,
+      input.chatTaskId,
+      input.messageId,
+      imageIndex,
+      input.sourceVersionId,
+    ]),
+  };
 }
 
 export function shouldConsumeSimpleChatWorkspaceHandoff(
@@ -211,7 +251,16 @@ function buildTransferIdempotencyKey(
   pending: PendingSimpleChatHandoffImage,
   sourceVersion: string,
 ): string {
-  return `simple-chat-workflow:${JSON.stringify([
+  const parts = [
+    intent.targetProjectId,
+    workflowId,
+    intent.chatProjectId,
+    intent.chatTaskId,
+    intent.chatMessageId,
+    String(pending.imageIndex),
+    sourceVersion,
+  ];
+  const readable = `simple-chat-workflow:${JSON.stringify([
     intent.targetProjectId,
     workflowId,
     intent.chatProjectId,
@@ -220,6 +269,7 @@ function buildTransferIdempotencyKey(
     pending.imageIndex,
     sourceVersion,
   ])}`;
+  return boundedSimpleChatIdentity('simple-chat-workflow', readable, parts);
 }
 
 export function buildSimpleChatWorkflowTransfer(
