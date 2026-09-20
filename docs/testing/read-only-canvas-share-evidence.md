@@ -21,7 +21,7 @@
 - Task 8 实现与完整本地门禁提交：`dd4880bc87ac13e723d7cd36d71b9e0a484bfbeb`。
 - 本地候选分支：`codex/read-only-canvas-share`；真库门禁修正提交为 `41a52b921d9d45e9f26cfda78c76781a73179387`。
 - 本地 `main` 已从 `953bd6309a571a6af7bfbac330ec6f31663779eb` 纯快进整合至 `41a52b921d9d45e9f26cfda78c76781a73179387`；整合前 6 个用户自有 `.superpowers/sdd` 改动与候选 67 个路径零重叠并得到保留。
-- `origin/main` 仍为 `9b6077b72f0661b68054c5b4709dc7e25997f9f2`；本轮未推送。
+- 本地 `main@3f75c3fcb1158711d3b2438fa1943a21d33b9be8` 已快进推送，推送后重新读取确认 `origin/main` 与本地一致；本段发布状态修正文档将作为后续纯文档提交一并同步，Coze 验收前必须再次读取最终 exact SHA。
 - 运行模式：本地 Next.js / Vitest / Playwright 合成 fixture；没有真实云端或真实账号声明。
 - 迁移版本：`migrations/20260919_read_only_canvas_shares.sql`。
 
@@ -111,4 +111,4 @@ pnpm exec vitest run `
 
 ## 发布判定
 
-本地 `main` 已具备安全、类型、保护基线、Chromium 合成证据、隔离 PostgreSQL 迁移与全量真库回归证据；全量为 826 files / 7123 tests，0 failed。真实账号/资产、Firefox/WebKit、真实 token trace 和云端 exact-main 仍未验证，本地 `main` 也尚未推送到 `origin/main`。因此发布开关必须保持默认关闭；本文不授权启用或对外发布，也不授权提前进入 WebSocket 阶段。
+GitHub `main` 已接收本地候选，并具备安全、类型、保护基线、Chromium 合成证据、隔离 PostgreSQL 迁移与全量真库回归证据；全量为 826 files / 7123 tests，0 failed。真实账号/资产、Firefox/WebKit、真实 token trace 和 Coze exact-main 运行验收仍未验证。因此发布开关必须保持默认关闭；本文不授权启用或对外发布，也不授权提前进入 WebSocket 阶段。
