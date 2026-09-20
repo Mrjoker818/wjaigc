@@ -1,12 +1,12 @@
 {
   "id": "V588-ADMIN-003-S3-ZERO-BYTE-RECOVERY",
-  "recordedAt": "2026-09-20T16:38:00+08:00",
-  "status": "LOCAL_PASS_CLOUD_REVERIFY_PENDING",
-  "scope": "ADMIN-003 remaining S3 recovery edge",
+  "recordedAt": "2026-09-20T16:59:44+08:00",
+  "status": "LOCAL_PASS_CLOUD_RUNTIME_STALE_REVERIFY_PENDING",
+  "scope": "ADMIN-003 remaining S3 recovery edge and preview verification",
   "cloudDiscovery": {
     "paidTasksCreated": 0,
     "filesDeleted": 0,
-    "databaseWrites": 0,
+    "databaseEffects": "The explicit legacy-asset recovery request only advanced that asset to its terminal unrecoverable state and synchronized the resulting canvas state.",
     "s3Configuration": {
       "endpointPresent": true,
       "bucketPresent": true,
@@ -19,17 +19,19 @@
       "naturallyMissingLocalCache": 0,
       "note": "No thumbnail was deleted to manufacture a recovery sample."
     },
-    "assetVersions": {
-      "readyWithStorageKey": 7,
-      "naturallyMissingLocalAndPublicCache": 1,
-      "candidateMimeType": "video/mp4",
+    "assetVersionCorrection": {
+      "mimeType": "video/mp4",
       "databaseByteSize": 1870188,
-      "s3HeadByteSize": 0,
-      "s3HeadMimeType": "video/mp4",
-      "routeRequestSentBeforeFix": false,
-      "localCacheWrittenBeforeFix": false
+      "rawExactHeadByteSizeObservedEarlier": 0,
+      "routeLevelExactReadByteSize": 1870188,
+      "routeLevelBasenameReadByteSize": null,
+      "sourceMapFullPathPresent": false,
+      "sourceMapBasenamePresent": false,
+      "existingManagedCacheByteSize": 1870188,
+      "existingManagedCacheMtime": "2026-09-14T07:56:20.490493423+08:00",
+      "correction": "The managed cache predated this sync, and the route-level S3 reader returned the complete object. The earlier raw HEAD observation therefore does not prove that serve-upload saw an empty Buffer, nor that this natural sample could exercise sourceUrl fallback."
     },
-    "rootCause": "downloadImageFromS3 returned Buffer.alloc(0), which is truthy; serve-upload therefore treated a zero-byte S3 object as a successful recovery and would have cached an empty file instead of continuing to the recorded source URL."
+    "defectClassification": "A defensive zero-byte handling defect is proven by deterministic RED/GREEN tests. A live cloud request that reaches the zero-byte route branch has not been demonstrated."
   },
   "tdd": {
     "red": {
@@ -46,11 +48,60 @@
       "result": "4 files, 49 tests passed"
     }
   },
+  "integration": {
+    "githubMainCommit": "b835986b41101aabbff52ac98c1504811b98a271",
+    "githubMainTree": "380da1bbc78941196af60dc3714b7b71d8886a11",
+    "cozeMergeCommit": "3d1b8cd0cdbf8832f61383b30d0f828ce3899da5",
+    "cozeTree": "380da1bbc78941196af60dc3714b7b71d8886a11",
+    "cozeWorkingTreeClean": true,
+    "stableCommit": "52f7c601ed150769e15d06fb435c6e360e28c9e7"
+  },
+  "previewVerification": {
+    "runningProcess": {
+      "pid": 1498,
+      "processStartedAt": "2026-09-20T16:21:10+08:00",
+      "nextBuildMtime": "2026-09-20T16:21:06.803645987+08:00",
+      "sourceSyncCommitTime": "2026-09-20T16:45:55+08:00",
+      "exactMainSourceLoadedByRuntime": false,
+      "note": "The preview process and .next build both predate the exact-main merge, so the public preview is not post-deploy evidence for this fix."
+    },
+    "positiveS3Recovery": {
+      "aliasPath": "images/video/video_1789335797083_mptoh9/video_video_1789335797083_mptoh9_1789343780439_njklym.mp4",
+      "preRequestLocalCandidatesPresent": false,
+      "firstResponse": "200 video/mp4 1870188 bytes",
+      "secondResponse": "200 video/mp4 1870188 bytes",
+      "cachedBytes": 1870188,
+      "responseAndCacheHashesEqual": true,
+      "fileMagicHex": "00000020667479706d703466",
+      "scope": "This verifies the existing preview build's non-empty S3 recovery and cache path only. It does not exercise the new zero-byte fallback guard."
+    },
+    "standalonePreview": {
+      "workspaceLoaded": true,
+      "healthySampleImages": 2,
+      "legacyMissingAsset": {
+        "filename": "3933359884065555-45121d83-fa52-44a6-a17e-48fce28dd818-image_7A3DJ3K50YKZSZ2E11RSJ1N1X4_0.png",
+        "identityComplete": true,
+        "recoveryHttpStatus": 200,
+        "recovered": false,
+        "availability": "unrecoverable",
+        "deferred": false,
+        "browserSourceLoadFailure": "net::ERR_BLOCKED_BY_ORB",
+        "finalUiErrorCode": "MEDIA_RECOVERY_FAILED",
+        "retryButtonsVisibleAfterTerminalResult": false
+      }
+    },
+    "postCheck": {
+      "gitDirtyEntries": 0,
+      "headTreeMatchesOriginMainTree": true,
+      "rootHttpStatus": 200,
+      "shareFlag": "unset"
+    }
+  },
   "gates": {
     "typescript": "PASS",
     "lint": "PASS_WITH_EXISTING_WARNINGS_948_AND_ZERO_ERRORS",
     "productionBuild": "PASS_121_OF_121_STATIC_PAGES",
-    "cloudPostDeploy": "PENDING"
+    "cloudPostDeploy": "PENDING_PREVIEW_REBUILD_OR_DEPLOY"
   },
   "files": [
     "src/app/api/serve-upload/[...path]/route.ts",
@@ -58,5 +109,5 @@
     "src/__tests__/api/serve-upload-s3-recovery.test.ts",
     "src/__tests__/lib/s3-storage-bounded-read.test.ts"
   ],
-  "conclusion": "A real cloud S3 integrity edge was found without deleting data or spending credits. The local fix is verified; ADMIN-003 remains open until the exact main candidate is deployed and the naturally missing object recovers through the existing source fallback without caching zero bytes."
+  "conclusion": "The zero-byte guard is locally verified and merged to main, but the currently running Coze preview predates that merge. The preview proves ordinary non-empty S3 recovery and correctly classifies one legacy asset as unrecoverable; it is not cloud post-deploy proof of zero-byte fallback. ADMIN-003 remains open until an exact-main preview rebuild or deployment is verified."
 }
