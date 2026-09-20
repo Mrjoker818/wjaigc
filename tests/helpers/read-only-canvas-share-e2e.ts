@@ -1,11 +1,10 @@
-import { mkdirSync, renameSync, writeFileSync } from 'node:fs';
-import { randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';
 
 import {
   expect,
   test as base,
   type BrowserContext,
+  type Frame,
   type Page,
   type Request,
   type Route,
@@ -13,7 +12,7 @@ import {
 } from '@playwright/test';
 
 import {
-  task7StagingRecordsDirectory,
+  writeTask7EvidenceRecord,
   type Task7EvidenceStatus,
 } from './read-only-canvas-share-evidence';
 
@@ -269,13 +268,25 @@ export interface ShareRequestRecord {
   reason?: ForbiddenReason;
 }
 
+export interface ShareFrameNavigationRecord {
+  origin: string;
+  pathname: string;
+  search: string;
+  hash: string;
+  pageRole: PageRole;
+  frameRole: FrameRole;
+  reason?: ForbiddenReason;
+}
+
 export interface ShareEvidence {
   startedAt: string;
   scenario: ShareScenario | null;
   identity: string | null;
   requests: ShareRequestRecord[];
+  frameNavigations: ShareFrameNavigationRecord[];
   apiRequests: Array<{ method: string; pathname: string }>;
   forbiddenRequests: ShareRequestRecord[];
+  forbiddenFrameNavigations: ShareFrameNavigationRecord[];
   consoleErrors: string[];
   details: Record<string, unknown>;
 }
@@ -286,8 +297,10 @@ export function createShareEvidence(startedAt = new Date().toISOString()): Share
     scenario: null,
     identity: null,
     requests: [],
+    frameNavigations: [],
     apiRequests: [],
     forbiddenRequests: [],
+    forbiddenFrameNavigations: [],
     consoleErrors: [],
     details: {},
   };
@@ -371,14 +384,31 @@ function expectedScenarioRequests(scenario: ShareScenario): ExpectedRequest[] {
 function isInfrastructureRequest(record: ShareRequestRecord): boolean {
   return record.pathname.startsWith('/_next/static/')
     || record.pathname === '/_next/webpack-hmr'
+    || /^\/__nextjs_font\/geist(?:-mono)?-latin\.woff2$/u.test(record.pathname)
+    || (record.pathname === expectedSharePath && record.search.startsWith('?_rsc='))
     || record.pathname === '/favicon.ico';
 }
 
 function hasApprovedInfrastructureSearch(record: ShareRequestRecord): boolean {
   if (record.search === '') return true;
   if (record.pathname.startsWith('/_next/static/')) return /^\?v=\d+$/u.test(record.search);
+  if (record.pathname === expectedSharePath) return /^\?_rsc=[a-zA-Z0-9_-]+$/u.test(record.search);
   if (record.pathname === '/favicon.ico') return /^\?[a-f0-9]+$/u.test(record.search);
   return false;
+}
+
+function hasApprovedInfrastructureShape(record: ShareRequestRecord): boolean {
+  if (record.navigation) return false;
+  if (/^\/__nextjs_font\/geist(?:-mono)?-latin\.woff2$/u.test(record.pathname)) {
+    return record.resourceType === 'font';
+  }
+  if (record.pathname === expectedSharePath && record.search.startsWith('?_rsc=')) {
+    return record.resourceType === 'fetch';
+  }
+  if (/^\/_next\/static\/webpack\/[a-f0-9]+\.webpack\.hot-update\.json$/u.test(record.pathname)) {
+    return record.resourceType === 'fetch';
+  }
+  return ['script', 'stylesheet', 'image', 'other'].includes(record.resourceType);
 }
 
 function matchesExpected(record: ShareRequestRecord, expected: ExpectedRequest): boolean {
@@ -407,7 +437,7 @@ function requestReason(
   if (isInfrastructureRequest(record)) {
     return !hasApprovedInfrastructureSearch(record)
       ? 'unexpected-search'
-      : record.navigation || !['script', 'stylesheet', 'image', 'other'].includes(record.resourceType)
+      : !hasApprovedInfrastructureShape(record)
       ? 'request-contract-mismatch'
       : null;
   }
@@ -450,6 +480,9 @@ export function validateShareRequestContract(evidence: ShareEvidence): ShareRequ
   const matched = relevant.filter(record => expected.some(contract => matchesExpected(record, contract))).length;
   if (matched !== relevant.length) errors.push(`unexpected scenario requests: ${relevant.length - matched}`);
   if (evidence.forbiddenRequests.length > 0) errors.push(`forbidden requests: ${evidence.forbiddenRequests.length}`);
+  if (evidence.forbiddenFrameNavigations.length > 0) {
+    errors.push(`forbidden frame navigations: ${evidence.forbiddenFrameNavigations.length}`);
+  }
   return {
     valid: errors.length === 0,
     errors,
@@ -476,9 +509,20 @@ export function observeReadOnlyShareRequests(
   evidence: ShareEvidence,
   baseURL: string,
   primaryPage: Page,
-): () => void {
+): { settleAndStop: () => Promise<void> } {
   const expectedOrigin = new URL(baseURL).origin;
+  const pendingRequests = new Set<Request>();
+  const pendingWaiters = new Set<() => void>();
+  const frameUrls = new WeakMap<Frame, string>();
+  const observedPages = new Set<Page>();
+
+  const notifyIfSettled = (): void => {
+    if (pendingRequests.size !== 0) return;
+    for (const resolveWaiter of pendingWaiters) resolveWaiter();
+    pendingWaiters.clear();
+  };
   const onRequest = (request: Request): void => {
+    pendingRequests.add(request);
     const url = new URL(request.url());
     const record: ShareRequestRecord = {
       method: request.method(),
@@ -498,8 +542,93 @@ export function observeReadOnlyShareRequests(
     }
     if (reason) evidence.forbiddenRequests.push(record);
   };
+  const onRequestSettled = (request: Request): void => {
+    pendingRequests.delete(request);
+    notifyIfSettled();
+  };
+  const reconcileClosedPageRequests = (): void => {
+    for (const request of pendingRequests) {
+      try {
+        if (request.frame().page().isClosed()) pendingRequests.delete(request);
+      } catch {
+        if (context.pages().every(targetPage => targetPage.isClosed())) pendingRequests.delete(request);
+      }
+    }
+    notifyIfSettled();
+  };
+  const observePage = (targetPage: Page): void => {
+    if (observedPages.has(targetPage)) return;
+    observedPages.add(targetPage);
+    for (const frame of targetPage.frames()) frameUrls.set(frame, frame.url());
+    targetPage.on('framenavigated', onFrameNavigated);
+  };
+  const onFrameNavigated = (frame: Frame): void => {
+    const previous = frameUrls.get(frame);
+    const current = frame.url();
+    frameUrls.set(frame, current);
+    if (!previous || previous === 'about:blank' || current === 'about:blank') return;
+    const previousUrl = new URL(previous);
+    const currentUrl = new URL(current);
+    if (previousUrl.origin !== currentUrl.origin
+      || previousUrl.pathname !== currentUrl.pathname
+      || previousUrl.search !== currentUrl.search
+      || previousUrl.hash === currentUrl.hash) return;
+    const page = frame.page();
+    const record: ShareFrameNavigationRecord = {
+      origin: currentUrl.origin,
+      pathname: currentUrl.pathname,
+      search: currentUrl.search,
+      hash: currentUrl.hash,
+      pageRole: page === primaryPage ? 'primary' : 'secondary',
+      frameRole: frame === page.mainFrame() ? 'main' : 'child',
+      reason: 'unexpected-navigation',
+    };
+    evidence.frameNavigations.push(record);
+    evidence.forbiddenFrameNavigations.push(record);
+  };
+  const waitForPendingRequests = async (): Promise<void> => {
+    if (pendingRequests.size === 0) return;
+    await new Promise<void>((resolveWaiter, reject) => {
+      const complete = (): void => {
+        clearTimeout(timeout);
+        resolveWaiter();
+      };
+      const timeout = setTimeout(() => {
+        pendingWaiters.delete(complete);
+        const pending = [...pendingRequests].map(request => `${request.method()} ${request.url()}`).join(', ');
+        reject(new Error(`Timed out waiting for ${pendingRequests.size} observed request(s) to settle: ${pending}`));
+      }, 10_000);
+      pendingWaiters.add(complete);
+    });
+  };
   context.on('request', onRequest);
-  return () => context.off('request', onRequest);
+  context.on('requestfinished', onRequestSettled);
+  context.on('requestfailed', onRequestSettled);
+  context.on('page', observePage);
+  context.pages().forEach(observePage);
+  return {
+    settleAndStop: async (): Promise<void> => {
+      const openPages = context.pages().filter(targetPage => !targetPage.isClosed());
+      await Promise.all(openPages.map(targetPage => targetPage.evaluate(() => {
+        for (const media of document.querySelectorAll<HTMLMediaElement>('video, audio')) {
+          media.pause();
+          media.removeAttribute('src');
+          media.load();
+        }
+      }).catch(error => {
+        if (!targetPage.isClosed()) throw error;
+      })));
+      const pagesToClose = context.pages().filter(targetPage => !targetPage.isClosed());
+      await Promise.all(pagesToClose.map(targetPage => targetPage.close({ runBeforeUnload: false })));
+      reconcileClosedPageRequests();
+      await waitForPendingRequests();
+      context.off('request', onRequest);
+      context.off('requestfinished', onRequestSettled);
+      context.off('requestfailed', onRequestSettled);
+      context.off('page', observePage);
+      for (const targetPage of observedPages) targetPage.off('framenavigated', onFrameNavigated);
+    },
+  };
 }
 
 function redactFixturePath(pathname: string): string {
@@ -519,23 +648,35 @@ function evidenceStatus(testInfo: TestInfo, contractValid: boolean): Task7Eviden
   return 'unexpected';
 }
 
-const defaultRunId = `adhoc-${Date.now()}-${process.pid}-${randomUUID()}`;
-const evidenceRunId = process.env.TASK7_EVIDENCE_RUN_ID?.trim() || defaultRunId;
-const evidenceCandidateCommit = process.env.TASK7_EVIDENCE_COMMIT?.trim() || 'working-tree';
+function requiredEvidenceRunBinding(): {
+  runId: string;
+  candidateCommit: string;
+  executionNonce: string;
+} {
+  const runId = process.env.TASK7_EVIDENCE_RUN_ID?.trim();
+  const candidateCommit = process.env.TASK7_EVIDENCE_COMMIT?.trim().toLowerCase();
+  const executionNonce = process.env.TASK7_EVIDENCE_NONCE?.trim().toLowerCase();
+  if (!runId || !candidateCommit || !executionNonce) {
+    throw new Error('Task 7 evidence run must be initialized; set TASK7_EVIDENCE_RUN_ID, TASK7_EVIDENCE_COMMIT, and TASK7_EVIDENCE_NONCE');
+  }
+  return { runId, candidateCommit, executionNonce };
+}
 
 async function attachEvidence(
-  page: Page,
+  viewport: { width: number; height: number } | null,
   evidence: ShareEvidence,
   testInfo: TestInfo,
   status: Task7EvidenceStatus,
   validation: ShareRequestContractValidation,
 ): Promise<void> {
+  const { runId, candidateCommit, executionNonce } = requiredEvidenceRunBinding();
   const completedAt = new Date().toISOString();
   const identity = evidence.identity ?? `${testInfo.project.name}/${testInfo.title}`;
-  const body = JSON.stringify({
-    schemaVersion: 2,
-    runId: evidenceRunId,
-    candidateCommit: evidenceCandidateCommit,
+  const record = {
+    schemaVersion: 3 as const,
+    runId,
+    candidateCommit,
+    executionNonce,
     identity,
     scenario: evidence.scenario ?? 'unconfigured',
     status,
@@ -543,11 +684,16 @@ async function attachEvidence(
     completedAt,
     testTitle: testInfo.titlePath,
     project: testInfo.project.name,
-    viewport: page.viewportSize(),
+    viewport,
     requests: evidence.requests.map(request => ({
       ...request,
       origin: request.origin === new URL(String(testInfo.project.use.baseURL)).origin ? ':same-origin' : request.origin,
       pathname: redactFixturePath(request.pathname),
+    })),
+    frameNavigations: evidence.frameNavigations.map(navigation => ({
+      ...navigation,
+      origin: navigation.origin === new URL(String(testInfo.project.use.baseURL)).origin ? ':same-origin' : navigation.origin,
+      pathname: redactFixturePath(navigation.pathname),
     })),
     apiRequests: evidence.apiRequests.map(request => ({ ...request, pathname: redactFixturePath(request.pathname) })),
     forbiddenRequestCount: evidence.forbiddenRequests.length,
@@ -556,29 +702,26 @@ async function attachEvidence(
       origin: request.origin === new URL(String(testInfo.project.use.baseURL)).origin ? ':same-origin' : request.origin,
       pathname: redactFixturePath(request.pathname),
     })),
+    forbiddenFrameNavigationCount: evidence.forbiddenFrameNavigations.length,
+    forbiddenFrameNavigations: evidence.forbiddenFrameNavigations.map(navigation => ({
+      ...navigation,
+      origin: navigation.origin === new URL(String(testInfo.project.use.baseURL)).origin ? ':same-origin' : navigation.origin,
+      pathname: redactFixturePath(navigation.pathname),
+    })),
     requestContractValid: validation.valid,
     requestContract: validation,
     consoleErrors: evidence.consoleErrors,
     details: evidence.details,
-  }, null, 2);
+  };
   const safeTitle = identity.replace(/[^a-zA-Z0-9\u4e00-\u9fff_.-]+/gu, '-');
-  const evidenceDirectory = task7StagingRecordsDirectory(
-    evidenceRoot,
-    evidenceCandidateCommit,
-    evidenceRunId,
-  );
-  const evidencePath = resolve(evidenceDirectory, `${safeTitle}.json`);
-  const temporaryPath = `${evidencePath}.tmp-${randomUUID()}`;
-  mkdirSync(evidenceDirectory, { recursive: true });
-  writeFileSync(temporaryPath, `${body}\n`, 'utf8');
-  renameSync(temporaryPath, evidencePath);
-  await testInfo.attach(`只读分享证据-${safeTitle}-${status}`, { path: evidencePath, contentType: 'application/json' });
+  const { recordPath } = await writeTask7EvidenceRecord({ rootDirectory: evidenceRoot, record });
+  await testInfo.attach(`只读分享证据-${safeTitle}-${status}`, { path: recordPath, contentType: 'application/json' });
 }
 
 export const test = base.extend<{ shareEvidence: ShareEvidence }>({
   shareEvidence: [async ({ context, page }, runTest, testInfo) => {
     const evidence = createShareEvidence();
-    const stopObserving = observeReadOnlyShareRequests(
+    const observer = observeReadOnlyShareRequests(
       context,
       evidence,
       String(testInfo.project.use.baseURL),
@@ -603,7 +746,8 @@ export const test = base.extend<{ shareEvidence: ShareEvidence }>({
     try {
       await runTest(evidence);
     } finally {
-      stopObserving();
+      const viewport = page.viewportSize();
+      await observer.settleAndStop();
       context.off('page', observePage);
       const skipped = testInfo.status === 'skipped'
         || testInfo.expectedStatus === 'skipped'
@@ -611,7 +755,7 @@ export const test = base.extend<{ shareEvidence: ShareEvidence }>({
       if (!skipped) {
         const validation = validateShareRequestContract(evidence);
         const status = evidenceStatus(testInfo, validation.valid);
-        await attachEvidence(page, evidence, testInfo, status, validation);
+        await attachEvidence(viewport, evidence, testInfo, status, validation);
         if (!validation.valid) {
           throw new Error(`只读分享请求契约失败：${validation.errors.join('; ')}`);
         }

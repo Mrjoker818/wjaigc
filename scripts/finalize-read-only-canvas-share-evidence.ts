@@ -5,17 +5,18 @@ import {
   task7ChromiumMatrixIdentities,
 } from '../tests/helpers/read-only-canvas-share-evidence';
 
-function argument(name: string): string {
-  const index = process.argv.indexOf(name);
-  const value = index >= 0 ? process.argv[index + 1] : undefined;
+function argument(argv: string[], name: string): string {
+  const index = argv.indexOf(name);
+  const value = index >= 0 ? argv[index + 1] : undefined;
   if (!value || value.startsWith('--')) throw new Error(`Missing required argument: ${name}`);
   return value;
 }
 
-async function main(): Promise<void> {
-  const runId = argument('--run-id');
-  const candidateCommit = argument('--commit');
-  const rootArgument = process.argv.includes('--root') ? argument('--root') : undefined;
+export async function main(argv = process.argv.slice(2)): Promise<void> {
+  const runId = argument(argv, '--run-id');
+  const candidateCommit = argument(argv, '--commit');
+  const executionNonce = argument(argv, '--nonce');
+  const rootArgument = argv.includes('--root') ? argument(argv, '--root') : undefined;
   const rootDirectory = resolve(
     rootArgument ?? resolve(process.cwd(), 'output', 'playwright', 'read-only-canvas-share-evidence'),
   );
@@ -23,20 +24,23 @@ async function main(): Promise<void> {
     rootDirectory,
     runId,
     candidateCommit,
+    executionNonce,
     expectedIdentities: [...task7ChromiumMatrixIdentities],
   });
 
   process.stdout.write(`${JSON.stringify({
     status: 'passed',
     runId,
-    candidateCommit,
+    candidateCommit: candidateCommit.toLowerCase(),
     expectedCount: task7ChromiumMatrixIdentities.length,
     finalDirectory: result.finalDirectory,
     manifestPath: result.manifestPath,
   }, null, 2)}\n`);
 }
 
-void main().catch(error => {
-  process.stderr.write(`${error instanceof Error ? error.stack ?? error.message : String(error)}\n`);
-  process.exitCode = 1;
-});
+if (require.main === module) {
+  void main().catch(error => {
+    process.stderr.write(`${error instanceof Error ? error.stack ?? error.message : String(error)}\n`);
+    process.exitCode = 1;
+  });
+}
