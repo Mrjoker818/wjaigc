@@ -217,7 +217,7 @@ describe('Task 7 canonical Round 5 semantics', () => {
     await overwriteRecord(nativeRepository, nativeMismatch);
     await expect(finalizeTask7Evidence(options(nativeRepository, nativeRun.executionNonce)))
       .rejects.toThrow(/long.?press|event chain|context/iu);
-  });
+  }, 20_000);
 });
 
 describe('Task 7 append-only completion-marker publication', () => {
@@ -250,7 +250,7 @@ describe('Task 7 append-only completion-marker publication', () => {
       nativeContextMenuSynthesis: { observedTrue: number; observedFalse: number; portraitTotal: number };
     };
     expect(manifest.nativeContextMenuSynthesis).toEqual({ observedTrue: 0, observedFalse: 3, portraitTotal: 3 });
-  });
+  }, 20_000);
 
   it('rejects a completed run when the owner marker bytes change without changing its binding', async () => {
     const repository = await createRepository();
@@ -264,7 +264,7 @@ describe('Task 7 append-only completion-marker publication', () => {
 
     await expect(verifyCompletedTask7EvidenceRun(options(repository, initialized.executionNonce)))
       .rejects.toThrow(/owner.*digest|digest.*owner/iu);
-  });
+  }, 20_000);
 
   it('leaves an immutable incomplete run when owner or tree is replaced before completion', async () => {
     const ownerRepository = await createRepository();

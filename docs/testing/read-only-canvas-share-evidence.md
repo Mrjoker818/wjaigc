@@ -1,12 +1,12 @@
 # 只读画布分享发布证据
 
-> 状态：本地候选门禁已完成；存在明确的真实环境未验证项，发布保持关闭。本文不包含 raw token、媒体 URL、storage key、供应商载荷或个人标识。
+> 状态：本地候选与隔离 PostgreSQL 门禁已完成；真实账号、跨浏览器、云端 main 等外部门禁仍未验证，发布保持关闭。本文不包含 raw token、媒体 URL、storage key、供应商载荷或个人标识。
 
 ## 先列阻断与未验证项
 
 | 门禁 | 状态 | 原因 / 解除条件 |
 | --- | --- | --- |
-| 真实 PostgreSQL 并发、迁移重复执行、事务竞态 | **未验证** | 当前环境缺少 `POSTGRES_TEST_DATABASE_URL`；4 个新增并发用例和既有 Canvas Share PostgreSQL 套件均不得计为通过。 |
+| 隔离 PostgreSQL 并发、迁移重复执行、事务竞态 | **本地通过** | PostgreSQL 18 隔离实例上迁移连续执行两次成功；5 个 Canvas Share 真库套件 18/18，通过全量真库回归。该结果不是云端生产数据库证据。 |
 | P0 真实账号流程 | **未验证** | 缺少受控账号、密码和生成模型前置。 |
 | Stage 2 真实资产生命周期 | **未验证** | 缺少受控 fixture、账号和真实数据库前置。 |
 | Firefox / WebKit 功能矩阵 | **未验证** | 本阶段只取得 Chromium 功能证据；launch-only 结果不等价于功能通过。 |
@@ -41,13 +41,14 @@
 2. 仅将脚本逐项点名的 33 个路径加入 `docs/testing/baselines/protected-baseline-allowed-paths.json`；未加入目录通配符或无关路径。
 3. 修改后同一命令：38 个 baseline feature ID 保留，source drift / protected component / evidence contract / Git refs 全部通过，0 warning。
 4. 安全回归新增实际泄漏负探针；扫描公开 JSON、捕获日志、公开错误体和落盘 artifact。正向输出无 private marker，负向 artifact 被准确检出。
-5. PostgreSQL 并发套件覆盖重复创建、重复撤销、策略 CAS、过期竞态、媒体读取与撤销；当前因真库缺失全部明确 skip，不写成通过。
+5. PostgreSQL 并发套件覆盖重复创建、重复撤销、策略 CAS、过期竞态、媒体读取与撤销；隔离 PostgreSQL 18 上 5 files / 18 tests 全部通过。
+6. 首次真库运行发现 owner preflight 断言遗漏服务端规范化的 `projectName`；核对类型、服务、API 和 UI 契约后仅修正陈旧测试。首次全量真库运行另发现 3 个进程型 evidence 用例在全仓负载下超过默认 5 秒；单文件 11/11 通过，按同文件既有先例把这 3 项显式预算设为 20 秒，第二轮全量通过。
 
 ## 可复现命令与已取得证据
 
 | 范围 | 命令 | 结果 |
 | --- | --- | --- |
-| Task 8 聚焦安全 / DB | `pnpm exec vitest run src/__tests__/lib/canvas-share-security-regression.test.ts tests/integration/canvas-share-concurrency-postgres.test.ts --reporter=verbose` | 安全 2/2 passed；PostgreSQL 4 skipped（未验证）。 |
+| Canvas Share 真库聚焦 | 见下方 5-file 命令 | PostgreSQL 18 隔离实例，5 files / 18 tests passed。 |
 | 类型 | `pnpm ts-check` | passed。 |
 | 定向 lint | `pnpm exec eslint src/__tests__/lib/canvas-share-security-regression.test.ts tests/integration/canvas-share-concurrency-postgres.test.ts --max-warnings=0` | passed。 |
 | 保护基线 | `pnpm check:protected-baseline` | 修改后 passed，0 warning。 |
@@ -56,9 +57,9 @@
 | Desktop Chromium | Task 7 desktop matrix | 4/4 passed。 |
 | Mobile Chromium | Task 7 mobile matrix | 4 actual passed，4 个互斥 skip；实际 viewport 320×568、375×667、393×852、812×375。 |
 | Network no-write gate | Task 7 network gate | 1/1 passed。 |
-| 全量 Vitest | `pnpm test` | 782 files passed、43 skipped、1 failed；6902 tests passed、220 skipped、1 failed。唯一失败为既有 PostgreSQL doctor 因缺少 `POSTGRES_TEST_DATABASE_URL` 主动阻断，不能记作全绿。 |
+| 全量 Vitest（真库） | `pnpm exec vitest run --reporter=dot`，同时设置 `DATABASE_URL`、`PGDATABASE_URL`、`POSTGRES_TEST_DATABASE_URL`、`TEST_POSTGRES_URL` 和 `RUN_POSTGRES_INTEGRATION=1` 指向同一隔离库 | 826 files / 7123 tests passed，0 failed，退出码 0；939.54 秒。 |
 | 统一校验 | `pnpm validate` | passed；`ts-check` 与 ESLint 均通过。仅有既有 `infinite-canvas.tsx` 超过 500 KB 的 Babel 提示。 |
-| 迁移执行 | `pnpm migrate` | **未验证**；缺少 `DATABASE_URL` / `PGDATABASE_URL`，命令在运行迁移前退出。 |
+| 迁移执行 | `pnpm migrate` 连续执行两次 | PostgreSQL 18 隔离实例上两次均退出 0；首次应用 26 个迁移，第二次全部安全跳过，含 `20260919_read_only_canvas_shares.sql`。 |
 | Chromium P0 | `pnpm exec playwright test tests/e2e/p0-core.spec.ts --project=chromium --reporter=line` | **未验证**；缺少 `E2E_TEST_USERNAME`、`E2E_TEST_PASSWORD`、`E2E_GENERATION_MODEL`。 |
 | Chromium Stage 2 | `pnpm exec playwright test tests/e2e/stage-2-asset-lifecycle.spec.ts tests/e2e/stage-2-cross-workspace.spec.ts --project=chromium --reporter=line` | 11 skipped；缺少真实 fixture、账号与数据库前置，**未验证**。 |
 | Chromium Stage 3 | `pnpm exec playwright test tests/e2e/stage-3-canvas-kernel.spec.ts --project=chromium --reporter=line` | 收集阶段因缺少 `E2E_STAGE3_PROJECT_IDS`、`E2E_STAGE3_RUN_ID` 阻断，**未验证**。 |
@@ -89,7 +90,7 @@ output/playwright/read-only-canvas-share-evidence/promoted/
 
 同一 exact commit 上再次运行 `pnpm check:protected-baseline` 通过且 0 warning，38 个 baseline feature ID 与 evidence contract 均保留。证据绑定后的提交只修改文档，不改变受测实现。
 
-## 真库复现（取得数据库后必须执行）
+## 真库复现（已在隔离 PostgreSQL 18 上通过）
 
 ```powershell
 $env:POSTGRES_TEST_DATABASE_URL = '<隔离测试数据库连接>'
@@ -102,7 +103,7 @@ pnpm exec vitest run `
   --reporter=verbose
 ```
 
-只有该命令在真实隔离 PostgreSQL 上通过，迁移重复执行、share/items 原子性、CAS、撤销/过期和媒体竞态才能从“未验证”改为“通过”。
+该命令已在仅监听本机回环地址的临时 PostgreSQL 18 数据库上以 5 files / 18 tests 通过；迁移也已连续执行两次。临时数据库仅用于本轮测试，验证结束后停止并删除，不把本地结果扩大为云端生产证据。
 
 ## 云端验收固定顺序
 
@@ -110,4 +111,4 @@ pnpm exec vitest run `
 
 ## 发布判定
 
-本地候选已具备安全、类型、保护基线和 Chromium 合成证据；`pnpm validate` 通过。全量 Vitest 唯一失败是缺少真实 PostgreSQL 测试连接触发的环境门禁，迁移、真实 PostgreSQL、真实账号/资产、Firefox/WebKit 和云端 main 仍未验证。因此发布开关必须保持默认关闭；本文不授权启用或对外发布。
+本地候选已具备安全、类型、保护基线、Chromium 合成证据、隔离 PostgreSQL 迁移与全量真库回归证据；全量为 826 files / 7123 tests，0 failed。真实账号/资产、Firefox/WebKit、真实 token trace 和云端 exact-main 仍未验证，候选也尚未整合进 `main`。因此发布开关必须保持默认关闭；本文不授权启用或对外发布，也不授权提前进入 WebSocket 阶段。

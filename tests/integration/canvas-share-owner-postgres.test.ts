@@ -128,6 +128,7 @@ describe('canvas-share owner lifecycle on PostgreSQL', () => {
       });
 
       expect(result).toEqual({
+        projectName: 'Project',
         projectRevision: 7,
         itemCount: 1,
         viewport: { offsetX: 0, offsetY: 0, zoom: 5 },
