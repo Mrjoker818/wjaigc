@@ -1,7 +1,7 @@
 import { copyFile, mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
-import { expect, test as base, type Page, type TestInfo } from '@playwright/test';
+import { expect, test as base, type Locator, type Page, type TestInfo } from '@playwright/test';
 import { stage3SourceIdentity } from './stage-3-source-state';
 import {
   isBenignStage3RequestAbort,
@@ -285,13 +285,21 @@ export async function readStage3Projects(page: Page): Promise<Array<Record<strin
   return body.value ?? [];
 }
 
-export function stage3CanvasCard(page: Page, nodeId: string) {
-  return page.getByAltText(nodeId, { exact: true })
+export function stage3CanvasMedia(page: Page, nodeId: string): Locator {
+  return page.locator(`[data-canvas-media-node=${JSON.stringify(nodeId)}]`);
+}
+
+function stage3CanvasImage(page: Page, nodeId: string): Locator {
+  return page.locator(`img[data-canvas-media-node=${JSON.stringify(nodeId)}]`);
+}
+
+export function stage3CanvasCard(page: Page, nodeId: string): Locator {
+  return stage3CanvasMedia(page, nodeId)
     .locator('xpath=ancestor::div[contains(concat(" ", normalize-space(@class), " "), " absolute ") and contains(concat(" ", normalize-space(@class), " "), " group ")][1]');
 }
 
 export async function waitForStage3Node(page: Page, nodeId: string, timeout = 30_000): Promise<void> {
-  const image = page.getByAltText(nodeId, { exact: true });
+  const image = stage3CanvasImage(page, nodeId);
   await expect(image).toBeVisible({ timeout });
   await expect.poll(() => image.evaluate(element => {
     const candidate = element as HTMLImageElement;

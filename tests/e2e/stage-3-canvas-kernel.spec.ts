@@ -12,6 +12,7 @@ import {
   openStage3Project,
   readStage3Projects,
   stage3CanvasCard,
+  stage3CanvasMedia,
   stage3ProjectId,
   test,
   validateStage3ProjectIsolation,
@@ -513,7 +514,7 @@ test.describe('Stage 3 Canvas kernel baseline', () => {
       const periodicBody = await periodicResponse.json() as { projectRevision?: number };
       expect(Number.isSafeInteger(periodicBody.projectRevision)).toBe(true);
       await waitForStage3Node(page, markerId, 20_000);
-      await expect(page.getByAltText(remoteDeletedNodeId, { exact: true })).toHaveCount(0);
+      await expect(stage3CanvasMedia(page, remoteDeletedNodeId)).toHaveCount(0);
       await resetCanvasView(page);
       await page.clock.runFor(600);
       const mergeObservedAt = Date.now();
@@ -557,8 +558,8 @@ test.describe('Stage 3 Canvas kernel baseline', () => {
       await modelRequestIdle.wait();
       await page.reload({ waitUntil: 'domcontentloaded' });
       await expect(page.locator('[data-canvas-viewport]')).toHaveAttribute('data-project-id', projectId);
-      await expect(page.getByAltText(nodeId, { exact: true })).toHaveCount(0);
-      await expect(page.getByAltText(remoteDeletedNodeId, { exact: true })).toHaveCount(0);
+      await expect(stage3CanvasMedia(page, nodeId)).toHaveCount(0);
+      await expect(stage3CanvasMedia(page, remoteDeletedNodeId)).toHaveCount(0);
       await waitForStage3Node(page, markerId);
     } finally {
       if (remoteMutationAttempted) {
@@ -900,11 +901,11 @@ test.describe('Stage 3 Canvas kernel baseline', () => {
     await waitForStage3Node(page, nodeId);
     await stage3CanvasCard(page, nodeId).click();
     await page.keyboard.press('Delete');
-    await expect(page.getByAltText(nodeId, { exact: true })).toHaveCount(0);
+    await expect(stage3CanvasMedia(page, nodeId)).toHaveCount(0);
     await page.keyboard.press('Control+KeyZ');
     await waitForStage3Node(page, nodeId);
     await page.keyboard.press('Control+Shift+KeyZ');
-    await expect(page.getByAltText(nodeId, { exact: true })).toHaveCount(0);
+    await expect(stage3CanvasMedia(page, nodeId)).toHaveCount(0);
     const restoredSave = page.waitForResponse(
       response => isProjectSave(response, projectId, nodeId),
       { timeout: 30_000 },
@@ -932,7 +933,7 @@ test.describe('Stage 3 Canvas kernel baseline', () => {
     await stage3CanvasCard(page, targetIds[1]).click({ modifiers: ['Control'] });
     await page.keyboard.press('Delete');
     for (const nodeId of targetIds) {
-      await expect(page.getByAltText(nodeId, { exact: true })).toHaveCount(0);
+      await expect(stage3CanvasMedia(page, nodeId)).toHaveCount(0);
     }
 
     const restoredSave = page.waitForResponse(

@@ -103,8 +103,8 @@ export async function assertCanvasNodeContinuity(page: Page, ids: string[]): Pro
     const interactiveRight = (viewportRect?.right ?? innerWidth) - occupiedRight - 2;
 
     return monitoredIds.flatMap(id => {
-    const image = [...document.querySelectorAll<HTMLImageElement>('[data-canvas-viewport] img')]
-      .find(candidate => candidate.alt === id);
+    const image = [...document.querySelectorAll<HTMLImageElement>('[data-canvas-viewport] img[data-canvas-media-node]')]
+      .find(candidate => candidate.dataset.canvasMediaNode === id);
     if (!image) return [`${id}:missing`];
     const card = image.closest<HTMLElement>('div.absolute.group');
     if (!card) return [`${id}:card-missing`];
@@ -318,7 +318,13 @@ async function startMeasurement(page: Page, monitoredNodeIds: string[]): Promise
         const node = resolveMonitoredNode(id);
         const image = node?.image ?? null;
         const card = node?.card ?? null;
-        if (!image || !card || image.alt !== id || !image.complete || image.naturalWidth === 0) {
+        if (
+          !image
+          || !card
+          || image.dataset.canvasMediaNode !== id
+          || !image.complete
+          || image.naturalWidth === 0
+        ) {
           disappeared = true;
           continue;
         }
