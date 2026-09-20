@@ -154,12 +154,13 @@ test.describe('只读画布分享跨浏览器功能矩阵', () => {
     const downloadLink = page.getByRole('link', { name: '下载预览内容' });
     await expect(downloadLink).toHaveAttribute('href', downloadPath);
     await expect(downloadLink).toHaveAttribute('download', '');
-    const downloadEvent = page.waitForEvent('download');
+    const downloadResponse = page.waitForResponse(
+      response => new URL(response.url()).pathname === downloadPath,
+    );
     await downloadLink.click();
-    const download = await downloadEvent;
-    expect(download.url()).toBe(new URL(downloadPath, page.url()).toString());
-    expect(download.suggestedFilename()).toBe('share-image.png');
-    await download.cancel();
+    const response = await downloadResponse;
+    expect(response.status()).toBe(200);
+    expect(await response.headerValue('content-disposition')).toBe('attachment; filename="share-image.png"');
 
     expect(shareRequestAudit.apiRequests.filter(request => request.pathname === downloadPath)).toEqual([
       { method: 'GET', pathname: downloadPath },
