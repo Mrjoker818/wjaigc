@@ -307,14 +307,70 @@ async function clickCanvasBlankSpace(page: Page) {
   await page.mouse.click(point.x, point.y);
 }
 
+function usesMobileCanvasToolbar(page: Page): boolean {
+  return (page.viewportSize()?.width ?? 1024) < 768;
+}
+
+function visibleCanvasPointerTool(page: Page, tool: 'select' | 'hand'): Locator {
+  if (usesMobileCanvasToolbar(page)) {
+    return page.locator('[data-mobile-canvas-toolbar]').getByRole('button', {
+      name: tool === 'select' ? '选择' : '平移',
+      exact: true,
+    });
+  }
+  return page.getByTestId(tool === 'select' ? 'canvas-select-tool' : 'canvas-hand-tool');
+}
+
+async function resetCanvasView(page: Page): Promise<void> {
+  if (!usesMobileCanvasToolbar(page)) {
+    await page.getByTitle('重置视图').click();
+    return;
+  }
+
+  const mobileToolbar = page.locator('[data-mobile-canvas-toolbar]');
+  const allTools = mobileToolbar.getByRole('button', { name: '全部工具', exact: true });
+  const drawer = page.locator('[data-mobile-canvas-toolbar-drawer]');
+  if (!await drawer.isVisible().catch(() => false)) await allTools.click();
+  await expect(drawer).toBeVisible();
+  await drawer.getByRole('button', { name: '重置视图', exact: true }).click();
+  await expect(drawer).toBeHidden();
+}
+
+async function openSelectedImageAction(
+  page: Page,
+  options: { label: string; testId: string },
+): Promise<void> {
+  if (usesMobileCanvasToolbar(page)) {
+    const toolbar = page.locator('[data-mobile-image-actions]');
+    await expect(toolbar).toBeVisible();
+    await toolbar.getByRole('button', { name: '更多', exact: true }).click();
+    const drawer = page.locator('[data-mobile-image-actions-drawer]');
+    await expect(drawer).toBeVisible();
+    await drawer.getByRole('button', { name: options.label, exact: true }).click();
+    await expect(drawer).toBeHidden();
+    return;
+  }
+
+  const toolbar = page.locator('[data-toolbar="image-action-toolbar"]');
+  await expect(toolbar).toBeVisible();
+  const action = page.getByTestId(options.testId);
+  if (!await action.isVisible().catch(() => false)) {
+    const more = toolbar.getByRole('button', { name: '展开更多工具', exact: true });
+    await more.click();
+    await expect(toolbar.locator('[data-image-toolbar-overflow]')).toBeVisible();
+  }
+  await expect(action).toBeVisible();
+  await action.click();
+}
+
 test.describe('Stage 3 Canvas kernel baseline', () => {
   test('uses the hand tool for panning and preserves focused button Space behavior', async ({ page }, testInfo) => {
     const projectId = stage3ProjectId(testInfo.project.name, 1);
     await loginStage3User(page);
     await openStage3Project(page, projectId);
 
-    const handTool = page.getByTestId('canvas-hand-tool');
-    const selectTool = page.getByTestId('canvas-select-tool');
+    const handTool = visibleCanvasPointerTool(page, 'hand');
+    const selectTool = visibleCanvasPointerTool(page, 'select');
     await handTool.click();
     await expect(handTool).toHaveAttribute('aria-pressed', 'true');
 
@@ -458,7 +514,7 @@ test.describe('Stage 3 Canvas kernel baseline', () => {
       expect(Number.isSafeInteger(periodicBody.projectRevision)).toBe(true);
       await waitForStage3Node(page, markerId, 20_000);
       await expect(page.getByAltText(remoteDeletedNodeId, { exact: true })).toHaveCount(0);
-      await page.getByTitle('重置视图').click();
+      await resetCanvasView(page);
       await page.clock.runFor(600);
       const mergeObservedAt = Date.now();
 
@@ -551,7 +607,7 @@ test.describe('Stage 3 Canvas kernel baseline', () => {
     const card = stage3CanvasCard(page, nodeId);
     await expect(card).toBeVisible({ timeout: 30_000 });
     const viewport = page.locator('[data-canvas-viewport]');
-    await page.getByTitle('重置视图').click();
+    await resetCanvasView(page);
     await clickCanvasBlankSpace(page);
 
     await page.keyboard.press('Shift+Digit3');
@@ -565,10 +621,10 @@ test.describe('Stage 3 Canvas kernel baseline', () => {
     await page.keyboard.press('Escape');
     await expect(viewport).toHaveAttribute('data-canvas-active-tool', '');
 
-    await page.getByTitle('重置视图').click();
+    await resetCanvasView(page);
     await hittableCardCenter(page, card);
     await card.click();
-    await page.getByTestId('canvas-erase').click();
+    await openSelectedImageAction(page, { label: '擦除', testId: 'canvas-erase' });
     await expect(viewport).toHaveAttribute('data-canvas-active-tool', 'erase');
     await expect(page.locator('[data-floating-panel="erase"]')).toBeVisible();
     await page.keyboard.press('Escape');
@@ -594,7 +650,7 @@ test.describe('Stage 3 Canvas kernel baseline', () => {
     const imageIds = images.map(image => String(image.id));
 
     await openStage3Project(page, projectId);
-    await page.getByTitle('重置视图').click();
+    await resetCanvasView(page);
     const targetIds = await findHittableRightEdgePair(page, imageIds);
     for (const nodeId of targetIds) await waitForStage3Node(page, nodeId);
 
@@ -788,7 +844,7 @@ test.describe('Stage 3 Canvas kernel baseline', () => {
     expect(Math.abs(afterZoomCenter.x - zoomAnchor.x)).toBeLessThanOrEqual(3);
     expect(Math.abs(afterZoomCenter.y - zoomAnchor.y)).toBeLessThanOrEqual(3);
 
-    await page.getByTitle('重置视图').click();
+    await resetCanvasView(page);
     await nextAnimationFrame(page);
     const resetBox = await card.boundingBox();
     const canvasBox = await page.locator('[data-canvas-viewport]').boundingBox();
@@ -868,7 +924,7 @@ test.describe('Stage 3 Canvas kernel baseline', () => {
     const originalOrder = originalImages.map(image => String(image.id));
 
     await openStage3Project(page, projectId);
-    await page.getByTitle('重置视图').click();
+    await resetCanvasView(page);
     const targetIds = await findHittableRightEdgePair(page, originalOrder);
     for (const nodeId of targetIds) await waitForStage3Node(page, nodeId);
 
@@ -999,7 +1055,7 @@ test.describe('Stage 3 Canvas kernel baseline', () => {
     }).toBeLessThanOrEqual(2);
     await nativeUndoProbe.evaluate(element => element.remove());
 
-    const selectTool = page.getByTestId('canvas-select-tool');
+    const selectTool = visibleCanvasPointerTool(page, 'select');
     await selectTool.focus();
     await expect(selectTool).toBeFocused();
     await page.keyboard.press('Control+KeyZ');
@@ -1131,7 +1187,7 @@ test.describe('Stage 3 Canvas kernel baseline', () => {
         .map(index => String(images[index].id));
 
       await openStage3Project(page, projectId);
-      await page.getByTitle('重置视图').click();
+      await resetCanvasView(page);
       for (const nodeId of monitoredNodeIds) await waitForStage3Node(page, nodeId);
       await assertCanvasNodeContinuity(page, monitoredNodeIds);
       await clickCanvasBlankSpace(page);
@@ -1184,7 +1240,7 @@ test.describe('Stage 3 Canvas kernel baseline', () => {
     };
 
     await openStage3Project(page, projectId);
-    await page.getByTitle('重置视图').click();
+    await resetCanvasView(page);
     await waitForStage3Node(page, nodeId);
     const card = stage3CanvasCard(page, nodeId);
     const { point: dragStart } = await hittableCardCenter(page, card);
