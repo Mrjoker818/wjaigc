@@ -148,7 +148,9 @@ describe('annotation project persistence wiring', () => {
     expect(workspaceSource).toContain('annotationsV2: annotationRecordsRef.current');
     expect(workspaceSource).toContain('initialAnnotations={initialCanvasAnnotations}');
     expect(workspaceSource).toContain('onAnnotationsChange={handleAnnotationsChange}');
-    const autosaveStart = workspaceSource.indexOf('const immediateSaveGuard = consumeCanvasHydrationGuard(');
+    const autosaveStart = workspaceSource.indexOf(
+      'const immediateSaveGuard = consumeCanvasHydrationGuardQueue(',
+    );
     const autosaveEnd = workspaceSource.indexOf('// 页面关闭/刷新前同步保存', autosaveStart);
     const autosaveSource = workspaceSource.slice(autosaveStart, autosaveEnd);
     expect(autosaveSource).toContain('buildCanvasPersistenceSnapshot(images, currentProject)');

@@ -172,8 +172,9 @@ import {
 import {
   consumeCanvasPendingMediaRecovery,
   consumePreparedCanvasUnloadSnapshot,
-  consumeCanvasHydrationGuard,
+  consumeCanvasHydrationGuardQueue,
   createCanvasHydrationGuard,
+  enqueueCanvasHydrationGuard,
   persistPreparedCanvasUnloadSnapshot,
   reconcileRecoveredCanvasImages,
   shouldConsumeCanvasHydrationGuard,
@@ -1384,7 +1385,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
     setCreatedShareAccess(undefined);
   }, [currentProject?.id]);
   const hydrationAutosaveGuardRef = useRef<CanvasHydrationGuard | null>(null);
-  const immediateSaveGuardRef = useRef<CanvasHydrationGuard | null>(null);
+  const immediateSaveGuardRef = useRef<CanvasHydrationGuard[]>([]);
   const recoveredCanvasPersistenceRef = useRef<{
     projectId: string;
     images: CanvasImage[];
@@ -1656,7 +1657,11 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
     if (persistenceHint === 'skip') return;
     const project = currentProjectRef.current;
     if (!project) return;
-    immediateSaveGuardRef.current = createCanvasHydrationGuard(project.id, nextImages);
+    immediateSaveGuardRef.current = enqueueCanvasHydrationGuard(
+      immediateSaveGuardRef.current,
+      project.id,
+      nextImages,
+    );
     const snapshot = buildCanvasPersistenceSnapshot(nextImages, project);
     canvasPersistenceScheduler.schedule(snapshot);
     if (persistenceHint === 'immediate') {
@@ -2186,12 +2191,12 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
     if (switchingProjectRef.current) return;
     // 服务器同步合并中，跳过自动保存，避免旧闭包数据覆盖刚合并的服务器数据
     if (serverSyncMergeRef.current) return;
-    const immediateSaveGuard = consumeCanvasHydrationGuard(
+    const immediateSaveGuard = consumeCanvasHydrationGuardQueue(
       immediateSaveGuardRef.current,
       currentProject.id,
       images,
     );
-    immediateSaveGuardRef.current = immediateSaveGuard.nextGuard;
+    immediateSaveGuardRef.current = immediateSaveGuard.nextGuards;
     if (immediateSaveGuard.suppress) return;
     if (shouldConsumeCanvasHydrationGuard(
       hydrationAutosaveGuardRef.current,

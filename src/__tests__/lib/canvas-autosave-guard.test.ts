@@ -7,7 +7,9 @@ import {
   consumeCanvasPendingMediaRecovery,
   consumePreparedCanvasUnloadSnapshot,
   consumeCanvasHydrationGuard,
+  consumeCanvasHydrationGuardQueue,
   createCanvasHydrationGuard,
+  enqueueCanvasHydrationGuard,
   persistPreparedCanvasUnloadSnapshot,
   reconcileRecoveredCanvasImages,
   shouldConsumeCanvasHydrationGuard,
@@ -54,6 +56,77 @@ describe('canvas autosave hydration guard', () => {
 
     expect(consumeCanvasHydrationGuard(guard, 'project-1', [image({ x: 180 })]))
       .toEqual({ suppress: false, nextGuard: null });
+  });
+
+  it('retains later immediate-save guards while earlier React effects drain', () => {
+    const moved = [image({ x: 180 })];
+    const resized = [image({ x: 180, width: 320, height: 320 })];
+    let guards = enqueueCanvasHydrationGuard([], 'project-1', moved);
+    guards = enqueueCanvasHydrationGuard(guards, 'project-1', resized);
+
+    const movedEffect = consumeCanvasHydrationGuardQueue(guards, 'project-1', moved);
+    expect(movedEffect.suppress).toBe(true);
+    expect(movedEffect.nextGuards).toHaveLength(1);
+
+    const resizedEffect = consumeCanvasHydrationGuardQueue(
+      movedEffect.nextGuards,
+      'project-1',
+      resized,
+    );
+    expect(resizedEffect).toEqual({ suppress: true, nextGuards: [] });
+  });
+
+  it('consumes superseded immediate-save guards when React batches to the latest state', () => {
+    const moved = [image({ x: 180 })];
+    const resized = [image({ x: 180, width: 320, height: 320 })];
+    const guards = enqueueCanvasHydrationGuard(
+      enqueueCanvasHydrationGuard([], 'project-1', moved),
+      'project-1',
+      resized,
+    );
+
+    expect(consumeCanvasHydrationGuardQueue(guards, 'project-1', resized))
+      .toEqual({ suppress: true, nextGuards: [] });
+  });
+
+  it('consumes through the newest repeated signature when React batches an undo-redo cycle', () => {
+    const original = [image()];
+    const moved = [image({ x: 180 })];
+    let guards = enqueueCanvasHydrationGuard([], 'project-1', original);
+    guards = enqueueCanvasHydrationGuard(guards, 'project-2', [image({ id: 'other' })]);
+    guards = enqueueCanvasHydrationGuard(guards, 'project-1', moved);
+    guards = enqueueCanvasHydrationGuard(guards, 'project-1', original);
+
+    const result = consumeCanvasHydrationGuardQueue(guards, 'project-1', original);
+
+    expect(result.suppress).toBe(true);
+    expect(result.nextGuards).toEqual([
+      createCanvasHydrationGuard('project-2', [image({ id: 'other' })]),
+    ]);
+  });
+
+  it('clears stale same-project guards without suppressing a real mutation', () => {
+    let guards = enqueueCanvasHydrationGuard([], 'project-1', [image()]);
+    guards = enqueueCanvasHydrationGuard(guards, 'project-2', [image({ id: 'other' })]);
+
+    expect(consumeCanvasHydrationGuardQueue(guards, 'project-1', [image({ x: 999 })]))
+      .toEqual({
+        suppress: false,
+        nextGuards: [createCanvasHydrationGuard('project-2', [image({ id: 'other' })])],
+      });
+  });
+
+  it('bounds queued immediate-save guards to the newest 32 snapshots', () => {
+    let guards = [] as ReturnType<typeof enqueueCanvasHydrationGuard>;
+    for (let x = 0; x < 40; x += 1) {
+      guards = enqueueCanvasHydrationGuard(guards, 'project-1', [image({ x })]);
+    }
+
+    expect(guards).toHaveLength(32);
+    expect(consumeCanvasHydrationGuardQueue(guards, 'project-1', [image({ x: 7 })]).suppress)
+      .toBe(false);
+    expect(consumeCanvasHydrationGuardQueue(guards, 'project-1', [image({ x: 8 })]).suppress)
+      .toBe(true);
   });
 
   it('stores only the prepared payload and sends its prebuilt beacon body', () => {

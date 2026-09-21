@@ -198,6 +198,8 @@ export interface CanvasHydrationGuard {
   signature: string;
 }
 
+const MAX_CANVAS_HYDRATION_GUARDS = 32;
+
 function hydrationSignature(images: CanvasHydrationImage[]): string {
   return JSON.stringify(images.map(image => ({
     id: image.id,
@@ -236,5 +238,51 @@ export function consumeCanvasHydrationGuard(
   return {
     suppress: guard.signature === hydrationSignature(images),
     nextGuard: null,
+  };
+}
+
+export function enqueueCanvasHydrationGuard(
+  guards: readonly CanvasHydrationGuard[],
+  projectId: string,
+  images: CanvasHydrationImage[],
+): CanvasHydrationGuard[] {
+  const nextGuard = createCanvasHydrationGuard(projectId, images);
+  const lastGuard = guards.at(-1);
+  if (
+    lastGuard?.projectId === nextGuard.projectId
+    && lastGuard.signature === nextGuard.signature
+  ) {
+    return [...guards];
+  }
+  return [...guards, nextGuard].slice(-MAX_CANVAS_HYDRATION_GUARDS);
+}
+
+export function consumeCanvasHydrationGuardQueue(
+  guards: readonly CanvasHydrationGuard[],
+  projectId: string,
+  images: CanvasHydrationImage[],
+): { suppress: boolean; nextGuards: CanvasHydrationGuard[] } {
+  const signature = hydrationSignature(images);
+  let matchingIndex = -1;
+  for (let index = guards.length - 1; index >= 0; index -= 1) {
+    const guard = guards[index];
+    if (guard.projectId === projectId && guard.signature === signature) {
+      matchingIndex = index;
+      break;
+    }
+  }
+
+  if (matchingIndex >= 0) {
+    return {
+      suppress: true,
+      nextGuards: guards.filter((guard, index) => (
+        guard.projectId !== projectId || index > matchingIndex
+      )),
+    };
+  }
+
+  return {
+    suppress: false,
+    nextGuards: guards.filter(guard => guard.projectId !== projectId),
   };
 }

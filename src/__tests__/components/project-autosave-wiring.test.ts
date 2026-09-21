@@ -25,6 +25,15 @@ describe('project autosave wiring', () => {
     expect(workspaceSource).toContain("persistenceHint === 'skip'");
   });
 
+  it('queues rapid immediate-save guards until their matching React effects drain', () => {
+    expect(workspaceSource).toContain('useRef<CanvasHydrationGuard[]>([])');
+    expect(workspaceSource).toContain('enqueueCanvasHydrationGuard(');
+    expect(workspaceSource).toContain('consumeCanvasHydrationGuardQueue(');
+    expect(workspaceSource).not.toContain(
+      'immediateSaveGuardRef.current = createCanvasHydrationGuard(',
+    );
+  });
+
   it('keeps an immediate Canvas snapshot pending until the server accepts it', () => {
     const writerStart = workspaceSource.indexOf('writer: async (snapshot');
     const writerEnd = workspaceSource.indexOf('const canvasPersistenceScheduler =', writerStart);
