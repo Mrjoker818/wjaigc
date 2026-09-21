@@ -1,4 +1,5 @@
 import type { CanvasPersistenceSnapshot } from '@/lib/canvas-kernel/persistence';
+import type { Project } from '@/lib/user-types';
 
 type CanvasHydrationImage = {
   id: string;
@@ -37,6 +38,11 @@ interface CanvasUnloadRecoveryStorage {
 
 interface CanvasUnloadCleanupStorage {
   removeItem: (key: string) => void;
+}
+
+interface RecoveredCanvasPersistenceManager {
+  updateProjectInMemory: (projectId: string, updates: Partial<Project>) => unknown;
+  flushProjectsToServerWithConflictRecovery: () => Promise<unknown>;
 }
 
 interface StoredCanvasUnloadSnapshot {
@@ -154,6 +160,19 @@ export function reconcileRecoveredCanvasImages<T extends { id: string; url: stri
     }
   }
   return { images, discardedBlobIds };
+}
+
+export async function persistRecoveredCanvasSnapshot(
+  manager: RecoveredCanvasPersistenceManager,
+  projectId: string,
+  images: CanvasPersistenceSnapshot['images'],
+  metadata: CanvasPersistenceSnapshot['metadata'],
+): Promise<void> {
+  manager.updateProjectInMemory(projectId, {
+    canvasImages: [...images],
+    metadata,
+  });
+  await manager.flushProjectsToServerWithConflictRecovery();
 }
 
 export function clearCanvasUnloadRecovery(storage: CanvasUnloadCleanupStorage): void {

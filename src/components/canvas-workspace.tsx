@@ -175,6 +175,7 @@ import {
   consumeCanvasHydrationGuardQueue,
   createCanvasHydrationGuard,
   enqueueCanvasHydrationGuard,
+  persistRecoveredCanvasSnapshot,
   persistPreparedCanvasUnloadSnapshot,
   reconcileRecoveredCanvasImages,
   shouldConsumeCanvasHydrationGuard,
@@ -874,14 +875,19 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
         ) as CanvasImage[];
         const visibleTargetImages = hydratedTargetImages.filter(shouldPersistCanvasPlacement);
         if (recoveredCanvasSnapshot) {
-          userMgr.updateProject(targetProject.id, {
-            canvasImages: targetProject.canvasImages,
-            metadata: targetProject.metadata,
-          });
-          recoveredCanvasPersistenceRef.current = {
-            projectId: targetProject.id,
-            images: visibleTargetImages,
-          };
+          try {
+            await persistRecoveredCanvasSnapshot(
+              userMgr,
+              targetProject.id,
+              targetProject.canvasImages,
+              targetProject.metadata || {},
+            );
+          } catch {
+            recoveredCanvasPersistenceRef.current = {
+              projectId: targetProject.id,
+              images: visibleTargetImages,
+            };
+          }
         }
         if (hadPendingMedia) {
           toast.warning(recoveredMedia?.discardedBlobIds.length
@@ -1172,14 +1178,19 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
                 ) as CanvasImage[];
                 const visibleTargetImages = hydratedTargetImages.filter(shouldPersistCanvasPlacement);
                 if (recoveredCanvasSnapshot) {
-                  userMgr.updateProject(targetProject.id, {
-                    canvasImages: targetProject.canvasImages,
-                    metadata: targetProject.metadata,
-                  });
-                  recoveredCanvasPersistenceRef.current = {
-                    projectId: targetProject.id,
-                    images: visibleTargetImages,
-                  };
+                  try {
+                    await persistRecoveredCanvasSnapshot(
+                      userMgr,
+                      targetProject.id,
+                      targetProject.canvasImages,
+                      targetProject.metadata || {},
+                    );
+                  } catch {
+                    recoveredCanvasPersistenceRef.current = {
+                      projectId: targetProject.id,
+                      images: visibleTargetImages,
+                    };
+                  }
                 }
                 if (hadPendingMedia) {
                   toast.warning(recoveredMedia?.discardedBlobIds.length
@@ -2226,7 +2237,8 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
   const currentProjectRef2 = useRef(currentProject);
   currentProjectRef2.current = currentProject;
   useEffect(() => {
-    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+    let lastLifecyclePersistedSignature: string | null = null;
+    const persistForLifecycle = (event?: BeforeUnloadEvent) => {
       const proj = currentProjectRef2.current;
       if (!proj) return;
       try {
@@ -2238,21 +2250,29 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
         );
         if (!prepared) return;
         if (prepared.hasPendingMedia) {
-          event.preventDefault();
-          event.returnValue = '';
+          event?.preventDefault();
+          if (event) event.returnValue = '';
         }
+        if (prepared.signature === lastLifecyclePersistedSignature) return;
         persistPreparedCanvasUnloadSnapshot(prepared, {
           storage: localStorage,
           sendBeacon: navigator.sendBeacon.bind(navigator),
         });
+        lastLifecyclePersistedSignature = prepared.signature;
       } catch (error) {
-        event.preventDefault();
-        event.returnValue = '';
+        event?.preventDefault();
+        if (event) event.returnValue = '';
         console.warn('[canvas] unload recovery snapshot failed', error instanceof Error ? error.message : 'unknown error');
       }
     };
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => persistForLifecycle(event);
+    const handlePageHide = () => persistForLifecycle();
     window.addEventListener('beforeunload', handleBeforeUnload);
-    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+    window.addEventListener('pagehide', handlePageHide);
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+      window.removeEventListener('pagehide', handlePageHide);
+    };
   }, [canvasPersistenceScheduler]);
 
   // 定期从服务器同步项目数据（跨设备/跨浏览器数据同步）

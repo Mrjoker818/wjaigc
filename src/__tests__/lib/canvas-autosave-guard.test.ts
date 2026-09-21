@@ -10,6 +10,7 @@ import {
   consumeCanvasHydrationGuardQueue,
   createCanvasHydrationGuard,
   enqueueCanvasHydrationGuard,
+  persistRecoveredCanvasSnapshot,
   persistPreparedCanvasUnloadSnapshot,
   reconcileRecoveredCanvasImages,
   shouldConsumeCanvasHydrationGuard,
@@ -22,12 +23,44 @@ const image = (overrides: Record<string, unknown> = {}) => ({
   y: 80,
   width: 256,
   height: 256,
+  originalWidth: 256,
+  originalHeight: 256,
   rotation: 0,
   zIndex: 1,
+  createdAt: 1,
   ...overrides,
 });
 
 describe('canvas autosave hydration guard', () => {
+  it('does not resolve recovered hydration until the authoritative server barrier settles', async () => {
+    let releaseFlush!: () => void;
+    const flush = new Promise<void>((resolve) => { releaseFlush = resolve; });
+    const manager = {
+      updateProjectInMemory: vi.fn(),
+      flushProjectsToServerWithConflictRecovery: vi.fn(() => flush),
+    };
+    let settled = false;
+
+    const persistence = persistRecoveredCanvasSnapshot(
+      manager,
+      'project-1',
+      [image({ x: 240, width: 384 })],
+      { viewState: { scale: 1, panX: 0, panY: 0 } },
+    ).then(() => { settled = true; });
+
+    expect(manager.updateProjectInMemory).toHaveBeenCalledWith('project-1', {
+      canvasImages: [expect.objectContaining({ x: 240, width: 384 })],
+      metadata: { viewState: { scale: 1, panX: 0, panY: 0 } },
+    });
+    expect(manager.flushProjectsToServerWithConflictRecovery).toHaveBeenCalledOnce();
+    await Promise.resolve();
+    expect(settled).toBe(false);
+
+    releaseFlush();
+    await persistence;
+    expect(settled).toBe(true);
+  });
+
   it('consumes exactly the unchanged project hydration snapshot', () => {
     const guard = createCanvasHydrationGuard('project-1', [image()]);
 

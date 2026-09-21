@@ -82,7 +82,7 @@ describe('project autosave wiring', () => {
   });
 
   it('does not serialize images or call UserManager updateProject during beforeunload', () => {
-    const handlerStart = workspaceSource.indexOf('const handleBeforeUnload =');
+    const handlerStart = workspaceSource.indexOf('const persistForLifecycle =');
     const handlerEnd = workspaceSource.indexOf("window.addEventListener('beforeunload'", handlerStart);
     const handlerSource = workspaceSource.slice(handlerStart, handlerEnd);
 
@@ -100,18 +100,18 @@ describe('project autosave wiring', () => {
   });
 
   it('warns before leaving while temporary media is still being persisted', () => {
-    const handlerStart = workspaceSource.indexOf('const handleBeforeUnload =');
+    const handlerStart = workspaceSource.indexOf('const persistForLifecycle =');
     const handlerEnd = workspaceSource.indexOf("window.addEventListener('beforeunload'", handlerStart);
     const handlerSource = workspaceSource.slice(handlerStart, handlerEnd);
 
     expect(handlerSource).toContain('prepared.hasPendingMedia');
-    expect(handlerSource).toContain('event.preventDefault()');
-    expect(handlerSource).toContain("event.returnValue = ''");
-    expect(handlerSource.indexOf('event.preventDefault()'))
+    expect(handlerSource).toContain('event?.preventDefault()');
+    expect(handlerSource).toContain("if (event) event.returnValue = ''");
+    expect(handlerSource.indexOf('event?.preventDefault()'))
       .toBeLessThan(handlerSource.indexOf('persistPreparedCanvasUnloadSnapshot('));
     const catchSource = handlerSource.slice(handlerSource.indexOf('} catch (error) {'));
-    expect(catchSource).toContain('event.preventDefault()');
-    expect(catchSource).toContain("event.returnValue = ''");
+    expect(catchSource).toContain('event?.preventDefault()');
+    expect(catchSource).toContain("if (event) event.returnValue = ''");
   });
 
   it('consumes a newer emergency Canvas snapshot when a project is loaded', () => {
@@ -121,8 +121,16 @@ describe('project autosave wiring', () => {
   });
 
   it('forces a recovered emergency snapshot through the immediate server barrier', () => {
+    expect(workspaceSource.match(/await persistRecoveredCanvasSnapshot\(/g)).toHaveLength(2);
     expect(workspaceSource).toContain('recoveredCanvasPersistenceRef.current = {');
     expect(workspaceSource).toContain("persistCanvasImagesNow(recovered.images, 'immediate')");
+  });
+
+  it('persists the latest unload snapshot on pagehide when beforeunload is skipped', () => {
+    expect(workspaceSource).toContain("window.addEventListener('pagehide', handlePageHide)");
+    expect(workspaceSource).toContain("window.removeEventListener('pagehide', handlePageHide)");
+    expect(workspaceSource).toContain('lastLifecyclePersistedSignature');
+    expect(workspaceSource).toContain('prepared.signature === lastLifecyclePersistedSignature');
   });
 
   it('builds workflow output images with every field required by the project sync validator', () => {
