@@ -80,6 +80,7 @@ vi.mock('@/lib/server-user-storage', () => ({ appendUserJsonl: vi.fn() }));
 vi.mock('@/lib/api-auth', () => ({
   getInternalRequestHeaders: vi.fn(),
   getRequestUser: mocks.getRequestUser,
+  getTrustedRequestAgentExecutionFence: vi.fn().mockResolvedValue(undefined),
 }));
 vi.mock('@/lib/remove-bg-postprocess', () => ({ postProcessAIRemoveBG: vi.fn() }));
 vi.mock('@/lib/fetch-image-buffer', () => ({ fetchImageBuffer: vi.fn() }));

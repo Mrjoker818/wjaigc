@@ -193,9 +193,13 @@ describe('multi-platform export results', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '下载 Instagram 帖子' }));
     await waitFor(() => expect(onDownload).toHaveBeenCalledWith('version-image-1'));
-    fireEvent.click(screen.getByRole('button', { name: '下载 ZIP' }));
+    const zipButton = screen.getByRole('button', { name: '下载 ZIP' });
+    await waitFor(() => expect(zipButton.hasAttribute('disabled')).toBe(false));
+    fireEvent.click(zipButton);
     await waitFor(() => expect(onDownload).toHaveBeenCalledWith('version-zip-1'));
-    fireEvent.click(screen.getByRole('button', { name: '批量放入画布' }));
+    const addAllButton = screen.getByRole('button', { name: '批量放入画布' });
+    await waitFor(() => expect(addAllButton.hasAttribute('disabled')).toBe(false));
+    fireEvent.click(addAllButton);
     await waitFor(() => expect(onAddToCanvas).toHaveBeenCalledWith([
       expect.objectContaining({ assetVersionId: 'version-image-1', kind: 'image' }),
     ]));

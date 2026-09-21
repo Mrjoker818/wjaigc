@@ -134,8 +134,9 @@ describe('Agent runtime route rollout modes', () => {
 
     const standalone = routeSource('src/app/api/simple-chat/chat/route.ts');
     expect(standalone).toContain('executeAdmittedToolCall({');
-    expect(standalone).toContain('}, context?.signal)');
-    expect(standalone).toContain('pollExistingTask(context?.signal)');
+    expect(standalone).toContain('}, context?.signal, {');
+    expect(standalone).toContain('executionFence: context?.executionFence');
+    expect(standalone).toContain('pollExistingTask(context?.signal, context?.executionFence)');
 
     const agentEdit = agentEditExecutionSource();
     expect(agentEdit).toContain('const operationSignal = operationContext.signal || executionSignal;');

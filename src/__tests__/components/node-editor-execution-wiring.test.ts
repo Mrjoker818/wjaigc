@@ -13,7 +13,8 @@ describe('node editor execution wiring', () => {
     expect(source).toContain('await startWorkflowExecution({');
     expect(source).toContain('startNodeId,');
     expect(source).toContain('tailNodeId: tailId,');
-    expect(source).toContain('await startWorkflowExecution({ nodes: wf.nodes, connections: wf.connections })');
+    expect(source).toContain('const latestWorkflow = wfRef.current');
+    expect(source).toContain('await startWorkflowExecution({ nodes: latestWorkflow.nodes, connections: latestWorkflow.connections })');
   });
 
   it('stores the execution id so status polling and progress rendering can start', () => {

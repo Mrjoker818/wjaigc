@@ -731,6 +731,15 @@ suite('canvas shadow PostgreSQL reconciliation', () => {
       const migration = migrateLegacyProjectOnWriteInTransaction(client, {
         actorUserId: localOwnerId,
         projectId: localProjectId,
+        verifiedMediaByImageId: {
+          [imageId]: {
+            url: localUrl,
+            mimeType: 'image/png',
+            byteSize: 1_024,
+            width: 600,
+            height: 400,
+          },
+        },
       });
       await waitForLockWait(migrationProcess.rows[0].pid);
       await projectorReplay.query(
@@ -780,6 +789,15 @@ suite('canvas shadow PostgreSQL reconciliation', () => {
       const replay = await migrateLegacyProjectOnWriteInTransaction(client, {
         actorUserId: localOwnerId,
         projectId: localProjectId,
+        verifiedMediaByImageId: {
+          [imageId]: {
+            url: localUrl,
+            mimeType: 'image/png',
+            byteSize: 1_024,
+            width: 600,
+            height: 400,
+          },
+        },
       });
       await client.query('COMMIT');
       expect(replay.mappings[imageId]).toEqual(activeMapping);
@@ -815,6 +833,15 @@ suite('canvas shadow PostgreSQL reconciliation', () => {
       const branched = await migrateLegacyProjectOnWriteInTransaction(client, {
         actorUserId: localOwnerId,
         projectId: localProjectId,
+        verifiedMediaByImageId: {
+          [imageId]: {
+            url: nextLocalUrl,
+            mimeType: 'image/png',
+            byteSize: 2_048,
+            width: 600,
+            height: 400,
+          },
+        },
       });
       await client.query('COMMIT');
       const branchedMapping = branched.mappings[imageId];

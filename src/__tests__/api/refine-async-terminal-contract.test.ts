@@ -25,6 +25,7 @@ vi.mock('@/lib/credits', () => ({ consumeCredits: io.charge, refundCredits: io.r
 vi.mock('@/lib/api-auth', () => ({
   getRequestUser: vi.fn(async () => ({ user: { id: 'refine-contract-user', role: 'user' }, source: 'cookie' })),
   getInternalRequestHeaders: vi.fn(async () => ({})),
+  getTrustedRequestAgentExecutionFence: vi.fn(async () => undefined),
   requireApiAuthOrReject: vi.fn(async () => ({
     user: { id: 'refine-contract-user', role: 'user' },
     source: 'cookie',

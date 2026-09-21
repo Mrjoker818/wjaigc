@@ -100,7 +100,19 @@ describe('legacy project copy-on-write migration', () => {
       const legacy = fixture('v1-images-alias.json', actorUserId, projectId);
       await seedLegacyProject(query, actorUserId, legacy);
 
-      const result = await migrateLegacyProjectOnWrite({ actorUserId, projectId });
+      const result = await migrateLegacyProjectOnWrite({
+        actorUserId,
+        projectId,
+        verifiedMediaByImageId: {
+          'legacy-alias-image': {
+            url: '/api/serve-upload/uploads/alias.png',
+            mimeType: 'image/png',
+            byteSize: 68,
+            width: 640,
+            height: 480,
+          },
+        },
+      });
 
       expect(result).toMatchObject({ migrated: true, reused: false, sourceSchemaVersion: 1 });
       expect(result.project.schemaVersion).toBe(3);

@@ -70,6 +70,7 @@ vi.mock('@/lib/api-auth', () => ({
     'x-wujie-internal-user-role': fixtures.user.role,
     'x-wujie-internal-secret': 'test-internal-secret',
   }),
+  getTrustedRequestAgentExecutionFence: vi.fn().mockResolvedValue(undefined),
 }));
 vi.mock('@/lib/server-auth', () => ({
   getSessionUser: vi.fn().mockResolvedValue(fixtures.user),
