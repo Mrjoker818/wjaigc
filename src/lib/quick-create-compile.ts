@@ -8,6 +8,38 @@ export type QuickCreateQuality = (typeof QUICK_CREATE_QUALITIES)[number];
 export type QuickCreateModelSource = 'task-override' | 'quick-create-default' | 'global-default' | 'recent-selection' | 'first-available';
 export type QuickCreateCompilePhase = 'validating' | 'routing' | 'understanding' | 'strategizing' | 'finalizing' | 'ready';
 
+export interface QuickCreateImageCapability {
+  allowedSizes: string[];
+  qualityOptions: string[];
+}
+
+export interface QuickCreateGenerationQuality {
+  quality?: string;
+  resolution?: string;
+}
+
+export function resolveQuickCreateGenerationQuality(
+  requested: QuickCreateQuality,
+  capability?: QuickCreateImageCapability,
+): QuickCreateGenerationQuality {
+  if (!capability) return {};
+
+  const result: QuickCreateGenerationQuality = {};
+  const qualityPreference = requested === 'high'
+    ? ['high', 'hd', 'quality', 'max', 'medium', 'auto', 'standard', 'low']
+    : ['standard', 'auto', 'medium', 'low', 'high', 'hd', 'quality', 'max'];
+  const quality = qualityPreference.find(value => capability.qualityOptions.includes(value));
+  if (quality) result.quality = quality;
+
+  const resolutionPreference = requested === 'high'
+    ? ['2K', '4K', '1K']
+    : ['1K', '2K', '4K'];
+  const resolution = resolutionPreference.find(value => capability.allowedSizes.includes(value));
+  if (resolution) result.resolution = resolution;
+
+  return result;
+}
+
 export interface QuickCreateCompileRequest {
   prompt: string;
   aspectRatio: QuickCreateAspectRatio;

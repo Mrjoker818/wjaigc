@@ -498,6 +498,7 @@
   "scripts/finalize-read-only-canvas-share-evidence.ts",
   "scripts/init-read-only-canvas-share-evidence.ts",
   "scripts/read-only-canvas-share-evidence-cli.ts",
+  "scripts/stage-2-e2e-fixtures.mjs",
   "src/app/api/canvas-shares/[shareId]/revoke/route.ts",
   "src/app/api/canvas-shares/[shareId]/route.ts",
   "src/app/api/canvas-shares/preflight/route.ts",
@@ -525,5 +526,7 @@
   "src/lib/canvas-share/snapshot.ts",
   "src/lib/canvas-share/storage.ts",
   "src/lib/canvas-share/token.ts",
-  "src/lib/canvas-share/types.ts"
+  "src/lib/canvas-share/types.ts",
+  "src/lib/canvas-autosave-guard.ts",
+  "src/lib/quick-create-compile.ts"
 ]

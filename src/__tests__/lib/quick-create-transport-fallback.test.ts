@@ -35,4 +35,9 @@ describe('quick create transport fallback', () => {
     expect(canvasWorkspaceSource).toContain('createQuickCreateFallbackResult(request');
     expect(canvasWorkspaceSource).toContain('prompt: finalResult.positivePrompt');
   });
+
+  it('routes both compiled and transport-fallback payloads through authoritative capabilities', () => {
+    expect(canvasWorkspaceSource).not.toContain('quality: finalResult.quality');
+    expect(canvasWorkspaceSource.match(/\.\.\.generationQuality\(finalResult\.quality\)/g)).toHaveLength(2);
+  });
 });

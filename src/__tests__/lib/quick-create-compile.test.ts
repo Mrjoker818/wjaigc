@@ -5,6 +5,7 @@ import {
   parseQuickCreateCompilePayload,
   parseQuickCreateCompileRequest,
   parseQuickCreateCompileSseEvent,
+  resolveQuickCreateGenerationQuality,
   stripMarkdownCodeFence,
   supportsQuickCreateVision,
 } from '@/lib/quick-create-compile';
@@ -96,6 +97,40 @@ describe('quick create request validation', () => {
       ...validRequest,
       referenceImages: ['file:///etc/passwd'],
     })).toThrow('referenceImages');
+  });
+});
+
+describe('quick create generation quality routing', () => {
+  it('uses a resolution tier without sending unsupported quality to a size-only model', () => {
+    expect(resolveQuickCreateGenerationQuality('standard', {
+      allowedSizes: ['1K', '2K', '4K'],
+      qualityOptions: [],
+    })).toEqual({ resolution: '1K' });
+  });
+
+  it('maps high intent to both supported dimensions when the model exposes both', () => {
+    expect(resolveQuickCreateGenerationQuality('high', {
+      allowedSizes: ['1K', '2K', '4K'],
+      qualityOptions: ['auto', 'low', 'medium', 'high'],
+    })).toEqual({ quality: 'high', resolution: '2K' });
+  });
+
+  it('preserves a supported quality-only value', () => {
+    expect(resolveQuickCreateGenerationQuality('standard', {
+      allowedSizes: [],
+      qualityOptions: ['standard', 'hd'],
+    })).toEqual({ quality: 'standard' });
+  });
+
+  it('omits unverified fields when no authoritative capability is available', () => {
+    expect(resolveQuickCreateGenerationQuality('standard')).toEqual({});
+  });
+
+  it('does not forward pixel sizes or unknown quality values as generation tiers', () => {
+    expect(resolveQuickCreateGenerationQuality('high', {
+      allowedSizes: ['1024x1024'],
+      qualityOptions: ['premium'],
+    })).toEqual({});
   });
 });
 

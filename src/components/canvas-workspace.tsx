@@ -69,6 +69,7 @@ import {
 } from '@/lib/model-defaults';
 import {
   createQuickCreateFallbackResult,
+  resolveQuickCreateGenerationQuality,
   shouldFallbackQuickCreateCompile,
   type QuickCreateModelSource,
   type QuickCreateCompileResult,
@@ -5604,6 +5605,10 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
       notifyMissingQuickCreateImageModel();
       return false;
     }
+    const imageCapability = taskModelCatalogIndex.get(quickCreateImageModel.id);
+    const generationQuality = (quality: QuickCreateCompileResult['quality']) => (
+      resolveQuickCreateGenerationQuality(quality, imageCapability)
+    );
 
     quickCreateCompileControllerRef.current?.abort();
     const controller = new AbortController();
@@ -5653,7 +5658,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
         imageCategory: '',
         productCategory: '',
         stylePreset: '',
-        quality: finalResult.quality,
+        ...generationQuality(finalResult.quality),
         model: quickCreateImageModel.modelId,
         providerId: quickCreateImageModel.providerId,
       });
@@ -5783,7 +5788,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
         imageCategory: '',
         productCategory: '',
         stylePreset: '',
-        quality: finalResult.quality,
+        ...generationQuality(finalResult.quality),
         model: quickCreateImageModel.modelId,
         providerId: quickCreateImageModel.providerId,
       });
@@ -5819,6 +5824,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
     resolvedQuickCreateChatModel,
     recentQuickCreateChatModel,
     recentQuickCreateImageModel,
+    taskModelCatalogIndex,
   ]);
 
   // AI聊天中的图像生成回调 - 当AI建议生成图片时直接触发
