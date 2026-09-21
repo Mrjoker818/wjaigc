@@ -7,6 +7,10 @@ import {
   type CanvasPersistenceSnapshot,
   type CanvasPersistencePhase,
 } from '@/lib/canvas-kernel/persistence';
+import {
+  consumePreparedCanvasUnloadSnapshot,
+  persistPreparedCanvasUnloadSnapshot,
+} from '@/lib/canvas-autosave-guard';
 
 function snapshot(
   revision: number,
@@ -319,9 +323,32 @@ describe('CanvasPersistenceScheduler', () => {
     scheduler.schedule(snapshot(1));
     scheduler.schedule(snapshot(2));
 
-    expect(scheduler.preparePendingSnapshotForUnload('project-a')).toEqual(
+    expect(scheduler.preparePendingSnapshotForUnload('project-a', 7)).toEqual(
       expect.objectContaining({ revision: 2, signature: 'signature-2' }),
     );
+  });
+
+  it('rebases a pending unload snapshot onto the latest acknowledged server revision', () => {
+    const scheduler = new CanvasPersistenceScheduler({ writer: async () => undefined });
+    const values = new Map<string, string>();
+    const storage = {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => { values.set(key, value); },
+      removeItem: (key: string) => { values.delete(key); },
+    };
+    scheduler.schedule(snapshot(5, { baseProjectRevision: 7 }));
+
+    const prepared = scheduler.preparePendingSnapshotForUnload('project-a', 10);
+
+    expect(prepared).not.toBeNull();
+    persistPreparedCanvasUnloadSnapshot(prepared!, {
+      storage,
+      sendBeacon: () => false,
+    });
+    expect(consumePreparedCanvasUnloadSnapshot('project-a', 10, storage, 'user-a')).toEqual(expect.objectContaining({
+      baseProjectRevision: 10,
+      revision: 5,
+    }));
   });
 
   it('adds the unload-only beacon payload after a normal snapshot has already been written', async () => {
@@ -341,7 +368,7 @@ describe('CanvasPersistenceScheduler', () => {
     await scheduler.flush('immediate');
     expect(scheduler.getPreparedSnapshot('project-a')).not.toHaveProperty('beaconPayload');
 
-    expect(scheduler.preparePendingSnapshotForUnload('project-a')).toEqual(expect.objectContaining({
+    expect(scheduler.preparePendingSnapshotForUnload('project-a', 7)).toEqual(expect.objectContaining({
       revision: 4,
       beaconPayload: 'beacon-4',
     }));

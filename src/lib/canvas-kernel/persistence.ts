@@ -223,7 +223,10 @@ export class CanvasPersistenceScheduler {
     return this.preparedSnapshots.get(projectId) ?? null;
   }
 
-  preparePendingSnapshotForUnload(projectId: string): CanvasPreparedPersistenceSnapshot | null {
+  preparePendingSnapshotForUnload(
+    projectId: string,
+    acknowledgedProjectRevision: number,
+  ): CanvasPreparedPersistenceSnapshot | null {
     const prepared = this.preparedSnapshots.get(projectId) ?? null;
     const candidates = [
       this.pendingSnapshot,
@@ -235,8 +238,21 @@ export class CanvasPersistenceScheduler {
       !current || candidate.revision > current.revision ? candidate : current
     ), null);
     if (!latest) return prepared;
-    if (prepared && prepared.revision >= latest.revision && prepared.beaconPayload) return prepared;
-    const emergencyPrepared = this.prepareUnloadSnapshot(latest);
+    const latestAcknowledgedRevision = Number.isSafeInteger(acknowledgedProjectRevision)
+      ? Math.max(latest.baseProjectRevision, acknowledgedProjectRevision)
+      : latest.baseProjectRevision;
+    const unloadSnapshot = latestAcknowledgedRevision === latest.baseProjectRevision
+      ? latest
+      : { ...latest, baseProjectRevision: latestAcknowledgedRevision };
+    if (
+      prepared
+      && prepared.revision >= unloadSnapshot.revision
+      && prepared.baseProjectRevision >= unloadSnapshot.baseProjectRevision
+      && prepared.beaconPayload
+    ) {
+      return prepared;
+    }
+    const emergencyPrepared = this.prepareUnloadSnapshot(unloadSnapshot);
     this.preparedSnapshots.set(projectId, emergencyPrepared);
     return emergencyPrepared;
   }

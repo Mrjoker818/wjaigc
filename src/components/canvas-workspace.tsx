@@ -2227,7 +2227,10 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
       try {
         if (!currentUserRef.current?.id) return;
         if (!canvasPersistenceScheduler.hasPendingSnapshot(proj.id)) return;
-        const prepared = canvasPersistenceScheduler.preparePendingSnapshotForUnload(proj.id);
+        const prepared = canvasPersistenceScheduler.preparePendingSnapshotForUnload(
+          proj.id,
+          UserManagerCore.getInstance().getProjectSyncRevision(),
+        );
         if (!prepared) return;
         if (prepared.hasPendingMedia) {
           event.preventDefault();
