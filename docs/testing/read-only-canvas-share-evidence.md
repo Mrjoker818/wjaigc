@@ -1,6 +1,6 @@
 # 只读画布分享发布证据
 
-> 状态：本地候选、隔离 PostgreSQL、GitHub main、Coze exact-tree 构建、Firefox/WebKit route-fixture、一条真实 token 匿名链路，以及 Stage 2/4 受控本地矩阵已完成；真实账号 P0、Stage 3、Stage 2/4 云端 exact-candidate 与完整八项云端发布矩阵仍未验证，发布保持关闭。本文不包含 raw token、分享 URL、媒体 URL、storage key、供应商载荷或个人标识。
+> 状态：本地候选、隔离 PostgreSQL、GitHub main、Coze exact-tree 构建、Firefox/WebKit route-fixture、一条真实 token 匿名链路、Stage 2/4 受控本地矩阵，以及 Stage 3 本地 `180/180` 与 Coze exact-business Chromium 三模式回滚门禁均已完成；真实账号 P0、Stage 2/4 云端 exact-candidate、不可变 GitHub Actions Stage 3 与完整八项云端发布矩阵仍未验证，发布保持关闭。本文不包含 raw token、分享 URL、媒体 URL、storage key、供应商载荷或个人标识。
 
 ## 先列阻断与未验证项
 
@@ -64,7 +64,7 @@
 | 迁移执行 | `pnpm migrate` 连续执行两次 | PostgreSQL 18 隔离实例上两次均退出 0；首次应用 26 个迁移，第二次全部安全跳过，含 `20260919_read_only_canvas_shares.sql`。 |
 | Chromium P0 | `pnpm exec playwright test tests/e2e/p0-core.spec.ts --project=chromium --reporter=line` | **未验证**；缺少 `E2E_TEST_USERNAME`、`E2E_TEST_PASSWORD`、`E2E_GENERATION_MODEL`。 |
 | Stage 2 受控本地矩阵 | 隔离 PostgreSQL + `tests/e2e/stage-2-asset-lifecycle.spec.ts`、`stage-2-cross-workspace.spec.ts` | Chromium、1080p Chromium、Firefox、Mobile Chromium 各 11/11，共 44/44；真实账号与 current-candidate WebKit 仍未验证。 |
-| Chromium Stage 3 | `pnpm exec playwright test tests/e2e/stage-3-canvas-kernel.spec.ts --project=chromium --reporter=line` | 收集阶段因缺少 `E2E_STAGE3_PROJECT_IDS`、`E2E_STAGE3_RUN_ID` 阻断，**未验证**。 |
+| Chromium Stage 3 | `pnpm exec playwright test tests/e2e/stage-3-canvas-kernel.spec.ts --project=chromium` | 本地 exact-candidate 五配置三模式 `180/180`；Coze exact-business 先验 legacy `12/12`，随后权威 `shadow 12/12 -> canvas-v2 12/12 -> legacy 12/12`，云端合计 `48/48`、四轮退出码均为 0。GitHub Actions 不可变运行仍受外部 runner/账务阻断。 |
 | Stage 4 受控本地矩阵 | `tests/e2e/stage-4-node-chat-agent.spec.ts`，每轮独立 PostgreSQL 与受控 provider | `stage4-local_20260920_r41` 为 Chromium 1080p / Firefox / Mobile Chromium 9/9；项目专用 WebKit 运行时的 `stage4-local_20260920_r40` 为 3/3。移动端链路通过真实节点选择、关闭面板及“发送到智能对话”点击完成，无 DOM 点击绕过；真实账号与 Coze exact-candidate 仍未验证。 |
 | Stage 4 候选相关回归 | 11 个 API、任务租约、工作流与聊天持久化测试文件 | 126/126 passed；TypeScript、生产构建（121/121 静态页）及 ESLint quiet 门禁通过。 |
 | Task 8 Desktop Chromium | `tests/e2e/read-only-canvas-share.spec.ts` | 4/4 passed at `dd4880bc…`。 |
@@ -124,4 +124,4 @@ pnpm exec vitest run `
 
 ## 发布判定
 
-GitHub `main` 已接收只读分享、Stage 2 候选与 Stage 4 生命周期修正；Stage 4 实现提交为 `8cc902b831686c7331b49630442f0bf30049ff42`。现有证据包括安全、类型、保护基线、Chromium 合成证据、隔离 PostgreSQL 迁移与全量真库回归、Firefox/WebKit route-fixture 4/4+4/4、Coze exact-tree 构建/服务、一条真实 token 匿名查看/下载/375px/撤销链路，以及 Stage 2/4 受控本地矩阵；Stage 4 最终本地证据为主矩阵 `r41` 9/9 与项目专用 WebKit `r40` 3/3。真实账号 P0、Stage 3、Stage 2/4 云端 exact-candidate、完整八项真实 token 云端矩阵仍未验证。因此发布开关必须保持默认关闭；本文不授权对外发布，也不授权提前进入 WebSocket 阶段。
+GitHub `main` 已接收只读分享、Stage 2 候选与 Stage 4 生命周期修正；Stage 4 实现提交为 `8cc902b831686c7331b49630442f0bf30049ff42`。现有证据包括安全、类型、保护基线、隔离 PostgreSQL 迁移与全量真库回归、Firefox/WebKit route-fixture 4/4+4/4、Coze exact-tree 构建/服务、一条真实 token 匿名查看/下载/375px/撤销链路、Stage 2/4 受控本地矩阵，以及 Stage 3 本地 `180/180` 和 Coze exact-business Chromium `48/48`。Coze 受测业务候选为 `57463c3a1cbf8981638a578bcbab761d596f3f65`、tree `3156585683291baa502405113fe1837465f52c80`、Build ID `xeRyfCmt9Ei82o99mcCTf`；权威回滚序列 `shadow -> canvas-v2 -> legacy` 为 `36/36`。真实账号 P0、Stage 2/4 云端 exact-candidate、不可变 GitHub Actions Stage 3 和完整八项真实 token 云端矩阵仍未验证。因此发布开关必须保持默认关闭；本文不授权对外发布，也不授权提前进入 WebSocket 阶段。

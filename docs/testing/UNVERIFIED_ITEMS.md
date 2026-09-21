@@ -1,5 +1,11 @@
 # 无界AI — 未验证项目清单 (UNVERIFIED ITEMS)
 
+## 2026-09-21 Stage 3 Coze 三模式状态修正
+
+Coze exact-business `main@57463c3a` 的 Chromium 发布/回滚门禁已关闭：先验 legacy `12/12`，权威 `shadow 12/12 -> canvas-v2 12/12 -> legacy 12/12`，四轮退出码均为 0，合计 `48/48`。因此下方历史章节中所有“Coze exact-SHA 三模式/最终 legacy 回滚未验证”的条目均已被本节取代，不再作为开放项。
+
+仍然开放且不得混淆为已通过：不可变 GitHub Actions Stage 3 三模式（runner/账务外部阻断）、真实账号 P0 生成及权威扣费/取消/退款、Stage 2/4 云端 exact-candidate、完整八项真实 token 云端矩阵、实体设备延期项和既有宿主 CSP 噪声。全平台发布仍不通过，`stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 继续只读。
+
 ## 2026-09-21 V588-ADMIN-003 状态修正
 
 真实 S3 缓存恢复已由 `main@57463c3a` 的 Coze 受控样本关闭：删除前后 HTTP 均为 200，服务日志命中 S3 恢复分支，本地缓存重新生成，67 字节响应与本地文件 SHA-256 完全一致；样本没有 `sourceUrl` 映射。结合既有缩略图重试/原图回退和隔离 PostgreSQL `2/2`，`V588-ADMIN-003` 不再保留未验证项。机器摘要：`docs/testing/evidence/v588-admin-003-s3-recovery-cloud-20260921.json`。

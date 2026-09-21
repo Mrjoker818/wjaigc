@@ -1,5 +1,11 @@
 # 无界AI — 发布就绪报告 (RELEASE READINESS REPORT)
 
+## 2026-09-21 Stage 3 Coze 发布/回滚判断
+
+Coze exact-business `main@57463c3a`（tree `3156585683291baa502405113fe1837465f52c80`，Build ID `xeRyfCmt9Ei82o99mcCTf`）已完成 Chromium `shadow -> canvas-v2 -> legacy` 权威序列 `36/36`；加上独立 legacy 先验，总计 `48/48`、四轮退出码均为 0。专用 5103/55433 环境及临时数据已清理，5000 业务预览保持 HTTP 200；未触碰业务数据库和 `stable`。
+
+**结论：Stage 3 Coze Chromium rollout/rollback 门禁通过；全平台正式发布仍不通过。** 不可变 GitHub Actions Stage 3、真实账号 P0 生成与扣费/取消/退款、Stage 2/4 云端 exact-candidate、完整真实 token 矩阵及其他明确开放项仍需独立证据。本节不授权发布或提前进入 WebSocket/Yjs。
+
 ## 2026-09-21 V588-ADMIN-003 最终判断
 
 `V588-ADMIN-003` 最后一项真实 S3 缓存恢复已在 Coze exact `main@57463c3a` 通过：受控一次性对象删除本地缓存后，由精确 S3 key 恢复为同一 67 字节 PNG，HTTP、日志、本地再缓存和 SHA-256 四重证据一致，且没有 `sourceUrl` 外部回退。既有缩略图失败重试/原图回退与隔离 PostgreSQL `2/2` 证据继续有效，故本阶段关闭。

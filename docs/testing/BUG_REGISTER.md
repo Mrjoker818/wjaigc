@@ -1,5 +1,12 @@
 # 无界AI — 缺陷登记表 (BUG REGISTER)
 
+## 2026-09-21 Stage 3 Coze 隔离环境与回滚门禁关闭
+
+- Coze exact-business `main@57463c3a` 的 Stage 3 Chromium 门禁已完成：先验 legacy `12/12`，再按 `shadow 12/12 -> canvas-v2 12/12 -> legacy 12/12` 完成权威发布/回滚序列，四轮均退出 0。
+- 首轮环境失败均保留且已用最小环境修正关闭：PostgreSQL 日志目录权限不足后改到专用数据目录；继承的 `PGSSLMODE=require`/`PGCHANNELBINDING=require` 与 localhost 无 SSL 冲突后显式设为 `disable`；seed 早于运行时核心表初始化后改为“先启动隔离应用，再 seed”；首轮执行顺序缺少最终 legacy 回滚后补跑独立 fresh legacy。
+- 上述修正没有修改产品源码、阈值或测试断言。专用 5103 服务、55433 PostgreSQL、临时数据库/数据目录和 worktree 依赖链接均已清理；5000 业务预览保持 HTTP 200，exact worktree clean。
+- **状态：环境/编排阻断已关闭。** GitHub Actions 不可变三模式运行与真实账号 P0 计费/取消/退款仍是独立外部门禁，不随本项关闭。
+
 ## 2026-09-21 画布供应商徽标回归关闭
 
 - 同名模型 `gpt-image-2` 的历史任务恢复后曾按模型目录回退显示 AILINK，而不是任务实际的 APImart。

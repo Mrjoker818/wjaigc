@@ -1,5 +1,15 @@
 # Stage 3 Canvas Performance And Reliability Report
 
+## 2026-09-21 最新 exact-candidate 与 Coze 门禁
+
+- 本地 exact-candidate 五配置在 `shadow -> canvas-v2 -> legacy` 下继续保持 `180/180`；本次云端收口没有重复执行。
+- Coze 受测业务提交为 `57463c3a1cbf8981638a578bcbab761d596f3f65`，tree `3156585683291baa502405113fe1837465f52c80`，Build ID `xeRyfCmt9Ei82o99mcCTf`。
+- Chromium 先验 legacy `12/12`（49.2s）；随后权威发布/回滚序列 shadow `12/12`（47.7s）、canvas-v2 `12/12`（47.8s）、最终 fresh legacy `12/12`（49.1s）。四轮进程均退出 0，云端合计 `48/48`，其中必需序列为 `36/36`。
+- 云端 fixture 使用 localhost 上的独立 PostgreSQL 16.15 集群和独立 5103 应用。临时数据、进程和依赖链接均已移除；55433 无监听、5103 已关闭、exact worktree clean，业务 5000 预览保持 HTTP 200。
+- 云端执行期间没有修改产品源码、阈值或断言。首次失败仅属于环境/启动顺序问题：日志目录权限、继承的 SSL 要求、运行时表初始化前 seed，以及缺少最终回滚轮次。
+
+**最新判定：COZE CHROMIUM ROLLOUT/ROLLBACK PASS / STAGE 3 EXTERNAL GATES REMAIN。** 不可变 GitHub Actions 与真实 P0 供应商/账务证据仍然必需；本文不授权全平台发布，也不授权写入 `stable@52f7c601ed150769e15d06fb435c6e360e28c9e7`。
+
 Date: 2026-08-14
 Pre-bootstrap baseline: `origin/main@18346aa3c48f455ed8d01c3093eea2474e41a166`
 Governance bootstrap: `d9fde3a0f36b7ca8532591e8b098e4dfb1ac40f6`
@@ -80,7 +90,7 @@ Saved geometry, z-order and task state survive reload. The complete functional f
 - Coze must run the exact SHA in `shadow`, switch the isolated preview to `canvas-v2`, rerun the same gates, and finally prove the mandatory return to `legacy`.
 - GitHub Actions has not yet supplied the new three-mode job result for this SHA.
 
-## Current Verdict
+## Historical Current Verdict (2026-08-14)
 
 **CONDITIONAL / STAGE 3 NOT COMPLETE.** Local functional, performance and three-mode browser gates pass. Cloud exact-SHA, real-provider P0, billing/refund evidence and the controlled `canvas-v2 -> legacy` rollback are mandatory remaining gates.
 

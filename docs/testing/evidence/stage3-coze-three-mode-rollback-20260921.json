@@ -1,0 +1,82 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-09-21",
+  "scope": "stage-3-coze-chromium-rollout-rollback",
+  "testedCommit": "57463c3a1cbf8981638a578bcbab761d596f3f65",
+  "testedTree": "3156585683291baa502405113fe1837465f52c80",
+  "buildId": "xeRyfCmt9Ei82o99mcCTf",
+  "stableCommit": "52f7c601ed150769e15d06fb435c6e360e28c9e7",
+  "environment": {
+    "node": "24.19.0",
+    "pnpm": "9.15.9",
+    "playwright": "1.60.0",
+    "chromium": "134.0.6998.35",
+    "postgresql": "16.15"
+  },
+  "runs": [
+    {
+      "purpose": "legacy-precheck",
+      "mode": "legacy",
+      "passed": 12,
+      "failed": 0,
+      "exitCode": 0,
+      "durationSeconds": 49.2
+    },
+    {
+      "purpose": "rollout-shadow",
+      "mode": "shadow",
+      "passed": 12,
+      "failed": 0,
+      "exitCode": 0,
+      "durationSeconds": 47.7
+    },
+    {
+      "purpose": "rollout-canvas-v2",
+      "mode": "canvas-v2",
+      "passed": 12,
+      "failed": 0,
+      "exitCode": 0,
+      "durationSeconds": 47.8
+    },
+    {
+      "purpose": "mandatory-final-rollback",
+      "mode": "legacy",
+      "passed": 12,
+      "failed": 0,
+      "exitCode": 0,
+      "durationSeconds": 49.1
+    }
+  ],
+  "requiredSequence": [
+    "shadow",
+    "canvas-v2",
+    "legacy"
+  ],
+  "requiredSequenceResult": {
+    "passed": 36,
+    "failed": 0
+  },
+  "aggregateResult": {
+    "passed": 48,
+    "failed": 0
+  },
+  "isolation": {
+    "databaseHost": "127.0.0.1",
+    "databasePort": 55433,
+    "applicationPort": 5103,
+    "businessPreviewPort": 5000,
+    "fixtureProjectsPerMode": 15,
+    "businessDatabaseTouched": false
+  },
+  "cleanup": {
+    "temporaryDirectoryRemoved": true,
+    "dependencyLinkRemoved": true,
+    "applicationPortClosed": true,
+    "databasePortClosed": true,
+    "exactWorktreeClean": true,
+    "businessPreviewHttpStatus": 200,
+    "sanitizedTextLogsRetained": 16
+  },
+  "sourceChangesDuringCloudRun": false,
+  "releaseDecision": "coze-chromium-rollout-rollback-pass-global-release-blocked"
+}

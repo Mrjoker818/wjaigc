@@ -1,5 +1,14 @@
 # 无界AI — 回归测试报告 (REGRESSION REPORT)
 
+## 2026-09-21 Stage 3 Coze Chromium 三模式发布/回滚回归
+
+- 受测业务候选：`57463c3a1cbf8981638a578bcbab761d596f3f65`，tree `3156585683291baa502405113fe1837465f52c80`，Build ID `xeRyfCmt9Ei82o99mcCTf`。后续 `main@24670e2b` 仅增加文档/证据，不改变本次受测业务源码；`stable@52f7c601ed150769e15d06fb435c6e360e28c9e7` 未修改。
+- 本地基线继续沿用 exact-candidate 五配置三模式 `180/180`，未重复执行。
+- Coze Chromium：legacy 先验 `12/12`（49.2s）、shadow `12/12`（47.7s）、canvas-v2 `12/12`（47.8s）、最终 fresh legacy 回滚 `12/12`（49.1s）；四轮退出码均为 0。权威 `shadow -> canvas-v2 -> legacy` 序列为 `36/36`，连同先验合计 `48/48`。
+- 环境：Node `v24.19.0`、pnpm `9.15.9`、Playwright `1.60.0`、Chromium `134.0.6998.35`、PostgreSQL `16.15`。所有 fixture 使用专用 localhost 55433 数据库、guard、隔离用户和 15 项目；独立应用仅监听 5103，业务 5000 未切换。
+- 清理复核：临时目录与数据库已删除，5103 返回 `000`，55433 无监听，依赖链接移除，exact worktree clean，5000 返回 HTTP 200；16 份脱敏文本日志保留在忽略目录。没有连接或修改业务数据库，没有修改产品源码。
+- **回归判定：COZE CHROMIUM ROLLOUT/ROLLBACK PASS / GLOBAL RELEASE STILL BLOCKED。** 不可变 GitHub Actions、真实账号 P0、Stage 2/4 云端 exact-candidate 与完整真实 token 矩阵仍须单独关闭。
+
 ## 2026-09-21 画布精确供应商徽标云端回归
 
 `main@57463c3a` 本地全仓 `831/831` 文件、`7176/7176` 测试通过，0 失败、0 跳过；TypeScript、构建版 Lint 和生产构建 `121/121` 通过。Coze Build ID `RviJZZ05HvKLSxvFREk22`。
