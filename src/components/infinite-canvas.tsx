@@ -64,6 +64,7 @@ import {
 import type { CanvasGenGroup, GenGroupToolbar, GroupRefImage, GenGroupType, ReferenceCategory, HexCubeGroup, CubeFace, ZoomLevel } from '@/lib/canvas-generation-group';
 import { buildGroupReferenceRequestControls, calculateActualPixels, captureGenerationGroupSourcePositions, REFERENCE_CATEGORIES, REFERENCE_CATEGORY_LABELS, createHexCubeGroup, CUBE_FACE_ORDER, CUBE_FACE_LABELS, ZOOM_LEVEL_LABELS, QUALITY_DISPLAY_NAMES, RESOLUTION_TIER_DISPLAY_NAMES, QUALITY_LEVEL_DISPLAY_NAMES, reconcileGenerationGroupPositions } from '@/lib/canvas-generation-group';
 import { getModelDisplayName } from '@/lib/model-name-map';
+import { resolveCanvasProviderDisplayName } from '@/lib/task-provider-display';
 import type { PsdLayerItem } from '@/types/psdLayer';
 import { awaitStableImageUrl, onPersistComplete, getCachedLocalUrl, persistVideoUrlInBackground, persistRemoteUrlInBackground } from '@/lib/stable-image-url';
 import { taskEventsClient } from '@/lib/task-events-client';
@@ -12765,32 +12766,15 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
                   const rawApiProvider = is3DImage
                     ? (image.threeDModelInfo?.providerName || image.apiProvider || '')
                     : (routeAudit?.actual.providerName || image.apiProvider || '');
-                  const displayApiProvider = (() => {
-                    // 1. 优先使用 apiProvider 直接值（后端返回的提供商名称）
-                    if (rawApiProvider) {
-                      // 如果 apiProvider 本身是 providerId（如 api_xxx），尝试从 map 查找友好名称
-                      const mapped = modelProviderMap.get(rawApiProvider);
-                      return mapped || rawApiProvider;
-                    }
-                    // 2. 如果图片有 modelName，尝试匹配复合键
-                    const imgModel = image.model || '';
-                    const imgModelName = image.modelName || '';
-                    if (imgModel) {
-                      // 遍历所有已知的复合键，查找 modelId 匹配的
-                      for (const [key, name] of modelProviderMap.entries()) {
-                        if (key.includes('::') && key.endsWith(`::${imgModel}`)) return name;
-                      }
-                      // 回退到纯 modelId 映射
-                      const pureModelMatch = modelProviderMap.get(imgModel);
-                      if (pureModelMatch) return pureModelMatch;
-                    }
-                    // 3. 最后尝试 modelName 映射
-                    if (imgModelName) {
-                      const nameMatch = modelProviderMap.get(imgModelName);
-                      if (nameMatch) return nameMatch;
-                    }
-                    return '';
-                  })();
+                  const rawApiProviderId = is3DImage
+                    ? (image.threeDModelInfo?.providerId || image.apiProviderId || '')
+                    : (routeAudit?.actual.providerId || image.apiProviderId || '');
+                  const displayApiProvider = resolveCanvasProviderDisplayName({
+                    providerId: rawApiProviderId,
+                    providerName: rawApiProvider,
+                    modelId: image.model,
+                    modelName: image.modelName,
+                  }, modelProviderMap);
                   return (displayModelName || displayApiProvider || (isSelected && image.sourceTrace)) && !image.isProcessingPlaceholder ? (
                   <div className="absolute bottom-1 left-1 z-20 pointer-events-none flex flex-col gap-0.5"
                     style={{ fontSize: `${Math.max(8, 9 / zoom)}px` }}>
