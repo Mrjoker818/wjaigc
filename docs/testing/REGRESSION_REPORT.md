@@ -1,5 +1,17 @@
 # 无界AI — 回归测试报告 (REGRESSION REPORT)
 
+## 2026-09-21 画布精确供应商徽标云端回归
+
+`main@57463c3a` 本地全仓 `831/831` 文件、`7176/7176` 测试通过，0 失败、0 跳过；TypeScript、构建版 Lint 和生产构建 `121/121` 通过。Coze Build ID `RviJZZ05HvKLSxvFREk22`。
+
+用户动作时确认后只提交一个 APImart `gpt-image-2` 任务。任务完成，单次扣 60，余额 `7150→7090`；整页刷新并恢复项目后，图片徽标显示 `gpt-image-2 APImart imgae`，不再被同名模型目录推断为 AILINK。没有第二次付费生成。机器摘要：`docs/testing/evidence/canvas-provider-badge-paid-cloud-20260921.json`。
+
+## 2026-09-21 V588-ADMIN-003 真实 S3 恢复回归
+
+Coze 运行 exact `main@57463c3a`、Build ID `RviJZZ05HvKLSxvFREk22`。一次性 PNG 同时写入受控本地路径与 S3；上传返回的哈希后缀对象通过 `resolveS3Key` 精确解析。删除前本地 GET 为 `200 image/png / 67 bytes`。确认删除目标位于 `/space/wujie-data/s3-recovery-proof/` 后移除单一缓存文件，再次 GET 仍为 `200 image/png / 67 bytes`，本地文件被恢复，日志命中 S3 恢复分支。三个字节样本 SHA-256 完全一致。
+
+本样本没有 source URL 映射，因此排除了公网源回退；没有数据库读写、付费生成或历史媒体变更。结合既有浏览器缩略图失败重试/原图回退以及隔离 PostgreSQL `2/2`，`V588-ADMIN-003` 判定为 **CLOUD PASS / CLOSED**。证据：`docs/testing/evidence/v588-admin-003-s3-recovery-cloud-20260921.json`。
+
 ## 2026-09-11 多平台批量导出云端回归
 
 云端运行源码 tree `ac874454893e877026562ce430170fec4ac0726c` 与 GitHub `main@fb46a39f` 完全一致。Coze 聚焦测试、TypeScript、构建版 ESLint、生产构建和单实例健康检查通过，Build ID 为 `b2FXKouZLkO2t54FKGZVd`。

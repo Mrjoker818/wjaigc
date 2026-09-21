@@ -1,0 +1,54 @@
+{
+  "schemaVersion": 1,
+  "capturedAt": "2026-09-21T17:45:45+08:00",
+  "scope": "Canvas exact-provider badge regression with one authorized paid generation",
+  "environment": {
+    "originMain": "57463c3a1cbf8981638a578bcbab761d596f3f65",
+    "originStable": "52f7c601ed150769e15d06fb435c6e360e28c9e7",
+    "buildId": "RviJZZ05HvKLSxvFREk22",
+    "browser": "Edge",
+    "platform": "Coze preview"
+  },
+  "task": {
+    "taskId": "async-1789980163706-0-2mf1nd",
+    "canvasEntityId": "gen-ph-1789980164248-0-h3lzxm",
+    "status": "completed",
+    "providerId": "api_1778430731224_533e09a",
+    "providerName": "APImart imgae",
+    "modelId": "gpt-image-2",
+    "outputWidth": 800,
+    "outputHeight": 534
+  },
+  "billing": {
+    "authorizedPaidTaskCount": 1,
+    "debitCount": 1,
+    "debitAmount": 60,
+    "balanceBefore": 7150,
+    "balanceAfter": 7090,
+    "totalUsedBefore": 6232,
+    "totalUsedAfter": 6292,
+    "refundCount": 0,
+    "secondPaidTaskTriggered": false
+  },
+  "browserAcceptance": {
+    "fullReloadPerformed": true,
+    "visibleBadge": "gpt-image-2 APImart imgae",
+    "ambiguousFallbackBadgeAbsent": true,
+    "authoritativePollProviderName": "APImart imgae"
+  },
+  "verification": {
+    "vitestFiles": 831,
+    "vitestTests": 7176,
+    "skipped": 0,
+    "failed": 0,
+    "typecheck": "pass",
+    "lintBuild": "pass",
+    "productionBuildPages": "121/121"
+  },
+  "boundaries": {
+    "provider003Reopened": false,
+    "upstreamProviderBillingDashboardObserved": false,
+    "stableModified": false
+  },
+  "verdict": "PASS"
+}

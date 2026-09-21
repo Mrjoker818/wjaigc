@@ -1,0 +1,54 @@
+{
+  "schemaVersion": 1,
+  "capturedAt": "2026-09-21T17:45:45+08:00",
+  "scope": "V588-ADMIN-003 controlled S3 cache recovery",
+  "environment": {
+    "platform": "Coze preview",
+    "originMain": "57463c3a1cbf8981638a578bcbab761d596f3f65",
+    "originStable": "52f7c601ed150769e15d06fb435c6e360e28c9e7",
+    "buildId": "RviJZZ05HvKLSxvFREk22",
+    "httpPort": 5000
+  },
+  "controlledObject": {
+    "publicPath": "/api/serve-upload/s3-recovery-proof/admin003-s3-57463c3a-20260921.png",
+    "localPath": "/space/wujie-data/s3-recovery-proof/admin003-s3-57463c3a-20260921.png",
+    "requestedStorageKey": "images/s3-recovery-proof/admin003-s3-57463c3a-20260921.png",
+    "resolvedStorageKey": "images/s3-recovery-proof/admin003-s3-57463c3a-20260921_6806488a.png",
+    "mimeType": "image/png",
+    "byteSize": 67,
+    "sha256": "cc749195b109ff43638b8fc2a38ed56a5f4b24313686efcecc3619e4fe7c6cbc2",
+    "sourceUrlMappingCreated": false
+  },
+  "observations": {
+    "beforeRemoval": {
+      "localFilePresent": true,
+      "publicUploadsDuplicatePresent": false,
+      "httpStatus": 200,
+      "responseBytes": 67,
+      "responseSha256Matches": true
+    },
+    "controlledRemoval": {
+      "targetVerifiedInside": "/space/wujie-data/s3-recovery-proof/",
+      "localFileAbsentBeforeRecoveryRequest": true,
+      "historicalMediaTouched": false
+    },
+    "afterRecovery": {
+      "httpStatus": 200,
+      "contentType": "image/png",
+      "responseBytes": 67,
+      "localFileRestored": true,
+      "responseSha256Matches": true,
+      "restoredLocalSha256Matches": true,
+      "serverLog": "[serve-upload] Recovered from S3: s3-recovery-proof/admin003-s3-57463c3a-20260921.png"
+    }
+  },
+  "sideEffects": {
+    "paidGenerationTriggered": false,
+    "databaseMutationPerformed": false,
+    "historicalArchiveRepeated": false,
+    "stableModified": false,
+    "controlledS3ObjectRetainedForAudit": true,
+    "localCacheRestored": true
+  },
+  "verdict": "PASS"
+}

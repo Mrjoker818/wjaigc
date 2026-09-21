@@ -1,5 +1,11 @@
 # V5.8.8 选择性吸收清单
 
+## 2026-09-21 V588-ADMIN-003 真实 S3 恢复闭环
+
+`main@57463c3a` 的 Coze 预览建立了一个 67 字节的一次性 PNG 对象，S3 精确解析键为 `images/s3-recovery-proof/admin003-s3-57463c3a-20260921_6806488a.png`。在确认本地绝对路径位于 `/space/wujie-data/s3-recovery-proof/` 且不存在 `public/uploads` 副本后，仅移除该测试缓存；随后同一 `/api/serve-upload/...` 请求返回 `200 image/png`，服务日志明确记录 `Recovered from S3`，本地缓存重新出现，响应与恢复文件 SHA-256 均与删除前一致。测试对象没有 `sourceUrl` 映射，因此未使用公网回退冒充 S3。
+
+结合既有缩略图失败重试/原图回退和隔离 PostgreSQL `2/2` 证据，`V588-ADMIN-003` 的剩余边界全部关闭；不重复历史软归档，不触碰业务数据库或 `stable@52f7c601`。机器摘要：`docs/testing/evidence/v588-admin-003-s3-recovery-cloud-20260921.json`。该结论不扩大为全平台发布通过，也不回退当前协作阶段的既定执行顺序。
+
 ## 2026-09-02 V588-CREDITS-OBS-001 积分可观测性进度
 
 云端真实管理页已证明历史 137% 分类问题关闭：四类合计 100%，总消费、退款、净消费及最近流水方向一致。新增残余仅为系统结余副标题错误，本地已用 RED→GREEN 最小改为“当前用户余额合计”，账务读写未变；待 Coze 拉取和 Google Chrome 强刷后关闭。本地门禁为 4505 项通过、133 项隔离 PostgreSQL 跳过、生产构建 118/118。
@@ -119,7 +125,7 @@ These are the only authorized first absorption targets. Every row remains unimpl
 | V588-UI-004 | Empty-state, zoom, overflow-safe toolbar and editing-panel layout components | Current toolbar behavior is protected but remains embedded | **已吸收 / 云端验证通过。** 六个展示叶已接入当前控制器；远程图片编辑、调色预览、桌面/移动布局、既有入口和动作均保留 | 本地 RED/GREEN、全仓门禁、exact-SHA Coze 与 Google Chrome 远程图片编辑/布局回归 | Medium |
 | V588-ADMIN-001 | `admin-dashboard-projection.ts`: no fabricated model/provider usage data | Current route fabricates zero-call provider rows and `99%` model success when database metrics are absent | **ABSORBED / CLOUD VERIFIED.** Real positive-call rows only; missing rates are nullable and coverage is explicit | Local RED/GREEN and full gates passed; authenticated Chrome and cloud API proved empty states, no fabricated `99%`, and zero fresh Console errors on `1ba98f7` | Low |
 | V588-ADMIN-002 | Repository-wide admin-route authorization contract | Current 24 admin routes use both `requireAdminUser` and explicit `getRequestUser + role` patterns; donor test recognizes only one manual exception | **ABSORBED / CLOUD VERIFIED.** The current architecture is retained; an exact 24-route manifest accepts only the reviewed shared and explicit guard forms | Local RED/GREEN and full gates passed; exact-candidate Coze returned unauthenticated 401 and authenticated Chrome refreshed the administrator dashboard with zero fresh Console errors/warnings | Medium |
-| V588-ADMIN-003 | 缩略图回填与幂等 worker | 复用当前资产恢复/健康子系统，不导入 donor 第二套媒体真相 | **检查点漂移已云端关闭；整体仍有条件。** `main@3cf87dc8` 的 shadow/asset-v3/shadow 三次均为 11/11 和 462 ready；历史 9/11 未复发。2026-08-22 的四个不可恢复版本保持软归档、原行保留 | 只保留缺失缩略图原图回退、真实 S3 恢复和隔离 PostgreSQL 并发证据；不重做归档、不重开 Stage 4 | 高 |
+| V588-ADMIN-003 | 缩略图回填与幂等 worker | 复用当前资产恢复/健康子系统，不导入 donor 第二套媒体真相 | **已吸收 / 云端关闭。** 检查点漂移、缩略图失败重试/原图回退、隔离 PostgreSQL 并发与真实 S3 缓存恢复均有证据；四个历史不可恢复版本保持既有软归档 | 本项无剩余动作；不重复回填、归档或 Stage 4，其他全平台未验证项单独保留 | 高 |
 | V588-PROVIDER-001 | New display mappings such as Nano Banana Lite, GPT Image 2 2K/4K, FLUX 2 Klein, Grok Imagine video/image, HappyHorse, Gemini Omni and Seedance/Seedream variants | Current map already contains several newer Pear/Seedance entries; blind copy would duplicate or reorder wildcard matches | **已吸收 / Coze 云端验证通过。** 仅补齐缺失精确模式，统一采用最长匹配，继续保持管理员/供应商显示名优先 | 表驱动 RED/GREEN、通配碰撞、管理员显示名优先、全量回归、Coze exact SHA 与普通用户图像/视频目录证据 | Low |
 | V588-PROVIDER-002 | Explicit `providerId::modelId` catalog and ambiguous legacy-ID rejection | 保留当前task-core目录、精确键授权迁移与管理员配置快照，未导入donor第二套状态 | **已吸收 / 云端专项通过。** 管理员拒绝/迁移/反馈、普通用户三个工作区精确目录与保存刷新均已闭环；10bcc899关闭BUG-006，临时选择不持久化，未改配置重启保持会话与模型 | 原RED与本地4438/4438门禁保留，9项Chrome云端检查及16份原件哈希已记录；无供应商任务/扣费，不代表完整全平台E2E或真实secret轮换 | 高 |
 | V588-PROVIDER-003 | 非路由导出拆至 `result-store.ts` / `constants.ts` | 拆分已进入main，品牌源码9b2e8d5f已同步；不重复搬运。donor预校验思想仅选择性参考 | BUG-004真实正向关闭；BUG-002/003已部署前端异常注入通过但严格后端负向未闭环；BUG-005本地配对修复通过、云端待验 | BUG-006预校验拒绝扣费已原路由隔离复现，优先收口；Pear品牌、精修/字境、上游账单/并发退款与完整录像/Trace仍未验；不宣称完整吸收 | 高，含P0候选账务风险 |
