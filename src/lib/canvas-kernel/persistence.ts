@@ -61,6 +61,11 @@ function isPendingMediaUrl(url: string): boolean {
   return url.startsWith('data:') || url.startsWith('blob:');
 }
 
+// During navigation, one serialized project sync can still finish before the
+// unload beacon is processed. Both requests may advance the authoritative
+// revision, so recovery must tolerate that bounded two-write race.
+const UNLOAD_RECOVERY_REVISION_WINDOW = 2;
+
 export function prepareCanvasPersistenceSnapshot(
   snapshot: CanvasPersistenceSnapshot,
 ): CanvasPreparedPersistenceSnapshot {
@@ -78,7 +83,8 @@ export function prepareCanvasPersistenceSnapshot(
       version: 4,
       ownerId: snapshot.ownerId,
       baseProjectRevision: snapshot.baseProjectRevision,
-      maxRecoverableProjectRevision: snapshot.baseProjectRevision + 1,
+      maxRecoverableProjectRevision:
+        snapshot.baseProjectRevision + UNLOAD_RECOVERY_REVISION_WINDOW,
       snapshot,
     }),
     recoveryMarker: JSON.stringify({
@@ -261,7 +267,7 @@ export class CanvasPersistenceScheduler {
     const prepared = this.preparedSnapshots.get(projectId);
     return this.pendingSnapshot?.projectId === projectId
       || this.activeSnapshot?.projectId === projectId
-      || Boolean(prepared && this.savedSignatures.get(projectId) !== prepared.signature);
+      || Boolean(prepared && this.serverFlushedSignatures.get(projectId) !== prepared.signature);
   }
 
   isSnapshotActive(projectId: string, revision: number): boolean {

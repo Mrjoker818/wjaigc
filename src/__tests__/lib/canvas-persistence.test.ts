@@ -63,12 +63,12 @@ function controlledIdle() {
 }
 
 describe('CanvasPersistenceScheduler', () => {
-  it('prepares a bounded version 4 unload recovery window', () => {
+  it('prepares a bounded version 4 unload recovery window for an in-flight save plus beacon', () => {
     const prepared = prepareCanvasPersistenceSnapshot(snapshot(9));
     expect(JSON.parse(prepared.serialized)).toEqual(expect.objectContaining({
       version: 4,
       baseProjectRevision: 7,
-      maxRecoverableProjectRevision: 8,
+      maxRecoverableProjectRevision: 9,
     }));
   });
 
@@ -262,6 +262,22 @@ describe('CanvasPersistenceScheduler', () => {
     expect(writer.mock.calls.map(([, reason]) => reason)).toEqual(['idle', 'immediate']);
   });
 
+  it('keeps an idle-written snapshot pending until an immediate durability barrier completes', async () => {
+    const writer = vi.fn(async () => undefined);
+    const scheduler = new CanvasPersistenceScheduler({ writer });
+    const unchanged = snapshot(1);
+
+    scheduler.schedule(unchanged);
+    await scheduler.flush('idle');
+
+    expect(scheduler.hasPendingSnapshot('project-a')).toBe(true);
+
+    scheduler.schedule({ ...unchanged, revision: 2 });
+    await scheduler.flush('immediate');
+
+    expect(scheduler.hasPendingSnapshot('project-a')).toBe(false);
+  });
+
   it('upgrades an in-flight idle write when an equivalent immediate snapshot is queued', async () => {
     let releaseIdle!: () => void;
     const idleWrite = new Promise<void>((resolve) => { releaseIdle = resolve; });
@@ -345,7 +361,7 @@ describe('CanvasPersistenceScheduler', () => {
       storage,
       sendBeacon: () => false,
     });
-    expect(consumePreparedCanvasUnloadSnapshot('project-a', 10, storage, 'user-a')).toEqual(expect.objectContaining({
+    expect(consumePreparedCanvasUnloadSnapshot('project-a', 12, storage, 'user-a')).toEqual(expect.objectContaining({
       baseProjectRevision: 10,
       revision: 5,
     }));
