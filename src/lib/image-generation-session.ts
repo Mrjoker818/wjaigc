@@ -134,6 +134,7 @@ export function createImageGenerationSession(
   const taskToSlot = new Map<string, string>();
   const requestBySlot = new Map<string, ImageGenerationRequest>();
   const pollHandles = new Map<string, PollHandle>();
+  const projectionPendingTaskIds = new Set<string>();
 
   const snapshot = (): ImageGenerationSlot[] => slots.map(cloneSlot);
   const publish = (): void => {
@@ -173,13 +174,13 @@ export function createImageGenerationSession(
     if (status === 'completed') {
       const reference = dependencies.extractAssetReferences(update.result)[0];
       if (!reference?.assetVersionId) {
-        next.status = 'failed';
-        next.error = {
-          code: 'MISSING_ASSET_PROJECTION',
-          message: '生成任务已完成，但未返回可管理的资产版本',
-          retryable: true,
-        };
+        // SSE can arrive before the completed task's asset projection is committed.
+        // Keep the slot recoverable and poll the authoritative task even while SSE is connected.
+        next.status = 'processing';
+        next.progress = Math.min(99, next.progress);
+        projectionPendingTaskIds.add(update.taskId);
       } else {
+        projectionPendingTaskIds.delete(update.taskId);
         next.progress = 100;
         next.assetVersionId = reference.assetVersionId;
         next.placementId = reference.placementId;
@@ -204,7 +205,7 @@ export function createImageGenerationSession(
     const handle = schedule(async () => {
       pollHandles.delete(taskId);
       if (disposed) return;
-      if (dependencies.isTaskEventsConnected()) {
+      if (dependencies.isTaskEventsConnected() && !projectionPendingTaskIds.has(taskId)) {
         schedulePoll(taskId);
         return;
       }
@@ -363,6 +364,7 @@ export function createImageGenerationSession(
       disposed = true;
       unsubscribeEvents();
       for (const taskId of pollHandles.keys()) clearPoll(taskId);
+      projectionPendingTaskIds.clear();
       listeners.clear();
     },
 

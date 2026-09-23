@@ -98,6 +98,82 @@ describe('continuous canvas shadow synchronization', () => {
     expect(query).toHaveBeenCalledTimes(4);
   });
 
+  it('recovers a missing asset ID only from the matching active canvas placement', async () => {
+    const query = vi.fn(async (sql: string, params: unknown[]) => {
+      if (sql.includes('JOIN wujie_workspace_placements placement')) {
+        expect(params).toEqual([
+          'placement-transfer', 'version-transfer', 'user-1', 'project-1', 'chat-image', null,
+        ]);
+        expect(sql).toContain("placement.status = 'active'");
+        expect(sql).toContain('placement.entity_id = $5');
+        return { rows: [{ id: 'asset-transfer', entity_id: 'chat-image' }], rowCount: 1 };
+      }
+      if (sql.includes('FROM wujie_assets asset')) {
+        expect(params).toEqual(['asset-transfer', 'user-1', 'project-1']);
+        return { rows: [{ id: 'asset-transfer' }], rowCount: 1 };
+      }
+      if (sql.includes('FROM wujie_asset_versions')) {
+        expect(params).toEqual(['version-transfer', 'asset-transfer', 'user-1', 'project-1']);
+        return { rows: [{ asset_id: 'asset-transfer', asset_version_id: 'version-transfer' }], rowCount: 1 };
+      }
+      if (sql.includes('FROM wujie_workspace_placements')) {
+        expect(params).toEqual([
+          'placement-transfer', 'user-1', 'project-1', 'asset-transfer', 'version-transfer', 'chat-image',
+        ]);
+        return { rows: [{ asset_id: 'asset-transfer', asset_version_id: 'version-transfer', placement_id: 'placement-transfer' }], rowCount: 1 };
+      }
+      expect(sql).toContain('UPDATE wujie_workspace_placements');
+      return { rows: [], rowCount: 1 };
+    });
+
+    await expect(legacyMigration.adoptManagedCanvasMapping(
+      { query } as never,
+      { actorUserId: 'user-1', projectId: 'project-1' },
+      image('chat-image', { assetVersionId: 'version-transfer', placementId: 'placement-transfer' }),
+    )).resolves.toEqual({ assetId: 'asset-transfer', versionId: 'version-transfer', placementId: 'placement-transfer' });
+    expect(query).toHaveBeenCalledTimes(5);
+  });
+
+  it('rejects a partial managed reference when no matching placement proves its asset ID', async () => {
+    const query = vi.fn(async () => ({ rows: [], rowCount: 0 }));
+    await expect(legacyMigration.adoptManagedCanvasMapping(
+      { query } as never,
+      { actorUserId: 'user-1', projectId: 'project-1' },
+      image('chat-image', { assetVersionId: 'version-transfer', placementId: 'placement-transfer' }),
+    )).rejects.toMatchObject({ code: 'LEGACY_MIGRATION_INTEGRITY_CONFLICT' });
+    expect(query).toHaveBeenCalledTimes(1);
+  });
+
+  it('adopts a generated placeholder alias only when its task projection proves the same asset', async () => {
+    const query = vi.fn(async (sql: string, params: unknown[]) => {
+      if (sql.includes('JOIN wujie_workspace_placements placement')) {
+        expect(params).toEqual([
+          'placement-transfer', 'version-transfer', 'user-1', 'project-1',
+          'gen-ph-old', 'task-1',
+        ]);
+        expect(sql).toContain("version.metadata->>'outputIndex' = '0'");
+        return { rows: [{ id: 'asset-transfer', entity_id: 'task-1:0' }], rowCount: 1 };
+      }
+      if (sql.includes('FROM wujie_assets asset')) return { rows: [{ id: 'asset-transfer' }], rowCount: 1 };
+      if (sql.includes('FROM wujie_asset_versions')) return { rows: [{ asset_id: 'asset-transfer', asset_version_id: 'version-transfer' }], rowCount: 1 };
+      if (sql.includes('FROM wujie_workspace_placements')) {
+        expect(params?.[5]).toBe('task-1:0');
+        return { rows: [{ asset_id: 'asset-transfer', asset_version_id: 'version-transfer', placement_id: 'placement-transfer' }], rowCount: 1 };
+      }
+      expect(sql).toContain('SET entity_id = $9');
+      expect(params?.[7]).toBe('task-1:0');
+      expect(params?.[8]).toBe('gen-ph-old');
+      return { rows: [], rowCount: 1 };
+    });
+    await expect(legacyMigration.adoptManagedCanvasMapping(
+      { query } as never,
+      { actorUserId: 'user-1', projectId: 'project-1' },
+      image('gen-ph-old', {
+        generationTaskId: 'task-1', assetVersionId: 'version-transfer', placementId: 'placement-transfer',
+      }),
+    )).resolves.toEqual({ assetId: 'asset-transfer', versionId: 'version-transfer', placementId: 'placement-transfer' });
+  });
+
   it('fails closed when a complete managed reference does not match its canvas placement', async () => {
     const adoptManagedCanvasMapping = (
       legacyMigration as typeof legacyMigration & {

@@ -194,6 +194,37 @@ describe('image generation session', () => {
     });
   });
 
+  it('waits for a managed projection when SSE reports completion before projection', async () => {
+    const fake = harness();
+    const scheduled: Array<() => void | Promise<void>> = [];
+    fake.dependencies.pollTask = vi.fn(async taskId => ({
+      taskId,
+      status: 'completed',
+      progress: 100,
+      result: managedResult('late-version', 'late-placement'),
+    }));
+    fake.dependencies.schedulePoll = callback => {
+      scheduled.push(callback);
+      return scheduled.length;
+    };
+    const session = createImageGenerationSession(fake.dependencies);
+
+    await session.submit({ projectId: 'p1', outputCount: 1, prompt: '海报', providerId: 'pear', model: 'm' });
+    fake.emit({ taskId: 'task-1', status: 'completed', progress: 100, result: { imageUrl: '/unmanaged.png' } });
+
+    expect(session.snapshot()[0]).toMatchObject({ taskId: 'task-1', status: 'processing' });
+    expect(session.snapshot()[0].error).toBeUndefined();
+    await scheduled[0]();
+
+    expect(fake.dependencies.pollTask).toHaveBeenCalledWith('task-1');
+    expect(session.snapshot()[0]).toMatchObject({
+      status: 'completed',
+      assetVersionId: 'late-version',
+      placementId: 'late-placement',
+      url: '/media/late-version.png',
+    });
+  });
+
   it('fails an unbound slot instead of leaving it submitting forever', async () => {
     const fake = harness();
     vi.mocked(fake.dependencies.submit).mockResolvedValueOnce({

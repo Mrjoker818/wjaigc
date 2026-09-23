@@ -226,11 +226,46 @@ export async function adoptManagedCanvasMapping(
 ): Promise<LegacyImageMapping | null> {
   const supplied = [image.assetId, image.assetVersionId, image.placementId];
   if (supplied.every(value => !value)) return null;
-  if (supplied.some(value => typeof value !== 'string' || value.length === 0)) {
+  const hasVersionAndPlacement = typeof image.assetVersionId === 'string' && image.assetVersionId.length > 0
+    && typeof image.placementId === 'string' && image.placementId.length > 0;
+  if (!hasVersionAndPlacement || (image.assetId != null && (typeof image.assetId !== 'string' || image.assetId.length === 0))) {
     throw migrationError('LEGACY_MIGRATION_INTEGRITY_CONFLICT');
   }
+  let assetId = image.assetId;
+  let existingEntityId = image.id;
+  if (!assetId) {
+    const recovered = await client.query<{ id: string; entity_id: string }>(
+      `SELECT asset.id, placement.entity_id
+       FROM wujie_assets asset
+       JOIN wujie_asset_versions version
+         ON version.asset_id = asset.id
+        AND version.owner_id = asset.owner_id AND version.project_id = asset.project_id
+       JOIN wujie_workspace_placements placement
+         ON placement.asset_id = asset.id AND placement.asset_version_id = version.id
+        AND placement.owner_id = asset.owner_id AND placement.project_id = asset.project_id
+       WHERE placement.id = $1 AND version.id = $2
+         AND asset.owner_id = $3 AND asset.project_id = $4
+         AND placement.workspace_kind = 'canvas'
+         AND placement.workspace_id IN ($4, 'canvas:' || $4)
+         AND (placement.entity_type = 'canvas-image' OR placement.entity_type = 'canvas-video')
+         AND (
+           placement.entity_id = $5
+           OR (
+             $6::text IS NOT NULL AND $5 LIKE 'gen-ph-%'
+             AND version.task_id = $6 AND version.metadata->>'outputIndex' = '0'
+             AND placement.entity_id = $6 || ':0'
+           )
+         )
+         AND placement.status = 'active'
+       FOR UPDATE OF asset`,
+      [image.placementId, image.assetVersionId, input.actorUserId, input.projectId, image.id, image.generationTaskId || null],
+    );
+    assetId = recovered.rows[0]?.id;
+    if (!assetId) throw migrationError('LEGACY_MIGRATION_INTEGRITY_CONFLICT');
+    existingEntityId = recovered.rows[0].entity_id;
+  }
   const mapping = {
-    assetId: image.assetId as string,
+    assetId,
     versionId: image.assetVersionId as string,
     placementId: image.placementId as string,
   };
@@ -269,7 +304,7 @@ export async function adoptManagedCanvasMapping(
       input.projectId,
       mapping.assetId,
       mapping.versionId,
-      image.id,
+      existingEntityId,
     ],
   );
   if (!placement.rows[0]) throw migrationError('LEGACY_MIGRATION_INTEGRITY_CONFLICT');
@@ -280,7 +315,7 @@ export async function adoptManagedCanvasMapping(
   });
   const updated = await client.query(
     `UPDATE wujie_workspace_placements
-     SET transform = $4::jsonb, metadata = $5::jsonb, updated_at = now()
+     SET entity_id = $9, transform = $4::jsonb, metadata = $5::jsonb, updated_at = now()
      WHERE id = $1 AND owner_id = $2 AND project_id = $3
        AND asset_id = $6 AND asset_version_id = $7
        AND workspace_kind = 'canvas' AND workspace_id IN ($3, 'canvas:' || $3)
@@ -294,6 +329,7 @@ export async function adoptManagedCanvasMapping(
       metadata,
       mapping.assetId,
       mapping.versionId,
+      existingEntityId,
       image.id,
     ],
   );
