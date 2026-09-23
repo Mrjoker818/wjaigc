@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev --webpack -p 5000",
-    "build": "next build --turbopack && node scripts/prune-build-traces.mjs",
+    "build": "node scripts/build-completion-marker.mjs clear && next build --turbopack && node scripts/prune-build-traces.mjs && node scripts/build-completion-marker.mjs seal",
     "start": "next start -p 5000 -H 0.0.0.0",
     "lint": "eslint",
     "ts-check": "next typegen && tsc -p tsconfig.json",

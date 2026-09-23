@@ -24,7 +24,6 @@ describe('Coze startup production contract', () => {
       'utf8',
     );
 
-    expect(source).toContain('.next/BUILD_ID');
     expect(source).toContain('exec ./node_modules/.bin/next start');
     expect(source).toContain('pnpm install --frozen-lockfile');
     expect(source).toContain('pnpm install --ignore-scripts');

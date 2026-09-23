@@ -10,7 +10,7 @@ describe('production build command', () => {
     const nextConfig = readFileSync(path.resolve(process.cwd(), 'next.config.ts'), 'utf8');
 
     expect(packageJson.scripts?.build).toBe(
-      'next build --turbopack && node scripts/prune-build-traces.mjs',
+      'node scripts/build-completion-marker.mjs clear && next build --turbopack && node scripts/prune-build-traces.mjs && node scripts/build-completion-marker.mjs seal',
     );
     expect(nextConfig).toContain("'wasm_vtracer'");
     expect(nextConfig).toContain("'@aws-sdk/client-s3'");

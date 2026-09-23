@@ -9,7 +9,7 @@ describe('production build pipeline contract', () => {
     ) as { scripts?: Record<string, string> };
 
     expect(packageJson.scripts?.build).toBe(
-      'next build --turbopack && node scripts/prune-build-traces.mjs',
+      'node scripts/build-completion-marker.mjs clear && next build --turbopack && node scripts/prune-build-traces.mjs && node scripts/build-completion-marker.mjs seal',
     );
     expect(packageJson.scripts?.dev).toBe('next dev --webpack -p 5000');
   });

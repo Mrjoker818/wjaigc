@@ -25,6 +25,39 @@ fi
 
 # Step 2: Build the project
 echo "[coze-preview-build] Building Next.js project..."
-pnpm run build
+
+EXPECTED_TREE=""
+if git rev-parse --is-inside-work-tree > /dev/null 2>&1 \
+  && [ -z "$(git status --porcelain --untracked-files=normal)" ]; then
+  EXPECTED_TREE="$(git rev-parse 'HEAD^{tree}')"
+fi
+
+if [ -f ".next/lock" ]; then
+  echo "[coze-preview-build] Another build holds the Next lock; waiting..."
+  for i in $(seq 1 60); do
+    [ ! -f ".next/lock" ] && break
+    sleep 5
+  done
+  if [ -f ".next/lock" ]; then
+    echo "[coze-preview-build] Timed out waiting for the existing build; refusing a concurrent build." >&2
+    exit 1
+  fi
+fi
+
+if [ -n "$EXPECTED_TREE" ] && [ -s ".next/BUILD_ID" ] \
+  && [ "$(cat .next/BUILD_ID)" = "$EXPECTED_TREE" ] \
+  && [ -s ".next/WUJIE_BUILD_COMPLETE" ] \
+  && [ "$(cat .next/WUJIE_BUILD_COMPLETE)" = "$EXPECTED_TREE" ]; then
+  echo "[coze-preview-build] Reusing completed build for the current source tree."
+else
+  pnpm run build
+fi
+
+if [ -n "$EXPECTED_TREE" ] \
+  && { [ "$(cat .next/BUILD_ID 2>/dev/null || true)" != "$EXPECTED_TREE" ] \
+    || [ "$(cat .next/WUJIE_BUILD_COMPLETE 2>/dev/null || true)" != "$EXPECTED_TREE" ]; }; then
+  echo "[coze-preview-build] Completed build does not match clean source tree." >&2
+  exit 1
+fi
 
 echo "[coze-preview-build] Build completed successfully."
