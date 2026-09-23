@@ -1,5 +1,28 @@
 import path from 'path';
+import { execFileSync } from 'node:child_process';
+import { randomBytes } from 'node:crypto';
 import type { NextConfig } from 'next';
+
+export function resolveBuildId(directory: string): string {
+  const options = {
+    cwd: directory,
+    encoding: 'utf8' as const,
+    windowsHide: true,
+    stdio: ['ignore', 'pipe', 'ignore'] as ['ignore', 'pipe', 'ignore'],
+  };
+
+  try {
+    const tree = execFileSync('git', ['rev-parse', 'HEAD^{tree}'], options).trim();
+    const changes = execFileSync('git', ['status', '--porcelain', '--untracked-files=normal'], options).trim();
+    if (/^[0-9a-f]{40}(?:[0-9a-f]{24})?$/.test(tree) && !changes) {
+      return tree;
+    }
+  } catch {
+    // A source checkout without Git metadata cannot attest a committed tree.
+  }
+
+  return `unverified-${randomBytes(16).toString('hex')}`;
+}
 
 const LOCAL_BUILD_ARTIFACT_EXCLUDES = [
   '.tmp/**/*',
@@ -10,6 +33,7 @@ const LOCAL_BUILD_ARTIFACT_EXCLUDES = [
 ];
 
 const nextConfig: NextConfig = {
+  generateBuildId: () => resolveBuildId(__dirname),
   turbopack: {},
   outputFileTracingRoot: path.resolve(__dirname),
   outputFileTracingExcludes: {
