@@ -499,6 +499,7 @@
   "scripts/finalize-read-only-canvas-share-evidence.ts",
   "scripts/init-read-only-canvas-share-evidence.ts",
   "scripts/read-only-canvas-share-evidence-cli.ts",
+  "scripts/run-share-real-token-gate.ps1",
   "scripts/stage-2-e2e-fixtures.mjs",
   "src/app/api/canvas-shares/[shareId]/revoke/route.ts",
   "src/app/api/canvas-shares/[shareId]/route.ts",

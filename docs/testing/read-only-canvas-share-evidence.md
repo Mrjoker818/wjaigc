@@ -114,6 +114,17 @@ pnpm exec vitest run `
 
 该命令已在仅监听本机回环地址的临时 PostgreSQL 18 数据库上以 5 files / 18 tests 通过；迁移也已连续执行两次。临时数据库仅用于本轮测试，验证结束后停止并删除，不把本地结果扩大为云端生产证据。
 
+## 本机真实令牌补充门禁（尚非云端验收）
+
+`scripts/run-share-real-token-gate.ps1` 在 `127.0.0.1` 上创建一次性 PostgreSQL 18 数据库、运行完整迁移和 Stage 2 项目夹具、启动当前候选 Next 服务，并以真实 Owner 会话创建随机分享令牌。`tests/e2e/read-only-canvas-share-real-token.spec.ts` 使用独立匿名浏览器上下文验证：默认不可下载、显式允许下载、项目同步 API 编辑后旧快照不变、媒体文件缺失时 410/占位、先有效后过期、撤销后文档与媒体均失效、320/393px 无横向溢出，以及匿名写接口拒绝且分享策略未变。令牌只校验数据库哈希与匿名浏览器存储；本门禁不声称证明所有外部日志或代理从不留存原始令牌。
+
+```powershell
+pwsh -NoProfile -File scripts/run-share-real-token-gate.ps1
+pwsh -NoProfile -File scripts/run-share-real-token-gate.ps1 -FullRegression
+```
+
+Playwright 令牌测试关闭 trace、截图和视频；脚本运行完停止仅属本门禁的服务和数据库，并删除本轮临时数据。最终候选在生产构建服务下本机浏览器门禁 `1/1 passed`，同一 `-FullRegression` 运行全量真库 Vitest 为 `831 files / 7177 tests passed`、退出码 0；TypeScript、ESLint、保护基线亦通过。此前开发服务下曾出现一次媒体失效请求间歇性 500，本生产门禁未复现，不将其写成已定位或已修复的产品缺陷。该覆盖不能替代 Coze exact-main、真实账号、付费生成或完整云端八项验收，分享发布开关仍保持默认关闭。
+
 ## 云端验收固定顺序
 
 仅对已推送且与运行时迁移一致的 exact main commit 执行：匿名有效链接 → 默认无下载 → 显式下载 → 撤销 → 过期 → 后续项目编辑不改变旧快照 → 媒体失效占位 → 320/375/393。
