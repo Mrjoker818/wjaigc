@@ -1,3 +1,4 @@
+import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
@@ -118,6 +119,28 @@ describe('Stage 2 E2E fixture plan', () => {
     await expect(assertStage2DatabaseGuard(query, 'wrong-token')).rejects.toThrow('database guard');
     await expect(assertStage2DatabaseGuard(async () => ({ rows: [] }), 'expected-token'))
       .rejects.toThrow('database guard');
+  });
+
+  it('rejects a short authentication secret before connecting to the fixture database', () => {
+    const result = spawnSync(process.execPath, ['scripts/stage-2-e2e-fixtures.mjs'], {
+      cwd: process.cwd(),
+      encoding: 'utf8',
+      timeout: 10_000,
+      env: {
+        NODE_ENV: 'test',
+        E2E_STAGE2_ALLOW_SEED: '1',
+        E2E_STAGE2_DATABASE_URL: 'postgresql://postgres@127.0.0.1:1/stage2_preflight?sslmode=disable',
+        E2E_STAGE2_DATABASE_GUARD: 'stage2-preflight-guard',
+        E2E_STAGE2_RUN_ID: 'stage2-preflight',
+        E2E_TEST_USERNAME: 'stage2_preflight',
+        E2E_TEST_PASSWORD: 'stage2-preflight-password',
+        WUJIE_AUTH_SECRET: 'stage2-auth-secret-coze-s24-r2',
+      },
+    });
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('WUJIE_AUTH_SECRET must contain at least 32 characters');
+    expect(result.stderr).not.toContain('ECONNREFUSED');
   });
 
   it('defaults credential-bearing fixture output outside the repository', () => {

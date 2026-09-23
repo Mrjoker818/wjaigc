@@ -511,6 +511,9 @@ async function main() {
   if (!databaseUrl || !runId || !username || !password || !authSecret || !databaseGuard) {
     throw new Error('E2E_STAGE2_DATABASE_URL, E2E_STAGE2_DATABASE_GUARD, E2E_STAGE2_RUN_ID, E2E_TEST_USERNAME, E2E_TEST_PASSWORD and WUJIE_AUTH_SECRET are required');
   }
+  if (authSecret.length < 32) {
+    throw new Error('WUJIE_AUTH_SECRET must contain at least 32 characters');
+  }
   const plan = buildStage2FixturePlan(runId);
   const defaults = defaultStage2FixturePaths(plan.runId);
   const dataRoot = resolve(process.env.WUJIE_DATA_DIR || defaults.dataRoot);

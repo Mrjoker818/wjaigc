@@ -250,6 +250,7 @@
   "src/lib/task-core/idempotency.ts",
   "src/lib/task-core/recovery-submission.ts",
   "src/lib/task-core/terminal-settlement.ts",
+  "src/lib/task-provider-display.ts",
   "src/lib/task-events-client.ts",
   "src/lib/universal-api-manager.ts",
   "src/lib/universal-api-types.ts",
