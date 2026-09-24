@@ -541,6 +541,7 @@
   "src/app/api/collaboration/members/route.ts",
   "src/app/api/collaboration/presence-ticket/route.ts",
   "src/components/collaboration/presence-indicator.tsx",
+  "src/lib/collaboration/canvas-document.ts",
   "src/lib/collaboration/presence-client.ts",
   "src/lib/collaboration/presence-gateway.ts",
   "src/lib/collaboration/presence-leases.ts",

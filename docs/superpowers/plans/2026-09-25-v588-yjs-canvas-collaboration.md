@@ -42,15 +42,16 @@
 
 ### Task 1：Yjs 文档合同与依赖
 
-**Files:** Create `src/lib/collaboration/canvas-document.ts`; create `src/__tests__/lib/canvas-document.test.ts`; modify `package.json`, `pnpm-lock.yaml`。
+**Files:** Create `src/lib/collaboration/canvas-document.ts`; create `src/__tests__/lib/canvas-document.test.ts`; modify `package.json`, `pnpm-lock.yaml`, `docs/testing/baselines/protected-baseline-allowed-paths.json`（仅精确授权新增模块）、本计划和对应设计（复审后的数据边界澄清）。
 
-**Interfaces:** `createCanvasDocument(): Y.Doc`；`applyCanvasImagePatch(doc, patch: CanvasImagePatch, origin: unknown): void`；`readCanvasDocument(doc): CanvasDocumentProjection`；`validateCanvasDocumentProjection(value): CanvasDocumentProjection`。`CanvasImagePatch` 使用稳定 `placementId`，只含有限数值变换、分组/标注和项目内 `assetVersionId`；不含媒体字节或来源 URL。
+**Interfaces:** `createCanvasDocument(): Y.Doc`；`applyCanvasImagePatch(doc, patch: CanvasImagePatch, origin: unknown): void`；`readCanvasDocument(doc): CanvasDocumentProjection`；`validateCanvasDocumentProjection(value): CanvasDocumentProjection`；`assertCanvasDocumentTransition(previous, candidate): void`。`CanvasImagePatch` 使用稳定 `placementId`，只含有限数值变换、分组/标注和项目内 `assetVersionId`；不含媒体字节或来源 URL。
 
-- [ ] **Step 1：写 RED。** 使用两个真实 `Y.Doc`，分别更改不同 placement；更新反序/重复应用后两个投影相等。拒绝 `data:`、跨域 URL、非有限坐标、未定义字段和 processing 占位。测试关键断言如下：
+- [x] **Step 1：安装测试前置依赖。** `pnpm add --save-exact yjs@13.6.33`，先取得真实 Yjs 编解码 API；这是测试环境前置，不是生产文档实现。检查只改 `package.json` 与 `pnpm-lock.yaml`。
+- [x] **Step 2：写 RED。** 使用两个真实 `Y.Doc`，分别更改不同 placement；更新反序/重复应用后两个投影相等。拒绝 `data:`、跨域 URL、非有限坐标、未定义字段和 processing 占位。测试关键断言如下：
 
 ```ts
 const first = createCanvasDocument();
-applyCanvasImagePatch(first, { placementId: 'p1', x: 10, y: 20, width: 80, height: 60 }, 'local');
+applyCanvasImagePatch(first, { placementId: 'p1', assetVersionId: 'v1', x: 10, y: 20, width: 80, height: 60, rotation: 0, zIndex: 0 }, 'local');
 const update = Y.encodeStateAsUpdate(first);
 const second = createCanvasDocument();
 Y.applyUpdate(second, update);
@@ -58,9 +59,11 @@ expect(readCanvasDocument(second).placements.p1.x).toBe(10);
 expect(() => validateCanvasDocumentProjection({ placements: { p1: { x: Infinity } } })).toThrow();
 ```
 
-- [ ] **Step 2：运行 RED。** `pnpm exec vitest run src/__tests__/lib/canvas-document.test.ts --reporter=dot`；应因缺少文档合同而失败，不是环境错误。
-- [ ] **Step 3：最小 GREEN。** 安装稳定 `yjs@^13`；用 `Y.Map` 按 `placementId` 存白名单记录，同一 placement 的 transform 作为整体字段更新。白名单 schema 在读/写两侧共用，限制图层数量、文本长度与数值范围。
-- [ ] **Step 4：聚焦验证与提交。** 重跑上项、`pnpm ts-check`、`pnpm lint:build`；只提交这四个文件。真实资产归属留给 Task 3，不把客户端白名单当成授权。
+- [x] **Step 3：运行 RED。** `pnpm exec vitest run src/__tests__/lib/canvas-document.test.ts --reporter=dot`；已观察到缺少合同及随后各行为断言的失败，不以仅缺文件的加载错误替代行为 RED。
+- [x] **Step 4：最小 GREEN。** 固定五个根 `Y.Map` 均按 `placementId` 索引；变换整体写入，版本、分组、标注独立字段合并；删除另存单调墓碑。拒绝额外根类型、旧式嵌套记录及无主字段，并约束图层数、文本长度与数值范围。纯函数 `assertCanvasDocumentTransition` 供 Task 4 在提交前比对，不能由客户端自行决定是否调用。
+- [x] **Step 5：聚焦验证与提交。** 重跑上项、`pnpm ts-check`、`pnpm lint:build`；保护基线先记录新增路径阻断，再仅授权该精确路径；只提交本任务源代码、测试、依赖、精确授权及设计/计划澄清文件。真实资产归属留给 Task 3，不把客户端白名单当成授权。
+
+**Task 1 本地证据（2026-09-25）：** 真 Yjs 聚焦 17/17；新建 localhost PostgreSQL 完成 29 项迁移后全量 Vitest 857 文件/7352 项、exit 0；`pnpm validate`、保护基线 38/38 且 0 警告、生产构建 121/121、239 traces 均 exit 0。严格 NFT 为 227 路由/75 宽/23 含配置/24 含根文档，exit 1；构建身份 `unverified-*`，不推送/Coze 同步/部署。两个本轮新建的临时测试库已删除、专用 PostgreSQL 已停止。独立复审未留 Task 1 Critical/Important；服务端权限、原始更新规范持久化及云端验证仍在 Task 2–9，不能称协作阶段完成。
 
 ### Task 2：独立项目编辑授权与启用前置
 
@@ -107,7 +110,7 @@ expect(await adoptCompletedResultIntoProject(input)).toEqual(first);
 
 **Interfaces:** `loadDocument(projectId): Promise<{ doc: Y.Doc; sequence: number }>`；`commitDocumentUpdate({ actorId, projectId, bytes }): Promise<{ sequence: number; update: Uint8Array }>`；`readDocumentUpdatesAfter(projectId, sequence)`；`compactDocument(projectId)`。
 
-- [ ] **Step 1：写 RED。** 更新确认后重建进程仍存在，重复更新幂等，两个实例反序提交收敛；通知丢失按序号补读；错误素材、超大更新或错误投影不写日志/投影；压缩前后状态向量相等。
+- [ ] **Step 1：写 RED。** 更新确认后重建进程仍存在，重复更新幂等，两个实例反序提交收敛；通知丢失按序号补读；错误素材、超大更新或错误投影不写日志/投影；原始 Yjs 更新删除墓碑/摆放记录或塞入额外根类型时事务拒绝且不写日志；一次原始更新先写 `data:` 媒体内容再覆盖成合法版本时，不得将禁入历史字节写入日志/快照；压缩前后状态向量相等。
 
 ```ts
 const ack = await commitDocumentUpdate({ actorId, projectId, bytes: validUpdate });
@@ -116,7 +119,7 @@ expect(readCanvasDocument((await loadDocument(projectId)).doc)).toEqual(expected
 ```
 
 - [ ] **Step 2：运行 RED。** 新库迁移后跑单元/集成测试，确认缺少 store 导致失败。
-- [ ] **Step 3：最小 GREEN。** 项目事务锁下从快照+日志构造临时 `Y.Doc`，应用更新、验证白名单与 Task 3 资产归属，原子追加 BYTEA 更新/序号/JSONB 投影；`pg_notify` 仅发送项目与序号。提交后才广播；定期压缩保留有界恢复日志。
+- [ ] **Step 3：最小 GREEN。** 项目事务锁下从快照+日志构造临时 `Y.Doc`，应用更新后必须调用 `assertCanvasDocumentTransition(previous, candidate)`，再验证 Task 3 资产归属。不得直接存原始来稿；对候选规范重编码，独立解码验证并证明禁入历史负载不残留（否则拒绝），在同一事务中写规范 BYTEA 更新/序号/JSONB 投影；`pg_notify` 仅发送项目与序号。提交后才广播；定期压缩保留有界恢复日志，并验证多实例状态向量补读仍正确。
 - [ ] **Step 4：复验并提交。** 断开 LISTEN、强制重建进程、迁移二次运行，跑聚焦和类型/Lint 后只提交目标文件。
 
 ### Task 5：独立票据、同源升级与文档 WebSocket 网关
