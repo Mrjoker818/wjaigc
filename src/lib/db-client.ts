@@ -6,6 +6,7 @@
 import { Pool, PoolConfig } from 'pg';
 
 let pool: Pool | null = null;
+let advisoryLockPool: Pool | null = null;
 
 export function normalizePostgresConnectionString(connectionString: string): string {
   try {
@@ -27,14 +28,13 @@ export function isDatabaseConfigured(): boolean {
   return Boolean(process.env.DATABASE_URL || process.env.PGDATABASE_URL);
 }
 
-export function getPool(): Pool {
-  if (!pool) {
-    const configuredConnectionString = process.env.DATABASE_URL || process.env.PGDATABASE_URL;
-    if (!isDatabaseConfigured() || !configuredConnectionString) {
-      throw new Error('[db-client] No DATABASE_URL or PGDATABASE_URL environment variable set');
-    }
-    const connectionString = normalizePostgresConnectionString(configuredConnectionString);
-    const config: PoolConfig = {
+function createPool(): Pool {
+  const configuredConnectionString = process.env.DATABASE_URL || process.env.PGDATABASE_URL;
+  if (!isDatabaseConfigured() || !configuredConnectionString) {
+    throw new Error('[db-client] No DATABASE_URL or PGDATABASE_URL environment variable set');
+  }
+  const connectionString = normalizePostgresConnectionString(configuredConnectionString);
+  const config: PoolConfig = {
       connectionString,
       ssl: connectionString.includes('supabase') || connectionString.includes('aidap') ? { rejectUnauthorized: false } : undefined,
       max: 5,
@@ -42,14 +42,23 @@ export function getPool(): Pool {
       connectionTimeoutMillis: 10000,
       keepAlive: true,
       keepAliveInitialDelayMillis: 10000,
-    };
-    pool = new Pool(config);
+  };
+  const created = new Pool(config);
+  created.on('error', () => {
+    console.error({ code: 'DB_POOL_ERROR' });
+  });
+  return created;
+}
 
-    pool.on('error', () => {
-      console.error({ code: 'DB_POOL_ERROR' });
-    });
-  }
+export function getPool(): Pool {
+  if (!pool) pool = createPool();
   return pool;
+}
+
+/** Session-level advisory locks must not consume the business transaction pool. */
+export function getAdvisoryLockPool(): Pool {
+  if (!advisoryLockPool) advisoryLockPool = createPool();
+  return advisoryLockPool;
 }
 
 export interface SqlResult {
@@ -107,6 +116,11 @@ export async function testConnection(): Promise<boolean> {
 
 export async function closePool(): Promise<void> {
   const currentPool = pool;
+  const currentAdvisoryLockPool = advisoryLockPool;
   pool = null;
-  if (currentPool) await currentPool.end();
+  advisoryLockPool = null;
+  await Promise.all([
+    currentPool?.end(),
+    currentAdvisoryLockPool?.end(),
+  ]);
 }

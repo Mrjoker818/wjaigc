@@ -555,5 +555,8 @@
   "src/lib/serve-upload-local-storage.ts",
   "migrations/20260925_yjs_canvas_editors.sql",
   "src/app/api/collaboration/editors/route.ts",
-  "src/lib/collaboration/document-access.ts"
+  "src/lib/collaboration/document-access.ts",
+  "migrations/20260925_yjs_canvas_asset_adoptions.sql",
+  "src/lib/collaboration/document-assets.ts",
+  "src/lib/asset-core/collaboration-adoption.ts"
 ]
