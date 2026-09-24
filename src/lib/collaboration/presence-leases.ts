@@ -119,6 +119,14 @@ export interface PresenceJoinInput {
   userId: string;
   projectId: string;
   instanceId: string;
+  maxConnectionsPerUserProject?: number;
+}
+
+export class PresenceConnectionLimitError extends Error {
+  constructor() {
+    super('Too many active project presence connections');
+    this.name = 'PresenceConnectionLimitError';
+  }
 }
 
 async function bumpSequence(client: PoolClient, projectId: string): Promise<void> {
@@ -172,10 +180,21 @@ export async function readPresenceSnapshot(projectId: string): Promise<PresenceS
 }
 
 export async function joinPresence(input: PresenceJoinInput): Promise<PresenceSnapshot> {
+  const maxConnections = Number.isFinite(input.maxConnectionsPerUserProject)
+    ? Math.max(1, Math.floor(input.maxConnectionsPerUserProject!)) : 10;
   const client = await getPool().connect();
   try {
     await client.query('BEGIN');
     await assertPresenceMemberForLease(client, input.userId, input.projectId);
+    await client.query('SELECT pg_advisory_xact_lock(hashtext($1), hashtext($2))', [
+      input.projectId, input.userId,
+    ]);
+    const active = await client.query<{ count: number }>(
+      `SELECT COUNT(*)::int AS count FROM wujie_presence_leases
+        WHERE project_id = $1 AND user_id = $2 AND expires_at > clock_timestamp()`,
+      [input.projectId, input.userId],
+    );
+    if (active.rows[0].count >= maxConnections) throw new PresenceConnectionLimitError();
     await client.query(
       `WITH sampled AS MATERIALIZED (SELECT clock_timestamp() AS joined_at)
        INSERT INTO wujie_presence_leases
@@ -192,7 +211,12 @@ export async function joinPresence(input: PresenceJoinInput): Promise<PresenceSn
   } finally {
     client.release();
   }
-  return readPresenceSnapshot(input.projectId);
+  try {
+    return await readPresenceSnapshot(input.projectId);
+  } catch (error) {
+    await leavePresence(input.connectionId).catch(() => undefined);
+    throw error;
+  }
 }
 
 export async function leavePresence(connectionId: string): Promise<void> {
@@ -241,7 +265,6 @@ export async function renewPresence(connectionId: string): Promise<boolean> {
         RETURNING project_id`,
       [connectionId],
     );
-    if (renewed.rows[0]) await bumpSequence(client, renewed.rows[0].project_id);
     await client.query('COMMIT');
     return Boolean(renewed.rows[0]);
   } catch (error) {

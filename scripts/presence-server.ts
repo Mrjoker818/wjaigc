@@ -1,4 +1,5 @@
 import { createServer, type IncomingMessage, type ServerResponse, type Server } from 'node:http';
+import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
 import type { Duplex } from 'node:stream';
@@ -91,6 +92,40 @@ export async function startPresenceServer(options: StartPresenceServerOptions): 
   return server;
 }
 
+export async function startLivePresenceServer(
+  options: Omit<StartPresenceServerOptions, 'onPresenceUpgrade'>,
+): Promise<{ server: Server; close(): Promise<void> }> {
+  if (!resolvePresenceEnabled(process.env.WUJIE_PRESENCE_ENABLED)) {
+    throw new Error('WUJIE_PRESENCE_ENABLED must be true to start the presence server');
+  }
+  const [{ createPresenceGateway }, { startPresenceMaintenance }] = await Promise.all([
+    import('../src/lib/collaboration/presence-gateway'),
+    import('../src/lib/collaboration/presence-leases'),
+  ]);
+  const gateway = createPresenceGateway({ instanceId: randomUUID() });
+  let server: Server;
+  try {
+    server = await startPresenceServer({
+      ...options,
+      onPresenceUpgrade: (request, socket, head) => {
+        void gateway.handlePresenceUpgrade(request, socket, head).catch(() => socket.destroy());
+      },
+    });
+  } catch (error) {
+    await gateway.close();
+    throw error;
+  }
+  const stopMaintenance = startPresenceMaintenance();
+  return {
+    server,
+    async close(): Promise<void> {
+      await gateway.close();
+      await new Promise<void>(resolve => server.close(() => resolve()));
+      await stopMaintenance();
+    },
+  };
+}
+
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const port = Number(process.env.PORT || process.env.DEPLOY_RUN_PORT || '5000');
   const launch = resolvePresenceLaunch(process.argv.slice(2), process.env);
@@ -98,12 +133,12 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     throw new Error('WUJIE_PRESENCE_ENABLED must be true to start the presence server');
   }
   process.env.WUJIE_PRESENCE_ENABLED = 'true';
-  void startPresenceServer({
+  void startLivePresenceServer({
     port,
     hostname: '0.0.0.0',
     dev: launch.dev,
-    onPresenceUpgrade: (_request, socket) => {
-      socket.end('HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\n\r\n');
-    },
+  }).catch(() => {
+    console.error({ code: 'PRESENCE_SERVER_START_FAILED' });
+    process.exitCode = 1;
   });
 }

@@ -34,6 +34,39 @@ async function setupPresenceDatabase(query: QueryFn): Promise<void> {
 }
 
 describe('presence leases on isolated PostgreSQL', () => {
+  postgresIt('removes a committed lease if the first snapshot read fails', async () => {
+    const { withIsolatedPostgres } = await import('../helpers/postgres-test-database');
+    await withIsolatedPostgres('presence-lease-initial-snapshot-fault', async ({ query }) => {
+      await setupPresenceDatabase(query);
+      const { getPool } = await import('../../src/lib/db-client');
+      const { joinPresence } = await import('../../src/lib/collaboration/presence-leases');
+      const snapshotFault = vi.spyOn(getPool(), 'query').mockRejectedValueOnce(new Error('snapshot probe failure'));
+      try {
+        await expect(joinPresence({
+          connectionId: 'snapshot-fault', userId: 'owner-a', projectId: 'project-a', instanceId: 'one',
+        })).rejects.toThrow('snapshot probe failure');
+      } finally {
+        snapshotFault.mockRestore();
+      }
+      expect((await query("SELECT 1 FROM wujie_presence_leases WHERE connection_id = 'snapshot-fault'"))
+        .rowCount).toBe(0);
+    });
+  });
+
+  postgresIt('renews lease time without treating every heartbeat as a project membership change', async () => {
+    const { withIsolatedPostgres } = await import('../helpers/postgres-test-database');
+    await withIsolatedPostgres('presence-lease-heartbeat-notify-budget', async ({ query }) => {
+      await setupPresenceDatabase(query);
+      const { joinPresence, renewPresence, readPresenceSnapshot } =
+        await import('../../src/lib/collaboration/presence-leases');
+      await joinPresence({
+        connectionId: 'quiet-heartbeat', userId: 'owner-a', projectId: 'project-a', instanceId: 'one',
+      });
+      await expect(renewPresence('quiet-heartbeat')).resolves.toBe(true);
+      expect((await readPresenceSnapshot('project-a')).sequence).toBe(1);
+    });
+  });
+
   postgresIt('serializes concurrent joins from two instances into one project sequence', async () => {
     const { withIsolatedPostgres } = await import('../helpers/postgres-test-database');
     await withIsolatedPostgres('presence-lease-concurrent-sequence', async ({ query }) => {
@@ -105,7 +138,7 @@ describe('presence leases on isolated PostgreSQL', () => {
           FROM wujie_presence_leases WHERE connection_id = 'connection-live'
       `);
       expect(liveLease.rows[0]?.lifetime_seconds).toBe(45);
-      expect((await readPresenceSnapshot('project-a')).sequence).toBe(2);
+      expect((await readPresenceSnapshot('project-a')).sequence).toBe(1);
 
       await query(`UPDATE wujie_presence_leases
                       SET expires_at = clock_timestamp() - interval '1 second'
@@ -114,7 +147,7 @@ describe('presence leases on isolated PostgreSQL', () => {
       expect((await readPresenceSnapshot('project-a')).participants).toEqual([]);
       await expect(expirePresenceLeases()).resolves.toBe(1);
       const cleaned = await readPresenceSnapshot('project-a');
-      expect(cleaned.sequence).toBe(3);
+      expect(cleaned.sequence).toBe(2);
       expect(cleaned.participants).toEqual([]);
       expect((await query("SELECT 1 FROM wujie_presence_leases WHERE connection_id = 'connection-live'"))
         .rowCount).toBe(0);
