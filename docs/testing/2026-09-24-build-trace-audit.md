@@ -34,3 +34,11 @@ node scripts/audit-build-traces.mjs --strict
 候选中残余 11 条含配置的路由为 `/api/credits/payment-config`、`/api/diag/storage`、`/api/export-project`、`/api/generate`、`/api/image-edit`、`/api/image/health`、`/api/image/start-services`、`/api/image/upscale`、`/api/image/upscale-pro`、`/api/refine-engine`、`/api/upscayl`；另有 `/api/user-data/record` 命中根文档但未命中配置。图像工具与生成入口可能共享运行期文件访问链，这只是下一步要以独立构建验证的假设，不能由清单重叠直接归因为同一函数。
 
 正式目标要求只修改 `main`，而旧实施计划要求候选仅留隔离分支，二者不一致。后续实施以用户的 `main` 约束为准：先重新建立当前主线的行为 RED/GREEN 与真实 NFT 对照，保留数据根优先级、迁移、媒体及 S3 回退；严格审计未通过时只作为本地未发布候选，不把旧分支结果直接合入、推送或用于 Coze 同步。不得降低严格审计条件或用全局追踪排除制造通过。
+
+## 2026-09-25 当前主线数据根目录追踪边界
+
+本地 `main@125de216` 在只提交目标源码的前提下完成数据根目录运行期路径的两层最小忽略标记。先前临时单路由探针由约 4,080 文件、包含 `next.config.ts` 降至 125 文件、不含配置；探针已从源码撤回。本轮重新执行不含探针的 `pnpm build`，退出 0、静态页面 121/121、检查 239 份 trace，并确认 `.next/server/app/api/traceprobe-dataroot/route.js.nft.json` 不存在。该构建并非干净 exact-tree：六份既有 `.superpowers/sdd` 用户文档仍为未暂存修改，`.next/BUILD_ID` 与完成标记均为 `unverified-652339ac9e6a18c6c79baeed5f710477`，不能等同 `HEAD^{tree}`。
+
+正式 API NFT 审计为 **227 路由、510,186 累计引用、75 条宽路由、26 条含 `next.config.ts`、27 条含项目根 Markdown**。`node scripts/audit-build-traces.mjs --strict` 退出 1。与此前主线只读记录的 227/215/214/214 对比，本地追踪显著收敛，但严格门禁仍红；这个对比不是同一份 clean-tree 云端构建的发布证明。当前剩余配置路由包括 `generate`、`image-edit`、`vision-prompt`、`serve-upload/[...path]`、`recover-images`、`cache-image`、`chat`、`agent-runs`/`skill-runs` 等 26 条；另有仅命中根文档的 `/api/user-data/record`。构建警告仍显示 `generate` 等路由对运行期媒体文件的项目级模式匹配，下一步需按正式导入链逐入口收敛，而非再扩大 `server-data-root` 的忽略范围或放宽审计器。
+
+本轮真实临时文件测试 3 文件/6 项、`pnpm validate`、保护基线 38/38 且 0 警告均退出 0。独立只读复审未发现本轮明确新增回归，但指出既有的迁移“空目录”文字与 `system/users` 实际判据不完全一致，以及保存/写目录的 `..` 和删除经符号链接越界的旧风险；这些尚未形成新的 RED→GREEN 修复，不宣称已解决。当前未推送、未同步 Coze、未部署、未主动查询或修改业务数据库，也未执行付费任务；`stable` 保持只读。严格 NFT、运行时资源装配、Coze 同源 `101`、真实付费取消/唯一退款、CI 和正式发布仍为独立开放门禁。
