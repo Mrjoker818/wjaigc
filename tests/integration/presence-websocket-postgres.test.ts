@@ -52,6 +52,8 @@ async function withPresenceServer(
   const { withIsolatedPostgres } = await import('../helpers/postgres-test-database');
   await withIsolatedPostgres(name, async ({ query }) => {
     vi.stubEnv('WUJIE_PRESENCE_ENABLED', 'true');
+    // These gateway fixtures create graph projects directly, without a legacy snapshot.
+    vi.stubEnv('WUJIE_ASSET_GRAPH_MODE', 'asset-v3');
     await setupPresenceDatabase(query);
     const { createPresenceGateway } = await import('../../src/lib/collaboration/presence-gateway');
     const { createPresenceHttpServer } = await import('../../scripts/presence-server');
@@ -374,6 +376,7 @@ describe('presence WebSocket on isolated PostgreSQL', () => {
     await withIsolatedPostgres('presence-websocket-live-entry', async ({ query }) => {
       await setupPresenceDatabase(query);
       vi.stubEnv('WUJIE_PRESENCE_ENABLED', 'true');
+      vi.stubEnv('WUJIE_ASSET_GRAPH_MODE', 'asset-v3');
       const { issuePresenceTicket } = await import('../../src/lib/collaboration/presence-tickets');
       const { startLivePresenceServer } = await import('../../scripts/presence-server');
       const runtime = await startLivePresenceServer({

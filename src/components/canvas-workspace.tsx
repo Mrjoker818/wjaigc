@@ -31,6 +31,7 @@ import {
   type RecoverableLegacyTask,
 } from '@/lib/legacy-task-recovery';
 import type { CanvasImage, ImageGroup } from '@/components/infinite-canvas';
+import { PresenceIndicator } from '@/components/collaboration/presence-indicator';
 import {
   restoreAnnotations,
   serializeAnnotations,
@@ -6421,9 +6422,15 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
           data-canvas-project-menu
           className={`absolute left-1/2 top-3 z-[70] flex max-w-[calc(100vw-7rem)] -translate-x-1/2 items-center rounded-xl border px-2 py-1 shadow-lg backdrop-blur-md ${themeStyle === 'monochrome' ? 'border-gray-200 bg-white/90 text-gray-900' : 'border-white/10 bg-[#171717]/90 text-white'}`}
         >
-          <span className="max-w-52 truncate px-2 text-sm font-medium" title={currentProject.name}>
+          <span className="min-w-0 max-w-52 truncate px-2 text-sm font-medium" title={currentProject.name}>
             {currentProject.name}
           </span>
+          <PresenceIndicator
+            key={currentProject.id}
+            projectId={currentProject.id}
+            isOwner={currentProject.userId === currentUser?.id}
+            themeStyle={themeStyle}
+          />
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button

@@ -40,6 +40,7 @@ export interface CanvasProjectSyncTransaction {
     verifiedMediaByImageId?: Readonly<Record<string, VerifiedLegacyMedia>>,
   ): Promise<boolean>;
   writeProjects(projects: Project[]): Promise<void>;
+  syncPresenceProjects?(projects: Project[]): Promise<void>;
   syncProject(
     project: Project,
     verifiedMediaByImageId?: Readonly<Record<string, VerifiedLegacyMedia>>,
@@ -392,6 +393,44 @@ async function writeProjects(client: PoolClient, actorUserId: string, projects: 
   );
 }
 
+async function syncLegacyPresenceProjects(
+  client: PoolClient,
+  actorUserId: string,
+  projects: Project[],
+): Promise<void> {
+  if (process.env.WUJIE_PRESENCE_ENABLED !== 'true') return;
+  for (const project of projects) {
+    if (!project.id || project.userId !== actorUserId) {
+      throw new Error('Invalid presence project owner');
+    }
+    const result = await client.query(
+      `INSERT INTO wujie_projects (id, owner_id, name, status, metadata)
+       VALUES ($1, $2, $3, 'active', '{"presenceProjection":true}'::jsonb)
+       ON CONFLICT (id) DO UPDATE SET
+         name = EXCLUDED.name, status = 'active', updated_at = now()
+       WHERE wujie_projects.owner_id = EXCLUDED.owner_id
+         AND wujie_projects.metadata->>'presenceProjection' = 'true'`,
+      [project.id, actorUserId, project.name],
+    );
+    if (result.rowCount !== 1) {
+      const existing = await client.query<{ owner_id: string }>(
+        'SELECT owner_id FROM wujie_projects WHERE id = $1',
+        [project.id],
+      );
+      if (existing.rows[0]?.owner_id !== actorUserId) {
+        throw new Error('Presence project ID belongs to another owner');
+      }
+    }
+  }
+  await client.query(
+    `UPDATE wujie_projects SET status = 'trashed', updated_at = now()
+      WHERE owner_id = $1 AND status = 'active'
+        AND metadata->>'presenceProjection' = 'true'
+        AND NOT (id = ANY($2::text[]))`,
+    [actorUserId, projects.map(project => project.id)],
+  );
+}
+
 export async function reconcileDeletedCanvasProjectsInTransaction(
   client: PoolClient,
   actorUserId: string,
@@ -516,6 +555,7 @@ class PostgresCanvasProjectSyncStorage implements CanvasProjectSyncStorage {
           verifiedMediaByImageId,
         ),
         writeProjects: (projects) => writeProjects(client, this.actorUserId, projects),
+        syncPresenceProjects: (projects) => syncLegacyPresenceProjects(client, this.actorUserId, projects),
         syncProject: (project, verifiedMediaByImageId) => migrateLegacyProjectOnWriteInTransaction(client, {
           actorUserId: this.actorUserId,
           projectId: project.id,
@@ -606,6 +646,7 @@ export async function executeLegacyCanvasProjectSync(
     }
     const revision = await transaction.claimRevision(input.expectedRevision);
     await transaction.writeProjects(persistedProjects);
+    await transaction.syncPresenceProjects?.(persistedProjects);
     return { projects: persistedProjects, mappings: {}, revision };
   });
 }

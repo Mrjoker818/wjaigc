@@ -2,6 +2,7 @@ import 'server-only';
 
 import type { PoolClient } from 'pg';
 
+import { resolveAssetGraphMode } from '@/lib/asset-core/mode';
 import { getPool } from '@/lib/db-client';
 
 export class PresenceMemberError extends Error {
@@ -13,13 +14,77 @@ export class PresenceMemberError extends Error {
   }
 }
 
+function usesLegacyPresenceSnapshot(): boolean {
+  return process.env.WUJIE_PRESENCE_ENABLED === 'true'
+    && resolveAssetGraphMode(process.env.WUJIE_ASSET_GRAPH_MODE) !== 'asset-v3';
+}
+
+function legacyProjectArraySql(alias: 'owner_projects' | 'data'): string {
+  const value = `${alias}.data_value`;
+  const storedString = `(${value} #>> '{}')`;
+  // Historical rows may contain a JSON-encoded array as a jsonb string.
+  // Validate before casting, and fail closed for malformed or non-array values.
+  return `CASE
+    WHEN jsonb_typeof(${value}) = 'array' THEN ${value}
+    WHEN jsonb_typeof(${value}) = 'string' THEN
+      CASE WHEN pg_input_is_valid(${storedString}, 'jsonb') THEN
+        CASE WHEN jsonb_typeof(${storedString}::jsonb) = 'array'
+          THEN ${storedString}::jsonb ELSE '[]'::jsonb END
+      ELSE '[]'::jsonb END
+    ELSE '[]'::jsonb END`;
+}
+
+export function legacyPresenceProjectPredicate(alias: 'p' | 'project'): string {
+  if (!usesLegacyPresenceSnapshot()) return '';
+  // The legacy project list owns visibility in legacy mode; a migrated graph row
+  // may remain active after that list deletes the project.
+  return `AND EXISTS (
+    SELECT 1 FROM wujie_user_data owner_projects
+    CROSS JOIN LATERAL jsonb_array_elements(
+      ${legacyProjectArraySql('owner_projects')}
+    ) snapshot_project(value)
+     WHERE owner_projects.user_id = ${alias}.owner_id
+       AND owner_projects.data_key = 'projects'
+       AND jsonb_typeof(snapshot_project.value) = 'object'
+       AND snapshot_project.value->>'id' = ${alias}.id
+       AND (
+         NULLIF(snapshot_project.value->>'userId', '') IS NULL
+         OR snapshot_project.value->>'userId' = ${alias}.owner_id
+       )
+  )`;
+}
+
+async function ensureLegacyPresenceProject(ownerId: string, projectId: string): Promise<void> {
+  if (!usesLegacyPresenceSnapshot()) return;
+  const existing = await getPool().query('SELECT 1 FROM wujie_projects WHERE id = $1', [projectId]);
+  if (existing.rowCount) return;
+  // Existing legacy projects may predate the presence-enabled sync projection.
+  // Derive only the caller's exact project from the authoritative user snapshot.
+  await getPool().query(
+    `INSERT INTO wujie_projects (id, owner_id, name, status, metadata)
+     SELECT $2, $1, COALESCE(project.value->>'name', ''), 'active', '{"presenceProjection":true}'::jsonb
+       FROM wujie_user_data data
+       CROSS JOIN LATERAL jsonb_array_elements(
+         ${legacyProjectArraySql('data')}
+       ) project(value)
+      WHERE data.user_id = $1 AND data.data_key = 'projects'
+        AND jsonb_typeof(project.value) = 'object'
+        AND project.value->>'id' = $2
+        AND (NULLIF(project.value->>'userId', '') IS NULL OR project.value->>'userId' = $1)
+     ON CONFLICT (id) DO NOTHING`,
+    [ownerId, projectId],
+  );
+}
+
 async function assertPresenceOwner(ownerId: string, projectId: string): Promise<void> {
+  await ensureLegacyPresenceProject(ownerId, projectId);
   const result = await getPool().query(
     `SELECT 1
        FROM wujie_projects p
        JOIN wujie_users owner_user ON owner_user.id = p.owner_id
       WHERE p.id = $1 AND p.owner_id = $2
-        AND p.status = 'active' AND owner_user.status = 'active'`,
+        AND p.status = 'active' AND owner_user.status = 'active'
+        ${legacyPresenceProjectPredicate('p')}`,
     [projectId, ownerId],
   );
   if (result.rowCount !== 1) throw new PresenceMemberError();
@@ -29,6 +94,7 @@ export async function assertPresenceMember(
   actorUserId: string,
   projectId: string,
 ): Promise<void> {
+  await ensureLegacyPresenceProject(actorUserId, projectId);
   const result = await getPool().query(
     `SELECT 1
        FROM wujie_projects p
@@ -43,7 +109,8 @@ export async function assertPresenceMember(
              WHERE m.project_id = p.id AND m.owner_id = p.owner_id
                AND m.member_user_id = $1 AND m.status = 'active'
           )
-        )`,
+        )
+        ${legacyPresenceProjectPredicate('p')}`,
     [actorUserId, projectId],
   );
   if (result.rowCount !== 1) throw new PresenceMemberError();
@@ -60,6 +127,7 @@ export async function assertPresenceMemberForLease(
        JOIN wujie_users actor ON actor.id = $1 AND actor.status = 'active'
        JOIN wujie_users owner_user ON owner_user.id = p.owner_id
       WHERE p.id = $2 AND p.status = 'active' AND owner_user.status = 'active'
+        ${legacyPresenceProjectPredicate('p')}
       FOR SHARE OF p, actor, owner_user`,
     [actorUserId, projectId],
   );
@@ -93,6 +161,7 @@ export async function grantPresenceMember(
         AND owner_user.status = 'active'
         AND member_user.status = 'active'
         AND member_user.id <> p.owner_id
+        ${legacyPresenceProjectPredicate('p')}
      ON CONFLICT (project_id, owner_id, member_user_id)
      DO UPDATE SET
        status = 'active',

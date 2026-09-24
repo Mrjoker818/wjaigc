@@ -3,7 +3,12 @@ import 'server-only';
 import type { PoolClient } from 'pg';
 
 import { getPool } from '@/lib/db-client';
-import { assertPresenceMember, assertPresenceMemberForLease, PresenceMemberError } from './presence-members';
+import {
+  assertPresenceMember,
+  assertPresenceMemberForLease,
+  legacyPresenceProjectPredicate,
+  PresenceMemberError,
+} from './presence-members';
 import { pruneExpiredPresenceTickets } from './presence-tickets';
 
 const CHANGE_CHANNEL = 'wujie_presence_changed';
@@ -160,6 +165,7 @@ export async function readPresenceSnapshot(projectId: string): Promise<PresenceS
             WHERE lease.project_id = $1 AND lease.expires_at > clock_timestamp()
               AND project.status = 'active' AND actor.status = 'active'
               AND owner_user.status = 'active'
+              ${legacyPresenceProjectPredicate('project')}
               AND (
                 actor.id = project.owner_id OR EXISTS (
                   SELECT 1 FROM wujie_project_presence_members member

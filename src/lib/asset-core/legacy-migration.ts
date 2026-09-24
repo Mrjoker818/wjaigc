@@ -1261,26 +1261,38 @@ export async function migrateLegacyProjectOnWriteInTransaction(
     const existingProject = await client.query<ProjectRow>(
       `SELECT schema_version, metadata
        FROM wujie_projects
-       WHERE owner_id = $1 AND id = $2 AND status = 'active'
+       WHERE owner_id = $1 AND id = $2
        FOR UPDATE`,
       [input.actorUserId, input.projectId],
     );
-    if (existingProject.rows[0]) throw migrationError('LEGACY_MIGRATION_FAILED');
-
-    await client.query(
-      `INSERT INTO wujie_projects(
-         id, owner_id, name, status, schema_version, metadata, created_at, updated_at
-       ) VALUES ($1, $2, $3, 'active', $4, $5::jsonb, $6, $7)`,
-      [
-        input.projectId,
-        input.actorUserId,
-        read.project.name ?? '',
-        sourceSchemaVersion,
-        JSON.stringify({ legacySourceSchemaVersion: sourceSchemaVersion }),
-        new Date(read.project.createdAt || Date.now()).toISOString(),
-        new Date(read.project.updatedAt || Date.now()).toISOString(),
-      ],
-    );
+    const projectValues = [
+      input.projectId,
+      input.actorUserId,
+      read.project.name ?? '',
+      sourceSchemaVersion,
+      JSON.stringify({ legacySourceSchemaVersion: sourceSchemaVersion }),
+      new Date(read.project.createdAt || Date.now()).toISOString(),
+      new Date(read.project.updatedAt || Date.now()).toISOString(),
+    ];
+    if (existingProject.rows[0]) {
+      if (existingProject.rows[0].metadata?.presenceProjection !== true) {
+        throw migrationError('LEGACY_MIGRATION_FAILED');
+      }
+      await client.query(
+        `UPDATE wujie_projects
+            SET name = $3, status = 'active', schema_version = $4,
+                metadata = $5::jsonb, created_at = $6, updated_at = $7
+          WHERE id = $1 AND owner_id = $2`,
+        projectValues,
+      );
+    } else {
+      await client.query(
+        `INSERT INTO wujie_projects(
+           id, owner_id, name, status, schema_version, metadata, created_at, updated_at
+         ) VALUES ($1, $2, $3, 'active', $4, $5::jsonb, $6, $7)`,
+        projectValues,
+      );
+    }
     const checkpointId = deterministicUuid([
       'wujie-legacy-migration-v1',
       input.actorUserId,
