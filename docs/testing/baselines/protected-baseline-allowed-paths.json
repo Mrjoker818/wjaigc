@@ -550,5 +550,6 @@
   "src/lib/runtime-path-exists.ts",
   "src/lib/server-data-root.ts",
   "src/app/api/cache-image/route.ts",
-  "src/app/api/recover-images/route.ts"
+  "src/app/api/recover-images/route.ts",
+  "src/lib/serve-upload-local-storage.ts"
 ]

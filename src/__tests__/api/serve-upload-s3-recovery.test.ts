@@ -1,18 +1,15 @@
 import { NextRequest } from 'next/server';
-import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   readBinaryFromS3Exact: vi.fn(),
   downloadImageFromS3: vi.fn(),
-  existsSync: vi.fn(),
   getImageSourceUrl: vi.fn(),
-  mkdirSync: vi.fn(),
   readExactRecoveryMedia: vi.fn(),
-  writeFileSync: vi.fn(),
-  readFile: vi.fn(),
-  stat: vi.fn(),
+  readServeUploadExportLocal: vi.fn(),
+  readServeUploadMediaLocal: vi.fn(),
+  cacheServeUploadMediaLocal: vi.fn(),
   recoverExportAssetBytes: vi.fn(),
   validateExportAssetBytes: vi.fn(),
 }));
@@ -34,33 +31,24 @@ vi.mock('@/lib/asset-core/binary-persistence', () => ({
   recoverExportAssetBytes: mocks.recoverExportAssetBytes,
   validateExportAssetBytes: mocks.validateExportAssetBytes,
 }));
-vi.mock('fs', async () => {
-  const actual = await vi.importActual<typeof import('fs')>('fs');
-  return {
-    ...actual,
-    default: {
-      ...actual,
-      existsSync: mocks.existsSync,
-      mkdirSync: mocks.mkdirSync,
-      writeFileSync: mocks.writeFileSync,
-      promises: { ...actual.promises, readFile: mocks.readFile, stat: mocks.stat },
-    },
-  };
-});
+vi.mock('@/lib/serve-upload-local-storage', () => ({
+  readServeUploadExportLocal: mocks.readServeUploadExportLocal,
+  readServeUploadMediaLocal: mocks.readServeUploadMediaLocal,
+  cacheServeUploadMediaLocal: mocks.cacheServeUploadMediaLocal,
+}));
 
 import { GET } from '@/app/api/serve-upload/[...path]/route';
 
 describe('serve-upload S3 thumbnail recovery', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.existsSync.mockReturnValue(false);
+    mocks.readServeUploadExportLocal.mockResolvedValue(null);
+    mocks.readServeUploadMediaLocal.mockResolvedValue(null);
     mocks.getImageSourceUrl.mockResolvedValue(null);
     mocks.readExactRecoveryMedia.mockResolvedValue(null);
     mocks.readBinaryFromS3Exact.mockResolvedValue(null);
     mocks.recoverExportAssetBytes.mockResolvedValue(undefined);
     mocks.validateExportAssetBytes.mockResolvedValue(undefined);
-    mocks.readFile.mockResolvedValue(Buffer.from('{}'));
-    mocks.stat.mockResolvedValue({ size: 2, isFile: () => true });
   });
 
   it('restores a missing nested thumbnail from the exact S3 path', async () => {
@@ -77,8 +65,9 @@ describe('serve-upload S3 thumbnail recovery', () => {
     expect(Buffer.from(await response.arrayBuffer())).toEqual(thumbnail);
     expect(mocks.downloadImageFromS3).toHaveBeenCalledOnce();
     expect(mocks.downloadImageFromS3).toHaveBeenCalledWith('thumbnails/version-a/512.webp');
-    expect(mocks.writeFileSync).toHaveBeenCalledWith(
-      path.join('C:/wujie-data', 'thumbnails/version-a/512.webp'),
+    expect(mocks.cacheServeUploadMediaLocal).toHaveBeenCalledWith(
+      'C:/wujie-data',
+      'thumbnails/version-a/512.webp',
       thumbnail,
     );
   });
@@ -106,9 +95,10 @@ describe('serve-upload S3 thumbnail recovery', () => {
       'https://media.example/recovery.mp4',
       expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
-    expect(mocks.writeFileSync).toHaveBeenCalledTimes(1);
-    expect(mocks.writeFileSync).toHaveBeenCalledWith(
-      path.join('C:/wujie-data', 'video/missing.mp4'),
+    expect(mocks.cacheServeUploadMediaLocal).toHaveBeenCalledTimes(1);
+    expect(mocks.cacheServeUploadMediaLocal).toHaveBeenCalledWith(
+      'C:/wujie-data',
+      'video/missing.mp4',
       recoveredVideo,
     );
   });
@@ -165,14 +155,13 @@ describe('serve-upload S3 thumbnail recovery', () => {
   it('validates and serves a bounded local export hit without calling S3 or republishing it', async () => {
     const bytes = Buffer.from('{}');
     const filename = `${createHash('sha256').update(bytes).digest('hex').slice(0, 16)}-manifest.json`;
-    mocks.existsSync.mockReturnValue(true);
-    mocks.readFile.mockResolvedValue(bytes);
+    mocks.readServeUploadExportLocal.mockResolvedValue(bytes);
     const response = await GET(
       new NextRequest(`http://localhost/api/serve-upload/exports/${filename}`),
       { params: Promise.resolve({ path: ['exports', filename] }) },
     );
     expect(response.status).toBe(200);
-    expect(mocks.stat).toHaveBeenCalledOnce();
+    expect(mocks.readServeUploadExportLocal).toHaveBeenCalledOnce();
     expect(mocks.readBinaryFromS3Exact).not.toHaveBeenCalled();
     expect(mocks.recoverExportAssetBytes).not.toHaveBeenCalled();
     expect(mocks.validateExportAssetBytes).toHaveBeenCalledWith({ bytes, filename, mimeType: 'application/json' });

@@ -10,7 +10,6 @@ import {
   validateExportAssetBytes,
 } from '@/lib/asset-core/binary-persistence';
 import path from 'path';
-import fs from 'fs';
 
 export async function GET(
   _request: NextRequest,
@@ -31,28 +30,21 @@ export async function GET(
     }
     if (exportArtifact) {
       const dataRoot = path.resolve(getServerDataRoot());
-      const exportsRoot = path.resolve(dataRoot, 'exports');
-      const localPath = path.resolve(exportsRoot, exportArtifact.filename);
-      if (!localPath.startsWith(`${exportsRoot}${path.sep}`)) {
-        return NextResponse.json({ error: 'File not found' }, { status: 404 });
-      }
+      const { readServeUploadExportLocal } = await import('@/lib/serve-upload-local-storage');
       let bytes: Buffer | null;
-      if (fs.existsSync(localPath)) {
-        try {
-          const stats = await fs.promises.stat(localPath);
-          if (!stats.isFile?.() || stats.size < 1 || stats.size > MAX_ASSET_BINARY_BYTES) {
-            return NextResponse.json({ error: 'File not found' }, { status: 404 });
-          }
-          bytes = await fs.promises.readFile(localPath);
+      try {
+        bytes = await readServeUploadExportLocal(dataRoot, exportArtifact.filename, MAX_ASSET_BINARY_BYTES);
+        if (bytes) {
           await validateExportAssetBytes({
             bytes,
             filename: exportArtifact.filename,
             mimeType: exportArtifact.contentType,
           });
-        } catch {
-          return NextResponse.json({ error: 'File not found' }, { status: 404 });
         }
-      } else {
+      } catch {
+        return NextResponse.json({ error: 'File not found' }, { status: 404 });
+      }
+      if (!bytes) {
         bytes = await readBinaryFromS3Exact(`exports/${exportArtifact.filename}`);
         if (bytes) {
           try {
@@ -86,43 +78,22 @@ export async function GET(
     }
     
     const dataRoot = getServerDataRoot();
-    const possibleDirs = [
-      path.join(dataRoot, 'uploads'),
-      dataRoot,
-    ];
+    const { readServeUploadMediaLocal, cacheServeUploadMediaLocal } = await import('@/lib/serve-upload-local-storage');
     
     // 1. 尝试从本地文件系统读取
-    for (const dir of possibleDirs) {
-      const fullPath = path.resolve(path.join(dir, filePath));
-      // 二次安全校验：解析后的绝对路径必须在允许的目录内
-      if (!fullPath.startsWith(path.resolve(dir))) {
-        continue;
+    let localBytes: Buffer | null;
+    try {
+      localBytes = await readServeUploadMediaLocal(dataRoot, process.cwd(), filePath);
+    } catch (error) {
+      if (error instanceof Error && error.message === 'Unsafe local media path') {
+        return NextResponse.json({ error: 'File not found' }, { status: 404 });
       }
-      if (fs.existsSync(fullPath)) {
-        const buffer = await fs.promises.readFile(fullPath);
-        const ext = path.extname(filePath).toLowerCase();
-        const contentType = getContentType(ext);
-        return publicMediaResponse(buffer, contentType, ext);
-      }
+      throw error;
     }
-    
-    // 1.5 回退: 检查 Next.js public/uploads 目录
-    // 旧版本图片可能只存在于 public/uploads/ 而不在 dataRoot 中
-    const publicUploadsDir = path.join(process.cwd(), 'public', 'uploads');
-    const publicPath = path.join(publicUploadsDir, path.basename(filePath));
-    if (fs.existsSync(publicPath)) {
-      const buffer = await fs.promises.readFile(publicPath);
+    if (localBytes) {
       const ext = path.extname(filePath).toLowerCase();
       const contentType = getContentType(ext);
-      
-      // 同时复制到 dataRoot 确保后续请求也能访问
-      try {
-        const destDir = path.join(dataRoot, 'uploads');
-        if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true });
-        fs.writeFileSync(path.join(destDir, path.basename(filePath)), buffer);
-      } catch {}
-      
-      return publicMediaResponse(buffer, contentType, ext);
+      return publicMediaResponse(new Uint8Array(localBytes), contentType, ext);
     }
     
     // 2. 本地文件不存在，尝试从 S3 下载
@@ -134,9 +105,7 @@ export async function GET(
       
       // 同时恢复到本地文件系统，下次请求无需再从 S3 下载
       try {
-        const restoreDir = path.join(dataRoot, path.dirname(filePath));
-        if (!fs.existsSync(restoreDir)) fs.mkdirSync(restoreDir, { recursive: true });
-        fs.writeFileSync(path.join(dataRoot, filePath), s3Buffer);
+        cacheServeUploadMediaLocal(dataRoot, filePath, s3Buffer);
       } catch (writeErr) {
         console.warn(`[serve-upload] Failed to cache S3 file locally:`, writeErr instanceof Error ? writeErr.message : writeErr);
       }
@@ -175,9 +144,7 @@ export async function GET(
           
           // 恢复到本地文件系统 — 保持原始路径结构
           try {
-            const restoreDir = path.join(dataRoot, path.dirname(filePath));
-            if (!fs.existsSync(restoreDir)) fs.mkdirSync(restoreDir, { recursive: true });
-            fs.writeFileSync(path.join(dataRoot, filePath), buffer);
+            cacheServeUploadMediaLocal(dataRoot, filePath, buffer);
           } catch (writeErr) {
             // 忽略
           }
