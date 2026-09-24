@@ -738,7 +738,13 @@ export class UserManager {
       this.multiUserData = { users: [], userData: {} };
     }
 
-    const admin = this.multiUserData.users.find(u => u.name === DEFAULT_ADMIN_NAME) ?? {
+    const cachedAdmin = this.multiUserData.userData.admin_mr_joker?.user;
+    const existingAdmin = this.multiUserData.users.find(u => u.id === 'admin_mr_joker' && u.name !== DEFAULT_ADMIN_NAME)
+      ?? (cachedAdmin?.id === 'admin_mr_joker' && cachedAdmin.name !== DEFAULT_ADMIN_NAME ? cachedAdmin : undefined)
+      ?? this.multiUserData.users.find(u => u.id === 'admin_mr_joker')
+      ?? (cachedAdmin?.id === 'admin_mr_joker' ? cachedAdmin : undefined)
+      ?? this.multiUserData.users.find(u => u.name === DEFAULT_ADMIN_NAME && u.role === 'admin');
+    const admin = existingAdmin ?? {
         id: 'admin_mr_joker',
         name: DEFAULT_ADMIN_NAME,
         password: '',  // Password is managed server-side; client never stores it
@@ -749,15 +755,19 @@ export class UserManager {
         createdAt: Date.now(),
         updatedAt: Date.now(),
       };
-    const isNewAdmin = !this.multiUserData.users.find(u => u.name === DEFAULT_ADMIN_NAME);
+    const isNewAdmin = !this.multiUserData.users.some(u => u.id === admin.id);
     if (isNewAdmin) {
       this.multiUserData.users.unshift(admin);
-      this.multiUserData.userData[admin.id] = {
-        user: admin,
-        projects: this.createDemoProjects(admin.id),
-        apiKeys: [],
-        usageStats: [],
-      };
+      if (this.multiUserData.userData[admin.id]) {
+        this.multiUserData.userData[admin.id].user = admin;
+      } else {
+        this.multiUserData.userData[admin.id] = {
+          user: admin,
+          projects: this.createDemoProjects(admin.id),
+          apiKeys: [],
+          usageStats: [],
+        };
+      }
       this.saveData();
       return;
     }
@@ -771,12 +781,15 @@ export class UserManager {
       storageFolder: admin.storageFolder?.startsWith('data/users/') ? admin.storageFolder : userStorageFolder(admin.id),
       updatedAt: Date.now(),
     };
-    this.multiUserData.users = this.multiUserData.users.map(u => u.id === normalizedAdmin.id ? normalizedAdmin : {
-      ...u,
-      role: u.role || 'user',
-      status: u.status || 'active',
-      apiPermissions: { ...defaultApiPermissions(), ...(u.apiPermissions || {}) },
-    });
+    this.multiUserData.users = [
+      normalizedAdmin,
+      ...this.multiUserData.users.filter(u => u.id !== normalizedAdmin.id).map(u => ({
+        ...u,
+        role: u.role || 'user',
+        status: u.status || 'active',
+        apiPermissions: { ...defaultApiPermissions(), ...(u.apiPermissions || {}) },
+      })),
+    ];
     if (this.multiUserData.userData[normalizedAdmin.id]) {
       this.multiUserData.userData[normalizedAdmin.id].user = normalizedAdmin;
     }

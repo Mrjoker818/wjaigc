@@ -33,10 +33,21 @@ async function connectGuestPresence(page: Page, projectId: string): Promise<{
     url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
     return new Promise<{ projectId: string; participants: Array<{ userId: string }> }>((resolve, reject) => {
       const socket = new WebSocket(url.href, ['wujie-presence-v1', `wujie-ticket.${ticket}`]);
-      const probe = window as typeof window & { __presenceTestSocket?: WebSocket; __presenceTestClosed?: boolean };
+      const probe = window as typeof window & {
+        __presenceTestSocket?: WebSocket;
+        __presenceTestClosed?: boolean;
+        __presenceTestLatest?: { projectId: string; participants: Array<{ userId: string }> };
+      };
       probe.__presenceTestSocket = socket;
       probe.__presenceTestClosed = false;
-      socket.onmessage = event => resolve(JSON.parse(String(event.data)));
+      socket.onmessage = event => {
+        const snapshot = JSON.parse(String(event.data)) as {
+          projectId: string;
+          participants: Array<{ userId: string }>;
+        };
+        probe.__presenceTestLatest = snapshot;
+        resolve(snapshot);
+      };
       socket.onerror = () => reject(new Error('guest socket failed'));
       socket.onclose = () => { probe.__presenceTestClosed = true; };
     });
@@ -106,22 +117,71 @@ test('two browser accounts converge on one project presence roster and revocatio
     await connectGuestPresence(guestPage, projectId);
     await expect(ownerPage.getByRole('status', { name: '在线状态' })).toContainText('2 人在线');
 
+    // A project switch must leave the old room before joining the next one.
+    await ownerPage.locator('button[title="工作台"]').click();
+    await expect(ownerPage.getByRole('button', { name: '新建项目' })).toBeVisible();
+    await expect.poll(() => guestPage.evaluate(() => (
+      window as typeof window & { __presenceTestLatest?: { participants: unknown[] } }
+    ).__presenceTestLatest?.participants.length)).toBe(1);
+    await ownerPage.getByRole('button', { name: '新建项目' }).click();
+    const secondProjectId = await viewport.getAttribute('data-project-id') ?? '';
+    expect(secondProjectId).toBeTruthy();
+    expect(secondProjectId).not.toBe(projectId);
+    await expect(ownerPage.getByRole('status', { name: '在线状态' })).toContainText('1 人在线');
+    const crossProjectTicketStatus = await guestPage.evaluate(async targetProjectId => {
+      const response = await fetch('/api/collaboration/presence-ticket', {
+        method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ projectId: targetProjectId }),
+      });
+      return response.status;
+    }, secondProjectId);
+    expect(crossProjectTicketStatus).toBe(403);
+    await expect.poll(() => guestPage.evaluate(() => (
+      window as typeof window & { __presenceTestLatest?: { projectId: string; participants: unknown[] } }
+    ).__presenceTestLatest)).toMatchObject({ projectId, participants: [{ userId: guestId }] });
+
+    await ownerPage.goto(`/?projectId=${encodeURIComponent(projectId)}`);
+    await expect(viewport).toHaveAttribute('data-project-id', projectId);
+    await expect(ownerPage.getByRole('status', { name: '在线状态' })).toContainText('2 人在线');
+    await expect.poll(async () => {
+      const response = await ownerContext.request.get('/api/user-data/sync?key=projects');
+      if (!response.ok()) return [];
+      const body = await response.json() as { value?: Array<{ id: string }> };
+      return body.value?.map(project => project.id) ?? [];
+    }).toEqual(expect.arrayContaining([projectId, secondProjectId]));
+    await ownerPage.reload();
+    await expect(viewport).toHaveAttribute('data-project-id', projectId);
+    await expect(ownerPage.getByRole('status', { name: '在线状态' })).toContainText('2 人在线');
+    const reloadedProjects = await ownerContext.request.get('/api/user-data/sync?key=projects');
+    expect(reloadedProjects.status()).toBe(200);
+    const reloadedBody = await reloadedProjects.json() as { value?: Array<{ id: string }> };
+    expect(reloadedBody.value?.map(project => project.id)).toEqual(expect.arrayContaining([projectId, secondProjectId]));
+
+    await ownerPage.goto(`/?projectId=${encodeURIComponent(secondProjectId)}`);
+    await expect(viewport).toHaveAttribute('data-project-id', secondProjectId);
+    await expect(ownerPage.getByRole('status', { name: '在线状态' })).toContainText('1 人在线');
+    await ownerPage.goto(`/?projectId=${encodeURIComponent(projectId)}`);
+    await expect(viewport).toHaveAttribute('data-project-id', projectId);
+    await expect(ownerPage.getByRole('status', { name: '在线状态' })).toContainText('2 人在线');
+
     await ownerPage.getByRole('button', { name: '管理在线成员' }).click();
     await ownerPage.getByRole('button', { name: `撤销${guestName}的在线资格` }).click();
     await guestPage.waitForFunction(() => (window as typeof window & { __presenceTestClosed?: boolean }).__presenceTestClosed === true);
     await expect(ownerPage.getByRole('status', { name: '在线状态' })).toContainText('1 人在线');
 
-    await ownerPage.setViewportSize({ width: 320, height: 568 });
-    const menuBounds = await ownerPage.locator('[data-canvas-project-menu]').boundingBox();
-    expect(menuBounds).not.toBeNull();
-    expect(menuBounds!.x).toBeGreaterThanOrEqual(0);
-    expect(menuBounds!.x + menuBounds!.width).toBeLessThanOrEqual(320);
-    const statusSnapshot = await ownerPage.getByRole('status', { name: '在线状态' }).ariaSnapshot();
-    expect(statusSnapshot).toContain('1 人在线');
-    const dialogBounds = await ownerPage.getByRole('dialog', { name: '项目在线成员' }).boundingBox();
-    expect(dialogBounds).not.toBeNull();
-    expect(dialogBounds!.x).toBeGreaterThanOrEqual(0);
-    expect(dialogBounds!.x + dialogBounds!.width).toBeLessThanOrEqual(320);
+    for (const width of [320, 375, 393]) {
+      await ownerPage.setViewportSize({ width, height: 667 });
+      const menuBounds = await ownerPage.locator('[data-canvas-project-menu]').boundingBox();
+      expect(menuBounds).not.toBeNull();
+      expect(menuBounds!.x).toBeGreaterThanOrEqual(0);
+      expect(menuBounds!.x + menuBounds!.width).toBeLessThanOrEqual(width);
+      const statusSnapshot = await ownerPage.getByRole('status', { name: '在线状态' }).ariaSnapshot();
+      expect(statusSnapshot).toContain('1 人在线');
+      const dialogBounds = await ownerPage.getByRole('dialog', { name: '项目在线成员' }).boundingBox();
+      expect(dialogBounds).not.toBeNull();
+      expect(dialogBounds!.x).toBeGreaterThanOrEqual(0);
+      expect(dialogBounds!.x + dialogBounds!.width).toBeLessThanOrEqual(width);
+    }
     expect(socketURLs.length).toBeGreaterThanOrEqual(3);
     expect(socketURLs.every(url => new URL(url).pathname === '/api/collaboration/presence'
       && !new URL(url).search)).toBe(true);
