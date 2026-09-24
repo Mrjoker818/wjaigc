@@ -44,10 +44,10 @@
 - Modify: `scripts/coze-start.sh`
 
 **Interfaces:**
-- Produces: `resolvePresenceEnabled(value: string | undefined): boolean`、`isPresenceUpgradePath(pathname: string): boolean`、`startPresenceServer({ port, dev, onUpgrade })`；`onUpgrade(req, socket, head)` 只收到精确 `/api/collaboration/presence`。
+- Produces: `resolvePresenceEnabled(value: string | undefined): boolean`、`isPresenceUpgradePath(pathname: string): boolean`、`startPresenceServer({ port, dev, onUpgrade })`；`onUpgrade(req, socket, head)` 只收到精确 `/api/collaboration/presence`；开发态其他 upgrade 委托 Next handler。
 - Task 5 注入真实 gateway；默认关闭不进入本启动入口。
 
-- [ ] **Step 1: 写失败测试。** 断言默认 `coze-start.sh` 仍执行 Next，只有精确开关 `true` 才执行 presence server；非目标 upgrade 不进入回调，普通 HTTP 返回原 Next 页面、`/_next/static` 和健康端点可用。
+- [ ] **Step 1: 写失败测试。** 断言默认 `coze-start.sh` 仍执行 Next，只有精确开关 `true` 才执行 presence server；在线状态升级只到目标回调，开发态 `/_next/webpack-hmr` 升级交给 Next，生产态未知升级拒绝；普通 HTTP 返回原 Next 页面、`/_next/static` 和健康端点可用。
 
 ```ts
 expect(resolvePresenceEnabled(undefined)).toBe(false);
@@ -57,7 +57,7 @@ expect(isPresenceUpgradePath('/api/collaboration/presence/other')).toBe(false);
 ```
 
 - [ ] **Step 2: 运行 RED。** `pnpm exec vitest run src/__tests__/scripts/presence-server-contract.test.ts --reporter=dot`，应因入口/导出缺失失败。
-- [ ] **Step 3: 最小 GREEN。** `createServer(nextHandler)` 后仅精确路径调用 `onUpgrade`；拒绝其他 upgrade；`pnpm start` 保持原样，新增 `start:presence`/`dev:presence`，Coze 启动仅在开关 true 时选新入口。将已安装的 `tsx` 从开发依赖移到生产依赖并同步锁文件，启动用 `./node_modules/.bin/tsx scripts/presence-server.ts`；不得清理 `.next` 或修改构建标记逻辑。
+- [ ] **Step 3: 最小 GREEN。** `createServer(nextHandler)` 后仅精确路径调用 `onUpgrade`；开发态其他 upgrade 调用 `app.getUpgradeHandler()`，生产态未知 upgrade 拒绝；`pnpm start` 保持原样，新增 `start:presence`/`dev:presence`，Coze 启动仅在开关 true 时选新入口。将已安装的 `tsx` 从开发依赖移到生产依赖并同步锁文件，启动用 `./node_modules/.bin/tsx scripts/presence-server.ts`；不得清理 `.next` 或修改构建标记逻辑。
 
 ```js
 export function isPresenceUpgradePath(pathname) {

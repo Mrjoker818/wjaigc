@@ -17,7 +17,7 @@
 2. 独立端口 WebSocket：实现简单，但 Coze 预览/正式域名是否透传第二端口未获证明，且增加跨源认证和部署面；不采用。
 3. 第三方实时服务：会引入第二套身份、账务/权限外部依赖；不采用。
 
-Next.js 官方自定义服务器文档提醒其可能失去部分优化，且不能与 standalone 输出直接混用；当前工程不是 standalone。采用前须用精确当前构建验证路由、静态资源、Build ID 与部署恢复不退化。`ws` 官方 `noServer`/`handleUpgrade` 模式用于唯一升级路径，其他升级请求不得被这个服务接管。参考：[Next.js 自定义服务器](https://nextjs.org/docs/app/guides/custom-server)、[`ws` 官方文档](https://github.com/websockets/ws/blob/master/doc/ws.md)。
+Next.js 官方自定义服务器文档提醒其可能失去部分优化，且不能与 standalone 输出直接混用；当前工程不是 standalone。采用前须用精确当前构建验证路由、静态资源、Build ID 与部署恢复不退化。`ws` 官方 `noServer`/`handleUpgrade` 模式用于唯一在线状态路径；开发态其它升级请求必须委托 Next 的 upgrade handler，以保留 HMR，生产态未知升级请求拒绝。参考：[Next.js 自定义服务器](https://nextjs.org/docs/app/guides/custom-server)、[`ws` 官方文档](https://github.com/websockets/ws/blob/master/doc/ws.md)。
 
 自定义入口使用 TypeScript 并以仓库已安装的 `tsx` 启动；将 `tsx` 从开发依赖转为明确的生产运行依赖，不能依赖开发镜像偶然安装。默认关闭路径仍沿用 `next start`。
 

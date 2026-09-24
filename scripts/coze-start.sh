@@ -2,6 +2,16 @@
 set -euo pipefail
 
 PORT="${PORT:-${DEPLOY_RUN_PORT:-5000}}"
+export PORT
+
+start_server() {
+  if [ "${WUJIE_PRESENCE_ENABLED:-}" = "true" ]; then
+    echo "[coze-start] Starting production server with presence on port ${PORT}..."
+    exec ./node_modules/.bin/tsx scripts/presence-server.ts
+  fi
+  echo "[coze-start] Starting production server on port ${PORT}..."
+  exec ./node_modules/.bin/next start -p "${PORT}" -H 0.0.0.0
+}
 
 # A BUILD_ID can be written before a concurrent build finishes its other files.
 # Never start or restore artifacts while Next still holds its build lock.
@@ -41,8 +51,7 @@ artifact_matches_source() {
 
 # --- Fast path: the build belongs to the current clean source tree ---
 if artifact_matches_source ".next"; then
-  echo "[coze-start] Starting production server on port ${PORT}..."
-  exec ./node_modules/.bin/next start -p "${PORT}" -H 0.0.0.0
+  start_server
 fi
 
 # --- Restore from dist/ backup if .next is missing ---
@@ -51,8 +60,8 @@ if artifact_matches_source "dist"; then
   echo "[coze-start] Restoring build artifacts from dist/..."
   rm -rf .next
   cp -r dist .next
-  echo "[coze-start] Restore complete. Starting production server on port ${PORT}..."
-  exec ./node_modules/.bin/next start -p "${PORT}" -H 0.0.0.0
+  echo "[coze-start] Restore complete."
+  start_server
 fi
 
 # --- Fallback: build from scratch (dev environment or cold start) ---
@@ -78,5 +87,5 @@ if [ -n "$SOURCE_TREE" ] && ! artifact_matches_source ".next"; then
   exit 1
 fi
 
-echo "[coze-start] Build complete. Starting server on port ${PORT}..."
-exec ./node_modules/.bin/next start -p "${PORT}" -H 0.0.0.0
+echo "[coze-start] Build complete."
+start_server
