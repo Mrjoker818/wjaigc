@@ -160,12 +160,12 @@ export function saveImageFile(
   subDir: string
 ): string {
   const root = getServerDataRoot();
-  const dir = path.join(root, subDir);
+  const dir = path.join(/* turbopackIgnore: true */ root, subDir);
   
   // 确保目录存在
   fs.mkdirSync(dir, { recursive: true });
   
-  const filePath = path.join(dir, filename);
+  const filePath = path.join(/* turbopackIgnore: true */ dir, filename);
   const data = typeof buffer === 'string' ? Buffer.from(buffer, 'base64') : buffer;
   fs.writeFileSync(filePath, data);
   
@@ -189,8 +189,8 @@ export function deleteImageFile(filename: string, subDir: string): boolean {
   ) {
     return false;
   }
-  const root = path.resolve(getServerDataRoot());
-  const filePath = path.resolve(root, subDir, filename);
+  const root = path.resolve(/* turbopackIgnore: true */ getServerDataRoot());
+  const filePath = path.resolve(/* turbopackIgnore: true */ root, subDir, filename);
   const relative = path.relative(root, filePath);
   if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) {
     return false;
@@ -206,7 +206,7 @@ export function deleteImageFile(filename: string, subDir: string): boolean {
 /** Returns a writable subdirectory under the managed server data root. */
 export function getImageWriteDir(subDir: string): string {
   const root = getServerDataRoot();
-  const dir = path.join(root, subDir);
+  const dir = path.join(/* turbopackIgnore: true */ root, subDir);
   fs.mkdirSync(dir, { recursive: true });
   return dir;
 }
