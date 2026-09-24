@@ -36,3 +36,10 @@
 - 最终浏览器用例在新建 localhost PostgreSQL 测试库应用 29 项迁移后运行：Chromium、Firefox、WebKit **3/3**，各自验证两账号邀请/撤销、A/B 切换与房间隔离、无权用户对 B 的票据 403、A/B 服务端保存、刷新后客户端实际重新打开两个项目、断开重连，以及 320/375/393px 弹窗边界；页面异常 0。该证据只覆盖受控本地矩阵，不能外推到 Coze 代理或真实多实例云端。
 - 最终 `pnpm validate` exit 0；`pnpm build` exit 0、静态页 121/121、239 份 trace 清理 20831 条本地引用；隔离真库全量 Vitest **850 文件/7298 项通过、0 失败、exit 0**。当前两份构建身份均为 `unverified-0f7dd98ed46e0bbf344dde2dda25da54`，因六份既有用户文档脏改，不能当作干净 exact-tree 身份。
 - 严格 NFT 审计仍 **exit 1：227 路由、965371 累计引用、215 条宽追踪**。Coze exact-main 同源 `101`、云端成员撤销/重连、GitHub Actions、真实付费取消唯一退款和正式部署仍未验收；不推送、不部署，也不把本次本地 3/3 算作 Task 7 总闭环。
+
+## 2026-09-25 匿名分享隔离与普通 HTTP 本地补证
+
+- 新增独立 `tests/e2e/presence-anonymous-share.spec.ts`，只在显式本机隔离库/数据目录及分享门禁下运行。有效公开分享可打开且公共快照 HTTP 200；先用所有者一次性票据取得真实 WebSocket 快照，证明在线网关正在服务，再以**同一有效分享令牌**直接尝试 WebSocket 升级，服务端返回 HTTP 401。匿名会话的票据 API 同样返回 401；分享页无在线状态 UI，也不自动建在线 socket。普通首页、登录会话 API、Next 静态脚本均为 HTTP 200；页面异常数为 0。
+- 分享令牌仅存在于一次性测试进程和隔离数据库；该规格顶层关闭 trace/截图/视频，导航失败只输出脱敏阶段，关闭带令牌页面后才断言；成功路径明确验证分享撤销 200，异常路径也关闭浏览器上下文。首次测试在项目尚未同步到服务器时预检返回 `CANVAS_SHARE_UNAUTHORIZED`，经服务端项目同步条件等待纠正；这是测试时序，不是放宽产品权限。
+- 隔离 PostgreSQL 新库应用 29 项迁移后，最终 `presence-online` 与匿名分享两套规格在 Chromium/Firefox/WebKit **6/6 通过，exit 0**。隔离真库全量 Vitest **850 文件/7298 项通过、exit 0**；最终 `pnpm validate` exit 0、生产构建静态页 121/121 且 exit 0。独立只读复审对新增规格的直接握手、失败信息与清理边界未发现剩余 Important/Critical。
+- 严格 NFT 仍 **exit 1：227 路由、965585 累计引用、215 条宽追踪**；当前构建身份标记是 `unverified-*`，不能证明干净 exact-tree。Coze exact-main 同源 `101`、多实例/重启失效、GitHub Actions、正式部署和真实付费取消唯一退款仍为 `UNVERIFIED`；本地测试补证不关闭 WebSocket 阶段或总体目标。
