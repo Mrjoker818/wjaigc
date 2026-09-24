@@ -12,6 +12,7 @@
 
 import path from 'path';
 import fs from 'fs';
+import { pathExistsSync } from './runtime-path-exists';
 
 const PROJECT_ROOT = process.env.COZE_WORKSPACE_PATH || process.cwd();
 const PERSISTENT_DIR = '/space/wujie-data';
@@ -21,9 +22,7 @@ let _dataRoot: string | null = null;
 
 function getWritableDir(dir: string): boolean {
   try {
-    if (!fs.existsSync(dir)) {
-      fs.mkdirSync(dir, { recursive: true });
-    }
+    fs.mkdirSync(dir, { recursive: true });
     // Test write
     const testFile = path.join(dir, '.write_test');
     fs.writeFileSync(testFile, 'test', 'utf-8');
@@ -54,7 +53,7 @@ export function getServerDataRoot(): string {
     console.log(`[DataRoot] Using persistent storage: ${_dataRoot}`);
     
     // 自动迁移旧数据
-    migrateFromLocalIfNeeded();
+    migrateLocalDataIfNeeded(LOCAL_DATA_DIR, _dataRoot);
     return _dataRoot;
   }
 
@@ -86,32 +85,32 @@ export function isServerDataRootDurable(dataRoot: string = getServerDataRoot()):
 /**
  * 如果本地 data/ 有旧数据且持久目录为空，自动迁移
  */
-function migrateFromLocalIfNeeded(): void {
-  if (!_dataRoot || _dataRoot === LOCAL_DATA_DIR) return;
+export function migrateLocalDataIfNeeded(localDir: string, persistentDir: string): void {
+  if (persistentDir === localDir) return;
 
   try {
-    const localSystemDir = path.join(LOCAL_DATA_DIR, 'system');
-    const localUsersDir = path.join(LOCAL_DATA_DIR, 'users');
+    const localSystemDir = path.join(localDir, 'system');
+    const localUsersDir = path.join(localDir, 'users');
     
-    const hasLocalData = fs.existsSync(localSystemDir) || fs.existsSync(localUsersDir);
+    const hasLocalData = pathExistsSync(localSystemDir) || pathExistsSync(localUsersDir);
     if (!hasLocalData) return;
 
-    const persistentSystemDir = path.join(_dataRoot, 'system');
-    const persistentUsersDir = path.join(_dataRoot, 'users');
+    const persistentSystemDir = path.join(persistentDir, 'system');
+    const persistentUsersDir = path.join(persistentDir, 'users');
     
-    const hasPersistentData = fs.existsSync(persistentSystemDir) || fs.existsSync(persistentUsersDir);
+    const hasPersistentData = pathExistsSync(persistentSystemDir) || pathExistsSync(persistentUsersDir);
     if (hasPersistentData) return; // 持久目录已有数据，不覆盖
 
-    console.log(`[DataRoot] Migrating data from ${LOCAL_DATA_DIR} to ${_dataRoot}...`);
+    console.log(`[DataRoot] Migrating data from ${localDir} to ${persistentDir}...`);
 
     // 迁移 system 目录
-    if (fs.existsSync(localSystemDir)) {
+    if (pathExistsSync(localSystemDir)) {
       copyDirRecursive(localSystemDir, persistentSystemDir);
       console.log(`[DataRoot] Migrated system/`);
     }
 
     // 迁移 users 目录
-    if (fs.existsSync(localUsersDir)) {
+    if (pathExistsSync(localUsersDir)) {
       copyDirRecursive(localUsersDir, persistentUsersDir);
       console.log(`[DataRoot] Migrated users/`);
     }
@@ -164,9 +163,7 @@ export function saveImageFile(
   const dir = path.join(root, subDir);
   
   // 确保目录存在
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
-  }
+  fs.mkdirSync(dir, { recursive: true });
   
   const filePath = path.join(dir, filename);
   const data = typeof buffer === 'string' ? Buffer.from(buffer, 'base64') : buffer;
@@ -210,9 +207,7 @@ export function deleteImageFile(filename: string, subDir: string): boolean {
 export function getImageWriteDir(subDir: string): string {
   const root = getServerDataRoot();
   const dir = path.join(root, subDir);
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
-  }
+  fs.mkdirSync(dir, { recursive: true });
   return dir;
 }
 
