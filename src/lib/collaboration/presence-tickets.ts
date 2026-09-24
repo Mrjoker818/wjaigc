@@ -65,3 +65,20 @@ export async function consumePresenceTicket(
   }
   return { userId: row.user_id, projectId: row.project_id };
 }
+
+export async function pruneExpiredPresenceTickets(batchSize = 500): Promise<number> {
+  const limit = Number.isFinite(batchSize) ? Math.max(1, Math.min(500, Math.floor(batchSize))) : 500;
+  const result = await getPool().query(
+    `WITH expired AS MATERIALIZED (
+       SELECT token_hash FROM wujie_presence_tickets
+        WHERE expires_at < clock_timestamp() - interval '5 minutes'
+        ORDER BY expires_at, token_hash
+        LIMIT $1
+     )
+     DELETE FROM wujie_presence_tickets ticket
+      USING expired
+      WHERE ticket.token_hash = expired.token_hash`,
+    [limit],
+  );
+  return result.rowCount ?? 0;
+}

@@ -170,4 +170,26 @@ describe('one-use presence tickets on isolated PostgreSQL', () => {
       await expect(consumePresenceTicket(disabled)).resolves.toBeNull();
     });
   });
+
+  postgresIt('prunes expired ticket rows in bounded batches without touching live tickets', async () => {
+    await withTicketDatabase('presence-ticket-retention', async (query) => {
+      const { issuePresenceTicket, pruneExpiredPresenceTickets } =
+        await import('../../src/lib/collaboration/presence-tickets');
+      const oldA = await issuePresenceTicket('owner-a', 'project-a');
+      const oldB = await issuePresenceTicket('owner-a', 'project-a');
+      const live = await issuePresenceTicket('owner-a', 'project-a');
+      for (const raw of [oldA, oldB]) {
+        await query(`UPDATE wujie_presence_tickets
+                        SET expires_at = clock_timestamp() - interval '10 minutes'
+                      WHERE token_hash = $1`, [createHash('sha256').update(raw).digest('hex')]);
+      }
+      await expect(pruneExpiredPresenceTickets(1)).resolves.toBe(1);
+      await expect(pruneExpiredPresenceTickets(1)).resolves.toBe(1);
+      await expect(pruneExpiredPresenceTickets(1)).resolves.toBe(0);
+      const remaining = await query('SELECT token_hash FROM wujie_presence_tickets');
+      expect(remaining.rows).toEqual([{
+        token_hash: createHash('sha256').update(live).digest('hex'),
+      }]);
+    });
+  });
 });

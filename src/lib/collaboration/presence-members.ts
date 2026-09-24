@@ -1,5 +1,7 @@
 import 'server-only';
 
+import type { PoolClient } from 'pg';
+
 import { getPool } from '@/lib/db-client';
 
 export class PresenceMemberError extends Error {
@@ -47,6 +49,33 @@ export async function assertPresenceMember(
   if (result.rowCount !== 1) throw new PresenceMemberError();
 }
 
+export async function assertPresenceMemberForLease(
+  client: PoolClient,
+  actorUserId: string,
+  projectId: string,
+): Promise<void> {
+  const project = await client.query<{ owner_id: string }>(
+    `SELECT p.owner_id
+       FROM wujie_projects p
+       JOIN wujie_users actor ON actor.id = $1 AND actor.status = 'active'
+       JOIN wujie_users owner_user ON owner_user.id = p.owner_id
+      WHERE p.id = $2 AND p.status = 'active' AND owner_user.status = 'active'
+      FOR SHARE OF p, actor, owner_user`,
+    [actorUserId, projectId],
+  );
+  const ownerId = project.rows[0]?.owner_id;
+  if (!ownerId) throw new PresenceMemberError();
+  if (ownerId === actorUserId) return;
+  const member = await client.query(
+    `SELECT 1 FROM wujie_project_presence_members
+      WHERE project_id = $1 AND owner_id = $2
+        AND member_user_id = $3 AND status = 'active'
+      FOR SHARE`,
+    [projectId, ownerId, actorUserId],
+  );
+  if (member.rowCount !== 1) throw new PresenceMemberError();
+}
+
 export async function grantPresenceMember(
   ownerId: string,
   projectId: string,
@@ -84,13 +113,43 @@ export async function revokePresenceMember(
   memberUserId: string,
 ): Promise<void> {
   await assertPresenceOwner(ownerId, projectId);
-  await getPool().query(
-    `UPDATE wujie_project_presence_members
-        SET status = 'revoked', updated_at = now(), revoked_at = now()
-      WHERE project_id = $1 AND owner_id = $2
-        AND member_user_id = $3 AND status = 'active'`,
-    [projectId, ownerId, memberUserId],
-  );
+  const client = await getPool().connect();
+  try {
+    await client.query('BEGIN');
+    await client.query(
+      `UPDATE wujie_project_presence_members
+          SET status = 'revoked', updated_at = now(), revoked_at = now()
+        WHERE project_id = $1 AND owner_id = $2
+          AND member_user_id = $3 AND status = 'active'`,
+      [projectId, ownerId, memberUserId],
+    );
+    const leasesAvailable = await client.query<{ relation: string | null }>(
+      "SELECT to_regclass('wujie_presence_leases')::text AS relation",
+    );
+    if (leasesAvailable.rows[0]?.relation) {
+      const removed = await client.query(
+        `DELETE FROM wujie_presence_leases
+          WHERE project_id = $1 AND user_id = $2`,
+        [projectId, memberUserId],
+      );
+      if (removed.rowCount) {
+        await client.query(
+          `INSERT INTO wujie_presence_project_sequences (project_id, sequence)
+           VALUES ($1, 1)
+           ON CONFLICT (project_id) DO UPDATE
+             SET sequence = wujie_presence_project_sequences.sequence + 1`,
+          [projectId],
+        );
+        await client.query("SELECT pg_notify('wujie_presence_changed', $1)", [projectId]);
+      }
+    }
+    await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => undefined);
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 export interface PresenceMemberSummary {
