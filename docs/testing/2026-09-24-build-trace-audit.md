@@ -42,3 +42,11 @@ node scripts/audit-build-traces.mjs --strict
 正式 API NFT 审计为 **227 路由、510,186 累计引用、75 条宽路由、26 条含 `next.config.ts`、27 条含项目根 Markdown**。`node scripts/audit-build-traces.mjs --strict` 退出 1。与此前主线只读记录的 227/215/214/214 对比，本地追踪显著收敛，但严格门禁仍红；这个对比不是同一份 clean-tree 云端构建的发布证明。当前剩余配置路由包括 `generate`、`image-edit`、`vision-prompt`、`serve-upload/[...path]`、`recover-images`、`cache-image`、`chat`、`agent-runs`/`skill-runs` 等 26 条；另有仅命中根文档的 `/api/user-data/record`。构建警告仍显示 `generate` 等路由对运行期媒体文件的项目级模式匹配，下一步需按正式导入链逐入口收敛，而非再扩大 `server-data-root` 的忽略范围或放宽审计器。
 
 本轮真实临时文件测试 3 文件/6 项、`pnpm validate`、保护基线 38/38 且 0 警告均退出 0。独立只读复审未发现本轮明确新增回归，但指出既有的迁移“空目录”文字与 `system/users` 实际判据不完全一致，以及保存/写目录的 `..` 和删除经符号链接越界的旧风险；这些尚未形成新的 RED→GREEN 修复，不宣称已解决。当前未推送、未同步 Coze、未部署、未主动查询或修改业务数据库，也未执行付费任务；`stable` 保持只读。严格 NFT、运行时资源装配、Coze 同源 `101`、真实付费取消/唯一退款、CI 和正式发布仍为独立开放门禁。
+
+## 2026-09-25 缓存图片路由的当前主线增量
+
+在上述无探针构建中，`/api/cache-image` 的 NFT 为 **5,309 文件，含配置与 24 份根文档**。本地 `main@4f52221d` 仅将该路由两处运行期目录存在性判断接到已验证的 `pathExistsSync`，并补真实临时目录测试，覆盖生产环境的持久目录和 `public/uploads` 缺失时创建、已存在时保留原文件、新图片双副本及返回 URL。改动前行为测试 2/2 已通过，是保留行为的 characterization；真正的构建级 RED 是上述 NFT 污染，不把行为测试称为失败测试。
+
+改动后的完整 `pnpm build` 退出 0、121/121 页、239 traces；目标路由降至 **2,753 文件，不含配置或根文档**。全站变为 **227 路由、507,631 累计引用、75 宽、25 含配置、26 含根文档**；严格审计仍退出 1，目标路由也仍高于 2,000 的宽阈值。独立只读复审未发现这两处替换的新增功能回归，并明确不将局部收敛外推为全站绿灯。聚焦 3 文件/4 项、`pnpm validate`、保护基线 38/38 且 0 警告均退出 0。
+
+本轮另起 `127.0.0.1:55486` 临时 PostgreSQL 18 集群和全新 `wujie_trace_cache` 测试库，应用 29 项迁移后全量 Vitest **853 文件/7,304 项通过，0 失败、0 跳过，退出 0**。集群已正常停止且 55486 无监听；精确临时目录 `J:\无界本地版\projects\_tmp_e2e\pg-trace-cache-2ec37756` 的递归清理被执行策略拒绝，未绕过，目录仍保留。六份用户文档脏改使本轮构建身份仍为 `unverified-*`，不能宣称干净 exact-tree，也未推送或部署。下一步继续按正式残余清单处理 `recover-images`、`serve-upload`、`vision-prompt` 等入口，并在所有本地门禁绿后才做 Coze exact-main 验收。
