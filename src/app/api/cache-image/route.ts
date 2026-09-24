@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { writeFile, mkdir } from 'fs/promises';
-import { existsSync } from 'fs';
 import path from 'path';
 import { getServerDataRoot } from '@/lib/server-data-root';
 import { uploadImageToS3, isS3Available } from '@/lib/s3-storage';
 import { saveImageDataMapping } from '@/lib/image-source-map';
 import { validateApiInputs } from '@/lib/api-validator';
 import { requireApiAuthOrReject } from '@/lib/api-auth';
+import { pathExistsSync } from '@/lib/runtime-path-exists';
 
 export const dynamic = 'force-dynamic';
 
@@ -114,7 +114,7 @@ export async function POST(request: NextRequest) {
       webPath = '/uploads';
     }
 
-    if (!existsSync(uploadDir)) {
+    if (!pathExistsSync(uploadDir)) {
       await mkdir(uploadDir, { recursive: true });
     }
 
@@ -128,7 +128,7 @@ export async function POST(request: NextRequest) {
     if (isProd) {
       try {
         const publicDir = path.join(process.cwd(), 'public', 'uploads');
-        if (!existsSync(publicDir)) await mkdir(publicDir, { recursive: true });
+        if (!pathExistsSync(publicDir)) await mkdir(publicDir, { recursive: true });
         const { copyFile } = await import('fs/promises');
         await copyFile(filePath, path.join(publicDir, filename));
       } catch { /* 生产环境无需 public 副本 */ }
