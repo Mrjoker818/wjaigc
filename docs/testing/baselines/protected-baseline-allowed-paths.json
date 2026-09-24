@@ -530,5 +530,21 @@
   "src/lib/canvas-share/token.ts",
   "src/lib/canvas-share/types.ts",
   "src/lib/canvas-autosave-guard.ts",
-  "src/lib/quick-create-compile.ts"
+  "src/lib/quick-create-compile.ts",
+  "migrations/20260924_project_presence.sql",
+  "migrations/20260924_project_presence_tickets.sql",
+  "migrations/20260924_project_presence_ttl_leases.sql",
+  "scripts/audit-build-traces.mjs",
+  "scripts/build-completion-marker.mjs",
+  "scripts/coze-start.sh",
+  "scripts/presence-server.ts",
+  "src/app/api/collaboration/members/route.ts",
+  "src/app/api/collaboration/presence-ticket/route.ts",
+  "src/components/collaboration/presence-indicator.tsx",
+  "src/lib/collaboration/presence-client.ts",
+  "src/lib/collaboration/presence-gateway.ts",
+  "src/lib/collaboration/presence-leases.ts",
+  "src/lib/collaboration/presence-members.ts",
+  "src/lib/collaboration/presence-schema.ts",
+  "src/lib/collaboration/presence-tickets.ts"
 ]
