@@ -552,5 +552,8 @@
   "src/lib/server-data-root.ts",
   "src/app/api/cache-image/route.ts",
   "src/app/api/recover-images/route.ts",
-  "src/lib/serve-upload-local-storage.ts"
+  "src/lib/serve-upload-local-storage.ts",
+  "migrations/20260925_yjs_canvas_editors.sql",
+  "src/app/api/collaboration/editors/route.ts",
+  "src/lib/collaboration/document-access.ts"
 ]

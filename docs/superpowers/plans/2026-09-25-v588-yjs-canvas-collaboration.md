@@ -71,7 +71,7 @@ expect(() => validateCanvasDocumentProjection({ placements: { p1: { x: Infinity 
 
 **Interfaces:** `assertDocumentEditor(actorUserId, projectId, client?): Promise<{ ownerId: string }>`；`grantDocumentEditor(ownerId, projectId, memberId): Promise<void>`；`revokeDocumentEditor(...): Promise<void>`。独立 `wujie_project_document_editors`，owner 隐式 editor，presence member 不自动通过。
 
-- [ ] **Step 1：写 RED。** 独立真库验证 owner、被邀请 editor、仅 presence member、同名异用户、禁用用户、归档项目、跨项目、撤销后立即拒绝；API 要求登录、同源和 owner。
+- [x] **Step 1：写 RED。** 独立真库验证 owner、被邀请 editor、仅 presence member、同名异用户、禁用用户、归档项目、跨项目、撤销后立即拒绝；API 要求登录、同源和 owner。
 
 ```ts
 await grantPresenceMember(ownerId, projectId, presenceOnlyId);
@@ -81,9 +81,11 @@ await grantDocumentEditor(ownerId, projectId, editorId);
 await expect(assertDocumentEditor(editorId, projectId)).resolves.toMatchObject({ ownerId });
 ```
 
-- [ ] **Step 2：运行 RED。** 显式将 `DATABASE_URL`、`PGDATABASE_URL`、`POSTGRES_TEST_DATABASE_URL`、`TEST_POSTGRES_URL` 都指向本次新建的 localhost 测试库；运行上述两份测试。
-- [ ] **Step 3：最小 GREEN。** 迁移建项目/owner/member 唯一授权表，所有状态变化以服务端 ID 和项目所有权校验；撤销事务通知在线网关并使旧票据失效。项目启用状态独立字段，不改 presence 表语义。
-- [ ] **Step 4：复验并提交。** 迁移首次应用和二次跳过、相关 API/真库测试、`pnpm validate`；只提交本任务文件。
+- [x] **Step 2：运行 RED。** 显式将 `DATABASE_URL`、`PGDATABASE_URL`、`POSTGRES_TEST_DATABASE_URL`、`TEST_POSTGRES_URL` 都指向本次新建的 localhost 测试库；运行上述两份测试。
+- [x] **Step 3：最小 GREEN。** 迁移建项目/owner/member 唯一授权表，所有状态变化以服务端 ID 和项目所有权校验；撤销事务通知未来文档网关并推进 `grant_generation`，为 Task 5 消费时拒绝旧票据提供判据，不能在票据实现前宣称其已失效。项目启用状态独立字段，不改 presence 表语义。
+- [x] **Step 4：复验并提交。** 迁移首次应用和二次跳过、相关 API/真库测试、`pnpm validate`；只提交本任务文件。
+
+**Task 2 本地验证（2026-09-25）：** 真库与 API 聚焦 12/12；状态交错用例先观察到分离查询错误授权，再改为单快照后 GREEN。全新 localhost PostgreSQL 测试库上 30 项迁移首次应用、二次全部跳过；完整 Vitest 859 文件/7364 项、`pnpm validate`、保护基线 38/38 且 0 警告、生产构建 121/121 与 240 traces 均 exit 0。独立复审无当前 Task 2 Critical/Important。严格 NFT 228 路由/75 宽/23 含配置/24 含根文档仍 exit 1；构建身份 `unverified-*`，不推送/部署。Task 5 旧票据代次比较及云端验收仍未实现或验证。
 
 ### Task 3：项目资产引用校验与编辑者成品采纳
 
@@ -128,7 +130,7 @@ expect(readCanvasDocument((await loadDocument(projectId)).doc)).toEqual(expected
 
 **Interfaces:** `issueDocumentTicket(userId, projectId)`、`consumeDocumentTicket(raw)`；`handleDocumentUpgrade(request, socket, head)`。精确 `/api/collaboration/document`，子协议 `wujie-document-v1` 与一次性票据；只传有界状态向量/更新/确认帧。
 
-- [ ] **Step 1：写 RED。** 无票据、重放、过期、跨源、仅 presence、撤销、二进制超限和慢客户端拒绝；合法双端更新在数据库确认后互达；普通 HTTP/静态资源及原 presence upgrade 仍可用。
+- [ ] **Step 1：写 RED。** 无票据、重放、过期、跨源、仅 presence、撤销、二进制超限和慢客户端拒绝；尤其验证“签发旧票据→撤销→重新授予→消费旧票据”仍被拒绝，不能只检查当前 active 状态；合法双端更新在数据库确认后互达；普通 HTTP/静态资源及原 presence upgrade 仍可用。
 
 ```ts
 const socket = await connectDocument({ ticket: await issueDocumentTicket(editorId, projectId) });
@@ -137,7 +139,7 @@ await expect(connectDocument({ ticket: socket.ticket })).rejects.toMatchObject({
 ```
 
 - [ ] **Step 2：运行 RED。** 独立 localhost PG+HTTP/ws 跑聚焦，确认失败发生在新文档路径。
-- [ ] **Step 3：最小 GREEN。** 精确路由分流，不复用 presence ticket；升级前原子消费并复核 editor；每帧复核有效权限、字节/速率/连接上限；由 Task 4 store 确认后广播；其他实例按序号补读。
+- [ ] **Step 3：最小 GREEN。** 精确路由分流，不复用 presence ticket；签发时在同一事务内锁定 editor 资格并绑定 `grant_generation`，升级前原子消费时在同一事务比较当前代次与资格，撤销后旧票据即使重新授予也不可复活；连接后每帧复核有效权限、字节/速率/连接上限；由 Task 4 store 确认后广播；其他实例按序号补读。
 - [ ] **Step 4：复验并提交。** 真 socket、重连、两实例、原 HTTP/presence/匿名分享回归和 `pnpm validate`；只提交目标文件。
 
 ### Task 6：旧项目启用、权威切换及旧保存写入围栏
