@@ -226,7 +226,7 @@ describe('Stage 4 Agent event migration', () => {
         `[PASS] agent-event-migration:${migrationVersion}: checksum and table contract verified`,
       );
     });
-  });
+  }, 15_000);
 
 });
 

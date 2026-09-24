@@ -549,5 +549,6 @@
   "src/lib/collaboration/presence-tickets.ts",
   "src/lib/runtime-path-exists.ts",
   "src/lib/server-data-root.ts",
-  "src/app/api/cache-image/route.ts"
+  "src/app/api/cache-image/route.ts",
+  "src/app/api/recover-images/route.ts"
 ]

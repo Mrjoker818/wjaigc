@@ -19,6 +19,7 @@ import path from 'path';
 import fs from 'fs';
 import { requireApiAuthOrReject } from '@/lib/api-auth';
 import { recordLegacyRecoveryOutcome } from '@/lib/asset-core/media-health';
+import { pathExistsSync } from '@/lib/runtime-path-exists';
 
 interface MissingImage {
   filename: string;
@@ -50,7 +51,21 @@ function isSafeRecoveryPath(value: string, dataRoot: string = getServerDataRoot(
   const resolvedDataRoot = path.resolve(dataRoot);
   const resolvedPath = path.resolve(resolvedDataRoot, ...resolved.split('/'));
   const relativePath = path.relative(resolvedDataRoot, resolvedPath);
-  return relativePath !== '..' && !relativePath.startsWith(`..${path.sep}`) && !path.isAbsolute(relativePath);
+  if (relativePath === '..' || relativePath.startsWith(`..${path.sep}`) || path.isAbsolute(relativePath)) {
+    return false;
+  }
+
+  let currentPath = resolvedDataRoot;
+  for (const segment of resolved.split('/')) {
+    currentPath = path.join(/* turbopackIgnore: true */ currentPath, segment);
+    try {
+      if (fs.lstatSync(currentPath).isSymbolicLink()) return false;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') break;
+      return false;
+    }
+  }
+  return true;
 }
 
 async function scanMissingImages(): Promise<ScanResult> {
@@ -94,7 +109,9 @@ async function scanMissingImages(): Promise<ScanResult> {
     
     let exists = false;
     for (const dir of possibleDirs) {
-      if (fs.existsSync(path.join(dir, localPath))) {
+      const candidatePath = path.join(dir, localPath);
+      if (!isSafeRecoveryPath(path.relative(dataRoot, candidatePath), dataRoot)) continue;
+      if (pathExistsSync(candidatePath)) {
         exists = true;
         break;
       }
@@ -147,8 +164,11 @@ async function recoverImage(localPath: string): Promise<{ success: boolean; meth
   const s3Buffer = await downloadImageFromS3(localPath);
   if (s3Buffer) {
     try {
+      if (!isSafeRecoveryPath(localPath, dataRoot)) {
+        return { success: false, method: 's3', error: 'Invalid recovery path' };
+      }
       const restoreDir = path.join(dataRoot, path.dirname(localPath));
-      if (!fs.existsSync(restoreDir)) fs.mkdirSync(restoreDir, { recursive: true });
+      if (!pathExistsSync(restoreDir)) fs.mkdirSync(restoreDir, { recursive: true });
       fs.writeFileSync(path.join(dataRoot, localPath), s3Buffer);
       return { success: true, method: 's3' };
     } catch (writeErr) {
@@ -163,10 +183,13 @@ async function recoverImage(localPath: string): Promise<{ success: boolean; meth
       const fetchRes = await fetch(sourceUrl, { signal: AbortSignal.timeout(15000) });
       if (fetchRes.ok) {
         const buffer = Buffer.from(await fetchRes.arrayBuffer());
+        if (!isSafeRecoveryPath(localPath, dataRoot)) {
+          return { success: false, method: 'sourceUrl', error: 'Invalid recovery path' };
+        }
         
         // Save locally
         const restoreDir = path.join(dataRoot, path.dirname(localPath));
-        if (!fs.existsSync(restoreDir)) fs.mkdirSync(restoreDir, { recursive: true });
+        if (!pathExistsSync(restoreDir)) fs.mkdirSync(restoreDir, { recursive: true });
         fs.writeFileSync(path.join(dataRoot, localPath), buffer);
         
         // Upload to S3 for future recovery
@@ -267,9 +290,12 @@ export async function POST(request: NextRequest) {
             }
             
             const localPath = path.join(localDir, localFname);
+            if (!isSafeRecoveryPath(path.relative(dataRoot, localPath), dataRoot)) {
+              throw new Error('Unsafe local recovery path');
+            }
             
             // Skip if already exists locally
-            if (fs.existsSync(localPath)) {
+            if (pathExistsSync(localPath)) {
               skipped++;
               continue;
             }
@@ -277,7 +303,10 @@ export async function POST(request: NextRequest) {
             // Download from S3
             const buffer = await storage.readFile({ fileKey: s3Key });
             if (buffer && buffer.length > 0) {
-              if (!fs.existsSync(localDir)) fs.mkdirSync(localDir, { recursive: true });
+              if (!isSafeRecoveryPath(path.relative(dataRoot, localPath), dataRoot)) {
+                throw new Error('Unsafe local recovery path');
+              }
+              if (!pathExistsSync(localDir)) fs.mkdirSync(localDir, { recursive: true });
               fs.writeFileSync(localPath, buffer);
               downloaded++;
             } else {

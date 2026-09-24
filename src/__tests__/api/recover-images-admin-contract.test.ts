@@ -10,7 +10,7 @@ const mocks = vi.hoisted(() => ({
   recordLegacyRecoveryOutcome: vi.fn(),
   requireApiAuthOrReject: vi.fn(),
   uploadImageToS3: vi.fn(),
-  existsSync: vi.fn(),
+  pathExistsSync: vi.fn(),
   mkdirSync: vi.fn(),
   writeFileSync: vi.fn(),
 }));
@@ -26,13 +26,13 @@ vi.mock('@/lib/s3-storage', () => ({
   uploadImageToS3: mocks.uploadImageToS3,
 }));
 vi.mock('@/lib/server-data-root', () => ({ getServerDataRoot: () => 'C:/wujie-data' }));
+vi.mock('@/lib/runtime-path-exists', () => ({ pathExistsSync: mocks.pathExistsSync }));
 vi.mock('fs', async () => {
   const actual = await vi.importActual<typeof import('fs')>('fs');
   return {
     ...actual,
     default: {
       ...actual,
-      existsSync: mocks.existsSync,
       mkdirSync: mocks.mkdirSync,
       writeFileSync: mocks.writeFileSync,
     },
@@ -49,7 +49,7 @@ describe('recover-images authorization contract', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.requireApiAuthOrReject.mockResolvedValue({ userRole: 'admin' });
-    mocks.existsSync.mockReturnValue(false);
+    mocks.pathExistsSync.mockReturnValue(false);
     mocks.recordLegacyRecoveryOutcome.mockResolvedValue({ matchedVersions: 1 });
   });
 
@@ -183,7 +183,7 @@ describe('recover-images authorization contract', () => {
       failed: 0,
       results: [],
     });
-    expect(mocks.existsSync).not.toHaveBeenCalled();
+    expect(mocks.pathExistsSync).not.toHaveBeenCalled();
     expect(mocks.downloadImageFromS3).not.toHaveBeenCalled();
     expect(mocks.getImageSourceUrl).not.toHaveBeenCalled();
     expect(mocks.writeFileSync).not.toHaveBeenCalled();
