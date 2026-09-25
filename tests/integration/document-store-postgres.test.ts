@@ -145,6 +145,29 @@ async function runStoreInSeparateProcess(
 }
 
 describe('Yjs document store on isolated PostgreSQL', () => {
+  postgresIt('rejects an old connection generation after revoke and regrant', async () => {
+    const { withIsolatedPostgres } = await import('../helpers/postgres-test-database');
+    await withIsolatedPostgres('document-store-stale-grant', async ({ query }) => {
+      await seedDatabase(query);
+      const { commitDocumentUpdate } = await import('../../src/lib/collaboration/document-store');
+      const { grantDocumentEditor, revokeDocumentEditor, DocumentAccessError } =
+        await import('../../src/lib/collaboration/document-access');
+      const bytes = placementUpdate('placement-one', 'version-one');
+      await revokeDocumentEditor('owner-a', 'project-a', 'editor-a');
+      await grantDocumentEditor('owner-a', 'project-a', 'editor-a');
+      await expect(commitDocumentUpdate({
+        actorId: 'editor-a', projectId: 'project-a', bytes,
+        expectedGrantGeneration: '1',
+      })).rejects.toBeInstanceOf(DocumentAccessError);
+      expect((await query("SELECT 1 FROM wujie_project_canvas_documents WHERE project_id = 'project-a'")).rowCount)
+        .toBe(0);
+      await expect(commitDocumentUpdate({
+        actorId: 'editor-a', projectId: 'project-a', bytes,
+        expectedGrantGeneration: '3',
+      })).resolves.toMatchObject({ sequence: 1 });
+    });
+  });
+
   postgresIt('acknowledges only durable canonical state, and duplicate updates do not advance sequence', async () => {
     const { withIsolatedPostgres } = await import('../helpers/postgres-test-database');
     await withIsolatedPostgres('document-store-durable', async ({ query }) => {

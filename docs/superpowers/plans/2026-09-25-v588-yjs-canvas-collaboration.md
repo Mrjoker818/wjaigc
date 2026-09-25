@@ -130,7 +130,7 @@ expect(readCanvasDocument((await loadDocument(projectId)).doc)).toEqual(expected
 
 **Interfaces:** `issueDocumentTicket(userId, projectId)`、`consumeDocumentTicket(raw)`；`handleDocumentUpgrade(request, socket, head)`。精确 `/api/collaboration/document`，子协议 `wujie-document-v1` 与一次性票据；只传有界状态向量/更新/确认帧。
 
-- [ ] **Step 1：写 RED。** 无票据、重放、过期、跨源、仅 presence、撤销、二进制超限和慢客户端拒绝；尤其验证“签发旧票据→撤销→重新授予→消费旧票据”仍被拒绝，不能只检查当前 active 状态；合法双端更新在数据库确认后互达；普通 HTTP/静态资源及原 presence upgrade 仍可用。
+- [x] **Step 1：写 RED。** 无票据、重放、过期、跨源、仅 presence、撤销、二进制超限和慢客户端拒绝；尤其验证“签发旧票据→撤销→重新授予→消费旧票据”仍被拒绝，不能只检查当前 active 状态；合法双端更新在数据库确认后互达；普通 HTTP/静态资源及原 presence upgrade 仍可用。
 
 ```ts
 const socket = await connectDocument({ ticket: await issueDocumentTicket(editorId, projectId) });
@@ -138,9 +138,9 @@ expect(socket.firstFrame.type).toBe('sync');
 await expect(connectDocument({ ticket: socket.ticket })).rejects.toMatchObject({ status: 401 });
 ```
 
-- [ ] **Step 2：运行 RED。** 独立 localhost PG+HTTP/ws 跑聚焦，确认失败发生在新文档路径。
-- [ ] **Step 3：最小 GREEN。** 精确路由分流，不复用 presence ticket；签发时在同一事务内锁定 editor 资格并绑定 `grant_generation`，升级前原子消费时在同一事务比较当前代次与资格，撤销后旧票据即使重新授予也不可复活；连接后每帧复核有效权限、字节/速率/连接上限；由 Task 4 store 确认后广播；其他实例按序号补读。
-- [ ] **Step 4：复验并提交。** 真 socket、重连、两实例、原 HTTP/presence/匿名分享回归和 `pnpm validate`；只提交目标文件。
+- [x] **Step 2：运行 RED。** 独立 localhost PG+HTTP/ws 跑聚焦，确认失败发生在新文档路径。
+- [x] **Step 3：最小 GREEN。** 精确路由分流，不复用 presence ticket；签发时在同一事务内锁定 editor 资格并绑定 `grant_generation`，升级前原子消费时在同一事务比较当前代次与资格，撤销后旧票据即使重新授予也不可复活；连接后每帧复核有效权限、字节/速率/连接上限；由 Task 4 store 确认后广播；其他实例按序号补读。
+- [x] **Step 4：复验并提交。** 真 socket、重连、两实例、原 HTTP/presence/匿名分享回归和 `pnpm validate`；只提交目标文件。
 
 ### Task 6：旧项目启用、权威切换及旧保存写入围栏
 

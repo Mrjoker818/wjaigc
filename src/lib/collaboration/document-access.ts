@@ -17,6 +17,7 @@ export async function assertDocumentEditor(
   actorUserId: string,
   projectId: string,
   client?: PoolClient,
+  expectedGrantGeneration?: string,
 ): Promise<{ ownerId: string }> {
   if (!client) {
     // A standalone permission read must use one MVCC snapshot. Mutating callers
@@ -27,12 +28,13 @@ export async function assertDocumentEditor(
          JOIN wujie_users actor ON actor.id = $1 AND actor.status = 'active'
          JOIN wujie_users owner_user ON owner_user.id = p.owner_id
         WHERE p.id = $2 AND p.status = 'active' AND owner_user.status = 'active'
-          AND (p.owner_id = $1 OR EXISTS (
+          AND ((p.owner_id = $1 AND ($3::text IS NULL OR $3 = '0')) OR EXISTS (
             SELECT 1 FROM wujie_project_document_editors editor
              WHERE editor.project_id = p.id AND editor.owner_id = p.owner_id
                AND editor.member_user_id = $1 AND editor.status = 'active'
+               AND ($3::text IS NULL OR editor.grant_generation::text = $3)
           ))`,
-      [actorUserId, projectId],
+      [actorUserId, projectId, expectedGrantGeneration ?? null],
     );
     const ownerId = access.rows[0]?.owner_id;
     if (!ownerId) throw new DocumentAccessError();
@@ -50,17 +52,45 @@ export async function assertDocumentEditor(
   );
   const ownerId = project.rows[0]?.owner_id;
   if (!ownerId) throw new DocumentAccessError();
-  if (ownerId === actorUserId) return { ownerId };
+  if (ownerId === actorUserId) {
+    if (expectedGrantGeneration !== undefined && expectedGrantGeneration !== '0') {
+      throw new DocumentAccessError();
+    }
+    return { ownerId };
+  }
 
   const editor = await client.query(
     `SELECT 1 FROM wujie_project_document_editors
       WHERE project_id = $1 AND owner_id = $2
         AND member_user_id = $3 AND status = 'active'
+        AND ($4::text IS NULL OR grant_generation::text = $4)
       FOR SHARE`,
-    [projectId, ownerId, actorUserId],
+    [projectId, ownerId, actorUserId, expectedGrantGeneration ?? null],
   );
   if (editor.rowCount !== 1) throw new DocumentAccessError();
   return { ownerId };
+}
+
+/** Keep the editor row locked until an outbound frame has been queued. */
+export async function withDocumentEditorRead<T>(
+  actorUserId: string,
+  projectId: string,
+  expectedGrantGeneration: string,
+  deliver: (client: PoolClient) => Promise<T>,
+): Promise<T> {
+  const client = await getPool().connect();
+  try {
+    await client.query('BEGIN');
+    await assertDocumentEditor(actorUserId, projectId, client, expectedGrantGeneration);
+    const result = await deliver(client);
+    await client.query('COMMIT');
+    return result;
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => undefined);
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 export async function grantDocumentEditor(

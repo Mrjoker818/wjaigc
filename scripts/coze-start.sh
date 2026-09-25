@@ -5,8 +5,8 @@ PORT="${PORT:-${DEPLOY_RUN_PORT:-5000}}"
 export PORT
 
 start_server() {
-  if [ "${WUJIE_PRESENCE_ENABLED:-}" = "true" ]; then
-    echo "[coze-start] Starting production server with presence on port ${PORT}..."
+  if [ "${WUJIE_PRESENCE_ENABLED:-}" = "true" ] || [ "${WUJIE_YJS_ENABLED:-}" = "true" ]; then
+    echo "[coze-start] Starting production server with collaboration on port ${PORT}..."
     exec node --conditions=react-server --import tsx scripts/presence-server.ts
   fi
   echo "[coze-start] Starting production server on port ${PORT}..."

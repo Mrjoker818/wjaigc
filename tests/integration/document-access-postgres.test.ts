@@ -34,6 +34,38 @@ async function setupDocumentDatabase(query: QueryFn): Promise<void> {
 }
 
 describe('independent canvas document editor access on PostgreSQL', () => {
+  postgresIt('holds editor authorization through the outbound read callback before revocation commits', async () => {
+    const { withIsolatedPostgres } = await import('../helpers/postgres-test-database');
+    await withIsolatedPostgres('document-editor-outbound-fence', async ({ query }) => {
+      await setupDocumentDatabase(query);
+      const { grantDocumentEditor, revokeDocumentEditor, withDocumentEditorRead } =
+        await import('../../src/lib/collaboration/document-access');
+      await grantDocumentEditor('owner-a', 'project-a', 'editor-a');
+      let enterRead: (() => void) | undefined;
+      let finishRead: (() => void) | undefined;
+      const entered = new Promise<void>(resolve => { enterRead = resolve; });
+      const release = new Promise<void>(resolve => { finishRead = resolve; });
+      const outbound = withDocumentEditorRead('editor-a', 'project-a', '1', async client => {
+        enterRead?.();
+        await release;
+        await client.query('SELECT 1');
+        return 'delivered';
+      });
+      await entered;
+      const revocation = revokeDocumentEditor('owner-a', 'project-a', 'editor-a');
+      const revokedEarly = await Promise.race([
+        revocation.then(() => true),
+        new Promise<false>(resolve => setTimeout(() => resolve(false), 50)),
+      ]);
+      expect(revokedEarly).toBe(false);
+      finishRead?.();
+      await expect(outbound).resolves.toBe('delivered');
+      await revocation;
+      await expect(withDocumentEditorRead('editor-a', 'project-a', '1', async () => 'late'))
+        .rejects.toMatchObject({ code: 'DOCUMENT_FORBIDDEN' });
+    });
+  });
+
   postgresIt('starts disabled and does not copy presence members into document editors', async () => {
     const { withIsolatedPostgres } = await import('../helpers/postgres-test-database');
     await withIsolatedPostgres('document-editors-schema', async ({ query }) => {

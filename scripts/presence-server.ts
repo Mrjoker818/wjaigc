@@ -7,6 +7,7 @@ import type { Duplex } from 'node:stream';
 export interface PresenceHttpServerOptions {
   onRequest(request: IncomingMessage, response: ServerResponse): void;
   onPresenceUpgrade(request: IncomingMessage, socket: Duplex, head: Buffer): void;
+  onDocumentUpgrade?(request: IncomingMessage, socket: Duplex, head: Buffer): void;
   onOtherUpgrade?(request: IncomingMessage, socket: Duplex, head: Buffer): void;
 }
 
@@ -16,17 +17,22 @@ export function resolvePresenceEnabled(value: string | undefined): boolean {
 
 export function resolvePresenceLaunch(
   args: string[],
-  environment: { NODE_ENV?: string; WUJIE_PRESENCE_ENABLED?: string },
+  environment: { NODE_ENV?: string; WUJIE_PRESENCE_ENABLED?: string; WUJIE_YJS_ENABLED?: string },
 ): { enabled: boolean; dev: boolean } {
   const dev = args.includes('--dev') || environment.NODE_ENV !== 'production';
   return {
-    enabled: args.includes('--dev') || resolvePresenceEnabled(environment.WUJIE_PRESENCE_ENABLED),
+    enabled: args.includes('--dev') || resolvePresenceEnabled(environment.WUJIE_PRESENCE_ENABLED)
+      || environment.WUJIE_YJS_ENABLED === 'true',
     dev,
   };
 }
 
 export function isPresenceUpgradePath(pathname: string): boolean {
   return pathname === '/api/collaboration/presence';
+}
+
+export function isDocumentUpgradePath(pathname: string): boolean {
+  return pathname === '/api/collaboration/document';
 }
 
 export function createPresenceHttpServer(options: PresenceHttpServerOptions): Server {
@@ -42,6 +48,11 @@ export function createPresenceHttpServer(options: PresenceHttpServerOptions): Se
 
     if (isPresenceUpgradePath(pathname)) {
       options.onPresenceUpgrade(request, socket, head);
+      return;
+    }
+    if (isDocumentUpgradePath(pathname)) {
+      if (options.onDocumentUpgrade) options.onDocumentUpgrade(request, socket, head);
+      else socket.end('HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\n\r\n');
       return;
     }
     if (options.onOtherUpgrade) {
@@ -64,6 +75,7 @@ export interface StartPresenceServerOptions {
   hostname: string;
   dev: boolean;
   onPresenceUpgrade(request: IncomingMessage, socket: Duplex, head: Buffer): void;
+  onDocumentUpgrade?(request: IncomingMessage, socket: Duplex, head: Buffer): void;
   createNextApp?(): NextAppLike;
 }
 
@@ -78,6 +90,7 @@ export async function startPresenceServer(options: StartPresenceServerOptions): 
   const server = createPresenceHttpServer({
     onRequest: app.getRequestHandler(),
     onPresenceUpgrade: options.onPresenceUpgrade,
+    onDocumentUpgrade: options.onDocumentUpgrade,
     ...(options.dev ? { onOtherUpgrade: app.getUpgradeHandler() } : {}),
   });
   try {
@@ -95,14 +108,22 @@ export async function startPresenceServer(options: StartPresenceServerOptions): 
 export async function startLivePresenceServer(
   options: Omit<StartPresenceServerOptions, 'onPresenceUpgrade'>,
 ): Promise<{ server: Server; close(): Promise<void> }> {
-  if (!resolvePresenceEnabled(process.env.WUJIE_PRESENCE_ENABLED)) {
-    throw new Error('WUJIE_PRESENCE_ENABLED must be true to start the presence server');
+  if (!resolvePresenceEnabled(process.env.WUJIE_PRESENCE_ENABLED)
+      && process.env.WUJIE_YJS_ENABLED !== 'true') {
+    throw new Error('WUJIE_PRESENCE_ENABLED or WUJIE_YJS_ENABLED must be true');
   }
-  const [{ createPresenceGateway }, { startPresenceMaintenance }] = await Promise.all([
+  const [
+    { createPresenceGateway }, { startPresenceMaintenance },
+    { createDocumentGateway }, { startDocumentTicketMaintenance },
+  ] = await Promise.all([
     import('../src/lib/collaboration/presence-gateway'),
     import('../src/lib/collaboration/presence-leases'),
+    import('../src/lib/collaboration/document-gateway'),
+    import('../src/lib/collaboration/document-tickets'),
   ]);
   const gateway = createPresenceGateway({ instanceId: randomUUID() });
+  const documentGateway = process.env.WUJIE_YJS_ENABLED === 'true'
+    ? createDocumentGateway() : null;
   let server: Server;
   try {
     server = await startPresenceServer({
@@ -110,18 +131,31 @@ export async function startLivePresenceServer(
       onPresenceUpgrade: (request, socket, head) => {
         void gateway.handlePresenceUpgrade(request, socket, head).catch(() => socket.destroy());
       },
+      onDocumentUpgrade: (request, socket, head) => {
+        if (!documentGateway) {
+          socket.end('HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\n\r\n');
+          return;
+        }
+        void documentGateway.handleDocumentUpgrade(request, socket, head).catch(() => socket.destroy());
+      },
     });
   } catch (error) {
     await gateway.close();
+    await documentGateway?.close();
     throw error;
   }
-  const stopMaintenance = startPresenceMaintenance();
+  const stopMaintenance = resolvePresenceEnabled(process.env.WUJIE_PRESENCE_ENABLED)
+    ? startPresenceMaintenance() : async (): Promise<void> => {};
+  const stopDocumentMaintenance = documentGateway
+    ? startDocumentTicketMaintenance() : async (): Promise<void> => {};
   return {
     server,
     async close(): Promise<void> {
       await gateway.close();
+      await documentGateway?.close();
       await new Promise<void>(resolve => server.close(() => resolve()));
       await stopMaintenance();
+      await stopDocumentMaintenance();
     },
   };
 }
@@ -130,9 +164,9 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   const port = Number(process.env.PORT || process.env.DEPLOY_RUN_PORT || '5000');
   const launch = resolvePresenceLaunch(process.argv.slice(2), process.env);
   if (!launch.enabled) {
-    throw new Error('WUJIE_PRESENCE_ENABLED must be true to start the presence server');
+    throw new Error('WUJIE_PRESENCE_ENABLED or WUJIE_YJS_ENABLED must be true');
   }
-  process.env.WUJIE_PRESENCE_ENABLED = 'true';
+  if (process.argv.slice(2).includes('--dev')) process.env.WUJIE_PRESENCE_ENABLED = 'true';
   void startLivePresenceServer({
     port,
     hostname: '0.0.0.0',

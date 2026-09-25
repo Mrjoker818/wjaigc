@@ -71,6 +71,15 @@ describe('presence server entry boundary', () => {
     });
   });
 
+  it('allows a document-only server launch without enabling presence', () => {
+    expect(resolvePresenceLaunch([], {
+      NODE_ENV: 'production',
+      WUJIE_PRESENCE_ENABLED: 'false',
+      WUJIE_YJS_ENABLED: 'true',
+    })).toEqual({ enabled: true, dev: false });
+    expect(resolvePresenceEnabled('false')).toBe(false);
+  });
+
   it('keeps HTTP and development upgrades separate from presence upgrades', async () => {
     const presence = new WebSocketServer({ noServer: true });
     const nextDev = new WebSocketServer({ noServer: true });
@@ -95,6 +104,32 @@ describe('presence server entry boundary', () => {
 
     expect(await (await fetch(`http://127.0.0.1:${port}/api/auth/me`)).text()).toBe('next-http');
     expect(await connectAndRead(`ws://127.0.0.1:${port}/api/collaboration/presence`)).toBe('presence');
+    expect(await connectAndRead(`ws://127.0.0.1:${port}/_next/webpack-hmr`)).toBe('next-dev');
+  });
+
+  it('routes only the exact document upgrade without changing HTTP, presence or development upgrades', async () => {
+    const presence = new WebSocketServer({ noServer: true });
+    const document = new WebSocketServer({ noServer: true });
+    const nextDev = new WebSocketServer({ noServer: true });
+    webSocketServers.push(presence, document, nextDev);
+    presence.on('connection', socket => socket.send('presence'));
+    document.on('connection', socket => socket.send('document'));
+    nextDev.on('connection', socket => socket.send('next-dev'));
+    const upgrade = (
+      target: WebSocketServer, request: IncomingMessage, socket: Duplex, head: Buffer,
+    ): void => {
+      target.handleUpgrade(request, socket, head, client => target.emit('connection', client, request));
+    };
+    const server = createPresenceHttpServer({
+      onRequest: (_request, response) => response.end('next-http'),
+      onPresenceUpgrade: (request, socket, head) => upgrade(presence, request, socket, head),
+      onDocumentUpgrade: (request, socket, head) => upgrade(document, request, socket, head),
+      onOtherUpgrade: (request, socket, head) => upgrade(nextDev, request, socket, head),
+    });
+    const port = await listen(server);
+    expect(await (await fetch(`http://127.0.0.1:${port}/api/auth/me`)).text()).toBe('next-http');
+    expect(await connectAndRead(`ws://127.0.0.1:${port}/api/collaboration/presence`)).toBe('presence');
+    expect(await connectAndRead(`ws://127.0.0.1:${port}/api/collaboration/document`)).toBe('document');
     expect(await connectAndRead(`ws://127.0.0.1:${port}/_next/webpack-hmr`)).toBe('next-dev');
   });
 

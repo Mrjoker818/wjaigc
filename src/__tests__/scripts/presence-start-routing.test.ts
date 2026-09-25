@@ -39,10 +39,11 @@ afterEach(() => {
 
 describe('Coze presence startup routing', () => {
   it.each([
-    [undefined, 'NEXT_CALLED'],
-    ['false', 'NEXT_CALLED'],
-    ['true', 'PRESENCE_CALLED'],
-  ])('starts the expected server when flag is %s', (flag, expected) => {
+    [undefined, undefined, 'NEXT_CALLED'],
+    ['false', 'false', 'NEXT_CALLED'],
+    ['true', undefined, 'PRESENCE_CALLED'],
+    ['false', 'true', 'PRESENCE_CALLED'],
+  ])('starts the expected server when presence=%s and Yjs=%s', (presenceFlag, yjsFlag, expected) => {
     const directory = createStartupFixture();
     const stdout = execFileSync(shellPath(), [
       '-c', `PATH="$PWD/fake-bin:$PATH" exec bash "${resolve(process.cwd(), 'scripts/coze-start.sh').replaceAll('\\', '/')}"`,
@@ -50,7 +51,8 @@ describe('Coze presence startup routing', () => {
       cwd: directory,
       env: {
         ...process.env,
-        WUJIE_PRESENCE_ENABLED: flag,
+        WUJIE_PRESENCE_ENABLED: presenceFlag,
+        WUJIE_YJS_ENABLED: yjsFlag,
       },
       encoding: 'utf8',
       timeout: 10_000,

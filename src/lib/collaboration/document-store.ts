@@ -182,15 +182,23 @@ function deriveVerifiedIncrementalUpdate(
   return delta;
 }
 
+export async function loadDocumentInTransaction(
+  client: PoolClient, projectId: string,
+): Promise<LoadedDocument> {
+  assertProjectId(projectId);
+  const row = await readDocumentRow(client, projectId);
+  const doc = await hydrateDocument(client, projectId, row);
+  return { doc, sequence: row ? sequenceNumber(row.sequence) : 0 };
+}
+
 export async function loadDocument(projectId: string): Promise<LoadedDocument> {
   assertProjectId(projectId);
   const client = await getPool().connect();
   try {
     await client.query('BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY');
-    const row = await readDocumentRow(client, projectId);
-    const doc = await hydrateDocument(client, projectId, row);
+    const loaded = await loadDocumentInTransaction(client, projectId);
     await client.query('COMMIT');
-    return { doc, sequence: row ? sequenceNumber(row.sequence) : 0 };
+    return loaded;
   } catch (error) {
     await client.query('ROLLBACK').catch(() => undefined);
     throw error;
@@ -203,6 +211,7 @@ export async function commitDocumentUpdate(input: {
   actorId: string;
   projectId: string;
   bytes: Uint8Array;
+  expectedGrantGeneration?: string;
 }): Promise<DocumentUpdate> {
   const { actorId, projectId, bytes } = input;
   assertProjectId(projectId);
@@ -217,7 +226,9 @@ export async function commitDocumentUpdate(input: {
       'SELECT 1 FROM wujie_projects WHERE id = $1 FOR UPDATE', [projectId],
     );
     if (project.rowCount !== 1) throw new Error('Canvas document project not found');
-    const { ownerId } = await assertDocumentEditor(actorId, projectId, client);
+    const { ownerId } = await assertDocumentEditor(
+      actorId, projectId, client, input.expectedGrantGeneration,
+    );
     const row = await readDocumentRow(client, projectId, true);
     const previous = await hydrateDocument(client, projectId, row);
     const candidate = createCanvasDocument();
@@ -307,31 +318,36 @@ export async function commitDocumentUpdate(input: {
   }
 }
 
-export async function readDocumentUpdatesAfter(projectId: string, afterSequence: number): Promise<DocumentUpdate[]> {
+export async function readDocumentUpdatesAfterInTransaction(
+  client: PoolClient, projectId: string, afterSequence: number,
+): Promise<DocumentUpdate[]> {
   assertProjectId(projectId);
   if (!Number.isSafeInteger(afterSequence) || afterSequence < 0) {
     throw new Error('Invalid canvas document sequence');
   }
+  const row = await readDocumentRow(client, projectId);
+  if (!row) return [];
+  const snapshotSequence = sequenceNumber(row.snapshot_sequence);
+  const from = afterSequence < snapshotSequence ? snapshotSequence : afterSequence;
+  const updates = await client.query<UpdateRow>(
+    `SELECT sequence, update_bytes FROM wujie_project_canvas_updates
+      WHERE project_id = $1 AND sequence > $2 ORDER BY sequence`,
+    [projectId, from],
+  );
+  return [
+    ...(afterSequence < snapshotSequence ? [{ sequence: snapshotSequence, update: row.snapshot_bytes }] : []),
+    ...updates.rows.map(update => ({ sequence: sequenceNumber(update.sequence), update: update.update_bytes })),
+  ];
+}
+
+export async function readDocumentUpdatesAfter(projectId: string, afterSequence: number): Promise<DocumentUpdate[]> {
+  assertProjectId(projectId);
   const client = await getPool().connect();
   try {
     await client.query('BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY');
-    const row = await readDocumentRow(client, projectId);
-    if (!row) {
-      await client.query('COMMIT');
-      return [];
-    }
-    const snapshotSequence = sequenceNumber(row.snapshot_sequence);
-    const from = afterSequence < snapshotSequence ? snapshotSequence : afterSequence;
-    const updates = await client.query<UpdateRow>(
-      `SELECT sequence, update_bytes FROM wujie_project_canvas_updates
-        WHERE project_id = $1 AND sequence > $2 ORDER BY sequence`,
-      [projectId, from],
-    );
+    const updates = await readDocumentUpdatesAfterInTransaction(client, projectId, afterSequence);
     await client.query('COMMIT');
-    return [
-      ...(afterSequence < snapshotSequence ? [{ sequence: snapshotSequence, update: row.snapshot_bytes }] : []),
-      ...updates.rows.map(update => ({ sequence: sequenceNumber(update.sequence), update: update.update_bytes })),
-    ];
+    return updates;
   } catch (error) {
     await client.query('ROLLBACK').catch(() => undefined);
     throw error;
