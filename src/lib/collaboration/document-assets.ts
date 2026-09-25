@@ -27,6 +27,60 @@ export class DocumentAssetError extends Error {
   }
 }
 
+/** Annotation masks/overlays are asset IDs, not placement version IDs. */
+export async function assertProjectAnnotationAsset(
+  ownerId: string,
+  projectId: string,
+  assetId: string,
+  client: PoolClient,
+): Promise<void> {
+  if (![ownerId, projectId, assetId].every(
+    value => typeof value === 'string' && value.trim().length > 0 && value.length <= 256,
+  )) throw new DocumentAssetError();
+  const result = await client.query<{ id: string }>(
+    `SELECT version.id
+       FROM wujie_assets asset
+       JOIN wujie_asset_versions version
+         ON version.asset_id = asset.id
+        AND version.owner_id = asset.owner_id
+        AND version.project_id = asset.project_id
+        AND version.id = asset.current_version_id
+       JOIN wujie_projects project
+         ON project.id = asset.project_id AND project.owner_id = asset.owner_id
+      WHERE asset.id = $1 AND asset.owner_id = $2 AND asset.project_id = $3
+        AND asset.status = 'active' AND asset.kind = 'image'
+        AND version.availability = 'ready' AND project.status = 'active'
+      LIMIT 1 FOR SHARE OF asset, version, project`,
+    [assetId, ownerId, projectId],
+  );
+  if (!result.rows[0]) throw new DocumentAssetError();
+  await assertProjectAssetVersion(ownerId, projectId, result.rows[0].id, client);
+}
+
+/** A document placement must already exist in the project's authoritative asset graph. */
+export async function assertProjectCanvasPlacement(
+  ownerId: string,
+  projectId: string,
+  placementId: string,
+  versionId: string,
+  client: PoolClient,
+): Promise<void> {
+  if (![ownerId, projectId, placementId, versionId].every(
+    value => typeof value === 'string' && value.trim().length > 0 && value.length <= 256,
+  )) throw new DocumentAssetError();
+  const result = await client.query(
+    `SELECT 1 FROM wujie_workspace_placements
+      WHERE id = $1 AND owner_id = $2 AND project_id = $3
+        AND asset_version_id = $4 AND workspace_kind = 'canvas'
+        AND workspace_id IN ($3, 'canvas:' || $3)
+        AND entity_type IN ('canvas-image', 'canvas-video')
+        AND status = 'active'
+      FOR SHARE`,
+    [placementId, ownerId, projectId, versionId],
+  );
+  if (result.rowCount !== 1) throw new DocumentAssetError();
+}
+
 export async function assertProjectAssetVersion(
   ownerId: string,
   projectId: string,

@@ -3,7 +3,9 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 
 import { Client } from 'pg';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+
+vi.mock('server-only', () => ({}));
 
 import { createCanvasShare } from '../../src/lib/canvas-share/service';
 import { insertCanvasShare } from '../../src/lib/canvas-share/storage';
@@ -37,10 +39,13 @@ async function applyMigrations(
   query: (text: string, values?: unknown[]) => Promise<unknown>,
 ): Promise<void> {
   for (const migrationPath of [
+    'migrations/20260809_wj_core_users.sql',
     'migrations/20260810_wj_stable_s2_assets.sql',
     'migrations/20260810_wj_stable_s2_workspace_entity_pairs.sql',
     'migrations/20260913_canvas_video_placements.sql',
     'migrations/20260919_read_only_canvas_shares.sql',
+    'migrations/20260925_yjs_canvas_editors.sql',
+    'migrations/20260925_yjs_canvas_documents.sql',
   ]) {
     await query(await readFile(migrationPath, 'utf8'));
   }
@@ -104,6 +109,40 @@ async function seedReadyCanvas(
 }
 
 describe('canvas-share snapshot transaction on PostgreSQL', () => {
+  postgresIt('freezes document coordinates for a newly created share of a collaborative project', async () => {
+    const { withIsolatedPostgres } = await import('../helpers/postgres-test-database');
+    await withIsolatedPostgres('canvas-share-document-projection', async ({ query }) => {
+      await applyMigrations(query);
+      await seedReadyCanvas(query);
+      const { createCanvasDocument, applyCanvasImagePatch, readCanvasDocument } = await import(
+        '../../src/lib/collaboration/canvas-document'
+      );
+      const Y = await import('yjs');
+      const doc = createCanvasDocument();
+      applyCanvasImagePatch(doc, {
+        placementId: 'placement-1', assetVersionId: 'version-1',
+        x: 99, y: 20, width: 640, height: 480, rotation: 0, zIndex: 1,
+      }, 'test');
+      await query(`INSERT INTO wujie_project_document_settings
+        (project_id, owner_id, enabled, authority_revision)
+        VALUES ('project-1', 'owner-1', true, 1)`);
+      await query(`INSERT INTO wujie_project_canvas_documents
+        (project_id, owner_id, snapshot_bytes, projection)
+        VALUES ('project-1', 'owner-1', $1, $2::jsonb)`, [
+        Buffer.from(Y.encodeStateAsUpdate(doc)), JSON.stringify(readCanvasDocument(doc)),
+      ]);
+
+      const created = await createCanvasShare({
+        actorUserId: 'owner-1', projectId: 'project-1', title: 'Document view',
+      });
+      const item = await query<{ transform: { x: number } }>(
+        'SELECT transform FROM wujie_canvas_share_items WHERE share_id = $1',
+        [created.share.id],
+      );
+      expect(item.rows).toEqual([{ transform: expect.objectContaining({ x: 99 }) }]);
+    });
+  });
+
   postgresIt('keeps revision and placement consistent while a shared-gate mutation races creation', async () => {
     const { withIsolatedPostgres } = await import('../helpers/postgres-test-database');
     await withIsolatedPostgres('canvas-share-snapshot-race', async ({ databaseUrl: isolatedUrl, query }) => {

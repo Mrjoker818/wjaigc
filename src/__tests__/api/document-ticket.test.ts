@@ -81,4 +81,12 @@ describe('/api/collaboration/document-ticket', () => {
     expect(failed.status).toBe(500);
     expect(await failed.text()).not.toContain('database secret');
   });
+
+  it('reports that an authorized project has not yet enabled document collaboration', async () => {
+    const { POST } = await import('@/app/api/collaboration/document-ticket/route');
+    mocks.issueDocumentTicket.mockRejectedValueOnce({ code: 'DOCUMENT_PROJECT_NOT_ENABLED' });
+    const response = await POST(request({ origin: 'http://localhost:5000', body: { projectId: 'project-a' } }));
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({ success: false, code: 'DOCUMENT_PROJECT_NOT_ENABLED' });
+  });
 });

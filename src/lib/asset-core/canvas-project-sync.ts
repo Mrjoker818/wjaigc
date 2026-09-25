@@ -22,6 +22,8 @@ import type { AssetKind, MediaAvailability } from './types';
 import { parseWorkspaceSourceTrace } from './source-trace';
 import { parseDeletedCanvasPlacements, type DeletedCanvasPlacement } from './deleted-canvas-placements';
 
+export const PROJECT_REVISION_DATA_KEY = '__asset_graph_projects_revision';
+
 export type AssetGraphMappings = Record<string, Record<string, LegacyImageMapping>>;
 
 export {
@@ -34,6 +36,7 @@ export {
 export interface CanvasProjectSyncTransaction {
   claimRevision?(expectedRevision: number): Promise<number>;
   readProjects?(): Promise<Project[]>;
+  readDocumentAuthoritativeProjectIds?(): Promise<ReadonlySet<string>>;
   verifyProjectMappings?(
     project: Project,
     mappings: Record<string, LegacyImageMapping>,
@@ -65,8 +68,6 @@ export interface CanvasProjectSyncInput {
   persistMedia?: LegacyMigrationInput['persistMedia'];
   inspectManagedMedia?: InspectManagedLegacyMedia;
 }
-
-const PROJECT_REVISION_DATA_KEY = '__asset_graph_projects_revision';
 
 export async function readCanvasShadowSnapshot(actorUserId: string, database: Pick<Pool, 'query'> = getPool()): Promise<{
   value: unknown;
@@ -383,13 +384,18 @@ async function verifyProjectMappings(
 }
 
 async function writeProjects(client: PoolClient, actorUserId: string, projects: Project[]): Promise<void> {
+  const { assertLegacyCanvasWriteAllowed, readOwnerProjectsWithDocuments } = await import('@/lib/collaboration/document-project-bridge');
+  const canonicalProjects = await assertLegacyCanvasWriteAllowed(
+    client, actorUserId, projects,
+    stored => readOwnerProjectsWithDocuments(actorUserId, stored, client),
+  );
   await client.query(
     `INSERT INTO wujie_user_data (user_id, data_key, data_value, updated_at)
      VALUES ($1, 'projects', $2, $3)
      ON CONFLICT (user_id, data_key) DO UPDATE SET
        data_value = EXCLUDED.data_value,
        updated_at = EXCLUDED.updated_at`,
-    [actorUserId, JSON.stringify(projects), Date.now()],
+    [actorUserId, JSON.stringify(canonicalProjects), Date.now()],
   );
 }
 
@@ -547,6 +553,14 @@ class PostgresCanvasProjectSyncStorage implements CanvasProjectSyncStorage {
       const result = await callback({
         claimRevision: (expectedRevision) => claimProjectRevision(client, this.actorUserId, expectedRevision),
         readProjects: () => readProjects(client, this.actorUserId),
+        readDocumentAuthoritativeProjectIds: async () => {
+          const enabled = await client.query<{ project_id: string }>(
+            `SELECT project_id FROM wujie_project_document_settings
+              WHERE owner_id = $1 AND enabled = true ORDER BY project_id FOR SHARE`,
+            [this.actorUserId],
+          );
+          return new Set(enabled.rows.map(row => row.project_id));
+        },
         verifyProjectMappings: (project, mappings, verifiedMediaByImageId) => verifyProjectMappings(
           client,
           this.actorUserId,
@@ -597,8 +611,10 @@ export async function executeCanvasProjectSync(
       : [];
     const previousById = new Map(previousProjects.map((project) => [project.id, project]));
     await transaction.writeProjects(persistedProjects);
+    const documentAuthoritativeProjects = await transaction.readDocumentAuthoritativeProjectIds?.();
     const mappings: AssetGraphMappings = {};
     for (const project of persistedProjects) {
+      if (documentAuthoritativeProjects?.has(project.id)) continue;
       const previous = previousById.get(project.id);
       const reusableMappings = completeProjectMappings(project);
       const graphIsUnchanged = previous
@@ -784,25 +800,19 @@ function assetV3PlacementQuery(includeThumbnailVariants: boolean): string {
      ORDER BY placement.created_at, placement.id`;
 }
 
-function isMissingThumbnailVariantTable(error: unknown): boolean {
-  if (!error || typeof error !== 'object') return false;
-  const candidate = error as { code?: unknown; message?: unknown };
-  return candidate.code === '42P01'
-    && typeof candidate.message === 'string'
-    && candidate.message.includes('wujie_asset_thumbnail_variants');
-}
-
-export async function readAssetV3Projects(actorUserId: string, projects: Project[]): Promise<Project[]> {
+export async function readAssetV3Projects(
+  actorUserId: string,
+  projects: Project[],
+  database: Pick<Pool, 'query'> = getPool(),
+): Promise<Project[]> {
   if (projects.length === 0) return [];
   const values = [actorUserId, projects.map((project) => project.id)];
-  const pool = getPool();
-  let result: { rows: AssetV3PlacementRow[] };
-  try {
-    result = await pool.query<AssetV3PlacementRow>(assetV3PlacementQuery(true), values);
-  } catch (error) {
-    if (!isMissingThumbnailVariantTable(error)) throw error;
-    result = await pool.query<AssetV3PlacementRow>(assetV3PlacementQuery(false), values);
-  }
+  const thumbnailTable = await database.query<{ exists: boolean }>(
+    `SELECT to_regclass('wujie_asset_thumbnail_variants') IS NOT NULL AS exists`,
+  );
+  const result = await database.query<AssetV3PlacementRow>(
+    assetV3PlacementQuery(thumbnailTable.rows[0]?.exists === true), values,
+  );
   const placementsByProject: Record<string, AssetV3CanvasPlacement[]> = {};
   for (const row of result.rows) {
     (placementsByProject[row.project_id] ??= []).push({

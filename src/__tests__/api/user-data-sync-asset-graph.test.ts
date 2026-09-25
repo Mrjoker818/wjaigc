@@ -75,6 +75,12 @@ describe('user-data asset graph sync route', () => {
     });
     mocks.getSessionUser.mockResolvedValue({ id: 'user-1' });
     mocks.execSql.mockResolvedValue({ rows: [], rowCount: 0 });
+    mocks.getPool.mockReturnValue({
+      connect: async () => ({
+        query: async () => ({ rows: [], rowCount: 0 }),
+        release: () => undefined,
+      }),
+    });
     mocks.dbSetUserData.mockResolvedValue(true);
     mocks.readCanvasProjectRevision.mockResolvedValue(0);
     mocks.readCanvasShadowSnapshot.mockImplementation(async (userId: string) => ({
@@ -210,6 +216,28 @@ describe('user-data asset graph sync route', () => {
       success: false,
       error: 'Canvas project snapshot is stale',
       currentRevision: 4,
+    });
+    expect(mocks.dbSetUserData).not.toHaveBeenCalled();
+  });
+
+  it('reports a document-authority conflict without treating it as a stale revision', async () => {
+    process.env.WUJIE_ASSET_GRAPH_MODE = 'legacy';
+    mocks.executeLegacyCanvasProjectSync.mockRejectedValue(Object.assign(
+      new Error('Collaborative canvas is document-authoritative'),
+      { code: 'DOCUMENT_AUTHORITY_CONFLICT' },
+    ));
+
+    const response = await POST(new NextRequest('http://localhost/api/user-data/sync', {
+      method: 'POST',
+      body: JSON.stringify({ key: 'projects', value: projects, projectRevision: 1 }),
+      headers: { 'content-type': 'application/json' },
+    }));
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({
+      success: false,
+      code: 'DOCUMENT_AUTHORITY_CONFLICT',
+      error: 'Collaborative canvas is document-authoritative',
     });
     expect(mocks.dbSetUserData).not.toHaveBeenCalled();
   });
@@ -447,6 +475,19 @@ describe('user-data asset graph sync route', () => {
     expect(body).not.toHaveProperty('value');
     expect(body).not.toHaveProperty('projects');
     expect(JSON.stringify(body)).not.toContain('must-not-leak');
+  });
+
+  it('rejects a non-array projects payload before generic user-data writes can bypass project authority', async () => {
+    const response = await POST(new NextRequest('http://localhost/api/user-data/sync', {
+      method: 'POST',
+      body: JSON.stringify({ key: 'projects', value: null, projectRevision: 0 }),
+      headers: { 'content-type': 'application/json' },
+    }));
+
+    expect(response.status).toBe(400);
+    expect(mocks.dbSetUserData).not.toHaveBeenCalled();
+    expect(mocks.executeLegacyCanvasProjectSync).not.toHaveBeenCalled();
+    expect(mocks.executeCanvasProjectSync).not.toHaveBeenCalled();
   });
 
   it('executes whole-project deletion reconciliation owner-scoped in the API transaction', async () => {

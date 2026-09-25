@@ -144,11 +144,13 @@ await expect(connectDocument({ ticket: socket.ticket })).rejects.toMatchObject({
 
 ### Task 6：旧项目启用、权威切换及旧保存写入围栏
 
+**设计补正（2026-09-25）：** 原五根合同未覆盖 `Project.metadata.groups` 的分组名称、注释、成员及布局，也未覆盖 `metadata.annotationsV2` 的几何/状态/来源。Task 6 须将两类完整记录作为独立 Yjs 权威，旧 image ID 与 placement ID 双向映射，并验证旧快照不能覆盖新记录。文档层的记录删除采用单调墓碑、保留历史记录并过滤可见投影；旧格式标注只在可验证几何和无临时画笔蒙版时迁入；可选遮罩/叠加 Asset ID 须核对当前项目与可用版本。浏览器端写入及完整回归仍是后续边界；不能把局部测试记作 Task 6 或协作阶段关闭。
+
 **Files:** Create `src/lib/collaboration/document-project-bridge.ts`、`src/app/api/collaboration/document-enable/route.ts`、`src/app/api/collaboration/document-project/route.ts`、相关单元/真库/API 测试；modify `src/lib/asset-core/canvas-project-sync.ts`、`src/lib/user-manager.ts` 中精确项目写入分支及对应既有测试。
 
 **Interfaces:** `enableCollaborativeProject(ownerId, projectId, expectedRevision)`；`readCollaborativeProject(actorId, projectId)`；`assertLegacyCanvasWriteAllowed(projectId, expectedRevision)`。
 
-- [ ] **Step 1：写 RED。** legacy/shadow 已就绪项目一次性种入，坏媒体/旧 revision 不启用；启用后 owner 旧快照写入返回冲突，editor 不写 owner 的 `wujie_user_data.projects`；非协作项目写入保持原行为；关闭开关后协作项目只读不可回退到旧双写。
+- [x] **Step 1：写 RED。** legacy/shadow 已就绪项目一次性种入，坏媒体/旧 revision 不启用；启用后 owner 旧快照写入返回冲突，editor 不写 owner 的 `wujie_user_data.projects`；非协作项目写入保持原行为；关闭开关后协作项目只读不可回退到旧双写。
 
 ```ts
 await enableCollaborativeProject(ownerId, projectId, revision);
@@ -156,9 +158,11 @@ await expect(writeLegacyCanvasSnapshot(ownerId, projectId, oldImages))
   .rejects.toMatchObject({ code: 'DOCUMENT_AUTHORITY_CONFLICT' });
 ```
 
-- [ ] **Step 2：运行 RED。** 聚焦加独立真库，确保失败不是迁移环境导致。
-- [ ] **Step 3：最小 GREEN。** 事务中检查原项目 revision/媒体/资产映射，保留回滚快照、种 Yjs 文档与投影、标记 per-project 权威；旧同步写入在数据库侧按标志拒绝 `canvasImages` 覆盖，列举仍可读投影。失败完全回滚。
-- [ ] **Step 4：复验并提交。** 旧项目两模式、asset-v3、账号隔离和现有 Canvas Share 回归；全量真库相关测试、`pnpm validate` 后只提交目标文件。
+- [x] **Step 2：运行 RED。** 聚焦加独立真库，确保失败不是迁移环境导致。
+- [x] **Step 3：最小 GREEN。** 事务中检查原项目 revision/媒体/资产映射，保留回滚快照、种 Yjs 文档与投影、标记 per-project 权威；旧同步写入在数据库侧按标志拒绝 `canvasImages` 覆盖，列举仍可读投影。失败完全回滚。
+- [x] **Step 4：复验并提交。** 旧项目两模式、asset-v3、账号隔离和现有 Canvas Share 回归；全量真库相关测试、`pnpm validate` 后只提交目标文件。
+
+**Task 6 本地证据（2026-09-25）：** 隔离 localhost PostgreSQL 完整迁移首次应用、二次全部跳过；旧项目种入、撤销/删除单调性、旧保存 SQL 围栏、项目名称/设置继续保存、错误摆放拒绝与两种历史 canvas 摆放兼容均经真库 RED→GREEN。最终全量 Vitest 排除单一高负载分享证据文件为 869 文件/7443 项、exit 0；该文件单独 11/11、exit 0，分段合计覆盖 870 文件/7454 项。`pnpm validate`、生产构建 121/121 静态页与 243 traces、保护基线 38/38 且零警告均通过；独立复审修复后未见当前 Task 6 Critical/Important。`canvas-video` 真库用例验证的是摆放类型兼容分支，不等于真实视频媒体端到端。严格 NFT 仍为 231 路由/80 宽追踪/23 含配置、exit 1；因此仅关闭本地 Task 6，不推送、Coze 同步、付费或部署，云端同源 `101` 与 Task 7–9 继续未验证。
 
 ### Task 7：浏览器文档桥、画布编辑和局部撤销
 

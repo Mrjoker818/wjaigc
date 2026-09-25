@@ -1,6 +1,8 @@
 import * as Y from 'yjs';
 
+import type { CanvasAnnotationV2 } from '@/features/annotations/annotation-types';
 import { isAssetVersionId } from '@/lib/asset-core/asset-version-id';
+import type { ImageGroupData } from '@/lib/user-types';
 
 export interface CanvasPlacement {
   assetVersionId: string;
@@ -17,6 +19,10 @@ export interface CanvasPlacement {
 
 export interface CanvasDocumentProjection {
   placements: Record<string, CanvasPlacement>;
+  groupDefinitions?: Record<string, ImageGroupData>;
+  annotationRecords?: Record<string, CanvasAnnotationV2>;
+  groupTombstones?: Record<string, true>;
+  annotationTombstones?: Record<string, true>;
 }
 
 export type CanvasImagePatch = { placementId: string } & Partial<CanvasPlacement>;
@@ -36,7 +42,11 @@ const MAX_COORDINATE = 1_000_000;
 const TRANSFORM_FIELDS = ['x', 'y', 'width', 'height', 'rotation', 'zIndex'] as const;
 const ROOT_FIELDS = new Set([
   'assetVersions', 'transforms', 'groups', 'annotations', 'tombstones',
+  'groupDefinitions', 'annotationRecords', 'groupTombstones', 'annotationTombstones',
 ]);
+const MAX_METADATA_RECORDS = 2000;
+const ANNOTATION_TYPES = new Set(['semantic-object', 'region', 'brush', 'arrow', 'text']);
+const ANNOTATION_STATUSES = new Set(['draft', 'ready', 'stale', 'running', 'done', 'failed']);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
@@ -54,6 +64,168 @@ function assertFiniteNumber(value: unknown, field: string, min: number, max: num
   if (typeof value !== 'number' || !Number.isFinite(value) || value < min || value > max) {
     throw new Error(`Invalid canvas ${field}`);
   }
+}
+
+function assertRecordFields(value: unknown, required: string[], optional: string[], field: string): asserts value is Record<string, unknown> {
+  if (!isRecord(value) || required.some(key => !Object.hasOwn(value, key)) ||
+      Object.keys(value).some(key => !required.includes(key) && !optional.includes(key))) {
+    throw new Error(`Invalid canvas ${field}`);
+  }
+}
+
+function assertText(value: unknown, field: string, limit: number): asserts value is string {
+  if (typeof value !== 'string' || value.length > limit) throw new Error(`Invalid canvas ${field}`);
+}
+
+function assertNormalizedPoint(value: unknown): void {
+  assertRecordFields(value, ['x', 'y'], [], 'annotation point');
+  assertFiniteNumber(value.x, 'annotation point x', 0, 1);
+  assertFiniteNumber(value.y, 'annotation point y', 0, 1);
+}
+
+function assertNormalizedRegion(value: unknown): void {
+  assertRecordFields(value, ['x', 'y', 'w', 'h'], [], 'annotation region');
+  for (const field of ['x', 'y', 'w', 'h']) {
+    assertFiniteNumber(value[field], `annotation region ${field}`, 0, 1);
+  }
+  if ((value.w as number) <= 0 || (value.h as number) <= 0 ||
+      (value.x as number) + (value.w as number) > 1 ||
+      (value.y as number) + (value.h as number) > 1) {
+    throw new Error('Invalid canvas annotation region');
+  }
+}
+
+function assertAnnotationGeometry(value: unknown): void {
+  if (!isRecord(value) || typeof value.kind !== 'string') {
+    throw new Error('Invalid canvas annotation geometry');
+  }
+  switch (value.kind) {
+    case 'semantic-object':
+      assertRecordFields(value, ['kind', 'region'], ['polygon'], 'annotation geometry');
+      assertNormalizedRegion(value.region);
+      if (Object.hasOwn(value, 'polygon')) {
+        if (!Array.isArray(value.polygon) || value.polygon.length > 2000) {
+          throw new Error('Invalid canvas annotation polygon');
+        }
+        value.polygon.forEach(assertNormalizedPoint);
+      }
+      return;
+    case 'region':
+      assertRecordFields(value, ['kind', 'region'], [], 'annotation geometry');
+      assertNormalizedRegion(value.region);
+      return;
+    case 'brush':
+      assertRecordFields(value, ['kind', 'points', 'width'], [], 'annotation geometry');
+      if (!Array.isArray(value.points) || value.points.length > 2000) {
+        throw new Error('Invalid canvas annotation points');
+      }
+      value.points.forEach(assertNormalizedPoint);
+      assertFiniteNumber(value.width, 'annotation brush width', 0, 1);
+      return;
+    case 'arrow':
+      assertRecordFields(value, ['kind', 'start', 'end'], [], 'annotation geometry');
+      assertNormalizedPoint(value.start);
+      assertNormalizedPoint(value.end);
+      return;
+    case 'text':
+      assertRecordFields(value, ['kind', 'point'], [], 'annotation geometry');
+      assertNormalizedPoint(value.point);
+      return;
+    default:
+      throw new Error('Invalid canvas annotation geometry');
+  }
+}
+
+function validateMetadataTombstones(value: unknown, records: unknown): Record<string, true> {
+  if (!isRecord(value) || !isRecord(records) || Object.keys(value).length > MAX_METADATA_RECORDS) {
+    throw new Error('Invalid canvas metadata tombstones');
+  }
+  const safe: Record<string, true> = Object.create(null) as Record<string, true>;
+  for (const [id, deleted] of Object.entries(value)) {
+    assertSafeId(id, 'metadata tombstone id');
+    if (deleted !== true || !Object.hasOwn(records, id)) {
+      throw new Error('Invalid canvas metadata tombstone');
+    }
+    safe[id] = true;
+  }
+  return safe;
+}
+
+function validateGroupDefinitions(
+  value: unknown, placements: Record<string, CanvasPlacement>, tombstones: Record<string, true>,
+): Record<string, ImageGroupData> {
+  if (!isRecord(value) || Object.keys(value).length > MAX_METADATA_RECORDS) {
+    throw new Error('Invalid canvas group definitions');
+  }
+  const safe: Record<string, ImageGroupData> = Object.create(null) as Record<string, ImageGroupData>;
+  for (const [id, raw] of Object.entries(value)) {
+    assertSafeId(id, 'group id');
+    assertRecordFields(raw, ['id', 'name', 'note', 'imageIds'], ['x', 'y', 'collapsed'], 'group definition');
+    if (raw.id !== id) throw new Error('Invalid canvas group id');
+    assertText(raw.name, 'group name', 200);
+    assertText(raw.note, 'group note', 1000);
+    if (!Array.isArray(raw.imageIds) || raw.imageIds.length > MAX_PLACEMENTS ||
+        new Set(raw.imageIds).size !== raw.imageIds.length) {
+      throw new Error('Invalid canvas group imageIds');
+    }
+    for (const imageId of raw.imageIds) {
+      assertSafeId(imageId, 'group imageId');
+      if (!Object.hasOwn(tombstones, id) &&
+          (!Object.hasOwn(placements, imageId) || placements[imageId].deleted === true)) {
+        throw new Error('Canvas group references an unknown placement');
+      }
+    }
+    if (Object.hasOwn(raw, 'x')) assertFiniteNumber(raw.x, 'group x', -MAX_COORDINATE, MAX_COORDINATE);
+    if (Object.hasOwn(raw, 'y')) assertFiniteNumber(raw.y, 'group y', -MAX_COORDINATE, MAX_COORDINATE);
+    if (Object.hasOwn(raw, 'collapsed') && typeof raw.collapsed !== 'boolean') {
+      throw new Error('Invalid canvas group collapsed');
+    }
+    safe[id] = raw as unknown as ImageGroupData;
+  }
+  return safe;
+}
+
+function validateAnnotationRecords(
+  value: unknown, placements: Record<string, CanvasPlacement>, tombstones: Record<string, true>,
+): Record<string, CanvasAnnotationV2> {
+  if (!isRecord(value) || Object.keys(value).length > MAX_METADATA_RECORDS) {
+    throw new Error('Invalid canvas annotation records');
+  }
+  const safe: Record<string, CanvasAnnotationV2> = Object.create(null) as Record<string, CanvasAnnotationV2>;
+  for (const [id, raw] of Object.entries(value)) {
+    assertSafeId(id, 'annotation id');
+    assertRecordFields(raw,
+      ['id', 'projectId', 'sourceImageId', 'sourceVersionId', 'type', 'geometry', 'status', 'createdAt', 'updatedAt'],
+      ['label', 'instruction', 'confidence', 'maskAssetId', 'overlayAssetId'], 'annotation record');
+    if (raw.id !== id) throw new Error('Invalid canvas annotation id');
+    assertSafeId(raw.projectId, 'annotation projectId');
+    assertSafeId(raw.sourceImageId, 'annotation sourceImageId');
+    assertSafeId(raw.sourceVersionId, 'annotation sourceVersionId');
+    if (!Object.hasOwn(tombstones, id) &&
+        (!Object.hasOwn(placements, raw.sourceImageId) || placements[raw.sourceImageId as string].deleted === true)) {
+      throw new Error('Canvas annotation references an unknown placement');
+    }
+    if (!ANNOTATION_TYPES.has(raw.type as string) || !ANNOTATION_STATUSES.has(raw.status as string)) {
+      throw new Error('Invalid canvas annotation type or status');
+    }
+    assertAnnotationGeometry(raw.geometry);
+    for (const field of ['label', 'instruction']) {
+      if (Object.hasOwn(raw, field)) assertText(raw[field], `annotation ${field}`, 1000);
+    }
+    for (const field of ['maskAssetId', 'overlayAssetId']) {
+      if (Object.hasOwn(raw, field)) assertSafeId(raw[field], `annotation ${field}`);
+    }
+    if (Object.hasOwn(raw, 'confidence')) {
+      assertFiniteNumber(raw.confidence, 'annotation confidence', 0, 1);
+    }
+    for (const field of ['createdAt', 'updatedAt']) {
+      if (typeof raw[field] !== 'number' || !Number.isSafeInteger(raw[field]) || (raw[field] as number) < 0) {
+        throw new Error(`Invalid canvas annotation ${field}`);
+      }
+    }
+    safe[id] = raw as unknown as CanvasAnnotationV2;
+  }
+  return safe;
 }
 
 function assertCanvasRootTypes(doc: Y.Doc): void {
@@ -85,7 +257,11 @@ function materializePlacement(doc: Y.Doc, placementId: string): CanvasPlacement 
 }
 
 export function validateCanvasDocumentProjection(value: unknown): CanvasDocumentProjection {
-  if (!isRecord(value) || Object.keys(value).length !== 1 || !isRecord(value.placements)) {
+  if (!isRecord(value) || !isRecord(value.placements) ||
+      Object.keys(value).some(key => ![
+        'placements', 'groupDefinitions', 'annotationRecords',
+        'groupTombstones', 'annotationTombstones',
+      ].includes(key))) {
     throw new Error('Invalid canvas document projection');
   }
   const entries = Object.entries(value.placements);
@@ -125,7 +301,30 @@ export function validateCanvasDocumentProjection(value: unknown): CanvasDocument
   }
   const safePlacements: Record<string, CanvasPlacement> = Object.create(null) as Record<string, CanvasPlacement>;
   for (const [placementId, placement] of placements) safePlacements[placementId] = placement;
-  return { placements: safePlacements };
+  const groupTombstones = Object.hasOwn(value, 'groupTombstones')
+    ? validateMetadataTombstones(value.groupTombstones, value.groupDefinitions)
+    : Object.create(null) as Record<string, true>;
+  const annotationTombstones = Object.hasOwn(value, 'annotationTombstones')
+    ? validateMetadataTombstones(value.annotationTombstones, value.annotationRecords)
+    : Object.create(null) as Record<string, true>;
+  const groupDefinitions = Object.hasOwn(value, 'groupDefinitions')
+    ? validateGroupDefinitions(value.groupDefinitions, safePlacements, groupTombstones)
+    : undefined;
+  const annotationRecords = Object.hasOwn(value, 'annotationRecords')
+    ? validateAnnotationRecords(value.annotationRecords, safePlacements, annotationTombstones)
+    : undefined;
+  for (const placement of Object.values(safePlacements)) {
+    if (placement.groupId && Object.hasOwn(groupTombstones, placement.groupId)) {
+      throw new Error('Canvas placement references a deleted group');
+    }
+  }
+  return {
+    placements: safePlacements,
+    ...(groupDefinitions && Object.keys(groupDefinitions).length > 0 ? { groupDefinitions } : {}),
+    ...(annotationRecords && Object.keys(annotationRecords).length > 0 ? { annotationRecords } : {}),
+    ...(Object.keys(groupTombstones).length > 0 ? { groupTombstones } : {}),
+    ...(Object.keys(annotationTombstones).length > 0 ? { annotationTombstones } : {}),
+  };
 }
 
 export function createCanvasDocument(): Y.Doc {
@@ -145,6 +344,9 @@ export function applyCanvasImagePatch(doc: Y.Doc, patch: CanvasImagePatch, origi
   const groups = doc.getMap<unknown>('groups');
   const annotations = doc.getMap<unknown>('annotations');
   const tombstones = doc.getMap<unknown>('tombstones');
+  if (typeof fields.groupId === 'string' && doc.getMap('groupTombstones').get(fields.groupId) === true) {
+    throw new Error('Canvas placement references a deleted group');
+  }
   const existing = assetVersions.has(placementId)
     ? materializePlacement(doc, placementId)
     : undefined;
@@ -175,6 +377,28 @@ export function applyCanvasImagePatch(doc: Y.Doc, patch: CanvasImagePatch, origi
   }, origin);
 }
 
+export function tombstoneCanvasGroup(doc: Y.Doc, groupId: string, origin: unknown): void {
+  assertSafeId(groupId, 'group id');
+  assertCanvasRootTypes(doc);
+  if (!doc.getMap('groupDefinitions').has(groupId)) throw new Error('Unknown canvas group');
+  if (doc.getMap('groupTombstones').get(groupId) === true) return;
+  doc.transact(() => {
+    const groups = doc.getMap<unknown>('groups');
+    for (const [placementId, currentGroupId] of groups.entries()) {
+      if (currentGroupId === groupId) groups.set(placementId, null);
+    }
+    doc.getMap('groupTombstones').set(groupId, true);
+  }, origin);
+}
+
+export function tombstoneCanvasAnnotation(doc: Y.Doc, annotationId: string, origin: unknown): void {
+  assertSafeId(annotationId, 'annotation id');
+  assertCanvasRootTypes(doc);
+  if (!doc.getMap('annotationRecords').has(annotationId)) throw new Error('Unknown canvas annotation');
+  if (doc.getMap('annotationTombstones').get(annotationId) === true) return;
+  doc.transact(() => doc.getMap('annotationTombstones').set(annotationId, true), origin);
+}
+
 export function readCanvasDocument(doc: Y.Doc): CanvasDocumentProjection {
   assertCanvasRootTypes(doc);
   const placements: Record<string, unknown> = Object.create(null) as Record<string, unknown>;
@@ -196,8 +420,12 @@ export function readCanvasDocument(doc: Y.Doc): CanvasDocumentProjection {
     }
     placements[placementId] = { ...placements[placementId], deleted: true };
   }
+  const groupDefinitions = Object.fromEntries(doc.getMap<unknown>('groupDefinitions').entries());
+  const annotationRecords = Object.fromEntries(doc.getMap<unknown>('annotationRecords').entries());
+  const groupTombstones = Object.fromEntries(doc.getMap<unknown>('groupTombstones').entries());
+  const annotationTombstones = Object.fromEntries(doc.getMap<unknown>('annotationTombstones').entries());
   return validateCanvasDocumentProjection({
-    placements,
+    placements, groupDefinitions, annotationRecords, groupTombstones, annotationTombstones,
   });
 }
 
@@ -215,6 +443,20 @@ export function assertCanvasDocumentTransition(previous: Y.Doc, candidate: Y.Doc
     if (!Object.hasOwn(after.placements, placementId) ||
         (placement.deleted === true && after.placements[placementId].deleted !== true)) {
       throw new Error('Canvas document placement cannot be revived or removed');
+    }
+  }
+  for (const field of ['groupDefinitions', 'annotationRecords'] as const) {
+    for (const id of Object.keys(before[field] ?? {})) {
+      if (!Object.hasOwn(after[field] ?? {}, id)) {
+        throw new Error('Canvas document metadata record cannot be removed');
+      }
+    }
+  }
+  for (const field of ['groupTombstones', 'annotationTombstones'] as const) {
+    for (const id of Object.keys(before[field] ?? {})) {
+      if (candidate.getMap(field).get(id) !== true) {
+        throw new Error('Canvas document metadata tombstone cannot be removed');
+      }
     }
   }
 }

@@ -171,6 +171,40 @@ afterEach(() => {
 });
 
 describe('UserManager project sync response isolation', () => {
+  it('does not rebase and retry a document-authority conflict as an ordinary revision race', async () => {
+    let readCount = 0;
+    let writeCount = 0;
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL) => {
+      if (String(input) === '/api/user-data/sync?key=projects') {
+        readCount += 1;
+        return new Response(JSON.stringify({
+          success: true,
+          value: [project('user-a', '/media/a.png')],
+          assetGraphMode: 'shadow',
+          projectRevision: 1,
+        }), { status: 200 });
+      }
+      writeCount += 1;
+      return new Response(JSON.stringify({
+        success: false,
+        code: 'DOCUMENT_AUTHORITY_CONFLICT',
+        error: 'Collaborative canvas is document-authoritative',
+      }), { status: 409 });
+    }));
+
+    const { UserManager } = await import('@/lib/user-manager');
+    const manager = UserManager.getInstance();
+    await expect(manager.loadProjectsFromServer(0, 'user-a')).resolves.toBe(true);
+    const beforeWriteReads = readCount;
+    manager.updateProject('project-a', { name: 'Local stale title', updatedAt: 2 });
+    await vi.advanceTimersByTimeAsync(2_001);
+
+    expect(readCount).toBe(beforeWriteReads);
+    expect(writeCount).toBe(1);
+    expect(manager.getProject('project-a')?.name).toBe('Local stale title');
+    expect(manager.hasPendingProjectChanges()).toBe(true);
+  });
+
   it('updates an immediate canvas snapshot in memory without serializing local storage', async () => {
     const setItem = vi.fn((key: string, value: string) => storage.set(key, value));
     vi.stubGlobal('localStorage', {

@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { QueryFn } from '../helpers/postgres-test-database';
 
@@ -26,6 +26,9 @@ async function setupTicketDatabase(query: QueryFn): Promise<void> {
            ('presence-only', 'Presence', 'test', 'active', 1, 1)
   `);
   await query("INSERT INTO wujie_projects (id, owner_id, name) VALUES ('project-a', 'owner-a', 'A')");
+  await query(`INSERT INTO wujie_project_document_settings
+    (project_id, owner_id, enabled, authority_revision)
+    VALUES ('project-a', 'owner-a', true, 0)`);
   await query(`
     INSERT INTO wujie_project_document_editors
       (project_id, owner_id, member_user_id, status)
@@ -34,6 +37,52 @@ async function setupTicketDatabase(query: QueryFn): Promise<void> {
 }
 
 describe('independent canvas document tickets on isolated PostgreSQL', () => {
+  beforeEach(() => vi.stubEnv('WUJIE_YJS_ENABLED', 'true'));
+  afterEach(() => vi.unstubAllEnvs());
+
+  postgresIt('does not issue a document ticket before the owner enables collaboration', async () => {
+    const { withIsolatedPostgres } = await import('../helpers/postgres-test-database');
+    await withIsolatedPostgres('document-ticket-not-enabled', async ({ query }) => {
+      await setupTicketDatabase(query);
+      await query("DELETE FROM wujie_project_document_settings WHERE project_id = 'project-a'");
+      const { issueDocumentTicket } = await import('../../src/lib/collaboration/document-tickets');
+      await expect(issueDocumentTicket('owner-a', 'project-a'))
+        .rejects.toMatchObject({ code: 'DOCUMENT_PROJECT_NOT_ENABLED' });
+      const tickets = await query("SELECT 1 FROM wujie_document_tickets WHERE project_id = 'project-a'");
+      expect(tickets.rowCount).toBe(0);
+    });
+  });
+
+  postgresIt('does not consume a ticket after the project loses document authority', async () => {
+    const { withIsolatedPostgres } = await import('../helpers/postgres-test-database');
+    await withIsolatedPostgres('document-ticket-disabled-before-consume', async ({ query }) => {
+      await setupTicketDatabase(query);
+      const { issueDocumentTicket, consumeDocumentTicket } =
+        await import('../../src/lib/collaboration/document-tickets');
+      const ticket = await issueDocumentTicket('editor-a', 'project-a');
+      await query(`UPDATE wujie_project_document_settings SET enabled = false
+        WHERE project_id = 'project-a'`);
+
+      await expect(consumeDocumentTicket(ticket)).resolves.toBeNull();
+      const row = await query("SELECT 1 FROM wujie_document_tickets WHERE project_id = 'project-a'");
+      expect(row.rowCount).toBe(0);
+    });
+  });
+
+  postgresIt('does not consume a live ticket while collaboration is globally read-only', async () => {
+    const { withIsolatedPostgres } = await import('../helpers/postgres-test-database');
+    await withIsolatedPostgres('document-ticket-feature-disabled', async ({ query }) => {
+      await setupTicketDatabase(query);
+      const { issueDocumentTicket, consumeDocumentTicket } =
+        await import('../../src/lib/collaboration/document-tickets');
+      const ticket = await issueDocumentTicket('editor-a', 'project-a');
+      vi.stubEnv('WUJIE_YJS_ENABLED', 'false');
+      await expect(consumeDocumentTicket(ticket)).resolves.toBeNull();
+      expect((await query("SELECT 1 FROM wujie_document_tickets WHERE project_id = 'project-a'")).rowCount)
+        .toBe(0);
+    });
+  });
+
   postgresIt('caps concurrent outstanding tickets per editor and deletes consumed hashes', async () => {
     const { withIsolatedPostgres } = await import('../helpers/postgres-test-database');
     await withIsolatedPostgres('document-ticket-issuance-cap', async ({ query }) => {

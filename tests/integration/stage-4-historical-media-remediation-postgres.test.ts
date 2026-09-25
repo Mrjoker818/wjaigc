@@ -231,7 +231,7 @@ function unwrapFulfilled<T>(result: PromiseSettledResult<T>): T {
 
 async function createRuntimeTables(query: QueryFn): Promise<void> {
   await query(
-    `CREATE TABLE wujie_user_data (
+    `CREATE TABLE IF NOT EXISTS wujie_user_data (
        user_id TEXT NOT NULL,
        data_key TEXT NOT NULL,
        data_value JSONB,

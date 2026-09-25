@@ -6,11 +6,99 @@ import {
   assertCanvasDocumentTransition,
   createCanvasDocument,
   readCanvasDocument,
+  tombstoneCanvasAnnotation,
+  tombstoneCanvasGroup,
   validateCanvasDocumentProjection,
   type CanvasImagePatch,
 } from '@/lib/collaboration/canvas-document';
 
 describe('collaborative canvas document', () => {
+  it('keeps group and annotation tombstones monotonic while clearing visible group membership', () => {
+    const doc = createCanvasDocument();
+    applyCanvasImagePatch(doc, {
+      placementId: 'placement-1', assetVersionId: 'version-1',
+      x: 10, y: 20, width: 80, height: 60, rotation: 0, zIndex: 2,
+      groupId: 'group-1',
+    }, 'seed');
+    doc.getMap('groupDefinitions').set('group-1', {
+      id: 'group-1', name: 'Hero', note: 'Keep', imageIds: ['placement-1'],
+      x: 0, y: 0, collapsed: false,
+    });
+    doc.getMap('annotationRecords').set('annotation-1', {
+      id: 'annotation-1', projectId: 'project-1', sourceImageId: 'placement-1',
+      sourceVersionId: 'source-1', type: 'region',
+      geometry: { kind: 'region', region: { x: 0.1, y: 0.2, w: 0.3, h: 0.4 } },
+      status: 'ready', createdAt: 1, updatedAt: 2,
+    });
+    const before = createCanvasDocument();
+    Y.applyUpdate(before, Y.encodeStateAsUpdate(doc));
+
+    tombstoneCanvasGroup(doc, 'group-1', 'local');
+    tombstoneCanvasAnnotation(doc, 'annotation-1', 'local');
+    expect(readCanvasDocument(doc)).toMatchObject({
+      placements: { 'placement-1': { groupId: null } },
+      groupTombstones: { 'group-1': true },
+      annotationTombstones: { 'annotation-1': true },
+    });
+    expect(() => assertCanvasDocumentTransition(before, doc)).not.toThrow();
+
+    const revived = createCanvasDocument();
+    Y.applyUpdate(revived, Y.encodeStateAsUpdate(doc));
+    revived.getMap('groupTombstones').delete('group-1');
+    expect(() => assertCanvasDocumentTransition(doc, revived))
+      .toThrow('Canvas document metadata tombstone cannot be removed');
+  });
+
+  it('round-trips complete group and structured annotation records through Yjs', () => {
+    const first = createCanvasDocument();
+    applyCanvasImagePatch(first, {
+      placementId: 'placement-1', assetVersionId: 'version-1',
+      x: 10, y: 20, width: 80, height: 60, rotation: 0, zIndex: 2,
+      groupId: 'group-1',
+    }, 'seed');
+    const group = {
+      id: 'group-1', name: 'Campaign', note: 'Hero set',
+      imageIds: ['placement-1'], x: 40, y: 50, collapsed: true,
+    };
+    const annotation = {
+      id: 'annotation-1', projectId: 'project-1', sourceImageId: 'placement-1',
+      sourceVersionId: 'source-version-1', type: 'region',
+      geometry: { kind: 'region', region: { x: 0.1, y: 0.2, w: 0.3, h: 0.4 } },
+      label: 'Face', instruction: 'Keep detail', status: 'ready',
+      createdAt: 1, updatedAt: 2,
+    };
+    first.getMap('groupDefinitions').set(group.id, group);
+    first.getMap('annotationRecords').set(annotation.id, annotation);
+
+    const second = createCanvasDocument();
+    Y.applyUpdate(second, Y.encodeStateAsUpdate(first));
+    expect(readCanvasDocument(second)).toEqual({
+      placements: {
+        'placement-1': {
+          assetVersionId: 'version-1', x: 10, y: 20, width: 80, height: 60,
+          rotation: 0, zIndex: 2, groupId: 'group-1',
+        },
+      },
+      groupDefinitions: { 'group-1': group },
+      annotationRecords: { 'annotation-1': annotation },
+    });
+  });
+
+  it('rejects zero-area structured annotations before they become persistent document state', () => {
+    const doc = createCanvasDocument();
+    applyCanvasImagePatch(doc, {
+      placementId: 'placement-1', assetVersionId: 'version-1',
+      x: 10, y: 20, width: 80, height: 60, rotation: 0, zIndex: 2,
+    }, 'seed');
+    doc.getMap('annotationRecords').set('annotation-1', {
+      id: 'annotation-1', projectId: 'project-1', sourceImageId: 'placement-1',
+      sourceVersionId: 'source-version-1', type: 'region',
+      geometry: { kind: 'region', region: { x: 0.1, y: 0.2, w: 0, h: 0.4 } },
+      status: 'ready', createdAt: 1, updatedAt: 2,
+    });
+    expect(() => readCanvasDocument(doc)).toThrow('Invalid canvas annotation region');
+  });
+
   it('transfers a versioned placement to another real Yjs document', () => {
     const first = createCanvasDocument();
     applyCanvasImagePatch(first, {

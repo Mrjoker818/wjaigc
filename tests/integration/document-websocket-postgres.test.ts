@@ -51,6 +51,9 @@ async function seed(query: QueryFn): Promise<void> {
            ('editor-a', 'Editor A', 'test', 'active', 1, 1)
   `);
   await query("INSERT INTO wujie_projects (id, owner_id, name) VALUES ('project-a', 'owner-a', 'A')");
+  await query(`INSERT INTO wujie_project_document_settings
+    (project_id, owner_id, enabled, authority_revision)
+    VALUES ('project-a', 'owner-a', true, 0)`);
   await query(`
     INSERT INTO wujie_project_document_editors
       (project_id, owner_id, member_user_id, status)
@@ -66,6 +69,15 @@ async function seed(query: QueryFn): Promise<void> {
     VALUES ('version-one', 'asset-one', 'owner-a', 'project-a',
             '/api/serve-upload/images/one.png', 'ready', 'image/png', $1)
   `, [imageSize]);
+  await query(`INSERT INTO wujie_workspace_placements
+    (id, owner_id, project_id, asset_id, asset_version_id,
+     workspace_kind, workspace_id, entity_type, entity_id)
+    VALUES ('placement-one', 'owner-a', 'project-a', 'asset-one', 'version-one',
+            'canvas', 'project-a', 'canvas-image', 'image-one'),
+           ('placement-two', 'owner-a', 'project-a', 'asset-one', 'version-one',
+            'canvas', 'project-a', 'canvas-image', 'image-two'),
+           ('placement-cross-instance', 'owner-a', 'project-a', 'asset-one', 'version-one',
+            'canvas', 'project-a', 'canvas-image', 'image-cross-instance')`);
 }
 
 function decodedFrame(data: WebSocket.RawData): { type: number; sequence: bigint; payload: Uint8Array } {

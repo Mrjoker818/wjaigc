@@ -26,16 +26,6 @@ describe('Stage 2 Doctor PostgreSQL projection audit', () => {
   postgresIt('verifies exact graph identities and excludes protected assets from unregistered GC candidates', async () => {
     await withIsolatedPostgres('doctor_asset_projection', async ({ databaseUrl, query }) => {
       migrate(databaseUrl);
-      await query(
-        `CREATE TABLE wujie_user_data (
-           user_id TEXT NOT NULL,
-           data_key TEXT NOT NULL,
-           data_value JSONB NOT NULL,
-           updated_at BIGINT NOT NULL,
-           PRIMARY KEY (user_id, data_key)
-         )`,
-      );
-
       const ownerId = randomUUID();
       const projectId = randomUUID();
       const assetId = randomUUID();

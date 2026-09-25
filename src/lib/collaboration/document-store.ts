@@ -12,8 +12,8 @@ import {
   readCanvasDocument,
   type CanvasDocumentProjection,
 } from '@/lib/collaboration/canvas-document';
-import { assertDocumentEditor } from '@/lib/collaboration/document-access';
-import { assertProjectAssetVersion } from '@/lib/collaboration/document-assets';
+import { assertDocumentEditor, assertDocumentProjectEnabled } from '@/lib/collaboration/document-access';
+import { assertProjectAnnotationAsset, assertProjectAssetVersion, assertProjectCanvasPlacement } from '@/lib/collaboration/document-assets';
 
 const MAX_INCOMING_UPDATE_BYTES = 1_048_576;
 const MAX_PERSISTED_UPDATE_BYTES = 4_194_304;
@@ -56,6 +56,9 @@ function valueFingerprint(value: unknown): string {
   if (typeof value === 'number' && Number.isFinite(value)) {
     return `number:${Object.is(value, -0) ? '-0' : value}`;
   }
+  if (Array.isArray(value)) {
+    return `array:${JSON.stringify(value.map(item => valueFingerprint(item)))}`;
+  }
   if (typeof value === 'object' && !Array.isArray(value)) {
     const prototype = Object.getPrototypeOf(value);
     if (prototype !== Object.prototype && prototype !== null) {
@@ -75,7 +78,11 @@ export function assertCanonicalDocumentPayload(
   projection: CanvasDocumentProjection,
 ): void {
   const permitted = new Set<string>();
-  const permittedPlacementIds = new Set(Object.keys(projection.placements));
+  const permittedKeys = new Set([
+    ...Object.keys(projection.placements),
+    ...Object.keys(projection.groupDefinitions ?? {}),
+    ...Object.keys(projection.annotationRecords ?? {}),
+  ]);
   for (const placement of Object.values(projection.placements)) {
     for (const value of [
       placement.assetVersionId,
@@ -88,10 +95,20 @@ export function assertCanonicalDocumentPayload(
     if (Object.hasOwn(placement, 'annotation')) permitted.add(valueFingerprint(placement.annotation));
     if (placement.deleted === true) permitted.add(valueFingerprint(true));
   }
+  for (const group of Object.values(projection.groupDefinitions ?? {})) {
+    permitted.add(valueFingerprint(group));
+  }
+  for (const annotation of Object.values(projection.annotationRecords ?? {})) {
+    permitted.add(valueFingerprint(annotation));
+  }
+  if (Object.keys(projection.groupTombstones ?? {}).length > 0 ||
+      Object.keys(projection.annotationTombstones ?? {}).length > 0) {
+    permitted.add(valueFingerprint(true));
+  }
   for (const struct of Y.decodeUpdate(bytes).structs) {
     if (struct instanceof Y.GC) continue;
     if (!(struct instanceof Y.Item)) throw new Error('Unsupported canvas document history struct');
-    if (struct.parentSub !== null && !permittedPlacementIds.has(struct.parentSub)) {
+    if (struct.parentSub !== null && !permittedKeys.has(struct.parentSub)) {
       throw new Error('Canvas document history contains a key outside the current projection');
     }
     if (struct.content instanceof Y.ContentDeleted) continue;
@@ -111,7 +128,7 @@ function assertProjectId(projectId: string): void {
   }
 }
 
-async function readDocumentRow(client: PoolClient, projectId: string, lock = false): Promise<DocumentRow | undefined> {
+async function readDocumentRow(client: Pick<PoolClient, 'query'>, projectId: string, lock = false): Promise<DocumentRow | undefined> {
   const result = await client.query<DocumentRow>(
     `SELECT owner_id, sequence, snapshot_sequence, snapshot_bytes, projection
        FROM wujie_project_canvas_documents
@@ -121,7 +138,7 @@ async function readDocumentRow(client: PoolClient, projectId: string, lock = fal
   return result.rows[0];
 }
 
-async function hydrateDocument(client: PoolClient, projectId: string, row?: DocumentRow): Promise<Y.Doc> {
+async function hydrateDocument(client: Pick<PoolClient, 'query'>, projectId: string, row?: DocumentRow): Promise<Y.Doc> {
   const doc = createCanvasDocument();
   if (!row) return doc;
   if (row.snapshot_bytes.length > 0) Y.applyUpdate(doc, row.snapshot_bytes);
@@ -160,6 +177,15 @@ function canonicalizeCandidate(candidate: Y.Doc, projection: CanvasDocumentProje
   return canonical;
 }
 
+/** Apply the same validation to an initial project seed as to later writes. */
+export function encodeCanonicalDocumentSnapshot(doc: Y.Doc): {
+  bytes: Uint8Array;
+  projection: CanvasDocumentProjection;
+} {
+  const projection = readCanvasDocument(doc);
+  return { bytes: canonicalizeCandidate(doc, projection), projection };
+}
+
 function deriveVerifiedIncrementalUpdate(
   previous: Y.Doc,
   candidate: Y.Doc,
@@ -183,7 +209,7 @@ function deriveVerifiedIncrementalUpdate(
 }
 
 export async function loadDocumentInTransaction(
-  client: PoolClient, projectId: string,
+  client: Pick<PoolClient, 'query'>, projectId: string,
 ): Promise<LoadedDocument> {
   assertProjectId(projectId);
   const row = await readDocumentRow(client, projectId);
@@ -229,12 +255,15 @@ export async function commitDocumentUpdate(input: {
     const { ownerId } = await assertDocumentEditor(
       actorId, projectId, client, input.expectedGrantGeneration,
     );
+    await assertDocumentProjectEnabled(client, ownerId, projectId);
     const row = await readDocumentRow(client, projectId, true);
     const previous = await hydrateDocument(client, projectId, row);
     const candidate = createCanvasDocument();
     Y.applyUpdate(candidate, Y.encodeStateAsUpdate(previous));
     const existingVersions = new Set(previous.getMap('assetVersions').keys());
     const existingTombstones = new Set(previous.getMap('tombstones').keys());
+    const touchedGroups = new Set<string>();
+    const touchedAnnotations = new Set<string>();
     let touchedImmutableKey = false;
     candidate.getMap('assetVersions').observe(event => {
       for (const key of event.changes.keys.keys()) {
@@ -246,19 +275,39 @@ export async function commitDocumentUpdate(input: {
         if (existingTombstones.has(key)) touchedImmutableKey = true;
       }
     });
+    candidate.getMap('groupDefinitions').observe(event => {
+      for (const key of event.changes.keys.keys()) touchedGroups.add(key);
+    });
+    candidate.getMap('annotationRecords').observe(event => {
+      for (const key of event.changes.keys.keys()) touchedAnnotations.add(key);
+    });
     Y.applyUpdate(candidate, bytes);
     if (touchedImmutableKey) {
       throw new Error('Canvas document immutable placement history cannot be rewritten');
     }
+    if ([...touchedGroups].some(id => candidate.getMap('groupTombstones').get(id) === true) ||
+        [...touchedAnnotations].some(id => candidate.getMap('annotationTombstones').get(id) === true)) {
+      throw new Error('Canvas deleted metadata record cannot be rewritten');
+    }
     assertCanvasDocumentTransition(previous, candidate);
     const beforeProjection = readCanvasDocument(previous);
     const projection = readCanvasDocument(candidate);
+    for (const [annotationId, annotation] of Object.entries(projection.annotationRecords ?? {})) {
+      if (projection.annotationTombstones?.[annotationId] === true) continue;
+      if (annotation.projectId !== projectId) {
+        throw new Error('Canvas annotation project does not match document project');
+      }
+      for (const assetId of [annotation.maskAssetId, annotation.overlayAssetId]) {
+        if (assetId) await assertProjectAnnotationAsset(ownerId, projectId, assetId, client);
+      }
+    }
     for (const [placementId, placement] of Object.entries(projection.placements)) {
       if (placement.deleted === true &&
           beforeProjection.placements[placementId]?.assetVersionId === placement.assetVersionId) {
         continue;
       }
       await assertProjectAssetVersion(ownerId, projectId, placement.assetVersionId, client);
+      await assertProjectCanvasPlacement(ownerId, projectId, placementId, placement.assetVersionId, client);
     }
     const canonical = canonicalizeCandidate(candidate, projection);
     const oldCanonical = Y.encodeStateAsUpdate(previous);

@@ -1,7 +1,9 @@
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+
+vi.mock('server-only', () => ({}));
 
 import {
   patchCanvasSharePolicy,
@@ -26,10 +28,13 @@ async function applyMigrations(
   query: (text: string, values?: unknown[]) => Promise<unknown>,
 ): Promise<void> {
   for (const migrationPath of [
+    'migrations/20260809_wj_core_users.sql',
     'migrations/20260810_wj_stable_s2_assets.sql',
     'migrations/20260810_wj_stable_s2_workspace_entity_pairs.sql',
     'migrations/20260913_canvas_video_placements.sql',
     'migrations/20260919_read_only_canvas_shares.sql',
+    'migrations/20260925_yjs_canvas_editors.sql',
+    'migrations/20260925_yjs_canvas_documents.sql',
   ]) {
     await query(await readFile(migrationPath, 'utf8'));
   }

@@ -79,6 +79,7 @@ export interface DataLossSnapshotRecord {
 
 interface ProjectSyncResponse {
   success?: boolean;
+  code?: string;
   error?: string;
   projectRevision?: number;
   currentRevision?: number;
@@ -1712,6 +1713,10 @@ export class UserManager {
       const data = await syncRes.json().catch(() => null) as ProjectSyncResponse | null;
       if (!this.isCurrentProjectSyncRequest(request)) return;
       if (syncRes.status === 409) {
+        if (data?.code === 'DOCUMENT_AUTHORITY_CONFLICT') {
+          console.warn('[Sync] syncToServer: collaborative project requires document sync; local draft retained');
+          return;
+        }
         if (conflictRetries > 0) {
           const rebased = await this.loadProjectsFromServer(0, request.userId);
           if (rebased

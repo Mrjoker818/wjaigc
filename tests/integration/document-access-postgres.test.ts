@@ -1,12 +1,14 @@
 import { readFile } from 'node:fs/promises';
 
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { QueryFn } from '../helpers/postgres-test-database';
 
 vi.mock('server-only', () => ({}));
 
 const postgresIt = process.env.POSTGRES_TEST_DATABASE_URL?.trim() ? it : it.skip;
+
+afterEach(() => vi.unstubAllEnvs());
 
 async function setupDocumentDatabase(query: QueryFn): Promise<void> {
   await query(await readFile('migrations/20260809_wj_core_users.sql', 'utf8'));
@@ -38,6 +40,10 @@ describe('independent canvas document editor access on PostgreSQL', () => {
     const { withIsolatedPostgres } = await import('../helpers/postgres-test-database');
     await withIsolatedPostgres('document-editor-outbound-fence', async ({ query }) => {
       await setupDocumentDatabase(query);
+      vi.stubEnv('WUJIE_YJS_ENABLED', 'true');
+      await query(`INSERT INTO wujie_project_document_settings
+        (project_id, owner_id, enabled, authority_revision)
+        VALUES ('project-a', 'owner-a', true, 0)`);
       const { grantDocumentEditor, revokeDocumentEditor, withDocumentEditorRead } =
         await import('../../src/lib/collaboration/document-access');
       await grantDocumentEditor('owner-a', 'project-a', 'editor-a');

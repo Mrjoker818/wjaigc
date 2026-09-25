@@ -13,6 +13,38 @@ export class DocumentAccessError extends Error {
   }
 }
 
+export class DocumentProjectNotEnabledError extends Error {
+  readonly code = 'DOCUMENT_PROJECT_NOT_ENABLED';
+
+  constructor() {
+    super('项目尚未启用文档协作');
+    this.name = 'DocumentProjectNotEnabledError';
+  }
+}
+
+export class DocumentFeatureDisabledError extends Error {
+  readonly code = 'DOCUMENT_DISABLED';
+
+  constructor() {
+    super('文档协作当前只读');
+    this.name = 'DocumentFeatureDisabledError';
+  }
+}
+
+export async function assertDocumentProjectEnabled(
+  client: PoolClient,
+  ownerId: string,
+  projectId: string,
+): Promise<void> {
+  if (process.env.WUJIE_YJS_ENABLED !== 'true') throw new DocumentFeatureDisabledError();
+  const setting = await client.query<{ enabled: boolean }>(
+    `SELECT enabled FROM wujie_project_document_settings
+      WHERE owner_id = $1 AND project_id = $2 FOR SHARE`,
+    [ownerId, projectId],
+  );
+  if (setting.rows[0]?.enabled !== true) throw new DocumentProjectNotEnabledError();
+}
+
 export async function assertDocumentEditor(
   actorUserId: string,
   projectId: string,
@@ -81,7 +113,8 @@ export async function withDocumentEditorRead<T>(
   const client = await getPool().connect();
   try {
     await client.query('BEGIN');
-    await assertDocumentEditor(actorUserId, projectId, client, expectedGrantGeneration);
+    const { ownerId } = await assertDocumentEditor(actorUserId, projectId, client, expectedGrantGeneration);
+    await assertDocumentProjectEnabled(client, ownerId, projectId);
     const result = await deliver(client);
     await client.query('COMMIT');
     return result;

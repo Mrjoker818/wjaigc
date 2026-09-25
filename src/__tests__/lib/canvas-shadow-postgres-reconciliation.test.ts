@@ -2,7 +2,9 @@ import { randomUUID } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { resolve } from 'node:path';
 
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+
+vi.mock('server-only', () => ({}));
 import { Pool, type PoolClient } from 'pg';
 
 import type { LegacyImageMapping } from '@/lib/asset-core/legacy-migration';

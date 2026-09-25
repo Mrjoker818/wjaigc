@@ -4,7 +4,13 @@ import { createHash, randomBytes } from 'node:crypto';
 
 import { getPool } from '@/lib/db-client';
 
-import { assertDocumentEditor, DocumentAccessError } from './document-access';
+import {
+  assertDocumentEditor,
+  assertDocumentProjectEnabled,
+  DocumentAccessError,
+  DocumentFeatureDisabledError,
+  DocumentProjectNotEnabledError,
+} from './document-access';
 
 const TICKET_PATTERN = /^[A-Za-z0-9_-]{43}$/u;
 const MAX_OUTSTANDING_TICKETS = 4;
@@ -49,6 +55,7 @@ export async function issueDocumentTicket(userId: string, projectId: string): Pr
       [userId, projectId],
     );
     const { ownerId } = await assertDocumentEditor(userId, projectId, client);
+    await assertDocumentProjectEnabled(client, ownerId, projectId);
     const active = await client.query<{ count: number }>(
       `SELECT COUNT(*)::int AS count FROM wujie_document_tickets
         WHERE user_id = $1 AND project_id = $2
@@ -117,6 +124,16 @@ export async function consumeDocumentTicket(rawTicket: string): Promise<Document
       return null;
     }
     if (currentOwnerId !== row.owner_id) {
+      await client.query('COMMIT');
+      return null;
+    }
+    try {
+      await assertDocumentProjectEnabled(client, currentOwnerId, row.project_id);
+    } catch (error) {
+      if (!(error instanceof DocumentProjectNotEnabledError) && !(error instanceof DocumentFeatureDisabledError)) {
+        throw error;
+      }
+      await client.query('DELETE FROM wujie_document_tickets WHERE token_hash = $1', [hashTicket(rawTicket)]);
       await client.query('COMMIT');
       return null;
     }

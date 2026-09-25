@@ -8,6 +8,55 @@ import { assertCanonicalDocumentPayload } from '@/lib/collaboration/document-sto
 vi.mock('server-only', () => ({}));
 
 describe('canonical Yjs document payload', () => {
+  it('keeps deleted metadata records and their monotonic tombstones in a canonical update', () => {
+    const doc = new Y.Doc();
+    doc.getMap('assetVersions').set('placement-one', 'version-one');
+    doc.getMap('transforms').set('placement-one', {
+      x: 10, y: 20, width: 80, height: 60, rotation: 0, zIndex: 1,
+    });
+    doc.getMap('groupDefinitions').set('group-one', {
+      id: 'group-one', name: 'Hero', note: '', imageIds: ['placement-one'],
+    });
+    doc.getMap('annotationRecords').set('annotation-one', {
+      id: 'annotation-one', projectId: 'project-one', sourceImageId: 'placement-one',
+      sourceVersionId: 'source-one', type: 'region',
+      geometry: { kind: 'region', region: { x: 0.1, y: 0.2, w: 0.3, h: 0.4 } },
+      status: 'ready', createdAt: 1, updatedAt: 2,
+    });
+    doc.getMap('groupTombstones').set('group-one', true);
+    doc.getMap('annotationTombstones').set('annotation-one', true);
+    const projection = readCanvasDocument(doc);
+
+    expect(() => assertCanonicalDocumentPayload(Y.encodeStateAsUpdate(doc), projection)).not.toThrow();
+  });
+
+  it('accepts current group and annotation records without admitting overwritten history', () => {
+    const doc = new Y.Doc({ gc: false });
+    doc.getMap('assetVersions').set('placement-one', 'version-one');
+    doc.getMap('transforms').set('placement-one', {
+      x: 10, y: 20, width: 80, height: 60, rotation: 0, zIndex: 1,
+    });
+    doc.getMap('groupDefinitions').set('group-one', {
+      id: 'group-one', name: 'Hero', note: 'Keep together',
+      imageIds: ['placement-one'], x: 5, y: 6, collapsed: false,
+    });
+    doc.getMap('annotationRecords').set('annotation-one', {
+      id: 'annotation-one', projectId: 'project-one', sourceImageId: 'placement-one',
+      sourceVersionId: 'source-one', type: 'brush',
+      geometry: { kind: 'brush', points: [{ x: 0.2, y: 0.3 }], width: 0.02 },
+      status: 'ready', createdAt: 1, updatedAt: 2,
+    });
+    const projection = readCanvasDocument(doc);
+    expect(() => assertCanonicalDocumentPayload(Y.encodeStateAsUpdate(doc), projection)).not.toThrow();
+
+    doc.getMap('groupDefinitions').set('group-one', {
+      id: 'group-one', name: 'Hero', note: 'different current record',
+      imageIds: ['placement-one'], x: 5, y: 6, collapsed: false,
+    });
+    const changed = readCanvasDocument(doc);
+    expect(() => assertCanonicalDocumentPayload(Y.encodeStateAsUpdate(doc), changed)).toThrow();
+  });
+
   it('rejects overwritten unlabelled credentials retained in Yjs history', () => {
     const doc = new Y.Doc({ gc: false });
     const annotations = doc.getMap('annotations');

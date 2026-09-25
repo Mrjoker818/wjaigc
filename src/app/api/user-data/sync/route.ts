@@ -35,6 +35,7 @@ import {
 import type { SimpleChatProject } from '@/components/simple-chat/simple-chat-types';
 import { errorResponse, getRequestId, withRequestId } from '@/lib/request-id';
 import { logOperation } from '@/lib/op-log';
+import { readOwnerProjectsWithDocuments } from '@/lib/collaboration/document-project-bridge';
 
 export const dynamic = 'force-dynamic';
 
@@ -569,6 +570,7 @@ export async function GET(request: NextRequest) {
       if (getAssetGraphReadStrategy(assetGraphMode) === 'asset-authoritative') {
         value = await readAssetV3Projects(sessionUser.id, value as Project[]);
       }
+      value = await readOwnerProjectsWithDocuments(sessionUser.id, value as Project[]);
     }
 
     return NextResponse.json({
@@ -725,6 +727,12 @@ export async function POST(request: NextRequest) {
     let assetGraphMappings: AssetGraphMappings = {};
     let assetGraphUpdates: Record<string, Record<string, CanvasAssetGraphUpdate>> = {};
     let projectRevision: number | undefined;
+    if (key === 'projects' && !Array.isArray(value)) {
+      return NextResponse.json({
+        success: false,
+        error: 'Canvas projects must be an array',
+      }, { status: 400 });
+    }
 
     // 【数据隔离】对 projects 类型数据做服务端验证和清洗
     // 1. 强制过滤只保留属于当前会话用户的项目
@@ -810,6 +818,13 @@ export async function POST(request: NextRequest) {
         success: false,
         error: error.message,
         currentRevision: error.currentRevision,
+      }, { status: 409 });
+    }
+    if (error instanceof Error && 'code' in error && error.code === 'DOCUMENT_AUTHORITY_CONFLICT') {
+      return NextResponse.json({
+        success: false,
+        code: 'DOCUMENT_AUTHORITY_CONFLICT',
+        error: error.message,
       }, { status: 409 });
     }
     return NextResponse.json({

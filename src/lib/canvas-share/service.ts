@@ -8,6 +8,7 @@ import {
   type ManagedMediaReadResult,
 } from '@/lib/asset-core/managed-media-read';
 import type { Asset, AssetVersion } from '@/lib/asset-core/types';
+import { readCanvasDocument, type CanvasDocumentProjection } from '@/lib/collaboration/canvas-document';
 import {
   lockCanvasProjectRevision,
   readCanvasProjectRevision,
@@ -151,13 +152,46 @@ async function prepareCanvasShareSnapshotSource(
   const projectName = typeof project.name === 'string' && project.name.trim()
     ? project.name.trim()
     : '未命名项目';
+  const setting = await client.query<{ enabled: boolean }>(
+    `SELECT enabled FROM wujie_project_document_settings
+      WHERE project_id = $1 AND owner_id = $2`,
+    [input.projectId, input.ownerId],
+  );
+  let documentProjection: CanvasDocumentProjection | undefined;
+  if (setting.rows[0]?.enabled === true) {
+    const { loadDocumentInTransaction } = await import('@/lib/collaboration/document-store');
+    const document = await client.query(
+      `SELECT 1 FROM wujie_project_canvas_documents
+        WHERE project_id = $1 AND owner_id = $2 FOR SHARE`,
+      [input.projectId, input.ownerId],
+    );
+    if (document.rowCount !== 1) throw new CanvasShareError('CANVAS_SHARE_PROJECT_CONFLICT');
+    documentProjection = readCanvasDocument((await loadDocumentInTransaction(client, input.projectId)).doc);
+  }
   return {
     projectName,
     source: {
       readProjectRevision: ownerId => readCanvasProjectRevision(ownerId, client),
-      listActiveCanvasPlacements: (ownerId, projectId) => (
-        assetStorage.listActiveCanvasPlacements(ownerId, projectId)
-      ),
+      listActiveCanvasPlacements: async (ownerId, projectId) => {
+        const graphPlacements = await assetStorage.listActiveCanvasPlacements(ownerId, projectId);
+        if (!documentProjection) return graphPlacements;
+        const byId = new Map(graphPlacements.map(placement => [placement.id, placement]));
+        return Object.entries(documentProjection.placements).flatMap(([placementId, state]) => {
+          if (state.deleted === true) return [];
+          const placement = byId.get(placementId);
+          if (!placement || placement.assetVersionId !== state.assetVersionId) {
+            throw new CanvasShareError('CANVAS_SHARE_PROJECT_CONFLICT');
+          }
+          return [{
+            ...placement,
+            transform: {
+              ...placement.transform,
+              x: state.x, y: state.y, width: state.width, height: state.height,
+              rotation: state.rotation, zIndex: state.zIndex,
+            },
+          }];
+        });
+      },
       findAsset: (ownerId, projectId, assetId) => (
         assetStorage.findAsset(ownerId, projectId, assetId)
       ),

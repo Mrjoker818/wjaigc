@@ -5,7 +5,7 @@ import path from 'node:path';
 
 import { Client } from 'pg';
 import sharp from 'sharp';
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as Y from 'yjs';
 
 import type { QueryFn } from '../helpers/postgres-test-database';
@@ -36,10 +36,14 @@ afterAll(async () => {
   if (mediaRoot) await rm(mediaRoot, { recursive: true, force: true });
 });
 
+beforeEach(() => vi.stubEnv('WUJIE_YJS_ENABLED', 'true'));
+afterEach(() => vi.unstubAllEnvs());
+
 async function seedDatabase(query: QueryFn): Promise<void> {
   for (const migration of [
     '20260809_wj_core_users.sql',
     '20260810_wj_stable_s2_assets.sql',
+    '20260913_canvas_video_placements.sql',
     '20260925_yjs_canvas_editors.sql',
     '20260925_yjs_canvas_documents.sql',
   ]) {
@@ -53,6 +57,9 @@ async function seedDatabase(query: QueryFn): Promise<void> {
            ('editor-a', 'Editor A', 'test', 'active', 1, 1)
   `);
   await query("INSERT INTO wujie_projects (id, owner_id, name) VALUES ('project-a', 'owner-a', 'A')");
+  await query(`INSERT INTO wujie_project_document_settings
+    (project_id, owner_id, enabled, authority_revision)
+    VALUES ('project-a', 'owner-a', true, 0)`);
   await query(`
     INSERT INTO wujie_project_document_editors
       (project_id, owner_id, member_user_id, status)
@@ -71,6 +78,13 @@ async function seedDatabase(query: QueryFn): Promise<void> {
            ('version-two', 'asset-two', 'owner-a', 'project-a',
             '/api/serve-upload/images/two.png', 'ready', 'image/png', $1)
   `, [imageSize]);
+  await query(`INSERT INTO wujie_workspace_placements
+    (id, owner_id, project_id, asset_id, asset_version_id,
+     workspace_kind, workspace_id, entity_type, entity_id)
+    VALUES ('placement-one', 'owner-a', 'project-a', 'asset-one', 'version-one',
+            'canvas', 'project-a', 'canvas-image', 'image-one'),
+           ('placement-two', 'owner-a', 'project-a', 'asset-two', 'version-two',
+            'canvas', 'project-a', 'canvas-image', 'image-two')`);
 }
 
 function placementUpdate(placementId: string, versionId: string): Uint8Array {
@@ -145,6 +159,107 @@ async function runStoreInSeparateProcess(
 }
 
 describe('Yjs document store on isolated PostgreSQL', () => {
+  postgresIt('accepts a historical canvas workspace ID for an active project placement', async () => {
+    const { withIsolatedPostgres } = await import('../helpers/postgres-test-database');
+    await withIsolatedPostgres('document-store-legacy-workspace', async ({ query }) => {
+      await seedDatabase(query);
+      await query(`UPDATE wujie_workspace_placements SET workspace_id = 'canvas:project-a'
+        WHERE id = 'placement-one'`);
+      const { commitDocumentUpdate, loadDocument } = await import('../../src/lib/collaboration/document-store');
+      await expect(commitDocumentUpdate({
+        actorId: 'owner-a', projectId: 'project-a',
+        bytes: placementUpdate('placement-one', 'version-one'),
+      })).resolves.toMatchObject({ sequence: 1 });
+      expect(readCanvasDocument((await loadDocument('project-a')).doc).placements['placement-one'].x).toBe(10);
+    });
+  });
+
+  postgresIt('accepts a historical canvas-video placement for an active project version', async () => {
+    const { withIsolatedPostgres } = await import('../helpers/postgres-test-database');
+    await withIsolatedPostgres('document-store-legacy-video-placement', async ({ query }) => {
+      await seedDatabase(query);
+      await query(`UPDATE wujie_workspace_placements SET entity_type = 'canvas-video'
+        WHERE id = 'placement-one'`);
+      const { commitDocumentUpdate, loadDocument } = await import('../../src/lib/collaboration/document-store');
+      await expect(commitDocumentUpdate({
+        actorId: 'owner-a', projectId: 'project-a',
+        bytes: placementUpdate('placement-one', 'version-one'),
+      })).resolves.toMatchObject({ sequence: 1 });
+      expect(readCanvasDocument((await loadDocument('project-a')).doc).placements['placement-one'].assetVersionId)
+        .toBe('version-one');
+    });
+  });
+
+  postgresIt('rejects a document placement that does not match an active canvas graph placement', async () => {
+    const { withIsolatedPostgres } = await import('../helpers/postgres-test-database');
+    await withIsolatedPostgres('document-store-placement-identity', async ({ query }) => {
+      await seedDatabase(query);
+      const { commitDocumentUpdate } = await import('../../src/lib/collaboration/document-store');
+      for (const [placementId, versionId] of [
+        ['forged-placement', 'version-one'],
+        ['placement-one', 'version-two'],
+      ]) {
+        await expect(commitDocumentUpdate({
+          actorId: 'owner-a', projectId: 'project-a',
+          bytes: placementUpdate(placementId, versionId),
+        })).rejects.toMatchObject({ code: 'DOCUMENT_ASSET_FORBIDDEN' });
+      }
+      await query(`UPDATE wujie_workspace_placements
+        SET status = 'trashed', deleted_at = now() WHERE id = 'placement-two'`);
+      await expect(commitDocumentUpdate({
+        actorId: 'owner-a', projectId: 'project-a',
+        bytes: placementUpdate('placement-two', 'version-two'),
+      })).rejects.toMatchObject({ code: 'DOCUMENT_ASSET_FORBIDDEN' });
+      expect((await query("SELECT 1 FROM wujie_project_canvas_documents WHERE project_id = 'project-a'")).rowCount)
+        .toBe(0);
+    });
+  });
+
+  postgresIt('rejects direct updates before a project is document-authoritative', async () => {
+    const { withIsolatedPostgres } = await import('../helpers/postgres-test-database');
+    await withIsolatedPostgres('document-store-not-enabled', async ({ query }) => {
+      await seedDatabase(query);
+      await query("DELETE FROM wujie_project_document_settings WHERE project_id = 'project-a'");
+      const { commitDocumentUpdate } = await import('../../src/lib/collaboration/document-store');
+      await expect(commitDocumentUpdate({
+        actorId: 'owner-a', projectId: 'project-a',
+        bytes: placementUpdate('placement-one', 'version-one'),
+      })).rejects.toMatchObject({ code: 'DOCUMENT_PROJECT_NOT_ENABLED' });
+      expect((await query("SELECT 1 FROM wujie_project_canvas_documents WHERE project_id = 'project-a'")).rowCount)
+        .toBe(0);
+    });
+  });
+
+  postgresIt('does not deliver document frames after document authority is disabled', async () => {
+    const { withIsolatedPostgres } = await import('../helpers/postgres-test-database');
+    await withIsolatedPostgres('document-store-disabled-read', async ({ query }) => {
+      await seedDatabase(query);
+      await query(`UPDATE wujie_project_document_settings SET enabled = false
+        WHERE project_id = 'project-a'`);
+      const { withDocumentEditorRead } = await import('../../src/lib/collaboration/document-access');
+      let delivered = false;
+      await expect(withDocumentEditorRead('editor-a', 'project-a', '1', async () => {
+        delivered = true;
+      })).rejects.toMatchObject({ code: 'DOCUMENT_PROJECT_NOT_ENABLED' });
+      expect(delivered).toBe(false);
+    });
+  });
+
+  postgresIt('keeps a document-authoritative project read-only when the live feature flag is off', async () => {
+    const { withIsolatedPostgres } = await import('../helpers/postgres-test-database');
+    await withIsolatedPostgres('document-store-flag-off', async ({ query }) => {
+      await seedDatabase(query);
+      vi.stubEnv('WUJIE_YJS_ENABLED', 'false');
+      const { commitDocumentUpdate } = await import('../../src/lib/collaboration/document-store');
+      await expect(commitDocumentUpdate({
+        actorId: 'owner-a', projectId: 'project-a',
+        bytes: placementUpdate('placement-one', 'version-one'),
+      })).rejects.toMatchObject({ code: 'DOCUMENT_DISABLED' });
+      expect((await query("SELECT 1 FROM wujie_project_canvas_documents WHERE project_id = 'project-a'")).rowCount)
+        .toBe(0);
+    });
+  });
+
   postgresIt('rejects an old connection generation after revoke and regrant', async () => {
     const { withIsolatedPostgres } = await import('../helpers/postgres-test-database');
     await withIsolatedPostgres('document-store-stale-grant', async ({ query }) => {

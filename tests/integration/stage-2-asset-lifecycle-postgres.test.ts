@@ -179,6 +179,22 @@ describe('stage 2 asset lifecycle PostgreSQL contract', () => {
           placementId,
         }),
       ]);
+
+      await query(`INSERT INTO wujie_project_document_settings
+        (project_id, owner_id, enabled, authority_revision)
+        VALUES ($1, $2, true, 8)`, [projectId, ownerId]);
+      await expect(createAssetService().trashPlacement({
+        actorUserId: ownerId, projectId, placementId,
+      })).rejects.toThrow('DOCUMENT_AUTHORITY_CONFLICT');
+      const afterRejectedTrash = await query<{ status: string }>(
+        'SELECT status FROM wujie_workspace_placements WHERE id = $1', [placementId],
+      );
+      expect(afterRejectedTrash.rows[0]?.status).toBe('active');
+      const afterRejectedSnapshot = await query<{ data_value: unknown }>(
+        `SELECT data_value FROM wujie_user_data
+          WHERE user_id = $1 AND data_key = 'projects'`, [ownerId],
+      );
+      expect(afterRejectedSnapshot.rows[0]?.data_value).toEqual(values.projects);
     });
   }, 30_000);
 

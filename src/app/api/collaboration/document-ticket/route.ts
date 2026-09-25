@@ -56,6 +56,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       && 'code' in error && error.code === 'DOCUMENT_FORBIDDEN') {
       return response({ success: false, code: 'DOCUMENT_FORBIDDEN' }, 403);
     }
+    if (typeof error === 'object' && error !== null
+      && 'code' in error && error.code === 'DOCUMENT_PROJECT_NOT_ENABLED') {
+      return response({ success: false, code: 'DOCUMENT_PROJECT_NOT_ENABLED' }, 409);
+    }
     return response({ success: false, code: 'DOCUMENT_INTERNAL_ERROR' }, 500);
   }
 }

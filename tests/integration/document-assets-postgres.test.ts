@@ -118,6 +118,35 @@ async function setupAdoptionDatabase(query: QueryFn): Promise<void> {
 }
 
 describe('Yjs canvas project asset reference authority on PostgreSQL', () => {
+  postgresIt('requires an annotation asset current version to be ready and usable', async () => {
+    const { withIsolatedPostgres } = await import('../helpers/postgres-test-database');
+    await withIsolatedPostgres('document-annotation-current-version', async ({ query }) => {
+      await setupAssetDatabase(query);
+      const { getPool } = await import('../../src/lib/db-client');
+      const { assertProjectAnnotationAsset } = await import('../../src/lib/collaboration/document-assets');
+      const client = await getPool().connect();
+      try {
+        await query("UPDATE wujie_assets SET current_version_id = 'version-a' WHERE id = 'asset-a'");
+        await expect(assertProjectAnnotationAsset('owner-a', 'project-a', 'asset-a', client))
+          .resolves.toBeUndefined();
+
+        await query(`INSERT INTO wujie_asset_versions
+          (id, asset_id, owner_id, project_id, file_url, availability, mime_type, byte_size)
+          VALUES ('version-a-next', 'asset-a', 'owner-a', 'project-a',
+            '/api/serve-upload/images/gone.png', 'missing', 'image/png', $1)`, [imageBytes.length]);
+        await query("UPDATE wujie_assets SET current_version_id = 'version-a-next' WHERE id = 'asset-a'");
+        await expect(assertProjectAnnotationAsset('owner-a', 'project-a', 'asset-a', client))
+          .rejects.toMatchObject({ code: 'DOCUMENT_ASSET_FORBIDDEN' });
+
+        await query("UPDATE wujie_asset_versions SET availability = 'ready' WHERE id = 'version-a-next'");
+        await expect(assertProjectAnnotationAsset('owner-a', 'project-a', 'asset-a', client))
+          .rejects.toMatchObject({ code: 'DOCUMENT_ASSET_FORBIDDEN' });
+      } finally {
+        client.release();
+      }
+    });
+  });
+
   postgresIt('accepts only a ready version in the exact active owner project and asset', async () => {
     const { withIsolatedPostgres } = await import('../helpers/postgres-test-database');
     await withIsolatedPostgres('document-asset-reference', async ({ query }) => {

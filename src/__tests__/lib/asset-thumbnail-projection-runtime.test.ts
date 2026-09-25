@@ -2,6 +2,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({ query: vi.fn() }));
 
+vi.mock('server-only', () => ({}));
+
 vi.mock('@/lib/db-client', () => ({
   getPool: () => ({ query: mocks.query }),
 }));
@@ -24,10 +26,7 @@ describe('asset thumbnail projection rollout', () => {
 
   it('keeps project loading available while only the new thumbnail table migration is pending', async () => {
     mocks.query
-      .mockRejectedValueOnce(Object.assign(
-        new Error('relation "wujie_asset_thumbnail_variants" does not exist'),
-        { code: '42P01' },
-      ))
+      .mockResolvedValueOnce({ rows: [{ exists: false }] })
       .mockResolvedValueOnce({ rows: [] });
 
     await expect(readAssetV3Projects('user-1', [project])).resolves.toEqual([project]);

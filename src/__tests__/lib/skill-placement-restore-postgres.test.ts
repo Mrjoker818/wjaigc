@@ -2,7 +2,9 @@ import { randomUUID } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { resolve } from 'node:path';
 import { Pool } from 'pg';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+
+vi.mock('server-only', () => ({}));
 import { transferCanvasSkillAsset } from '@/lib/skill-runtime/canvas-client';
 import type { CanvasImage } from '@/lib/user-types';
 import { readCanvasShadowSnapshot } from '@/lib/asset-core/canvas-project-sync';

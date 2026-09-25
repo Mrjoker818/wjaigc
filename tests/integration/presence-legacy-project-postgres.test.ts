@@ -16,6 +16,7 @@ async function setup(query: QueryFn): Promise<void> {
     'migrations/20260924_project_presence.sql',
     'migrations/20260924_project_presence_tickets.sql',
     'migrations/20260924_project_presence_ttl_leases.sql',
+    'migrations/20260925_yjs_canvas_editors.sql',
   ]) await query(await readFile(file, 'utf8'));
   await query(`INSERT INTO wujie_users (id, name, password_hash, status, created_at, updated_at)
     VALUES ('owner-a', 'Owner A', 'test', 'active', 1, 1),

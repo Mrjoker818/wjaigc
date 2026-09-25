@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
+vi.mock('server-only', () => ({}));
+
 import {
   executeCanvasProjectSync,
   executeLegacyCanvasProjectSync,
