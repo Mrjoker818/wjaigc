@@ -558,5 +558,7 @@
   "src/lib/collaboration/document-access.ts",
   "migrations/20260925_yjs_canvas_asset_adoptions.sql",
   "src/lib/collaboration/document-assets.ts",
-  "src/lib/asset-core/collaboration-adoption.ts"
+  "src/lib/asset-core/collaboration-adoption.ts",
+  "migrations/20260925_yjs_canvas_documents.sql",
+  "src/lib/collaboration/document-store.ts"
 ]

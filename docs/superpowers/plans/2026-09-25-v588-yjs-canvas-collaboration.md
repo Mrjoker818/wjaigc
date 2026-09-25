@@ -93,7 +93,7 @@ await expect(assertDocumentEditor(editorId, projectId)).resolves.toMatchObject({
 
 **Interfaces:** `assertProjectAssetVersion(ownerId, projectId, versionId, client): Promise<void>`；`adoptCompletedResultIntoProject({ actorId, ownerId, projectId, taskId, sourceVersionId, idempotencyKey }): Promise<{ assetVersionId; placementId }>`。
 
-- [ ] **Step 1：写 RED。** 已就绪同项目版本通过；他人/跨项目/trashed/未完成版本拒绝；编辑者任务只在 `completed` 且媒体可用时被采纳；重放幂等；原任务扣费与 owner 不变；原图和原版本不覆盖。
+- [x] **Step 1：写 RED。** 已就绪同项目版本通过；他人/跨项目/trashed/未完成版本拒绝；编辑者任务只在 `completed` 且媒体可用时被采纳；重放幂等；原任务扣费与 owner 不变；原图和原版本不覆盖。
 
 ```ts
 await expect(assertProjectAssetVersion(ownerId, projectId, foreignVersionId, client))
@@ -102,9 +102,9 @@ const first = await adoptCompletedResultIntoProject(input);
 expect(await adoptCompletedResultIntoProject(input)).toEqual(first);
 ```
 
-- [ ] **Step 2：运行 RED。** 独立真库跑本任务两份测试，记录实际失败分支。
-- [ ] **Step 3：最小 GREEN。** 对原任务及版本精确加锁，校验 actor 和项目 editor；为项目创建独立资产/版本及父系引用，媒体校验先于项目采纳提交；用 actor+项目+task+sourceVersion 作为幂等域，不复制或重记积分流水。
-- [ ] **Step 4：复验并提交。** 真库并发 20 路重放、一份资产投影、零额外扣费；相关既有任务/资产回归、类型/Lint 后只提交目标文件。
+- [x] **Step 2：运行 RED。** 独立真库跑本任务两份测试，记录实际失败分支。
+- [x] **Step 3：最小 GREEN。** 对原任务及版本精确加锁，校验 actor 和项目 editor；为项目创建独立资产/版本及父系引用，媒体校验先于项目采纳提交；用 actor+项目+task+sourceVersion 作为幂等域，不复制或重记积分流水。
+- [x] **Step 4：复验并提交。** 真库并发 20 路重放、一份资产投影、零额外扣费；相关既有任务/资产回归、类型/Lint 后只提交目标文件。
 
 ### Task 4：持久 Yjs 更新、物化投影与多实例补读
 
@@ -112,7 +112,7 @@ expect(await adoptCompletedResultIntoProject(input)).toEqual(first);
 
 **Interfaces:** `loadDocument(projectId): Promise<{ doc: Y.Doc; sequence: number }>`；`commitDocumentUpdate({ actorId, projectId, bytes }): Promise<{ sequence: number; update: Uint8Array }>`；`readDocumentUpdatesAfter(projectId, sequence)`；`compactDocument(projectId)`。
 
-- [ ] **Step 1：写 RED。** 更新确认后重建进程仍存在，重复更新幂等，两个实例反序提交收敛；通知丢失按序号补读；错误素材、超大更新或错误投影不写日志/投影；原始 Yjs 更新删除墓碑/摆放记录或塞入额外根类型时事务拒绝且不写日志；一次原始更新先写 `data:` 媒体内容再覆盖成合法版本时，不得将禁入历史字节写入日志/快照；压缩前后状态向量相等。
+- [x] **Step 1：写 RED。** 更新确认后重建进程仍存在，重复更新幂等，两个实例反序提交收敛；通知丢失按序号补读；错误素材、超大更新或错误投影不写日志/投影；原始 Yjs 更新删除墓碑/摆放记录或塞入额外根类型时事务拒绝且不写日志；一次原始更新先写 `data:` 媒体内容再覆盖成合法版本时，不得将禁入历史字节写入日志/快照；压缩前后状态向量相等。
 
 ```ts
 const ack = await commitDocumentUpdate({ actorId, projectId, bytes: validUpdate });
@@ -120,9 +120,9 @@ expect(ack.sequence).toBe(1);
 expect(readCanvasDocument((await loadDocument(projectId)).doc)).toEqual(expectedProjection);
 ```
 
-- [ ] **Step 2：运行 RED。** 新库迁移后跑单元/集成测试，确认缺少 store 导致失败。
-- [ ] **Step 3：最小 GREEN。** 项目事务锁下从快照+日志构造临时 `Y.Doc`，应用更新后必须调用 `assertCanvasDocumentTransition(previous, candidate)`，再验证 Task 3 资产归属。不得直接存原始来稿；对候选规范重编码，独立解码验证并证明禁入历史负载不残留（否则拒绝），在同一事务中写规范 BYTEA 更新/序号/JSONB 投影；`pg_notify` 仅发送项目与序号。提交后才广播；定期压缩保留有界恢复日志，并验证多实例状态向量补读仍正确。
-- [ ] **Step 4：复验并提交。** 断开 LISTEN、强制重建进程、迁移二次运行，跑聚焦和类型/Lint 后只提交目标文件。
+- [x] **Step 2：运行 RED。** 新库迁移后跑单元/集成测试，确认缺少 store 导致失败。
+- [x] **Step 3：最小 GREEN。** 项目事务锁下从快照+日志构造临时 `Y.Doc`，应用更新后必须调用 `assertCanvasDocumentTransition(previous, candidate)`，再验证 Task 3 资产归属。不得直接存原始来稿；对候选规范重编码，独立解码验证并证明禁入历史负载不残留（否则拒绝），在同一事务中写规范 BYTEA 更新/序号/JSONB 投影；`pg_notify` 仅发送项目与序号。提交后才广播；定期压缩保留有界恢复日志，并验证多实例状态向量补读仍正确。
+- [x] **Step 4：复验并提交。** 断开 LISTEN、强制重建进程、迁移二次运行，跑聚焦和类型/Lint 后只提交目标文件。
 
 ### Task 5：独立票据、同源升级与文档 WebSocket 网关
 
