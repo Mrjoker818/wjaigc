@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import ts from 'typescript';
 import { describe, expect, it, vi } from 'vitest';
+import { commitCanvasImageRefChange } from '@/lib/collaboration/canvas-document-image-bridge';
 
 function sizeEffect(bindings: Record<string, unknown>): () => (() => void) | undefined {
   const path = resolve('src/components/infinite-canvas.tsx');
@@ -34,7 +35,7 @@ function setup(originalWidth?: number, originalHeight?: number, secondImage = fa
   const images = secondImage ? [image, { ...image, id: 'other', url: '/other.png' }] : [image];
   const imagesRef = { current: images };
   const onImagesChange = vi.fn();
-  const run = sizeEffect({ images, imagesRef, onImagesChange,
+  const run = sizeEffect({ images, imagesRef, onImagesChange, commitCanvasImageRefChange,
     sizeFillAttemptedRef: { current: new Set<string>() }, window: { Image: TestImage } });
   return { run, loads, onImagesChange, imagesRef };
 }

@@ -31,6 +31,9 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     if (error instanceof Error && 'code' in error && error.code === 'DOCUMENT_FORBIDDEN') {
       return response({ success: false, code: 'DOCUMENT_FORBIDDEN' }, 403);
     }
+    if (error instanceof Error && 'code' in error && error.code === 'DOCUMENT_PROJECT_NOT_ENABLED') {
+      return response({ success: false, code: 'DOCUMENT_PROJECT_NOT_ENABLED' }, 409);
+    }
     if (error instanceof Error && 'code' in error && error.code === 'DOCUMENT_AUTHORITY_CONFLICT') {
       return response({ success: false, code: 'DOCUMENT_AUTHORITY_CONFLICT' }, 409);
     }

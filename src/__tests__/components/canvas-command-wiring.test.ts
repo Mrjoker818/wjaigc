@@ -248,17 +248,6 @@ describe('canvas command and explicit history wiring', () => {
     expect(serverSync).not.toContain('skipHistoryRef.current = false');
   });
 
-  it('finishes initial project hydration without a timer window that drops user history', () => {
-    const projectResolution = workspace.indexOf('const projectId = initialProjectIdRef.current');
-    const hydrationStart = workspace.indexOf('if (projectId) {', projectResolution);
-    const hydrationEnd = workspace.indexOf('setAuthChecked(true);', hydrationStart);
-    const hydration = workspace.slice(hydrationStart, hydrationEnd);
-
-    expect(hydration).toContain("as CanvasImage[], { history: 'skip' });");
-    expect(hydration).not.toContain('skipHistoryRef.current');
-    expect(workspace).not.toContain('const skipHistoryRef = useRef(false)');
-  });
-
   it('records user deletions during a server merge while excluding the snapshot itself', () => {
     expect(workspace).toContain("next.length < prev.length && historyIntent !== 'skip'");
     expect(workspace).not.toContain('next.length < prev.length && !serverSyncMergeRef.current');

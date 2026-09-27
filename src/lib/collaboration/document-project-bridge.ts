@@ -13,7 +13,7 @@ import { inspectManagedImageMetadata } from '@/lib/asset-core/image-result-metad
 import { migrateLegacyProjectOnWriteInTransaction, prepareVerifiedLegacyProjectMedia, selectCanvasImagesForAssetGraph } from '@/lib/asset-core/legacy-migration';
 import { readProjectSnapshot } from '@/lib/asset-core/project-readers';
 import { applyCanvasImagePatch, createCanvasDocument, readCanvasDocument, type CanvasDocumentProjection } from '@/lib/collaboration/canvas-document';
-import { assertDocumentEditor } from '@/lib/collaboration/document-access';
+import { assertDocumentEditor, DocumentProjectNotEnabledError } from '@/lib/collaboration/document-access';
 import { assertProjectAnnotationAsset, assertProjectAssetVersion } from '@/lib/collaboration/document-assets';
 import { encodeCanonicalDocumentSnapshot, loadDocumentInTransaction } from '@/lib/collaboration/document-store';
 import { getPool } from '@/lib/db-client';
@@ -42,10 +42,45 @@ export interface CollaborativeProjectRead {
   ownerId: string;
   sequence: number;
   projection: CanvasDocumentProjection;
+  canvasImages: CanvasImage[];
+  workspace: Project;
   readOnly: boolean;
 }
 
-export async function readCollaborativeProject(actorId: string, projectId: string): Promise<CollaborativeProjectRead> {
+function toDocumentCanvasImage(image: CanvasImage): CanvasImage {
+  return {
+    id: image.id, url: image.url,
+    x: image.x, y: image.y, width: image.width, height: image.height,
+    originalWidth: image.originalWidth, originalHeight: image.originalHeight,
+    rotation: image.rotation, zIndex: image.zIndex, createdAt: image.createdAt,
+    assetId: image.assetId, assetVersionId: image.assetVersionId,
+    placementId: image.placementId,
+    prompt: image.prompt, modifyPrompt: image.modifyPrompt,
+    model: image.model, modelName: image.modelName, quality: image.quality,
+    aspectRatio: image.aspectRatio, stylePreset: image.stylePreset,
+    category: image.category, size: image.size, groupId: image.groupId,
+    thumbnailUrl: image.thumbnailUrl, mediaAvailability: image.mediaAvailability,
+    mediaErrorCode: image.mediaErrorCode,
+    threeDModelUrl: image.threeDModelUrl,
+    threeDModelUrls: image.threeDModelUrls,
+    threeDThumbnailUrls: image.threeDThumbnailUrls,
+    threeDTextureUrls: image.threeDTextureUrls,
+    threeDModelInfo: image.threeDModelInfo,
+    generatedFromImageId: image.generatedFromImageId,
+    annotationVersionId: image.annotationVersionId,
+    annotationSourceImageId: image.annotationSourceImageId,
+    annotationSourceVersionId: image.annotationSourceVersionId,
+    annotationBundleId: image.annotationBundleId,
+    annotationIds: image.annotationIds,
+    svgUrl: image.svgUrl, psdUrl: image.psdUrl,
+    mediaType: image.mediaType, videoUrl: image.videoUrl,
+    videoDuration: image.videoDuration,
+    videoThumbnailUrl: image.videoThumbnailUrl,
+    relationType: image.relationType,
+  };
+}
+
+async function readCollaborativeProjectOnce(actorId: string, projectId: string): Promise<CollaborativeProjectRead> {
   const client = await getPool().connect();
   try {
     await client.query('BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ');
@@ -55,7 +90,7 @@ export async function readCollaborativeProject(actorId: string, projectId: strin
         WHERE project_id = $1 AND owner_id = $2 FOR SHARE`,
       [projectId, ownerId],
     );
-    if (settings.rows[0]?.enabled !== true) throw new DocumentAuthorityConflictError();
+    if (settings.rows[0]?.enabled !== true) throw new DocumentProjectNotEnabledError();
     const document = await client.query(
       `SELECT 1 FROM wujie_project_canvas_documents
         WHERE project_id = $1 AND owner_id = $2 FOR SHARE`,
@@ -64,9 +99,32 @@ export async function readCollaborativeProject(actorId: string, projectId: strin
     if (document.rowCount !== 1) throw new DocumentAuthorityConflictError();
     const loaded = await loadDocumentInTransaction(client, projectId);
     const projection = readCanvasDocument(loaded.doc);
+    const snapshot = await client.query<{ data_value: unknown }>(
+      `SELECT data_value FROM wujie_user_data
+        WHERE user_id = $1 AND data_key = 'projects'`,
+      [ownerId],
+    );
+    if (snapshot.rows.length !== 1) throw new DocumentAuthorityConflictError();
+    const matching = parseProjects(snapshot.rows[0].data_value)
+      .filter(project => project.id === projectId && project.userId === ownerId);
+    if (matching.length !== 1) throw new DocumentAuthorityConflictError();
+    const [resolved] = await readOwnerProjectsWithDocuments(ownerId, matching, client);
+    if (!resolved) throw new DocumentAuthorityConflictError();
     await client.query('COMMIT');
+    const canvasImages = resolved.canvasImages.map(toDocumentCanvasImage);
+    const safeMetadata: Project['metadata'] = {
+      ...(resolved.metadata?.groups ? { groups: resolved.metadata.groups } : {}),
+      ...(resolved.metadata?.annotationsV2 ? { annotationsV2: resolved.metadata.annotationsV2 } : {}),
+    };
     return {
       projectId, ownerId, sequence: loaded.sequence, projection,
+      canvasImages,
+      workspace: {
+        id: projectId, userId: ownerId, name: resolved.name,
+        createdAt: resolved.createdAt, updatedAt: resolved.updatedAt,
+        canvasImages, settings: {},
+        ...(Object.keys(safeMetadata).length > 0 ? { metadata: safeMetadata } : {}),
+      },
       readOnly: process.env.WUJIE_YJS_ENABLED !== 'true',
     };
   } catch (error) {
@@ -75,6 +133,18 @@ export async function readCollaborativeProject(actorId: string, projectId: strin
   } finally {
     client.release();
   }
+}
+
+export async function readCollaborativeProject(actorId: string, projectId: string): Promise<CollaborativeProjectRead> {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      return await readCollaborativeProjectOnce(actorId, projectId);
+    } catch (error) {
+      if (!(error instanceof Error) || !('code' in error) || error.code !== '40001'
+        || attempt === 2) throw error;
+    }
+  }
+  throw new Error('Collaborative project read retry limit exceeded');
 }
 
 /** Project-list reads must not revive coordinates from the frozen legacy snapshot. */

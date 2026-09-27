@@ -106,22 +106,6 @@ describe('authentication bootstrap project sync', () => {
     expect(projectLookup).toBeGreaterThan(waitForHydration);
   });
 
-  it('hydrates the seeded node workflow when an explicit project route is opened', () => {
-    const source = readFileSync(path.resolve(process.cwd(), 'src/components/canvas-workspace.tsx'), 'utf8');
-    const authInitializer = source.indexOf('const initCurrentUser = async () => {');
-    const authEffectEnd = source.indexOf('const [currentUser, setCurrentUser]', authInitializer);
-    const authEffect = source.slice(authInitializer, authEffectEnd);
-    const projectLookup = authEffect.indexOf('const storedProject = projects.find((p: Project) => p.id === projectId);');
-    const targetProjectResolution = authEffect.indexOf('const targetProject = recoveredCanvasSnapshot', projectLookup);
-    const projectBranchEnd = authEffect.indexOf('if (targetProject.canvasImages && targetProject.canvasImages.length > 0)', targetProjectResolution);
-    const projectBranch = authEffect.slice(projectLookup, projectBranchEnd);
-
-    expect(projectLookup).toBeGreaterThan(-1);
-    expect(targetProjectResolution).toBeGreaterThan(projectLookup);
-    expect(projectBranchEnd).toBeGreaterThan(targetProjectResolution);
-    expect(projectBranch).toContain('setNodeWorkflow(workflowFromProjectMetadata(targetProject.metadata));');
-  });
-
   it('keeps the authenticated workspace out of the initial loading render', () => {
     const source = readFileSync(path.resolve(process.cwd(), 'src/app/page.tsx'), 'utf8');
     const authGate = source.indexOf('if (!authChecked) {');

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
+import { useState, useCallback, useRef, useEffect, useMemo, type CSSProperties } from 'react';
 import dynamic from 'next/dynamic';
 import { getResumedTaskPollingOutcome, RESUMED_TASK_MAX_POLL_ATTEMPTS, shouldStartResumedTaskPolling } from '@/lib/resumed-task-polling';
 import { hasDirectVideoPollingTimedOut } from '@/lib/video-task-polling';
@@ -32,6 +32,10 @@ import {
 } from '@/lib/legacy-task-recovery';
 import type { CanvasImage, ImageGroup } from '@/components/infinite-canvas';
 import { PresenceIndicator } from '@/components/collaboration/presence-indicator';
+import { createLatestProjectLoadGate } from '@/lib/collaboration/project-load-gate';
+import { DocumentStatus } from '@/components/collaboration/document-status';
+import { useCollaborativeCanvas, type CollaborativeCanvas } from '@/lib/collaboration/document-client';
+import { canUseLegacyCanvasPersistence, routeCanvasWorkspaceChange, shouldKeepDirtyCanvasAnnotations } from '@/lib/collaboration/canvas-document-image-bridge';
 import {
   restoreAnnotations,
   serializeAnnotations,
@@ -268,6 +272,28 @@ function getInitialProjectId(): string | null {
   return new URLSearchParams(window.location.search).get('projectId');
 }
 
+async function readInvitedCollaborativeWorkspace(projectId: string): Promise<Project | null> {
+  const response = await fetch(
+    `/api/collaboration/document-project?projectId=${encodeURIComponent(projectId)}`,
+    { credentials: 'include', cache: 'no-store' },
+  );
+  if (!response.ok) return null;
+  const payload = await response.json() as {
+    success?: boolean;
+    projectId?: string;
+    ownerId?: string;
+    workspace?: Project;
+  };
+  const workspace = payload.workspace;
+  if (payload.success !== true || payload.projectId !== projectId ||
+      !workspace || workspace.id !== projectId || workspace.userId !== payload.ownerId ||
+      typeof workspace.name !== 'string' || !Array.isArray(workspace.canvasImages) ||
+      !Number.isFinite(workspace.createdAt) || !Number.isFinite(workspace.updatedAt)) {
+    return null;
+  }
+  return workspace;
+}
+
 function getInitialLoginMode(): 'canvas' | null {
   if (typeof window === 'undefined') return null;
   const params = new URLSearchParams(window.location.search);
@@ -484,6 +510,7 @@ type CanvasHistoryIntent = 'record' | 'skip';
 
 interface CanvasImageChangeOptions {
   history?: CanvasHistoryIntent;
+  source?: 'hydration' | 'document';
 }
 
 function rebaseCanvasImages(
@@ -542,6 +569,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
     after: CanvasImage[];
   } | null>(null);
   const historyProjectIdRef = useRef<string | null>(null);
+  const collaborativeCanvasRef = useRef<CollaborativeCanvas | null>(null);
   const latestImagesRef = useRef(images);
   latestImagesRef.current = images;
   const isMountedRef = useRef(true);
@@ -569,7 +597,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
   const setImages = useCallback((
     action: React.SetStateAction<CanvasImage[]>,
     options: CanvasImageChangeOptions = {},
-  ) => {
+  ): boolean => {
       const prev = latestImagesRef.current;
       const queued = queuedCanvasHistoryChangeRef.current;
       const projectId = historyProjectIdRef.current;
@@ -578,11 +606,30 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
         : prev;
       const next = typeof action === 'function' ? action(actionBase) : action;
       const historyIntent = options.history ?? (isCanvasTaskProjectionChange(actionBase, next) ? 'skip' : 'record');
+      if (options.source !== 'document') {
+        const routed = routeCanvasWorkspaceChange(
+          projectId, collaborativeCanvasRef.current, prev, next,
+          options.source === 'hydration' ? 'hydration' : undefined,
+        );
+        if (routed.kind === 'blocked') {
+          if (options.source !== 'hydration') toast.error(routed.reason);
+          return false;
+        }
+        if (routed.kind === 'document') {
+          try {
+            if (routed.patches.length > 0) collaborativeCanvasRef.current?.applyLocalChange(routed.patches);
+          } catch (error) {
+            toast.error(error instanceof Error ? error.message : '协作画布修改失败');
+            return false;
+          }
+          if (routed.patches.length > 0) return true;
+        }
+      }
       if (historyLifecyclePendingRef.current && historyIntent === 'record') {
         queuedCanvasHistoryChangeRef.current = queued?.projectId === projectId
           ? { ...queued, after: next }
           : { projectId, before: prev, after: next };
-        return;
+        return true;
       }
 
       // ★ 检测被删除的图片ID，注册到 UserManagerCore 防止服务器同步恢复
@@ -603,7 +650,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
       // 导致 recordChange([], allImages) 被记录，Ctrl+Z 时所有图片被移除。
       // 现在始终使用 prev（真实 React 状态）作为基准，确保 diff 计算正确。
       // ★ 跳过非用户操作（项目加载/服务器同步）的 diff 记录，防止 Ctrl+Z 撤销到空画布
-      if (historyIntent === 'skip') {
+      if (historyIntent === 'skip' || options.source === 'document') {
         // Hydration, server reconciliation and transient task progress do not
         // represent user-editable commands.
       } else {
@@ -618,6 +665,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
       prevImagesRef.current = next;
       latestImagesRef.current = next;
       setImagesRaw(next);
+      return true;
   }, []);
 
   const projectWorkspaceTaskEvent = useCallback((event: CanvasTaskEvent) => {
@@ -733,6 +781,17 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
   }, []);
 
   const handleUndo = useCallback(async () => {
+    const projectId = historyProjectIdRef.current;
+    if (projectId && !canUseLegacyCanvasPersistence(projectId, collaborativeCanvasRef.current)) {
+      const document = collaborativeCanvasRef.current;
+      if (document?.projectId === projectId && document.authority === 'document' &&
+          (document.status === 'saved' || document.status === 'pending')) {
+        try { document.undoLocal(); } catch (error) {
+          toast.error(error instanceof Error ? error.message : '协作撤销失败');
+        }
+      }
+      return;
+    }
     if (!incrementalHistoryRef.current.canUndo() || historyLifecyclePendingRef.current) return;
     const previous = latestImagesRef.current;
     const result = incrementalHistoryRef.current.undo(previous);
@@ -775,6 +834,17 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
   }, [clearRestoredCanvasImageTombstones, commitCanvasHistorySnapshot, flushQueuedCanvasHistoryChange, isActiveCanvasHistoryTransition, syncAssetV3HistoryTransition]);
 
   const handleRedo = useCallback(async () => {
+    const projectId = historyProjectIdRef.current;
+    if (projectId && !canUseLegacyCanvasPersistence(projectId, collaborativeCanvasRef.current)) {
+      const document = collaborativeCanvasRef.current;
+      if (document?.projectId === projectId && document.authority === 'document' &&
+          (document.status === 'saved' || document.status === 'pending')) {
+        try { document.redoLocal(); } catch (error) {
+          toast.error(error instanceof Error ? error.message : '协作重做失败');
+        }
+      }
+      return;
+    }
     if (!incrementalHistoryRef.current.canRedo() || historyLifecyclePendingRef.current) return;
     const previous = latestImagesRef.current;
     const result = incrementalHistoryRef.current.redo(previous);
@@ -818,6 +888,20 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
   const [panelCollapsed, setPanelCollapsed] = useState(() => (
     typeof window !== 'undefined' && shouldInitiallyCollapseWorkspacePanel(window.innerWidth)
   ));
+  const [projectMenuElement, setProjectMenuElement] = useState<HTMLDivElement | null>(null);
+  const [projectMenuBottom, setProjectMenuBottom] = useState(0);
+  useEffect(() => {
+    if (!projectMenuElement) return;
+    // On narrow screens the expanded panel consumes the full width. Reserve
+    // the menu's actual height above it, including wrapped recovery actions.
+    const measure = (): void => {
+      setProjectMenuBottom(Math.ceil(projectMenuElement.getBoundingClientRect().bottom) + 12);
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(projectMenuElement);
+    return () => observer.disconnect();
+  }, [projectMenuElement]);
   const [activePanel, setActivePanel] = useState<ActivePanel>('generate');
   const [createMode, setCreateMode] = useState<CreateMode>('quick');
   const [quickCreateImageModels, setQuickCreateImageModels] = useState<QuickCreateModelCandidate[]>([]);
@@ -828,6 +912,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
   const [quickCreateModelsError, setQuickCreateModelsError] = useState('');
   const [quickCreateCompileState, setQuickCreateCompileState] = useState<QuickCreateCompileViewState>(EMPTY_QUICK_CREATE_COMPILE_STATE);
   const quickCreateCompileControllerRef = useRef<AbortController | null>(null);
+  const projectLoadGateRef = useRef(createLatestProjectLoadGate());
   // 从工作台加载指定项目
   const loadProjectById = useCallback(async (projectId: string) => {
     try {
@@ -846,20 +931,25 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
 
       const userMgr = UserManagerCore.getInstance();
       const projects = userMgr.getProjects();
-      const storedProject = projects.find((p: Project) => p.id === projectId);
+      const ownProject = projects.find((p: Project) => p.id === projectId);
+      const resolvedProject = await projectLoadGateRef.current.resolve(() => (
+        ownProject ? Promise.resolve(ownProject) : readInvitedCollaborativeWorkspace(projectId)
+      ));
+      if (!resolvedProject.isCurrent()) return;
+      const storedProject = resolvedProject.value;
       if (storedProject) {
         const recoveryOwnerId = userMgr.getUser()?.id ?? '';
-        const recoveredCanvasSnapshot = consumePreparedCanvasUnloadSnapshot(
+        const recoveredCanvasSnapshot = ownProject ? consumePreparedCanvasUnloadSnapshot(
           storedProject.id,
           userMgr.getProjectSyncRevision(),
           localStorage,
           recoveryOwnerId,
-        );
-        const pendingMediaMarker = consumeCanvasPendingMediaRecovery(
+        ) : null;
+        const pendingMediaMarker = ownProject ? consumeCanvasPendingMediaRecovery(
           storedProject.id,
           localStorage,
           recoveryOwnerId,
-        );
+        ) : null;
         const hadPendingMedia = Boolean(recoveredCanvasSnapshot && pendingMediaMarker);
         const recoveredMedia = recoveredCanvasSnapshot
           ? reconcileRecoveredCanvasImages(recoveredCanvasSnapshot.images, storedProject.canvasImages)
@@ -891,6 +981,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
             };
           }
         }
+        if (!resolvedProject.isCurrent()) return;
         if (hadPendingMedia) {
           toast.warning(recoveredMedia?.discardedBlobIds.length
             ? '部分临时图片在页面关闭前未完成上传，请重新上传缺失图片。'
@@ -949,13 +1040,16 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
             relationType: img.relationType || undefined,
             isProcessingPlaceholder: img.isProcessingPlaceholder || false,
             processing: img.processing ? { ...img.processing, isResumed: true } : undefined,
-          })) as CanvasImage[], { history: 'skip' });
+          })) as CanvasImage[], { history: 'skip', source: 'hydration' });
         } else {
-          setImages([], { history: 'skip' });
+          setImages([], { history: 'skip', source: 'hydration' });
         }
-        if (targetProject.metadata?.groups) {
-          groupsRef.current = targetProject.metadata.groups as ImageGroupData[];
-        }
+        const loadedGroups = (targetProject.metadata?.groups ?? []).map(group => ({
+          ...group, x: group.x ?? 0, y: group.y ?? 0,
+          collapsed: group.collapsed ?? false,
+        }));
+        groupsRef.current = loadedGroups;
+        setInitialGroups(loadedGroups);
       }
 
     } catch (e) {
@@ -1150,19 +1244,24 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
             // 从工作台跳转过来，加载指定项目
             try {
               const projects = userMgr.getProjects();
-              const storedProject = projects.find((p: Project) => p.id === projectId);
+              const ownProject = projects.find((p: Project) => p.id === projectId);
+              const resolvedProject = await projectLoadGateRef.current.resolve(() => (
+                ownProject ? Promise.resolve(ownProject) : readInvitedCollaborativeWorkspace(projectId)
+              ));
+              if (cancelled || !resolvedProject.isCurrent()) return;
+              const storedProject = resolvedProject.value;
               if (storedProject) {
-                const recoveredCanvasSnapshot = consumePreparedCanvasUnloadSnapshot(
+                const recoveredCanvasSnapshot = ownProject ? consumePreparedCanvasUnloadSnapshot(
                   storedProject.id,
                   userMgr.getProjectSyncRevision(),
                   localStorage,
                   hydratedUser.id,
-                );
-                const pendingMediaMarker = consumeCanvasPendingMediaRecovery(
+                ) : null;
+                const pendingMediaMarker = ownProject ? consumeCanvasPendingMediaRecovery(
                   storedProject.id,
                   localStorage,
                   hydratedUser.id,
-                );
+                ) : null;
                 const hadPendingMedia = Boolean(recoveredCanvasSnapshot && pendingMediaMarker);
                 const recoveredMedia = recoveredCanvasSnapshot
                   ? reconcileRecoveredCanvasImages(recoveredCanvasSnapshot.images, storedProject.canvasImages)
@@ -1194,6 +1293,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
                     };
                   }
                 }
+                if (cancelled || !resolvedProject.isCurrent()) return;
                 if (hadPendingMedia) {
                   toast.warning(recoveredMedia?.discardedBlobIds.length
                     ? '部分临时图片在页面关闭前未完成上传，请重新上传缺失图片。'
@@ -1244,7 +1344,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
                     relationType: img.relationType || undefined,
                     isProcessingPlaceholder: img.isProcessingPlaceholder || false,
                     processing: img.processing ? { ...img.processing, isResumed: true } : undefined,
-                  })) as CanvasImage[], { history: 'skip' });
+                  })) as CanvasImage[], { history: 'skip', source: 'hydration' });
                   // 恢复分组数据
                   const metaGroups = targetProject.metadata?.groups;
                   let restoredGroups: Array<{id: string; name: string; note: string; imageIds: string[]; x: number; y: number; collapsed: boolean}> = [];
@@ -1265,6 +1365,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
                     } catch {}
                   }
                   setInitialGroups(restoredGroups);
+                  groupsRef.current = restoredGroups;
                   // 恢复视图状态
                   const metaViewState = targetProject.metadata?.viewState;
                   if (metaViewState && typeof metaViewState === 'object' && 'offsetX' in metaViewState) {
@@ -1390,8 +1491,37 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
   const [ohMyPromptOpen, setOhMyPromptOpen] = useState(false);
   const [currentProject, setCurrentProject] = useState<Project | null>(null);
   historyProjectIdRef.current = currentProject?.id ?? null;
+  const collaborativeCanvas = useCollaborativeCanvas(currentProject?.id ?? null, currentUser?.id ?? null);
+  collaborativeCanvasRef.current = collaborativeCanvas;
   const currentProjectRef = useRef(currentProject);
   currentProjectRef.current = currentProject;
+  useEffect(() => {
+    if (!currentProject?.id || collaborativeCanvas.projectId !== currentProject.id ||
+        collaborativeCanvas.authority !== 'document' ||
+        (collaborativeCanvas.status !== 'saved' && collaborativeCanvas.status !== 'pending' &&
+         collaborativeCanvas.status !== 'connecting' && collaborativeCanvas.status !== 'read-only' &&
+         collaborativeCanvas.status !== 'rejected' && collaborativeCanvas.status !== 'recovery')) return;
+    const placeholders = latestImagesRef.current.filter(shouldPersistProcessingPlaceholder);
+    const documentIds = new Set(collaborativeCanvas.canvasImages.map(image => image.id));
+    setImages([
+      ...collaborativeCanvas.canvasImages,
+      ...placeholders.filter(image => !documentIds.has(image.id)),
+    ], { history: 'skip', source: 'document' });
+  }, [currentProject?.id, collaborativeCanvas.projectId, collaborativeCanvas.authority,
+    collaborativeCanvas.status, collaborativeCanvas.canvasImages, setImages]);
+  useEffect(() => {
+    if (!currentProject?.id || collaborativeCanvas.projectId !== currentProject.id ||
+        collaborativeCanvas.authority !== 'document') return;
+    const groups = collaborativeCanvas.groups.map(group => ({
+      ...group, x: group.x ?? 0, y: group.y ?? 0,
+      collapsed: group.collapsed ?? false,
+    }));
+    groupsRef.current = groups;
+    setInitialGroups(previous => (
+      JSON.stringify(previous) === JSON.stringify(groups) ? previous : groups
+    ));
+  }, [currentProject?.id, collaborativeCanvas.projectId,
+    collaborativeCanvas.authority, collaborativeCanvas.groups]);
   useEffect(() => {
     setShareCreateOpen(false);
     setShareManageOpen(false);
@@ -1608,12 +1738,18 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
       writer: async (snapshot, reason) => {
         const scheduler = canvasPersistenceSchedulerRef.current;
         if (!scheduler) return;
+        if (!canUseLegacyCanvasPersistence(snapshot.projectId, collaborativeCanvasRef.current)) {
+          throw new Error('协作项目已由文档接管，旧画布快照不可保存');
+        }
         const userId = currentUserRef.current?.id;
         if (!userId) throw new Error('当前用户不存在，无法保存画布');
 
         if (snapshot.hasPendingMedia) {
           const { urlMapping, failedUrls } = await persistCanvasSnapshotMedia(snapshot.images, userId);
           if (!scheduler.isSnapshotActive(snapshot.projectId, snapshot.revision)) return;
+          if (!canUseLegacyCanvasPersistence(snapshot.projectId, collaborativeCanvasRef.current)) {
+            throw new Error('协作项目已由文档接管，旧画布快照不可保存');
+          }
           if (Object.keys(urlMapping).length === 0) {
             throw new Error(`未持久化媒体保存失败: ${failedUrls.length}`);
           }
@@ -1632,6 +1768,9 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
         }
 
         const manager = UserManagerCore.getInstance();
+        if (!canUseLegacyCanvasPersistence(snapshot.projectId, collaborativeCanvasRef.current)) {
+          throw new Error('协作项目已由文档接管，旧画布快照不可保存');
+        }
         const projectUpdates = {
           canvasImages: [...snapshot.images],
           metadata: snapshot.metadata,
@@ -1670,6 +1809,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
     if (persistenceHint === 'skip') return;
     const project = currentProjectRef.current;
     if (!project) return;
+    if (!canUseLegacyCanvasPersistence(project.id, collaborativeCanvasRef.current)) return;
     immediateSaveGuardRef.current = enqueueCanvasHydrationGuard(
       immediateSaveGuardRef.current,
       project.id,
@@ -1694,6 +1834,10 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
     if (historyLifecyclePendingRef.current) return [];
     const activeProjectId = currentProject?.id;
     if (!activeProjectId) throw new Error('当前项目不存在');
+    if (!canUseLegacyCanvasPersistence(activeProjectId, collaborativeCanvasRef.current)) {
+      toast.error('协作素材删除尚未接入文档命令');
+      return [];
+    }
     const uniqueImageIds = [...new Set(imageIds)]
       .filter((id) => !pendingCanvasDeleteIdsRef.current.has(id));
     if (uniqueImageIds.length === 0) return [];
@@ -1745,7 +1889,9 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
   }, [currentProject?.id, persistCanvasImagesNow, setImages]);
   const initialCanvasAnnotations = useMemo(() => {
     if (!currentProject) return [];
-    const sources = currentProject.canvasImages
+    const documentMode = collaborativeCanvas.projectId === currentProject.id
+      && collaborativeCanvas.authority === 'document';
+    const sources = (documentMode ? collaborativeCanvas.canvasImages : currentProject.canvasImages)
       .filter((image) => Boolean(image.id && image.url))
       .map((image) => ({
         imageId: image.id,
@@ -1758,13 +1904,14 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
           ),
       }));
     return restoreAnnotations(
-      currentProject.metadata?.annotationsV2,
+      documentMode ? collaborativeCanvas.annotations : currentProject.metadata?.annotationsV2,
       {
         projectId: currentProject.id,
         sources,
       },
     );
-  }, [currentProject]);
+  }, [currentProject, collaborativeCanvas.projectId, collaborativeCanvas.authority,
+    collaborativeCanvas.canvasImages, collaborativeCanvas.annotations]);
   const annotationRecordsRef = useRef<CanvasAnnotationV2[]>(
     initialCanvasAnnotations,
   );
@@ -1774,22 +1921,47 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
   useEffect(() => {
     const nextProjectId = currentProject?.id ?? null;
     const projectChanged = annotationProjectIdRef.current !== nextProjectId;
-    if (!projectChanged && annotationsDirtyRef.current) return;
+    const documentMode = nextProjectId === collaborativeCanvas.projectId
+      && collaborativeCanvas.authority === 'document';
+    if (shouldKeepDirtyCanvasAnnotations({
+      projectChanged, documentMode, dirty: annotationsDirtyRef.current,
+    })) return;
 
     annotationProjectIdRef.current = nextProjectId;
     annotationsDirtyRef.current = false;
     annotationRecordsRef.current = initialCanvasAnnotations;
     annotationSignatureRef.current = JSON.stringify(initialCanvasAnnotations);
-  }, [currentProject?.id, initialCanvasAnnotations]);
+  }, [currentProject?.id, initialCanvasAnnotations,
+    collaborativeCanvas.projectId, collaborativeCanvas.authority]);
   const handleAnnotationsChange = useCallback(
-    (annotations: CanvasAnnotationV2[]) => {
+    (annotations: CanvasAnnotationV2[], renderedBaseline?: CanvasAnnotationV2[]) => {
       const serialized = serializeAnnotations(annotations);
       const signature = JSON.stringify(serialized);
-      if (signature === annotationSignatureRef.current) return;
+      if (signature === annotationSignatureRef.current) return true;
+      const projectId = currentProjectRef.current?.id;
+      const authority = collaborativeCanvasRef.current;
+      if (projectId && authority?.projectId === projectId) {
+        if (authority.authority === 'document') {
+          try {
+            authority.applyLocalAnnotations(
+              serialized,
+              renderedBaseline ? serializeAnnotations(renderedBaseline) : undefined,
+            );
+            annotationRecordsRef.current = serialized;
+            annotationSignatureRef.current = signature;
+          } catch (error) {
+            toast.error(error instanceof Error ? error.message : '协作标注同步失败');
+            return false;
+          }
+          return true;
+        }
+        if (authority.authority === 'unknown') return false;
+      }
       annotationRecordsRef.current = serialized;
       annotationSignatureRef.current = signature;
       annotationsDirtyRef.current = true;
       setAnnotationRevision((revision) => revision + 1);
+      return true;
     },
     [],
   );
@@ -2195,11 +2367,16 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
     if (previousProjectId && previousProjectId !== nextProjectId) {
       canvasPersistenceScheduler.cancel(previousProjectId);
     }
+    if (nextProjectId && !canUseLegacyCanvasPersistence(nextProjectId, collaborativeCanvasRef.current)) {
+      canvasPersistenceScheduler.cancel(nextProjectId);
+    }
     canvasPersistenceProjectRef.current = nextProjectId;
-  }, [canvasPersistenceScheduler, currentProject?.id]);
+  }, [canvasPersistenceScheduler, currentProject?.id,
+    collaborativeCanvas.projectId, collaborativeCanvas.authority]);
 
   useEffect(() => {
     if (!currentProject?.id) return;
+    if (!canUseLegacyCanvasPersistence(currentProject.id, collaborativeCanvasRef.current)) return;
     // 项目切换进行中时，跳过自动保存，避免旧闭包数据覆盖
     if (switchingProjectRef.current) return;
     // 服务器同步合并中，跳过自动保存，避免旧闭包数据覆盖刚合并的服务器数据
@@ -2232,6 +2409,8 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
     serverSyncMergeRevision,
     buildCanvasPersistenceSnapshot,
     canvasPersistenceScheduler,
+    collaborativeCanvas.projectId,
+    collaborativeCanvas.authority,
   ]);
 
   // 页面关闭/刷新前同步保存（localStorage + sendBeacon到服务器）
@@ -2243,6 +2422,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
     const persistForLifecycle = (event?: BeforeUnloadEvent) => {
       const proj = currentProjectRef2.current;
       if (!proj) return;
+      if (!canUseLegacyCanvasPersistence(proj.id, collaborativeCanvasRef.current)) return;
       try {
         if (!currentUserRef.current?.id) return;
         if (!canvasPersistenceScheduler.hasPendingSnapshot(proj.id)) return;
@@ -2306,7 +2486,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
           const latest = projects.find(p => p.id === curProjectId);
           if (latest) {
             setCurrentProject(latest);
-            if (latest.canvasImages) {
+            if (latest.canvasImages && canUseLegacyCanvasPersistence(curProjectId, collaborativeCanvasRef.current)) {
               // 保留当前正在处理的占位框（isProcessingPlaceholder），避免服务器同步覆盖导致加载框消失
               const processingPlaceholders = latestImagesRef.current.filter(shouldPersistProcessingPlaceholder);
               // 去重：避免服务器数据中已包含占位框 id 时重复添加
@@ -6398,7 +6578,8 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
   }
 
   return (
-    <div className={`h-screen w-screen relative overflow-clip ${themeStyle === 'monochrome' ? 'bg-gradient-to-br from-blue-50 via-white to-purple-50/30' : 'bg-[#0a0a0a]'}`}>
+    <div className={`h-screen w-screen relative overflow-clip ${themeStyle === 'monochrome' ? 'bg-gradient-to-br from-blue-50 via-white to-purple-50/30' : 'bg-[#0a0a0a]'}`}
+      style={{ '--project-menu-bottom': `${currentProject ? projectMenuBottom : 0}px` } as CSSProperties}>
       {/* System Announcement - Banner mode (top bar) */}
       {announcement && showAnnouncement && announcement.displayMode !== 'popup' && announcement.displayMode !== 'sidebar' && (
         <div className={`fixed top-0 left-0 right-0 z-[400] flex items-center justify-center gap-2 px-4 py-2 text-sm ${
@@ -6418,9 +6599,11 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
         </div>
       )}
       {currentProject && (
+        <div className={`pointer-events-none absolute left-14 top-3 z-[70] flex justify-center ${panelCollapsed ? 'right-8' : 'right-3 md:right-[492px]'}`}>
         <div
+          ref={setProjectMenuElement}
           data-canvas-project-menu
-          className={`absolute left-1/2 top-3 z-[70] flex max-w-[calc(100vw-7rem)] -translate-x-1/2 items-center rounded-xl border px-2 py-1 shadow-lg backdrop-blur-md ${themeStyle === 'monochrome' ? 'border-gray-200 bg-white/90 text-gray-900' : 'border-white/10 bg-[#171717]/90 text-white'}`}
+          className={`pointer-events-auto flex min-w-0 max-w-full flex-wrap items-center gap-1 rounded-xl border px-2 py-1 shadow-lg backdrop-blur-md ${themeStyle === 'monochrome' ? 'border-gray-200 bg-white/90 text-gray-900' : 'border-white/10 bg-[#171717]/90 text-white'}`}
         >
           <span className="min-w-0 max-w-52 truncate px-2 text-sm font-medium" title={currentProject.name}>
             {currentProject.name}
@@ -6431,11 +6614,37 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
             isOwner={currentProject.userId === currentUser?.id}
             themeStyle={themeStyle}
           />
+          <DocumentStatus
+            authority={collaborativeCanvas.projectId === currentProject.id
+              ? collaborativeCanvas.authority : 'unknown'}
+            status={collaborativeCanvas.projectId === currentProject.id
+              ? collaborativeCanvas.status : 'checking'}
+            onExportLocalCopy={() => {
+              try {
+                const contents = collaborativeCanvas.exportRecoveryCopy();
+                const url = URL.createObjectURL(new Blob([contents], { type: 'application/json' }));
+                const link = document.createElement('a');
+                link.href = url;
+                link.download = `wujie-canvas-unsynced-${currentProject.id.replace(/[^A-Za-z0-9_-]/gu, '_')}.json`;
+                link.click();
+                window.setTimeout(() => URL.revokeObjectURL(url), 0);
+              } catch (error) {
+                toast.error(error instanceof Error ? error.message : '导出未同步副本失败');
+              }
+            }}
+            onRetryRecovered={collaborativeCanvas.recoveryRetryReady ? () => {
+              try {
+                collaborativeCanvas.retryRecovered();
+              } catch (error) {
+                toast.error(error instanceof Error ? error.message : '重试协作同步失败');
+              }
+            } : undefined}
+          />
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button
                 type="button"
-                className="flex size-11 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                className="flex size-11 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 aria-label={`${currentProject.name} 项目菜单`}
               >
                 <MoreHorizontal className="size-4" aria-hidden="true" />
@@ -6462,6 +6671,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
+        </div>
         </div>
       )}
       {/* System Announcement - Popup mode (center modal) */}
@@ -6640,6 +6850,8 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
           } : null}
           projectId={currentProject?.id}
           initialAnnotations={initialCanvasAnnotations}
+          documentMetadataMode={collaborativeCanvas.projectId === currentProject?.id
+            && collaborativeCanvas.authority === 'document'}
           onAnnotationsChange={handleAnnotationsChange}
           onRequestTaskPoll={requestCanvasTaskPoll}
           onSwitchToNodeMode={() => safeSwitchMode('node')}
@@ -6649,7 +6861,24 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
           isPanelCollapsed={panelCollapsed}
           navigateToImageId={navigateToImageId}
           onNavigateToImageComplete={() => setNavigateToImageId(null)}
-          onGroupsChange={(groups) => {
+          onGroupsChange={(groups, renderedBaseline) => {
+            const authority = collaborativeCanvasRef.current;
+            if (currentProject?.id && authority?.projectId === currentProject.id) {
+              if (authority.authority === 'document') {
+                try {
+                  authority.applyLocalGroups(groups, renderedBaseline);
+                  groupsRef.current = groups;
+                } catch (error) {
+                  toast.error(error instanceof Error ? error.message : '协作分组同步失败');
+                  return false;
+                }
+                return true;
+              }
+              if (authority.authority === 'unknown') {
+                toast.error('正在确认项目协作状态，请稍后重试');
+                return false;
+              }
+            }
             groupsRef.current = groups;
             // 额外持久化分组到 localStorage，防止竞态条件下数据丢失
             try {
@@ -6657,6 +6886,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
                 localStorage.setItem(`wujie-groups-${currentProject.id}`, JSON.stringify(groups));
               }
             } catch {}
+            return true;
           }}
           initialGroups={initialGroups}
           onViewStateChange={(vs) => {
@@ -6747,7 +6977,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
       )}
 
       {/* Right Panel - with vertical collapse strip */}
-      <div data-workspace-right-panel className={`fixed top-0 right-0 bottom-0 z-[70] flex transition-all duration-300 ease-in-out ${panelCollapsed ? '' : ''}`} style={{ width: panelCollapsed ? '20px' : 'min(480px, 100vw)' }}>
+      <div data-workspace-right-panel className={`fixed right-0 bottom-0 z-[70] flex transition-all duration-300 ease-in-out ${panelCollapsed ? 'top-0' : 'top-[var(--project-menu-bottom,0px)] md:top-0'}`} style={{ width: panelCollapsed ? '20px' : 'min(480px, 100vw)' }}>
         {/* Vertical collapse strip */}
         <button
           onClick={() => setPanelCollapsed(prev => !prev)}

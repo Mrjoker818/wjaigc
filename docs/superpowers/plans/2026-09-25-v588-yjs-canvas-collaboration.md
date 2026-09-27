@@ -168,9 +168,9 @@ await expect(writeLegacyCanvasSnapshot(ownerId, projectId, oldImages))
 
 **Files:** Create `src/lib/collaboration/document-client.ts`、`src/components/collaboration/document-status.tsx`、相关 client/component 测试；modify `src/components/canvas-workspace.tsx` 的项目加载、`setImages` 与保存切换点；modify `src/components/infinite-canvas.tsx` 仅需要的状态提示接口；create `tests/e2e/yjs-canvas-collaboration.spec.ts`。
 
-**Interfaces:** `useCollaborativeCanvas(projectId, actorId)` 提供 `images`、`applyLocalChange`、`undoLocal`、`status`、`disconnect`；非协作项目仍用原 `CanvasPersistenceScheduler`。
+**Interfaces:** `useCollaborativeCanvas(projectId, actorId)` 提供 `images`、`applyLocalChange`、`undoLocal`、`status`、`exportRecoveryCopy`、`retryRecovered`、`disconnect`；非协作项目仍用原 `CanvasPersistenceScheduler`。
 
-- [ ] **Step 1：写 RED。** 双标签不同素材同时移动合并；同素材 transform 确定性收敛；远端更新不回声；本地 Ctrl+Z 不撤销别人改动；切项目、登出、禁用时 socket 和 Y.Doc 清理；断线待确认不显示“已保存”。
+- [x] **Step 1：写 RED。** 双标签不同素材同时移动合并；同素材 transform 确定性收敛；远端更新不回声；本地 Ctrl+Z 不撤销别人改动；切项目、登出、禁用时 socket 和 Y.Doc 清理；断线待确认不显示“已保存”。跨页面未确认帧不得自动重放，需保留可读恢复副本并明确重试；拒绝标记写入、Cookie 与删除全部失败时仍不得丢失恢复数据或自动发送。
 
 ```ts
 first.applyLocalChange({ placementId: 'p1', x: 100 });
@@ -179,9 +179,11 @@ await waitForConvergence();
 expect(first.images).toEqual(second.images);
 ```
 
-- [ ] **Step 2：运行 RED。** client/component 聚焦及两浏览器真 socket E2E，记录缺失行为。
-- [ ] **Step 3：最小 GREEN。** 画布入口只增加协作状态桥；owner/editor 对协作项目的变动走 Yjs，原项目保持原路径。仅持久 placement 字段入文档；远端应用带 origin 标记，旧调度器对协作项目彻底禁止写入。
-- [ ] **Step 4：复验并提交。** 既有画布撤销、生成、图生图、项目刷新/切换回归；Chromium/Firefox/WebKit 与 320/375/393px 本地矩阵，`pnpm validate` 后只提交目标文件。
+- [x] **Step 2：运行 RED。** client/component 聚焦及两浏览器真 socket E2E，记录缺失行为。
+- [x] **Step 3：最小 GREEN。** 画布入口只增加协作状态桥；owner/editor 对协作项目的变动走 Yjs，原项目保持原路径。placement 字段以及既有完整分组定义、结构化标注记录均由文档持久化（独立记录 ID、删除墓碑及图片 ID／placement ID 映射按设计规格执行）；远端应用带 origin 标记，旧调度器对协作项目彻底禁止写入。跨页面待确认队列先隔离和导出，经用户明确操作后才重试；不以删除唯一持久副本换取拒绝帧隔离。
+- [x] **Step 4：复验并提交。** 既有画布撤销、生成、图生图、项目刷新/切换回归；Chromium/Firefox/WebKit 与 320/375/393px 本地矩阵，`pnpm validate` 后只提交目标文件。
+
+**Task 7 本地证据（2026-09-27）：** 权限失效资源清理与恢复控件布局经RED→GREEN；不同素材双端真正并发、同素材完整变换冲突、本地撤销、完整分组/标注、恢复副本下载/明确重试、1280/320/375/393×面板展开折叠的最终三浏览器矩阵3/3、exit0。`regression-05562230` 新localhost库聚焦6文件/93项、完整875文件/7532项（1322.61s）、validate、保护38/38零警告、生产构建121/121页及243traces均exit0；专用PG已停止。前一轮PSD测试超时未抹除：真实摘要反序确证测试身份错绑自锁，仅修测试等待，原断言/15000ms上限不变，独立复审及最终全量通过。完整详情见 `docs/testing/v588-yjs-collaboration-evidence.md`。严格NFT仍exit1（231路由/556069引用/80宽/23配置/24根文档），构建身份 `unverified-*`，只关闭本地Task7，不推送/Coze同步/付费/部署。新增、替换、删除媒体、编辑者完整生成计费/采纳、跨工作区权威读取仍属Task8；用户可达启用/邀请及云端门禁须在阶段交付前证明，不以E2E预置授权替代。
 
 ### Task 8：媒体命令、跨工作区视图与全局回归
 

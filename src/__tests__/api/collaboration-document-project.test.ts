@@ -68,4 +68,24 @@ describe('collaborative project read route', () => {
     expect(response.status).toBe(403);
     expect(await response.json()).toEqual({ success: false, code: 'DOCUMENT_FORBIDDEN' });
   });
+
+  it('distinguishes a legacy project from a broken enabled document', async () => {
+    mocks.readCollaborativeProject.mockRejectedValueOnce(Object.assign(
+      new Error('not enabled'), { code: 'DOCUMENT_PROJECT_NOT_ENABLED' },
+    ));
+    const legacy = await GET(new NextRequest(
+      'http://localhost/api/collaboration/document-project?projectId=project-a'
+    ));
+    expect(legacy.status).toBe(409);
+    expect(await legacy.json()).toEqual({ success: false, code: 'DOCUMENT_PROJECT_NOT_ENABLED' });
+
+    mocks.readCollaborativeProject.mockRejectedValueOnce(Object.assign(
+      new Error('missing document'), { code: 'DOCUMENT_AUTHORITY_CONFLICT' },
+    ));
+    const broken = await GET(new NextRequest(
+      'http://localhost/api/collaboration/document-project?projectId=project-a'
+    ));
+    expect(broken.status).toBe(409);
+    expect(await broken.json()).toEqual({ success: false, code: 'DOCUMENT_AUTHORITY_CONFLICT' });
+  });
 });

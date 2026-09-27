@@ -8,8 +8,10 @@ import WebSocket, { WebSocketServer } from 'ws';
 import * as Y from 'yjs';
 
 import { DocumentAccessError, withDocumentEditorRead } from './document-access';
+import { DocumentAssetError } from './document-assets';
 import {
-  commitDocumentUpdate, loadDocumentInTransaction, readDocumentUpdatesAfterInTransaction,
+  commitDocumentUpdate, DocumentUpdateRejectedError, loadDocumentInTransaction,
+  readDocumentUpdatesAfterInTransaction,
 } from './document-store';
 import { consumeDocumentTicket } from './document-tickets';
 import { getPool } from '@/lib/db-client';
@@ -158,7 +160,9 @@ export function createDocumentGateway({
     queuedInboundBytes += retainedBytes;
     const pending = connection.pending.then(operation).catch(error => {
       if (connection.active) connection.socket.close(
-        error instanceof DocumentAccessError ? 1008 : 1011, 'document unavailable',
+        error instanceof DocumentUpdateRejectedError || error instanceof DocumentAssetError
+          ? 4400 : error instanceof DocumentAccessError ? 1008 : 1011,
+        'document unavailable',
       );
     }).finally(() => {
       connection.pendingOperations -= 1;

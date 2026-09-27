@@ -311,11 +311,13 @@ describe('PSD Pro layer decomposition client', () => {
       .mockResolvedValueOnce(completed);
     const source = '/api/serve-upload/uploads/generation-race.png';
 
-    const firstRun = psdExport.requestExternalPsdScene(source);
-    const lateOldRun = psdExport.requestExternalPsdScene(source);
+    const firstRun = psdExport.requestExternalPsdScene(source).then(() => 'first' as const);
+    const secondRun = psdExport.requestExternalPsdScene(source).then(() => 'second' as const);
     await vi.waitFor(() => expect(runLayerDecomposition).toHaveBeenCalledTimes(2));
     resolveFirst(completed);
-    await firstRun;
+    // Async source hashing can reverse which request reaches the first mock.
+    const completedRun = await Promise.race([firstRun, secondRun]);
+    const lateOldRun = completedRun === 'first' ? secondRun : firstRun;
     await expect(psdExport.requestExternalPsdScene(source)).rejects.toThrow('newer generation poll lost');
     expect([...values.values()].join('\n')).toContain('newer-generation-task');
     resolveSecond(completed);

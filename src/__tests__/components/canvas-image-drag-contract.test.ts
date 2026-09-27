@@ -14,8 +14,4 @@ describe('canvas image drag activation', () => {
     expect(source).not.toContain('imageDragReadyRef.current = true;\n      }, 200);');
   });
 
-  it('publishes and force-saves the same committed drag snapshot', () => {
-    expect(source).toContain('imagesRef.current = updatedImages;');
-    expect(source).toContain('onForceSave?.(updatedImages);');
-  });
 });

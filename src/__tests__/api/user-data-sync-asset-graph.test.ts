@@ -368,13 +368,15 @@ describe('user-data asset graph sync route', () => {
     ['shadow', 'shadow'],
     ['react-flow-v2', 'react-flow-v2'],
   ] as const)('clamps server workflow renderer mode %s to %s at the route', async (configured, delivered) => {
+    process.env.WUJIE_ASSET_GRAPH_MODE = 'legacy';
     process.env.WUJIE_WORKFLOW_RENDERER_MODE = configured;
     mocks.dbGetUserData.mockResolvedValue(projects);
 
     const response = await GET(new NextRequest('http://localhost/api/user-data/sync?key=projects'));
 
-    expect(response.status).toBe(200);
-    expect(await response.json()).toMatchObject({ workflowRendererMode: delivered });
+    const body = await response.json();
+    expect(response.status, JSON.stringify(body)).toBe(200);
+    expect(body).toMatchObject({ workflowRendererMode: delivered });
   });
 
   it('injects the established data URL persistence boundary into atomic shadow sync', async () => {

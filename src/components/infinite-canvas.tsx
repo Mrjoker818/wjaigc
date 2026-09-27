@@ -58,6 +58,7 @@ import {
 import { waitForAnnotationTaskResult } from '@/features/annotations/annotation-task-client';
 import {
   buildAnnotationSourceVersionId,
+  createInitialAnnotationControllerState,
   type AnnotationGesture,
   useAnnotationController,
 } from '@/features/annotations/use-annotation-controller';
@@ -170,6 +171,7 @@ import {
   type CanvasCommand,
 } from '@/lib/canvas-kernel/commands';
 import { resolveActiveCanvasImage } from '@/lib/canvas-active-image';
+import { commitAcceptedCanvasImageChange, commitCanvasImageRefChange } from '@/lib/collaboration/canvas-document-image-bridge';
 import type { CanvasToolbarAction } from '@/lib/mobile-canvas-toolbar';
 import {
   THREE_D_POLL_INTERVAL_MS,
@@ -482,7 +484,7 @@ interface InfiniteCanvasProps {
   taskModelOptions?: TaskModelCatalogModel[];
   catalogStatus?: { loading: boolean; error: string | null };
   images: CanvasImage[];
-  onImagesChange: (images: CanvasImage[], options?: { history?: 'record' | 'skip' }) => void;
+  onImagesChange: (images: CanvasImage[], options?: { history?: 'record' | 'skip' }) => boolean | void;
   selectedImage: CanvasImage | null;
   onSelectImage: (image: CanvasImage | null) => void;
   onPreviewImage: (image: CanvasImage) => void;
@@ -523,7 +525,7 @@ interface InfiniteCanvasProps {
   isHistoryTransitionPending?: boolean;
   navigateToImageId?: string | null;
   onNavigateToImageComplete?: () => void;
-  onGroupsChange?: (groups: ImageGroup[]) => void;
+  onGroupsChange?: (groups: ImageGroup[], renderedBaseline?: ImageGroup[]) => boolean | void;
   initialGroups?: ImageGroup[];
   /** Called when Alt+Click marks an image as reference with number */
   onAltMarkReference?: (image: CanvasImage) => void;
@@ -570,7 +572,8 @@ interface InfiniteCanvasProps {
   onRetryProcessing?: (image: CanvasImage) => void;
   projectId?: string;
   initialAnnotations?: CanvasAnnotationV2[];
-  onAnnotationsChange?: (annotations: CanvasAnnotationV2[]) => void;
+  onAnnotationsChange?: (annotations: CanvasAnnotationV2[], renderedBaseline?: CanvasAnnotationV2[]) => boolean | void;
+  documentMetadataMode?: boolean;
   /** Execute shared remote task polling at the workspace side-effect boundary. */
   onRequestTaskPoll: (
     payload: Record<string, unknown>,
@@ -744,7 +747,7 @@ function CanvasScaledMenuSelect({
   );
 }
 
-export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], catalogStatus = { loading: false, error: null }, images, onImagesChange, selectedImage, onSelectImage, onPreviewImage, onGenerateVariation, onExtractKeywords, onAddImages, referenceIds = [], isGenerating = false, generationProgress = undefined, themeStyle = 'gold', onVisionPrompt, visionPromptEnabled = false, onToggleVisionPrompt, ohMyPromptOpen = false, onCloseOhMyPrompt, onInsertPrompt, ohMyPromptThemeStyle = 'gold', isVisionAnalyzing = false, visionResult = null, ompActiveTab = 'agent', ompVisionImageUrl = null, onToggleSettings, onToggleTheme, onToggleUserManager, onToggleAdminSystem, onToggleProjectData, isAdmin = false, onToggleHelp, isPanelCollapsed = false, onUndo, onRedo, onHistoryTransactionBegin, onHistoryTransactionCommit, onHistoryTransactionRollback, isHistoryTransitionPending = false, navigateToImageId, onNavigateToImageComplete, onGroupsChange, initialGroups, altRefMarkerIds = [], onForceSave, onDeleteImages, onUploadEffectReverseSource, onEditImage, onViewStateChange, initialViewState, onAddToFavorites, onToggleFavorites, onTogglePromptTemplate, brandProject, onSwitchToNodeMode, onSwitchToWorkflowHub, onSwitchToDashboard, onSendToChat, connections, onConnectionsChange, versionHistoryManager, onOpenVideoPanel, onRetryProcessing, projectId, initialAnnotations = [], onAnnotationsChange, onRequestTaskPoll }: InfiniteCanvasProps) {
+export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], catalogStatus = { loading: false, error: null }, images, onImagesChange, selectedImage, onSelectImage, onPreviewImage, onGenerateVariation, onExtractKeywords, onAddImages, referenceIds = [], isGenerating = false, generationProgress = undefined, themeStyle = 'gold', onVisionPrompt, visionPromptEnabled = false, onToggleVisionPrompt, ohMyPromptOpen = false, onCloseOhMyPrompt, onInsertPrompt, ohMyPromptThemeStyle = 'gold', isVisionAnalyzing = false, visionResult = null, ompActiveTab = 'agent', ompVisionImageUrl = null, onToggleSettings, onToggleTheme, onToggleUserManager, onToggleAdminSystem, onToggleProjectData, isAdmin = false, onToggleHelp, isPanelCollapsed = false, onUndo, onRedo, onHistoryTransactionBegin, onHistoryTransactionCommit, onHistoryTransactionRollback, isHistoryTransitionPending = false, navigateToImageId, onNavigateToImageComplete, onGroupsChange, initialGroups, altRefMarkerIds = [], onForceSave, onDeleteImages, onUploadEffectReverseSource, onEditImage, onViewStateChange, initialViewState, onAddToFavorites, onToggleFavorites, onTogglePromptTemplate, brandProject, onSwitchToNodeMode, onSwitchToWorkflowHub, onSwitchToDashboard, onSendToChat, connections, onConnectionsChange, versionHistoryManager, onOpenVideoPanel, onRetryProcessing, projectId, initialAnnotations = [], onAnnotationsChange, documentMetadataMode = false, onRequestTaskPoll }: InfiniteCanvasProps) {
   const isMonochrome = themeStyle === 'monochrome';
   const taskModelCatalogIndex = useMemo(
     () => createTaskModelCatalogIndex(taskModelCatalog),
@@ -1205,8 +1208,7 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
         });
         if (changed) {
           // Keep concurrent image completions based on the latest dimension updates.
-          imagesRef.current = updated;
-          onImagesChange(updated);
+          commitCanvasImageRefChange(imagesRef, updated, onImagesChange);
         }
       };
       imageEl.onerror = () => { pending.delete(key); };
@@ -1385,16 +1387,31 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
   const addFusionImageToGenGroupRef = useRef<(image: CanvasImage) => void>(() => {});
   const exitEditModeRef = useRef<() => void>(() => {});
 
-  // 同步groups到父组件
+  const prevInitialGroupsRef = useRef<string>('');
+  const lastRenderedGroupsRef = useRef(groups);
+  // 同步本地分组改动；项目切换或远端投影更新不是本地写入。
   useEffect(() => {
-    onGroupsChange?.(groups);
-  }, [groups, onGroupsChange]);
+    const incoming = JSON.stringify(initialGroups || []);
+    if (incoming !== prevInitialGroupsRef.current || JSON.stringify(groups) === incoming) {
+      if (JSON.stringify(groups) === incoming) lastRenderedGroupsRef.current = groups;
+      return;
+    }
+    if (JSON.stringify(groups) === JSON.stringify(lastRenderedGroupsRef.current)) return;
+    const renderedBaseline = lastRenderedGroupsRef.current;
+    const accepted = onGroupsChange?.(groups, renderedBaseline);
+    if (accepted === false) {
+      setGroups(current => (
+        JSON.stringify(current) === JSON.stringify(groups) ? renderedBaseline : current
+      ));
+      return;
+    }
+    lastRenderedGroupsRef.current = groups;
+  }, [groups, initialGroups, onGroupsChange]);
 
   // ★ 组件卸载时：不做 abort（轮询仍在后台继续，结果通过 setImages 持久化到父级状态）
   // 切换回画布模式时，InfiniteCanvas 重新挂载即可看到已完成的结果
 
   // 当 initialGroups 从外部变化时同步更新 groups（项目切换、页面刷新加载）
-  const prevInitialGroupsRef = useRef<string>('');
   useEffect(() => {
     const key = initialGroups ? JSON.stringify(initialGroups) : '__empty__';
     if (key !== prevInitialGroupsRef.current) {
@@ -1712,9 +1729,76 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
     remove: removeAnnotationV2,
     escape: escapeAnnotationV2,
   } = annotationController;
+  const documentAnnotationMirrorRef = useRef({
+    projectId,
+    signature: JSON.stringify(initialAnnotations),
+    hydrating: false,
+  });
+  const lastRenderedAnnotationsRef = useRef(annotationV2State.annotations);
   useEffect(() => {
-    onAnnotationsChange?.(annotationV2State.annotations);
-  }, [annotationV2State.annotations, onAnnotationsChange]);
+    if (!documentMetadataMode) return;
+    const signature = JSON.stringify(initialAnnotations);
+    const mirror = documentAnnotationMirrorRef.current;
+    if (mirror.projectId === projectId && mirror.signature === signature) return;
+    documentAnnotationMirrorRef.current = { projectId, signature, hydrating: true };
+    if (JSON.stringify(annotationV2State.annotations) === signature) {
+      documentAnnotationMirrorRef.current.hydrating = false;
+      return;
+    }
+    const restored = createInitialAnnotationControllerState(initialAnnotations);
+    setAnnotationV2State(current => ({
+      ...current,
+      annotations: restored.annotations,
+      sourceLock: mirror.projectId === projectId && current.gesture.kind !== 'idle'
+        ? current.sourceLock : restored.sourceLock,
+      sourceMismatch: mirror.projectId === projectId && current.gesture.kind !== 'idle'
+        ? current.sourceMismatch : restored.sourceMismatch,
+      gesture: mirror.projectId === projectId && current.gesture.kind !== 'idle'
+        ? current.gesture : { kind: 'idle' },
+      selectedAnnotationId: restored.annotations.some(annotation => (
+        annotation.id === current.selectedAnnotationId
+      )) ? current.selectedAnnotationId : null,
+    }));
+  }, [documentMetadataMode, projectId, initialAnnotations,
+    annotationV2State.annotations, setAnnotationV2State]);
+  useEffect(() => {
+    if (documentMetadataMode) {
+      const mirror = documentAnnotationMirrorRef.current;
+      if (mirror.projectId !== projectId) return;
+      const signature = JSON.stringify(annotationV2State.annotations);
+      if (mirror.hydrating) {
+        if (signature === mirror.signature) {
+          mirror.hydrating = false;
+          lastRenderedAnnotationsRef.current = annotationV2State.annotations;
+        }
+        return;
+      }
+      if (signature === mirror.signature) {
+        lastRenderedAnnotationsRef.current = annotationV2State.annotations;
+        return;
+      }
+    }
+    if (JSON.stringify(annotationV2State.annotations) ===
+        JSON.stringify(lastRenderedAnnotationsRef.current)) return;
+    const renderedBaseline = lastRenderedAnnotationsRef.current;
+    const accepted = onAnnotationsChange?.(annotationV2State.annotations, renderedBaseline);
+    if (accepted === false) {
+      const restored = createInitialAnnotationControllerState(renderedBaseline);
+      setAnnotationV2State(current => ({
+        ...current,
+        annotations: renderedBaseline,
+        sourceLock: restored.sourceLock,
+        sourceMismatch: restored.sourceMismatch,
+        gesture: { kind: 'idle' },
+        selectedAnnotationId: renderedBaseline.some(annotation => (
+          annotation.id === current.selectedAnnotationId
+        )) ? current.selectedAnnotationId : null,
+      }));
+      return;
+    }
+    lastRenderedAnnotationsRef.current = annotationV2State.annotations;
+  }, [annotationV2State.annotations, onAnnotationsChange,
+    documentMetadataMode, projectId, setAnnotationV2State]);
   const annotationPointerIdRef = useRef<number | null>(null);
   const annotationObservedImagesRef = useRef(images.length > 0);
   const annotationSemanticRequestRef = useRef(0);
@@ -2675,8 +2759,7 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
         ? { ...image, mediaAvailability: 'missing' as const, mediaErrorCode }
         : image
     ));
-    imagesRef.current = nextImages;
-    onImagesChange(nextImages);
+    commitCanvasImageRefChange(imagesRef, nextImages, onImagesChange);
   }, [onImagesChange]);
 
   const recoverMissingMedia = useCallback(async (image: CanvasImage) => {
@@ -2693,8 +2776,7 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
             }
           : candidate
       ));
-      imagesRef.current = nextImages;
-      onImagesChange(nextImages);
+      commitCanvasImageRefChange(imagesRef, nextImages, onImagesChange);
       return;
     }
     if (identityState === 'legacy') {
@@ -2708,8 +2790,7 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
             }
           : candidate
       ));
-      imagesRef.current = nextImages;
-      onImagesChange(nextImages);
+      commitCanvasImageRefChange(imagesRef, nextImages, onImagesChange);
       return;
     }
     if (identityState === 'incomplete' || !effectiveProjectId) {
@@ -2718,8 +2799,7 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
           ? { ...candidate, mediaAvailability: 'missing' as const, mediaErrorCode: 'ASSET_RECOVERY_IDENTITY_MISSING' }
           : candidate
       ));
-      imagesRef.current = nextImages;
-      onImagesChange(nextImages);
+      commitCanvasImageRefChange(imagesRef, nextImages, onImagesChange);
       toast.error('媒体恢复失败', { description: '媒体身份信息不完整，请刷新项目后重试。' });
       return;
     }
@@ -2729,8 +2809,7 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
         ? { ...candidate, mediaAvailability: 'recovering' as const, mediaErrorCode: undefined }
         : candidate
     ));
-    imagesRef.current = recoveringImages;
-    onImagesChange(recoveringImages);
+    commitCanvasImageRefChange(imagesRef, recoveringImages, onImagesChange);
 
     const toastId = toast.loading('正在恢复媒体文件...');
     try {
@@ -2740,8 +2819,7 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
           ? applyRecoveredCanvasMedia(candidate, result)
           : candidate
       ));
-      imagesRef.current = nextImages;
-      onImagesChange(nextImages);
+      commitCanvasImageRefChange(imagesRef, nextImages, onImagesChange);
       if (result.recovered) toast.success('媒体已恢复', { id: toastId });
       else if (result.availability === 'recovering') toast.loading('媒体正在恢复中...', { id: toastId });
       else toast.error('媒体恢复失败', { id: toastId, description: result.error });
@@ -2751,8 +2829,7 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
           ? { ...candidate, mediaAvailability: 'missing' as const, mediaErrorCode: 'MEDIA_RECOVERY_FAILED' }
           : candidate
       ));
-      imagesRef.current = nextImages;
-      onImagesChange(nextImages);
+      commitCanvasImageRefChange(imagesRef, nextImages, onImagesChange);
       toast.error('媒体恢复失败', {
         id: toastId,
         description: error instanceof Error ? error.message : '请稍后重试',
@@ -5186,8 +5263,9 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
         id: resizingImage,
         bounds: resizePreview,
       });
-      onImagesChange(resizedImages);
-      onForceSave?.(resizedImages);
+      const committed = commitAcceptedCanvasImageChange(imagesRef.current, resizedImages, onImagesChange);
+      imagesRef.current = committed.images;
+      if (committed.accepted) onForceSave?.(resizedImages);
     }
     setResizePreview(null);
 
@@ -5206,13 +5284,13 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
           ids: [...committedIds],
           delta: finalDragOffset,
         });
-        imagesRef.current = updatedImages;
-        onImagesChange(updatedImages);
-        onForceSave?.(updatedImages);
+        const committed = commitAcceptedCanvasImageChange(currentImages, updatedImages, onImagesChange);
+        imagesRef.current = committed.images;
+        if (committed.accepted) onForceSave?.(updatedImages);
 
         // ── Drag-in/Drag-out detection for GenGroups ──
         // For each dragged image, check if it landed inside a GenGroup container
-        for (const imgId of committedIds) {
+        for (const imgId of committed.accepted ? committedIds : []) {
           const draggedImg = updatedImages.find(i => i.id === imgId);
           if (!draggedImg) continue;
           const imgCX = draggedImg.x + draggedImg.width / 2;
@@ -6277,8 +6355,7 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
                   height: displayH,
                 } : i
               );
-              imagesRef.current = updated;
-              onImagesChange(updated);
+              commitCanvasImageRefChange(imagesRef, updated, onImagesChange);
             }
           };
           vImg.src = newImg.url;
@@ -6379,8 +6456,7 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
                         height: displayH,
                       } : i
                     );
-                    imagesRef.current = updated;
-                    onImagesChange(updated);
+                    commitCanvasImageRefChange(imagesRef, updated, onImagesChange);
                   }
                 };
                 vImg.src = savedUrl;
@@ -6579,8 +6655,7 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
       generatedFromImageId: sourceImage.id,
     };
     const nextImages = [...imagesRef.current, placeholder];
-    imagesRef.current = nextImages;
-    onImagesChange(nextImages);
+    commitCanvasImageRefChange(imagesRef, nextImages, onImagesChange);
     setSelectedIds(new Set([sourceImage.id]));
     onSelectImage(sourceImage);
     return placeholder.id;
@@ -6598,16 +6673,14 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
         },
       };
     });
-    imagesRef.current = nextImages;
-    onImagesChange(nextImages);
+    commitCanvasImageRefChange(imagesRef, nextImages, onImagesChange);
   }, [onImagesChange]);
 
   const projectProcessingFrameEvent = useCallback((event: CanvasTaskEvent) => {
     const current = imagesRef.current;
     const next = applyCanvasTaskEventToProcessingPlaceholders(current, event);
     if (next === current) return;
-    imagesRef.current = next;
-    onImagesChange(next);
+    commitCanvasImageRefChange(imagesRef, next, onImagesChange);
   }, [onImagesChange]);
 
   const completeProcessingFrame = useCallback((
@@ -6645,8 +6718,7 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
       return completedImage;
     });
     if (didMutateFrame) {
-      imagesRef.current = nextImages;
-      onImagesChange(nextImages);
+      if (!commitCanvasImageRefChange(imagesRef, nextImages, onImagesChange)) return null;
     }
 
     // ★ 异步验证修正：始终从图片真实像素尺寸修正 originalWidth/Height 和 width/height
@@ -6675,8 +6747,7 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
                 height: currentDisplayH,
               } : i
             );
-            imagesRef.current = updated;
-            onImagesChange(updated);
+            commitCanvasImageRefChange(imagesRef, updated, onImagesChange);
           }
         }
       };
@@ -6716,8 +6787,7 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
             const updatedImages = imagesRef.current.map(img =>
               img.id === id ? { ...img, originalWidth: natW, originalHeight: natH } : img
             );
-            imagesRef.current = updatedImages;
-            onImagesChange(updatedImages);
+            commitCanvasImageRefChange(imagesRef, updatedImages, onImagesChange);
           }
         }
       }; // 加载成功，更新真实尺寸
@@ -6748,8 +6818,7 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
                 }
                 return img;
               });
-              imagesRef.current = fallbackImages;
-              onImagesChange(fallbackImages);
+              commitCanvasImageRefChange(imagesRef, fallbackImages, onImagesChange);
             };
             fallbackImg.onerror = () => {
               // 持久化 URL 也无法加载，仅更新 URL
@@ -6759,8 +6828,7 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
                 }
                 return img;
               });
-              imagesRef.current = fallbackImages;
-              onImagesChange(fallbackImages);
+              commitCanvasImageRefChange(imagesRef, fallbackImages, onImagesChange);
             };
             fallbackImg.src = data.url;
           }
@@ -6780,8 +6848,7 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
             const updatedImages = imagesRef.current.map(img =>
               img.id === id ? { ...img, originalWidth: natW, originalHeight: natH } : img
             );
-            imagesRef.current = updatedImages;
-            onImagesChange(updatedImages);
+            commitCanvasImageRefChange(imagesRef, updatedImages, onImagesChange);
           }
         }
       };
@@ -6792,8 +6859,7 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
 
   const removeProcessingFrame = useCallback((id: string) => {
     const nextImages = imagesRef.current.filter(image => image.id !== id);
-    imagesRef.current = nextImages;
-    onImagesChange(nextImages);
+    commitCanvasImageRefChange(imagesRef, nextImages, onImagesChange);
   }, [onImagesChange]);
 
   const handleCancelProcessingFrame = useCallback(async (image: CanvasImage) => {
@@ -7874,8 +7940,7 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
         };
         });
         const nextImages = [...imagesRef.current, ...directImages];
-        imagesRef.current = nextImages;
-        onImagesChange(nextImages);
+        commitCanvasImageRefChange(imagesRef, nextImages, onImagesChange);
         setCanvasGenFrameId(null);
         setCanvasGenPreviewUrl(savedUrls[0] || null);
         setCanvasGenProgress(100);
@@ -7940,8 +8005,7 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
         };
       });
       const nextImages = [...imagesRef.current, ...placeholders];
-      imagesRef.current = nextImages;
-      onImagesChange(nextImages);
+      commitCanvasImageRefChange(imagesRef, nextImages, onImagesChange);
       setCanvasGenFrameId(null);
 
       const pollForSlot = async (slot: { taskId: string; frameId: string; slotIndex: number }): Promise<string | null> => {
@@ -9037,8 +9101,7 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
               model: 'removebg-mask',
             };
             const nextImages = [...imagesRef.current, maskImage];
-            imagesRef.current = nextImages;
-            onImagesChange(nextImages);
+            commitCanvasImageRefChange(imagesRef, nextImages, onImagesChange);
           } catch (maskErr) {
             console.warn('[removeBg] Failed to add mask image to canvas:', maskErr);
           }
@@ -12421,8 +12484,7 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
                             ? clearFailedCanvasVideoPoster(candidate)
                             : candidate
                         ));
-                        imagesRef.current = nextImages;
-                        onImagesChange(nextImages);
+                        commitCanvasImageRefChange(imagesRef, nextImages, onImagesChange);
                         return;
                       }
                       if (action === 'ignore') return;

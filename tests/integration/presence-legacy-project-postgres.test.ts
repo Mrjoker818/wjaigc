@@ -65,6 +65,7 @@ describe('presence identity for legacy canvas projects', () => {
     await withIsolatedPostgres('presence-legacy-on-demand', async ({ query }) => {
       await setup(query);
       vi.stubEnv('WUJIE_PRESENCE_ENABLED', 'true');
+      vi.stubEnv('WUJIE_ASSET_GRAPH_MODE', 'legacy');
       const { assertPresenceMember, grantPresenceMember } = await import('../../src/lib/collaboration/presence-members');
       await query(
         `INSERT INTO wujie_user_data (user_id, data_key, data_value, updated_at)

@@ -43,6 +43,14 @@ export interface LoadedDocument {
   sequence: number;
 }
 
+/** The submitted bytes cannot become a valid document update by retrying unchanged. */
+export class DocumentUpdateRejectedError extends Error {
+  constructor(error: unknown) {
+    super(error instanceof Error ? error.message : 'Invalid canvas document update', { cause: error });
+    this.name = 'DocumentUpdateRejectedError';
+  }
+}
+
 function sequenceNumber(value: string): number {
   const parsed = Number(value);
   if (!Number.isSafeInteger(parsed) || parsed < 0) throw new Error('Invalid canvas document sequence');
@@ -242,7 +250,7 @@ export async function commitDocumentUpdate(input: {
   const { actorId, projectId, bytes } = input;
   assertProjectId(projectId);
   if (!(bytes instanceof Uint8Array) || bytes.length === 0 || bytes.length > MAX_INCOMING_UPDATE_BYTES) {
-    throw new Error('Invalid canvas document update size');
+    throw new DocumentUpdateRejectedError(new Error('Invalid canvas document update size'));
   }
   const client = await getPool().connect();
   try {
@@ -281,17 +289,22 @@ export async function commitDocumentUpdate(input: {
     candidate.getMap('annotationRecords').observe(event => {
       for (const key of event.changes.keys.keys()) touchedAnnotations.add(key);
     });
-    Y.applyUpdate(candidate, bytes);
-    if (touchedImmutableKey) {
-      throw new Error('Canvas document immutable placement history cannot be rewritten');
-    }
-    if ([...touchedGroups].some(id => candidate.getMap('groupTombstones').get(id) === true) ||
-        [...touchedAnnotations].some(id => candidate.getMap('annotationTombstones').get(id) === true)) {
-      throw new Error('Canvas deleted metadata record cannot be rewritten');
-    }
-    assertCanvasDocumentTransition(previous, candidate);
     const beforeProjection = readCanvasDocument(previous);
-    const projection = readCanvasDocument(candidate);
+    let projection: CanvasDocumentProjection;
+    try {
+      Y.applyUpdate(candidate, bytes);
+      if (touchedImmutableKey) {
+        throw new Error('Canvas document immutable placement history cannot be rewritten');
+      }
+      if ([...touchedGroups].some(id => candidate.getMap('groupTombstones').get(id) === true) ||
+          [...touchedAnnotations].some(id => candidate.getMap('annotationTombstones').get(id) === true)) {
+        throw new Error('Canvas deleted metadata record cannot be rewritten');
+      }
+      assertCanvasDocumentTransition(previous, candidate);
+      projection = readCanvasDocument(candidate);
+    } catch (error) {
+      throw new DocumentUpdateRejectedError(error);
+    }
     for (const [annotationId, annotation] of Object.entries(projection.annotationRecords ?? {})) {
       if (projection.annotationTombstones?.[annotationId] === true) continue;
       if (annotation.projectId !== projectId) {
@@ -309,14 +322,24 @@ export async function commitDocumentUpdate(input: {
       await assertProjectAssetVersion(ownerId, projectId, placement.assetVersionId, client);
       await assertProjectCanvasPlacement(ownerId, projectId, placementId, placement.assetVersionId, client);
     }
-    const canonical = canonicalizeCandidate(candidate, projection);
+    let canonical: Uint8Array;
+    try {
+      canonical = canonicalizeCandidate(candidate, projection);
+    } catch (error) {
+      throw new DocumentUpdateRejectedError(error);
+    }
     const oldCanonical = Y.encodeStateAsUpdate(previous);
     const oldSequence = row ? sequenceNumber(row.sequence) : 0;
     if (Buffer.from(canonical).equals(Buffer.from(oldCanonical))) {
       await client.query('COMMIT');
       return { sequence: oldSequence, update: canonical };
     }
-    const incremental = deriveVerifiedIncrementalUpdate(previous, candidate, canonical, projection);
+    let incremental: Uint8Array;
+    try {
+      incremental = deriveVerifiedIncrementalUpdate(previous, candidate, canonical, projection);
+    } catch (error) {
+      throw new DocumentUpdateRejectedError(error);
+    }
     const sequence = oldSequence + 1;
     if (!Number.isSafeInteger(sequence)) throw new Error('Canvas document sequence exhausted');
     if (!row) {

@@ -41,7 +41,7 @@ const originalProject: Project = {
 afterEach(() => vi.unstubAllEnvs());
 
 describe('collaborative project authority on isolated PostgreSQL', () => {
-  postgresIt('returns document coordinates rather than stale graph coordinates in the owner project GET', async () => {
+  postgresIt('returns document coordinates through the owner project GET despite a concurrent document update', async () => {
     const { withIsolatedPostgres } = await import('../helpers/postgres-test-database');
     await withIsolatedPostgres('document-project-owner-read', async ({ query }) => {
       for (const migration of [
@@ -57,7 +57,8 @@ describe('collaborative project authority on isolated PostgreSQL', () => {
         updated_at BIGINT NOT NULL, PRIMARY KEY (user_id, data_key)
       )`);
       await query(`INSERT INTO wujie_users (id, name, password_hash, status, created_at, updated_at)
-        VALUES ('owner-a', 'Owner A', 'test', 'active', 1, 1)`);
+        VALUES ('owner-a', 'Owner A', 'test', 'active', 1, 1),
+               ('editor-a', 'Editor A', 'test', 'active', 1, 1)`);
       await query(`INSERT INTO wujie_projects (id, owner_id, name)
         VALUES ('project-a', 'owner-a', 'Original')`);
       const image = {
@@ -97,6 +98,48 @@ describe('collaborative project authority on isolated PostgreSQL', () => {
         VALUES ('project-a', 'owner-a', $1, $2::jsonb)`, [
         Buffer.from(Y.encodeStateAsUpdate(doc)), JSON.stringify(readCanvasDocument(doc)),
       ]);
+      await query(`INSERT INTO wujie_project_document_editors
+        (project_id, owner_id, member_user_id, status)
+        VALUES ('project-a', 'owner-a', 'editor-a', 'active')`);
+
+      const { readCollaborativeProject } = await import(
+        '../../src/lib/collaboration/document-project-bridge'
+      );
+      const editorRead = await readCollaborativeProject('editor-a', 'project-a');
+      expect(editorRead.canvasImages).toMatchObject([{
+        id: 'image-a', placementId: 'placement-a', assetVersionId: 'version-a',
+        url: '/api/serve-upload/uploads/ready.png', x: 99,
+      }]);
+
+      const { getPool } = await import('../../src/lib/db-client');
+      const blocker = await getPool().connect();
+      let concurrentRead: Promise<unknown> | null = null;
+      try {
+        await blocker.query('BEGIN');
+        await blocker.query(`UPDATE wujie_project_canvas_documents
+          SET updated_at = updated_at + interval '1 millisecond'
+          WHERE project_id = 'project-a'`);
+        concurrentRead = readCollaborativeProject('editor-a', 'project-a');
+        const settledRead = concurrentRead.then(
+          value => ({ value }), error => ({ error }),
+        );
+        await vi.waitFor(async () => {
+          const waiting = await query<{ waiting: boolean }>(`SELECT EXISTS (
+            SELECT 1 FROM pg_stat_activity
+            WHERE wait_event_type = 'Lock'
+              AND query LIKE '%wujie_project_canvas_documents%FOR SHARE%'
+          ) AS waiting`);
+          expect(waiting.rows[0]?.waiting).toBe(true);
+        }, { timeout: 5_000, interval: 20 });
+        await blocker.query('COMMIT');
+        expect(await settledRead).toMatchObject({
+          value: { canvasImages: [{ id: 'image-a', x: 99 }] },
+        });
+      } finally {
+        await blocker.query('ROLLBACK').catch(() => undefined);
+        blocker.release();
+        if (concurrentRead) await concurrentRead.catch(() => undefined);
+      }
 
       const { NextRequest } = await import('next/server');
       const { GET } = await import('../../src/app/api/user-data/sync/route');
@@ -382,7 +425,9 @@ describe('collaborative project authority on isolated PostgreSQL', () => {
       await query(`INSERT INTO wujie_projects (id, owner_id, name, metadata)
         VALUES ('project-a', 'owner-a', 'Original', '{"presenceProjection":true}'::jsonb)`);
       await query(`INSERT INTO wujie_user_data (user_id, data_key, data_value, updated_at)
-        VALUES ('owner-a', 'projects', $1::jsonb, 1)`, [JSON.stringify([originalProject])]);
+        VALUES ('owner-a', 'projects', $1::jsonb, 1)`, [JSON.stringify([{
+          ...originalProject, metadata: { privateOwnerSetting: 'must-not-leak' },
+        }])]);
 
       const { enableCollaborativeProject } = await import('../../src/lib/collaboration/document-project-bridge');
       await expect(enableCollaborativeProject('owner-a', 'project-a', 1))
@@ -405,7 +450,9 @@ describe('collaborative project authority on isolated PostgreSQL', () => {
       const snapshot = await query<{ data_value: Project[] }>(
         `SELECT data_value FROM wujie_user_data WHERE user_id = 'owner-a' AND data_key = 'projects'`,
       );
-      expect(snapshot.rows[0]?.data_value).toEqual([originalProject]);
+      expect(snapshot.rows[0]?.data_value).toEqual([{
+        ...originalProject, metadata: { privateOwnerSetting: 'must-not-leak' },
+      }]);
       const revision = await query<{ data_value: number }>(
         `SELECT data_value FROM wujie_user_data
           WHERE user_id = 'owner-a' AND data_key = '__asset_graph_projects_revision'`,
@@ -854,7 +901,11 @@ describe('collaborative project authority on isolated PostgreSQL', () => {
       vi.stubEnv('WUJIE_YJS_ENABLED', 'true');
       await expect(readCollaborativeProject('editor-a', 'project-a')).resolves.toEqual({
         projectId: 'project-a', ownerId: 'owner-a', sequence: 0,
-        projection: { placements: {} }, readOnly: false,
+        projection: { placements: {} }, canvasImages: [], readOnly: false,
+        workspace: {
+          id: 'project-a', userId: 'owner-a', name: 'Original',
+          createdAt: 1, updatedAt: 1, canvasImages: [], settings: {},
+        },
       });
       await expect(readCollaborativeProject('stranger-a', 'project-a'))
         .rejects.toMatchObject({ code: 'DOCUMENT_FORBIDDEN' });

@@ -347,9 +347,4 @@ describe('InfiniteCanvas annotation gesture integration', () => {
     expect(nodeWorkspaceSource).toContain("baseMessage.includes('框选')");
   });
 
-  it('does not let a late same-project snapshot overwrite dirty annotations', () => {
-    expect(canvasWorkspaceSource).toContain('const annotationsDirtyRef = useRef(false);');
-    expect(canvasWorkspaceSource).toContain('if (!projectChanged && annotationsDirtyRef.current) return;');
-    expect(canvasWorkspaceSource).toContain('annotationsDirtyRef.current = true;');
-  });
 });
