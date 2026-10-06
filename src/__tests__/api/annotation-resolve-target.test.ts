@@ -1,5 +1,7 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NextRequest, NextResponse } from 'next/server';
+import { installAnnotationPrivatePgBoundary } from '../../../tests/helpers/annotation-private-pg-boundary';
+vi.mock('server-only', () => ({}));
 
 const mocks = vi.hoisted(() => ({
   requireApiAuthOrReject: vi.fn(),
@@ -28,7 +30,18 @@ function request(body: unknown) {
 }
 
 describe('POST /api/annotations/resolve-target', () => {
+  let pgBoundary: ReturnType<typeof installAnnotationPrivatePgBoundary>;
+  afterEach(() => {
+    try {
+      pgBoundary.assertDrained();
+    } finally {
+      vi.restoreAllMocks();
+      vi.unstubAllEnvs();
+    }
+  });
   beforeEach(() => {
+    // Fixture values populate the SQL boundary, not an invented file-only store.
+    pgBoundary = installAnnotationPrivatePgBoundary(async (): Promise<unknown> => mocks.dbGetUserData());
     Object.values(mocks).forEach((mock) => mock.mockReset());
     mocks.requireApiAuthOrReject.mockResolvedValue({
       authenticated: true,
@@ -79,6 +92,46 @@ describe('POST /api/annotations/resolve-target', () => {
 
     expect(response.status).toBe(404);
     expect(mocks.identifyImageTargetAtPoint).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { name: 'a foreign project', projectId: 'foreign-project', sourceImageId: 'image-1' },
+    { name: 'an unknown image in an owned project', projectId: 'project-1', sourceImageId: 'foreign-image' },
+  ])('rejects client sourceImageUrl fallback for $name before vision I/O', async ({ projectId, sourceImageId }) => {
+    // Real route and real source lookup; only DB persistence and external vision are doubled.
+    // A valid vision answer makes the unauthorized fallback observable as HTTP 200, not a null-result artifact.
+    mocks.identifyImageTargetAtPoint.mockResolvedValue({
+      label: 'cup', confidence: 0.9,
+      region: { x: 0.2, y: 0.2, w: 0.3, h: 0.4 },
+    });
+    const response = await POST(request({
+      projectId, sourceImageId, sourceVersionId: 'client-asserted-version',
+      sourceImageUrl: '/api/serve-upload/generated/client-asserted-source.png',
+      point: { x: 0.3, y: 0.4 },
+    }));
+
+    expect(response.status).toBe(404);
+    expect(await response.json()).toMatchObject({ success: false, code: 'ANNOTATION_PROJECT_NOT_FOUND' });
+    expect(mocks.identifyImageTargetAtPoint).not.toHaveBeenCalled();
+  });
+
+  it('uses the owned server source even when the real fallback field supplies another URL', async () => {
+    mocks.identifyImageTargetAtPoint.mockResolvedValue({
+      label: 'cup', confidence: 0.9,
+      region: { x: 0.2, y: 0.2, w: 0.3, h: 0.4 },
+    });
+    const response = await POST(request({
+      projectId: 'project-1', sourceImageId: 'image-1', sourceVersionId: 'version-1',
+      sourceImageUrl: '/api/serve-upload/generated/client-asserted-source.png',
+      point: { x: 0.3, y: 0.4 },
+    }));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ success: true, target: { label: 'cup' } });
+    expect(mocks.identifyImageTargetAtPoint).toHaveBeenCalledWith(
+      'https://example.com/owned-source.png', { x: 0.3, y: 0.4 }, 30_000,
+      { userId: 'user-1', userRole: 'user' },
+    );
   });
 
   it('rejects a point outside normalized image coordinates', async () => {

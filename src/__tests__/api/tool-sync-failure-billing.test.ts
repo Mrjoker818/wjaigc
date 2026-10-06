@@ -3,8 +3,10 @@ import { NextRequest, NextResponse } from 'next/server';
 
 const mocks = vi.hoisted(() => ({
   charge: vi.fn(), refund: vi.fn(), engine: vi.fn(), upstream: vi.fn(),
-  providers: vi.fn(), findProvider: vi.fn(), log: vi.fn(), session: vi.fn(),
+  providers: vi.fn(), findProvider: vi.fn(), log: vi.fn(), session: vi.fn(), imageEdit: vi.fn(),
 }));
+vi.mock('server-only', () => ({}));
+vi.mock('@/app/api/image-edit/route', () => ({ POST: mocks.imageEdit }));
 vi.mock('@/lib/server-auth', () => ({ getSessionUser: mocks.session }));
 vi.mock('@/lib/credits', () => ({ consumeCredits: mocks.charge, refundCredits: mocks.refund }));
 vi.mock('@/lib/image-tools/upscayl', () => ({ performOnnxUpscale: mocks.engine }));
@@ -92,20 +94,31 @@ describe('upscale preflight and synchronous compensation', () => {
     expect((await upscale(request({ imageUrl: image }))).status).toBe(500);
     refundedOnce();
   });
-  it('refunds a delegated AI rejection and retains its error status', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => Response.json({ error: 'Unauthorized' }, { status: 401 })));
+  it('returns AI admission rejection without an outer charge or refund', async () => {
+    mocks.imageEdit.mockResolvedValue(NextResponse.json({ error: 'Unauthorized' }, { status: 401 }));
     const response = await upscale(request({ imageUrl: image, upscaleMode: 'ai', scale: '4' }));
     expect(response.status).toBe(401);
-    expect(await response.json()).toMatchObject({ success: false, error: expect.stringContaining('Unauthorized') });
-    expect(JSON.parse(vi.mocked(fetch).mock.calls[0][1]!.body as string)).toMatchObject({ scale: 4 });
-    refundedOnce();
+    expect(await response.json()).toEqual({ error: 'Unauthorized' });
+    expect(await (mocks.imageEdit.mock.calls[0][0] as NextRequest).json()).toMatchObject({ action: 'upscale', scale: 4 });
+    noCharge();
+    expect(fetch).not.toHaveBeenCalled();
   });
-  it('retains a successful delegated response without refunding', async () => {
+  it('retains an accepted AI task without an outer charge or refund', async () => {
     const result = { success: true, taskId: 'delegate-task' };
-    vi.stubGlobal('fetch', vi.fn(async () => Response.json(result)));
-    expect(await (await upscale(request({ imageUrl: image, upscaleMode: 'ai' }))).json()).toEqual(result);
-    expect(mocks.charge).toHaveBeenCalledTimes(1);
-    expect(mocks.refund).not.toHaveBeenCalled();
+    mocks.imageEdit.mockResolvedValue(NextResponse.json(result, { status: 202 }));
+    const response = await upscale(new NextRequest('http://localhost/api/image/upscale', {
+      method: 'POST', headers: { 'x-test-actor': 'billing-test-user' },
+      body: JSON.stringify({ imageUrl: image, upscaleMode: 'ai', projectId: 'project-1',
+        assetParentVersionIds: ['version-1'] }),
+    }));
+    expect(response.status).toBe(202);
+    expect(await response.json()).toEqual(result);
+    const delegated = mocks.imageEdit.mock.calls[0][0] as NextRequest;
+    expect(delegated.headers.get('x-test-actor')).toBe('billing-test-user');
+    expect(await delegated.json()).toMatchObject({ action: 'upscale', projectId: 'project-1',
+      assetParentVersionIds: ['version-1'] });
+    noCharge();
+    expect(fetch).not.toHaveBeenCalled();
   });
   it('does not run the engine or refund an unsuccessful debit', async () => {
     mocks.charge.mockResolvedValue({ success: false, cost: 8, message: 'Insufficient credits' });

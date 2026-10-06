@@ -35,12 +35,32 @@ function setup(originalWidth?: number, originalHeight?: number, secondImage = fa
   const images = secondImage ? [image, { ...image, id: 'other', url: '/other.png' }] : [image];
   const imagesRef = { current: images };
   const onImagesChange = vi.fn();
+  const sizeFillAttemptedRef = { current: new Set<string>() };
   const run = sizeEffect({ images, imagesRef, onImagesChange, commitCanvasImageRefChange,
-    sizeFillAttemptedRef: { current: new Set<string>() }, window: { Image: TestImage } });
-  return { run, loads, onImagesChange, imagesRef };
+    sizeFillAttemptedRef, window: { Image: TestImage } });
+  return { run, loads, onImagesChange, imagesRef, sizeFillAttemptedRef };
 }
 
 describe('production canvas image size recovery', () => {
+  it('cleans its original attempt Set after the ref changes without publishing a late result', async () => {
+    const test = setup();
+    const cleanup = test.run();
+    const attempts = test.sizeFillAttemptedRef.current;
+    const key = '["restored","/cake.png"]';
+    expect(attempts.has(key)).toBe(true);
+    const lateLoad = test.loads[0].onload!;
+    const replacement = new Set([key, 'another-read']);
+    test.sizeFillAttemptedRef.current = replacement;
+    cleanup!();
+    expect(attempts.has(key)).toBe(false);
+    expect(replacement).toEqual(new Set([key, 'another-read']));
+    lateLoad();
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(test.onImagesChange).not.toHaveBeenCalled();
+  });
+
   it.each([[undefined, undefined], [1, 1]])('fills real dimensions for placeholder %s x %s', async (width, height) => {
     const test = setup(width, height);
     test.run();

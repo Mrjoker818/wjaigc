@@ -4,8 +4,10 @@ import path from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NextRequest, NextResponse } from 'next/server';
+vi.mock('server-only', () => ({}));
 
 import type { CanvasAnnotationV2, EditIntentBundle } from '@/features/annotations/annotation-types';
+import { installAnnotationPrivatePgBoundary } from '../../../tests/helpers/annotation-private-pg-boundary';
 
 const mocks = vi.hoisted(() => ({
   requireApiAuthOrReject: vi.fn(),
@@ -26,7 +28,8 @@ vi.mock('@/lib/db-storage', () => ({
 vi.mock('@/lib/server-api-config', () => ({
   findProviderById: mocks.findProviderById,
 }));
-vi.mock('@/features/annotations/annotation-executor', () => ({
+vi.mock('@/features/annotations/annotation-executor', async importOriginal => ({
+  ...await importOriginal<typeof import('@/features/annotations/annotation-executor')>(),
   submitAnnotationEdit: mocks.submitAnnotationEdit,
 }));
 vi.mock('@/lib/server-data-root', () => ({
@@ -100,8 +103,17 @@ const MANAGED_FIXTURE_DIR = path.join(
   'generate',
 );
 
+let pgBoundary: ReturnType<typeof installAnnotationPrivatePgBoundary> | undefined;
+
 afterEach(async () => {
-  await rm(MANAGED_FIXTURE_DIR, { recursive: true, force: true });
+  try {
+    pgBoundary?.assertDrained();
+  } finally {
+    pgBoundary = undefined;
+    vi.restoreAllMocks();
+    vi.unstubAllEnvs();
+    await rm(MANAGED_FIXTURE_DIR, { recursive: true, force: true });
+  }
 });
 
 describe('annotation asset and provider compilation', () => {
@@ -168,6 +180,9 @@ describe('annotation asset and provider compilation', () => {
 
 describe('POST /api/annotations/execute', () => {
   beforeEach(async () => {
+    // dbGetUserData below supplies SQL fixture data only; the real configured-PG
+    // authorization and source revalidation run, with no paid/network submission.
+    pgBoundary = installAnnotationPrivatePgBoundary(async (): Promise<unknown> => mocks.dbGetUserData());
     Object.values(mocks).forEach((mock) => {
       if (typeof mock !== 'string') mock.mockReset();
     });
@@ -206,6 +221,18 @@ describe('POST /api/annotations/execute', () => {
     });
   });
 
+  it('does not expose internal exception details through generic submission errors', async () => {
+    mocks.submitAnnotationEdit.mockRejectedValueOnce(new Error('SELECT secret FROM tasks; postgres://private'));
+    const response = await POST(request({ bundle: bundle([annotation('ann-text', {
+      kind: 'text', point: { x: 0.5, y: 0.5 },
+    })]) }));
+    expect(response.status).toBe(502);
+    const payload = await response.json();
+    expect(payload).toMatchObject({ success: false, code: 'ANNOTATION_SUBMISSION_FAILED',
+      requestId: 'req-test-1', retryable: true });
+    expect(payload.message).not.toMatch(/SELECT|secret|tasks|postgres:/);
+  });
+
   it('rejects unauthenticated callers before reading the project or image', async () => {
     mocks.requireApiAuthOrReject.mockResolvedValue(
       NextResponse.json({ error: 'Authentication required' }, { status: 401 }),
@@ -215,6 +242,21 @@ describe('POST /api/annotations/execute', () => {
 
     expect(response.status).toBe(401);
     expect(mocks.dbGetUserData).not.toHaveBeenCalled();
+    expect(mocks.submitAnnotationEdit).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { name: 'a foreign project', projectId: 'foreign-project', sourceImageId: 'image-1' },
+    { name: 'an unknown source in an owned project', projectId: 'project-1', sourceImageId: 'foreign-image' },
+  ])('refuses an executable client sourceImageUrl fallback for $name', async ({ projectId, sourceImageId }) => {
+    // The real bundle validator, source lookup and Sharp compiler run against a valid local PNG.
+    // Only the final paid submission is doubled: an authorization regression must not reach it.
+    const marked = { ...annotation('ann-1'), projectId, sourceImageId };
+    const input = { ...bundle([marked]), projectId, sourceImageId };
+    const response = await POST(request({ bundle: input, sourceImageUrl: SOURCE_DATA_URL }));
+
+    expect(response.status).toBe(404);
+    expect(await response.json()).toMatchObject({ success: false, code: 'ANNOTATION_PROJECT_NOT_FOUND' });
     expect(mocks.submitAnnotationEdit).not.toHaveBeenCalled();
   });
 

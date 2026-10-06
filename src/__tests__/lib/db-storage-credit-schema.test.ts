@@ -6,6 +6,9 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock('@/lib/db-client', () => mocks);
+vi.mock('@/lib/refund-identity-claim', () => ({
+  ensureRefundIdentityClaims: vi.fn(async (): Promise<void> => {}),
+}));
 
 describe('credit schema initialization', () => {
   beforeEach(() => {

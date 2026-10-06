@@ -9,7 +9,7 @@ import type { WorkspaceAssetReference } from '@/lib/asset-core/types';
 import {
   detectSupportedImageMimeType,
   type SupportedImageMimeType,
-} from '@/lib/image-tools/file';
+} from '@/lib/image-tools/image-mime';
 import {
   loadSafeImageInput,
   withSafeSharp,

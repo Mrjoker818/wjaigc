@@ -17,6 +17,20 @@ jobs:
   static-and-tests:
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: wujie_bridge_test_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d wujie_bridge_test_ci"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     env:
       PGDATABASE_URL: ${{ secrets.PGDATABASE_URL }}
       WUJIE_AUTH_SECRET: ${{ secrets.WUJIE_AUTH_SECRET }}
@@ -52,10 +66,18 @@ jobs:
         run: pnpm ts-check
       - name: ESLint
         run: pnpm lint:build
+      - name: Prepare isolated Vitest media root
+        env:
+          WUJIE_DATA_DIR: ${{ runner.temp }}/wujie-bridge-test-ci
+        run: mkdir -p "$WUJIE_DATA_DIR"
       - name: Unit and integration tests
-        run: pnpm test
-      - name: API tests
-        run: pnpm test:api
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/wujie_bridge_test_ci
+          PGDATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/wujie_bridge_test_ci
+          POSTGRES_TEST_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/wujie_bridge_test_ci
+          TEST_POSTGRES_URL: postgresql://postgres:postgres@127.0.0.1:5432/wujie_bridge_test_ci
+          WUJIE_DATA_DIR: ${{ runner.temp }}/wujie-bridge-test-ci
+        run: pnpm test:ci
       - name: Production dependency audit
         run: pnpm audit --prod --json --registry=https://registry.npmjs.org
       - name: Production build

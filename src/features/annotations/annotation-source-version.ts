@@ -7,6 +7,12 @@ function stableFingerprint(value: string): string {
   return (hash >>> 0).toString(36);
 }
 
+/** Canonical content identity deliberately excludes UI read-time createdAt and mutable geometry. */
+export function buildCanonicalAnnotationSourceVersionId(imageId: string, assetVersionId: string): string {
+  const compactId = imageId.length <= 48 ? imageId : `image-${stableFingerprint(imageId)}`;
+  return `${compactId}:asset:${assetVersionId}`.slice(0, 96);
+}
+
 export function buildAnnotationSourceVersionId(
   imageId: string,
   createdAt?: number,

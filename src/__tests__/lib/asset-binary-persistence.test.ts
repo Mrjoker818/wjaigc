@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, rm, writeFile, rename, mkdir } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -250,5 +250,129 @@ describe('generic asset binary persistence', () => {
     })));
     expect(await readFile(join(root, 'exports', filename))).toEqual(bytes);
     expect(await readdir(join(root, 'exports'))).toEqual([filename]);
+  });
+
+  it.each(['modify', 'replace', 'directory'] as const)('rejects staging %s during the awaited S3 upload without deleting replacements', async fault => {
+    const bytes = Buffer.from('{}');
+    const foreign = Buffer.from('{"foreign":true}');
+    const s3Cleanup = vi.fn(async () => undefined);
+    let foreignPath: string | undefined;
+    mocks.uploadBinaryToS3.mockImplementationOnce(async (_bytes: Buffer, filename: string) => {
+      const directory = join(root, 'exports');
+      const stage = (await readdir(directory)).find(name => name.endsWith('.tmp'))!;
+      if (fault === 'directory') {
+        // Windows forbids renaming a directory with an open child. Move that child first,
+        // then perform the actual parent replacement while the descriptor stays alive.
+        await rename(join(directory, stage), join(root, 'displaced-stage'));
+        await rename(directory, join(root, 'displaced')); await mkdir(directory);
+      }
+      const target = join(directory, stage);
+      if (fault === 'replace') await rename(target, join(root, 'displaced-stage'));
+      await writeFile(target, foreign);
+      if (fault !== 'modify') foreignPath = target;
+      return { storageKey: `exports/${filename}`, createdThisCall: true, cleanup: s3Cleanup };
+    });
+    await expect(persistAssetBytes({ bytes, filename: 'race.json', mimeType: 'application/json' })).rejects.toThrow();
+    expect((await readdir(join(root, 'exports'))).filter(name => !name.startsWith('.'))).toEqual([]);
+    if (foreignPath) expect(await readFile(foreignPath)).toEqual(foreign);
+    expect(s3Cleanup).toHaveBeenCalledOnce();
+    expect(mocks.recordAssetCleanupFailure).not.toHaveBeenCalled();
+  });
+
+  it.each(['persist', 'recover'] as const)('verifies the newly published bytes for %s', async operation => {
+    const bytes = Buffer.from('{}');
+    const link = assetBinaryFileOps.link;
+    const spy = vi.spyOn(assetBinaryFileOps, 'link').mockImplementation(async (from, to) => {
+      await link(from, to); await writeFile(to, '{"corrupt":true}');
+    });
+    try {
+      const filename = `${createHash('sha256').update(bytes).digest('hex').slice(0, 16)}-race.json`;
+      await expect(operation === 'persist'
+        ? persistAssetBytes({ bytes, filename, mimeType: 'application/json' })
+        : recoverExportAssetBytes({ bytes, filename, mimeType: 'application/json' })).rejects.toThrow();
+      expect(await readdir(join(root, 'exports'))).toEqual([]);
+    } finally { spy.mockRestore(); }
+  });
+
+  it.each(['persist', 'recover'] as const)('verifies exclusive fallback bytes for %s', async operation => {
+    const bytes = Buffer.from('{}');
+    const linkSpy = vi.spyOn(assetBinaryFileOps, 'link').mockRejectedValue(Object.assign(new Error('no links'), { code: 'EPERM' }));
+    const write = assetBinaryFileOps.writeFile;
+    let writes = 0;
+    const spy = vi.spyOn(assetBinaryFileOps, 'writeFile').mockImplementation(async (target, data, options) => {
+      await write(target, ++writes === 2 ? Buffer.from('{"bad":1}') : data, options);
+    });
+    try {
+      const filename = `${createHash('sha256').update(bytes).digest('hex').slice(0, 16)}-race.json`;
+      await expect(operation === 'persist'
+        ? persistAssetBytes({ bytes, filename, mimeType: 'application/json' })
+        : recoverExportAssetBytes({ bytes, filename, mimeType: 'application/json' })).rejects.toThrow();
+      expect(await readdir(join(root, 'exports'))).toEqual([]);
+    } finally { spy.mockRestore(); linkSpy.mockRestore(); }
+  });
+
+  it('cleanup retains a replacement of its previously published pathname', async () => {
+    const file = await persistAssetBytes({ bytes: Buffer.from('{}'), filename: 'race.json', mimeType: 'application/json' });
+    const target = join(root, 'exports', file.url.split('/').at(-1)!);
+    await rename(target, join(root, 'original'));
+    await writeFile(target, 'foreign');
+    await expect(file.cleanup()).rejects.toThrow('ASSET_FILE_IDENTITY_CHANGED');
+    expect(await readFile(target, 'utf8')).toBe('foreign');
+    expect(mocks.recordAssetCleanupFailure).not.toHaveBeenCalled();
+  });
+
+  it('rejects an identical-byte staging replacement and never compensates a preexisting S3 object', async () => {
+    const bytes = Buffer.from('{}');
+    let target = '';
+    const cleanup = vi.fn(async () => undefined);
+    mocks.uploadBinaryToS3.mockImplementationOnce(async (_bytes: Buffer, filename: string) => {
+      target = join(root, 'exports', (await readdir(join(root, 'exports')))[0]);
+      await rename(target, join(root, 'own-displaced-stage')); await writeFile(target, bytes);
+      return { storageKey: `exports/${filename}`, createdThisCall: false, cleanup };
+    });
+    await expect(persistAssetBytes({ bytes, filename: 'same.json', mimeType: 'application/json' })).rejects.toThrow();
+    expect(await readFile(target)).toEqual(bytes);
+    expect(cleanup).not.toHaveBeenCalled();
+  });
+
+  it('recovery refuses a replaced staging identity even when its new bytes are identical', async () => {
+    const bytes = Buffer.from('{}');
+    const filename = `${createHash('sha256').update(bytes).digest('hex').slice(0, 16)}-same.json`;
+    const link = assetBinaryFileOps.link;
+    let stage = '';
+    const spy = vi.spyOn(assetBinaryFileOps, 'link').mockImplementation(async (from, to) => {
+      stage = String(from);
+      await rename(stage, join(root, 'own-displaced-recovery'));
+      await writeFile(stage, bytes);
+      await link(from, to);
+    });
+    try {
+      await expect(recoverExportAssetBytes({ bytes, filename, mimeType: 'application/json' })).rejects.toThrow();
+      expect(await readFile(stage)).toEqual(bytes);
+      expect(await readFile(join(root, 'exports', filename))).toEqual(bytes);
+      expect(mocks.recordAssetCleanupFailure).not.toHaveBeenCalled();
+    } finally { spy.mockRestore(); }
+  });
+
+  it('records the creator identity on local failure, never a replacement observed during enqueue', async () => {
+    const bytes = Buffer.from('{}');
+    const file = await persistAssetBytes({ bytes, filename: 'retry.json', mimeType: 'application/json' });
+    const target = join(root, 'exports', file.url.split('/').at(-1)!);
+    const remove = assetBinaryFileOps.rm;
+    const spy = vi.spyOn(assetBinaryFileOps, 'rm').mockImplementation(async (name, options) => {
+      if (String(name) !== target) return remove(name, options);
+      await rename(target, join(root, 'own-before-enqueue')); await writeFile(target, 'replacement');
+      throw new Error('failed unlink');
+    });
+    try {
+      await expect(file.cleanup()).rejects.toThrow('failed unlink');
+      const recorded = mocks.recordAssetCleanupFailure.mock.calls.find(([record]) => record.localPath?.endsWith('retry.json'))![0];
+      const { lstat } = await import('node:fs/promises');
+      const own = await lstat(join(root, 'own-before-enqueue'), { bigint: true });
+      const foreign = await lstat(target, { bigint: true });
+      expect(recorded.localIdentity.file).toMatchObject({ dev: String(own.dev), ino: String(own.ino), birthtimeNs: String(own.birthtimeNs) });
+      expect(recorded.localIdentity.file.ino).not.toBe(String(foreign.ino));
+      expect(await readFile(target, 'utf8')).toBe('replacement');
+    } finally { spy.mockRestore(); }
   });
 });

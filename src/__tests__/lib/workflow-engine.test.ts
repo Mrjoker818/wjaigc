@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { buildNodeExecutionRequest, evaluateWorkflowCondition, getNodeInputs, getNodePropertyFields, mergeWorkflowNodeUpdate, resolveControlOutputPorts, resolveGroupOutput, resolveInlineSubgraph, resolveWorkflowIterations, resolveWorkflowOutputAssetReference, shouldSkipNodeForInactiveBranches, topologicalSort } from '@/lib/workflow-engine';
-import type { NodeType, WorkflowNode, WorkflowConnection } from '@/lib/workflow-engine';
+import { buildNodeExecutionRequest, createWorkflowNode, evaluateWorkflowCondition, getNodeInputs, getNodePropertyFields, isWorkflowConnectionValid, mergeWorkflowNodeUpdate, resolveControlOutputPorts, resolveGroupOutput, resolveInlineSubgraph, resolveWorkflowIterations, resolveWorkflowOutputAssetReference, shouldSkipNodeForInactiveBranches, topologicalSort } from '@/lib/workflow-engine';
+import type { NodeType, WorkflowNode, WorkflowConnection, Workflow } from '@/lib/workflow-engine';
 
 /** 创建最小合法 WorkflowNode */
 function makeNode(id: string, type: string = 'input-text'): WorkflowNode {
@@ -229,6 +229,194 @@ describe('versioned workflow image resolution', () => {
     node.config = { imageUrl: '/legacy.png' };
 
     expect(buildNodeExecutionRequest(node, {})).toBeNull();
+  });
+});
+
+describe('workflow image edit request routing', () => {
+  it('exposes a mask input port so remove-background masks can connect to edits', () => {
+    expect(createWorkflowNode('ai-edit', 0, 0).ports).toContainEqual({
+      id: 'in-mask', label: '蒙版', type: 'mask', direction: 'in',
+    });
+  });
+
+  it('routes workflow language edit to the existing edit API with its image and exact provider-model pair', () => {
+    const node = makeNode('language-edit', 'ai-edit');
+    node.config = { prompt: 'Make the sky blue', model: 'provider-a::gpt-image-1' };
+
+    const request = buildNodeExecutionRequest(node, {
+      imageUrl: '/api/serve-upload/source.png',
+      assetVersionId: 'language-source-version', placementId: 'language-source-placement',
+    });
+    expect(request).toMatchObject({
+      endpoint: '/api/edit',
+      method: 'POST',
+      body: {
+        image: '/api/serve-upload/source.png',
+        prompt: 'Make the sky blue',
+        model: 'gpt-image-1',
+        providerId: 'provider-a',
+        assetParentVersionIds: ['language-source-version'],
+        assetSourcePlacementId: 'language-source-placement',
+      },
+    });
+    expect(request?.body).not.toHaveProperty('action');
+    expect(request?.body).not.toHaveProperty('imageUrl');
+    expect(request?.body).not.toHaveProperty('assetWorkspace');
+  });
+
+  it('carries a connected managed source into language edit without trusting a stale node config identity', () => {
+    const source = createWorkflowNode('input-image', 0, 0);
+    const edit = createWorkflowNode('ai-edit', 400, 0);
+    edit.config = {
+      action: 'edit', prompt: 'Refine the product',
+      assetVersionId: 'stale-version', placementId: 'stale-placement',
+    };
+    const connections: WorkflowConnection[] = [{
+      ...makeConn('source-to-edit', source.id, edit.id),
+      fromPortId: 'out-image', toPortId: 'in-image', type: 'image',
+    }];
+    const results = new Map([[
+      source.id,
+      { nodeId: source.id, status: 'success' as const, output: {
+        imageUrl: '/api/serve-upload/canonical.png', assetVersionId: 'current-version',
+        placementId: 'workflow-placement', assetId: 'project-asset',
+      }, durationMs: 0 },
+    ]]);
+
+    const request = buildNodeExecutionRequest(edit, getNodeInputs(edit, connections, results));
+    expect(request).toMatchObject({
+      endpoint: '/api/edit',
+      body: {
+        image: '/api/serve-upload/canonical.png',
+        assetParentVersionIds: ['current-version'], assetSourcePlacementId: 'workflow-placement',
+        sourceEntityId: source.id,
+      },
+    });
+  });
+
+  it('does not invent a managed source for a URL-only language edit', () => {
+    const edit = createWorkflowNode('ai-edit', 0, 0);
+    edit.config = { action: 'edit', prompt: 'Refine', assetVersionId: 'stale-version', placementId: 'stale-placement' };
+    const request = buildNodeExecutionRequest(edit, { imageUrl: '/legacy.png' });
+    expect(request?.body).not.toHaveProperty('assetParentVersionIds');
+    expect(request?.body).not.toHaveProperty('assetSourcePlacementId');
+  });
+
+  it('does not combine an upstream version with a stale configured placement', () => {
+    const source = createWorkflowNode('input-image', 0, 0);
+    const edit = createWorkflowNode('ai-edit', 400, 0);
+    edit.config = { action: 'edit', prompt: 'Refine', assetVersionId: 'old-version', placementId: 'old-placement' };
+    const connection: WorkflowConnection = {
+      ...makeConn('version-only-source', source.id, edit.id),
+      fromPortId: 'out-image', toPortId: 'in-image', type: 'image',
+    };
+    const results = new Map([[
+      source.id,
+      { nodeId: source.id, status: 'success' as const, output: {
+        imageUrl: '/api/serve-upload/new.png', assetVersionId: 'new-version',
+      }, durationMs: 0 },
+    ]]);
+
+    const request = buildNodeExecutionRequest(edit, getNodeInputs(edit, [connection], results));
+    expect(request?.body.image).toBe('/api/serve-upload/new.png');
+    expect(request?.body).not.toHaveProperty('assetParentVersionIds');
+    expect(request?.body).not.toHaveProperty('assetSourcePlacementId');
+  });
+
+  it('routes workflow color adjustment as a natural-language edit with all three adjustments', () => {
+    const node = makeNode('color-adjust', 'ai-color-adjust');
+    node.config = { brightness: 15, contrast: -10, saturation: 20, model: 'provider-a::gpt-image-1' };
+
+    const request = buildNodeExecutionRequest(node, {
+      imageUrl: '/api/serve-upload/source.png',
+      assetVersionId: 'color-source-version', placementId: 'color-source-placement',
+    });
+    expect(request).toMatchObject({
+      endpoint: '/api/edit',
+      body: {
+        image: '/api/serve-upload/source.png',
+        prompt: 'adjust brightness by 15%, contrast by -10%, saturation by 20%',
+        model: 'gpt-image-1',
+        providerId: 'provider-a',
+        assetParentVersionIds: ['color-source-version'],
+        assetSourcePlacementId: 'color-source-placement',
+      },
+    });
+    expect(request?.body).not.toHaveProperty('action');
+    expect(request?.body).not.toHaveProperty('imageUrl');
+  });
+
+  it('retains explicit extend on the image-edit API', () => {
+    const node = makeNode('extend', 'ai-edit');
+    node.config = { action: 'extend', prompt: 'Extend the sky' };
+
+    expect(buildNodeExecutionRequest(node, {
+      imageUrl: '/api/serve-upload/source.png',
+      assetVersionId: 'extend-source-version', placementId: 'extend-source-placement',
+    })).toMatchObject({ endpoint: '/api/image-edit', body: {
+      action: 'extend', imageUrl: '/api/serve-upload/source.png',
+      assetParentVersionIds: ['extend-source-version'], assetSourcePlacementId: 'extend-source-placement',
+    } });
+  });
+
+  it.each(['erase', 'mask'])('rejects %s without a connected mask before submitting', action => {
+    const node = makeNode(`${action}-without-mask`, 'ai-edit');
+    node.config = { action };
+
+    expect(() => buildNodeExecutionRequest(node, { imageUrl: '/api/serve-upload/source.png' }))
+      .toThrow('WORKFLOW_EDIT_MASK_REQUIRED');
+  });
+
+  it.each(['erase', 'mask'])('passes the connected mask and edit mode for %s', action => {
+    const node = makeNode(`${action}-with-mask`, 'ai-edit');
+    node.config = { action };
+
+    expect(buildNodeExecutionRequest(node, {
+      imageUrl: '/api/serve-upload/source.png',
+      maskUrl: '/api/serve-upload/mask.png',
+    })).toMatchObject({
+      endpoint: '/api/image-edit',
+      body: {
+        action,
+        imageUrl: '/api/serve-upload/source.png',
+        editMode: action,
+        maskImage: '/api/serve-upload/mask.png',
+      },
+    });
+  });
+
+  it('passes a mask from an upstream mask connection into the edit request', () => {
+    const node = createWorkflowNode('ai-edit', 0, 0);
+    node.config = { action: 'erase' };
+    const sourceImage = createWorkflowNode('input-image', 0, 0);
+    const sourceMask = createWorkflowNode('ai-removebg', 0, 0);
+    const connections: WorkflowConnection[] = [
+      { ...makeConn('image-edge', sourceImage.id, node.id), fromPortId: 'out-image', toPortId: 'in-image', type: 'image' },
+      { ...makeConn('mask-edge', sourceMask.id, node.id), fromPortId: 'out-mask', toPortId: 'in-mask', type: 'mask' },
+    ];
+    const workflow: Workflow = {
+      id: 'mask-edit', name: 'Mask edit', version: '1', nodes: [sourceImage, sourceMask, node],
+      connections, status: 'idle', createdAt: 0, updatedAt: 0,
+    };
+    expect(connections.every(connection => isWorkflowConnectionValid(workflow, connection))).toBe(true);
+    const results = new Map([
+      [sourceImage.id, { nodeId: sourceImage.id, status: 'success' as const, output: { imageUrl: '/source.png' }, durationMs: 0 }],
+      [sourceMask.id, { nodeId: sourceMask.id, status: 'success' as const, output: { maskUrl: '/mask.png' }, durationMs: 0 }],
+    ]);
+
+    const request = buildNodeExecutionRequest(node, getNodeInputs(node, connections, results));
+    expect(request).toMatchObject({
+      endpoint: '/api/image-edit',
+      body: { action: 'erase', imageUrl: '/source.png', editMode: 'erase', maskImage: '/mask.png' },
+    });
+  });
+
+  it('rejects an unknown edit action before constructing a network request', () => {
+    const node = makeNode('unknown-edit', 'ai-edit');
+    node.config = { action: 'unsupported' };
+
+    expect(() => buildNodeExecutionRequest(node, { imageUrl: '/api/serve-upload/source.png' }))
+      .toThrow('WORKFLOW_EDIT_ACTION_UNSUPPORTED');
   });
 });
 

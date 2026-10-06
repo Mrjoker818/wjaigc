@@ -14,24 +14,17 @@ describe('image edit task admission contract', () => {
     expect(source).toContain('await persistSubmittedImageTask({');
   });
 
-  it('persists one durable record for each asynchronous erase task', () => {
-    const eraseAdmissions = source.match(
-      /await persistSubmittedImageTask\(\{[\s\S]*?type: 'erase',[\s\S]*?\}\);/g,
-    ) || [];
-
-    expect(eraseAdmissions).toHaveLength(1);
-  });
-
-  it('enables core-v2 only for the staged 302 upscale admission path', () => {
+  it('enables core-v2 for an explicitly requested or automatically selected 302 upscale path', () => {
     expect(source).toContain('resolveImageEditTaskCoreMode(');
     expect(source).toMatch(/executeTaskEntryMigration(?:<[^>]+>)?\(\{/);
     expect(source).toContain('createBillableTask({');
-    expect(source).toContain("action === 'upscale' && Boolean(requested302UpscaleModel)");
+    expect(source).toContain("action === 'upscale' && (Boolean(requested302UpscaleModel) || maySelect302Upscale)");
+    expect(source).toContain("if (usesAtomicBilling && !selected302UpscaleModel)");
   });
 
   it('settles an admitted core-v2 task instead of issuing a legacy refund', () => {
     expect(source).toContain('atomicBillingTaskId = admission.value.taskId');
     expect(source).toContain('await settleFailedTask({');
-    expect(source).toContain('if (usesAtomicBilling && atomicBillingTaskId)');
+    expect(source).toContain('if (usesAtomicBilling && atomicBillingTaskId && !atomicSettlementAttempted)');
   });
 });

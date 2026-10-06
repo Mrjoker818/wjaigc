@@ -10,12 +10,15 @@ const mocks = vi.hoisted(() => ({
   updateTaskProgress: vi.fn(),
   cancelEditTask: vi.fn(),
   refundCredits: vi.fn(),
+  getCloudTaskById: vi.fn(),
   getCloudTaskForUser: vi.fn(),
   refundCloudTaskCredits: vi.fn(),
   terminateCloudTaskAndRefund: vi.fn(),
   recordCloudTaskCancelled: vi.fn(),
+  deleteTerminalPrivateInpaintInputs: vi.fn(),
 }));
 
+vi.mock('server-only', () => ({}));
 vi.mock('@/lib/api-auth', () => ({
   requireApiAuthOrReject: mocks.requireApiAuthOrReject,
 }));
@@ -28,11 +31,15 @@ vi.mock('@/lib/task-registry', () => ({
 vi.mock('@/lib/edit-task-store', () => ({ cancelEditTask: mocks.cancelEditTask }));
 vi.mock('@/lib/credits', () => ({ refundCredits: mocks.refundCredits }));
 vi.mock('@/lib/cloud-task-storage', () => ({
+  getCloudTaskById: mocks.getCloudTaskById,
   getCloudTaskForUser: mocks.getCloudTaskForUser,
   refundCloudTaskCredits: mocks.refundCloudTaskCredits,
   terminateCloudTaskAndRefund: mocks.terminateCloudTaskAndRefund,
 }));
 vi.mock('@/lib/cloud-task-persistence', () => ({ recordCloudTaskCancelled: mocks.recordCloudTaskCancelled }));
+vi.mock('@/lib/task-core/inpaint-private-inputs', () => ({
+  deleteTerminalPrivateInpaintInputs: mocks.deleteTerminalPrivateInpaintInputs,
+}));
 
 import { POST } from '@/app/api/cancel-task/route';
 
@@ -68,6 +75,8 @@ describe('POST /api/cancel-task', () => {
         : NextResponse.json({ error: 'Authentication required' }, { status: 401 });
     });
     mocks.isTaskCancelled.mockReturnValue(false);
+    mocks.getCloudTaskById.mockResolvedValue(null);
+    mocks.deleteTerminalPrivateInpaintInputs.mockResolvedValue(true);
     mocks.recordCloudTaskCancelled.mockResolvedValue({
       transitioned: true,
       task: { id: 'cancelled-task', status: 'cancelled', revision: 1 },

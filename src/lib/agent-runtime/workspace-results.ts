@@ -63,4 +63,8 @@ export function createAgentWorkspaceResultProjector(
   };
 }
 
-export const projectAgentResultToWorkspace = createAgentWorkspaceResultProjector();
+const privateProjector = createAgentWorkspaceResultProjector();
+export async function projectAgentResultToWorkspace(input: ProjectAgentResultToWorkspaceInput): Promise<WorkspaceAssetReference[]> {
+  const { projectCanvasTaskResult } = await import('@/lib/collaboration/task-result-publication');
+  return await projectCanvasTaskResult(input) ?? privateProjector(input);
+}

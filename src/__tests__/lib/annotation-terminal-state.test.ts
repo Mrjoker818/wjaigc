@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const { execSql } = vi.hoisted(() => ({ execSql: vi.fn() }));
 
 vi.mock('@/lib/db-client', () => ({ execSql }));
+vi.mock('@/lib/db-storage', () => ({ ensureCoreTables: vi.fn(async () => {}) }));
 
 import {
   completeCloudTask,

@@ -73,41 +73,52 @@ export async function executeOverlapTileUpscale(
   const processed = new Array<ProcessedTile>(tiles.length);
   let cursor = 0;
   let completed = 0;
+  let failed = false;
+  let firstFailure: unknown;
 
   const worker = async (): Promise<void> => {
     while (true) {
-      await throwIfCancelled(options.isCancelled);
-      const index = cursor;
-      cursor += 1;
-      if (index >= tiles.length) return;
-      const tile = tiles[index];
-      const left = Math.round(tile.x * scaleX);
-      const top = Math.round(tile.y * scaleY);
-      const right = tile.x + tile.width === sourceWidth
-        ? options.targetWidth
-        : Math.round((tile.x + tile.width) * scaleX);
-      const bottom = tile.y + tile.height === sourceHeight
-        ? options.targetHeight
-        : Math.round((tile.y + tile.height) * scaleY);
-      const targetWidth = Math.max(1, right - left);
-      const targetHeight = Math.max(1, bottom - top);
-      const input = await sharp(options.source)
-        .extract({ left: tile.x, top: tile.y, width: tile.width, height: tile.height })
-        .png()
-        .toBuffer();
-      const generated = await options.processTile({ input, tile, targetWidth, targetHeight });
-      const normalized = await sharp(generated)
-        .resize(targetWidth, targetHeight, { fit: 'fill', kernel: sharp.kernel.lanczos3 })
-        .removeAlpha()
-        .png()
-        .toBuffer();
-      processed[index] = { tile, buffer: normalized, left, top, width: targetWidth, height: targetHeight };
-      completed += 1;
-      await options.onProgress?.(Math.round((completed / tiles.length) * 100));
+      if (failed) return;
+      try {
+        await throwIfCancelled(options.isCancelled);
+        if (failed) return;
+        const index = cursor;
+        cursor += 1;
+        if (index >= tiles.length) return;
+        const tile = tiles[index];
+        const left = Math.round(tile.x * scaleX);
+        const top = Math.round(tile.y * scaleY);
+        const right = tile.x + tile.width === sourceWidth
+          ? options.targetWidth
+          : Math.round((tile.x + tile.width) * scaleX);
+        const bottom = tile.y + tile.height === sourceHeight
+          ? options.targetHeight
+          : Math.round((tile.y + tile.height) * scaleY);
+        const targetWidth = Math.max(1, right - left);
+        const targetHeight = Math.max(1, bottom - top);
+        const input = await sharp(options.source)
+          .extract({ left: tile.x, top: tile.y, width: tile.width, height: tile.height })
+          .png()
+          .toBuffer();
+        if (failed) return;
+        const generated = await options.processTile({ input, tile, targetWidth, targetHeight });
+        const normalized = await sharp(generated)
+          .resize(targetWidth, targetHeight, { fit: 'fill', kernel: sharp.kernel.lanczos3 })
+          .removeAlpha()
+          .png()
+          .toBuffer();
+        processed[index] = { tile, buffer: normalized, left, top, width: targetWidth, height: targetHeight };
+        completed += 1;
+        await options.onProgress?.(Math.round((completed / tiles.length) * 100));
+      } catch (error) {
+        if (!failed) { failed = true; firstFailure = error; }
+        return;
+      }
     }
   };
 
   await Promise.all(Array.from({ length: Math.min(concurrency, tiles.length) }, () => worker()));
+  if (failed) throw firstFailure;
   await throwIfCancelled(options.isCancelled);
 
   const composites: OverlayOptions[] = [];

@@ -47,6 +47,93 @@ function harness() {
   };
 }
 
+describe('ordinary output groups', () => {
+  const request = { projectId: 'p1', outputCount: 2, prompt: 'cup', providerId: 'provider', model: 'gpt-image-1' };
+  const marker = { version: 1, kind: 'ordinary-generation', taskId: 'ordinary-root', requestedCount: 2 };
+  function groupHarness() {
+    const fake = harness();
+    fake.dependencies.submit = async () => ({ taskId: 'ordinary-root', taskIds: ['ordinary-root'], outputGroup: marker, status: 'processing', result: { outputGroup: marker } });
+    return fake;
+  }
+  function results(count: number) {
+    return { outputGroup: marker, imageUrls: Array.from({ length: count }, (_, index) => `/media/v${index}.png`),
+      assetProjection: { references: Array.from({ length: count }, (_, index) => managedResult(`v${index}`, `pl${index}`).assetProjection.references[0]) } };
+  }
+  it('maps all and extra canonical outputs to stable indices, then ignores duplicate completion', async () => {
+    const fake = groupHarness(); const session = createImageGenerationSession(fake.dependencies);
+    try {
+      await session.submit(request);
+      fake.emit({ taskId: 'ordinary-root', status: 'completed', result: results(3) });
+      const first = session.snapshot();
+      expect(first.map(slot => [slot.outputIndex, slot.assetVersionId, slot.placementId, slot.status])).toEqual([
+        [0, 'v0', 'pl0', 'completed'], [1, 'v1', 'pl1', 'completed'], [2, 'v2', 'pl2', 'completed'],
+      ]);
+      fake.emit({ taskId: 'ordinary-root', status: 'completed', result: results(3) });
+      expect(session.snapshot()).toEqual(first);
+    } finally { session.dispose(); }
+  });
+  it('keeps missing canonical projections pending and never offers regeneration', async () => {
+    const fake = groupHarness(); const session = createImageGenerationSession(fake.dependencies);
+    try {
+      await session.submit(request);
+      fake.emit({ taskId: 'ordinary-root', status: 'completed', result: { imageUrls: ['/one', '/two'], assetProjection: { status: 'projection_pending' } } });
+      expect(session.snapshot().map(slot => slot.status)).toEqual(['processing', 'processing']);
+      expect(await session.retry(session.snapshot()[0].id)).toBeNull();
+      fake.emit({ taskId: 'ordinary-root', status: 'completed', result: results(2) });
+      expect(session.snapshot().map(slot => slot.status)).toEqual(['completed', 'completed']);
+    } finally { session.dispose(); }
+  });
+  it('marks unproduced slots nonretryable without discarding successful results', async () => {
+    const fake = groupHarness(); const session = createImageGenerationSession(fake.dependencies);
+    try {
+      await session.submit(request);
+      fake.emit({ taskId: 'ordinary-root', status: 'completed', result: results(1) });
+      expect(session.snapshot()[0].status).toBe('completed');
+      expect(session.snapshot()[1]).toMatchObject({ status: 'failed', error: { code: 'ORDINARY_OUTPUT_NOT_PRODUCED', retryable: false } });
+      expect(await session.retry(session.snapshot()[1].id)).toBeNull();
+    } finally { session.dispose(); }
+  });
+  it('cancels the whole root once and rejects late completion or another project', async () => {
+    const fake = groupHarness(); const session = createImageGenerationSession(fake.dependencies);
+    try {
+      await session.submit(request);
+      fake.emit({ taskId: 'ordinary-root', projectId: 'p2', status: 'completed', result: results(3) });
+      expect(session.snapshot().map(slot => slot.status)).toEqual(['processing', 'processing']);
+      expect(await session.cancel(session.snapshot()[1].id)).toBe(true);
+      expect(await session.cancel(session.snapshot()[0].id)).toBe(false);
+      fake.emit({ taskId: 'ordinary-root', status: 'completed', result: results(3) });
+      expect(session.snapshot().map(slot => slot.status)).toEqual(['cancelled', 'cancelled']);
+      expect(fake.dependencies.cancelTask).toHaveBeenCalledTimes(1);
+    } finally { session.dispose(); }
+  });
+  it.each([{ ...marker, requestedCount: '2' }, { ...marker, taskId: 'other' }, { ...marker, extra: true }])('does not bind malformed group %#', async outputGroup => {
+    const fake = groupHarness(); fake.dependencies.submit = async () => ({ taskId: 'ordinary-root', taskIds: ['ordinary-root'], outputGroup });
+    const session = createImageGenerationSession(fake.dependencies);
+    try { await session.submit(request); expect(session.snapshot().every(slot => !slot.outputGroup)).toBe(true); }
+    finally { session.dispose(); }
+  });
+  it('does not accept multiple task IDs as a group', async () => {
+    const fake = groupHarness(); fake.dependencies.submit = async () => ({ taskId: 'ordinary-root', taskIds: ['ordinary-root', 'other'], outputGroup: marker });
+    const session = createImageGenerationSession(fake.dependencies);
+    try { await session.submit(request); expect(session.snapshot().every(slot => !slot.outputGroup)).toBe(true); }
+    finally { session.dispose(); }
+  });
+  it('ignores an in-flight old group poll after restore into a different project', async () => {
+    const fake = groupHarness();
+    let finish: ((update: ImageGenerationTaskUpdate) => void) | undefined;
+    let tick: (() => void | Promise<void>) | undefined;
+    fake.dependencies.pollTask = () => new Promise(resolve => { finish = resolve; });
+    fake.dependencies.schedulePoll = callback => { tick = callback; return 1; };
+    const session = createImageGenerationSession(fake.dependencies);
+    try {
+      await session.submit(request); const running = tick!();
+      await session.restore('p2');
+      finish!({ taskId: 'ordinary-root', status: 'completed', result: results(3) }); await running;
+      expect(session.snapshot()).toEqual([]);
+    } finally { session.dispose(); }
+  });
+});
+
 describe('image generation session', () => {
   it('binds independent slots and projects each completed image immediately', async () => {
     const fake = harness();

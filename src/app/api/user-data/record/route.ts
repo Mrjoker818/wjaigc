@@ -67,13 +67,13 @@ export async function POST(request: NextRequest) {
       if (decoded) {
         const filename = safeFilename(String(body.filename || `${Date.now()}${decoded.ext}`));
         const finalName = filename.includes('.') ? filename : `${filename}${decoded.ext}`;
-        const target = path.join(getUserDataDir(userId), area, `${Date.now()}_${finalName}`);
+        const target = path.join(/* turbopackIgnore: true */ getUserDataDir(userId), area, `${Date.now()}_${finalName}`);
         await writeFile(target, decoded.buffer);
         storedFile = target;
       }
     } else if (typeof body.content === 'string') {
       const filename = safeFilename(String(body.filename || `${Date.now()}.json`));
-      const target = path.join(getUserDataDir(userId), area, `${Date.now()}_${filename}`);
+      const target = path.join(/* turbopackIgnore: true */ getUserDataDir(userId), area, `${Date.now()}_${filename}`);
       await writeFile(target, body.content, 'utf8');
       storedFile = target;
     }

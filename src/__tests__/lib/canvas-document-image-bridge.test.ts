@@ -33,6 +33,54 @@ function placement(id: string, x: number): CanvasPlacement {
 }
 
 describe('canvas document image bridge', () => {
+  it('numbers annotations by creation time rather than record insertion or identifier order', () => {
+    const media = [image('a', 'p1', 10)];
+    const record: CanvasAnnotationV2 = {
+      id: 'region-z', projectId: 'project-a', sourceImageId: 'p1',
+      sourceVersionId: 'version-a', type: 'region',
+      geometry: { kind: 'region', region: { x: 0, y: 0, w: 1, h: 1 } },
+      status: 'ready', createdAt: 10, updatedAt: 100,
+    };
+    const projection: CanvasDocumentProjection = {
+      placements: { p1: placement('a', 10) },
+      annotationRecords: {
+        'brush-a': { ...record, id: 'brush-a', type: 'brush', createdAt: 20,
+          geometry: { kind: 'brush', points: [{ x: 0.2, y: 0.3 }], width: 0.1 } },
+        'region-z': record,
+        removed: { ...record, id: 'removed', createdAt: 0 },
+      },
+      annotationTombstones: { removed: true },
+    };
+    const original = structuredClone(projection);
+    expect(projectCanvasDocumentMetadata(projection, media).annotations.map(item => item.type))
+      .toEqual(['region', 'brush']);
+    expect(projection).toEqual(original);
+  });
+
+  it('uses deterministic legacy IDs for annotations created at the same timestamp', () => {
+    const record: CanvasAnnotationV2 = {
+      id: 'ann-z', projectId: 'project-a', sourceImageId: 'p1', sourceVersionId: 'version-a', type: 'text',
+      geometry: { kind: 'text', point: { x: 0.1, y: 0.2 } }, status: 'ready', createdAt: 10, updatedAt: 10,
+    };
+    const annotations = projectCanvasDocumentMetadata({ placements: { p1: placement('a', 10) },
+      annotationRecords: { 'ann-z': record, 'ann-a': { ...record, id: 'ann-a' } },
+    }, [image('a', 'p1', 10)]).annotations;
+    expect(annotations.map(item => item.id)).toEqual(['ann-a', 'ann-z']);
+  });
+
+  it('keeps same-timestamp annotation order after restored identities reverse identifier order', () => {
+    const record = {
+      id: 'restored-a', orderKey: 'original-z', projectId: 'project-a', sourceImageId: 'p1',
+      sourceVersionId: 'version-a', type: 'text' as const,
+      geometry: { kind: 'text' as const, point: { x: 0.1, y: 0.2 } }, status: 'ready' as const,
+      createdAt: 10, updatedAt: 10,
+    };
+    const annotations = projectCanvasDocumentMetadata({ placements: { p1: placement('a', 10) },
+      annotationRecords: { 'restored-a': record, 'restored-z': { ...record, id: 'restored-z', orderKey: 'original-a' } },
+    }, [image('a', 'p1', 10)]).annotations;
+    expect(annotations.map(item => item.id)).toEqual(['restored-z', 'restored-a']);
+  });
+
   it('keeps the accepted image ref unchanged when the parent rejects a drag', () => {
     const before = [image('a', 'p1', 10)];
     const after = [{ ...before[0], x: 66 }];

@@ -9,12 +9,14 @@ import { requireApiAuthOrReject } from '@/lib/api-auth';
 import { refundCredits } from '@/lib/credits';
 import { recordCloudTaskCancelled } from '@/lib/cloud-task-persistence';
 import {
+  getCloudTaskById,
   getCloudTaskForUser,
   refundCloudTaskCredits,
   terminateCloudTaskAndRefund,
 } from '@/lib/cloud-task-storage';
 import { errorResponse, getRequestId } from '@/lib/request-id';
 import { inferTaskErrorSource } from '@/lib/task-core/task-error';
+import { deleteTerminalPrivateInpaintInputs } from '@/lib/task-core/inpaint-private-inputs';
 import {
   hasDurableGenerationSlotIdentity,
   requiresAtomicTerminalSettlement,
@@ -177,10 +179,31 @@ export async function POST(request: NextRequest) {
       cancelTask(taskId);
       cancelEditTask(taskId);
       updateTaskProgress(taskId, { status: 'cancelled', progress: 0 });
+      let cleanupPending = false;
+      try {
+        const terminalTask = await getCloudTaskById(taskId);
+        const admission = terminalTask?.result?.imageEditAdmission as
+          { kind?: unknown } | undefined;
+        if (terminalTask?.status === 'cancelled'
+          && terminalTask.type === 'image-edit'
+          && admission?.kind === 'ordinary-inpaint'
+          && terminalTask.requestDigest) {
+          await deleteTerminalPrivateInpaintInputs({
+            taskId,
+            userId: terminalTask.userId,
+            projectId: terminalTask.projectId || '',
+            requestDigest: terminalTask.requestDigest,
+          });
+        }
+      } catch (error) {
+        cleanupPending = true;
+        console.error('[cancel-task] Terminal inpaint private input cleanup pending:', error);
+      }
       return NextResponse.json({
         success: true,
         message: '任务已取消',
         task: safeTaskInfo,
+        ...(cleanupPending ? { cleanupPending: true } : {}),
       });
     }
 

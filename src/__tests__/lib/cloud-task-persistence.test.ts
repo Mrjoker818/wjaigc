@@ -27,6 +27,7 @@ const {
 vi.mock('@/lib/cloud-task-storage', () => ({
   createCloudTask,
   getCloudTaskById,
+  getCloudTaskForUser: async () => (await transitionTask.mock.results.at(-1)?.value)?.task ?? null,
   transitionCloudTaskStatus,
   updateCloudTask,
 }));
@@ -37,6 +38,7 @@ vi.mock('@/lib/asset-core/task-projector', () => ({
   recordTaskLateResultAudit,
   recordTaskProjectionPending,
 }));
+vi.mock('@/lib/collaboration/task-result-publication', () => ({ projectCanvasTaskResult: async () => null }));
 vi.mock('@/lib/asset-core/image-result-metadata', () => ({ enrichCompletedImageResult }));
 
 import {

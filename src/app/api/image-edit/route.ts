@@ -1,19 +1,40 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createHash } from 'node:crypto';
-import { findProviderForModel, findProviderById, findAllProvidersForType, normalizeApiBaseUrl } from '@/lib/server-api-config';
-import { getSessionUser } from '@/lib/server-auth';
-import { fetchWithV1Retry } from '@/lib/api-helpers';
+import { createHash, randomUUID } from 'node:crypto';
+import type { PoolClient } from 'pg';
+import { captureImageEditRequestIdentity, digestImageEditInputIdentity, digestRequested302UpscaleIdentity } from '@/lib/task-core/image-edit-request-identity';
+import { IdempotencyConflictError } from '@/lib/task-core/idempotency';
+import { prepareImageEditModelPlan, ImageEditModelPlanError, type ImageEditModelPlan } from '@/lib/task-core/image-edit-model-plan';
+import { getAuthSecretForInternalRequests, getSessionUser } from '@/lib/server-auth';
+import { IMAGE_EDIT_QUOTE_LIFETIME_MS, confirmedImageEditQuoteForResponse,
+  issueImageEditQuoteToken, verifyImageEditQuoteToken,
+  type ImageEditQuoteIdentity } from '@/lib/task-core/image-edit-quote-token';
+import { submitImageTask, autoTrySubmitImageTask, ModelCapabilityError } from '@/lib/image-edit-provider';
+import { autoTryChatVisionFallback } from '@/lib/image-edit-vision-provider';
+import { submit302aiUpscaleTask, submit302aiUpscaleV6Task, submit302aiImageUpscaleTask, submit302aiEsrganTask } from '@/lib/image-edit-upscale-provider';
+import { ImageEditProviderBoundaryError, type ImageEditProviderCallOptions } from '@/lib/image-edit-provider-boundary';
+import { openImageEditProviderPhase } from '@/lib/task-core/image-edit-provider-phase';
+import { readAcceptedImageEditPhaseResult } from '@/lib/task-core/image-edit-provider-checkpoint';
+import { persistOutpaintDirectResult, readOutpaintResultSize } from '@/lib/task-core/outpaint-direct-result';
+import { insertPrivateInpaintInputs, deleteTerminalPrivateInpaintInputs } from '@/lib/task-core/inpaint-private-inputs';
+import { persistInpaintAcceptedResult } from '@/lib/task-core/inpaint-task';
 import { requireApiAuthOrReject } from '@/lib/api-auth';
+import { authorizeGenerationProject, GenerationProjectAccessError } from '@/lib/collaboration/generation-project-access';
+import { authorizeDocumentImageEditSource, authorizeDocumentImageEditSourceLocked, authorizeDocumentImageEditSourceNow, completeDocumentImageEditTask, completeDocumentInpaintTask, documentImageEditProviderUrl, ImageEditCompletionUnknownError, ImageEditSourceAdmissionError, resolveDocumentImageEditSourceLocked } from '@/lib/collaboration/image-edit-source-admission';
+import { CanvasTaskPublicationError, type CanvasTaskPublicationInput } from '@/lib/collaboration/task-publication';
+import { assertCanvasImageEditSourceSelection, CanvasPublicationIntentError, parseCanvasPublicationIntentProposal } from '@/lib/collaboration/task-publication-intent';
+import { isCoherentPublishedCpuRemoveBgResult } from '@/lib/collaboration/image-edit-publication-output';
+import { getPool } from '@/lib/db-client';
 import { checkPromptSafety, logSafetyWarning } from '@/lib/prompt-safety';
-import { translateApiError } from '@/lib/api-error-translate';
-import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile, buildPollUrl, isEditsEndpointRejected, stripEditsOnlyFields, type ImageEndpoint, buildGeminiChatImageRequest, parseGeminiChatImageResponse, resolveProfileForModel, isGeminiImageModel, tryChatCompletionsImageFallback, isChannelUnavailableError } from '@/lib/api-compatibility';
-import { saveImageFile } from '@/lib/server-data-root';
+import { buildPollUrl, resolveProfileForModel } from '@/lib/api-compatibility';
+import { isServerDataRootDurable, saveImageFile } from '@/lib/server-data-root';
 import { logError, logOperation, OP_ACTIONS, startTimer } from '@/lib/op-log';
 import sharp from 'sharp';
 import fs from 'fs/promises';
 const { writeFile, mkdir, copyFile } = fs;
 import path from 'path';
 import { getServerDataRoot } from '@/lib/server-data-root';
+import { persistAssetBytes } from '@/lib/asset-core/binary-persistence';
+import { readServeUploadExportLocal, readServeUploadMediaLocal } from '@/lib/serve-upload-local-storage';
 import { isS3Available, uploadImageToS3 } from '@/lib/s3-storage';
 import { registerTask, updateTaskProgress, isTaskCancelled } from '@/lib/task-registry';
 import { eraseWithLama, VALID_ERASE_MODELS } from '@/lib/image-tools/local-erase-client';
@@ -21,22 +42,24 @@ import { LOCAL_AI_ENABLED } from '@/lib/image-tools/config';
 import { postProcessAIRemoveBG, postProcessLocalRemoveBG } from '@/lib/remove-bg-postprocess';
 import { DEFAULT_REMBG_MODEL, generateRembgMask, isRembgCpuModel } from '@/lib/image-tools/rembg-client';
 import { normalizeModelForApi } from '@/lib/model-capabilities';
-import { fetchImageBuffer } from '@/lib/fetch-image-buffer';
-import { calculateConfiguredCreditCost, consumeCredits, refundCredits } from '@/lib/credits';
+import { fetchImageBuffer, ImageEditInputTooLargeError } from '@/lib/fetch-image-buffer';
+import { calculateConfiguredCreditCost, consumeCredits, refundCredits, InsufficientCreditsError } from '@/lib/credits';
+import { CREDIT_PRICING_CONFIG_KEY, loadCreditPricingConfig, parseCreditPricingConfig } from '@/lib/credit-pricing';
 import { validateImageUrl } from '@/lib/input-validation';
+import { normalizeImageEditLocalReference, readImageToolsLocalFile } from '@/lib/image-tools/local-image-reader';
 import { enhanceViaAI } from '@/lib/quality-enhance';
+import { downloadPublicImage } from '@/lib/safe-image-download';
 import {
   projectPersistedCompletedTask,
   recordImageTaskSubmitted,
   recordImageTaskTerminal,
 } from '@/lib/cloud-task-persistence';
-import { completeCloudTask, terminateCloudTaskAndRefund } from '@/lib/cloud-task-storage';
+import { ActiveImageEditAttemptError, CloudTaskAdmissionError, claimCloudTaskLease, completeCloudTask, getCloudTaskForUser, getCloudTaskForUserByIdempotencyKey, releaseCloudTaskLease, renewCloudTaskLease, terminateCloudTaskAndRefund, updateCloudTask } from '@/lib/cloud-task-storage';
 import {
   is302AiUpscaleBaseUrl,
   resolve302UpscaleModelId,
-  resolve302UpscaleModelSelection,
 } from '@/lib/302-upscale-models';
-import { parse302UpscaleProviderError, UpscaleProviderError } from '@/lib/upscale-provider-error';
+import { UpscaleProviderError } from '@/lib/upscale-provider-error';
 import { validateUpscaleTargetDimensions, type UpscaleTargetPreset } from '@/lib/upscale-target';
 import {
   createUpscaleExecutionPlan,
@@ -48,12 +71,10 @@ import { buildDisplayDecomposePrompt, buildDisplayDecomposeRequestBody, normaliz
 import { compositeMaskedEdit } from '@/lib/image-tools/masked-edit-composite';
 import { evaluateRemoveBgOutput } from '@/lib/image-tools/remove-bg-quality';
 import { resolveLayerSourceImage } from '@/lib/layer-decomposition/source-image';
-import { isModelAssignedToUser } from '@/lib/model-defaults';
 import {
   submitDedicatedRemoveBg,
   RemoveBgProviderError,
 } from '@/lib/remove-bg-provider';
-import type { ApiProvider } from '@/lib/universal-api-types';
 import {
   createTaskEntryAudit,
   executeTaskEntryMigration,
@@ -66,6 +87,10 @@ import { getRequestId } from '@/lib/request-id';
 
 const SUPPORTED_RATIOS = ['1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9'];
 
+class ImageEditProviderSubmissionPending extends Error {
+  constructor() { super('302.AI 提交状态待核对，任务不会自动重试或退款'); }
+}
+
 function resolveImageEditTaskCoreMode(
   requestedMode: TaskCoreMode,
   coreV2Eligible: boolean,
@@ -73,6 +98,13 @@ function resolveImageEditTaskCoreMode(
   return requestedMode === 'core-v2' && !coreV2Eligible
     ? 'shadow'
     : requestedMode;
+}
+
+class ImageEditQuoteChangedError extends CloudTaskAdmissionError {
+  constructor() {
+    super('报价已过期或配置已变化，请重新报价');
+    this.name = 'ImageEditQuoteChangedError';
+  }
 }
 
 function findClosestAspectRatio(aspectRatio: string): string {
@@ -437,7 +469,9 @@ interface EditRequest {
   sessionId?: string;
   messageId?: string;
   assetParentVersionIds?: string[];
+  assetSourcePlacementId?: string;
   assetProjectionMode?: 'derived' | 'revision';
+  assetSelectedEntityIds?: string[];
   action: EditAction;
   imageUrl: string;
   maskImage?: string; // base64 encoded mask
@@ -464,1073 +498,28 @@ interface EditRequest {
   originalPrompt?: string; // 原图的生成提示词, 用于多角度场景上下文
   upscaleMode?: 'auto' | 'ai' | 'cpu' | 'ai-only' | 'fidelity'; // 新产品模式兼容旧值
   upscaleModel?: string; // 302.AI 原生放大模型
+  enableQualityEnhance?: boolean;
+  enhanceModel?: string;
+  enhanceProviderId?: string;
+  quoteOnly?: boolean;
+  quoteToken?: string;
   outputFormat?: 'png' | 'jpg' | 'webp'; // 输出格式
   compression?: number; // 压缩质量 (0-100)
   engine?: 'auto' | 'ai' | 'local' | 'cpu' | 'ai-only' | 'fidelity'; // 智能推荐/仅AI/保真放大，兼容旧值
   displayBackground?: 'light-gray' | 'transparent';
 }
 
-// Helper: submit a task to the images/generations API and return taskId or directUrl
-// Custom error for model capability issues (triggers chat-vision fallback)
-class ModelCapabilityError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'ModelCapabilityError';
-  }
-}
-
-async function submitImageTask(
-  apiBaseUrl: string,
-  apiKey: string,
-  requestBody: Record<string, unknown>,
-  endpoint: '/images/generations' | '/images/edits' = '/images/generations',
-  providerInfo?: { baseUrl?: string; requestStyle?: string; advancedParams?: Record<string, string>; model?: string } | null,
-): Promise<{ taskId?: string; directUrl?: string; apiBaseUrl?: string; apiKey?: string; advancedParams?: Record<string, string> }> {
-  // 解析兼容性档案 — 优先使用 resolveProfileForModel 来正确处理 Gemini 图像模型
-  const modelId = providerInfo?.model || (typeof requestBody.model === 'string' ? requestBody.model : '');
-  const profile = resolveProfileForModel(modelId, providerInfo);
-
-  // ★ Gemini 图像模型专用路由：通过 /chat/completions 生图
-  // 某些中转站（如4SAPI）的 Gemini 图像模型仅支持 /chat/completions 端点，
-  // 不支持 /images/generations。需要将请求转换为 chat 格式。
-  //
-  // ⚠️ 但真正的 Gemini 图像模型通过 chat/completions 只能"参考"原图生成新图，
-  // 无法做精确编辑操作。对于 outpaint/inpaint（扩展/擦除/蒙版）等需要像素级控制的操作，
-  // Gemini 会变形/重绘而非精确扩展，应跳过此 provider 回退到支持 edits 的候选模型。
-  // 注意：同一 provider 上的非 Gemini 模型（如 gpt-image-2-c）不应被拒绝，
-  // 因为它们通过 chat/completions 也能做编辑。
-  const isActualGeminiImageModel = isGeminiImageModel(modelId);
-  const isEditOperation = endpoint === '/images/edits'
-    || !!requestBody.mask
-    || (typeof requestBody.strength === 'number' && requestBody.strength < 1)
-    || (typeof requestBody.prompt === 'string' && (
-      requestBody.prompt.includes('outpainting') ||
-      requestBody.prompt.includes('expansion task') ||
-      requestBody.prompt.includes('inpainting') ||
-      requestBody.prompt.includes('erase') ||
-      requestBody.prompt.includes('remove')
-    ));
-
-  if (profile.id === 'gemini-image' && isActualGeminiImageModel && isEditOperation) {
-    // Gemini chat/completions 不支持精确图片编辑，跳过此 provider
-    console.info(`[submitImageTask] Skipping gemini-image model "${modelId}" for edit operation, will try next candidate`);
-    throw new Error('GEMINI_IMAGE_NOT_FOR_EDITS: Gemini 图像模型不支持精确编辑操作（扩展/擦除/蒙版），请使用其他图像模型');
-  }
-
-  if (profile.id === 'gemini-image' && !isEditOperation) {
-    console.info(`[submitImageTask] Gemini image route detected for model="${modelId}", using /chat/completions`);
-    const chatRequestBody = buildGeminiChatImageRequest(requestBody);
-    const chatController = new AbortController();
-    const chatTimeoutId = setTimeout(() => chatController.abort(), 600000); // 10分钟超时
-
-    try {
-      const chatResponse = await fetchWithV1Retry(
-        apiBaseUrl,
-        '/chat/completions',
-        {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${apiKey}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(chatRequestBody),
-          signal: chatController.signal,
-        }
-      );
-
-      clearTimeout(chatTimeoutId);
-
-      if (!chatResponse.ok) {
-        const errorText = await chatResponse.text();
-        console.error('[submitImageTask] Gemini chat/completions error:', chatResponse.status, errorText);
-        let errorMsg = `Gemini API 请求失败 (${chatResponse.status})`;
-        try {
-          const errorJson = JSON.parse(errorText);
-          if (errorJson.error?.message) errorMsg = errorJson.error.message;
-        } catch { /* ignore */ }
-        throw new Error(translateApiError(errorMsg));
-      }
-
-      const chatResponseText = await chatResponse.text();
-      let chatResult: Record<string, unknown>;
-      try {
-        chatResult = JSON.parse(chatResponseText);
-      } catch {
-        console.error('[submitImageTask] Gemini chat returned non-JSON, first 200 chars:', chatResponseText.substring(0, 200));
-        throw new Error('Gemini API 返回了非 JSON 响应');
-      }
-
-      const extractedImageUrls = parseGeminiChatImageResponse(chatResult);
-      if (extractedImageUrls.length > 0) {
-        console.info(`[submitImageTask] Gemini image route: extracted ${extractedImageUrls.length} images`);
-        return { directUrl: extractedImageUrls[0], apiBaseUrl, apiKey, advancedParams: providerInfo?.advancedParams };
-      }
-
-      // 没有提取到图片
-      const choices = chatResult.choices as Array<Record<string, unknown>> | undefined;
-      if (choices && choices.length > 0) {
-        const content = (choices[0].message as Record<string, unknown>)?.content;
-        console.error('[submitImageTask] Gemini chat response has choices but no extractable image. Content type:', typeof content, 'Content preview:', typeof content === 'string' ? content.substring(0, 200) : JSON.stringify(content).substring(0, 200));
-      }
-
-      throw new Error('Gemini 图像模型未返回图片结果');
-    } finally {
-      clearTimeout(chatTimeoutId);
-    }
-  }
-
-  // 使用兼容性层调整请求（size格式、端点选择、input_fidelity等）
-  const hasImageField = !!requestBody.image;
-  const { body: adjustedBody, endpoint: resolvedEndpoint } = adjustRequestForProfile(
-    requestBody,
-    profile,
-    { hasImage: hasImageField, isEditEndpoint: endpoint === '/images/edits' },
-  );
-
-  // 如果兼容性层建议使用不同的端点，优先使用
-  const effectiveEndpoint = resolvedEndpoint;
-
-  const controller = new AbortController();
-  const isDirectMode = profile.responseMode === 'direct';
-  const timeoutMs = isDirectMode ? 600000 : 300000; // 直接模式600s(兼容token link等慢速API), 异步模式300s
-  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
-
-  // Debug: log key params for image-to-image verification
-  const hasImageUrls = !!adjustedBody.image_urls;
-  const urls = adjustedBody.image_urls as string[] | undefined;
-  const str = adjustedBody.strength;
-  const sz = adjustedBody.size;
-  const pmt = String(adjustedBody.prompt || '').substring(0, 80);
-  const hasImg = !!(adjustedBody.image || (Array.isArray(adjustedBody.images) && adjustedBody.images.length > 0));
-  const inputFidelity = adjustedBody.input_fidelity;
-  console.info(`[submitImageTask] API call: endpoint=${effectiveEndpoint}, profile=${profile.id}, hasImageUrls=${hasImageUrls}, hasImage=${hasImg}, inputFidelity=${inputFidelity}, urlCount=${urls?.length || 0}, urlType=${urls?.[0]?.substring(0, 30) || 'N/A'}, strength=${str}, size=${sz}, prompt=${pmt}...`);
-
-  // For /images/edits endpoint, try JSON first (most proxies accept it), then fallback to multipart form
-  let submitResponse: Response;
-
-  if (effectiveEndpoint === '/images/edits' && hasImg) {
-    // Strategy: Try JSON first (most API proxies support JSON for edits)
-    // If it fails with form-related error, retry with multipart form data
-    const jsonBody = { ...adjustedBody };
-
-    submitResponse = await fetchWithV1Retry(
-      apiBaseUrl,
-      effectiveEndpoint,
-      {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${apiKey}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(jsonBody),
-        signal: controller.signal,
-      }
-    );
-
-    // If JSON request fails, try multipart form data as fallback
-    if (!submitResponse.ok) {
-      const errorText = await submitResponse.text();
-      const needsMultipart = errorText.includes('multipart') ||
-        errorText.includes('form-data') ||
-        errorText.includes('Content-Type') ||
-        errorText.includes('expected multipart') ||
-        errorText.includes('no file') ||
-        errorText.includes('file required') ||
-        errorText.includes('Missing image') ||
-        errorText.includes('Invalid') ||
-        errorText.includes('invalid');
-
-      if (needsMultipart) {
-        console.info(`[submitImageTask] JSON failed for edits endpoint, retrying with multipart form data...`);
-        // Build multipart form data
-        // If adjustRequestForProfile merged image → images[], extract first image back for multipart
-        const multipartBody = { ...adjustedBody };
-        if (!multipartBody.image && Array.isArray(multipartBody.images) && multipartBody.images.length > 0) {
-          const firstImg = multipartBody.images[0] as Record<string, unknown>;
-          if (firstImg?.image_url && typeof (firstImg.image_url as Record<string, unknown>)?.url === 'string') {
-            multipartBody.image = (firstImg.image_url as Record<string, {url: string}>).url;
-          } else if (typeof firstImg?.url === 'string') {
-            multipartBody.image = firstImg.url;
-          }
-          // Remove first image from images[] to avoid duplication
-          multipartBody.images = (multipartBody.images as unknown[]).slice(1);
-          if ((multipartBody.images as unknown[]).length === 0) {
-            delete multipartBody.images;
-          }
-        }
-        const formData = new FormData();
-        for (const [key, value] of Object.entries(multipartBody)) {
-          if (value === undefined || value === null) continue;
-          if (key === 'image') {
-            // image field: could be base64 data URL or plain base64
-            const imgVal = String(value);
-            if (imgVal.startsWith('data:')) {
-              // data:image/png;base64,xxxxx
-              const match = imgVal.match(/^data:([^;]+);base64,(.+)$/);
-              if (match) {
-                const mimeType = match[1];
-                const base64Data = match[2];
-                const binaryData = Buffer.from(base64Data, 'base64');
-                const ext = mimeType.includes('png') ? 'png' : mimeType.includes('webp') ? 'webp' : 'jpg';
-                const file = new File([binaryData], `image.${ext}`, { type: mimeType });
-                formData.append('image', file);
-              }
-            } else {
-              // Plain base64
-              const binaryData = Buffer.from(imgVal, 'base64');
-              const file = new File([binaryData], 'image.png', { type: 'image/png' });
-              formData.append('image', file);
-            }
-          } else if (Array.isArray(value)) {
-            // Arrays like images[] for multi-image edits
-            for (let i = 0; i < value.length; i++) {
-              const item = value[i];
-              if (typeof item === 'object' && item !== null) {
-                // OpenAI format: {image_url: {url: "data:..."}} or {image_url: {url: "https://..."}}
-                const imgUrl = (item as Record<string, unknown>)?.image_url
-                  ? ((item as Record<string, Record<string, unknown>>).image_url?.url as string)
-                  : (item as Record<string, unknown>)?.url as string;
-                if (imgUrl) {
-                  if (imgUrl.startsWith('data:')) {
-                    const match = imgUrl.match(/^data:([^;]+);base64,(.+)$/);
-                    if (match) {
-                      const mimeType = match[1];
-                      const base64Data = match[2];
-                      const binaryData = Buffer.from(base64Data, 'base64');
-                      const ext = mimeType.includes('png') ? 'png' : mimeType.includes('webp') ? 'webp' : 'jpg';
-                      const file = new File([binaryData], `image_${i}.${ext}`, { type: mimeType });
-                      formData.append(`${key}[${i}]`, file);
-                    }
-                  } else {
-                    // HTTP URL - append as string
-                    formData.append(`${key}[${i}][image_url][url]`, imgUrl);
-                  }
-                } else {
-                  formData.append(`${key}[${i}]`, JSON.stringify(item));
-                }
-              } else {
-                formData.append(key, String(item));
-              }
-            }
-          } else {
-            formData.append(key, String(value));
-          }
-        }
-
-        submitResponse = await fetchWithV1Retry(
-          apiBaseUrl,
-          effectiveEndpoint,
-          {
-            method: 'POST',
-            headers: {
-              'Authorization': `Bearer ${apiKey}`,
-              ...(() => {
-                // Node.js 原生 fetch + 浏览器 FormData 需要手动设置 Content-Type
-                // 让 fetch 自动处理 boundary
-                return {};
-              })(),
-            },
-            body: formData,
-            signal: controller.signal,
-          }
-        );
-      } else {
-        // Not a form-related error, re-create the response for error handling below
-        // We already have the error text, create a synthetic response
-        submitResponse = new Response(errorText, { status: submitResponse.status, headers: submitResponse.headers });
-      }
-    }
-  } else {
-    // Standard JSON request for /images/generations
-    // 当 /images/generations 携带 image_urls 时，增强 prompt 以确保 AI 使用参考图
-    if (effectiveEndpoint === '/images/generations' && hasImageUrls) {
-      if (!String(adjustedBody.prompt || '').includes('[IMAGE-TO-IMAGE MODE]') && !String(adjustedBody.prompt || '').includes('[REFERENCE IMAGE]')) {
-        adjustedBody.prompt = `[IMAGE-TO-IMAGE MODE] You MUST use the provided reference image as the mandatory source/base for generation. Do NOT generate from scratch. ${String(adjustedBody.prompt || '')}`;
-      }
-    }
-    submitResponse = await fetchWithV1Retry(
-      apiBaseUrl,
-      effectiveEndpoint,
-      {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${apiKey}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(adjustedBody),
-        signal: controller.signal,
-      }
-    );
-  }
-
-  clearTimeout(timeoutId);
-
-  if (!submitResponse.ok) {
-    const errorText = await submitResponse.text();
-    console.error('Image task submit error:', submitResponse.status, errorText);
-    let errorMsg = `API 请求失败 (${submitResponse.status})`;
-    try {
-      const errorJson = JSON.parse(errorText);
-      errorMsg = errorJson.error?.message || errorJson.message || errorJson.msg || errorJson.detail || errorMsg;
-    } catch { /* ignore */ }
-    // 原始文本兜底：如果解析后的 errorMsg 仍为默认格式，尝试从原始文本提取关键信息
-    if (errorMsg === `API 请求失败 (${submitResponse.status})`) {
-      const lowerText = errorText.toLowerCase();
-      if (lowerText.includes('no available channel')) errorMsg = errorText.trim();
-      else if (lowerText.includes('model_not_found') || lowerText.includes('model not found')) errorMsg = errorText.trim();
-    }
-
-    // 自动回退：如果 /images/edits 端点不被支持，回退到 /images/generations
-    // 使用原始响应文本(errorText)进行检测，而非清理后的 errorMsg
-    if (effectiveEndpoint === '/images/edits' && isEditsEndpointRejected(submitResponse.status, errorText)) {
-      console.log('[submitImageTask] /images/edits rejected, auto-falling back to /images/generations');
-      const fallbackBody = stripEditsOnlyFields(adjustedBody);
-
-      // ★ If images[] nested format exists (from adjustRequestForProfile conversion),
-      // convert back to image_urls flat format for maximum provider compatibility
-      if (Array.isArray(fallbackBody.images) && fallbackBody.images.length > 0) {
-        const flatUrls = (fallbackBody.images as Array<{ image_url: { url: string } }>)
-          .map((img) => img.image_url?.url || '')
-          .filter(Boolean);
-        delete fallbackBody.images;
-        if (flatUrls.length > 0) {
-          fallbackBody.image_urls = flatUrls;
-        }
-      }
-
-      const fallbackEndpoint: ImageEndpoint = '/images/generations';
-
-      // 增强 prompt：/images/generations 仅将 image_urls 视为可选参考，
-      // 必须在 prompt 中明确指示 AI 使用参考图作为基础
-      if (fallbackBody.image_urls && Array.isArray(fallbackBody.image_urls) && (fallbackBody.image_urls as string[]).length > 0) {
-        const refCount = (fallbackBody.image_urls as string[]).length;
-        fallbackBody.prompt = `[IMAGE-TO-IMAGE MODE] You MUST use the provided ${refCount > 1 ? `${refCount} reference images` : 'reference image'} as the mandatory source/base for generation. Do NOT generate from scratch. ${String(fallbackBody.prompt || '')}`;
-      }
-
-      try {
-        const fallbackResponse = await fetchWithV1Retry(
-          apiBaseUrl,
-          fallbackEndpoint,
-          {
-            method: 'POST',
-            headers: {
-              'Authorization': `Bearer ${apiKey}`,
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify(fallbackBody),
-            signal: AbortSignal.timeout(isChannelUnavailableError(errorText) ? 30000 : 60000),
-          }
-        );
-        if (fallbackResponse.ok) {
-          console.log('[submitImageTask] fallback to /images/generations succeeded');
-          const fallbackText = await fallbackResponse.text();
-          const fallbackJson = JSON.parse(fallbackText);
-          const parsed = parseResponseForProfile(fallbackJson, profile);
-          return {
-            taskId: parsed.taskIds?.[0],
-            directUrl: parsed.directImageUrls?.[0],
-          };
-        } else {
-          const fallbackErrorText = await fallbackResponse.text();
-          console.error('[submitImageTask] fallback also failed:', fallbackResponse.status, fallbackErrorText);
-
-          // ★ Third fallback: try /chat/completions (for API proxies that only support models via chat)
-          if (isChannelUnavailableError(`${fallbackErrorText} ${fallbackResponse.status}`)) {
-            console.info('[submitImageTask] /images/generations also failed with channel error, trying /chat/completions fallback...');
-            try {
-              const chatImageUrls = await tryChatCompletionsImageFallback({
-                baseUrl: apiBaseUrl,
-                apiKey,
-                model: modelId,
-                prompt: String(adjustedBody.prompt || ''),
-                imageBase64: (adjustedBody.image as string) || undefined,
-                imageUrls: (adjustedBody.image_urls as string[]) || undefined,
-                size: adjustedBody.size as string | undefined,
-                originalError: fallbackErrorText,
-                requestIdPrefix: 'image-edit',
-                skipChannelCheck: true,
-              });
-              if (chatImageUrls && chatImageUrls.length > 0) {
-                console.log('[submitImageTask] /chat/completions fallback succeeded, got', chatImageUrls.length, 'images');
-                return { directUrl: chatImageUrls[0], apiBaseUrl, apiKey, advancedParams: providerInfo?.advancedParams };
-              }
-            } catch (chatErr) {
-              console.warn('[submitImageTask] /chat/completions fallback error:', chatErr);
-            }
-          }
-        }
-      } catch (fallbackErr) {
-        // /images/generations timed out → try /chat/completions immediately
-        const isTimeout = fallbackErr instanceof Error && (fallbackErr.name === 'AbortError' || /timeout|aborted/i.test(fallbackErr.message));
-        if (isTimeout) {
-          console.info('[submitImageTask] /images/generations timed out, trying /chat/completions fallback...');
-          try {
-            const chatImageUrls = await tryChatCompletionsImageFallback({
-              baseUrl: apiBaseUrl,
-              apiKey,
-              model: modelId,
-              prompt: String(adjustedBody.prompt || ''),
-              imageBase64: (adjustedBody.image as string) || undefined,
-              imageUrls: (adjustedBody.image_urls as string[]) || undefined,
-              size: adjustedBody.size as string | undefined,
-              originalError: 'images/generations timeout',
-              requestIdPrefix: 'image-edit',
-              skipChannelCheck: true,
-            });
-            if (chatImageUrls && chatImageUrls.length > 0) {
-              console.log('[submitImageTask] /chat/completions fallback succeeded (after generations timeout), got', chatImageUrls.length, 'images');
-              return { directUrl: chatImageUrls[0], apiBaseUrl, apiKey, advancedParams: providerInfo?.advancedParams };
-            }
-          } catch (chatErr) {
-            console.warn('[submitImageTask] /chat/completions fallback error (after generations timeout):', chatErr);
-          }
-        }
-        console.error('[submitImageTask] fallback request error:', fallbackErr);
-      }
-    }
-
-    // ★ Fallback: if /images/generations with images[] nested format fails with
-    // "请上传参考图" or "reference #" error, retry with image_urls (flat string array) format.
-    // Some providers (e.g. AI Link) don't support the nested images[] format on
-    // /images/generations and require the flat image_urls field instead.
-    if (effectiveEndpoint === '/images/generations' && Array.isArray(adjustedBody.images) && adjustedBody.images.length > 0
-        && isEditsEndpointRejected(submitResponse.status, errorText)) {
-      console.info('[submitImageTask] /images/generations with images[] format rejected, retrying with image_urls flat format...');
-      const flatUrls = (adjustedBody.images as Array<{ image_url: { url: string } }>)
-        .map((img) => img.image_url?.url || '')
-        .filter(Boolean);
-      delete adjustedBody.images;
-      adjustedBody.image_urls = flatUrls;
-
-      try {
-        const flatResponse = await fetchWithV1Retry(
-          apiBaseUrl,
-          effectiveEndpoint,
-          {
-            method: 'POST',
-            headers: {
-              'Authorization': `Bearer ${apiKey}`,
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify(adjustedBody),
-            signal: AbortSignal.timeout(60000),
-          }
-        );
-        if (flatResponse.ok) {
-          console.log('[submitImageTask] retry with image_urls flat format succeeded');
-          const flatText = await flatResponse.text();
-          const flatJson = JSON.parse(flatText);
-          const parsed = parseResponseForProfile(flatJson, profile);
-          return {
-            taskId: parsed.taskIds?.[0],
-            directUrl: parsed.directImageUrls?.[0],
-          };
-        } else {
-          const flatErrorText = await flatResponse.text();
-          console.error('[submitImageTask] retry with image_urls also failed:', flatResponse.status, flatErrorText);
-        }
-      } catch (retryErr) {
-        console.error('[submitImageTask] retry with image_urls error:', retryErr);
-      }
-    }
-
-    // ★ 使用统一翻译函数翻译 API 错误信息
-    const translatedMsg = translateApiError(errorMsg);
-
-    // 模型能力错误（支持自动回退）
-    if (errorMsg.includes('ratio or price') || errorMsg.includes('not configured') || errorMsg.includes('宽高比不在允许') || errorMsg.includes('aspect ratio is not in the allowed') || errorMsg.includes('Invalid aspect ratio') || errorMsg.includes('not a valid size')) {
-      throw new ModelCapabilityError(translatedMsg);
-    }
-    if (errorMsg.includes('image_urls') || errorMsg.includes('mask_image') || errorMsg.includes('image editing')) {
-      throw new ModelCapabilityError(translatedMsg);
-    }
-    if (errorMsg.includes('must be an URL') || errorMsg.includes('Invalid URL') || errorMsg.includes('data:')) {
-      throw new ModelCapabilityError(translatedMsg);
-    }
-    if (errorMsg.includes('model_not_found') || errorMsg.includes('model not found') || errorMsg.includes('Model not found') || errorMsg.includes('No available channel') || errorMsg.includes('no available channel')) {
-      throw new ModelCapabilityError(translatedMsg);
-    }
-    if (errorMsg.includes('_error') || errorMsg.includes('try again later')) {
-      throw new ModelCapabilityError(translatedMsg);
-    }
-    // 5xx 服务器错误 / Cloudflare 524 超时 / 401 认证错误 → 先尝试 chat/completions 兜底
-    if (errorMsg.includes('524') || errorMsg.includes('timeout occurred') || errorMsg.includes('bad_response_status_code') || (submitResponse.status >= 500 && submitResponse.status !== 501) || submitResponse.status === 401) {
-      // ★ 尝试 /chat/completions 兜底（某些 API 代理仅通过 chat 端点支持模型）
-      if (isChannelUnavailableError(`${errorMsg} ${errorText}`)) {
-        console.info('[submitImageTask] 5xx channel error, trying /chat/completions fallback...');
-        try {
-          const chatImageUrls = await tryChatCompletionsImageFallback({
-            baseUrl: apiBaseUrl,
-            apiKey,
-            model: modelId,
-            prompt: String(adjustedBody.prompt || ''),
-            imageBase64: (adjustedBody.image as string) || undefined,
-            imageUrls: (adjustedBody.image_urls as string[]) || undefined,
-            size: adjustedBody.size as string | undefined,
-            originalError: `${errorMsg} ${errorText}`,
-            requestIdPrefix: 'image-edit',
-            skipChannelCheck: true,
-          });
-          if (chatImageUrls && chatImageUrls.length > 0) {
-            console.log('[submitImageTask] /chat/completions fallback succeeded from 5xx handler');
-            return { directUrl: chatImageUrls[0], apiBaseUrl, apiKey, advancedParams: providerInfo?.advancedParams };
-          }
-        } catch (chatErr) {
-          console.warn('[submitImageTask] /chat/completions fallback (5xx) error:', chatErr);
-        }
-      }
-      console.warn('[submitImageTask] retryable server error, will try fallback:', submitResponse.status, errorMsg);
-      throw new ModelCapabilityError(translatedMsg);
-    }
-
-    throw new Error(translatedMsg);
-  }
-
-  // 解析响应 — 防止 API 返回 HTML 页面导致 JSON 解析失败
-  const responseText = await submitResponse.text();
-  let submitResult: Record<string, unknown>;
-  try {
-    submitResult = JSON.parse(responseText) as Record<string, unknown>;
-  } catch {
-    console.error('[image-edit] API returned non-JSON response, first 200 chars:', responseText.substring(0, 200));
-    throw new Error('API 返回了非 JSON 响应（可能是端点不存在），请检查 API 地址配置');
-  }
-  const parsed = parseResponseForProfile(submitResult, profile);
-
-  if (parsed.mode === 'direct' && parsed.directImageUrls.length > 0) {
-    return { directUrl: parsed.directImageUrls[0], apiBaseUrl, apiKey, advancedParams: providerInfo?.advancedParams };
-  }
-
-  if (parsed.taskIds.length > 0) {
-    return { taskId: parsed.taskIds[0], apiBaseUrl, apiKey, advancedParams: providerInfo?.advancedParams };
-  }
-
-  throw new Error('未获取到任务ID或图片数据');
-}
-
-/**
- * 从文本解析 SSE 格式的 chat/completions 响应
- * 用于处理某些 API 代理即使 stream:false 也返回 SSE 流的情况
- */
-function parseSSEChatResponseFromText(text: string): Record<string, unknown> | null {
-  const lines = text.split('\n');
-
-  let finalContent = '';
-  let model = '';
-  let role = 'assistant';
-
-  for (const line of lines) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed === 'data: [DONE]') continue;
-    if (!trimmed.startsWith('data:') && !trimmed.startsWith('data :')) continue;
-
-    const dataStr = trimmed.startsWith('data: ') ? trimmed.slice(6) : trimmed.startsWith('data :') ? trimmed.slice(6) : trimmed.slice(5);
-
-    try {
-      const json = JSON.parse(dataStr);
-      // 非流式响应：直接取 message.content
-      if (json.choices?.[0]?.message?.content) {
-        finalContent = typeof json.choices[0].message.content === 'string'
-          ? json.choices[0].message.content
-          : JSON.stringify(json.choices[0].message.content);
-      }
-      // 流式响应：累加 delta.content
-      const delta = json.choices?.[0]?.delta;
-      if (delta?.content) {
-        finalContent += delta.content;
-      }
-      if (delta?.role) role = delta.role;
-      if (json.model) model = json.model;
-    } catch {
-      // 忽略无法解析的行
-    }
-  }
-
-  if (!finalContent) return null;
-
-  return {
-    choices: [{
-      message: { content: finalContent, role },
-      finish_reason: 'stop',
-    }],
-    model,
-  } as Record<string, unknown>;
-}
-
-// Helper: use chat-completions with vision model to describe an image
-// Returns a text description of the image, or null if all models fail
-async function describeImageWithVision(
-  imageBase64: string,
-  instruction: string,
-): Promise<string | null> {
-  const chatProviders = await findAllProvidersForType('chat');
-  if (chatProviders.length === 0) {
-    console.warn('[image-edit] No chat models available for vision description');
-    return null;
-  }
-
-  const imageDataUrl = imageBase64.startsWith('data:') ? imageBase64 : `data:image/png;base64,${imageBase64}`;
-
-  for (const entry of chatProviders) {
-    for (const m of entry.models) {
-      try {
-        console.debug(`[image-edit] vision-describe: Trying ${m}`);
-        const chatRequestBody = {
-          model: m,
-          messages: [
-            {
-              role: 'user',
-              content: [
-                { type: 'image_url', image_url: { url: imageDataUrl } },
-                { type: 'text', text: instruction }
-              ]
-            }
-          ],
-          max_tokens: 2048,
-          stream: false,
-        };
-
-        const chatResponse = await fetchWithV1Retry(
-          normalizeApiBaseUrl(entry.provider.baseUrl),
-          '/chat/completions',
-          {
-            method: 'POST',
-            headers: {
-              'Authorization': `Bearer ${entry.provider.apiKey}`,
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify(chatRequestBody),
-            signal: AbortSignal.timeout(60000),
-          }
-        );
-
-        if (!chatResponse.ok) continue;
-
-        const responseText = await chatResponse.text();
-        let chatResult: Record<string, unknown> | null = null;
-        const trimmedText = responseText.trim();
-
-        if (trimmedText.startsWith('data:') || trimmedText.startsWith('data :')) {
-          chatResult = parseSSEChatResponseFromText(trimmedText);
-        } else {
-          try { chatResult = JSON.parse(trimmedText); } catch { chatResult = parseSSEChatResponseFromText(trimmedText); }
-        }
-
-        if (!chatResult) continue;
-
-        const choice = (chatResult as { choices?: Array<{ message?: { content?: unknown } }> }).choices?.[0];
-        const content = choice?.message?.content;
-
-        // Extract text content (whether string or array)
-        if (typeof content === 'string' && content.length > 20) {
-          console.debug(`[image-edit] vision-describe: ${m} returned ${content.length} chars`);
-          return content;
-        }
-        if (Array.isArray(content)) {
-          const textParts = content
-            .filter((p: { type: string }) => p.type === 'text')
-            .map((p: { text: string }) => p.text)
-            .filter((t: string) => t.length > 10);
-          if (textParts.length > 0) {
-            const joined = textParts.join(' ');
-            console.debug(`[image-edit] vision-describe: ${m} returned ${joined.length} chars (array)`);
-            return joined;
-          }
-        }
-      } catch (err: unknown) {
-        const errMsg = err instanceof Error ? err.message : String(err);
-        console.warn(`[image-edit] vision-describe: ${m} failed: ${errMsg}`);
-        continue;
-      }
-    }
-  }
-
-  return null;
-}
-
-/**
- * 302.AI 超级放大 API 适配器
- * 端点: /302/submit/super-upscale-v2
- * 文档: https://302ai.apifox.cn/205808838e0
- */
-async function submit302aiUpscaleTask(
-  baseUrl: string,
-  apiKey: string,
-  imageUrl: string,
-  scale: number = 3,
-  creativity: number = 0.2,
-  detail: number = 2,
-  shapePreservation: number = 0.1,
-  promptSuffix: string = ' high quality, highly detailed, high resolution, sharp',
-  negativePrompt: string = 'blurry, low resolution, bad, ugly, low quality, pixelated, interpolated, compression artifacts, noisey, grainy',
-): Promise<{ directUrl?: string; width?: number; height?: number; usedModel?: string }> {
-  const endpoint = '/302/submit/super-upscale-v2';
-  const url = `${baseUrl.replace(/\/+$/, '')}${endpoint}`;
-
-  const requestBody = {
-    model_type: 'SDXL',
-    image_url: imageUrl,
-    scale,
-    creativity,
-    detail,
-    shape_preservation: shapePreservation,
-    prompt_suffix: promptSuffix,
-    negative_prompt: negativePrompt,
-    guidance_scale: 7.5,
-    num_inference_steps: 20,
-    override_size_limits: true,
-  };
-
-  console.debug(`[image-edit] 302.AI upscale: POST ${url}, scale=${scale}`);
-
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(requestBody),
-  });
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw parse302UpscaleProviderError(response.status, errorText);
-  }
-
-  const result = await response.json();
-  console.debug(`[image-edit] 302.AI upscale response keys:`, Object.keys(result));
-
-  // 响应格式: { image: { url, content_type, file_size, width, height }, seed }
-  // Fallback: some 302.AI endpoints return { output: "url" } instead
-  const directUrl = result.image?.url || (typeof result.output === 'string' ? result.output : undefined);
-  if (directUrl) {
-    return {
-      directUrl,
-      width: result.image?.width,
-      height: result.image?.height,
-      usedModel: '302-super-upscale-v2',
-    };
-  }
-
-  throw new Error('302.AI upscale response missing image.url or output');
-}
-
-/**
- * 302.AI Upscale-V6 普通放大 API 适配器
- * 端点: /302/submit/upscale-v6
- * 文档: https://302ai.apifox.cn/373009524e0
- * 特点: 普通放大，无AI想象，价格更便宜（0.05 PTC/次）
- */
-async function submit302aiUpscaleV6Task(
-  baseUrl: string,
-  apiKey: string,
-  imageUrl: string,
-  upscaleFactor: number = 4, // 1-4
-): Promise<{ directUrl?: string; width?: number; height?: number; usedModel?: string }> {
-  const endpoint = '/302/submit/upscale-v6';
-  const url = `${baseUrl.replace(/\/+$/, '')}${endpoint}`;
-
-  // upscale_factor 范围: 1-4
-  const factor = Math.min(4, Math.max(1, upscaleFactor));
-
-  const requestBody = {
-    image_url: imageUrl,
-    upscale_factor: factor,
-  };
-
-  console.debug(`[image-edit] 302.AI upscale-v6: POST ${url}, factor=${factor}`);
-
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(requestBody),
-  });
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw parse302UpscaleProviderError(response.status, errorText);
-  }
-
-  const result = await response.json();
-  console.debug(`[image-edit] 302.AI upscale-v6 response keys:`, Object.keys(result));
-
-  // 响应格式: { image: { url, content_type, file_size, width, height }, seed }
-  // Fallback: some 302.AI endpoints return { output: "url" } instead
-  const directUrl = result.image?.url || (typeof result.output === 'string' ? result.output : undefined);
-  if (directUrl) {
-    return {
-      directUrl,
-      width: result.image?.width,
-      height: result.image?.height,
-      usedModel: '302-upscale-v6',
-    };
-  }
-
-  throw new Error('302.AI upscale-v6 response missing image.url or output');
-}
-
-/**
- * 302.AI Image Upscale 基础放大 API 适配器
- * 端点: /302/submit/image-upscale
- * 特点: 基础放大，速度快，适合日常使用
- */
-async function submit302aiImageUpscaleTask(
-  baseUrl: string,
-  apiKey: string,
-  imageUrl: string,
-  scale: number = 2,
-): Promise<{ directUrl?: string; width?: number; height?: number; usedModel?: string }> {
-  const endpoint = '/302/submit/image-upscale';
-  const url = `${baseUrl.replace(/\/+$/, '')}${endpoint}`;
-  const factor = Math.min(4, Math.max(1, Math.round(scale)));
-
-  const requestBody = {
-    image_url: imageUrl,
-    upscale_factor: factor,
-  };
-
-  console.debug(`[image-edit] 302.AI image-upscale: POST ${url}, factor=${factor}`);
-
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(requestBody),
-  });
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw parse302UpscaleProviderError(response.status, errorText);
-  }
-
-  const result = await response.json();
-  console.debug(`[image-edit] 302.AI image-upscale response keys:`, Object.keys(result));
-
-  // 响应格式: { image: { url, ... } } or { output: "url" }
-  const directUrl = result.image?.url || (typeof result.output === 'string' ? result.output : undefined);
-  if (directUrl) {
-    return {
-      directUrl,
-      width: result.image?.width,
-      height: result.image?.height,
-      usedModel: '302-image-upscale',
-    };
-  }
-
-  throw new Error('302.AI image-upscale response missing image.url or output');
-}
-
-/**
- * 302.AI ESRGAN 高清放大 API 适配器
- * 端点: /302/submit/esrgan
- * 特点: ESRGAN高清放大，增强细节和纹理
- */
-async function submit302aiEsrganTask(
-  baseUrl: string,
-  apiKey: string,
-  imageUrl: string,
-  scale: number = 4,
-): Promise<{ directUrl?: string; width?: number; height?: number; usedModel?: string }> {
-  const endpoint = '/302/submit/esrgan';
-  const url = `${baseUrl.replace(/\/+$/, '')}${endpoint}`;
-  const factor = Math.min(4, Math.max(2, Math.round(scale)));
-
-  const requestBody = {
-    image_url: imageUrl,
-    upscale_factor: factor,
-  };
-
-  console.debug(`[image-edit] 302.AI esrgan: POST ${url}, factor=${factor}`);
-
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(requestBody),
-  });
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw parse302UpscaleProviderError(response.status, errorText);
-  }
-
-  const result = await response.json();
-  console.debug(`[image-edit] 302.AI esrgan response keys:`, Object.keys(result));
-
-  // 响应格式: { image: { url, ... } } or { output: "url" }
-  const directUrl = result.image?.url || (typeof result.output === 'string' ? result.output : undefined);
-  if (directUrl) {
-    return {
-      directUrl,
-      width: result.image?.width,
-      height: result.image?.height,
-      usedModel: '302-esrgan',
-    };
-  }
-
-  throw new Error('302.AI esrgan response missing image.url or output');
-}
-
-/**
- * 自动尝试提交图像任务 - 遍历候选模型直到成功
- * 遇到 ModelCapabilityError 时自动切换下一个候选模型
- */
-async function autoTrySubmitImageTask(
-  candidateModels: Array<{ model: string; apiKey: string; apiBaseUrl: string; source: string; advancedParams?: Record<string, string> }>,
-  buildRequestBody: (model: string) => Record<string, unknown>,
-  operation: string,
-  endpoint: '/images/generations' | '/images/edits' = '/images/generations',
-): Promise<{ taskId?: string; directUrl?: string; usedModel?: string; apiBaseUrl?: string; apiKey?: string; advancedParams?: Record<string, string> }> {
-  const errors: string[] = [];
-  let ratioRetryDone = false;
-
-  for (const candidate of candidateModels) {
-    try {
-      console.debug(`[image-edit] ${operation}: Trying model ${candidate.model} (source: ${candidate.source}, endpoint: ${endpoint})`);
-      const requestBody = buildRequestBody(candidate.model);
-      const result = await submitImageTask(candidate.apiBaseUrl, candidate.apiKey, requestBody, endpoint, {
-        baseUrl: candidate.apiBaseUrl,
-        advancedParams: candidate.advancedParams,
-        model: candidate.model,
-      });
-      return { ...result, usedModel: candidate.model };
-    } catch (err: unknown) {
-      const errMsg = err instanceof Error ? err.message : String(err);
-      errors.push(`${candidate.model}: ${errMsg}`);
-      console.warn(`[image-edit] ${operation}: Model ${candidate.model} failed: ${errMsg}`);
-
-      // ModelCapabilityError → 检查是否是宽高比问题，可以重试
-      if (err instanceof ModelCapabilityError) {
-        if (!ratioRetryDone && (errMsg.includes('ratio') || errMsg.includes('宽高比') || errMsg.includes('aspect'))) {
-          // 宽高比不被支持，用 1:1 重试模型（跳过已失败的模型，避免双重API调用）
-          console.warn(`[image-edit] ${operation}: Aspect ratio not supported, retrying with 1:1`);
-          ratioRetryDone = true;
-          // 记录当前及之前已失败的模型，避免对同一模型重复提交导致双重API调用
-          const failedModelIndex = candidateModels.indexOf(candidate);
-          const failedModelSet = new Set(candidateModels.slice(0, failedModelIndex + 1).map(c => c.model));
-          // 用 1:1 比例重试尚未失败的候选模型
-          for (const retryCandidate of candidateModels) {
-            if (failedModelSet.has(retryCandidate.model)) {
-              console.debug(`[image-edit] ${operation}: Skipping already-failed model ${retryCandidate.model} in 1:1 retry`);
-              continue;
-            }
-            try {
-              const retryBody = buildRequestBody(retryCandidate.model);
-              // 强制设置 size 为 1:1
-              if (retryBody.size) retryBody.size = '1:1';
-              const retryResult = await submitImageTask(retryCandidate.apiBaseUrl, retryCandidate.apiKey, retryBody, endpoint, {
-                baseUrl: retryCandidate.apiBaseUrl,
-                advancedParams: retryCandidate.advancedParams,
-                model: retryCandidate.model,
-              });
-              return { ...retryResult, usedModel: retryCandidate.model };
-            } catch (retryErr: unknown) {
-              const retryErrMsg = retryErr instanceof Error ? retryErr.message : String(retryErr);
-              errors.push(`${retryCandidate.model}(1:1): ${retryErrMsg}`);
-              if (retryErr instanceof ModelCapabilityError) continue;
-              const nr = retryErrMsg.includes('Invalid API key') || retryErrMsg.includes('invalid api_key');
-              if (nr) throw retryErr;
-              continue;
-            }
-          }
-        }
-        continue;
-      }
-      // 不可重试的致命错误（认证/配额等）→ 直接抛出
-      const nonRetryable =
-        errMsg.includes('Invalid API key') ||
-        errMsg.includes('invalid api_key') ||
-        errMsg.includes('Insufficient balance') ||
-        errMsg.includes('insufficient balance');
-      if (nonRetryable) {
-        throw err;
-      }
-      // 提供商通道/配额/网络等错误 → 继续尝试下一个模型
-      console.warn(`[image-edit] ${operation}: Retrying with next model...`);
-      continue;
-    }
-  }
-
-  // 所有候选模型都不支持此操作
-  throw new ModelCapabilityError(
-    `所有 ${candidateModels.length} 个可用模型均不支持${operation}操作。请添加支持图像编辑的模型（如 DALL-E、Flux 等）。\n` +
-    `尝试过的模型: ${errors.map((e, i) => `${i + 1}. ${e}`).join('; ')}`
-  );
-}
-
-/**
- * 自动尝试所有 LLM 模型做视觉 fallback
- * 遍历管理员配置的 chat 类型模型，用视觉理解+生成的方式替代图像编辑
- */
-/**
- * 自动尝试所有 LLM 模型做视觉描述 + 图像生成 fallback
- * 用于 inpaint/erase 等操作，当 images/generations 不支持时
- */
-async function autoTryChatVisionFallback(
-  imageBase64: string,
-  _maskBase64: string | null,
-  prompt: string,
-  operation: string,
-): Promise<{ taskId?: string; directUrl?: string; usedModel?: string } | null> {
-  // Step 1: 用 chat vision 模型描述图片内容
-  const description = await describeImageWithVision(
-    imageBase64,
-    operation === 'erase'
-      ? '请详细描述这张图片的内容，包括主体、背景、风格、色彩、构图等细节。'
-      : prompt || '请详细描述这张图片的内容，包括主体、背景、风格、色彩、构图等细节。'
-  );
-
-  if (!description) {
-    console.warn(`[image-edit] ${operation} vision fallback: No description available`);
-    return null;
-  }
-
-  // Step 2: 用描述 + image_urls 作为参考提交 images/generations
-  const imageProviders = await findAllProvidersForType('image');
-  if (imageProviders.length === 0) {
-    console.warn(`[image-edit] ${operation} vision fallback: No image models available`);
-    return null;
-  }
-
-  const imageDataUrl = imageBase64.startsWith('data:') ? imageBase64 : `data:image/png;base64,${imageBase64}`;
-
-  // 构建 candidate models from image providers
-  const candidates: Array<{ model: string; apiKey: string; apiBaseUrl: string; source: string }> = [];
-  for (const entry of imageProviders) {
-    for (const m of entry.models) {
-      candidates.push({
-        model: m,
-        apiKey: entry.provider.apiKey,
-        apiBaseUrl: normalizeApiBaseUrl(entry.provider.baseUrl),
-        source: 'chat-vision-fallback',
-      });
-    }
-  }
-
-  const enhancedPrompt = operation === 'erase'
-    ? `${description}\n\nRemove the masked area content and fill with natural background. Seamlessly blend the repaired area with surrounding content.`
-    : `${description}\n\n${prompt || ''}`;
-
-  try {
-    const result = await autoTrySubmitImageTask(candidates, (m) => ({
-      model: m,
-      prompt: enhancedPrompt,
-      n: 1,
-      size: '1024x1024',
-      image_urls: [imageDataUrl],
-      strength: 0.6,
-    }), `${operation}(vision-fallback)`, '/images/generations');
-    return { ...result, usedModel: result.usedModel };
-  } catch {
-    return null;
-  }
+interface PreparedInpaintInput {
+  imageBuffer: Buffer;
+  maskBuffer: Buffer;
+  maskRawData: Buffer;
+  origW: number;
+  origH: number;
+  maskPixelCount: number;
+  minX: number;
+  minY: number;
+  maxX: number;
+  maxY: number;
 }
 
 // ============================================================
@@ -1617,35 +606,303 @@ export async function POST(request: NextRequest) {
   let deductedCredits = 0;
   let usesAtomicBilling = false;
   let atomicBillingTaskId: string | null = null;
+  let atomicSettlementAttempted = false;
   let sessionUser: Awaited<ReturnType<typeof getSessionUser>> = null;
   try {
     const authResult = await requireApiAuthOrReject(request);
     if (authResult instanceof NextResponse) return authResult;
-    const body: EditRequest = await request.json();
-    sessionUser = await getSessionUser(request);
+    let parsedBody: unknown;
+    try {
+      parsedBody = await request.json();
+    } catch {
+      return NextResponse.json({ success: false, code: 'IMAGE_EDIT_INVALID_REQUEST', error: '图片编辑请求必须是 JSON 对象' }, { status: 400 });
+    }
+    if (!parsedBody || typeof parsedBody !== 'object' || Array.isArray(parsedBody)) {
+      return NextResponse.json({ success: false, code: 'IMAGE_EDIT_INVALID_REQUEST', error: '图片编辑请求必须是 JSON 对象' }, { status: 400 });
+    }
+    const requestIdentity = captureImageEditRequestIdentity(parsedBody as Record<string, unknown>);
+    const inputIdentityDigest = digestImageEditInputIdentity(authResult.userId, requestIdentity);
+    const body = parsedBody as EditRequest;
+    let projectAccess;
+    try {
+      projectAccess = await authorizeGenerationProject({ actorUserId: authResult.userId, projectId: body.projectId });
+    } catch (error) {
+      if (error instanceof GenerationProjectAccessError) {
+        return NextResponse.json({ success: false, code: error.code, error: error.message }, { status: error.status });
+      }
+      throw error;
+    }
+    sessionUser = authResult.user;
     deductedCredits = 0; // 跟踪已扣积分，用于失败退款
-    const { action: rawAction, imageUrl, maskImage, prompt, editMode, expandRatio, expandScale = 1, expandPadding, targetWidth, targetHeight, aspectRatio, angleMode = 'image', rotation = 0, tilt = 0, zoom = 1, model: rawModel = 'gemini-2.5-flash-image-preview', providerId, engine: enginePref = 'auto' } = body;
+    const { action: rawAction, maskImage, prompt, editMode, expandRatio, expandScale = 1, expandPadding, targetWidth, targetHeight, aspectRatio, angleMode = 'image', rotation = 0, tilt = 0, zoom = 1, engine: enginePref = 'auto' } = body;
     const action = rawAction === 'extend' ? 'outpaint' : (rawAction === 'erase' || rawAction === 'mask') ? 'inpaint' : rawAction;
     const isRemoveBackgroundAction = action === 'removebg' || action === 'remove_background';
 
-    // 防御性处理：确保 model 是字符串（前端可能误传对象）
-    let modelStr = typeof rawModel === 'string' ? rawModel : (rawModel as Record<string, unknown>)?.model as string || String(rawModel);
-    // ★ 从 model 中提取纯 modelId（前端可能传 providerId::modelId 格式）
-    const extractedProviderId = modelStr.includes('::') ? modelStr.split('::')[0] : '';
-    if (modelStr.includes('::')) {
-      modelStr = modelStr.split('::').pop()!;
-      console.debug(`[image-edit] Stripped provider prefix from model: "${rawModel}" → "${modelStr}" (providerId via field: "${providerId || 'none'}")`);
+    if (!action || !['erase', 'mask', 'upscale', 'extend', 'removebg', 'inpaint', 'outpaint', 'remove_background', 'multi_angle', 'display_decompose'].includes(action)) {
+      return NextResponse.json({ success: false, error: '缺少或无效的 action 参数' }, { status: 400 });
     }
-    const effectiveProviderId = providerId || extractedProviderId || '';
-    const requestedUpscaleModel = body.upscaleModel?.trim() || null;
-    const requested302UpscaleModel = requestedUpscaleModel
-      ? resolve302UpscaleModelId(requestedUpscaleModel)
-      : null;
-    const taskCoreMode = resolveImageEditTaskCoreMode(
-      requestedTaskCoreMode,
-      action === 'upscale' && Boolean(requested302UpscaleModel),
-    );
-    usesAtomicBilling = taskCoreMode === 'core-v2';
+    if (body.enableQualityEnhance !== undefined && typeof body.enableQualityEnhance !== 'boolean') {
+      return NextResponse.json({ success: false, code: 'IMAGE_EDIT_INVALID_ENHANCEMENT' }, { status: 400 });
+    }
+    if (body.enableQualityEnhance && action !== 'upscale') {
+      return NextResponse.json({ success: false, code: 'IMAGE_EDIT_INVALID_ENHANCEMENT' }, { status: 400 });
+    }
+    if (body.quoteOnly !== undefined && typeof body.quoteOnly !== 'boolean') {
+      return NextResponse.json({ success: false, code: 'IMAGE_EDIT_INVALID_QUOTE_REQUEST' }, { status: 400 });
+    }
+    if (body.quoteToken !== undefined && (typeof body.quoteToken !== 'string'
+      || body.quoteToken.length < 1 || body.quoteToken.length > 8_192 || body.quoteOnly)) {
+      return NextResponse.json({ success: false, code: 'IMAGE_EDIT_INVALID_QUOTE_REQUEST' }, { status: 400 });
+    }
+    let imageUrl: string;
+    try {
+      imageUrl = await authorizeDocumentImageEditSource({ access: projectAccess, action,
+        parentVersionIds: body.assetParentVersionIds, imageUrl: body.imageUrl, origin: request.nextUrl.origin });
+    } catch (error) {
+      if (error instanceof ImageEditSourceAdmissionError) {
+        return NextResponse.json({ success: false, code: error.code, error: error.message }, { status: error.status });
+      }
+      throw error;
+    }
+    const replayKey = request.headers.get('idempotency-key')?.trim();
+    const respondPublishedCpuResult = async (taskId: string, reused: boolean): Promise<NextResponse> => {
+      try {
+        const current = await getCloudTaskForUser(taskId, authResult.userId);
+        if (current && ['failed', 'cancelled', 'timeout'].includes(current.status)) {
+          return NextResponse.json({ success: false, taskId, status: current.status,
+            error: current.error, reused }, { status: 409 });
+        }
+        if (current?.status !== 'completed') {
+          return NextResponse.json({ success: true, taskId, status: current?.status || 'processing',
+            reused }, { status: 202 });
+        }
+        await projectPersistedCompletedTask(taskId, authResult.userId);
+        const published = await getCloudTaskForUser(taskId, authResult.userId);
+        const currentResult = published?.result;
+        const projection = currentResult?.assetProjection as
+          { status?: unknown; references?: unknown[] } | undefined;
+        if (published?.status === 'completed' && currentResult
+          && isCoherentPublishedCpuRemoveBgResult(published)
+          && projection?.status === 'completed' && Array.isArray(projection.references)) {
+          return NextResponse.json({ success: true, taskId, action,
+            imageUrl: currentResult.imageUrl, maskUrl: currentResult.maskUrl,
+            quality: currentResult.quality, engine: 'rembg-cpu',
+            usedModel: currentResult.model, reused,
+            quote: confirmedImageEditQuoteForResponse(currentResult),
+            assetProjection: { status: 'completed', references: projection.references } });
+        }
+      } catch (error) {
+        // A charged completed task cannot be reclassified as an execution
+        // failure simply because its publication read or projection failed.
+        console.error('[remove_background] completed task publication pending:', error);
+      }
+      return NextResponse.json({ success: true, taskId,
+        status: 'publication-pending', retryAfterMs: 1500, reused }, { status: 202 });
+    };
+    if (!body.quoteOnly && replayKey && projectAccess.kind === 'document'
+      && isRemoveBackgroundAction && (enginePref === 'cpu' || enginePref === 'local')
+      && body.assetSelectedEntityIds !== undefined) {
+      const existing = await getCloudTaskForUserByIdempotencyKey(authResult.userId, replayKey);
+      if (existing) {
+        const admission = existing.result?.imageEditAdmission as { kind?: unknown } | undefined;
+        if (existing.type !== 'image-edit' || existing.providerId !== 'local-rembg'
+          || admission?.kind !== 'document-cpu-removebg'
+          || existing.requestDigest !== inputIdentityDigest) {
+          throw new IdempotencyConflictError({ userId: authResult.userId,
+            idempotencyKey: replayKey, requestDigest: inputIdentityDigest,
+            existingDigest: existing.requestDigest || 'legacy-unknown' });
+        }
+        return respondPublishedCpuResult(existing.id, true);
+      }
+    }
+    if (action === 'upscale' && replayKey && !body.quoteOnly) {
+      const existing = await getCloudTaskForUserByIdempotencyKey(authResult.userId, replayKey);
+      if (existing) {
+        const replayQuote = confirmedImageEditQuoteForResponse(existing.result);
+        const admission = existing.result?.imageEditAdmission as
+          | { kind?: string; inputIdentityDigest?: string; requestDigest?: string } | undefined;
+        if (existing.type !== 'upscale' || admission?.kind !== 'requested-302-upscale') {
+          throw new IdempotencyConflictError({ userId: authResult.userId,
+            idempotencyKey: replayKey, requestDigest: inputIdentityDigest,
+            existingDigest: existing.requestDigest || 'legacy-unknown' });
+        }
+        if (admission.inputIdentityDigest) {
+          if (admission.inputIdentityDigest !== inputIdentityDigest
+            || admission.requestDigest !== existing.requestDigest) {
+            throw new IdempotencyConflictError({ userId: authResult.userId,
+              idempotencyKey: replayKey, requestDigest: inputIdentityDigest,
+              existingDigest: admission.inputIdentityDigest });
+          }
+          if (existing.status === 'processing' && existing.creditStatus === 'pending'
+            && existing.projectId === body.projectId && existing.requestDigest) {
+            const payload = existing.result?.submissionPayload as Record<string, unknown> | undefined;
+            const enhancement = payload?.qualityEnhance as Record<string, unknown> | undefined;
+            const sourceWidth = payload?.sourceWidth;
+            const sourceHeight = payload?.sourceHeight;
+            const targetW = payload?.targetWidth;
+            const targetH = payload?.targetHeight;
+            let accepted;
+            try {
+              accepted = readAcceptedImageEditPhaseResult(existing.result || {}, existing.requestDigest,
+                'upscale-quality-enhance');
+            } catch { /* Corrupt or legacy checkpoint is not safe to auto-finalize. */ }
+            if (accepted?.identity.kind === 'image' && accepted.result.kind === 'image'
+              && typeof accepted.result.directUrl === 'string'
+              && accepted.identity.providerId === enhancement?.providerId
+              && accepted.identity.modelId === enhancement?.modelId
+              && typeof sourceWidth === 'number' && typeof sourceHeight === 'number'
+              && typeof targetW === 'number' && typeof targetH === 'number'
+              && !validateUpscaleTargetDimensions(sourceWidth, sourceHeight, targetW, targetH)) {
+              const owner = randomUUID();
+              const lease = await claimCloudTaskLease(existing.id, owner, 30 * 60_000);
+              if (lease) {
+                try {
+                  const current = await getCloudTaskForUser(existing.id, authResult.userId);
+                  const currentAccepted = current?.status === 'processing' && current.creditStatus === 'pending'
+                    ? readAcceptedImageEditPhaseResult(current.result || {}, existing.requestDigest,
+                      'upscale-quality-enhance') : null;
+                  if (currentAccepted?.result.kind === 'image'
+                    && currentAccepted.result.directUrl === accepted.result.directUrl
+                    && currentAccepted.identity.providerId === accepted.identity.providerId
+                    && currentAccepted.identity.modelId === accepted.identity.modelId) {
+                    const acceptedUrl = accepted.result.directUrl;
+                    let downloaded: { buffer: Buffer; mimeType: string };
+                    if (currentAccepted.result.managedExport === true
+                      && acceptedUrl.startsWith('/api/serve-upload/exports/')) {
+                      const filename = acceptedUrl.slice('/api/serve-upload/exports/'.length);
+                      const { exportMediaDescriptor } = await import('@/lib/asset-core/binary-media-contract');
+                      const descriptor = exportMediaDescriptor(filename);
+                      if (!descriptor?.mimeType.startsWith('image/')) {
+                        throw new Error('Accepted managed enhancement is not an image export');
+                      }
+                      const [{ readServeUploadExportLocal }, { readBinaryFromS3Exact },
+                        { validateExportAssetBytes }] = await Promise.all([
+                        import('@/lib/serve-upload-local-storage'),
+                        import('@/lib/s3-storage'),
+                        import('@/lib/asset-core/binary-persistence'),
+                      ]);
+                      request.signal.throwIfAborted();
+                      const buffer = await readServeUploadExportLocal(getServerDataRoot(), filename, 32 * 1024 * 1024)
+                        ?? await readBinaryFromS3Exact(`exports/${filename}`,
+                          { maxBytes: 32 * 1024 * 1024, signal: request.signal });
+                      if (!buffer) throw new Error('Accepted managed enhancement is unavailable');
+                      await validateExportAssetBytes({ bytes: buffer, filename,
+                        mimeType: descriptor.mimeType, signal: request.signal });
+                      downloaded = { buffer, mimeType: descriptor.mimeType };
+                    } else {
+                      // Provider-controlled remote URLs are DNS-pinned to public
+                      // addresses and redirects are refused before any download.
+                      downloaded = await downloadPublicImage(acceptedUrl,
+                        { maxBytes: 32 * 1024 * 1024, timeoutMs: 120_000, signal: request.signal });
+                    }
+                    const enhancedBuffer = downloaded.buffer;
+                    const metadata = await sharp(enhancedBuffer).metadata();
+                    if (!metadata.width || !metadata.height
+                      || metadata.width < targetW || metadata.height < targetH) {
+                      throw new Error('Accepted enhancement result is smaller than the frozen target');
+                    }
+                    let finalBuffer = enhancedBuffer;
+                    let extension = downloaded.mimeType === 'image/jpeg' ? 'jpg'
+                      : downloaded.mimeType === 'image/webp' ? 'webp'
+                        : downloaded.mimeType === 'image/avif' ? 'avif'
+                          : downloaded.mimeType === 'image/gif' ? 'gif' : 'png';
+                    if (metadata.width !== targetW || metadata.height !== targetH) {
+                      finalBuffer = await sharp(enhancedBuffer)
+                        .resize(targetW, targetH, { kernel: sharp.kernel.lanczos3 }).png().toBuffer();
+                      extension = 'png';
+                    }
+                    const finalUrl = await saveBufferToPublic(finalBuffer,
+                      `upscale_enhanced_recovered_${existing.id}_${lease.attemptCount}.${extension}`);
+                    if (!finalUrl.startsWith('/api/serve-upload/')) {
+                      throw new Error('Recovered enhancement is not durably stored');
+                    }
+                    const result = { imageUrl: finalUrl, action: 'upscale',
+                      providerId: existing.providerId, model: existing.model, enhanced: true };
+                    const committed = projectAccess.kind === 'document'
+                      ? await completeDocumentImageEditTask({ taskId: existing.id, result, access: projectAccess,
+                        parentVersionIds: body.assetParentVersionIds, imageUrl: body.imageUrl,
+                        origin: request.nextUrl.origin, expectedCanonicalUrl: imageUrl,
+                        leaseOwner: owner, leaseExpiresAt: lease.expiresAt,
+                        leaseAttemptCount: lease.attemptCount })
+                      : await completeCloudTask(existing.id, result, { leaseOwner: owner,
+                        deadlineAt: lease.expiresAt, leaseAttemptCount: lease.attemptCount });
+                    if (committed) {
+                      if (sessionUser) await projectPersistedCompletedTask(existing.id, sessionUser.id);
+                      return NextResponse.json({ success: true, action: 'upscale', taskId: existing.id,
+                        imageUrl: finalUrl, enhanced: true, reused: true,
+                        ...(replayQuote ? { quote: replayQuote } : {}) });
+                    }
+                  }
+                } catch {
+                  // An accepted provider result is never refunded or re-submitted
+                  // because a media read, source check, or COMMIT response failed.
+                } finally {
+                  await releaseCloudTaskLease(existing.id, owner);
+                }
+                const after = await getCloudTaskForUser(existing.id, authResult.userId);
+                if (after?.status === 'completed' && typeof after.result?.imageUrl === 'string') {
+                  return NextResponse.json({ success: true, action: 'upscale', taskId: existing.id,
+                    imageUrl: after.result.imageUrl, enhanced: after.result.enhanced === true, reused: true,
+                    ...(replayQuote ? { quote: replayQuote } : {}) });
+                }
+                if (after && ['failed', 'cancelled', 'timeout'].includes(after.status)) {
+                  return NextResponse.json({ success: false, action: 'upscale', taskId: existing.id,
+                    status: after.status, error: after.error, reused: true,
+                    ...(replayQuote ? { quote: replayQuote } : {}) }, { status: 409 });
+                }
+              }
+            }
+          }
+          const completedUrl = typeof existing.result?.imageUrl === 'string'
+            ? existing.result.imageUrl : null;
+          if (existing.status === 'completed' && completedUrl) {
+            return NextResponse.json({ success: true, action: 'upscale', taskId: existing.id,
+              imageUrl: completedUrl, enhanced: existing.result?.enhanced === true, reused: true,
+              ...(replayQuote ? { quote: replayQuote } : {}) });
+          }
+          const failed = ['failed', 'cancelled', 'timeout'].includes(existing.status);
+          return NextResponse.json({ success: !failed, action: 'upscale', taskId: existing.id,
+            status: existing.status, error: existing.error, reused: true,
+            ...(replayQuote ? { quote: replayQuote } : {}) }, { status: failed ? 409 : 200 });
+        }
+      }
+    }
+    if (action !== 'upscale' && action !== 'inpaint' && replayKey && !body.quoteOnly
+      && !(isRemoveBackgroundAction && (enginePref === 'cpu' || enginePref === 'local'))) {
+      const existing = await getCloudTaskForUserByIdempotencyKey(authResult.userId, replayKey);
+      if (existing) {
+        const entryAudit = existing.result?.taskEntryAudit as { entry?: unknown } | undefined;
+        if (entryAudit?.entry !== 'edit' || existing.requestDigest !== inputIdentityDigest) {
+          throw new IdempotencyConflictError({ userId: authResult.userId,
+            idempotencyKey: replayKey, requestDigest: inputIdentityDigest,
+            existingDigest: existing.requestDigest || 'legacy-unknown' });
+        }
+        const failed = ['failed', 'cancelled', 'timeout'].includes(existing.status);
+        return NextResponse.json({ success: !failed, taskId: existing.id, action,
+          status: existing.status, error: existing.error,
+          ...(typeof existing.result?.imageUrl === 'string' ? { imageUrl: existing.result.imageUrl } : {}),
+          reused: true }, { status: failed ? 409 : 200 });
+      }
+    }
+    let modelPlan: ImageEditModelPlan;
+    try {
+      modelPlan = await prepareImageEditModelPlan({
+        action, model: body.model, providerId: body.providerId, upscaleModel: body.upscaleModel,
+        enableQualityEnhance: body.enableQualityEnhance,
+        enhanceModel: body.enhanceModel, enhanceProviderId: body.enhanceProviderId,
+        user: authResult.user, source: authResult.source,
+      });
+    } catch (error) {
+      if (error instanceof ImageEditModelPlanError) {
+        return NextResponse.json({ success: false, code: error.code, error: error.message }, { status: error.status });
+      }
+      throw error;
+    }
+    const modelStr = modelPlan.requestedModelId;
+    const effectiveProviderId = modelPlan.requestedProviderId;
+    const qualityEnhanceCandidate = modelPlan.enhancementCandidate;
+    const requestedUpscaleModel = action === 'upscale' && body.upscaleModel ? modelStr : null;
+    const requested302UpscaleModel = requestedUpscaleModel ? resolve302UpscaleModelId(requestedUpscaleModel) : null;
     const engineMode = (
       enginePref === 'ai'
       || enginePref === 'local'
@@ -1653,51 +910,86 @@ export async function POST(request: NextRequest) {
       || enginePref === 'ai-only'
       || enginePref === 'fidelity'
     ) ? enginePref : 'auto';
+    const requestedUpscaleMode = engineMode !== 'auto' ? engineMode : body.upscaleMode;
+    const upscaleProductMode = resolveUpscaleProductMode(requestedUpscaleMode, Boolean(requestedUpscaleModel));
+    const maySelect302Upscale = action === 'upscale' && upscaleProductMode !== 'fidelity'
+      && modelPlan.candidates.some(candidate => is302AiUpscaleBaseUrl(candidate.apiBaseUrl)
+        && Boolean(resolve302UpscaleModelId(candidate.model)));
+    // Document 302 dispatch cannot use legacy consume-then-insert: an insert
+    // failure would leave a charge with no recoverable task identity.
+    const documentCpuRemoveBg = projectAccess.kind === 'document' && isRemoveBackgroundAction
+      && (engineMode === 'cpu' || engineMode === 'local');
+    let cpuRemoveBgPublication: CanvasTaskPublicationInput | undefined;
+    if (documentCpuRemoveBg && projectAccess.kind === 'document' && body.assetSelectedEntityIds !== undefined) {
+      try {
+        const intent = parseCanvasPublicationIntentProposal({ parentVersionIds: body.assetParentVersionIds,
+          projectionMode: body.assetProjectionMode ?? 'derived',
+          placement: { action: 'append', selectedEntityIds: body.assetSelectedEntityIds } });
+        if (intent.parentVersionIds.length !== 1 || intent.placement.action !== 'append'
+          || intent.placement.selectedEntityIds.length !== 1) throw new CanvasPublicationIntentError();
+        cpuRemoveBgPublication = { access: projectAccess, workspace: 'canvas', workspaceId: projectAccess.projectId,
+          singleAdmission: 'image-edit', imageEditOutputs: { version: 1, includeMask: true }, intent };
+      } catch {
+        return NextResponse.json({ success: false, code: 'IMAGE_EDIT_PUBLICATION_INVALID' }, { status: 400 });
+      }
+    }
+    if ((body.quoteOnly || body.quoteToken)
+      && !cpuRemoveBgPublication && (!requested302UpscaleModel || !maySelect302Upscale)) {
+      return NextResponse.json({ success: false, code: 'IMAGE_EDIT_QUOTE_UNAVAILABLE' }, { status: 422 });
+    }
+    let taskCoreMode: TaskCoreMode = (documentCpuRemoveBg || action === 'outpaint' || action === 'inpaint') ? 'core-v2'
+      : (projectAccess.kind === 'document' || body.enableQualityEnhance
+      || body.quoteOnly || body.quoteToken) && maySelect302Upscale
+      ? 'core-v2'
+      : resolveImageEditTaskCoreMode(
+        requestedTaskCoreMode,
+        action === 'upscale' && (Boolean(requested302UpscaleModel) || maySelect302Upscale),
+      );
+    usesAtomicBilling = taskCoreMode === 'core-v2';
+    let documentProviderImageUrl: string | undefined;
+    if (projectAccess.kind === 'document' && action === 'upscale'
+      && upscaleProductMode !== 'fidelity'
+      && modelPlan.candidates.some(candidate => is302AiUpscaleBaseUrl(candidate.apiBaseUrl)
+        && Boolean(resolve302UpscaleModelId(candidate.model)))) {
+      try {
+        documentProviderImageUrl = documentImageEditProviderUrl(imageUrl, process.env.COZE_PROJECT_DOMAIN_DEFAULT);
+      } catch (error) {
+        if (error instanceof ImageEditSourceAdmissionError) {
+          return NextResponse.json({ success: false, code: error.code, error: error.message }, { status: error.status });
+        }
+        throw error;
+      }
+    }
 
     // ★ 输入校验
-    if (!action || !['erase', 'mask', 'upscale', 'extend', 'removebg', 'inpaint', 'outpaint', 'remove_background', 'multi_angle', 'display_decompose'].includes(action)) {
-      return NextResponse.json({ success: false, error: '缺少或无效的 action 参数' }, { status: 400 });
-    }
     if (imageUrl) {
       const urlError = validateImageUrl(imageUrl);
       if (urlError) {
         return NextResponse.json({ success: false, error: urlError }, { status: 400 });
       }
     }
-
-    if (action === 'upscale' && requestedUpscaleModel) {
-      const selectedProvider = effectiveProviderId
-        ? await findProviderById(effectiveProviderId)
-        : null;
-      if (!selectedProvider) {
-        return NextResponse.json({
-          success: false,
-          error: '请选择管理员已配置的放大模型和供应商。',
-        }, { status: 400 });
-      }
-
-      const selectedModels = selectedProvider.selectedModels || [];
-      const discoveredModels = (selectedProvider.discoveredModels || []).map(model => model.id);
-      const resolved302Models = resolve302UpscaleModelSelection(
-        selectedProvider.baseUrl,
-        selectedModels,
-      );
-      const allowedModels = new Set(
-        resolved302Models || (selectedModels.length > 0 ? selectedModels : discoveredModels),
-      );
-      if (!allowedModels.has(requestedUpscaleModel)) {
-        return NextResponse.json({
-          success: false,
-          error: '所选放大模型不属于当前已启用的供应商。',
-        }, { status: 403 });
-      }
-
-      if (requestedUpscaleModel === 'SeedVR2-Upscaler') {
-        return NextResponse.json({
-          success: false,
-          error: 'SeedVR2-Upscaler 尚未完成当前 Pear 接口协议验证，暂不可提交。',
-          retryable: false,
-        }, { status: 422 });
+    const localDomainBase = (process.env.COZE_PROJECT_DOMAIN_DEFAULT
+      || `http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}`).replace(/\/+$/, '');
+    let localImagePath: string | null;
+    try {
+      localImagePath = normalizeImageEditLocalReference(imageUrl, localDomainBase);
+    } catch {
+      return NextResponse.json({ success: false, code: 'IMAGE_EDIT_SOURCE_INVALID',
+        error: '本地图片路径不合法' }, { status: 400 });
+    }
+    const localPublicRoot = path.join(process.env.COZE_WORKSPACE_PATH || '/workspace/projects', 'public');
+    let preparedLocalImage: Buffer | null = null;
+    if (localImagePath && (action === 'multi_angle' || action === 'upscale' || isRemoveBackgroundAction)) {
+      try {
+        preparedLocalImage = await readImageToolsLocalFile(
+          getServerDataRoot(), localPublicRoot, localImagePath, 50 * 1024 * 1024, 'image-edit',
+        );
+      } catch (error) {
+        if (error instanceof Error && /Unsafe local media path|Invalid local image file/.test(error.message)) {
+          return NextResponse.json({ success: false, code: 'IMAGE_EDIT_SOURCE_INVALID',
+            error: '本地图片路径不合法' }, { status: 400 });
+        }
+        throw error;
       }
     }
 
@@ -1718,23 +1010,212 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    let preparedInpaint: PreparedInpaintInput | undefined;
+    let inpaintRequestDigest = inputIdentityDigest;
+    if (action === 'inpaint') {
+      const configuredSizeMb = Number(process.env.IMAGE_MAX_SIZE_MB);
+      const configuredEdge = Number(process.env.IMAGE_MAX_EDGE);
+      const maxInputBytes = Math.min(20 * 1024 * 1024,
+        Number.isFinite(configuredSizeMb) && configuredSizeMb > 0
+          ? Math.max(1, Math.floor(configuredSizeMb * 1024 * 1024)) : 20 * 1024 * 1024);
+      const maxInputEdge = Math.min(2048,
+        Number.isFinite(configuredEdge) && configuredEdge > 0
+          ? Math.max(1, Math.floor(configuredEdge)) : 2048);
+      const tooLarge = (): NextResponse => NextResponse.json({
+        success: false, code: 'IMAGE_EDIT_INPUT_TOO_LARGE', error: '图片输入超过大小限制',
+      }, { status: 413 });
+      if (editMode !== 'erase' && editMode !== 'mask') {
+        return NextResponse.json(
+          { success: false, error: 'inpaint 请求必须明确指定 editMode: erase 或 mask' },
+          { status: 400 },
+        );
+      }
+      if (body.assetSourcePlacementId !== undefined
+        && (typeof body.assetSourcePlacementId !== 'string'
+          || !body.assetSourcePlacementId.trim()
+          || body.assetSourcePlacementId.trim() !== body.assetSourcePlacementId)) {
+        return NextResponse.json({ success: false, code: 'IMAGE_EDIT_SOURCE_INVALID' }, { status: 400 });
+      }
+
+      if (!maskImage) {
+        return NextResponse.json({ success: false, error: '需要提供蒙版图像' }, { status: 400 });
+      }
+
+      // 1. 获取原始图片
+      let imageBuffer: Buffer;
+      try {
+        imageBuffer = await fetchImageBuffer(imageUrl, { maxBytes: maxInputBytes });
+        if (imageBuffer.byteLength > maxInputBytes) throw new ImageEditInputTooLargeError();
+      } catch (e) {
+        if (e instanceof ImageEditInputTooLargeError) return tooLarge();
+        console.error('[inpaint] Failed to fetch source image:', e);
+        return NextResponse.json({ success: false, error: '无法获取原始图片' }, { status: 500 });
+      }
+
+      const origMeta = await sharp(imageBuffer).metadata();
+      if (!origMeta.width || !origMeta.height || origMeta.width > maxInputEdge || origMeta.height > maxInputEdge
+        || origMeta.width * origMeta.height * 4 > 2048 * 2048 * 4) return tooLarge();
+      const origW = origMeta.width || 512;
+      const origH = origMeta.height || 512;
+
+      // 2. 解码蒙版并确保与原图尺寸一致
+      let maskBuffer: Buffer;
+      try {
+        if (maskImage.startsWith('data:')) {
+          // Reject manifestly oversized encoded input before replace copies the full string.
+          if (maskImage.length > Math.ceil(maxInputBytes / 3) * 4 + 128) {
+            throw new ImageEditInputTooLargeError();
+          }
+          const base64Data = maskImage.replace(/^data:image\/\w+;base64,/, '');
+          if (Buffer.byteLength(base64Data, 'base64') > maxInputBytes) throw new ImageEditInputTooLargeError();
+          maskBuffer = Buffer.from(base64Data, 'base64');
+        } else {
+          maskBuffer = await fetchImageBuffer(maskImage, { maxBytes: maxInputBytes });
+        }
+        if (maskBuffer.byteLength > maxInputBytes) throw new ImageEditInputTooLargeError();
+        const maskMeta = await sharp(maskBuffer).metadata();
+        if (!maskMeta.width || !maskMeta.height || maskMeta.width > maxInputEdge || maskMeta.height > maxInputEdge) {
+          return tooLarge();
+        }
+        if (maskMeta.width !== origW || maskMeta.height !== origH) {
+          console.log(`[inpaint] Resizing mask from ${maskMeta.width}x${maskMeta.height} to ${origW}x${origH}`);
+          maskBuffer = await sharp(maskBuffer)
+            .resize(origW, origH, { fit: 'fill', kernel: 'nearest' })
+            .png()
+            .toBuffer();
+        }
+      } catch (e) {
+        if (e instanceof ImageEditInputTooLargeError) return tooLarge();
+        console.error('[inpaint] Failed to process mask:', e);
+        return NextResponse.json({ success: false, error: '蒙版处理失败' }, { status: 500 });
+      }
+
+      // 3. 检测蒙版是否为空 & 获取蒙版原始灰度数据
+      const maskRawData = await sharp(maskBuffer).ensureAlpha().raw().toBuffer();
+      let maskPixelCount = 0;
+      let minX = origW, minY = origH, maxX = 0, maxY = 0;
+      for (let y = 0; y < origH; y++) {
+        for (let x = 0; x < origW; x++) {
+          const idx = (y * origW + x) * 4;
+          const brightness = (maskRawData[idx] + maskRawData[idx + 1] + maskRawData[idx + 2]) / 3;
+          if (brightness > 127) {
+            maskPixelCount++;
+            if (x < minX) minX = x;
+            if (x > maxX) maxX = x;
+            if (y < minY) minY = y;
+            if (y > maxY) maxY = y;
+          }
+        }
+      }
+      if (maskPixelCount === 0) {
+        const modeLabel = editMode === 'erase' ? '擦除区域为空，请先涂抹要擦除的区域' : '蒙版区域为空，请先涂抹要编辑的区域';
+        return NextResponse.json({ success: false, error: modeLabel }, { status: 400 });
+      }
+
+      preparedInpaint = { imageBuffer, maskBuffer, maskRawData, origW, origH,
+        maskPixelCount, minX, minY, maxX, maxY };
+      inpaintRequestDigest = createHash('sha256').update(inputIdentityDigest)
+        .update(createHash('sha256').update(imageBuffer).digest('hex'))
+        .update(createHash('sha256').update(maskBuffer).digest('hex')).digest('hex');
+    }
+
     // 积分检查与扣除
     const creditOp = action === 'upscale' ? 'image_upscale'
       : isRemoveBackgroundAction ? 'image_remove_bg'
       : 'image_edit';
-    if (sessionUser) {
-      if (usesAtomicBilling) {
-        deductedCredits = await calculateConfiguredCreditCost(
-          creditOp,
-          modelStr,
-          { providerId: effectiveProviderId || undefined },
-        );
-      } else {
-        const creditResult = await consumeCredits(sessionUser.id, creditOp, undefined, undefined, modelStr, { providerId: effectiveProviderId || undefined });
-      if (!creditResult.success) {
-        return NextResponse.json({ success: false, error: creditResult.message || '积分不足' }, { status: 402 });
+    const chargeLegacyCredits = async (): Promise<NextResponse | null> => {
+      const user = sessionUser;
+      if (!user) return null;
+      const result = await consumeCredits(user.id, creditOp, undefined, undefined, modelStr,
+        { providerId: effectiveProviderId || undefined });
+      if (!result.success) {
+        return NextResponse.json({ success: false, error: result.message || '积分不足' }, { status: 402 });
       }
-        deductedCredits = creditResult.cost;
+      deductedCredits = result.cost;
+      return null;
+    };
+    const upscalePricingSnapshot = usesAtomicBilling && action === 'upscale'
+      && (qualityEnhanceCandidate || body.quoteOnly || body.quoteToken)
+      ? structuredClone(await loadCreditPricingConfig()) : undefined;
+    const cpuRemoveBgPricingSnapshot = cpuRemoveBgPublication
+      ? structuredClone(await loadCreditPricingConfig()) : undefined;
+    if (usesAtomicBilling) {
+      deductedCredits = await calculateConfiguredCreditCost(
+        creditOp,
+        modelStr,
+        { providerId: effectiveProviderId || undefined,
+          pricingConfig: upscalePricingSnapshot || cpuRemoveBgPricingSnapshot },
+      );
+    } else if (sessionUser && (projectAccess.kind !== 'document' || action !== 'upscale')) {
+      const rejected = await chargeLegacyCredits();
+      if (rejected) return rejected;
+    }
+    let confirmedCpuRemoveBgQuote: ImageEditQuoteIdentity | null = null;
+    if (cpuRemoveBgPublication && cpuRemoveBgPricingSnapshot) {
+      if (!replayKey) {
+        return NextResponse.json({ success: false, code: 'IMAGE_EDIT_IDEMPOTENCY_KEY_REQUIRED',
+          error: '去背景报价需要固定的请求身份' }, { status: 400 });
+      }
+      const cpuModel = isRembgCpuModel(body.removeBgModel || '')
+        ? body.removeBgModel! : DEFAULT_REMBG_MODEL;
+      const components = { removebg: deductedCredits };
+      const targets = [{ phase: 'removebg', providerId: 'local-rembg', modelId: cpuModel }];
+      const quoteIdentity: ImageEditQuoteIdentity = {
+        actorUserId: authResult.userId,
+        requestDigest: createHash('sha256').update(JSON.stringify({
+          requestDigest: inputIdentityDigest, idempotencyKey: replayKey,
+        })).digest('hex'),
+        creditOp, total: deductedCredits, components, targets,
+        pricingDigest: createHash('sha256').update(JSON.stringify(cpuRemoveBgPricingSnapshot)).digest('hex'),
+        catalogDigest: createHash('sha256').update(JSON.stringify({ version: 1,
+          cpuModel, pricedProviderId: effectiveProviderId, pricedModelId: modelStr })).digest('hex'),
+      };
+      const secret = await getAuthSecretForInternalRequests();
+      const now = Date.now();
+      if (body.quoteOnly) {
+        let client: PoolClient | undefined;
+        let discard = false;
+        try {
+          client = await getPool().connect();
+          await client.query('BEGIN');
+          await assertCanvasImageEditSourceSelection(client, cpuRemoveBgPublication.access.ownerId,
+            cpuRemoveBgPublication.access.projectId, cpuRemoveBgPublication.intent!);
+          await client.query('ROLLBACK');
+        } catch (error) {
+          if (client) {
+            try { await client.query('ROLLBACK'); } catch { discard = true; }
+          }
+          if (error instanceof CanvasPublicationIntentError && !discard) {
+            return NextResponse.json({ success: false, code: 'IMAGE_EDIT_PUBLICATION_INVALID' }, { status: 400 });
+          }
+          return NextResponse.json({ success: false, code: 'IMAGE_EDIT_PUBLICATION_UNAVAILABLE' }, { status: 503 });
+        } finally { client?.release(discard); }
+        return NextResponse.json({ success: true, quote: {
+          total: deductedCredits, components, targets,
+          token: issueImageEditQuoteToken(quoteIdentity, secret, now),
+          expiresAt: now + IMAGE_EDIT_QUOTE_LIFETIME_MS,
+          service: 'remove-background',
+        } });
+      }
+      const existing = replayKey
+        ? await getCloudTaskForUserByIdempotencyKey(authResult.userId, replayKey) : null;
+      if (existing) {
+        const admission = existing.result?.imageEditAdmission as { kind?: unknown } | undefined;
+        if (existing.type !== 'image-edit' || existing.providerId !== 'local-rembg'
+          || admission?.kind !== 'document-cpu-removebg'
+          || existing.requestDigest !== inputIdentityDigest) {
+          throw new IdempotencyConflictError({ userId: authResult.userId,
+            idempotencyKey: replayKey!, requestDigest: inputIdentityDigest,
+            existingDigest: existing.requestDigest || 'legacy-unknown' });
+        }
+      } else if (!body.quoteToken) {
+        return NextResponse.json({ success: false, code: 'IMAGE_EDIT_QUOTE_REQUIRED',
+          error: '请先预览并确认本次去背景报价' }, { status: 428 });
+      } else if (!verifyImageEditQuoteToken(body.quoteToken, quoteIdentity, secret, now)) {
+        return NextResponse.json({ success: false, code: 'IMAGE_EDIT_QUOTE_CHANGED',
+          error: '报价已过期或配置已变化，请重新报价' }, { status: 409 });
+      } else {
+        confirmedCpuRemoveBgQuote = quoteIdentity;
       }
     }
 
@@ -1757,261 +1238,65 @@ export async function POST(request: NextRequest) {
     const persistSubmittedImageTask = async (
       input: Parameters<typeof recordImageTaskSubmitted>[0],
     ): Promise<void> => {
-      const recorded = await recordImageTaskSubmitted(input);
+      const creditCost = input.creditCost ?? (!usesAtomicBilling ? deductedCredits : 0);
+      const recorded = await recordImageTaskSubmitted({ ...input,
+        userId: authResult.userId,
+        projectId: projectAccess.kind === 'unscoped' ? undefined : projectAccess.projectId,
+        sessionId: body.sessionId,
+        messageId: body.messageId,
+        idempotencyKey: replayKey || undefined,
+        requestDigest: replayKey ? inputIdentityDigest : undefined,
+        creditCost,
+      });
       if (!recorded) {
         throw new Error(`图片编辑任务 ${input.taskId} 持久化失败，已停止返回不可恢复的任务`);
       }
+      updateTaskProgress(input.taskId, { creditCost });
     };
 
-    // 放大/擦除/蒙版 均使用管理员系统的 image 类型模型
-    // 策略：自动识别管理员配置的所有可用 image 模型，按优先级逐一尝试
-    // 0. 先尝试前端指定的 provider（如果提供了 providerId）
-    // 1. 再尝试前端指定的模型（如果匹配到 provider）
-    // 2. 再尝试管理员配置的其他 image 类型 provider 的模型
-    // 3. 最后使用环境变量兜底
-    // 构建候选模型列表：前端指定的模型优先，然后是其他所有可用模型
-    type ImageCandidate = {
-      model: string;
-      apiKey: string;
-      apiBaseUrl: string;
-      source: string;
-      providerId?: string;
-      providerType?: ApiProvider['modelType'];
-      advancedParams?: Record<string, string>;
-    };
-    const candidateModels: ImageCandidate[] = [];
-    const dedicatedRemoveBgProviders: ApiProvider[] = [];
-    const triedModels = new Set<string>();
-
-    const allImageProviders = await findAllProvidersForType('image');
-
-    // 0. 优先使用前端指定的 providerId
-    if (effectiveProviderId) {
-      const specifiedProvider = await findProviderById(effectiveProviderId);
-      if (specifiedProvider) {
-        candidateModels.push({
-          model: lookupModel,
-          apiKey: specifiedProvider.apiKey,
-          apiBaseUrl: normalizeApiBaseUrl(specifiedProvider.baseUrl),
-          source: 'specified-provider',
-          providerId: specifiedProvider.id,
-          providerType: specifiedProvider.modelType,
-          advancedParams: specifiedProvider.advancedParams,
-        });
-        triedModels.add(lookupModel);
-      }
-    }
-
-    // 1. 前端指定的模型（如果匹配到 provider，优先使用 providerId）
-    // 使用 lookupModel（原始名）匹配，PearAPI 的 gpt-image-2-4k 等后缀是独立模型
-    const preferredProvider = await findProviderForModel(lookupModel, 'image', effectiveProviderId || undefined)
-      || await findProviderForModel(lookupModel, 'universal');
-    if (preferredProvider) {
-      candidateModels.push({
-        model: lookupModel,
-        apiKey: preferredProvider.apiKey,
-        apiBaseUrl: normalizeApiBaseUrl(preferredProvider.baseUrl),
-        source: 'preferred',
-        providerId: preferredProvider.id,
-        providerType: preferredProvider.modelType,
-        advancedParams: preferredProvider.advancedParams,
-      });
-      triedModels.add(lookupModel);
-    }
-
-    // 2. 管理员配置的所有 image 类型 provider 的模型
-    for (const entry of allImageProviders) {
-      for (const m of entry.models) {
-        if (!triedModels.has(m)) {
-          candidateModels.push({
-            model: m,
-            apiKey: entry.provider.apiKey,
-            apiBaseUrl: normalizeApiBaseUrl(entry.provider.baseUrl),
-            source: 'admin-auto',
-            providerId: entry.provider.id,
-            providerType: entry.provider.modelType,
-            advancedParams: entry.provider.advancedParams,
-          });
-          triedModels.add(m);
-        }
-      }
-    }
-
-    // 2.5 功能专用模型优先插入到候选列表首位（按action类型）:
-    //   removebg: 优先使用管理员配置的 removebg 类型专用模型
-    //   upscale: 优先使用管理员配置的 upscaler 类型专用模型
-    if (isRemoveBackgroundAction || action === 'upscale') {
-      const specialType = isRemoveBackgroundAction ? 'removebg' : 'upscaler';
-      const { isRemoveBgModel, isUpscalerModel } = await import('@/lib/model-capabilities');
-      const specialProviders = await findAllProvidersForType(specialType);
-      const specialModels: typeof candidateModels = [];
-      for (const entry of specialProviders) {
-        const isDedicatedRemoveBgProvider = isRemoveBackgroundAction
-          && (entry.provider.modelType || entry.provider.type) === 'removebg';
-        for (const m of entry.models) {
-          const isAuthorized = !sessionUser
-            || sessionUser.role === 'admin'
-            || isModelAssignedToUser(sessionUser.imageModels, entry.provider.id, m);
-          if (!isAuthorized) continue;
-          if (isDedicatedRemoveBgProvider) {
-            if (!dedicatedRemoveBgProviders.some(provider => provider.id === entry.provider.id)) {
-              dedicatedRemoveBgProviders.push(entry.provider);
-            }
-            continue;
-          }
-          if (!triedModels.has(m)) {
-            specialModels.push({
-              model: m,
-              apiKey: entry.provider.apiKey,
-              apiBaseUrl: normalizeApiBaseUrl(entry.provider.baseUrl),
-              source: `admin-special-${specialType}`,
-              providerId: entry.provider.id,
-              providerType: entry.provider.modelType,
-              advancedParams: entry.provider.advancedParams,
-            });
-            triedModels.add(m);
-          }
-        }
-      }
-      // 对于 removebg/upscale 操作，在通用 image 模型中也检查是否为专用模型（关键词匹配）
-      // 将通用image模型里匹配的专用模型也移到前面
-      const isSpecialModel = isRemoveBackgroundAction ? isRemoveBgModel : isUpscalerModel;
-      const matchedFromImage: typeof candidateModels = [];
-      const restGeneral: typeof candidateModels = [];
-      for (const c of candidateModels) {
-        if (isSpecialModel(c.model)) {
-          matchedFromImage.push(c);
-        } else {
-          restGeneral.push(c);
-        }
-      }
-      // 重新组装：专用provider模型 → image中匹配的专用模型 → 其他通用image模型
-      candidateModels.length = 0;
-      candidateModels.push(...specialModels, ...matchedFromImage, ...restGeneral);
-    }
-
-    if (effectiveProviderId) {
-      dedicatedRemoveBgProviders.sort((provider) => (
-        provider.id === effectiveProviderId ? -1 : 1
-      ));
-    }
-
-    // 3. 环境变量兜底
-    const envApiKey = process.env.APIMART_API_KEY || '';
-    const envApiBaseUrl = normalizeApiBaseUrl(process.env.APIMART_BASE_URL || '');
-    if (envApiKey && candidateModels.length === 0) {
-      candidateModels.push({
-        model: modelStr,
-        apiKey: envApiKey,
-        apiBaseUrl: envApiBaseUrl,
-        source: 'env-fallback',
-        providerType: 'image',
-      });
-    }
-
-    const genericRemoveBgCandidates = candidateModels.filter(
-      candidate => candidate.providerType !== 'removebg',
-    );
-
-    if (candidateModels.length === 0 && dedicatedRemoveBgProviders.length === 0) {
-      return NextResponse.json({
-        success: false,
-        error: '请先在管理员系统配置可用的图像模型（image类型）',
-      }, { status: 400 });
-    }
+    const candidateModels = modelPlan.candidates;
+    const dedicatedRemoveBgCandidates = modelPlan.dedicatedRemoveBgCandidates;
+    const genericRemoveBgCandidates = candidateModels;
     // 自动尝试下一个候选模型
     // Helper: resolve local/blob/external image URL to base64 data URL
     const resolveImageToBase64 = async (url: string): Promise<string> => {
       if (url.startsWith('data:')) return url;
-
-      // 本地 API 路径（/api/serve-upload/xxx 或 /uploads/xxx）优先走 localhost fetch
-      // 这与顶层 resolveImage 函数保持一致，避免文件系统路径映射问题
-      const localApiPrefixes = ['/api/serve-upload/', '/uploads/'];
-      const isLocalApiPath = !url.startsWith('http') && localApiPrefixes.some(p => url.startsWith(p));
-      const isLocalDomainUrl = url.startsWith('http') && (() => {
-        const rawDomain = process.env.COZE_PROJECT_DOMAIN_DEFAULT || `http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}`;
-        const domainBase = rawDomain.replace(/\/+$/, '');
-        return url.startsWith(`${domainBase}/api/serve-upload/`) || url.startsWith(`${domainBase}/uploads/`);
-      })();
-
-      if (isLocalApiPath || isLocalDomainUrl) {
-        // Extract the relative path
-        let relPath = url;
-        if (url.startsWith('http')) {
-          const rawDomain = process.env.COZE_PROJECT_DOMAIN_DEFAULT || `http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}`;
-          const domainBase = rawDomain.replace(/\/+$/, '');
-          relPath = url.replace(`${domainBase}`, '');
+      const localPath = normalizeImageEditLocalReference(url, localDomainBase);
+      if (localPath) {
+        const bytes = url === imageUrl && preparedLocalImage
+          ? preparedLocalImage
+          : await readImageToolsLocalFile(getServerDataRoot(), localPublicRoot,
+            localPath, 50 * 1024 * 1024, 'image-edit');
+        if (bytes) {
+          const ext = path.extname(localPath).slice(1).toLowerCase();
+          const mime = ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg' : ext === 'webp' ? 'image/webp' : 'image/png';
+          return `data:${mime};base64,${bytes.toString('base64')}`;
         }
-        // 优先尝试文件系统直接读取（/api/serve-upload/xxx → {dataRoot}/uploads/xxx）
-        const dataRoot = await getServerDataRoot();
-        const fsPath = relPath.replace(/^\/api\/serve-upload\//, '/uploads/').replace(/^\//, '');
-        const fsSearchPaths = [
-          path.join(dataRoot, fsPath),
-          path.join(dataRoot, 'uploads', path.basename(relPath)),
-        ];
-        for (const fp of fsSearchPaths) {
+        const managed = localPath.startsWith('/api/serve-upload/') || localPath.startsWith('/uploads/');
+        const rawLocalPath = url.startsWith(`${localDomainBase}/`) ? url.slice(localDomainBase.length) : url;
+        const fetchUrl = `http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}${rawLocalPath.split('#', 1)[0]}`;
+        for (let retry = 0; retry < (managed ? 2 : 1); retry++) {
           try {
-            const buf = await fs.readFile(fp);
-            const ext = path.extname(fp).slice(1).toLowerCase() || 'png';
-            const mime = ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg' : ext === 'webp' ? 'image/webp' : 'image/png';
-            return `data:${mime};base64,${buf.toString('base64')}`;
-          } catch {}
-        }
-        // 文件系统未找到则走 localhost fetch（兼容所有环境）
-        // 注意：serve-upload 可能从 S3 恢复文件，需要较长时间（最多 30s），因此超时设为 45s
-        const port = process.env.DEPLOY_RUN_PORT || 5000;
-        const fetchUrl = relPath.startsWith('/') ? `http://localhost:${port}${relPath}` : `http://localhost:${port}/${relPath}`;
-        // 重试最多 2 次，应对 S3 恢复延迟
-        for (let retry = 0; retry < 2; retry++) {
-          try {
-            const res = await fetch(fetchUrl, { signal: AbortSignal.timeout(45000) });
+            const res = await fetch(fetchUrl, { signal: AbortSignal.timeout(managed ? 45000 : 15000) });
             if (res.ok) {
               const buf = Buffer.from(await res.arrayBuffer());
               const ct = res.headers.get('content-type') || 'image/png';
               return `data:${ct};base64,${buf.toString('base64')}`;
             }
-            if (res.status === 404) {
-              // 404 不重试，文件确实不存在
-              break;
-            }
+            if (res.status === 404) break;
           } catch {
-            // 超时或其他网络错误，等待后重试
-            if (retry < 1) await new Promise(r => setTimeout(r, 2000));
+            if (managed && retry === 0) await new Promise(r => setTimeout(r, 2000));
           }
         }
-        throw new Error(`Local image not found: ${url} (tried fs: ${fsSearchPaths.join(', ')}, fetch: ${fetchUrl})`);
+        throw new Error(`Local image not found: ${localPath}`);
       }
-
       if (url.startsWith('http://') || url.startsWith('https://')) {
-        // External URL: fetch it
         const res = await fetch(url, { signal: AbortSignal.timeout(30000) });
         const buf = Buffer.from(await res.arrayBuffer());
         const ct = res.headers.get('content-type') || 'image/png';
         return `data:${ct};base64,${buf.toString('base64')}`;
       }
-      // Other relative paths (e.g. /outpaint/xxx.png)
-      const dataRoot = await getServerDataRoot();
-      const relPath = url.startsWith('/') ? url.slice(1) : url;
-      const searchPaths = [
-        path.join(dataRoot, relPath),
-        path.join(dataRoot, 'public', relPath),
-        path.join(process.env.COZE_WORKSPACE_PATH || '/workspace/projects', 'public', relPath),
-      ];
-      for (const fp of searchPaths) {
-        try { const buf = await fs.readFile(fp); const ext = relPath.split('.').pop()?.toLowerCase() || 'png'; const mime = ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg' : ext === 'webp' ? 'image/webp' : 'image/png'; return `data:${mime};base64,${buf.toString('base64')}`; } catch {}
-      }
-      // 文件系统未找到，尝试 localhost fetch 兜底
-      const port = process.env.DEPLOY_RUN_PORT || 5000;
-      const fetchUrl = url.startsWith('/') ? `http://localhost:${port}${url}` : `http://localhost:${port}/${url}`;
-      try {
-        const res = await fetch(fetchUrl, { signal: AbortSignal.timeout(15000) });
-        if (res.ok) {
-          const buf = Buffer.from(await res.arrayBuffer());
-          const ct = res.headers.get('content-type') || 'image/png';
-          return `data:${ct};base64,${buf.toString('base64')}`;
-        }
-      } catch {}
-      throw new Error(`File not found: ${url} (searched ${searchPaths.join(', ')}, fetch: ${fetchUrl})`);
+      throw new Error('Unsupported image reference');
     };
 
     if (action === 'display_decompose') {
@@ -2054,17 +1339,16 @@ export async function POST(request: NextRequest) {
       }
 
       if (result.taskId) {
-        const decomposeCandidate = candidateModels.find(candidate => candidate.model === result.usedModel) || candidateModels[0];
+        const decomposeCandidate = candidateModels.find(candidate => candidate.model === result.usedModel && candidate.providerId === result.providerId);
         registerTask(result.taskId, 'display-decompose', '元素拆解', sessionUser?.id);
         await persistSubmittedImageTask({
           taskId: result.taskId,
           userId: sessionUser?.id,
           type: 'display-decompose',
-          providerId: effectiveProviderId,
+          providerId: result.providerId,
           model: result.usedModel || decomposeCandidate?.model,
           label: '元素拆解',
-          taskEntryAudit: buildTaskEntryAudit(
-            effectiveProviderId,
+          taskEntryAudit: buildTaskEntryAudit(result.providerId,
             result.usedModel || decomposeCandidate?.model,
           ),
         });
@@ -2073,6 +1357,7 @@ export async function POST(request: NextRequest) {
           progress: 10,
           result: {
             usedModel: result.usedModel || decomposeCandidate?.model,
+            providerId: result.providerId,
             apiBaseUrl: decomposeCandidate?.apiBaseUrl,
             apiKey: decomposeCandidate?.apiKey,
             advancedParams: decomposeCandidate?.advancedParams,
@@ -2229,7 +1514,7 @@ export async function POST(request: NextRequest) {
       // - Small angles (<25° rotation AND <15° tilt): use /images/edits with medium fidelity (subtle change)
       // - Large angles: use /images/generations with image as reference (allows bigger viewpoint shift)
       const isSmallAngle = absRot < 25 && absTilt < 15;
-      let result: { taskId?: string; directUrl?: string; usedModel?: string } | null = null;
+      let result: Awaited<ReturnType<typeof autoTrySubmitImageTask>> | null = null;
       let usedEndpoint: '/images/edits' | '/images/generations' = isSmallAngle ? '/images/edits' : '/images/generations';
 
       // Try preferred endpoint first, fallback to the other
@@ -2286,33 +1571,31 @@ export async function POST(request: NextRequest) {
       }
 
       if (result?.directUrl) {
-        // ★ 持久化远程URL到本地，确保浏览器可靠加载（部分API代理URL需要认证或会过期，浏览器直接加载会失败）
-        let persistedUrl = result.directUrl;
-        try {
-          const { persistRemoteImage } = await import('@/lib/s3-storage');
-          const localUrl = await persistRemoteImage(result.directUrl, 'generate/multi-angle');
-          if (localUrl) persistedUrl = localUrl;
-        } catch {}
+        // Never re-fetch or expose an unverified provider URL as a successful result.
+        const resultBuffer = await fetchImageBuffer(result.directUrl, { maxBytes: 50 * 1024 * 1024 });
+        const output = await sharp(resultBuffer).png().toBuffer();
+        const persistedUrl = await saveBufferToPublic(output, `multi_angle_${Date.now()}_${randomUUID()}.png`);
         return NextResponse.json({ success: true, imageUrl: persistedUrl, action, usedModel: result.usedModel, endpoint: usedEndpoint });
       }
       // ★ 注册异步多角度任务（存储提供商信息，供 poll-task 轮询远端API）
       if (result?.taskId) {
-        const maCandidate = candidateModels.find(c => c.model === result.usedModel) || candidateModels[0];
+        const maCandidate = candidateModels.find(c => c.model === result.usedModel && c.providerId === result.providerId);
         registerTask(result.taskId, 'multi-angle', '多角度旋转', sessionUser?.id);
         await persistSubmittedImageTask({
           taskId: result.taskId,
           userId: sessionUser?.id,
           type: 'multi-angle',
-          providerId: effectiveProviderId,
+          providerId: result.providerId,
           model: result.usedModel || maCandidate?.model,
           label: '多角度旋转',
-          taskEntryAudit: buildTaskEntryAudit(effectiveProviderId, result.usedModel || maCandidate?.model),
+          taskEntryAudit: buildTaskEntryAudit(result.providerId, result.usedModel || maCandidate?.model),
         });
         updateTaskProgress(result.taskId, {
           status: 'processing',
           progress: 10,
           result: {
             usedModel: result.usedModel || maCandidate?.model,
+            providerId: result.providerId,
             apiBaseUrl: maCandidate?.apiBaseUrl,
             apiKey: maCandidate?.apiKey,
             advancedParams: maCandidate?.advancedParams,
@@ -2361,6 +1644,24 @@ export async function POST(request: NextRequest) {
         }, { status: 400 });
       }
 
+      // Source recovery can wait. Recheck after that wait; for core-v2 requested 302
+      // this precedes task admission/charge. Legacy settlement remains a separate gate.
+      if (projectAccess.kind === 'document') {
+        try {
+          const currentImageUrl = await authorizeDocumentImageEditSource({ access: projectAccess, action,
+            parentVersionIds: body.assetParentVersionIds, imageUrl: body.imageUrl, origin: request.nextUrl.origin });
+          if (currentImageUrl !== imageUrl) {
+            return NextResponse.json({ success: false, code: 'IMAGE_EDIT_SOURCE_MISMATCH',
+              error: '图片来源在读取期间已变化，请重新提交' }, { status: 403 });
+          }
+        } catch (error) {
+          if (error instanceof ImageEditSourceAdmissionError) {
+            return NextResponse.json({ success: false, code: error.code, error: error.message }, { status: error.status });
+          }
+          throw error;
+        }
+      }
+
       const targetW = targetWidth ?? origW * scaleVal;
       const targetH = targetHeight ?? origH * scaleVal;
       const upscaleTargetError = validateUpscaleTargetDimensions(origW, origH, targetW, targetH);
@@ -2370,12 +1671,12 @@ export async function POST(request: NextRequest) {
           { status: 400 },
         );
       }
+      if (projectAccess.kind === 'document' && !usesAtomicBilling) {
+        const rejected = await chargeLegacyCredits();
+        if (rejected) return rejected;
+      }
 
-      const requestedMode = engineMode !== 'auto' ? engineMode : (body.upscaleMode || 'auto');
-      const productMode = resolveUpscaleProductMode(
-        requestedMode,
-        Boolean(requestedUpscaleModel),
-      );
+      const productMode = upscaleProductMode;
       const upscaleMode: 'auto' | 'ai' | 'cpu' = productMode === 'ai-only'
         ? 'ai'
         : productMode === 'fidelity'
@@ -2391,8 +1692,8 @@ export async function POST(request: NextRequest) {
 
       const { isUpscalerModel } = await import('@/lib/model-capabilities');
       const dedicatedCandidates = candidateModels.filter(candidate => isUpscalerModel(candidate.model));
-      const providerCandidates = dedicatedCandidates.map((candidate, index) => ({
-        id: `${index}:${candidate.source}:${candidate.model}`,
+      const providerCandidates = dedicatedCandidates.map(candidate => ({
+        id: `${candidate.providerId}::${candidate.model}`,
         candidate,
       }));
       const providerCapabilities: UpscaleProviderCapability[] = providerCandidates.map(({ id, candidate }) => ({
@@ -2509,9 +1810,70 @@ export async function POST(request: NextRequest) {
         return `${domainBase}${savedPath.startsWith('/') ? savedPath : `/${savedPath}`}`;
       };
 
+      const selectedUpscaleCandidate = providerCandidates.find(item => item.id === executionPlan.providerId)?.candidate;
+      const selected302UpscaleModel = selectedUpscaleCandidate
+        && is302AiUpscaleBaseUrl(selectedUpscaleCandidate.apiBaseUrl)
+        ? resolve302UpscaleModelId(selectedUpscaleCandidate.model) : null;
+      if ((body.quoteOnly || body.quoteToken) && !selected302UpscaleModel) {
+        return NextResponse.json({ success: false, code: 'IMAGE_EDIT_QUOTE_UNAVAILABLE' }, { status: 422 });
+      }
+      if (usesAtomicBilling && !selected302UpscaleModel) {
+        // A possible automatic 302 candidate did not win the plan. Preserve
+        // the old non-302 billing path instead of silently making it free.
+        usesAtomicBilling = false;
+        taskCoreMode = 'shadow';
+        if (sessionUser) {
+          const rejected = await chargeLegacyCredits();
+          if (rejected) return rejected;
+        }
+      }
+      let quotedEnhanceCost = 0;
+      if (usesAtomicBilling && selected302UpscaleModel && qualityEnhanceCandidate) {
+        quotedEnhanceCost = await calculateConfiguredCreditCost('image_generate', qualityEnhanceCandidate.model,
+          { providerId: qualityEnhanceCandidate.providerId, pricingConfig: upscalePricingSnapshot });
+        deductedCredits += quotedEnhanceCost;
+      }
+      // Automatic selection may choose another admitted model; persist the same pair as dispatch.
+      const actual302ProviderId = selectedUpscaleCandidate?.providerId || effectiveProviderId;
+      const actual302UpscaleModel = selectedUpscaleCandidate?.model || modelStr;
+      let confirmedQuoteIdentity: ImageEditQuoteIdentity | null = null;
+      if ((body.quoteOnly || body.quoteToken) && selected302UpscaleModel
+        && selectedUpscaleCandidate && upscalePricingSnapshot) {
+        const components = { upscale: deductedCredits - quotedEnhanceCost, enhance: quotedEnhanceCost };
+        const targets = [{ phase: 'upscale', providerId: actual302ProviderId, modelId: actual302UpscaleModel },
+          ...(qualityEnhanceCandidate ? [{ phase: 'enhance', providerId: qualityEnhanceCandidate.providerId,
+            modelId: qualityEnhanceCandidate.model }] : [])];
+        const pricingDigest = createHash('sha256').update(JSON.stringify(upscalePricingSnapshot)).digest('hex');
+        const catalogDigest = createHash('sha256').update(JSON.stringify(targets.map(target => ({
+          ...target, providerUpdatedAt: target.phase === 'upscale'
+            ? selectedUpscaleCandidate.provider.updatedAt : qualityEnhanceCandidate?.provider.updatedAt,
+          baseUrl: target.phase === 'upscale'
+            ? selectedUpscaleCandidate.apiBaseUrl : qualityEnhanceCandidate?.apiBaseUrl,
+        })))).digest('hex');
+        const quoteIdentity: ImageEditQuoteIdentity = { actorUserId: authResult.userId,
+          requestDigest: inputIdentityDigest, creditOp, total: deductedCredits,
+          components, targets, pricingDigest, catalogDigest };
+        const secret = await getAuthSecretForInternalRequests();
+        const now = Date.now();
+        if (body.quoteOnly) {
+          const token = issueImageEditQuoteToken(quoteIdentity, secret, now);
+          return NextResponse.json({ success: true, quote: { total: deductedCredits, components, targets,
+            token, expiresAt: now + IMAGE_EDIT_QUOTE_LIFETIME_MS,
+            service: qualityEnhanceCandidate ? 'upscale-and-enhance' : 'upscale-only',
+            autoSelectionNotice: modelPlan.explicit ? null : '可能使用不同实际模型，价格以本次确认的服务报价为准' } });
+        }
+        if (!verifyImageEditQuoteToken(body.quoteToken!, quoteIdentity, secret, now)) {
+          return NextResponse.json({ success: false, code: 'IMAGE_EDIT_QUOTE_CHANGED',
+            error: '报价已过期或配置已变化，请重新报价' }, { status: 409 });
+        }
+        confirmedQuoteIdentity = quoteIdentity;
+      }
       // Explicit 302 selections are charged before the provider call. Persist a
       // task before dispatch so a provider rejection can be refunded exactly once.
       let upscaleCreditTaskId: string | null = null;
+      let upscaleCreditRequestDigest: string | null = null;
+      let upscaleProviderLeaseOwner: string | null = null;
+      let accepted302ResultInProgress = false;
       type Requested302Admission = {
         taskId: string | null;
         creditCost: number;
@@ -2521,27 +1883,31 @@ export async function POST(request: NextRequest) {
         error?: string;
       };
       const beginRequested302CreditTask = async (): Promise<NextResponse | null> => {
-        if (!requested302UpscaleModel || upscaleCreditTaskId) return null;
+        if (!selected302UpscaleModel || upscaleCreditTaskId) return null;
 
         const idempotencyKey = request.headers.get('idempotency-key')?.trim() || requestId;
-        const requestDigest = createHash('sha256').update(JSON.stringify({
-          action,
-          imageUrl,
-          providerId: effectiveProviderId,
-          model: requested302UpscaleModel,
+        const requestDigest = digestRequested302UpscaleIdentity({
+          actorUserId: authResult.userId,
+          request: requestIdentity,
+          providerId: actual302ProviderId,
+          modelId: actual302UpscaleModel,
           sourceWidth: origW,
           sourceHeight: origH,
           targetWidth: targetW,
           targetHeight: targetH,
-        })).digest('hex');
+        });
+        upscaleCreditRequestDigest = requestDigest;
         const submissionPayload = {
           sourceWidth: origW,
           sourceHeight: origH,
           targetWidth: targetW,
           targetHeight: targetH,
-          requestedModel: requested302UpscaleModel,
+          requestedModel: requested302UpscaleModel || modelStr,
           assetParentVersionIds: body.assetParentVersionIds || [],
           assetProjectionMode: body.assetProjectionMode === 'revision' ? 'revision' : 'derived',
+          qualityEnhance: qualityEnhanceCandidate && selected302UpscaleModel
+            ? { providerId: qualityEnhanceCandidate.providerId, modelId: qualityEnhanceCandidate.model,
+              creditCost: quotedEnhanceCost } : null,
         };
         const taskId = `upscale-302-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
         const admission = await executeTaskEntryMigration<Requested302Admission>({
@@ -2564,11 +1930,11 @@ export async function POST(request: NextRequest) {
           sessionId: body.sessionId,
           messageId: body.messageId,
           type: 'upscale',
-          providerId: effectiveProviderId,
-          model: requested302UpscaleModel,
+          providerId: actual302ProviderId,
+          model: actual302UpscaleModel,
           label: '302.AI 超分',
           creditCost: deductedCredits,
-          taskEntryAudit: buildTaskEntryAudit(effectiveProviderId, requested302UpscaleModel),
+          taskEntryAudit: buildTaskEntryAudit(actual302ProviderId, actual302UpscaleModel),
           submissionPayload,
         });
         if (!recorded) {
@@ -2586,9 +1952,10 @@ export async function POST(request: NextRequest) {
           coreV2: async () => {
             const now = Date.now();
             const result = await createBillableTask({
-              userId: sessionUser?.id || 'anonymous',
+              userId: authResult.userId,
               idempotencyKey,
               requestDigest,
+              ...(confirmedQuoteIdentity ? { activeImageEditInputDigest: inputIdentityDigest } : {}),
               creditCost: deductedCredits,
               task: {
               id: taskId,
@@ -2597,12 +1964,25 @@ export async function POST(request: NextRequest) {
               messageId: body.messageId,
                 type: 'upscale',
                 status: 'processing',
-                providerId: effectiveProviderId,
-                model: requested302UpscaleModel,
+                providerId: actual302ProviderId,
+                model: actual302UpscaleModel,
                 progress: 0,
                 label: '302.AI upscale',
                 result: {
-                  taskEntryAudit: buildTaskEntryAudit(effectiveProviderId, requested302UpscaleModel),
+                  imageEditAdmission: {
+                    version: 1,
+                    route: '/api/image-edit',
+                    kind: 'requested-302-upscale',
+                    requestDigest,
+                    inputIdentityDigest,
+                  },
+                  taskEntryAudit: buildTaskEntryAudit(actual302ProviderId, actual302UpscaleModel),
+                  imageEditQuote: { version: 1, total: deductedCredits,
+                    upscale: deductedCredits - quotedEnhanceCost, enhance: quotedEnhanceCost,
+                    ...(confirmedQuoteIdentity ? { confirmed: true,
+                      pricingDigest: confirmedQuoteIdentity.pricingDigest,
+                      catalogDigest: confirmedQuoteIdentity.catalogDigest,
+                      targets: confirmedQuoteIdentity.targets } : {}) },
                   submissionPayload,
                 },
                 createdAt: now,
@@ -2619,8 +1999,8 @@ export async function POST(request: NextRequest) {
             };
           },
           factsFromResult: value => ({
-            providerId: effectiveProviderId,
-            modelId: requested302UpscaleModel,
+            providerId: actual302ProviderId,
+            modelId: actual302UpscaleModel,
             creditCost: value.creditCost,
             status: value.status === 'completed'
               || value.status === 'failed'
@@ -2630,8 +2010,8 @@ export async function POST(request: NextRequest) {
               : 'processing',
           }),
           previewCoreFacts: async () => ({
-            providerId: effectiveProviderId,
-            modelId: requested302UpscaleModel,
+            providerId: actual302ProviderId,
+            modelId: actual302UpscaleModel,
             creditCost: deductedCredits,
             status: 'processing',
           }),
@@ -2641,6 +2021,7 @@ export async function POST(request: NextRequest) {
         atomicBillingTaskId = admission.value.taskId;
         if (!admission.value.reused || !admission.value.taskId) return null;
 
+        const reusedQuote = confirmedImageEditQuoteForResponse(admission.value.result);
         const reusedImageUrl = typeof admission.value.result?.imageUrl === 'string'
           ? admission.value.result.imageUrl
           : null;
@@ -2650,7 +2031,9 @@ export async function POST(request: NextRequest) {
             imageUrl: reusedImageUrl,
             taskId: admission.value.taskId,
             action,
+            enhanced: admission.value.result?.enhanced === true,
             reused: true,
+            ...(reusedQuote ? { quote: reusedQuote } : {}),
           });
         }
         const terminalFailure = admission.value.status === 'failed'
@@ -2663,49 +2046,91 @@ export async function POST(request: NextRequest) {
           status: admission.value.status,
           error: admission.value.error,
           reused: true,
+          ...(reusedQuote ? { quote: reusedQuote } : {}),
         }, { status: terminalFailure ? 409 : 200 });
       };
 
-      const completeRequested302CreditTask = async (imageUrlResult: string): Promise<void> => {
-        if (!upscaleCreditTaskId) return;
-        const committed = await completeCloudTask(upscaleCreditTaskId, {
+      const completeRequested302CreditTask = async (imageUrlResult: string, enhanced = false): Promise<NextResponse | null> => {
+        if (!upscaleCreditTaskId) return null;
+        const result = {
           imageUrl: imageUrlResult,
           action: 'upscale',
-          providerId: effectiveProviderId,
-          model: requested302UpscaleModel,
-        });
-        if (committed && sessionUser) {
+          providerId: actual302ProviderId,
+          model: actual302UpscaleModel,
+          enhanced,
+        };
+        let committed: boolean;
+        try {
+          committed = projectAccess.kind === 'document'
+            ? await completeDocumentImageEditTask({ taskId: upscaleCreditTaskId, result,
+              access: projectAccess, parentVersionIds: body.assetParentVersionIds,
+              imageUrl: body.imageUrl, origin: request.nextUrl.origin, expectedCanonicalUrl: imageUrl })
+            : await completeCloudTask(upscaleCreditTaskId, result);
+        } catch (error) {
+          if (error instanceof ImageEditCompletionUnknownError) {
+            return NextResponse.json({ success: true, action: 'upscale', status: 'completion-unknown',
+              taskId: upscaleCreditTaskId, code: error.code, requiresReconciliation: true }, { status: 202 });
+          }
+          if (!(error instanceof ImageEditSourceAdmissionError)) throw error;
+          const failure = await settleRequested302Failure(error);
+          return NextResponse.json(failure, { status: failure.providerStatus });
+        }
+        if (!committed) {
+          const current = await getCloudTaskForUser(upscaleCreditTaskId, authResult.userId);
+          return NextResponse.json({
+            success: false,
+            code: 'TASK_TERMINAL_CONFLICT',
+            taskId: upscaleCreditTaskId,
+            status: current?.status || 'unknown',
+          }, { status: 409 });
+        }
+        if (sessionUser) {
           await projectPersistedCompletedTask(upscaleCreditTaskId, sessionUser.id);
         }
+        return null;
       };
 
       const settleRequested302Failure = async (error: unknown) => {
         const providerError = error instanceof UpscaleProviderError ? error : null;
+        const sourceError = error instanceof ImageEditSourceAdmissionError ? error : null;
         const message = providerError?.message
           || (error instanceof Error ? error.message : String(error));
         let refunded = false;
 
         if (upscaleCreditTaskId) {
+          // A durable task owns this charge even if settlement itself fails.
+          // The outer legacy catch must not create a second, unbound refund.
+          deductedCredits = 0;
+          atomicSettlementAttempted = true;
           const terminal = await terminateCloudTaskAndRefund(
             upscaleCreditTaskId,
             'failed',
             message,
+            undefined,
+            { requireActive: true },
           );
+          if (!terminal.transitioned) {
+            const current = await getCloudTaskForUser(upscaleCreditTaskId, authResult.userId);
+            return { success: false, error: message, code: 'TASK_TERMINAL_CONFLICT', providerStatus: 409,
+              providerCode: null, retryable: false, refunded: false, taskId: upscaleCreditTaskId,
+              status: current?.status || 'unknown' };
+          }
           refunded = terminal.refunded;
-          if (terminal.refunded) deductedCredits = 0;
-        } else if (sessionUser && deductedCredits > 0) {
-          await refundCredits(sessionUser.id, deductedCredits, `302.AI 超分失败退款: ${message.slice(0, 100)}`);
+        } else if (!usesAtomicBilling && sessionUser && deductedCredits > 0) {
+          const refundableCost = deductedCredits;
           deductedCredits = 0;
+          const refund = await refundCredits(sessionUser.id, refundableCost, `302.AI 超分失败退款: ${message.slice(0, 100)}`);
+          if (!refund.success) throw new Error('302.AI 超分退款未完成，任务需要人工对账');
           refunded = true;
         }
 
         return {
           success: false,
           error: message,
-          code: providerError?.code || 'UPSCALE_PROVIDER_UNAVAILABLE',
-          providerStatus: providerError?.status || 502,
+          code: sourceError?.code || providerError?.code || 'UPSCALE_PROVIDER_UNAVAILABLE',
+          providerStatus: sourceError?.status || providerError?.status || 502,
           providerCode: providerError?.providerCode || null,
-          retryable: providerError?.retryable ?? true,
+          retryable: sourceError ? false : providerError?.retryable ?? true,
           refunded,
           taskId: upscaleCreditTaskId,
         };
@@ -2714,42 +2139,230 @@ export async function POST(request: NextRequest) {
       const reusedAdmissionResponse = await beginRequested302CreditTask();
       if (reusedAdmissionResponse) return reusedAdmissionResponse;
 
+      // Task admission can race with editor revocation. Revalidate the exact
+      // document source after charging, immediately before provider dispatch.
+      if (projectAccess.kind === 'document') {
+        let sourceDenial: ImageEditSourceAdmissionError | null = null;
+        try {
+          const currentImageUrl = await authorizeDocumentImageEditSource({ access: projectAccess, action,
+            parentVersionIds: body.assetParentVersionIds, imageUrl: body.imageUrl, origin: request.nextUrl.origin });
+          if (currentImageUrl !== imageUrl) {
+            sourceDenial = new ImageEditSourceAdmissionError(403, 'IMAGE_EDIT_SOURCE_MISMATCH');
+          }
+        } catch (error) {
+          if (error instanceof ImageEditSourceAdmissionError) sourceDenial = error;
+          else throw error;
+        }
+        if (sourceDenial) {
+          if (upscaleCreditTaskId) {
+            // Once task admission owns the charge, an outer error must not
+            // issue an unrelated legacy refund if task settlement fails.
+            deductedCredits = 0;
+            atomicSettlementAttempted = true;
+            const terminal = await terminateCloudTaskAndRefund(upscaleCreditTaskId, 'failed', sourceDenial.message,
+              undefined, { requireActive: true });
+            if (!terminal.transitioned) {
+              return NextResponse.json({ success: false, code: 'TASK_TERMINAL_CONFLICT',
+                taskId: upscaleCreditTaskId }, { status: 409 });
+            }
+          } else if (sessionUser && deductedCredits > 0) {
+            const refundableCost = deductedCredits;
+            deductedCredits = 0;
+            const refund = await refundCredits(sessionUser.id, refundableCost, `文档来源复验失败退款: ${sourceDenial.message}`);
+            if (!refund.success) throw new Error('文档来源复验退款未完成，任务需要人工对账');
+          }
+          return NextResponse.json({ success: false, code: sourceDenial.code, error: sourceDenial.message },
+            { status: sourceDenial.status });
+        }
+      }
+
+      const release302ProviderLease = async (): Promise<void> => {
+        if (upscaleCreditTaskId && upscaleProviderLeaseOwner) {
+          await releaseCloudTaskLease(upscaleCreditTaskId, upscaleProviderLeaseOwner);
+          upscaleProviderLeaseOwner = null;
+        }
+      };
+      const inspect302TaskSafety = async (): Promise<{ conflict: NextResponse | null; started: boolean }> => {
+        if (!upscaleCreditTaskId) return { conflict: null, started: false };
+        const task = await getCloudTaskForUser(upscaleCreditTaskId, authResult.userId);
+        if (task && ['completed', 'failed', 'cancelled', 'timeout'].includes(task.status)) {
+          return { conflict: NextResponse.json({ success: false, code: 'TASK_TERMINAL_CONFLICT',
+            taskId: upscaleCreditTaskId, status: task.status }, { status: 409 }), started: false };
+        }
+        const execution = task?.result?.imageEditExecution as
+          | { phases?: Array<{ attempts?: Array<{ status?: string }> }> } | undefined;
+        return { conflict: null,
+          started: execution?.phases?.some(phase => phase.attempts?.some(attempt => attempt.status === 'started')) === true };
+      };
+      const pending302Response = (taskId: string): NextResponse => NextResponse.json({
+        success: true, action: 'upscale', status: 'submission-unknown', taskId,
+        message: '302.AI 提交状态待核对；不会自动重发或退款',
+        ...(confirmedQuoteIdentity ? { quote: { total: confirmedQuoteIdentity.total,
+          components: confirmedQuoteIdentity.components } } : {}),
+      }, { status: 202 });
+      const finishQualityEnhanced302Image = async (baseUrl: string, baseBuffer: Buffer): Promise<
+        { url: string; enhanced: boolean } | NextResponse
+      > => {
+        if (!qualityEnhanceCandidate || !selected302UpscaleModel) return { url: baseUrl, enhanced: false };
+        if (!upscaleCreditTaskId || !upscaleCreditRequestDigest || !upscaleProviderLeaseOwner
+          || taskCoreMode !== 'core-v2') throw new ImageEditProviderSubmissionPending();
+        const candidate = qualityEnhanceCandidate;
+        const inputDigest = createHash('sha256').update(baseBuffer).update(JSON.stringify({
+          baseUrl, targetW, targetH, providerId: candidate.providerId, modelId: candidate.model,
+        })).digest('hex');
+        const opened = await openImageEditProviderPhase({
+          taskId: upscaleCreditTaskId,
+          actorUserId: authResult.userId,
+          projectId: String(body.projectId || ''),
+          requestDigest: upscaleCreditRequestDigest,
+          leaseOwner: upscaleProviderLeaseOwner,
+          phase: { phaseId: 'upscale-quality-enhance', inputDigest,
+            targets: [{ providerId: candidate.providerId, modelId: candidate.model, kind: 'image' }] },
+          secretValues: [candidate.apiKey],
+          beforeDispatch: async (): Promise<void> => {
+            if (projectAccess.kind !== 'document') return;
+            const currentImageUrl = await authorizeDocumentImageEditSource({ access: projectAccess, action,
+              parentVersionIds: body.assetParentVersionIds, imageUrl: body.imageUrl, origin: request.nextUrl.origin });
+            if (currentImageUrl !== imageUrl) {
+              throw new ImageEditSourceAdmissionError(403, 'IMAGE_EDIT_SOURCE_MISMATCH');
+            }
+          },
+          transactionalSourceCheck: projectAccess.kind === 'document'
+            ? async client => authorizeDocumentImageEditSourceLocked(client, {
+              access: projectAccess, parentVersionIds: body.assetParentVersionIds,
+              imageUrl: body.imageUrl, origin: request.nextUrl.origin, expectedCanonicalUrl: imageUrl,
+            })
+            : undefined,
+        });
+        if (opened.status !== 'ready') throw new ImageEditProviderSubmissionPending();
+        const result = await enhanceViaAI(baseUrl, candidate.model, candidate.providerId,
+          { targetWidth: targetW, targetHeight: targetH }, candidate.provider,
+          { execution: { providerId: candidate.providerId, boundary: opened.boundary,
+            responseMaxBytes: 32 * 1024 * 1024 }, signal: request.signal });
+        if (!result.enhanced) {
+          const failure = await settleRequested302Failure(new Error('画质精修模型明确拒绝请求，完整放大服务未交付'));
+          return NextResponse.json(failure, { status: failure.providerStatus });
+        }
+        const enhancedBuffer = await fetchImageBuffer(result.url);
+        const enhancedMetadata = await sharp(enhancedBuffer).metadata();
+        if (!enhancedMetadata.width || !enhancedMetadata.height
+          || enhancedMetadata.width < targetW || enhancedMetadata.height < targetH) {
+          throw new Error('画质精修输出尺寸不足，等待人工核对');
+        }
+        if (enhancedMetadata.width === targetW && enhancedMetadata.height === targetH) {
+          return { url: result.url, enhanced: true };
+        }
+        const normalizedBuffer = await sharp(enhancedBuffer)
+          .resize(targetW, targetH, { kernel: sharp.kernel.lanczos3 }).png({ quality: 95 }).toBuffer();
+        const normalizedPath = await saveBufferToPublic(normalizedBuffer,
+          `upscale_enhanced_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.png`);
+        return { url: toPublicUrl(normalizedPath), enhanced: true };
+      };
+      const completeRequested302FidelityFallback = async (fallback: NextResponse): Promise<NextResponse> => {
+        try {
+          const result = await fallback.clone().json() as Record<string, unknown>;
+          if (typeof result.imageUrl !== 'string' || !result.imageUrl) {
+            throw new Error('保真降级结果缺少图片地址');
+          }
+          const baseBuffer = qualityEnhanceCandidate
+            ? await fetchImageBuffer(result.imageUrl) : Buffer.alloc(0);
+          const enhancement = await finishQualityEnhanced302Image(result.imageUrl, baseBuffer);
+          if (enhancement instanceof NextResponse) return enhancement;
+          const terminalConflict = await completeRequested302CreditTask(enhancement.url, enhancement.enhanced);
+          if (terminalConflict) return terminalConflict;
+          return NextResponse.json({ ...result, imageUrl: enhancement.url,
+            enhanced: enhancement.enhanced, taskId: upscaleCreditTaskId });
+        } catch (error) {
+          const safety = await inspect302TaskSafety();
+          if (safety.conflict) return safety.conflict;
+          if (upscaleCreditTaskId && (safety.started || error instanceof ImageEditProviderBoundaryError
+            || error instanceof ImageEditProviderSubmissionPending)) {
+            return pending302Response(upscaleCreditTaskId);
+          }
+          const failure = await settleRequested302Failure(error);
+          return NextResponse.json(failure, { status: failure.providerStatus });
+        }
+      };
+      const submitTracked302Upscale = async (
+        selectedProvider: NonNullable<typeof selectedUpscaleCandidate>,
+        selectedModel: NonNullable<ReturnType<typeof resolve302UpscaleModelId>>,
+        providerImageUrl: string,
+        requestedScale: number,
+        phaseId: string,
+        inputBuffer: Buffer,
+      ): Promise<{ directUrl?: string; width?: number; height?: number; usedModel?: string }> => {
+        accepted302ResultInProgress = false;
+        let callOptions: ImageEditProviderCallOptions | undefined;
+        if (upscaleCreditTaskId && upscaleCreditRequestDigest && taskCoreMode === 'core-v2') {
+          if (!upscaleProviderLeaseOwner) {
+            const owner = randomUUID();
+            const lease = await claimCloudTaskLease(upscaleCreditTaskId, owner, 30 * 60_000);
+            if (!lease) throw new ImageEditProviderSubmissionPending();
+            upscaleProviderLeaseOwner = owner;
+          }
+          const inputDigest = createHash('sha256').update(inputBuffer)
+            .update(JSON.stringify({ providerImageUrl, requestedScale, selectedModel })).digest('hex');
+          const opened = await openImageEditProviderPhase({
+            taskId: upscaleCreditTaskId,
+            actorUserId: authResult.userId,
+            projectId: String(body.projectId || ''),
+            requestDigest: upscaleCreditRequestDigest,
+            leaseOwner: upscaleProviderLeaseOwner,
+            phase: { phaseId, inputDigest,
+              targets: [{ providerId: selectedProvider.providerId, modelId: selectedModel, kind: 'upscale' }] },
+            secretValues: [selectedProvider.apiKey],
+            beforeDispatch: async (): Promise<void> => {
+              if (projectAccess.kind !== 'document') return;
+              const currentImageUrl = await authorizeDocumentImageEditSource({ access: projectAccess, action,
+                parentVersionIds: body.assetParentVersionIds, imageUrl: body.imageUrl, origin: request.nextUrl.origin });
+              if (currentImageUrl !== imageUrl) {
+                throw new ImageEditSourceAdmissionError(403, 'IMAGE_EDIT_SOURCE_MISMATCH');
+              }
+            },
+            transactionalSourceCheck: projectAccess.kind === 'document'
+              ? async client => authorizeDocumentImageEditSourceLocked(client, {
+                access: projectAccess, parentVersionIds: body.assetParentVersionIds,
+                imageUrl: body.imageUrl, origin: request.nextUrl.origin, expectedCanonicalUrl: imageUrl,
+              })
+              : undefined,
+          });
+          if (opened.status === 'submission-unknown') throw new ImageEditProviderSubmissionPending();
+          if (opened.status === 'accepted') {
+            accepted302ResultInProgress = true;
+            if (opened.result.kind === 'image' && opened.result.directUrl) {
+              return { directUrl: opened.result.directUrl, width: opened.result.width,
+                height: opened.result.height, usedModel: selectedModel };
+            }
+            throw new ImageEditProviderSubmissionPending();
+          }
+          callOptions = { providerId: selectedProvider.providerId, boundary: opened.boundary };
+        }
+        const submitted = await (selectedModel === '302-super-upscale-v2'
+          ? submit302aiUpscaleTask(selectedProvider.apiBaseUrl, selectedProvider.apiKey,
+            providerImageUrl, requestedScale, undefined, undefined, undefined, undefined, undefined, callOptions)
+          : selectedModel === '302-upscale-v6'
+            ? submit302aiUpscaleV6Task(selectedProvider.apiBaseUrl, selectedProvider.apiKey,
+              providerImageUrl, requestedScale, callOptions)
+            : selectedModel === '302-image-upscale'
+              ? submit302aiImageUpscaleTask(selectedProvider.apiBaseUrl, selectedProvider.apiKey,
+                providerImageUrl, requestedScale, callOptions)
+              : submit302aiEsrganTask(selectedProvider.apiBaseUrl, selectedProvider.apiKey,
+                providerImageUrl, requestedScale, callOptions));
+        accepted302ResultInProgress = true;
+        return submitted;
+      };
+
       // 单次倍率可覆盖目标时，直接调用编排器选中的专用 AI 超分模型。
       // AI 输出必须真实达到目标尺寸；Sharp 只允许下采样或格式归一，禁止补足缺失像素。
       if (!executionPlan.tiled && executionPlan.providerId) {
-        const selectedProvider = providerCandidates.find(item => item.id === executionPlan.providerId)?.candidate;
+        const selectedProvider = selectedUpscaleCandidate;
         const selectedModel = selectedProvider ? resolve302UpscaleModelId(selectedProvider.model) : null;
 
         if (selectedProvider && selectedModel && is302AiUpscaleBaseUrl(selectedProvider.apiBaseUrl)) {
           try {
             const requestedScale = Math.min(4, Math.max(1, Math.ceil(executionPlan.targetScale)));
-            const response = selectedModel === '302-super-upscale-v2'
-              ? await submit302aiUpscaleTask(
-                selectedProvider.apiBaseUrl,
-                selectedProvider.apiKey,
-                imageUrl,
-                requestedScale,
-              )
-              : selectedModel === '302-upscale-v6'
-                ? await submit302aiUpscaleV6Task(
-                  selectedProvider.apiBaseUrl,
-                  selectedProvider.apiKey,
-                  imageUrl,
-                  requestedScale,
-                )
-                : selectedModel === '302-image-upscale'
-                  ? await submit302aiImageUpscaleTask(
-                    selectedProvider.apiBaseUrl,
-                    selectedProvider.apiKey,
-                    imageUrl,
-                    requestedScale,
-                  )
-                  : await submit302aiEsrganTask(
-                    selectedProvider.apiBaseUrl,
-                    selectedProvider.apiKey,
-                    imageUrl,
-                    requestedScale,
-                  );
+            const response = await submitTracked302Upscale(selectedProvider, selectedModel,
+              documentProviderImageUrl || imageUrl, requestedScale, 'upscale-direct', sourceBuffer);
 
             if (!response.directUrl) throw new Error('AI 超分响应缺少图片地址');
             const aiBuffer = await fetchImageBuffer(response.directUrl);
@@ -2771,14 +2384,21 @@ export async function POST(request: NextRequest) {
             const filename = `upscale_ai_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.png`;
             const imagePath = await saveBufferToPublic(finalBuffer, filename);
             const publicImageUrl = toPublicUrl(imagePath);
-            await completeRequested302CreditTask(publicImageUrl);
+            const enhancement = await finishQualityEnhanced302Image(publicImageUrl, finalBuffer);
+            if (enhancement instanceof NextResponse) return enhancement;
+            const terminalConflict = await completeRequested302CreditTask(enhancement.url, enhancement.enhanced);
+            if (terminalConflict) return terminalConflict;
 
             return NextResponse.json({
               success: true,
-              imageUrl: publicImageUrl,
+              imageUrl: enhancement.url,
+              taskId: upscaleCreditTaskId,
               action,
+              enhanced: enhancement.enhanced,
+              ...(confirmedQuoteIdentity ? { quote: { total: confirmedQuoteIdentity.total,
+                components: confirmedQuoteIdentity.components } } : {}),
               engine: executionPlan.engine,
-              providerId: executionPlan.providerId,
+              providerId: selectedProvider.providerId,
               usedModel: response.usedModel || selectedProvider.model,
               tiled: false,
               tileCount: 1,
@@ -2790,8 +2410,35 @@ export async function POST(request: NextRequest) {
               outputHeight: outputMetadata.height,
             });
           } catch (error) {
+            if (projectAccess.kind === 'document' && !(error instanceof ImageEditSourceAdmissionError)) {
+              try {
+                const currentImageUrl = await authorizeDocumentImageEditSource({ access: projectAccess, action,
+                  parentVersionIds: body.assetParentVersionIds, imageUrl: body.imageUrl, origin: request.nextUrl.origin });
+                if (currentImageUrl !== imageUrl) {
+                  throw new ImageEditSourceAdmissionError(403, 'IMAGE_EDIT_SOURCE_MISMATCH');
+                }
+              } catch (sourceError) {
+                if (sourceError instanceof ImageEditSourceAdmissionError) error = sourceError;
+                else throw sourceError;
+              }
+            }
+            const taskSafety = await inspect302TaskSafety();
+            if (taskSafety.conflict) return taskSafety.conflict;
+            if (upscaleCreditTaskId && taskCoreMode === 'core-v2'
+              && (error instanceof ImageEditProviderSubmissionPending || accepted302ResultInProgress
+                || taskSafety.started)) {
+              return pending302Response(upscaleCreditTaskId);
+            }
             const errorMessage = error instanceof Error ? error.message : String(error);
-            if (requested302UpscaleModel) {
+            if (upscaleCreditTaskId && !(error instanceof ImageEditSourceAdmissionError)
+              && !requested302UpscaleModel && executionPlan.fallbackAllowed) {
+              console.warn(`[image-edit] dedicated AI upscale failed, falling back to fidelity: ${errorMessage}`);
+              const fidelityResult = await runLocalCpuUpscale(`专用 AI 超分失败，已降级到保真模式：${errorMessage}`);
+              if (fidelityResult) {
+                return await completeRequested302FidelityFallback(fidelityResult);
+              }
+            }
+            if (upscaleCreditTaskId || requested302UpscaleModel) {
               const failure = await settleRequested302Failure(error);
               return NextResponse.json(failure, { status: failure.providerStatus });
             }
@@ -2804,20 +2451,22 @@ export async function POST(request: NextRequest) {
               success: false,
               error: errorMessage,
               engine: executionPlan.engine,
-              providerId: executionPlan.providerId,
+              providerId: selectedProvider.providerId,
               tiled: false,
               fallbackAllowed: executionPlan.fallbackAllowed,
               fallbackReason: executionPlan.fallbackAllowed
                 ? `专用 AI 超分失败且保真降级不可用：${errorMessage}`
                 : null,
             }, { status: 502 });
+          } finally {
+            await release302ProviderLease();
           }
         }
       }
 
       // 8K、输入超限或目标倍率超出单次能力时，走真实 AI 重叠瓦片链路。
       if (executionPlan.tiled && executionPlan.providerId) {
-        const selectedProvider = providerCandidates.find(item => item.id === executionPlan.providerId)?.candidate;
+        const selectedProvider = selectedUpscaleCandidate;
         const selectedModel = selectedProvider ? resolve302UpscaleModelId(selectedProvider.model) : null;
         if (!selectedProvider || !selectedModel || !is302AiUpscaleBaseUrl(selectedProvider.apiBaseUrl)) {
           return NextResponse.json({
@@ -2828,7 +2477,7 @@ export async function POST(request: NextRequest) {
           }, { status: 422 });
         }
 
-        const taskId = `upscale-tiled-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+        const taskId = upscaleCreditTaskId || `upscale-tiled-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
         registerTask(taskId, 'upscale', 'AI 分块超分', sessionUser?.id);
         updateTaskProgress(taskId, { status: 'processing', progress: 5, label: '正在准备重叠瓦片' });
 
@@ -2839,7 +2488,9 @@ export async function POST(request: NextRequest) {
             targetHeight: targetH,
             tileSize: executionPlan.tileSize,
             overlap: executionPlan.overlap,
-            concurrency: 2,
+            // The durable checkpoint permits one in-flight provider submission
+            // per charged task. Keep legacy non-durable tiling parallel.
+            concurrency: upscaleCreditTaskId && taskCoreMode === 'core-v2' ? 1 : 2,
             isCancelled: () => isTaskCancelled(taskId),
             onProgress: (progress: number) => {
               updateTaskProgress(taskId, {
@@ -2868,33 +2519,17 @@ export async function POST(request: NextRequest) {
                 const tileFilename = `upscale_tile_${taskId}_${tile.index}_${pass}.png`;
                 const tilePath = await saveBufferToPublic(currentBuffer, tileFilename);
                 const tileUrl = toPublicUrl(tilePath);
-                const response = selectedModel === '302-super-upscale-v2'
-                  ? await submit302aiUpscaleTask(
-                    selectedProvider.apiBaseUrl,
-                    selectedProvider.apiKey,
-                    tileUrl,
-                    passScale,
-                  )
-                  : selectedModel === '302-upscale-v6'
-                    ? await submit302aiUpscaleV6Task(
-                      selectedProvider.apiBaseUrl,
-                      selectedProvider.apiKey,
-                      tileUrl,
-                      passScale,
-                    )
-                    : selectedModel === '302-image-upscale'
-                      ? await submit302aiImageUpscaleTask(
-                        selectedProvider.apiBaseUrl,
-                        selectedProvider.apiKey,
-                        tileUrl,
-                        passScale,
-                      )
-                      : await submit302aiEsrganTask(
-                        selectedProvider.apiBaseUrl,
-                        selectedProvider.apiKey,
-                        tileUrl,
-                        passScale,
-                      );
+                // An accepted earlier tile does not make a later, unsent tile uncertain.
+                accepted302ResultInProgress = false;
+                if (projectAccess.kind === 'document') {
+                  const currentImageUrl = await authorizeDocumentImageEditSource({ access: projectAccess, action,
+                    parentVersionIds: body.assetParentVersionIds, imageUrl: body.imageUrl, origin: request.nextUrl.origin });
+                  if (currentImageUrl !== imageUrl) {
+                    throw new ImageEditSourceAdmissionError(403, 'IMAGE_EDIT_SOURCE_MISMATCH');
+                  }
+                }
+                const response = await submitTracked302Upscale(selectedProvider, selectedModel,
+                  tileUrl, passScale, `upscale-tile-${tile.index}-pass-${pass}`, currentBuffer);
                 if (!response.directUrl) throw new Error('AI 超分瓦片响应缺少图片地址');
                 currentBuffer = await fetchImageBuffer(response.directUrl);
                 currentMetadata = await sharp(currentBuffer).metadata();
@@ -2916,21 +2551,25 @@ export async function POST(request: NextRequest) {
           const filename = `upscale_ai_tiled_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.png`;
           const imagePath = await saveBufferToPublic(finalBuffer, filename);
           const imageUrlResult = toPublicUrl(imagePath);
-          await completeRequested302CreditTask(imageUrlResult);
+          const enhancement = await finishQualityEnhanced302Image(imageUrlResult, finalBuffer);
+          if (enhancement instanceof NextResponse) return enhancement;
+          const terminalConflict = await completeRequested302CreditTask(enhancement.url, enhancement.enhanced);
+          if (terminalConflict) return terminalConflict;
           updateTaskProgress(taskId, {
             status: 'completed',
             progress: 100,
             label: 'AI 分块超分完成',
-            result: { imageUrl: imageUrlResult },
+            result: { imageUrl: enhancement.url },
           });
 
           return NextResponse.json({
             success: true,
             taskId,
-            imageUrl: imageUrlResult,
+            imageUrl: enhancement.url,
             action,
+            enhanced: enhancement.enhanced,
             engine: executionPlan.engine,
-            providerId: executionPlan.providerId,
+            providerId: selectedProvider.providerId,
             usedModel: selectedProvider.model,
             tiled: executionPlan.tiled,
             tileCount: tiledResult.tileCount,
@@ -2942,15 +2581,60 @@ export async function POST(request: NextRequest) {
             outputHeight: outputMetadata.height,
           });
         } catch (error) {
-          const errorMessage = error instanceof Error ? error.message : String(error);
-          if (requested302UpscaleModel) {
+          let effectiveError: unknown = error;
+          if (projectAccess.kind === 'document' && !(error instanceof ImageEditSourceAdmissionError)) {
+            try {
+              const currentImageUrl = await authorizeDocumentImageEditSource({ access: projectAccess, action,
+                parentVersionIds: body.assetParentVersionIds, imageUrl: body.imageUrl, origin: request.nextUrl.origin });
+              if (currentImageUrl !== imageUrl) {
+                effectiveError = new ImageEditSourceAdmissionError(403, 'IMAGE_EDIT_SOURCE_MISMATCH');
+              }
+            } catch (sourceError) {
+              if (sourceError instanceof ImageEditSourceAdmissionError) effectiveError = sourceError;
+              else throw sourceError;
+            }
+          }
+          const taskSafety = await inspect302TaskSafety();
+          if (taskSafety.conflict) return taskSafety.conflict;
+          const errorMessage = effectiveError instanceof Error ? effectiveError.message : String(effectiveError);
+          if (upscaleCreditTaskId && taskCoreMode === 'core-v2'
+            && (effectiveError instanceof ImageEditProviderSubmissionPending || accepted302ResultInProgress
+              || taskSafety.started)) {
+            updateTaskProgress(taskId, { status: 'processing', label: '302.AI 提交状态待核对' });
+            return pending302Response(upscaleCreditTaskId);
+          }
+          if (upscaleCreditTaskId && !(effectiveError instanceof ImageEditSourceAdmissionError)
+            && !requested302UpscaleModel && executionPlan.fallbackAllowed) {
+            updateTaskProgress(taskId, {
+              status: 'processing', progress: 90, label: 'AI 分块失败，正在切换保真模式',
+            });
+            const fidelityResult = await runLocalCpuUpscale(`AI 分块超分失败，已降级到保真模式：${errorMessage}`);
+            if (fidelityResult) {
+              const completedFallback = await completeRequested302FidelityFallback(fidelityResult);
+              // The fallback may have started an enhancement phase that is still
+              // submission-unknown, or it may have settled a failure. Mirror the
+              // durable task state instead of declaring success from CPU output.
+              const durableTask = upscaleCreditTaskId
+                ? await getCloudTaskForUser(upscaleCreditTaskId, authResult.userId) : null;
+              if (durableTask?.status === 'completed') {
+                updateTaskProgress(taskId, { status: 'completed', progress: 100, label: '保真降级完成' });
+              } else if (durableTask?.status === 'failed' || durableTask?.status === 'cancelled'
+                || durableTask?.status === 'timeout') {
+                updateTaskProgress(taskId, { status: durableTask.status, error: durableTask.error || undefined });
+              } else if (durableTask) {
+                updateTaskProgress(taskId, { status: 'processing', label: '增强提交状态待核对' });
+              }
+              return completedFallback;
+            }
+          }
+          if (upscaleCreditTaskId || requested302UpscaleModel || effectiveError instanceof ImageEditSourceAdmissionError) {
             updateTaskProgress(taskId, { status: 'failed', error: errorMessage });
-            const failure = await settleRequested302Failure(error);
+            const failure = await settleRequested302Failure(effectiveError);
             return NextResponse.json({
               ...failure,
-              taskId,
+              taskId: upscaleCreditTaskId || taskId,
               engine: executionPlan.engine,
-              providerId: executionPlan.providerId,
+              providerId: selectedProvider.providerId,
               tiled: executionPlan.tiled,
             }, { status: failure.providerStatus });
           }
@@ -2961,7 +2645,7 @@ export async function POST(request: NextRequest) {
               taskId,
               error: errorMessage,
               engine: executionPlan.engine,
-              providerId: executionPlan.providerId,
+              providerId: selectedProvider.providerId,
               tiled: executionPlan.tiled,
               fallbackAllowed: executionPlan.fallbackAllowed,
               fallbackReason: executionPlan.fallbackReason,
@@ -2991,13 +2675,15 @@ export async function POST(request: NextRequest) {
             taskId,
             error: errorMessage,
             engine: executionPlan.engine,
-            providerId: executionPlan.providerId,
+            providerId: selectedProvider.providerId,
             tiled: executionPlan.tiled,
             fallbackAllowed: executionPlan.fallbackAllowed,
             fallbackReason: executionPlan.fallbackAllowed
               ? `AI 分块超分失败且保真降级不可用：${errorMessage}`
               : executionPlan.fallbackReason,
           }, { status: 502 });
+        } finally {
+          await release302ProviderLease();
         }
       }
 
@@ -3069,7 +2755,6 @@ export async function POST(request: NextRequest) {
         isUpscalerModel(c.model)
         && (!requestedUpscaleModel || (
           c.model === requestedUpscaleModel
-          && c.source === 'specified-provider'
         ))
       ));
       const generalImageCandidates = candidateModels.filter(c => !isUpscalerModel(c.model));
@@ -3079,6 +2764,7 @@ export async function POST(request: NextRequest) {
         width?: number;
         height?: number;
         usedModel?: string;
+        providerId?: string;
       }) | null = null;
       let aiError: Error | null = null;
 
@@ -3118,7 +2804,7 @@ export async function POST(request: NextRequest) {
               aiResult302 = await submit302aiUpscaleTask(
                 c.apiBaseUrl,
                 c.apiKey,
-                imageUrl,
+                documentProviderImageUrl || imageUrl,
                 calcScale,
                 0.2, // creativity: 保守值，避免过度创意
                 2,   // detail: 中等细节增强
@@ -3131,7 +2817,7 @@ export async function POST(request: NextRequest) {
               aiResult302 = await submit302aiUpscaleV6Task(
                 c.apiBaseUrl,
                 c.apiKey,
-                imageUrl,
+                documentProviderImageUrl || imageUrl,
                 calcScale, // upscale_factor: 1-4
               );
             } else if (modelId === '302-image-upscale') {
@@ -3139,7 +2825,7 @@ export async function POST(request: NextRequest) {
               aiResult302 = await submit302aiImageUpscaleTask(
                 c.apiBaseUrl,
                 c.apiKey,
-                imageUrl,
+                documentProviderImageUrl || imageUrl,
                 calcScale,
               );
             } else if (modelId === '302-esrgan') {
@@ -3147,7 +2833,7 @@ export async function POST(request: NextRequest) {
               aiResult302 = await submit302aiEsrganTask(
                 c.apiBaseUrl,
                 c.apiKey,
-                imageUrl,
+                documentProviderImageUrl || imageUrl,
                 calcScale,
               );
             }
@@ -3158,6 +2844,10 @@ export async function POST(request: NextRequest) {
                 width: aiResult302.width,
                 height: aiResult302.height,
                 usedModel: aiResult302.usedModel || c.model,
+                providerId: c.providerId,
+                apiBaseUrl: c.apiBaseUrl,
+                apiKey: c.apiKey,
+                advancedParams: c.advancedParams,
               };
               console.debug(`[image-edit] upscale: 302.AI success, output ${aiResult302.width}x${aiResult302.height}`);
               break; // 成功后跳出
@@ -3375,10 +3065,11 @@ export async function POST(request: NextRequest) {
         let finalUrl = resized.url;
         let enhanced = false;
         try {
-          const enhanceResult = await enhanceViaAI(resized.url, modelStr, effectiveProviderId, {
+          const enhanceTarget = body.enableQualityEnhance ? qualityEnhanceCandidate : undefined;
+          const enhanceResult = enhanceTarget ? await enhanceViaAI(resized.url, enhanceTarget.model, enhanceTarget.providerId, {
             targetWidth: targetW,
             targetHeight: targetH,
-          });
+          }, enhanceTarget.provider) : { url: resized.url, enhanced: false };
           if (enhanceResult.enhanced && enhanceResult.url) {
             finalUrl = enhanceResult.url;
             enhanced = true;
@@ -3391,7 +3082,8 @@ export async function POST(request: NextRequest) {
         }
 
         const normalizedFinal = await resizeAiResultToTarget(finalUrl);
-        await completeRequested302CreditTask(normalizedFinal.url);
+        const terminalConflict = await completeRequested302CreditTask(normalizedFinal.url);
+        if (terminalConflict) return terminalConflict;
 
         return NextResponse.json({
           success: true,
@@ -3416,10 +3108,10 @@ export async function POST(request: NextRequest) {
           taskId: regTaskId.taskId,
           userId: sessionUser?.id,
           type: 'upscale',
-          providerId: effectiveProviderId,
+          providerId: aiResult.providerId,
           model: aiResult.usedModel,
           label: 'AI放大',
-          taskEntryAudit: buildTaskEntryAudit(effectiveProviderId, aiResult.usedModel),
+          taskEntryAudit: buildTaskEntryAudit(aiResult.providerId, aiResult.usedModel),
         });
         updateTaskProgress(regTaskId.taskId, {
           status: 'processing',
@@ -3436,7 +3128,7 @@ export async function POST(request: NextRequest) {
             _targetW: targetW,
             _targetH: targetH,
             engine: executionPlan.engine,
-            providerId: executionPlan.providerId,
+            providerId: aiResult.providerId,
             tiled: executionPlan.tiled,
             tileCount: 1,
             fallbackAllowed: executionPlan.fallbackAllowed,
@@ -3479,6 +3171,207 @@ export async function POST(request: NextRequest) {
         const rembgModel = isRembgCpuModel(body.removeBgModel || '')
           ? body.removeBgModel!
           : DEFAULT_REMBG_MODEL;
+
+        if (documentCpuRemoveBg && projectAccess.kind === 'document') {
+          const now = Date.now();
+          let created: Awaited<ReturnType<typeof createBillableTask>>;
+          try {
+            created = await createBillableTask({
+            userId: authResult.userId,
+            idempotencyKey: request.headers.get('idempotency-key')?.trim() || requestId,
+            requestDigest: inputIdentityDigest,
+            creditCost: deductedCredits,
+            ...(cpuRemoveBgPublication ? { canvasPublication: cpuRemoveBgPublication } : {}),
+            beforeCharge: async client => {
+              if (confirmedCpuRemoveBgQuote) {
+                let locked = await client.query(
+                  'SELECT value FROM wujie_system_settings WHERE key=$1 FOR SHARE',
+                  [CREDIT_PRICING_CONFIG_KEY],
+                );
+                if (locked.rowCount === 0) {
+                  // With no row there is nothing to row-lock. Block an admin
+                  // insertion until this admission transaction has committed.
+                  await client.query('LOCK TABLE wujie_system_settings IN SHARE MODE');
+                  locked = await client.query(
+                    'SELECT value FROM wujie_system_settings WHERE key=$1 FOR SHARE',
+                    [CREDIT_PRICING_CONFIG_KEY],
+                  );
+                }
+                const currentPricing = parseCreditPricingConfig(locked.rows[0]?.value);
+                const currentDigest = createHash('sha256')
+                  .update(JSON.stringify(currentPricing)).digest('hex');
+                if (currentDigest !== confirmedCpuRemoveBgQuote.pricingDigest) {
+                  throw new ImageEditQuoteChangedError();
+                }
+              }
+              await authorizeDocumentImageEditSourceLocked(client, {
+                access: projectAccess, parentVersionIds: body.assetParentVersionIds,
+                imageUrl, origin: request.nextUrl.origin, expectedCanonicalUrl: imageUrl,
+              });
+              if (cpuRemoveBgPublication) {
+                try {
+                  await assertCanvasImageEditSourceSelection(client, projectAccess.ownerId,
+                    projectAccess.projectId, cpuRemoveBgPublication.intent!);
+                } catch (error) {
+                  if (error instanceof CanvasPublicationIntentError) {
+                    throw new CanvasTaskPublicationError('CANVAS_TASK_PUBLICATION_CONFLICT');
+                  }
+                  throw error;
+                }
+              }
+            },
+            task: {
+              id: cpuRemoveBgPublication ? `image_edit_removebg_cpu_${randomUUID()}` : `removebg-cpu-${randomUUID()}`,
+              projectId: projectAccess.projectId,
+              sessionId: body.sessionId,
+              messageId: body.messageId,
+              type: 'image-edit',
+              status: 'processing',
+              providerId: 'local-rembg',
+              model: rembgModel,
+              progress: 0,
+              label: 'CPU remove background',
+              result: {
+                imageEditAdmission: { version: 1, kind: 'document-cpu-removebg',
+                  requestDigest: inputIdentityDigest, sourceUrl: imageUrl,
+                  parentVersionIds: body.assetParentVersionIds },
+                imageEditQuote: { version: 1, total: deductedCredits,
+                  providerId: 'local-rembg', model: rembgModel,
+                  ...(confirmedCpuRemoveBgQuote ? { confirmed: true,
+                    components: confirmedCpuRemoveBgQuote.components,
+                    pricingDigest: confirmedCpuRemoveBgQuote.pricingDigest,
+                    catalogDigest: confirmedCpuRemoveBgQuote.catalogDigest } : {}) },
+                taskEntryAudit: buildTaskEntryAudit('local-rembg', rembgModel),
+              },
+              createdAt: now,
+              updatedAt: now,
+            },
+            });
+          } catch (error) {
+            if (error instanceof ImageEditQuoteChangedError) {
+              return NextResponse.json({ success: false, code: 'IMAGE_EDIT_QUOTE_CHANGED',
+                error: error.message }, { status: 409 });
+            }
+            if (error instanceof ImageEditSourceAdmissionError) {
+              return NextResponse.json({ success: false, code: error.code, error: error.message },
+              { status: error.status });
+            }
+            if (error instanceof CanvasTaskPublicationError) {
+              return NextResponse.json({ success: false, code: error.code, error: error.message },
+                { status: error.status });
+            }
+            throw error;
+          }
+          // A replay does not own the prior charge; an outer error must never
+          // settle someone else's still-running attempt.
+          atomicBillingTaskId = created.reused ? null : created.task.id;
+          const replay = created.task;
+          if (replay.status === 'completed' && typeof replay.result?.imageUrl === 'string') {
+            if (cpuRemoveBgPublication) return respondPublishedCpuResult(replay.id, true);
+            return NextResponse.json({ success: true, taskId: replay.id, action,
+              imageUrl: replay.result.imageUrl, maskUrl: replay.result.maskUrl,
+              quality: replay.result.quality, engine: 'rembg-cpu',
+              usedModel: replay.result.model, reused: true });
+          }
+          if (['failed', 'cancelled', 'timeout'].includes(replay.status)) {
+            return NextResponse.json({ success: false, taskId: replay.id,
+              status: replay.status, error: replay.error, reused: true }, { status: 409 });
+          }
+          const owner = `removebg-cpu:${randomUUID()}`;
+          const lease = await claimCloudTaskLease(replay.id, owner, 30 * 60_000);
+          if (!lease) {
+            return NextResponse.json({ success: true, taskId: replay.id,
+              status: replay.status, reused: true }, { status: 202 });
+          }
+          try {
+            const sourceBuffer = await fetchImageBuffer(imageUrl);
+            await authorizeDocumentImageEditSource({ access: projectAccess, action,
+              parentVersionIds: body.assetParentVersionIds, imageUrl,
+              origin: request.nextUrl.origin });
+            const rembgResult = await generateRembgMask(sourceBuffer, rembgModel);
+            if (!rembgResult.success || !rembgResult.rgbaBase64) {
+              throw new Error(rembgResult.error || 'rembg CPU 去背景失败');
+            }
+            const processed = await postProcessLocalRemoveBG(rembgResult.rgbaBase64,
+              rembgResult.maskBase64, sourceBuffer, replay.id.replaceAll('_', '-'));
+            if (!processed || !processed.imageUrl.startsWith('/api/serve-upload/')
+              || !processed.maskUrl.startsWith('/api/serve-upload/')) {
+              throw new Error('rembg CPU output could not be durably stored');
+            }
+            const dataRoot = getServerDataRoot();
+            const imageBytes = await readServeUploadMediaLocal(dataRoot, process.cwd(),
+              processed.imageUrl.slice('/api/serve-upload/'.length));
+            const maskBytes = await readServeUploadMediaLocal(dataRoot, process.cwd(),
+              processed.maskUrl.slice('/api/serve-upload/'.length));
+            if (!imageBytes || !maskBytes) throw new Error('rembg CPU output bytes are missing');
+            const imageFile = await persistAssetBytes({ bytes: imageBytes,
+              filename: 'removebg-subject.png', mimeType: 'image/png', signal: request.signal });
+            const maskFile = await persistAssetBytes({ bytes: maskBytes,
+              filename: 'removebg-mask.png', mimeType: 'image/png', signal: request.signal });
+            if ((!imageFile.storageKey || !maskFile.storageKey) && !isServerDataRootDurable(dataRoot)) {
+              throw new Error('rembg CPU outputs require durable storage');
+            }
+            for (const [file, bytes] of [[imageFile, imageBytes], [maskFile, maskBytes]] as const) {
+              const stored = await readServeUploadExportLocal(dataRoot,
+                file.url.slice('/api/serve-upload/exports/'.length), 32 * 1024 * 1024);
+              if (!stored || !stored.equals(bytes)) throw new Error('rembg CPU output verification failed');
+            }
+            const result = { imageUrl: imageFile.url, maskUrl: maskFile.url,
+              quality: processed.quality, action, engine: 'rembg-cpu',
+              providerId: 'local-rembg', model: rembgResult.model || rembgModel,
+              ...(cpuRemoveBgPublication ? { imageEditPublicationCheckpoint: {
+                version: 1, taskId: replay.id, requestDigest: inputIdentityDigest, status: 'persisted',
+                providerId: 'local-rembg', modelId: rembgResult.model || rembgModel, outputs: [
+                  { outputIndex: 0, role: 'primary', url: imageFile.url },
+                  { outputIndex: 1, role: 'mask', url: maskFile.url },
+                ],
+              } } : {}) };
+            const completed = await completeDocumentImageEditTask({ taskId: replay.id,
+              result, access: projectAccess, parentVersionIds: body.assetParentVersionIds,
+              imageUrl, origin: request.nextUrl.origin, expectedCanonicalUrl: imageUrl,
+              leaseOwner: owner, leaseExpiresAt: lease.expiresAt,
+              leaseAttemptCount: lease.attemptCount });
+            if (!completed) {
+              return NextResponse.json({ success: false, taskId: replay.id,
+                code: 'IMAGE_EDIT_TASK_NOT_ACTIVE' }, { status: 409 });
+            }
+            if (cpuRemoveBgPublication) return respondPublishedCpuResult(replay.id, false);
+            await projectPersistedCompletedTask(replay.id, authResult.userId);
+            return NextResponse.json({ success: true, taskId: replay.id, ...result,
+              usedModel: result.model });
+          } catch (error) {
+            if (error instanceof ImageEditCompletionUnknownError) {
+              return NextResponse.json({ success: true, taskId: replay.id,
+                status: 'completion-unknown' }, { status: 202 });
+            }
+            const sourceError = error instanceof ImageEditSourceAdmissionError ? error : null;
+            const message = error instanceof Error ? error.message : 'rembg CPU 去背景失败';
+            atomicSettlementAttempted = true;
+            try {
+              const settlement = await settleFailedTask({ taskId: replay.id, status: 'failed', leaseOwner: owner,
+                error: { code: sourceError?.code || 'IMAGE_EDIT_CPU_REMOVEBG_FAILED',
+                  message, source: 'wujie', retryable: false, requestId } });
+              if (!settlement.transitioned) {
+                const current = await getCloudTaskForUser(replay.id, authResult.userId);
+                if (current && ['completed', 'failed', 'cancelled', 'timeout'].includes(current.status)) {
+                  return NextResponse.json({ success: false, taskId: replay.id,
+                    status: current.status, error: current.error }, { status: 409 });
+                }
+                return NextResponse.json({ success: true, taskId: replay.id,
+                  status: current?.status || 'processing' }, { status: 202 });
+              }
+            } catch (settleError) {
+              console.error('[remove_background] durable settlement failed:', settleError);
+              return NextResponse.json({ success: false, taskId: replay.id,
+                code: 'IMAGE_EDIT_SETTLEMENT_UNKNOWN' }, { status: 503 });
+            }
+            return NextResponse.json({ success: false, taskId: replay.id,
+              ...(sourceError ? { code: sourceError.code } : {}), error: message },
+            { status: sourceError?.status || 502 });
+          } finally {
+            await releaseCloudTaskLease(replay.id, owner);
+          }
+        }
 
         try {
           const sourceBuffer = await fetchImageBuffer(imageUrl);
@@ -3538,15 +3431,9 @@ export async function POST(request: NextRequest) {
       let aiSuccess = false;
       let dedicatedError: RemoveBgProviderError | null = null;
       try {
-        for (const dedicatedProvider of dedicatedRemoveBgProviders) {
-          const configuredDedicatedModels = [
-            dedicatedProvider.selectedModel,
-            ...(dedicatedProvider.selectedModels || []),
-            ...(dedicatedProvider.discoveredModels || []).map(model => model.id),
-          ].filter((model): model is string => Boolean(model));
-          const dedicatedModel = configuredDedicatedModels.includes(modelStr)
-            ? modelStr
-            : configuredDedicatedModels[0] || modelStr;
+        for (const dedicatedCandidate of dedicatedRemoveBgCandidates) {
+          const dedicatedProvider = dedicatedCandidate.provider;
+          const dedicatedModel = dedicatedCandidate.model;
           try {
             const dedicatedResult = await submitDedicatedRemoveBg(
               { ...dedicatedProvider, selectedModel: dedicatedModel },
@@ -3637,23 +3524,23 @@ export async function POST(request: NextRequest) {
         if (submitResult.taskId) {
           // 异步模式：返回 taskId 给前端轮询，poll-task 会做后处理
           console.log(`[remove_background] AI returned taskId=${submitResult.taskId}, returning to frontend for polling`);
-          const rbUsedCandidate = genericRemoveBgCandidates.find(c => c.model === aiUsedModel) || genericRemoveBgCandidates[0];
+          const rbUsedCandidate = genericRemoveBgCandidates.find(c => c.model === aiUsedModel && c.providerId === submitResult.providerId);
           aiSuccess = true;
           registerTask(submitResult.taskId, 'generate', 'AI 移除背景', sessionUser?.id);
           await persistSubmittedImageTask({
             taskId: submitResult.taskId,
             userId: sessionUser?.id,
             type: 'removebg',
-            providerId: effectiveProviderId,
+            providerId: submitResult.providerId,
             model: aiUsedModel,
             label: 'AI 移除背景',
-            taskEntryAudit: buildTaskEntryAudit(effectiveProviderId, aiUsedModel),
+            taskEntryAudit: buildTaskEntryAudit(submitResult.providerId, aiUsedModel),
           });
           updateTaskProgress(submitResult.taskId, {
             status: 'processing',
             progress: 10,
             label: 'AI 正在识别主体并移除背景...',
-            result: { engine: 'ai-background-remove', usedModel: aiUsedModel, originalImageUrl: imageUrl, apiBaseUrl: rbUsedCandidate?.apiBaseUrl, apiKey: rbUsedCandidate?.apiKey, advancedParams: rbUsedCandidate?.advancedParams },
+            result: { engine: 'ai-background-remove', providerId: submitResult.providerId, usedModel: aiUsedModel, originalImageUrl: imageUrl, apiBaseUrl: rbUsedCandidate?.apiBaseUrl, apiKey: rbUsedCandidate?.apiKey, advancedParams: rbUsedCandidate?.advancedParams },
           });
           return NextResponse.json({
             success: true,
@@ -3725,75 +3612,155 @@ export async function POST(request: NextRequest) {
       // 擦除 (无提示词): 本地 BFS 边界扩散 + 高斯平滑，速度快无黑白块
       // 蒙版修图 (有提示词): AI 智能修复 + 裁剪优化 + 合成回原图
       // ============================================================
-      if (editMode !== 'erase' && editMode !== 'mask') {
-        return NextResponse.json(
-          { success: false, error: 'inpaint 请求必须明确指定 editMode: erase 或 mask' },
-          { status: 400 },
-        );
-      }
-
-      if (!maskImage) {
-        return NextResponse.json({ success: false, error: '需要提供蒙版图像' }, { status: 400 });
-      }
-
-      // 1. 获取原始图片
-      let imageBuffer: Buffer;
-      try {
-        imageBuffer = await fetchImageBuffer(imageUrl);
-      } catch (e) {
-        console.error('[inpaint] Failed to fetch source image:', e);
-        return NextResponse.json({ success: false, error: '无法获取原始图片' }, { status: 500 });
-      }
-
-      const origMeta = await sharp(imageBuffer).metadata();
-      const origW = origMeta.width || 512;
-      const origH = origMeta.height || 512;
-
-      // 2. 解码蒙版并确保与原图尺寸一致
-      let maskBuffer: Buffer;
-      try {
-        if (maskImage.startsWith('data:')) {
-          const base64Data = maskImage.replace(/^data:image\/\w+;base64,/, '');
-          maskBuffer = Buffer.from(base64Data, 'base64');
-        } else {
-          maskBuffer = await fetchImageBuffer(maskImage);
+      if (!preparedInpaint) throw new Error('Inpaint input was not prepared');
+      const { imageBuffer, maskBuffer, maskRawData, origW, origH,
+        maskPixelCount, minX, minY, maxX, maxY } = preparedInpaint;
+      const isErase = editMode === 'erase';
+      const localTaskId = `image-edit-${randomUUID()}`;
+      const inpaintIdentity = { taskId: localTaskId, userId: authResult.userId,
+        projectId: projectAccess.kind === 'unscoped' ? '' : projectAccess.projectId,
+        requestDigest: inpaintRequestDigest };
+      const sourceSha256 = createHash('sha256').update(imageBuffer).digest('hex');
+      const maskSha256 = createHash('sha256').update(maskBuffer).digest('hex');
+      const inpaintAdmission: {
+        version: number; route: string; kind: string; editMode: string | undefined;
+        requestDigest: string; documentSource: boolean; documentOwnerId?: string;
+        documentGrantGeneration?: string; documentSourceVersionId?: string;
+        documentSourcePlacementId?: string; documentCanonicalUrl?: string;
+      } = { version: 1, route: '/api/image-edit', kind: 'ordinary-inpaint',
+        editMode, requestDigest: inpaintRequestDigest, documentSource: projectAccess.kind === 'document',
+        ...(projectAccess.kind === 'document' ? {
+          documentOwnerId: projectAccess.ownerId,
+          documentGrantGeneration: projectAccess.grantGeneration,
+        } : {}) };
+      const admitted = await createBillableTask({
+        userId: authResult.userId, idempotencyKey: replayKey || requestId,
+        requestDigest: inpaintRequestDigest, creditCost: deductedCredits,
+        beforeCharge: async (client: PoolClient): Promise<void> => {
+          let documentSource: {
+            ownerId: string; grantGeneration: string; sourceVersionId: string;
+            sourcePlacementId: string; canonicalUrl: string; origin: string;
+          } | undefined;
+          if (projectAccess.kind === 'document') {
+            const verified = await resolveDocumentImageEditSourceLocked(client, {
+              access: projectAccess, parentVersionIds: body.assetParentVersionIds,
+              imageUrl: body.imageUrl, origin: request.nextUrl.origin,
+              expectedCanonicalUrl: imageUrl, expectedPlacementId: body.assetSourcePlacementId,
+            });
+            documentSource = { ownerId: projectAccess.ownerId,
+              grantGeneration: projectAccess.grantGeneration,
+              sourceVersionId: body.assetParentVersionIds![0],
+              sourcePlacementId: verified.placementId,
+              canonicalUrl: verified.canonicalUrl, origin: request.nextUrl.origin };
+            inpaintAdmission.documentSourceVersionId = documentSource.sourceVersionId;
+            inpaintAdmission.documentSourcePlacementId = documentSource.sourcePlacementId;
+            inpaintAdmission.documentCanonicalUrl = documentSource.canonicalUrl;
+          }
+          await insertPrivateInpaintInputs(client, {
+            ...inpaintIdentity, source: imageBuffer, mask: maskBuffer, width: origW, height: origH,
+            ...(documentSource ? { documentSource } : {}),
+          });
+        },
+        task: { id: localTaskId, type: 'image-edit', status: 'processing', progress: 0,
+          projectId: inpaintIdentity.projectId, sessionId: body.sessionId, messageId: body.messageId,
+          providerId: candidateModels[0]?.providerId || effectiveProviderId,
+          model: candidateModels[0]?.model || modelStr,
+          label: isErase ? '擦除' : '蒙版修图',
+          result: { imageEditAdmission: inpaintAdmission, imageEditInputs: { sourceSha256, maskSha256,
+            width: origW, height: origH }, taskEntryAudit: buildTaskEntryAudit() },
+          createdAt: Date.now(), updatedAt: Date.now() },
+      });
+      atomicBillingTaskId = admitted.task.id;
+      atomicSettlementAttempted = true;
+      if (admitted.reused) {
+        const original = admitted.task.result?.imageEditAdmission as
+          Partial<typeof inpaintAdmission> | undefined;
+        if (original?.kind !== 'ordinary-inpaint' || original.route !== '/api/image-edit'
+          || original.requestDigest !== inpaintRequestDigest || original.editMode !== editMode
+          || original.documentSource !== (projectAccess.kind === 'document')) {
+          return NextResponse.json({ success: false, code: 'IMAGE_EDIT_SOURCE_FORBIDDEN' }, { status: 403 });
         }
-        const maskMeta = await sharp(maskBuffer).metadata();
-        if (maskMeta.width !== origW || maskMeta.height !== origH) {
-          console.log(`[inpaint] Resizing mask from ${maskMeta.width}x${maskMeta.height} to ${origW}x${origH}`);
-          maskBuffer = await sharp(maskBuffer)
-            .resize(origW, origH, { fit: 'fill', kernel: 'nearest' })
-            .png()
-            .toBuffer();
-        }
-      } catch (e) {
-        console.error('[inpaint] Failed to process mask:', e);
-        return NextResponse.json({ success: false, error: '蒙版处理失败' }, { status: 500 });
-      }
-
-      // 3. 检测蒙版是否为空 & 获取蒙版原始灰度数据
-      const maskRawData = await sharp(maskBuffer).ensureAlpha().raw().toBuffer();
-      let maskPixelCount = 0;
-      let minX = origW, minY = origH, maxX = 0, maxY = 0;
-      for (let y = 0; y < origH; y++) {
-        for (let x = 0; x < origW; x++) {
-          const idx = (y * origW + x) * 4;
-          const brightness = (maskRawData[idx] + maskRawData[idx + 1] + maskRawData[idx + 2]) / 3;
-          if (brightness > 127) {
-            maskPixelCount++;
-            if (x < minX) minX = x;
-            if (x > maxX) maxX = x;
-            if (y < minY) minY = y;
-            if (y > maxY) maxY = y;
+        if (projectAccess.kind === 'document') {
+          if (original.documentOwnerId !== projectAccess.ownerId
+            || original.documentGrantGeneration !== projectAccess.grantGeneration
+            || original.documentSourceVersionId !== body.assetParentVersionIds?.[0]
+            || typeof original.documentSourcePlacementId !== 'string'
+            || typeof original.documentCanonicalUrl !== 'string') {
+            return NextResponse.json({ success: false, code: 'IMAGE_EDIT_SOURCE_FORBIDDEN' }, { status: 403 });
+          }
+          try {
+            await authorizeDocumentImageEditSourceNow({ access: projectAccess,
+              parentVersionIds: [original.documentSourceVersionId], imageUrl: body.imageUrl,
+              origin: request.nextUrl.origin, expectedCanonicalUrl: original.documentCanonicalUrl,
+              expectedPlacementId: original.documentSourcePlacementId });
+          } catch (error) {
+            if (error instanceof ImageEditSourceAdmissionError) {
+              return NextResponse.json({ success: false, code: error.code, error: error.message },
+                { status: error.status });
+            }
+            throw error;
           }
         }
+        const failed = ['failed', 'cancelled', 'timeout'].includes(admitted.task.status);
+        return NextResponse.json({ success: !failed, taskId: admitted.task.id, action,
+          status: admitted.task.status, error: admitted.task.error, reused: true,
+          ...(typeof admitted.task.result?.imageUrl === 'string'
+            ? { imageUrl: admitted.task.result.imageUrl } : {}) }, { status: failed ? 409 : 200 });
       }
-      if (maskPixelCount === 0) {
-        const modeLabel = editMode === 'erase' ? '擦除区域为空，请先涂抹要擦除的区域' : '蒙版区域为空，请先涂抹要编辑的区域';
-        return NextResponse.json({ success: false, error: modeLabel }, { status: 400 });
-      }
-
-      const isErase = editMode === 'erase';
+      const inpaintPending = (): NextResponse => NextResponse.json({ success: true,
+        taskId: localTaskId, action, status: 'submission-unknown', recoveryPending: true,
+        message: '编辑任务状态待核对，不会重复提交或退款' }, { status: 202 });
+      const leaseOwner = randomUUID();
+      const leaseMs = 90_000;
+      const lease = await claimCloudTaskLease(localTaskId, leaseOwner, leaseMs);
+      if (!lease) return inpaintPending();
+      const leaseHeartbeat = setInterval((): void => {
+        void renewCloudTaskLease(localTaskId, leaseOwner, leaseMs).catch(() => false);
+      }, 30_000);
+      leaseHeartbeat.unref();
+      const completeInpaint = async (edited: Buffer, engine: string,
+        crop?: InpaintCropInfo, actualProviderId?: string, actualModelId?: string): Promise<NextResponse> => {
+        const persisted = await persistInpaintAcceptedResult({ identity: inpaintIdentity,
+          editMode: isErase ? 'erase' : 'mask', edited,
+          ...(crop ? { crop } : {}) });
+        if (!await renewCloudTaskLease(localTaskId, leaseOwner, leaseMs)) return inpaintPending();
+        const result = {
+          imageUrl: persisted.url, checksum: persisted.checksum, engine,
+          providerId: actualProviderId || admitted.task.providerId,
+          usedModel: actualModelId || admitted.task.model,
+        };
+        let completed: boolean;
+        try {
+          completed = projectAccess.kind === 'document'
+            ? await completeDocumentInpaintTask({ identity: inpaintIdentity, result,
+              leaseOwner, leaseAttemptCount: lease.attemptCount,
+              leaseExpiresAt: lease.expiresAt })
+            : await completeCloudTask(localTaskId, result, { leaseOwner,
+              leaseAttemptCount: lease.attemptCount, deadlineAt: lease.expiresAt });
+        } catch (error) {
+          if (!(error instanceof ImageEditSourceAdmissionError) || error.status !== 403) throw error;
+          const settled = await terminateCloudTaskAndRefund(localTaskId, 'failed',
+            '文档图片来源授权已失效', leaseOwner);
+          if (!settled.transitioned) return inpaintPending();
+          await deleteTerminalPrivateInpaintInputs(inpaintIdentity).catch(() => false);
+          return NextResponse.json({ success: false, taskId: localTaskId,
+            code: error.code, error: error.message, status: 'failed' }, { status: 403 });
+        }
+        if (!completed) return inpaintPending();
+        await deleteTerminalPrivateInpaintInputs(inpaintIdentity).catch(error => {
+          console.warn('[inpaint] private input cleanup pending:', error);
+        });
+        return NextResponse.json({ success: true, taskId: localTaskId,
+          imageUrl: persisted.url, action, engine, ...(crop ? { cropInfo: crop } : {}) });
+      };
+      const hasUncertainInpaintSubmission = async (): Promise<boolean> => {
+        const current = await getCloudTaskForUser(localTaskId, authResult.userId);
+        const phases = (current?.result?.imageEditExecution as
+          { phases?: Array<{ attempts?: Array<{ status?: string }> }> } | undefined)?.phases;
+        return phases?.some(phase => phase.attempts?.some(attempt =>
+          attempt.status === 'started' || attempt.status === 'accepted')) === true;
+      };
+      try {
       const totalPixels = origW * origH;
       const maskRatio = (maskPixelCount / totalPixels * 100).toFixed(1);
       console.log(`[inpaint] ${isErase ? 'ERASE' : 'MASK'} mode, image ${origW}x${origH}, mask pixels ${maskPixelCount}/${totalPixels} (${maskRatio}%)`);
@@ -3801,6 +3768,13 @@ export async function POST(request: NextRequest) {
       // 4. 计算裁剪区域（减少送入模型的图片面积）
       const cropInfo = calculateInpaintCrop(origW, origH, minX, minY, maxX, maxY, isErase);
       console.log(`[inpaint] Crop region: ${cropInfo.cropW}x${cropInfo.cropH} at (${cropInfo.cropX},${cropInfo.cropY})`);
+      if (!isErase) {
+        const prepared = await updateCloudTask(localTaskId, {
+          result: { inpaintResult: { editMode: 'mask', ...cropInfo } },
+          mergeResult: true, expectedStatuses: ['processing'], leaseOwner,
+        });
+        if (!prepared) return inpaintPending();
+      }
 
       // ★★★ 路径分叉：擦除走本地修复，蒙版修图走 AI 模型 ★★★
       if (isErase) {
@@ -3857,12 +3831,8 @@ export async function POST(request: NextRequest) {
             );
             if (lamaResult.success && lamaResult.imageUrl) {
               console.log(`[inpaint] IOPaint ${lamaResult.engine || 'iopaint'} erase succeeded: ${lamaResult.imageUrl}`);
-              return NextResponse.json({
-                success: true,
-                imageUrl: lamaResult.imageUrl,
-                action,
-                engine: lamaResult.engine || 'iopaint-lama',
-              });
+              return await completeInpaint(await fetchImageBuffer(lamaResult.imageUrl),
+                lamaResult.engine || 'iopaint-lama');
             }
             console.log(`[inpaint] IOPaint erase failed: ${lamaResult.error}, falling back to AI API`);
           } catch (lamaErr) {
@@ -3920,12 +3890,44 @@ export async function POST(request: NextRequest) {
 
             console.log(`[inpaint] AI erase attempt: full image ${aiInputW}x${aiInputH}, size=${eraseEffectiveSize}, strength=0.85`);
 
-            const eraseResult = await autoTrySubmitImageTask(
-              candidateModels,
-              (m: string) => ({ ...eraseRequestBody, model: m }),
-              '擦除(AI)',
-              '/images/edits',
-            );
+            const erasePhase = await openImageEditProviderPhase({
+              taskId: localTaskId, actorUserId: authResult.userId,
+              projectId: inpaintIdentity.projectId, requestDigest: inpaintRequestDigest,
+              leaseOwner, phase: { phaseId: 'inpaint-erase-submit',
+                inputDigest: createHash('sha256').update(sourceSha256).update(maskSha256)
+                  .update(JSON.stringify({ eraseEffectiveSize, prompt: eraseRequestBody.prompt })).digest('hex'),
+                targets: candidateModels.map(candidate => ({ providerId: candidate.providerId,
+                  modelId: candidate.model, kind: 'image' as const })) },
+              secretValues: candidateModels.map(candidate => candidate.apiKey),
+              beforeDispatch: async (): Promise<void> => {
+                if (projectAccess.kind !== 'document') return;
+                const current = await authorizeDocumentImageEditSource({ access: projectAccess,
+                  action, parentVersionIds: body.assetParentVersionIds, imageUrl: body.imageUrl,
+                  origin: request.nextUrl.origin });
+                if (current !== imageUrl) throw new ImageEditSourceAdmissionError(403, 'IMAGE_EDIT_SOURCE_MISMATCH');
+              },
+              transactionalSourceCheck: projectAccess.kind === 'document'
+                ? async client => authorizeDocumentImageEditSourceLocked(client, {
+                  access: projectAccess, parentVersionIds: body.assetParentVersionIds,
+                  imageUrl: body.imageUrl, origin: request.nextUrl.origin,
+                  expectedCanonicalUrl: imageUrl,
+                }) : undefined,
+            });
+            if (erasePhase.status === 'submission-unknown') return inpaintPending();
+            let eraseResult: Awaited<ReturnType<typeof autoTrySubmitImageTask>>;
+            if (erasePhase.status === 'accepted') {
+              const candidate = candidateModels.find(item => item.providerId === erasePhase.identity.providerId
+                && item.model === erasePhase.identity.modelId);
+              if (!candidate || erasePhase.result.kind !== 'image') return inpaintPending();
+              eraseResult = { taskId: erasePhase.result.taskId, directUrl: erasePhase.result.directUrl,
+                usedModel: candidate.model, providerId: candidate.providerId,
+                apiBaseUrl: candidate.apiBaseUrl, apiKey: candidate.apiKey,
+                advancedParams: candidate.advancedParams };
+            } else {
+              eraseResult = await autoTrySubmitImageTask(candidateModels,
+                (m: string) => ({ ...eraseRequestBody, model: m }), '擦除(AI)',
+                '/images/edits', erasePhase.boundary);
+            }
 
             // AI 模型成功：合成结果到原图
             if (eraseResult.directUrl) {
@@ -3960,191 +3962,25 @@ export async function POST(request: NextRequest) {
                 resultOrigSize = resultBuffer;
               }
 
-              const compositePng = await compositeMaskedEdit({
-                source: imageBuffer,
-                edited: resultOrigSize,
-                mask: maskBuffer,
-              });
-              const resultDataUrl = `data:image/png;base64,${compositePng.toString('base64')}`;
-              console.log(`[inpaint] AI erase masked result: PNG base64 (${(compositePng.length / 1024).toFixed(0)}KB)`);
-              return NextResponse.json({ success: true, imageUrl: resultDataUrl, action, engine: 'ai-erase' });
+              return await completeInpaint(resultOrigSize, 'ai-erase', undefined,
+                eraseResult.providerId, eraseResult.usedModel);
             } else if (eraseResult.taskId) {
-              // 异步模式：服务器端短时间轮询（30秒），超时则返回taskId让前端poll-task接管
-              const ERASE_POLL_TIMEOUT_MS = 30_000; // 30秒服务器端轮询上限
-              const ERASE_POLL_INTERVAL_MS = 3000; // 3秒轮询间隔
-              console.log(`[inpaint] AI erase async: taskId=${eraseResult.taskId}, server-side polling for up to ${ERASE_POLL_TIMEOUT_MS / 1000}s`);
-
-              // ★ 注册异步擦除任务（存储提供商信息，供 poll-task 轮询远端API）
-              const eraseUsedCandidate = candidateModels.find(c => c.model === eraseResult.usedModel) || candidateModels[0];
-              registerTask(eraseResult.taskId, 'erase', '擦除', sessionUser?.id);
-              await persistSubmittedImageTask({
-                taskId: eraseResult.taskId,
-                userId: sessionUser?.id,
-                type: 'erase',
-                providerId: effectiveProviderId,
-                model: eraseResult.usedModel || eraseUsedCandidate?.model,
-                label: '擦除',
-                taskEntryAudit: buildTaskEntryAudit(effectiveProviderId, eraseResult.usedModel || eraseUsedCandidate?.model),
+              const saved = await updateCloudTask(localTaskId, {
+                remoteTaskId: eraseResult.taskId,
+                result: { providerId: eraseResult.providerId, usedModel: eraseResult.usedModel,
+                  inpaintResult: { editMode: 'erase', aiInputW, aiInputH } },
+                mergeResult: true, expectedStatuses: ['processing'], leaseOwner,
               });
-              updateTaskProgress(eraseResult.taskId, {
-                status: 'processing',
-                progress: 10,
-                result: {
-                  usedModel: eraseResult.usedModel || eraseUsedCandidate?.model,
-                  apiBaseUrl: eraseUsedCandidate?.apiBaseUrl,
-                  apiKey: eraseUsedCandidate?.apiKey,
-                  advancedParams: eraseUsedCandidate?.advancedParams,
-                  originalImageUrl: imageUrl,
-                  maskImageUrl: maskImage,
-                }
-              });
-
-              // 服务器端轮询：尝试在超时内获取结果
-              let asyncEraseSucceeded = false;
-              const pollStart = Date.now();
-
-              try {
-                // 查找provider用于轮询
-                const eraseProvider = await findProviderForModel(eraseResult.usedModel || '', 'image')
-                  || await findProviderForModel(eraseResult.usedModel || '', 'image');
-                const eraseApiKey = eraseProvider?.apiKey;
-                const eraseApiBaseUrl = normalizeApiBaseUrl(eraseProvider?.baseUrl || '');
-                const eraseProfile = eraseProvider ? resolveCompatProfile(eraseProvider) : null;
-                const erasePollUrl = eraseApiBaseUrl && eraseProfile ? buildPollUrl(eraseApiBaseUrl, eraseResult.taskId, eraseProfile) : null;
-
-                if (erasePollUrl && eraseApiKey) {
-                  while (Date.now() - pollStart < ERASE_POLL_TIMEOUT_MS) {
-                    // 检查任务是否被取消
-                    if (isTaskCancelled(eraseResult.taskId)) {
-                      console.log(`[inpaint] AI erase task cancelled: ${eraseResult.taskId}`);
-                      return NextResponse.json({ success: false, error: '任务已被取消' }, { status: 200 });
-                    }
-
-                    await new Promise(r => setTimeout(r, ERASE_POLL_INTERVAL_MS));
-
-                    try {
-                      const pollCtrl = new AbortController();
-                      const pollTimer = setTimeout(() => pollCtrl.abort(), 15000);
-                      const pollResp = await fetch(erasePollUrl, {
-                        headers: { 'Authorization': `Bearer ${eraseApiKey}` },
-                        signal: pollCtrl.signal,
-                      });
-                      clearTimeout(pollTimer);
-
-                      if (!pollResp.ok) {
-                        console.warn(`[inpaint] Erase poll HTTP ${pollResp.status}, continuing...`);
-                        continue;
-                      }
-
-                      const pollData = (await pollResp.json()) as Record<string, unknown>;
-                      const innerData = (pollData.data as Record<string, unknown>) || pollData;
-                      const taskStatus = innerData.status as string;
-                      const completedStatuses = ['completed', 'succeeded', 'success', 'done'];
-
-                      if (completedStatuses.includes(taskStatus || '')) {
-                        // 提取图片URL
-                        let sourceUrl: string | null = null;
-                        const images = (innerData.result as Record<string, unknown>)?.images as Array<Record<string, unknown>> | undefined;
-                        if (images && images.length > 0) {
-                          const rawUrl = images[0].url || images[0].image_url;
-                          sourceUrl = Array.isArray(rawUrl) ? rawUrl[0] : (typeof rawUrl === 'string' ? rawUrl : null);
-                        }
-                        if (!sourceUrl) {
-                          const result2 = innerData.result as Record<string, unknown> | undefined;
-                          if (result2?.b64_json) sourceUrl = `data:image/png;base64,${result2.b64_json}`;
-                        }
-
-                        if (sourceUrl) {
-                          console.log(`[inpaint] AI erase async completed in ${((Date.now() - pollStart) / 1000).toFixed(1)}s`);
-                          // 下载结果并合成蒙版
-                          const resultBuffer = await fetchImageBuffer(sourceUrl);
-                          const resultMeta = await sharp(resultBuffer).metadata();
-                          let resultOrigSize: Buffer;
-                          const resW = resultMeta.width || aiInputW;
-                          const resH = resultMeta.height || aiInputH;
-                          if (resW !== origW || resH !== origH) {
-                            let step1: Buffer;
-                            if (resW !== aiInputW || resH !== aiInputH) {
-                              step1 = await sharp(resultBuffer).resize(aiInputW, aiInputH, { fit: 'fill' }).png().toBuffer();
-                            } else {
-                              step1 = resultBuffer;
-                            }
-                            if (aiInputW !== origW || aiInputH !== origH) {
-                              resultOrigSize = await sharp(step1).resize(origW, origH, { fit: 'fill' }).png().toBuffer();
-                            } else {
-                              resultOrigSize = step1;
-                            }
-                          } else {
-                            resultOrigSize = resultBuffer;
-                          }
-
-                          const compositePng = await compositeMaskedEdit({
-                            source: imageBuffer,
-                            edited: resultOrigSize,
-                            mask: maskBuffer,
-                          });
-                          const resultDataUrl = `data:image/png;base64,${compositePng.toString('base64')}`;
-                          console.log(`[inpaint] AI erase async masked result: PNG base64 (${(compositePng.length / 1024).toFixed(0)}KB)`);
-
-                          // 更新任务注册中心
-                          updateTaskProgress(eraseResult.taskId, { status: 'completed', progress: 100, result: { imageUrl: resultDataUrl } });
-                          void recordImageTaskTerminal(eraseResult.taskId, { status: 'completed', imageUrl: resultDataUrl })
-                            .catch(error => console.warn('[image-edit] 云端任务完成记录失败:', error));
-
-                          asyncEraseSucceeded = true;
-                          return NextResponse.json({ success: true, imageUrl: resultDataUrl, action, engine: 'ai-erase-async' });
-                        }
-                        break; // completed but no URL → fall through to BFS
-                      } else if (taskStatus === 'failed') {
-                        console.warn(`[inpaint] AI erase async task failed: ${JSON.stringify(innerData.error)}`);
-                        break; // fall through to BFS
-                      }
-                      // still processing, continue polling
-                      const elapsed = ((Date.now() - pollStart) / 1000).toFixed(0);
-                      updateTaskProgress(eraseResult.taskId, { progress: Math.min(90, 30 + Math.round((Date.now() - pollStart) / ERASE_POLL_TIMEOUT_MS * 60)), label: `擦除中 (${elapsed}s)` });
-                    } catch (pollErr) {
-                      console.warn(`[inpaint] Erase poll error:`, pollErr instanceof Error ? pollErr.message : pollErr);
-                      // continue polling
-                    }
-                  }
-                }
-              } catch (pollSetupErr) {
-                console.warn(`[inpaint] Erase server-side poll setup error:`, pollSetupErr instanceof Error ? pollSetupErr.message : pollSetupErr);
-              }
-
-              if (!asyncEraseSucceeded) {
-                const elapsed = ((Date.now() - pollStart) / 1000).toFixed(0);
-                console.warn(`[inpaint] AI erase async server-side poll timed out after ${elapsed}s, returning taskId to client for continued polling`);
-
-                // ★ 注册异步擦除任务（存储提供商信息，供 poll-task 轮询远端API）
-                const eraseCandidate = candidateModels.find(c => c.model === eraseResult.usedModel) || candidateModels[0];
-                registerTask(eraseResult.taskId, 'erase', 'AI擦除', sessionUser?.id);
-                updateTaskProgress(eraseResult.taskId, {
-                  status: 'processing',
-                  progress: 30,
-                  result: {
-                    usedModel: eraseResult.usedModel || eraseCandidate?.model,
-                    apiBaseUrl: eraseCandidate?.apiBaseUrl,
-                    apiKey: eraseCandidate?.apiKey,
-                    advancedParams: eraseCandidate?.advancedParams,
-                    originalImageUrl: imageUrl,
-                    maskImageUrl: maskImage,
-                  }
-                });
-
-                // ★ 不再直接降级到BFS，而是将taskId返回给前端继续轮询
-                // AI返回的结果已经是完整的擦除图，无需蒙版合成
-                return NextResponse.json({
-                  success: true,
-                  taskId: eraseResult.taskId,
-                  action,
-                  engine: 'ai-erase-async',
-                  usedModel: eraseResult.usedModel,
-                  // AI返回的结果已经是完整的擦除图，无需蒙版合成
-                });
-              }
+              if (!saved) return inpaintPending();
+              registerTask(localTaskId, 'erase', '擦除', authResult.userId);
+              updateTaskProgress(localTaskId, { status: 'processing', progress: 10,
+                creditCost: deductedCredits, result: { remoteTaskId: eraseResult.taskId,
+                  providerId: eraseResult.providerId, usedModel: eraseResult.usedModel } });
+              return NextResponse.json({ success: true, taskId: localTaskId, action,
+                status: 'processing', engine: 'ai-erase-async', usedModel: eraseResult.usedModel });
             }
           } catch (aiErr) {
+            if (await hasUncertainInpaintSubmission()) return inpaintPending();
             console.warn(`[inpaint] AI erase failed, falling back to local BFS:`, aiErr instanceof Error ? aiErr.message : aiErr);
           }
         }
@@ -4154,13 +3990,17 @@ export async function POST(request: NextRequest) {
         try {
           const resultBuffer = await createLocalEraseInpaint(imageBuffer, maskGrayData, origW, origH, cropInfo);
 
-          const resultJpeg = await sharp(resultBuffer).jpeg({ quality: 92 }).toBuffer();
-          const resultDataUrl = `data:image/jpeg;base64,${resultJpeg.toString('base64')}`;
-          console.log(`[inpaint] Local erase result: JPEG base64 (${(resultJpeg.length / 1024).toFixed(0)}KB)`);
-          return NextResponse.json({ success: true, imageUrl: resultDataUrl, action, engine: 'local-erase' });
+          return await completeInpaint(resultBuffer, 'local-erase');
         } catch (localErr) {
           console.error('[inpaint] Local erase failed:', localErr);
-          return NextResponse.json({ success: false, error: '擦除修复失败，请重试' }, { status: 500 });
+          try {
+            await settleFailedTask({ taskId: localTaskId, status: 'failed', leaseOwner,
+              error: { code: 'INPAINT_LOCAL_ERASE_FAILED', message: '擦除修复失败，请重试',
+                source: 'wujie', retryable: true, requestId } });
+            await deleteTerminalPrivateInpaintInputs(inpaintIdentity);
+          } catch { return inpaintPending(); }
+          return NextResponse.json({ success: false, taskId: localTaskId,
+            error: '擦除修复失败，请重试' }, { status: 500 });
         }
       }
 
@@ -4216,77 +4056,76 @@ export async function POST(request: NextRequest) {
 
       console.log(`[inpaint] AI API request: crop ${cropInfo.cropW}x${cropInfo.cropH}, size=${effectiveSize}, strength=0.8`);
 
-      let result: { taskId?: string; directUrl?: string; usedModel?: string };
+      let result: Awaited<ReturnType<typeof autoTrySubmitImageTask>>;
       try {
-        result = await autoTrySubmitImageTask(
-          candidateModels,
-          (m: string) => ({ ...requestBody, model: m }),
-          '蒙版修图',
-          '/images/edits',
-        );
+        const maskPhase = await openImageEditProviderPhase({
+          taskId: localTaskId, actorUserId: authResult.userId,
+          projectId: inpaintIdentity.projectId, requestDigest: inpaintRequestDigest,
+          leaseOwner, phase: { phaseId: 'inpaint-mask-submit',
+            inputDigest: createHash('sha256').update(sourceSha256).update(maskSha256)
+              .update(JSON.stringify({ effectiveSize, prompt: inpaintPrompt, cropInfo })).digest('hex'),
+            targets: candidateModels.map(candidate => ({ providerId: candidate.providerId,
+              modelId: candidate.model, kind: 'image' as const })) },
+          secretValues: candidateModels.map(candidate => candidate.apiKey),
+          beforeDispatch: async (): Promise<void> => {
+            if (projectAccess.kind !== 'document') return;
+            const current = await authorizeDocumentImageEditSource({ access: projectAccess,
+              action, parentVersionIds: body.assetParentVersionIds, imageUrl: body.imageUrl,
+              origin: request.nextUrl.origin });
+            if (current !== imageUrl) throw new ImageEditSourceAdmissionError(403, 'IMAGE_EDIT_SOURCE_MISMATCH');
+          },
+          transactionalSourceCheck: projectAccess.kind === 'document'
+            ? async client => authorizeDocumentImageEditSourceLocked(client, {
+              access: projectAccess, parentVersionIds: body.assetParentVersionIds,
+              imageUrl: body.imageUrl, origin: request.nextUrl.origin,
+              expectedCanonicalUrl: imageUrl,
+            }) : undefined,
+        });
+        if (maskPhase.status === 'submission-unknown') return inpaintPending();
+        if (maskPhase.status === 'accepted') {
+          const candidate = candidateModels.find(item => item.providerId === maskPhase.identity.providerId
+            && item.model === maskPhase.identity.modelId);
+          if (!candidate || maskPhase.result.kind !== 'image') return inpaintPending();
+          result = { taskId: maskPhase.result.taskId, directUrl: maskPhase.result.directUrl,
+            usedModel: candidate.model, providerId: candidate.providerId,
+            apiBaseUrl: candidate.apiBaseUrl, apiKey: candidate.apiKey,
+            advancedParams: candidate.advancedParams };
+        } else {
+          result = await autoTrySubmitImageTask(candidateModels,
+            (m: string) => ({ ...requestBody, model: m }), '蒙版修图',
+            '/images/edits', maskPhase.boundary);
+        }
       } catch {
+        if (await hasUncertainInpaintSubmission()) return inpaintPending();
         console.log(`[inpaint] All image models failed, trying chat-vision fallback...`);
         const fallbackResult = await autoTryChatVisionFallback(
-          croppedImageDataUrl, croppedMaskDataUrl, inpaintPrompt, 'inpaint'
+          croppedImageDataUrl, croppedMaskDataUrl, inpaintPrompt, 'inpaint', modelPlan
         );
         if (fallbackResult) {
-          result = fallbackResult as { taskId: string; directUrl?: string; usedModel?: string };
+          result = fallbackResult;
         } else {
-          return NextResponse.json({ success: false, error: '图像编辑失败，当前无可用模型支持图像编辑，请在管理员系统中配置支持图生图的模型' }, { status: 500 });
+          const failureMessage = '图像编辑失败，当前无可用模型支持图像编辑，请在管理员系统中配置支持图生图的模型';
+          try {
+            await settleFailedTask({ taskId: localTaskId, status: 'failed', leaseOwner,
+              error: { code: 'INPAINT_NO_AVAILABLE_MODEL', message: failureMessage,
+                source: 'wujie', retryable: true, requestId } });
+            const settled = await getCloudTaskForUser(localTaskId, authResult.userId);
+            if (settled?.status !== 'failed' || settled.creditStatus !== 'refunded') return inpaintPending();
+            await deleteTerminalPrivateInpaintInputs(inpaintIdentity).catch(() => false);
+          } catch { return inpaintPending(); }
+          return NextResponse.json({ success: false, taskId: localTaskId,
+            error: failureMessage }, { status: 500 });
         }
       }
 
       // 11. 处理结果
       if (result.directUrl) {
         try {
-          // 下载 AI 生成的结果
           const resultBuffer = await fetchImageBuffer(result.directUrl);
-          const resultMeta = await sharp(resultBuffer).metadata();
-
-          // 将 AI 结果等比缩放到裁剪区域内（inside模式保留完整内容，避免cover裁切导致错位）
-          let resizedResult: Buffer;
-          if (resultMeta.width !== cropInfo.cropW || resultMeta.height !== cropInfo.cropH) {
-            const innerResult = await sharp(resultBuffer)
-              .resize(cropInfo.cropW, cropInfo.cropH, { fit: 'inside', withoutEnlargement: true })
-              .png()
-              .toBuffer();
-            // 如果缩放后尺寸仍小于裁剪区域，用原图背景色填充边缘（居中放置）
-            const innerMeta = await sharp(innerResult).metadata();
-            const padX = Math.floor((cropInfo.cropW - (innerMeta.width || cropInfo.cropW)) / 2);
-            const padY = Math.floor((cropInfo.cropH - (innerMeta.height || cropInfo.cropH)) / 2);
-            if (padX > 0 || padY > 0) {
-              resizedResult = await sharp({
-                create: {
-                  width: cropInfo.cropW,
-                  height: cropInfo.cropH,
-                  channels: 4,
-                  background: { r: 0, g: 0, b: 0, alpha: 0 },
-                }
-              })
-                .composite([{ input: innerResult, left: padX, top: padY, blend: 'over' }])
-                .png()
-                .toBuffer();
-            } else {
-              resizedResult = innerResult;
-            }
-          } else {
-            resizedResult = resultBuffer;
-          }
-
-          const editedFullSize = await sharp(imageBuffer)
-            .composite([{ input: resizedResult, left: cropInfo.cropX, top: cropInfo.cropY }])
-            .png()
-            .toBuffer();
-          const compositeResult = await compositeMaskedEdit({
-            source: imageBuffer,
-            edited: editedFullSize,
-            mask: maskBuffer,
-          });
-          const compositeDataUrl = `data:image/png;base64,${compositeResult.toString('base64')}`;
-          console.log(`[inpaint] AI masked composite result: PNG base64 (${(compositeResult.length / 1024).toFixed(0)}KB)`);
-
-          return NextResponse.json({ success: true, imageUrl: compositeDataUrl, action, engine: 'ai-crop-composite', cropInfo });
+          return await completeInpaint(resultBuffer, 'ai-crop-composite', cropInfo,
+            result.providerId, result.usedModel);
         } catch (compositeErr) {
+          if (await hasUncertainInpaintSubmission()) return inpaintPending();
           const message = compositeErr instanceof Error ? compositeErr.message : String(compositeErr);
           console.error('[inpaint] Masked composite failed closed:', message);
           return NextResponse.json({
@@ -4299,41 +4138,32 @@ export async function POST(request: NextRequest) {
       }
 
       // 异步结果 - 返回 taskId 给前端轮询，poll-task 会做蒙版合成
-      // ★ 注册异步蒙版修图任务（存储提供商信息 + 合成所需数据，供 poll-task 轮询后做蒙版合成）
       if (result.taskId) {
-        const usedCandidate = candidateModels.find(c => c.model === result.usedModel) || candidateModels[0];
-        registerTask(result.taskId, 'mask', '蒙版修图', sessionUser?.id);
-        await persistSubmittedImageTask({
-          taskId: result.taskId,
-          userId: sessionUser?.id,
-          type: 'mask',
-          providerId: effectiveProviderId,
-          model: result.usedModel || usedCandidate?.model,
-          label: '蒙版修图',
-          taskEntryAudit: buildTaskEntryAudit(effectiveProviderId, result.usedModel || usedCandidate?.model),
+        const saved = await updateCloudTask(localTaskId, {
+          remoteTaskId: result.taskId,
+          result: { providerId: result.providerId, usedModel: result.usedModel,
+            inpaintResult: { editMode: 'mask', ...cropInfo } },
+          mergeResult: true, expectedStatuses: ['processing'], leaseOwner,
         });
-        updateTaskProgress(result.taskId, {
-          status: 'processing',
-          progress: 10,
-          result: {
-            usedModel: result.usedModel || usedCandidate?.model,
-            apiBaseUrl: usedCandidate?.apiBaseUrl,
-            apiKey: usedCandidate?.apiKey,
-            advancedParams: usedCandidate?.advancedParams,
-            cropInfo,
-            originalImageUrl: imageUrl,
-            maskImageUrl: maskImage,
-          }
-        });
+        if (!saved) return inpaintPending();
+        registerTask(localTaskId, 'mask', '蒙版修图', authResult.userId);
+        updateTaskProgress(localTaskId, { status: 'processing', progress: 10,
+          creditCost: deductedCredits,
+          result: { remoteTaskId: result.taskId, providerId: result.providerId,
+            usedModel: result.usedModel } });
       }
       return NextResponse.json({
         success: true,
-        taskId: result.taskId,
+        taskId: localTaskId,
         action,
         cropInfo,
         engine: 'ai-api',
         usedModel: result.usedModel,
       });
+      } finally {
+        clearInterval(leaseHeartbeat);
+        await releaseCloudTaskLease(localTaskId, leaseOwner);
+      }
     }
 
     if (action === 'outpaint') {
@@ -4503,86 +4333,155 @@ export async function POST(request: NextRequest) {
       genBody.image_urls = [originalBase64];
       genBody.strength = 0.65; // 保留原图风格，同时允许扩展
 
-      // Submit to AI model API — 使用 autoTrySubmitImageTask 自动回退非 gemini-image 的候选模型
-      const result = await autoTrySubmitImageTask(
-        candidateModels,
-        (model: string) => ({ ...genBody, model }),
-        '扩展画面',
-        '/images/edits',
-      );
-      const usedModel = result.usedModel || modelStr;
-
-      // ★ 扩展结果持久化：直接保存 AI 生成结果
-      // 不做原图合成，AI 已根据原图+方向提示词生成完整扩展图
-      const persistOutpaintResult = async (resultBuffer: Buffer): Promise<{ url: string; w: number; h: number }> => {
-        const resultMeta = await sharp(resultBuffer).metadata();
-        const resultW = resultMeta.width || genW;
-        const resultH = resultMeta.height || genH;
-
-        console.log(`[outpaint] AI result size: ${resultW}x${resultH}, target: ${targetW}x${targetH}, genSize: ${genW}x${genH}`);
-
-        // Resize AI result to target dimensions if needed
-        let finalBuf = resultBuffer;
-        if (resultW !== targetW || resultH !== targetH) {
-          finalBuf = await sharp(resultBuffer)
-            .resize(targetW, targetH, { fit: 'fill' })
-            .jpeg({ quality: 92 })
-            .toBuffer();
-        } else {
-          finalBuf = await sharp(resultBuffer).jpeg({ quality: 92 }).toBuffer();
-        }
-
-        const resultFileName = `outpaint_${Date.now()}.jpg`;
-        let resultUrl: string = '';
-        if (isS3Available()) {
-          resultUrl = (await uploadImageToS3(finalBuf, resultFileName, 'image/jpeg')) || '';
-        }
-        if (!resultUrl) {
-          resultUrl = `data:image/jpeg;base64,${finalBuf.toString('base64')}`;
-        }
-        return { url: resultUrl, w: targetW, h: targetH };
-      };
-
-      if (result.directUrl) {
-        // 同步结果
-        try {
-          const resultBuffer = await fetchImageBuffer(result.directUrl);
-          const { url: compositeResultUrl } = await persistOutpaintResult(resultBuffer);
-
-          console.log(`[outpaint] Sync result saved`);
-
-          return NextResponse.json({ success: true, imageUrl: compositeResultUrl, action, targetWidth: targetW, targetHeight: targetH });
-        } catch (compositeErr) {
-          console.error('[outpaint] Persist failed, trying to persist raw URL:', compositeErr);
-          // ★ 尝试持久化远程URL，避免浏览器无法加载
-          let fallbackUrl = result.directUrl;
-          try {
-            const { persistRemoteImage } = await import('@/lib/s3-storage');
-            const localUrl = await persistRemoteImage(result.directUrl, 'generate/outpaint');
-            if (localUrl) fallbackUrl = localUrl;
-          } catch {}
-          return NextResponse.json({ success: true, imageUrl: fallbackUrl, action, targetWidth: targetW, targetHeight: targetH });
-        }
+      // Create the billable local identity before a provider can receive a POST.
+      const now = Date.now();
+      const admitted = await createBillableTask({
+        userId: authResult.userId,
+        idempotencyKey: replayKey || requestId,
+        requestDigest: inputIdentityDigest,
+        creditCost: deductedCredits,
+        beforeCharge: projectAccess.kind === 'document'
+          ? async client => authorizeDocumentImageEditSourceLocked(client, {
+            access: projectAccess, parentVersionIds: body.assetParentVersionIds,
+            imageUrl: body.imageUrl, origin: request.nextUrl.origin,
+            expectedCanonicalUrl: imageUrl,
+          }) : undefined,
+        task: {
+          id: `image-edit-${randomUUID()}`,
+          projectId: projectAccess.kind === 'unscoped' ? undefined : projectAccess.projectId,
+          sessionId: body.sessionId,
+          messageId: body.messageId,
+          type: 'image-edit', status: 'processing', progress: 0,
+          providerId: candidateModels[0]?.providerId || effectiveProviderId,
+          model: candidateModels[0]?.model || modelStr,
+          label: '扩展画面',
+          result: { imageEditAdmission: { version: 1, route: '/api/image-edit', kind: 'ordinary-outpaint' },
+            taskEntryAudit: buildTaskEntryAudit(), outpaintInfo: { targetW, targetH, genW, genH } },
+          createdAt: now, updatedAt: now,
+        },
+      });
+      const localTaskId = admitted.task.id;
+      atomicBillingTaskId = localTaskId;
+      atomicSettlementAttempted = true;
+      if (admitted.reused) {
+        const failed = ['failed', 'cancelled', 'timeout'].includes(admitted.task.status);
+        return NextResponse.json({ success: !failed, taskId: localTaskId, action,
+          status: admitted.task.status, error: admitted.task.error, reused: true,
+          ...(typeof admitted.task.result?.imageUrl === 'string'
+            ? { imageUrl: admitted.task.result.imageUrl } : {}) },
+        { status: failed ? 409 : 200 });
       }
+      const pendingOutpaint = (): NextResponse => NextResponse.json({
+        success: true, taskId: localTaskId, action, status: 'submission-unknown',
+        recoveryPending: true, message: '扩图提交状态待核对；不会自动重发或退款',
+      }, { status: 202 });
+      const leaseOwner = randomUUID();
+      // A short, renewable lease bounds crash recovery for expiring direct URLs.
+      // The original submitter retains it throughout provider IO and result persistence.
+      const outpaintLeaseMs = 90_000;
+      const lease = await claimCloudTaskLease(localTaskId, leaseOwner, outpaintLeaseMs);
+      if (!lease) return pendingOutpaint();
+      const leaseHeartbeat = setInterval((): void => {
+        void renewCloudTaskLease(localTaskId, leaseOwner, outpaintLeaseMs).catch(() => false);
+      }, 30_000);
+      leaseHeartbeat.unref();
+      let result: Awaited<ReturnType<typeof autoTrySubmitImageTask>>;
+      try {
+        const inputDigest = createHash('sha256').update(originalRefBuffer)
+          .update(JSON.stringify({ genW, genH, outpaintPrompt, outpaintNegPrompt })).digest('hex');
+        const opened = await openImageEditProviderPhase({
+          taskId: localTaskId, actorUserId: authResult.userId,
+          projectId: projectAccess.kind === 'unscoped' ? '' : projectAccess.projectId,
+          requestDigest: inputIdentityDigest, leaseOwner,
+          phase: { phaseId: 'outpaint-submit', inputDigest,
+            targets: candidateModels.map(candidate => ({
+              providerId: candidate.providerId, modelId: candidate.model, kind: 'image' as const,
+            })) },
+          secretValues: candidateModels.map(candidate => candidate.apiKey),
+          beforeDispatch: async (): Promise<void> => {
+            if (projectAccess.kind !== 'document') return;
+            const current = await authorizeDocumentImageEditSource({ access: projectAccess, action,
+              parentVersionIds: body.assetParentVersionIds, imageUrl: body.imageUrl,
+              origin: request.nextUrl.origin });
+            if (current !== imageUrl) throw new ImageEditSourceAdmissionError(403, 'IMAGE_EDIT_SOURCE_MISMATCH');
+          },
+          transactionalSourceCheck: projectAccess.kind === 'document'
+            ? async client => authorizeDocumentImageEditSourceLocked(client, {
+              access: projectAccess, parentVersionIds: body.assetParentVersionIds,
+              imageUrl: body.imageUrl, origin: request.nextUrl.origin,
+              expectedCanonicalUrl: imageUrl,
+            }) : undefined,
+        });
+        if (opened.status === 'submission-unknown') return pendingOutpaint();
+        if (opened.status === 'accepted') {
+          const candidate = candidateModels.find(item => item.providerId === opened.identity.providerId
+            && item.model === opened.identity.modelId);
+          if (!candidate || opened.result.kind !== 'image') return pendingOutpaint();
+          result = { taskId: opened.result.taskId, directUrl: opened.result.directUrl,
+            usedModel: candidate.model, providerId: candidate.providerId,
+            apiBaseUrl: candidate.apiBaseUrl, apiKey: candidate.apiKey,
+            advancedParams: candidate.advancedParams };
+        } else {
+          result = await autoTrySubmitImageTask(candidateModels,
+            (model: string) => ({ ...genBody, model }), '扩展画面', '/images/edits', opened.boundary);
+        }
+        if (result.taskId) {
+          const saved = await updateCloudTask(localTaskId, {
+            remoteTaskId: result.taskId,
+            result: { providerId: result.providerId, usedModel: result.usedModel,
+              outpaintInfo: { targetW, targetH, genW, genH } },
+            mergeResult: true, expectedStatuses: ['processing'], leaseOwner,
+          });
+          if (!saved) return pendingOutpaint();
+        }
+        if (result.directUrl) {
+          const outpaintInfo = readOutpaintResultSize({ targetW, targetH, genW, genH });
+          if (!outpaintInfo) return pendingOutpaint();
+          const imageUrl = await persistOutpaintDirectResult(result.directUrl, outpaintInfo);
+          if (!await renewCloudTaskLease(localTaskId, leaseOwner, outpaintLeaseMs)) return pendingOutpaint();
+          const completed = await completeCloudTask(localTaskId, {
+            imageUrl, providerId: result.providerId,
+            usedModel: result.usedModel || modelStr, outpaintInfo,
+          }, { leaseOwner, leaseAttemptCount: lease.attemptCount,
+            deadlineAt: Date.now() + outpaintLeaseMs });
+          if (!completed) return pendingOutpaint();
+          return NextResponse.json({ success: true, taskId: localTaskId,
+            imageUrl, action, targetWidth: targetW, targetHeight: targetH });
+        }
+      } catch (error) {
+        const current = await getCloudTaskForUser(localTaskId, authResult.userId);
+        const phases = (current?.result?.imageEditExecution as
+          { phases?: Array<{ attempts?: Array<{ status?: string }> }> } | undefined)?.phases;
+        const mayHaveSent = phases?.some(phase => phase.attempts?.some(attempt =>
+          attempt.status === 'started' || attempt.status === 'accepted')) === true;
+        if (mayHaveSent || !current || current.status !== 'processing') return pendingOutpaint();
+        try {
+          await settleFailedTask({ taskId: localTaskId, status: 'failed', leaseOwner,
+            error: { code: 'IMAGE_EDIT_SUBMISSION_REJECTED',
+              message: error instanceof Error ? error.message : '扩图提交失败',
+              source: 'wujie', retryable: true, requestId } });
+        } catch { return pendingOutpaint(); }
+        return NextResponse.json({ success: false, taskId: localTaskId,
+          status: 'failed', error: error instanceof Error ? error.message : '扩图提交失败' },
+        { status: 502 });
+      } finally {
+        clearInterval(leaseHeartbeat);
+        await releaseCloudTaskLease(localTaskId, leaseOwner);
+      }
+      const usedModel = result.usedModel || modelStr;
 
       // 异步结果 - 返回 taskId，前端轮询后直接使用 AI 结果
       if (result.taskId) {
-        registerTask(result.taskId, 'outpaint', '扩展画面', sessionUser?.id);
-        await persistSubmittedImageTask({
-          taskId: result.taskId,
-          userId: sessionUser?.id,
-          type: 'outpaint',
-          providerId: effectiveProviderId,
-          model: result.usedModel || apiModelStr,
-          label: '扩展画面',
-          taskEntryAudit: buildTaskEntryAudit(effectiveProviderId, result.usedModel || apiModelStr),
-        });
-        updateTaskProgress(result.taskId, {
+        registerTask(localTaskId, 'outpaint', '扩展画面', authResult.userId);
+        updateTaskProgress(localTaskId, {
           status: 'processing',
           progress: 10,
+          creditCost: deductedCredits,
           result: {
             outpaintInfo: { targetW, targetH, genW, genH },
+            remoteTaskId: result.taskId,
             usedModel,
+            providerId: result.providerId,
             apiBaseUrl: result.apiBaseUrl,
             apiKey: result.apiKey,
             advancedParams: result.advancedParams,
@@ -4591,7 +4490,7 @@ export async function POST(request: NextRequest) {
       }
       return NextResponse.json({
         success: true,
-        taskId: result.taskId,
+        taskId: localTaskId,
         action,
         targetWidth: targetW,
         targetHeight: targetH,
@@ -4601,6 +4500,18 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ success: false, error: `不支持的操作: ${action}` }, { status: 400 });
 
   } catch (error: unknown) {
+    // A rejected admission owns no new task or charge; never settle the existing task.
+    if (error instanceof ActiveImageEditAttemptError) {
+      return NextResponse.json({ success: false, code: error.code, error: error.message,
+        taskId: error.taskId, idempotencyKey: error.idempotencyKey, status: error.taskStatus },
+      { status: error.status });
+    }
+    if (error instanceof IdempotencyConflictError) {
+      return NextResponse.json({ success: false, code: error.code, error: error.message }, { status: error.status });
+    }
+    if (error instanceof InsufficientCreditsError) {
+      return NextResponse.json({ success: false, code: error.code, error: '积分不足' }, { status: error.status });
+    }
     const errMsg = error instanceof Error ? error.message : String(error);
     console.error('Image edit error:', errMsg);
     // 记录操作日志 - 图片编辑失败
@@ -4611,7 +4522,7 @@ export async function POST(request: NextRequest) {
       durationMs: opTimer.end(),
     });
     // 退款：异常失败时退还积分
-    if (usesAtomicBilling && atomicBillingTaskId) {
+    if (usesAtomicBilling && atomicBillingTaskId && !atomicSettlementAttempted) {
       try {
         await settleFailedTask({
           taskId: atomicBillingTaskId,

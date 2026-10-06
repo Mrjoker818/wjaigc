@@ -65,7 +65,8 @@ export interface SafeImageDimensions {
 const MANAGED_MEDIA_PREFIXES = ['/uploads/', '/api/serve-upload/', '/gallery/'];
 const PRIVATE_MEDIA_ROOTS = new Set(['system', 'users']);
 
-function detectImageMimeType(buffer: Buffer): string | null {
+/** Inspect existing bytes without allocating another full image input buffer. */
+export function detectImageMimeType(buffer: Buffer): string | null {
   if (buffer.length >= 2 && buffer[0] === 0x42 && buffer[1] === 0x4d) return 'image/bmp';
   if (
     buffer.length >= 8

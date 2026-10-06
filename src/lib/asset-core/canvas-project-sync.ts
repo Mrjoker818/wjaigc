@@ -1,6 +1,7 @@
 import type { Pool, PoolClient, QueryResultRow } from 'pg';
 
 import { getPool } from '@/lib/db-client';
+import { buildCanonicalAnnotationSourceVersionId } from '@/features/annotations/annotation-source-version';
 import type { CanvasImage, Project } from '@/lib/user-types';
 
 import {
@@ -677,6 +678,8 @@ export interface AssetV3CanvasPlacement {
   thumbnailUrl?: string;
   availability: MediaAvailability;
   recoverySourceUrl?: string;
+  sourceWidth?: number;
+  sourceHeight?: number;
   transform: Record<string, unknown>;
   metadata: Record<string, unknown>;
 }
@@ -692,6 +695,8 @@ interface AssetV3PlacementRow extends QueryResultRow {
   thumbnail_url: string | null;
   availability: MediaAvailability;
   recovery_source_url: string | null;
+  width: number | null;
+  height: number | null;
   transform: Record<string, unknown>;
   metadata: Record<string, unknown>;
 }
@@ -745,11 +750,14 @@ export function hydrateAssetV3Projects(
         y: numberOr(transform.y, base.y ?? 0),
         width,
         height,
-        originalWidth: numberOr(transform.originalWidth, base.originalWidth ?? width),
-        originalHeight: numberOr(transform.originalHeight, base.originalHeight ?? height),
+        originalWidth: placement.sourceWidth ?? numberOr(transform.originalWidth, base.originalWidth ?? width),
+        originalHeight: placement.sourceHeight ?? numberOr(transform.originalHeight, base.originalHeight ?? height),
         rotation: numberOr(transform.rotation, base.rotation ?? 0),
         zIndex: numberOr(transform.zIndex, base.zIndex ?? 0),
         createdAt: base.createdAt ?? Date.now(),
+        ...(!base.annotationVersionId && base.createdAt === undefined ? {
+          annotationVersionId: buildCanonicalAnnotationSourceVersionId(placement.entityId, placement.assetVersionId),
+        } : {}),
         mediaAvailability: placement.availability,
         assetId: placement.assetId,
         assetVersionId: placement.assetVersionId,
@@ -780,6 +788,7 @@ function assetV3PlacementQuery(includeThumbnailVariants: boolean): string {
   return `SELECT placement.project_id, placement.entity_id, placement.asset_id,
             placement.asset_version_id, placement.id AS placement_id,
             asset.kind AS asset_kind, version.file_url, version.availability, version.recovery_source_url,
+            version.width, version.height,
             ${thumbnailSelection}, placement.transform, placement.metadata
      FROM wujie_workspace_placements placement
      JOIN wujie_assets asset
@@ -825,6 +834,8 @@ export async function readAssetV3Projects(
       ...(row.thumbnail_url ? { thumbnailUrl: row.thumbnail_url } : {}),
       availability: row.availability,
       ...(row.recovery_source_url ? { recoverySourceUrl: row.recovery_source_url } : {}),
+      ...(row.width ? { sourceWidth: row.width } : {}),
+      ...(row.height ? { sourceHeight: row.height } : {}),
       transform: asRecord(row.transform),
       metadata: asRecord(row.metadata),
     });

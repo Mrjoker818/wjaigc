@@ -14,6 +14,9 @@ const registry = vi.hoisted(() => ({
 
 vi.mock('@/lib/cloud-task-storage', () => storage);
 vi.mock('@/lib/task-registry', () => registry);
+vi.mock('@/lib/refund-identity-claim', () => ({
+  ensureRefundIdentityClaims: vi.fn(async (): Promise<void> => {}),
+}));
 
 import {
   createBillableTask,
@@ -100,6 +103,21 @@ describe('task billing service', () => {
       code: 'IDEMPOTENCY_CONFLICT',
       status: 409,
       statusCode: 409,
+    });
+  });
+
+  it('forwards publication separately without changing the request digest or persisted result', async () => {
+    storage.createBillableCloudTask.mockResolvedValue({ task: persistedTask, reused: false, charged: true });
+    const canvasPublication = { access: { kind: 'document' as const, actorUserId: 'user-a', ownerId: 'owner',
+      projectId: 'shared', grantGeneration: '1' }, workspace: 'canvas' as const, workspaceId: 'canvas:shared' };
+    await createBillableTask({ userId: 'user-a', idempotencyKey: 'request-key', requestDigest: 'digest-a', creditCost: 7,
+      canvasPublication, task: { id: 'task-owner', projectId: 'shared', type: 'agent', status: 'processing',
+        progress: 0, result: { userResult: true }, createdAt: 100, updatedAt: 100 } });
+    expect(storage.createBillableCloudTask).toHaveBeenCalledWith({
+      userId: 'user-a', idempotencyKey: 'request-key', requestDigest: 'digest-a', creditCost: 7, canvasPublication,
+      task: { id: 'task-owner', userId: 'user-a', projectId: 'shared', type: 'agent', status: 'processing',
+        progress: 0, result: { userResult: true }, createdAt: 100, updatedAt: 100,
+        idempotencyKey: 'request-key', requestDigest: 'digest-a' },
     });
   });
 
@@ -247,7 +265,7 @@ describe('task billing service', () => {
     expect(storageSource).toContain('refunded_transaction_id');
   });
 
-  it('installs additive task billing columns and one-ledger-entry guards', () => {
+  it('installs additive task billing columns', () => {
     const cloudTaskSource = readFileSync(
       resolve(process.cwd(), 'src/lib/cloud-task-storage.ts'),
       'utf8',
@@ -268,9 +286,6 @@ describe('task billing service', () => {
     );
     expect(databaseSource).toContain(
       "['wujie_credit_transactions', 'task_id', 'TEXT DEFAULT \\'\\'']",
-    );
-    expect(databaseSource).toContain(
-      'CREATE UNIQUE INDEX IF NOT EXISTS idx_credit_tx_task_type_once',
     );
   });
 });

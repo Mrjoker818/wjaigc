@@ -10,6 +10,54 @@ import {
 } from '@/lib/asset-core/cleanup-outbox';
 
 describe('asset cleanup outbox', () => {
+  it('refuses ownership without usable file and directory incarnation timestamps', async () => {
+    const records: AssetCleanupOutboxRecord[] = [];
+    const service = createAssetCleanupOutboxService({
+      store: {
+        enqueue: async record => { records.push(record); }, claim: async () => [],
+        complete: async () => true, retry: async () => true, hasAssetReference: async () => false,
+      },
+      removeLocal: async () => undefined, deleteS3: async () => undefined,
+    });
+    for (const part of ['file', 'directory'] as const) {
+      const localIdentity = { version: 1 as const,
+        directory: { dev: '1', ino: '2', birthtimeNs: '100' },
+        file: { dev: '1', ino: '3', birthtimeNs: '200' } };
+      localIdentity[part].birthtimeNs = '0';
+      await expect(service.recordFailure({ rootId: 'server-data', localPath: 'exports/.own.tmp', localIdentity, lastError: 'failure' }))
+        .rejects.toThrow('ASSET_CLEANUP_LOCAL_IDENTITY_INVALID');
+    }
+    expect(records).toEqual([]);
+  });
+
+  it.each(['gif', 'avif', 'bmp', 'mp4', 'webm', 'mov', 'm4v'])('retries %s cleanup and preserves referenced media', async extension => {
+    const records = new Map<string, AssetCleanupOutboxRecord>();
+    let referenced = false;
+    let failing = true;
+    const key = `exports/0123456789abcdef-original.${extension}`;
+    const objects = new Set([key]);
+    const store = {
+      enqueue: async (record: AssetCleanupOutboxRecord): Promise<void> => { records.set(record.id, record); },
+      claim: async (): Promise<AssetCleanupOutboxRecord[]> => [...records.values()].filter(record => record.status !== 'completed').map(record => ({ ...record, leaseToken: 'lease' })),
+      complete: async (id: string): Promise<boolean> => { records.get(id)!.status = 'completed'; return true; },
+      retry: async (): Promise<boolean> => true,
+      hasAssetReference: async (): Promise<boolean> => referenced,
+    };
+    const service = createAssetCleanupOutboxService({ store,
+      deleteS3: async (target: string): Promise<void> => { if (failing) throw new Error('offline'); objects.delete(target); },
+      removeLocal: async (): Promise<void> => undefined,
+    });
+    await service.recordFailure({ rootId: 'server-data', storageKey: key, localPath: key, lastError: 'offline' });
+    expect(await service.drain()).toEqual({ completed: 0, failed: 1 });
+    expect(objects.has(key)).toBe(true);
+    failing = false;
+    expect(await service.drain()).toEqual({ completed: 1, failed: 0 });
+    expect(objects.has(key)).toBe(false);
+    objects.add(key); referenced = true;
+    await service.recordFailure({ rootId: 'server-data', storageKey: key, lastError: 'offline' });
+    expect(await service.drain()).toEqual({ completed: 1, failed: 0 });
+    expect(objects.has(key)).toBe(true);
+  });
   it('accepts tightly scoped gateway image paths for durable cleanup retry', async () => {
     const store = {
       enqueue: vi.fn(async () => undefined), claim: vi.fn(async () => []),

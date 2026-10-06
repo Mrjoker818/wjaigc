@@ -1,4 +1,7 @@
-import * as Y from 'yjs';
+import type * as YTypes from 'yjs';
+// 服务端与原生协作入口统一加载 CJS；浏览器由构建配置统一解析。
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const Y: typeof YTypes = require('yjs');
 
 import type { CanvasAnnotationV2 } from '@/features/annotations/annotation-types';
 import { isAssetVersionId } from '@/lib/asset-core/asset-version-id';
@@ -196,11 +199,12 @@ function validateAnnotationRecords(
     assertSafeId(id, 'annotation id');
     assertRecordFields(raw,
       ['id', 'projectId', 'sourceImageId', 'sourceVersionId', 'type', 'geometry', 'status', 'createdAt', 'updatedAt'],
-      ['label', 'instruction', 'confidence', 'maskAssetId', 'overlayAssetId'], 'annotation record');
+      ['label', 'instruction', 'confidence', 'maskAssetId', 'overlayAssetId', 'orderKey'], 'annotation record');
     if (raw.id !== id) throw new Error('Invalid canvas annotation id');
     assertSafeId(raw.projectId, 'annotation projectId');
     assertSafeId(raw.sourceImageId, 'annotation sourceImageId');
     assertSafeId(raw.sourceVersionId, 'annotation sourceVersionId');
+    if (Object.hasOwn(raw, 'orderKey')) assertSafeId(raw.orderKey, 'annotation orderKey');
     if (!Object.hasOwn(tombstones, id) &&
         (!Object.hasOwn(placements, raw.sourceImageId) || placements[raw.sourceImageId as string].deleted === true)) {
       throw new Error('Canvas annotation references an unknown placement');
@@ -228,7 +232,7 @@ function validateAnnotationRecords(
   return safe;
 }
 
-function assertCanvasRootTypes(doc: Y.Doc): void {
+function assertCanvasRootTypes(doc: YTypes.Doc): void {
   for (const rootName of doc.share.keys()) {
     if (!ROOT_FIELDS.has(rootName)) {
       throw new Error('Canvas document contains an unsupported root type');
@@ -236,7 +240,7 @@ function assertCanvasRootTypes(doc: Y.Doc): void {
   }
 }
 
-function materializePlacement(doc: Y.Doc, placementId: string): CanvasPlacement {
+function materializePlacement(doc: YTypes.Doc, placementId: string): CanvasPlacement {
   const transform = doc.getMap<unknown>('transforms').get(placementId);
   if (!isRecord(transform) || Object.keys(transform).length !== TRANSFORM_FIELDS.length ||
       TRANSFORM_FIELDS.some((field) => !Object.hasOwn(transform, field))) {
@@ -327,11 +331,11 @@ export function validateCanvasDocumentProjection(value: unknown): CanvasDocument
   };
 }
 
-export function createCanvasDocument(): Y.Doc {
+export function createCanvasDocument(): YTypes.Doc {
   return new Y.Doc();
 }
 
-export function applyCanvasImagePatch(doc: Y.Doc, patch: CanvasImagePatch, origin: unknown): void {
+export function applyCanvasImagePatch(doc: YTypes.Doc, patch: CanvasImagePatch, origin: unknown): void {
   if (!isRecord(patch)) throw new Error('Invalid canvas document patch');
   if (Object.keys(patch).some((field) => !PATCH_FIELDS.has(field))) {
     throw new Error('Canvas document patch contains an unsupported field');
@@ -377,7 +381,7 @@ export function applyCanvasImagePatch(doc: Y.Doc, patch: CanvasImagePatch, origi
   }, origin);
 }
 
-export function tombstoneCanvasGroup(doc: Y.Doc, groupId: string, origin: unknown): void {
+export function tombstoneCanvasGroup(doc: YTypes.Doc, groupId: string, origin: unknown): void {
   assertSafeId(groupId, 'group id');
   assertCanvasRootTypes(doc);
   if (!doc.getMap('groupDefinitions').has(groupId)) throw new Error('Unknown canvas group');
@@ -391,7 +395,7 @@ export function tombstoneCanvasGroup(doc: Y.Doc, groupId: string, origin: unknow
   }, origin);
 }
 
-export function tombstoneCanvasAnnotation(doc: Y.Doc, annotationId: string, origin: unknown): void {
+export function tombstoneCanvasAnnotation(doc: YTypes.Doc, annotationId: string, origin: unknown): void {
   assertSafeId(annotationId, 'annotation id');
   assertCanvasRootTypes(doc);
   if (!doc.getMap('annotationRecords').has(annotationId)) throw new Error('Unknown canvas annotation');
@@ -399,7 +403,7 @@ export function tombstoneCanvasAnnotation(doc: Y.Doc, annotationId: string, orig
   doc.transact(() => doc.getMap('annotationTombstones').set(annotationId, true), origin);
 }
 
-export function readCanvasDocument(doc: Y.Doc): CanvasDocumentProjection {
+export function readCanvasDocument(doc: YTypes.Doc): CanvasDocumentProjection {
   assertCanvasRootTypes(doc);
   const placements: Record<string, unknown> = Object.create(null) as Record<string, unknown>;
   const assetVersions = doc.getMap<unknown>('assetVersions');
@@ -430,7 +434,7 @@ export function readCanvasDocument(doc: Y.Doc): CanvasDocumentProjection {
 }
 
 /** Server-side precommit guard: compare the persisted document with the candidate update. */
-export function assertCanvasDocumentTransition(previous: Y.Doc, candidate: Y.Doc): void {
+export function assertCanvasDocumentTransition(previous: YTypes.Doc, candidate: YTypes.Doc): void {
   const before = readCanvasDocument(previous);
   const after = readCanvasDocument(candidate);
   const candidateTombstones = candidate.getMap<unknown>('tombstones');

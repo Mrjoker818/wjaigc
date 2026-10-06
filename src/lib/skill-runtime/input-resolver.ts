@@ -423,6 +423,7 @@ function validateField(
 export function resolveSkillInputs(
   definition: SkillDefinition,
   raw: Record<string, unknown>,
+  options?: { allowMissingRequired?: boolean },
 ): Record<string, unknown> {
   if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) {
     throw new SkillInputError('SKILL_INPUT_INVALID_TYPE');
@@ -467,7 +468,9 @@ export function resolveSkillInputs(
     const rawDescriptor = rawSnapshot.descriptors[field.key];
     const rawValue = rawDescriptor?.value;
     const value = rawValue ?? field.defaultValue;
-    if (field.required && isEmpty(value)) {
+    const missingForUpstream = options?.allowMissingRequired
+      && rawDescriptor === undefined && field.defaultValue === undefined;
+    if (field.required && isEmpty(value) && !missingForUpstream) {
       throw new SkillInputError('SKILL_INPUT_REQUIRED', field.key);
     }
     if (value !== undefined) assertStrictJsonValue(value, field);
@@ -476,6 +479,7 @@ export function resolveSkillInputs(
   }
   for (const field of definition.inputs) {
     if (field.kind !== 'dataset' || field.datasetSchema === undefined) continue;
+    if (options?.allowMissingRequired && output[field.key] === undefined) continue;
     if (field.datasetSchema !== 'sku-v1') {
       throw new SkillInputError('SKILL_INPUT_INVALID_DEFINITION', field.key);
     }

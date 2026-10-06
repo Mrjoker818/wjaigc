@@ -52,6 +52,8 @@ export type NormalizedAnnotationGeometry =
 
 export interface CanvasAnnotationV2 {
   id: string;
+  /** Original creation identity, retained when undo restores a new record ID. */
+  orderKey?: string;
   projectId: string;
   sourceImageId: string;
   sourceVersionId: string;

@@ -500,11 +500,14 @@ describe('readImageFromS3Bounded cancellation', () => {
 
   it('reads an export artifact by its exact key without deriving the images namespace', async () => {
     mocks.awsSend.mockResolvedValueOnce({
-      Body: { transformToByteArray: async () => new Uint8Array(Buffer.from('exact')) },
+      ContentLength: 5, ContentType: 'application/zip', ETag: '"exact"',
+    }).mockResolvedValueOnce({
+      ContentLength: 5, ContentRange: 'bytes 0-4/5', ContentType: 'application/zip', ETag: '"exact"',
+      Body: { async *[Symbol.asyncIterator](): AsyncGenerator<Uint8Array> { yield Buffer.from('ex'); yield Buffer.from('act'); } },
     });
     const { readBinaryFromS3Exact } = await import('@/lib/s3-storage');
     await expect(readBinaryFromS3Exact('exports/0123456789abcdef-report.zip')).resolves.toEqual(Buffer.from('exact'));
-    expect(mocks.awsSend).toHaveBeenCalledWith(expect.objectContaining({ input: expect.objectContaining({ Key: 'exports/0123456789abcdef-report.zip' }) }));
+    expect(mocks.awsSend).toHaveBeenCalledWith(expect.objectContaining({ input: expect.objectContaining({ Key: 'exports/0123456789abcdef-report.zip' }) }), expect.objectContaining({ abortSignal: expect.any(AbortSignal) }));
   });
 
   it('retries cleanup after a transient delete failure and only marks it clean after success', async () => {

@@ -57,6 +57,23 @@ describe('collaborative project read route', () => {
     expect(response.status).toBe(401);
     expect(mocks.readCollaborativeProject).not.toHaveBeenCalled();
   });
+  it.each(['actor-a', ''])('rejects a frozen actor mismatch before reading the directory (%s)', async actorId => {
+    const response = await GET(new NextRequest(
+      'http://localhost/api/collaboration/document-project?projectId=project-a',
+      { headers: { 'x-wujie-expected-actor-id': actorId } },
+    ));
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({ success: false, code: 'ACTOR_SCOPE_CHANGED' });
+    expect(mocks.readCollaborativeProject).not.toHaveBeenCalled();
+  });
+  it('reads using the session identity when the expected actor matches', async () => {
+    const response = await GET(new NextRequest(
+      'http://localhost/api/collaboration/document-project?projectId=project-a',
+      { headers: { 'x-wujie-expected-actor-id': 'editor-a' } },
+    ));
+    expect(response.status).toBe(200);
+    expect(mocks.readCollaborativeProject).toHaveBeenCalledExactlyOnceWith('editor-a', 'project-a');
+  });
 
   it('does not expose a document when the project editor check fails', async () => {
     mocks.readCollaborativeProject.mockRejectedValue(Object.assign(

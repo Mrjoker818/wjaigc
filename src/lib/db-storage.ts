@@ -5,6 +5,7 @@
  */
 
 import { execSql, getPool } from './db-client';
+import { ensureRefundIdentityClaims } from './refund-identity-claim';
 import { refreshAuthJsonFileAtomic } from './auth/auth-persistence';
 import { withDatabaseAuthReplicaLock } from './auth/auth-repository';
 import {
@@ -368,14 +369,21 @@ async function initializeCoreTables(): Promise<void> {
     try { await execSql(`CREATE INDEX IF NOT EXISTS idx_audit_user_id ON wujie_audit_log(user_id)`); } catch {}
     try { await execSql(`CREATE INDEX IF NOT EXISTS idx_audit_resolution ON wujie_audit_log(resolution_status)`); } catch {}
     await execSql(
-      `CREATE UNIQUE INDEX IF NOT EXISTS idx_credit_tx_task_type_once
+      `CREATE UNIQUE INDEX IF NOT EXISTS idx_credit_tx_charge_task_once
        ON wujie_credit_transactions(task_id, type)
-       WHERE task_id <> ''
-         AND (
-           (type = 'consume' AND id LIKE 'ctx_charge_%')
-           OR (type = 'refund' AND id LIKE 'ctx_refund_%')
-         )`,
+       WHERE task_id <> '' AND type = 'consume' AND id LIKE 'ctx_charge_%'`,
     );
+    await execSql(
+      `CREATE INDEX IF NOT EXISTS idx_credit_refund_task_lookup
+       ON wujie_credit_transactions(task_id) WHERE type = 'refund'`,
+    );
+    await execSql(
+      `CREATE INDEX IF NOT EXISTS idx_credit_refund_reference_lookup
+       ON wujie_credit_transactions(reference_id) WHERE type = 'refund'`,
+    );
+    // Historical refund identities may already be duplicated. Keep their rows
+    // intact, but require every new refund writer to claim its identity once.
+    await ensureRefundIdentityClaims();
 
     console.log('[db-storage] Core tables ensured');
   } catch (e) {
@@ -444,11 +452,12 @@ export async function dbDeleteUser(id: string): Promise<boolean> {
 
 // ─── API Providers ───────────────────────────────────────────────────────────
 
-export async function dbGetApiProviders(): Promise<DbApiProvider[]> {
+export async function dbGetApiProviders(options: { throwOnError?: boolean } = {}): Promise<DbApiProvider[]> {
   try {
     const result = await execSql('SELECT * FROM wujie_api_providers ORDER BY COALESCE(sort_order, 999999) ASC, created_at ASC');
     return result.rows as unknown as DbApiProvider[];
   } catch (e) {
+    if (options.throwOnError) throw e;
     console.error('[db-storage] dbGetApiProviders error:', e);
     return [];
   }

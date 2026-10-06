@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useRef, useEffect, useMemo, type CSSProperties } from 'react';
+import { useState, useCallback, useRef, useEffect, useLayoutEffect, useMemo, type CSSProperties } from 'react';
 import dynamic from 'next/dynamic';
 import { getResumedTaskPollingOutcome, RESUMED_TASK_MAX_POLL_ATTEMPTS, shouldStartResumedTaskPolling } from '@/lib/resumed-task-polling';
 import { hasDirectVideoPollingTimedOut } from '@/lib/video-task-polling';
@@ -21,6 +21,8 @@ import {
   createCanvasTaskEventError,
   type CanvasTaskEvent,
 } from '@/lib/canvas-kernel/task-projection';
+import { projectOrdinaryGenerationSlots } from '@/lib/canvas-ordinary-generation-projection';
+import { parseOrdinaryGenerationOutputGroup } from '@/lib/task-core/ordinary-generation-output-group';
 import {
   normalizeGenerationSubmitSlots,
   resolveGenerationSlotIndex,
@@ -30,11 +32,15 @@ import {
   getLegacyRecoveryRetryAt,
   type RecoverableLegacyTask,
 } from '@/lib/legacy-task-recovery';
-import type { CanvasImage, ImageGroup } from '@/components/infinite-canvas';
+import type { CanvasImage, ImageGroup, AnnotationExecutionContext } from '@/components/infinite-canvas';
+import { readAnnotationCanonicalReference } from '@/features/annotations/annotation-task-client';
 import { PresenceIndicator } from '@/components/collaboration/presence-indicator';
 import { createLatestProjectLoadGate } from '@/lib/collaboration/project-load-gate';
 import { DocumentStatus } from '@/components/collaboration/document-status';
 import { useCollaborativeCanvas, type CollaborativeCanvas } from '@/lib/collaboration/document-client';
+import { runDocumentHistoryCommand, readDocumentHistoryCommandJournal, runDocumentHistoryRestoration, confirmDocumentHistoryRestorationMetadata, recoverDocumentHistoryCommands, documentHistoryCommandStorageKey } from '@/lib/collaboration/document-history-command';
+import type { DocumentHistoryCommandItem } from '@/lib/collaboration/document-history-command';
+import { commitDocumentCanvasFile, DocumentCanvasUploadError, loadDocumentCanvasVideoSize, uniqueDocumentCanvasFiles } from '@/lib/collaboration/document-canvas-upload';
 import { canUseLegacyCanvasPersistence, routeCanvasWorkspaceChange, shouldKeepDirtyCanvasAnnotations } from '@/lib/collaboration/canvas-document-image-bridge';
 import {
   restoreAnnotations,
@@ -110,9 +116,10 @@ import type { WorkflowCanvasInsertionItem } from '@/lib/asset-core/workspace-tra
 import { canvasSkillProjectionIdentity, transferCanvasSkillAsset, transferCanvasSkillAssets } from '@/lib/skill-runtime/canvas-client';
 import {
   buildSimpleChatCanvasBridgeImages,
-  consumeSimpleChatCanvasBridge,
   resolveSimpleChatCanvasReference,
 } from '@/components/simple-chat/simple-chat-types';
+import { SimpleChatBridgeReception } from '@/components/canvas/simple-chat-bridge-reception';
+import type { ConsumeCanvasBridgeInput } from '@/lib/simple-chat-canvas-bridge';
 import {
   clearSimpleCreateCanvasHandoff,
   consumeSimpleCreateCanvasHandoff,
@@ -562,6 +569,13 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
   const [historyTransitionPending, setHistoryTransitionPending] = useState(false);
   const historyTransitionEpochRef = useRef(0);
   const activeHistoryTransitionRef = useRef<CanvasHistoryTransitionToken | null>(null);
+  const documentHistoryRecoveryRef = useRef<{
+    actorId: string; projectId: string; epoch: number; generation: CollaborativeCanvas['recordMediaHistory'];
+    state: 'running' | 'failed' | 'complete'; transition: CanvasHistoryTransitionToken;
+    direction?: 'undo' | 'redo' | 'delete'; retry?: () => Promise<boolean>;
+    requestedImageIds?: readonly string[]; deletedImageIds?: readonly string[];
+  } | null>(null);
+  const [documentHistoryRecoveryState, setDocumentHistoryRecoveryState] = useState<typeof documentHistoryRecoveryRef.current>(null);
   const persistCanvasHistorySnapshotRef = useRef<(nextImages: CanvasImage[]) => void>(() => undefined);
   const queuedCanvasHistoryChangeRef = useRef<{
     projectId: string | null;
@@ -594,10 +608,19 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
 
   // Apply changes against the latest ref synchronously so pointerup can commit
   // the same explicit history transaction in the current event boundary.
+  const isDocumentHistoryRecoveryPending = useCallback((): boolean => {
+    const recovery = documentHistoryRecoveryRef.current, document = collaborativeCanvasRef.current;
+    return !!recovery && recovery.state !== 'complete'
+      && recovery.actorId === currentUserRef.current?.id && recovery.projectId === currentProjectRef.current?.id
+      && recovery.projectId === historyProjectIdRef.current && recovery.epoch === historyTransitionEpochRef.current
+      && document?.projectId === recovery.projectId && document.authority === 'document'
+      && document.recordMediaHistory === recovery.generation;
+  }, []);
   const setImages = useCallback((
     action: React.SetStateAction<CanvasImage[]>,
     options: CanvasImageChangeOptions = {},
   ): boolean => {
+      if (options.source !== 'document' && isDocumentHistoryRecoveryPending()) return false;
       const prev = latestImagesRef.current;
       const queued = queuedCanvasHistoryChangeRef.current;
       const projectId = historyProjectIdRef.current;
@@ -666,7 +689,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
       latestImagesRef.current = next;
       setImagesRaw(next);
       return true;
-  }, []);
+  }, [isDocumentHistoryRecoveryPending]);
 
   const projectWorkspaceTaskEvent = useCallback((event: CanvasTaskEvent) => {
     setImages((current) => applyCanvasTaskEventToProcessingPlaceholders(current, event));
@@ -696,6 +719,52 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
         historyTransitionEpochRef.current,
       )
   ), []);
+
+  const suspendDocumentHistoryOperation = useCallback((
+    transition: CanvasHistoryTransitionToken, document: CollaborativeCanvas, actorId: string | undefined,
+    direction: 'undo' | 'redo' | 'delete', operation: () => void | Promise<void>,
+    deletion?: { requestedImageIds: readonly string[]; deletedImageIds: readonly string[] },
+  ): void => {
+    const projectId = document.projectId;
+    if (!actorId || !projectId) return;
+    const recovery: NonNullable<typeof documentHistoryRecoveryRef.current> = {
+      actorId, projectId, epoch: transition.epoch, generation: document.recordMediaHistory,
+      state: 'failed', transition, direction,
+      ...(deletion ? { requestedImageIds: [...deletion.requestedImageIds], deletedImageIds: deletion.deletedImageIds } : {}),
+    };
+    const isCurrent = (): boolean => currentUserRef.current?.id === actorId
+      && currentProjectRef.current?.id === projectId && historyProjectIdRef.current === projectId
+      && historyTransitionEpochRef.current === transition.epoch
+      && collaborativeCanvasRef.current?.projectId === projectId && collaborativeCanvasRef.current.authority === 'document'
+      && collaborativeCanvasRef.current.recordMediaHistory === document.recordMediaHistory
+      && collaborativeCanvasRef.current.refreshMedia === document.refreshMedia
+      && isActiveCanvasHistoryTransition(transition);
+    if (!isCurrent()) return;
+    recovery.retry = async (): Promise<boolean> => {
+      if (!isCurrent() || documentHistoryRecoveryRef.current !== recovery || recovery.state !== 'failed'
+          || (collaborativeCanvasRef.current?.status !== 'saved' && collaborativeCanvasRef.current?.status !== 'pending')) return false;
+      recovery.state = 'running'; setDocumentHistoryRecoveryState({ ...recovery });
+      try {
+        // Keep the original live operation and its cohort. Fresh-page journal
+        // recovery cannot register a failed initial deletion's session history
+        // or advance the cursor of an existing undo/redo entry.
+        await operation();
+        if (!isCurrent() || documentHistoryRecoveryRef.current !== recovery) return false;
+        recovery.state = 'complete'; setDocumentHistoryRecoveryState({ ...recovery });
+        activeHistoryTransitionRef.current = null; historyLifecyclePendingRef.current = false;
+        setHistoryTransitionPending(false); flushQueuedCanvasHistoryChange();
+        return true;
+      } catch (error) {
+        if (isCurrent() && documentHistoryRecoveryRef.current === recovery) {
+          recovery.state = 'failed'; setDocumentHistoryRecoveryState({ ...recovery });
+          toast.error(error instanceof Error ? error.message : '画布操作仍未确认，请重试');
+        }
+        return false;
+      }
+    };
+    documentHistoryRecoveryRef.current = recovery;
+    setDocumentHistoryRecoveryState({ ...recovery });
+  }, [flushQueuedCanvasHistoryChange, isActiveCanvasHistoryTransition]);
 
   const beginCanvasHistoryTransaction = useCallback((id: string) => {
     incrementalHistoryRef.current.beginTransaction(id);
@@ -781,13 +850,35 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
   }, []);
 
   const handleUndo = useCallback(async () => {
+    if (historyLifecyclePendingRef.current) {
+      const recovery = documentHistoryRecoveryRef.current;
+      if (isDocumentHistoryRecoveryPending() && recovery?.state === 'failed' && recovery.direction === 'undo') await recovery.retry?.();
+      return;
+    }
     const projectId = historyProjectIdRef.current;
     if (projectId && !canUseLegacyCanvasPersistence(projectId, collaborativeCanvasRef.current)) {
       const document = collaborativeCanvasRef.current;
       if (document?.projectId === projectId && document.authority === 'document' &&
           (document.status === 'saved' || document.status === 'pending')) {
-        try { document.undoLocal(); } catch (error) {
-          toast.error(error instanceof Error ? error.message : '协作撤销失败');
+        const actorId = currentUserRef.current?.id;
+        const transition: CanvasHistoryTransitionToken = { projectId, epoch: historyTransitionEpochRef.current };
+        activeHistoryTransitionRef.current = transition;
+        historyLifecyclePendingRef.current = true;
+        setHistoryTransitionPending(true);
+        try { await document.undoLocal(); } catch (error) {
+          if (isActiveCanvasHistoryTransition(transition) && currentUserRef.current?.id === actorId) {
+            if (documentDeleteHistoryRef.current?.retryDirection === 'undo') {
+              suspendDocumentHistoryOperation(transition, document, actorId, 'undo', () => document.undoLocal());
+            }
+            toast.error(error instanceof Error ? error.message : '协作撤销失败');
+          }
+        } finally {
+          if (isActiveCanvasHistoryTransition(transition) && !isDocumentHistoryRecoveryPending()) {
+            activeHistoryTransitionRef.current = null;
+            historyLifecyclePendingRef.current = false;
+            setHistoryTransitionPending(false);
+            flushQueuedCanvasHistoryChange();
+          }
         }
       }
       return;
@@ -831,16 +922,38 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
         flushQueuedCanvasHistoryChange();
       }
     }
-  }, [clearRestoredCanvasImageTombstones, commitCanvasHistorySnapshot, flushQueuedCanvasHistoryChange, isActiveCanvasHistoryTransition, syncAssetV3HistoryTransition]);
+  }, [clearRestoredCanvasImageTombstones, commitCanvasHistorySnapshot, flushQueuedCanvasHistoryChange, isActiveCanvasHistoryTransition, isDocumentHistoryRecoveryPending, suspendDocumentHistoryOperation, syncAssetV3HistoryTransition]);
 
   const handleRedo = useCallback(async () => {
+    if (historyLifecyclePendingRef.current) {
+      const recovery = documentHistoryRecoveryRef.current;
+      if (isDocumentHistoryRecoveryPending() && recovery?.state === 'failed' && recovery.direction === 'redo') await recovery.retry?.();
+      return;
+    }
     const projectId = historyProjectIdRef.current;
     if (projectId && !canUseLegacyCanvasPersistence(projectId, collaborativeCanvasRef.current)) {
       const document = collaborativeCanvasRef.current;
       if (document?.projectId === projectId && document.authority === 'document' &&
           (document.status === 'saved' || document.status === 'pending')) {
-        try { document.redoLocal(); } catch (error) {
-          toast.error(error instanceof Error ? error.message : '协作重做失败');
+        const actorId = currentUserRef.current?.id;
+        const transition: CanvasHistoryTransitionToken = { projectId, epoch: historyTransitionEpochRef.current };
+        activeHistoryTransitionRef.current = transition;
+        historyLifecyclePendingRef.current = true;
+        setHistoryTransitionPending(true);
+        try { await document.redoLocal(); } catch (error) {
+          if (isActiveCanvasHistoryTransition(transition) && currentUserRef.current?.id === actorId) {
+            if (documentDeleteHistoryRef.current?.retryDirection === 'redo') {
+              suspendDocumentHistoryOperation(transition, document, actorId, 'redo', () => document.redoLocal());
+            }
+            toast.error(error instanceof Error ? error.message : '协作重做失败');
+          }
+        } finally {
+          if (isActiveCanvasHistoryTransition(transition) && !isDocumentHistoryRecoveryPending()) {
+            activeHistoryTransitionRef.current = null;
+            historyLifecyclePendingRef.current = false;
+            setHistoryTransitionPending(false);
+            flushQueuedCanvasHistoryChange();
+          }
         }
       }
       return;
@@ -879,7 +992,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
         flushQueuedCanvasHistoryChange();
       }
     }
-  }, [clearRestoredCanvasImageTombstones, commitCanvasHistorySnapshot, flushQueuedCanvasHistoryChange, isActiveCanvasHistoryTransition, syncAssetV3HistoryTransition]);
+  }, [clearRestoredCanvasImageTombstones, commitCanvasHistorySnapshot, flushQueuedCanvasHistoryChange, isActiveCanvasHistoryTransition, isDocumentHistoryRecoveryPending, suspendDocumentHistoryOperation, syncAssetV3HistoryTransition]);
   const [activeGenerationCount, setActiveGenerationCount] = useState(0);
   const [previewImage, setPreviewImage] = useState<CanvasImage | null>(null);
   const [themeStyle, setThemeStyle] = useState<ThemeStyle>('gold');
@@ -1002,6 +1115,9 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
         setViewState(restoredViewState);
         // ★ 调试日志：追踪项目加载
         console.log('[page] loadProjectById:', targetProject.id, targetProject.name, 'canvasImages:', targetProject.canvasImages?.length || 0);
+        // An async project lookup can render the previous project and reset the
+        // history ref before hydration runs. Route the replacement as the target.
+        historyProjectIdRef.current = targetProject.id;
         if (targetProject.canvasImages && targetProject.canvasImages.length > 0) {
           setImages(visibleTargetImages.map(img => ({
             ...img,
@@ -1305,6 +1421,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
                 );
                 setCurrentProject(targetProject);
                 setNodeWorkflow(workflowFromProjectMetadata(targetProject.metadata));
+                historyProjectIdRef.current = targetProject.id;
                 if (targetProject.canvasImages && targetProject.canvasImages.length > 0) {
                 setImages(visibleTargetImages.map(img => ({
                   ...img,
@@ -1595,47 +1712,26 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
     });
   }, [setImages]);
 
-  // 从 simple-chat 传来的图片桥接
-  useEffect(() => {
-    if (!currentProject?.id) return;
-    const bridgeKey = 'wujie_canvas_bridge';
-    let cancelled = false;
-    try {
-      const raw = localStorage.getItem(bridgeKey);
-      if (!raw) return;
-      const data = JSON.parse(raw) as unknown;
-      void consumeSimpleChatCanvasBridge({
-        payload: data,
-        currentProjectId: currentProject.id,
-        resolveReference: resolveSimpleChatCanvasReference,
-        merge: references => {
-          if (cancelled) throw new Error('BRIDGE_CONSUMPTION_CANCELLED');
-          const timestamp = Date.now();
-          setImages(prev => {
-            const existingPlacementIds = new Set(prev.flatMap(image => image.placementId ? [image.placementId] : []));
-            const existingEntityIds = new Set(prev.map(image => image.id));
-            const uniqueReferences = references.filter(reference => (
-              (!reference.placementId || !existingPlacementIds.has(reference.placementId))
-              && (!reference.entityId || !existingEntityIds.has(reference.entityId))
-            ));
-            const newImages: CanvasImage[] = buildSimpleChatCanvasBridgeImages(
-              uniqueReferences,
-              timestamp,
-            );
-      // ★ 修复：使用 setImages 包装器而非直接 setImagesRaw，确保 prevImagesRef 同步更新
-      // 之前直接调用 setImagesRaw 导致 prevImagesRef 过期，后续 setImages 调用会使用过期的基准计算 diff
-            return [...prev, ...newImages];
-          });
-        },
-        remove: () => localStorage.removeItem(bridgeKey),
-      }).catch(() => {
-        // Keep the bridge payload for a later successful hydrated merge.
+  // Legacy delivery still goes through the managed history/ref wrapper. Keep
+  // journal slots even when earlier items were already received or filtered.
+  const mergeChatBridgeLegacy = useCallback<ConsumeCanvasBridgeInput['mergeLegacy']>(references => {
+    // setImages returns true for queued undo/redo changes as well. A bridge
+    // receipt requires application, not a queue that a project switch discards.
+    if (historyLifecyclePendingRef.current) return false;
+    const timestamp = Date.now();
+    return setImages(prev => {
+      const placementIds = new Set(prev.flatMap(image => image.placementId ? [image.placementId] : []));
+      const entityIds = new Set(prev.map(image => image.id));
+      const newImages = references.flatMap(reference => {
+        if (placementIds.has(reference.placementId!) || (reference.entityId && entityIds.has(reference.entityId))) return [];
+        const [image] = buildSimpleChatCanvasBridgeImages([reference], timestamp);
+        placementIds.add(reference.placementId!);
+        return [{ ...image, id: reference.entityId || `chat-bridge-${timestamp}-${reference.bridgeSlot}`,
+          x: 200 + (reference.bridgeSlot % 5) * 220, y: 200 + Math.floor(reference.bridgeSlot / 5) * 220 }];
       });
-    } catch {
-      // ignore parse errors
-    }
-    return () => { cancelled = true; };
-  }, [currentProject?.id, setImages]);
+      return [...prev, ...newImages];
+    });
+  }, [setImages]);
 
   // 应用主题
   useEffect(() => {
@@ -1667,6 +1763,12 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
   const [serverSyncMergeRevision, setServerSyncMergeRevision] = useState(0);
   // ★ 近期删除的图片 ID 集合：防止服务器同步把刚删除的图片恢复回来
   const pendingCanvasDeleteIdsRef = useRef<Set<string>>(new Set());
+  const documentDeleteHistoryRef = useRef<{
+    actorId: string; projectId: string; epoch: number; generation: CollaborativeCanvas['recordMediaHistory'];
+    pending: Map<string, { image: CanvasImage; operationId: string }>;
+    recorded: Set<string>;
+    retryDirection: 'undo' | 'redo' | null;
+  } | null>(null);
   const nextCanvasPersistenceRevision = useCallback(() => {
     canvasPersistenceRevisionRef.current += 1;
     return canvasPersistenceRevisionRef.current;
@@ -1830,13 +1932,253 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
     persistCanvasImagesNow(recovered.images, 'immediate');
   }, [currentProject?.id, persistCanvasImagesNow]);
 
+  const handleRecoverDocumentHistoryCommands = useCallback(async (): Promise<boolean> => {
+    const projectId = currentProjectRef.current?.id, actorId = currentUserRef.current?.id;
+    const document = collaborativeCanvasRef.current, epoch = historyTransitionEpochRef.current;
+    const previous = documentHistoryRecoveryRef.current;
+    const same = !!previous && previous.actorId === actorId && previous.projectId === projectId
+      && previous.epoch === epoch && previous.generation === document?.recordMediaHistory;
+    // Release only this recovery's old token, never a new scope's transition.
+    if (previous && !same && activeHistoryTransitionRef.current === previous.transition) {
+      activeHistoryTransitionRef.current = null; historyLifecyclePendingRef.current = false;
+      setHistoryTransitionPending(false);
+    }
+    if (!actorId || !projectId || projectId !== historyProjectIdRef.current
+        || document?.projectId !== projectId || document.authority !== 'document'
+        || (document.status !== 'saved' && document.status !== 'pending')) return false;
+    if (same && previous?.state === 'complete') return true;
+    if (same && previous?.state === 'running') return false;
+    if (same && previous?.retry) return previous.retry();
+    if (historyLifecyclePendingRef.current && !(same && previous?.state === 'failed'
+        && activeHistoryTransitionRef.current === previous.transition)) return false;
+    const transition: CanvasHistoryTransitionToken = { projectId, epoch };
+    const recovery = { actorId, projectId, epoch, generation: document.recordMediaHistory,
+      state: 'running' as 'running' | 'failed' | 'complete', transition };
+    documentHistoryRecoveryRef.current = recovery;
+    activeHistoryTransitionRef.current = transition; historyLifecyclePendingRef.current = true;
+    setHistoryTransitionPending(true); setDocumentHistoryRecoveryState({ ...recovery });
+    const isCurrent = (): boolean => documentHistoryRecoveryRef.current === recovery
+      && currentUserRef.current?.id === actorId && currentProjectRef.current?.id === projectId
+      && historyProjectIdRef.current === projectId && historyTransitionEpochRef.current === epoch
+      && collaborativeCanvasRef.current?.projectId === projectId && collaborativeCanvasRef.current.authority === 'document'
+      && collaborativeCanvasRef.current.recordMediaHistory === recovery.generation
+      && collaborativeCanvasRef.current.refreshMedia === document.refreshMedia;
+    const assertCurrent = (): void => { if (!isCurrent()) throw new Error('DOCUMENT_HISTORY_SCOPE_CHANGED'); };
+    try {
+      assertCurrent();
+      const journalKey = documentHistoryCommandStorageKey({ actorId, projectId });
+      // An empty scope has no command to recover. Do not require Web Locks or
+      // wait on ordinary Yjs edits; backup/save fences still require recovery.
+      const hasJournal = [journalKey, journalKey + ':previous', journalKey + ':saving']
+        .some(key => localStorage.getItem(key) !== null);
+      assertCurrent();
+      if (hasJournal) {
+        await document.waitForPendingUpdates(); assertCurrent();
+        await recoverDocumentHistoryCommands({ actorId, projectId, storage: localStorage, locks: navigator.locks,
+          isCurrent, refreshMedia: document.refreshMedia,
+          restoreMetadata: async restored => {
+            assertCurrent();
+            document.restorePlacementHistoryMetadata({ previousPlacementId: restored.removalSnapshot.placementId,
+              nextPlacementId: restored.item.receipt!.placementId, assetVersionId: restored.removalSnapshot.placement.assetVersionId,
+              requirePristine: true,
+              removal: { projectId, snapshot: restored.removalSnapshot, annotationIds: restored.annotationIds } });
+            const sequence = await document.waitForPendingUpdates(); assertCurrent();
+            return sequence;
+          } });
+      }
+      assertCurrent(); recovery.state = 'complete'; setDocumentHistoryRecoveryState({ ...recovery });
+      if (activeHistoryTransitionRef.current === transition) {
+        activeHistoryTransitionRef.current = null; historyLifecyclePendingRef.current = false;
+        setHistoryTransitionPending(false); flushQueuedCanvasHistoryChange();
+      }
+      return true;
+    } catch (error) {
+      if (isCurrent()) {
+        recovery.state = 'failed'; setDocumentHistoryRecoveryState({ ...recovery });
+        toast.error(error instanceof Error ? error.message : '恢复未完成的画布操作失败，请重试');
+      }
+      // Keep same-scope edits fenced until explicit retry finishes the durable
+      // intent. A scope rollover may release only the old recovery's token.
+      return false;
+    }
+  }, [flushQueuedCanvasHistoryChange]);
+  useEffect(() => {
+    const recovery = documentHistoryRecoveryRef.current;
+    if (recovery?.state === 'failed' && recovery.actorId === currentUser?.id && recovery.projectId === currentProject?.id
+        && recovery.epoch === historyTransitionEpochRef.current && recovery.generation === collaborativeCanvas.recordMediaHistory) return;
+    void handleRecoverDocumentHistoryCommands();
+  }, [currentUser?.id, currentProject?.id, collaborativeCanvas.projectId, collaborativeCanvas.authority,
+    collaborativeCanvas.status, collaborativeCanvas.recordMediaHistory, collaborativeCanvas.refreshMedia,
+    historyTransitionPending, handleRecoverDocumentHistoryCommands]);
+
+  const canRetryPendingDocumentDelete = useCallback((imageIds: readonly string[]): boolean => {
+    const recovery = documentHistoryRecoveryRef.current, document = collaborativeCanvasRef.current;
+    const ids = [...new Set(imageIds)];
+    return isDocumentHistoryRecoveryPending() && recovery?.state === 'failed' && recovery.direction === 'delete'
+      && isActiveCanvasHistoryTransition(recovery.transition)
+      && (document?.status === 'saved' || document?.status === 'pending')
+      && recovery.requestedImageIds?.length === ids.length && ids.every(id => recovery.requestedImageIds!.includes(id));
+  }, [isActiveCanvasHistoryTransition, isDocumentHistoryRecoveryPending]);
   const handleDeleteCanvasImages = useCallback(async (imageIds: string[]): Promise<string[]> => {
-    if (historyLifecyclePendingRef.current) return [];
+    if (historyLifecyclePendingRef.current) {
+      const recovery = documentHistoryRecoveryRef.current;
+      if (canRetryPendingDocumentDelete(imageIds)) {
+        return await recovery?.retry?.() ? [...(recovery?.deletedImageIds ?? [])] : [];
+      }
+      return [];
+    }
     const activeProjectId = currentProject?.id;
     if (!activeProjectId) throw new Error('当前项目不存在');
+    if (currentProjectRef.current?.id !== activeProjectId || historyProjectIdRef.current !== activeProjectId) return [];
     if (!canUseLegacyCanvasPersistence(activeProjectId, collaborativeCanvasRef.current)) {
-      toast.error('协作素材删除尚未接入文档命令');
-      return [];
+      const document = collaborativeCanvasRef.current;
+      const actorId = currentUserRef.current?.id;
+      if (!actorId || document?.projectId !== activeProjectId || document.authority !== 'document'
+          || (document.status !== 'saved' && document.status !== 'pending')) return [];
+      const epoch = historyTransitionEpochRef.current;
+      const generation = document.recordMediaHistory;
+      const isCurrent = (): boolean => currentUserRef.current?.id === actorId
+        && currentProjectRef.current?.id === activeProjectId && historyProjectIdRef.current === activeProjectId
+        && historyTransitionEpochRef.current === epoch
+        && collaborativeCanvasRef.current?.projectId === activeProjectId
+        && collaborativeCanvasRef.current.authority === 'document'
+        && collaborativeCanvasRef.current.recordMediaHistory === generation
+        && collaborativeCanvasRef.current.refreshMedia === document.refreshMedia;
+      const assertCurrent = (): void => { if (!isCurrent()) throw new Error('协作删除的账号或项目已切换'); };
+      if (!documentDeleteHistoryRef.current || documentDeleteHistoryRef.current.actorId !== actorId
+          || documentDeleteHistoryRef.current.projectId !== activeProjectId || documentDeleteHistoryRef.current.epoch !== epoch
+          || documentDeleteHistoryRef.current.generation !== generation) {
+        documentDeleteHistoryRef.current = { actorId, projectId: activeProjectId, epoch, generation,
+          pending: new Map(), recorded: new Set(), retryDirection: null };
+      }
+      const scopeHistory = documentDeleteHistoryRef.current;
+      if (scopeHistory.retryDirection) {
+        toast.error(scopeHistory.retryDirection === 'undo' ? '请先重试完成上一次撤销' : '请先重试完成上一次重做');
+        return [];
+      }
+      const ids = [...new Set(imageIds)];
+      if (!ids.length) return [];
+      const transition: CanvasHistoryTransitionToken = { projectId: activeProjectId, epoch };
+      activeHistoryTransitionRef.current = transition;
+      historyLifecyclePendingRef.current = true;
+      setHistoryTransitionPending(true);
+      const running: NonNullable<typeof documentHistoryRecoveryRef.current> = {
+        actorId, projectId: activeProjectId, epoch, generation, state: 'running', transition, direction: 'delete',
+      };
+      documentHistoryRecoveryRef.current = running;
+      setDocumentHistoryRecoveryState({ ...running });
+      const deletedIds: string[] = [];
+      // One user batch retains its confirmed prefix across explicit retries.
+      // Register history only after the suffix is confirmed, so an uncertain
+      // command cannot be bypassed and one batch remains one history entry.
+      const cohort: Array<{ imageId: string; item: DocumentHistoryCommandItem; phase: 'deleted' | 'restored';
+        placementId: string; removalOperationId: string; restorationOperationId?: string;
+        annotationIds?: Record<string, string>; redoOperationId?: string }> = [];
+      const executeRemoval = async (): Promise<void> => {
+        await document.waitForPendingUpdates(); assertCurrent();
+        const boundary = { actorId, projectId: activeProjectId, storage: localStorage,
+          locks: navigator.locks, isCurrent, refreshMedia: document.refreshMedia };
+        // The journal only locates a retry identity. run always reauthorizes it
+        // under the same Web Lock and independently confirms the server result.
+        const journal = readDocumentHistoryCommandJournal(boundary.storage, boundary);
+        let failure: unknown;
+        for (const id of ids) {
+          try {
+            assertCurrent();
+            if (cohort.some(member => member.imageId === id)) continue;
+            let intent = scopeHistory.pending.get(id);
+            if (!intent) {
+              const image = latestImagesRef.current.find(candidate => candidate.id === id);
+              if (!image) continue;
+              const placement = image.placementId ? document.images[image.placementId] : undefined;
+              if (!image.assetId || !image.placementId || !image.assetVersionId || image.isProcessingPlaceholder
+                  || !placement || placement.deleted || placement.assetVersionId !== image.assetVersionId) {
+                throw new Error('协作素材身份未就绪，不能删除');
+              }
+              const previous = journal?.items.find(item => item.command.action === 'remove'
+                && item.command.placementId === image.placementId && item.command.expectedAssetVersionId === image.assetVersionId);
+              intent = { image: { ...image }, operationId: previous?.operationId ?? crypto.randomUUID() };
+              scopeHistory.pending.set(id, intent);
+            }
+            if (scopeHistory.recorded.has(intent.operationId)) continue;
+            const item = await runDocumentHistoryCommand({ ...boundary, operationId: intent.operationId,
+              command: { action: 'remove', placementId: intent.image.placementId!, expectedAssetVersionId: intent.image.assetVersionId! } });
+            assertCurrent();
+            if (item.state !== 'confirmed' || !item.receipt?.removeSnapshot) throw new Error('协作删除缺少受权恢复快照');
+            cohort.push({ imageId: id, item, phase: 'deleted', placementId: item.receipt.placementId, removalOperationId: item.operationId });
+            deletedIds.push(id);
+          } catch (error) { failure = error; break; }
+        }
+        assertCurrent();
+        setSelectedImage(current => reconcileSelectedImageAfterBatchDeletion(current, deletedIds));
+        if (failure) throw failure;
+        if (cohort.length) {
+          document.recordMediaHistory({
+            undo: async (): Promise<void> => {
+              assertCurrent(); scopeHistory.retryDirection = 'undo';
+              await document.waitForPendingUpdates(); assertCurrent();
+              for (const member of [...cohort].reverse()) {
+                if (member.phase === 'restored') continue;
+                if (!member.restorationOperationId) {
+                  member.restorationOperationId = crypto.randomUUID();
+                  member.annotationIds = Object.fromEntries(Object.keys(member.item.receipt!.removeSnapshot!.annotationRecords)
+                    .map(id => [id, crypto.randomUUID()]));
+                }
+                const input = { ...boundary, operationId: member.restorationOperationId,
+                  removalOperationId: member.removalOperationId, annotationIds: member.annotationIds };
+                const restored = await runDocumentHistoryRestoration(input); assertCurrent();
+                const nextPlacementId = restored.item.receipt!.placementId;
+                const binding = { previousPlacementId: member.placementId, nextPlacementId,
+                  assetVersionId: restored.removalSnapshot.placement.assetVersionId,
+                  removal: { projectId: activeProjectId, snapshot: restored.removalSnapshot, annotationIds: restored.annotationIds } };
+                document.restorePlacementHistoryMetadata(binding);
+                const documentSequence = await document.waitForPendingUpdates(); assertCurrent();
+                await confirmDocumentHistoryRestorationMetadata({ ...input, documentSequence }); assertCurrent();
+                document.rebindPlacementHistory(binding);
+                member.placementId = nextPlacementId; member.phase = 'restored';
+              }
+              scopeHistory.retryDirection = null;
+            },
+            redo: async (): Promise<void> => {
+              assertCurrent(); scopeHistory.retryDirection = 'redo';
+              await document.waitForPendingUpdates(); assertCurrent();
+              for (const member of cohort) {
+                if (member.phase === 'deleted') continue;
+                member.redoOperationId ??= crypto.randomUUID();
+                const removed = await runDocumentHistoryCommand({ ...boundary, operationId: member.redoOperationId,
+                  command: { action: 'remove', placementId: member.placementId, expectedAssetVersionId: member.item.receipt!.assetVersionId } });
+                assertCurrent();
+                if (removed.state !== 'confirmed' || !removed.receipt?.removeSnapshot) throw new Error('协作重做缺少受权恢复快照');
+                member.item = removed; member.removalOperationId = removed.operationId; member.phase = 'deleted';
+                member.restorationOperationId = undefined; member.annotationIds = undefined; member.redoOperationId = undefined;
+              }
+              scopeHistory.retryDirection = null;
+            },
+          });
+          for (const member of cohort) {
+            scopeHistory.recorded.add(member.removalOperationId); scopeHistory.pending.delete(member.imageId);
+          }
+        }
+      };
+      try {
+        await executeRemoval();
+        assertCurrent();
+        running.state = 'complete'; setDocumentHistoryRecoveryState({ ...running });
+        return deletedIds;
+      } catch (error) {
+        if (isCurrent()) {
+          suspendDocumentHistoryOperation(transition, document, actorId, 'delete', executeRemoval,
+            { requestedImageIds: ids, deletedImageIds: deletedIds });
+          toast.error(error instanceof Error ? error.message : '协作素材删除失败');
+          return [...deletedIds];
+        }
+        return [];
+      } finally {
+        if (isCurrent() && isActiveCanvasHistoryTransition(transition) && !isDocumentHistoryRecoveryPending()) {
+          activeHistoryTransitionRef.current = null; historyLifecyclePendingRef.current = false;
+          setHistoryTransitionPending(false); flushQueuedCanvasHistoryChange();
+        }
+      }
     }
     const uniqueImageIds = [...new Set(imageIds)]
       .filter((id) => !pendingCanvasDeleteIdsRef.current.has(id));
@@ -1886,7 +2228,8 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
     } finally {
       uniqueImageIds.forEach((id) => pendingCanvasDeleteIdsRef.current.delete(id));
     }
-  }, [currentProject?.id, persistCanvasImagesNow, setImages]);
+  }, [currentProject?.id, persistCanvasImagesNow, setImages, isActiveCanvasHistoryTransition, flushQueuedCanvasHistoryChange,
+    canRetryPendingDocumentDelete, isDocumentHistoryRecoveryPending, suspendDocumentHistoryOperation]);
   const initialCanvasAnnotations = useMemo(() => {
     if (!currentProject) return [];
     const documentMode = collaborativeCanvas.projectId === currentProject.id
@@ -1935,6 +2278,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
     collaborativeCanvas.projectId, collaborativeCanvas.authority]);
   const handleAnnotationsChange = useCallback(
     (annotations: CanvasAnnotationV2[], renderedBaseline?: CanvasAnnotationV2[]) => {
+      if (isDocumentHistoryRecoveryPending()) return false;
       const serialized = serializeAnnotations(annotations);
       const signature = JSON.stringify(serialized);
       if (signature === annotationSignatureRef.current) return true;
@@ -1963,7 +2307,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
       setAnnotationRevision((revision) => revision + 1);
       return true;
     },
-    [],
+    [isDocumentHistoryRecoveryPending],
   );
   const currentUserRef = useRef(currentUser);
   currentUserRef.current = currentUser;
@@ -1971,6 +2315,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
   const generationSessionPendingSlotIdsRef = useRef<string[]>([]);
   const generationSessionManagedTaskIdsRef = useRef<Set<string>>(new Set());
   const generationSessionSlotContextRef = useRef<Map<string, {
+    projectId: string;
     placeholderId: string;
     params: GenerationParams;
   }>>(new Map());
@@ -1986,7 +2331,8 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
         signal: AbortSignal.timeout(600_000),
       });
       const data = await response.json().catch(() => null) as Record<string, unknown> | null;
-      if (!response.ok || data?.success !== true) {
+      const ordinaryGroup = parseOrdinaryGenerationOutputGroup(data?.outputGroup, typeof data?.taskId === 'string' ? data.taskId : '');
+      if (!response.ok || (data?.success !== true && !(ordinaryGroup && data?.requiresReconciliation === true))) {
         throw new Error(
           typeof data?.error === 'string'
             ? data.error
@@ -2059,8 +2405,15 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
 
   useEffect(() => imageGenerationSession.subscribe((sessionSlots) => {
     setImages((current) => {
-      let next = current;
+      let next = projectOrdinaryGenerationSlots(current, sessionSlots, currentProjectRef.current?.id, generationSessionSlotContextRef.current);
       for (const slot of sessionSlots) {
+        if (slot.outputGroup && slot.taskId && slot.projectId === currentProjectRef.current?.id
+          && sessionSlots.some(value => value.taskId === slot.taskId && generationSessionSlotContextRef.current.get(value.id)?.projectId === slot.projectId)) {
+          generationSessionManagedTaskIdsRef.current.add(slot.taskId);
+        }
+      }
+      for (const slot of sessionSlots) {
+        if (slot.outputGroup) continue;
         const context = generationSessionSlotContextRef.current.get(slot.id);
         if (!context) continue;
         if (slot.taskId) generationSessionManagedTaskIdsRef.current.add(slot.taskId);
@@ -2820,7 +3173,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
         generationSessionPendingSlotIdsRef.current.push(...placeholderIds);
         placeholderIds.forEach((placeholderId) => generationSessionSlotContextRef.current.set(
           placeholderId,
-          { placeholderId, params },
+          { placeholderId, params, projectId: currentProject.id },
         ));
         const payload = withClientImageOutputPreference(
           {
@@ -4014,6 +4367,156 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
       });
     }
   }, [images, currentUser?.id, setImages, autoLayoutImages, stabilizeCanvasImages, persistCanvasImagesNow]);
+
+  const documentUploadBusyRef = useRef(false);
+  const documentUploadControllerRef = useRef<AbortController | null>(null);
+  const annotationExecutionIdentity = useMemo(() => ({ actorId: currentUser?.id,
+    projectId: currentProject?.id, generation: collaborativeCanvas.refreshMedia }),
+  [currentUser?.id, currentProject?.id, collaborativeCanvas.refreshMedia]);
+  const confirmAnnotationPublication = useCallback(async (payload: unknown, signal: AbortSignal): Promise<boolean> => {
+    const { actorId, projectId, generation } = annotationExecutionIdentity;
+    const authority = collaborativeCanvasRef.current;
+    const epoch = historyTransitionEpochRef.current;
+    const isCurrent = (): boolean => !signal.aborted && isMountedRef.current
+      && currentUserRef.current?.id === actorId && currentProjectRef.current?.id === projectId
+      && historyProjectIdRef.current === projectId && historyTransitionEpochRef.current === epoch
+      && authority?.projectId === projectId && authority.authority === 'document'
+      && collaborativeCanvasRef.current?.refreshMedia === generation && authority.refreshMedia === generation
+      && (authority.isSessionActive?.() ?? authority.isWritable())
+      && !historyLifecyclePendingRef.current && !isDocumentHistoryRecoveryPending();
+    const reference = readAnnotationCanonicalReference(payload);
+    if (!projectId || !reference || !authority || !isCurrent()) return false;
+    const canonicalImages = await authority.refreshMedia({ projectId,
+      documentSequence: Math.max(0, authority.appliedServerSequence), requireDirectorySequence: true });
+    return isCurrent() && authority.isWritable() && canonicalImages.some(image => image.id === reference.entityId
+      && image.assetId === reference.assetId && image.assetVersionId === reference.assetVersionId
+      && image.placementId === reference.placementId && image.url === reference.url);
+  }, [annotationExecutionIdentity, isDocumentHistoryRecoveryPending]);
+  const annotationExecutionContext: AnnotationExecutionContext = {
+    identity: annotationExecutionIdentity,
+    canWaitForPublication: !!currentUser?.id && !!currentProject?.id && !historyTransitionPending
+      && !isDocumentHistoryRecoveryPending() && collaborativeCanvas.projectId === currentProject.id
+      && collaborativeCanvas.authority === 'document' && collaborativeCanvas.isSessionActive?.() === true,
+    writable: !!currentUser?.id && !!currentProject?.id && !historyTransitionPending
+      && !isDocumentHistoryRecoveryPending() && collaborativeCanvas.projectId === currentProject.id
+      && (collaborativeCanvas.authority === 'legacy'
+        || (collaborativeCanvas.authority === 'document' && collaborativeCanvas.isWritable())),
+    confirmPublication: confirmAnnotationPublication,
+  };
+  useLayoutEffect(() => (): void => {
+    documentUploadControllerRef.current?.abort();
+    documentUploadControllerRef.current = null;
+  }, []);
+  const handleDocumentCanvasFiles = useCallback(async (files: File[]): Promise<void> => {
+    const projectId = currentProjectRef.current?.id;
+    const actorId = currentUserRef.current?.id;
+    const authority = collaborativeCanvasRef.current;
+    if (!actorId || !projectId || historyProjectIdRef.current !== projectId
+      || authority?.projectId !== projectId || authority.authority !== 'document'
+      || !authority.isWritable()
+      || historyLifecyclePendingRef.current || isDocumentHistoryRecoveryPending()) {
+      throw new Error('协作文档暂不可写，请检查连接和编辑权限');
+    }
+    if (documentUploadBusyRef.current) throw new Error('已有媒体正在导入协作文档，请稍后重试');
+    documentUploadBusyRef.current = true;
+    const controller = new AbortController();
+    documentUploadControllerRef.current = controller;
+    const epoch = historyTransitionEpochRef.current;
+    const isCurrentProject = (): boolean => currentUserRef.current?.id === actorId
+      && documentUploadControllerRef.current === controller && !controller.signal.aborted
+      && currentProjectRef.current?.id === projectId && historyProjectIdRef.current === projectId
+      && historyTransitionEpochRef.current === epoch
+      && collaborativeCanvasRef.current?.projectId === projectId
+      && collaborativeCanvasRef.current.authority === 'document'
+      && collaborativeCanvasRef.current.recordMediaHistory === authority.recordMediaHistory
+      && collaborativeCanvasRef.current.refreshMedia === authority.refreshMedia;
+    const isWritableProject = (): boolean => isCurrentProject()
+      && !historyLifecyclePendingRef.current && !isDocumentHistoryRecoveryPending()
+      && authority.isWritable();
+    let layoutImages = latestImagesRef.current;
+    let pendingToastId: string | number | undefined;
+    try {
+      const batch = await uniqueDocumentCanvasFiles(files);
+      if (!isCurrentProject()) throw new DocumentCanvasUploadError('stale-project');
+      if (!isWritableProject()) throw new DocumentCanvasUploadError('not-writable');
+      if (batch.rejected.length > 0) {
+        const reason = batch.rejected[0].code === 'unsupported' ? '格式不受支持'
+          : batch.rejected[0].code === 'too-large' ? '图片上限 32 MiB，视频上限 512 MiB' : '无法读取';
+        toast.warning(`已跳过 ${batch.rejected.length} 个文件（${reason}）`);
+      }
+      if (batch.files.length === 0) return;
+      pendingToastId = toast.loading(`正在导入 ${batch.files.length} 个媒体到协作文档…`, {
+        action: { label: '停止等待', onClick: () => controller.abort() },
+      });
+      for (const file of batch.files) {
+        if (!isCurrentProject()) throw new DocumentCanvasUploadError('stale-project');
+        if (!isWritableProject()) throw new DocumentCanvasUploadError('not-writable');
+        let dimensions: { width: number; height: number };
+        if (file.type.startsWith('video/')) {
+          dimensions = await loadDocumentCanvasVideoSize(file, controller.signal);
+        } else {
+          const previewUrl = URL.createObjectURL(file);
+          try { dimensions = await loadCanvasImageSize(previewUrl); }
+          finally { URL.revokeObjectURL(previewUrl); }
+        }
+        if (!isCurrentProject()) throw new DocumentCanvasUploadError('stale-project');
+        if (!isWritableProject()) throw new DocumentCanvasUploadError('not-writable');
+        const display = getCanvasImageDisplaySize(dimensions.width, dimensions.height);
+        const zIndex = Math.max(0, ...layoutImages.map(image => image.zIndex ?? 0)) + 1;
+        const [positioned] = autoLayoutImages(layoutImages, [{
+          id: 'pending-document-upload', url: '', prompt: '', x: 0, y: 0,
+          width: display.width, height: display.height,
+          originalWidth: dimensions.width, originalHeight: dimensions.height,
+          rotation: 0, zIndex, createdAt: Date.now(),
+        }]);
+        let committed = false;
+        try {
+          await commitDocumentCanvasFile({
+            file, expectedActorId: actorId, projectId, isCurrentProject, isWritableProject, signal: controller.signal,
+            transform: { x: positioned.x, y: positioned.y, width: positioned.width,
+              height: positioned.height, rotation: 0, zIndex },
+            refreshMedia: async (documentSequence, resultIdentity) => {
+              committed = true;
+              layoutImages = await authority.refreshMedia({ projectId, documentSequence });
+              if (!layoutImages.some(image => image.placementId === resultIdentity.placementId
+                && image.assetVersionId === resultIdentity.assetVersionId)) {
+                throw new Error('协作媒体投影尚未包含新媒体');
+              }
+            },
+          });
+          toast.success(`已导入 ${file.name}`);
+        } catch (error) {
+          if (error instanceof DocumentCanvasUploadError && error.code === 'cancelled') {
+            toast.info('已停止等待本批次导入', {
+              description: '已发出的媒体可能仍在服务端处理；请核对原项目后再重试同一文件',
+            });
+          } else if (error instanceof DocumentCanvasUploadError && error.code === 'stale-project') {
+            toast.warning('账号或项目已切换；请回到原账号和项目确认媒体导入状态');
+          } else if (error instanceof DocumentCanvasUploadError && error.code === 'not-writable') {
+            toast.warning('协作文档当前不可写；若媒体已经发出，请在恢复连接后核对原项目并重试同一文件');
+          } else if (committed) {
+            toast.warning('媒体已提交，但协作同步尚未确认；请稍后在本项目重试');
+          } else if (error instanceof DocumentCanvasUploadError) {
+            const messages: Record<string, string> = {
+              unsupported: '此媒体格式不支持协作文档导入', 'too-large': '超过导入上限（图片 32 MiB，视频 512 MiB）',
+              unauthenticated: '登录状态已失效，请重新登录', forbidden: '当前账号无权编辑协作文档',
+              conflict: '同一媒体的导入记录冲突，请检查原项目中的结果',
+              busy: '协作文档导入繁忙，请稍后重试', network: '网络未确认导入结果，请重试同一文件',
+              'invalid-response': '导入响应无法确认，请重试同一文件',
+            };
+            toast.error(messages[error.code] || '协作文档媒体导入失败');
+          } else {
+            toast.error('协作文档媒体导入失败，请稍后重试');
+          }
+          break;
+        }
+      }
+    } finally {
+      if (pendingToastId !== undefined) toast.dismiss(pendingToastId);
+      if (documentUploadControllerRef.current === controller) documentUploadControllerRef.current = null;
+      documentUploadBusyRef.current = false;
+    }
+  }, [autoLayoutImages, isDocumentHistoryRecoveryPending]);
 
   const handleAddEmbeddedChatImage = useCallback(async (
     reference: CoreWorkspaceAssetReference,
@@ -6608,6 +7111,20 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
           <span className="min-w-0 max-w-52 truncate px-2 text-sm font-medium" title={currentProject.name}>
             {currentProject.name}
           </span>
+          {currentUser && <SimpleChatBridgeReception
+            actorId={currentUser.id}
+            projectId={currentProject.id}
+            authority={collaborativeCanvas.projectId === currentProject.id ? collaborativeCanvas.authority : 'unknown'}
+            ready={historyProjectIdRef.current === currentProject.id
+              && !historyTransitionPending
+              && !historyLifecyclePendingRef.current
+              && collaborativeCanvas.projectId === currentProject.id
+              && (collaborativeCanvas.authority === 'legacy' || (collaborativeCanvas.authority === 'document'
+                && (collaborativeCanvas.status === 'saved' || collaborativeCanvas.status === 'pending')))}
+            refreshMedia={input => collaborativeCanvasRef.current!.refreshMedia(input)}
+            resolveReference={resolveSimpleChatCanvasReference}
+            mergeLegacy={mergeChatBridgeLegacy}
+          />}
           <PresenceIndicator
             key={currentProject.id}
             projectId={currentProject.id}
@@ -6619,6 +7136,12 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
               ? collaborativeCanvas.authority : 'unknown'}
             status={collaborativeCanvas.projectId === currentProject.id
               ? collaborativeCanvas.status : 'checking'}
+            commandStatus={collaborativeCanvas.projectId === currentProject.id && collaborativeCanvas.authority === 'document'
+              && historyTransitionPending ? documentHistoryRecoveryState?.state === 'failed'
+                && documentHistoryRecoveryState.actorId === currentUser?.id
+                && documentHistoryRecoveryState.projectId === currentProject.id
+                && documentHistoryRecoveryState.epoch === historyTransitionEpochRef.current
+                && documentHistoryRecoveryState.generation === collaborativeCanvas.recordMediaHistory ? 'failed' : 'running' : undefined}
             onExportLocalCopy={() => {
               try {
                 const contents = collaborativeCanvas.exportRecoveryCopy();
@@ -6640,6 +7163,19 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
               }
             } : undefined}
           />
+          {documentHistoryRecoveryState && documentHistoryRecoveryState.state !== 'complete'
+            && documentHistoryRecoveryState.actorId === currentUser?.id
+            && documentHistoryRecoveryState.projectId === currentProject.id
+            && documentHistoryRecoveryState.epoch === historyTransitionEpochRef.current
+            && documentHistoryRecoveryState.generation === collaborativeCanvas.recordMediaHistory && (
+            <button type="button"
+              className="min-h-11 rounded-lg px-3 text-sm text-muted-foreground hover:bg-accent disabled:opacity-50"
+              disabled={documentHistoryRecoveryState.state === 'running'
+                || (collaborativeCanvas.status !== 'saved' && collaborativeCanvas.status !== 'pending')}
+              onClick={() => { void handleRecoverDocumentHistoryCommands(); }}>
+              {documentHistoryRecoveryState.state === 'running' ? '正在恢复画布操作…' : '重试未完成的画布操作'}
+            </button>
+          )}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button
@@ -6801,6 +7337,10 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
           onHistoryTransactionRollback={rollbackCanvasHistoryTransaction}
           isHistoryTransitionPending={historyTransitionPending}
           onDeleteImages={handleDeleteCanvasImages}
+          canRetryPendingDelete={canRetryPendingDocumentDelete}
+          onUploadFiles={handleDocumentCanvasFiles}
+          uploadAuthority={!currentProject?.id ? 'legacy'
+            : collaborativeCanvas.projectId === currentProject.id ? collaborativeCanvas.authority : 'unknown'}
           onUndo={handleUndo}
           onRedo={handleRedo}
 
@@ -6853,6 +7393,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
           documentMetadataMode={collaborativeCanvas.projectId === currentProject?.id
             && collaborativeCanvas.authority === 'document'}
           onAnnotationsChange={handleAnnotationsChange}
+          annotationExecutionContext={annotationExecutionContext}
           onRequestTaskPoll={requestCanvasTaskPoll}
           onSwitchToNodeMode={() => safeSwitchMode('node')}
           onSwitchToWorkflowHub={() => safeSwitchMode('workflow-hub')}
@@ -6862,6 +7403,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
           navigateToImageId={navigateToImageId}
           onNavigateToImageComplete={() => setNavigateToImageId(null)}
           onGroupsChange={(groups, renderedBaseline) => {
+            if (isDocumentHistoryRecoveryPending()) return false;
             const authority = collaborativeCanvasRef.current;
             if (currentProject?.id && authority?.projectId === currentProject.id) {
               if (authority.authority === 'document') {

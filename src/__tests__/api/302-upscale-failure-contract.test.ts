@@ -7,10 +7,12 @@ const source = readFileSync(
   'utf8',
 );
 
+const upscaleSource = readFileSync(resolve(process.cwd(), 'src/lib/image-edit-upscale-provider.ts'), 'utf8');
+
 describe('302 upscale failure contract', () => {
   it('uses the typed upstream-error parser for all native 302 endpoints', () => {
-    expect(source).toContain("from '@/lib/upscale-provider-error'");
-    expect((source.match(/parse302UpscaleProviderError\(/g) || []).length).toBeGreaterThanOrEqual(4);
+    expect(upscaleSource).toContain("from '@/lib/upscale-provider-error'");
+    expect((upscaleSource.match(/parse302UpscaleProviderError\(/g) || []).length).toBeGreaterThanOrEqual(4);
   });
 
   it('preserves upstream status and provider code instead of rewriting every failure to 502', () => {

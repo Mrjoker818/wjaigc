@@ -1,6 +1,5 @@
 import type { AgentRunCreateResult } from '@/lib/agent-runtime/service';
 import { authorizeAgentContext } from '@/lib/agent-runtime/context-adapters';
-import { toAgentModelCapabilitySet } from '@/lib/agent-runtime/model-capability-set';
 import { readAgentPrompt } from '@/lib/agent-runtime/request-validation';
 import { calculateConfiguredCreditCost } from '@/lib/credits';
 import type {
@@ -26,7 +25,9 @@ import { compileSkillPrompt } from './prompt-compiler';
 import { requiredSkillModelRoles, skillStepModelRole } from './types';
 import type { MultiPlatformExportRetryLineage } from '@/lib/multi-platform-export/manifest';
 import { createMultiPlatformExportSkill, MULTI_PLATFORM_EXPORT_SKILL_ID } from './multi-platform-export-preset';
+import { authorizeAndFreezeBindings, authorizeBindingModels, SkillModelBindingError } from './binding-authorization';
 export { requiredSkillModelRoles } from './types';
+export { authorizeAndFreezeBindings, SkillModelBindingError } from './binding-authorization';
 import type {
   SkillDefinition,
   SkillModelBinding,
@@ -103,29 +104,6 @@ export class SkillRunVersionError extends Error {
   }
 }
 
-export class SkillModelBindingError extends Error {
-  constructor(
-    readonly code:
-      | 'SKILL_MODEL_BINDING_REQUIRED'
-      | 'SKILL_MODEL_BINDINGS_INVALID'
-      | 'SKILL_MODEL_CAPABILITY_REQUIRED',
-    readonly status: 400 | 422,
-    message: string,
-  ) {
-    super(message);
-    this.name = 'SkillModelBindingError';
-  }
-}
-
-const roleCapabilities: Record<SkillModelRole, readonly string[]> = {
-  orchestrator: ['chat'],
-  image: ['image'],
-  video: ['video'],
-  vision: ['vision'],
-  edit: ['edit'],
-  'three-d': ['3d'],
-};
-
 function sameStringSet(actual: readonly string[], expected: readonly string[]): boolean {
   return actual.length === expected.length
     && actual.every(value => expected.includes(value));
@@ -196,75 +174,6 @@ export function assertSourceVersionBindings(
     }
   }
   return canonicalSourceVersionIds;
-}
-
-function assertExactBindingRoles(requested: FrozenBindings, skill: SkillDefinition): void {
-  const actual = Object.keys(requested);
-  const expected = requiredSkillModelRoles(skill);
-  if (!sameStringSet(actual, expected)) {
-    const missing = expected.find(role => !actual.includes(role));
-    if (missing) {
-      throw new SkillModelBindingError(
-        'SKILL_MODEL_BINDING_REQUIRED',
-        400,
-        `Missing model binding for role: ${missing}`,
-      );
-    }
-    throw new SkillModelBindingError(
-      'SKILL_MODEL_BINDINGS_INVALID',
-      400,
-      'Skill model bindings do not match the required roles',
-    );
-  }
-}
-
-function assertRoleCapabilities(
-  role: SkillModelRole,
-  model: TaskModelDescriptor,
-): void {
-  const capabilities = toAgentModelCapabilitySet(model);
-  if (!roleCapabilities[role].every(capability => capabilities.has(capability))) {
-    throw new SkillModelBindingError(
-      'SKILL_MODEL_CAPABILITY_REQUIRED',
-      422,
-      `Model does not satisfy the ${role} role`,
-    );
-  }
-}
-
-export async function authorizeAndFreezeBindings(
-  requested: FrozenBindings,
-  skill: SkillDefinition,
-  dependencies: SkillRunRequestDependencies,
-): Promise<FrozenBindings> {
-  return (await authorizeBindingModels(requested, skill, dependencies)).frozen;
-}
-
-async function authorizeBindingModels(
-  requested: FrozenBindings,
-  skill: SkillDefinition,
-  dependencies: SkillRunRequestDependencies,
-): Promise<{
-  frozen: FrozenBindings;
-  models: Partial<Record<SkillModelRole, TaskModelDescriptor>>;
-}> {
-  assertExactBindingRoles(requested, skill);
-  const roles = requiredSkillModelRoles(skill);
-
-  const frozen: FrozenBindings = {};
-  const models: Partial<Record<SkillModelRole, TaskModelDescriptor>> = {};
-  for (const role of roles) {
-    const binding = requested[role]!;
-    const model = await dependencies.resolveTaskModel(
-      binding.providerId,
-      binding.modelId,
-      dependencies.actorUserId,
-    );
-    assertRoleCapabilities(role, model);
-    frozen[role] = { providerId: model.providerId, modelId: model.modelId };
-    models[role] = model;
-  }
-  return { frozen, models };
 }
 
 export async function authorizeSkillAgentRunRequest(

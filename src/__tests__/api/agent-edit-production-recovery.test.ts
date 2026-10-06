@@ -1,6 +1,20 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { digestAgentEditAdmissionRequest } from '@/lib/agent-runtime/agent-edit-admission-identity';
 
 vi.mock('server-only', () => ({}));
+// The recovery fixture owns project-route; no blanket bypass for explicit projects.
+vi.mock('@/lib/collaboration/generation-project-access', async original => {
+  const actual = await original<typeof import('@/lib/collaboration/generation-project-access')>();
+  return { ...actual, authorizeGenerationProject: async ({ actorUserId, projectId }: {
+    actorUserId: string; projectId: unknown;
+  }): Promise<import('@/lib/collaboration/generation-project-access').GenerationProjectAccess> => {
+    if (projectId === undefined || projectId === null || projectId === '') return { kind: 'unscoped', actorUserId };
+    if (actorUserId === 'user-route' && projectId === 'project-route') {
+      return { kind: 'personal', actorUserId, ownerId: 'user-route', projectId: 'project-route' };
+    }
+    throw new actual.GenerationProjectAccessError('GENERATION_PROJECT_FORBIDDEN');
+  } };
+});
 
 const state = vi.hoisted(() => ({
   afterCallbacks: [] as Array<() => unknown>,
@@ -684,6 +698,51 @@ describe('Agent route default-adapter production recovery', () => {
     }) as typeof setTimeout);
   });
 
+  it('freezes only server admission scope from real POST while keeping the authenticated actor', async () => {
+    const { admitAuthorizedAgentExecution } = await import('@/lib/agent-runtime/admission-gate');
+    const { createBillableTask } = await import('@/lib/task-core/billing-service');
+    const access = { kind: 'document' as const, actorUserId: fixtures.user.id, ownerId: 'shared-owner',
+      projectId: 'project-route', grantGeneration: '7' };
+    vi.mocked(admitAuthorizedAgentExecution).mockImplementationOnce(async input => (
+      input.admit({ snapshot: input.request.context, mediaByVersionId: { 'version-1': '/source.png' },
+        selectedEntityVersionIds: { 'entity-1': 'version-1' }, projectAccess: access })
+    ));
+    const original = agentRequest('server-scope');
+    const body = await original.json();
+    const response = await agentPost(new Request(original.url, {
+      method: 'POST', headers: original.headers,
+      body: JSON.stringify({ ...body, canvasPublication: { access: { ...access, ownerId: 'forged', grantGeneration: '99' } },
+        projectAccess: { ...access, ownerId: 'forged' }, ownerId: 'forged' }),
+    }) as never);
+    expect(response.status).toBe(200);
+    const input = vi.mocked(createBillableTask).mock.calls.at(-1)![0];
+    expect(input).toMatchObject({ userId: fixtures.user.id,
+      canvasPublication: { access, workspace: 'canvas', workspaceId: 'canvas:project-route' } });
+    expect(input.task.result).not.toHaveProperty('canvasPublication');
+    expect(state.externalSubmits).toEqual([]);
+    expect(state.chatSubmits).toEqual([]);
+  });
+
+  it('does not upgrade legacy admission from forged body publication and maps fixed publication errors', async () => {
+    const { createBillableTask } = await import('@/lib/task-core/billing-service');
+    const original = agentRequest('legacy-scope-body');
+    const body = await original.json();
+    const forged = { ...body, canvasPublication: { access: { kind: 'document', actorUserId: 'forged', ownerId: 'forged',
+      projectId: 'project-route', grantGeneration: '9' }, workspace: 'canvas', workspaceId: 'canvas:project-route' } };
+    const response = await agentPost(new Request(original.url, { method: 'POST', headers: original.headers,
+      body: JSON.stringify(forged) }) as never);
+    expect(response.status).toBe(200);
+    expect(vi.mocked(createBillableTask).mock.calls.at(-1)![0]).not.toHaveProperty('canvasPublication');
+    for (const [status, code] of [[403, 'CANVAS_TASK_PUBLICATION_FORBIDDEN'],
+      [409, 'CANVAS_TASK_PUBLICATION_CONFLICT'], [503, 'CANVAS_TASK_PUBLICATION_UNAVAILABLE']] as const) {
+      vi.mocked(createBillableTask).mockRejectedValueOnce(Object.assign(new Error('Fixed publication error'), { status, code }));
+      const failed = await agentPost(agentRequest(`publication-error-${status}`) as never);
+      expect(failed.status).toBe(status);
+      await expect(failed.json()).resolves.toMatchObject({ code, error: 'Fixed publication error' });
+    }
+    expect(state.externalSubmits).toEqual([]);
+  });
+
   it('resumes from the private descriptor without a process-local task entry or another charge', async () => {
     state.crashedPoll = true;
     state.tasks.set('persisted-agent-edit', {
@@ -759,6 +818,7 @@ describe('Agent route default-adapter production recovery', () => {
     state.taskByIdempotency.set(idempotencyKey, taskId);
     state.tasks.set(taskId, {
       id: taskId,
+      requestDigest: digestAgentEditAdmissionRequest(await agentRequest(idempotencyKey).json()),
       userId: fixtures.user.id,
       projectId: 'project-route',
       type: 'agent-edit',
@@ -792,6 +852,7 @@ describe('Agent route default-adapter production recovery', () => {
     state.taskByIdempotency.set(idempotencyKey, taskId);
     state.tasks.set(taskId, {
       id: taskId,
+      requestDigest: digestAgentEditAdmissionRequest(await agentRequest(idempotencyKey).json()),
       userId: fixtures.user.id,
       projectId: 'project-route',
       type: 'agent-edit',
@@ -957,7 +1018,15 @@ describe('Agent route default-adapter production recovery', () => {
     await Promise.all(state.afterCallbacks.splice(0).map(worker => worker()));
     await vi.waitFor(() => expect(state.tasks.get(taskId)?.status).toBe('completed'));
 
-    expect(state.internalSubmits.filter(submit => submit.path === '/api/image-edit')).toHaveLength(1);
+    const removeBackgroundSubmits = state.internalSubmits.filter(submit => submit.path === '/api/image-edit');
+    expect(removeBackgroundSubmits).toHaveLength(1);
+    expect(removeBackgroundSubmits[0].body).toMatchObject({
+      imageUrl: '/source.png',
+      action: 'removebg',
+      model: 'Exact::Model',
+      providerId: 'provider-image',
+      engine: 'ai',
+    });
     expect(state.internalPolls.filter(poll => poll.taskId === 'remove-background-provider-task')).toEqual([
       { taskId: 'remove-background-provider-task', userId: fixtures.user.id },
       { taskId: 'remove-background-provider-task', userId: fixtures.user.id },

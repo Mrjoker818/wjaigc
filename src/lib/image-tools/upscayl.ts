@@ -11,25 +11,12 @@ import { spawn } from 'child_process';
 import sharp from 'sharp';
 import { UPSCALE_DEFAULT_SCALE, UPSCALE_TIMEOUT_MS, UPSCALE_OUTPUT_DIR, UPSCALE_OUTPUT_URL_PREFIX, PYTHON_BIN } from './config';
 import { withLocalInferenceLock } from './concurrency-gate';
+import { resolveOnnxReportedOutput } from './onnx-output-boundary';
+import { getOnnxModelsDir, isOnnxUpscaleAvailable } from './onnx-health';
+
+export { isOnnxUpscaleAvailable } from './onnx-health';
 
 // ---- 目录配置 ----
-
-function getOnnxModelsDir(): string {
-  const envDir = process.env.ONNX_MODELS_DIR;
-  if (envDir && fs.existsSync(envDir)) return envDir;
-  // 优先使用持久化目录，再 fallback 到项目内
-  const persistentCandidates = [
-    process.env.UPSCAYL_MODELS_DIR,
-    '/space/upscayl-models',
-    '/space/onnx-models',
-    path.join(process.cwd(), 'onnx-models'),
-  ].filter(Boolean) as string[];
-  const existing = persistentCandidates.find(dir =>
-    fs.existsSync(dir) && fs.readdirSync(dir).some(file => file.includes('realesrgan'))
-  );
-  if (existing) return existing;
-  return path.join(process.cwd(), 'onnx-models');
-}
 
 function getUpscaleOutputDir(): string {
   return UPSCALE_OUTPUT_DIR;
@@ -73,76 +60,6 @@ export interface UpscaleResult {
 // ONNX CPU 放大 (Python onnxruntime + Real-ESRGAN)
 // ============================================================
 
-/** 检查 ONNX 放大是否可用（模型文件 + Python + onnxruntime） */
-export async function isOnnxUpscaleAvailable(): Promise<{
-  available: boolean;
-  model?: string;
-  error?: string;
-}> {
-  const modelsDir = getOnnxModelsDir();
-  if (!fs.existsSync(modelsDir)) {
-    return { available: false, error: 'ONNX 模型目录不存在' };
-  }
-
-  // 检查模型文件（fp16 或完整精度均可）
-  const modelFile = 'realesrgan-x4plus-fp16.onnx';
-  const altModel = 'realesrgan-x4plus.onnx';
-  let foundModel = modelFile;
-  if (!fs.existsSync(path.join(modelsDir, modelFile))) {
-    if (!fs.existsSync(path.join(modelsDir, altModel))) {
-      return { available: false, error: `ONNX 模型文件不存在 (${modelFile} / ${altModel})` };
-    }
-    foundModel = altModel;
-  }
-
-  // 检查 Python + onnxruntime 依赖
-  try {
-    const result = await new Promise<{ installed: boolean; version?: string }>((resolve) => {
-      let settled = false;
-      const proc = spawn(PYTHON_BIN, ['-c', 'import onnxruntime; print(onnxruntime.__version__)'], {
-        stdio: ['pipe', 'pipe', 'pipe'],
-      });
-      const timer = setTimeout(() => {
-        if (!settled) {
-          settled = true;
-          try { proc.kill('SIGKILL'); } catch {}
-          resolve({ installed: false });
-        }
-      }, 10000);
-      let stdout = '';
-      let stderr = '';
-      proc.stdout.on('data', (d: Buffer) => { stdout += d.toString(); });
-      proc.stderr.on('data', (d: Buffer) => { stderr += d.toString(); });
-      proc.on('close', (code: number | null) => {
-        if (!settled) {
-          settled = true;
-          clearTimeout(timer);
-          if (code === 0 && stdout.trim()) {
-            resolve({ installed: true, version: stdout.trim() });
-          } else {
-            resolve({ installed: false });
-          }
-        }
-      });
-      proc.on('error', () => {
-        if (!settled) {
-          settled = true;
-          clearTimeout(timer);
-          resolve({ installed: false });
-        }
-      });
-    });
-
-    if (!result.installed) {
-      return { available: false, error: 'Python onnxruntime 未安装 (pip install onnxruntime)' };
-    }
-  } catch {
-    return { available: false, error: 'Python 环境不可用' };
-  }
-
-  return { available: true, model: foundModel };
-}
-
 /** 获取 upscale_onnx.py 脚本路径 */
 function getUpscaleOnnxScriptPath(): string {
   return path.join(
@@ -166,6 +83,7 @@ interface OnnxUpscaleResult {
 
 /** 动态计算 tileSize：根据图片尺寸和可用内存自适应 */
 export function calcOptimalTileSize(width: number, height: number, scale: number): number {
+  void scale; // 保留既有位置参数；tile 选择当前仅取决于输入尺寸。
   const pixels = width * height;
   // 模型为 4x 固定倍率；tile 过小会导致 tile 数量爆炸
   // （如 2160x3840 用 128 => 510 个 tile 串行推理 50min+，占满 CPU 使服务无响应）。
@@ -220,35 +138,52 @@ async function callOnnxUpscale(
       stdio: ['pipe', 'pipe', 'pipe'],
       env: { ...process.env, ONNX_MODELS_DIR: onnxModelsDir },
       detached: true,
+      windowsHide: true,
     });
 
     let stdout = '';
     let stderr = '';
-    let settled = false;
+    let failure: string | undefined;
+    let stopping = false;
+
+    const stop = (error: string): void => {
+      failure ??= error;
+      if (stopping) return;
+      stopping = true;
+      // The inference lease and input files remain owned until actual close.
+      // Negative PID group signalling is not supported on Windows.
+      if (!proc.pid || proc.exitCode !== null || proc.signalCode !== null) return;
+      try {
+        if (process.platform === 'win32') proc.kill('SIGKILL');
+        else {
+          try { process.kill(-proc.pid, 'SIGKILL'); }
+          catch { proc.kill('SIGKILL'); }
+        }
+      } catch (error) {
+        failure += `; 子进程终止失败: ${error instanceof Error ? error.message : String(error)}`;
+      }
+    };
 
     const timer = setTimeout(() => {
-      if (!settled) {
-        settled = true;
-        if (proc.pid) try { process.kill(-proc.pid, 'SIGKILL'); } catch {}
-        resolve({ success: false, error: `ONNX 放大超时 (${Math.round(effectiveTimeout / 1000)}s)` });
-      }
+      stop(`ONNX 放大超时 (${Math.round(effectiveTimeout / 1000)}s)`);
     }, effectiveTimeout);
 
     proc.stdout.on('data', (data: Buffer) => { stdout += data.toString(); });
     proc.stderr.on('data', (data: Buffer) => { stderr += data.toString(); });
 
     proc.on('error', (err: Error) => {
-      if (!settled) {
-        settled = true;
-        clearTimeout(timer);
-        resolve({ success: false, error: `Python 脚本启动失败: ${err.message}` });
-      }
+      failure ??= `Python 脚本启动失败: ${err.message}`;
     });
 
-    proc.on('close', (code: number | null) => {
-      if (settled) return;
-      settled = true;
+    proc.stdin.on('error', (err: Error) => stop(`Python 输入写入失败: ${err.message}`));
+
+    proc.once('close', (code: number | null) => {
       clearTimeout(timer);
+
+      if (failure) {
+        resolve({ success: false, error: failure });
+        return;
+      }
 
       if (code !== 0 && !stdout.trim()) {
         const errMsg = stderr.trim() || `进程退出码 ${code}`;
@@ -267,8 +202,12 @@ async function callOnnxUpscale(
       }
     });
 
-    proc.stdin.write(input);
-    proc.stdin.end();
+    try {
+      proc.stdin.write(input);
+      proc.stdin.end();
+    } catch (error) {
+      stop(`Python 输入写入失败: ${error instanceof Error ? error.message : String(error)}`);
+    }
   });
 }
 
@@ -302,7 +241,7 @@ export async function performOnnxUpscale(
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'onnx-upscale-'));
 
     try {
-    const { readImageToBuffer } = await import('./file');
+    const { readImageToBuffer } = await import('./image-input');
     const { buffer: inputBuffer, width: origW, height: origH } =
       await readImageToBuffer(inputImageUrl);
 
@@ -323,7 +262,7 @@ export async function performOnnxUpscale(
     const targetProcH = Math.min(origH, MAX_ONNX_EDGE, useScaleAwarePreResize ? shrinkH : MAX_ONNX_EDGE);
 
     if (targetProcW < origW || targetProcH < origH) {
-      const { resizeIfTooLarge } = await import('./file');
+      const { resizeIfTooLarge } = await import('./image-input');
       const resized = await resizeIfTooLarge(inputBuffer, Math.max(targetProcW, targetProcH));
       processBuffer = resized.buffer;
       procW = resized.width;
@@ -364,9 +303,15 @@ export async function performOnnxUpscale(
       return { success: false, error: result.error || 'ONNX 放大未返回结果' };
     }
 
+    const reportedOutput = resolveOnnxReportedOutput(result, isLargeImage ? outputFile : null);
+    if (!reportedOutput) {
+      return { success: false, error: 'ONNX 输出与本次请求不匹配' };
+    }
+
     // 文件模式：Python 已直接写入输出文件
-    if (result.outputFile && fs.existsSync(result.outputFile)) {
-      let finalBuffer: Buffer = await fs.promises.readFile(result.outputFile);
+    if (reportedOutput.kind === 'file') {
+      if (!fs.existsSync(outputFile)) return { success: false, error: 'ONNX 输出文件不存在' };
+      let finalBuffer: Buffer = await fs.promises.readFile(outputFile);
       const outW = result.outputSize?.[0] ?? procW * onnxScale;
       const outH = result.outputSize?.[1] ?? procH * onnxScale;
 
@@ -387,9 +332,9 @@ export async function performOnnxUpscale(
       const filename = generateFilename('upscale', outputFormat === 'png' ? 'png' : outputFormat as string);
       const finalOutputPath = path.join(getUpscaleOutputDir(), filename);
 
-      if (finalOutputPath !== result.outputFile) {
+      if (finalOutputPath !== outputFile) {
         fs.writeFileSync(finalOutputPath, finalBuffer);
-        try { fs.unlinkSync(result.outputFile); } catch {}
+        try { fs.unlinkSync(outputFile); } catch {}
       }
 
       const imageUrl = `${UPSCALE_OUTPUT_URL_PREFIX}/${filename}`;
@@ -405,11 +350,7 @@ export async function performOnnxUpscale(
     }
 
     // base64 模式
-    if (!result.image) {
-      return { success: false, error: result.error || 'ONNX 放大未返回结果' };
-    }
-
-    const outputBuffer = Buffer.from(result.image, 'base64');
+    const outputBuffer = Buffer.from(reportedOutput.url.slice('data:image/png;base64,'.length), 'base64');
     const outputMeta = await sharp(outputBuffer).metadata();
     const outW = outputMeta.width || (result.outputSize?.[0] ?? procW * scale);
     const outH = outputMeta.height || (result.outputSize?.[1] ?? procH * scale);
@@ -469,7 +410,7 @@ export async function performUpscaleAuto(
   // 兜底: sharp Lanczos3 插值放大（仅保留像素，不增加细节）
   console.log('[upscale] Falling back to sharp Lanczos3 resize...');
   try {
-    const { readImageToBuffer } = await import('./file');
+    const { readImageToBuffer } = await import('./image-input');
     const { buffer: inputBuffer, width: origW, height: origH } = await readImageToBuffer(params.imageUrl);
     const scaleNum = Math.max(2, Math.min(4, Math.round(params.scale || UPSCALE_DEFAULT_SCALE)));
     const outW = origW * scaleNum;

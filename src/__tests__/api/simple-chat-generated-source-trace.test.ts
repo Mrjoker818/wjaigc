@@ -12,6 +12,9 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock('server-only', () => ({}));
+vi.mock('@/lib/collaboration/task-result-publication', () => ({
+  projectCanvasTaskResult: vi.fn(async () => null),
+}));
 
 vi.mock('@/lib/server-api-config', () => ({
   findProviderForModel: mocks.findProviderForModel,
@@ -255,6 +258,47 @@ describe('simple chat generated image source trace', () => {
     expect(mocks.projectCompletedTaskToAssets).toHaveBeenCalledWith(expect.objectContaining({
       taskId: 'generation-task-1',
       sourceEntityId: 'assistant-message',
+    }));
+  });
+
+  it('projects a completed task again when its stored projection lacks a chat placement', async () => {
+    vi.useFakeTimers();
+    mocks.projectCompletedTaskToAssets.mockResolvedValueOnce({
+      versions: [{
+        id: 'version-without-placement',
+        assetId: 'asset-projected',
+        file: { url: '/api/serve-upload/projected.png' },
+      }],
+      placements: [{ id: 'placement-projected', entityId: 'assistant-message:0' }],
+      reused: true,
+    });
+    vi.stubGlobal('fetch', vi.fn<typeof fetch>(async input => {
+      const url = String(input);
+      if (url === 'https://chat.example/v1/chat/completions') return imageToolCallResponse();
+      if (url === 'http://127.0.0.1:5000/api/generate') {
+        return jsonResponse({ success: true, taskIds: ['generation-task-1'] });
+      }
+      if (url === 'http://127.0.0.1:5000/api/poll-task') {
+        return jsonResponse({
+          status: 'completed',
+          imageUrl: '/api/serve-upload/projected.png',
+          assetProjection: { status: 'completed', versionIds: ['version-without-placement'] },
+        });
+      }
+      throw new Error(`Unexpected fetch URL: ${url}`);
+    }));
+
+    const response = await POST(imageToolRequest());
+    const streamPromise = response.text();
+    await vi.runAllTimersAsync();
+    const event = readImageEvent(await streamPromise);
+
+    expect(event.imageRef).toEqual(expect.objectContaining({
+      assetId: 'asset-projected',
+      assetVersionId: 'version-without-placement',
+      placementId: 'placement-projected',
+      entityId: 'assistant-message:0',
+      url: '/api/serve-upload/projected.png',
     }));
   });
 });

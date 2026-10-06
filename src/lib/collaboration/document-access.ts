@@ -142,7 +142,20 @@ export async function grantDocumentEditor(
       [memberUserId, ownerId],
     );
     if (member.rowCount !== 1) throw new DocumentAccessError();
-    await client.query(
+    await writeDocumentEditorGrant(client, ownerId, projectId, memberUserId);
+    await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => undefined);
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+async function writeDocumentEditorGrant(
+  client: PoolClient, ownerId: string, projectId: string, memberUserId: string,
+): Promise<void> {
+  await client.query(
       `INSERT INTO wujie_project_document_editors
          (project_id, owner_id, member_user_id, status)
        VALUES ($1, $2, $3, 'active')
@@ -161,6 +174,30 @@ export async function grantDocumentEditor(
          revoked_at = NULL`,
       [projectId, ownerId, memberUserId],
     );
+}
+
+export async function grantDocumentEditorByName(
+  ownerId: string, projectId: string, memberName: string,
+): Promise<void> {
+  const client = await getPool().connect();
+  try {
+    await client.query('BEGIN');
+    await assertDocumentOwner(client, ownerId, projectId);
+    await assertDocumentProjectEnabled(client, ownerId, projectId);
+    const document = await client.query(
+      'SELECT 1 FROM wujie_project_canvas_documents WHERE project_id=$1 AND owner_id=$2 FOR SHARE',
+      [projectId, ownerId],
+    );
+    if (document.rowCount !== 1) {
+      throw Object.assign(new Error('项目协作文档缺失'), { code: 'DOCUMENT_AUTHORITY_CONFLICT' });
+    }
+    const member = await client.query<{ id: string }>(
+      "SELECT id FROM wujie_users WHERE name=$1 AND status='active' FOR SHARE", [memberName],
+    );
+    if (member.rowCount !== 1 || member.rows[0].id === ownerId) {
+      throw Object.assign(new Error('可邀请账号无效'), { code: 'DOCUMENT_INVITEE_INVALID' });
+    }
+    await writeDocumentEditorGrant(client, ownerId, projectId, member.rows[0].id);
     await client.query('COMMIT');
   } catch (error) {
     await client.query('ROLLBACK').catch(() => undefined);

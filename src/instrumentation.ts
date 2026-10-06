@@ -11,6 +11,16 @@ export async function register() {
       }).catch(() => {
         console.warn({ code: 'ASSET_CLEANUP_WORKER_START_FAILED' });
       });
+      import('@/lib/collaboration/cpu-removebg-publication-worker').then(({ startCpuRemoveBgPublicationWorker }) => {
+        startCpuRemoveBgPublicationWorker();
+      }).catch(() => {
+        console.warn({ code: 'CPU_REMOVEBG_PUBLICATION_WORKER_START_FAILED' });
+      });
+      import('@/lib/collaboration/cpu-removebg-timeout-recovery').then(({ startCpuRemoveBgTimeoutWorker }) => {
+        startCpuRemoveBgTimeoutWorker();
+      }).catch(() => {
+        console.warn({ code: 'CPU_REMOVEBG_TIMEOUT_WORKER_START_FAILED' });
+      });
     }
 
     // 数据库迁移和表初始化改为非阻塞，避免生产环境启动超时

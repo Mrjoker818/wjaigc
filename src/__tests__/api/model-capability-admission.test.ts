@@ -37,7 +37,8 @@ describe('image model capability admission', () => {
     expect(source).toContain("code: 'MODEL_NOT_CONFIGURED'");
     expect(source).toContain('retryable: false');
     expect(source).toContain('providerId: effectiveProviderId');
-    expect(source).toContain('modelId: model');
+    expect(source).toContain('modelId: candidateModelId');
+    expect(source).toContain('candidateAdmissionErrorResponse(implicitAdmission.error, provider.id, model)');
     expect(source).not.toContain('actualProviderId: capabilityProvider.id');
   });
 

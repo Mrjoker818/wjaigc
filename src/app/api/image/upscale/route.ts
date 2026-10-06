@@ -8,6 +8,10 @@ import { IMAGE_MAX_SIZE_MB } from '@/lib/image-tools/config';
 import { getSessionUser } from '@/lib/server-auth';
 import { consumeCredits, refundCredits } from '@/lib/credits';
 import { validateApiInputs } from '@/lib/api-validator';
+import { POST as imageEditPost } from '@/app/api/image-edit/route';
+
+// AI mode executes image-edit in this route segment; imports do not inherit its limit.
+export const maxDuration = 1800;
 
 export async function POST(request: NextRequest) {
   let deductedCredits = 0;
@@ -59,7 +63,22 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 积分检查与扣除
+    // AI mode uses the image-edit admission, billing, and task lifecycle as-is.
+    // Keep the original request credentials and project/version identity; do not
+    // charge once here and then submit an unauthenticated second request.
+    if (mode === 'ai') {
+      const headers = new Headers(request.headers);
+      headers.set('content-type', 'application/json');
+      headers.delete('content-length');
+      return imageEditPost(new NextRequest(new URL('/api/image-edit', request.url), {
+        method: 'POST', headers, signal: request.signal,
+        body: JSON.stringify({ ...body, action: 'upscale', scale,
+          upscaleMode: 'ai', engine: 'ai', outputFormat: outputFormat || 'png',
+          compression: compression || 90 }),
+      }));
+    }
+
+    // CPU 放大保持既有同步积分合同
     sessionUser = await getSessionUser(request).catch(() => null);
     deductedCredits = 0;
     if (sessionUser) {
@@ -68,35 +87,6 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ success: false, error: creditResult.message || '积分不足' }, { status: 402 });
       }
       deductedCredits = creditResult.cost;
-    }
-
-    // AI 放大模式: 委托给 /api/image-edit (action=upscale, upscaleMode=ai)
-    if (mode === 'ai') {
-      const baseUrl = process.env.DEPLOY_RUN_PORT
-        ? `http://localhost:${process.env.DEPLOY_RUN_PORT}`
-        : 'http://localhost:5000';
-      const aiResp = await fetch(`${baseUrl}/api/image-edit`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: 'upscale',
-          imageUrl,
-          scale,
-          upscaleMode: 'ai',
-          outputFormat: outputFormat || 'png',
-          compression: compression || 90,
-        }),
-        signal: AbortSignal.timeout(600000), // 10分钟超时
-      });
-      const aiResult = await aiResp.json() as Record<string, unknown>;
-      if (!aiResp.ok || aiResult.error) {
-        await refundFailure(`AI放大失败 (${aiResp.status})`);
-        return NextResponse.json(
-          { success: false, error: `AI放大失败: ${aiResult.error || '未知错误'}` },
-          { status: aiResp.status },
-        );
-      }
-      return NextResponse.json(aiResult);
     }
 
     // CPU 放大模式: ONNX Real-ESRGAN

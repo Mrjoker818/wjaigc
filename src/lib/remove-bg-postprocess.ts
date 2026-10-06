@@ -14,6 +14,7 @@
  */
 
 import sharp from 'sharp';
+import { randomUUID } from 'node:crypto';
 import { saveImageFile } from './server-data-root';
 import { fetchImageBuffer } from './fetch-image-buffer';
 import {
@@ -110,8 +111,10 @@ export async function postProcessLocalRemoveBG(
   rgbaBase64: string,
   maskBase64?: string,
   sourceBuffer?: Buffer,
+  outputId?: string,
 ): Promise<RemoveBGResult | null> {
   try {
+    if (outputId !== undefined && !/^[a-z0-9-]{1,80}$/.test(outputId)) return null;
     // 解码 base64 → PNG Buffer
     let rgbaBuffer = Buffer.from(rgbaBase64, 'base64');
 
@@ -148,14 +151,15 @@ export async function postProcessLocalRemoveBG(
     }
 
     const timestamp = Date.now();
-    const imageFilename = `removebg-${timestamp}.png`;
+    const fileIdentity = outputId ?? randomUUID();
+    const imageFilename = `removebg-${timestamp}-${fileIdentity}.png`;
     const imageUrl = saveImageFile(rgbaBuffer, imageFilename, 'removebg');
 
     // 保存黑白蒙版图
     let maskUrl: string | null = null;
     if (maskBase64) {
       const maskBuffer = Buffer.from(maskBase64, 'base64');
-      const maskFilename = `removebg-mask-${timestamp}.png`;
+      const maskFilename = `removebg-mask-${timestamp}-${fileIdentity}.png`;
       maskUrl = saveImageFile(maskBuffer, maskFilename, 'removebg');
     }
 
@@ -319,7 +323,7 @@ export async function postProcessAIRemoveBG(
         
         // 确保 AI 结果和原图尺寸一致
         const aiMeta = await sharp(aiBuffer).metadata();
-        const origMeta = await sharp(origBuffer).metadata();
+        await sharp(origBuffer).metadata();
         const targetW = aiMeta.width || 1024;
         const targetH = aiMeta.height || 1024;
         
@@ -487,8 +491,6 @@ export async function postProcessAIRemoveBG(
         if (foregroundRatio > 0.05 && foregroundRatio < 0.95) {
           // 使用原图 RGB（像素更精确）+ AI 检测的 alpha 蒙版
           let resultRgbSource: Buffer;
-          let sourceW = w;
-          let sourceH = h;
           try {
             const origResized = await sharp(origBuffer)
               .resize(w, h, { fit: 'fill' })
@@ -496,8 +498,6 @@ export async function postProcessAIRemoveBG(
               .raw()
               .toBuffer({ resolveWithObject: true });
             resultRgbSource = origResized.data;
-            sourceW = origResized.info.width;
-            sourceH = origResized.info.height;
           } catch {
             // 原图不可用时退回 AI 结果像素
             resultRgbSource = raw;
@@ -555,7 +555,7 @@ export async function postProcessAIRemoveBG(
       const origPixels = origW * origH;
 
       const maskBuffer = Buffer.from(maskResult.maskBase64, 'base64');
-      const maskMeta = await sharp(maskBuffer).metadata();
+      await sharp(maskBuffer).metadata();
       const maskResized = await sharp(maskBuffer)
         .resize(origW, origH, { fit: 'fill' })
         .raw()

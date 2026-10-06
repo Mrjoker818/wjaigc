@@ -4,9 +4,9 @@ import { getSessionUser } from '@/lib/server-auth';
 import { loadPaymentConfig, PAYMENT_CONFIG_KEY, type QrPaymentConfig } from '@/lib/payment-config';
 import { uploadImageToS3, isS3Available } from '@/lib/s3-storage';
 import { getServerDataRoot } from '@/lib/server-data-root';
+import { readServeUploadMediaLocal } from '@/lib/serve-upload-local-storage';
 import { decodeQrFromUrl, isPaymentLink } from '@/lib/qr-decode';
 import path from 'path';
-import fs from 'fs';
 
 /** GET：获取支付配置（管理员） */
 export async function GET(request: NextRequest) {
@@ -81,33 +81,27 @@ export async function POST(request: NextRequest) {
       const dataRoot = getServerDataRoot();
       for (const url of urlsToBackup) {
         const relativePath = url.replace(/^\/api\/serve-upload\//, '');
-        const possibleDirs = [
-          path.join(dataRoot, 'uploads'),
-          dataRoot,
-          path.join(process.cwd(), 'public', 'uploads'),
-        ];
-        for (const dir of possibleDirs) {
-          const fullPath = path.join(dir, relativePath);
-          if (fs.existsSync(fullPath)) {
-            try {
-              const buffer = await fs.promises.readFile(fullPath);
-              const ext = path.extname(fullPath).toLowerCase();
-              const mimeType = ext === '.jpg' || ext === '.jpeg' ? 'image/jpeg'
-                : ext === '.webp' ? 'image/webp'
-                : ext === '.svg' ? 'image/svg+xml'
-                : 'image/png';
-              const s3Key = await uploadImageToS3(buffer, path.basename(relativePath), mimeType);
-              if (s3Key) console.log(`[payment-config] S3 backup: ${relativePath} → ${s3Key}`);
-            } catch (err) {
-              console.warn(`[payment-config] S3 backup failed for ${relativePath}:`, err instanceof Error ? err.message : err);
-            }
-            break; // 找到文件就不继续搜索其他目录
+        try {
+          const buffer = await readServeUploadMediaLocal(dataRoot, process.cwd(), relativePath);
+          if (buffer) {
+            const ext = path.extname(relativePath).toLowerCase();
+            const mimeType = ext === '.jpg' || ext === '.jpeg' ? 'image/jpeg'
+              : ext === '.webp' ? 'image/webp'
+              : ext === '.svg' ? 'image/svg+xml'
+              : 'image/png';
+            const s3Key = await uploadImageToS3(buffer, path.basename(relativePath), mimeType);
+            if (s3Key) console.log(`[payment-config] S3 backup: ${relativePath} → ${s3Key}`);
           }
+        } catch (err) {
+          console.warn(`[payment-config] S3 backup failed for ${relativePath}:`, err instanceof Error ? err.message : err);
         }
       }
     }
 
-    await dbSetSystemSetting(PAYMENT_CONFIG_KEY, JSON.stringify(currentCfg));
+    const saved = await dbSetSystemSetting(PAYMENT_CONFIG_KEY, JSON.stringify(currentCfg));
+    if (!saved) {
+      return NextResponse.json({ success: false, error: '保存失败: 支付配置未持久化' }, { status: 500 });
+    }
 
     const canAcceptPayments = (currentCfg.wechatEnabled && !!(currentCfg.wechatQrUrl || currentCfg.wechatPayLink)) || (currentCfg.alipayEnabled && !!(currentCfg.alipayQrUrl || currentCfg.alipayPayLink));
 

@@ -1100,6 +1100,8 @@ export default function NodeEditor({ taskModelCatalog = [], taskModelOptions = [
   execLogsRef.current = execLogs;
 
   const executionViewScope = JSON.stringify([userId, projectId, wf.id]);
+  const executionViewScopeRef = useRef(executionViewScope);
+  executionViewScopeRef.current = executionViewScope;
   const previousExecutionViewScope = useRef(executionViewScope);
   useEffect(() => {
     if (previousExecutionViewScope.current === executionViewScope) return;
@@ -2126,6 +2128,7 @@ ${contextInfo}
     startNodeId?: string;
     tailNodeId?: string;
   }) => {
+    const submissionViewScope = executionViewScope;
     try {
       payload = resolveWorkflowExecutionScope(payload);
     } catch (error) {
@@ -2181,9 +2184,15 @@ ${contextInfo}
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'start', projectId, workflowId: wf.id, ...payload, nodes: executionNodes }),
       });
-      const data = await res.json();
-      if (!res.ok || !data.executionId) {
+      const data = await res.json().catch(() => null) as { executionId?: string; error?: string } | null;
+      if (executionViewScopeRef.current !== submissionViewScope) return;
+      if (!res.ok || !data?.executionId) {
         setExecStatus('failed');
+        setExecLogs([{
+          time: Date.now(), nodeId: 'workflow', label: '工作流', status: 'error',
+          message: typeof data?.error === 'string' && data.error ? data.error : `工作流启动失败 (${res.status})`,
+        }]);
+        setShowExecLog(true);
         return;
       }
       workflowCanvasPersistenceRef.current = {
@@ -2200,9 +2209,12 @@ ${contextInfo}
         execLogs: [],
       }));
     } catch {
+      if (executionViewScopeRef.current !== submissionViewScope) return;
       setExecStatus('failed');
+      setExecLogs([{ time: Date.now(), nodeId: 'workflow', label: '工作流', status: 'error', message: '工作流启动请求失败，请重试' }]);
+      setShowExecLog(true);
     }
-  }, [projectId, imageModels, wf.id, workflowSkills, WORKFLOW_EXEC_STATE_KEY]);
+  }, [projectId, imageModels, wf.id, workflowSkills, WORKFLOW_EXEC_STATE_KEY, executionViewScope]);
 
   const startWorkflowExecution = useCallback(async (payload: WorkflowExecutionScope) => {
     if (skillExecutionLock.current || skillQuote || ['running', 'paused'].includes(execStatus)) return;

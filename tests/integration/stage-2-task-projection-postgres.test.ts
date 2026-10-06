@@ -1,8 +1,10 @@
 import { spawnSync } from 'node:child_process';
 import { resolve } from 'node:path';
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import sharp from 'sharp';
+
+vi.mock('server-only', () => ({}));
 
 import { withIsolatedPostgres } from '../helpers/postgres-test-database';
 

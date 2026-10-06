@@ -1,5 +1,6 @@
 import type { WorkspaceAssetReference } from '@/lib/asset-core/types';
 import { normalizeGenerationSubmitSlots } from '@/lib/task-core/generation-batch';
+import { parseOrdinaryGenerationOutputGroup, type OrdinaryGenerationOutputGroup } from '@/lib/task-core/ordinary-generation-output-group';
 
 export type ImageGenerationSlotStatus =
   | 'submitting'
@@ -41,6 +42,10 @@ export interface RestoredImageGenerationTask extends ImageGenerationTaskUpdate {
 }
 
 export interface ImageGenerationSlot {
+  outputGroup?: OrdinaryGenerationOutputGroup;
+  outputIndex?: number;
+  assetId?: string;
+  entityId?: string;
   id: string;
   projectId: string;
   taskId?: string;
@@ -53,6 +58,9 @@ export interface ImageGenerationSlot {
 }
 
 interface SubmitResponse {
+  outputGroup?: unknown;
+  result?: unknown;
+  status?: unknown;
   batchId?: unknown;
   slots?: unknown;
   taskId?: unknown;
@@ -135,6 +143,7 @@ export function createImageGenerationSession(
   const requestBySlot = new Map<string, ImageGenerationRequest>();
   const pollHandles = new Map<string, PollHandle>();
   const projectionPendingTaskIds = new Set<string>();
+  const groups = new Map<string, { marker: OrdinaryGenerationOutputGroup; slotIds: string[]; projectId: string; cancelled: boolean }>();
 
   const snapshot = (): ImageGenerationSlot[] => slots.map(cloneSlot);
   const publish = (): void => {
@@ -159,6 +168,45 @@ export function createImageGenerationSession(
   };
 
   const applyUpdate = (update: ImageGenerationTaskUpdate): void => {
+    const group = groups.get(update.taskId);
+    if (group) {
+      if (group.cancelled || (update.projectId && update.projectId !== group.projectId)) return;
+      const status = normalizeStatus(update.status);
+      const refs = dependencies.extractAssetReferences(update.result);
+      const result = update.result && typeof update.result === 'object' ? update.result as Record<string, unknown> : {};
+      const imageCount = Array.isArray(result.imageUrls) ? result.imageUrls.length : 0;
+      const projection = result.assetProjection as Record<string, unknown> | undefined;
+      const pending = status === 'completed' && (!refs.length || refs.length < imageCount || projection?.status === 'projection_pending');
+      if (pending) projectionPendingTaskIds.add(update.taskId);
+      else projectionPendingTaskIds.delete(update.taskId);
+      if (status === 'completed' && !pending) {
+        for (let index = group.slotIds.length; index < refs.length; index++) {
+          const id = `${update.taskId}:output:${index}`;
+          group.slotIds.push(id);
+          slots.push({ id, projectId: group.projectId, taskId: update.taskId, status: 'processing', progress: 0,
+            outputGroup: group.marker, outputIndex: index });
+        }
+      }
+      group.slotIds.forEach((slotId, outputIndex) => {
+        const current = slots.find(slot => slot.id === slotId);
+        if (!current || TERMINAL_STATUSES.has(current.status)) return;
+        const next: ImageGenerationSlot = { ...current, status: pending ? 'processing' : status,
+          progress: pending ? 99 : typeof update.progress === 'number' ? update.progress : current.progress };
+        if (status === 'completed' && !pending) {
+          const reference = refs[outputIndex];
+          if (reference?.assetVersionId) {
+            Object.assign(next, { status: 'completed', progress: 100, assetId: reference.assetId,
+              assetVersionId: reference.assetVersionId, placementId: reference.placementId, entityId: reference.entityId, url: reference.url });
+            delete next.error;
+          } else {
+            next.status = 'failed'; next.error = { code: 'ORDINARY_OUTPUT_NOT_PRODUCED', message: '该请求未生成此输出', retryable: false };
+          }
+        } else if (status === 'failed' || status === 'timeout') next.error = normalizeError(update.error, '生成任务失败');
+        replaceSlot(slotId, next);
+      });
+      if (group.slotIds.every(id => !id || TERMINAL_STATUSES.has(slots.find(slot => slot.id === id)?.status || 'processing'))) clearPoll(update.taskId);
+      return;
+    }
     const slotId = taskToSlot.get(update.taskId);
     if (!slotId) return;
     const current = slots.find(slot => slot.id === slotId);
@@ -205,7 +253,7 @@ export function createImageGenerationSession(
     const handle = schedule(async () => {
       pollHandles.delete(taskId);
       if (disposed) return;
-      if (dependencies.isTaskEventsConnected() && !projectionPendingTaskIds.has(taskId)) {
+      if (dependencies.isTaskEventsConnected() && !projectionPendingTaskIds.has(taskId) && !groups.has(taskId)) {
         schedulePoll(taskId);
         return;
       }
@@ -213,6 +261,11 @@ export function createImageGenerationSession(
         applyUpdate(await dependencies.pollTask!(taskId));
       } catch {
         // A transient poll failure keeps the authoritative task active for the next attempt.
+      }
+      const group = groups.get(taskId);
+      if (group) {
+        if (!group.cancelled && group.slotIds.some(id => slots.some(slot => slot.id === id && !TERMINAL_STATUSES.has(slot.status)))) schedulePoll(taskId);
+        return;
       }
       const slotId = taskToSlot.get(taskId);
       const slot = slots.find(value => value.id === slotId);
@@ -225,6 +278,19 @@ export function createImageGenerationSession(
     targetSlots: ImageGenerationSlot[],
     response: SubmitResponse,
   ): void => {
+    const result = response.result && typeof response.result === 'object' ? response.result as Record<string, unknown> : {};
+    const rootId = typeof response.taskId === 'string' ? response.taskId : '';
+    const group = parseOrdinaryGenerationOutputGroup(response.outputGroup ?? result.outputGroup, rootId);
+    if (group && Array.isArray(response.taskIds) && response.taskIds.length === 1 && response.taskIds[0] === rootId
+      && group.requestedCount === targetSlots.length) {
+      groups.set(rootId, { marker: group, slotIds: targetSlots.map(slot => slot.id), projectId: targetSlots[0].projectId, cancelled: false });
+      targetSlots.forEach((slot, outputIndex) => {
+        replaceSlot(slot.id, { ...slot, taskId: rootId, outputGroup: group, outputIndex, status: 'processing' });
+      });
+      applyUpdate({ taskId: rootId, status: typeof response.status === 'string' ? response.status : 'processing', result: response.result });
+      if (targetSlots.some(slot => !TERMINAL_STATUSES.has(slots.find(value => value.id === slot.id)!.status))) schedulePoll(rootId);
+      return;
+    }
     const submitted = normalizeGenerationSubmitSlots(response);
     for (const serverSlot of submitted) {
       const target = targetSlots[serverSlot.slotIndex];
@@ -295,7 +361,23 @@ export function createImageGenerationSession(
 
     async restore(projectId) {
       const restored = (await dependencies.restoreTasks(projectId)).filter(task => task.projectId === projectId);
-      slots = restored.map((task): ImageGenerationSlot => {
+      for (const taskId of pollHandles.keys()) clearPoll(taskId);
+      groups.clear(); taskToSlot.clear(); requestBySlot.clear(); projectionPendingTaskIds.clear();
+      const groupUpdates: RestoredImageGenerationTask[] = [];
+      slots = restored.flatMap((task): ImageGenerationSlot[] => {
+        const result = task.result && typeof task.result === 'object' ? task.result as Record<string, unknown> : {};
+        const marker = parseOrdinaryGenerationOutputGroup(result.outputGroup, task.taskId);
+        if (marker) {
+          const count = Math.max(marker.requestedCount, dependencies.extractAssetReferences(task.result).length);
+          const created = Array.from({ length: count }, (_, outputIndex): ImageGenerationSlot => ({
+            id: `${task.taskId}:output:${outputIndex}`, taskId: task.taskId, projectId, outputIndex, outputGroup: marker,
+            status: 'processing', progress: task.progress || 0,
+          }));
+          groups.set(task.taskId, { marker, slotIds: created.map(slot => slot.id), projectId, cancelled: false });
+          if (task.request) created.forEach(slot => requestBySlot.set(slot.id, task.request!));
+          groupUpdates.push(task);
+          return created;
+        }
         const reference = dependencies.extractAssetReferences(task.result)[0];
         const restoredStatus = normalizeStatus(task.status);
         const missingCompletedProjection = restoredStatus === 'completed' && !reference?.assetVersionId;
@@ -324,8 +406,12 @@ export function createImageGenerationSession(
         taskToSlot.set(task.taskId, slot.id);
         if (task.request) requestBySlot.set(slot.id, task.request);
         if (!TERMINAL_STATUSES.has(slot.status)) schedulePoll(task.taskId);
-        return slot;
+        return [slot];
       });
+      for (const task of groupUpdates) {
+        applyUpdate(task);
+        if (slots.some(slot => slot.taskId === task.taskId && !TERMINAL_STATUSES.has(slot.status))) schedulePoll(task.taskId);
+      }
       publish();
       return snapshot();
     },
@@ -336,6 +422,15 @@ export function createImageGenerationSession(
       const result = await dependencies.cancelTask(slot.taskId);
       if (result.success !== true) return false;
       clearPoll(slot.taskId);
+      const group = groups.get(slot.taskId);
+      if (group) {
+        group.cancelled = true;
+        group.slotIds.forEach(id => {
+          const value = slots.find(item => item.id === id);
+          if (value && !TERMINAL_STATUSES.has(value.status)) replaceSlot(id, { ...value, status: 'cancelled' });
+        });
+        return true;
+      }
       replaceSlot(slotId, { ...slot, status: 'cancelled' });
       return true;
     },
@@ -344,7 +439,10 @@ export function createImageGenerationSession(
       const slot = slots.find(value => value.id === slotId);
       const request = requestBySlot.get(slotId);
       if (!slot || !request || (slot.status !== 'failed' && slot.status !== 'timeout')) return null;
+      if (slot.outputGroup && slot.error?.retryable === false) return null;
       if (slot.taskId) {
+        const group = groups.get(slot.taskId);
+        if (group) group.slotIds = group.slotIds.map(id => id === slotId ? '' : id);
         clearPoll(slot.taskId);
         taskToSlot.delete(slot.taskId);
       }
@@ -365,6 +463,7 @@ export function createImageGenerationSession(
       unsubscribeEvents();
       for (const taskId of pollHandles.keys()) clearPoll(taskId);
       projectionPendingTaskIds.clear();
+      groups.clear();
       listeners.clear();
     },
 

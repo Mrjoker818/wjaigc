@@ -104,3 +104,68 @@ describe('build trace audit CLI', () => {
     expect(JSON.parse(result.stdout).routeCount).toBe(1);
   });
 });
+
+describe.runIf(process.env.WUJIE_VERIFY_CURRENT_BUILD_TRACE === '1')('current production build traces', () => {
+  it('keeps project-root documents out of all API route bundles', async () => {
+    const { auditBuildTraces } = await import('../../../scripts/audit-build-traces.mjs');
+    const report = await auditBuildTraces(process.cwd());
+    expect(report.rootDocumentRoutes).toEqual([]);
+  });
+
+  it('keeps project-root documents out of the three upscale execution routes', async () => {
+    const { auditBuildTraces } = await import('../../../scripts/audit-build-traces.mjs');
+    const report = await auditBuildTraces(process.cwd());
+    for (const route of ['/api/image-edit', '/api/image/upscale', '/api/upscayl']) {
+      expect(report.rootDocumentRoutes).not.toContain(route);
+    }
+  });
+
+  it('keeps project-root configuration and documents out of the image health route', async () => {
+    const { auditBuildTraces } = await import('../../../scripts/audit-build-traces.mjs');
+    const report = await auditBuildTraces(process.cwd());
+    expect(report.nextConfigRoutes).not.toContain('/api/image/health');
+    expect(report.rootDocumentRoutes).not.toContain('/api/image/health');
+  });
+
+  it('keeps user data record writes out of project-root documents', async () => {
+    const { auditBuildTraces } = await import('../../../scripts/audit-build-traces.mjs');
+    const report = await auditBuildTraces(process.cwd());
+    expect(report.rootDocumentRoutes).not.toContain('/api/user-data/record');
+  });
+
+  it('does not bundle project-root configuration into the project export route', async () => {
+    const { auditBuildTraces } = await import('../../../scripts/audit-build-traces.mjs');
+    const report = await auditBuildTraces(process.cwd());
+    expect(report.nextConfigRoutes).not.toContain('/api/export-project');
+    expect(report.rootDocumentRoutes).not.toContain('/api/export-project');
+  });
+
+  it('does not bundle project-root files into the storage diagnostic route', async () => {
+    const { auditBuildTraces } = await import('../../../scripts/audit-build-traces.mjs');
+    const report = await auditBuildTraces(process.cwd());
+    expect(report.nextConfigRoutes).not.toContain('/api/diag/storage');
+    expect(report.rootDocumentRoutes).not.toContain('/api/diag/storage');
+  });
+
+  it('does not bundle project-root files into the payment configuration route', async () => {
+    const { auditBuildTraces } = await import('../../../scripts/audit-build-traces.mjs');
+    const report = await auditBuildTraces(process.cwd());
+    expect(report.nextConfigRoutes).not.toContain('/api/credits/payment-config');
+    expect(report.rootDocumentRoutes).not.toContain('/api/credits/payment-config');
+  });
+
+  it('does not bundle project-root files into the vision prompt route', async () => {
+    const { auditBuildTraces } = await import('../../../scripts/audit-build-traces.mjs');
+    const report = await auditBuildTraces(process.cwd());
+    expect(report.nextConfigRoutes).not.toContain('/api/vision-prompt');
+    expect(report.rootDocumentRoutes).not.toContain('/api/vision-prompt');
+  });
+
+  it('does not bundle project-root files into the refine engine route', async () => {
+    const { auditBuildTraces } = await import('../../../scripts/audit-build-traces.mjs');
+    const report = await auditBuildTraces(process.cwd());
+    expect(report.nextConfigRoutes).not.toContain('/api/refine-engine');
+    expect(report.rootDocumentRoutes).not.toContain('/api/refine-engine');
+  });
+
+});

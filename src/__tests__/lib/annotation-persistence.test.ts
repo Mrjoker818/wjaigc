@@ -11,6 +11,10 @@ import type {
   CanvasAnnotationV2,
   LegacyCanvasAnnotation,
 } from '@/features/annotations/annotation-types';
+import { validateCanvasDocumentProjection } from '@/lib/collaboration/canvas-document';
+import { toCanvasDocumentAnnotationRecords } from '@/lib/collaboration/canvas-document-image-bridge';
+import { beginAnnotationGesture, commitAnnotationGesture,
+  createInitialAnnotationControllerState } from '@/features/annotations/use-annotation-controller';
 
 function makeAnnotation(
   overrides: Partial<CanvasAnnotationV2> = {},
@@ -33,6 +37,57 @@ function makeAnnotation(
 }
 
 describe('annotation persistence', () => {
+  function readDocument(annotations: CanvasAnnotationV2[]): void {
+    validateCanvasDocumentProjection({
+      placements: { placement: { assetVersionId: 'version-1', x: 0, y: 0,
+        width: 200, height: 200, rotation: 0, zIndex: 1 } },
+      annotationRecords: toCanvasDocumentAnnotationRecords(serializeAnnotations(annotations),
+        [{ id: 'image-1', placementId: 'placement', url: '/api/serve-upload/source.png',
+          x: 0, y: 0, width: 200, height: 200 }]),
+    });
+  }
+
+  it('serializes a real arrow without a prompt into the strict document contract', () => {
+    const initial = { ...createInitialAnnotationControllerState(), tool: 'arrow' as const };
+    const begun = beginAnnotationGesture(initial, {
+      projectId: 'project-1', imageId: 'image-1', versionId: 'version-1',
+      imageRect: { x: 0, y: 0, width: 200, height: 200 },
+    }, { x: 20, y: 40 });
+    const committed = commitAnnotationGesture(begun, { x: 140, y: 160 }, 'arrow-1', 3);
+    expect(committed.annotations).toHaveLength(1);
+    expect(() => readDocument(committed.annotations)).not.toThrow();
+    const serialized = serializeAnnotations(committed.annotations);
+    expect(Object.hasOwn(serialized[0], 'instruction')).toBe(false);
+    expect(serialized[0].geometry).toEqual({ kind: 'arrow',
+      start: { x: 0.1, y: 0.2 }, end: { x: 0.7, y: 0.8 } });
+  });
+
+  it.each(['label', 'instruction', 'confidence', 'maskAssetId', 'overlayAssetId'] as const)(
+    'omits absent optional %s before Yjs validation without mutating the source', field => {
+      const record = makeAnnotation({ [field]: undefined });
+      expect(() => readDocument([record])).not.toThrow();
+      expect(Object.hasOwn(serializeAnnotations([record])[0], field)).toBe(false);
+      expect(Object.hasOwn(record, field)).toBe(true);
+    },
+  );
+
+  it('preserves a valid frozen order key distinct from the restored record identity', () => {
+    const record = makeAnnotation({ id: 'restored-record', orderKey: 'original-creation', instruction: undefined });
+    expect(() => readDocument([record])).not.toThrow();
+    const serialized = serializeAnnotations([record]);
+    expect(serialized[0].id).toBe('restored-record');
+    expect(serialized[0].orderKey).toBe('original-creation');
+    expect(record.orderKey).toBe('original-creation');
+  });
+
+  it.each([
+    { instruction: null }, { instruction: 7 }, { instruction: 'x'.repeat(1001) },
+    { orderKey: undefined }, { orderKey: null }, { orderKey: 'https://invalid.example' },
+  ])('does not hide invalid defined metadata or an invalid frozen order identity: %j', invalid => {
+    const record = makeAnnotation(invalid as unknown as Partial<CanvasAnnotationV2>);
+    expect(() => readDocument([record])).toThrow();
+  });
+
   it('removes inline and blob asset URLs during serialization', () => {
     const serialized = serializeAnnotations([
       makeAnnotation({

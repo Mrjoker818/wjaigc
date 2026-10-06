@@ -1,5 +1,14 @@
 import { NextRequest, NextResponse, after } from 'next/server';
 import { randomUUID } from 'node:crypto';
+import { confirmedImageEditQuoteForResponse } from '@/lib/task-core/image-edit-quote-token';
+import { readAcceptedImageEditPhaseResult } from '@/lib/task-core/image-edit-provider-checkpoint';
+import { persistOutpaintDirectResult, readOutpaintResultSize } from '@/lib/task-core/outpaint-direct-result';
+import { persistInpaintAcceptedResult } from '@/lib/task-core/inpaint-task';
+import { completeDocumentInpaintTask, ImageEditSourceAdmissionError } from '@/lib/collaboration/image-edit-source-admission';
+import { authorizeGenerationProject, GenerationProjectAccessError } from '@/lib/collaboration/generation-project-access';
+import { deleteTerminalPrivateInpaintInputs } from '@/lib/task-core/inpaint-private-inputs';
+import { isCoherentPublishedCpuRemoveBgResult } from '@/lib/collaboration/image-edit-publication-output';
+import { getCpuRemoveBgStaleAt, recoverAbandonedCpuRemoveBgTask } from '@/lib/collaboration/cpu-removebg-timeout-recovery';
 
 export const maxDuration = 1800; // 30分钟 - 支持长时间轮询慢速API（apimart等需要260s+任务）
 
@@ -51,8 +60,10 @@ import {
   getCloudTaskById,
   refundCloudTaskCredits,
   releaseCloudTaskLease,
+  renewCloudTaskLease,
   terminateCloudTaskAndRefund,
   updateCloudTask,
+  type CloudTask,
 } from '@/lib/cloud-task-storage';
 import { getCompletedVideoTaskResult } from '@/lib/video-task-result';
 import { resolveVideoCompatProfile } from '@/lib/video-api';
@@ -68,7 +79,7 @@ import {
 import {
   normalizeTaskError,
 } from '@/lib/task-core/task-error';
-import { requiresAtomicTerminalSettlement } from '@/lib/task-core/terminal-settlement';
+import { hasRequested302ImageEditIdentity, requiresAtomicTerminalSettlement } from '@/lib/task-core/terminal-settlement';
 import { getRequestId } from '@/lib/request-id';
 import type { GenerationRouteAudit } from '@/lib/generation-route-audit';
 import { STRICT_AGENT_GENERATE_HEADER } from '@/lib/agent-runtime/generate-image-adapter';
@@ -326,6 +337,158 @@ if (typeof setInterval !== 'undefined') {
 
 // 轮询异步任务状态 - 由前端调用
 // 通用化设计：支持不同提供商的任务状态查询格式
+async function pollDurableInpaintTask(task: CloudTask, actorUserId: string): Promise<NextResponse> {
+  const taskId = task.id;
+  const pending = (): NextResponse => NextResponse.json({ success: true, taskId,
+    status: 'processing', recoveryPending: true, progress: task.progress,
+    label: '编辑任务状态待核对，请勿重复提交' });
+  if (!task.requestDigest) return pending();
+  const identity = { taskId, userId: actorUserId, projectId: task.projectId || '',
+    requestDigest: task.requestDigest };
+  const admission = task.result?.imageEditAdmission as
+    { editMode?: unknown; documentSource?: unknown; documentOwnerId?: unknown;
+      documentGrantGeneration?: unknown } | undefined;
+  if (typeof admission?.documentSource !== 'boolean') return pending();
+  if (task.status === 'completed' && typeof task.result?.imageUrl === 'string') {
+    if (admission.documentSource) {
+      try {
+        const access = await authorizeGenerationProject({ actorUserId, projectId: identity.projectId });
+        if (access.kind !== 'document' || access.ownerId !== admission.documentOwnerId
+          || access.grantGeneration !== admission.documentGrantGeneration) {
+          return NextResponse.json({ success: false, code: 'IMAGE_EDIT_SOURCE_FORBIDDEN' }, { status: 403 });
+        }
+      } catch (error) {
+        if (error instanceof GenerationProjectAccessError && error.status === 403) {
+          return NextResponse.json({ success: false, code: 'IMAGE_EDIT_SOURCE_FORBIDDEN' }, { status: 403 });
+        }
+        return NextResponse.json({ success: false, code: 'IMAGE_EDIT_SOURCE_UNAVAILABLE' }, { status: 503 });
+      }
+    }
+    await deleteTerminalPrivateInpaintInputs(identity).catch(() => false);
+    return NextResponse.json({ success: true, taskId, status: 'completed', progress: 100,
+      imageUrl: task.result.imageUrl });
+  }
+  if (['failed', 'cancelled', 'timeout'].includes(task.status)) {
+    await deleteTerminalPrivateInpaintInputs(identity).catch(() => false);
+    return NextResponse.json({ success: false, taskId, status: task.status,
+      error: task.error || '编辑任务未完成', retryable: task.status === 'failed' });
+  }
+  const editMode = admission?.editMode === 'erase' ? 'erase' : admission?.editMode === 'mask' ? 'mask' : null;
+  if (!editMode) return pending();
+  const phaseId = editMode === 'erase' ? 'inpaint-erase-submit' : 'inpaint-mask-submit';
+  let accepted;
+  try { accepted = readAcceptedImageEditPhaseResult(task.result || {}, task.requestDigest, phaseId); }
+  catch { return pending(); }
+  if (accepted?.identity.kind !== 'image' || accepted.result.kind !== 'image') return pending();
+  if (!accepted.result.directUrl && !accepted.result.taskId) return pending();
+  if (task.remoteTaskId && task.remoteTaskId !== accepted.result.taskId) return pending();
+  if (!task.remoteTaskId && accepted.result.taskId) {
+    const repaired = await updateCloudTask(taskId, { remoteTaskId: accepted.result.taskId,
+      result: { providerId: accepted.identity.providerId, usedModel: accepted.identity.modelId },
+      mergeResult: true, expectedStatuses: ['processing'], expectedRevision: task.revision });
+    if (!repaired) return pending();
+  }
+  const leaseOwner = randomUUID();
+  const leaseMs = 90_000;
+  const lease = await claimCloudTaskLease(taskId, leaseOwner, leaseMs);
+  if (!lease) return pending();
+  const heartbeat = setInterval((): void => {
+    void renewCloudTaskLease(taskId, leaseOwner, leaseMs).catch(() => false);
+  }, 30_000);
+  heartbeat.unref();
+  try {
+    const current = await getCloudTaskForUser(taskId, actorUserId);
+    if (!current || current.status !== 'processing' || current.creditStatus !== 'pending'
+      || current.projectId !== identity.projectId || current.requestDigest !== identity.requestDigest
+      || (current.result?.imageEditAdmission as { kind?: unknown } | undefined)?.kind !== 'ordinary-inpaint'
+      || (current.result?.imageEditAdmission as { documentSource?: unknown } | undefined)?.documentSource
+        !== admission.documentSource
+      || (accepted.result.taskId && current.remoteTaskId !== accepted.result.taskId)) return pending();
+    const confirmed = readAcceptedImageEditPhaseResult(current.result || {}, identity.requestDigest, phaseId);
+    if (confirmed?.identity.kind !== 'image' || confirmed.result.kind !== 'image'
+      || confirmed.identity.providerId !== accepted.identity.providerId
+      || confirmed.identity.modelId !== accepted.identity.modelId
+      || confirmed.result.taskId !== accepted.result.taskId
+      || confirmed.result.directUrl !== accepted.result.directUrl) return pending();
+
+    let resultUrl = confirmed.result.directUrl;
+    if (!resultUrl) {
+      if (!confirmed.result.taskId) return pending();
+      const provider = await findProviderById(confirmed.identity.providerId);
+      if (!provider?.apiKey || !provider.baseUrl) return pending();
+      const pollUrl = buildPollUrl(normalizeApiBaseUrl(provider.baseUrl),
+        confirmed.result.taskId, resolveCompatProfile(provider));
+      if (!pollUrl) return pending();
+      const response = await fetch(pollUrl, { method: 'GET',
+        headers: { Authorization: `Bearer ${provider.apiKey}` },
+        signal: AbortSignal.timeout(30_000) });
+      if (!response.ok) return pending();
+      const data = await response.json() as Record<string, unknown>;
+      let state: Record<string, unknown> = data;
+      for (let depth = 0; depth < 3 && state.data && typeof state.data === 'object'
+        && !Array.isArray(state.data); depth += 1) state = state.data as Record<string, unknown>;
+      const status = String(state.status || '').toLowerCase();
+      if (['failed', 'error', 'cancelled', 'canceled', 'timeout', 'timed_out', 'expired'].includes(status)) {
+        const settled = await terminateCloudTaskAndRefund(taskId,
+          status === 'cancelled' || status === 'canceled' ? 'cancelled'
+            : ['timeout', 'timed_out', 'expired'].includes(status) ? 'timeout' : 'failed',
+          '远端编辑任务失败', leaseOwner);
+        const terminal = await getCloudTaskForUser(taskId, actorUserId);
+        if (!settled.transitioned || !terminal || !['failed', 'cancelled', 'timeout'].includes(terminal.status)) {
+          return pending();
+        }
+        await deleteTerminalPrivateInpaintInputs(identity).catch(() => false);
+        updateTaskProgress(taskId, { status: terminal.status, error: terminal.error || '远端编辑任务失败' });
+        return NextResponse.json({ success: false, taskId, status: terminal.status,
+          error: terminal.error || '远端编辑任务失败', retryable: terminal.status === 'failed' });
+      }
+      if (!['succeeded', 'completed', 'success', 'done'].includes(status)) return pending();
+      resultUrl = extractImageUrl(state) || extractImageUrl(data) || undefined;
+      if (!resultUrl) return pending();
+    }
+    const edited = await fetchImageBuffer(resultUrl, { maxBytes: 50 * 1024 * 1024 });
+    const crop = current.result?.inpaintResult as
+      { cropX: number; cropY: number; cropW: number; cropH: number } | undefined;
+    const output = await persistInpaintAcceptedResult({ identity, editMode, edited,
+      ...(editMode === 'mask' ? { crop } : {}) });
+    if (!await renewCloudTaskLease(taskId, leaseOwner, leaseMs)) return pending();
+    const result = { imageUrl: output.url,
+      checksum: output.checksum, providerId: confirmed.identity.providerId,
+      usedModel: confirmed.identity.modelId,
+    };
+    const completed = admission.documentSource
+      ? await completeDocumentInpaintTask({ identity, result, leaseOwner,
+        leaseAttemptCount: lease.attemptCount, leaseExpiresAt: lease.expiresAt })
+      : await completeCloudTask(taskId, result, { leaseOwner,
+        leaseAttemptCount: lease.attemptCount, deadlineAt: lease.expiresAt });
+    if (!completed) return pending();
+    await deleteTerminalPrivateInpaintInputs(identity).catch(() => false);
+    updateTaskProgress(taskId, { status: 'completed', progress: 100, result: { imageUrl: output.url } });
+    return NextResponse.json({ success: true, taskId, status: 'completed', progress: 100,
+      imageUrl: output.url });
+  } catch (error) {
+    if (error instanceof ImageEditSourceAdmissionError && error.status === 403) {
+      try {
+        const settled = await terminateCloudTaskAndRefund(taskId, 'failed',
+          '文档图片来源授权已失效', leaseOwner);
+        const terminal = await getCloudTaskForUser(taskId, actorUserId);
+        if (settled.transitioned && terminal?.status === 'failed' && terminal.creditStatus === 'refunded') {
+          await deleteTerminalPrivateInpaintInputs(identity).catch(() => false);
+          return NextResponse.json({ success: false, taskId, status: 'failed',
+            code: error.code, error: error.message });
+        }
+      } catch { /* An uncertain settlement remains pending until reconciled. */ }
+      return pending();
+    }
+    try { await deferCloudTaskRecovery(taskId, leaseOwner, 30_000,
+      '编辑结果暂时无法恢复；稍后继续核对'); } catch { /* Keep the charged task pending. */ }
+    return pending();
+  } finally {
+    clearInterval(heartbeat);
+    await releaseCloudTaskLease(taskId, leaseOwner);
+  }
+}
+
 async function handlePost(request: NextRequest): Promise<NextResponse> {
   const requestId = getRequestId(request);
   try {
@@ -357,6 +520,184 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
     const sessionUser = (await getRequestUser(request))?.user || null;
     // ★ 安全：已登录用户必须使用 session 中的 userId，忽略客户端传入值（防止伪造）
     const userId = sessionUser?.id || "anonymous";
+    if (sessionUser) {
+      let workflowEdit = await getCloudTaskForUser(taskId, userId);
+      if (workflowEdit?.type === 'edit' && workflowEdit.status === 'processing') {
+        const { settleAcceptedWorkflowEditTask } = await import('@/lib/collaboration/workflow-edit-output');
+        const settlement = await settleAcceptedWorkflowEditTask(userId, taskId);
+        if (settlement !== 'pending') workflowEdit = await getCloudTaskForUser(taskId, userId);
+      }
+      if (workflowEdit?.type === 'edit' && workflowEdit.status === 'completed') {
+        try {
+          const { projectWorkflowEditTaskResult } = await import('@/lib/collaboration/workflow-edit-output');
+          const references = await projectWorkflowEditTaskResult(userId, taskId);
+          if (references) {
+            const imageUrl = references[0]?.url;
+            if (!imageUrl) throw new Error('WORKFLOW_EDIT_OUTPUT_MISSING');
+            return NextResponse.json({ success: true, taskId, status: 'completed',
+              stage: workflowEdit.label || '完成',
+              result: { success: true, image: { url: imageUrl },
+                images: references.map(reference => ({ url: reference.url })),
+                imageUrl, imageUrls: references.map(reference => reference.url), model: workflowEdit.model,
+                providerId: workflowEdit.providerId,
+                assetProjection: { status: 'completed', references,
+                  versionIds: references.map(reference => reference.assetVersionId) } },
+            });
+          }
+          const submission = workflowEdit.result?.submissionPayload as Record<string, unknown> | undefined;
+          if (submission?.assetWorkspace === 'workflow') {
+            return NextResponse.json({ success: true, taskId, status: 'publication-pending',
+              recoveryPending: true, retryAfterMs: 1500 }, { status: 202 });
+          }
+        } catch {
+          return NextResponse.json({ success: true, taskId, status: 'publication-pending',
+            recoveryPending: true, retryAfterMs: 1500 }, { status: 202 });
+        }
+      }
+    }
+    if (sessionUser && taskId.startsWith('image-edit-')) {
+      const durableTask = await getCloudTaskForUser(taskId, sessionUser.id);
+      if (durableTask?.type === 'image-edit'
+        && (durableTask.result?.imageEditAdmission as { kind?: unknown } | undefined)?.kind === 'ordinary-inpaint') {
+        return pollDurableInpaintTask(durableTask, sessionUser.id);
+      }
+    }
+
+    // This CPU edit has no upstream provider task. Never let the generic
+    // generation recovery path reinterpret it as a provider submission.
+    if (taskId.startsWith('removebg-cpu-') || taskId.startsWith('image_edit_removebg_cpu_')) {
+      if (!sessionUser) return NextResponse.json({ success: false, error: '请先登录' }, { status: 401 });
+      let cpuTask = await getCloudTaskForUser(taskId, userId);
+      const admission = cpuTask?.result?.imageEditAdmission as Record<string, unknown> | undefined;
+      if (!cpuTask || cpuTask.type !== 'image-edit' || cpuTask.providerId !== 'local-rembg'
+        || admission?.kind !== 'document-cpu-removebg'
+        || typeof cpuTask.requestDigest !== 'string' || cpuTask.requestDigest.length === 0
+        || admission.requestDigest !== cpuTask.requestDigest) {
+        return NextResponse.json({ success: false, error: '任务不存在' }, { status: 404 });
+      }
+      if (cpuTask.status === 'pending' || cpuTask.status === 'queued') {
+        return NextResponse.json({ success: true, taskId, status: 'processing',
+          progress: cpuTask.progress, recoveryPending: true, retryAfterMs: 3000 });
+      }
+      if (cpuTask.status === 'processing') {
+        const staleAt = getCpuRemoveBgStaleAt(cpuTask);
+        if (Date.now() < staleAt) {
+          return NextResponse.json({ success: true, taskId, status: 'processing',
+            progress: cpuTask.progress, recoveryPending: true,
+            retryAfterMs: Math.max(1000, Math.min(staleAt - Date.now(), 30_000)) });
+        }
+        await recoverAbandonedCpuRemoveBgTask(taskId, userId);
+        cpuTask = await getCloudTaskForUser(taskId, userId);
+        if (!cpuTask) return NextResponse.json({ success: false, error: '任务不存在' }, { status: 404 });
+        if (['processing', 'pending', 'queued'].includes(cpuTask.status)) {
+          return NextResponse.json({ success: true, taskId, status: 'processing',
+            progress: cpuTask.progress, recoveryPending: true, retryAfterMs: 3000 });
+        }
+      }
+      if (cpuTask.status === 'completed') {
+        const requiresDocumentPublication = taskId.startsWith('image_edit_removebg_cpu_');
+        let completedProjectionReferences: unknown[] | undefined;
+        if (requiresDocumentPublication) {
+          await projectPersistedCompletedTask(taskId, userId);
+          cpuTask = await getCloudTaskForUser(taskId, userId);
+          const projection = cpuTask?.result?.assetProjection as {
+            status?: unknown;
+            references?: unknown[];
+          } | undefined;
+          if (!cpuTask || !isCoherentPublishedCpuRemoveBgResult(cpuTask)
+            || !Array.isArray(projection?.references)) {
+            return NextResponse.json({ success: true, taskId, status: 'publication-pending',
+              retryAfterMs: 1500 }, { status: 202 });
+          }
+          completedProjectionReferences = projection.references;
+        }
+        const completed = await getAuthoritativeCompletedImageResult(taskId, userId, cpuTask?.result || {});
+        if (!completed?.imageUrl || !completed.maskUrl) {
+          return NextResponse.json({ success: false, taskId, status: 'error',
+            code: 'IMAGE_EDIT_RESULT_MISSING', retryable: false });
+        }
+        return NextResponse.json({ success: true, taskId, status: 'completed', progress: 100,
+          imageUrl: completed.imageUrl, maskUrl: completed.maskUrl,
+          ...(requiresDocumentPublication ? { quote: confirmedImageEditQuoteForResponse(cpuTask?.result) } : {}),
+          result: sanitizeCompletedTaskResult(completed),
+          ...(requiresDocumentPublication ? {
+            assetProjection: {
+              status: 'completed',
+              references: completedProjectionReferences,
+            },
+          } : {}) });
+      }
+      return NextResponse.json({ success: false, taskId, status: cpuTask.status,
+        error: cpuTask.error || '任务未完成', retryable: false });
+    }
+
+    // Checkpointed 302 image-edit tasks are not ordinary submitOnly generation
+    // wrappers. Polling must never turn a lost 302 response into a second POST
+    // to /api/generate or an age-based automatic refund.
+    if (taskId.startsWith('upscale-302-')) {
+      if (!sessionUser) return NextResponse.json({ success: false, error: '请先登录' }, { status: 401 });
+      const imageEditTask = await getCloudTaskForUser(taskId, userId);
+      if (!imageEditTask || !hasRequested302ImageEditIdentity(imageEditTask)) {
+        return NextResponse.json({ success: false, error: '任务不存在' }, { status: 404 });
+      }
+      if (imageEditTask.status === 'completed') {
+        const completedResult = await getAuthoritativeCompletedImageResult(taskId, userId, imageEditTask.result || {});
+        if (!completedResult?.imageUrl) {
+          return NextResponse.json({ success: false, taskId, status: 'error',
+            code: 'IMAGE_EDIT_RESULT_MISSING', error: '任务缺少权威完成结果', retryable: false });
+        }
+        return NextResponse.json({ success: true, taskId, status: 'completed', progress: 100,
+          imageUrl: completedResult.imageUrl, result: sanitizeCompletedTaskResult(completedResult) });
+      }
+      if (['failed', 'cancelled', 'timeout'].includes(imageEditTask.status)) {
+        return NextResponse.json({ success: false, taskId, status: imageEditTask.status,
+          error: imageEditTask.error || '任务未完成', retryable: false });
+      }
+      const execution = imageEditTask.result?.imageEditExecution as
+        | { phases?: Array<{ attempts?: Array<{ status?: string }> }> } | undefined;
+      const attempts = execution?.phases?.flatMap(phase => phase.attempts || []) || [];
+      const submissionUnknown = attempts.some(attempt => attempt.status === 'started');
+      const accepted = attempts.some(attempt => attempt.status === 'accepted');
+      const code = submissionUnknown ? 'IMAGE_EDIT_SUBMISSION_UNKNOWN'
+        : accepted ? 'IMAGE_EDIT_ACCEPTED_RESULT_PENDING' : 'IMAGE_EDIT_DISPATCH_PENDING';
+      return NextResponse.json({ success: true, taskId, status: 'processing',
+        progress: imageEditTask.progress, code, recoveryPending: true,
+        requiresReconciliation: submissionUnknown || accepted,
+        label: submissionUnknown ? '302.AI 提交状态待核对，请勿重复提交'
+          : accepted ? '302.AI 已接受，正在等待结果安全恢复'
+            : '302.AI 任务正在等待安全执行',
+        retryAfterMs: 3000 });
+    }
+
+    if (taskId.startsWith('ordinary_')) {
+      if (!sessionUser) return NextResponse.json({ success: false, error: '请先登录' }, { status: 401 });
+      let task = await getCloudTaskForUser(taskId, userId);
+      if (!task || task.type !== 'generate') return NextResponse.json({ success: false, error: '任务不存在' }, { status: 404 });
+      const { executeOrdinaryGenerationTask, ordinaryTaskResponse, readOrdinaryDescriptor } = await import('@/lib/task-core/ordinary-generation-task');
+      try { readOrdinaryDescriptor(task); }
+      catch { return NextResponse.json({ success: false, error: '任务不存在' }, { status: 404 }); }
+      if (!['completed', 'failed', 'cancelled', 'timeout'].includes(task.status)) {
+        await executeOrdinaryGenerationTask({ taskId, actorUserId: userId, origin: request.nextUrl.origin, phase: 'poll' });
+      }
+      task = (await getCloudTaskForUser(taskId, userId))!;
+      if (task.status === 'completed') {
+        await projectPersistedCompletedTask(taskId, userId);
+        task = (await getCloudTaskForUser(taskId, userId))!;
+      }
+      return NextResponse.json(ordinaryTaskResponse(task));
+    }
+
+    if (taskId.startsWith('universal_')) {
+      if (!sessionUser) return NextResponse.json({ success: false, error: '请先登录' }, { status: 401 });
+      const task = await getCloudTaskForUser(taskId, userId);
+      if (!task || task.type !== 'universal-generate') return NextResponse.json({ success: false, error: '任务不存在' }, { status: 404 });
+      const { executeUniversalGenerationTask, universalTaskResponse } = await import('@/lib/task-core/universal-generation-task');
+      if (!['completed', 'failed', 'cancelled', 'timeout'].includes(task.status)) {
+        try { after(async (): Promise<void> => executeUniversalGenerationTask({ taskId, actorUserId: userId, origin: request.nextUrl.origin })); }
+        catch { /* The persisted task remains recoverable on the next authenticated poll. */ }
+      }
+      return NextResponse.json(universalTaskResponse(task));
+    }
 
     if (sessionUser && taskId.startsWith('async-')) {
       const child = await getCloudTaskForUser(taskId, userId);
@@ -579,6 +920,19 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
           retryable: false,
         }, { status: 200 });
       };
+
+      const completeDurableEditResult = async (result: Record<string, unknown>): Promise<
+        'completed' | 'denied' | 'rejected' | 'pending' | 'terminal'> => {
+        const submission = persistedEditTask?.result?.submissionPayload as Record<string, unknown> | undefined;
+        if (submission?.assetWorkspace === 'workflow' && sessionUser) {
+          const { completeWorkflowEditTask } = await import('@/lib/collaboration/workflow-edit-terminal');
+          return completeWorkflowEditTask({ actorId: sessionUser.id, taskId,
+            requestDigest: persistedEditTask?.requestDigest || '',
+            providerId: persistedEditTask?.providerId || '', modelId: persistedEditTask?.model || '', result });
+        }
+        return await completeCloudTask(taskId, result) ? 'completed' : 'terminal';
+      };
+
 
       if (remotePollInfo && task.status === 'processing') {
         if (!remotePollInfo.providerId) {
@@ -829,7 +1183,22 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
                 };
                 let authoritativeCompletedResult: Record<string, unknown> = completedResult;
                 if (hasDurableEditTask) {
-                  const committed = await completeCloudTask(taskId, completedResult);
+                  const completion = await completeDurableEditResult(completedResult);
+                  if (completion === 'denied') {
+                    failEditTask(taskId, '工作流图片来源已失效');
+                    return NextResponse.json({ success: false, taskId, status: 'failed',
+                      error: '工作流图片来源已失效', retryable: false }, { status: 200 });
+                  }
+                  if (completion === 'rejected') {
+                    failEditTask(taskId, '生成结果不是可用图片，积分已退还');
+                    return NextResponse.json({ success: false, taskId, status: 'failed',
+                      error: '生成结果不是可用图片，积分已退还', retryable: false }, { status: 200 });
+                  }
+                  if (completion === 'pending') {
+                    return NextResponse.json({ success: true, taskId, status: 'publication-pending',
+                      recoveryPending: true, retryAfterMs: 1500 }, { status: 202 });
+                  }
+                  const committed = completion === 'completed';
                   if (!committed) {
                     const current = await getCloudTaskForUser(taskId, sessionUser!.id);
                     if (current?.status === 'completed') {
@@ -912,7 +1281,22 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
                   };
                   let authoritativeCompletedResult: Record<string, unknown> = completedResult;
                   if (hasDurableEditTask) {
-                    const committed = await completeCloudTask(taskId, completedResult);
+                    const completion = await completeDurableEditResult(completedResult);
+                    if (completion === 'denied') {
+                      failEditTask(taskId, '工作流图片来源已失效');
+                      return NextResponse.json({ success: false, taskId, status: 'failed',
+                        error: '工作流图片来源已失效', retryable: false }, { status: 200 });
+                    }
+                    if (completion === 'rejected') {
+                      failEditTask(taskId, '生成结果不是可用图片，积分已退还');
+                      return NextResponse.json({ success: false, taskId, status: 'failed',
+                        error: '生成结果不是可用图片，积分已退还', retryable: false }, { status: 200 });
+                    }
+                    if (completion === 'pending') {
+                      return NextResponse.json({ success: true, taskId, status: 'publication-pending',
+                        recoveryPending: true, retryAfterMs: 1500 }, { status: 202 });
+                    }
+                    const committed = completion === 'completed';
                     if (!committed) {
                       const current = await getCloudTaskForUser(taskId, sessionUser!.id);
                       if (current?.status === 'completed') {
@@ -1253,8 +1637,9 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
       && (!isLocalWorkerMode || Date.now() - registryTask.updatedAt > SUBMISSION_STALE_MS),
     );
     if ((!registryTask || shouldResumeExistingAsync) && sessionUser) {
-      const persistedTask = await getCloudTaskForUser(taskId, sessionUser.id);
-      if (persistedTask) {
+      const loadedTask = await getCloudTaskForUser(taskId, sessionUser.id);
+      if (loadedTask) {
+        let persistedTask = loadedTask;
         if (persistedTask.type === 'refine-engine' && ['completed', 'failed', 'cancelled', 'timeout'].includes(persistedTask.status)) {
           return NextResponse.json(refineTaskResponse(persistedTask));
         }
@@ -1311,6 +1696,115 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
             error: persistedTask.error || '任务未完成',
             retryable: persistedTask.status === 'failed',
           }, persistedTask.result, taskId), { status: 200 });
+        }
+
+        const imageEditAdmission = persistedTask.result?.imageEditAdmission as
+          | { kind?: unknown } | undefined;
+        if (persistedTask.type === 'image-edit'
+          && imageEditAdmission?.kind === 'ordinary-outpaint') {
+          // A local billable identity exists before the provider receipt. It is
+          // never a valid provider task ID, even after the normal recovery backoff.
+          // A durable accepted checkpoint can, however, restore the remote ID
+          // without another provider POST or another charge.
+          const pending = (): NextResponse => NextResponse.json({ success: true, taskId, status: 'processing',
+            progress: persistedTask.progress,
+            label: '扩展画面提交状态待核对，请勿重复提交', recoveryPending: true });
+          if (!persistedTask.requestDigest && !persistedTask.remoteTaskId) return pending();
+          let accepted;
+          if (persistedTask.requestDigest) {
+            try {
+              accepted = readAcceptedImageEditPhaseResult(persistedTask.result || {},
+                persistedTask.requestDigest, 'outpaint-submit');
+            } catch {
+              if (!persistedTask.remoteTaskId) return pending();
+            }
+          }
+          if (accepted?.identity.kind === 'image' && accepted.result.kind === 'image'
+            && accepted.result.directUrl) {
+            // A direct provider response is already accepted and billable. Only
+            // its safe download/resize and terminal write need recovery.
+            const leaseOwner = randomUUID();
+            const directLeaseMs = 90_000;
+            const lease = await claimCloudTaskLease(taskId, leaseOwner, directLeaseMs);
+            if (!lease) return pending();
+            const leaseHeartbeat = setInterval((): void => {
+              void renewCloudTaskLease(taskId, leaseOwner, directLeaseMs).catch(() => false);
+            }, 30_000);
+            leaseHeartbeat.unref();
+            try {
+              const current = await getCloudTaskForUser(taskId, sessionUser.id);
+              if (!current || current.status !== 'processing' || current.creditStatus !== 'pending'
+                || current.remoteTaskId !== persistedTask.remoteTaskId
+                || (current.remoteTaskId && current.remoteTaskId !== accepted.result.taskId)
+                || !current.requestDigest || current.requestDigest !== persistedTask.requestDigest
+                || current.projectId !== persistedTask.projectId
+                || (current.result?.imageEditAdmission as { kind?: unknown } | undefined)?.kind !== 'ordinary-outpaint') {
+                return pending();
+              }
+              const confirmed = readAcceptedImageEditPhaseResult(current.result || {},
+                current.requestDigest, 'outpaint-submit');
+              if (confirmed?.identity.kind !== 'image' || confirmed.result.kind !== 'image'
+                || confirmed.result.directUrl !== accepted.result.directUrl
+                || confirmed.result.taskId !== accepted.result.taskId
+                || confirmed.identity.providerId !== accepted.identity.providerId
+                || confirmed.identity.modelId !== accepted.identity.modelId) return pending();
+              const outpaintInfo = readOutpaintResultSize(current.result?.outpaintInfo);
+              if (!outpaintInfo) return pending();
+              const imageUrl = await persistOutpaintDirectResult(confirmed.result.directUrl, outpaintInfo);
+              if (!await renewCloudTaskLease(taskId, leaseOwner, directLeaseMs)) return pending();
+              const completed = await completeCloudTask(taskId, {
+                imageUrl, providerId: confirmed.identity.providerId,
+                usedModel: confirmed.identity.modelId, outpaintInfo,
+              }, { leaseOwner, leaseAttemptCount: lease.attemptCount,
+                deadlineAt: Date.now() + directLeaseMs });
+              if (!completed) return pending();
+              return NextResponse.json({ success: true, taskId, status: 'completed', progress: 100,
+                imageUrl, targetWidth: outpaintInfo.targetW, targetHeight: outpaintInfo.targetH });
+            } catch {
+              // A provider URL may carry credentials; never log the fetch error
+              // or the URL. Keep the paid task pending, but bound retry work.
+              const backoffMs = Math.min(10 * 60_000,
+                30_000 * 2 ** Math.min(5, Math.max(0, lease.attemptCount - 2)));
+              try {
+                await deferCloudTaskRecovery(taskId, leaseOwner, backoffMs,
+                  '已接收扩图结果，安全保存失败；稍后继续恢复');
+              } catch { /* The task stays pending even if a retry barrier cannot be written. */ }
+              return pending();
+            } finally {
+              clearInterval(leaseHeartbeat);
+              await releaseCloudTaskLease(taskId, leaseOwner);
+            }
+          }
+          if (!persistedTask.remoteTaskId) {
+            if (accepted?.identity.kind !== 'image' || accepted.result.kind !== 'image'
+              || !accepted.result.taskId) return pending();
+            // Repairing an accepted receipt is a local CAS write, not another
+            // provider operation or a reason to steal the submitter's lease.
+            const current = await getCloudTaskForUser(taskId, sessionUser.id);
+            if (!current || current.status !== 'processing' || current.creditStatus !== 'pending'
+              || current.remoteTaskId || !current.requestDigest
+              || current.requestDigest !== persistedTask.requestDigest
+              || current.projectId !== persistedTask.projectId
+              || (current.result?.imageEditAdmission as { kind?: unknown } | undefined)?.kind !== 'ordinary-outpaint') {
+              return pending();
+            }
+            const confirmed = readAcceptedImageEditPhaseResult(current.result || {},
+              current.requestDigest, 'outpaint-submit');
+            if (confirmed?.identity.kind !== 'image' || confirmed.result.kind !== 'image'
+              || confirmed.result.taskId !== accepted.result.taskId
+              || confirmed.identity.providerId !== accepted.identity.providerId
+              || confirmed.identity.modelId !== accepted.identity.modelId) return pending();
+            const saved = await updateCloudTask(taskId, {
+              remoteTaskId: confirmed.result.taskId,
+              result: { providerId: confirmed.identity.providerId, usedModel: confirmed.identity.modelId },
+              mergeResult: true, expectedStatuses: ['processing'], expectedRevision: current.revision,
+            });
+            if (!saved) return pending();
+            const recovered = await getCloudTaskForUser(taskId, sessionUser.id);
+            if (!recovered || recovered.status !== 'processing'
+              || recovered.remoteTaskId !== confirmed.result.taskId) return pending();
+            persistedTask = recovered;
+          }
         }
 
         const localBackgroundRecovery = getLocalBackgroundTaskRecoveryDecision({
@@ -1507,6 +2001,10 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
           result: {
             submissionPayload,
             remoteTaskId: recovery.remoteTaskId,
+            ...(persistedTask.type === 'image-edit'
+              && (persistedTask.result?.imageEditAdmission as { kind?: unknown } | undefined)?.kind === 'ordinary-outpaint'
+              && persistedTask.result?.outpaintInfo
+              ? { outpaintInfo: persistedTask.result.outpaintInfo } : {}),
             ...(recovery.type.startsWith('video') ? {
               thirdPartyTaskId: recovery.remoteTaskId,
               profile: recoveredVideoProfile,
@@ -2996,6 +3494,7 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
       if (taskButtons.length > 0) pollResult.buttons = taskButtons;
       appendSourceImageUrl(taskResult?.image_urls);
       appendSourceImageUrl(taskResult?.imageUrls);
+      appendSourceImageUrl(taskResult?.image_url ?? taskResult?.imageUrl ?? taskResult?.url);
       appendSourceImageUrl(taskResult?.generated_images);
       appendSourceImageUrl(taskResult?.data);
 

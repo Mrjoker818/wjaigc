@@ -103,6 +103,7 @@ export interface ExecuteAnnotationBundleResult {
 
 export async function executeAnnotationBundle(
   input: ExecuteAnnotationBundleInput,
+  options?: { signal?: AbortSignal },
 ): Promise<ExecuteAnnotationBundleResult> {
   const response = await fetch('/api/annotations/execute', {
     method: 'POST',
@@ -112,6 +113,7 @@ export async function executeAnnotationBundle(
       'x-idempotency-key': input.bundle.idempotencyKey,
     },
     body: JSON.stringify(input),
+    signal: options?.signal,
   });
   const payload = await readJson(response);
   if (!response.ok || payload.success !== true || typeof payload.taskId !== 'string') {

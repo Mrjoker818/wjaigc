@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { safeSkillExecutionError } from '@/lib/skill-runtime/execution-error';
+import { projectPersistedCompletedTask } from '@/lib/cloud-task-persistence';
 
 import {
   getCloudTaskForUser,
@@ -182,6 +183,7 @@ interface OwnedAgentRun {
 }
 
 export interface AgentRuntimeDependencies {
+  projectPersistedCompletedTask?: typeof projectPersistedCompletedTask;
   randomUUID: () => string;
   now: () => number;
   resolveTaskModel: typeof resolveTaskModel;
@@ -205,6 +207,7 @@ export interface AgentRuntimeDependencies {
 }
 
 const defaultDependencies: AgentRuntimeDependencies = {
+  projectPersistedCompletedTask,
   randomUUID,
   now: Date.now,
   resolveTaskModel,
@@ -562,6 +565,7 @@ export function createAgentRuntimeService(
           payload: validated.payload,
           executionFence: validated.executionFence,
         });
+        if (verified.type === 'run.completed') await dependencies.projectPersistedCompletedTask?.(validated.runId, validated.actorUserId);
         return {
           accepted: true,
           event: verified,
@@ -717,6 +721,7 @@ export function createAgentRuntimeService(
     });
     const projection = reduceAgentEvents(events);
     const accepted = acceptedEventFromProjection(events, appended, projection);
+    if (accepted && appended.type === 'run.completed') await dependencies.projectPersistedCompletedTask?.(validated.runId, validated.actorUserId);
     return { accepted, event: appended, projection };
   }
 
@@ -804,7 +809,7 @@ export function createAgentRuntimeService(
       const modelRequest = executionRuntime === 'model'
         ? requireModelAgentRunRequest(request)
         : undefined;
-      await dependencies.authorizeContext({
+      const authorizedContext = await dependencies.authorizeContext({
         actorUserId: input.actor.id,
         request,
       });
@@ -863,6 +868,12 @@ export function createAgentRuntimeService(
       const now = dependencies.now();
       const created = await dependencies.createBillableTask({
         userId: input.actor.id,
+        ...(authorizedContext.projectAccess?.kind === 'document' && request.workspace === 'canvas'
+          && (request.workspaceId === request.projectId || request.workspaceId === `canvas:${request.projectId}`)
+          ? { canvasPublication: { access: authorizedContext.projectAccess, workspace: 'canvas' as const, workspaceId: request.workspaceId,
+              intent: { parentVersionIds: request.sourceVersionIds, projectionMode: 'derived' as const,
+                placement: { action: 'append' as const, selectedEntityIds: request.context.selectedEntityIds } } } }
+          : {}),
         idempotencyKey: request.idempotencyKey,
         requestDigest: agentRunRequestDigest(request),
         creditCost,

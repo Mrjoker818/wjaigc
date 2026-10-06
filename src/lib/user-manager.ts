@@ -2122,7 +2122,7 @@ export class UserManager {
             );
             const baseProject: Project = serverTime >= localTime
               ? { ...sp, canvasImages: selectedImages }
-              : { ...lp, canvasImages: selectedImages, updatedAt: Math.max(localTime, serverTime) };
+              : { ...lp, createdAt: sp.createdAt, canvasImages: selectedImages, updatedAt: Math.max(localTime, serverTime) };
             // 补充合并 metadata.groups（按 group ID 并集）
             if (lp.metadata?.groups || sp.metadata?.groups) {
               const localGroups = new Map(((lp.metadata?.groups ?? []) as ImageGroupData[]).map(g => [g.id, g]));

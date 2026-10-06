@@ -14,6 +14,9 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock('server-only', () => ({}));
+vi.mock('@/lib/collaboration/task-result-publication', () => ({
+  projectCanvasTaskResult: vi.fn(async () => null),
+}));
 
 vi.mock('@/lib/server-api-config', () => ({
   findProviderForModel: mocks.findProviderForModel,

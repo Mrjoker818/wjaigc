@@ -3,13 +3,17 @@
 import type { CollaborativeCanvasState } from '@/lib/collaboration/document-client';
 
 export function DocumentStatus({
-  authority, status, onExportLocalCopy, onRetryRecovered,
+  authority, status, commandStatus, onExportLocalCopy, onRetryRecovered,
 }: Pick<CollaborativeCanvasState, 'authority' | 'status'> & {
   onExportLocalCopy?: () => void;
   onRetryRecovered?: () => void;
+  commandStatus?: 'running' | 'failed';
 }) {
   if (authority === 'legacy' || status === 'disabled') return null;
-  const message = status === 'saved' ? '已保存'
+  const commandUnconfirmed = !!commandStatus && (status === 'saved' || status === 'pending');
+  const message = commandUnconfirmed ? commandStatus === 'failed'
+    ? '画布操作未确认；请重试未完成的画布操作' : '正在确认画布操作…'
+    : status === 'saved' ? '已保存'
     : status === 'pending' ? '待同步'
       : status === 'connecting' ? '正在连接协作'
         : status === 'read-only' ? '协作文档只读'
@@ -27,7 +31,7 @@ export function DocumentStatus({
       aria-live="polite"
       aria-atomic="true"
       className={`min-w-0 max-w-full whitespace-normal break-words rounded-md border px-2 py-1 text-xs ${
-        status === 'unavailable' || status === 'pending' || status === 'rejected' || status === 'recovery'
+        commandUnconfirmed || status === 'unavailable' || status === 'pending' || status === 'rejected' || status === 'recovery'
           ? 'border-amber-500/50 text-amber-300'
           : 'border-white/20 text-white/80'
       }`}

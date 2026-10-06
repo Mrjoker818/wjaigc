@@ -6,6 +6,18 @@ import { describe, expect, it, vi } from 'vitest';
 import { DocumentStatus } from '@/components/collaboration/document-status';
 
 describe('DocumentStatus', () => {
+  it.each(['running', 'failed'] as const)('does not claim saved for a %s live media operation even when Yjs is acknowledged', commandStatus => {
+    render(<DocumentStatus authority="document" status="saved" {...{ commandStatus }} />);
+    expect(screen.getByRole('status').textContent).not.toContain('已保存');
+    expect(screen.getByRole('status').textContent).toContain('确认');
+  });
+
+  it('keeps rejected document recovery actions visible while a media command is unfinished', () => {
+    render(<DocumentStatus authority="document" status="rejected" {...{ commandStatus: 'failed' as const }}
+      onExportLocalCopy={vi.fn()} />);
+    expect(screen.getByRole('status').textContent).toContain('服务器拒绝');
+    expect(screen.getByRole('button', { name: '下载未同步副本' })).toBeTruthy();
+  });
   it('keeps the recovery notice and explicit actions in one accessible group across status changes', () => {
     const exportCopy = vi.fn();
     const retry = vi.fn();

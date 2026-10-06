@@ -250,8 +250,9 @@ function mapVersion(row: VersionRow): AssetVersion {
       url: row.file_url,
       availability: row.availability,
       ...(row.storage_key ? { storageKey: row.storage_key } : {}),
-      ...(row.checksum ? { checksum: row.checksum } : {}),
-      ...(row.mime_type ? { mimeType: row.mime_type } : {}),
+      // Preserve explicit empty values: only SQL NULL means absent metadata.
+      ...(row.checksum == null ? {} : { checksum: row.checksum }),
+      ...(row.mime_type == null ? {} : { mimeType: row.mime_type }),
       ...(row.byte_size === null ? {} : { byteSize: Number(row.byte_size) }),
       ...(row.width === null ? {} : { width: row.width }),
       ...(row.height === null ? {} : { height: row.height }),

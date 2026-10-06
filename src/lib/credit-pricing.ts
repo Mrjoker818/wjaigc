@@ -26,6 +26,13 @@ export interface CreditPricingConfig {
 
 const EMPTY_CONFIG: CreditPricingConfig = { modelCredits: {} };
 
+function normalizeCreditPriceValue(value: unknown): number {
+  if (typeof value !== 'number' && (typeof value !== 'string' || !value.trim())) {
+    return Number.NaN;
+  }
+  return Number(value);
+}
+
 function normalizeSingleEntry(model: string, value: unknown): number | ModelCreditEntry {
   if (typeof value === 'number') {
     if (!Number.isInteger(value) || value < 0 || value > 100_000) {
@@ -35,7 +42,7 @@ function normalizeSingleEntry(model: string, value: unknown): number | ModelCred
   }
   if (value && typeof value === 'object' && !Array.isArray(value)) {
     const obj = value as Record<string, unknown>;
-    const credits = Number(obj.credits);
+    const credits = normalizeCreditPriceValue(obj.credits);
     if (!Number.isInteger(credits) || credits < 0 || credits > 100_000) {
       throw new Error(`Invalid credit price for model: ${model}`);
     }
@@ -43,7 +50,7 @@ function normalizeSingleEntry(model: string, value: unknown): number | ModelCred
     if (obj.quality && typeof obj.quality === 'object' && !Array.isArray(obj.quality)) {
       const quality: Record<string, number> = {};
       for (const [q, v] of Object.entries(obj.quality as Record<string, unknown>)) {
-        const n = Number(v);
+        const n = normalizeCreditPriceValue(v);
         if (!q.trim() || !Number.isInteger(n) || n < 0 || n > 100_000) {
           throw new Error(`Invalid quality credit for model ${model}: ${q}`);
         }
@@ -54,7 +61,7 @@ function normalizeSingleEntry(model: string, value: unknown): number | ModelCred
     if (obj.resolution && typeof obj.resolution === 'object' && !Array.isArray(obj.resolution)) {
       const resolution: Record<string, number> = {};
       for (const [r, v] of Object.entries(obj.resolution as Record<string, unknown>)) {
-        const n = Number(v);
+        const n = normalizeCreditPriceValue(v);
         if (!r.trim() || !Number.isInteger(n) || n < 0 || n > 100_000) {
           throw new Error(`Invalid resolution credit for model ${model}: ${r}`);
         }
@@ -64,8 +71,8 @@ function normalizeSingleEntry(model: string, value: unknown): number | ModelCred
     }
     if (obj.tokenPricing && typeof obj.tokenPricing === 'object' && !Array.isArray(obj.tokenPricing)) {
       const tp = obj.tokenPricing as Record<string, unknown>;
-      const inputRate = Number(tp.input);
-      const outputRate = Number(tp.output);
+      const inputRate = normalizeCreditPriceValue(tp.input);
+      const outputRate = normalizeCreditPriceValue(tp.output);
       if (
         !Number.isInteger(inputRate) || inputRate <= 0 || inputRate > 10_000_000 ||
         !Number.isInteger(outputRate) || outputRate <= 0 || outputRate > 10_000_000
@@ -90,8 +97,7 @@ function normalizeModelCredits(value: unknown): Record<string, number | ModelCre
   return normalized;
 }
 
-export async function loadCreditPricingConfig(): Promise<CreditPricingConfig> {
-  const raw = await dbGetSystemSetting(CREDIT_PRICING_CONFIG_KEY);
+export function parseCreditPricingConfig(raw: unknown): CreditPricingConfig {
   if (!raw) return { ...EMPTY_CONFIG };
 
   try {
@@ -103,6 +109,10 @@ export async function loadCreditPricingConfig(): Promise<CreditPricingConfig> {
   } catch {
     return { ...EMPTY_CONFIG };
   }
+}
+
+export async function loadCreditPricingConfig(): Promise<CreditPricingConfig> {
+  return parseCreditPricingConfig(await dbGetSystemSetting(CREDIT_PRICING_CONFIG_KEY));
 }
 
 export async function saveCreditPricingConfig(input: Pick<CreditPricingConfig, 'modelCredits'>): Promise<CreditPricingConfig> {

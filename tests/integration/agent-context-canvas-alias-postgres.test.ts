@@ -1,12 +1,13 @@
 import { spawnSync } from 'node:child_process';
 import { resolve } from 'node:path';
-import { expect, it } from 'vitest';
+import { expect, it, vi } from 'vitest';
 import { withIsolatedPostgres } from '../helpers/postgres-test-database';
 import { createAssetService } from '@/lib/asset-core/service';
 import { authorizeAgentContext } from '@/lib/agent-runtime/context-adapters';
 import type { AgentRunRequest } from '@/lib/agent-runtime/types';
 
 const postgresIt = process.env.POSTGRES_TEST_DATABASE_URL ? it : it.skip;
+vi.mock('server-only', () => ({}));
 
 postgresIt('authorizes migrated Canvas placements with real storage while preserving isolation and data', async () => {
   await withIsolatedPostgres('agent-canvas-alias', async ({ databaseUrl, query }) => {
@@ -14,6 +15,8 @@ postgresIt('authorizes migrated Canvas placements with real storage while preser
       encoding: 'utf8', env: { ...process.env, DATABASE_URL: databaseUrl, PGDATABASE_URL: databaseUrl },
     });
     expect(migration.status, migration.stderr || migration.stdout).toBe(0);
+    await query(`INSERT INTO wujie_users (id,name,password_hash,status,role,created_at,updated_at)
+      VALUES ('owner-a','Owner','test','active','user',1,1), ('other-owner','Other','test','active','user',1,1)`);
     await query("INSERT INTO wujie_projects(id, owner_id, name) VALUES ('project-a', 'owner-a', 'Alias test')");
     const service = createAssetService();
     const { version } = await service.createAssetVersion({

@@ -8,6 +8,7 @@ import {
 } from '@/lib/canvas-share/request';
 import {
   grantDocumentEditor,
+  grantDocumentEditorByName,
   listDocumentEditors,
   revokeDocumentEditor,
 } from '@/lib/collaboration/document-access';
@@ -21,6 +22,10 @@ const mutationSchema = z.object({
   projectId: identifier,
   memberUserId: identifier,
 }).strict();
+const grantSchema = z.union([mutationSchema, z.object({
+  projectId: identifier,
+  memberName: identifier,
+}).strict()]);
 
 function response(data: Record<string, unknown>, status: number): NextResponse {
   const result = NextResponse.json(data, { status });
@@ -30,6 +35,13 @@ function response(data: Record<string, unknown>, status: number): NextResponse {
 }
 
 function errorResponse(error: unknown): NextResponse {
+  if (typeof error === 'object' && error !== null && 'code' in error) {
+    if (error.code === 'DOCUMENT_INVITEE_INVALID') return response({ success: false, code: error.code }, 400);
+    if (error.code === 'DOCUMENT_PROJECT_NOT_ENABLED' || error.code === 'DOCUMENT_AUTHORITY_CONFLICT') {
+      return response({ success: false, code: error.code }, 409);
+    }
+    if (error.code === 'DOCUMENT_DISABLED') return response({ success: false, code: error.code }, 503);
+  }
   if (error instanceof CanvasShareHttpError) {
     const status = error.code === 'CANVAS_SHARE_ORIGIN_INVALID' ? 403
       : error.code === 'CANVAS_SHARE_CONTENT_TYPE_UNSUPPORTED' ? 415 : 400;
@@ -69,11 +81,16 @@ async function mutate(request: NextRequest, action: 'grant' | 'revoke'): Promise
   if (typeof actor !== 'string') return actor;
   try {
     assertCanvasShareMutationRequest(request);
-    const parsed = mutationSchema.safeParse(await readCanvasShareJson(request));
+    const parsed = (action === 'grant' ? grantSchema : mutationSchema).safeParse(await readCanvasShareJson(request));
     if (!parsed.success) return response({ success: false, code: 'DOCUMENT_REQUEST_INVALID' }, 400);
     if (action === 'grant') {
-      await grantDocumentEditor(actor, parsed.data.projectId, parsed.data.memberUserId);
+      if ('memberName' in parsed.data) {
+        await grantDocumentEditorByName(actor, parsed.data.projectId, parsed.data.memberName);
+      } else {
+        await grantDocumentEditor(actor, parsed.data.projectId, parsed.data.memberUserId);
+      }
     } else {
+      if (!('memberUserId' in parsed.data)) return response({ success: false, code: 'DOCUMENT_REQUEST_INVALID' }, 400);
       await revokeDocumentEditor(actor, parsed.data.projectId, parsed.data.memberUserId);
     }
     return response({ success: true }, 200);

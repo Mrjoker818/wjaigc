@@ -1,4 +1,5 @@
 import {
+  AssetServiceError,
   createAssetService,
   type CreatePlacementInput,
   type ResolveAssetReferenceInput,
@@ -43,15 +44,31 @@ export async function resolveWorkflowInputImageForActor(
     };
   }
 
-  const reference = await resolver.resolveAssetReference({
-    actorUserId,
-    projectId,
-    assetVersionId,
-    ...(placementId ? { placementId } : {}),
-  });
+  let resourceOwnerId = actorUserId;
+  let reference: WorkspaceAssetReference;
+  try {
+    reference = await resolver.resolveAssetReference({
+      actorUserId,
+      projectId,
+      assetVersionId,
+      ...(placementId ? { placementId } : {}),
+    });
+  } catch (error) {
+    if (!(error instanceof AssetServiceError) || error.code !== 'ASSET_NOT_FOUND') throw error;
+    const { authorizeGenerationProject } = await import('@/lib/collaboration/generation-project-access');
+    const access = await authorizeGenerationProject({ actorUserId, projectId });
+    if (access.kind !== 'document' || access.ownerId === actorUserId) throw error;
+    resourceOwnerId = access.ownerId;
+    reference = await resolver.resolveAssetReference({
+      actorUserId: resourceOwnerId,
+      projectId,
+      assetVersionId,
+      ...(placementId ? { placementId } : {}),
+    });
+  }
   const workflowPlacement = context
     ? await resolver.bindWorkflowInputPlacement({
-        actorUserId,
+        actorUserId: resourceOwnerId,
         projectId,
         assetVersionId,
         workspace: 'workflow',

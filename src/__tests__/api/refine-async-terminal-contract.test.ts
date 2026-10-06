@@ -1,6 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
+import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import type { CloudTask, CreateBillableCloudTaskInput, UpdateCloudTaskInput, TransitionCloudTaskStatusInput } from '@/lib/cloud-task-storage';
+import { getSessionUser } from '@/lib/server-auth';
 
 // Keep the route, registry, persistence service and terminal guard real. Only
 // external I/O is isolated; these tests are not cloud billing verification.
@@ -15,9 +19,14 @@ const io = vi.hoisted(() => ({
   poll: vi.fn(),
   atomic: vi.fn(), quote: vi.fn(), settle: vi.fn(), update: vi.fn(),
   releaseLease: vi.fn(),
+  dataRoot: '',
 }));
 
 vi.mock('server-only', () => ({}));
+vi.mock('@/lib/server-data-root', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/server-data-root')>();
+  return { ...actual, getServerDataRoot: () => io.dataRoot || actual.getServerDataRoot() };
+});
 vi.mock('@/lib/server-auth', () => ({
   getSessionUser: vi.fn(async () => ({ id: 'refine-contract-user', name: 'Test user' })),
 }));
@@ -124,6 +133,7 @@ async function submitRefine(): Promise<string> {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  io.dataRoot = '';
   io.tasks.clear();
   io.provider.mockResolvedValue(provider);
   io.fallbackProvider.mockResolvedValue(provider);
@@ -158,13 +168,107 @@ beforeEach(() => {
   vi.stubGlobal('fetch', io.poll);
 });
 
-afterEach(() => {
+afterEach(async () => {
   for (const id of taskIds.splice(0)) updateTaskProgress(id, { status: 'failed', error: 'Test cleanup' });
+  if (io.dataRoot) {
+    const resolved = path.resolve(io.dataRoot);
+    if (path.dirname(resolved) !== path.resolve(tmpdir())
+      || !path.basename(resolved).startsWith('wujie-refine-local-')) {
+      throw new Error('Refusing to remove an unexpected test directory');
+    }
+    await rm(resolved, { recursive: true, force: true });
+    io.dataRoot = '';
+  }
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
 
 describe('refine async submission to authoritative completion', () => {
+  it('checks login before inspecting a local reference path', async () => {
+    vi.mocked(getSessionUser).mockResolvedValueOnce(null);
+
+    const response = await refine(request('/api/refine-engine', {
+      ...input, imageUrl: '/api/serve-upload/../private.png',
+    }));
+
+    expect(response.status).toBe(401);
+    expect(io.atomic).not.toHaveBeenCalled();
+    expect(io.submit).not.toHaveBeenCalled();
+  });
+
+  it('rejects a traversal reference before creating a charged task or contacting the provider', async () => {
+    io.dataRoot = await mkdtemp(path.join(tmpdir(), 'wujie-refine-local-'));
+    await mkdir(path.join(io.dataRoot, 'uploads'));
+    await writeFile(path.join(io.dataRoot, 'private.png'), Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+      'base64',
+    ));
+
+    const response = await refine(request('/api/refine-engine', {
+      ...input, imageUrl: '/api/serve-upload/../private.png',
+    }));
+
+    expect(response.status).toBe(400);
+    expect(io.atomic).not.toHaveBeenCalled();
+    expect(io.submit).not.toHaveBeenCalled();
+  });
+
+  it('submits the exact valid local reference after preparing it before billing', async () => {
+    io.dataRoot = await mkdtemp(path.join(tmpdir(), 'wujie-refine-local-'));
+    const uploads = path.join(io.dataRoot, 'uploads');
+    await mkdir(uploads);
+    const png = Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+      'base64',
+    );
+    await writeFile(path.join(uploads, 'safe.png'), png);
+
+    const response = await refine(request('/api/refine-engine', {
+      ...input, imageUrl: '/api/serve-upload/safe.png',
+    }));
+    const payload = await response.json();
+    if (typeof payload.taskId === 'string') taskIds.push(payload.taskId);
+
+    expect(response.status).toBe(200);
+    expect(io.atomic).toHaveBeenCalledTimes(1);
+    const sent = JSON.parse((io.submit.mock.calls[0]?.[2] as RequestInit).body as string) as {
+      image?: string; image_urls?: string[];
+    };
+    const expectedImage = `data:image/png;base64,${png.toString('base64')}`;
+    expect(sent.image).toBe(expectedImage);
+    expect(sent.image_urls).toEqual([expectedImage]);
+  });
+
+  it('keeps legacy /uploads references in the public directory ahead of data-root fallback', async () => {
+    io.dataRoot = await mkdtemp(path.join(tmpdir(), 'wujie-refine-local-'));
+    const publicUploads = path.join(io.dataRoot, 'public', 'uploads');
+    const dataUploads = path.join(io.dataRoot, 'uploads');
+    await mkdir(publicUploads, { recursive: true });
+    await mkdir(dataUploads);
+    const publicPng = Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+      'base64',
+    );
+    await writeFile(path.join(publicUploads, 'legacy.png'), publicPng);
+    await writeFile(path.join(dataUploads, 'legacy.png'), Buffer.from('different-data-root-bytes'));
+    const priorWorkspacePath = process.env.COZE_WORKSPACE_PATH;
+    process.env.COZE_WORKSPACE_PATH = io.dataRoot;
+    try {
+      const response = await refine(request('/api/refine-engine', {
+        ...input, imageUrl: '/uploads/legacy.png',
+      }));
+      const payload = await response.json();
+      if (typeof payload.taskId === 'string') taskIds.push(payload.taskId);
+
+      expect(response.status).toBe(200);
+      const sent = JSON.parse((io.submit.mock.calls[0]?.[2] as RequestInit).body as string) as { image?: string };
+      expect(sent.image).toBe(`data:image/png;base64,${publicPng.toString('base64')}`);
+    } finally {
+      if (priorWorkspacePath === undefined) delete process.env.COZE_WORKSPACE_PATH;
+      else process.env.COZE_WORKSPACE_PATH = priorWorkspacePath;
+    }
+  });
+
   it.each([
     ['missing provider', null, input.model],
     ['model outside provider catalog', { ...provider, selectedModels: ['other-image-model'] }, input.model],

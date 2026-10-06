@@ -9,6 +9,7 @@ import {
   validateSimpleChatProjects,
 } from '@/lib/simple-chat-project-sync';
 import type { WorkspaceSourceTrace } from '@/lib/asset-core/source-trace';
+import { enqueueCanvasBridgeReferences, readCanvasBridgeJournal } from '@/lib/simple-chat-canvas-bridge';
 
 const typesSource = readFileSync(
   resolve(process.cwd(), 'src/components/simple-chat/simple-chat-types.ts'),
@@ -89,7 +90,8 @@ type SendMediaToCanvas = (input: {
     index: number;
     sourceTrace?: WorkspaceSourceTrace;
   }) => Promise<AssetReference>;
-  writeBridge: (references: AssetReference[]) => void;
+  writeBridge?: (references: AssetReference[]) => void | Promise<void>;
+  onTransferred?: (reference: AssetReference, index: number) => void | Promise<void>;
 }) => Promise<{ ok: boolean; references: AssetReference[]; reason?: string }>;
 
 type SendExportToCanvas = (input: {
@@ -97,7 +99,8 @@ type SendExportToCanvas = (input: {
   imageRefs: AssetReference[];
   sourceTrace: WorkspaceSourceTrace;
   transfer: Parameters<SendMediaToCanvas>[0]['transfer'];
-  writeBridge: Parameters<SendMediaToCanvas>[0]['writeBridge'];
+  writeBridge?: Parameters<SendMediaToCanvas>[0]['writeBridge'];
+  onTransferred?: Parameters<SendMediaToCanvas>[0]['onTransferred'];
 }) => Promise<{ ok: boolean; references: AssetReference[]; reason?: string }>;
 
 type CanTransferMedia = (images: string[], references: AssetReference[]) => boolean;
@@ -150,6 +153,69 @@ function serializeCanvasBridgePayload(): SerializeCanvasBridgePayload | undefine
 }
 
 describe('standalone simple-chat asset transfer', () => {
+  describe.each(['ordinary', 'export'] as const)('%s durable per-item delivery', mode => {
+    const sourceRefs: AssetReference[] = [
+      { url: '/a.png', assetVersionId: 'version-a', placementId: 'chat-a' },
+      { url: '/b.png', assetVersionId: 'version-b', placementId: 'chat-b' },
+    ];
+    function deliver(callbacks: Pick<Parameters<SendMediaToCanvas>[0], 'transfer' | 'writeBridge' | 'onTransferred'>): ReturnType<SendMediaToCanvas> {
+      return mode === 'ordinary'
+        ? sendMediaToCanvas()!({ ...callbacks, sourceTrace: sourceTraceFixture,
+          images: ['/a.png', '/b.png'], imageRefs: sourceRefs, targetProjectId: 'canvas-a' })
+        : sendExportToCanvas()!({ ...callbacks, sourceTrace: sourceTraceFixture, imageRefs: sourceRefs, runProjectId: 'canvas-a' });
+    }
+    it('saves the first transferred item before a failed second transfer', async () => {
+      const values = new Map<string, string>();
+      const storage: Storage = { get length(): number { return values.size; },
+        key: index => [...values.keys()][index] ?? null,
+        getItem: key => values.get(key) ?? null, setItem: (key, value) => { values.set(key, value); },
+        removeItem: key => { values.delete(key); }, clear: () => { values.clear(); } };
+      const locks = { request: async <T>(_name: string, callback: (lock: Lock) => T | Promise<T>): Promise<T> =>
+        callback({ name: _name, mode: 'exclusive' }),
+        query: async () => ({ held: [], pending: [] }) } as LockManager;
+      const bridgeScope = { actorId: 'actor-a', projectId: 'canvas-a' };
+      await expect(deliver({ transfer: async ({ index, sourceVersionId }) => {
+        if (index === 1) throw new Error('second transfer failed');
+        return { url: '/canonical-a.png', assetVersionId: sourceVersionId, placementId: 'canvas-placement-a' };
+      }, onTransferred: async reference => {
+        await enqueueCanvasBridgeReferences({ ...bridgeScope, storage, locks, isCurrent: () => true, references: [reference] });
+      } })).rejects.toThrow('second transfer failed');
+      expect(readCanvasBridgeJournal(storage, bridgeScope)?.items.map(item => [item.assetVersionId, item.placementId, item.state]))
+        .toEqual([['version-a', 'canvas-placement-a', 'pending']]);
+    });
+    it('waits for asynchronous batch delivery before reporting success', async () => {
+      let entered!: () => void;
+      let release!: () => void;
+      const reached = new Promise<void>(resolve => { entered = resolve; });
+      const gate = new Promise<void>(resolve => { release = resolve; });
+      let completed = false;
+      const pending = deliver({ transfer: async ({ sourceVersionId, index }) => ({
+        url: '/canonical.png', assetVersionId: sourceVersionId, placementId: `canvas-${index}`,
+      }), writeBridge: async () => { entered(); await gate; } }).then(result => { completed = true; return result; });
+      await reached;
+      // Drain the caller's completion microtask while the actual persistence barrier stays closed.
+      await Promise.resolve();
+      try { expect(completed).toBe(false); }
+      finally { release(); }
+      expect(await pending).toMatchObject({ ok: true });
+    });
+    it('does not submit the next transfer after per-item delivery is rejected', async () => {
+      const submitted: number[] = [];
+      await expect(deliver({ transfer: async ({ sourceVersionId, index }) => {
+        submitted.push(index);
+        return { url: '/canonical.png', assetVersionId: sourceVersionId, placementId: `canvas-${index}` };
+      }, onTransferred: async () => { throw new Error('storage refused'); } })).rejects.toThrow('storage refused');
+      expect(submitted).toEqual([0]);
+    });
+    it('rejects a missing delivery sink before any transfer is submitted', async () => {
+      const submitted: number[] = [];
+      await expect(deliver({ transfer: async ({ sourceVersionId, index }) => {
+        submitted.push(index);
+        return { url: '/canonical.png', assetVersionId: sourceVersionId, placementId: `canvas-${index}` };
+      } })).rejects.toThrow('CANVAS_BRIDGE_DELIVERY_UNAVAILABLE');
+      expect(submitted).toEqual([]);
+    });
+  });
   it('returns export versions only to the Run project and rejects a copied version', async () => {
     const send = sendExportToCanvas();
     expect(send).toBeTypeOf('function');
@@ -343,7 +409,7 @@ describe('standalone simple-chat asset transfer', () => {
       }],
     });
     expect(json).not.toMatch(/https?:|data:|blob:|prompt|name|url|sourceTrace/);
-    expect(chatAreaSource).toContain('serializeSimpleChatCanvasBridgePayload(');
+    // The v2 sender's actual ID-only storage boundary is covered by the real ChatArea scope tests.
   });
 
   it('preserves only validated sourceTrace through the canvas and SSE bridge parsers', () => {
@@ -642,7 +708,8 @@ describe('standalone simple-chat asset transfer', () => {
     expect(chatRouteSource).toMatch(/createVersionWithPlacement/);
     expect(chatAreaSource).toMatch(/parsed\.imageRef/);
     expect(chatAreaSource).not.toMatch(/messages[\s\S]{0,300}\/api\/save-image/);
-    expect(canvasWorkspaceSource).toMatch(/consumeSimpleChatCanvasBridge/);
+    // Actual reception behavior is covered by simple-chat-bridge-reception.test.tsx;
+    // do not pin the retired consumer helper name.
   });
 
   it('I1 keeps failed registration slots visible but blocks the entire Canvas bridge write', async () => {

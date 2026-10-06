@@ -14,6 +14,7 @@
  */
 
 import { S3Storage } from 'coze-coding-dev-sdk';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import {
   DeleteObjectCommand,
   GetObjectCommand,
@@ -22,6 +23,8 @@ import {
   S3Client,
 } from '@aws-sdk/client-s3';
 import { saveImageDataMapping } from './image-source-map';
+import { getSafeMediaTypeFromResponse } from './media-validation';
+import { EXPORT_KEY, binaryExtensions, exportMediaDescriptor, BINARY_MEDIA_CHUNK_BYTES, MAX_ASSET_VIDEO_BYTES } from './asset-core/binary-media-contract';
 
 let _storage: S3Storage | null = null;
 let _binaryStorage: S3Client | null = null;
@@ -206,14 +209,6 @@ export async function uploadImageToS3Abortable(
   }
 }
 
-const BINARY_CONTENT_TYPES = new Set([
-  'image/png',
-  'image/jpeg',
-  'image/webp',
-  'application/json',
-  'application/zip',
-]);
-
 export interface S3BinaryUploadResult {
   storageKey: string;
   createdThisCall: boolean;
@@ -241,7 +236,7 @@ async function deleteExactS3Key(client: S3Client, bucket: string, key: string): 
 }
 
 export async function deleteBinaryFromS3Exact(key: string): Promise<void> {
-  if (!/^exports\/[a-f0-9]{16}-[A-Za-z0-9._-]+\.(?:png|jpe?g|webp|json|zip)$/u.test(key)) {
+  if (!EXPORT_KEY.test(key)) {
     throw new TypeError('S3_BINARY_KEY_INVALID');
   }
   const storage = getBinaryStorage();
@@ -295,7 +290,9 @@ export async function uploadBinaryToS3(
   signal?: AbortSignal,
 ): Promise<S3BinaryUploadResult | null> {
   if (!Buffer.isBuffer(buffer) || buffer.length === 0) throw new TypeError('S3_BINARY_INVALID');
-  if (!BINARY_CONTENT_TYPES.has(contentType)) throw new TypeError('S3_BINARY_MIME_INVALID');
+  if (!binaryExtensions(contentType)) throw new TypeError('S3_BINARY_MIME_INVALID');
+  const descriptor = exportMediaDescriptor(fileName);
+  if (!descriptor || descriptor.mimeType !== contentType || buffer.length > descriptor.maxBytes) throw new TypeError('S3_BINARY_FILENAME_INVALID');
   if (
     fileName !== fileName.normalize('NFC')
     || fileName !== fileName.split(/[\\/]/u).at(-1)
@@ -343,25 +340,246 @@ export async function uploadBinaryToS3(
 }
 
 /** Read an export artifact by its persisted exact key; never derives the legacy images namespace. */
-export async function readBinaryFromS3Exact(key: string): Promise<Buffer | null> {
-  if (!/^exports\/[a-f0-9]{16}-[A-Za-z0-9._-]+\.(?:png|jpe?g|webp|json|zip)$/u.test(key)) return null;
+export async function readBinaryFromS3Exact(key: string, options: {
+  maxBytes?: number; timeoutMs?: number; signal?: AbortSignal;
+} = {}): Promise<Buffer | null> {
+  if (!EXPORT_KEY.test(key)) return null;
+  const descriptor = exportMediaDescriptor(key.slice(8));
+  if (!descriptor) return null;
+  const maxBytes = Math.min(options.maxBytes ?? descriptor.maxBytes, descriptor.maxBytes);
+  if (!Number.isSafeInteger(maxBytes) || maxBytes < 1) throw new S3BoundedReadError('S3_READ_SIZE_LIMIT');
+  // No queue retaining arbitrarily many callers/buffers. At most 4 reads and 512 MiB reserved per process.
+  if (exportReads >= 4) throw new S3BoundedReadError('S3_READ_SIZE_LIMIT');
+  exportReads++;
+  let reserved = 0;
+  try {
+    return await withExactS3Deadline(options.timeoutMs ?? 60_000, options.signal, async signal => {
+      const metadata = await inspectS3ObjectExact(key, options.timeoutMs ?? 60_000, signal);
+      if (!metadata) return null;
+      if (metadata.byteSize < 1 || metadata.byteSize > maxBytes || exportReadBytes + metadata.byteSize > MAX_ASSET_VIDEO_BYTES) {
+        throw new S3BoundedReadError('S3_READ_SIZE_LIMIT');
+      }
+      if (metadata.contentType !== descriptor.mimeType) throw new S3BoundedReadError('S3_READ_FAILED');
+      reserved = metadata.byteSize; exportReadBytes += reserved;
+      const output = Buffer.allocUnsafe(reserved);
+      for (let start = 0; start < reserved; start += BINARY_MEDIA_CHUNK_BYTES) {
+        signal.throwIfAborted();
+        const part = await readS3ObjectRangeExact(key, { start, end: Math.min(reserved, start + BINARY_MEDIA_CHUNK_BYTES) - 1 }, {
+          expectedTotalBytes: reserved, maxBytes: BINARY_MEDIA_CHUNK_BYTES, timeoutMs: options.timeoutMs ?? 60_000,
+          eTag: metadata.eTag, versionId: metadata.versionId, contentType: descriptor.mimeType, signal,
+        });
+        if (!part) throw new S3BoundedReadError('S3_READ_FAILED');
+        part.bytes.copy(output, start);
+      }
+      signal.throwIfAborted();
+      return output;
+    });
+  } finally { exportReads--; exportReadBytes -= reserved; }
+}
+
+const WORKFLOW_EDIT_ACCEPTANCE_MIME = 'application/vnd.wujie.workflow-edit-acceptance+json';
+const WORKFLOW_EDIT_ACCEPTANCE_MAX_BYTES = 64 * 1024;
+let workflowAcceptanceReads = 0;
+
+function workflowEditAcceptanceKey(taskId: string): string {
+  if (!/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/u.test(taskId)) {
+    throw new TypeError('WORKFLOW_EDIT_ACCEPTANCE_TASK_ID_INVALID');
+  }
+  // This namespace is deliberately excluded from public serve-upload exact-key validation.
+  return `private/workflow-edit/accepted/${taskId}.json`;
+}
+
+/** Private, immutable, task-keyed acceptance bytes. Null means S3 is not configured. */
+export async function putWorkflowEditAcceptanceObject(
+  taskId: string,
+  bytes: Buffer,
+  signal?: AbortSignal,
+): Promise<'created' | 'existing' | null> {
+  const key = workflowEditAcceptanceKey(taskId);
+  if (!Buffer.isBuffer(bytes) || bytes.length < 1 || bytes.length > WORKFLOW_EDIT_ACCEPTANCE_MAX_BYTES) {
+    throw new TypeError('WORKFLOW_EDIT_ACCEPTANCE_SIZE_INVALID');
+  }
   const storage = getBinaryStorage();
   if (!storage) return null;
   try {
-    const result = await storage.client.send(new GetObjectCommand({ Bucket: storage.bucket, Key: key }));
-    if (!result.Body) return null;
-    if (typeof result.Body.transformToByteArray === 'function') {
-      return Buffer.from(await result.Body.transformToByteArray());
-    }
-    const chunks: Buffer[] = [];
-    for await (const chunk of result.Body as AsyncIterable<Uint8Array>) chunks.push(Buffer.from(chunk));
-    return Buffer.concat(chunks);
+    await withExactS3Deadline(60_000, signal, abortSignal => storage.client.send(new PutObjectCommand({
+      Bucket: storage.bucket, Key: key, Body: bytes,
+      ContentType: WORKFLOW_EDIT_ACCEPTANCE_MIME, IfNoneMatch: '*',
+    }), { abortSignal }));
+    return 'created';
   } catch (error) {
-    const status = (error as { $metadata?: { httpStatusCode?: number } })?.$metadata?.httpStatusCode;
-    if (status === 404 || (error as { name?: string })?.name === 'NoSuchKey') return null;
+    if (isPreconditionFailure(error)) return 'existing';
     throw error;
   }
 }
+
+/** Exact bounded read; never falls back to a public URL or the local filesystem. */
+export async function readWorkflowEditAcceptanceObject(
+  taskId: string,
+  signal?: AbortSignal,
+): Promise<Buffer | null> {
+  const key = workflowEditAcceptanceKey(taskId);
+  const storage = getBinaryStorage();
+  if (!storage) return null;
+  if (workflowAcceptanceReads >= 4) throw new S3BoundedReadError('S3_READ_SIZE_LIMIT');
+  workflowAcceptanceReads++;
+  try {
+    return await withExactS3Deadline(60_000, signal, async abortSignal => {
+      let head;
+      try {
+        head = await storage.client.send(new HeadObjectCommand({ Bucket: storage.bucket, Key: key }),
+          { abortSignal });
+      } catch (error) {
+        if (isS3MissingObject(error)) return null;
+        throw error;
+      }
+      const length = head.ContentLength;
+      const etag = normalizeS3IdentityToken(head.ETag);
+      const versionId = normalizeS3IdentityToken(head.VersionId);
+      if (!Number.isSafeInteger(length) || !length || length < 1
+        || length > WORKFLOW_EDIT_ACCEPTANCE_MAX_BYTES
+        || head.ContentType?.trim().toLowerCase() !== WORKFLOW_EDIT_ACCEPTANCE_MIME
+        || (!etag && !versionId)) throw new S3BoundedReadError('S3_READ_FAILED');
+      const object = await storage.client.send(new GetObjectCommand({
+        Bucket: storage.bucket, Key: key, Range: `bytes=0-${length - 1}`,
+        ...(etag ? { IfMatch: etag } : {}), ...(versionId ? { VersionId: versionId } : {}),
+      }), { abortSignal });
+      try {
+        if (!object.Body || object.ContentLength !== length
+          || object.ContentRange !== `bytes 0-${length - 1}/${length}`
+          || object.ContentType?.trim().toLowerCase() !== WORKFLOW_EDIT_ACCEPTANCE_MIME
+          || (etag && normalizeS3IdentityToken(object.ETag) !== etag)
+          || (versionId && normalizeS3IdentityToken(object.VersionId) !== versionId)) {
+          throw new S3BoundedReadError('S3_READ_FAILED');
+        }
+        const bytes = await collectExactS3Body(object.Body, length, abortSignal);
+        if (bytes.length !== length) throw new S3BoundedReadError('S3_READ_FAILED');
+        return bytes;
+      } finally { closeExactS3Body(object.Body); }
+    });
+  } finally { workflowAcceptanceReads--; }
+}
+
+/** A real private read/write check before a new billable workflow edit is admitted. */
+export async function probeWorkflowEditAcceptanceStorage(signal?: AbortSignal): Promise<boolean> {
+  const taskId = `probe-${randomUUID()}`;
+  const bytes = randomBytes(32);
+  const storage = getBinaryStorage();
+  if (!storage) return false;
+  let created = false;
+  try {
+    const result = await putWorkflowEditAcceptanceObject(taskId, bytes, signal);
+    if (result !== 'created') return false;
+    created = true;
+    const readBack = await readWorkflowEditAcceptanceObject(taskId, signal);
+    return Boolean(readBack?.equals(bytes));
+  } finally {
+    if (created) {
+      await withExactS3Deadline(60_000, undefined, abortSignal => storage.client.send(new DeleteObjectCommand({
+        Bucket: storage.bucket, Key: workflowEditAcceptanceKey(taskId),
+      }), { abortSignal }));
+    }
+  }
+}
+
+const WORKFLOW_EDIT_MEDIA_MAX_BYTES = 20 * 1024 * 1024;
+
+function workflowEditMediaKey(taskId: string, index: number, sha256: string, mimeType: string): string {
+  workflowEditAcceptanceKey(taskId);
+  if (!Number.isSafeInteger(index) || index < 0 || index > 31 || !/^[a-f0-9]{64}$/u.test(sha256)) {
+    throw new TypeError('WORKFLOW_EDIT_MEDIA_ID_INVALID');
+  }
+  // MIME validation is explicit here; the actual bytes are checked independently below.
+  const extensions: Record<string, string> = {
+    'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp',
+    'image/gif': 'gif', 'image/avif': 'avif', 'image/bmp': 'bmp',
+  };
+  const suffix = extensions[mimeType];
+  if (!suffix) throw new TypeError('WORKFLOW_EDIT_MEDIA_MIME_INVALID');
+  return `private/workflow-edit/media/${taskId}/${index}-${sha256}.${suffix}`;
+}
+
+/** Store one signature-checked output under an immutable, content-addressed private task key. */
+export async function putWorkflowEditAcceptedMedia(
+  taskId: string, index: number, bytes: Buffer, mimeType: string, signal?: AbortSignal,
+): Promise<{ key: string; sha256: string; created: boolean } | null> {
+  if (!Buffer.isBuffer(bytes) || bytes.length < 1 || bytes.length > WORKFLOW_EDIT_MEDIA_MAX_BYTES) {
+    throw new TypeError('WORKFLOW_EDIT_MEDIA_SIZE_INVALID');
+  }
+  if (!getSafeMediaTypeFromResponse(mimeType, bytes, false)?.mimeType) {
+    throw new TypeError('WORKFLOW_EDIT_MEDIA_MIME_INVALID');
+  }
+  const sha256 = createHash('sha256').update(bytes).digest('hex');
+  const key = workflowEditMediaKey(taskId, index, sha256, mimeType);
+  const storage = getBinaryStorage();
+  if (!storage) return null;
+  let created = false;
+  try {
+    await withExactS3Deadline(60_000, signal, abortSignal => storage.client.send(new PutObjectCommand({
+      Bucket: storage.bucket, Key: key, Body: bytes, ContentType: mimeType, IfNoneMatch: '*',
+    }), { abortSignal }));
+    created = true;
+  } catch (error) {
+    if (!isPreconditionFailure(error)) throw error;
+  }
+  const confirmed = await readWorkflowEditAcceptedMedia(taskId, index, sha256, mimeType, signal);
+  if (!confirmed || !confirmed.equals(bytes)) throw new S3BoundedReadError('S3_READ_FAILED');
+  return { key, sha256, created };
+}
+
+/** Read one private output only when its task, slot, MIME and SHA-256 all match. */
+export async function readWorkflowEditAcceptedMedia(
+  taskId: string, index: number, sha256: string, mimeType: string, signal?: AbortSignal,
+): Promise<Buffer | null> {
+  const key = workflowEditMediaKey(taskId, index, sha256, mimeType);
+  const storage = getBinaryStorage();
+  if (!storage) return null;
+  if (workflowAcceptanceReads >= 4) throw new S3BoundedReadError('S3_READ_SIZE_LIMIT');
+  workflowAcceptanceReads++;
+  try {
+    return await withExactS3Deadline(60_000, signal, async abortSignal => {
+      let head;
+      try {
+        head = await storage.client.send(new HeadObjectCommand({ Bucket: storage.bucket, Key: key }),
+          { abortSignal });
+      } catch (error) {
+        if (isS3MissingObject(error)) return null;
+        throw error;
+      }
+      const length = head.ContentLength;
+      const etag = normalizeS3IdentityToken(head.ETag);
+      const versionId = normalizeS3IdentityToken(head.VersionId);
+      if (!Number.isSafeInteger(length) || !length || length < 1
+        || length > WORKFLOW_EDIT_MEDIA_MAX_BYTES
+        || head.ContentType?.trim().toLowerCase() !== mimeType || (!etag && !versionId)) {
+        throw new S3BoundedReadError('S3_READ_FAILED');
+      }
+      const object = await storage.client.send(new GetObjectCommand({
+        Bucket: storage.bucket, Key: key, Range: `bytes=0-${length - 1}`,
+        ...(etag ? { IfMatch: etag } : {}), ...(versionId ? { VersionId: versionId } : {}),
+      }), { abortSignal });
+      try {
+        if (!object.Body || object.ContentLength !== length
+          || object.ContentRange !== `bytes 0-${length - 1}/${length}`
+          || object.ContentType?.trim().toLowerCase() !== mimeType
+          || (etag && normalizeS3IdentityToken(object.ETag) !== etag)
+          || (versionId && normalizeS3IdentityToken(object.VersionId) !== versionId)) {
+          throw new S3BoundedReadError('S3_READ_FAILED');
+        }
+        const bytes = await collectExactS3Body(object.Body, length, abortSignal);
+        if (bytes.length !== length || createHash('sha256').update(bytes).digest('hex') !== sha256) {
+          throw new S3BoundedReadError('S3_READ_FAILED');
+        }
+        if (!getSafeMediaTypeFromResponse(mimeType, bytes, false)?.mimeType) {
+          throw new S3BoundedReadError('S3_READ_FAILED');
+        }
+        return bytes;
+      } finally { closeExactS3Body(object.Body); }
+    });
+  } finally { workflowAcceptanceReads--; }
+}
+let exportReads = 0;
+let exportReadBytes = 0;
 
 export type S3BoundedReadErrorCode =
   | 'S3_READ_ABORTED'
@@ -395,6 +613,7 @@ export interface S3ExactRangeReadOptions {
   eTag?: string | null;
   versionId?: string | null;
   signal?: AbortSignal;
+  contentType?: string;
 }
 
 export interface S3ExactRangeReadResult {
@@ -420,6 +639,13 @@ function isS3MissingObject(error: unknown): boolean {
 function normalizeS3IdentityToken(value: string | null | undefined): string | null {
   const normalized = value?.trim();
   return normalized ? normalized : null;
+}
+
+function closeExactS3Body(body: unknown): void {
+  if (!body || typeof body !== 'object') return;
+  const stream = body as { destroy?: () => unknown; cancel?: () => Promise<unknown> };
+  if (typeof stream.destroy === 'function') stream.destroy();
+  else if (typeof stream.cancel === 'function') void stream.cancel().catch(() => undefined);
 }
 
 async function withExactS3Deadline<T>(
@@ -601,20 +827,27 @@ export async function readS3ObjectRangeExact(
           ...(eTag ? { IfMatch: eTag } : {}),
           ...(versionId ? { VersionId: versionId } : {}),
         }), { abortSignal });
-        const contentRange = result.ContentRange?.match(/^bytes (\d+)-(\d+)\/(\d+)$/u);
-        if (
-          !contentRange
-          || Number(contentRange[1]) !== range.start
-          || Number(contentRange[2]) !== range.end
-          || Number(contentRange[3]) !== options.expectedTotalBytes
-          || result.ContentLength !== length
-          || !result.Body
-        ) {
-          throw new S3BoundedReadError('S3_READ_FAILED');
-        }
-        const bytes = await collectExactS3Body(result.Body, options.maxBytes, abortSignal);
-        if (bytes.byteLength !== length) throw new S3BoundedReadError('S3_READ_FAILED');
-        return { bytes, totalBytes: options.expectedTotalBytes };
+        try {
+          const contentRange = result.ContentRange?.match(/^bytes (\d+)-(\d+)\/(\d+)$/u);
+          if (
+            !contentRange
+            || Number(contentRange[1]) !== range.start
+            || Number(contentRange[2]) !== range.end
+            || Number(contentRange[3]) !== options.expectedTotalBytes
+            || result.ContentLength !== length
+            || !result.Body
+            || (result.ETag !== undefined && eTag !== null && normalizeS3IdentityToken(result.ETag) !== eTag)
+            || (result.VersionId !== undefined && versionId !== null && normalizeS3IdentityToken(result.VersionId) !== versionId)
+            || (options.contentType !== undefined && result.ContentType?.trim().toLowerCase() !== options.contentType)
+            || (options.contentType !== undefined && eTag !== null && normalizeS3IdentityToken(result.ETag) !== eTag)
+            || (options.contentType !== undefined && versionId !== null && normalizeS3IdentityToken(result.VersionId) !== versionId)
+          ) {
+            throw new S3BoundedReadError('S3_READ_FAILED');
+          }
+          const bytes = await collectExactS3Body(result.Body, length, abortSignal);
+          if (bytes.byteLength !== length) throw new S3BoundedReadError('S3_READ_FAILED');
+          return { bytes, totalBytes: options.expectedTotalBytes };
+        } finally { closeExactS3Body(result.Body); }
       },
     );
   } catch (error) {

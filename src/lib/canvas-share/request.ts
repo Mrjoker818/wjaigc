@@ -274,10 +274,14 @@ function hasJsonContentType(request: NextRequest): boolean {
   return contentType?.split(';', 1)[0]?.trim().toLowerCase() === 'application/json';
 }
 
-export function assertCanvasShareMutationRequest(request: NextRequest): void {
+export function assertCanvasShareMutationOrigin(request: NextRequest): void {
   if (!hasAllowedMutationOrigin(request)) {
     throw new CanvasShareHttpError('CANVAS_SHARE_ORIGIN_INVALID');
   }
+}
+
+export function assertCanvasShareMutationRequest(request: NextRequest): void {
+  assertCanvasShareMutationOrigin(request);
   if (!hasJsonContentType(request)) {
     throw new CanvasShareHttpError('CANVAS_SHARE_CONTENT_TYPE_UNSUPPORTED');
   }

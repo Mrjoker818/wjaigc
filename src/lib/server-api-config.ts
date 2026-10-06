@@ -8,6 +8,7 @@ import { fetchWithV1Retry, shouldSkipV1Retry } from './api-helpers';
 import { getModelDisplayName } from './model-name-map';
 import { getServerSystemDir } from './server-data-root';
 import { dbGetApiProviders, dbUpsertApiProvider, dbDeleteApiProvider } from './db-storage';
+import { isDatabaseConfigured } from './db-client';
 import {
   get302UpscaleModelsForProvider,
   resolve302UpscaleModelId,
@@ -307,13 +308,17 @@ function normalizeDiscoveredModels(val: unknown, providerId: string, modelType: 
 
 interface ReadConfigOptions {
   migrateFileProviders?: boolean;
+  strict?: boolean;
 }
 
 async function readConfig(options: ReadConfigOptions = {}): Promise<StoredApiConfig> {
   // Try database first (persistent across deployments)
   try {
-    const dbProviderRows = await dbGetApiProviders();
-    if (dbProviderRows && dbProviderRows.length > 0) {
+    const readDatabase = !options.strict || isDatabaseConfigured();
+    const dbProviderRows = readDatabase
+      ? await dbGetApiProviders(options.strict ? { throwOnError: true } : undefined)
+      : [];
+    if ((options.strict && readDatabase) || dbProviderRows.length > 0) {
       const providers: ApiProvider[] = dbProviderRows.map((p, i) => ({
         id: p.id,
         name: p.name,
@@ -340,7 +345,8 @@ async function readConfig(options: ReadConfigOptions = {}): Promise<StoredApiCon
         updatedAt: Date.now(),
       };
     }
-  } catch {
+  } catch (error) {
+    if (options.strict) throw error;
     // DB not available, fall through to file
   }
 
@@ -348,16 +354,22 @@ async function readConfig(options: ReadConfigOptions = {}): Promise<StoredApiCon
   try {
     const raw = await readFile(CONFIG_PATH, 'utf8');
     const parsed = JSON.parse(raw) as StoredApiConfig;
+    if (options.strict && (!parsed || !Array.isArray(parsed.providers))) {
+      throw new Error('Invalid API provider configuration');
+    }
     const config = {
       providers: Array.isArray(parsed.providers) ? parsed.providers : [],
       updatedAt: parsed.updatedAt || Date.now(),
     };
     // Migrate file data to database if DB is available
-    if (options.migrateFileProviders !== false && config.providers.length > 0) {
+    if (!options.strict && options.migrateFileProviders !== false && config.providers.length > 0) {
       migrateProvidersToDb(config.providers).catch(() => {});
     }
     return config;
-  } catch {
+  } catch (error) {
+    if (options.strict && !(error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT')) {
+      throw error;
+    }
     return { providers: [], updatedAt: Date.now() };
   }
 }

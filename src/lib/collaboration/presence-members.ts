@@ -4,6 +4,7 @@ import type { PoolClient } from 'pg';
 
 import { resolveAssetGraphMode } from '@/lib/asset-core/mode';
 import { getPool } from '@/lib/db-client';
+import { withPresenceConnection } from './presence-connection';
 
 export class PresenceMemberError extends Error {
   readonly code = 'PRESENCE_FORBIDDEN';
@@ -54,13 +55,14 @@ export function legacyPresenceProjectPredicate(alias: 'p' | 'project'): string {
   )`;
 }
 
-async function ensureLegacyPresenceProject(ownerId: string, projectId: string): Promise<void> {
+async function ensureLegacyPresenceProject(ownerId: string, projectId: string, client?: PoolClient): Promise<void> {
   if (!usesLegacyPresenceSnapshot()) return;
-  const existing = await getPool().query('SELECT 1 FROM wujie_projects WHERE id = $1', [projectId]);
+  const executor = client ?? getPool();
+  const existing = await executor.query('SELECT 1 FROM wujie_projects WHERE id = $1', [projectId]);
   if (existing.rowCount) return;
   // Existing legacy projects may predate the presence-enabled sync projection.
   // Derive only the caller's exact project from the authoritative user snapshot.
-  await getPool().query(
+  await executor.query(
     `INSERT INTO wujie_projects (id, owner_id, name, status, metadata)
      SELECT $2, $1, COALESCE(project.value->>'name', ''), 'active', '{"presenceProjection":true}'::jsonb
        FROM wujie_user_data data
@@ -93,9 +95,11 @@ async function assertPresenceOwner(ownerId: string, projectId: string): Promise<
 export async function assertPresenceMember(
   actorUserId: string,
   projectId: string,
+  signal?: AbortSignal,
 ): Promise<void> {
-  await ensureLegacyPresenceProject(actorUserId, projectId);
-  const result = await getPool().query(
+  const verify = async (client?: PoolClient): Promise<void> => {
+  await ensureLegacyPresenceProject(actorUserId, projectId, client);
+  const result = await (client ?? getPool()).query(
     `SELECT 1
        FROM wujie_projects p
        JOIN wujie_users actor ON actor.id = $1 AND actor.status = 'active'
@@ -114,6 +118,9 @@ export async function assertPresenceMember(
     [actorUserId, projectId],
   );
   if (result.rowCount !== 1) throw new PresenceMemberError();
+  };
+  if (signal) await withPresenceConnection(signal, verify);
+  else await verify();
 }
 
 export async function assertPresenceMemberForLease(

@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import YAML from 'yaml';
 
 const workflow = readFileSync(
   resolve(process.cwd(), '.github/workflows/quality.yml'),
@@ -72,9 +73,21 @@ describe('quality workflow contract', () => {
   });
 
   it('creates a writable doctor data directory on a clean runner', () => {
-    expect(workflow).not.toContain('WUJIE_DATA_DIR: ${{ runner.temp }}');
-    expect(workflow).toContain('WUJIE_DATA_DIR: .wujie-data');
-    expect(workflow).toContain('mkdir -p "$WUJIE_DATA_DIR"');
+    const parsed = YAML.parse(workflow) as { jobs: Record<string, {
+      env: Record<string, string>;
+      steps: Array<{ name?: string; run?: string; env?: Record<string, string> }>;
+    }> };
+    const job = parsed.jobs['static-and-tests'];
+    expect(job.env.WUJIE_DATA_DIR).toBe('.wujie-data');
+    const preparation = job.steps.findIndex(step => step.name === 'Prepare doctor data directory');
+    expect(preparation).toBeGreaterThan(-1);
+    expect(job.steps[preparation].run).toBe('mkdir -p "$WUJIE_DATA_DIR"');
+    expect(job.steps[preparation].env?.WUJIE_DATA_DIR ?? job.env.WUJIE_DATA_DIR).toBe('.wujie-data');
+    for (const name of ['Environment doctor (production)', 'Environment doctor (untrusted pull request)']) {
+      const index = job.steps.findIndex(step => step.name === name);
+      expect(index).toBeGreaterThan(preparation);
+      expect(job.steps[index].env?.WUJIE_DATA_DIR ?? job.env.WUJIE_DATA_DIR).toBe('.wujie-data');
+    }
   });
 
   it('runs database concurrency gates against an isolated PostgreSQL service', () => {

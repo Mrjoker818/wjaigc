@@ -2,6 +2,10 @@ import { NextRequest, NextResponse } from 'next/server';
 import { performOnnxUpscale, isOnnxUpscaleAvailable } from '@/lib/image-tools/upscayl';
 import { validateApiInputs } from '@/lib/api-validator';
 import { requireApiAuthOrReject } from '@/lib/api-auth';
+import { POST as imageEditPost } from '@/app/api/image-edit/route';
+
+// AI mode executes image-edit in this route segment; imports do not inherit its limit.
+export const maxDuration = 1800;
 
 // /api/upscayl - 向后兼容的无损放大 API（已迁移到 ONNX CPU）
 // 不再依赖 upscayl GPU (Vulkan)，使用 ONNX Real-ESRGAN CPU 放大
@@ -48,30 +52,15 @@ export async function POST(request: NextRequest) {
 
     // AI 放大模式: 委托给 /api/image-edit
     if (upscaleMode === 'ai') {
-      const baseUrl = process.env.DEPLOY_RUN_PORT
-        ? `http://localhost:${process.env.DEPLOY_RUN_PORT}`
-        : 'http://localhost:5000';
-      const aiResp = await fetch(`${baseUrl}/api/image-edit`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: 'upscale',
-          imageUrl,
-          scale: upscaleScale,
-          upscaleMode: 'ai',
-          outputFormat: format,
-          compression: compression || 90,
-        }),
-        signal: AbortSignal.timeout(600000),
-      });
-      const aiResult = await aiResp.json() as Record<string, unknown>;
-      if (!aiResp.ok || aiResult.error) {
-        return NextResponse.json(
-          { success: false, error: `AI放大失败: ${aiResult.error || '未知错误'}` },
-          { status: aiResp.status },
-        );
-      }
-      return NextResponse.json(aiResult);
+      const headers = new Headers(request.headers);
+      headers.set('content-type', 'application/json');
+      headers.delete('content-length');
+      return imageEditPost(new NextRequest(new URL('/api/image-edit', request.url), {
+        method: 'POST', headers, signal: request.signal,
+        body: JSON.stringify({ ...body, action: 'upscale', scale: upscaleScale,
+          upscaleMode: 'ai', engine: 'ai', outputFormat: format,
+          compression: compression || 90 }),
+      }));
     }
 
     // CPU 放大模式: ONNX Real-ESRGAN

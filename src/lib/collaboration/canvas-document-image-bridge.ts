@@ -233,6 +233,23 @@ export function toCanvasDocumentAnnotationRecords<T extends CanvasBridgeImage>(
   return records;
 }
 
+export function restoreCanvasDocumentAnnotationIdentity(
+  annotation: CanvasAnnotationV2,
+  id: string,
+  sourceImageId: string,
+): CanvasAnnotationV2 {
+  return { ...annotation, orderKey: annotation.orderKey ?? annotation.id, id, sourceImageId };
+}
+
+function compareAnnotationCreationOrder(left: CanvasAnnotationV2, right: CanvasAnnotationV2): number {
+  if (left.createdAt !== right.createdAt) return left.createdAt - right.createdAt;
+  const leftKey = left.orderKey ?? left.id, rightKey = right.orderKey ?? right.id;
+  // Code-point order is independent of browser/server locale. New restoration
+  // IDs must not change the tie-break used by legacy creation records.
+  if (leftKey !== rightKey) return leftKey < rightKey ? -1 : 1;
+  return left.id === right.id ? 0 : left.id < right.id ? -1 : 1;
+}
+
 export function projectCanvasDocumentMetadata<T extends CanvasBridgeImage>(
   projection: CanvasDocumentProjection,
   images: readonly T[],
@@ -247,7 +264,7 @@ export function projectCanvasDocumentMetadata<T extends CanvasBridgeImage>(
     })),
     annotations: Object.values(projection.annotationRecords ?? {}).filter(annotation => (
       projection.annotationTombstones?.[annotation.id] !== true
-    )).map(annotation => ({
+    )).sort(compareAnnotationCreationOrder).map(annotation => ({
       ...annotation,
       sourceImageId: requiredCanvasIdentity(imageByPlacement, annotation.sourceImageId),
     })),

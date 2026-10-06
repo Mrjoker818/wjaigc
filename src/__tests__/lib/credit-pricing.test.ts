@@ -44,4 +44,20 @@ describe('credit pricing configuration', () => {
     dbGetSystemSetting.mockResolvedValue(null);
     await expect(calculateConfiguredCreditCost('video_generate', 'kling-v3', { durationSeconds: 5 })).resolves.toBe(150);
   });
+
+  it('prices an upscale and its enhancement from one immutable request snapshot', async () => {
+    dbGetSystemSetting.mockResolvedValueOnce(JSON.stringify({ modelCredits: {
+      'up::302-esrgan': 7, 'enhance::enhance-image': 4,
+    } }));
+    const pricingConfig = await loadCreditPricingConfig();
+    dbGetSystemSetting.mockResolvedValue(JSON.stringify({ modelCredits: {
+      'up::302-esrgan': 70, 'enhance::enhance-image': 40,
+    } }));
+    const upscale = await calculateConfiguredCreditCost('image_upscale', '302-esrgan',
+      { providerId: 'up', pricingConfig });
+    const enhance = await calculateConfiguredCreditCost('image_generate', 'enhance-image',
+      { providerId: 'enhance', pricingConfig });
+    expect({ upscale, enhance, total: upscale + enhance }).toEqual({ upscale: 7, enhance: 4, total: 11 });
+    expect(dbGetSystemSetting).toHaveBeenCalledTimes(1);
+  });
 });

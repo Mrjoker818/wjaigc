@@ -1,6 +1,9 @@
+// @vitest-environment jsdom
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { createElement, type ReactElement } from 'react';
+import { act, cleanup, fireEvent, render } from '@testing-library/react';
+import { describe, expect, it, vi } from 'vitest';
 
 const workspaceSource = readFileSync(
   resolve(process.cwd(), 'src/components/canvas-workspace.tsx'),
@@ -55,15 +58,64 @@ describe('video terminal state contract', () => {
     expect(resumedSource).toContain('buildCompletedVideoCanvasMedia');
   });
 
-  it('renders video posters and keeps posterless completed videos visibly playable', () => {
-    expect(canvasSource).toContain("mediaRenderDecision === 'video'");
-    const previewStart = canvasSource.indexOf("mediaRenderDecision === 'video' && image.videoUrl");
-    const previewSource = canvasSource.slice(previewStart, previewStart + 700);
-    expect(previewStart).toBeGreaterThan(-1);
-    expect(previewSource).toContain('<video');
-    expect(previewSource).toContain('data-canvas-video-preview');
-    expect(previewSource).toContain('preload="metadata"');
-    expect(canvasSource).toContain('group/play bg-black');
+  it('renders video posters and keeps posterless completed videos visibly playable', async () => {
+    const values = new Map<string, string>();
+    vi.stubGlobal('localStorage', {
+      getItem: (key: string): string | null => values.get(key) ?? null,
+      setItem: (key: string, value: string): void => { values.set(key, value); },
+      removeItem: (key: string): void => { values.delete(key); },
+      clear: (): void => { values.clear(); },
+    });
+    vi.stubGlobal('ResizeObserver', class {
+      observe(): void {}
+      unobserve(): void {}
+      disconnect(): void {}
+    });
+    vi.stubGlobal('fetch', async (): Promise<Response> => new Response('{}'));
+    try {
+      const { InfiniteCanvas } = await import('@/components/infinite-canvas');
+      const videoUrl = '/api/serve-upload/exports/terminal-clip.mp4';
+      const posterUrl = '/api/serve-upload/exports/terminal-poster.png';
+      const canvas = (withPoster: boolean): ReactElement => createElement(InfiniteCanvas, {
+        images: [{ id: 'terminal-video', placementId: 'terminal-video', assetVersionId: 'terminal-version',
+          url: withPoster ? posterUrl : '', videoThumbnailUrl: withPoster ? posterUrl : undefined,
+          videoUrl, mediaType: 'video', x: 0, y: 0, width: 256, height: 192,
+          rotation: 0, zIndex: 1, createdAt: 1 }],
+        onImagesChange: (): void => {}, selectedImage: null, onSelectImage: (): void => {},
+        onPreviewImage: (): void => {}, onGenerateVariation: (): void => {},
+        onExtractKeywords: (): void => {}, onFusion: (): void => {}, onAddImages: (): void => {},
+        projectId: 'terminal-video-project', onRequestTaskPoll: async (): Promise<Response> => new Response('{}'),
+      });
+      const settle = async (): Promise<void> => {
+        await act(async () => { for (let index = 0; index < 10; index++) await Promise.resolve(); });
+      };
+      const view = render(canvas(true));
+      await settle();
+      const poster = view.container.querySelector<HTMLImageElement>('img[data-canvas-media-node="terminal-video"]');
+      expect(poster).not.toBeNull();
+      expect(poster?.src).toBe(new URL(posterUrl, window.location.href).href);
+      expect(view.container.querySelector('[data-canvas-video-preview]')).toBeNull();
+
+      view.rerender(canvas(false));
+      await settle();
+      const preview = view.container.querySelector<HTMLVideoElement>('video[data-canvas-video-preview]');
+      expect(preview).not.toBeNull();
+      expect(preview?.src).toBe(new URL(videoUrl, window.location.href).href);
+      expect(preview?.getAttribute('preload')).toBe('metadata');
+      expect(Array.from(view.container.querySelectorAll('img')).map(image => image.src))
+        .not.toContain(new URL(videoUrl, window.location.href).href);
+
+      fireEvent.click(view.getByText('VIDEO'));
+      await settle();
+      const playing = view.container.querySelector<HTMLVideoElement>('video:not([data-canvas-video-preview])');
+      expect(playing).not.toBeNull();
+      expect(playing?.src).toBe(new URL(videoUrl, window.location.href).href);
+      expect(playing?.autoplay).toBe(true);
+    } finally {
+      cleanup();
+      vi.restoreAllMocks();
+      vi.unstubAllGlobals();
+    }
   });
 
   it('keeps the inline video play control outside the canvas drag pointer capture', () => {

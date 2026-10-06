@@ -1,11 +1,77 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import ts from 'typescript';
 import { describe, expect, it } from 'vitest';
+import { shouldToggleCanvasCommandPalette } from '@/components/canvas/CanvasCommandPalette';
 
 const root = process.cwd();
 const workspace = fs.readFileSync(path.join(root, 'src/components/canvas-workspace.tsx'), 'utf8');
 const canvas = fs.readFileSync(path.join(root, 'src/components/infinite-canvas.tsx'), 'utf8');
 const incremental = fs.readFileSync(path.join(root, 'src/lib/canvas-incremental-history.ts'), 'utf8');
+
+// Run the actual callback AST rather than requiring a particular guard spelling.
+// DOM focus and the workspace callbacks are boundaries; shortcut branching,
+// pending-delete exclusion and selection reconciliation stay production code.
+function canvasCallback<T>(name: string, bindings: Record<string, unknown>): T {
+  const source = ts.createSourceFile('infinite-canvas.tsx', canvas, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  let callback: ts.Expression | undefined;
+  const visit = (node: ts.Node): void => {
+    if (ts.isVariableDeclaration(node) && node.name.getText(source) === name && node.initializer) {
+      if (ts.isCallExpression(node.initializer)) callback = node.initializer.arguments[0];
+      else if (ts.isArrowFunction(node.initializer)) callback = node.initializer;
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(source);
+  if (!callback) throw new Error(`Canvas callback missing: ${name}`);
+  const javascript = ts.transpileModule(`const callback = ${callback.getText(source)};`, {
+    compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.None },
+  }).outputText;
+  return new Function(...Object.keys(bindings), `${javascript}; return callback;`)(...Object.values(bindings)) as T;
+}
+
+function pendingCanvas(): {
+  key: (code: string, options?: { shiftKey?: boolean; textEditing?: boolean; overlay?: boolean }) => boolean;
+  remove: (ids: string[]) => Promise<unknown>;
+  effects: string[];
+  removedBatches: string[][];
+  selected: () => string[];
+} {
+  let selectedIds = new Set(['a', 'b']);
+  let textEditing = false;
+  let overlay = false;
+  const effects: string[] = [];
+  const removedBatches: string[][] = [];
+  const canRetryPendingDelete = (ids: readonly string[]): boolean => ids.length === 2 && ids.includes('a') && ids.includes('b');
+  const remove = canvasCallback<(ids: string[]) => Promise<unknown>>('requestDeleteImages', {
+    isHistoryTransitionPending: true, canRetryPendingDelete,
+    pendingDeleteIdsRef: { current: new Set<string>() },
+    onDeleteImages: async (ids: string[]): Promise<string[]> => { removedBatches.push([...ids]); return ids; },
+    setSelectedIds: (update: (ids: Set<string>) => Set<string>): void => { selectedIds = update(selectedIds); },
+    selectedImage: null, editImageId: null,
+  });
+  const handler = canvasCallback<(event: KeyboardEvent) => void>('handleKeyDown', {
+    isInputFocused: (): boolean => textEditing,
+    isTextEditingTarget: (): boolean => textEditing,
+    isKeyboardEventFromOverlay: (): boolean => overlay,
+    shouldToggleCanvasCommandPalette,
+    isHistoryTransitionPending: true, editMode: 'none', selectedIds,
+    canRetryPendingDelete, requestDeleteImages: remove,
+    onUndo: (): void => { effects.push('undo'); },
+    onRedo: (): void => { effects.push('redo'); },
+  });
+  return {
+    effects, removedBatches, remove, selected: (): string[] => [...selectedIds],
+    key: (code: string, options = {}): boolean => {
+      textEditing = options.textEditing ?? false;
+      overlay = options.overlay ?? false;
+      let prevented = false;
+      handler({ code, ctrlKey: true, metaKey: false, shiftKey: options.shiftKey ?? false,
+        preventDefault: (): void => { prevented = true; } } as KeyboardEvent);
+      return prevented;
+    },
+  };
+}
 
 describe('canvas command and explicit history wiring', () => {
   it('removes the 500ms history guess and uses explicit transaction callbacks', () => {
@@ -161,16 +227,14 @@ describe('canvas command and explicit history wiring', () => {
   });
 
   it('routes undo and redo through the authoritative workspace lock before the render-state guard', () => {
-    const keyboardEffectStart = canvas.indexOf('// Keyboard events');
-    const keyboardEffectEnd = canvas.indexOf('// Click outside to close menus', keyboardEffectStart);
-    const keyboardEffect = canvas.slice(keyboardEffectStart, keyboardEffectEnd);
-    const undoShortcut = keyboardEffect.indexOf("e.code === 'KeyZ' && !e.shiftKey");
-    const redoShortcut = keyboardEffect.indexOf("e.code === 'KeyZ' && e.shiftKey");
-    const renderStateGuard = keyboardEffect.indexOf('if (isHistoryTransitionPending) return;');
-
-    expect(undoShortcut).toBeGreaterThan(-1);
-    expect(redoShortcut).toBeGreaterThan(undoShortcut);
-    expect(renderStateGuard).toBeGreaterThan(redoShortcut);
+    const fixture = pendingCanvas();
+    expect(fixture.key('KeyZ', { textEditing: true })).toBe(false);
+    expect(fixture.key('KeyZ', { shiftKey: true, overlay: true })).toBe(false);
+    expect(fixture.effects).toEqual([]);
+    expect(fixture.key('KeyZ')).toBe(true);
+    expect(fixture.key('KeyZ', { shiftKey: true })).toBe(true);
+    expect(fixture.effects).toEqual(['undo', 'redo']);
+    expect(fixture.removedBatches).toEqual([]);
   });
 
   it('reattaches Canvas keyboard shortcuts during commit so history input has no passive-effect gap', () => {
@@ -253,13 +317,21 @@ describe('canvas command and explicit history wiring', () => {
     expect(workspace).not.toContain('next.length < prev.length && !serverSyncMergeRef.current');
   });
 
-  it('locks user gestures while placement history is synchronizing', () => {
+  it('locks user gestures while placement history is synchronizing except the approved same-batch delete retry', async () => {
     expect(workspace).toContain('isHistoryTransitionPending={historyTransitionPending}');
     expect(workspace).toContain('setHistoryTransitionPending(true)');
     expect(workspace).toContain('rebaseCanvasSnapshotChanges(');
     expect(canvas).toContain('isHistoryTransitionPending?: boolean');
-    expect(canvas).toContain('if (isHistoryTransitionPending) return;');
-    expect(canvas).toContain('if (isHistoryTransitionPending) return []');
+    const fixture = pendingCanvas();
+    expect(fixture.key('KeyG')).toBe(false);
+    expect(fixture.key('Equal')).toBe(false);
+    await fixture.remove(['a']);
+    await fixture.remove(['foreign']);
+    expect(fixture.removedBatches).toEqual([]);
+    expect(fixture.selected()).toEqual(['a', 'b']);
+    await fixture.remove(['a', 'b']);
+    expect(fixture.removedBatches).toEqual([['a', 'b']]);
+    expect(fixture.selected()).toEqual([]);
     expect(workspace).toContain('queuedCanvasHistoryChangeRef');
     expect(workspace).toContain('flushQueuedCanvasHistoryChange');
     expect(workspace).not.toContain("if (historyLifecyclePendingRef.current && historyIntent === 'record') return;");

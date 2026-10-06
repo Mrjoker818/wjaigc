@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({
   getSessionUser: vi.fn(),
   grantDocumentEditor: vi.fn(),
+  grantDocumentEditorByName: vi.fn(),
   revokeDocumentEditor: vi.fn(),
   listDocumentEditors: vi.fn(),
 }));
@@ -11,6 +12,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock('@/lib/server-auth', () => ({ getSessionUser: mocks.getSessionUser }));
 vi.mock('@/lib/collaboration/document-access', () => ({
   grantDocumentEditor: mocks.grantDocumentEditor,
+  grantDocumentEditorByName: mocks.grantDocumentEditorByName,
   revokeDocumentEditor: mocks.revokeDocumentEditor,
   listDocumentEditors: mocks.listDocumentEditors,
 }));
@@ -41,6 +43,27 @@ describe('/api/collaboration/editors', () => {
   });
 
   afterEach(() => vi.unstubAllEnvs());
+
+  it('invites by exact account name without using the legacy ID grant', async () => {
+    const { POST } = await import('@/app/api/collaboration/editors/route');
+    const result = await POST(editorRequest('POST', { origin: 'http://localhost:5000',
+      body: { projectId: 'project-a', memberName: 'Editor A' } }));
+    expect(result.status).toBe(200);
+    expect(mocks.grantDocumentEditorByName).toHaveBeenCalledWith('owner-a', 'project-a', 'Editor A');
+    expect(mocks.grantDocumentEditor).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { memberName: 'Editor A', memberUserId: 'editor-a' },
+    { memberName: '' }, { memberName: 'Editor A', ownerId: 'other' },
+  ])('rejects invalid name invitation %j', async fields => {
+    const { POST } = await import('@/app/api/collaboration/editors/route');
+    const result = await POST(editorRequest('POST', { origin: 'http://localhost:5000',
+      body: { projectId: 'project-a', ...fields } }));
+    expect(result.status).toBe(400);
+    expect(mocks.grantDocumentEditorByName).not.toHaveBeenCalled();
+    expect(mocks.grantDocumentEditor).not.toHaveBeenCalled();
+  });
 
   it('keeps document editor management disabled by default', async () => {
     vi.stubEnv('WUJIE_YJS_ENABLED', 'false');

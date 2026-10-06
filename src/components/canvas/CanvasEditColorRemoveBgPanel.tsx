@@ -29,9 +29,12 @@ interface CanvasEditColorRemoveBgPanelProps {
   removeBgModelId: string;
   setRemoveBgModelId: React.Dispatch<React.SetStateAction<string>>;
   removeBgEngine: string;
+  documentMetadataMode: boolean;
+  removeBgQuote: { total: number } | null;
+  isRemoveBgQuoteLoading: boolean;
+  isRemoveBgSubmitting: boolean;
   removeBgDedicatedLoaded: boolean;
   removeBgDedicatedName: string;
-  setRemoveBgTargetImage: React.Dispatch<React.SetStateAction<CanvasImage | null>>;
   addRemoveBgMaskToCanvas: boolean;
   setAddRemoveBgMaskToCanvas: React.Dispatch<React.SetStateAction<boolean>>;
   setEngineDialog: React.Dispatch<React.SetStateAction<'upscale' | 'removebg' | 'segment' | 'svg' | null>>;
@@ -61,9 +64,12 @@ export function CanvasEditColorRemoveBgPanel({
   removeBgModelId,
   setRemoveBgModelId,
   removeBgEngine,
+  documentMetadataMode,
+  removeBgQuote,
+  isRemoveBgQuoteLoading,
+  isRemoveBgSubmitting,
   removeBgDedicatedLoaded,
   removeBgDedicatedName,
-  setRemoveBgTargetImage,
   addRemoveBgMaskToCanvas,
   setAddRemoveBgMaskToCanvas,
   setEngineDialog,
@@ -231,7 +237,9 @@ export function CanvasEditColorRemoveBgPanel({
                     </button>
                   </div>
                   <div className={`flex items-start gap-1.5 text-[11px] leading-snug ${isMonochrome ? 'text-gray-600' : 'text-gray-300'}`}>
-                    {removeBgDedicatedName ? (
+                    {documentMetadataMode && removeBgEngine === 'local' ? (
+                      <span>当前使用本地 CPU 去背景模型；确认报价后发布主体图与蒙版。</span>
+                    ) : removeBgDedicatedName ? (
                       <>
                         <span className={`mt-0.5 w-1.5 h-1.5 rounded-full shrink-0 ${isMonochrome ? 'bg-green-600' : 'bg-green-400'}`} />
                         <span>专用 <span className={isMonochrome ? 'text-green-700 font-medium' : 'text-green-400 font-medium'}>{removeBgDedicatedName}</span> 已启用，将优先调用云端抠图 API</span>
@@ -291,7 +299,13 @@ export function CanvasEditColorRemoveBgPanel({
                       {removeBgModels.find(m => m.id === removeBgModelId)?.label || removeBgModelId}
                     </span>
                   </div>
-                  <label className={`mb-3 flex cursor-pointer items-center gap-2 text-xs ${isMonochrome ? 'text-gray-600' : 'text-[#bbb]'}`}>
+                  {documentMetadataMode && <p className={`mb-2 text-xs ${isMonochrome ? 'text-gray-600' : 'text-[#bbb]'}`}>
+                    协作文档仅支持本地引擎；主体图与黑白蒙版将一起发布到文档。
+                  </p>}
+                  {removeBgQuote && documentMetadataMode && <p className={`mb-2 text-sm font-semibold ${isMonochrome ? 'text-blue-700' : 'text-gold'}`}>
+                    本次报价：{removeBgQuote.total} 积分
+                  </p>}
+                  {!documentMetadataMode && <label className={`mb-3 flex cursor-pointer items-center gap-2 text-xs ${isMonochrome ? 'text-gray-600' : 'text-[#bbb]'}`}>
                     <input
                       type="checkbox"
                       aria-label="同时将黑白蒙版加入画布"
@@ -300,16 +314,16 @@ export function CanvasEditColorRemoveBgPanel({
                       className="h-4 w-4 accent-[#d4af37]"
                     />
                     同时将黑白蒙版加入画布
-                  </label>
+                  </label>}
                   <button
-                    onClick={() => {
-                      setShowRemoveBgPicker(false);
-                      handleRemoveBackground();
-                      setRemoveBgTargetImage(null);
-                    }}
-                    className={`w-full py-2.5 text-sm font-semibold rounded-xl active:scale-[0.98] transition-all ${isMonochrome ? 'bg-blue-500 text-white hover:bg-blue-600' : 'bg-gold text-black hover:bg-[#e5c047]'}`}
+                    onClick={() => { void handleRemoveBackground(); }}
+                    disabled={isRemoveBgQuoteLoading || isRemoveBgSubmitting}
+                    aria-busy={isRemoveBgQuoteLoading || isRemoveBgSubmitting}
+                    className={`w-full py-2.5 text-sm font-semibold rounded-xl active:scale-[0.98] transition-all disabled:opacity-50 ${isMonochrome ? 'bg-blue-500 text-white hover:bg-blue-600' : 'bg-gold text-black hover:bg-[#e5c047]'}`}
                   >
-                    开始去背景
+                    {isRemoveBgQuoteLoading ? '正在获取报价…' : isRemoveBgSubmitting ? '正在提交去背景…'
+                      : documentMetadataMode && removeBgQuote ? '确认报价并开始去背景'
+                        : documentMetadataMode ? '查看去背景报价' : '开始去背景'}
                   </button>
                 </div>
               </div>

@@ -21,7 +21,8 @@ describe('agent-edit durable continuation contract', () => {
     expect(routeSource).toContain("@/lib/agent-runtime/agent-edit-execution-service");
     expect(routeSource).not.toContain('persistPrivateAgentExecutionDescriptor');
     expect(routeSource).not.toContain('executeAgentEditTask');
-    expect(serviceSource).toContain('persistPrivateAgentExecutionDescriptor');
+    expect(serviceSource).toContain('agentExecutionDescriptor:');
+    expect(serviceSource).not.toContain('persistPrivateAgentExecutionDescriptor');
     expect(serviceSource).toContain('agentEditContinuation:');
     expect(serviceSource).toContain('export async function executePersistedAgentEditDescriptor');
     expect(serviceSource).toContain('await executeAgentEditTask(input.operationContext)');

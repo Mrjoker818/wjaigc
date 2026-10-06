@@ -6,7 +6,7 @@ import { NextResponse } from 'next/server';
 import { checkLocalEraseHealth, ERASE_MODELS } from '@/lib/image-tools/local-erase-client';
 import { checkRembgHealth, REMBG_CPU_MODELS } from '@/lib/image-tools/rembg-client';
 import { LOCAL_AI_ENABLED, IOPAINT_MODELS_DIR } from '@/lib/image-tools/config';
-import { isOnnxUpscaleAvailable } from '@/lib/image-tools/upscayl';
+import { isOnnxUpscaleAvailable } from '@/lib/image-tools/onnx-health';
 import fs from 'fs';
 import path from 'path';
 
@@ -24,7 +24,7 @@ function checkEraseModels(): Record<string, { available: boolean; path: string; 
     }
     // 查找模型文件: 先查 root 目录，再查 hub/checkpoints/ 子目录
     let modelPath = path.join(modelsDir, primaryFile);
-    if (!fs.existsSync(modelPath)) {
+    if (!fs.existsSync(/* turbopackIgnore: true */ modelPath)) {
       modelPath = path.join(hubCkptDir, primaryFile);
     }
     try {
@@ -33,11 +33,11 @@ function checkEraseModels(): Record<string, { available: boolean; path: string; 
       let totalSize = 0;
       for (const f of m.files) {
         let fp = path.join(modelsDir, f);
-        if (!fs.existsSync(fp)) {
+        if (!fs.existsSync(/* turbopackIgnore: true */ fp)) {
           fp = path.join(hubCkptDir, f);
         }
-        if (!fs.existsSync(fp)) { allExist = false; break; }
-        totalSize += fs.statSync(fp).size;
+        if (!fs.existsSync(/* turbopackIgnore: true */ fp)) { allExist = false; break; }
+        totalSize += fs.statSync(/* turbopackIgnore: true */ fp).size;
       }
       if (!allExist) {
         models[m.id] = {

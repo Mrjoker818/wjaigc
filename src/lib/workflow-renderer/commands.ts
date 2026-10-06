@@ -5,6 +5,20 @@ import {
   type WorkflowNode,
 } from '@/lib/workflow-engine';
 
+const EDIT_MASK_INPUT_PORT = { id: 'in-mask', label: '蒙版', type: 'mask', direction: 'in' } as const;
+
+function restoreLegacyEditMaskPorts(workflow: Workflow): Workflow {
+  if (!workflow.nodes.some(node => node.type === 'ai-edit'
+    && !node.ports.some(port => port.id === EDIT_MASK_INPUT_PORT.id))) return workflow;
+  return {
+    ...workflow,
+    nodes: workflow.nodes.map(node => node.type === 'ai-edit'
+      && !node.ports.some(port => port.id === EDIT_MASK_INPUT_PORT.id)
+      ? { ...node, ports: [...node.ports, { ...EDIT_MASK_INPUT_PORT }] }
+      : node),
+  };
+}
+
 export type WorkflowInteractionCommand =
   | { type: 'nodes.move'; nodeIds: string[]; delta: { x: number; y: number }; transactionId: string }
   | { type: 'nodes.drag.commit'; initialPositions: WorkflowNodePosition[]; positions: WorkflowNodePosition[]; transactionId: string }
@@ -409,7 +423,7 @@ export function applyWorkflowCommand(
   command: WorkflowInteractionCommand,
 ): WorkflowCommandResult {
   if (command.type === 'workflow.hydrate') {
-    return { workflow: command.workflow, historyEntries: [], createdNodeIds: [] };
+    return { workflow: restoreLegacyEditMaskPorts(command.workflow), historyEntries: [], createdNodeIds: [] };
   }
 
   if (command.type === 'selection.set') return noChange(workflow);
@@ -510,7 +524,7 @@ export function applyWorkflowCommand(
 }
 
 export function createWorkflowEditorState(workflow: Workflow): WorkflowEditorState {
-  return { workflow, history: createWorkflowCommandHistory(), broadcastRevision: 0 };
+  return { workflow: restoreLegacyEditMaskPorts(workflow), history: createWorkflowCommandHistory(), broadcastRevision: 0 };
 }
 
 export function reduceWorkflowEditorState(
@@ -536,11 +550,11 @@ export function reduceWorkflowEditorState(
     };
   }
   if (transition.kind === 'system.update') {
-    const workflow = transition.workflow;
+    const workflow = restoreLegacyEditMaskPorts(transition.workflow);
     return workflow === state.workflow ? state : { ...state, workflow };
   }
   if (transition.kind === 'user.update') {
-    const workflow = transition.workflow;
+    const workflow = restoreLegacyEditMaskPorts(transition.workflow);
     if (workflow === state.workflow) return state;
     const historyEntry = createHistoryEntry(state.workflow, workflow, transition.transactionId);
     return {

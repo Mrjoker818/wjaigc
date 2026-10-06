@@ -10,6 +10,9 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock('@/lib/db-client', () => mocks);
+vi.mock('@/lib/refund-identity-claim', () => ({
+  ensureRefundIdentityClaims: vi.fn(async (): Promise<void> => {}),
+}));
 vi.mock('server-only', () => ({}));
 
 import {

@@ -12,6 +12,7 @@
 
 import path from 'path';
 import fs from 'fs';
+import { randomUUID } from 'node:crypto';
 import { pathExistsSync } from './runtime-path-exists';
 
 const PROJECT_ROOT = process.env.COZE_WORKSPACE_PATH || process.cwd();
@@ -23,10 +24,18 @@ let _dataRoot: string | null = null;
 function getWritableDir(dir: string): boolean {
   try {
     fs.mkdirSync(dir, { recursive: true });
-    // Test write
-    const testFile = path.join(dir, '.write_test');
-    fs.writeFileSync(testFile, 'test', 'utf-8');
-    fs.unlinkSync(testFile);
+    // Each worker owns its probe; concurrent probes must not delete each other.
+    const testFile = path.join(dir, `.write_test-${randomUUID()}`);
+    const descriptor = fs.openSync(testFile, 'wx');
+    try {
+      fs.writeFileSync(descriptor, 'test', 'utf-8');
+    } finally {
+      try {
+        fs.closeSync(descriptor);
+      } finally {
+        fs.unlinkSync(testFile);
+      }
+    }
     return true;
   } catch {
     return false;

@@ -15,10 +15,13 @@ const IMAGE_MIME_TYPES = new Set([
 ]);
 const SAFE_REMOTE_ASSET_MIME_TYPES = new Set([
   ...IMAGE_MIME_TYPES,
+  'image/bmp',
   'video/mp4',
   'video/quicktime',
   'video/webm',
   'video/x-m4v',
+  'video/x-msvideo',
+  'video/x-matroska',
   'application/json',
   'application/octet-stream',
   'application/x-zip-compressed',
@@ -53,6 +56,7 @@ export interface DownloadPublicImageOptions {
   authorizationHeader?: string;
   authorizationHost?: string;
   maxBytesByMimeType?: Readonly<Record<string, number>>;
+  allowMissingContentTypeAsOctetStream?: boolean;
 }
 
 export function isAllowedRemoteMimeType(
@@ -174,7 +178,22 @@ export async function downloadPublicImage(
     }
   }
 
-  const addresses = await lookup(url.hostname, { all: true, verbatim: true });
+  const pendingLookup = lookup(url.hostname, { all: true, verbatim: true });
+  let removeDnsAbortListener: (() => void) | undefined;
+  const dnsAbort = new Promise<never>((_resolve, reject) => {
+    if (!options.signal) return;
+    const onAbort = (): void => reject(options.signal?.reason instanceof Error
+      ? options.signal.reason : new SafeImageDownloadError('Remote image DNS lookup was aborted'));
+    options.signal.addEventListener('abort', onAbort, { once: true });
+    removeDnsAbortListener = () => options.signal?.removeEventListener('abort', onAbort);
+    if (options.signal.aborted) onAbort();
+  });
+  let addresses: Awaited<typeof pendingLookup>;
+  try {
+    addresses = await Promise.race([pendingLookup, dnsAbort]);
+  } finally {
+    removeDnsAbortListener?.();
+  }
   options.signal?.throwIfAborted();
   const allowCozeEgressProxy = Boolean(
     process.env.COZE_PROJECT_ENV?.trim()
@@ -261,10 +280,12 @@ export async function downloadPublicImage(
         rejectOnce(new SafeImageDownloadError(`Remote image returned HTTP ${status}`));
         return;
       }
-      const mimeType = (response.headers['content-type'] || '')
+      const responseMimeType = (response.headers['content-type'] || '')
         .split(';', 1)[0]
         .trim()
         .toLowerCase();
+      const mimeType = responseMimeType || (options.allowMissingContentTypeAsOctetStream
+        ? 'application/octet-stream' : '');
       if (!isAllowedRemoteMimeType(mimeType, acceptedMimeTypes)) {
         response.resume();
         rejectOnce(new SafeImageDownloadError('Remote response is not an allowed image type'));

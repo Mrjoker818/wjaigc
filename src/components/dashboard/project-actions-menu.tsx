@@ -1,7 +1,7 @@
 'use client';
 
 import { useRef } from 'react';
-import { ArrowRight, MoreVertical, Pencil, Share2, Trash2 } from 'lucide-react';
+import { ArrowRight, MoreVertical, Pencil, Share2, Trash2, Users } from 'lucide-react';
 
 import {
   DropdownMenu,
@@ -16,6 +16,7 @@ interface DashboardProjectActionsMenuProps {
   onRename: () => void;
   onExport: () => void;
   onManageShare: (returnFocusTarget: HTMLButtonElement) => void;
+  onManageCollaboration?: (returnFocusTarget: HTMLButtonElement) => void;
   onDelete: () => void;
 }
 
@@ -24,6 +25,7 @@ export function DashboardProjectActionsMenu({
   onRename,
   onExport,
   onManageShare,
+  onManageCollaboration,
   onDelete,
 }: DashboardProjectActionsMenuProps) {
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -60,6 +62,9 @@ export function DashboardProjectActionsMenu({
         >
           <Share2 aria-hidden="true" />管理分享
         </DropdownMenuItem>
+        {onManageCollaboration && <DropdownMenuItem className="min-h-11" onSelect={() => {
+          if (triggerRef.current) onManageCollaboration(triggerRef.current);
+        }}><Users aria-hidden="true" />管理协作</DropdownMenuItem>}
         <DropdownMenuSeparator />
         <DropdownMenuItem className="min-h-11" variant="destructive" onSelect={onDelete}>
           <Trash2 aria-hidden="true" />删除

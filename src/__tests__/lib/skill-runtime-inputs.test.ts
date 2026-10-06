@@ -78,6 +78,33 @@ function expectInputError(
 }
 
 describe('resolveSkillInputs', () => {
+  it('validates supplied fields before upstream nodes provide required inputs', () => {
+    expect(resolveSkillInputs(definition, { style: '生活方式' }, { allowMissingRequired: true }))
+      .toMatchObject({ style: '生活方式' });
+    expectInputError(
+      () => resolveSkillInputs(definition, { style: '生活方式' }),
+      'SKILL_INPUT_REQUIRED', 'product',
+    );
+    expectInputError(
+      () => resolveSkillInputs(definition, { product: '' }, { allowMissingRequired: true }),
+      'SKILL_INPUT_REQUIRED', 'product',
+    );
+    expectInputError(
+      () => resolveSkillInputs(definition, { hiddenPayload: { memo: 'test-only-secret-canary' } },
+        { allowMissingRequired: true }),
+      'SKILL_INPUT_UNKNOWN_FIELD', 'hiddenPayload',
+    );
+  });
+
+  it('leaves an upstream-supplied dataset unresolved during partial validation', () => {
+    const datasetSkill = createDefinition([
+      { key: 'rows', label: 'SKU rows', kind: 'dataset', required: true, datasetSchema: 'sku-v1' },
+    ]);
+    expect(resolveSkillInputs(datasetSkill, {}, { allowMissingRequired: true }))
+      .toMatchObject({ rows: undefined });
+    expectInputError(() => resolveSkillInputs(datasetSkill, {}), 'SKILL_INPUT_REQUIRED', 'rows');
+  });
+
   it('applies generic maximumLength and dependentOptions declarations', () => {
     const constrained = createDefinition([
       { key: 'platform', label: 'Platform', kind: 'select', required: true, options: ['Amazon', '京东'] },

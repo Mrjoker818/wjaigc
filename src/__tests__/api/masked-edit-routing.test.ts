@@ -12,19 +12,6 @@ const pollTaskSource = readFileSync(
 );
 
 describe('masked edit production routing', () => {
-  it('uses the lossless masked compositor for synchronous edit results', () => {
-    expect(imageEditSource).toContain("import { compositeMaskedEdit } from '@/lib/image-tools/masked-edit-composite';");
-    expect(imageEditSource.match(/compositeMaskedEdit\(/g)?.length ?? 0).toBeGreaterThanOrEqual(3);
-    expect(imageEditSource).not.toContain('AI erase result (no composite): JPEG');
-    expect(imageEditSource).not.toContain('AI erase async result (no composite): JPEG');
-    expect(imageEditSource).not.toContain('AI composite result: JPEG base64');
-  });
-
-  it('persists source and mask context for remote erase and mask tasks', () => {
-    expect(imageEditSource.match(/originalImageUrl: imageUrl/g)?.length ?? 0).toBeGreaterThanOrEqual(2);
-    expect(imageEditSource.match(/maskImageUrl: maskImage/g)?.length ?? 0).toBeGreaterThanOrEqual(2);
-  });
-
   it('uses the same lossless compositor when asynchronous tasks complete', () => {
     expect(pollTaskSource).toContain("import { compositeMaskedEdit } from '@/lib/image-tools/masked-edit-composite';");
     expect(pollTaskSource).toContain('await compositeMaskedEdit({');

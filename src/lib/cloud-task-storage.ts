@@ -1,6 +1,12 @@
 import { execSql, getPool } from '@/lib/db-client';
 import type { PoolClient } from 'pg';
 import {
+  createAgentEditExecutionDescriptorV1, digestAgentEditExecutionDescriptor,
+  AgentEditExecutionDescriptorError, type AgentEditExecutionDescriptorV1,
+} from '@/lib/agent-runtime/agent-edit-execution-descriptor';
+import type { CanvasTaskPublicationInput, PreparedCanvasTaskPublication } from '@/lib/collaboration/task-publication';
+import type { WorkflowEditPublicationInput, PreparedWorkflowEditSource } from '@/lib/collaboration/workflow-edit-publication';
+import {
   createTaskBillingTransactionId,
   InsufficientCreditsError,
   normalizeBillableCreditCost,
@@ -268,6 +274,12 @@ export interface CloudTaskFallbackTransitionResult extends CloudTaskCreditRefund
 }
 
 export interface CreateBillableCloudTaskInput {
+  agentExecutionDescriptor?: { descriptor: AgentEditExecutionDescriptorV1; descriptorDigest: string };
+  canvasPublication?: CanvasTaskPublicationInput;
+  workflowPublication?: WorkflowEditPublicationInput;
+  activeImageEditInputDigest?: string;
+  /** Server-owned admission check, executed under the same transaction as the first charge. */
+  beforeCharge?: (client: PoolClient) => Promise<void>;
   userId: string;
   idempotencyKey: string;
   requestDigest: string;
@@ -298,10 +310,16 @@ export interface SettleFailedCloudTaskInput {
   allowPausedAgentSettlement?: boolean;
 }
 
+/** A deliberate, user-actionable rejection from a server-owned admission hook. */
+export class CloudTaskAdmissionError extends Error {}
+
 export interface CompleteCloudTaskOptions {
   leaseOwner?: string;
   deadlineAt?: number;
+  leaseAttemptCount?: number;
   agentExecutionFence?: AgentExecutionFence;
+  /** Caller-owned transaction; the caller must lock the task before any authorization fence. */
+  client?: PoolClient;
 }
 
 export interface SettleFailedCloudTaskResult {
@@ -477,18 +495,96 @@ export async function createCloudTask(input: CreateCloudTaskInput, transaction?:
   return created;
 }
 
+/** Produced only by the core after an explicit canvas batch COMMIT was issued. */
+export class CanvasBatchCommitUnknownError extends Error {
+  readonly code = 'CANVAS_BATCH_COMMIT_UNKNOWN';
+  readonly status = 503;
+
+  constructor() {
+    super('画布批次提交结果暂未确认，请使用原请求标识核对任务');
+    this.name = 'CanvasBatchCommitUnknownError';
+  }
+}
+
+export class WorkflowEditCommitUnknownError extends Error {
+  readonly code = 'WORKFLOW_EDIT_COMMIT_UNKNOWN';
+  readonly status = 503;
+
+  constructor() {
+    super('工作流编辑任务提交结果待核对，请用原请求标识查询，不要重新扣费');
+    this.name = 'WorkflowEditCommitUnknownError';
+  }
+}
+
+/** Another key already owns this actor/project's still-active 302 request. */
+export class ActiveImageEditAttemptError extends Error {
+  readonly code = 'IMAGE_EDIT_ACTIVE_ATTEMPT';
+  readonly status = 409;
+
+  constructor(readonly taskId: string, readonly idempotencyKey: string, readonly taskStatus: string) {
+    super('该图像放大请求已有待完成任务，请核对原任务');
+    this.name = 'ActiveImageEditAttemptError';
+  }
+}
+
 export async function createBillableCloudTask(
   input: CreateBillableCloudTaskInput,
 ): Promise<CreateBillableCloudTaskResult> {
-  await ensureCoreTables();
-  await ensureCloudTaskTables();
-
+  // Capture the typed publication before table/pool awaits expose caller mutation.
+  if (input.task.type === 'image-edit' && input.canvasPublication !== undefined) {
+    input = { ...input, canvasPublication: structuredClone(input.canvasPublication) };
+  }
+  if (input.workflowPublication !== undefined) {
+    input = { ...input, workflowPublication: structuredClone(input.workflowPublication) };
+  }
   const creditCost = normalizeBillableCreditCost(input.creditCost);
-  const pool = getPool();
-  const client = await pool.connect();
+  let client: PoolClient | undefined;
+  let discardClient = false;
+  let batchCommitIssued = false;
+  let workflowCommitIssued = false;
+  let publicationModule: typeof import('@/lib/collaboration/task-publication') | undefined;
+  let workflowModule: typeof import('@/lib/collaboration/workflow-edit-publication') | undefined;
+  const isCanvasBatch = input.canvasPublication?.access?.kind === 'document'
+    && Boolean(input.canvasPublication.batchAdmission || input.canvasPublication.batchPlacement);
+  const singleTaskIdentity = input.canvasPublication?.singleAdmission ? {
+    type: input.task.type as 'edit' | 'universal-generate' | 'generate' | 'image-edit', idempotencyKey: input.idempotencyKey, requestDigest: input.requestDigest,
+  } : undefined;
+  const batchPayload = input.task.result?.submissionPayload as Record<string, unknown> | undefined;
+  const taskIdentity = isCanvasBatch ? {
+    idempotencyKey: input.idempotencyKey, requestDigest: input.requestDigest,
+    batchId: batchPayload?.batchId as string, slotId: batchPayload?.slotId as string,
+    slotIndex: batchPayload?.slotIndex as number, slotCount: batchPayload?.slotCount as number,
+  } : undefined;
 
   try {
+    await ensureCoreTables();
+    await ensureCloudTaskTables();
+    client = await getPool().connect();
     await client.query('BEGIN');
+    if (input.workflowPublication && (input.task.type !== 'edit' || input.canvasPublication
+      || input.workflowPublication.access.actorUserId !== input.userId
+      || input.workflowPublication.access.projectId !== input.task.projectId)) {
+      throw new IdempotencyConflictError({ userId: input.userId, idempotencyKey: input.idempotencyKey,
+        existingDigest: 'workflow-edit-scope-conflict', requestDigest: input.requestDigest });
+    }
+    // Validate inside the authoritative admission transaction, before any charge.
+    let privateDescriptor: (NonNullable<CreateBillableCloudTaskInput['agentExecutionDescriptor']>
+      & { admissionVersion: 2 }) | undefined;
+    if (input.agentExecutionDescriptor !== undefined) {
+      const raw = input.agentExecutionDescriptor;
+      if (input.task.type !== 'agent-edit' || !raw?.descriptor) {
+        throw new AgentEditExecutionDescriptorError();
+      }
+      const { version, ...fields } = raw.descriptor;
+      if (version !== 1) throw new AgentEditExecutionDescriptorError('Descriptor version is unknown');
+      const descriptor = createAgentEditExecutionDescriptorV1(fields);
+      const descriptorDigest = digestAgentEditExecutionDescriptor(descriptor);
+      if (descriptorDigest !== raw.descriptorDigest) throw new AgentEditExecutionDescriptorError('Descriptor digest mismatch');
+      privateDescriptor = { admissionVersion: 2, descriptor, descriptorDigest };
+      if (Buffer.byteLength(JSON.stringify(privateDescriptor), 'utf8') > 64 * 1024) {
+        throw new AgentEditExecutionDescriptorError('Descriptor exceeds the size limit');
+      }
+    }
     await client.query(
       'SELECT pg_advisory_xact_lock(hashtextextended($1, 0))',
       [createIdempotencyLockKey(input.userId, input.idempotencyKey)],
@@ -504,6 +600,34 @@ export async function createBillableCloudTask(
       | Record<string, unknown>
       | undefined;
     if (existingRow) {
+      if ((existingRow.type === 'image-edit' || input.task.type === 'image-edit')
+        && (existingRow.type !== input.task.type
+          || existingRow.project_id !== (input.task.projectId || ''))) {
+        throw new IdempotencyConflictError({ userId: input.userId, idempotencyKey: input.idempotencyKey,
+          existingDigest: String(existingRow.request_digest || LEGACY_UNKNOWN_REQUEST_DIGEST), requestDigest: input.requestDigest });
+      }
+      if (input.task.type === 'agent-edit' && (existingRow.type !== 'agent-edit'
+        || existingRow.project_id !== (input.task.projectId || ''))) {
+        throw new IdempotencyConflictError({ userId: input.userId, idempotencyKey: input.idempotencyKey,
+          existingDigest: String(existingRow.request_digest || LEGACY_UNKNOWN_REQUEST_DIGEST), requestDigest: input.requestDigest });
+      }
+      if (privateDescriptor) {
+        const stored = existingRow.agent_execution_descriptor as typeof privateDescriptor | null;
+        let matches = false;
+        try {
+          matches = !!stored && stored.admissionVersion === 2
+            && stored.descriptorDigest === privateDescriptor.descriptorDigest
+            && digestAgentEditExecutionDescriptor(stored.descriptor) === privateDescriptor.descriptorDigest;
+        } catch { /* Invalid or absent private state cannot be repaired by replay. */ }
+        if (!matches) throw new IdempotencyConflictError({ userId: input.userId, idempotencyKey: input.idempotencyKey,
+          existingDigest: 'agent-execution-descriptor-conflict', requestDigest: input.requestDigest });
+      }
+      if (singleTaskIdentity && (input.task.type !== input.canvasPublication!.singleAdmission || existingRow.type !== input.canvasPublication!.singleAdmission
+        || existingRow.project_id !== input.task.projectId || existingRow.idempotency_key !== input.idempotencyKey
+        || !existingRow.request_digest || existingRow.request_digest !== input.requestDigest)) {
+        throw new IdempotencyConflictError({ userId: input.userId, idempotencyKey: input.idempotencyKey,
+          existingDigest: String(existingRow.request_digest || LEGACY_UNKNOWN_REQUEST_DIGEST), requestDigest: input.requestDigest });
+      }
       const existingDigest = getPersistedRequestDigest(existingRow);
       if (!existingDigest) {
         throw new IdempotencyConflictError({
@@ -522,6 +646,53 @@ export async function createBillableCloudTask(
         });
       }
 
+      if ((isCanvasBatch || singleTaskIdentity) && input.canvasPublication
+        && (singleTaskIdentity?.type === 'image-edit'
+          || !['completed', 'failed', 'cancelled', 'timeout'].includes(String(existingRow.status)))) {
+        publicationModule = await import('@/lib/collaboration/task-publication');
+        await publicationModule.prepareCanvasTaskPublicationInTransaction(client, {
+          actorUserId: input.userId, projectId: input.task.projectId || '', publication: input.canvasPublication,
+          taskIdentity, singleTaskIdentity, replayTaskId: String(existingRow.id),
+        });
+        // Authorized batch reuse takes over the creator's compensation revision,
+        // including the window before any worker has acquired a lease.
+        if (isCanvasBatch) {
+          const takeover = await client.query(
+            'UPDATE cloud_tasks SET revision = revision + 1 WHERE id = $1 RETURNING revision',
+            [existingRow.id],
+          );
+          existingRow.revision = takeover.rows[0].revision;
+        }
+      }
+
+      if (existingRow.type === 'edit' || input.workflowPublication) {
+        const availability = await client.query<{ relation: string | null }>(
+          "SELECT to_regclass('wujie_workflow_edit_publications')::text AS relation",
+        );
+        if (!availability.rows[0]?.relation && input.workflowPublication) {
+          workflowModule = await import('@/lib/collaboration/workflow-edit-publication');
+          throw new workflowModule.WorkflowEditSourceError('WORKFLOW_EDIT_SOURCE_UNAVAILABLE');
+        }
+        const hasIntent = availability.rows[0]?.relation
+          ? (await client.query('SELECT task_id FROM wujie_workflow_edit_publications WHERE task_id=$1',
+            [existingRow.id])).rowCount === 1
+          : false;
+        if (hasIntent !== Boolean(input.workflowPublication)) {
+          workflowModule = await import('@/lib/collaboration/workflow-edit-publication');
+          throw new workflowModule.WorkflowEditIntentConflictError();
+        }
+      }
+      if (input.workflowPublication) {
+        workflowModule = await import('@/lib/collaboration/workflow-edit-publication');
+        const source = await workflowModule.prepareWorkflowEditSourceInTransaction(client, input.workflowPublication);
+        await workflowModule.assertWorkflowEditIntentReplayInTransaction(client, {
+          publication: input.workflowPublication, source,
+          identity: { taskId: String(existingRow.id), requestDigest: input.requestDigest,
+            providerId: input.task.providerId || '', modelId: input.task.model || '' },
+        });
+      }
+      batchCommitIssued = isCanvasBatch;
+      workflowCommitIssued = Boolean(input.workflowPublication);
       await client.query('COMMIT');
       return {
         task: rowToPersistedCloudTask(existingRow),
@@ -530,6 +701,36 @@ export async function createBillableCloudTask(
       };
     }
 
+    if (input.activeImageEditInputDigest) {
+      await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))',
+        [`image-edit-active:${input.userId}:${input.activeImageEditInputDigest}`]);
+      const active = await client.query(
+        `SELECT id, idempotency_key, status FROM cloud_tasks
+         WHERE user_id = $1 AND project_id = $2 AND type = 'upscale'
+           AND result #>> '{imageEditAdmission,kind}' = 'requested-302-upscale'
+           AND result #>> '{imageEditAdmission,inputIdentityDigest}' = $3
+           AND result #>> '{imageEditQuote,confirmed}' = 'true'
+           AND status IN ('queued', 'pending', 'processing')
+         ORDER BY created_at DESC LIMIT 1 FOR UPDATE`,
+        [input.userId, input.task.projectId || '', input.activeImageEditInputDigest],
+      );
+      const row = active.rows[0] as { id: string; idempotency_key: string; status: string } | undefined;
+      if (row) throw new ActiveImageEditAttemptError(row.id, row.idempotency_key, row.status);
+    }
+
+    let publication: PreparedCanvasTaskPublication | undefined;
+    if (input.canvasPublication !== undefined) {
+      publicationModule = await import('@/lib/collaboration/task-publication');
+      publication = await publicationModule.prepareCanvasTaskPublicationInTransaction(client, {
+        actorUserId: input.userId, projectId: input.task.projectId || '', publication: input.canvasPublication, taskIdentity, singleTaskIdentity,
+      });
+    }
+    let workflowSource: PreparedWorkflowEditSource | undefined;
+    if (input.workflowPublication) {
+      workflowModule = await import('@/lib/collaboration/workflow-edit-publication');
+      workflowSource = await workflowModule.prepareWorkflowEditSourceInTransaction(client, input.workflowPublication);
+    }
+    await input.beforeCharge?.(client);
     const now = Date.now();
     const chargedTransactionId = creditCost > 0
       ? createTaskBillingTransactionId('charge', input.task.id)
@@ -577,11 +778,11 @@ export async function createBillableCloudTask(
         credit_status, credit_cost, lease_owner, lease_expires_at,
         attempt_count, idempotency_key, request_digest,
         charged_transaction_id, refunded_transaction_id, revision,
-        created_at, updated_at
+        created_at, updated_at, agent_execution_descriptor
       ) VALUES (
         $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
         $11, $12, $13, $14, $15, $16, $17, $18, $19, $20,
-        $21, $22, '', $23, $24, $25
+        $21, $22, '', $23, $24, $25, $26::jsonb
       )
       RETURNING *`,
       [
@@ -610,6 +811,7 @@ export async function createBillableCloudTask(
         task.revision || 0,
         task.createdAt,
         task.updatedAt,
+        privateDescriptor ? JSON.stringify(privateDescriptor) : null,
       ],
     );
 
@@ -632,6 +834,18 @@ export async function createBillableCloudTask(
       );
     }
 
+    if (publication && publicationModule) {
+      await publicationModule.persistCanvasTaskPublicationInTransaction(client, { taskId: task.id, publication });
+    }
+    if (input.workflowPublication && workflowSource && workflowModule) {
+      await workflowModule.persistWorkflowEditIntentInTransaction(client, {
+        publication: input.workflowPublication, source: workflowSource,
+        identity: { taskId: task.id, requestDigest: input.requestDigest,
+          providerId: task.providerId || '', modelId: task.model || '' },
+      });
+    }
+    batchCommitIssued = isCanvasBatch;
+    workflowCommitIssued = Boolean(input.workflowPublication);
     await client.query('COMMIT');
     return {
       task: rowToPersistedCloudTask(
@@ -641,10 +855,32 @@ export async function createBillableCloudTask(
       charged: creditCost > 0,
     };
   } catch (error) {
-    await client.query('ROLLBACK').catch(() => undefined);
+    if (batchCommitIssued) {
+      // Even a successful later ROLLBACK cannot disprove a committed transaction.
+      discardClient = true;
+      throw new CanvasBatchCommitUnknownError();
+    }
+    if (workflowCommitIssued) {
+      discardClient = true;
+      throw new WorkflowEditCommitUnknownError();
+    }
+    if (client) {
+      try { await client.query('ROLLBACK'); }
+      catch { discardClient = true; }
+    }
+    if (input.canvasPublication !== undefined && (discardClient || !(
+      error instanceof InsufficientCreditsError || error instanceof IdempotencyConflictError
+      || error instanceof CloudTaskAdmissionError
+      || (publicationModule && error instanceof publicationModule.CanvasTaskPublicationError)
+    ))) {
+      // No eager server-only import, including connect failures and existing-task replay.
+      throw Object.assign(new Error('任务画布发布授权服务暂不可用，请稍后重试'), {
+        name: 'CanvasTaskPublicationError', code: 'CANVAS_TASK_PUBLICATION_UNAVAILABLE', status: 503,
+      });
+    }
     throw error;
   } finally {
-    client.release();
+    client?.release(discardClient);
   }
 }
 
@@ -1047,8 +1283,8 @@ export async function completeCloudTask(
     ? { leaseOwner: leaseOwnerOrOptions }
     : leaseOwnerOrOptions ?? {};
   const agentFence = options.agentExecutionFence || getAgentExecutionFence();
-  const executionFence = buildAgentSqlFence('$1', 6, agentFence);
-  const completed = await execSql(`
+  const executionFence = buildAgentSqlFence('$1', 7, agentFence);
+  const completed = await (options.client ?? { query: execSql }).query(`
     WITH ${PREPAID_PARENT_COMPLETION_CTE}
     UPDATE cloud_tasks
     SET ${protectPrepaidCompletionSets([
@@ -1064,6 +1300,7 @@ export async function completeCloudTask(
     ], '$2::jsonb').join(', ')}
     WHERE id = $1 AND status = 'processing'
       AND ($4::text IS NULL OR lease_owner = $4)
+      AND ($6::integer IS NULL OR attempt_count = $6)
       AND (
         $5::bigint IS NULL
         OR (
@@ -1080,6 +1317,7 @@ export async function completeCloudTask(
     Date.now(),
     options.leaseOwner || null,
     options.deadlineAt ?? null,
+    options.leaseAttemptCount ?? null,
     ...executionFence.params,
   ]);
   return (completed.rowCount ?? completed.rows.length) > 0 && completed.rows[0]?.committed !== false;
@@ -1094,23 +1332,39 @@ export async function terminateCloudTaskAndRefund(
   status: CloudTaskFailureStatus,
   reason: string,
   leaseOwner?: string,
-  options: { requireUnsubmittedPrepaid?: boolean } = {},
+  options: { requireUnsubmittedPrepaid?: boolean; requireActive?: boolean;
+    expectedCpuRemoveBg?: { userId: string; requestDigest: string; createdBefore: number };
+    client?: PoolClient } = {},
 ): Promise<CloudTaskTerminationResult> {
+  await ensureCoreTables();
   await ensureCloudTaskTables();
   const now = Date.now();
   const transactionId = `ctx_${now}_${Math.random().toString(36).slice(2, 10)}`;
   const agentFence = getAgentExecutionFence();
   const executionFence = buildAgentSqlFence('task.id', 7, agentFence);
-  const result = await execSql(`
+  const expectedCpuRemoveBg = options.expectedCpuRemoveBg;
+  const cpuIdentityIndex = executionFence.nextIndex;
+  const cpuIdentityCondition = expectedCpuRemoveBg ? `
+        AND task.user_id = $${cpuIdentityIndex}
+        AND task.type = 'image-edit' AND task.status = 'processing'
+        AND task.provider_id = 'local-rembg'
+        AND (starts_with(task.id, 'removebg-cpu-') OR starts_with(task.id, 'image_edit_removebg_cpu_'))
+        AND task.request_digest <> '' AND task.request_digest = $${cpuIdentityIndex + 1}
+        AND task.result #>> '{imageEditAdmission,kind}' = 'document-cpu-removebg'
+        AND task.result #>> '{imageEditAdmission,requestDigest}' = task.request_digest
+        AND task.created_at <= $${cpuIdentityIndex + 2}` : '';
+  const settlementSql = `
     WITH candidate AS (
       SELECT task.id,
              task.user_id,
              task.status AS previous_status,
              task.credit_status AS previous_credit_status,
-             task.credit_cost
+             task.credit_cost,
+             task.charged_transaction_id
       FROM cloud_tasks task
       WHERE task.id = $1
         ${executionFence.condition}
+        ${cpuIdentityCondition}
         AND ($6::text IS NULL OR task.lease_owner = $6)
         ${options.requireUnsubmittedPrepaid ? `AND (
           $2 <> 'timeout'
@@ -1123,10 +1377,9 @@ export async function terminateCloudTaskAndRefund(
             AND COALESCE(task.lease_expires_at, 0) <= (EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::bigint
           )
         )` : ''}
-        AND (
-          task.status IN ('pending', 'processing')
-          OR task.status IN ('failed', 'timeout', 'cancelled')
-        )
+        AND ${options.requireActive
+    ? "task.status IN ('pending', 'processing')"
+    : "(task.status IN ('pending', 'processing') OR task.status IN ('failed', 'timeout', 'cancelled'))"}
       FOR UPDATE
     ), locked_credit AS (
       SELECT credit.user_id
@@ -1135,6 +1388,23 @@ export async function terminateCloudTaskAndRefund(
       WHERE candidate.previous_credit_status = 'pending'
         AND candidate.credit_cost > 0
       FOR UPDATE OF credit
+    ), prior_refund AS (
+      SELECT candidate.id AS task_id,
+             MIN(refund_tx.id) AS transaction_id
+      FROM candidate
+      JOIN wujie_credit_transactions charge
+        ON charge.id = candidate.charged_transaction_id
+       AND charge.type = 'consume'
+       AND charge.user_id = candidate.user_id
+       AND charge.amount = -candidate.credit_cost
+      JOIN wujie_credit_transactions refund_tx
+        ON refund_tx.type = 'refund'
+       AND (refund_tx.task_id = candidate.id
+         OR (COALESCE(refund_tx.task_id, '') = '' AND refund_tx.reference_id = candidate.id))
+      GROUP BY candidate.id
+      HAVING COUNT(*) = 1
+         AND BOOL_AND(refund_tx.user_id = candidate.user_id
+           AND refund_tx.amount = candidate.credit_cost)
     ), settled_task AS (
       UPDATE cloud_tasks task
       SET status = CASE
@@ -1148,15 +1418,19 @@ export async function terminateCloudTaskAndRefund(
           credit_status = CASE
             WHEN candidate.previous_credit_status = 'pending'
               AND candidate.credit_cost > 0
-              AND EXISTS (
-                SELECT 1
-                FROM locked_credit credit
-                WHERE credit.user_id = candidate.user_id
-              )
+              AND (EXISTS (SELECT 1 FROM prior_refund prior WHERE prior.task_id = candidate.id)
+                OR EXISTS (
+                  SELECT 1
+                  FROM locked_credit credit
+                  WHERE credit.user_id = candidate.user_id
+                ))
             THEN 'refunded'
             ELSE candidate.previous_credit_status
           END,
           refunded_transaction_id = CASE
+            WHEN candidate.previous_credit_status = 'pending'
+              AND EXISTS (SELECT 1 FROM prior_refund prior WHERE prior.task_id = candidate.id)
+            THEN (SELECT prior.transaction_id FROM prior_refund prior WHERE prior.task_id = candidate.id)
             WHEN candidate.previous_credit_status = 'pending'
               AND candidate.credit_cost > 0
               AND EXISTS (
@@ -1167,6 +1441,8 @@ export async function terminateCloudTaskAndRefund(
             THEN $5
             ELSE task.refunded_transaction_id
           END,
+          lease_owner = '',
+          lease_expires_at = 0,
           updated_at = $4
       FROM candidate
       WHERE task.id = candidate.id
@@ -1176,8 +1452,10 @@ export async function terminateCloudTaskAndRefund(
                 task.credit_status,
                 task.credit_cost,
                 candidate.previous_status IN ('pending', 'processing') AS transitioned,
+                candidate.previous_credit_status = 'pending' AS credit_was_pending,
                 candidate.previous_credit_status = 'pending'
-                  AND task.credit_status = 'refunded' AS refund_claimed
+                  AND task.credit_status = 'refunded'
+                  AND NOT EXISTS (SELECT 1 FROM prior_refund prior WHERE prior.task_id = candidate.id) AS refund_claimed
     ), refunded_balance AS (
       UPDATE wujie_credits credit
       SET balance = credit.balance + settled.credit_cost,
@@ -1199,20 +1477,43 @@ export async function terminateCloudTaskAndRefund(
            settled.user_id,
            settled.credit_cost,
            settled.transitioned,
-           EXISTS (
+           (EXISTS (
              SELECT 1 FROM refunded_balance refunded WHERE refunded.task_id = settled.id
-           ) AS refunded,
-           (
+           ) OR (settled.credit_was_pending AND EXISTS (
+             SELECT 1 FROM prior_refund prior WHERE prior.task_id = settled.id
+           ))) AS refunded,
+           COALESCE((
              SELECT refunded.balance
              FROM refunded_balance refunded
              WHERE refunded.task_id = settled.id
-           ) AS balance
+           ), (
+             SELECT credit.balance FROM wujie_credits credit
+             WHERE credit.user_id = settled.user_id
+               AND EXISTS (SELECT 1 FROM prior_refund prior WHERE prior.task_id = settled.id)
+           )) AS balance
     FROM settled_task settled
     LIMIT 1
-  `, [
+  `;
+  const settlementParams = [
     taskId, status, reason, now, transactionId, leaseOwner || null,
     ...executionFence.params,
-  ]);
+    ...(expectedCpuRemoveBg ? [expectedCpuRemoveBg.userId,
+      expectedCpuRemoveBg.requestDigest, expectedCpuRemoveBg.createdBefore] : []),
+  ];
+  let result: { rows: Record<string, unknown>[] };
+  try {
+    result = await (options.client ?? { query: execSql }).query(settlementSql, settlementParams);
+  } catch (error) {
+    if (options.client) throw error; // A failed statement aborts its caller-owned transaction.
+    if (!(typeof error === 'object' && error !== null && 'code' in error
+      && error.code === '23505' && 'constraint' in error
+      && (error.constraint === 'idx_credit_refund_task_once_all'
+        || error.constraint === 'wujie_refund_identity_claims_pkey'
+        || error.constraint === 'idx_credit_tx_task_type_once'))) throw error;
+    // Another writer may have committed the refund after this statement's
+    // snapshot. A fresh statement sees its ledger row and reconciles atomically.
+    result = await execSql(settlementSql, settlementParams);
+  }
   const row = result.rows[0] as Record<string, unknown> | undefined;
   if (!row) {
     return { status: undefined, transitioned: false, refunded: false, creditCost: 0 };
@@ -1239,11 +1540,16 @@ export async function refundCloudTaskCredits(
   reason: string,
   options: { leaseOwner?: string } = {},
 ): Promise<CloudTaskCreditRefundResult> {
+  await ensureCoreTables();
   await ensureCloudTaskTables();
   const now = Date.now();
+  const priorRefund = await reconcileCloudTaskRefund(taskId, now, options.leaseOwner);
+  if (priorRefund) return priorRefund;
   const transactionId = `ctx_${now}_${Math.random().toString(36).slice(2, 10)}`;
   const agentFence = buildAgentSqlFence('task.id', 6);
-  const result = await execSql(`
+  let result: Awaited<ReturnType<typeof execSql>>;
+  try {
+    result = await execSql(`
     WITH refundable AS (
       SELECT task.id, task.user_id, task.credit_cost
       FROM cloud_tasks task
@@ -1251,6 +1557,7 @@ export async function refundCloudTaskCredits(
       WHERE task.id = $1
         AND task.credit_status = 'pending'
         AND task.credit_cost > 0
+        AND task.status <> 'completed'
         ${agentFence.condition}
         AND ($5::text IS NULL OR (
           task.status = 'processing'
@@ -1284,6 +1591,14 @@ export async function refundCloudTaskCredits(
     SELECT user_id, credit_cost, balance FROM settled_task
   `, [taskId, now, transactionId, reason, options.leaseOwner || null,
     ...agentFence.params]);
+  } catch (error) {
+    if (typeof error === 'object' && error !== null && 'code' in error
+      && error.code === '23505') {
+      const reconciled = await reconcileCloudTaskRefund(taskId, now, options.leaseOwner);
+      if (reconciled) return reconciled;
+    }
+    throw error;
+  }
   const row = result.rows[0] as Record<string, unknown> | undefined;
   if (!row) return { refunded: false, creditCost: 0 };
   return {
@@ -1305,6 +1620,7 @@ export async function transitionCloudTaskToLocalFallbackAndRefund(
   reason: string,
   leaseOwner: string,
 ): Promise<CloudTaskFallbackTransitionResult> {
+  await ensureCoreTables();
   await ensureCloudTaskTables();
   const now = Date.now();
   const transactionId = `ctx_${now}_${Math.random().toString(36).slice(2, 10)}`;
@@ -1566,7 +1882,7 @@ export async function renewCloudTaskLease(
   return (result.rowCount ?? result.rows.length) > 0;
 }
 
-/** Releases a lease only when it is still owned by the calling worker. */
+/** Releases a live task lease only when it is still owned by the calling worker. */
 export async function releaseCloudTaskLease(
   taskId: string,
   owner: string,
@@ -1580,6 +1896,7 @@ export async function releaseCloudTaskLease(
         updated_at = $3
     WHERE id = $1
       AND lease_owner = $2
+      AND status IN ('created', 'queued', 'submitting', 'pending', 'processing', 'uploading')
       ${agentFence.condition}
     RETURNING id
   `, [taskId, owner, Date.now(), ...agentFence.params]);
@@ -1690,6 +2007,54 @@ export async function persistPrivateAgentExecutionDescriptor(
   return {
     persisted: Boolean(row),
     reused: Boolean(row && !row.inserted),
+  };
+}
+
+async function reconcileCloudTaskRefund(
+  taskId: string,
+  now: number,
+  leaseOwner?: string,
+): Promise<CloudTaskCreditRefundResult | null> {
+  const agentFence = buildAgentSqlFence('task.id', 4);
+  const result = await execSql(`
+    WITH prior_refund AS (
+      SELECT MIN(id) AS transaction_id,
+             MIN(user_id) AS user_id,
+             MIN(amount) AS amount
+      FROM wujie_credit_transactions
+      WHERE type = 'refund'
+        AND (task_id = $1 OR (COALESCE(task_id, '') = '' AND reference_id = $1))
+      HAVING COUNT(*) = 1
+    )
+    UPDATE cloud_tasks task
+       SET credit_status = 'refunded',
+           refunded_transaction_id = prior_refund.transaction_id,
+           updated_at = $2
+      FROM prior_refund, wujie_credits credit, wujie_credit_transactions charge
+     WHERE task.id = $1
+       AND task.credit_status = 'pending'
+       AND task.credit_cost > 0
+       AND task.status <> 'completed'
+       AND prior_refund.user_id = task.user_id
+       AND prior_refund.amount = task.credit_cost
+       AND credit.user_id = task.user_id
+       AND charge.id = task.charged_transaction_id
+       AND charge.type = 'consume'
+       AND charge.user_id = task.user_id
+       AND charge.amount = -task.credit_cost
+       ${agentFence.condition}
+       AND ($3::text IS NULL OR (
+         task.status = 'processing' AND task.lease_owner = $3
+       ))
+    RETURNING task.user_id, task.credit_cost, credit.balance
+  `, [taskId, now, leaseOwner || null, ...agentFence.params]);
+  const row = result.rows[0] as Record<string, unknown> | undefined;
+  if (!row) return null;
+  return {
+    refunded: true,
+    creditCost: Number(row.credit_cost || 0),
+    balance: Number(row.balance || 0),
+    userId: String(row.user_id || '') || undefined,
   };
 }
 

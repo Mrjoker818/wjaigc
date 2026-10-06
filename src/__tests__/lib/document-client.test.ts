@@ -38,8 +38,126 @@ class FakeSocket {
   }
 }
 
+describe('pending ACK confirmation barrier', () => {
+  const cleanups: Array<() => void> = [];
+  afterEach(() => { while (cleanups.length) cleanups.pop()?.(); vi.useRealTimers(); vi.unstubAllGlobals(); });
+  function fixture(): { server: Y.Doc; socket: FakeSocket; session: ReturnType<typeof createCanvasDocumentSession>; store: PendingDocumentUpdateStore } {
+    const server = createCanvasDocument(); applyCanvasImagePatch(server, placement('p1', 10), 'seed');
+    const socket = new FakeSocket(); const frames = new Map<string, Uint8Array>(); let next = 0;
+    const store: PendingDocumentUpdateStore = {
+      load: () => [...frames].map(([id, bytes]) => ({ id, frame: bytes })),
+      append: bytes => { const id = `frame-${++next}`; frames.set(id, bytes); return id; },
+      remove: id => { frames.delete(id); },
+    };
+    const session = createCanvasDocumentSession(socket as unknown as WebSocket, undefined, store);
+    socket.receive(frame(0x11, 7, Y.encodeStateAsUpdate(server)));
+    cleanups.push(() => { session.disconnect(); server.destroy(); });
+    return { server, socket, session, store };
+  }
+  it('returns the current server sequence without making a frame when no updates await ACK', async () => {
+    const f = fixture(); expect(await f.session.waitForPendingUpdates()).toBe(7);
+    expect(f.socket.send).not.toHaveBeenCalled(); expect(f.store.load()).toHaveLength(0);
+  });
+  it('waits for every queued update rather than the first ACK or a local pending projection', async () => {
+    const f = fixture(); f.session.applyLocalChange({ placementId: 'p1', x: 11 }); f.session.applyLocalChange({ placementId: 'p1', x: 12 });
+    let done = false; const pending = f.session.waitForPendingUpdates().then(value => { done = true; return value; }, error => { done = true; throw error; });
+    const handled = pending.catch(() => undefined);
+    await Promise.resolve(); expect(done).toBe(false);
+    f.socket.receive(frame(0x12, 8)); await Promise.resolve(); expect(done).toBe(false); expect(f.store.load()).toHaveLength(1);
+    f.socket.receive(frame(0x12, 9)); expect(await pending).toBe(9); await handled;
+    expect(f.session.appliedServerSequence).toBe(7); expect(f.store.load()).toHaveLength(0);
+  });
+  it('does not mistake an accepted canonical snapshot for the ACK of its pending frame', async () => {
+    const f = fixture(); f.session.applyLocalChange({ placementId: 'p1', x: 99 });
+    let done = false; const pending = f.session.waitForPendingUpdates().then(value => { done = true; return value; }, error => { done = true; throw error; });
+    const handled = pending.catch(() => undefined);
+    Y.applyUpdate(f.server, (f.socket.send.mock.calls[0][0] as Uint8Array).subarray(1));
+    f.socket.receive(frame(0x11, 9, Y.encodeStateAsUpdate(f.server)));
+    await Promise.resolve(); expect(done).toBe(false); expect(f.session.status).toBe('pending');
+    f.socket.receive(frame(0x12, 9)); expect(await pending).toBe(9); await handled;
+  });
+  it('ignores malformed ACK bytes and preserves the queued update until a valid ACK', async () => {
+    const f = fixture(); f.session.applyLocalChange({ placementId: 'p1', x: 99 });
+    let done = false; const pending = f.session.waitForPendingUpdates().then(value => { done = true; return value; }, error => { done = true; throw error; });
+    const handled = pending.catch(() => undefined);
+    f.socket.receive(new Uint8Array([0x12, 0]).buffer); await Promise.resolve(); expect(done).toBe(false);
+    expect(f.store.load()).toHaveLength(1); f.socket.receive(frame(0x12, 8)); expect(await pending).toBe(8); await handled;
+  });
+  it('times out only the waiter and lets a later wait confirm the original retained frame', async () => {
+    vi.useFakeTimers(); const f = fixture(); f.session.applyLocalChange({ placementId: 'p1', x: 99 });
+    let done = false; const pending = f.session.waitForPendingUpdates().then(value => ({ value }), error => { done = true; return { error: String(error.message) }; });
+    await vi.advanceTimersByTimeAsync(9999); expect(done).toBe(false);
+    await vi.advanceTimersByTimeAsync(1); expect(await pending).toEqual({ error: 'DOCUMENT_PENDING_CONFIRMATION_TIMEOUT' });
+    expect(f.store.load()).toHaveLength(1); expect(f.session.status).toBe('pending');
+    const retry = f.session.waitForPendingUpdates(); f.socket.receive(frame(0x12, 8)); expect(await retry).toBe(8);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+  it.each(['disconnect', 'drop', 'rejected', 'revoked'] as const)('rejects on %s rather than completing history and retains the durable frame', async kind => {
+    const f = fixture(); f.session.applyLocalChange({ placementId: 'p1', x: 99 });
+    const pending = f.session.waitForPendingUpdates().then(value => ({ value }), error => ({ error: String(error.message) }));
+    if (kind === 'disconnect') f.session.disconnect();
+    else if (kind === 'rejected') f.socket.drop(4400);
+    else if (kind === 'revoked') f.socket.drop(1008, 'document unavailable');
+    else f.socket.drop();
+    expect(await pending).toEqual({ error: 'DOCUMENT_PENDING_CONFIRMATION_UNAVAILABLE' });
+    expect(f.store.load()).toHaveLength(1);
+  });
+  it('settles concurrent waiters together and clears their timers', async () => {
+    vi.useFakeTimers(); const f = fixture(); f.session.applyLocalChange({ placementId: 'p1', x: 99 });
+    const a = f.session.waitForPendingUpdates().catch(() => -1), b = f.session.waitForPendingUpdates().catch(() => -1);
+    f.socket.receive(frame(0x12, 8)); expect(await Promise.all([a, b])).toEqual([8, 8]); expect(vi.getTimerCount()).toBe(0);
+  });
+  it('does not report successful confirmation when the state observer fails while ACK is published', async () => {
+    const server = createCanvasDocument(); applyCanvasImagePatch(server, placement('p1', 10), 'seed'); const socket = new FakeSocket(); let fail = false;
+    const session = createCanvasDocumentSession(socket as unknown as WebSocket, () => { if (fail) throw new Error('observer unavailable'); });
+    cleanups.push(() => { session.disconnect(); server.destroy(); }); socket.receive(frame(0x11, 7, Y.encodeStateAsUpdate(server)));
+    session.applyLocalChange({ placementId: 'p1', x: 99 }); const pending = session.waitForPendingUpdates().then(value => ({ value }), error => ({ error: String(error.message) }));
+    fail = true; socket.receive(frame(0x12, 8)); expect(await pending).toEqual({ error: 'DOCUMENT_PENDING_CONFIRMATION_UNAVAILABLE' });
+  });
+});
+
 describe('canvas document browser session', () => {
   afterEach(() => vi.unstubAllGlobals());
+
+  it('advances appliedServerSequence only for accepted canonical frames and preserves it across reconnect', () => {
+    const server = createCanvasDocument();
+    applyCanvasImagePatch(server, placement('p1', 10), 'seed');
+    const socket = new FakeSocket();
+    const session = createCanvasDocumentSession(socket as unknown as WebSocket);
+    expect(session.appliedServerSequence).toBe(-1);
+    socket.receive(frame(0x11, 1, Y.encodeStateAsUpdate(server)));
+    session.applyLocalChange({ placementId: 'p1', x: 91 });
+    socket.receive(frame(0x12, 20));
+    expect(session.appliedServerSequence).toBe(1);
+    socket.receive(frame(0x11, 4, Y.encodeStateAsUpdate(server)));
+    expect(session.appliedServerSequence).toBe(4);
+    socket.receive(frame(0x11, 3, Y.encodeStateAsUpdate(server)));
+    expect(session.appliedServerSequence).toBe(4);
+    socket.drop();
+    const next = new FakeSocket();
+    session.replaceSocket(next as unknown as WebSocket);
+    expect(session.appliedServerSequence).toBe(4);
+    next.receive(frame(0x11, 5, Y.encodeStateAsUpdate(server)));
+    expect(session.appliedServerSequence).toBe(5);
+    session.disconnect();
+    server.destroy();
+  });
+
+  it('publishes a remote projection only after its canonical sequence has been accepted', () => {
+    const server = createCanvasDocument();
+    applyCanvasImagePatch(server, placement('p1', 10), 'seed');
+    const socket = new FakeSocket();
+    const observations: Array<{ sequence: number; x: number }> = [];
+    const session = createCanvasDocumentSession(socket as unknown as WebSocket, (_status, images) => {
+      if (images.p1) observations.push({ sequence: session.appliedServerSequence, x: images.p1.x });
+    });
+    socket.receive(frame(0x11, 1, Y.encodeStateAsUpdate(server)));
+    observations.length = 0;
+    applyCanvasImagePatch(server, { placementId: 'p1', x: 100 }, 'remote');
+    socket.receive(frame(0x11, 2, Y.encodeStateAsUpdate(server)));
+    expect(observations).toEqual([{ sequence: 2, x: 100 }]);
+    session.disconnect(); server.destroy();
+  });
 
   it('destroys a permission-revoked session while retaining an exportable durable fork', () => {
     const values = new Map<string, string>();

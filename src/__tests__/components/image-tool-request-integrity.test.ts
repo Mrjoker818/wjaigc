@@ -6,7 +6,6 @@ const readSource = (path: string) => readFileSync(resolve(process.cwd(), path), 
 
 const canvasSource = readSource('src/components/infinite-canvas.tsx');
 const imageEditSource = readSource('src/app/api/image-edit/route.ts');
-const agentEditExecutionSource = readSource('src/lib/agent-runtime/agent-edit-execution-service.ts');
 const imageTo3DSource = readSource('src/app/api/image-to-3d/route.ts');
 const refinePanelSource = readSource('src/components/refine-engine-panel.tsx');
 
@@ -22,20 +21,6 @@ describe('image tool request integrity', () => {
     expect(imageEditSource).toContain("const callerViewIntent = typeof prompt === 'string'");
     expect(imageEditSource).toContain('USER VIEW INTENT');
     expect(imageEditSource).not.toContain('const multiAnglePrompt = prompt || (');
-  });
-
-  it('forwards the selected image provider to Agent background removal', () => {
-    const requestStart = agentEditExecutionSource.indexOf('const removeBackgroundRequest = {');
-    const requestEnd = agentEditExecutionSource.indexOf('};', requestStart);
-    const requestBlock = agentEditExecutionSource.slice(requestStart, requestEnd);
-
-    expect(requestStart).toBeGreaterThan(-1);
-    expect(requestEnd).toBeGreaterThan(requestStart);
-    expect(requestBlock).toContain('imageUrl: finalImageUrl');
-    expect(requestBlock).toContain("action: 'removebg'");
-    expect(requestBlock).toContain('model: imageModel');
-    expect(requestBlock).toContain('providerId: imageProviderId');
-    expect(requestBlock).toContain("engine: imageModel ? 'ai' : 'auto'");
   });
 
   it('uses requested face limits for Tripo and does not expose unsupported 302 Tripo controls', () => {

@@ -14,6 +14,7 @@
     "lint:build": "eslint . --quiet",
     "validate": "pnpm ts-check && pnpm lint:build",
     "test": "vitest run",
+    "test:ci": "node scripts/run-isolated-vitest.mjs",
     "test:watch": "vitest",
     "test:api": "vitest run src/__tests__/api",
     "test:http-api": "vitest run --config vitest.http.config.ts",
@@ -163,7 +164,8 @@
     "tailwindcss": "^4",
     "tsup": "^8.3.5",
     "typescript": "^5",
-    "vitest": "^3.2.4"
+    "vitest": "^3.2.4",
+    "yaml": "1.10.2"
   },
   "pnpm": {
     "overrides": {

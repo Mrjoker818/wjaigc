@@ -4,6 +4,7 @@ import sharp from 'sharp';
 import { evaluateRemoveBgOutput } from '@/lib/image-tools/remove-bg-quality';
 import { loadSafeImageInput, safeSharp } from '@/lib/safe-image-input';
 import type { ApiProvider } from '@/lib/universal-api-types';
+import { createImageEditProviderCall, type ImageEditProviderCallOptions } from '@/lib/image-edit-provider-boundary';
 
 const DEFAULT_ENDPOINT_PATH = '/v1.0/removebg';
 const DEFAULT_TIMEOUT_MS = 90_000;
@@ -27,6 +28,13 @@ export interface RemoveBgProviderOptions {
 export interface DedicatedRemoveBgResult {
   buffer: Buffer;
   mimeType: 'image/png' | 'image/webp';
+  directUrl?: string;
+}
+
+export interface DedicatedRemoveBgRequestOptions {
+  signal?: AbortSignal;
+  timeoutMs?: number;
+  execution?: ImageEditProviderCallOptions;
 }
 
 export class RemoveBgProviderError extends Error {
@@ -296,7 +304,7 @@ function joinEndpoint(baseUrl: string, endpointPath: string): string {
   return `${base}${endpointPath}`;
 }
 
-function providerHeaders(provider: ApiProvider, options: RemoveBgProviderOptions): Record<string, string> {
+function providerHeaders(provider: Pick<ApiProvider, 'apiKey'>, options: RemoveBgProviderOptions): Record<string, string> {
   return options.apiKeyHeader === 'Authorization'
     ? { Authorization: `Bearer ${provider.apiKey}` }
     : { 'X-Api-Key': provider.apiKey };
@@ -305,27 +313,44 @@ function providerHeaders(provider: ApiProvider, options: RemoveBgProviderOptions
 export async function submitDedicatedRemoveBg(
   provider: ApiProvider,
   sourceUrl: string,
-  requestOptions: { signal?: AbortSignal; timeoutMs?: number } = {},
+  requestOptions: DedicatedRemoveBgRequestOptions = {},
 ): Promise<DedicatedRemoveBgResult> {
-  if (!provider.isEnabled || !provider.apiKey.trim()) {
-    throw new RemoveBgProviderError('REMOVE_BG_PROVIDER_CONFIG_INVALID', 'RemoveBG provider is disabled or missing its API key');
-  }
+  const execution = requestOptions.execution;
+  const callerSignal = requestOptions.signal;
+  const timeoutMs = requestOptions.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  // Only the server-owned scalars and parsed settings survive source preparation.
+  const snapshot = { id: provider.id, isEnabled: provider.isEnabled, baseUrl: provider.baseUrl, apiKey: provider.apiKey,
+    selectedModel: provider.selectedModel || provider.selectedModels?.[0] };
   const options = parseRemoveBgProviderOptions(provider.advancedParams);
-  const source = await loadSafeImageInput(sourceUrl, {
-    maxBytes: MAX_SOURCE_BYTES,
-    maxPixels: options.maxInputMegapixels * 1_000_000,
-    signal: requestOptions.signal,
-  });
+  const call = createImageEditProviderCall(execution ? { ...execution, responseMaxBytes: MAX_RESPONSE_BYTES } : undefined,
+    snapshot.selectedModel ?? '', 'image');
+  let endpoint: string;
+  try {
+    if (execution && (execution.providerId !== snapshot.id || !snapshot.selectedModel?.trim())) {
+      throw new Error('Invalid RemoveBG execution identity');
+    }
+    if (!snapshot.isEnabled || !snapshot.apiKey.trim()) {
+      throw new RemoveBgProviderError('REMOVE_BG_PROVIDER_CONFIG_INVALID', 'RemoveBG provider is disabled or missing its API key');
+    }
+    endpoint = joinEndpoint(snapshot.baseUrl, options.endpointPath);
+    if (execution) new URL(endpoint);
+    callerSignal?.throwIfAborted();
+  } catch (error) { call.stop(error); throw error; }
   const controller = new AbortController();
-  const abortFromCaller = () => controller.abort(requestOptions.signal?.reason);
-  requestOptions.signal?.addEventListener('abort', abortFromCaller, { once: true });
+  const signal = callerSignal ? AbortSignal.any([callerSignal, controller.signal]) : controller.signal;
   const timeout = setTimeout(
     () => controller.abort(new RemoveBgProviderError('REMOVE_BG_PROVIDER_TIMEOUT', 'RemoveBG provider request timed out', true)),
-    requestOptions.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+    timeoutMs,
   );
-
+  let rejected = false;
   try {
-    const headers = providerHeaders(provider, options);
+    const source = await loadSafeImageInput(sourceUrl, {
+      maxBytes: MAX_SOURCE_BYTES,
+      maxPixels: options.maxInputMegapixels * 1_000_000,
+      signal,
+    });
+    signal.throwIfAborted();
+    const headers = providerHeaders(snapshot, options);
     let body: BodyInit;
     if (options.requestProfile === 'removebg-multipart') {
       const form = new FormData();
@@ -340,36 +365,47 @@ export async function submitDedicatedRemoveBg(
       headers['Content-Type'] = 'application/json';
       const encoded = `data:${source.mimeType};base64,${source.buffer.toString('base64')}`;
       body = JSON.stringify({
-        model: provider.selectedModel || provider.selectedModels?.[0],
+        model: snapshot.selectedModel,
         image: options.imageInput === 'url' && /^https?:\/\//i.test(sourceUrl) ? sourceUrl : encoded,
         response_format: options.responseMode === 'webp' ? 'webp' : 'png',
       });
     }
-    const response = await fetch(joinEndpoint(provider.baseUrl, options.endpointPath), {
+    const response = await call.transport(endpoint, {
       method: 'POST',
       headers,
       body,
-      signal: controller.signal,
+      signal,
       redirect: 'error',
     });
+    signal.throwIfAborted();
     if (!response.ok) {
+      rejected = true;
       throw new RemoveBgProviderError(
         'REMOVE_BG_PROVIDER_REJECTED',
         `RemoveBG provider returned HTTP ${response.status}`,
         response.status === 408 || response.status === 429 || response.status >= 500,
       );
     }
-    return await decodeDedicatedRemoveBgResponse(response, source.buffer, options);
+    const result = await decodeDedicatedRemoveBgResponse(response, source.buffer, options);
+    signal.throwIfAborted();
+    if (!execution) return result;
+    const { persistAssetBytes } = await import('@/lib/asset-core/binary-persistence');
+    const file = await persistAssetBytes({ bytes: result.buffer,
+      filename: result.mimeType === 'image/webp' ? 'remove-bg.webp' : 'remove-bg.png', mimeType: result.mimeType, signal });
+    signal.throwIfAborted();
+    await call.acceptImage({ directUrl: file.url });
+    signal.throwIfAborted();
+    return { ...result, directUrl: file.url };
   } catch (error) {
+    if (!rejected || signal.aborted) call.stop(error);
     if (error instanceof RemoveBgProviderError) throw error;
-    if (controller.signal.aborted) {
-      const reason = controller.signal.reason;
+    if (signal.aborted) {
+      const reason = signal.reason;
       if (reason instanceof RemoveBgProviderError) throw reason;
       throw reason instanceof Error ? reason : new RemoveBgProviderError('REMOVE_BG_PROVIDER_ABORTED', 'RemoveBG provider request was cancelled');
     }
     throw new RemoveBgProviderError('REMOVE_BG_PROVIDER_FAILED', 'RemoveBG provider request failed', true, { cause: error });
   } finally {
     clearTimeout(timeout);
-    requestOptions.signal?.removeEventListener('abort', abortFromCaller);
   }
 }

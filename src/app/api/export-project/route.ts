@@ -4,7 +4,7 @@ import { join, relative } from 'path';
 import { Readable } from 'stream';
 import { pipeline } from 'stream/promises';
 import { createGzip } from 'zlib';
-import { spawn, execSync } from 'child_process';
+import { spawn, execFileSync, execSync } from 'child_process';
 import { requireAdminUser } from '@/lib/server-auth';
 
 const PROJECT_ROOT = process.env.COZE_WORKSPACE_PATH || '/workspace/projects';
@@ -136,10 +136,12 @@ async function createTarGz(scope: string): Promise<{ stream: Readable; fileCount
         'components.json', 'drizzle.config.ts', 'eslint.config.mjs',
         '.coze', '.gitignore', 'AGENTS.md', 'DESIGN.md',
       ];
-      for (const f of configFiles) {
-        if (existsSync(join(PROJECT_ROOT, f))) {
-          tarArgs.push(`./${f}`);
-        }
+      const probe = 'const fs=require("node:fs");const path=require("node:path");const root=process.argv[1];const names=JSON.parse(process.argv[2]);process.stdout.write(JSON.stringify(names.filter(name=>fs.existsSync(path.join(root,name)))));';
+      const existing = JSON.parse(execFileSync(process.execPath, [
+        '-e', probe, PROJECT_ROOT, JSON.stringify(configFiles),
+      ], { encoding: 'utf8', timeout: 5000, maxBuffer: 65536, windowsHide: true })) as string[];
+      for (const f of existing) {
+        tarArgs.push(`./${f}`);
       }
     }
   } else {

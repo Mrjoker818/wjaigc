@@ -77,6 +77,26 @@ async function graphCounts(query: QueryFn, actorUserId: string, projectId: strin
 }
 
 describe('legacy project copy-on-write migration', () => {
+  postgresIt('preserves original video dimensions for migration without collaboration opt-in', async () => {
+    await withIsolatedPostgres('legacy-video-default-dimensions', async ({ databaseUrl: isolatedUrl, query }) => {
+      migrate(isolatedUrl);
+      const actorUserId = randomUUID();
+      const projectId = randomUUID();
+      const legacy = fixture('v1-images-alias.json', actorUserId, projectId);
+      legacy.images = [{ id: 'legacy-video', url: '/api/serve-upload/uploads/original.mp4',
+        videoUrl: '/api/serve-upload/uploads/original.mp4', mediaType: 'video',
+        x: 10, y: 20, width: 320, height: 180, originalWidth: 1920, originalHeight: 1080,
+        rotation: 0, zIndex: 1, createdAt: 1700000000000 }];
+      await seedLegacyProject(query, actorUserId, legacy);
+      await migrateLegacyProjectOnWrite({ actorUserId, projectId });
+      const stored = await query('SELECT width,height FROM wujie_asset_versions WHERE owner_id=$1 AND project_id=$2',
+        [actorUserId, projectId]);
+      expect(stored.rows).toEqual([{ width: 1920, height: 1080 }]);
+      const source = await query('SELECT data_value FROM wujie_user_data WHERE user_id=$1', [actorUserId]);
+      expect(source.rows[0].data_value).toEqual([legacy]);
+    });
+  });
+
   postgresIt('creates no graph rows when a legacy project is only opened for reading', async () => {
     await withIsolatedPostgres('stage-2-legacy-read-only', async ({ databaseUrl: isolatedUrl, query }) => {
       migrate(isolatedUrl);

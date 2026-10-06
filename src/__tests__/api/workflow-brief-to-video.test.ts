@@ -24,7 +24,7 @@ const routeMocks = vi.hoisted(() => ({
   getCloudTaskForUser: vi.fn(async (..._args: unknown[]): Promise<unknown> => null),
   releaseCloudTaskLease: vi.fn(async () => true),
   renewCloudTaskLease: vi.fn(async () => true),
-  updateCloudTask: vi.fn(async () => undefined),
+  updateCloudTask: vi.fn(async () => true),
 }));
 const authMocks = vi.hoisted(() => ({
   getInternalRequestHeaders: vi.fn(async () => ({})),
@@ -67,7 +67,7 @@ beforeEach(() => {
   routeMocks.getCloudTaskForUser.mockResolvedValue(null);
   routeMocks.releaseCloudTaskLease.mockResolvedValue(true);
   routeMocks.renewCloudTaskLease.mockResolvedValue(true);
-  routeMocks.updateCloudTask.mockResolvedValue(undefined);
+  routeMocks.updateCloudTask.mockResolvedValue(true);
   authMocks.getInternalRequestHeaders.mockResolvedValue({});
 });
 

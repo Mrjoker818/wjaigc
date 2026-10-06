@@ -43,6 +43,7 @@ export interface LegacyMediaPersistenceResult {
 
 export interface VerifiedLegacyMedia {
   url: string;
+  storageKey?: string;
   mimeType: string;
   byteSize: number;
   width?: number;
@@ -61,6 +62,7 @@ export interface LegacyMigrationInput {
     input: LegacyMediaPersistenceInput,
   ) => Promise<LegacyMediaPersistenceResult>;
   verifiedMediaByImageId?: Readonly<Record<string, VerifiedLegacyMedia>>;
+  verifyManagedVideos?: boolean;
 }
 
 export interface LegacyImageMapping {
@@ -577,12 +579,13 @@ async function fileForImage(
   const mediaUrl = selectLegacyCanvasMediaUrl(image);
   if (!mediaUrl.startsWith('data:')) {
     const kind = inferAssetKind(image);
-    const isControlledImage = kind === 'image'
+    const isControlledImage = (kind === 'image' || (kind === 'video' && input.verifyManagedVideos === true))
       && (mediaUrl.startsWith('/api/serve-upload/') || mediaUrl.startsWith('/uploads/'));
     const supplied = input.verifiedMediaByImageId?.[image.id];
-    const verified = kind === 'image'
+    const verified = (kind === 'image' || (kind === 'video' && input.verifyManagedVideos === true))
       && supplied?.url === mediaUrl
-      && /^image\/(?:png|jpeg|webp|gif|avif|bmp)$/u.test(supplied.mimeType)
+      && (kind === 'video' ? /^video\/(?:mp4|webm|quicktime|x-m4v)$/u.test(supplied.mimeType)
+        : /^image\/(?:png|jpeg|webp|gif|avif|bmp)$/u.test(supplied.mimeType))
       && Number.isSafeInteger(supplied.byteSize)
       && supplied.byteSize > 0
       ? supplied
@@ -594,11 +597,15 @@ async function fileForImage(
       url: mediaUrl,
       availability,
       ...(image.sourceUrl ? { recoverySourceUrl: image.sourceUrl } : {}),
-      ...(image.originalWidth >= 0 ? { width: image.originalWidth } : {}),
-      ...(image.originalHeight >= 0 ? { height: image.originalHeight } : {}),
+      ...(!(kind === 'video' && input.verifyManagedVideos === true) && image.originalWidth >= 0
+        ? { width: image.originalWidth } : {}),
+      ...(!(kind === 'video' && input.verifyManagedVideos === true) && image.originalHeight >= 0
+        ? { height: image.originalHeight } : {}),
       ...(verified ? {
         mimeType: verified.mimeType,
         byteSize: verified.byteSize,
+        ...(kind === 'video' && input.verifyManagedVideos === true && verified.storageKey
+          ? { storageKey: verified.storageKey } : {}),
         ...(Number.isSafeInteger(verified.width) && (verified.width ?? 0) > 0
           ? { width: verified.width }
           : {}),
@@ -640,6 +647,7 @@ export async function prepareVerifiedLegacyProjectMedia(
     projectId: string;
     legacyImageId?: string;
     inspectManagedMedia: InspectManagedLegacyMedia;
+    verifyManagedVideos?: boolean;
   },
   database: Pick<Pool, 'query'> = getPool(),
 ): Promise<Record<string, VerifiedLegacyMedia>> {
@@ -671,14 +679,17 @@ export async function prepareVerifiedLegacyProjectMedia(
     if (input.legacyImageId && image.id !== input.legacyImageId) continue;
     if ((image.mediaAvailability ?? 'ready') !== 'ready') continue;
     const url = selectLegacyCanvasMediaUrl(image);
+    const kind = inferAssetKind(image);
+    if (kind === 'video' && hasCompleteManagedCanvasMapping(image)) continue;
     if (
-      inferAssetKind(image) !== 'image'
+      (kind !== 'image' && !(kind === 'video' && input.verifyManagedVideos === true))
       || (!url.startsWith('/api/serve-upload/') && !url.startsWith('/uploads/'))
     ) continue;
-    const inspected = await input.inspectManagedMedia({ url, kind: 'image' });
+    const inspected = await input.inspectManagedMedia({ url, kind: kind === 'video' ? 'video' : 'image' });
     if (
       inspected?.url !== url
-      || !/^image\/(?:png|jpeg|webp|gif|avif|bmp)$/u.test(inspected.mimeType)
+      || !(kind === 'video' ? /^video\/(?:mp4|webm|quicktime|x-m4v)$/u.test(inspected.mimeType)
+        : /^image\/(?:png|jpeg|webp|gif|avif|bmp)$/u.test(inspected.mimeType))
       || !Number.isSafeInteger(inspected.byteSize)
       || inspected.byteSize <= 0
     ) {
@@ -924,7 +935,6 @@ async function updateGraphForImage(
   image: CanvasImage,
   mapping: LegacyImageMapping,
 ): Promise<LegacyImageMapping | null> {
-  const file = await fileForImage(input, image, mapping);
   const metadata = JSON.stringify({ legacyImageId: image.id, legacyImage: image });
   const assetLock = await client.query<{
     id: string;
@@ -1001,6 +1011,13 @@ async function updateGraphForImage(
     ...(row.height === null ? {} : { height: row.height }),
     ...(row.recovery_source_url ? { recoverySourceUrl: row.recovery_source_url } : {}),
   };
+  const reusesVerifiedVideo = input.verifyManagedVideos === true && inferAssetKind(image) === 'video'
+    && image.assetId === mapping.assetId && image.assetVersionId === mapping.versionId
+    && image.placementId === mapping.placementId && currentFile.availability === 'ready'
+    && currentFile.url === selectLegacyCanvasMediaUrl(image);
+  // Complete mapped videos keep their server-authoritative file descriptor. The
+  // caller still verifies document asset access; changed sources need preflight.
+  const file = reusesVerifiedVideo ? currentFile : await fileForImage(input, image, mapping);
   const versionPlan = planCanvasAssetVersionUpdate({
     actorUserId: input.actorUserId,
     projectId: input.projectId,

@@ -177,7 +177,7 @@ describe('task result asset projection wiring', () => {
     const editRoute = source('src/app/api/edit/route.ts');
     const finishTask = editRoute.slice(
       editRoute.indexOf('const finishTask = async'),
-      editRoute.indexOf('try {', editRoute.indexOf('const finishTask = async')),
+      editRoute.indexOf('return true;', editRoute.indexOf('const finishTask = async')),
     );
     expect(finishTask).toContain('const safeResult = sanitizeEditTaskResult(result)');
     expect(finishTask).toContain('...safeResult');
@@ -312,16 +312,18 @@ describe('task result asset projection wiring', () => {
     expect(route).toContain("'/api/poll-3d-task'");
   });
 
-  it('projects only the winning completed agent transition and marks projection failures pending', () => {
+  it('projects a completed agent terminal through the shared idempotent projection boundary', () => {
     const persistence = source('src/lib/agent-task-persistence.ts');
-    expect(persistence).toContain('projectCompletedTaskToAssets');
-    expect(persistence).toMatch(/if\s*\(terminal\.transitioned\)[\s\S]*projectCompletedTaskToAssets/);
-    expect(persistence).toContain('recordTaskProjectionPending');
+    const sharedProjection = source('src/lib/cloud-task-persistence.ts');
+    expect(persistence).toContain("if (!terminal.transitioned && terminal.task.status !== 'completed')");
+    expect(persistence).toContain('await projectPersistedCompletedTask(taskId, terminal.task.userId)');
+    expect(sharedProjection).toContain("if (!task || task.status !== 'completed') return;");
+    expect(sharedProjection).toContain('await recordTaskProjectionPending(input)');
   });
 
   it('retries projection_pending tasks through the existing project recovery endpoint', () => {
     const route = source('src/app/api/tasks/recover/route.ts');
     expect(route).toContain("assetProjection?.status === 'projection_pending'");
-    expect(route).toContain('projectPersistedCompletedTask(task.id, user.id)');
+    expect(route).toContain('projectPersistedCompletedTask(task.id, userId)');
   });
 });

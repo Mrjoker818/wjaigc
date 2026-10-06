@@ -2,10 +2,8 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-const source = readFileSync(
-  resolve(process.cwd(), 'src/app/api/generate/route.ts'),
-  'utf8',
-);
+const source = ['src/app/api/generate/route.ts', 'src/lib/task-core/ordinary-generation-provider.ts']
+  .map(path => readFileSync(resolve(process.cwd(), path), 'utf8')).join('\n');
 
 describe('generate reference category strength contract', () => {
   it('accepts per-image per-category strengths before falling back to the legacy image-wide strengths', () => {

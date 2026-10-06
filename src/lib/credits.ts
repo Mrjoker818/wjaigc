@@ -11,7 +11,7 @@
 
 import { createHash } from 'node:crypto';
 
-import { dbGetCredits, dbAdjustCredits, dbInitCredits, dbRecordCreditTransaction } from './db-storage';
+import { dbGetCredits, dbInitCredits, ensureCoreTables } from './db-storage';
 export {
   CREDITS_TO_CNY, CNY_TO_CREDITS,
   IMAGE_MODEL_CREDITS, VIDEO_MODEL_CREDITS, CHAT_MODEL_CREDITS,
@@ -22,7 +22,7 @@ import {
   OTHER_OPERATION_CREDITS, CREDITS_TO_CNY,
 } from './credits-constants';
 import { loadCreditPricingConfig, resolveConfiguredCreditCost, resolveTokenPricingFromConfig } from './credit-pricing';
-import type { TokenCreditPricing } from './credit-pricing';
+import type { CreditPricingConfig, TokenCreditPricing } from './credit-pricing';
 
 export type TaskBillingTransactionKind = 'charge' | 'refund';
 
@@ -206,10 +206,11 @@ export function calculateCreditCost(
 export async function calculateConfiguredCreditCost(
   operation: CreditOperation | string,
   model?: string,
-  options?: { quality?: string; resolution?: string; durationSeconds?: number; providerId?: string },
+  options?: { quality?: string; resolution?: string; durationSeconds?: number; providerId?: string;
+    pricingConfig?: Readonly<CreditPricingConfig> },
 ): Promise<number> {
   if (!model) return calculateCreditCost(operation, model, options);
-  const config = await loadCreditPricingConfig();
+  const config = options?.pricingConfig || await loadCreditPricingConfig();
   if (operation === 'video_generate' || operation === 'video_extend') {
     const fallbackPerSecond = getVideoModelCreditsPerSecond(model);
     const perSecond = resolveConfiguredCreditCost(config, model, undefined, undefined, fallbackPerSecond, options?.providerId);
@@ -258,7 +259,7 @@ export async function resolveConfiguredTokenPricing(
 /**
  * Token 计费结算：请求前已按预估金额 preChargedCredits 预扣，
  * 请求完成后根据实际 usage 多退少补。
- * 结算失败不抛出异常（响应已产出，仅记录日志），返回实际成本。
+ * 结算失败不抛出异常（响应已产出，仅记录日志），返回保留的预扣金额。
  */
 export async function settleTokenCharge(
   userId: string,
@@ -294,11 +295,22 @@ export async function settleTokenCharge(
       }
     } else if (diff < 0) {
       // 实际成本低于预扣：返还差额
-      await refundCredits(
+      const result = await refundCredits(
         userId,
         -diff,
         `${description}（Token返还 ${usage.inputTokens}+${usage.outputTokens}）`
       );
+      if (!result.success) {
+        console.warn({
+          code: 'TOKEN_SETTLEMENT_REFUND_FAILED',
+          userId,
+          model,
+          providerId,
+          preChargedCredits,
+          refundAmount: -diff,
+        });
+        return preChargedCredits;
+      }
     }
   } catch (error) {
     console.error('[credits] Token settlement error:', error);
@@ -363,18 +375,31 @@ export async function consumeCredits(
     const opLabel = getOperationLabel(operation, model);
     const modelInfo = model ? ` [${model}]` : '';
 
-    // Atomic deduction: UPDATE ... WHERE balance >= cost
-    // This avoids race condition where concurrent requests both pass the balance check
+    // Keep the conditional deduction and its ledger entry in one statement.
+    // A failed INSERT rolls back the UPDATE, while the balance predicate still
+    // serializes concurrent deductions on the same user's row.
     const { execSql } = await import('@/lib/db-client');
     const now = Date.now();
+    const txId = 'ctx_' + now + '_' + Math.random().toString(36).substring(2, 10);
     const deductResult = await execSql(
-      `UPDATE wujie_credits 
-       SET balance = balance - $1, 
-           total_used = total_used + $2, 
-           updated_at = $3 
-       WHERE user_id = $4 AND balance >= $1 
-       RETURNING balance`,
-      [cost, cost, now, userId]
+      `WITH deducted AS (
+         UPDATE wujie_credits
+            SET balance = balance - $1,
+                total_used = total_used + $1,
+                updated_at = $2
+          WHERE user_id = $3 AND balance >= $1
+          RETURNING balance
+       ), logged AS (
+         INSERT INTO wujie_credit_transactions
+           (id, user_id, amount, type, balance_after, description, reference_id, created_at)
+         SELECT $4, $3, -$1, 'consume', deducted.balance, $5, $6, $2
+           FROM deducted
+         RETURNING balance_after
+       )
+       SELECT balance_after AS balance FROM logged`,
+      [cost, now, userId, txId,
+        description || `${opLabel}${modelInfo} 扣除 ${cost} 积分`,
+        `${operation}${modelInfo}`]
     );
 
     if (!deductResult || !deductResult.rows || deductResult.rows.length === 0) {
@@ -394,31 +419,6 @@ export async function consumeCredits(
     }
 
     const newBalance = Number(deductResult.rows[0].balance);
-
-    // Record the transaction in history — 使用事务保证一致性
-    try {
-      const { execSql: execSql2 } = await import('@/lib/db-client');
-      const txId = 'ctx_' + Date.now() + '_' + Math.random().toString(36).substring(2, 10);
-      // 尝试在同一事务中插入记录
-      await execSql2(
-        `INSERT INTO wujie_credit_transactions (id, user_id, amount, type, balance_after, description, reference_id, created_at)
-         VALUES ($1, $2, $3, 'consume', $4, $5, $6, $7)`,
-        [txId, userId, -cost, newBalance, description || `${opLabel}${modelInfo} 扣除 ${cost} 积分`, `${operation}${modelInfo}`, Date.now()]
-      );
-    } catch {
-      // 事务记录是非关键的，如果插入失败不影响扣费结果
-      try {
-        await dbRecordCreditTransaction(
-          userId,
-          -cost,
-          'consume',
-          newBalance,
-          description || `${opLabel}${modelInfo} 扣除 ${cost} 积分`,
-          `${operation}${modelInfo}`
-        );
-      } catch { /* history recording is non-critical */ }
-    }
-
     return { success: true, balance: newBalance, cost };
   } catch (e) {
     console.error('[credits] consumeCredits error:', e);
@@ -470,51 +470,45 @@ export async function refundCredits(
   reason: string,
   referenceId?: string
 ): Promise<{ success: boolean; balance: number }> {
-  if (amount <= 0) return { success: true, balance: 0 };
+  if (amount <= 0 && !referenceId) return { success: true, balance: 0 };
 
   try {
-    const { execSql } = await import('@/lib/db-client');
+    await ensureCoreTables();
+    const { execSql, getPool } = await import('@/lib/db-client');
+    const existing = referenceId
+      ? await findExistingTaskRefund(userId, amount, referenceId) : null;
+    if (existing) return existing;
+    if (amount <= 0) return { success: true, balance: 0 };
     const now = Date.now();
-    const refundTxId = 'ctx_' + now + '_' + Math.random().toString(36).substring(2, 10);
+    const refundTxId = (referenceId ? 'ctx_refund_' : 'ctx_') + now + '_'
+      + Math.random().toString(36).substring(2, 10);
 
-    // 事务保护：UPDATE balance + INSERT transaction record 在同一事务中
-    // 如果事务记录插入失败，余额更新也会回滚，保证数据一致性
-    const refundResult = await execSql(
-      `BEGIN;
-       UPDATE wujie_credits 
-       SET balance = balance + $1, 
-           total_used = GREATEST(total_used - $2, 0),
-           updated_at = $3 
-       WHERE user_id = $4 
-       RETURNING balance;
-       INSERT INTO wujie_credit_transactions (id, user_id, amount, type, balance_after, description, reference_id, created_at)
-       VALUES ($7, $4, $1, 'refund', (SELECT balance FROM wujie_credits WHERE user_id = $4), $5, $6, $3);
-       COMMIT;`,
-      [amount, amount, now, userId, reason, referenceId || null, refundTxId]
-    );
+    // A single data-modifying CTE is atomic under PostgreSQL. Parameterized
+    // BEGIN; UPDATE; INSERT; COMMIT cannot be sent through pg's prepared query.
+    // If the transaction row fails, the balance update rolls back too.
+    const query =
+      `WITH updated AS (
+         UPDATE wujie_credits
+            SET balance = balance + $1,
+                total_used = GREATEST(total_used - $2, 0),
+                updated_at = $3
+          WHERE user_id = $4
+          RETURNING balance
+       ), logged AS (
+         INSERT INTO wujie_credit_transactions
+            (id, user_id, amount, type, balance_after, description, task_id, reference_id, created_at)
+          SELECT $7, $4, $1, 'refund', updated.balance, $5, $8, $6, $3
+            FROM updated
+          RETURNING balance_after
+        )
+        SELECT balance_after AS balance FROM logged`;
+    const params = [amount, amount, now, userId, reason, referenceId || null,
+      refundTxId, referenceId || ''];
+    const refundResult = referenceId
+      ? await getPool().query(query, params)
+      : await execSql(query, params);
 
     if (!refundResult || !refundResult.rows || refundResult.rows.length === 0) {
-      // 可能BEGIN/COMMIT不支持多语句，尝试单语句模式
-      try {
-        const singleResult = await execSql(
-          `UPDATE wujie_credits 
-           SET balance = balance + $1, 
-               total_used = GREATEST(total_used - $2, 0),
-               updated_at = $3 
-           WHERE user_id = $4 
-           RETURNING balance`,
-          [amount, amount, now, userId]
-        );
-        if (singleResult && singleResult.rows && singleResult.rows.length > 0) {
-          const newBalance = Number(singleResult.rows[0].balance);
-          // 记录退款事务（非关键，失败不影响退款）
-          try {
-            await dbRecordCreditTransaction(userId, amount, 'refund', newBalance, reason, referenceId);
-          } catch { /* non-critical */ }
-          return { success: true, balance: newBalance };
-        }
-      } catch { /* fallback also failed */ }
-      
       console.error('[credits] refundCredits: user not found or update failed', userId);
       return { success: false, balance: 0 };
     }
@@ -522,9 +516,40 @@ export async function refundCredits(
     const newBalance = Number(refundResult.rows[0].balance);
     return { success: true, balance: newBalance };
   } catch (e) {
+    if (referenceId && typeof e === 'object' && e !== null && 'code' in e
+      && e.code === '23505') {
+      try {
+        const existing = await findExistingTaskRefund(userId, amount, referenceId);
+        if (existing) return existing;
+      } catch (lookupError) {
+        console.error('[credits] refundCredits replay lookup error:', lookupError);
+      }
+    }
     console.error('[credits] refundCredits error:', e);
     return { success: false, balance: 0 };
   }
+}
+
+async function findExistingTaskRefund(
+  userId: string, amount: number, referenceId: string,
+): Promise<{ success: boolean; balance: number } | null> {
+  const { getPool } = await import('@/lib/db-client');
+  const result = await getPool().query(
+    `SELECT tx.user_id, tx.amount, credit.balance
+       FROM wujie_credit_transactions tx
+       JOIN wujie_credits credit ON credit.user_id = $2
+      WHERE tx.type = 'refund'
+        AND (tx.task_id = $1 OR (COALESCE(tx.task_id, '') = '' AND tx.reference_id = $1))`,
+    [referenceId, userId],
+  );
+  if (result.rows.length === 0) return null;
+  // Historical duplicate rows cannot prove an exactly-once refund, even when
+  // every row happens to share the same owner and amount.
+  if (result.rows.length !== 1) return { success: false, balance: 0 };
+  if (!result.rows.every(row => row.user_id === userId && Number(row.amount) === amount)) {
+    return { success: false, balance: 0 };
+  }
+  return { success: true, balance: Number(result.rows[0].balance) };
 }
 
 /**

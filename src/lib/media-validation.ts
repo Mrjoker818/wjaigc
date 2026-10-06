@@ -58,6 +58,10 @@ export function getSafeRasterImageExtension(mimeType: string): string | null {
   return RASTER_IMAGES[normalizeMimeType(mimeType)]?.extension ?? null;
 }
 
+export function inferSafeRasterImageType(buffer: Uint8Array): SafeMediaType | null {
+  return Object.values(RASTER_IMAGES).find(type => matchesImageSignature(type.mimeType, buffer)) ?? null;
+}
+
 export function getSafeImageTypeFromDataUrl(dataUrl: string): SafeMediaType | null {
   const match = dataUrl.match(/^data:([^;,]+);base64,/i);
   if (!match) return null;
@@ -88,4 +92,15 @@ export function isAllowedPublicMediaExtension(extension: string): boolean {
     '.mp4', '.webm', '.mov', '.m4v', '.avi', '.mkv',
     '.svg', '.glb', '.gltf', '.obj', '.mtl',
   ]).has(extension.toLowerCase());
+}
+
+/** Shared public-resource boundary; private data roots are never media sources. */
+export function isAllowedPublicMediaPath(pathParts: readonly string[]): boolean {
+  if (pathParts.length === 0 || pathParts.some(part => !/^[a-zA-Z0-9._-]+$/.test(part) || part.includes('..'))) {
+    return false;
+  }
+  if (['system', 'users'].includes(pathParts[0].toLowerCase())) return false;
+  const filename = pathParts[pathParts.length - 1];
+  const dotIndex = filename.lastIndexOf('.');
+  return dotIndex > 0 && isAllowedPublicMediaExtension(filename.slice(dotIndex));
 }

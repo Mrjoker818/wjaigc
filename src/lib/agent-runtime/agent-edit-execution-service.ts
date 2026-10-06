@@ -6,11 +6,10 @@ import type { ApiProvider } from '@/lib/universal-api-types';
 import { fetchWithV1Retry, getInternalApiUrl } from '@/lib/api-helpers';
 import { getInternalRequestHeaders, requireApiAuthOrReject } from '@/lib/api-auth';
 import { canAccessAgentTask } from '@/lib/agent-task-access';
-import { recordAgentTaskProgress, recordAgentTaskSubmitted, recordAgentTaskTerminal } from '@/lib/agent-task-persistence';
+import { recordAgentTaskProgress, recordAgentTaskTerminal } from '@/lib/agent-task-persistence';
 import {
   getCloudTaskForUser,
   getCloudTaskForUserByIdempotencyKey,
-  persistPrivateAgentExecutionDescriptor,
   type CloudTask,
 } from '@/lib/cloud-task-storage';
 import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile, tryChatCompletionsImageFallback, isChannelUnavailableError } from '@/lib/api-compatibility';
@@ -19,11 +18,9 @@ import { executeAgentLoop, getToolsForLLM, type AgentContext, type AgentResult }
 import { checkPromptSafety, logSafetyWarning } from '@/lib/prompt-safety';
 import { translateApiError } from '@/lib/api-error-translate';
 import { isTaskCancelled as isRegistryCancelled } from '@/lib/task-registry';
-import { getSessionUser, listManagedUsers } from '@/lib/server-auth';
+import { listManagedUsers } from '@/lib/server-auth';
 import {
   calculateConfiguredCreditCost,
-  consumeCredits,
-  refundCredits,
   InsufficientCreditsError,
 } from '@/lib/credits';
 import { validateApiInputs } from '@/lib/api-validator';
@@ -33,7 +30,9 @@ import {
   executeTaskEntryMigration,
   resolveTaskCoreMode,
 } from '@/lib/task-core/entry-migration';
+import { digestAgentEditAdmissionRequest } from '@/lib/agent-runtime/agent-edit-admission-identity';
 import { createBillableTask } from '@/lib/task-core/billing-service';
+import type { CanvasTaskPublicationInput } from '@/lib/collaboration/task-publication';
 import { IdempotencyConflictError } from '@/lib/task-core/idempotency';
 import type { DurableTaskStatus } from '@/lib/task-core/task-state';
 import { getRequestId } from '@/lib/request-id';
@@ -94,6 +93,58 @@ class AgentReplayStateUnavailableError extends Error {
     super('Agent replay state is temporarily unavailable', options);
     this.name = 'AgentReplayStateUnavailableError';
   }
+}
+
+interface ResolvedLegacyAgentModels {
+  chatProvider: ApiProvider;
+  chatModel: string;
+  imageProvider: ApiProvider;
+  imageModel: string;
+}
+
+function resolveConfiguredLegacyModel(provider: ApiProvider, requested?: string): string | undefined {
+  const configured = new Set([
+    ...(provider.selectedModels || []),
+    ...(provider.selectedModel ? [provider.selectedModel] : []),
+  ]);
+  const selected = requested || provider.selectedModels?.[0] || provider.selectedModel || '';
+  // Native model IDs may themselves contain :: or a resolution suffix.
+  if (configured.has(selected)) return selected;
+  const prefix = `${provider.id}::`;
+  const candidate = selected.startsWith(prefix) ? selected.slice(prefix.length) : selected;
+  if (configured.has(candidate)) return candidate;
+  const normalized = normalizeModelForApi(candidate, { providerModels: [...configured] }).apiModelName;
+  return configured.has(normalized) ? normalized : undefined;
+}
+
+// Legacy defaults remain supported, but selection must finish before authorization
+// and billing. The executor retains these snapshots, never resolving another pair.
+async function resolveLegacyAgentModels(
+  providerId: string | undefined,
+  model: string | undefined,
+  imageProviderId: string | undefined,
+  imageModel: string | undefined,
+): Promise<ResolvedLegacyAgentModels> {
+  let chatProvider = providerId?.trim() ? await findProviderById(providerId.trim()) : null;
+  const chatType = chatProvider?.modelType ?? chatProvider?.type;
+  if (!['chat', 'universal', 'general'].includes(chatType || '')) chatProvider = null;
+  const explicitChatProvider = chatProvider;
+  if (!chatProvider) chatProvider = await findProviderForFeature('chat');
+
+  let imageProvider = imageProviderId ? await findProviderById(imageProviderId) : null;
+  const explicitImageProvider = imageProvider;
+  if (!imageProvider && imageModel) imageProvider = await findProviderForModel(imageModel, 'image', imageProviderId);
+  if (!imageProvider) imageProvider = await findProviderForFeature('imageEdit');
+  if (!chatProvider?.baseUrl || !chatProvider.apiKey || !imageProvider?.baseUrl || !imageProvider.apiKey) {
+    throw new AgentModelRouteMismatchError();
+  }
+  const chatModel = resolveConfiguredLegacyModel(chatProvider, explicitChatProvider ? model : undefined);
+  const actualImageModel = resolveConfiguredLegacyModel(imageProvider, imageModel)
+    || (!explicitImageProvider ? resolveConfiguredLegacyModel(imageProvider) : undefined);
+  if (!chatModel || !actualImageModel) {
+    throw new AgentModelRouteMismatchError();
+  }
+  return { chatProvider, chatModel, imageProvider, imageModel: actualImageModel };
 }
 
 function digestAgentDownstreamRequest(input: unknown): string {
@@ -467,7 +518,7 @@ async function handleAgentEditRequest(
   const requestId = getRequestId(request);
   const taskCoreMode = resolveTaskCoreMode(process.env.WUJIE_TASK_CORE_MODE);
   const agentRuntimeMode = resolveAgentRuntimeMode(process.env.WUJIE_AGENT_RUNTIME_MODE);
-  let deductedCredits = 0;
+  let newlyAdmittedTask = false;
   let sessionUser: import('@/lib/user-types').User | null = null;
   let localTaskId: string | null = null;
   const selectedModel = '';
@@ -493,24 +544,26 @@ async function handleAgentEditRequest(
     }
 
     const {
-      image, prompt, maskDataUrl, maskVersionId, model, providerId, maxRounds, imagePrompt,
-      imageModel, imageProviderId, quality, aspectRatio, projectId, sessionId,
+      image, prompt, maskDataUrl, maskVersionId, model, providerId: requestedProviderId, maxRounds, imagePrompt,
+      imageModel, imageProviderId: requestedImageProviderId, quality, aspectRatio, projectId, sessionId,
       messageId, selectedEntityId, assetParentVersionIds, assetProjectionMode,
     } = body;
+    let providerId = requestedProviderId;
+    let imageProviderId = requestedImageProviderId;
 
     const idempotencyKey = request.headers.get('idempotency-key')?.trim() || requestId;
-    const requestDigest = createHash('sha256').update(JSON.stringify({
-      image, prompt, maskDataUrl, providerId, model, imageProviderId, imageModel,
-      imagePrompt, quality, aspectRatio, maxRounds,
-    })).digest('hex');
-    if (agentRuntimeMode === 'agent-v2' && !resumeContext) {
+    const requestDigest = digestAgentEditAdmissionRequest({ ...body });
+    sessionUser = authResult.user;
+    if (!resumeContext) {
       const existing = await getCloudTaskForUserByIdempotencyKey(authResult.userId, idempotencyKey);
-      if (existing && existing.requestDigest && existing.requestDigest !== requestDigest) {
+      if (existing && (existing.type !== 'agent-edit' || existing.userId !== authResult.userId
+        || (existing.projectId || '') !== (typeof projectId === 'string' ? projectId : '')
+        || existing.requestDigest !== requestDigest)) {
         throw new IdempotencyConflictError({
           userId: authResult.userId,
           idempotencyKey,
           requestDigest,
-          existingDigest: existing.requestDigest,
+          existingDigest: existing.requestDigest || 'legacy-unknown',
         });
       }
       if (existing && ['completed', 'failed', 'cancelled', 'timeout'].includes(existing.status)) {
@@ -535,32 +588,9 @@ async function handleAgentEditRequest(
       }
     }
 
-    // ★ 从 model 中提取纯 modelId（前端可能传 providerId::modelId 格式）
+    // Preserve raw IDs until the selected provider's configured models are known.
     let pureModel = model;
-    if (agentRuntimeMode !== 'agent-v2' && typeof model === 'string' && model.includes('::')) {
-      pureModel = model.split('::').pop()!;
-      console.log(`[agent-edit] Stripped provider prefix from model: "${model}" → "${pureModel}"`);
-    }
-    // ★ 规范化模型名（如 gpt-image-2-2k → gpt-image-2）
-    if (agentRuntimeMode !== 'agent-v2') {
-      const modelNorm = normalizeModelForApi(pureModel || '');
-      if (modelNorm.wasNormalized) {
-        console.log(`[agent-edit] Normalized model alias: "${pureModel}" → "${modelNorm.apiModelName}"`);
-        pureModel = modelNorm.apiModelName;
-      }
-    }
     let pureImageModel = imageModel;
-    if (agentRuntimeMode !== 'agent-v2' && typeof imageModel === 'string' && imageModel.includes('::')) {
-      pureImageModel = imageModel.split('::').pop()!;
-      console.log(`[agent-edit] Stripped provider prefix from imageModel: "${imageModel}" → "${pureImageModel}"`);
-    }
-    if (agentRuntimeMode !== 'agent-v2') {
-      const imgModelNorm = normalizeModelForApi(pureImageModel || '');
-      if (imgModelNorm.wasNormalized) {
-        console.log(`[agent-edit] Normalized imageModel alias: "${pureImageModel}" → "${imgModelNorm.apiModelName}"`);
-        pureImageModel = imgModelNorm.apiModelName;
-      }
-    }
 
     if (!image || !prompt) {
       return NextResponse.json({ success: false, error: '缺少图片或描述' }, { status: 400 });
@@ -575,14 +605,27 @@ async function handleAgentEditRequest(
       logSafetyWarning(prompt, safetyResult);
     }
 
-    sessionUser = resumeContext?.actor || await getSessionUser(request).catch(() => null);
+    sessionUser = resumeContext?.actor || (authResult.source === 'internal'
+      ? (await listManagedUsers()).find(user => user.id === authResult.userId) || null
+      : authResult.user);
+    if (!sessionUser || sessionUser.id !== authResult.userId || sessionUser.status !== 'active') {
+      return NextResponse.json({ success: false, error: '用户不存在或已停用' }, { status: 403 });
+    }
     const sourceVersionIds = Array.isArray(assetParentVersionIds)
       ? assetParentVersionIds.filter((value): value is string => typeof value === 'string')
       : [];
     const selectedEntityIds = typeof selectedEntityId === 'string' && selectedEntityId
       ? [selectedEntityId]
       : [];
-    const runtimeActor = sessionUser || authResult.user;
+    const runtimeActor = sessionUser;
+    let resolvedLegacyModels: ResolvedLegacyAgentModels | undefined;
+    if (!resumeContext && agentRuntimeMode !== 'agent-v2') {
+      resolvedLegacyModels = await resolveLegacyAgentModels(providerId, pureModel, imageProviderId, pureImageModel);
+      providerId = resolvedLegacyModels.chatProvider.id;
+      pureModel = resolvedLegacyModels.chatModel;
+      imageProviderId = resolvedLegacyModels.imageProvider.id;
+      pureImageModel = resolvedLegacyModels.imageModel;
+    }
     const buildRuntimeRequest = (stableIdempotencyKey: string): ModelAgentRunRequest => (
       requireModelAgentRunRequest(buildAgentEditRequest({
       projectId: typeof projectId === 'string' ? projectId : '',
@@ -591,40 +634,37 @@ async function handleAgentEditRequest(
       modelId: typeof pureModel === 'string' ? pureModel : '',
       prompt: typeof prompt === 'string' ? prompt : '',
       selectedEntityId: typeof selectedEntityId === 'string' ? selectedEntityId : '',
-      sourceVersionIds,
+      sourceVersionIds: typeof maskVersionId === 'string' && maskVersionId
+        ? [...sourceVersionIds, maskVersionId] : sourceVersionIds,
       visibleVersionIds: sourceVersionIds,
       conversationId: typeof sessionId === 'string' ? sessionId : undefined,
         idempotencyKey: stableIdempotencyKey,
       }))
     );
-    if (agentRuntimeMode === 'agent-v2') {
-      if (
-        typeof providerId !== 'string' || !providerId
-        || typeof pureModel !== 'string' || !pureModel
-        || typeof imageProviderId !== 'string' || !imageProviderId
-        || typeof pureImageModel !== 'string' || !pureImageModel
-      ) {
-        throw new AgentModelRouteMismatchError();
-      }
-      try {
-        const [chatModel, exactImageModel] = await Promise.all([
-          resolveTaskModel(providerId, pureModel, runtimeActor.id),
-          resolveTaskModel(imageProviderId, pureImageModel, runtimeActor.id),
-        ]);
-        if (chatModel.kind !== 'chat' || !['image', 'edit'].includes(exactImageModel.kind)) {
-          throw new Error('Model kind mismatch');
-        }
-      } catch {
-        throw new AgentModelRouteMismatchError();
-      }
+    if (
+      typeof providerId !== 'string' || !providerId
+      || typeof pureModel !== 'string' || !pureModel
+      || typeof imageProviderId !== 'string' || !imageProviderId
+      || typeof pureImageModel !== 'string' || !pureImageModel
+    ) {
+      throw new AgentModelRouteMismatchError();
     }
-    const plannedCreditCost = sessionUser
-      ? await calculateConfiguredCreditCost(
+    try {
+      const [chatModel, exactImageModel] = await Promise.all([
+        resolveTaskModel(providerId, pureModel, runtimeActor.id),
+        resolveTaskModel(imageProviderId, pureImageModel, runtimeActor.id),
+      ]);
+      if (chatModel.kind !== 'chat' || !['image', 'edit'].includes(exactImageModel.kind)) {
+        throw new Error('Model kind mismatch');
+      }
+    } catch {
+      throw new AgentModelRouteMismatchError();
+    }
+    const plannedCreditCost = await calculateConfiguredCreditCost(
           'image_retouch',
           typeof pureModel === 'string' ? pureModel : undefined,
           { providerId: typeof providerId === 'string' ? providerId : undefined },
-        )
-      : 0;
+        );
     type AgentAdmission = {
       taskId: string;
       creditCost: number;
@@ -632,64 +672,16 @@ async function handleAgentEditRequest(
       status: DurableTaskStatus;
       result?: Record<string, unknown>;
     };
-    const admitAgentTask = () => executeTaskEntryMigration<AgentAdmission>({
-      mode: taskCoreMode,
-      legacy: async () => {
-        let creditCost = 0;
-        if (sessionUser) {
-          const creditResult = await consumeCredits(
-            sessionUser.id,
-            'image_retouch',
-            undefined,
-            undefined,
-            model,
-          );
-          if (!creditResult.success) {
-            throw new InsufficientCreditsError(
-              sessionUser.id,
-              plannedCreditCost,
-              creditResult.balance || 0,
-            );
-          }
-          creditCost = creditResult.cost;
-          deductedCredits = creditCost;
-        }
-        const taskId = `agent-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-        const created = await recordAgentTaskSubmitted({
-          taskId,
-          userId: authResult.userId,
-          projectId: typeof projectId === 'string' ? projectId : undefined,
-          sessionId: typeof sessionId === 'string' ? sessionId : undefined,
-          messageId: typeof messageId === 'string' ? messageId : undefined,
-          providerId: typeof providerId === 'string' ? providerId : undefined,
-          model: typeof pureModel === 'string' ? pureModel : undefined,
-          label: 'Agent processing',
-          creditCost,
-          creditStatus: creditCost > 0 ? 'pending' : 'not-applicable',
-          submissionPayload: {
-            assetParentVersionIds: Array.isArray(assetParentVersionIds) ? assetParentVersionIds : [],
-            assetProjectionMode: assetProjectionMode === 'revision' ? 'revision' : 'derived',
-          },
-          taskEntryAudit: createTaskEntryAudit({
-            entry: 'agent',
-            mode: taskCoreMode,
-            requestId,
-            requestedProviderId: typeof providerId === 'string' ? providerId : undefined,
-            requestedModelId: typeof model === 'string' ? model : undefined,
-            actualProviderId: typeof providerId === 'string' ? providerId : undefined,
-            actualModelId: typeof pureModel === 'string' ? pureModel : undefined,
-            startedAt: startTime,
-            creditCost,
-            creditStatus: creditCost > 0 ? 'pending' : 'not-applicable',
-          }),
-        });
-        if (!created) throw new Error('Agent task could not be created');
-        return { taskId, creditCost, reused: false, status: 'processing' };
-      },
-      coreV2: async () => {
+    let canvasPublication: CanvasTaskPublicationInput | undefined;
+    let descriptor: AgentEditExecutionDescriptorV1 | undefined = resumeContext?.descriptor;
+    const atomicAdmission = async (): Promise<AgentAdmission> => {
         const now = Date.now();
         const result = await createBillableTask({
-          userId: authResult.userId,
+          userId: runtimeActor.id,
+          ...(canvasPublication ? { canvasPublication } : {}),
+          ...(descriptor ? { agentExecutionDescriptor: {
+            descriptor, descriptorDigest: digestAgentEditExecutionDescriptor(descriptor),
+          } } : {}),
           idempotencyKey,
           requestDigest,
           creditCost: plannedCreditCost,
@@ -711,9 +703,9 @@ async function handleAgentEditRequest(
               },
               taskEntryAudit: createTaskEntryAudit({
                 entry: 'agent',
-                mode: 'core-v2',
+                mode: taskCoreMode,
                 requestId,
-                requestedProviderId: typeof providerId === 'string' ? providerId : undefined,
+                requestedProviderId: typeof requestedProviderId === 'string' ? requestedProviderId : undefined,
                 requestedModelId: typeof model === 'string' ? model : undefined,
                 actualProviderId: typeof providerId === 'string' ? providerId : undefined,
                 actualModelId: typeof pureModel === 'string' ? pureModel : undefined,
@@ -733,7 +725,11 @@ async function handleAgentEditRequest(
           status: result.task.status,
           result: result.task.result,
         };
-      },
+    };
+    const admitAgentTask = () => executeTaskEntryMigration<AgentAdmission>({
+      mode: taskCoreMode,
+      legacy: atomicAdmission,
+      coreV2: atomicAdmission,
       factsFromResult: value => ({
         providerId: typeof providerId === 'string' ? providerId : undefined,
         modelId: typeof pureModel === 'string' ? pureModel : undefined,
@@ -764,7 +760,7 @@ async function handleAgentEditRequest(
             : 'processing',
           result: resumeContext.task.result,
         } }
-      : agentRuntimeMode === 'agent-v2'
+      : agentRuntimeMode === 'agent-v2' || (typeof projectId === 'string' && projectId.length > 0)
       ? await admitAuthorizedAgentExecution({
           actor: runtimeActor,
           request: buildRuntimeRequest(idempotencyKey),
@@ -778,45 +774,43 @@ async function handleAgentEditRequest(
               || sourceVersionIds[0]
               || '';
             executionImage = canonicalImageUrl;
+            if (agentRuntimeMode === 'agent-v2') descriptor = createAgentEditExecutionDescriptorV1({
+              sourceVersionId: descriptorSourceVersionId,
+              ...(typeof maskVersionId === 'string' && maskVersionId ? { maskVersionId } : {}),
+              prompt: String(prompt),
+              ...(typeof imagePrompt === 'string' && imagePrompt ? { imagePrompt } : {}),
+              providerId: String(providerId),
+              modelId: String(pureModel),
+              imageProviderId: String(imageProviderId),
+              imageModelId: String(pureImageModel),
+              maxRounds: Math.min(Math.max(Math.trunc(Number(maxRounds) || 5), 1), MAX_AGENT_EDIT_ROUNDS),
+              ...(typeof quality === 'string' && quality ? { quality } : {}),
+              ...(typeof aspectRatio === 'string' && aspectRatio ? { aspectRatio } : {}),
+            });
+            const access = authorizedContext.projectAccess;
+            if (access?.kind === 'document') {
+              const admittedRequest = buildRuntimeRequest(idempotencyKey);
+              if (admittedRequest.workspace === 'canvas'
+                && (admittedRequest.workspaceId === admittedRequest.projectId
+                  || admittedRequest.workspaceId === `canvas:${admittedRequest.projectId}`)) {
+                canvasPublication = { access, workspace: 'canvas', workspaceId: admittedRequest.workspaceId,
+                  intent: { parentVersionIds: sourceVersionIds,
+                    projectionMode: assetProjectionMode === 'revision' ? 'revision' : 'derived',
+                    placement: { action: 'append', selectedEntityIds } } };
+              }
+            }
             return admitAgentTask();
           },
         })
       : await admitAgentTask();
     const taskId = admission.value.taskId;
     localTaskId = taskId;
-    deductedCredits = admission.value.creditCost;
+    newlyAdmittedTask = !admission.value.reused && !resumeContext;
     let agentEditContinuation:
       | { kind: 'agent-edit'; version: 1; descriptorDigest: string }
       | undefined;
-    if (agentRuntimeMode === 'agent-v2') {
-      const descriptor = resumeContext?.descriptor || createAgentEditExecutionDescriptorV1({
-        sourceVersionId: descriptorSourceVersionId,
-        ...(typeof maskVersionId === 'string' && maskVersionId ? { maskVersionId } : {}),
-        prompt: String(prompt),
-        ...(typeof imagePrompt === 'string' && imagePrompt ? { imagePrompt } : {}),
-        providerId: String(providerId),
-        modelId: String(pureModel),
-        imageProviderId: String(imageProviderId),
-        imageModelId: String(pureImageModel),
-        maxRounds: Math.min(Math.max(Math.trunc(Number(maxRounds) || 5), 1), MAX_AGENT_EDIT_ROUNDS),
-        ...(typeof quality === 'string' && quality ? { quality } : {}),
-        ...(typeof aspectRatio === 'string' && aspectRatio ? { aspectRatio } : {}),
-      });
+    if (agentRuntimeMode === 'agent-v2' && descriptor) {
       const descriptorDigest = digestAgentEditExecutionDescriptor(descriptor);
-      if (!resumeContext) {
-        const persisted = await persistPrivateAgentExecutionDescriptor({
-          taskId,
-          userId: authResult.userId,
-          descriptor: { ...descriptor },
-          descriptorDigest,
-        });
-        if (!persisted.persisted) throw new IdempotencyConflictError({
-          userId: authResult.userId,
-          idempotencyKey,
-          requestDigest: descriptorDigest,
-          existingDigest: 'agent-execution-descriptor-conflict',
-        });
-      }
       agentEditContinuation = {
         kind: 'agent-edit', version: 1, descriptorDigest,
       };
@@ -916,10 +910,10 @@ async function handleAgentEditRequest(
           return t === 'chat' || t === 'universal' || t === 'general';
         };
 
-        let chatProvider: ApiProvider | null = null;
-        let chatModel = '';
+        let chatProvider: ApiProvider | null = resolvedLegacyModels?.chatProvider || null;
+        let chatModel = resolvedLegacyModels?.chatModel || '';
 
-        if (typeof providerId === 'string' && providerId.trim()) {
+        if (!resolvedLegacyModels && typeof providerId === 'string' && providerId.trim()) {
           chatProvider = await findProviderById(providerId.trim());
           if (chatProvider && !isChatType(chatProvider)) {
             console.warn(`[agent-edit] Provider ${providerId} is not a chat-type provider, rejecting`);
@@ -927,7 +921,7 @@ async function handleAgentEditRequest(
           }
         }
 
-        if (chatProvider) {
+        if (!resolvedLegacyModels && chatProvider) {
           if (pureModel) {
             // 前端指定模型时，必须精确匹配该提供商的授权模型，禁止静默降级
             const authorized = new Set<string>([
@@ -950,26 +944,6 @@ async function handleAgentEditRequest(
             }
           } else {
             chatModel = chatProvider.selectedModels?.[0] || '';
-          }
-        }
-
-        // 未指定 providerId 或指定提供商不可用 → 兼容旧调用，回退到功能查找
-        if (!chatProvider && agentRuntimeMode !== 'agent-v2') {
-          chatProvider = await findProviderForFeature('chat');
-          if (!chatProvider || isCancelled()) {
-            if (!chatProvider) {
-              await recordAgentTaskTerminal(taskId, {
-                status: 'failed', error: 'No chat model is configured for Agent execution',
-              });
-              localTaskStore.set(taskId, {
-                userId: authResult.userId,
-                status: 'failed', error: '未配置聊天模型，请在管理员面板添加 LLM 模型', progress: 100, label: '失败', createdAt: Date.now(),
-              });
-            }
-            return;
-          }
-          if (!chatModel) {
-            chatModel = chatProvider.selectedModels?.[0] || pureModel || 'gpt-4o';
           }
         }
 
@@ -1187,6 +1161,7 @@ async function handleAgentEditRequest(
                 stepContext.recordAccepted,
                 stepContext.beginSubmission,
                 operationSignal,
+                resolvedLegacyModels,
               ), {
                 reconcile: async providerTaskId => ({
                   success: true,
@@ -1257,9 +1232,9 @@ async function handleAgentEditRequest(
               const removeBackgroundRequest = {
                 imageUrl: finalImageUrl,
                 action: 'removebg',
-                model: imageModel,
+                model: pureImageModel,
                 providerId: imageProviderId,
-                engine: imageModel ? 'ai' : 'auto',
+                engine: pureImageModel ? 'ai' : 'auto',
               };
               const pollRemoveBackground = async (providerTaskId: string) => ({
                 success: true as const,
@@ -1669,7 +1644,7 @@ async function handleAgentEditRequest(
         error: err.message,
       }, { status: err.status });
     }
-    if (localTaskId) {
+    if (localTaskId && newlyAdmittedTask) {
       try {
         await recordAgentTaskTerminal(localTaskId, {
           status: 'failed',
@@ -1678,10 +1653,6 @@ async function handleAgentEditRequest(
       } catch (settleError) {
         console.error('[agent-edit] Task settlement failed:', settleError);
       }
-    } else if (deductedCredits > 0 && sessionUser) {
-      try {
-        await refundCredits(sessionUser.id, deductedCredits, `Agent编排失败退款`);
-      } catch (refundErr) { console.error('[agent-edit] Refund failed:', refundErr); }
     }
     if (err instanceof InsufficientCreditsError || err instanceof IdempotencyConflictError) {
       return NextResponse.json({
@@ -1824,11 +1795,12 @@ async function performImageEdit(
   recordAccepted?: (providerTaskId: string) => Promise<void>,
   beginSubmission?: () => Promise<void>,
   signal?: AbortSignal,
+  resolvedLegacyModels?: ResolvedLegacyAgentModels,
 ): Promise<{ success: boolean; imageUrl?: string; error?: string }> {
   // 优先使用前端传递的图像模型和提供商，遵循用户在图像生成面板的选择
   console.log('[agent-edit] performImageEdit called, model:', imageModelFromFrontend, 'providerId:', imageProviderIdFromFrontend);
-  let imageProvider: ApiProvider | null = null;
-  if (imageProviderIdFromFrontend) {
+  let imageProvider: ApiProvider | null = resolvedLegacyModels?.imageProvider || null;
+  if (!resolvedLegacyModels && imageProviderIdFromFrontend) {
     imageProvider = await findProviderById(imageProviderIdFromFrontend);
     console.log('[agent-edit] findProviderById result:', imageProvider ? imageProvider.name : 'null');
   }
@@ -1848,12 +1820,15 @@ async function performImageEdit(
 
   const baseUrl = imageProvider.baseUrl?.replace(/\/+$/, '') || '';
   const apiKey = imageProvider.apiKey || '';
-  const exactImageModel = imageModelFromFrontend || imageProvider.selectedModels?.[0] || '';
-  let imageModel = strictProviderModel ? exactImageModel : stripProviderModelPrefix(exactImageModel);
-  const pImgNorm = strictProviderModel ? imageModel : normalizeModelForApi(imageModel);
-  if (typeof pImgNorm !== 'string' && pImgNorm.wasNormalized) {
-    console.log(`[agent-edit] Normalized performImageEdit model: "${imageModel}" → "${pImgNorm.apiModelName}"`);
-    imageModel = pImgNorm.apiModelName;
+  let imageModel = resolvedLegacyModels?.imageModel || '';
+  if (!resolvedLegacyModels) {
+    const exactImageModel = imageModelFromFrontend || imageProvider.selectedModels?.[0] || '';
+    imageModel = strictProviderModel ? exactImageModel : stripProviderModelPrefix(exactImageModel);
+    const pImgNorm = strictProviderModel ? imageModel : normalizeModelForApi(imageModel);
+    if (typeof pImgNorm !== 'string' && pImgNorm.wasNormalized) {
+      console.log(`[agent-edit] Normalized performImageEdit model: "${imageModel}" → "${pImgNorm.apiModelName}"`);
+      imageModel = pImgNorm.apiModelName;
+    }
   }
 
   if (!baseUrl || !apiKey || !imageModel) {

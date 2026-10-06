@@ -3,7 +3,10 @@ import 'server-only';
 import { isDeepStrictEqual } from 'node:util';
 
 import type { PoolClient } from 'pg';
-import * as Y from 'yjs';
+import type * as YTypes from 'yjs';
+// 服务端与原生协作入口统一加载 CJS；浏览器由构建配置统一解析。
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const Y: typeof YTypes = require('yjs');
 
 import { getPool } from '@/lib/db-client';
 import {
@@ -14,6 +17,8 @@ import {
 } from '@/lib/collaboration/canvas-document';
 import { assertDocumentEditor, assertDocumentProjectEnabled } from '@/lib/collaboration/document-access';
 import { assertProjectAnnotationAsset, assertProjectAssetVersion, assertProjectCanvasPlacement } from '@/lib/collaboration/document-assets';
+import { applyCanvasAssetCommand, captureDocumentPlacementRemovalSnapshot, type DocumentPlacementRemovalSnapshot, type CanvasAssetCommand } from './canvas-asset-command';
+import { assertPreparedDocumentAssets, type PreparedDocumentAssets } from './document-asset-validation';
 
 const MAX_INCOMING_UPDATE_BYTES = 1_048_576;
 const MAX_PERSISTED_UPDATE_BYTES = 4_194_304;
@@ -38,8 +43,15 @@ export interface DocumentUpdate {
   update: Uint8Array;
 }
 
+export interface DocumentUpdateInput {
+  actorId: string;
+  projectId: string;
+  bytes: Uint8Array;
+  expectedGrantGeneration?: string;
+}
+
 export interface LoadedDocument {
-  doc: Y.Doc;
+  doc: YTypes.Doc;
   sequence: number;
 }
 
@@ -146,7 +158,7 @@ async function readDocumentRow(client: Pick<PoolClient, 'query'>, projectId: str
   return result.rows[0];
 }
 
-async function hydrateDocument(client: Pick<PoolClient, 'query'>, projectId: string, row?: DocumentRow): Promise<Y.Doc> {
+async function hydrateDocument(client: Pick<PoolClient, 'query'>, projectId: string, row?: DocumentRow): Promise<YTypes.Doc> {
   const doc = createCanvasDocument();
   if (!row) return doc;
   if (row.snapshot_bytes.length > 0) Y.applyUpdate(doc, row.snapshot_bytes);
@@ -165,7 +177,7 @@ async function hydrateDocument(client: Pick<PoolClient, 'query'>, projectId: str
   return doc;
 }
 
-function canonicalizeCandidate(candidate: Y.Doc, projection: CanvasDocumentProjection): Uint8Array {
+function canonicalizeCandidate(candidate: YTypes.Doc, projection: CanvasDocumentProjection): Uint8Array {
   const canonical = Y.encodeStateAsUpdate(candidate);
   if (canonical.length > MAX_PERSISTED_UPDATE_BYTES) {
     throw new Error('Canvas document update exceeds persisted size limit');
@@ -186,7 +198,7 @@ function canonicalizeCandidate(candidate: Y.Doc, projection: CanvasDocumentProje
 }
 
 /** Apply the same validation to an initial project seed as to later writes. */
-export function encodeCanonicalDocumentSnapshot(doc: Y.Doc): {
+export function encodeCanonicalDocumentSnapshot(doc: YTypes.Doc): {
   bytes: Uint8Array;
   projection: CanvasDocumentProjection;
 } {
@@ -195,8 +207,8 @@ export function encodeCanonicalDocumentSnapshot(doc: Y.Doc): {
 }
 
 function deriveVerifiedIncrementalUpdate(
-  previous: Y.Doc,
-  candidate: Y.Doc,
+  previous: YTypes.Doc,
+  candidate: YTypes.Doc,
   canonical: Uint8Array,
   projection: CanvasDocumentProjection,
 ): Uint8Array {
@@ -241,147 +253,205 @@ export async function loadDocument(projectId: string): Promise<LoadedDocument> {
   }
 }
 
-export async function commitDocumentUpdate(input: {
-  actorId: string;
-  projectId: string;
-  bytes: Uint8Array;
-  expectedGrantGeneration?: string;
-}): Promise<DocumentUpdate> {
-  const { actorId, projectId, bytes } = input;
-  assertProjectId(projectId);
-  if (!(bytes instanceof Uint8Array) || bytes.length === 0 || bytes.length > MAX_INCOMING_UPDATE_BYTES) {
+function assertDocumentUpdateInput(input: DocumentUpdateInput): void {
+  assertProjectId(input.projectId);
+  if (!(input.bytes instanceof Uint8Array) || input.bytes.length === 0 || input.bytes.length > MAX_INCOMING_UPDATE_BYTES) {
     throw new DocumentUpdateRejectedError(new Error('Invalid canvas document update size'));
   }
+}
+
+/**
+ * Server-internal write using the caller's already-open transaction and client.
+ * Acquires the same project and authorization locks as the standalone wrapper.
+ * Does not open/end a transaction, acquire another connection, or release this one.
+ * The returned sequence/update is pending COMMIT, NOT a client ACK. The caller
+ * must commit all composed writes before acknowledging, or roll back on failure.
+ * pg_notify stays inside this transaction and becomes observable only on COMMIT.
+ */
+export async function commitDocumentUpdateInTransaction(
+  client: PoolClient,
+  input: DocumentUpdateInput,
+): Promise<DocumentUpdate> {
+  assertDocumentUpdateInput(input);
+  const { projectId, bytes } = input;
+  const { row, previous, ownerId } = await lockDocumentForWrite(client, input);
+  const candidate = createCanvasDocument();
+  Y.applyUpdate(candidate, Y.encodeStateAsUpdate(previous));
+  assertRawDocumentMutation(previous, candidate, bytes);
+  return persistDocumentCandidate(client, projectId, ownerId, row, previous, candidate);
+}
+
+async function lockDocumentForWrite(
+  client: PoolClient,
+  input: Pick<DocumentUpdateInput, 'actorId' | 'projectId' | 'expectedGrantGeneration'>,
+): Promise<{ row: DocumentRow | undefined; previous: YTypes.Doc; ownerId: string }> {
+  const { actorId, projectId } = input;
+  // This row lock serializes the first write as well as subsequent writes.
+  const project = await client.query(
+    'SELECT 1 FROM wujie_projects WHERE id = $1 FOR UPDATE', [projectId],
+  );
+  if (project.rowCount !== 1) throw new Error('Canvas document project not found');
+  const { ownerId } = await assertDocumentEditor(
+    actorId, projectId, client, input.expectedGrantGeneration,
+  );
+  await assertDocumentProjectEnabled(client, ownerId, projectId);
+  const row = await readDocumentRow(client, projectId, true);
+  if (row && row.owner_id !== ownerId) throw new Error('Canvas document owner mismatch');
+  const previous = await hydrateDocument(client, projectId, row);
+  return { row, previous, ownerId };
+}
+
+function assertRawDocumentMutation(previous: YTypes.Doc, candidate: YTypes.Doc, bytes: Uint8Array): void {
+  const existingVersions = new Set(previous.getMap('assetVersions').keys());
+  const existingTombstones = new Set(previous.getMap('tombstones').keys());
+  const touchedGroups = new Set<string>();
+  const touchedAnnotations = new Set<string>();
+  let touchedImmutableKey = false;
+  candidate.getMap('assetVersions').observe(event => {
+    for (const key of event.changes.keys.keys()) {
+      if (existingVersions.has(key)) touchedImmutableKey = true;
+    }
+  });
+  candidate.getMap('tombstones').observe(event => {
+    for (const key of event.changes.keys.keys()) {
+      if (existingTombstones.has(key)) touchedImmutableKey = true;
+    }
+  });
+  candidate.getMap('groupDefinitions').observe(event => {
+    for (const key of event.changes.keys.keys()) touchedGroups.add(key);
+  });
+  candidate.getMap('annotationRecords').observe(event => {
+    for (const key of event.changes.keys.keys()) touchedAnnotations.add(key);
+  });
+  try {
+    Y.applyUpdate(candidate, bytes);
+    if (touchedImmutableKey) {
+      throw new Error('Canvas document immutable placement history cannot be rewritten');
+    }
+    if ([...touchedGroups].some(id => candidate.getMap('groupTombstones').get(id) === true) ||
+        [...touchedAnnotations].some(id => candidate.getMap('annotationTombstones').get(id) === true)) {
+      throw new Error('Canvas deleted metadata record cannot be rewritten');
+    }
+  } catch (error) {
+    throw new DocumentUpdateRejectedError(error);
+  }
+}
+
+/** Caller-owned transaction; only an exact typed command and a genuine server
+ * preparation can reach this path. The caller must also update the graph and
+ * commit its idempotency result before ACK. Never accepts raw bytes or callbacks. */
+export async function commitDocumentAssetCommandInTransaction(
+  client: PoolClient,
+  input: { actorId: string; projectId: string; command: CanvasAssetCommand; placementId: string; prepared: PreparedDocumentAssets },
+): Promise<DocumentUpdate & { removeSnapshot?: DocumentPlacementRemovalSnapshot }> {
+  const { row, previous, ownerId } = await lockDocumentForWrite(client, input);
+  const removeSnapshot = input.command.action === 'remove'
+    ? captureDocumentPlacementRemovalSnapshot(readCanvasDocument(previous), input.projectId, input.command) : undefined;
+  const candidate = createCanvasDocument();
+  Y.applyUpdate(candidate, Y.encodeStateAsUpdate(previous));
+  applyCanvasAssetCommand(candidate, input.command, input.placementId);
+  const update = await persistDocumentCandidate(client, input.projectId, ownerId, row, previous, candidate, input.prepared);
+  return removeSnapshot ? { ...update, removeSnapshot } : update;
+}
+
+async function persistDocumentCandidate(
+  client: PoolClient, projectId: string, ownerId: string, row: DocumentRow | undefined,
+  previous: YTypes.Doc, candidate: YTypes.Doc, prepared?: PreparedDocumentAssets,
+): Promise<DocumentUpdate> {
+  const beforeProjection = readCanvasDocument(previous);
+  let projection: CanvasDocumentProjection;
+  try {
+    assertCanvasDocumentTransition(previous, candidate);
+    projection = readCanvasDocument(candidate);
+  } catch (error) { throw new DocumentUpdateRejectedError(error); }
+  if (prepared) await assertPreparedDocumentAssets(client, ownerId, projectId, projection, prepared);
+  for (const [annotationId, annotation] of Object.entries(projection.annotationRecords ?? {})) {
+    if (projection.annotationTombstones?.[annotationId] === true) continue;
+    if (annotation.projectId !== projectId) {
+      throw new Error('Canvas annotation project does not match document project');
+    }
+    for (const assetId of [annotation.maskAssetId, annotation.overlayAssetId]) {
+      if (assetId && !prepared) await assertProjectAnnotationAsset(ownerId, projectId, assetId, client);
+    }
+  }
+  for (const [placementId, placement] of Object.entries(projection.placements)) {
+    if (placement.deleted === true &&
+        beforeProjection.placements[placementId]?.assetVersionId === placement.assetVersionId) {
+      continue;
+    }
+    if (!prepared) await assertProjectAssetVersion(ownerId, projectId, placement.assetVersionId, client);
+    await assertProjectCanvasPlacement(ownerId, projectId, placementId, placement.assetVersionId, client);
+  }
+  let canonical: Uint8Array;
+  try {
+    canonical = canonicalizeCandidate(candidate, projection);
+  } catch (error) {
+    throw new DocumentUpdateRejectedError(error);
+  }
+  const oldCanonical = Y.encodeStateAsUpdate(previous);
+  const oldSequence = row ? sequenceNumber(row.sequence) : 0;
+  if (Buffer.from(canonical).equals(Buffer.from(oldCanonical))) {
+    return { sequence: oldSequence, update: canonical };
+  }
+  let incremental: Uint8Array;
+  try {
+    incremental = deriveVerifiedIncrementalUpdate(previous, candidate, canonical, projection);
+  } catch (error) {
+    throw new DocumentUpdateRejectedError(error);
+  }
+  const sequence = oldSequence + 1;
+  if (!Number.isSafeInteger(sequence)) throw new Error('Canvas document sequence exhausted');
+  if (!row) {
+    await client.query(
+      `INSERT INTO wujie_project_canvas_documents
+         (project_id, owner_id, sequence, projection)
+       VALUES ($1, $2, $3, $4::jsonb)`,
+      [projectId, ownerId, sequence, JSON.stringify(projection)],
+    );
+  } else {
+    await client.query(
+      `UPDATE wujie_project_canvas_documents
+          SET sequence = $2, projection = $3::jsonb, updated_at = now()
+        WHERE project_id = $1`,
+      [projectId, sequence, JSON.stringify(projection)],
+    );
+  }
+  await client.query(
+    `INSERT INTO wujie_project_canvas_updates
+       (project_id, owner_id, sequence, update_bytes)
+     VALUES ($1, $2, $3, $4)`,
+    [projectId, ownerId, sequence, Buffer.from(incremental)],
+  );
+  const snapshotSequence = row ? sequenceNumber(row.snapshot_sequence) : 0;
+  if (sequence - snapshotSequence >= RECOVERY_LOG_LIMIT) {
+    await client.query(
+      `UPDATE wujie_project_canvas_documents
+          SET snapshot_sequence = $2, snapshot_bytes = $3, updated_at = now()
+        WHERE project_id = $1`,
+      [projectId, sequence, Buffer.from(canonical)],
+    );
+  }
+  await client.query(
+    `DELETE FROM wujie_project_canvas_updates
+      WHERE project_id = $1 AND sequence <= $2`,
+    [projectId, Math.max(0, sequence - RECOVERY_LOG_LIMIT)],
+  );
+  await client.query("SELECT pg_notify('wujie_canvas_document_changed', $1)", [
+    JSON.stringify({ projectId, sequence }),
+  ]);
+  return { sequence, update: incremental };
+}
+
+/** Return a client-acknowledgeable update only after the owned transaction commits. */
+export async function commitDocumentUpdate(input: DocumentUpdateInput): Promise<DocumentUpdate> {
+  // Preserve input rejection before pool acquisition, including its error type.
+  assertDocumentUpdateInput(input);
   const client = await getPool().connect();
   try {
     await client.query('BEGIN');
-    // This row lock serializes the first write as well as subsequent writes.
-    const project = await client.query(
-      'SELECT 1 FROM wujie_projects WHERE id = $1 FOR UPDATE', [projectId],
-    );
-    if (project.rowCount !== 1) throw new Error('Canvas document project not found');
-    const { ownerId } = await assertDocumentEditor(
-      actorId, projectId, client, input.expectedGrantGeneration,
-    );
-    await assertDocumentProjectEnabled(client, ownerId, projectId);
-    const row = await readDocumentRow(client, projectId, true);
-    const previous = await hydrateDocument(client, projectId, row);
-    const candidate = createCanvasDocument();
-    Y.applyUpdate(candidate, Y.encodeStateAsUpdate(previous));
-    const existingVersions = new Set(previous.getMap('assetVersions').keys());
-    const existingTombstones = new Set(previous.getMap('tombstones').keys());
-    const touchedGroups = new Set<string>();
-    const touchedAnnotations = new Set<string>();
-    let touchedImmutableKey = false;
-    candidate.getMap('assetVersions').observe(event => {
-      for (const key of event.changes.keys.keys()) {
-        if (existingVersions.has(key)) touchedImmutableKey = true;
-      }
-    });
-    candidate.getMap('tombstones').observe(event => {
-      for (const key of event.changes.keys.keys()) {
-        if (existingTombstones.has(key)) touchedImmutableKey = true;
-      }
-    });
-    candidate.getMap('groupDefinitions').observe(event => {
-      for (const key of event.changes.keys.keys()) touchedGroups.add(key);
-    });
-    candidate.getMap('annotationRecords').observe(event => {
-      for (const key of event.changes.keys.keys()) touchedAnnotations.add(key);
-    });
-    const beforeProjection = readCanvasDocument(previous);
-    let projection: CanvasDocumentProjection;
-    try {
-      Y.applyUpdate(candidate, bytes);
-      if (touchedImmutableKey) {
-        throw new Error('Canvas document immutable placement history cannot be rewritten');
-      }
-      if ([...touchedGroups].some(id => candidate.getMap('groupTombstones').get(id) === true) ||
-          [...touchedAnnotations].some(id => candidate.getMap('annotationTombstones').get(id) === true)) {
-        throw new Error('Canvas deleted metadata record cannot be rewritten');
-      }
-      assertCanvasDocumentTransition(previous, candidate);
-      projection = readCanvasDocument(candidate);
-    } catch (error) {
-      throw new DocumentUpdateRejectedError(error);
-    }
-    for (const [annotationId, annotation] of Object.entries(projection.annotationRecords ?? {})) {
-      if (projection.annotationTombstones?.[annotationId] === true) continue;
-      if (annotation.projectId !== projectId) {
-        throw new Error('Canvas annotation project does not match document project');
-      }
-      for (const assetId of [annotation.maskAssetId, annotation.overlayAssetId]) {
-        if (assetId) await assertProjectAnnotationAsset(ownerId, projectId, assetId, client);
-      }
-    }
-    for (const [placementId, placement] of Object.entries(projection.placements)) {
-      if (placement.deleted === true &&
-          beforeProjection.placements[placementId]?.assetVersionId === placement.assetVersionId) {
-        continue;
-      }
-      await assertProjectAssetVersion(ownerId, projectId, placement.assetVersionId, client);
-      await assertProjectCanvasPlacement(ownerId, projectId, placementId, placement.assetVersionId, client);
-    }
-    let canonical: Uint8Array;
-    try {
-      canonical = canonicalizeCandidate(candidate, projection);
-    } catch (error) {
-      throw new DocumentUpdateRejectedError(error);
-    }
-    const oldCanonical = Y.encodeStateAsUpdate(previous);
-    const oldSequence = row ? sequenceNumber(row.sequence) : 0;
-    if (Buffer.from(canonical).equals(Buffer.from(oldCanonical))) {
-      await client.query('COMMIT');
-      return { sequence: oldSequence, update: canonical };
-    }
-    let incremental: Uint8Array;
-    try {
-      incremental = deriveVerifiedIncrementalUpdate(previous, candidate, canonical, projection);
-    } catch (error) {
-      throw new DocumentUpdateRejectedError(error);
-    }
-    const sequence = oldSequence + 1;
-    if (!Number.isSafeInteger(sequence)) throw new Error('Canvas document sequence exhausted');
-    if (!row) {
-      await client.query(
-        `INSERT INTO wujie_project_canvas_documents
-           (project_id, owner_id, sequence, projection)
-         VALUES ($1, $2, $3, $4::jsonb)`,
-        [projectId, ownerId, sequence, JSON.stringify(projection)],
-      );
-    } else {
-      await client.query(
-        `UPDATE wujie_project_canvas_documents
-            SET sequence = $2, projection = $3::jsonb, updated_at = now()
-          WHERE project_id = $1`,
-        [projectId, sequence, JSON.stringify(projection)],
-      );
-    }
-    await client.query(
-      `INSERT INTO wujie_project_canvas_updates
-         (project_id, owner_id, sequence, update_bytes)
-       VALUES ($1, $2, $3, $4)`,
-      [projectId, ownerId, sequence, Buffer.from(incremental)],
-    );
-    const snapshotSequence = row ? sequenceNumber(row.snapshot_sequence) : 0;
-    if (sequence - snapshotSequence >= RECOVERY_LOG_LIMIT) {
-      await client.query(
-        `UPDATE wujie_project_canvas_documents
-            SET snapshot_sequence = $2, snapshot_bytes = $3, updated_at = now()
-          WHERE project_id = $1`,
-        [projectId, sequence, Buffer.from(canonical)],
-      );
-    }
-    await client.query(
-      `DELETE FROM wujie_project_canvas_updates
-        WHERE project_id = $1 AND sequence <= $2`,
-      [projectId, Math.max(0, sequence - RECOVERY_LOG_LIMIT)],
-    );
-    await client.query("SELECT pg_notify('wujie_canvas_document_changed', $1)", [
-      JSON.stringify({ projectId, sequence }),
-    ]);
+    const update = await commitDocumentUpdateInTransaction(client, input);
     await client.query('COMMIT');
-    return { sequence, update: incremental };
+    return update;
   } catch (error) {
     await client.query('ROLLBACK').catch(() => undefined);
     throw error;

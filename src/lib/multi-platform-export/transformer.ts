@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import {
   detectSupportedImageMimeType,
   type SupportedImageMimeType,
-} from '@/lib/image-tools/file';
+} from '@/lib/image-tools/image-mime';
 import { withSafeSharp } from '@/lib/safe-image-input';
 import type { ExportFormat, MultiPlatformExportInput } from './types';
 import type { AuthorizedExportImageSource } from './source-reader';

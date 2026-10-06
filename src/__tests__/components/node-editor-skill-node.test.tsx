@@ -599,6 +599,77 @@ describe('NodeEditor workflow Skill node', () => {
     }
   });
 
+  it('shows the server model-binding rejection after a confirmed Skill quote', async () => {
+    const bindings = {
+      image: { providerId: 'provider-a', modelId: 'image-model' },
+      orchestrator: { providerId: 'provider-chat', modelId: 'chat-model' },
+    };
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === '/api/skills?surface=workflow') return new Response(JSON.stringify({ skills: [workflowSkill] }));
+      if (url === '/api/skill-runs/estimate') {
+        return new Response(JSON.stringify({ minimum: 62, maximum: 62, modelBindings: bindings }));
+      }
+      if (url === '/api/workflow/execute') {
+        return new Response(JSON.stringify({
+          code: 'WORKFLOW_MODEL_BINDING_UNAVAILABLE',
+          error: '工作流指定的模型或提供商不可用，请重新选择后重试',
+        }), { status: 422 });
+      }
+      return new Response('{}');
+    }));
+    vi.stubGlobal('matchMedia', vi.fn(() => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() })));
+    vi.stubGlobal('ResizeObserver', class { observe(): void {} unobserve(): void {} disconnect(): void {} });
+    const node = createWorkflowNode('ai-skill', 0, 0);
+    node.config = { ...node.config, skillId: workflowSkill.id, version: workflowSkill.version,
+      inputValues: { brief: '商品摄影' }, modelBindings: bindings };
+    render(<NodeEditor workflow={{ ...createEmptyWorkflow('Rejected Skill'), nodes: [node] }} projectId="project-a" canvasImages={[]} />);
+    fireEvent.mouseDown(screen.getByLabelText(node.label), { button: 0 });
+    fireEvent.mouseUp(screen.getByLabelText(node.label), { button: 0 });
+    await waitFor(() => expect(screen.getByRole('combobox', { name: 'Skill' }).textContent).toContain(workflowSkill.name));
+    fireEvent.click(screen.getByRole('button', { name: '执行工作流' }));
+    await screen.findByRole('dialog', { name: 'Skill 费用预估' });
+    fireEvent.click(screen.getByRole('button', { name: '确认执行' }));
+    expect(await screen.findByText('工作流指定的模型或提供商不可用，请重新选择后重试')).toBeTruthy();
+  });
+
+  it('does not show a late Skill start rejection after switching projects', async () => {
+    let rejectStart!: (response: Response) => void;
+    const pendingStart = new Promise<Response>(resolve => { rejectStart = resolve; });
+    let startRequested = false;
+    const bindings = {
+      image: { providerId: 'provider-a', modelId: 'image-model' },
+      orchestrator: { providerId: 'provider-chat', modelId: 'chat-model' },
+    };
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === '/api/skills?surface=workflow') return new Response(JSON.stringify({ skills: [workflowSkill] }));
+      if (url === '/api/skill-runs/estimate') {
+        return new Response(JSON.stringify({ minimum: 62, maximum: 62, modelBindings: bindings }));
+      }
+      if (url === '/api/workflow/execute') { startRequested = true; return pendingStart; }
+      return new Response('{}');
+    }));
+    vi.stubGlobal('matchMedia', vi.fn(() => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() })));
+    vi.stubGlobal('ResizeObserver', class { observe(): void {} unobserve(): void {} disconnect(): void {} });
+    const node = createWorkflowNode('ai-skill', 0, 0);
+    node.config = { ...node.config, skillId: workflowSkill.id, version: workflowSkill.version,
+      inputValues: { brief: '商品摄影' }, modelBindings: bindings };
+    const workflow = { ...createEmptyWorkflow('Late rejection'), nodes: [node] };
+    const view = render(<NodeEditor workflow={workflow} projectId="project-a" canvasImages={[]} />);
+    fireEvent.mouseDown(screen.getByLabelText(node.label), { button: 0 });
+    fireEvent.mouseUp(screen.getByLabelText(node.label), { button: 0 });
+    await waitFor(() => expect(screen.getByRole('combobox', { name: 'Skill' }).textContent).toContain(workflowSkill.name));
+    fireEvent.click(screen.getByRole('button', { name: '执行工作流' }));
+    await screen.findByRole('dialog', { name: 'Skill 费用预估' });
+    fireEvent.click(screen.getByRole('button', { name: '确认执行' }));
+    await waitFor(() => expect(startRequested).toBe(true));
+    view.rerender(<NodeEditor workflow={workflow} projectId="project-b" canvasImages={[]} />);
+    await act(async () => {
+      rejectStart(new Response(JSON.stringify({ error: '旧项目模型无权使用' }), { status: 422 }));
+      await pendingStart;
+    });
+    expect(screen.queryByText('旧项目模型无权使用')).toBeNull();
+  });
+
   it('limits cascade submission to the selected chain rather than disconnected nodes', async () => {
     const submissions: Array<Record<string, unknown>> = [];
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {

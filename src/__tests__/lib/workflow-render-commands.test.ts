@@ -32,6 +32,27 @@ function workflowFixture(): Workflow {
 }
 
 describe('workflow render commands', () => {
+  it('restores the mask input on an older saved edit node during initial load and hydration', () => {
+    const workflow = workflowFixture();
+    const edit = createWorkflowNode('ai-edit', 320, 20);
+    edit.ports = edit.ports.filter(port => port.id !== 'in-mask');
+    workflow.nodes.push(edit);
+
+    const initial = createWorkflowEditorState(workflow);
+    expect(initial.workflow.nodes.at(-1)?.ports.some(port => port.id === 'in-mask')).toBe(true);
+    expect(edit.ports.some(port => port.id === 'in-mask')).toBe(false);
+
+    const hydrated = reduceWorkflowEditorState(initial, {
+      kind: 'command',
+      command: { type: 'workflow.hydrate', workflow, transactionId: 'legacy-reload' },
+    });
+    expect(hydrated.workflow.nodes.at(-1)?.ports.some(port => port.id === 'in-mask')).toBe(true);
+
+    const external = reduceWorkflowEditorState(hydrated, { kind: 'system.update', workflow });
+    expect(external.workflow.nodes.at(-1)?.ports.some(port => port.id === 'in-mask')).toBe(true);
+    expect(external.history).toBe(hydrated.history);
+  });
+
   it('moves a drag transaction once for every selected node', () => {
     const workflow = workflowFixture();
     const moved = applyWorkflowCommand(workflow, {

@@ -49,6 +49,7 @@ interface ImageTaskSubmission {
   label?: string;
   persist?: boolean;
   idempotencyKey?: string;
+  requestDigest?: string;
   submissionPayload?: Record<string, unknown>;
   creditCost?: number;
   creditStatus?: CloudTaskCreditStatus;
@@ -183,6 +184,7 @@ async function persistTerminalTask(
 
 interface ProjectableTask {
   id: string;
+  type?: string;
   userId: string;
   projectId?: string;
   sessionId?: string;
@@ -243,7 +245,7 @@ async function recordProjectionPendingSafely(input: {
   actorUserId: string;
   taskId: string;
   reason: string;
-  retry: Omit<ProjectCompletedTaskInput, 'actorUserId' | 'taskId'>;
+  retry?: Omit<ProjectCompletedTaskInput, 'actorUserId' | 'taskId'>;
 }): Promise<void> {
   try {
     await recordTaskProjectionPending(input);
@@ -258,6 +260,13 @@ async function projectCompletedTask(task: ProjectableTask): Promise<void> {
   }
   const target = taskProjectionTarget(task);
   try {
+    if (task.type === 'edit') {
+      const { projectWorkflowEditTaskResult } = await import('@/lib/collaboration/workflow-edit-output');
+      const published = await projectWorkflowEditTaskResult(task.userId, task.id);
+      if (published) return;
+      const submission = task.result?.submissionPayload as Record<string, unknown> | undefined;
+      if (submission?.assetWorkspace === 'workflow') throw new Error('WORKFLOW_EDIT_INTENT_MISSING');
+    }
     const targetWorkspaceId = target.workspaceId
       || (target.workspace === 'canvas' ? task.projectId : `${target.workspace}:${task.projectId}`);
     await projectAgentResultToWorkspace({
@@ -290,8 +299,8 @@ async function reconcileCompletedProjection(
   terminal: TransitionTaskResult,
   urls: string[],
 ): Promise<void> {
-  if (terminal.transitioned) {
-    await projectCompletedTask(terminal.task);
+  if (terminal.task.status === 'completed') {
+    await projectPersistedCompletedTask(terminal.task.id, terminal.task.userId);
     return;
   }
   if (
@@ -316,9 +325,14 @@ export async function projectPersistedCompletedTask(
   taskId: string,
   actorUserId: string,
 ): Promise<void> {
-  const task = await getCloudTaskForUser(taskId, actorUserId);
-  if (!task || task.status !== 'completed') return;
-  await projectCompletedTask(task);
+  try {
+    const task = await getCloudTaskForUser(taskId, actorUserId);
+    if (!task || task.status !== 'completed') return;
+    await projectCompletedTask(task);
+  } catch (error) {
+    await recordProjectionPendingSafely({ actorUserId, taskId,
+      reason: error instanceof Error ? error.message : String(error) });
+  }
 }
 
 export async function recordImageTaskSubmitted(input: ImageTaskSubmission): Promise<boolean> {
@@ -357,6 +371,7 @@ export async function recordImageTaskSubmitted(input: ImageTaskSubmission): Prom
     creditStatus: input.deferCreditCharge ? 'not-applicable' : input.creditStatus,
     creditCost: input.deferCreditCharge ? 0 : input.creditCost,
     idempotencyKey: input.idempotencyKey,
+    requestDigest: input.requestDigest,
     createdAt: now,
     updatedAt: now,
   };
@@ -385,6 +400,14 @@ export async function recordImageTaskTerminal(
     ? await getCloudTaskById(taskId)
     : null;
   const currentResultLoaded = input.status === 'completed' && imageUrls.length > 0;
+  if (currentTask?.status === 'completed') {
+    // A repeated callback cannot introduce even a media read of its new URL.
+    // Keep the authoritative terminal transition/reconciliation contract.
+    const terminal = await persistTerminalTask(taskId, { status: 'completed',
+      currentResult: currentTask.result, currentResultLoaded: true, creditStatus: input.creditStatus });
+    await reconcileCompletedProjection(terminal, imageUrls);
+    return terminal;
+  }
   const submissionPayload = currentTask?.result?.submissionPayload as Record<string, unknown> | undefined;
   let alphaVerification = input.alphaVerification;
   if (!alphaVerification && submissionPayload?.background === 'transparent') {

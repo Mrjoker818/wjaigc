@@ -14,6 +14,8 @@ describe('canvas task projection wiring', () => {
     expect(workspace).toContain('applyCanvasTaskEventToProcessingPlaceholders');
     expect(workspace).toContain('createImageGenerationSession');
     expect(workspace).toContain('imageGenerationSession.submit');
+    expect(workspace).toContain('projectOrdinaryGenerationSlots(current, sessionSlots, currentProjectRef.current?.id, generationSessionSlotContextRef.current)');
+    expect(workspace).toContain('if (slot.outputGroup) continue;');
     expect(workspace).toContain("source: 'submit'");
     expect(workspace).toContain("source: 'poll'");
     expect(workspace).toContain("source: 'recovery'");

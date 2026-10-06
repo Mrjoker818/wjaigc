@@ -17,7 +17,7 @@ type ConsumeBridge = (input: {
     assetVersionId: string;
     placementId: string;
   }) => Promise<AssetReference>;
-  merge: (references: AssetReference[]) => void | Promise<void>;
+  merge: (references: AssetReference[]) => boolean | void | Promise<boolean | void>;
   remove: () => void;
 }) => Promise<{ status: 'waiting' | 'consumed'; references: AssetReference[] }>;
 
@@ -49,6 +49,99 @@ function managedPayload(): Record<string, unknown> {
 }
 
 describe('standalone chat Canvas bridge behavior', () => {
+  it.each([
+    ['permission denied', 403, { success: false }, []],
+    ['wrong version', 200, { success: true, placementId: 'doc-placement', assetVersionId: 'wrong', documentSequence: 7 }, []],
+    ['missing media readback', 200, { success: true, placementId: 'doc-placement', assetVersionId: 'owned-version', documentSequence: 7 }, []],
+  ])('keeps pending bridge data after document %s', async (_label, status, reply, images) => {
+    let bridgePresent = true;
+    await expect(simpleChatTypes.consumeSimpleChatCanvasBridge({
+      payload: managedPayload(), currentProjectId: 'canvas-a',
+      resolveReference: async () => ({ url: '/canonical.png', assetVersionId: 'owned-version', placementId: 'owned-placement' }),
+      merge: async references => {
+        await simpleChatTypes.attachSimpleChatCanvasDocumentReference({
+          projectId: 'canvas-a', reference: references[0], index: 0,
+          isCurrent: () => true, refreshMedia: async () => images,
+        }, async () => new Response(JSON.stringify(reply), { status }));
+      },
+      remove: () => { bridgePresent = false; },
+    })).rejects.toThrow();
+    expect(bridgePresent).toBe(true);
+  });
+
+  it('does not refresh another project after an in-flight document attach completes', async () => {
+    let current = true;
+    let refreshed = false;
+    await expect(simpleChatTypes.attachSimpleChatCanvasDocumentReference({
+      projectId: 'canvas-a', index: 0,
+      reference: { url: '/canonical.png', assetVersionId: 'owned-version', placementId: 'source-placement' },
+      isCurrent: () => current,
+      refreshMedia: async () => { refreshed = true; return []; },
+    }, async () => {
+      current = false;
+      return new Response(JSON.stringify({ success: true, placementId: 'doc-placement', assetVersionId: 'owned-version', documentSequence: 7 }));
+    })).rejects.toThrow('BRIDGE_CONSUMPTION_CANCELLED');
+    expect(refreshed).toBe(false);
+  });
+
+  it('replays an unchanged document attach with the same key and transform', async () => {
+    const requests: string[] = [];
+    const input = {
+      projectId: 'canvas-a', index: 0, isCurrent: () => true,
+      reference: { url: '/canonical.png', assetVersionId: 'owned-version', placementId: 'source-placement' },
+      refreshMedia: async () => [{ placementId: 'doc-placement', assetVersionId: 'owned-version' }],
+    };
+    const fetcher: typeof fetch = async (_url, init) => {
+      requests.push(String(init?.body));
+      return new Response(JSON.stringify({ success: true, placementId: 'doc-placement', assetVersionId: 'owned-version', documentSequence: 7 }));
+    };
+    await simpleChatTypes.attachSimpleChatCanvasDocumentReference(input, fetcher);
+    await simpleChatTypes.attachSimpleChatCanvasDocumentReference(input, fetcher);
+    expect(requests).toHaveLength(2);
+    expect(requests[0]).toBe(requests[1]);
+    expect(JSON.parse(requests[0]).idempotencyKey).toMatch(/^chat-bridge:[a-f0-9]{64}$/);
+  });
+
+  it('attaches the same version through the document command and requires authoritative readback', async () => {
+    const attach = (simpleChatTypes as unknown as { attachSimpleChatCanvasDocumentReference?: (
+      input: { projectId: string; reference: AssetReference; index: number;
+        isCurrent: () => boolean; refreshMedia: (input: { projectId: string; documentSequence: number }) => Promise<Array<{ placementId?: string; assetVersionId?: string }>> },
+      fetcher?: typeof fetch,
+    ) => Promise<void> }).attachSimpleChatCanvasDocumentReference;
+    expect(attach).toBeTypeOf('function');
+    if (!attach) return;
+    let request: Record<string, unknown> | undefined;
+    let readback = false;
+    await attach({
+      projectId: 'canvas-a', index: 0, isCurrent: () => true,
+      reference: { url: '/canonical.png', assetVersionId: 'owned-version', placementId: 'source-placement' },
+      refreshMedia: async input => {
+        expect(input).toEqual({ projectId: 'canvas-a', documentSequence: 7 });
+        readback = true;
+        return [{ placementId: 'document-placement', assetVersionId: 'owned-version' }];
+      },
+    }, async (url, init) => {
+      expect(url).toBe('/api/collaboration/document-assets');
+      request = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      return new Response(JSON.stringify({ success: true, placementId: 'document-placement', assetVersionId: 'owned-version', documentSequence: 7 }));
+    });
+    expect(request).toMatchObject({ projectId: 'canvas-a', command: { action: 'attach', assetVersionId: 'owned-version' } });
+    expect(readback).toBe(true);
+  });
+
+  it('retains the bridge when the canvas authority rejects a resolved merge', async () => {
+    const consume = consumeBridge()!;
+    let bridgePresent = true;
+    const result = await consume({
+      payload: managedPayload(), currentProjectId: 'canvas-a',
+      resolveReference: async () => ({ url: '/canonical.png', assetVersionId: 'owned-version', placementId: 'owned-placement' }),
+      merge: () => false,
+      remove: () => { bridgePresent = false; },
+    });
+    expect(bridgePresent).toBe(true);
+    expect(result.status).toBe('waiting');
+  });
+
   it('I5 waits for matching project hydration and preserves old project images during merge', async () => {
     const consume = consumeBridge();
     expect(consume).toBeTypeOf('function');

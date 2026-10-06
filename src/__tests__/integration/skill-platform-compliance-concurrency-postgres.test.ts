@@ -15,6 +15,117 @@ import type { SkillRunRequest } from '@/lib/skill-runtime/run-request';
 
 vi.mock('server-only', () => ({}));
 
+interface RetryProducer {
+  kind: 'start' | 'completion' | 'failure-record';
+  settled: boolean;
+  failed: boolean;
+  error?: unknown;
+  observation: Promise<void>;
+}
+
+interface RetryLifetimeScope {
+  projectionEntered: boolean;
+  gate: { promise: Promise<void>; release(): void };
+  producers: RetryProducer[];
+}
+
+// Observe the singleton's real asynchronous producers before it captures its
+// dependencies. All transport, SQL, results and original promises stay real.
+const retryLifetime = vi.hoisted(() => ({
+  scopes: new Map<string, RetryLifetimeScope>(),
+  observe(scope: RetryLifetimeScope, kind: RetryProducer['kind'], promise: Promise<unknown>): void {
+    const producer: RetryProducer = {
+      kind, settled: false, failed: false, observation: Promise.resolve(),
+    };
+    producer.observation = promise.then(
+      () => { producer.settled = true; },
+      error => { producer.settled = true; producer.failed = true; producer.error = error; },
+    );
+    scope.producers.push(producer);
+  },
+}));
+
+vi.mock('@/lib/agent-runtime/execution-dispatch', async importOriginal => {
+  const real = await importOriginal<typeof import('@/lib/agent-runtime/execution-dispatch')>();
+  return {
+    ...real,
+    async dispatchResumedAgentExecution(
+      ...args: Parameters<typeof real.dispatchResumedAgentExecution>
+    ): ReturnType<typeof real.dispatchResumedAgentExecution> {
+      const scope = retryLifetime.scopes.get(args[0].runId);
+      const start = real.dispatchResumedAgentExecution(...args);
+      if (scope) retryLifetime.observe(scope, 'start', start);
+      const result = await start;
+      if (scope && result.completion) retryLifetime.observe(scope, 'completion', result.completion);
+      return result;
+    },
+    recordResumedAgentExecutionCompletionFailure(
+      ...args: Parameters<typeof real.recordResumedAgentExecutionCompletionFailure>
+    ): ReturnType<typeof real.recordResumedAgentExecutionCompletionFailure> {
+      const result = real.recordResumedAgentExecutionCompletionFailure(...args);
+      const scope = retryLifetime.scopes.get(args[0].runId);
+      if (scope) retryLifetime.observe(scope, 'failure-record', result);
+      return result;
+    },
+  };
+});
+
+vi.mock('@/lib/cloud-task-persistence', async importOriginal => {
+  const real = await importOriginal<typeof import('@/lib/cloud-task-persistence')>();
+  return {
+    ...real,
+    async projectPersistedCompletedTask(
+      ...args: Parameters<typeof real.projectPersistedCompletedTask>
+    ): ReturnType<typeof real.projectPersistedCompletedTask> {
+      const scope = retryLifetime.scopes.get(args[0]);
+      if (scope) {
+        scope.projectionEntered = true;
+        await scope.gate.promise;
+      }
+      return real.projectPersistedCompletedTask(...args);
+    },
+  };
+});
+
+async function drainRetryProducers(scope: RetryLifetimeScope): Promise<void> {
+  for (;;) {
+    const count = scope.producers.length;
+    await Promise.allSettled(scope.producers.map(producer => producer.observation));
+    // A rejected completion can schedule a real failure-recorder in the
+    // runtime's catch chain; observe that chain before declaring it drained.
+    await new Promise<void>(resolveTurn => setImmediate(resolveTurn));
+    if (scope.producers.length === count && scope.producers.every(producer => producer.settled)) return;
+  }
+}
+
+async function withComplianceRetryLifetime(runId: string, body: () => Promise<void>): Promise<void> {
+  const scope: RetryLifetimeScope = {
+    projectionEntered: false, gate: createGate(), producers: [],
+  };
+  expect(retryLifetime.scopes.has(runId)).toBe(false);
+  retryLifetime.scopes.set(runId, scope);
+  const errors: unknown[] = [];
+  try {
+    await body();
+    await waitFor(async () => scope.projectionEntered, entered => entered);
+    expect(scope.producers.filter(producer => producer.kind === 'completion')).toHaveLength(1);
+    scope.gate.release();
+    await drainRetryProducers(scope);
+    expect(scope.producers.filter(producer => !producer.settled),
+      'The retry fixture must own all real background execution before returning to schema cleanup',
+    ).toHaveLength(0);
+  } catch (error) {
+    errors.push(error);
+  } finally {
+    scope.gate.release();
+    await drainRetryProducers(scope);
+    retryLifetime.scopes.delete(runId);
+    errors.push(...scope.producers.filter(producer => producer.failed).map(producer => producer.error));
+  }
+  if (errors.length === 1) throw errors[0];
+  if (errors.length > 1) throw new AggregateError(errors, 'Compliance retry body and background execution failed');
+}
+
 const postgresIt = process.env.POSTGRES_TEST_DATABASE_URL?.trim() ? it : it.skip;
 
 function migrate(databaseUrl: string): void {
@@ -832,32 +943,34 @@ describe('platform compliance accounting on isolated PostgreSQL', () => {
         });
         expect(failedReport).toBeDefined();
 
-        const retried = await skillService.retrySkillStep({
-          actorUserId: userId, runId: created.runId, stepId: paused.resumeFromStepId!,
-        });
-        expect(retried.accepted).toBe(true);
-        const completed = await waitFor(
-          () => skillService.getSkillRun({ actorUserId: userId, runId: created.runId }),
-          history => history.status === 'completed',
-        );
-        expect(completed.assetVersionIds).toHaveLength(3);
-        const after = await query<{ id: string; metadata: Record<string, unknown> }>(
-          `SELECT version.id, version.metadata FROM wujie_asset_versions version
-           JOIN wujie_assets asset ON asset.id = version.asset_id
-           WHERE asset.owner_id = $1 AND asset.kind = 'document' ORDER BY version.created_at, version.id`,
-          [userId],
-        );
-        expect(after.rows).toHaveLength(4);
-        expect(after.rows.map(row => row.id)).toEqual(expect.arrayContaining(before.rows.map(row => row.id)));
-        expect(provider.calls.filter(call => call.sourceVersionId === failedSource)).toHaveLength(2);
-        for (const source of seeded.scenario.sourceVersionIds.filter(value => value !== failedSource)) {
-          expect(provider.calls.filter(call => call.sourceVersionId === source)).toHaveLength(1);
-        }
-        const ledger = await query<{ type: string }>(
-          'SELECT type FROM wujie_credit_transactions WHERE task_id = $1 ORDER BY created_at, id',
-          [created.runId],
-        );
-        expect(ledger.rows).toEqual([{ type: 'consume' }]);
+        await withComplianceRetryLifetime(created.runId, async () => {
+          const retried = await skillService.retrySkillStep({
+            actorUserId: userId, runId: created.runId, stepId: paused.resumeFromStepId!,
+          });
+          expect(retried.accepted).toBe(true);
+          const completed = await waitFor(
+            () => skillService.getSkillRun({ actorUserId: userId, runId: created.runId }),
+            history => history.status === 'completed',
+          );
+          expect(completed.assetVersionIds).toHaveLength(3);
+          const after = await query<{ id: string; metadata: Record<string, unknown> }>(
+            `SELECT version.id, version.metadata FROM wujie_asset_versions version
+             JOIN wujie_assets asset ON asset.id = version.asset_id
+             WHERE asset.owner_id = $1 AND asset.kind = 'document' ORDER BY version.created_at, version.id`,
+            [userId],
+          );
+          expect(after.rows).toHaveLength(4);
+          expect(after.rows.map(row => row.id)).toEqual(expect.arrayContaining(before.rows.map(row => row.id)));
+          expect(provider.calls.filter(call => call.sourceVersionId === failedSource)).toHaveLength(2);
+          for (const source of seeded.scenario.sourceVersionIds.filter(value => value !== failedSource)) {
+            expect(provider.calls.filter(call => call.sourceVersionId === source)).toHaveLength(1);
+          }
+          const ledger = await query<{ type: string }>(
+            'SELECT type FROM wujie_credit_transactions WHERE task_id = $1 ORDER BY created_at, id',
+            [created.runId],
+          );
+          expect(ledger.rows).toEqual([{ type: 'consume' }]);
+          });
       } finally {
         await provider.close();
       }
@@ -907,22 +1020,24 @@ describe('platform compliance accounting on isolated PostgreSQL', () => {
         expect(provider.calls.filter(call => call.sourceVersionId === failedSource)).toHaveLength(1);
         await query('DROP TRIGGER reject_task10_report_before_insert ON wujie_asset_versions; DROP FUNCTION reject_task10_report()');
 
-        await skillService.retrySkillStep({
-          actorUserId: userId, runId: created.runId, stepId: paused.resumeFromStepId!,
-        });
-        const completed = await waitFor(
-          () => skillService.getSkillRun({ actorUserId: userId, runId: created.runId }),
-          history => history.status === 'completed',
-        );
-        expect(completed.assetVersionIds).toEqual(expect.arrayContaining(before.rows.map(row => row.id)));
-        expect(provider.calls.filter(call => call.sourceVersionId === failedSource)).toHaveLength(1);
-        const reports = await query<{ count: string }>(
-          `SELECT COUNT(*)::text AS count FROM wujie_asset_versions version
-           JOIN wujie_assets asset ON asset.id = version.asset_id
-           WHERE asset.owner_id = $1 AND asset.kind = 'document'`,
-          [userId],
-        );
-        expect(reports.rows[0]?.count).toBe('3');
+        await withComplianceRetryLifetime(created.runId, async () => {
+          await skillService.retrySkillStep({
+            actorUserId: userId, runId: created.runId, stepId: paused.resumeFromStepId!,
+          });
+          const completed = await waitFor(
+            () => skillService.getSkillRun({ actorUserId: userId, runId: created.runId }),
+            history => history.status === 'completed',
+          );
+          expect(completed.assetVersionIds).toEqual(expect.arrayContaining(before.rows.map(row => row.id)));
+          expect(provider.calls.filter(call => call.sourceVersionId === failedSource)).toHaveLength(1);
+          const reports = await query<{ count: string }>(
+            `SELECT COUNT(*)::text AS count FROM wujie_asset_versions version
+             JOIN wujie_assets asset ON asset.id = version.asset_id
+             WHERE asset.owner_id = $1 AND asset.kind = 'document'`,
+            [userId],
+          );
+          expect(reports.rows[0]?.count).toBe('3');
+          });
       } finally {
         await provider.close();
       }

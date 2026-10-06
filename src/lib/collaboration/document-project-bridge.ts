@@ -5,11 +5,11 @@ import { isDeepStrictEqual } from 'node:util';
 import type { PoolClient } from 'pg';
 
 import { migrateLegacyAnnotation } from '@/features/annotations/annotation-bundle';
-import { buildAnnotationSourceVersionId } from '@/features/annotations/annotation-source-version';
+import { buildAnnotationSourceVersionId, buildCanonicalAnnotationSourceVersionId } from '@/features/annotations/annotation-source-version';
 import type { LegacyCanvasAnnotation } from '@/features/annotations/annotation-types';
 import { lockAssetGraphWriteGate } from '@/lib/asset-core/storage';
 import { PROJECT_REVISION_DATA_KEY } from '@/lib/asset-core/canvas-project-sync';
-import { inspectManagedImageMetadata } from '@/lib/asset-core/image-result-metadata';
+import { assertDocumentEnableMediaUnchanged, inspectDocumentEnableMedia } from '@/lib/collaboration/document-enable-media';
 import { migrateLegacyProjectOnWriteInTransaction, prepareVerifiedLegacyProjectMedia, selectCanvasImagesForAssetGraph } from '@/lib/asset-core/legacy-migration';
 import { readProjectSnapshot } from '@/lib/asset-core/project-readers';
 import { applyCanvasImagePatch, createCanvasDocument, readCanvasDocument, type CanvasDocumentProjection } from '@/lib/collaboration/canvas-document';
@@ -67,7 +67,10 @@ function toDocumentCanvasImage(image: CanvasImage): CanvasImage {
     threeDTextureUrls: image.threeDTextureUrls,
     threeDModelInfo: image.threeDModelInfo,
     generatedFromImageId: image.generatedFromImageId,
-    annotationVersionId: image.annotationVersionId,
+    // Existing annotation records retain their semantic identity; do not silently migrate them.
+    // Newly created annotations bind the live canonical asset revision, not a read-time timestamp.
+    annotationVersionId: image.assetVersionId
+      ? buildCanonicalAnnotationSourceVersionId(image.id, image.assetVersionId) : image.annotationVersionId,
     annotationSourceImageId: image.annotationSourceImageId,
     annotationSourceVersionId: image.annotationSourceVersionId,
     annotationBundleId: image.annotationBundleId,
@@ -277,9 +280,8 @@ export async function enableCollaborativeProject(
   const verifiedMediaByImageId = await prepareVerifiedLegacyProjectMedia({
     actorUserId: ownerId,
     projectId,
-    inspectManagedMedia: async ({ url, kind }) => kind === 'image'
-      ? { url, ...await inspectManagedImageMetadata(url) }
-      : null,
+    inspectManagedMedia: inspectDocumentEnableMedia,
+    verifyManagedVideos: true,
   });
   const client = await getPool().connect();
   try {
@@ -336,6 +338,7 @@ export async function enableCollaborativeProject(
     const migration = await migrateLegacyProjectOnWriteInTransaction(client, {
       actorUserId: ownerId, projectId,
       verifiedMediaByImageId,
+      verifyManagedVideos: true,
     });
     const doc = createCanvasDocument();
     const placementByImageId = new Map<string, string>();
@@ -397,6 +400,7 @@ export async function enableCollaborativeProject(
         doc.getMap('annotationRecords').set(normalized.id, { ...normalized, sourceImageId });
       }
     }
+    await assertDocumentEnableMediaUnchanged(verifiedMediaByImageId);
     const { bytes, projection } = encodeCanonicalDocumentSnapshot(doc);
     await client.query(
       `INSERT INTO wujie_project_canvas_documents

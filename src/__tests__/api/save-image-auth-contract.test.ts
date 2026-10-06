@@ -6,7 +6,6 @@ const root = process.cwd();
 const routeFile = path.resolve(root, 'src/app/api/save-image/route.ts');
 const serverCallers = [
   'src/lib/persist-result-image.ts',
-  'src/lib/quality-enhance.ts',
   'src/lib/agent-runtime/agent-edit-execution-service.ts',
   'src/app/api/generate/route.ts',
   'src/app/api/brand-ecommerce/route.ts',
@@ -43,5 +42,11 @@ describe('save-image authentication contract', () => {
         /\/api\/save-image[\s\S]{0,400}headers:\s*\{\s*['\"]Content-Type['\"]:\s*['\"]application\/json['\"]\s*\}/,
       );
     }
+  });
+
+  it('persists quality enhancement output directly without a self-HTTP save-image call', () => {
+    const caller = readFileSync(path.resolve(root, 'src/lib/quality-enhance.ts'), 'utf8');
+    expect(caller).toContain('await persistAssetBytes({');
+    expect(caller).not.toContain('/api/save-image');
   });
 });

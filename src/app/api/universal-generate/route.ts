@@ -1,305 +1,117 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest, NextResponse, after } from 'next/server';
+import { randomUUID } from 'node:crypto';
+import { createBillableTask } from '@/lib/task-core/billing-service';
+import { getCloudTaskForUser, getCloudTaskForUserByIdempotencyKey, CanvasBatchCommitUnknownError } from '@/lib/cloud-task-storage';
+import { resolveTaskModelForUser } from '@/lib/task-core/model-catalog';
+import { CanvasTaskPublicationError } from '@/lib/collaboration/task-publication';
+import { calculateConfiguredCreditCost, InsufficientCreditsError } from '@/lib/credits';
+import { IdempotencyConflictError } from '@/lib/task-core/idempotency';
+import { parseCanvasUniversalPublication, canvasUniversalRequestDigest, readCanvasUniversalTask, validateCanvasUniversalSources,
+  validateCanvasUniversalReplay, isUniversalTerminal, CanvasUniversalAdmissionError } from '@/lib/collaboration/canvas-universal-generation-admission';
+import { executeUniversalGenerationTask, universalTaskResponse } from '@/lib/task-core/universal-generation-task';
 import { findProviderForModel, findProviderById, normalizeApiBaseUrl } from '@/lib/server-api-config';
-import { getSessionUser } from '@/lib/server-auth';
-import { fetchWithV1Retry } from '@/lib/api-helpers';
-import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile } from '@/lib/api-compatibility';
-import { checkPromptSafety, logSafetyWarning } from '@/lib/prompt-safety';
+import { requireApiAuthOrReject } from '@/lib/api-auth';
+import { authorizeGenerationProject, GenerationProjectAccessError } from '@/lib/collaboration/generation-project-access';
+import { resolveCompatProfile } from '@/lib/api-compatibility';
+import { checkPromptSafety } from '@/lib/prompt-safety';
 import { normalizeModelForApi } from '@/lib/model-capabilities';
-import { validateApiInputs } from '@/lib/api-validator';
 import {
   normalizeImageOutputRequestBody,
   UnsupportedTransparentBackgroundError,
 } from '@/lib/image-generation-output';
-import { verifyGeneratedImageAlphaSet } from '@/lib/generated-image-alpha';
+import { executePrivateUniversalGeneration, type UniversalGenerateRequest } from '@/lib/task-core/universal-generation-provider';
 
 // 通用API生成路由 - 支持第三方OpenAI兼容API的图像生成
 // 当用户使用非 APIMart 管理的第三方模型时，图像生成请求会被路由到这里
 export const maxDuration = 600; // 10分钟 - token link等API生图最久可达600s
 export const dynamic = 'force-dynamic';
 
-interface UniversalGenerateRequest {
-  prompt: string;
-  model: string;
-  apiKey?: string;
-  baseUrl?: string;
-  quality?: string;
-  aspectRatio?: string;
-  n?: number;
-  referenceImageUrl?: string;
-  userId?: string;
-  providerId?: string;
-  background?: string;
-  backgroundMode?: string;
-  output_format?: string;
-  outputFormat?: string;
-}
-
-async function getTransparentResultMetadata(
-  imageUrls: string[],
-  background: unknown,
-): Promise<Record<string, unknown>> {
-  if (background !== 'transparent') return {};
-  const alphaVerification = await verifyGeneratedImageAlphaSet(imageUrls);
-  if (!['opaque', 'invalid'].includes(alphaVerification.status)) {
-    return { alphaVerification };
-  }
-  return {
-    alphaVerification,
-    warning: {
-      code: 'TRANSPARENT_RESULT_NOT_ALPHA',
-      message: '模型未返回真实透明背景，原始结果已保留。可在图片工具栏中主动选择“移除背景”。',
-    },
-    nextAction: {
-      type: 'remove-background',
-      requiresConfirmation: true,
-      separatelyBilled: true,
-    },
-  };
-}
-
-export async function POST(request: NextRequest) {
+export async function POST(request: NextRequest): Promise<NextResponse> {
+  const authResult = await requireApiAuthOrReject(request);
+  if (authResult instanceof NextResponse) return authResult;
+  let canvasRequest = false;
+  let idempotencyKey: string | undefined;
   try {
     const body: UniversalGenerateRequest = await request.json();
-    // 输入校验
-    const _validationError = validateApiInputs(body as unknown as Record<string, unknown>, {
-        prompt: 'optionalPrompt',
-        imageUrl: 'optionalImageUrl'
-    });
-    if (_validationError) {
-      return NextResponse.json({ error: _validationError }, { status: 400 });
-    }
-
-    const {
-      prompt,
-      model,
-      apiKey: _clientApiKey,
-      baseUrl: _clientBaseUrl,
-      quality = 'standard',
-      aspectRatio = '1:1',
-      n = 1,
-      referenceImageUrl,
-      providerId,
-    } = body;
-
-    const sessionUser = await getSessionUser(request);
-
-    // Content safety check
-    const safetyResult = checkPromptSafety(prompt || '');
-    if (safetyResult.level === 'block') {
-      return NextResponse.json({ success: false, error: safetyResult.reason }, { status: 400 });
-    }
-    if (safetyResult.level === 'warning') {
-      logSafetyWarning(prompt, safetyResult);
-    }
-
-    const rawResolvedModel = model.includes('::') ? model.split('::').slice(1).join('::') : model;
-    const { apiModelName: resolvedModel } = normalizeModelForApi(rawResolvedModel);
-    if (resolvedModel !== rawResolvedModel) {
-      console.log(`[universal-generate] Model normalized: ${rawResolvedModel} → ${resolvedModel}`);
-    }
-    let normalizedBody: Record<string, unknown>;
-    try {
-      normalizedBody = normalizeImageOutputRequestBody(
-        body as unknown as Record<string, unknown>,
-        resolvedModel,
-      );
-    } catch (error) {
-      if (error instanceof UnsupportedTransparentBackgroundError) {
-        return NextResponse.json({
-          success: false,
-          code: 'TRANSPARENT_BACKGROUND_UNSUPPORTED',
-          error: error.message,
-          retryable: false,
-        }, { status: 400 });
-      }
-      throw error;
-    }
-    // 优先使用 providerId 精确匹配提供商
-    let provider = providerId ? await findProviderById(providerId) : null;
-    if (!provider) {
-      provider = await findProviderForModel(resolvedModel, 'image');
-    }
-    const apiKey = provider?.apiKey;
-    const baseUrl = normalizeApiBaseUrl(provider?.baseUrl || '');
-
-    if (!prompt || !resolvedModel || !apiKey || !baseUrl) {
-      return NextResponse.json({
-        success: false,
-        error: '缺少可用的后台图像模型配置',
-      }, { status: 400 });
-    }
-
-    // 解析兼容性配置
-    const profile = resolveCompatProfile(provider);
-
-    // 构建请求体 - 先构建原始请求，再用兼容性层调整
-    const rawBody: Record<string, unknown> = {
-      model: resolvedModel,
-      prompt,
-      size: aspectRatio,
-      n,
-      background: normalizedBody.background,
-      output_format: normalizedBody.output_format,
-    };
-    if (quality && quality !== 'standard') {
-      rawBody.quality = quality;
-    }
-    if (referenceImageUrl) {
-      rawBody.image_urls = [referenceImageUrl];
-    }
-
-    const { body: requestBody, endpoint } = adjustRequestForProfile(rawBody, profile, {
-      hasImage: !!referenceImageUrl,
-    });
-
-    console.log(`[Universal API] 请求: model=${resolvedModel}, baseUrl=${baseUrl}, endpoint=${endpoint}, profile=${profile.id}`);
-
-    // 1. 提交生成任务
-    const submitResponse = await fetchWithV1Retry(baseUrl, endpoint, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(requestBody),
-    });
-
-    const submitData = await submitResponse.json();
-
-    // 检查提交是否成功
-    if (submitData.error) {
-      const rawMsg = submitData.error.message || JSON.stringify(submitData.error);
-      // 清理常见 API 错误
-      let cleanMsg = rawMsg;
-      if (rawMsg.includes('ratio or price') || rawMsg.includes('not configured')) {
-        cleanMsg = '当前模型暂不可用，请切换其他模型或联系管理员配置';
-      } else if (rawMsg.includes('Insufficient balance') || rawMsg.includes('insufficient')) {
-        cleanMsg = 'API 余额不足，请联系管理员充值';
-      } else if (rawMsg.includes('Rate limit') || rawMsg.includes('rate_limit') || rawMsg.includes('Too many requests')) {
-        cleanMsg = '请求过于频繁，请稍后再试';
-      }
-      return NextResponse.json({
-        success: false,
-        error: cleanMsg,
-      }, { status: 400 });
-    }
-
-    // 使用兼容性层解析响应
-    const parsed = parseResponseForProfile(submitData as Record<string, unknown>, profile);
-
-    if (parsed.mode === 'direct' && parsed.directImageUrls.length > 0) {
-      // 直接模式：API 返回了图片数据
-      const images = parsed.directImageUrls.map((url: string, idx: number) => ({
-        id: `${resolvedModel}-${Date.now()}-${idx}`,
-        url,
-        prompt,
-        originalPrompt: prompt,
-        model: resolvedModel,
-      }));
-      const transparentResult = await getTransparentResultMetadata(
-        parsed.directImageUrls,
-        normalizedBody.background,
-      );
-      return NextResponse.json({ success: true, images, ...transparentResult });
-    }
-
-    // 异步任务模式
-    const taskId = parsed.taskIds.length > 0 ? parsed.taskIds[0] : undefined;
-
-    if (!taskId) {
-      return NextResponse.json({
-        success: false,
-        error: '未能获取任务ID或图片数据',
-        rawResponse: JSON.stringify(submitData).slice(0, 500),
-      }, { status: 400 });
-    }
-
-    // 2. 异步轮询任务状态
-    console.log(`[Universal API] 任务已提交: ${taskId}`);
-
-    const maxPolls = 200; // 兼容需要2分钟以上的慢速API
-    for (let i = 0; i < maxPolls; i++) {
-      const interval = i <= 2 ? 800 : i <= 5 ? 1000 : i < 10 ? 1500 : 2000;
-      await new Promise(resolve => setTimeout(resolve, interval));
-
-      try {
-        const statusResponse = await fetch(
-          `${baseUrl}/tasks/${taskId}?language=zh`,
-          { headers: { 'Authorization': `Bearer ${apiKey}` } }
-        );
-        const statusData = await statusResponse.json();
-
-        const taskInfo = statusData.data || statusData;
-        const status = taskInfo.status;
-
-        if (status === 'completed') {
-          const result = taskInfo.result || taskInfo;
-          const imagesList = result.images || [];
-
-          const images = imagesList.map((img: Record<string, unknown>, idx: number) => {
-            let url = '';
-            if (Array.isArray(img.url)) {
-              url = img.url[0] || '';
-            } else if (typeof img.url === 'string') {
-              url = img.url;
-            } else if (img.b64_json) {
-              url = `data:image/png;base64,${img.b64_json}`;
-            }
-
-            return {
-              id: `${resolvedModel}-${Date.now()}-${idx}`,
-              url,
-              prompt,
-              originalPrompt: prompt,
-              model: resolvedModel,
-            };
-          }).filter((img: { url: string }) => img.url);
-
-          if (images.length > 0) {
-            console.log(`[Universal API] 任务完成: ${taskId}, 图片数: ${images.length}`);
-            const transparentResult = await getTransparentResultMetadata(
-              images.map((image: { url: string }) => image.url),
-              normalizedBody.background,
-            );
-            return NextResponse.json({ success: true, images, ...transparentResult });
-          }
-
-          return NextResponse.json({
-            success: false,
-            error: '任务完成但未获取到图片URL',
-          }, { status: 500 });
-        }
-
-        if (status === 'failed') {
-          const rawMsg = taskInfo.error?.message || '任务执行失败';
-          // 清理常见 API 错误
-          let cleanMsg = rawMsg;
-          if (rawMsg.includes('ratio or price') || rawMsg.includes('not configured')) {
-            cleanMsg = '当前模型暂不可用，请切换其他模型或联系管理员配置';
-          } else if (rawMsg.includes('Insufficient balance') || rawMsg.includes('insufficient')) {
-            cleanMsg = 'API 余额不足，请联系管理员充值';
-          }
-          return NextResponse.json({
-            success: false,
-            error: cleanMsg,
-          }, { status: 500 });
-        }
-
-        // submitted/processing - 继续轮询
-        if (i % 5 === 0) {
-          console.log(`[Universal API] 轮询 #${i}: status=${status}`);
-        }
-      } catch (pollError) {
-        console.error(`[Universal API] 轮询错误:`, pollError);
+    const access = await authorizeGenerationProject({ actorUserId: authResult.userId, projectId: body.projectId });
+    canvasRequest = access.kind === 'document' && (body.assetScope === undefined || body.assetScope === 'canvas');
+    idempotencyKey = request.headers.get('Idempotency-Key') || randomUUID();
+    const identity = { type: 'universal-generate' as const, idempotencyKey, requestDigest: canvasUniversalRequestDigest(body) };
+    if (access.kind !== 'document' && request.headers.has('Idempotency-Key')) {
+      const previous = await getCloudTaskForUserByIdempotencyKey(authResult.userId, identity.idempotencyKey);
+      if (previous?.type === 'universal-generate') {
+        if (previous.requestDigest !== identity.requestDigest || previous.projectId !== body.projectId) throw new CanvasUniversalAdmissionError(409, 'IDEMPOTENCY_CONFLICT');
+        if (isUniversalTerminal(previous.status)) return NextResponse.json(universalTaskResponse(previous));
+        throw new CanvasUniversalAdmissionError(403, 'CANVAS_UNIVERSAL_SOURCE_FORBIDDEN');
       }
     }
-
-    return NextResponse.json({
-      success: false,
-      error: `${resolvedModel} 生成超时，请稍后重试`,
-    }, { status: 408 });
+    const existing = access.kind === 'document' ? await readCanvasUniversalTask({ access, workspace: 'canvas', workspaceId: access.projectId }, identity) : null;
+    if (existing && isUniversalTerminal(existing.status)) return NextResponse.json(universalTaskResponse(existing));
+    if (body.assetScope !== undefined && !['canvas', 'chat', 'workflow'].includes(String(body.assetScope))) {
+      throw new CanvasUniversalAdmissionError(400, 'CANVAS_UNIVERSAL_INVALID_SCOPE');
+    }
+    if (access.kind === 'document' && (body.assetScope === undefined || body.assetScope === 'canvas')) {
+      const publication = parseCanvasUniversalPublication(access, body);
+      if (existing) await validateCanvasUniversalReplay(publication, identity, existing.id);
+      const sourceUrls = await validateCanvasUniversalSources(publication, body, request.nextUrl.origin);
+      if (existing) {
+        const execute = async (): Promise<void> => executeUniversalGenerationTask({ taskId: existing.id, actorUserId: authResult.userId, origin: request.nextUrl.origin });
+        if (body.submitOnly === true) { try { after(execute); } catch { /* Durable task is recoverable by poll. */ } }
+        else await execute();
+        return NextResponse.json(universalTaskResponse((await getCloudTaskForUser(existing.id, authResult.userId))!));
+      }
+      const n = body.n === undefined ? 1 : body.n;
+      if (!Number.isSafeInteger(n) || n < 1) throw new CanvasUniversalAdmissionError(400, 'CANVAS_UNIVERSAL_INVALID_COUNT');
+      if (typeof body.model !== 'string' || !body.model || typeof body.prompt !== 'string' || !body.prompt.trim()
+        || checkPromptSafety(body.prompt).level === 'block') throw new CanvasUniversalAdmissionError(400, 'CANVAS_UNIVERSAL_INVALID');
+      const parts = body.model.split('::');
+      const hasProviderId = Object.hasOwn(body, 'providerId');
+      if ((hasProviderId && (typeof body.providerId !== 'string' || !body.providerId.trim() || body.providerId.trim() !== body.providerId))
+        || parts.length > 2 || parts.some(part => !part.trim() || part.trim() !== part)) {
+        throw new CanvasUniversalAdmissionError(400, 'CANVAS_UNIVERSAL_PROVIDER_INVALID');
+      }
+      const compositeProvider = parts.length === 2 ? parts[0] : undefined;
+      if (compositeProvider !== undefined && hasProviderId && compositeProvider !== body.providerId) throw new CanvasUniversalAdmissionError(400, 'CANVAS_UNIVERSAL_PROVIDER_INVALID');
+      const model = normalizeModelForApi(parts.at(-1)!).apiModelName;
+      const normalizedBody = normalizeImageOutputRequestBody(body, model);
+      const selectedProvider = hasProviderId ? body.providerId : compositeProvider;
+      const provider = selectedProvider !== undefined ? await findProviderById(selectedProvider) : await findProviderForModel(model, 'image');
+      if (!provider?.apiKey || !provider.isEnabled) throw new CanvasUniversalAdmissionError(400, 'CANVAS_UNIVERSAL_PROVIDER_INVALID');
+      try { await resolveTaskModelForUser(provider.id, model, authResult.user); }
+      catch { throw new CanvasUniversalAdmissionError(400, 'CANVAS_UNIVERSAL_MODEL_INVALID'); }
+      const cost = await calculateConfiguredCreditCost('image_generate', model, { providerId: provider.id, quality: body.quality });
+      if (!Number.isSafeInteger(cost * n) || cost * n < 0) throw new CanvasUniversalAdmissionError(400, 'CANVAS_UNIVERSAL_INVALID_COST');
+      const now = Date.now();
+      const admitted = await createBillableTask({ userId: authResult.userId, ...identity, creditCost: cost * n, canvasPublication: publication,
+        task: { id: `universal_${randomUUID()}`, type: 'universal-generate', status: 'processing', projectId: access.projectId,
+          providerId: provider.id, model, progress: 0, label: '生成图片', createdAt: now, updatedAt: now,
+          result: { universalGeneration: { version: 1, route: '/api/universal-generate', requestDigest: identity.requestDigest,
+            providerId: provider.id, publication, target: { baseUrl: normalizeApiBaseUrl(provider.baseUrl), profile: resolveCompatProfile(provider) },
+            request: { model, prompt: body.prompt, n, quality: body.quality, aspectRatio: body.aspectRatio,
+              referenceImageUrl: sourceUrls[0], background: normalizedBody.background, output_format: normalizedBody.output_format } } } } });
+      const task = await getCloudTaskForUser(admitted.task.id, authResult.userId);
+      if (!task) throw new CanvasUniversalAdmissionError(503, 'CANVAS_UNIVERSAL_UNAVAILABLE');
+      if (isUniversalTerminal(task.status)) return NextResponse.json(universalTaskResponse(task));
+      const execute = async (): Promise<void> => executeUniversalGenerationTask({ taskId: task.id, actorUserId: authResult.userId, origin: request.nextUrl.origin });
+      if (body.submitOnly === true) { try { after(execute); } catch { /* Durable task is recoverable by poll. */ } return NextResponse.json(universalTaskResponse(task)); }
+      await execute();
+      return NextResponse.json(universalTaskResponse((await getCloudTaskForUser(task.id, authResult.userId))!));
+    }
+    return await executePrivateUniversalGeneration(body);
 
   } catch (error: unknown) {
+    // The transaction may have committed even when its acknowledgement was lost.
+    // Expose only the request key, never an unconfirmed candidate task ID.
+    const recoveryIdentity = canvasRequest && idempotencyKey ? { idempotencyKey } : {};
+    if (error instanceof UnsupportedTransparentBackgroundError) return NextResponse.json({ success: false, code: 'TRANSPARENT_BACKGROUND_UNSUPPORTED', error: error.message, retryable: false }, { status: 400 });
+    if (error instanceof CanvasUniversalAdmissionError || error instanceof CanvasTaskPublicationError || error instanceof CanvasBatchCommitUnknownError || error instanceof IdempotencyConflictError || error instanceof InsufficientCreditsError) {
+      return NextResponse.json({ success: false, code: error.code, error: error.message, ...recoveryIdentity }, { status: error instanceof InsufficientCreditsError ? 402 : error.status });
+    }
+    if (error && typeof error === 'object' && 'code' in error && error.code === 'CANVAS_TASK_PUBLICATION_UNAVAILABLE') return NextResponse.json({ success: false, code: error.code, error: '画布生成暂不可用，请使用原请求标识重试', ...recoveryIdentity }, { status: 503 });
+    if (error instanceof GenerationProjectAccessError) {
+      return NextResponse.json({ success: false, code: error.code, error: error.message }, { status: error.status });
+    }
+    if (canvasRequest) return NextResponse.json({ success: false, code: 'CANVAS_UNIVERSAL_UNAVAILABLE', error: '画布生成暂不可用，请使用原请求标识重试', ...recoveryIdentity }, { status: 503 });
     const message = error instanceof Error ? error.message : 'Unknown error';
     console.error('[Universal API] 生成错误:', error);
     return NextResponse.json({

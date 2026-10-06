@@ -887,8 +887,12 @@ export async function POST(request: NextRequest) {
             if (authoritativeTaskId) {
               const workspaceId = `standalone-chat:${body.projectId}`;
               const durableReferences = extractTaskAssetReferences(authoritativeResult);
-              const projected = durableReferences.length > 0
-                ? durableReferences
+              const durableReference = findWorkspaceAssetReferenceByUrl(
+                imageUrl,
+                durableReferences.filter(reference => Boolean(reference.placementId)),
+              );
+              const projected = durableReference
+                ? [durableReference]
                 : await projectAgentResultToWorkspace({
                     actorUserId: user.id,
                     taskId: authoritativeTaskId,

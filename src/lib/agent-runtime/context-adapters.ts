@@ -1,4 +1,4 @@
-import { createPostgresAssetStorage } from '@/lib/asset-core/storage';
+import type { GenerationProjectAccess } from '@/lib/collaboration/generation-project-access';
 import type { AssetKind, MediaAvailability } from '@/lib/asset-core/types';
 import type {
   AgentContextSnapshot,
@@ -6,6 +6,7 @@ import type {
 } from './types';
 
 export interface AgentContextTransaction {
+  authorizeProject?(actorUserId: string, projectId: string): Promise<GenerationProjectAccess>;
   findProject(ownerId: string, projectId: string): Promise<boolean>;
   findAsset?(
     ownerId: string,
@@ -50,6 +51,7 @@ export interface AuthorizeAgentContextInput {
 }
 
 export interface AuthorizedAgentContext {
+  projectAccess?: Extract<GenerationProjectAccess, { kind: 'document' }>;
   snapshot: AgentContextSnapshot;
   mediaByVersionId: Record<string, string>;
   selectedEntityVersionIds: Record<string, string>;
@@ -96,32 +98,6 @@ export function resolveAgentMediaUrls(
   });
 }
 
-function defaultStorage(): AgentContextStorage {
-  const storage = createPostgresAssetStorage();
-  return {
-    transaction: callback => storage.read(transaction => callback({
-      findProject: transaction.findProject.bind(transaction),
-      findAsset: transaction.findAsset.bind(transaction),
-      findVersion: transaction.findVersion.bind(transaction),
-      findVersionPlacement: transaction.findActivePlacementForVersion.bind(transaction),
-      async findEntityPlacement(ownerId, projectId, workspace, workspaceId, entityId) {
-        const entityTypes = workspace === 'canvas'
-          ? ['canvas-image']
-          : workspace === 'workflow'
-            ? ['workflow-input', 'workflow-output']
-            : ['chat-attachment', 'chat-result'];
-        for (const entityType of entityTypes) {
-          const placement = await transaction.findActivePlacement(
-            ownerId, projectId, workspace, workspaceId, entityType, entityId,
-          );
-          if (placement) return placement;
-        }
-        return null;
-      },
-    })),
-  };
-}
-
 const TRUSTED_SOURCE_IMAGE_MIME_TYPES = new Set([
   'image/png',
   'image/jpeg',
@@ -140,10 +116,16 @@ function isTrustedSourceImageMimeType(value: unknown): value is string {
 export async function authorizeAgentContext({
   actorUserId,
   request,
-  storage = defaultStorage(),
+  storage,
 }: AuthorizeAgentContextInput): Promise<AuthorizedAgentContext> {
+  if (!storage) {
+    const { createPostgresAgentContextStorage } = await import('./context-storage');
+    storage = createPostgresAgentContextStorage(request);
+  }
   return storage.transaction(async transaction => {
-    if (!await transaction.findProject(actorUserId, request.projectId)) {
+    const access = await transaction.authorizeProject?.(actorUserId, request.projectId);
+    const resourceOwner = access && access.kind !== 'unscoped' ? access.ownerId : actorUserId;
+    if (!await transaction.findProject(resourceOwner, request.projectId)) {
       throw new AgentContextNotFoundError();
     }
 
@@ -171,7 +153,7 @@ export async function authorizeAgentContext({
     const mediaByVersionId: Record<string, string> = {};
     for (const versionId of versionIds) {
       const version = await transaction.findVersion(
-        actorUserId,
+        resourceOwner,
         request.projectId,
         versionId,
       );
@@ -179,7 +161,7 @@ export async function authorizeAgentContext({
       if (sourceVersionIds.has(versionId)) {
         if (!version.assetId || !transaction.findAsset) throw new AgentContextNotFoundError();
         const asset = await transaction.findAsset(
-          actorUserId,
+          resourceOwner,
           request.projectId,
           version.assetId,
         );
@@ -194,11 +176,12 @@ export async function authorizeAgentContext({
       }
       mediaByVersionId[versionId] = version.file.url;
     }
-    for (const versionId of new Set(request.sourceVersionIds)) {
+    for (const versionId of access?.kind === 'document' && request.workspace === 'canvas'
+      ? versionIds : new Set(request.sourceVersionIds)) {
       let placement: Awaited<ReturnType<AgentContextTransaction['findVersionPlacement']>> = null;
       for (const workspaceId of workspaceIds) {
         placement = await transaction.findVersionPlacement(
-          actorUserId, request.projectId, request.workspace, workspaceId, versionId,
+          resourceOwner, request.projectId, request.workspace, workspaceId, versionId,
         );
         if (placement) break;
       }
@@ -212,7 +195,7 @@ export async function authorizeAgentContext({
       let placement: Awaited<ReturnType<NonNullable<AgentContextTransaction['findEntityPlacement']>>> = null;
       for (const workspaceId of workspaceIds) {
         placement = await transaction.findEntityPlacement(
-          actorUserId, request.projectId, request.workspace, workspaceId, entityId,
+          resourceOwner, request.projectId, request.workspace, workspaceId, entityId,
         );
         if (placement) break;
       }
@@ -220,6 +203,7 @@ export async function authorizeAgentContext({
       if (!versionIds.has(placement.assetVersionId)) throw new AgentContextNotFoundError();
       selectedEntityVersionIds[entityId] = placement.assetVersionId;
     }
-    return { snapshot: request.context, mediaByVersionId, selectedEntityVersionIds };
+    return { snapshot: request.context, mediaByVersionId, selectedEntityVersionIds,
+      ...(access?.kind === 'document' ? { projectAccess: access } : {}) };
   });
 }

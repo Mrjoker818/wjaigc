@@ -7,6 +7,7 @@ import {
   readCanvasShareJson,
 } from '@/lib/canvas-share/request';
 import { enableCollaborativeProject } from '@/lib/collaboration/document-project-bridge';
+import { readDocumentOwnerStatus } from '@/lib/collaboration/document-owner-status';
 import { getSessionUser } from '@/lib/server-auth';
 
 export const dynamic = 'force-dynamic';
@@ -22,6 +23,26 @@ function response(data: Record<string, unknown>, status: number): NextResponse {
   result.headers.set('Cache-Control', 'private, no-store');
   result.headers.set('Vary', 'Cookie');
   return result;
+}
+
+export async function GET(request: NextRequest): Promise<NextResponse> {
+  const user = await getSessionUser(request);
+  if (!user) return response({ success: false, code: 'AUTHENTICATION_REQUIRED' }, 401);
+  const params = request.nextUrl.searchParams;
+  const projectId = requestSchema.shape.projectId.safeParse(params.get('projectId'));
+  if (params.size !== 1 || !projectId.success) {
+    return response({ success: false, code: 'DOCUMENT_REQUEST_INVALID' }, 400);
+  }
+  try {
+    const status = await readDocumentOwnerStatus(user.id, projectId.data);
+    return response({ success: true, ...status }, 200);
+  } catch (error) {
+    if (error instanceof Error && 'code' in error) {
+      if (error.code === 'DOCUMENT_FORBIDDEN') return response({ success: false, code: error.code }, 403);
+      if (error.code === 'DOCUMENT_AUTHORITY_CONFLICT') return response({ success: false, code: error.code }, 409);
+    }
+    return response({ success: false, code: 'DOCUMENT_INTERNAL_ERROR' }, 500);
+  }
 }
 
 export async function POST(request: NextRequest): Promise<NextResponse> {

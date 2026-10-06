@@ -1,4 +1,4 @@
-import { execFileSync, spawn } from 'node:child_process';
+import { execFileSync, spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -6,22 +6,35 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 const bash = process.platform === 'win32' ? 'C:\\Program Files\\Git\\bin\\bash.exe' : 'bash';
 let fixture: string;
+interface ScriptResult {
+  exitCode: number | null;
+  output: string;
+}
+
+interface ScriptRun {
+  completion: Promise<ScriptResult>;
+  waitForOutput: (message: string) => Promise<void>;
+}
+
+const ownedChildren = new Map<ChildProcessWithoutNullStreams, Promise<ScriptResult>>();
 
 function git(...args: string[]): string {
-  return execFileSync('git', args, { cwd: fixture, encoding: 'utf8', windowsHide: true }).trim();
+  return execFileSync('git', args, { cwd: fixture, encoding: 'utf8', windowsHide: true, timeout: 5_000 }).trim();
 }
 
 function runStart(): string {
   return execFileSync(
     bash,
     ['-c', 'PATH="$PWD/fake-bin:$PATH" exec bash scripts/coze-start.sh'],
-    { cwd: fixture, encoding: 'utf8', windowsHide: true },
+    { cwd: fixture, encoding: 'utf8', windowsHide: true, timeout: 10_000 },
   );
 }
 
-function runScript(script: string): Promise<{ exitCode: number | null; output: string }> {
-  return new Promise((resolveRun, rejectRun) => {
-    const child = spawn(
+function runScript(script: string): ScriptRun {
+  let output = '';
+  let closed = false;
+  let spawnError: Error | undefined;
+  const child = spawn(
       bash,
       ['-c', `PATH="$PWD/fake-bin:$PATH" exec bash scripts/${script}`],
       {
@@ -30,16 +43,44 @@ function runScript(script: string): Promise<{ exitCode: number | null; output: s
         env: { ...process.env, DATABASE_URL: '', PGDATABASE_URL: '' },
       },
     );
-    let output = '';
+  const completion = new Promise<ScriptResult>((resolveRun, rejectRun) => {
     child.stdout.on('data', (chunk: Buffer) => { output += chunk.toString(); });
     child.stderr.on('data', (chunk: Buffer) => { output += chunk.toString(); });
-    child.on('error', rejectRun);
-    child.on('close', (exitCode) => resolveRun({ exitCode, output }));
+    child.on('error', (error: Error) => {
+      spawnError = error;
+      rejectRun(error);
+    });
+    child.on('close', (exitCode) => {
+      closed = true;
+      ownedChildren.delete(child);
+      resolveRun({ exitCode, output });
+    });
   });
+  // Keep errors observable by the test/cleanup without an unhandled rejection
+  // while the test is still waiting for a synchronization message.
+  void completion.catch(() => undefined);
+  ownedChildren.set(child, completion);
+  return {
+    completion,
+    waitForOutput: async (message: string): Promise<void> => {
+      const deadline = Date.now() + 5_000;
+      while (!output.includes(message)) {
+        if (spawnError) throw new Error(`Script failed before ${message}: ${output}`, { cause: spawnError });
+        if (closed) throw new Error(`Script closed before ${message}: ${output}`, { cause: spawnError });
+        if (Date.now() >= deadline) throw new Error(`Script did not reach ${message}: ${output}`);
+        await new Promise<void>(resolveDelay => setTimeout(resolveDelay, 20));
+      }
+    },
+  };
 }
 
-describe('Coze startup build identity', () => {
+// Real Bash/Git process startup can exceed five seconds on Windows; lock
+// contention also includes the production script's real five-second sleep.
+// This local integration budget matches the two existing contention cases and
+// does not change the production wait loop or the global Vitest configuration.
+describe('Coze startup build identity', { timeout: 15_000 }, () => {
   beforeEach(() => {
+    expect(ownedChildren.size).toBe(0);
     fixture = mkdtempSync(join(tmpdir(), 'wujie-coze-build-'));
     mkdirSync(join(fixture, 'scripts'));
     mkdirSync(join(fixture, '.next'));
@@ -61,7 +102,46 @@ describe('Coze startup build identity', () => {
     git('-c', 'user.name=Build Test', '-c', 'user.email=build-test@example.invalid', 'commit', '-qm', 'initial');
   });
 
-  afterEach(() => rmSync(fixture, { recursive: true, force: true }));
+  afterEach(async () => {
+    const cleanupErrors: unknown[] = [];
+    for (const [child, completion] of ownedChildren) {
+      if (child.pid && child.exitCode === null) {
+        try {
+          if (process.platform === 'win32') {
+            execFileSync('taskkill.exe', ['/PID', String(child.pid), '/T', '/F'], {
+              windowsHide: true, timeout: 2_000, stdio: 'pipe',
+            });
+          } else {
+            child.kill('SIGTERM');
+          }
+        } catch (error) {
+          cleanupErrors.push(error);
+        }
+      }
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        await Promise.race([
+          completion,
+          new Promise<never>((_resolve, reject) => {
+            timer = setTimeout(() => reject(new Error('Owned script did not close before fixture cleanup')), 2_000);
+          }),
+        ]);
+      } catch (error) {
+        cleanupErrors.push(error);
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+    if (ownedChildren.size > 0) {
+      throw new AggregateError(cleanupErrors, 'Refusing to remove a fixture still used by an owned script');
+    }
+    try {
+      rmSync(fixture, { recursive: true, force: true });
+    } catch (error) {
+      cleanupErrors.push(error);
+    }
+    if (cleanupErrors.length > 0) throw new AggregateError(cleanupErrors, 'Owned script cleanup failed');
+  });
 
   it('rebuilds before starting when an existing Next build belongs to an older source tree', () => {
     const expectedTree = git('rev-parse', 'HEAD^{tree}');
@@ -114,11 +194,12 @@ describe('Coze startup build identity', () => {
     writeFileSync(join(fixture, '.next', 'lock'), 'building\n');
 
     const preview = runScript('coze-preview-build.sh');
-    await new Promise<void>((resolveDelay) => setTimeout(resolveDelay, 500));
+    await preview.waitForOutput('Another build holds the Next lock; waiting...');
+    expect(existsSync(join(fixture, '.next', 'lock'))).toBe(true);
     writeFileSync(join(fixture, '.next', 'BUILD_ID'), `${expectedTree}\n`);
     writeFileSync(join(fixture, '.next', 'WUJIE_BUILD_COMPLETE'), `${expectedTree}\n`);
     unlinkSync(join(fixture, '.next', 'lock'));
-    const result = await preview;
+    const result = await preview.completion;
 
     expect(result.exitCode).toBe(0);
     expect(result.output).toContain('Build completed successfully.');
@@ -131,11 +212,12 @@ describe('Coze startup build identity', () => {
     writeFileSync(join(fixture, '.next', 'lock'), 'building\n');
 
     const startup = runScript('coze-start.sh');
-    await new Promise<void>((resolveDelay) => setTimeout(resolveDelay, 2500));
+    await startup.waitForOutput('Build lock detected, waiting...');
+    expect(existsSync(join(fixture, '.next', 'lock'))).toBe(true);
     writeFileSync(join(fixture, '.next', 'BUILD_ID'), `${expectedTree}\n`);
     writeFileSync(join(fixture, '.next', 'WUJIE_BUILD_COMPLETE'), `${expectedTree}\n`);
     if (existsSync(join(fixture, '.next', 'lock'))) unlinkSync(join(fixture, '.next', 'lock'));
-    const result = await startup;
+    const result = await startup.completion;
 
     expect(result.exitCode).toBe(0);
     expect(result.output).toContain(`started:${expectedTree}`);
@@ -149,9 +231,10 @@ describe('Coze startup build identity', () => {
     writeFileSync(join(fixture, '.next', 'lock'), 'building\n');
 
     const startup = runScript('coze-start.sh');
-    await new Promise<void>((resolveDelay) => setTimeout(resolveDelay, 2500));
+    await startup.waitForOutput('Build lock detected, waiting...');
+    expect(existsSync(join(fixture, '.next', 'lock'))).toBe(true);
     if (existsSync(join(fixture, '.next', 'lock'))) unlinkSync(join(fixture, '.next', 'lock'));
-    const result = await startup;
+    const result = await startup.completion;
 
     expect(result.exitCode).toBe(0);
     expect(result.output).toContain(`started:${expectedTree}`);

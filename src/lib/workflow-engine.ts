@@ -494,6 +494,9 @@ function createDefaultPorts(type: NodeType): NodePort[] {
       } else {
         ports.push({ id: 'in-prompt', label: '提示词', type: 'prompt', direction: 'in' });
       }
+      if (type === 'ai-edit') {
+        ports.push({ id: 'in-mask', label: '蒙版', type: 'mask', direction: 'in' });
+      }
       if (type === 'ai-annotation-edit') {
         ports.push({ id: 'in-reference', label: '参考图', type: 'image', direction: 'in' });
       }
@@ -1597,6 +1600,7 @@ export function getNodeInputs(
 
   // 从上游连线中获取输入 (按端口类型映射)
   const incomingConns = connections.filter(c => c.toNodeId === node.id);
+  let connectedEditSourceAdopted = false;
   const appendImageInputs = (
     output: Record<string, unknown>,
     sourceNodeId: string,
@@ -1614,7 +1618,9 @@ export function getNodeInputs(
     const primaryCandidate = candidates[0];
     const imageUrls = Array.from(new Set([...current, ...candidates]));
     const isSkillReference = node.type === 'ai-skill' && targetPortId === 'in-reference';
-    const shouldAdoptAssetIdentity = !isSkillReference && !inputs.assetVersionId
+    const isEditSource = node.type === 'ai-edit' || node.type === 'ai-color-adjust';
+    const shouldAdoptAssetIdentity = !isSkillReference
+      && (isEditSource ? !connectedEditSourceAdopted : !inputs.assetVersionId)
       && (!inputs.imageUrl || inputs.imageUrl === primaryCandidate);
     inputs.imageUrls = imageUrls;
     if (isSkillReference) {
@@ -1626,9 +1632,24 @@ export function getNodeInputs(
       inputs.imageUrl = primaryCandidate;
     }
     if (shouldAdoptAssetIdentity) {
-      if (typeof output.assetVersionId === 'string') inputs.assetVersionId = output.assetVersionId;
-      if (typeof output.assetId === 'string') inputs.assetId = output.assetId;
-      if (typeof output.placementId === 'string') inputs.placementId = output.placementId;
+      if (isEditSource) {
+        delete inputs.assetVersionId;
+        delete inputs.assetId;
+        delete inputs.placementId;
+        delete inputs.sourceEntityId;
+        if (typeof output.assetVersionId === 'string' && output.assetVersionId.trim()
+          && typeof output.placementId === 'string' && output.placementId.trim()) {
+          inputs.assetVersionId = output.assetVersionId;
+          inputs.placementId = output.placementId;
+          inputs.sourceEntityId = sourceNodeId;
+          if (typeof output.assetId === 'string') inputs.assetId = output.assetId;
+        }
+        connectedEditSourceAdopted = true;
+      } else {
+        if (typeof output.assetVersionId === 'string') inputs.assetVersionId = output.assetVersionId;
+        if (typeof output.assetId === 'string') inputs.assetId = output.assetId;
+        if (typeof output.placementId === 'string') inputs.placementId = output.placementId;
+      }
     }
 
     const upstreamReferences = Array.isArray(output.assetReferences)
@@ -1955,6 +1976,13 @@ export function buildNodeExecutionRequest(
   inputs: Record<string, unknown>
 ): { endpoint: string; method: string; body: Record<string, unknown> } | null {
   const config = { ...node.config, ...inputs };
+  const connectedVersionId = typeof inputs.assetVersionId === 'string' ? inputs.assetVersionId.trim() : '';
+  const connectedPlacementId = typeof inputs.placementId === 'string' ? inputs.placementId.trim() : '';
+  const connectedSource = connectedVersionId && connectedPlacementId
+    ? { assetParentVersionIds: [connectedVersionId], assetSourcePlacementId: connectedPlacementId,
+      ...(typeof inputs.sourceEntityId === 'string' && inputs.sourceEntityId.trim()
+        ? { sourceEntityId: inputs.sourceEntityId.trim() } : {}) }
+    : {};
 
   // 解析复合键 providerId::modelId，确保 model 和 providerId 正确分离
   if (config.model && typeof config.model === 'string' && config.model.includes('::')) {
@@ -2033,19 +2061,44 @@ export function buildNodeExecutionRequest(
       };
     }
 
-    case 'ai-edit':
+    case 'ai-edit': {
+      const action = String(config.action || 'edit');
+      if (!['edit', 'erase', 'mask', 'extend'].includes(action)) {
+        throw new Error('WORKFLOW_EDIT_ACTION_UNSUPPORTED');
+      }
+      if (action === 'edit') {
+        return {
+          endpoint: '/api/edit',
+          method: 'POST',
+          body: {
+            image: config.imageUrl || '',
+            prompt: config.prompt || config.textContent || config.text || '',
+            ...connectedSource,
+            ...(config.model ? { model: config.model } : {}),
+            ...(config.providerId ? { providerId: config.providerId } : {}),
+          },
+        };
+      }
+      const requiresMask = action === 'erase' || action === 'mask';
+      const maskUrl = typeof config.maskUrl === 'string' ? config.maskUrl.trim() : '';
+      if (requiresMask && !maskUrl) {
+        throw new Error('WORKFLOW_EDIT_MASK_REQUIRED');
+      }
       return {
         endpoint: '/api/image-edit',
         method: 'POST',
         body: {
-          action: config.action || 'edit',
+          action,
           imageUrl: config.imageUrl || '',
+          ...connectedSource,
+          ...(requiresMask ? { editMode: action, maskImage: maskUrl } : {}),
           prompt: config.prompt || config.textContent || config.text || '',
           negativePrompt: config.negativePrompt || '',
           model: config.model || '',
           strength: config.strength || 75,
         }
       };
+    }
 
     case 'ai-annotation-edit': {
       const rawBundle = config.annotationBundle;
@@ -2148,13 +2201,14 @@ export function buildNodeExecutionRequest(
 
     case 'ai-color-adjust':
       return {
-        endpoint: '/api/image-edit',
+        endpoint: '/api/edit',
         method: 'POST',
         body: {
-          action: 'edit',
-          imageUrl: config.imageUrl || '',
+          image: config.imageUrl || '',
           prompt: `adjust brightness by ${config.brightness || 0}%, contrast by ${config.contrast || 0}%, saturation by ${config.saturation || 0}%`,
-          model: config.model || '',
+          ...connectedSource,
+          ...(config.model ? { model: config.model } : {}),
+          ...(config.providerId ? { providerId: config.providerId } : {}),
         }
       };
 

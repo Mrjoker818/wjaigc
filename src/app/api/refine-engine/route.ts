@@ -15,6 +15,10 @@ import { normalizeProviderModelSelection } from '@/lib/task-core/exact-model-sel
 import { validateApiInputs } from '@/lib/api-validator';
 import { logOperation, logError, OP_ACTIONS, startTimer } from '@/lib/op-log';
 import { setRefineResult } from './result-store';
+import path from 'node:path';
+import { readImageToolsLocalFile } from '@/lib/image-tools/local-image-reader';
+
+const MAX_REFINE_REFERENCE_BYTES = 20 * 1024 * 1024;
 
 // ─── Persist result image to local server ───
 async function persistResultImage(imageUrl: string): Promise<string> {
@@ -430,6 +434,7 @@ async function submitRefineToApi(
     provider: ApiProvider;
     aspectRatio: string;
     quality?: string;
+    preparedLocalImageDataUrl?: string;
   }
 ): Promise<{ directImageUrls?: string[]; remoteTaskId?: string }> {
   console.log(`[refine-engine] submitRefineToApi START taskId=${taskId}`);
@@ -455,60 +460,9 @@ async function submitRefineToApi(
   if (params.imageUrl) {
     let imageAsBase64: string | undefined;
 
-    // 1) Local path → base64
+    // 1) Local media was checked before task creation and billing.
     if (params.imageUrl.startsWith('/api/serve-upload/') || params.imageUrl.startsWith('/uploads/')) {
-      try {
-        const fs = await import('fs/promises');
-        const path = await import('path');
-        const workspacePath = process.env.COZE_WORKSPACE_PATH || '/workspace/projects';
-        const publicDir = path.join(workspacePath, 'public');
-        let filePath = '';
-        if (params.imageUrl.startsWith('/api/serve-upload/')) {
-          // serve-upload 路径：从数据目录读取，而非 public
-          const relativePath = params.imageUrl.replace('/api/serve-upload/', '');
-          try {
-            const { getServerDataRoot } = await import('@/lib/server-data-root');
-            const dataRoot = getServerDataRoot();
-            const path1 = path.join(dataRoot, 'uploads', relativePath);
-            const path2 = path.join(dataRoot, relativePath);
-            try { await fs.access(path1); filePath = path1; } catch {
-              try { await fs.access(path2); filePath = path2; } catch {
-                filePath = path.join(publicDir, relativePath);
-              }
-            }
-          } catch {
-            filePath = path.join(publicDir, relativePath);
-          }
-        } else {
-          // 直接路径如 /uploads/xxx.jpg：先尝试 publicDir，再尝试 dataRoot
-          const relativePath = params.imageUrl.replace(/^\//, '');
-          filePath = path.join(publicDir, relativePath);
-          try { await fs.access(filePath); } catch {
-            try {
-              const { getServerDataRoot } = await import('@/lib/server-data-root');
-              const dataRoot = getServerDataRoot();
-              const altPath = path.join(dataRoot, relativePath);
-              await fs.access(altPath);
-              filePath = altPath;
-            } catch {
-              // 保持 publicDir 路径，后续安全校验会处理
-            }
-          }
-        }
-        const resolved = path.resolve(filePath);
-        // 安全校验：允许 publicDir 和 dataRoot 两个合法目录
-        const { getServerDataRoot } = await import('@/lib/server-data-root');
-        const dataRoot = getServerDataRoot();
-        if (resolved.startsWith(publicDir) || resolved.startsWith(dataRoot)) {
-          const imgBuf = await fs.readFile(resolved);
-          const ext = path.extname(resolved).toLowerCase();
-          const mimeMap: Record<string, string> = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp' };
-          const mime = mimeMap[ext] || 'image/png';
-          imageAsBase64 = `data:${mime};base64,${imgBuf.toString('base64')}`;
-        }
-      } catch (localErr) {
-        console.warn('[refine-engine] Failed to read local image:', localErr);
-      }
+      imageAsBase64 = params.preparedLocalImageDataUrl;
     }
     // 2) HTTP URL → download → base64
     else if (params.imageUrl.startsWith('http://') || params.imageUrl.startsWith('https://')) {
@@ -971,6 +925,26 @@ export async function POST(request: NextRequest) {
         console.log(`[refine-engine] 模型别名规范化: "${displayName}" → API模型名 "${selectedModel}"`);
       }
 
+      sessionUser = await getSessionUser(request).catch(() => null);
+      if (!sessionUser) return NextResponse.json({ success: false, error: '未登录，请先登录' }, { status: 401 });
+
+      let preparedLocalImageDataUrl: string | undefined;
+      if (imageUrl.startsWith('/api/serve-upload/') || imageUrl.startsWith('/uploads/')) {
+        try {
+          const { getServerDataRoot } = await import('@/lib/server-data-root');
+          const publicDir = path.join(process.env.COZE_WORKSPACE_PATH || '/workspace/projects', 'public');
+          const imageBytes = await readImageToolsLocalFile(
+            getServerDataRoot(), publicDir, imageUrl, MAX_REFINE_REFERENCE_BYTES, 'refine',
+          );
+          if (!imageBytes) throw new Error('Local reference missing');
+          const ext = path.extname(imageUrl).toLowerCase();
+          const mimeMap: Record<string, string> = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp' };
+          preparedLocalImageDataUrl = `data:${mimeMap[ext] || 'image/png'};base64,${imageBytes.toString('base64')}`;
+        } catch {
+          return NextResponse.json({ success: false, error: '参考图片不可用或路径不安全' }, { status: 400 });
+        }
+      }
+
       const refineMode = (mode === 'expert') ? 'expert' : 'standard';
       const prompt = generateRefinePrompt({
         productCategory: productCategory || 'default',
@@ -985,9 +959,7 @@ export async function POST(request: NextRequest) {
         mode: refineMode,
       });
 
-      // 模型、供应商和提示词准备完成后才扣费。
-      sessionUser = await getSessionUser(request).catch(() => null);
-      if (!sessionUser) return NextResponse.json({ success: false, error: '未登录，请先登录' }, { status: 401 });
+      // 模型、供应商、参考图片和提示词准备完成后才扣费。
       const taskId = `refine-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       const label = `精修: ${productName || MODE_LABELS[refineMode] || '产品'}`;
       const creditCost = await createRefineTask({ taskId, userId: sessionUser.id, label,
@@ -1005,6 +977,7 @@ export async function POST(request: NextRequest) {
           provider,
           aspectRatio: aspectRatio || '1:1',
           quality: body.quality || 'standard',
+          preparedLocalImageDataUrl,
         });
         providerAccepted = true;
 

@@ -36,6 +36,39 @@ async function setupDocumentDatabase(query: QueryFn): Promise<void> {
 }
 
 describe('independent canvas document editor access on PostgreSQL', () => {
+  postgresIt('resolves exact unique names only after owner and enabled authority checks', async () => {
+    const { withIsolatedPostgres } = await import('../helpers/postgres-test-database');
+    await withIsolatedPostgres('document-editor-name', async ({ query }) => {
+      await setupDocumentDatabase(query);
+      await query(await readFile('migrations/20260925_yjs_canvas_documents.sql', 'utf8'));
+      vi.stubEnv('WUJIE_YJS_ENABLED', 'true');
+      const access = await import('../../src/lib/collaboration/document-access');
+      const grant = (access as typeof access & {
+        grantDocumentEditorByName?: (owner: string, project: string, name: string) => Promise<void>;
+      }).grantDocumentEditorByName;
+      expect(grant, 'account-name invitations must be supported').toBeTypeOf('function');
+      if (!grant) return;
+      await expect(grant('owner-b', 'project-a', 'missing')).rejects.toMatchObject({ code: 'DOCUMENT_FORBIDDEN' });
+      await expect(grant('owner-a', 'project-a', 'Member')).rejects.toMatchObject({ code: 'DOCUMENT_PROJECT_NOT_ENABLED' });
+      await query("INSERT INTO wujie_project_document_settings (project_id,owner_id,enabled) VALUES ('project-a','owner-a',true)");
+      await expect(grant('owner-a', 'project-a', 'Member')).rejects.toMatchObject({ code: 'DOCUMENT_AUTHORITY_CONFLICT' });
+      await query("INSERT INTO wujie_project_canvas_documents (project_id,owner_id) VALUES ('project-a','owner-a')");
+      for (const name of ['Editor', 'Owner A', 'missing', 'member']) {
+        await expect(grant('owner-a', 'project-a', name)).rejects.toMatchObject({ code: 'DOCUMENT_INVITEE_INVALID' });
+      }
+      await query("UPDATE wujie_users SET status='disabled' WHERE id='presence-only'");
+      await expect(grant('owner-a', 'project-a', 'Member')).rejects.toMatchObject({ code: 'DOCUMENT_INVITEE_INVALID' });
+      expect((await query('SELECT * FROM wujie_project_document_editors')).rows).toEqual([]);
+      await query("UPDATE wujie_users SET status='active' WHERE id='presence-only'");
+      await Promise.all([grant('owner-a', 'project-a', 'Member'), grant('owner-a', 'project-a', 'Member')]);
+      expect((await query('SELECT member_user_id,grant_generation::int FROM wujie_project_document_editors')).rows)
+        .toEqual([{ member_user_id: 'presence-only', grant_generation: 1 }]);
+      await access.revokeDocumentEditor('owner-a', 'project-a', 'presence-only');
+      await grant('owner-a', 'project-a', 'Member');
+      expect((await query('SELECT grant_generation::int FROM wujie_project_document_editors')).rows)
+        .toEqual([{ grant_generation: 3 }]);
+    });
+  });
   postgresIt('holds editor authorization through the outbound read callback before revocation commits', async () => {
     const { withIsolatedPostgres } = await import('../helpers/postgres-test-database');
     await withIsolatedPostgres('document-editor-outbound-fence', async ({ query }) => {

@@ -2,6 +2,8 @@ import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { requireOfflineBridgeTestDatabaseUrl } from '../../../tests/helpers/offline-bridge-database-guard';
+import { withIsolatedPostgres } from '../../../tests/helpers/postgres-test-database';
 
 const DATABASE_PASSWORD_SENTINEL = 'MEDIA_GATEWAY_DATABASE_PASSWORD_SENTINEL';
 const API_KEY_SENTINEL = 'MEDIA_GATEWAY_API_KEY_SENTINEL';
@@ -62,21 +64,29 @@ describe('media gateway doctor', () => {
     expect(source).toContain('required gateway tables verified');
   });
 
-  it('verifies all gateway tables against the required real PostgreSQL test database', () => {
-    const databaseUrl = process.env.POSTGRES_TEST_DATABASE_URL?.trim();
-    expect(databaseUrl, 'POSTGRES_TEST_DATABASE_URL is required; this test must not be skipped').toBeTruthy();
+  it('fails before the gateway migration and verifies all tables after it in an isolated real schema', async () => {
+    const baseDatabaseUrl = requireOfflineBridgeTestDatabaseUrl(process.env);
+    await withIsolatedPostgres('media-gateway-doctor', async ({ databaseUrl, query }) => {
+      const doctorEnvironment = {
+        GATEWAY_ENABLED: 'true',
+        PGDATABASE_URL: databaseUrl,
+        POSTGRES_TEST_DATABASE_URL: baseDatabaseUrl,
+      };
+      const beforeMigration = runDoctor(doctorEnvironment);
+      expect(beforeMigration.stdout).toContain(
+        '[FAIL] media-gateway-database: missing gateway tables: '
+          + 'wujie_gateway_keys,wujie_gateway_rate_windows,wujie_gateway_requests',
+      );
 
-    const result = runDoctor({
-      GATEWAY_ENABLED: 'true',
-      PGDATABASE_URL: databaseUrl,
-      POSTGRES_TEST_DATABASE_URL: databaseUrl,
+      await query(readFileSync(resolve(process.cwd(), 'migrations/20260913_v588_media_gateway.sql'), 'utf8'));
+
+      const afterMigration = runDoctor(doctorEnvironment);
+      expect(afterMigration.stdout).toContain('[PASS] media-gateway: enabled');
+      expect(afterMigration.stdout).toContain(
+        '[PASS] media-gateway-database: required gateway tables verified: '
+          + 'wujie_gateway_keys,wujie_gateway_rate_windows,wujie_gateway_requests',
+      );
+      expect(afterMigration.stdout).not.toContain(API_KEY_SENTINEL);
     });
-
-    expect(result.stdout).toContain('[PASS] media-gateway: enabled');
-    expect(result.stdout).toContain(
-      '[PASS] media-gateway-database: required gateway tables verified: '
-        + 'wujie_gateway_keys,wujie_gateway_rate_windows,wujie_gateway_requests',
-    );
-    expect(result.stdout).not.toContain(API_KEY_SENTINEL);
-  });
+  }, 45_000);
 });

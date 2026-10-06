@@ -55,7 +55,7 @@ if (typeof setInterval !== 'undefined' && !(globalThis as Record<string, unknown
         editTaskStore.delete(id);
       }
     }
-  }, 5 * 60 * 1000);
+  }, 5 * 60 * 1000).unref?.();
 }
 
 export function getEditTask(taskId: string): EditTask | undefined {

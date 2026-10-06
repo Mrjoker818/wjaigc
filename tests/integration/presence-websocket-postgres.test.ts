@@ -3,15 +3,177 @@ import { once } from 'node:events';
 import { readFile } from 'node:fs/promises';
 import type { AddressInfo } from 'node:net';
 
+import { Client, type QueryResult } from 'pg';
 import WebSocket from 'ws';
 import { describe, expect, it, vi } from 'vitest';
+import { requireOfflineBridgeTestDatabaseUrl } from '../helpers/offline-bridge-database-guard';
 
 import type { QueryFn } from '../helpers/postgres-test-database';
 import type { PresenceGateway } from '../../src/lib/collaboration/presence-gateway';
+import { runPostgresCleanup } from '../helpers/postgres-test-database';
 
 vi.mock('server-only', () => ({}));
 
 const postgresIt = process.env.POSTGRES_TEST_DATABASE_URL?.trim() ? it : it.skip;
+
+// Observe completed native SQL across both Pool.query and owned checkouts.
+// Cancellation ownership must not make the shared-read budget invisible.
+interface RosterReadObservation { completed: () => number; stop: () => Promise<void> }
+function observeActualRosterReads(): RosterReadObservation {
+  let completed = 0;
+  const operations: Promise<QueryResult>[] = [];
+  const callbacks: Promise<void>[] = [];
+  const nativeQuery: (this: Client, text: string, values?: unknown[]) => Promise<QueryResult> = Client.prototype.query;
+  const observer = vi.spyOn(Client.prototype, 'query').mockImplementation(function (
+    this: Client, text: unknown, values?: unknown[], callback?: (error: Error, result: QueryResult) => void,
+  ): Promise<QueryResult> {
+    const operation = (async (): Promise<QueryResult> => {
+      if (typeof text !== 'string') throw new Error('Native SQL text required for roster observer');
+      const result = await nativeQuery.call(this, text, values);
+      if (text.startsWith('SELECT COALESCE((') && text.includes('FROM wujie_presence_leases lease')) completed += 1;
+      return result;
+    })();
+    operations.push(operation);
+    void operation.catch(() => undefined);
+    if (callback) {
+      const delivery = operation.then(result => { Reflect.apply(callback, undefined, [null, result]); },
+        (error: unknown): void => { Reflect.apply(callback, undefined, [error]); });
+      callbacks.push(delivery);
+      void delivery.catch(() => undefined);
+    }
+    return operation;
+  });
+  return { completed: (): number => completed, stop: async (): Promise<void> => {
+    observer.mockRestore();
+    const settled = await Promise.allSettled([...operations, ...callbacks]);
+    const errors = settled.flatMap(result => result.status === 'rejected' ? [result.reason as unknown] : []);
+    if (errors.length > 0) throw new AggregateError(errors, 'Observed roster SQL or callback failed');
+  } };
+}
+
+// One test-only owner for the existing read windows. Failure controls below
+// exercise this exact budget/cleanup boundary used by the WebSocket contracts.
+async function withRosterReadBudget(
+  expected: number | undefined, body: (observer: RosterReadObservation) => Promise<void>,
+): Promise<void> {
+  const observer = observeActualRosterReads();
+  let bodyFailed = false;
+  let bodyError: unknown;
+  try { await body(observer); }
+  catch (error) { bodyFailed = true; bodyError = error; }
+  let stopFailed = false;
+  let stopError: unknown;
+  try { await observer.stop(); }
+  catch (error) { stopFailed = true; stopError = error; }
+  if (bodyFailed && stopFailed) throw new AggregateError([bodyError, stopError], 'Roster body and drain both failed');
+  if (bodyFailed) throw bodyError;
+  if (stopFailed) throw stopError;
+  if (expected !== undefined) expect(observer.completed()).toBe(expected);
+}
+
+async function observeWithin<T>(pending: Promise<T>, milliseconds: number, label: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([pending, new Promise<never>((_resolve, reject) => {
+      timer = setTimeout(() => reject(new Error(`Observation exceeded: ${label}`)), milliseconds);
+    })]);
+  } finally { if (timer) clearTimeout(timer); }
+}
+
+async function verifyRosterBudgetControl(kind: 'late-roster' | 'failed-and-pending'): Promise<void> {
+  requireOfflineBridgeTestDatabaseUrl(process.env);
+  const { withIsolatedPostgres } = await import('../helpers/postgres-test-database');
+  await withIsolatedPostgres('presence-roster-observer-control', async ({ query, databaseUrl }) => {
+    let locker: Client | undefined;
+    let roster: Promise<unknown> | undefined;
+    let window: Promise<void> | undefined;
+    let unlock: Promise<void> | undefined;
+    let windowError: unknown;
+    let sqlError: unknown;
+    let settled = false;
+    let settledBeforeUnlock = false;
+    let signalBody: () => void = (): void => {};
+    const bodyReached = new Promise<void>(resolve => { signalBody = resolve; });
+    const bodyError = new Error('controlled roster window body failure');
+    let bodyFailed = false;
+    let bodyFailure: unknown;
+    try {
+      vi.stubEnv('WUJIE_ASSET_GRAPH_MODE', 'asset-v3');
+      await setupPresenceDatabase(query);
+      locker = new Client({ connectionString: databaseUrl, connectionTimeoutMillis: 2_000 });
+      await locker.connect();
+      await locker.query('BEGIN');
+      const lockerPid = (await locker.query<{ pid: number }>('SELECT pg_backend_pid() AS pid')).rows[0].pid;
+      await locker.query('LOCK TABLE wujie_users IN ACCESS EXCLUSIVE MODE');
+      const { getPool } = await import('../../src/lib/db-client');
+      const { readPresenceSnapshot } = await import('../../src/lib/collaboration/presence-leases');
+      window = withRosterReadBudget(kind === 'late-roster' ? 0 : undefined, async (): Promise<void> => {
+        if (kind === 'failed-and-pending') {
+          try { await getPool().query('SELECT 1/0'); }
+          catch (error) { sqlError = error; }
+          if (!(sqlError instanceof Error)) throw new Error('Actual PostgreSQL division failure required');
+        }
+        roster = readPresenceSnapshot('project-a');
+        void roster.catch(() => undefined);
+        const deadline = performance.now() + 3_000;
+        let waiting = false;
+        while (performance.now() < deadline) {
+          const result = await query<{ count: number }>(`SELECT count(*)::int AS count FROM pg_stat_activity
+            WHERE datname=current_database() AND state='active' AND wait_event_type='Lock'
+              AND $1::int=ANY(pg_blocking_pids(pid)) AND query LIKE 'SELECT COALESCE((%'`, [lockerPid]);
+          if (result.rows[0].count === 1) { waiting = true; break; }
+          await new Promise<void>(resolve => setTimeout(resolve, 10));
+        }
+        if (!waiting) throw new Error('Actual extra roster SQL lock required');
+        signalBody();
+        if (kind === 'failed-and-pending') throw bodyError;
+        // The real extra read is still locked during the OLD budget assertion.
+        // Unlock on the next native turn, then it completes during stop/drain.
+        unlock = new Promise<void>((resolve, reject) => setImmediate(() => {
+          void locker!.query('ROLLBACK').then(() => resolve(), reject);
+        }));
+      }).then((): void => { settled = true; }, (error: unknown): void => { settled = true; windowError = error; });
+      await observeWithin(bodyReached, 5_000, 'real roster body boundary');
+      if (kind === 'failed-and-pending') {
+        await new Promise<void>(resolve => setImmediate(resolve));
+        settledBeforeUnlock = settled;
+        expect((await query<{ held: boolean }>(`SELECT EXISTS(SELECT 1 FROM pg_locks WHERE pid=$1
+          AND granted AND mode='AccessExclusiveLock' AND relation='wujie_users'::regclass) AS held`, [lockerPid])).rows[0].held).toBe(true);
+        await locker.query('ROLLBACK');
+      } else if (unlock) await observeWithin(unlock, 2_000, 'scheduled real unlock');
+      await observeWithin(window, 5_000, 'actual budget owner settlement');
+      if (roster) await observeWithin(roster, 5_000, 'actual late roster result');
+      if (kind === 'late-roster') {
+        expect(windowError, 'An actual read completing during drain cannot pass an exact-zero budget').toBeInstanceOf(Error);
+      } else {
+        const nested = (error: unknown): unknown[] => [error,
+          ...(error instanceof AggregateError ? (error.errors as unknown[]).flatMap(nested) : []),
+          ...(error instanceof Error && error.cause !== undefined ? nested(error.cause) : []),
+        ];
+        expect(settledBeforeUnlock, 'Rejected SQL must not let stop return before another actual SQL settles').toBe(false);
+        expect(windowError).toBeInstanceOf(AggregateError);
+        expect(nested(windowError)).toContain(bodyError);
+        expect(nested(windowError)).toContain(sqlError);
+        expect(sqlError instanceof Error && 'code' in sqlError ? sqlError.code : undefined).toBe('22012');
+      }
+      expect((await getPool().query<{ answer: number }>('SELECT 42 AS answer')).rows[0].answer).toBe(42);
+    } catch (error) { bodyFailed = true; bodyFailure = error; throw error; }
+    finally {
+      await runPostgresCleanup([
+        { name: 'rollback-observer-independent-lock', run: async (): Promise<void> => { if (locker) await observeWithin(locker.query('ROLLBACK'), 2_000, 'rescue lock'); } },
+        { name: 'settle-observer-unlock-producer', run: async (): Promise<void> => { if (unlock) await observeWithin(unlock, 5_000, 'unlock producer'); } },
+        { name: 'settle-observer-roster', run: async (): Promise<void> => { if (roster) await observeWithin(roster, 5_000, 'rescue roster'); } },
+        { name: 'settle-observer-window', run: async (): Promise<void> => { if (window) await observeWithin(window, 5_000, 'rescue window'); } },
+        { name: 'end-observer-independent-lock', run: async (): Promise<void> => { if (locker) await observeWithin(locker.end(), 2_000, 'end locker'); } },
+        { name: 'restore-observer-environment', run: (): void => { vi.restoreAllMocks(); vi.unstubAllEnvs(); } },
+      ]).catch((cleanupError: unknown): never => {
+        if (!bodyFailed) throw cleanupError;
+        throw new AggregateError([bodyFailure, ...(cleanupError instanceof AggregateError ? cleanupError.errors as unknown[] : [cleanupError])],
+          'Roster observer control and cleanup failed');
+      });
+    }
+  });
+}
 
 async function setupPresenceDatabase(query: QueryFn): Promise<void> {
   for (const file of [
@@ -100,6 +262,9 @@ async function rejectedStatus(client: WebSocket): Promise<number> {
 }
 
 describe('presence WebSocket on isolated PostgreSQL', () => {
+  postgresIt.each(['late-roster', 'failed-and-pending'] as const)('owns actual roster budget failure boundary: %s', async kind => {
+    await verifyRosterBudgetControl(kind);
+  }, 20_000);
   postgresIt('accepts a one-use ticket and sends an authoritative project snapshot', async () => {
     await withPresenceServer('presence-websocket-snapshot', async ({ connect, origin }) => {
       const { issuePresenceTicket } = await import('../../src/lib/collaboration/presence-tickets');
@@ -147,9 +312,7 @@ describe('presence WebSocket on isolated PostgreSQL', () => {
       const before = await query<{ last_seen_at: Date }>(
         "SELECT last_seen_at FROM wujie_presence_leases WHERE user_id = 'owner-a'",
       );
-      const { getPool } = await import('../../src/lib/db-client');
-      const rosterReads = vi.spyOn(getPool(), 'query');
-      try {
+      await withRosterReadBudget(0, async (): Promise<void> => {
         client.send(JSON.stringify({ type: 'heartbeat' }));
         let renewed = false;
         const deadline = Date.now() + 1_000;
@@ -164,15 +327,11 @@ describe('presence WebSocket on isolated PostgreSQL', () => {
           await new Promise(resolve => setTimeout(resolve, 10));
         }
         expect(renewed).toBe(true);
-        expect(rosterReads.mock.calls.filter(([sql]) =>
-          typeof sql === 'string' && sql.includes('FROM wujie_presence_leases lease'))).toHaveLength(0);
         const sequence = await query<{ sequence: number }>(
           "SELECT sequence::int FROM wujie_presence_project_sequences WHERE project_id = 'project-a'",
         );
         expect(sequence.rows[0].sequence).toBe(1);
-      } finally {
-        rosterReads.mockRestore();
-      }
+      });
     });
   });
 
@@ -519,35 +678,115 @@ describe('presence WebSocket on isolated PostgreSQL', () => {
     });
   });
 
-  postgresIt('shares one roster read across local clients for one project notification', async () => {
+  postgresIt.each([false, true])('shares one roster read across local clients for one project notification (delayed initialization: %s)', async delayInitialization => {
     await withPresenceServer('presence-websocket-shared-roster-read', async ({ connect, query }) => {
       const { issuePresenceTicket } = await import('../../src/lib/collaboration/presence-tickets');
+      const leases = await import('../../src/lib/collaboration/presence-leases');
+      const actualJoin = leases.joinPresence;
+      const actualSnapshot = leases.readPresenceSnapshot;
+      const actualSubscribe = leases.subscribePresence;
+      const joinedSignals = new Set<AbortSignal>();
+      const initializedSignals = new Set<AbortSignal>();
+      const reads: Array<Promise<Awaited<ReturnType<typeof actualSnapshot>>>> = [];
+      const refreshes: Promise<void>[] = [];
+      const removeFrameListeners: Array<() => void> = [];
+      let markInitialized: () => void = (): void => undefined;
+      const initialized = new Promise<void>(resolve => { markInitialized = resolve; });
+      let markBarrierReceived: () => void = (): void => undefined;
+      const barrierReceived = new Promise<void>(resolve => { markBarrierReceived = resolve; });
+      let notifications = 0;
+      let secondSignal: AbortSignal | undefined;
+      let joinCount = 0;
+      let releaseInitialRead: () => void = (): void => undefined;
+      const initialReadGate = new Promise<void>(resolve => { releaseInitialRead = resolve; });
+      let markInitialHeld: () => void = (): void => undefined;
+      const initialHeld = new Promise<void>(resolve => { markInitialHeld = resolve; });
+      const joinObserver = vi.spyOn(leases, 'joinPresence').mockImplementation(async (input, signal) => {
+        joinCount += 1;
+        if (joinCount === 2) secondSignal = signal;
+        const result = await actualJoin(input, signal);
+        if (signal) joinedSignals.add(signal);
+        return result;
+      });
+      const snapshotObserver = vi.spyOn(leases, 'readPresenceSnapshot').mockImplementation((projectId, signal) => {
+        const pending = (async (): Promise<Awaited<ReturnType<typeof actualSnapshot>>> => {
+          if (delayInitialization && signal !== undefined && signal === secondSignal && joinedSignals.has(signal)) {
+            markInitialHeld();
+            await initialReadGate;
+          }
+          const result = await actualSnapshot(projectId, signal);
+          if (signal && joinedSignals.has(signal)) initializedSignals.add(signal);
+          if (initializedSignals.size === 2) markInitialized();
+          return result;
+        })();
+        reads.push(pending);
+        void pending.catch(() => undefined);
+        return pending;
+      });
+      // The second join and the explicit barrier each emit a real notification.
+      // A sequence-3 frame can come from the older queued refresh: own both
+      // actual callback settlements instead of treating that frame as drain.
+      const subscriptionObserver = vi.spyOn(leases, 'subscribePresence').mockImplementation((projectId, onChange, interval) =>
+        actualSubscribe(projectId, () => {
+          const pending = Promise.resolve(onChange());
+          refreshes.push(pending);
+          void pending.catch(() => undefined);
+          notifications += 1;
+          if (notifications === 2) markBarrierReceived();
+          return pending;
+        }, interval));
+      let bodyFailed = false;
+      let bodyError: unknown;
+      try {
       const first = connect(await issuePresenceTicket('owner-a', 'project-a'));
       await once(first, 'message');
       const second = connect(await issuePresenceTicket('owner-a', 'project-a'));
-      await once(second, 'message');
-      const afterBarrier = (socket: WebSocket): Promise<void> => new Promise(resolve => {
-        socket.on('message', data => {
-          if ((JSON.parse(String(data)) as { sequence: number }).sequence === 3) resolve();
-        });
+      if (delayInitialization) await observeWithin(initialHeld, 2_000, 'second initialization held');
+      else await once(second, 'message');
+      const atSequence = (socket: WebSocket, sequence: number): Promise<void> => new Promise(resolve => {
+        const onFrame = (data: WebSocket.RawData): void => {
+          if ((JSON.parse(String(data)) as { sequence: number }).sequence !== sequence) return;
+          socket.removeListener('message', onFrame);
+          resolve();
+        };
+        removeFrameListeners.push((): void => { socket.removeListener('message', onFrame); });
+        socket.on('message', onFrame);
       });
-      const firstReady = afterBarrier(first);
-      const secondReady = afterBarrier(second);
+      const firstReady = atSequence(first, 3);
+      const secondReady = atSequence(second, 3);
       await query("UPDATE wujie_presence_project_sequences SET sequence = sequence + 1 WHERE project_id = 'project-a'");
       await query("SELECT pg_notify('wujie_presence_changed', 'project-a')");
       await Promise.all([firstReady, secondReady]);
-      const { getPool } = await import('../../src/lib/db-client');
-      const rosterReads = vi.spyOn(getPool(), 'query');
-      try {
-        const firstChange = once(first, 'message');
-        const secondChange = once(second, 'message');
+      if (delayInitialization) expect(initializedSignals.size).toBe(1);
+      releaseInitialRead();
+      await observeWithin(initialized, 2_000, 'both actual post-join snapshots returned');
+      await observeWithin(barrierReceived, 2_000, 'join and barrier notifications received');
+      await Promise.all(refreshes);
+      expect(initializedSignals.size).toBe(2);
+      await withRosterReadBudget(1, async (): Promise<void> => {
+        const firstChange = atSequence(first, 4);
+        const secondChange = atSequence(second, 4);
         await query("UPDATE wujie_presence_project_sequences SET sequence = sequence + 1 WHERE project_id = 'project-a'");
         await query("SELECT pg_notify('wujie_presence_changed', 'project-a')");
         await Promise.all([firstChange, secondChange]);
-        expect(rosterReads.mock.calls.filter(([sql]) =>
-          typeof sql === 'string' && sql.includes('FROM wujie_presence_leases lease'))).toHaveLength(1);
-      } finally {
-        rosterReads.mockRestore();
+      });
+      } catch (error) { bodyFailed = true; bodyError = error; throw error; }
+      finally {
+        await runPostgresCleanup([
+          { name: 'release-initial-snapshot-producer', run: releaseInitialRead },
+          { name: 'drain-real-snapshots-and-notifications', run: async (): Promise<void> => {
+            const settled = await Promise.allSettled([...reads, ...refreshes]);
+            const errors = settled.flatMap(result => result.status === 'rejected' ? [result.reason as unknown] : []);
+            if (errors.length > 0) throw new AggregateError(errors, 'Actual initialization or refresh failed');
+          } },
+          { name: 'restore-shared-roster-observers', run: (): void => {
+            snapshotObserver.mockRestore(); joinObserver.mockRestore(); subscriptionObserver.mockRestore();
+            for (const remove of removeFrameListeners) remove();
+          } },
+        ]).catch((cleanupError: unknown): never => {
+          if (!bodyFailed) throw cleanupError;
+          throw new AggregateError([bodyError, cleanupError], 'Shared roster body and cleanup failed');
+        });
       }
     });
   });
@@ -640,16 +879,14 @@ describe('presence WebSocket on isolated PostgreSQL', () => {
         if (!renewed) await new Promise(resolve => setTimeout(resolve, 10));
       }
       expect(renewed).toBe(true);
-      const { getPool } = await import('../../src/lib/db-client');
-      const rosterReads = vi.spyOn(getPool(), 'query');
       let reconciled = false;
       const deadline = Date.now() + 1_000;
-      while (!reconciled && Date.now() < deadline) {
-        reconciled = rosterReads.mock.calls.some(([sql]) =>
-          typeof sql === 'string' && sql.includes('FROM wujie_presence_leases lease'));
-        await new Promise(resolve => setTimeout(resolve, 20));
-      }
-      rosterReads.mockRestore();
+      await withRosterReadBudget(undefined, async (rosterReads: RosterReadObservation): Promise<void> => {
+        while (!reconciled && Date.now() < deadline) {
+          reconciled = rosterReads.completed() > 0;
+          await new Promise(resolve => setTimeout(resolve, 20));
+        }
+      });
       expect(reconciled).toBe(true);
       expect(receivedFresh).toBe(false);
     }, { reconcileIntervalMs: 100 });

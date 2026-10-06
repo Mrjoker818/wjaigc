@@ -4,11 +4,10 @@ import { PassThrough } from 'node:stream';
 import { describe, expect, it, vi } from 'vitest';
 
 const httpsRequestMock = vi.hoisted(() => vi.fn());
+const lookupMock = vi.hoisted(() => vi.fn().mockResolvedValue([{ address: '8.8.8.8', family: 4 }]));
 
 vi.mock('node:dns/promises', () => ({
-  lookup: vi.fn().mockResolvedValue([
-    { address: '8.8.8.8', family: 4 },
-  ]),
+  lookup: lookupMock,
 }));
 vi.mock('node:https', () => ({ request: httpsRequestMock }));
 
@@ -65,6 +64,53 @@ function mockHttpsResponses(
 }
 
 describe('safe remote image download transport', () => {
+  it('ends an outstanding DNS lookup when the overall deadline aborts', async () => {
+    lookupMock.mockImplementationOnce(() => new Promise(() => undefined));
+    const controller = new AbortController();
+    const pending = downloadPublicImage('https://cdn.example.com/hanging-dns.png', { signal: controller.signal });
+    controller.abort(new Error('dns deadline'));
+    const outcome = await Promise.race([
+      pending.then(() => 'resolved', error => error instanceof Error ? error.message : 'unknown'),
+      new Promise<string>(resolve => setTimeout(() => resolve('pending'), 50)),
+    ]);
+    expect(outcome).toBe('dns deadline');
+  });
+
+  it('permits a missing Content-Type only under explicit octet-stream opt-in', async () => {
+    const bytes = Buffer.from('opaque bytes');
+    mockHttpsResponses(() => ({ statusCode: 200, body: bytes }));
+    await expect(downloadPublicImage('https://cdn.example.com/image')).rejects.toThrow();
+    await expect(downloadPublicImage('https://cdn.example.com/image', {
+      allowedMimeTypes: ['application/octet-stream'],
+      allowMissingContentTypeAsOctetStream: true,
+    })).resolves.toEqual({ buffer: bytes, mimeType: 'application/octet-stream' });
+  });
+
+  it('rejects an undeclared response as soon as streamed bytes exceed the supplied budget', async () => {
+    mockHttpsResponses(() => ({ statusCode: 200, headers: { 'content-type': 'image/png' }, body: Buffer.from('12345') }));
+    await expect(downloadPublicImage('https://cdn.example.com/image.png', { maxBytes: 4 }))
+      .rejects.toThrow('size limit');
+  });
+
+  it.each(['video/x-msvideo', 'video/x-matroska'])(
+    'keeps a previously supported %s source-map recovery behind explicit MIME opt-in', async (mimeType): Promise<void> => {
+      const bytes = mimeType === 'video/x-msvideo' ? Buffer.from('RIFF0000AVI ') : Buffer.from([0x1a, 0x45, 0xdf, 0xa3]);
+      mockHttpsResponses(() => ({ statusCode: 200, headers: { 'content-type': mimeType }, body: bytes }));
+      await expect(downloadPublicImage('https://cdn.example.com/media', { allowedMimeTypes: [mimeType] }))
+        .resolves.toEqual({ buffer: bytes, mimeType });
+    },
+  );
+  it('downloads BMP bytes only with explicit opt-in and still enforces actual stream size', async (): Promise<void> => {
+    const bmp = Buffer.alloc(58);
+    bmp.write('BM'); bmp.writeUInt32LE(58, 2); bmp.writeUInt32LE(54, 10);
+    bmp.writeUInt32LE(40, 14); bmp.writeInt32LE(1, 18); bmp.writeInt32LE(1, 22);
+    bmp.writeUInt16LE(1, 26); bmp.writeUInt16LE(24, 28);
+    mockHttpsResponses(() => ({ statusCode: 200, headers: { 'content-type': 'image/bmp' }, body: bmp }));
+    expect(isAllowedRemoteMimeType('image/bmp')).toBe(false);
+    await expect(downloadPublicImage('https://cdn.example.com/a.bmp')).rejects.toThrow();
+    expect((await downloadPublicImage('https://cdn.example.com/a.bmp', { allowedMimeTypes: ['image/bmp'] })).buffer).toEqual(bmp);
+    await expect(downloadPublicImage('https://cdn.example.com/a.bmp', { allowedMimeTypes: ['image/bmp'], maxBytes: 20 })).rejects.toThrow();
+  });
   it('sends credentials only to the exact explicitly authorized hostname', async () => {
     const observedAuthorization: Array<string | undefined> = [];
     mockHttpsResponses((requestOptions) => {

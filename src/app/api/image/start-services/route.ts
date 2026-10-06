@@ -39,8 +39,9 @@ export async function POST(request: NextRequest) {
 
         // Ensure model directory exists
         const workspacePath = process.env.COZE_WORKSPACE_PATH || '/workspace/projects';
-        const fullModelDir = path.isAbsolute(modelDir) ? modelDir : path.join(workspacePath, modelDir);
-        if (!fs.existsSync(fullModelDir)) {
+        const fullModelDir = path.isAbsolute(modelDir) ? modelDir
+          : path.join(/* turbopackIgnore: true */ workspacePath, modelDir);
+        if (!fs.existsSync(/* turbopackIgnore: true */ fullModelDir)) {
           fs.mkdirSync(fullModelDir, { recursive: true });
         }
 
@@ -95,14 +96,16 @@ export async function POST(request: NextRequest) {
   // 2. Check Upscayl (ONNX) availability
   try {
     const workspacePath = process.env.COZE_WORKSPACE_PATH || '/workspace/projects';
-    const modelsDir = process.env.UPSCAYL_MODELS_DIR || path.join(workspacePath, 'upscayl-models');
-    const onnxModelsDir = process.env.ONNX_MODELS_DIR || path.join(workspacePath, 'onnx-models');
+    const modelsDir = process.env.UPSCAYL_MODELS_DIR
+      || path.join(/* turbopackIgnore: true */ workspacePath, 'upscayl-models');
+    const onnxModelsDir = process.env.ONNX_MODELS_DIR
+      || path.join(/* turbopackIgnore: true */ workspacePath, 'onnx-models');
 
     // Check for ONNX model files
     let onnxModelsFound = false;
     for (const dir of [onnxModelsDir, modelsDir]) {
-      if (fs.existsSync(dir)) {
-        const files = fs.readdirSync(dir);
+      if (fs.existsSync(/* turbopackIgnore: true */ dir)) {
+        const files = fs.readdirSync(/* turbopackIgnore: true */ dir);
         if (files.some(f => f.endsWith('.onnx'))) {
           onnxModelsFound = true;
           break;
@@ -121,8 +124,8 @@ export async function POST(request: NextRequest) {
     }
 
     // Check for upscale script
-    const scriptPath = path.join(workspacePath, 'scripts', 'upscale_onnx.py');
-    const scriptFound = fs.existsSync(scriptPath);
+    const scriptPath = path.join(/* turbopackIgnore: true */ workspacePath, 'scripts', 'upscale_onnx.py');
+    const scriptFound = fs.existsSync(/* turbopackIgnore: true */ scriptPath);
 
     if (onnxModelsFound && onnxReady && scriptFound) {
       results.upscayl = { started: true };

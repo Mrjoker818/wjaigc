@@ -12,6 +12,7 @@ import {
   validateUpscaleTargetDimensions,
 } from '@/lib/upscale-target';
 import type { UpscaleProductMode } from '@/lib/upscale-orchestrator';
+import { resolve302UpscaleModelId } from '@/lib/302-upscale-models';
 import {
   getConstrainedFixedPanelPosition,
   type FixedPanelPosition,
@@ -49,6 +50,12 @@ export interface CanvasEditUpscaleSvgPanelProps {
   showUpscalePresetMenu: boolean;
   setShowUpscalePresetMenu: React.Dispatch<React.SetStateAction<boolean>>;
   handleUpscaleConfirm: () => void | Promise<void>;
+  upscaleQuote: { total: number; components: { upscale: number; enhance: number } } | null;
+  isUpscaleQuoteLoading: boolean;
+  isUpscaleSubmitting: boolean;
+  isUpscaleSubmissionUnknown: boolean;
+  recoveredUpscaleTask: { taskId: string; status: string } | null;
+  onResetUpscaleQuote: () => void;
   isLoadingUpscaleModels: boolean;
   upscaleModelsLoadError: string;
   upscaleActualW: number;
@@ -98,6 +105,12 @@ export function CanvasEditUpscaleSvgPanel(props: CanvasEditUpscaleSvgPanelProps)
     showUpscalePresetMenu,
     setShowUpscalePresetMenu,
     handleUpscaleConfirm,
+    upscaleQuote,
+    isUpscaleQuoteLoading,
+    isUpscaleSubmitting,
+    isUpscaleSubmissionUnknown,
+    recoveredUpscaleTask,
+    onResetUpscaleQuote,
     isLoadingUpscaleModels,
     upscaleModelsLoadError,
     upscaleActualW,
@@ -154,6 +167,9 @@ export function CanvasEditUpscaleSvgPanel(props: CanvasEditUpscaleSvgPanelProps)
             && targetDim.canUpscale
             && !targetValidationError
             && (upscaleMode !== 'ai-only' || Boolean(selectedUpscaleModel && !selectedUpscaleModel.unavailableReason));
+          const requiresQuote = upscaleMode === 'ai-only'
+            && Boolean(selectedUpscaleModel && resolve302UpscaleModelId(selectedUpscaleModel.modelId));
+          const controlsLocked = Boolean(upscaleQuote) || isUpscaleQuoteLoading || isUpscaleSubmitting;
 
           return (
             <div
@@ -176,6 +192,7 @@ export function CanvasEditUpscaleSvgPanel(props: CanvasEditUpscaleSvgPanelProps)
                 <div className="relative">
                   <button
                     onClick={(e) => { e.stopPropagation(); setShowUpscalePresetMenu(!showUpscalePresetMenu); }}
+                    disabled={controlsLocked}
                     className={`px-2.5 py-1 text-xs rounded-md transition-all flex items-center gap-1 font-semibold ${
                       isMonochrome ? 'bg-blue-50 text-blue-700 hover:bg-blue-100' : 'bg-[#252525] text-text-bright hover:bg-[#282828]/85'
                     }`}
@@ -226,7 +243,7 @@ export function CanvasEditUpscaleSvgPanel(props: CanvasEditUpscaleSvgPanelProps)
                     <select
                       aria-label="AI 放大模型"
                       value={selectedUpscaleModelKey}
-                      disabled={isLoadingUpscaleModels || configuredUpscaleModels.length === 0}
+                      disabled={controlsLocked || isLoadingUpscaleModels || configuredUpscaleModels.length === 0}
                       onChange={(e) => setSelectedUpscaleModelKey(e.target.value)}
                       onPointerDown={(e) => e.stopPropagation()}
                       className={`h-7 max-w-64 border px-2 text-xs outline-none focus-visible:ring-2 focus-visible:ring-primary/40 ${
@@ -270,6 +287,7 @@ export function CanvasEditUpscaleSvgPanel(props: CanvasEditUpscaleSvgPanelProps)
                     <button
                       key={mode.id}
                       onClick={(e) => { e.stopPropagation(); setUpscaleMode(mode.id); }}
+                      disabled={controlsLocked}
                       className={`px-2 py-1 text-xs transition-all font-medium ${
                         index === 0 ? 'rounded-l-md' : index === modes.length - 1 ? 'rounded-r-md' : ''
                       } ${
@@ -295,18 +313,46 @@ export function CanvasEditUpscaleSvgPanel(props: CanvasEditUpscaleSvgPanelProps)
                 {/* Execute button */}
                 <button
                   onClick={handleUpscaleConfirm}
-                  disabled={!canExecute}
-                  className={`w-8 h-8 flex items-center justify-center rounded-lg transition-all ${
-                    !canExecute
+                  disabled={(!canExecute && !isUpscaleSubmissionUnknown) || isUpscaleQuoteLoading || isUpscaleSubmitting}
+                  className={`${upscaleQuote || isUpscaleQuoteLoading || isUpscaleSubmitting ? 'min-w-8 px-2' : 'w-8'} h-8 max-[640px]:h-11 flex items-center justify-center gap-1 rounded-lg transition-all focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gold ${
+                    (!canExecute && !isUpscaleSubmissionUnknown) || isUpscaleQuoteLoading || isUpscaleSubmitting
                       ? isMonochrome ? 'bg-gray-200 text-gray-400 cursor-not-allowed' : 'bg-[#333] text-gold-muted/50 cursor-not-allowed'
                       : isMonochrome ? 'bg-blue-500 text-white hover:bg-blue-600 active:scale-95' : 'bg-gold text-black hover:bg-[#e5c047] active:scale-95'
                   }`}
-                  title={targetValidationError || (targetDim.canUpscale ? '开始放大' : '原图已达到该分辨率')}
+                  title={isUpscaleSubmissionUnknown ? '核对原放大任务' : targetValidationError || (targetDim.canUpscale
+                    ? upscaleQuote ? '确认报价并开始放大' : requiresQuote ? '查看放大报价' : '开始放大'
+                    : '原图已达到该分辨率')}
                 >
-                  <Sparkles size={14} />
+                  <Sparkles size={14} aria-hidden="true" />
+                  {isUpscaleQuoteLoading && <span className="text-xs whitespace-nowrap">报价中…</span>}
+                  {isUpscaleSubmitting && <span className="text-xs whitespace-nowrap">提交中…</span>}
+                  {isUpscaleSubmissionUnknown && !isUpscaleSubmitting && <span className="text-xs whitespace-nowrap">核对原任务</span>}
+                  {upscaleQuote && !isUpscaleSubmitting && !isUpscaleSubmissionUnknown
+                    && <span className="text-xs whitespace-nowrap">确认 {upscaleQuote.total} 积分</span>}
                 </button>
-                <button onClick={exitEditMode} className={panelCancelBtnClass}>取消</button>
+                <button disabled={isUpscaleSubmitting || isUpscaleSubmissionUnknown}
+                  onClick={() => { onResetUpscaleQuote(); exitEditMode(); }}
+                  className={`${panelCancelBtnClass} max-[640px]:min-h-11 disabled:cursor-not-allowed disabled:opacity-50`}>取消</button>
               </div>
+              {upscaleQuote && (
+                <div role="status" className={`mt-2 flex items-center justify-center gap-3 rounded-lg px-3 py-2 text-xs tabular-nums ${
+                  isMonochrome ? 'bg-white text-gray-800' : 'bg-[#1e1e1e] text-text-bright'
+                }`}>
+                  <span>{isUpscaleSubmissionUnknown ? '提交状态未知，勿重新报价' : `本次报价：${upscaleQuote.total} 积分`}</span>
+                  <span className={isMonochrome ? 'text-gray-600' : 'text-gold-muted'}>
+                    放大 {upscaleQuote.components.upscale} · 精修 {upscaleQuote.components.enhance}
+                  </span>
+                  <button type="button" onClick={onResetUpscaleQuote} disabled={isUpscaleSubmissionUnknown}
+                    className="px-2 max-[640px]:min-h-11 underline underline-offset-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-gold">
+                    修改
+                  </button>
+                </div>
+              )}
+              {isUpscaleSubmissionUnknown && recoveredUpscaleTask && (
+                <div role="status" className="mt-2 text-center text-xs text-amber-300">
+                  原任务 {recoveredUpscaleTask.taskId} · {recoveredUpscaleTask.status} · 点击核对再次查询
+                </div>
+              )}
               <div className="text-center mt-1">
                 <span className={`text-xs ${isMonochrome ? 'text-gray-400' : 'text-gold-muted/70'}`}>Esc 退出</span>
               </div>

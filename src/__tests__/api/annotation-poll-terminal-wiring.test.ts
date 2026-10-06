@@ -12,7 +12,7 @@ describe('annotation remote poll terminal wiring', () => {
   it('commits remote edit success through the database before memory state', () => {
     const remoteEditStart = source.indexOf("if (taskId.startsWith('edit_'))");
     const imageSuccess = source.indexOf('if (images.length > 0)', remoteEditStart);
-    const databaseCommit = source.indexOf('completeCloudTask(taskId,', imageSuccess);
+    const databaseCommit = source.indexOf('await completeDurableEditResult(completedResult)', imageSuccess);
     const memoryCommit = source.indexOf("updateTaskProgress(taskId, { status: 'completed'", imageSuccess);
 
     expect(remoteEditStart).toBeGreaterThan(-1);

@@ -51,6 +51,7 @@ import { readProviderCapabilityOverrides } from '@/lib/task-core/model-capabilit
 import JSZip from 'jszip';
 import { CanvasShareManagePanel } from '@/components/canvas-share/manage-panel';
 import { DashboardProjectActionsMenu } from '@/components/dashboard/project-actions-menu';
+import { ProjectCollaborationDialog } from '@/components/dashboard/project-collaboration-dialog';
 
 type TabType = 'projects' | 'templates' | 'assets' | 'stats' | 'credits' | 'settings' | 'users' | 'apis' | 'data' | 'ecom-templates' | 'payment-config' | 'audit' | 'overview' | 'desktop-admin' | 'connector-admin' | 'groups' | 'chat' | 'media-gateway';
 type ProjectFilter = 'all' | 'recent' | 'starred';
@@ -324,6 +325,9 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
   const [shareManagementProject, setShareManagementProject] = useState<Project | null>(null);
   const [shareManagementOpen, setShareManagementOpen] = useState(false);
   const shareManagementReturnFocusRef = useRef<HTMLButtonElement | null>(null);
+  const [collaborationProject, setCollaborationProject] = useState<Project | null>(null);
+  const [collaborationOpen, setCollaborationOpen] = useState(false);
+  const [collaborationReturnFocusTarget, setCollaborationReturnFocusTarget] = useState<HTMLButtonElement | null>(null);
   const [projectManageMode, setProjectManageMode] = useState(false);
   const [selectedProjectIds, setSelectedProjectIds] = useState<Set<string>>(new Set());
   const [projectDeleteLoading, setProjectDeleteLoading] = useState(false);
@@ -2434,6 +2438,11 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                                     setShareManagementOpen(true);
                                   }}
                                   onDelete={() => void handleDelete(project.id)}
+                                  onManageCollaboration={returnFocusTarget => {
+                                    setCollaborationReturnFocusTarget(returnFocusTarget);
+                                    setCollaborationProject(project);
+                                    setCollaborationOpen(true);
+                                  }}
                                 />
                               </div>
                             )}
@@ -4316,6 +4325,12 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
           projectName={shareManagementProject.name}
           returnFocusRef={shareManagementReturnFocusRef}
         />
+      )}
+
+      {collaborationProject && collaborationProject.userId === user.id && (
+        <ProjectCollaborationDialog open={collaborationOpen} userId={user.id}
+          projectId={collaborationProject.id} projectName={collaborationProject.name}
+          returnFocusTarget={collaborationReturnFocusTarget} onOpenChange={setCollaborationOpen} />
       )}
 
       <ConfirmDialog open={confirmDlg.open} title={confirmDlg.title} message={confirmDlg.message} variant={confirmDlg.variant} onConfirm={confirmDlg.onConfirm} onCancel={confirmDlg.onCancel} />

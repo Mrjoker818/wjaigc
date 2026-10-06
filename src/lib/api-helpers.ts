@@ -97,13 +97,13 @@ export function shouldSkipV1Retry(baseUrl: string): boolean {
 export async function fetchWithV1Retry(
   baseUrl: string,
   path: string,
-  options: RequestInit & { skipV1Retry?: boolean } = {},
+  options: RequestInit & { skipV1Retry?: boolean; transport?: typeof fetch; propagateErrors?: boolean } = {},
   retryWithV1 = true,
   defaultTimeoutMs = 300_000 // 5min default timeout for all external API calls (some models take >2min)
 ): Promise<Response> {
   const cleanBase = baseUrl.replace(/\/+$/, '');
   const url = `${cleanBase}${path}`;
-  const { skipV1Retry, ...fetchOptions } = options;
+  const { skipV1Retry, transport = fetch, propagateErrors, ...fetchOptions } = options;
 
   // Apply default timeout if no signal is already set
   const effectiveOptions: RequestInit = { ...fetchOptions };
@@ -111,7 +111,7 @@ export async function fetchWithV1Retry(
     effectiveOptions.signal = AbortSignal.timeout(defaultTimeoutMs);
   }
   
-  const response = await fetch(url, effectiveOptions);
+  const response = await transport(url, effectiveOptions);
   
   // Determine if we need to retry with /v1:
   // 1. retryWithV1 is explicitly enabled AND skipV1Retry is not set
@@ -139,13 +139,14 @@ export async function fetchWithV1Retry(
       } else {
         retryOptions.signal = timeoutSignal;
       }
-      const retryResponse = await fetch(retryUrl, retryOptions);
+      const retryResponse = await transport(retryUrl, retryOptions);
       // Accept retry response if it's JSON (even if status is 4xx like 401 - means API is reachable)
       // or if it's a successful response
       if (retryResponse.ok || isJsonLikeResponse(retryResponse)) {
         return retryResponse;
       }
-    } catch {
+    } catch (error) {
+      if (propagateErrors) throw error;
       // Retry also failed, fall through to return original response
     }
   }

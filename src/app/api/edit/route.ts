@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse, after } from 'next/server';
+import { createHash, randomUUID } from 'node:crypto';
 import sharp from 'sharp';
 import { findProviderForModel, findProviderById, normalizeApiBaseUrl, getApiProviders } from '@/lib/server-api-config';
 import { normalizeModelForApi } from '@/lib/model-capabilities';
@@ -36,8 +37,12 @@ import {
   completeCloudTask,
   terminateCloudTaskAndRefund,
   updateCloudTask,
+  claimCloudTaskLease,
+  releaseCloudTaskLease,
+  type CloudTask,
+  type PersistedCloudTask,
 } from '@/lib/cloud-task-storage';
-import { loadSafeImageInput, safeSharp } from '@/lib/safe-image-input';
+import { loadSafeImageInput, normalizeTrustedManagedMediaInput, safeSharp } from '@/lib/safe-image-input';
 import {
   createTaskEntryAudit,
   executeTaskEntryMigration,
@@ -47,6 +52,21 @@ import { IdempotencyConflictError } from '@/lib/task-core/idempotency';
 import type { DurableTaskStatus } from '@/lib/task-core/task-state';
 import { getRequestId } from '@/lib/request-id';
 import { projectPersistedCompletedTask } from '@/lib/cloud-task-persistence';
+import { authorizeGenerationProject, GenerationProjectAccessError } from '@/lib/collaboration/generation-project-access';
+import { parseCanvasEditPublication, validateCanvasEditSources, CanvasEditAdmissionError, classifyCanvasEditError,
+  readCanvasEditTask, validateCanvasEditReplay, isCanvasEditTerminal } from '@/lib/collaboration/canvas-edit-admission';
+import type { CanvasTaskPublicationInput } from '@/lib/collaboration/task-publication';
+import { WorkflowEditIntentConflictError, WorkflowEditSourceError,
+  resolveLegacyWorkflowEditSource, type WorkflowEditPublicationInput } from '@/lib/collaboration/workflow-edit-publication';
+import { completeWorkflowEditTask } from '@/lib/collaboration/workflow-edit-terminal';
+import { probeWorkflowEditAcceptanceStorage } from '@/lib/s3-storage';
+import { parseTrustedAnnotationEdit, validateCompiledAnnotationReference, validateAnnotationEditSource,
+  privateAnnotationSourceIdentity, assertPrivateAnnotationTaskIdentity, AnnotationEditContextError } from '@/lib/annotation-edit-context';
+import { AnnotationSourceAdmissionError, assertPrivateAnnotationSourceLocked } from '@/lib/annotation-authorized-source';
+import { prepareAnnotationImageByteProof, assertAnnotationImageBytes } from '@/lib/annotation-image-byte-proof';
+import { isDeepStrictEqual } from 'node:util';
+import { readPrivateAnnotationTask, assertPrivateAnnotationTaskBilling, terminatePrivateAnnotationTask,
+  completePrivateAnnotationTask, type PrivateAnnotationTaskIdentity } from '@/lib/task-core/private-annotation-task-guard';
 
 // 允许大请求体（base64图片可能很大，50MB限制）
 export const runtime = 'nodejs';
@@ -71,10 +91,18 @@ interface EditTaskResult {
 }
 
 interface EditRequestBody {
+  [key: string]: unknown;
+  assetWorkspace?: string;
+  assetWorkspaceId?: string;
+  assetSelectedEntityIds?: string[];
   projectId?: string;
   sessionId?: string;
   messageId?: string;
   assetParentVersionIds?: string[];
+  assetSourcePlacementId?: string;
+  workflowId?: string;
+  nodeId?: string;
+  sourceEntityId?: string;
   assetProjectionMode?: 'derived' | 'revision';
   image?: string;
   prompt?: string;
@@ -116,7 +144,7 @@ function sanitizeEditTaskResult(result: Record<string, unknown>): Record<string,
 // export { getEditTask, deleteEditTask };
 
 /** 本地便捷：失败任务 */
-function failTask(taskId: string, error: string, networkError = false) {
+function failLocalTask(taskId: string, error: string, networkError = false): void {
   failEditTask(taskId, error, networkError);
   // ★ 同步更新任务注册中心
   updateTaskProgress(taskId, { status: 'failed', error });
@@ -127,7 +155,16 @@ async function reportEditTaskProgress(
   progress: number,
   stage: string,
   persistCloud: boolean,
+  leaseOwner?: string,
 ): Promise<void> {
+  if (leaseOwner) {
+    if (!await updateCloudTask(taskId, { status: 'processing', progress, label: stage, leaseOwner })) {
+      throw new CanvasEditAdmissionError(409, 'CANVAS_EDIT_EXECUTION_LOST');
+    }
+    updateTaskStage(taskId, stage, progress);
+    updateTaskProgress(taskId, { status: 'processing', progress, label: stage });
+    return;
+  }
   updateTaskStage(taskId, stage, progress);
   updateTaskProgress(taskId, { status: 'processing', progress, label: stage });
   if (persistCloud) {
@@ -364,6 +401,11 @@ export async function POST(request: NextRequest) {
   let usesAtomicBilling = false;
   let sessionUser: import('@/lib/user-types').User | null = null;
   let annotationTaskId = '';
+  let canvasPublication: CanvasTaskPublicationInput | undefined;
+  let workflowPublication: WorkflowEditPublicationInput | undefined;
+  let privateTaskIdentity: PrivateAnnotationTaskIdentity | undefined;
+  let privateTaskCreated = false;
+  let privateAnnotationRequest = false;
   try {
     const annotationBodyLimit = 64 * 1024 * 1024;
     const declaredBodySize = Number(request.headers.get('content-length') || 0);
@@ -387,6 +429,57 @@ export async function POST(request: NextRequest) {
       parsedRequestBody = JSON.parse(rawBody) as EditRequestBody;
     } else {
       parsedRequestBody = await request.json() as EditRequestBody;
+    }
+    const annotationEdit = parseTrustedAnnotationEdit(parsedRequestBody, authResult.source, authResult.userId);
+    if (annotationEdit) await validateCompiledAnnotationReference(annotationEdit.referenceImage, request.signal);
+    const projectAccess = await authorizeGenerationProject({ actorUserId: authResult.userId, projectId: parsedRequestBody.projectId });
+    if (annotationEdit?.source.access && !isDeepStrictEqual(annotationEdit.source.access, projectAccess)) {
+      throw new AnnotationSourceAdmissionError(409);
+    }
+    const requestHash = createAnnotationRequestHash(parsedRequestBody);
+    const singleIdentity = { type: 'edit' as const, idempotencyKey: annotationIdempotencyKey || requestId, requestDigest: requestHash };
+    let originalCanvasTask: CloudTask | null = null;
+    let canvasImages: string[] | undefined;
+    if (projectAccess.kind === 'document' && (parsedRequestBody.assetWorkspace === undefined || parsedRequestBody.assetWorkspace === 'canvas')) {
+      canvasPublication = parseCanvasEditPublication(projectAccess, parsedRequestBody);
+      originalCanvasTask = await readCanvasEditTask(canvasPublication, singleIdentity);
+      if (originalCanvasTask && isCanvasEditTerminal(originalCanvasTask.status)) {
+        return NextResponse.json({ success: true, mode: 'polling', taskId: originalCanvasTask.id, replayed: true });
+      }
+      if (annotationEdit) {
+        await validateAnnotationEditSource(annotationEdit);
+        canvasPublication.annotationSource = annotationEdit.source;
+        canvasPublication.annotationByteProof = await prepareAnnotationImageByteProof(annotationEdit.source, request.signal);
+      }
+      if (resumeAgentExecution && !originalCanvasTask) throw new CanvasEditAdmissionError(409, 'CANVAS_EDIT_RESUME_MISSING');
+      if (originalCanvasTask) await validateCanvasEditReplay(canvasPublication, singleIdentity, originalCanvasTask.id);
+      canvasImages = await validateCanvasEditSources(canvasPublication, parsedRequestBody, request.nextUrl.origin);
+    }
+    privateAnnotationRequest = Boolean(annotationEdit && !canvasPublication);
+    if (privateAnnotationRequest) await validateAnnotationEditSource(annotationEdit!);
+    if (projectAccess.kind === 'document' && parsedRequestBody.assetWorkspace === 'workflow'
+      && (parsedRequestBody.workflowId !== undefined || parsedRequestBody.nodeId !== undefined
+        || parsedRequestBody.sourceEntityId !== undefined || parsedRequestBody.assetSourcePlacementId !== undefined)) {
+      const sourceVersionId = parsedRequestBody.assetParentVersionIds?.length === 1
+        ? parsedRequestBody.assetParentVersionIds[0] : '';
+      workflowPublication = {
+        access: projectAccess,
+        workflowId: parsedRequestBody.workflowId || '',
+        nodeId: parsedRequestBody.nodeId || '',
+        sourceEntityId: parsedRequestBody.sourceEntityId || '',
+        sourceVersionId,
+        sourcePlacementId: parsedRequestBody.assetSourcePlacementId || '',
+        imageUrl: parsedRequestBody.image || '',
+        origin: request.nextUrl.origin,
+      };
+    } else if (projectAccess.kind === 'document' && parsedRequestBody.assetWorkspace === 'workflow') {
+      workflowPublication = await resolveLegacyWorkflowEditSource({
+        access: projectAccess,
+        imageUrl: parsedRequestBody.image || '',
+        origin: request.nextUrl.origin,
+        nodeId: `legacy-edit-${createHash('sha256').update(annotationIdempotencyKey || requestId).digest('hex').slice(0, 32)}`,
+        sourceVersionIds: parsedRequestBody.assetParentVersionIds,
+      });
     }
     const {
       image,         // base64 data URL（客户端已转换）
@@ -426,7 +519,7 @@ export async function POST(request: NextRequest) {
 
     // ★ 从 model 中提取纯 modelId（前端可能传 providerId::modelId 格式）
     let pureModel = model;
-    const extractedProviderId = model.includes('::') ? model.split('::')[0] : '';
+    const extractedProviderId = originalCanvasTask?.providerId || (model.includes('::') ? model.split('::')[0] : '');
     if (model.includes('::')) {
       pureModel = model.split('::').pop()!;
       console.log(`[edit] Stripped provider prefix from model: "${model}" → "${pureModel}"`);
@@ -504,14 +597,26 @@ export async function POST(request: NextRequest) {
       }, { status: 400 });
     }
 
+    if (workflowPublication) {
+      let storageReady = false;
+      try { storageReady = await probeWorkflowEditAcceptanceStorage(); }
+      catch { /* A failed private write, read or cleanup must reject this billable submission. */ }
+      if (!storageReady) {
+        return NextResponse.json({ success: false, code: 'WORKFLOW_EDIT_ACCEPTANCE_STORAGE_UNAVAILABLE',
+          error: '工作流修图结果存储暂不可用，请稍后重试' }, { status: 503 });
+      }
+    }
+
     type EditAdmission = {
       taskId: string | null;
       creditCost: number;
       reused: boolean;
       status: DurableTaskStatus;
+      providerId?: string;
+      model?: string;
+      privateTask?: PersistedCloudTask;
     };
-    const requestHash = createAnnotationRequestHash(parsedRequestBody);
-    const actualProviderId = extractedProviderId || providerId || imageProvider?.id || '';
+    let actualProviderId = extractedProviderId || providerId || imageProvider?.id || '';
     const plannedCreditCost = sessionUser
       ? await calculateConfiguredCreditCost(
           'image_retouch',
@@ -588,6 +693,11 @@ export async function POST(request: NextRequest) {
           idempotencyKey: annotationIdempotencyKey || requestId,
           requestDigest: requestHash,
           creditCost: plannedCreditCost,
+          ...(canvasPublication ? { canvasPublication } : {}),
+          ...(workflowPublication ? { workflowPublication } : {}),
+          ...(annotationEdit && !canvasPublication ? {
+            beforeCharge: async (client): Promise<void> => assertPrivateAnnotationSourceLocked(client, annotationEdit.source),
+          } : {}),
           task: {
             id: `edit_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
             projectId,
@@ -601,9 +711,14 @@ export async function POST(request: NextRequest) {
             label: '语言修图',
             result: {
               requestHash,
+              ...(annotationEdit && !canvasPublication ? {
+                annotationSourceIdentity: privateAnnotationSourceIdentity(annotationEdit.source, requestHash),
+              } : {}),
               submissionPayload: {
                 assetParentVersionIds: assetParentVersionIds || [],
                 assetProjectionMode: assetProjectionMode === 'revision' ? 'revision' : 'derived',
+                ...(workflowPublication ? { assetWorkspace: 'workflow',
+                  workflowId: workflowPublication.workflowId, nodeId: workflowPublication.nodeId } : {}),
               },
             },
             createdAt: now,
@@ -615,6 +730,9 @@ export async function POST(request: NextRequest) {
           creditCost: result.task.creditCost || 0,
           reused: result.reused,
           status: result.task.status,
+          providerId: result.task.providerId,
+          model: result.task.model,
+          ...(annotationEdit && !canvasPublication ? { privateTask: result.task } : {}),
         };
       },
       factsFromResult: value => ({
@@ -638,7 +756,19 @@ export async function POST(request: NextRequest) {
     usesAtomicBilling = admission.mode === 'core-v2';
     annotationTaskId = admission.value.taskId || '';
     deductedCredits = admission.value.creditCost;
-    if (admission.value.reused && admission.value.taskId && !resumeAgentExecution) {
+    if (annotationEdit && !canvasPublication) {
+      privateTaskIdentity = { taskId: annotationTaskId, actorUserId: authResult.userId,
+        projectId: annotationEdit.source.projectId, requestDigest: requestHash, creditCost: deductedCredits };
+      privateTaskCreated = !admission.value.reused;
+    }
+    if (annotationEdit && !canvasPublication && !isCanvasEditTerminal(admission.value.status)) {
+      const privateTask = admission.value.reused
+        ? await readPrivateAnnotationTask(annotationTaskId) : admission.value.privateTask || null;
+      assertPrivateAnnotationTaskIdentity(privateTask, annotationTaskId,
+        annotationEdit.source, requestHash);
+    }
+    if (admission.value.taskId && ((canvasPublication && isCanvasEditTerminal(admission.value.status))
+      || (admission.value.reused && !canvasPublication && !resumeAgentExecution))) {
       return NextResponse.json({
         success: true,
         mode: 'polling',
@@ -647,6 +777,15 @@ export async function POST(request: NextRequest) {
       });
     }
 
+    if (canvasPublication && admission.value.reused) {
+      if (admission.value.model !== pureModel || !admission.value.providerId) throw new CanvasEditAdmissionError(409, 'CANVAS_EDIT_PROVIDER_CONFLICT');
+      actualProviderId = admission.value.providerId;
+      imageProvider = await findProviderById(actualProviderId);
+      if (!imageProvider?.apiKey) throw new CanvasEditAdmissionError(503, 'CANVAS_EDIT_PROVIDER_UNAVAILABLE');
+      effectiveApiKey = apiKey || imageProvider.apiKey;
+      effectiveBaseUrl = normalizeApiBaseUrl(imageProvider.baseUrl || '');
+      apiModelName = normalizeModelForApi(pureModel, { providerModels: imageProvider.selectedModels || [] }).apiModelName;
+    }
     const taskEntryAudit = createTaskEntryAudit({
       entry: 'edit',
       mode: editTaskCoreMode,
@@ -662,24 +801,30 @@ export async function POST(request: NextRequest) {
 
     // ========== 1.5 创建异步任务（提交+轮询模式，避免CDN/FaaS代理超时） ==========
     const taskId = annotationTaskId || `edit_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
-    if (annotationTaskId) {
-      await updateCloudTask(taskId, {
-        status: 'processing',
-        progress: 0,
-        result: {
-          requestHash: createAnnotationRequestHash(parsedRequestBody),
-          taskEntryAudit,
-        },
-        mergeResult: true,
-      });
-    }
-    setEditTask(taskId, { id: taskId, status: 'processing', progress: 0, stage: '初始化', createdAt: Date.now() });
-    // ★ 注册到统一任务中心（SSE推送 + 取消支持）
-    registerTask(taskId, 'edit', '语言修图', sessionUser?.id, annotationTaskId ? 'durable' : 'memory');
+    const initializeTask = async (leaseOwner?: string): Promise<boolean> => {
+      if (annotationTaskId) {
+        const initialized = await updateCloudTask(taskId, {
+          status: 'processing',
+          progress: 0,
+          result: {
+            requestHash: createAnnotationRequestHash(parsedRequestBody),
+            taskEntryAudit,
+          },
+          mergeResult: true,
+          ...(leaseOwner ? { leaseOwner } : {}),
+        });
+        if (canvasPublication && !initialized) return false;
+      }
+      setEditTask(taskId, { id: taskId, status: 'processing', progress: 0, stage: '初始化', createdAt: Date.now() });
+      // ★ 注册到统一任务中心（SSE推送 + 取消支持）
+      registerTask(taskId, 'edit', '语言修图', sessionUser?.id, annotationTaskId ? 'durable' : 'memory');
+      registerTaskAbortController(taskId, taskController);
+      console.info(`[edit] ★ taskId=${taskId} 创建成功, model=${pureModel}, providerId=${providerId || 'auto'}`);
+      return true;
+    };
     const taskController = new AbortController();
     const taskSignal = taskController.signal;
-    registerTaskAbortController(taskId, taskController);
-    console.info(`[edit] ★ taskId=${taskId} 创建成功, model=${pureModel}, providerId=${providerId || 'auto'}`);
+    if (!canvasPublication) await initializeTask();
 
     if (deferAgentExecution) {
       return NextResponse.json({
@@ -696,6 +841,37 @@ export async function POST(request: NextRequest) {
     // waits for terminal persistence so the lease cannot complete ahead of the worker.
     const EDIT_GLOBAL_TIMEOUT_MS = 5 * 60 * 1000;
     const executeEditTask = async (): Promise<void> => {
+      const leaseOwner = canvasPublication || annotationEdit ? `canvas-edit-${randomUUID()}` : undefined;
+      if (privateTaskIdentity) {
+        try { await assertPrivateAnnotationTaskBilling(privateTaskIdentity); }
+        catch { console.error('[edit] Private annotation dispatch identity unavailable or conflicting'); return; }
+      }
+      if (leaseOwner && !await claimCloudTaskLease(taskId, leaseOwner, 360000)) return;
+      const terminateTask = async (status: 'failed' | 'timeout' | 'cancelled',
+        reason: string): Promise<import('@/lib/cloud-task-storage').CloudTaskTerminationResult> => {
+        if (!privateTaskIdentity) return terminateCloudTaskAndRefund(taskId, status, reason, leaseOwner);
+        try { return await terminatePrivateAnnotationTask(privateTaskIdentity, status, reason, leaseOwner); }
+        catch {
+          console.error('[edit] Private annotation settlement deferred: billing identity unavailable or conflicting');
+          return { transitioned: false, refunded: false, creditCost: 0 };
+        }
+      };
+      const privateDispatchIdentity = privateTaskIdentity;
+      const privateProviderOptions = privateDispatchIdentity ? {
+        transport: async (input: Parameters<typeof fetch>[0], init?: RequestInit): Promise<Response> => {
+          taskSignal.throwIfAborted();
+          try { await assertPrivateAnnotationTaskBilling(privateDispatchIdentity); }
+          catch (error) { taskController.abort(error); throw error; }
+          // The guard committed before remote I/O. Repeats/fallbacks must prove the payer again.
+          return fetch(input, init);
+        },
+      } : {};
+      let workerFailure: { error: string; networkError: boolean } | undefined;
+      const failTask = (id: string, error: string, networkError: boolean = false): void => {
+        if (canvasPublication) workerFailure = { error, networkError };
+        else failLocalTask(id, error, networkError);
+      };
+      const deadlineAt = Date.now() + EDIT_GLOBAL_TIMEOUT_MS;
       const timeoutId = setTimeout(() => {
         if (!taskSignal.aborted) {
           const timeoutError = new Error('编辑超时，请稍后重试');
@@ -707,14 +883,20 @@ export async function POST(request: NextRequest) {
       const finishTask = async (result: Record<string, unknown>): Promise<boolean> => {
         taskSignal.throwIfAborted();
         const safeResult = sanitizeEditTaskResult(result);
-        await reportEditTaskProgress(
-          taskId,
-          90,
-          '正在保存结果',
-          Boolean(annotationTaskId),
-        );
+        try {
+          await reportEditTaskProgress(
+            taskId,
+            90,
+            '正在保存结果',
+            Boolean(annotationTaskId),
+            leaseOwner,
+          );
+        } catch (error) {
+          if (canvasPublication) taskController.abort(error);
+          throw error;
+        }
         if (annotationTaskId) {
-          const committed = await completeCloudTask(taskId, {
+          const completedResult = {
             requestHash: createAnnotationRequestHash(parsedRequestBody),
             taskEntryAudit: createTaskEntryAudit({
               ...taskEntryAudit,
@@ -722,7 +904,24 @@ export async function POST(request: NextRequest) {
               creditStatus: deductedCredits > 0 ? 'charged' : 'not-applicable',
             }),
             ...safeResult,
-          });
+          };
+          const completion = workflowPublication
+            ? await completeWorkflowEditTask({ actorId: authResult.userId, taskId,
+              requestDigest: requestHash, providerId: actualProviderId, modelId: pureModel,
+              result: completedResult })
+            : (privateTaskIdentity && leaseOwner
+              ? await completePrivateAnnotationTask(privateTaskIdentity, completedResult, leaseOwner, deadlineAt)
+              : await completeCloudTask(taskId, completedResult,
+                leaseOwner ? { leaseOwner, deadlineAt } : undefined)) ? 'completed' : 'terminal';
+          if (completion === 'denied') {
+            failLocalTask(taskId, '工作流图片来源已失效');
+            return false;
+          }
+          if (completion === 'rejected') {
+            failLocalTask(taskId, '生成结果不是可用图片，积分已退还');
+            return false;
+          }
+          const committed = completion === 'completed';
           if (!committed) return false;
           await projectPersistedCompletedTask(taskId, authResult.userId);
         }
@@ -740,6 +939,25 @@ export async function POST(request: NextRequest) {
       };
 
       try {
+        if (annotationEdit && !canvasPublication) {
+          const persistedTask = await readPrivateAnnotationTask(taskId);
+          assertPrivateAnnotationTaskIdentity(persistedTask, taskId, annotationEdit.source, requestHash);
+          if (persistedTask!.remoteTaskId || isCanvasEditTerminal(persistedTask!.status)) return;
+          await validateAnnotationEditSource(annotationEdit);
+          await assertPrivateAnnotationTaskBilling(privateTaskIdentity!);
+        }
+        if (canvasPublication) {
+          // Another queued callback may run after the first worker handed off to the existing poller.
+          // Verify the actual task before trusting its checkpoint. Later revocation/source removal
+          // must prevent shared publication, not refund or terminate that in-flight personal result.
+          const persistedTask = await readCanvasEditTask(canvasPublication, singleIdentity);
+          if (!persistedTask || persistedTask.id !== taskId) throw new CanvasEditAdmissionError(409, 'IDEMPOTENCY_CONFLICT');
+          if (persistedTask.remoteTaskId) return;
+          await validateCanvasEditReplay(canvasPublication, singleIdentity, taskId);
+          canvasImages = await validateCanvasEditSources(canvasPublication, parsedRequestBody, request.nextUrl.origin);
+          usableReferenceImages.splice(0, usableReferenceImages.length, ...canvasImages.slice(1));
+          if (!await initializeTask(leaseOwner)) return;
+        }
         taskSignal.throwIfAborted();
         // ★ 检查任务是否已被取消
         if (isTaskCancelled(taskId)) {
@@ -752,13 +970,25 @@ export async function POST(request: NextRequest) {
       15,
       '正在准备图片和蒙版',
       Boolean(annotationTaskId),
+      leaseOwner,
     );
-    const loadedImage = await loadSafeImageInput(image, {
+    // Preserve the original source URL in admission/identity; normalize only the trusted read input.
+    const primaryImageInput = canvasImages?.[0] || (annotationEdit
+      ? normalizeTrustedManagedMediaInput(annotationEdit.source.imageUrl, [
+          request.nextUrl.host,
+          request.headers.get('host') || '',
+          request.headers.get('x-forwarded-host')?.split(',')[0]?.trim() || '',
+        ])
+      : image);
+    const loadedImage = await loadSafeImageInput(primaryImageInput, {
       allowRawBase64: true,
       signal: taskSignal,
     });
     const imageBuffer = loadedImage.buffer;
     const mimeType = loadedImage.mimeType;
+    if (annotationEdit && canvasPublication?.annotationByteProof) {
+      assertAnnotationImageBytes(canvasPublication.annotationByteProof, annotationEdit.source, imageBuffer, mimeType);
+    }
 
     // ========== 3. 解析 mask ==========
     let maskBuffer: Buffer | undefined;
@@ -894,7 +1124,8 @@ export async function POST(request: NextRequest) {
         failTask(taskId, '任务已被取消');
         return;
       }
-      updateTaskStage(taskId, '分析中');
+      if (canvasPublication) await reportEditTaskProgress(taskId, 15, '分析中', true, leaseOwner);
+      else updateTaskStage(taskId, '分析中');
       console.info(`[edit] taskId=${taskId} 开始LLM协作, prompt="${prompt.substring(0, 60)}..."`);
       // 查找 LLM 提供商：优先使用 llmProviderId，否则查找 chat 类型提供商
       let llmProvider: Awaited<ReturnType<typeof findProviderById>> = null;
@@ -984,6 +1215,7 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
         collaborationMessages.push({ role: 'user', content: contentParts });
 
         const collabResp = await fetchWithV1Retry(llmBaseUrl, '/chat/completions', {
+          ...privateProviderOptions,
           method: 'POST',
           headers: llmHeaders,
           body: JSON.stringify({
@@ -1010,6 +1242,7 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
               stream: false,
             };
             actualCollabResp = await fetchWithV1Retry(llmBaseUrl, '/responses', {
+              ...privateProviderOptions,
               method: 'POST',
               headers: llmHeaders,
               body: JSON.stringify(respBody),
@@ -1038,7 +1271,8 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
               (collabData.output as Array<Record<string, unknown>>)?.[0]?.content
                 ? (((collabData.output as Array<Record<string, unknown>>)[0].content as Array<Record<string, unknown>>)?.[0]?.text as string) || ''
                 : '';
-          updateTaskStage(taskId, '优化指令中');
+          if (canvasPublication) await reportEditTaskProgress(taskId, 15, '优化指令中', true, leaseOwner);
+          else updateTaskStage(taskId, '优化指令中');
 
           // 尝试解析 JSON 响应
           let parsed: Record<string, unknown> | null = null;
@@ -1096,6 +1330,7 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
       30,
       '正在提交模型',
       Boolean(annotationTaskId),
+      leaseOwner,
     );
     let editInstruction = `Edit this image according to the following instruction: ${effectivePrompt}. Maintain the overall composition and style while making the requested changes.${aspectRatioExtendHint ? ` ${aspectRatioExtendHint}` : ''}${size ? ` Output image size: ${size}.` : ''}${quality ? ` Output quality: ${quality}.` : ''}`;
     // 蒙版语义增强：所有路径统一添加蒙版描述
@@ -1114,6 +1349,7 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
       45,
       '模型正在处理',
       Boolean(annotationTaskId),
+      leaseOwner,
     );
     const editStartTime = Date.now();
 
@@ -1126,7 +1362,7 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
     //   因为第三方代理可能不正确转发images.edit的mask参数
     // - 无mask时：优先images.edit → fallback images/generations → chat/completions
     // - 所有路径都在 prompt 中描述蒙版语义（通用增强）
-    const skipImagesEdit = !!maskBuffer; // 有mask时跳过images.edit，走视觉参考路径
+    const skipImagesEdit = !!maskBuffer || Boolean(annotationEdit); // 编号参考图不能被无参考图的旧multipart路径忽略
 
     // ★ 路径A: images/edits 端点（仅无mask时尝试）
     if (!skipImagesEdit) {
@@ -1290,6 +1526,7 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
 
         // 先构建 image_urls 数组（需要在 adjustRequestForProfile 之前，这样兼容层才能转换为 images[] 格式）
         const imageUrls: string[] = [imageUrlForApi];
+        if (annotationEdit) imageUrls.push(annotationEdit.referenceImage);
         // ★ 蒙版参考图：红色高亮标注编辑区域，让AI理解蒙版位置
         if (maskImageUrl) {
           imageUrls.push(maskImageUrl);
@@ -1360,6 +1597,7 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
             },
             body: JSON.stringify(adjustedBody),
             signal: taskSignal,
+            ...privateProviderOptions,
           },
         );
 
@@ -1397,6 +1635,7 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
                   },
                   body: JSON.stringify({ ...adjustedBody, n: 1 }),
                   signal: AbortSignal.any([taskSignal, AbortSignal.timeout(120000)]),
+                  ...privateProviderOptions,
                 })
                 .then(async r => {
                   if (!r.ok) return null;
@@ -1435,7 +1674,7 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
             console.info(`[edit] images/generations returned task_id: ${remoteTaskId}, delegating to poll-task`);
 
             // 将远程 taskId 写入 editTask，让 /api/poll-task 的远程轮询逻辑接管
-            updateTaskProgress(taskId, { status: 'processing', progress: 10, label: '已提交，等待生成' });
+            if (!canvasPublication) updateTaskProgress(taskId, { status: 'processing', progress: 10, label: '已提交，等待生成' });
             // ★ 关键修复: 如果API返回了task_id（异步模式），但compatProfile是pollMode:'none'，
             // 说明该提供商实际上支持异步轮询，需要升级compatProfile以确保poll-task能正确轮询
             let effectiveCompatProfile = compatProfile;
@@ -1446,8 +1685,7 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
 
             if (annotationTaskId) {
               if (!actualProviderId) {
-                await terminateCloudTaskAndRefund(
-                  taskId,
+                await terminateTask(
                   'failed',
                   '异步编辑任务缺少可恢复的提供商标识',
                 );
@@ -1469,6 +1707,7 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
                   },
                 },
                 mergeResult: true,
+                ...(leaseOwner ? { leaseOwner } : {}),
               });
               if (!checkpointed) {
                 taskController.abort(new Error('编辑任务终态已由其他请求更新'));
@@ -1476,6 +1715,7 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
               }
             }
 
+            if (canvasPublication) updateTaskProgress(taskId, { status: 'processing', progress: 10, label: '已提交，等待生成' });
             setEditTask(taskId, {
               id: taskId,
               status: 'processing',
@@ -1527,6 +1767,7 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
                   },
                   body: JSON.stringify(flatBody),
                   signal: AbortSignal.any([taskSignal, AbortSignal.timeout(120000)]),
+                  ...privateProviderOptions,
                 },
               );
               if (flatResponse.ok) {
@@ -1589,6 +1830,7 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
       type: 'image_url',
       image_url: { url: `data:${mimeType};base64,${imageBuffer.toString('base64')}` },
     });
+    if (annotationEdit) contentParts.push({ type: 'image_url', image_url: { url: annotationEdit.referenceImage } });
 
     // 参考图
     if (usableReferenceImages.length > 0) {
@@ -1670,6 +1912,7 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
         },
         body: JSON.stringify(chatRequestBody),
         signal: AbortSignal.any([taskSignal, AbortSignal.timeout(120000)]),
+        ...privateProviderOptions,
       },
     );
 
@@ -1708,7 +1951,7 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
         return;
       } else if (chatResponse.status === 400) {
         // 400 可能是模型不支持图片输入，尝试降级到 /images/generations
-        if (isImageEditModel(pureModel)) {
+        if (isImageEditModel(pureModel) && !annotationEdit) {
           try {
             const genUrl = await tryImagesGenerations(effectiveBaseUrl, effectiveApiKey, apiModelName, effectivePrompt, size, quality, 1, taskSignal);
             if (genUrl) {
@@ -1771,7 +2014,7 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
     console.info(`[edit] taskId=${taskId} chat/completions图片提取: ${resultImageUrl ? '成功' : '未找到'}, 耗时=${Date.now() - editStartTime}ms`);
 
     // chat/completions 未提取到图片，尝试降级到 images/generations（★ 限时30秒，避免长时间等待）
-    if (!resultImageUrl && isImageEditModel(pureModel)) {
+    if (!resultImageUrl && isImageEditModel(pureModel) && !annotationEdit) {
       try {
         console.info(`[edit] taskId=${taskId} chat/completions未返回图片, 尝试images/generations降级`);
         const fallbackStart = Date.now();
@@ -1873,30 +2116,39 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
         failTask(taskId, isNetworkError ? '网络连接失败：无法访问 API 服务' : (errMsg || '图片编辑失败'), isNetworkError);
       }
     } finally {
-      const finalTask = getEditTask(taskId);
-      if (annotationTaskId) {
-        const timeoutAborted = taskSignal.aborted
-          && taskSignal.reason instanceof Error
-          && taskSignal.reason.name === 'TimeoutError';
-        const terminalStatus = timeoutAborted
-          ? 'timeout'
-          : (isTaskCancelled(taskId) || finalTask?.status === 'cancelled')
-            ? 'cancelled'
-            : finalTask?.status === 'failed'
-              ? 'failed'
-              : null;
-        if (terminalStatus) {
-          await terminateCloudTaskAndRefund(
-            taskId,
-            terminalStatus,
-            finalTask?.error
-              || (taskSignal.reason instanceof Error ? taskSignal.reason.message : '')
-              || 'Annotation edit failed',
-          );
+      try {
+        const finalTask = getEditTask(taskId);
+        if (annotationTaskId) {
+          const timeoutAborted = taskSignal.aborted
+            && taskSignal.reason instanceof Error
+            && taskSignal.reason.name === 'TimeoutError';
+          const terminalStatus = timeoutAborted
+            ? 'timeout'
+            : (isTaskCancelled(taskId) || finalTask?.status === 'cancelled')
+              ? 'cancelled'
+              : (canvasPublication ? Boolean(workerFailure) : finalTask?.status === 'failed')
+                ? 'failed'
+                : null;
+          if (terminalStatus) {
+            const terminated = await terminateTask(
+              terminalStatus,
+              workerFailure?.error || finalTask?.error
+                || (taskSignal.reason instanceof Error ? taskSignal.reason.message : '')
+                || 'Annotation edit failed',
+            );
+            if (canvasPublication && terminated.status) {
+              const error = workerFailure?.error || '编辑任务已终止';
+              setEditTask(taskId, { id: taskId, status: terminated.status, progress: finalTask?.progress || 0,
+                stage: '已终止', error, createdAt: finalTask?.createdAt || Date.now(), completedAt: Date.now() });
+              updateTaskProgress(taskId, { status: terminated.status, error });
+            }
+          }
         }
+      } finally {
+        clearTimeout(timeoutId);
+        unregisterTaskAbortController(taskId, taskController);
+        if (leaseOwner) await releaseCloudTaskLease(taskId, leaseOwner);
       }
-      clearTimeout(timeoutId);
-      unregisterTaskAbortController(taskId, taskController);
     }
     };
     if (resumeAgentExecution) {
@@ -1915,6 +2167,30 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
      handlerVersion: taskEntryAudit.handlerVersion,
    });
   } catch (error: unknown) {
+    // Compensate only this submission's proven new task. A replay never owns settlement.
+    if (privateTaskCreated && privateTaskIdentity) {
+      try { await terminatePrivateAnnotationTask(privateTaskIdentity, 'failed', '批注修图任务调度失败'); }
+      catch { console.error('[edit] Private annotation creation compensation deferred: billing identity unavailable or conflicting'); }
+    }
+    if (error instanceof AnnotationEditContextError || error instanceof AnnotationSourceAdmissionError
+      || error instanceof GenerationProjectAccessError || error instanceof CanvasEditAdmissionError
+      || error instanceof WorkflowEditSourceError || error instanceof WorkflowEditIntentConflictError) {
+      return NextResponse.json({ success: false, code: error.code, error: error.message }, { status: error.status });
+    }
+    if (privateAnnotationRequest) {
+      if (error instanceof InsufficientCreditsError || error instanceof IdempotencyConflictError) {
+        return NextResponse.json({ success: false, code: error.code, error: error.message }, { status: error.statusCode });
+      }
+      if (error instanceof AnnotationIdempotencyConflictError) {
+        return NextResponse.json({ success: false, code: error.code, error: error.message }, { status: 409 });
+      }
+      const safe = new AnnotationSourceAdmissionError(503);
+      return NextResponse.json({ success: false, code: safe.code, error: safe.message }, { status: safe.status });
+    }
+    if (canvasPublication && !(error instanceof InsufficientCreditsError) && !(error instanceof IdempotencyConflictError)) {
+      const safe = classifyCanvasEditError(error);
+      return NextResponse.json({ success: false, code: safe.code, error: safe.message }, { status: safe.status });
+    }
     const message = error instanceof Error ? error.message : 'Unknown error';
     console.error(`[edit] Task creation error: ${message}`);
     // 记录操作日志 - 语言修图失败

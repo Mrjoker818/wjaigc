@@ -1,8 +1,14 @@
 'use client';
 import NextImage from 'next/image';
 import { withClientImageOutputPreference } from '@/lib/image-generation-output-preference';
+import { claimUpscaleSubmissionMarker, clearUpscaleSubmissionMarker,
+  findUpscaleSubmissionMarker, isRecoverableUpscaleIdempotencyKey,
+  writeUpscaleSubmissionMarker } from '@/lib/canvas-upscale-submission-marker';
+import { claimRemoveBgSubmissionMarker, clearRemoveBgSubmissionMarker,
+  findRemoveBgSubmissionMarker, type RemoveBgSubmissionMarker } from '@/lib/canvas-removebg-submission-marker';
 import { getTransparentOutputWarning } from '@/lib/image-generation-output';
 import { loadBrowserImageBlob } from '@/lib/browser-image-blob';
+import { getVideoDownloadLabel, resolveVideoDownloadFormat } from '@/lib/video-download-format';
 import { toast } from 'sonner';
 import { } from '@/lib/canvas-mode-handlers';
 import { findClosestStandardRatio, STANDARD_RATIOS, type StandardRatio } from '@/lib/canvas-utils';
@@ -88,6 +94,7 @@ import { normalizeGenerationSubmitSlots } from '@/lib/task-core/generation-batch
 import { } from '@/lib/canvas-annotation-visibility';
 import { closestSupportedImageAspectRatio } from '@/lib/image-aspect-ratio';
 import { getHexCubeInitialPosition } from '@/lib/hex-cube-position';
+import { resolve302UpscaleModelId } from '@/lib/302-upscale-models';
 import { buildHexCubeGenerationInput } from '@/lib/hex-cube-generation';
 import { resolveRefineEngineInitialImageUrl } from '@/lib/refine-engine-image';
 import { translateApiError } from '@/lib/api-error-translator';
@@ -116,7 +123,9 @@ function createBoundTouchGestureController(
 }
 import { useCanvasSelection } from '@/components/canvas/use-canvas-selection';
 import { CanvasMediaNode } from '@/components/canvas/CanvasMediaNode';
+import { CanvasVideo } from '@/components/canvas/CanvasVideo';
 import { CanvasSurface } from '@/components/canvas/CanvasSurface';
+import { CanvasContextMenu } from '@/components/canvas/CanvasContextMenu';
 import { CanvasToolHost } from '@/components/canvas/CanvasToolHost';
 import { CanvasZoomCluster } from '@/components/canvas/CanvasZoomCluster';
 import { MobileBottomToolbar } from '@/components/canvas/mobile-bottom-toolbar';
@@ -185,6 +194,8 @@ import {
   type UpscaleTargetPreset,
 } from '@/lib/upscale-target';
 import type { UpscaleProductMode } from '@/lib/upscale-orchestrator';
+import { resolveCanvasUpscaleSource } from '@/lib/canvas-upscale-source';
+import { deliverCanvasImageFiles, DocumentCanvasUploadError, isDocumentCanvasMediaFile } from '@/lib/collaboration/document-canvas-upload';
 import { getCenteredFloatingPanelPosition } from '@/lib/floating-panel-position';
 import { DEFAULT_IMAGE_TOOLBAR_ITEM_ORDER, normalizeImageToolbarPreferences } from '@/lib/image-toolbar-preferences';
 import OhMyPrompt from '@/components/oh-my-prompt';
@@ -259,6 +270,26 @@ export interface ConfiguredUpscaleModel {
   modelId: string;
   label: string;
   unavailableReason?: string;
+}
+
+interface CanvasUpscaleQuote {
+  imageId: string;
+  requestBody: Record<string, unknown>;
+  token: string;
+  total: number;
+  components: { upscale: number; enhance: number };
+  expiresAt: number;
+  idempotencyKey: string;
+}
+
+interface CanvasRemoveBgQuote {
+  actorId: string;
+  imageId: string;
+  requestBody: Record<string, unknown>;
+  token: string;
+  total: number;
+  expiresAt: number;
+  idempotencyKey: string;
 }
 
 interface EffectReverseCanvasSource {
@@ -479,6 +510,14 @@ function parseImageEditResponse(value: unknown): ImageEditResponse {
   };
 }
 
+export interface AnnotationExecutionContext {
+  identity: unknown;
+  writable: boolean;
+  /** Only retains an admitted run while authorized media is synchronizing. */
+  canWaitForPublication?: boolean;
+  confirmPublication: (payload: unknown, signal: AbortSignal) => Promise<boolean>;
+}
+
 interface InfiniteCanvasProps {
   taskModelCatalog?: TaskModelDescriptor[];
   taskModelOptions?: TaskModelCatalogModel[];
@@ -492,6 +531,8 @@ interface InfiniteCanvasProps {
   onExtractKeywords: (image: CanvasImage) => void;
   onFusion: (images: CanvasImage[]) => void;
   onAddImages: (imageUrls: string[], sourceImageId?: string, meta?: { modelName?: string; apiProvider?: string }) => void;
+  onUploadFiles?: (files: File[]) => Promise<void>;
+  uploadAuthority?: 'unknown' | 'legacy' | 'document';
   onReferenceSelect?: (image: CanvasImage) => void;
   referenceIds?: string[];
   isGenerating?: boolean;
@@ -535,6 +576,8 @@ interface InfiniteCanvasProps {
   onForceSave?: (images: CanvasImage[]) => void;
   /** Delete managed placements before removing their canvas images. */
   onDeleteImages?: (imageIds: string[]) => Promise<string[]>;
+  /** Allows only an explicitly retried, failed same-scope deletion batch. */
+  canRetryPendingDelete?: (imageIds: readonly string[]) => boolean;
   /** Persist a file as an owned project image before using it as reverse-engineering source. */
   onUploadEffectReverseSource?: (file: File) => Promise<CanvasImage>;
   /** 用户绘制的连线 */
@@ -574,6 +617,7 @@ interface InfiniteCanvasProps {
   initialAnnotations?: CanvasAnnotationV2[];
   onAnnotationsChange?: (annotations: CanvasAnnotationV2[], renderedBaseline?: CanvasAnnotationV2[]) => boolean | void;
   documentMetadataMode?: boolean;
+  annotationExecutionContext?: AnnotationExecutionContext;
   /** Execute shared remote task polling at the workspace side-effect boundary. */
   onRequestTaskPoll: (
     payload: Record<string, unknown>,
@@ -747,7 +791,8 @@ function CanvasScaledMenuSelect({
   );
 }
 
-export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], catalogStatus = { loading: false, error: null }, images, onImagesChange, selectedImage, onSelectImage, onPreviewImage, onGenerateVariation, onExtractKeywords, onAddImages, referenceIds = [], isGenerating = false, generationProgress = undefined, themeStyle = 'gold', onVisionPrompt, visionPromptEnabled = false, onToggleVisionPrompt, ohMyPromptOpen = false, onCloseOhMyPrompt, onInsertPrompt, ohMyPromptThemeStyle = 'gold', isVisionAnalyzing = false, visionResult = null, ompActiveTab = 'agent', ompVisionImageUrl = null, onToggleSettings, onToggleTheme, onToggleUserManager, onToggleAdminSystem, onToggleProjectData, isAdmin = false, onToggleHelp, isPanelCollapsed = false, onUndo, onRedo, onHistoryTransactionBegin, onHistoryTransactionCommit, onHistoryTransactionRollback, isHistoryTransitionPending = false, navigateToImageId, onNavigateToImageComplete, onGroupsChange, initialGroups, altRefMarkerIds = [], onForceSave, onDeleteImages, onUploadEffectReverseSource, onEditImage, onViewStateChange, initialViewState, onAddToFavorites, onToggleFavorites, onTogglePromptTemplate, brandProject, onSwitchToNodeMode, onSwitchToWorkflowHub, onSwitchToDashboard, onSendToChat, connections, onConnectionsChange, versionHistoryManager, onOpenVideoPanel, onRetryProcessing, projectId, initialAnnotations = [], onAnnotationsChange, documentMetadataMode = false, onRequestTaskPoll }: InfiniteCanvasProps) {
+export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], catalogStatus = { loading: false, error: null }, images, onImagesChange, selectedImage, onSelectImage, onPreviewImage, onGenerateVariation, onExtractKeywords, onAddImages, onUploadFiles, uploadAuthority, referenceIds = [], isGenerating = false, generationProgress = undefined, themeStyle = 'gold', onVisionPrompt, visionPromptEnabled = false, onToggleVisionPrompt, ohMyPromptOpen = false, onCloseOhMyPrompt, onInsertPrompt, ohMyPromptThemeStyle = 'gold', isVisionAnalyzing = false, visionResult = null, ompActiveTab = 'agent', ompVisionImageUrl = null, onToggleSettings, onToggleTheme, onToggleUserManager, onToggleAdminSystem, onToggleProjectData, isAdmin = false, onToggleHelp, isPanelCollapsed = false, onUndo, onRedo, onHistoryTransactionBegin, onHistoryTransactionCommit, onHistoryTransactionRollback, isHistoryTransitionPending = false, navigateToImageId, onNavigateToImageComplete, onGroupsChange, initialGroups, altRefMarkerIds = [], onForceSave, onDeleteImages, canRetryPendingDelete, onUploadEffectReverseSource, onEditImage, onViewStateChange, initialViewState, onAddToFavorites, onToggleFavorites, onTogglePromptTemplate, brandProject, onSwitchToNodeMode, onSwitchToWorkflowHub, onSwitchToDashboard, onSendToChat, connections, onConnectionsChange, versionHistoryManager, onOpenVideoPanel, onRetryProcessing, projectId, initialAnnotations = [], onAnnotationsChange, documentMetadataMode = false, annotationExecutionContext, onRequestTaskPoll }: InfiniteCanvasProps) {
+  const effectiveUploadAuthority = uploadAuthority ?? (projectId ? 'unknown' : 'legacy');
   const isMonochrome = themeStyle === 'monochrome';
   const taskModelCatalogIndex = useMemo(
     () => createTaskModelCatalogIndex(taskModelCatalog),
@@ -874,6 +919,7 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
   const {
     viewOffset,
     zoom,
+    getZoom: getViewportZoom,
     setViewOffset,
     setZoom,
     applyViewState,
@@ -1179,16 +1225,17 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
   // ★ 自动回填 originalWidth/originalHeight：当图片缺少真实尺寸时，异步加载并补全
   const sizeFillAttemptedRef = useRef<Set<string>>(new Set());
   useEffect(() => {
+    const attempts = sizeFillAttemptedRef.current;
     const imagesNeedingSize = images.filter(img => !img.originalWidth || !img.originalHeight
       || img.originalWidth <= 1 || img.originalHeight <= 1);
     // 跳过已尝试过但失败的图片，避免无限重试
     const readKey = (img: CanvasImage): string => JSON.stringify([img.id, img.url]);
-    const untried = imagesNeedingSize.filter(img => !sizeFillAttemptedRef.current.has(readKey(img)));
+    const untried = imagesNeedingSize.filter(img => !attempts.has(readKey(img)));
     if (untried.length === 0) return;
 
     // 标记这些图片为已尝试
     for (const img of untried) {
-      sizeFillAttemptedRef.current.add(readKey(img));
+      attempts.add(readKey(img));
     }
 
     let cancelled = false;
@@ -1221,7 +1268,7 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
         imageEl.onload = null;
         imageEl.onerror = null;
         imageEl.src = '';
-        sizeFillAttemptedRef.current.delete(key);
+        attempts.delete(key);
       }
       pending.clear();
     };
@@ -1250,6 +1297,32 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
     // Notify parent that navigation is complete
     onNavigateToImageCompleteRef.current?.();
   }, [images, navigateToImageId, setViewOffset, setZoom]);
+
+  // Selection
+  const {
+    selectedIds,
+    setSelectedIds,
+    getSelectionState,
+    getBoxSelectionPreview,
+    selectHit: selectSelectionHit,
+    beginBoxSelection: beginSelectionBox,
+    updateBoxSelection: updateSelectionBox,
+    commitBoxSelection: commitSelectionBox,
+    cancelSelectionGesture,
+    beginImageSelectionGesture,
+    finishCanvasPointerGesture,
+    setBoxOverlayElement,
+  } = useCanvasSelection({
+    initialIds: [],
+    getViewportElement: () => canvasContainerRef.current,
+  });
+  // Get selected image data
+  const getSelectedImageData = (): CanvasImage | null => {
+    if (selectedIds.size !== 1) return null;
+    return images.find(i => i.id === Array.from(selectedIds)[0]) || null;
+  };
+
+  const selectedImageData = getSelectedImageData();
 
   // Auto-center view on newly added images (upload / generate / paste)
   const prevImageCountRef = useRef(images.length);
@@ -1294,26 +1367,8 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
 
     prevImageIdsRef.current = currentIds;
     prevImageCountRef.current = images.length;
-  }, [images, setViewOffset, setZoom, zoom]);
+  }, [images, setSelectedIds, setViewOffset, setZoom, zoom]);
 
-  // Selection
-  const {
-    selectedIds,
-    setSelectedIds,
-    getSelectionState,
-    getBoxSelectionPreview,
-    selectHit: selectSelectionHit,
-    beginBoxSelection: beginSelectionBox,
-    updateBoxSelection: updateSelectionBox,
-    commitBoxSelection: commitSelectionBox,
-    cancelSelectionGesture,
-    beginImageSelectionGesture,
-    finishCanvasPointerGesture,
-    setBoxOverlayElement,
-  } = useCanvasSelection({
-    initialIds: [],
-    getViewportElement: () => canvasContainerRef.current,
-  });
   const pendingDeleteIdsRef = useRef<Set<string>>(new Set());
   const [groups, setGroups] = useState<ImageGroup[]>(initialGroups || []);
   const [editingGroupId, setEditingGroupId] = useState<string | null>(null);
@@ -1718,6 +1773,7 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
   const {
     state: annotationV2State,
     setState: setAnnotationV2State,
+    getState: getAnnotationV2State,
     selectTool: selectAnnotationV2Tool,
     pointerDownCanvas: beginCanvasAnnotationV2Gesture,
     pointerMove: updateAnnotationV2Gesture,
@@ -1811,6 +1867,52 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
     startedAt: number;
   } | null>(null);
   const [annotationExecutionError, setAnnotationExecutionError] = useState<string | null>(null);
+  const annotationRunScopeActive = (annotationExecutionContext?.writable ?? !documentMetadataMode)
+    || (documentMetadataMode && annotationExecutionContext?.canWaitForPublication === true);
+  const annotationExecutionScopeRef = useRef({ projectId: projectId || brandProject?.id,
+    identity: annotationExecutionContext?.identity, document: documentMetadataMode,
+    active: annotationRunScopeActive,
+    authority: effectiveUploadAuthority, epoch: 0 });
+  const executionScope = annotationExecutionScopeRef.current;
+  const nextExecutionScope = { projectId: projectId || brandProject?.id,
+    identity: annotationExecutionContext?.identity, document: documentMetadataMode,
+    active: annotationRunScopeActive,
+    authority: effectiveUploadAuthority };
+  if (executionScope.projectId !== nextExecutionScope.projectId || executionScope.identity !== nextExecutionScope.identity
+    || executionScope.document !== nextExecutionScope.document || executionScope.active !== nextExecutionScope.active
+    || executionScope.authority !== nextExecutionScope.authority) {
+    annotationExecutionScopeRef.current = { ...nextExecutionScope, epoch: executionScope.epoch + 1 };
+  }
+  const annotationExecutionRunRef = useRef<{
+    controller: AbortController; epoch: number; projectId: string; source: CanvasImage; annotationIds: Set<string>;
+  } | null>(null);
+  const annotationExecutionImagesRef = useRef(images);
+  annotationExecutionImagesRef.current = images;
+  const isAnnotationRunCurrent = useCallback((run: NonNullable<typeof annotationExecutionRunRef.current>): boolean => {
+    const scope = annotationExecutionScopeRef.current;
+    const currentSource = annotationExecutionImagesRef.current.find(image => image.id === run.source.id);
+    return annotationExecutionRunRef.current === run && !run.controller.signal.aborted
+      && scope.epoch === run.epoch && scope.projectId === run.projectId && scope.active
+      && scope.authority !== 'unknown' && !!currentSource
+      && currentSource.url === run.source.url && currentSource.placementId === run.source.placementId
+      && currentSource.assetId === run.source.assetId && currentSource.assetVersionId === run.source.assetVersionId
+      && (currentSource.annotationVersionId || buildAnnotationSourceVersionId(currentSource.id, currentSource.createdAt, currentSource.url))
+        === (run.source.annotationVersionId || buildAnnotationSourceVersionId(run.source.id, run.source.createdAt, run.source.url));
+  }, []);
+  useLayoutEffect(() => {
+    const run = annotationExecutionRunRef.current;
+    if (!run || isAnnotationRunCurrent(run)) return;
+    annotationExecutionRunRef.current = null;
+    annotationTaskAbortRef.current = null;
+    run.controller.abort();
+    setAnnotationTaskId(null); setAnnotationExecution(null);
+    setAnnotationExecutionError('项目、来源或编辑权限已变化；已停止等待，请回原项目核对任务结果');
+    if (annotationExecutionScopeRef.current.projectId === run.projectId) {
+      setAnnotationV2State(current => ({ ...current, annotations: current.annotations.map(item =>
+        run.annotationIds.has(item.id) && item.status === 'running' ? { ...item, status: 'ready' } : item) }));
+    }
+  }, [images, projectId, brandProject?.id, documentMetadataMode, annotationExecutionContext,
+    effectiveUploadAuthority, isAnnotationRunCurrent, setAnnotationV2State]);
   const annotationReportedProgress = annotationExecution?.reportedProgress ?? null;
   useEffect(() => {
     if (annotationReportedProgress === null || annotationReportedProgress >= 100) return;
@@ -1940,6 +2042,49 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
   const [selectedUpscaleModelKey, setSelectedUpscaleModelKey] = useState('');
   const [isLoadingUpscaleModels, setIsLoadingUpscaleModels] = useState(false);
   const [upscaleModelsLoadError, setUpscaleModelsLoadError] = useState('');
+  const [upscaleQuote, setUpscaleQuote] = useState<CanvasUpscaleQuote | null>(null);
+  const [isUpscaleQuoteLoading, setIsUpscaleQuoteLoading] = useState(false);
+  const [isUpscaleSubmitting, setIsUpscaleSubmitting] = useState(false);
+  const [isUpscaleSubmissionUnknown, setIsUpscaleSubmissionUnknown] = useState(false);
+  const [recoveredUpscaleTask, setRecoveredUpscaleTask] = useState<{
+    imageId: string; taskId: string; status: string } | null>(null);
+  const upscaleActionPendingRef = useRef(false);
+  useEffect(() => {
+    if (!selectedImage?.id) return;
+    const source = { projectId: projectId || '', imageId: selectedImage.id,
+      sourceVersionId: selectedImage.assetVersionId || null };
+    try {
+      if (!findUpscaleSubmissionMarker(localStorage, source)) {
+        const quotedVersionIds = upscaleQuote?.requestBody.assetParentVersionIds;
+        const quotedVersion = Array.isArray(quotedVersionIds) && typeof quotedVersionIds[0] === 'string'
+          ? quotedVersionIds[0] : null;
+        const quoteMatchesSource = upscaleQuote?.imageId === selectedImage.id
+          && upscaleQuote.requestBody.imageUrl === selectedImage.url
+          && quotedVersion === source.sourceVersionId;
+        if (!quoteMatchesSource) {
+          setIsUpscaleSubmissionUnknown(false);
+          if (upscaleQuote) setUpscaleQuote(null);
+        }
+        setRecoveredUpscaleTask(null);
+        return;
+      }
+    } catch {
+      setIsUpscaleSubmissionUnknown(true);
+      return;
+    }
+    setIsUpscaleSubmissionUnknown(true);
+    let active = true;
+    void fetch('/api/auth/me', { cache: 'no-store' }).then(async response => {
+      const auth = await response.json() as { success?: boolean; user?: { id?: string } | null };
+      if (!active) return;
+      if (!response.ok || auth.success !== true || !auth.user?.id) {
+        setIsUpscaleSubmissionUnknown(true);
+        return;
+      }
+      setIsUpscaleSubmissionUnknown(Boolean(findUpscaleSubmissionMarker(localStorage, source, auth.user.id)));
+    }).catch(() => { if (active) setIsUpscaleSubmissionUnknown(true); });
+    return () => { active = false; };
+  }, [projectId, selectedImage?.id, selectedImage?.assetVersionId, selectedImage?.url, upscaleQuote]);
   const selectedUpscaleModel = useMemo(
     () => configuredUpscaleModels.find(model => model.key === selectedUpscaleModelKey) || null,
     [configuredUpscaleModels, selectedUpscaleModelKey],
@@ -1950,7 +2095,11 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
     return 'auto';
   };
   const [removeBgEngine, setRemoveBgEngine] = useState<'auto' | 'ai' | 'local'>(() => getEnginePref('removebg'));
-  const [upscaleEnginePref, setUpscaleEnginePref] = useState<'auto' | 'ai' | 'local'>(() => getEnginePref('upscale'));
+  const [removeBgQuote, setRemoveBgQuote] = useState<CanvasRemoveBgQuote | null>(null);
+  const [isRemoveBgQuoteLoading, setIsRemoveBgQuoteLoading] = useState(false);
+  const [isRemoveBgSubmitting, setIsRemoveBgSubmitting] = useState(false);
+  const removeBgActionPendingRef = useRef(false);
+  const [, setUpscaleEnginePref] = useState<'auto' | 'ai' | 'local'>(() => getEnginePref('upscale'));
   const [, setSegmentEnginePref] = useState<'auto' | 'ai' | 'local'>(() => getEnginePref('segment'));
   const [engineDialog, setEngineDialog] = useState<null | 'upscale' | 'removebg' | 'svg' | 'segment'>(null);
   // Actual pixel dimensions of the image being upscaled (loaded from DOM)
@@ -2621,6 +2770,7 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
     const touchGestureController = touchGestureControllerRef.current;
     return () => {
       isMountedRef.current = false;
+      annotationExecutionRunRef.current = null;
       annotationTaskAbortRef.current?.abort();
       annotationTaskAbortRef.current = null;
       // ★ 组件卸载时中止所有正在进行的轮询
@@ -2957,9 +3107,10 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
   ]);
 
   const handleAnnotationExecute = useCallback(async () => {
-    if (annotationTaskId || annotationExecution) return;
-    const sourceAnnotation = annotationV2State.annotations[0];
-    const sourceImage = imagesRef.current.find(
+    if (annotationExecutionRunRef.current) return;
+    const annotationState = getAnnotationV2State();
+    const sourceAnnotation = annotationState.annotations[0];
+    const sourceImage = annotationExecutionImagesRef.current.find(
       (image) => image.id === sourceAnnotation?.sourceImageId,
     );
     const effectiveProjectId = projectId || brandProject?.id;
@@ -2968,6 +3119,13 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
       return;
     }
 
+    if (!(annotationExecutionContext?.writable ?? !documentMetadataMode) || effectiveUploadAuthority === 'unknown') {
+      setAnnotationExecutionError('当前项目暂不可编辑，请恢复连接或编辑权限后再试'); return;
+    }
+    const sourceVersion = sourceImage.annotationVersionId || buildAnnotationSourceVersionId(sourceImage.id, sourceImage.createdAt, sourceImage.url);
+    if (sourceAnnotation.projectId !== effectiveProjectId || sourceAnnotation.sourceVersionId !== sourceVersion) {
+      setAnnotationExecutionError('来源图片已变化，请重新确认批注'); return;
+    }
     const selectedModel = annotationModelId || (() => {
       const current = getCurrentModel();
       return current.providerId
@@ -2989,8 +3147,8 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
 
     let bundle;
     try {
-      bundle = buildEditIntentBundle(annotationV2State.annotations, {
-        prompt: annotationV2State.prompt,
+      bundle = buildEditIntentBundle(annotationState.annotations, {
+        prompt: annotationState.prompt,
         providerId,
         modelId,
       });
@@ -3002,6 +3160,9 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
     }
 
     const abortController = new AbortController();
+    const run = { controller: abortController, epoch: annotationExecutionScopeRef.current.epoch,
+      projectId: effectiveProjectId, source: { ...sourceImage }, annotationIds: new Set(bundle.annotationIds) };
+    annotationExecutionRunRef.current = run;
     annotationTaskAbortRef.current = abortController;
     setAnnotationExecutionError(null);
     setAnnotationExecution({
@@ -3012,32 +3173,44 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
     });
     setAnnotationV2State((current) => ({
       ...current,
-      annotations: current.annotations.map((annotation) => ({
+      annotations: current.annotations.map((annotation) => run.annotationIds.has(annotation.id) ? ({
         ...annotation,
         status: 'running',
-      })),
+      }) : annotation),
     }));
 
     try {
       const submitted = await executeAnnotationBundle({
         bundle,
         sourceImageUrl: sourceImage.url || '',
-      });
+      }, { signal: abortController.signal });
+      if (!isAnnotationRunCurrent(run)) return;
       setAnnotationTaskId(submitted.taskId);
       const completed = await waitForAnnotationTaskResult(submitted.taskId, {
         signal: abortController.signal,
+        requireCanonicalPublication: documentMetadataMode,
+        requestPoll: (payload, options) => onRequestTaskPollRef.current(payload, options),
         onProgress: (progress, stage) => {
+          if (!isAnnotationRunCurrent(run)) return;
           setAnnotationExecution((current) => current
             ? {
                 ...current,
-                progress: Math.max(current.progress, progress),
-                reportedProgress: Math.max(current.reportedProgress, progress),
-                stage,
+                progress: Math.max(current.progress, documentMetadataMode ? Math.min(95, progress) : progress),
+                reportedProgress: Math.max(current.reportedProgress, documentMetadataMode ? Math.min(95, progress) : progress),
+                stage: documentMetadataMode && progress >= 100 ? '等待协作媒体同步' : stage,
               }
             : current);
         },
       });
+      if (!isAnnotationRunCurrent(run)) return;
+      if (documentMetadataMode) {
+        const confirmed = await annotationExecutionContext!.confirmPublication(completed.payload, abortController.signal);
+        if (!isAnnotationRunCurrent(run)) return;
+        if (!confirmed) throw new AnnotationClientError({ code: 'ANNOTATION_PUBLICATION_UNCONFIRMED',
+          message: '结果已提交，但协作同步尚未确认；请在原项目核对结果', retryable: true });
+      }
       const now = Date.now();
+      if (!documentMetadataMode) {
       const resultImage: CanvasImage = {
         id: `annotation-result-${now}`,
         url: completed.imageUrl,
@@ -3053,7 +3226,7 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
           now,
           completed.imageUrl,
         ),
-        prompt: annotationV2State.prompt,
+        prompt: annotationState.prompt,
         model: modelId,
         modelName: modelId,
         apiProvider: providerId,
@@ -3063,17 +3236,21 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
         annotationBundleId: bundle.id,
         annotationIds: bundle.annotationIds,
       };
-      onImagesChange([...imagesRef.current, resultImage]);
+      if (onImagesChange([...annotationExecutionImagesRef.current, resultImage]) === false) {
+        throw new AnnotationClientError({ code: 'ANNOTATION_RESULT_REJECTED', message: '画布未接受结果，请在原项目核对后重试' });
+      }
+      }
       setAnnotationV2State((current) => ({
         ...current,
-        annotations: current.annotations.map((annotation) => ({
+        annotations: current.annotations.map((annotation) => run.annotationIds.has(annotation.id) ? ({
           ...annotation,
           status: 'done',
           updatedAt: now,
-        })),
+        }) : annotation),
       }));
-      toast.success('批注修改已完成，结果已添加到原图右侧');
+      toast.success(documentMetadataMode ? '批注修改已完成，协作结果已确认' : '批注修改已完成，结果已添加到原图右侧');
     } catch (error) {
+      if (annotationExecutionRunRef.current !== run || annotationExecutionScopeRef.current.epoch !== run.epoch) return;
       const cancelled = abortController.signal.aborted;
       const message = error instanceof AnnotationClientError
         ? error.message
@@ -3081,24 +3258,28 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
       setAnnotationExecutionError(message);
       setAnnotationV2State((current) => ({
         ...current,
-        annotations: current.annotations.map((annotation) => ({
+        annotations: current.annotations.map((annotation) => run.annotationIds.has(annotation.id) ? ({
           ...annotation,
           status: cancelled ? 'ready' : 'failed',
           updatedAt: Date.now(),
-        })),
+        }) : annotation),
       }));
       if (!cancelled) toast.error(message);
     } finally {
-      annotationTaskAbortRef.current = null;
-      setAnnotationTaskId(null);
-      setAnnotationExecution(null);
+      if (annotationExecutionRunRef.current === run) {
+        annotationExecutionRunRef.current = null;
+        annotationTaskAbortRef.current = null;
+        setAnnotationTaskId(null);
+        setAnnotationExecution(null);
+      }
     }
   }, [
-    annotationExecution,
     annotationModelId,
-    annotationTaskId,
-    annotationV2State.annotations,
-    annotationV2State.prompt,
+    annotationExecutionContext,
+    documentMetadataMode,
+    effectiveUploadAuthority,
+    getAnnotationV2State,
+    isAnnotationRunCurrent,
     brandProject,
     getCurrentModel,
     onImagesChange,
@@ -3107,25 +3288,26 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
   ]);
 
   const handleAnnotationCancel = useCallback(async () => {
-    annotationTaskAbortRef.current?.abort();
-    setAnnotationExecution(null);
+    const run = annotationExecutionRunRef.current;
+    if (!run) return;
+    annotationExecutionRunRef.current = null;
+    annotationTaskAbortRef.current = null;
+    run.controller.abort();
+    setAnnotationExecution(null); setAnnotationTaskId(null);
+    setAnnotationV2State((current) => ({ ...current,
+      annotations: current.annotations.map(annotation =>
+        run.annotationIds.has(annotation.id) && annotation.status === 'running'
+          ? { ...annotation, status: 'ready' } : annotation),
+    }));
     const taskId = annotationTaskId;
     if (taskId) {
       try {
         await cancelAnnotationTask(taskId);
       } catch (error) {
         const message = error instanceof Error ? error.message : '取消任务失败';
-        toast.error(message);
+        if (annotationExecutionScopeRef.current.epoch === run.epoch && !annotationExecutionRunRef.current) toast.error(message);
       }
     }
-    setAnnotationV2State((current) => ({
-      ...current,
-      annotations: current.annotations.map((annotation) =>
-        annotation.status === 'running'
-          ? { ...annotation, status: 'ready' }
-          : annotation,
-      ),
-    }));
   }, [annotationTaskId, setAnnotationV2State]);
 
   // Helper: check if keyboard event target is an input field (should not trigger canvas shortcuts)
@@ -3429,7 +3611,7 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
   ]);
 
   const requestDeleteImages = useCallback(async (imageIds: string[]) => {
-    if (isHistoryTransitionPending) return [];
+    if (isHistoryTransitionPending && !canRetryPendingDelete?.(imageIds)) return [];
     const uniqueIds = [...new Set(imageIds)]
       .filter(Boolean)
       .filter((id) => !pendingDeleteIdsRef.current.has(id));
@@ -3457,7 +3639,7 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
     } finally {
       uniqueIds.forEach((id) => pendingDeleteIdsRef.current.delete(id));
     }
-  }, [editImageId, isHistoryTransitionPending, onDeleteImages, onForceSave, onImagesChange, selectImage, selectedImage]);
+  }, [editImageId, isHistoryTransitionPending, canRetryPendingDelete, onDeleteImages, onForceSave, onImagesChange, selectImage, selectedImage, setSelectedIds]);
 
   // Create a group from selected images
   const handleCreateGroup = useCallback(() => {
@@ -3589,7 +3771,14 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
       }
       // Workspace history uses a synchronous ref as the authoritative lock.
       // Keep other shortcuts blocked while its rendered pending state catches up.
-      if (isHistoryTransitionPending) return;
+      if (isHistoryTransitionPending) {
+        if (!inputFocused && editMode === 'none' && (e.code === 'Delete' || e.code === 'Backspace')
+            && selectedIds.size > 0 && canRetryPendingDelete?.([...selectedIds])) {
+          e.preventDefault();
+          void requestDeleteImages([...selectedIds]);
+        }
+        return;
+      }
       // Ctrl + Plus: Zoom in
       if ((e.ctrlKey || e.metaKey) && (e.code === 'Equal' || e.code === 'NumpadAdd')) {
         e.preventDefault();
@@ -3951,7 +4140,7 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
       keyup: handleKeyUp,
       paste: handlePaste,
     };
-  }, [selectedIds, images, onImagesChange, selectImage, editMode, onUndo, zoom, viewOffset, isKeyboardEventFromOverlay, isInputFocused, isTextEditingTarget, annotationMode, onRedo, handleCreateGroup, compareSelecting, agentSelectingImage, showSvgTracePanel, editImageId, handleToggleCanvasAnnotation, selectAnnotationV2Tool, annotationV2State.tool, annotationV2State.gesture.kind, escapeAnnotationV2, setAnnotationV2Mode, requestDeleteImages, zoomViewportAtPoint, isHistoryTransitionPending, activateCanvasToolSession, selectedImage, onEditImage, onOpenVideoPanel, commandPaletteOpen]);
+  }, [selectedIds, selectedImageData, setSelectedIds, images, onImagesChange, selectImage, editMode, onUndo, zoom, viewOffset, isKeyboardEventFromOverlay, isInputFocused, isTextEditingTarget, annotationMode, onRedo, handleCreateGroup, compareSelecting, agentSelectingImage, showSvgTracePanel, editImageId, handleToggleCanvasAnnotation, selectAnnotationV2Tool, annotationV2State.tool, annotationV2State.gesture.kind, escapeAnnotationV2, setAnnotationV2Mode, requestDeleteImages, zoomViewportAtPoint, isHistoryTransitionPending, canRetryPendingDelete, activateCanvasToolSession, selectedImage, onEditImage, onOpenVideoPanel, commandPaletteOpen]);
 
   // Stable Canvas keyboard listeners remain attached for the component lifetime. React commits only
   // refresh the ref above, so delete/restore renders cannot create an input gap.
@@ -4269,7 +4458,7 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
     }
 
     applyCanvasTouchIntent(intent, {
-      getZoom: () => zoomRef.current,
+      getZoom: getViewportZoom,
       beginPan: pointer => {
         const began = beginViewportPan(pointer);
         if (began) {
@@ -4319,6 +4508,7 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
     cancelSelectionGesture,
     cancelViewportPan,
     commitViewportPan,
+    getViewportZoom,
     openContextMenuAt,
     previewViewportPan,
     rollbackHistoryTransaction,
@@ -4715,12 +4905,13 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
   }, [viewOffset, selectedIds, images, screenToCanvas, hitTestImage, selectImage, editMode, zoom, handleEditMouseDown, compareSelecting, compareImages, annotationMode, annotationTool, annotationBrushSize, annotationBrushColor, annotations, beginViewportPan, annotationV2State.isOpen, annotationV2State.annotations, annotationV2State.sourceLock, annotationV2State.tool, beginCanvasAnnotationV2Gesture, brandProject?.id, projectId, setAnnotationV2State, setSelectedIds, applyTouchGestureIntent, beginImageSelectionGesture, beginSelectionBox, isEventFromOverlay, showRefFusion, beginHistoryTransaction, isHistoryTransitionPending]);
 
   const handlePointerMove = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    const annotationState = getAnnotationV2State();
     if (
       annotationMode
       && movingTextAnnotationIdRef.current
       && annotationPointerIdRef.current === e.pointerId
     ) {
-      const annotation = annotationV2State.annotations.find(
+      const annotation = annotationState.annotations.find(
         (candidate) => candidate.id === movingTextAnnotationIdRef.current,
       );
       const targetImage = images.find(
@@ -4744,7 +4935,7 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
 
     if (
       annotationMode
-      && annotationV2State.gesture.kind !== 'idle'
+      && annotationState.gesture.kind !== 'idle'
       && annotationPointerIdRef.current === e.pointerId
     ) {
       updateAnnotationV2Gesture({ x: e.clientX, y: e.clientY });
@@ -4988,9 +5179,13 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
         });
       }
     }
-  }, [annotationMode, annotationRegionStart, editMode, screenToCanvas, isMiddlePanning, isPanning, resizingImage, resizeCorner, groupDragTarget, genGroupDragTarget, hexCubeDragTarget, annotations, images, annotationBrushSize, zoom, viewOffset.x, viewOffset.y, handleEditMouseMove, resizeStart.x, resizeStart.w, resizeStart.h, resizeStart.imgX, resizeStart.imgY, groupDragStart.x, groupDragStart.y, genGroupDragStart.x, genGroupDragStart.y, hexCubeDragStart.x, hexCubeDragStart.y, previewViewportPan, annotationV2State.annotations, annotationV2State.gesture.kind, updateAnnotationV2Gesture, moveAnnotationV2Text, applyTouchGestureIntent, getBoxSelectionPreview, updateSelectionBox]);
+  }, [annotationMode, annotationRegionStart, editMode, screenToCanvas, isMiddlePanning, isPanning, resizingImage, resizeCorner, groupDragTarget, genGroupDragTarget, hexCubeDragTarget, annotations, images, annotationBrushSize, zoom, viewOffset.x, viewOffset.y, handleEditMouseMove, resizeStart.x, resizeStart.w, resizeStart.h, resizeStart.imgX, resizeStart.imgY, groupDragStart.x, groupDragStart.y, genGroupDragStart.x, genGroupDragStart.y, hexCubeDragStart.x, hexCubeDragStart.y, previewViewportPan, getAnnotationV2State, updateAnnotationV2Gesture, moveAnnotationV2Text, applyTouchGestureIntent, getBoxSelectionPreview, updateSelectionBox]);
 
   const handlePointerUp = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    // Pointer events may arrive before React commits the preceding render.
+    // The controller's synchronous state is the gesture authority, not the
+    // callback's rendered snapshot (also important after cancel/tool changes).
+    const annotationState = getAnnotationV2State();
     const releaseAnnotationPointer = () => {
       if (e.currentTarget.hasPointerCapture(e.pointerId)) {
         e.currentTarget.releasePointerCapture(e.pointerId);
@@ -5006,7 +5201,7 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
       && annotationPointerIdRef.current === e.pointerId
     ) {
       const annotationId = movingTextAnnotationIdRef.current;
-      const annotation = annotationV2State.annotations.find(
+      const annotation = annotationState.annotations.find(
         (candidate) => candidate.id === annotationId,
       );
       const targetImage = images.find(
@@ -5032,13 +5227,16 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
 
     if (
       annotationMode
-      && annotationV2State.gesture.kind !== 'idle'
       && annotationPointerIdRef.current === e.pointerId
     ) {
-      if (annotationV2State.gesture.kind === 'text') {
-        commitAnnotationV2Text(annotationV2State.prompt);
-      } else if (annotationV2State.gesture.kind === 'semantic-object') {
-        void resolveActiveSemanticGesture(annotationV2State.gesture);
+      if (annotationState.gesture.kind === 'idle') {
+        releaseAnnotationPointer();
+        return;
+      }
+      if (annotationState.gesture.kind === 'text') {
+        commitAnnotationV2Text(annotationState.prompt);
+      } else if (annotationState.gesture.kind === 'semantic-object') {
+        void resolveActiveSemanticGesture(annotationState.gesture);
       } else {
         commitAnnotationV2Gesture({ x: e.clientX, y: e.clientY });
       }
@@ -5464,7 +5662,7 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
 
     commitHistoryTransaction(e.pointerId);
     mouseDownOnImageRef.current = false;
-  }, [annotationRegionStart, annotationMode, isDraggingRegion, annotationRegionCurrent, editMode, isMiddlePanning, isPanning, resizingImage, resizePreview, groupDragTarget, genGroupDragTarget, hexCubeDragTarget, hitTestImage, images, annotationTool, screenToCanvas, handleEditMouseUp, genGroups, onImagesChange, onForceSave, onPreviewImage, zoom, viewOffset.x, viewOffset.y, commitViewportPan, annotationV2State.annotations, annotationV2State.gesture, annotationV2State.prompt, commitAnnotationV2Text, commitAnnotationV2Gesture, moveAnnotationV2Text, resolveActiveSemanticGesture, applyTouchGestureIntent, cancelImageDragPreview, commitSelectionBox, finishCanvasPointerGesture, getBoxSelectionPreview, getSelectionState, selectImage, commitHistoryTransaction]);
+  }, [annotationRegionStart, annotationMode, isDraggingRegion, annotationRegionCurrent, editMode, isMiddlePanning, isPanning, resizingImage, resizePreview, groupDragTarget, genGroupDragTarget, hexCubeDragTarget, hitTestImage, images, annotationTool, screenToCanvas, handleEditMouseUp, genGroups, onImagesChange, onForceSave, onPreviewImage, zoom, viewOffset.x, viewOffset.y, commitViewportPan, getAnnotationV2State, commitAnnotationV2Text, commitAnnotationV2Gesture, moveAnnotationV2Text, resolveActiveSemanticGesture, applyTouchGestureIntent, cancelImageDragPreview, commitSelectionBox, finishCanvasPointerGesture, getBoxSelectionPreview, getSelectionState, selectImage, commitHistoryTransaction]);
 
   const handlePointerCancel = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
     if (e.pointerType === 'touch' && activeTouchPointerIdsRef.current.has(e.pointerId)) {
@@ -5499,14 +5697,14 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
     if (annotationPointerIdRef.current === e.pointerId) {
       movingTextAnnotationIdRef.current = null;
       annotationPointerIdRef.current = null;
-      if (annotationV2State.gesture.kind !== 'idle') {
+      if (getAnnotationV2State().gesture.kind !== 'idle') {
         escapeAnnotationV2();
       }
     }
     if (e.currentTarget.hasPointerCapture(e.pointerId)) {
       e.currentTarget.releasePointerCapture(e.pointerId);
     }
-  }, [annotationV2State.gesture.kind, applyTouchGestureIntent, cancelViewportPan, escapeAnnotationV2, cancelGroupDragPreviews, cancelImageDragPreview, cancelSelectionGesture, finishCanvasPointerGesture, rollbackHistoryTransaction]);
+  }, [getAnnotationV2State, applyTouchGestureIntent, cancelViewportPan, escapeAnnotationV2, cancelGroupDragPreviews, cancelImageDragPreview, cancelSelectionGesture, finishCanvasPointerGesture, rollbackHistoryTransaction]);
 
   const handlePointerLeave = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
     if (annotationPointerIdRef.current !== null) return;
@@ -5599,27 +5797,44 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    const files = Array.from(e.dataTransfer.files).filter(f => f.type.startsWith('image/'));
+    const droppedFiles = Array.from(e.dataTransfer.files);
+    const files = droppedFiles.filter(f => effectiveUploadAuthority === 'document'
+      ? isDocumentCanvasMediaFile(f) : f.type.startsWith('image/'));
+    if (files.length < droppedFiles.length) {
+      toast.warning(effectiveUploadAuthority === 'document' ? '已跳过不支持的媒体格式' : files.length > 0 ? '已跳过非图片文件' : '请选择图片文件');
+    }
     if (files.length > 0) {
-      const promises = files.map(file =>
+      const legacyUpload = async (items: File[]): Promise<void> => {
+        const promises = items.map(file =>
         new Promise<string>(resolve => {
           const reader = new FileReader();
           reader.onload = (event) => resolve((event.target?.result as string) || '');
           reader.readAsDataURL(file);
         })
-      );
-      Promise.allSettled(promises).then(results => {
+        );
+        const results = await Promise.allSettled(promises);
         const validUrls = results.filter(r => r.status === 'fulfilled' && r.value).map(r => (r as PromiseFulfilledResult<string>).value);
         if (validUrls.length > 0) onAddImages(validUrls);
+      };
+      void deliverCanvasImageFiles({ files, authority: effectiveUploadAuthority,
+        documentUpload: onUploadFiles, legacyUpload }).catch(error => {
+        toast.error(error instanceof DocumentCanvasUploadError && error.code === 'authority-unresolved'
+          ? '正在确认画布权限，请稍后重试上传'
+          : error instanceof Error ? error.message : '画布图片上传失败');
       });
     }
-  }, [onAddImages]);
+  }, [effectiveUploadAuthority, onAddImages, onUploadFiles]);
 
   const handleCanvasImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (files && files.length > 0) {
+    const selectedFiles = Array.from(e.target.files ?? []);
+    const files = selectedFiles.filter(f => effectiveUploadAuthority === 'document'
+      ? isDocumentCanvasMediaFile(f) : f.type.startsWith('image/'));
+    if (files.length < selectedFiles.length) toast.warning('已跳过不支持的文件格式');
+    e.target.value = '';
+    if (files.length > 0) {
+      const legacyUpload = async (items: File[]): Promise<void> => {
       // ★ 大文件自动压缩（>1MB 的图片压缩到 2048px 以内）
-      const promises = Array.from(files).map(async file => {
+      const promises = items.map(async file => {
         try {
           if (file.size > 1024 * 1024) {
             // 大于 1MB，先压缩
@@ -5655,8 +5870,16 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
       } catch (error) {
         console.error('Failed to read images:', error);
       }
+      };
+      try {
+        await deliverCanvasImageFiles({ files, authority: effectiveUploadAuthority,
+          documentUpload: onUploadFiles, legacyUpload });
+      } catch (error) {
+        toast.error(error instanceof DocumentCanvasUploadError && error.code === 'authority-unresolved'
+          ? '正在确认画布权限，请稍后重试上传'
+          : error instanceof Error ? error.message : '画布图片上传失败');
+      }
     }
-    e.target.value = '';
   };
 
   // ──────────────── 【调整2&3】生成组：Alt/Ctrl+左键 创建参考图/融图组 ────────────────
@@ -6659,7 +6882,7 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
     setSelectedIds(new Set([sourceImage.id]));
     onSelectImage(sourceImage);
     return placeholder.id;
-  }, [onImagesChange, onSelectImage]);
+  }, [onImagesChange, onSelectImage, setSelectedIds]);
 
   const updateProcessingFrame = useCallback((id: string, patch: Partial<NonNullable<CanvasImage['processing']>>) => {
     const nextImages = imagesRef.current.map(image => {
@@ -6855,7 +7078,7 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
       dataImg.src = newUrl;
     }
     return completedImage;
-  }, [onImagesChange, onSelectImage]);
+  }, [onImagesChange, onSelectImage, setSelectedIds]);
 
   const removeProcessingFrame = useCallback((id: string) => {
     const nextImages = imagesRef.current.filter(image => image.id !== id);
@@ -6922,14 +7145,6 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
       cancellingTaskIdsRef.current.delete(taskId);
     }
   }, [projectProcessingFrameEvent, removeProcessingFrame, updateProcessingFrame]);
-
-  // Get selected image data
-  const getSelectedImageData = (): CanvasImage | null => {
-    if (selectedIds.size !== 1) return null;
-    return images.find(i => i.id === Array.from(selectedIds)[0]) || null;
-  };
-
-  const selectedImageData = getSelectedImageData();
 
   // 当前单选必须覆盖历史编辑目标；面板导致选择丢失时再回退到锁定目标。
   const getActiveImageData = useCallback((): CanvasImage | null => {
@@ -7007,7 +7222,7 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
     setSelectedIds(new Set([uploaded.id]));
     onSelectImage(uploaded);
     return nextSource;
-  }, [brandProject?.id, onSelectImage, onUploadEffectReverseSource, projectId]);
+  }, [brandProject?.id, onSelectImage, onUploadEffectReverseSource, projectId, setSelectedIds]);
 
   const handleEffectReverseResult = useCallback((result: EffectReverseTaskResult) => {
     const source = effectReverseSource;
@@ -7034,7 +7249,7 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
     setSelectedIds(new Set([newImage.id]));
     onSelectImage(newImage);
     toast.success('透视校正结果已添加到源图右侧');
-  }, [effectReverseSource, onImagesChange, onSelectImage]);
+  }, [effectReverseSource, onImagesChange, onSelectImage, setSelectedIds]);
 
   // 3D model name to friendly Chinese label mapping
   const get3DModelLabel = useCallback((modelId: string): string => {
@@ -8718,6 +8933,62 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
   const handleUpscaleConfirm = useCallback(async () => {
     const img = getActiveImageData();
     if (!img) return;
+    const markerSource = { projectId: projectId || '', imageId: img.id,
+      sourceVersionId: img.assetVersionId || null };
+    // Check a persisted paid attempt before model/dimension validation: status lookup
+    // must work even when today's model catalog or image dimensions have changed.
+    try {
+      if (findUpscaleSubmissionMarker(localStorage, markerSource)) {
+        const authResponse = await fetch('/api/auth/me', { cache: 'no-store' });
+        const auth = await authResponse.json() as { success?: boolean; user?: { id?: string } | null };
+        if (!authResponse.ok || auth.success !== true || !auth.user?.id) throw new Error('Account unavailable');
+        const marker = findUpscaleSubmissionMarker(localStorage, markerSource, auth.user.id);
+        if (marker) {
+          const query = new URLSearchParams({ projectId: marker.projectId,
+            idempotencyKey: marker.idempotencyKey });
+          const recoveryResponse = await fetch(`/api/tasks/recover?${query}`, { cache: 'no-store' });
+          if (!recoveryResponse.ok) throw new Error('Original task recovery unavailable');
+          const recovered = await recoveryResponse.json() as { success?: boolean; found?: boolean;
+            taskId?: string; status?: string };
+          if (recovered.success !== true) throw new Error('Original task recovery invalid');
+          if (recovered.found && typeof recovered.taskId === 'string'
+            && ['completed', 'failed', 'cancelled', 'timeout'].includes(recovered.status || '')) {
+            clearUpscaleSubmissionMarker(localStorage, marker.idempotencyKey, marker, marker.actorId);
+            setIsUpscaleSubmissionUnknown(false);
+            setRecoveredUpscaleTask(null);
+            setUpscaleQuote(null);
+            toast.info(`原放大任务已结束（${recovered.status}），请先核对任务记录。`);
+          } else {
+            setIsUpscaleSubmissionUnknown(true);
+            setRecoveredUpscaleTask(recovered.found && typeof recovered.taskId === 'string'
+              ? { imageId: img.id, taskId: recovered.taskId, status: recovered.status || 'processing' }
+              : null);
+            toast.error(recovered.found && recovered.taskId
+              ? `原放大任务 ${recovered.taskId} 仍待完成，请核对任务记录；不能重新报价。`
+              : '原放大提交仍待确认；当前未查到任务不代表未发送，不能重新报价。');
+          }
+          return;
+        }
+      }
+    } catch {
+      setIsUpscaleSubmissionUnknown(true);
+      toast.error('无法核对原放大任务或浏览器存储；为避免重复扣费，已阻止新的付费请求。');
+      return;
+    }
+    const sourceContext = resolveCanvasUpscaleSource({ projectId, documentMetadataMode,
+      assetVersionId: img.assetVersionId });
+    if (sourceContext.kind === 'project-required') {
+      toast.error('无法确认当前协作文档所属项目，请刷新项目后重试。');
+      return;
+    }
+    if (sourceContext.kind === 'invalid-source') {
+      toast.error('图片资产版本标识无效，请刷新项目后重试。');
+      return;
+    }
+    if (sourceContext.kind === 'import-required') {
+      toast.error('此图片尚无协作文档资产版本；需先完成受权导入，当前无法放大。');
+      return;
+    }
     if (upscaleMode === 'ai-only' && (!selectedUpscaleModel || selectedUpscaleModel.unavailableReason)) {
       toast.error(selectedUpscaleModel?.unavailableReason || '请先选择可用的 AI 放大模型。');
       return;
@@ -8742,6 +9013,135 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
       return;
     }
     const selectedPreset = UPSCALE_TARGET_PRESETS.find(preset => preset.id === upscalePreset);
+    if (upscaleActionPendingRef.current) return;
+    const modelInfo = getCurrentModel();
+    const requestBody: Record<string, unknown> = {
+      action: 'upscale',
+      imageUrl: img.url,
+      ...sourceContext.fields,
+      prompt: img.prompt || img.modifyPrompt || '',
+      targetWidth: targetDim.width,
+      targetHeight: targetDim.height,
+      targetPreset: upscalePreset,
+      aspectRatio: findClosestStandardRatio(origW, origH),
+      model: upscaleMode === 'ai-only' ? selectedUpscaleModel?.modelId || modelInfo.model : modelInfo.model,
+      providerId: upscaleMode === 'ai-only' ? selectedUpscaleModel?.providerId : (modelInfo.providerId || getCurrentProviderId()),
+      scale: targetDim.engineScale,
+      originalWidth: origW,
+      originalHeight: origH,
+      upscaleMode,
+      upscaleModel: upscaleMode === 'ai-only' ? selectedUpscaleModel?.modelId : undefined,
+      engine: upscaleMode,
+      localModel: upscaylSelectedModel,
+    };
+    const needsQuote = upscaleMode === 'ai-only'
+      && Boolean(selectedUpscaleModel && resolve302UpscaleModelId(selectedUpscaleModel.modelId));
+    let quoteActorId = '';
+    if (needsQuote) {
+      try {
+        const authResponse = await fetch('/api/auth/me', { cache: 'no-store' });
+        const auth = await authResponse.json() as { success?: boolean; user?: { id?: string } | null };
+        if (!authResponse.ok || auth.success !== true || !auth.user?.id) {
+          throw new Error('Cannot confirm account for paid upscale');
+        }
+        quoteActorId = auth.user.id;
+        const marker = findUpscaleSubmissionMarker(localStorage, markerSource, quoteActorId);
+        if (marker) {
+          const query = new URLSearchParams({ projectId: marker.projectId,
+            idempotencyKey: marker.idempotencyKey });
+          const recoveryResponse = await fetch(`/api/tasks/recover?${query}`, { cache: 'no-store' });
+          if (!recoveryResponse.ok) throw new Error('Original task recovery unavailable');
+          const recovered = await recoveryResponse.json() as { success?: boolean; found?: boolean;
+            taskId?: string; status?: string };
+          if (recovered.success !== true) throw new Error('Original task recovery invalid');
+          if (recovered.found && typeof recovered.taskId === 'string'
+            && ['completed', 'failed', 'cancelled', 'timeout'].includes(recovered.status || '')) {
+            clearUpscaleSubmissionMarker(localStorage, marker.idempotencyKey, marker, marker.actorId);
+            setIsUpscaleSubmissionUnknown(false);
+            setRecoveredUpscaleTask(null);
+            setUpscaleQuote(null);
+            toast.info(`原放大任务已结束（${recovered.status}），请先核对任务记录。`);
+          } else {
+            setIsUpscaleSubmissionUnknown(true);
+            setRecoveredUpscaleTask(recovered.found && typeof recovered.taskId === 'string'
+              ? { imageId: img.id, taskId: recovered.taskId, status: recovered.status || 'processing' }
+              : null);
+            toast.error(recovered.found && recovered.taskId
+              ? `原放大任务 ${recovered.taskId} 仍待完成，请核对任务记录；不能重新报价。`
+              : '原放大提交仍待确认；当前未查到任务不代表未发送，不能重新报价。');
+          }
+          return;
+        }
+        if (isUpscaleSubmissionUnknown) {
+          toast.error('原放大任务身份不可核对；不能重发付费请求或重新报价。');
+          return;
+        }
+      } catch {
+        setIsUpscaleSubmissionUnknown(true);
+        toast.error('无法核对原放大任务或浏览器存储；为避免重复扣费，已阻止新的付费请求。');
+        return;
+      }
+    }
+    if (isUpscaleSubmissionUnknown && (!upscaleQuote || !needsQuote
+      || upscaleQuote.imageId !== img.id
+      || JSON.stringify(upscaleQuote.requestBody) !== JSON.stringify(requestBody))) {
+      toast.error('原放大任务提交状态未知，请回到原图核对任务，不能开始新的付费请求。');
+      return;
+    }
+    if (upscaleQuote && (!needsQuote || upscaleQuote.imageId !== img.id
+      || JSON.stringify(upscaleQuote.requestBody) !== JSON.stringify(requestBody)
+      || (!isUpscaleSubmissionUnknown && Date.now() >= upscaleQuote.expiresAt))) {
+      setUpscaleQuote(null);
+      toast.info('放大参数或报价已变化，请重新获取报价。');
+      return;
+    }
+    if (needsQuote && !upscaleQuote) {
+      upscaleActionPendingRef.current = true;
+      setIsUpscaleQuoteLoading(true);
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 30_000);
+      try {
+        const idempotencyKey = globalThis.crypto?.randomUUID?.()
+          || `upscale-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+        const response = await fetch('/api/image-edit', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Idempotency-Key': idempotencyKey },
+          body: JSON.stringify({ ...requestBody, quoteOnly: true }),
+          signal: controller.signal,
+        });
+        const data = await response.json() as { success?: boolean; quote?: {
+          token?: string; total?: number; components?: { upscale?: number; enhance?: number };
+          expiresAt?: number;
+        } };
+        const quote = data.quote;
+        const components = quote?.components;
+        if (!response.ok || data.success !== true || !quote
+          || typeof quote.token !== 'string' || typeof quote.total !== 'number'
+          || !Number.isSafeInteger(quote.total) || quote.total < 0
+          || typeof quote.expiresAt !== 'number' || !Number.isFinite(quote.expiresAt)
+          || quote.expiresAt <= Date.now()
+          || typeof components?.upscale !== 'number' || !Number.isSafeInteger(components.upscale)
+          || typeof components?.enhance !== 'number' || !Number.isSafeInteger(components.enhance)
+          || components.upscale < 0 || components.enhance < 0
+          || components.upscale + components.enhance !== quote.total) {
+          toast.error('无法取得有效放大报价，请检查模型配置后重试。');
+          return;
+        }
+        setUpscaleQuote({ imageId: img.id, requestBody, token: quote.token,
+          total: quote.total, components: { upscale: components.upscale, enhance: components.enhance },
+          expiresAt: quote.expiresAt, idempotencyKey });
+      } catch (error) {
+        toast.error(error instanceof Error && error.name === 'AbortError'
+          ? '获取报价超时，请重试。' : '获取放大报价失败，请重试。');
+      } finally {
+        clearTimeout(timeout);
+        setIsUpscaleQuoteLoading(false);
+        upscaleActionPendingRef.current = false;
+      }
+      return;
+    }
+    upscaleActionPendingRef.current = true;
+    setIsUpscaleSubmitting(true);
 
     // 放大结果应保持与原图相同的画布显示尺寸，仅 originalWidth/Height 变大
     const displayW = img.width;
@@ -8765,10 +9165,14 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
       setActiveTool('none');
       return failure;
     };
+    const holdUnknownUpscale = (message: string) => {
+      removeProcessingFrame(placeholderId);
+      setIsUpscaleSubmissionUnknown(true);
+      toast.error(message);
+    };
     setIsEditProcessing(true);
-    exitEditModeRef.current();
+    if (!upscaleQuote) exitEditModeRef.current();
     try {
-      const modelInfo = getCurrentModel();
       const initialStatus = upscaleMode === 'ai-only'
         ? '正在提交到专用 AI 超分模型...'
         : upscaleMode === 'fidelity'
@@ -8780,32 +9184,33 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
       const upscaleTimeout = setTimeout(() => upscaleController.abort(), 600000); // 10分钟超时，匹配后端maxDuration
       let res: Response;
       try {
+        if (upscaleQuote) {
+          if (!quoteActorId) throw new Error('Cannot confirm account for paid upscale');
+          const claim = await claimUpscaleSubmissionMarker(navigator.locks, localStorage,
+            { version: 1, actorId: quoteActorId,
+            ...markerSource, idempotencyKey: upscaleQuote.idempotencyKey, createdAt: Date.now() });
+          if (!claim.claimed && (!isUpscaleSubmissionUnknown
+            || claim.existing.idempotencyKey !== upscaleQuote.idempotencyKey)) {
+            clearTimeout(upscaleTimeout);
+            holdUnknownUpscale('另一标签已提交此图的放大请求，请先核对原任务；不会再次扣费。');
+            return;
+          }
+        }
         res = await fetch('/api/image-edit', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            action: 'upscale',
-            imageUrl: img.url,
-            prompt: img.prompt || img.modifyPrompt || '',
-            targetWidth: targetDim.width,
-            targetHeight: targetDim.height,
-            targetPreset: upscalePreset,
-            aspectRatio: findClosestStandardRatio(origW, origH),
-            model: upscaleMode === 'ai-only' ? selectedUpscaleModel?.modelId || modelInfo.model : modelInfo.model,
-            providerId: upscaleMode === 'ai-only' ? selectedUpscaleModel?.providerId : (modelInfo.providerId || getCurrentProviderId()),
-            scale: targetDim.engineScale,
-            originalWidth: origW,
-            originalHeight: origH,
-            upscaleMode,
-            upscaleModel: upscaleMode === 'ai-only' ? selectedUpscaleModel?.modelId : undefined,
-            engine: upscaleMode,
-            localModel: upscaylSelectedModel,
-          }),
+          headers: { 'Content-Type': 'application/json',
+            ...(upscaleQuote ? { 'Idempotency-Key': upscaleQuote.idempotencyKey } : {}) },
+          body: JSON.stringify({ ...requestBody,
+            ...(upscaleQuote ? { quoteToken: upscaleQuote.token } : {}) }),
           signal: upscaleController.signal,
         });
       } catch (fetchErr: unknown) {
         clearTimeout(upscaleTimeout);
         const err = fetchErr as Error;
+        if (upscaleQuote) {
+          holdUnknownUpscale('放大提交状态未知，可能已扣费；请用原请求核对任务，勿重新报价。');
+          return;
+        }
         if (err.name === 'AbortError') {
           failUpscale('放大请求超时，AI模型响应时间过长，请稍后重试', '放大请求超时');
         } else {
@@ -8817,6 +9222,66 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
 
       if (!res.ok) {
         const errorText = await res.text().catch(() => '');
+        if (upscaleQuote && res.status === 409 && errorText.includes('IMAGE_EDIT_ACTIVE_ATTEMPT')) {
+          let original: { code?: string; taskId?: string; idempotencyKey?: string; status?: string } | null = null;
+          try { original = JSON.parse(errorText) as {
+            code?: string; taskId?: string; idempotencyKey?: string; status?: string;
+          }; } catch { /* Preserve the uncertain key. */ }
+          if (original?.code === 'IMAGE_EDIT_ACTIVE_ATTEMPT'
+            && typeof original.taskId === 'string' && original.taskId.length > 0
+            && isRecoverableUpscaleIdempotencyKey(original.idempotencyKey)
+            && original.idempotencyKey !== upscaleQuote.idempotencyKey
+            && ['queued', 'pending', 'processing'].includes(original.status || '')
+            && quoteActorId) {
+            try {
+              writeUpscaleSubmissionMarker(localStorage, { version: 1, actorId: quoteActorId,
+                ...markerSource, idempotencyKey: original.idempotencyKey, createdAt: Date.now() });
+              clearUpscaleSubmissionMarker(localStorage, upscaleQuote.idempotencyKey,
+                markerSource, quoteActorId);
+              setRecoveredUpscaleTask({ imageId: img.id, taskId: original.taskId,
+                status: original.status || 'processing' });
+              setUpscaleQuote(null);
+              holdUnknownUpscale('另一标签已受理此放大请求，已接续原任务；不会再次扣费。');
+              return;
+            } catch { /* Keep the original local attempt unresolved on storage failure. */ }
+          }
+          holdUnknownUpscale('放大冲突的原任务身份未能安全保存，请核对任务记录；勿重新提交。');
+          return;
+        }
+        if (upscaleQuote && res.status === 409 && errorText.includes('IMAGE_EDIT_QUOTE_CHANGED')) {
+          removeProcessingFrame(placeholderId);
+          if (isUpscaleSubmissionUnknown) {
+            toast.error('原放大任务仍未确认，不能以新报价重试；请检查任务记录。');
+            return;
+          }
+          clearUpscaleSubmissionMarker(localStorage, upscaleQuote.idempotencyKey,
+            markerSource, quoteActorId);
+          setUpscaleQuote(null);
+          toast.error('报价已变化，未扣费；请重新获取并确认新报价。');
+          return;
+        }
+        if (upscaleQuote && isUpscaleSubmissionUnknown) {
+          const originalTask = (() => {
+            try { return JSON.parse(errorText) as { reused?: boolean; taskId?: string; status?: string }; }
+            catch { return null; }
+          })();
+          if (res.status === 409 && originalTask?.reused === true
+            && typeof originalTask.taskId === 'string'
+            && ['failed', 'cancelled', 'timeout'].includes(originalTask.status || '')) {
+            setIsUpscaleSubmissionUnknown(false);
+            clearUpscaleSubmissionMarker(localStorage, upscaleQuote.idempotencyKey,
+              markerSource, quoteActorId);
+            setUpscaleQuote(null);
+            failUpscale(extractImageEditErrorMessage(errorText, res.status));
+            return;
+          }
+          holdUnknownUpscale('未能确认原放大任务终态，请检查任务记录；不能以新报价重试。');
+          return;
+        }
+        if (upscaleQuote) {
+          holdUnknownUpscale('放大提交结果未确认，请核对原任务，勿重新报价。');
+          return;
+        }
         const errorMsg = extractImageEditErrorMessage(errorText, res.status);
         console.error('[upscale] API error:', res.status, errorText.slice(0, 200));
         failUpscale(errorMsg);
@@ -8828,12 +9293,19 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
         data = await res.json();
       } catch (jsonErr) {
         console.error('[upscale] JSON parse error:', jsonErr);
-        failUpscale('放大失败: 服务器返回了无效的响应');
+        if (upscaleQuote) holdUnknownUpscale('服务器响应无效，原放大任务状态待核对；请勿重新报价。');
+        else failUpscale('放大失败: 服务器返回了无效的响应');
         return;
       }
 
       if (!data.success) {
-        failUpscale(extractImageEditErrorMessage(JSON.stringify(data), res.status));
+        if (upscaleQuote) holdUnknownUpscale('原放大任务终态未确认，请核对任务记录。');
+        else failUpscale(extractImageEditErrorMessage(JSON.stringify(data), res.status));
+        return;
+      }
+
+      if (upscaleQuote && data.status === 'submission-unknown') {
+        holdUnknownUpscale('供应商提交状态未知，原任务待核对；请勿重新报价或创建新任务。');
         return;
       }
 
@@ -8882,17 +9354,29 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
           modelName: `${usedModelName} · ${executionEngine}`,
           apiProvider: providerName,
         }, 'upscale');
+        if (upscaleQuote) {
+          setIsUpscaleSubmissionUnknown(false);
+          clearUpscaleSubmissionMarker(localStorage, upscaleQuote.idempotencyKey,
+            markerSource, quoteActorId);
+          setUpscaleQuote(null);
+          exitEditModeRef.current();
+        }
       } else {
         const pollError = lastPollErrorRef.current || '放大超时，请重试';
-        failUpscale(pollError, '放大超时');
+        if (upscaleQuote) holdUnknownUpscale(`原放大任务状态待核对：${pollError}`);
+        else failUpscale(pollError, '放大超时');
       }
     } catch (e) {
       console.error('Upscale error:', e);
-      failUpscale(`操作失败: ${e instanceof Error ? e.message : '请重试'}`);
+      if (upscaleQuote) holdUnknownUpscale('原放大任务结果尚未确认，请核对原任务，勿重新报价。');
+      else failUpscale(`操作失败: ${e instanceof Error ? e.message : '请重试'}`);
+    } finally {
+      setIsEditProcessing(false);
+      setIsUpscaleSubmitting(false);
+      upscaleActionPendingRef.current = false;
     }
-    setIsEditProcessing(false);
     setActiveTool('none');
-  }, [getActiveImageData, upscaleActualW, upscaleActualH, upscalePreset, createProcessingFrameRightOf, getCurrentModel, updateProcessingFrame, upscaleMode, selectedUpscaleModel, upscaylSelectedModel, getCurrentProviderId, pollForResult, completeProcessingFrame]);
+  }, [getActiveImageData, projectId, documentMetadataMode, upscaleActualW, upscaleActualH, upscalePreset, createProcessingFrameRightOf, getCurrentModel, updateProcessingFrame, upscaleMode, selectedUpscaleModel, upscaylSelectedModel, getCurrentProviderId, pollForResult, completeProcessingFrame, upscaleQuote, isUpscaleSubmissionUnknown, removeProcessingFrame]);
 
   // Engine selection helper: if pref saved, run directly; else open dialog
   const triggerWithEngine = useCallback((tool: 'upscale'|'removebg'|'svg'|'segment', doExecute: (engine: 'auto'|'ai'|'local') => void) => {
@@ -8907,9 +9391,29 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
     triggerWithEngine('upscale', () => {
     const img = getActiveImageData();
     if (!img) return;
+    let persistedAttempt = false;
+    if (isUpscaleSubmissionUnknown && !upscaleQuote) {
+      try {
+        persistedAttempt = Boolean(findUpscaleSubmissionMarker(localStorage,
+          { projectId: projectId || '', imageId: img.id, sourceVersionId: img.assetVersionId || null }));
+      } catch { /* Corrupt storage is not permission to start a new paid attempt. */ }
+    }
+    if (isUpscaleSubmissionUnknown && upscaleQuote?.imageId !== img.id && !persistedAttempt) {
+      toast.error('另一张图片的放大任务提交状态未知，请先核对原任务。');
+      return;
+    }
     if (!activateCanvasToolSession('upscale', 'image-toolbar', [img.id])) return;
+    if (!isUpscaleSubmissionUnknown) setUpscaleQuote(null);
     setEditImageId(img.id);
     setEditMode('upscale');
+    if (persistedAttempt) setUpscaleMode('ai-only');
+    if (isUpscaleSubmissionUnknown && upscaleQuote) {
+      setUpscaleActualW(Number(upscaleQuote.requestBody.originalWidth));
+      setUpscaleActualH(Number(upscaleQuote.requestBody.originalHeight));
+      setUpscalePreset(upscaleQuote.requestBody.targetPreset as UpscaleTargetPreset);
+      setUpscaleMode('ai-only');
+      return;
+    }
     // Load actual pixel dimensions from the image element
     const imgEl = new Image();
     imgEl.crossOrigin = 'anonymous';
@@ -8937,12 +9441,191 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
     };
     imgEl.src = img.url;
     });
-  }, [activateCanvasToolSession, getActiveImageData, triggerWithEngine]);
+  }, [activateCanvasToolSession, getActiveImageData, triggerWithEngine, isUpscaleSubmissionUnknown, upscaleQuote, projectId]);
 
   // 2. REMOVE BACKGROUND - auto, result to the right
   const handleRemoveBackground = useCallback(async () => {
     const img = removeBgTargetImage || getActiveImageData();
     if (!img) return;
+    if (removeBgActionPendingRef.current) return;
+    if (removeBgQuote && !documentMetadataMode) {
+      setRemoveBgQuote(null);
+      toast.info('画布模式已变化，请重新打开去背景面板。');
+      return;
+    }
+    if (documentMetadataMode) {
+      const current = imagesRef.current.find(candidate => candidate.id === img.id);
+      if (!current || current.url !== img.url || current.assetVersionId !== img.assetVersionId
+        || current.placementId !== img.placementId) {
+        setRemoveBgQuote(null);
+        toast.info('协作文档图片已更新，请重新选择并获取去背景报价。');
+        return;
+      }
+    }
+    const modelInfo = getCurrentModel();
+    const documentRemoveBg = documentMetadataMode;
+    if (documentRemoveBg && (!projectId?.trim() || !img.assetVersionId?.trim())) {
+      toast.error(!projectId?.trim() ? '无法确认协作文档项目，请刷新后重试。'
+        : '此图片尚无协作文档资产版本；需先完成受权导入。');
+      return;
+    }
+    if (documentRemoveBg && removeBgEngine !== 'local') {
+      toast.error('协作文档去背景目前仅支持本地引擎报价，请切换为本地算法。');
+      return;
+    }
+    const requestBody: Record<string, unknown> = {
+      action: 'remove_background',
+      imageUrl: img.url,
+      aspectRatio: findClosestStandardRatio(img.originalWidth || img.width, img.originalHeight || img.height),
+      model: modelInfo.model,
+      providerId: modelInfo.providerId || getCurrentProviderId(),
+      removeBgModel: removeBgModelId,
+      engine: removeBgEngine,
+      ...(documentRemoveBg ? { projectId, assetParentVersionIds: [img.assetVersionId],
+        assetProjectionMode: 'derived', assetSelectedEntityIds: [img.id] } : {}),
+    };
+    let submissionMarker: RemoveBgSubmissionMarker | null = null;
+    const verifiedPublication = (imageUrl: unknown, maskUrl: unknown, projection: unknown,
+      publishedUrls = false): boolean => {
+      if (typeof imageUrl !== 'string' || !imageUrl || typeof maskUrl !== 'string' || !maskUrl
+        || imageUrl === maskUrl || !projection || typeof projection !== 'object') return false;
+      const record = projection as { status?: unknown; references?: unknown };
+      return record.status === 'completed' && Array.isArray(record.references)
+        && record.references.length === 2
+        && record.references.every((reference: unknown) => {
+          if (!reference || typeof reference !== 'object') return false;
+          const ref = reference as { url?: unknown; assetVersionId?: unknown };
+          return typeof ref.url === 'string' && ref.url.startsWith('/api/serve-upload/exports/')
+            && typeof ref.assetVersionId === 'string' && ref.assetVersionId.length > 0;
+        })
+        && (!publishedUrls || (record.references[0].url === imageUrl
+          && record.references[1].url === maskUrl))
+        && record.references[0].url !== record.references[1].url
+        && record.references[0].assetVersionId !== record.references[1].assetVersionId;
+    };
+    const finishRecoveredRemoveBg = (marker: RemoveBgSubmissionMarker, taskId: string): void => {
+      const placeholder = imagesRef.current.find(image => image.isProcessingPlaceholder
+        && image.processing?.taskId === taskId);
+      if (placeholder) removeProcessingFrame(placeholder.id);
+      clearRemoveBgSubmissionMarker(localStorage, marker);
+      setRemoveBgQuote(null);
+      toast.info('原去背景任务已发布主体图和蒙版，请核对协作文档。');
+    };
+    const checkPriorRemoveBgAttempt = async (marker: RemoveBgSubmissionMarker): Promise<void> => {
+      const query = new URLSearchParams({ projectId: marker.projectId,
+        idempotencyKey: marker.idempotencyKey, sourceVersionId: marker.sourceVersionId });
+      const response = await fetch(`/api/tasks/recover?${query}`, { cache: 'no-store' });
+      if (!response.ok) throw new Error('Original remove-background task recovery unavailable');
+      const recovered = await response.json() as { success?: boolean; found?: boolean;
+        taskId?: string; status?: string; assetProjectionStatus?: string;
+        publication?: { imageUrl?: string; maskUrl?: string; references?: unknown[] } };
+      if (recovered.success !== true) throw new Error('Original remove-background task recovery invalid');
+      if (recovered.found && recovered.status === 'completed' && recovered.taskId) {
+        if (verifiedPublication(recovered.publication?.imageUrl, recovered.publication?.maskUrl,
+          { status: recovered.assetProjectionStatus, references: recovered.publication?.references }, true)) {
+          finishRecoveredRemoveBg(marker, recovered.taskId);
+          return;
+        }
+        const pollResponse = await onRequestTaskPollRef.current({ taskId: recovered.taskId });
+        if (!pollResponse.ok) throw new Error('Original remove-background publication unavailable');
+        const polled = await pollResponse.json() as { status?: string; imageUrl?: string;
+          maskUrl?: string; assetProjection?: { status?: string } };
+        if (polled.status === 'completed' && verifiedPublication(polled.imageUrl, polled.maskUrl,
+          polled.assetProjection)) {
+          finishRecoveredRemoveBg(marker, recovered.taskId);
+          return;
+        }
+      }
+      if (recovered.found && ['failed', 'cancelled', 'timeout'].includes(recovered.status || '')) {
+        clearRemoveBgSubmissionMarker(localStorage, marker);
+        setRemoveBgQuote(null);
+        toast.info(`原去背景任务已结束（${recovered.status}），请先核对任务记录。`);
+      } else {
+        toast.error(recovered.found && recovered.taskId
+          ? `原去背景任务 ${recovered.taskId} 尚待处理或画布发布，请先核对；不会再次扣费。`
+          : '原去背景提交状态未知；当前未查到任务不代表未发送，不能重新报价或重发。');
+      }
+    };
+    if (documentRemoveBg) {
+      if (removeBgQuote && (removeBgQuote.imageId !== img.id
+        || JSON.stringify(removeBgQuote.requestBody) !== JSON.stringify(requestBody)
+        || Date.now() >= removeBgQuote.expiresAt)) {
+        setRemoveBgQuote(null);
+        toast.info('去背景参数或报价已变化，请重新获取报价。');
+        return;
+      }
+      if (!removeBgQuote) {
+        removeBgActionPendingRef.current = true;
+        setIsRemoveBgQuoteLoading(true);
+        try {
+          const authResponse = await fetch('/api/auth/me', { cache: 'no-store' });
+          const auth = await authResponse.json() as { success?: boolean; user?: { id?: string } | null };
+          if (!authResponse.ok || auth.success !== true || !auth.user?.id) {
+            throw new Error('Cannot confirm account for paid remove-background');
+          }
+          const existing = findRemoveBgSubmissionMarker(localStorage,
+            { projectId: projectId!, imageId: img.id, sourceVersionId: img.assetVersionId! }, auth.user.id);
+          if (existing) {
+            await checkPriorRemoveBgAttempt(existing);
+            return;
+          }
+          const idempotencyKey = globalThis.crypto?.randomUUID?.()
+            || `removebg-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+          const response = await fetch('/api/image-edit', { method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Idempotency-Key': idempotencyKey },
+            body: JSON.stringify({ ...requestBody, quoteOnly: true }) });
+          const data = await response.json() as { success?: boolean; quote?: {
+            token?: string; total?: number; components?: { removebg?: number }; expiresAt?: number } };
+          const quote = data.quote;
+          if (!response.ok || data.success !== true || !quote
+            || typeof quote.token !== 'string' || typeof quote.total !== 'number'
+            || !Number.isSafeInteger(quote.total) || quote.total < 0
+            || quote.components?.removebg !== quote.total
+            || typeof quote.expiresAt !== 'number' || quote.expiresAt <= Date.now()) {
+            toast.error('无法取得有效去背景报价，请检查模型与来源后重试。');
+            return;
+          }
+          const currentSource = imagesRef.current.find(candidate => candidate.id === img.id);
+          if (!currentSource || currentSource.url !== img.url
+            || currentSource.assetVersionId !== img.assetVersionId) {
+            toast.info('协作文档图片在报价期间已更新，请重新选择。');
+            return;
+          }
+          setRemoveBgQuote({ actorId: auth.user.id, imageId: img.id, requestBody, token: quote.token,
+            total: quote.total, expiresAt: quote.expiresAt, idempotencyKey });
+        } catch {
+          toast.error('获取去背景报价失败，请重试。');
+        } finally {
+          setIsRemoveBgQuoteLoading(false);
+          removeBgActionPendingRef.current = false;
+        }
+        return;
+      }
+      try {
+        submissionMarker = { version: 1, actorId: removeBgQuote.actorId,
+          projectId: projectId!, imageId: img.id, sourceVersionId: img.assetVersionId!,
+          idempotencyKey: removeBgQuote.idempotencyKey, createdAt: Date.now() };
+        const claim = await claimRemoveBgSubmissionMarker(navigator.locks, localStorage, submissionMarker);
+        if (!claim.claimed) {
+          await checkPriorRemoveBgAttempt(claim.existing);
+          return;
+        }
+      } catch {
+        toast.error('无法核对原去背景任务或浏览器存储；为避免重复扣费，已阻止提交。');
+        return;
+      }
+      const currentSource = imagesRef.current.find(candidate => candidate.id === img.id);
+      if (!currentSource || currentSource.url !== img.url
+        || currentSource.assetVersionId !== img.assetVersionId) {
+        if (submissionMarker) clearRemoveBgSubmissionMarker(localStorage, submissionMarker);
+        setRemoveBgQuote(null);
+        toast.info('协作文档图片在确认期间已更新，请重新选择并获取报价。');
+        return;
+      }
+    }
+    removeBgActionPendingRef.current = true;
+    setIsRemoveBgSubmitting(true);
+    setShowRemoveBgPicker(false);
     const placeholderId = createProcessingFrameRightOf(
       img,
       '去背景中',
@@ -8960,29 +9643,33 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
       toast.error(failure.error);
       return failure.error;
     };
+    const holdUnknownRemoveBg = (): void => {
+      updateProcessingFrame(placeholderId, { progress: 95,
+        status: '原去背景任务状态待核对；请重新打开去背景面板核对，不要再次提交。' });
+      toast.info('原去背景任务状态待核对；不会重新扣费。');
+    };
 
     try {
-      const modelInfo = getCurrentModel();
       updateProcessingFrame(placeholderId, { progress: 12, status: '正在提交到 AI 模型...' });
       const res = await fetch('/api/image-edit', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: 'remove_background',
-          imageUrl: img.url,
-          aspectRatio: findClosestStandardRatio(img.originalWidth || img.width, img.originalHeight || img.height),
-          model: modelInfo.model,
-          providerId: modelInfo.providerId || getCurrentProviderId(),
-          removeBgModel: removeBgModelId,
-          engine: removeBgEngine,
-        }),
+        headers: { 'Content-Type': 'application/json',
+          ...(removeBgQuote ? { 'Idempotency-Key': removeBgQuote.idempotencyKey } : {}) },
+        body: JSON.stringify({ ...requestBody,
+          ...(removeBgQuote ? { quoteOnly: false, quoteToken: removeBgQuote.token } : {}) }),
       });
 
       if (!res.ok) {
         const errorText = await res.text().catch(() => '');
         const errorMsg = errorText || `服务器错误 (${res.status})`;
         console.error('[removeBg] API error:', res.status, errorText.slice(0, 200));
-        failRemoveBackground(errorMsg);
+        if (submissionMarker && res.status === 409 && errorText.includes('IMAGE_EDIT_QUOTE_CHANGED')) {
+          clearRemoveBgSubmissionMarker(localStorage, submissionMarker);
+          setRemoveBgQuote(null);
+        }
+        if (submissionMarker && !(res.status === 409 && errorText.includes('IMAGE_EDIT_QUOTE_CHANGED'))) {
+          holdUnknownRemoveBg();
+        } else failRemoveBackground(errorMsg);
         setIsEditProcessing(false);
         return;
       }
@@ -8992,14 +9679,36 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
         data = await res.json();
       } catch (jsonErr) {
         console.error('[removeBg] JSON parse error:', jsonErr);
-        failRemoveBackground('服务器返回了无效的响应');
+        if (submissionMarker) holdUnknownRemoveBg();
+        else failRemoveBackground('服务器返回了无效的响应');
         setIsEditProcessing(false);
         return;
       }
 
       if (!data.success) {
-        failRemoveBackground(String(data.error || '移除背景失败'));
+        if (submissionMarker && typeof data.taskId === 'string'
+          && ['failed', 'cancelled', 'timeout'].includes(String(data.status))) {
+          clearRemoveBgSubmissionMarker(localStorage, submissionMarker);
+          setRemoveBgQuote(null);
+          failRemoveBackground(String(data.error || '去背景任务已结束'));
+        } else if (submissionMarker) holdUnknownRemoveBg();
+        else failRemoveBackground(String(data.error || '移除背景失败'));
         setIsEditProcessing(false);
+        return;
+      }
+
+      if (documentRemoveBg && typeof data.taskId === 'string') {
+        updateProcessingFrame(placeholderId, { taskId: data.taskId });
+      }
+      if (documentRemoveBg && ['completion-unknown', 'submission-unknown'].includes(String(data.status))) {
+        holdUnknownRemoveBg();
+        return;
+      }
+
+      if (documentRemoveBg && data.status === 'publication-pending' && data.taskId) {
+        updateProcessingFrame(placeholderId, { progress: 95,
+          status: '任务已完成，画布发布待核对；请重新打开去背景面板核对原任务。' });
+        toast.info('去背景任务已完成，画布发布待核对；不会再次扣费。');
         return;
       }
 
@@ -9010,6 +9719,8 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
       // 2) 异步返回 taskId（AI 模型通过 APImart 等代理异步处理，前端轮询）
       let resultUrl: string | null = data.imageUrl ? String(data.imageUrl) : null;
       let maskResultUrl: string | null = data.maskUrl ? String(data.maskUrl) : null;
+      let publicationProjection: unknown = data.assetProjection;
+      let terminalPollStatus: string | null = null;
       if (!resultUrl && data.taskId) {
         // AI RemoveBG 异步轮询：APImart 代理可能需要 60-120 秒
         // 轮询次数增加到 60 次（约 120 秒），适应 AI 模型处理时间
@@ -9057,9 +9768,15 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
                 || (pollData.result?.image as Record<string, unknown>)?.url
                 || (pollData.result?.images as Array<Record<string, unknown>>)?.[0]?.url;
               if (pollData.status === 'completed' && resultUrl) {
-                return { imageUrl: resultUrl as string, maskUrl: (pollData.maskUrl || pollData.result?.maskUrl || '') as string };
+                return { imageUrl: resultUrl as string,
+                  maskUrl: (pollData.maskUrl || pollData.result?.maskUrl || '') as string,
+                  publicationProjection: pollData.assetProjection };
               }
-              if (pollData.status === 'failed' || pollData.status === 'error' || pollData.status === 'cancelled' || pollData.retryable === false) return null;
+              if (pollData.status === 'failed' || pollData.status === 'cancelled' || pollData.status === 'timeout') {
+                terminalPollStatus = pollData.status;
+                return null;
+              }
+              if (pollData.status === 'error' || pollData.retryable === false) return null;
             } catch { /* continue */ }
           }
           return null;
@@ -9067,10 +9784,22 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
         if (asyncResult) {
           resultUrl = asyncResult.imageUrl;
           if (asyncResult.maskUrl) maskResultUrl = asyncResult.maskUrl;
+          publicationProjection = asyncResult.publicationProjection;
         }
       }
 
       if (resultUrl) {
+        if (documentRemoveBg) {
+          if (!verifiedPublication(resultUrl, maskResultUrl, publicationProjection)) {
+            updateProcessingFrame(placeholderId, { progress: 95, status: '任务已完成，画布发布待核对；请在任务记录中查看。' });
+            return;
+          }
+          removeProcessingFrame(placeholderId);
+          if (submissionMarker) clearRemoveBgSubmissionMarker(localStorage, submissionMarker);
+          setRemoveBgQuote(null);
+          toast.success('去背景主体图和蒙版已发布到协作文档。');
+          return;
+        }
         const w = img.originalWidth || Math.round(img.width);
         const h = img.originalHeight || Math.round(img.height);
         updateProcessingFrame(placeholderId, { progress: 96, status: '正在载入透明背景结果...' });
@@ -9107,14 +9836,27 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
           }
         }
       } else {
-        failRemoveBackground(lastPollErrorRef.current || String(data.error || '移除背景超时，请重试'));
+        if (submissionMarker && terminalPollStatus) {
+          clearRemoveBgSubmissionMarker(localStorage, submissionMarker);
+          setRemoveBgQuote(null);
+          failRemoveBackground(`去背景任务已结束（${terminalPollStatus}）`);
+        } else if (submissionMarker) holdUnknownRemoveBg();
+        else failRemoveBackground(lastPollErrorRef.current || String(data.error || '移除背景超时，请重试'));
       }
     } catch (e) {
       console.error('Remove background error:', e);
-      failRemoveBackground(e instanceof Error ? e.message : '网络请求失败，请重试');
+      if (submissionMarker) holdUnknownRemoveBg();
+      else failRemoveBackground(e instanceof Error ? e.message : '网络请求失败，请重试');
     }
-    setIsEditProcessing(false);
-  }, [removeBgTargetImage, getActiveImageData, createProcessingFrameRightOf, getCurrentModel, updateProcessingFrame, getCurrentProviderId, removeBgModelId, removeBgEngine, addRemoveBgMaskToCanvas, completeProcessingFrame, onImagesChange, toast]);
+    finally {
+      setIsEditProcessing(false);
+      setIsRemoveBgSubmitting(false);
+      removeBgActionPendingRef.current = false;
+    }
+  }, [removeBgTargetImage, getActiveImageData, createProcessingFrameRightOf, getCurrentModel,
+    updateProcessingFrame, getCurrentProviderId, removeBgModelId, removeBgEngine,
+    addRemoveBgMaskToCanvas, completeProcessingFrame, removeProcessingFrame, onImagesChange,
+    documentMetadataMode, projectId, removeBgQuote]);
 
   const elementDecomposeRecoveryRef = useRef<{ projectId: string | null; requestId: number }>({
     projectId: null,
@@ -9508,13 +10250,6 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
     }
   }, [brandProject?.id, completeElementBoardResult, createProcessingFrameRightOf, displayDecomposeAutoRemoveBg, elementDecomposeOutputMode, displayDecomposeProcessing, displayDecomposeRatio, getActiveImageData, getCurrentModel, getCurrentProviderId, projectId, removeProcessingFrame, updateProcessingFrame]);
 
-  const handleOpenAspectRecompose = useCallback(() => {
-    const selectedImage = getActiveImageData();
-    if (!selectedImage) return;
-    setAspectRecomposeRatio('1:1');
-    setShowAspectRecomposePanel(true);
-  }, [getActiveImageData]);
-
   const handleAspectRecomposeConfirm = useCallback(async (ratio: string) => {
     const selectedImage = getActiveImageData();
     if (!selectedImage || aspectRecomposeProcessing) return;
@@ -9523,7 +10258,6 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
     const placeholderId = createProcessingFrameRightOf(selectedImage, '横竖重组', 180, 180, '正在分析...');
     try {
       const model = getCurrentModel();
-      const providerId = getCurrentProviderId() || undefined;
       const [w, h] = ratio.split(':').map(Number);
       if (!w || !h) throw new Error('无效的比例参数');
       const targetWidth = Math.round(Math.min(selectedImage.width, Math.max(selectedImage.width, 512)));
@@ -9551,7 +10285,7 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
       setAspectRecomposeProcessing(false);
       setIsEditProcessing(false);
     }
-  }, [getActiveImageData, aspectRecomposeProcessing, setIsEditProcessing, createProcessingFrameRightOf, getCurrentModel, getCurrentProviderId, updateProcessingFrame, pollForResult, completeProcessingFrame, removeProcessingFrame, toast]);
+  }, [getActiveImageData, aspectRecomposeProcessing, setIsEditProcessing, createProcessingFrameRightOf, getCurrentModel, updateProcessingFrame, pollForResult, completeProcessingFrame, removeProcessingFrame]);
 
   const handleRetryElementBranch = useCallback(async (branch: 'board' | 'layers') => {
     if (!elementDecomposeTask) return;
@@ -10308,7 +11042,7 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
       );
       setThreeDProgress(null);
     }
-  }, [brandProject?.id, projectId, getActiveImageData, threeDSingleImageUrl, selectedImageData, threeDMode, threeDPrompt, threeDMultiImages, getCurrentModel, getThreeDProviders, threeDBackend, threeDProviderId, createProcessingFrameRightOf, updateProcessingFrame, threeDType, threeDQuality, threeDTexture, threeDFormat, threeDEnablePBR, threeDFaceCount, threeDPose, threeDLocalEndpoint, threeDLocalModel, completeProcessingFrame, toast]);
+  }, [brandProject?.id, projectId, getActiveImageData, threeDSingleImageUrl, selectedImageData, threeDMode, threeDPrompt, threeDMultiImages, getCurrentModel, getThreeDProviders, threeDBackend, threeDProviderId, createProcessingFrameRightOf, updateProcessingFrame, threeDType, threeDQuality, threeDTexture, threeDFormat, threeDEnablePBR, threeDFaceCount, threeDPose, threeDLocalEndpoint, threeDLocalModel, completeProcessingFrame]);
 
   // 4. ERASE - floating window mode
   const handleOpenErase = useCallback(() => {
@@ -11010,10 +11744,14 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
         const response = await fetch(`/api/video/download?url=${encodeURIComponent(image.videoUrl)}`);
         if (!response.ok) throw new Error(`视频下载失败: ${response.status}`);
         const blob = await response.blob();
+        if (response.status === 204 || blob.size === 0) {
+          throw new Error('视频下载未返回文件，请检查浏览器下载扩展或稍后重试');
+        }
+        const videoFormat = resolveVideoDownloadFormat(image.videoUrl, response.headers.get('content-type'));
         const url = URL.createObjectURL(blob);
         const link = document.createElement('a');
         link.href = url;
-        link.download = generateSafeFilename(image.prompt || 'video', 'mp4');
+        link.download = generateSafeFilename(image.prompt || 'video', videoFormat.extension);
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
@@ -11187,6 +11925,7 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
     } catch (error) {
       console.error('Download failed:', error);
       setDownloadProgress(null);
+      if (format === 'video') toast.error(error instanceof Error ? error.message : '视频下载失败，请稍后重试');
     }
     setShowDownloadPopup(false);
     setActiveTool('none');
@@ -11218,7 +11957,7 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
     testId?: string;
   }> = [
     { icon: <ZoomIn size={14} className={isMonochrome ? monoColors['放大'] : ''} />, label: '放大', desc: '智能补细节放大，变大变高清，不改内容', action: handleOpenUpscale },
-    { icon: <Eraser size={14} className={isMonochrome ? monoColors['移除背景'] : ''} />, label: '移除背景', desc: '一键删除背景，只剩透明底主体', action: () => { const image = getActiveImageData(); if (!image || !activateCanvasToolSession('remove-bg', 'image-toolbar', [image.id])) return; setRemoveBgTargetImage(image); setShowRemoveBgPicker(true); } },
+    { icon: <Eraser size={14} className={isMonochrome ? monoColors['移除背景'] : ''} />, label: '移除背景', desc: '一键删除背景，只剩透明底主体', action: () => { const image = getActiveImageData(); if (!image || !activateCanvasToolSession('remove-bg', 'image-toolbar', [image.id])) return; setRemoveBgTargetImage(image); setRemoveBgQuote(null); setShowRemoveBgPicker(true); } },
     { icon: <PenTool size={14} className={isMonochrome ? monoColors['SVG智能描摹'] : ''} />, label: 'SVG智能描摹', desc: '矢量描摹/压缩/缩略图', action: handleOpenSvgTrace },
     { icon: <LayoutGrid size={14} className={isMonochrome ? monoColors['元素拆解'] : ''} />, label: '元素拆解', desc: '拆出美陈物料与设计元素，生成平面陈列板', action: handleOpenDisplayDecompose },
     { icon: <LayoutDashboard size={14} className={isMonochrome ? monoColors['横竖重组'] : ''} />, label: '横竖重组', desc: '一键转换图片横竖比例', action: () => { const image = getActiveImageData(); if (image && activateCanvasToolSession('aspect-recompose', 'image-toolbar', [image.id])) { setAspectRecomposeRatio('1:1'); setShowAspectRecomposePanel(true); } } },
@@ -11533,7 +12272,7 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
     const observer = new ResizeObserver(syncToolbarSize);
     observer.observe(toolbar);
     return () => observer.disconnect();
-  }, [selectedImageData?.id, displayedActions.length, toolbarExpanded]);
+  }, [selectedImageData, displayedActions.length, toolbarExpanded]);
 
   const previousNaturalRenderIdsRef = useRef<Set<string>>(new Set());
   const activeRenderKeepAliveIds = useMemo(() => {
@@ -12521,9 +13260,10 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
                       }
                     }}
                   />
-                ) : mediaRenderDecision === 'video' && image.videoUrl ? (
-                  <video
+                ) : mediaRenderDecision === 'video' && image.videoUrl && playingVideoId !== image.id ? (
+                  <CanvasVideo
                     data-canvas-video-preview
+                    recoveryScope={JSON.stringify([projectId, image.id, image.placementId, image.assetVersionId])}
                     src={image.videoUrl}
                     preload="metadata"
                     muted
@@ -12537,7 +13277,8 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
                   playingVideoId === image.id ? (
                     /* ── Inline video playing state ── */
                     <div className="absolute inset-0 z-20 flex flex-col bg-black">
-                      <video
+                      <CanvasVideo
+                        recoveryScope={JSON.stringify([projectId, image.id, image.placementId, image.assetVersionId])}
                         ref={(el) => { inlineVideoRefs.current[image.id] = el; }}
                         src={image.videoUrl}
                         className="w-full h-full object-contain cursor-pointer"
@@ -14044,6 +14785,13 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
           showUpscalePresetMenu={showUpscalePresetMenu}
           setShowUpscalePresetMenu={setShowUpscalePresetMenu}
           handleUpscaleConfirm={handleUpscaleConfirm}
+          upscaleQuote={upscaleQuote ? { total: upscaleQuote.total,
+            components: upscaleQuote.components } : null}
+          isUpscaleQuoteLoading={isUpscaleQuoteLoading}
+          isUpscaleSubmitting={isUpscaleSubmitting}
+          isUpscaleSubmissionUnknown={isUpscaleSubmissionUnknown}
+          recoveredUpscaleTask={recoveredUpscaleTask?.imageId === editImageId ? recoveredUpscaleTask : null}
+          onResetUpscaleQuote={() => { if (!isUpscaleSubmissionUnknown) setUpscaleQuote(null); }}
           isLoadingUpscaleModels={isLoadingUpscaleModels}
           upscaleModelsLoadError={upscaleModelsLoadError}
           upscaleActualW={upscaleActualW}
@@ -14121,11 +14869,14 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
           showRemoveBgPicker={showRemoveBgPicker}
           setShowRemoveBgPicker={setShowRemoveBgPicker}
           removeBgModelId={removeBgModelId}
-          setRemoveBgModelId={setRemoveBgModelId}
+          setRemoveBgModelId={(modelId) => { setRemoveBgQuote(null); setRemoveBgModelId(modelId); }}
           removeBgEngine={removeBgEngine}
+          documentMetadataMode={documentMetadataMode}
+          removeBgQuote={removeBgQuote}
+          isRemoveBgQuoteLoading={isRemoveBgQuoteLoading}
+          isRemoveBgSubmitting={isRemoveBgSubmitting}
           removeBgDedicatedLoaded={removeBgDedicatedLoaded}
           removeBgDedicatedName={removeBgDedicatedName}
-          setRemoveBgTargetImage={setRemoveBgTargetImage}
           addRemoveBgMaskToCanvas={addRemoveBgMaskToCanvas}
           setAddRemoveBgMaskToCanvas={setAddRemoveBgMaskToCanvas}
           setEngineDialog={setEngineDialog}
@@ -15048,7 +15799,7 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
                 {/* Format Selection */}
                 <div className="flex flex-col gap-1">
                   {(selectedImageData?.mediaType === 'video'
-                    ? [{ format: 'video' as const, label: 'MP4 视频', desc: '下载当前视频文件' }]
+                    ? [{ format: 'video' as const, label: getVideoDownloadLabel(selectedImageData.videoUrl), desc: '下载当前视频文件（不转码）' }]
                     : [
                         { format: 'png' as const, label: 'PNG 格式', desc: '位图格式，无损画质' },
                         { format: 'svg' as const, label: 'SVG 格式', desc: '矢量图形，可无损缩放' },
@@ -17294,13 +18045,8 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
 
         {/* Image context menu */}
         {showContextMenu && (
-          <div
-            className={`fixed z-50 py-1.5 rounded-xl border shadow-2xl min-w-[160px] ${isMonochrome ? 'bg-white border-gray-200' : 'bg-[#1e1e1e] border-[#333]'}`}
-            data-popup="context-menu"
-            style={{ left: contextMenuPos.x, top: contextMenuPos.y }}
-            onClick={(e) => e.stopPropagation()}
-            onWheel={(e) => e.stopPropagation()}
-          >
+          <CanvasContextMenu anchor={contextMenuPos} minWidth={160} isMonochrome={isMonochrome}
+            onDismiss={() => setShowContextMenu(false)}>
             {imageContextMenuItems.map((item, idx) => (
               <button
                 key={idx}
@@ -17313,16 +18059,13 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
                 {item.shortcut && <span className={`text-xs ${isMonochrome ? 'text-gray-400' : 'text-gold-muted/70'}`}>{item.shortcut}</span>}
               </button>
             ))}
-          </div>
+          </CanvasContextMenu>
         )}
 
         {/* Canvas context menu */}
         {showCanvasMenu && (
-          <div
-            className={`fixed z-50 py-1.5 rounded-xl border shadow-2xl min-w-[200px] ${isMonochrome ? 'bg-white border-gray-200' : 'bg-[#1e1e1e] border-[#333]'}`}
-            style={{ left: canvasMenuPos.x, top: canvasMenuPos.y }}
-            onClick={(e) => e.stopPropagation()}
-          >
+          <CanvasContextMenu anchor={canvasMenuPos} minWidth={200} isMonochrome={isMonochrome}
+            onDismiss={() => setShowCanvasMenu(false)}>
             {canvasMenuItems.map((item, idx) => (
               <button
                 key={idx}
@@ -17335,7 +18078,7 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
                 {item.shortcut && <span className={`text-xs ${isMonochrome ? 'text-gray-400' : 'text-gold-muted/70'}`}>{item.shortcut}</span>}
               </button>
             ))}
-          </div>
+          </CanvasContextMenu>
         )}
 
         {showHelpModal && (
@@ -17899,7 +18642,7 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
 
         <div className={`w-px h-5 mx-1 ${separatorCls}`} />
 
-        <input data-testid="canvas-image-upload-input" ref={uploadFileInputRef} type="file" accept="image/*" multiple className="hidden" onChange={handleCanvasImageUpload} />
+        <input data-testid="canvas-image-upload-input" ref={uploadFileInputRef} type="file" accept={effectiveUploadAuthority === 'document' ? 'image/*,video/mp4,video/webm,video/quicktime,video/x-m4v' : 'image/*'} multiple className="hidden" onChange={handleCanvasImageUpload} />
         <button
           aria-label="图片上传"
           onClick={() => uploadFileInputRef.current?.click()}
@@ -18262,7 +19005,7 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
         toolType={(engineDialog || 'upscale') as 'upscale' | 'removebg' | 'svg' | 'segment'}
         onSelect={(eng: EditEngine) => {
           if (engineDialog === 'upscale') setUpscaleEnginePref(eng);
-          else if (engineDialog === 'removebg') setRemoveBgEngine(eng);
+          else if (engineDialog === 'removebg') { setRemoveBgQuote(null); setRemoveBgEngine(eng); }
           else if (engineDialog === 'svg') setSvgTraceEngine(eng === 'local' ? 'vtracer' : eng === 'ai' ? 'vlm' : 'auto');
           else if (engineDialog === 'segment') setSegmentEnginePref(eng);
           setEngineDialog(null);

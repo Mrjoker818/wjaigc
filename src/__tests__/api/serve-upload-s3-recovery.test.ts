@@ -1,11 +1,14 @@
 import { NextRequest } from 'next/server';
 import { createHash } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
+import sharp from 'sharp';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   readBinaryFromS3Exact: vi.fn(),
   downloadImageFromS3: vi.fn(),
   getImageSourceUrl: vi.fn(),
+  publicDownload: vi.fn(),
   readExactRecoveryMedia: vi.fn(),
   readServeUploadExportLocal: vi.fn(),
   readServeUploadMediaLocal: vi.fn(),
@@ -23,6 +26,12 @@ vi.mock('@/lib/s3-storage', () => ({
   resolveS3Key: vi.fn(),
 }));
 vi.mock('@/lib/image-source-map', () => ({ getImageSourceUrl: mocks.getImageSourceUrl }));
+vi.mock('@/lib/safe-image-download', async original => {
+  const actual = await original<typeof import('@/lib/safe-image-download')>();
+  return { ...actual, downloadPublicImage: (input: string | URL,
+    options?: Parameters<typeof actual.downloadPublicImage>[1]) => String(input).includes('127.0.0.1')
+      ? actual.downloadPublicImage(input, options) : mocks.publicDownload(input, options) };
+});
 vi.mock('@/lib/asset-core/recovery-media', () => ({
   readExactRecoveryMedia: mocks.readExactRecoveryMedia,
 }));
@@ -45,6 +54,7 @@ describe('serve-upload S3 thumbnail recovery', () => {
     mocks.readServeUploadExportLocal.mockResolvedValue(null);
     mocks.readServeUploadMediaLocal.mockResolvedValue(null);
     mocks.getImageSourceUrl.mockResolvedValue(null);
+    mocks.publicDownload.mockReset();
     mocks.readExactRecoveryMedia.mockResolvedValue(null);
     mocks.readBinaryFromS3Exact.mockResolvedValue(null);
     mocks.recoverExportAssetBytes.mockResolvedValue(undefined);
@@ -77,10 +87,14 @@ describe('serve-upload S3 thumbnail recovery', () => {
   });
 
   it('does not cache an empty S3 object and falls back to the recorded source URL', async () => {
-    const recoveredVideo = Buffer.from('source-video');
+    const recoveredVideo = Buffer.from(
+      await readFile('tests/fixtures/yjs-task8b1-tiny-valid.mp4.base64', 'utf8'),
+      'base64',
+    );
     mocks.downloadImageFromS3.mockResolvedValue(Buffer.alloc(0));
     mocks.getImageSourceUrl.mockResolvedValue('https://media.example/recovery.mp4');
-    const fetchMock = vi.fn().mockResolvedValue(new Response(recoveredVideo, { status: 200 }));
+    mocks.publicDownload.mockResolvedValue({ buffer: recoveredVideo, mimeType: 'video/mp4' });
+    const fetchMock = vi.fn().mockRejectedValue(new Error('Ordinary fetch is forbidden for source recovery'));
     vi.stubGlobal('fetch', fetchMock);
 
     const response = await GET(
@@ -91,16 +105,114 @@ describe('serve-upload S3 thumbnail recovery', () => {
     expect(response.status).toBe(200);
     expect(response.headers.get('content-type')).toBe('video/mp4');
     expect(Buffer.from(await response.arrayBuffer())).toEqual(recoveredVideo);
-    expect(fetchMock).toHaveBeenCalledWith(
-      'https://media.example/recovery.mp4',
-      expect.objectContaining({ signal: expect.any(AbortSignal) }),
-    );
+    expect(fetchMock).not.toHaveBeenCalled();
     expect(mocks.cacheServeUploadMediaLocal).toHaveBeenCalledTimes(1);
     expect(mocks.cacheServeUploadMediaLocal).toHaveBeenCalledWith(
       'C:/wujie-data',
       'video/missing.mp4',
       recoveredVideo,
     );
+  });
+
+  it('recovers a fully decoded public PNG under its matching filename', async () => {
+    const recoveredImage = await sharp({ create: { width: 1, height: 1, channels: 4, background: '#ffffff' } }).png().toBuffer();
+    mocks.downloadImageFromS3.mockResolvedValue(null);
+    mocks.getImageSourceUrl.mockResolvedValue('https://media.example/recovery.png');
+    mocks.publicDownload.mockResolvedValue({ buffer: recoveredImage, mimeType: 'image/png' });
+
+    const response = await GET(
+      new NextRequest('http://localhost/api/serve-upload/uploads/recovery.png'),
+      { params: Promise.resolve({ path: ['uploads', 'recovery.png'] }) },
+    );
+    expect(response.status).toBe(200);
+    expect(Buffer.from(await response.arrayBuffer())).toEqual(recoveredImage);
+    expect(mocks.cacheServeUploadMediaLocal).toHaveBeenCalledWith('C:/wujie-data', 'uploads/recovery.png', recoveredImage);
+  });
+
+  it.each([
+    { extension: 'avi', mimeType: 'video/x-msvideo' },
+    { extension: 'mkv', mimeType: 'video/x-matroska' },
+  ])('recovers a valid public $extension video after bounded metadata inspection', async ({ extension, mimeType }) => {
+    const recoveredVideo = Buffer.from(
+      await readFile(`tests/fixtures/source-recovery-tiny-valid.${extension}.base64`, 'utf8'),
+      'base64',
+    );
+    mocks.downloadImageFromS3.mockResolvedValue(null);
+    mocks.getImageSourceUrl.mockResolvedValue(`https://media.example/recovery.${extension}`);
+    mocks.publicDownload.mockResolvedValue({ buffer: recoveredVideo, mimeType });
+
+    const response = await GET(
+      new NextRequest(`http://localhost/api/serve-upload/video/recovery.${extension}`),
+      { params: Promise.resolve({ path: ['video', `recovery.${extension}`] }) },
+    );
+    expect(response.status).toBe(200);
+    expect(response.headers.get('content-type')).toBe(mimeType);
+    expect(Buffer.from(await response.arrayBuffer())).toEqual(recoveredVideo);
+    expect(mocks.cacheServeUploadMediaLocal).toHaveBeenCalledWith('C:/wujie-data', `video/recovery.${extension}`, recoveredVideo);
+  });
+
+  it('does not fetch or cache a private source-map URL when media is missing', async () => {
+    mocks.downloadImageFromS3.mockResolvedValue(null);
+    mocks.getImageSourceUrl.mockResolvedValue('http://127.0.0.1/private-image.png');
+    const fetchMock = vi.fn().mockResolvedValue(new Response(Buffer.from('private-image'), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const response = await GET(
+      new NextRequest('http://localhost/api/serve-upload/uploads/missing.png'),
+      { params: Promise.resolve({ path: ['uploads', 'missing.png'] }) },
+    );
+
+    expect(response.status).toBe(404);
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(mocks.cacheServeUploadMediaLocal).not.toHaveBeenCalled();
+  });
+
+  it('does not cache source-map bytes that do not match their image MIME', async () => {
+    mocks.downloadImageFromS3.mockResolvedValue(null);
+    mocks.getImageSourceUrl.mockResolvedValue('https://media.example/changed.png');
+    mocks.publicDownload.mockResolvedValue({ buffer: Buffer.from('not-an-image'), mimeType: 'image/png' });
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(Buffer.from('not-an-image'), { status: 200 })));
+
+    const response = await GET(
+      new NextRequest('http://localhost/api/serve-upload/uploads/changed.png'),
+      { params: Promise.resolve({ path: ['uploads', 'changed.png'] }) },
+    );
+
+    expect(response.status).toBe(404);
+    expect(mocks.cacheServeUploadMediaLocal).not.toHaveBeenCalled();
+  });
+
+  it('does not cache a valid image under an incompatible requested extension', async () => {
+    const jpeg = await sharp({ create: { width: 1, height: 1, channels: 3, background: '#ffffff' } }).jpeg().toBuffer();
+    mocks.downloadImageFromS3.mockResolvedValue(null);
+    mocks.getImageSourceUrl.mockResolvedValue('https://media.example/changed.jpg');
+    mocks.publicDownload.mockResolvedValue({ buffer: jpeg, mimeType: 'image/jpeg' });
+    const response = await GET(
+      new NextRequest('http://localhost/api/serve-upload/uploads/changed.png'),
+      { params: Promise.resolve({ path: ['uploads', 'changed.png'] }) },
+    );
+    expect(response.status).toBe(404);
+    expect(mocks.cacheServeUploadMediaLocal).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { name: 'truncated JPEG', path: ['uploads', 'truncated.jpg'], bytes: Buffer.from([0xff, 0xd8, 0xff]), mimeType: 'image/jpeg' },
+    { name: 'header-only MP4', path: ['video', 'truncated.mp4'], bytes: Buffer.from('0000ftypisom'), mimeType: 'video/mp4' },
+    { name: 'header-only AVI', path: ['video', 'truncated.avi'], bytes: Buffer.from('RIFF0000AVI '), mimeType: 'video/x-msvideo' },
+    { name: 'header-only MKV', path: ['video', 'truncated.mkv'], bytes: Buffer.from([0x1a, 0x45, 0xdf, 0xa3]), mimeType: 'video/x-matroska' },
+  ])('does not cache a $name recovered from a public source URL', async ({ path, bytes, mimeType }) => {
+    mocks.downloadImageFromS3.mockResolvedValue(null);
+    mocks.getImageSourceUrl.mockResolvedValue('https://media.example/truncated');
+    mocks.publicDownload.mockResolvedValue({ buffer: bytes, mimeType });
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('Ordinary fetch is forbidden')));
+
+    const response = await GET(
+      new NextRequest(`http://localhost/api/serve-upload/${path.join('/')}`),
+      { params: Promise.resolve({ path }) },
+    );
+
+    expect(response.status).toBe(404);
+    expect(mocks.cacheServeUploadMediaLocal).not.toHaveBeenCalled();
   });
 
   it.each([

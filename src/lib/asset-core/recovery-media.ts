@@ -17,7 +17,16 @@ export interface ExactRecoveryMedia {
   mimeType: string;
 }
 
-async function readExactLocalRecoveryMedia(relativePath: string): Promise<Buffer | null> {
+export class RecoveryMediaSizeLimitError extends Error {
+  readonly code = 'RECOVERY_MEDIA_SIZE_LIMIT';
+
+  constructor() {
+    super('Recovery media exceeds the supplied byte limit');
+    this.name = 'RecoveryMediaSizeLimitError';
+  }
+}
+
+async function readExactLocalRecoveryMedia(relativePath: string, maxBytes?: number): Promise<Buffer | null> {
   const root = path.resolve(getServerDataRoot());
   const candidate = path.resolve(root, ...relativePath.split('/'));
   const relative = path.relative(root, candidate);
@@ -25,15 +34,42 @@ async function readExactLocalRecoveryMedia(relativePath: string): Promise<Buffer
     return null;
   }
   try {
+    if (maxBytes !== undefined) {
+      const handle = await fs.open(candidate, 'r');
+      try {
+        const stat = await handle.stat();
+        if (!stat.isFile() || stat.size <= 0) return null;
+        if (stat.size > maxBytes) throw new RecoveryMediaSizeLimitError();
+        const chunks: Buffer[] = [];
+        let total = 0;
+        while (true) {
+          const readSize = Math.min(64 * 1024, maxBytes - total + 1);
+          const chunk = Buffer.allocUnsafe(readSize);
+          const { bytesRead } = await handle.read(chunk, 0, readSize, null);
+          if (bytesRead === 0) break;
+          total += bytesRead;
+          if (total > maxBytes) throw new RecoveryMediaSizeLimitError();
+          chunks.push(chunk.subarray(0, bytesRead));
+        }
+        return Buffer.concat(chunks, total);
+      } finally {
+        await handle.close();
+      }
+    }
     const stat = await fs.stat(candidate);
     if (!stat.isFile() || stat.size <= 0 || stat.size > MAX_MEDIA_BYTES) return null;
     return await fs.readFile(candidate);
-  } catch {
+  } catch (error) {
+    if (error instanceof RecoveryMediaSizeLimitError) throw error;
     return null;
   }
 }
 
-export async function readExactRecoveryMedia(relativePath: string): Promise<ExactRecoveryMedia | null> {
+export async function readExactRecoveryMedia(relativePath: string, maxBytes?: number): Promise<ExactRecoveryMedia | null> {
+  if (maxBytes !== undefined && (!Number.isSafeInteger(maxBytes) || maxBytes < 1)) {
+    throw new TypeError('maxBytes must be a positive safe integer');
+  }
+  const effectiveMaxBytes = maxBytes === undefined ? MAX_MEDIA_BYTES : Math.min(MAX_MEDIA_BYTES, maxBytes);
   const match = RECOVERY_PATH.exec(relativePath);
   if (!match) return null;
   const fileUrl = `/api/serve-upload/${relativePath}`;
@@ -53,15 +89,37 @@ export async function readExactRecoveryMedia(relativePath: string): Promise<Exac
   }, undefined, 'none');
   if (!version?.mime_type) return null;
   const declaredBytes = Number(version.byte_size || 0);
+  if (maxBytes !== undefined && Number.isFinite(declaredBytes) && declaredBytes > effectiveMaxBytes) {
+    throw new RecoveryMediaSizeLimitError();
+  }
   if (Number.isFinite(declaredBytes) && declaredBytes > MAX_MEDIA_BYTES) return null;
-  const storageBuffer = version.storage_key
-    ? await readImageFromS3Bounded(
-      version.storage_key.replace(/^\/+/, ''),
-      MAX_MEDIA_BYTES,
-      STORAGE_TIMEOUT_MS,
-    )
-    : null;
-  const buffer = storageBuffer ?? await readExactLocalRecoveryMedia(relativePath);
+  let storageBuffer: Buffer | null = null;
+  if (version.storage_key) {
+    const key = version.storage_key.replace(/^\/+/, '');
+    if (maxBytes === undefined) {
+      storageBuffer = await readImageFromS3Bounded(key, MAX_MEDIA_BYTES, STORAGE_TIMEOUT_MS);
+    } else {
+      try {
+        storageBuffer = await readImageFromS3Bounded(
+          key, effectiveMaxBytes, STORAGE_TIMEOUT_MS, { strict: true },
+        );
+        if (storageBuffer && storageBuffer.byteLength > effectiveMaxBytes) {
+          throw new RecoveryMediaSizeLimitError();
+        }
+      } catch (error) {
+        if (error instanceof RecoveryMediaSizeLimitError) throw error;
+        if (error instanceof Error && 'code' in error && error.code === 'S3_READ_SIZE_LIMIT') {
+          throw new RecoveryMediaSizeLimitError();
+        }
+        // A non-size S3 failure still permits the exact local attempt fallback.
+      }
+    }
+  }
+  const buffer = storageBuffer ?? await readExactLocalRecoveryMedia(relativePath,
+    maxBytes === undefined ? undefined : effectiveMaxBytes);
+  if (buffer && maxBytes !== undefined && buffer.byteLength > effectiveMaxBytes) {
+    throw new RecoveryMediaSizeLimitError();
+  }
   if (!buffer || (declaredBytes > 0 && buffer.byteLength !== declaredBytes)) return null;
   const mediaType = getSafeMediaTypeFromResponse(version.mime_type, buffer, false);
   if (!mediaType || mediaType.kind !== 'image') return null;

@@ -2,12 +2,12 @@ import { randomUUID } from 'node:crypto';
 
 import { NextRequest, NextResponse } from 'next/server';
 
-import { submitAnnotationEdit } from '@/features/annotations/annotation-executor';
+import { AnnotationSubmissionError, submitAnnotationEdit } from '@/features/annotations/annotation-executor';
 import { validateEditIntentBundle } from '@/features/annotations/annotation-bundle';
 import type { EditIntentBundle } from '@/features/annotations/annotation-types';
 import { requireApiAuthOrReject } from '@/lib/api-auth';
 import { AnnotationAssetError, compileAnnotationAssets } from '@/lib/annotation-mask';
-import { findOwnedAnnotationSource } from '@/lib/annotation-project-source';
+import { AnnotationSourceAdmissionError, findAuthorizedAnnotationSource, assertAnnotationSourceUnchanged } from '@/lib/annotation-authorized-source';
 import {
   AnnotationProviderError,
   buildAnnotationProviderRequest,
@@ -114,22 +114,13 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  let source = await findOwnedAnnotationSource(
-    auth.userId,
-    bundle.projectId,
-    bundle.sourceImageId,
-  );
-  if (!source) {
-    // DB 中找不到图片（可能尚未同步），尝试使用前端传来的 imageUrl 兜底
-    const fallbackUrl = typeof body.sourceImageUrl === 'string' ? body.sourceImageUrl.trim() : '';
-    if (fallbackUrl) {
-      source = {
-        projectId: bundle.projectId,
-        imageId: bundle.sourceImageId,
-        imageUrl: fallbackUrl,
-        versionId: bundle.sourceVersionId,
-      };
-    } else {
+  try {
+    const source = await findAuthorizedAnnotationSource(
+      auth.userId,
+      bundle.projectId,
+      bundle.sourceImageId,
+    );
+    if (!source) {
       return errorResponse(
         404,
         'ANNOTATION_PROJECT_NOT_FOUND',
@@ -137,16 +128,14 @@ export async function POST(request: NextRequest) {
         requestId,
       );
     }
-  }
-  if (source.versionId !== bundle.sourceVersionId) {
-    return errorResponse(
-      409,
-      'ANNOTATION_SOURCE_STALE',
-      '批注源图版本已变化，请重新标注后再执行修改',
-      requestId,
-    );
-  }
-  try {
+    if (source.versionId !== bundle.sourceVersionId) {
+      return errorResponse(
+        409,
+        'ANNOTATION_SOURCE_STALE',
+        '批注源图版本已变化，请重新标注后再执行修改',
+        requestId,
+      );
+    }
     const resolved = await resolveAnnotationProvider(
       bundle.providerId,
       bundle.modelId,
@@ -172,8 +161,10 @@ export async function POST(request: NextRequest) {
       assets,
       requestId,
     });
+    await assertAnnotationSourceUnchanged(source);
     const result = await submitAnnotationEdit({
       request: providerRequest,
+      source,
       userId: auth.userId,
       userRole: auth.userRole,
       signal: request.signal,
@@ -186,6 +177,12 @@ export async function POST(request: NextRequest) {
       requestId,
     }, { status: 202 });
   } catch (error) {
+    if (error instanceof AnnotationSubmissionError) {
+      return errorResponse(error.status, error.code, error.message, requestId, error.retryable);
+    }
+    if (error instanceof AnnotationSourceAdmissionError) {
+      return errorResponse(error.status, error.code, error.message, requestId, error.status === 503);
+    }
     if (error instanceof AnnotationProviderError) {
       return errorResponse(
         error.code === 'ANNOTATION_MODEL_FORBIDDEN' ? 403 : 422,
@@ -200,7 +197,7 @@ export async function POST(request: NextRequest) {
     return errorResponse(
       502,
       'ANNOTATION_SUBMISSION_FAILED',
-      error instanceof Error ? error.message : '批注修图提交失败',
+      '批注修图提交暂不可用，请使用原请求重试',
       requestId,
       true,
     );

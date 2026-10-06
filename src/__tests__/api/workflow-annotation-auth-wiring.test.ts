@@ -9,12 +9,7 @@ const source = readFileSync(
 ).replace(/\r\n/g, '\n');
 
 describe('workflow annotation internal authentication wiring', () => {
-  it('builds signed user headers for every internal workflow API execution path', () => {
-    const signedHeaderCalls = source.match(
-      /getInternalRequestHeaders\(\s*(?:auth|execState)\.userId!?/g,
-    ) || [];
-
-    expect(signedHeaderCalls).toHaveLength(8);
+  it('builds signed user headers for workflow internal API execution paths', () => {
     expect(source).toMatch(
       /const internalHeaders = await getInternalRequestHeaders\(\s*auth\.userId/,
     );

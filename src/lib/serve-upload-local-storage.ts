@@ -1,6 +1,38 @@
 import fsSync from 'fs';
 import fs from 'fs/promises';
 import path from 'path';
+import type { FileHandle } from 'node:fs/promises';
+
+export interface OpenExportFile {
+  handle: FileHandle;
+  size: number;
+  identity: string;
+  assertUnchanged(): Promise<void>;
+}
+
+/** Hold the checked descriptor across integrity validation and range reads. */
+export async function openServeUploadExportLocal(dataRoot: string, filename: string, maxBytes: number): Promise<OpenExportFile | null> {
+  const candidate = resolveLocalCandidate(path.resolve(dataRoot, 'exports'), filename);
+  try { await assertExistingUnlinked(dataRoot, candidate); }
+  catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null; throw error; }
+  const before = await fs.lstat(candidate, { bigint: true });
+  const handle = await fs.open(candidate, fsSync.constants.O_RDONLY | (fsSync.constants.O_NOFOLLOW ?? 0));
+  const identityOf = (stats: typeof before): string => [stats.dev, stats.ino, stats.size, stats.mtimeNs, stats.ctimeNs, stats.nlink].join(':');
+  const identity = identityOf(before);
+  try {
+    const stats = await handle.stat({ bigint: true });
+    if (!stats.isFile() || stats.nlink !== BigInt(1) || stats.size < BigInt(1) || stats.size > BigInt(maxBytes)
+      || identityOf(stats) !== identity) throw new Error('Invalid export file');
+    const assertUnchanged = async (): Promise<void> => {
+      await assertExistingUnlinked(dataRoot, candidate);
+      if (identityOf(await handle.stat({ bigint: true })) !== identity || identityOf(await fs.lstat(candidate, { bigint: true })) !== identity) {
+        throw new Error('Export identity changed');
+      }
+    };
+    await assertUnchanged();
+    return { handle, size: Number(stats.size), identity, assertUnchanged };
+  } catch (error) { await handle.close(); throw error; }
+}
 
 function assertInside(root: string, candidate: string, allowRoot = false): void {
   const relative = path.relative(root, candidate);
@@ -66,17 +98,20 @@ export async function readServeUploadMediaLocal(
 
   const legacyRoot = path.join(workspaceRoot, 'public', 'uploads');
   const legacyName = path.basename(relativePath);
-  const legacyCandidate = resolveLocalCandidate(legacyRoot, legacyName);
-  if (!fsSync.existsSync(legacyCandidate)) return null;
+  for (const name of new Set([relativePath, legacyName])) {
+    const legacyCandidate = resolveLocalCandidate(legacyRoot, name);
+    if (!fsSync.existsSync(legacyCandidate)) continue;
 
-  await assertExistingUnlinked(workspaceRoot, legacyCandidate);
-  const bytes = await fs.readFile(legacyCandidate);
-  try {
-    cacheServeUploadMediaLocal(dataRoot, `uploads/${legacyName}`, bytes);
-  } catch {
-    // A readable legacy file remains available when optional caching fails.
+    await assertExistingUnlinked(workspaceRoot, legacyCandidate);
+    const bytes = await fs.readFile(legacyCandidate);
+    try {
+      cacheServeUploadMediaLocal(dataRoot, `uploads/${legacyName}`, bytes);
+    } catch {
+      // A readable legacy file remains available when optional caching fails.
+    }
+    return bytes;
   }
-  return bytes;
+  return null;
 }
 
 export function cacheServeUploadMediaLocal(dataRoot: string, relativePath: string, bytes: Buffer): void {

@@ -3,7 +3,7 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 const source = readFileSync(
-  path.join(process.cwd(), 'src/app/api/universal-generate/route.ts'),
+  path.join(process.cwd(), 'src/lib/task-core/universal-generation-provider.ts'),
   'utf8',
 );
 

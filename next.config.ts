@@ -34,13 +34,19 @@ const LOCAL_BUILD_ARTIFACT_EXCLUDES = [
 
 const nextConfig: NextConfig = {
   generateBuildId: () => resolveBuildId(__dirname),
-  turbopack: {},
+  turbopack: {
+    resolveAlias: {
+      // 浏览器内的直接/传递 Yjs 引用必须使用同一入口。
+      yjs: { browser: './node_modules/yjs/dist/yjs.cjs' },
+    },
+  },
   outputFileTracingRoot: path.resolve(__dirname),
   outputFileTracingExcludes: {
     '*': LOCAL_BUILD_ARTIFACT_EXCLUDES,
     instrumentation: LOCAL_BUILD_ARTIFACT_EXCLUDES,
   },
   serverExternalPackages: [
+    'yjs',
     'wasm_vtracer',
     '@aws-sdk/client-s3',
     '@aws-sdk/lib-storage',
@@ -84,10 +90,14 @@ const nextConfig: NextConfig = {
     ];
   },
   webpack: (config, { isServer }) => {
+    if (!isServer) {
+      config.resolve.alias = { ...config.resolve.alias, yjs: require.resolve('yjs') };
+    }
     if (isServer) {
       config.externals.push(({ request }: { request?: string }, callback: (error?: Error | null, result?: string) => void) => {
         if (
-          request?.startsWith('@aws-sdk/')
+          request === 'yjs'
+          || request?.startsWith('@aws-sdk/')
           || request?.startsWith('@smithy/')
           || request?.startsWith('@langchain/')
           || request === 'coze-coding-dev-sdk'

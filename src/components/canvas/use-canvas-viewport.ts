@@ -54,6 +54,7 @@ interface UseCanvasViewportResult {
   viewOffset: CanvasPoint;
   panViewportOffset: CanvasPoint;
   zoom: number;
+  getZoom: () => number;
   setViewOffset: Dispatch<SetStateAction<CanvasPoint>>;
   setZoom: Dispatch<SetStateAction<number>>;
   applyViewState: (view: CanvasPersistedViewport) => void;
@@ -227,6 +228,9 @@ export function useCanvasViewport({
   const activeRef = useCallback(() => (
     mode === 'canvas-v2' ? kernelRef.current : legacyRef.current
   ), [mode]);
+
+  // Touch moves may share one render batch; use the latest published state.
+  const getZoom = useCallback((): number => activeRef().zoom, [activeRef]);
 
   const compareShadow = useCallback((legacy: CanvasViewportState, kernel: CanvasViewportState, code: string) => {
     if (mode === 'shadow' && !viewportStatesEqual(legacy, kernel)) {
@@ -445,6 +449,7 @@ export function useCanvasViewport({
     viewOffset: activeState.committed,
     panViewportOffset,
     zoom: activeState.zoom,
+    getZoom,
     setViewOffset,
     setZoom,
     applyViewState,

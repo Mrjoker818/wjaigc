@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { NextRequest, NextResponse } from 'next/server';
 
 import { requireApiAuthOrReject } from '@/lib/api-auth';
-import { findOwnedAnnotationSource } from '@/lib/annotation-project-source';
+import { AnnotationSourceAdmissionError, findAuthorizedAnnotationSource, assertAnnotationSourceUnchanged } from '@/lib/annotation-authorized-source';
 import { identifyImageTargetAtPoint } from '@/lib/identify-subject';
 import { normalizeTrustedManagedMediaInput } from '@/lib/safe-image-input';
 
@@ -97,22 +97,13 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  let source = await findOwnedAnnotationSource(
-    auth.userId,
-    projectId,
-    sourceImageId,
-  );
-  if (!source) {
-    // DB 中找不到图片（可能尚未同步），尝试使用前端传来的 imageUrl 兜底
-    const fallbackUrl = typeof body.sourceImageUrl === 'string' ? body.sourceImageUrl.trim() : '';
-    if (fallbackUrl) {
-      source = {
-        projectId,
-        imageId: sourceImageId,
-        imageUrl: fallbackUrl,
-        versionId: sourceVersionId,
-      };
-    } else {
+  try {
+    const source = await findAuthorizedAnnotationSource(
+      auth.userId,
+      projectId,
+      sourceImageId,
+    );
+    if (!source) {
       return errorResponse(
         404,
         'ANNOTATION_PROJECT_NOT_FOUND',
@@ -120,16 +111,14 @@ export async function POST(request: NextRequest) {
         requestId,
       );
     }
-  }
-  if (source.versionId !== sourceVersionId) {
-    return errorResponse(
-      409,
-      'ANNOTATION_SOURCE_STALE',
-      'Source image version has changed. Refresh the annotation and try again.',
-      requestId,
-    );
-  }
-  try {
+    if (source.versionId !== sourceVersionId) {
+      return errorResponse(
+        409,
+        'ANNOTATION_SOURCE_STALE',
+        'Source image version has changed. Refresh the annotation and try again.',
+        requestId,
+      );
+    }
     const sourceImageInput = normalizeTrustedManagedMediaInput(
       source.imageUrl,
       trustedRequestHosts(request),
@@ -140,6 +129,7 @@ export async function POST(request: NextRequest) {
       30_000,
       { userId: auth.userId, userRole: auth.userRole },
     );
+    await assertAnnotationSourceUnchanged(source);
     if (!target) {
       return errorResponse(
         422,
@@ -159,6 +149,9 @@ export async function POST(request: NextRequest) {
       requestId,
     });
   } catch (error) {
+    if (error instanceof AnnotationSourceAdmissionError) {
+      return errorResponse(error.status, error.code, error.message, requestId, error.status === 503);
+    }
     return errorResponse(
       422,
       'ANNOTATION_TARGET_RESOLUTION_FAILED',

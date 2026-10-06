@@ -247,6 +247,78 @@ function simpleChatSkillRequest(): ModelAgentRunRequest {
 }
 
 describe('Agent runtime service', () => {
+  it.each(['agent', 'model-skill', 'local-skill'] as const)('passes server document scope for %s parent runs', async mode => {
+    const dependencies = serviceDependencies();
+    const access = { kind: 'document' as const, actorUserId: user.id, ownerId: 'shared-owner',
+      projectId: 'project-1', grantGeneration: '3' };
+    dependencies.authorizeContext.mockImplementation(async ({ request: input }) => ({
+      snapshot: input.context, mediaByVersionId: {}, selectedEntityVersionIds: {}, projectAccess: access,
+    }));
+    dependencies.resolveTaskModel.mockImplementation(async (providerId, modelId) => ({
+      providerId, modelId, kind: providerId === 'provider-image' ? 'image' : 'chat',
+      sourceType: providerId === 'provider-image' ? 'image' : 'chat',
+      protocol: providerId === 'provider-image' ? 'images-generations' : 'chat-completions', executionMode: 'sync',
+      allowedRatios: [], allowedSizes: [], qualityOptions: [], maxOutputs: 1,
+      supportsReferenceImages: false, supportsMask: false, outputKinds: ['image'], capabilitySources: {},
+    }));
+    const localSkill: SkillDefinition = {
+      id: 'local-publication', version: 1, name: 'Local publication', category: 'export', description: 'test',
+      systemPrompt: 'Run local export', allowedSurfaces: ['canvas'], catalogSurfaces: ['canvas'], inputs: [],
+      steps: [{ id: 'export', label: 'Export', toolId: 'multi_platform_export', runtime: 'local',
+        execution: 'sequential', promptTemplate: '', qualityGateIds: ['output-present'] }],
+      enabled: true, builtIn: true, createdAt: 1, updatedAt: 1, usageCount: 0,
+    };
+    const original = skillCatalog.requireSkillForSurface;
+    const catalog = vi.spyOn(skillCatalog, 'requireSkillForSurface').mockImplementation((id, surface) => (
+      id === localSkill.id ? localSkill : original(id, surface)
+    ));
+    try {
+      const input: AgentRunRequest = mode === 'model-skill'
+        ? canvasSkillRequest({ workspaceId: 'canvas:project-1' })
+        : mode === 'local-skill' ? {
+          projectId: 'project-1', workspace: 'canvas', workspaceId: 'project-1', mode: 'agent', executionRuntime: 'local',
+          prompt: localSkill.systemPrompt, sourceVersionIds: [], allowedToolIds: ['multi_platform_export'], idempotencyKey: 'local-scope',
+          context: { selectedEntityIds: [], visibleVersionIds: [], locale: 'zh-CN' },
+          skill: { skillId: localSkill.id, skillVersion: 1, inputValues: {}, modelBindings: {} },
+        } : request({ workspaceId: 'canvas:project-1' });
+      const forged = { ...input, canvasPublication: { access: { ...access, ownerId: 'forged' } }, ownerId: 'forged', projectAccess: null };
+      await agentRuntime.createAgentRuntimeService(dependencies).createRun({ actor: user, request: forged });
+      const created = dependencies.createBillableTask.mock.calls[0][0];
+      expect(created).toMatchObject({ userId: user.id,
+        canvasPublication: { access, workspace: 'canvas', workspaceId: input.workspaceId } });
+      expect(created.task.result).not.toHaveProperty('canvasPublication');
+      expect(dependencies.appendEvent.mock.calls[0][0].payload).not.toHaveProperty('projectAccess');
+      if (mode === 'local-skill') {
+        expect(created.creditCost).toBe(0);
+        expect(dependencies.resolveTaskModel).not.toHaveBeenCalled();
+      }
+    } finally { catalog.mockRestore(); }
+  });
+
+  it('omits publication for personal, unscoped, legacy DI, private owner scopes and invalid canvas aliases', async () => {
+    const document = { kind: 'document' as const, actorUserId: user.id, ownerId: user.id, projectId: 'project-1', grantGeneration: '0' };
+    const personal = { kind: 'personal' as const, actorUserId: user.id, ownerId: user.id, projectId: 'project-1' };
+    const unscoped = { kind: 'unscoped' as const, actorUserId: user.id };
+    for (const candidate of [
+      { access: personal, input: request({ workspaceId: 'project-1' }) },
+      { access: unscoped, input: request({ workspaceId: 'project-1' }) },
+      { access: undefined, input: request({ workspaceId: 'project-1' }) },
+      { access: document, input: request({ workspace: 'workflow', workspaceId: 'private', allowedToolIds: [] }) },
+      { access: document, input: request({ workspace: 'chat', workspaceId: 'private', allowedToolIds: [] }) },
+      { access: document, input: request({ workspaceId: 'canvas:other' }) },
+    ]) {
+      const dependencies = serviceDependencies();
+      dependencies.authorizeContext.mockImplementation(({ actorUserId, request: input }) => authorizeAgentContext({
+        actorUserId, request: input, storage: { transaction: async callback => callback({
+          ...(candidate.access ? { authorizeProject: async () => candidate.access! } : {}),
+          findProject: async () => true, findVersion: async () => null, findVersionPlacement: async () => null,
+        }) },
+      }));
+      await agentRuntime.createAgentRuntimeService(dependencies).createRun({ actor: user, request: candidate.input });
+      expect(dependencies.createBillableTask.mock.calls[0][0]).not.toHaveProperty('canvasPublication');
+    }
+  });
+
   it('persists exact authorized video capabilities in the frozen Skill snapshot', async () => {
     const definition = createBriefToVideoSkill(true);
     const catalogSpy = vi.spyOn(skillCatalog, 'requireSkillForSurface')

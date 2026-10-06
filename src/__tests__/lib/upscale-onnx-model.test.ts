@@ -3,7 +3,7 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 const clientSource = readFileSync(
-  resolve(process.cwd(), 'src/lib/image-tools/upscayl.ts'),
+  resolve(process.cwd(), 'src/lib/image-tools/onnx-health.ts'),
   'utf8',
 );
 const scriptSource = readFileSync(

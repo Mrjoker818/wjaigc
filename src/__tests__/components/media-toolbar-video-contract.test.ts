@@ -52,7 +52,7 @@ describe('media toolbar video contracts', () => {
   it('downloads a selected video from its video URL instead of its thumbnail', () => {
     expect(canvasSource).toContain('/api/video/download?url=${encodeURIComponent(image.videoUrl)}');
     expect(canvasSource).toContain("format === 'video'");
-    expect(canvasSource).toContain("generateSafeFilename(image.prompt || 'video', 'mp4')");
+    // Actual popup/filename/byte behavior is covered by canvas-video-download.test.tsx.
   });
 
   it('regenerates an edited video from its thumbnail image, not the video URL', () => {

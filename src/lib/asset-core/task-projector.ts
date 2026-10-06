@@ -163,7 +163,7 @@ function stableDigest(value: unknown): string {
   return createHash('sha256').update(JSON.stringify(value)).digest('hex');
 }
 
-function outputUrls(task: ProjectionTask): string[] {
+export function outputUrls(task: ProjectionTask): string[] {
   const result = task.result;
   const kind = kindForTask(task);
   const primaryKey = kind === 'video' ? 'videoUrl' : kind === 'model-3d' ? 'assetUrl' : '';
@@ -198,7 +198,7 @@ function positiveSafeInteger(value: unknown): number | undefined {
   return Number.isSafeInteger(value) && Number(value) > 0 ? Number(value) : undefined;
 }
 
-function outputFileMetadata(result: Record<string, unknown>, url: string): Partial<AssetFile> {
+export function outputFileMetadata(result: Record<string, unknown>, url: string): Partial<AssetFile> {
   const candidates = [
     ...(Array.isArray(result.images) ? result.images : []),
     result.image,
@@ -375,6 +375,24 @@ class PostgresTaskProjectionTransaction implements TaskProjectionTransaction {
     placement: TaskProjectionPlacementReference;
     reused: boolean;
   }> {
+    if (input.workspace === 'canvas') {
+      // Serialize private writes with enableCollaborativeProject's project UPDATE
+      // lock, including when no settings row exists yet. Keep graph -> task ->
+      // project -> asset order and retain this lock through the actual COMMIT.
+      const project = await this.client.query(
+        `SELECT 1 FROM wujie_projects
+         WHERE id = $1 AND owner_id = $2 AND status = 'active' FOR SHARE`,
+        [input.projectId, input.actorUserId],
+      );
+      if (project.rowCount !== 1) throw new TaskProjectionError('TASK_PROJECTION_NOT_FOUND');
+      // Separate statement: if enable held the lock first, this READ COMMITTED
+      // snapshot must see its committed setting, not the pre-wait snapshot.
+      const enabled = await this.client.query(
+        'SELECT 1 FROM wujie_project_document_settings WHERE project_id = $1 AND enabled = true',
+        [input.projectId],
+      );
+      if (enabled.rowCount) throw new TaskProjectionError('TASK_PROJECTION_CONFLICT');
+    }
     await this.client.query(
       'SELECT pg_advisory_xact_lock(hashtextextended($1, 0))',
       [`task-asset-projection:${input.actorUserId}:${input.idempotencyKey}`],
@@ -836,7 +854,8 @@ export async function recordTaskProjectionPending(
        ),
        true
      )
-     WHERE id = $1 AND user_id = $2 AND status = 'completed'`,
+     WHERE id = $1 AND user_id = $2 AND status = 'completed'
+       AND COALESCE(result->'assetProjection'->>'status', '') <> 'completed'`,
     [input.taskId, input.actorUserId, JSON.stringify(pending)],
   );
 }
@@ -887,7 +906,8 @@ export async function recordTaskProjectionCompleted(
        $3::jsonb,
        true
      )
-     WHERE id = $1 AND user_id = $2 AND status = 'completed'`,
+     WHERE id = $1 AND user_id = $2 AND status = 'completed'
+       AND COALESCE(result->'assetProjection'->>'status', '') <> 'completed'`,
     [input.taskId, input.actorUserId, JSON.stringify(completed)],
   );
 }

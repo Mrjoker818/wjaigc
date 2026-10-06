@@ -306,6 +306,18 @@ async function findAllVisionProviders(): Promise<Array<{ baseUrl: string; apiKey
   return result;
 }
 
+export interface FrozenSubjectIdentificationTarget { providerId: string; baseUrl: string; model: string }
+export async function freezeSubjectIdentificationTargets(): Promise<FrozenSubjectIdentificationTarget[]> {
+  return (await findAllVisionProviders()).slice(0, 8).map(({ providerId, baseUrl, model }) => ({ providerId, baseUrl, model }));
+}
+export interface SubjectIdentificationOptions {
+  frozenTargets?: readonly FrozenSubjectIdentificationTarget[];
+  resolveApiKey?: (providerId: string) => Promise<string | undefined>;
+  transport?: typeof fetch;
+  signal?: AbortSignal;
+  beforeIO?: () => Promise<void>;
+}
+
 async function findStrictVisionProvider(identity?: {
   userId: string;
   userRole: string;
@@ -503,13 +515,15 @@ export async function identifyImageTargetAtPoint(
 /**
  * Convert an image URL to base64 data URL for vision API
  */
-async function imageToBase64(imageUrl: string): Promise<string | null> {
+async function imageToBase64(imageUrl: string, signal?: AbortSignal): Promise<string | null> {
   try {
     const image = await loadSafeImageInput(imageUrl, {
       maxBytes: 25 * 1024 * 1024,
+      signal,
     });
     return `data:${image.mimeType};base64,${image.buffer.toString('base64')}`;
   } catch (err) {
+    if (signal?.aborted) throw err;
     console.warn('[identify-subject] Failed to convert image to base64:', err);
     return null;
   }
@@ -525,9 +539,12 @@ async function imageToBase64(imageUrl: string): Promise<string | null> {
 export async function identifyImageSubject(
   imageUrl: string,
   timeoutMs: number = 8000,
+  options: SubjectIdentificationOptions = {},
 ): Promise<IdentifyResult | null> {
   // Collect ALL available vision providers for multi-provider fallback
-  const allProviders = await findAllVisionProviders();
+  const allProviders = options.frozenTargets !== undefined
+    ? await Promise.all(options.frozenTargets.map(async target => ({ ...target, apiKey: await options.resolveApiKey?.(target.providerId) })))
+    : await findAllVisionProviders();
   if (allProviders.length === 0) {
     console.warn('[identify-subject] No vision-capable model provider available for identification');
     return null;
@@ -536,7 +553,8 @@ export async function identifyImageSubject(
   console.info(`[identify-subject] Found ${allProviders.length} vision provider(s): ${allProviders.map(p => p.model).join(', ')}`);
 
   // Pre-convert image to base64 once (reuse across all provider attempts)
-  const base64 = await imageToBase64(imageUrl);
+  await options.beforeIO?.();
+  const base64 = await imageToBase64(imageUrl, options.signal);
   if (!base64) {
     console.warn('[identify-subject] Failed to convert image to base64');
     return null;
@@ -547,6 +565,8 @@ export async function identifyImageSubject(
   const maxAttempts = Math.min(allProviders.length, 8);
   for (let i = 0; i < maxAttempts; i++) {
     const provider = allProviders[i];
+    if (!provider.apiKey) continue;
+    await options.beforeIO?.();
     try {
       console.info(`[identify-subject] Trying provider ${i + 1}/${maxAttempts}: model=${provider.model}`);
 
@@ -586,7 +606,8 @@ export async function identifyImageSubject(
               'Content-Type': 'application/json',
             },
             body: JSON.stringify(requestBody),
-            signal: controller.signal,
+            signal: options.signal ? AbortSignal.any([controller.signal, options.signal]) : controller.signal,
+            ...(options.transport ? { transport: options.transport, propagateErrors: true } : {}),
           },
           true,
           timeoutMs,
@@ -648,6 +669,7 @@ export async function identifyImageSubject(
         clearTimeout(timeoutId);
       }
     } catch (err) {
+      if (options.signal?.aborted) throw err;
       console.warn(`[identify-subject] Provider ${i + 1} (${provider.model}) failed:`, err instanceof Error ? err.message : String(err));
       // Continue to next provider
     }

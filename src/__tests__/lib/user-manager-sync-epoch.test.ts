@@ -171,6 +171,29 @@ afterEach(() => {
 });
 
 describe('UserManager project sync response isolation', () => {
+  it('preserves server creation identity when a newer cold-start local project shares its ID', async () => {
+    const seeded = JSON.parse(storage.get('unbounded_ai_user_data')!) as {
+      userData: Record<string, { projects: Project[] }>;
+    };
+    seeded.userData['user-a'].projects[0].createdAt = 900;
+    seeded.userData['user-a'].projects[0].updatedAt = 900;
+    seeded.userData['user-a'].projects[0].name = 'Newer local draft';
+    storage.set('unbounded_ai_user_data', JSON.stringify(seeded));
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      success: true,
+      value: [project('user-a', '/media/a.png')],
+      assetGraphMode: 'shadow',
+      projectRevision: 1,
+    }), { status: 200 })));
+    const { UserManager } = await import('@/lib/user-manager');
+    const manager = UserManager.getInstance();
+    await expect(manager.loadProjectsFromServer(0, 'user-a')).resolves.toBe(true);
+    expect(manager.getProject('project-a')).toMatchObject({
+      createdAt: 1,
+      name: 'Newer local draft',
+    });
+  });
+
   it('does not rebase and retry a document-authority conflict as an ordinary revision race', async () => {
     let readCount = 0;
     let writeCount = 0;

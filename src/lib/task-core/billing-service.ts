@@ -4,6 +4,7 @@ import {
   type CloudTaskFailureStatus,
   type PersistedCloudTask,
   type TaskTerminalIdentity,
+  type CreateBillableCloudTaskInput,
 } from '@/lib/cloud-task-storage';
 import { markTaskDurable, updateTaskProgress } from '@/lib/task-registry';
 import {
@@ -12,6 +13,8 @@ import {
   type TaskErrorInput,
 } from '@/lib/task-core/task-state';
 import { validateIdempotencyIdentity } from '@/lib/task-core/idempotency';
+import type { CanvasTaskPublicationInput } from '@/lib/collaboration/task-publication';
+import type { WorkflowEditPublicationInput } from '@/lib/collaboration/workflow-edit-publication';
 
 export type CreateDurableTaskInput = Omit<
   DurableTask,
@@ -25,6 +28,11 @@ export type CreateDurableTaskInput = Omit<
 };
 
 export interface CreateBillableTaskInput {
+  agentExecutionDescriptor?: CreateBillableCloudTaskInput['agentExecutionDescriptor'];
+  canvasPublication?: CanvasTaskPublicationInput;
+  workflowPublication?: WorkflowEditPublicationInput;
+  activeImageEditInputDigest?: string;
+  beforeCharge?: CreateBillableCloudTaskInput['beforeCharge'];
   userId: string;
   idempotencyKey: string;
   requestDigest: string;
@@ -64,6 +72,12 @@ export async function createBillableTask(
   const outcome = await createBillableCloudTask({
     ...identity,
     creditCost: input.creditCost,
+    ...(input.agentExecutionDescriptor !== undefined ? { agentExecutionDescriptor: input.agentExecutionDescriptor } : {}),
+    ...(input.canvasPublication !== undefined ? { canvasPublication: input.canvasPublication } : {}),
+    ...(input.workflowPublication !== undefined ? { workflowPublication: input.workflowPublication } : {}),
+    ...(input.activeImageEditInputDigest !== undefined
+      ? { activeImageEditInputDigest: input.activeImageEditInputDigest } : {}),
+    ...(input.beforeCharge !== undefined ? { beforeCharge: input.beforeCharge } : {}),
     task: {
       ...input.task,
       userId: identity.userId,

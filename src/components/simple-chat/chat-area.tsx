@@ -23,12 +23,12 @@ import {
   PRESET_SKILLS, PresetSkill, alignSimpleChatMediaSlots, buildSimpleChatMessageSourceTrace,
   buildSimpleChatManagedAttachmentSelection,
   canSendSimpleChatMessageToNodeMode, canTransferSimpleChatMedia,
-  mergeSimpleChatCanvasBridgeReferences, parseSimpleChatCanvasBridgePayload,
   readSimpleChatStreamAssetReference,
-  sendSimpleChatExportToCanvas, sendSimpleChatMediaToCanvas, serializeSimpleChatCanvasBridgePayload,
+  sendSimpleChatExportToCanvas, sendSimpleChatMediaToCanvas,
   type WorkspaceAssetReference
 } from "./simple-chat-types";
 import { User } from "@/lib/user-types";
+import { enqueueCanvasBridgeReferences } from '@/lib/simple-chat-canvas-bridge';
 import type { ReasoningEffort, ResponseSpeed, ResolvedChatControls } from "@/lib/chat-generation-controls";
 import { useTheme } from "@/app/simple-chat/providers";
 import { AgentProgressTimeline } from "@/components/agent-runtime/AgentProgressTimeline";
@@ -364,6 +364,21 @@ export default function ChatArea({
   const [canvasProjects, setCanvasProjects] = useState<CanvasProjectOption[]>([]);
   const [selectedCanvasProjectId, setSelectedCanvasProjectId] = useState('');
   const [canvasTransferMessageId, setCanvasTransferMessageId] = useState<string | null>(null);
+  const canvasTransferScope = useMemo(() => ({ actorId: user.id, projectId: project?.id,
+    taskId: task?.id, targetProjectId: selectedCanvasProjectId }),
+  [user.id, project?.id, task?.id, selectedCanvasProjectId]);
+  const canvasTransferScopeRef = useRef(canvasTransferScope);
+  canvasTransferScopeRef.current = canvasTransferScope;
+  const canvasTransferMountedRef = useRef(false);
+  const canvasTransferToastRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    canvasTransferMountedRef.current = true;
+    return () => { canvasTransferMountedRef.current = false; };
+  }, []);
+  useEffect(() => {
+    setCanvasTransferMessageId(null);
+    return () => { canvasTransferToastRef.current?.remove(); canvasTransferToastRef.current = null; };
+  }, [canvasTransferScope]);
 
   // Instructions draft
   const [instructionsDraft, setInstructionsDraft] = useState<ProjectInstructions>(
@@ -1814,8 +1829,14 @@ export default function ChatArea({
       return;
     }
     if (canvasTransferMessageId === message.id) return;
+    const isCurrent = (): boolean => canvasTransferMountedRef.current
+      && canvasTransferScopeRef.current === canvasTransferScope;
+    const assertCurrent = (): void => {
+      if (!isCurrent()) throw new Error('CANVAS_BRIDGE_SCOPE_CHANGED');
+    };
     setCanvasTransferMessageId(message.id);
     try {
+      assertCurrent();
       const latestTask = latestTaskRef.current;
       if (!latestTask || latestTask.id !== task.id) {
         throw new Error('Chat task changed before Canvas transfer');
@@ -1825,6 +1846,7 @@ export default function ChatArea({
         messages: messagesRef.current,
         updatedAt: Date.now(),
       });
+      assertCurrent();
       const transfer = async ({ sourceVersionId, targetProjectId: transferProjectId, index, sourceTrace, kind }: {
         sourceVersionId: string;
         targetProjectId: string;
@@ -1832,6 +1854,7 @@ export default function ChatArea({
         sourceTrace?: WorkspaceAssetReference['sourceTrace'];
         kind?: WorkspaceAssetReference['kind'];
       }): Promise<WorkspaceAssetReference> => {
+        assertCurrent();
         const entityType = kind === 'video' ? 'canvas-video' : 'canvas-image';
         const transferIdentity = buildSimpleChatCanvasTransferIdentity({
           targetProjectId: transferProjectId,
@@ -1858,31 +1881,22 @@ export default function ChatArea({
             },
           }], restoreDeletedPlacements: true }),
         });
+        assertCurrent();
         if (!transferResponse.ok) throw new Error('Asset transfer failed');
         const payload = await transferResponse.json() as { transfers?: unknown[] };
+        assertCurrent();
         const transferred = readWorkspaceAssetReference(payload.transfers?.[0]);
         if (!transferred?.assetVersionId || !transferred.placementId) {
           throw new Error('Asset transfer returned an incomplete reference');
         }
         return { ...transferred, ...(kind ? { kind } : {}) };
       };
-      const writeBridge = (transferredImages: WorkspaceAssetReference[]): void => {
-        const rawExisting = localStorage.getItem('wujie_canvas_bridge');
-        let existingPayload: unknown = [];
-        try { existingPayload = rawExisting ? JSON.parse(rawExisting) : []; } catch {}
-        const existingProjectId = existingPayload && typeof existingPayload === 'object' && !Array.isArray(existingPayload)
-          && typeof (existingPayload as Record<string, unknown>).projectId === 'string'
-          ? (existingPayload as Record<string, unknown>).projectId as string
-          : null;
-        const existingImages = !existingProjectId || existingProjectId === targetProjectId
-          ? parseSimpleChatCanvasBridgePayload(existingPayload)
-          : [];
-        localStorage.setItem('wujie_canvas_bridge', JSON.stringify(
-          serializeSimpleChatCanvasBridgePayload(
-            targetProjectId,
-            mergeSimpleChatCanvasBridgeReferences(existingImages, transferredImages),
-          ),
-        ));
+      const onTransferred = async (reference: WorkspaceAssetReference): Promise<void> => {
+        assertCurrent();
+        await enqueueCanvasBridgeReferences({ actorId: canvasTransferScope.actorId,
+          projectId: targetProjectId, storage: localStorage, locks: navigator.locks, isCurrent,
+          references: [reference] });
+        assertCurrent();
       };
       const transferResult = options?.runProjectId
         ? await sendSimpleChatExportToCanvas({
@@ -1890,7 +1904,7 @@ export default function ChatArea({
           imageRefs: message.imageRefs || [],
           sourceTrace,
           transfer,
-          writeBridge,
+          onTransferred,
         })
         : await sendSimpleChatMediaToCanvas({
         images: message.images || [],
@@ -1898,8 +1912,9 @@ export default function ChatArea({
         targetProjectId,
         sourceTrace,
         transfer,
-        writeBridge,
+        onTransferred,
       });
+      assertCurrent();
       if (!transferResult.ok) {
         setControlNotice('历史图片或登记失败的图片仅可查看，无法发送到画布');
         return;
@@ -1910,29 +1925,34 @@ export default function ChatArea({
         return;
       }
       const toast = document.createElement('div');
+      canvasTransferToastRef.current?.remove();
+      canvasTransferToastRef.current = toast;
+      toast.dataset.canvasBridgeNotice = 'waiting';
+      toast.setAttribute('role', 'status');
       toast.className = 'fixed bottom-20 right-6 z-[9999] bg-blue-600 text-white px-4 py-3 rounded-lg shadow-lg cursor-pointer hover:bg-blue-700 transition-colors text-sm flex items-center gap-2';
       // P3 fix: 用 DOM API 构建子节点，避免 innerHTML 拼接（低风险但非最佳实践）
       const span1 = document.createElement('span');
-      span1.textContent = `已添加 ${transferredImages.length} 张图片`;
+      span1.textContent = `已发送 ${transferredImages.length} 张图片，等待画布接收`;
       const span2 = document.createElement('span');
       span2.className = 'underline';
       span2.textContent = '前往画布查看';
       toast.appendChild(span1);
       toast.appendChild(span2);
       toast.onclick = () => {
-        window.location.assign(`/?projectId=${encodeURIComponent(targetProjectId)}`);
+        if (isCurrent()) window.location.assign(`/?projectId=${encodeURIComponent(targetProjectId)}`);
         toast.remove();
       };
       document.body.appendChild(toast);
       setTimeout(() => toast.remove(), 8000);
     } catch (error) {
+      if (!isCurrent()) return;
       setControlNotice(error instanceof Error && error.message === 'EXPORT_ASSET_VERSION_MISMATCH'
         ? '导出结果必须返回任务所属画布，未创建跨项目副本'
         : '图片无法发送到所选画布');
     } finally {
-      setCanvasTransferMessageId((current) => current === message.id ? null : current);
+      if (isCurrent()) setCanvasTransferMessageId((current) => current === message.id ? null : current);
     }
-  }, [canvasTransferMessageId, onPersistTask, project, selectedCanvasProjectId, task]);
+  }, [canvasTransferMessageId, canvasTransferScope, onPersistTask, project, selectedCanvasProjectId, task]);
 
   // Message operations
   const copyMessage = (content: string) => { navigator.clipboard.writeText(content); };

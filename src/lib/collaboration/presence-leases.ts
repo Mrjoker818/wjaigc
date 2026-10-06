@@ -10,16 +10,12 @@ import {
   PresenceMemberError,
 } from './presence-members';
 import { pruneExpiredPresenceTickets } from './presence-tickets';
+import { PresenceConnectionCleanupError, withPresenceConnection } from './presence-connection';
+import { createPresenceListenerOwner } from './presence-listener';
 
 const CHANGE_CHANNEL = 'wujie_presence_changed';
 type PresenceChangeCallback = () => void | Promise<void>;
 const subscriptions = new Map<string, Set<PresenceChangeCallback>>();
-let listener: {
-  client: PoolClient;
-  close: () => void;
-} | null = null;
-let connecting: Promise<void> | null = null;
-let retryTimer: ReturnType<typeof setTimeout> | null = null;
 
 function invokeSubscriber(callback: PresenceChangeCallback): void {
   try {
@@ -34,79 +30,44 @@ function announceChange(projectId: string): void {
   for (const callback of subscriptions.get(projectId) ?? []) invokeSubscriber(callback);
 }
 
-function scheduleListenerReconnect(): void {
-  if (subscriptions.size === 0 || retryTimer) return;
-  retryTimer = setTimeout(() => {
-    retryTimer = null;
-    void ensureListener();
-  }, 1_000);
-  retryTimer.unref?.();
-}
-
-async function ensureListener(): Promise<void> {
-  if (listener || subscriptions.size === 0) return;
-  if (connecting) return connecting;
-  connecting = (async () => {
-    let client: PoolClient;
-    try {
-      client = await getPool().connect();
-    } catch {
-      scheduleListenerReconnect();
-      return;
-    }
-    let closed = false;
-    const onNotification = (message: { channel: string; payload?: string }): void => {
-      if (message.channel === CHANGE_CHANNEL && message.payload) announceChange(message.payload);
-    };
-    const close = (): void => {
-      if (closed) return;
-      closed = true;
-      client.removeListener('notification', onNotification);
-      client.removeListener('error', onDisconnect);
-      client.removeListener('end', onDisconnect);
-      if (listener?.client === client) listener = null;
-      client.release(true);
-    };
-    const onDisconnect = (): void => {
-      close();
-      scheduleListenerReconnect();
-    };
-    client.on('notification', onNotification);
-    client.once('error', onDisconnect);
-    client.once('end', onDisconnect);
-    try {
-      await client.query(`LISTEN ${CHANGE_CHANNEL}`);
-      if (subscriptions.size === 0) close();
-      else listener = { client, close };
-    } catch {
-      close();
-      scheduleListenerReconnect();
-    }
-  })().finally(() => { connecting = null; });
-  return connecting;
-}
+const listenerOwner = createPresenceListenerOwner(announceChange);
 
 export async function subscribePresence(
   projectId: string,
   onChange: PresenceChangeCallback,
   reconcileIntervalMs = 15_000,
+  signal?: AbortSignal,
 ): Promise<() => Promise<void>> {
+  signal?.throwIfAborted();
   const callbacks = subscriptions.get(projectId) ?? new Set<PresenceChangeCallback>();
   callbacks.add(onChange);
   subscriptions.set(projectId, callbacks);
   const reconcileTimer = setInterval(() => invokeSubscriber(onChange), Math.max(50, reconcileIntervalMs));
   reconcileTimer.unref?.();
-  await ensureListener();
-  return async () => {
+  const token = listenerOwner.retain(signal);
+  let closing: Promise<void> | undefined;
+  const close = (): Promise<void> => {
+    if (closing) return closing;
+    signal?.removeEventListener('abort', onAbort);
     clearInterval(reconcileTimer);
     callbacks.delete(onChange);
     if (callbacks.size === 0) subscriptions.delete(projectId);
-    if (subscriptions.size === 0) {
-      if (retryTimer) clearTimeout(retryTimer);
-      retryTimer = null;
-      listener?.close();
-    }
+    closing = token.close();
+    void closing.catch(() => undefined);
+    return closing;
   };
+  const onAbort = (): void => { void close().catch(() => undefined); };
+  signal?.addEventListener('abort', onAbort, { once: true });
+  if (signal?.aborted) onAbort();
+  try { await token.ready; signal?.throwIfAborted(); return close; }
+  catch (error) {
+    try { await close(); }
+    catch (cleanupError) {
+      if (cleanupError === error) throw error;
+      throw new AggregateError([error, cleanupError], 'Presence subscription initialization and cleanup failed');
+    }
+    throw error;
+  }
 }
 
 export interface PresenceSnapshot {
@@ -145,12 +106,12 @@ async function bumpSequence(client: PoolClient, projectId: string): Promise<void
   await client.query('SELECT pg_notify($1, $2)', [CHANGE_CHANNEL, projectId]);
 }
 
-export async function readPresenceSnapshot(projectId: string): Promise<PresenceSnapshot> {
-  const result = await getPool().query<{
+export async function readPresenceSnapshot(projectId: string, signal?: AbortSignal): Promise<PresenceSnapshot> {
+  interface SnapshotRow {
     sequence: string;
     participants: PresenceSnapshot['participants'];
-  }>(
-    `SELECT COALESCE((
+  }
+  const text = `SELECT COALESCE((
        SELECT sequence FROM wujie_presence_project_sequences WHERE project_id = $1
      ), 0)::text AS sequence,
      COALESCE((
@@ -175,9 +136,12 @@ export async function readPresenceSnapshot(projectId: string): Promise<PresenceS
               )
             GROUP BY actor.id, actor.name
          ) person
-     ), '[]'::json) AS participants`,
-    [projectId],
-  );
+     ), '[]'::json) AS participants`;
+  // Initial join still owns its committed lease until this snapshot returns.
+  // Keep the ordinary pool query API for callers without a cancellation owner.
+  const result = signal
+    ? await withPresenceConnection(signal, client => client.query<SnapshotRow>(text, [projectId]))
+    : await getPool().query<SnapshotRow>(text, [projectId]);
   return {
     projectId,
     sequence: Number(result.rows[0]?.sequence ?? 0),
@@ -185,80 +149,107 @@ export async function readPresenceSnapshot(projectId: string): Promise<PresenceS
   };
 }
 
-export async function joinPresence(input: PresenceJoinInput): Promise<PresenceSnapshot> {
+async function compensateCommittedJoin(connectionId: string, cause: unknown): Promise<void> {
+  // The failed join may already be cancelled. Its committed lease needs a
+  // fresh cancellation owner, including retirement of the actual checkout.
+  // This bounds compensation SQL, not native acquisition or total shutdown.
+  const controller = new AbortController();
+  const deadline = setTimeout(() => controller.abort(
+    new Error(`Presence committed lease compensation deadline exceeded (${connectionId})`),
+  ), 5_000);
+  deadline.unref();
+  try { await leavePresence(connectionId, controller.signal); }
+  catch (compensationError) {
+    throw new PresenceConnectionCleanupError(new AggregateError([cause, compensationError],
+      `Presence committed lease compensation failed (${connectionId})`));
+  } finally { clearTimeout(deadline); }
+}
+
+export async function joinPresence(input: PresenceJoinInput, signal?: AbortSignal): Promise<PresenceSnapshot> {
   const maxConnections = Number.isFinite(input.maxConnectionsPerUserProject)
     ? Math.max(1, Math.floor(input.maxConnectionsPerUserProject!)) : 10;
-  const client = await getPool().connect();
+  let commitAttempted = false;
   try {
-    await client.query('BEGIN');
-    await assertPresenceMemberForLease(client, input.userId, input.projectId);
-    await client.query('SELECT pg_advisory_xact_lock(hashtext($1), hashtext($2))', [
-      input.projectId, input.userId,
-    ]);
-    const active = await client.query<{ count: number }>(
-      `SELECT COUNT(*)::int AS count FROM wujie_presence_leases
-        WHERE project_id = $1 AND user_id = $2 AND expires_at > clock_timestamp()`,
-      [input.projectId, input.userId],
-    );
-    if (active.rows[0].count >= maxConnections) throw new PresenceConnectionLimitError();
-    await client.query(
-      `WITH sampled AS MATERIALIZED (SELECT clock_timestamp() AS joined_at)
-       INSERT INTO wujie_presence_leases
-         (connection_id, project_id, user_id, instance_id, created_at, last_seen_at, expires_at)
-       SELECT $1, $2, $3, $4, joined_at, joined_at, joined_at + interval '45 seconds'
-         FROM sampled`,
-      [input.connectionId, input.projectId, input.userId, input.instanceId],
-    );
-    await bumpSequence(client, input.projectId);
-    await client.query('COMMIT');
+    await withPresenceConnection(signal, async client => {
+      try {
+        await client.query('BEGIN');
+        await assertPresenceMemberForLease(client, input.userId, input.projectId);
+        await client.query('SELECT pg_advisory_xact_lock(hashtext($1), hashtext($2))', [
+          input.projectId, input.userId,
+        ]);
+        const active = await client.query<{ count: number }>(
+          `SELECT COUNT(*)::int AS count FROM wujie_presence_leases
+            WHERE project_id = $1 AND user_id = $2 AND expires_at > clock_timestamp()`,
+          [input.projectId, input.userId],
+        );
+        if (active.rows[0].count >= maxConnections) throw new PresenceConnectionLimitError();
+        await client.query(
+          `WITH sampled AS MATERIALIZED (SELECT clock_timestamp() AS joined_at)
+           INSERT INTO wujie_presence_leases
+             (connection_id, project_id, user_id, instance_id, created_at, last_seen_at, expires_at)
+           SELECT $1, $2, $3, $4, joined_at, joined_at, joined_at + interval '45 seconds'
+             FROM sampled`,
+          [input.connectionId, input.projectId, input.userId, input.instanceId],
+        );
+        await bumpSequence(client, input.projectId);
+        // Once COMMIT is sent, a lost acknowledgement does not prove rollback.
+        // Keep ownership until join returns, even when its result is unknown.
+        commitAttempted = true;
+        await client.query('COMMIT');
+      } catch (error) {
+        // Cancellation owns and retires this exact checkout and its transaction.
+        if (!signal?.aborted) await client.query('ROLLBACK').catch(() => undefined);
+        throw error;
+      }
+    });
   } catch (error) {
-    await client.query('ROLLBACK').catch(() => undefined);
+    // The gateway has not received the join result yet. Compensate the exact
+    // possibly committed lease; a rolled-back COMMIT makes this a no-op.
+    // Failures before COMMIT (including duplicate ids) do not own a prior lease.
+    if (commitAttempted) await compensateCommittedJoin(input.connectionId, error);
     throw error;
-  } finally {
-    client.release();
   }
   try {
-    return await readPresenceSnapshot(input.projectId);
+    return await readPresenceSnapshot(input.projectId, signal);
   } catch (error) {
-    await leavePresence(input.connectionId).catch(() => undefined);
+    await compensateCommittedJoin(input.connectionId, error);
     throw error;
-  }
-}
-
-export async function leavePresence(connectionId: string): Promise<void> {
-  const client = await getPool().connect();
-  try {
-    await client.query('BEGIN');
-    const deleted = await client.query<{ project_id: string }>(
-      'DELETE FROM wujie_presence_leases WHERE connection_id = $1 RETURNING project_id',
-      [connectionId],
-    );
-    if (deleted.rows[0]) await bumpSequence(client, deleted.rows[0].project_id);
-    await client.query('COMMIT');
-  } catch (error) {
-    await client.query('ROLLBACK').catch(() => undefined);
-    throw error;
-  } finally {
-    client.release();
   }
 }
 
-export async function renewPresence(connectionId: string): Promise<boolean> {
-  const current = await getPool().query<{ project_id: string; user_id: string }>(
-    'SELECT project_id, user_id FROM wujie_presence_leases WHERE connection_id = $1',
-    [connectionId],
-  );
+export async function leavePresence(connectionId: string, signal?: AbortSignal): Promise<void> {
+  await withPresenceConnection(signal, async client => {
+    try {
+      await client.query('BEGIN');
+      const deleted = await client.query<{ project_id: string }>(
+        'DELETE FROM wujie_presence_leases WHERE connection_id = $1 RETURNING project_id',
+        [connectionId],
+      );
+      if (deleted.rows[0]) await bumpSequence(client, deleted.rows[0].project_id);
+      await client.query('COMMIT');
+    } catch (error) {
+      if (!signal?.aborted) await client.query('ROLLBACK').catch(() => undefined);
+      throw error;
+    }
+  });
+}
+
+export async function renewPresence(connectionId: string, signal?: AbortSignal): Promise<boolean> {
+  const text = 'SELECT project_id, user_id FROM wujie_presence_leases WHERE connection_id = $1';
+  const current = signal
+    ? await withPresenceConnection(signal, client => client.query<{ project_id: string; user_id: string }>(text, [connectionId]))
+    : await getPool().query<{ project_id: string; user_id: string }>(text, [connectionId]);
   const lease = current.rows[0];
   if (!lease) return false;
   try {
-    await assertPresenceMember(lease.user_id, lease.project_id);
+    await assertPresenceMember(lease.user_id, lease.project_id, signal);
   } catch (error) {
     if (!(error instanceof PresenceMemberError)) throw error;
-    await leavePresence(connectionId);
+    await leavePresence(connectionId, signal);
     return false;
   }
 
-  const client = await getPool().connect();
+  return await withPresenceConnection(signal, async client => {
   try {
     await client.query('BEGIN');
     const renewed = await client.query<{ project_id: string }>(
@@ -274,16 +265,15 @@ export async function renewPresence(connectionId: string): Promise<boolean> {
     await client.query('COMMIT');
     return Boolean(renewed.rows[0]);
   } catch (error) {
-    await client.query('ROLLBACK').catch(() => undefined);
+    if (!signal?.aborted) await client.query('ROLLBACK').catch(() => undefined);
     throw error;
-  } finally {
-    client.release();
   }
+  });
 }
 
-export async function expirePresenceLeases(batchSize = 500): Promise<number> {
+export async function expirePresenceLeases(batchSize = 500, signal?: AbortSignal): Promise<number> {
   const limit = Number.isFinite(batchSize) ? Math.max(1, Math.min(500, Math.floor(batchSize))) : 500;
-  const client = await getPool().connect();
+  return await withPresenceConnection(signal, async client => {
   try {
     await client.query('BEGIN');
     const expired = await client.query<{ project_id: string }>(
@@ -305,31 +295,52 @@ export async function expirePresenceLeases(batchSize = 500): Promise<number> {
     await client.query('COMMIT');
     return expired.rowCount ?? 0;
   } catch (error) {
-    await client.query('ROLLBACK').catch(() => undefined);
+    if (!signal?.aborted) await client.query('ROLLBACK').catch(() => undefined);
     throw error;
-  } finally {
-    client.release();
   }
+  });
 }
 
 export function startPresenceMaintenance(intervalMs = 15_000): () => Promise<void> {
   let pending: Promise<void> | null = null;
+  let controller: AbortController | null = null;
+  let closing: Promise<void> | undefined;
+  let stopping = false;
+  let cleanupFailure: PresenceConnectionCleanupError | undefined;
   const timer = setInterval(() => {
-    if (pending) return;
+    if (stopping || pending || cleanupFailure) return;
+    const selected = new AbortController();
+    controller = selected;
     pending = (async () => {
-      try {
-        await expirePresenceLeases();
-        await pruneExpiredPresenceTickets();
-      } finally {
+      await expirePresenceLeases(500, selected.signal);
+      selected.signal.throwIfAborted();
+      await pruneExpiredPresenceTickets(500, selected.signal);
+    })().catch((error: unknown): void => {
+      if (error instanceof PresenceConnectionCleanupError) {
+        cleanupFailure = error;
+        clearInterval(timer);
+        throw error;
+      }
+      // Running cycles retry ordinary failures. Once stop owns this cycle,
+      // preserve its actual rejection rather than falsely reporting success.
+      if (stopping) throw error;
+    }).finally(() => {
+      if (controller === selected) {
+        controller = null;
         pending = null;
       }
-    })().catch(() => {
-      // A later cycle retries after a transient database failure.
     });
+    void pending.catch(() => undefined);
   }, Number.isFinite(intervalMs) ? Math.max(50, intervalMs) : 15_000);
   timer.unref?.();
-  return async () => {
+  return (): Promise<void> => {
+    if (closing) return closing;
+    stopping = true;
     clearInterval(timer);
-    await pending;
+    const owned = pending;
+    controller?.abort();
+    closing = Promise.resolve(owned).then((): void => { if (cleanupFailure) throw cleanupFailure; });
+    void closing.catch(() => undefined);
+    return closing;
   };
 }

@@ -4,6 +4,7 @@ import path from 'path';
 import { getServerDataRoot } from '@/lib/server-data-root';
 import { requireApiAuthOrReject } from '@/lib/api-auth';
 import { isSafeVideoSource } from '@/lib/api-validator';
+import { resolveVideoDownloadFormat } from '@/lib/video-download-format';
 
 export const runtime = 'nodejs';
 export const maxDuration = 120;
@@ -52,13 +53,6 @@ async function readLocalVideoBuffer(url: string): Promise<Buffer | null> {
   return null;
 }
 
-function getVideoContentType(url: string): string {
-  const pathname = url.split(/[?#]/, 1)[0].toLowerCase();
-  if (pathname.endsWith('.webm')) return 'video/webm';
-  if (pathname.endsWith('.mov')) return 'video/quicktime';
-  return 'video/mp4';
-}
-
 export async function GET(request: NextRequest): Promise<NextResponse> {
   const authResult = await requireApiAuthOrReject(request);
   if (authResult instanceof NextResponse) return authResult;
@@ -72,10 +66,11 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     if (sourceUrl.startsWith('/')) {
       const localBuffer = await readLocalVideoBuffer(sourceUrl);
       if (!localBuffer) return NextResponse.json({ error: '视频文件不存在' }, { status: 404 });
+      const format = resolveVideoDownloadFormat(sourceUrl);
       return new NextResponse(new Uint8Array(localBuffer), {
         headers: {
-          'Content-Type': getVideoContentType(sourceUrl),
-          'Content-Disposition': 'attachment; filename="wujie-video.mp4"',
+          'Content-Type': format.mimeType,
+          'Content-Disposition': `attachment; filename="wujie-video.${format.extension}"`,
           'Cache-Control': 'private, max-age=0',
         },
       });
@@ -87,10 +82,12 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     if (length > MAX_DOWNLOAD_BYTES) return NextResponse.json({ error: '视频文件超过 150MB 下载上限' }, { status: 413 });
     const body = await response.arrayBuffer();
     if (body.byteLength > MAX_DOWNLOAD_BYTES) return NextResponse.json({ error: '视频文件超过 150MB 下载上限' }, { status: 413 });
+    const contentType = response.headers.get('content-type');
+    const format = resolveVideoDownloadFormat(sourceUrl, contentType);
     return new NextResponse(body, {
       headers: {
-        'Content-Type': response.headers.get('content-type') || 'video/mp4',
-        'Content-Disposition': 'attachment; filename="wujie-video.mp4"',
+        'Content-Type': contentType || format.mimeType,
+        'Content-Disposition': `attachment; filename="wujie-video.${format.extension}"`,
         'Cache-Control': 'private, max-age=0',
       },
     });

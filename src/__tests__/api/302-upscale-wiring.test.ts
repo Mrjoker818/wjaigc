@@ -4,12 +4,13 @@ import { describe, expect, it } from 'vitest';
 
 const routeSource = readFileSync(resolve(process.cwd(), 'src/app/api/image-edit/route.ts'), 'utf8');
 const providerSource = readFileSync(resolve(process.cwd(), 'src/lib/server-api-config.ts'), 'utf8');
+const upscaleSource = readFileSync(resolve(process.cwd(), 'src/lib/image-edit-upscale-provider.ts'), 'utf8');
 
 describe('302.AI upscale wiring', () => {
   it('uses only the two documented native endpoints', () => {
-    expect(routeSource).toContain("'/302/submit/super-upscale-v2'");
-    expect(routeSource).toContain("'/302/submit/upscale-v6'");
-    expect(routeSource).not.toContain('upscale-v5');
+    expect(upscaleSource).toContain("'/302/submit/super-upscale-v2'");
+    expect(upscaleSource).toContain("'/302/submit/upscale-v6'");
+    expect(upscaleSource).not.toContain('upscale-v5');
   });
 
   it('requires both an exact 302 model id and a 302.AI base URL for native routing', () => {

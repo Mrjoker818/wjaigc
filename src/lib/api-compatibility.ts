@@ -725,6 +725,8 @@ export function parseGeminiChatImageResponse(
  * @returns Array of image data URLs, or null if fallback failed
  */
 export async function tryChatCompletionsImageFallback(params: {
+  transport?: typeof fetch;
+  propagateErrors?: boolean;
   baseUrl: string;
   apiKey: string;
   model: string;
@@ -771,7 +773,7 @@ export async function tryChatCompletionsImageFallback(params: {
     const chatRequest = buildGeminiChatImageRequest(chatRequestBody);
 
     const chatUrl = `${baseUrl.replace(/\/+$/, '')}/chat/completions`;
-    const chatResponse = await fetch(chatUrl, {
+    const chatResponse = await (params.transport || fetch)(chatUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -798,6 +800,7 @@ export async function tryChatCompletionsImageFallback(params: {
     console.log(`[${requestIdPrefix}] /chat/completions fallback returned no images`);
     return null;
   } catch (err) {
+    if (params.propagateErrors) throw err;
     console.log(`[${requestIdPrefix}] /chat/completions fallback error: ${err}`);
     return null;
   }

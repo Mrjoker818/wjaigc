@@ -7,7 +7,8 @@ import path from 'node:path';
 import { execSql, isDatabaseConfigured } from '@/lib/db-client';
 import { getServerDataRoot } from '@/lib/server-data-root';
 
-const SAFE_EXPORT_PATH = /^exports\/[a-f0-9]{16}-[A-Za-z0-9._-]+\.(?:png|jpe?g|webp|json|zip)$/u;
+import { EXPORT_KEY as SAFE_EXPORT_PATH } from './binary-media-contract';
+import { checkExportCleanupIdentity, isBinaryLocalIdentity, type BinaryLocalIdentity } from './binary-local-identity';
 const SAFE_EXPORT_TEMP_PATH = /^exports\/\.[A-Za-z0-9._-]+\.(?:tmp|recover\.tmp)$/u;
 const SAFE_GATEWAY_LOCAL_PATH = /^gateway\/[A-Za-z0-9._-]+\.(?:png|jpe?g|webp|gif|bmp|avif)$/u;
 const SAFE_GATEWAY_STORAGE_KEY = /^images\/gateway\/[A-Za-z0-9._-]+\.(?:png|jpe?g|webp|gif|bmp|avif)$/u;
@@ -19,6 +20,7 @@ export interface AssetCleanupOutboxRecord {
   targetHash: string;
   rootId: 'server-data';
   localPath?: string;
+  localIdentity?: BinaryLocalIdentity;
   storageKey?: string;
   status: 'pending' | 'processing' | 'completed';
   attemptCount: number;
@@ -38,10 +40,11 @@ export interface AssetCleanupOutboxStore {
 interface CleanupServiceDependencies {
   store: AssetCleanupOutboxStore;
   deleteS3(storageKey: string): Promise<void>;
-  removeLocal(localPath: string, rootId: 'server-data'): Promise<void>;
+  removeLocal(localPath: string, rootId: 'server-data', identity?: BinaryLocalIdentity): Promise<void>;
 }
 
 export interface RecordAssetCleanupFailureInput {
+  localIdentity?: BinaryLocalIdentity;
   storageKey?: string;
   localPath?: string;
   rootId: 'server-data';
@@ -72,11 +75,13 @@ function assertSafeTarget(input: Pick<RecordAssetCleanupFailureInput, 'storageKe
   }
 }
 
-function targetHash(input: Pick<RecordAssetCleanupFailureInput, 'storageKey' | 'localPath' | 'rootId'>): string {
+function targetHash(input: Pick<RecordAssetCleanupFailureInput, 'storageKey' | 'localPath' | 'rootId' | 'localIdentity'>): string {
   return createHash('sha256').update(JSON.stringify({
     rootId: input.rootId,
     localPath: input.localPath ?? null,
     storageKey: input.storageKey ?? null,
+    // Keep legacy target hashes stable; separate every new ownership generation.
+    ...(input.localIdentity ? { identityVersion: 1, localIdentity: input.localIdentity } : {}),
   })).digest('hex');
 }
 
@@ -88,11 +93,15 @@ export function createAssetCleanupOutboxService(dependencies: CleanupServiceDepe
   return {
     async recordFailure(input: RecordAssetCleanupFailureInput): Promise<void> {
       assertSafeTarget(input);
+      if (input.localIdentity && (!input.localPath?.startsWith('exports/') || !isBinaryLocalIdentity(input.localIdentity))) {
+        throw new TypeError('ASSET_CLEANUP_LOCAL_IDENTITY_INVALID');
+      }
       await dependencies.store.enqueue({
         id: randomUUID(),
         targetHash: targetHash(input),
         rootId: input.rootId,
         ...(input.localPath ? { localPath: input.localPath } : {}),
+        ...(input.localIdentity ? { localIdentity: structuredClone(input.localIdentity) } : {}),
         ...(input.storageKey ? { storageKey: input.storageKey } : {}),
         status: 'pending',
         attemptCount: 0,
@@ -118,7 +127,7 @@ export function createAssetCleanupOutboxService(dependencies: CleanupServiceDepe
             fileUrl: record.localPath ? `/api/serve-upload/${record.localPath}` : undefined,
           });
           if (!referenced) {
-            if (record.localPath) await dependencies.removeLocal(record.localPath, record.rootId);
+            if (record.localPath) await dependencies.removeLocal(record.localPath, record.rootId, record.localIdentity);
             if (record.storageKey) await dependencies.deleteS3(record.storageKey);
           }
           if (await dependencies.store.complete(record.id, record.leaseToken)) completed += 1;
@@ -145,8 +154,8 @@ const postgresStore: AssetCleanupOutboxStore = {
     await execSql(
       `INSERT INTO wujie_asset_cleanup_outbox(
          id, target_hash, root_id, local_path, storage_key, status,
-         attempt_count, next_attempt_at, last_error, created_at, updated_at
-       ) VALUES ($1, $2, $3, $4, $5, 'pending', 0, $7, $6, NOW(), NOW())
+         attempt_count, next_attempt_at, last_error, created_at, updated_at, local_identity
+       ) VALUES ($1, $2, $3, $4, $5, 'pending', 0, $7, $6, NOW(), NOW(), $8::jsonb)
        ON CONFLICT (target_hash) DO UPDATE SET
          status = 'pending',
          lease_token = NULL,
@@ -156,7 +165,7 @@ const postgresStore: AssetCleanupOutboxStore = {
          next_attempt_at = EXCLUDED.next_attempt_at,
          last_error = EXCLUDED.last_error,
          updated_at = NOW()`,
-      [record.id, record.targetHash, record.rootId, record.localPath ?? null, record.storageKey ?? null, record.lastError, record.nextAttemptAt],
+      [record.id, record.targetHash, record.rootId, record.localPath ?? null, record.storageKey ?? null, record.lastError, record.nextAttemptAt, record.localIdentity ? JSON.stringify(record.localIdentity) : null],
     );
   },
   async claim(limit, now) {
@@ -173,12 +182,13 @@ const postgresStore: AssetCleanupOutboxStore = {
            next_attempt_at = $1::timestamptz + INTERVAL '5 minutes', updated_at = NOW()
        FROM candidates WHERE item.id = candidates.id
        RETURNING item.id, item.target_hash, item.root_id, item.local_path, item.storage_key,
-                 item.status, item.attempt_count, item.next_attempt_at, item.last_error, item.lease_token`,
+                 item.status, item.attempt_count, item.next_attempt_at, item.last_error, item.lease_token, item.local_identity`,
       [now, limit],
     );
     return result.rows.map(row => ({
       id: String(row.id), targetHash: String(row.target_hash), rootId: 'server-data' as const,
       ...(row.local_path ? { localPath: String(row.local_path) } : {}),
+      ...(row.local_identity ? { localIdentity: row.local_identity as BinaryLocalIdentity } : {}),
       ...(row.storage_key ? { storageKey: String(row.storage_key) } : {}),
       status: 'processing' as const, attemptCount: Number(row.attempt_count),
       nextAttemptAt: new Date(String(row.next_attempt_at)), lastError: String(row.last_error),
@@ -215,7 +225,7 @@ const postgresStore: AssetCleanupOutboxStore = {
   },
 };
 
-async function removeLocalArtifact(localPath: string): Promise<void> {
+async function removeLocalArtifact(localPath: string, _rootId: 'server-data', identity?: BinaryLocalIdentity): Promise<void> {
   assertSafeTarget({ rootId: 'server-data', localPath });
   const root = path.resolve(getServerDataRoot());
   const target = path.resolve(root, localPath);
@@ -223,6 +233,9 @@ async function removeLocalArtifact(localPath: string): Promise<void> {
   if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) {
     throw new TypeError('ASSET_CLEANUP_LOCAL_PATH_INVALID');
   }
+  // Gateway/video producers retain their existing contract in this bounded fix.
+  if (localPath.startsWith('exports/') && !await checkExportCleanupIdentity(target, identity)) return;
+  // stat/unlink is not an atomic OS ownership primitive; no hostile OS-writer guarantee.
   await rm(target, { force: true });
 }
 

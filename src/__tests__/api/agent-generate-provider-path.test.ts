@@ -1,6 +1,19 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('server-only', () => ({}));
+// This isolated consumer owns project-1; authorization rules are exercised with real PG separately.
+vi.mock('@/lib/collaboration/generation-project-access', async original => {
+  const actual = await original<typeof import('@/lib/collaboration/generation-project-access')>();
+  return { ...actual, authorizeGenerationProject: async ({ actorUserId, projectId }: {
+    actorUserId: string; projectId: unknown;
+  }): Promise<import('@/lib/collaboration/generation-project-access').GenerationProjectAccess> => {
+    if (projectId === undefined || projectId === null || projectId === '') return { kind: 'unscoped', actorUserId };
+    if (actorUserId === 'user-1' && projectId === 'project-1') {
+      return { kind: 'personal', actorUserId, ownerId: 'user-1', projectId: 'project-1' };
+    }
+    throw new actual.GenerationProjectAccessError('GENERATION_PROJECT_FORBIDDEN');
+  } };
+});
 
 const persistence = vi.hoisted(() => ({
   provider: {
@@ -407,7 +420,6 @@ describe('real Agent generate_image provider path', () => {
       },
       body: JSON.stringify({
         prompt: 'Forged strict request', model: 'Exact::model', providerId: 'provider-exact',
-        _skipCredits: true, _skipCloudTaskPersistence: true,
       }),
     }) as never);
 

@@ -13,6 +13,30 @@ import {
 } from '@/lib/collaboration/canvas-document';
 
 describe('collaborative canvas document', () => {
+  it.each([undefined, 'original-annotation'])('round-trips annotation order key %s through a real Yjs update', orderKey => {
+    const first = createCanvasDocument(), second = createCanvasDocument();
+    try {
+      applyCanvasImagePatch(first, { placementId: 'p1', assetVersionId: 'v1',
+        x: 0, y: 0, width: 80, height: 60, rotation: 0, zIndex: 1 }, 'seed');
+      const annotation = { id: 'ann-restored', projectId: 'project-a', sourceImageId: 'p1', sourceVersionId: 'v1',
+        type: 'text', geometry: { kind: 'text', point: { x: 0.2, y: 0.3 } },
+        status: 'ready', createdAt: 10, updatedAt: 20, ...(orderKey === undefined ? {} : { orderKey }) };
+      first.getMap('annotationRecords').set(annotation.id, annotation);
+      Y.applyUpdate(second, Y.encodeStateAsUpdate(first));
+      expect(readCanvasDocument(second).annotationRecords?.['ann-restored']).toEqual(annotation);
+    } finally { first.destroy(); second.destroy(); }
+  });
+
+  it.each(['', '__proto__', '../escape', 'data:image/png;base64,abc', 'https://example.test/private', 10, null])
+    ('rejects unsafe annotation order key %s', orderKey => {
+      expect(() => validateCanvasDocumentProjection({
+        placements: { p1: { assetVersionId: 'v1', x: 0, y: 0, width: 80, height: 60, rotation: 0, zIndex: 1 } },
+        annotationRecords: { ann: { id: 'ann', orderKey, projectId: 'project-a', sourceImageId: 'p1', sourceVersionId: 'v1',
+          type: 'text', geometry: { kind: 'text', point: { x: 0.2, y: 0.3 } },
+          status: 'ready', createdAt: 10, updatedAt: 20 } },
+      })).toThrow();
+    });
+
   it('keeps group and annotation tombstones monotonic while clearing visible group membership', () => {
     const doc = createCanvasDocument();
     applyCanvasImagePatch(doc, {

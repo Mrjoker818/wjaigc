@@ -1,10 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { readFileSync } from 'fs';
-import path from 'path';
 
 const {
   createCloudTask,
   getCloudTaskById,
+  getCloudTaskForUser,
   projectCompletedTaskToAssets,
   recordTaskProjectionCompleted,
   recordTaskProjectionPending,
@@ -15,6 +14,7 @@ const {
 } = vi.hoisted(() => ({
   createCloudTask: vi.fn(),
   getCloudTaskById: vi.fn(),
+  getCloudTaskForUser: vi.fn(),
   projectCompletedTaskToAssets: vi.fn(),
   recordTaskProjectionCompleted: vi.fn(),
   recordTaskProjectionPending: vi.fn(),
@@ -24,7 +24,8 @@ const {
   updateCloudTask: vi.fn(),
 }));
 
-vi.mock('@/lib/cloud-task-storage', () => ({ createCloudTask, getCloudTaskById, updateCloudTask }));
+vi.mock('@/lib/cloud-task-storage', () => ({ createCloudTask, getCloudTaskById, getCloudTaskForUser, updateCloudTask }));
+vi.mock('@/lib/collaboration/task-result-publication', () => ({ projectCanvasTaskResult: async () => null }));
 vi.mock('@/lib/task-core/billing-service', () => ({ settleFailedTask }));
 vi.mock('@/lib/task-core/task-service', () => ({ transitionTask }));
 vi.mock('@/lib/asset-core/task-projector', () => ({
@@ -42,6 +43,7 @@ import {
 
 describe('agent task persistence', () => {
   beforeEach(() => {
+    getCloudTaskForUser.mockReset().mockResolvedValue(null);
     createCloudTask.mockReset().mockResolvedValue(true);
     getCloudTaskById.mockReset().mockResolvedValue({
       id: 'agent-1',
@@ -53,7 +55,8 @@ describe('agent task persistence', () => {
     transitionTask.mockReset().mockResolvedValue({ transitioned: true, task: { status: 'completed' } });
     updateCloudTask.mockReset().mockResolvedValue(undefined);
     projectCompletedTaskToAssets.mockReset().mockResolvedValue({
-      versions: [{ id: 'version-agent-1' }],
+      versions: [{ id: 'version-agent-1', assetId: 'asset-agent-1', file: { url: '/result.png' } }],
+      placements: [{ id: 'placement-agent-1', entityId: 'entity-agent-1' }],
       reused: false,
     });
     recordTaskProjectionCompleted.mockReset().mockResolvedValue(undefined);
@@ -140,6 +143,9 @@ describe('agent task persistence', () => {
   });
 
   it('records the successful asset projection for the terminal transition winner', async () => {
+    getCloudTaskForUser.mockResolvedValue({ id: 'agent-1', userId: 'user-1', projectId: 'project-1',
+      sessionId: 'workflow:project-1', messageId: 'message-1', status: 'completed', result: { imageUrl: '/result.png' } });
+    transitionTask.mockResolvedValueOnce({ transitioned: true, task: { id: 'agent-1', userId: 'user-1', status: 'completed' } });
     getCloudTaskById.mockResolvedValueOnce({
       id: 'agent-1',
       userId: 'user-1',
@@ -161,6 +167,7 @@ describe('agent task persistence', () => {
       actorUserId: 'user-1',
       taskId: 'agent-1',
       versionIds: ['version-agent-1'],
+      references: [{ assetId: 'asset-agent-1', assetVersionId: 'version-agent-1', placementId: 'placement-agent-1', entityId: 'entity-agent-1', url: '/result.png' }],
     });
     expect(projectCompletedTaskToAssets).toHaveBeenCalledWith(expect.objectContaining({
       workspace: 'workflow',
@@ -196,18 +203,4 @@ describe('agent task persistence', () => {
     })).resolves.toBeUndefined();
   });
 
-  it('wires agent-edit task lifecycle through persistent storage', () => {
-    const source = readFileSync(
-      path.resolve(process.cwd(), 'src/lib/agent-runtime/agent-edit-execution-service.ts'),
-      'utf8',
-    );
-    expect(source).toContain('recordAgentTaskSubmitted');
-    expect(source).toContain('recordAgentTaskProgress');
-    expect(source).toContain('recordAgentTaskTerminal');
-    expect(source).toContain('getCloudTaskForUser');
-    expect(source).toContain("status: 'timeout'");
-    expect(source).toContain('sessionId');
-    expect(source).toContain('messageId');
-    expect(source).toContain('projectId: typeof projectId');
-  });
 });

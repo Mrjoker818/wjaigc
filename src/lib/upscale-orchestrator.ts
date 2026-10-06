@@ -34,14 +34,14 @@ export interface UpscaleExecutionPlan {
 }
 
 /**
- * A user-selected 302 model is an explicit provider choice, not a preference.
+ * A user-selected upscaler model is an explicit provider choice, not a preference.
  * It must never silently fall back to the local fidelity path after charging.
  */
 export function resolveUpscaleProductMode(
   requestedMode: string | undefined,
-  hasExact302Selection: boolean,
+  hasExplicitUpscaleSelection: boolean,
 ): UpscaleProductMode {
-  if (hasExact302Selection) return 'ai-only';
+  if (hasExplicitUpscaleSelection) return 'ai-only';
   if (requestedMode === 'ai' || requestedMode === 'ai-only') return 'ai-only';
   if (
     requestedMode === 'cpu'

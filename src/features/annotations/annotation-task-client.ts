@@ -18,6 +18,9 @@ export interface WaitForAnnotationTaskOptions {
   timeoutMs?: number;
   pollIntervalMs?: number;
   onProgress?: (progress: number, stage: string) => void;
+  /** Shared documents must wait for an owned poll, not an early SSE completion. */
+  requireCanonicalPublication?: boolean;
+  requestPoll?: (payload: Record<string, unknown>, options?: { signal?: AbortSignal }) => Promise<Response>;
 }
 
 function asRecord(value: unknown): JsonRecord | undefined {
@@ -58,6 +61,37 @@ function completedResult(taskId: string, payload: unknown): AnnotationTaskResult
   return { taskId, imageUrl, payload };
 }
 
+export interface AnnotationCanonicalReference {
+  assetId: string;
+  assetVersionId: string;
+  placementId: string;
+  entityId: string;
+  kind: 'image';
+  url: string;
+}
+
+export function readAnnotationCanonicalReference(payload: unknown): AnnotationCanonicalReference | undefined {
+  const root = asRecord(payload);
+  const task = asRecord(root?.task);
+  const projection = asRecord(root?.assetProjection)
+    ?? asRecord(asRecord(root?.result)?.assetProjection)
+    ?? asRecord(asRecord(task?.result)?.assetProjection);
+  if (projection?.status !== 'completed' || !Array.isArray(projection.references)
+    || projection.references.length !== 1) return undefined;
+  const ref = asRecord(projection.references[0]);
+  if (ref?.kind !== 'image' || ['assetId', 'assetVersionId', 'placementId', 'entityId'].some(key => {
+    const value = ref?.[key];
+    return typeof value !== 'string' || !value || value.trim() !== value
+      || value.length > 256 || /\p{Cc}/u.test(value);
+  })) return undefined;
+  const url = ref?.url;
+  if (typeof url !== 'string' || url.length > 8192
+    || !/^\/api\/serve-upload\/[A-Za-z0-9._/-]+$/.test(url)
+    || url.slice('/api/serve-upload/'.length).split('/').some(part => !part || part === '.' || part === '..')) return undefined;
+  return { assetId: ref.assetId as string, assetVersionId: ref.assetVersionId as string,
+    placementId: ref.placementId as string, entityId: ref.entityId as string, kind: 'image', url };
+}
+
 export function waitForAnnotationTaskResult(
   taskId: string,
   options: WaitForAnnotationTaskOptions = {},
@@ -83,11 +117,17 @@ export function waitForAnnotationTaskResult(
       cleanup();
       callback();
     };
-    const handlePayload = (payload: unknown) => {
+    const handlePayload = (payload: unknown, ownedPoll = false) => {
+      if (settled || options.signal?.aborted) return true;
       const state = taskState(payload);
       const completed = state.status === 'completed'
         || state.status === 'success'
         || state.status === 'succeeded';
+      const canonicalUrl = options.requireCanonicalPublication && ownedPoll ? readAnnotationCanonicalReference(payload)?.url : undefined;
+      if (completed && options.requireCanonicalPublication && !canonicalUrl) {
+        options.onProgress?.(Math.min(95, lastProgress), '等待协作结果发布');
+        return false;
+      }
       if (completed) {
         lastProgress = 100;
         options.onProgress?.(100, '修改完成');
@@ -104,7 +144,7 @@ export function waitForAnnotationTaskResult(
       if (completed) {
         finish(() => {
           try {
-            resolve(completedResult(taskId, payload));
+            resolve(canonicalUrl ? { taskId, imageUrl: canonicalUrl, payload } : completedResult(taskId, payload));
           } catch (error) {
             reject(error);
           }
@@ -141,13 +181,14 @@ export function waitForAnnotationTaskResult(
     const poll = async () => {
       if (settled) return;
       try {
-        const response = await fetch('/api/poll-task', {
+        const response = await (options.requestPoll ? options.requestPoll({ taskId }, { signal: options.signal }) : fetch('/api/poll-task', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ taskId }),
           signal: options.signal,
-        });
+        }));
         const payload = await response.json().catch(() => ({})) as unknown;
+        if (settled || options.signal?.aborted) return;
         if (!response.ok) {
           const error = asRecord(payload);
           throw new AnnotationClientError({
@@ -156,7 +197,7 @@ export function waitForAnnotationTaskResult(
             retryable: response.status >= 500,
           });
         }
-        if (handlePayload(payload)) return;
+        if (handlePayload(payload, true)) return;
       } catch (error) {
         if (options.signal?.aborted) {
           onAbort();
@@ -167,10 +208,11 @@ export function waitForAnnotationTaskResult(
           return;
         }
       }
-      pollTimer = setTimeout(poll, pollIntervalMs);
+      if (!settled) pollTimer = setTimeout(poll, pollIntervalMs);
     };
 
     options.signal?.addEventListener('abort', onAbort, { once: true });
+    if (options.signal?.aborted) { onAbort(); return; }
     timeoutTimer = setTimeout(() => {
       finish(() => reject(new AnnotationClientError({
         code: 'ANNOTATION_TASK_TIMEOUT',

@@ -1,5 +1,7 @@
 import { migrateLegacyAnnotation } from './annotation-bundle';
+import { isNormalizedRegion } from './annotation-geometry';
 import type {
+  AnnotationRegion,
   AnnotationStatus,
   CanvasAnnotationV2,
   LegacyCanvasAnnotation,
@@ -34,6 +36,55 @@ const ANNOTATION_STATUSES = new Set<AnnotationStatus>([
   'done',
   'failed',
 ]);
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function isNormalizedPoint(value: unknown): boolean {
+  return isRecord(value)
+    && typeof value.x === 'number' && Number.isFinite(value.x)
+    && typeof value.y === 'number' && Number.isFinite(value.y)
+    && value.x >= 0 && value.x <= 1 && value.y >= 0 && value.y <= 1;
+}
+
+function isPointArray(value: unknown): boolean {
+  if (!Array.isArray(value)) return false;
+  for (const point of value) {
+    if (!isNormalizedPoint(point)) return false;
+  }
+  return true;
+}
+
+function isRestorableGeometry(value: unknown, type: string, status: unknown): boolean {
+  if (!isRecord(value) || value.kind !== type) return false;
+  switch (value.kind) {
+    case 'brush':
+      // Draft gestures may have only one point; restoration is not execution.
+      return isPointArray(value.points)
+        && typeof value.width === 'number' && Number.isFinite(value.width)
+        && value.width > 0 && value.width <= 1;
+    case 'arrow':
+      return isNormalizedPoint(value.start) && isNormalizedPoint(value.end);
+    case 'text':
+      // Legacy migration uses this exact stale sentinel until bounds are known.
+      return isNormalizedPoint(value.point)
+        || (status === 'stale' && isRecord(value.point)
+          && value.point.x === -1 && value.point.y === -1);
+    case 'region':
+    case 'semantic-object': {
+      const region = value.region;
+      if (!isRecord(region)
+        || typeof region.x !== 'number' || typeof region.y !== 'number'
+        || typeof region.w !== 'number' || typeof region.h !== 'number'
+        || !isNormalizedRegion(region as unknown as AnnotationRegion)) return false;
+      return value.kind === 'region' || value.polygon === undefined
+        || isPointArray(value.polygon);
+    }
+    default:
+      return false;
+  }
+}
 
 function cloneGeometry(
   geometry: NormalizedAnnotationGeometry,
@@ -91,8 +142,7 @@ function isCanvasAnnotationV2(value: unknown): value is CanvasAnnotationV2 {
     && typeof candidate.sourceVersionId === 'string'
     && typeof candidate.type === 'string'
     && ANNOTATION_TYPES.has(candidate.type)
-    && typeof candidate.geometry === 'object'
-    && candidate.geometry !== null
+    && isRestorableGeometry(candidate.geometry, candidate.type, candidate.status)
     && typeof candidate.status === 'string'
     && ANNOTATION_STATUSES.has(candidate.status as AnnotationStatus)
     && typeof candidate.createdAt === 'number'
@@ -125,6 +175,12 @@ export function serializeAnnotations(
 ): CanvasAnnotationV2[] {
   return annotations.map((annotation) => {
     const serialized = cloneAnnotation(annotation);
+    // JSON used to omit these absent UI values, but Yjs preserves own keys
+    // with undefined values. Keep the strict document contract unchanged.
+    // orderKey is deliberately excluded: a malformed frozen identity must fail.
+    for (const field of ['label', 'instruction', 'confidence', 'maskAssetId', 'overlayAssetId'] as const) {
+      if (serialized[field] === undefined) delete serialized[field];
+    }
     if (isTemporaryAssetReference(serialized.maskAssetId)) {
       delete serialized.maskAssetId;
     }

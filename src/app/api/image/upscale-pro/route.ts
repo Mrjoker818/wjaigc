@@ -12,10 +12,10 @@ import { getInternalRequestHeaders, requireApiAuthOrReject } from '@/lib/api-aut
 
 // 允许最长5分钟（ONNX放大+AI精修可能较慢）
 export const maxDuration = 300;
-import { consumeCredits, refundCredits } from '@/lib/credits';
 import { enhanceViaAI } from '@/lib/quality-enhance';
 import { UPSCALE_OUTPUT_DIR, UPSCALE_OUTPUT_URL_PREFIX } from '@/lib/image-tools/config';
 import { validateApiInputs } from '@/lib/api-validator';
+import { resolveOnnxReportedOutput } from '@/lib/image-tools/onnx-output-boundary';
 
 /** 支持的无损放大模型 */
 type UpscaleProModel = 'Real-ESRGAN' | 'SeedVR2-Upscaler';
@@ -32,6 +32,9 @@ interface UpscaleProRequest {
   skipAiEnhance?: boolean; // 跳过AI画质精修（默认false，ONNX/云端放大结果已足够好时跳过可避免内容变化）
   originalWidth?: number;  // 原图宽度（用于链式放大精确 resize 到目标尺寸）
   originalHeight?: number; // 原图高度（用于链式放大精确 resize 到目标尺寸）
+  projectId?: string;
+  assetParentVersionIds?: string[];
+  upscaleModel?: string;
 }
 
 /** 从管理员配置查找 upscaler 提供商的 API Key 和配置 */
@@ -643,10 +646,13 @@ async function upscaleViaOnnx(
 ): Promise<{ url: string; model: string; strategy: string } | null> {
   console.log(`[upscale-pro] Strategy 2: Local ONNX Real-ESRGAN (scale=${scale}x, face=${face})`);
 
+  let expectedOutputFile: string | null = null;
   try {
     const { execFile } = await import('child_process');
     const path = await import('path');
     const fs = await import('fs');
+    const { tmpdir } = await import('os');
+    const { randomUUID } = await import('crypto');
 
     // 检查脚本和模型文件是否存在
     const scriptPath = path.join(process.cwd(), 'scripts', 'upscale_onnx.py');
@@ -692,38 +698,51 @@ async function upscaleViaOnnx(
       inputPath = path.join('/tmp', `upscale-input-${Date.now()}.png`);
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 30000);
-      const resp = await fetch(`${baseUrl}${imageUrl}`, { signal: controller.signal });
-      clearTimeout(timeout);
-      if (!resp.ok) {
-        console.warn(`[upscale-pro] Failed to download local image: ${resp.status}`);
-        return null;
+      let downloadCompleted = false;
+      try {
+        const resp = await fetch(`${baseUrl}${imageUrl}`, { signal: controller.signal });
+        if (!resp.ok) {
+          console.warn(`[upscale-pro] Failed to download local image: ${resp.status}`);
+          return null;
+        }
+        const buf = Buffer.from(await resp.arrayBuffer());
+        downloadCompleted = true;
+        fs.writeFileSync(inputPath, buf);
+      } finally {
+        // The deadline owns both response headers and the complete body.
+        clearTimeout(timeout);
+        if (!downloadCompleted) controller.abort();
       }
-      const buf = Buffer.from(await resp.arrayBuffer());
-      fs.writeFileSync(inputPath, buf);
     } else {
       // 外部 URL — 带重试机制，避免偶发网络问题导致降级
       inputPath = path.join('/tmp', `upscale-input-${Date.now()}.png`);
       let lastError: Error | null = null;
       for (let attempt = 1; attempt <= 3; attempt++) {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 30000);
+        let downloadCompleted = false;
         try {
-          const controller = new AbortController();
-          const timeout = setTimeout(() => controller.abort(), 30000);
           const resp = await fetch(imageUrl, { signal: controller.signal });
-          clearTimeout(timeout);
           if (!resp.ok) {
+            controller.abort();
             console.warn(`[upscale-pro] Failed to download remote image (attempt ${attempt}/3): ${resp.status}`);
             lastError = new Error(`HTTP ${resp.status}`);
             if (attempt < 3) { await new Promise(r => setTimeout(r, 1000 * attempt)); continue; }
             return null;
           }
           const buf = Buffer.from(await resp.arrayBuffer());
+          downloadCompleted = true;
           fs.writeFileSync(inputPath, buf);
           lastError = null;
           break;
         } catch (err: unknown) {
+          controller.abort();
           lastError = err instanceof Error ? err : new Error(String(err));
           console.warn(`[upscale-pro] Download remote image failed (attempt ${attempt}/3): ${lastError.message}`);
           if (attempt < 3) { await new Promise(r => setTimeout(r, 1000 * attempt)); }
+        } finally {
+          clearTimeout(timeout);
+          if (!downloadCompleted) controller.abort();
         }
       }
       if (lastError) return null;
@@ -762,11 +781,15 @@ async function upscaleViaOnnx(
     console.log(`[upscale-pro] ONNX upscale: input=${maxDim}px, model=${modelName}, tile=${tileSize}, target=${scale}x (model=4x then resize)`);
 
     // 调用Python ONNX脚本
+    if ((metadata.width || 512) * (metadata.height || 512) > 512 * 512) {
+      expectedOutputFile = path.join(tmpdir(), `upscale_onnx_${randomUUID()}.png`);
+    }
     const params = JSON.stringify({
       inputFile: inputPath,
       scale: 4,  // ONNX Real-ESRGAN 模型固定4×放大，后续用sharp精确resize到目标尺寸
       tileSize,
       model: modelName,
+      ...(expectedOutputFile ? { outputFile: expectedOutputFile } : {}),
     });
 
     const result = await new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
@@ -796,16 +819,12 @@ async function upscaleViaOnnx(
       return null;
     }
 
-    // 优先使用文件路径（大图模式），否则使用base64（小图模式）
-    let resultUrl: string = output.outputFile || '';
-    if (!resultUrl && output.image) {
-      // Python脚本返回的image字段是纯base64，需转为data URL
-      resultUrl = `data:image/png;base64,${output.image}`;
-    }
-    if (!resultUrl) {
-      console.warn('[upscale-pro] ONNX upscale: no output in response');
+    const reportedOutput = resolveOnnxReportedOutput(output, expectedOutputFile);
+    if (!reportedOutput) {
+      console.warn('[upscale-pro] ONNX upscale: output identity mismatch or no output');
       return null;
     }
+    let resultUrl = reportedOutput.kind === 'file' ? reportedOutput.path : reportedOutput.url;
 
     // 精确resize到目标尺寸：ONNX模型固定4×放大，但用户可能选2×/4×/8×
     // 始终检查并精确调整到 origW*scale × origH*scale
@@ -816,14 +835,14 @@ async function upscaleViaOnnx(
     // 需要resize的情况：输入被缩小过、scale≠4、或tile对齐偏差
     // 始终精确调整到 origW*scale × origH*scale
     {
-      if (fs.existsSync(resultUrl)) {
-        const resizedBuf = await sharp.default(resultUrl)
+      if (reportedOutput.kind === 'file') {
+        const resizedBuf = await sharp.default(reportedOutput.path)
           .resize(targetW, targetH, { kernel: 'lanczos3' })
           .png()
           .toBuffer();
-        fs.writeFileSync(resultUrl, resizedBuf);
+        fs.writeFileSync(reportedOutput.path, resizedBuf);
         console.log(`[upscale-pro] ONNX output resized to ${targetW}x${targetH}`);
-      } else if (resultUrl.startsWith('data:')) {
+      } else {
         // base64 data URL — decode, resize, re-encode
         const base64Match = resultUrl.match(/^data:image\/(png|jpeg|webp);base64,(.+)$/);
         if (base64Match) {
@@ -839,15 +858,15 @@ async function upscaleViaOnnx(
     }
 
     // 如果输出是文件路径，保存到持久化目录
-    if (fs.existsSync(resultUrl)) {
-      const fileName = path.basename(resultUrl);
+    if (reportedOutput.kind === 'file') {
+      const fileName = path.basename(reportedOutput.path);
       const outputDir = UPSCALE_OUTPUT_DIR;
       if (!fs.existsSync(outputDir)) {
         fs.mkdirSync(outputDir, { recursive: true });
       }
       const destPath = path.join(outputDir, fileName);
-      fs.copyFileSync(resultUrl, destPath);
-      try { fs.unlinkSync(resultUrl); } catch {}
+      fs.copyFileSync(reportedOutput.path, destPath);
+      try { fs.unlinkSync(reportedOutput.path); } catch {}
       resultUrl = `${UPSCALE_OUTPUT_URL_PREFIX}${fileName}`;
     } else if (resultUrl.startsWith('data:')) {
       const persistedUrl = await persistResult(resultUrl);
@@ -860,56 +879,68 @@ async function upscaleViaOnnx(
     const errMsg = err instanceof Error ? err.message : String(err);
     console.warn(`[upscale-pro] ONNX Real-ESRGAN error: ${errMsg}`);
     return null;
+  } finally {
+    if (expectedOutputFile) {
+      try { (await import('fs')).unlinkSync(expectedOutputFile); } catch {}
+    }
   }
 }
 
 /** 策略3: AI重绘放大 */
 async function upscaleViaAI(
+  request: NextRequest,
+  originalBody: UpscaleProRequest,
   imageUrl: string,
   scale: number,
-): Promise<{ url: string; model: string; strategy: string } | null> {
+): Promise<{ url: string; model: string; strategy: string; taskId?: string; enhanced?: boolean } | { response: NextResponse } | null> {
   console.log(`[upscale-pro] Strategy 3: AI redraw upscale (scale=${scale}x)`);
 
   try {
-    const baseUrl = process.env.DEPLOY_RUN_PORT
-      ? `http://localhost:${process.env.DEPLOY_RUN_PORT}`
-      : 'http://localhost:5000';
-
-    const aiRes = await fetch(`${baseUrl}/api/image-edit`, {
+    const { POST: imageEditPost } = await import('@/app/api/image-edit/route');
+    const headers = new Headers(request.headers);
+    headers.delete('content-length');
+    const aiRes = await imageEditPost(new NextRequest(new URL('/api/image-edit', request.url), {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify({
         action: 'upscale',
         imageUrl,
         scale,
-        upscaleMode: 'ai', // AI重绘模式，不走CPU放大链路
+        upscaleMode: 'ai',
+        engine: 'ai',
+        projectId: originalBody.projectId,
+        assetParentVersionIds: originalBody.assetParentVersionIds,
+        upscaleModel: originalBody.upscaleModel,
+        enableQualityEnhance: !originalBody.skipAiEnhance,
+        enhanceModel: originalBody.enhanceModel,
+        enhanceProviderId: originalBody.providerId,
       }),
-    });
+    }));
 
-    if (!aiRes.ok) {
-      console.warn(`[upscale-pro] AI upscale returned ${aiRes.status}`);
-      return null;
+    if (aiRes.status === 202 || !aiRes.ok) {
+      return { response: aiRes };
     }
 
     const aiData = await aiRes.json() as Record<string, unknown>;
-    // image-edit 返回可能是 taskId（异步）或直接 url
-    if (aiData.taskId) {
-      console.log(`[upscale-pro] AI upscale submitted as async task: ${aiData.taskId}`);
-      // 异步任务：upscale-pro 是同步 API，不支持轮询，直接返回 null 让调用方处理
-      console.warn('[upscale-pro] AI upscale returned async taskId, cannot wait in sync context');
-      return null;
+    if (aiData.success === true && typeof aiData.taskId === 'string'
+      && !aiData.url && !aiData.imageUrl && !aiData.resultUrl
+      && !['completed', 'failed', 'cancelled', 'timeout'].includes(String(aiData.status || ''))) {
+      // image-edit 的幂等重放可用 HTTP 200 返回仍在处理的持久任务。
+      return { response: NextResponse.json(aiData, { status: 202 }) };
     }
-
     if (aiData.success && aiData.url) {
       console.log(`[upscale-pro] AI upscale success: ${(aiData.url as string).slice(0, 80)}`);
-      return { url: aiData.url as string, model: 'AI-redraw', strategy: 'ai-redraw' };
+      return { url: aiData.url as string, model: 'AI-redraw', strategy: 'ai-redraw',
+        taskId: typeof aiData.taskId === 'string' ? aiData.taskId : undefined,
+        enhanced: aiData.enhanced === true };
     }
 
     // 检查AI重绘返回的imageUrl (可能是http URL或data: URL)
     const aiImageUrl = (aiData.imageUrl as string) || (aiData.resultUrl as string) || '';
     if (aiImageUrl) {
-      const persistedUrl = await persistResult(aiImageUrl);
-      return { url: persistedUrl, model: 'AI-redraw', strategy: 'ai-redraw' };
+      return { url: aiImageUrl, model: 'AI-redraw', strategy: 'ai-redraw',
+        taskId: typeof aiData.taskId === 'string' ? aiData.taskId : undefined,
+        enhanced: aiData.enhanced === true };
     }
 
     console.warn(`[upscale-pro] AI upscale unexpected response:`, JSON.stringify(aiData).slice(0, 200));
@@ -989,20 +1020,30 @@ export async function POST(request: NextRequest) {
     // targetScale > 4 时执行两步放大，最终尺寸 = 原图 × targetScale
     if (targetScale && targetScale > scale) {
       console.log(`[upscale-pro] Chain upscale: target ${targetScale}×, first pass ${scale}×...`);
+      // 链式放大当前没有持久化的异步第二步编排；不能先收费提交 AI 任务再丢弃首步 taskId。
+      const chainFailure = (failed: Record<string, unknown>): NextResponse => NextResponse.json(
+        fallbackToAi ? { ...failed, code: 'UPSCALE_CHAIN_ASYNC_FALLBACK_UNAVAILABLE',
+          error: '链式放大需要异步续接，当前云端和本地策略未能完成；AI 兜底未提交任务或扣费' } : failed,
+        { status: 502 },
+      );
       // 第一步：使用当前 scale（通常 4×）
-      const firstPassResult = await performUpscaleChain(imageUrl, model, face, scale, fallbackToAi, skipAiEnhance,
-        originalWidth ? originalWidth * scale : undefined, originalHeight ? originalHeight * scale : undefined, enhanceModel, effectiveProviderId);
+      const firstPassResult = await performUpscaleChain(imageUrl, model, face, scale, false, skipAiEnhance,
+        originalWidth ? originalWidth * scale : undefined, originalHeight ? originalHeight * scale : undefined,
+        enhanceModel, effectiveProviderId, request, body);
       if (!firstPassResult.success || !firstPassResult.url) {
-        return NextResponse.json(firstPassResult, { status: firstPassResult.success ? 200 : 502 });
+        return chainFailure(firstPassResult);
       }
       // 第二步：对第一步结果再做 (targetScale/scale)× 放大
       const secondScale = targetScale / scale; // 如 8/4=2
       console.log(`[upscale-pro] Chain upscale: second pass ${secondScale}× on first result...`);
       const secondPassResult = await performUpscaleChain(
-        firstPassResult.url as string, model, face, Math.min(4, Math.max(2, Math.round(secondScale))), fallbackToAi, skipAiEnhance,
+        firstPassResult.url as string, model, face, Math.min(4, Math.max(2, Math.round(secondScale))), false, skipAiEnhance,
         originalWidth ? Math.round(originalWidth * targetScale) : undefined, originalHeight ? Math.round(originalHeight * targetScale) : undefined,
-        enhanceModel, effectiveProviderId,
+        enhanceModel, effectiveProviderId, request, body,
       );
+      if (!secondPassResult.success || !secondPassResult.url) {
+        return chainFailure(secondPassResult);
+      }
       if (secondPassResult.success && secondPassResult.url) {
         // 标记链式放大
         (secondPassResult as Record<string, unknown>).chainUpscale = true;
@@ -1056,11 +1097,14 @@ export async function POST(request: NextRequest) {
     // ★ 常规 2× / 4× 放大
     const result = await performUpscaleChain(imageUrl, model, face, scale, fallbackToAi, skipAiEnhance,
       originalWidth ? originalWidth * scale : undefined, originalHeight ? originalHeight * scale : undefined,
-      enhanceModel, effectiveProviderId,
+      enhanceModel, effectiveProviderId, request, body,
     );
+    if (result.response instanceof NextResponse) return result.response;
 
     // ★ 最终精确尺寸校验：确保输出图片尺寸 = 原图 × scale
-    if (result.success && result.url && originalWidth && originalHeight) {
+    // A delegated image-edit task already owns its final, size-normalized artifact.
+    // Resizing it here would make the HTTP response diverge from the durable task result.
+    if (result.success && result.url && !result.taskId && originalWidth && originalHeight) {
       const exactW = originalWidth * scale;
       const exactH = originalHeight * scale;
       try {
@@ -1118,6 +1162,8 @@ async function performUpscaleChain(
   targetHeight?: number,
   enhanceModel?: string,
   enhanceProviderId?: string,
+  request?: NextRequest,
+  originalBody?: UpscaleProRequest,
 ): Promise<Record<string, unknown>> {
   // === 多策略降级 ===
 
@@ -1182,32 +1228,19 @@ async function performUpscaleChain(
   }
 
   // 策略3: AI重绘兜底
-  if (fallbackToAi) {
-    const aiResult = await upscaleViaAI(imageUrl, scale);
+  if (fallbackToAi && request && originalBody) {
+    const aiResult = await upscaleViaAI(request, originalBody, imageUrl, scale);
+    if (aiResult && 'response' in aiResult) return { response: aiResult.response };
     if (aiResult?.url) {
-      // AI重绘放大后追加AI画质精修（带关键词约束，修复AI重绘产生的模糊/噪点）
-      let enhancedUrl = aiResult.url;
-      let didEnhance = false;
-      if (!skipAiEnhance) {
-        try {
-          const enhanceResult = await enhanceViaAI(aiResult.url, enhanceModel, enhanceProviderId);
-          if (enhanceResult.enhanced && enhanceResult.url) {
-            enhancedUrl = enhanceResult.url;
-            didEnhance = true;
-            console.log(`[upscale-pro] AI quality enhance applied after AI redraw upscale`);
-          }
-        } catch (enhanceErr) {
-          console.warn('[upscale-pro] AI enhance error (strategy 3):', enhanceErr instanceof Error ? enhanceErr.message : enhanceErr);
-        }
-      }
       return {
         success: true,
-        url: enhancedUrl,
+        url: aiResult.url,
         model: aiResult.model,
+        taskId: aiResult.taskId,
         strategy: aiResult.strategy,
         fallback: true,
         fallbackReason: '云端和本地无损放大均不可用，已使用AI重绘放大',
-        enhanced: didEnhance,
+        enhanced: aiResult.enhanced === true,
       };
     }
   }

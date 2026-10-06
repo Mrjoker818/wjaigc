@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getServerDataRoot } from '@/lib/server-data-root';
 import { downloadImageFromS3, getS3PresignedUrl, deriveS3Key, readBinaryFromS3Exact, resolveS3Key } from '@/lib/s3-storage';
 import { getImageSourceUrl } from '@/lib/image-source-map';
-import { isAllowedPublicMediaExtension } from '@/lib/media-validation';
+import { getSafeMediaTypeFromResponse, isAllowedPublicMediaPath } from '@/lib/media-validation';
 import { readExactRecoveryMedia } from '@/lib/asset-core/recovery-media';
 import {
   MAX_ASSET_BINARY_BYTES,
@@ -10,6 +10,7 @@ import {
   validateExportAssetBytes,
 } from '@/lib/asset-core/binary-persistence';
 import path from 'path';
+import { exportMediaDescriptor } from '@/lib/asset-core/binary-media-contract';
 
 export async function GET(
   _request: NextRequest,
@@ -25,10 +26,17 @@ export async function GET(
     }
 
     const exportArtifact = exportArtifactDescriptor(pathParts);
+    if (pathParts[0]?.toLowerCase() === 'exports' && !exportArtifact) {
+      return NextResponse.json({ error: 'File not found' }, { status: 404 });
+    }
     if (!exportArtifact && !isAllowedPublicMediaPath(pathParts)) {
       return NextResponse.json({ error: 'File not found' }, { status: 404 });
     }
     if (exportArtifact) {
+      if (exportArtifact.contentType.startsWith('video/') || ['image/gif', 'image/avif', 'image/bmp'].includes(exportArtifact.contentType)) {
+        const { serveBinaryMedia } = await import('@/lib/asset-core/binary-media-serving');
+        return serveBinaryMedia(_request, exportArtifact.filename);
+      }
       const dataRoot = path.resolve(getServerDataRoot());
       const { readServeUploadExportLocal } = await import('@/lib/serve-upload-local-storage');
       let bytes: Buffer | null;
@@ -136,32 +144,48 @@ export async function GET(
     
     if (sourceUrl) {
       try {
-        const fetchRes = await fetch(sourceUrl, { signal: AbortSignal.timeout(15000) });
-        if (fetchRes.ok) {
-          const buffer = Buffer.from(await fetchRes.arrayBuffer());
-          const ext = path.extname(filePath).toLowerCase();
-          const contentType = getContentType(ext);
-          
-          // 恢复到本地文件系统 — 保持原始路径结构
-          try {
-            cacheServeUploadMediaLocal(dataRoot, filePath, buffer);
-          } catch (writeErr) {
-            // 忽略
-          }
-          
-          // 同时上传到 S3 备份
-          try {
-            const { uploadImageToS3 } = await import('@/lib/s3-storage');
-            await uploadImageToS3(buffer, path.basename(filePath), contentType);
-          } catch (s3Err) {
-            // 忽略
-          }
-          
-          console.log(`[serve-upload] Recovered from sourceUrl: ${filePath} → ${sourceUrl}`);
-          return publicMediaResponse(buffer, contentType, ext);
+        const ext = path.extname(filePath).toLowerCase();
+        const contentType = getContentType(ext);
+        const isVideo = contentType.startsWith('video/');
+        const allowedMimeTypes = isVideo
+          ? ['video/mp4', 'video/webm', 'video/quicktime', 'video/x-m4v', 'video/x-msvideo', 'video/x-matroska']
+          : ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/bmp', 'image/avif'];
+        if (!isVideo && !contentType.startsWith('image/')) throw new Error('Unsupported source-map media type');
+        const deadline = AbortSignal.any([_request.signal, AbortSignal.timeout(15_000)]);
+        const { downloadPublicImage } = await import('@/lib/safe-image-download');
+        const { buffer, mimeType } = await downloadPublicImage(sourceUrl, {
+          maxBytes: isVideo ? 200 * 1024 * 1024 : 50 * 1024 * 1024,
+          timeoutMs: 15_000,
+          signal: deadline,
+          allowedMimeTypes,
+        });
+        const safeMedia = getSafeMediaTypeFromResponse(mimeType, buffer, isVideo);
+        if (!safeMedia || safeMedia.kind !== (isVideo ? 'video' : 'image') || safeMedia.mimeType !== contentType) {
+          throw new Error('Source-map media has invalid content');
         }
+        const { validateRecoveredSourceMedia } = await import('@/lib/asset-core/binary-media-validation');
+        await validateRecoveredSourceMedia(buffer, contentType, deadline);
+        deadline.throwIfAborted();
+
+        // 恢复到本地文件系统 — 保持原始路径结构
+        try {
+          cacheServeUploadMediaLocal(dataRoot, filePath, buffer);
+        } catch {
+          // 缓存失败不阻断本次受限下载结果
+        }
+
+        // 同时上传到 S3 备份
+        try {
+          const { uploadImageToS3 } = await import('@/lib/s3-storage');
+          await uploadImageToS3(buffer, path.basename(filePath), contentType);
+        } catch {
+          // 备份失败不阻断本次受限下载结果
+        }
+
+        console.log(`[serve-upload] Recovered from sourceUrl: ${filePath}`);
+        return publicMediaResponse(new Uint8Array(buffer), contentType, ext);
       } catch (fetchErr) {
-        console.warn(`[serve-upload] Failed to download from sourceUrl: ${sourceUrl}`, fetchErr instanceof Error ? fetchErr.message : fetchErr);
+        console.warn(`[serve-upload] Failed to download sourceUrl for: ${filePath}`, fetchErr instanceof Error ? fetchErr.message : fetchErr);
       }
     }
     
@@ -203,17 +227,12 @@ function getContentType(ext: string): string {
 function exportArtifactDescriptor(pathParts: string[]): { filename: string; contentType: string; attachment: boolean } | null {
   if (pathParts.length !== 2 || pathParts[0] !== 'exports') return null;
   const filename = pathParts[1];
-  if (!/^[a-f0-9]{16}-[A-Za-z0-9._-]+\.(?:png|jpe?g|webp|json|zip)$/u.test(filename)) return null;
-  const extension = path.extname(filename).toLowerCase();
-  const contentType = extension === '.png' ? 'image/png'
-    : extension === '.jpg' || extension === '.jpeg' ? 'image/jpeg'
-    : extension === '.webp' ? 'image/webp'
-    : extension === '.json' ? 'application/json'
-    : 'application/zip';
+  const descriptor = exportMediaDescriptor(filename);
+  if (!descriptor) return null;
   return {
     filename,
-    contentType,
-    attachment: extension === '.json' || extension === '.zip',
+    contentType: descriptor.mimeType,
+    attachment: descriptor.attachment,
   };
 }
 
@@ -226,17 +245,6 @@ function exportDocumentResponse(body: BodyInit, contentType: string, filename: s
       'X-Content-Type-Options': 'nosniff',
     },
   });
-}
-
-function isAllowedPublicMediaPath(pathParts: string[]): boolean {
-  if (pathParts.length === 0 || pathParts.some((part) => !/^[a-zA-Z0-9._-]+$/.test(part))) {
-    return false;
-  }
-
-  const privateRoots = new Set(['system', 'users']);
-  if (privateRoots.has(pathParts[0].toLowerCase())) return false;
-
-  return isAllowedPublicMediaExtension(path.extname(pathParts[pathParts.length - 1]));
 }
 
 function publicMediaResponse(body: BodyInit, contentType: string, extension: string): NextResponse {

@@ -19,6 +19,10 @@ function response(data: Record<string, unknown>, status: number): NextResponse {
 export async function GET(request: NextRequest): Promise<NextResponse> {
   const user = await getSessionUser(request);
   if (!user) return response({ success: false, code: 'AUTHENTICATION_REQUIRED' }, 401);
+  const expectedActorId = request.headers.get('x-wujie-expected-actor-id');
+  if (expectedActorId !== null && expectedActorId !== user.id) {
+    return response({ success: false, code: 'ACTOR_SCOPE_CHANGED' }, 409);
+  }
   if (request.nextUrl.searchParams.size !== 1) {
     return response({ success: false, code: 'DOCUMENT_REQUEST_INVALID' }, 400);
   }

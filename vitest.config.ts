@@ -25,6 +25,8 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
+      // Match the native server and browser bundle; mixed ESM/CJS Yjs types are unsafe.
+      yjs: path.resolve(__dirname, './node_modules/yjs/dist/yjs.cjs'),
     },
   },
 });

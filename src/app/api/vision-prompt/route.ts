@@ -5,6 +5,8 @@ import { fetchWithV1Retry } from '@/lib/api-helpers';
 import { consumeCredits, refundCredits } from '@/lib/credits';
 import { normalizeModelForApi } from '@/lib/model-capabilities';
 import { validateApiInputs } from '@/lib/api-validator';
+import { readVisionPromptLocalImage } from '@/lib/vision-prompt-local-reader';
+import { isAllowedPublicMediaPath } from '@/lib/media-validation';
 
 export const maxDuration = 60;
 
@@ -118,53 +120,17 @@ async function imageUrlToBase64(imageUrl: string): Promise<string> {
 
   // Relative path (e.g., /uploads/xxx.png, /api/serve-upload/generate/img_xxx.png) — read from local filesystem
   if (imageUrl.startsWith('/')) {
-    const fsSync = await import('fs');
-    const fsPromises = fsSync.promises;
-    const path = await import('path');
     const workspacePath = process.env.COZE_WORKSPACE_PATH || '/workspace/projects';
 
     // Strip /api/serve-upload/ prefix to get the actual file sub-path
     // e.g., /api/serve-upload/generate/img_xxx.png → generate/img_xxx.png
     const strippedPath = imageUrl.replace(/^\/api\/serve-upload\//, '').replace(/^\//, '');
 
-    // 1. Try local public directory
-    const localPath = path.join(workspacePath, 'public', strippedPath);
-    if (fsSync.existsSync(localPath)) {
-      const buffer = await fsPromises.readFile(localPath);
-      const ext = path.extname(localPath).toLowerCase();
-      const mimeMap: Record<string, string> = {
-        '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
-        '.webp': 'image/webp', '.gif': 'image/gif', '.svg': 'image/svg+xml',
-      };
-      const contentType = mimeMap[ext] || 'image/png';
-      return `data:${contentType};base64,${buffer.toString('base64')}`;
-    }
+    const { getServerDataRoot } = await import('@/lib/server-data-root');
+    const localImage = await readVisionPromptLocalImage(getServerDataRoot(), workspacePath, strippedPath);
+    if (localImage) return `data:${localImage.mimeType};base64,${localImage.bytes.toString('base64')}`;
 
-    // 2. Try persistent data directory (DEV + PROD)
-    try {
-      const { getServerDataRoot } = await import('@/lib/server-data-root');
-      const dataRoot = await getServerDataRoot();
-      // Try multiple possible locations (matching serve-upload route logic)
-      const possiblePaths = [
-        path.join(dataRoot, strippedPath),              // dataRoot/generate/img_xxx.png
-        path.join(dataRoot, 'uploads', strippedPath),   // dataRoot/uploads/generate/img_xxx.png
-        path.join(workspacePath, 'public', 'uploads', path.basename(strippedPath)), // public/uploads/img_xxx.png
-      ];
-      for (const persistentPath of possiblePaths) {
-        if (fsSync.existsSync(persistentPath)) {
-          const buffer = await fsPromises.readFile(persistentPath);
-          const ext = path.extname(persistentPath).toLowerCase();
-          const mimeMap: Record<string, string> = {
-            '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
-            '.webp': 'image/webp', '.gif': 'image/gif',
-          };
-          const contentType = mimeMap[ext] || 'image/png';
-          return `data:${contentType};base64,${buffer.toString('base64')}`;
-        }
-      }
-    } catch {}
-
-    // 3. Try S3 object storage fallback
+    // 2. Try S3 object storage fallback
     try {
       const { isS3Available, downloadImageFromS3 } = await import('@/lib/s3-storage');
       if (isS3Available()) {
@@ -185,7 +151,7 @@ async function imageUrlToBase64(imageUrl: string): Promise<string> {
       }
     } catch {}
 
-    // 4. Try source URL mapping (re-download from original external URL)
+    // 3. Try source URL mapping (re-download from original external URL)
     try {
       const filename = strippedPath;
       const { getImageSourceUrl } = await import('@/lib/image-source-map');
@@ -202,7 +168,7 @@ async function imageUrlToBase64(imageUrl: string): Promise<string> {
       }
     } catch {}
 
-    // 5. Last resort: try localhost fetch
+    // 4. Last resort: try localhost fetch
     try {
       const absoluteUrl = `http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}${imageUrl}`;
       const response = await fetch(absoluteUrl, { signal: AbortSignal.timeout(10000) });
@@ -239,18 +205,29 @@ async function imageUrlToBase64(imageUrl: string): Promise<string> {
   }
 }
 
-/**
- * Build the chat completions endpoint based on provider preset
- */
-function buildChatEndpoint(baseUrl: string, _providerPreset?: string): string {
-  const normalized = normalizeApiBaseUrl(baseUrl.replace(/\/+$/, ''));
-  return `${normalized}/chat/completions`;
-}
-
 export async function POST(request: NextRequest) {
   let deductedCredits = 0;
   let sessionUser: import('@/lib/user-types').User | null = null;
+  const refundDeduction = async (reason: string): Promise<void> => {
+    if (deductedCredits <= 0 || !sessionUser) return;
+    const userId = sessionUser.id;
+    const credits = deductedCredits;
+    // This request owns one refund attempt. Do not replay after an uncertain
+    // result or let the outer catch pay the same deduction a second time.
+    deductedCredits = 0;
+    try {
+      const result = await refundCredits(userId, credits, `图片识词失败退款: ${reason.substring(0, 100)}`);
+      if (!result.success) console.warn({ code: 'VISION_PROMPT_REFUND_FAILED', userId, credits });
+    } catch (error) {
+      console.warn({ code: 'VISION_PROMPT_REFUND_FAILED', userId, credits });
+      console.error('[vision-prompt] Refund failed:', error);
+    }
+  };
   try {
+    sessionUser = await getSessionUser(request);
+    if (!sessionUser) {
+      return NextResponse.json({ success: false, error: 'Login required' }, { status: 401 });
+    }
     const {
       imageUrl,
       model,
@@ -266,24 +243,19 @@ export async function POST(request: NextRequest) {
     }
 
 
-    sessionUser = await getSessionUser(request);
-
     if (!imageUrl) {
       return NextResponse.json({ error: '缺少图片URL' }, { status: 400 });
     }
 
+    if (imageUrl.startsWith('/')) {
+      const relativePath = imageUrl.replace(/^\/api\/serve-upload\//, '').replace(/^\//, '');
+      if (!isAllowedPublicMediaPath(relativePath.split('/'))) {
+        return NextResponse.json({ error: 'Unsafe local media path' }, { status: 400 });
+      }
+    }
+
     const resolvedModel = model?.includes('::') ? model.split('::').slice(1).join('::') : (model || '');
     const resolvedProviderId = providerId || (model?.includes('::') ? model.split('::')[0] : undefined);
-
-    // 积分检查与扣除
-    deductedCredits = 0;
-    if (sessionUser) {
-      const creditResult = await consumeCredits(sessionUser.id, 'chat', undefined, undefined, resolvedModel);
-      if (!creditResult.success) {
-        return NextResponse.json({ success: false, error: creditResult.message || '积分不足' }, { status: 402 });
-      }
-      deductedCredits = creditResult.cost;
-    }
 
     // Resolve API key and base URL — use the user's selected chat model only (no VLM fallback)
     // Build candidate list: same model across different providers that have it
@@ -377,6 +349,14 @@ export async function POST(request: NextRequest) {
     if (candidates.length === 0) {
       return NextResponse.json({ error: '请在聊天面板选择一个支持图片理解的模型（如 GPT-4o、Gemini、Claude 等）' }, { status: 400 });
     }
+
+    // Reject unavailable selection before charging. Subsequent failure paths
+    // share the same refund boundary while successful analyses keep the charge.
+    const creditResult = await consumeCredits(sessionUser.id, 'chat', undefined, undefined, resolvedModel);
+    if (!creditResult.success) {
+      return NextResponse.json({ success: false, error: creditResult.message || '积分不足' }, { status: 402 });
+    }
+    deductedCredits = creditResult.cost;
 
     console.log(`[vision-prompt] Using user's chat model: ${candidates.map(c => `${c.model}@${c.providerName}`).join(' → ')}`);
 
@@ -547,18 +527,14 @@ export async function POST(request: NextRequest) {
 
     // All candidates failed
     console.error(`[vision-prompt] All ${candidates.length} candidate(s) failed. Last error: ${lastError}`);
+    await refundDeduction(lastError || '所有视觉模型提供商均不可用');
     return NextResponse.json(
       { error: lastError || '所有视觉模型提供商均不可用，请检查管理员面板配置' },
       { status: lastStatus }
     );
   } catch (error) {
     console.error('[vision-prompt] Error:', error);
-    // 退款：图片识词失败时退还积分
-    if (deductedCredits > 0 && sessionUser) {
-      try {
-        await refundCredits(sessionUser.id, deductedCredits, `图片识词失败退款: ${(error instanceof Error ? error.message : 'Unknown').substring(0, 100)}`);
-      } catch (refundErr) { console.error('[vision-prompt] Refund failed:', refundErr); }
-    }
+    await refundDeduction(error instanceof Error ? error.message : 'Unknown');
     return NextResponse.json(
       { error: `图片分析失败: ${error instanceof Error ? error.message : '未知错误'}` },
       { status: 500 }

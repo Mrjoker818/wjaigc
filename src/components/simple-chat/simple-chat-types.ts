@@ -456,6 +456,11 @@ export function buildSimpleChatManagedAttachmentSelection(
   };
 }
 
+interface CanvasBridgeDeliveryCallbacks {
+  writeBridge?: (references: WorkspaceAssetReference[]) => void | Promise<void>;
+  onTransferred?: (reference: WorkspaceAssetReference, index: number) => void | Promise<void>;
+}
+
 export async function sendSimpleChatMediaToCanvas(input: {
   images: string[];
   imageRefs: WorkspaceAssetReference[];
@@ -468,14 +473,16 @@ export async function sendSimpleChatMediaToCanvas(input: {
     sourceTrace?: WorkspaceAssetReference['sourceTrace'];
     kind?: WorkspaceAssetReference['kind'];
   }) => Promise<WorkspaceAssetReference>;
-  writeBridge: (references: WorkspaceAssetReference[]) => void;
-}): Promise<{
+} & CanvasBridgeDeliveryCallbacks): Promise<{
   ok: boolean;
   references: WorkspaceAssetReference[];
   reason?: 'UNMANAGED_IMAGE_SLOT';
 }> {
   if (!input.targetProjectId || !canTransferSimpleChatMedia(input.images, input.imageRefs)) {
     return { ok: false, references: [], reason: 'UNMANAGED_IMAGE_SLOT' };
+  }
+  if (!input.writeBridge && !input.onTransferred) {
+    throw new Error('CANVAS_BRIDGE_DELIVERY_UNAVAILABLE');
   }
 
   const references: WorkspaceAssetReference[] = [];
@@ -498,9 +505,10 @@ export async function sendSimpleChatMediaToCanvas(input: {
     if (!hasManagedAssetIdentity(transferred)) {
       throw new Error('ASSET_TRANSFER_INVALID');
     }
+    await input.onTransferred?.(transferred, index);
     references.push(transferred);
   }
-  input.writeBridge(references);
+  await input.writeBridge?.(references);
   return { ok: true, references };
 }
 
@@ -515,8 +523,7 @@ export async function sendSimpleChatExportToCanvas(input: {
     sourceTrace?: WorkspaceAssetReference['sourceTrace'];
     kind?: WorkspaceAssetReference['kind'];
   }) => Promise<WorkspaceAssetReference>;
-  writeBridge: (references: WorkspaceAssetReference[]) => void;
-}): Promise<{
+} & CanvasBridgeDeliveryCallbacks): Promise<{
   ok: boolean;
   references: WorkspaceAssetReference[];
   reason?: 'UNMANAGED_IMAGE_SLOT';
@@ -524,6 +531,9 @@ export async function sendSimpleChatExportToCanvas(input: {
   if (!input.runProjectId || input.imageRefs.length === 0
     || input.imageRefs.some(reference => !reference.url || !reference.assetVersionId)) {
     return { ok: false, references: [], reason: 'UNMANAGED_IMAGE_SLOT' };
+  }
+  if (!input.writeBridge && !input.onTransferred) {
+    throw new Error('CANVAS_BRIDGE_DELIVERY_UNAVAILABLE');
   }
 
   const references: WorkspaceAssetReference[] = [];
@@ -543,9 +553,10 @@ export async function sendSimpleChatExportToCanvas(input: {
     if (transferred.assetVersionId !== reference.assetVersionId) {
       throw new Error('EXPORT_ASSET_VERSION_MISMATCH');
     }
+    await input.onTransferred?.(transferred, index);
     references.push(transferred);
   }
-  input.writeBridge(references);
+  await input.writeBridge?.(references);
   return { ok: true, references };
 }
 
@@ -561,6 +572,52 @@ export function canTransferSimpleChatMedia(
     ));
 }
 
+export async function attachSimpleChatCanvasDocumentReference(input: {
+  projectId: string;
+  reference: WorkspaceAssetReference;
+  index: number;
+  isCurrent: () => boolean;
+  refreshMedia: (input: { projectId: string; documentSequence: number }) => Promise<Array<{ placementId?: string; assetVersionId?: string }>>;
+}, fetcher: typeof fetch = fetch): Promise<void> {
+  const assertCurrent = (): void => {
+    if (!input.isCurrent()) throw new Error('BRIDGE_CONSUMPTION_CANCELLED');
+  };
+  assertCurrent();
+  if (!hasManagedAssetIdentity(input.reference)) throw new Error('ASSET_REFERENCE_INVALID');
+  const keyBytes = new TextEncoder().encode(JSON.stringify([
+    input.projectId, input.reference.assetVersionId, input.reference.placementId,
+  ]));
+  const hash = await crypto.subtle.digest('SHA-256', keyBytes);
+  const key = Array.from(new Uint8Array(hash), byte => byte.toString(16).padStart(2, '0')).join('');
+  assertCurrent();
+  const [image] = buildSimpleChatCanvasBridgeImages([input.reference], 0);
+  const response = await fetcher('/api/collaboration/document-assets', {
+    method: 'POST', credentials: 'include', cache: 'no-store',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      projectId: input.projectId, idempotencyKey: `chat-bridge:${key}`,
+      command: { action: 'attach', assetVersionId: input.reference.assetVersionId,
+        transform: { x: image.x + (input.index % 5) * 220, y: image.y + Math.floor(input.index / 5) * 220,
+          width: image.width, height: image.height, rotation: 0, zIndex: 1 } },
+    }),
+  });
+  assertCurrent();
+  const result: unknown = await response.json();
+  if (!response.ok || !isRecord(result) || result.success !== true
+    || typeof result.placementId !== 'string' || !result.placementId.trim()
+    || result.assetVersionId !== input.reference.assetVersionId
+    || !Number.isSafeInteger(result.documentSequence) || (result.documentSequence as number) < 0) {
+    throw new Error('DOCUMENT_BRIDGE_ATTACH_UNCONFIRMED');
+  }
+  assertCurrent();
+  const images = await input.refreshMedia({ projectId: input.projectId, documentSequence: result.documentSequence as number });
+  assertCurrent();
+  if (!images.some(candidate => candidate.placementId === result.placementId
+    && candidate.assetVersionId === input.reference.assetVersionId)) {
+    throw new Error('DOCUMENT_BRIDGE_READBACK_UNCONFIRMED');
+  }
+}
+
 export async function consumeSimpleChatCanvasBridge(input: {
   payload: unknown;
   currentProjectId: string | null;
@@ -569,7 +626,7 @@ export async function consumeSimpleChatCanvasBridge(input: {
     assetVersionId: string;
     placementId: string;
   }) => Promise<WorkspaceAssetReference>;
-  merge: (references: WorkspaceAssetReference[]) => void | Promise<void>;
+  merge: (references: WorkspaceAssetReference[]) => boolean | void | Promise<boolean | void>;
   remove: () => void;
 }): Promise<{
   status: 'waiting' | 'consumed';
@@ -616,7 +673,7 @@ export async function consumeSimpleChatCanvasBridge(input: {
   }
 
   const uniqueReferences = mergeSimpleChatCanvasBridgeReferences([], references);
-  await input.merge(uniqueReferences);
+  if (await input.merge(uniqueReferences) === false) return { status: 'waiting', references: uniqueReferences };
   input.remove();
   return { status: 'consumed', references: uniqueReferences };
 }

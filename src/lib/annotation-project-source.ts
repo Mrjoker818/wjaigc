@@ -1,5 +1,6 @@
 import { buildAnnotationSourceVersionId } from '@/features/annotations/annotation-source-version';
 import { dbGetUserData } from '@/lib/db-storage';
+import { isDatabaseConfigured } from '@/lib/db-client';
 
 type JsonRecord = Record<string, unknown>;
 
@@ -42,6 +43,9 @@ export async function findOwnedAnnotationSource(
   projectId: string,
   imageId: string,
 ): Promise<OwnedAnnotationSource | null> {
+  // There is no authoritative file-backed project reader here. Without PG,
+  // retain the unavailable result and never query a cached/unconfigured pool.
+  if (!isDatabaseConfigured()) return null;
   const projects = normalizeProjects(await dbGetUserData(userId, 'projects'));
   const project = projects.find((candidate) =>
     String(candidate.id || '') === projectId
