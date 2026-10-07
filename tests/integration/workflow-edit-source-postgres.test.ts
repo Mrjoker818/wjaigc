@@ -6,6 +6,7 @@ import { resolve } from 'node:path';
 import { DeleteObjectCommand, GetObjectCommand, HeadObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { NextRequest } from 'next/server';
 import sharp from 'sharp';
+import * as Y from 'yjs';
 
 import { afterEach, expect, it, vi } from 'vitest';
 import type { PoolClient } from 'pg';
@@ -19,6 +20,7 @@ import { createBillableTask, type CreateBillableTaskInput } from '@/lib/task-cor
 import { persistAssetBytes } from '@/lib/asset-core/binary-persistence';
 import { drainPendingAssetCleanup, recordAssetCleanupFailure } from '@/lib/asset-core/cleanup-outbox';
 import { grantDocumentEditor, revokeDocumentEditor } from '@/lib/collaboration/document-access';
+import { applyCanvasImagePatch, createCanvasDocument, readCanvasDocument } from '@/lib/collaboration/canvas-document';
 import { deleteEditTask } from '@/lib/edit-task-store';
 import { projectPersistedCompletedTask } from '@/lib/cloud-task-persistence';
 import { projectWorkflowEditTaskResult, settleAcceptedWorkflowEditTask } from '@/lib/collaboration/workflow-edit-output';
@@ -1169,16 +1171,30 @@ postgresIt('runs a real parent edit through charged child, pending poll, and man
     await query(`INSERT INTO wujie_users(id,name,password_hash,status,role,created_at,updated_at)
       VALUES ('owner','Owner','test','active','user',1,1),('editor','Editor','test','active','user',1,1)`);
     await query("INSERT INTO wujie_projects(id,owner_id,name) VALUES ('shared','owner','Shared')");
-    await query("INSERT INTO wujie_project_document_settings(project_id,owner_id,enabled) VALUES ('shared','owner',true)");
-    await query("INSERT INTO wujie_project_document_editors(project_id,owner_id,member_user_id) VALUES ('shared','owner','editor')");
-    await query("INSERT INTO wujie_project_canvas_documents(project_id,owner_id) VALUES ('shared','owner')");
+    const sourceDoc = createCanvasDocument();
+    applyCanvasImagePatch(sourceDoc, { placementId: 'canvas-source', assetVersionId: 'version-1',
+      x: 0, y: 0, width: 100, height: 100, rotation: 0, zIndex: 1 }, 'fixture');
+    const sourceSnapshot = Buffer.from(Y.encodeStateAsUpdate(sourceDoc));
+    const sourceProjection = JSON.stringify(readCanvasDocument(sourceDoc));
+    sourceDoc.destroy();
+    await query(`INSERT INTO wujie_project_canvas_documents(project_id,owner_id,snapshot_bytes,projection)
+      VALUES ('shared','owner',$1,$2::jsonb)`, [sourceSnapshot, sourceProjection]);
+    await query(`INSERT INTO wujie_user_data(user_id,data_key,data_value,updated_at)
+      VALUES ('owner','projects',$1::jsonb,1)`, [JSON.stringify([{ id: 'shared', userId: 'owner',
+      name: 'Shared', createdAt: 1, updatedAt: 1, settings: {}, canvasImages: [{ id: 'source-image',
+        url: '/api/serve-upload/canonical.png', assetId: 'source', assetVersionId: 'version-1',
+        placementId: 'canvas-source', availability: 'ready', x: 0, y: 0, width: 100, height: 100,
+        originalWidth: 100, originalHeight: 100, rotation: 0, zIndex: 1, createdAt: 1 }] }])]);
     await query("INSERT INTO wujie_assets(id,owner_id,project_id,kind) VALUES ('source','owner','shared','image')");
-    await query(`INSERT INTO wujie_asset_versions(id,asset_id,owner_id,project_id,file_url,mime_type)
-      VALUES ('version-1','source','owner','shared','/api/serve-upload/canonical.png','image/png')`);
+    await query(`INSERT INTO wujie_asset_versions(id,asset_id,owner_id,project_id,file_url,mime_type,availability)
+      VALUES ('version-1','source','owner','shared','/api/serve-upload/canonical.png','image/png','ready')`);
     await query("UPDATE wujie_assets SET current_version_id='version-1' WHERE id='source'");
     await query(`INSERT INTO wujie_workspace_placements
       (id,owner_id,project_id,asset_id,asset_version_id,workspace_kind,workspace_id,entity_type,entity_id)
       VALUES ('canvas-source','owner','shared','source','version-1','canvas','shared','canvas-image','source-image')`);
+    // Seed canonical document, owner snapshot, and media before enabling document authority.
+    await query("INSERT INTO wujie_project_document_settings(project_id,owner_id,enabled) VALUES ('shared','owner',true)");
+    await query("INSERT INTO wujie_project_document_editors(project_id,owner_id,member_user_id) VALUES ('shared','owner','editor')");
     await query("INSERT INTO wujie_credits(id,user_id,balance,total_recharged,total_used,created_at,updated_at) VALUES ('credits_editor','editor',100,100,0,1,1)");
 
     const input = createWorkflowNode('input-image', 0, 0);

@@ -70,8 +70,6 @@ postgresIt('reads an editor’s document input without copying and rejects delet
     await query(`INSERT INTO wujie_users(id,name,password_hash,status,role,created_at,updated_at)
       VALUES ('owner','Owner','test','active','user',1,1),('editor','Editor','test','active','user',1,1)`);
     await query("INSERT INTO wujie_projects(id,owner_id,name) VALUES ('shared','owner','Shared')");
-    await query("INSERT INTO wujie_project_document_settings(project_id,owner_id,enabled) VALUES ('shared','owner',true)");
-    await query("INSERT INTO wujie_project_document_editors(project_id,owner_id,member_user_id) VALUES ('shared','owner','editor')");
     const doc = createCanvasDocument();
     applyCanvasImagePatch(doc, { placementId: 'placement-source', assetVersionId: 'version-source',
       x: 0, y: 0, width: 100, height: 100, rotation: 0, zIndex: 1 }, 'fixture');
@@ -91,6 +89,9 @@ postgresIt('reads an editor’s document input without copying and rejects delet
     await query(`INSERT INTO wujie_workspace_placements
       (id,owner_id,project_id,asset_id,asset_version_id,workspace_kind,workspace_id,entity_type,entity_id)
       VALUES ('placement-source','owner','shared','asset-source','version-source','canvas','shared','canvas-image','image-source')`);
+    // Seed the owner snapshot and canonical graph before enabling the document authority fence.
+    await query("INSERT INTO wujie_project_document_settings(project_id,owner_id,enabled) VALUES ('shared','owner',true)");
+    await query("INSERT INTO wujie_project_document_editors(project_id,owner_id,member_user_id) VALUES ('shared','owner','editor')");
     const sourceBefore = (await query("SELECT * FROM wujie_workspace_placements WHERE id='placement-source'")).rows;
     const node = createWorkflowNode('input-image', 0, 0);
     node.id = 'workflow-input-a';

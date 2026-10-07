@@ -374,6 +374,7 @@ async function loadDocumentNodeWorkflow(
   actorId: string,
   signal: AbortSignal,
   isCurrent: () => boolean,
+  ownedProject?: Pick<Project, 'id' | 'userId' | 'metadata'>,
 ): Promise<Workflow | null> {
   if (!isCurrent()) throw new Error('HANDOFF_SCOPE_CHANGED');
   const response = await fetch(`/api/workflow/save?userId=${encodeURIComponent(actorId)}`, {
@@ -383,10 +384,16 @@ async function loadDocumentNodeWorkflow(
   if (!response.ok) throw new Error('工作流加载失败');
   const payload = await response.json() as { workflows?: Array<Record<string, unknown>> };
   if (!isCurrent()) throw new Error('HANDOFF_SCOPE_CHANGED');
-  return (payload.workflows ?? []).filter(value => value.projectId === projectId)
+  if (!Array.isArray(payload?.workflows)) throw new Error('工作流加载失败');
+  const standalone = (payload.workflows ?? []).filter(value => value.projectId === projectId)
     .map(value => workflowFromProjectMetadata({ workflow: value }))
     .filter((value): value is Workflow => value !== null)
     .sort((a, b) => b.updatedAt - a.updatedAt)[0] ?? null;
+  if (standalone) return standalone;
+  if (ownedProject?.id === projectId && ownedProject.userId === actorId) {
+    return workflowFromProjectMetadata(ownedProject.metadata);
+  }
+  return null;
 }
 
 async function importSimpleChatImageToDocumentWorkflow(
@@ -7270,7 +7277,10 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
       && currentUserRef.current?.id === actorId && currentProjectRef.current?.id === projectId
       && historyTransitionEpochRef.current === epoch;
     const initialWorkflow = nodeWorkflowRef.current;
-    void loadDocumentNodeWorkflow(projectId, actorId, controller.signal, isCurrent).then(workflow => {
+    const projectSnapshot = currentProjectRef.current;
+    const ownedProject = projectSnapshot?.id === projectId && projectSnapshot.userId === actorId
+      ? { id: projectId, userId: actorId, metadata: projectSnapshot.metadata } : undefined;
+    void loadDocumentNodeWorkflow(projectId, actorId, controller.signal, isCurrent, ownedProject).then(workflow => {
       if (!isCurrent() || nodeWorkflowRef.current !== initialWorkflow) return;
       nodeWorkflowRef.current = workflow;
       setNodeWorkflow(workflow);

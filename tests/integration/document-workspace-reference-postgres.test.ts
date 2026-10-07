@@ -9,6 +9,7 @@ import { resolveDocumentWorkspaceReference, resolvePersonalWorkspaceReference } 
 import { resolveSimpleChatWorkspaceHandoff } from '@/lib/simple-chat-workspace-handoff-server';
 import { enableCollaborativeProject } from '@/lib/collaboration/document-project-bridge';
 import { createAssetService } from '@/lib/asset-core/service';
+import { migrateLegacyProjectOnWrite } from '@/lib/asset-core/legacy-migration';
 import { getPool } from '@/lib/db-client';
 import { PROJECT_REVISION_DATA_KEY } from '@/lib/asset-core/canvas-project-sync';
 
@@ -26,8 +27,6 @@ postgresIt('reads canonical editor references and actor-only chat without copies
     await query(`INSERT INTO wujie_users(id,name,password_hash,status,role,created_at,updated_at)
       VALUES ('owner','Owner','test','active','user',1,1),('editor','Editor','test','active','user',1,1)`);
     await query("INSERT INTO wujie_projects(id,owner_id,name) VALUES ('shared','owner','Shared'),('personal','editor','Personal')");
-    await query("INSERT INTO wujie_project_document_settings(project_id,owner_id,enabled) VALUES ('shared','owner',true)");
-    await query("INSERT INTO wujie_project_document_editors(project_id,owner_id,member_user_id) VALUES ('shared','owner','editor')");
     const doc = createCanvasDocument();
     try {
       applyCanvasImagePatch(doc, { placementId: 'placement-source', assetVersionId: 'version-source',
@@ -48,6 +47,9 @@ postgresIt('reads canonical editor references and actor-only chat without copies
       await query(`INSERT INTO wujie_workspace_placements
         (id,owner_id,project_id,asset_id,asset_version_id,workspace_kind,workspace_id,entity_type,entity_id)
         VALUES ('placement-source','owner','shared','asset-source','version-source','canvas','shared','canvas-image','image-source')`);
+      // Seed the legacy snapshot before enabling its immutable document authority fence.
+      await query("INSERT INTO wujie_project_document_settings(project_id,owner_id,enabled) VALUES ('shared','owner',true)");
+      await query("INSERT INTO wujie_project_document_editors(project_id,owner_id,member_user_id) VALUES ('shared','owner','editor')");
       const tuple = { projectId: 'shared', assetVersionId: 'version-source', placementId: 'placement-source' };
       const before = (await query('SELECT * FROM wujie_workspace_placements ORDER BY id')).rows;
       await expect(resolveDocumentWorkspaceReference('editor', tuple)).resolves.toMatchObject({
@@ -95,10 +97,11 @@ postgresIt('serializes real enable before personal workflow bind and rejects the
     vi.stubEnv('WUJIE_YJS_ENABLED', 'true');
     await query(`INSERT INTO wujie_users(id,name,password_hash,status,role,created_at,updated_at)
       VALUES ('owner','Owner','test','active','user',1,1)`);
-    await query("INSERT INTO wujie_projects(id,owner_id,name) VALUES ('personal','owner','Personal')");
     await query("INSERT INTO wujie_user_data(user_id,data_key,data_value,updated_at) VALUES ('owner','projects',$1::jsonb,1)",
       [JSON.stringify([{ id: 'personal', userId: 'owner', name: 'Personal', schemaVersion: 3,
         createdAt: 1, updatedAt: 1, settings: {}, canvasImages: [] }])]);
+    // Establish the real graph/checkpoint through the public migration path, not a fabricated project row.
+    await migrateLegacyProjectOnWrite({ actorUserId: 'owner', projectId: 'personal' });
     const { version } = await createAssetService().createAssetVersion({
       actorUserId: 'owner', projectId: 'personal', kind: 'image',
       file: { url: '/api/serve-upload/private.png', availability: 'ready', mimeType: 'image/png' },

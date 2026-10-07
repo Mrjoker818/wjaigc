@@ -59,6 +59,52 @@ describe('actual document node handoff entry', () => {
     expect(await load('shared', 'editor', new AbortController().signal, () => true)).toEqual(own);
     expect(fetcher).toHaveBeenCalledWith('/api/workflow/save?userId=editor', expect.objectContaining({ credentials: 'include', cache: 'no-store' }));
   });
+  it('preserves a confirmed owner project workflow when the actor has no separate workflow record', async () => {
+    const workflow = createSimpleChatImportWorkflow('shared', 2);
+    workflow.name = '协作项目保留的节点工作流';
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({ workflows: [] })));
+    const load = actualTransferCallback<(project: string, actor: string, signal: AbortSignal, current: () => boolean, ownedProject: unknown) => Promise<Workflow | null>>('loadDocumentNodeWorkflow', { workflowFromProjectMetadata });
+    expect(await load('shared', 'owner', new AbortController().signal, () => true,
+      { id: 'shared', userId: 'owner', metadata: { workflow } })).toEqual(workflow);
+  });
+  it('does not recover owner metadata for an editor or a different project', async () => {
+    const workflow = createSimpleChatImportWorkflow('shared', 2);
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(() => Promise.resolve(Response.json({ workflows: [] }))));
+    const load = actualTransferCallback<(project: string, actor: string, signal: AbortSignal, current: () => boolean, ownedProject: unknown) => Promise<Workflow | null>>('loadDocumentNodeWorkflow', { workflowFromProjectMetadata });
+    expect(await load('shared', 'editor', new AbortController().signal, () => true,
+      { id: 'shared', userId: 'owner', metadata: { workflow } })).toBeNull();
+    expect(await load('shared', 'owner', new AbortController().signal, () => true,
+      { id: 'other', userId: 'owner', metadata: { workflow } })).toBeNull();
+  });
+  it('prefers the actor standalone workflow over historical owner metadata', async () => {
+    const historical = createSimpleChatImportWorkflow('shared', 2);
+    const standalone = { ...createSimpleChatImportWorkflow('shared', 9), projectId: 'shared' };
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({ workflows: [standalone] })));
+    const load = actualTransferCallback<(project: string, actor: string, signal: AbortSignal, current: () => boolean, ownedProject: unknown) => Promise<Workflow | null>>('loadDocumentNodeWorkflow', { workflowFromProjectMetadata });
+    expect(await load('shared', 'owner', new AbortController().signal, () => true,
+      { id: 'shared', userId: 'owner', metadata: { workflow: historical } })).toEqual(standalone);
+  });
+  it('does not use owner metadata after a failed authenticated read', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({ error: 'forbidden' }, { status: 403 })));
+    const load = actualTransferCallback<(project: string, actor: string, signal: AbortSignal, current: () => boolean, ownedProject: unknown) => Promise<Workflow | null>>('loadDocumentNodeWorkflow', { workflowFromProjectMetadata });
+    await expect(load('shared', 'owner', new AbortController().signal, () => true,
+      { id: 'shared', userId: 'owner', metadata: { workflow: createSimpleChatImportWorkflow('shared', 2) } })).rejects.toThrow('工作流加载失败');
+  });
+  it('does not treat a malformed successful workflow response as an empty actor list', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({})));
+    const load = actualTransferCallback<(project: string, actor: string, signal: AbortSignal, current: () => boolean, ownedProject: unknown) => Promise<Workflow | null>>('loadDocumentNodeWorkflow', { workflowFromProjectMetadata });
+    await expect(load('shared', 'owner', new AbortController().signal, () => true,
+      { id: 'shared', userId: 'owner', metadata: { workflow: createSimpleChatImportWorkflow('shared', 2) } })).rejects.toThrow('工作流加载失败');
+  });
+  it('rejects a late owner metadata recovery after the actor or project changes', async () => {
+    const deferred = contractDeferred<Response>(); let current = true;
+    vi.stubGlobal('fetch', vi.fn(() => deferred.promise));
+    const load = actualTransferCallback<(project: string, actor: string, signal: AbortSignal, current: () => boolean, ownedProject: unknown) => Promise<Workflow | null>>('loadDocumentNodeWorkflow', { workflowFromProjectMetadata });
+    const pending = load('shared', 'owner', new AbortController().signal, () => current,
+      { id: 'shared', userId: 'owner', metadata: { workflow: createSimpleChatImportWorkflow('shared', 2) } });
+    current = false; deferred.release(Response.json({ workflows: [] }));
+    await expect(pending).rejects.toThrow('HANDOFF_SCOPE_CHANGED');
+  });
   it('imports an actor personal image through the existing document receipt and directory boundary', async () => {
     const published = { ...reference, assetVersionId: 'published-version', placementId: 'published-placement' };
     const result = { projectId: 'shared', documentSequence: 8, items: [{ assetReference: published }] };
