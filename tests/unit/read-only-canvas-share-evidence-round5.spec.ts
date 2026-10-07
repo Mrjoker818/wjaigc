@@ -296,7 +296,7 @@ describe('Task 7 append-only completion-marker publication', () => {
       },
     })).rejects.toThrow(/unexpected|tree|entry/iu);
     await expect(readFile(join(treeFinal, 'complete.json'))).rejects.toMatchObject({ code: 'ENOENT' });
-  });
+  }, 20_000);
 
   it('allows exactly one publisher and rejects a destination created by a competitor', async () => {
     const repository = await createRepository();

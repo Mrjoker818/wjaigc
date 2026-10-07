@@ -11,7 +11,7 @@ const source = readFileSync(
 describe('video poll terminal durability contract', () => {
   it('commits a completed video before publishing the in-memory completion state', () => {
     const videoStart = source.indexOf("if (registryTask.type === 'video')");
-    const completionMatch = /completed = await completeCloudTask\(\s*taskId,/u.exec(
+    const completionMatch = /completed = await \(submission\?\.videoCanvasAdmission \? completeDocumentVideoTask : completeCloudTask\)\(\s*taskId,/u.exec(
       source.slice(videoStart),
     );
     const completion = completionMatch ? videoStart + completionMatch.index : -1;
@@ -77,7 +77,7 @@ describe('video poll terminal durability contract', () => {
       /terminateCloudTaskAndRefund\(\s*taskId,\s*'failed',\s*gatewayVideoError,\s*gatewayVideoArtifactLeaseOwner,?\s*\)/,
     );
     expect(videoSource).toMatch(
-      /completeCloudTask\(\s*taskId,\s*completedResult,\s*gatewayVideoArtifactLeaseOwner,?\s*\)/,
+      /\(submission\?\.videoCanvasAdmission \? completeDocumentVideoTask : completeCloudTask\)\(\s*taskId,\s*completedResult,\s*gatewayVideoArtifactLeaseOwner,?\s*\)/,
     );
     expect(videoSource).toContain('600_000');
   });

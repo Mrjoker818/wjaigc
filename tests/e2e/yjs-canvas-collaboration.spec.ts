@@ -1082,17 +1082,18 @@ test('owner and invited editor converge without copying the project into the edi
     await firstPage.goto('/?view=dashboard', { waitUntil: 'domcontentloaded' });
     await firstPage.getByRole('button', { name: `${uiProjectName} 项目操作菜单`, exact: true }).click();
     await firstPage.getByRole('menuitem', { name: '管理协作', exact: true }).click();
-    await expect(collaborationDialog).toBeVisible();
+    const revocationDialog = firstPage.getByRole('dialog', { name: `管理协作 · ${uiProjectName}`, exact: true });
+    await expect(revocationDialog).toBeVisible();
     const [revoked] = await Promise.all([
       firstPage.waitForResponse(response => response.request().method() === 'DELETE'
         && new URL(response.url()).pathname === '/api/collaboration/editors'),
-      collaborationDialog.getByRole('button', { name: `撤销 ${editorName} 的编辑权限`, exact: true }).click(),
+      revocationDialog.getByRole('button', { name: `撤销 ${editorName} 的编辑权限`, exact: true }).click(),
     ]);
     expect(revoked.request().postDataJSON()).toEqual({ projectId, memberUserId: editorUserId });
     expect(revoked.status(), await revoked.text()).toBe(200);
     expect(await revoked.json()).toEqual({ success: true });
-    await expect(collaborationDialog.getByRole('status').filter({ hasText: /^编辑权限已撤销$/ })).toBeVisible();
-    await expect(collaborationDialog.getByRole('list', { name: '项目编辑者', exact: true })
+    await expect(revocationDialog.getByRole('status').filter({ hasText: /^编辑权限已撤销$/ })).toBeVisible();
+    await expect(revocationDialog.getByRole('list', { name: '项目编辑者', exact: true })
       .getByText(editorName, { exact: true })).toHaveCount(0);
     await expect.poll(() => secondPage.evaluate(() => (window as Window & {
       __editorRevocationClose?: { code: number };

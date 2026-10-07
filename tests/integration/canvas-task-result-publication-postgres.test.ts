@@ -17,6 +17,7 @@ vi.mock('server-only', () => ({}));
 import { withIsolatedPostgres, type QueryFn } from '../helpers/postgres-test-database';
 import { ensureCoreTables } from '@/lib/db-storage';
 import { createBillableTask } from '@/lib/task-core/billing-service';
+import { prepareVideoCanvasPublication } from '@/lib/video-document-admission';
 import { transitionTask } from '@/lib/task-core/task-service';
 import { createCanvasDocument, applyCanvasImagePatch, readCanvasDocument } from '@/lib/collaboration/canvas-document';
 import { projectCanvasTaskResult, canvasTaskOutputCommandKey } from '@/lib/collaboration/task-result-publication';
@@ -375,9 +376,25 @@ it('two tiny video outputs within the actual aggregate byte budget publish toget
     await seed(query, databaseUrl, schemaName);
     const video = Buffer.from(readFileSync('tests/fixtures/yjs-task8b1-tiny-valid.mp4.base64', 'utf8'), 'base64');
     writeFileSync(join(roots.root, 'tiny-a.mp4'), video); writeFileSync(join(roots.root, 'tiny-b.mp4'), video);
-    await task('tiny-videos', { ...proposal, projectionMode: 'derived' },
-      { imageUrls: ['/api/serve-upload/tiny-a.mp4', '/api/serve-upload/tiny-b.mp4'] }, 'owner');
-    await query("UPDATE cloud_tasks SET type='video' WHERE id='tiny-videos'");
+    await query(`INSERT INTO wujie_user_data(user_id,data_key,data_value,updated_at)
+      VALUES ('owner','projects',$1::jsonb,1)`, [JSON.stringify([{
+      id: 'shared', userId: 'owner', name: 'Shared', createdAt: 1, updatedAt: 1, canvasImages: [], settings: {},
+    }])]);
+    const canvasPublication = await prepareVideoCanvasPublication({
+      kind: 'document', actorUserId: 'owner', ownerId: 'owner', projectId: 'shared', grantGeneration: '0',
+    }, {
+      assetWorkspace: 'canvas', assetWorkspaceId: 'shared', assetProjectionMode: 'derived',
+      assetParentVersionIds: ['version-shared'], assetSelectedEntityIds: ['image-shared'],
+      imageUrl: '/api/serve-upload/shared.png',
+    }, 'http://localhost:5012', 'video');
+    if (!canvasPublication) throw new Error('Document video admission required');
+    const submissionPayload = { videoCanvasAdmission: canvasPublication };
+    await createBillableTask({ userId: 'owner', idempotencyKey: 'tiny-videos', requestDigest: 'tiny-videos', creditCost: 7,
+      task: { id: 'tiny-videos', projectId: 'shared', type: 'video', providerId: 'trusted-provider', model: 'trusted-model',
+        status: 'processing', progress: 0, result: { submissionPayload }, createdAt: Date.now(), updatedAt: Date.now() },
+      canvasPublication });
+    await transitionTask({ taskId: 'tiny-videos', from: ['processing'], to: 'completed', creditStatus: 'charged',
+      result: { submissionPayload, imageUrls: ['/api/serve-upload/tiny-a.mp4', '/api/serve-upload/tiny-b.mp4'] } });
     const refs = await projectCanvasTaskResult(input('tiny-videos', 'owner'));
     expect(refs).toHaveLength(2); expect(refs!.map(ref => ref.kind)).toEqual(['video', 'video']);
     expect((await query("SELECT byte_size,mime_type FROM wujie_asset_versions WHERE task_id='tiny-videos'")).rows)

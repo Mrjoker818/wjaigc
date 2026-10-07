@@ -63,7 +63,9 @@ describe('video task durability contract', () => {
     it(`${routePath} settles provider failures and direct completions through conditional database transitions`, () => {
       const source = readSource(routePath);
 
-      expect(source).toContain('completeCloudTask(');
+      expect(source).toMatch(
+        /await \(canvasPublication \? completeDocumentVideoTask : completeCloudTask\)\(taskId, completedResult\)/u,
+      );
       expect(source).toContain('terminateCloudTaskAndRefund(');
       expect(source).toContain('registerTaskAbortController(taskId, submitController)');
       expect(source).toContain('unregisterTaskAbortController(taskId, submitController)');
@@ -88,7 +90,9 @@ describe('video task durability contract', () => {
         );
         const directBlock = source.slice(directCompletion, directCompletion + 5000);
         const persistence = directBlock.indexOf('await persistDirectGatewayVideoResult({');
-        const completion = directBlock.indexOf('await completeCloudTask(');
+        const completion = directBlock.indexOf(
+          'await (canvasPublication ? completeDocumentVideoTask : completeCloudTask)(',
+        );
 
         expect(persistence).toBeGreaterThan(-1);
         expect(completion).toBeGreaterThan(persistence);

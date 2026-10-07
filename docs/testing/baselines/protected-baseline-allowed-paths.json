@@ -715,5 +715,6 @@
   "src/lib/skill-runtime/document-assets.ts",
   "src/app/api/assets/route.ts",
   "src/lib/collaboration/document-workspace-reference.ts",
-  "src/lib/video-document-admission.ts"
+  "src/lib/video-document-admission.ts",
+  "src/app/api/video/extract-frame/route.ts"
 ]
