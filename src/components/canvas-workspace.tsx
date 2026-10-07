@@ -318,10 +318,13 @@ function getInitialWorkspaceMode(): WorkspaceMode {
 
 async function resolveSimpleChatWorkspaceHandoffFromApi(
   intent: SimpleChatWorkspaceHandoffIntent,
+  scope?: { expectedActorUserId: string; signal?: AbortSignal; isCurrent: () => boolean },
 ): Promise<SimpleChatWorkspaceHandoff> {
+  if (scope && !scope.isCurrent()) throw new Error('HANDOFF_SCOPE_CHANGED');
   const response = await fetch('/api/simple-chat/workspace-handoff', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include', cache: 'no-store', signal: scope?.signal,
+    headers: { 'Content-Type': 'application/json', ...(scope ? { 'x-wujie-expected-actor-id': scope.expectedActorUserId } : {}) },
     body: JSON.stringify(intent),
   });
   const payload = await response.json().catch(() => null) as {
@@ -329,6 +332,7 @@ async function resolveSimpleChatWorkspaceHandoffFromApi(
     code?: string;
     handoff?: SimpleChatWorkspaceHandoff;
   } | null;
+  if (scope && !scope.isCurrent()) throw new Error('HANDOFF_SCOPE_CHANGED');
   if (!response.ok || !payload?.success || !payload.handoff) {
     const code = payload?.code || `HANDOFF_RESOLVE_FAILED_${response.status}`;
     throw Object.assign(new Error(code), { code, status: response.status });
@@ -338,18 +342,75 @@ async function resolveSimpleChatWorkspaceHandoffFromApi(
 
 async function transferSimpleChatImageToWorkflow(
   request: SimpleChatWorkflowTransferRequest,
+  scope?: { expectedActorUserId: string; signal?: AbortSignal; isCurrent: () => boolean;
+    documentReference?: WorkspaceAssetReference },
 ): Promise<WorkspaceAssetReference> {
-  const response = await fetch('/api/assets/transfer', {
+  if (scope && !scope.isCurrent()) throw new Error('HANDOFF_SCOPE_CHANGED');
+  const reference = scope?.documentReference;
+  if (reference && (reference.assetVersionId !== request.sourceVersion || !reference.placementId)) {
+    throw new Error('HANDOFF_CANONICAL_REFERENCE_REQUIRED');
+  }
+  const response = await fetch(reference ? '/api/assets' : '/api/assets/transfer', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(request),
+    credentials: 'include', cache: 'no-store', signal: scope?.signal,
+    headers: { 'Content-Type': 'application/json', ...(scope ? { 'x-wujie-expected-actor-id': scope.expectedActorUserId } : {}) },
+    body: JSON.stringify(reference ? { projectId: request.targetProject,
+      assetVersionId: reference.assetVersionId, placementId: reference.placementId } : request),
   });
   const payload = await response.json().catch(() => null) as (WorkspaceAssetReference & { error?: string }) | null;
+  if (scope && !scope.isCurrent()) throw new Error('HANDOFF_SCOPE_CHANGED');
   if (!response.ok || !payload?.url) {
     const code = payload?.error || `ASSET_TRANSFER_FAILED_${response.status}`;
     throw Object.assign(new Error(code), { code, status: response.status });
   }
+  if (reference && (payload.assetVersionId !== reference.assetVersionId || payload.placementId !== reference.placementId)) {
+    throw new Error('HANDOFF_CANONICAL_REFERENCE_MISMATCH');
+  }
   return payload;
+}
+
+async function loadDocumentNodeWorkflow(
+  projectId: string,
+  actorId: string,
+  signal: AbortSignal,
+  isCurrent: () => boolean,
+): Promise<Workflow | null> {
+  if (!isCurrent()) throw new Error('HANDOFF_SCOPE_CHANGED');
+  const response = await fetch(`/api/workflow/save?userId=${encodeURIComponent(actorId)}`, {
+    credentials: 'include', cache: 'no-store', signal,
+    headers: { 'x-wujie-expected-actor-id': actorId },
+  });
+  if (!response.ok) throw new Error('工作流加载失败');
+  const payload = await response.json() as { workflows?: Array<Record<string, unknown>> };
+  if (!isCurrent()) throw new Error('HANDOFF_SCOPE_CHANGED');
+  return (payload.workflows ?? []).filter(value => value.projectId === projectId)
+    .map(value => workflowFromProjectMetadata({ workflow: value }))
+    .filter((value): value is Workflow => value !== null)
+    .sort((a, b) => b.updatedAt - a.updatedAt)[0] ?? null;
+}
+
+async function importSimpleChatImageToDocumentWorkflow(
+  request: SimpleChatWorkflowTransferRequest,
+  reference: WorkspaceAssetReference,
+  scope: { expectedActorUserId: string; signal: AbortSignal; isCurrent: () => boolean;
+    refreshMedia: (value: { projectId: string; documentSequence: number; requireDirectorySequence: boolean }) => Promise<Parameters<typeof assertDocumentMediaBatchProjection>[1]> },
+): Promise<WorkspaceAssetReference> {
+  const assertScope = (): void => { if (!scope.isCurrent()) throw new Error('HANDOFF_SCOPE_CHANGED'); };
+  assertScope();
+  if (!reference.assetVersionId || reference.assetVersionId !== request.sourceVersion) {
+    throw new Error('HANDOFF_CANONICAL_REFERENCE_REQUIRED');
+  }
+  const result = await importDocumentMediaBatch({ projectId: request.targetProject,
+    idempotencyKey: request.idempotencyKey, items: [{ sourceVersionId: reference.assetVersionId,
+      ...(reference.placementId ? { placementId: reference.placementId } : {}),
+      command: { action: 'attach', transform: { x: 200, y: 200, width: 512, height: 512, rotation: 0, zIndex: 1 } },
+    }] }, scope.expectedActorUserId, scope.signal, assertScope);
+  assertScope();
+  const images = await scope.refreshMedia({ projectId: request.targetProject,
+    documentSequence: result.documentSequence, requireDirectorySequence: true });
+  assertScope();
+  assertDocumentMediaBatchProjection(result, images);
+  return result.items[0].assetReference;
 }
 
 function normalizeQuickCreateModels(data: QuickCreateModelsResponse): QuickCreateModelCandidate[] {
@@ -5319,12 +5380,127 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
     directorIntent?: string;
     _vgenReqId?: string;
   }) => {
+    const actorId = currentUserRef.current?.id;
+    const projectId = currentProjectRef.current?.id;
+    const authority = collaborativeCanvasRef.current;
+    const epoch = historyTransitionEpochRef.current;
+    const documentMode = authority?.projectId === projectId && authority?.authority === 'document';
+    const authorityKind = authority?.authority;
+    const historyGeneration = authority?.recordMediaHistory;
+    const refreshGeneration = authority?.refreshMedia;
+    const isCurrentVideoScope = (): boolean => !!actorId && !!projectId && isMountedRef.current
+      && currentUserRef.current?.id === actorId && currentProjectRef.current?.id === projectId
+      && historyProjectIdRef.current === projectId && historyTransitionEpochRef.current === epoch
+      && collaborativeCanvasRef.current?.projectId === projectId
+      && collaborativeCanvasRef.current?.authority === authorityKind
+      && collaborativeCanvasRef.current?.recordMediaHistory === historyGeneration
+      && collaborativeCanvasRef.current?.refreshMedia === refreshGeneration && !historyLifecyclePendingRef.current
+      && !isDocumentHistoryRecoveryPending();
+    const assertVideoScope = (): void => {
+      if (!isCurrentVideoScope()) throw new Error('视频生成作用域已失效');
+    };
+    const assertVideoWritable = (): void => {
+      assertVideoScope();
+      if (documentMode ? !collaborativeCanvasRef.current?.isWritable() : authorityKind !== 'legacy') {
+        throw new Error('当前画布不可提交视频任务');
+      }
+    };
+    assertVideoWritable();
+    const setVideoImages: typeof setImages = update => {
+      if (!isCurrentVideoScope() || documentMode) return false;
+      return setImages(update);
+    };
+    const videoFetch: typeof fetch = async (...args) => {
+      assertVideoScope();
+      const response = await fetch(...args);
+      assertVideoScope();
+      const json = response.json.bind(response);
+      response.json = async () => { const value: unknown = await json(); assertVideoScope(); return value; };
+      return response;
+    };
+    const managedVideoFrames = new Map<string, CanvasImage>();
+    const bindVideoRequest = (body: Record<string, unknown>): Record<string, unknown> => {
+      assertVideoWritable();
+      if (!documentMode) return { ...body, projectId };
+      const urls = [body.imageUrl, body.lastFrameImageUrl, body.videoUrl,
+        ...(Array.isArray(body.referenceImages) ? body.referenceImages : []),
+        ...(Array.isArray(body.characterReferences) ? body.characterReferences : [])]
+        .filter((value): value is string => typeof value === 'string' && !!value);
+      const sources = [...new Set(urls)].map(url => {
+        const candidates = managedVideoFrames.has(url) ? [managedVideoFrames.get(url)!] : latestImagesRef.current;
+        const matches = candidates.filter(image =>
+          (image.url === url || image.videoUrl === url) && image.assetVersionId && image.placementId);
+        if (matches.length !== 1) throw new Error('视频来源尚未取得权威版本身份');
+        return matches[0];
+      });
+      return { ...body, projectId, assetWorkspace: 'canvas', assetWorkspaceId: projectId,
+        assetParentVersionIds: [...new Set(sources.map(source => source.assetVersionId!))],
+        assetSelectedEntityIds: [...new Set(sources.map(source => source.id))] };
+    };
+    const confirmDocumentVideo = async (taskId: string): Promise<CanvasImage> => {
+      assertVideoScope();
+      if (!documentMode || !authority || !actorId || !projectId) throw new Error('视频文档身份未就绪');
+      const response = await videoFetch('/api/video/generate', {
+        method: 'POST', headers: { 'Content-Type': 'application/json', 'x-wujie-expected-actor-id': actorId },
+        body: JSON.stringify({ action: 'publish-canvas-task', taskId, projectId }),
+      });
+      const receipt = await response.json();
+      if (!response.ok || !receipt.success || receipt.projectId !== projectId || receipt.taskId !== taskId
+        || !Number.isSafeInteger(receipt.documentSequence) || receipt.documentSequence < 0
+        || !receipt.placementId || !receipt.assetVersionId || receipt.assetReference?.kind !== 'video'
+        || receipt.assetReference.placementId !== receipt.placementId
+        || receipt.assetReference.assetVersionId !== receipt.assetVersionId) throw new Error(receipt.error || '视频发布未获权威确认');
+      const media = await authority.refreshMedia({ projectId, documentSequence: receipt.documentSequence, requireDirectorySequence: true });
+      assertVideoWritable();
+      const matches = media.filter(image => image.id === receipt.assetReference.entityId
+        && image.assetId === receipt.assetReference.assetId && image.assetVersionId === receipt.assetVersionId
+        && image.placementId === receipt.placementId && image.mediaType === 'video'
+        && image.videoUrl === receipt.assetReference.url && [image.width, image.height, image.originalWidth, image.originalHeight]
+          .every(value => typeof value === 'number' && Number.isFinite(value) && value > 0));
+      if (matches.length !== 1) throw new Error('视频权威目录读回不完整');
+      let placementId: string = receipt.placementId;
+      let removalOperationId: string | undefined;
+      let restorationOperationId: string | undefined;
+      let annotationIds: Record<string, string> | undefined;
+      const boundary = { actorId, projectId, storage: localStorage, locks: navigator.locks,
+        isCurrent: isCurrentVideoScope, refreshMedia: authority.refreshMedia };
+      authority.recordMediaHistory({
+        undo: async (): Promise<void> => {
+          assertVideoWritable();
+          removalOperationId ??= crypto.randomUUID();
+          const item = await runDocumentHistoryCommand({ ...boundary, operationId: removalOperationId,
+            command: { action: 'remove', placementId, expectedAssetVersionId: receipt.assetVersionId } });
+          assertVideoWritable();
+          if (item.state !== 'confirmed' || !item.receipt?.removeSnapshot) throw new Error('视频撤回未确认');
+          restorationOperationId = undefined; annotationIds = undefined;
+        },
+        redo: async (): Promise<void> => {
+          assertVideoWritable();
+          if (!removalOperationId) throw new Error('视频恢复缺少撤回身份');
+          restorationOperationId ??= crypto.randomUUID();
+          const input = { ...boundary, operationId: restorationOperationId, removalOperationId, annotationIds };
+          const restored = await runDocumentHistoryRestoration(input); assertVideoScope();
+          annotationIds = restored.annotationIds;
+          const nextPlacementId = restored.item.receipt!.placementId;
+          const binding = { previousPlacementId: placementId, nextPlacementId, assetVersionId: receipt.assetVersionId,
+            removal: { projectId, snapshot: restored.removalSnapshot, annotationIds: restored.annotationIds } };
+          authority.restorePlacementHistoryMetadata(binding);
+          const documentSequence = await authority.waitForPendingUpdates(); assertVideoScope();
+          await confirmDocumentHistoryRestorationMetadata({ ...input, annotationIds, documentSequence }); assertVideoWritable();
+          authority.rebindPlacementHistory(binding);
+          placementId = nextPlacementId; removalOperationId = undefined;
+        },
+      });
+      assertVideoWritable();
+      return matches[0];
+    };
     const markVideoPlaceholderFailed = (
       placeholderId: string,
       message: string | null | undefined,
       label = '视频生成失败',
     ) => {
-      setImages(prev => prev.map((image): CanvasImage => (
+      if (!isCurrentVideoScope()) return;
+      setVideoImages(prev => prev.map((image): CanvasImage => (
         image.id === placeholderId
           ? {
             ...image,
@@ -5344,7 +5520,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
       const extractLastFrame = async (videoUrl: string): Promise<string | null> => {
         // 1) 优先后端 ffmpeg（稳定、无跨域、画质好）
         try {
-          const resp = await fetch('/api/video/extract-frame', {
+          const resp = await videoFetch('/api/video/extract-frame', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ videoUrl, frame: 'last' }),
@@ -5389,7 +5565,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
       // 辅助：保存 data URL 到服务器并获取本地路径
       const saveFrameToServer = async (dataUrl: string): Promise<string | null> => {
         try {
-          const resp = await fetch('/api/save-image', {
+          const resp = await videoFetch('/api/save-image', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ imageData: dataUrl }),
@@ -5417,9 +5593,47 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
         let chainFirstFrame: string | undefined;
         if (!isFirstScene && prevVideoUrl) {
           const lastFrame = await extractLastFrame(prevVideoUrl);
+          assertVideoScope();
           if (lastFrame) {
-            const savedUrl = await saveFrameToServer(lastFrame);
-            chainFirstFrame = savedUrl || lastFrame;
+            if (documentMode && authority && actorId && projectId) {
+              const frameResponse = await videoFetch(lastFrame);
+              if (!frameResponse.ok) throw new Error('链式尾帧读取失败');
+              const mime = frameResponse.headers.get('content-type')?.split(';')[0];
+              if (!mime || !mime.startsWith('image/')) throw new Error('链式尾帧不是图像');
+              const bytes = await frameResponse.arrayBuffer(); assertVideoWritable();
+              const file = new File([bytes], `video-chain-frame-${i}.png`, { type: mime });
+              const previewUrl = URL.createObjectURL(file);
+              let dimensions: { width: number; height: number };
+              try { dimensions = await loadCanvasImageSize(previewUrl); }
+              finally { URL.revokeObjectURL(previewUrl); }
+              assertVideoWritable();
+              const display = getCanvasImageDisplaySize(dimensions.width, dimensions.height);
+              let confirmed: CanvasImage | undefined;
+              await commitDocumentCanvasFile({ file, expectedActorId: actorId, projectId,
+                isCurrentProject: isCurrentVideoScope,
+                isWritableProject: () => isCurrentVideoScope() && !!collaborativeCanvasRef.current?.isWritable(),
+                transform: { x: 0, y: 0, width: display.width, height: display.height, rotation: 0,
+                  zIndex: Math.max(0, ...latestImagesRef.current.map(image => image.zIndex ?? 0)) + 1 },
+                refreshMedia: async (documentSequence, receipt): Promise<void> => {
+                  assertVideoScope();
+                  const media = await authority.refreshMedia({ projectId, documentSequence, requireDirectorySequence: true });
+                  assertVideoScope();
+                  confirmed = media.find(image => image.id === receipt.assetReference.entityId
+                    && image.assetId === receipt.assetReference.assetId && image.placementId === receipt.placementId
+                    && image.assetVersionId === receipt.assetVersionId && image.url === receipt.assetReference.url
+                    && receipt.assetReference.kind === 'image');
+                  if (!confirmed) throw new Error('链式尾帧权威读回不完整');
+                } });
+              assertVideoWritable();
+              if (!confirmed) throw new Error('链式尾帧未受控采纳');
+              managedVideoFrames.set(confirmed.url, confirmed);
+              chainFirstFrame = confirmed.url;
+            } else {
+              const savedUrl = await saveFrameToServer(lastFrame);
+              chainFirstFrame = savedUrl || lastFrame;
+            }
+          } else if (documentMode) {
+            throw new Error('链式尾帧未生成，不能降级为无来源任务');
           }
         }
 
@@ -5466,7 +5680,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
         const canvasCenterX = (viewportWidth / 2 - viewOffsetX) / currentZoom + offsetX;
         const canvasCenterY = (viewportHeight / 2 - viewOffsetY) / currentZoom;
 
-        setImages(prev => [...prev, {
+        setVideoImages(prev => [...prev, {
           id: phId,
           url: '',
           x: canvasCenterX - phWidth / 2,
@@ -5503,10 +5717,11 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
 
         try {
           // 提交场景请求
-          const submitResp = await fetch('/api/video/generate', {
+          const submitResp = await videoFetch('/api/video/generate', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(sceneRequest),
+            headers: { 'Content-Type': 'application/json', 'idempotency-key': `canvas-video:${phId}`,
+              ...(documentMode ? { 'x-wujie-expected-actor-id': actorId! } : {}) },
+            body: JSON.stringify(bindVideoRequest(sceneRequest)),
           });
           const submitData = await submitResp.json();
           if (!submitResp.ok || submitData.error) {
@@ -5514,7 +5729,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
           }
 
           const taskId = submitData.taskId;
-          setImages(prev => prev.map(img =>
+          setVideoImages(prev => prev.map(img =>
             img.id === phId ? {
               ...img,
               processing: { ...img.processing, status: 'processing' as const, progress: 10, taskId },
@@ -5528,6 +5743,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
             let attempts = 0;
 
             const poll = async () => {
+              if (!isCurrentVideoScope()) { resolve({ videoUrl: null, error: '视频生成作用域已失效' }); return; }
               if (attempts > 500 || Date.now() - startTime > maxPollTime) {
                 resolve({ videoUrl: null, error: '超时' });
                 return;
@@ -5536,12 +5752,13 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
               if (attempts > 0) await new Promise(r => setTimeout(r, interval));
 
               try {
-                const pollResp = await fetch('/api/poll-task', {
+                const pollResp = await videoFetch('/api/poll-task', {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify({ taskId, model: params.model, providerId: params.providerId }),
                 });
                 const pollData = await pollResp.json();
+                if (!isCurrentVideoScope()) { resolve({ videoUrl: null, error: '视频生成作用域已失效' }); return; }
 
                 if (pollData.status === 'completed') {
                   const videoUrl = pollData.videoUrl || pollData.result?.videoUrl;
@@ -5550,7 +5767,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
                   resolve({ videoUrl: null, error: pollData.error || '生成失败' });
                 } else {
                   const progress = pollData.progress || 0;
-                  setImages(prev => prev.map(img =>
+                  setVideoImages(prev => prev.map(img =>
                     img.id === phId ? {
                       ...img,
                       processing: { ...img.processing, progress: Math.max(10, progress), status: 'processing' as const, label: `${sceneLabel} · ${pollData.label || '生成中'}` },
@@ -5560,18 +5777,27 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
                   poll();
                 }
               } catch {
+                if (!isCurrentVideoScope()) { resolve({ videoUrl: null, error: '视频生成作用域已失效' }); return; }
                 attempts++;
                 poll();
               }
             };
             poll();
           });
+          if (!isCurrentVideoScope()) return;
 
           if (sceneResult.videoUrl) {
+            if (documentMode) {
+              const canonical = await confirmDocumentVideo(taskId); assertVideoWritable();
+              chainResults.push({ sceneIndex: i, videoUrl: canonical.videoUrl! });
+              prevVideoUrl = canonical.videoUrl!;
+              try { UserManagerCore.getInstance().recordUsage('video'); } catch {}
+              continue;
+            }
             // 持久化视频
             let persistedUrl = sceneResult.videoUrl;
             try {
-              const persistResp = await fetch('/api/save-image', {
+              const persistResp = await videoFetch('/api/save-image', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ imageUrl: sceneResult.videoUrl, isVideo: true }),
@@ -5581,12 +5807,13 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
                 if (persistData.url) persistedUrl = persistData.url;
               }
             } catch { /* 持久化失败用原URL */ }
+            if (!isCurrentVideoScope()) return;
 
             chainResults.push({ sceneIndex: i, videoUrl: persistedUrl });
             prevVideoUrl = persistedUrl;
 
             // 更新占位符为完成状态
-            setImages(prev => prev.map(img =>
+            setVideoImages(prev => prev.map(img =>
               img.id === phId ? {
                 ...img,
                 ...buildCompletedVideoCanvasMedia({ videoUrl: persistedUrl }),
@@ -5610,6 +5837,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
             break;
           }
         } catch (err: unknown) {
+          if (!isCurrentVideoScope()) return;
           const errorMsg = err instanceof Error ? err.message : '场景生成失败';
           markVideoPlaceholderFailed(phId, errorMsg, `${sceneLabel} 视频生成失败`);
           toast.error(`${sceneLabel}生成失败`, { description: errorMsg, className: themeStyle === 'monochrome' ? 'bg-white border border-gray-200 text-gray-900' : 'bg-[#141414] border-[#2a2a2a] text-white' });
@@ -5617,8 +5845,9 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
         }
       }
 
+      if (!isCurrentVideoScope()) return;
       setActiveGenerationCount(prev => Math.max(0, prev - 1));
-      if (chainResults.length > 0) {
+      if (chainResults.length > 0 && isCurrentVideoScope()) {
         toast.success(`链式生成完成`, { description: `成功生成 ${chainResults.length}/${params.multiShotScenes.length} 个场景`, className: themeStyle === 'monochrome' ? 'bg-white border border-gray-200 text-gray-900' : 'bg-[#141414] border-[#2a2a2a] text-white' });
       }
       return; // 链式模式不走常规单视频生成逻辑
@@ -5646,7 +5875,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
     const canvasCenterX = (viewportWidth / 2 - viewOffsetX) / currentZoom;
     const canvasCenterY = (viewportHeight / 2 - viewOffsetY) / currentZoom;
 
-    setImages(prev => [...prev, {
+    setVideoImages(prev => [...prev, {
       id: phId,
       url: '',
       x: canvasCenterX - phWidth / 2,
@@ -5714,10 +5943,11 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
         _vgenReqId: phId,
       };
 
-      const res = await fetch(apiEndpoint, {
+      const res = await videoFetch(apiEndpoint, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(requestBody),
+        headers: { 'Content-Type': 'application/json', 'idempotency-key': `canvas-video:${phId}`,
+          ...(documentMode ? { 'x-wujie-expected-actor-id': actorId! } : {}) },
+        body: JSON.stringify(bindVideoRequest(requestBody)),
       });
       const data = await res.json();
       if (!res.ok || data.error) {
@@ -5728,7 +5958,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
       if (params.shotId && taskId) {
         shotTaskIdMapRef.current.set(params.shotId, taskId);
       }
-      setImages(prev => prev.map(img =>
+      setVideoImages(prev => prev.map(img =>
         img.id === phId ? {
           ...img,
           processing: { ...img.processing, status: 'processing' as const, progress: 10, taskId },
@@ -5739,11 +5969,11 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
       const videoPollStartTime = Date.now();
       const pollVideoResult = async (attempt = 0): Promise<void> => {
         // ★ 组件卸载后立即终止递归轮询
-        if (!isMountedRef.current) return;
+        if (!isCurrentVideoScope()) return;
         if (hasDirectVideoPollingTimedOut(attempt, Date.now() - videoPollStartTime)) {
           markVideoPlaceholderFailed(phId, '已超过最大等待时间', '视频生成超时');
           toast.error('视频生成超时', { description: '已超过最大等待时间', className: themeStyle === 'monochrome' ? 'bg-white border border-gray-200 text-gray-900' : 'bg-[#141414] border-[#2a2a2a] text-white' });
-          if (isMountedRef.current) setActiveGenerationCount(prev => Math.max(0, prev - 1));
+          if (isCurrentVideoScope()) setActiveGenerationCount(prev => Math.max(0, prev - 1));
           return;
         }
         // 渐进式间隔：1s → 1.5s → 2s → 3s（视频生成通常较慢，间隔不宜过短）
@@ -5782,7 +6012,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
             await Promise.race([ssePromise, pollPromise]);
           }
 
-          const pollRes = await fetch('/api/poll-task', {
+          const pollRes = await videoFetch('/api/poll-task', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ taskId, model: params.model, providerId: params.providerId }),
@@ -5790,7 +6020,17 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
           const pollData = await pollRes.json();
 
           if (pollData.status === 'completed') {
-            if (!isMountedRef.current) return; // 组件已卸载，停止轮询
+            if (!isCurrentVideoScope()) return; // 组件已卸载，停止轮询
+            if (documentMode) {
+              const canonical = await confirmDocumentVideo(taskId);
+              assertVideoWritable();
+              try { UserManagerCore.getInstance().recordUsage('video'); } catch {}
+              if (params.shotId) videoPanelRef.current?.notifyShotVideoGenerated?.({
+                shotId: params.shotId, videoUrl: canonical.videoUrl!, thumbnailUrl: canonical.url,
+              });
+              setActiveGenerationCount(prev => Math.max(0, prev - 1));
+              return;
+            }
             const rawVideoUrl = pollData.videoUrl || pollData.url;
             const rawThumbnailUrl = pollData.videoThumbnailUrl || pollData.thumbnailUrl;
             if (rawVideoUrl) {
@@ -5805,8 +6045,8 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
                 videoUrl: stableVideo || rawVideoUrl,
                 thumbnailUrl: stableThumbnail || rawThumbnailUrl || undefined,
               });
-              if (!isMountedRef.current) return; // 持久化期间组件可能卸载
-              setImages(prev => prev.map(img =>
+              if (!isCurrentVideoScope()) return; // 持久化期间组件可能卸载
+              setVideoImages(prev => prev.map(img =>
                 img.id === phId ? {
                   ...img,
                   ...completedMedia,
@@ -5838,11 +6078,11 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
               markVideoPlaceholderFailed(phId, '未获取到视频地址');
               toast.error('视频生成失败', { description: '未获取到视频地址', className: themeStyle === 'monochrome' ? 'bg-white border border-gray-200 text-gray-900' : 'bg-[#141414] border-[#2a2a2a] text-white' });
             }
-            if (isMountedRef.current) setActiveGenerationCount(prev => Math.max(0, prev - 1));
+            if (isCurrentVideoScope()) setActiveGenerationCount(prev => Math.max(0, prev - 1));
           } else if (pollData.status === 'failed') {
             markVideoPlaceholderFailed(phId, pollData.error || '未知错误');
             toast.error('视频生成失败', { description: pollData.error || '未知错误', className: themeStyle === 'monochrome' ? 'bg-white border border-gray-200 text-gray-900' : 'bg-[#141414] border-[#2a2a2a] text-white' });
-            if (isMountedRef.current) setActiveGenerationCount(prev => Math.max(0, prev - 1));
+            if (isCurrentVideoScope()) setActiveGenerationCount(prev => Math.max(0, prev - 1));
             // 通知视频面板：shot 失败（解开 waitForShotTask 的等待）
             try {
                 const shotId = params.shotId;
@@ -5852,20 +6092,20 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
             } catch {}
           } else {
             // 更新进度，继续轮询
-            if (!isMountedRef.current) return;
+            if (!isCurrentVideoScope()) return;
             const progress = pollData.progress || 0;
-            setImages(prev => prev.map(img =>
+            setVideoImages(prev => prev.map(img =>
               img.id === phId ? {
                 ...img,
                 processing: { ...img.processing, progress: Math.max(10, progress), status: 'processing' as const, label: pollData.label || '视频生成中' },
               } as CanvasImage : img
             ));
             // 递归继续轮询
-            if (isMountedRef.current) pollVideoResult(attempt + 1);
+            if (isCurrentVideoScope()) pollVideoResult(attempt + 1);
           }
         } catch {
           // 轮询错误，继续尝试
-          if (isMountedRef.current) pollVideoResult(attempt + 1);
+          if (isCurrentVideoScope()) pollVideoResult(attempt + 1);
         }
       };
 
@@ -5873,6 +6113,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
       pollVideoResult(0);
 
     } catch (err: unknown) {
+      if (!isCurrentVideoScope()) return;
       const errorMsg = err instanceof Error ? err.message : '视频生成失败';
       markVideoPlaceholderFailed(phId, errorMsg);
       toast.error('视频生成失败', {
@@ -5881,9 +6122,9 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
           ? 'bg-white border border-gray-200 text-gray-900'
           : 'bg-[#141414] border-[#2a2a2a] text-white',
       });
-      if (isMountedRef.current) setActiveGenerationCount(prev => Math.max(0, prev - 1));
+      if (isCurrentVideoScope()) setActiveGenerationCount(prev => Math.max(0, prev - 1));
     }
-  }, [setImages, themeStyle]);
+  }, [setImages, themeStyle, isDocumentHistoryRecoveryPending]);
 
   const handleRetryVideoProcessing = useCallback((image: CanvasImage) => {
     const retryPayload = image.processing?.retryPayload;
@@ -6942,22 +7183,42 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
 
   // Workflow state for node mode
   const [nodeWorkflow, setNodeWorkflow] = useState<Workflow | null>(null);
+  const [loadedDocumentWorkflowScope, setLoadedDocumentWorkflowScope] = useState('');
   const workspaceLocationSearch = useWorkspaceLocationSearch();
   useEffect(() => {
-    if (!currentProject?.id) return;
+    if (!currentProject?.id || !currentUser?.id || collaborativeCanvas.projectId !== currentProject.id
+      || collaborativeCanvas.authority === 'unknown') return;
     const handoff = parseSimpleCreateCanvasHandoff(workspaceLocationSearch);
     if (!handoff) return;
     let cancelled = false;
+    const actorId = currentUser.id;
+    const controller = new AbortController();
+    const authority = collaborativeCanvasRef.current;
+    const epoch = historyTransitionEpochRef.current;
+    const isCurrent = (): boolean => !cancelled && !controller.signal.aborted && isMountedRef.current
+      && currentUserRef.current?.id === actorId && currentProjectRef.current?.id === handoff.projectId
+      && historyTransitionEpochRef.current === epoch
+      && collaborativeCanvasRef.current?.refreshMedia === authority?.refreshMedia;
 
     void consumeSimpleCreateCanvasHandoff({
       handoff,
       currentProjectId: currentProject.id,
-      resolveReference: resolveSimpleChatCanvasReference,
-      merge: reference => {
-        if (cancelled || currentProjectRef.current?.id !== handoff.projectId) {
+      resolveReference: reference => resolveSimpleChatCanvasReference(reference, fetch, {
+        expectedActorUserId: actorId, signal: controller.signal, isCurrent,
+      }),
+      merge: async reference => {
+        if (!isCurrent()) {
           throw new Error('SIMPLE_CREATE_HANDOFF_CANCELLED');
         }
+        if (authority?.authority === 'document') {
+          const canonical = await authority.refreshMedia({ projectId: handoff.projectId,
+            documentSequence: Math.max(0, authority.appliedServerSequence) });
+          if (!isCurrent() || !canonical.some(image => image.placementId === reference.placementId
+            && image.assetVersionId === reference.assetVersionId)) throw new Error('SIMPLE_CREATE_HANDOFF_CANCELLED');
+          return;
+        }
         setImages(previous => {
+          if (!isCurrent()) return previous;
           if (previous.some(image => (
             image.placementId === reference.placementId
             || image.assetVersionId === reference.assetVersionId
@@ -6968,34 +7229,58 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
           ];
         });
       },
-      cleanUrl: () => replaceWorkspaceHistoryState(
-        window,
-        clearSimpleCreateCanvasHandoff(window.location.href),
-      ),
+      cleanUrl: () => {
+        if (!isCurrent()) throw new Error('SIMPLE_CREATE_HANDOFF_CANCELLED');
+        replaceWorkspaceHistoryState(window, clearSimpleCreateCanvasHandoff(window.location.href));
+      },
     }).then(result => {
-      if (!cancelled && result.status === 'consumed') {
+      if (isCurrent() && result.status === 'consumed') {
         toast.success('生成结果已定位到画布');
       }
     }).catch(error => {
-      if (cancelled) return;
+      if (!isCurrent()) return;
       console.error('快速生图结果导入失败:', error);
       toast.error('生成结果导入失败', {
         description: '素材交接信息已保留，刷新页面可重试。',
       });
     });
 
-    return () => { cancelled = true; };
-  }, [currentProject?.id, setImages, workspaceLocationSearch]);
+    return () => { cancelled = true; controller.abort(); };
+  }, [currentProject?.id, currentUser?.id, collaborativeCanvas.projectId, collaborativeCanvas.authority,
+    collaborativeCanvas.refreshMedia, setImages, workspaceLocationSearch]);
   const handoffBootstrapWorkflow = useMemo(() => {
     if (nodeWorkflow || !currentProject?.id) return null;
     const intent = parseSimpleChatWorkspaceHandoffIntent(workspaceLocationSearch);
     if (!intent || intent.targetProjectId !== currentProject.id) return null;
     return createSimpleChatImportWorkflow(currentProject.id, Date.now());
   }, [currentProject?.id, nodeWorkflow, workspaceLocationSearch]);
-  const nodeEditorWorkflow = nodeWorkflow ?? handoffBootstrapWorkflow;
+  const documentWorkflowScope = `${currentUser?.id ?? ''}:${currentProject?.id ?? ''}`;
+  const nodeEditorWorkflow = collaborativeCanvas.authority === 'document'
+    && loadedDocumentWorkflowScope !== documentWorkflowScope ? null : nodeWorkflow ?? handoffBootstrapWorkflow;
   const nodeWorkflowRef = useRef(nodeEditorWorkflow);
   nodeWorkflowRef.current = nodeEditorWorkflow;
   const [handoffRetryRevision, setHandoffRetryRevision] = useState(0);
+  useEffect(() => {
+    if (!currentUser?.id || !currentProject?.id || collaborativeCanvas.projectId !== currentProject.id
+      || collaborativeCanvas.authority !== 'document') return;
+    const actorId = currentUser.id, projectId = currentProject.id;
+    const controller = new AbortController();
+    const epoch = historyTransitionEpochRef.current;
+    const isCurrent = (): boolean => !controller.signal.aborted && isMountedRef.current
+      && currentUserRef.current?.id === actorId && currentProjectRef.current?.id === projectId
+      && historyTransitionEpochRef.current === epoch;
+    const initialWorkflow = nodeWorkflowRef.current;
+    void loadDocumentNodeWorkflow(projectId, actorId, controller.signal, isCurrent).then(workflow => {
+      if (!isCurrent() || nodeWorkflowRef.current !== initialWorkflow) return;
+      nodeWorkflowRef.current = workflow;
+      setNodeWorkflow(workflow);
+      setLoadedDocumentWorkflowScope(`${actorId}:${projectId}`);
+    }).catch(error => {
+      if (isCurrent()) { console.error('共享项目个人工作流加载失败:', error); toast.error('工作流加载失败，请刷新重试'); }
+    });
+    return () => controller.abort();
+  }, [currentUser?.id, currentProject?.id, collaborativeCanvas.projectId, collaborativeCanvas.authority,
+    workspaceLocationSearch]);
 
   const persistNodeWorkflow = useCallback(async (
     workflow: Workflow,
@@ -7004,9 +7289,26 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
     if (!expectedProjectId || currentProjectRef.current?.id !== expectedProjectId) {
       throw new Error('工作流保存已取消：当前项目已发生变化');
     }
+    const actorId = currentUserRef.current?.id;
+    const authority = collaborativeCanvasRef.current;
+    if (!actorId || authority?.projectId !== expectedProjectId || authority.authority === 'unknown') {
+      throw new Error('工作流保存已取消：当前身份或项目权限未确认');
+    }
+    if (authority.authority === 'document') {
+      const response = await fetch('/api/workflow/save', {
+        method: 'POST', credentials: 'include', cache: 'no-store',
+        headers: { 'Content-Type': 'application/json', 'x-wujie-expected-actor-id': actorId },
+        body: JSON.stringify({ userId: actorId, workflow: { ...workflow, projectId: expectedProjectId } }),
+      });
+      if (currentUserRef.current?.id !== actorId || currentProjectRef.current?.id !== expectedProjectId) {
+        throw new Error('工作流保存已取消：当前身份或项目已发生变化');
+      }
+      if (!response.ok) throw new Error('工作流保存失败');
+      return;
+    }
 
     await canvasPersistenceScheduler.flush('immediate');
-    if (currentProjectRef.current?.id !== expectedProjectId) {
+    if (currentUserRef.current?.id !== actorId || currentProjectRef.current?.id !== expectedProjectId) {
       throw new Error('工作流保存已取消：当前项目已发生变化');
     }
     const manager = UserManagerCore.getInstance();
@@ -7017,7 +7319,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
     if (!updatedProject) throw new Error('当前项目不存在，无法绑定工作流');
 
     await manager.flushProjectsToServerWithConflictRecovery();
-    if (currentProjectRef.current?.id !== expectedProjectId) return;
+    if (currentUserRef.current?.id !== actorId || currentProjectRef.current?.id !== expectedProjectId) return;
     currentProjectRef.current = updatedProject;
     setCurrentProject(updatedProject);
   }, [canvasPersistenceScheduler]);
@@ -7026,36 +7328,54 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
   const handoffProjectQueueRef = useRef(createSimpleChatWorkspaceHandoffProjectQueue());
   const saveNodeWorkflowForProject = useCallback(async (requestedWorkflow: Workflow): Promise<void> => {
     const expectedProjectId = currentProjectRef.current?.id;
+    const expectedActorId = currentUserRef.current?.id;
     if (!expectedProjectId) throw new Error('当前项目不存在，无法保存工作流');
     await handoffProjectQueueRef.current.enqueue(expectedProjectId, async () => {
-      if (currentProjectRef.current?.id !== expectedProjectId) {
+      if (!expectedActorId || currentUserRef.current?.id !== expectedActorId || currentProjectRef.current?.id !== expectedProjectId) {
         throw new Error('工作流保存已取消：当前项目已发生变化');
       }
       const workflow = {
         ...(nodeWorkflowRef.current ?? requestedWorkflow),
         updatedAt: requestedWorkflow.updatedAt,
       };
+      if (collaborativeCanvasRef.current?.authority !== 'legacy') {
+        await persistNodeWorkflow(workflow, expectedProjectId);
+        return;
+      }
       const response = await fetch('/api/workflow/save', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: currentUser?.id, workflow }),
+        body: JSON.stringify({ userId: expectedActorId, workflow }),
       });
       if (!response.ok) throw new Error('工作流保存失败');
       await persistNodeWorkflow(workflow, expectedProjectId);
     });
   }, [currentUser?.id, persistNodeWorkflow]);
   useEffect(() => {
-    if (!currentProject?.id) return;
+    if (!currentProject?.id || !currentUser?.id || collaborativeCanvas.projectId !== currentProject.id
+      || collaborativeCanvas.authority === 'unknown') return;
+    if (collaborativeCanvas.authority === 'document'
+      && loadedDocumentWorkflowScope !== documentWorkflowScope) return;
     const retryRevision = handoffRetryRevision;
     const intent = parseSimpleChatWorkspaceHandoffIntent(workspaceLocationSearch);
     const guard = handoffRunGuardRef.current;
     const expectedProjectId = currentProject.id;
+    const actorId = currentUser.id;
+    const authority = collaborativeCanvasRef.current;
+    const controller = new AbortController();
+    const epoch = historyTransitionEpochRef.current;
+    const isCurrent = (): boolean => !controller.signal.aborted && isMountedRef.current
+      && currentUserRef.current?.id === actorId && currentProjectRef.current?.id === expectedProjectId
+      && historyTransitionEpochRef.current === epoch
+      && collaborativeCanvasRef.current?.refreshMedia === authority?.refreshMedia;
+    const scope = { expectedActorUserId: actorId, signal: controller.signal, isCurrent };
+    let resolvedHandoff: SimpleChatWorkspaceHandoff | undefined;
 
     void consumeSimpleChatWorkspaceHandoffForProject({
       intent,
       currentProjectId: expectedProjectId,
       currentWorkflow: nodeWorkflowRef.current,
-      getCurrentProjectId: () => currentProjectRef.current?.id,
+      getCurrentProjectId: () => isCurrent() ? currentProjectRef.current?.id : undefined,
       getCurrentIdentity: () => {
         const currentIntent = parseSimpleChatWorkspaceHandoffIntent(window.location.search);
         return currentIntent ? getSimpleChatWorkspaceHandoffIdentity(currentIntent) : null;
@@ -7063,20 +7383,37 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
       getCurrentWorkflow: () => nodeWorkflowRef.current,
       guard,
       queue: handoffProjectQueueRef.current,
-      resolve: resolveSimpleChatWorkspaceHandoffFromApi,
-      transfer: transferSimpleChatImageToWorkflow,
-      persist: workflow => persistNodeWorkflow(workflow, expectedProjectId),
+      resolve: async value => {
+        resolvedHandoff = await resolveSimpleChatWorkspaceHandoffFromApi(value, scope);
+        return resolvedHandoff;
+      },
+      transfer: request => {
+        if (authority?.authority !== 'document') return transferSimpleChatImageToWorkflow(request, scope);
+        const reference = resolvedHandoff?.images.find(image => image.imageIndex === request.metadata.imageIndex
+          && image.assetRef.assetVersionId === request.sourceVersion)?.assetRef;
+        if (!reference) throw new Error('HANDOFF_CANONICAL_REFERENCE_REQUIRED');
+        if (!latestImagesRef.current.some(image => image.assetVersionId === reference.assetVersionId
+          && image.placementId === reference.placementId)) {
+          return importSimpleChatImageToDocumentWorkflow(request, reference, { ...scope, refreshMedia: authority.refreshMedia });
+        }
+        return transferSimpleChatImageToWorkflow(request, { ...scope, documentReference: reference });
+      },
+      persist: workflow => {
+        if (!isCurrent()) throw new Error('HANDOFF_SCOPE_CHANGED');
+        return persistNodeWorkflow(workflow, expectedProjectId);
+      },
       applyWorkflow: workflow => {
+        if (!isCurrent()) return;
         nodeWorkflowRef.current = workflow;
         setNodeWorkflow(workflow);
       },
-      cleanUrl: () => replaceWorkspaceHistoryState(
-        window,
-        clearSimpleChatWorkspaceHandoffParams(window.location.href),
-      ),
+      cleanUrl: () => {
+        if (!isCurrent()) throw new Error('HANDOFF_SCOPE_CHANGED');
+        replaceWorkspaceHistoryState(window, clearSimpleChatWorkspaceHandoffParams(window.location.href));
+      },
       now: Date.now,
     }).then(result => {
-      if (!result) return;
+      if (!result || !isCurrent()) return;
       if (result.warnings.includes('UNMANAGED_IMAGE_SKIPPED')) {
         toast.warning('部分图片未导入', {
           description: '未完成素材托管的图片已跳过，其余内容已保存到节点模式。',
@@ -7085,6 +7422,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
         toast.success('智能对话内容已导入节点模式');
       }
     }).catch(error => {
+      if (!isCurrent()) return;
       console.error('智能对话内容导入失败:', { error, retryRevision });
       toast.error(toSimpleChatHandoffMessage(error), {
         action: {
@@ -7093,7 +7431,10 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
         },
       });
     });
-  }, [currentProject?.id, handoffRetryRevision, persistNodeWorkflow, workspaceLocationSearch]);
+    return () => controller.abort();
+  }, [currentProject?.id, currentUser?.id, collaborativeCanvas.projectId, collaborativeCanvas.authority,
+    collaborativeCanvas.refreshMedia, loadedDocumentWorkflowScope, documentWorkflowScope,
+    handoffRetryRevision, persistNodeWorkflow, workspaceLocationSearch]);
 
   const handleCanvasImageAssetReferenceAdopted = useCallback((
     imageId: string,
@@ -7114,6 +7455,10 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
 
   // Mode switching - early return for non-canvas modes
   if (appMode === 'node') {
+    if (collaborativeCanvas.projectId !== currentProject?.id || collaborativeCanvas.authority === 'unknown'
+      || (collaborativeCanvas.authority === 'document' && loadedDocumentWorkflowScope !== documentWorkflowScope)) {
+      return <div role="status" className="flex h-screen items-center justify-center">正在加载当前项目工作流…</div>;
+    }
     const currentAnnotationModel = getCurrentImageModel();
     const preferredAnnotationModelId = currentAnnotationModel.model.includes('::')
       ? currentAnnotationModel.model
@@ -7122,6 +7467,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
         : currentAnnotationModel.model;
     return (
       <NodeEditor
+        canvasDocumentMode={collaborativeCanvas.projectId !== currentProject?.id || collaborativeCanvas.authority !== 'legacy'}
         taskModelCatalog={taskModelCatalog}
         taskModelOptions={catalogModels}
         catalogStatus={catalogStatus}

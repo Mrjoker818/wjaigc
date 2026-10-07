@@ -71,6 +71,53 @@ const authorizedMediaDependencies = {
 };
 
 describe('resolveSimpleChatWorkspaceHandoff', () => {
+  it('resolves an editor document source canonically while reading only the actor chat snapshot', async () => {
+    const readSnapshot = vi.fn().mockResolvedValue(snapshotFixture);
+    const resolveVersionProject = vi.fn().mockResolvedValue(null);
+    const findPlacement = vi.fn();
+    const resolveDocumentReference = vi.fn().mockResolvedValue({
+      url: '/canonical.png', assetId: 'asset-1', assetVersionId: 'version-1',
+      placementId: 'placement-1', entityId: 'entity-1', kind: 'image',
+    });
+    const result = await resolveSimpleChatWorkspaceHandoff(input, {
+      projectExists: async () => true, readSnapshot, resolveVersionProject, findPlacement,
+      resolveDocumentReference,
+    });
+    expect(readSnapshot).toHaveBeenCalledWith('user-1');
+    expect(resolveVersionProject).toHaveBeenCalledWith('user-1', 'version-1');
+    expect(resolveDocumentReference).toHaveBeenCalledWith('user-1', {
+      projectId: 'canvas-1', assetVersionId: 'version-1', placementId: 'placement-1',
+    });
+    expect(findPlacement).not.toHaveBeenCalled();
+    expect(result.images).toHaveLength(1);
+    expect(result.images[0].assetRef.url).toBe('/canonical.png');
+    expect(result.sourceTrace.chatProjectId).toBe('chat-1');
+  });
+
+  it('keeps a personal source separate from an authorized document target', async () => {
+    const resolveDocumentReference = vi.fn().mockResolvedValue(null);
+    const findPlacement = vi.fn().mockResolvedValue({ assetVersionId: 'version-1', status: 'active' });
+    const result = await resolveSimpleChatWorkspaceHandoff(input, {
+      projectExists: async () => true, readSnapshot: async () => snapshotFixture,
+      resolveVersionProject: vi.fn().mockResolvedValue('my-private-source'),
+      resolveDocumentReference, findPlacement,
+    });
+    expect(resolveDocumentReference).toHaveBeenCalledWith('user-1', {
+      projectId: 'my-private-source', assetVersionId: 'version-1', placementId: 'placement-1',
+    });
+    expect(findPlacement).toHaveBeenCalledWith('user-1', 'my-private-source', 'placement-1');
+    expect(result.images[0].assetRef.url).toBe('/managed.png');
+  });
+
+  it('does not downgrade a revoked document source to a successful private asset lookup', async () => {
+    const resolveDocumentReference = vi.fn().mockRejectedValue(Object.assign(new Error('revoked'), { status: 403 }));
+    const findPlacement = vi.fn().mockResolvedValue({ assetVersionId: 'version-1', status: 'active' });
+    await expect(resolveSimpleChatWorkspaceHandoff(input, {
+      projectExists: async () => true, readSnapshot: async () => snapshotFixture,
+      resolveVersionProject: async () => 'my-document-source', resolveDocumentReference, findPlacement,
+    })).rejects.toMatchObject({ status: 403 });
+    expect(findPlacement).not.toHaveBeenCalled();
+  });
   it('returns only the actor-owned message and managed index-aligned images', async () => {
     const projectExists = vi.fn().mockResolvedValue(true);
     const readSnapshot = vi.fn().mockResolvedValue(snapshotFixture);

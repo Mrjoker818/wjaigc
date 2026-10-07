@@ -7,6 +7,13 @@
  */
 
 import { logOperation, logError, OP_ACTIONS } from '@/lib/op-log';
+import { authorizeGenerationProject, GenerationProjectAccessError } from '@/lib/collaboration/generation-project-access';
+import { prepareVideoCanvasPublication } from '@/lib/video-document-admission';
+import { CanvasOrdinaryAdmissionError } from '@/lib/collaboration/canvas-ordinary-generation-admission';
+import { CanvasTaskPublicationError } from '@/lib/collaboration/task-publication';
+import { createBillableTask } from '@/lib/task-core/billing-service';
+import { IdempotencyConflictError } from '@/lib/task-core/idempotency';
+import { createHash } from 'node:crypto';
 import { after, NextRequest, NextResponse } from 'next/server';
 import { findProviderForFeature, findProviderForModel, findProviderById } from '@/lib/server-api-config';
 import {
@@ -122,6 +129,13 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: `Video duration exceeds the ${runtimeSettings.maxVideoDuration}s platform limit` }, { status: 400 });
     }
     // 1. 查找视频 API 提供商
+    sessionUser = await getSessionUser(request);
+    if (!sessionUser) return NextResponse.json({ error: '请先登录后再延长视频' }, { status: 401 });
+    const projectAccess = await authorizeGenerationProject({ actorUserId: sessionUser.id, projectId });
+    if (projectAccess.kind === 'document' && request.headers.get('x-wujie-expected-actor-id') !== sessionUser.id) {
+      return NextResponse.json({ error: 'ACTOR_CHANGED' }, { status: 403 });
+    }
+    const canvasPublication = await prepareVideoCanvasPublication(projectAccess, body, request.nextUrl.origin, 'video-extend');
     const effectiveProviderId = extractedProviderId || providerId;
     const provider = await resolveProviderForTask({
       providerId: effectiveProviderId || undefined,
@@ -136,10 +150,6 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    sessionUser = await getSessionUser(request);
-    if (!sessionUser) {
-      return NextResponse.json({ error: '请先登录后再延长视频' }, { status: 401 });
-    }
     const descriptor = await resolveTaskModelForUser(provider.id, pureModel, sessionUser);
     const videoCapabilityAdmission = validateTaskModelSelection(descriptor, {
       operation: 'video-extend',
@@ -270,9 +280,40 @@ export async function POST(request: NextRequest) {
       : 0;
 
     // 5. 注册任务
-    const taskId = `video_extend_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+    let taskId = `video_extend_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
     const modelName = modelInfo?.name || pureModel;
+    let admittedCreditCost: number | undefined;
+    if (canvasPublication) {
+      const idempotencyKey = request.headers.get('idempotency-key')?.trim();
+      if (!idempotencyKey) throw new CanvasOrdinaryAdmissionError(400, 'CANVAS_VIDEO_IDEMPOTENCY_REQUIRED');
+      const now = Date.now();
+      const admission = await createBillableTask({
+        userId: sessionUser.id, idempotencyKey,
+        requestDigest: createHash('sha256').update(JSON.stringify({ route: '/api/video/extend', body, canvasPublication })).digest('hex'),
+        creditCost: plannedCreditCost, canvasPublication,
+        task: { id: taskId, projectId: canvasPublication.access.projectId,
+          sessionId: typeof sessionId === 'string' ? sessionId : undefined,
+          messageId: typeof messageId === 'string' ? messageId : undefined,
+          type: 'video-extend', status: 'processing', providerId: provider.id, model: pureModel,
+          remoteTaskId: taskId, progress: 0, label: `视频延长 - ${modelName}`,
+          result: { submissionPayload: { prompt: safePrompt, videoUrl, extendDuration, model: pureModel,
+            providerId: provider.id, projectId: canvasPublication.access.projectId,
+            sessionId: typeof sessionId === 'string' ? sessionId : undefined,
+            messageId: typeof messageId === 'string' ? messageId : undefined,
+            generateAudio, negativePrompt, seed,
+            assetWorkspace: 'canvas', assetWorkspaceId: canvasPublication.workspaceId,
+            assetParentVersionIds: canvasPublication.intent!.parentVersionIds,
+            assetSelectedEntityIds: body.assetSelectedEntityIds,
+            videoCanvasAdmission: canvasPublication } },
+          createdAt: now, updatedAt: now },
+      });
+      taskId = admission.task.id;
+      if (admission.reused) return NextResponse.json({ taskId, status: admission.task.status, reused: true });
+      if (!admission.charged && plannedCreditCost > 0) return NextResponse.json({ error: '视频延长扣费未确认' }, { status: 402 });
+      admittedCreditCost = admission.task.creditCost || 0;
+    }
     registerTask(taskId, 'video', `视频延长 · ${modelName}`, sessionUser?.id);
+    if (!canvasPublication) {
     try {
       await recordVideoTaskSubmitted({
         taskId,
@@ -317,6 +358,9 @@ export async function POST(request: NextRequest) {
       }, { status: 402 });
     }
     updateTaskProgress(taskId, { status: 'processing', progress: 0, creditCost: charge.creditCost });
+    } else {
+      updateTaskProgress(taskId, { status: 'processing', progress: 0, creditCost: admittedCreditCost });
+    }
 
     // 6. 异步提交到第三方 API
     after(async () => {
@@ -488,6 +532,13 @@ export async function POST(request: NextRequest) {
       } : null,
     });
   } catch (err: unknown) {
+    if (err instanceof CanvasOrdinaryAdmissionError || err instanceof CanvasTaskPublicationError) {
+      return NextResponse.json({ success: false, code: err.code, error: err.message, retryable: false }, { status: err.status });
+    }
+    if (err instanceof IdempotencyConflictError) return NextResponse.json({ success: false, error: err.message }, { status: 409 });
+    if (err instanceof GenerationProjectAccessError) {
+      return NextResponse.json({ success: false, code: err.code, error: err.message, retryable: false }, { status: err.status });
+    }
     if (err instanceof ModelCapabilityError) {
       return modelCapabilityConfigurationErrorResponse(err, requestId);
     }

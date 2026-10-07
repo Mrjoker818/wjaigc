@@ -547,7 +547,7 @@ export async function createBillableCloudTask(
   const isCanvasBatch = input.canvasPublication?.access?.kind === 'document'
     && Boolean(input.canvasPublication.batchAdmission || input.canvasPublication.batchPlacement);
   const singleTaskIdentity = input.canvasPublication?.singleAdmission ? {
-    type: input.task.type as 'edit' | 'universal-generate' | 'generate' | 'image-edit', idempotencyKey: input.idempotencyKey, requestDigest: input.requestDigest,
+    type: input.task.type as 'edit' | 'universal-generate' | 'generate' | 'image-edit' | 'video' | 'video-extend', idempotencyKey: input.idempotencyKey, requestDigest: input.requestDigest,
   } : undefined;
   const batchPayload = input.task.result?.submissionPayload as Record<string, unknown> | undefined;
   const taskIdentity = isCanvasBatch ? {

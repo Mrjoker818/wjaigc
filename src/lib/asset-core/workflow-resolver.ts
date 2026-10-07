@@ -1,11 +1,10 @@
 import {
-  AssetServiceError,
-  createAssetService,
   type CreatePlacementInput,
   type ResolveAssetReferenceInput,
 } from './service';
 import type { WorkspaceAssetReference } from './types';
 import type { WorkflowNode } from '../workflow-engine';
+import { resolveDocumentWorkspaceReference, resolvePersonalWorkspaceReference } from '@/lib/collaboration/document-workspace-reference';
 
 interface AssetReferenceResolver {
   resolveAssetReference(input: ResolveAssetReferenceInput): Promise<WorkspaceAssetReference>;
@@ -26,7 +25,7 @@ export async function resolveWorkflowInputImageForActor(
   actorUserId: string,
   node: WorkflowNode,
   context?: WorkflowInputContext,
-  resolver: AssetReferenceResolver = createAssetService(),
+  resolver?: AssetReferenceResolver,
 ): Promise<Record<string, unknown>> {
   const configuredProjectId = typeof node.config.projectId === 'string' ? node.config.projectId : '';
   const projectId = context?.projectId || configuredProjectId;
@@ -34,6 +33,16 @@ export async function resolveWorkflowInputImageForActor(
   const placementId = typeof node.config.placementId === 'string' ? node.config.placementId : '';
   if (context && configuredProjectId && configuredProjectId !== context.projectId) {
     throw new Error('工作流图片输入不属于当前项目');
+  }
+  const documentReference = projectId ? await resolveDocumentWorkspaceReference(actorUserId, {
+    projectId, assetVersionId, placementId,
+  }) : null;
+  if (documentReference) {
+    // Nodes consume the document's active version; they do not create a second
+    // owner-owned placement or gain access to the owner's private asset graph.
+    return { ...node.config, projectId, imageUrl: documentReference.url,
+      assetId: documentReference.assetId, assetVersionId: documentReference.assetVersionId,
+      placementId: documentReference.placementId, _type: node.type };
   }
   if (!projectId || !assetVersionId) {
     if (context?.requireManagedAsset) throw new Error('工作流 Skill 图片输入必须使用项目资产');
@@ -44,31 +53,20 @@ export async function resolveWorkflowInputImageForActor(
     };
   }
 
-  let resourceOwnerId = actorUserId;
-  let reference: WorkspaceAssetReference;
-  try {
-    reference = await resolver.resolveAssetReference({
-      actorUserId,
-      projectId,
-      assetVersionId,
-      ...(placementId ? { placementId } : {}),
-    });
-  } catch (error) {
-    if (!(error instanceof AssetServiceError) || error.code !== 'ASSET_NOT_FOUND') throw error;
-    const { authorizeGenerationProject } = await import('@/lib/collaboration/generation-project-access');
-    const access = await authorizeGenerationProject({ actorUserId, projectId });
-    if (access.kind !== 'document' || access.ownerId === actorUserId) throw error;
-    resourceOwnerId = access.ownerId;
-    reference = await resolver.resolveAssetReference({
-      actorUserId: resourceOwnerId,
-      projectId,
-      assetVersionId,
-      ...(placementId ? { placementId } : {}),
-    });
+  if (!resolver) {
+    const reference = await resolvePersonalWorkspaceReference(actorUserId, {
+      projectId, assetVersionId, ...(placementId ? { placementId } : {}),
+    }, context ? { workspaceId: context.workspaceId, entityId: context.entityId } : undefined);
+    return { ...node.config, projectId, imageUrl: reference.url, assetId: reference.assetId,
+      assetVersionId: reference.assetVersionId, placementId: reference.placementId, _type: node.type };
   }
+
+  const reference = await resolver.resolveAssetReference({
+    actorUserId, projectId, assetVersionId, ...(placementId ? { placementId } : {}),
+  });
   const workflowPlacement = context
     ? await resolver.bindWorkflowInputPlacement({
-        actorUserId: resourceOwnerId,
+        actorUserId,
         projectId,
         assetVersionId,
         workspace: 'workflow',

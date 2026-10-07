@@ -20,7 +20,7 @@ export interface CanvasTaskPublicationInput {
   intent?: CanvasPublicationIntentProposal;
   /** Server-only opt-in; the core supplies the actual task identity separately. */
   batchAdmission?: true;
-  singleAdmission?: 'edit' | 'universal-generate' | 'generate' | 'image-edit';
+  singleAdmission?: 'edit' | 'universal-generate' | 'generate' | 'image-edit' | 'video' | 'video-extend';
   imageEditOutputs?: { version: 1; includeMask: boolean };
   /** Server-captured ordinary source identities; never accepted from a request body. */
   ordinarySourceSnapshot?: OrdinaryPublicationSourceSnapshot[];
@@ -75,7 +75,7 @@ export interface CanvasBatchTaskIdentity {
 }
 
 export interface CanvasSingleTaskIdentity {
-  type: 'edit' | 'universal-generate' | 'generate' | 'image-edit'; idempotencyKey: string; requestDigest: string;
+  type: 'edit' | 'universal-generate' | 'generate' | 'image-edit' | 'video' | 'video-extend'; idempotencyKey: string; requestDigest: string;
 }
 
 function batchRoot(identity: CanvasBatchTaskIdentity): string {
@@ -211,7 +211,7 @@ export async function prepareCanvasTaskPublicationInTransaction(
         || !/^[a-f0-9]{64}$/.test(input.singleTaskIdentity?.requestDigest ?? '')
         || !proposal?.parentVersionIds.length))) throw new CanvasPublicationIntentError();
     if (publication.singleAdmission && (publication.batchAdmission || publication.batchPlacement
-      || !['edit', 'universal-generate', 'generate', 'image-edit'].includes(publication.singleAdmission)
+      || !['edit', 'universal-generate', 'generate', 'image-edit', 'video', 'video-extend'].includes(publication.singleAdmission)
       || input.singleTaskIdentity?.type !== publication.singleAdmission || !input.singleTaskIdentity.idempotencyKey
       || !input.singleTaskIdentity.idempotencyKey.trim()
       || !input.singleTaskIdentity.requestDigest || (!isImageEdit && proposal?.placement.action !== 'append')
@@ -287,14 +287,16 @@ export async function prepareCanvasTaskPublicationInTransaction(
     if (publication.singleAdmission) {
       // The shared intent resolver also supports video. Single language edits require image parents,
       // checked under the same source locks so a front-door image check cannot become stale.
+      const isVideo = publication.singleAdmission === 'video' || publication.singleAdmission === 'video-extend';
       const images = await client.query(`SELECT v.id FROM wujie_asset_versions v
         JOIN wujie_assets a ON a.id=v.asset_id AND a.owner_id=v.owner_id AND a.project_id=v.project_id
         WHERE v.id=ANY($1::text[]) AND v.owner_id=$2 AND v.project_id=$3
-          AND a.kind='image' AND (v.mime_type LIKE 'image/%'${byteProof ? ' OR (v.mime_type IS NULL AND v.id=$4)' : ''}) FOR SHARE OF v,a`,
+          AND ${isVideo ? "((a.kind='image' AND v.mime_type LIKE 'image/%') OR (a.kind='video' AND v.mime_type LIKE 'video/%'))"
+            : `a.kind='image' AND (v.mime_type LIKE 'image/%'${byteProof ? ' OR (v.mime_type IS NULL AND v.id=$4)' : ''})`} FOR SHARE OF v,a`,
       [proposal!.parentVersionIds, ownerId, snapshot.projectId, ...(byteProof ? [byteProof.assetVersionId] : [])]);
       if (images.rows.length !== proposal!.parentVersionIds.length) throw new CanvasPublicationIntentError();
     }
-    if (publication.singleAdmission === 'generate' && publication.ordinarySourceSnapshot) {
+    if (['generate', 'video', 'video-extend'].includes(publication.singleAdmission ?? '') && publication.ordinarySourceSnapshot) {
       const current = await readOrdinaryPublicationSourceSnapshot(client, ownerId, snapshot.projectId, proposal!.parentVersionIds, true);
       if (!isDeepStrictEqual(current, publication.ordinarySourceSnapshot)) throw new CanvasPublicationIntentError();
     }

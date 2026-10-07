@@ -5,6 +5,7 @@ import {
   canvasBridgeStorageKey, consumeCanvasBridgeJournal, migrateLegacyCanvasBridge, readCanvasBridgeJournal,
   type ConsumeCanvasBridgeInput,
 } from '@/lib/simple-chat-canvas-bridge';
+import type { resolveSimpleChatCanvasReference } from '@/components/simple-chat/simple-chat-types';
 
 export interface SimpleChatBridgeReceptionProps {
   actorId: string;
@@ -12,7 +13,7 @@ export interface SimpleChatBridgeReceptionProps {
   authority: 'document' | 'legacy' | 'unknown';
   ready: boolean;
   refreshMedia: ConsumeCanvasBridgeInput['refreshMedia'];
-  resolveReference: ConsumeCanvasBridgeInput['resolveReference'];
+  resolveReference: typeof resolveSimpleChatCanvasReference;
   mergeLegacy: ConsumeCanvasBridgeInput['mergeLegacy'];
 }
 
@@ -32,14 +33,18 @@ export function SimpleChatBridgeReception(props: SimpleChatBridgeReceptionProps)
   useEffect(() => {
     if (!scope.ready || scope.authority === 'unknown') return;
     let cancelled = false;
-    const isCurrent = (): boolean => !cancelled && scopeRef.current === scope;
+    const controller = new AbortController();
+    const isCurrent = (): boolean => !cancelled && !controller.signal.aborted && scopeRef.current === scope;
     const callbacks = callbacksRef.current;
+    const resolveReference: ConsumeCanvasBridgeInput['resolveReference'] = tuple => callbacks.resolveReference(tuple, undefined, {
+      expectedActorUserId: scope.actorId, signal: controller.signal, isCurrent,
+    });
     const run = async (): Promise<void> => {
       await Promise.resolve();
       if (!isCurrent()) return;
       try {
         const input = { actorId: scope.actorId, projectId: scope.projectId, storage: localStorage,
-          locks: navigator.locks, isCurrent, resolveReference: callbacks.resolveReference };
+          locks: navigator.locks, isCurrent, resolveReference };
         const initial = readCanvasBridgeJournal(localStorage, scope);
         const hadPending = initial?.items.some(item => item.state === 'pending' || item.state === 'accepted');
         const hadLegacy = localStorage.getItem('wujie_canvas_bridge') !== null;
@@ -70,7 +75,7 @@ export function SimpleChatBridgeReception(props: SimpleChatBridgeReceptionProps)
       }
     };
     void run();
-    return () => { cancelled = true; };
+    return () => { cancelled = true; controller.abort(); };
   }, [scope, attempt]);
 
   useEffect(() => {

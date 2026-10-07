@@ -712,5 +712,8 @@
   "src/lib/collaboration/document-media-batch.ts",
   "src/lib/collaboration/document-skill-restoration.ts",
   "src/lib/collaboration/document-task-version-adapter.ts",
-  "src/lib/skill-runtime/document-assets.ts"
+  "src/lib/skill-runtime/document-assets.ts",
+  "src/app/api/assets/route.ts",
+  "src/lib/collaboration/document-workspace-reference.ts",
+  "src/lib/video-document-admission.ts"
 ]

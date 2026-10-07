@@ -6,6 +6,8 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { createAssetService } from '@/lib/asset-core/service';
 import { resolveWorkflowInputImageForActor } from '@/lib/asset-core/workflow-resolver';
 import { revokeDocumentEditor } from '@/lib/collaboration/document-access';
+import { applyCanvasImagePatch, createCanvasDocument, readCanvasDocument } from '@/lib/collaboration/canvas-document';
+import * as Y from 'yjs';
 import { createWorkflowNode } from '@/lib/workflow-engine';
 import { withIsolatedPostgres } from '../helpers/postgres-test-database';
 
@@ -57,7 +59,7 @@ postgresIt('serializes concurrent workflow input rebinds without restoring sourc
   });
 }, 60_000);
 
-postgresIt('resolves an active editor’s canonical workflow input but denies new binding after revocation', async () => {
+postgresIt('reads an editor’s document input without copying and rejects deleted versions or revoked access', async () => {
   await withIsolatedPostgres('workflow-editor-input', async ({ databaseUrl, query }) => {
     const migration = spawnSync(process.execPath, [resolve('scripts/run-migrations.mjs')], {
       encoding: 'utf8',
@@ -70,10 +72,21 @@ postgresIt('resolves an active editor’s canonical workflow input but denies ne
     await query("INSERT INTO wujie_projects(id,owner_id,name) VALUES ('shared','owner','Shared')");
     await query("INSERT INTO wujie_project_document_settings(project_id,owner_id,enabled) VALUES ('shared','owner',true)");
     await query("INSERT INTO wujie_project_document_editors(project_id,owner_id,member_user_id) VALUES ('shared','owner','editor')");
-    await query("INSERT INTO wujie_project_canvas_documents(project_id,owner_id) VALUES ('shared','owner')");
+    const doc = createCanvasDocument();
+    applyCanvasImagePatch(doc, { placementId: 'placement-source', assetVersionId: 'version-source',
+      x: 0, y: 0, width: 100, height: 100, rotation: 0, zIndex: 1 }, 'fixture');
+    const snapshot = Buffer.from(Y.encodeStateAsUpdate(doc));
+    const projection = JSON.stringify(readCanvasDocument(doc));
+    await query(`INSERT INTO wujie_project_canvas_documents(project_id,owner_id,snapshot_bytes,projection)
+      VALUES ('shared','owner',$1,$2::jsonb)`, [snapshot, projection]);
+    await query(`INSERT INTO wujie_user_data(user_id,data_key,data_value,updated_at) VALUES ('owner','projects',$1::jsonb,1)`,
+      [JSON.stringify([{ id: 'shared', userId: 'owner', name: 'Shared', createdAt: 1, updatedAt: 1,
+        settings: {}, canvasImages: [{ id: 'image-source', url: '/api/serve-upload/canonical.png',
+          x: 0, y: 0, width: 100, height: 100, originalWidth: 100, originalHeight: 100,
+          rotation: 0, zIndex: 1, createdAt: 1 }] }])]);
     await query("INSERT INTO wujie_assets(id,owner_id,project_id,kind) VALUES ('asset-source','owner','shared','image')");
-    await query(`INSERT INTO wujie_asset_versions(id,asset_id,owner_id,project_id,file_url,mime_type)
-      VALUES ('version-source','asset-source','owner','shared','/api/serve-upload/canonical.png','image/png')`);
+    await query(`INSERT INTO wujie_asset_versions(id,asset_id,owner_id,project_id,file_url,mime_type,availability)
+      VALUES ('version-source','asset-source','owner','shared','/api/serve-upload/canonical.png','image/png','ready')`);
     await query("UPDATE wujie_assets SET current_version_id='version-source' WHERE id='asset-source'");
     await query(`INSERT INTO wujie_workspace_placements
       (id,owner_id,project_id,asset_id,asset_version_id,workspace_kind,workspace_id,entity_type,entity_id)
@@ -95,19 +108,22 @@ postgresIt('resolves an active editor’s canonical workflow input but denies ne
       assetId: 'asset-source', assetVersionId: 'version-source',
     });
     expect((await query("SELECT * FROM wujie_workspace_placements WHERE id='placement-source'")).rows).toEqual(sourceBefore);
-    const bound = (await query(`SELECT owner_id,project_id,asset_version_id,workspace_kind,workspace_id,entity_type,entity_id,status
-      FROM wujie_workspace_placements WHERE id=$1`, [output.placementId])).rows;
-    expect(bound).toEqual([{
-      owner_id: 'owner', project_id: 'shared', asset_version_id: 'version-source',
-      workspace_kind: 'workflow', workspace_id: 'workflow:shared', entity_type: 'workflow-input',
-      entity_id: node.id, status: 'active',
-    }]);
+    expect(output.placementId).toBe('placement-source');
+    expect((await query("SELECT id FROM wujie_workspace_placements WHERE workspace_kind='workflow'")).rows).toEqual([]);
+    await expect(resolveWorkflowInputImageForActor('editor', { ...node,
+      config: { ...node.config, assetVersionId: 'old-version' } })).rejects.toMatchObject({ code: 'ASSET_NOT_FOUND' });
+    applyCanvasImagePatch(doc, { placementId: 'placement-source', deleted: true }, 'fixture-delete');
+    await query(`UPDATE wujie_project_canvas_documents SET snapshot_bytes=$1,projection=$2::jsonb WHERE project_id='shared'`,
+      [Buffer.from(Y.encodeStateAsUpdate(doc)), JSON.stringify(readCanvasDocument(doc))]);
+    await expect(resolveWorkflowInputImageForActor('editor', node)).rejects.toMatchObject({ code: 'ASSET_NOT_FOUND' });
+    expect((await query("SELECT * FROM wujie_workspace_placements WHERE id='placement-source'")).rows).toEqual(sourceBefore);
+    await query(`UPDATE wujie_project_canvas_documents SET snapshot_bytes=$1,projection=$2::jsonb WHERE project_id='shared'`, [snapshot, projection]);
 
     await revokeDocumentEditor('owner', 'shared', 'editor');
     const revokedNode = { ...node, id: 'workflow-input-after-revoke' };
     await expect(resolveWorkflowInputImageForActor('editor', revokedNode, {
       projectId: 'shared', workspaceId: 'workflow:shared', entityId: revokedNode.id,
-    })).rejects.toMatchObject({ code: 'GENERATION_PROJECT_FORBIDDEN' });
+    })).rejects.toMatchObject({ code: 'DOCUMENT_FORBIDDEN' });
     expect((await query("SELECT id FROM wujie_workspace_placements WHERE entity_id='workflow-input-after-revoke'")).rows).toEqual([]);
   });
 }, 60_000);

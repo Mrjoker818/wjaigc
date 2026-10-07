@@ -661,6 +661,8 @@ interface NodeEditorProps {
   userId?: string;
   projectId?: string;
   onBack?: () => void;
+  /** Document inputs are read-only canonical references, never personal asset copies. */
+  canvasDocumentMode?: boolean;
   onWorkflowChange?: (wf: WorkflowData | null) => void;
   onWorkflowSaved?: (wf: WorkflowData) => Promise<void>;
   onWorkflowSaveRequest?: (wf: WorkflowData) => Promise<void>;
@@ -871,7 +873,7 @@ const nodeThemes = {
 
 // 底部内容面板 - 显示项目图片，支持拖拽到画布创建节点
 
-export default function NodeEditor({ taskModelCatalog = [], taskModelOptions = [], catalogStatus = { loading: false, error: null }, workflow, userId, projectId, onBack, onWorkflowChange, onWorkflowSaved, onWorkflowSaveRequest, onBeforeWorkflowChatNavigation, canvasImages, onCanvasImageAssetReferenceAdopted, themeStyle = 'gold', onAddImages, preferredAnnotationModelId = '', rendererMode = 'legacy' }: NodeEditorProps) {
+export default function NodeEditor({ taskModelCatalog = [], taskModelOptions = [], catalogStatus = { loading: false, error: null }, workflow, userId, projectId, canvasDocumentMode = false, onBack, onWorkflowChange, onWorkflowSaved, onWorkflowSaveRequest, onBeforeWorkflowChatNavigation, canvasImages, onCanvasImageAssetReferenceAdopted, themeStyle = 'gold', onAddImages, preferredAnnotationModelId = '', rendererMode = 'legacy' }: NodeEditorProps) {
   const T = nodeThemes[themeStyle];
   const projectIdRef = useRef(projectId);
   const workflowCanvasPersistenceRef = useRef<{
@@ -1074,6 +1076,17 @@ export default function NodeEditor({ taskModelCatalog = [], taskModelOptions = [
   const [comparePosition, setComparePosition] = useState(50);
   const [collapsedNodes, setCollapsedNodes] = useState<Set<string>>(new Set());
   const workflowInputTransferGuardRef = useRef(createWorkflowInputTransferGuard());
+  const workflowInputScopeRef = useRef<string>('');
+  const workflowInputScope = JSON.stringify([userId, projectId, wf.id, canvasDocumentMode]);
+  if (workflowInputScopeRef.current !== workflowInputScope) {
+    workflowInputScopeRef.current = workflowInputScope;
+    // Replacing the guard makes every in-flight response from the previous scope stale.
+    workflowInputTransferGuardRef.current = createWorkflowInputTransferGuard();
+  }
+  useEffect(() => () => {
+    workflowInputScopeRef.current = '';
+    workflowInputTransferGuardRef.current = createWorkflowInputTransferGuard();
+  }, []);
 
   const toggleNodeCollapse = useCallback((nodeId: string) => {
     setCollapsedNodes(prev => {
@@ -1933,6 +1946,7 @@ ${contextInfo}
   ): Promise<void> => {
     const guard = workflowInputTransferGuardRef.current;
     const token = guard.begin(nodeId);
+    const isCurrent = (): boolean => guard === workflowInputTransferGuardRef.current && guard.isCurrent(token);
     const pendingReference = createPendingWorkflowInputReference(image);
     const applyLegacyReference = (): void => {
       updateWorkflow(prev => ({
@@ -1977,6 +1991,21 @@ ${contextInfo}
       guard,
       token,
       transfer: async () => {
+        if (canvasDocumentMode) {
+          if (!image.assetVersionId || !image.placementId || image.projectId !== projectId) {
+            throw new Error('Document input identity is required');
+          }
+          const response = await fetch('/api/assets', {
+            method: 'POST', credentials: 'include', cache: 'no-store',
+            headers: { 'Content-Type': 'application/json', ...(userId ? { 'x-wujie-expected-actor-id': userId } : {}) },
+            body: JSON.stringify({ projectId, assetVersionId: image.assetVersionId, placementId: image.placementId }),
+          });
+          if (!response.ok) throw new Error(`Document input rejected (${response.status})`);
+          const reference = await response.json() as WorkspaceAssetReference;
+          if (typeof reference.url !== 'string' || !reference.url.trim() || reference.assetVersionId !== image.assetVersionId
+            || reference.placementId !== image.placementId) throw new Error('Document input identity changed');
+          return reference;
+        }
         let sourceReference: WorkspaceAssetReference = image;
         if (!sourceReference.assetVersionId) {
           const adoptionResponse = await fetch('/api/assets/adopt-canvas-image', {
@@ -2010,6 +2039,7 @@ ${contextInfo}
         return response.json() as Promise<WorkspaceAssetReference>;
       },
       onSuccess: transferred => {
+        if (!isCurrent()) return;
         updateWorkflow(prev => ({
           ...prev,
           nodes: prev.nodes.map(node => node.id === nodeId
@@ -2030,9 +2060,17 @@ ${contextInfo}
             : node),
         }));
       },
-      onFailure: applyLegacyReference,
+      onFailure: () => {
+        if (!isCurrent()) return;
+        if (!canvasDocumentMode) { applyLegacyReference(); return; }
+        updateWorkflow(prev => ({ ...prev, nodes: prev.nodes.map(node => node.id === nodeId ? {
+          ...node, config: { ...node.config, imageUrl: '', assetTransferPending: false,
+            projectId: undefined, assetId: undefined, assetVersionId: undefined, placementId: undefined },
+        } : node) }));
+        setNodeAnnotationError('协作图片权限或版本已变化，请重新选择');
+      },
     });
-  }, [onCanvasImageAssetReferenceAdopted, projectId, updateWorkflow, wf.id]);
+  }, [canvasDocumentMode, onCanvasImageAssetReferenceAdopted, projectId, updateWorkflow, userId, wf.id]);
 
 
   // 从内容面板拖拽图片到画布 → 创建 input-image 节点

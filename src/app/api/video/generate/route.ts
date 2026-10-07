@@ -7,6 +7,13 @@
  */
 
 import { createHash, randomUUID } from 'node:crypto';
+import { authorizeGenerationProject, GenerationProjectAccessError } from '@/lib/collaboration/generation-project-access';
+import { prepareVideoCanvasPublication } from '@/lib/video-document-admission';
+import { CanvasOrdinaryAdmissionError } from '@/lib/collaboration/canvas-ordinary-generation-admission';
+import { CanvasTaskPublicationError } from '@/lib/collaboration/task-publication';
+import { publishDocumentTaskOutput } from '@/lib/collaboration/document-media-import';
+import { mediaImportFailure } from '@/lib/collaboration/document-media-request';
+import { assertCanvasShareMutationRequest } from '@/lib/canvas-share/request';
 import { after, NextRequest, NextResponse } from 'next/server';
 import { findProviderForFeature, findProviderForModel, findProviderById } from '@/lib/server-api-config';
 import {
@@ -141,12 +148,32 @@ export async function POST(request: NextRequest) {
   const opTimer = startTimer();
   const taskStartedAt = Date.now();
   const requestId = getRequestId(request);
-  const taskCoreMode = resolveTaskCoreMode(process.env.WUJIE_TASK_CORE_MODE);
+  let taskCoreMode = resolveTaskCoreMode(process.env.WUJIE_TASK_CORE_MODE);
   let plannedCreditCost = 0;
   let sessionUser: User | null = null;
   try {
     // 积分扣除（按模型差异化扣分）
     const body = await request.json();
+    if (body.action === 'publish-canvas-task') {
+      try {
+        const auth = await requireApiAuthOrReject(request);
+        if (auth instanceof NextResponse) return auth;
+        assertCanvasShareMutationRequest(request);
+        if (request.headers.get('x-wujie-expected-actor-id') !== auth.user.id) {
+          return NextResponse.json({ error: 'ACTOR_CHANGED' }, { status: 403 });
+        }
+        if (typeof body.taskId !== 'string' || !body.taskId || typeof body.projectId !== 'string' || !body.projectId) {
+          return NextResponse.json({ error: 'CANVAS_VIDEO_INVALID' }, { status: 400 });
+        }
+        const task = await getCloudTaskForUser(body.taskId, auth.user.id);
+        if (!task || task.userId !== auth.user.id || task.projectId !== body.projectId
+          || !['video', 'video-extend'].includes(task.type) || task.status !== 'completed') {
+          return NextResponse.json({ error: 'CANVAS_VIDEO_TASK_UNAVAILABLE' }, { status: 403 });
+        }
+        const result = await publishDocumentTaskOutput(auth.user.id, task.id, 0, request.signal);
+        return NextResponse.json({ success: true, projectId: task.projectId, taskId: task.id, ...result });
+      } catch (error) { return mediaImportFailure(error); }
+    }
     const runtimeSettings = await getRuntimeSettings();
     if (!runtimeSettings.videoGenerationEnabled) {
       return NextResponse.json({ error: 'Video generation is currently disabled by the administrator' }, { status: 403 });
@@ -211,6 +238,14 @@ export async function POST(request: NextRequest) {
     const auth = await requireApiAuthOrReject(request);
     if (auth instanceof NextResponse) return auth;
     sessionUser = auth.user;
+    const projectAccess = await authorizeGenerationProject({ actorUserId: sessionUser.id, projectId });
+    if (body.skillBillingContext === undefined && projectAccess.kind === 'document'
+      && request.headers.get('x-wujie-expected-actor-id') !== sessionUser.id) {
+      return NextResponse.json({ error: 'ACTOR_CHANGED' }, { status: 403 });
+    }
+    const canvasPublication = body.skillBillingContext === undefined
+      ? await prepareVideoCanvasPublication(projectAccess, body, request.nextUrl.origin, 'video') : undefined;
+    if (canvasPublication) taskCoreMode = 'core-v2';
     const gatewayContext = trustedGatewayContext(auth.source, request.headers);
     const strictGatewayRouting = Boolean(gatewayContext);
     const extractedProviderId = !strictGatewayRouting && model.includes('::')
@@ -233,6 +268,7 @@ export async function POST(request: NextRequest) {
       ? undefined
       : parseSkillBillingContext(body.skillBillingContext);
     const requestedIdempotencyKey = request.headers.get('idempotency-key')?.trim() || '';
+    if (canvasPublication && !requestedIdempotencyKey) throw new CanvasOrdinaryAdmissionError(400, 'CANVAS_VIDEO_IDEMPOTENCY_REQUIRED');
     if (skillBillingContext && (
       !requestedIdempotencyKey
       || !effectiveProviderId
@@ -547,6 +583,7 @@ export async function POST(request: NextRequest) {
       projectId,
       sessionId,
       messageId,
+      ...(canvasPublication ? { canvasPublication } : {}),
       ...(skillBillingContext ? {
         assetWorkspace,
         assetWorkspaceId,
@@ -566,6 +603,12 @@ export async function POST(request: NextRequest) {
       generateAudio,
       negativePrompt,
       seed,
+      ...(canvasPublication ? {
+        assetWorkspace: 'canvas', assetWorkspaceId: canvasPublication.workspaceId,
+        assetParentVersionIds: canvasPublication.intent!.parentVersionIds,
+        assetSelectedEntityIds: body.assetSelectedEntityIds,
+        videoCanvasAdmission: canvasPublication,
+      } : {}),
       ...(skillBillingContext ? {
         assetWorkspace,
         assetWorkspaceId,
@@ -661,6 +704,7 @@ export async function POST(request: NextRequest) {
           idempotencyKey,
           requestDigest,
           creditCost: plannedCreditCost,
+          canvasPublication,
           task: {
             id: taskId,
             projectId: typeof projectId === 'string' ? projectId : undefined,
@@ -981,6 +1025,12 @@ export async function POST(request: NextRequest) {
       handlerVersion: taskEntryAudit.handlerVersion,
     });
   } catch (err: unknown) {
+    if (err instanceof CanvasOrdinaryAdmissionError || err instanceof CanvasTaskPublicationError) {
+      return NextResponse.json({ success: false, code: err.code, error: err.message, retryable: false }, { status: err.status });
+    }
+    if (err instanceof GenerationProjectAccessError) {
+      return NextResponse.json({ success: false, code: err.code, error: err.message, retryable: false }, { status: err.status });
+    }
     if (err instanceof ModelCapabilityError) {
       return modelCapabilityConfigurationErrorResponse(err, requestId);
     }

@@ -367,18 +367,29 @@ function isExplicitAssetNotFound(error: unknown): boolean {
 export async function resolveSimpleChatCanvasReference(
   input: { projectId: string; assetVersionId: string; placementId: string },
   fetcher: typeof fetch = fetch,
+  scope: { expectedActorUserId?: string; signal?: AbortSignal; isCurrent?: () => boolean } = {},
 ): Promise<WorkspaceAssetReference> {
+  const assertCurrent = (): void => {
+    if (scope.signal?.aborted || (scope.isCurrent && !scope.isCurrent())) {
+      throw bridgeReferenceError('BRIDGE_CONSUMPTION_CANCELLED');
+    }
+  };
+  assertCurrent();
   const response = await fetcher('/api/assets', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    method: 'POST', credentials: 'include', cache: 'no-store', signal: scope.signal,
+    headers: { 'Content-Type': 'application/json',
+      ...(scope.expectedActorUserId ? { 'x-wujie-expected-actor-id': scope.expectedActorUserId } : {}),
+    },
     body: JSON.stringify(input),
   });
+  assertCurrent();
   let payload: unknown;
   try {
     payload = await response.json();
   } catch {
     throw bridgeReferenceError('ASSET_REFERENCE_INVALID', response.status);
   }
+  assertCurrent();
 
   if (!response.ok) {
     if (

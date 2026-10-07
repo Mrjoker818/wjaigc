@@ -50,10 +50,11 @@ const handoff = {
   warnings: [] as Array<'UNMANAGED_IMAGE_SKIPPED'>,
 };
 
-function request(value: unknown): NextRequest {
+function request(value: unknown, expectedActorUserId?: string): NextRequest {
   return new NextRequest('http://localhost/api/simple-chat/workspace-handoff', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json',
+      ...(expectedActorUserId !== undefined ? { 'x-wujie-expected-actor-id': expectedActorUserId } : {}) },
     body: JSON.stringify(value),
   });
 }
@@ -86,6 +87,23 @@ describe('POST /api/simple-chat/workspace-handoff', () => {
       code: 'HANDOFF_RESOLVE_FAILED',
     });
     expect(mocks.resolveSimpleChatWorkspaceHandoff).not.toHaveBeenCalled();
+  });
+
+  it('rejects a changed cookie actor before parsing the body or resolving private chat', async () => {
+    const input = request(body, 'previous-user');
+    const readBody = vi.spyOn(input, 'json');
+    const response = await POST(input);
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({ success: false, code: 'ACTOR_CHANGED' });
+    expect(readBody).not.toHaveBeenCalled();
+    expect(mocks.resolveSimpleChatWorkspaceHandoff).not.toHaveBeenCalled();
+  });
+
+  it('accepts the matching expected actor while preserving the session actor as authority', async () => {
+    const response = await POST(request(body, 'user-1'));
+    expect(response.status).toBe(200);
+    expect(mocks.resolveSimpleChatWorkspaceHandoff).toHaveBeenCalledWith({ actorUserId: 'user-1', ...body });
+    await expect(response.json()).resolves.toEqual({ success: true, handoff });
   });
 
   it('returns 400 for malformed identifiers', async () => {

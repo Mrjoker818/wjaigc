@@ -12,6 +12,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     if (!user) {
       return NextResponse.json({ success: false, code: 'UNAUTHORIZED' }, { status: 401 });
     }
+    const expectedActor = request.headers.get('x-wujie-expected-actor-id');
+    if (expectedActor !== null && expectedActor !== user.id) {
+      return NextResponse.json({ success: false, code: 'ACTOR_CHANGED' }, { status: 409 });
+    }
 
     const body = await request.json().catch(() => null);
     const intent = parseSimpleChatWorkspaceHandoffBody(body);

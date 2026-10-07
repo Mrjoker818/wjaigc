@@ -9,7 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SimpleChatBridgeReception, type SimpleChatBridgeReceptionProps } from '@/components/canvas/simple-chat-bridge-reception';
 import { canvasBridgeStorageKey, enqueueCanvasBridgeReferences, readCanvasBridgeJournal } from '@/lib/simple-chat-canvas-bridge';
 import type { ConsumeCanvasBridgeInput } from '@/lib/simple-chat-canvas-bridge';
-import { buildSimpleChatCanvasBridgeImages } from '@/components/simple-chat/simple-chat-types';
+import { buildSimpleChatCanvasBridgeImages, resolveSimpleChatCanvasReference } from '@/components/simple-chat/simple-chat-types';
 import { routeCanvasWorkspaceChange } from '@/lib/collaboration/canvas-document-image-bridge';
 import { isCanvasTaskProjectionChange } from '@/lib/canvas-kernel/commands';
 import { IncrementalHistoryManager } from '@/lib/canvas-incremental-history';
@@ -126,6 +126,42 @@ describe('real Canvas chat bridge reception and feedback', () => {
     expect(bodies).toHaveLength(2);
     expect(bodies[1]).toBe(bodies[0]);
     expect(screen.getByRole('status').textContent).toContain('接收已确认');
+  });
+
+  it('passes the captured actor, abort signal and lifecycle guard to the actual reference resolver', async () => {
+    const requests: RequestInit[] = [];
+    const fetcher: typeof fetch = async (_url, init) => {
+      requests.push(init ?? {}); return response(reference);
+    };
+    const resolver: typeof resolveSimpleChatCanvasReference = (tuple, _fetcher, captured) =>
+      resolveSimpleChatCanvasReference(tuple, fetcher, captured);
+    render(<SimpleChatBridgeReception {...props({ authority: 'legacy', resolveReference: resolver })} />);
+    await waitFor(() => expect(readCanvasBridgeJournal(localStorage, scope)?.items[0].state).toBe('confirmed'));
+    expect(requests).toHaveLength(1);
+    expect(requests[0].headers).toEqual({ 'Content-Type': 'application/json', 'x-wujie-expected-actor-id': 'actor-a' });
+    expect(requests[0].signal).toBeInstanceOf(AbortSignal);
+    expect(requests[0].signal?.aborted).toBe(false);
+  });
+
+  it('aborts the real resolver on an actor change and preserves the original pending journal', async () => {
+    const late = deferred<Response>();
+    let captured: Parameters<typeof resolveSimpleChatCanvasReference>[2];
+    const merge = vi.fn(() => true);
+    const resolver: typeof resolveSimpleChatCanvasReference = (tuple, _fetcher, capturedScope) => {
+      captured = capturedScope;
+      return resolveSimpleChatCanvasReference(tuple, async () => late.promise, capturedScope);
+    };
+    const view = render(<SimpleChatBridgeReception {...props({ authority: 'legacy', resolveReference: resolver, mergeLegacy: merge })} />);
+    await screen.findByRole('status');
+    await act(async () => {});
+    expect(captured?.expectedActorUserId).toBe('actor-a');
+    const pending = localStorage.getItem(canvasBridgeStorageKey(scope));
+    view.rerender(<SimpleChatBridgeReception {...props({ actorId: 'actor-b', authority: 'legacy', resolveReference: resolver })} />);
+    expect(captured?.signal?.aborted).toBe(true);
+    expect(captured?.isCurrent?.()).toBe(false);
+    await act(async () => { late.resolve(response(reference)); });
+    expect(merge).not.toHaveBeenCalled();
+    expect(localStorage.getItem(canvasBridgeStorageKey(scope))).toBe(pending);
   });
 
   it('does not consume before hydration/authority is ready', async () => {
