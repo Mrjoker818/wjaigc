@@ -5,8 +5,26 @@
 
 import { Pool, PoolConfig } from 'pg';
 
-let pool: Pool | null = null;
-let advisoryLockPool: Pool | null = null;
+const POOL_REGISTRY = Symbol.for('wujie.databasePoolRegistry.v1');
+
+interface DatabasePools {
+  business?: Pool;
+  advisoryLocks?: Pool;
+}
+
+interface PoolRegistry {
+  databases: Map<string, DatabasePools>;
+  // Keep a failed member visible to concurrent callers until its whole batch drains.
+  draining: Set<Promise<void>>;
+}
+
+type PoolRegistryGlobal = typeof globalThis & { [POOL_REGISTRY]?: PoolRegistry };
+
+/** Source CLI modules and compiled Next routes must have the same lifecycle owner. */
+function getPoolRegistry(): PoolRegistry {
+  const scope = globalThis as PoolRegistryGlobal;
+  return scope[POOL_REGISTRY] ??= { databases: new Map(), draining: new Set() };
+}
 
 export function normalizePostgresConnectionString(connectionString: string): string {
   try {
@@ -28,12 +46,15 @@ export function isDatabaseConfigured(): boolean {
   return Boolean(process.env.DATABASE_URL || process.env.PGDATABASE_URL);
 }
 
-function createPool(): Pool {
+function getConnectionString(): string {
   const configuredConnectionString = process.env.DATABASE_URL || process.env.PGDATABASE_URL;
-  if (!isDatabaseConfigured() || !configuredConnectionString) {
+  if (!configuredConnectionString) {
     throw new Error('[db-client] No DATABASE_URL or PGDATABASE_URL environment variable set');
   }
-  const connectionString = normalizePostgresConnectionString(configuredConnectionString);
+  return normalizePostgresConnectionString(configuredConnectionString);
+}
+
+function createPool(connectionString: string): Pool {
   const config: PoolConfig = {
       connectionString,
       ssl: connectionString.includes('supabase') || connectionString.includes('aidap') ? { rejectUnauthorized: false } : undefined,
@@ -51,14 +72,23 @@ function createPool(): Pool {
 }
 
 export function getPool(): Pool {
-  if (!pool) pool = createPool();
-  return pool;
+  return getConfiguredPool('business');
 }
 
 /** Session-level advisory locks must not consume the business transaction pool. */
 export function getAdvisoryLockPool(): Pool {
-  if (!advisoryLockPool) advisoryLockPool = createPool();
-  return advisoryLockPool;
+  return getConfiguredPool('advisoryLocks');
+}
+
+function getConfiguredPool(kind: keyof DatabasePools): Pool {
+  const connectionString = getConnectionString();
+  const registry = getPoolRegistry();
+  let databasePools = registry.databases.get(connectionString);
+  if (!databasePools) {
+    databasePools = {};
+    registry.databases.set(connectionString, databasePools);
+  }
+  return databasePools[kind] ??= createPool(connectionString);
 }
 
 export interface SqlResult {
@@ -114,13 +144,30 @@ export async function testConnection(): Promise<boolean> {
   }
 }
 
+async function waitForPoolDrains(pending: Promise<void>[]): Promise<void> {
+  const results = await Promise.allSettled(pending);
+  const failure = results.find((result) => result.status === 'rejected');
+  if (failure?.status === 'rejected') throw failure.reason;
+}
+
 export async function closePool(): Promise<void> {
-  const currentPool = pool;
-  const currentAdvisoryLockPool = advisoryLockPool;
-  pool = null;
-  advisoryLockPool = null;
-  await Promise.all([
-    currentPool?.end(),
-    currentAdvisoryLockPool?.end(),
-  ]);
+  const registry = getPoolRegistry();
+  const poolDrains: Promise<void>[] = [];
+  for (const databasePools of registry.databases.values()) {
+    for (const currentPool of [databasePools.business, databasePools.advisoryLocks]) {
+      if (!currentPool) continue;
+      poolDrains.push(Promise.resolve().then(() => currentPool.end()));
+    }
+  }
+  // Detach before awaiting: old module references can reopen without reusing ended pools.
+  registry.databases.clear();
+  if (poolDrains.length > 0) {
+    const batch = waitForPoolDrains(poolDrains);
+    registry.draining.add(batch);
+    void batch.then(
+      () => { registry.draining.delete(batch); },
+      () => { registry.draining.delete(batch); },
+    );
+  }
+  await waitForPoolDrains([...registry.draining]);
 }

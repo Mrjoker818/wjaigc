@@ -35,7 +35,8 @@ describe('db-client closePool', () => {
     delete process.env.PGDATABASE_URL;
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    await (await import('@/lib/db-client')).closePool();
     vi.useRealTimers();
     vi.restoreAllMocks();
     if (originalDatabaseUrl === undefined) delete process.env.DATABASE_URL;
