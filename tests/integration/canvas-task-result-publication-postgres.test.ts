@@ -267,7 +267,8 @@ it('revocation after publication but before marker prevents new shared confirmat
   });
 }, 60_000);
 
-async function seed(query: QueryFn, databaseUrl: string, schemaName: string): Promise<void> {
+async function seed(query: QueryFn, databaseUrl: string, schemaName: string,
+  beforeEnable?: () => Promise<void>): Promise<void> {
   const migration = spawnSync(process.execPath, [resolve('scripts/run-migrations.mjs')], {
     encoding: 'utf8', env: { ...process.env, DATABASE_URL: databaseUrl, PGDATABASE_URL: databaseUrl },
   });
@@ -281,6 +282,7 @@ async function seed(query: QueryFn, databaseUrl: string, schemaName: string): Pr
   await query(`INSERT INTO wujie_users(id,name,password_hash,status,role,created_at,updated_at)
     VALUES ('owner','Owner','test','active','user',1,1),('editor','Editor','test','active','user',1,1)`);
   await query("INSERT INTO wujie_projects(id,owner_id,name) VALUES ('shared','owner','Shared')");
+  await beforeEnable?.();
   await query("INSERT INTO wujie_project_document_settings(project_id,owner_id,enabled) VALUES ('shared','owner',true)");
   await query("INSERT INTO wujie_project_document_editors(project_id,owner_id,member_user_id) VALUES ('shared','owner','editor')");
   const doc = createCanvasDocument();
@@ -373,13 +375,14 @@ it('failed preparation attempts cleanup of every owned file even if the first cl
 
 it('two tiny video outputs within the actual aggregate byte budget publish together', async () => {
   await withIsolatedPostgres('atomic-two-tiny-video', async ({ query, databaseUrl, schemaName }) => {
-    await seed(query, databaseUrl, schemaName);
+    await seed(query, databaseUrl, schemaName, async () => {
+      await query(`INSERT INTO wujie_user_data(user_id,data_key,data_value,updated_at)
+        VALUES ('owner','projects',$1::jsonb,1)`, [JSON.stringify([{
+        id: 'shared', userId: 'owner', name: 'Shared', createdAt: 1, updatedAt: 1, canvasImages: [], settings: {},
+      }])]);
+    });
     const video = Buffer.from(readFileSync('tests/fixtures/yjs-task8b1-tiny-valid.mp4.base64', 'utf8'), 'base64');
     writeFileSync(join(roots.root, 'tiny-a.mp4'), video); writeFileSync(join(roots.root, 'tiny-b.mp4'), video);
-    await query(`INSERT INTO wujie_user_data(user_id,data_key,data_value,updated_at)
-      VALUES ('owner','projects',$1::jsonb,1)`, [JSON.stringify([{
-      id: 'shared', userId: 'owner', name: 'Shared', createdAt: 1, updatedAt: 1, canvasImages: [], settings: {},
-    }])]);
     const canvasPublication = await prepareVideoCanvasPublication({
       kind: 'document', actorUserId: 'owner', ownerId: 'owner', projectId: 'shared', grantGeneration: '0',
     }, {
