@@ -96,6 +96,11 @@ export async function assertTaskPublication(client: PoolClient, capability: Prep
  * not merely the newer media-preparation snapshot. Personal task recovery is separate. */
 async function assertOrdinaryPublicationSources(client: PoolClient, snapshot: PublicationSnapshot): Promise<void> {
   const { task, access, intent } = snapshot;
+  if (task.type === 'video' || task.type === 'video-extend') {
+    const { assertVideoPublicationSources } = await import('../video-document-admission');
+    await assertVideoPublicationSources(client, task, access, intent);
+    return;
+  }
   // Language edits freeze source entities at admission. Repeat that exact tuple
   // on completion and every final import, not just before remote model I/O.
   if (task.type === 'edit' && intent.selectionSnapshot) {

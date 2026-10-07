@@ -66,6 +66,7 @@ import {
   type CloudTask,
 } from '@/lib/cloud-task-storage';
 import { getCompletedVideoTaskResult } from '@/lib/video-task-result';
+import { completeDocumentVideoTask, VideoCompletionUnknownError } from '@/lib/video-document-admission';
 import { resolveVideoCompatProfile } from '@/lib/video-api';
 import { resolveTaskProviderDisplayName } from '@/lib/task-provider-display';
 import { getLayerTaskStatus } from '@/lib/layer-decomposition/service';
@@ -2778,12 +2779,14 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
               if (hasDurableVideoTask) {
                 let completed: boolean;
                 try {
-                  completed = await completeCloudTask(
+                  const submission = persistedVideoTask?.result?.submissionPayload as Record<string, unknown> | undefined;
+                  completed = await (submission?.videoCanvasAdmission ? completeDocumentVideoTask : completeCloudTask)(
                     taskId,
                     completedResult,
                     gatewayVideoArtifactLeaseOwner,
                   );
                 } catch (completionError) {
+                  if (completionError instanceof VideoCompletionUnknownError) throw completionError;
                   if (persistedVideoUrl.startsWith('/api/serve-upload/video/')) {
                     await cleanupPersistedGatewayVideoResult({
                       videoUrl: persistedVideoUrl,
@@ -2793,7 +2796,9 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
                   throw completionError;
                 }
                 if (!completed) {
-                  if (persistedVideoUrl.startsWith('/api/serve-upload/video/')) {
+                  const current = await getCloudTaskForUser(taskId, userId);
+                  if (current && ['failed', 'cancelled', 'timeout'].includes(current.status)
+                    && persistedVideoUrl.startsWith('/api/serve-upload/video/')) {
                     await cleanupPersistedGatewayVideoResult({
                       videoUrl: persistedVideoUrl,
                       storageKey: gatewayVideoStorageKey,

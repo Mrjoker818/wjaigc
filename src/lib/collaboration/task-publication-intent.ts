@@ -157,7 +157,8 @@ async function readCanonicalSources(
     JOIN wujie_assets a ON a.id=v.asset_id AND a.owner_id=v.owner_id AND a.project_id=v.project_id
     WHERE p.owner_id=$1 AND p.project_id=$2 AND p.workspace_kind='canvas'
       AND p.workspace_id IN ($2,$3) AND p.deleted_at IS NULL
-      AND ((p.entity_type='canvas-image' AND a.kind='image') OR (p.entity_type='canvas-video' AND a.kind='video'))
+      AND ((p.entity_type='canvas-image' AND a.kind IN ('image','video'))
+        OR (p.entity_type='canvas-video' AND a.kind='video'))
       AND v.availability='ready' AND a.status='active'
     ORDER BY p.id FOR SHARE OF p,v,a`, [ownerId, projectId, `canvas:${projectId}`]);
   const canonical = rows.rows.filter(row => {

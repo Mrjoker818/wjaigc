@@ -87,6 +87,7 @@ export async function readServeUploadMediaLocal(
   dataRoot: string,
   workspaceRoot: string,
   relativePath: string,
+  allowLegacy: boolean = true,
 ): Promise<Buffer | null> {
   for (const root of [path.join(dataRoot, 'uploads'), dataRoot]) {
     const candidate = resolveLocalCandidate(root, relativePath);
@@ -95,6 +96,8 @@ export async function readServeUploadMediaLocal(
       return fs.readFile(candidate);
     }
   }
+
+  if (!allowLegacy) return null;
 
   const legacyRoot = path.join(workspaceRoot, 'public', 'uploads');
   const legacyName = path.basename(relativePath);

@@ -264,6 +264,15 @@ export async function deleteGatewayVideoFromS3Exact(key: string): Promise<void> 
   await deleteExactS3Key(storage.client, storage.bucket, key);
 }
 
+/** Exact SDK-returned generated key only; never infer a key or list a prefix. */
+export async function deleteGeneratedMediaFromS3Exact(key: string, filename: string): Promise<void> {
+  const name = /^((?:video|gen)-\d{13}-[a-z0-9]{1,6})\.([a-z0-9]{2,5})$/u.exec(filename);
+  const exact = key.startsWith('/') ? key.slice(1) : key;
+  if (!name || !new RegExp(`^images/${name[1]}_[0-9a-f]{8}\\.${name[2]}$`, 'u').test(exact.replace(/\\/gu, '/'))) throw new TypeError('S3_GENERATED_MEDIA_KEY_INVALID');
+  const storage = getStorage(); if (!storage) throw new Error('S3_GENERATED_MEDIA_STORAGE_UNAVAILABLE');
+  if (!await storage.deleteFile({ fileKey: exact })) throw new Error('S3_GENERATED_MEDIA_DELETE_FAILED');
+}
+
 async function deleteBinaryWithPersistentFallback(key: string): Promise<void> {
   try {
     await deleteBinaryFromS3Exact(key);

@@ -8,7 +8,7 @@
 
 import { createHash, randomUUID } from 'node:crypto';
 import { authorizeGenerationProject, GenerationProjectAccessError } from '@/lib/collaboration/generation-project-access';
-import { prepareVideoCanvasPublication } from '@/lib/video-document-admission';
+import { prepareVideoCanvasPublication, completeDocumentVideoTask, VideoCompletionUnknownError } from '@/lib/video-document-admission';
 import { CanvasOrdinaryAdmissionError } from '@/lib/collaboration/canvas-ordinary-generation-admission';
 import { CanvasTaskPublicationError } from '@/lib/collaboration/task-publication';
 import { publishDocumentTaskOutput } from '@/lib/collaboration/document-media-import';
@@ -927,8 +927,9 @@ export async function POST(request: NextRequest) {
           };
           let completed: boolean;
           try {
-            completed = await completeCloudTask(taskId, completedResult);
+            completed = await (canvasPublication ? completeDocumentVideoTask : completeCloudTask)(taskId, completedResult);
           } catch (completionError) {
+            if (completionError instanceof VideoCompletionUnknownError) throw completionError;
             if (directGatewayVideo) {
               await cleanupPersistedGatewayVideoResult({
                 videoUrl: directGatewayVideo.videoUrl,
@@ -997,6 +998,10 @@ export async function POST(request: NextRequest) {
           },
         });
       } catch (err: unknown) {
+        if (err instanceof VideoCompletionUnknownError) {
+          console.error('[video/generate] Completion requires reconciliation:', err.message);
+          return;
+        }
         const errorMsg = err instanceof Error && err.name === 'AbortError'
           ? '提交超时，请稍后重试'
           : errorMessage(err, '提交视频生成任务失败');

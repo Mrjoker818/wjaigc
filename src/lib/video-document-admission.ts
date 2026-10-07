@@ -1,10 +1,17 @@
 import 'server-only';
 import type { GenerationProjectAccess } from './collaboration/generation-project-access';
+import type { PoolClient } from 'pg';
+import { completeCloudTask, ensureCloudTaskTables, getCloudTaskById, terminateCloudTaskAndRefund,
+  type CompleteCloudTaskOptions } from './cloud-task-storage';
 import { isDeepStrictEqual } from 'node:util';
 import { getPool } from './db-client';
 import { CanvasOrdinaryAdmissionError, parseCanvasOrdinaryPublication } from './collaboration/canvas-ordinary-generation-admission';
 import { readOrdinaryPublicationSourceSnapshot, type CanvasTaskPublicationInput } from './collaboration/task-publication';
-import { parseCanvasPublicationIntentProposal } from './collaboration/task-publication-intent';
+import { CanvasPublicationIntentError, parseCanvasPublicationIntentProposal, validateCanvasBatchSources,
+  type CanvasTaskPublicationIntent } from './collaboration/task-publication-intent';
+import { assertDocumentEditor, assertDocumentProjectEnabled, DocumentAccessError,
+  DocumentFeatureDisabledError, DocumentProjectNotEnabledError } from './collaboration/document-access';
+import { readTaskPublicationAccess, readTaskPublicationIntent, type TaskPublicationAccess } from './collaboration/task-publication-access';
 import { readCollaborativeProject } from './collaboration/document-project-bridge';
 import { resolveDocumentWorkspaceReference } from './collaboration/document-workspace-reference';
 
@@ -63,4 +70,96 @@ export async function prepareVideoCanvasPublication(access: GenerationProjectAcc
   if (!isDeepStrictEqual(before, after)) throw new CanvasOrdinaryAdmissionError(403, 'CANVAS_VIDEO_SOURCE_MISMATCH');
   publication.ordinarySourceSnapshot = before;
   return publication;
+}
+
+export class VideoCompletionUnknownError extends Error {
+  constructor() { super('视频完成提交状态待核对'); this.name = 'VideoCompletionUnknownError'; }
+}
+interface VideoPublicationTask {
+  id: string; user_id: string; project_id: string; type: string; status: string;
+  result: Record<string, unknown>; lease_owner: string; attempt_count: number; deadline_valid: boolean;
+}
+const deniedReason = 'CANVAS_VIDEO_COMPLETION_FORBIDDEN';
+
+/** Repeat the immutable admission tuple and source fingerprints. No media I/O under these locks. */
+export async function assertVideoPublicationSources(client: PoolClient,
+  task: Pick<VideoPublicationTask, 'type' | 'result'>, access: NonNullable<TaskPublicationAccess>,
+  intent: CanvasTaskPublicationIntent): Promise<void> {
+  const submission = task.result.submissionPayload as Record<string, unknown> | undefined;
+  const publication = submission?.videoCanvasAdmission as CanvasTaskPublicationInput | undefined;
+  const source = publication?.ordinarySourceSnapshot;
+  if (!['video', 'video-extend'].includes(task.type) || publication?.singleAdmission !== task.type
+    || publication.workspace !== 'canvas' || publication.workspaceId !== access.workspaceId
+    || publication.access?.kind !== 'document' || publication.access.actorUserId !== access.actorId
+    || publication.access.ownerId !== access.ownerId || publication.access.projectId !== access.projectId
+    || publication.access.grantGeneration !== access.grantGeneration
+    || intent.projectionMode !== 'derived' || intent.placement.action !== 'attach'
+    || !intent.selectionSnapshot || !isDeepStrictEqual(publication.intent?.parentVersionIds, intent.parentVersionIds)
+    || !Array.isArray(source) || source.length !== intent.parentVersionIds.length
+    || source.some((entry, index) => !entry || entry.versionId !== intent.parentVersionIds[index]
+      || typeof entry.fingerprint !== 'string' || !/^[a-f0-9]{64}$/.test(entry.fingerprint))) {
+    throw new CanvasPublicationIntentError();
+  }
+  await validateCanvasBatchSources(client, access.ownerId, access.projectId, intent);
+  const current = await readOrdinaryPublicationSourceSnapshot(client, access.ownerId,
+    access.projectId, intent.parentVersionIds, true);
+  if (!isDeepStrictEqual(current, source)) throw new CanvasPublicationIntentError();
+}
+
+/** Document-only completion: task lock, then frozen publication/grant/source.
+ * Complete or refund once in the SAME transaction, before pending becomes charged. */
+export async function completeDocumentVideoTask(taskId: string, result: Record<string, unknown>,
+  leaseOwnerOrOptions?: string | Omit<CompleteCloudTaskOptions, 'client'>): Promise<boolean> {
+  await ensureCloudTaskTables();
+  const options = typeof leaseOwnerOrOptions === 'string' ? { leaseOwner: leaseOwnerOrOptions } : leaseOwnerOrOptions ?? {};
+  const client = await getPool().connect();
+  let discard = false; let commitIssued = false; let denied = false;
+  try {
+    await client.query('BEGIN');
+    const task = (await client.query<VideoPublicationTask>(`SELECT id,user_id,project_id,type,status,result,lease_owner,attempt_count,
+      ($2::bigint IS NULL OR ((EXTRACT(EPOCH FROM clock_timestamp())*1000)::bigint <= $2
+        AND lease_expires_at >= (EXTRACT(EPOCH FROM clock_timestamp())*1000)::bigint)) AS deadline_valid
+      FROM cloud_tasks WHERE id=$1 FOR UPDATE`, [taskId, options.deadlineAt ?? null])).rows[0];
+    // A stale worker cannot revoke/refund a newer attempt.
+    if (!task || task.status !== 'processing' || !task.deadline_valid
+      || options.leaseOwner !== undefined && task.lease_owner !== options.leaseOwner
+      || options.leaseAttemptCount !== undefined && task.attempt_count !== options.leaseAttemptCount) {
+      commitIssued = true; await client.query('COMMIT'); return false;
+    }
+    try {
+      const access = await readTaskPublicationAccess(client, task.user_id, taskId);
+      const intent = await readTaskPublicationIntent(client, task.user_id, taskId);
+      if (!access || !intent || access.projectId !== task.project_id) throw new DocumentAccessError();
+      const { ownerId } = await assertDocumentEditor(task.user_id, task.project_id, client, access.grantGeneration);
+      if (ownerId !== access.ownerId) throw new DocumentAccessError();
+      await assertDocumentProjectEnabled(client, ownerId, task.project_id);
+      await assertVideoPublicationSources(client, task, access, intent);
+    } catch (error) {
+      if (!(error instanceof DocumentAccessError || error instanceof DocumentFeatureDisabledError
+        || error instanceof DocumentProjectNotEnabledError || error instanceof CanvasPublicationIntentError)) throw error;
+      denied = true;
+    }
+    let completed = false;
+    if (denied) await terminateCloudTaskAndRefund(taskId, 'failed', deniedReason, options.leaseOwner,
+      { client, requireActive: true });
+    else completed = await completeCloudTask(taskId, result, { ...options, client });
+    commitIssued = true;
+    await client.query('COMMIT');
+    return completed;
+  } catch (error) {
+    if (!commitIssued) {
+      try { await client.query('ROLLBACK'); } catch { discard = true; }
+      throw error;
+    }
+    // A lost COMMIT reply is not permission to refund or delete persisted media.
+    discard = true;
+  } finally { client.release(discard); }
+  try {
+    const task = await getCloudTaskById(taskId);
+    if (denied && task?.status === 'failed' && task.error === deniedReason
+      && (task.creditCost === 0 || task.creditStatus === 'refunded')) return false;
+    if (!denied && task?.status === 'completed'
+      && Object.entries(result).every(([key, value]) => isDeepStrictEqual(task.result?.[key], value))) return true;
+  } catch { /* An unavailable reconciliation remains unknown. */ }
+  throw new VideoCompletionUnknownError();
 }

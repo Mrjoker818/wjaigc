@@ -1,7 +1,8 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';
 
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { Client } from 'pg';
 
 interface ProjectImage {
   id: string;
@@ -11,7 +12,7 @@ interface ProjectImage {
 
 interface ProjectsResponse {
   projectRevision: number;
-  value: Array<{ id: string; canvasImages?: ProjectImage[]; metadata?: Record<string, unknown> }> | null;
+  value: Array<{ id: string; name: string; canvasImages?: ProjectImage[]; metadata?: Record<string, unknown> }> | null;
 }
 
 const localGate = process.env.E2E_YJS_LOCAL_GATE === '1';
@@ -31,6 +32,36 @@ function requireLocalGate(): { baseURL: string; ownerName: string; ownerPassword
     throw new Error('Yjs browser gate requires an isolated localhost project, database, and data root');
   }
   return { baseURL, ownerName, ownerPassword };
+}
+
+// Read-only receipts from this attempt's exact private database, never a write
+// that supplies the identity which the UI is supposed to create.
+async function readPlacementReceipt(projectId: string, placementId: string) {
+  const raw = process.env.PGDATABASE_URL ?? '';
+  const url = new URL(raw);
+  if (url.hostname !== '127.0.0.1' || url.port !== '55497'
+    || !/^\/wujie_yjs_task7_[A-Za-z0-9_]+$/.test(url.pathname)
+    || process.env.DATABASE_URL !== raw) {
+    throw new Error('Placement receipt requires matching owned Yjs database URLs');
+  }
+  const client = new Client({ connectionString: raw, connectionTimeoutMillis: 5_000 });
+  try {
+    await client.connect();
+    await client.query('BEGIN READ ONLY');
+    await client.query("SET LOCAL statement_timeout = '5s'");
+    const receipt = await client.query(`SELECT p.id, p.owner_id, p.project_id,
+        p.asset_version_id, p.workspace_kind, p.workspace_id, p.entity_type,
+        p.entity_id, p.status, p.deleted_at, v.file_url, v.checksum, v.availability
+      FROM wujie_workspace_placements p
+      JOIN wujie_asset_versions v ON v.id = p.asset_version_id
+        AND v.owner_id = p.owner_id AND v.project_id = p.project_id
+      WHERE p.project_id = $1 AND p.id = $2`, [projectId, placementId]);
+    await client.query('COMMIT');
+    expect(receipt.rows).toHaveLength(1);
+    return receipt.rows[0];
+  } finally {
+    await client.end();
+  }
 }
 
 async function readProjects(context: BrowserContext): Promise<ProjectsResponse> {
@@ -193,6 +224,8 @@ test('owner and invited editor converge without copying the project into the edi
       data: { name: gate.ownerName, password: gate.ownerPassword, productType: 'canvas' },
     });
     expect(ownerLogin.status()).toBe(200);
+    const ownerUserId = (await ownerLogin.json() as { user: { id: string } }).user.id;
+    expect(ownerUserId).toBeTruthy();
     await firstPage.goto('/?view=dashboard', { waitUntil: 'domcontentloaded' });
     await firstPage.getByRole('button', { name: '新建项目' }).click();
     const viewport = firstPage.locator('[data-canvas-viewport]');
@@ -221,16 +254,36 @@ test('owner and invited editor converge without copying the project into the edi
     const [firstImage, secondImage] = images.filter(image => image.placementId && image.assetVersionId);
     expect(firstImage.id).not.toBe(secondImage.id);
 
+    // Leave the canvas before API seeding so its unload save cannot overwrite
+    // the fixture. The subsequent dashboard reload must hydrate the new seed.
+    await firstPage.goto('/?view=dashboard', { waitUntil: 'domcontentloaded' });
+    await expect(firstPage.getByRole('button', { name: '新建项目', exact: true })).toBeVisible();
+
     const snapshot = await readProjects(firstContext);
+    const inputNodeId = `input-${randomUUID()}`;
+    const outputNodeId = `output-${randomUUID()}`;
     const seededWorkflow = {
       id: `workflow-${randomUUID()}`,
       name: '协作项目保留的节点工作流',
-      version: 'v1.0', nodes: [], connections: [], status: 'idle',
+      version: 'v1.0', status: 'idle',
+      // Structure only: no URL/version/placement or completed result is seeded.
+      nodes: [
+        { id: inputNodeId, type: 'input-image', label: 'UI画布输入',
+          x: 80, y: 80, width: 260, height: 200, config: {}, agentRound: 0, breakpoint: false,
+          ports: [{ id: 'out-image', label: '图片', type: 'image', direction: 'out' }] },
+        { id: outputNodeId, type: 'output-image', label: 'UI无付费输出',
+          x: 420, y: 80, width: 260, height: 200, config: {}, agentRound: 0, breakpoint: false,
+          ports: [{ id: 'in-image', label: '图片', type: 'image', direction: 'in' }] },
+      ],
+      connections: [{ id: `connection-${randomUUID()}`, fromNodeId: inputNodeId,
+        fromPortId: 'out-image', toNodeId: outputNodeId, toPortId: 'in-image', type: 'image' }],
       createdAt: Date.now(), updatedAt: Date.now(),
     };
+    const uiProjectName = `Yjs owner UI ${projectId}`;
     const seededProjects = snapshot.value?.map(project => project.id === projectId
       ? {
         ...project,
+        name: uiProjectName,
         // Tiny source pixels remain valid media, but a 2px hit target makes
         // user gestures unreliable. Seed visible, separated canvas placements
         // through the normal project API before switching document authority.
@@ -245,16 +298,63 @@ test('owner and invited editor converge without copying the project into the edi
       data: { key: 'projects', value: seededProjects, projectRevision: snapshot.projectRevision },
     });
     expect(seeded.status(), await seeded.text()).toBe(200);
-    const enabledSnapshot = await readProjects(firstContext);
-    const enabled = await firstPage.evaluate(async input => {
-      const response = await fetch('/api/collaboration/document-enable', {
-        method: 'POST', credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(input),
-      });
-      return { status: response.status, body: await response.json() };
-    }, { projectId, expectedRevision: enabledSnapshot.projectRevision });
-    expect(enabled.status, JSON.stringify(enabled.body)).toBe(200);
+    const hydration = firstPage.waitForResponse(response => {
+      const url = new URL(response.url());
+      return response.request().method() === 'GET' && url.pathname === '/api/user-data/sync'
+        && url.searchParams.get('key') === 'projects';
+    });
+    await firstPage.reload({ waitUntil: 'domcontentloaded' });
+    const hydrationResponse = await hydration;
+    expect(hydrationResponse.status()).toBe(200);
+    const hydrated = await hydrationResponse.json() as ProjectsResponse;
+    const ownerProject = hydrated.value?.find(project => project.id === projectId);
+    expect(ownerProject?.name).toBe(uiProjectName);
+    expect(ownerProject?.metadata?.workflow).toEqual(seededWorkflow);
+    expect(ownerProject?.canvasImages?.map(image => image.id)).toEqual(expect.arrayContaining([
+      firstImage.id, secondImage.id,
+    ]));
+
+    await firstPage.getByRole('button', {
+      name: `${ownerProject!.name} 项目操作菜单`, exact: true,
+    }).click();
+    await firstPage.getByRole('menuitem', { name: '管理协作', exact: true }).click();
+    const collaborationDialog = firstPage.getByRole('dialog', {
+      name: `管理协作 · ${ownerProject!.name}`, exact: true,
+    });
+    await expect(collaborationDialog).toBeVisible();
+    const enableButton = collaborationDialog.getByRole('button', { name: '启用协作', exact: true });
+    await expect(enableButton).toBeEnabled();
+    // Observe the real saveAndEnable request chain; do not enable through a
+    // test-side API write or treat an optimistic UI update as a durable ACK.
+    const [savedProject, enabled] = await Promise.all([
+      firstPage.waitForResponse(response => {
+        if (response.request().method() !== 'POST'
+          || new URL(response.url()).pathname !== '/api/user-data/sync') return false;
+        const input = response.request().postDataJSON() as { key?: string; value?: ProjectsResponse['value'] };
+        return input.key === 'projects' && !!input.value?.some(project => project.id === projectId);
+      }),
+      firstPage.waitForResponse(response => response.request().method() === 'POST'
+        && new URL(response.url()).pathname === '/api/collaboration/document-enable'),
+      enableButton.click(),
+    ]);
+    expect(savedProject.status(), await savedProject.text()).toBe(200);
+    const savedBody = await savedProject.json() as { success: boolean; projectRevision: number };
+    expect(savedBody.success).toBe(true);
+    expect(Number.isSafeInteger(savedBody.projectRevision)).toBe(true);
+    expect(savedBody.projectRevision).toBeGreaterThanOrEqual(hydrated.projectRevision);
+    const savedInput = savedProject.request().postDataJSON() as { value: ProjectsResponse['value'] };
+    expect(savedInput.value?.find(project => project.id === projectId)?.metadata?.workflow).toEqual(seededWorkflow);
+    expect(enabled.request().postDataJSON()).toEqual({ projectId, expectedRevision: savedBody.projectRevision });
+    expect(enabled.status(), await enabled.text()).toBe(200);
+    expect(await enabled.json()).toEqual({ success: true, projectId });
+    await expect(collaborationDialog.getByRole('status').filter({ hasText: /^协作已启用$/ })).toBeVisible();
+    const enabledStatus = await firstContext.request.get(
+      `/api/collaboration/document-enable?projectId=${encodeURIComponent(projectId!)}`,
+    );
+    expect(enabledStatus.status()).toBe(200);
+    expect(await enabledStatus.json()).toMatchObject({
+      success: true, projectId, enabled: true, featureEnabled: true,
+    });
 
     const editorName = `yjs_editor_${randomUUID().slice(0, 8)}`;
     const editorPassword = `LocalYjsEditor-${randomUUID()}`;
@@ -264,11 +364,25 @@ test('owner and invited editor converge without copying the project into the edi
     expect(createdEditor.status()).toBe(200);
     const editorUserId = (await createdEditor.json() as { user?: { id?: string } }).user?.id;
     expect(editorUserId).toBeTruthy();
-    const grant = await firstContext.request.post('/api/collaboration/editors', {
-      headers: { Origin: gate.baseURL },
-      data: { projectId, memberUserId: editorUserId },
-    });
+    await collaborationDialog.getByLabel('登录账号名称', { exact: true }).fill(editorName);
+    const [grant] = await Promise.all([
+      firstPage.waitForResponse(response => response.request().method() === 'POST'
+        && new URL(response.url()).pathname === '/api/collaboration/editors'),
+      collaborationDialog.getByRole('button', { name: '邀请编辑者', exact: true }).click(),
+    ]);
+    expect(grant.request().postDataJSON()).toEqual({ projectId, memberName: editorName });
     expect(grant.status()).toBe(200);
+    expect(await grant.json()).toEqual({ success: true });
+    await expect(collaborationDialog.getByRole('status').filter({ hasText: /^编辑者已邀请$/ })).toBeVisible();
+    await expect(collaborationDialog.getByRole('list', { name: '项目编辑者', exact: true })
+      .getByText(editorName, { exact: true })).toBeVisible();
+    const collaborationLink = collaborationDialog.getByLabel('协作访问链接', { exact: true });
+    await expect(collaborationLink).toHaveValue(new URL(
+      `/?projectId=${encodeURIComponent(projectId!)}`, gate.baseURL,
+    ).href);
+    const collaborationURL = await collaborationLink.inputValue();
+    await collaborationDialog.getByRole('button', { name: '关闭', exact: true }).click();
+    await expect(collaborationDialog).toHaveCount(0);
     const editorLogin = await secondContext.request.post('/api/auth/login', {
       data: { name: editorName, password: editorPassword, productType: 'canvas' },
     });
@@ -291,7 +405,7 @@ test('owner and invited editor converge without copying the project into the edi
     await firstPage.goto(`/?projectId=${encodeURIComponent(projectId!)}`, {
       waitUntil: 'domcontentloaded', timeout: 90_000,
     });
-    await secondPage.goto(`/?projectId=${encodeURIComponent(projectId!)}`, {
+    await secondPage.goto(collaborationURL, {
       waitUntil: 'domcontentloaded', timeout: 90_000,
     });
     const savedStatus = (page: Page) => page.getByRole('status').filter({ hasText: '已保存' });
@@ -785,6 +899,210 @@ test('owner and invited editor converge without copying the project into the edi
       __yjsGateSocket?: { sentUpdates: number };
     }).__yjsGateSocket?.sentUpdates)).toBeGreaterThan(0);
     expect(await firstPage.evaluate(({ key }) => localStorage.getItem(key), capturedPending!)).toBeNull();
+    expect(errors).toEqual([]);
+
+    // All original concurrency/history/reload/mobile/annotation/offline checks
+    // above have completed. This addition does not replace any of them.
+    await firstPage.setViewportSize({ width: 1280, height: 800 });
+    const sourceImages = (await readProjects(firstContext)).value
+      ?.find(project => project.id === projectId)?.canvasImages ?? [];
+    const sourceIndex = sourceImages.findIndex(image => image.id === firstImage.id);
+    expect(sourceIndex).toBeGreaterThanOrEqual(0);
+    const source = sourceImages[sourceIndex];
+    expect(source.assetVersionId).toBeTruthy();
+    expect(source.placementId).toBeTruthy();
+    const sourceBefore = await readPlacementReceipt(projectId!, source.placementId!);
+    expect(sourceBefore).toMatchObject({ owner_id: ownerUserId, project_id: projectId,
+      asset_version_id: source.assetVersionId, workspace_kind: 'canvas', entity_type: 'canvas-image',
+      status: 'active', deleted_at: null, availability: 'ready' });
+    const originalFile = await firstContext.request.get(sourceBefore.file_url as string);
+    expect(originalFile.status()).toBe(200);
+    const originalFileSHA = createHash('sha256').update(await originalFile.body()).digest('hex');
+
+    await firstPage.getByTitle('节点模式').first().click();
+    await expect(firstPage.getByRole('toolbar', { name: '工作流工具栏' })).toBeVisible();
+    const inputCard = firstPage.locator(`[data-node-id="${inputNodeId}"]`);
+    await expect(inputCard).toBeVisible();
+    await inputCard.click();
+    const imageField = firstPage.locator('[data-node-field="imageUrl"]');
+    await imageField.getByText('画布', { exact: true }).click();
+    const [inputRead] = await Promise.all([
+      firstPage.waitForResponse(response => response.request().method() === 'POST'
+        && new URL(response.url()).pathname === '/api/assets'),
+      imageField.getByRole('button').nth(sourceIndex).click(),
+    ]);
+    expect(inputRead.request().postDataJSON()).toEqual({ projectId,
+      assetVersionId: source.assetVersionId, placementId: source.placementId });
+    expect(inputRead.request().headers()['x-wujie-expected-actor-id']).toBe(ownerUserId);
+    expect(inputRead.status(), await inputRead.text()).toBe(200);
+    const inputReference = await inputRead.json() as { assetVersionId: string; placementId: string; url: string };
+    expect(inputReference).toMatchObject({ assetVersionId: source.assetVersionId,
+      placementId: source.placementId, url: sourceBefore.file_url });
+    await expect(imageField.getByRole('img', { name: '预览', exact: true })).toBeVisible();
+    const completedPromise = firstPage.waitForResponse(async response => {
+      if (response.request().method() !== 'POST'
+        || new URL(response.url()).pathname !== '/api/workflow/execute'
+        || response.request().postDataJSON()?.action !== 'status') return false;
+      const body = await response.json() as { status?: string };
+      return body.status === 'completed';
+    });
+    const [submitted, completed] = await Promise.all([
+      firstPage.waitForResponse(response => response.request().method() === 'POST'
+        && new URL(response.url()).pathname === '/api/workflow/execute'
+        && response.request().postDataJSON()?.action === 'start'),
+      completedPromise,
+      firstPage.getByRole('button', { name: '执行工作流', exact: true }).click(),
+    ]);
+    expect(submitted.status(), await submitted.text()).toBe(200);
+    const submittedBody = submitted.request().postDataJSON() as {
+      projectId: string; workflowId: string;
+      nodes: Array<{ id: string; type: string; config: Record<string, unknown> }>;
+    };
+    expect(submittedBody.projectId).toBe(projectId);
+    expect(submittedBody.workflowId).toBe(seededWorkflow.id);
+    expect(submittedBody.nodes.map(node => node.type)).toEqual(['input-image', 'output-image']);
+    expect(submittedBody.nodes.find(node => node.id === inputNodeId)?.config).toMatchObject({
+      source: 'canvas', projectId, assetVersionId: source.assetVersionId,
+      placementId: source.placementId, imageUrl: sourceBefore.file_url, assetTransferPending: false,
+    });
+    const { executionId } = await submitted.json() as { executionId: string };
+    expect(executionId).toBeTruthy();
+    expect(completed.request().postDataJSON().executionId).toBe(executionId);
+    expect(completed.status()).toBe(200);
+    const completedBody = await completed.json() as { status: string; results: Record<string, {
+      status: string; output: { assetVersionId: string; placementId: string; imageUrl: string };
+    }> };
+    expect(completedBody.status).toBe('completed');
+    for (const id of [inputNodeId, outputNodeId]) {
+      expect(completedBody.results[id]).toMatchObject({ status: 'success', output: {
+        assetVersionId: source.assetVersionId, placementId: source.placementId, imageUrl: sourceBefore.file_url,
+      } });
+    }
+    const outputCard = firstPage.locator(`[data-node-id="${outputNodeId}"]`);
+    await expect(outputCard.getByRole('button', { name: '发送到智能对话', exact: true })).toBeVisible();
+
+    // Navigation is only the entry: require actual transfer + server-persisted
+    // message + independently read SQL placement and a reload of that message.
+    const transferPromise = firstPage.waitForResponse(response => {
+      if (response.request().method() !== 'POST'
+        || new URL(response.url()).pathname !== '/api/assets/transfer') return false;
+      return response.request().postDataJSON()?.entityType === 'chat-result';
+    });
+    const chatSavePromise = firstPage.waitForResponse(response => {
+      if (response.request().method() !== 'POST'
+        || new URL(response.url()).pathname !== '/api/user-data/sync') return false;
+      const body = response.request().postDataJSON() as { key?: string; value?: Array<{ tasks: Array<{
+        messages: Array<{ imageRefs?: Array<{ assetVersionId?: string; entityId?: string }> }>;
+      }> }> };
+      return body.key === 'chat_simple_projects' && !!body.value?.some(project => project.tasks.some(task => (
+        task.messages.some(message => message.imageRefs?.some(reference => (
+          reference.assetVersionId === source.assetVersionId
+          && reference.entityId === `workflow-return:${executionId}:${outputNodeId}`
+        )))
+      )));
+    });
+    const [transferred, chatSaved] = await Promise.all([
+      transferPromise, chatSavePromise,
+      (async () => {
+        await outputCard.getByRole('button', { name: '发送到智能对话', exact: true }).click();
+        await expect(firstPage).toHaveURL(url => url.pathname === '/simple-chat');
+      })(),
+    ]);
+    expect(transferred.status(), await transferred.text()).toBe(200);
+    const transferInput = transferred.request().postDataJSON() as {
+      sourceVersion: string; targetProject: string; targetWorkspace: string; entityId: string;
+      metadata: { workflowId: string; executionId: string; outputNodeId: string };
+    };
+    expect(transferInput).toMatchObject({ sourceVersion: source.assetVersionId,
+      targetProject: projectId, entityId: `workflow-return:${executionId}:${outputNodeId}`,
+      metadata: { workflowId: seededWorkflow.id, executionId, outputNodeId } });
+    const chatReference = await transferred.json() as {
+      assetVersionId: string; placementId: string; entityId: string; url: string;
+    };
+    expect(chatReference.assetVersionId).toBe(source.assetVersionId);
+    expect(chatReference.placementId).toBeTruthy();
+    expect(chatReference.placementId).not.toBe(source.placementId);
+    expect(chatReference.entityId).toBe(transferInput.entityId);
+    expect(chatReference.url).toBe(sourceBefore.file_url);
+    const chatPlacement = await readPlacementReceipt(projectId!, chatReference.placementId);
+    expect(chatPlacement).toMatchObject({ owner_id: ownerUserId, project_id: projectId,
+      asset_version_id: source.assetVersionId, workspace_kind: 'chat',
+      workspace_id: transferInput.targetWorkspace, entity_type: 'chat-result',
+      entity_id: transferInput.entityId, status: 'active', deleted_at: null,
+      file_url: sourceBefore.file_url, availability: 'ready' });
+    expect(chatSaved.status(), await chatSaved.text()).toBe(200);
+    expect(await chatSaved.json()).toMatchObject({ success: true });
+    const chatProjectId = new URL(firstPage.url()).searchParams.get('projectId');
+    const chatTaskId = new URL(firstPage.url()).searchParams.get('taskId');
+    expect(chatProjectId).toBeTruthy();
+    expect(chatTaskId).toBeTruthy();
+    expect(transferInput.targetWorkspace).toBe(`standalone-chat:${chatProjectId}`);
+    const messageId = `workflow-return:${chatReference.placementId}`;
+    const chatMessage = firstPage.locator(`[data-chat-message-id="${messageId}"]`);
+    await expect(chatMessage).toHaveAttribute('data-chat-asset-placement-ids', chatReference.placementId);
+    await expect(chatMessage.getByText('工作流结果已返回：UI无付费输出', { exact: true })).toBeVisible();
+    const readChat = await firstContext.request.get('/api/user-data/sync?key=chat_simple_projects');
+    expect(readChat.status()).toBe(200);
+    const chatData = await readChat.json() as { value: Array<{ id: string; tasks: Array<{
+      id: string; messages: Array<{ id: string; imageRefs: unknown[] }>;
+    }> }> };
+    const persistedMessage = chatData.value.find(project => project.id === chatProjectId)
+      ?.tasks.find(task => task.id === chatTaskId)?.messages.find(message => message.id === messageId);
+    expect(persistedMessage?.imageRefs).toEqual([expect.objectContaining({
+      assetVersionId: source.assetVersionId, placementId: chatReference.placementId,
+      entityId: transferInput.entityId, url: sourceBefore.file_url,
+    })]);
+    await firstPage.reload({ waitUntil: 'domcontentloaded' });
+    await expect(firstPage).toHaveURL(url => url.pathname === '/simple-chat');
+    await expect(chatMessage).toHaveAttribute('data-chat-asset-placement-ids', chatReference.placementId);
+    const reloadedChatImage = chatMessage.locator('img').first();
+    await expect(reloadedChatImage).toHaveAttribute('src', sourceBefore.file_url as string);
+    await expect(reloadedChatImage).toBeVisible();
+    await expect.poll(() => reloadedChatImage.evaluate(
+      (image: HTMLImageElement) => image.complete && image.naturalWidth > 0 && image.naturalHeight > 0,
+    )).toBe(true);
+    expect(await readPlacementReceipt(projectId!, source.placementId!)).toEqual(sourceBefore);
+    const retainedFile = await firstContext.request.get(sourceBefore.file_url as string);
+    expect(retainedFile.status()).toBe(200);
+    expect(createHash('sha256').update(await retainedFile.body()).digest('hex')).toBe(originalFileSHA);
+
+    // Capture the live native document socket, not a test-side close, before
+    // the owner revokes this exact member through the actual management dialog.
+    await expect(savedStatus(secondPage)).toBeVisible();
+    await secondPage.evaluate(() => {
+      const state = (window as Window & { __yjsGateSocket?: { socket: WebSocket | null } }).__yjsGateSocket;
+      if (!state?.socket || state.socket.readyState !== WebSocket.OPEN) throw new Error('Editor document socket is not live');
+      (window as Window & { __editorRevocationClose?: { code: number; wasClean: boolean } }).__editorRevocationClose = undefined;
+      state.socket.addEventListener('close', event => {
+        (window as Window & { __editorRevocationClose?: { code: number; wasClean: boolean } }).__editorRevocationClose = {
+          code: event.code, wasClean: event.wasClean,
+        };
+      }, { once: true });
+    });
+    await firstPage.goto('/?view=dashboard', { waitUntil: 'domcontentloaded' });
+    await firstPage.getByRole('button', { name: `${uiProjectName} 项目操作菜单`, exact: true }).click();
+    await firstPage.getByRole('menuitem', { name: '管理协作', exact: true }).click();
+    await expect(collaborationDialog).toBeVisible();
+    const [revoked] = await Promise.all([
+      firstPage.waitForResponse(response => response.request().method() === 'DELETE'
+        && new URL(response.url()).pathname === '/api/collaboration/editors'),
+      collaborationDialog.getByRole('button', { name: `撤销 ${editorName} 的编辑权限`, exact: true }).click(),
+    ]);
+    expect(revoked.request().postDataJSON()).toEqual({ projectId, memberUserId: editorUserId });
+    expect(revoked.status(), await revoked.text()).toBe(200);
+    expect(await revoked.json()).toEqual({ success: true });
+    await expect(collaborationDialog.getByRole('status').filter({ hasText: /^编辑权限已撤销$/ })).toBeVisible();
+    await expect(collaborationDialog.getByRole('list', { name: '项目编辑者', exact: true })
+      .getByText(editorName, { exact: true })).toHaveCount(0);
+    await expect.poll(() => secondPage.evaluate(() => (window as Window & {
+      __editorRevocationClose?: { code: number };
+    }).__editorRevocationClose?.code)).toBe(1008);
+    const forbidden = await secondContext.request.post('/api/assets', { data: {
+      projectId, assetVersionId: source.assetVersionId, placementId: source.placementId,
+    } });
+    expect(forbidden.status()).toBe(403);
+    expect(await forbidden.json()).toEqual({ error: 'DOCUMENT_FORBIDDEN' });
+    expect(((await readProjects(secondContext)).value ?? []).some(project => project.id === projectId)).toBe(false);
     expect(errors).toEqual([]);
   } finally {
     try {

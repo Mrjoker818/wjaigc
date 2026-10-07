@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { NextRequest } from 'next/server';
 
 vi.mock('server-only', () => ({}));
 vi.mock('next/server', async (importOriginal) => ({
@@ -110,8 +111,8 @@ function imageRequest(model = 'Exact::Image'): Request {
   });
 }
 
-function videoRequest(providerId = 'video-provider'): Request {
-  return new Request('http://localhost/api/video/generate', {
+function videoRequest(providerId = 'video-provider'): NextRequest {
+  return new NextRequest('http://localhost/api/video/generate', {
     method: 'POST', headers: gatewayHeaders,
     body: JSON.stringify({
       prompt: 'test video', model: 'Exact::Video', providerId, duration: 5,

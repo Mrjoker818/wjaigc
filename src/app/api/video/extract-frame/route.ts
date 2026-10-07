@@ -1,12 +1,14 @@
 import { NextResponse } from 'next/server';
 import { spawn } from 'child_process';
-import { mkdir, writeFile, unlink } from 'fs/promises';
+import { mkdir, open, unlink } from 'fs/promises';
 import { existsSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { randomUUID } from 'crypto';
 import { requireApiAuthOrReject } from '@/lib/api-auth';
 import { isSafeVideoSource } from '@/lib/api-validator';
+import { getServerDataRoot } from '@/lib/server-data-root';
+import { readServeUploadExportLocal, readServeUploadMediaLocal } from '@/lib/serve-upload-local-storage';
 
 // 视频抽帧：支持 first/last/at/N-grid 四种模式
 // POST body:
@@ -16,31 +18,37 @@ import { isSafeVideoSource } from '@/lib/api-validator';
 //   单帧模式: { success: true, imageUrl: string }
 //   grid 模式: { success: true, frames: [{index, time, imageUrl}...], gridImageUrl?: string }
 
-const UPLOAD_DIR = join(process.cwd(), 'public', 'uploads');
+const uploadDir = (): string => join(getServerDataRoot(), 'uploads');
 
 async function ensureUploadDir() {
-  if (!existsSync(UPLOAD_DIR)) {
-    await mkdir(UPLOAD_DIR, { recursive: true });
+  if (!existsSync(uploadDir())) {
+    await mkdir(uploadDir(), { recursive: true });
   }
 }
 
-async function downloadVideo(url: string, destPath: string): Promise<void> {
-  const resp = await fetch(url);
-  if (!resp.ok) {
-    throw new Error(`下载视频失败: HTTP ${resp.status}`);
+async function downloadVideo(url: string): Promise<Buffer> {
+  const resp = await fetch(url, { signal: AbortSignal.timeout(90_000) });
+  if (!resp.ok) throw new Error(`下载视频失败: HTTP ${resp.status}`);
+  if (Number(resp.headers.get('content-length') || 0) > 150 * 1024 * 1024) {
+    await resp.body?.cancel();
+    throw new Error('视频超过150MB');
   }
-  const buf = Buffer.from(await resp.arrayBuffer());
-  await writeFile(destPath, buf);
-}
-
-function resolveLocalVideoPath(videoUrl: string): string | null {
-  if (videoUrl.startsWith('/api/serve-upload/') || videoUrl.startsWith('/uploads/')) {
-    const filename = videoUrl.split('/').pop();
-    if (!filename) return null;
-    const local = join(UPLOAD_DIR, filename);
-    return existsSync(local) ? local : null;
+  const reader = resp.body?.getReader();
+  if (!reader) throw new Error('视频响应缺少内容');
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > 150 * 1024 * 1024) throw new Error('视频超过150MB');
+      chunks.push(value);
+    }
+  } finally {
+    try { await reader.cancel(); } finally { reader.releaseLock(); }
   }
-  return null;
+  return Buffer.concat(chunks, size);
 }
 
 // 获取视频时长（秒）
@@ -49,7 +57,7 @@ function getVideoDuration(videoPath: string): Promise<number> {
     const proc = spawn('ffprobe', [
       '-v', 'error', '-show_entries', 'format=duration',
       '-of', 'default=noprint_wrappers=1:nokey=1', videoPath,
-    ], { stdio: ['ignore', 'pipe', 'pipe'] });
+    ], { stdio: ['ignore', 'pipe', 'pipe'], timeout: 30_000, windowsHide: true });
     let out = '';
     proc.stdout.on('data', (d) => { out += d.toString(); });
     proc.on('error', () => resolve(0));
@@ -62,7 +70,7 @@ function getVideoDuration(videoPath: string): Promise<number> {
 
 function runFfmpeg(args: string[]): Promise<{ ok: boolean; stderr: string }> {
   return new Promise((resolve) => {
-    const proc = spawn('ffmpeg', ['-y', ...args], { stdio: ['ignore', 'pipe', 'pipe'] });
+    const proc = spawn('ffmpeg', ['-y', ...args], { stdio: ['ignore', 'pipe', 'pipe'], timeout: 90_000, windowsHide: true });
     let stderr = '';
     proc.stderr.on('data', (d) => { stderr += d.toString(); });
     proc.on('error', () => resolve({ ok: false, stderr }));
@@ -93,17 +101,16 @@ async function extractSingleFrame(
 }
 
 async function extractLastFrame(videoPath: string, outPath: string): Promise<boolean> {
-  // 优先 -sseof 取末尾，失败则通过 duration 计算
+  // Reverse only the final short window so the chosen frame is the actual last frame.
   const { ok, stderr } = await runFfmpeg([
-    '-sseof', '-0.1', '-i', videoPath, '-frames:v', '1', '-q:v', '2', outPath,
+    '-sseof', '-0.1', '-i', videoPath, '-vf', 'reverse', '-frames:v', '1', '-q:v', '2', outPath,
   ]);
   if (ok && existsSync(outPath)) return true;
-  console.warn('[extract-frame] last frame via sseof failed, fallback to duration:', stderr.slice(-200));
-  const dur = await getVideoDuration(videoPath);
-  if (dur > 0) {
-    return extractSingleFrame(videoPath, Math.max(0, dur - 0.1), outPath);
-  }
-  return false;
+  // A one-frame or sparse clip can have no frame within 100ms of EOF. Decode
+  // sequentially into one updated JPEG, bounded by the existing process timeout.
+  console.warn('[extract-frame] last seek empty, decoding through EOF:', stderr.slice(-200));
+  const fallback = await runFfmpeg(['-i', videoPath, '-vsync', '0', '-update', '1', '-q:v', '2', outPath]);
+  return fallback.ok && existsSync(outPath);
 }
 
 async function extractGridFrames(
@@ -123,10 +130,10 @@ async function extractGridFrames(
   for (let i = 0; i < n; i++) {
     const t = n === 1 ? (start + end) / 2 : start + step * i;
     const filename = `frame-${randomUUID()}.jpg`;
-    const outPath = join(UPLOAD_DIR, filename);
+    const outPath = join(uploadDir(), filename);
     const ok = await extractSingleFrame(videoPath, t, outPath);
     if (ok) {
-      frames.push({ index: i, time: Number(t.toFixed(2)), imageUrl: `/api/serve-upload/${filename}` });
+      frames.push({ index: i, time: Number(t.toFixed(2)), imageUrl: `/api/serve-upload/uploads/${filename}` });
     }
   }
   return { frames };
@@ -165,16 +172,28 @@ export async function POST(req: Request) {
 
     await ensureUploadDir();
 
-    // 1) 定位/下载视频
-    let localVideoPath = resolveLocalVideoPath(videoUrl);
-    let downloadedTempPath: string | null = null;
-    if (!localVideoPath) {
-      downloadedTempPath = join(tmpdir(), `v-${randomUUID()}.mp4`);
-      await downloadVideo(videoUrl, downloadedTempPath);
-      localVideoPath = downloadedTempPath;
-    }
-
+    // CPU works on a private temporary copy; never route a managed relative URL to fetch.
+    const downloadedTempPath = join(tmpdir(), `v-${randomUUID()}.mp4`);
+    let ownsDownloadedTemp = false;
     try {
+      let bytes: Buffer;
+      if (videoUrl.startsWith('/')) {
+        const pathname = decodeURIComponent(new URL(videoUrl, 'http://localhost').pathname);
+        const managed = pathname.startsWith('/api/serve-upload/');
+        const relativePath = managed ? pathname.slice('/api/serve-upload/'.length) : pathname.slice(1);
+        // Only explicit legacy URLs or an original flat managed name may use public fallback.
+        const allowLegacy = pathname.startsWith('/uploads/') || (managed && !relativePath.includes('/'));
+        const local = managed && relativePath.startsWith('exports/')
+          ? await readServeUploadExportLocal(getServerDataRoot(), relativePath.slice('exports/'.length), 150 * 1024 * 1024)
+          : await readServeUploadMediaLocal(getServerDataRoot(), process.cwd(), relativePath, allowLegacy);
+        if (!local) return NextResponse.json({ error: '视频文件不存在' }, { status: 404 });
+        if (local.byteLength > 150 * 1024 * 1024) return NextResponse.json({ error: '视频超过150MB' }, { status: 413 });
+        bytes = local;
+      } else bytes = await downloadVideo(videoUrl);
+      const handle = await open(downloadedTempPath, 'wx');
+      ownsDownloadedTemp = true;
+      try { await handle.writeFile(bytes); } finally { await handle.close(); }
+      const localVideoPath = downloadedTempPath;
       if (mode === 'grid') {
         const { frames } = await extractGridFrames(localVideoPath, gridCount);
         if (frames.length === 0) {
@@ -185,7 +204,7 @@ export async function POST(req: Request) {
 
       // 单帧模式
       const frameFilename = `frame-${randomUUID()}.jpg`;
-      const framePath = join(UPLOAD_DIR, frameFilename);
+      const framePath = join(uploadDir(), frameFilename);
       let ok = false;
       if (mode === 'first') {
         ok = await extractSingleFrame(localVideoPath, 0, framePath);
@@ -195,14 +214,13 @@ export async function POST(req: Request) {
         ok = await extractLastFrame(localVideoPath, framePath);
       }
       if (!ok) {
+        await unlink(framePath).catch(() => undefined);
         return NextResponse.json({ error: '抽帧失败，视频可能无法解码或尚未安装 ffmpeg' }, { status: 500 });
       }
-      const imageUrl = `/api/serve-upload/${frameFilename}`;
+      const imageUrl = `/api/serve-upload/uploads/${frameFilename}`;
       return NextResponse.json({ success: true, mode, imageUrl });
     } finally {
-      if (downloadedTempPath) {
-        unlink(downloadedTempPath).catch(() => {});
-      }
+      if (ownsDownloadedTemp) await unlink(downloadedTempPath).catch(() => undefined);
     }
   } catch (err: unknown) {
     console.error('[extract-frame] error:', err);

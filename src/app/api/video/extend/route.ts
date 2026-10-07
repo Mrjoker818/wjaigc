@@ -6,9 +6,13 @@
  * 异步提交 + 轮询模式，复用 task-registry
  */
 
+import { lstat, realpath, readFile, unlink } from 'node:fs/promises';
+import path from 'node:path';
+import { getServerDataRoot } from '@/lib/server-data-root';
+import { deleteGeneratedMediaFromS3Exact } from '@/lib/s3-storage';
 import { logOperation, logError, OP_ACTIONS } from '@/lib/op-log';
 import { authorizeGenerationProject, GenerationProjectAccessError } from '@/lib/collaboration/generation-project-access';
-import { prepareVideoCanvasPublication } from '@/lib/video-document-admission';
+import { prepareVideoCanvasPublication, completeDocumentVideoTask, VideoCompletionUnknownError } from '@/lib/video-document-admission';
 import { CanvasOrdinaryAdmissionError } from '@/lib/collaboration/canvas-ordinary-generation-admission';
 import { CanvasTaskPublicationError } from '@/lib/collaboration/task-publication';
 import { createBillableTask } from '@/lib/task-core/billing-service';
@@ -38,6 +42,7 @@ import { buildDirectorPrompt, type DirectorStyle } from '@/lib/video-director';
 import { recordVideoTaskRemotePolling, recordVideoTaskSubmitted } from '@/lib/cloud-task-persistence';
 import {
   chargeCloudTaskCredits,
+  getCloudTaskById,
   completeCloudTask,
   terminateCloudTaskAndRefund,
 } from '@/lib/cloud-task-storage';
@@ -49,6 +54,55 @@ import { resolveProviderForTask } from '@/lib/task-core/exact-provider-routing';
 import { ModelCapabilityError } from '@/lib/task-core/model-capability-contract';
 
 export const maxDuration = 300; // 5 min timeout
+
+type GeneratedMediaReceipt = { filename: string; s3Key?: string; files: { path: string; identity: string }[] };
+async function generatedMediaIdentity(file: string): Promise<string> {
+  for (let dir = path.dirname(file);; dir = path.dirname(dir)) {
+    const parent = await lstat(dir); if (!parent.isDirectory() || parent.isSymbolicLink()) throw new Error('GENERATED_MEDIA_PARENT_CHANGED');
+    if (dir === path.dirname(dir)) break;
+  }
+  const stat = await lstat(file);
+  if (!stat.isFile() || stat.isSymbolicLink() || path.resolve(await realpath(file)) !== file) throw new Error('GENERATED_MEDIA_PATH_CHANGED');
+  const bytes = await readFile(file), after = await lstat(file);
+  const fields = (s: typeof stat): number[] => [s.dev, s.ino, s.birthtimeMs, s.mtimeMs, s.size];
+  if (!after.isFile() || after.isSymbolicLink() || fields(stat).some((value, index) => value !== fields(after)[index])) throw new Error('GENERATED_MEDIA_CHANGED');
+  return [...fields(stat), createHash('sha256').update(bytes).digest('hex')].join(':');
+}
+async function captureGeneratedMedia(data: Record<string, unknown>, startedAt: number): Promise<GeneratedMediaReceipt> {
+  const match = typeof data.filename === 'string' && /^(?:video|gen)-(\d{13})-[a-z0-9]{1,6}\.[a-z0-9]{2,5}$/u.exec(data.filename);
+  if (data.success !== true || !match || data.url !== `/api/serve-upload/uploads/${data.filename}`
+    || !Number.isSafeInteger(data.size) || Number(data.size) <= 0 || Number(match[1]) < startedAt || Number(match[1]) > Date.now()
+    || data.s3Key != null && (typeof data.s3Key !== 'string' || !data.s3Key)) throw new Error('GENERATED_MEDIA_RECEIPT_INVALID');
+  const receipt: GeneratedMediaReceipt = { filename: data.filename as string, files: [],
+    ...(typeof data.s3Key === 'string' ? { s3Key: data.s3Key } : {}) };
+  const dirs = [path.resolve(getServerDataRoot(), 'uploads')];
+  if (process.env.COZE_PROJECT_ENV !== 'PROD') dirs.push(path.resolve(process.cwd(), 'public', 'uploads'));
+  for (const [index, dir] of dirs.entries()) {
+    const file = path.resolve(dir, receipt.filename); if (path.dirname(file) !== dir) throw new Error('GENERATED_MEDIA_PATH_INVALID');
+    let stat; try { stat = await lstat(file); } catch (error) {
+      if (index > 0 && (error as NodeJS.ErrnoException).code === 'ENOENT') continue; throw error;
+    }
+    if (stat.size !== data.size || stat.birthtimeMs < startedAt - 1000 || stat.birthtimeMs > Date.now() + 1000) throw new Error('GENERATED_MEDIA_IDENTITY_INVALID');
+    const identity = await generatedMediaIdentity(file);
+    if (!identity.startsWith([stat.dev, stat.ino, stat.birthtimeMs, stat.mtimeMs, stat.size].join(':') + ':')) throw new Error('GENERATED_MEDIA_CHANGED');
+    receipt.files.push({ path: file, identity });
+  }
+  return receipt;
+}
+async function cleanupGeneratedMedia(taskId: string, receipts: GeneratedMediaReceipt[]): Promise<void> {
+  const task = await getCloudTaskById(taskId);
+  if (!task || !['failed', 'cancelled', 'timeout'].includes(task.status)) return;
+  const settled = await Promise.allSettled(receipts.map(async receipt => {
+    for (const file of receipt.files) if (await generatedMediaIdentity(file.path) !== file.identity) throw new Error('GENERATED_MEDIA_CHANGED');
+    if (receipt.s3Key) await deleteGeneratedMediaFromS3Exact(receipt.s3Key, receipt.filename);
+    for (const file of receipt.files) {
+      if (await generatedMediaIdentity(file.path) !== file.identity) throw new Error('GENERATED_MEDIA_CHANGED');
+      await unlink(file.path);
+    }
+  }));
+  const errors = settled.filter((row): row is PromiseRejectedResult => row.status === 'rejected').map(row => row.reason);
+  if (errors.length) throw new AggregateError(errors, 'GENERATED_MEDIA_CLEANUP_FAILED');
+}
 
 function errorMessage(error: unknown, fallback: string): string {
   return error instanceof Error && error.message ? error.message : fallback;
@@ -365,6 +419,7 @@ export async function POST(request: NextRequest) {
     // 6. 异步提交到第三方 API
     after(async () => {
       const submitController = new AbortController();
+      const generatedMedia: GeneratedMediaReceipt[] = []; let preserveGeneratedMedia = false;
       registerTaskAbortController(taskId, submitController);
       try {
         updateTaskProgress(taskId, { progress: 5, label: `视频延长 · ${modelName} · 提交中...` });
@@ -422,6 +477,7 @@ export async function POST(request: NextRequest) {
           let finalImageUrl = (submitResult as unknown as Record<string, unknown>).imageUrl as string || (submitResult as unknown as Record<string, unknown>).coverUrl as string || '';
           
           // 持久化视频URL
+          const videoPersistStartedAt = Date.now();
           try {
             const persistRes = await fetch(`http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}/api/save-image`, {
               method: 'POST',
@@ -431,12 +487,14 @@ export async function POST(request: NextRequest) {
             });
             if (persistRes.ok) {
               const persistData = await persistRes.json();
+              if (canvasPublication) generatedMedia.push(await captureGeneratedMedia(persistData, videoPersistStartedAt));
               if (persistData.url) finalVideoUrl = persistData.url;
             }
-          } catch { /* fallback to original */ }
+          } catch (error) { if (canvasPublication) console.error('[video/extend] Media receipt unavailable; retained:', error); /* fallback to original */ }
 
           // 持久化封面图
           if (finalImageUrl) {
+            const coverPersistStartedAt = Date.now();
             try {
               const persistRes = await fetch(`http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}/api/save-image`, {
                 method: 'POST',
@@ -446,9 +504,10 @@ export async function POST(request: NextRequest) {
               });
               if (persistRes.ok) {
                 const persistData = await persistRes.json();
+                if (canvasPublication) generatedMedia.push(await captureGeneratedMedia(persistData, coverPersistStartedAt));
                 if (persistData.url) finalImageUrl = persistData.url;
               }
-            } catch { /* fallback to original */ }
+            } catch (error) { if (canvasPublication) console.error('[video/extend] Cover receipt unavailable; retained:', error); /* fallback to original */ }
           }
 
           const completedResult = {
@@ -456,7 +515,7 @@ export async function POST(request: NextRequest) {
             imageUrl: finalImageUrl,
             videoDuration: (submitResult as unknown as Record<string, unknown>).videoDuration as number || extendDuration,
           };
-          const completed = await completeCloudTask(taskId, completedResult);
+          const completed = await (canvasPublication ? completeDocumentVideoTask : completeCloudTask)(taskId, completedResult);
           if (!completed) return;
           updateTaskProgress(taskId, {
             status: 'completed',
@@ -500,6 +559,11 @@ export async function POST(request: NextRequest) {
           },
         });
       } catch (err: unknown) {
+        if (err instanceof VideoCompletionUnknownError) {
+          preserveGeneratedMedia = true;
+          console.error('[video/extend] Completion requires reconciliation:', err.message);
+          return;
+        }
         const errorMsg = err instanceof Error && err.name === 'AbortError'
           ? '提交超时，请稍后重试'
           : errorMessage(err, '提交视频延长任务失败');
@@ -507,7 +571,8 @@ export async function POST(request: NextRequest) {
         if (!settled.transitioned) return;
         updateTaskProgress(taskId, { status: 'failed', error: errorMsg, progress: 0 });
       } finally {
-        unregisterTaskAbortController(taskId, submitController);
+        try { if (canvasPublication && !preserveGeneratedMedia && generatedMedia.length) await cleanupGeneratedMedia(taskId, generatedMedia); }
+        finally { unregisterTaskAbortController(taskId, submitController); }
       }
     });
 
