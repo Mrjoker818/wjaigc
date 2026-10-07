@@ -3,6 +3,7 @@ import { createServer } from 'node:net';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { describe, expect, it } from 'vitest';
+import { requireOfflineBridgeTestDatabaseUrl } from '../../../tests/helpers/offline-bridge-database-guard';
 
 type Signal = 'SIGTERM' | 'SIGINT';
 type Mode = 'normal' | 'prepare-blocked' | 'prepare-blocked-fails' | 'close-blocked' | 'close-fails' | 'prepare-fails';
@@ -35,8 +36,12 @@ async function reservePort(): Promise<number> {
 }
 
 async function startCli(mode: Mode): Promise<CliRun> {
+  const database = requireOfflineBridgeTestDatabaseUrl(process.env);
+  const url = new URL(database);
+  if (url.port !== '55496' || url.pathname !== '/wujie_bridge_test_batch_20261006') {
+    throw new Error('Exact current owned suite database required');
+  }
   const port = await reservePort();
-  const database = 'postgresql://postgres@127.0.0.1:55494/wujie_bridge_test_ownerui_20261003';
   const child = spawn(process.execPath, [
     '--conditions=react-server', '--import', 'tsx', '--import',
     pathToFileURL(resolve('tests/helpers/presence-cli-next-register.mjs')).href,
@@ -44,7 +49,7 @@ async function startCli(mode: Mode): Promise<CliRun> {
   ], {
     cwd: process.cwd(),
     env: {
-      ...process.env, NODE_OPTIONS: '', NODE_ENV: 'production', PORT: String(port),
+      ...process.env, NODE_ENV: 'production', PORT: String(port),
       WUJIE_PRESENCE_ENABLED: 'true', WUJIE_YJS_ENABLED: 'false', WUJIE_TEST_NEXT_MODE: mode,
       DATABASE_URL: database, PGDATABASE_URL: database,
       POSTGRES_TEST_DATABASE_URL: database, TEST_POSTGRES_URL: database,

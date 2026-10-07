@@ -1,4 +1,6 @@
 'use client';
+import { importDocumentMediaBatch, assertDocumentMediaBatchProjection } from '@/lib/collaboration/document-media-batch-client';
+import type { DocumentMediaBatchRequest } from '@/lib/collaboration/document-media-batch-request';
 
 import { useState, useCallback, useRef, useEffect, useLayoutEffect, useMemo, type CSSProperties } from 'react';
 import dynamic from 'next/dynamic';
@@ -113,7 +115,7 @@ import {
 import { taskEventsClient } from '@/lib/task-events-client';
 import { waitForTaskPollInterval } from '@/lib/task-polling-wait';
 import type { WorkflowCanvasInsertionItem } from '@/lib/asset-core/workspace-transfer';
-import { canvasSkillProjectionIdentity, transferCanvasSkillAsset, transferCanvasSkillAssets } from '@/lib/skill-runtime/canvas-client';
+import { canvasSkillProjectionIdentity, transferCanvasSkillAsset, transferCanvasSkillAssets, resolveCanvasSkillAssets } from '@/lib/skill-runtime/canvas-client';
 import {
   buildSimpleChatCanvasBridgeImages,
   resolveSimpleChatCanvasReference,
@@ -1685,7 +1687,11 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
   const groupsRef = useRef<ImageGroupData[]>([]);
   const [annotationRevision, setAnnotationRevision] = useState(0);
 
-  const stabilizeCanvasImages = useCallback((items: Array<{ id: string; url: string }>) => {
+  const stabilizeCanvasImages = useCallback((
+    items: Array<{ id: string; url: string }>,
+    isCurrent?: () => boolean,
+  ) => {
+    if (isCurrent && !isCurrent()) return;
     const toStabilize = items.filter(({ url }) => url && !url.startsWith('data:'));
     if (toStabilize.length === 0) return;
 
@@ -1694,21 +1700,26 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
       toStabilize.map(async ({ id, url }) => {
         try {
           const stableUrl = await toStableImageUrl(url);
-          return { id, stableUrl: stableUrl !== url ? stableUrl : null };
+          return { id, url, stableUrl: (!isCurrent || isCurrent()) && stableUrl !== url ? stableUrl : null };
         } catch {
-          return { id, stableUrl: null };
+          return { id, url, stableUrl: null };
         }
       })
     ).then(results => {
-      const updates = new Map<string, string>();
-      for (const { id, stableUrl } of results) {
-        if (stableUrl) updates.set(id, stableUrl);
+      if (isCurrent && !isCurrent()) return;
+      const updates = new Map<string, { url: string; stableUrl: string }>();
+      for (const { id, url, stableUrl } of results) {
+        if (stableUrl) updates.set(id, { url, stableUrl });
       }
       if (updates.size === 0) return;
-      setImages(prev => prev.map(img => {
-        const newUrl = updates.get(img.id);
-        return newUrl ? { ...img, url: newUrl } : img;
-      }), { history: 'skip' });
+      setImages(prev => {
+        if (isCurrent && !isCurrent()) return prev;
+        return prev.map(img => {
+          const update = updates.get(img.id);
+          // Scoped insertion must not replace a concurrent URL edit; old callers retain their default behavior.
+          return update && (!isCurrent || img.url === update.url) ? { ...img, url: update.stableUrl } : img;
+        });
+      }, { history: 'skip' });
     });
   }, [setImages]);
 
@@ -4201,172 +4212,182 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
     return laidOut;
   }, []);
 
-  // 加载图片真实尺寸
-  // 添加多张图片到画布（自动排列布局）
-  const handleAddImages = useCallback(async (imageInputs: Array<string | WorkflowCanvasInsertionItem>, sourceImageId?: string, meta?: { modelName?: string; apiProvider?: string; relationType?: ConnectionRelationType; signal?: AbortSignal; beforeInsert?: () => void }) => {
-    const expectedProjectId = currentProjectRef.current?.id;
+  // Generic insertion remains legacy-only; controlled document import is a separate command.
+  const captureCanvasInsertionScope = useCallback((signal?: AbortSignal): {
+    actorId: string; projectId: string; assertCurrent: () => void; isCurrentWritable: () => boolean;
+    fetcher: typeof fetch;
+  } => {
+    const actorId = currentUserRef.current?.id;
+    const projectId = currentProjectRef.current?.id;
+    const authority = collaborativeCanvasRef.current;
+    const epoch = historyTransitionEpochRef.current;
+    if (!actorId || !projectId || historyProjectIdRef.current !== projectId
+      || authority?.projectId !== projectId || authority.authority !== 'legacy') {
+      throw new Error('当前画布不能使用个人素材转入，请先确认项目保存方式');
+    }
+    const generation = authority.recordMediaHistory;
+    const refreshMedia = authority.refreshMedia;
+    const isCurrentWritable = (): boolean => !signal?.aborted && isMountedRef.current
+      && currentUserRef.current?.id === actorId && currentProjectRef.current?.id === projectId
+      && historyProjectIdRef.current === projectId && historyTransitionEpochRef.current === epoch
+      && collaborativeCanvasRef.current?.projectId === projectId
+      && collaborativeCanvasRef.current.authority === 'legacy'
+      && collaborativeCanvasRef.current.recordMediaHistory === generation
+      && collaborativeCanvasRef.current.refreshMedia === refreshMedia
+      && !historyLifecyclePendingRef.current && !isDocumentHistoryRecoveryPending();
+    const assertCurrent = (): void => {
+      if (!isCurrentWritable()) throw new Error('画布转入作用域已失效，请在当前项目重新操作');
+    };
+    assertCurrent();
+    // The existing Skill helper may restore a trashed placement after reading transfer JSON.
+    // Fence its real HTTP/readback seams too, before it can issue that next request.
+    const fetcher: typeof fetch = async (...args) => {
+      assertCurrent();
+      const response = await fetch(...args);
+      assertCurrent();
+      const readJson = response.json.bind(response);
+      response.json = async () => {
+        const value: unknown = await readJson();
+        assertCurrent();
+        return value;
+      };
+      return response;
+    };
+    return { actorId, projectId, assertCurrent, isCurrentWritable, fetcher };
+  }, [isDocumentHistoryRecoveryPending]);
+
+  // 添加多张图片到画布（自动排列布局）；setImages 是唯一准入与 ref 更新入口。
+  const handleAddImages = useCallback(async (
+    imageInputs: Array<string | WorkflowCanvasInsertionItem>,
+    sourceImageId?: string,
+    meta?: {
+      modelName?: string; apiProvider?: string; relationType?: ConnectionRelationType; signal?: AbortSignal;
+      beforeInsert?: () => void; afterInsert?: () => void; scope?: ReturnType<typeof captureCanvasInsertionScope>;
+    },
+  ): Promise<void> => {
+    const scope = meta?.scope ?? captureCanvasInsertionScope(meta?.signal);
+    scope.assertCurrent();
     const newImages: CanvasImage[] = [];
-    const nextWorkflowImageZIndex = Math.max(
-      0,
-      ...latestImagesRef.current.map(image => image.zIndex || 0),
-    ) + 1;
-
-    // Find source image for positioning if provided
-    const sourceImg = sourceImageId ? images.find(img => img.id === sourceImageId) : null;
-
-    // ★ 确定模型信息：优先使用 meta 参数，其次从源图继承
-    const effectiveModelName = meta?.modelName || sourceImg?.modelName || '';
-    const effectiveApiProvider = meta?.apiProvider || sourceImg?.apiProvider || '';
-
-    for (let i = 0; i < imageInputs.length; i++) {
-      if (meta?.signal?.aborted) return;
-      const insertionItem = typeof imageInputs[i] === 'string'
-        ? undefined
-        : imageInputs[i] as WorkflowCanvasInsertionItem;
-      let rawUrl = insertionItem?.url || imageInputs[i] as string;
+    for (const input of imageInputs) {
+      scope.assertCurrent();
+      const insertionItem = typeof input === 'string' ? undefined : input;
       const transferredReference = insertionItem?.assetReference as CoreWorkspaceAssetReference | undefined;
-      if (transferredReference) rawUrl = transferredReference.url;
-      // 将 blob: URL 转为 data URL（blob: 在页面刷新后失效）
+      let rawUrl = transferredReference?.url || insertionItem?.url || input as string;
       if (rawUrl.startsWith('blob:')) {
-        try {
-          const blobResp = await fetch(rawUrl);
-          const blob = await blobResp.blob();
-          const dataUrl = await new Promise<string>((resolve) => {
-            const reader = new FileReader();
-            reader.onloadend = () => resolve(reader.result as string);
-            reader.readAsDataURL(blob);
-          });
-          rawUrl = dataUrl;
-        } catch { /* conversion failed, keep blob URL */ }
+        const response = await fetch(rawUrl, { signal: meta?.signal });
+        scope.assertCurrent();
+        const blob = await response.blob();
+        scope.assertCurrent();
+        rawUrl = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onloadend = () => typeof reader.result === 'string'
+            ? resolve(reader.result) : reject(new Error('图片读取失败'));
+          reader.onerror = () => reject(new Error('图片读取失败'));
+          reader.readAsDataURL(blob);
+        });
+        scope.assertCurrent();
       }
-
-      // 将 data: URL 和外部 HTTP URL 持久化到服务器（避免数据丢失和外部 URL 过期）
       if (!transferredReference && (rawUrl.startsWith('data:') || rawUrl.startsWith('http'))) {
-        try {
-          const saveResp = await fetch('/api/save-image', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ imageUrl: rawUrl, userId: currentUser?.id }),
-          });
-          if (!saveResp.ok) {
-            console.warn(`[handleAddImages] save-image returned ${saveResp.status} for image, keeping original URL`);
-          } else {
-            const saveData = await saveResp.json();
-            if (saveData.success && saveData.url) {
-              rawUrl = saveData.url;
-            } else {
-              console.warn('[handleAddImages] save-image returned non-success:', saveData.error || 'unknown');
-            }
-          }
-        } catch (err) {
-          console.warn('[handleAddImages] save-image failed, keeping original URL:', err);
-        }
+        const response = await fetch('/api/save-image', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ imageUrl: rawUrl, userId: scope.actorId }), signal: meta?.signal,
+        });
+        scope.assertCurrent();
+        if (!response.ok) throw new Error(`图片保存失败 (${response.status})`);
+        const data = await response.json();
+        scope.assertCurrent();
+        if (!data.success || typeof data.url !== 'string' || !data.url) throw new Error(data.error || '图片保存失败');
+        rawUrl = data.url;
       }
-
-      // 跳过已存在的图片
-      if (!transferredReference && (images.some(img => img.url === rawUrl) || newImages.some(img => img.url === rawUrl))) {
-        continue;
-      }
-      // 先获取图片真实尺寸
+      if (!transferredReference && (latestImagesRef.current.some(image => image.url === rawUrl)
+        || newImages.some(image => image.url === rawUrl))) continue;
       const { width: natW, height: natH } = await loadCanvasImageSize(rawUrl);
+      scope.assertCurrent();
       const displaySize = getCanvasImageDisplaySize(natW, natH);
-
       const fallbackId = insertionItem?.outputNodeId || `ref-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-      const tempId = transferredReference
-        ? canvasEntityIdForTransferredReference(transferredReference, fallbackId)
-        : fallbackId;
-      // If source image exists, position generated images to its right
-      const offsetX = sourceImg ? sourceImg.x + sourceImg.width + 30 : 0;
-      const offsetY = sourceImg ? sourceImg.y + i * (displaySize.height + 20) : 0;
-
       newImages.push({
-        id: tempId,
-        url: rawUrl,
-        prompt: '',
-        x: offsetX,
-        y: offsetY,
-        width: displaySize.width,
-        height: displaySize.height,
-        originalWidth: natW,
-        originalHeight: natH,
-        rotation: 0,
-        zIndex: nextWorkflowImageZIndex + newImages.length,
-        createdAt: Date.now(),
+        id: transferredReference ? canvasEntityIdForTransferredReference(transferredReference, fallbackId) : fallbackId,
+        url: rawUrl, prompt: '', x: 0, y: 0, width: displaySize.width, height: displaySize.height,
+        originalWidth: natW, originalHeight: natH, rotation: 0, createdAt: Date.now(),
         generatedFromImageId: sourceImageId,
         ...(transferredReference?.assetId ? { assetId: transferredReference.assetId } : {}),
         ...(transferredReference?.assetVersionId ? { assetVersionId: transferredReference.assetVersionId } : {}),
         ...(transferredReference?.placementId ? { placementId: transferredReference.placementId } : {}),
         ...(transferredReference?.sourceTrace ? { sourceTrace: transferredReference.sourceTrace } : {}),
-        // ★ 保留模型信息和API提供商信息
-        ...(effectiveModelName ? { modelName: effectiveModelName } : {}),
-        ...(effectiveApiProvider ? { apiProvider: effectiveApiProvider } : {}),
       });
     }
-
-    if (
-      newImages.length > 0
-      && !meta?.signal?.aborted
-      && isWorkspaceResultScopeCurrent(expectedProjectId, currentProjectRef.current?.id)
-    ) {
+    scope.assertCurrent();
+    if (newImages.length > 0) {
+      meta?.beforeInsert?.();
+      scope.assertCurrent();
+      // Rebase after all async work (and the caller's synchronous validation), not on the render closure.
       const previousImages = latestImagesRef.current;
-      const insertionCandidates = sourceImg
-        ? newImages
-        : autoLayoutImages(previousImages, newImages);
-      const insertedImages = filterUniqueCanvasImageInsertions(previousImages, insertionCandidates);
-      if (insertedImages.length === 0) {
-        toast.info('图片已在画布中', {
-          description: '工作流结果已存在，无需重复添加',
+      const sourceImg = sourceImageId ? previousImages.find(image => image.id === sourceImageId) : undefined;
+      const zIndex = Math.max(0, ...previousImages.map(image => image.zIndex || 0)) + 1;
+      const candidates = newImages.filter(image => image.assetVersionId
+        || !previousImages.some(existing => existing.url === image.url)).map((image, index) => ({
+          ...image, zIndex: zIndex + index,
+          x: sourceImg ? sourceImg.x + sourceImg.width + 30 : 0,
+          y: sourceImg ? sourceImg.y + index * (image.height + 20) : 0,
+          modelName: meta?.modelName || sourceImg?.modelName || '',
+          apiProvider: meta?.apiProvider || sourceImg?.apiProvider || '',
+        }));
+      const insertedImages = filterUniqueCanvasImageInsertions(previousImages,
+        sourceImg ? candidates : autoLayoutImages(previousImages, candidates));
+      if (insertedImages.length > 0) {
+        const nextImages = [...previousImages, ...insertedImages];
+        if (!setImages(nextImages)) throw new Error('当前画布未接受转入图片');
+        scope.assertCurrent();
+        meta?.afterInsert?.();
+        scope.assertCurrent();
+        if (insertedImages.some(image => image.assetVersionId && image.placementId)) {
+          try {
+            persistCanvasImagesNow(nextImages);
+            await UserManagerCore.getInstance().flushProjectsToServer();
+            scope.assertCurrent();
+          } catch (error) {
+            // Never roll a failed old operation over a new scope or an intervening edit.
+            if (scope.isCurrentWritable() && latestImagesRef.current === nextImages && setImages(previousImages)) {
+              scope.assertCurrent();
+              persistCanvasImagesNow(previousImages);
+            }
+            throw error;
+          }
+        }
+        scope.assertCurrent();
+        if (!sourceImg) stabilizeCanvasImages(insertedImages.map(image => ({ id: image.id, url: image.url })), scope.isCurrentWritable);
+        scope.assertCurrent();
+        if (sourceImageId) {
+          setCanvasConnections(previous => [...previous, ...insertedImages.map(image =>
+            createAutoConnection(sourceImageId, image.id, meta?.relationType || 'variant'))]);
+        }
+        scope.assertCurrent();
+        recordUserData({
+          userId: scope.actorId, area: 'images', type: 'canvas-add-batch',
+          filename: `canvas-images-${Date.now()}.json`, content: JSON.stringify(insertedImages, null, 2),
+          metadata: { imageCount: insertedImages.length },
+        });
+        scope.assertCurrent();
+        toast.success(sourceImg && insertedImages.length > 1
+          ? `已生成 ${insertedImages.length} 张图片，已与原图连线` : `已添加 ${insertedImages.length} 张图片到画布`, {
+          description: sourceImg && insertedImages.length > 1 ? '图片组已自动排列在原图右侧' : '图片已自动排列到画布',
           className: 'bg-[#141414] border-[#2a2a2a] text-white',
         });
         return;
       }
-      const nextImages = [...previousImages, ...insertedImages];
-      meta?.beforeInsert?.();
-      latestImagesRef.current = nextImages;
-      setImages(nextImages);
-      if (!sourceImg) {
-        stabilizeCanvasImages(insertedImages.map(img => ({ id: img.id, url: img.url })));
-      }
-      // ★ 自动连线：当有源图片时，为新图片自动创建连线
-      if (sourceImageId && newImages.length > 0) {
-        const relationType = meta?.relationType || 'variant';
-        setCanvasConnections(prev => {
-          const newConns = newImages.map(img =>
-            createAutoConnection(sourceImageId, img.id, relationType)
-          );
-          return [...prev, ...newConns];
-        });
-      }
-      recordUserData({
-        userId: currentUser?.id,
-        area: 'images',
-        type: 'canvas-add-batch',
-        filename: `canvas-images-${Date.now()}.json`,
-        content: JSON.stringify(newImages, null, 2),
-        metadata: { imageCount: newImages.length },
-      });
-      if (insertedImages.some(image => image.assetVersionId && image.placementId)) {
-        persistCanvasImagesNow(nextImages);
-        await UserManagerCore.getInstance().flushProjectsToServer();
-      }
-      if (sourceImg && newImages.length > 1) {
-        toast.success(`已生成 ${newImages.length} 张图片，已与原图连线`, {
-          description: '图片组已自动排列在原图右侧',
-          className: 'bg-[#141414] border-[#2a2a2a] text-white',
-        });
-      } else {
-        toast.success(`已添加 ${newImages.length} 张图片到画布`, {
-          description: '图片已自动排列到画布',
-          className: 'bg-[#141414] border-[#2a2a2a] text-white',
-        });
-      }
-    } else if (imageInputs.length > 0) {
-      toast.info('图片已在画布中', {
-        description: '所有图片已经存在于画布',
-        className: 'bg-[#141414] border-[#2a2a2a] text-white',
-      });
     }
-  }, [images, currentUser?.id, setImages, autoLayoutImages, stabilizeCanvasImages, persistCanvasImagesNow]);
+    scope.assertCurrent();
+    if (imageInputs.length > 0) toast.info('图片已在画布中', {
+      description: '所有图片已经存在于画布', className: 'bg-[#141414] border-[#2a2a2a] text-white',
+    });
+  }, [captureCanvasInsertionScope, setImages, autoLayoutImages, stabilizeCanvasImages, persistCanvasImagesNow]);
+
+  // Legacy void UI consumers report rejection here; Promise-aware Chat/Node consumers keep the raw sink.
+  const handleAddImagesFromUi = useCallback((...args: Parameters<typeof handleAddImages>): void => {
+    void handleAddImages(...args).catch(error => {
+      toast.error(error instanceof Error ? error.message : '画布转入失败');
+    });
+  }, [handleAddImages]);
 
   const documentUploadBusyRef = useRef(false);
   const documentUploadControllerRef = useRef<AbortController | null>(null);
@@ -4518,6 +4539,113 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
     }
   }, [autoLayoutImages, isDocumentHistoryRecoveryPending]);
 
+  const documentMediaTransferIntentsRef = useRef(new Map<string, {
+    isCurrent: () => boolean; request: Promise<DocumentMediaBatchRequest>;
+  }>());
+  const captureDocumentMediaTransferScope = useCallback((signal?: AbortSignal) => {
+    const actorId = currentUserRef.current?.id;
+    const projectId = currentProjectRef.current?.id;
+    const epoch = historyTransitionEpochRef.current;
+    const authority = collaborativeCanvasRef.current;
+    const generation = authority?.recordMediaHistory;
+    const refreshMedia = authority?.refreshMedia;
+    const isCurrent = (): boolean => !!actorId && !!projectId && isMountedRef.current
+      && !signal?.aborted && currentUserRef.current?.id === actorId
+      && currentProjectRef.current?.id === projectId && historyProjectIdRef.current === projectId
+      && historyTransitionEpochRef.current === epoch && collaborativeCanvasRef.current === authority
+      && authority?.projectId === projectId && authority.authority === 'document'
+      && authority.recordMediaHistory === generation && authority.refreshMedia === refreshMedia
+      && !historyLifecyclePendingRef.current && !isDocumentHistoryRecoveryPending();
+    const assertScope = (): void => {
+      if (!isCurrent()) throw new Error('协作转入作用域已失效');
+    };
+    const assertWritable = (): void => {
+      assertScope();
+      if (!authority?.isWritable()) throw new Error('协作画布当前不可写');
+    };
+    assertWritable();
+    return { actorId: actorId!, projectId: projectId!, epoch, authority: authority!, refreshMedia: refreshMedia!,
+      isCurrent, assertScope, assertWritable };
+  }, [isDocumentHistoryRecoveryPending]);
+
+  const handleAddDocumentEmbeddedMedia = useCallback(async (
+    references: CoreWorkspaceAssetReference[],
+    meta?: { runId?: string; sourceImageId?: string; restoreDeletedPlacement?: boolean; signal?: AbortSignal },
+  ): Promise<void> => {
+    const scope = captureDocumentMediaTransferScope(meta?.signal);
+    if (meta?.restoreDeletedPlacement && !meta.runId) throw new Error('共享文档恢复需要真实 Skill 运行身份');
+    if (!references.length || references.length > 100
+      || references.some(reference => !reference.assetVersionId)
+      || new Set(references.map(reference => reference.assetVersionId)).size !== references.length) {
+      throw new Error('协作转入需要完整且不重复的版本引用');
+    }
+    if(meta?.runId) {
+      references=await resolveCanvasSkillAssets({projectId:scope.projectId,runId:meta.runId,
+        assetVersionIds:references.map(reference=>reference.assetVersionId!),expectedActorId:scope.actorId,signal:meta.signal});
+      scope.assertScope();
+    }
+    // This key identifies a UI intention, never source authority. Retain its
+    // transform and server key through failed ACK/directory refresh attempts.
+    const signature = JSON.stringify([scope.actorId, scope.projectId, scope.epoch, meta?.runId ?? null, !!meta?.restoreDeletedPlacement,
+      meta?.sourceImageId ?? null, references.map(reference => [reference.assetVersionId, reference.placementId ?? null])]);
+    const intents = documentMediaTransferIntentsRef.current;
+    for (const [key, intent] of intents) if (!intent.isCurrent()) intents.delete(key);
+    let intent = intents.get(signature);
+    if (!intent) {
+      if (intents.size >= 128) throw new Error('未确认转入过多，请先确认已有结果');
+      const key = 'embedded-document:' + crypto.randomUUID();
+      const request = (async (): Promise<DocumentMediaBatchRequest> => {
+        const pending: CanvasImage[] = [];
+        for (const [index, reference] of references.entries()) {
+          const current = latestImagesRef.current.find(image => image.placementId === reference.placementId
+            && image.assetVersionId === reference.assetVersionId);
+          // Published confirmations don't load/copy media or alter their position.
+          const resolved=reference as Awaited<ReturnType<typeof resolveCanvasSkillAssets>>[number];
+          if(reference.kind==='video'&&!current&&(!resolved.width||!resolved.height))throw new Error('视频规范尺寸未确认');
+          const dimensions = current
+            ? { width: current.originalWidth || current.width, height: current.originalHeight || current.height }
+            :resolved.width&&resolved.height?{width:resolved.width,height:resolved.height}:await loadCanvasImageSize(reference.url);
+          scope.assertScope();
+          const display = getCanvasImageDisplaySize(dimensions.width, dimensions.height);
+          pending.push({ id: 'document-intent-' + index, url: reference.url, prompt: '', x: 0, y: 0,
+            width: display.width, height: display.height, originalWidth: dimensions.width,
+            originalHeight: dimensions.height, rotation: 0, zIndex: 0, createdAt: Date.now() });
+        }
+        const baseline = latestImagesRef.current;
+        const zIndex = Math.max(0, ...baseline.map(image => image.zIndex ?? 0)) + 1;
+        const positioned = autoLayoutImages(baseline, pending);
+        return { projectId: scope.projectId, idempotencyKey: key, ...(meta?.runId?{skillRunId:meta.runId}:{}), items: references.map((reference, index) => {
+          const state=(reference as Awaited<ReturnType<typeof resolveCanvasSkillAssets>>[number]).placementState;
+          if(meta?.runId && !state)throw new Error('Skill 摆放状态未确认');
+          if(state?.kind==='deleted'&&!meta?.restoreDeletedPlacement)throw new Error('Skill 结果已删除，请从运行记录显式恢复');
+          return {
+          sourceVersionId: reference.assetVersionId!,
+          ...(state?.kind==='deleted'?{restore:{placementId:state.placementId,expectedRemovalSequence:state.removalSequence}}
+            :reference.placementId?{placementId:reference.placementId}:{}),
+          command: { action: 'attach', transform: { x: positioned[index].x, y: positioned[index].y,
+            width: positioned[index].width, height: positioned[index].height, rotation: 0, zIndex: zIndex + index } },
+        };}) };
+      })();
+      intent = { isCurrent: scope.isCurrent, request };
+      intents.set(signature, intent);
+      // No HTTP was sent if preparation fails; release only this failed intent.
+      void request.catch(() => { if (intents.get(signature)?.request === request) intents.delete(signature); });
+    }
+    const input = await intent.request;
+    scope.assertWritable();
+    const result = await importDocumentMediaBatch(input, scope.actorId, meta?.signal, scope.assertScope);
+    scope.assertScope();
+    // WS may deliver the placement before the directory; refresh repairs this,
+    // while the final success boundary still requires current write authority.
+    const images = await scope.refreshMedia({ projectId: scope.projectId,
+      documentSequence: result.documentSequence, requireDirectorySequence: true });
+    scope.assertScope();
+    assertDocumentMediaBatchProjection(result, images);
+    scope.assertWritable();
+    intents.delete(signature);
+    if (result.items.some(item => item.mode !== 'confirm')) toast.success('素材已原子转入协作画布');
+  }, [captureDocumentMediaTransferScope, autoLayoutImages]);
+
   const handleAddEmbeddedChatImage = useCallback(async (
     reference: CoreWorkspaceAssetReference,
     meta?: {
@@ -4530,11 +4658,17 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
       signal?: AbortSignal;
     },
   ) => {
-    if (!currentProject?.id || !reference.assetVersionId) {
-      await handleAddImages([reference.url], meta?.sourceImageId, meta);
+    if (collaborativeCanvasRef.current?.authority !== 'legacy') {
+      await handleAddDocumentEmbeddedMedia([reference], meta);
       return;
     }
-    const expectedProjectId = currentProject.id;
+    const scope = captureCanvasInsertionScope(meta?.signal);
+    if (!reference.assetVersionId) {
+      await handleAddImages([reference.url], meta?.sourceImageId, { ...meta, scope });
+      scope.assertCurrent();
+      return;
+    }
+    const expectedProjectId = scope.projectId;
     const initialRevision = UserManagerCore.getInstance().getProjectSyncRevision();
     const restoreEntityId = meta?.runId
       ? canvasSkillProjectionIdentity(meta.runId, reference.assetVersionId) : undefined;
@@ -4544,24 +4678,25 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
     if (meta?.runId) {
       transferred = await transferCanvasSkillAsset({
           reference,
-          projectId: currentProject.id,
+          projectId: expectedProjectId,
           runId: meta.runId,
           sourceVersionIds: meta.sourceVersionIds ?? [],
           restoreDeletedPlacement: meta.restoreDeletedPlacement,
+          fetcher: scope.fetcher,
           signal: meta.signal,
         });
     } else {
       const requestNonce = Date.now();
-      const response = await fetch('/api/assets/transfer', {
+      const response = await scope.fetcher('/api/assets/transfer', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           sourceVersion: reference.assetVersionId,
-          targetProject: currentProject.id,
-          targetWorkspace: `canvas:${currentProject.id}`,
+          targetProject: expectedProjectId,
+          targetWorkspace: `canvas:${expectedProjectId}`,
           entityType: 'canvas-image',
           entityId: `embedded-chat:${requestNonce}`,
-          idempotencyKey: `embedded-chat-canvas:${currentProject.id}:${reference.assetVersionId}:${requestNonce}`,
+          idempotencyKey: `embedded-chat-canvas:${expectedProjectId}:${reference.assetVersionId}:${requestNonce}`,
           metadata: {
             source: 'embedded-chat',
             ...(reference.sourceTrace ? { sourceTrace: reference.sourceTrace } : {}),
@@ -4569,14 +4704,17 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
         }),
         signal: meta?.signal,
       });
+      scope.assertCurrent();
       if (!response.ok) throw new Error(`Asset transfer failed (${response.status})`);
       transferred = await response.json() as CoreWorkspaceAssetReference;
+      scope.assertCurrent();
       if (!transferred.assetVersionId || !transferred.placementId) {
         throw new Error('Asset transfer returned an incomplete reference');
       }
     }
-    if (meta?.signal?.aborted || !isWorkspaceResultScopeCurrent(expectedProjectId, currentProjectRef.current?.id)) return;
+    scope.assertCurrent();
     let beforeInsert: (() => void) | undefined;
+    let afterInsert: (() => void) | undefined;
     if (meta?.restoreDeletedPlacement) {
       const manager = UserManagerCore.getInstance();
       // Image loading is asynchronous. Recheck at the final synchronous insertion boundary.
@@ -4587,6 +4725,8 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
         if (manager.getProjectSyncRevision() > restoreRevision || currentGeneration !== deletionGeneration) {
           throw new Error('画布已更新，请从运行记录重新选择需要恢复的结果');
         }
+      };
+      afterInsert = () => {
         if (Number.isSafeInteger(transferred.projectRevision)) {
           manager.advanceProjectSyncRevision(Number(transferred.projectRevision));
         }
@@ -4600,8 +4740,9 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
       outputNodeId: `embedded-chat:${transferred.placementId}`,
       url: transferred.url,
       assetReference: transferred,
-    }], meta?.sourceImageId, { ...meta, beforeInsert });
-  }, [currentProject?.id, handleAddImages]);
+    }], meta?.sourceImageId, { ...meta, beforeInsert, afterInsert, scope });
+    scope.assertCurrent();
+  }, [captureCanvasInsertionScope, handleAddImages, handleAddDocumentEmbeddedMedia]);
 
   const handleAddEmbeddedChatImages = useCallback(async (
     references: CoreWorkspaceAssetReference[],
@@ -4613,13 +4754,19 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
       signal?: AbortSignal;
     },
   ): Promise<void> => {
+    if (collaborativeCanvasRef.current?.authority !== 'legacy') {
+      await handleAddDocumentEmbeddedMedia(references, meta);
+      return;
+    }
+    const scope = captureCanvasInsertionScope(meta?.signal);
     if (references.length === 0) return;
-    if (!currentProject?.id || !meta?.runId || references.some(reference => !reference.assetVersionId)) {
-      await handleAddImages(references.map(reference => reference.url), meta?.sourceImageId, meta);
+    if (!meta?.runId || references.some(reference => !reference.assetVersionId)) {
+      await handleAddImages(references.map(reference => reference.url), meta?.sourceImageId, { ...meta, scope });
+      scope.assertCurrent();
       return;
     }
 
-    const expectedProjectId = currentProject.id;
+    const expectedProjectId = scope.projectId;
     const deletionGenerations = new Map(references.map(reference => {
       const identity = canvasSkillProjectionIdentity(meta.runId!, reference.assetVersionId!);
       return [identity, imageDeletionGenerationRef.current.get(identity) ?? 0] as const;
@@ -4630,9 +4777,10 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
       runId: meta.runId,
       sourceVersionIds: meta.sourceVersionIds ?? [],
       restoreDeletedPlacement: meta.restoreDeletedPlacement,
+      fetcher: scope.fetcher,
       signal: meta.signal,
     });
-    if (meta.signal?.aborted || !isWorkspaceResultScopeCurrent(expectedProjectId, currentProjectRef.current?.id)) return;
+    scope.assertCurrent();
 
     const insertionItems = transferred.map(reference => ({
       outputNodeId: `embedded-chat:${reference.placementId}`,
@@ -4653,6 +4801,11 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
       if ((latestRevision > 0 && manager.getProjectSyncRevision() > latestRevision) || deletionChanged) {
         throw new Error('画布已更新，请从运行记录重新选择需要恢复的结果');
       }
+    } : undefined;
+    const afterInsert = meta.restoreDeletedPlacement ? (): void => {
+      const manager = UserManagerCore.getInstance();
+      const latestRevision = Math.max(...transferred.map(reference => Number.isSafeInteger(reference.projectRevision)
+        ? Number(reference.projectRevision) : 0));
       if (latestRevision > 0) manager.advanceProjectSyncRevision(latestRevision);
       const restoredEntityIds = transferred
         .map(reference => reference.entityId)
@@ -4661,12 +4814,79 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
       manager.clearRecentlyDeletedImageIds(restoredEntityIds);
     } : undefined;
 
-    await handleAddImages(insertionItems, meta.sourceImageId, { ...meta, beforeInsert });
-  }, [currentProject?.id, handleAddImages]);
+    await handleAddImages(insertionItems, meta.sourceImageId, { ...meta, beforeInsert, afterInsert, scope });
+    scope.assertCurrent();
+  }, [captureCanvasInsertionScope, handleAddImages, handleAddDocumentEmbeddedMedia]);
 
   const handleUploadEffectReverseSource = useCallback(async (file: File): Promise<CanvasImage> => {
-    if (!currentProject?.id) {
-      throw new Error('请先保存或选择一个项目');
+    const project = currentProjectRef.current;
+    const actorId = currentUserRef.current?.id;
+    const authority = collaborativeCanvasRef.current;
+    const epoch = historyTransitionEpochRef.current;
+    if (!actorId || !project?.id || historyProjectIdRef.current !== project.id
+      || authority?.projectId !== project.id || authority.authority === 'unknown') {
+      throw new Error('请先登录并确认当前项目的保存方式');
+    }
+    const projectId = project.id;
+    const mode = authority.authority;
+    const generation = authority.recordMediaHistory;
+    const refreshMedia = authority.refreshMedia;
+    const isCurrentProject = (): boolean => isMountedRef.current && currentUserRef.current?.id === actorId
+      && currentProjectRef.current?.id === projectId && historyProjectIdRef.current === projectId
+      && historyTransitionEpochRef.current === epoch
+      && collaborativeCanvasRef.current?.projectId === projectId
+      && collaborativeCanvasRef.current.authority === mode
+      && collaborativeCanvasRef.current.recordMediaHistory === generation
+      && collaborativeCanvasRef.current.refreshMedia === refreshMedia;
+    const isWritableProject = (): boolean => isCurrentProject()
+      && !historyLifecyclePendingRef.current && !isDocumentHistoryRecoveryPending()
+      && (mode === 'legacy' || authority.isWritable());
+    const assertScope = (): void => {
+      if (!isCurrentProject()) throw new DocumentCanvasUploadError('stale-project');
+    };
+    const assertCurrent = (): void => {
+      assertScope();
+      if (!isWritableProject()) throw new DocumentCanvasUploadError('not-writable');
+    };
+    assertCurrent();
+
+    if (mode === 'document') {
+      const previewUrl = URL.createObjectURL(file);
+      let dimensions: { width: number; height: number };
+      try { dimensions = await loadCanvasImageSize(previewUrl); }
+      finally { URL.revokeObjectURL(previewUrl); }
+      assertCurrent();
+      const display = getCanvasImageDisplaySize(dimensions.width, dimensions.height);
+      const layoutImages = latestImagesRef.current;
+      const zIndex = Math.max(0, ...layoutImages.map(image => image.zIndex ?? 0)) + 1;
+      const [positioned] = autoLayoutImages(layoutImages, [{
+        id: 'pending-reverse-source-upload', url: '', prompt: '', x: 0, y: 0,
+        width: display.width, height: display.height,
+        originalWidth: dimensions.width, originalHeight: dimensions.height,
+        rotation: 0, zIndex, createdAt: Date.now(),
+      }]);
+      let confirmed: CanvasImage | undefined;
+      await commitDocumentCanvasFile({
+        file, expectedActorId: actorId, projectId, isCurrentProject, isWritableProject,
+        transform: { x: positioned.x, y: positioned.y, width: positioned.width,
+          height: positioned.height, rotation: 0, zIndex },
+        refreshMedia: async (documentSequence, resultIdentity) => {
+          // A published WS placement may precede its media directory. This authorized
+          // read repairs the projection; keep write readiness at submission and final ACK.
+          assertScope();
+          const media = await refreshMedia({ projectId, documentSequence });
+          assertScope();
+          confirmed = media.find(image => image.placementId === resultIdentity.placementId
+            && image.assetVersionId === resultIdentity.assetVersionId);
+          if (!confirmed) throw new Error('协作媒体投影尚未包含反拆源图');
+        },
+      });
+      assertCurrent();
+      if (!confirmed) throw new Error('协作媒体投影尚未确认反拆源图');
+      // The document projection owns insertion; never prewrite a legacy snapshot.
+      setSelectedImage(confirmed);
+      toast.success('源图已保存到项目并载入反向拆图');
+      return confirmed;
     }
 
     const formData = new FormData();
@@ -4676,16 +4896,19 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
       body: formData,
       credentials: 'include',
     });
+    assertCurrent();
     const payload = await response.json().catch(() => null) as {
       success?: boolean;
       url?: string;
       error?: string;
     } | null;
+    assertCurrent();
     if (!response.ok || !payload?.success || !payload.url) {
       throw new Error(payload?.error || `源图保存失败 (${response.status})`);
     }
 
     const { width: naturalWidth, height: naturalHeight } = await loadCanvasImageSize(payload.url);
+    assertCurrent();
     const displaySize = getCanvasImageDisplaySize(naturalWidth, naturalHeight);
     const createdAt = Date.now();
     const imageId = `effect-reverse-source-${createdAt}-${Math.random().toString(36).slice(2, 9)}`;
@@ -4723,13 +4946,14 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
       ...(image.annotationVersionId ? { annotationVersionId: image.annotationVersionId } : {}),
     }));
 
-    latestImagesRef.current = nextImages;
-    setImages(nextImages);
+    // setImages is the admission point and owns the ref write.
+    assertCurrent();
+    if (!setImages(nextImages)) throw new Error('当前画布未接受反拆源图');
     const manager = UserManagerCore.getInstance();
-    manager.updateProject(currentProject.id, {
+    manager.updateProject(projectId, {
       canvasImages: persistableCanvasImages,
       metadata: {
-        ...(currentProject.metadata || {}),
+        ...(project.metadata || {}),
         groups: groupsRef.current,
         viewState: viewStateRef.current,
         annotationsV2: annotationRecordsRef.current,
@@ -4737,28 +4961,30 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
     });
 
     try {
-      await UserManagerCore.getInstance().flushProjectsToServer();
+      await manager.flushProjectsToServer();
+      assertCurrent();
     } catch (error) {
-      latestImagesRef.current = previousImages;
-      setImages(previousImages);
-      manager.updateProject(currentProject.id, {
-        canvasImages: serializeCanvasWorkspacePlacements(previousImages).map((image) => ({
-          ...image,
-          id: image.id,
-          url: image.url,
-          x: image.x,
-          y: image.y,
-          width: image.width,
-          height: image.height,
-          originalWidth: image.originalWidth || image.width,
-          originalHeight: image.originalHeight || image.height,
-          rotation: image.rotation ?? 0,
-          zIndex: image.zIndex ?? 0,
-          createdAt: image.createdAt || Date.now(),
-          prompt: image.prompt || '',
-          ...(image.annotationVersionId ? { annotationVersionId: image.annotationVersionId } : {}),
-        })),
-      });
+      // Never restore the old scope into a new actor/project/authority or overwrite newer edits.
+      if (isWritableProject() && latestImagesRef.current === nextImages && setImages(previousImages)) {
+        manager.updateProject(projectId, {
+          canvasImages: serializeCanvasWorkspacePlacements(previousImages).map((image) => ({
+            ...image,
+            id: image.id,
+            url: image.url,
+            x: image.x,
+            y: image.y,
+            width: image.width,
+            height: image.height,
+            originalWidth: image.originalWidth || image.width,
+            originalHeight: image.originalHeight || image.height,
+            rotation: image.rotation ?? 0,
+            zIndex: image.zIndex ?? 0,
+            createdAt: image.createdAt || Date.now(),
+            prompt: image.prompt || '',
+            ...(image.annotationVersionId ? { annotationVersionId: image.annotationVersionId } : {}),
+          })),
+        });
+      }
       throw new Error(error instanceof Error ? error.message : '项目同步失败，源图未加入反拆任务');
     }
 
@@ -4766,7 +4992,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
     setSelectedImage(uploaded);
     toast.success('源图已保存到项目并载入反向拆图');
     return uploaded;
-  }, [autoLayoutImages, currentProject, getCanvasImageDisplaySize, loadCanvasImageSize, setImages, stabilizeCanvasImages]);
+  }, [autoLayoutImages, isDocumentHistoryRecoveryPending, setImages, stabilizeCanvasImages]);
 
   const handleAddVectorAsset = useCallback(async (asset: VectorDesignAsset, sourceImageId?: string) => {
     const sourceImage = sourceImageId ? latestImagesRef.current.find(img => img.id === sourceImageId) : undefined;
@@ -7350,7 +7576,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
           onGenerateVariation={handleCanvasGenerateVariation}
           onExtractKeywords={handleCanvasExtractKeywords}
           onFusion={handleCanvasFusion}
-          onAddImages={handleAddImages}
+          onAddImages={handleAddImagesFromUi}
           onUploadEffectReverseSource={handleUploadEffectReverseSource}
           onReferenceSelect={handleCanvasReferenceSelect}
           referenceIds={ctrlRefSelections.map(r => r.id)}
@@ -7680,7 +7906,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
               </div>
             </div>
             <div className={activePanel === 'chat' ? 'flex-1 overflow-hidden' : 'hidden'}>
-              <ChatPanel themeStyle={themeStyle} projectId={currentProject?.id} onAddToPrompt={handleAddToPrompt} onAddImages={handleAddImages} onAddGeneratedImage={handleAddEmbeddedChatImage} onAddGeneratedImages={handleAddEmbeddedChatImages} canvasImages={images} selectedCanvasImage={selectedImage} onResolveCanvasImageForChat={resolveCanvasImageForChat} onChatModelChange={setCurrentChatModelInfo} chatInitialImage={chatInitialImage} onChatInitialImageConsumed={() => setChatInitialImage(null)} chatTabOpen={chatTabOpen} onChatTabOpenChange={setChatTabOpen} onNavigateToImage={(id: string) => setNavigateToImageId(id)} onGenerateImage={handleChatGenerateImage} externalPrompt={externalChatPrompt} onExternalPromptConsumed={() => setExternalChatPrompt(undefined)} />
+              <ChatPanel canvasAuthority={collaborativeCanvas.authority==='unknown'?'pending':collaborativeCanvas.authority} themeStyle={themeStyle} projectId={currentProject?.id} onAddToPrompt={handleAddToPrompt} onAddImages={handleAddImages} onAddGeneratedImage={handleAddEmbeddedChatImage} onAddGeneratedImages={handleAddEmbeddedChatImages} canvasImages={images} selectedCanvasImage={selectedImage} onResolveCanvasImageForChat={resolveCanvasImageForChat} onChatModelChange={setCurrentChatModelInfo} chatInitialImage={chatInitialImage} onChatInitialImageConsumed={() => setChatInitialImage(null)} chatTabOpen={chatTabOpen} onChatTabOpenChange={setChatTabOpen} onNavigateToImage={(id: string) => setNavigateToImageId(id)} onGenerateImage={handleChatGenerateImage} externalPrompt={externalChatPrompt} onExternalPromptConsumed={() => setExternalChatPrompt(undefined)} />
             </div>
 
             {/* 固定在底部的开始生成按钮 */}
@@ -7732,7 +7958,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
             await handleVideoGenerate(params);
             return {};
           }}
-          onAddImages={(urls: string[]) => handleAddImages(urls)}
+          onAddImages={handleAddImagesFromUi}
           onClose={() => setShowVideoPanel(false)}
           externalPrompt={externalVideoPrompt}
           externalPromptMode={externalVideoMode}

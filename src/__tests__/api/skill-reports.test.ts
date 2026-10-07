@@ -21,6 +21,9 @@ vi.mock('@/lib/agent-runtime/service', () => ({ listAgentRunEvents: mocks.listAg
 vi.mock('@/lib/asset-core/storage', () => ({
   createPostgresAssetStorage: () => ({ read: mocks.read }),
 }));
+vi.mock('@/lib/skill-runtime/document-assets', () => ({
+  skillRunAssetReadStorage: () => ({read:mocks.read}),
+}));
 
 import { GET } from '@/app/api/skill-reports/[runId]/[stepId]/route';
 

@@ -5,6 +5,44 @@ import { parseDurableSkillOutputs } from './structured-output';
 import { MULTI_PLATFORM_EXPORT_SKILL_ID } from './multi-platform-export-preset';
 import { parseBriefToVideoResult } from '@/lib/brief-to-video/schema';
 import type { BriefToVideoResultV1 } from '@/lib/brief-to-video/types';
+import type { SkillPlacementState } from './document-assets';
+
+export type SkillResolvedAssetReference = WorkspaceAssetReference & {placementState?: SkillPlacementState; width?:number; height?:number};
+interface CanvasSkillReferenceInput {
+  projectId: string; runId: string; assetVersionIds: readonly string[]; expectedActorId?: string;
+  fetcher?: typeof fetch; signal?: AbortSignal;
+}
+export function resolveCanvasSkillAssets(input: CanvasSkillReferenceInput): Promise<SkillResolvedAssetReference[]> {
+  return resolveCanvasSkillReferences(input, 'assets');
+}
+export function resolveCanvasSkillSources(input: CanvasSkillReferenceInput): Promise<SkillResolvedAssetReference[]> {
+  return resolveCanvasSkillReferences(input, 'sources');
+}
+async function resolveCanvasSkillReferences(input: CanvasSkillReferenceInput, endpoint: 'assets' | 'sources'): Promise<SkillResolvedAssetReference[]> {
+  if (!input.assetVersionIds.length) return [];
+  if (input.assetVersionIds.length > 100 || new Set(input.assetVersionIds).size !== input.assetVersionIds.length) throw new Error('Skill 输出批次无效');
+  input.signal?.throwIfAborted();
+  const query = new URLSearchParams({projectId: input.projectId});
+  for (const id of input.assetVersionIds) query.append('assetVersionId',id);
+  const payload: unknown = await readJson(await (input.fetcher??fetch)(`/api/skill-runs/${encodeURIComponent(input.runId)}/${endpoint}?${query}`,
+    {method:'GET',credentials:'include',signal:input.signal}),'Skill 运行资产读取失败');
+  input.signal?.throwIfAborted();
+  if(!isRecord(payload)||payload.projectId!==input.projectId||payload.runId!==input.runId
+    ||typeof payload.actorUserId!=='string'||(input.expectedActorId&&payload.actorUserId!==input.expectedActorId)
+    ||!Array.isArray(payload.references)||payload.references.length!==input.assetVersionIds.length)throw new Error('Skill 运行资产身份不一致');
+  return payload.references.map((raw,index)=>{
+    if(!isWorkspaceAssetReference(raw)||raw.assetVersionId!==input.assetVersionIds[index]
+      ||!['image','video','document'].includes(raw.kind??''))throw new Error('Skill 运行资产版本不一致');
+    const state=(raw as SkillResolvedAssetReference).placementState;
+    if(state&&(state.kind==='live'?(!state.placementId||raw.placementId!==state.placementId)
+      :state.kind==='deleted'?(!state.placementId||!Number.isSafeInteger(state.removalSequence)||state.removalSequence<1)
+      :state.kind!=='unplaced'))throw new Error('Skill 运行资产摆放身份不一致');
+    const media=raw as SkillResolvedAssetReference;
+    const dimensions=typeof media.width==='number'&&Number.isFinite(media.width)&&media.width>0
+      &&typeof media.height==='number'&&Number.isFinite(media.height)&&media.height>0?{width:media.width,height:media.height}:{};
+    return {...sanitizeWorkspaceAssetReference(raw),...dimensions,...(state?{placementState:state}:{})};
+  });
+}
 
 export function shouldAutoProjectCanvasSkill(skillId: string): boolean {
   return skillId !== MULTI_PLATFORM_EXPORT_SKILL_ID;
@@ -336,13 +374,17 @@ export function createCanvasSkillProjectionCoordinator() {
     async project(input: {
       runId: string;
       projectId: string;
-      assetVersionId: string;
+      assetVersionId?: string;
+      assetVersionIds?: readonly string[];
       isAlreadyProjected?: () => boolean;
       project: (signal: AbortSignal) => Promise<void>;
     }): Promise<boolean> {
       if (!isActive(input.runId, input.projectId) || !active) return false;
       if (input.isAlreadyProjected?.()) return false;
-      const identity = canvasSkillProjectionIdentity(input.runId, input.assetVersionId);
+      const versions=input.assetVersionIds??(input.assetVersionId?[input.assetVersionId]:[]);
+      if(!versions.length||new Set(versions).size!==versions.length)throw new Error('Skill 投影批次无效');
+      const identity = input.assetVersionIds
+        ? JSON.stringify([input.runId,[...versions].sort()]) : canvasSkillProjectionIdentity(input.runId,versions[0]);
       if (pending.get(identity)?.aborted === false || completed.has(identity)) return false;
       const signal = active.controller.signal;
       pending.set(identity, signal);
@@ -392,10 +434,12 @@ export async function loadCompletedCanvasSkillAssets(input: {
   sourceVersionIds: readonly string[];
   fetcher?: typeof fetch;
   signal?: AbortSignal;
+  authority?: 'document' | 'legacy' | 'pending';
+  expectedActorId?: string;
 }): Promise<WorkspaceAssetReference[]> {
   const fetcher = input.fetcher ?? fetch;
   const payload = await readJson<SkillRunHistoryResponse>(
-    await fetcher(`/api/skill-runs/${encodeURIComponent(input.runId)}`, {
+    await fetcher(`/api/skill-runs/${encodeURIComponent(input.runId)}?observeOnly=true`, {
       method: 'GET',
       signal: input.signal,
     }),
@@ -410,6 +454,12 @@ export async function loadCompletedCanvasSkillAssets(input: {
         typeof value === 'string' && Boolean(value) && !sourceIds.has(value)
       )))]
     : [];
+
+  if (input.authority === 'pending') throw new Error('画布权威尚未就绪');
+  if (input.authority === 'document') {
+    const references=await resolveCanvasSkillAssets({...input,assetVersionIds:outputIds});
+    return references.filter(reference=>reference.kind==='image'||reference.kind==='video');
+  }
 
   const resolved = await Promise.all(outputIds.map(async assetVersionId => {
     const query = new URLSearchParams({ projectId: input.projectId, assetVersionId });
@@ -431,10 +481,12 @@ export async function loadCompletedCanvasBriefVideoResult(input: {
   runId: string;
   fetcher?: typeof fetch;
   signal?: AbortSignal;
+  authority?: 'document' | 'legacy' | 'pending';
+  expectedActorId?: string;
 }): Promise<{ result: BriefToVideoResultV1; asset: WorkspaceAssetReference } | null> {
   const fetcher = input.fetcher ?? fetch;
   const payload = await readJson<SkillRunHistoryResponse>(
-    await fetcher(`/api/skill-runs/${encodeURIComponent(input.runId)}`, {
+    await fetcher(`/api/skill-runs/${encodeURIComponent(input.runId)}?observeOnly=true`, {
       method: 'GET', signal: input.signal,
     }),
     '视频 Skill 运行结果加载失败',
@@ -457,7 +509,9 @@ export async function loadCompletedCanvasBriefVideoResult(input: {
     projectId: input.projectId,
     assetVersionId: result.videoAssetVersionId,
   });
-  const asset = await readJson<WorkspaceAssetReference & { kind?: string }>(
+  if(input.authority==='pending')throw new Error('画布权威尚未就绪');
+  const asset = input.authority==='document' ? (await resolveCanvasSkillAssets({...input,assetVersionIds:[result.videoAssetVersionId]}))[0]
+    : await readJson<WorkspaceAssetReference & { kind?: string }>(
     await fetcher(`/api/assets?${query.toString()}`, { method: 'GET', signal: input.signal }),
     '视频 Skill 资产版本加载失败',
   );
@@ -474,8 +528,14 @@ export async function loadCanvasExportImageAssets(input: {
   assetVersionIds: readonly string[];
   fetcher?: typeof fetch;
   signal?: AbortSignal;
+  runId?: string;
 }): Promise<WorkspaceAssetReference[]> {
   const fetcher = input.fetcher ?? fetch;
+  if(input.runId) {
+    const references=await resolveCanvasSkillAssets({...input,runId:input.runId,assetVersionIds:[...new Set(input.assetVersionIds)]});
+    if(references.some(ref=>ref.kind!=='image'))throw new Error('导出图片类型不一致');
+    return references;
+  }
   const resolved = await Promise.all([...new Set(input.assetVersionIds)].map(async assetVersionId => {
     const query = new URLSearchParams({ projectId: input.projectId, assetVersionId });
     const reference = await readJson<WorkspaceAssetReference & { kind?: string }>(

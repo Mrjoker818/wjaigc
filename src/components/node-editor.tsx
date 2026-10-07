@@ -675,7 +675,7 @@ interface NodeEditorProps {
   /** 主题风格: gold(黑金) / monochrome(单色) */
   themeStyle?: 'gold' | 'monochrome';
   /** 生成图片后回调，将图片添加到项目 */
-  onAddImages?: (items: WorkflowCanvasInsertionItem[], meta?: { modelName?: string; apiProvider?: string }) => void;
+  onAddImages?: (items: WorkflowCanvasInsertionItem[], meta?: { modelName?: string; apiProvider?: string }) => void | Promise<void>;
   preferredAnnotationModelId?: string;
   rendererMode?: WorkflowRendererMode;
 }
@@ -3083,7 +3083,7 @@ ${contextInfo}
               if (workflowModelName) meta.modelName = workflowModelName;
               if (workflowApiProvider) meta.apiProvider = workflowApiProvider;
               if (insertion.items.length > 0) {
-                onAddImages(insertion.items, Object.keys(meta).length > 0 ? meta : undefined);
+                await onAddImages(insertion.items, Object.keys(meta).length > 0 ? meta : undefined);
               }
             }
           }

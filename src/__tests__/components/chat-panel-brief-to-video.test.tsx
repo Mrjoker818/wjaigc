@@ -2,10 +2,29 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
+import ts from 'typescript';
 
 const source = readFileSync(resolve(process.cwd(), 'src/components/chat-panel.tsx'), 'utf8');
 
 describe('Canvas Brief 到视频成片 UI wiring', () => {
+  it('1397 fix1 actual Chat JSX passes current authority/account to both consumers', () => {
+    const ast = ts.createSourceFile('chat.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+    const values: Record<string, Record<string, unknown>> = {};
+    const visit = (node: ts.Node): void => {
+      if (ts.isJsxSelfClosingElement(node) && ['BriefToVideoResultCard', 'MultiPlatformExportDrawer'].includes(node.tagName.getText(ast))) {
+        const evaluated: Record<string, unknown> = {};
+        for (const prop of node.attributes.properties) {
+          if (!ts.isJsxAttribute(prop) || !['authority', 'expectedActorId', 'accountKey', 'projectId'].includes(prop.name.getText(ast))) continue;
+          if (!prop.initializer || !ts.isJsxExpression(prop.initializer) || !prop.initializer.expression) throw new Error('Missing actual prop expression');
+          evaluated[prop.name.getText(ast)] = new Function('canvasAuthority', 'skillAccountKey', 'projectId', 'return (' + prop.initializer.expression.getText(ast) + ');')('document', 'editor', 'target');
+        }
+        values[node.tagName.getText(ast)] = evaluated;
+      }
+      ts.forEachChild(node, visit);
+    }; visit(ast);
+    expect(values.BriefToVideoResultCard).toEqual({ authority: 'document', expectedActorId: 'editor', projectId: 'target' });
+    expect(values.MultiPlatformExportDrawer).toEqual({ authority: 'document', accountKey: 'editor', projectId: 'target' });
+  });
   it('keeps approval and finished-video UI inside Canvas Skill runtime', () => {
     expect(source).toContain("import { BriefToVideoApprovalCard } from '@/components/skill-runtime/BriefToVideoApprovalCard';");
     expect(source).toContain("import { BriefToVideoResultCard } from '@/components/skill-runtime/BriefToVideoResultCard';");

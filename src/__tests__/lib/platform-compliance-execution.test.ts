@@ -4,17 +4,27 @@ import { resolve } from 'node:path';
 import { createHash } from 'node:crypto';
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { WorkspaceReadableAssetReference } from '@/lib/asset-core/types';
+import type { SkillDocumentAssetScopeInput } from '@/lib/skill-runtime/document-assets';
 
 const mocks = vi.hoisted(() => ({
   fetchWithV1Retry: vi.fn(),
   getApiProviders: vi.fn(),
   persistComplianceReportAsset: vi.fn(),
   appendAdoptedAgentEvent: vi.fn(),
+  createSkillDocumentAssetScope: vi.fn<typeof import('@/lib/skill-runtime/document-assets').createSkillDocumentAssetScope>(),
 }));
 
 vi.mock('server-only', () => ({}));
+vi.mock('@/lib/db-client', () => ({
+  getPool: () => { throw new Error('Unexpected compliance unit database access'); },
+}));
 vi.mock('@/lib/api-helpers', () => ({ fetchWithV1Retry: mocks.fetchWithV1Retry }));
 vi.mock('@/lib/server-api-config', () => ({ getApiProviders: mocks.getApiProviders }));
+vi.mock('@/lib/skill-runtime/document-assets', async importOriginal => ({
+  ...await importOriginal<typeof import('@/lib/skill-runtime/document-assets')>(),
+  createSkillDocumentAssetScope: mocks.createSkillDocumentAssetScope,
+}));
 vi.mock('@/lib/agent-runtime/event-storage', () => ({
   appendAdoptedAgentEvent: mocks.appendAdoptedAgentEvent,
 }));
@@ -30,6 +40,7 @@ import { buildComplianceReport } from '@/lib/platform-compliance/report-builder'
 import { canonicalComplianceReportJson } from '@/lib/platform-compliance/report-schema';
 import { resolveComplianceRuleSet } from '@/lib/platform-compliance/rules';
 import { evaluateTechnicalRules } from '@/lib/platform-compliance/technical-evaluator';
+import { SkillAssetScopeError } from '@/lib/skill-runtime/document-assets';
 import {
   executeDurableAgentDownstreamOperation,
   type AgentDownstreamOperation,
@@ -44,6 +55,46 @@ const image = readFileSync(resolve(
   process.cwd(), 'src/__tests__/fixtures/platform-compliance/amazon-main-pass.png',
 ));
 const imageDataUrl = `data:image/png;base64,${image.toString('base64')}`;
+type ComplianceAssetScope = Awaited<ReturnType<typeof import('@/lib/skill-runtime/document-assets').createSkillDocumentAssetScope>>;
+const authorizedReferences = new Map<string, WorkspaceReadableAssetReference>();
+
+// This unit replaces the DB-backed scope boundary, not the production adapter.
+// Only these sealed test identities are authorized; unused storage/writes fail closed.
+async function authorizedComplianceScope(input: SkillDocumentAssetScopeInput): Promise<ComplianceAssetScope> {
+  const permittedOperation = (input.operationKey === 'operation-1'
+    && input.operationIdempotencyKey === 'provider-idempotency')
+    || (input.operationKey === 'agent-op:3286ea5e0f58339cfcd61dd4cf6c0171e0505eb7e7def5d9c56e9c7fa28b0baf'
+      && input.operationIdempotencyKey === 'agent-provider:3286ea5e0f58339cfcd61dd4cf6c0171e0505eb7e7def5d9c56e9c7fa28b0baf');
+  const permittedSources = input.stepId === 'audit:a'
+    ? input.sourceVersionIds.length === 1 && input.sourceVersionIds[0] === 'asset-version-a'
+    : input.stepId === 'audit:b' && input.sourceVersionIds.length === 2
+      && input.sourceVersionIds[0] === 'asset-version-a' && input.sourceVersionIds[1] === 'asset-version-b';
+  if (input.actorUserId !== 'user-1' || input.projectId !== 'project-1' || input.runId !== 'run-1'
+    || input.toolId !== 'compliance_audit' || input.requestDigest !== 'request-digest'
+    || input.executionFence?.runId !== 'run-1' || input.executionFence.leaseOwner !== 'lease-1'
+    || input.executionFence.generation !== 1 || !permittedOperation || !permittedSources
+    || !(input.signal instanceof AbortSignal)) throw new SkillAssetScopeError();
+  input.signal.throwIfAborted();
+  const unsupported = async (): Promise<never> => { throw new Error('Unexpected compliance unit asset storage/write'); };
+  return {
+    assetService: {
+      resolveAssetReference: async value => {
+        const reference = authorizedReferences.get(value.assetVersionId);
+        if (value.actorUserId !== 'user-1' || value.projectId !== 'project-1'
+          || !input.sourceVersionIds.includes(value.assetVersionId) || !reference) throw new SkillAssetScopeError();
+        return { ...reference };
+      },
+      createAssetVersion: unsupported,
+      createAssetVersionsAtomically: unsupported,
+      findAssetVersionByIdempotency: unsupported,
+    },
+    storage: { read: unsupported, transaction: unsupported },
+    readExportSources: unsupported,
+    persistExportImage: unsupported,
+    loadPersistedExportImages: unsupported,
+    persistExportArtifacts: unsupported,
+  };
+}
 const ruleSet = resolveComplianceRuleSet({
   platform: 'Amazon', region: 'US', assetType: 'main', productCategory: '',
 });
@@ -159,6 +210,15 @@ function immediateOperationContext(idempotencyKey = 'provider-idempotency') {
 describe('platform compliance report execution', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    authorizedReferences.clear();
+    for (const [versionId, assetId] of [['asset-version-a', 'asset-a'], ['asset-version-b', 'asset-b']]) {
+      authorizedReferences.set(versionId, {
+        assetId, assetVersionId: versionId, kind: 'image', url: imageDataUrl,
+        mimeType: 'image/png', byteSize: image.length,
+        checksum: createHash('sha256').update(image).digest('hex'),
+      });
+    }
+    mocks.createSkillDocumentAssetScope.mockImplementation(authorizedComplianceScope);
     mocks.persistComplianceReportAsset.mockImplementation(async input => {
       const reportContent = canonicalComplianceReportJson(input.report);
       return {
@@ -285,6 +345,52 @@ describe('platform compliance report execution', () => {
     }));
     expect(result.assetVersionIds).toEqual(['report-version-1']);
     expect(result.structured).toMatchObject({ schemaId: 'platform-compliance-report-v1' });
+    expect(mocks.createSkillDocumentAssetScope).toHaveBeenCalledWith({
+      actorUserId: 'user-1', projectId: 'project-1', runId: 'run-1', stepId: 'audit:b',
+      requestDigest: 'request-digest', sourceVersionIds: ['asset-version-a', 'asset-version-b'],
+      executionFence: { runId: 'run-1', leaseOwner: 'lease-1', generation: 1 },
+      toolId: 'compliance_audit', operationKey: 'operation-1',
+      operationIdempotencyKey: 'provider-idempotency', signal: expect.any(AbortSignal),
+    });
+  });
+
+  it('rejects a denied asset scope before provider, report or event effects', async () => {
+    const denied = new SkillAssetScopeError();
+    mocks.createSkillDocumentAssetScope.mockRejectedValueOnce(denied);
+    const request = complianceRequest();
+    const persisted = vi.fn<(input: PersistCompliancePartialReportInput) => Promise<void>>();
+    const registry = createProductionSkillStepRegistry({
+      actor: { id: 'user-1', name: 'User', role: 'user', status: 'active', productType: 'canvas', createdAt: 1, updatedAt: 1 },
+      request, mediaByVersionId: { 'asset-version-a': imageDataUrl },
+      persistCompliancePartialReport: persisted,
+    });
+    await expect(registry.stepAdapters.compliance_audit(complianceStepInput(
+      request, immediateOperationContext(), new AbortController().signal,
+    ))).rejects.toBe(denied);
+    expect(mocks.getApiProviders).not.toHaveBeenCalled();
+    expect(mocks.fetchWithV1Retry).not.toHaveBeenCalled();
+    expect(persisted).not.toHaveBeenCalled();
+    expect(mocks.persistComplianceReportAsset).not.toHaveBeenCalled();
+    expect(mocks.appendAdoptedAgentEvent).not.toHaveBeenCalled();
+  });
+
+  it('rejects mismatched authorized reference media before provider or persistence', async () => {
+    // Independently sealed source remains the PNG; the registry's media is different.
+    const request = complianceRequest();
+    const persisted = vi.fn<(input: PersistCompliancePartialReportInput) => Promise<void>>();
+    const registry = createProductionSkillStepRegistry({
+      actor: { id: 'user-1', name: 'User', role: 'user', status: 'active', productType: 'canvas', createdAt: 1, updatedAt: 1 },
+      request, mediaByVersionId: { 'asset-version-a': 'data:image/png;base64,client-must-not-win' },
+      persistCompliancePartialReport: persisted,
+    });
+    await expect(registry.stepAdapters.compliance_audit(complianceStepInput(
+      request, immediateOperationContext(), new AbortController().signal,
+    ))).rejects.toThrow('Skill compliance source identity changed');
+    expect(mocks.getApiProviders).not.toHaveBeenCalled();
+    expect(mocks.fetchWithV1Retry).not.toHaveBeenCalled();
+    expect(persisted).not.toHaveBeenCalled();
+    expect(mocks.persistComplianceReportAsset).not.toHaveBeenCalled();
+    expect(mocks.appendAdoptedAgentEvent).not.toHaveBeenCalled();
   });
 
   it('keeps the partial report and exact retryable identity when vision fails', async () => {
@@ -648,27 +754,43 @@ describe('platform compliance report execution', () => {
     }, operation => registry.stepAdapters.compliance_audit(
       complianceStepInput(request, operation, controller.signal),
     ), dependencies);
-    await cleanupStarted;
-    controller.abort(new DOMException('cancelled during cleanup', 'AbortError'));
-    finishCleanup();
-
-    await expect(execution).rejects.toMatchObject({
-      code: 'COMPLIANCE_AUDIT_VISION_FAILED',
-      submissionOutcome: 'known',
-      retryable: false,
-      partialReport: expect.objectContaining({
-        technicalErrors: [expect.objectContaining({
-          code: 'COMPLIANCE_VISION_CANCELLED',
-          requestId: 'provider-request-429',
-          retryable: false,
-        })],
-      }),
-    });
-    expect(cancel).toHaveBeenCalledTimes(1);
-    expect(dependencies.markSubmissionUnknown).not.toHaveBeenCalled();
-    expect(dependencies.release).toHaveBeenCalledWith(
-      expect.any(Object), { knownSubmissionOutcome: true },
+    // Observe rejection immediately. A pre-cleanup failure must reject this wait,
+    // not leave cleanupStarted pending and turn the original error into unhandled.
+    const outcome = execution.then(
+      value => ({ kind: 'resolved' as const, value }),
+      (error: unknown) => ({ kind: 'rejected' as const, error }),
     );
+    try {
+      await Promise.race([cleanupStarted, outcome.then(result => {
+        if (result.kind === 'rejected') throw result.error;
+        throw new Error('Compliance execution completed before response cleanup');
+      })]);
+      controller.abort(new DOMException('cancelled during cleanup', 'AbortError'));
+      finishCleanup();
+
+      await expect(execution).rejects.toMatchObject({
+        code: 'COMPLIANCE_AUDIT_VISION_FAILED',
+        submissionOutcome: 'known',
+        retryable: false,
+        partialReport: expect.objectContaining({
+          technicalErrors: [expect.objectContaining({
+            code: 'COMPLIANCE_VISION_CANCELLED',
+            requestId: 'provider-request-429',
+            retryable: false,
+          })],
+        }),
+      });
+      expect(cancel).toHaveBeenCalledTimes(1);
+      expect(dependencies.markSubmissionUnknown).not.toHaveBeenCalled();
+      expect(dependencies.release).toHaveBeenCalledWith(
+        expect.any(Object), { knownSubmissionOutcome: true },
+      );
+    } finally {
+      finishCleanup();
+      markCleanupStarted();
+      await cleanupPending;
+      await outcome;
+    }
   });
 
   it('binds vision to the inspected bytes when the authorized URL content changes', async () => {
@@ -691,6 +813,8 @@ describe('platform compliance report execution', () => {
     );
     const request = complianceRequest();
     const mutableUrl = `/uploads/${name}`;
+    const reference = authorizedReferences.get('asset-version-a')!;
+    authorizedReferences.set('asset-version-a', { ...reference, url: mutableUrl });
     const registry = createProductionSkillStepRegistry({
       actor: { id: 'user-1', name: 'User', role: 'user', status: 'active', productType: 'canvas', createdAt: 1, updatedAt: 1 },
       request, mediaByVersionId: { 'asset-version-a': mutableUrl },

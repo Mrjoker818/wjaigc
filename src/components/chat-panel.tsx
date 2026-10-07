@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
+import { useState, useCallback, useRef, useEffect, useMemo, useLayoutEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { Bot, Send, Square, Sparkles, Copy, Check, Trash2, Loader2, Eye, EyeOff, Wand2, User, Upload, X, Image as ImageIcon, Languages, Settings, Plug, Plus, History, FolderOpen, MessageSquare, Bookmark, BookmarkCheck, Lightbulb, Zap, ArrowRight, Palette, Target, Sliders, Download, AlertCircle, LocateFixed, RotateCcw, FileText, Cpu, ChevronRight, AtSign, ThumbsUp, ThumbsDown } from 'lucide-react';
 import { AgentBuilderDialog, type AgentDefinition, type AgentRecipe } from '@/components/chat/AgentBuilderDialog';
@@ -65,7 +65,6 @@ import {
   deleteCanvasSkillsSequentially,
   loadCanvasSkillCatalog,
   loadCompletedCanvasSkillAssets,
-  projectExportImagesInBatches,
   shouldAutoProjectCanvasSkill,
   startCanvasSkillRun,
   updateCanvasSkill,
@@ -547,9 +546,10 @@ const AGENTS: AgentDefinition[] = [
 interface ChatPanelProps {
   themeStyle: 'gold' | 'monochrome';
   projectId?: string;
+  canvasAuthority?: 'document' | 'legacy' | 'pending';
 
   onAddToPrompt?: (prompt: string) => void;
-  onAddImages?: (imageUrls: string[], sourceImageId?: string, meta?: { modelName?: string; apiProvider?: string }) => void;
+  onAddImages?: (imageUrls: string[], sourceImageId?: string, meta?: { modelName?: string; apiProvider?: string }) => void | Promise<void>;
   onAddGeneratedImage?: (reference: WorkspaceAssetReference, meta?: {
     modelName?: string;
     apiProvider?: string;
@@ -1304,7 +1304,7 @@ function extractPromptForGeneration(content: string): string {
 /* ========== 智能体搭建弹窗 ========== */
 /* AgentBuilderDialog 已提取至 src/components/chat/AgentBuilderDialog.tsx */
 
-export function ChatPanel({ themeStyle, projectId, onAddToPrompt, onAddImages, onAddGeneratedImage, onAddGeneratedImages, canvasImages = [], selectedCanvasImage, onResolveCanvasImageForChat, onChatModelChange, onSuggestionAction, onGenerateImage, brandDna, onInjectBrandDna, chatInitialImage, onChatInitialImageConsumed, chatTabOpen, onChatTabOpenChange, onNavigateToImage, externalPrompt, onExternalPromptConsumed }: ChatPanelProps) {
+export function ChatPanel({ themeStyle, projectId, canvasAuthority = 'legacy', onAddToPrompt, onAddImages, onAddGeneratedImage, onAddGeneratedImages, canvasImages = [], selectedCanvasImage, onResolveCanvasImageForChat, onChatModelChange, onSuggestionAction, onGenerateImage, brandDna, onInjectBrandDna, chatInitialImage, onChatInitialImageConsumed, chatTabOpen, onChatTabOpenChange, onNavigateToImage, externalPrompt, onExternalPromptConsumed }: ChatPanelProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [showFullHistory, setShowFullHistory] = useState(false);
   const visibleMessages = useMemo(() => (showFullHistory ? messages : messages.slice(-CHAT_RENDER_WINDOW)).filter(Boolean), [messages, showFullHistory]);
@@ -1452,6 +1452,22 @@ export function ChatPanel({ themeStyle, projectId, onAddToPrompt, onAddImages, o
   const receiveSkillOutput = useSkillOutputReceiver(onAddGeneratedImage);
   const resetSkillRun = skillRun.reset;
   const skillAccountKey = typeof window === 'undefined' ? '' : UserManager.getInstance().getCurrentUserId() || '';
+  const skillDeliveryScopeRef = useRef({epoch:0,mounted:false});
+  useLayoutEffect(() => {
+    skillDeliveryScopeRef.current = {epoch:skillDeliveryScopeRef.current.epoch+1,mounted:true};
+    return () => { skillDeliveryScopeRef.current.mounted=false; skillProjectionControllerRef.current?.abort(); };
+  }, [projectId,skillAccountKey,canvasAuthority,onAddGeneratedImages]);
+  const receiveSkillOutputs = useCallback(async (references:WorkspaceAssetReference[],
+    meta?: Parameters<NonNullable<ChatPanelProps['onAddGeneratedImages']>>[1]):Promise<void> => {
+    const scope=skillDeliveryScopeRef.current;
+    const assertCurrent=():void=>{
+      if(!scope.mounted||skillDeliveryScopeRef.current!==scope||meta?.signal?.aborted)throw new Error('Skill 交付作用域已变化');
+    };
+    assertCurrent();
+    if(onAddGeneratedImages) { await onAddGeneratedImages(references,meta); assertCurrent(); return; }
+    if(canvasAuthority!=='legacy'||!receiveSkillOutput)throw new Error('画布暂时无法整批接收 Skill 资产版本');
+    for(const reference of references) {assertCurrent();await receiveSkillOutput(reference,meta);assertCurrent();}
+  }, [canvasAuthority,onAddGeneratedImages,receiveSkillOutput]);
   const activeCanvasSkillRunRef = useRef<{
     runId: string;
     skillId: string;
@@ -2308,7 +2324,7 @@ export function ChatPanel({ themeStyle, projectId, onAddToPrompt, onAddImages, o
       };
       const reference = findWorkspaceAssetReferenceByUrl(imageUrl, message.generatedImageRefs || []);
       if (reference && onAddGeneratedImage) await onAddGeneratedImage(reference, meta);
-      else onAddImages?.([imageUrl], sourceImageId, meta);
+      else await onAddImages?.([imageUrl], sourceImageId, meta);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : '添加到画布失败');
     }
@@ -3547,7 +3563,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
               } else if (allPolledVideoUrls.length > 0) {
                 const newVideoUrls = allPolledVideoUrls.filter(u => !addedImageUrls.has(u));
                 newVideoUrls.forEach(u => addedImageUrls.add(u));
-                if (onAddImages && newVideoUrls.length > 0) onAddImages(newVideoUrls);
+                if (onAddImages && newVideoUrls.length > 0) await onAddImages(newVideoUrls);
                 setMessages(prev => prev.map(msg =>
                   msg.id === assistantMessageId
                     ? { ...msg, generatedImages: [...new Set([...(msg.generatedImages || []), ...newVideoUrls])], isGeneratingImage: false, generateProgress: 100 }
@@ -4197,36 +4213,13 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
     return true;
   }, [onNavigateToImage]);
 
-  const onAddExportImagesToCanvas = useCallback(async (
-    references: WorkspaceAssetReference[],
-  ): Promise<void> => {
-    if (!projectId || !receiveSkillOutput) {
-      toast.error('画布暂时无法接收导出图片');
-      return;
-    }
-    const context = activeCanvasSkillRunRef.current;
-    const activeRunId = skillRun.runId;
-    if (!context || !activeRunId || context.runId !== activeRunId || context.skillId !== MULTI_PLATFORM_EXPORT_SKILL_ID) {
-      throw new Error('导出运行上下文已变化，请重新选择运行记录');
-    }
-    if (onAddGeneratedImages) {
-      await onAddGeneratedImages(references, {
-        runId: context.runId,
-        sourceVersionIds: context.sourceVersionIds,
-        restoreDeletedPlacement: context.restoreDeletedPlacement,
-      });
-      return;
-    }
-    await projectExportImagesInBatches(references, async reference => {
-      const assetVersionId = reference.assetVersionId;
-      if (!assetVersionId || skillCanvasImagesRef.current.some(image => image.assetVersionId === assetVersionId)) return;
-      await Promise.resolve(receiveSkillOutput(reference, {
-        runId: context.runId,
-        sourceVersionIds: context.sourceVersionIds,
-        restoreDeletedPlacement: context.restoreDeletedPlacement,
-      }));
-    });
-  }, [onAddGeneratedImages, projectId, receiveSkillOutput, skillRun.runId]);
+  const onAddExportImagesToCanvas = useCallback(async (references: WorkspaceAssetReference[]): Promise<void> => {
+    const context=activeCanvasSkillRunRef.current;
+    if(!projectId||!context||context.projectId!==projectId||context.runId!==skillRun.runId
+      ||context.skillId!==MULTI_PLATFORM_EXPORT_SKILL_ID)throw new Error('导出运行上下文已变化，请重新选择运行记录');
+    await receiveSkillOutputs(references,{runId:context.runId,sourceVersionIds:context.sourceVersionIds,
+      restoreDeletedPlacement:context.restoreDeletedPlacement});
+  }, [projectId,receiveSkillOutputs,skillRun.runId]);
 
   const handleRetryExport = useCallback(async (): Promise<void> => {
     const context = activeCanvasSkillRunRef.current;
@@ -4295,7 +4288,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
     const context = activeCanvasSkillRunRef.current;
     if (!context || context.projectId !== projectId || !skillProjectionCoordinatorRef.current.isActive(context.runId, context.projectId)) return;
     if (!shouldAutoProjectCanvasSkill(context.skillId)) return;
-    if (!receiveSkillOutput) {
+    if (!receiveSkillOutputs) {
       toast.error('画布暂时无法接收 Skill 资产版本');
       return;
     }
@@ -4310,21 +4303,22 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
       runId: context.runId,
       sourceVersionIds: context.sourceVersionIds,
       signal: controller.signal,
+      authority: canvasAuthority,
+      expectedActorId: skillAccountKey,
     }).then(async references => {
       if (
         controller.signal.aborted
         || activeCanvasSkillRunRef.current?.runId !== context.runId
         || activeCanvasSkillRunRef.current.projectId !== projectId
       ) return;
-      for (const reference of references) {
-        const assetVersionId = reference.assetVersionId;
-        if (!assetVersionId || controller.signal.aborted) continue;
+      if (references.length) {
+        const assetVersionIds=references.map(reference=>reference.assetVersionId!);
         await skillProjectionCoordinatorRef.current.project({
           runId: context.runId,
           projectId: context.projectId,
-          assetVersionId,
-          isAlreadyProjected: () => skillCanvasImagesRef.current.some(image => image.assetVersionId === assetVersionId),
-          project: signal => Promise.resolve(receiveSkillOutput(reference, {
+          assetVersionIds,
+          isAlreadyProjected: () => !context.restoreDeletedPlacement && assetVersionIds.every(id=>skillCanvasImagesRef.current.some(image => image.assetVersionId === id)),
+          project: signal => Promise.resolve(receiveSkillOutputs(references, {
             sourceImageId: context.sourceImageId,
             runId: context.runId,
             sourceVersionIds: context.sourceVersionIds,
@@ -4344,7 +4338,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
       }
     });
     return () => controller.abort();
-  }, [receiveSkillOutput, projectId, skillProjectionRetry, skillRun.projection]);
+  }, [receiveSkillOutputs, projectId, canvasAuthority, skillAccountKey, skillProjectionRetry, skillRun.projection]);
 
   useEffect(() => () => skillProjectionControllerRef.current?.abort(), []);
 
@@ -5153,7 +5147,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                       {message.role === 'assistant'
                         ? <ReactMarkdown
                             remarkPlugins={[remarkGfm]}
-                            components={createMarkdownComponents(isGold, onAddImages ? (url: string) => onAddImages([url], undefined, { modelName: message.generateModelName, apiProvider: providerDisplayName(message.generateProviderId) }) : undefined)}
+                            components={createMarkdownComponents(isGold, onAddImages ? (url: string) => { void addGeneratedImageToCanvas(url, message); } : undefined)}
                           >
                             {cleanAssistantContent(message.content)}
                           </ReactMarkdown>
@@ -6535,7 +6529,8 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                   && projectId
                   && skillRun.runId
                   && skillRun.projection?.status === 'completed' && (
-                    <BriefToVideoResultCard runId={skillRun.runId} projectId={projectId} />
+                    <BriefToVideoResultCard runId={skillRun.runId} projectId={projectId}
+                      authority={canvasAuthority} expectedActorId={skillAccountKey} />
                   )}
               </div>
             )}
@@ -6544,6 +6539,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
               <MultiPlatformExportDrawer
                 open
                 projectId={projectId}
+                authority={canvasAuthority}
                 accountKey={skillAccountKey}
                 activeRunId={skillRun.runId}
                 historyRefreshKey={`${skillRun.runId || ''}:${skillRun.projection?.status || ''}`}

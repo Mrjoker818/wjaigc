@@ -21,7 +21,7 @@ import {
   loadExportManifestFiles,
   parseMultiPlatformExportResult,
   previewMultiPlatformExportPlan,
-  resolveExportAssetReference,
+  resolveExportSourceReference,
   resolveExportImageReferences,
 } from '@/lib/skill-runtime/multi-platform-export-client';
 
@@ -29,6 +29,7 @@ interface MultiPlatformExportDrawerProps {
   open: boolean;
   projectId: string;
   accountKey?: string;
+  authority?: 'document' | 'legacy' | 'pending';
   activeRunId?: string;
   historyRefreshKey?: string;
   sourceAssetVersionIds: readonly string[];
@@ -96,6 +97,7 @@ export function MultiPlatformExportDrawer({
   open,
   projectId,
   accountKey = '',
+  authority = 'legacy',
   activeRunId,
   historyRefreshKey,
   sourceAssetVersionIds,
@@ -169,6 +171,11 @@ export function MultiPlatformExportDrawer({
     }
   }, [projection?.result?.outputs, projection?.status]);
   const result = parsedResult.result;
+  const deliveryControllerRef=useRef<AbortController|null>(null);
+  useLayoutEffect(()=>{
+    const controller=new AbortController();deliveryControllerRef.current=controller;
+    return ()=>{controller.abort();if(deliveryControllerRef.current===controller)deliveryControllerRef.current=null;};
+  },[open,projectId,accountKey,authority,result,onAddToCanvas,onLocateSource]);
 
   useEffect(() => {
     if (!open || !result) {
@@ -177,12 +184,17 @@ export function MultiPlatformExportDrawer({
       setResultError(undefined);
       return undefined;
     }
+    if (authority === 'pending') {
+      setReferences([]); setManifestFiles([]); setResultError('画布权威尚未就绪');
+      return undefined;
+    }
     const controller = new AbortController();
     setResultError(undefined);
     void Promise.allSettled([
       resolveExportImageReferences({
         projectId,
         versionIds: result.imageAssetVersionIds,
+        runId:result.runId,
         fetcher,
         signal: controller.signal,
       }),
@@ -199,7 +211,7 @@ export function MultiPlatformExportDrawer({
       if (failure) setResultError(failure instanceof Error ? failure.message : '导出结果加载失败');
     });
     return () => controller.abort();
-  }, [fetcher, open, projectId, result]);
+  }, [fetcher, open, projectId, accountKey, authority, result]);
 
   if (!open) return null;
 
@@ -404,25 +416,45 @@ export function MultiPlatformExportDrawer({
             {resultError && <div role="alert" className="break-words text-xs text-destructive">{resultError}</div>}
             {result && (
               <MultiPlatformExportResults
+                key={JSON.stringify([projectId, accountKey, authority, result.runId])}
                 projectId={projectId}
                 result={result}
                 references={references}
                 files={manifestFiles}
                 busy={busy}
-                onDownload={versionId => downloadExportArtifact(versionId, projectId, fetcher)}
+                onDownload={versionId => downloadExportArtifact(versionId, projectId, fetcher,result.runId,deliveryControllerRef.current?.signal)}
                 onDownloadGroup={(items, platform, onProgress) => downloadExportGroup({
+                  runId:result.runId,
                   projectId, platform, references: items, files: manifestFiles, fetcher, onProgress,
+                  signal:deliveryControllerRef.current?.signal,
                 })}
-                onAddToCanvas={items => onAddToCanvas?.(items)}
+                onAddToCanvas={async items => {
+                  const controller=deliveryControllerRef.current;
+                  if(!controller)throw new Error('导出交付作用域已失效');
+                  controller.signal.throwIfAborted();
+                  const current=await resolveExportImageReferences({projectId,runId:result.runId,
+                    versionIds:items.map(item=>item.assetVersionId!),fetcher,signal:controller.signal});
+                  controller.signal.throwIfAborted();await onAddToCanvas?.(current);controller.signal.throwIfAborted();
+                }}
                 onRetry={onRetry ? () => onRetry('export') : undefined}
                 onLocateSource={async sourceVersionId => {
+                  const controller=deliveryControllerRef.current;
+                  if(!controller)throw new Error('导出交付作用域已失效');
+                  controller.signal.throwIfAborted();
                   const located = await onLocateSource?.(sourceVersionId);
+                  controller.signal.throwIfAborted();
                   if (located === true) return undefined;
-                  const reference = await resolveExportAssetReference({
+                  if (authority === 'pending') throw new Error('画布权威尚未就绪');
+                  const reference = await resolveExportSourceReference({
+                    runId:result.runId,
+                    authority,
+                    expectedActorId:accountKey || undefined,
                     projectId,
                     versionId: sourceVersionId,
                     fetcher,
+                    signal:controller.signal,
                   });
+                  controller.signal.throwIfAborted();
                   if (reference.kind !== 'image') throw new Error('来源版本不是可预览图片');
                   return reference;
                 }}

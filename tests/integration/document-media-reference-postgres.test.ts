@@ -259,12 +259,33 @@ describe('document media registered references', () => {
           }
           expect((await query("SELECT task_id FROM wujie_asset_versions WHERE project_id='target'")).rows).toEqual([{ task_id: null }]);
           expect(await originals(query)).toEqual(original);
+          const committedFiles = await files();
           for (const other of ['upload', 'task', 'version'] as const) {
-            if (other !== source) expect((await post(other, kind)).status).toBe(409);
+            if (other === source) continue;
+            const response = await post(other, kind);
+            const equivalentTaskVersion = source === 'task' && other === 'version';
+            expect(response.status, `${source} -> ${other}: committed identity`).toBe(equivalentTaskVersion ? 200 : 409);
+            if (equivalentTaskVersion) {
+              expect(response.headers.get('cache-control')).toBe('private, no-store');
+              expect(response.headers.get('vary')).toBe('Cookie');
+              expect(await response.json()).toEqual(bodies[0]);
+              expect(bodies[0].assetReference).toEqual(await canonical(query));
+            }
+          }
+          if (source === 'task') {
+            for (const conflict of [
+              { other: 'version' as const, extra: { sourceVersionId: 'other-version' } },
+              { other: 'task' as const, extra: { taskId: 'other-task' } },
+              { other: 'task' as const, extra: { outputIndex: 1 } },
+            ]) {
+              const response = await post(conflict.other, kind, 'reference', conflict.extra);
+              expect(response.status, `${source} -> ${conflict.other}: ${JSON.stringify(conflict.extra)}`).toBe(409);
+            }
           }
           expect((await post(source, kind, 'reference', { command: { ...command, transform: { ...command.transform, x: 999 } } })).status).toBe(409);
           expect(await snapshot(query)).toEqual(rows);
           expect(await originals(query)).toEqual(original);
+          expect(await files()).toEqual(committedFiles);
         });
       }, 30_000);
     }

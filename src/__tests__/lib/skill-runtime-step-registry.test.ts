@@ -28,6 +28,10 @@ vi.mock('@/lib/asset-core/storage', () => ({
 vi.mock('@/lib/asset-core/image-result-metadata', () => ({
   enrichCompletedImageResult: mocks.enrichCompletedImageResult,
 }));
+vi.mock('@/lib/skill-runtime/document-assets', () => ({
+  skillRunAssetReadStorage: () => ({read: async (callback: (transaction: {findVersion: typeof mocks.findVersion})=>Promise<unknown>) =>
+    callback({findVersion:mocks.findVersion})}),
+}));
 
 import { createProductionSkillStepRegistry } from '@/lib/skill-runtime/step-registry';
 import { runSkillQualityGates } from '@/lib/skill-runtime/quality-gates';

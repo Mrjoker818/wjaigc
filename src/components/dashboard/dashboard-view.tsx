@@ -629,7 +629,10 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
 
   // ─── Project data ───
   const mgr = UserManager.getInstance();
-  const projects = useMemo(() => mgr.getProjects(), [mgr, projectRevision]);
+  // Authentication hydration replaces user even when its id stays the same.
+  // Refresh the pre-login project snapshot after the manager binds that owner.
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- User and revision intentionally invalidate the manager's external project cache.
+  const projects = useMemo(() => mgr.getProjects(), [mgr, projectRevision, user]);
   const statsArr: UsageStats[] = mgr.getUsageStats();
   const stats: UsageStats | null = statsArr.length > 0 ? statsArr[statsArr.length - 1] : null;
 

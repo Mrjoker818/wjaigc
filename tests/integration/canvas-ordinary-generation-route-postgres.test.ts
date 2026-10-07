@@ -52,6 +52,7 @@ import { extractTaskAssetReferences } from '@/lib/asset-core/workspace-transfer'
 import sharp from 'sharp';
 import * as safeImages from '@/lib/safe-image-input';
 import * as mediaSources from '@/lib/collaboration/document-media-source';
+import { publishDocumentTaskOutput } from '@/lib/collaboration/document-media-import';
 import { revokeDocumentEditor, grantDocumentEditor } from '@/lib/collaboration/document-access';
 import { getTaskInfo } from '@/lib/task-registry';
 import { validateCanvasOrdinaryReplay, validateCanvasOrdinarySources } from '@/lib/collaboration/canvas-ordinary-generation-admission';
@@ -537,9 +538,26 @@ it.each(['recover', 'foreign-head', 'wrong-root', 'missing-lineage', 'wrong-inde
     const post = await (await POST(ordinaryRequest({ referenceImages: ['/api/serve-upload/shared.png'], referenceDescriptions: ['cup'],
       assetParentVersionIds: ['version-shared'], assetProjectionMode: 'revision' }))).json();
     expect(post.status).toBe('completed'); expect(post.imageUrls).toHaveLength(2);
+    // A new two-output attempt is atomic even when the second lineage write fails.
+    expect((await query('SELECT id FROM wujie_asset_versions WHERE task_id=$1', [post.taskId])).rows).toEqual([]);
+    expect((await query('SELECT * FROM wujie_canvas_asset_commands')).rows).toEqual([]);
+    expect((await query('SELECT * FROM wujie_canvas_media_lineage')).rows).toEqual([]);
+    expect((await query("SELECT current_version_id FROM wujie_assets WHERE id='asset-shared'")).rows[0].current_version_id)
+      .toBe('version-shared');
+    expect((await query("SELECT result->'assetProjection' AS marker FROM cloud_tasks WHERE id=$1", [post.taskId])).rows[0].marker?.status)
+      .not.toBe('completed');
+    // Model a legitimate historical partial through the public, DB-minted single entry.
+    const historical = await publishDocumentTaskOutput('editor', post.taskId, 0);
     const first = (await query('SELECT id FROM wujie_asset_versions WHERE task_id=$1', [post.taskId])).rows;
     expect(first).toHaveLength(1); const head = first[0].id;
+    expect(head).toBe(historical.assetVersionId);
     expect((await query("SELECT current_version_id FROM wujie_assets WHERE id='asset-shared'")).rows[0].current_version_id).toBe(head);
+    expect((await query('SELECT target_version_id,output_index FROM wujie_canvas_media_lineage')).rows)
+      .toEqual([{ target_version_id: head, output_index: 0 }]);
+    expect((await query('SELECT asset_version_id FROM wujie_canvas_asset_commands')).rows)
+      .toEqual([{ asset_version_id: head }]);
+    expect((await query("SELECT result->'assetProjection' AS marker FROM cloud_tasks WHERE id=$1", [post.taskId])).rows[0].marker?.status)
+      .not.toBe('completed');
     await query('ALTER TABLE wujie_canvas_media_lineage DROP CONSTRAINT fix1_second');
     if (mutation === 'foreign-head') {
       await query(`INSERT INTO wujie_asset_versions(id,asset_id,owner_id,project_id,file_url,mime_type,availability)

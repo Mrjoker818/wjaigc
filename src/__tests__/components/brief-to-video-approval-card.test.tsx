@@ -266,7 +266,7 @@ describe('BriefToVideoResultCard', () => {
     const versionId = 'av_01JVIDEORESULT000000000000001';
     const fetcher = vi.fn<typeof fetch>(async input => {
       const url = String(input);
-      if (url === '/api/skill-runs/run-video-1') return Response.json({ run: {
+      if (url === '/api/skill-runs/run-video-1?observeOnly=true') return Response.json({ run: {
         runId: 'run-video-1', status: 'completed', assetVersionIds: [versionId], outputs: [{
           stepId: 'generate-film', kind: 'json', schemaId: 'brief-to-video-result-v1',
           content: JSON.stringify({
@@ -277,10 +277,11 @@ describe('BriefToVideoResultCard', () => {
           }),
         }],
       } });
-      return Response.json({
+      if (url === `/api/assets?projectId=project-1&assetVersionId=${versionId}`) return Response.json({
         assetId: 'asset-video-1', assetVersionId: versionId, kind: 'video',
         url: '/api/serve-upload/video/run-video-1/result.mp4',
       });
+      throw new Error('Unexpected video result request: ' + url);
     });
 
     const { container } = render(<BriefToVideoResultCard

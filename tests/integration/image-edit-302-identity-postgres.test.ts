@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { isAbsolute, resolve } from 'node:path';
 import sharp from 'sharp';
 import type { ApiProvider } from '@/lib/universal-api-types';
 import type { User } from '@/lib/user-types';
@@ -76,12 +76,14 @@ async function seed(query: QueryFn, databaseUrl: string, schemaName: string): Pr
   if (!['127.0.0.1', 'localhost', '[::1]'].includes(database.hostname)
     || !/^test_task_8cb3j4[bd]_/.test(schemaName)
     || !database.searchParams.get('options')?.includes(`search_path=${schemaName}`)) throw new Error('Isolated schema required');
+  const mediaRoot = process.env.WUJIE_DATA_DIR;
+  if (!mediaRoot || !isAbsolute(mediaRoot)) throw new Error('Explicit absolute isolated media root required');
+  const prefix = resolve(mediaRoot, `task-8cb3j4d-migration-${schemaName}`);
   const started = new Date().toISOString();
   const migration = spawnSync(process.execPath, [resolve('scripts/run-migrations.mjs')], {
     encoding: 'utf8', timeout: 45_000,
     env: { ...process.env, DATABASE_URL: databaseUrl, PGDATABASE_URL: databaseUrl },
   });
-  const prefix = resolve('.superpowers/sdd/2026-09-25-v588-yjs-canvas-collaboration', `task-8cb3j4d-migration-${schemaName}`);
   const hashes = ['src/app/api/image-edit/route.ts', 'src/lib/task-core/terminal-settlement.ts',
     'src/__tests__/api/provider-terminal-settlement-contract.test.ts', 'tests/integration/image-edit-302-identity-postgres.test.ts']
     .map(path => ({ path, sha256: createHash('sha256').update(readFileSync(resolve(path))).digest('hex') }));

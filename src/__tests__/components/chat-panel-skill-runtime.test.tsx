@@ -14,7 +14,7 @@ describe('canvas chat shared Skill runtime wiring', () => {
     expect(source).toContain('onSelect={handleRestoreSkill}');
     expect(source).toContain('() => skillRun.restoreRun(record)');
     expect(source).toContain('sourceVersionIds: [...(record.sourceVersionIds || [])]');
-    expect(source).toContain('skillCanvasImagesRef.current.some(image => image.assetVersionId === assetVersionId)');
+    expect(source).toContain('assetVersionIds.every(id=>skillCanvasImagesRef.current.some(image => image.assetVersionId === id))');
   });
   it('uses the Task 7 controls and never routes an active Skill through ordinary chat', () => {
     expect(source).toContain("import { SkillInputFields } from '@/components/skill-runtime/SkillInputFields';");
@@ -62,7 +62,7 @@ describe('canvas chat shared Skill runtime wiring', () => {
     expect(source).toContain('sourceImageId: context.sourceImageId');
     expect(source).toContain('receiveSkillOutput(reference');
     expect(source).toContain('useSkillOutputReceiver(onAddGeneratedImage)');
-    expect(source).toContain('[receiveSkillOutput, projectId, skillProjectionRetry, skillRun.projection]');
+    expect(source).toContain('[receiveSkillOutputs, projectId, canvasAuthority, skillAccountKey, skillProjectionRetry, skillRun.projection]');
     expect(source).not.toContain('[onAddGeneratedImage, projectId, skillProjectionRetry, skillRun.projection]');
     expect(source).not.toContain('onAddImages?.(skill');
     expect(source).toContain('skillProjectionCoordinatorRef.current.project({');

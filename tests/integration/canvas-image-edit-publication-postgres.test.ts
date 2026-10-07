@@ -126,7 +126,7 @@ it.each(['primary-only', 'derived', 'same-url', 'replace', 'derived-replace'] as
   });
 }, 60_000);
 
-it.each(['append', 'replace', 'derived-replace'] as const)('recovers %s primary after mask disk failure and source movement exactly once across restart/concurrency', async mode => {
+it.each(['append', 'replace', 'derived-replace'] as const)('recovers legacy single-output prefix %s primary after mask disk failure and source movement exactly once across restart/concurrency', async mode => {
   await withIsolatedPostgres(`task-8cb3j4a-recover-${mode}`, async ({ query, databaseUrl, schemaName }) => {
     await seedImageEditPublication(query, databaseUrl, schemaName);
     const input = roleAdmission(); const result = roleResult();
@@ -135,9 +135,13 @@ it.each(['append', 'replace', 'derived-replace'] as const)('recovers %s primary 
     result.maskUrl = `/api/serve-upload/missing-mask-${mode}.png`;
     (result.imageEditPublicationCheckpoint as { outputs: Array<{ url: unknown }> }).outputs[1].url = result.maskUrl;
     await completeRoleTask(input, result);
+    const primary = await publishDocumentTaskOutput('editor', 'image_edit_roles', 0);
+    const prefixState = await roleState(query);
     await expect(projectCanvasTaskResult(projection())).rejects.toThrow();
+    expect(await roleState(query)).toEqual(prefixState);
     const first = (await query("SELECT id FROM wujie_asset_versions WHERE task_id='image_edit_roles'")).rows;
     expect(first).toHaveLength(1);
+    expect(first[0].id).toBe(primary.assetVersionId);
     expect((await query("SELECT result->'assetProjection'->>'status' AS status FROM cloud_tasks")).rows[0].status).not.toBe('completed');
     await moveSource();
     const replay = await createBillableTask(input); expect(replay.reused).toBe(true);
@@ -155,6 +159,75 @@ it.each(['append', 'replace', 'derived-replace'] as const)('recovers %s primary 
     const loaded = await loadDocument('shared');
     try { expect(readCanvasDocument(loaded.doc).placements[both[0]![1].placementId!].x).toBe(mode === 'append' ? 264 : 132); }
     finally { loaded.doc.destroy(); }
+    if (mode === 'derived-replace') expect((await query("SELECT current_version_id FROM wujie_assets WHERE id='asset-shared'")).rows[0].current_version_id).toBe('version-shared');
+  });
+}, 60_000);
+
+it.each(['append', 'replace', 'derived-replace'] as const)('atomically recovers new %s attempt after mask disk failure and source movement', async mode => {
+  await withIsolatedPostgres(`task-8cb3j4a-atomic-recover-${mode}`, async ({ query, databaseUrl, schemaName }) => {
+    await seedImageEditPublication(query, databaseUrl, schemaName);
+    const input = roleAdmission(); const result = roleResult();
+    if (mode !== 'append') input.canvasPublication!.intent!.placement = { action: 'replace', placementId: 'placement-shared', expectedAssetVersionId: 'version-shared' };
+    if (mode === 'derived-replace') input.canvasPublication!.intent!.projectionMode = 'derived';
+    const missing = `missing-atomic-mask-${mode}.png`;
+    result.maskUrl = `/api/serve-upload/${missing}`;
+    (result.imageEditPublicationCheckpoint as { outputs: Array<{ url: unknown }> }).outputs[1].url = result.maskUrl;
+    await completeRoleTask(input, result);
+    const before = await roleState(query);
+    const filesBefore: Record<string, string> = {};
+    for (const file of await disk.readdir(process.env.WUJIE_DATA_DIR!, { recursive: true, withFileTypes: true })) {
+      if (file.isFile()) { const name = join(file.parentPath, file.name); filesBefore[name] = (await disk.readFile(name)).toString('base64'); }
+    }
+    await expect(projectCanvasTaskResult(projection())).rejects.toThrow();
+    expect(await roleState(query)).toEqual(before);
+    const filesAfter: Record<string, string> = {};
+    for (const file of await disk.readdir(process.env.WUJIE_DATA_DIR!, { recursive: true, withFileTypes: true })) {
+      if (file.isFile()) { const name = join(file.parentPath, file.name); filesAfter[name] = (await disk.readFile(name)).toString('base64'); }
+    }
+    expect(filesAfter).toEqual(filesBefore);
+    expect((await query("SELECT id FROM wujie_asset_versions WHERE task_id='image_edit_roles'")).rows).toEqual([]);
+    expect((await query('SELECT count(*)::int AS n FROM wujie_canvas_asset_commands')).rows[0].n).toBe(0);
+    expect((await query('SELECT count(*)::int AS n FROM wujie_canvas_media_lineage')).rows[0].n).toBe(0);
+    expect((await query("SELECT result->'assetProjection'->>'status' AS status FROM cloud_tasks")).rows[0].status).not.toBe('completed');
+    await disk.copyFile(join(process.env.WUJIE_DATA_DIR!, 'mask.png'), join(process.env.WUJIE_DATA_DIR!, missing));
+    await moveSource();
+    expect(await createBillableTask(input)).toMatchObject({ reused: true, charged: false });
+    await closePool();
+    const restarted = recoverRolesInFreshProcess(databaseUrl, schemaName);
+    expect(restarted).toHaveLength(2);
+    const restoredState = await roleState(query);
+    const both = await Promise.all([projectCanvasTaskResult(projection()), projectCanvasTaskResult(projection())]);
+    expect(both).toEqual([restarted, restarted]);
+    expect(await roleState(query)).toEqual(restoredState);
+    expect((await query('SELECT count(*)::int AS n FROM wujie_canvas_asset_commands')).rows[0].n).toBe(2);
+    expect((await query('SELECT count(*)::int AS n FROM wujie_canvas_media_lineage')).rows[0].n).toBe(2);
+    const outputs = (await query("SELECT id,asset_id,metadata,provider_id,model_id FROM wujie_asset_versions WHERE task_id='image_edit_roles' ORDER BY (metadata->>'outputIndex')::int")).rows;
+    expect(outputs.map(row => row.id)).toEqual(restarted.map(row => row.assetVersionId));
+    expect(outputs.map(row => row.metadata)).toEqual([
+      { source: 'document-media-import', sourceVersionIds: ['version-shared'], outputRole: 'primary', outputIndex: 0 },
+      { source: 'document-media-import', sourceVersionIds: ['version-shared'], outputRole: 'mask', outputIndex: 1 },
+    ]);
+    expect(outputs[0].asset_id === 'asset-shared').toBe(mode !== 'derived-replace');
+    expect(outputs[1].asset_id).not.toBe(outputs[0].asset_id);
+    expect(outputs.map(row => ({ provider_id: row.provider_id, model_id: row.model_id })))
+      .toEqual(Array(2).fill({ provider_id: 'frozen-provider', model_id: 'frozen-model' }));
+    expect((await query('SELECT parent_version_id,parent_order FROM wujie_asset_version_parents ORDER BY version_id')).rows)
+      .toEqual(Array(2).fill({ parent_version_id: 'version-shared', parent_order: 0 }));
+    expect((await query('SELECT type,amount FROM wujie_credit_transactions')).rows).toEqual([{ type: 'consume', amount: -7 }]);
+    expect((await query("SELECT balance FROM wujie_credits WHERE user_id='editor'")).rows[0].balance).toBe(93);
+    expect((await query("SELECT result->'assetProjection'->>'status' AS status FROM cloud_tasks")).rows[0].status).toBe('completed');
+    for (const name of ['primary', 'mask', 'shared']) {
+      const file = join(process.env.WUJIE_DATA_DIR!, `${name}.png`);
+      expect((await disk.readFile(file)).toString('base64')).toBe(filesBefore[file]);
+    }
+    const loaded = await loadDocument('shared');
+    try {
+      const placements = readCanvasDocument(loaded.doc).placements;
+      expect(placements[restarted[0].placementId!]).toMatchObject(mode === 'append'
+        ? { x: 132, y: 10, width: 100, height: 80, rotation: 0 }
+        : { x: 900, y: 10, width: 200, height: 80, rotation: 15 });
+      expect(placements[restarted[1].placementId!]).toMatchObject({ x: mode === 'append' ? 264 : 132, y: 10, width: 100, height: 80, rotation: 0 });
+    } finally { loaded.doc.destroy(); }
     if (mode === 'derived-replace') expect((await query("SELECT current_version_id FROM wujie_assets WHERE id='asset-shared'")).rows[0].current_version_id).toBe('version-shared');
   });
 }, 60_000);

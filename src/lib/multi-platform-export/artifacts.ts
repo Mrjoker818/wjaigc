@@ -309,6 +309,7 @@ export interface PersistExportArtifactsInput {
   failures: readonly ExportFailure[]; signal?: AbortSignal;
   lineage?: MultiPlatformExportRetryLineage;
   assetService?: ExportAssetService; persistBytes?: PersistBytes;
+  imageVersionStorage?: Pick<AssetStorage,'read'>;
 }
 
 export async function persistExportArtifacts(input: PersistExportArtifactsInput): Promise<{
@@ -324,6 +325,8 @@ export async function persistExportArtifacts(input: PersistExportArtifactsInput)
     throw new Error('EXPORT_RETRY_LINEAGE_INVALID');
   }
   for (const image of input.images) {
+    const registered=input.imageVersionStorage ? await input.imageVersionStorage.read(transaction=>
+      transaction.findVersion(input.actorUserId,input.projectId,image.version.id)) : undefined;
     const checksum = createHash('sha256').update(image.bytes).digest('hex');
     const metadata = image.version.metadata;
     if (
@@ -331,7 +334,11 @@ export async function persistExportArtifacts(input: PersistExportArtifactsInput)
       || image.version.file.checksum !== checksum
       || image.version.file.byteSize !== image.bytes.length
       || image.version.file.mimeType !== image.mimeType
-      || image.version.ownerId !== input.actorUserId
+      || (input.imageVersionStorage ? !registered || registered.ownerId !== image.version.ownerId
+        || registered.id !== image.version.id || registered.assetId !== image.version.assetId
+        || registered.file.checksum !== checksum || registered.file.byteSize !== image.bytes.length
+        || registered.file.mimeType !== image.mimeType || registered.file.url !== image.version.file.url
+        : image.version.ownerId !== input.actorUserId)
       || image.version.projectId !== input.projectId
     ) throw new Error('EXPORT_IMAGE_ARTIFACT_INTEGRITY_INVALID');
     if (

@@ -32,6 +32,16 @@ describe('media import routes', () => {
     expect(mocks.upload).toHaveBeenCalledWith('session-actor', matched);
   });
   const versionInput = { projectId: 'project', sourceVersionId: 'version', idempotencyKey: 'key', command };
+  it('version import rejects actor scope drift before JSON without trusting a matched actor header', async () => {
+    const changed = request('import-version', JSON.stringify(versionInput), { 'x-wujie-expected-actor-id': 'previous' });
+    const response = await version(changed);
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({ success: false, code: 'ACTOR_SCOPE_CHANGED' });
+    expect(changed.bodyUsed).toBe(false); expect(mocks.version).not.toHaveBeenCalled();
+    const matched = request('import-version', JSON.stringify(versionInput), { 'x-wujie-expected-actor-id': 'session-actor' });
+    expect((await version(matched)).status).toBe(200);
+    expect(mocks.version).toHaveBeenCalledWith('session-actor', versionInput, matched.signal);
+  });
   it('version route binds session actor and returns the committed command for refreshMedia', async (): Promise<void> => {
     const req = request('import-version', JSON.stringify(versionInput));
     const response = await version(req);

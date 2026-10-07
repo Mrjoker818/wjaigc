@@ -9,7 +9,7 @@ import {
 } from '@/lib/multi-platform-export/manifest';
 import type { PlatformExportPreset } from '@/lib/multi-platform-export/types';
 import JSZip from 'jszip';
-import { loadCanvasExportImageAssets } from './canvas-client';
+import { loadCanvasExportImageAssets, resolveCanvasSkillAssets, resolveCanvasSkillSources } from './canvas-client';
 
 const RESULT_SCHEMA_ID = 'multi-platform-export-result-v1';
 const DEFAULT_EXPORT_BACKGROUND = '#ffffffff';
@@ -123,9 +123,11 @@ export function previewMultiPlatformExportPlan(
 export async function resolveExportAssetReference(input: {
   projectId: string;
   versionId: string;
+  runId?: string;
   fetcher?: typeof fetch;
   signal?: AbortSignal;
 }): Promise<WorkspaceAssetReference> {
+  if(input.runId) return (await resolveCanvasSkillAssets({...input,runId:input.runId,assetVersionIds:[input.versionId]}))[0];
   const query = new URLSearchParams({
     projectId: input.projectId,
     assetVersionId: input.versionId,
@@ -140,15 +142,30 @@ export async function resolveExportAssetReference(input: {
   return payload;
 }
 
+export async function resolveExportSourceReference(input: {
+  projectId: string; runId: string; versionId: string; authority: 'document' | 'legacy' | 'pending';
+  expectedActorId?: string; fetcher?: typeof fetch; signal?: AbortSignal;
+}): Promise<WorkspaceAssetReference> {
+  input.signal?.throwIfAborted();
+  if (input.authority === 'pending') throw new Error('画布权威尚未就绪');
+  const reference = input.authority === 'document'
+    ? (await resolveCanvasSkillSources({ ...input, assetVersionIds: [input.versionId] }))[0]
+    : await resolveExportAssetReference({ projectId: input.projectId, versionId: input.versionId, fetcher: input.fetcher, signal: input.signal });
+  input.signal?.throwIfAborted();
+  return reference;
+}
+
 export async function resolveExportImageReferences(input: {
   projectId: string;
   versionIds: readonly string[];
+  runId?: string;
   fetcher?: typeof fetch;
   signal?: AbortSignal;
 }): Promise<WorkspaceAssetReference[]> {
   return loadCanvasExportImageAssets({
     projectId: input.projectId,
     assetVersionIds: input.versionIds,
+    runId: input.runId,
     fetcher: input.fetcher,
     signal: input.signal,
   });
@@ -164,6 +181,7 @@ export async function loadExportManifestFiles(
   const reference = await resolveExportAssetReference({
     projectId,
     versionId: result.manifestAssetVersionId,
+    runId: result.runId,
     fetcher,
     signal,
   });
@@ -189,11 +207,16 @@ export async function downloadExportArtifact(
   versionId: string,
   projectId: string,
   fetcher: typeof fetch = fetch,
+  runId?: string,
+  signal?: AbortSignal,
 ): Promise<void> {
-  const reference = await resolveExportAssetReference({ projectId, versionId, fetcher });
-  const response = await fetcher(reference.url, { method: 'GET', credentials: 'same-origin' });
+  signal?.throwIfAborted();
+  const reference = await resolveExportAssetReference({ projectId, versionId, fetcher,runId,signal });
+  signal?.throwIfAborted();
+  const response = await fetcher(reference.url, { method: 'GET', credentials: 'same-origin',signal });
   if (!response.ok) throw new Error(`导出制品下载失败 (${response.status})`);
-  const objectUrl = URL.createObjectURL(await response.blob());
+  const blob=await response.blob();signal?.throwIfAborted();
+  const objectUrl = URL.createObjectURL(blob);
   const anchor = document.createElement('a');
   anchor.href = objectUrl;
   const encodedFilename = new URL(reference.url, window.location.href).pathname.split('/').filter(Boolean).at(-1) || '';
@@ -220,11 +243,14 @@ const MAX_GROUP_BYTES = 64 * 1_048_576;
 export async function downloadExportGroup(input: {
   platform: string;
   projectId: string;
+  runId?: string;
   references: readonly WorkspaceAssetReference[];
   files: readonly ExportManifestFile[];
   fetcher?: typeof fetch;
   onProgress?: (progress: number) => void;
+  signal?: AbortSignal;
 }): Promise<void> {
+  input.signal?.throwIfAborted();
   if (input.references.length < 1 || input.references.length > MAX_GROUP_FILES) {
     throw new Error('EXPORT_GROUP_FILE_LIMIT');
   }
@@ -243,7 +269,10 @@ export async function downloadExportGroup(input: {
       projectId: input.projectId,
       versionId,
       fetcher,
+      runId:input.runId,
+      signal:input.signal,
     });
+    input.signal?.throwIfAborted();
     if (stableReference.kind !== 'image') throw new Error('EXPORT_GROUP_REFERENCE_INVALID');
     const response = await fetcher(stableReference.url, { method: 'GET', credentials: 'same-origin' });
     if (!response.ok) throw new Error(`导出图片下载失败 (${response.status})`);
@@ -252,15 +281,18 @@ export async function downloadExportGroup(input: {
       throw new Error('EXPORT_GROUP_BYTE_LIMIT');
     }
     const blob = await response.blob();
+    input.signal?.throwIfAborted();
     totalBytes += blob.size;
     if (totalBytes > MAX_GROUP_BYTES) throw new Error('EXPORT_GROUP_BYTE_LIMIT');
     zip.file(file.filename, blob);
     input.onProgress?.(Math.round(((index + 1) / (input.references.length + 1)) * 100));
   }
   const archive = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 6 } }, metadata => {
+    input.signal?.throwIfAborted();
     const fileProgress = input.references.length / (input.references.length + 1) * 100;
     input.onProgress?.(Math.min(99, Math.round(fileProgress + metadata.percent / (input.references.length + 1))));
   });
+  input.signal?.throwIfAborted();
   const objectUrl = URL.createObjectURL(archive);
   const anchor = document.createElement('a');
   anchor.href = objectUrl;

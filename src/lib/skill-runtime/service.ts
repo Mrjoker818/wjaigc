@@ -228,9 +228,11 @@ const defaultDependencies: SkillRuntimeServiceDependencies = {
     module.loadPersistedSkillContinuation(input)
   )),
   getActor: async actorUserId => (await listManagedUsers()).find(user => user.id === actorUserId) ?? null,
-  validatePartialRetry: input => import('@/lib/multi-platform-export/artifacts').then(module => (
-    module.validateMultiPlatformExportRetryLineage(input)
-  )),
+  validatePartialRetry: async input => {
+    const [artifacts,assets] = await Promise.all([import('@/lib/multi-platform-export/artifacts'),import('./document-assets')]);
+    await artifacts.validateMultiPlatformExportRetryLineage({...input,storage:assets.skillRunAssetReadStorage({
+      actorUserId:input.actorUserId,projectId:input.projectId,runId:input.lineage.retryOfRunId})});
+  },
 };
 
 const surfaces = new Set<SkillSurface>(['canvas', 'workflow', 'simple-chat']);

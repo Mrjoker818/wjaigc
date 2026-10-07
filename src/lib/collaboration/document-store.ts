@@ -19,6 +19,7 @@ import { assertDocumentEditor, assertDocumentProjectEnabled } from '@/lib/collab
 import { assertProjectAnnotationAsset, assertProjectAssetVersion, assertProjectCanvasPlacement } from '@/lib/collaboration/document-assets';
 import { applyCanvasAssetCommand, captureDocumentPlacementRemovalSnapshot, type DocumentPlacementRemovalSnapshot, type CanvasAssetCommand } from './canvas-asset-command';
 import { assertPreparedDocumentAssets, type PreparedDocumentAssets } from './document-asset-validation';
+import { applyPreparedSkillRestoration, type PreparedSkillRestoration } from './document-skill-restoration';
 
 const MAX_INCOMING_UPDATE_BYTES = 1_048_576;
 const MAX_PERSISTED_UPDATE_BYTES = 4_194_304;
@@ -352,6 +353,16 @@ export async function commitDocumentAssetCommandInTransaction(
   applyCanvasAssetCommand(candidate, input.command, input.placementId);
   const update = await persistDocumentCandidate(client, input.projectId, ownerId, row, previous, candidate, input.prepared);
   return removeSnapshot ? { ...update, removeSnapshot } : update;
+}
+
+export async function commitDocumentSkillRestorationInTransaction(client: PoolClient, input: {
+  actorId: string; projectId: string; placementId: string; prepared: PreparedDocumentAssets; restoration: PreparedSkillRestoration;
+}): Promise<DocumentUpdate> {
+  const { row, previous, ownerId } = await lockDocumentForWrite(client, input);
+  const candidate = createCanvasDocument();
+  Y.applyUpdate(candidate, Y.encodeStateAsUpdate(previous));
+  await applyPreparedSkillRestoration(client,candidate,input.restoration,input.actorId,input.projectId,input.placementId);
+  return persistDocumentCandidate(client,input.projectId,ownerId,row,previous,candidate,input.prepared);
 }
 
 async function persistDocumentCandidate(

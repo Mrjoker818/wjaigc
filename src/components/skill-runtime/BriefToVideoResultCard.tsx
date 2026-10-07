@@ -1,7 +1,7 @@
 'use client';
 
 import { Download } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useLayoutEffect, useState } from 'react';
 
 import type { WorkspaceAssetReference } from '@/lib/asset-core/types';
 import type { BriefToVideoResultV1 } from '@/lib/brief-to-video/types';
@@ -10,22 +10,26 @@ import { loadCompletedCanvasBriefVideoResult } from '@/lib/skill-runtime/canvas-
 interface BriefToVideoResultCardProps {
   runId: string;
   projectId: string;
+  authority?: 'document' | 'legacy' | 'pending';
+  expectedActorId?: string;
   fetcher?: typeof fetch;
 }
 
 export function BriefToVideoResultCard({
   runId,
   projectId,
+  authority = 'legacy',
+  expectedActorId,
   fetcher = fetch,
 }: BriefToVideoResultCardProps): React.ReactElement {
   const [value, setValue] = useState<{ result: BriefToVideoResultV1; asset: WorkspaceAssetReference }>();
   const [error, setError] = useState<string>();
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const controller = new AbortController();
     setValue(undefined);
     setError(undefined);
-    void loadCompletedCanvasBriefVideoResult({ projectId, runId, fetcher, signal: controller.signal })
+    void loadCompletedCanvasBriefVideoResult({ projectId, runId, authority, expectedActorId, fetcher, signal: controller.signal })
       .then(result => {
         if (!controller.signal.aborted) {
           if (result) setValue(result);
@@ -38,7 +42,7 @@ export function BriefToVideoResultCard({
         }
       });
     return () => controller.abort();
-  }, [fetcher, projectId, runId]);
+  }, [fetcher, projectId, runId, authority, expectedActorId]);
 
   return (
     <section className="min-w-0 space-y-3 border-t border-current/15 pt-3" aria-live="polite">

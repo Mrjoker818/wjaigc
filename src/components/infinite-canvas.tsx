@@ -7190,15 +7190,52 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
     setShowEffectReverse(true);
   }, [activateCanvasToolSession, brandProject?.id, getActiveImageData, projectId]);
 
+  const reverseSourceUploadScopeRef = useRef({
+    projectId: projectId || brandProject?.id,
+    identity: annotationExecutionContext?.identity,
+    authority: effectiveUploadAuthority,
+    upload: onUploadEffectReverseSource,
+    epoch: 0,
+    mounted: true,
+  });
+  const reverseSourceUploadScope = reverseSourceUploadScopeRef.current;
+  const nextReverseSourceUploadScope = {
+    projectId: projectId || brandProject?.id,
+    identity: annotationExecutionContext?.identity,
+    authority: effectiveUploadAuthority,
+    upload: onUploadEffectReverseSource,
+  };
+  if (reverseSourceUploadScope.projectId !== nextReverseSourceUploadScope.projectId
+    || reverseSourceUploadScope.identity !== nextReverseSourceUploadScope.identity
+    || reverseSourceUploadScope.authority !== nextReverseSourceUploadScope.authority
+    || reverseSourceUploadScope.upload !== nextReverseSourceUploadScope.upload) {
+    reverseSourceUploadScopeRef.current = {
+      ...nextReverseSourceUploadScope,
+      epoch: reverseSourceUploadScope.epoch + 1,
+      mounted: reverseSourceUploadScope.mounted,
+    };
+  }
+  useLayoutEffect(() => {
+    reverseSourceUploadScopeRef.current.mounted = true;
+    return () => {
+      const scope = reverseSourceUploadScopeRef.current;
+      reverseSourceUploadScopeRef.current = { ...scope, mounted: false, epoch: scope.epoch + 1 };
+    };
+  }, []);
+
   const handleUploadEffectReverseSource = useCallback(async (file: File) => {
-    if (!onUploadEffectReverseSource) {
+    const scope = reverseSourceUploadScopeRef.current;
+    if (!scope.upload) {
       throw new Error('当前项目暂时无法保存上传的源图');
     }
-    const uploaded = await onUploadEffectReverseSource(file);
-    const effectiveProjectId = projectId || brandProject?.id;
-    if (!effectiveProjectId) {
+    if (!scope.projectId || !scope.mounted || !isMountedRef.current) {
       throw new Error('请先保存或选择一个项目');
     }
+    const uploaded = await scope.upload(file);
+    if (!isMountedRef.current || !scope.mounted || reverseSourceUploadScopeRef.current !== scope) {
+      throw new Error('账号、项目或反拆上传入口已切换，请在原项目核对源图');
+    }
+    const effectiveProjectId = scope.projectId;
     const sourceVersionId = uploaded.annotationVersionId || buildAnnotationSourceVersionId(
       uploaded.id,
       uploaded.createdAt,
@@ -7222,7 +7259,7 @@ export function InfiniteCanvas({ taskModelCatalog = [], taskModelOptions = [], c
     setSelectedIds(new Set([uploaded.id]));
     onSelectImage(uploaded);
     return nextSource;
-  }, [brandProject?.id, onSelectImage, onUploadEffectReverseSource, projectId, setSelectedIds]);
+  }, [onSelectImage, setSelectedIds]);
 
   const handleEffectReverseResult = useCallback((result: EffectReverseTaskResult) => {
     const source = effectReverseSource;

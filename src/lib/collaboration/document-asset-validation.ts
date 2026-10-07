@@ -12,6 +12,7 @@ import { DocumentAssetCommandConflictError, type CanvasAssetCommand } from './ca
 import type { CanvasDocumentProjection } from './canvas-document';
 import { importedMediaIdentity, importedMediaRevision, type PreparedImportedMedia } from './document-media-source';
 import { assertMediaActive, type MediaImportCommand } from './document-media-request';
+import { skillRestorationMediaTargets, type PreparedSkillRestoration } from './document-skill-restoration';
 
 interface MediaIdentity {
   id: string; asset_id: string; owner_id: string; project_id: string;
@@ -70,8 +71,20 @@ export async function prepareDocumentAssetsForImport(
   return prepareCommandAssets(actorId, projectId, command, signal);
 }
 
+/** Targets are canonical version identities; restoration references are server-minted only. */
+export async function prepareDocumentAssetsForSkillBatch(actorId: string, projectId: string,
+  versionIds: readonly string[], restorations: readonly PreparedSkillRestoration[], signal: AbortSignal): Promise<PreparedDocumentAssets> {
+  if (!versionIds.length || versionIds.length > 100 || new Set(versionIds).size !== versionIds.length) {
+    throw new DocumentAssetCommandConflictError();
+  }
+  const annotations = restorations.flatMap(value => skillRestorationMediaTargets(value).annotationAssetIds);
+  return prepareCommandAssets(actorId,projectId,{action:'attach',assetVersionId:versionIds[0],
+    transform:{x:0,y:0,width:1,height:1,rotation:0,zIndex:0}},signal,versionIds,annotations);
+}
+
 async function prepareCommandAssets(
   actorId: string, projectId: string, command: CanvasAssetCommand | MediaImportCommand, signal?: AbortSignal,
+  extraVersions: readonly string[] = [], extraAnnotations: readonly string[] = [],
 ): Promise<PreparedDocumentAssets> {
   if (signal) assertMediaActive(signal);
   const client = await getPool().connect();
@@ -92,6 +105,8 @@ async function prepareCommandAssets(
       if (!placement || placement.deleted || placement.assetVersionId !== command.expectedAssetVersionId) throw new DocumentAssetCommandConflictError();
     }
     const refs = references(projection);
+    for (const version of extraVersions) refs.versions.add(version);
+    for (const asset of extraAnnotations) refs.annotations.add(asset);
     if ('assetVersionId' in command) refs.versions.add(command.assetVersionId);
     if (command.action !== 'attach') refs.versions.add(command.expectedAssetVersionId);
     preparation = { ownerId, projectId, versions: new Map(), annotations: new Map() };

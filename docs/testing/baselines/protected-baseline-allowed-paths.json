@@ -702,5 +702,15 @@
   "src/lib/image-tools/local-image-reader.ts",
   "src/lib/simple-chat-canvas-bridge.ts",
   "src/lib/video-download-format.ts",
-  "src/app/api/image/upscale-pro/route.ts"
+  "src/app/api/image/upscale-pro/route.ts",
+  "migrations/20261006_yjs_canvas_media_batch_receipts.sql",
+  "src/app/api/collaboration/document-assets/import-batch/route.ts",
+  "src/app/api/skill-runs/[runId]/assets/route.ts",
+  "src/app/api/skill-runs/[runId]/sources/route.ts",
+  "src/lib/collaboration/document-media-batch-client.ts",
+  "src/lib/collaboration/document-media-batch-request.ts",
+  "src/lib/collaboration/document-media-batch.ts",
+  "src/lib/collaboration/document-skill-restoration.ts",
+  "src/lib/collaboration/document-task-version-adapter.ts",
+  "src/lib/skill-runtime/document-assets.ts"
 ]

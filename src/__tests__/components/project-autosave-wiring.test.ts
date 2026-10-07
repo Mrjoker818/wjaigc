@@ -1,4 +1,7 @@
-import { describe, expect, it } from 'vitest';
+// @vitest-environment jsdom
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { canvasTransferContractFixture } from '../helpers/canvas-chat-transfer-contract-fixture';
+import type { WorkflowCanvasInsertionItem } from '@/lib/asset-core/workspace-transfer';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
@@ -10,6 +13,8 @@ const infiniteCanvasSource = readFileSync(
   resolve(process.cwd(), 'src/components/infinite-canvas.tsx'),
   'utf8',
 ).replace(/\r\n/g, '\n');
+
+afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 describe('project autosave wiring', () => {
   it('schedules structural canvas snapshots through the persistence scheduler', () => {
@@ -133,15 +138,36 @@ describe('project autosave wiring', () => {
     expect(workspaceSource).toContain('prepared.signature === lastLifecyclePersistedSignature');
   });
 
-  it('builds workflow output images with every field required by the project sync validator', () => {
-    const handlerStart = workspaceSource.indexOf('const handleAddImages = useCallback');
-    const handlerEnd = workspaceSource.indexOf('const handleAddImage = useCallback', handlerStart);
-    const handlerSource = workspaceSource.slice(handlerStart, handlerEnd);
+  it('builds workflow output images with every field required by the project sync validator', async () => {
+    // Breaks: losing rotation, losing/reusing zIndex, or placing outputs below an existing image.
+    const fixture = canvasTransferContractFixture();
+    fixture.images.current[0] = {
+      id: 'original', url: '/original.png', prompt: '', x: 10, y: 20,
+      width: 32, height: 24, rotation: 45, zIndex: 7, createdAt: 1,
+    };
+    vi.spyOn(Date, 'now').mockReturnValue(123456);
+    const receive = fixture.bindings.handleAddImages as (items: WorkflowCanvasInsertionItem[]) => Promise<void>;
+    await receive([
+      { url: '/workflow-a.png', outputNodeId: 'node-a' },
+      { url: '/workflow-b.png', outputNodeId: 'node-b' },
+    ]);
 
-    expect(handlerStart).toBeGreaterThan(-1);
-    expect(handlerSource).toContain('const nextWorkflowImageZIndex =');
-    expect(handlerSource).toContain('rotation: 0,');
-    expect(handlerSource).toContain('zIndex: nextWorkflowImageZIndex + newImages.length,');
+    expect(fixture.images.current).toHaveLength(3);
+    expect(fixture.images.current[0]).toEqual({
+      id: 'original', url: '/original.png', prompt: '', x: 10, y: 20,
+      width: 32, height: 24, rotation: 45, zIndex: 7, createdAt: 1,
+    });
+    expect(fixture.images.current.slice(1)).toMatchObject([
+      { id: 'node-a', url: '/workflow-a.png', prompt: '', x: 52, y: 0,
+        width: 32, height: 24, originalWidth: 32, originalHeight: 24,
+        rotation: 0, zIndex: 8, createdAt: 123456 },
+      { id: 'node-b', url: '/workflow-b.png', prompt: '', x: 94, y: 0,
+        width: 32, height: 24, originalWidth: 32, originalHeight: 24,
+        rotation: 0, zIndex: 9, createdAt: 123456 },
+    ]);
+    expect(fixture.writes).toHaveLength(1);
+    expect(fixture.writes[0].map(image => image.id)).toEqual(['original', 'node-a', 'node-b']);
+    expect(fixture.requests).toEqual([]);
   });
 
   it('forces the committed resize snapshot into the immediate persistence path', () => {

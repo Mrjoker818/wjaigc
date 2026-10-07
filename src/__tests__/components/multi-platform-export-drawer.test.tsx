@@ -37,6 +37,84 @@ function projection(overrides: Partial<AgentRunProjection> = {}): AgentRunProjec
 }
 
 describe('MultiPlatformExportDrawer', () => {
+  it.each(['document', 'legacy', 'located', 'denied', 'wrong-actor', 'wrong-project', 'wrong-run', 'wrong-version', 'late-actor', 'late-project', 'late-run', 'late-authority', 'late-unmount', 'late-locate', 'pending'] as const)('1397 fix1 actual Drawer source boundary %s', async mode => {
+    const authority = mode === 'legacy' ? 'legacy' : mode === 'pending' ? 'pending' : 'document';
+    const pending = deferred<Response>(); const locate = deferred<boolean>();
+    const envelope = { actorUserId: mode === 'wrong-actor' ? 'other' : 'editor', projectId: mode === 'wrong-project' ? 'other' : 'project-1', runId: mode === 'wrong-run' ? 'other' : 'run-export-1' };
+    const ref = { assetId: 'out-a', assetVersionId: 'out-v', kind: 'image', url: '/output.png' };
+    const source = { assetId: 'source-a', assetVersionId: 'source-v', kind: 'image', url: '/source.png', name: 'Source' };
+    const manifest = { schemaVersion: 1, schemaId: 'multi-platform-export-manifest-v1', runId: 'run-export-1',
+      requestDigest: 'a'.repeat(64), createdAt: '2026-10-06T00:00:00Z', frozenParameters: {}, failures: [],
+      files: [{ filename: 'out.png', sourceAssetVersionId: 'source-v', derivedAssetVersionId: 'out-v',
+        platform: 'fixture', usage: 'post', width: 2, height: 2, mimeType: 'image/png', byteSize: 8, sha256: 'a'.repeat(64) }] };
+    const fetcher = vi.fn<typeof fetch>(async input => {
+      const url = String(input);
+      if (url === '/api/platform-export-presets') return Response.json({ success: true, presets: enabledPresets });
+      if (url === '/manifest.json') return Response.json(manifest);
+      if (url.includes('assetVersionId=source-v')) {
+        if (authority === 'document' && url.startsWith('/api/skill-runs/run-export-1/sources?'))
+          return mode.startsWith('late-') ? pending.promise : mode === 'denied' ? Response.json({error:'forbidden'}, {status:403}) : Response.json({...envelope, references:[mode === 'wrong-version' ? {...source,assetVersionId:'other'} : source]});
+        if (authority === 'legacy' && url.startsWith('/api/assets?')) return Response.json(source);
+        return Response.json({ error: 'not an output' }, { status: 403 });
+      }
+      return Response.json({ actorUserId: 'editor', projectId: 'project-1', runId: 'run-export-1', references:
+        url.includes('assetVersionId=manifest') ? [{ assetId: 'manifest-a', assetVersionId: 'manifest', kind: 'document', url: '/manifest.json' }] : [ref] });
+    });
+    const props: React.ComponentProps<typeof MultiPlatformExportDrawer> = { open: true, authority, projectId: 'project-1', accountKey: 'editor', sourceAssetVersionIds: ['source-v'],
+      values: {}, fetcher, onChange: vi.fn(), onEstimate: vi.fn(), onStart: vi.fn(), onClose: vi.fn(), onLocateSource: vi.fn(() => mode === 'late-locate' ? locate.promise : mode === 'located'),
+      projection: projection({ status: 'completed', result: { outputs: [{ stepId: 'export', kind: 'json',
+        schemaId: 'multi-platform-export-result-v1', content: JSON.stringify({ schemaVersion: 1, runId: 'run-export-1',
+          outcome: 'completed', imageAssetVersionIds: ['out-v'], manifestAssetVersionId: 'manifest', zipAssetVersionId: 'zip', failures: [] }) }] } }) };
+    const view = render(<MultiPlatformExportDrawer {...props} />);
+    if (mode === 'pending') {
+      await waitFor(() => expect(screen.getByText('画布权威尚未就绪')).not.toBeNull());
+      expect(fetcher.mock.calls.some(([url]) => String(url).includes('assetVersionId=source-v'))).toBe(false); return;
+    }
+    fireEvent.click(await screen.findByRole('button', { name: '定位来源 source-v' }));
+    if (mode.startsWith('late-')) {
+      await waitFor(() => expect(props.onLocateSource).toHaveBeenCalled());
+      if (mode !== 'late-locate') await waitFor(() => expect(fetcher.mock.calls.some(([url]) => String(url).includes('/sources?'))).toBe(true));
+      if (mode === 'late-actor') view.rerender(<MultiPlatformExportDrawer {...props} accountKey="other" />);
+      if (mode === 'late-project' || mode === 'late-locate') view.rerender(<MultiPlatformExportDrawer {...props} projectId="other" />);
+      if (mode === 'late-authority') view.rerender(<MultiPlatformExportDrawer {...props} authority="pending" />);
+      if (mode === 'late-run') view.rerender(<MultiPlatformExportDrawer {...props} projection={projection({status:'executing'})} />);
+      if (mode === 'late-unmount') view.unmount();
+      await act(async () => { locate.resolve(false); pending.resolve(Response.json({...envelope,references:[source]})); await pending.promise; });
+      expect(screen.queryByAltText('Source')).toBeNull();
+      if (mode === 'late-locate') expect(fetcher.mock.calls.some(([url]) => String(url).includes('/sources?'))).toBe(false);
+    } else if (mode === 'located') {
+      await waitFor(() => expect(props.onLocateSource).toHaveBeenCalledWith('source-v'));
+      expect(fetcher.mock.calls.some(([url]) => String(url).includes('assetVersionId=source-v'))).toBe(false);
+    } else if (mode === 'denied' || mode.startsWith('wrong-')) {
+      await screen.findByRole('alert'); expect(screen.queryByAltText('Source')).toBeNull();
+    } else expect((await screen.findByAltText('Source')).getAttribute('src')).toBe(source.url);
+    expect(props.onLocateSource).toHaveBeenCalledWith('source-v');
+    if (authority === 'document') expect(fetcher.mock.calls.some(([url]) => String(url).startsWith('/api/assets?'))).toBe(false);
+  });
+  it.each(['normal','actor','project','unmount'] as const)('run-bound manual delivery %s never uses private assets or consumes a stale scope',async mode=>{
+    const pending=deferred<Response>();let reads=0;
+    const ref={assetId:'asset',assetVersionId:'image',kind:'image',url:'/image.png'};
+    const fetcher=vi.fn<typeof fetch>(async input=>{
+      const url=String(input);if(url==='/api/platform-export-presets')return Response.json({success:true,presets:enabledPresets});
+      if(!url.startsWith('/api/skill-runs/run-export-1/assets?'))throw new Error('Private assets forbidden');
+      reads++;return reads===1?Response.json({actorUserId:'editor',runId:'run-export-1',projectId:'project-1',references:[ref]}):pending.promise;
+    });
+    const props={open:true,projectId:'project-1',accountKey:'editor',sourceAssetVersionIds:['source'],values:{},
+      onChange:vi.fn(),onEstimate:vi.fn(),onStart:vi.fn(),onClose:vi.fn(),onAddToCanvas:vi.fn(),fetcher,
+      projection:projection({status:'completed',result:{outputs:[{stepId:'export',kind:'json',schemaId:'multi-platform-export-result-v1',
+        content:JSON.stringify({schemaVersion:1,runId:'run-export-1',outcome:'partial_success',imageAssetVersionIds:['image'],
+          failures:[{sourceAssetVersionId:'source',code:'EXPORT_TRANSFORM_FAILED',retryable:true}]})}]}})};
+    const view=render(<MultiPlatformExportDrawer {...props}/>);
+    fireEvent.click(await screen.findByRole('button',{name:'批量放入画布'}));
+    await waitFor(()=>expect(reads).toBe(2));
+    if(mode==='actor')view.rerender(<MultiPlatformExportDrawer {...props} accountKey="other"/>);
+    if(mode==='project')view.rerender(<MultiPlatformExportDrawer {...props} projectId="other"/>);
+    if(mode==='unmount')view.unmount();
+    await act(async()=>{pending.resolve(Response.json({actorUserId:'editor',runId:'run-export-1',projectId:'project-1',references:[ref]}));await pending.promise;});
+    if(mode==='normal')await waitFor(()=>expect(props.onAddToCanvas).toHaveBeenCalledWith([ref]));
+    else expect(props.onAddToCanvas).not.toHaveBeenCalled();
+    expect(fetcher.mock.calls.some(([url])=>String(url).startsWith('/api/assets?'))).toBe(false);
+  });
   it('renders a bottom-toolbar drawer with the six approved sections and responsive controls', async () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({
       success: true,

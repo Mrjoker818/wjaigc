@@ -49,10 +49,12 @@ import {
   type FrozenBriefVideoBinding,
 } from '@/lib/brief-to-video/video-adapter';
 import { productionBriefVideoExecution } from '@/lib/brief-to-video/video-recovery';
+import { createSkillDocumentAssetScope, skillRunAssetReadStorage } from './document-assets';
 
 type ResolveSkillMediaMetadata = (input: {
   actorUserId: string;
   projectId: string;
+  runId?: string;
   assetVersionIds: readonly string[];
 }) => Promise<SkillStepResult['media']>;
 
@@ -145,9 +147,10 @@ async function persistCompliancePartialReport(
 }
 
 const resolveSkillMediaMetadata: ResolveSkillMediaMetadata = async input => {
-  const storage = createPostgresAssetStorage();
-  return storage.read(async transaction => Promise.all(input.assetVersionIds.map(async versionId => {
-    const version = await transaction.findVersion(input.actorUserId, input.projectId, versionId);
+  const storage = input.runId ? skillRunAssetReadStorage({ ...input, runId: input.runId }) : createPostgresAssetStorage();
+  const versions=await storage.read(transaction=>Promise.all(input.assetVersionIds.map(versionId=>
+    transaction.findVersion(input.actorUserId,input.projectId,versionId))));
+  return Promise.all(versions.map(async version => {
     if (version?.file.width !== undefined && version.file.height !== undefined) {
       return { width: version.file.width, height: version.file.height };
     }
@@ -166,7 +169,7 @@ const resolveSkillMediaMetadata: ResolveSkillMediaMetadata = async input => {
       ...(version?.file.width !== undefined ? { width: version.file.width } : {}),
       ...(version?.file.height !== undefined ? { height: version.file.height } : {}),
     };
-  })));
+  }));
 };
 
 function projectionVersionIds(task: CloudTask): string[] {
@@ -390,11 +393,13 @@ export function createProductionSkillStepRegistry(input: {
   stepAdapters: Readonly<Record<string, SkillStepAdapter>>;
   stepRecoveries: Readonly<Record<string, SkillStepRecoveryFactory>>;
 } {
+  const metadataFor = (step: Pick<ExecuteSkillStepInput, 'runId'>): ResolveSkillMediaMetadata =>
+    input.resolveMediaMetadata ?? (value => resolveSkillMediaMetadata({ ...value, runId: step.runId }));
   const generate: SkillStepAdapter = step => step.step.modelRole === 'orchestrator'
     ? executeOrchestratorStep(step)
     : executeGenerationStep(
       input.actor, input.request, step, 'generate_image', undefined,
-      input.resolveMediaMetadata || resolveSkillMediaMetadata,
+      metadataFor(step),
     );
   const recoverGenerate: SkillStepRecoveryFactory = step => ({
     reconcile: taskId => reconcileGeneration(
@@ -404,7 +409,7 @@ export function createProductionSkillStepRegistry(input: {
       step.signal,
       step.step.qualityGateIds.some(id => (
         id === 'image-dimensions-known' || id === 'aspect-ratio-match'
-      )) ? input.resolveMediaMetadata || resolveSkillMediaMetadata : undefined,
+      )) ? metadataFor(step) : undefined,
     ),
   } satisfies AgentDownstreamRecovery<SkillStepResult>);
   const img2img: SkillStepAdapter = step => {
@@ -424,7 +429,7 @@ export function createProductionSkillStepRegistry(input: {
       step,
       'img2img',
       canonicalImageUrls,
-      input.resolveMediaMetadata || resolveSkillMediaMetadata,
+      metadataFor(step),
     );
   };
 
@@ -539,6 +544,13 @@ export function createProductionSkillStepRegistry(input: {
       throw imageAdmissionError('Skill compliance audit requires a persisted workspace');
     }
     const workspace = input.request.surface;
+    const assetScope = await createSkillDocumentAssetScope({ actorUserId: step.actorUserId, projectId: step.projectId,
+      runId: step.runId, stepId: step.step.id, requestDigest: step.requestDigest,
+      sourceVersionIds: input.request.sourceVersionIds, executionFence: step.operation.executionFence, signal: step.signal,
+      toolId: step.step.toolId, operationKey: step.operation.operationKey, operationIdempotencyKey: step.operation.idempotencyKey });
+    const sourceReference = await assetScope.assetService.resolveAssetReference({ actorUserId: step.actorUserId,
+      projectId: step.projectId, assetVersionId: sourceVersionId });
+    if (sourceReference.url !== imageInput) throw imageAdmissionError('Skill compliance source identity changed');
 
     const platform = step.inputValues.platform;
     const region = step.inputValues.region;
@@ -617,6 +629,7 @@ export function createProductionSkillStepRegistry(input: {
         sourceTrace,
         idempotencyKey: `${step.operation.idempotencyKey}:report-asset:${phase}`,
         requestDigest: step.requestDigest,
+        assetService: assetScope.assetService,
       });
       return { version, report: complianceReportFromAssetVersion(version) };
     };
@@ -762,7 +775,14 @@ export function createProductionSkillStepRegistry(input: {
       structured: { schemaId: 'platform-compliance-report-v1', value: completed.report },
     };
   };
-  const multiPlatformExport: SkillStepAdapter = step => executeMultiPlatformExportStep(step, {
+  const multiPlatformExport: SkillStepAdapter = async step => {
+    const scope = await createSkillDocumentAssetScope({ actorUserId: step.actorUserId, projectId: step.projectId,
+      runId: step.runId, stepId: step.step.id, requestDigest: step.requestDigest,
+      sourceVersionIds: input.request.sourceVersionIds, executionFence: step.operation.executionFence, signal: step.signal,
+      toolId: step.step.toolId, operationKey: step.operation.operationKey, operationIdempotencyKey: step.operation.idempotencyKey });
+    return executeMultiPlatformExportStep(step, {
+    readSources: scope.readExportSources, persistImage: scope.persistExportImage,
+    loadPersistedImages: scope.loadPersistedExportImages, persistArtifacts: scope.persistExportArtifacts,
     ...(input.request.retryLineage ? { retryLineage: input.request.retryLineage } : {}),
     onProgress: async progress => {
       if (!step.operation.executionFence) throw new Error('Skill export execution fence is missing');
@@ -783,7 +803,8 @@ export function createProductionSkillStepRegistry(input: {
         executionFence: step.operation.executionFence,
       });
     },
-  });
+    });
+  };
   return {
     stepAdapters: {
       chat: executeOrchestratorStep,

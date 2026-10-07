@@ -259,18 +259,20 @@ describe('canvas chat Skill catalog contract', () => {
   });
 
   it('projects only authoritative completed output versions and excludes source versions', async () => {
-    const fetcher = vi.fn(async (input: string | URL | Request) => {
+    const fetcher = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      if (init?.method !== 'GET') throw new Error('Unexpected HTTP method: ' + init?.method);
       const url = String(input);
-      if (url === '/api/skill-runs/run-1') {
+      if (url === '/api/skill-runs/run-1?observeOnly=true') {
         return new Response(JSON.stringify({
           run: {
             runId: 'run-1',
             status: 'completed',
             assetVersionIds: ['source-version', 'output-version'],
+            outputs: [{ stepId: 'generate', kind: 'text', content: 'Generated output' }],
           },
         }), { status: 200 });
       }
-      if (url.includes('assetVersionId=output-version')) {
+      if (url === '/api/assets?projectId=project-1&assetVersionId=output-version') {
         return new Response(JSON.stringify({
           kind: 'image',
           assetId: 'asset-output',
@@ -292,20 +294,28 @@ describe('canvas chat Skill catalog contract', () => {
       assetVersionId: 'output-version',
       url: '/api/serve-upload/output.png',
     }]);
+    expect(fetcher.mock.calls.map(([input]) => String(input))).toEqual([
+      '/api/skill-runs/run-1?observeOnly=true',
+      '/api/assets?projectId=project-1&assetVersionId=output-version',
+    ]);
   });
 
   it('does not project completed document reports into Canvas image slots', async () => {
-    const fetcher = vi.fn(async (input: string | URL | Request) => {
+    const fetcher = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      if (init?.method !== 'GET') throw new Error('Unexpected HTTP method: ' + init?.method);
       const url = String(input);
-      if (url === '/api/skill-runs/run-report') {
+      if (url === '/api/skill-runs/run-report?observeOnly=true') {
         return new Response(JSON.stringify({
           run: {
             runId: 'run-report',
             status: 'completed',
             assetVersionIds: ['report-version'],
-            outputs: [],
+            outputs: [{ stepId: 'audit', kind: 'text', content: 'Report ready' }],
           },
         }), { status: 200 });
+      }
+      if (url !== '/api/assets?projectId=project-1&assetVersionId=report-version') {
+        throw new Error(`Unexpected request: ${url}`);
       }
       return new Response(JSON.stringify({
         kind: 'document',
@@ -321,15 +331,23 @@ describe('canvas chat Skill catalog contract', () => {
       runId: 'run-report',
       sourceVersionIds: [],
     })).resolves.toEqual([]);
+    expect(fetcher.mock.calls.map(([input]) => String(input))).toEqual([
+      '/api/skill-runs/run-report?observeOnly=true',
+      '/api/assets?projectId=project-1&assetVersionId=report-version',
+    ]);
   });
 
   it('rejects an unknown structured output schema during Canvas history restore', async () => {
-    const fetcher = vi.fn(async () => new Response(JSON.stringify({
-      run: {
-        runId: 'run-1', status: 'completed', assetVersionIds: [],
-        outputs: [{ stepId: 'audit:a', kind: 'json', schemaId: 'unknown', content: '{}' }],
-      },
-    }), { status: 200 }));
+    const fetcher = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      if (init?.method !== 'GET') throw new Error('Unexpected HTTP method: ' + init?.method);
+      if (String(input) !== '/api/skill-runs/run-1?observeOnly=true') throw new Error(`Unexpected request: ${String(input)}`);
+      return new Response(JSON.stringify({
+        run: {
+          runId: 'run-1', status: 'completed', assetVersionIds: [],
+          outputs: [{ stepId: 'audit:a', kind: 'json', schemaId: 'unknown', content: '{}' }],
+        },
+      }), { status: 200 });
+    });
 
     await expect(loadCompletedCanvasSkillAssets({
       fetcher: fetcher as typeof fetch,
@@ -340,9 +358,13 @@ describe('canvas chat Skill catalog contract', () => {
   });
 
   it('rejects present non-array outputs during Canvas history restore', async () => {
-    const fetcher = vi.fn(async () => new Response(JSON.stringify({
-      run: { runId: 'run-1', status: 'completed', assetVersionIds: [], outputs: {} },
-    }), { status: 200 }));
+    const fetcher = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      if (init?.method !== 'GET') throw new Error('Unexpected HTTP method: ' + init?.method);
+      if (String(input) !== '/api/skill-runs/run-1?observeOnly=true') throw new Error(`Unexpected request: ${String(input)}`);
+      return new Response(JSON.stringify({
+        run: { runId: 'run-1', status: 'completed', assetVersionIds: [], outputs: {} },
+      }), { status: 200 });
+    });
 
     await expect(loadCompletedCanvasSkillAssets({
       fetcher: fetcher as typeof fetch,
@@ -351,9 +373,13 @@ describe('canvas chat Skill catalog contract', () => {
   });
 
   it.each(['failed', 'cancelled', 'paused'])('does not project %s runs', async status => {
-    const fetcher = vi.fn(async () => new Response(JSON.stringify({
-      run: { runId: 'run-1', status, assetVersionIds: ['late-version'] },
-    }), { status: 200 }));
+    const fetcher = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      if (init?.method !== 'GET') throw new Error('Unexpected HTTP method: ' + init?.method);
+      if (String(input) !== '/api/skill-runs/run-1?observeOnly=true') throw new Error(`Unexpected request: ${String(input)}`);
+      return new Response(JSON.stringify({
+        run: { runId: 'run-1', status, assetVersionIds: ['late-version'], outputs: [] },
+      }), { status: 200 });
+    });
 
     await expect(loadCompletedCanvasSkillAssets({
       fetcher: fetcher as typeof fetch,

@@ -16,6 +16,7 @@ import { validateBinaryImage } from '@/lib/asset-core/binary-image-validation';
 import { binaryExtensions } from '@/lib/asset-core/binary-media-contract';
 import { outputUrls, outputFileMetadata, type ProjectionTask } from '@/lib/asset-core/task-projector';
 import { taskPublicationSnapshot, withoutAssetProjection, type PreparedTaskPublication } from './task-publication-output';
+import { readBoundPrivateTaskVersion, type PreparedPrivateTaskVersion } from './document-task-version-adapter';
 import { assertMediaActive, consumeMediaBody, DocumentMediaError, mediaImportLimit, IMAGE_IMPORT_LIMIT, VIDEO_IMPORT_LIMIT,
   type MediaAdoptionRequest, type MediaVersionImportRequest, type ReadMediaBody } from './document-media-request';
 
@@ -37,10 +38,20 @@ interface MediaVersionSource { readonly [versionSourceBrand]: true }
 type MediaSource = MediaTaskSource | MediaVersionSource;
 const sources = new WeakMap<MediaSource, SourceSnapshot>();
 const automaticSources = new WeakMap<MediaSource, PreparedTaskPublication>();
+const privateSources = new WeakMap<MediaSource, PreparedPrivateTaskVersion>();
 function forbidden(): never { throw new DocumentMediaError('DOCUMENT_MEDIA_SOURCE_FORBIDDEN'); }
 function conflict(): never { throw new DocumentMediaError('DOCUMENT_MEDIA_CONFLICT'); }
 async function loadSource(actorId: string, input: MediaTaskSourceIdentity, client?: PoolClient,
-  publication?: PreparedTaskPublication): Promise<TaskSnapshot> {
+  publication?: PreparedTaskPublication, privateVersion?: PreparedPrivateTaskVersion): Promise<TaskSnapshot> {
+  if (privateVersion) {
+    if (publication) forbidden();
+    const bound = await readBoundPrivateTaskVersion(actorId, input, privateVersion, client);
+    // image_edit must still enter via its exact prepared-publication contract.
+    if (bound.task.id.startsWith('image_edit_')) forbidden();
+    return { sourceKind: 'task', task: bound.task, source: bound.source,
+      url: outputUrls({ ...bound.task, userId: bound.task.user_id, status: 'completed' } as ProjectionTask)[bound.outputIndex],
+      kind: bound.source.kind, outputIndex: bound.outputIndex };
+  }
   const db = client ?? getPool();
   const task = (await db.query<TaskRow>(`SELECT id,user_id,project_id,type,status,result FROM cloud_tasks
     WHERE id=$1 AND user_id=$2`, [input.taskId, actorId])).rows[0];
@@ -118,11 +129,12 @@ export async function assertMediaVersionSource(client: PoolClient, actorId: stri
   if (!isDeepStrictEqual(previous, current)) conflict();
 }
 export async function prepareMediaTaskSource(actorId: string, input: MediaTaskSourceIdentity,
-  publication?: PreparedTaskPublication): Promise<MediaTaskSource> {
-  const snapshot = await loadSource(actorId, input, undefined, publication);
+  publication?: PreparedTaskPublication, privateVersion?: PreparedPrivateTaskVersion): Promise<MediaTaskSource> {
+  const snapshot = await loadSource(actorId, input, undefined, publication, privateVersion);
   const capability = Object.freeze({}) as MediaTaskSource;
   sources.set(capability, snapshot);
   if (publication) automaticSources.set(capability, publication);
+  if (privateVersion) privateSources.set(capability, privateVersion);
   return capability;
 }
 export function mediaSourceProject(capability: MediaSource): string {
@@ -144,7 +156,7 @@ export async function assertMediaTaskSource(client: PoolClient, actorId: string,
   const previous = sources.get(capability);
   if (!previous || previous.sourceKind !== 'task') forbidden();
   let current: SourceSnapshot;
-  try { current = await loadSource(actorId, input, client, automaticSources.get(capability)); }
+  try { current = await loadSource(actorId, input, client, automaticSources.get(capability), privateSources.get(capability)); }
   catch (error) { if (error instanceof DocumentMediaError) conflict(); throw error; }
   if (!isDeepStrictEqual(previous, current)) conflict();
 }

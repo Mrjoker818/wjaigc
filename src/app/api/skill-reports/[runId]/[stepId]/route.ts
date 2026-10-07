@@ -4,7 +4,7 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { listAgentRunEvents } from '@/lib/agent-runtime/service';
 import { parseWorkspaceSourceTrace } from '@/lib/asset-core/source-trace';
-import { createPostgresAssetStorage } from '@/lib/asset-core/storage';
+import { skillRunAssetReadStorage } from '@/lib/skill-runtime/document-assets';
 import { getCloudTaskForUser } from '@/lib/cloud-task-storage';
 import {
   COMPLIANCE_REPORT_SCHEMA_ID,
@@ -111,7 +111,7 @@ export async function GET(request: NextRequest, context: RouteContext): Promise<
   )))];
   if (reportVersionIds.length === 0) return notFound();
 
-  const reportContent = await createPostgresAssetStorage().read(async transaction => {
+  const reportContent = await skillRunAssetReadStorage({actorUserId:sessionUser.id,projectId,runId}).read(async transaction => {
     if (!await transaction.findProject(sessionUser.id, projectId)) return null;
     for (const versionId of reportVersionIds) {
       const version = await transaction.findVersion(sessionUser.id, projectId, versionId);

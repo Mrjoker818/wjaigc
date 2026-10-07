@@ -156,12 +156,16 @@ describe('multi-platform export results', () => {
     };
     const fetcher = vi.fn<typeof fetch>()
       .mockResolvedValueOnce(Response.json({
-        assetId: 'asset-manifest-1', assetVersionId: 'version-manifest-1', kind: 'document',
-        url: '/api/serve-upload/exports/manifest.json',
+        actorUserId: 'editor', projectId: 'project-1', runId: result.runId,
+        references: [{ assetId: 'asset-manifest-1', assetVersionId: 'version-manifest-1', kind: 'document',
+          url: '/api/serve-upload/exports/manifest.json' }],
       }))
       .mockResolvedValueOnce(Response.json(manifest));
 
     await expect(loadExportManifestFiles(result, 'project-1', fetcher)).resolves.toEqual(manifest.files);
+    expect(fetcher).toHaveBeenNthCalledWith(1,
+      '/api/skill-runs/run-export-1/assets?projectId=project-1&assetVersionId=version-manifest-1',
+      expect.objectContaining({ method: 'GET', credentials: 'include' }));
   });
 
   it('renders stable result actions and reuses existing versions when adding all images', async () => {

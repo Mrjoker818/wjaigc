@@ -31,8 +31,10 @@ import { importedMediaIdentity, prepareAdoptedMedia, type PreparedImportedMedia,
 import { taskPublicationSnapshot, type PreparedTaskPublication } from '@/lib/collaboration/task-publication-output';
 import * as publicationOutput from '@/lib/collaboration/task-publication-output';
 import { enableCollaborativeProject } from '@/lib/collaboration/document-project-bridge';
-import { getPool } from '@/lib/db-client';
+import { getPool, getAdvisoryLockPool } from '@/lib/db-client';
 import type { PoolClient, QueryResult } from 'pg';
+import { Client } from 'pg';
+import { publishPreparedDocumentTaskBatch } from '@/lib/collaboration/document-media-import';
 import { grantDocumentEditor, revokeDocumentEditor } from '@/lib/collaboration/document-access';
 import { recordTaskProjectionPending } from '@/lib/asset-core/task-projector';
 afterEach((): void => { vi.restoreAllMocks(); vi.unstubAllEnvs(); });
@@ -177,25 +179,25 @@ it('publication connection outage reports 503 and never falls back to private wr
   });
 }, 60_000);
 
-it('one multi-output attempt cannot adopt a changed intent between committed outputs', async () => {
+it('one multi-output attempt rejects changed intent during preparation without any committed output', async () => {
   await withIsolatedPostgres('publication-original-intent', async ({ query, databaseUrl, schemaName }) => {
     await seed(query, databaseUrl, schemaName);
     await task('original-intent', { ...proposal, projectionMode: 'derived' },
       { imageUrls: ['/api/serve-upload/shared.png', '/api/serve-upload/shared.png'] });
-    const writes = new Set<PoolClient>(); let changed = false;
-    const restore = interceptQueries(async (client, sql, next) => {
-      if (sql.includes('INSERT INTO wujie_canvas_asset_commands')) writes.add(client);
-      const result = await next();
-      if (sql === 'COMMIT' && writes.delete(client) && !changed) {
+    let changed = false; let persisted = 0;
+    const nativePersist = binary.persistAssetBytes;
+    const spy = vi.spyOn(binary, 'persistAssetBytes').mockImplementation(async (...args) => {
+      const result = await nativePersist(...args);
+      if (++persisted === 2) {
         changed = true;
         await query(`UPDATE wujie_canvas_task_publications SET publication_intent=jsonb_set(publication_intent,'{placement,transform,x}','700')`);
       }
       return result;
     });
-    try { await expect(projectCanvasTaskResult(input('original-intent'))).rejects.toThrow(); } finally { restore(); }
+    try { await expect(projectCanvasTaskResult(input('original-intent'))).rejects.toThrow(); } finally { spy.mockRestore(); }
     expect(changed).toBe(true);
-    expect((await query('SELECT * FROM wujie_canvas_asset_commands')).rows).toHaveLength(1);
-    expect((await query('SELECT * FROM wujie_project_canvas_updates')).rows).toHaveLength(1);
+    expect((await query('SELECT * FROM wujie_canvas_asset_commands')).rows).toHaveLength(0);
+    expect((await query('SELECT * FROM wujie_project_canvas_updates')).rows).toHaveLength(0);
   });
 }, 60_000);
 
@@ -258,7 +260,7 @@ it('revocation after publication but before marker prevents new shared confirmat
       return next();
     });
     try { await expect(projectCanvasTaskResult(input('marker-revoke'))).rejects.toThrow(); } finally { restore(); }
-    expect(revoked).toBe(true); expect((await query('SELECT * FROM wujie_canvas_asset_commands')).rows).toHaveLength(1);
+    expect(revoked).toBe(true); expect((await query('SELECT * FROM wujie_canvas_asset_commands')).rows).toHaveLength(0);
     expect((await query("SELECT status,result->'assetProjection' AS marker FROM cloud_tasks")).rows).toEqual([{ status: 'completed', marker: null }]);
     expect((await query('SELECT user_id,type,amount FROM wujie_credit_transactions')).rows).toEqual([{ user_id: 'editor', type: 'consume', amount: -7 }]);
   });
@@ -321,6 +323,241 @@ async function snapshot(query: QueryFn, tables: string[] = ['wujie_assets', 'wuj
   for (const table of tables) rows[table] = (await query(`SELECT to_jsonb(t) AS row FROM ${table} t ORDER BY to_jsonb(t)::text`)).rows;
   return rows;
 }
+
+for (const failure of ['child-sql', 'marker-sql'] as const) {
+  it(`atomic publication rolls back every new child and owned file on ${failure}`, async () => {
+    await withIsolatedPostgres('atomic-' + failure, async ({ query, databaseUrl, schemaName }) => {
+      await seed(query, databaseUrl, schemaName);
+      await task('atomic-sql', { ...proposal, projectionMode: 'derived' },
+        { imageUrls: ['/api/serve-upload/shared.png', '/api/serve-upload/shared.png'] });
+      if (failure === 'child-sql') {
+        await query(`CREATE FUNCTION reject_child2() RETURNS trigger LANGUAGE plpgsql AS $$
+          BEGIN IF NEW.task_id='atomic-sql' AND EXISTS(SELECT 1 FROM wujie_asset_versions WHERE task_id='atomic-sql')
+            THEN RAISE EXCEPTION 'second child SQL rejection'; END IF; RETURN NEW; END $$;
+          CREATE TRIGGER reject_child2 BEFORE INSERT ON wujie_asset_versions FOR EACH ROW EXECUTE FUNCTION reject_child2()`);
+      } else {
+        await query(`CREATE FUNCTION reject_marker() RETURNS trigger LANGUAGE plpgsql AS $$
+          BEGIN IF NEW.result->'assetProjection'->>'status'='completed' THEN RAISE EXCEPTION 'marker SQL rejection';
+          END IF; RETURN NEW; END $$;
+          CREATE TRIGGER reject_marker BEFORE UPDATE ON cloud_tasks FOR EACH ROW EXECUTE FUNCTION reject_marker()`);
+      }
+      const before = await snapshot(query); const media = files(); const tasks = await snapshot(query, ['cloud_tasks']);
+      await expect(projectCanvasTaskResult(input('atomic-sql'))).rejects.toThrow(failure === 'child-sql' ? 'second child SQL rejection' : 'marker SQL rejection');
+      expect(await snapshot(query)).toEqual(before); expect(files()).toEqual(media);
+      expect(await snapshot(query, ['cloud_tasks'])).toEqual(tasks);
+    });
+  }, 60_000);
+}
+
+
+it('failed preparation attempts cleanup of every owned file even if the first cleanup rejects', async () => {
+  await withIsolatedPostgres('atomic-cleanup-all', async ({ query, databaseUrl, schemaName }) => {
+    await seed(query, databaseUrl, schemaName);
+    await task('cleanup-all', { ...proposal, projectionMode: 'derived' },
+      { imageUrls: ['/api/serve-upload/shared.png', '/api/serve-upload/shared.png', '/api/serve-upload/cleanup-missing.png'] });
+    let preparedCount = 0; let cleanedCount = 0; const original = binary.persistAssetBytes;
+    vi.spyOn(binary, 'persistAssetBytes').mockImplementation(async (...args) => {
+      const result = await original(...args); const index = ++preparedCount;
+      return { ...result, cleanup: async (): Promise<void> => {
+        cleanedCount++; await result.cleanup();
+        if (index === 1) throw new Error('first cleanup rejected after native deletion');
+      } };
+    });
+    const before = await snapshot(query); const media = files();
+    await expect(projectCanvasTaskResult(input('cleanup-all'))).rejects.toThrow();
+    expect(preparedCount).toBe(2); expect(cleanedCount).toBe(2);
+    expect(await snapshot(query)).toEqual(before); expect(files()).toEqual(media);
+  });
+}, 60_000);
+
+it('two tiny video outputs within the actual aggregate byte budget publish together', async () => {
+  await withIsolatedPostgres('atomic-two-tiny-video', async ({ query, databaseUrl, schemaName }) => {
+    await seed(query, databaseUrl, schemaName);
+    const video = Buffer.from(readFileSync('tests/fixtures/yjs-task8b1-tiny-valid.mp4.base64', 'utf8'), 'base64');
+    writeFileSync(join(roots.root, 'tiny-a.mp4'), video); writeFileSync(join(roots.root, 'tiny-b.mp4'), video);
+    await task('tiny-videos', { ...proposal, projectionMode: 'derived' },
+      { imageUrls: ['/api/serve-upload/tiny-a.mp4', '/api/serve-upload/tiny-b.mp4'] }, 'owner');
+    await query("UPDATE cloud_tasks SET type='video' WHERE id='tiny-videos'");
+    const refs = await projectCanvasTaskResult(input('tiny-videos', 'owner'));
+    expect(refs).toHaveLength(2); expect(refs!.map(ref => ref.kind)).toEqual(['video', 'video']);
+    expect((await query("SELECT byte_size,mime_type FROM wujie_asset_versions WHERE task_id='tiny-videos'")).rows)
+      .toEqual(Array(2).fill({ byte_size: String(video.length), mime_type: 'video/mp4' }));
+    expect((await query("SELECT result->'assetProjection' AS marker FROM cloud_tasks")).rows[0].marker.references).toEqual(refs);
+  });
+}, 60_000);
+
+it('six small outputs publish and replay with the actual five-connection advisory pool', async () => {
+  await withIsolatedPostgres('atomic-six-output-lock-capacity', async ({ query, databaseUrl, schemaName }) => {
+    await seed(query, databaseUrl, schemaName);
+    expect(getAdvisoryLockPool().options.max).toBe(5);
+    await task('six-small', { ...proposal, projectionMode: 'derived' },
+      { imageUrls: Array(6).fill('/api/serve-upload/shared.png') });
+    const before = await snapshot(query); const media = files();
+    const outcome = await projectCanvasTaskResult(input('six-small')).then(
+      refs => ({ refs, error: undefined }),
+      (error: unknown) => ({ refs: undefined, error }));
+    const after = await snapshot(query); const afterFiles = files();
+    const marker = (await query("SELECT result->'assetProjection' AS marker FROM cloud_tasks WHERE id='six-small'")).rows[0].marker;
+    console.info('six-output real PG observation', JSON.stringify({
+      error: outcome.error instanceof Error ? outcome.error.message : outcome.error,
+      sqlUnchanged: JSON.stringify(after) === JSON.stringify(before),
+      filesUnchanged: JSON.stringify(afterFiles) === JSON.stringify(media),
+      children: (await query('SELECT idempotency_key FROM wujie_canvas_asset_commands ORDER BY idempotency_key')).rows,
+      versions: (await query("SELECT id FROM wujie_asset_versions WHERE task_id='six-small' ORDER BY id")).rows,
+      marker,
+    }));
+    expect(outcome.error).toBeUndefined();
+    expect(outcome.refs).toHaveLength(6);
+    const refs = outcome.refs!;
+    expect(new Set(refs.map(ref => ref.assetVersionId)).size).toBe(6);
+    for (const table of ['wujie_canvas_asset_commands', 'wujie_canvas_media_lineage', 'wujie_project_canvas_updates'])
+      expect((await query('SELECT * FROM ' + table)).rows, table).toHaveLength(6);
+    expect((await query("SELECT id FROM wujie_asset_versions WHERE task_id='six-small'")).rows.map(row => row.id).sort())
+      .toEqual(refs.map(ref => ref.assetVersionId).sort());
+    expect(marker.references).toEqual(refs);
+    expect((await query('SELECT user_id,type,amount FROM wujie_credit_transactions')).rows)
+      .toEqual([{ user_id: 'editor', type: 'consume', amount: -7 }]);
+    expect(await projectCanvasTaskResult(input('six-small'))).toEqual(refs);
+    expect(await snapshot(query)).toEqual(after); expect(files()).toEqual(afterFiles);
+    expect(getAdvisoryLockPool().waitingCount).toBe(0);
+    expect((await query("SELECT count(*)::int AS n FROM pg_locks WHERE locktype='advisory' AND database=(SELECT oid FROM pg_database WHERE datname=current_database())")).rows[0].n).toBe(0);
+  });
+}, 60_000);
+
+it('three revision outputs share the original family and atomically select the last ordered head', async () => {
+  await withIsolatedPostgres('atomic-revisions', async ({ query, databaseUrl, schemaName }) => {
+    await seed(query, databaseUrl, schemaName);
+    await task('revisions', proposal, { imageUrls: Array(3).fill('/api/serve-upload/shared.png') });
+    const source = readFileSync(join(roots.root, 'shared.png'));
+    const refs = await projectCanvasTaskResult(input('revisions'));
+    expect(refs).toHaveLength(3); expect(refs!.map(ref => ref.assetId)).toEqual(Array(3).fill('asset-shared'));
+    expect(new Set(refs!.map(ref => ref.assetVersionId)).size).toBe(3);
+    expect((await query("SELECT current_version_id FROM wujie_assets WHERE id='asset-shared'")).rows[0].current_version_id).toBe(refs![2].assetVersionId);
+    for (const ref of refs!) {
+      expect((await query('SELECT parent_version_id,parent_order FROM wujie_asset_version_parents WHERE version_id=$1 ORDER BY parent_order', [ref.assetVersionId])).rows)
+        .toEqual([{ parent_version_id: 'version-shared', parent_order: 0 }]);
+      expect((await query('SELECT provider_id,model_id FROM wujie_asset_versions WHERE id=$1', [ref.assetVersionId])).rows)
+        .toEqual([{ provider_id: 'trusted-provider', model_id: 'trusted-model' }]);
+    }
+    expect(readFileSync(join(roots.root, 'shared.png'))).toEqual(source);
+    const before = await snapshot(query); const media = files();
+    expect(await projectCanvasTaskResult(input('revisions'))).toEqual(refs);
+    expect(await snapshot(query)).toEqual(before); expect(files()).toEqual(media);
+    expect((await query('SELECT user_id,type,amount FROM wujie_credit_transactions')).rows).toEqual([{ user_id: 'editor', type: 'consume', amount: -7 }]);
+  });
+}, 60_000);
+
+it('20 whole-batch publishers racing the legacy single output commit exactly one two-child batch', async () => {
+  await withIsolatedPostgres('atomic-concurrent-multi', async ({ query, databaseUrl, schemaName }) => {
+    await seed(query, databaseUrl, schemaName);
+    await task('multi-race', { ...proposal, projectionMode: 'derived' }, { imageUrls: Array(2).fill('/api/serve-upload/shared.png') });
+    const single = publishDocumentTaskOutput('editor', 'multi-race', 1);
+    const results = await Promise.all(Array.from({ length: 20 }, () => projectCanvasTaskResult(input('multi-race'))));
+    const original = await single;
+    results.forEach(value => expect(value).toEqual(results[0]));
+    expect(results[0]![1]).toEqual(original.assetReference);
+    for (const table of ['wujie_canvas_asset_commands', 'wujie_canvas_media_lineage', 'wujie_project_canvas_updates'])
+      expect((await query('SELECT * FROM ' + table)).rows).toHaveLength(2);
+    expect((await query("SELECT result->'assetProjection' AS marker FROM cloud_tasks")).rows[0].marker.references).toEqual(results[0]);
+  });
+}, 60_000);
+
+it('independent client sees no children or marker before sole COMMIT and lost reply recovers the complete batch without redownload', async () => {
+  await withIsolatedPostgres('atomic-observer-lost-reply', async ({ query, databaseUrl, schemaName }) => {
+    await seed(query, databaseUrl, schemaName);
+    await task('whole-crash', { ...proposal, projectionMode: 'derived' }, { imageUrls: Array(2).fill('/api/serve-upload/shared.png') });
+    const observer = new Client({ connectionString: databaseUrl }); await observer.connect();
+    const writing = new Set<PoolClient>(); let lost = false; let finalCommits = 0;
+    let preCommit: unknown;
+    const restore = interceptQueries(async (client, sql, next) => {
+      if (sql.includes('INSERT INTO wujie_canvas_asset_commands')) writing.add(client);
+      if (sql === 'COMMIT' && writing.delete(client)) {
+        finalCommits++;
+        preCommit = {
+          children: (await observer.query("SELECT idempotency_key FROM wujie_canvas_asset_commands")).rows,
+          versions: (await observer.query("SELECT id FROM wujie_asset_versions WHERE task_id='whole-crash'")).rows,
+          placements: (await observer.query("SELECT id FROM wujie_workspace_placements WHERE id NOT IN ('placement-shared','placement-second')")).rows,
+          updates: (await observer.query('SELECT sequence FROM wujie_project_canvas_updates')).rows,
+          marker: (await observer.query("SELECT result->'assetProjection' AS marker FROM cloud_tasks")).rows[0].marker,
+        };
+        const result = await next();
+        if (!lost) { lost = true; throw new Error('whole COMMIT reply lost'); }
+        return result;
+      }
+      return next();
+    });
+    let refs: Awaited<ReturnType<typeof projectCanvasTaskResult>>;
+    try { refs = await projectCanvasTaskResult(input('whole-crash')); }
+    finally { restore(); await observer.end(); }
+    // All critical checks deliberately outside the production await/recovery catch.
+    expect(preCommit).toEqual({ children: [], versions: [], placements: [], updates: [], marker: null });
+    expect(finalCommits).toBe(1); expect(lost).toBe(true); expect(refs!).toHaveLength(2);
+    const media = files(); const before = await snapshot(query);
+    const persisted = vi.spyOn(binary, 'persistAssetBytes');
+    expect(await projectCanvasTaskResult(input('whole-crash'))).toEqual(refs!);
+    expect(persisted).not.toHaveBeenCalled(); expect(files()).toEqual(media); expect(await snapshot(query)).toEqual(before);
+    expect((await query("SELECT result->'assetProjection' AS marker FROM cloud_tasks")).rows[0].marker.references).toEqual(refs!);
+  });
+}, 60_000);
+
+
+for (const invalidation of ['missing-child', 'revoked-authorization'] as const) {
+  it(`lost whole COMMIT reply cannot ACK ${invalidation} from a completed marker alone`, async () => {
+    await withIsolatedPostgres('atomic-unknown-' + invalidation, async ({ query, databaseUrl, schemaName }) => {
+      await seed(query, databaseUrl, schemaName);
+      await task('uncertain-batch', { ...proposal, projectionMode: 'derived' }, { imageUrls: Array(2).fill('/api/serve-upload/shared.png') });
+      const writing = new Set<PoolClient>(); let lost = false;
+      const restore = interceptQueries(async (client, sql, next) => {
+        if (sql.includes('INSERT INTO wujie_canvas_asset_commands')) writing.add(client);
+        const value = await next();
+        if (sql === 'COMMIT' && writing.delete(client) && !lost) {
+          lost = true;
+          if (invalidation === 'missing-child') {
+            await query('DELETE FROM wujie_canvas_asset_commands WHERE idempotency_key=$1',
+              [canvasTaskOutputCommandKey({ actorId: 'editor', projectId: 'shared', taskId: 'uncertain-batch', outputIndex: 1 })]);
+          } else await revokeDocumentEditor('owner', 'shared', 'editor');
+          throw new Error('whole acknowledgement lost after actual COMMIT');
+        }
+        return value;
+      });
+      const original = files();
+      let outcome: unknown;
+      try { outcome = await projectCanvasTaskResult(input('uncertain-batch')).then(() => null, error => error); }
+      finally { restore(); }
+      expect(lost).toBe(true); expect(outcome).toMatchObject({ message: 'DOCUMENT_MEDIA_COMMIT_UNCONFIRMED' });
+      expect((await query("SELECT result->'assetProjection'->>'status' AS status FROM cloud_tasks")).rows).toEqual([{ status: 'completed' }]);
+      expect((await query("SELECT file_url FROM wujie_asset_versions WHERE task_id='uncertain-batch'")).rows).toHaveLength(2);
+      expect(Object.keys(files()).length).toBe(Object.keys(original).length + 2);
+    });
+  }, 60_000);
+}
+
+it('a legacy later revision remains the last ordered head when an earlier missing output is filled', async () => {
+  await withIsolatedPostgres('atomic-later-prefix-revision', async ({ query, databaseUrl, schemaName }) => {
+    await seed(query, databaseUrl, schemaName);
+    await task('later-prefix', proposal, { imageUrls: Array(2).fill('/api/serve-upload/shared.png') });
+    const later = await publishDocumentTaskOutput('editor', 'later-prefix', 1);
+    const refs = await projectCanvasTaskResult(input('later-prefix'));
+    expect(refs).toHaveLength(2); expect(refs![1]).toEqual(later.assetReference);
+    expect((await query("SELECT current_version_id FROM wujie_assets WHERE id='asset-shared'")).rows[0].current_version_id).toBe(later.assetVersionId);
+  });
+}, 60_000);
+
+it('cancellation while preparing item2 rolls back the entire new attempt and keeps task billing', async () => {
+  await withIsolatedPostgres('atomic-cancel', async ({ query, databaseUrl, schemaName }) => {
+    await seed(query, databaseUrl, schemaName);
+    await task('cancel-batch', { ...proposal, projectionMode: 'derived' }, { imageUrls: Array(2).fill('/api/serve-upload/shared.png') });
+    const capability = await publicationOutput.prepareTaskPublication('editor', 'cancel-batch');
+    const abort = new AbortController(); const native = binary.persistAssetBytes; let count = 0;
+    vi.spyOn(binary, 'persistAssetBytes').mockImplementation(async (...args) => {
+      const result = await native(...args); if (++count === 2) abort.abort(); return result;
+    });
+    const before = await snapshot(query); const media = files(); const tasks = await snapshot(query, ['cloud_tasks']);
+    await expect(publishPreparedDocumentTaskBatch(capability!, abort.signal)).rejects.toMatchObject({ code: 'DOCUMENT_MEDIA_CANCELLED' });
+    expect(await snapshot(query)).toEqual(before); expect(files()).toEqual(media); expect(await snapshot(query, ['cloud_tasks'])).toEqual(tasks);
+  });
+}, 60_000);
+
 function files(): Record<string, string> {
   const result: Record<string, string> = {};
   for (const file of readdirSync(roots.root, { recursive: true, withFileTypes: true })) {
@@ -356,12 +593,26 @@ it('revision uses the frozen asset family, ordered real parent edge and leaves s
   });
 }, 60_000);
 
+it('a new multi-output attempt leaves no SQL prefix or prepared files when the second media fails', async () => {
+  await withIsolatedPostgres('publication-atomic-media-fail', async ({ query, databaseUrl, schemaName }) => {
+    await seed(query, databaseUrl, schemaName);
+    await task('atomic-media-fail', { ...proposal, projectionMode: 'derived' },
+      { imageUrls: ['/api/serve-upload/shared.png', '/api/serve-upload/missing.png'] });
+    const before = await snapshot(query); const media = files();
+    const originalTask = await snapshot(query, ['cloud_tasks']);
+    await expect(projectCanvasTaskResult(input('atomic-media-fail'))).rejects.toThrow();
+    expect((await query('SELECT * FROM wujie_canvas_asset_commands')).rows).toEqual([]);
+    expect(await snapshot(query)).toEqual(before); expect(files()).toEqual(media);
+    expect(await snapshot(query, ['cloud_tasks'])).toEqual(originalTask);
+  });
+}, 60_000);
+
 it('derived ordered parents and two outputs recover a committed prefix without downloading it again', async () => {
   await withIsolatedPostgres('publication-prefix', async ({ query, databaseUrl, schemaName }) => {
     await seed(query, databaseUrl, schemaName);
     await task('multi', { ...proposal, projectionMode: 'derived', parentVersionIds: ['version-second', 'version-shared'] },
       { imageUrls: ['/api/serve-upload/shared.png', '/api/serve-upload/missing.png'] });
-    await expect(projectCanvasTaskResult(input('multi'))).rejects.toThrow();
+    await publishDocumentTaskOutput('editor', 'multi', 0);
     const prefix = (await query('SELECT * FROM wujie_canvas_asset_commands')).rows;
     expect(prefix).toHaveLength(1);
     expect((await query("SELECT result->'assetProjection' AS marker FROM cloud_tasks")).rows[0].marker).toBeNull();

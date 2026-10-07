@@ -298,15 +298,28 @@ describe('Task8Cb1 version imports', () => {
       await expect(importDocumentAssetVersion('editor', versionImport)).rejects.toMatchObject({ code: 'DOCUMENT_FORBIDDEN' });
     });
   }, 15_000);
-  it('rejects version reuse of upload/task/ready keys and replaces with version CAS', async (): Promise<void> => {
+  it('rejects conflicting version keys, replays durable adopt identity and replaces with version CAS', async (): Promise<void> => {
     await withIsolatedPostgres('8cb1-replace', async ({ query }): Promise<void> => {
       await seed(query); const attached = await importDocumentUpload('editor', upload());
-      await adoptDocumentTaskResult('editor', adoption);
+      const adopted = await adoptDocumentTaskResult('editor', adoption);
       await executeDocumentAssetCommand({ actorId: 'editor', projectId: 'target', idempotencyKey: 'ready', command: { ...command, assetVersionId: attached.assetVersionId } });
       await taskless(query, 'video');
-      for (const idempotencyKey of ['upload', 'adopt', 'ready']) {
+      const replayState = async (): Promise<unknown[]> => Promise.all([
+        'wujie_assets', 'wujie_asset_versions', 'wujie_canvas_media_lineage', 'wujie_workspace_placements',
+        'wujie_canvas_asset_commands', 'wujie_project_canvas_updates', 'wujie_project_canvas_documents',
+        'cloud_tasks', 'wujie_credit_transactions',
+      ].map(async (table: string): Promise<unknown> =>
+        (await query('SELECT to_jsonb(t) AS row FROM ' + table + ' t ORDER BY to_jsonb(t)::text')).rows));
+      const replayBefore = await replayState(); const replayFiles = await files();
+      for (const idempotencyKey of ['upload', 'ready']) {
         await expect(importDocumentAssetVersion('editor', { ...versionImport, idempotencyKey })).rejects.toMatchObject({ code: 'DOCUMENT_MEDIA_CONFLICT' });
       }
+      expect(await importDocumentAssetVersion('editor', { ...versionImport, idempotencyKey: 'adopt' })).toEqual(adopted);
+      await expect(importDocumentAssetVersion('editor', { ...versionImport, idempotencyKey: 'adopt',
+        sourceVersionId: 'another-version' })).rejects.toMatchObject({ code: 'DOCUMENT_MEDIA_CONFLICT' });
+      await expect(importDocumentAssetVersion('editor', { ...versionImport, idempotencyKey: 'adopt',
+        command: { ...command, transform: { ...command.transform, x: 11 } } })).rejects.toMatchObject({ code: 'DOCUMENT_MEDIA_CONFLICT' });
+      expect(await replayState()).toEqual(replayBefore); expect(await files()).toEqual(replayFiles);
       const replacement = { ...versionImport, command: { action: 'replace', placementId: attached.placementId, expectedAssetVersionId: attached.assetVersionId } };
       const result = await importDocumentAssetVersion('editor', replacement);
       expect(result.placementId).toBe(attached.placementId); expect(result.assetVersionId).not.toBe(attached.assetVersionId); expect(result.documentSequence).toBe(4);
