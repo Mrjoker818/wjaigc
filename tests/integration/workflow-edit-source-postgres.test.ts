@@ -1197,6 +1197,104 @@ postgresIt('runs a real parent edit through charged child, pending poll, and man
     await query("INSERT INTO wujie_project_document_editors(project_id,owner_id,member_user_id) VALUES ('shared','owner','editor')");
     await query("INSERT INTO wujie_credits(id,user_id,balance,total_recharged,total_used,created_at,updated_at) VALUES ('credits_editor','editor',100,100,0,1,1)");
 
+    await query("INSERT INTO wujie_projects(id,owner_id,name) VALUES ('other','owner','Other')");
+    await query(`INSERT INTO wujie_project_canvas_documents(project_id,owner_id,snapshot_bytes,projection)
+      VALUES ('other','owner',$1,$2::jsonb)`, [sourceSnapshot, sourceProjection]);
+    await query("INSERT INTO wujie_project_document_settings(project_id,owner_id,enabled) VALUES ('other','owner',true)");
+    await query("INSERT INTO wujie_project_document_editors(project_id,owner_id,member_user_id) VALUES ('other','owner','editor')");
+    interface SourceDocumentRow {
+      owner_id: string;
+      sequence: string;
+      snapshot_sequence: string;
+      snapshot_bytes: Buffer;
+      projection: unknown;
+      created_at: string;
+      updated_at: string;
+    }
+    const documentColumns = 'owner_id,sequence,snapshot_sequence,snapshot_bytes,projection,'
+      + 'created_at::text AS created_at,updated_at::text AS updated_at';
+    const savedDocument = (await query<SourceDocumentRow>(`SELECT ${documentColumns}
+      FROM wujie_project_canvas_documents WHERE project_id='shared'`)).rows[0];
+    if (!savedDocument) throw new Error('Canonical source document fixture is missing');
+
+    // The real billing transaction must reject invalid canvas sources before a
+    // charge, task, or frozen intent is created. Restore the canonical fixture
+    // after each attempt so the parent chain still exercises the original input.
+    for (const invalidSource of ['forged-url', 'tombstoned', 'replaced', 'missing-document',
+      'wrong-workspace', 'wrong-mime', 'non-image-kind', 'cross-project', 'stale-grant'] as const) {
+      const invalidTaskId = `invalid-canvas-${invalidSource}`;
+      try {
+        if (invalidSource === 'tombstoned' || invalidSource === 'replaced') {
+          const invalidDoc = createCanvasDocument();
+          try {
+            Y.applyUpdate(invalidDoc, sourceSnapshot);
+            applyCanvasImagePatch(invalidDoc, invalidSource === 'tombstoned'
+              ? { placementId: 'canvas-source', deleted: true }
+              : { placementId: 'canvas-source', assetVersionId: 'version-2' }, 'fixture');
+            await query(`UPDATE wujie_project_canvas_documents SET snapshot_bytes=$1,projection=$2::jsonb
+              WHERE project_id='shared'`, [Buffer.from(Y.encodeStateAsUpdate(invalidDoc)),
+              JSON.stringify(readCanvasDocument(invalidDoc))]);
+          } finally { invalidDoc.destroy(); }
+        } else if (invalidSource === 'missing-document') {
+          expect((await query("SELECT project_id FROM wujie_project_canvas_updates WHERE project_id='shared'")).rows)
+            .toEqual([]);
+          expect((await query("SELECT project_id FROM wujie_canvas_asset_commands WHERE project_id='shared'")).rows)
+            .toEqual([]);
+          await query("DELETE FROM wujie_project_canvas_documents WHERE project_id='shared'");
+        } else if (invalidSource === 'wrong-workspace') {
+          await query("UPDATE wujie_workspace_placements SET workspace_id='foreign-project' WHERE id='canvas-source'");
+        } else if (invalidSource === 'wrong-mime') {
+          await query("UPDATE wujie_asset_versions SET mime_type='video/mp4' WHERE id='version-1'");
+        } else if (invalidSource === 'non-image-kind') {
+          await query("UPDATE wujie_assets SET kind='video' WHERE id='source'");
+        }
+        const requestProject = invalidSource === 'cross-project' ? 'other' : 'shared';
+        const invalidInput: CreateBillableCloudTaskInput = {
+          userId: 'editor', idempotencyKey: invalidTaskId, requestDigest: invalidTaskId, creditCost: 5,
+          workflowPublication: {
+            access: { kind: 'document', actorUserId: 'editor', ownerId: 'owner',
+              projectId: requestProject, grantGeneration: invalidSource === 'stale-grant' ? '0' : '1' },
+            workflowId: 'workflow-a', nodeId: 'edit-a', sourceEntityId: 'input-a',
+            sourceVersionId: 'version-1', sourcePlacementId: 'canvas-source',
+            imageUrl: invalidSource === 'forged-url'
+              ? 'https://attacker.invalid/api/serve-upload/canonical.png' : '/api/serve-upload/canonical.png',
+            origin: 'https://attacker.invalid',
+          },
+          task: { id: invalidTaskId, userId: 'editor', projectId: requestProject, type: 'edit',
+            status: 'processing', progress: 0, providerId: 'provider-a', model: 'model-a',
+            createdAt: 1, updatedAt: 1 },
+        };
+        await expect(createBillableCloudTask(invalidInput), invalidSource).rejects.toMatchObject({
+          code: invalidSource === 'forged-url' ? 'WORKFLOW_EDIT_SOURCE_MISMATCH' : 'WORKFLOW_EDIT_SOURCE_FORBIDDEN',
+        });
+        expect((await query("SELECT balance FROM wujie_credits WHERE user_id='editor'")).rows)
+          .toEqual([{ balance: 100 }]);
+        expect((await query('SELECT id FROM cloud_tasks WHERE id=$1', [invalidTaskId])).rows).toEqual([]);
+        expect((await query('SELECT id FROM wujie_credit_transactions WHERE task_id=$1', [invalidTaskId])).rows)
+          .toEqual([]);
+        expect((await query('SELECT task_id FROM wujie_workflow_edit_publications WHERE task_id=$1', [invalidTaskId])).rows)
+          .toEqual([]);
+      } finally {
+        await query(`INSERT INTO wujie_project_canvas_documents
+          (project_id,owner_id,sequence,snapshot_sequence,snapshot_bytes,projection,created_at,updated_at)
+          VALUES ('shared',$1,$2,$3,$4,$5::jsonb,$6::timestamptz,$7::timestamptz) ON CONFLICT (project_id)
+          DO UPDATE SET owner_id=EXCLUDED.owner_id,sequence=EXCLUDED.sequence,
+            snapshot_sequence=EXCLUDED.snapshot_sequence,snapshot_bytes=EXCLUDED.snapshot_bytes,
+            projection=EXCLUDED.projection,created_at=EXCLUDED.created_at,updated_at=EXCLUDED.updated_at`,
+        [savedDocument.owner_id, savedDocument.sequence, savedDocument.snapshot_sequence,
+          savedDocument.snapshot_bytes, JSON.stringify(savedDocument.projection),
+          savedDocument.created_at, savedDocument.updated_at]);
+        await query("UPDATE wujie_workspace_placements SET workspace_id='shared' WHERE id='canvas-source'");
+        await query("UPDATE wujie_asset_versions SET mime_type='image/png' WHERE id='version-1'");
+        await query("UPDATE wujie_assets SET kind='image' WHERE id='source'");
+      }
+      expect((await query<SourceDocumentRow>(`SELECT ${documentColumns}
+        FROM wujie_project_canvas_documents WHERE project_id='shared'`)).rows).toEqual([savedDocument]);
+      expect((await query(`SELECT p.workspace_id,v.mime_type,a.kind FROM wujie_workspace_placements p
+        JOIN wujie_asset_versions v ON v.id=p.asset_version_id JOIN wujie_assets a ON a.id=p.asset_id
+        WHERE p.id='canvas-source'`)).rows).toEqual([{ workspace_id: 'shared', mime_type: 'image/png', kind: 'image' }]);
+    }
+
     const input = createWorkflowNode('input-image', 0, 0);
     input.id = 'input-a';
     input.config = { projectId: 'shared', assetVersionId: 'version-1', placementId: 'canvas-source',
@@ -1246,10 +1344,10 @@ postgresIt('runs a real parent edit through charged child, pending poll, and man
         .toMatchObject([{ source_version_id: 'version-1' }]);
     }, { timeout: 10_000 });
     const workflowPlacement = (await query("SELECT id FROM wujie_workspace_placements WHERE workspace_kind='workflow' AND workspace_id='workflow-a' AND entity_type='workflow-input' AND entity_id='input-a' AND status='active'")).rows;
-    expect(workflowPlacement).toHaveLength(1);
+    expect(workflowPlacement).toHaveLength(0);
     expect((await query('SELECT source_version_id,source_placement_id FROM wujie_workflow_edit_publications WHERE task_id=$1', [childId])).rows)
-      .toEqual([{ source_version_id: 'version-1', source_placement_id: workflowPlacement[0].id }]);
-    await query("UPDATE wujie_workspace_placements SET status='trashed',deleted_at=now() WHERE id=$1", [workflowPlacement[0].id]);
+      .toEqual([{ source_version_id: 'version-1', source_placement_id: 'canvas-source' }]);
+    await query("UPDATE wujie_workspace_placements SET status='trashed',deleted_at=now() WHERE id=$1", ['canvas-source']);
     const bytes = await sharp({ create: { width: 8, height: 8, channels: 4,
       background: { r: 20, g: 70, b: 110, alpha: 1 } } }).png().toBuffer();
     const raw = await persistAssetBytes({ bytes, filename: 'parent-edit-result.png', mimeType: 'image/png' });
@@ -1262,7 +1360,7 @@ postgresIt('runs a real parent edit through charged child, pending poll, and man
         output: { status: 'publication-pending', taskId: childId } });
       expect(JSON.stringify(results)).not.toContain(raw.url);
     }, { timeout: 10_000 });
-    await query("UPDATE wujie_workspace_placements SET status='active',deleted_at=NULL WHERE id=$1", [workflowPlacement[0].id]);
+    await query("UPDATE wujie_workspace_placements SET status='active',deleted_at=NULL WHERE id=$1", ['canvas-source']);
     await vi.waitFor(async () => {
       await workflow({ action: 'status', executionId });
       const parent = await getCloudTaskForUser(executionId, 'editor');

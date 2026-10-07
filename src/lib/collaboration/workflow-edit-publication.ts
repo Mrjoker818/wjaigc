@@ -4,6 +4,8 @@ import type { Pool, PoolClient } from 'pg';
 import { getPool } from '@/lib/db-client';
 import { assertDocumentEditor, assertDocumentProjectEnabled, DocumentAccessError,
   DocumentFeatureDisabledError, DocumentProjectNotEnabledError } from './document-access';
+import { readCanvasDocument } from './canvas-document';
+import { loadDocumentInTransaction } from './document-store';
 import type { GenerationProjectAccess } from './generation-project-access';
 
 export interface WorkflowEditPublicationInput {
@@ -144,15 +146,18 @@ export async function prepareWorkflowEditSourceInTransaction(
     }
     const source = await client.query<{
       asset_id: string; file_url: string; mime_type: string | null; availability: string;
-      kind: string; asset_status: string;
-    }>(`SELECT v.asset_id,v.file_url,v.mime_type,v.availability,a.kind,a.status AS asset_status
+      kind: string; asset_status: string; workspace_kind: string;
+    }>(`SELECT v.asset_id,v.file_url,v.mime_type,v.availability,a.kind,a.status AS asset_status,
+              p.workspace_kind
        FROM wujie_workspace_placements p
        JOIN wujie_asset_versions v ON v.id=p.asset_version_id
          AND v.asset_id=p.asset_id AND v.owner_id=p.owner_id AND v.project_id=p.project_id
        JOIN wujie_assets a ON a.id=v.asset_id AND a.owner_id=v.owner_id AND a.project_id=v.project_id
        WHERE p.id=$1 AND p.owner_id=$2 AND p.project_id=$3
-         AND p.workspace_kind='workflow' AND p.workspace_id=$4
-         AND p.entity_type='workflow-input' AND p.entity_id=$6
+         AND ((p.workspace_kind='workflow' AND p.workspace_id=$4
+               AND p.entity_type='workflow-input' AND p.entity_id=$6)
+           OR (p.workspace_kind='canvas' AND p.workspace_id IN ($3,'canvas:' || $3)
+               AND p.entity_type='canvas-image'))
          AND p.status='active' AND p.deleted_at IS NULL AND p.asset_version_id=$5
        FOR SHARE OF p,v,a`, [input.sourcePlacementId, editor.ownerId, access.projectId,
       input.workflowId, input.sourceVersionId, input.sourceEntityId]);
@@ -162,6 +167,19 @@ export async function prepareWorkflowEditSourceInTransaction(
       || row.availability !== 'ready' || (mime && !new Set([
         'image/png', 'image/jpeg', 'image/webp', 'image/gif', 'image/avif', 'image/heic', 'image/heif',
       ]).has(mime))) throw new WorkflowEditSourceError('WORKFLOW_EDIT_SOURCE_FORBIDDEN');
+    if (row.workspace_kind === 'canvas') {
+      const document = await client.query(
+        'SELECT 1 FROM wujie_project_canvas_documents WHERE project_id=$1 AND owner_id=$2 FOR SHARE',
+        [access.projectId, editor.ownerId]);
+      if (document.rowCount !== 1) throw new WorkflowEditSourceError('WORKFLOW_EDIT_SOURCE_FORBIDDEN');
+      const loaded = await loadDocumentInTransaction(client, access.projectId);
+      try {
+        const canonical = readCanvasDocument(loaded.doc).placements[input.sourcePlacementId];
+        if (!canonical || canonical.deleted === true || canonical.assetVersionId !== input.sourceVersionId) {
+          throw new WorkflowEditSourceError('WORKFLOW_EDIT_SOURCE_FORBIDDEN');
+        }
+      } finally { loaded.doc.destroy(); }
+    }
     // A database-relative managed URL must remain relative in the request. Otherwise
     // an attacker-controlled Host/origin could make an absolute foreign URL compare equal.
     if ((row.file_url.startsWith('/') && !row.file_url.startsWith('//')
