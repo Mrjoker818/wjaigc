@@ -38,10 +38,10 @@ export function contractDeferred<T>(): { promise: Promise<T>; release: (value: T
   const promise = new Promise<T>(resolve => { release = resolve; });
   return { promise, release };
 }
-function actualCanvasChatReceiver<T>(name: string, bindings: Record<string, unknown>): T {
+function actualCanvasChatReceiver<T>(name: string, bindings: Record<string, unknown>, tag: 'ChatPanel' | 'NodeEditor' = 'ChatPanel'): T {
   let expression: ts.Expression | undefined;
   const visit = (node: ts.Node): void => {
-    if ((ts.isJsxOpeningElement(node) || ts.isJsxSelfClosingElement(node)) && node.tagName.getText(sources.workspace) === 'ChatPanel') {
+    if ((ts.isJsxOpeningElement(node) || ts.isJsxSelfClosingElement(node)) && node.tagName.getText(sources.workspace) === tag) {
       for (const prop of node.attributes.properties) {
         if (ts.isJsxAttribute(prop) && prop.name.getText(sources.workspace) === name
           && prop.initializer && ts.isJsxExpression(prop.initializer)) expression = prop.initializer.expression;
@@ -50,11 +50,14 @@ function actualCanvasChatReceiver<T>(name: string, bindings: Record<string, unkn
     ts.forEachChild(node, visit);
   };
   visit(sources.workspace);
-  if (!expression) throw new Error('Embedded Chat receiver missing: ' + name);
+  if (!expression) throw new Error(tag + ' receiver missing: ' + name);
   const js = ts.transpileModule('const receiver = ' + expression.getText(sources.workspace) + ';', {
     compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.None },
   }).outputText;
   return new Function(...Object.keys(bindings), js + '; return receiver;')(...Object.values(bindings)) as T;
+}
+export function actualNodeBeforeChatNavigation(bindings: Record<string, unknown>): (reference: WorkspaceAssetReference) => Promise<void> {
+  return actualCanvasChatReceiver<(reference: WorkspaceAssetReference) => Promise<void>>('onBeforeWorkflowChatNavigation', bindings, 'NodeEditor');
 }
 export type TransferMeta = { runId?: string; sourceVersionIds?: readonly string[]; restoreDeletedPlacement?: boolean;
   modelName?: string; apiProvider?: string; sourceImageId?: string; signal?: AbortSignal };

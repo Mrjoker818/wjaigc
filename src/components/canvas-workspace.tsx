@@ -7336,7 +7336,9 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
 
   const handoffRunGuardRef = useRef(createSimpleChatWorkspaceHandoffRunGuard());
   const handoffProjectQueueRef = useRef(createSimpleChatWorkspaceHandoffProjectQueue());
-  const saveNodeWorkflowForProject = useCallback(async (requestedWorkflow: Workflow): Promise<void> => {
+  const saveNodeWorkflowForProject = useCallback(async (
+    requestedWorkflow: Workflow, assertBeforePersist?: () => void,
+  ): Promise<void> => {
     const expectedProjectId = currentProjectRef.current?.id;
     const expectedActorId = currentUserRef.current?.id;
     if (!expectedProjectId) throw new Error('当前项目不存在，无法保存工作流');
@@ -7344,6 +7346,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
       if (!expectedActorId || currentUserRef.current?.id !== expectedActorId || currentProjectRef.current?.id !== expectedProjectId) {
         throw new Error('工作流保存已取消：当前项目已发生变化');
       }
+      assertBeforePersist?.();
       const workflow = {
         ...(nodeWorkflowRef.current ?? requestedWorkflow),
         updatedAt: requestedWorkflow.updatedAt,
@@ -7361,6 +7364,52 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
       await persistNodeWorkflow(workflow, expectedProjectId);
     });
   }, [currentUser?.id, persistNodeWorkflow]);
+  const prepareWorkflowChatNavigation = useCallback(async (reference: CoreWorkspaceAssetReference): Promise<void> => {
+    const projectId = currentProjectRef.current?.id;
+    const actorId = currentUserRef.current?.id;
+    const authority = collaborativeCanvasRef.current;
+    const epoch = historyTransitionEpochRef.current;
+    const assertCurrent = (requireWritable = true): void => {
+      const current = collaborativeCanvasRef.current;
+      if (!actorId || !projectId || currentUserRef.current?.id !== actorId
+        || currentProjectRef.current?.id !== projectId || historyTransitionEpochRef.current !== epoch
+        || authority?.projectId !== projectId || authority.authority === 'unknown'
+        || current?.projectId !== projectId || current.authority !== authority.authority
+        || (current.authority === 'document' && (!(current.isSessionActive?.() ?? current.isWritable())
+          || (requireWritable && !current.isWritable())))) {
+        throw new Error('HANDOFF_SCOPE_CHANGED');
+      }
+    };
+    assertCurrent(false);
+    const workflow = nodeWorkflowRef.current;
+    if (!workflow) throw new Error('当前工作流不存在');
+    if (authority?.authority === 'document') {
+      if (!reference.assetVersionId || !reference.placementId || !reference.url) {
+        throw new Error('工作流输出尚未在协作文档中确认');
+      }
+      const media = await authority.refreshMedia({ projectId: projectId!,
+        documentSequence: Math.max(0, authority.appliedServerSequence ?? 0), requireDirectorySequence: true });
+      assertCurrent();
+      if (!media.some(image => image.assetId === reference.assetId
+        && image.assetVersionId === reference.assetVersionId && image.placementId === reference.placementId
+        && image.url === reference.url)) throw new Error('工作流输出尚未在协作文档中确认');
+      const response = await fetch('/api/assets', {
+        method: 'POST', credentials: 'include', cache: 'no-store',
+        headers: { 'Content-Type': 'application/json', 'x-wujie-expected-actor-id': actorId! },
+        body: JSON.stringify({ projectId, assetVersionId: reference.assetVersionId, placementId: reference.placementId }),
+      });
+      assertCurrent();
+      if (!response.ok) throw new Error('工作流输出尚未在协作文档中确认');
+      const confirmed = await response.json() as CoreWorkspaceAssetReference;
+      assertCurrent();
+      if (confirmed.assetId !== reference.assetId || confirmed.assetVersionId !== reference.assetVersionId
+        || confirmed.placementId !== reference.placementId || confirmed.url !== reference.url) {
+        throw new Error('工作流输出尚未在协作文档中确认');
+      }
+    }
+    await saveNodeWorkflowForProject(workflow, assertCurrent);
+    assertCurrent();
+  }, [saveNodeWorkflowForProject]);
   useEffect(() => {
     if (!currentProject?.id || !currentUser?.id || collaborativeCanvas.projectId !== currentProject.id
       || collaborativeCanvas.authority === 'unknown') return;
@@ -7490,7 +7539,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
           setNodeWorkflow(workflow);
         }}
         onWorkflowSaveRequest={saveNodeWorkflowForProject}
-        onBeforeWorkflowChatNavigation={() => canvasPersistenceScheduler.flush('immediate')}
+        onBeforeWorkflowChatNavigation={prepareWorkflowChatNavigation}
         onOpenWorkflowHub={() => setAppMode('workflow-hub')}
         canvasImages={images.map(img => ({
           id: img.id,

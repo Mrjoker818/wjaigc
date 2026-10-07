@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import NodeEditor from '@/components/node-editor';
 import { createEmptyWorkflow, createWorkflowNode, type Workflow } from '@/lib/workflow-engine';
 
-afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
+afterEach(() => { cleanup(); localStorage.clear(); vi.unstubAllGlobals(); });
 
 const image = { id: 'canvas-a', name: 'Shared input', description: 'Shared input',
   url: '/untrusted.png', assetId: 'asset-a', assetVersionId: 'version-a',
@@ -29,6 +29,41 @@ function setup(fetcher: typeof fetch, documentMode = true): { latest: () => Work
 }
 
 describe('NodeEditor document canvas inputs', () => {
+  it.each([true, false])('preserves completed output persistence for document mode %s', async documentMode => {
+    const outputNode = createWorkflowNode('output-image', 0, 0);
+    const executionId = 'document-output-execution';
+    const output = { imageUrl: canonical.url, ...canonical };
+    const fetcher = vi.fn(async (url: string | URL | Request, init?: RequestInit): Promise<Response> => {
+      if (url === '/api/workflow/execute') {
+        const body = JSON.parse(String(init?.body)) as { action: string };
+        return Response.json(body.action === 'start' ? { executionId } : {
+          status: 'completed', results: { [outputNode.id]: { status: 'success', output } },
+        });
+      }
+      if (url === '/api/assets/transfer') return documentMode
+        ? Response.json({ error: 'DOCUMENT_CANVAS_REQUIRED' }, { status: 403 })
+        : Response.json(canonical);
+      return Response.json({ skills: [] });
+    });
+    vi.stubGlobal('fetch', fetcher);
+    vi.stubGlobal('matchMedia', vi.fn(() => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() })));
+    vi.stubGlobal('ResizeObserver', class { observe(): void {} unobserve(): void {} disconnect(): void {} });
+    const onAddImages = vi.fn().mockResolvedValue(undefined);
+    render(<NodeEditor workflow={{ ...createEmptyWorkflow('Document output'), id: 'workflow-output', nodes: [outputNode] }}
+      userId="editor-a" projectId="project-a" canvasDocumentMode={documentMode} onAddImages={onAddImages} />);
+    fireEvent.click(screen.getByRole('button', { name: '执行工作流' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: '发送到智能对话' })).toBeTruthy());
+    if (documentMode) {
+      expect(fetcher.mock.calls.some(([url]) => url === '/api/assets/transfer')).toBe(false);
+      expect(onAddImages).not.toHaveBeenCalled();
+    } else {
+      await waitFor(() => expect(onAddImages).toHaveBeenCalledOnce());
+      expect(fetcher.mock.calls.some(([url]) => url === '/api/assets/transfer')).toBe(true);
+      expect(onAddImages).toHaveBeenCalledWith([expect.objectContaining({
+        url: canonical.url, assetReference: expect.objectContaining(canonical),
+      })], undefined);
+    }
+  });
   it('reads the exact canonical document placement without creating a personal transfer', async () => {
     const fetcher = vi.fn(async (url: string | URL | Request) => {
       if (url === '/api/assets' || url === '/api/assets/transfer') {

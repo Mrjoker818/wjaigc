@@ -666,7 +666,7 @@ interface NodeEditorProps {
   onWorkflowChange?: (wf: WorkflowData | null) => void;
   onWorkflowSaved?: (wf: WorkflowData) => Promise<void>;
   onWorkflowSaveRequest?: (wf: WorkflowData) => Promise<void>;
-  onBeforeWorkflowChatNavigation?: () => Promise<void>;
+  onBeforeWorkflowChatNavigation?: (reference: WorkspaceAssetReference) => Promise<void>;
   onOpenWorkflowHub?: () => void;
   /** P0: 画布图片列表，用于@图片引用 */
   canvasImages?: CanvasImageRef[];
@@ -2455,9 +2455,12 @@ ${contextInfo}
       outputLabel: wf.nodes.find(node => node.id === nodeId)?.label || '工作流结果',
     }, targetChatProjectId);
     try {
+      if (canvasDocumentMode && !onBeforeWorkflowChatNavigation) {
+        throw new Error('工作流输出尚未在协作文档中确认');
+      }
       await navigateToWorkflowChatAfterPersistence(
         targetUrl,
-        onBeforeWorkflowChatNavigation || (async () => undefined),
+        async () => { await onBeforeWorkflowChatNavigation?.(reference); },
         target => window.location.assign(target),
       );
     } catch (error) {
@@ -2466,7 +2469,7 @@ ${contextInfo}
         status: 'error', message: error instanceof Error ? error.message : '保存工作区失败，未跳转到智能对话',
       }]));
     }
-  }, [execResults, executionId, onBeforeWorkflowChatNavigation, projectId, wf.connections, wf.id, wf.nodes]);
+  }, [canvasDocumentMode, execResults, executionId, onBeforeWorkflowChatNavigation, projectId, wf.connections, wf.id, wf.nodes]);
 
   // P1: 键盘快捷键 (复制/粘贴/删除)
   useEffect(() => {
@@ -3023,7 +3026,7 @@ ${contextInfo}
             }
           }, 3000);
           // 持久化: 将工作流生成的图片添加到项目
-          if (data.status === 'completed' && onAddImages && data.results) {
+          if (!canvasDocumentMode && data.status === 'completed' && onAddImages && data.results) {
             const workflowResults = data.results as Record<string, { status: string; output?: Record<string, unknown> }>;
             // ★ 收集工作流中使用的模型信息
             let workflowModelName: string | undefined;
@@ -3161,7 +3164,7 @@ ${contextInfo}
     };
     poll();
     return () => { controller.abort(); if (timerId) clearTimeout(timerId); };
-  }, [execStatus, executionId, onAddImages, projectId, updateWorkflowSystem, wf.connections, wf.id, wf.nodes, WORKFLOW_EXEC_STATE_KEY]);
+  }, [canvasDocumentMode, execStatus, executionId, onAddImages, projectId, updateWorkflowSystem, wf.connections, wf.id, wf.nodes, WORKFLOW_EXEC_STATE_KEY]);
 
   // ─── 保存工作流 ───
 
