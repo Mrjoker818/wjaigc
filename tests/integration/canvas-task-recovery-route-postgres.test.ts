@@ -16,6 +16,7 @@ const auth = vi.hoisted(() => ({ id: 'editor' as string | null }));
 vi.mock('server-only', () => ({}));
 vi.mock('@/lib/server-auth', () => ({ getSessionUser: async (): Promise<{ id: string } | null> => auth.id ? { id: auth.id } : null }));
 import { withIsolatedPostgres, type QueryFn } from '../helpers/postgres-test-database';
+import { saveFixtureMigrationLog } from '../helpers/fixture-migration-log';
 import { ensureCoreTables } from '@/lib/db-storage';
 import { createBillableTask } from '@/lib/task-core/billing-service';
 import { transitionTask } from '@/lib/task-core/task-service';
@@ -39,8 +40,7 @@ async function seed(query: QueryFn, databaseUrl: string, schemaName: string): Pr
   const migration = spawnSync(process.execPath, [resolve('scripts/run-migrations.mjs')], {
     encoding: 'utf8', env: { ...process.env, DATABASE_URL: databaseUrl, PGDATABASE_URL: databaseUrl },
   });
-  const log = resolve('.superpowers/sdd/2026-09-25-v588-yjs-canvas-collaboration', `task-8cb3e-migrations-${schemaName}.log`);
-  writeFileSync(log, `exit=${migration.status}\n${migration.stdout}\n${migration.stderr}`);
+  const log = saveFixtureMigrationLog(schemaName, migration);
   console.info('Full migrations:', migration.status, log, 'media:', roots.root);
   if (migration.status !== 0) console.error(migration.stdout, migration.stderr);
   expect(migration.status).toBe(0); await ensureCoreTables();

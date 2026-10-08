@@ -150,6 +150,13 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Install CPU media tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ffmpeg
+          ffmpeg -version
+          ffprobe -version
+
       - name: Verify Stage 1 release contracts
         run: pnpm exec vitest run src/__tests__/scripts/stage-1-release-gate-contract.test.ts
 

@@ -13,6 +13,7 @@ import { createServer, createConnection, type Socket } from 'node:net';
 import { createIdempotencyLockKey } from '@/lib/task-core/idempotency';
 import { loadDocument, commitDocumentUpdate } from '@/lib/collaboration/document-store';
 import { isActiveOfflineBridgeTestConnection } from './offline-bridge-database-guard';
+import { saveFixtureMigrationLog } from './fixture-migration-log';
 
 /** A real PostgreSQL gate, observed through pg_blocking_pids, never timed with sleeps. */
 export async function lockCanvasSlot(root: string, index: number): Promise<{ wait: (query: QueryFn, count?: number) => Promise<void>; release: () => Promise<void> }> {
@@ -125,8 +126,7 @@ export async function seedCanvasGeneration(query: QueryFn, databaseUrl: string, 
   const migration = spawnSync(process.execPath, [resolve('scripts/run-migrations.mjs')], {
     encoding: 'utf8', env: { ...process.env, DATABASE_URL: databaseUrl, PGDATABASE_URL: databaseUrl },
   });
-  const log = resolve('.superpowers/sdd/2026-09-25-v588-yjs-canvas-collaboration', `task-8cb3f-migrations-${schemaName}.log`);
-  writeFileSync(log, `start=${start}\nend=${new Date().toISOString()}\nexit=${migration.status}\n${migration.stdout}\n${migration.stderr}`);
+  const log = saveFixtureMigrationLog(schemaName, migration, start);
   console.info('Isolation:', schemaName, 'media:', process.env.WUJIE_DATA_DIR, 'migration:', log);
   expect(migration.status, migration.stderr || migration.stdout).toBe(0);
   await ensureCoreTables();

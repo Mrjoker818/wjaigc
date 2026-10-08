@@ -48,6 +48,12 @@ jobs:
           cache: pnpm
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+      - name: Install CPU media tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ffmpeg
+          ffmpeg -version
+          ffprobe -version
       - name: Prepare doctor data directory
         run: mkdir -p "$WUJIE_DATA_DIR"
       - name: Environment doctor (production)
