@@ -333,9 +333,6 @@ jobs:
       E2E_TEST_PASSWORD: ${{ secrets.E2E_TEST_PASSWORD }}
       E2E_GENERATION_MODEL: ${{ secrets.E2E_GENERATION_MODEL }}
       E2E_ENABLE_PAID_GENERATION: ${{ secrets.E2E_ENABLE_PAID_GENERATION }}
-      E2E_LAYER_PROVIDER_ID: ${{ secrets.E2E_LAYER_PROVIDER_ID }}
-      E2E_LAYER_MODEL_ID: ${{ secrets.E2E_LAYER_MODEL_ID }}
-      E2E_ENABLE_PAID_LAYERING: ${{ secrets.E2E_ENABLE_PAID_LAYERING }}
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -349,7 +346,7 @@ jobs:
         shell: bash
         run: |
           missing=0
-          for name in E2E_BASE_URL E2E_TEST_USERNAME E2E_TEST_PASSWORD E2E_GENERATION_MODEL E2E_ENABLE_PAID_GENERATION E2E_LAYER_PROVIDER_ID E2E_LAYER_MODEL_ID E2E_ENABLE_PAID_LAYERING; do
+          for name in E2E_BASE_URL E2E_TEST_USERNAME E2E_TEST_PASSWORD E2E_GENERATION_MODEL E2E_ENABLE_PAID_GENERATION; do
             if [ -z "${!name:-}" ]; then
               echo "::error title=Missing E2E configuration::$name is required"
               missing=1
@@ -359,21 +356,18 @@ jobs:
             echo "::error title=Paid E2E disabled::E2E_ENABLE_PAID_GENERATION must be 1 or true"
             missing=1
           fi
-          if [ "$E2E_ENABLE_PAID_LAYERING" != "1" ]; then
-            echo "::error title=Paid layer E2E disabled::E2E_ENABLE_PAID_LAYERING must be 1"
-            missing=1
-          fi
           exit "$missing"
       - name: Install browsers
         run: pnpm exec playwright install --with-deps chromium firefox webkit
       - name: Run real HTTP API, security, and chaos tests
         run: pnpm test:http-api
-      - name: Run real P0 and Pear Chromium journeys
-        run: pnpm exec playwright test tests/e2e/p0-core.spec.ts tests/e2e/layer-editing.spec.ts --project=chromium
+      - name: Run real P0 Chromium journeys
+        run: pnpm exec playwright test tests/e2e/p0-core.spec.ts --project=chromium
+      # Pear paid acceptance was canceled; retain the existing non-billable PSD regressions.
       - name: Run non-billable cross-browser layer regression
         env:
           LAYER_E2E_SKIP_PROVIDER_CALL: '1'
-        run: pnpm exec playwright test tests/e2e/layer-editing.spec.ts --project=firefox --project=webkit
+        run: pnpm exec playwright test tests/e2e/layer-editing.spec.ts --project=chromium --project=firefox --project=webkit
       - name: Collect immutable browser evidence
         if: always()
         run: pnpm test:artifacts
