@@ -63,12 +63,12 @@ function probeStepHeap(workflowPath: string, jobName: string, stepName: string):
 describe('CI Node heap budget at the compiler boundary', () => {
   // Removing a step's budget must reproduce the observed 2 GiB compiler limit.
   it.each([
-    ['.github/workflows/quality.yml', 'static-and-tests', 'TypeScript'],
-    ['.github/workflows/quality.yml', 'static-and-tests', 'Production build'],
+    ['.github/workflows/quality.yml', 'static-and-build', 'TypeScript'],
+    ['.github/workflows/quality.yml', 'static-and-build', 'Production build'],
     ['.github/workflows/quality.yml', 'stage-3-canvas-kernel', 'Build production application'],
     ['.github/workflows/quality.yml', 'stage-4-workspace-interoperability', 'Build production application'],
-    ['.github/workflows/stage-0-quality.yml', 'stage-1-local-gates', 'TypeScript'],
-    ['.github/workflows/stage-0-quality.yml', 'stage-1-local-gates', 'Production build'],
+    ['.github/workflows/stage-0-quality.yml', 'stage-1-static-and-build', 'TypeScript'],
+    ['.github/workflows/stage-0-quality.yml', 'stage-1-static-and-build', 'Production build'],
   ])('%s / %s / %s gives the compiler and its worker a bounded 4 GiB heap', (workflowPath, jobName, stepName) => {
     const result = probeStepHeap(workflowPath, jobName, stepName);
     for (const limit of [result.parent, result.worker]) {
@@ -78,10 +78,10 @@ describe('CI Node heap budget at the compiler boundary', () => {
   });
 
   it.each([
-    ['.github/workflows/quality.yml', 'static-and-tests', 'Unit and integration tests'],
+    ['.github/workflows/quality.yml', 'unit-and-integration-tests', 'Unit and integration tests'],
     ['.github/workflows/quality.yml', 'stage-3-canvas-kernel', 'Start production application'],
     ['.github/workflows/quality.yml', 'stage-4-workspace-interoperability', 'Start production application'],
-    ['.github/workflows/stage-0-quality.yml', 'stage-1-local-gates', 'Full automated test suite'],
+    ['.github/workflows/stage-0-quality.yml', 'stage-1-automated-tests', 'Full automated test suite'],
   ])('%s / %s / %s does not inherit the compiler-only increase', (workflowPath, jobName, stepName) => {
     const result = probeStepHeap(workflowPath, jobName, stepName);
     for (const limit of [result.parent, result.worker]) {

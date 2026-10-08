@@ -15,6 +15,22 @@ concurrency:
 
 jobs:
   static-and-tests:
+    if: always()
+    needs: [static-and-build, unit-and-integration-tests]
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Require all quality checks
+        env:
+          STATIC_RESULT: ${{ needs.static-and-build.result }}
+          TEST_RESULT: ${{ needs.unit-and-integration-tests.result }}
+        run: |
+          if [ "$STATIC_RESULT" != success ] || [ "$TEST_RESULT" != success ]; then
+            echo "::error title=Quality gate failed::Static checks and every test shard must succeed"
+            exit 1
+          fi
+
+  static-and-build:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     services:
@@ -74,6 +90,57 @@ jobs:
         run: pnpm ts-check
       - name: ESLint
         run: pnpm lint:build
+      - name: Production dependency audit
+        run: pnpm audit --prod --json --registry=https://registry.npmjs.org
+      - name: Production build
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
+        run: pnpm build
+
+  unit-and-integration-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: wujie_bridge_test_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d wujie_bridge_test_ci"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      WUJIE_AUTH_SECRET: ${{ secrets.WUJIE_AUTH_SECRET }}
+      INTERNAL_API_SECRET: ${{ secrets.INTERNAL_API_SECRET }}
+      PAYMENT_TOKEN_SECRET: ${{ secrets.PAYMENT_TOKEN_SECRET }}
+      WUJIE_ADMIN_PASSWORD: ${{ secrets.WUJIE_ADMIN_PASSWORD }}
+      MANDATORY_API_AUTH: 'true'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Install CPU media tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ffmpeg
+          ffmpeg -version
+          ffprobe -version
       - name: Prepare isolated Vitest media root
         env:
           WUJIE_DATA_DIR: ${{ runner.temp }}/wujie-bridge-test-ci
@@ -85,18 +152,12 @@ jobs:
           POSTGRES_TEST_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/wujie_bridge_test_ci
           TEST_POSTGRES_URL: postgresql://postgres:postgres@127.0.0.1:5432/wujie_bridge_test_ci
           WUJIE_DATA_DIR: ${{ runner.temp }}/wujie-bridge-test-ci
-        run: pnpm test:ci
-      - name: Production dependency audit
-        run: pnpm audit --prod --json --registry=https://registry.npmjs.org
-      - name: Production build
-        env:
-          NODE_OPTIONS: --max-old-space-size=4096
-        run: pnpm build
+        run: pnpm test:ci --shard=${{ matrix.shard }}/4
       - name: Upload unit reports
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: unit-test-results
+          name: unit-test-results-${{ matrix.shard }}
           path: |
             test-results/
             coverage/

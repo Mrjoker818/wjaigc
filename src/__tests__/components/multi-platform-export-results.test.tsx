@@ -2,6 +2,7 @@
 
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
+import { browserBinaryResponse } from '../helpers/jsdom-native-web-boundary';
 
 import { MultiPlatformExportResults } from '@/components/skill-runtime/MultiPlatformExportResults';
 import {
@@ -328,7 +329,7 @@ describe('multi-platform export results', () => {
         assetId: 'asset-image-1', assetVersionId: 'version-image-1', kind: 'image',
         url: '/stable/image.png', name: 'instagram-post.png',
       }))
-      .mockResolvedValueOnce(new Response(new Uint8Array([1, 2, 3, 4]), {
+      .mockResolvedValueOnce(browserBinaryResponse(new Uint8Array([1, 2, 3, 4]), {
         status: 200, headers: { 'Content-Type': 'image/png', 'Content-Length': '4' },
       }));
     Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: vi.fn(() => 'blob:group') });

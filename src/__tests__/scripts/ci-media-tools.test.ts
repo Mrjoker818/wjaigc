@@ -28,8 +28,8 @@ function runSetup(path: string, job: string, testStep: string, failure: string =
 }
 
 describe.each([
-  ['.github/workflows/quality.yml', 'static-and-tests', 'Unit and integration tests'],
-  ['.github/workflows/stage-0-quality.yml', 'stage-1-local-gates', 'Full automated test suite'],
+  ['.github/workflows/quality.yml', 'unit-and-integration-tests', 'Unit and integration tests'],
+  ['.github/workflows/stage-0-quality.yml', 'stage-1-automated-tests', 'Full automated test suite'],
 ])('CI CPU media dependencies: %s', (path, job, testStep) => {
   // Removing installation, installing the wrong package, or moving setup after
   // tests must break the observable dependency sequence.

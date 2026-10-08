@@ -25,15 +25,15 @@ describe('production dependency security baseline', () => {
       '@supabase/supabase-js': '2.110.7',
       'coze-coding-dev-sdk': '^0.7.24',
       'drizzle-orm': '^0.45.2',
-      next: '16.2.11',
+      next: '16.3.8',
       openai: '^6.48.0',
-      sharp: '^0.35.0',
-      svgo: '^4.0.2',
+      sharp: '^0.35.5',
+      svgo: '^4.1.0',
       ws: '8.21.1',
     });
     expect(packageJson.devDependencies).toMatchObject({
       'drizzle-kit': '^0.31.8',
-      'eslint-config-next': '16.2.11',
+      'eslint-config-next': '16.3.8',
       'form-data': '^4.0.6',
     });
     expect(packageJson.dependencies).not.toHaveProperty('drizzle-kit');
@@ -41,17 +41,23 @@ describe('production dependency security baseline', () => {
 
   it('overrides audited vulnerable transitive packages with patched releases', () => {
     expect(packageJson.pnpm?.overrides).toMatchObject({
-      axios: '1.18.1',
+      axios: '1.20.0',
       '@babel/core': '7.29.6',
-      'brace-expansion@1.1.12': '1.1.18',
-      'brace-expansion@2.0.2': '2.1.4',
+      'brace-expansion@1.1.12': '1.1.21',
+      'brace-expansion@2.0.2': '2.1.7',
+      'baseline-browser-mapping': '2.11.0',
+      browserslist: '4.28.7',
+      'fflate@>=0.6.0 <0.7.0': '0.6.11',
+      'fflate@>=0.8.0 <0.9.0': '0.8.3',
       'fast-xml-parser': '5.10.1',
       langsmith: '0.8.3',
       lodash: '4.18.1',
+      'mammoth>argparse': '2.0.1',
       'minimatch@3.1.2': '3.1.4',
       'nanoid@3.3.16': '3.3.18',
       postcss: '8.5.23',
-      'sharp@0.34.5': '0.35.3',
+      'sharp@0.34.5': '0.35.5',
+      'source-map-js': '1.2.2',
       uuid: '11.1.1',
       ws: '8.21.1',
     });

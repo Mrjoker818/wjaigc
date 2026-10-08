@@ -77,7 +77,7 @@ describe('quality workflow contract', () => {
       env: Record<string, string>;
       steps: Array<{ name?: string; run?: string; env?: Record<string, string> }>;
     }> };
-    const job = parsed.jobs['static-and-tests'];
+    const job = parsed.jobs['static-and-build'];
     expect(job.env.WUJIE_DATA_DIR).toBe('.wujie-data');
     const preparation = job.steps.findIndex(step => step.name === 'Prepare doctor data directory');
     expect(preparation).toBeGreaterThan(-1);

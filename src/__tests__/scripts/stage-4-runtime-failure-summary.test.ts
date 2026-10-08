@@ -65,4 +65,53 @@ describe('Stage 4 safe CI runtime failure diagnostics', () => {
     expect(JSON.stringify(failures)).toBe(before);
     expect(failures.networkFailures).toEqual([denied]);
   });
+
+  it.each([
+    ['/api/collaboration/document-enable?projectId=do-not-log', '/api/collaboration/document-enable'],
+    ['/?projectId=do-not-log', '/'],
+    ['/simple-chat?projectId=do-not-log', '/simple-chat'],
+  ])('identifies the fixed route %s without including its private query', (path, route) => {
+    const entry: Stage4RuntimeEvidenceEntry = {
+      method: 'GET', url: `https://fixture-user:fixture-password@fixture.invalid${path}`,
+      text: 'net::ERR_ABORTED', requestDigest: 'do-not-log',
+    };
+    const failures = evidenceFilter.stage4RuntimeEvidenceFailures([], [entry]);
+    expect(summarize?.(failures)).toEqual({
+      console: [], network: [{ method: 'GET', route, failure: 'aborted' }],
+      omitted: { console: 0, network: 0 },
+    });
+    expect(failures.networkFailures).toEqual([entry]);
+  });
+
+  it.each([
+    ['NS_BINDING_ABORTED', 'aborted'],
+    ['NS_ERROR_ABORT', 'aborted'],
+    ['Load request cancelled', 'aborted'],
+    ['net::ERR_CONNECTION_REFUSED', 'connection-refused'],
+    ['net::ERR_CONNECTION_CLOSED', 'connection-closed'],
+    ['net::ERR_TIMED_OUT', 'timeout'],
+    ['net::ERR_NAME_NOT_RESOLVED', 'name-resolution'],
+    ['net::ERR_FAILED', 'failed'],
+  ])('classifies the standard browser failure %s without printing its text', (text, failure) => {
+    const entry: Stage4RuntimeEvidenceEntry = {
+      method: 'GET', url: 'https://fixture.invalid/do-not-log?ticket=do-not-log', text,
+    };
+    const failures = evidenceFilter.stage4RuntimeEvidenceFailures([], [entry]);
+    expect(summarize?.(failures)).toEqual({
+      console: [], network: [{ method: 'GET', route: '[other-route]', failure }],
+      omitted: { console: 0, network: 0 },
+    });
+    expect(failures.networkFailures).toEqual([entry]);
+  });
+
+  it('leaves unknown failure text opaque, including text that contains a known code', () => {
+    const entry: Stage4RuntimeEvidenceEntry = {
+      method: 'GET', url: 'https://fixture.invalid/do-not-log',
+      text: 'Authorization: Bearer do-not-log net::ERR_ABORTED',
+    };
+    expect(summarize?.(evidenceFilter.stage4RuntimeEvidenceFailures([], [entry]))).toEqual({
+      console: [], network: [{ method: 'GET', route: '[other-route]' }],
+      omitted: { console: 0, network: 0 },
+    });
+  });
 });

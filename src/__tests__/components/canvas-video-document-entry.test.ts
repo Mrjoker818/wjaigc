@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { actualTransferCallback, contractDeferred } from '../helpers/canvas-chat-transfer-contract-fixture';
 import { buildCompletedVideoCanvasMedia } from '@/lib/video-processing-state';
 import { hasDirectVideoPollingTimedOut } from '@/lib/video-task-polling';
-import { webcrypto } from 'node:crypto';
+import { jsdomCrypto as webcrypto } from '../helpers/jsdom-native-web-boundary';
 import { commitDocumentCanvasFile } from '@/lib/collaboration/document-canvas-upload';
 
 function fixture() {
