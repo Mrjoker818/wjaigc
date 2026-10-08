@@ -296,9 +296,10 @@ test('executes ordinary chat, vision stop, agent cancel, and refresh recovery', 
       console.info(`STAGE4_AGENT_SELECTION ${JSON.stringify({ phase: 'before', selectionSequence, ...beforeClick })}`);
     }
     // Observe native delivery, not just a pre-click elementFromPoint sample.
-    // Keep the original action and assertion gates unchanged while diagnosing
-    // Linux/WebKit's unselected image. No URLs, content, or credentials enter
-    // this bounded, test-only recorder.
+    // Keep the business assertions unchanged. Linux/WebKit native evidence
+    // showed force-click delivering at the pre-fit point after the image moved;
+    // normal actionability below must wait for the rendered image to be stable.
+    // No URLs, content, or credentials enter this bounded, test-only recorder.
     const selectionRecorder = testInfo.project.name === 'webkit'
       ? await page.evaluateHandle(imageId => {
         const entries: Array<Record<string, unknown>> = [];
@@ -350,7 +351,7 @@ test('executes ordinary chat, vision stop, agent cancel, and refresh recovery', 
       })
       : null;
     try {
-      await canvasImage.click({ force: true });
+      await canvasImage.click();
     } finally {
       if (selectionRecorder) {
         const failures = await finalizeStage4SelectionDiagnostic({
