@@ -847,7 +847,9 @@ test('keeps the selected workflow renderer server-authoritative at 100 nodes', a
   const authoritativeSurface = expectedWorkflowRendererMode === 'react-flow-v2'
     ? reactFlowSurface
     : legacySurface;
-  await expect(authoritativeSurface).toBeVisible({ timeout: 20_000 });
+  const rendererReadyDeadline = Date.now() + 20_000;
+  const remainingRendererReadyMs = (): number => Math.max(1, rendererReadyDeadline - Date.now());
+  await expect(authoritativeSurface).toBeVisible({ timeout: remainingRendererReadyMs() });
   if (expectedWorkflowRendererMode === 'react-flow-v2') {
     await expect(legacySurface).toHaveCount(0);
     await expect(page.locator('[data-workflow-shadow-probe]')).toHaveCount(0);
@@ -860,9 +862,9 @@ test('keeps the selected workflow renderer server-authoritative at 100 nodes', a
   } else if (expectedWorkflowRendererMode !== 'react-flow-v2') {
     await expect(page.locator('[data-workflow-shadow-probe]')).toHaveCount(0);
   }
-  if (expectedWorkflowRendererMode !== 'react-flow-v2') {
-    await expect(legacySurface).toHaveAttribute('data-domain-node-count', String(fixture.nodeCount));
-  }
+  await expect(authoritativeSurface).toHaveAttribute('data-domain-node-count', String(fixture.nodeCount), {
+    timeout: remainingRendererReadyMs(),
+  });
   const canvasBounds = await page.locator('.canvas-bg').boundingBox();
   expect(canvasBounds).not.toBeNull();
   const expectedMountedNodeIds = resolveExpectedMountedWorkflowNodeIds(
@@ -870,11 +872,17 @@ test('keeps the selected workflow renderer server-authoritative at 100 nodes', a
     { x: 0, y: 0, zoom: 0.8 },
     { width: canvasBounds!.width, height: canvasBounds!.height },
   );
-  const domainNodeIds = expectedWorkflowRendererMode === 'react-flow-v2'
-    ? selectWorkflowMonitorIds(fixture.expectedNodeIds)
-    : selectWorkflowMonitorIds(
-        ((await legacySurface.getAttribute('data-domain-node-ids')) ?? '').split(' '),
-      );
+  const domainNodeIds = selectWorkflowMonitorIds(
+    ((await authoritativeSurface.getAttribute('data-domain-node-ids')) ?? '').split(' '),
+  );
+  await expect.poll(async () => selectWorkflowMonitorIds(
+    await authoritativeSurface.locator('[data-node-id]').evaluateAll(nodes => (
+      nodes.map(node => (node as HTMLElement).dataset.nodeId ?? null)
+    )),
+  ).sort(), {
+    message: 'the authoritative workflow must mount the complete expected viewport before measurement',
+    timeout: remainingRendererReadyMs(),
+  }).toEqual([...expectedMountedNodeIds].sort());
   const mountedNodeIds = selectWorkflowMonitorIds(await page.locator('[data-node-id]').evaluateAll(nodes => (
     nodes.map(node => (node as HTMLElement).dataset.nodeId ?? null)
   )));

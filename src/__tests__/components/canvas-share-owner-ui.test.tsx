@@ -27,6 +27,7 @@ vi.mock('@/components/canvas-share/share-api-client', () => apiMocks);
 
 import { CanvasShareCreateDialog } from '@/components/canvas-share/create-dialog';
 import { CanvasShareManagePanel } from '@/components/canvas-share/manage-panel';
+import type { CanvasShareOwnerRecord } from '@/components/canvas-share/share-api-client';
 
 const readyPreflight = {
   projectName: '服务端项目名',
@@ -740,6 +741,8 @@ describe('canvas share owner UI', () => {
   });
 
   it('sorts management rows newest-first and confines policy editing to mutable fields', async () => {
+    const pendingList = deferred<CanvasShareOwnerRecord[]>();
+    apiMocks.listCanvasShares.mockReturnValueOnce(pendingList.promise);
     render(
       <CanvasShareManagePanel
         open
@@ -750,7 +753,10 @@ describe('canvas share owner UI', () => {
     );
 
     const dialog = await screen.findByRole('dialog', { name: '管理画布分享' });
-    const rows = within(dialog).getAllByTestId('canvas-share-row');
+    expect(within(dialog).getByRole('status', { name: '正在加载画布分享' })).toBeTruthy();
+    expect(within(dialog).queryAllByTestId('canvas-share-row')).toHaveLength(0);
+    pendingList.resolve([olderShare, newerShare]);
+    const rows = await within(dialog).findAllByTestId('canvas-share-row');
     expect(rows).toHaveLength(2);
     expect(rows[0].textContent).toContain('新版审阅');
     expect(rows[0].textContent).toContain('有效');

@@ -356,7 +356,13 @@ export function WorkflowReactFlowSurface({
   }, [projectedNodes, setFlowNodes]);
 
   return (
-    <div data-workflow-react-flow-surface aria-hidden={readOnly ? 'true' : 'false'} className="absolute inset-0">
+    <div
+      data-workflow-react-flow-surface
+      data-domain-node-count={model.nodes.length}
+      data-domain-node-ids={model.nodes.map(node => node.id).join(' ')}
+      aria-hidden={readOnly ? 'true' : 'false'}
+      className="absolute inset-0"
+    >
       <ReactFlow<WorkflowFlowNode, WorkflowFlowEdge>
         nodes={flowNodes}
         onNodesChange={readOnly ? undefined : onFlowNodesChange}
