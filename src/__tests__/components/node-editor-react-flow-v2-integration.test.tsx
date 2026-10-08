@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import NodeEditor from '@/components/node-editor';
@@ -136,6 +136,56 @@ describe('NodeEditor react-flow-v2 integration', () => {
     cleanup();
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
+  });
+
+  it.each(['legacy', 'shadow', 'react-flow-v2'] as const)(
+    'keeps the %s annotation action in the keyboard-accessible toolbar rather than over graph controls',
+    async rendererMode => {
+      const { container } = render(
+        <NodeEditor
+          workflow={workflowFixture()}
+          userId="integration-user"
+          projectId="integration-project"
+          canvasImages={[]}
+          rendererMode={rendererMode}
+        />,
+      );
+      const toolbar = screen.getByRole('toolbar', { name: '工作流工具栏' });
+      const annotation = within(toolbar).getByRole('button', { name: '批注修改' });
+      expect(container.querySelector('.canvas-bg')?.contains(annotation)).toBe(false);
+      expect(screen.getAllByRole('button', { name: '批注修改' })).toHaveLength(1);
+      expect(annotation.getAttribute('aria-pressed')).toBe('false');
+
+      fireEvent.click(annotation);
+
+      expect((await screen.findByRole('alert')).textContent).toContain('请选择包含单张图片的节点');
+    },
+  );
+
+  it('reports the complete authoritative domain independently of viewport-mounted cards', async () => {
+    const workflow = workflowFixture();
+    workflow.nodes[0]!.id = 'visible-domain-node';
+    workflow.nodes.push({
+      ...createWorkflowNode('input-text', 8_000, 8_000, 'offscreen source'),
+      id: 'offscreen-domain-node',
+    });
+    const { container } = render(
+      <NodeEditor
+        workflow={workflow}
+        userId="integration-user"
+        projectId="integration-project"
+        canvasImages={[]}
+        rendererMode="react-flow-v2"
+      />,
+    );
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-node-id="visible-domain-node"]')).not.toBeNull();
+    });
+    const surface = container.querySelector('[data-workflow-react-flow-surface]');
+    expect(surface?.getAttribute('data-domain-node-count')).toBe('2');
+    expect(surface?.getAttribute('data-domain-node-ids')).toBe('visible-domain-node offscreen-domain-node');
+    expect(container.querySelector('[data-node-id="offscreen-domain-node"]')).toBeNull();
   });
 
   it('synchronizes a React Flow node click with the domain selection and property panel', async () => {

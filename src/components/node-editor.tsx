@@ -3551,6 +3551,25 @@ ${contextInfo}
             {execStatus === 'running' ? <Square size={16} /> : <Play size={16} />}
             <span>{execStatus === 'running' ? '停止' : execStatus === 'paused' ? '待确认' : '执行'}</span>
           </button>
+          <button
+            type="button"
+            data-toolbar="node-annotation-entry"
+            className={`inline-flex min-h-11 shrink-0 items-center gap-2 whitespace-nowrap rounded-md border px-3 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary ${
+              nodeAnnotationSession
+                ? 'border-primary bg-primary text-primary-foreground'
+                : 'border-border bg-card text-muted-foreground hover:border-primary/50 hover:text-foreground'
+            }`}
+            onClick={() => {
+              if (nodeAnnotationSession) setNodeAnnotationSession(null);
+              else requestNodeAnnotation(selectedNode);
+            }}
+            title="批注修改 (C)"
+            aria-label="批注修改"
+            aria-pressed={Boolean(nodeAnnotationSession)}
+          >
+            <MessageSquare size={15} aria-hidden="true" />
+            批注修改
+          </button>
           <div className="w-px h-6 bg-border/20 mx-1" aria-hidden="true" />
           {/* 撤销/重做 */}
           <button onClick={handleUndo} disabled={historyIndex <= 0} className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed" title="撤销 Ctrl+Z" aria-label="撤销">
@@ -3809,26 +3828,6 @@ ${contextInfo}
             </>
           )}
         </div>
-
-        <button
-          type="button"
-          data-toolbar="node-annotation-entry"
-          className={`absolute bottom-3 left-1/2 z-[1] inline-flex h-9 -translate-x-1/2 items-center gap-2 rounded-md border px-3 text-xs font-medium shadow-lg transition-colors ${
-            nodeAnnotationSession
-              ? 'border-primary bg-primary text-primary-foreground'
-              : 'border-border bg-card/95 text-muted-foreground hover:border-primary/50 hover:text-foreground'
-          }`}
-          onClick={() => {
-            if (nodeAnnotationSession) setNodeAnnotationSession(null);
-            else requestNodeAnnotation(selectedNode);
-          }}
-          title="批注修改 (C)"
-          aria-label="批注修改"
-          aria-pressed={Boolean(nodeAnnotationSession)}
-        >
-          <MessageSquare size={15} />
-          批注修改
-        </button>
 
         {nodeAnnotationError && !nodeAnnotationSession && (
           <div
