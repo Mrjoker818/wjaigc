@@ -3525,7 +3525,7 @@ ${contextInfo}
       {/* 全局图片上传 (foreignObject内input.click()不可靠, 统一由外部触发) */}
       <input ref={imageFileInputRef} type="file" accept="image/*" className="hidden" onChange={handleGlobalImageUpload} />
       {/* ═══ 顶部工具栏 - 全宽, 与原型对齐 ═══ */}
-      <header className="bg-card h-12 flex items-center justify-between gap-3 overflow-x-auto px-3 border-b border-border/20 z-50 shrink-0" role="toolbar" aria-label="工作流工具栏">
+      <header className="bg-card min-h-12 flex items-center justify-between gap-3 overflow-x-auto px-3 py-0.5 border-b border-border/20 z-50 shrink-0" role="toolbar" aria-label="工作流工具栏">
         {/* 左侧：工作流操作 */}
         <div className="flex min-w-max items-center gap-1" role="group" aria-label="工作流操作">
           {onBack && (

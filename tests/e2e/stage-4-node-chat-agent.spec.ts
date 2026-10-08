@@ -835,6 +835,40 @@ test('completes chat to canvas to workflow to chat with durable lineage and refr
   });
 });
 
+test('keeps the annotation action fully inside the workflow toolbar on narrow screens', async ({ page, stage4Evidence }, testInfo) => {
+  const fixture = await stage4FixtureForProject(testInfo.project.name);
+  const auth = await ensureStage4Session(page, fixture);
+  await seedStage4Baseline(page, fixture, auth);
+  await page.setViewportSize({ width: 375, height: 812 });
+  await openStage4CanvasProject(page, String(fixture.canvasProject.id));
+  await page.getByTitle('节点模式').first().click();
+
+  const toolbar = page.getByRole('toolbar', { name: '工作流工具栏', exact: true });
+  const annotation = toolbar.getByRole('button', { name: '批注修改', exact: true });
+  await expect(toolbar).toBeVisible({ timeout: 20_000 });
+  await annotation.click();
+  const geometry = await annotation.evaluate(element => {
+    const bounds = element.getBoundingClientRect();
+    const header = element.closest<HTMLElement>('[role="toolbar"]');
+    if (!header) throw new Error('Annotation action is not inside the real workflow toolbar');
+    const headerBounds = header.getBoundingClientRect();
+    return {
+      height: bounds.height,
+      top: bounds.top,
+      bottom: bounds.bottom,
+      toolbarTop: headerBounds.top,
+      toolbarContentBottom: headerBounds.top + header.clientHeight,
+      insideCanvas: document.querySelector('.canvas-bg')?.contains(element) ?? false,
+    };
+  });
+  expect(geometry.height).toBeGreaterThanOrEqual(44);
+  expect(geometry.top).toBeGreaterThanOrEqual(geometry.toolbarTop);
+  expect(geometry.bottom).toBeLessThanOrEqual(geometry.toolbarContentBottom);
+  expect(geometry.insideCanvas).toBe(false);
+  await expect(page.getByRole('alert').filter({ hasText: '请选择包含单张图片的节点' })).toBeVisible();
+  await writeStage4Metrics(stage4Evidence, testInfo, 'workflow-toolbar-narrow', geometry);
+});
+
 test('keeps the selected workflow renderer server-authoritative at 100 nodes', async ({ page, stage4Evidence }, testInfo) => {
   const fixture = await stage4FixtureForProject(testInfo.project.name);
   const auth = await ensureStage4Session(page, fixture);
