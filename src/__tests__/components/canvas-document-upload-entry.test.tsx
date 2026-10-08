@@ -5,7 +5,7 @@ import { InfiniteCanvas } from '@/components/infinite-canvas';
 import type { CanvasImage } from '@/components/infinite-canvas';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { webcrypto } from 'node:crypto';
+import { jsdomCrypto as webcrypto } from '../helpers/jsdom-native-web-boundary';
 import ts from 'typescript';
 import { commitDocumentCanvasFile, DocumentCanvasUploadError, loadDocumentCanvasVideoSize,
   uniqueDocumentCanvasFiles } from '@/lib/collaboration/document-canvas-upload';

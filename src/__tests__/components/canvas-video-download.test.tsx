@@ -4,6 +4,7 @@ import { act, cleanup, fireEvent, render, waitFor, within } from '@testing-libra
 import { Toaster, toast } from 'sonner';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { InfiniteCanvas, type CanvasImage } from '@/components/infinite-canvas';
+import { browserBinaryResponse } from '../helpers/jsdom-native-web-boundary';
 
 function Canvas({ source }: { source: string }): React.JSX.Element {
   const image: CanvasImage = { id: 'clip', url: '', videoUrl: source, mediaType: 'video',
@@ -54,7 +55,7 @@ describe('real canvas original-format video download', () => {
     vi.stubGlobal('fetch', async (url: string): Promise<Response> => {
       if (url.startsWith('/api/video/download?')) {
         requests.push(url);
-        return new Response(bytes, { headers: { 'Content-Type': mime } });
+        return browserBinaryResponse(bytes, { headers: { 'Content-Type': mime } });
       }
       return new Response('{}');
     });

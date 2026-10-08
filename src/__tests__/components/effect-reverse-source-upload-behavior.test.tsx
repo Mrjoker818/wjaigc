@@ -4,7 +4,7 @@ import React, { useLayoutEffect, useRef } from 'react';
 import { act, cleanup, render } from '@testing-library/react';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { webcrypto } from 'node:crypto';
+import { jsdomCrypto as webcrypto } from '../helpers/jsdom-native-web-boundary';
 import ts from 'typescript';
 import type { CanvasImage } from '@/components/infinite-canvas';
 import { commitDocumentCanvasFile, DocumentCanvasUploadError } from '@/lib/collaboration/document-canvas-upload';

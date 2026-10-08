@@ -10,6 +10,7 @@ import { createBillableTask, type CreateBillableTaskInput } from '@/lib/task-cor
 import { transitionTask } from '@/lib/task-core/task-service';
 import type { QueryFn } from './postgres-test-database';
 import type { WorkspaceAssetReference } from '@/lib/asset-core/types';
+import { saveFixtureMigrationLog } from './fixture-migration-log';
 
 export const roleDigest = 'a'.repeat(64);
 export async function seedImageEditPublication(query: QueryFn, databaseUrl: string, schemaName: string): Promise<void> {
@@ -21,8 +22,7 @@ export async function seedImageEditPublication(query: QueryFn, databaseUrl: stri
   const migration = spawnSync(process.execPath, [resolve('scripts/run-migrations.mjs')], {
     encoding: 'utf8', env: { ...process.env, DATABASE_URL: databaseUrl, PGDATABASE_URL: databaseUrl },
   });
-  const log = resolve('.superpowers/sdd/2026-09-25-v588-yjs-canvas-collaboration', `task-8cb3j4a-migrations-${schemaName}.log`);
-  writeFileSync(log, `command=node scripts/run-migrations.mjs\nstart=${start}\nend=${new Date().toISOString()}\nexit=${migration.status}\n${migration.stdout}\n${migration.stderr}`, { flag: 'wx' });
+  const log = saveFixtureMigrationLog(schemaName, migration, start);
   if (migration.status !== 0) throw new Error(`Migration failed: ${log}`);
   await ensureCoreTables();
   await query(`INSERT INTO wujie_users(id,name,password_hash,status,role,created_at,updated_at)
@@ -100,8 +100,9 @@ export function recoverRolesInFreshProcess(databaseUrl: string, schemaName: stri
   const result = spawnSync(process.execPath, ['--conditions=react-server', '--import=tsx', '-e', script], {
     encoding: 'utf8', timeout: 45_000, env: { ...process.env, DATABASE_URL: databaseUrl, PGDATABASE_URL: databaseUrl },
   });
-  const log = resolve('.superpowers/sdd/2026-09-25-v588-yjs-canvas-collaboration', `task-8cb3j4a-restart-${schemaName}.log`);
-  writeFileSync(log, `command=node --conditions=react-server --import=tsx -e ${script}\nstart=${start}\nend=${new Date().toISOString()}\nexit=${result.status}\n${result.stdout}\n${result.stderr}\n${result.error ?? ''}`, { flag: 'wx' });
+  const log = saveFixtureMigrationLog(`${schemaName}_restart`, {
+    status: result.status, stdout: result.stdout, stderr: `${result.stderr}\n${result.error ?? ''}`,
+  }, start);
   if (result.status !== 0) throw new Error(`Fresh process recovery failed: ${log}`);
   const line = result.stdout.split(/\r?\n/).find(value => value.startsWith('ROLE_RESTART_RESULT='));
   if (!line) throw new Error('Fresh process omitted results');

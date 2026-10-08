@@ -9,6 +9,6 @@ export function saveFixtureMigrationLog(schemaName: string, migration: Migration
   const directory = resolve('test-results/fixture-migrations');
   mkdirSync(directory, { recursive: true });
   const log = resolve(directory, `${schemaName}.log`);
-  writeFileSync(log, `${start ? `start=${start}\nend=${new Date().toISOString()}\n` : ''}exit=${migration.status}\n${migration.stdout}\n${migration.stderr}`);
+  writeFileSync(log, `${start ? `start=${start}\nend=${new Date().toISOString()}\n` : ''}exit=${migration.status}\n${migration.stdout}\n${migration.stderr}`, { flag: 'wx' });
   return log;
 }

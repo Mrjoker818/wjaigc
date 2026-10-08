@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { webcrypto } from 'node:crypto';
+import { jsdomCrypto as webcrypto } from '../helpers/jsdom-native-web-boundary';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { clearDocumentCanvasUploadIntent, commitDocumentCanvasFile, deliverCanvasImageFiles, getDocumentCanvasUploadIntent,
   uniqueDocumentCanvasFiles, uploadDocumentCanvasFile, loadDocumentCanvasVideoSize } from '@/lib/collaboration/document-canvas-upload';
