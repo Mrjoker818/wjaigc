@@ -455,9 +455,21 @@ test('completes chat to canvas to workflow to chat with durable lineage and refr
   const addToCanvas = page.getByTitle('添加到画布').last();
   await expect(addToCanvas).toBeAttached();
   await addToCanvas.click({ force: true });
-  await expect.poll(() => page.evaluate(() => localStorage.getItem('wujie_canvas_bridge')), {
+  // New transfers use an actor/project-scoped durable journal; the old global
+  // key is an inbound migration source only and is never written by ChatArea.
+  const bridgeKey = 'wujie:canvas-bridge:v2:'
+    + encodeURIComponent(JSON.stringify([auth.userId, canvasProjectId]));
+  const readBridgeJournal = async (): Promise<unknown> => page.evaluate(key => {
+    const value = localStorage.getItem(key);
+    return value === null ? null : JSON.parse(value) as unknown;
+  }, bridgeKey);
+  await expect.poll(readBridgeJournal, {
     timeout: 20_000,
-  }).not.toBeNull();
+  }).toMatchObject({
+    version: 2, actorId: auth.userId, projectId: canvasProjectId,
+    items: [expect.objectContaining({ state: 'pending', assetVersionId: expect.any(String),
+      placementId: expect.any(String), command: expect.objectContaining({ action: 'attach' }) })],
+  });
 
   type GeneratedTask = {
     id: string;
@@ -515,9 +527,23 @@ test('completes chat to canvas to workflow to chat with durable lineage and refr
   const canvasReference = await readCanvasReference();
   if (!canvasReference) throw new Error('Canvas transfer did not create a placement');
 
+  const bridgeTransfer = {
+    assetVersionId: generatedTask.asset_version_id, placementId: canvasReference.id,
+    entityId: canvasReference.entity_id,
+    command: expect.objectContaining({ action: 'attach', assetVersionId: generatedTask.asset_version_id }),
+  };
+  await expect(readBridgeJournal()).resolves.toMatchObject({
+    version: 2, actorId: auth.userId, projectId: canvasProjectId,
+    items: [expect.objectContaining({ ...bridgeTransfer, state: 'pending' })],
+  });
+
   await openStage4CanvasProject(page, canvasProjectId);
   const generatedCanvasImage = page.locator(`[data-canvas-image-id="${canvasReference.entity_id}"]`);
   await expect(generatedCanvasImage).toBeVisible({ timeout: 30_000 });
+  await expect.poll(readBridgeJournal, { timeout: 20_000 }).toMatchObject({
+    version: 2, actorId: auth.userId, projectId: canvasProjectId,
+    items: [expect.objectContaining({ ...bridgeTransfer, state: 'confirmed' })],
+  });
   const readPersistedPosition = async () => page.evaluate(async input => {
     const response = await fetch('/api/user-data/sync?key=projects');
     const payload = await response.json() as { value?: Array<Record<string, unknown>> };
