@@ -176,6 +176,8 @@ jobs:
           pnpm check:protected-baseline -- --base "$protected_base" --candidate HEAD "${args[@]}"
 
       - name: TypeScript
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
         run: pnpm ts-check
 
       - name: ESLint
@@ -196,6 +198,8 @@ jobs:
         run: pnpm test:ci
 
       - name: Production build
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
         run: pnpm build
 
   stage-1-external-evidence:

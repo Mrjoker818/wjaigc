@@ -63,6 +63,8 @@ jobs:
           github.actor == 'dependabot[bot]')
         run: pnpm doctor
       - name: TypeScript
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
         run: pnpm ts-check
       - name: ESLint
         run: pnpm lint:build
@@ -81,6 +83,8 @@ jobs:
       - name: Production dependency audit
         run: pnpm audit --prod --json --registry=https://registry.npmjs.org
       - name: Production build
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
         run: pnpm build
       - name: Upload unit reports
         if: always()
@@ -195,6 +199,8 @@ jobs:
           await client.end();
           NODE
       - name: Build production application
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
         run: pnpm build
       - name: Start production application
         shell: bash
@@ -284,6 +290,8 @@ jobs:
       - name: Prepare Stage 4 application database
         run: pnpm migrate
       - name: Build production application
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
         run: pnpm build
       - name: Start production application
         shell: bash
