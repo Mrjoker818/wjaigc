@@ -113,6 +113,22 @@ jobs:
           echo "payment callbacks, cloud storage, or authenticated cloud E2E passed."
 
   stage-1-local-gates:
+    if: always() && github.ref != 'refs/heads/stable'
+    needs: [stage-1-static-and-build, stage-1-automated-tests]
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Require all quality checks
+        env:
+          STATIC_RESULT: ${{ needs.stage-1-static-and-build.result }}
+          TEST_RESULT: ${{ needs.stage-1-automated-tests.result }}
+        run: |
+          if [ "$STATIC_RESULT" != success ] || [ "$TEST_RESULT" != success ]; then
+            echo "::error title=Stage 1 gate failed::Static checks and every test shard must succeed"
+            exit 1
+          fi
+
+  stage-1-static-and-build:
     if: github.ref != 'refs/heads/stable'
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -190,6 +206,55 @@ jobs:
       - name: ESLint
         run: pnpm lint
 
+      - name: Production build
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
+        run: pnpm build
+
+  stage-1-automated-tests:
+    if: github.ref != 'refs/heads/stable'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: wujie_bridge_test_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d wujie_bridge_test_ci"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - name: Checkout candidate
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.0.0
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Install CPU media tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ffmpeg
+          ffmpeg -version
+          ffprobe -version
       - name: Prepare isolated Vitest media root
         env:
           WUJIE_DATA_DIR: ${{ runner.temp }}/wujie-bridge-test-ci
@@ -202,12 +267,7 @@ jobs:
           POSTGRES_TEST_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/wujie_bridge_test_ci
           TEST_POSTGRES_URL: postgresql://postgres:postgres@127.0.0.1:5432/wujie_bridge_test_ci
           WUJIE_DATA_DIR: ${{ runner.temp }}/wujie-bridge-test-ci
-        run: pnpm test:ci
-
-      - name: Production build
-        env:
-          NODE_OPTIONS: --max-old-space-size=4096
-        run: pnpm build
+        run: pnpm test:ci --shard=${{ matrix.shard }}/4
 
   stage-1-external-evidence:
     if: github.event_name == 'workflow_dispatch'
