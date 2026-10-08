@@ -1,4 +1,8 @@
 import type { Locator, Page, Request, Response } from '@playwright/test';
+import {
+  installStage3HistoryDiagnostics,
+  summarizeStage3HistorySync,
+} from '../helpers/stage-3-history-diagnostics';
 
 import {
   assertCanvasNodeContinuity,
@@ -954,6 +958,54 @@ test.describe('Stage 3 Canvas kernel baseline', () => {
 
   test('commits move and resize as one undo step each', async ({ page, stage3Evidence }, testInfo) => {
     const projectId = stage3ProjectId(testInfo.project.name, 1);
+    let syncSequence = 0;
+    let syncTruncated = false;
+    let hydrationReads = 0;
+    const syncs = new WeakMap<Request, number>();
+    page.on('console', message => {
+      if (message.type() === 'info' && message.text().startsWith('STAGE3_HISTORY_STORAGE ')) {
+        console.log(message.text());
+      }
+    });
+    page.on('request', request => {
+      if (request.method() !== 'POST' || new URL(request.url()).pathname !== '/api/user-data/sync') return;
+      try {
+        const summary = summarizeStage3HistorySync(request.postDataJSON(), projectId);
+        if (!summary) return;
+        if (syncSequence >= 16) {
+          if (!syncTruncated) console.log('STAGE3_HISTORY_NETWORK {"phase":"truncated","limit":16}');
+          syncTruncated = true;
+          return;
+        }
+        const sequence = ++syncSequence;
+        syncs.set(request, sequence);
+        console.log(`STAGE3_HISTORY_NETWORK ${JSON.stringify({ phase: 'request', sequence, ...summary })}`);
+      } catch { /* A non-JSON request is opaque and remains in the original evidence. */ }
+    });
+    page.on('response', response => {
+      const url = new URL(response.url());
+      if (response.request().method() === 'GET' && url.pathname === '/api/user-data/sync' && url.searchParams.get('key') === 'projects') {
+        if (hydrationReads++ >= 8) return;
+        void response.json().then((body: unknown) => {
+          const summary = summarizeStage3HistorySync(body, projectId);
+          if (summary) console.log(`STAGE3_HISTORY_NETWORK ${JSON.stringify({ phase: 'hydrate', status: response.status(), ...summary })}`);
+        }).catch(() => undefined);
+        return;
+      }
+      const sequence = syncs.get(response.request());
+      if (sequence === undefined) return;
+      void response.json().then((body: unknown) => {
+        const revision = body && typeof body === 'object' ? (body as Record<string, unknown>).projectRevision : null;
+        console.log(`STAGE3_HISTORY_NETWORK ${JSON.stringify({ phase: 'response', sequence, status: response.status(), acknowledged: typeof revision === 'number' && Number.isSafeInteger(revision) && revision >= 0 ? revision : null })}`);
+      }).catch(() => {
+        console.log(`STAGE3_HISTORY_NETWORK ${JSON.stringify({ phase: 'response-body-unavailable', sequence, status: response.status() })}`);
+      });
+    });
+    page.on('requestfailed', request => {
+      const sequence = syncs.get(request);
+      if (sequence !== undefined) console.log(`STAGE3_HISTORY_NETWORK ${JSON.stringify({ phase: 'failed', sequence })}`);
+    });
+    await page.addInitScript(installStage3HistoryDiagnostics, { projectId });
     await page.addInitScript(() => {
       const state = window as typeof window & {
         __stage3HistoryInputEvents?: Array<Record<string, unknown>>;

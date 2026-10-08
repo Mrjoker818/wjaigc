@@ -267,7 +267,13 @@ export class CanvasPersistenceScheduler {
     const prepared = this.preparedSnapshots.get(projectId);
     return this.pendingSnapshot?.projectId === projectId
       || this.activeSnapshot?.projectId === projectId
-      || Boolean(prepared && this.serverFlushedSignatures.get(projectId) !== prepared.signature);
+      || Boolean(prepared && (
+        this.serverFlushedSignatures.get(projectId) !== prepared.signature
+        // A -> B -> A can match an old acknowledged signature while an idle
+        // write of B is already authoritative. The current revision still
+        // needs its own durability barrier (and unload recovery until then).
+        || (this.serverFlushedRevisions.get(projectId) ?? -1) < prepared.revision
+      ));
   }
 
   isSnapshotActive(projectId: string, revision: number): boolean {
