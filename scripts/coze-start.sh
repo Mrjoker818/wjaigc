@@ -4,6 +4,12 @@ set -euo pipefail
 PORT="${PORT:-${DEPLOY_RUN_PORT:-5000}}"
 export PORT
 
+# Coze reserves COZE_* configuration keys. Pin the independent preview origin
+# explicitly in DEV only; deployed runtimes keep their platform-owned origin.
+if [ "${COZE_PROJECT_ENV:-}" = "DEV" ] && [ -n "${WUJIE_PREVIEW_ORIGIN:-}" ]; then
+  export COZE_PROJECT_DOMAIN_DEFAULT="${WUJIE_PREVIEW_ORIGIN}"
+fi
+
 start_server() {
   if [ "${WUJIE_PRESENCE_ENABLED:-}" = "true" ] || [ "${WUJIE_YJS_ENABLED:-}" = "true" ]; then
     echo "[coze-start] Starting production server with collaboration on port ${PORT}..."

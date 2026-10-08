@@ -56,13 +56,14 @@ function createStartupFixture(): string {
   writeFileSync(join(directory, '.next', 'BUILD_ID'), 'test-build-id');
   writeFileSync(join(directory, 'fake-bin', 'node'), `#!/usr/bin/env bash
 printf 'PRESENCE_NODE_ENV=%s\\n' "$NODE_ENV"
+printf 'LAUNCHED_PUBLIC_ORIGIN=%s\\n' "\${COZE_PROJECT_DOMAIN_DEFAULT:-}"
 printf 'PRESENCE_CALLED\n'
 printf '%s\\n' "$@"
 `);
   chmodSync(join(directory, 'fake-bin', 'node'), 0o755);
   for (const [name, output] of [['next', 'NEXT_CALLED']]) {
     const executable = join(directory, 'node_modules', '.bin', name);
-    writeFileSync(executable, `#!/usr/bin/env bash\nprintf '${output}\\n'\n`);
+    writeFileSync(executable, `#!/usr/bin/env bash\nprintf 'LAUNCHED_PUBLIC_ORIGIN=%s\\n' "\${COZE_PROJECT_DOMAIN_DEFAULT:-}"\nprintf '${output}\\n'\n`);
     chmodSync(executable, 0o755);
   }
   return directory;
@@ -133,6 +134,47 @@ describe('Coze presence startup routing', () => {
       const nodeArguments = stdout.split('PRESENCE_CALLED\n')[1].trim().split(/\r?\n/);
       expectNextRuntimeReady(nodeArguments);
     }
+  });
+});
+
+describe('Coze explicit preview origin startup configuration', () => {
+  const platformOrigin = 'https://example.dev.coze.site';
+  const previewOrigin = 'https://example-5000.dev.coze.site';
+
+  describe.each(['true', 'false'])('with collaboration enabled=%s', (collaborationEnabled) => {
+    it.each([
+      ['DEV', previewOrigin, previewOrigin],
+      ['DEV', '', platformOrigin],
+      ['DEV', undefined, platformOrigin],
+      ['PROD', previewOrigin, platformOrigin],
+      [undefined, previewOrigin, platformOrigin],
+      ['development', previewOrigin, platformOrigin],
+    ] as const)('launches with the expected exact origin for environment=%s, preview override=%s', (projectEnv, override, expectedOrigin) => {
+      const directory = createStartupFixture();
+      const environment: NodeJS.ProcessEnv = {
+        ...process.env,
+        WUJIE_PRESENCE_ENABLED: collaborationEnabled,
+        WUJIE_YJS_ENABLED: collaborationEnabled,
+        COZE_PROJECT_DOMAIN_DEFAULT: platformOrigin,
+      };
+      if (projectEnv === undefined) Reflect.deleteProperty(environment, 'COZE_PROJECT_ENV');
+      else environment.COZE_PROJECT_ENV = projectEnv;
+      if (override === undefined) Reflect.deleteProperty(environment, 'WUJIE_PREVIEW_ORIGIN');
+      else environment.WUJIE_PREVIEW_ORIGIN = override;
+
+      const stdout = execFileSync(shellPath(), [
+        '-c', `PATH="$PWD/fake-bin:$PATH" exec bash "${resolve(process.cwd(), 'scripts/coze-start.sh').replaceAll('\\', '/')}"`,
+      ], {
+        cwd: directory,
+        env: environment,
+        encoding: 'utf8',
+        timeout: 10_000,
+        windowsHide: true,
+      });
+
+      expect(stdout.match(/^LAUNCHED_PUBLIC_ORIGIN=(.*)$/m)?.[1]).toBe(expectedOrigin);
+      expect(stdout).toContain(collaborationEnabled === 'true' ? 'PRESENCE_CALLED' : 'NEXT_CALLED');
+    });
   });
 });
 
