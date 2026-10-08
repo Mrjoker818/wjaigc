@@ -82,6 +82,28 @@ export function useProjectPresence(projectId: string | null): ProjectPresenceSta
       const request = new AbortController();
       controller = request;
       try {
+        // Read the flag before attempting a mutation that is intentionally 503
+        // when disabled. This does not replace project authorization on POST.
+        const availability = await fetch('/api/collaboration/presence-ticket', {
+          method: 'GET', credentials: 'include', cache: 'no-store', signal: request.signal,
+        });
+        if (!active || controller !== request || stopped) return;
+        if (availability.status === 401 || availability.status === 403) {
+          stopped = true;
+          publish({ status: 'unavailable', participants: [] });
+          return;
+        }
+        const capability: unknown = await availability.json();
+        if (!active || controller !== request || stopped) return;
+        if (!availability.ok || typeof capability !== 'object' || capability === null
+          || !('success' in capability) || capability.success !== true
+          || !('enabled' in capability) || typeof capability.enabled !== 'boolean') {
+          throw new Error('invalid presence availability');
+        }
+        if (!capability.enabled) {
+          publish({ status: 'disabled', participants: [] });
+          return;
+        }
         const response = await fetch('/api/collaboration/presence-ticket', {
           method: 'POST',
           credentials: 'include',

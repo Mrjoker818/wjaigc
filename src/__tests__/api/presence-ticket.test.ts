@@ -40,6 +40,35 @@ describe('/api/collaboration/presence-ticket', () => {
 
   afterEach(() => vi.unstubAllEnvs());
 
+  it.each(['true', 'false', undefined])('reports authenticated availability without issuing a ticket: %s', async flag => {
+    if (flag === undefined) delete process.env.WUJIE_PRESENCE_ENABLED;
+    else vi.stubEnv('WUJIE_PRESENCE_ENABLED', flag);
+    const { GET } = await import('@/app/api/collaboration/presence-ticket/route');
+    const result = await GET(new NextRequest('http://localhost:5000/api/collaboration/presence-ticket'));
+    expect(result.status).toBe(200);
+    expect(await result.json()).toEqual({ success: true, enabled: flag === 'true' });
+    expect(result.headers.get('Cache-Control')).toBe('private, no-store');
+    expect(result.headers.get('Vary')).toBe('Cookie');
+    expect(mocks.issuePresenceTicket).not.toHaveBeenCalled();
+  });
+
+  it('does not expose availability to a signed-out caller', async () => {
+    mocks.getSessionUser.mockResolvedValue(null);
+    const { GET } = await import('@/app/api/collaboration/presence-ticket/route');
+    const result = await GET(new NextRequest('http://localhost:5000/api/collaboration/presence-ticket'));
+    expect(result.status).toBe(401);
+    expect(await result.json()).toEqual({ success: false, code: 'AUTHENTICATION_REQUIRED' });
+    expect(mocks.issuePresenceTicket).not.toHaveBeenCalled();
+  });
+
+  it('rejects all query data on availability reads', async () => {
+    const { GET } = await import('@/app/api/collaboration/presence-ticket/route');
+    const result = await GET(new NextRequest('http://localhost:5000/api/collaboration/presence-ticket?ticket=forbidden'));
+    expect(result.status).toBe(400);
+    expect(await result.json()).toEqual({ success: false, code: 'PRESENCE_REQUEST_INVALID' });
+    expect(mocks.issuePresenceTicket).not.toHaveBeenCalled();
+  });
+
   it('keeps issuance disabled unless the presence flag is true', async () => {
     vi.stubEnv('WUJIE_PRESENCE_ENABLED', 'false');
     const { POST } = await import('@/app/api/collaboration/presence-ticket/route');

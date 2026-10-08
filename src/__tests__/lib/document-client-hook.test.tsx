@@ -7,6 +7,7 @@ import * as Y from 'yjs';
 
 import { applyCanvasImagePatch, createCanvasDocument, readCanvasDocument } from '@/lib/collaboration/canvas-document';
 import { applyCanvasAssetCommand, captureDocumentPlacementRemovalSnapshot } from '@/lib/collaboration/canvas-asset-command';
+import { canUseLegacyCanvasPersistence, routeCanvasWorkspaceChange } from '@/lib/collaboration/canvas-document-image-bridge';
 import { createBrowserPendingUpdateStore, useCollaborativeCanvas } from '@/lib/collaboration/document-client';
 
 // The fallback reproduces the old consumer's rendered-state guard on the RED
@@ -183,6 +184,221 @@ describe('useCollaborativeCanvas', () => {
     vi.useRealTimers();
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
+  });
+
+  function mockOwnerStatus(read: (projectId: string, init?: RequestInit) => Promise<Response>): void {
+    const transport = vi.mocked(fetch).getMockImplementation()!;
+    vi.mocked(fetch).mockImplementation((url, init) => {
+      if (!String(url).startsWith('/api/collaboration/document-enable?')) return transport(url, init);
+      const projectId = new URL(String(url), 'http://localhost').searchParams.get('projectId')!;
+      return read(projectId, init);
+    });
+  }
+
+  it.each([true, false])('does not probe a disabled owner document when the feature flag is %s', async featureEnabled => {
+    mockOwnerStatus(projectId => Promise.resolve(response(200, { success: true, projectId,
+      featureEnabled, enabled: false, currentRevision: 0 })));
+    const { result, unmount } = renderHook(() => useCollaborativeCanvas('project-a', 'owner-a', 'owner-a'));
+    await waitFor(() => expect(result.current.authority).toBe('legacy'));
+    expect(result.current.status).toBe('disabled');
+    expect(vi.mocked(fetch).mock.calls.map(call => String(call[0])))
+      .toEqual(['/api/collaboration/document-enable?projectId=project-a']);
+    expect(FakeSocket.instances).toHaveLength(0);
+    unmount();
+  });
+
+  it('retains authoritative read-only geometry for an enabled owner document while the feature flag is off', async () => {
+    const transport = vi.mocked(fetch).getMockImplementation()!;
+    vi.mocked(fetch).mockImplementation(async (url, init) => {
+      const reply = await transport(url, init);
+      return String(url).startsWith('/api/collaboration/document-project?')
+        ? response(200, { ...await reply.json(), readOnly: true }) : reply;
+    });
+    mockOwnerStatus(projectId => Promise.resolve(response(200, { success: true, projectId,
+      featureEnabled: false, enabled: true, currentRevision: 1 })));
+    const { result, unmount } = renderHook(() => useCollaborativeCanvas('project-a', 'owner-a', 'owner-a'));
+    await waitFor(() => expect(result.current.status).toBe('read-only'));
+    expect(result.current.authority).toBe('document');
+    expect(result.current.canvasImages[0]).toMatchObject({ placementId: 'p1', x: 10, y: 20 });
+    expect(result.current.isWritable()).toBe(false);
+    expect(FakeSocket.instances).toHaveLength(0);
+    expect(vi.mocked(fetch).mock.calls.map(call => String(call[0])))
+      .toEqual(['/api/collaboration/document-enable?projectId=project-a', '/api/collaboration/document-project?projectId=project-a']);
+    unmount();
+  });
+
+  it('does not use the owner-only status endpoint for an invited editor', async () => {
+    const { unmount } = renderHook(() => useCollaborativeCanvas('project-a', 'editor-a', 'owner-a'));
+    await waitFor(() => expect(FakeSocket.instances).toHaveLength(1));
+    expect(vi.mocked(fetch).mock.calls.map(call => String(call[0])))
+      .toEqual(['/api/collaboration/document-project?projectId=project-a', '/api/collaboration/document-ticket']);
+    unmount();
+  });
+
+  it('blocks legacy writes as soon as the owner status confirms enablement, before the directory arrives', async () => {
+    const transport = vi.mocked(fetch).getMockImplementation()!;
+    let finishDirectory!: (value: Response) => void;
+    vi.mocked(fetch).mockImplementation((url, init) => String(url).startsWith('/api/collaboration/document-project?')
+      ? new Promise(resolve => { finishDirectory = resolve; }) : transport(url, init));
+    let enabled = false;
+    mockOwnerStatus(projectId => Promise.resolve(response(200, { success: true, projectId,
+      featureEnabled: true, enabled, currentRevision: 1 })));
+    const { result, unmount } = renderHook(() => useCollaborativeCanvas('project-a', 'owner-a', 'owner-a'));
+    await waitFor(() => expect(result.current.authority).toBe('legacy'));
+    enabled = true;
+    act(() => window.dispatchEvent(new Event('focus')));
+    await waitFor(() => expect(result.current.authority).toBe('document'));
+    expect(result.current.status).toBe('checking');
+    expect(result.current.isWritable()).toBe(false);
+    expect(FakeSocket.instances).toHaveLength(0);
+    const directory = await transport('/api/collaboration/document-project?projectId=project-a');
+    await act(async () => { finishDirectory(directory); });
+    await waitFor(() => expect(FakeSocket.instances).toHaveLength(1));
+    unmount();
+  });
+
+  it('does not revert a confirmed enabled owner document to legacy on a conflicting directory 409', async () => {
+    vi.mocked(fetch).mockResolvedValue(response(409, { success: false, code: 'DOCUMENT_PROJECT_NOT_ENABLED' }));
+    mockOwnerStatus(projectId => Promise.resolve(response(200, { success: true, projectId,
+      featureEnabled: true, enabled: true, currentRevision: 1 })));
+    const { result, unmount } = renderHook(() => useCollaborativeCanvas('project-a', 'owner-a', 'owner-a'));
+    await waitFor(() => expect(result.current.status).toBe('unavailable'));
+    expect(result.current.authority).toBe('document');
+    expect(result.current.isWritable()).toBe(false);
+    expect(FakeSocket.instances).toHaveLength(0);
+    unmount();
+  });
+
+  it('revokes retained legacy consumer admission before React commits enabled owner status', async () => {
+    const transport = vi.mocked(fetch).getMockImplementation()!;
+    let boundary: { authority: string; persistence: boolean; insertion: boolean; route: string } | undefined;
+    vi.mocked(fetch).mockImplementation((url, init) => {
+      if (!String(url).startsWith('/api/collaboration/document-project?')) return transport(url, init);
+      boundary = { authority: retained.authority, persistence: canUseLegacyCanvasPersistence('project-a', retained),
+        insertion: retained.projectId === 'project-a' && retained.authority === 'legacy',
+        route: routeCanvasWorkspaceChange('project-a', retained, [], []).kind };
+      return new Promise<Response>(() => {});
+    });
+    let enabled = false;
+    mockOwnerStatus(projectId => Promise.resolve(response(200, { success: true, projectId,
+      featureEnabled: true, enabled, currentRevision: 1 })));
+    const { result, unmount } = renderHook(() => useCollaborativeCanvas('project-a', 'owner-a', 'owner-a'));
+    await waitFor(() => expect(result.current.authority).toBe('legacy'));
+    const retained = result.current;
+    expect(canUseLegacyCanvasPersistence('project-a', retained)).toBe(true);
+    enabled = true;
+    act(() => window.dispatchEvent(new Event('focus')));
+    await waitFor(() => expect(boundary).toBeDefined());
+    expect(boundary).toEqual({ authority: 'document', persistence: false, insertion: false, route: 'blocked' });
+    expect(retained.status).toBe('disabled'); // This object is still the old React render.
+    unmount();
+    expect(canUseLegacyCanvasPersistence('project-a', retained)).toBe(false);
+  });
+
+  it.each(['malformed', 'wrong-project', 'conflict'] as const)('fails closed on %s owner status without a directory or ticket request', async scenario => {
+    mockOwnerStatus(() => Promise.resolve(response(scenario === 'conflict' ? 409 : 200,
+      scenario === 'conflict' ? { success: false, code: 'DOCUMENT_AUTHORITY_CONFLICT' }
+        : { success: true, projectId: scenario === 'wrong-project' ? 'project-b' : 'project-a',
+          featureEnabled: true, enabled: scenario === 'malformed' ? 'false' : false, currentRevision: 0 })));
+    const { result, unmount } = renderHook(() => useCollaborativeCanvas('project-a', 'owner-a', 'owner-a'));
+    await waitFor(() => expect(result.current.status).toBe('unavailable'));
+    expect(result.current.authority).toBe('unknown');
+    expect(result.current.isWritable()).toBe(false);
+    expect(vi.mocked(fetch).mock.calls.map(call => String(call[0])))
+      .toEqual(['/api/collaboration/document-enable?projectId=project-a']);
+    expect(FakeSocket.instances).toHaveLength(0);
+    unmount();
+  });
+
+  it.each(['malformed', 'unauthorized'] as const)('revokes retained legacy admission on a later %s owner status', async scenario => {
+    let attempts = 0;
+    mockOwnerStatus(projectId => Promise.resolve(++attempts === 1
+      ? response(200, { success: true, projectId, featureEnabled: true, enabled: false, currentRevision: 0 })
+      : scenario === 'unauthorized' ? new Response('<html>login</html>', { status: 401 })
+        : response(200, { success: true, projectId, featureEnabled: true, enabled: 'false', currentRevision: 0 })));
+    const { result, unmount } = renderHook(() => useCollaborativeCanvas('project-a', 'owner-a', 'owner-a'));
+    await waitFor(() => expect(result.current.authority).toBe('legacy'));
+    const retained = result.current;
+    act(() => window.dispatchEvent(new Event('focus')));
+    await waitFor(() => expect(result.current.status).toBe('unavailable'));
+    expect(canUseLegacyCanvasPersistence('project-a', retained)).toBe(false);
+    expect(routeCanvasWorkspaceChange('project-a', retained, [], []).kind).toBe('blocked');
+    expect(FakeSocket.instances).toHaveLength(0);
+    unmount();
+  });
+
+  it('retries a newly persisted owner project without allowing legacy writes on a transient 403', async () => {
+    vi.useFakeTimers();
+    let attempts = 0;
+    mockOwnerStatus(projectId => Promise.resolve(++attempts === 1
+      ? response(403, { success: false, code: 'DOCUMENT_FORBIDDEN' })
+      : response(200, { success: true, projectId, featureEnabled: true, enabled: false, currentRevision: 0 })));
+    const { result, unmount } = renderHook(() => useCollaborativeCanvas('project-a', 'owner-a', 'owner-a'));
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    expect(result.current.status).toBe('unavailable');
+    expect(result.current.authority).toBe('unknown');
+    await act(async () => { await vi.advanceTimersByTimeAsync(500); });
+    expect(result.current.authority).toBe('legacy');
+    expect(attempts).toBe(2);
+    expect(vi.mocked(fetch).mock.calls.every(call => String(call[0]).startsWith('/api/collaboration/document-enable?'))).toBe(true);
+    unmount();
+  });
+
+  it.each([true, false])('stops owner admission on a 401 with a JSON body: %s', async json => {
+    vi.useFakeTimers();
+    mockOwnerStatus(() => Promise.resolve(json
+      ? response(401, { success: false, code: 'UNAUTHORIZED' }) : new Response('<html>login</html>', { status: 401 })));
+    const { result, unmount } = renderHook(() => useCollaborativeCanvas('project-a', 'owner-a', 'owner-a'));
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    expect(result.current.status).toBe('unavailable');
+    expect(result.current.authority).toBe('document');
+    expect(result.current.isWritable()).toBe(false);
+    act(() => window.dispatchEvent(new Event('focus')));
+    await act(async () => { await vi.advanceTimersByTimeAsync(100_000); });
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(FakeSocket.instances).toHaveLength(0);
+    unmount();
+  });
+
+  it('exhausts a forbidden owner status retry budget without opening the legacy canvas', async () => {
+    vi.useFakeTimers();
+    mockOwnerStatus(() => Promise.resolve(response(403, { success: false, code: 'DOCUMENT_FORBIDDEN' })));
+    const { result, unmount } = renderHook(() => useCollaborativeCanvas('project-a', 'owner-a', 'owner-a'));
+    await act(async () => { await vi.advanceTimersByTimeAsync(100_000); });
+    expect(result.current.status).toBe('unavailable');
+    expect(result.current.authority).toBe('unknown');
+    expect(result.current.isWritable()).toBe(false);
+    expect(fetch).toHaveBeenCalledTimes(11);
+    expect(FakeSocket.instances).toHaveLength(0);
+    expect(vi.getTimerCount()).toBe(0);
+    unmount();
+  });
+
+  it.each(['project', 'owner', 'actor'] as const)('discards a delayed owner status after the %s changes', async changed => {
+    let finish!: (value: Response) => void;
+    let oldSignal: AbortSignal | null | undefined;
+    mockOwnerStatus((projectId, init) => {
+      if (projectId === 'project-b') return Promise.resolve(response(200, { success: true, projectId,
+        featureEnabled: true, enabled: false, currentRevision: 0 }));
+      oldSignal = init?.signal;
+      return new Promise(resolve => { finish = resolve; });
+    });
+    const { result, rerender, unmount } = renderHook(({ projectId, ownerId, actorId }) =>
+      useCollaborativeCanvas(projectId, actorId, ownerId), {
+      initialProps: { projectId: 'project-a', ownerId: 'owner-a', actorId: 'owner-a' },
+    });
+    await act(async () => { await Promise.resolve(); });
+    rerender({ projectId: changed === 'project' ? 'project-b' : 'project-a',
+      ownerId: changed === 'owner' ? 'other-owner' : 'owner-a',
+      actorId: changed === 'actor' ? 'editor-a' : 'owner-a' });
+    await waitFor(() => expect(changed === 'project' ? result.current.authority : FakeSocket.instances.length)
+      .toBe(changed === 'project' ? 'legacy' : 1));
+    expect(oldSignal?.aborted).toBe(true);
+    await act(async () => { finish(response(200, { success: true, projectId: 'project-a',
+      featureEnabled: true, enabled: false, currentRevision: 0 })); });
+    expect(result.current.authority).toBe(changed === 'project' ? 'legacy' : 'document');
+    expect(result.current.projectId).toBe(changed === 'project' ? 'project-b' : 'project-a');
+    unmount();
   });
 
   it('reports current writable media immediately after HTTP confirmation before React commits its saved render', async () => {

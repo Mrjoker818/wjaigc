@@ -8,12 +8,36 @@ export interface OwnerProjectStatus {
   projectId: string; featureEnabled: boolean; enabled: boolean; currentRevision: number;
 }
 export async function readOwnerProjectStatus(projectId: string, signal?: AbortSignal): Promise<OwnerProjectStatus> {
-  const data = await requestOwnerDocument(`/api/collaboration/document-enable?projectId=${encodeURIComponent(projectId)}`, { signal });
-  if (data.projectId !== projectId || typeof data.featureEnabled !== 'boolean' || typeof data.enabled !== 'boolean'
-    || typeof data.currentRevision !== 'number' || !Number.isSafeInteger(data.currentRevision) || data.currentRevision < 0) {
-    throw new OwnerDocumentRequestError('DOCUMENT_RESPONSE_INVALID', 200, false);
+  if (signal?.aborted) throw new OwnerDocumentRequestError('DOCUMENT_REQUEST_CANCELLED', 0, false);
+  const controller = new AbortController();
+  let cancel = (): void => {};
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const interrupted = new Promise<never>((_resolve, reject) => {
+    cancel = (): void => {
+      controller.abort();
+      reject(new OwnerDocumentRequestError('DOCUMENT_REQUEST_CANCELLED', 0, false));
+    };
+    signal?.addEventListener('abort', cancel, { once: true });
+    timer = setTimeout(() => {
+      controller.abort();
+      reject(new OwnerDocumentRequestError('DOCUMENT_REQUEST_TIMEOUT', 0, false));
+    }, 10_000);
+  });
+  const read = async (): Promise<OwnerProjectStatus> => {
+    const data = await requestOwnerDocument(`/api/collaboration/document-enable?projectId=${encodeURIComponent(projectId)}`,
+      { signal: controller.signal });
+    if (data.projectId !== projectId || typeof data.featureEnabled !== 'boolean' || typeof data.enabled !== 'boolean'
+      || typeof data.currentRevision !== 'number' || !Number.isSafeInteger(data.currentRevision) || data.currentRevision < 0) {
+      throw new OwnerDocumentRequestError('DOCUMENT_RESPONSE_INVALID', 200, false);
+    }
+    return { projectId, featureEnabled: data.featureEnabled, enabled: data.enabled, currentRevision: data.currentRevision };
+  };
+  // Include body decoding; a transport that ignores abort cannot hold the canvas.
+  try { return await Promise.race([read(), interrupted]); }
+  finally {
+    clearTimeout(timer);
+    signal?.removeEventListener('abort', cancel);
   }
-  return { projectId, featureEnabled: data.featureEnabled, enabled: data.enabled, currentRevision: data.currentRevision };
 }
 
 export class OwnerDocumentRequestError extends Error {

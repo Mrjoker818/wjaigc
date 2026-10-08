@@ -1678,7 +1678,9 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
   const [ohMyPromptOpen, setOhMyPromptOpen] = useState(false);
   const [currentProject, setCurrentProject] = useState<Project | null>(null);
   historyProjectIdRef.current = currentProject?.id ?? null;
-  const collaborativeCanvas = useCollaborativeCanvas(currentProject?.id ?? null, currentUser?.id ?? null);
+  const collaborativeCanvas = useCollaborativeCanvas(
+    currentProject?.id ?? null, currentUser?.id ?? null, currentProject?.userId ?? null,
+  );
   collaborativeCanvasRef.current = collaborativeCanvas;
   const currentProjectRef = useRef(currentProject);
   currentProjectRef.current = currentProject;

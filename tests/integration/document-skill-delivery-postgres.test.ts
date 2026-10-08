@@ -36,21 +36,16 @@ vi.mock('server-only', () => ({}));
 let root: string, image: Buffer;
 const previousRoot = process.env.WUJIE_DATA_DIR;
 function admitSkillFixture(previous: string | undefined, environment: NodeJS.ProcessEnv): string {
-  const url = new URL(requireOfflineBridgeTestDatabaseUrl(environment));
-  if (url.hostname !== '127.0.0.1' || url.port !== '55496'
-    || url.pathname !== '/wujie_bridge_test_batch_20261006') throw new Error('Exact owned suite PG required');
+  requireOfflineBridgeTestDatabaseUrl(environment);
   const admitted = requireOfflineBridgeTestMediaRoot(previous);
   const identity = (value: string): string => path.resolve(value).toLowerCase();
   for (const key of ['WUJIE_DATA_DIR', 'MEDIA_ROOT', 'WUJIE_SUITE_MEDIA_ROOT'] as const) {
     const value = environment[key];
-    if (!value || !path.isAbsolute(value) || identity(value) !== identity(admitted))
+    if (value !== undefined && (!path.isAbsolute(value) || identity(value) !== identity(admitted)))
       throw new Error('Current suite media identity required');
   }
-  const copy = environment.WUJIE_SUITE_COPY_ROOT;
-  if (!copy || !path.isAbsolute(copy)
-    || identity(copy) !== identity('J:/无界本地版/projects/_tmp_e2e/wujie-stage7-current-build-gEZUx9'))
-    throw new Error('Exact current suite copy required');
-  for (const bound of [admitted, path.resolve(copy)]) {
+  // This suite runs the current checkout, not a historical frozen build copy.
+  for (const bound of [admitted]) {
     if (identity(realpathSync(bound)) !== identity(bound)) throw new Error('Canonical suite path required');
     for (let current = bound; ; current = path.dirname(current)) {
       const entry = lstatSync(current);
@@ -58,7 +53,6 @@ function admitSkillFixture(previous: string | undefined, environment: NodeJS.Pro
       if (path.dirname(current) === current) break;
     }
   }
-  if (identity(path.dirname(admitted)) !== identity(path.dirname(copy))) throw new Error('Same private suite parent required');
   return admitted;
 }
 beforeAll(async () => {

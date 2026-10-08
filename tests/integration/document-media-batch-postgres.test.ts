@@ -6,20 +6,17 @@ import sharp from 'sharp';
 import { Client } from 'pg';
 import { beforeAll, afterAll, beforeEach, afterEach, describe, it, expect, vi } from 'vitest';
 import { withIsolatedPostgres, type QueryFn } from '../helpers/postgres-test-database';
+import { requireOfflineBridgeTestDatabaseUrl } from '../helpers/offline-bridge-database-guard';
+import { requireOfflineBridgeTestMediaRoot } from '../helpers/offline-bridge-media-guard';
 import { importDocumentMediaBatch } from '../../src/lib/collaboration/document-media-batch';
 import { getServerDataRoot } from '../../src/lib/server-data-root';
 vi.mock('server-only', () => ({}));
 let root: string, image: Buffer;
 const previousRoot = process.env.WUJIE_DATA_DIR;
 beforeAll(async () => {
-  const url = new URL(process.env.POSTGRES_TEST_DATABASE_URL ?? '');
-  if (!['127.0.0.1','localhost','[::1]'].includes(url.hostname)
-    || !/^\/wujie_bridge_test_[A-Za-z0-9_]+$/.test(url.pathname)
-    || ['55494','5432'].includes(url.port)) throw new Error('Explicit private localhost PG fixture required');
-  if (!previousRoot || !path.isAbsolute(previousRoot) || !path.basename(path.resolve(previousRoot)).startsWith('wujie-bridge-test-')) {
-    throw new Error('Existing private media fixture required');
-  }
-  root = await mkdtemp(path.join(previousRoot, 'document-media-batch-'));
+  requireOfflineBridgeTestDatabaseUrl(process.env);
+  const admitted = requireOfflineBridgeTestMediaRoot(previousRoot);
+  root = await mkdtemp(path.join(admitted, 'document-media-batch-'));
   process.env.WUJIE_DATA_DIR = root;
   expect(path.resolve(getServerDataRoot())).toBe(path.resolve(root));
   await mkdir(path.join(root, 'images'));

@@ -18,10 +18,8 @@ await vi.hoisted(async (): Promise<void> => {
   requireOfflineBridgeTestDatabaseUrl(process.env);
   const fs = await import('node:fs');
   const path = await import('node:path');
-  const root = process.env.WUJIE_DATA_DIR?.replaceAll('\\', '/');
-  if (!root || !/^J:\/无界本地版\/projects\/_tmp_e2e\/wujie-bridge-test-[a-z0-9-]+$/i.test(root)) {
-    throw new Error('Expected a dedicated offline bridge media root');
-  }
+  const { requireOfflineBridgeTestMediaRoot } = await import('../helpers/offline-bridge-media-guard');
+  const root = requireOfflineBridgeTestMediaRoot(process.env.WUJIE_DATA_DIR);
   process.env.WUJIE_DATA_DIR = fs.mkdtempSync(path.join(root, 'task-image-edit-source-'));
   process.env.COZE_PROJECT_ENV = 'PROD';
   process.env.LOCAL_AI_ENABLED = 'false';

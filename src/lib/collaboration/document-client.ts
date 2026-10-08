@@ -6,6 +6,7 @@ import type * as YTypes from 'yjs';
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const Y: typeof YTypes = require('yjs');
 import { CanvasDocumentMediaSync, CanvasDocumentMediaSyncError, readDocumentMediaResponse } from './document-media-sync';
+import { OwnerDocumentRequestError, readOwnerProjectStatus } from './document-owner-client';
 
 import {
   applyCanvasImagePatch, createCanvasDocument, readCanvasDocument,
@@ -350,9 +351,11 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 export function useCollaborativeCanvas(
   projectId: string | null,
   actorId: string | null,
+  ownerId: string | null = null,
 ): CollaborativeCanvas {
-  const generation = useMemo(() => ({ projectId, actorId }), [projectId, actorId]);
+  const generation = useMemo(() => ({ projectId, actorId, ownerId }), [projectId, actorId, ownerId]);
   const generationRef = useRef<typeof generation | null>(null);
+  const legacyAdmissionRef = useRef<CollaborativeCanvasState['authority']>('unknown');
   const [state, setState] = useState<CollaborativeCanvasState>(INITIAL_STATE);
   const sessionRef = useRef<CanvasDocumentSession | null>(null);
   const recoveryRef = useRef<ReturnType<CanvasDocumentSession['exportRecoveryCopy']> | null>(null);
@@ -370,6 +373,7 @@ export function useCollaborativeCanvas(
 
   useEffect(() => {
     generationRef.current = generation;
+    legacyAdmissionRef.current = 'unknown';
     let active = true;
     let connecting = false;
     let stopped = false;
@@ -377,6 +381,7 @@ export function useCollaborativeCanvas(
     let inspectAttempts = 0;
     let inspecting = false;
     let legacyAuthority = false;
+    let ownerDocumentEnabled = false;
     let retry: ReturnType<typeof setTimeout> | null = null;
     let legacyRecheck: ReturnType<typeof setTimeout> | null = null;
     let request: AbortController | null = null;
@@ -545,26 +550,52 @@ export function useCollaborativeCanvas(
       inspecting = true;
       const controller = new AbortController();
       request = controller;
+      const unavailable = (): void => {
+        legacyAuthority = false;
+        legacyAdmissionRef.current = ownerDocumentEnabled ? 'document' : 'unknown';
+        setState({ ...INITIAL_STATE, projectId, authority: ownerDocumentEnabled ? 'document' : 'unknown', status: 'unavailable' });
+      };
       try {
+        // The local owner hint only selects a server-authorized read. Editors
+        // still use the shared document directory, never the owner-only route.
+        if (ownerId === actorId) {
+          const ownerStatus = await readOwnerProjectStatus(projectId, controller.signal);
+          if (!active || controller.signal.aborted) return;
+          if (!ownerStatus.enabled) {
+            if (ownerDocumentEnabled) { unavailable(); return; }
+            legacyAuthority = true;
+            legacyAdmissionRef.current = 'legacy';
+            setState({ ...INITIAL_STATE, projectId, authority: 'legacy', status: 'disabled' });
+            return;
+          }
+          ownerDocumentEnabled = true;
+          legacyAuthority = false;
+          legacyAdmissionRef.current = 'document';
+          // Even when the global feature is off, an enabled document remains
+          // authoritative. Stop legacy writes before awaiting its geometry.
+          setState({ ...INITIAL_STATE, projectId, authority: 'document' });
+        }
         const response = await readDocumentMediaResponse(projectId, controller.signal);
         const payload = asRecord(response.payload);
         if (!active || controller.signal.aborted) return;
-        if (response.status === 409 && payload?.code === 'DOCUMENT_PROJECT_NOT_ENABLED') {
+        if (!ownerDocumentEnabled && response.status === 409 && payload?.code === 'DOCUMENT_PROJECT_NOT_ENABLED') {
           legacyAuthority = true;
+          legacyAdmissionRef.current = 'legacy';
           setState({ ...INITIAL_STATE, projectId, authority: 'legacy', status: 'disabled' });
           return;
         }
         legacyAuthority = false;
         if (response.status === 403) {
-          setState({ ...INITIAL_STATE, projectId, status: 'unavailable' });
+          unavailable();
           scheduleInspectionRetry();
           return;
         }
         if (!response.ok || payload?.success !== true || payload.projectId !== projectId) {
-          setState({ ...INITIAL_STATE, projectId, status: 'unavailable' });
+          unavailable();
           return;
         }
         const directory = mediaSync!.acceptDirectory(payload);
+        legacyAdmissionRef.current = 'document';
         const projection = directory.projection;
         const images = projection.placements;
         canvasMediaRef.current = directory.canvasImages;
@@ -587,9 +618,16 @@ export function useCollaborativeCanvas(
         setState({ projectId, authority: 'document', status: 'connecting', appliedServerSequence: -1,
           images, canvasImages: projected.images, ...metadata });
         await connect();
-      } catch {
+      } catch (error) {
         if (active && !controller.signal.aborted) {
-          setState({ ...INITIAL_STATE, projectId, status: 'unavailable' });
+          if (error instanceof OwnerDocumentRequestError && error.status === 401) {
+            stopForAccessLoss();
+            return;
+          }
+          unavailable();
+          if (error instanceof OwnerDocumentRequestError && (error.status === 403 || error.status === 0)) {
+            scheduleInspectionRetry();
+          }
         }
       } finally {
         if (request === controller) request = null;
@@ -600,7 +638,7 @@ export function useCollaborativeCanvas(
     window.addEventListener('focus', onFocus);
     void inspect();
     return stop;
-  }, [projectId, actorId, generation]);
+  }, [projectId, actorId, ownerId, generation]);
 
   const isWritable = useCallback((): boolean => {
     const session = sessionRef.current;
@@ -697,7 +735,14 @@ export function useCollaborativeCanvas(
       pendingFrames: copy.pendingFrames,
     }, null, 2);
   }, [projectId, actorId, state]);
-  return { ...state, recoveryRetryReady: state.status === 'recovery' && mediaCompleteRef.current,
+  return { ...state,
+    // Retained legacy render objects are used by async insertion/persistence
+    // guards. Revoke them synchronously; never grant legacy before a render.
+    get authority(): CollaborativeCanvasState['authority'] {
+      if (state.authority !== 'legacy') return state.authority;
+      return generationRef.current === generation ? legacyAdmissionRef.current : 'unknown';
+    },
+    recoveryRetryReady: state.status === 'recovery' && mediaCompleteRef.current,
     applyLocalChange, applyLocalGroups, applyLocalAnnotations,
     recordMediaHistory, restorePlacementHistoryMetadata, rebindPlacementHistory,
     undoLocal, redoLocal, retryRecovered, exportRecoveryCopy, disconnect, refreshMedia, waitForPendingUpdates, isWritable, isSessionActive };

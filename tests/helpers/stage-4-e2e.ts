@@ -12,7 +12,7 @@ import {
   type Stage3SourceState,
 } from './stage-3-source-state';
 import { stage3RequestFingerprint } from './stage-3-evidence-filter';
-import { stage4RuntimeEvidenceFailures } from './stage-4-evidence-filter';
+import { stage4RuntimeEvidenceFailures, summarizeStage4RuntimeFailures } from './stage-4-evidence-filter';
 
 interface Stage4EvidenceEntry {
   type?: string;
@@ -278,6 +278,9 @@ export const test = base.extend<{ stage4Evidence: Stage4Evidence }>({
         contentType: 'application/json',
       });
       const runtimeFailures = stage4RuntimeEvidenceFailures(evidence.console, evidence.network);
+      if (runtimeFailures.consoleFailures.length > 0 || runtimeFailures.networkFailures.length > 0) {
+        console.error(`STAGE4_RUNTIME_FAILURES ${JSON.stringify(summarizeStage4RuntimeFailures(runtimeFailures))}`);
+      }
       if (testInfo.status === 'passed' && artifactErrors.length > 0) {
         throw new Error(`Stage 4 evidence artifacts failed: ${artifactErrors.join('; ')}`);
       }

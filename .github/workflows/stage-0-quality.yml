@@ -150,6 +150,13 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Install CPU media tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ffmpeg
+          ffmpeg -version
+          ffprobe -version
+
       - name: Verify Stage 1 release contracts
         run: pnpm exec vitest run src/__tests__/scripts/stage-1-release-gate-contract.test.ts
 
@@ -176,6 +183,8 @@ jobs:
           pnpm check:protected-baseline -- --base "$protected_base" --candidate HEAD "${args[@]}"
 
       - name: TypeScript
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
         run: pnpm ts-check
 
       - name: ESLint
@@ -196,6 +205,8 @@ jobs:
         run: pnpm test:ci
 
       - name: Production build
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
         run: pnpm build
 
   stage-1-external-evidence:

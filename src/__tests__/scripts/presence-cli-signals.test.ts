@@ -37,10 +37,6 @@ async function reservePort(): Promise<number> {
 
 async function startCli(mode: Mode): Promise<CliRun> {
   const database = requireOfflineBridgeTestDatabaseUrl(process.env);
-  const url = new URL(database);
-  if (url.port !== '55496' || url.pathname !== '/wujie_bridge_test_batch_20261006') {
-    throw new Error('Exact current owned suite database required');
-  }
   const port = await reservePort();
   const child = spawn(process.execPath, [
     '--conditions=react-server', '--import', 'tsx', '--import',
