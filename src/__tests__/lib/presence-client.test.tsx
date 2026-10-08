@@ -46,16 +46,82 @@ const ticketResponse = (ticket = 'a'.repeat(43)): Response => ({
   json: async () => ({ success: true, ticket }),
 } as Response);
 
+const availabilityResponse = (enabled: boolean): Response => ({
+  ok: true, status: 200, json: async () => ({ success: true, enabled }),
+} as Response);
+const ticketFetch = vi.fn<() => Promise<Response>>();
+const availabilityFetch = vi.fn<() => Promise<Response>>();
+
 describe('useProjectPresence', () => {
   beforeEach(() => {
     FakeSocket.instances = [];
     vi.stubGlobal('WebSocket', FakeSocket);
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(ticketResponse()));
+    ticketFetch.mockReset().mockResolvedValue(ticketResponse());
+    availabilityFetch.mockReset().mockResolvedValue(availabilityResponse(true));
+    vi.stubGlobal('fetch', vi.fn((_url: RequestInfo | URL, init?: RequestInit): Promise<Response> => (
+      init?.method === 'POST' ? ticketFetch() : availabilityFetch()
+    )));
   });
 
   afterEach(() => {
     vi.useRealTimers();
     vi.unstubAllGlobals();
+  });
+
+  it('checks availability before requesting a ticket and makes no failing POST while disabled', async () => {
+    availabilityFetch.mockResolvedValue(availabilityResponse(false));
+    const { result } = renderHook(() => useProjectPresence('project-a'));
+    await waitFor(() => expect(availabilityFetch).toHaveBeenCalledTimes(1));
+    expect(fetch).toHaveBeenCalledWith('/api/collaboration/presence-ticket', expect.objectContaining({
+      method: 'GET', credentials: 'include', cache: 'no-store', signal: expect.any(AbortSignal),
+    }));
+    expect(result.current.status).toBe('disabled');
+    expect(ticketFetch).not.toHaveBeenCalled();
+    expect(FakeSocket.instances).toHaveLength(0);
+  });
+
+  it('a signed-out availability response stops ticket issuance and retries', async () => {
+    availabilityFetch.mockResolvedValue({ ok: false, status: 401,
+      json: async () => ({ success: false, code: 'AUTHENTICATION_REQUIRED' }) } as Response);
+    const { result } = renderHook(() => useProjectPresence('project-a'));
+    await waitFor(() => expect(result.current.status).toBe('unavailable'));
+    await new Promise(resolve => setTimeout(resolve, 700));
+    expect(availabilityFetch).toHaveBeenCalledTimes(1);
+    expect(ticketFetch).not.toHaveBeenCalled();
+  });
+
+  it('does not interpret a malformed availability body as permission to request a ticket', async () => {
+    availabilityFetch.mockResolvedValue({ ok: true, status: 200,
+      json: async () => ({ success: true, enabled: 'true' }) } as Response);
+    const { result } = renderHook(() => useProjectPresence('project-a'));
+    await waitFor(() => expect(result.current.status).toBe('unavailable'));
+    expect(ticketFetch).not.toHaveBeenCalled();
+    expect(FakeSocket.instances).toHaveLength(0);
+  });
+
+  it('rechecks disabled availability when visible again, then follows the original ticket authorization', async () => {
+    availabilityFetch.mockResolvedValueOnce(availabilityResponse(false));
+    const { result } = renderHook(() => useProjectPresence('project-a'));
+    await waitFor(() => expect(availabilityFetch).toHaveBeenCalledTimes(1));
+    expect(result.current.status).toBe('disabled');
+    act(() => document.dispatchEvent(new Event('visibilitychange')));
+    await waitFor(() => expect(FakeSocket.instances).toHaveLength(1));
+    expect(ticketFetch).toHaveBeenCalledTimes(1);
+    expect(FakeSocket.instances[0].protocols).toEqual(['wujie-presence-v1', `wujie-ticket.${'a'.repeat(43)}`]);
+  });
+
+  it('ignores an old project availability result after switching projects', async () => {
+    let resolveOld: ((response: Response) => void) | undefined;
+    availabilityFetch.mockImplementationOnce(() => new Promise<Response>(resolve => { resolveOld = resolve; }));
+    const { rerender } = renderHook(({ id }) => useProjectPresence(id), { initialProps: { id: 'project-a' } });
+    await waitFor(() => expect(availabilityFetch).toHaveBeenCalledTimes(1));
+    rerender({ id: 'project-b' });
+    await waitFor(() => expect(FakeSocket.instances).toHaveLength(1));
+    await act(async () => resolveOld?.(availabilityResponse(true)));
+    expect(ticketFetch).toHaveBeenCalledTimes(1);
+    expect(fetch).not.toHaveBeenCalledWith('/api/collaboration/presence-ticket', expect.objectContaining({
+      method: 'POST', body: JSON.stringify({ projectId: 'project-a' }),
+    }));
   });
 
   it('仅用内存票据连接同源 socket，去重用户并拒绝旧快照', async () => {
@@ -88,9 +154,10 @@ describe('useProjectPresence', () => {
 
   it('等待功能票据时不闪现在线 UI，成功取票后才进入连接中', async () => {
     let resolveTicket: ((response: Response) => void) | undefined;
-    vi.mocked(fetch).mockImplementationOnce(() => new Promise<Response>(resolve => { resolveTicket = resolve; }));
+    ticketFetch.mockImplementationOnce(() => new Promise<Response>(resolve => { resolveTicket = resolve; }));
     const { result } = renderHook(() => useProjectPresence('project-a'));
     expect(result.current.status).toBe('disabled');
+    await waitFor(() => expect(ticketFetch).toHaveBeenCalledTimes(1));
     act(() => resolveTicket?.(ticketResponse()));
     await waitFor(() => expect(result.current.status).toBe('connecting'));
   });
@@ -111,7 +178,7 @@ describe('useProjectPresence', () => {
   });
 
   it('关闭标志不伪造在线人数；服务故障显示不可用', async () => {
-    vi.mocked(fetch).mockResolvedValueOnce({ status: 503, ok: false, json: async () => ({ code: 'PRESENCE_DISABLED' }) } as Response);
+    ticketFetch.mockResolvedValueOnce({ status: 503, ok: false, json: async () => ({ code: 'PRESENCE_DISABLED' }) } as Response);
     const { result, rerender } = renderHook(({ projectId }) => useProjectPresence(projectId), {
       initialProps: { projectId: 'project-a' as string | null },
     });
@@ -122,13 +189,13 @@ describe('useProjectPresence', () => {
   });
 
   it('新项目同步尚未投影时的 403 可有界退避后重新取票', async () => {
-    vi.mocked(fetch)
+    ticketFetch
       .mockResolvedValueOnce({ status: 403, ok: false, json: async () => ({ code: 'PRESENCE_FORBIDDEN' }) } as Response)
       .mockResolvedValueOnce(ticketResponse());
     const { result } = renderHook(() => useProjectPresence('project-a'));
     await waitFor(() => expect(result.current.status).toBe('unavailable'));
     await waitFor(() => expect(FakeSocket.instances).toHaveLength(1), { timeout: 5000 });
-    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(ticketFetch).toHaveBeenCalledTimes(2);
   });
 
   it('页面隐藏期间切换项目也必须立即清除旧项目在线名单', async () => {
@@ -160,12 +227,41 @@ describe('useProjectPresence', () => {
     const first = FakeSocket.instances[0];
     act(() => first.drop());
     await waitFor(() => expect(FakeSocket.instances).toHaveLength(2), { timeout: 5000 });
-    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(ticketFetch).toHaveBeenCalledTimes(2);
     unmount();
     const count = FakeSocket.instances.length;
     act(() => FakeSocket.instances.at(-1)?.drop());
     await new Promise(resolve => setTimeout(resolve, 200));
     expect(FakeSocket.instances).toHaveLength(count);
+  });
+
+  it.each(['disabled', 'signed-out'] as const)('rechecks availability after a disconnect and stops new tickets when %s', async mode => {
+    const { result, unmount } = renderHook(() => useProjectPresence('project-a'));
+    await waitFor(() => expect(FakeSocket.instances).toHaveLength(1));
+    const first = FakeSocket.instances[0];
+    act(() => {
+      first.open();
+      first.snapshot('project-a', 'connection-a', 1, [
+        { userId: 'u1', displayName: '一号', lastSeenAt: '2026-09-24T00:00:00Z' },
+      ]);
+    });
+    expect(result.current.status).toBe('online');
+    expect(result.current.participants).toHaveLength(1);
+    availabilityFetch.mockResolvedValue(mode === 'disabled'
+      ? availabilityResponse(false) : new Response('not JSON', { status: 401 }));
+    act(() => first.drop());
+    await waitFor(() => expect(availabilityFetch).toHaveBeenCalledTimes(2), { timeout: 2000 });
+    await waitFor(() => expect(result.current.status).toBe(mode === 'disabled' ? 'disabled' : 'unavailable'));
+    expect(result.current.participants).toEqual([]);
+    expect(ticketFetch).toHaveBeenCalledTimes(1);
+    expect(FakeSocket.instances).toHaveLength(1);
+    if (mode === 'signed-out') {
+      act(() => document.dispatchEvent(new Event('visibilitychange')));
+      await new Promise(resolve => setTimeout(resolve, 700));
+      expect(availabilityFetch).toHaveBeenCalledTimes(2);
+      expect(ticketFetch).toHaveBeenCalledTimes(1);
+    }
+    unmount();
   });
 
   it('可见页面心跳超时后重新取票，权限拒绝仍停止重连', async () => {
@@ -211,7 +307,7 @@ describe('useProjectPresence', () => {
     Object.defineProperty(document, 'hidden', { configurable: true, value: false });
     act(() => document.dispatchEvent(new Event('visibilitychange')));
     await waitFor(() => expect(FakeSocket.instances).toHaveLength(2));
-    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(ticketFetch).toHaveBeenCalledTimes(2);
     const second = FakeSocket.instances[1];
     act(() => window.dispatchEvent(new StorageEvent('storage', {
       key: 'unbounded_ai_current_user', newValue: null,

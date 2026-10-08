@@ -24,6 +24,16 @@ function response(data: Record<string, unknown>, status: number): NextResponse {
   return result;
 }
 
+/** Availability is a read, never a room grant or a ticket issuance. */
+export async function GET(request: NextRequest): Promise<NextResponse> {
+  const user = await getSessionUser(request);
+  if (!user) return response({ success: false, code: 'AUTHENTICATION_REQUIRED' }, 401);
+  if (request.nextUrl.search) {
+    return response({ success: false, code: 'PRESENCE_REQUEST_INVALID' }, 400);
+  }
+  return response({ success: true, enabled: process.env.WUJIE_PRESENCE_ENABLED === 'true' }, 200);
+}
+
 export async function POST(request: NextRequest): Promise<NextResponse> {
   if (process.env.WUJIE_PRESENCE_ENABLED !== 'true') {
     return response({ success: false, code: 'PRESENCE_DISABLED' }, 503);
