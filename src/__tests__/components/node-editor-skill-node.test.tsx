@@ -784,7 +784,7 @@ describe('NodeEditor workflow Skill node', () => {
     fireEvent.mouseUp(screen.getByLabelText(node.label), { button: 0 });
 
     const skillSelect = await screen.findByRole('combobox', { name: 'Skill' });
-    expect(within(skillSelect).getByRole('option', { name: '广告 A/B 变体' })).toBeTruthy();
+    expect(await within(skillSelect).findByRole('option', { name: '广告 A/B 变体' })).toBeTruthy();
     expect(within(skillSelect).getByRole('option', { name: '再营销素材' })).toBeTruthy();
     expect(within(skillSelect).getByRole('option', { name: '全渠道活动素材包' })).toBeTruthy();
     fireEvent.change(skillSelect, { target: { value: 'preset-omnichannel-campaign' } });
@@ -809,7 +809,7 @@ describe('NodeEditor workflow Skill node', () => {
     fireEvent.mouseUp(screen.getByLabelText(node.label), { button: 0 });
 
     const skillSelect = await screen.findByRole('combobox', { name: 'Skill' });
-    expect(within(skillSelect).getByRole('option', { name: 'YouTube/B站缩略图' })).toBeTruthy();
+    expect(await within(skillSelect).findByRole('option', { name: 'YouTube/B站缩略图' })).toBeTruthy();
     expect(within(skillSelect).getByRole('option', { name: 'Pinterest 图钉' })).toBeTruthy();
     expect(within(skillSelect).getByRole('option', { name: '批量 SKU 商品素材' })).toBeTruthy();
     fireEvent.change(skillSelect, { target: { value: 'preset-batch-sku-assets' } });
@@ -851,6 +851,7 @@ describe('NodeEditor workflow Skill node', () => {
     fireEvent.mouseDown(screen.getByLabelText(skillNode.label), { button: 0 });
     fireEvent.mouseUp(screen.getByLabelText(skillNode.label), { button: 0 });
     const skillSelect = await screen.findByRole('combobox', { name: 'Skill' });
+    await within(skillSelect).findByRole('option', { name: boundSkill.name });
     fireEvent.change(skillSelect, { target: { value: boundSkill.id } });
 
     expect(await screen.findByText('已选择 1 张来源图片')).toBeTruthy();

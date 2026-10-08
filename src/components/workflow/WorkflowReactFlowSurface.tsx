@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 import {
   Background,
   BaseEdge,
@@ -10,6 +10,7 @@ import {
   type Connection,
   type Edge,
   type EdgeProps,
+  type NodeMouseHandler,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 
@@ -297,7 +298,16 @@ export function WorkflowReactFlowSurface({
   const dragInitialPositionsRef = useRef<WorkflowNodePosition[]>([]);
   const dragActiveRef = useRef(false);
   const commandHandlers = createReactFlowCommandHandlers(model, onCommand, onViewportChange);
-  const nextTransactionId = (prefix: string): string => `${prefix}:${++transactionCounterRef.current}`;
+  const nextTransactionId = useCallback((prefix: string): string => `${prefix}:${++transactionCounterRef.current}`, []);
+  // A fresh onNodeClick invalidates every mounted React Flow node wrapper on
+  // each local position update, even when the domain model has not changed.
+  const handleNodeClick = useCallback<NodeMouseHandler<WorkflowFlowNode>>((event, node): void => {
+    onCommand({
+      type: 'selection.set',
+      nodeIds: resolveReactFlowSelection(model, node.id, event.ctrlKey || event.metaKey),
+      transactionId: nextTransactionId(`react-flow-select:${node.id}`),
+    });
+  }, [model, onCommand, nextTransactionId]);
   const presentation = useMemo<Partial<WorkflowReactFlowPresentation>>(() => ({
     onCommand,
     theme,
@@ -358,13 +368,7 @@ export function WorkflowReactFlowSurface({
         nodesDraggable={!readOnly}
         nodesConnectable={!readOnly}
         elementsSelectable={!readOnly}
-        onNodeClick={readOnly ? undefined : (event, node) => {
-          onCommand({
-            type: 'selection.set',
-            nodeIds: resolveReactFlowSelection(model, node.id, event.ctrlKey || event.metaKey),
-            transactionId: nextTransactionId(`react-flow-select:${node.id}`),
-          });
-        }}
+        onNodeClick={readOnly ? undefined : handleNodeClick}
         onPaneClick={readOnly ? undefined : () => {
           onCommand({
             type: 'selection.set',

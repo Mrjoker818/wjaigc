@@ -264,10 +264,48 @@ test('executes ordinary chat, vision stop, agent cancel, and refresh recovery', 
   })));
   await openStage4CanvasProject(page, String(fixture.canvasProject.id));
   const runStorageKey = `wujie_agent_run:${fixture.canvasProject.id}:${asset.selectedEntityId}`;
+  let agentSelectionSequence = 0;
   const openAgentEditor = async () => {
+    const selectionSequence = ++agentSelectionSequence;
     const canvasImage = page.locator(`[data-canvas-image-id="${asset.selectedEntityId}"]`);
     await expect(canvasImage).toBeVisible({ timeout: 20_000 });
+    if (testInfo.project.name === 'webkit') {
+      const beforeClick = await canvasImage.evaluate(element => {
+        const bounds = element.getBoundingClientRect();
+        const x = bounds.left + bounds.width / 2;
+        const y = bounds.top + bounds.height / 2;
+        const hit = document.elementFromPoint(x, y);
+        const overlay = hit?.closest('[data-popup], [data-toolbar], [data-floating-panel]');
+        return {
+          bounds: { x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height },
+          clickPoint: { x, y },
+          hitTag: hit?.tagName ?? null,
+          hitImageId: hit?.closest<HTMLElement>('[data-canvas-image-id]')?.dataset.canvasImageId ?? null,
+          hitOverlay: overlay ? {
+            popup: overlay.getAttribute('data-popup'),
+            toolbar: overlay.getAttribute('data-toolbar'),
+            floatingPanel: overlay.getAttribute('data-floating-panel'),
+          } : null,
+          selected: element.getAttribute('data-canvas-selected'),
+        };
+      });
+      await writeStage4Metrics(stage4Evidence, testInfo, `agent-before-selection-${selectionSequence}`, beforeClick);
+      console.info(`STAGE4_AGENT_SELECTION ${JSON.stringify({ phase: 'before', selectionSequence, ...beforeClick })}`);
+    }
     await canvasImage.click({ force: true });
+    if (testInfo.project.name === 'webkit') {
+      const afterClick = await canvasImage.evaluate(element => ({
+        selected: element.getAttribute('data-canvas-selected'),
+        selectedImageIds: Array.from(document.querySelectorAll<HTMLElement>('[data-canvas-selected="true"]'))
+          .map(image => image.dataset.canvasImageId),
+        toolbarMounted: document.querySelector('[data-toolbar="image-action-toolbar"]') !== null,
+        visibleDialogNames: Array.from(document.querySelectorAll<HTMLElement>('[role="dialog"]'))
+          .filter(dialog => dialog.getBoundingClientRect().width > 0)
+          .map(dialog => dialog.getAttribute('aria-label')),
+      }));
+      await writeStage4Metrics(stage4Evidence, testInfo, `agent-after-selection-${selectionSequence}`, afterClick);
+      console.info(`STAGE4_AGENT_SELECTION ${JSON.stringify({ phase: 'after', selectionSequence, ...afterClick })}`);
+    }
     if ((page.viewportSize()?.width ?? 1280) < 768) {
       const mobileActions = page.locator('[data-mobile-image-actions]');
       await expect(mobileActions).toBeVisible({ timeout: 10_000 });
