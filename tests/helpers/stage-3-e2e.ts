@@ -3,6 +3,7 @@ import { join } from 'node:path';
 
 import { expect, test as base, type Locator, type Page, type TestInfo } from '@playwright/test';
 import { stage3SourceIdentity } from './stage-3-source-state';
+import { stage3RuntimeFailureMessage } from './stage-3-runtime-failure-summary';
 import {
   isBenignStage3RequestAbort,
   isRecoveredStage3RequestAbort,
@@ -172,6 +173,9 @@ export const test = base.extend<{ stage3Evidence: Stage3Evidence }>({
           && !isBenignStage3RequestAbort(entry)
           && !isRecoveredStage3RequestAbort(entry, evidence.network))
       ));
+      if (consoleErrors.length > 0 || networkErrors.length > 0) {
+        console.error(stage3RuntimeFailureMessage(consoleErrors, networkErrors));
+      }
       if (
         testInfo.status === 'passed'
         && (artifactErrors.length > 0 || consoleErrors.length > 0 || networkErrors.length > 0)

@@ -230,7 +230,7 @@ describe('CanvasPersistenceScheduler', () => {
     const writer = vi.fn(async (
       _snapshot: CanvasPreparedPersistenceSnapshot,
       _reason: string,
-    ): Promise<void> => undefined);
+    ): Promise<void> => { void _snapshot; void _reason; });
     const scheduler = new CanvasPersistenceScheduler({ writer });
     const original = snapshot(1);
 
@@ -250,7 +250,7 @@ describe('CanvasPersistenceScheduler', () => {
     const writer = vi.fn(async (
       _snapshot: CanvasPreparedPersistenceSnapshot,
       _reason: string,
-    ): Promise<void> => undefined);
+    ): Promise<void> => { void _snapshot; void _reason; });
     const scheduler = new CanvasPersistenceScheduler({ writer });
     const unchanged = snapshot(1);
 
@@ -278,13 +278,55 @@ describe('CanvasPersistenceScheduler', () => {
     expect(scheduler.hasPendingSnapshot('project-a')).toBe(false);
   });
 
+  it('retains unload recovery when idle history cycles back to an older server-flushed signature', async () => {
+    let authoritativeWidth = 0;
+    const backgroundWrites: Array<() => void> = [];
+    const scheduler = new CanvasPersistenceScheduler({
+      writer: (prepared, reason): void => {
+        const width = prepared.images[0].width;
+        if (reason === 'immediate') authoritativeWidth = width;
+        else backgroundWrites.push((): void => { authoritativeWidth = width; });
+      },
+      deferWork: async (): Promise<void> => undefined,
+    });
+    const resized = snapshot(1, { images: [{ ...snapshot(1).images[0], width: 160, height: 160 }] });
+    const moved = snapshot(2, { images: [{ ...snapshot(2).images[0], width: 96, height: 96 }] });
+    scheduler.schedule(resized);
+    await scheduler.flush('immediate');
+    scheduler.schedule(moved);
+    await scheduler.flush('idle');
+    backgroundWrites.shift()?.();
+    scheduler.schedule({ ...resized, revision: 3 });
+    await scheduler.flush('idle');
+
+    expect(authoritativeWidth).toBe(96);
+    expect(scheduler.hasPendingSnapshot('project-a')).toBe(true);
+    const values = new Map<string, string>();
+    const storage = {
+      getItem: (key: string): string | null => values.get(key) ?? null,
+      setItem: (key: string, value: string): void => { values.set(key, value); },
+      removeItem: (key: string): void => { values.delete(key); },
+    };
+    if (scheduler.hasPendingSnapshot('project-a')) {
+      persistPreparedCanvasUnloadSnapshot(scheduler.preparePendingSnapshotForUnload('project-a', 9)!, {
+        storage, sendBeacon: (): boolean => false,
+      });
+    }
+    const recovered = consumePreparedCanvasUnloadSnapshot('project-a', 9, storage, 'user-a');
+    expect(recovered?.images[0].width).toBe(160);
+    scheduler.schedule({ ...resized, revision: 3 });
+    await scheduler.flush('immediate');
+    expect(authoritativeWidth).toBe(160);
+    expect(scheduler.hasPendingSnapshot('project-a')).toBe(false);
+  });
+
   it('upgrades an in-flight idle write when an equivalent immediate snapshot is queued', async () => {
     let releaseIdle!: () => void;
     const idleWrite = new Promise<void>((resolve) => { releaseIdle = resolve; });
     const writer = vi.fn(async (
       _snapshot: CanvasPreparedPersistenceSnapshot,
       _reason: string,
-    ): Promise<void> => undefined)
+    ): Promise<void> => { void _snapshot; void _reason; })
       .mockImplementationOnce(() => idleWrite)
       .mockResolvedValue(undefined);
     const scheduler = new CanvasPersistenceScheduler({
