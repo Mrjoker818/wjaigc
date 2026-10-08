@@ -23,6 +23,7 @@ import {
   shouldEnforceWorkflowFpsGate,
 } from '../helpers/workflow-performance';
 import { dragPointerAcrossFrames } from '../helpers/canvas-performance';
+import { finalizeStage4SelectionDiagnostic } from '../helpers/stage-4-selection-diagnostics';
 
 test.describe.configure({ mode: 'serial', timeout: 120_000 });
 test.use({ trace: 'off', video: 'on' });
@@ -286,13 +287,91 @@ test('executes ordinary chat, vision stop, agent cancel, and refresh recovery', 
             toolbar: overlay.getAttribute('data-toolbar'),
             floatingPanel: overlay.getAttribute('data-floating-panel'),
           } : null,
+          hitBlockedByOverlay: Boolean(hit?.closest('[data-floating-panel], [data-popup], [data-modal], [data-toolbar], [data-compare-dialog], [role="dialog"], [role="tabpanel"]')),
+          historyPending: element.closest('[data-canvas-history-pending]')?.getAttribute('data-canvas-history-pending') ?? null,
           selected: element.getAttribute('data-canvas-selected'),
         };
       });
       await writeStage4Metrics(stage4Evidence, testInfo, `agent-before-selection-${selectionSequence}`, beforeClick);
       console.info(`STAGE4_AGENT_SELECTION ${JSON.stringify({ phase: 'before', selectionSequence, ...beforeClick })}`);
     }
-    await canvasImage.click({ force: true });
+    // Observe native delivery, not just a pre-click elementFromPoint sample.
+    // Keep the original action and assertion gates unchanged while diagnosing
+    // Linux/WebKit's unselected image. No URLs, content, or credentials enter
+    // this bounded, test-only recorder.
+    const selectionRecorder = testInfo.project.name === 'webkit'
+      ? await page.evaluateHandle(imageId => {
+        const entries: Array<Record<string, unknown>> = [];
+        const eventTypes = ['pointerdown', 'pointerup', 'pointercancel', 'gotpointercapture', 'lostpointercapture', 'mousedown', 'mouseup', 'click'];
+        const overlaySelector = '[data-floating-panel], [data-popup], [data-modal], [data-toolbar], [data-compare-dialog], [role="dialog"], [role="tabpanel"]';
+        let stopped = false;
+        let droppedCount = 0;
+        const snapshot = (event: Event, phase: 'capture' | 'capture-microtask'): void => {
+          if (stopped) return;
+          if (entries.length >= 32) { droppedCount += 1; return; }
+          const sample = event instanceof MouseEvent ? event : null;
+          const pointer = event instanceof PointerEvent ? event : null;
+          const target = event.target instanceof Element ? event.target : null;
+          const hit = sample ? document.elementFromPoint(sample.clientX, sample.clientY) : null;
+          const image = document.querySelector<HTMLElement>(`[data-canvas-image-id="${CSS.escape(imageId)}"]`);
+          const bounds = image?.getBoundingClientRect();
+          entries.push({
+            type: event.type, phase, timestamp: performance.now(), trusted: event.isTrusted,
+            point: sample ? { x: sample.clientX, y: sample.clientY } : null,
+            button: sample?.button ?? null, pointerId: pointer?.pointerId ?? null,
+            pointerType: pointer?.pointerType ?? null,
+            targetTag: target?.tagName ?? null,
+            targetImageId: target?.closest<HTMLElement>('[data-canvas-image-id]')?.dataset.canvasImageId ?? null,
+            hitImageId: hit?.closest<HTMLElement>('[data-canvas-image-id]')?.dataset.canvasImageId ?? null,
+            targetBlockedByOverlay: Boolean(target?.closest(overlaySelector)),
+            historyPending: image?.closest('[data-canvas-history-pending]')?.getAttribute('data-canvas-history-pending') ?? null,
+            selected: image?.getAttribute('data-canvas-selected') ?? null,
+            toolbarMounted: document.querySelector('[data-toolbar="image-action-toolbar"]') !== null,
+            bounds: bounds ? { x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height } : null,
+          });
+        };
+        const capture = (event: Event): void => {
+          snapshot(event, 'capture');
+          // A browser may run a microtask checkpoint between event listeners;
+          // this phase does not promise that React's bubbling handler ran.
+          queueMicrotask(() => snapshot(event, 'capture-microtask'));
+        };
+        eventTypes.forEach(type => document.addEventListener(type, capture, true));
+        return {
+          finish: (): { entries: Array<Record<string, unknown>>; droppedCount: number } => {
+            stopped = true;
+            eventTypes.forEach(type => document.removeEventListener(type, capture, true));
+            return { entries, droppedCount };
+          },
+        };
+      }, asset.selectedEntityId).catch(() => {
+        console.info(`STAGE4_AGENT_SELECTION_DIAGNOSTIC_FAILED ${JSON.stringify({ selectionSequence, phase: 'install' })}`);
+        return null;
+      })
+      : null;
+    try {
+      await canvasImage.click({ force: true });
+    } finally {
+      if (selectionRecorder) {
+        const failures = await finalizeStage4SelectionDiagnostic({
+          collect: async (): Promise<void> => {
+            const timeline = await selectionRecorder.evaluate(recorder => recorder.finish());
+            console.info(`STAGE4_AGENT_SELECTION_EVENTS ${JSON.stringify({ selectionSequence, ...timeline })}`);
+            await writeStage4Metrics(stage4Evidence, testInfo, `agent-selection-events-${selectionSequence}`, timeline);
+          },
+          dispose: async (): Promise<void> => {
+            try {
+              await selectionRecorder.evaluate(recorder => { recorder.finish(); });
+            } finally {
+              await selectionRecorder.dispose();
+            }
+          },
+        });
+        for (const phase of failures) {
+          console.info(`STAGE4_AGENT_SELECTION_DIAGNOSTIC_FAILED ${JSON.stringify({ selectionSequence, phase })}`);
+        }
+      }
+    }
     if (testInfo.project.name === 'webkit') {
       const afterClick = await canvasImage.evaluate(element => ({
         selected: element.getAttribute('data-canvas-selected'),
