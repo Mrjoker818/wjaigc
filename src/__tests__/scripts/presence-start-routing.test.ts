@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
+import { resolvePresenceLaunch } from '../../../scripts/presence-server';
 
 const tempDirs: string[] = [];
 const presenceEntry = 'scripts/presence-server.ts';
@@ -54,6 +55,7 @@ function createStartupFixture(): string {
   mkdirSync(join(directory, 'node_modules', '.bin'), { recursive: true });
   writeFileSync(join(directory, '.next', 'BUILD_ID'), 'test-build-id');
   writeFileSync(join(directory, 'fake-bin', 'node'), `#!/usr/bin/env bash
+printf 'PRESENCE_NODE_ENV=%s\\n' "$NODE_ENV"
 printf 'PRESENCE_CALLED\n'
 printf '%s\\n' "$@"
 `);
@@ -73,6 +75,35 @@ afterEach(() => {
 });
 
 describe('Coze presence startup routing', () => {
+  it.each([undefined, 'development', 'production'] as const)('uses the sealed production build when inherited NODE_ENV=%s', (nodeEnv) => {
+    const directory = createStartupFixture();
+    const environment = {
+      ...process.env,
+      WUJIE_PRESENCE_ENABLED: 'true',
+      WUJIE_YJS_ENABLED: 'true',
+    };
+    if (nodeEnv === undefined) Reflect.deleteProperty(environment, 'NODE_ENV');
+    else environment.NODE_ENV = nodeEnv;
+    const stdout = execFileSync(shellPath(), [
+      '-c', `PATH="$PWD/fake-bin:$PATH" exec bash "${resolve(process.cwd(), 'scripts/coze-start.sh').replaceAll('\\', '/')}"`,
+    ], {
+      cwd: directory,
+      env: environment,
+      encoding: 'utf8',
+      timeout: 10_000,
+      windowsHide: true,
+    });
+    const launchedNodeEnv = stdout.match(/^PRESENCE_NODE_ENV=(.*)$/m)?.[1];
+    const nodeArguments = stdout.split('PRESENCE_CALLED\n')[1].trim().split(/\r?\n/);
+    expect(resolvePresenceLaunch(nodeArguments.slice(nodeArguments.indexOf(presenceEntry) + 1), {
+      NODE_ENV: launchedNodeEnv,
+      WUJIE_PRESENCE_ENABLED: 'true',
+      WUJIE_YJS_ENABLED: 'true',
+    })).toEqual({ enabled: true, dev: false });
+    expect(launchedNodeEnv).toBe('production');
+    expectNextRuntimeReady(nodeArguments);
+  });
+
   it.each([
     [undefined, undefined, 'NEXT_CALLED'],
     ['false', 'false', 'NEXT_CALLED'],
