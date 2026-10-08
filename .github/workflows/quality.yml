@@ -222,7 +222,10 @@ jobs:
           echo "E2E_TEST_USERNAME=$(jq -r .E2E_TEST_USERNAME "$E2E_STAGE3_ENV_OUTPUT")" >> "$GITHUB_ENV"
           echo "E2E_STAGE3_PROJECT_IDS=$(jq -r .E2E_STAGE3_PROJECT_IDS "$E2E_STAGE3_ENV_OUTPUT")" >> "$GITHUB_ENV"
       - name: Run five-browser Canvas matrix
-        run: pnpm test:e2e:stage-3
+        run: >-
+          pnpm test:e2e:stage-3
+          --project=chromium --project=chromium-1080p
+          --project=firefox --project=webkit --project=mobile-chromium
       - name: Upload Stage 3 browser evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -307,7 +310,10 @@ jobs:
           cat /tmp/wujie-stage4-server.log
           exit 1
       - name: Run five-browser Stage 4 workspace matrix
-        run: pnpm test:e2e:stage-4
+        run: >-
+          pnpm test:e2e:stage-4
+          --project=chromium --project=chromium-1080p
+          --project=firefox --project=webkit --project=mobile-chromium
       - name: Upload Stage 4 browser evidence
         if: always()
         uses: actions/upload-artifact@v4
