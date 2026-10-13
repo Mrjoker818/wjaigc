@@ -27,7 +27,7 @@ export type NodeType =
   | 'ai-generate' | 'ai-edit' | 'ai-annotation-edit' | 'ai-retouch' | 'ai-upscale' | 'ai-removebg' | 'ai-vectorize' | 'ai-style-transfer' | 'ai-color-adjust' | 'ai-analyze'
   | 'ai-font-design' | 'ai-refine-engine' | 'ai-human-repair' | 'ai-brand-ecommerce' | 'ai-segment' | 'ai-multi-angle' | 'ai-3d-model' | 'ai-panorama'
   | 'ai-video-generate' | 'ai-video-i2v'
-  | 'ai-llm' | 'ai-audio' | 'ai-skill'
+  | 'ai-llm' | 'ai-audio' | 'ai-skill' | 'ai-sketch-to-code'
   | 'video-speed-change' | 'video-filter' | 'video-concat' | 'video-trim'
   | 'video-extract-frames' | 'video-compose'
   | 'manual-color-adjust'
@@ -187,6 +187,7 @@ export const NODE_TYPE_LABELS: Record<NodeType, string> = {
   'manual-color-adjust': '参数调色',
   'ai-llm': 'AI文案',
   'ai-skill': 'Skill 执行',
+  'ai-sketch-to-code': '草图转代码',
 };
 
 /** 节点类型 → 图标名 */
@@ -242,12 +243,29 @@ export const NODE_TYPE_ICONS: Record<NodeType, string> = {
   'ai-panorama': 'Globe',
   'manual-color-adjust': 'Palette',
   'ai-llm': 'Brain',
+  'ai-sketch-to-code': 'Pencil',
   'ai-skill': 'Blocks',
 };
 
 // ==================== 端口类型 ====================
 
-export type PortType = 'image' | 'mask' | 'prompt' | 'condition' | 'any' | 'data' | 'video' | 'audio' | 'frames' | 'text';
+export type PortType = 'image' | 'mask' | 'prompt' | 'condition' | 'any' | 'data' | 'video' | 'audio' | 'frames' | 'text' | 'document-reference';
+
+/** A task/version binding, never HTML or a download URL. Browser reads must reauthorize it. */
+export interface WorkflowSketchDocumentReference {
+  kind: 'document-reference'; taskId: string; projectId: string; providerId: string; modelId: string;
+  previewAssetId: string; htmlAssetId: string; previewAssetVersionId: string; htmlAssetVersionId: string;
+}
+export function parseWorkflowSketchDocumentReference(value: unknown): WorkflowSketchDocumentReference | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  const keys = ['taskId', 'projectId', 'providerId', 'modelId', 'previewAssetId', 'htmlAssetId', 'previewAssetVersionId', 'htmlAssetVersionId'] as const;
+  if (record.kind !== 'document-reference' || keys.some(key => typeof record[key] !== 'string'
+    || !/^[A-Za-z0-9._:-]{1,200}$/.test(record[key] as string))) return null;
+  const reference = { kind: 'document-reference' } as WorkflowSketchDocumentReference;
+  for (const key of keys) reference[key] = record[key] as string;
+  return reference;
+}
 
 export const PORT_COLORS: Record<PortType, string> = {
   image: '#3b82f6',
@@ -260,6 +278,7 @@ export const PORT_COLORS: Record<PortType, string> = {
   audio: '#10b981',
   frames: '#06b6d4',
   text: '#60a5fa',
+  'document-reference': '#22d3ee',
 };
 
 /** 端口类型兼容矩阵：哪些输出类型可以连到哪些输入类型 */
@@ -274,6 +293,7 @@ export const PORT_COMPATIBILITY: Record<PortType, PortType[]> = {
   audio: ['audio', 'any'],
   frames: ['frames', 'any', 'image'],
   text: ['text', 'prompt', 'any'],
+  'document-reference': ['document-reference'],
 };
 
 /** 检查两个端口是否可以连线 */
@@ -409,6 +429,7 @@ export const NODE_TEMPLATES: { type: NodeType; category: NodeCategory; label: st
   { type: 'input-video', category: 'input', label: '视频输入', desc: '上传视频或输入视频URL' },
   { type: 'audio-input', category: 'input', label: '音频输入', desc: '上传音频文件或引用AI生成配音' },
   { type: 'ai-llm', category: 'ai', label: 'AI文案策划', desc: 'LLM文本生成/文案策划/提示词优化' },
+  { type: 'ai-sketch-to-code', category: 'ai', label: '草图转代码', desc: '使用明确视觉模型分析草图，交付安全代码与原草图 PNG' },
   { type: 'ai-skill', category: 'ai', label: 'Skill 执行', desc: '运行画布与节点模式共享的 Skill' },
   { type: 'ai-generate', category: 'ai', label: '图像生成', desc: 'AI生成新图片' },
   { type: 'ai-edit', category: 'ai', label: '图像编辑', desc: '修图/擦除/扩展' },
@@ -534,6 +555,9 @@ function createDefaultPorts(type: NodeType): NodePort[] {
         ports.push({ id: 'in-audio', label: '音频', type: 'audio', direction: 'in' });
       } else {
         ports.push({ id: 'in-image', label: '图片', type: 'image', direction: 'in' });
+        if (type === 'output-export') {
+          ports.push({ id: 'in-document', label: '安全代码', type: 'document-reference', direction: 'in' });
+        }
         if (type === 'output-image-group') {
           ports.push({ id: 'in-image-2', label: '图片2', type: 'image', direction: 'in' });
           ports.push({ id: 'in-image-3', label: '图片3', type: 'image', direction: 'in' });
@@ -565,7 +589,10 @@ function createDefaultPorts(type: NodeType): NodePort[] {
       ports.push({ id: 'out-task', label: '任务', type: 'data', direction: 'out' });
     } else if (type.startsWith('ai-')) {
       // 视频节点输出video端口
-      if (type === 'ai-video-generate' || type === 'ai-video-i2v') {
+      if (type === 'ai-sketch-to-code') {
+        ports.push({ id: 'out-image', label: '原草图 PNG', type: 'image', direction: 'out' });
+        ports.push({ id: 'out-document', label: '安全代码', type: 'document-reference', direction: 'out' });
+      } else if (type === 'ai-video-generate' || type === 'ai-video-i2v') {
         ports.push({ id: 'out-video', label: '视频', type: 'video', direction: 'out' });
       } else if (type === 'ai-llm') {
         ports.push({ id: 'out-text', label: '文案', type: 'prompt', direction: 'out' });
@@ -750,6 +777,12 @@ export function getNodePropertyFields(type: NodeType): PropertyField[] {
 
   // 通用: 标签
   fields.push({ key: 'label', label: '名称', type: 'text', defaultValue: NODE_TYPE_LABELS[type] });
+
+  if (type === 'ai-sketch-to-code') {
+    fields.push({ key: 'model', label: '视觉模型', type: 'model-select', modelFilter: 'chat' });
+    fields.push({ key: 'instruction', label: '草图说明', type: 'textarea', placeholder: '描述要还原的页面布局' });
+    return fields;
+  }
 
   // ─── 输入节点 ───
   if (type === 'input-image') {
@@ -1697,6 +1730,11 @@ export function getNodeInputs(
     if (hasActiveControlPort(upstreamResult, conn.fromPortId) === false) continue;
 
     const upstreamOutput = upstreamResult.output;
+    if (conn.type === 'document-reference') {
+      const reference = parseWorkflowSketchDocumentReference(upstreamOutput.documentReference);
+      if (reference) inputs.documentReference = reference;
+      continue;
+    }
     if (!inputs.result && Object.keys(upstreamOutput).length > 0) inputs.result = upstreamOutput;
 
     // P0: 记录上游节点的imageUrl到映射
@@ -1973,8 +2011,31 @@ export function buildWorkflowSkillRunRequest(
 
 export function buildNodeExecutionRequest(
   node: WorkflowNode,
-  inputs: Record<string, unknown>
+  inputs: Record<string, unknown>,
+  sketchContext?: { projectId: string; idempotencyKey: string },
 ): { endpoint: string; method: string; body: Record<string, unknown> } | null {
+  // Only the dedicated server adapter supplies execution scope and the frozen nonce.
+  // Keep generic config merging, provider inference and tracking fields out of this protocol.
+  if (node.type === 'ai-sketch-to-code') {
+    if (!sketchContext?.projectId || !sketchContext.idempotencyKey) {
+      throw new Error('WORKFLOW_SKETCH_SCOPE_REQUIRED');
+    }
+    const configured = getConfigString(node.config, 'model');
+    const separator = configured.indexOf('::');
+    const compositeProvider = separator < 0 ? '' : configured.slice(0, separator);
+    const declaredProvider = getConfigString(node.config, 'providerId');
+    const providerId = compositeProvider || declaredProvider;
+    const modelId = separator < 0 ? configured : configured.slice(separator + 2);
+    if (!providerId || !modelId || (compositeProvider && declaredProvider && compositeProvider !== declaredProvider)) {
+      throw new Error('WORKFLOW_SKETCH_MODEL_REQUIRED');
+    }
+    return { endpoint: '/api/sketch-to-code', method: 'POST', body: {
+      projectId: sketchContext.projectId,
+      imageDataUrl: getConfigString(inputs, 'imageDataUrl', getConfigString(inputs, 'imageUrl', getConfigString(inputs, 'image'))),
+      instruction: getConfigString(inputs, 'prompt', getConfigString(node.config, 'instruction')),
+      providerId, modelId, idempotencyKey: sketchContext.idempotencyKey,
+    } };
+  }
   const config = { ...node.config, ...inputs };
   const connectedVersionId = typeof inputs.assetVersionId === 'string' ? inputs.assetVersionId.trim() : '';
   const connectedPlacementId = typeof inputs.placementId === 'string' ? inputs.placementId.trim() : '';

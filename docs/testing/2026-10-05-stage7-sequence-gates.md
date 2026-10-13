@@ -1,5 +1,21 @@
 # 整体第七项执行顺序与前置门禁纠正
 
+## 2026-10-09 15:24 当前接续：第七项延期，进入整体第八项
+
+依据用户最新明确要求，第七项在当前 Coze WS 外部条件仍未恢复时暂时跳过，状态 **DEFERRED / 未验收**；保留其全部剩余业务、安全、生产/云端验收与失败证据，不记通过，不再重复同一方案。当前接续为整体第八项手绘草图转代码，再做排除延期协作项的其余平台回归；不把内部 8C/8D/8E/Task9 当作整体第八项，也不把其余回归冒充全部发布通过。完整决定见 `docs/superpowers/specs/2026-09-27-upgrade-goal-scope-decisions.md` 的15:24段。
+
+本地本轮发现并修补了首次项目加载/新建竞态；连续点击和失败后恢复也先RED再GREEN，相关16文件121项通过，完整非增量类型检查原生0、限定独审无Critical/Important。原生产浏览器仍保留1FAIL；修后开发浏览器被首次接口编译7.7秒触发原5秒断言超时，未放宽原断言/超时，未取得修后生产或Coze通过证据。修前12415 COMPOSED覆盖及同树构建保持历史，不自动迁移到修后源码。
+
+下方所有“当前/冻结后继/第7前置”的排队要求按历史保留，不再优先于本段用户决定。整体1–6与已闭分享冻结，Pear取消/PSD保留，main-only/stable只读，目标工具active。
+
+## 2026-10-09 当前执行口径：本地测试，Coze WS 任务不重复派发
+
+依据用户最新决定，GitHub 仅作同步和拉取；旧 Actions 账户付款/支出上限/制品配额不再阻塞本地测试，不重试或等待 Actions。执行位置改变不等于验收标准取消：完整回归、独立 MPE、隔离 PostgreSQL、类型/代码/依赖/保护检查、当前源码构建/严格 NFT 和仍开放的原浏览器矩阵均在本地取得绑定版本的证据。旧版本或局部证据不自动迁移到当前完整门禁，已闭且未受影响的切片不重跑。
+
+2026-10-09 02:05Z已收到用户提供的Coze只读诊断报告，报告称未改文件/环境/配置，短tree和构建值与当前main前缀相符；主控仅独立核对本地代码及既有证据，未取得新云端运行结果。配置匹配不等于实际请求头经过平台代理仍被保留；报告缺少本次必需头入站、有效票据握手和选中子协议、presence/Yjs业务成功证据，因此不接受“WS已恢复/平台无需支持”的结论。工作状态awaiting_ws_acceptance、goal工具实际active，第7仍OPEN。不再标为任务执行中，不重发相同任务或登记为verified wait。下一到正确独立Edge、已有授权项目/身份验证真实协议协商和在线/同步，再验原多身份/撤权/重连/双实例/重启门禁；浏览器URL校验受限时不旁路。保留Origin、短期票据及双子协议；不验右侧iframe，不以本地PASS、静态报告或代理外侧101代替真实云端链路。
+
+完整决定见 `docs/superpowers/specs/2026-09-27-upgrade-goal-scope-decisions.md` 的 2026-10-09 段落。第 7 项仍 OPEN，整体 1–6/已闭分享冻结，第 8 项未启动，Pear 已取消且 PSD 核心保留。以下旧“最新/当前”和 GitHub 账户恢复前置仅属于历史时点，不能优先于本段。
+
 最新集中收口（1210–1213）：1211受控延迟真实末次projection，原两retry业务断言结束后各仍有一条completion未结算，完整九案2FAIL/7PASS/零skip/native1；失败出口仍先排空后清schema。仅compliance测试观察singleton的真实start/completion/failure-record链并在返回前释放gate、allSettled排空，生产及原报告/账务/授权断言不改。strict lint、非增量tsc原生0及同席限定C0/I0/M0后，1212九案9PASS/零skip/native0、19.93秒，3664输入零mismatch、primary0/0、PGstop0，55496/pidfile已消失。只关闭两夹具清理生命周期问题。1213准备按实际1012文件集合精确分组并另跑MPE，清单/语法检查不是全量通过；事实以后续原生运行及JSON终态为准。后续完整覆盖/独立MPE→当前源码构建→真实Next→正确Coze，1189/1190失败绑定未绕过。第七项及发布OPEN，许可不扩、原服务/stable保持，无安装/付费/同步/部署。详细证据只看 docs/superpowers/plans/2026-10-05-stage7-batch-closure-v1.md，既定顺序、Pear移出/PSD保留不变；下方旧检查点仅历史。
 
 最新生产控制连接检查点（640–651）：641四新增RED/原七PASS；642强化后两案actual stream.closed=false、两案原control错误丢失。最小生产修补分别聚合操作/end错误，end同步throw仍destroy具体stream并等待close、清deadline，643十一PASS。首strictlint的no-this-alias/native1保留，等645终态29文件160PASS后只改collector；648在649前冻结54输入，649最终29文件160PASS/零skip/native0/147.75秒、六路径strictlint/非增量tsc终态0、冻结到终态零mismatch。647同席限定关闭两生产具体缺陷及collector Minor，无新增C/I，不等于整个deadline/WS关闭。646源码保护仍62BLOCK/allowlist未扩；650专库有限READ ONLY样本保持、隔离schema/其他非idle为0，原5010/55494/main/stable/index及.next保持。下一先补false termination/操作先结算release竞态，再checkout/身份采样/TLS网络/COMMIT/101后维护等；修后完整构建/正式身份/全平台/Coze门禁仍OPEN。详651报告。顺序仍只读分享已闭→WebSocket前置（当前）→8C剩余→8D剩余→8E→内部Task9→整体第八项草图；后继冻结，已闭1–6/Lovart/分享不重做，Pear移出/PSD保留。下方旧“最新/当前/进行中”均属历史时点。

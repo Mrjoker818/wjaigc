@@ -13,6 +13,7 @@ const ATOMIC_TERMINAL_TASK_TYPES = new Set([
   'refine-engine',
   'brand-ecommerce',
   'font-design',
+  'sketch-to-code',
 ]);
 
 export function hasDurableGenerationSlotIdentity(

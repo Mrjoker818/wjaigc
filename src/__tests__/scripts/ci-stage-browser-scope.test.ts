@@ -10,7 +10,7 @@ interface Workflow {
 
 interface DiscoverySuite {
   suites?: DiscoverySuite[];
-  specs?: Array<{ tests: Array<{ projectName: string }> }>;
+  specs?: Array<{ title: string; tests: Array<{ projectName: string }> }>;
 }
 
 interface DiscoveryReport {
@@ -32,12 +32,23 @@ function discoveredProfiles(suites: DiscoverySuite[]): string[] {
   ]);
 }
 
+function discoveredCases(suites: DiscoverySuite[]): Array<{ title: string; projectName: string }> {
+  return suites.flatMap(suite => [
+    ...(suite.specs ?? []).flatMap(spec => spec.tests.map(test => ({
+      title: spec.title,
+      projectName: test.projectName,
+    }))),
+    ...discoveredCases(suite.suites ?? []),
+  ]);
+}
+
 describe('CI approved Stage 3/4 browser fixture boundary', () => {
   // Omitting selectors expands these fixed-fixture gates to unrelated global projects.
   // The real Playwright collector is exercised; no browser/server/database is started.
   it.each([
     ['stage-3-canvas-kernel', 'Run five-browser Canvas matrix', 60],
-    ['stage-4-workspace-interoperability', 'Run five-browser Stage 4 workspace matrix', 15],
+    // Four approved cases per browser, including the narrow-toolbar regression.
+    ['stage-4-workspace-interoperability', 'Run five-browser Stage 4 workspace matrix', 20],
   ] as const)('%s discovers every approved case and no unseeded browser project', (jobName, stepName, caseCount) => {
     const command = workflow.jobs[jobName].steps.find(step => step.name === stepName)?.run;
     if (!command) throw new Error(`Missing workflow command: ${stepName}`);
@@ -75,5 +86,16 @@ describe('CI approved Stage 3/4 browser fixture boundary', () => {
       'chromium', 'chromium-1080p', 'firefox', 'mobile-chromium', 'webkit',
     ]);
     expect(profiles).toHaveLength(caseCount);
+    if (jobName === 'stage-4-workspace-interoperability') {
+      const cases = discoveredCases(report.suites);
+      for (const profile of ['chromium', 'chromium-1080p', 'firefox', 'webkit', 'mobile-chromium']) {
+        expect(cases.filter(test => test.projectName === profile).map(test => test.title).sort()).toEqual([
+          'completes chat to canvas to workflow to chat with durable lineage and refresh recovery',
+          'executes ordinary chat, vision stop, agent cancel, and refresh recovery',
+          'keeps the annotation action fully inside the workflow toolbar on narrow screens',
+          'keeps the selected workflow renderer server-authoritative at 100 nodes',
+        ]);
+      }
+    }
   });
 });

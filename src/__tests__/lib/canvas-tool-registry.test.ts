@@ -29,6 +29,16 @@ const protectedCanvasFeatures = JSON.parse(readFileSync(
 )) as Array<{ featureId: string; workspace: string | null; actions: string[] }>;
 
 describe('canvas tool registry', () => {
+  it('opens sketch-to-code as a mutually exclusive specialized drawer without a selected image', () => {
+    const previous = openCanvasToolSession(CLOSED_CANVAS_TOOL_SESSION, 'font-design', {
+      projectId: 'project-a', sourceImageIds: [], entryPoint: 'bottom-toolbar',
+    });
+    const session = openCanvasToolSession(previous, 'sketch-to-code', {
+      projectId: 'project-a', sourceImageIds: [], entryPoint: 'bottom-toolbar',
+    });
+    expect(session).toMatchObject({ toolId: 'sketch-to-code', sessionKind: 'specialized', panelPlacement: 'bottom-drawer' });
+    expect(reconcileCanvasToolSession(session, { type: 'escape' })).toEqual(CLOSED_CANVAS_TOOL_SESSION);
+  });
   it('covers every protected Canvas feature without duplicate tool ids', () => {
     expect(canvasToolRegistry.featureIds()).toEqual(
       expect.arrayContaining(protectedCanvasToolFeatureIds),

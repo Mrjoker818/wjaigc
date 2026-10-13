@@ -23,7 +23,17 @@ export interface CanvasSkillWorkspaceSourceTrace {
   createdAt: string;
 }
 
-export type WorkspaceSourceTrace = SimpleChatWorkspaceSourceTrace | CanvasSkillWorkspaceSourceTrace;
+export interface SketchWorkspaceSourceTrace {
+  source: 'sketch-to-code';
+  taskId: string;
+  projectId: string;
+  previewAssetVersionId: string;
+  htmlAssetVersionId: string;
+  /** Local receipt time only; never task creation time or authority. */
+  createdAt: string;
+}
+
+export type WorkspaceSourceTrace = SimpleChatWorkspaceSourceTrace | CanvasSkillWorkspaceSourceTrace | SketchWorkspaceSourceTrace;
 
 const TRACE_ID = /^[A-Za-z0-9._:-]{1,200}$/;
 const TRACE_LABEL_MAX_LENGTH = 200;
@@ -38,6 +48,14 @@ function isBoundedTraceLabel(value: unknown): value is string {
 export function parseWorkspaceSourceTrace(value: unknown): WorkspaceSourceTrace | undefined {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
   const trace = value as Record<string, unknown>;
+  if (trace.source === 'sketch-to-code') {
+    const { taskId, projectId, previewAssetVersionId, htmlAssetVersionId, createdAt } = trace;
+    if (![taskId, projectId, previewAssetVersionId, htmlAssetVersionId].every(id => typeof id === 'string' && TRACE_ID.test(id))
+      || typeof createdAt !== 'string' || Number.isNaN(Date.parse(createdAt))) return undefined;
+    return Object.freeze({ source: 'sketch-to-code', taskId: taskId as string, projectId: projectId as string,
+      previewAssetVersionId: previewAssetVersionId as string, htmlAssetVersionId: htmlAssetVersionId as string,
+      createdAt: new Date(createdAt).toISOString() });
+  }
   if (trace.source === 'canvas-skill') {
     if (
       typeof trace.runId !== 'string' || !TRACE_ID.test(trace.runId)

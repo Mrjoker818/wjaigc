@@ -87,6 +87,17 @@ const nextConfig: NextConfig = {
           },
         ],
       },
+      {
+        // Next preserves configured headers over route-handler headers. Keep
+        // generated HTML isolated even when the application policy also matches.
+        source: '/api/sketch-to-code/:taskId/document',
+        headers: [
+          {
+            key: 'Content-Security-Policy',
+            value: "default-src 'none'; script-src 'none'; style-src 'unsafe-inline'; connect-src 'none'; img-src 'none'; font-src 'none'; media-src 'none'; frame-src 'none'; object-src 'none'; form-action 'none'; base-uri 'none'; frame-ancestors 'none'; sandbox",
+          },
+        ],
+      },
     ];
   },
   webpack: (config, { isServer }) => {

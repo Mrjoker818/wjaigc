@@ -111,6 +111,26 @@ export function parseCreditPricingConfig(raw: unknown): CreditPricingConfig {
   }
 }
 
+/** Opt-in fail-closed parsing for paid task admission; the legacy reader remains unchanged. */
+export function parseCreditPricingConfigStrict(raw: unknown): CreditPricingConfig {
+  const value: unknown = typeof raw === 'string' ? JSON.parse(raw) as unknown : raw;
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('CREDIT_PRICING_INVALID');
+  const config = value as Record<string, unknown>;
+  const entries = config.modelCredits;
+  if (!entries || typeof entries !== 'object' || Array.isArray(entries)) throw new Error('CREDIT_PRICING_INVALID');
+  for (const [model, entry] of Object.entries(entries)) {
+    if (!model.trim()) throw new Error('CREDIT_PRICING_INVALID');
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue;
+    const fields = entry as Record<string, unknown>;
+    for (const field of ['quality', 'resolution', 'tokenPricing']) {
+      if (fields[field] !== undefined && (!fields[field] || typeof fields[field] !== 'object' || Array.isArray(fields[field]))) {
+        throw new Error('CREDIT_PRICING_INVALID');
+      }
+    }
+  }
+  return { modelCredits: normalizeModelCredits(entries), updatedAt: Number(config.updatedAt) || undefined };
+}
+
 export async function loadCreditPricingConfig(): Promise<CreditPricingConfig> {
   return parseCreditPricingConfig(await dbGetSystemSetting(CREDIT_PRICING_CONFIG_KEY));
 }

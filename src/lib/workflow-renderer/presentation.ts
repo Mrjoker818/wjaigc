@@ -23,6 +23,7 @@ export const WORKFLOW_RENDER_PORT_COLORS: Readonly<Record<PortType, string>> = {
   audio: '#10b981',
   frames: '#06b6d4',
   text: '#60a5fa',
+  'document-reference': '#22d3ee',
 };
 
 export const WORKFLOW_RENDER_NODE_ICONS: Readonly<Record<NodeType, string>> = {
@@ -32,6 +33,7 @@ export const WORKFLOW_RENDER_NODE_ICONS: Readonly<Record<NodeType, string>> = {
   'input-video': 'FileVideo',
   'audio-input': 'Music',
   'ai-generate': 'Wand2',
+  'ai-sketch-to-code': 'Pencil',
   'ai-edit': 'Pencil',
   'ai-annotation-edit': 'MessageSquare',
   'ai-retouch': 'Wand2',

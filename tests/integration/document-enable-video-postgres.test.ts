@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
@@ -31,7 +31,7 @@ let mediaRoot = '';
 let mp4: Buffer;
 let webm: Buffer;
 beforeAll(async () => {
-  mediaRoot = await mkdtemp(path.join(tmpdir(), 'wujie-owner-video-'));
+  mediaRoot = await mkdtemp(path.join(await realpath(tmpdir()), 'wujie-owner-video-'));
   await mkdir(path.join(mediaRoot, 'uploads'));
   mp4 = Buffer.from((await readFile('tests/fixtures/yjs-task8b1-tiny-valid.mp4.base64', 'utf8')).trim(), 'base64');
   webm = Buffer.from((await readFile('tests/fixtures/yjs-task8b2-tiny-valid.webm.base64', 'utf8')).trim(), 'base64');
@@ -44,7 +44,7 @@ beforeAll(async () => {
 });
 afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); s3Metadata.inspect.mockReset(); s3Metadata.read.mockReset(); });
 afterAll(async () => {
-  if (mediaRoot && path.dirname(mediaRoot) === path.resolve(tmpdir())
+  if (mediaRoot && path.dirname(mediaRoot) === await realpath(tmpdir())
     && path.basename(mediaRoot).startsWith('wujie-owner-video-')) await rm(mediaRoot, { recursive: true, force: true });
 });
 

@@ -782,6 +782,18 @@ export const WorkflowLegacyNodeCard = React.memo(function WorkflowLegacyNodeCard
             </div>
           )}
 
+          {/* 导出节点保留图片与安全代码输入，复用现有连线处理。 */}
+          {node.type === 'output-export' && inputPorts.map((port: NodePort): React.ReactNode => {
+            const portColor = PORT_COLORS[port.type] || T.connColor;
+            return (
+              <div key={port.id} className="port-row" style={{ marginBottom: 8 }}>
+                {renderPortDot(port, 'in', { borderColor: portColor, color: portColor })}
+                <span className="port-label">{port.label}</span>
+                <div className="port-dot output-port" style={{ visibility: 'hidden' }} />
+              </div>
+            );
+          })}
+
           {/* AI 生成类节点: input-card + port-row + 下拉选择 + RUN按钮 */}
           {!isInputText && !isInputImage && !isOutputImage && !isOutputImageGroup && !hasImageOutput && (node.type.startsWith('ai-') || node.type === 'output-image') && (
             <div className="flex flex-col gap-0">

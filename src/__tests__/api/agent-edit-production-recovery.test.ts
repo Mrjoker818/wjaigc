@@ -307,6 +307,7 @@ vi.mock('@/lib/cloud-task-storage', () => ({
     persisted: true, reused: false,
   }),
   getPrivateAgentExecutionDescriptor: vi.fn().mockResolvedValue(null),
+  getCloudTaskById: vi.fn(async (taskId: string): Promise<Record<string, unknown> | null> => state.tasks.get(taskId) ?? null),
   getCloudTaskForUser: vi.fn(async (taskId: string, userId: string) => {
     if (state.hiddenCloudTaskIds.has(taskId)) return null;
     const task = state.tasks.get(taskId);

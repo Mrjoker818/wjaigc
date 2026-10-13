@@ -13,7 +13,7 @@ export type QueryFn = <TRow extends QueryResultRow = QueryResultRow>(
   values?: unknown[],
 ) => Promise<QueryResult<TRow>>;
 
-interface IsolatedPostgresContext {
+export interface IsolatedPostgresContext {
   databaseUrl: string;
   schemaName: string;
   query: QueryFn;
@@ -184,6 +184,9 @@ export function createIsolatedPostgresConnectionString(
 export async function withIsolatedPostgres<T>(
   testName: string,
   callback: (context: IsolatedPostgresContext) => Promise<T>,
+  options?: {
+    beforeCreateSchema: (context: { connectionString: string; query: QueryFn }) => Promise<void>;
+  },
 ): Promise<T> {
   const connectionString = getConnectionString();
   const client = new Client({
@@ -206,6 +209,12 @@ export async function withIsolatedPostgres<T>(
 
   try {
     await client.connect();
+    if (options) {
+      await options.beforeCreateSchema({
+        connectionString,
+        query: (text, values) => client.query(text, values),
+      });
+    }
     await client.query(`CREATE SCHEMA ${quotedSchemaName}`);
     schemaCreated = true;
     await client.query(`SET search_path TO ${quotedSchemaName}`);

@@ -1,11 +1,12 @@
 'use client';
 
-import type { MouseEvent, RefObject } from 'react';
+import { useCallback, useLayoutEffect, useRef, useState, type MouseEvent, type RefObject } from 'react';
 
 import type { NodePort, PortType, WorkflowConnection, WorkflowNode } from '@/lib/workflow-engine';
 import type { WorkflowInteractionCommand } from '@/lib/workflow-renderer/commands';
 import { WORKFLOW_RENDER_PORT_COLORS as PORT_COLORS } from '@/lib/workflow-renderer/presentation';
 import type { WorkflowRenderModel } from '@/lib/workflow-renderer/view-model';
+import { getLegacyPortWorldPosition } from '@/lib/workflow-renderer/legacy-port-position';
 import {
   WorkflowLegacyNodeCard,
   type WorkflowLegacyCanvasImageRef,
@@ -92,6 +93,53 @@ export function WorkflowLegacySurface({
   getConnectionPath = defaultConnectionPath, getPortPosition, isConnectionHighlighted = () => false,
   onToggleConnectionBlocked,
 }: WorkflowLegacySurfaceProps) {
+  const nodeLayerRef = useRef<HTMLDivElement | null>(null);
+  const [portPositions, setPortPositions] = useState<Map<string, { x: number; y: number }>>(new Map());
+  const setNodeLayerRef = useCallback((element: HTMLDivElement | null): void => {
+    nodeLayerRef.current = element;
+    if (nodeViewportTransformRef) nodeViewportTransformRef.current = element;
+  }, [nodeViewportTransformRef]);
+
+  const visibleNodes = model.nodes.filter(node => visibleNodeIds.has(node.id));
+  // Track rendered membership, not Set identity (including the default Set).
+  const visibleNodeKey = JSON.stringify(visibleNodes.map(node => node.id));
+
+  useLayoutEffect(() => {
+    const layer = nodeLayerRef.current;
+    if (!layer) return;
+    const measure = (): void => {
+      const next = new Map<string, { x: number; y: number }>();
+      for (const element of layer.querySelectorAll<HTMLElement>('[data-port-id]')) {
+        const position = getLegacyPortWorldPosition(element, layer);
+        if (position) next.set(element.dataset.portId!, position);
+      }
+      setPortPositions(previous => (
+        previous.size === next.size && [...next].every(([id, position]) => {
+          const old = previous.get(id);
+          return old?.x === position.x && old.y === position.y;
+        }) ? previous : next
+      ));
+    };
+    measure();
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure);
+    for (const element of layer.querySelectorAll('[data-node-id], .node-body, .port-row, .input-card')) {
+      observer?.observe(element);
+    }
+    layer.addEventListener('load', measure, true);
+    layer.addEventListener('animationend', measure, true);
+    return () => {
+      observer?.disconnect();
+      layer.removeEventListener('load', measure, true);
+      layer.removeEventListener('animationend', measure, true);
+    };
+  }, [model.nodes, model.viewport, execResults, cardCallbacks?.collapsedNodes, visibleNodeKey]);
+
+  const resolvePortPosition = (node: WorkflowNode, port: NodePort): { x: number; y: number } | null => {
+    const measured = portPositions.get(`${node.id}-${port.direction}-${port.id}`);
+    if (measured) return measured;
+    const local = getPortPosition?.(node, port);
+    return local ? { x: node.x + local.x, y: node.y + local.y } : null;
+  };
   const projectedNodes = model.nodes.map(renderNode => ({
     ...renderNode.workflowNode,
     id: renderNode.id,
@@ -104,7 +152,6 @@ export function WorkflowLegacySurface({
     ports: renderNode.ports.map(port => ({ ...port })),
   }));
   const nodeById = new Map(projectedNodes.map(node => [node.id, node]));
-  const visibleNodes = model.nodes.filter(node => visibleNodeIds.has(node.id));
   const visibleEdges = model.edges.filter(edge => (
     visibleNodeIds.has(edge.source.nodeId) && visibleNodeIds.has(edge.target.nodeId)
   ));
@@ -144,8 +191,8 @@ export function WorkflowLegacySurface({
             const toNode = nodeById.get(connection.toNodeId);
             const fromPort = fromNode?.ports.find(port => port.id === connection.fromPortId);
             const toPort = toNode?.ports.find(port => port.id === connection.toPortId);
-            const from = fromNode && fromPort ? getPortPosition?.(fromNode, fromPort) : null;
-            const to = toNode && toPort ? getPortPosition?.(toNode, toPort) : null;
+            const from = fromNode && fromPort ? resolvePortPosition(fromNode, fromPort) : null;
+            const to = toNode && toPort ? resolvePortPosition(toNode, toPort) : null;
             if (!fromNode || !toNode || !fromPort || !toPort || !from || !to) return null;
 
             const color = PORT_COLORS[connection.type] || theme.connColor;
@@ -179,7 +226,7 @@ export function WorkflowLegacySurface({
         </g>
       </svg>
 
-      <div data-workflow-legacy-node-layer ref={nodeViewportTransformRef} className="absolute inset-0" style={{ zIndex: 2, transform: `translate(${model.viewport.x}px, ${model.viewport.y}px) scale(${model.viewport.zoom})`, transformOrigin: '0 0', willChange: 'transform', contain: 'layout style' }}>
+      <div data-workflow-legacy-node-layer ref={setNodeLayerRef} className="absolute inset-0" style={{ zIndex: 2, transform: `translate(${model.viewport.x}px, ${model.viewport.y}px) scale(${model.viewport.zoom})`, transformOrigin: '0 0', willChange: 'transform', contain: 'layout style' }}>
         {visibleNodes.map(renderNode => {
           const node = nodeById.get(renderNode.id)!;
           return <WorkflowLegacyNodeCard

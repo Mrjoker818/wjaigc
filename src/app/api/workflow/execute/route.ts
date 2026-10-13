@@ -13,6 +13,7 @@ import { isDeepStrictEqual } from 'node:util';
 import { getInternalApiUrl } from '@/lib/api-helpers';
 import { getInternalRequestHeaders, requireApiAuthOrReject } from '@/lib/api-auth';
 import { resolveWorkflowInputImageForActor } from '@/lib/asset-core/workflow-resolver';
+import type { WorkflowSketchIntent, WorkflowSketchHost } from '@/lib/sketch-to-code/workflow';
 import {
   topologicalSort,
   getNodeInputs,
@@ -89,9 +90,12 @@ interface WorkflowExecutionState {
   totalNodes: number;
   activeLayerTasks?: Record<string, string>;
   activeChildTasks?: Record<string, string>;
+  sketchIntents?: Record<string, WorkflowSketchIntent>;
+  sketchRoot?: { executionId: string; state: WorkflowExecutionState };
+  sketchNested?: Record<string, { results: Record<string, ExecutionResult>; currentNodeId: string | null; status: WorkflowExecutionStatus; loopResume?: WorkflowExecutionState['loopResume'] }>;
   activeSkillRuns?: Record<string, string>;
   pendingSkillSubmissions?: Record<string, Promise<void>>;
-  cancellationState?: { cancelled: boolean };
+  cancellationState?: { cancelled: boolean; dispatchStopped?: boolean };
   persistActiveSkillRuns?: () => Promise<void>;
   retryAttempts?: Record<string, number>;
   executionNodes?: WorkflowNode[];
@@ -113,6 +117,12 @@ interface WorkflowExecutionState {
 
 function isWorkflowCancellationRequested(state: WorkflowExecutionState): boolean {
   return state.status === 'cancelled' || state.cancellationState?.cancelled === true;
+}
+
+function isWorkflowDispatchStopped(state: WorkflowExecutionState): boolean {
+  const root = state.sketchRoot?.state || state;
+  return isWorkflowCancellationRequested(state) || isWorkflowCancellationRequested(root)
+    || root.cancellationState?.dispatchStopped === true;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -140,6 +150,8 @@ async function captureRecoverableExecutionGraph(
     'color', 'imageUrl', 'maskUrl', 'providerId', 'projectId',
     'assetId', 'assetVersionId', 'placementId', 'text', 'textContent',
   ]);
+  const containsSketch = nodes.some(node => node.type === 'ai-sketch-to-code'
+    || node.type === 'subgraph' && resolveInlineSubgraph(node)?.nodes.some(child => child.type === 'ai-sketch-to-code' || child.type === 'subgraph'));
   const nodeKeys = new Set([
     'id', 'type', 'label', 'x', 'y', 'width', 'height', 'ports',
     'config', 'condition', 'loopCount', 'agentRound', 'subgraphId', 'breakpoint',
@@ -207,14 +219,16 @@ async function captureRecoverableExecutionGraph(
   let unsafe = false;
   const serialized = JSON.stringify({ nodes: snapshotNodes, connections }, (key, value: unknown) => {
     if (/api.?key|secret|token|password|credential|authorization|headers?|auth|cookie/i.test(key)) unsafe = true;
-    if (typeof value === 'string' && (
+    const sketchPng = containsSketch && key === 'imageUrl' && typeof value === 'string'
+      && /^data:image\/png;base64,[A-Za-z0-9+/]+={0,2}$/.test(value) && value.length <= 5_592_430;
+    if (typeof value === 'string' && !sketchPng && (
       value.length > 16_384
       || /data:[^\s"'<>]*;base64,|blob:/i.test(value)
       || /[?&](?:api.?key|token|secret|password|signature)=/i.test(value)
     )) unsafe = true;
     return value;
   });
-  if (unsafe || serialized.length > 262_144) return undefined;
+  if (unsafe || serialized.length > (containsSketch ? 6 * 1024 * 1024 : 262_144)) return undefined;
   return JSON.parse(serialized) as { nodes: WorkflowNode[]; connections: WorkflowConnection[] };
 }
 
@@ -223,6 +237,15 @@ async function freezeConfiguredModelBindings(
   actorUserId: string,
 ): Promise<boolean> {
   for (const node of graph.nodes) {
+    if (node.type === 'ai-sketch-to-code') {
+      try {
+        const request = buildNodeExecutionRequest(node, {}, { projectId: 'binding-check', idempotencyKey: 'binding-check' })!;
+        const descriptor = await resolveTaskModel(String(request.body.providerId), String(request.body.modelId), actorUserId);
+        if (descriptor.providerId !== request.body.providerId || descriptor.modelId !== request.body.modelId || descriptor.kind !== 'chat'
+          || descriptor.supportsVision !== true || descriptor.executionMode !== 'sync' || descriptor.protocol !== 'chat-completions') return false;
+      } catch { return false; }
+      continue;
+    }
     if (node.type === 'subgraph') {
       const inlineSubgraph = resolveInlineSubgraph(node);
       if (!inlineSubgraph || !await freezeConfiguredModelBindings(inlineSubgraph, actorUserId)) return false;
@@ -287,22 +310,38 @@ async function renewRecoveryLeaseBeforeDispatch(
   executionId: string,
   execState: WorkflowExecutionState,
 ): Promise<boolean> {
-  if (execState.recoveryLeaseState?.lost) {
-    execState.recoveryLeaseLost = true;
-    return false;
-  }
-  if (!execState.recoveryLeaseOwner) return true;
+  if (isWorkflowDispatchStopped(execState)) return false;
+  const root = execState.sketchRoot || { executionId, state: execState };
+  const hasLostFence = (): boolean => Boolean(execState.recoveryLeaseLost || execState.recoveryLeaseState?.lost
+    || root.state.recoveryLeaseLost || root.state.recoveryLeaseState?.lost);
   try {
-    const renewed = await renewCloudTaskLease(
-      execState.recoveryLeaseTaskId || executionId,
-      execState.recoveryLeaseOwner,
-      120_000,
-    );
-    if (renewed) return true;
+    if (hasLostFence()) throw new Error('WORKFLOW_EXECUTION_FENCE_LOST');
+    if (execState.recoveryLeaseOwner && !await renewCloudTaskLease(
+      execState.recoveryLeaseTaskId || executionId, execState.recoveryLeaseOwner, 120_000,
+    )) throw new Error('WORKFLOW_EXECUTION_FENCE_LOST');
+    if (hasLostFence()) throw new Error('WORKFLOW_EXECUTION_FENCE_LOST');
+    if (isWorkflowDispatchStopped(execState)) return false;
+    // Another instance can stop this parent during renewal; read its fence after the last lease await.
+    if (Object.keys(root.state.sketchIntents || {}).length > 0) {
+      const parent = root.state.userId ? await getCloudTaskForUser(root.executionId, root.state.userId) : null;
+      if (hasLostFence()) throw new Error('WORKFLOW_EXECUTION_FENCE_LOST');
+      if (!parent || parent.type !== 'workflow' || parent.userId !== root.state.userId || parent.projectId !== root.state.projectId
+        || ['cancelled', 'failed', 'completed', 'timeout'].includes(parent.status)) {
+        throw new Error('WORKFLOW_EXECUTION_FENCE_LOST');
+      }
+      if (parent.result?.dispatchStopped === true) {
+        root.state.cancellationState ||= { cancelled: false };
+        root.state.cancellationState.dispatchStopped = true;
+        root.state.status = 'paused';
+        return false;
+      }
+    }
+    return !isWorkflowDispatchStopped(execState);
   } catch {
     // A failed ownership check must stop this worker before it dispatches paid work.
   }
   execState.recoveryLeaseLost = true;
+  root.state.recoveryLeaseLost = true;
   if (execState.recoveryLeaseState) execState.recoveryLeaseState.lost = true;
   return false;
 }
@@ -325,6 +364,39 @@ async function buildExecutableNodeRequest(
     .find(candidate => candidate.id === skillId);
   if (!skill) throw new Error('所选 Skill 不存在或不适用于节点模式');
   return buildWorkflowSkillRunRequest(node, inputs, skill, context);
+}
+
+async function sketchHost(executionId: string, state: WorkflowExecutionState, nodeId: string, instanceId = `${executionId}:${nodeId}`): Promise<WorkflowSketchHost> {
+  const root = state.sketchRoot || { executionId, state };
+  if (!state.userId || !state.projectId || root.state.userId !== state.userId || root.state.projectId !== state.projectId) throw new Error('WORKFLOW_SKETCH_SCOPE_REQUIRED');
+  root.state.sketchIntents ||= {};
+  state.sketchIntents = root.state.sketchIntents;
+  if (!root.state.recoveryLeaseOwner) {
+    const owner = `workflow-sketch:${crypto.randomUUID()}`;
+    if (!await claimCloudTaskLease(root.executionId, owner, 120_000)) throw new Error('WORKFLOW_EXECUTION_FENCE_LOST');
+    root.state.recoveryLeaseOwner = owner; root.state.recoveryLeaseTaskId = root.executionId;
+  }
+  const headers = await getInternalRequestHeaders(state.userId, state.userRole || 'user', state.userProductType);
+  return { actorUserId: state.userId, projectId: state.projectId, parentExecutionId: root.executionId, executionId, nodeId, instanceId,
+    attempt: state.retryAttempts?.[nodeId] || 0, headers, intents: root.state.sketchIntents,
+    progress: result => { state.results[nodeId] = result; },
+    checkpoint: () => persistWorkflowExecution(executionId, state, true),
+    assertCurrent: async () => {
+      if (root.state.recoveryLeaseLost || root.state.recoveryLeaseState?.lost || state.userId !== root.state.userId
+        || state.projectId !== root.state.projectId || isWorkflowDispatchStopped(root.state)
+        || !await renewRecoveryLeaseBeforeDispatch(root.executionId, root.state)) throw new Error('WORKFLOW_EXECUTION_FENCE_LOST');
+      const parent = await getCloudTaskForUser(root.executionId, state.userId!);
+      if (!parent || parent.type !== 'workflow' || parent.userId !== state.userId || parent.projectId !== state.projectId
+        || parent.result?.dispatchStopped === true || ['cancelled', 'failed', 'completed', 'timeout'].includes(parent.status)) throw new Error('WORKFLOW_EXECUTION_FENCE_LOST');
+    } };
+}
+async function executeSketchNode(executionId: string, state: WorkflowExecutionState, node: WorkflowNode, inputs: Record<string, unknown>, instanceId?: string): Promise<ExecutionResult> {
+  const { executeWorkflowSketch } = await import('@/lib/sketch-to-code/workflow');
+  const result = await executeWorkflowSketch(node, inputs, await sketchHost(executionId, state, node.id, instanceId));
+  state.results[node.id] = result;
+  if (result.status === 'running') { state.status = 'paused'; state.error = result.error; }
+  await persistWorkflowExecution(executionId, state, true);
+  return result;
 }
 
 async function executeSkillWorkflowTask(input: {
@@ -649,6 +721,7 @@ async function executeTrackedWorkflowTask(
     && !execState.projectId) {
     return { nodeId: node.id, status: 'failed', error: 'WORKFLOW_EDIT_PROJECT_REQUIRED', durationMs: 0 };
   }
+  const hasSketch = Object.keys((execState.sketchRoot?.state || execState).sketchIntents || {}).length > 0;
   const trackedBody: Record<string, unknown> = {
     ...body,
     projectId: execState.projectId,
@@ -694,6 +767,9 @@ async function executeTrackedWorkflowTask(
         }
       }
     }
+    if (isWorkflowDispatchStopped(execState) || hasSketch && !await renewRecoveryLeaseBeforeDispatch(executionId, execState)) {
+      return { nodeId: node.id, status: 'running', error: 'WORKFLOW_EXECUTION_FENCE_LOST', durationMs: 0 };
+    }
     return executeAsyncTask(submitUrl, trackedBody, trackedFetchOptions, node.id, node.type as NodeType,
       trackChild ? async taskIds => {
         execState.activeChildTasks ||= {};
@@ -704,6 +780,9 @@ async function executeTrackedWorkflowTask(
       } : undefined, acceptedTaskIds as string[] | undefined, isGeneration);
   }
 
+  if (hasSketch && !await renewRecoveryLeaseBeforeDispatch(executionId, execState)) {
+    return { nodeId: node.id, status: 'running', error: 'WORKFLOW_EXECUTION_FENCE_LOST', durationMs: 0 };
+  }
   execState.activeLayerTasks ||= {};
   try {
     return await executeLayerWorkflowTask({
@@ -763,6 +842,12 @@ function fromCloudWorkflowStatus(status: string): WorkflowExecutionStatus {
 
 async function persistWorkflowExecution(executionId: string, execState: WorkflowExecutionState,
   required = false): Promise<void> {
+  if (execState.sketchRoot) {
+    const root = execState.sketchRoot;
+    root.state.sketchNested ||= {};
+    root.state.sketchNested[executionId] = { results: execState.results, currentNodeId: execState.currentNodeId, status: execState.status, loopResume: execState.loopResume };
+    return persistWorkflowExecution(root.executionId, root.state, required);
+  }
   if (!execState.userId) return;
   try {
     if (execState.recoveryLeaseLost) {
@@ -771,9 +856,12 @@ async function persistWorkflowExecution(executionId: string, execState: Workflow
     }
     const current = await getCloudTaskForUser(executionId, execState.userId);
     const durableStatus = current?.result?.workflowStatus;
+    const confirmedSketchCancellation = durableStatus === 'paused' && execState.status === 'cancelled'
+      && execState.cancellationState?.cancelled === true && Object.keys(execState.sketchIntents || {}).length > 0;
     if (current && (['completed', 'failed', 'cancelled', 'timeout'].includes(current.status)
+      || current.result?.dispatchStopped === true && execState.cancellationState?.dispatchStopped !== true
       || (['paused', 'cancelled', 'completed', 'failed'].includes(String(durableStatus))
-        && durableStatus !== execState.status))) {
+        && durableStatus !== execState.status && !confirmedSketchCancellation))) {
       execState.recoveryLeaseLost = true;
       if (required) throw new Error('WORKFLOW_EXECUTION_FENCE_LOST');
       return;
@@ -797,6 +885,10 @@ async function persistWorkflowExecution(executionId: string, execState: Workflow
         completedAt: execState.completedAt,
         activeSkillRuns: execState.activeSkillRuns,
         activeChildTasks: execState.activeChildTasks,
+        sketchIntents: execState.sketchIntents,
+        sketchNested: execState.sketchNested,
+        ...(execState.cancellationState?.dispatchStopped ? { dispatchStopped: true } : {}),
+        retryAttempts: execState.retryAttempts,
         loopResume: execState.loopResume,
         ...(execState.executionGraph ? { executionGraph: execState.executionGraph } : {}),
         submissionPayload: {
@@ -884,10 +976,12 @@ async function restorePausedWorkflowExecution(input: {
       : graph.nodes.length,
     activeLayerTasks: {},
     activeChildTasks,
+    ...(isRecord(persistedResult.sketchIntents) ? { sketchIntents: persistedResult.sketchIntents as unknown as Record<string, WorkflowSketchIntent> } : {}),
+    ...(isRecord(persistedResult.sketchNested) ? { sketchNested: persistedResult.sketchNested as unknown as WorkflowExecutionState['sketchNested'] } : {}),
     activeSkillRuns,
     pendingSkillSubmissions: {},
-    cancellationState: { cancelled: false },
-    retryAttempts: {},
+    cancellationState: { cancelled: false, ...(persistedResult.dispatchStopped === true ? { dispatchStopped: true } : {}) },
+    retryAttempts: isRecord(persistedResult.retryAttempts) ? persistedResult.retryAttempts as Record<string, number> : {},
     executionNodes: graph.nodes as WorkflowNode[],
     executionConnections: graph.connections as unknown as WorkflowConnection[],
     executionGraph: graph as { nodes: WorkflowNode[]; connections: WorkflowConnection[] },
@@ -993,7 +1087,7 @@ export async function POST(request: NextRequest) {
               ]
               : undefined;
             if ((node?.type === 'ai-skill' && typeof runId === 'string')
-              || acceptedEditTaskId || acceptedLoopTaskId) {
+              || acceptedEditTaskId || acceptedLoopTaskId || Object.keys(exec.sketchIntents || {}).length > 0) {
               const leaseOwner = `workflow-recovery:${crypto.randomUUID()}`;
               let leaseAcquired = false;
               try {
@@ -1001,7 +1095,8 @@ export async function POST(request: NextRequest) {
                 if (lease) {
                   leaseAcquired = true;
                   exec.recoveryStarted = true;
-                  if (acceptedEditTaskId || acceptedLoopTaskId) {
+                  if (acceptedEditTaskId || acceptedLoopTaskId || Object.keys(exec.sketchIntents || {}).length > 0) {
+                    for (const [id, result] of Object.entries(exec.results)) if (result.status === 'running' && exec.sketchIntents?.[`${executionId}:${id}`]) delete exec.results[id];
                     if (acceptedEditTaskId && node
                       && exec.results[node.id]?.status === 'running'
                       && exec.results[node.id]?.output?.status === 'publication-pending') {
@@ -1161,12 +1256,12 @@ export async function POST(request: NextRequest) {
       if (exec?.userId && exec.userId !== auth.userId) {
         return NextResponse.json({ error: '无权取消该执行记录' }, { status: 403 });
       }
-      const persisted = !exec && auth.userId
+      let persisted = !exec && auth.userId
         ? await getCloudTaskForUser(executionId, auth.userId)
         : null;
-      const persistedResult = persisted?.type === 'workflow' ? persisted.result : null;
+      let persistedResult = persisted?.type === 'workflow' ? persisted.result : null;
       const persistedSkillRunIds = collectPersistedWorkflowSkillRunIds(persistedResult);
-      const childTaskEntries = Object.entries(exec?.activeChildTasks
+      let childTaskEntries = Object.entries(exec?.activeChildTasks
         || (isRecord(persistedResult) && isRecord(persistedResult.activeChildTasks)
           ? persistedResult.activeChildTasks : {}))
         .filter((entry): entry is [string, string] => typeof entry[1] === 'string' && entry[1].length > 0);
@@ -1193,17 +1288,59 @@ export async function POST(request: NextRequest) {
         }
         return NextResponse.json({ error: message, status: 'paused' }, { status: 502 });
       };
+      const sketchIntents = exec?.sketchIntents || (isRecord(persistedResult?.sketchIntents) ? persistedResult.sketchIntents as unknown as Record<string, WorkflowSketchIntent> : {});
+      const hasSketch = Object.keys(sketchIntents).length > 0;
+      const cancellationOutcomes = { confirmed: 0, winner: 0, unknown: 0 };
+      if (hasSketch) {
+        // Fence dispatch before the first child lookup. This is a stop request, not a cancelled terminal claim.
+        if (exec) {
+          exec.cancellationState ||= { cancelled: false };
+          exec.cancellationState.dispatchStopped = true;
+          if (['completed', 'failed', 'cancelled'].includes(exec.status)) {
+            return NextResponse.json({ executionId, status: exec.status }, { status: 409 });
+          }
+          exec.status = 'paused';
+          try { await persistWorkflowExecution(executionId, exec, true); }
+          catch { return NextResponse.json({ executionId, status: 'unconfirmed', error: 'WORKFLOW_EXECUTION_FENCE_LOST' }, { status: 409 }); }
+        } else if (persisted?.type === 'workflow' && isRecord(persistedResult)) {
+          if (['completed', 'failed', 'cancelled', 'timeout'].includes(persisted.status) || typeof persisted.revision !== 'number') {
+            return NextResponse.json({ executionId, status: persisted.status, error: 'WORKFLOW_EXECUTION_FENCE_LOST' }, { status: 409 });
+          }
+          const fenced = await updateCloudTask(executionId, { expectedRevision: persisted.revision, status: 'processing',
+            result: { ...persistedResult, workflowStatus: 'paused', dispatchStopped: true } });
+          if (!fenced) return NextResponse.json({ executionId, status: 'unconfirmed', error: 'WORKFLOW_EXECUTION_FENCE_LOST' }, { status: 409 });
+          const current = await getCloudTaskForUser(executionId, auth.userId);
+          if (!current || current.type !== 'workflow' || current.userId !== auth.userId || current.projectId !== persisted.projectId
+            || current.status !== 'processing' || current.result?.workflowStatus !== 'paused' || current.result?.dispatchStopped !== true) {
+            return NextResponse.json({ executionId, status: 'unconfirmed', error: 'WORKFLOW_EXECUTION_FENCE_LOST' }, { status: 409 });
+          }
+          persisted = current; persistedResult = current.result;
+        }
+      }
+      if (Object.keys(sketchIntents).length) {
+        const { cancelWorkflowSketch } = await import('@/lib/sketch-to-code/workflow');
+        const headers = await getInternalRequestHeaders(auth.userId, auth.userRole === 'admin' ? 'admin' : 'user', auth.user.productType);
+        for (const [instanceId, intent] of Object.entries(sketchIntents)) {
+          const host: WorkflowSketchHost = { actorUserId: auth.userId, projectId: exec?.projectId || persisted?.projectId || '', parentExecutionId: executionId,
+            executionId: intent.executionId, nodeId: intent.nodeId, instanceId, attempt: intent.attempt, headers, intents: sketchIntents,
+            checkpoint: async () => undefined, assertCurrent: async () => { if (intent.parentExecutionId !== executionId || intent.actorUserId !== auth.userId) throw new Error('WORKFLOW_SKETCH_INTENT_MISMATCH'); } };
+          const outcome = await cancelWorkflowSketch(intent, host);
+          cancellationOutcomes[outcome] += 1;
+        }
+      }
       const shouldCancelMemoryExecution = Boolean(exec && (
         exec.status === 'running'
+        || Object.keys(sketchIntents).length > 0
         || Object.keys(exec.activeSkillRuns || {}).length > 0
         || childTaskEntries.length > 0
       ));
       if (shouldCancelMemoryExecution && exec) {
         exec.cancellationState ||= { cancelled: false };
-        exec.cancellationState.cancelled = true;
+        if (!hasSketch) exec.cancellationState.cancelled = true;
         await waitForWorkflowSkillSubmissions(exec);
+        childTaskEntries = Object.entries(exec.activeChildTasks || {}).filter((entry): entry is [string, string] => typeof entry[1] === 'string' && entry[1].length > 0);
       }
-      if (shouldCancelMemoryExecution || persistedSkillRunIds.length > 0 || childTaskEntries.length > 0) {
+      if (shouldCancelMemoryExecution || persistedSkillRunIds.length > 0 || childTaskEntries.length > 0 || Object.keys(sketchIntents).length > 0) {
         const activeLayerTaskIds = exec ? Object.values(exec.activeLayerTasks || {}) : [];
         const activeSkillRunIds = exec
           ? Object.values(exec.activeSkillRuns || {})
@@ -1219,11 +1356,15 @@ export async function POST(request: NextRequest) {
                 || !sourceEntityId.startsWith(`${executionId}:`)
                 || child.messageId !== sourceEntityId
                 || child.idempotencyKey !== `workflow:${sourceEntityId}`) {
-                return pauseForUnconfirmedChild('工作流子任务身份无法确认，未取消父任务');
+                if (!hasSketch) return pauseForUnconfirmedChild('子任务身份未确认，保留原任务待核对');
+                cancellationOutcomes.unknown += 1;
+                continue;
               }
-              if (child.status === 'cancelled') continue;
+              if (child.status === 'cancelled') { cancellationOutcomes.confirmed += 1; continue; }
               if (['completed', 'failed', 'timeout'].includes(child.status)) {
-                return pauseForUnconfirmedChild('工作流子任务已终态但并非取消，需核对结果与账务');
+                if (!hasSketch) return pauseForUnconfirmedChild('子任务已终态，保留原结果与费用待核对');
+                cancellationOutcomes.winner += 1;
+                continue;
               }
               const response = await fetch(getInternalApiUrl('/api/cancel-task'), {
                 method: 'POST',
@@ -1232,11 +1373,13 @@ export async function POST(request: NextRequest) {
               });
               const payload = await response.json().catch(() => null);
               if (!response.ok || !payload?.success) {
-                return pauseForUnconfirmedChild('工作流子任务取消未确认，未取消父任务');
-              }
+                if (!hasSketch) return pauseForUnconfirmedChild('子任务取消未确认，保留原任务待核对');
+                cancellationOutcomes.unknown += 1;
+              } else cancellationOutcomes.confirmed += 1;
             } catch (error) {
               console.warn('[Workflow] 取消编辑子任务失败:', error instanceof Error ? error.name : 'unknown');
-              return pauseForUnconfirmedChild('工作流子任务取消未确认，未取消父任务');
+              if (!hasSketch) return pauseForUnconfirmedChild('子任务取消未确认，保留原任务待核对');
+              cancellationOutcomes.unknown += 1;
             }
           }
         }
@@ -1255,6 +1398,7 @@ export async function POST(request: NextRequest) {
           )));
           for (const result of cancelResults) {
             if (result.status === 'rejected') {
+              if (hasSketch) cancellationOutcomes.unknown += 1;
               console.warn('[Workflow] 取消图片分层子任务失败:', result.reason);
             }
           }
@@ -1276,21 +1420,33 @@ export async function POST(request: NextRequest) {
             result.status === 'rejected' ? [activeSkillRunIds[index]] : []
           ));
           if (failedRunIds.length > 0) {
-            if (exec?.cancellationState) exec.cancellationState.cancelled = false;
-            if (exec) {
-              exec.status = 'running';
-              exec.error = '部分 Skill Run 未确认取消，请重试取消工作流';
-              await persistWorkflowExecution(executionId, exec);
+            if (hasSketch) cancellationOutcomes.unknown += failedRunIds.length;
+            else {
+              if (exec?.cancellationState) exec.cancellationState.cancelled = false;
+              if (exec) {
+                exec.status = 'running';
+                exec.error = '部分 Skill Run 未确认取消，请重试取消工作流';
+                await persistWorkflowExecution(executionId, exec);
+              }
+              return NextResponse.json({
+                error: '部分 Skill Run 未确认取消，工作流仍保持运行状态',
+                executionId,
+                status: 'running',
+                failedRunIds,
+              }, { status: 502 });
             }
-            return NextResponse.json({
-              error: '部分 Skill Run 未确认取消，工作流仍保持运行状态',
-              executionId,
-              status: 'running',
-              failedRunIds,
-            }, { status: 502 });
           }
         }
+        if (hasSketch && (cancellationOutcomes.unknown > 0 || cancellationOutcomes.winner > 0)) {
+          const unknown = cancellationOutcomes.unknown > 0;
+          const paused = await pauseForUnconfirmedChild(unknown ? '子任务取消未确认，保留原意图、结果与费用' : '子任务已终态，保留原结果与费用待核对');
+          if (paused.status === 409) return paused;
+          return NextResponse.json({ executionId, status: unknown ? 'unconfirmed' : 'paused', cancellationOutcomes,
+            error: 'WORKFLOW_SKETCH_CANCEL_UNCONFIRMED' }, { status: unknown ? 503 : 409 });
+        }
         if (exec) {
+          exec.cancellationState ||= { cancelled: false };
+          exec.cancellationState.cancelled = true;
           exec.status = 'cancelled';
           exec.completedAt = Date.now();
           exec.activeSkillRuns = {};
@@ -1346,7 +1502,7 @@ export async function POST(request: NextRequest) {
           }
         }
       }
-      return NextResponse.json({ executionId, status: 'cancelled' });
+      return NextResponse.json({ executionId, status: 'cancelled', ...(hasSketch ? { cancellationOutcomes } : {}) });
     }
 
     // ─── 节点重试 (B2) ─── 仅重试单个失败节点，不重跑全流程
@@ -1358,12 +1514,18 @@ export async function POST(request: NextRequest) {
       if (!nodeId) {
         return NextResponse.json({ error: '缺少 nodeId' }, { status: 400 });
       }
-      const exec = executionCache.get(executionId);
+      const exec = executionCache.get(executionId) || await restorePausedWorkflowExecution({ executionId, userId: auth.userId,
+        userRole: auth.userRole === 'admin' ? 'admin' : 'user', userProductType: auth.user.productType }) || undefined;
       if (!exec) {
         return NextResponse.json({ error: '执行实例不存在或已过期' }, { status: 404 });
       }
       if (exec.userId && exec.userId !== auth.userId) {
         return NextResponse.json({ error: '无权重试该执行记录' }, { status: 403 });
+      }
+      // A lost cached object cannot dispatch or persist again; only status may replace it from the durable snapshot.
+      if (Object.keys(exec.sketchIntents || {}).length > 0
+        && (exec.cancellationState?.dispatchStopped || exec.recoveryLeaseLost || exec.recoveryLeaseState?.lost)) {
+        return NextResponse.json({ executionId, status: 'paused', error: 'WORKFLOW_EXECUTION_FENCE_LOST' }, { status: 409 });
       }
       const requestedRetryNode = (body.nodes || []).find((node: WorkflowNode) => node.id === nodeId);
       if (!requestedRetryNode) {
@@ -1384,6 +1546,12 @@ export async function POST(request: NextRequest) {
           }, { status: 409 });
         }
         const requestedConfig = { ...requestedRetryNode.config };
+        if (requestedRetryNode.type === 'subgraph' && Object.values(exec.sketchIntents || {}).some(intent => intent.executionId.startsWith(`${executionId}:${nodeId}`))) {
+          const normalized = await captureRecoverableExecutionGraph([requestedRetryNode], [], auth.userId);
+          if (!normalized) return NextResponse.json({ error: '重试图配置无效', code: 'WORKFLOW_RETRY_GRAPH_CHANGED' }, { status: 409 });
+          delete requestedConfig.inlineWorkflow;
+          requestedConfig.subgraph = normalized.nodes[0].config.subgraph;
+        }
         if (frozenBinding.modelId) {
           requestedConfig.model = frozenNode.config.model;
           requestedConfig.providerId = frozenNode.config.providerId;
@@ -1410,6 +1578,61 @@ export async function POST(request: NextRequest) {
       try {
         const retryResultMap = new Map(Object.entries(exec.results || {}));
         const nodeInputs = getNodeInputs(retryNode, retryConnections, retryResultMap);
+        const pausedSketchRetry = exec.status === 'paused' && Object.keys(exec.sketchIntents || {}).length > 0
+          && (retryNode.type === 'ai-sketch-to-code' && exec.sketchIntents?.[`${executionId}:${nodeId}`]
+            || exec.loopResume && exec.sketchIntents?.[`${executionId}:${nodeId}:loop:${exec.loopResume.loopNodeId}:${exec.loopResume.iterationIndex}`]
+            || retryNode.type === 'subgraph' && Object.values(exec.sketchIntents || {}).some(intent => intent.executionId.startsWith(`${executionId}:${nodeId}:`) || intent.executionId === `${executionId}:${nodeId}`));
+        if (pausedSketchRetry && exec.executionGraph) {
+          const owner = `workflow-sketch-retry:${crypto.randomUUID()}`;
+          if (!await claimCloudTaskLease(executionId, owner, 120_000)) return NextResponse.json({ error: 'WORKFLOW_EXECUTION_FENCE_LOST' }, { status: 409 });
+          try {
+            const parent = await getCloudTaskForUser(executionId, auth.userId);
+            if (!parent || parent.type !== 'workflow' || parent.projectId !== exec.projectId || parent.status !== 'processing'
+              || parent.result?.workflowStatus !== 'paused' || parent.result?.dispatchStopped === true || typeof parent.revision !== 'number'
+              || !await updateCloudTask(executionId, { expectedRevision: parent.revision, leaseOwner: owner,
+                result: { ...parent.result, workflowStatus: 'running' } })) throw new Error('WORKFLOW_EXECUTION_FENCE_LOST');
+            exec.status = 'running'; exec.recoveryLeaseOwner = owner; exec.recoveryLeaseTaskId = executionId;
+            for (const [id, result] of Object.entries(exec.results)) if (result.status === 'running') delete exec.results[id];
+            await executeWorkflow(executionId, exec, exec.executionGraph.nodes, exec.executionGraph.connections);
+            let completionConfirmed = false;
+            if (!exec.recoveryLeaseLost && !exec.cancellationState?.cancelled
+              && (exec.status as WorkflowExecutionStatus) === 'completed') {
+              try {
+                const committed = await getCloudTaskForUser(executionId, auth.userId);
+                completionConfirmed = committed?.type === 'workflow' && committed.projectId === exec.projectId
+                  && committed.status === 'completed' && committed.result?.workflowStatus === 'completed'
+                    // Match the original result JSON codec; meaningful durable fields still compare strictly.
+                    && isDeepStrictEqual(committed.result.results, JSON.parse(JSON.stringify(exec.results)));
+              } catch {
+                // An unavailable authoritative read cannot confirm a completed acknowledgement.
+              }
+            }
+            if (exec.recoveryLeaseLost || exec.cancellationState?.cancelled
+              || (exec.status as WorkflowExecutionStatus) === 'cancelled'
+              || (exec.status as WorkflowExecutionStatus) === 'completed' && !completionConfirmed) {
+              exec.recoveryLeaseLost = true;
+              executionCache.delete(executionId);
+              return NextResponse.json({ success: false, nodeId, error: 'WORKFLOW_EXECUTION_FENCE_LOST' });
+            }
+            const result = exec.results[nodeId];
+            return NextResponse.json({ success: (exec.status as WorkflowExecutionStatus) === 'completed' && result?.status === 'success', nodeId, output: result?.output, error: result?.error || exec.error });
+          } finally {
+            delete exec.recoveryLeaseOwner; delete exec.recoveryLeaseTaskId;
+            await releaseCloudTaskLease(executionId, owner).catch(() => false);
+          }
+        }
+        if (retryNode.type === 'ai-sketch-to-code') {
+          const previousOwner = exec.recoveryLeaseOwner;
+          try {
+            const retryResult = await executeSketchNode(executionId, exec, retryNode, nodeInputs);
+            return NextResponse.json({ success: retryResult.status === 'success', nodeId, output: retryResult.output, error: retryResult.error });
+          } finally {
+            if (!previousOwner && exec.recoveryLeaseOwner) {
+              const owner = exec.recoveryLeaseOwner; delete exec.recoveryLeaseOwner; delete exec.recoveryLeaseTaskId;
+              await releaseCloudTaskLease(executionId, owner).catch(() => false);
+            }
+          }
+        }
         exec.retryAttempts ||= {};
         const retryAttempt = (exec.retryAttempts[nodeId] || 0) + 1;
         exec.retryAttempts[nodeId] = retryAttempt;
@@ -1440,6 +1663,9 @@ export async function POST(request: NextRequest) {
             auth.userRole === 'admin' ? 'admin' : 'user',
             auth.user.productType,
           );
+          if (Object.keys(exec.sketchIntents || {}).length > 0 && !await renewRecoveryLeaseBeforeDispatch(executionId, exec)) {
+            return NextResponse.json({ success: false, nodeId, error: 'WORKFLOW_EXECUTION_FENCE_LOST' });
+          }
           const retryResult = await executeSkillWorkflowTask({
             apiUrl: `http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}/api/skill-runs`,
             requestBody: {},
@@ -1501,6 +1727,11 @@ export async function POST(request: NextRequest) {
               auth.user.productType,
             )
           : (apiKey ? { 'Authorization': `Bearer ${apiKey}` } : {});
+        // Retry preparation can outlive cancellation in this or another instance; fence the paid dispatch, not just its checkpoint.
+        if (!isAsyncWorkflowEndpoint(req.endpoint) && Object.keys(exec.sketchIntents || {}).length > 0
+          && !await renewRecoveryLeaseBeforeDispatch(executionId, exec)) {
+          return NextResponse.json({ success: false, nodeId, error: 'WORKFLOW_EXECUTION_FENCE_LOST' });
+        }
         if (retryNode.type === 'ai-skill') {
           const retryResult = await executeSkillWorkflowTask({
             apiUrl,
@@ -1762,6 +1993,11 @@ export async function POST(request: NextRequest) {
       execState.error = err instanceof Error ? err.message : String(err);
       execState.completedAt = Date.now();
       void persistWorkflowExecution(executionIdNew, execState);
+    }).finally(async () => {
+      if (execState.sketchIntents && execState.recoveryLeaseOwner) {
+        await releaseCloudTaskLease(executionIdNew, execState.recoveryLeaseOwner).catch(() => false);
+        delete execState.recoveryLeaseOwner; delete execState.recoveryLeaseTaskId;
+      }
     });
 
     return NextResponse.json({
@@ -1793,6 +2029,7 @@ async function executeWorkflow(
   depth = 0,
 ) {
   console.debug(`[Workflow] 开始执行 ${executionId}, ${nodes.length} 个节点`);
+  if (isWorkflowDispatchStopped(execState)) return;
 
   // 1. DAG拓扑排序
   const sorted = topologicalSort(nodes, connections);
@@ -1897,6 +2134,12 @@ async function executeWorkflow(
       }
 
       // P0: 自动注入缺失的 providerId — 当 AI 建图或历史节点缺少 providerId 时，根据 model 名自动查找
+      if (node.type === 'ai-sketch-to-code') {
+        const result = await executeSketchNode(executionId, execState, node, inputs);
+        resultMap.set(node.id, result);
+        if (result.status === 'running') return;
+        continue;
+      }
       if (node.config.model && !node.config.providerId) {
         const modelStr = String(node.config.model);
         // 解析复合键
@@ -2004,10 +2247,16 @@ async function executeWorkflow(
             completedAt: null,
             ...inheritNestedWorkflowExecutionContext(execState),
             totalNodes: inlineSubgraph.nodes.length,
+            sketchRoot: execState.sketchRoot || { executionId, state: execState },
+            sketchIntents: execState.sketchIntents,
           };
+          const savedNested = (execState.sketchRoot?.state || execState).sketchNested?.[`${executionId}:${node.id}`];
+          if (savedNested) { childState.results = savedNested.results; childState.currentNodeId = savedNested.currentNodeId; childState.loopResume = savedNested.loopResume; }
+          for (const [id, result] of Object.entries(childState.results)) if (result.status === 'running') delete childState.results[id];
           const childNodes = hydrateInlineSubgraphInputs(inlineSubgraph.nodes, inputs);
           await executeWorkflow(`${executionId}:${node.id}`, childState, childNodes, inlineSubgraph.connections, depth + 1);
           if (childState.status !== 'completed') {
+            if (childState.status === 'paused') { execState.status = 'paused'; await persistWorkflowExecution(executionId, execState); return; }
             throw new Error(childState.error || '子图执行失败');
           }
           Object.assign(outputData, collectInlineSubgraphOutput(childNodes, inlineSubgraph.connections, childState.results));
@@ -2107,7 +2356,7 @@ async function executeWorkflow(
               if (resumeCursor && loopIteration.index === resumeCursor.iterationIndex
                 && downstreamIndex < resumeCursor.nextNodeIndex) continue;
               const dsNode = downstreamNodes[downstreamIndex];
-              if ((execState.status as string) === 'cancelled') break;
+              if (isWorkflowDispatchStopped(execState)) return;
               const dsInputs = getNodeInputs(dsNode, connections, resultMap);
               dsInputs._loopItem = loopIteration.item;
               dsInputs._loopIndex = loopIteration.index;
@@ -2118,6 +2367,14 @@ async function executeWorkflow(
                 if (typeof dsInputs[key] === 'string') {
                   dsInputs[key] = replaceLoopVariables(dsInputs[key] as string, loopCtx.index, loopCtx.total);
                 }
+              }
+              if (dsNode.type === 'ai-sketch-to-code') {
+                execState.loopResume = { loopNodeId: node.id, iterationIndex: loopIteration.index, nextNodeIndex: downstreamIndex };
+                const dsResult = await executeSketchNode(executionId, execState, dsNode, dsInputs, `${executionId}:${dsNode.id}:loop:${node.id}:${loopIteration.index}`);
+                resultMap.set(dsNode.id, dsResult);
+                if (dsResult.status === 'running') return;
+                if (dsResult.status === 'failed') { loopBodyFailed = true; break; }
+                lastLoopOutput = dsResult.output; continue;
               }
               const dsReq = await buildExecutableNodeRequest(dsNode, dsInputs, {
                 actorUserId: execState.userId!,
@@ -2235,7 +2492,7 @@ async function executeWorkflow(
                       loopIteration.index,
                       `${executionId}:${dsNode.id}:loop:${loopIteration.index}`,
                     );
-                    if (isWorkflowCancellationRequested(execState) || execState.recoveryLeaseLost) return;
+                    if (isWorkflowDispatchStopped(execState) || execState.recoveryLeaseLost) return;
                     if (dsResult.status === 'success') {
                       dsResult.output = {
                         ...dsResult.output,
@@ -2408,7 +2665,7 @@ async function executeWorkflow(
         let lastImageUrl = inputs.imageUrl as string || '';
 
         for (let si = 0; si < scenes.length; si++) {
-          if ((execState.status as string) === 'cancelled') break;
+          if (isWorkflowDispatchStopped(execState)) return;
           if (!await renewRecoveryLeaseBeforeDispatch(executionId, execState)) return;
 
           const sceneDesc = scenes[si].trim();
@@ -2464,7 +2721,7 @@ async function executeWorkflow(
           execState,
           0,
         );
-        if (isWorkflowCancellationRequested(execState) || execState.recoveryLeaseLost) return;
+        if (isWorkflowDispatchStopped(execState) || execState.recoveryLeaseLost) return;
         resultMap.set(node.id, result);
         execState.results[node.id] = result;
         if (result.status === 'running' && result.output?.status === 'publication-pending') {
@@ -2549,6 +2806,7 @@ async function executeWorkflow(
     await persistWorkflowExecution(executionId, execState);
   }
 
+  if (execState.cancellationState?.dispatchStopped && !execState.cancellationState.cancelled) return;
   if (execState.status === 'cancelled' || execState.cancellationState?.cancelled) {
     execState.status = 'cancelled';
     await persistWorkflowExecution(executionId, execState);

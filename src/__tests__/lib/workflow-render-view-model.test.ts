@@ -19,7 +19,7 @@ import {
 } from '@/lib/workflow-renderer/view-model';
 
 const viewport: WorkflowRenderViewport = { x: 12, y: -8, zoom: 0.75 };
-const portTypes: PortType[] = ['image', 'mask', 'prompt', 'condition', 'any', 'data', 'video', 'audio', 'frames', 'text'];
+const portTypes: PortType[] = ['image', 'mask', 'prompt', 'condition', 'any', 'data', 'video', 'audio', 'frames', 'text', 'document-reference'];
 const expectedPortCompatibility: Record<PortType, PortType[]> = {
   image: ['image', 'any'],
   mask: ['mask', 'any'],
@@ -31,6 +31,7 @@ const expectedPortCompatibility: Record<PortType, PortType[]> = {
   audio: ['audio', 'any'],
   frames: ['frames', 'any', 'image'],
   text: ['text', 'prompt', 'any'],
+  'document-reference': ['document-reference'],
 };
 
 describe('workflow render view model', () => {
