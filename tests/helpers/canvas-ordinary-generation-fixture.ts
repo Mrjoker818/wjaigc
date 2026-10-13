@@ -4,6 +4,7 @@ import type { QueryFn } from './postgres-test-database';
 import { createConnection, createServer, type Socket } from 'node:net';
 import { closePool, getPool } from '@/lib/db-client';
 import { isActiveOfflineBridgeTestConnection } from './offline-bridge-database-guard';
+import { registerOwnedFaultProxy, cleanupOwnedFaultProxy } from './owned-postgres-fault-proxy';
 import { requireOfflineBridgeTestMediaRoot } from './offline-bridge-media-guard';
 
 export function assertOrdinaryEnvironment(databaseUrl: string, media: string): void {
@@ -32,6 +33,7 @@ export async function seedOrdinaryGeneration(query: QueryFn, databaseUrl: string
 
 /** Real wire failure after an autocommitted completion UPDATE, not a mocked storage result. */
 export async function loseOrdinaryCompletionReply(databaseUrl: string): Promise<{ dropped: () => boolean; close: () => Promise<void> }> {
+  if (typeof databaseUrl !== 'string') throw new Error('OWNED_PROXY_INPUT');
   assertOrdinaryEnvironment(databaseUrl, process.env.WUJIE_DATA_DIR || '');
   const target = new URL(databaseUrl); const sockets = new Set<Socket>(); let dropped = false;
   const server = createServer(downstream => {
@@ -73,13 +75,23 @@ export async function loseOrdinaryCompletionReply(databaseUrl: string): Promise<
     upstream.on('close', () => { sockets.delete(upstream); downstream.destroy(); });
   });
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
-  const address = server.address(); if (!address || typeof address === 'string') throw new Error('No loopback port');
-  await closePool(); const proxy = new URL(databaseUrl); proxy.port = String(address.port); proxy.searchParams.set('sslmode', 'disable');
-  process.env.DATABASE_URL = proxy.href; process.env.PGDATABASE_URL = proxy.href;
-  getPool().on('connect', client => client.on('error', () => { /* Query rejection carries the actual connection failure. */ }));
+  let revoke: () => void = (): void => {};
+  let environmentBound = false;
+  const restoreEnvironment = (): void => { process.env.DATABASE_URL = databaseUrl; process.env.PGDATABASE_URL = databaseUrl; };
+  try {
+    const address = server.address(); if (!address || typeof address === 'string') throw new Error('No loopback port');
+    revoke = registerOwnedFaultProxy(server, databaseUrl, import.meta.url);
+    await closePool();
+    const proxy = new URL(databaseUrl); proxy.port = String(address.port); proxy.searchParams.set('sslmode', 'disable');
+    environmentBound = true;
+    process.env.DATABASE_URL = proxy.href; process.env.PGDATABASE_URL = proxy.href;
+    getPool().on('connect', client => client.on('error', () => { /* Query rejection carries the actual connection failure. */ }));
+  } catch (primaryError) {
+    await cleanupOwnedFaultProxy({ server, sockets, revoke, restoreEnvironment, primaryError,
+      closePool: environmentBound ? closePool : async (): Promise<void> => {} });
+    throw primaryError;
+  }
   return { dropped: () => dropped, close: async (): Promise<void> => {
-    await closePool(); process.env.DATABASE_URL = databaseUrl; process.env.PGDATABASE_URL = databaseUrl;
-    sockets.forEach(socket => socket.destroy());
-    await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+    await cleanupOwnedFaultProxy({ server, sockets, revoke, closePool, restoreEnvironment });
   } };
 }

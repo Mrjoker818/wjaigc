@@ -22,6 +22,18 @@ const trace = {
 };
 
 describe('workspace source trace UI', () => {
+  it('labels sketch input PNG and paired HTML provenance with local received time', () => {
+    const sourceTrace = { source: 'sketch-to-code', taskId: 'sketch-1', projectId: 'project-1',
+      previewAssetVersionId: 'preview-1', htmlAssetVersionId: 'html-1', createdAt: '2026-10-09T00:00:00.000Z' };
+    const markup = renderToStaticMarkup(React.createElement(WorkspaceSourceTraceDetails, { sourceTrace }));
+    const badge = renderToStaticMarkup(React.createElement(CanvasSourceTraceBadge, { sourceTrace, isSelected: true }));
+    expect(markup).toContain('草图转代码');
+    expect(markup).toContain('本地接收时间');
+    expect(markup).toContain('preview-1');
+    expect(markup).toContain('html-1');
+    expect(badge).toContain('草图转代码');
+    expect(markup + badge).not.toContain('来源：智能对话');
+  });
   it('renders read-only provenance without exposing unvalidated secrets', () => {
     const markup = renderToStaticMarkup(React.createElement(WorkspaceSourceTraceDetails, { sourceTrace: trace }));
 

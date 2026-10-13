@@ -1041,6 +1041,7 @@ export class UserManager {
 
   waitForProjectHydration(expectedUserId: string | null = this.currentUserId): Promise<boolean> {
     if (!expectedUserId || this.currentUserId !== expectedUserId) return Promise.resolve(false);
+    if (this._serverSyncReady) return Promise.resolve(true);
     if (this._projectHydration?.userId === expectedUserId) return this._projectHydration.promise;
     return Promise.resolve(this._serverSyncReady);
   }

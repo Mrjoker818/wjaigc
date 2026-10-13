@@ -30,6 +30,18 @@ const canvasSkillTraceFixture: WorkspaceSourceTrace = {
 };
 
 describe('asset source trace propagation', () => {
+  it('retains only bounded sketch paired-version provenance and freezes the local received-time hint', () => {
+    const trace = { source: 'sketch-to-code', taskId: 'sketch-1', projectId: 'project-1',
+      previewAssetVersionId: 'preview-1', htmlAssetVersionId: 'html-1', createdAt: '2026-10-09T00:00:00.000Z' };
+    const parsed = parseWorkspaceSourceTrace({ ...trace, html: '<script>secret</script>', apiKey: 'secret' });
+    expect(parsed).toEqual(trace);
+    expect(Object.isFrozen(parsed)).toBe(true);
+    for (const key of ['taskId', 'projectId', 'previewAssetVersionId', 'htmlAssetVersionId']) {
+      expect(parseWorkspaceSourceTrace({ ...trace, [key]: 'bad id' })).toBeUndefined();
+      expect(parseWorkspaceSourceTrace({ ...trace, [key]: 'x'.repeat(201) })).toBeUndefined();
+    }
+    expect(parseWorkspaceSourceTrace({ ...trace, createdAt: 'invalid' })).toBeUndefined();
+  });
   it('strictly validates and freezes Canvas Skill traces while retaining simple-chat compatibility', () => {
     const parsed = parseWorkspaceSourceTrace({
       ...canvasSkillTraceFixture,

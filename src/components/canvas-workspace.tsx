@@ -1,6 +1,8 @@
 'use client';
 import { importDocumentMediaBatch, assertDocumentMediaBatchProjection } from '@/lib/collaboration/document-media-batch-client';
 import type { DocumentMediaBatchRequest } from '@/lib/collaboration/document-media-batch-request';
+import type { SketchScope } from '@/lib/sketch-to-code/client';
+import type { SketchTransform } from '@/lib/sketch-to-code/placement-client';
 
 import { useState, useCallback, useRef, useEffect, useLayoutEffect, useMemo, type CSSProperties } from 'react';
 import dynamic from 'next/dynamic';
@@ -205,7 +207,6 @@ import {
   type ImageGenerationRequest,
 } from '@/lib/image-generation-session';
 
-import { LoginPanel } from '@/components/dashboard/login-panel';
 import { CanvasShareCreateDialog } from '@/components/canvas-share/create-dialog';
 import { CanvasShareManagePanel } from '@/components/canvas-share/manage-panel';
 import type { CanvasShareCreatedAccess } from '@/components/canvas-share/share-api-client';
@@ -1063,7 +1064,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
       }
     }
   }, [clearRestoredCanvasImageTombstones, commitCanvasHistorySnapshot, flushQueuedCanvasHistoryChange, isActiveCanvasHistoryTransition, isDocumentHistoryRecoveryPending, suspendDocumentHistoryOperation, syncAssetV3HistoryTransition]);
-  const [activeGenerationCount, setActiveGenerationCount] = useState(0);
+  const [, setActiveGenerationCount] = useState(0);
   const [previewImage, setPreviewImage] = useState<CanvasImage | null>(null);
   const [themeStyle, setThemeStyle] = useState<ThemeStyle>('gold');
   const themeStyleRef = useRef(themeStyle);
@@ -1838,6 +1839,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
   const canvasPersistenceSchedulerRef = useRef<CanvasPersistenceScheduler | null>(null);
   // 项目切换中标记：防止自动保存回调用旧闭包数据覆盖刚保存的新数据
   const switchingProjectRef = useRef(false);
+  const newProjectPendingRef = useRef<{ userId: string } | null>(null);
   // 服务器同步合并中标记：防止自动保存用旧闭包数据覆盖刚从服务器合并的新数据
   const serverSyncMergeRef = useRef(false);
   const serverSyncMergeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -3067,7 +3069,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
       }
       serverSyncMergeRef.current = false;
     };
-  }, [currentUser?.id, currentProject?.id, setImages]);
+  }, [currentUser, currentProject?.id, setImages]);
 
   // ★ 异步持久化 data:/blob: URL：页面加载后自动检测并持久化临时 URL
   // 解决刷新后图片消失的问题：data: URL 在 normalizeImageUrls 中不再被清空，
@@ -4333,6 +4335,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
     meta?: {
       modelName?: string; apiProvider?: string; relationType?: ConnectionRelationType; signal?: AbortSignal;
       beforeInsert?: () => void; afterInsert?: () => void; scope?: ReturnType<typeof captureCanvasInsertionScope>;
+      sketchTransform?: SketchTransform;
     },
   ): Promise<void> => {
     const scope = meta?.scope ?? captureCanvasInsertionScope(meta?.signal);
@@ -4342,6 +4345,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
       scope.assertCurrent();
       const insertionItem = typeof input === 'string' ? undefined : input;
       const transferredReference = insertionItem?.assetReference as CoreWorkspaceAssetReference | undefined;
+      if (meta?.sketchTransform && transferredReference?.sourceTrace?.source !== 'sketch-to-code') throw new Error('草图落点缺少原始来源');
       let rawUrl = transferredReference?.url || insertionItem?.url || input as string;
       if (rawUrl.startsWith('blob:')) {
         const response = await fetch(rawUrl, { signal: meta?.signal });
@@ -4384,6 +4388,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
         ...(transferredReference?.assetVersionId ? { assetVersionId: transferredReference.assetVersionId } : {}),
         ...(transferredReference?.placementId ? { placementId: transferredReference.placementId } : {}),
         ...(transferredReference?.sourceTrace ? { sourceTrace: transferredReference.sourceTrace } : {}),
+        ...(meta?.sketchTransform ? meta.sketchTransform : {}),
       });
     }
     scope.assertCurrent();
@@ -4401,9 +4406,10 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
           y: sourceImg ? sourceImg.y + index * (image.height + 20) : 0,
           modelName: meta?.modelName || sourceImg?.modelName || '',
           apiProvider: meta?.apiProvider || sourceImg?.apiProvider || '',
+          ...(meta?.sketchTransform ? meta.sketchTransform : {}),
         }));
       const insertedImages = filterUniqueCanvasImageInsertions(previousImages,
-        sourceImg ? candidates : autoLayoutImages(previousImages, candidates));
+        sourceImg || meta?.sketchTransform ? candidates : autoLayoutImages(previousImages, candidates));
       if (insertedImages.length > 0) {
         const nextImages = [...previousImages, ...insertedImages];
         if (!setImages(nextImages)) throw new Error('当前画布未接受转入图片');
@@ -4425,7 +4431,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
           }
         }
         scope.assertCurrent();
-        if (!sourceImg) stabilizeCanvasImages(insertedImages.map(image => ({ id: image.id, url: image.url })), scope.isCurrentWritable);
+        if (!sourceImg && !meta?.sketchTransform) stabilizeCanvasImages(insertedImages.map(image => ({ id: image.id, url: image.url })), scope.isCurrentWritable);
         scope.assertCurrent();
         if (sourceImageId) {
           setCanvasConnections(previous => [...previous, ...insertedImages.map(image =>
@@ -4451,6 +4457,39 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
       description: '所有图片已经存在于画布', className: 'bg-[#141414] border-[#2a2a2a] text-white',
     });
   }, [captureCanvasInsertionScope, setImages, autoLayoutImages, stabilizeCanvasImages, persistCanvasImagesNow]);
+
+  const sketchContextKey = useMemo(() => {
+    const identity = [currentUser?.id, currentProject?.id, collaborativeCanvas.authority,
+      collaborativeCanvas.recordMediaHistory, collaborativeCanvas.refreshMedia, historyTransitionPending, documentHistoryRecoveryState];
+    return `${identity[0]}:${identity[1]}:${crypto.randomUUID()}`;
+  }, [currentUser?.id, currentProject?.id,
+    collaborativeCanvas.authority, collaborativeCanvas.recordMediaHistory, collaborativeCanvas.refreshMedia,
+    historyTransitionPending, documentHistoryRecoveryState]);
+  const captureSketchScope = useCallback((): SketchScope => {
+    const actorId = currentUserRef.current?.id ?? '', projectId = currentProjectRef.current?.id ?? '';
+    const authority = collaborativeCanvasRef.current, epoch = historyTransitionEpochRef.current;
+    const generation = authority?.recordMediaHistory, refreshMedia = authority?.refreshMedia;
+    const mode = authority?.projectId === projectId ? authority.authority : 'unknown';
+    return { actorId, projectId, key: sketchContextKey, authority: mode,
+      assertCurrent: (write = false): void => {
+        const current = collaborativeCanvasRef.current;
+        if (!isMountedRef.current || !actorId || !projectId || mode === 'unknown'
+          || currentUserRef.current?.id !== actorId || currentProjectRef.current?.id !== projectId
+          || historyProjectIdRef.current !== projectId || historyTransitionEpochRef.current !== epoch
+          || current?.projectId !== projectId || current.authority !== mode
+          || current.recordMediaHistory !== generation || current.refreshMedia !== refreshMedia
+          || historyLifecyclePendingRef.current || isDocumentHistoryRecoveryPending()
+          || (mode === 'document' && (current.isSessionActive?.() !== true || write && !current.isWritable()))) {
+          throw new Error('草图操作作用域已失效，请在当前受权项目重新打开');
+        }
+      } };
+  }, [isDocumentHistoryRecoveryPending, sketchContextKey]);
+  const insertSketchResult = useCallback(async (reference: CoreWorkspaceAssetReference, transform: SketchTransform): Promise<void> => {
+    const scope = captureCanvasInsertionScope();
+    await handleAddImages([{ outputNodeId: reference.entityId!, url: reference.url, assetReference: reference }],
+      undefined, { scope, sketchTransform: transform });
+    scope.assertCurrent();
+  }, [captureCanvasInsertionScope, handleAddImages]);
 
   // Legacy void UI consumers report rejection here; Promise-aware Chat/Node consumers keep the raw sink.
   const handleAddImagesFromUi = useCallback((...args: Parameters<typeof handleAddImages>): void => {
@@ -5104,7 +5143,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
       description: 'PNG 预览用于画布展示，SVG 原件已保存，可在矢量面板继续编辑或下载',
       className: 'bg-[#141414] border-[#2a2a2a] text-white',
     });
-  }, [currentUser?.id, getCanvasImageDisplaySize, loadCanvasImageSize, setCanvasConnections, setImages, stabilizeCanvasImages]);
+  }, [currentUser?.id, setCanvasConnections, setImages, stabilizeCanvasImages]);
 
   // 提取图片关键词
   const handleExtractPrompt = useCallback(async (imageUrl: string) => {
@@ -6691,6 +6730,8 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
     const { model, providerId } = getCurrentImageModel();
     if (model.includes('::')) return model;
     return model && providerId ? `${providerId}::${model}` : '';
+    // The catalog refresh intentionally invalidates the local recent-model cache.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [getCurrentImageModel, quickCreateImageModels]);
 
   const resolvedQuickCreateImageModel = useMemo<ResolvedQuickCreateModel>(() => (
@@ -7365,6 +7406,8 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
       if (!response.ok) throw new Error('工作流保存失败');
       await persistNodeWorkflow(workflow, expectedProjectId);
     });
+    // Preserve the existing actor-change invalidation; the callback reads live actor refs.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentUser?.id, persistNodeWorkflow]);
   const prepareWorkflowChatNavigation = useCallback(async (reference: CoreWorkspaceAssetReference): Promise<void> => {
     const projectId = currentProjectRef.current?.id;
@@ -7587,13 +7630,24 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
           setFavoriteParams(params);
         }}
         onNewProject={async () => {
+          const mgr = UserManagerCore.getInstance();
+          const userId = currentUser?.id;
+          if (!userId || mgr.getCurrentUserId() !== userId
+            || newProjectPendingRef.current?.userId === userId) return;
+          const pending = { userId };
+          newProjectPendingRef.current = pending;
           try {
-            const mgr = UserManagerCore.getInstance();
+            // Creating during the first GET invalidates its mutation generation,
+            // leaving server sync unready and Presence unable to authorize the room.
+            const hydrated = await mgr.waitForProjectHydration(userId);
+            if (!hydrated || mgr.getCurrentUserId() !== userId) return;
             const newProject = await mgr.createProject('未命名项目');
             loadProjectById(newProject.id);
             setAppMode('canvas');
           } catch (e) {
             console.error('创建项目失败:', e);
+          } finally {
+            if (newProjectPendingRef.current === pending) newProjectPendingRef.current = null;
           }
         }}
         onLogout={async () => {
@@ -7959,6 +8013,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
       {/* Canvas - 全屏 */}
       <div className="absolute inset-0">
         <InfiniteCanvas
+          sketchContext={{ key: sketchContextKey, captureScope: captureSketchScope, insert: insertSketchResult }}
           taskModelCatalog={taskModelCatalog}
           taskModelOptions={catalogModels}
           catalogStatus={catalogStatus}

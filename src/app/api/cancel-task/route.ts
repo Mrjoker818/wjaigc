@@ -16,6 +16,8 @@ import {
 } from '@/lib/cloud-task-storage';
 import { errorResponse, getRequestId } from '@/lib/request-id';
 import { inferTaskErrorSource } from '@/lib/task-core/task-error';
+import { cancelSketchTask } from '@/lib/sketch-to-code/task-http';
+import { sketchError } from '@/lib/sketch-to-code/http';
 import { deleteTerminalPrivateInpaintInputs } from '@/lib/task-core/inpaint-private-inputs';
 import {
   hasDurableGenerationSlotIdentity,
@@ -47,6 +49,15 @@ export async function POST(request: NextRequest) {
         { success: false, error: 'taskId 必须为非空字符串' },
         { status: 400 }
       );
+    }
+
+    // Original persisted type precedes registry/admin shortcuts. An unavailable
+    // type lookup cannot authorize a nonprefix sketch via an old cache entry.
+    let sketchCandidate;
+    try { sketchCandidate = await getCloudTaskById(taskId); }
+    catch { return sketchError(undefined, requestId); }
+    if (sketchCandidate?.type === 'sketch-to-code' || taskId.startsWith('sketch_')) {
+      return cancelSketchTask(body, sketchCandidate, user.id, requestId);
     }
 
     // 检查任务是否存在于注册中心

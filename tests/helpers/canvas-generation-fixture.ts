@@ -13,6 +13,7 @@ import { createServer, createConnection, type Socket } from 'node:net';
 import { createIdempotencyLockKey } from '@/lib/task-core/idempotency';
 import { loadDocument, commitDocumentUpdate } from '@/lib/collaboration/document-store';
 import { isActiveOfflineBridgeTestConnection } from './offline-bridge-database-guard';
+import { registerOwnedFaultProxy, cleanupOwnedFaultProxy } from './owned-postgres-fault-proxy';
 import { saveFixtureMigrationLog } from './fixture-migration-log';
 
 /** A real PostgreSQL gate, observed through pg_blocking_pids, never timed with sleeps. */
@@ -57,6 +58,7 @@ async function canvasPgFault(databaseUrl: string, fault: { commitIndex?: number;
   close: () => Promise<void>; dropped: () => boolean; connectionErrors: Error[];
   paused: Promise<void>; failBeforeCommit: () => void;
 }> {
+  if (typeof databaseUrl !== 'string') throw new Error('OWNED_PROXY_INPUT');
   const target = new URL(databaseUrl);
   const activeBridgeDatabase = isActiveOfflineBridgeTestConnection(process.env, databaseUrl);
   if (!activeBridgeDatabase && (target.hostname !== '127.0.0.1' || target.port !== '55492'
@@ -105,19 +107,27 @@ async function canvasPgFault(databaseUrl: string, fault: { commitIndex?: number;
     upstream.on('close', (): void => { sockets.delete(upstream); downstream.destroy(); });
   });
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
-  const address = server.address(); if (!address || typeof address === 'string') throw new Error('No proxy port');
-  await closePool();
-  const proxy = new URL(databaseUrl); proxy.port = String(address.port); proxy.searchParams.set('sslmode', 'disable');
-  process.env.DATABASE_URL = proxy.href; process.env.PGDATABASE_URL = proxy.href;
-  // Observe pg's separate client error event as well as the rejected real query.
-  // No query, transaction, or result is replaced. The test asserts this channel too.
-  getPool().on('connect', client => client.on('error', error => { connectionErrors.push(error); }));
-  console.info('Loopback PG fault proxy:', address.port, fault);
+  let revoke: () => void = (): void => {};
+  let environmentBound = false;
+  const restoreEnvironment = (): void => { process.env.DATABASE_URL = databaseUrl; process.env.PGDATABASE_URL = databaseUrl; };
+  try {
+    const address = server.address(); if (!address || typeof address === 'string') throw new Error('No proxy port');
+    revoke = registerOwnedFaultProxy(server, databaseUrl, import.meta.url);
+    await closePool();
+    const proxy = new URL(databaseUrl); proxy.port = String(address.port); proxy.searchParams.set('sslmode', 'disable');
+    environmentBound = true;
+    process.env.DATABASE_URL = proxy.href; process.env.PGDATABASE_URL = proxy.href;
+    // Observe pg's separate client error event as well as the rejected real query.
+    // No query, transaction, or result is replaced. The test asserts this channel too.
+    getPool().on('connect', client => client.on('error', error => { connectionErrors.push(error); }));
+    console.info('Loopback PG fault proxy:', address.port, fault);
+  } catch (primaryError) {
+    await cleanupOwnedFaultProxy({ server, sockets, revoke, restoreEnvironment, primaryError,
+      closePool: environmentBound ? closePool : async (): Promise<void> => {}, beforePool: failBeforeCommit });
+    throw primaryError;
+  }
   return { dropped: (): boolean => dropped, connectionErrors, paused, failBeforeCommit, close: async (): Promise<void> => {
-    failBeforeCommit();
-    await closePool(); process.env.DATABASE_URL = databaseUrl; process.env.PGDATABASE_URL = databaseUrl;
-    sockets.forEach(socket => socket.destroy());
-    await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+    await cleanupOwnedFaultProxy({ server, sockets, revoke, closePool, restoreEnvironment, beforePool: failBeforeCommit });
   } };
 }
 

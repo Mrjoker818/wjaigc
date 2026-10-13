@@ -5,7 +5,19 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { setImmediate as nextTurn, setTimeout as realDelay } from 'node:timers/promises';
 import sharp from 'sharp';
-import { afterAll, afterEach, beforeAll, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, expect, it, vi, type TestContext } from 'vitest';
+
+interface PhaseFacts { exitCode?: number | null; signal?: NodeJS.Signals | null; childCreated?: boolean }
+const phaseTrace = vi.hoisted(() => ({ startedAt: BigInt(0), mode: '', events: [] as Array<{ event: string; ms: number } & PhaseFacts> }));
+function recordPhase(event: string, facts: PhaseFacts = {}): void {
+  if (phaseTrace.startedAt) phaseTrace.events.push({ event, ms: Number(process.hrtime.bigint() - phaseTrace.startedAt) / 1e6, ...facts });
+}
+vi.mock('@/lib/image-tools/image-input', async importOriginal => {
+  recordPhase('image-input-import-start');
+  const actual = await importOriginal<typeof import('@/lib/image-tools/image-input')>();
+  recordPhase('image-input-import-end');
+  return actual;
+});
 
 const fixture = vi.hoisted(() => ({ root: '', output: '' }));
 // Forward the named import through the native default object so the observer
@@ -26,7 +38,7 @@ vi.mock('@/lib/image-tools/config', () => ({
 }));
 // The actual interpreter/model health probe is outside this lifecycle contract.
 vi.mock('@/lib/image-tools/onnx-health', () => ({
-  isOnnxUpscaleAvailable: async () => ({ available: true, model: 'fixture' }),
+  isOnnxUpscaleAvailable: async () => { recordPhase('health-resolved'); return { available: true, model: 'fixture' }; },
   getOnnxModelsDir: () => `${fixture.root}/models`,
 }));
 
@@ -44,7 +56,11 @@ afterAll(() => {
   if (fixture.root && path.dirname(realpathSync(fixture.root)) === realpathSync(tmpdir())
     && path.basename(fixture.root).startsWith('wujie-onnx-lifecycle-')) rmSync(fixture.root, { recursive: true, force: true });
 });
-afterEach(() => { vi.restoreAllMocks(); vi.useRealTimers(); });
+afterEach((context: TestContext): void => {
+  process.stdout.write('TASK6_LIFECYCLE_PHASES:' + JSON.stringify({ caseName: context.task.name, mode: phaseTrace.mode, events: phaseTrace.events }) + '\n');
+  phaseTrace.startedAt = BigInt(0); phaseTrace.events = [];
+  vi.restoreAllMocks(); vi.useRealTimers();
+});
 
 function observeFixture<T>(pending: Promise<T>, label: string): Promise<T> {
   const watchdog = new AbortController();
@@ -68,6 +84,8 @@ function controlInterpreter(mode: 'success' | 'hang' | 'spawn-error' | 'closed-i
   release: () => void;
   cleanup: () => Promise<void>;
 } {
+  phaseTrace.startedAt = process.hrtime.bigint(); phaseTrace.mode = mode; phaseTrace.events = [];
+  recordPhase('control-created');
   const spawn = childProcess.spawn;
   let child!: ChildProcess;
   let signalReady!: (request: { inputFile?: string }) => void;
@@ -85,12 +103,17 @@ function controlInterpreter(mode: 'success' | 'hang' | 'spawn-error' | 'closed-i
   let requestInput: string | undefined;
   vi.spyOn(childProcess, 'spawn').mockImplementation((...args: Parameters<typeof spawn>) => {
     const options = args[2] as SpawnOptionsWithoutStdio;
+    recordPhase('native-spawn-start');
     child = spawn(mode === 'spawn-error' ? `${process.execPath}.missing` : process.execPath,
       [path.resolve('tests/helpers/upscayl-lifecycle-worker.mjs'), mode, fixture.output],
       { ...options, env: { ...options.env, NODE_ENV: process.env.NODE_ENV, NODE_OPTIONS: '', NODE_PATH: '' } });
+    recordPhase('native-spawn-return');
+    child.once('spawn', () => recordPhase('native-spawn-event'));
+    child.once('exit', (exitCode: number | null, signal: NodeJS.Signals | null) => recordPhase('native-exit-event', { exitCode, signal }));
     const emit = child.emit.bind(child);
     child.emit = ((event: string | symbol, ...values: unknown[]): boolean => {
       if (event !== 'close') return emit(event, ...values);
+      recordPhase('native-close-event', { exitCode: child.exitCode, signal: child.signalCode });
       // Real OS process exited; delay only delivery of its lifecycle boundary.
       if (holdClose) deliverClose = () => { emit(event, ...values); };
       else emit(event, ...values);
@@ -108,6 +131,7 @@ function controlInterpreter(mode: 'success' | 'hang' | 'spawn-error' | 'closed-i
     const write = stdin.write.bind(stdin);
     const end = stdin.end.bind(stdin);
     stdin.write = ((chunk: string | Uint8Array): boolean => {
+      recordPhase('stdin-write');
       requestInput = (JSON.parse(String(chunk)) as { inputFile?: string }).inputFile;
       return write(chunk);
     }) as typeof stdin.write;
@@ -131,7 +155,11 @@ function controlInterpreter(mode: 'success' | 'hang' | 'spawn-error' | 'closed-i
     child: () => child, requestInput: () => requestInput,
     release: () => { deliverClose?.(); deliverClose = undefined; },
     cleanup: async (): Promise<void> => {
-      if (child && child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
+      recordPhase('cleanup-start', { childCreated: Boolean(child), exitCode: child?.exitCode ?? null, signal: child?.signalCode ?? null });
+      if (child && child.exitCode === null && child.signalCode === null) {
+        recordPhase('cleanup-kill-request', { exitCode: child.exitCode, signal: child.signalCode });
+        child.kill('SIGKILL');
+      }
       if (child) await actualClose;
       deliverClose?.(); deliverClose = undefined;
     },
@@ -142,13 +170,16 @@ it('drains an interpreter that exits before READY without abandoning the lease o
   const run = controlInterpreter('early-exit', true);
   const { performOnnxUpscale } = await import('@/lib/image-tools/upscayl');
   const { withLocalInferenceLock } = await import('@/lib/image-tools/concurrency-gate');
+  recordPhase('perform-start');
   const pending = performOnnxUpscale({ imageUrl: largeImage, scale: 4 });
+  recordPhase('500ms-observation-start');
   const watchdog = new AbortController();
   try {
     const observed = await Promise.race([
       run.ready.then(() => 'unexpected READY', error => String(error.message)),
       realDelay(500, 'OBSERVATION_STUCK', { signal: watchdog.signal }).catch(() => 'cancelled'),
     ]);
+    recordPhase('500ms-observation-result:' + observed);
     expect(observed).toMatch(/fixture.*closed.*READY/i);
   } finally { watchdog.abort(); await run.cleanup(); await pending; }
   expect(run.requestInput()).toBeTruthy();

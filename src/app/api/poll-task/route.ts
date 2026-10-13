@@ -14,6 +14,7 @@ export const maxDuration = 1800; // 30分钟 - 支持长时间轮询慢速API（
 
 import { appendUserJsonl } from '@/lib/server-user-storage';
 import { findProviderForModel, findProviderById, normalizeApiBaseUrl } from '@/lib/server-api-config';
+import { pollSketchTask } from '@/lib/sketch-to-code/task-http';
 import {
   getInternalRequestHeaders,
   getRequestUser,
@@ -37,7 +38,7 @@ import {
   type TaskType,
 } from '@/lib/task-registry';
 import { translateApiError } from '@/lib/api-error-translate';
-import { classifyApiError, type ClassifiedError, isCloudflareTimeoutError } from '@/lib/api-error-translator';
+import { classifyApiError, isCloudflareTimeoutError } from '@/lib/api-error-translator';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
 import { getRefineResult } from '@/app/api/refine-engine/result-store';
 import { reconcileRefineTask, refineTaskResponse, settleRefineTask } from '@/lib/refine-task-lifecycle';
@@ -45,7 +46,6 @@ import { getBrandResult } from '@/app/api/brand-ecommerce/result-store';
 import { getFontDesignResult } from '@/lib/font-design-task-store';
 import { unwrapFontDesignTaskResult } from '@/lib/font-design-task-result';
 import { isPendingLocalAsyncGenerateTask, isRecoverableSubmitOnlySubmission, shouldPollRemoteAsyncGenerateTask } from '@/lib/async-generate-task';
-import { enhanceViaAI } from '@/lib/quality-enhance';
 import {
   buildRecoveredTaskContext,
   projectPersistedCompletedTask,
@@ -120,7 +120,6 @@ const completedTaskCache = new Map<string, {
   taskResult?: Record<string, unknown>;
   timestamp: number;
 }>();
-const FAILED_CACHE = Symbol('failed');
 const failedTaskCache = new Map<string, {
   userId: string;
   error: string;
@@ -219,6 +218,8 @@ function sanitizeCompletedTaskResult(result: Record<string, unknown>): Record<st
     submissionPayload,
     ...safeResult
   } = result;
+  // Deliberately consumed only to omit private transport fields from this copy.
+  void _apiKey; void _apiBaseUrl; void _baseUrl; void _advancedParams;
   const isProviderUrlAlias = typeof provider === 'string' && /^https?:\/\//i.test(provider.trim());
   const sanitizedProvider = isProviderUrlAlias ? undefined : provider;
   return {
@@ -493,7 +494,8 @@ async function pollDurableInpaintTask(task: CloudTask, actorUserId: string): Pro
 async function handlePost(request: NextRequest): Promise<NextResponse> {
   const requestId = getRequestId(request);
   try {
-    const { taskId, model: rawModel, userId: requestUserId, providerId, engine: requestEngine, apiKey: bodyApiKey, apiBaseUrl: bodyApiBaseUrl } = await request.json();
+    const body = await request.json();
+    const { taskId, model: rawModel, providerId, engine: requestEngine, apiKey: bodyApiKey, apiBaseUrl: bodyApiBaseUrl } = body;
     if (!taskId || typeof taskId !== 'string') {
       return NextResponse.json({
         success: false,
@@ -502,6 +504,27 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
         retryable: false,
       }, { status: 400 });
     }
+    const sessionUser = (await getRequestUser(request))?.user || null;
+    const sketchRejected = (status: number, code: string): NextResponse => NextResponse.json({
+      success: false, code, requestId, retryable: false,
+    }, { status, headers: { 'Cache-Control': 'private, no-store', 'x-request-id': requestId } });
+    if (taskId.startsWith('sketch_') && !sessionUser) {
+      return sketchRejected(401, 'AUTHENTICATION_REQUIRED');
+    }
+    // Persisted type, including IDs without the sketch_ hint, must be checked
+    // before aliases, registry/cache, provider polling or paid recovery. The
+    // owner-only read cannot identify another actor's nonprefix sketch task.
+    let persistedSketchCandidate: Awaited<ReturnType<typeof getCloudTaskById>>;
+    try { persistedSketchCandidate = await getCloudTaskById(taskId); }
+    catch { return sketchRejected(503, 'SKETCH_TASK_UNAVAILABLE'); }
+    if (persistedSketchCandidate?.type === 'sketch-to-code') {
+      if (!sessionUser) return sketchRejected(401, 'AUTHENTICATION_REQUIRED');
+      if (persistedSketchCandidate.userId !== sessionUser.id) {
+        return sketchRejected(404, 'SKETCH_TASK_UNAVAILABLE');
+      }
+      return pollSketchTask(body, persistedSketchCandidate, sessionUser.id, requestId);
+    }
+    if (taskId.startsWith('sketch_')) return sketchRejected(404, 'SKETCH_TASK_UNAVAILABLE');
     let model = typeof rawModel === 'string' ? rawModel : (rawModel as Record<string, unknown>)?.model as string || String(rawModel || '');
     // ★ 从 model 中提取纯 modelId（前端可能传 providerId::modelId 格式）
     const extractedProviderId = model.includes('::') ? model.split('::')[0] : '';
@@ -518,7 +541,6 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
     // ★ engine 参数：前端传递的任务引擎类型（用于 AI RemoveBG 后处理等场景）
     // 优先使用请求参数，因为 Next.js dev 模式下 task-registry 可能不共享
     const requestEngineStr = typeof requestEngine === 'string' ? requestEngine : '';
-    const sessionUser = (await getRequestUser(request))?.user || null;
     // ★ 安全：已登录用户必须使用 session 中的 userId，忽略客户端传入值（防止伪造）
     const userId = sessionUser?.id || "anonymous";
     if (sessionUser) {
@@ -1512,7 +1534,7 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
           progress: layerTask.progress,
           label: layerTask.phase || '正在处理图片分层...',
         }, { status: 200 });
-      } catch (layerErr) {
+      } catch {
         // Fallback: directly query cloud_tasks table for layer task status
         // (avoids lease/heartbeat complexity of getLayerTaskStatus)
         try {
@@ -2317,7 +2339,6 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
       }
     }
     if (registryTask) {
-      const taskType = registryTask.type;
       if (registryTask.status === 'completed') {
         // ★ 释放队列槽位
         releaseQueueSlot(taskId);

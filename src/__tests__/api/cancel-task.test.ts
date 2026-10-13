@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   getTaskInfo: vi.fn(),
   isTaskCancelled: vi.fn(),
   cancelTask: vi.fn(),
+  abortTaskExecution: vi.fn(),
   updateTaskProgress: vi.fn(),
   cancelEditTask: vi.fn(),
   refundCredits: vi.fn(),
@@ -26,6 +27,7 @@ vi.mock('@/lib/task-registry', () => ({
   getTaskInfo: mocks.getTaskInfo,
   isTaskCancelled: mocks.isTaskCancelled,
   cancelTask: mocks.cancelTask,
+  abortTaskExecution: mocks.abortTaskExecution,
   updateTaskProgress: mocks.updateTaskProgress,
 }));
 vi.mock('@/lib/edit-task-store', () => ({ cancelEditTask: mocks.cancelEditTask }));
@@ -42,6 +44,52 @@ vi.mock('@/lib/task-core/inpaint-private-inputs', () => ({
 }));
 
 import { POST } from '@/app/api/cancel-task/route';
+
+function sketchCancellationTask(status = 'processing'): Record<string, unknown> {
+  return { id: 'original-nonprefix', userId: 'owner-a', projectId: 'project-a', type: 'sketch-to-code', providerId: 'p1', model: 'm1',
+    requestDigest: 'a'.repeat(64), idempotencyKey: 'nonce', status, progress: 10, creditCost: 14, creditStatus: status === 'cancelled' ? 'refunded' : 'pending',
+    result: { sketchAdmission: { version: 1, route: '/api/sketch-to-code', requestDigest: 'a'.repeat(64), access: { kind: 'document', actorUserId: 'owner-a', projectId: 'project-a', ownerId: 'project-owner', grantGeneration: 'expired-grant' }, pricing: { calls: 2, perCallCredits: 7, totalCredits: 14 } }, html: 'PRIVATE_HTML' } };
+}
+describe('original sketch owner-only atomic cancellation', () => {
+  beforeEach(() => {
+    Object.values(mocks).forEach(mock => mock.mockReset());
+    mocks.requireApiAuthOrReject.mockResolvedValue({ user: { id: 'owner-a', role: 'user' } });
+    mocks.getCloudTaskById.mockResolvedValue(sketchCancellationTask());
+    mocks.terminateCloudTaskAndRefund.mockResolvedValue({ status: 'cancelled', transitioned: true, refunded: true, creditCost: 14 });
+  });
+  it('lost grant owner can explicitly cancel using taskId alone; DB confirmation precedes memory abort', async () => {
+    const order: string[] = []; mocks.terminateCloudTaskAndRefund.mockImplementation(async () => { order.push('db'); return { status: 'cancelled', transitioned: true, refunded: true, creditCost: 14 }; }); mocks.abortTaskExecution.mockImplementation(() => { order.push('abort'); });
+    const response = await POST(request('original-nonprefix')); expect(response.status).toBe(200); expect(order).toEqual(['db', 'abort']);
+    expect(mocks.terminateCloudTaskAndRefund).toHaveBeenCalledWith('original-nonprefix', 'cancelled', 'SKETCH_EXECUTION_CANCELLED', undefined, { requireActive: true });
+    expect(mocks.refundCredits).not.toHaveBeenCalled(); expect(mocks.refundCloudTaskCredits).not.toHaveBeenCalled(); expect(mocks.getTaskInfo).not.toHaveBeenCalled(); expect(await response.text()).not.toMatch(/PRIVATE|access|nonce/);
+  });
+  it('admin cannot cancel another actor even if registry says admin-owned', async () => {
+    mocks.requireApiAuthOrReject.mockResolvedValue({ user: { id: 'admin-b', role: 'admin' } }); mocks.getTaskInfo.mockReturnValue({ userId: 'admin-b', result: { html: 'PRIVATE_HTML' } });
+    expect((await POST(request('original-nonprefix'))).status).toBe(404); expect(mocks.getTaskInfo).not.toHaveBeenCalled(); expect(mocks.abortTaskExecution).not.toHaveBeenCalled(); expect(mocks.terminateCloudTaskAndRefund).not.toHaveBeenCalled();
+  });
+  it.each(['completed', 'unknown', 'lookup'] as const)('does not abort/refund on %s winner/uncertainty', async variant => {
+    if (variant === 'lookup') mocks.getCloudTaskById.mockRejectedValue(new Error('SQL secret'));
+    else if (variant === 'unknown') mocks.terminateCloudTaskAndRefund.mockRejectedValue(new Error('COMMIT lost'));
+    else {
+      // Real original atomic service returns no candidate/status if completion won.
+      mocks.terminateCloudTaskAndRefund.mockResolvedValue({ status: undefined, transitioned: false, refunded: false, creditCost: 0 });
+      mocks.getCloudTaskById.mockResolvedValueOnce(sketchCancellationTask()).mockResolvedValue(sketchCancellationTask('completed'));
+    }
+    const response = await POST(request('original-nonprefix')); expect(response.status).toBe(variant === 'completed' ? 409 : 503); expect(await response.text()).not.toMatch(/SQL|secret|refunded/); expect(mocks.abortTaskExecution).not.toHaveBeenCalled(); expect(mocks.cancelTask).not.toHaveBeenCalled();
+  });
+  it('already-cancelled original result replays safely without another settlement', async () => {
+    mocks.getCloudTaskById.mockResolvedValue(sketchCancellationTask('cancelled'));
+    const response = await POST(request('original-nonprefix')); expect(response.status).toBe(200); expect(await response.json()).toHaveProperty('refunded', true); expect(mocks.terminateCloudTaskAndRefund).not.toHaveBeenCalled(); expect(mocks.abortTaskExecution).toHaveBeenCalledTimes(1);
+  });
+  it('completed before cancellation is 409 with zero settlement/abort', async () => {
+    mocks.getCloudTaskById.mockResolvedValue(sketchCancellationTask('completed'));
+    expect((await POST(request('original-nonprefix'))).status).toBe(409); expect(mocks.terminateCloudTaskAndRefund).not.toHaveBeenCalled(); expect(mocks.abortTaskExecution).not.toHaveBeenCalled();
+  });
+  it.each([{ projectId: 'wrong' }, { userId: 'owner-a' }, { apiKey: 'key' }])('rejects client cancellation fields %j', async extra => {
+    const incoming = new NextRequest('http://localhost/api/cancel-task', { method: 'POST', body: JSON.stringify({ taskId: 'original-nonprefix', ...extra }), headers: { 'content-type': 'application/json' } });
+    expect((await POST(incoming)).status).toBe(400); expect(mocks.terminateCloudTaskAndRefund).not.toHaveBeenCalled(); expect(mocks.abortTaskExecution).not.toHaveBeenCalled();
+  });
+});
 
 function request(
   taskId: string,

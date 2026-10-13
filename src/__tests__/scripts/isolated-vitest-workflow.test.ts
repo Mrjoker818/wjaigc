@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { pathToFileURL } from 'node:url';
 import path from 'node:path';
 import YAML from 'yaml';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, type TestContext } from 'vitest';
 
 interface WorkflowStep {
   name?: string;
@@ -95,18 +95,53 @@ const fixtureShards = [
   [4, 'src/__tests__/scripts/stage-4-runtime-failure-summary.test.ts'],
 ] as const;
 
+interface HistoryPhase {
+  operation: string;
+  durationMs: number;
+}
+
+interface HistoryTrace {
+  workflowPath: string;
+  events: HistoryPhase[];
+}
+
+let historyTrace: HistoryTrace | undefined;
+
+// 被动计时：所有真实操作与原时限保留，输出延后到用例结束之后。
+function recordHistoryPhase(operation: string, startedAt: bigint): void {
+  historyTrace?.events.push({ operation, durationMs: Number(process.hrtime.bigint() - startedAt) / 1e6 });
+}
+
+afterEach((context: TestContext): void => {
+  if (!historyTrace) return;
+  const completed = historyTrace;
+  historyTrace = undefined;
+  const errors = context.task.result?.errors?.map(error => ({ name: error.name, message: error.message })) ?? [];
+  process.stdout.write(`TASK6_GIT_HISTORY_PHASES:${JSON.stringify({ ...completed, errors })}\n`);
+});
+
 describe.each(shardWorkflows)('%s full-suite shard execution', (workflowPath, gateName, staticName, shardName, stepName) => {
   it('makes historical baseline objects and ancestry available on a clean shard checkout', () => {
+    historyTrace = { workflowPath, events: [] };
+    const fixtureStartedAt = process.hrtime.bigint();
     const checkout = loadJob(workflowPath, shardName).steps.find(step => step.uses === 'actions/checkout@v4');
     const depth = Number(checkout?.with?.['fetch-depth'] ?? 1);
     const fixtureRoot = realpathSync(mkdtempSync(path.join(tmpdir(), 'wujie-ci-history-')));
     expect(path.dirname(fixtureRoot)).toBe(realpathSync(tmpdir()));
     expect(path.basename(fixtureRoot)).toMatch(/^wujie-ci-history-/);
+    recordHistoryPhase('workflow-and-temporary-root', fixtureStartedAt);
     const repository = path.join(fixtureRoot, 'source');
     const candidate = path.join(fixtureRoot, 'checkout');
-    const git = (args: string[], cwd: string = fixtureRoot): string => execFileSync('git', args, {
-      cwd, encoding: 'utf8', timeout: 10_000, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'],
-    }).trim();
+    const git = (args: string[], cwd: string = fixtureRoot): string => {
+      const startedAt = process.hrtime.bigint();
+      try {
+        return execFileSync('git', args, {
+          cwd, encoding: 'utf8', timeout: 10_000, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'],
+        }).trim();
+      } finally {
+        recordHistoryPhase(args[0] === '-c' ? `commit:${args[args.length - 1]}` : args[0], startedAt);
+      }
+    };
     try {
       git(['init', '--quiet', repository]);
       const commit = (message: string): string => git([
@@ -122,12 +157,28 @@ describe.each(shardWorkflows)('%s full-suite shard execution', (workflowPath, ga
       git(['clone', '--quiet', '--no-checkout', ...(depth > 0 ? [`--depth=${depth}`] : []),
         pathToFileURL(repository).href, candidate]);
       const options = { cwd: candidate, encoding: 'utf8' as const, timeout: 10_000, windowsHide: true };
-      expect(spawnSync('git', ['cat-file', '-e', `${baseline}^{commit}`], options).status).toBe(0);
-      expect(spawnSync('git', ['merge-base', '--is-ancestor', baseline, 'HEAD'], options).status).toBe(0);
+      const catFileStartedAt = process.hrtime.bigint();
+      try {
+        expect(spawnSync('git', ['cat-file', '-e', `${baseline}^{commit}`], options).status).toBe(0);
+      } finally {
+        recordHistoryPhase('cat-file', catFileStartedAt);
+      }
+      const ancestryStartedAt = process.hrtime.bigint();
+      try {
+        expect(spawnSync('git', ['merge-base', '--is-ancestor', baseline, 'HEAD'], options).status).toBe(0);
+      } finally {
+        recordHistoryPhase('merge-base', ancestryStartedAt);
+      }
       expect(depth).toBe(0);
     } finally {
       // Only the absolute, newly created and verified fixture directory is removed.
-      rmSync(fixtureRoot, { recursive: true, force: true });
+      const cleanupStartedAt = process.hrtime.bigint();
+      try {
+        rmSync(fixtureRoot, { recursive: true, force: true });
+      } finally {
+        recordHistoryPhase('fixture-cleanup', cleanupStartedAt);
+        recordHistoryPhase('whole-history-case', fixtureStartedAt);
+      }
     }
   });
 

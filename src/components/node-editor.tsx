@@ -2,7 +2,6 @@
 
 import NextImage from 'next/image';
 import React, { useState, useCallback, useRef, useEffect, useLayoutEffect, useMemo, useReducer } from 'react';
-import { createPortal } from 'react-dom';
 import {
   WorkflowNode, WorkflowConnection, Workflow as WorkflowData, NodeType, NodeCategory,
   NODE_TYPE_COLORS, NODE_TYPE_LABELS, NODE_TYPE_ICONS, NODE_CATEGORY_LABELS,
@@ -13,7 +12,10 @@ import {
   mergeWorkflowNodeUpdate, resolveWorkflowOutputAssetReference, type WorkspaceAssetReference,
   configureWorkflowSkillNodePorts,
   updateWorkflowSkillModelBinding, workflowModelSupportsSkillRole,
+  parseWorkflowSketchDocumentReference, resolveInlineSubgraph, type WorkflowSketchDocumentReference,
 } from '@/lib/workflow-engine';
+import { SketchClient, sketchModels, DOCUMENT_PLACEMENT_REASON, SKETCH_DOCUMENT_SANDBOX, type SketchScope } from '@/lib/sketch-to-code/client';
+import { SketchPlacement, type SketchInsert } from '@/lib/sketch-to-code/placement-client';
 import {
   applyWorkflowCommand,
   createWorkflowClipboardSnapshot,
@@ -36,6 +38,7 @@ import { WorkflowShadowProbe } from '@/components/workflow/WorkflowShadowProbe';
 import { getModelDisplayName } from '@/lib/model-name-map';
 import { parseExactModelKey, resolvePersistedModelSelection } from '@/lib/model-defaults';
 import { computePortPosition } from '@/lib/node-port-position';
+import { getLegacyPortWorldPosition } from '@/lib/workflow-renderer/legacy-port-position';
 import {
   createTaskModelCatalogIndex,
   taskModelKey,
@@ -95,12 +98,12 @@ import {
   PenTool, Palette, Sun, GitBranch, GitMerge, Repeat, RefreshCw, Layers,
   Bot, MessageSquare, ImageDown, Save, Download, Play, Square,
   FileInput,
-  ChevronRight, ChevronDown, ChevronLeft, Plus, Trash2, ZoomIn, ZoomOut, RotateCcw,
+  ChevronDown, Plus, Trash2, ZoomIn, ZoomOut, RotateCcw,
   Settings, Upload, X, Check, AlertCircle, Loader2, BoxSelect, Group,
   Search, ScanSearch,
   ArrowLeft, LayoutGrid, Sparkles, Rotate3d, Box, ShoppingBag,
-  Copy, Clipboard, Film, Bookmark, BookmarkPlus, GitCompare, Grid3X3, ArrowLeftFromLine, ImagePlus, BookOpen, Blocks, FolderOpen, ScrollText, MousePointer2,
-  CopyPlus, Unlink, Shuffle, Paintbrush, Video, FileVideo, FileText,
+  Copy, Clipboard, Film, BookOpen, Blocks, FolderOpen, ScrollText, MousePointer2,
+  CopyPlus, Unlink, Shuffle, Video, FileVideo,
   Mic, Volume2, Music, Camera, Clapperboard, Scissors as CutIcon, Globe, AudioLines, Brain,
 } from 'lucide-react';
 
@@ -121,6 +124,110 @@ function getNodeIcon(type: NodeType, size = 14, className = '') {
 }
 
 interface ModelOption { id: string; name: string; type: string; provider: string; providerId?: string; apiDisplayName?: string; }
+
+function sketchNodes(nodes: readonly WorkflowNode[], depth = 0): WorkflowNode[] {
+  return nodes.flatMap(node => node.type === 'ai-sketch-to-code' ? [node]
+    : node.type === 'subgraph' && depth < 3 ? sketchNodes(resolveInlineSubgraph(node)?.nodes || [], depth + 1) : []);
+}
+function containsSketchNode(nodes: readonly WorkflowNode[]): boolean { return sketchNodes(nodes).length > 0; }
+function unavailableSketchModel(nodes: readonly WorkflowNode[], catalog: ReadonlyMap<string, TaskModelDescriptor>, loading: boolean): boolean {
+  const sketches = sketchNodes(nodes);
+  if (!sketches.length) return false;
+  if (loading) return true;
+  return sketches.some(node => {
+    const model = String(node.config.model || ''); const split = model.indexOf('::');
+    const providerId = split < 0 ? String(node.config.providerId || '') : model.slice(0, split);
+    const modelId = split < 0 ? model : model.slice(split + 2);
+    const descriptor = catalog.get(taskModelKey(providerId, modelId));
+    return !descriptor || sketchModels([descriptor]).length !== 1;
+  });
+}
+type SketchExecutionView = { status: string; output?: Record<string, unknown>; error?: string };
+function safeSketchExecutionResults(results: Record<string, SketchExecutionView>, nodes: readonly WorkflowNode[]): Record<string, SketchExecutionView> {
+  const ids = new Set(sketchNodes(nodes).map(node => node.id));
+  return Object.fromEntries(Object.entries(results).map(([id, result]) => {
+    const reference = parseWorkflowSketchDocumentReference(result.output?.documentReference);
+    if (!ids.has(id) && !reference) return [id, result];
+    const output: Record<string, unknown> = {};
+    if (reference) output.documentReference = reference;
+    for (const key of ['taskId', 'projectId', 'providerId', 'modelId', 'assetId', 'assetVersionId', 'sourceRole', 'status', 'phase']) {
+      const value = result.output?.[key]; if (typeof value === 'string' && /^[A-Za-z0-9._:-]{1,200}$/.test(value)) output[key] = value;
+    }
+    if (typeof result.output?.progress === 'number') output.progress = Math.max(0, Math.min(100, result.output.progress));
+    for (const key of ['needsReconcile', 'refunded']) if (typeof result.output?.[key] === 'boolean') output[key] = result.output[key];
+    const image = result.output?.imageUrl;
+    if (typeof image === 'string' && /^data:image\/png;base64,[A-Za-z0-9+/]+={0,2}$/.test(image)) output.imageUrl = image;
+    return [id, { status: result.status, output, ...(typeof result.error === 'string' ? { error: result.error.slice(0, 8192) } : {}) }];
+  }));
+}
+interface WorkflowSketchDocumentControlsProps {
+  scope: SketchScope; reference: WorkflowSketchDocumentReference | null; status: string; error?: string; phase?: unknown; progress?: unknown; insert?: SketchInsert;
+}
+function WorkflowSketchDocumentControls({ scope, reference, status, error, phase, progress, insert }: WorkflowSketchDocumentControlsProps) {
+  const binding = JSON.stringify(reference);
+  const client = useMemo(() => new SketchClient(scope), [scope]);
+  const placement = useRef<SketchPlacement | null>(null);
+  const lifecycle = useRef(0);
+  const urlRef = useRef<string | null>(null);
+  const [preview, setPreview] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [readError, setReadError] = useState('');
+  const clearPreview = useCallback(() => {
+    if (urlRef.current) URL.revokeObjectURL(urlRef.current);
+    urlRef.current = null; setPreview(null);
+  }, []);
+  useEffect(() => {
+    lifecycle.current += 1; placement.current = null; clearPreview(); setBusy(false); setReadError('');
+    return () => {
+      lifecycle.current += 1; client.stop(); placement.current?.stop();
+      if (urlRef.current) URL.revokeObjectURL(urlRef.current);
+      urlRef.current = null;
+    };
+  }, [client, binding, status, clearPreview]);
+  const perform = async (action: 'preview' | 'download' | 'place'): Promise<void> => {
+    if (busy || !reference || status !== 'success' || scope.authority === 'unknown') return;
+    const epoch = lifecycle.current;
+    const assert = (): void => { scope.assertCurrent(); if (epoch !== lifecycle.current) throw new Error('读取已停止'); };
+    setBusy(true); setReadError(''); clearPreview();
+    try {
+      assert(); const task = await client.poll(reference.taskId); assert();
+      if (task.status !== 'completed' || Object.entries(reference).some(([key, value]) => key !== 'kind' && task[key as keyof typeof task] !== value)) throw new Error('草图结果绑定已变化，请核对原任务');
+      if (action === 'place') {
+        if (!insert) throw new Error('当前画布落点不可用');
+        placement.current ||= new SketchPlacement(task, scope, insert);
+        await placement.current.add(); assert();
+      } else {
+        const html = await client.document(reference.taskId); assert();
+        const url = URL.createObjectURL(new Blob([html], { type: 'text/html;charset=utf-8' }));
+        urlRef.current = url; setPreview(url);
+        if (action === 'download') {
+          const anchor = document.createElement('a'); anchor.href = url; anchor.download = `sketch-${reference.taskId}.html`; anchor.click();
+        }
+      }
+    } catch (failure) {
+      if (epoch === lifecycle.current) { clearPreview(); setReadError(failure instanceof Error ? failure.message : '当前读取未确认，请重新核对任务'); }
+    } finally { if (epoch === lifecycle.current) setBusy(false); }
+  };
+  const readable = status === 'success' && !!reference && scope.authority !== 'unknown';
+  const phaseLabel = phase === 'analysis' ? '正在分析草图' : phase === 'reconstruction' ? '正在重建页面' : '';
+  const progressLabel = typeof progress === 'number' && Number.isFinite(progress) && progress >= 0 && progress <= 100 ? ` · ${progress}%` : '';
+  const placementReason = scope.authority === 'document' ? DOCUMENT_PLACEMENT_REASON : scope.authority === 'unknown' ? '项目授权未知，不能放置' : !insert ? '当前画布落点不可用' : '';
+  return <div className="px-4 py-3 space-y-2 text-xs">
+    <p className="text-muted-foreground">原草图PNG为输入草图，不是重建页面截图；代码按当前授权读取。</p>
+    {status === 'running' && <p role="status" className="text-muted-foreground">{phaseLabel ? `${phaseLabel}${progressLabel}` : '草图处理中；受理未知时请核对原提交，不重复扣费。'}</p>}
+    {(status === 'failed' || status === 'cancelled') && <p role="alert" className="text-destructive">{error || '草图任务已停止，费用以服务端终态为准。'}</p>}
+    <div className="flex flex-wrap gap-2">
+      <button disabled={!readable || busy} onClick={() => void perform('preview')} className="px-2 py-1.5 rounded border border-border hover:bg-muted focus-visible:outline-primary disabled:opacity-50">预览安全代码</button>
+      <button disabled={!readable || busy} onClick={() => void perform('download')} className="px-2 py-1.5 rounded border border-border hover:bg-muted focus-visible:outline-primary disabled:opacity-50">下载安全HTML</button>
+      <button disabled={!readable || busy || !!placementReason} title={placementReason} onClick={() => void perform('place')} className="px-2 py-1.5 rounded border border-border hover:bg-muted focus-visible:outline-primary disabled:opacity-50">添加原草图PNG到画布</button>
+    </div>
+    {placementReason && <p className="text-muted-foreground">{placementReason}</p>}
+    {busy && <p role="status">正在核对当前授权…</p>}
+    {readError && <p role="alert" className="text-destructive">{readError}</p>}
+    {preview && <><button onClick={() => { client.stop(); clearPreview(); }} className="hover:text-primary">关闭代码预览</button>
+      <iframe title="草图安全代码预览" sandbox={SKETCH_DOCUMENT_SANDBOX} src={preview} className="w-full h-64 border border-border rounded" /></>}
+  </div>;
+}
 
 // ==================== 连线临时状态 ====================
 
@@ -708,7 +815,7 @@ export function useWorkflowDragSynchronization({
   useEffect(() => {
     if (externalWorkflow) synchronizeExternalWorkflow(externalWorkflow);
   }, [externalWorkflow, synchronizeExternalWorkflow]);
-  const beginWorkflowDrag = useCallback((_positions: WorkflowNodePosition[] = []) => {
+  const beginWorkflowDrag = useCallback(() => {
     isDraggingRef.current = true;
   }, []);
   const finishWorkflowDrag = useCallback((positions: WorkflowNodePosition[]) => {
@@ -1049,6 +1156,8 @@ export default function NodeEditor({ taskModelCatalog = [], taskModelOptions = [
   const [executionId, setExecutionId] = useState<string | null>(null);
   const [execStatus, setExecStatus] = useState<'idle' | 'running' | 'paused' | 'completed' | 'failed'>('idle');
   const [executionNodeIds, setExecutionNodeIds] = useState<string[]>([]);
+  const executionNodeIdsRef = useRef(executionNodeIds);
+  executionNodeIdsRef.current = executionNodeIds;
   const [skillEstimating, setSkillEstimating] = useState(false);
   const [skillQuote, setSkillQuote] = useState<{
     scope: WorkflowExecutionScope; quotes: WorkflowSkillQuote[]; projectId: string; expiresAt: number;
@@ -1087,6 +1196,12 @@ export default function NodeEditor({ taskModelCatalog = [], taskModelOptions = [
     workflowInputScopeRef.current = '';
     workflowInputTransferGuardRef.current = createWorkflowInputTransferGuard();
   }, []);
+  const sketchScope = useMemo<SketchScope>(() => ({ actorId: userId || '', projectId: projectId || '', key: workflowInputScope,
+    authority: userId && projectId ? canvasDocumentMode ? 'document' : 'legacy' : 'unknown',
+    assertCurrent: (write?: boolean) => {
+      if (workflowInputScopeRef.current !== workflowInputScope || !userId || !projectId) throw new Error('项目已切换或授权未知，请在当前项目核对');
+      if (write && canvasDocumentMode) throw new Error(DOCUMENT_PLACEMENT_REASON);
+    } }), [userId, projectId, canvasDocumentMode, workflowInputScope]);
 
   const toggleNodeCollapse = useCallback((nodeId: string) => {
     setCollapsedNodes(prev => {
@@ -1137,7 +1252,9 @@ export default function NodeEditor({ taskModelCatalog = [], taskModelOptions = [
           setExecutionId(state.executionId);
           setExecStatus(state.execStatus);
           setExecLogs(state.execLogs || []);
-          setExecResults(state.execResults || {});
+          const safeResults = safeSketchExecutionResults(state.execResults || {}, wfRef.current.nodes);
+          setExecResults(safeResults);
+          if (JSON.stringify(safeResults) !== JSON.stringify(state.execResults || {})) localStorage.setItem(WORKFLOW_EXEC_STATE_KEY, JSON.stringify({ ...state, execResults: safeResults }));
           setExecutionNodeIds(Array.isArray(state.nodeIds) ? state.nodeIds : Object.keys(state.execResults || {}));
           // running 由轮询重新持久化终态；paused 必须保留以支持刷新后继续审批。
           if (state.execStatus === 'running') localStorage.removeItem(WORKFLOW_EXEC_STATE_KEY);
@@ -1465,7 +1582,6 @@ ${contextInfo}
         } finally { setAssistantLoading(false); }
       }, [assistantInput, wf.nodes, wf.connections, selectedNodeId, updateWorkflow]);
 
-  const svgRef = useRef<SVGSVGElement>(null);
   const canvasContainerRef = useRef<HTMLDivElement>(null);
   const viewportRef = useRef(viewport);
   viewportRef.current = viewport; // 始终保持最新值，避免拖动时stale closure
@@ -1546,7 +1662,7 @@ ${contextInfo}
     nodeCullingBounds,
     pinnedNodeIds,
     draggingNodeRef.current,
-  ), [wf.nodes, nodeCullingBounds, pinnedNodeIds, isPanning]);
+  ), [wf.nodes, nodeCullingBounds, pinnedNodeIds]);
 
   useLayoutEffect(() => {
     if (isPanning) applyNodeViewportPreview(nodePanPreviewRef.current);
@@ -1570,6 +1686,7 @@ ${contextInfo}
     apiDisplayName: model.displayName || model.name,
   })), [taskModelOptions]);
   const modelsLoading = catalogStatus.loading || Boolean(catalogStatus.error);
+  const sketchModelsUnavailable = useMemo(() => unavailableSketchModel(wf.nodes, modelCatalogIndex, modelsLoading), [wf.nodes, modelCatalogIndex, modelsLoading]);
   const [workflowSkills, setWorkflowSkills] = useState<SkillDefinition[]>([]);
   const [workflowSkillsLoading, setWorkflowSkillsLoading] = useState(false);
   const [workflowSkillsError, setWorkflowSkillsError] = useState<string | null>(null);
@@ -1863,8 +1980,10 @@ ${contextInfo}
   // 通知外部 (拖动期间跳过)
   const onWorkflowChangeRef = useRef(onWorkflowChange);
   onWorkflowChangeRef.current = onWorkflowChange;
+  const notificationDragGuardRef = useRef(isDraggingRef);
+  notificationDragGuardRef.current = isDraggingRef;
   useEffect(() => {
-    if (!isDraggingRef.current) {
+    if (!notificationDragGuardRef.current.current) {
       lastEmittedRef.current = wf;
       onWorkflowChangeRef.current?.(wf);
     }
@@ -2167,6 +2286,9 @@ ${contextInfo}
     tailNodeId?: string;
   }) => {
     const submissionViewScope = executionViewScope;
+    if (unavailableSketchModel(payload.nodes, modelCatalogIndex, modelsLoading) || (containsSketchNode(payload.nodes) && sketchScope.authority === 'unknown')) {
+      setExecStatus('failed'); setExecLogs([{ time: Date.now(), nodeId: 'workflow', label: '工作流', status: 'error', message: '请在当前授权项目选择可用的同步视觉聊天模型' }]); setShowExecLog(true); return;
+    }
     try {
       payload = resolveWorkflowExecutionScope(payload);
     } catch (error) {
@@ -2177,6 +2299,19 @@ ${contextInfo}
     }
     const executionNodes: WorkflowNode[] = [];
     for (const node of payload.nodes) {
+      if (node.type === 'input-image') {
+        if (node.config.assetTransferPending === true) {
+          setExecStatus('failed');
+          setExecLogs([{ time: Date.now(), nodeId: node.id, label: node.label, status: 'error', message: '图片资产正在同步，请完成后再运行工作流' }]);
+          setShowExecLog(true);
+          return;
+        }
+        // 仅移除画布选图的界面追踪标记，保留权威资产引用及服务端严格校验。
+        const config = Object.fromEntries(Object.entries(node.config)
+          .filter(([key]) => !['sourceImageId', 'sourceVersionId', 'assetTransferPending'].includes(key)));
+        executionNodes.push({ ...node, config });
+        continue;
+      }
       if (node.type === 'ai-skill') {
         const skill = workflowSkills.find(candidate => (
           candidate.id === node.config.skillId && candidate.version === Number(node.config.version)
@@ -2252,7 +2387,7 @@ ${contextInfo}
       setExecLogs([{ time: Date.now(), nodeId: 'workflow', label: '工作流', status: 'error', message: '工作流启动请求失败，请重试' }]);
       setShowExecLog(true);
     }
-  }, [projectId, imageModels, wf.id, workflowSkills, WORKFLOW_EXEC_STATE_KEY, executionViewScope]);
+  }, [projectId, imageModels, wf.id, workflowSkills, WORKFLOW_EXEC_STATE_KEY, executionViewScope, modelCatalogIndex, modelsLoading, sketchScope]);
 
   const startWorkflowExecution = useCallback(async (payload: WorkflowExecutionScope) => {
     if (skillExecutionLock.current || skillQuote || ['running', 'paused'].includes(execStatus)) return;
@@ -2552,7 +2687,9 @@ ${contextInfo}
     if (port.direction !== 'out') return;
     const node = wf.nodes.find(n => n.id === nodeId);
     if (!node) return;
-    const pos = getPortPositionLocalRef.current(node, port);
+    const local = getPortPositionLocalRef.current(node, port);
+    const pos = getLegacyPortWorldPosition(e.currentTarget as HTMLElement, nodeViewportTransformRef.current)
+      ?? (local ? { x: node.x + local.x, y: node.y + local.y } : null);
     if (!pos) return;
     setDraggingConn({ fromNodeId: nodeId, fromPortId: port.id, fromX: pos.x, fromY: pos.y, toX: pos.x, toY: pos.y, portType: port.type });
   }, [wf.nodes]);
@@ -2966,6 +3103,7 @@ ${contextInfo}
           body: JSON.stringify({ action: 'status', executionId }),
         });
         const data = await res.json();
+        if (data.results) data.results = safeSketchExecutionResults(data.results, wfRef.current.nodes);
         if (controller.signal.aborted || !isWorkspaceResultScopeCurrent(executionProjectId, projectIdRef.current)) return;
         if (data.results && typeof data.results === 'object') {
           const results = data.results as Record<string, { output?: Record<string, unknown> }>;
@@ -2989,7 +3127,7 @@ ${contextInfo}
             execStatus: 'paused',
             execResults: data.results || {},
             execLogs: execLogsRef.current,
-            nodeIds: executionNodeIds.length > 0 ? executionNodeIds : Object.keys(data.results || {}),
+            nodeIds: executionNodeIdsRef.current.length > 0 ? executionNodeIdsRef.current : Object.keys(data.results || {}),
           }));
           return;
         }
@@ -3478,7 +3616,7 @@ ${contextInfo}
       nodeDragInitialPositionsRef.current = [{ nodeId, position: { x: node.x, y: node.y } }];
       nodeDragPositionRef.current = { id: nodeId, x: node.x, y: node.y };
       dragOffsetRef.current = { x: mouseX - node.x, y: mouseY - node.y };
-      beginWorkflowDrag(nodeDragInitialPositionsRef.current);
+      beginWorkflowDrag();
       setBoxSelect(null);
       isBoxSelectingRef.current = false;
     },
@@ -3543,7 +3681,7 @@ ${contextInfo}
           {/* 执行/停止 */}
           <button
             onClick={execStatus === 'running' ? handleStopWorkflow : handleRunWorkflow}
-            disabled={execStatus === 'paused'}
+            disabled={execStatus === 'paused' || (execStatus !== 'running' && sketchModelsUnavailable)}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-50 ${execStatus === 'running' ? 'bg-destructive/10 text-destructive hover:bg-destructive/20' : 'bg-[var(--color-success,#3fb950)]/10 text-[var(--color-success,#3fb950)] hover:bg-[var(--color-success,#3fb950)]/20'}`}
             title={execStatus === 'running' ? '停止执行 (Ctrl+.)' : execStatus === 'paused' ? '请先确认视频脚本' : '执行工作流 (Ctrl+Enter)'}
             aria-label={execStatus === 'running' ? '停止执行' : execStatus === 'paused' ? '等待脚本确认' : '执行工作流'}
@@ -3958,6 +4096,12 @@ ${contextInfo}
               onCanvasImageSelect={transferCanvasImageToWorkflow}
               projectId={projectId}
               execResult={execResults[selectedNode.id]}
+              sketchScope={sketchScope}
+              onSketchInsert={onAddImages ? async reference => {
+                sketchScope.assertCurrent(true);
+                await onAddImages([{ outputNodeId: selectedNode.id, url: reference.url, assetReference: reference }]);
+                sketchScope.assertCurrent(true);
+              } : undefined}
               onSkillApproval={handleWorkflowSkillApproval}
             />
           ) : (
@@ -4399,6 +4543,8 @@ interface PropertyPanelProps {
   onCanvasImageSelect: (nodeId: string, image: CanvasImageRef) => Promise<void>;
   projectId?: string;
   execResult?: { status: string; output?: Record<string, unknown>; error?: string };
+  sketchScope: SketchScope;
+  onSketchInsert?: SketchInsert;
   onSkillApproval: (
     nodeId: string,
     runId: string,
@@ -4408,7 +4554,7 @@ interface PropertyPanelProps {
   ) => Promise<boolean>;
 }
 
-function PropertyPanel({ node, models, modelCatalogIndex, modelsLoading, workflowSkills, workflowSkillsLoading, workflowSkillsError, boundSourceVersionIds, onUpdate, onDelete, onImageUpload, canvasImages, onCanvasImageSelect, projectId, execResult, onSkillApproval }: PropertyPanelProps) {
+function PropertyPanel({ node, models, modelCatalogIndex, modelsLoading, workflowSkills, workflowSkillsLoading, workflowSkillsError, boundSourceVersionIds, onUpdate, onDelete, onImageUpload, canvasImages, onCanvasImageSelect, projectId, execResult, onSkillApproval, sketchScope, onSketchInsert }: PropertyPanelProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [localTextValues, setLocalTextValues] = useState<Record<string, string>>({});
   const [focusedField, setFocusedField] = useState<string | null>(null);
@@ -4700,6 +4846,17 @@ function PropertyPanel({ node, models, modelCatalogIndex, modelsLoading, workflo
       }
 
       case 'model-select': {
+        if (node.type === 'ai-sketch-to-code') {
+          const eligible = sketchModels([...modelCatalogIndex.values()]);
+          const configured = String(externalValue || '');
+          const exact = configured.includes('::') ? configured : `${String(node.config.providerId || '')}::${configured}`;
+          return <select aria-label="草图视觉模型" value={eligible.some(m => `${m.providerId}::${m.modelId}` === exact) ? exact : ''} disabled={modelsLoading}
+            onChange={event => { const model = eligible.find(m => `${m.providerId}::${m.modelId}` === event.target.value); if (model) onUpdate(node.id, { config: { model: event.target.value, providerId: model.providerId } }); }}
+            className="w-full bg-muted border border-border rounded px-3 py-2 text-sm text-foreground focus:outline-none focus:border-primary/50 disabled:opacity-50">
+            <option value="">{modelsLoading ? '模型目录暂不可用' : '选择同步视觉聊天模型'}</option>
+            {eligible.map(model => <option key={`${model.providerId}::${model.modelId}`} value={`${model.providerId}::${model.modelId}`}>{model.modelId} ({model.providerId})</option>)}
+          </select>;
+        }
         const modelFilterType = field.modelFilter || 'image'; // 默认只显示图像模型
         // 支持复合键 providerId::modelId 和纯 modelId
         const currentModelId = String(externalValue || '');
@@ -4872,6 +5029,9 @@ function PropertyPanel({ node, models, modelCatalogIndex, modelsLoading, workflo
 
       <WorkspaceSourceTraceDetails sourceTrace={node.config.sourceTrace} />
 
+      {(node.type === 'ai-sketch-to-code' || parseWorkflowSketchDocumentReference(execResult?.output?.documentReference)) && <WorkflowSketchDocumentControls scope={sketchScope}
+        reference={parseWorkflowSketchDocumentReference(execResult?.output?.documentReference)} status={execResult?.status || 'idle'} error={execResult?.error}
+        phase={execResult?.output?.phase} progress={execResult?.output?.progress} insert={onSketchInsert} />}
       {node.type === 'ai-skill' && (
         <div className="space-y-4 px-4 py-2">
           <div>

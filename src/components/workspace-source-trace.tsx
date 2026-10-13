@@ -24,6 +24,9 @@ function formatSourceTime(createdAt: string): string {
 }
 
 function sourceTraceTitle(trace: WorkspaceSourceTrace): string {
+  if (trace.source === 'sketch-to-code') return ['来源：草图转代码（原始草图PNG，非页面截图）',
+    `task：${trace.taskId}`, `project：${trace.projectId}`, `PNG版本：${trace.previewAssetVersionId}`,
+    `HTML版本：${trace.htmlAssetVersionId}`, `本地接收时间：${formatSourceTime(trace.createdAt)}`].join('\n');
   if (trace.source === 'canvas-skill') {
     return [
       '来源：Canvas Skill',
@@ -44,6 +47,16 @@ function sourceTraceTitle(trace: WorkspaceSourceTrace): string {
 export function WorkspaceSourceTraceDetails({ sourceTrace }: WorkspaceSourceTraceProps): ReactElement | null {
   const trace = parseWorkspaceSourceTrace(sourceTrace);
   if (!trace) return null;
+  if (trace.source === 'sketch-to-code') return (
+    <section className="mx-4 mb-2 rounded border border-border/60 bg-muted/40 px-3 py-2" aria-label="节点来源">
+      <div className="text-xs font-medium text-foreground">来源：草图转代码（原始草图PNG，非页面截图）</div>
+      <dl className="mt-1.5 grid grid-cols-[auto_minmax(0,1fr)] gap-x-2 gap-y-1 break-all text-[11px] text-muted-foreground">
+        <dt>task</dt><dd>{trace.taskId}</dd><dt>project</dt><dd>{trace.projectId}</dd>
+        <dt>PNG版本</dt><dd>{trace.previewAssetVersionId}</dd><dt>HTML版本</dt><dd>{trace.htmlAssetVersionId}</dd>
+        <dt>本地接收时间</dt><dd>{formatSourceTime(trace.createdAt)}</dd>
+      </dl>
+    </section>
+  );
   if (trace.source === 'canvas-skill') {
     return (
       <section className="mx-4 mb-2 rounded border border-border/60 bg-muted/40 px-3 py-2" aria-label="节点来源">
@@ -81,7 +94,7 @@ export function CanvasSourceTraceBadge({
       className="pointer-events-auto px-1.5 py-0.5 rounded text-[9px] font-medium whitespace-nowrap leading-tight bg-black/70 text-amber-200"
       title={sourceTraceTitle(trace)}
     >
-      {trace.source === 'canvas-skill' ? 'Canvas Skill' : '智能对话'}
+      {trace.source === 'canvas-skill' ? 'Canvas Skill' : trace.source === 'sketch-to-code' ? '草图转代码 · 原始PNG' : '智能对话'}
     </span>
   );
 }

@@ -1323,6 +1323,46 @@ export async function completeCloudTask(
   return (completed.rowCount ?? completed.rows.length) > 0 && completed.rows[0]?.committed !== false;
 }
 
+/** Opt-in eligibility for the original sketch worker/recovery refund statement. */
+export interface SketchTaskSettlementFence {
+  actorUserId: string;
+  projectId: string;
+  providerId: string;
+  modelId: string;
+  requestDigest: string;
+  idempotencyKey: string;
+  access: { kind: 'personal'; actorUserId: string; projectId: string; ownerId: string }
+    | { kind: 'document'; actorUserId: string; projectId: string; ownerId: string; grantGeneration: string };
+  leaseOwner: string;
+  attemptCount: number;
+  leaseExpiresAt: number;
+  /** DB deadline for this one settlement, independent of its longer lease. */
+  settleBefore: number;
+}
+
+function snapshotSketchSettlementFence(value: unknown, leaseOwner?: string): SketchTaskSettlementFence | null {
+  try {
+    const fence = structuredClone(value) as SketchTaskSettlementFence | undefined;
+    const text = (value: unknown): value is string => typeof value === 'string' && value.length > 0
+      && value.length <= 256 && value === value.trim() && !/\p{Cc}/u.test(value);
+    if (!fence || typeof fence !== 'object' || Array.isArray(fence)
+      || ![fence.actorUserId, fence.projectId, fence.providerId, fence.modelId, fence.idempotencyKey, fence.leaseOwner].every(text)
+      || fence.leaseOwner !== leaseOwner || !/^[a-f0-9]{64}$/.test(fence.requestDigest)
+      || !Number.isSafeInteger(fence.attemptCount) || fence.attemptCount < 1 || fence.attemptCount > 2_147_483_647
+      || !Number.isSafeInteger(fence.leaseExpiresAt) || fence.leaseExpiresAt <= 0
+      || !Number.isSafeInteger(fence.settleBefore) || fence.settleBefore <= 0) return null;
+    const access = fence.access;
+    if (!access || typeof access !== 'object' || Array.isArray(access) || !text(access.ownerId)
+      || access.actorUserId !== fence.actorUserId || access.projectId !== fence.projectId) return null;
+    const fields = access.kind === 'personal' ? ['kind', 'actorUserId', 'projectId', 'ownerId']
+      : ['kind', 'actorUserId', 'projectId', 'ownerId', 'grantGeneration'];
+    if (Object.keys(access).length !== fields.length || !Object.keys(access).every(key => fields.includes(key))) return null;
+    if (access.kind === 'personal' ? access.ownerId !== fence.actorUserId
+      : access.kind !== 'document' || !text(access.grantGeneration)) return null;
+    Object.freeze(access); return Object.freeze(fence);
+  } catch { return null; }
+}
+
 /**
  * Moves a live task to a failure terminal state and claims any refund in the
  * same database statement. Repeated or concurrent calls cannot claim twice.
@@ -1334,8 +1374,14 @@ export async function terminateCloudTaskAndRefund(
   leaseOwner?: string,
   options: { requireUnsubmittedPrepaid?: boolean; requireActive?: boolean;
     expectedCpuRemoveBg?: { userId: string; requestDigest: string; createdBefore: number };
+    expectedSketchExecution?: SketchTaskSettlementFence;
     client?: PoolClient } = {},
 ): Promise<CloudTaskTerminationResult> {
+  // An explicitly requested but malformed fence must never fall back to the
+  // legacy cancellation path. Copy it before schema initialization can await.
+  const sketchFence = 'expectedSketchExecution' in options
+    ? snapshotSketchSettlementFence(options.expectedSketchExecution, leaseOwner) : undefined;
+  if (sketchFence === null) return { status: undefined, transitioned: false, refunded: false, creditCost: 0 };
   await ensureCoreTables();
   await ensureCloudTaskTables();
   const now = Date.now();
@@ -1353,6 +1399,20 @@ export async function terminateCloudTaskAndRefund(
         AND task.result #>> '{imageEditAdmission,kind}' = 'document-cpu-removebg'
         AND task.result #>> '{imageEditAdmission,requestDigest}' = task.request_digest
         AND task.created_at <= $${cpuIdentityIndex + 2}` : '';
+  const sketchIndex = executionFence.nextIndex + (expectedCpuRemoveBg ? 3 : 0);
+  const sketchIdentityCondition = sketchFence ? `
+        AND task.type = 'sketch-to-code' AND task.status IN ('pending', 'processing')
+        AND task.user_id = $${sketchIndex} AND task.project_id = $${sketchIndex + 1}
+        AND task.provider_id = $${sketchIndex + 2} AND task.model = $${sketchIndex + 3}
+        AND task.request_digest = $${sketchIndex + 4} AND task.idempotency_key = $${sketchIndex + 5}
+        AND task.result #> '{sketchAdmission,version}' = '1'::jsonb
+        AND task.result #>> '{sketchAdmission,route}' = '/api/sketch-to-code'
+        AND task.result #>> '{sketchAdmission,requestDigest}' = $${sketchIndex + 4}
+        AND task.result #> '{sketchAdmission,access}' = $${sketchIndex + 6}::jsonb
+        AND task.lease_owner = $6 AND task.attempt_count = $${sketchIndex + 7}
+        AND task.lease_expires_at = $${sketchIndex + 8}
+        AND task.lease_expires_at > EXTRACT(EPOCH FROM clock_timestamp()) * 1000
+        AND $${sketchIndex + 9}::bigint > EXTRACT(EPOCH FROM clock_timestamp()) * 1000` : '';
   const settlementSql = `
     WITH candidate AS (
       SELECT task.id,
@@ -1365,6 +1425,7 @@ export async function terminateCloudTaskAndRefund(
       WHERE task.id = $1
         ${executionFence.condition}
         ${cpuIdentityCondition}
+        ${sketchIdentityCondition}
         AND ($6::text IS NULL OR task.lease_owner = $6)
         ${options.requireUnsubmittedPrepaid ? `AND (
           $2 <> 'timeout'
@@ -1388,7 +1449,11 @@ export async function terminateCloudTaskAndRefund(
       WHERE candidate.previous_credit_status = 'pending'
         AND candidate.credit_cost > 0
       FOR UPDATE OF credit
-    ), prior_refund AS (
+    )${sketchFence ? `, sketch_locked_candidate AS MATERIALIZED (
+      SELECT candidate.*
+      FROM candidate
+      WHERE (SELECT COUNT(*) FROM locked_credit) >= 0
+    )` : ''}, prior_refund AS (
       SELECT candidate.id AS task_id,
              MIN(refund_tx.id) AS transaction_id
       FROM candidate
@@ -1444,8 +1509,12 @@ export async function terminateCloudTaskAndRefund(
           lease_owner = '',
           lease_expires_at = 0,
           updated_at = $4
-      FROM candidate
-      WHERE task.id = candidate.id
+      FROM ${sketchFence ? 'sketch_locked_candidate' : 'candidate'} candidate
+      -- CASE depends on both joined rows, preventing the planner from pushing
+      -- the volatile DB-time check into a task scan before candidate locks.
+      -- The opt-in materialization also consumes the credit lock first.
+      WHERE task.id = candidate.id${sketchFence ? `
+        AND CASE WHEN task.id = candidate.id THEN (TRUE${sketchIdentityCondition}) ELSE FALSE END` : ''}
       RETURNING task.id,
                 task.user_id,
                 task.status,
@@ -1499,6 +1568,9 @@ export async function terminateCloudTaskAndRefund(
     ...executionFence.params,
     ...(expectedCpuRemoveBg ? [expectedCpuRemoveBg.userId,
       expectedCpuRemoveBg.requestDigest, expectedCpuRemoveBg.createdBefore] : []),
+    ...(sketchFence ? [sketchFence.actorUserId, sketchFence.projectId, sketchFence.providerId, sketchFence.modelId,
+      sketchFence.requestDigest, sketchFence.idempotencyKey, JSON.stringify(sketchFence.access), sketchFence.attemptCount,
+      sketchFence.leaseExpiresAt, sketchFence.settleBefore] : []),
   ];
   let result: { rows: Record<string, unknown>[] };
   try {

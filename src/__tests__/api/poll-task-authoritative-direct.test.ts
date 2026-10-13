@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   getTaskInfo: vi.fn(),
   isTaskCancelled: vi.fn(),
   getCloudTaskForUser: vi.fn(),
+  getCloudTaskById: vi.fn(),
   claimCloudTaskLease: vi.fn(),
   registerTask: vi.fn(),
   updateTaskProgress: vi.fn(),
@@ -48,6 +49,7 @@ vi.mock('@/lib/task-registry', () => ({
 }));
 
 vi.mock('@/lib/cloud-task-storage', () => ({
+  getCloudTaskById: mocks.getCloudTaskById,
   getCloudTaskForUser: mocks.getCloudTaskForUser,
   claimCloudTaskLease: mocks.claimCloudTaskLease,
   completeCloudTask: mocks.completeCloudTask,
@@ -102,6 +104,7 @@ import { POST } from '@/app/api/poll-task/route';
 describe('poll-task authoritative direct recovery', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.getCloudTaskById.mockReset().mockResolvedValue(null);
     mocks.getRequestUser.mockResolvedValue({
       user: { id: 'user-a', role: 'user' },
       source: 'cookie',

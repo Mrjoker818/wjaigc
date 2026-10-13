@@ -209,6 +209,7 @@ const definitions: readonly CanvasToolDefinition[] = Object.freeze([
   tool(specialized, 'packaging-pro', '包装Pro', ['bottom-toolbar'], 'specialized', 'floating'),
   tool(specialized, 'display-pro', '展陈Pro', ['bottom-toolbar'], 'specialized', 'floating'),
   tool(specialized, 'effect-reverse', '效果图反拆', ['bottom-toolbar', 'image-toolbar'], 'specialized', 'bottom-drawer'),
+  tool(specialized, 'sketch-to-code', '草图转代码', ['bottom-toolbar', 'image-toolbar'], 'specialized', 'bottom-drawer'),
   tool(specialized, 'font-design', '字境大师', ['bottom-toolbar', 'shortcut'], 'specialized', 'floating'),
   tool(specialized, 'vector-design', 'AI矢量设计', ['bottom-toolbar'], 'specialized', 'floating'),
   tool(specialized, 'ai-psd', 'AI PSD', ['bottom-toolbar', 'image-toolbar'], 'specialized', 'floating'),
