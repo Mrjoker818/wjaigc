@@ -81,7 +81,8 @@ src/
 │       │   └── inpaint/route.ts    # 涂抹消除/蒙版修图 API (IOPaint+LaMa)
 │       ├── admin/
 │       │   ├── api-balance/route.ts   # API 余额与用量分析 API
-│       │   └── op-log/route.ts        # 操作日志 API (查询/统计/AI分析/修复/批量删除/导出)
+│       │   ├── op-log/route.ts        # 操作日志 API (查询/统计/AI分析/修复/批量删除/导出)
+│       │   └── restore-user-data/route.ts # 管理员数据恢复 API (cloud_tasks时间窗→画布缺失图→追加恢复项目, 只追加+幂等+审计)
 │       └── design/
 │           └── vectorize/route.ts  # 矢量化 API (支持管理员配置的矢量模型 + PY_VECTORIZE_ENDPOINT)
 ├── components/
@@ -718,6 +719,16 @@ UPSCALE_TIMEOUT_MS=300000
   - action: `batch_delete` - 批量删除日志
   - action: `export` - 导出日志 CSV
 
+### 用户数据恢复 (admin/restore-user-data/route.ts)
+
+管理员专用恢复接口，用于用户项目内容丢失（前端 sync 快照覆盖等场景）后找回生成数据。
+
+- **原理**: 扫描 `cloud_tasks` 中指定用户时间窗内的 completed 任务 → 提取 `result.imageUrls/imageUrl`（临时 CDN URL）→ 通过 `wujie_image_source_map` 映射回 gen- 持久化文件（`gen-` 优先，`img_` 兜底）→ 排除已存在于现有画布的图片 → sharp 读取真实尺寸 → 组装为新项目**追加**到 `wujie_user_data.projects`
+- **安全设计**: 只追加新项目（绝不修改/删除现有项目）；同名恢复项目幂等跳过；恢复图 id 使用 `restore-` 前缀不会命中删除墓碑；全程 `logOperation` 审计
+- **POST 参数**: `userId`（目标用户）、`startTime/endTime`（时间窗 ms，最大 7 天）、`projectName?`（默认 `数据恢复-YYYY-MM-DD`）、`dryRun?`（true 仅预览清单不写库）
+- **响应**: `restored`（恢复张数）/ `skippedExisting`（画布已有跳过数）/ `preview`（dryRun 时文件清单）
+- **调用方式**: 管理员登录后浏览器 F12 控制台 `fetch('/api/admin/restore-user-data', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({...})})`
+- **注意**: cloud_tasks 主键列为 `id`（非 task_id）；恢复前建议目标用户刷新/关闭已打开的编辑页面，避免旧前端快照 sync 再次覆盖
 ### 前端 UI (admin-tabs.tsx)
 - 管理员面板"操作日志"Tab：统计卡片(总操作/今日操作/错误数/未解决) + 筛选栏(操作类型/日志级别/用户ID) + 日志列表 + 详情展开(错误堆栈/请求参数/AI分析) + 解决操作(标记已解决/忽略/AI修复)
 
