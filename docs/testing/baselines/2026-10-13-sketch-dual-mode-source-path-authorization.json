@@ -1,0 +1,176 @@
+{
+  "kind": "EXACT_DUAL_MODE_CANDIDATE_SOURCE_PATH_AUTHORIZATION",
+  "authorizedAt": "2026-10-13T11:47:29.458Z",
+  "sourceRoot": "J:/无界本地版/projects/_upstream-wjaigc-restore",
+  "authorizationBasis": [
+    "Human: 确认按照双模式方案推进",
+    "Human: 完成交付检查后，仅本轮升级相关代码、测试和必要文档提交同步GitHub main→Coze；不动stable、不提交无关用户文件或密钥、不强推、不正式部署"
+  ],
+  "scope": "Only 25 exact newly introduced production paths of the agreed dual-mode implementation. This is pre-commit path authorization, NOT historical commit provenance, whole-CI, build, paid-provider, Coze or Edge acceptance.",
+  "sourceCommit": null,
+  "historicalProvenanceUntouched": true,
+  "gateScriptAndOriginalAssertionsUntouched": true,
+  "paths": [
+    {
+      "path": "src/app/api/sketch-to-image/route.ts",
+      "bytes": 4180,
+      "sha256": "c8ffbe9f3e37eb937b8f2e7c479aece443caeaba9b775f8654ab22624e0dbcdc"
+    },
+    {
+      "path": "src/components/workflow-sketch-image-controls.tsx",
+      "bytes": 9066,
+      "sha256": "d6778e72cbfbb7308beed631f8d557f4f889ba7cfae56570e81fa4b97a261d96"
+    },
+    {
+      "path": "src/lib/sketch-to-code/configured-image-dependencies.ts",
+      "bytes": 19220,
+      "sha256": "b4d0287075143d4f0a144ab95113ba3213f9d757a70824fcd2cc14ee4bd33b45"
+    },
+    {
+      "path": "src/lib/sketch-to-code/image-admission.ts",
+      "bytes": 9059,
+      "sha256": "a9dafed02f73edf508e13069ad15d999df755dd7681de85952d5ef1b871da9c7"
+    },
+    {
+      "path": "src/lib/sketch-to-code/image-cancel-reconfirm.ts",
+      "bytes": 5987,
+      "sha256": "6d5261db6e2e7f881f2f55a4f4009e8c3b58d3297f8c653e8e51a71a2b6768ab"
+    },
+    {
+      "path": "src/lib/sketch-to-code/image-client.ts",
+      "bytes": 22236,
+      "sha256": "733c4216f5cc35ec45fa40d7779c874193eaa5027da46f055c3f848bd7c91c5d"
+    },
+    {
+      "path": "src/lib/sketch-to-code/image-contract.ts",
+      "bytes": 14342,
+      "sha256": "1e12a965e22470947d1c19609c66af631a6ea6d8d74f2da872f8c9e8693df324"
+    },
+    {
+      "path": "src/lib/sketch-to-code/image-execution.ts",
+      "bytes": 11674,
+      "sha256": "02e6e3bccd25e406987ab26571fe3407333b3fde33cb1221e93493801e24e48a"
+    },
+    {
+      "path": "src/lib/sketch-to-code/image-failure.ts",
+      "bytes": 8416,
+      "sha256": "a60220428b3722f46724ea71b2c8726b0fbb69b354725c47cc7ec12888b9ce03"
+    },
+    {
+      "path": "src/lib/sketch-to-code/image-generation.ts",
+      "bytes": 9949,
+      "sha256": "68ee303ac40e73a55d864b66a4c7f25605bccac42651ef2868e22f8151fd1eff"
+    },
+    {
+      "path": "src/lib/sketch-to-code/image-http.ts",
+      "bytes": 612,
+      "sha256": "a87eee032da7c0fb32fc21a4e3a97990598cd8edaed7156a97e3d1f70f6392f8"
+    },
+    {
+      "path": "src/lib/sketch-to-code/image-known-failure.ts",
+      "bytes": 1959,
+      "sha256": "ecb4594edfaca8ff8a31c397eff20f420ef2beaaff76aac436822e2676b4f7d6"
+    },
+    {
+      "path": "src/lib/sketch-to-code/image-ledger.ts",
+      "bytes": 14307,
+      "sha256": "18262009441040b8e96941a73b4f8f82942757c96bcd0250ef129e8e6d4999aa"
+    },
+    {
+      "path": "src/lib/sketch-to-code/image-placement-client.ts",
+      "bytes": 7948,
+      "sha256": "47d7dad780ebe84d13fb8340d33767cb220764627d56c05973ba79bae84f5724"
+    },
+    {
+      "path": "src/lib/sketch-to-code/image-pricing.ts",
+      "bytes": 6993,
+      "sha256": "6997669a968dcbd7dbd650d0d7ed56ca8459a79d70659e150c64223d418138eb"
+    },
+    {
+      "path": "src/lib/sketch-to-code/image-provider.ts",
+      "bytes": 28978,
+      "sha256": "9013ebf157f8ef0b3223237f758019183d91e0a96327af4f88b58c160d6bb2c9"
+    },
+    {
+      "path": "src/lib/sketch-to-code/image-public-http.ts",
+      "bytes": 13919,
+      "sha256": "1fde8d5a400b331e2298265a1efc30e1bad7b070b3c2b43b76ceea3656e1cccf"
+    },
+    {
+      "path": "src/lib/sketch-to-code/image-publication.ts",
+      "bytes": 26211,
+      "sha256": "610b2d403d35eb3fa432bb3717f5eee2cde8773cf20b1bca370fd59693a6bf6d"
+    },
+    {
+      "path": "src/lib/sketch-to-code/image-result.ts",
+      "bytes": 10560,
+      "sha256": "a19456c9af0a1bacb040bdf94711287c6c0340b028b7d5ffa3f1787baab5009d"
+    },
+    {
+      "path": "src/lib/sketch-to-code/image-service.ts",
+      "bytes": 3607,
+      "sha256": "da0f57e0dd4a9ab68ac8979e33e2a78a3620b084e842c7ca887851b8fbdc6dca"
+    },
+    {
+      "path": "src/lib/sketch-to-code/image-task-http.ts",
+      "bytes": 6303,
+      "sha256": "ca67c61dcf6490ea5725e15e9e8576022d4020746552ca8a1162849da0e354d3"
+    },
+    {
+      "path": "src/lib/sketch-to-code/image-task-state.ts",
+      "bytes": 6546,
+      "sha256": "52294aea561face57416430dcf056e176f5784386f6b5d18d92638d7bd04bb0e"
+    },
+    {
+      "path": "src/lib/sketch-to-code/image-worker.ts",
+      "bytes": 16786,
+      "sha256": "14291f25122042c5262a52287212fa25fe607c17cb14a5fdb3c554592ac2efae"
+    },
+    {
+      "path": "src/lib/sketch-to-code/image-workflow.ts",
+      "bytes": 18643,
+      "sha256": "728f7adfed7d4eea14437319678038d0f7d599e05cac52b6b81c03f0caf9c4b4"
+    },
+    {
+      "path": "src/lib/sketch-to-code/stage.ts",
+      "bytes": 1202,
+      "sha256": "885102fbcec134cf940e736356a6c0e55691b0f3999cd0064f986275643b3d0a"
+    }
+  ],
+  "reviewIndex": {
+    "task7": ".superpowers/sdd/2026-10-09-sketch-to-code/task-7-review.md",
+    "task8B1": ".superpowers/sdd/2026-10-09-sketch-to-code/task-8-pricing-review.md",
+    "task8A": ".superpowers/sdd/2026-10-09-sketch-to-code/task-8-analysis-review.md",
+    "task8B2": ".superpowers/sdd/2026-10-09-sketch-to-code/task-8-generation-review.md",
+    "task8B3a": ".superpowers/sdd/2026-10-09-sketch-to-code/task-8-image-admission-state-review.md",
+    "task8B3Ledger": ".superpowers/sdd/2026-10-09-sketch-to-code/task-8-image-ledger-review.md",
+    "task8C": ".superpowers/sdd/2026-10-09-sketch-to-code/task-8-image-provider-review.md",
+    "task8Checkpoint": ".superpowers/sdd/2026-10-09-sketch-to-code/task-8-image-checkpoint-review.md",
+    "task8Worker": ".superpowers/sdd/2026-10-09-sketch-to-code/task-8-image-worker-review.md",
+    "task8Publication": ".superpowers/sdd/2026-10-09-sketch-to-code/task-8-image-publication-review.md",
+    "task8Configured": ".superpowers/sdd/2026-10-09-sketch-to-code/task-8-image-configured-review.md",
+    "task8OwnerCancel": ".superpowers/sdd/2026-10-09-sketch-to-code/task-8-image-task-http-review.md",
+    "task8ProtectedResult": ".superpowers/sdd/2026-10-09-sketch-to-code/task-8-image-result-review.md",
+    "task8ServiceHttp": ".superpowers/sdd/2026-10-09-sketch-to-code/task-8-image-service-http-review.md",
+    "task8PublicHttp": ".superpowers/sdd/2026-10-09-sketch-to-code/task-8-image-public-http-review.md",
+    "task8SqlNumericCompatibility": ".superpowers/sdd/2026-10-09-sketch-to-code/task-8-numeric-row-review.md",
+    "task8KnownFailure": ".superpowers/sdd/2026-10-09-sketch-to-code/task-8-known-failure-review.md",
+    "task8KnownFailureProvider": ".superpowers/sdd/2026-10-09-sketch-to-code/task-8-known-failure-provider-fix-review.md",
+    "task8SqlEmptyIdCompatibility": ".superpowers/sdd/2026-10-09-sketch-to-code/task-8-empty-sql-id-review.md",
+    "task8CancelReconfirm": ".superpowers/sdd/2026-10-09-sketch-to-code/task-8-cancel-reconfirm-review.md"
+  },
+  "finalIntegrationClosure": {
+    "path": "J:/无界本地版/projects/_upstream-wjaigc-restore/.superpowers/sdd/2026-10-09-sketch-to-code/integration-c1-three-seams-independent-closure-20261013.md",
+    "bytes": 8462,
+    "sha256": "8cbdb49ab5ba0dea8f892ddcd390fce61c0b98efe58caa219483677613f5f386"
+  },
+  "boundaries": {
+    "noBlanketDirectoryOrWildcard": true,
+    "noNewSourceClaimedAs2729": true,
+    "noStable": true,
+    "noPaidProvider": true,
+    "noDeployment": true,
+    "noGitYet": true,
+    "fullDeliveryGatesPending": true
+  }
+}

@@ -27,7 +27,7 @@ export type NodeType =
   | 'ai-generate' | 'ai-edit' | 'ai-annotation-edit' | 'ai-retouch' | 'ai-upscale' | 'ai-removebg' | 'ai-vectorize' | 'ai-style-transfer' | 'ai-color-adjust' | 'ai-analyze'
   | 'ai-font-design' | 'ai-refine-engine' | 'ai-human-repair' | 'ai-brand-ecommerce' | 'ai-segment' | 'ai-multi-angle' | 'ai-3d-model' | 'ai-panorama'
   | 'ai-video-generate' | 'ai-video-i2v'
-  | 'ai-llm' | 'ai-audio' | 'ai-skill' | 'ai-sketch-to-code'
+  | 'ai-llm' | 'ai-audio' | 'ai-skill' | 'ai-sketch-to-code' | 'ai-sketch-to-image'
   | 'video-speed-change' | 'video-filter' | 'video-concat' | 'video-trim'
   | 'video-extract-frames' | 'video-compose'
   | 'manual-color-adjust'
@@ -188,6 +188,7 @@ export const NODE_TYPE_LABELS: Record<NodeType, string> = {
   'ai-llm': 'AI文案',
   'ai-skill': 'Skill 执行',
   'ai-sketch-to-code': '草图转代码',
+  'ai-sketch-to-image': '草图生图',
 };
 
 /** 节点类型 → 图标名 */
@@ -244,6 +245,7 @@ export const NODE_TYPE_ICONS: Record<NodeType, string> = {
   'manual-color-adjust': 'Palette',
   'ai-llm': 'Brain',
   'ai-sketch-to-code': 'Pencil',
+  'ai-sketch-to-image': 'Pencil',
   'ai-skill': 'Blocks',
 };
 
@@ -255,6 +257,32 @@ export type PortType = 'image' | 'mask' | 'prompt' | 'condition' | 'any' | 'data
 export interface WorkflowSketchDocumentReference {
   kind: 'document-reference'; taskId: string; projectId: string; providerId: string; modelId: string;
   previewAssetId: string; htmlAssetId: string; previewAssetVersionId: string; htmlAssetVersionId: string;
+}
+/** Bound generated image identity; never an HTML document or provider URL. */
+export interface WorkflowSketchImageReference {
+  readonly kind: 'sketch-image-reference'; readonly taskId: string; readonly projectId: string;
+  readonly visionProviderId: string; readonly visionModelId: string; readonly imageProviderId: string; readonly imageModelId: string;
+  readonly previewAssetId: string; readonly previewAssetVersionId: string; readonly imageAssetId: string; readonly imageAssetVersionId: string;
+}
+export function parseWorkflowSketchImageReference(value: unknown): Readonly<WorkflowSketchImageReference> | null {
+  try {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+    const prototype: unknown = Object.getPrototypeOf(value);
+    if (prototype !== Object.prototype && prototype !== null) return null;
+    const kind = Object.getOwnPropertyDescriptor(value, 'kind');
+    if (!kind || !('value' in kind) || kind.value !== 'sketch-image-reference') return null;
+    const keys = ['taskId', 'projectId', 'visionProviderId', 'visionModelId', 'imageProviderId', 'imageModelId',
+      'previewAssetId', 'previewAssetVersionId', 'imageAssetId', 'imageAssetVersionId'] as const;
+    const fields = {} as Record<typeof keys[number], string>;
+    for (const key of keys) {
+      const property = Object.getOwnPropertyDescriptor(value, key);
+      if (!property || !('value' in property) || typeof property.value !== 'string'
+        || !property.value || property.value.length > 256 || property.value !== property.value.trim() || /\p{Cc}/u.test(property.value)) return null;
+      fields[key] = property.value;
+    }
+    if (fields.previewAssetId === fields.imageAssetId || fields.previewAssetVersionId === fields.imageAssetVersionId) return null;
+    return Object.freeze({ kind: 'sketch-image-reference', ...fields });
+  } catch { return null; }
 }
 export function parseWorkflowSketchDocumentReference(value: unknown): WorkflowSketchDocumentReference | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
@@ -430,6 +458,7 @@ export const NODE_TEMPLATES: { type: NodeType; category: NodeCategory; label: st
   { type: 'audio-input', category: 'input', label: '音频输入', desc: '上传音频文件或引用AI生成配音' },
   { type: 'ai-llm', category: 'ai', label: 'AI文案策划', desc: 'LLM文本生成/文案策划/提示词优化' },
   { type: 'ai-sketch-to-code', category: 'ai', label: '草图转代码', desc: '使用明确视觉模型分析草图，交付安全代码与原草图 PNG' },
+  { type: 'ai-sketch-to-image', category: 'ai', label: '草图生图', desc: '明确视觉模型分析草图与关键词，再由参考图模型生成新图片' },
   { type: 'ai-skill', category: 'ai', label: 'Skill 执行', desc: '运行画布与节点模式共享的 Skill' },
   { type: 'ai-generate', category: 'ai', label: '图像生成', desc: 'AI生成新图片' },
   { type: 'ai-edit', category: 'ai', label: '图像编辑', desc: '修图/擦除/扩展' },
@@ -592,6 +621,8 @@ function createDefaultPorts(type: NodeType): NodePort[] {
       if (type === 'ai-sketch-to-code') {
         ports.push({ id: 'out-image', label: '原草图 PNG', type: 'image', direction: 'out' });
         ports.push({ id: 'out-document', label: '安全代码', type: 'document-reference', direction: 'out' });
+      } else if (type === 'ai-sketch-to-image') {
+        ports.push({ id: 'out-image', label: '生成图片', type: 'image', direction: 'out' });
       } else if (type === 'ai-video-generate' || type === 'ai-video-i2v') {
         ports.push({ id: 'out-video', label: '视频', type: 'video', direction: 'out' });
       } else if (type === 'ai-llm') {
@@ -781,6 +812,16 @@ export function getNodePropertyFields(type: NodeType): PropertyField[] {
   if (type === 'ai-sketch-to-code') {
     fields.push({ key: 'model', label: '视觉模型', type: 'model-select', modelFilter: 'chat' });
     fields.push({ key: 'instruction', label: '草图说明', type: 'textarea', placeholder: '描述要还原的页面布局' });
+    return fields;
+  }
+  if (type === 'ai-sketch-to-image') {
+    fields.push({ key: 'visionModel', label: '视觉分析模型', type: 'model-select', modelFilter: 'chat' });
+    fields.push({ key: 'imageModel', label: '参考图生成模型', type: 'model-select', modelFilter: 'image' });
+    fields.push({ key: 'instruction', label: '创作关键词', type: 'textarea', placeholder: '描述想将草图生成为什么图像' });
+    fields.push({ key: 'aspectRatio', label: '画面比例', type: 'select', defaultValue: '4:3',
+      options: ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3'].map(value => ({ label: value, value })) });
+    fields.push({ key: 'size', label: '生成尺寸（选填）', type: 'text', hint: '只填写所选图像模型明确支持的尺寸；留空使用该模型默认值。' });
+    fields.push({ key: 'quality', label: '生成质量（选填）', type: 'text', hint: '只填写所选图像模型明确支持的质量；留空使用该模型默认值。' });
     return fields;
   }
 
@@ -2016,6 +2057,28 @@ export function buildNodeExecutionRequest(
 ): { endpoint: string; method: string; body: Record<string, unknown> } | null {
   // Only the dedicated server adapter supplies execution scope and the frozen nonce.
   // Keep generic config merging, provider inference and tracking fields out of this protocol.
+  if (node.type === 'ai-sketch-to-image') {
+    if (!sketchContext?.projectId || !sketchContext.idempotencyKey) throw new Error('WORKFLOW_SKETCH_SCOPE_REQUIRED');
+    const binding = (role: 'vision' | 'image'): { providerId: string; modelId: string } => {
+      const configured = getConfigString(node.config, `${role}Model`), separator = configured.indexOf('::');
+      const compositeProvider = separator < 0 ? '' : configured.slice(0, separator);
+      const declaredProvider = getConfigString(node.config, `${role}ProviderId`), providerId = compositeProvider || declaredProvider;
+      const modelId = separator < 0 ? configured : configured.slice(separator + 2);
+      if (!providerId || !modelId || compositeProvider && declaredProvider && compositeProvider !== declaredProvider) {
+        throw new Error('WORKFLOW_SKETCH_MODEL_REQUIRED');
+      }
+      return { providerId, modelId };
+    };
+    const vision = binding('vision'), image = binding('image');
+    const size = getConfigString(node.config, 'size'), quality = getConfigString(node.config, 'quality');
+    return { endpoint: '/api/sketch-to-image', method: 'POST', body: {
+      projectId: sketchContext.projectId, idempotencyKey: sketchContext.idempotencyKey,
+      imageDataUrl: getConfigString(inputs, 'imageDataUrl', getConfigString(inputs, 'imageUrl', getConfigString(inputs, 'image'))),
+      instruction: getConfigString(inputs, 'prompt', getConfigString(node.config, 'instruction')),
+      visionProviderId: vision.providerId, visionModelId: vision.modelId, imageProviderId: image.providerId, imageModelId: image.modelId,
+      aspectRatio: getConfigString(node.config, 'aspectRatio', '4:3'), ...(size ? { size } : {}), ...(quality ? { quality } : {}),
+    } };
+  }
   if (node.type === 'ai-sketch-to-code') {
     if (!sketchContext?.projectId || !sketchContext.idempotencyKey) {
       throw new Error('WORKFLOW_SKETCH_SCOPE_REQUIRED');

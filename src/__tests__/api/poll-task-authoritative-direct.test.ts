@@ -49,6 +49,7 @@ vi.mock('@/lib/task-registry', () => ({
 }));
 
 vi.mock('@/lib/cloud-task-storage', () => ({
+  CloudTaskAdmissionError: class CloudTaskAdmissionError extends Error {},
   getCloudTaskById: mocks.getCloudTaskById,
   getCloudTaskForUser: mocks.getCloudTaskForUser,
   claimCloudTaskLease: mocks.claimCloudTaskLease,

@@ -34,6 +34,7 @@ export const WORKFLOW_RENDER_NODE_ICONS: Readonly<Record<NodeType, string>> = {
   'audio-input': 'Music',
   'ai-generate': 'Wand2',
   'ai-sketch-to-code': 'Pencil',
+  'ai-sketch-to-image': 'Pencil',
   'ai-edit': 'Pencil',
   'ai-annotation-edit': 'MessageSquare',
   'ai-retouch': 'Wand2',

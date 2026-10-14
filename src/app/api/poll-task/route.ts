@@ -15,6 +15,7 @@ export const maxDuration = 1800; // 30分钟 - 支持长时间轮询慢速API（
 import { appendUserJsonl } from '@/lib/server-user-storage';
 import { findProviderForModel, findProviderById, normalizeApiBaseUrl } from '@/lib/server-api-config';
 import { pollSketchTask } from '@/lib/sketch-to-code/task-http';
+import { pollSketchImageTask } from '@/lib/sketch-to-code/image-public-http';
 import {
   getInternalRequestHeaders,
   getRequestUser,
@@ -508,7 +509,7 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
     const sketchRejected = (status: number, code: string): NextResponse => NextResponse.json({
       success: false, code, requestId, retryable: false,
     }, { status, headers: { 'Cache-Control': 'private, no-store', 'x-request-id': requestId } });
-    if (taskId.startsWith('sketch_') && !sessionUser) {
+    if ((taskId.startsWith('sketch_') || taskId.startsWith('skimg_')) && !sessionUser) {
       return sketchRejected(401, 'AUTHENTICATION_REQUIRED');
     }
     // Persisted type, including IDs without the sketch_ hint, must be checked
@@ -517,6 +518,11 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
     let persistedSketchCandidate: Awaited<ReturnType<typeof getCloudTaskById>>;
     try { persistedSketchCandidate = await getCloudTaskById(taskId); }
     catch { return sketchRejected(503, 'SKETCH_TASK_UNAVAILABLE'); }
+    if (persistedSketchCandidate?.type === 'sketch-to-image') {
+      if (!sessionUser) return sketchRejected(401, 'AUTHENTICATION_REQUIRED');
+      if (persistedSketchCandidate.userId !== sessionUser.id) return sketchRejected(404, 'SKETCH_IMAGE_TASK_UNAVAILABLE');
+      return pollSketchImageTask(body, persistedSketchCandidate, sessionUser.id, requestId);
+    }
     if (persistedSketchCandidate?.type === 'sketch-to-code') {
       if (!sessionUser) return sketchRejected(401, 'AUTHENTICATION_REQUIRED');
       if (persistedSketchCandidate.userId !== sessionUser.id) {
@@ -525,6 +531,7 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
       return pollSketchTask(body, persistedSketchCandidate, sessionUser.id, requestId);
     }
     if (taskId.startsWith('sketch_')) return sketchRejected(404, 'SKETCH_TASK_UNAVAILABLE');
+    if (taskId.startsWith('skimg_')) return sketchRejected(404, 'SKETCH_IMAGE_TASK_UNAVAILABLE');
     let model = typeof rawModel === 'string' ? rawModel : (rawModel as Record<string, unknown>)?.model as string || String(rawModel || '');
     // ★ 从 model 中提取纯 modelId（前端可能传 providerId::modelId 格式）
     const extractedProviderId = model.includes('::') ? model.split('::')[0] : '';

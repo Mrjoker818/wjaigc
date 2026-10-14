@@ -14,6 +14,8 @@ import { getInternalApiUrl } from '@/lib/api-helpers';
 import { getInternalRequestHeaders, requireApiAuthOrReject } from '@/lib/api-auth';
 import { resolveWorkflowInputImageForActor } from '@/lib/asset-core/workflow-resolver';
 import type { WorkflowSketchIntent, WorkflowSketchHost } from '@/lib/sketch-to-code/workflow';
+import type { WorkflowSketchImageIntent } from '@/lib/sketch-to-code/image-workflow';
+import { sketchImageModels } from '@/lib/sketch-to-code/image-contract';
 import {
   topologicalSort,
   getNodeInputs,
@@ -74,6 +76,7 @@ import {
 } from '@/lib/workflow-layer-task';
 
 type WorkflowExecutionStatus = 'running' | 'paused' | 'completed' | 'failed' | 'cancelled';
+type WorkflowSketchAnyIntent = WorkflowSketchIntent | WorkflowSketchImageIntent;
 
 interface WorkflowExecutionState {
   status: WorkflowExecutionStatus;
@@ -90,7 +93,7 @@ interface WorkflowExecutionState {
   totalNodes: number;
   activeLayerTasks?: Record<string, string>;
   activeChildTasks?: Record<string, string>;
-  sketchIntents?: Record<string, WorkflowSketchIntent>;
+  sketchIntents?: Record<string, WorkflowSketchAnyIntent>;
   sketchRoot?: { executionId: string; state: WorkflowExecutionState };
   sketchNested?: Record<string, { results: Record<string, ExecutionResult>; currentNodeId: string | null; status: WorkflowExecutionStatus; loopResume?: WorkflowExecutionState['loopResume'] }>;
   activeSkillRuns?: Record<string, string>;
@@ -128,6 +131,9 @@ function isWorkflowDispatchStopped(state: WorkflowExecutionState): boolean {
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
+function isSketchWorkflowNode(node: Pick<WorkflowNode, 'type'>): boolean {
+  return node.type === 'ai-sketch-to-code' || node.type === 'ai-sketch-to-image';
+}
 
 function requiresRecoverableExecutionGraph(node: WorkflowNode): boolean {
   return node.type.startsWith('ai-') || node.type.startsWith('agent-')
@@ -150,8 +156,8 @@ async function captureRecoverableExecutionGraph(
     'color', 'imageUrl', 'maskUrl', 'providerId', 'projectId',
     'assetId', 'assetVersionId', 'placementId', 'text', 'textContent',
   ]);
-  const containsSketch = nodes.some(node => node.type === 'ai-sketch-to-code'
-    || node.type === 'subgraph' && resolveInlineSubgraph(node)?.nodes.some(child => child.type === 'ai-sketch-to-code' || child.type === 'subgraph'));
+  const containsSketch = nodes.some(node => isSketchWorkflowNode(node)
+    || node.type === 'subgraph' && resolveInlineSubgraph(node)?.nodes.some(child => isSketchWorkflowNode(child) || child.type === 'subgraph'));
   const nodeKeys = new Set([
     'id', 'type', 'label', 'x', 'y', 'width', 'height', 'ports',
     'config', 'condition', 'loopCount', 'agentRound', 'subgraphId', 'breakpoint',
@@ -167,6 +173,7 @@ async function captureRecoverableExecutionGraph(
     const allowedKeys = new Set([
       ...getNodePropertyFields(node.type).map(field => field.key),
       ...executionConfigKeys,
+      ...(node.type === 'ai-sketch-to-image' ? ['visionProviderId', 'imageProviderId'] : []),
       ...(node.type === 'ai-skill'
         ? ['skillId', 'version', 'inputValues', 'modelBindings', 'runId']
         : []),
@@ -237,6 +244,17 @@ async function freezeConfiguredModelBindings(
   actorUserId: string,
 ): Promise<boolean> {
   for (const node of graph.nodes) {
+    if (node.type === 'ai-sketch-to-image') {
+      try {
+        const request = buildNodeExecutionRequest(node, {}, { projectId: 'binding-check', idempotencyKey: 'binding-check' })!;
+        const vision = await resolveTaskModel(String(request.body.visionProviderId), String(request.body.visionModelId), actorUserId);
+        const image = await resolveTaskModel(String(request.body.imageProviderId), String(request.body.imageModelId), actorUserId);
+        if (vision.providerId !== request.body.visionProviderId || vision.modelId !== request.body.visionModelId || vision.kind !== 'chat'
+          || vision.supportsVision !== true || vision.executionMode !== 'sync' || vision.protocol !== 'chat-completions'
+          || image.providerId !== request.body.imageProviderId || image.modelId !== request.body.imageModelId || sketchImageModels([image]).length !== 1) return false;
+      } catch { return false; }
+      continue;
+    }
     if (node.type === 'ai-sketch-to-code') {
       try {
         const request = buildNodeExecutionRequest(node, {}, { projectId: 'binding-check', idempotencyKey: 'binding-check' })!;
@@ -366,7 +384,7 @@ async function buildExecutableNodeRequest(
   return buildWorkflowSkillRunRequest(node, inputs, skill, context);
 }
 
-async function sketchHost(executionId: string, state: WorkflowExecutionState, nodeId: string, instanceId = `${executionId}:${nodeId}`): Promise<WorkflowSketchHost> {
+async function sketchHost(executionId: string, state: WorkflowExecutionState, nodeId: string, instanceId = `${executionId}:${nodeId}`): Promise<WorkflowSketchHost<WorkflowSketchAnyIntent>> {
   const root = state.sketchRoot || { executionId, state };
   if (!state.userId || !state.projectId || root.state.userId !== state.userId || root.state.projectId !== state.projectId) throw new Error('WORKFLOW_SKETCH_SCOPE_REQUIRED');
   root.state.sketchIntents ||= {};
@@ -391,8 +409,17 @@ async function sketchHost(executionId: string, state: WorkflowExecutionState, no
     } };
 }
 async function executeSketchNode(executionId: string, state: WorkflowExecutionState, node: WorkflowNode, inputs: Record<string, unknown>, instanceId?: string): Promise<ExecutionResult> {
-  const { executeWorkflowSketch } = await import('@/lib/sketch-to-code/workflow');
-  const result = await executeWorkflowSketch(node, inputs, await sketchHost(executionId, state, node.id, instanceId));
+  const host = await sketchHost(executionId, state, node.id, instanceId);
+  const existing = host.intents[host.instanceId], image = node.type === 'ai-sketch-to-image';
+  if (existing && existing.version !== (image ? 2 : 1)) throw new Error('WORKFLOW_SKETCH_INTENT_MISMATCH');
+  let result: ExecutionResult;
+  if (image) {
+    const { executeWorkflowSketchImage } = await import('@/lib/sketch-to-code/image-workflow');
+    result = await executeWorkflowSketchImage(node, inputs, host as WorkflowSketchHost<WorkflowSketchImageIntent>);
+  } else {
+    const { executeWorkflowSketch } = await import('@/lib/sketch-to-code/workflow');
+    result = await executeWorkflowSketch(node, inputs, host as WorkflowSketchHost);
+  }
   state.results[node.id] = result;
   if (result.status === 'running') { state.status = 'paused'; state.error = result.error; }
   await persistWorkflowExecution(executionId, state, true);
@@ -976,7 +1003,7 @@ async function restorePausedWorkflowExecution(input: {
       : graph.nodes.length,
     activeLayerTasks: {},
     activeChildTasks,
-    ...(isRecord(persistedResult.sketchIntents) ? { sketchIntents: persistedResult.sketchIntents as unknown as Record<string, WorkflowSketchIntent> } : {}),
+    ...(isRecord(persistedResult.sketchIntents) ? { sketchIntents: persistedResult.sketchIntents as unknown as Record<string, WorkflowSketchAnyIntent> } : {}),
     ...(isRecord(persistedResult.sketchNested) ? { sketchNested: persistedResult.sketchNested as unknown as WorkflowExecutionState['sketchNested'] } : {}),
     activeSkillRuns,
     pendingSkillSubmissions: {},
@@ -1288,7 +1315,7 @@ export async function POST(request: NextRequest) {
         }
         return NextResponse.json({ error: message, status: 'paused' }, { status: 502 });
       };
-      const sketchIntents = exec?.sketchIntents || (isRecord(persistedResult?.sketchIntents) ? persistedResult.sketchIntents as unknown as Record<string, WorkflowSketchIntent> : {});
+      const sketchIntents = exec?.sketchIntents || (isRecord(persistedResult?.sketchIntents) ? persistedResult.sketchIntents as unknown as Record<string, WorkflowSketchAnyIntent> : {});
       const hasSketch = Object.keys(sketchIntents).length > 0;
       const cancellationOutcomes = { confirmed: 0, winner: 0, unknown: 0 };
       if (hasSketch) {
@@ -1319,12 +1346,14 @@ export async function POST(request: NextRequest) {
       }
       if (Object.keys(sketchIntents).length) {
         const { cancelWorkflowSketch } = await import('@/lib/sketch-to-code/workflow');
+        const { cancelWorkflowSketchImage } = await import('@/lib/sketch-to-code/image-workflow');
         const headers = await getInternalRequestHeaders(auth.userId, auth.userRole === 'admin' ? 'admin' : 'user', auth.user.productType);
         for (const [instanceId, intent] of Object.entries(sketchIntents)) {
-          const host: WorkflowSketchHost = { actorUserId: auth.userId, projectId: exec?.projectId || persisted?.projectId || '', parentExecutionId: executionId,
+          const host: WorkflowSketchHost<WorkflowSketchAnyIntent> = { actorUserId: auth.userId, projectId: exec?.projectId || persisted?.projectId || '', parentExecutionId: executionId,
             executionId: intent.executionId, nodeId: intent.nodeId, instanceId, attempt: intent.attempt, headers, intents: sketchIntents,
             checkpoint: async () => undefined, assertCurrent: async () => { if (intent.parentExecutionId !== executionId || intent.actorUserId !== auth.userId) throw new Error('WORKFLOW_SKETCH_INTENT_MISMATCH'); } };
-          const outcome = await cancelWorkflowSketch(intent, host);
+          const outcome = intent.version === 2 ? await cancelWorkflowSketchImage(intent, host as WorkflowSketchHost<WorkflowSketchImageIntent>)
+            : intent.version === 1 ? await cancelWorkflowSketch(intent, host as WorkflowSketchHost) : 'unknown';
           cancellationOutcomes[outcome] += 1;
         }
       }
@@ -1579,7 +1608,7 @@ export async function POST(request: NextRequest) {
         const retryResultMap = new Map(Object.entries(exec.results || {}));
         const nodeInputs = getNodeInputs(retryNode, retryConnections, retryResultMap);
         const pausedSketchRetry = exec.status === 'paused' && Object.keys(exec.sketchIntents || {}).length > 0
-          && (retryNode.type === 'ai-sketch-to-code' && exec.sketchIntents?.[`${executionId}:${nodeId}`]
+          && (isSketchWorkflowNode(retryNode) && exec.sketchIntents?.[`${executionId}:${nodeId}`]
             || exec.loopResume && exec.sketchIntents?.[`${executionId}:${nodeId}:loop:${exec.loopResume.loopNodeId}:${exec.loopResume.iterationIndex}`]
             || retryNode.type === 'subgraph' && Object.values(exec.sketchIntents || {}).some(intent => intent.executionId.startsWith(`${executionId}:${nodeId}:`) || intent.executionId === `${executionId}:${nodeId}`));
         if (pausedSketchRetry && exec.executionGraph) {
@@ -1621,7 +1650,7 @@ export async function POST(request: NextRequest) {
             await releaseCloudTaskLease(executionId, owner).catch(() => false);
           }
         }
-        if (retryNode.type === 'ai-sketch-to-code') {
+        if (isSketchWorkflowNode(retryNode)) {
           const previousOwner = exec.recoveryLeaseOwner;
           try {
             const retryResult = await executeSketchNode(executionId, exec, retryNode, nodeInputs);
@@ -2134,7 +2163,7 @@ async function executeWorkflow(
       }
 
       // P0: 自动注入缺失的 providerId — 当 AI 建图或历史节点缺少 providerId 时，根据 model 名自动查找
-      if (node.type === 'ai-sketch-to-code') {
+      if (isSketchWorkflowNode(node)) {
         const result = await executeSketchNode(executionId, execState, node, inputs);
         resultMap.set(node.id, result);
         if (result.status === 'running') return;
@@ -2368,7 +2397,7 @@ async function executeWorkflow(
                   dsInputs[key] = replaceLoopVariables(dsInputs[key] as string, loopCtx.index, loopCtx.total);
                 }
               }
-              if (dsNode.type === 'ai-sketch-to-code') {
+              if (isSketchWorkflowNode(dsNode)) {
                 execState.loopResume = { loopNodeId: node.id, iterationIndex: loopIteration.index, nextNodeIndex: downstreamIndex };
                 const dsResult = await executeSketchNode(executionId, execState, dsNode, dsInputs, `${executionId}:${dsNode.id}:loop:${node.id}:${loopIteration.index}`);
                 resultMap.set(dsNode.id, dsResult);

@@ -233,6 +233,7 @@ import type { LayerDocumentSource } from '@/lib/layer-documents/types';
 import type { EffectReverseTaskResult } from '@/lib/effect-reverse-engineering/types';
 import type { SketchCanvasContext } from '@/components/sketch-to-code-panel';
 import { createSketchPanelSession, type SketchPanelSession } from '@/lib/sketch-to-code/client';
+import { createSketchImagePanelSession, type SketchImagePanelSession } from '@/lib/sketch-to-code/image-client';
 import { parseWorkspaceSourceTrace, type SketchWorkspaceSourceTrace } from '@/lib/asset-core/source-trace';
 const BrandEcommercePanel = lazy(() => import('@/components/brand-ecommerce-panel').then(m => ({ default: m.BrandEcommercePanel })));
 const RefineEnginePanel = lazy(() => import('@/components/refine-engine-panel'));
@@ -523,6 +524,8 @@ export interface AnnotationExecutionContext {
 }
 
 interface InfiniteCanvasProps {
+  /** Enabled only by the product after the image runtime delivery gates pass. */
+  sketchImageEnabled?: boolean;
   sketchContext?: SketchCanvasContext;
   taskModelCatalog?: TaskModelDescriptor[];
   taskModelOptions?: TaskModelCatalogModel[];
@@ -796,7 +799,7 @@ function CanvasScaledMenuSelect({
   );
 }
 
-export function InfiniteCanvas({ sketchContext, taskModelCatalog = [], taskModelOptions = [], catalogStatus = { loading: false, error: null }, images, onImagesChange, selectedImage, onSelectImage, onPreviewImage, onGenerateVariation, onExtractKeywords, onAddImages, onUploadFiles, uploadAuthority, referenceIds = [], isGenerating = false, generationProgress = undefined, themeStyle = 'gold', onVisionPrompt, visionPromptEnabled = false, onToggleVisionPrompt, ohMyPromptOpen = false, onCloseOhMyPrompt, onInsertPrompt, ohMyPromptThemeStyle = 'gold', isVisionAnalyzing = false, visionResult = null, ompActiveTab = 'agent', ompVisionImageUrl = null, onToggleSettings, onToggleTheme, onToggleUserManager, onToggleAdminSystem, onToggleProjectData, isAdmin = false, onToggleHelp, isPanelCollapsed = false, onUndo, onRedo, onHistoryTransactionBegin, onHistoryTransactionCommit, onHistoryTransactionRollback, isHistoryTransitionPending = false, navigateToImageId, onNavigateToImageComplete, onGroupsChange, initialGroups, altRefMarkerIds = [], onForceSave, onDeleteImages, canRetryPendingDelete, onUploadEffectReverseSource, onEditImage, onViewStateChange, initialViewState, onAddToFavorites, onToggleFavorites, onTogglePromptTemplate, brandProject, onSwitchToNodeMode, onSwitchToWorkflowHub, onSwitchToDashboard, onSendToChat, connections, onConnectionsChange, versionHistoryManager, onOpenVideoPanel, onRetryProcessing, projectId, initialAnnotations = [], onAnnotationsChange, documentMetadataMode = false, annotationExecutionContext, onRequestTaskPoll }: InfiniteCanvasProps) {
+export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, taskModelCatalog = [], taskModelOptions = [], catalogStatus = { loading: false, error: null }, images, onImagesChange, selectedImage, onSelectImage, onPreviewImage, onGenerateVariation, onExtractKeywords, onAddImages, onUploadFiles, uploadAuthority, referenceIds = [], isGenerating = false, generationProgress = undefined, themeStyle = 'gold', onVisionPrompt, visionPromptEnabled = false, onToggleVisionPrompt, ohMyPromptOpen = false, onCloseOhMyPrompt, onInsertPrompt, ohMyPromptThemeStyle = 'gold', isVisionAnalyzing = false, visionResult = null, ompActiveTab = 'agent', ompVisionImageUrl = null, onToggleSettings, onToggleTheme, onToggleUserManager, onToggleAdminSystem, onToggleProjectData, isAdmin = false, onToggleHelp, isPanelCollapsed = false, onUndo, onRedo, onHistoryTransactionBegin, onHistoryTransactionCommit, onHistoryTransactionRollback, isHistoryTransitionPending = false, navigateToImageId, onNavigateToImageComplete, onGroupsChange, initialGroups, altRefMarkerIds = [], onForceSave, onDeleteImages, canRetryPendingDelete, onUploadEffectReverseSource, onEditImage, onViewStateChange, initialViewState, onAddToFavorites, onToggleFavorites, onTogglePromptTemplate, brandProject, onSwitchToNodeMode, onSwitchToWorkflowHub, onSwitchToDashboard, onSendToChat, connections, onConnectionsChange, versionHistoryManager, onOpenVideoPanel, onRetryProcessing, projectId, initialAnnotations = [], onAnnotationsChange, documentMetadataMode = false, annotationExecutionContext, onRequestTaskPoll }: InfiniteCanvasProps) {
   const effectiveUploadAuthority = uploadAuthority ?? (projectId ? 'unknown' : 'legacy');
   const isMonochrome = themeStyle === 'monochrome';
   const taskModelCatalogIndex = useMemo(
@@ -882,6 +885,7 @@ export function InfiniteCanvas({ sketchContext, taskModelCatalog = [], taskModel
   const [showSketchToCode, setShowSketchToCode] = useState(false);
   const [sketchTrace, setSketchTrace] = useState<SketchWorkspaceSourceTrace>();
   const sketchSession = useRef<SketchPanelSession | undefined>(undefined);
+  const sketchImageSession = useRef<SketchImagePanelSession | undefined>(undefined);
   const [effectReverseSource, setEffectReverseSource] = useState<EffectReverseCanvasSource | null>(null);
   // 美陈拆解（独立功能：识别展陈/物料/道具，生成浅灰背景平面元素拆解板）
   const [showDisplayDecomposePanel, setShowDisplayDecomposePanel] = useState(false);
@@ -2544,6 +2548,8 @@ export function InfiniteCanvas({ sketchContext, taskModelCatalog = [], taskModel
     setShowSketchToCode(false);
     sketchSession.current?.client.stop();
     sketchSession.current?.placement?.stop();
+    sketchImageSession.current?.client.stop();
+    sketchImageSession.current?.placement?.stop();
     setShowDisplayDecomposePanel(false);
     setShowAspectRecomposePanel(false);
     setShowCompareDialog(false);
@@ -2622,16 +2628,23 @@ export function InfiniteCanvas({ sketchContext, taskModelCatalog = [], taskModel
     if (!activateCanvasToolSession('sketch-to-code', trace ? 'image-toolbar' : 'bottom-toolbar', [])) return;
     if (!sketchSession.current || sketchSession.current.client.scope.key !== scope.key
       || trace && sketchSession.current.client.task?.taskId !== trace.taskId) {
+      sketchSession.current?.client.stop(); sketchSession.current?.placement?.stop();
       sketchSession.current = createSketchPanelSession(scope);
     }
-    setSketchTrace(trace); setShowSketchToCode(true);
-  }, [activateCanvasToolSession, sketchContext]);
-  useEffect(() => {
-    if (sketchSession.current && sketchSession.current.client.scope.key !== sketchContext?.key) {
-      sketchSession.current.client.stop(); sketchSession.current.placement?.stop();
-      sketchSession.current = undefined; setShowSketchToCode(false); setSketchTrace(undefined);
+    if (sketchImageEnabled && (!sketchImageSession.current || sketchImageSession.current.client.scope.key !== scope.key)) {
+      sketchImageSession.current?.client.stop(); sketchImageSession.current?.placement?.stop();
+      sketchImageSession.current = createSketchImagePanelSession(scope);
     }
-  }, [sketchContext?.key]);
+    setSketchTrace(trace); setShowSketchToCode(true);
+  }, [activateCanvasToolSession, sketchContext, sketchImageEnabled]);
+  useEffect(() => {
+    if (sketchSession.current && sketchSession.current.client.scope.key !== sketchContext?.key
+      || sketchImageSession.current && (!sketchImageEnabled || sketchImageSession.current.client.scope.key !== sketchContext?.key)) {
+      sketchSession.current?.client.stop(); sketchSession.current?.placement?.stop();
+      sketchImageSession.current?.client.stop(); sketchImageSession.current?.placement?.stop();
+      sketchSession.current = undefined; sketchImageSession.current = undefined; setShowSketchToCode(false); setSketchTrace(undefined);
+    }
+  }, [sketchContext?.key, sketchImageEnabled]);
 
   useEffect(() => {
     window.addEventListener('wujie:close-canvas-tool-panels', closeCanvasToolPanels);
@@ -12469,7 +12482,7 @@ export function InfiniteCanvas({ sketchContext, taskModelCatalog = [], taskModel
     { id: 'packaging-pro', label: '包装Pro', group: '专业工具', icon: <Package className="h-4 w-4" />, onActivate: () => { if (activateCanvasToolSession('packaging-pro', 'bottom-toolbar', [])) setShowBrandPackaging(true); } },
     { id: 'display-pro', label: '展陈Pro', group: '专业工具', icon: <Store className="h-4 w-4" />, onActivate: () => { if (activateCanvasToolSession('display-pro', 'bottom-toolbar', [])) setShowDisplay3D(true); } },
     { id: 'effect-reverse', label: '反向拆图Pro', group: '专业工具', icon: <Scan className="h-4 w-4" />, onActivate: openEffectReverseEngineering },
-    { id: 'sketch-to-code', label: '草图转代码', group: '专业工具', icon: <Pencil className="h-4 w-4" />, active: showSketchToCode, onActivate: () => openSketchToCode() },
+    { id: 'sketch-to-code', label: sketchImageEnabled ? '草图创作' : '草图转代码', group: '专业工具', icon: <Pencil className="h-4 w-4" />, active: showSketchToCode, onActivate: () => openSketchToCode() },
     { id: 'ai-psd', label: 'AI PSD', group: '专业工具', icon: <FileImage className="h-4 w-4" />, onActivate: () => { if (activateCanvasToolSession('ai-psd', 'bottom-toolbar', [])) setShowAiPsd(true); } },
     { id: 'sticker', label: '表情助手', group: '专业工具', icon: <Heart className="h-4 w-4" />, onActivate: () => { if (activateCanvasToolSession('sticker-assistant', 'bottom-toolbar', [])) setShowStickerAssistant(true); } },
     { id: 'hex-cube', label: '六面体', group: '画布工具', icon: <Boxes className="h-4 w-4" />, onActivate: handleCreateHexCube },
@@ -17228,7 +17241,7 @@ export function InfiniteCanvas({ sketchContext, taskModelCatalog = [], taskModel
         )}
 
         {showSketchToCode && sketchSession.current && <Suspense fallback={<div role="status">草图工具加载中…</div>}>
-          <SketchToCodePanel session={sketchSession.current} models={taskModelCatalog} catalogStatus={catalogStatus}
+          <SketchToCodePanel session={sketchSession.current} imageSession={sketchImageEnabled ? sketchImageSession.current : undefined} models={taskModelCatalog} catalogStatus={catalogStatus}
             insert={sketchContext?.insert} initialTrace={sketchTrace} isMonochrome={isMonochrome} onClose={closeCanvasToolPanels} />
         </Suspense>}
 
@@ -18936,9 +18949,9 @@ export function InfiniteCanvas({ sketchContext, taskModelCatalog = [], taskModel
           </section>
 
           <section data-toolbar-drawer-section="pro-tools" className="grid grid-cols-4 gap-1">
-            <button type="button" aria-label="草图转代码" title="草图转代码" onClick={() => openSketchToCode()}
+            <button type="button" aria-label={sketchImageEnabled ? '草图创作' : '草图转代码'} title={sketchImageEnabled ? '草图创作' : '草图转代码'} onClick={() => openSketchToCode()}
               className={`rounded-lg p-2 focus-visible:outline focus-visible:outline-2 ${isMonochrome ? 'text-gray-700 hover:bg-gray-100' : 'text-gold hover:bg-white/10'}`}>
-              <Pencil className="mx-auto h-4 w-4" /><span className="text-xs">草图转代码</span>
+              <Pencil className="mx-auto h-4 w-4" /><span className="text-xs">{sketchImageEnabled ? '草图创作' : '草图转代码'}</span>
             </button>
             <div className={`col-span-full flex items-center gap-1.5 px-1 pt-1 ${isMonochrome ? 'text-gray-400' : 'text-gold-muted'}`}>
               <span className="text-[10px] font-semibold tracking-[0.12em] uppercase">专业工具</span>

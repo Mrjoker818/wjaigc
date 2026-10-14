@@ -13,8 +13,11 @@ import {
   configureWorkflowSkillNodePorts,
   updateWorkflowSkillModelBinding, workflowModelSupportsSkillRole,
   parseWorkflowSketchDocumentReference, resolveInlineSubgraph, type WorkflowSketchDocumentReference,
+  parseWorkflowSketchImageReference,
 } from '@/lib/workflow-engine';
 import { SketchClient, sketchModels, DOCUMENT_PLACEMENT_REASON, SKETCH_DOCUMENT_SANDBOX, type SketchScope } from '@/lib/sketch-to-code/client';
+import { sketchImageModels } from '@/lib/sketch-to-code/image-contract';
+import { WorkflowSketchImageControls } from '@/components/workflow-sketch-image-controls';
 import { SketchPlacement, type SketchInsert } from '@/lib/sketch-to-code/placement-client';
 import {
   applyWorkflowCommand,
@@ -126,7 +129,7 @@ function getNodeIcon(type: NodeType, size = 14, className = '') {
 interface ModelOption { id: string; name: string; type: string; provider: string; providerId?: string; apiDisplayName?: string; }
 
 function sketchNodes(nodes: readonly WorkflowNode[], depth = 0): WorkflowNode[] {
-  return nodes.flatMap(node => node.type === 'ai-sketch-to-code' ? [node]
+  return nodes.flatMap(node => node.type === 'ai-sketch-to-code' || node.type === 'ai-sketch-to-image' ? [node]
     : node.type === 'subgraph' && depth < 3 ? sketchNodes(resolveInlineSubgraph(node)?.nodes || [], depth + 1) : []);
 }
 function containsSketchNode(nodes: readonly WorkflowNode[]): boolean { return sketchNodes(nodes).length > 0; }
@@ -135,6 +138,18 @@ function unavailableSketchModel(nodes: readonly WorkflowNode[], catalog: Readonl
   if (!sketches.length) return false;
   if (loading) return true;
   return sketches.some(node => {
+    if (node.type === 'ai-sketch-to-image') {
+      return (['vision', 'image'] as const).some(role => {
+        const configured = node.config[`${role}Model`], declaredProvider = node.config[`${role}ProviderId`];
+        if (typeof configured !== 'string' || !configured || typeof declaredProvider !== 'string' || !declaredProvider) return true;
+        const split = configured.indexOf('::'), modelId = split < 0 ? configured : configured.slice(split + 2);
+        if (split >= 0 && configured.slice(0, split) !== declaredProvider) return true;
+        const descriptor = catalog.get(taskModelKey(declaredProvider, modelId));
+        if (!descriptor) return true;
+        try { return (role === 'vision' ? sketchModels([descriptor]) : sketchImageModels([descriptor])).length !== 1; }
+        catch { return true; }
+      });
+    }
     const model = String(node.config.model || ''); const split = model.indexOf('::');
     const providerId = split < 0 ? String(node.config.providerId || '') : model.slice(0, split);
     const modelId = split < 0 ? model : model.slice(split + 2);
@@ -145,7 +160,29 @@ function unavailableSketchModel(nodes: readonly WorkflowNode[], catalog: Readonl
 type SketchExecutionView = { status: string; output?: Record<string, unknown>; error?: string };
 function safeSketchExecutionResults(results: Record<string, SketchExecutionView>, nodes: readonly WorkflowNode[]): Record<string, SketchExecutionView> {
   const ids = new Set(sketchNodes(nodes).map(node => node.id));
+  const imageIds = new Set(sketchNodes(nodes).filter(node => node.type === 'ai-sketch-to-image').map(node => node.id));
   return Object.fromEntries(Object.entries(results).map(([id, result]) => {
+    const imageReference = parseWorkflowSketchImageReference(result.output?.sketchImageReference);
+    if (imageIds.has(id) || imageReference || result.output && Object.hasOwn(result.output, 'sketchImageReference')) {
+      const output: Record<string, unknown> = {};
+      if (imageReference) output.sketchImageReference = imageReference;
+      for (const key of ['taskId', 'projectId', 'visionProviderId', 'visionModelId', 'imageProviderId', 'imageModelId']) {
+        const value = result.output?.[key];
+        if (typeof value === 'string' && value && value.length <= 256 && value === value.trim() && !/\p{Cc}/u.test(value)) output[key] = value;
+      }
+      const taskStatus = result.output?.status, phase = result.output?.phase, progress = result.output?.progress;
+      if (typeof taskStatus === 'string' && ['pending', 'processing', 'submitting', 'completed', 'failed', 'cancelled', 'timeout'].includes(taskStatus)) output.status = taskStatus;
+      if (phase === 'analysis' || phase === 'generation') output.phase = phase;
+      if (typeof progress === 'number' && Number.isFinite(progress) && progress >= 0 && progress <= 100) output.progress = progress;
+      for (const key of ['reserveCredits', 'actualCredits']) {
+        const value = result.output?.[key]; if (typeof value === 'number' && Number.isSafeInteger(value) && value >= 0) output[key] = value;
+      }
+      for (const key of ['needsReconcile', 'refunded', 'dispatchPending', 'recoveryPending']) {
+        const value = result.output?.[key]; if (typeof value === 'boolean') output[key] = value;
+      }
+      const status = ['idle', 'running', 'pending', 'success', 'failed', 'cancelled', 'timeout', 'skipped'].includes(result.status) ? result.status : 'failed';
+      return [id, { status, output, ...(result.error ? { error: '草图生图任务未完成，请核对原任务。' } : {}) }];
+    }
     const reference = parseWorkflowSketchDocumentReference(result.output?.documentReference);
     if (!ids.has(id) && !reference) return [id, result];
     const output: Record<string, unknown> = {};
@@ -1686,7 +1723,8 @@ ${contextInfo}
     apiDisplayName: model.displayName || model.name,
   })), [taskModelOptions]);
   const modelsLoading = catalogStatus.loading || Boolean(catalogStatus.error);
-  const sketchModelsUnavailable = useMemo(() => unavailableSketchModel(wf.nodes, modelCatalogIndex, modelsLoading), [wf.nodes, modelCatalogIndex, modelsLoading]);
+  const sketchModelsUnavailable = useMemo(() => unavailableSketchModel(wf.nodes, modelCatalogIndex, modelsLoading)
+    || containsSketchNode(wf.nodes) && sketchScope.authority === 'unknown', [wf.nodes, modelCatalogIndex, modelsLoading, sketchScope.authority]);
   const [workflowSkills, setWorkflowSkills] = useState<SkillDefinition[]>([]);
   const [workflowSkillsLoading, setWorkflowSkillsLoading] = useState(false);
   const [workflowSkillsError, setWorkflowSkillsError] = useState<string | null>(null);
@@ -4846,6 +4884,27 @@ function PropertyPanel({ node, models, modelCatalogIndex, modelsLoading, workflo
       }
 
       case 'model-select': {
+        if (node.type === 'ai-sketch-to-image' && (field.key === 'visionModel' || field.key === 'imageModel')) {
+          const visionRole = field.key === 'visionModel', providerKey = visionRole ? 'visionProviderId' : 'imageProviderId';
+          let eligible: TaskModelDescriptor[] = [];
+          try { eligible = visionRole ? sketchModels([...modelCatalogIndex.values()]) : sketchImageModels([...modelCatalogIndex.values()]); } catch { /* Invalid catalog stays unavailable. */ }
+          const configured = typeof externalValue === 'string' ? externalValue : '', providerId = node.config[providerKey];
+          const split = configured.indexOf('::'), modelId = split < 0 ? configured : configured.slice(split + 2);
+          const exact = typeof providerId === 'string' && providerId && (split < 0 || configured.slice(0, split) === providerId) ? `${providerId}::${modelId}` : '';
+          const label = visionRole ? '草图生图视觉模型' : '草图生图图像模型';
+          const empty = visionRole ? '暂无可用的同步视觉聊天模型，请检查模型授权与视觉能力。' : '暂无支持参考图的图像模型，请检查模型授权与参考图能力。';
+          return <div className="min-w-0 space-y-1">
+            <select aria-label={label} value={eligible.some(model => `${model.providerId}::${model.modelId}` === exact) ? exact : ''}
+              disabled={modelsLoading || !eligible.length} onChange={event => {
+                const selected = eligible.find(model => `${model.providerId}::${model.modelId}` === event.target.value);
+                onUpdate(node.id, { config: { [field.key]: selected ? event.target.value : '', [providerKey]: selected?.providerId || '' } });
+              }} className="w-full min-w-0 bg-muted border border-border rounded px-3 py-2 text-sm text-foreground focus:outline-none focus:border-primary/50 disabled:opacity-50">
+              <option value="">{modelsLoading ? '模型目录暂不可用' : visionRole ? '选择同步视觉聊天模型' : '选择参考图生成模型'}</option>
+              {eligible.map(model => <option key={`${model.providerId}::${model.modelId}`} value={`${model.providerId}::${model.modelId}`}>{model.modelId} ({model.providerId})</option>)}
+            </select>
+            {!modelsLoading && !eligible.length && <p className="text-xs text-muted-foreground break-words">{empty}</p>}
+          </div>;
+        }
         if (node.type === 'ai-sketch-to-code') {
           const eligible = sketchModels([...modelCatalogIndex.values()]);
           const configured = String(externalValue || '');
@@ -5029,6 +5088,11 @@ function PropertyPanel({ node, models, modelCatalogIndex, modelsLoading, workflo
 
       <WorkspaceSourceTraceDetails sourceTrace={node.config.sourceTrace} />
 
+      {(node.type === 'ai-sketch-to-image' || parseWorkflowSketchImageReference(execResult?.output?.sketchImageReference)) && <WorkflowSketchImageControls
+        key={node.id} scope={sketchScope} reference={parseWorkflowSketchImageReference(execResult?.output?.sketchImageReference)}
+        status={execResult?.status || 'idle'} error={execResult?.error} phase={execResult?.output?.phase} progress={execResult?.output?.progress}
+        reserveCredits={execResult?.output?.reserveCredits} actualCredits={execResult?.output?.actualCredits} refunded={execResult?.output?.refunded}
+        needsReconcile={execResult?.output?.needsReconcile || execResult?.output?.dispatchPending || execResult?.output?.recoveryPending} insert={onSketchInsert} />}
       {(node.type === 'ai-sketch-to-code' || parseWorkflowSketchDocumentReference(execResult?.output?.documentReference)) && <WorkflowSketchDocumentControls scope={sketchScope}
         reference={parseWorkflowSketchDocumentReference(execResult?.output?.documentReference)} status={execResult?.status || 'idle'} error={execResult?.error}
         phase={execResult?.output?.phase} progress={execResult?.output?.progress} insert={onSketchInsert} />}

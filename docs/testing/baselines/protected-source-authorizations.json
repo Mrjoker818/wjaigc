@@ -267,6 +267,27 @@
     { "path": ".superpowers/sdd/media-gateway-task-8-report.md", "sourceCommit": "74716cb9" },
     { "path": ".superpowers/sdd/media-gateway-task-9-report.md", "sourceCommit": "b108312b" },
     { "path": ".superpowers/sdd/media-gateway-task-9-review-package.md", "sourceCommit": "b108312b" },
-    { "path": "migrations/20260913_v588_media_gateway.sql", "sourceCommit": "91c1f6c2" }
+    { "path": "migrations/20260913_v588_media_gateway.sql", "sourceCommit": "91c1f6c2" },
+    { "path": "src/app/api/sketch-to-code/[taskId]/document/route.ts", "sourceCommit": "2729e0f903e68d1005ac21bc968f7fb529c37470" },
+    { "path": "src/app/api/sketch-to-code/route.ts", "sourceCommit": "2729e0f903e68d1005ac21bc968f7fb529c37470" },
+    { "path": "src/components/sketch-to-code-panel.tsx", "sourceCommit": "2729e0f903e68d1005ac21bc968f7fb529c37470" },
+    { "path": "src/lib/sketch-to-code/admission.ts", "sourceCommit": "2729e0f903e68d1005ac21bc968f7fb529c37470" },
+    { "path": "src/lib/sketch-to-code/client.ts", "sourceCommit": "2729e0f903e68d1005ac21bc968f7fb529c37470" },
+    { "path": "src/lib/sketch-to-code/configured-dependencies.ts", "sourceCommit": "2729e0f903e68d1005ac21bc968f7fb529c37470" },
+    { "path": "src/lib/sketch-to-code/document.ts", "sourceCommit": "2729e0f903e68d1005ac21bc968f7fb529c37470" },
+    { "path": "src/lib/sketch-to-code/drawing.ts", "sourceCommit": "2729e0f903e68d1005ac21bc968f7fb529c37470" },
+    { "path": "src/lib/sketch-to-code/execution.ts", "sourceCommit": "2729e0f903e68d1005ac21bc968f7fb529c37470" },
+    { "path": "src/lib/sketch-to-code/generation.ts", "sourceCommit": "2729e0f903e68d1005ac21bc968f7fb529c37470" },
+    { "path": "src/lib/sketch-to-code/html.ts", "sourceCommit": "2729e0f903e68d1005ac21bc968f7fb529c37470" },
+    { "path": "src/lib/sketch-to-code/http.ts", "sourceCommit": "2729e0f903e68d1005ac21bc968f7fb529c37470" },
+    { "path": "src/lib/sketch-to-code/placement-client.ts", "sourceCommit": "2729e0f903e68d1005ac21bc968f7fb529c37470" },
+    { "path": "src/lib/sketch-to-code/provider.ts", "sourceCommit": "2729e0f903e68d1005ac21bc968f7fb529c37470" },
+    { "path": "src/lib/sketch-to-code/publication.ts", "sourceCommit": "2729e0f903e68d1005ac21bc968f7fb529c37470" },
+    { "path": "src/lib/sketch-to-code/render.ts", "sourceCommit": "2729e0f903e68d1005ac21bc968f7fb529c37470" },
+    { "path": "src/lib/sketch-to-code/task-http.ts", "sourceCommit": "2729e0f903e68d1005ac21bc968f7fb529c37470" },
+    { "path": "src/lib/sketch-to-code/token-billing.ts", "sourceCommit": "2729e0f903e68d1005ac21bc968f7fb529c37470" },
+    { "path": "src/lib/sketch-to-code/usage.ts", "sourceCommit": "2729e0f903e68d1005ac21bc968f7fb529c37470" },
+    { "path": "src/lib/sketch-to-code/workflow.ts", "sourceCommit": "2729e0f903e68d1005ac21bc968f7fb529c37470" },
+    { "path": "src/lib/workflow-renderer/legacy-port-position.ts", "sourceCommit": "2729e0f903e68d1005ac21bc968f7fb529c37470" }
   ]
 }

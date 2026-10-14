@@ -657,7 +657,7 @@ function buildTaskModelCatalogResult(
   };
 }
 
-function resolveTaskModelFromProviders(
+export function resolveTaskModelFromProviders(
   providers: ApiProvider[],
   providerId: string,
   modelId: string,

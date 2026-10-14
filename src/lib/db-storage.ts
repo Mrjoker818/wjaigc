@@ -452,12 +452,13 @@ export async function dbDeleteUser(id: string): Promise<boolean> {
 
 // ─── API Providers ───────────────────────────────────────────────────────────
 
-export async function dbGetApiProviders(options: { throwOnError?: boolean } = {}): Promise<DbApiProvider[]> {
+export async function dbGetApiProviders(options: { throwOnError?: boolean; client?: PoolClient } = {}): Promise<DbApiProvider[]> {
   try {
-    const result = await execSql('SELECT * FROM wujie_api_providers ORDER BY COALESCE(sort_order, 999999) ASC, created_at ASC');
+    const sql = 'SELECT * FROM wujie_api_providers ORDER BY COALESCE(sort_order, 999999) ASC, created_at ASC';
+    const result = options.client ? await options.client.query(sql) : await execSql(sql);
     return result.rows as unknown as DbApiProvider[];
   } catch (e) {
-    if (options.throwOnError) throw e;
+    if (options.throwOnError || options.client) throw e;
     console.error('[db-storage] dbGetApiProviders error:', e);
     return [];
   }

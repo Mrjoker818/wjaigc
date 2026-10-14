@@ -24,6 +24,10 @@ function formatSourceTime(createdAt: string): string {
 }
 
 function sourceTraceTitle(trace: WorkspaceSourceTrace): string {
+  if (trace.source === 'sketch-to-image') return ['来源：草图生图（保留原始草图）',
+    `task：${trace.taskId}`, `project：${trace.projectId}`, `原始PNG版本：${trace.previewAssetVersionId}`,
+    `生成图版本：${trace.imageAssetVersionId}`, `视觉模型：${trace.visionProviderId} / ${trace.visionModelId}`,
+    `图像模型：${trace.imageProviderId} / ${trace.imageModelId}`].join('\n');
   if (trace.source === 'sketch-to-code') return ['来源：草图转代码（原始草图PNG，非页面截图）',
     `task：${trace.taskId}`, `project：${trace.projectId}`, `PNG版本：${trace.previewAssetVersionId}`,
     `HTML版本：${trace.htmlAssetVersionId}`, `本地接收时间：${formatSourceTime(trace.createdAt)}`].join('\n');
@@ -47,6 +51,17 @@ function sourceTraceTitle(trace: WorkspaceSourceTrace): string {
 export function WorkspaceSourceTraceDetails({ sourceTrace }: WorkspaceSourceTraceProps): ReactElement | null {
   const trace = parseWorkspaceSourceTrace(sourceTrace);
   if (!trace) return null;
+  if (trace.source === 'sketch-to-image') return (
+    <section className="mx-4 mb-2 rounded border border-border/60 bg-muted/40 px-3 py-2" aria-label="节点来源">
+      <div className="text-xs font-medium text-foreground">来源：草图生图（保留原始草图）</div>
+      <dl className="mt-1.5 grid grid-cols-[auto_minmax(0,1fr)] gap-x-2 gap-y-1 break-all text-[11px] text-muted-foreground">
+        <dt>task</dt><dd>{trace.taskId}</dd><dt>project</dt><dd>{trace.projectId}</dd>
+        <dt>原始PNG版本</dt><dd>{trace.previewAssetVersionId}</dd><dt>生成图版本</dt><dd>{trace.imageAssetVersionId}</dd>
+        <dt>视觉模型</dt><dd>{trace.visionProviderId} / {trace.visionModelId}</dd>
+        <dt>图像模型</dt><dd>{trace.imageProviderId} / {trace.imageModelId}</dd>
+      </dl>
+    </section>
+  );
   if (trace.source === 'sketch-to-code') return (
     <section className="mx-4 mb-2 rounded border border-border/60 bg-muted/40 px-3 py-2" aria-label="节点来源">
       <div className="text-xs font-medium text-foreground">来源：草图转代码（原始草图PNG，非页面截图）</div>
@@ -94,7 +109,8 @@ export function CanvasSourceTraceBadge({
       className="pointer-events-auto px-1.5 py-0.5 rounded text-[9px] font-medium whitespace-nowrap leading-tight bg-black/70 text-amber-200"
       title={sourceTraceTitle(trace)}
     >
-      {trace.source === 'canvas-skill' ? 'Canvas Skill' : trace.source === 'sketch-to-code' ? '草图转代码 · 原始PNG' : '智能对话'}
+      {trace.source === 'canvas-skill' ? 'Canvas Skill' : trace.source === 'sketch-to-code' ? '草图转代码 · 原始PNG'
+        : trace.source === 'sketch-to-image' ? '草图生图 · 保留原始草图' : '智能对话'}
     </span>
   );
 }
