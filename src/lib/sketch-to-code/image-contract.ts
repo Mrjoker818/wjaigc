@@ -91,11 +91,15 @@ function readModel(value: unknown): TaskModelDescriptor {
   if (raw.maxDurationSeconds !== undefined) model.maxDurationSeconds = nonnegativeInteger(raw.maxDurationSeconds);
   return model;
 }
+/** The authoritative catalog declares raster formats; retain the legacy image category. */
+export function supportsSketchImageOutput(outputKinds: readonly string[]): boolean {
+  return outputKinds.some(kind => ['image', 'png', 'jpeg', 'webp'].includes(kind));
+}
 function supportsSketchImage(model: TaskModelDescriptor): boolean {
   return model.kind === 'image' && model.supportsReferenceImages === true
     && (model.maxReferenceImages === undefined || model.maxReferenceImages >= 1)
     && (model.supportedOperations === undefined || model.supportedOperations.includes('image-to-image'))
-    && model.outputKinds.includes('image') && model.maxOutputs >= 1;
+    && supportsSketchImageOutput(model.outputKinds) && model.maxOutputs >= 1;
 }
 export function sketchImageModels(catalog: readonly TaskModelDescriptor[]): TaskModelDescriptor[] {
   return denseArray(catalog).map(readModel).filter(supportsSketchImage);

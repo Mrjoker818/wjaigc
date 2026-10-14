@@ -10,7 +10,7 @@ import type { OrdinaryQueryResult } from '@/lib/task-core/ordinary-generation-pr
 import type { SketchImageGenerationDependencies, SketchImagePreparation } from './image-generation';
 import type { SketchImageRouting } from './image-execution';
 import type { SketchImageTaskIdentity } from './image-task-state';
-import { freezeSketchImageInput, parseStoredSketchImageInput, type SketchImageInput } from './image-contract';
+import { freezeSketchImageInput, parseStoredSketchImageInput, supportsSketchImageOutput, type SketchImageInput } from './image-contract';
 import { createSketchImageAnalysisStage, SketchProviderError } from './provider';
 import { createSketchImageGenerationStage, createSketchImageQueryStage, getSketchImageRoutingFingerprint, readConfirmedSketchImageQueryFailure } from './image-provider';
 import { markSketchImageKnownFailure } from './image-known-failure';
@@ -85,7 +85,7 @@ function readModel(value: TaskModelDescriptor, role: Role, providerId: string, m
     if (model.providerId !== providerId || model.modelId !== modelId
       || role === 'vision' && (model.kind !== 'chat' || model.supportsVision !== true || model.protocol !== 'chat-completions' || model.executionMode !== 'sync')
       || role === 'image' && (model.kind !== 'image' || model.supportsReferenceImages !== true || model.maxOutputs < 1
-        || model.maxReferenceImages !== undefined && model.maxReferenceImages < 1 || !model.outputKinds.includes('image')
+        || model.maxReferenceImages !== undefined && model.maxReferenceImages < 1 || !supportsSketchImageOutput(model.outputKinds)
         || model.supportedOperations !== undefined && !model.supportedOperations.includes('image-to-image'))) throw new Error();
     return model;
   } catch { throw new Error('SKETCH_IMAGE_MODEL_UNAVAILABLE'); }
