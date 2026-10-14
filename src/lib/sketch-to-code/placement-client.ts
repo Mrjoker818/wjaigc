@@ -46,7 +46,7 @@ export class SketchPlacement {
         || !placed && value.kind !== 'image'
         || placed && (!validSketchId(value.placementId) || value.entityId !== this.entityId
           || JSON.stringify(parseWorkspaceSourceTrace(value.sourceTrace)) !== JSON.stringify(this.trace))) throw new Error('素材放置身份或来源不匹配');
-      return { url: value.url, assetId: value.assetId as string, assetVersionId: value.assetVersionId as string,
+      return { url: value.url, assetId: value.assetId as string, assetVersionId: value.assetVersionId as string, kind: 'image',
         ...(placed ? { entityId: this.entityId, placementId: value.placementId as string, sourceTrace: this.trace } : {}) };
     };
     try {

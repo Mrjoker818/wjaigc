@@ -1140,6 +1140,13 @@ export async function listManagedUsers(): Promise<User[]> {
   return file.users.map(publicUser);
 }
 
+/** Reuse the original database/user normalization without bootstrap or file fallback. */
+export async function listManagedUsersWithClient(client: PoolClient): Promise<User[]> {
+  const file = await readDatabaseStore(client);
+  normalizeDefaultAdministrator(file);
+  return file.users.map(publicUser);
+}
+
 export async function repairDuplicateUserIds(): Promise<{ repaired: number; users: User[] }> {
   const repair = (file: StoredUsersFile): {
     repaired: number;

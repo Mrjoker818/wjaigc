@@ -303,6 +303,7 @@ vi.mock('@/lib/cloud-task-persistence', () => ({
   projectPersistedCompletedTask: vi.fn(),
 }));
 vi.mock('@/lib/cloud-task-storage', () => ({
+  CloudTaskAdmissionError: class CloudTaskAdmissionError extends Error {},
   persistPrivateAgentExecutionDescriptor: vi.fn().mockResolvedValue({
     persisted: true, reused: false,
   }),

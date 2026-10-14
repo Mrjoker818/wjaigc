@@ -14,6 +14,7 @@ vi.mock('@/lib/api-auth', () => ({
   getTrustedRequestAgentExecutionFence: vi.fn().mockResolvedValue(undefined),
 }));
 vi.mock('@/lib/cloud-task-storage', () => ({
+  CloudTaskAdmissionError: class CloudTaskAdmissionError extends Error {},
   getCloudTaskById: mocks.getCloudTaskById, getCloudTaskForUser: mocks.getCloudTaskForUser,
   claimCloudTaskLease: vi.fn(), completeCloudTask: vi.fn(), refundCloudTaskCredits: vi.fn(),
   terminateCloudTaskAndRefund: mocks.terminateCloudTaskAndRefund, updateCloudTask: vi.fn(),

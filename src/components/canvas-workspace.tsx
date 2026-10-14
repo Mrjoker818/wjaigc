@@ -1,7 +1,8 @@
 'use client';
 import { importDocumentMediaBatch, assertDocumentMediaBatchProjection } from '@/lib/collaboration/document-media-batch-client';
 import type { DocumentMediaBatchRequest } from '@/lib/collaboration/document-media-batch-request';
-import type { SketchScope } from '@/lib/sketch-to-code/client';
+import { validSketchId, type SketchScope } from '@/lib/sketch-to-code/client';
+import { parseWorkspaceSourceTrace } from '@/lib/asset-core/source-trace';
 import type { SketchTransform } from '@/lib/sketch-to-code/placement-client';
 
 import { useState, useCallback, useRef, useEffect, useLayoutEffect, useMemo, type CSSProperties } from 'react';
@@ -4345,7 +4346,16 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
       scope.assertCurrent();
       const insertionItem = typeof input === 'string' ? undefined : input;
       const transferredReference = insertionItem?.assetReference as CoreWorkspaceAssetReference | undefined;
-      if (meta?.sketchTransform && transferredReference?.sourceTrace?.source !== 'sketch-to-code') throw new Error('草图落点缺少原始来源');
+      const sketchTrace = meta?.sketchTransform ? parseWorkspaceSourceTrace(transferredReference?.sourceTrace) : undefined;
+      if (meta?.sketchTransform && (!sketchTrace || !['sketch-to-code', 'sketch-to-image'].includes(sketchTrace.source)
+        || !('projectId' in sketchTrace) || sketchTrace.projectId !== scope.projectId
+        || transferredReference?.kind !== 'image'
+        || ![transferredReference.assetId, transferredReference.assetVersionId,
+          transferredReference.entityId, transferredReference.placementId].every(validSketchId)
+        || (sketchTrace.source === 'sketch-to-code' ? sketchTrace.previewAssetVersionId
+          : sketchTrace.source === 'sketch-to-image' ? sketchTrace.imageAssetVersionId : undefined) !== transferredReference.assetVersionId)) {
+        throw new Error('草图落点缺少匹配的受权原始来源');
+      }
       let rawUrl = transferredReference?.url || insertionItem?.url || input as string;
       if (rawUrl.startsWith('blob:')) {
         const response = await fetch(rawUrl, { signal: meta?.signal });
@@ -4387,7 +4397,8 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
         ...(transferredReference?.assetId ? { assetId: transferredReference.assetId } : {}),
         ...(transferredReference?.assetVersionId ? { assetVersionId: transferredReference.assetVersionId } : {}),
         ...(transferredReference?.placementId ? { placementId: transferredReference.placementId } : {}),
-        ...(transferredReference?.sourceTrace ? { sourceTrace: transferredReference.sourceTrace } : {}),
+        ...(sketchTrace ? { sourceTrace: sketchTrace }
+          : transferredReference?.sourceTrace ? { sourceTrace: transferredReference.sourceTrace } : {}),
         ...(meta?.sketchTransform ? meta.sketchTransform : {}),
       });
     }
@@ -8014,6 +8025,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
       <div className="absolute inset-0">
         <InfiniteCanvas
           sketchContext={{ key: sketchContextKey, captureScope: captureSketchScope, insert: insertSketchResult }}
+          sketchImageEnabled={true}
           taskModelCatalog={taskModelCatalog}
           taskModelOptions={catalogModels}
           catalogStatus={catalogStatus}

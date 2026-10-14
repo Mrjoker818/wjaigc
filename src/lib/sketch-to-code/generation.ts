@@ -3,6 +3,7 @@ import type { GenerationProjectAccess } from '@/lib/collaboration/generation-pro
 import type { TaskModelDescriptor } from '@/lib/task-core/model-capability-contract';
 import { compileSketchHtml } from './html';
 import { aggregateSketchUsage, normalizeSketchStageResponse, type SketchCodeUsage } from './usage';
+import { runSketchStage } from './stage';
 
 export interface SketchCodeInput {
   projectId: string;
@@ -46,7 +47,6 @@ export interface SketchCodePreparation {
 
 const MAX_PNG_BYTES = 4 * 1024 * 1024;
 const MAX_JSON_BYTES = 256 * 1024;
-const STAGE_TIMEOUT_MS = 60_000;
 const INPUT_FIELDS = ['projectId', 'imageDataUrl', 'instruction', 'providerId', 'modelId', 'idempotencyKey'];
 
 function record(value: unknown, fields: readonly string[], code: string): Record<string, unknown> {
@@ -116,23 +116,6 @@ function freezeJson(value: unknown): unknown {
   return value;
 }
 
-// Abort even an adapter that ignores its signal; late fulfillment cannot start the next phase.
-async function runStage<T>(operation: (signal: AbortSignal) => Promise<T>, parent: AbortSignal): Promise<T> {
-  parent.throwIfAborted();
-  const deadline = new AbortController();
-  const signal = AbortSignal.any([parent, deadline.signal]);
-  const timer = setTimeout(() => deadline.abort(new Error('SKETCH_MODEL_TIMEOUT')), STAGE_TIMEOUT_MS);
-  return new Promise<T>((resolve, reject) => {
-    const cleanup = (): void => { clearTimeout(timer); signal.removeEventListener('abort', abort); };
-    const abort = (): void => { cleanup(); reject(signal.reason); };
-    signal.addEventListener('abort', abort, { once: true });
-    if (signal.aborted) { abort(); return; }
-    Promise.resolve().then(() => { signal.throwIfAborted(); return operation(signal); }).then(
-      result => { cleanup(); if (signal.aborted) reject(signal.reason); else resolve(result); },
-      error => { cleanup(); reject(error); },
-    );
-  });
-}
 
 /** Complete admission and binary validation before a caller may begin guarded billing. */
 export async function prepareSketchCode(
@@ -165,13 +148,13 @@ export async function prepareSketchCode(
   const compute = async (executionSignal: AbortSignal, onPhase?: SketchPhaseCallback): Promise<SketchCodeDraft> => {
     executionSignal.throwIfAborted();
     await onPhase?.('analysis'); executionSignal.throwIfAborted();
-    const analysisResponse = normalizeSketchStageResponse(await runStage(
+    const analysisResponse = normalizeSketchStageResponse(await runSketchStage(
       signal => analyze(input.imageDataUrl, input.instruction, binding, signal), executionSignal,
     ));
     const analysis = parseAnalysis(parseModelJson(analysisResponse.content));
     executionSignal.throwIfAborted();
     await onPhase?.('reconstruction'); executionSignal.throwIfAborted();
-    const reconstructionResponse = normalizeSketchStageResponse(await runStage(signal => reconstruct(analysis, binding, signal), executionSignal));
+    const reconstructionResponse = normalizeSketchStageResponse(await runSketchStage(signal => reconstruct(analysis, binding, signal), executionSignal));
     const tree = parseModelJson(reconstructionResponse.content);
     executionSignal.throwIfAborted();
     // Validate before preserving the JSON source; never label an arbitrary

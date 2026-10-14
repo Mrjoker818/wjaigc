@@ -33,6 +33,7 @@ vi.mock('@/lib/task-registry', () => ({
 vi.mock('@/lib/edit-task-store', () => ({ cancelEditTask: mocks.cancelEditTask }));
 vi.mock('@/lib/credits', () => ({ refundCredits: mocks.refundCredits }));
 vi.mock('@/lib/cloud-task-storage', () => ({
+  CloudTaskAdmissionError: class CloudTaskAdmissionError extends Error {},
   getCloudTaskById: mocks.getCloudTaskById,
   getCloudTaskForUser: mocks.getCloudTaskForUser,
   refundCloudTaskCredits: mocks.refundCloudTaskCredits,

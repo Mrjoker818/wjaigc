@@ -91,19 +91,16 @@ function createWorkflowTestFixtureScope<T extends object>(makeMocks: () => T) {
     const result = run(fixture, () => Reflect.apply(operation, undefined, args));
     if (!result || typeof (result as PromiseLike<unknown>).then !== 'function') return result;
     const key = JSON.stringify(args.slice(0, 2));
-    let observed!: Promise<unknown>;
-    observed = (async () => {
-      try {
-        const value = await result;
-        if (name === 'claim' && value) fixture.workers.add(key);
-        return value;
-      } finally {
-        // No rejection handler is attached to the returned Promise: an unawaited
-        // original port failure must remain visible to native/Vitest detection.
-        if (name === 'release') fixture.workers.delete(key);
-        fixture.pending.delete(observed);
-      }
-    })();
+    const observed: Promise<unknown> = (async () => {
+      const value = await result;
+      if (name === 'claim' && value) fixture.workers.add(key);
+      return value;
+    })().finally(() => {
+      // No rejection handler is attached to the returned Promise: an unawaited
+      // original port failure must remain visible to native/Vitest detection.
+      if (name === 'release') fixture.workers.delete(key);
+      fixture.pending.delete(observed);
+    });
     fixture.pending.add(observed);
     return observed;
   }

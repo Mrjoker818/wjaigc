@@ -52,6 +52,7 @@ vi.mock('@/lib/persist-result-image', () => ({ persistResultImage: vi.fn(async (
 vi.mock('@/lib/op-log', () => ({ logOperation: vi.fn(), logError: vi.fn(), OP_ACTIONS: {} }));
 vi.mock('@/lib/server-user-storage', () => ({ appendUserJsonl: io.append }));
 vi.mock('@/lib/cloud-task-storage', () => ({
+  CloudTaskAdmissionError: class CloudTaskAdmissionError extends Error {},
   createCloudTask: io.create,
   createBillableCloudTask: io.atomic,
   getCloudTaskById: vi.fn(async (id: string) => io.tasks.get(id) ?? null),

@@ -2,6 +2,7 @@ import 'server-only';
 
 import { mkdir, readFile, writeFile } from 'fs/promises';
 import path from 'path';
+import type { PoolClient } from 'pg';
 import type { ApiBalanceInfo, ApiProvider, ModelInfo, ApiKind } from './universal-api-types';
 export type { ApiProvider, ModelInfo, ApiBalanceInfo, ApiKind };
 import { fetchWithV1Retry, shouldSkipV1Retry } from './api-helpers';
@@ -309,16 +310,17 @@ function normalizeDiscoveredModels(val: unknown, providerId: string, modelType: 
 interface ReadConfigOptions {
   migrateFileProviders?: boolean;
   strict?: boolean;
+  client?: PoolClient;
 }
 
 async function readConfig(options: ReadConfigOptions = {}): Promise<StoredApiConfig> {
   // Try database first (persistent across deployments)
   try {
-    const readDatabase = !options.strict || isDatabaseConfigured();
+    const readDatabase = Boolean(options.client) || !options.strict || isDatabaseConfigured();
     const dbProviderRows = readDatabase
-      ? await dbGetApiProviders(options.strict ? { throwOnError: true } : undefined)
+      ? await dbGetApiProviders(options.client ? { client: options.client, throwOnError: true } : options.strict ? { throwOnError: true } : undefined)
       : [];
-    if ((options.strict && readDatabase) || dbProviderRows.length > 0) {
+    if (((options.strict || options.client) && readDatabase) || dbProviderRows.length > 0) {
       const providers: ApiProvider[] = dbProviderRows.map((p, i) => ({
         id: p.id,
         name: p.name,
@@ -346,7 +348,7 @@ async function readConfig(options: ReadConfigOptions = {}): Promise<StoredApiCon
       };
     }
   } catch (error) {
-    if (options.strict) throw error;
+    if (options.strict || options.client) throw error;
     // DB not available, fall through to file
   }
 
@@ -437,6 +439,11 @@ export async function getApiProviders(options: ReadConfigOptions = {}): Promise<
   providers.forEach((p, i) => { if (p.sortOrder == null) p.sortOrder = i; });
   providers.sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0));
   return providers;
+}
+
+/** Same transaction only: no file fallback, migration, bootstrap or independent pool. */
+export async function getApiProvidersWithClient(client: PoolClient): Promise<ApiProvider[]> {
+  return getApiProviders({ client, strict: true, migrateFileProviders: false });
 }
 
 export async function getApiProvider(id: string): Promise<ApiProvider | null> {

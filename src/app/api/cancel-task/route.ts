@@ -17,6 +17,7 @@ import {
 import { errorResponse, getRequestId } from '@/lib/request-id';
 import { inferTaskErrorSource } from '@/lib/task-core/task-error';
 import { cancelSketchTask } from '@/lib/sketch-to-code/task-http';
+import { cancelSketchImageTask } from '@/lib/sketch-to-code/image-public-http';
 import { sketchError } from '@/lib/sketch-to-code/http';
 import { deleteTerminalPrivateInpaintInputs } from '@/lib/task-core/inpaint-private-inputs';
 import {
@@ -56,6 +57,9 @@ export async function POST(request: NextRequest) {
     let sketchCandidate;
     try { sketchCandidate = await getCloudTaskById(taskId); }
     catch { return sketchError(undefined, requestId); }
+    if (sketchCandidate?.type === 'sketch-to-image' || taskId.startsWith('skimg_')) {
+      return cancelSketchImageTask(body, sketchCandidate, user.id, requestId);
+    }
     if (sketchCandidate?.type === 'sketch-to-code' || taskId.startsWith('sketch_')) {
       return cancelSketchTask(body, sketchCandidate, user.id, requestId);
     }

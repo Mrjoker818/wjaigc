@@ -1,5 +1,56 @@
 # 手绘草图转代码实施计划
 
+## 2026-10-13 双模式增量（当前执行入口）
+
+用户已确认默认草图生图、保留草图转代码；依据为[双模式设计](../specs/2026-10-13-sketch-dual-mode-design.md)。原 Task1–6 的已闭代码及历史验收不重派。增量继续使用本计划 `.superpowers/sdd/2026-10-09-sketch-to-code/progress.md` 和唯一总台账，不建立第二份进行中状态。
+
+### Task 7：共享图像模式合同（内部任务号，不是整体第七项协作）
+
+**Files:** 新增 `src/lib/sketch-to-code/image-contract.ts` 与 `src/__tests__/lib/sketch-image-contract.test.ts`。只实现纯合同，不启用未接通的新默认入口。
+
+**Interfaces:** `SketchCreationMode = 'image' | 'code'`；`SketchImageInput` 含 `projectId,imageDataUrl,instruction,visionProviderId,visionModelId,imageProviderId,imageModelId,idempotencyKey,aspectRatio`，可选 `size,quality`；`SketchImageAnalysis` 为只读 `summary,composition,prompt,negativePrompt`。导出 `sketchImageModels(catalog)`、`freezeSketchImageInput(value, vision, image)`、`parseSketchImageAnalysis(value)`、`buildSketchImageGenerationBody(input, analysis)`。
+
+- [ ] 写实际行为 RED：合法两模型输入成功、后续输入变化不影响快照；chat/vision/execution、image/reference/operation/output 的不符目录均拒绝；同名模型不同 provider 不混用；控制字符、缺字段、未知字段、稀疏/访问器对象、过长分析、空 prompt 与原始 PNG 不合法拒绝。
+- [ ] 实跑单文件，保留缺模块收集失败；建立能调用的最小占位后再确认行为失败，不把缺模块当完整 RED。
+- [ ] 最小 GREEN：冻结绑定和原始 PNG，复用 `validateTaskModelSelection` 验证比例/尺寸/质量/单张参考输入；生成 body 精确 `model=imageModelId,providerId=imageProviderId,referenceImages=[imageDataUrl],imageUrl=imageDataUrl,outputCount=1,submitOnly=true`，参考描述为同次分析，不构造猜测模型回退。
+- [ ] 单文件与既有模型选择/草图输入相关单元测试、严格 ESLint；独立 Spec/Quality 审查后才完成本任务。不得调用真实模型、数据库、安装或 Git 写入。
+
+```ts
+expect(buildSketchImageGenerationBody(input, analysis).referenceImages).toEqual([input.imageDataUrl]);
+expect(buildSketchImageGenerationBody(input, analysis).providerId).toBe(input.imageProviderId);
+expect(() => freezeSketchImageInput(input, vision, { ...image, supportsReferenceImages: false })).toThrow();
+```
+
+### Task 8：持久两阶段接入与故障保护
+
+**Files:** 限定 `src/lib/sketch-to-code/` 图像运行适配、现有任务执行/恢复/计费接缝及直接相关测试；不改 HTML 编译器。接入前根据真实原设施确定最小写集并在本台账登记。
+
+**第一接缝 8A：明确视觉分析 HTTP。** 修改 `src/lib/sketch-to-code/provider.ts`，新增 `createSketchImageAnalysisStage({provider,modelId,requestId}, {transport?})`。该工厂只暴露 `(imageDataUrl,instruction,binding,signal) => Promise<Readonly<{analysis:SketchImageAnalysis,usage?:SketchStageResponse['usage']}>>`，共享原有单次 POST、严格 model 回执、错误脱敏、1MiB 收体上限和取消保护；不能给新模式暴露 HTML 重建调用。测试新增 `src/__tests__/lib/sketch-image-provider.test.ts`，使用本地合成 HTTP，不付费。先 RED 核对请求的原PNG/关键词、四字段图像分析规则、一次POST、不同provider同名model拒绝、原始usage不伪造、错误/异常JSON/迟到取消拒绝；再最小工厂接入并保持旧代码工厂全部行为。独立复核后只关闭8A，不能把它计为持久任务、费用或图像生成服务完成。
+
+**独立接缝 8B1：生图费用纯合同。** 新增 `src/lib/sketch-to-code/image-pricing.ts` 和 `src/__tests__/lib/sketch-image-pricing.test.ts`，主控与8A无交叉写集。接口 `quoteSketchImagePricing(selection,config)` 冻结两个provider/model和单次视觉、单张图像报价；`parseSketchImagePricing(value)` 严格重读持久报价；`quoteSketchImageSettlement(pricing,usage?)` 仅计算结算候选。复用原严格定价配置、管理员按次报价与Token计算器；Token仅计算一次视觉真实计数、缺计数拒绝，不能借用旧两次LLM聚合，图像报价保持独立。先可调用占位RED，再GREEN；覆盖独立provider价格、质量/尺寸、免费配置、Token最低1与补退差额、缺失/畸形/越界usage、外部突变和伪造报价。无数据库、财务写入、任务或网络权限，独审关闭的仅是报价合同；后续原事务仍必须核对原消费、任务摘要与冻结报价。
+
+**接缝 8B2：受权准备与有界两阶段计算。** 新增 `image-generation.ts` 与 `sketch-image-generation.test.ts`，将旧 `generation.ts` 的有界异步阶段移动到同目录 `stage.ts` 并由两模式共用，保留旧60秒语义及原断言。`prepareSketchImage(value,dependencies,context)` 在报价/扣费前核对当前项目、两组真实目录、Task7完整字段合同，并真实inspectBinaryImage解码原PNG；冻结输入、访问身份、两绑定。`compute(signal,{beforePhase,afterAnalysis})` 必需两个持久接线回调，缺失时零调用；依次调用明确视觉分析、严格四字段及真实可选usage，等待原任务afterAnalysis持久回执后才向显式图像模型发同一原PNG。返回只含单个直出图或单个远端任务的严格生成回执；分析失败/存储回执失联/取消/超时/迟到响应均不能推进下一阶段。此切片不提供财务、HTTP路由或资产发布权；通过不计为服务完成。分别60秒分析、120秒生成，可忽略signal的适配器同样受外部有界race限制。后续执行器必须将beforePhase/afterAnalysis接入原任务提交标记和同租约写入，回执不明确进入reconcile而不自动重发。
+
+- [ ] 先写可复现故障合同：两模型准入在扣费前；原 nonce 重放不重复扣费；分析失败不提交生图；取消/权限失效/过期租约后的迟到结果不推进；收据不明不能重试付费；已完成任务按受权 status 恢复。
+- [ ] 将 Task7 输入冻结接入既有 durable task 与资产发布权威。分析/生成阶段均持久化与原任务关联，绑定和原始草图与请求摘要一致；复用既有供应商适配，不增加第二个任务 Map 或可见 Skill。
+- [ ] 费用按真实已冻结分析与图像报价确认，保留原唯一消费/退款保护。针对性隔离数据库验证只使用专属临时库，身份/互斥/租约门禁全部保留。
+- [ ] 独立审查接缝与故障证据，确认实际服务可用后再进入默认 UI 切换；局部纯合同 GREEN 不计为服务完成。
+
+### Task 9：双模式窗口、画布和节点
+
+**Files:** 限定 `src/components/sketch-to-code-panel.tsx`、画布入口、`client.ts`、`placement-client.ts`、`workflow-engine.ts`、节点属性及其直接相关测试。
+
+- [ ] 先 RED：默认图像模式、切换保留绘图/各模式绑定/结果；精确视觉与图像模型筛选；新任务与原任务核对区分；失败保留输入；图片结果预览/下载/同项目添加不覆盖原图；旧 HTML 预览和安全下载保持。
+- [ ] 最小接入运行已审查的 Task8，模式切换不提交/取消/改费；未知授权禁用生成与添加。节点复用同一服务与绑定合同，不把 HTML 当图片 URL。
+- [ ] 有序失效测试覆盖切项目、撤权限、关闭和迟到读结果；组件/画布/节点相关回归通过后独立审查。
+
+### Task 10：增量交付与当前构建真实验收
+
+- [ ] 集中差异/机密/类型/严格 lint 检查和受影响回归；完整回归仅在最终冻结增量统一运行，原失败不抹除，不重复无变化已闭矩阵。
+- [ ] 检查通过才按限定清单正常提交 main（避免付费 CI）、同步 GitHub，由 Coze 受控拉取。核对源码与构建同树，未正式部署。
+- [ ] 新独立 Edge 验双模式、375/320 有限窄屏、绘图 PNG、模型菜单与同项目结果恢复；实际付费生成/取消/退款须按仍有效费用边界，缺证据写未验证。
+- [ ] 当前总台账和本计划 SDD 原位更新，不把 Task7 内部编号与整体协作第七项混淆，不宣称整体目标完成。
+
 ## 2026-10-13 受控交付授权（覆盖下方历史 Git／Coze 边界）
 
 用户已明确允许：完成交付检查后，仅提交本轮升级相关代码、测试和必要文档并同步 GitHub main，由 Coze 拉取；先在项目页核对来源与构建，再在新的独立 Edge 预览页真实验收。不动 stable，不提交无关用户文件、密钥或本地运行产物，不强制推送，不正式部署。该范围内无需再次确认。完整依据见[范围决策](../specs/2026-09-27-upgrade-goal-scope-decisions.md)顶部2026-10-13条目。

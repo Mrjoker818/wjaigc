@@ -32,9 +32,13 @@ export function sketchAuthResponse(response: NextResponse, requestId: string): N
 
 const MAX_BODY = 6 * 1024 * 1024;
 const START_FIELDS = ['projectId', 'imageDataUrl', 'instruction', 'providerId', 'modelId', 'idempotencyKey'] as const;
+export interface SketchBodyContract { readonly fields: readonly string[]; readonly required: readonly string[] }
 /** Independent 10s ingress budget; never await a hung read or cancel on failure. */
-export async function readSketchBody(request: { body: ReadableStream<Uint8Array> | null; headers: Headers; signal: AbortSignal }): Promise<Record<string, unknown>> {
+export async function readSketchBody(request: { body: ReadableStream<Uint8Array> | null; headers: Headers; signal: AbortSignal },
+  contract?: Readonly<SketchBodyContract>): Promise<Record<string, unknown>> {
   const invalid = (): SketchHttpError => new SketchHttpError(400, 'SKETCH_BODY_INVALID');
+  // The contract is an internal call-site choice, never a browser body field.
+  const allowed = [...(contract?.fields ?? START_FIELDS)], required = [...(contract?.required ?? START_FIELDS)];
   if (request.signal.aborted) throw invalid();
   if (!/^application\/json(?:\s*;\s*charset\s*=\s*"?utf-8"?)?\s*$/i.test(request.headers.get('content-type') ?? '')) throw new SketchHttpError(415, 'SKETCH_CONTENT_TYPE_INVALID');
   const declared = request.headers.get('content-length');
@@ -70,8 +74,8 @@ export async function readSketchBody(request: { body: ReadableStream<Uint8Array>
     }
     const bytes = Buffer.concat(chunks); let value: unknown;
     try { value = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes)) as unknown; } catch { throw invalid(); }
-    const fields = sketchFields(value, START_FIELDS);
-    if (Object.keys(fields).length !== START_FIELDS.length || START_FIELDS.some(key => typeof fields[key] !== 'string')) throw invalid();
+    const fields = sketchFields(value, allowed);
+    if (required.some(key => !Object.hasOwn(fields, key)) || Object.values(fields).some(field => typeof field !== 'string')) throw invalid();
     return fields;
   } catch (error) { cancel(); throw error instanceof SketchHttpError ? error : invalid(); }
   finally {

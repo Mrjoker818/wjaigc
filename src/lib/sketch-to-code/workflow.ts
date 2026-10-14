@@ -18,10 +18,10 @@ export interface WorkflowSketchIntent {
   input: Readonly<SketchCodeInput>; access: SketchCodePreparation['access']; requestDigest: string;
   childTaskId?: string; admissionUnknown?: boolean;
 }
-export interface WorkflowSketchHost {
+export interface WorkflowSketchHost<TIntent = WorkflowSketchIntent> {
   actorUserId: string; projectId: string; parentExecutionId: string; executionId: string;
   nodeId: string; instanceId: string; attempt: number; headers: HeadersInit;
-  intents: Record<string, WorkflowSketchIntent>;
+  intents: Record<string, TIntent>;
   progress?(result: ExecutionResult): void;
   checkpoint(): Promise<void>; assertCurrent(): Promise<void>;
 }
@@ -35,7 +35,8 @@ function assertIntent(intent: WorkflowSketchIntent, host: WorkflowSketchHost): v
     || intent.nodeId !== host.nodeId || intent.instanceId !== host.instanceId || !Number.isSafeInteger(intent.attempt) || intent.attempt < 0
     || intent.input.projectId !== host.projectId || intent.requestDigest !== digest(intent.input)) throw new Error('WORKFLOW_SKETCH_INTENT_MISMATCH');
 }
-async function assertAccess(host: WorkflowSketchHost, intent?: Pick<WorkflowSketchIntent, 'access'>): Promise<SketchCodePreparation['access']> {
+type WorkflowSketchAccessHost = Pick<WorkflowSketchHost, 'actorUserId' | 'projectId' | 'assertCurrent'>;
+async function assertAccess(host: WorkflowSketchAccessHost, intent?: Pick<WorkflowSketchIntent, 'access'>): Promise<SketchCodePreparation['access']> {
   await host.assertCurrent();
   const access = await authorizeGenerationProject({ actorUserId: host.actorUserId, projectId: host.projectId });
   await host.assertCurrent();
@@ -43,7 +44,7 @@ async function assertAccess(host: WorkflowSketchHost, intent?: Pick<WorkflowSket
     || intent && !isDeepStrictEqual(access, intent.access)) throw new Error('WORKFLOW_SKETCH_SCOPE_CHANGED');
   return access;
 }
-async function managedPng(node: WorkflowNode, inputs: Record<string, unknown>, host: WorkflowSketchHost, access: SketchCodePreparation['access']): Promise<string> {
+async function managedPng(node: WorkflowNode, inputs: Record<string, unknown>, host: WorkflowSketchAccessHost, access: SketchCodePreparation['access']): Promise<string> {
   const raw = inputs.imageDataUrl ?? inputs.imageUrl ?? inputs.image ?? node.config.imageUrl;
   const versionId = String(inputs.assetVersionId ?? node.config.assetVersionId ?? '');
   const placementId = String(inputs.assetVersionId !== undefined ? inputs.placementId ?? '' : node.config.placementId ?? '');
@@ -72,6 +73,8 @@ async function managedPng(node: WorkflowNode, inputs: Record<string, unknown>, h
   if (media.mimeType !== 'image/png') throw new SketchInputError('SKETCH_IMAGE_INVALID');
   return `data:image/png;base64,${media.bytes.toString('base64')}`;
 }
+// The image adapter shares the original access/managed PNG reader, not a new authority.
+export { assertAccess as assertWorkflowSketchAccess, managedPng as readWorkflowSketchPng };
 async function originalChild(intent: WorkflowSketchIntent, host: WorkflowSketchHost): Promise<string | null> {
   assertIntent(intent, host);
   const candidate = await getCloudTaskForUserByIdempotencyKey(host.actorUserId, intent.input.idempotencyKey);

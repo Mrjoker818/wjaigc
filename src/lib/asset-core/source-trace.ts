@@ -33,7 +33,20 @@ export interface SketchWorkspaceSourceTrace {
   createdAt: string;
 }
 
-export type WorkspaceSourceTrace = SimpleChatWorkspaceSourceTrace | CanvasSkillWorkspaceSourceTrace | SketchWorkspaceSourceTrace;
+/** Data-only lineage from a freshly protected result; never placement authority. */
+export interface SketchImageWorkspaceSourceTrace {
+  source: 'sketch-to-image';
+  taskId: string;
+  projectId: string;
+  previewAssetVersionId: string;
+  imageAssetVersionId: string;
+  visionProviderId: string;
+  visionModelId: string;
+  imageProviderId: string;
+  imageModelId: string;
+}
+
+export type WorkspaceSourceTrace = SimpleChatWorkspaceSourceTrace | CanvasSkillWorkspaceSourceTrace | SketchWorkspaceSourceTrace | SketchImageWorkspaceSourceTrace;
 
 const TRACE_ID = /^[A-Za-z0-9._:-]{1,200}$/;
 const TRACE_LABEL_MAX_LENGTH = 200;
@@ -48,6 +61,17 @@ function isBoundedTraceLabel(value: unknown): value is string {
 export function parseWorkspaceSourceTrace(value: unknown): WorkspaceSourceTrace | undefined {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
   const trace = value as Record<string, unknown>;
+  if (trace.source === 'sketch-to-image') {
+    const { taskId, projectId, previewAssetVersionId, imageAssetVersionId,
+      visionProviderId, visionModelId, imageProviderId, imageModelId } = trace;
+    if (![taskId, projectId, previewAssetVersionId, imageAssetVersionId].every(id => typeof id === 'string' && TRACE_ID.test(id))
+      || ![visionProviderId, visionModelId, imageProviderId, imageModelId].every(label => typeof label === 'string'
+        && label.length > 0 && label.length <= 256 && label === label.trim() && !/\p{Cc}/u.test(label))) return undefined;
+    return Object.freeze({ source: 'sketch-to-image', taskId: taskId as string, projectId: projectId as string,
+      previewAssetVersionId: previewAssetVersionId as string, imageAssetVersionId: imageAssetVersionId as string,
+      visionProviderId: visionProviderId as string, visionModelId: visionModelId as string,
+      imageProviderId: imageProviderId as string, imageModelId: imageModelId as string });
+  }
   if (trace.source === 'sketch-to-code') {
     const { taskId, projectId, previewAssetVersionId, htmlAssetVersionId, createdAt } = trace;
     if (![taskId, projectId, previewAssetVersionId, htmlAssetVersionId].every(id => typeof id === 'string' && TRACE_ID.test(id))
