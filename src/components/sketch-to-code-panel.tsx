@@ -7,11 +7,12 @@ import { parseWorkspaceSourceTrace, type SketchWorkspaceSourceTrace } from '@/li
 import { appendSketchStroke, clearSketch, redoSketch, SKETCH_COLORS, SKETCH_WIDTHS,
   undoSketch, type SketchHistory, type SketchStroke } from '@/lib/sketch-to-code/drawing';
 import { exportSketchPng, paintSketch } from '@/lib/sketch-to-code/render';
-import { createSketchPanelSession, DOCUMENT_PLACEMENT_REASON, SKETCH_DOCUMENT_SANDBOX, sketchModels, type SketchPanelSession, type SketchScope, type SketchTask } from '@/lib/sketch-to-code/client';
+import { createSketchPanelSession, SketchClient, DOCUMENT_PLACEMENT_REASON, SKETCH_DOCUMENT_SANDBOX, sketchModels, type SketchPanelSession, type SketchScope, type SketchTask } from '@/lib/sketch-to-code/client';
 import { SketchPlacement, type SketchInsert } from '@/lib/sketch-to-code/placement-client';
 import { sketchImageModels, type SketchCreationMode } from '@/lib/sketch-to-code/image-contract';
-import type { SketchImagePanelSession, SketchImageTask } from '@/lib/sketch-to-code/image-client';
+import { SketchImageClient, SketchImageReadGate, type SketchImagePanelSession, type SketchImageTask } from '@/lib/sketch-to-code/image-client';
 import { SketchImagePlacement } from '@/lib/sketch-to-code/image-placement-client';
+import { discoverSketchTasks, sketchRecoveryActive, sketchRecoveryMemory, type SketchRecoveryCandidate } from '@/lib/sketch-to-code/recovery-client';
 
 export interface SketchCanvasContext {
   key: string; captureScope: () => SketchScope; insert: SketchInsert;
@@ -20,18 +21,60 @@ interface SketchToCodePanelProps {
   session?: SketchPanelSession; imageSession?: SketchImagePanelSession; models?: readonly TaskModelDescriptor[];
   catalogStatus?: { loading: boolean; error: string | null }; onClose?: () => void;
   insert?: SketchInsert; initialTrace?: SketchWorkspaceSourceTrace; isMonochrome?: boolean;
+  recoverTasks?: boolean;
 }
 const unavailable: SketchScope = { actorId: '', projectId: '', key: 'unavailable', authority: 'unknown', assertCurrent: () => { throw new Error('当前项目授权不可用'); } };
 const active = (task?: Pick<SketchTask, 'status'>): boolean => !!task && ['pending', 'processing', 'submitting'].includes(task.status);
 // Keep the browser input boundary aligned with generation.ts admission validation.
 const MAX_INSTRUCTION_LENGTH = 4096;
 
+// Owned by the existing drawer sessions, not a global cache of authorization
+// closures. Non-enumerable state is neither persisted nor copied as draft data.
+const runtimeKey = Symbol('sketch-drawer-runtime');
+interface SketchDrawerRuntime {
+  scopeKey: string; check: SketchScope['assertCurrent']; imageAdmissions: number;
+  placements: Map<string, SketchPlacement | SketchImagePlacement>;
+}
+function placementKey(task: SketchTask | SketchImageTask): string {
+  return JSON.stringify('visionProviderId' in task
+    ? ['image', task.projectId, task.taskId, task.previewAssetId, task.previewAssetVersionId,
+      task.imageAssetId, task.imageAssetVersionId, task.visionProviderId, task.visionModelId, task.imageProviderId, task.imageModelId]
+    : ['code', task.projectId, task.taskId, task.previewAssetId, task.previewAssetVersionId, task.htmlAssetId, task.htmlAssetVersionId]);
+}
+function drawerRuntime(session: SketchPanelSession | SketchImagePanelSession): SketchDrawerRuntime {
+  const owner = session as (SketchPanelSession | SketchImagePanelSession) & { [runtimeKey]?: SketchDrawerRuntime };
+  const scope = session.client.scope;
+  const scopeKey = JSON.stringify([scope.actorId, scope.projectId, scope.key, scope.authority]);
+  const previous = owner[runtimeKey];
+  if (previous?.scopeKey === scopeKey && previous.check === scope.assertCurrent) return previous;
+  if (previous) {
+    for (const placement of previous.placements.values()) placement.stop();
+    previous.placements.clear(); session.placement?.stop(); session.placement = undefined;
+  }
+  const runtime: SketchDrawerRuntime = { scopeKey, check: scope.assertCurrent, imageAdmissions: 0, placements: new Map() };
+  if (!previous && session.placement && session.client.task?.status === 'completed') {
+    runtime.placements.set(placementKey(session.client.task), session.placement);
+  }
+  Object.defineProperty(owner, runtimeKey, { value: runtime, configurable: true });
+  return runtime;
+}
+function retainedPlacement<T extends SketchPlacement | SketchImagePlacement>(session: SketchPanelSession | SketchImagePanelSession,
+  task: SketchTask | SketchImageTask, create: () => T): T {
+  session.client.scope.assertCurrent();
+  const placements = drawerRuntime(session).placements, key = placementKey(task);
+  let placement = placements.get(key);
+  if (!placement) { placement = create(); placements.set(key, placement); }
+  return placement as T;
+}
+
 interface ImageModeControlsProps {
   session: SketchImagePanelSession; history: SketchHistory; models: readonly TaskModelDescriptor[];
   catalogStatus?: SketchToCodePanelProps['catalogStatus']; insert?: SketchInsert;
   visible: boolean; allowed: boolean; control: string; isMonochrome: boolean;
+  recoveryBlocked?: boolean; onTask?: (task: SketchImageTask) => void;
+  recoverTasks?: boolean; onAdmissionChange?: () => void;
 }
-function ImageModeControls({ session, history, models, catalogStatus, insert, visible, allowed, control, isMonochrome }: ImageModeControlsProps): ReactElement {
+function ImageModeControls({ session, history, models, catalogStatus, insert, visible, allowed, control, isMonochrome, recoveryBlocked = false, onTask, recoverTasks = false, onAdmissionChange }: ImageModeControlsProps): ReactElement {
   const [, repaint] = useState(0);
   const [task, setTask] = useState(session.client.task);
   const [busy, setBusy] = useState(false);
@@ -40,6 +83,7 @@ function ImageModeControls({ session, history, models, catalogStatus, insert, vi
   const url = useRef(''), operation = useRef(0), busyRef = useRef(false), live = useRef(true), paused = useRef(false);
   const enabled = useRef(false); enabled.current = visible && allowed;
   const placementTask = useRef(session.placement ? session.client.task?.taskId : undefined);
+  const runtime = recoverTasks ? drawerRuntime(session) : undefined;
   const errorId = useId();
   const visionModels = sketchModels(models);
   let imageModels: TaskModelDescriptor[] = [], invalidCatalog = false;
@@ -53,8 +97,8 @@ function ImageModeControls({ session, history, models, catalogStatus, insert, vi
   const parametersValid = !!image && (!image.allowedRatios.length || image.allowedRatios.includes(session.aspectRatio))
     && (!session.size || image.allowedSizes.includes(session.size)) && (!session.quality || image.qualityOptions.includes(session.quality));
   const reconcile = !!(task?.needsReconcile || task?.dispatchPending || task?.recoveryPending);
-  const canGenerate = allowed && writable && !!vision && parametersValid && !catalogStatus?.loading && !catalogStatus?.error
-    && !invalidCatalog && !!history.present.strokes.length && !tooLong && !busy && !active(task) && !reconcile && !session.client.admissionUnknown;
+  const canGenerate = !recoveryBlocked && allowed && writable && !!vision && parametersValid && !catalogStatus?.loading && !catalogStatus?.error
+    && !invalidCatalog && !!history.present.strokes.length && !tooLong && !busy && !runtime?.imageAdmissions && !active(task) && !reconcile && !session.client.admissionUnknown;
   const refresh = (): void => repaint(value => value + 1);
   const revoke = (): void => { if (url.current) URL.revokeObjectURL(url.current); url.current = ''; };
   const stop = (): void => { operation.current++; busyRef.current = false; session.client.stop(); session.placement?.stop(); };
@@ -71,7 +115,7 @@ function ImageModeControls({ session, history, models, catalogStatus, insert, vi
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible, allowed, session]);
   const run = async (action: (assert: () => void) => Promise<void>): Promise<void> => {
-    if (busyRef.current || !enabled.current || !live.current) return;
+    if (busyRef.current || runtime?.imageAdmissions || !enabled.current || !live.current) return;
     const token = ++operation.current; busyRef.current = true; setBusy(true); setMessage('');
     const assert = (): void => { session.client.scope.assertCurrent(); if (!live.current || !enabled.current || token !== operation.current) throw new Error('图像读取已停止，请核对原任务'); };
     try { await action(assert); }
@@ -80,8 +124,12 @@ function ImageModeControls({ session, history, models, catalogStatus, insert, vi
   };
   const receive = (next: SketchImageTask): void => {
     paused.current = false; setTask(next);
-    if (next.status === 'completed' && !next.needsReconcile && !next.dispatchPending && !next.recoveryPending && insert && placementTask.current !== next.taskId) {
-      session.placement?.stop(); session.placement = new SketchImagePlacement(next, session.client.scope, insert); placementTask.current = next.taskId;
+    onTask?.(next);
+    if (next.status === 'completed' && !next.needsReconcile && !next.dispatchPending && !next.recoveryPending && insert && (recoverTasks || placementTask.current !== next.taskId)) {
+      const placement = recoverTasks ? retainedPlacement(session, next, () => new SketchImagePlacement(next, session.client.scope, insert))
+        : new SketchImagePlacement(next, session.client.scope, insert);
+      if (session.placement !== placement) session.placement?.stop();
+      session.placement = placement; placementTask.current = next.taskId;
     }
   };
   const poll = async (assert: () => void): Promise<void> => { if (!task) return; const next = await session.client.poll(task.taskId); assert(); receive(next); };
@@ -91,10 +139,20 @@ function ImageModeControls({ session, history, models, catalogStatus, insert, vi
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible, allowed, task, reconcile, busy, session]);
+  const admit = async (input: NonNullable<SketchImageClient['input']>, reconcile = false): Promise<SketchImageTask> => {
+    if (!runtime) return session.client.start(input, reconcile);
+    if (runtime.imageAdmissions) throw new Error('原图像提交仍在受理，请等待确认后核对原提交');
+    // stop(), mode changes and child remounts cannot release this ownership.
+    // Only settlement of the original client promise can do so; a lost ACK
+    // then remains guarded by that client's admissionUnknown and frozen input.
+    runtime.imageAdmissions++; onAdmissionChange?.();
+    try { return await session.client.start(input, reconcile); }
+    finally { runtime.imageAdmissions--; onAdmissionChange?.(); }
+  };
   const generate = async (original: boolean, assert: () => void): Promise<void> => {
     if (original) {
       if (!session.client.input) return;
-      const next = task ? await session.client.poll(task.taskId) : await session.client.start(session.client.input, true);
+      const next = task ? await session.client.poll(task.taskId) : await admit(session.client.input, true);
       assert(); receive(next); return;
     }
     if (!canGenerate || !vision || !image) return;
@@ -102,7 +160,7 @@ function ImageModeControls({ session, history, models, catalogStatus, insert, vi
       visionProviderId: vision.providerId, visionModelId: vision.modelId, imageProviderId: image.providerId, imageModelId: image.modelId,
       idempotencyKey: crypto.randomUUID(), aspectRatio: session.aspectRatio, ...(session.size ? { size: session.size } : {}), ...(session.quality ? { quality: session.quality } : {}) };
     setTask(undefined); session.placement?.stop(); session.placement = undefined; placementTask.current = undefined; revoke(); setPreview('');
-    const next = await session.client.start(input); assert(); receive(next);
+    const next = await admit(input); assert(); receive(next);
   };
   const readImage = async (save: boolean, assert: () => void): Promise<void> => {
     if (!task || task.status !== 'completed' || reconcile) return;
@@ -116,7 +174,7 @@ function ImageModeControls({ session, history, models, catalogStatus, insert, vi
   };
   const stage = reconcile ? '任务待核对' : task?.status === 'completed' ? '已完成' : task?.status === 'failed' ? '失败，草图已保留'
     : task?.status === 'cancelled' ? '已取消（服务端确认）' : task?.status === 'timeout' ? '任务超时，草图已保留'
-    : task?.phase === 'analysis' ? '分析中' : task?.phase === 'generation' ? '生图中' : task ? '等待处理' : '尚未提交';
+    : task?.phase === 'analysis' ? '分析中' : task?.phase === 'generation' ? '生图中' : task ? '等待处理' : recoveryBlocked ? '原任务待核对' : '尚未提交';
   const selectClass = `${control} mt-1 w-full ${isMonochrome ? 'bg-white' : 'bg-[#1a1a1a]'}`;
   return <div hidden={!visible} className="min-w-0 space-y-3">
     <label className="block text-sm">创作关键词<textarea aria-label="创作关键词" value={session.instruction} maxLength={MAX_INSTRUCTION_LENGTH}
@@ -174,7 +232,7 @@ function ImageModeControls({ session, history, models, catalogStatus, insert, vi
 }
 
 export function SketchToCodePanel({ session: supplied, imageSession, models = [], catalogStatus, onClose, insert,
-  initialTrace, isMonochrome = false }: SketchToCodePanelProps): ReactElement {
+  initialTrace, isMonochrome = false, recoverTasks = false }: SketchToCodePanelProps): ReactElement {
   const [fallback] = useState(() => createSketchPanelSession(unavailable));
   const session = supplied ?? fallback;
   const [mode, setMode] = useState<SketchCreationMode>(initialTrace ? 'code' : imageSession ? 'image' : 'code');
@@ -206,8 +264,36 @@ export function SketchToCodePanel({ session: supplied, imageSession, models = []
     if (supplied && (imageSession.client.scope.actorId !== session.client.scope.actorId || imageSession.client.scope.projectId !== session.client.scope.projectId || imageSession.client.scope.key !== session.client.scope.key)) imageAuthorized = false;
   }
   const allowed = !closed && (imageSession ? imageAuthorized && (!supplied || authorized) : authorized);
+  const recovery = sketchRecoveryMemory(session, session.client.scope);
+  const [recoverBusy, setRecoverBusy] = useState(false);
+  // List discovery is independent of the incumbent original-task controls.
+  const [recoveringTask, setRecoveringTask] = useState(false);
+  const [recoverError, setRecoverError] = useState('');
+  const [recoveryVersion, setRecoveryVersion] = useState(0);
+  const recoveryRead = useRef<{ stop: () => void } | undefined>(undefined);
+  const recoveryOperation = useRef(0);
+  const recoveryEnabled = recoverTasks && !initialTrace;
+  if (recoveryEnabled) drawerRuntime(session);
+  const imageRuntime = recoveryEnabled && imageSession ? drawerRuntime(imageSession) : undefined;
+  const imageAdmissionInFlight = !!imageRuntime?.imageAdmissions;
+  const rememberTask = (next: SketchTask | SketchImageTask, type: SketchRecoveryCandidate['type']): void => {
+    if (!recoveryEnabled) return;
+    recovery.known.set(next.taskId, { type, unresolved: sketchRecoveryActive(next.status)
+      || !!next.needsReconcile || !!next.dispatchPending || ('recoveryPending' in next && !!next.recoveryPending) });
+    repaint(value => value + 1);
+  };
+  // Known session tasks remain authoritative even when discovery omits them.
+  for (const [known, type] of [[session.client.task, 'sketch-to-code'], [imageSession?.client.task, 'sketch-to-image']] as const) {
+    if (known && recoveryEnabled) recovery.known.set(known.taskId, { type, unresolved: sketchRecoveryActive(known.status)
+      || !!known.needsReconcile || !!known.dispatchPending || ('recoveryPending' in known && !!known.recoveryPending) });
+  }
+  const recoveryBlocked = recoveryEnabled && (recoverBusy || imageAdmissionInFlight || !recovery.checked || recovery.unresolved
+    || (!!recovery.candidates.length && !recovery.decided)
+    || recovery.candidates.some(candidate => sketchRecoveryActive(candidate.status) && recovery.known.get(candidate.id)?.unresolved !== false)
+    || [...recovery.known.values()].some(known => known.unresolved)
+    || session.client.admissionUnknown || !!imageSession?.client.admissionUnknown);
   const canGenerate = authorized && writable && !catalogStatus?.loading && !catalogStatus?.error && !!selected
-    && allowed && mode === 'code' && session.history.present.strokes.length > 0 && !instructionTooLong && !busy && !active(task);
+    && !recoveryBlocked && allowed && mode === 'code' && session.history.present.strokes.length > 0 && !instructionTooLong && !busy && !active(task);
   const refresh = (): void => repaint(value => value + 1);
   const revoke = (): void => { if (blobUrl.current) URL.revokeObjectURL(blobUrl.current); blobUrl.current = ''; };
   const draw = (): void => {
@@ -231,7 +317,7 @@ export function SketchToCodePanel({ session: supplied, imageSession, models = []
   useEffect(() => { if (!allowed) { operation.current++; busyRef.current = false; session.client.stop(); session.placement?.stop(); imageSession?.client.stop(); imageSession?.placement?.stop(); revoke(); setPreviewUrl(''); setBusy(false); } }, [allowed, session, imageSession]);
   useEffect(() => { if (mode !== 'code') { operation.current++; busyRef.current = false; session.client.stop(); session.placement?.stop(); setBusy(false); } }, [mode, session]);
   const run = async (action: () => Promise<void>): Promise<void> => {
-    if (busyRef.current || !live.current || !allowed || mode !== 'code') return;
+    if (busyRef.current || !live.current || !allowed || recoveringTask || mode !== 'code') return;
     const token = ++operation.current; busyRef.current = true; setBusy(true); setMessage('');
     try { await action(); } catch (error) {
       if (live.current && token === operation.current) { readPaused.current = true; revoke(); setPreviewUrl(''); setMessage(error instanceof Error ? error.message : '操作未确认，请核对原任务'); }
@@ -244,10 +330,81 @@ export function SketchToCodePanel({ session: supplied, imageSession, models = []
       || next.previewAssetVersionId !== initialTrace.previewAssetVersionId || next.htmlAssetVersionId !== initialTrace.htmlAssetVersionId)) { session.client.task = undefined; throw new Error('保存的来源提示与当前任务不匹配'); }
     readPaused.current = false;
     setTask(next);
-    if (next.status === 'completed' && insert && session.placement?.trace.taskId !== next.taskId) {
-      session.placement = new SketchPlacement(next, session.client.scope, insert);
+    rememberTask(next, 'sketch-to-code');
+    if (next.status === 'completed' && insert && (recoveryEnabled || session.placement?.trace.taskId !== next.taskId)) {
+      const placement = recoveryEnabled ? retainedPlacement(session, next, () => new SketchPlacement(next, session.client.scope, insert))
+        : new SketchPlacement(next, session.client.scope, insert);
+      if (session.placement !== placement) session.placement?.stop();
+      session.placement = placement;
     }
   };
+  const stopRecovery = (): void => { recoveryOperation.current++; recoveryRead.current?.stop(); recoveryRead.current = undefined; };
+  const discover = async (): Promise<void> => {
+    if (!recoveryEnabled || !allowed) return;
+    stopRecovery();
+    const token = recoveryOperation.current;
+    const gate = new SketchImageReadGate(session.client.scope, fetch);
+    recoveryRead.current = gate; recovery.checked = false; setRecoverBusy(true); setRecoverError('');
+    try {
+      const found = await discoverSketchTasks(gate, gate.scope);
+      gate.assert(); if (!live.current || token !== recoveryOperation.current) return;
+      // A later empty list cannot erase a previously discovered unresolved ID.
+      const merged = new Map(recovery.candidates.map(candidate => [candidate.id, candidate]));
+      for (const candidate of found) {
+        const previous = merged.get(candidate.id);
+        const known = recovery.known.get(candidate.id);
+        if (previous && previous.type !== candidate.type || known && known.type !== candidate.type) throw new Error('原任务类型不一致，请重试读取。');
+        if (sketchRecoveryActive(candidate.status) && !known) recovery.known.set(candidate.id, { type: candidate.type, unresolved: true });
+        merged.set(candidate.id, candidate);
+      }
+      recovery.candidates = [...merged.values()]; recovery.checked = true;
+    } catch (error) {
+      if (live.current && token === recoveryOperation.current) setRecoverError(error instanceof Error ? error.message : '原任务列表读取失败，请重试。');
+    } finally {
+      if (live.current && token === recoveryOperation.current) { recoveryRead.current = undefined; setRecoverBusy(false); refresh(); }
+    }
+  };
+  const recover = async (candidate: Pick<SketchRecoveryCandidate, 'id' | 'type'>): Promise<void> => {
+    if (!allowed || recoverBusy || busyRef.current || imageRuntime?.imageAdmissions || session.client.admissionUnknown || imageSession?.client.admissionUnknown) return;
+    if (candidate.type === 'sketch-to-image' && !imageSession) return;
+    stopRecovery(); operation.current++; busyRef.current = false; setBusy(false);
+    session.client.stop(); session.placement?.stop(); imageSession?.client.stop(); imageSession?.placement?.stop(); revoke(); setPreviewUrl('');
+    recovery.selected = candidate; recovery.unresolved = true; setRecoverBusy(true); setRecoveringTask(true); setRecoverError('');
+    setRecoveryVersion(value => value + 1);
+    const token = recoveryOperation.current;
+    const isImage = candidate.type === 'sketch-to-image';
+    const current = isImage ? imageSession!.client : session.client;
+    // Each explicit recovery choice gets an isolated reader. Never switch an
+    // image client's guarded identity or attach discovery data to its input.
+    const client = isImage ? new SketchImageClient(current.scope) : new SketchClient(current.scope);
+    recoveryRead.current = client;
+    setMode(isImage ? 'image' : 'code');
+    try {
+      const next = await client.poll(candidate.id);
+      client.scope.assertCurrent(); if (!live.current || token !== recoveryOperation.current) return;
+      if (isImage && imageSession && client instanceof SketchImageClient) {
+        imageSession.client = client; imageSession.placement?.stop(); imageSession.placement = undefined;
+        if (next.status === 'completed' && insert && !next.needsReconcile && !next.dispatchPending && !('recoveryPending' in next && next.recoveryPending)) {
+          imageSession.placement = retainedPlacement(imageSession, next, () => new SketchImagePlacement(next as SketchImageTask, client.scope, insert));
+        }
+      } else if (client instanceof SketchClient) {
+        session.client = client; session.placement?.stop(); session.placement = undefined; receive(next as SketchTask);
+      }
+      rememberTask(next, candidate.type); recovery.decided = true; recovery.unresolved = false;
+      setRecoveryVersion(value => value + 1);
+    } catch (error) {
+      if (live.current && token === recoveryOperation.current) setRecoverError(error instanceof Error ? error.message : '原任务状态读取失败，请重试。');
+    } finally {
+      if (live.current && token === recoveryOperation.current) { recoveryRead.current = undefined; setRecoverBusy(false); setRecoveringTask(false); refresh(); }
+    }
+  };
+  useEffect(() => {
+    if (recoveryEnabled && allowed) void discover();
+    else { stopRecovery(); setRecoverBusy(false); setRecoveringTask(false); }
+    return stopRecovery;
+    // Discovery is scoped to the drawer, not to model, mode or drawing edits.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [recoveryEnabled, allowed, session, imageSession, recovery]);
   useEffect(() => {
     if (!initialTrace) { sourceRestore.current = undefined; return; }
     const trace = parseWorkspaceSourceTrace(initialTrace);
@@ -269,11 +426,11 @@ export function SketchToCodePanel({ session: supplied, imageSession, models = []
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialTrace, session, imageSession, mode, allowed, busy]);
   useEffect(() => {
-    if (mode !== 'code' || !allowed || !active(task) || task?.needsReconcile || task?.dispatchPending || busy || readPaused.current || !authorized) return;
+    if (mode !== 'code' || !allowed || recoveringTask || !active(task) || task?.needsReconcile || task?.dispatchPending || busy || readPaused.current || !authorized) return;
     const timer = setTimeout(() => { void run(async () => receive(await session.client.poll(task!.taskId))); }, 1500);
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [task, busy, session, authorized, allowed, mode]);
+  }, [task, busy, session, authorized, allowed, mode, recoveringTask]);
   const updateHistory = (history: SketchHistory): void => { session.history = history; draft.current = null; refresh(); };
   const cancelStroke = (): void => { const pointerId = draft.current?.pointerId; draft.current = null;
     if (pointerId !== undefined && canvas.current?.hasPointerCapture?.(pointerId)) canvas.current.releasePointerCapture(pointerId); draw(); };
@@ -295,10 +452,10 @@ export function SketchToCodePanel({ session: supplied, imageSession, models = []
     if (save) download(url, 'sketch-code.html');
   };
   const control = `rounded-md border px-3 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 ${isMonochrome ? 'border-gray-300 hover:bg-gray-100 focus-visible:outline-gray-900' : 'border-white/25 hover:bg-white/10 focus-visible:outline-[#d4af37]'}`;
-  const close = (): void => { live.current = false; operation.current++; busyRef.current = false; session.client.stop(); session.placement?.stop(); imageSession?.client.stop(); imageSession?.placement?.stop(); revoke(); setPreviewUrl(''); setClosed(true); cancelStroke(); onClose?.(); };
+  const close = (): void => { stopRecovery(); live.current = false; operation.current++; busyRef.current = false; session.client.stop(); session.placement?.stop(); imageSession?.client.stop(); imageSession?.placement?.stop(); revoke(); setPreviewUrl(''); setClosed(true); cancelStroke(); onClose?.(); };
   const generation = async (reconcile: boolean): Promise<void> => {
     if (reconcile) { if (!session.client.input) return; receive(await session.client.start(session.client.input, true)); return; }
-    if (!canGenerate || !selected) return;
+    if (!canGenerate || imageRuntime?.imageAdmissions || !selected) return;
     const input = { projectId: session.client.scope.projectId, imageDataUrl: exportSketchPng(session.history.present),
       instruction: session.instruction, providerId: selected.providerId, modelId: selected.modelId, idempotencyKey: crypto.randomUUID() };
     setTask(undefined); session.placement?.stop(); session.placement = undefined;
@@ -307,7 +464,7 @@ export function SketchToCodePanel({ session: supplied, imageSession, models = []
   };
   const stage = task?.needsReconcile || task?.dispatchPending ? '派发待核对'
     : task?.status === 'completed' ? '已完成' : task?.status === 'cancelled' ? '已取消（服务端确认）' : task?.status === 'failed' ? '失败，草图已保留' : task?.status === 'timeout' ? '任务超时，草图已保留'
-    : task?.phase === 'analysis' ? '分析中' : task?.phase === 'reconstruction' ? '重建中' : task ? '等待处理' : '尚未提交';
+    : task?.phase === 'analysis' ? '分析中' : task?.phase === 'reconstruction' ? '重建中' : task ? '等待处理' : recoveryBlocked ? '原任务待核对' : '尚未提交';
   return <section aria-label={imageSession ? '草图创作' : '草图转代码'} role="region" data-modal="sketch-to-code" tabIndex={-1}
     className={`absolute inset-x-2 bottom-20 z-[80] max-h-[82dvh] overflow-y-auto overscroll-contain rounded-xl p-4 shadow-[0_12px_32px_rgba(0,0,0,0.3)] md:inset-x-8 ${isMonochrome ? 'bg-white text-gray-900' : 'bg-[#1a1a1a] text-gray-100'}`}
     onWheel={event => event.stopPropagation()} onPointerDown={event => event.stopPropagation()} onMouseDown={event => event.stopPropagation()}
@@ -324,6 +481,30 @@ export function SketchToCodePanel({ session: supplied, imageSession, models = []
     <p className="mb-3 text-sm">{mode === 'image' ? '画出构图，输入创作关键词，选择视觉分析与图像模型。生成图不会替换原始草图。' : '画出页面结构，生成安全静态 HTML。画布卡片是原始草图 PNG，不是页面截图。'}关闭仅停止读取，不取消任务。</p>
     {session.client.scope.authority === 'document' && <p role="note" className="mb-3 text-sm">{mode === 'image' ? '协作文档暂不能放置生成图像，仍可受权预览和下载。' : DOCUMENT_PLACEMENT_REASON}</p>}
     {!allowed && <p role="alert" className="mb-3 text-sm">当前项目授权未知或已失效，请恢复项目后操作。</p>}
+    {recoveryEnabled && <section aria-label="恢复原草图任务" className="mb-3 min-w-0 space-y-2 rounded-md border border-current/20 p-3 text-sm break-words">
+      <h3 className="font-medium">恢复原草图任务</h3>
+      <p role="status">{recoverBusy ? '正在读取原任务，请稍候…' : !recovery.checked ? '原任务列表尚未确认，请重试读取。'
+        : !recovery.candidates.length ? '当前项目未发现可恢复的草图任务。' : '请选择确切任务核对状态；读取不会重新提交或扣费。'}</p>
+      {recoverError && <p role="alert">{recoverError}</p>}
+      <div className="flex min-w-0 flex-wrap gap-2">
+        {recovery.candidates.map(candidate => <button key={candidate.id} className={`${control} max-w-full whitespace-normal break-all text-left`}
+          disabled={!allowed || recoverBusy || busy || imageAdmissionInFlight || session.client.admissionUnknown || !!imageSession?.client.admissionUnknown || (candidate.type === 'sketch-to-image' && !imageSession)}
+          aria-pressed={recovery.selected?.id === candidate.id} onClick={() => { void recover(candidate); }}>
+          {candidate.type === 'sketch-to-image' ? '草图生图' : '草图转代码'} · {candidate.id} · {candidate.status} · {new Date(candidate.createdAt).toLocaleString('zh-CN')}
+        </button>)}
+        {[...recovery.known].filter(([id]) => !recovery.candidates.some(candidate => candidate.id === id)).map(([id, known]) => <button
+          key={id} className={`${control} max-w-full whitespace-normal break-all text-left`}
+          disabled={!allowed || recoverBusy || busy || imageAdmissionInFlight || session.client.admissionUnknown || !!imageSession?.client.admissionUnknown || (known.type === 'sketch-to-image' && !imageSession)}
+          aria-pressed={recovery.selected?.id === id} onClick={() => { void recover({ id, type: known.type }); }}>
+          核对会话原任务 · {id}
+        </button>)}
+      </div>
+      {recoveryBlocked && <p>原任务尚待核对，暂不能新生成；其他活动任务也需逐一核对。取消和退款以服务端确认为准。</p>}
+      <div className="flex flex-wrap gap-2">
+        <button className={control} disabled={!allowed || recoverBusy} onClick={() => { void discover(); }}>重试读取原任务列表</button>
+        {recovery.selected && <button className={control} disabled={!allowed || recoverBusy || busy || imageAdmissionInFlight || session.client.admissionUnknown || !!imageSession?.client.admissionUnknown} onClick={() => { if (recovery.selected) void recover(recovery.selected); }}>重试核对原任务 {recovery.selected.id}</button>}
+      </div>
+    </section>}
     <div className="grid min-w-0 gap-4 lg:grid-cols-[minmax(0,3fr)_minmax(240px,2fr)]">
       <div className="min-w-0">
         <div className="mb-2 flex flex-wrap gap-2">
@@ -351,7 +532,7 @@ export function SketchToCodePanel({ session: supplied, imageSession, models = []
         </div>
       </div>
       <div className="min-w-0">
-      {imageSession && <ImageModeControls session={imageSession} history={session.history} models={models} catalogStatus={catalogStatus} insert={insert} visible={mode === 'image'} allowed={allowed} control={control} isMonochrome={isMonochrome} />}
+      {imageSession && <ImageModeControls key={recoveryVersion} session={imageSession} history={session.history} models={models} catalogStatus={catalogStatus} insert={insert} visible={mode === 'image'} allowed={allowed && !recoveringTask} control={control} isMonochrome={isMonochrome} recoveryBlocked={recoveryBlocked} onTask={next => rememberTask(next, 'sketch-to-image')} recoverTasks={recoveryEnabled} onAdmissionChange={() => { if (live.current) refresh(); }} />}
       <div hidden={mode !== 'code'} className="min-w-0 space-y-3">
         <label className="block text-sm">页面说明<textarea aria-label="页面说明" value={session.instruction} maxLength={MAX_INSTRUCTION_LENGTH}
           aria-invalid={instructionTooLong || undefined} aria-describedby={instructionTooLong ? instructionErrorId : undefined}
@@ -366,14 +547,14 @@ export function SketchToCodePanel({ session: supplied, imageSession, models = []
         {!catalogStatus?.loading && !candidates.length && <p className="text-sm">没有可用的同步视觉聊天模型，请管理员检查目录。</p>}
         <button className={`${control} w-full ${isMonochrome ? 'bg-gray-900 text-white hover:bg-gray-800' : 'bg-[#d4af37] text-black hover:bg-[#e2c45e]'}`} disabled={!canGenerate} onClick={() => { void run(() => generation(false)); }}>{task || session.client.input ? '生成新任务代码（新提交）' : '生成代码'}</button>
         {session.client.input && (session.client.admissionUnknown || active(task)) && <p className="text-sm">更改草图、说明或模型后生成属于新意图；原提交可能仍在处理。核对原提交不会使用新输入。</p>}
-        {session.client.admissionUnknown && <><p role="status">受理结果未知，未确认取消或退款。请核对原提交，勿重复扣费提交。</p><button className={control} disabled={busy || !allowed} onClick={() => { void run(() => generation(true)); }}>核对原提交（相同标识）</button></>}
+        {session.client.admissionUnknown && <><p role="status">受理结果未知，未确认取消或退款。请核对原提交，勿重复扣费提交。</p><button className={control} disabled={busy || !allowed || recoveringTask} onClick={() => { void run(() => generation(true)); }}>核对原提交（相同标识）</button></>}
         <div aria-live="polite" className="space-y-2 break-words text-sm">
           <p>{busy ? '正在核对服务结果…' : stage}{task ? ` · ${task.progress}%` : ''}</p>
           {task && <><p>预留额度：{task.reserveCredits}；实际净费：{task.actualCredits ?? '尚未确认'}</p>
             <p>退款状态：{task.refunded === true ? '服务端确认已退还预留额度' : task.status === 'completed' ? '净费以实际金额为准，返差额不等于全额退款' : '未确认全额退款'}</p>
             <p>任务：{task.taskId}{task.requestId ? ` · 请求：${task.requestId}` : ''}</p>
-            <button className={control} disabled={busy || !allowed} onClick={() => { void run(async () => receive(await session.client.poll(task.taskId))); }}>核对任务状态</button>
-            {active(task) && <button className={control} disabled={busy || !allowed} onClick={() => { void run(async () => { session.client.stop(); receive(await session.client.cancel(task.taskId)); }); }}>取消任务（等待确认）</button>}
+            <button className={control} disabled={busy || !allowed || recoveringTask} onClick={() => { void run(async () => receive(await session.client.poll(task.taskId))); }}>核对任务状态</button>
+            {active(task) && <button className={control} disabled={busy || !allowed || recoveringTask} onClick={() => { void run(async () => { session.client.stop(); receive(await session.client.cancel(task.taskId)); }); }}>取消任务（等待确认）</button>}
             {task.error && <p role="alert">{task.error}</p>}</>}
           {message && <p role="alert">{message}</p>}
         </div>
