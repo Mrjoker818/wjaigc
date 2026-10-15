@@ -2,7 +2,7 @@ import { createServer, type Server, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { createCanvas } from '@napi-rs/canvas';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createSketchProviderStages, SketchProviderError } from '@/lib/sketch-to-code/provider';
+import { createSketchImageAnalysisStage, createSketchProviderStages, SketchProviderError } from '@/lib/sketch-to-code/provider';
 import { createConfiguredSketchDependencies } from '@/lib/sketch-to-code/configured-dependencies';
 import { generateSketchCode, prepareSketchCode } from '@/lib/sketch-to-code/generation';
 import type { TaskModelDescriptor } from '@/lib/task-core/model-capability-contract';
@@ -288,6 +288,59 @@ describe('configured sketch provider HTTP boundary', () => {
     });
     await expect(generateSketchCode({ projectId: 'project-a', imageDataUrl: image, instruction: '', ...binding, idempotencyKey: 'task-1' }, dependencies, { actorUserId: 'user-a', signal: new AbortController().signal }))
       .rejects.toThrow('SKETCH_PROVIDER_BINDING_MISMATCH');
+    expect(requests).toHaveLength(1);
+  });
+
+  it.each(['html-analysis', 'html-reconstruction', 'image-analysis'] as const)(
+    'preserves safe requested and reported model identities when rejecting %s', async phase => {
+      respond = response => {
+        response.writeHead(200, { 'content-type': 'application/json', 'x-request-id': 'identity-provider-42' });
+        response.end(envelope().replace('vision-1', 'reported-vision-2026-01-01'));
+      };
+      const stages = createSketchProviderStages({ provider, modelId: 'vision-1', requestId: 'identity-task' });
+      const pending = phase === 'image-analysis'
+        ? createSketchImageAnalysisStage({ provider, modelId: 'vision-1', requestId: 'identity-task' })(image, '', binding, new AbortController().signal)
+        : phase === 'html-analysis' ? stages.analyze(image, '', binding, new AbortController().signal)
+          : stages.reconstruct(analysis, binding, new AbortController().signal);
+      const error: unknown = await pending.catch((value: unknown) => value);
+      expect(error).toBeInstanceOf(SketchProviderError);
+      expect(error).toMatchObject({ code: 'SKETCH_PROVIDER_BINDING_MISMATCH', providerId: 'p1', modelId: 'vision-1',
+        phase: phase === 'html-reconstruction' ? 'reconstruction' : 'analysis', requestId: 'identity-provider-42', providerStatus: 200 });
+      expect((error as Error).message).toContain('requested=vision-1');
+      expect((error as Error).message).toContain('reported=reported-vision-2026-01-01');
+      expect(requests).toHaveLength(1);
+      expect(requests[0].body.model).toBe('vision-1');
+      expect(requests[0].url).toBe('/v1/chat/completions');
+    },
+  );
+
+  it.each(['bad\nmodel', 'x'.repeat(257), '<script>private</script>', 'https://example.invalid/?key=private'])(
+    'omits unsafe or overlong reported identity %j while retaining rejection', async reported => {
+      respond = response => {
+        const body = JSON.parse(envelope()) as Record<string, unknown>; body.model = reported;
+        response.writeHead(200, { 'content-type': 'application/json' }); response.end(JSON.stringify(body));
+      };
+      const stages = createSketchProviderStages({ provider, modelId: 'vision-1', requestId: 'identity-task' });
+      const error: unknown = await stages.analyze(image, '', binding, new AbortController().signal).catch((value: unknown) => value);
+      expect(error).toMatchObject({ code: 'SKETCH_PROVIDER_BINDING_MISMATCH', providerStatus: 200 });
+      expect((error as Error).message).toContain('requested=vision-1');
+      expect((error as Error).message).toContain('reported=[invalid-model-id]');
+      expect((error as Error).message).not.toContain(reported);
+      expect((error as Error).message.length).toBeLessThan(600);
+      expect(requests).toHaveLength(1);
+    },
+  );
+
+  it('redacts the configured credential from an otherwise valid reported identity', async () => {
+    respond = response => {
+      response.writeHead(200, { 'content-type': 'application/json' });
+      response.end(envelope().replace('vision-1', 'prefix-server-fixture-secret-suffix'));
+    };
+    const stages = createSketchProviderStages({ provider, modelId: 'vision-1', requestId: 'identity-task' });
+    const error: unknown = await stages.analyze(image, '', binding, new AbortController().signal).catch((value: unknown) => value);
+    expect(error).toMatchObject({ code: 'SKETCH_PROVIDER_BINDING_MISMATCH', modelId: 'vision-1', providerStatus: 200 });
+    expect((error as Error).message).toContain('reported=prefix-[REDACTED]-suffix');
+    expect(JSON.stringify(error) + String(error)).not.toContain('server-fixture-secret');
     expect(requests).toHaveLength(1);
   });
 

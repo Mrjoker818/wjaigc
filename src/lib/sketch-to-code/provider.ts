@@ -36,6 +36,11 @@ function safeText(value: string, runtime: Runtime): string {
   return value.split(runtime.apiKey).join('[REDACTED]').slice(0, 8192);
 }
 
+function safeModelIdentity(value: string, runtime: Runtime): string {
+  if (value.length > 256 || !/^[A-Za-z0-9]/.test(value) || /[^A-Za-z0-9._:/-]/.test(value)) return '[invalid-model-id]';
+  return safeText(value, runtime);
+}
+
 async function readResponse(response: Response, signal: AbortSignal, limitError: Error): Promise<string> {
   const declared = response.headers.get('content-length');
   if (declared !== null && (!/^\d+$/.test(declared) || Number(declared) > MAX_RESPONSE_BYTES)) {
@@ -118,7 +123,8 @@ function createProviderInvoke<T extends object>(input: {
       || first.finish_reason !== 'stop' || first.message.refusal || first.message.tool_calls
       || !record(envelope) || typeof envelope.model !== 'string' || !envelope.model) throw invalid();
     if (envelope.model !== runtime.modelId) {
-      throw new SketchProviderError('SKETCH_PROVIDER_BINDING_MISMATCH', runtime, phase, responseId, response.status);
+      throw new SketchProviderError('SKETCH_PROVIDER_BINDING_MISMATCH', runtime, phase, responseId, response.status, undefined,
+        `SKETCH_PROVIDER_BINDING_MISMATCH: requested=${safeModelIdentity(runtime.modelId, runtime)}; reported=${safeModelIdentity(envelope.model, runtime)}`);
     }
     try {
       return Object.freeze({ ...readContent(first.message.content),
