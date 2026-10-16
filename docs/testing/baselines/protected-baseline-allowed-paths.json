@@ -762,5 +762,6 @@
   "src/lib/sketch-to-code/image-task-state.ts",
   "src/lib/sketch-to-code/image-worker.ts",
   "src/lib/sketch-to-code/image-workflow.ts",
+  "src/lib/sketch-to-code/recovery-client.ts",
   "src/lib/sketch-to-code/stage.ts"
 ]

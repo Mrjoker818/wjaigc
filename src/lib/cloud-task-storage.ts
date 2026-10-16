@@ -447,7 +447,9 @@ async function initializeCloudTaskTables(): Promise<void> {
 }
 
 export async function createCloudTask(input: CreateCloudTaskInput, transaction?: PoolClient): Promise<boolean> {
-  await ensureCloudTaskTables();
+  // A supplied connection owns schema readiness and the whole transaction.
+  // Pooled DDL here can wait on locks already held by that same caller.
+  if (!transaction) await ensureCloudTaskTables();
   const query = transaction ? transaction.query.bind(transaction) : execSql;
   const result = await query(`
     INSERT INTO cloud_tasks (
@@ -1278,10 +1280,11 @@ export async function completeCloudTask(
   result: Record<string, unknown>,
   leaseOwnerOrOptions?: string | CompleteCloudTaskOptions,
 ): Promise<boolean> {
-  await ensureCloudTaskTables();
   const options = typeof leaseOwnerOrOptions === 'string'
     ? { leaseOwner: leaseOwnerOrOptions }
     : leaseOwnerOrOptions ?? {};
+  // Never escape a caller-owned transaction for lazy schema initialization.
+  if (!options.client) await ensureCloudTaskTables();
   const agentFence = options.agentExecutionFence || getAgentExecutionFence();
   const executionFence = buildAgentSqlFence('$1', 7, agentFence);
   const completed = await (options.client ?? { query: execSql }).query(`
@@ -1382,8 +1385,13 @@ export async function terminateCloudTaskAndRefund(
   const sketchFence = 'expectedSketchExecution' in options
     ? snapshotSketchSettlementFence(options.expectedSketchExecution, leaseOwner) : undefined;
   if (sketchFence === null) return { status: undefined, transitioned: false, refunded: false, creditCost: 0 };
-  await ensureCoreTables();
-  await ensureCloudTaskTables();
+  // The caller already owns task/ledger locks and schema readiness. Running
+  // pooled initialization here would wait for those locks while the caller
+  // waits for us; keep all work on its connection, including SQL failures.
+  if (!options.client) {
+    await ensureCoreTables();
+    await ensureCloudTaskTables();
+  }
   const now = Date.now();
   const transactionId = `ctx_${now}_${Math.random().toString(36).slice(2, 10)}`;
   const agentFence = getAgentExecutionFence();

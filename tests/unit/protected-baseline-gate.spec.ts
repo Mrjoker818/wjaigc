@@ -334,6 +334,7 @@ const historicalSourceAuthorizations = [
   ['src/lib/sketch-to-code/usage.ts', '2729e0f903e68d1005ac21bc968f7fb529c37470'],
   ['src/lib/sketch-to-code/workflow.ts', '2729e0f903e68d1005ac21bc968f7fb529c37470'],
   ['src/lib/workflow-renderer/legacy-port-position.ts', '2729e0f903e68d1005ac21bc968f7fb529c37470'],
+  ['src/lib/sketch-to-code/recovery-client.ts', 'a91beec7b667e8bd747b2ab1946b42516e044a30'],
 ] as const;
 
 const unifiedSkillRuntimeArtifactPaths = [

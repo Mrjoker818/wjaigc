@@ -288,6 +288,7 @@
     { "path": "src/lib/sketch-to-code/token-billing.ts", "sourceCommit": "2729e0f903e68d1005ac21bc968f7fb529c37470" },
     { "path": "src/lib/sketch-to-code/usage.ts", "sourceCommit": "2729e0f903e68d1005ac21bc968f7fb529c37470" },
     { "path": "src/lib/sketch-to-code/workflow.ts", "sourceCommit": "2729e0f903e68d1005ac21bc968f7fb529c37470" },
-    { "path": "src/lib/workflow-renderer/legacy-port-position.ts", "sourceCommit": "2729e0f903e68d1005ac21bc968f7fb529c37470" }
+    { "path": "src/lib/workflow-renderer/legacy-port-position.ts", "sourceCommit": "2729e0f903e68d1005ac21bc968f7fb529c37470" },
+    { "path": "src/lib/sketch-to-code/recovery-client.ts", "sourceCommit": "a91beec7b667e8bd747b2ab1946b42516e044a30" }
   ]
 }

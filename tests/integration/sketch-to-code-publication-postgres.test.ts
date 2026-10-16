@@ -140,14 +140,27 @@ describe('original atomic sketch publication on the owned real PostgreSQL fixtur
   }, 30_000);
   it('fix1 completed replay requires live DB lease while current editor read survives expiry', async () => {
     await withIsolatedPostgres('sketch_fix1_replay_expired', async ({ query, databaseUrl }) => {
-      await seed(query, databaseUrl); const value = await accepted('shared', 'editor', 2000);
+      await seed(query, databaseUrl); const value = await accepted('shared', 'editor');
       expect(await publishSketchTask(value)).toBe(true);
       const before = (await query('SELECT * FROM cloud_tasks WHERE id=$1', [value.task.id])).rows;
       const charges = (await query('SELECT * FROM wujie_credit_transactions ORDER BY id')).rows;
       expect(await publishSketchTask(value)).toBe(true);
-      await until(query, 'SELECT EXTRACT(EPOCH FROM clock_timestamp())*1000 >= $1::bigint ok', [value.lease.expiresAt]);
-      const replay = await publishSketchTask(value);
       expect((await query('SELECT * FROM cloud_tasks WHERE id=$1', [value.task.id])).rows).toEqual(before);
+      expect((await query('SELECT * FROM wujie_credit_transactions ORDER BY id')).rows).toEqual(charges);
+      // 正向重放不依赖机器在两秒内完成；负向状态由真实数据库时钟建立。
+      const expiredRows = (await query(`UPDATE cloud_tasks
+        SET lease_expires_at=(FLOOR(EXTRACT(EPOCH FROM clock_timestamp())*1000)-1)::bigint
+        WHERE id=$1 AND status='completed' AND lease_owner=$2 AND attempt_count=$3 AND lease_expires_at=$4
+        RETURNING *`, [value.task.id, value.lease.owner, value.lease.attemptCount, value.lease.expiresAt])).rows;
+      expect(expiredRows).toHaveLength(1);
+      const expiredAt = Number(expiredRows[0].lease_expires_at);
+      expect(Number.isSafeInteger(expiredAt)).toBe(true);
+      expect(expiredRows).toEqual(before.map(row => ({ ...row, lease_expires_at: String(expiredAt) })));
+      // 两份输入与数据库使用同一过期值，防止身份不匹配冒充时钟拒绝。
+      const expiredValue = { ...value, task: { ...value.task, leaseExpiresAt: expiredAt },
+        lease: { ...value.lease, expiresAt: expiredAt } };
+      const replay = await publishSketchTask(expiredValue);
+      expect((await query('SELECT * FROM cloud_tasks WHERE id=$1', [value.task.id])).rows).toEqual(expiredRows);
       expect((await query('SELECT * FROM wujie_credit_transactions ORDER BY id')).rows).toEqual(charges);
       expect(await counts(query)).toEqual({ assets: 2, versions: 2, completed: 1, refunds: 0 });
       expect((await readSketchDocument({ actorUserId: 'reader', projectId: 'shared', taskId: value.task.id })).bytes.equals(Buffer.from(value.draft.html))).toBe(true);
