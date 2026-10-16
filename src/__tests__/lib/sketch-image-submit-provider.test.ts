@@ -8,6 +8,7 @@ import { buildSketchImageGenerationBody } from '@/lib/sketch-to-code/image-contr
 import type { ApiProvider } from '@/lib/universal-api-types';
 import * as imageProvider from '@/lib/sketch-to-code/image-provider';
 import { readSketchImageKnownFailure } from '@/lib/sketch-to-code/image-known-failure';
+import * as apiHelpers from '@/lib/api-helpers';
 
 vi.mock('server-only', () => ({}));
 
@@ -456,4 +457,79 @@ describe('Task8 bounded private provider failure proof', () => {
       const result: unknown = await createSketchImageQueryStage({ provider, modelId: binding.modelId, requestId })('remote-42', binding, new AbortController().signal).catch((caught: unknown) => caught);
       expect(readQueryFailure(result)).toBeUndefined(); expect(readSketchImageKnownFailure(result)).toBeUndefined(); expect(requests).toHaveLength(1); expect(requests[0].method).toBe('GET');
     });
+});
+
+describe('Task8 APImart native resolution boundary', () => {
+  // Breaks caught: treating a native tier as a pixel hint, losing the selected
+  // resolution, or bypassing the original single-send/receipt protections.
+  it.each([
+    { modelId: 'gemini-3.1-flash-lite-image', size: '1K' },
+    { modelId: 'gpt-image-2', size: '1K' },
+    { modelId: 'gpt-image-2', size: '2K' },
+    { modelId: 'gpt-image-2', size: '4K' },
+  ])('submits the exact native tier once: $modelId / $size', async ({ modelId, size }) => {
+    provider.advancedParams = { compatProfile: 'apimart' };
+    provider.selectedModels = [modelId];
+    const selected = { providerId: binding.providerId, modelId };
+    reply({ model: modelId, data: [{ task_id: 'native-tier-task' }] });
+    const submit = createSketchImageGenerationStage({ provider, modelId, requestId });
+    const value = body({ model: modelId, size, quality: undefined });
+
+    await expect(submit(value, selected, new AbortController().signal)).resolves.toEqual({
+      taskIds: ['native-tier-task'], directImageUrls: [], usedModel: modelId, usedProviderId: binding.providerId,
+    });
+    expect(requests).toHaveLength(1);
+    expect(requests[0]).toMatchObject({ method: 'POST', url: '/v1/images/generations',
+      headers: { 'x-request-id': requestId },
+      body: { model: modelId, n: 1, size: '4:3', resolution: size, image_urls: [image], idempotency_key: requestId },
+    });
+    for (const key of ['width', 'height', 'size_px', 'quality', 'image', 'images']) {
+      expect(requests[0].body).not.toHaveProperty(key);
+    }
+    await expect(submit(value, selected, new AbortController().signal)).rejects.toHaveProperty('code', 'SKETCH_IMAGE_PROVIDER_EXTRA_REQUEST');
+    expect(requests).toHaveLength(1);
+  });
+
+  it.each([422, 500])('keeps native-tier rejection provenance and never resubmits HTTP %i', async status => {
+    provider.advancedParams = { compatProfile: 'apimart' };
+    reply({ error: { message: 'synthetic rejection' } }, status);
+    const error: unknown = await invoke(body({ size: '1K', quality: undefined })).catch((caught: unknown) => caught);
+    expect(error).toMatchObject({ code: 'SKETCH_IMAGE_PROVIDER_REJECTED', providerStatus: status });
+    expect(readSketchImageKnownFailure(error)).toEqual(status === 422
+      ? { phase: 'generation', ...binding, kind: 'rejected' } : undefined);
+    expect(requests).toHaveLength(1);
+    expect(requests[0].body).toMatchObject({ size: '4:3', resolution: '1K', image_urls: [image] });
+  });
+
+  it.each(['missing-resolution', 'wrong-resolution', 'width', 'height', 'size_px'] as const)(
+    'rejects malformed native adapter payload %s before any send', async variant => {
+      provider.advancedParams = { compatProfile: 'apimart' };
+      const original = apiHelpers.fetchWithV1Retry;
+      // Corrupt only the legacy adapter-to-guard seam. The real URL/header,
+      // transport gate, private failure provenance and HTTP helper still run.
+      const changed = vi.spyOn(apiHelpers, 'fetchWithV1Retry').mockImplementation((base, endpoint, options = {}, retry, timeout) => {
+        if (typeof options.body !== 'string') throw new Error('Expected original JSON adapter body');
+        const payload = JSON.parse(options.body) as Record<string, unknown>;
+        if (variant === 'missing-resolution') delete payload.resolution;
+        else if (variant === 'wrong-resolution') payload.resolution = '2K';
+        else payload[variant] = variant === 'size_px' ? '1024x768' : 1024;
+        return original(base, endpoint, { ...options, body: JSON.stringify(payload) }, retry, timeout);
+      });
+      const counter = { value: 0 };
+      try {
+        const error: unknown = await invoke(body({ size: '1K', quality: undefined }), countTransport(counter))
+          .catch((caught: unknown) => caught);
+        expect(error).toHaveProperty('code', 'SKETCH_IMAGE_PROVIDER_PROTOCOL_UNSUPPORTED');
+        expect(readSketchImageKnownFailure(error)).toEqual({ phase: 'generation', ...binding, kind: 'not-submitted' });
+        expect(counter.value).toBe(0); expect(requests).toHaveLength(0);
+      } finally { changed.mockRestore(); }
+    });
+
+  it('preserves the original cancellation before any native-tier send', async () => {
+    provider.advancedParams = { compatProfile: 'apimart' };
+    const controller = new AbortController(), reason = new Error('original native-tier cancellation');
+    controller.abort(reason);
+    await expect(stage()(body({ size: '1K', quality: undefined }), binding, controller.signal)).rejects.toBe(reason);
+    expect(requests).toHaveLength(0);
+  });
 });
