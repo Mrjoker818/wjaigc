@@ -169,7 +169,14 @@ function guardPayload(payload: Record<string, unknown>, body: Body, profile: Api
     if (payload.n !== 1 || typeof payload.prompt !== 'string' || !payload.prompt.includes(prompt)
       || body.quality !== undefined && payload.quality !== body.quality) fail();
     if (profile.sizeFormat === 'aspect-ratio') {
-      if (payload.size !== body.aspectRatio || body.size !== undefined && payload.size_px !== body.size) fail();
+      if (payload.size !== body.aspectRatio) fail();
+      if (profile.id === 'apimart' && profile.resolutionTierMode === 'native') {
+        // Native tiers are not pixel hints. APImart deliberately strips derived
+        // width/height/size_px; require the frozen tier in its actual wire field.
+        if (body.size !== undefined && !/^[124]K$/.test(body.size)
+          || payload.resolution !== body.size
+          || ['width', 'height', 'size_px'].some(key => Object.hasOwn(payload, key))) fail();
+      } else if (body.size !== undefined && payload.size_px !== body.size) fail();
     } else if (body.size !== undefined && payload.size !== body.size) fail();
     const references: string[] = [];
     if (typeof payload.image === 'string') references.push(payload.image);
@@ -416,7 +423,10 @@ export function createSketchImageGenerationStage(input: {
       }
       return fetchWithV1Retry(base, path, { ...options, skipV1Retry: true, transport: guarded, propagateErrors: true }, false);
     };
-    const submit = createOrdinaryProvider({ requestedSize: body.aspectRatio, normalizedRequestedPixelSize: body.size,
+    const nativeResolution = profile.id === 'apimart' && profile.resolutionTierMode === 'native';
+    const submit = createOrdinaryProvider({ requestedSize: body.aspectRatio,
+      normalizedRequestedPixelSize: nativeResolution ? undefined : body.size,
+      resolutionTier: nativeResolution ? body.size : undefined,
       quality: body.quality, enhancedPrompt: prompt, agentProviderIdempotencyKey: runtime.requestId,
       accessibleReferenceImages: [body.imageUrl], aspectRatio: body.aspectRatio, referenceMode: 'reference',
       strictAgentRouting: true, controlled: true, profile, transport: guarded, providerFetch,
