@@ -4,6 +4,7 @@ import type { SketchAnalysis, SketchGenerationDependencies, SketchModelBinding }
 import type { ApiProvider } from '@/lib/universal-api-types';
 import { parseSketchProviderUsage, type SketchStageResponse } from './usage';
 import { parseSketchImageAnalysis, type SketchImageAnalysis } from './image-contract';
+import { createSketchRuntimeObserver } from './runtime-observation';
 
 type Phase = 'analysis' | 'reconstruction';
 type ErrorCode = 'SKETCH_PROVIDER_REJECTED' | 'SKETCH_PROVIDER_RESPONSE_INVALID' | 'SKETCH_PROVIDER_RESPONSE_LIMIT' | 'SKETCH_PROVIDER_BINDING_MISMATCH';
@@ -84,21 +85,30 @@ function createProviderInvoke<T extends object>(input: {
     || !modelId || modelId.length > 256 || modelId !== modelId.trim() || /\p{Cc}/u.test(modelId)
     || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(requestId)) throw new Error('SKETCH_PROVIDER_UNAVAILABLE');
   const runtime: Runtime = Object.freeze({ providerId: provider.id, modelId, requestId, apiKey: provider.apiKey, baseUrl: provider.baseUrl });
+  const observe = createSketchRuntimeObserver(runtime, [runtime.apiKey]);
   return async (phase, content, binding, signal) => {
     signal.throwIfAborted();
     if (binding.providerId !== runtime.providerId || binding.modelId !== runtime.modelId) {
       throw new SketchProviderError('SKETCH_PROVIDER_BINDING_MISMATCH', runtime, phase, requestId);
     }
-    const response = await fetchWithV1Retry(runtime.baseUrl, '/chat/completions', {
+    const started = Date.now();
+    observe({ event: 'request-start', phase, elapsedMs: 0 });
+    let response: Response;
+    try { response = await fetchWithV1Retry(runtime.baseUrl, '/chat/completions', {
       method: 'POST', redirect: 'error', skipV1Retry: true, transport: dependencies.transport,
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${runtime.apiKey}`, 'X-Request-Id': `${requestId}:${phase}` },
       body: JSON.stringify({ model: runtime.modelId, stream: false, response_format: { type: 'json_object' },
         messages: [{ role: 'system', content: phase === 'analysis' ? analysisPrompt : TREE_PROMPT }, { role: 'user', content }] }),
       signal,
-    }, false);
+    }, false); }
+    catch (error) {
+      observe({ event: 'attempt-error', phase, aborted: signal.aborted, elapsedMs: Date.now() - started });
+      throw error;
+    }
     if (signal.aborted) { void response.body?.cancel(signal.reason).catch(() => undefined); signal.throwIfAborted(); }
     const headerId = safeText(response.headers.get('x-request-id') || response.headers.get('request-id') || '', runtime);
     const responseId = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(headerId) ? headerId : `${requestId}:${phase}`;
+    observe({ event: 'response-headers', phase, httpStatus: response.status, responseId, elapsedMs: Date.now() - started });
     const invalid = (): SketchProviderError => new SketchProviderError('SKETCH_PROVIDER_RESPONSE_INVALID', runtime, phase, responseId, response.status);
     if (response.ok && !/^(application\/json|text\/json)(?:\s*;|$)/i.test(response.headers.get('content-type') || '')) {
       const error = invalid();
@@ -107,8 +117,12 @@ function createProviderInvoke<T extends object>(input: {
     const limit = new SketchProviderError('SKETCH_PROVIDER_RESPONSE_LIMIT', runtime, phase, responseId, response.status);
     let text: string;
     try { text = await readResponse(response, signal, limit); }
-    catch (error) { signal.throwIfAborted(); if (error === limit) throw error; throw invalid(); }
+    catch (error) {
+      observe({ event: 'attempt-error', phase, httpStatus: response.status, aborted: signal.aborted, elapsedMs: Date.now() - started });
+      signal.throwIfAborted(); if (error === limit) throw error; throw invalid();
+    }
     signal.throwIfAborted();
+    observe({ event: 'body-complete', phase, httpStatus: response.status, responseId, elapsedMs: Date.now() - started });
     let envelope: unknown;
     try { envelope = JSON.parse(text) as unknown; }
     catch { if (response.ok) throw invalid(); }

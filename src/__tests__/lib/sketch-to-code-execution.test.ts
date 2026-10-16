@@ -14,6 +14,14 @@ import { executeSketchTask, recoverExpiredSketchTask, type SketchExecutionDepend
   type SketchPublicationInput, type SketchRecoveryIdentity } from '@/lib/sketch-to-code/execution';
 
 vi.mock('server-only', () => ({}));
+vi.mock('@/lib/server-data-root', () => {
+  const root = `${process.cwd()}/.superpowers/sdd/2026-10-09-sketch-to-code/runtime-observation-owned`;
+  const denied = (): never => { throw new Error('OBSERVATION_DEFAULT_FILE_PORT_FORBIDDEN'); };
+  return { getServerDataRoot: (): string => root, getServerSystemDir: (): string => `${root}/system`,
+    getServerUsersDir: (): string => `${root}/users`, isServerDataRootDurable: (): boolean => false,
+    migrateLocalDataIfNeeded: denied, saveImageFile: denied, deleteImageFile: denied,
+    getImageWriteDir: denied, filePathToPublicUrl: denied };
+});
 // Original settlement validation runs here; only external SQL/schema access is
 // replaced. Real SQL timing/locks/accounting are exercised by the PG fixture.
 vi.mock('@/lib/db-client', () => ({ execSql: vi.fn(async () => ({ rows: [], rowCount: 0 })), getPool: vi.fn() }));
@@ -228,6 +236,23 @@ describe('Token fix1 rejection query lifecycle', () => {
 });
 
 describe('sketch guarded execution (storage/publisher seams, real computation and AbortScope)', () => {
+  it('distinguishes confirmed phase writes and the original publication acknowledgement without logging the draft', async () => {
+    const h = await harness(), log = vi.spyOn(console, 'info').mockImplementation(() => {});
+    // This case needs the original onPhase seam. The older harness intentionally
+    // wraps compute(signal) without forwarding that second argument.
+    h.admission.prepared = await prepareSketchCode(input, h.generation,
+      { actorUserId: 'user-a', signal: new AbortController().signal });
+    expect(await executeSketchTask(h.admission, context(), h.dep)).toEqual({ status: 'completed' });
+    const rows = log.mock.calls.filter(call => call[0] === '[SketchRuntime]').map(call => JSON.parse(String(call[1])));
+    expect(rows.map(row => [row.phase, row.event])).toEqual([
+      ['analysis', 'phase-state-start'], ['analysis', 'phase-state-confirmed'],
+      ['reconstruction', 'phase-state-start'], ['reconstruction', 'phase-state-confirmed'],
+      ['publication', 'publication-start'], ['publication', 'publication-return'],
+    ]);
+    expect(rows.at(-1)).toMatchObject({ taskId: 'sketch-test', confirmed: true });
+    expect(JSON.stringify(log.mock.calls)).not.toMatch(/imageDataUrl|instruction|nonce|access|lease|digest|欢迎|html/);
+    expect(h.publications).toHaveLength(1); expect(h.settlements).toHaveLength(0);
+  });
   it('settles only a trusted confirmed Token rejection matching the full current lease', async () => {
     const h = await harness();
     const client = tokenFailureClient(h);

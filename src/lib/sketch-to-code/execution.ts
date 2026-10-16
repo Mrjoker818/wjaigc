@@ -8,6 +8,7 @@ import { type PersistedCloudTask, type CloudTaskLease, getCloudTaskById, claimCl
   updateCloudTask, terminateCloudTaskAndRefund, type SketchTaskSettlementFence } from '@/lib/cloud-task-storage';
 import { createTaskAbortScope, type TaskAbortScope } from '@/lib/task-core/task-abort';
 import { SketchProviderError } from './provider';
+import { createSketchRuntimeObserver } from './runtime-observation';
 import { SketchTokenPublicationRejectedError, lockSketchTokenLedger, type SketchTokenTaskRow } from './token-billing';
 
 export interface SketchExecutionContext { actorUserId: string; projectId: string; signal?: AbortSignal }
@@ -234,6 +235,7 @@ export async function executeSketchTask(admission: SketchTaskAdmission, context:
     || acceptedMeta.version !== 1 || acceptedMeta.route !== '/api/sketch-to-code'
     || access.actorUserId !== ctx.actorUserId || access.projectId !== ctx.projectId || !sameAccess(acceptedMeta.access, access)) return skipped('SKETCH_IDENTITY_MISMATCH');
 
+  const observe = createSketchRuntimeObserver({ taskId: accepted.id, providerId: binding.providerId, modelId: binding.modelId });
   const globalDeadline = new AbortController();
   const globalTimer = setTimeout(() => globalDeadline.abort({ code: 'SKETCH_EXECUTION_TIMEOUT' }), EXECUTION_MS);
   let scope: TaskAbortScope | undefined; let monitorTimer: ReturnType<typeof setTimeout> | undefined;
@@ -312,6 +314,7 @@ export async function executeSketchTask(admission: SketchTaskAdmission, context:
       }
       draft = snapshot(await bounded(() => compute(scopeSignal, async phase => {
         scopeSignal.throwIfAborted();
+        observe({ event: 'phase-state-start', phase });
         try {
           const current = await read(scopeSignal);
           if (!matches(current, accepted.id, identity, input.idempotencyKey) || !owns(current, lease!)) {
@@ -323,7 +326,9 @@ export async function executeSketchTask(admission: SketchTaskAdmission, context:
             expectedStatuses: [...ACTIVE], expectedRevision: current.revision, leaseOwner: owner,
           }), scopeSignal, CHECK_MS);
           if (!updated) { stopUnsafe('SKETCH_LEASE_LOST'); throw new ExecutionStop('SKETCH_LEASE_LOST'); }
+          observe({ event: 'phase-state-confirmed', phase });
         } catch (error) {
+          observe({ event: 'phase-state-unconfirmed', phase, aborted: scopeSignal.aborted });
           if (!scopeSignal.aborted) stopUnsafe('SKETCH_TASK_UNAVAILABLE');
           throw error;
         }
@@ -338,8 +343,10 @@ export async function executeSketchTask(admission: SketchTaskAdmission, context:
     if (!matches(publishTask, accepted.id, identity, input.idempotencyKey) || !owns(publishTask, lease)) return deferred('SKETCH_LEASE_LOST');
     const publicationLease = lease;
     publishing = true;
+    observe({ event: 'publication-start', phase: 'publication' });
     // Task data is already deeply frozen; AbortSignal is a live capability.
     const committed = await bounded(() => publisher(Object.freeze({ task: publishTask, access, input, draft, lease: publicationLease, signal: scopeSignal })), scopeSignal);
+    observe({ event: 'publication-return', phase: 'publication', confirmed: committed === true });
     stopMonitor();
     if (!committed || unsafeReason || scopeSignal.aborted) return deferred(unsafeReason || 'SKETCH_PUBLICATION_UNCONFIRMED');
     const completed = await read(globalDeadline.signal);

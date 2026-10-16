@@ -14,6 +14,7 @@ import { GenerationProjectAccessError } from '@/lib/collaboration/generation-pro
 import { ModelCapabilityError } from '@/lib/task-core/model-capability-contract';
 import { InsufficientCreditsError } from '@/lib/credits';
 import { IdempotencyConflictError } from '@/lib/task-core/idempotency';
+import { createSketchRuntimeObserver } from '@/lib/sketch-to-code/runtime-observation';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 660;
@@ -45,11 +46,19 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       if (!admission.prepared) dispatchPending = true;
       else try {
         const dependencies = service.workerDependencies();
+        const observe = createSketchRuntimeObserver({ requestId, taskId: admission.task.id,
+          providerId: admission.task.providerId, modelId: admission.task.model });
         after(async () => {
           // Closing a response is not an explicit owner cancellation. Each
           // producer retains its original DB/lease/charge/checkpoint fences.
-          try { await executeSketchImageTask(admission, { actorUserId: auth.user.id, projectId: identity.projectId }, dependencies); }
-          catch { /* Only original durable query/accepted recovery reconciles unknown outcomes. */ }
+          observe({ event: 'worker-start', phase: 'image-worker' });
+          try {
+            const outcome = await executeSketchImageTask(admission, { actorUserId: auth.user.id, projectId: identity.projectId }, dependencies);
+            observe({ event: 'worker-return', phase: 'image-worker', status: outcome?.status, reason: outcome?.reason });
+          } catch {
+            observe({ event: 'worker-throw', phase: 'image-worker', status: 'unknown' });
+            /* Only original durable query/accepted recovery reconciles unknown outcomes. */
+          }
         });
       } catch { dispatchPending = true; }
     }

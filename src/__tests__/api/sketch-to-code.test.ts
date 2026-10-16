@@ -3,6 +3,14 @@ import { NextRequest, NextResponse } from 'next/server';
 import { SketchInputError } from '@/lib/sketch-to-code/generation';
 import type { SketchTaskAdmission } from '@/lib/sketch-to-code/admission';
 vi.mock('server-only', () => ({}));
+vi.mock('@/lib/server-data-root', () => {
+  const root = `${process.cwd()}/.superpowers/sdd/2026-10-09-sketch-to-code/runtime-observation-owned`;
+  const denied = (): never => { throw new Error('OBSERVATION_DEFAULT_FILE_PORT_FORBIDDEN'); };
+  return { getServerDataRoot: (): string => root, getServerSystemDir: (): string => `${root}/system`,
+    getServerUsersDir: (): string => `${root}/users`, isServerDataRootDurable: (): boolean => false,
+    migrateLocalDataIfNeeded: denied, saveImageFile: denied, deleteImageFile: denied,
+    getImageWriteDir: denied, filePathToPublicUrl: denied };
+});
 const mocks = vi.hoisted(() => ({ auth: vi.fn(), admit: vi.fn(), after: vi.fn(), execute: vi.fn(), publish: vi.fn(), resolve: vi.fn(), authorize: vi.fn(), provider: vi.fn() }));
 vi.mock('next/server', async original => ({ ...await original<typeof import('next/server')>(), after: mocks.after }));
 vi.mock('@/lib/api-auth', () => ({ requireApiAuthOrReject: mocks.auth }));
@@ -46,6 +54,30 @@ describe('real preparation through the HTTP start route', () => {
   });
 });
 describe('formal sketch start HTTP ports (not live SQL/provider)', () => {
+  it.each(['completed', 'deferred', 'timeout'] as const)('records the actual %s worker return without exposing admission material', async status => {
+    const log = vi.spyOn(console, 'info').mockImplementation(() => {});
+    mocks.execute.mockResolvedValue({ status, reason: status === 'deferred' ? 'SKETCH_TASK_UNAVAILABLE' : undefined,
+      privateField: 'worker-private-field' });
+    const response = await POST(request()); await mocks.after.mock.calls[0][0]();
+    expect(response.status).toBe(202); expect(mocks.execute).toHaveBeenCalledTimes(1); expect(mocks.admit).toHaveBeenCalledTimes(1);
+    const rows = log.mock.calls.filter(call => call[0] === '[SketchRuntime]').map(call => JSON.parse(String(call[1])));
+    expect(rows).toEqual([
+      expect.objectContaining({ event: 'worker-start', phase: 'code-worker', taskId: 'sketch_original' }),
+      expect.objectContaining({ event: 'worker-return', phase: 'code-worker', taskId: 'sketch_original', status }),
+    ]);
+    expect(JSON.stringify(log.mock.calls)).not.toMatch(/worker-private-field|private-PNG|private-instruction|RAW_SECRET_HTML|nonce|access|lease|digest/);
+  });
+  it('links task and request before awaiting a worker that has not returned', async () => {
+    const log = vi.spyOn(console, 'info').mockImplementation(() => {});
+    let release!: () => void;
+    mocks.execute.mockReturnValue(new Promise<void>(resolve => { release = resolve; }));
+    await POST(request()); const running = mocks.after.mock.calls[0][0]();
+    try {
+      const rows = log.mock.calls.filter(call => call[0] === '[SketchRuntime]').map(call => JSON.parse(String(call[1])));
+      expect(rows).toEqual([expect.objectContaining({ event: 'worker-start', taskId: 'sketch_original', requestId: expect.any(String) })]);
+      expect(mocks.execute).toHaveBeenCalledTimes(1);
+    } finally { release(); await running; }
+  });
   it('Token response uses original frozen rates/reserve, never an unverified actual cost', async () => {
     const accepted = admission(); (accepted.task.result!.sketchAdmission as Record<string, unknown>).pricing = { mode: 'token', calls: 2, perCallCredits: 7, totalCredits: 14, tokenPricing: { input: 1, output: 2 } };
     mocks.admit.mockResolvedValue(accepted); const response = await POST(request()); const json = await response.json();
