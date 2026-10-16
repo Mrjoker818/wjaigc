@@ -8,6 +8,14 @@ import { InsufficientCreditsError } from '@/lib/credits';
 import { IdempotencyConflictError } from '@/lib/task-core/idempotency';
 import { GenerationProjectAccessError } from '@/lib/collaboration/generation-project-access';
 vi.mock('server-only', () => ({}));
+vi.mock('@/lib/server-data-root', () => {
+  const root = `${process.cwd()}/.superpowers/sdd/2026-10-09-sketch-to-code/runtime-observation-owned`;
+  const denied = (): never => { throw new Error('OBSERVATION_DEFAULT_FILE_PORT_FORBIDDEN'); };
+  return { getServerDataRoot: (): string => root, getServerSystemDir: (): string => `${root}/system`,
+    getServerUsersDir: (): string => `${root}/users`, isServerDataRootDurable: (): boolean => false,
+    migrateLocalDataIfNeeded: denied, saveImageFile: denied, deleteImageFile: denied,
+    getImageWriteDir: denied, filePathToPublicUrl: denied };
+});
 const mocks = vi.hoisted(() => ({ auth: vi.fn(), after: vi.fn(), admit: vi.fn(), service: vi.fn(), worker: vi.fn(), execute: vi.fn() }));
 vi.mock('next/server', async original => ({ ...await original<typeof import('next/server')>(), after: mocks.after }));
 vi.mock('@/lib/api-auth', () => ({ requireApiAuthOrReject: mocks.auth }));
@@ -38,6 +46,18 @@ beforeEach(() => {
 });
 afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
 describe('image start API with original bounded ingress and controlled durable ports', () => {
+  it('records an actual deferred image worker return without serializing its private admission', async () => {
+    const log = vi.spyOn(console, 'info').mockImplementation(() => {});
+    mocks.execute.mockResolvedValue({ status: 'deferred', reason: 'SKETCH_IMAGE_TASK_UNAVAILABLE', privateField: 'worker-private-field' });
+    await POST(request()); await mocks.after.mock.calls[0][0]();
+    expect(mocks.execute).toHaveBeenCalledTimes(1); expect(mocks.admit).toHaveBeenCalledTimes(1);
+    const rows = log.mock.calls.filter(call => call[0] === '[SketchRuntime]').map(call => JSON.parse(String(call[1])));
+    expect(rows).toEqual([
+      expect.objectContaining({ event: 'worker-start', phase: 'image-worker', taskId: 'skimg_original' }),
+      expect.objectContaining({ event: 'worker-return', phase: 'image-worker', taskId: 'skimg_original', status: 'deferred' }),
+    ]);
+    expect(JSON.stringify(log.mock.calls)).not.toMatch(/worker-private-field|private-secret|imageDataUrl|instruction|nonce|access|lease|digest/);
+  });
   it('runs on bounded Node/after without changing the old code route', () => {
     expect(runtime).toBe('nodejs'); expect(dynamic).toBe('force-dynamic'); expect(maxDuration).toBeGreaterThanOrEqual(600);
   });

@@ -10,6 +10,7 @@ import { buildPollUrl, parseGeminiChatImageResponse, parseResponseForProfile, re
 import { fetchWithV1Retry } from '@/lib/api-helpers';
 import { sketchFields, sketchHttpId } from './http';
 import { markSketchImageKnownFailure } from './image-known-failure';
+import { createSketchRuntimeObserver, type SketchRuntimeObserver } from './runtime-observation';
 
 type Body = Readonly<ReturnType<typeof buildSketchImageGenerationBody>>;
 type Code = 'SKETCH_IMAGE_PROVIDER_UNAVAILABLE' | 'SKETCH_IMAGE_PROVIDER_BINDING_MISMATCH'
@@ -42,6 +43,8 @@ export function createSketchImageQueryStage(input: { provider: ApiProvider; mode
   ) => Promise<Readonly<OrdinaryQueryResult>> {
   const { runtime, profile } = freezeRouting(input);
   const transport = dependencies.transport || globalThis.fetch;
+  const observe = createSketchRuntimeObserver(runtime, [runtime.apiKey]);
+  let firstQuery = true, observedStatus: string | undefined;
   return async (remoteId, binding, signal): Promise<Readonly<OrdinaryQueryResult>> => {
     signal.throwIfAborted(); checkBinding(binding, runtime);
     try { remoteTaskId(remoteId); }
@@ -49,7 +52,9 @@ export function createSketchImageQueryStage(input: { provider: ApiProvider; mode
     const expectedUrl = buildPollUrl(runtime.baseUrl, encodeURIComponent(remoteId), profile)
       || `${runtime.baseUrl}/tasks/${encodeURIComponent(remoteId)}?language=zh`;
     let confirmedFailure = false;
+    const queryObserver = firstQuery ? observe : undefined; firstQuery = false;
     const guarded = controlledTransport(runtime, profile, transport, signal, { method: 'GET', expectedUrl, remoteId,
+      observe: queryObserver,
       onQueryFailure: (): void => { confirmedFailure = true; } });
     try {
       const result = await queryOrdinaryGeneration({ baseUrl: runtime.baseUrl, profile, remoteId, apiKey: runtime.apiKey,
@@ -59,6 +64,10 @@ export function createSketchImageQueryStage(input: { provider: ApiProvider; mode
         usedModel: runtime.modelId, usedProviderId: runtime.providerId }, runtime);
       const imageUrls = [...result.imageUrls]; Object.freeze(imageUrls);
       const outward = Object.freeze({ status: result.status, imageUrls });
+      if (result.status !== observedStatus) {
+        observe({ event: 'query-result', phase: 'image-query', remoteTaskId: remoteId, status: result.status });
+        observedStatus = result.status;
+      }
       if (confirmedFailure && result.status === 'failed') confirmedQueryFailures.set(outward,
         Object.freeze({ providerId: runtime.providerId, modelId: runtime.modelId, remoteId }));
       return outward;
@@ -267,6 +276,7 @@ interface TransportScope {
   method: 'POST' | 'GET'; expectedUrl: string; body?: Body; prompt?: string; remoteId?: string;
   onReceipt?: (value: Readonly<SketchImageReceipt>) => void;
   onDispatch?: () => void; onQueryFailure?: () => void;
+  observe?: SketchRuntimeObserver;
 }
 /** A failed parser result alone is insufficient: require the original task alias
  * and no competing task envelope or media behind the parser's first preference. */
@@ -327,14 +337,25 @@ function controlledTransport(runtime: Runtime, profile: ApiCompatProfile, transp
     actual.throwIfAborted(); headers.set('X-Request-Id', runtime.requestId);
     let response: Response;
     scope.onDispatch?.();
+    const started = Date.now(), phase = scope.method === 'GET' ? 'image-query' : 'image-submit';
+    scope.observe?.({ event: 'request-start', phase, elapsedMs: 0 });
     try { response = await transport(url, { ...options, headers, body: outgoing, signal: actual, redirect: 'error' }); }
-    catch { signal.throwIfAborted(); throw new ImageProviderError('SKETCH_IMAGE_PROVIDER_TRANSPORT_FAILED', runtime); }
+    catch {
+      scope.observe?.({ event: 'attempt-error', phase, aborted: actual.aborted, elapsedMs: Date.now() - started });
+      signal.throwIfAborted(); throw new ImageProviderError('SKETCH_IMAGE_PROVIDER_TRANSPORT_FAILED', runtime);
+    }
     if (actual.aborted) { void response.body?.cancel(actual.reason).catch(() => undefined); signal.throwIfAborted(); actual.throwIfAborted(); }
     const invalid = (): ImageProviderError => new ImageProviderError('SKETCH_IMAGE_PROVIDER_RESPONSE_INVALID', runtime, response.status);
+    const responseId = response.headers.get('x-request-id') || response.headers.get('request-id') || undefined;
+    scope.observe?.({ event: 'response-headers', phase, httpStatus: response.status, responseId, elapsedMs: Date.now() - started });
     let text: string;
     try { text = await boundedText(response, actual, new ImageProviderError('SKETCH_IMAGE_PROVIDER_RESPONSE_LIMIT', runtime, response.status)); }
-    catch (error) { signal.throwIfAborted(); if (error instanceof ImageProviderError) throw error; throw invalid(); }
+    catch (error) {
+      scope.observe?.({ event: 'attempt-error', phase, httpStatus: response.status, aborted: actual.aborted, elapsedMs: Date.now() - started });
+      signal.throwIfAborted(); if (error instanceof ImageProviderError) throw error; throw invalid();
+    }
     signal.throwIfAborted();
+    scope.observe?.({ event: 'body-complete', phase, httpStatus: response.status, responseId, elapsedMs: Date.now() - started });
     if (!response.ok) {
       if (scope.method === 'GET') return new Response(null, { status: response.status });
       const error = new ImageProviderError('SKETCH_IMAGE_PROVIDER_REJECTED', runtime, response.status);
@@ -396,6 +417,7 @@ export function createSketchImageGenerationStage(input: {
   const { runtime, route, profile } = freezeRouting(input);
   const modelConfig = inferModelConfig(runtime.modelId, profile);
   const transport = dependencies.transport || globalThis.fetch;
+  const observe = createSketchRuntimeObserver(runtime, [runtime.apiKey]);
   let claimed = false;
   return async (suppliedBody, binding, signal): Promise<Readonly<SketchImageReceipt>> => {
     signal.throwIfAborted();
@@ -413,6 +435,7 @@ export function createSketchImageGenerationStage(input: {
     let nativeReceipt: Readonly<SketchImageReceipt> | undefined;
     let dispatched = false;
     const guarded = controlledTransport(runtime, profile, transport, signal, { method: 'POST', body, prompt,
+      observe,
       onDispatch: (): void => { dispatched = true; },
       onReceipt: (value: Readonly<SketchImageReceipt>): void => { nativeReceipt = value; },
       expectedUrl: runtime.baseUrl + (profile.id === 'gemini-image' ? '/chat/completions' : profile.editEndpoint) });

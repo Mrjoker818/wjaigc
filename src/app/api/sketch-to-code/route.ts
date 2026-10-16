@@ -13,6 +13,7 @@ import { InsufficientCreditsError } from '@/lib/credits';
 import { IdempotencyConflictError } from '@/lib/task-core/idempotency';
 import { createConfiguredSketchDependencies } from '@/lib/sketch-to-code/configured-dependencies';
 import { resolveTaskModel } from '@/lib/task-core/model-catalog';
+import { createSketchRuntimeObserver } from '@/lib/sketch-to-code/runtime-observation';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -48,10 +49,18 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     if (!admission.reused) {
       if (!admission.prepared) dispatchPending = true;
       else try {
+        const observe = createSketchRuntimeObserver({ requestId, taskId: admission.task.id,
+          providerId: admission.task.providerId, modelId: admission.task.model });
         after(async () => {
           // No inbound signal: response disconnect is NOT an explicit cancellation.
-          try { await executeSketchTask(admission, { actorUserId: auth.user.id, projectId: identity.task.projectId }, { publisher: publishSketchTask }); }
-          catch { /* unknown outcome is reconciled only by original query/recovery */ }
+          observe({ event: 'worker-start', phase: 'code-worker' });
+          try {
+            const outcome = await executeSketchTask(admission, { actorUserId: auth.user.id, projectId: identity.task.projectId }, { publisher: publishSketchTask });
+            observe({ event: 'worker-return', phase: 'code-worker', status: outcome?.status, reason: outcome?.reason });
+          } catch {
+            observe({ event: 'worker-throw', phase: 'code-worker', status: 'unknown' });
+            /* unknown outcome is reconciled only by original query/recovery */
+          }
         });
       } catch { dispatchPending = true; }
     }
