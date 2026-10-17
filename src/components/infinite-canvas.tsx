@@ -17241,7 +17241,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
         )}
 
         {showSketchToCode && sketchSession.current && <Suspense fallback={<div role="status">草图工具加载中…</div>}>
-          <SketchToCodePanel recoverTasks={true} session={sketchSession.current} imageSession={sketchImageEnabled ? sketchImageSession.current : undefined} models={taskModelCatalog} catalogStatus={catalogStatus}
+          <SketchToCodePanel recoverTasks={true} session={sketchSession.current} imageSession={sketchImageEnabled ? sketchImageSession.current : undefined} models={taskModelCatalog} modelOptions={taskModelOptions} catalogStatus={catalogStatus}
             insert={sketchContext?.insert} initialTrace={sketchTrace} isMonochrome={isMonochrome} onClose={closeCanvasToolPanels} />
         </Suspense>}
 

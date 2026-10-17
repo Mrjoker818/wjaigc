@@ -4,7 +4,8 @@ import { cleanup, fireEvent, render, screen, within } from '@testing-library/rea
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SketchPanelSession, SketchScope } from '@/lib/sketch-to-code/client';
 import type { SketchImagePanelSession } from '@/lib/sketch-to-code/image-client';
-const seen = vi.hoisted(() => ({ props: undefined as { session: SketchPanelSession; imageSession?: SketchImagePanelSession; onClose: () => void } | undefined }));
+import type { TaskModelCatalogModel } from '@/hooks/use-task-model-catalog';
+const seen = vi.hoisted(() => ({ props: undefined as { session: SketchPanelSession; imageSession?: SketchImagePanelSession; modelOptions?: readonly TaskModelCatalogModel[]; onClose: () => void } | undefined }));
 vi.mock('@/components/sketch-to-code-panel', () => ({ SketchToCodePanel: (props: NonNullable<typeof seen.props>) => {
   seen.props = props;
   return React.createElement('section', { role: 'region', 'aria-label': 'controlled sketch panel' }, React.createElement('button', { onClick: props.onClose }, 'close controlled panel'));
@@ -36,6 +37,13 @@ async function open(view: ReturnType<typeof render>, label: string): Promise<Non
   expect(seen.props).toBeDefined(); return seen.props!;
 }
 describe('actual canvas image-session opt-in integration; controlled panel, no generation', () => {
+  it('passes the same public admin display catalog to the actual sketch entry without generation', async () => {
+    const options: TaskModelCatalogModel[] = [{ id: 'image-model', providerId: 'provider-1', providerName: '管理员供应商名称', name: '管理员图像名称', type: 'image' }];
+    const view = render(<InfiniteCanvas {...props(scope(), true)} taskModelOptions={options} />);
+    const panel = await open(view, '草图创作');
+    expect(panel.modelOptions).toBe(options);
+    expect(vi.mocked(fetch).mock.calls.some(([url]) => /\/api\/sketch-to-/.test(String(url)))).toBe(false);
+  });
   it('keeps code-only embedding compatibility when the runtime image gate is absent', async () => {
     const view = render(<InfiniteCanvas {...props(scope())} />), panel = await open(view, '草图转代码');
     expect(panel.imageSession).toBeUndefined(); expect(panel.session.client.scope.projectId).toBe('p1');

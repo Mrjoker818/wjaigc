@@ -25,7 +25,7 @@ import {
   // Admin prototype icons
   LayoutDashboard, Flame, Coins, TrendingUp, TrendingDown,
   SlidersHorizontal, HardDrive, Megaphone,
-  Brain, Link, Lock, LogIn, ChevronLeft, Globe2, ListChecks, MessageSquareMore,
+  Brain, Link, Lock, LogIn, ChevronLeft, Globe2, ListChecks, MessageSquareMore, Menu,
 } from 'lucide-react';
 import { UserManager } from '@/lib/user-manager';
 import { RECHARGE_PACKAGES } from '@/lib/credits-constants';
@@ -303,6 +303,8 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
   // Chat-only users start on chat tab, others on projects
   const defaultTab: TabType = (user.productType?.includes('chat') && !user.productType?.includes('canvas')) ? 'chat' : 'projects';
   const [activeTab, setActiveTab] = useState<TabType>(defaultTab);
+  const [mobileNavOpen, setMobileNavOpen] = useState<boolean>(false);
+  const mobileNavTriggerRef = useRef<HTMLButtonElement>(null);
   const [desktopAdminData, setDesktopAdminData] = useState<{
     devices: Record<string, unknown>[];
     backups: Record<string, unknown>[];
@@ -2198,9 +2200,23 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
 
   // =================== RENDER ===================
   return (
-    <div className="dashboard-root h-screen w-screen flex overflow-hidden" style={{ '--dash-accent': accentHex, '--dash-accent-light': isMonochrome ? 'rgba(59,130,246,0.1)' : 'rgba(212,175,55,0.15)', '--dash-accent-mid': isMonochrome ? 'rgba(59,130,246,0.2)' : 'rgba(212,175,55,0.2)', '--dash-accent-ring': isMonochrome ? 'rgba(59,130,246,0.3)' : 'rgba(212,175,55,0.3)', '--dash-accent-hover': isMonochrome ? '#2563eb' : '#e0b840', '--dash-accent-text': isMonochrome ? '#fff' : '#000', } as React.CSSProperties }>
+    <div className="dashboard-root h-dvh md:h-screen w-screen flex flex-col md:flex-row overflow-hidden" style={{ '--dash-accent': accentHex, '--dash-accent-light': isMonochrome ? 'rgba(59,130,246,0.1)' : 'rgba(212,175,55,0.15)', '--dash-accent-mid': isMonochrome ? 'rgba(59,130,246,0.2)' : 'rgba(212,175,55,0.2)', '--dash-accent-ring': isMonochrome ? 'rgba(59,130,246,0.3)' : 'rgba(212,175,55,0.3)', '--dash-accent-hover': isMonochrome ? '#2563eb' : '#e0b840', '--dash-accent-text': isMonochrome ? '#fff' : '#000', } as React.CSSProperties }>
+      <div className={`md:hidden shrink-0 flex items-center px-3 border-b ${isDark ? 'bg-[#0e0e1a] border-white/5' : 'bg-white border-gray-200'}`}>
+        <button ref={mobileNavTriggerRef} type="button" aria-label="展开导航" aria-controls="dashboard-navigation" aria-expanded={mobileNavOpen}
+          onClick={() => setMobileNavOpen(open => !open)} className={`min-h-11 flex items-center gap-2 px-2 text-sm font-medium ${textPrimary}`}>
+          <Menu className="w-5 h-5 shrink-0" /> 导航
+        </button>
+      </div>
       {/* ===== Sidebar ===== */}
-      <aside className={`w-[136px] shrink-0 flex flex-col sm:w-[220px] md:w-[260px] ${isDark ? 'bg-[#0e0e1a]' : 'bg-white'} border-r ${isDark ? 'border-white/5' : 'border-gray-200'} overflow-hidden`}>
+      <aside id="dashboard-navigation" aria-label="工作台导航" onKeyDown={event => {
+        if (event.key === 'Escape' && mobileNavOpen) {
+          setMobileNavOpen(false);
+          mobileNavTriggerRef.current?.focus();
+        }
+      }} className={`${mobileNavOpen ? 'flex' : 'hidden'} md:flex w-full max-h-[60dvh] md:max-h-none shrink-0 flex-col md:w-[260px] ${isDark ? 'bg-[#0e0e1a]' : 'bg-white'} border-r ${isDark ? 'border-white/5' : 'border-gray-200'} overflow-y-auto md:overflow-hidden [&_button]:whitespace-nowrap [&_svg]:shrink-0`}>
+        <button type="button" aria-label="关闭导航" onClick={() => { setMobileNavOpen(false); mobileNavTriggerRef.current?.focus(); }} className={`md:hidden sticky top-0 z-10 shrink-0 min-h-11 self-end flex items-center gap-2 px-4 text-sm ${isDark ? 'bg-[#0e0e1a]' : 'bg-white'} ${textSecondary}`}>
+          <X className="w-4 h-4" /> 关闭导航
+        </button>
         {/* User info */}
         <div className="p-4">
           <div className="flex items-center gap-3 cursor-pointer" onClick={() => setShowUserProfile(!showUserProfile)}>
@@ -2210,7 +2226,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
             <div className="min-w-0 flex-1">
               <div className={`text-sm font-semibold truncate ${textPrimary}`}>{user.name}</div>
               <div className="flex items-center gap-1.5">
-                <span className={`text-[10px] px-1.5 py-0.5 rounded-md font-medium ${isAdmin ? `${accentBgLight} ${accentClass}` : isDark ? 'bg-white/5 text-gray-500' : 'bg-gray-100 text-gray-500'}`}>
+                <span className={`shrink-0 whitespace-nowrap text-[10px] px-1.5 py-0.5 rounded-md font-medium ${isAdmin ? `${accentBgLight} ${accentClass}` : isDark ? 'bg-white/5 text-gray-500' : 'bg-gray-100 text-gray-500'}`}>
                   {isAdmin ? '管理员' : '创作者'}
                 </span>
               </div>
@@ -2251,7 +2267,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
         </div>
 
         {/* Navigation */}
-        <nav className="flex-1 px-3 space-y-1 min-h-0 overflow-y-auto">
+        <nav className="flex-none md:flex-1 px-3 space-y-1 min-h-0 overflow-visible md:overflow-y-auto">
           {/* Regular tabs - filtered by productType */}
           {[
             ...(user.productType?.includes('canvas') ? [
@@ -2266,7 +2282,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
             { key: 'settings' as TabType, label: '设置', icon: Settings, count: null },
             { key: 'credits' as TabType, label: '积分', icon: Wallet, count: creditsBalance > 0 ? creditsBalance : null },
           ].map(item => (
-            <button key={item.key} onClick={() => setActiveTab(item.key)} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all cursor-pointer ${activeTab === item.key ? `${accentBgLight} ${accentClass}` : `${textSecondary} ${isDark ? 'hover:bg-white/5' : 'hover:bg-gray-100'}`}`}>
+            <button key={item.key} onClick={() => { setActiveTab(item.key); if (mobileNavOpen) { setMobileNavOpen(false); mobileNavTriggerRef.current?.focus(); } }} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all cursor-pointer ${activeTab === item.key ? `${accentBgLight} ${accentClass}` : `${textSecondary} ${isDark ? 'hover:bg-white/5' : 'hover:bg-gray-100'}`}`}>
               <item.icon className="w-4.5 h-4.5" />
               <span className="flex-1 text-left">{item.label}</span>
               {item.count !== null && <span className={`text-xs ${activeTab === item.key ? accentClass : textSecondary}`}>{item.count}</span>}
@@ -2293,7 +2309,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                 { key: 'payment-config' as TabType, label: '支付配置', icon: CreditCard, count: null },
                 { key: 'ecom-templates' as TabType, label: '电商模板', icon: ShoppingBag, count: ecomTemplates.length },
               ].map(item => (
-                <button key={item.key} onClick={() => setActiveTab(item.key)} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all cursor-pointer ${activeTab === item.key ? `${accentBgLight} ${accentClass}` : `${textSecondary} ${isDark ? 'hover:bg-white/5' : 'hover:bg-gray-100'}`}`}>
+                <button key={item.key} onClick={() => { setActiveTab(item.key); if (mobileNavOpen) { setMobileNavOpen(false); mobileNavTriggerRef.current?.focus(); } }} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all cursor-pointer ${activeTab === item.key ? `${accentBgLight} ${accentClass}` : `${textSecondary} ${isDark ? 'hover:bg-white/5' : 'hover:bg-gray-100'}`}`}>
                   <item.icon className="w-4.5 h-4.5" />
                   <span className="flex-1 text-left">{item.label}</span>
                   {item.count !== null && <span className={`text-xs ${activeTab === item.key ? accentClass : textSecondary}`}>{item.count}</span>}
@@ -2319,21 +2335,21 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
       </aside>
 
       {/* ===== Main Content ===== */}
-      <main className="dashboard-scrollable flex-1 min-w-0 min-h-0">
+      <main className="dashboard-scrollable flex-1 min-w-0 min-h-0 [&_h1]:shrink-0 [&_button]:whitespace-nowrap [&_button>svg]:shrink-0">
         {/* ── Tab: Projects ── */}
         {activeTab === 'projects' && (
           <div className="h-full flex flex-col">
             {/* Header */}
-            <div className={`px-8 pt-8 pb-4 ${isDark ? 'bg-[#0a0a0f]' : 'bg-gray-50'}`}>
-              <div className="flex items-center justify-between">
-                <div>
+            <div className={`px-4 pt-4 sm:px-8 sm:pt-8 pb-4 ${isDark ? 'bg-[#0a0a0f]' : 'bg-gray-50'}`}>
+              <div className="flex flex-wrap items-center justify-between gap-4">
+                <div className="shrink-0">
                   <h1 className={`text-2xl font-bold ${textPrimary}`}>我的项目</h1>
                   <p className={`text-sm mt-1 ${textSecondary}`}>{projects.length} 个项目 · {allImages.length} 张图片</p>
                 </div>
-                 <div className="flex items-center gap-3">
-                   <div className="relative">
+                 <div className="flex w-full lg:w-auto min-w-0 flex-wrap items-center gap-3">
+                   <div className="relative w-full sm:w-auto">
                      <Search className={`w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 ${textSecondary}`} />
-                     <input value={searchQuery} onChange={e => setSearchQuery(e.target.value)} placeholder="搜索项目..." className={`pl-9 pr-4 py-2 rounded-xl text-sm ${isDark ? 'bg-white/5 border-white/10 text-white' : 'bg-white border-gray-200'} border focus:outline-none focus:ring-1 ${accentRingClass} w-56`} />
+                     <input value={searchQuery} onChange={e => setSearchQuery(e.target.value)} placeholder="搜索项目..." className={`pl-9 pr-4 py-2 rounded-xl text-sm ${isDark ? 'bg-white/5 border-white/10 text-white' : 'bg-white border-gray-200'} border focus:outline-none focus:ring-1 ${accentRingClass} w-full sm:w-56`} />
                    </div>
                    {projectManageMode ? (
                      <>
@@ -2376,7 +2392,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
               </div>
             </div>
             {/* Project Grid */}
-            <div className="flex-1 overflow-y-auto px-8 pb-8">
+            <div className="flex-1 overflow-y-auto px-4 sm:px-8 pb-8">
               {filteredProjects.length === 0 ? (
                 <div className={`flex flex-col items-center justify-center h-64 ${textSecondary}`}>
                   <FolderOpen className="w-12 h-12 mb-3 opacity-30" />
@@ -2487,13 +2503,13 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
         {/* ── Tab: Assets ── */}
         {activeTab === 'assets' && (
           <div className="h-full flex flex-col">
-            <div className={`px-8 pt-8 pb-4 ${isDark ? 'bg-[#0a0a0f]' : 'bg-gray-50'}`}>
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
+            <div className={`px-4 pt-4 sm:px-8 sm:pt-8 pb-4 ${isDark ? 'bg-[#0a0a0f]' : 'bg-gray-50'}`}>
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="flex flex-wrap items-center gap-2">
                   <h1 className={`text-2xl font-bold ${textPrimary}`}>资产库</h1>
                   {unavailableAssetCount > 0 && <span className="text-xs text-amber-500">{unavailableAssetCount} 个媒体需要恢复</span>}
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
                   {/* View mode toggle */}
                   <button onClick={() => setAssetViewMode(assetViewMode === 'grid' ? 'list' : 'grid')} className={`p-1.5 rounded-lg ${isDark ? 'hover:bg-white/10' : 'hover:bg-gray-200'} cursor-pointer`} title={assetViewMode === 'grid' ? '列表模式' : '大图模式'}>
                     {assetViewMode === 'grid' ? <List className="w-4 h-4" /> : <Grid3X3 className="w-4 h-4" />}
@@ -2538,7 +2554,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                 )}
               </div>
             </div>
-            <div className="flex-1 overflow-y-auto px-8 pb-8">
+            <div className="flex-1 overflow-y-auto px-4 sm:px-8 pb-8">
               {assetTab === 'images' && (
                 filteredImages.length === 0 ? (
                   <div className={`flex flex-col items-center justify-center h-64 ${textSecondary}`}><Image className="w-12 h-12 mb-3 opacity-30" /><p className="text-sm">暂无图片</p></div>
@@ -3134,14 +3150,14 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
 
         {/* ── Tab: API Management ── */}
         {activeTab === 'apis' && isAdmin && (
-          <div className="h-full overflow-y-auto p-6 relative" onMouseEnter={() => { if (!productionReadiness && !productionReadinessLoading) void refreshProductionReadiness(); if (!cloudTasks.length && !cloudTasksLoading) void refreshCloudTasks(); if (!Object.keys(providerTaskSummary).length) void refreshProviderTaskSummary(); }}>
+          <div className="h-full overflow-y-auto p-4 sm:p-6 relative" onMouseEnter={() => { if (!productionReadiness && !productionReadinessLoading) void refreshProductionReadiness(); if (!cloudTasks.length && !cloudTasksLoading) void refreshCloudTasks(); if (!Object.keys(providerTaskSummary).length) void refreshProviderTaskSummary(); }}>
             {/* ── Header with add button ── */}
-            <div className="flex items-center justify-between mb-4">
-              <div>
+            <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+              <div className="min-w-0">
                 <h1 className="text-xl font-bold text-foreground">API 管理</h1>
                 <p className="text-sm text-muted-foreground">配置图像、对话、3D、矢量等模型接口</p>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <button onClick={() => void refreshProductionReadiness()} className="text-xs px-3 py-1.5 rounded-lg flex items-center gap-1.5 cursor-pointer bg-muted text-muted-foreground hover:text-foreground hover:bg-muted/80 transition-colors"><ShieldCheck className={`w-3.5 h-3.5 ${productionReadinessLoading ? 'animate-pulse' : ''}`} />发布自检</button>
                 <button onClick={() => void refreshBalances()} className="text-xs px-3 py-1.5 rounded-lg flex items-center gap-1.5 cursor-pointer bg-muted text-muted-foreground hover:text-foreground hover:bg-muted/80 transition-colors"><Activity className="w-3.5 h-3.5" />刷新余额</button>
                 <button onClick={() => { void refreshAdmin(); }} className="text-xs px-3 py-1.5 rounded-lg flex items-center gap-1.5 cursor-pointer bg-muted text-muted-foreground hover:text-foreground hover:bg-muted/80 transition-colors"><RefreshCw className="w-3.5 h-3.5" />刷新列表</button>
@@ -3214,7 +3230,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
             </section>
 
             {/* ── Filter bar ── */}
-            <div className="flex items-center gap-2 mb-3 p-2 rounded-xl bg-muted/50 border border-border">
+            <div className="flex flex-wrap items-center gap-2 mb-3 p-2 rounded-xl bg-muted/50 border border-border">
               <select className="h-8 px-2.5 rounded-lg text-xs bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 cursor-pointer" value={apiFilterType} onChange={e => setApiFilterType(e.target.value as ApiKind | 'all')}>
                 <option value="all">全部类型</option>
                 {(Object.keys(apiKindLabels) as ApiKind[]).map(k => <option key={k} value={k}>{apiKindLabels[k]}</option>)}
@@ -3224,7 +3240,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                 <option value="enabled">已启用</option>
                 <option value="disabled">已停用</option>
               </select>
-              <div className="relative flex-1">
+              <div className="relative min-w-0 basis-full sm:basis-auto flex-1">
                 <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
                 <input type="text" placeholder="搜索 API 名称或 URL..." value={apiSearchQuery} onChange={e => setApiSearchQuery(e.target.value)} className="w-full h-8 pl-8 pr-3 rounded-lg text-xs bg-background border border-border text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30" />
               </div>
@@ -3232,7 +3248,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
 
             {/* ── Batch operations bar ── */}
             {selectedProviderIds.size > 0 && (
-              <div className="flex items-center gap-2 mb-3 p-2 rounded-xl bg-primary/10 border border-primary/20">
+              <div className="flex flex-wrap items-center gap-2 mb-3 p-2 rounded-xl bg-primary/10 border border-primary/20">
                 <span className="text-xs text-primary">已选择 {selectedProviderIds.size} 个</span>
                 <button onClick={() => void handleBatchToggleApi(true)} className="text-xs px-2.5 py-1 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-500 cursor-pointer transition-colors">批量启用</button>
                 <button onClick={() => void handleBatchToggleApi(false)} className="text-xs px-2.5 py-1 rounded-lg bg-destructive/10 hover:bg-destructive/20 text-destructive cursor-pointer transition-colors">批量停用</button>
@@ -3810,13 +3826,13 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
 
         {/* ── Tab: Connector Admin (DCC / Creative) ── */}
         {activeTab === 'connector-admin' && isAdmin && (
-          <div className="h-full overflow-y-auto p-6">
-            <div className="flex items-center justify-between mb-6">
-              <div>
+          <div className="h-full overflow-y-auto p-4 sm:p-6 [overflow-wrap:anywhere] [&_.grid>*]:min-w-0 [&_svg]:shrink-0">
+            <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
+              <div className="min-w-0">
                 <h1 className={`text-xl font-bold ${textPrimary}`}>插件连接器管理</h1>
                 <p className={`text-sm ${textSecondary}`}>SketchUp / 3ds Max / Photoshop / Illustrator / 窗口拾取脚本 等外部插件云端对接状态</p>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <button
                   onClick={() => {
                     navigator.clipboard?.writeText(typeof window !== 'undefined' ? window.location.origin : '');
@@ -3842,7 +3858,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                 <Globe2 size={14} className={accentClass} />
                 <span className={`text-sm font-semibold ${textPrimary}`}>插件连接配置</span>
               </div>
-              <div className="grid grid-cols-2 gap-4 text-xs">
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 text-xs">
                 <div>
                   <div className={textSecondary}>公共云端地址</div>
                   <div className={`font-mono mt-1 ${textPrimary}`}>{typeof window !== 'undefined' ? window.location.origin : ''}</div>
@@ -3863,7 +3879,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
             </div>
 
             {/* 核心接口健康状态 */}
-            <div className="grid grid-cols-4 gap-3 mb-5">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
               {[
                 { label: 'DCC Health', path: '/api/dcc/health', ok: !!connectorStatus.dcc?.success },
                 { label: 'DCC Preflight', path: '/api/dcc/preflight', ok: !!connectorStatus.dccPreflight?.success },
@@ -3884,10 +3900,10 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
               ))}
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
               {/* DCC 插件 (SketchUp / 3ds Max / 窗口拾取) */}
               <div className={`${softClass} rounded-xl p-4 border ${isDark ? 'border-white/10' : 'border-gray-200'}`}>
-                <div className="flex items-center justify-between mb-3">
+                <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
                   <h2 className={`font-semibold ${textPrimary} flex items-center gap-2`}>
                     <Box size={16} className={accentClass} /> DCC 插件接口（SketchUp / 3ds Max）
                   </h2>
@@ -3915,7 +3931,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
 
               {/* CEP 插件 (Photoshop / Illustrator) */}
               <div className={`${softClass} rounded-xl p-4 border ${isDark ? 'border-white/10' : 'border-gray-200'}`}>
-                <div className="flex items-center justify-between mb-3">
+                <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
                   <h2 className={`font-semibold ${textPrimary} flex items-center gap-2`}>
                     <Palette size={16} className={accentClass} /> Adobe CEP 创意连接器（PS / AI）
                   </h2>
@@ -3923,14 +3939,14 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                     {connectorStatus.creative?.success ? '在线' : '未就绪'}
                   </span>
                 </div>
-                <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs mb-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1.5 text-xs mb-3">
                   <div className="flex justify-between"><span className={textSecondary}>Photoshop</span><span className={connectorStatus.creative?.hosts?.photoshopCep ? 'text-emerald-500' : 'text-red-500'}>{connectorStatus.creative?.hosts?.photoshopCep ? '已启用' : '未启用'}</span></div>
                   <div className="flex justify-between"><span className={textSecondary}>Illustrator</span><span className={connectorStatus.creative?.hosts?.illustratorCep ? 'text-emerald-500' : 'text-red-500'}>{connectorStatus.creative?.hosts?.illustratorCep ? '已启用' : '未启用'}</span></div>
                   <div className="flex justify-between"><span className={textSecondary}>版本</span><span className={textPrimary}>{String(connectorStatus.creative?.version || '-')}</span></div>
                   <div className="flex justify-between"><span className={textSecondary}>鉴权</span><span className={textPrimary}>{connectorStatus.creative?.authRequired ? '开启' : '免鉴权'}</span></div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
                     <h3 className={`text-xs font-semibold ${textPrimary} mb-2`}>Photoshop 模板</h3>
                     <div className="space-y-1.5 max-h-40 overflow-y-auto">
@@ -3961,9 +3977,9 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
               {/* 能力矩阵 */}
               <div className={`${softClass} rounded-xl p-4 border ${isDark ? 'border-white/10' : 'border-gray-200'}`}>
                 <h2 className={`font-semibold mb-3 ${textPrimary} flex items-center gap-2`}><Zap size={16} className={accentClass} /> Creative 能力矩阵</h2>
-                <div className="grid grid-cols-2 gap-2 text-xs">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
                   {(connectorStatus.creative?.capabilities ? Object.entries(connectorStatus.creative.capabilities as Record<string, boolean>) : []).map(([k, v]) => (
-                    <div key={k} className={`flex items-center justify-between px-2 py-1.5 rounded-lg ${isDark ? 'bg-white/5' : 'bg-gray-100'}`}>
+                    <div key={k} className={`flex min-w-0 items-center justify-between gap-2 px-2 py-1.5 rounded-lg ${isDark ? 'bg-white/5' : 'bg-gray-100'}`}>
                       <span className={textPrimary}>{k}</span>
                       {v ? <CheckCircle2 size={12} className="text-emerald-500" /> : <XCircle size={12} className="text-red-500" />}
                     </div>
@@ -3982,7 +3998,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                     </div>
                   ))}
                   <h3 className={`text-xs font-semibold ${textPrimary} mt-3 mb-1`}>渲染模式</h3>
-                  <div className="grid grid-cols-2 gap-1.5">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
                     {(connectorStatus.dccPreflight?.renderModes ?? []).map((m) => (
                       <div key={String(m.id)} className={`text-[11px] p-1.5 rounded ${isDark ? 'bg-white/5' : 'bg-gray-100'}`}>
                         <div className={`${textPrimary} font-medium`}>{String(m.name)}</div>
@@ -3997,7 +4013,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
             {/* 端点清单 */}
             <div className={`${softClass} rounded-xl p-4 border ${isDark ? 'border-white/10' : 'border-gray-200'} mt-4`}>
               <h2 className={`font-semibold mb-3 ${textPrimary} flex items-center gap-2`}><ListChecks size={16} className={accentClass} /> 端点清单（可直接复制到插件配置）</h2>
-              <div className="grid grid-cols-2 gap-x-6 gap-y-1.5 text-xs font-mono">
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-x-6 gap-y-1.5 text-xs font-mono">
                 {[
                   ['DCC 健康检测', 'GET /api/dcc/health'],
                   ['DCC 预飞配置', 'GET /api/dcc/preflight'],
@@ -4012,9 +4028,9 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                   ['位图矢量化', 'POST /api/design/vectorize'],
                   ['SVG 智能描摹', 'POST /api/svg-trace'],
                 ].map(([label, path]) => (
-                  <div key={path} className="flex items-center justify-between gap-3">
+                  <div key={path} className="flex min-w-0 flex-col sm:flex-row sm:items-center sm:justify-between gap-1 sm:gap-3">
                     <span className={`${textSecondary} shrink-0`}>{label}</span>
-                    <code className={`${textPrimary} truncate`}>{path}</code>
+                    <code className={`${textPrimary} min-w-0 whitespace-normal`}>{path}</code>
                   </div>
                 ))}
               </div>

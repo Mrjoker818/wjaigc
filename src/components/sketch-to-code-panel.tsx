@@ -1,7 +1,10 @@
 'use client';
-import React, { useEffect, useId, useRef, useState, type ReactElement, type PointerEvent } from 'react';
-import { X } from 'lucide-react';
+import React, { useEffect, useId, useLayoutEffect, useRef, useState, type ReactElement, type PointerEvent } from 'react';
+import { Check, Maximize2, Minus, X } from 'lucide-react';
 import Image from 'next/image';
+import type { TaskModelCatalogModel } from '@/hooks/use-task-model-catalog';
+import { getModelDisplayName } from '@/lib/model-name-map';
+import { constrainFloatingPanelPosition, getCenteredFloatingPanelPosition } from '@/lib/floating-panel-position';
 import type { TaskModelDescriptor } from '@/lib/task-core/model-capability-contract';
 import { parseWorkspaceSourceTrace, type SketchWorkspaceSourceTrace } from '@/lib/asset-core/source-trace';
 import { appendSketchStroke, clearSketch, redoSketch, SKETCH_COLORS, SKETCH_WIDTHS,
@@ -19,6 +22,7 @@ export interface SketchCanvasContext {
 }
 interface SketchToCodePanelProps {
   session?: SketchPanelSession; imageSession?: SketchImagePanelSession; models?: readonly TaskModelDescriptor[];
+  modelOptions?: readonly TaskModelCatalogModel[];
   catalogStatus?: { loading: boolean; error: string | null }; onClose?: () => void;
   insert?: SketchInsert; initialTrace?: SketchWorkspaceSourceTrace; isMonochrome?: boolean;
   recoverTasks?: boolean;
@@ -27,6 +31,25 @@ const unavailable: SketchScope = { actorId: '', projectId: '', key: 'unavailable
 const active = (task?: Pick<SketchTask, 'status'>): boolean => !!task && ['pending', 'processing', 'submitting'].includes(task.status);
 // Keep the browser input boundary aligned with generation.ts admission validation.
 const MAX_INSTRUCTION_LENGTH = 4096;
+const COLOR_NAMES: Readonly<Record<SketchStroke['color'], string>> = {
+  '#111827': '黑色', '#ffffff': '白色', '#ef4444': '红色', '#f97316': '橙色',
+  '#eab308': '黄色', '#22c55e': '绿色', '#3b82f6': '蓝色', '#8b5cf6': '紫色',
+};
+function SelectionMark({ selected, swatch = false }: { selected: boolean; swatch?: boolean }): ReactElement | null {
+  return selected ? <Check data-selection-mark="" aria-hidden="true" className={swatch
+    ? 'pointer-events-none absolute bottom-0.5 right-0.5 h-3.5 w-3.5 rounded-sm bg-white text-gray-900'
+    : 'pointer-events-none ml-1 inline-block h-4 w-4 align-middle'} /> : null;
+}
+function modelLabel(model: TaskModelDescriptor, options: readonly TaskModelCatalogModel[]): string {
+  const option = options.find(candidate => candidate.providerId === model.providerId && candidate.id === model.modelId);
+  return `${option?.providerName || model.providerId} / ${option?.displayName || option?.name || getModelDisplayName(model.modelId)}`;
+}
+function sketchViewport(): { width: number; height: number; left: number; top: number } {
+  if (typeof window === 'undefined') return { width: 1056, height: 776, left: 0, top: 0 };
+  const viewport = window.visualViewport;
+  return { width: viewport?.width ?? window.innerWidth, height: viewport?.height ?? window.innerHeight,
+    left: viewport?.offsetLeft ?? 0, top: viewport?.offsetTop ?? 0 };
+}
 
 // Owned by the existing drawer sessions, not a global cache of authorization
 // closures. Non-enumerable state is neither persisted nor copied as draft data.
@@ -69,12 +92,13 @@ function retainedPlacement<T extends SketchPlacement | SketchImagePlacement>(ses
 
 interface ImageModeControlsProps {
   session: SketchImagePanelSession; history: SketchHistory; models: readonly TaskModelDescriptor[];
+  modelOptions: readonly TaskModelCatalogModel[];
   catalogStatus?: SketchToCodePanelProps['catalogStatus']; insert?: SketchInsert;
   visible: boolean; allowed: boolean; control: string; isMonochrome: boolean;
   recoveryBlocked?: boolean; onTask?: (task: SketchImageTask) => void;
   recoverTasks?: boolean; onAdmissionChange?: () => void;
 }
-function ImageModeControls({ session, history, models, catalogStatus, insert, visible, allowed, control, isMonochrome, recoveryBlocked = false, onTask, recoverTasks = false, onAdmissionChange }: ImageModeControlsProps): ReactElement {
+function ImageModeControls({ session, history, models, modelOptions, catalogStatus, insert, visible, allowed, control, isMonochrome, recoveryBlocked = false, onTask, recoverTasks = false, onAdmissionChange }: ImageModeControlsProps): ReactElement {
   // Recovery can replace the shared pointer before this keyed instance cleans up.
   const client = session.client;
   const [, repaint] = useState(0);
@@ -180,6 +204,7 @@ function ImageModeControls({ session, history, models, catalogStatus, insert, vi
   const stage = reconcile ? '任务待核对' : task?.status === 'completed' ? '已完成' : task?.status === 'failed' ? '失败，草图已保留'
     : task?.status === 'cancelled' ? '已取消（服务端确认）' : task?.status === 'timeout' ? '任务超时，草图已保留'
     : task?.phase === 'analysis' ? '分析中' : task?.phase === 'generation' ? '生图中' : task ? '等待处理' : recoveryBlocked ? '原任务待核对' : '尚未提交';
+  const buttonControl = `${control} min-h-11 shrink-0 whitespace-nowrap`;
   const selectClass = `${control} mt-1 w-full ${isMonochrome ? 'bg-white' : 'bg-[#1a1a1a]'}`;
   return <div hidden={!visible} className="min-w-0 space-y-3">
     <label className="block text-sm">创作关键词<textarea aria-label="创作关键词" value={session.instruction} maxLength={MAX_INSTRUCTION_LENGTH}
@@ -189,10 +214,10 @@ function ImageModeControls({ session, history, models, catalogStatus, insert, vi
     {tooLong && <p id={errorId} role="alert" className="text-sm">创作关键词最多支持 {MAX_INSTRUCTION_LENGTH} 个字符，请缩短后再提交；现有关键词和草图已保留。</p>}
     <label className="block text-sm">视觉分析模型<select aria-label="视觉分析模型" value={vision ? session.visionSelection : ''} className={selectClass}
       disabled={catalogStatus?.loading || !!catalogStatus?.error || invalidCatalog} onChange={event => { session.visionSelection = event.target.value; refresh(); }}>
-      <option value="">请选择支持视觉的同步聊天模型</option>{visionModels.map(model => <option key={key(model)} value={key(model)}>{model.providerId} / {model.modelId}</option>)}</select></label>
+      <option value="">请选择支持视觉的同步聊天模型</option>{visionModels.map(model => <option key={key(model)} value={key(model)}>{modelLabel(model, modelOptions)}</option>)}</select></label>
     <label className="block text-sm">图像生成模型<select aria-label="图像生成模型" value={image ? session.imageSelection : ''} className={selectClass}
       disabled={catalogStatus?.loading || !!catalogStatus?.error || invalidCatalog} onChange={event => { session.imageSelection = event.target.value; refresh(); }}>
-      <option value="">请选择支持参考图的图像模型</option>{imageModels.map(model => <option key={key(model)} value={key(model)}>{model.providerId} / {model.modelId}</option>)}</select></label>
+      <option value="">请选择支持参考图的图像模型</option>{imageModels.map(model => <option key={key(model)} value={key(model)}>{modelLabel(model, modelOptions)}</option>)}</select></label>
     {!catalogStatus?.loading && !catalogStatus?.error && (!visionModels.length || !imageModels.length) && <p className="text-sm">需要可用的视觉分析模型和支持参考图的图像模型，请管理员检查目录。</p>}
     {(catalogStatus?.error || invalidCatalog) && <p role="alert">模型目录不可用：{catalogStatus?.error ?? '目录格式无效，请重新加载'}</p>}
     <div className="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-3">
@@ -205,10 +230,10 @@ function ImageModeControls({ session, history, models, catalogStatus, insert, vi
         onChange={event => { session.quality = event.target.value || undefined; refresh(); }}><option value="">模型默认</option>{Array.from(new Set([...(session.quality ? [session.quality] : []), ...(image?.qualityOptions ?? [])])).map(value => <option key={value} value={value}>{value}</option>)}</select></label>
     </div>
     {image && !parametersValid && <p role="alert">保留的图像参数不适用于当前模型，请调整比例、尺寸或质量后提交。</p>}
-    <button className={`${control} w-full ${isMonochrome ? 'bg-gray-900 text-white hover:bg-gray-800' : 'bg-[#d4af37] text-black hover:bg-[#e2c45e]'}`} disabled={!canGenerate}
+    <button className={`${buttonControl} w-full ${isMonochrome ? 'bg-gray-900 text-white hover:bg-gray-800' : 'bg-[#d4af37] text-black hover:bg-[#e2c45e]'}`} disabled={!canGenerate}
       onClick={() => { void run(assert => generate(false, assert)); }}>{task || session.client.input ? '生成新图像（新提交）' : '生成图像'}</button>
     {session.client.input && (session.client.admissionUnknown || active(task)) && <p className="text-sm">原提交可能仍在处理。核对原提交使用原始草图、关键词、双模型和参数，不使用后续编辑。</p>}
-    {session.client.admissionUnknown && <><p role="status">受理结果未知，未确认取消或退款。请核对原提交，勿重复扣费提交。</p><button className={control} disabled={busy || !allowed}
+    {session.client.admissionUnknown && <><p role="status">受理结果未知，未确认取消或退款。请核对原提交，勿重复扣费提交。</p><button className={buttonControl} disabled={busy || !allowed}
       onClick={() => { void run(assert => generate(true, assert)); }}>核对原提交（相同标识）</button></>}
     <div aria-live="polite" className="space-y-2 break-words text-sm">
       <p>{busy ? '正在核对服务结果…' : stage}{task ? ` · ${task.progress}%` : ''}</p>
@@ -217,17 +242,17 @@ function ImageModeControls({ session, history, models, catalogStatus, insert, vi
         <p>任务模型：{task.visionProviderId} / {task.visionModelId} → {task.imageProviderId} / {task.imageModelId}</p>
         <p>退款状态：{task.status === 'completed' ? '净费以实际金额为准，返差额不等于全额退款' : task.refunded === true ? '服务端确认已退还预留额度' : '未确认全额退款'}</p>
         <p>任务：{task.taskId}{task.requestId ? ` · 请求：${task.requestId}` : ''}</p>
-        <button className={control} disabled={busy || !allowed} onClick={() => { void run(poll); }}>核对任务状态</button>
-        {active(task) && <button className={control} disabled={busy || !allowed || !writable} onClick={() => { void run(async assert => { session.client.stop(); const next = await session.client.cancel(task.taskId); assert(); receive(next); }); }}>取消任务（等待确认）</button>}
+        <button className={buttonControl} disabled={busy || !allowed} onClick={() => { void run(poll); }}>核对任务状态</button>
+        {active(task) && <button className={buttonControl} disabled={busy || !allowed || !writable} onClick={() => { void run(async assert => { session.client.stop(); const next = await session.client.cancel(task.taskId); assert(); receive(next); }); }}>取消任务（等待确认）</button>}
         {task.error && <p role="alert">{task.error}</p>}</>}
       {message && <p role="alert">{message}</p>}
     </div>
     {task?.status === 'completed' && !reconcile && <div className="space-y-2">
       {task.analysis && <p className="whitespace-pre-wrap break-words text-sm">{`摘要：${task.analysis.summary}\n构图：${task.analysis.composition}\n生成提示词：${task.analysis.prompt}\n反向提示词：${task.analysis.negativePrompt}`}</p>}
       <div className="flex flex-wrap gap-2">
-        <button className={control} disabled={busy || !allowed} onClick={() => { void run(assert => readImage(false, assert)); }}>打开图像预览</button>
-        <button className={control} disabled={busy || !allowed} onClick={() => { void run(assert => readImage(true, assert)); }}>下载生成图像</button>
-        <button className={control} disabled={busy || !allowed || !writable || session.client.scope.authority !== 'legacy' || !session.placement}
+        <button className={buttonControl} disabled={busy || !allowed} onClick={() => { void run(assert => readImage(false, assert)); }}>打开图像预览</button>
+        <button className={buttonControl} disabled={busy || !allowed} onClick={() => { void run(assert => readImage(true, assert)); }}>下载生成图像</button>
+        <button className={buttonControl} disabled={busy || !allowed || !writable || session.client.scope.authority !== 'legacy' || !session.placement}
           title={session.client.scope.authority === 'document' ? '协作文档暂不能放置生成图像，仍可受权预览和下载。' : undefined}
           onClick={() => { void run(async assert => { await session.placement?.add(); assert(); setMessage('生成图像已新增到画布，原始草图保持不变'); }); }}>添加生成图到画布</button>
       </div>
@@ -236,12 +261,56 @@ function ImageModeControls({ session, history, models, catalogStatus, insert, vi
   </div>;
 }
 
-export function SketchToCodePanel({ session: supplied, imageSession, models = [], catalogStatus, onClose, insert,
+export function SketchToCodePanel({ session: supplied, imageSession, models = [], modelOptions = [], catalogStatus, onClose, insert,
   initialTrace, isMonochrome = false, recoverTasks = false }: SketchToCodePanelProps): ReactElement {
   const [fallback] = useState(() => createSketchPanelSession(unavailable));
   const session = supplied ?? fallback;
   const [mode, setMode] = useState<SketchCreationMode>(initialTrace ? 'code' : imageSession ? 'image' : 'code');
   const [closed, setClosed] = useState(false);
+  const [minimized, setMinimized] = useState(false);
+  const [viewport, setViewport] = useState(sketchViewport);
+  const [position, setPosition] = useState(() => {
+    const initial = sketchViewport();
+    const centered = getCenteredFloatingPanelPosition({ viewportWidth: initial.width, viewportHeight: initial.height,
+      panelWidth: 1040, panelHeight: 760, margin: 8 });
+    return { x: initial.left + centered.x, y: initial.top + centered.y };
+  });
+  const panel = useRef<HTMLElement>(null);
+  const titlebar = useRef<HTMLDivElement>(null);
+  const drag = useRef<{ pointerId: number; x: number; y: number; left: number; top: number } | null>(null);
+  const panelWidth = Math.min(minimized ? 360 : 1040, Math.max(0, viewport.width - 16));
+  const panelMaxHeight = Math.min(760, Math.max(0, viewport.height - 16));
+  const constrainWindow = (next: { x: number; y: number }, visible = sketchViewport()): { x: number; y: number } => {
+    const measuredHeight = panel.current?.getBoundingClientRect().height || (minimized ? 64 : 760);
+    const constrained = constrainFloatingPanelPosition({ x: next.x - visible.left, y: next.y - visible.top,
+      viewportWidth: visible.width, viewportHeight: visible.height,
+      panelWidth: Math.min(minimized ? 360 : 1040, Math.max(0, visible.width - 16)),
+      panelHeight: Math.min(measuredHeight, Math.max(0, visible.height - 16)), margin: 8 });
+    return { x: constrained.x + visible.left, y: constrained.y + visible.top };
+  };
+  const stopWindowDrag = (): void => {
+    const pointerId = drag.current?.pointerId; drag.current = null;
+    if (pointerId !== undefined && titlebar.current?.hasPointerCapture?.(pointerId)) titlebar.current.releasePointerCapture(pointerId);
+  };
+  useLayoutEffect(() => {
+    const update = (): void => {
+      const visible = sketchViewport(); setViewport(visible);
+      setPosition(current => constrainWindow(current, visible));
+    };
+    update();
+    window.addEventListener('resize', update);
+    const visualViewport = window.visualViewport;
+    visualViewport?.addEventListener('resize', update); visualViewport?.addEventListener('scroll', update);
+    const observer = typeof ResizeObserver === 'undefined' ? undefined : new ResizeObserver(update);
+    if (panel.current) observer?.observe(panel.current);
+    return () => {
+      window.removeEventListener('resize', update);
+      visualViewport?.removeEventListener('resize', update); visualViewport?.removeEventListener('scroll', update);
+      observer?.disconnect(); stopWindowDrag();
+    };
+    // Geometry only: minimizing must not change the task reader's lifetime.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [minimized]);
   const [, repaint] = useState(0);
   const [task, setTask] = useState(initialTrace ? undefined : session.client.task);
   const [busy, setBusy] = useState(false);
@@ -250,6 +319,7 @@ export function SketchToCodePanel({ session: supplied, imageSession, models = []
   const [tool, setTool] = useState<SketchStroke['tool']>('pen');
   const [color, setColor] = useState<SketchStroke['color']>(SKETCH_COLORS[0]);
   const [width, setWidth] = useState<SketchStroke['width']>(5);
+  const recoveryPanel = useRef<HTMLElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
   const draft = useRef<{ pointerId: number; stroke: SketchStroke } | null>(null);
   const blobUrl = useRef('');
@@ -456,8 +526,9 @@ export function SketchToCodePanel({ session: supplied, imageSession, models = []
     blobUrl.current = url; setPreviewUrl(url);
     if (save) download(url, 'sketch-code.html');
   };
-  const control = `rounded-md border px-3 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 ${isMonochrome ? 'border-gray-300 hover:bg-gray-100 focus-visible:outline-gray-900' : 'border-white/25 hover:bg-white/10 focus-visible:outline-[#d4af37]'}`;
-  const close = (): void => { stopRecovery(); live.current = false; operation.current++; busyRef.current = false; session.client.stop(); session.placement?.stop(); imageSession?.client.stop(); imageSession?.placement?.stop(); revoke(); setPreviewUrl(''); setClosed(true); cancelStroke(); onClose?.(); };
+  const control = `rounded-md border px-3 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-50 enabled:active:opacity-80 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 aria-pressed:font-semibold ${isMonochrome ? 'border-gray-300 hover:bg-gray-100 focus-visible:outline-gray-900 aria-pressed:border-gray-900 aria-pressed:bg-gray-900 aria-pressed:text-white aria-pressed:hover:bg-gray-800' : 'border-white/25 hover:bg-white/10 focus-visible:outline-[#d4af37] aria-pressed:border-[#d4af37] aria-pressed:bg-[#d4af37] aria-pressed:text-black aria-pressed:hover:bg-[#e2c45e]'}`;
+  const buttonControl = `${control} min-h-11 shrink-0 whitespace-nowrap`;
+  const close = (): void => { stopWindowDrag(); stopRecovery(); live.current = false; operation.current++; busyRef.current = false; session.client.stop(); session.placement?.stop(); imageSession?.client.stop(); imageSession?.placement?.stop(); revoke(); setPreviewUrl(''); setClosed(true); cancelStroke(); onClose?.(); };
   const generation = async (reconcile: boolean): Promise<void> => {
     if (reconcile) { if (!session.client.input) return; receive(await session.client.start(session.client.input, true)); return; }
     if (!canGenerate || imageRuntime?.imageAdmissions || !selected) return;
@@ -470,8 +541,9 @@ export function SketchToCodePanel({ session: supplied, imageSession, models = []
   const stage = task?.needsReconcile || task?.dispatchPending ? '派发待核对'
     : task?.status === 'completed' ? '已完成' : task?.status === 'cancelled' ? '已取消（服务端确认）' : task?.status === 'failed' ? '失败，草图已保留' : task?.status === 'timeout' ? '任务超时，草图已保留'
     : task?.phase === 'analysis' ? '分析中' : task?.phase === 'reconstruction' ? '重建中' : task ? '等待处理' : recoveryBlocked ? '原任务待核对' : '尚未提交';
-  return <section aria-label={imageSession ? '草图创作' : '草图转代码'} role="region" data-modal="sketch-to-code" tabIndex={-1}
-    className={`absolute inset-x-2 bottom-20 z-[80] max-h-[82dvh] overflow-y-auto overscroll-contain rounded-xl p-4 shadow-[0_12px_32px_rgba(0,0,0,0.3)] md:inset-x-8 ${isMonochrome ? 'bg-white text-gray-900' : 'bg-[#1a1a1a] text-gray-100'}`}
+  return <section ref={panel} aria-label={imageSession ? '草图创作' : '草图转代码'} role="region" data-modal="sketch-to-code" tabIndex={-1}
+    className={`fixed z-[200] flex min-w-0 flex-col overflow-hidden rounded-xl shadow-[0_12px_32px_rgba(0,0,0,0.3)] ${isMonochrome ? 'bg-white text-gray-900' : 'bg-[#1a1a1a] text-gray-100'}`}
+    style={{ left: position.x, top: position.y, width: panelWidth, maxHeight: panelMaxHeight }}
     onWheel={event => event.stopPropagation()} onPointerDown={event => event.stopPropagation()} onMouseDown={event => event.stopPropagation()}
     onKeyDown={event => {
       event.stopPropagation();
@@ -480,45 +552,48 @@ export function SketchToCodePanel({ session: supplied, imageSession, models = []
       if (target.closest('input,textarea,select,[contenteditable="true"]')) return;
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') { event.preventDefault(); updateHistory(event.shiftKey ? redoSketch(session.history) : undoSketch(session.history)); }
     }}>
-    <div className="mb-3 flex items-center justify-between gap-2"><h2 className="text-lg font-semibold">{imageSession ? '草图创作' : '草图转代码'}</h2>
-      <button className={control} aria-label={imageSession ? '关闭草图创作' : '关闭草图转代码'} onClick={close}><X className="h-4 w-4" /></button></div>
-    {imageSession && <div role="group" aria-label="创作模式" className="mb-3 flex flex-wrap gap-2">{(['image', 'code'] as const).map(value => <button key={value} className={`${control} ${mode === value ? isMonochrome ? 'bg-gray-900 text-white hover:bg-gray-800' : 'bg-[#d4af37] text-black hover:bg-[#e2c45e]' : ''}`} aria-pressed={mode === value} onClick={() => setMode(value)}>{value === 'image' ? '草图生图' : '草图转代码'}</button>)}</div>}
+    <div ref={titlebar} role="group" aria-label="草图窗口标题栏" className="flex shrink-0 cursor-move select-none items-center gap-2 border-b border-current/15 px-3 py-2" style={{ touchAction: 'none' }}
+      onPointerDown={event => {
+        if (event.button !== 0 || (event.target as HTMLElement).closest('button,input,textarea,select,a')) return;
+        if (drag.current) { stopWindowDrag(); return; }
+        event.preventDefault();
+        try { event.currentTarget.setPointerCapture(event.pointerId);
+          drag.current = { pointerId: event.pointerId, x: event.clientX, y: event.clientY, left: position.x, top: position.y };
+        } catch { drag.current = null; }
+      }}
+      onPointerMove={event => {
+        const start = drag.current; if (!start || start.pointerId !== event.pointerId) return;
+        setPosition(constrainWindow({ x: start.left + event.clientX - start.x, y: start.top + event.clientY - start.y }));
+      }}
+      onPointerUp={event => { if (drag.current?.pointerId === event.pointerId) stopWindowDrag(); }}
+      onPointerCancel={event => { if (drag.current?.pointerId === event.pointerId) stopWindowDrag(); }}
+      onLostPointerCapture={event => { if (drag.current?.pointerId === event.pointerId) drag.current = null; }}>
+      <h2 className="min-w-0 flex-1 truncate text-base font-semibold sm:text-lg">{imageSession ? '草图创作' : '草图转代码'}</h2>
+      <button className={`${buttonControl} flex h-11 w-11 shrink-0 items-center justify-center p-0`} aria-label={minimized ? '恢复草图窗口' : '最小化草图窗口'} aria-expanded={!minimized}
+        onClick={() => { cancelStroke(); setMinimized(value => !value); }}>{minimized ? <Maximize2 aria-hidden="true" className="h-4 w-4" /> : <Minus aria-hidden="true" className="h-4 w-4" />}</button>
+      <button className={`${buttonControl} flex h-11 w-11 shrink-0 items-center justify-center p-0`} aria-label={imageSession ? '关闭草图创作' : '关闭草图转代码'} onClick={close}><X aria-hidden="true" className="h-4 w-4" /></button></div>
+    <div hidden={minimized} className={`${minimized ? 'hidden' : ''} min-h-0 min-w-0 overflow-y-auto overscroll-contain p-3 sm:p-4`}>
+    {imageSession && <div role="group" aria-label="创作模式" className="mb-3 flex flex-wrap gap-2">{(['image', 'code'] as const).map(value => <button key={value} className={`${buttonControl} min-h-11`} aria-pressed={mode === value} onClick={() => setMode(value)}>{value === 'image' ? '草图生图' : '草图转代码'}<SelectionMark selected={mode === value} /></button>)}</div>}
     <p className="mb-3 text-sm">{mode === 'image' ? '画出构图，输入创作关键词，选择视觉分析与图像模型。生成图不会替换原始草图。' : '画出页面结构，生成安全静态 HTML。画布卡片是原始草图 PNG，不是页面截图。'}关闭仅停止读取，不取消任务。</p>
     {session.client.scope.authority === 'document' && <p role="note" className="mb-3 text-sm">{mode === 'image' ? '协作文档暂不能放置生成图像，仍可受权预览和下载。' : DOCUMENT_PLACEMENT_REASON}</p>}
     {!allowed && <p role="alert" className="mb-3 text-sm">当前项目授权未知或已失效，请恢复项目后操作。</p>}
-    {recoveryEnabled && <section aria-label="恢复原草图任务" className="mb-3 min-w-0 space-y-2 rounded-md border border-current/20 p-3 text-sm break-words">
-      <h3 className="font-medium">恢复原草图任务</h3>
-      <p role="status">{recoverBusy ? '正在读取原任务，请稍候…' : !recovery.checked ? '原任务列表尚未确认，请重试读取。'
-        : !recovery.candidates.length ? '当前项目未发现可恢复的草图任务。' : '请选择确切任务核对状态；读取不会重新提交或扣费。'}</p>
-      {recoverError && <p role="alert">{recoverError}</p>}
-      <div className="flex min-w-0 flex-wrap gap-2">
-        {recovery.candidates.map(candidate => <button key={candidate.id} className={`${control} max-w-full whitespace-normal break-all text-left`}
-          disabled={!allowed || recoverBusy || busy || imageAdmissionInFlight || session.client.admissionUnknown || !!imageSession?.client.admissionUnknown || (candidate.type === 'sketch-to-image' && !imageSession)}
-          aria-pressed={recovery.selected?.id === candidate.id} onClick={() => { void recover(candidate); }}>
-          {candidate.type === 'sketch-to-image' ? '草图生图' : '草图转代码'} · {candidate.id} · {candidate.status} · {new Date(candidate.createdAt).toLocaleString('zh-CN')}
-        </button>)}
-        {[...recovery.known].filter(([id]) => !recovery.candidates.some(candidate => candidate.id === id)).map(([id, known]) => <button
-          key={id} className={`${control} max-w-full whitespace-normal break-all text-left`}
-          disabled={!allowed || recoverBusy || busy || imageAdmissionInFlight || session.client.admissionUnknown || !!imageSession?.client.admissionUnknown || (known.type === 'sketch-to-image' && !imageSession)}
-          aria-pressed={recovery.selected?.id === id} onClick={() => { void recover({ id, type: known.type }); }}>
-          核对会话原任务 · {id}
-        </button>)}
-      </div>
-      {recoveryBlocked && <p>原任务尚待核对，暂不能新生成；其他活动任务也需逐一核对。取消和退款以服务端确认为准。</p>}
-      <div className="flex flex-wrap gap-2">
-        <button className={control} disabled={!allowed || recoverBusy} onClick={() => { void discover(); }}>重试读取原任务列表</button>
-        {recovery.selected && <button className={control} disabled={!allowed || recoverBusy || busy || imageAdmissionInFlight || session.client.admissionUnknown || !!imageSession?.client.admissionUnknown} onClick={() => { if (recovery.selected) void recover(recovery.selected); }}>重试核对原任务 {recovery.selected.id}</button>}
-      </div>
-    </section>}
+    {recoveryBlocked && <div role="status" className="mb-3 flex min-w-0 flex-wrap items-center gap-2 text-sm"><span>原任务待核对，暂不能新生成。</span><button className={buttonControl} onClick={() => recoveryPanel.current?.scrollIntoView({ block: 'start' })}>查看原任务</button></div>}
     <div className="grid min-w-0 gap-4 lg:grid-cols-[minmax(0,3fr)_minmax(240px,2fr)]">
       <div className="min-w-0">
-        <div className="mb-2 flex flex-wrap gap-2">
-          <button className={control} aria-pressed={tool === 'pen'} onClick={() => setTool('pen')}>画笔</button>
-          <button className={control} aria-pressed={tool === 'eraser'} onClick={() => setTool('eraser')}>橡皮擦</button>
-          {SKETCH_COLORS.map(value => <button key={value} className={`${control} h-11 w-11 p-1`} aria-label={`画笔颜色 ${value}`} aria-pressed={color === value} onClick={() => setColor(value)}>
-            <span className="block h-5 w-5 rounded border border-gray-400" style={{ backgroundColor: value }} /></button>)}
-          {SKETCH_WIDTHS.map(value => <button key={value} className={control} aria-label={`画笔粗细 ${value}`} aria-pressed={width === value} onClick={() => setWidth(value)}>{value}px</button>)}
+        <div className="mb-3 space-y-2">
+          <div role="group" aria-label="绘图工具" className="flex flex-wrap gap-2">
+          <button className={`${buttonControl} min-h-11`} aria-pressed={tool === 'pen'} onClick={() => setTool('pen')}>画笔<SelectionMark selected={tool === 'pen'} /></button>
+          <button className={`${buttonControl} min-h-11`} aria-pressed={tool === 'eraser'} onClick={() => setTool('eraser')}>橡皮擦<SelectionMark selected={tool === 'eraser'} /></button>
+          </div>
+          <div role="group" aria-label="画笔颜色" className="flex max-w-[200px] flex-wrap gap-2 sm:max-w-none">
+          {SKETCH_COLORS.map(value => <button key={value} className={`${buttonControl} relative h-11 w-11 p-1`} aria-label={`画笔颜色 ${value}`} aria-pressed={color === value} onClick={() => setColor(value)}>
+            <span className="block h-5 w-5 rounded border border-gray-400" style={{ backgroundColor: value }} /><SelectionMark selected={color === value} swatch /></button>)}
+          </div>
+          <div role="group" aria-label="画笔粗细" className="flex flex-wrap gap-2">
+          {SKETCH_WIDTHS.map(value => <button key={value} className={`${buttonControl} min-h-11`} aria-label={`画笔粗细 ${value}`} aria-pressed={width === value} onClick={() => setWidth(value)}>{value}px<SelectionMark selected={width === value} /></button>)}
+          </div>
         </div>
+        <p role="status" aria-label="当前绘图设置" className="mb-2 text-sm">当前：{tool === 'pen' ? '画笔' : '橡皮擦'} · {COLOR_NAMES[color]} · {width}px</p>
         <canvas ref={canvas} aria-label="绘图区" tabIndex={0} width={1024} height={768} className="block h-auto w-full rounded-md bg-white outline-offset-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#d4af37]" style={{ touchAction: 'none' }}
           onPointerDown={event => { event.preventDefault(); if (draft.current) { cancelStroke(); return; } if (event.button !== 0 || session.history.present.strokes.length >= 200) return;
             event.currentTarget.focus(); draft.current = { pointerId: event.pointerId, stroke: { id: crypto.randomUUID(), tool, color, width, points: [point(event)] } };
@@ -529,15 +604,15 @@ export function SketchToCodePanel({ session: supplied, imageSession, models = []
             draft.current = null; if (event.currentTarget.hasPointerCapture?.(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
             try { updateHistory(appendSketchStroke(session.history, current.stroke)); } catch (error) { setMessage(error instanceof Error ? error.message : '笔迹未保存'); } }}
           onPointerCancel={cancelStroke} onLostPointerCapture={cancelStroke} />
-        <div className="mt-2 flex flex-wrap gap-2">
-          <button className={control} disabled={!session.history.past.length} onClick={() => updateHistory(undoSketch(session.history))}>撤销</button>
-          <button className={control} disabled={!session.history.future.length} onClick={() => updateHistory(redoSketch(session.history))}>重做</button>
-          <button className={control} disabled={!session.history.present.strokes.length} onClick={() => updateHistory(clearSketch(session.history))}>清空</button>
-          <button className={control} disabled={!session.history.present.strokes.length} onClick={() => { try { download(exportSketchPng(session.history.present), 'input-sketch.png'); } catch (error) { setMessage(String(error)); } }}>下载草图PNG</button>
+        <div className="mt-2 grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
+          <button className={buttonControl} disabled={!session.history.past.length} onClick={() => updateHistory(undoSketch(session.history))}>撤销</button>
+          <button className={buttonControl} disabled={!session.history.future.length} onClick={() => updateHistory(redoSketch(session.history))}>重做</button>
+          <button className={buttonControl} disabled={!session.history.present.strokes.length} onClick={() => updateHistory(clearSketch(session.history))}>清空</button>
+          <button className={buttonControl} disabled={!session.history.present.strokes.length} onClick={() => { try { download(exportSketchPng(session.history.present), 'input-sketch.png'); } catch (error) { setMessage(String(error)); } }}>下载草图PNG</button>
         </div>
       </div>
       <div className="min-w-0">
-      {imageSession && <ImageModeControls key={recoveryVersion} session={imageSession} history={session.history} models={models} catalogStatus={catalogStatus} insert={insert} visible={mode === 'image'} allowed={allowed && !recoveringTask} control={control} isMonochrome={isMonochrome} recoveryBlocked={recoveryBlocked} onTask={next => rememberTask(next, 'sketch-to-image')} recoverTasks={recoveryEnabled} onAdmissionChange={() => { if (live.current) refresh(); }} />}
+      {imageSession && <ImageModeControls key={recoveryVersion} session={imageSession} history={session.history} models={models} modelOptions={modelOptions} catalogStatus={catalogStatus} insert={insert} visible={mode === 'image'} allowed={allowed && !recoveringTask} control={control} isMonochrome={isMonochrome} recoveryBlocked={recoveryBlocked} onTask={next => rememberTask(next, 'sketch-to-image')} recoverTasks={recoveryEnabled} onAdmissionChange={() => { if (live.current) refresh(); }} />}
       <div hidden={mode !== 'code'} className="min-w-0 space-y-3">
         <label className="block text-sm">页面说明<textarea aria-label="页面说明" value={session.instruction} maxLength={MAX_INSTRUCTION_LENGTH}
           aria-invalid={instructionTooLong || undefined} aria-describedby={instructionTooLong ? instructionErrorId : undefined}
@@ -547,28 +622,28 @@ export function SketchToCodePanel({ session: supplied, imageSession, models = []
         <label className="block text-sm">视觉模型<select aria-label="视觉模型" value={selected ? session.selection : ''} className={`${control} mt-1 w-full ${isMonochrome ? 'bg-white' : 'bg-[#1a1a1a]'}`}
           disabled={catalogStatus?.loading || !!catalogStatus?.error} onChange={event => { session.selection = event.target.value; refresh(); }}>
           <option value="">{catalogStatus?.loading ? '目录加载中' : '请选择支持视觉的同步聊天模型'}</option>
-          {candidates.map(model => <option key={JSON.stringify([model.providerId, model.modelId])} value={JSON.stringify([model.providerId, model.modelId])}>{model.providerId} / {model.modelId}</option>)}</select></label>
+          {candidates.map(model => <option key={JSON.stringify([model.providerId, model.modelId])} value={JSON.stringify([model.providerId, model.modelId])}>{modelLabel(model, modelOptions)}</option>)}</select></label>
         {catalogStatus?.error && <p role="alert">模型目录不可用：{catalogStatus.error}</p>}
         {!catalogStatus?.loading && !candidates.length && <p className="text-sm">没有可用的同步视觉聊天模型，请管理员检查目录。</p>}
-        <button className={`${control} w-full ${isMonochrome ? 'bg-gray-900 text-white hover:bg-gray-800' : 'bg-[#d4af37] text-black hover:bg-[#e2c45e]'}`} disabled={!canGenerate} onClick={() => { void run(() => generation(false)); }}>{task || session.client.input ? '生成新任务代码（新提交）' : '生成代码'}</button>
+        <button className={`${buttonControl} w-full ${isMonochrome ? 'bg-gray-900 text-white hover:bg-gray-800' : 'bg-[#d4af37] text-black hover:bg-[#e2c45e]'}`} disabled={!canGenerate} onClick={() => { void run(() => generation(false)); }}>{task || session.client.input ? '生成新任务代码（新提交）' : '生成代码'}</button>
         {session.client.input && (session.client.admissionUnknown || active(task)) && <p className="text-sm">更改草图、说明或模型后生成属于新意图；原提交可能仍在处理。核对原提交不会使用新输入。</p>}
-        {session.client.admissionUnknown && <><p role="status">受理结果未知，未确认取消或退款。请核对原提交，勿重复扣费提交。</p><button className={control} disabled={busy || !allowed || recoveringTask} onClick={() => { void run(() => generation(true)); }}>核对原提交（相同标识）</button></>}
+        {session.client.admissionUnknown && <><p role="status">受理结果未知，未确认取消或退款。请核对原提交，勿重复扣费提交。</p><button className={buttonControl} disabled={busy || !allowed || recoveringTask} onClick={() => { void run(() => generation(true)); }}>核对原提交（相同标识）</button></>}
         <div aria-live="polite" className="space-y-2 break-words text-sm">
           <p>{busy ? '正在核对服务结果…' : stage}{task ? ` · ${task.progress}%` : ''}</p>
           {task && <><p>预留额度：{task.reserveCredits}；实际净费：{task.actualCredits ?? '尚未确认'}</p>
             <p>退款状态：{task.refunded === true ? '服务端确认已退还预留额度' : task.status === 'completed' ? '净费以实际金额为准，返差额不等于全额退款' : '未确认全额退款'}</p>
             <p>任务：{task.taskId}{task.requestId ? ` · 请求：${task.requestId}` : ''}</p>
-            <button className={control} disabled={busy || !allowed || recoveringTask} onClick={() => { void run(async () => receive(await session.client.poll(task.taskId))); }}>核对任务状态</button>
-            {active(task) && <button className={control} disabled={busy || !allowed || recoveringTask} onClick={() => { void run(async () => { session.client.stop(); receive(await session.client.cancel(task.taskId)); }); }}>取消任务（等待确认）</button>}
+            <button className={buttonControl} disabled={busy || !allowed || recoveringTask} onClick={() => { void run(async () => receive(await session.client.poll(task.taskId))); }}>核对任务状态</button>
+            {active(task) && <button className={buttonControl} disabled={busy || !allowed || recoveringTask} onClick={() => { void run(async () => { session.client.stop(); receive(await session.client.cancel(task.taskId)); }); }}>取消任务（等待确认）</button>}
             {task.error && <p role="alert">{task.error}</p>}</>}
           {message && <p role="alert">{message}</p>}
         </div>
         {task?.status === 'completed' && <div className="space-y-2">
           <p className="whitespace-pre-wrap break-words text-sm">{task.analysis}</p>
           <div className="flex flex-wrap gap-2">
-            <button className={control} disabled={busy || !allowed} onClick={() => { void run(() => readCode(false)); }}>打开代码预览</button>
-            <button className={control} disabled={busy || !allowed} onClick={() => { void run(() => readCode(true)); }}>下载HTML</button>
-            <button className={control} disabled={busy || !allowed || !writable || session.client.scope.authority !== 'legacy' || !session.placement}
+            <button className={buttonControl} disabled={busy || !allowed} onClick={() => { void run(() => readCode(false)); }}>打开代码预览</button>
+            <button className={buttonControl} disabled={busy || !allowed} onClick={() => { void run(() => readCode(true)); }}>下载HTML</button>
+            <button className={buttonControl} disabled={busy || !allowed || !writable || session.client.scope.authority !== 'legacy' || !session.placement}
               title={session.client.scope.authority === 'document' ? DOCUMENT_PLACEMENT_REASON : undefined}
               onClick={() => { void run(async () => { await session.placement?.add(); if (live.current) setMessage('原始草图PNG已放置，代码仍需当前授权读取'); }); }}>添加到画布</button>
           </div>
@@ -576,6 +651,33 @@ export function SketchToCodePanel({ session: supplied, imageSession, models = []
         </div>}
       </div>
       </div>
+    </div>
+    {recoveryEnabled && <section ref={recoveryPanel} aria-label="恢复原草图任务" className="mb-3 min-w-0 space-y-2 rounded-md border border-current/20 p-3 text-sm break-words">
+      <h3 className="font-medium">恢复原草图任务</h3>
+      <p role="status">{recoverBusy ? '正在读取原任务，请稍候…' : !recovery.checked ? '原任务列表尚未确认，请重试读取。'
+        : !recovery.candidates.length ? '当前项目未发现可恢复的草图任务。' : '请选择确切任务核对状态；读取不会重新提交或扣费。'}</p>
+      {recoverError && <p role="alert">{recoverError}</p>}
+      <div className="flex min-w-0 flex-wrap gap-2">
+        {recovery.candidates.map(candidate => <button key={candidate.id} className={`${control} max-w-full whitespace-normal break-all text-left`}
+          disabled={!allowed || recoverBusy || busy || imageAdmissionInFlight || session.client.admissionUnknown || !!imageSession?.client.admissionUnknown || (candidate.type === 'sketch-to-image' && !imageSession)}
+          aria-pressed={recovery.selected?.id === candidate.id} onClick={() => { void recover(candidate); }}>
+          {candidate.type === 'sketch-to-image' ? '草图生图' : '草图转代码'} · {candidate.id} · {candidate.status} · {new Date(candidate.createdAt).toLocaleString('zh-CN')}
+          <SelectionMark selected={recovery.selected?.id === candidate.id} />
+        </button>)}
+        {[...recovery.known].filter(([id]) => !recovery.candidates.some(candidate => candidate.id === id)).map(([id, known]) => <button
+          key={id} className={`${control} max-w-full whitespace-normal break-all text-left`}
+          disabled={!allowed || recoverBusy || busy || imageAdmissionInFlight || session.client.admissionUnknown || !!imageSession?.client.admissionUnknown || (known.type === 'sketch-to-image' && !imageSession)}
+          aria-pressed={recovery.selected?.id === id} onClick={() => { void recover({ id, type: known.type }); }}>
+          核对会话原任务 · {id}
+          <SelectionMark selected={recovery.selected?.id === id} />
+        </button>)}
+      </div>
+      {recoveryBlocked && <p>原任务尚待核对，暂不能新生成；其他活动任务也需逐一核对。取消和退款以服务端确认为准。</p>}
+      <div className="flex flex-wrap gap-2">
+        <button className={buttonControl} disabled={!allowed || recoverBusy} onClick={() => { void discover(); }}>重试读取原任务列表</button>
+        {recovery.selected && <button className={`${control} min-h-11 max-w-full whitespace-normal break-all text-left`} disabled={!allowed || recoverBusy || busy || imageAdmissionInFlight || session.client.admissionUnknown || !!imageSession?.client.admissionUnknown} onClick={() => { if (recovery.selected) void recover(recovery.selected); }}>重试核对原任务 {recovery.selected.id}</button>}
+      </div>
+    </section>}
     </div>
   </section>;
 }

@@ -29,6 +29,108 @@ beforeEach(() => {
 });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 describe('sketch drawer behavior', () => {
+  it('minimizes and restores the mounted draft without stopping reads or changing drawing settings', () => {
+    const f = fixture(), onClose = vi.fn();
+    f.session.instruction = '保留页面说明';
+    render(<SketchToCodePanel session={f.session} onClose={onClose} />);
+    const stop = vi.spyOn(f.session.client, 'stop');
+    fireEvent.click(screen.getByRole('button', { name: '橡皮擦' }));
+    const surface = screen.getByLabelText('绘图区');
+    fireEvent.pointerDown(surface, { pointerId: 1, button: 0 }); fireEvent.pointerUp(surface, { pointerId: 1 });
+    const history = f.session.history;
+    fireEvent.click(screen.getByRole('button', { name: '最小化草图窗口' }));
+    expect(screen.queryByRole('textbox', { name: '页面说明' })).toBeNull();
+    expect(screen.getByLabelText('页面说明')).toHaveProperty('value', '保留页面说明');
+    expect(screen.getByLabelText('绘图区')).toBe(surface);
+    expect(f.session.history).toBe(history);
+    expect(stop).not.toHaveBeenCalled(); expect(onClose).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: '恢复草图窗口' }));
+    expect(screen.getByRole('textbox', { name: '页面说明' })).toHaveProperty('value', '保留页面说明');
+    expect(screen.getByRole('button', { name: '橡皮擦' }).getAttribute('aria-pressed')).toBe('true');
+    expect(f.session.history).toBe(history); expect(f.fetcher).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: '最小化草图窗口' }));
+    fireEvent.click(screen.getByRole('button', { name: '关闭草图转代码' }));
+    expect(onClose).toHaveBeenCalledTimes(1); expect(stop).toHaveBeenCalled();
+    expect(f.session.history).toBe(history);
+  });
+  it('keeps floating controls in a narrow resized viewport and isolates header dragging from drawing', () => {
+    vi.stubGlobal('innerWidth', 320); vi.stubGlobal('innerHeight', 640);
+    const f = fixture(); render(<SketchToCodePanel session={f.session} />);
+    const panel = screen.getByRole('region', { name: '草图转代码' });
+    const header = screen.getByRole('group', { name: '草图窗口标题栏' });
+    expect(panel.style.width).toBe('304px'); expect(panel.style.maxHeight).toBe('624px');
+    Object.defineProperty(header, 'setPointerCapture', { configurable: true, value: vi.fn() });
+    Object.defineProperty(header, 'hasPointerCapture', { configurable: true, value: (): boolean => true });
+    const release = vi.fn(); Object.defineProperty(header, 'releasePointerCapture', { configurable: true, value: release });
+    fireEvent.pointerDown(header, { pointerId: 8, button: 0, clientX: 20, clientY: 20 });
+    fireEvent.pointerMove(header, { pointerId: 8, clientX: 2000, clientY: -2000 });
+    fireEvent.pointerUp(header, { pointerId: 8 });
+    expect(panel.style.left).toBe('8px'); expect(panel.style.top).toBe('8px');
+    expect(release).toHaveBeenCalledWith(8); expect(f.session.history.present.strokes).toHaveLength(0);
+    vi.stubGlobal('innerWidth', 430); vi.stubGlobal('innerHeight', 300);
+    fireEvent(window, new Event('resize'));
+    expect(panel.style.width).toBe('414px'); expect(panel.style.maxHeight).toBe('284px');
+    expect(panel.style.left).toBe('8px'); expect(panel.style.top).toBe('8px');
+    expect(f.fetcher).not.toHaveBeenCalled();
+  });
+  it('releases a cancelled header drag and ignores drags starting on window buttons', () => {
+    const f = fixture(); render(<SketchToCodePanel session={f.session} />);
+    const panel = screen.getByRole('region', { name: '草图转代码' });
+    const header = screen.getByRole('group', { name: '草图窗口标题栏' });
+    Object.defineProperty(header, 'setPointerCapture', { configurable: true, value: vi.fn() });
+    Object.defineProperty(header, 'hasPointerCapture', { configurable: true, value: (): boolean => true });
+    const release = vi.fn(); Object.defineProperty(header, 'releasePointerCapture', { configurable: true, value: release });
+    const before = [panel.style.left, panel.style.top];
+    fireEvent.pointerDown(screen.getByRole('button', { name: '最小化草图窗口' }), { pointerId: 9, button: 0, clientX: 30, clientY: 30 });
+    fireEvent.pointerMove(header, { pointerId: 9, clientX: 200, clientY: 200 });
+    expect([panel.style.left, panel.style.top]).toEqual(before);
+    fireEvent.pointerDown(header, { pointerId: 10, button: 0, clientX: 30, clientY: 30 });
+    fireEvent.pointerCancel(header, { pointerId: 10 });
+    fireEvent.pointerMove(header, { pointerId: 10, clientX: 200, clientY: 200 });
+    expect([panel.style.left, panel.style.top]).toEqual(before); expect(release).toHaveBeenCalledWith(10);
+    expect(f.session.history.present.strokes).toHaveLength(0);
+  });
+  it('keeps the title and close control within the visible viewport when a mobile keyboard opens', () => {
+    const visible = Object.assign(new EventTarget(), { width: 375, height: 700, offsetLeft: 0, offsetTop: 0 });
+    vi.stubGlobal('visualViewport', visible);
+    render(<SketchToCodePanel />);
+    const panel = screen.getByRole('region', { name: '草图转代码' });
+    visible.height = 300; visible.offsetTop = 120;
+    act(() => { visible.dispatchEvent(new Event('resize')); });
+    expect(panel.style.width).toBe('359px'); expect(panel.style.maxHeight).toBe('284px');
+    expect(panel.style.top).toBe('128px');
+    expect(screen.getByRole('button', { name: '关闭草图转代码' })).toBeDefined();
+  });
+  it.each([false, true])('keeps drawing selections visible and consistent with the next stroke (monochrome=%s)', isMonochrome => {
+    const f = fixture(); render(<SketchToCodePanel session={f.session} isMonochrome={isMonochrome} />);
+    const settings = (): HTMLElement => screen.getByRole('status', { name: '当前绘图设置' });
+    expect(settings().textContent).toBe('当前：画笔 · 黑色 · 5px');
+    expect(screen.getByRole('button', { name: '画笔' }).querySelector('[data-selection-mark]')).not.toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '橡皮擦' }));
+    fireEvent.click(screen.getByRole('button', { name: '画笔颜色 #ef4444' }));
+    fireEvent.click(screen.getByRole('button', { name: '画笔粗细 10' }));
+    expect(settings().textContent).toBe('当前：橡皮擦 · 红色 · 10px');
+    for (const name of ['橡皮擦', '画笔颜色 #ef4444', '画笔粗细 10']) {
+      const button = screen.getByRole('button', { name });
+      expect(button.getAttribute('aria-pressed')).toBe('true');
+      expect(button.querySelector('[data-selection-mark]')).not.toBeNull();
+    }
+    for (const name of ['画笔', '画笔颜色 #111827', '画笔粗细 5']) {
+      const button = screen.getByRole('button', { name });
+      expect(button.getAttribute('aria-pressed')).toBe('false');
+      expect(button.querySelector('[data-selection-mark]')).toBeNull();
+    }
+    const surface = screen.getByLabelText('绘图区');
+    fireEvent.pointerDown(surface, { pointerId: 1, button: 0 }); fireEvent.pointerUp(surface, { pointerId: 1 });
+    expect(f.session.history.present.strokes[0]).toMatchObject({ tool: 'eraser', color: '#ef4444', width: 10 });
+    fireEvent.click(screen.getByRole('button', { name: '撤销' }));
+    expect(f.session.history.present.strokes).toHaveLength(0);
+    expect(screen.getByRole('button', { name: '撤销' }).getAttribute('aria-pressed')).toBeNull();
+    expect(settings().textContent).toBe('当前：橡皮擦 · 红色 · 10px');
+    fireEvent.click(screen.getByRole('button', { name: '重做' }));
+    expect(f.session.history.present.strokes[0]).toMatchObject({ tool: 'eraser', color: '#ef4444', width: 10 });
+    expect(f.fetcher).not.toHaveBeenCalled();
+  });
   it('provides all eight data colors and three widths, empty drawing disables submission', () => {
     render(<SketchToCodePanel />);
     for (const color of ['#111827', '#ffffff', '#ef4444', '#f97316', '#eab308', '#22c55e', '#3b82f6', '#8b5cf6']) expect(screen.getByRole('button', { name: `画笔颜色 ${color}` })).toBeDefined();

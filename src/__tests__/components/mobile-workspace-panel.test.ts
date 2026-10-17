@@ -17,6 +17,11 @@ describe('mobile workspace panel and node controls', () => {
     );
   });
 
+  it('reserves the mobile toolbar and safe area below the expanded workspace content', () => {
+    // CSS wiring guard only; the independent preview checks actual geometry.
+    expect(workspaceSource).toContain('bottom-[calc(72px+env(safe-area-inset-bottom))] md:bottom-0');
+  });
+
   it('does not render an inert node property header button', () => {
     expect(nodeSource).not.toContain('节点属性</span>\n          <button className="text-muted-foreground hover:text-foreground cursor-pointer"><Maximize2 size={12} /></button>');
   });

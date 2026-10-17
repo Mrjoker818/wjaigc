@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react';
 import {
   X, Sparkles, Copy, Image as ImageIcon, Download, Loader2,
   ChevronDown, ChevronUp, RefreshCw, Star, Cpu, Wand2,
@@ -8,6 +8,7 @@ import {
   Palette, Zap, Search, List, Grid3X3, Maximize2,
 } from 'lucide-react';
 import { useProgressTimer } from '@/hooks/useProgressTimer';
+import { constrainFloatingPanelPosition, getCenteredFloatingPanelPosition } from '@/lib/floating-panel-position';
 
 interface StyleSubCategory { id: string; name: string; prompt: string; }
 interface StyleCategory { id: string; name: string; subStyles: StyleSubCategory[]; }
@@ -167,46 +168,87 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
   const [copiedToast, setCopiedToast] = useState<string | null>(null);
   const [isMinimized, setIsMinimized] = useState(false);
 
-  // ─── Drag state ───
+  // Keep the window inside the visible viewport, including keyboard/orientation changes.
   const panelWidth = 1100;
   const panelHeight = 720;
+  const panelMargin = 16;
+  const readViewport = useCallback(() => ({
+    width: typeof window === 'undefined' ? panelWidth + panelMargin * 2 : window.visualViewport?.width ?? window.innerWidth,
+    height: typeof window === 'undefined' ? panelHeight + panelMargin * 2 : window.visualViewport?.height ?? window.innerHeight,
+    left: typeof window === 'undefined' ? 0 : window.visualViewport?.offsetLeft ?? 0,
+    top: typeof window === 'undefined' ? 0 : window.visualViewport?.offsetTop ?? 0,
+  }), []);
+  const [viewport, setViewport] = useState(readViewport);
+  const visiblePanelWidth = Math.max(0, Math.min(panelWidth, viewport.width - panelMargin * 2));
+  const visiblePanelHeight = Math.max(0, Math.min(panelHeight, viewport.height - panelMargin * 2));
   const [position, setPosition] = useState(() => {
-    if (typeof window !== 'undefined') {
-      return { x: (window.innerWidth - panelWidth) / 2, y: (window.innerHeight - panelHeight) / 2 };
-    }
-    return { x: 0, y: 0 };
+    const centered = getCenteredFloatingPanelPosition({
+      viewportWidth: viewport.width, viewportHeight: viewport.height,
+      panelWidth: visiblePanelWidth, panelHeight: visiblePanelHeight, margin: panelMargin,
+    });
+    return { x: centered.x + viewport.left, y: centered.y + viewport.top };
   });
-  const [hasPosition, setHasPosition] = useState(true);
   const isDragging = useRef(false);
   const [isDraggingState, setIsDraggingState] = useState(false);
   const dragStart = useRef({ x: 0, y: 0 });
   const panelRef = useRef<HTMLDivElement>(null);
 
+  const constrainPosition = useCallback((x: number, y: number): { x: number; y: number } => {
+    const current = readViewport();
+    const bounds = panelRef.current?.getBoundingClientRect();
+    const constrained = constrainFloatingPanelPosition({
+      x: x - current.left, y: y - current.top,
+      viewportWidth: current.width, viewportHeight: current.height,
+      panelWidth: Math.min(bounds?.width || panelWidth, current.width - panelMargin * 2),
+      panelHeight: isMinimized ? bounds?.height || 80 : Math.min(panelHeight, current.height - panelMargin * 2),
+      margin: panelMargin,
+    });
+    return { x: constrained.x + current.left, y: constrained.y + current.top };
+  }, [isMinimized, readViewport]);
+
+  useEffect(() => {
+    const updateBounds = (): void => {
+      setViewport(readViewport());
+      setPosition(previous => constrainPosition(previous.x, previous.y));
+    };
+    updateBounds();
+    window.addEventListener('resize', updateBounds);
+    window.addEventListener('orientationchange', updateBounds);
+    const visualViewport = window.visualViewport;
+    visualViewport?.addEventListener('resize', updateBounds);
+    visualViewport?.addEventListener('scroll', updateBounds);
+    return () => {
+      window.removeEventListener('resize', updateBounds);
+      window.removeEventListener('orientationchange', updateBounds);
+      visualViewport?.removeEventListener('resize', updateBounds);
+      visualViewport?.removeEventListener('scroll', updateBounds);
+    };
+  }, [constrainPosition, readViewport]);
+
+  useLayoutEffect(() => {
+    // A narrower committed header can wrap and grow while minimized.
+    setPosition(previous => {
+      const next = constrainPosition(previous.x, previous.y);
+      return next.x === previous.x && next.y === previous.y ? previous : next;
+    });
+  }, [viewport, constrainPosition]);
+
   const modelDropdownRef = useRef<HTMLDivElement>(null);
 
   // ─── Drag handlers ───
-  const handlePanelDragStart = (e: React.MouseEvent) => {
+  const handlePanelDragStart = (e: React.MouseEvent): void => {
+    if (e.button !== 0 || (e.target as HTMLElement).closest('button, input, textarea, select')) return;
     e.preventDefault();
     e.stopPropagation();
     isDragging.current = true;
     setIsDraggingState(true);
-    if (!hasPosition && panelRef.current) {
-      const rect = panelRef.current.getBoundingClientRect();
-      setPosition({ x: rect.left, y: rect.top });
-      setHasPosition(true);
-      dragStart.current = { x: e.clientX - rect.left, y: e.clientY - rect.top };
-    } else if (hasPosition) {
-      dragStart.current = { x: e.clientX - position.x, y: e.clientY - position.y };
-    } else {
-      isDragging.current = false;
-      return;
-    }
-    const onMouseMove = (ev: MouseEvent) => {
+    dragStart.current = { x: e.clientX - position.x, y: e.clientY - position.y };
+    const onMouseMove = (ev: MouseEvent): void => {
       if (!isDragging.current) return;
       ev.stopPropagation();
-      setPosition({ x: ev.clientX - dragStart.current.x, y: ev.clientY - dragStart.current.y });
+      setPosition(constrainPosition(ev.clientX - dragStart.current.x, ev.clientY - dragStart.current.y));
     };
-    const onMouseUp = (ev: MouseEvent) => {
+    const onMouseUp = (ev: MouseEvent): void => {
       ev.stopPropagation();
       isDragging.current = false;
       setIsDraggingState(false);
@@ -772,12 +814,13 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
     <div
       ref={panelRef}
       data-floating-panel
-      className="fixed z-[150]"
+      className="fixed z-[150] min-w-0"
       style={{
         left: position.x,
         top: position.y,
-        width: panelWidth,
-        maxHeight: isMinimized ? undefined : '85vh',
+        width: visiblePanelWidth,
+        height: isMinimized ? undefined : visiblePanelHeight,
+        maxHeight: Math.max(0, viewport.height - panelMargin * 2),
         borderRadius: 12,
         backgroundColor: bgPanel,
         border: isDraggingState
@@ -795,11 +838,11 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
     >
       {/* ─── Header (draggable) ─── */}
       <div
-        className="flex items-center gap-2 px-5 py-3 cursor-move select-none shrink-0"
+        className="flex items-center gap-2 px-3 md:px-5 py-3 cursor-move select-none shrink-0"
         style={{ borderBottom: isMinimized ? 'none' : `1px solid ${borderColor}`, background: isMonochrome ? '#f9fafb' : 'linear-gradient(180deg, #161616, #0f0f0f)' }}
         onMouseDown={handlePanelDragStart}
       >
-        <GripVertical size={16} style={{ color: mutedColor }} />
+        <GripVertical size={16} className="shrink-0" style={{ color: mutedColor }} />
         <div
           className="w-7 h-7 rounded-lg flex items-center justify-center font-bold text-sm shrink-0"
           style={{ background: `linear-gradient(135deg, ${accentColor}, ${isMonochrome ? '#2563eb' : '#8b7225'})`, color: isMonochrome ? '#ffffff' : '#0a0a0a' }}
@@ -807,16 +850,16 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
           字
         </div>
         <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-1.5">
+          <div className="flex flex-wrap items-center gap-1.5">
             <img src="/logo.png" alt="" className="w-4 h-4 object-contain rounded" />
             <h1 className="text-sm font-semibold" style={{ color: textColor }}>字境大师 Pro</h1>
           </div>
-          <p className="text-[11px] mt-0.5" style={{ color: subTextColor }}>中文标题字 / KV文字 / 封面字 / 文字Logo 设计器</p>
+          <p className="text-[11px] mt-0.5 break-words" style={{ color: subTextColor }}>中文标题字 / KV文字 / 封面字 / 文字Logo 设计器</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex shrink-0 items-center gap-1 md:gap-2">
           <button
             onClick={(e) => { e.stopPropagation(); setIsMinimized(!isMinimized); }}
-            className="p-1.5 rounded-lg transition-colors"
+            className="min-h-[44px] min-w-[44px] md:min-h-0 md:min-w-0 p-1.5 rounded-lg transition-colors flex items-center justify-center"
             style={{ color: mutedColor, border: `1px solid ${borderColorLight}` }}
             onMouseEnter={e => (e.currentTarget.style.borderColor = accentColor)}
             onMouseLeave={e => (e.currentTarget.style.borderColor = borderColorLight)}
@@ -826,7 +869,7 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
           </button>
           <button
             onClick={(e) => { e.stopPropagation(); onClose(); }}
-            className="p-1.5 rounded-lg transition-colors"
+            className="min-h-[44px] min-w-[44px] md:min-h-0 md:min-w-0 p-1.5 rounded-lg transition-colors flex items-center justify-center"
             style={{ color: mutedColor, border: `1px solid ${borderColorLight}` }}
             onMouseEnter={e => { e.currentTarget.style.borderColor = 'rgba(255,60,60,0.3)'; e.currentTarget.style.color = '#ff5555'; }}
             onMouseLeave={e => { e.currentTarget.style.borderColor = borderColorLight; e.currentTarget.style.color = mutedColor; }}
@@ -839,13 +882,13 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
 
       {/* ─── Body (hidden when minimized) ─── */}
       {!isMinimized && (
-        <div className="flex flex-1 overflow-hidden" style={{ maxHeight: `calc(85vh - 52px)` }}>
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto md:flex-row md:overflow-hidden">
           {/* ==================== LEFT PANEL: Parameters (38%) ==================== */}
           <div
-            className="flex flex-col shrink-0"
-            style={{ width: '38%', borderRight: `1px solid ${borderColor}`, overflow: 'hidden' }}
+            className="flex min-h-0 min-w-0 w-full flex-col shrink-0 border-b md:w-[38%] md:border-b-0 md:border-r"
+            style={{ borderColor }}
           >
-            <div className="flex-1 overflow-y-auto p-4 space-y-4" style={{ scrollbarWidth: 'thin' }}>
+            <div className="min-h-0 min-w-0 p-3 md:flex-1 md:overflow-y-auto md:p-4 space-y-4" style={{ scrollbarWidth: 'thin' }}>
               {inspirationRef ? (
                 /* ═══════════ 灵感同款创作区 (replaces normal left panel) ═══════════ */
                 <>
@@ -1029,7 +1072,7 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
                   <span style={{ color: accentColor }}>■</span>
                   使用场景
                 </label>
-                <div className="grid grid-cols-4 gap-1.5">
+                <div className="grid grid-cols-2 min-[400px]:grid-cols-4 gap-1.5">
                   {scenes.map((s) => (
                     <button
                       key={s.id}
@@ -1075,7 +1118,7 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
                 </div>
                 {/* Level 2: Sub-style grid */}
                 {currentCategory && (
-                  <div className="grid grid-cols-4 gap-1.5 min-h-[80px] max-h-[120px] overflow-y-auto" style={{ scrollbarWidth: 'thin' }}>
+                  <div className="grid grid-cols-2 min-[400px]:grid-cols-4 gap-1.5 min-h-[80px] max-h-[120px] overflow-y-auto" style={{ scrollbarWidth: 'thin' }}>
                     {currentCategory.subStyles.map((sub) => (
                       <button
                         key={sub.id}
@@ -1291,7 +1334,7 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
                 )}
               </div>
               {!inspirationRef && (
-                <div className="flex gap-2">
+                <div className="flex flex-wrap gap-2 [&>button]:min-w-0 [&>button]:basis-24">
                   <button onClick={handleGeneratePrompt} disabled={isGeneratingPrompt || !text.trim()} style={{ ...secondaryBtnStyle, flex: 1, opacity: (isGeneratingPrompt || !text.trim()) ? 0.5 : 1 }}>
                     {isGeneratingPrompt ? <Loader2 className="h-3 w-3 animate-spin inline mr-1" /> : <Wand2 className="h-3 w-3 inline mr-1" />}
                     生成即梦提示词
@@ -1309,14 +1352,14 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
           </div>
 
           {/* ==================== RIGHT PANEL: Results (62%) ==================== */}
-          <div className="flex flex-col flex-1 overflow-hidden">
+          <div className="flex min-h-0 min-w-0 shrink-0 flex-col md:flex-1" style={{ overflowWrap: 'anywhere' }}>
             {/* Tab bar */}
-            <div className="flex px-4 shrink-0" style={{ borderBottom: `1px solid ${borderColor}`, background: bgPanel }}>
+            <div className="flex flex-wrap px-2 md:px-4 shrink-0" style={{ borderBottom: `1px solid ${borderColor}`, background: bgPanel }}>
               {(['plans', 'prompt', 'images', 'gallery', 'history'] as const).map((tab) => (
                 <button
                   key={tab}
                   onClick={() => setActiveTab(tab)}
-                  className="py-2.5 text-[13px] font-medium transition-colors relative"
+                  className="min-h-[44px] py-2.5 text-[13px] font-medium transition-colors relative"
                   style={{
                     color: activeTab === tab ? accentColor : subTextColor,
                     borderBottom: activeTab === tab ? `2px solid ${accentColor}` : '2px solid transparent',
@@ -1334,7 +1377,7 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
             </div>
 
             {/* Tab content area */}
-            <div className="flex-1 overflow-y-auto p-4" style={{ background: isMonochrome ? '#ffffff' : '#0a0a0a', scrollbarWidth: 'thin' }}>
+            <div className="min-w-0 p-3 md:min-h-0 md:flex-1 md:overflow-y-auto md:p-4" style={{ background: isMonochrome ? '#ffffff' : '#0a0a0a', scrollbarWidth: 'thin' }}>
 
               {/* ========== Tab 1: 设计方案 ========== */}
               {activeTab === 'plans' && (
