@@ -1,9 +1,12 @@
-import { spawnSync } from 'node:child_process';
-import { mkdir, mkdtemp, readFile, rm, symlink, unlink, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { mkdir, readFile, symlink, unlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import {
+  createTask7EvidenceRepositoryFixture,
+  type Task7EvidenceRepository,
+  type Task7EvidenceRepositoryFixture,
+} from '../helpers/task7-evidence-repository-fixture';
 
 import {
   finalizeTask7Evidence,
@@ -16,34 +19,22 @@ import {
   type Task7ExpectedRequest,
 } from '../helpers/read-only-canvas-share-evidence';
 
-const temporaryRoots: string[] = [];
+let repositoryFixture: Promise<Task7EvidenceRepositoryFixture> | undefined;
 const runId = 'run-001';
 
-afterEach(async () => {
-  await Promise.all(temporaryRoots.splice(0).map(path => rm(path, { recursive: true, force: true })));
+beforeAll(async (): Promise<void> => {
+  // Retain ownership before awaiting: a timed-out hook does not cancel initialization.
+  repositoryFixture = createTask7EvidenceRepositoryFixture();
+  await repositoryFixture;
+});
+afterAll(async (): Promise<void> => {
+  const settled = await repositoryFixture;
+  await settled?.dispose();
 });
 
-function git(cwd: string, args: string[]): string {
-  const result = spawnSync('git', args, { cwd, encoding: 'utf8' });
-  if (result.status !== 0) throw new Error(result.stderr || `git ${args.join(' ')} failed`);
-  return result.stdout.trim();
-}
-
-async function createRepository(): Promise<{ repositoryRoot: string; rootDirectory: string; head: string }> {
-  const repositoryRoot = await mkdtemp(join(tmpdir(), 'task7-evidence-repo-'));
-  temporaryRoots.push(repositoryRoot);
-  git(repositoryRoot, ['init', '-q']);
-  git(repositoryRoot, ['config', 'user.email', 'task7@example.invalid']);
-  git(repositoryRoot, ['config', 'user.name', 'Task 7 Test']);
-  await writeFile(join(repositoryRoot, '.gitignore'), 'output/\n', 'utf8');
-  await writeFile(join(repositoryRoot, 'tracked.txt'), 'clean\n', 'utf8');
-  git(repositoryRoot, ['add', '.gitignore', 'tracked.txt']);
-  git(repositoryRoot, ['commit', '-qm', 'test fixture']);
-  return {
-    repositoryRoot,
-    rootDirectory: join(repositoryRoot, 'output', 'playwright', 'read-only-canvas-share-evidence'),
-    head: git(repositoryRoot, ['rev-parse', 'HEAD']).toLowerCase(),
-  };
+async function createRepository(): Promise<Task7EvidenceRepository> {
+  if (!repositoryFixture) throw new Error('TASK7_REPOSITORY_FIXTURE_NOT_STARTED');
+  return (await repositoryFixture).createRepository();
 }
 
 function materializeRequest(expected: Task7ExpectedRequest): Task7EvidenceRecord['requests'][number] {

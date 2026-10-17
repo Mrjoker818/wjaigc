@@ -75,6 +75,8 @@ interface ImageModeControlsProps {
   recoverTasks?: boolean; onAdmissionChange?: () => void;
 }
 function ImageModeControls({ session, history, models, catalogStatus, insert, visible, allowed, control, isMonochrome, recoveryBlocked = false, onTask, recoverTasks = false, onAdmissionChange }: ImageModeControlsProps): ReactElement {
+  // Recovery can replace the shared pointer before this keyed instance cleans up.
+  const client = session.client;
   const [, repaint] = useState(0);
   const [task, setTask] = useState(session.client.task);
   const [busy, setBusy] = useState(false);
@@ -101,14 +103,17 @@ function ImageModeControls({ session, history, models, catalogStatus, insert, vi
     && !invalidCatalog && !!history.present.strokes.length && !tooLong && !busy && !runtime?.imageAdmissions && !active(task) && !reconcile && !session.client.admissionUnknown;
   const refresh = (): void => repaint(value => value + 1);
   const revoke = (): void => { if (url.current) URL.revokeObjectURL(url.current); url.current = ''; };
-  const stop = (): void => { operation.current++; busyRef.current = false; session.client.stop(); session.placement?.stop(); };
+  const stop = (owner: SketchImageClient = session.client): void => {
+    operation.current++; busyRef.current = false; owner.stop();
+    if (owner === session.client) session.placement?.stop();
+  };
   useEffect(() => {
     live.current = true;
-    setTask(session.client.task); setBusy(false); setMessage(''); setPreview(''); paused.current = false;
+    setTask(client.task); setBusy(false); setMessage(''); setPreview(''); paused.current = false;
     placementTask.current = session.placement ? session.client.task?.taskId : undefined;
-    return () => { live.current = false; stop(); revoke(); };
+    return () => { live.current = false; stop(client); revoke(); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session]);
+  }, [session, client]);
   useEffect(() => {
     if (!visible || !allowed) { stop(); setBusy(false); }
     if (!allowed) { revoke(); setPreview(''); }

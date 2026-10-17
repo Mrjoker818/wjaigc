@@ -733,6 +733,7 @@
   "src/lib/sketch-to-code/provider.ts",
   "src/lib/sketch-to-code/publication.ts",
   "src/lib/sketch-to-code/render.ts",
+  "src/lib/sketch-to-code/runtime-observation.ts",
   "src/lib/sketch-to-code/task-http.ts",
   "src/lib/sketch-to-code/token-billing.ts",
   "src/lib/sketch-to-code/usage.ts",

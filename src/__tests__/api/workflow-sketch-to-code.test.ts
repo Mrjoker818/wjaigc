@@ -148,6 +148,10 @@ function scopedRegistration(registration: typeof originalIt): typeof originalIt 
   });
 }
 const it = scopedRegistration(originalIt);
+// 用户批准的测试等待校准：只给真实PNG前置工作的就绪观察留预算；不改业务时限。
+// 6秒沿用本文件既有就绪约定，不表示覆盖解码器15秒安全上限的所有最坏情形。
+const workflowReadinessWait = { timeout: 6000 };
+const workflowReadinessCase = { timeout: 15000 };
 function stubFixtureFetch(value: typeof fetch): void {
   const owner = fixtureScope.owner();
   owner.fetch = value;
@@ -310,7 +314,7 @@ describe('Task5 original admission through dedicated workflow adapter (isolated 
 });
 describe('Task5 actual workflow entry', () => {
   async function post(body: Record<string, unknown>) { return workflow(new NextRequest('http://localhost/api/workflow/execute', { method: 'POST', body: JSON.stringify(body) })); }
-  it.each(['main', 'loop'] as const)('parent cancel visits the running second %s sketch after the first completed winner', async variant => {
+  it.each(['main', 'loop'] as const)('parent cancel visits the running second %s sketch after the first completed winner', workflowReadinessCase, async variant => {
     const { tasks, requests, checkpoints } = fixtureScope.owner();
     const first = node(); first.id = 'sketch-a'; const second = node(); second.id = 'sketch-b';
     const loop = createWorkflowNode('loop-for', 0, 0); loop.config.loopCount = 2; loop.loopCount = 2;
@@ -338,7 +342,7 @@ describe('Task5 actual workflow entry', () => {
     expect(retry.status).toBe(409); expect(requests).toHaveLength(beforeRetry); expect(mocks.bill).toHaveBeenCalledTimes(2);
     expect(tasks.get(executionId)).toMatchObject({ status: 'processing', result: { workflowStatus: 'paused', results: originalResult, dispatchStopped: true } });
   });
-  it.each(['main', 'loop'] as const)('parent cancellation fences an entered %s provider lookup before the next ordinary dispatch even when completion wins', async variant => {
+  it.each(['main', 'loop'] as const)('parent cancellation fences an entered %s provider lookup before the next ordinary dispatch even when completion wins', workflowReadinessCase, async variant => {
     const { tasks, requests, checkpoints } = fixtureScope.owner();
     completeOnPoll(); const sketch = node(); const ordinary = createWorkflowNode('ai-llm', 400, 0); ordinary.config = { providerId: 'p1', model: 'm1' };
     const loop = createWorkflowNode('loop-for', 0, 0); loop.config.loopCount = 1; loop.loopCount = 1;
@@ -361,7 +365,7 @@ describe('Task5 actual workflow entry', () => {
       return transport(url, init);
     }));
     const started = await post({ action: 'start', projectId: 'project-a', nodes, connections }); const { executionId } = await started.json();
-    await vi.waitFor(() => expect(entered).toBe(true));
+    await vi.waitFor(() => expect(entered).toBe(true), workflowReadinessWait);
     const cancelled = await post({ action: 'cancel', executionId }); expect(cancelled.status).toBe(409);
     release(); await vi.waitFor(() => expect(mocks.release.mock.calls.some(call => call[0] === executionId)).toBe(true));
     expect(requests.filter(r => r.url.endsWith('/api/chat'))).toEqual([]);
@@ -403,7 +407,7 @@ describe('Task5 actual workflow entry', () => {
     expect(tasks.get(executionId)).toMatchObject({ status: 'processing', result: { workflowStatus: 'paused', dispatchStopped: true } });
     expect(mocks.bill).toHaveBeenCalledTimes(1); expect(mocks.terminate).not.toHaveBeenCalled();
   });
-  it('runs original parent and dedicated sketch branch without generic media billing fields', async () => {
+  it('runs original parent and dedicated sketch branch without generic media billing fields', workflowReadinessCase, async () => {
     const { tasks, requests, checkpoints } = fixtureScope.owner();
     completeOnPoll(); const n = node(); const response = await post({ action: 'start', projectId: 'project-a', nodes: [n], connections: [] }); expect(response.status).toBe(200);
     const { executionId } = await response.json(); await vi.waitFor(async () => { const status = await (await post({ action: 'status', executionId })).json(); expect(status.status).toBe('completed'); expect(status.results[n.id].output.documentReference.kind).toBe('document-reference'); }, { timeout: 6000 });
@@ -417,12 +421,12 @@ describe('Task5 actual workflow entry', () => {
     const { NextResponse } = await import('next/server'); mocks.auth.mockResolvedValue(NextResponse.json({ error: 'authentication required' }, { status: 401 }));
     expect((await post({ action: 'start', projectId: 'project-a', nodes: [node()], connections: [] })).status).toBe(401); expect(mocks.create).not.toHaveBeenCalled();
   });
-  it('persists unknown intent and retries the same frozen child through the original retry action', async () => {
+  it('persists unknown intent and retries the same frozen child through the original retry action', workflowReadinessCase, async () => {
     const { tasks, requests, checkpoints } = fixtureScope.owner();
     const n = node(); let loseAck = true;
     stubFixtureFetch(vi.fn(async (url, init) => { const response = await transport(url, init); if (loseAck && String(url).endsWith('/api/sketch-to-code')) { loseAck = false; throw new Error('ACK_LOST'); } return response; }));
     const started = await post({ action: 'start', projectId: 'project-a', nodes: [n], connections: [] }); const { executionId } = await started.json();
-    await vi.waitFor(async () => expect((await (await post({ action: 'status', executionId })).json()).status).toBe('paused'));
+    await vi.waitFor(async () => expect((await (await post({ action: 'status', executionId })).json()).status).toBe('paused'), workflowReadinessWait);
     const parent = tasks.get(executionId)!; const frozen = structuredClone(parent.result!.sketchIntents);
     expect(frozen).toBeDefined(); completeOnPoll();
     const retry = await post({ action: 'retry', executionId, nodeId: n.id, nodes: [n], connections: [], projectId: 'project-a' });
@@ -430,7 +434,7 @@ describe('Task5 actual workflow entry', () => {
     expect(requests.filter(r => r.url.endsWith('/api/sketch-to-code'))).toHaveLength(1);
     expect(Object.values(parent.result!.sketchIntents as Record<string, WorkflowSketchIntent>)[0].input).toEqual(Object.values(frozen as Record<string, WorkflowSketchIntent>)[0].input);
   });
-  it('executes two real loop instances and nested subgraph on the same parent without identity collision', async () => {
+  it('executes two real loop instances and nested subgraph on the same parent without identity collision', workflowReadinessCase, async () => {
     const { tasks, requests, checkpoints } = fixtureScope.owner();
     completeOnPoll(); const loop = createWorkflowNode('loop-for', 0, 0); loop.config.loopCount = 2; loop.loopCount = 2; const n = node();
     const connections = [{ id: 'loop-body', fromNodeId: loop.id, toNodeId: n.id, fromPortId: 'out-loop', toPortId: 'in-prompt', type: 'prompt' }];
@@ -444,11 +448,11 @@ describe('Task5 actual workflow entry', () => {
     const nestedIntent = Object.values(tasks.get(nestedId)!.result!.sketchIntents as Record<string, WorkflowSketchIntent>)[0];
     expect(nestedIntent.parentExecutionId).toBe(nestedId); expect(nestedIntent.executionId).toBe(`${nestedId}:${sub.id}`); expect(mocks.bill).toHaveBeenCalledTimes(3);
   });
-  it.each(['confirmed', 'winner', 'unknown'] as const)('parent cancel preserves original sketch %s outcome', async outcome => {
+  it.each(['confirmed', 'winner', 'unknown'] as const)('parent cancel preserves original sketch %s outcome', workflowReadinessCase, async outcome => {
     const { tasks, requests, checkpoints } = fixtureScope.owner();
     const n = node(); stubFixtureFetch(vi.fn(async (url, init) => { const response = await transport(url, init); if (String(url).endsWith('/api/sketch-to-code')) throw new Error('ACK_LOST'); return response; }));
     const started = await post({ action: 'start', projectId: 'project-a', nodes: [n], connections: [] }); const { executionId } = await started.json();
-    await vi.waitFor(async () => expect((await (await post({ action: 'status', executionId })).json()).status).toBe('paused'));
+    await vi.waitFor(async () => expect((await (await post({ action: 'status', executionId })).json()).status).toBe('paused'), workflowReadinessWait);
     stubFixtureFetch(vi.fn(transport)); if (outcome === 'winner') [...tasks.values()].find(t => t.type === 'sketch-to-code')!.status = 'completed';
     if (outcome === 'unknown') mocks.terminate.mockRejectedValue(new Error('PRIVATE_SQL'));
     const cancelled = await post({ action: 'cancel', executionId }); const value = await cancelled.json();
@@ -457,7 +461,7 @@ describe('Task5 actual workflow entry', () => {
     expect(mocks.bill).toHaveBeenCalledTimes(1);
     expect((await (await post({ action: 'status', executionId })).json()).status).toBe(outcome === 'confirmed' ? 'cancelled' : 'paused');
   });
-  it('persists actual analysis and reconstruction progress on the same parent before completion', async () => {
+  it('persists actual analysis and reconstruction progress on the same parent before completion', workflowReadinessCase, async () => {
     const { tasks, requests, checkpoints } = fixtureScope.owner();
     let polls = 0;
     mocks.recover.mockImplementation(async (id: string) => {
@@ -465,20 +469,20 @@ describe('Task5 actual workflow entry', () => {
       if (polls >= 3) t.status = 'completed'; return { status: 'live' };
     });
     const started = await post({ action: 'start', projectId: 'project-a', nodes: [node()], connections: [] }); const { executionId } = await started.json();
-    await vi.waitFor(() => expect(tasks.get(executionId)?.result?.results).toMatchObject({ 'sketch-node': { status: 'running', output: { phase: 'analysis', progress: 20 } } }));
-    await vi.waitFor(() => expect(tasks.get(executionId)?.result?.results).toMatchObject({ 'sketch-node': { status: 'running', output: { phase: 'reconstruction', progress: 60 } } }));
-    await vi.waitFor(async () => expect((await (await post({ action: 'status', executionId })).json()).status).toBe('completed'));
+    await vi.waitFor(() => expect(tasks.get(executionId)?.result?.results).toMatchObject({ 'sketch-node': { status: 'running', output: { phase: 'analysis', progress: 20 } } }), workflowReadinessWait);
+    await vi.waitFor(() => expect(tasks.get(executionId)?.result?.results).toMatchObject({ 'sketch-node': { status: 'running', output: { phase: 'reconstruction', progress: 60 } } }), workflowReadinessWait);
+    await vi.waitFor(async () => expect((await (await post({ action: 'status', executionId })).json()).status).toBe('completed'), workflowReadinessWait);
   });
-  it('releases the original parent lease after a same-intent retry', async () => {
+  it('releases the original parent lease after a same-intent retry', workflowReadinessCase, async () => {
     const { tasks, requests, checkpoints } = fixtureScope.owner();
     stubFixtureFetch(vi.fn(async (url, init) => { const response = await transport(url, init); if (String(url).endsWith('/api/sketch-to-code')) throw new Error('ACK_LOST'); return response; }));
     const n = node(); const started = await post({ action: 'start', projectId: 'project-a', nodes: [n], connections: [] }); const { executionId } = await started.json();
-    await vi.waitFor(async () => expect((await (await post({ action: 'status', executionId })).json()).status).toBe('paused'));
+    await vi.waitFor(async () => expect((await (await post({ action: 'status', executionId })).json()).status).toBe('paused'), workflowReadinessWait);
     await vi.waitFor(() => expect(mocks.release).toHaveBeenCalled()); const released = mocks.release.mock.calls.length;
     completeOnPoll(); stubFixtureFetch(vi.fn(transport)); await post({ action: 'retry', executionId, nodeId: n.id, nodes: [n], connections: [] });
     expect(mocks.release.mock.calls.length).toBe(released + 1);
   });
-  it.each(['loop', 'nested'] as const)('explicit %s retry continues original paused instance without a replacement nonce', async variant => {
+  it.each(['loop', 'nested'] as const)('explicit %s retry continues original paused instance without a replacement nonce', workflowReadinessCase, async variant => {
     const { tasks, requests, checkpoints } = fixtureScope.owner();
     let loseAck = true;
     stubFixtureFetch(vi.fn(async (url, init) => { const response = await transport(url, init); if (loseAck && String(url).endsWith('/api/sketch-to-code')) { loseAck = false; throw new Error('ACK_LOST'); } return response; }));
@@ -488,11 +492,78 @@ describe('Task5 actual workflow entry', () => {
     const nodes = variant === 'loop' ? [control, n] : [control];
     const connections = variant === 'loop' ? [{ id: 'body', fromNodeId: control.id, toNodeId: n.id, fromPortId: 'out-loop', toPortId: 'in-prompt', type: 'prompt' }] : [];
     const started = await post({ action: 'start', projectId: 'project-a', nodes, connections }); expect(started.status).toBe(200); const { executionId } = await started.json();
-    await vi.waitFor(async () => expect((await (await post({ action: 'status', executionId })).json()).status).toBe('paused'));
+    await vi.waitFor(async () => expect((await (await post({ action: 'status', executionId })).json()).status).toBe('paused'), workflowReadinessWait);
     const frozen = structuredClone(tasks.get(executionId)!.result!.sketchIntents); completeOnPoll(); stubFixtureFetch(vi.fn(transport));
     const retry = await post({ action: 'retry', executionId, nodeId: variant === 'loop' ? n.id : control.id, nodes, connections });
     expect((await retry.json()).success).toBe(true); expect(mocks.bill).toHaveBeenCalledTimes(1);
     expect(Object.values(tasks.get(executionId)!.result!.sketchIntents as Record<string, WorkflowSketchIntent>).map(i => i.input)).toEqual(Object.values(frozen as Record<string, WorkflowSketchIntent>).map(i => i.input));
+  });
+  it('bounded slow real PNG receipt preserves paused retry identity and one charge', workflowReadinessCase, async () => {
+    const owner = fixtureScope.owner();
+    const { tasks, requests } = owner;
+    const releaseLease = mocks.release.getMockImplementation()!;
+    mocks.release.mockImplementation(async (id: string, leaseOwner: string) => {
+      const released = await releaseLease(id, leaseOwner);
+      const task = tasks.get(id);
+      // This case observes durable lease fields; mirror the real release port's
+      // matching-owner side effect instead of treating a bare true receipt as storage.
+      if (released && task && task.leaseOwner === leaseOwner) delete task.leaseOwner;
+      return released;
+    });
+    const binary = await import('@/lib/asset-core/binary-image-validation');
+    const inspect = binary.inspectBinaryImage;
+    const gate = fixtureScope.gate();
+    let decoded: { width: number; height: number } | undefined;
+    let delayed = false;
+    let releaseTimer: ReturnType<typeof setTimeout> | undefined;
+    const spy = vi.spyOn(binary, 'inspectBinaryImage').mockImplementation(async (...args) => {
+      // Always execute the actual killable decoder and its cleanup before delaying its receipt.
+      const result = await inspect(...args);
+      if (!delayed) {
+        delayed = true; decoded = result;
+        await gate.wait();
+        args[2]?.throwIfAborted();
+      }
+      return result;
+    });
+    try {
+      let loseAck = true;
+      stubFixtureFetch(vi.fn(async (url, init) => {
+        const response = await transport(url, init);
+        if (loseAck && String(url).endsWith('/api/sketch-to-code')) {
+          loseAck = false; throw new Error('ACK_LOST');
+        }
+        return response;
+      }));
+      const n = node();
+      const started = await post({ action: 'start', projectId: 'project-a', nodes: [n], connections: [] });
+      expect(started.status).toBe(200);
+      const { executionId } = await started.json();
+      await vi.waitFor(() => expect(decoded).toEqual({ width: 2, height: 2 }), { timeout: 6000 });
+      expect(tasks.get(executionId)?.result?.workflowStatus).toBe('running');
+      expect(mocks.bill).not.toHaveBeenCalled();
+      // Deliberately exceed the old implicit 1000ms; no fake timer or fake PNG result.
+      releaseTimer = setTimeout(gate.release, 1250);
+      await vi.waitFor(async () => expect((await (await post({ action: 'status', executionId })).json()).status).toBe('paused'), workflowReadinessWait);
+      await vi.waitFor(() => expect(tasks.get(executionId)?.leaseOwner).toBeUndefined());
+      const frozen = structuredClone(tasks.get(executionId)!.result!.sketchIntents);
+      const child = [...tasks.values()].find(task => task.type === 'sketch-to-code')!;
+      expect(child).toMatchObject({ creditCost: 14, creditStatus: 'charged' });
+      expect(mocks.bill).toHaveBeenCalledTimes(1);
+      completeOnPoll();
+      const retry = await post({ action: 'retry', executionId, nodeId: n.id, nodes: [n], connections: [] });
+      expect((await retry.json()).success).toBe(true);
+      expect(Object.values(tasks.get(executionId)!.result!.sketchIntents as Record<string, WorkflowSketchIntent>).map(intent => intent.input))
+        .toEqual(Object.values(frozen as Record<string, WorkflowSketchIntent>).map(intent => intent.input));
+      expect(requests.filter(request => request.url.endsWith('/api/sketch-to-code'))).toHaveLength(1);
+      expect([...tasks.values()].filter(task => task.type === 'sketch-to-code').map(task => task.id)).toEqual([child.id]);
+      expect(mocks.bill).toHaveBeenCalledTimes(1);
+      expect((await (await post({ action: 'status', executionId })).json()).status).toBe('completed');
+    } finally {
+      if (releaseTimer) clearTimeout(releaseTimer);
+      gate.release();
+      await fixtureScope.finish(owner, () => { spy.mockRestore(); vi.unstubAllGlobals(); });
+    }
   });
 });
 
@@ -632,7 +703,7 @@ describe('Task5 original managed PNG and durable recovery boundaries', () => {
     expect(mocks.personalReference).toHaveBeenCalledWith('u1', { projectId: 'project-a', assetVersionId: 'input-version' });
     expect(requests[0].body.imageDataUrl).toBe(png);
   });
-  it.each(['main', 'loop', 'nested'] as const)('cache-miss %s resumes the frozen original child on the original durable parent', async variant => {
+  it.each(['main', 'loop', 'nested'] as const)('cache-miss %s resumes the frozen original child on the original durable parent', workflowReadinessCase, async variant => {
     const { tasks, requests, checkpoints } = fixtureScope.owner();
     const executionId = `restored-${variant}`; const n = node(); const loop = createWorkflowNode('loop-for', 0, 0); loop.id = 'loop'; loop.config.loopCount = 1; loop.loopCount = 1;
     const sub = createWorkflowNode('subgraph', 0, 0); sub.id = 'sub'; sub.config.inlineWorkflow = { nodes: [n], connections: [] };
@@ -721,7 +792,7 @@ describe('Task5 I1 ordinary sketch retry resumes the fenced parent DAG', () => {
     }));
     const response = await post({ action: 'start', projectId: 'project-a', nodes, connections }); expect(response.status).toBe(200);
     const { executionId } = await response.json();
-    await vi.waitFor(async () => expect((await (await post({ action: 'status', executionId })).json()).status).toBe('paused'));
+    await vi.waitFor(async () => expect((await (await post({ action: 'status', executionId })).json()).status).toBe('paused'), workflowReadinessWait);
     await vi.waitFor(() => expect(tasks.get(executionId)?.leaseOwner).toBeUndefined());
     const parent = tasks.get(executionId)!;
     expect(parent).toMatchObject({ type: 'workflow', status: 'processing', creditCost: 0, result: { workflowStatus: 'paused' } });
@@ -757,7 +828,7 @@ describe('Task5 I1 ordinary sketch retry resumes the fenced parent DAG', () => {
     return syncResults;
   }
 
-  it.each(['cached', 'cache-miss'] as const)('I3 JSON codec %s ACK-lost retry confirms the original successful sync result and durable safe export', async variant => {
+  it.each(['cached', 'cache-miss'] as const)('I3 JSON codec %s ACK-lost retry confirms the original successful sync result and durable safe export', workflowReadinessCase, async variant => {
     const { tasks, requests, checkpoints } = fixtureScope.owner();
     const syncResults = useJsonResultStorage(); const graph = await pausedGraph(true);
     expect(syncResults.length).toBeGreaterThan(0);
@@ -793,7 +864,7 @@ describe('Task5 I1 ordinary sketch retry resumes the fenced parent DAG', () => {
     expect(mocks.bill).toHaveBeenCalledTimes(1); expect(mocks.terminate).not.toHaveBeenCalled();
   });
 
-  it.each(['sync-duration', 'sketch-version', 'extra-field'] as const)('I3 JSON codec still rejects meaningful completed result tampering: %s', async field => {
+  it.each(['sync-duration', 'sketch-version', 'extra-field'] as const)('I3 JSON codec still rejects meaningful completed result tampering: %s', workflowReadinessCase, async field => {
     const { tasks, requests, checkpoints } = fixtureScope.owner();
     useJsonResultStorage(); const graph = await pausedGraph(true); completeOnPoll();
     const storedUpdate = mocks.update.getMockImplementation()!; let tampered = false;
@@ -822,7 +893,7 @@ describe('Task5 I1 ordinary sketch retry resumes the fenced parent DAG', () => {
     expect(mocks.bill).toHaveBeenCalledTimes(1); expect(mocks.terminate).not.toHaveBeenCalled();
   });
 
-  it.each(['cached', 'cache-miss'] as const)('ordinary ACK-lost %s retry completes the same parent and safe export with durable readback and one net charge', async variant => {
+  it.each(['cached', 'cache-miss'] as const)('ordinary ACK-lost %s retry completes the same parent and safe export with durable readback and one net charge', workflowReadinessCase, async variant => {
     const { tasks, requests, checkpoints } = fixtureScope.owner();
     const graph = await pausedGraph(); completeOnPoll();
     let entry = workflow;
@@ -859,7 +930,7 @@ describe('Task5 I1 ordinary sketch retry resumes the fenced parent DAG', () => {
     expect(requests.filter(request => request.url.endsWith('/api/sketch-to-code'))).toHaveLength(1);
   });
 
-  it.each(['lease-denied', 'missing-revision', 'revision-race', 'cancelled', 'cancel-race', 'lease-lost'] as const)('%s cannot unlock the ordinary paused sketch downstream without its original parent fence', async boundary => {
+  it.each(['lease-denied', 'missing-revision', 'revision-race', 'cancelled', 'cancel-race', 'lease-lost'] as const)('%s cannot unlock the ordinary paused sketch downstream without its original parent fence', workflowReadinessCase, async boundary => {
     const { tasks, requests, checkpoints } = fixtureScope.owner();
     const graph = await pausedGraph(); completeOnPoll(); const storedUpdate = mocks.update.getMockImplementation()!;
     if (boundary === 'lease-denied') mocks.claim.mockResolvedValueOnce(null);
@@ -884,7 +955,7 @@ describe('Task5 I1 ordinary sketch retry resumes the fenced parent DAG', () => {
     expect(mocks.terminate).not.toHaveBeenCalled(); expect(parent.leaseOwner).toBeUndefined();
   });
 
-  it('still-unknown ordinary retry stays paused with the original intent and no downstream or new admission', async () => {
+  it('still-unknown ordinary retry stays paused with the original intent and no downstream or new admission', workflowReadinessCase, async () => {
     const { tasks, requests, checkpoints } = fixtureScope.owner();
     const graph = await pausedGraph(); mocks.byKey.mockRejectedValue(new Error('ORIGINAL_ADMISSION_READ_UNAVAILABLE'));
     const retry = await post({ action: 'retry', executionId: graph.executionId, nodeId: 'sketch-node', nodes: graph.nodes, connections: graph.connections });
@@ -896,7 +967,7 @@ describe('Task5 I1 ordinary sketch retry resumes the fenced parent DAG', () => {
     expect(mocks.bill).toHaveBeenCalledTimes(1); expect(requests).toHaveLength(1); expect(parent.leaseOwner).toBeUndefined();
   });
 
-  it.each(['revision-race', 'lease-lost', 'cancel-winner', 'storage-error'] as const)('I2 final completed %s fails closed on retry, cached status and fresh durable read without another child or charge', async boundary => {
+  it.each(['revision-race', 'lease-lost', 'cancel-winner', 'storage-error'] as const)('I2 final completed %s fails closed on retry, cached status and fresh durable read without another child or charge', workflowReadinessCase, async boundary => {
     const { tasks, requests, checkpoints } = fixtureScope.owner();
     const graph = await pausedGraph(); completeOnPoll(); const storedUpdate = mocks.update.getMockImplementation()!;
     const finalAttempts: UpdateCloudTaskInput[] = [];

@@ -6,7 +6,8 @@ interface SketchObservationIdentity {
 interface SketchRuntimeEvent {
   event: 'request-start' | 'response-headers' | 'body-complete' | 'attempt-error' | 'query-result'
     | 'worker-start' | 'worker-return' | 'worker-throw' | 'phase-state-start' | 'phase-state-confirmed'
-    | 'phase-state-unconfirmed' | 'publication-start' | 'publication-return';
+    | 'phase-state-unconfirmed' | 'publication-start' | 'publication-return'
+    | 'publication-refused' | 'publication-rejected' | 'publication-commit-unknown';
   phase: 'analysis' | 'reconstruction' | 'image-submit' | 'image-query' | 'code-worker' | 'image-worker' | 'publication';
   responseId?: string; remoteTaskId?: string; status?: string; reason?: string;
   httpStatus?: number; elapsedMs?: number; aborted?: boolean; confirmed?: boolean;
