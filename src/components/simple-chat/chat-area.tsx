@@ -2050,7 +2050,7 @@ export default function ChatArea({
   } : undefined;
 
   return (
-    <div className="flex-1 min-w-0 flex flex-col h-screen bg-background">
+    <div className="flex-1 min-w-0 flex flex-col h-screen supports-[height:100dvh]:h-dvh min-h-0 bg-background">
       {/* Top Bar */}
       <header className="relative z-50 flex flex-wrap items-center gap-2 px-3 py-2 border-b border-border bg-background/80 backdrop-blur-sm shrink-0">
         <button onClick={onToggleSidebar} className="p-2 rounded-lg hover:bg-muted transition-colors" title="切换侧边栏">
@@ -2223,7 +2223,7 @@ export default function ChatArea({
       </div>
 
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto px-4 py-6">
+      <div className="flex-1 min-h-0 overflow-y-auto px-4 py-6">
         <div className="max-w-3xl mx-auto space-y-6">
           {messages.length === 0 && (
             <div className="text-center py-20 space-y-4">
@@ -2476,8 +2476,8 @@ export default function ChatArea({
       )}
 
       {/* Input */}
-      <div className="px-4 pb-4 pt-2">
-        <div className="max-w-3xl mx-auto">
+      <div className="shrink-0 min-w-0 px-3 sm:px-4 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-2">
+        <div className="min-w-0 max-w-3xl mx-auto">
           <div
             className={`relative bg-card border rounded-2xl shadow-sm focus-within:ring-2 focus-within:ring-primary/20 focus-within:border-primary/30 transition-all ${dragOver ? 'border-primary ring-2 ring-primary/30' : 'border-border'}`}
             onDragOver={e => { e.preventDefault(); setDragOver(true); }}
@@ -2529,10 +2529,10 @@ export default function ChatArea({
               onPaste={handlePaste}
               placeholder={activeAgent ? `与 ${activeAgent.name} 对话...` : "输入消息，Enter 发送，支持 Ctrl+V 粘贴图片"}
               rows={1}
-              className="w-full bg-transparent px-4 py-3 pr-28 text-sm resize-none outline-none placeholder:text-muted-foreground/50 min-h-[48px] max-h-[200px]"
+              className="block w-full min-w-0 bg-transparent px-4 py-3 text-base sm:text-sm leading-relaxed resize-none outline-none placeholder:text-muted-foreground/50 min-h-[80px] sm:min-h-[60px] max-h-[min(200px,30dvh)]"
               style={{ scrollbarWidth: 'thin' }}
             />
-            <div className="absolute right-2 bottom-2 flex items-center gap-1">
+            <div className="flex min-w-0 flex-wrap items-center gap-1 px-2 pb-2 [&>button]:inline-flex [&>button]:min-h-11 [&>button]:min-w-11 [&>button]:shrink-0 [&>button]:items-center [&>button]:justify-center">
               <button onClick={() => setBrandActive(!brandActive)}
                 className={`p-1.5 rounded-lg transition-colors ${brandActive ? 'bg-amber-500/10 text-amber-500' : 'text-muted-foreground hover:bg-muted'}`}
                 title="品牌DNA注入 - 将品牌规范注入对话上下文">
@@ -2579,7 +2579,8 @@ export default function ChatArea({
                 <GitBranch className="w-4 h-4" />
               </button>
               <button onClick={handleSend} disabled={!input.trim() && uploadedImages.length === 0}
-                className="p-1.5 rounded-lg bg-primary text-primary-foreground disabled:opacity-40 transition-all hover:bg-primary/90">
+                className="ml-auto p-1.5 rounded-lg bg-primary text-primary-foreground disabled:opacity-40 transition-all hover:bg-primary/90"
+                aria-label="发送消息">
                 {isStreaming ? <div className="w-4 h-4 border-2 border-primary-foreground border-t-transparent rounded-full animate-spin" /> : <ArrowUp className="w-4 h-4" />}
               </button>
             </div>
@@ -2599,14 +2600,14 @@ export default function ChatArea({
                 });
               }} />
           </div>
-          <div className="text-xs text-muted-foreground/50 text-center mt-2 flex flex-wrap items-center justify-center gap-3">
-            <label className="inline-flex items-center gap-1">
-              <span>目标画布</span>
+          <div className="text-xs text-muted-foreground/50 mt-2 flex min-w-0 flex-wrap items-center justify-center gap-x-3 gap-y-1">
+            <label className="inline-flex w-full min-w-0 items-center gap-2 sm:w-auto">
+              <span className="shrink-0">目标画布</span>
               <select
                 aria-label="目标画布项目"
                 value={selectedCanvasProjectId}
                 onChange={event => setSelectedCanvasProjectId(event.target.value)}
-                className="max-w-36 bg-transparent text-foreground border border-border rounded px-1.5 py-0.5 outline-none"
+                className="min-h-11 min-w-0 flex-1 sm:flex-none sm:max-w-36 bg-transparent text-foreground border border-border rounded px-1.5 py-0.5 outline-none"
               >
                 <option value="">未选择</option>
                 {canvasProjects.map(canvasProject => (
@@ -2614,14 +2615,14 @@ export default function ChatArea({
                 ))}
               </select>
             </label>
-            <button onClick={toggleTheme} className="inline-flex items-center gap-1 hover:text-foreground transition-colors">
+            <button onClick={toggleTheme} className="inline-flex min-h-11 items-center gap-1 hover:text-foreground transition-colors">
               {theme === 'dark' ? <Sun className="w-3 h-3" /> : <Moon className="w-3 h-3" />}
               {theme === 'dark' ? '亮色模式' : '暗色模式'}
             </button>
-            <button onClick={() => setTempChat(v => !v)} className={`inline-flex items-center gap-1 transition-colors ${tempChat ? 'text-amber-500' : 'hover:text-foreground'}`}>
+            <button onClick={() => setTempChat(v => !v)} className={`inline-flex min-h-11 items-center gap-1 transition-colors ${tempChat ? 'text-amber-500' : 'hover:text-foreground'}`}>
               <EyeOff className="w-3 h-3" />{tempChat ? '临时聊天中' : '临时聊天'}
             </button>
-            <button onClick={() => setShowGlobalSearch(true)} className="inline-flex items-center gap-1 hover:text-foreground transition-colors">
+            <button onClick={() => setShowGlobalSearch(true)} className="inline-flex min-h-11 items-center gap-1 hover:text-foreground transition-colors">
               <Search className="w-3 h-3" />全局搜索
             </button>
           </div>

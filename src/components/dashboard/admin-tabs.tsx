@@ -844,9 +844,9 @@ export default function AdminTabs(props: AdminTabsProps) {
       return g ? g.name : null;
     };
     return (
-      <div className="space-y-4 px-6 pt-6 pb-8">
+      <div className="min-w-0 space-y-4 px-4 sm:px-6 pt-6 pb-8 [&_button]:whitespace-nowrap [&_button>svg]:shrink-0">
         {/* 页面标题 */}
-        <div className="flex items-center justify-between">
+        <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h1 className="text-xl font-bold text-foreground">用户管理</h1>
             <p className="text-sm text-muted-foreground mt-0.5">查看和管理平台所有用户</p>
@@ -857,10 +857,10 @@ export default function AdminTabs(props: AdminTabsProps) {
         </div>
         {/* 操作栏：搜索 + 筛选 + 批量操作 + 添加 */}
         <div className="flex items-center justify-between gap-4 flex-wrap">
-          <div className="flex items-center gap-3 flex-wrap">
-            <div className="relative">
+          <div className="flex min-w-0 w-full sm:w-auto items-center gap-3 flex-wrap">
+            <div className="relative w-full sm:w-auto">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-              <input value={userSearch} onChange={e => setUserSearch(e.target.value)} placeholder="搜索用户名 / 邮箱" className="bg-background border border-border rounded-md pl-9 pr-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 w-64 transition-colors" />
+              <input value={userSearch} onChange={e => setUserSearch(e.target.value)} placeholder="搜索用户名 / 邮箱" className="bg-background border border-border rounded-md pl-9 pr-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 w-full sm:w-64 transition-colors" />
             </div>
             <div className="relative inline-flex items-center">
               <select value={userFilterRole} onChange={e => setUserFilterRole(e.target.value)} className="bg-background border border-border rounded-md pl-3 pr-8 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 cursor-pointer appearance-none">
@@ -885,7 +885,7 @@ export default function AdminTabs(props: AdminTabsProps) {
               <ChevronDown className="w-3.5 h-3.5 text-muted-foreground absolute right-2.5 pointer-events-none" />
             </div>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <button onClick={() => handleBatchToggleUsers(true)} disabled={selectedUserIds.size === 0} className={`bg-muted text-muted-foreground px-3 py-2 rounded-md text-sm font-medium transition-all inline-flex items-center gap-1.5 ${selectedUserIds.size === 0 ? 'cursor-not-allowed opacity-50' : 'hover:text-foreground cursor-pointer'}`}><CheckCircle className="w-3.5 h-3.5" />批量启用</button>
             <button onClick={() => handleBatchToggleUsers(false)} disabled={selectedUserIds.size === 0} className={`bg-muted text-muted-foreground px-3 py-2 rounded-md text-sm font-medium transition-all inline-flex items-center gap-1.5 ${selectedUserIds.size === 0 ? 'cursor-not-allowed opacity-50' : 'hover:text-foreground cursor-pointer'}`}><Ban className="w-3.5 h-3.5" />批量禁用</button>
             <button onClick={() => void handleBatchDeleteUsers()} disabled={selectedUserIds.size === 0} className={`bg-muted text-muted-foreground px-3 py-2 rounded-md text-sm font-medium transition-all inline-flex items-center gap-1.5 ${selectedUserIds.size === 0 ? 'cursor-not-allowed opacity-50' : 'hover:text-destructive cursor-pointer'}`}><Trash2 className="w-3.5 h-3.5" />批量删除</button>
@@ -903,7 +903,8 @@ export default function AdminTabs(props: AdminTabsProps) {
         )}
 
         {/* 用户列表表格 */}
-        <div className="bg-card rounded-lg shadow-card overflow-hidden border border-border/50">
+        <div role="region" aria-label="用户列表，可横向滚动" tabIndex={0} className="max-w-full overflow-x-auto bg-card rounded-lg shadow-card border border-border/50">
+          <div className="min-w-[1120px]">
           {/* 表头 */}
           <div className="grid grid-cols-[40px_1fr_1.2fr_90px_80px_90px_90px_70px_100px_110px_100px] items-center px-4 py-3 bg-muted text-xs font-semibold text-muted-foreground uppercase tracking-wider border-b border-border/20">
             <div className="flex items-center justify-center">
@@ -946,6 +947,7 @@ export default function AdminTabs(props: AdminTabsProps) {
               );
             })}
             {filteredUsers.length === 0 && <div className="py-12 text-center text-sm text-muted-foreground">暂无用户数据</div>}
+          </div>
           </div>
         </div>
 

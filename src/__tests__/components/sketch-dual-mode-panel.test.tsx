@@ -72,6 +72,53 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers(); });
 
 describe('dual-mode drawer projection', () => {
+  it('keeps an image admission mounted through minimize and receives its result without a duplicate submission', async () => {
+    const f = ready(), late = deferred<Response>(); f.noIO.mockImplementationOnce(() => late.promise).mockResolvedValueOnce(json(completed()));
+    show(f); const stop = vi.spyOn(f.imageSession.client, 'stop');
+    fireEvent.click(screen.getByRole('button', { name: '生成图像' }));
+    expect(f.noIO).toHaveBeenCalledTimes(1);
+    const stoppedAtSubmission = stop.mock.calls.length;
+    fireEvent.click(screen.getByRole('button', { name: '最小化草图窗口' }));
+    expect(stop).toHaveBeenCalledTimes(stoppedAtSubmission);
+    await act(async () => { late.resolve(json(completed())); });
+    expect(f.imageSession.client.task?.status).toBe('completed');
+    expect(screen.queryByRole('button', { name: '打开图像预览' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '恢复草图窗口' }));
+    expect(screen.getByRole('button', { name: '打开图像预览' })).toBeDefined();
+    expect(screen.getByLabelText('创作关键词')).toHaveProperty('value', '原关键词');
+    expect(screen.getByLabelText('视觉分析模型')).toHaveProperty('value', binding('vision-a'));
+    expect(screen.getByLabelText('图像生成模型')).toHaveProperty('value', binding('image-a'));
+    expect(f.noIO.mock.calls.map(call => String(call[0]))).toEqual(['/api/sketch-to-image', '/api/poll-task']);
+    expect(stop).toHaveBeenCalledTimes(stoppedAtSubmission); expect(f.session.history.present.strokes).toHaveLength(1);
+  });
+  it('uses exact admin catalog names in all sketch model menus without changing their identity or adding unauthorized models', () => {
+    const f = fixture();
+    const options = [
+      { id: 'same-model', providerId: 'vision-a', providerName: '视觉供应商甲', type: 'chat' as const, name: '上游视觉名称', displayName: '管理员视觉名称' },
+      { id: 'same-model', providerId: 'vision-b', providerName: '视觉供应商乙', type: 'chat' as const, name: '视觉模型乙' },
+      { id: 'same-model', providerId: 'image-a', providerName: '图像供应商甲', type: 'image' as const, name: '上游图像名称', displayName: '管理员图像名称' },
+      { id: 'same-model', providerId: 'image-b', providerName: '图像供应商乙', type: 'image' as const, name: '图像模型乙' },
+      { id: 'hidden-model', providerId: 'not-authorized', providerName: '不应出现', type: 'image' as const, name: '未授权模型' },
+    ];
+    show(f, { modelOptions: options });
+    const visionSelect = screen.getByLabelText('视觉分析模型') as HTMLSelectElement;
+    const imageSelect = screen.getByLabelText('图像生成模型') as HTMLSelectElement;
+    expect(Array.from(visionSelect.options, option => [option.text, option.value]).slice(1)).toEqual([
+      ['视觉供应商甲 / 管理员视觉名称', binding('vision-a')], ['视觉供应商乙 / 视觉模型乙', binding('vision-b')],
+    ]);
+    expect(Array.from(imageSelect.options, option => [option.text, option.value]).slice(1)).toEqual([
+      ['图像供应商甲 / 管理员图像名称', binding('image-a')], ['图像供应商乙 / 图像模型乙', binding('image-b')],
+    ]);
+    fireEvent.change(visionSelect, { target: { value: binding('vision-b') } });
+    fireEvent.change(imageSelect, { target: { value: binding('image-b') } });
+    expect(f.imageSession.visionSelection).toBe(binding('vision-b')); expect(f.imageSession.imageSelection).toBe(binding('image-b'));
+    fireEvent.click(screen.getByRole('button', { name: '草图转代码' }));
+    expect(screen.getByRole('button', { name: '草图转代码' }).querySelector('[data-selection-mark]')).not.toBeNull();
+    expect(screen.getByRole('button', { name: '草图生图' }).querySelector('[data-selection-mark]')).toBeNull();
+    const codeSelect = screen.getByLabelText('视觉模型') as HTMLSelectElement;
+    expect(Array.from(codeSelect.options, option => option.text).slice(1)).toEqual(['视觉供应商甲 / 管理员视觉名称', '视觉供应商乙 / 视觉模型乙']);
+    expect(f.codeFetch).not.toHaveBeenCalled(); expect(f.noIO).not.toHaveBeenCalled();
+  });
   it('only a supplied image session enables image-first keywords; legacy callers still start in code', () => {
     const f = fixture(); const view = render(<SketchToCodePanel session={f.session} imageSession={f.imageSession} />);
     expect(screen.getByRole('button', { name: '草图生图' }).getAttribute('aria-pressed')).toBe('true');

@@ -8219,7 +8219,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
       )}
 
       {/* Right Panel - with vertical collapse strip */}
-      <div data-workspace-right-panel className={`fixed right-0 bottom-0 z-[70] flex transition-all duration-300 ease-in-out ${panelCollapsed ? 'top-0' : 'top-[var(--project-menu-bottom,0px)] md:top-0'}`} style={{ width: panelCollapsed ? '20px' : 'min(480px, 100vw)' }}>
+      <div data-workspace-right-panel className={`fixed right-0 bottom-[calc(72px+env(safe-area-inset-bottom))] md:bottom-0 z-[70] flex transition-all duration-300 ease-in-out ${panelCollapsed ? 'top-0' : 'top-[var(--project-menu-bottom,0px)] md:top-0'}`} style={{ width: panelCollapsed ? '20px' : 'min(480px, 100vw)' }}>
         {/* Vertical collapse strip */}
         <button
           onClick={() => setPanelCollapsed(prev => !prev)}
@@ -8237,7 +8237,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
 
         {/* Panel Content */}
         {!panelCollapsed && (
-        <div className={`flex-1 flex flex-col ${themeStyle === 'monochrome' ? 'bg-white border-l border-gray-200' : 'bg-[#141418] border-l border-white/[0.06]'} overflow-hidden`}>
+        <div className={`min-w-0 flex-1 flex flex-col ${themeStyle === 'monochrome' ? 'bg-white border-l border-gray-200' : 'bg-[#141418] border-l border-white/[0.06]'} overflow-hidden`}>
           {/* 软件标题 */}
           <div className="px-4 py-2.5 flex-shrink-0 flex items-center">
             <div className="flex flex-col">

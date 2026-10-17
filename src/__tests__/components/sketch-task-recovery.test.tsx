@@ -313,6 +313,16 @@ describe('review regressions: pending image admission and original placement int
 });
 
 describe('opted-in sketch drawer recovers the original paid task without resubmission', (): void => {
+  it('keeps drawing ahead of the recovery list with an explicit jump while preserving the admission block', async () => {
+    const f = fixture(), view = render(panel(f)); await discovered(f); readyDrawing(f, view);
+    const drawing = screen.getByLabelText('绘图区');
+    const recovery = screen.getByRole('region', { name: '恢复原草图任务' });
+    expect(drawing.compareDocumentPosition(recovery) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
+    const scroll = vi.fn(); Object.defineProperty(recovery, 'scrollIntoView', { configurable: true, value: scroll });
+    fireEvent.click(screen.getByRole('button', { name: '查看原任务' }));
+    expect(scroll).toHaveBeenCalledTimes(1); expectAdmissionBlocked(f);
+    expect(f.fetcher.mock.calls.map(call => String(call[0]))).toEqual([discoveryUrl]);
+  });
   it.each(['image', 'code'] as const)('preserves explicit SAME frozen idempotency reconciliation for unknown %s admission despite independent discovery loading/failure', async (mode): Promise<void> => {
     const f = fixture(), discovery = deferred(); f.io.discover = (): Promise<Response> => discovery.promise;
     const route = mode === 'image' ? '/api/sketch-to-image' : '/api/sketch-to-code';
