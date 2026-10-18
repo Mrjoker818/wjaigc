@@ -1,7 +1,8 @@
 'use client';
 
-import { Suspense, useCallback, useEffect, useMemo, useRef, useState, Component, type ReactNode } from 'react';
+import { Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, Component, type ReactNode } from 'react';
 import { Canvas, useLoader, useThree, useFrame } from '@react-three/fiber';
+import { getFloatingPanelViewport, subscribeFloatingPanelViewport } from '@/lib/floating-panel-position';
 import { OrbitControls, Grid, Environment } from '@react-three/drei';
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
@@ -459,6 +460,11 @@ export default function ModelViewer3D({
   onSendToSceneStudio,
   onClose,
 }: ModelViewer3DProps) {
+  const [viewerViewport, setViewerViewport] = useState({ width: 1056, height: 776, left: 0, top: 0 });
+  useLayoutEffect(() => {
+    const update = (): void => setViewerViewport(getFloatingPanelViewport());
+    update(); return subscribeFloatingPanelViewport(update);
+  }, []);
   const [modelInfo, setModelInfo] = useState<ModelInfo | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -714,7 +720,8 @@ export default function ModelViewer3D({
 
   return (
     <div
-      className="fixed inset-0 z-[999] flex items-center justify-center bg-black/80 backdrop-blur-md"
+      className="fixed z-[999] flex items-center justify-center bg-black/80 backdrop-blur-md"
+      style={{ left: viewerViewport.left, top: viewerViewport.top, width: viewerViewport.width, height: viewerViewport.height }}
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
@@ -724,23 +731,24 @@ export default function ModelViewer3D({
       onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); }}
     >
       <div
-        className="relative w-[92vw] max-w-[1200px] h-[85vh] max-h-[800px] rounded-2xl border border-[#2a2a2a]/80 bg-gradient-to-b from-[#141414] to-[#0a0a0a] overflow-hidden flex flex-col shadow-2xl shadow-black/50"
+        className="relative min-h-0 rounded-2xl border border-[#2a2a2a]/80 bg-gradient-to-b from-[#141414] to-[#0a0a0a] overflow-y-auto flex flex-col shadow-2xl shadow-black/50 lg:overflow-hidden [&_button]:inline-flex [&_button]:min-h-11 [&_button]:min-w-11 [&_button]:shrink-0 [&_button]:items-center [&_button]:justify-center [&_button]:whitespace-nowrap"
+        style={{ width: Math.min(1200, Math.max(0, viewerViewport.width - 16)), height: Math.min(800, Math.max(0, viewerViewport.height - 16)) }}
         onWheel={(e) => e.stopPropagation()}
         onContextMenu={(e) => e.preventDefault()}
       >
         {/* Header */}
-        <div className="flex items-center gap-2 px-3 py-2 border-b border-[#2a2a2a]/60 bg-[#0d0d0d]/80 shrink-0 select-none">
-          <GripVertical size={14} style={{ color: 'rgba(255,255,255,0.3)' }} />
-          <Box size={15} style={{ color: '#d4af37' }} />
-          <span className="text-sm font-semibold flex-1" style={{ color: '#d4af37' }}>
+        <div className="relative flex flex-wrap items-center gap-2 px-3 py-2 border-b border-[#2a2a2a]/60 bg-[#0d0d0d]/80 shrink-0 select-none">
+          <GripVertical size={14} className="hidden lg:block" style={{ color: 'rgba(255,255,255,0.3)' }} />
+          <Box size={15} className="hidden lg:block" style={{ color: '#d4af37' }} />
+          <span className="min-w-0 basis-full truncate whitespace-nowrap text-sm font-semibold lg:basis-auto lg:flex-1" style={{ color: '#d4af37' }}>
             3D 模型预览
           </span>
           {modelInfo && (
-            <span className="text-[10px] px-1.5 py-0.5 rounded" style={{ color: 'rgba(255,255,255,0.5)', background: 'rgba(255,255,255,0.06)' }}>
+            <span className="hidden text-[10px] px-1.5 py-0.5 rounded lg:inline-flex" style={{ color: 'rgba(255,255,255,0.5)', background: 'rgba(255,255,255,0.06)' }}>
               {modelInfo.format} · {formatNumber(modelInfo.faces)} 面
             </span>
           )}
-          <div className="flex items-center gap-1">
+          <div className="flex w-full flex-wrap items-center gap-1 lg:w-auto">
             {/* Screenshot to canvas */}
             {onScreenshotToCanvas && (
             <button
@@ -834,6 +842,7 @@ export default function ModelViewer3D({
             )}
             <button
               onClick={onClose}
+              aria-label="关闭3D模型预览"
               className="p-1 rounded-md transition-colors"
               style={{ color: 'rgba(255,255,255,0.4)' }}
               onMouseEnter={e => (e.currentTarget.style.color = '#fff')}
@@ -845,10 +854,10 @@ export default function ModelViewer3D({
         </div>
 
         {/* Main content */}
-        <div className="flex-1 flex overflow-hidden">
+        <div className="flex min-h-0 flex-none flex-col overflow-visible lg:flex-1 lg:flex-row lg:overflow-hidden">
           {/* Left sidebar */}
           {showSidebar && (
-            <div className="w-[240px] shrink-0 border-r border-[#2a2a2a]/60 bg-[#0d0d0d]/60 flex flex-col overflow-y-auto">
+            <div className="order-last flex max-h-64 w-full min-w-0 shrink-0 flex-col overflow-y-auto border-t border-[#2a2a2a]/60 bg-[#0d0d0d]/60 lg:order-none lg:max-h-none lg:w-[240px] lg:border-r lg:border-t-0">
               {/* Source image */}
               {previewImageUrl && (
                 <div className="p-3 border-b border-[#2a2a2a]/40">
@@ -988,7 +997,7 @@ export default function ModelViewer3D({
           )}
 
           {/* 3D Canvas */}
-          <div className="flex-1 relative" ref={canvasRef}>
+          <div className="relative h-60 min-h-44 w-full shrink-0 lg:h-auto lg:w-auto lg:flex-1" ref={canvasRef}>
             {loadError ? (
               <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 bg-[#0d0d0d]">
                 <div className="w-16 h-16 rounded-2xl bg-[#d4af37]/10 flex items-center justify-center">
@@ -1099,8 +1108,8 @@ export default function ModelViewer3D({
         </div>
 
         {/* Bottom toolbar */}
-        <div className="flex items-center justify-between px-4 py-2 border-t border-[#2a2a2a]/60 bg-[#0d0d0d]/80 shrink-0">
-          <div className="flex items-center gap-1">
+        <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 border-t border-[#2a2a2a]/60 bg-[#0d0d0d]/80 shrink-0 lg:px-4">
+          <div className="flex min-w-0 flex-wrap items-center gap-1">
             {/* Material mode */}
             <button
               onClick={() => setMaterialMode(materialMode === 'solid' ? 'wireframe' : 'solid')}
@@ -1197,7 +1206,7 @@ export default function ModelViewer3D({
               <Maximize2 size={11} /> 重置
             </button>
           </div>
-          <div className="flex items-center gap-3 text-xs text-[#555]">
+          <div className="flex min-w-0 flex-wrap items-center gap-3 text-xs text-[#555]">
             <span className="flex items-center gap-1"><RotateCcw size={9} /> 左键{viewMode === 'orbit' ? '旋转' : '平移'}</span>
             <span>·</span>
             <span className="flex items-center gap-1"><ZoomIn size={9} /> 滚轮缩放</span>

@@ -11,6 +11,7 @@ import {
   Tag, Info, Loader2, Type, Scissors, PenLine, Video, GitBranch
 } from 'lucide-react';
 import { getModelDisplayName } from '@/lib/model-name-map';
+import { constrainFloatingPanelPosition, getFloatingPanelViewport, subscribeFloatingPanelViewport } from '@/lib/floating-panel-position';
 
 /* ============================================================
    类型定义
@@ -245,6 +246,24 @@ export default function BrandPackagingPanel({ isMonochrome = false, onClose, onA
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
   const [windowPos, setWindowPos] = useState({ x: 40, y: 40 });
 
+  const [panelViewport, setPanelViewport] = useState(getFloatingPanelViewport);
+  const compactPanel = panelViewport.width < 1024 || panelViewport.height < 600;
+  const panelInset = compactPanel ? 8 : 40;
+  const panelWidth = isMinimized ? Math.min(340, Math.max(0, panelViewport.width - 16)) : Math.max(0, panelViewport.width - panelInset * 2);
+  const panelHeight = isMinimized ? 56 : Math.max(0, panelViewport.height - panelInset * 2);
+  const boundedPosition = constrainFloatingPanelPosition({
+    x: windowPos.x - panelViewport.left, y: windowPos.y - panelViewport.top,
+    viewportWidth: panelViewport.width, viewportHeight: panelViewport.height,
+    panelWidth, panelHeight, margin: 8,
+  });
+  const panelLeft = panelViewport.left + boundedPosition.x;
+  const panelTop = panelViewport.top + boundedPosition.y;
+
+  useEffect(() => subscribeFloatingPanelViewport(() => {
+    setPanelViewport(getFloatingPanelViewport());
+  }), []);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+
   // === Sidebar tab ===
   const [sidebarTab, setSidebarTab] = useState<'projects' | 'templates' | 'history'>('projects');
 
@@ -332,11 +351,12 @@ export default function BrandPackagingPanel({ isMonochrome = false, onClose, onA
 
   // === Drag handlers ===
   const handleDragStart = useCallback((e: React.MouseEvent) => {
+    if ((e.target as Element).closest('button')) return;
     e.preventDefault();
     e.stopPropagation();
     setIsDragging(true);
-    setDragOffset({ x: e.clientX - windowPos.x, y: e.clientY - windowPos.y });
-  }, [windowPos]);
+    setDragOffset({ x: e.clientX - panelLeft, y: e.clientY - panelTop });
+  }, [panelLeft, panelTop]);
 
   // === Load image models ===
   useEffect(() => {
@@ -420,11 +440,14 @@ export default function BrandPackagingPanel({ isMonochrome = false, onClose, onA
   useEffect(() => {
     if (!isDragging) return;
     const handleMove = (e: MouseEvent) => setWindowPos({ x: e.clientX - dragOffset.x, y: e.clientY - dragOffset.y });
-    const handleUp = () => setIsDragging(false);
+    const handleUp = () => {
+      setWindowPos({ x: panelLeft, y: panelTop });
+      setIsDragging(false);
+    };
     window.addEventListener('mousemove', handleMove);
     window.addEventListener('mouseup', handleUp);
     return () => { window.removeEventListener('mousemove', handleMove); window.removeEventListener('mouseup', handleUp); };
-  }, [isDragging, dragOffset]);
+  }, [isDragging, dragOffset, panelLeft, panelTop]);
 
   // === SKU management ===
   const addSku = () => {
@@ -730,18 +753,18 @@ export default function BrandPackagingPanel({ isMonochrome = false, onClose, onA
 
   // === RENDER ===
   return createPortal(
-    <div className="fixed z-[200] flex items-start justify-start" style={{ pointerEvents: 'auto', ...(isMinimized ? { left: windowPos.x, top: windowPos.y } : { inset: 0 }) }}>
+    <div className="fixed z-[200] flex items-start justify-start" style={{ pointerEvents: 'auto', ...(isMinimized ? { left: panelLeft, top: panelTop } : { inset: 0 }) }}>
       {!isMinimized && <div className="fixed inset-0 bg-black/30 backdrop-blur-sm" onClick={onClose} />}
 
       <div
         data-popup
-        className="relative flex flex-col rounded-xl overflow-hidden shadow-2xl border"
+        className="relative flex min-w-0 flex-col rounded-xl overflow-hidden shadow-2xl border [&_button]:min-h-11 [&_button]:min-w-11 [&_button]:whitespace-nowrap [&_select]:min-h-11 [&_select]:min-w-0 [&_select]:max-w-full [&_input]:min-h-11 [&_input]:min-w-0 [&_textarea]:min-h-11 [&_textarea]:min-w-0 [&_svg]:shrink-0 max-sm:[&_input]:text-base max-sm:[&_select]:text-base max-sm:[&_textarea]:text-base"
         style={{
-          width: isMinimized ? 340 : 'calc(100vw - 80px)',
-          height: isMinimized ? 'auto' : 'calc(100vh - 80px)',
+          width: panelWidth,
+          height: panelHeight,
           background: bg,
           borderColor: isMonochrome ? '#e5e5e5' : 'rgba(212,175,55,0.3)',
-          ...(isMinimized ? {} : { left: windowPos.x, top: windowPos.y }),
+          ...(isMinimized ? {} : { left: panelLeft, top: panelTop }),
           ...(isDragging ? { outline: `2px solid ${accent}`, outlineOffset: '-2px' } : {}),
         }}
         onMouseDown={e => e.stopPropagation()}
@@ -750,28 +773,30 @@ export default function BrandPackagingPanel({ isMonochrome = false, onClose, onA
         {/* === Title bar (draggable) === */}
         <div
           data-panel-header
-          className="flex items-center justify-between px-3 shrink-0 cursor-move select-none"
-          style={{ height: 36, background: isMonochrome ? '#f9fafb' : '#111', borderBottom: isMinimized ? 'none' : (isMonochrome ? '1px solid #e5e5e5' : '1px solid rgba(212,175,55,0.3)') }}
+          className="flex min-w-0 items-center justify-between gap-2 px-3 shrink-0 cursor-move select-none"
+          style={{ height: 54, background: isMonochrome ? '#f9fafb' : '#111', borderBottom: isMinimized ? 'none' : (isMonochrome ? '1px solid #e5e5e5' : '1px solid rgba(212,175,55,0.3)') }}
           onMouseDown={handleDragStart}
         >
           <div className="flex items-center gap-2">
             <Package size={14} style={{ color: accent }} />
-            <span className="text-sm font-medium" style={{ color: textAccent }}>品牌包装系统 Pro</span>
+            <span className="whitespace-nowrap text-sm font-medium" style={{ color: textAccent }}>品牌包装系统 Pro</span>
           </div>
           <div className="flex items-center gap-1">
-            <button className={`w-7 h-7 flex items-center justify-center rounded transition-colors ${isMonochrome ? 'hover:bg-gray-200' : 'hover:bg-white/10'}`} onClick={() => setIsMinimized(!isMinimized)} title={isMinimized ? '展开' : '最小化'}>
+            <button className={`w-11 h-11 shrink-0 flex items-center justify-center rounded transition-colors ${isMonochrome ? 'hover:bg-gray-200' : 'hover:bg-white/10'}`} onClick={() => setIsMinimized(!isMinimized)} title={isMinimized ? '展开' : '最小化'} aria-label={isMinimized ? '展开品牌包装系统' : '最小化品牌包装系统'} onMouseDown={e => e.stopPropagation()}>
               {isMinimized ? <Maximize2 size={14} style={{ color: textMuted }} /> : <Minus size={14} style={{ color: textMuted }} />}
             </button>
-            <button className={`w-7 h-7 flex items-center justify-center rounded transition-colors ${isMonochrome ? 'hover:bg-red-100' : 'hover:bg-red-500/30'}`} onClick={onClose} title="关闭">
+            <button className={`w-11 h-11 shrink-0 flex items-center justify-center rounded transition-colors ${isMonochrome ? 'hover:bg-red-100' : 'hover:bg-red-500/30'}`} onClick={onClose} title="关闭" aria-label="关闭品牌包装系统" onMouseDown={e => e.stopPropagation()}>
               <X size={14} style={{ color: textMuted }} />
             </button>
           </div>
         </div>
 
-        {isMinimized ? null : (
-          <div className="flex flex-1 overflow-hidden">
+          <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto overscroll-contain lg:flex-row lg:overflow-hidden" style={{ display: isMinimized ? 'none' : undefined }}>
+            <button className="flex shrink-0 items-center justify-between gap-2 px-4 py-2 text-sm lg:hidden" style={{ color: textAccent, borderBottom: `1px solid ${border}` }} onClick={() => setSidebarOpen(!sidebarOpen)} aria-expanded={sidebarOpen} aria-label="项目、模板与历史">
+              项目、模板与历史 {sidebarOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+            </button>
             {/* === LEFT SIDEBAR === */}
-            <aside className="w-[240px] shrink-0 border-r flex flex-col overflow-hidden"
+            <aside className={`w-full lg:w-[240px] shrink-0 border-b lg:border-b-0 lg:border-r ${sidebarOpen ? 'flex' : 'hidden'} lg:flex flex-col overflow-hidden`}
               style={{ background: isMonochrome ? '#f9fafb' : 'rgba(0,0,0,0.4)', borderColor: border }}
             >
               {/* New project button */}
@@ -812,9 +837,9 @@ export default function BrandPackagingPanel({ isMonochrome = false, onClose, onA
             </aside>
 
             {/* === MAIN CONTENT === */}
-            <main className="flex flex-1 flex-col overflow-hidden">
+            <main className="flex min-w-0 flex-none flex-col lg:min-h-0 lg:flex-1 lg:overflow-hidden">
               {/* Header */}
-              <header className="flex items-center justify-between px-4 shrink-0" style={{ height: 44, borderBottom: `1px solid ${border}` }}>
+              <header className="flex min-h-11 flex-wrap items-center justify-between gap-2 px-4 py-1 shrink-0" style={{ borderBottom: `1px solid ${border}` }}>
                 <div className="flex items-center gap-3">
                   <h2 className="text-base font-semibold" style={{ color: textPrimary }}>品牌包装工作台</h2>
                   <span className="text-xs px-2 py-0.5 rounded-full" style={{ background: isMonochrome ? '#dbeafe' : 'rgba(212,175,55,0.15)', color: textAccent }}>Pro</span>
@@ -827,16 +852,16 @@ export default function BrandPackagingPanel({ isMonochrome = false, onClose, onA
               </header>
 
               {/* Workspace: left form + right results */}
-              <div className="grid flex-1 grid-cols-[1.35fr_0.95fr] gap-4 overflow-hidden p-4">
+              <div className="grid min-w-0 grid-cols-1 gap-4 p-3 lg:min-h-0 lg:flex-1 lg:grid-cols-[minmax(0,1.35fr)_minmax(0,0.95fr)] lg:overflow-hidden lg:p-4">
                 {/* LEFT: Form area */}
-                <div className="overflow-y-auto pr-2 space-y-4" data-toolbar>
+                <div className="min-w-0 space-y-4 lg:min-h-0 lg:overflow-y-auto lg:pr-2" data-toolbar>
                   {/* Step 1: Brand Assets */}
                   <section className={panelCls}>
                     <div className="mb-3 flex items-center gap-2">
                       <span className={stepBadgeCls}>1</span>
                       <h3 className="text-sm font-semibold" style={{ color: textPrimary }}>品牌资产与核心信息</h3>
                     </div>
-                    <div className="grid grid-cols-3 gap-2 mb-3">
+                    <div className="grid grid-cols-1 gap-2 mb-3 sm:grid-cols-3">
                       <div>
                         <label className="block text-[12px] mb-1" style={{ color: textMuted }}>品牌名</label>
                         <input className={inputCls} placeholder="例如：山茶记" value={brandName} onChange={e => setBrandName(e.target.value)} />
@@ -854,11 +879,11 @@ export default function BrandPackagingPanel({ isMonochrome = false, onClose, onA
                     </div>
 
                     {/* Brand assets row */}
-                    <div className="grid grid-cols-[1fr_auto] gap-3">
+                    <div className="grid min-w-0 grid-cols-1 gap-3 xl:grid-cols-[minmax(0,1fr)_auto]">
                       {/* SKU Matrix */}
                       <div className="rounded-lg border p-2.5" style={{ borderColor: border, background: bgCard }}>
                         <div className="text-[12px] font-semibold mb-2" style={{ color: textMuted }}>系列 SKU 矩阵</div>
-                        <table className="w-full text-[12px]">
+                        <table className="w-full table-fixed text-[12px]">
                           <thead><tr style={{ color: textMuted }}>
                             <th className="py-1 text-left">SKU 名称</th>
                             <th className="py-1 text-left">规格</th>
@@ -879,15 +904,15 @@ export default function BrandPackagingPanel({ isMonochrome = false, onClose, onA
                         <button className="mt-2 text-[12px] cursor-pointer" style={{ color: textAccent }} onClick={addSku}>+ 新增 SKU</button>
                       </div>
                       {/* Logo + Colors + Font + Pattern */}
-                      <div className="flex flex-col gap-2">
+                      <div className="flex flex-wrap gap-2 xl:flex-col">
                         <button className="w-[72px] h-[72px] rounded-lg border-2 border-dashed flex flex-col items-center justify-center cursor-pointer transition-colors"
                           style={{ borderColor: border, color: textMuted }}
                           onClick={() => handleUpload('Logo')}>
                           {logoUrl ? <img src={logoUrl} alt="品牌 Logo" className="w-full h-full object-contain rounded" /> : <><Upload size={14} /><span className="text-[9px] mt-0.5">Logo</span></>}
                         </button>
                         <div className="flex gap-1">
-                          <input type="color" className="w-6 h-6 rounded cursor-pointer" value={brandColors[0] || '#d4af37'} onChange={e => setBrandColors([e.target.value])} title="品牌色" />
-                          <input type="color" className="w-6 h-6 rounded cursor-pointer" value={brandColors[1] || '#000000'} onChange={e => setBrandColors(prev => [prev[0] || '#d4af37', e.target.value])} title="辅助色" />
+                          <input type="color" className="w-11 h-11 rounded cursor-pointer" value={brandColors[0] || '#d4af37'} onChange={e => setBrandColors([e.target.value])} title="品牌色" />
+                          <input type="color" className="w-11 h-11 rounded cursor-pointer" value={brandColors[1] || '#000000'} onChange={e => setBrandColors(prev => [prev[0] || '#d4af37', e.target.value])} title="辅助色" />
                         </div>
                         <button className="w-[72px] h-[40px] rounded-lg border-2 border-dashed flex flex-col items-center justify-center cursor-pointer transition-colors text-[9px]"
                           style={{ borderColor: border, color: textMuted }}
@@ -1184,7 +1209,7 @@ export default function BrandPackagingPanel({ isMonochrome = false, onClose, onA
                       <span className={stepBadgeCls}>4</span>
                       <h3 className="text-sm font-semibold" style={{ color: textPrimary }}>上传参考与素材</h3>
                     </div>
-                    <div className="grid grid-cols-4 gap-2">
+                    <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
                       {['产品图', '包装参考图', 'Logo', '材质贴图'].map((t, i) => (
                         <button key={t} className="h-[72px] rounded-lg border-2 border-dashed flex flex-col items-center justify-center cursor-pointer transition-colors"
                           style={{ borderColor: border, color: textMuted }}
@@ -1212,7 +1237,7 @@ export default function BrandPackagingPanel({ isMonochrome = false, onClose, onA
                       <span className={stepBadgeCls}>5</span>
                       <h3 className="text-sm font-semibold" style={{ color: textPrimary }}>输出模式</h3>
                     </div>
-                    <div className="grid grid-cols-4 gap-1.5">
+                    <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-4">
                       {OUTPUT_MODES.map(m => (
                         <button key={m.value} className={`rounded-lg border p-2 text-[12px] flex flex-col items-center gap-1 cursor-pointer transition-all ${outputModes.includes(m.value) ? (isMonochrome ? 'border-blue-400 bg-blue-50 text-blue-700' : 'border-amber-400/60 bg-amber-400/10 text-amber-200') : (isMonochrome ? 'border-gray-200 bg-gray-50 text-gray-500 hover:border-blue-300' : 'border-white/10 bg-black/30 text-white/60 hover:border-amber-400/40')}`}
                           onClick={() => toggleOutputMode(m.value)}>
@@ -1267,8 +1292,8 @@ export default function BrandPackagingPanel({ isMonochrome = false, onClose, onA
                     {/* Export format + Generate button */}
                     {/* 模型选择 - 图像模型与LLM模型左右横向排列 */}
                     {imageModels.length > 0 && (
-                      <div className="grid grid-cols-2 gap-3">
-                        <div>
+                      <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2">
+                        <div className="min-w-0">
                           <span className="text-[11px] font-medium" style={{ color: textMuted }}>图像模型</span>
                           <select
                             className="w-full rounded-lg border px-2 py-1.5 text-[12px] cursor-pointer mt-0.5"
@@ -1358,8 +1383,8 @@ export default function BrandPackagingPanel({ isMonochrome = false, onClose, onA
                         )}
                       </div>
                     )}
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-1.5">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div className="flex flex-wrap items-center gap-1.5">
                         <span className="text-[12px]" style={{ color: textMuted }}>导出格式</span>
                         {(['PNG', 'SVG', 'PDF', 'AI'] as const).map(f => (
                           <button key={f} className={`rounded-md border px-2 py-1 text-[12px] cursor-pointer transition-colors ${exportFormat === f ? (isMonochrome ? 'border-blue-400 bg-blue-50 text-blue-700' : 'border-amber-400/60 bg-amber-400/10 text-amber-200') : (isMonochrome ? 'border-gray-200 text-gray-500' : 'border-white/10 text-white/50')}`}
@@ -1382,10 +1407,10 @@ export default function BrandPackagingPanel({ isMonochrome = false, onClose, onA
                 </div>
 
                 {/* RIGHT: Results area */}
-                <div className="flex flex-col gap-3 overflow-hidden">
+                <div className="flex min-w-0 flex-col gap-3 lg:min-h-0 lg:overflow-hidden">
                   {/* Results grid */}
-                  <section className={`${panelCls} flex-1 flex flex-col overflow-hidden`}>
-                    <div className="flex items-center justify-between mb-3">
+                  <section className={`${panelCls} min-w-0 flex-1 flex flex-col lg:min-h-0 lg:overflow-hidden`}>
+                    <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
                       <h3 className="text-xs font-semibold" style={{ color: textPrimary }}>预览与结果</h3>
                       <div className="flex gap-1">
                         {(['all', 'favorites', 'optimize'] as const).map(tab => (
@@ -1396,21 +1421,21 @@ export default function BrandPackagingPanel({ isMonochrome = false, onClose, onA
                         ))}
                       </div>
                     </div>
-                    <div className="flex-1 overflow-y-auto">
+                    <div className="min-w-0 flex-1 lg:min-h-0 lg:overflow-y-auto">
                       {filteredResults.length === 0 ? (
-                        <div className="flex flex-col items-center justify-center h-full text-xs" style={{ color: textMuted }}>
+                        <div className="flex min-h-32 flex-col items-center justify-center h-full text-xs" style={{ color: textMuted }}>
                           <Package size={32} className="mb-2 opacity-20" />
                           {isGenerating ? '正在生成包装方案...' : '设置参数后点击"生成方案"'}
                         </div>
                       ) : (
-                        <div className="grid grid-cols-2 gap-2">
+                        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                           {filteredResults.map(r => (
                             <div key={r.id} className="rounded-lg border overflow-hidden cursor-pointer group relative" style={{ borderColor: border }}>
                               <img src={r.url} alt={OUTPUT_MODES.find(m => m.value === r.type)?.label ?? r.type} className="w-full aspect-[4/3] object-cover" />
-                              <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex flex-col justify-end p-2">
+                              <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent opacity-100 lg:opacity-0 lg:group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity flex flex-col justify-end p-2">
                                 <span className="text-[12px] text-white">{OUTPUT_MODES.find(m => m.value === r.type)?.label || r.type}</span>
                                 <div className="flex gap-1 mt-1">
-                                  <button className="p-1 rounded bg-white/20 hover:bg-white/40" onClick={() => toggleFavorite(r.id)}>
+                                  <button className="p-1 rounded bg-white/20 hover:bg-white/40" onClick={() => toggleFavorite(r.id)} aria-label={favorites.has(r.id) ? '取消收藏方案' : '收藏方案'}>
                                     <Star size={10} fill={favorites.has(r.id) ? accent : 'none'} style={{ color: favorites.has(r.id) ? accent : '#fff' }} />
                                   </button>
                                   <button className="p-1 rounded bg-white/20 hover:bg-white/40" onClick={() => onAddImages?.([r.url], { modelName: selectedModel, apiProvider: selectedProviderId })} title="发送到画布">
@@ -1427,7 +1452,7 @@ export default function BrandPackagingPanel({ isMonochrome = false, onClose, onA
                       )}
                     </div>
                     {results.length > 0 && (
-                      <div className="mt-3 flex gap-2">
+                      <div className="mt-3 flex flex-wrap gap-2">
                         <button
                           className={`rounded-lg border px-3 py-1.5 text-[12px] cursor-pointer disabled:opacity-50 ${isMonochrome ? 'border-blue-300 text-blue-600 hover:bg-blue-50' : 'border-amber-500/40 text-amber-200 hover:bg-amber-500/10'}`}
                           onClick={handleGenerateSeries}
@@ -1450,7 +1475,7 @@ export default function BrandPackagingPanel({ isMonochrome = false, onClose, onA
                   <section className={panelCls}>
                     <h3 className="text-xs font-semibold mb-3" style={{ color: textPrimary }}>方案评估与分析</h3>
                     {analysis ? (
-                      <div className="grid grid-cols-2 gap-3">
+                      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                         <div className="flex items-center justify-center rounded-lg border p-4" style={{ borderColor: border, background: bgCard }}>
                           <div className="text-[12px]" style={{ color: textMuted }}>雷达图组件</div>
                         </div>
@@ -1493,7 +1518,6 @@ export default function BrandPackagingPanel({ isMonochrome = false, onClose, onA
               </div>
             </main>
           </div>
-        )}
       </div>
     </div>,
     document.body,

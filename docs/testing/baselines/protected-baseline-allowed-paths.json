@@ -764,5 +764,18 @@
   "src/lib/sketch-to-code/image-worker.ts",
   "src/lib/sketch-to-code/image-workflow.ts",
   "src/lib/sketch-to-code/recovery-client.ts",
-  "src/lib/sketch-to-code/stage.ts"
+  "src/lib/sketch-to-code/stage.ts",
+  "src/components/ai-psd/ai-psd-panel.tsx",
+  "src/components/aspect-recompose-panel.tsx",
+  "src/components/brand-factory-panel.tsx",
+  "src/components/brand-packaging-panel.tsx",
+  "src/components/display3d-panel.tsx",
+  "src/components/effect-reverse-engineering-panel.tsx",
+  "src/components/effect-reverse-engineering/source-panel.tsx",
+  "src/components/effect-reverse-engineering/workspace.tsx",
+  "src/components/favorites-panel.tsx",
+  "src/components/image-editor.tsx",
+  "src/components/logo-skill-panel.tsx",
+  "src/components/model-viewer-3d.tsx",
+  "src/components/project-data-panel.tsx"
 ]

@@ -91,7 +91,7 @@ export function EffectReverseSourcePanel({ source, onSelect, onUploadSource, mod
     <aside
       data-testid="effect-reverse-source-panel"
       data-panel="source-panel"
-      className="flex min-h-0 flex-col gap-5 overflow-y-auto border-r border-white/10 px-[18px] pb-[22px] pt-5 max-[960px]:border-b max-[960px]:border-r-0"
+      className="flex min-h-0 min-w-0 flex-col gap-5 overflow-y-auto border-r border-white/10 px-[18px] pb-[22px] pt-5 max-[960px]:min-h-fit max-[960px]:overflow-visible max-[960px]:border-b max-[960px]:border-r-0 [&_button]:min-h-11 [&_button]:min-w-11 [&_button]:whitespace-nowrap [&_input]:min-h-11 [&_select]:min-h-11 [&_input]:text-base [&_select]:text-base lg:[&_input]:text-sm lg:[&_select]:text-sm"
     >
       <section aria-labelledby="effect-reverse-upload-heading">
       <div id="effect-reverse-upload-heading"><SectionHeading>{REVERSE_COPY.uploadSection}</SectionHeading></div>

@@ -121,8 +121,8 @@ export function EffectReverseWorkspace({ imageUrl, points, regions, task, busy, 
   };
 
   return (
-    <main data-testid="effect-reverse-workspace" data-panel="workspace" className="flex min-h-0 min-w-0 flex-1 flex-col bg-[#0d0e0f]">
-      <nav className="flex h-[58px] shrink-0 items-end gap-1 border-b border-white/10 px-5" role="tablist" aria-label={REVERSE_COPY.workspaceLabel}>
+    <main data-testid="effect-reverse-workspace" data-panel="workspace" className="flex min-h-fit min-w-0 flex-none flex-col bg-[#0d0e0f] lg:min-h-0 lg:flex-1 [&_button]:min-h-11 [&_button]:min-w-11 [&_button]:whitespace-nowrap [&_textarea]:text-base lg:[&_textarea]:text-sm">
+      <nav className="flex h-[58px] shrink-0 items-end gap-1 overflow-x-auto border-b border-white/10 px-3 lg:px-5" role="tablist" aria-label={REVERSE_COPY.workspaceLabel}>
         {tabs.map(([value, label]) => {
           const resultRequired = value === 'vector' || value === 'history';
           return (
@@ -133,7 +133,7 @@ export function EffectReverseWorkspace({ imageUrl, points, regions, task, busy, 
               disabled={resultRequired && !hasRealResult}
               aria-selected={tab === value}
               onClick={() => setTab(value)}
-              className={`h-full border-b-2 px-4 text-sm transition-colors ${tab === value ? 'border-[#d4af37] text-[#e2c35f]' : 'border-transparent text-neutral-400 hover:text-neutral-200'} disabled:cursor-not-allowed disabled:opacity-35`}
+              className={`h-full shrink-0 border-b-2 px-3 text-sm transition-colors ${tab === value ? 'border-[#d4af37] text-[#e2c35f]' : 'border-transparent text-neutral-400 hover:text-neutral-200'} disabled:cursor-not-allowed disabled:opacity-35`}
               title={resultRequired && !hasRealResult ? REVERSE_COPY.unavailableUntilResult : label}
             >
               {label}
@@ -142,25 +142,25 @@ export function EffectReverseWorkspace({ imageUrl, points, regions, task, busy, 
         })}
       </nav>
 
-      <div className="flex h-11 shrink-0 items-center justify-between gap-3 border-b border-white/10 px-5">
-        <div className="flex items-center gap-1 text-neutral-400" aria-label="预览工具">
-          {([['select', REVERSE_COPY.selectTool, MousePointer2], ['pan', REVERSE_COPY.panTool, Move], ['annotate', REVERSE_COPY.annotateTool, ScanLine]] as const).map(([tool, label, Icon]) => <button key={tool} type="button" title={label} data-active={previewTool === tool} onClick={() => setPreviewTool(tool)} className={`flex h-[34px] w-[34px] items-center justify-center rounded-md ${previewTool === tool ? 'bg-[#d4af37] text-black' : 'hover:bg-white/10 hover:text-white'}`}><Icon className="h-4 w-4" /></button>)}
+      <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-white/10 px-3 py-2 lg:px-5">
+        <div className="flex min-w-0 flex-wrap items-center gap-1 text-neutral-400" aria-label="预览工具">
+          {([['select', REVERSE_COPY.selectTool, MousePointer2], ['pan', REVERSE_COPY.panTool, Move], ['annotate', REVERSE_COPY.annotateTool, ScanLine]] as const).map(([tool, label, Icon]) => <button key={tool} type="button" title={label} data-active={previewTool === tool} onClick={() => setPreviewTool(tool)} className={`flex h-11 w-11 items-center justify-center rounded-md ${previewTool === tool ? 'bg-[#d4af37] text-black' : 'hover:bg-white/10 hover:text-white'}`}><Icon className="h-4 w-4" /></button>)}
           <span className="mx-1 h-5 w-px bg-white/10" />
-          <button type="button" title={REVERSE_COPY.zoomIn} onClick={() => setPreviewZoom((value) => Math.min(4, Number((value + 0.1).toFixed(2))))} className="flex h-[34px] w-[34px] items-center justify-center rounded-md hover:bg-white/10 hover:text-white"><ZoomIn className="h-4 w-4" /></button>
-          <button type="button" title={REVERSE_COPY.zoomOut} onClick={() => setPreviewZoom((value) => Math.max(0.25, Number((value - 0.1).toFixed(2))))} className="flex h-[34px] w-[34px] items-center justify-center rounded-md hover:bg-white/10 hover:text-white"><ZoomOut className="h-4 w-4" /></button>
-          <button type="button" title={REVERSE_COPY.resetView} onClick={resetPreview} className="flex h-[34px] w-[34px] items-center justify-center rounded-md hover:bg-white/10 hover:text-white"><RotateCcw className="h-4 w-4" /></button>
+          <button type="button" title={REVERSE_COPY.zoomIn} onClick={() => setPreviewZoom((value) => Math.min(4, Number((value + 0.1).toFixed(2))))} className="flex h-11 w-11 items-center justify-center rounded-md hover:bg-white/10 hover:text-white"><ZoomIn className="h-4 w-4" /></button>
+          <button type="button" title={REVERSE_COPY.zoomOut} onClick={() => setPreviewZoom((value) => Math.max(0.25, Number((value - 0.1).toFixed(2))))} className="flex h-11 w-11 items-center justify-center rounded-md hover:bg-white/10 hover:text-white"><ZoomOut className="h-4 w-4" /></button>
+          <button type="button" title={REVERSE_COPY.resetView} onClick={resetPreview} className="flex h-11 w-11 items-center justify-center rounded-md hover:bg-white/10 hover:text-white"><RotateCcw className="h-4 w-4" /></button>
           <output className="ml-1 min-w-12 text-center text-[11px] text-neutral-500">{Math.round(previewZoom * 100)}%</output>
         </div>
         {tab === 'preview' && (
           <div className="flex rounded-md border border-white/10 bg-black/30 p-0.5" aria-label="预览模式">
             {([['original', REVERSE_COPY.original], ['structure', REVERSE_COPY.structureLayer], ['compare', REVERSE_COPY.compare]] as const).map(([value, label]) => (
-              <button key={value} type="button" onClick={() => setPreviewMode(value)} className={`rounded px-3 py-1.5 text-xs ${previewMode === value ? 'bg-[#d4af37] text-black' : 'text-neutral-400 hover:text-white'}`}>{label}</button>
+              <button key={value} type="button" onClick={() => setPreviewMode(value)} className={`min-h-11 min-w-11 whitespace-nowrap rounded px-3 py-1.5 text-xs ${previewMode === value ? 'bg-[#d4af37] text-black' : 'text-neutral-400 hover:text-white'}`}>{label}</button>
             ))}
           </div>
         )}
       </div>
 
-      <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-auto p-5">
+      <div className="flex min-h-fit min-w-0 flex-none flex-col gap-3 overflow-visible p-3 lg:min-h-0 lg:flex-1 lg:overflow-auto lg:p-5">
         {tab === 'preview' && (
           <div ref={previewContainerRef} className={`relative flex min-h-[540px] flex-1 items-center justify-center overflow-hidden rounded-lg border border-white/10 bg-black ${previewTool === 'pan' ? 'cursor-grab active:cursor-grabbing' : previewTool === 'annotate' ? 'cursor-crosshair' : 'cursor-default'}`} onPointerDown={onPreviewPointerDown} onPointerMove={onPreviewPointerMove} onPointerUp={onPreviewPointerUp} onPointerCancel={onPreviewPointerUp}>
             <div className="relative flex h-full w-full items-center justify-center will-change-transform" style={{ transform: `translate(${previewOffset.x}px, ${previewOffset.y}px) scale(${previewZoom})` }}>

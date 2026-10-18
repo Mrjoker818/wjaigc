@@ -5,6 +5,7 @@ import { X, GripVertical, RefreshCw, ChevronDown, ChevronUp, CheckCircle2, XCirc
 import { getPromptTemplates, searchTemplates } from '@/lib/prompt-templates';
 import { AgentProgressTimeline } from '@/components/agent-runtime/AgentProgressTimeline';
 import { useAgentRunEvents } from '@/components/agent-runtime/use-agent-run-events';
+import { constrainFloatingPanelPosition, getFloatingPanelViewport, subscribeFloatingPanelViewport } from '@/lib/floating-panel-position';
 
 interface AgentEditorProps {
   projectId?: string;
@@ -407,6 +408,34 @@ export function AgentEditor({
   const dragStart = useRef({ x: 0, y: 0 });
   const panelRef = useRef<HTMLDivElement>(null);
 
+  const [panelViewport, setPanelViewport] = useState(getFloatingPanelViewport);
+  const [measuredPanelHeight, setMeasuredPanelHeight] = useState(580);
+  const panelWidth = Math.min(320, Math.max(0, panelViewport.width - 16));
+  const panelMaxHeight = Math.max(0, Math.min(panelViewport.height - 16, panelViewport.height * 0.85));
+  const compactPanel = panelViewport.width < 1024 || panelViewport.height < 600;
+  const boundedPosition = constrainFloatingPanelPosition({
+    x: position.x - panelViewport.left, y: position.y - panelViewport.top,
+    viewportWidth: panelViewport.width, viewportHeight: panelViewport.height,
+    panelWidth, panelHeight: Math.min(measuredPanelHeight, panelMaxHeight), margin: 8,
+  });
+  const panelLeft = panelViewport.left + boundedPosition.x;
+  const panelTop = panelViewport.top + boundedPosition.y;
+
+  useEffect(() => subscribeFloatingPanelViewport(() => {
+    setPanelViewport(getFloatingPanelViewport());
+  }), []);
+
+  useEffect(() => {
+    const panel = panelRef.current;
+    if (!panel) return;
+    const measure = (): void => setMeasuredPanelHeight(panel.getBoundingClientRect().height);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(panel);
+    return () => observer.disconnect();
+  }, []);
+
+
   // 输入框拖动调整高度
   const [textareaHeight, setTextareaHeight] = useState(56);
   const isResizing = useRef(false);
@@ -788,6 +817,7 @@ export function AgentEditor({
 
   // 面板拖动
   const handlePanelDragStart = (e: React.MouseEvent) => {
+    if ((e.target as Element).closest('button')) return;
     e.preventDefault();
     e.stopPropagation();
     isDragging.current = true;
@@ -803,8 +833,8 @@ export function AgentEditor({
       };
     } else if (hasPosition) {
       dragStart.current = {
-        x: e.clientX - position.x,
-        y: e.clientY - position.y,
+        x: e.clientX - panelLeft,
+        y: e.clientY - panelTop,
       };
     } else {
       // panelRef not available yet, skip drag start
@@ -840,7 +870,7 @@ export function AgentEditor({
       if (!isResizing.current) return;
       ev.stopPropagation();
       const delta = resizeStart.current.height + (ev.clientY - resizeStart.current.y);
-      setTextareaHeight(Math.max(36, Math.min(300, delta)));
+      setTextareaHeight(Math.max(44, Math.min(300, delta)));
     };
     const onMouseUp = (ev: MouseEvent) => {
       ev.stopPropagation();
@@ -860,12 +890,12 @@ export function AgentEditor({
   return (
     <div
       ref={panelRef}
-      className="fixed z-[150]"
+      className="fixed z-[150] min-w-0 [&_button]:min-h-11 [&_button]:min-w-11 [&_button]:whitespace-nowrap [&_select]:min-h-11 [&_select]:min-w-0 [&_select]:max-w-full [&_input]:min-h-11 [&_input]:min-w-0 [&_textarea]:min-h-11 [&_textarea]:min-w-0 [&_svg]:shrink-0 max-sm:[&_input]:text-base max-sm:[&_select]:text-base max-sm:[&_textarea]:text-base"
       style={{
-        left: position.x,
-        top: position.y,
-        width: 320,
-        maxHeight: '85vh',
+        left: panelLeft,
+        top: panelTop,
+        width: panelWidth,
+        maxHeight: panelMaxHeight,
         backgroundColor: bgPanel,
         border: isDraggingState
           ? `2px solid ${accentColor}`
@@ -893,23 +923,27 @@ export function AgentEditor({
       >
         <GripVertical size={14} style={{ color: mutedColor }} />
         <Zap size={15} style={{ color: accentColor }} />
-        <span className="text-base font-semibold flex-1" style={{ color: accentColor }}>
+        <span className="min-w-0 whitespace-nowrap text-base font-semibold flex-1" style={{ color: accentColor }}>
           Agent 编排
         </span>
-        <span className="text-xs px-1.5 py-0.5 rounded" style={{ color: mutedColor, background: isMonochrome ? 'rgba(0,0,0,0.05)' : 'rgba(255,255,255,0.06)' }}>
+        <span className="shrink-0 whitespace-nowrap text-xs px-1.5 py-0.5 rounded" style={{ color: mutedColor, background: isMonochrome ? 'rgba(0,0,0,0.05)' : 'rgba(255,255,255,0.06)' }}>
           智能工具选择
         </span>
         <button
           onClick={(e) => { e.stopPropagation(); onClose(); }}
-          className="p-1 rounded-md transition-colors"
+          className="flex w-11 h-11 shrink-0 items-center justify-center p-1 rounded-md transition-colors"
+          title="关闭 Agent 编排"
+          aria-label="关闭 Agent 编排"
+          onMouseDown={e => e.stopPropagation()}
           style={{ color: mutedColor }}
         >
           <X size={14} />
         </button>
       </div>
 
-      {/* 可滚动内容区 */}
-      <div className="overflow-y-auto shrink-0" style={{ maxHeight: 240 }}>
+      {/* Header stays reachable; the original preview and footer share short-screen scrolling. */}
+      <div className="min-h-0 min-w-0 overflow-y-auto overscroll-contain" style={{ flex: '1 1 auto' }}>
+      <div className="shrink-0" style={{ maxHeight: compactPanel ? undefined : 240, overflowY: compactPanel ? undefined : 'auto' }}>
         {/* 图片区域 */}
         {imageUrl ? (
           <div className="px-3 pt-2 pb-1">
@@ -1069,7 +1103,7 @@ export function AgentEditor({
         )}
       </div>
 
-      {/* 固定底部区域：模型 + 轮次 + 输入框 + 按钮 + 拖拽手柄 */}
+      {/* 模型 + 轮次 + 输入框 + 按钮 + 拖拽手柄，保持原实例和顺序 */}
       <div className="shrink-0 flex flex-col" style={{ borderTop: `1px solid ${borderColor}` }}>
         {/* 决策模型选择（LLM） */}
         {chatModelOptions.length > 0 && (
@@ -1214,7 +1248,7 @@ export function AgentEditor({
         </div>
 
         {/* 执行按钮 */}
-        <div className="flex items-center gap-1.5 px-3 pb-1.5">
+        <div className="flex flex-wrap items-center gap-1.5 px-3 pb-1.5">
           {isProcessing ? (
             <button
               onClick={(e) => { e.stopPropagation(); handleCancel(); }}
@@ -1262,6 +1296,7 @@ export function AgentEditor({
         >
           <div className="w-8 h-1 rounded-full" style={{ backgroundColor: mutedColor, opacity: 0.5 }} />
         </div>
+      </div>
       </div>
     </div>
   );

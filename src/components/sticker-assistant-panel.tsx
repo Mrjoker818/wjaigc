@@ -7,6 +7,7 @@ import { getModelDisplayName } from '@/lib/model-name-map';
 import { getStickerModelLoadDiagnosticMessage } from '@/lib/sticker-model-load-state';
 import { getStickerFailureMessage } from '@/lib/sticker-failure-message';
 import { withClientImageOutputPreference } from '@/lib/image-generation-output-preference';
+import { constrainFloatingPanelPosition, getCenteredFloatingPanelPosition, getFloatingPanelViewport, subscribeFloatingPanelViewport } from '@/lib/floating-panel-position';
 
 
 /* ──────────────────── 主题色 ──────────────────── */
@@ -619,13 +620,30 @@ export default function StickerAssistantPanel({
   /* ── 拖拽 & 最小化 ── */
   const panelW = 480;
   const panelH = 620;
-  const [pos, setPos] = useState({
-    x: typeof window !== 'undefined' ? Math.max(40, (window.innerWidth - panelW) / 2) : 0,
-    y: typeof window !== 'undefined' ? Math.max(40, (window.innerHeight - panelH) / 2) : 0,
+  const [viewport, setViewport] = useState(getFloatingPanelViewport);
+  const [pos, setPos] = useState(() => {
+    const view = getFloatingPanelViewport();
+    const centered = getCenteredFloatingPanelPosition({ viewportWidth: view.width, viewportHeight: view.height, panelWidth: panelW, panelHeight: panelH, margin: 8 });
+    return { x: view.left + centered.x, y: view.top + centered.y };
   });
   const [dragging, setDragging] = useState(false);
   const dragOff = useRef({ x: 0, y: 0 });
   const [minimized, setMinimized] = useState(false);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const updateViewport = (): void => setViewport(getFloatingPanelViewport());
+    updateViewport();
+    return subscribeFloatingPanelViewport(updateViewport);
+  }, [isOpen]);
+
+  const panelWidth = Math.min(panelW, Math.max(0, viewport.width - 16));
+  const panelHeight = Math.min(minimized ? 58 : panelH, Math.max(0, viewport.height - 16));
+  const panelPosition = constrainFloatingPanelPosition({
+    x: pos.x - viewport.left, y: pos.y - viewport.top,
+    viewportWidth: viewport.width, viewportHeight: viewport.height,
+    panelWidth, panelHeight, margin: 8,
+  });
 
   /* ── 步骤 ── */
   const [step, setStep] = useState<0 | 1 | 2>(0);
@@ -1262,40 +1280,39 @@ ${themeDesc}
 
   return (
     <div
-      className="fixed z-[150] flex flex-col"
+      className="fixed z-[150] flex flex-col [&_button]:min-h-11 [&_button]:min-w-11 [&_button]:shrink-0 [&_button]:whitespace-nowrap [&_input]:min-h-11 [&_input]:min-w-0 [&_select]:min-h-11 [&_select]:min-w-0 [&_select]:max-w-full [&_textarea]:min-w-0 [&_p]:break-words"
       style={{
-        left: pos.x,
-        top: pos.y,
-        width: panelW,
-        maxHeight: minimized ? 40 : 'calc(100vh - 100px)',
+        left: viewport.left + panelPosition.x,
+        top: viewport.top + panelPosition.y,
+        width: panelWidth,
+        maxHeight: panelHeight,
         background: t.panelBg,
         borderRadius: 10,
         border: `1px solid ${t.border}`,
         boxShadow: t.shadow,
         overflow: 'hidden',
-        transition: 'max-height 0.2s ease',
       }}
       data-popup="sticker-assistant"
     >
       {/* ── 标题栏 ── */}
       <div
-        className="flex items-center justify-between px-3 h-10 cursor-move select-none shrink-0"
+        className="flex items-center justify-between gap-2 px-3 h-14 cursor-move select-none shrink-0"
         style={{ background: t.headerGrad, borderBottom: `1px solid ${t.border}` }}
         onMouseDown={onDragDown}
       >
-        <div className="flex items-center gap-2">
-          <GripVertical size={14} style={{ color: t.textDim }} />
-          <Smile size={15} style={{ color: t.accent }} />
-          <span className="text-sm font-medium" style={{ color: t.text }}>表情助手</span>
+        <div className="flex min-w-0 flex-1 items-center gap-2">
+          <GripVertical size={14} className="shrink-0" style={{ color: t.textDim }} />
+          <Smile size={15} className="shrink-0" style={{ color: t.accent }} />
+          <span className="truncate text-sm font-medium" style={{ color: t.text }}>表情助手</span>
           {plan.length > 0 && step >= 1 && (
-            <span className="text-xs px-1.5 py-0.5 rounded" style={{ background: t.accentBg, color: t.accent }}>
+            <span className="shrink-0 whitespace-nowrap text-xs px-1.5 py-0.5 rounded" style={{ background: t.accentBg, color: t.accent }}>
               {doneCount}/{plan.length}
             </span>
           )}
         </div>
-        <div className="flex items-center gap-1">
+        <div className="flex shrink-0 items-center gap-1">
           <button
-            className="p-1 rounded transition-colors duration-150"
+            className="flex items-center justify-center p-1 rounded transition-colors duration-150"
             style={{ color: t.textDim }}
             onMouseEnter={e => (e.currentTarget.style.color = t.text)}
             onMouseLeave={e => (e.currentTarget.style.color = t.textDim)}
@@ -1305,7 +1322,7 @@ ${themeDesc}
             <Minus size={14} />
           </button>
           <button
-            className="p-1 rounded transition-colors duration-150"
+            className="flex items-center justify-center p-1 rounded transition-colors duration-150"
             style={{ color: t.textDim }}
             onMouseEnter={e => (e.currentTarget.style.color = t.btnClose)}
             onMouseLeave={e => (e.currentTarget.style.color = t.textDim)}
@@ -1318,7 +1335,7 @@ ${themeDesc}
       </div>
 
       {minimized ? null : (
-        <div className="flex-1 overflow-y-auto" style={{ background: t.deepBg }}>
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain" style={{ background: t.deepBg }}>
           {/* ── 生成进度条 ── */}
           {step === 2 && plan.length > 0 && (
             <div className="h-1 shrink-0" style={{ background: t.border }}>
@@ -1538,7 +1555,7 @@ ${themeDesc}
               {/* 风格选择 */}
               <div>
                 <label className="block text-xs mb-1.5 font-medium" style={{ color: t.textSub }}>风格</label>
-                <div className="grid grid-cols-3 gap-2">
+                <div className="grid gap-2" style={{ gridTemplateColumns: viewport.width < 640 ? 'minmax(0, 1fr)' : 'repeat(3, minmax(0, 1fr))' }}>
                   {STYLE_PRESETS.map(s => (
                     <button
                       key={s.key}
@@ -1571,11 +1588,11 @@ ${themeDesc}
               {/* 主题选择 */}
               <div>
                 <label className="block text-xs mb-1.5 font-medium" style={{ color: t.textSub }}>主题</label>
-                <div className="grid grid-cols-4 gap-2">
+                <div className="grid gap-2" style={{ gridTemplateColumns: viewport.width < 640 ? 'minmax(0, 1fr)' : 'repeat(4, minmax(0, 1fr))' }}>
                   {THEME_PRESETS.map(th => (
                     <button
                       key={th.key}
-                      className="flex flex-col items-center gap-0.5 px-2 py-2 rounded-md text-xs transition-all duration-150 cursor-pointer"
+                      className={`flex ${viewport.width < 640 ? 'flex-row' : 'flex-col'} items-center justify-center gap-1 px-2 py-2 rounded-md text-xs transition-all duration-150 cursor-pointer`}
                       style={{
                         background: themeKey === th.key ? t.accentBg : t.cardBg,
                         border: `1.5px solid ${themeKey === th.key ? t.accent : t.border}`,
@@ -1604,7 +1621,7 @@ ${themeDesc}
               {/* 数量 */}
               <div>
                 <label className="block text-xs mb-1.5 font-medium" style={{ color: t.textSub }}>数量</label>
-                <div className="flex gap-2">
+                <div className="flex flex-wrap gap-2">
                   {[9, 16].map(n => (
                     <button
                       key={n}
@@ -1648,7 +1665,7 @@ ${themeDesc}
           {/* ── Step 1: 计划确认 ── */}
           {step === 1 && (
             <div className="p-4 space-y-3">
-              <div className="flex items-center justify-between">
+              <div className="flex flex-wrap items-center justify-between gap-2">
                 <span className="text-sm font-medium" style={{ color: t.text }}>
                   表情计划 ({plan.length}个)
                 </span>
@@ -1671,7 +1688,7 @@ ${themeDesc}
                     <div className="text-xs font-medium truncate" style={{ color: t.text }}>
                       主体: {subject}
                     </div>
-                    <div className="text-[10px]" style={{ color: t.textDim }}>
+                    <div className="break-words text-[10px]" style={{ color: t.textDim }}>
                       计划: {chatModels.find(m => m.id === chatModelId)?.displayLabel || '默认'}
                       {' · '}生图: {selectedModel?.displayLabel || selectedModel?.id || '默认'}
                       {' · '}风格: {selectedStyle.label}
@@ -1681,7 +1698,7 @@ ${themeDesc}
                 </div>
               )}
 
-              <div className="space-y-1.5 max-h-[45vh] overflow-y-auto pr-1">
+              <div className="space-y-1.5 pr-1">
                 {plan.map(item => (
                   <div
                     key={item.id}
@@ -1719,8 +1736,8 @@ ${themeDesc}
           {/* ── Step 2: 生成 ── */}
           {step === 2 && (
             <div className="p-4 space-y-3">
-              <div className="flex items-center justify-between">
-                <span className="text-sm font-medium" style={{ color: t.text }}>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="min-w-0 flex-1 text-sm font-medium" style={{ color: t.text }}>
                   生成进度 {doneCount}/{plan.length}
                   {generating && generatingCount > 0 && <span className="ml-1 opacity-60">（{generatingCount}张同时生成中）</span>}
                   {failCount > 0 && <span className="text-red-500 ml-1">({failCount}失败)</span>}
@@ -1734,7 +1751,7 @@ ${themeDesc}
                     停止
                   </button>
                 ) : (
-                  <div className="flex gap-2">
+                  <div className="flex flex-wrap gap-2">
                     {failCount > 0 && (
                       <button
                         className="text-xs px-2 py-1 rounded cursor-pointer transition-colors duration-150"
@@ -1755,7 +1772,7 @@ ${themeDesc}
                 )}
               </div>
 
-              <div className="grid grid-cols-3 gap-2 max-h-[50vh] overflow-y-auto">
+              <div className="grid gap-2" style={{ gridTemplateColumns: viewport.width < 640 ? 'minmax(0, 1fr)' : 'repeat(3, minmax(0, 1fr))' }}>
                 {plan.map(item => (
                   <div
                     key={item.id}
@@ -1807,7 +1824,7 @@ ${themeDesc}
 
               {/* 底部操作 */}
               {!generating && doneCount > 0 && (
-                <div className="flex gap-2 pt-1">
+                <div className="flex flex-wrap gap-2 pt-1">
                   <button
                     className="flex-1 py-2 rounded-md text-xs font-medium cursor-pointer transition-all duration-150 flex items-center justify-center gap-1"
                     style={{ background: t.accent, color: isMonochrome ? '#fff' : '#1a1a1a' }}
@@ -1818,6 +1835,7 @@ ${themeDesc}
                   <button
                     className="py-2 px-3 rounded-md text-xs font-medium cursor-pointer transition-all duration-150 flex items-center justify-center gap-1"
                     style={{ background: t.cardBg, color: t.textSub, border: `1px solid ${t.border}` }}
+                    aria-label="下载全部 ZIP"
                     onClick={handleDownloadAll}
                     disabled={downloadZipping}
                   >

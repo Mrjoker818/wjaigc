@@ -3,6 +3,7 @@
 import { GripHorizontal, GripVertical, Maximize2, Minimize2, ScanLine, X } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { taskEventsClient } from '@/lib/task-events-client';
+import { constrainFloatingPanelPosition, getFloatingPanelViewport, subscribeFloatingPanelViewport } from '@/lib/floating-panel-position';
 import type { EffectReverseRegion, EffectReverseTaskRecord, EffectReverseTaskResult, NormalizedPoint, NormalizedQuad } from '@/lib/effect-reverse-engineering/types';
 import { EffectReverseSourcePanel } from './effect-reverse-engineering/source-panel';
 import { EffectReverseWorkspace } from './effect-reverse-engineering/workspace';
@@ -54,6 +55,11 @@ function isValidPerspective(points: NormalizedPoint[]): points is NormalizedQuad
 export function EffectReverseEngineeringPanel({ initialSource, analyzerOptions = [], isMonochrome = false, onClose, onCanvasResult, onUploadSource }: EffectReverseEngineeringPanelProps) {
   const [geometry, setGeometry] = useState<WindowGeometry>(loadGeometry);
   const [viewport, setViewport] = useState(viewportSize);
+  const [visibleViewport, setVisibleViewport] = useState(getFloatingPanelViewport);
+  useEffect(() => {
+    const update = (): void => setVisibleViewport(getFloatingPanelViewport());
+    update(); return subscribeFloatingPanelViewport(update);
+  }, []);
   const [source, setSource] = useState<EffectReverseSource>(initialSource);
   const [minimized, setMinimized] = useState(false);
   const [maximized, setMaximized] = useState(false);
@@ -77,11 +83,19 @@ export function EffectReverseEngineeringPanel({ initialSource, analyzerOptions =
   const viewportRef = useRef(viewport);
   const desktopGeometryRef = useRef(geometry);
   const completedTaskRef = useRef<string | null>(null);
-  const shellGeometry = maximized
+  const baseShellGeometry = maximized
     ? { x: 16, y: 16, width: viewport.width - 32, height: viewport.height - 32 }
     : viewport.width < 960
       ? { x: 0, y: 0, width: viewport.width, height: viewport.height }
       : geometry;
+  const visibleWidth = Math.min(minimized ? 360 : baseShellGeometry.width, Math.max(0, visibleViewport.width - 16));
+  const visibleHeight = Math.min(minimized ? 56 : baseShellGeometry.height, Math.max(0, visibleViewport.height - 16));
+  const visiblePosition = constrainFloatingPanelPosition({
+    x: baseShellGeometry.x - visibleViewport.left, y: baseShellGeometry.y - visibleViewport.top,
+    viewportWidth: visibleViewport.width, viewportHeight: visibleViewport.height,
+    panelWidth: visibleWidth, panelHeight: visibleHeight, margin: 8,
+  });
+  const shellGeometry = { x: visibleViewport.left + visiblePosition.x, y: visibleViewport.top + visiblePosition.y, width: visibleWidth, height: visibleHeight };
   const validPerspective = isValidPerspective(points);
 
   useEffect(() => { if (typeof window !== 'undefined' && !maximized) localStorage.setItem(STORAGE_KEY, JSON.stringify(geometry)); }, [geometry, maximized]);
@@ -168,20 +182,20 @@ export function EffectReverseEngineeringPanel({ initialSource, analyzerOptions =
   return (
     <section data-popup="effect-reverse-engineering" data-testid="effect-reverse-engineering-panel" className={`fixed z-[220] flex overflow-hidden border shadow-2xl ${minimized ? 'rounded-lg' : 'rounded-xl'} ${isMonochrome ? 'border-neutral-300 bg-white text-neutral-950' : 'border-[#6e5a22] bg-[#111] text-neutral-100'}`} style={{ left: shellGeometry.x, top: shellGeometry.y, width: minimized ? Math.min(360, shellGeometry.width) : shellGeometry.width, height: minimized ? 56 : shellGeometry.height }} onPointerDown={(event) => event.stopPropagation()} onWheel={(event) => event.stopPropagation()}>
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className={`flex shrink-0 cursor-move items-center gap-3 border-b border-white/10 ${minimized ? 'h-14 px-3' : 'h-[84px] px-5'}`} onDoubleClick={() => setMaximized((value) => !value)} onPointerDown={(event) => { if ((event.target as HTMLElement).closest('button')) return; dragRef.current = { x: event.clientX, y: event.clientY, origin: geometry }; }}>
+        <header className={`flex shrink-0 cursor-move items-center gap-2 border-b border-white/10 ${minimized ? 'h-14 px-3' : 'h-14 px-3 lg:h-[84px] lg:px-5'}`} onDoubleClick={() => setMaximized((value) => !value)} onPointerDown={(event) => { if ((event.target as HTMLElement).closest('button')) return; dragRef.current = { x: event.clientX, y: event.clientY, origin: geometry }; }}>
           {minimized && <span data-testid="effect-reverse-minimized-chip" className="sr-only">{REVERSE_COPY.minimizedLabel}</span>}
-          <GripVertical data-testid="effect-reverse-title-grip" className="h-5 w-3 shrink-0 text-neutral-600" aria-hidden="true" />
+          <GripVertical data-testid="effect-reverse-title-grip" className="hidden h-5 w-3 shrink-0 text-neutral-600 lg:block" aria-hidden="true" />
           <div data-testid="effect-reverse-skill-badge" className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-[#d4af37]/40 bg-[#d4af37]/10 text-base font-bold text-[#e2c35f]">拆</div>
-          {!minimized && <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-white/5"><ScanLine className="h-5 w-5 text-[#d4af37]" /></div>}
+          {!minimized && <div className="hidden h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-white/5 lg:flex"><ScanLine className="h-5 w-5 text-[#d4af37]" /></div>}
           <div className="min-w-0 flex-1"><div className="truncate text-base font-semibold">{minimized ? REVERSE_COPY.minimizedLabel : REVERSE_COPY.title}</div>{!minimized && <div className="mt-1 truncate text-xs text-neutral-400">{REVERSE_COPY.subtitle}</div>}</div>
-          <button type="button" title={minimized ? REVERSE_COPY.restore : REVERSE_COPY.minimize} onClick={() => setMinimized((value) => !value)} className="rounded-md p-2 text-neutral-400 outline-none hover:bg-white/10 hover:text-white focus-visible:ring-2 focus-visible:ring-[#d4af37]"><Minimize2 className="h-4 w-4" /></button>
-          {!minimized && <button type="button" title={maximized ? REVERSE_COPY.restore : REVERSE_COPY.maximize} onClick={() => setMaximized((value) => !value)} className="rounded-md p-2 text-neutral-400 outline-none hover:bg-white/10 hover:text-white focus-visible:ring-2 focus-visible:ring-[#d4af37]"><Maximize2 className="h-4 w-4" /></button>}
-          <button type="button" title={REVERSE_COPY.close} onClick={onClose} className="rounded-md p-2 text-neutral-400 outline-none hover:bg-red-500/15 hover:text-red-300 focus-visible:ring-2 focus-visible:ring-[#d4af37]"><X className="h-4 w-4" /></button>
+          <button type="button" title={minimized ? REVERSE_COPY.restore : REVERSE_COPY.minimize} onClick={() => setMinimized((value) => !value)} className="grid h-11 w-11 shrink-0 place-items-center rounded-md p-2 text-neutral-400 outline-none hover:bg-white/10 hover:text-white focus-visible:ring-2 focus-visible:ring-[#d4af37]"><Minimize2 className="h-4 w-4" /></button>
+          {!minimized && <button type="button" title={maximized ? REVERSE_COPY.restore : REVERSE_COPY.maximize} onClick={() => setMaximized((value) => !value)} className="grid h-11 w-11 shrink-0 place-items-center rounded-md p-2 text-neutral-400 outline-none hover:bg-white/10 hover:text-white focus-visible:ring-2 focus-visible:ring-[#d4af37]"><Maximize2 className="h-4 w-4" /></button>}
+          <button type="button" title={REVERSE_COPY.close} onClick={onClose} className="grid h-11 w-11 shrink-0 place-items-center rounded-md p-2 text-neutral-400 outline-none hover:bg-red-500/15 hover:text-red-300 focus-visible:ring-2 focus-visible:ring-[#d4af37]"><X className="h-4 w-4" /></button>
         </header>
-        {!minimized && <div className="grid min-h-0 flex-1 grid-cols-[380px_minmax(0,1fr)] max-[960px]:grid-cols-1 max-[960px]:overflow-y-auto"><EffectReverseSourcePanel source={source} onSelect={setSource} onUploadSource={onUploadSource} mode={mode} geometryCorrection={geometryCorrection} analyzerAvailable={analyzerOptions.length > 0} analysisSubmitted={analysisSubmitted} regions={regions} busy={busy} hasRealResult={Boolean(task?.status === 'completed' && task.result)} horizontalCorrection={horizontalCorrection} verticalCorrection={verticalCorrection} perspectiveStrength={perspectiveStrength} basePart={basePart} baseDimension={baseDimension} dimensionUnit={dimensionUnit} onModeChange={setMode} onGeometryCorrectionChange={setGeometryCorrection} onAnalyze={runAnalyzer} onRegionsChange={setRegions} onHorizontalCorrectionChange={setHorizontalCorrection} onVerticalCorrectionChange={setVerticalCorrection} onPerspectiveStrengthChange={setPerspectiveStrength} onBasePartChange={setBasePart} onBaseDimensionChange={setBaseDimension} onDimensionUnitChange={setDimensionUnit} onResetPoints={() => { setPoints([]); setHorizontalCorrection(0); setVerticalCorrection(0); setPerspectiveStrength(62); }} onSubmit={(action) => void submit(action)} /><EffectReverseWorkspace imageUrl={source.imageUrl} points={points} regions={regions} task={task} busy={busy} instruction={instruction} onPointsChange={setPoints} onInstructionChange={setInstruction} onResetPoints={() => setPoints([])} onSubmit={(action) => void submit(action)} onCancel={() => void cancel()} /></div>}
-        {!minimized && <footer data-testid="effect-reverse-status-bar" className="flex h-10 shrink-0 items-center justify-between gap-4 border-t border-white/10 px-5 text-xs" aria-live="polite"><div className="flex min-w-0 items-center gap-5 text-neutral-400"><span>{REVERSE_COPY.modeStatus}<b className="text-neutral-200">{mode === 'restore' ? REVERSE_COPY.restoreMode : mode === 'production' ? REVERSE_COPY.productionMode : REVERSE_COPY.constructionMode}</b></span><span>{REVERSE_COPY.structureStatus}<b className="text-neutral-200">{regions.length} / {regions.length}</b></span><span>{REVERSE_COPY.correctionStatus}<b className="text-neutral-200">{geometryCorrection ? REVERSE_COPY.enabled : REVERSE_COPY.disabled}</b></span></div><span className="min-w-0 flex-1 truncate text-right text-neutral-400"><span className={`mr-2 inline-block h-2 w-2 rounded-full ${busy ? 'animate-pulse bg-amber-400' : 'bg-emerald-400'}`} />{message || task?.label || (source.imageUrl ? '图片已载入，等待结构分析' : '等待上传效果图')}</span>{task?.result?.exportUrl && <a href={task.result.exportUrl} download className="shrink-0 text-[#d4af37] underline underline-offset-2">{REVERSE_COPY.download}</a>}</footer>}
+        {!minimized && <div className="grid min-h-0 flex-1 grid-cols-[380px_minmax(0,1fr)] max-[960px]:grid-cols-1 max-[960px]:auto-rows-max max-[960px]:overflow-y-auto"><EffectReverseSourcePanel source={source} onSelect={setSource} onUploadSource={onUploadSource} mode={mode} geometryCorrection={geometryCorrection} analyzerAvailable={analyzerOptions.length > 0} analysisSubmitted={analysisSubmitted} regions={regions} busy={busy} hasRealResult={Boolean(task?.status === 'completed' && task.result)} horizontalCorrection={horizontalCorrection} verticalCorrection={verticalCorrection} perspectiveStrength={perspectiveStrength} basePart={basePart} baseDimension={baseDimension} dimensionUnit={dimensionUnit} onModeChange={setMode} onGeometryCorrectionChange={setGeometryCorrection} onAnalyze={runAnalyzer} onRegionsChange={setRegions} onHorizontalCorrectionChange={setHorizontalCorrection} onVerticalCorrectionChange={setVerticalCorrection} onPerspectiveStrengthChange={setPerspectiveStrength} onBasePartChange={setBasePart} onBaseDimensionChange={setBaseDimension} onDimensionUnitChange={setDimensionUnit} onResetPoints={() => { setPoints([]); setHorizontalCorrection(0); setVerticalCorrection(0); setPerspectiveStrength(62); }} onSubmit={(action) => void submit(action)} /><EffectReverseWorkspace imageUrl={source.imageUrl} points={points} regions={regions} task={task} busy={busy} instruction={instruction} onPointsChange={setPoints} onInstructionChange={setInstruction} onResetPoints={() => setPoints([])} onSubmit={(action) => void submit(action)} onCancel={() => void cancel()} /></div>}
+        {!minimized && <footer data-testid="effect-reverse-status-bar" className="flex min-h-11 shrink-0 flex-wrap items-center justify-between gap-2 border-t border-white/10 px-3 py-2 text-xs lg:px-5" aria-live="polite"><div className="flex min-w-0 flex-wrap items-center gap-2 text-neutral-400 lg:gap-5"><span>{REVERSE_COPY.modeStatus}<b className="text-neutral-200">{mode === 'restore' ? REVERSE_COPY.restoreMode : mode === 'production' ? REVERSE_COPY.productionMode : REVERSE_COPY.constructionMode}</b></span><span>{REVERSE_COPY.structureStatus}<b className="text-neutral-200">{regions.length} / {regions.length}</b></span><span>{REVERSE_COPY.correctionStatus}<b className="text-neutral-200">{geometryCorrection ? REVERSE_COPY.enabled : REVERSE_COPY.disabled}</b></span></div><span className="min-w-0 flex-1 truncate text-right text-neutral-400"><span className={`mr-2 inline-block h-2 w-2 rounded-full ${busy ? 'animate-pulse bg-amber-400' : 'bg-emerald-400'}`} />{message || task?.label || (source.imageUrl ? '图片已载入，等待结构分析' : '等待上传效果图')}</span>{task?.result?.exportUrl && <a href={task.result.exportUrl} download className="inline-flex min-h-11 min-w-11 shrink-0 items-center text-[#d4af37] underline underline-offset-2">{REVERSE_COPY.download}</a>}</footer>}
       </div>
-      {!minimized && !maximized && <button type="button" aria-label={REVERSE_COPY.resize} className="absolute bottom-0 right-0 cursor-nwse-resize p-1 text-neutral-500" onPointerDown={(event) => { resizeRef.current = { x: event.clientX, y: event.clientY, origin: geometry }; }}><GripHorizontal className="h-4 w-4 rotate-[-45deg]" /></button>}
+      {!minimized && !maximized && <button type="button" aria-label={REVERSE_COPY.resize} className="absolute bottom-0 right-0 hidden cursor-nwse-resize p-1 text-neutral-500 lg:block" onPointerDown={(event) => { resizeRef.current = { x: event.clientX, y: event.clientY, origin: geometry }; }}><GripHorizontal className="h-4 w-4 rotate-[-45deg]" /></button>}
     </section>
   );
 }

@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { X, Heart, Grid3X3, List, Search, Sparkles, Trash2, Clock, User, Copy, ChevronDown, ChevronUp, Image as ImageIcon, Download, Upload, Shuffle, Eye, ArrowRight, Tag, Filter, SortAsc, FolderOpen, CheckSquare, Square, GripHorizontal } from 'lucide-react';
+import { constrainFloatingPanelPosition, getCenteredFloatingPanelPosition, getFloatingPanelViewport, subscribeFloatingPanelViewport } from '@/lib/floating-panel-position';
 
 export interface FavoriteItem {
     id: number | string;
@@ -69,10 +70,30 @@ export function FavoritesPanel({ userId, onClose, isMonochrome, onApplyParams }:
     const [sortBy, setSortBy] = useState<'time' | 'model' | 'usage'>('time');
     const [filterModel, setFilterModel] = useState<string>('all');
     const [windowSize, setWindowSize] = useState({ w: 1020, h: 720 });
+    const [viewport, setViewport] = useState(getFloatingPanelViewport);
+    const [position, setPosition] = useState(() => {
+        const view = getFloatingPanelViewport();
+        const centered = getCenteredFloatingPanelPosition({ viewportWidth: view.width, viewportHeight: view.height, panelWidth: 1020, panelHeight: 720, margin: 8 });
+        return { x: view.left + centered.x, y: view.top + centered.y };
+    });
     const panelRef = useRef<HTMLDivElement>(null);
     const resizeRef = useRef<{ startX: number; startY: number; origW: number; origH: number } | null>(null);
     const dragRef = useRef<{ startX: number; startY: number; origX: number; origY: number } | null>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
+
+    useEffect(() => {
+        const updateViewport = (): void => setViewport(getFloatingPanelViewport());
+        updateViewport();
+        return subscribeFloatingPanelViewport(updateViewport);
+    }, []);
+
+    const panelWidth = Math.min(windowSize.w, Math.max(0, viewport.width - 16));
+    const panelHeight = Math.min(windowSize.h, viewport.height * 0.9, Math.max(0, viewport.height - 16));
+    const panelPosition = constrainFloatingPanelPosition({
+        x: position.x - viewport.left, y: position.y - viewport.top,
+        viewportWidth: viewport.width, viewportHeight: viewport.height,
+        panelWidth, panelHeight, margin: 8,
+    });
 
     // Theme colors for Monochrome - white bg, blue accent
     const mc = !!isMonochrome;
@@ -255,9 +276,7 @@ export function FavoritesPanel({ userId, onClose, isMonochrome, onApplyParams }:
             if (!dragRef.current || !panelRef.current) return;
             const dx = ev.clientX - dragRef.current.startX;
             const dy = ev.clientY - dragRef.current.startY;
-            panelRef.current.style.left = `${dragRef.current.origX + dx}px`;
-            panelRef.current.style.top = `${dragRef.current.origY + dy}px`;
-            panelRef.current.style.transform = 'none';
+            setPosition({ x: dragRef.current.origX + dx, y: dragRef.current.origY + dy });
         };
         const onUp = () => { dragRef.current = null; window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); };
         window.addEventListener('mousemove', onMove);
@@ -305,12 +324,11 @@ export function FavoritesPanel({ userId, onClose, isMonochrome, onApplyParams }:
                 ref={panelRef}
                 onClick={e => e.stopPropagation()}
                 onWheel={handleWheel}
-                className="fixed shadow-2xl flex flex-col overflow-hidden"
+                className="fixed shadow-2xl flex flex-col overflow-hidden [&_button]:min-h-11 [&_button]:min-w-11 [&_button]:shrink-0 [&_button]:whitespace-nowrap [&_input]:min-h-11 [&_select]:min-h-11 [&_select]:min-w-0 [&_select]:max-w-full [&_p]:break-words"
                 style={{
-                    width: windowSize.w,
-                    height: windowSize.h,
-                    maxHeight: '90vh',
-                    top: '50%', left: '50%', transform: 'translate(-50%, -50%)',
+                    width: panelWidth,
+                    height: panelHeight,
+                    top: viewport.top + panelPosition.y, left: viewport.left + panelPosition.x,
                     borderRadius: 16,
                     background: bg,
                     border: `1px solid ${border}`,
@@ -320,18 +338,18 @@ export function FavoritesPanel({ userId, onClose, isMonochrome, onApplyParams }:
                 {/* Title bar - draggable */}
                 <div
                     onMouseDown={handleDragStart}
-                    className="flex items-center justify-between px-5 py-3 cursor-move select-none flex-shrink-0"
+                    className="flex items-center justify-between gap-2 px-3 sm:px-5 py-2 cursor-move select-none flex-shrink-0"
                     style={{ borderBottom: `1px solid ${borderLight}`, background: mc ? '#f8fafc' : 'rgba(255,255,255,0.02)' }}
                 >
-                    <div className="flex items-center gap-2.5">
-                        <Heart size={18} fill={accent} stroke={accent} />
-                        <span className="text-[15px] font-semibold tracking-wide" style={{ color: textPrimary }}>收藏夹</span>
+                    <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2.5">
+                        <Heart size={18} className="shrink-0" fill={accent} stroke={accent} />
+                        <span className="whitespace-nowrap text-[15px] font-semibold tracking-wide" style={{ color: textPrimary }}>收藏夹</span>
                         <span className="text-xs ml-1" style={{ color: textMuted }}>{filtered.length} 项</span>
                         {batchMode && selectedIds.size > 0 && (
                             <span className="text-xs px-2 py-0.5 rounded-full" style={{ background: accentBg, color: accent }}>已选 {selectedIds.size}</span>
                         )}
                     </div>
-                    <div className="flex items-center gap-1">
+                    <div className="flex shrink-0 items-center gap-1">
                         {/* Batch mode toggle */}
                         <button
                             onClick={() => { setBatchMode(!batchMode); setSelectedIds(new Set()); }}
@@ -341,22 +359,23 @@ export function FavoritesPanel({ userId, onClose, isMonochrome, onApplyParams }:
                         >
                             <CheckSquare size={15} />
                         </button>
-                        <button onClick={onClose} className="p-1.5 rounded-md transition-colors hover:opacity-70" style={{ color: textMuted }}>
+                        <button onClick={onClose} aria-label="关闭收藏夹" className="flex items-center justify-center p-1.5 rounded-md transition-colors hover:opacity-70" style={{ color: textMuted }}>
                             <X size={16} />
                         </button>
                     </div>
                 </div>
 
+                <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
                 {/* Toolbar: Search + Actions */}
-                <div className="flex items-center gap-2 px-5 py-2.5 flex-shrink-0" style={{ borderBottom: `1px solid ${borderLight}` }}>
+                <div className="flex flex-wrap items-center gap-2 px-3 sm:px-5 py-2.5" style={{ borderBottom: `1px solid ${borderLight}` }}>
                     {/* Search */}
-                    <div className="flex-1 flex items-center gap-2 rounded-lg px-3 py-1.5" style={{ background: inputBg, border: `1px solid ${borderLight}` }}>
+                    <div className="min-w-0 basis-full lg:basis-0 flex-1 flex items-center gap-2 rounded-lg px-3 py-1.5" style={{ background: inputBg, border: `1px solid ${borderLight}` }}>
                         <Search size={14} style={{ color: textMuted }} />
                         <input
                             value={searchQuery}
                             onChange={e => setSearchQuery(e.target.value)}
                             placeholder="搜索关键词、模型、用户..."
-                            className="flex-1 bg-transparent text-sm outline-none"
+                            className="min-w-0 w-full flex-1 bg-transparent text-sm outline-none"
                             style={{ color: textPrimary }}
                         />
                     </div>
@@ -385,10 +404,10 @@ export function FavoritesPanel({ userId, onClose, isMonochrome, onApplyParams }:
                     )}
                     {/* View toggle */}
                     <div className="flex items-center rounded-lg overflow-hidden" style={{ border: `1px solid ${borderLight}` }}>
-                        <button onClick={() => setViewMode('grid')} className="p-1.5 transition-colors" style={{ background: viewMode === 'grid' ? accentBg : 'transparent' }}>
+                        <button aria-label="网格视图" onClick={() => setViewMode('grid')} className="p-1.5 transition-colors" style={{ background: viewMode === 'grid' ? accentBg : 'transparent' }}>
                             <Grid3X3 size={14} style={{ color: viewMode === 'grid' ? accent : textMuted }} />
                         </button>
-                        <button onClick={() => setViewMode('list')} className="p-1.5 transition-colors" style={{ background: viewMode === 'list' ? accentBg : 'transparent' }}>
+                        <button aria-label="列表视图" onClick={() => setViewMode('list')} className="p-1.5 transition-colors" style={{ background: viewMode === 'list' ? accentBg : 'transparent' }}>
                             <List size={14} style={{ color: viewMode === 'list' ? accent : textMuted }} />
                         </button>
                     </div>
@@ -407,7 +426,7 @@ export function FavoritesPanel({ userId, onClose, isMonochrome, onApplyParams }:
 
                 {/* Batch action bar */}
                 {batchMode && (
-                    <div className="flex items-center gap-3 px-5 py-2 flex-shrink-0" style={{ background: mc ? '#eff6ff' : 'rgba(59,130,246,0.06)', borderBottom: `1px solid ${borderLight}` }}>
+                    <div className="flex flex-wrap items-center gap-3 px-3 sm:px-5 py-2" style={{ background: mc ? '#eff6ff' : 'rgba(59,130,246,0.06)', borderBottom: `1px solid ${borderLight}` }}>
                         <button
                             onClick={() => setSelectedIds(new Set(filtered.map(f => f.id)))}
                             className="text-xs px-2.5 py-1 rounded-md transition-colors"
@@ -429,7 +448,7 @@ export function FavoritesPanel({ userId, onClose, isMonochrome, onApplyParams }:
                 )}
 
                 {/* Content */}
-                <div className="flex-1 overflow-y-auto p-4" style={{ scrollbarWidth: 'thin' }}>
+                <div className="min-w-0 p-4" style={{ scrollbarWidth: 'thin' }}>
                     {loading ? (
                         <div className="flex items-center justify-center py-16 gap-2" style={{ color: textMuted }}>
                             <div className="w-4 h-4 border-2 rounded-full animate-spin" style={{ borderColor: `${accent}33`, borderTopColor: accent }} />
@@ -442,7 +461,7 @@ export function FavoritesPanel({ userId, onClose, isMonochrome, onApplyParams }:
                             <p className="text-xs mt-1" style={{ color: textMuted }}>右键画布图片可添加到收藏夹</p>
                         </div>
                     ) : viewMode === 'grid' ? (
-                        <div className="grid grid-cols-4 gap-3" style={{ minWidth: 500 }}>
+                        <div className="grid gap-3" style={{ gridTemplateColumns: viewport.width < 768 || panelWidth < 640 ? 'minmax(0, 1fr)' : panelWidth < 960 ? 'repeat(2, minmax(0, 1fr))' : 'repeat(4, minmax(0, 1fr))' }}>
                             {filtered.map(item => (
                                 <div
                                     key={item.id}
@@ -470,7 +489,7 @@ export function FavoritesPanel({ userId, onClose, isMonochrome, onApplyParams }:
                                     <div className="relative aspect-square" style={{ background: mc ? '#e2e8f0' : 'rgba(255,255,255,0.05)' }}>
                                         <img src={item.imageUrl} alt="" className="w-full h-full object-cover" loading="lazy" />
                                         {/* Hover overlay */}
-                                        <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-all duration-200 flex items-center justify-center gap-2 opacity-0 group-hover:opacity-100">
+                                        <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-all duration-200 flex flex-wrap items-center justify-center gap-2 opacity-100 lg:opacity-0 group-hover:opacity-100 focus-within:opacity-100">
                                             <button
                                                 onClick={e => { e.stopPropagation(); handleApply(item); }}
                                                 className="px-3 py-1.5 rounded-lg text-xs font-medium text-white flex items-center gap-1.5 transition-transform hover:scale-105"
@@ -500,9 +519,9 @@ export function FavoritesPanel({ userId, onClose, isMonochrome, onApplyParams }:
                                         <p className="text-xs truncate leading-snug" style={{ color: textPrimary }}>
                                             {highlightText(item.prompt || '无描述', searchQuery)}
                                         </p>
-                                        <div className="flex items-center gap-1.5 mt-1.5">
+                                        <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
                                             {item.modelName && (
-                                                <span className="text-[10px] px-1.5 py-0.5 rounded" style={{ background: accentBg, color: accent }}>{item.modelName}</span>
+                                                <span className="max-w-full break-all text-[10px] px-1.5 py-0.5 rounded" style={{ background: accentBg, color: accent }}>{item.modelName}</span>
                                             )}
                                             {item.aspectRatio && (
                                                 <span className="text-[10px]" style={{ color: textMuted }}>{item.aspectRatio}</span>
@@ -552,7 +571,7 @@ export function FavoritesPanel({ userId, onClose, isMonochrome, onApplyParams }:
                                         </p>
                                         <div className="flex items-center gap-2 mt-1 flex-wrap">
                                             {item.modelName && (
-                                                <span className="text-[11px] px-1.5 py-0.5 rounded" style={{ background: accentBg, color: accent }}>{item.modelName}</span>
+                                                <span className="max-w-full break-all text-[11px] px-1.5 py-0.5 rounded" style={{ background: accentBg, color: accent }}>{item.modelName}</span>
                                             )}
                                             {item.aspectRatio && (
                                                 <span className="text-[11px]" style={{ color: textMuted }}>{item.aspectRatio}</span>
@@ -566,9 +585,9 @@ export function FavoritesPanel({ userId, onClose, isMonochrome, onApplyParams }:
                                                 </span>
                                             )}
                                         </div>
-                                        <div className="flex items-center gap-3 mt-1.5 text-[11px]" style={{ color: textMuted }}>
+                                        <div className="flex flex-wrap items-center gap-3 mt-1.5 text-[11px]" style={{ color: textMuted }}>
                                             {item.username && (
-                                                <span className="flex items-center gap-1"><User size={10} />{item.username}</span>
+                                                <span className="flex max-w-full break-all items-center gap-1"><User size={10} />{item.username}</span>
                                             )}
                                             {item.createdAt && (
                                                 <span className="flex items-center gap-1"><Clock size={10} />{formatTime(item.createdAt)}</span>
@@ -621,22 +640,22 @@ export function FavoritesPanel({ userId, onClose, isMonochrome, onApplyParams }:
                     const item = filtered.find(f => f.id === expandedId);
                     if (!item) return null;
                     return (
-                        <div className="px-5 py-3 flex-shrink-0" style={{ borderTop: `1px solid ${borderLight}`, background: mc ? '#f8fafc' : 'rgba(255,255,255,0.01)' }}>
+                        <div className="min-w-0 px-3 sm:px-5 py-3" style={{ borderTop: `1px solid ${borderLight}`, background: mc ? '#f8fafc' : 'rgba(255,255,255,0.01)' }}>
                             <div className="flex items-center justify-between mb-2">
                                 <span className="text-xs font-medium" style={{ color: textSecondary }}>参数详情</span>
-                                <button onClick={() => setExpandedId(null)} style={{ color: textMuted }}>
+                                <button onClick={() => setExpandedId(null)} aria-label="收起参数详情" style={{ color: textMuted }}>
                                     <ChevronDown size={14} />
                                 </button>
                             </div>
-                            <div className="grid grid-cols-2 gap-x-6 gap-y-1.5 text-xs">
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-1.5 text-xs [&>div]:min-w-0">
                                 {item.prompt && (
-                                    <div className="col-span-2">
+                                    <div className="sm:col-span-2">
                                         <span style={{ color: textMuted }}>提示词</span>
                                         <p className="mt-0.5 leading-relaxed break-all" style={{ color: textPrimary }}>{item.prompt}</p>
                                     </div>
                                 )}
                                 {item.negativePrompt && (
-                                    <div className="col-span-2">
+                                    <div className="sm:col-span-2">
                                         <span style={{ color: textMuted }}>反向提示词</span>
                                         <p className="mt-0.5 leading-relaxed break-all" style={{ color: textSecondary }}>{item.negativePrompt}</p>
                                     </div>
@@ -649,7 +668,7 @@ export function FavoritesPanel({ userId, onClose, isMonochrome, onApplyParams }:
                                 {item.username && <div><span style={{ color: textMuted }}>收藏自</span><p className="mt-0.5" style={{ color: textPrimary }}>{item.username}</p></div>}
                                 {item.createdAt && <div><span style={{ color: textMuted }}>收藏时间</span><p className="mt-0.5" style={{ color: textPrimary }}>{formatTime(item.createdAt)}</p></div>}
                             </div>
-                            <div className="flex gap-2 mt-3">
+                            <div className="flex flex-wrap gap-2 mt-3">
                                 <button
                                     onClick={() => handleApply(item)}
                                     className="flex-1 py-2 rounded-lg text-sm font-medium flex items-center justify-center gap-2 transition-all hover:opacity-90"
@@ -690,10 +709,15 @@ export function FavoritesPanel({ userId, onClose, isMonochrome, onApplyParams }:
                     </div>
                 )}
 
+                </div>
+
+                {/* Reserve the resize target outside scrolling controls. */}
+                <div aria-hidden="true" className="h-11 shrink-0" />
                 {/* Resize handle - bottom right */}
                 <div
                     onMouseDown={handleResizeStart}
-                    className="absolute bottom-0 right-0 w-5 h-5 cursor-se-resize flex items-center justify-center"
+                    title="调整收藏夹大小"
+                    className="absolute bottom-0 right-0 w-11 h-11 cursor-se-resize flex items-center justify-center"
                     style={{ color: textMuted }}
                 >
                     <GripHorizontal size={12} className="rotate-[-45deg]" />
@@ -702,24 +726,24 @@ export function FavoritesPanel({ userId, onClose, isMonochrome, onApplyParams }:
                 {/* Preview modal */}
                 {previewItem && (
                     <div
-                        className="absolute inset-0 z-50 flex items-center justify-center"
+                        className="absolute inset-0 z-50 flex items-center justify-center overflow-y-auto"
                         style={{ background: 'rgba(0,0,0,0.6)', borderRadius: 16 }}
                         onClick={() => setPreviewItem(null)}
                     >
                         <div
-                            className="relative max-w-[80%] max-h-[80%] flex gap-4"
+                            className="relative min-w-0 w-[calc(100%_-_16px)] max-w-[640px] max-h-[calc(100%_-_16px)] flex flex-col lg:flex-row gap-4 overflow-y-auto overscroll-contain"
+                            style={{ background: bg, borderRadius: 12, padding: 16, border: `1px solid ${border}`, flexDirection: viewport.width < 1024 ? 'column' : 'row' }}
                             onClick={e => e.stopPropagation()}
-                            style={{ background: bg, borderRadius: 12, padding: 16, border: `1px solid ${border}` }}
                         >
                             <img
                                 src={previewItem.imageUrl}
                                 alt=""
-                                className="max-h-[60vh] max-w-[50%] object-contain rounded-lg"
+                                className="w-full max-h-40 lg:max-h-[60vh] lg:max-w-[50%] object-contain rounded-lg"
                             />
-                            <div className="flex-1 min-w-[200px] max-w-[300px] flex flex-col">
+                            <div className="flex-1 min-w-0 w-full lg:max-w-[300px] flex flex-col">
                                 <div className="flex items-center justify-between mb-3">
                                     <span className="text-sm font-semibold" style={{ color: textPrimary }}>图片详情</span>
-                                    <button onClick={() => setPreviewItem(null)} style={{ color: textMuted }}>
+                                    <button onClick={() => setPreviewItem(null)} aria-label="关闭图片详情" style={{ color: textMuted }}>
                                         <X size={16} />
                                     </button>
                                 </div>
@@ -735,13 +759,13 @@ export function FavoritesPanel({ userId, onClose, isMonochrome, onApplyParams }:
                                         <p className="text-sm mt-1 leading-relaxed break-all" style={{ color: textSecondary }}>{previewItem.negativePrompt}</p>
                                     </div>
                                 )}
-                                <div className="grid grid-cols-2 gap-2 text-xs mb-4">
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs mb-4 [&>div]:min-w-0">
                                     {previewItem.modelName && <div><span style={{ color: textMuted }}>模型</span><p style={{ color: textPrimary }}>{previewItem.modelName}</p></div>}
                                     {previewItem.aspectRatio && <div><span style={{ color: textMuted }}>比例</span><p style={{ color: textPrimary }}>{previewItem.aspectRatio}</p></div>}
                                     {previewItem.quality && <div><span style={{ color: textMuted }}>质量</span><p style={{ color: textPrimary }}>{previewItem.quality}</p></div>}
                                     {(previewItem.originalWidth && previewItem.originalHeight) && <div><span style={{ color: textMuted }}>尺寸</span><p style={{ color: textPrimary }}>{previewItem.originalWidth}×{previewItem.originalHeight}</p></div>}
                                 </div>
-                                <div className="flex gap-2 mt-auto">
+                                <div className="flex flex-wrap gap-2 mt-auto">
                                     <button
                                         onClick={() => { handleApply(previewItem); setPreviewItem(null); }}
                                         className="flex-1 py-2 rounded-lg text-sm font-medium flex items-center justify-center gap-1.5"
@@ -751,6 +775,7 @@ export function FavoritesPanel({ userId, onClose, isMonochrome, onApplyParams }:
                                         调用参数
                                     </button>
                                     <button
+                                        aria-label="复制提示词"
                                         onClick={() => handleCopyPrompt(previewItem.prompt || '')}
                                         className="px-3 py-2 rounded-lg text-sm"
                                         style={{ background: inputBg, color: textSecondary, border: `1px solid ${borderLight}` }}

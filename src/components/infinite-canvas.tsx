@@ -7962,7 +7962,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
       await Promise.race([
         new Promise(r => setTimeout(r, pollDelay)),
         new Promise(resolve => {
-          if (!taskEventsClient.isConnected()) { resolve(undefined); return; }
+          if (!taskEventsClient.isConnected()) return; // SSE 不可用时仍等待上面的原计时器。
           const unsub = taskEventsClient.onTaskEvent(event => {
             if (event.taskId === taskId && ['completed', 'failed', 'cancelled'].includes(event.type)) {
               unsub();
@@ -10345,7 +10345,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
       const targetHeight = Math.round(targetWidth * h / w);
       const response = await fetch('/api/aspect-recompose', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ imageUrl: selectedImage.url, targetWidth, targetHeight, model: model.model, providerId: model.providerId }),
+        body: JSON.stringify({ imageUrl: selectedImage.url, targetRatio: ratio, targetWidth, targetHeight, model: model.model, providerId: model.providerId }),
       });
       if (!response.ok) throw new Error(`横竖重组失败：HTTP ${response.status}`);
       const data = await response.json();
@@ -18127,6 +18127,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
           <AspectRecomposePanel
             targetRatio={aspectRecomposeRatio}
             processing={aspectRecomposeProcessing}
+            isMonochrome={isMonochrome}
             onTargetRatioChange={setAspectRecomposeRatio}
             onConfirm={handleAspectRecomposeConfirm}
             onClose={() => { setShowAspectRecomposePanel(false); }}

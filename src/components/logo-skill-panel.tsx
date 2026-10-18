@@ -1,6 +1,8 @@
 'use client';
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react';
+import { constrainFloatingPanelPosition, getCenteredFloatingPanelPosition, getFloatingPanelViewport,
+  subscribeFloatingPanelViewport, type FloatingPanelPosition, type FloatingPanelViewport } from '@/lib/floating-panel-position';
 import ReactDOM from 'react-dom';
 import {
   PenTool, X, Loader2, Wand2, Star, Eye, ArrowRight,
@@ -118,29 +120,32 @@ function ModelDropdownPortal({
 }) {
   const [style, setStyle] = useState<React.CSSProperties>({});
 
-  useEffect(() => {
-    if (buttonRef?.current) {
+  useLayoutEffect(() => {
+    let frame = 0;
+    const update = (): void => {
+      if (!buttonRef?.current) return;
       const rect = buttonRef.current.getBoundingClientRect();
-      const spaceBelow = window.innerHeight - rect.bottom;
-      const dropH = 240;
-      const top = spaceBelow < dropH
-        ? rect.top - dropH - 4
-        : rect.bottom + 4;
-      setStyle({
-        position: 'fixed',
-        top,
-        left: rect.left,
-        width: rect.width,
-        zIndex: 9999,
-      });
-    }
-   
+      const view = getFloatingPanelViewport();
+      const width = Math.max(0, Math.min(rect.width, view.width - 16));
+      const below = Math.max(0, view.top + view.height - rect.bottom - 12);
+      const above = Math.max(0, rect.top - view.top - 12);
+      const maxHeight = Math.min(240, Math.max(below, above));
+      const preferredTop = below >= above ? rect.bottom + 4 : rect.top - maxHeight - 4;
+      setStyle({ position: 'fixed', zIndex: 9999, width, maxHeight,
+        left: Math.max(view.left + 8, Math.min(rect.left, view.left + view.width - width - 8)),
+        top: Math.max(view.top + 8, Math.min(preferredTop, view.top + view.height - maxHeight - 8)) });
+    };
+    const schedule = (): void => { cancelAnimationFrame(frame); frame = requestAnimationFrame(update); };
+    update();
+    const unsubscribe = subscribeFloatingPanelViewport(schedule);
+    document.addEventListener('scroll', schedule, true);
+    return () => { unsubscribe(); document.removeEventListener('scroll', schedule, true); cancelAnimationFrame(frame); };
   }, [buttonRef]);
 
   return ReactDOM.createPortal(
     <div
       style={style}
-      className={`max-h-60 overflow-y-auto rounded-xl border shadow-2xl ${isMonochrome ? 'bg-white border-gray-200' : 'bg-[#1a1a1a] border-white/10'}`}
+      className={`max-h-60 overflow-y-auto rounded-xl border shadow-2xl [&_button]:min-h-11 [&_button]:min-w-11 ${isMonochrome ? 'bg-white border-gray-200' : 'bg-[#1a1a1a] border-white/10'}`}
     >
       {children}
     </div>,
@@ -177,19 +182,50 @@ export default function LogoSkillPanel({
 }: LogoSkillPanelProps) {
   // ─── Panel position (draggable) ──────────────────────────────
   const panelRef = useRef<HTMLDivElement>(null);
-  const [pos, setPos] = useState({ x: 0, y: 0 });
+  const [pos, setPos] = useState<FloatingPanelPosition>({ x: 8, y: 8 });
   const [dragging, setDragging] = useState(false);
   const [isMinimized, setIsMinimized] = useState(false);
   const dragStart = useRef({ mx: 0, my: 0, px: 0, py: 0 });
 
-  useEffect(() => {
-    setPos({
-      x: Math.max(20, (window.innerWidth - PANEL_W) / 2),
-      y: Math.max(72, (window.innerHeight - 620) / 2),
-    });
+
+  const [panelViewport, setPanelViewport] = useState<FloatingPanelViewport>({ width: 1056, height: 776, left: 0, top: 0 });
+  const panelWidth = Math.max(0, Math.min(PANEL_W, panelViewport.width - 16));
+  const panelMaxHeight = Math.max(0, Math.min(panelViewport.height - 16,
+    panelViewport.width >= 1024 && panelViewport.height >= 600 ? Math.min(840, panelViewport.height * 0.85) : panelViewport.height - 16));
+  const constrainPanelPosition = useCallback((next: FloatingPanelPosition): FloatingPanelPosition => {
+    const view = getFloatingPanelViewport();
+    const box = panelRef.current?.getBoundingClientRect();
+    const bounded = constrainFloatingPanelPosition({ x: next.x - view.left, y: next.y - view.top,
+      viewportWidth: view.width, viewportHeight: view.height,
+      panelWidth: box?.width || Math.min(PANEL_W, Math.max(0, view.width - 16)), panelHeight: box?.height || 60, margin: 8 });
+    return { x: bounded.x + view.left, y: bounded.y + view.top };
   }, []);
+  useLayoutEffect(() => {
+    const update = (): void => {
+      const next = getFloatingPanelViewport();
+      setPanelViewport(current => current.width === next.width && current.height === next.height
+        && current.left === next.left && current.top === next.top ? current : next);
+    };
+    const view = getFloatingPanelViewport();
+    const box = panelRef.current?.getBoundingClientRect();
+    const centered = getCenteredFloatingPanelPosition({ viewportWidth: view.width, viewportHeight: view.height,
+      panelWidth: Math.min(PANEL_W, Math.max(0, view.width - 16)),
+      panelHeight: box?.height || Math.min(840, Math.max(0, view.height - 16)), margin: 8 });
+    setPos({ x: centered.x + view.left, y: centered.y + view.top });
+    update(); return subscribeFloatingPanelViewport(update);
+  }, []);
+  useLayoutEffect(() => {
+    const keepVisible = (): void => setPos(current => {
+      const next = constrainPanelPosition(current); return next.x === current.x && next.y === current.y ? current : next;
+    });
+    keepVisible();
+    if (typeof ResizeObserver === 'undefined' || !panelRef.current) return;
+    const observer = new ResizeObserver(keepVisible); observer.observe(panelRef.current);
+    return () => observer.disconnect();
+  }, [panelViewport, isMinimized, constrainPanelPosition]);
 
   const onDragStart = useCallback((e: React.MouseEvent) => {
+    if (e.button !== 0 || (e.target as HTMLElement).closest('button,input,select,textarea,a')) return;
     e.preventDefault();
     setDragging(true);
     dragStart.current = { mx: e.clientX, my: e.clientY, px: pos.x, py: pos.y };
@@ -200,16 +236,13 @@ export default function LogoSkillPanel({
     const onMove = (e: MouseEvent) => {
       const dx = e.clientX - dragStart.current.mx;
       const dy = e.clientY - dragStart.current.my;
-      setPos({
-        x: Math.max(0, Math.min(window.innerWidth - PANEL_W, dragStart.current.px + dx)),
-        y: Math.max(0, Math.min(window.innerHeight - 100, dragStart.current.py + dy)),
-      });
+      setPos(constrainPanelPosition({ x: dragStart.current.px + dx, y: dragStart.current.py + dy }));
     };
-    const onUp = () => setDragging(false);
+    const onUp = (): void => { setPos(current => constrainPanelPosition(current)); setDragging(false); };
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
     return () => { window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); };
-  }, [dragging]);
+  }, [dragging, constrainPanelPosition]);
 
   // ─── State ─────────────────────────────────────────────────
   const [step, setStep] = useState<Step>('input');
@@ -742,8 +775,8 @@ export default function LogoSkillPanel({
   return (
     <div
       ref={panelRef}
-      className={`fixed z-[90] ${dragging ? 'cursor-grabbing' : ''}`}
-      style={{ left: pos.x, top: pos.y, width: PANEL_W }}
+      className={`fixed z-[90] min-w-0 [&_button]:min-h-11 [&_button]:min-w-11 [&_button]:max-w-full [&_input]:min-h-11 [&_input]:max-w-full [&_select]:min-h-11 [&_select]:max-w-full [&_textarea]:min-h-11 [&_input]:text-base [&_select]:text-base [&_textarea]:text-base lg:[&_input]:text-sm lg:[&_select]:text-sm lg:[&_textarea]:text-sm ${dragging ? 'cursor-grabbing' : ''}`}
+      style={{ left: pos.x, top: pos.y, width: panelWidth, maxWidth: 'calc(100vw - 16px)', maxHeight: panelMaxHeight }}
       onMouseDown={e => e.stopPropagation()}
       onPointerDown={e => e.stopPropagation()}
       onWheel={e => e.stopPropagation()}
@@ -751,34 +784,34 @@ export default function LogoSkillPanel({
     >
       <div
         data-floating-panel="true"
-        className={`flex flex-col rounded-2xl overflow-hidden ${bg} border ${border} ${
+        className={`flex min-h-0 flex-col rounded-2xl overflow-hidden ${bg} border ${border} ${
           dragging
             ? `ring-2 ${isMonochrome ? 'ring-blue-500/30 shadow-[0_0_30px_rgba(59,130,246,0.15)]' : 'ring-[#d4af37]/30 shadow-[0_0_30px_rgba(212,175,55,0.2)]'}`
             : isMonochrome
               ? 'shadow-[0_8px_32px_rgba(0,0,0,0.12)]'
               : 'shadow-[0_8px_32px_rgba(0,0,0,0.6),0_0_0_1px_rgba(212,175,55,0.1)]'
         }`}
-        style={{ maxHeight: isMinimized ? undefined : 'calc(100vh - 80px)' }}
+        style={{ maxHeight: isMinimized ? undefined : panelMaxHeight }}
       >
         {/* ─── 标题栏 ─────────────────────────────────────── */}
         <div
-          className={`flex items-center justify-between px-6 py-3.5 border-b select-none cursor-grab active:cursor-grabbing shrink-0 ${headerBg} ${border}`}
+          className={`flex min-w-0 flex-wrap items-center justify-between gap-2 px-3 py-2 lg:px-6 lg:py-3.5 border-b select-none cursor-grab active:cursor-grabbing shrink-0 ${headerBg} ${border}`}
           onMouseDown={onDragStart}
         >
-          <div className="flex items-center gap-3">
-            <GripVertical className={`h-4 w-4 ${isMonochrome ? 'text-gray-300' : 'text-gray-600'}`} />
-            <div className={`w-8 h-8 rounded-lg ${accentBg} flex items-center justify-center shadow-sm`}>
+          <div className="flex min-w-0 flex-1 items-center gap-2 lg:gap-3">
+            <GripVertical className={`hidden h-4 w-4 shrink-0 lg:block ${isMonochrome ? 'text-gray-300' : 'text-gray-600'}`} />
+            <div className={`w-8 h-8 shrink-0 rounded-lg ${accentBg} flex items-center justify-center shadow-sm`}>
               <PenTool className="h-4 w-4 text-white" />
             </div>
-            <h1 className={`text-base font-bold ${textPrimary} tracking-tight`}>Logo Generator Pro</h1>
+            <h1 className={`min-w-0 truncate whitespace-nowrap text-base font-bold ${textPrimary} tracking-tight`}>Logo Generator Pro</h1>
           </div>
 
           {/* 步骤指示器 */}
-          <div className="flex items-center gap-1">
+          {!isMinimized && (<div className="order-3 flex w-full items-center gap-1 lg:order-none lg:w-auto">
             {steps.map((s, i) => (
               <div key={s} className="flex items-center">
                 {i > 0 && (
-                  <div className={`w-8 h-px mx-1 ${steps.indexOf(step) > i ? (isMonochrome ? 'bg-blue-400' : 'bg-[#d4af37]') : (isMonochrome ? 'bg-gray-200' : 'bg-white/10')}`} />
+                  <div className={`w-3 h-px mx-0.5 lg:w-8 lg:mx-1 ${steps.indexOf(step) > i ? (isMonochrome ? 'bg-blue-400' : 'bg-[#d4af37]') : (isMonochrome ? 'bg-gray-200' : 'bg-white/10')}`} />
                 )}
                 <div
                   className={`px-3 py-1.5 rounded-lg text-[11px] font-semibold transition-all duration-200 ${
@@ -797,13 +830,13 @@ export default function LogoSkillPanel({
                 </div>
               </div>
             ))}
-          </div>
+          </div>)}
 
-          <div className="flex items-center gap-1">
-            <button onClick={() => setIsMinimized(!isMinimized)} className={`p-2 rounded-lg ${isMonochrome ? 'hover:bg-gray-200' : 'hover:bg-white/10'} transition-colors cursor-pointer`}>
+          <div className="order-2 ml-auto flex shrink-0 items-center gap-1 lg:order-none">
+            <button type="button" aria-label={isMinimized ? '展开 Logo 生成器' : '最小化 Logo 生成器'} onClick={() => setIsMinimized(!isMinimized)} className={`grid h-11 w-11 shrink-0 place-items-center p-2 rounded-lg ${isMonochrome ? 'hover:bg-gray-200' : 'hover:bg-white/10'} transition-colors cursor-pointer`}>
               <Minus className={`h-4 w-4 ${textSecondary}`} />
             </button>
-            <button onClick={onClose} className={`p-2 rounded-lg ${isMonochrome ? 'hover:bg-gray-200' : 'hover:bg-white/10'} transition-colors cursor-pointer`}>
+            <button type="button" aria-label="关闭 Logo 生成器" onClick={onClose} className={`grid h-11 w-11 shrink-0 place-items-center p-2 rounded-lg ${isMonochrome ? 'hover:bg-gray-200' : 'hover:bg-white/10'} transition-colors cursor-pointer`}>
               <X className={`h-4 w-4 ${textSecondary}`} />
             </button>
           </div>
@@ -811,7 +844,7 @@ export default function LogoSkillPanel({
 
         {/* ─── 内容区 ─────────────────────────────────── */}
         {!isMinimized && (
-          <div className="flex-1 overflow-y-auto">
+          <div className="min-h-0 min-w-0 flex-1 overflow-y-auto">
             {error && (
               <div className={`mx-6 mt-4 p-3.5 rounded-xl border text-sm flex items-start gap-2.5 ${
                 isMonochrome ? 'bg-red-50 border-red-200 text-red-700' : 'bg-red-500/10 border-red-500/20 text-red-400'
@@ -833,9 +866,9 @@ export default function LogoSkillPanel({
   // ─── Step 1: 输入 ─────────
   function renderInputStep() {
     return (
-      <div className="p-6 space-y-6">
+      <div className="space-y-4 p-3 sm:space-y-6 sm:p-6">
         {/* ── 第一行：品牌名称 + 英文名 ── */}
-        <div className="grid grid-cols-[1fr_200px] gap-4">
+        <div className="grid min-w-0 grid-cols-1 gap-4 min-[900px]:grid-cols-[minmax(0,1fr)_200px]">
           <div>
             <label className={`block text-sm font-semibold mb-2 ${textPrimary}`}>
               品牌名称 <span className="text-red-500">*</span>
@@ -873,7 +906,7 @@ export default function LogoSkillPanel({
         </div>
 
         {/* ── 第三行：受众 / 偏好风格 / 参考风格 ── */}
-        <div className="grid grid-cols-3 gap-4">
+        <div className="grid min-w-0 grid-cols-1 gap-4 sm:grid-cols-3">
           <div>
             <label className={`block text-xs font-medium mb-2 ${textSecondary}`}>目标受众</label>
             <input
@@ -904,11 +937,11 @@ export default function LogoSkillPanel({
         </div>
 
         {/* ── 第四行：Logo 类型（左半）+ 输出布局（右半）── */}
-        <div className="grid grid-cols-2 gap-6">
+        <div className="grid min-w-0 grid-cols-1 gap-6 sm:grid-cols-2">
           {/* Logo 类型 — 3 列网格 */}
           <div>
             <label className={`block text-sm font-semibold mb-2.5 ${textPrimary}`}>Logo 类型</label>
-            <div className="grid grid-cols-5 gap-1.5">
+            <div className="grid grid-cols-3 gap-1.5 min-[900px]:grid-cols-5">
               {LOGO_TYPES.map(t => (
                 <button
                   key={t.value}
@@ -958,7 +991,7 @@ export default function LogoSkillPanel({
         {/* ── 第五行：模型 + 高级设置 + 生成按钮 ── */}
         <div className={`rounded-xl border ${border} ${glassBg} p-5 space-y-4`}>
           {/* 模型行 */}
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid min-w-0 grid-cols-1 gap-4 sm:grid-cols-2">
             {/* LLM 模型 */}
             <div>
               <label className={`block text-xs font-medium mb-2 ${textSecondary}`}>LLM 模型</label>
@@ -1060,7 +1093,7 @@ export default function LogoSkillPanel({
     return (
       <div className="p-4 space-y-3 overflow-y-auto" style={{ maxHeight: 'calc(100vh - 200px)' }}>
         {/* 三栏横向布局：Logo方向 | 符号概念 | 视觉系统 */}
-        <div className="grid grid-cols-3 gap-3">
+        <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-3">
           {/* Logo 方向 */}
           {direction && (
             <div className={`rounded-xl border ${border} ${glassBg} p-4 space-y-3`}>
@@ -1336,7 +1369,7 @@ export default function LogoSkillPanel({
   function renderResultStep() {
     return (
       <div className="p-6">
-        <div className="flex gap-6">
+        <div className="flex min-w-0 flex-col gap-4 min-[900px]:flex-row min-[900px]:gap-6">
           {/* ── 左：大图预览 + 缩略图 ── */}
           <div className="flex-1 min-w-0 space-y-3">
             {selectedImageUrl && (
@@ -1364,7 +1397,7 @@ export default function LogoSkillPanel({
           </div>
 
           {/* ── 右：操作面板 ── */}
-          <div className="w-[280px] shrink-0 space-y-4">
+          <div className="min-w-0 w-full shrink-0 space-y-4 min-[900px]:w-[280px]">
             {/* 主操作 */}
             <div className={`rounded-xl border ${border} ${glassBg} p-4`}>
               <h3 className={`text-sm font-semibold mb-3 ${textPrimary}`}>操作</h3>

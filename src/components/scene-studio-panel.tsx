@@ -6,6 +6,7 @@ import { Canvas, useThree, ThreeEvent, extend } from '@react-three/fiber';
 import { OrbitControls, TransformControls, Grid, GizmoHelper, GizmoViewport, useGLTF, Html } from '@react-three/drei';
 import * as THREE from 'three';
 import { withClientImageOutputPreference } from '@/lib/image-generation-output-preference';
+import { constrainFloatingPanelPosition, getFloatingPanelViewport, subscribeFloatingPanelViewport } from '@/lib/floating-panel-position';
 
 // Register Three.js classes with R3F to avoid React 19 "incorrect casing" warnings
 extend({
@@ -1505,6 +1506,23 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome, i
     return { x: 40, y: 40 };
   });
 
+  const [panelViewport, setPanelViewport] = useState(getFloatingPanelViewport);
+  const compactPanel = panelViewport.width < 1024 || panelViewport.height < 600;
+  const panelInset = compactPanel ? 8 : 40;
+  const panelWidth = isMinimized ? Math.min(320, Math.max(0, panelViewport.width - 16)) : Math.max(0, panelViewport.width - panelInset * 2);
+  const panelHeight = isMinimized ? 56 : Math.max(0, panelViewport.height - panelInset * 2);
+  const boundedPosition = constrainFloatingPanelPosition({
+    x: windowPos.x - panelViewport.left, y: windowPos.y - panelViewport.top,
+    viewportWidth: panelViewport.width, viewportHeight: panelViewport.height,
+    panelWidth, panelHeight, margin: 8,
+  });
+  const panelLeft = panelViewport.left + boundedPosition.x;
+  const panelTop = panelViewport.top + boundedPosition.y;
+
+  useEffect(() => subscribeFloatingPanelViewport(() => {
+    setPanelViewport(getFloatingPanelViewport());
+  }), []);
+
   const accent = isMonochrome ? '#3b82f6' : ACCENT();
 
   // Keyboard shortcut: Ctrl+Z / Ctrl+Shift+Z
@@ -1528,25 +1546,29 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome, i
 
   // Window drag handlers (consistent with ImageEditor pattern)
   const handleDragStart = useCallback((e: React.MouseEvent) => {
+    if ((e.target as Element).closest('button')) return;
     e.preventDefault();
     e.stopPropagation();
     setIsDragging(true);
-    setDragOffset({ x: e.clientX - windowPos.x, y: e.clientY - windowPos.y });
-  }, [windowPos]);
+    setDragOffset({ x: e.clientX - panelLeft, y: e.clientY - panelTop });
+  }, [panelLeft, panelTop]);
 
   useEffect(() => {
     if (!isDragging) return;
     const handleMove = (e: MouseEvent) => {
       setWindowPos({ x: e.clientX - dragOffset.x, y: e.clientY - dragOffset.y });
     };
-    const handleUp = () => setIsDragging(false);
+    const handleUp = () => {
+      setWindowPos({ x: panelLeft, y: panelTop });
+      setIsDragging(false);
+    };
     window.addEventListener('mousemove', handleMove);
     window.addEventListener('mouseup', handleUp);
     return () => {
       window.removeEventListener('mousemove', handleMove);
       window.removeEventListener('mouseup', handleUp);
     };
-  }, [isDragging, dragOffset]);
+  }, [isDragging, dragOffset, panelLeft, panelTop]);
 
   // Object management
   const addObject = useCallback((type: SceneObject['type']) => {
@@ -2127,7 +2149,7 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome, i
       className="fixed z-[200] flex items-start justify-start"
       style={{
         pointerEvents: 'auto',
-        ...(isMinimized ? { inset: undefined, left: windowPos.x, top: windowPos.y } : { inset: 0 }),
+        ...(isMinimized ? { inset: undefined, left: panelLeft, top: panelTop } : { inset: 0 }),
       }}
     >
       {/* Semi-transparent overlay (only when expanded) */}
@@ -2136,13 +2158,13 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome, i
       {/* Draggable floating window */}
       <div
         data-popup
-        className="relative flex flex-col rounded-xl overflow-hidden shadow-2xl border"
+        className="relative flex min-w-0 flex-col rounded-xl overflow-hidden shadow-2xl border [&_button]:min-h-11 [&_button]:min-w-11 [&_button]:whitespace-nowrap [&_select]:min-h-11 [&_select]:min-w-0 [&_select]:max-w-full [&_input]:min-h-11 [&_input]:min-w-0 [&_textarea]:min-h-11 [&_textarea]:min-w-0 [&_svg]:shrink-0 max-sm:[&_input]:text-base max-sm:[&_select]:text-base max-sm:[&_textarea]:text-base [&_a]:min-h-11 [&_a]:min-w-11"
         style={{
-          width: isMinimized ? 320 : 'calc(100vw - 80px)',
-          height: isMinimized ? 'auto' : 'calc(100vh - 80px)',
+          width: panelWidth,
+          height: panelHeight,
           background: isMonochrome ? '#ffffff' : '#111',
           borderColor: isMonochrome ? '#e5e5e5' : '#d4af3740',
-          ...(isMinimized ? {} : { left: windowPos.x, top: windowPos.y }),
+          ...(isMinimized ? {} : { left: panelLeft, top: panelTop }),
           ...(isDragging ? { outline: `2px solid ${accent}`, outlineOffset: '-2px' } : {}),
         }}
         onMouseDown={e => e.stopPropagation()}
@@ -2151,58 +2173,65 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome, i
         {/* === Title bar (draggable) === */}
         <div
           data-panel-header
-          className="flex items-center justify-between px-3 shrink-0 cursor-move select-none"
-          style={{ height: 36, background: isMonochrome ? '#f9fafb' : '#161616', borderBottom: isMinimized ? 'none' : (isMonochrome ? '1px solid #e5e5e5' : '1px solid #d4af3730') }}
+          className="flex min-w-0 items-center justify-between gap-1 px-2 shrink-0 cursor-move select-none"
+          style={{ height: 54, background: isMonochrome ? '#f9fafb' : '#161616', borderBottom: isMinimized ? 'none' : (isMonochrome ? '1px solid #e5e5e5' : '1px solid #d4af3730') }}
           onMouseDown={handleDragStart}
         >
-          <div className="flex items-center gap-2">
+          <div className="flex min-w-0 items-center gap-1">
             <Boxes size={14} style={{ color: accent }} />
-            <span className="text-sm font-medium" style={{ color: isMonochrome ? '#3b82f6' : '#d4af37' }}>3D构图</span>
-            <span className="text-xs" style={{ color: isMonochrome ? '#6b7280' : '#666' }}>{sceneName}</span>
+            <span className="shrink-0 whitespace-nowrap text-sm font-medium" style={{ color: isMonochrome ? '#3b82f6' : '#d4af37' }}>3D构图</span>
+            <span className="hidden min-w-0 truncate text-xs lg:block" style={{ color: isMonochrome ? '#6b7280' : '#666' }}>{sceneName}</span>
           </div>
-          <div className="flex items-center gap-1">
+          <div className="flex shrink-0 items-center gap-0.5">
             <button
-              className={`w-7 h-7 flex items-center justify-center rounded transition-colors disabled:opacity-30 disabled:cursor-not-allowed ${isMonochrome ? 'hover:bg-gray-200' : 'hover:bg-white/10'}`}
+              className={`w-11 h-11 shrink-0 flex items-center justify-center rounded transition-colors disabled:opacity-30 disabled:cursor-not-allowed ${isMonochrome ? 'hover:bg-gray-200' : 'hover:bg-white/10'}`}
               onClick={handleSceneUndo}
               disabled={sceneHistoryIdxRef.current <= 0}
               title="撤销 (Ctrl+Z)"
+              aria-label="撤销场景操作"
+              onMouseDown={e => e.stopPropagation()}
             >
               <Undo2 size={14} style={{ color: isMonochrome ? '#6b7280' : '#888' }} />
             </button>
             <button
-              className={`w-7 h-7 flex items-center justify-center rounded transition-colors disabled:opacity-30 disabled:cursor-not-allowed ${isMonochrome ? 'hover:bg-gray-200' : 'hover:bg-white/10'}`}
+              className={`w-11 h-11 shrink-0 flex items-center justify-center rounded transition-colors disabled:opacity-30 disabled:cursor-not-allowed ${isMonochrome ? 'hover:bg-gray-200' : 'hover:bg-white/10'}`}
               onClick={handleSceneRedo}
               disabled={sceneHistoryIdxRef.current >= sceneHistoryRef.current.length - 1}
               title="重做 (Ctrl+Shift+Z)"
+              aria-label="重做场景操作"
+              onMouseDown={e => e.stopPropagation()}
             >
               <Redo2 size={14} style={{ color: isMonochrome ? '#6b7280' : '#888' }} />
             </button>
-            <div style={{ width: 1, height: 16, background: isMonochrome ? '#d1d5db' : '#333', margin: '0 2px' }} />
+            <div style={{ width: 1, height: 16, background: isMonochrome ? '#d1d5db' : '#333', margin: 0 }} />
             <button
-              className={`w-7 h-7 flex items-center justify-center rounded transition-colors ${isMonochrome ? 'hover:bg-gray-200' : 'hover:bg-white/10'}`}
+              className={`w-11 h-11 shrink-0 flex items-center justify-center rounded transition-colors ${isMonochrome ? 'hover:bg-gray-200' : 'hover:bg-white/10'}`}
               onClick={() => setIsMinimized(!isMinimized)}
               title={isMinimized ? '展开' : '最小化'}
+              aria-label={isMinimized ? '展开3D构图' : '最小化3D构图'}
+              onMouseDown={e => e.stopPropagation()}
             >
               {isMinimized ? <Maximize2 size={14} style={{ color: isMonochrome ? '#6b7280' : '#888' }} /> : <Minus size={14} style={{ color: isMonochrome ? '#6b7280' : '#888' }} />}
             </button>
             <button
-              className={`w-7 h-7 flex items-center justify-center rounded transition-colors ${isMonochrome ? 'hover:bg-red-100' : 'hover:bg-red-500/30'}`}
+              className={`w-11 h-11 shrink-0 flex items-center justify-center rounded transition-colors ${isMonochrome ? 'hover:bg-red-100' : 'hover:bg-red-500/30'}`}
               onClick={onClose}
               title="关闭"
+              aria-label="关闭3D构图"
+              onMouseDown={e => e.stopPropagation()}
             >
               <X size={14} style={{ color: isMonochrome ? '#6b7280' : '#888' }} />
             </button>
           </div>
         </div>
 
-        {/* === Minimized: only title bar visible === */}
-        {!isMinimized && (
-        <div className="flex-1 flex flex-row overflow-hidden">
+        {/* Keep the original scene mounted while only its title bar is visible. */}
+        <div className="min-h-0 min-w-0 flex-1 flex flex-col overflow-y-auto overscroll-contain lg:flex-row lg:overflow-hidden" style={{ display: isMinimized ? 'none' : undefined, flexDirection: compactPanel ? 'column' : undefined, overflowY: compactPanel ? 'auto' : undefined }}>
           {/* === Left: 3D Viewport === */}
-          <div className="flex-1 flex flex-col overflow-hidden">
+          <div className="min-w-0 shrink-0 flex flex-col lg:min-h-0 lg:flex-1 lg:overflow-hidden" style={{ flex: compactPanel ? '0 0 auto' : undefined }}>
             {/* Top transform toolbar */}
             <div
-              className="relative z-20 flex items-center gap-1 px-3 py-1.5 border-b"
+              className="relative z-20 flex shrink-0 flex-wrap items-center gap-1 px-3 py-1.5 border-b"
               style={{
                 background: isMonochrome ? '#f3f4f6' : '#131313',
                 borderColor: isMonochrome ? '#e5e5e5' : '#d4af3720',
@@ -2223,11 +2252,11 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome, i
                 </button>
               ))}
               <div className="flex-1" />
-              <span className="text-[13px]" style={{ color: isMonochrome ? '#999' : '#555' }}>Del 删除 · Esc 取消</span>
+              <span className="hidden whitespace-nowrap text-[13px] xl:inline" style={{ color: isMonochrome ? '#999' : '#555' }}>Del 删除 · Esc 取消</span>
             </div>
 
             {/* 3D Canvas */}
-            <div className="flex-1 relative" style={{ minHeight: 0 }}>
+            <div className="relative min-h-24 shrink-0 lg:flex-1" style={{ minHeight: 96, height: compactPanel ? 160 : undefined }}>
               <div className="absolute inset-0 overflow-hidden scene-studio-canvas">
                 <Canvas
                   shadows
@@ -2247,8 +2276,8 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome, i
                 </Canvas>
               </div>
               {/* Keyboard shortcuts hint */}
-              <div className="absolute bottom-2 left-2 pointer-events-none z-10">
-                <span className="text-[13px] px-2 py-1 rounded" style={{ color: isMonochrome ? '#666' : '#555', background: isMonochrome ? 'rgba(255,255,255,0.8)' : 'rgba(0,0,0,0.6)' }}>
+              <div className="absolute bottom-2 left-2 right-2 pointer-events-none z-10">
+                <span className="inline-block max-w-full text-[13px] px-2 py-1 rounded" style={{ color: isMonochrome ? '#666' : '#555', background: isMonochrome ? 'rgba(255,255,255,0.8)' : 'rgba(0,0,0,0.6)' }}>
                   W 移动 · E 旋转 · R 缩放 · Del 删除 · Esc 取消选择
                 </span>
               </div>
@@ -2256,7 +2285,7 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome, i
 
             {/* Bottom action bar */}
             <div
-              className="relative z-20 flex items-center gap-2 px-3 py-2 border-t flex-shrink-0"
+              className="relative z-20 flex flex-wrap items-center gap-2 px-3 py-2 border-t flex-shrink-0"
               style={{
                 background: isMonochrome ? '#f9fafb' : '#0d0d0d',
                 borderColor: isMonochrome ? '#e5e5e5' : '#d4af3720',
@@ -2328,9 +2357,9 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome, i
 
           {/* === Right: Unified Panel === */}
           <div
-            className="flex flex-col overflow-hidden"
+            className="min-w-0 shrink-0 flex flex-col lg:min-h-0 lg:overflow-hidden"
             style={{
-              width: 280,
+              width: compactPanel ? '100%' : 280,
               background: isMonochrome ? '#ffffff' : '#111',
               borderLeft: isMonochrome ? '1px solid #e5e5e5' : '1px solid #d4af3720',
             }}
@@ -2363,7 +2392,7 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome, i
             </div>
 
             {/* Tab content - scrollable */}
-            <div className="flex-1 overflow-y-auto p-3 space-y-3" style={{ minHeight: 0 }}>
+            <div className="min-w-0 p-3 space-y-3 lg:min-h-0 lg:flex-1 lg:overflow-y-auto">
               {/* ===== BUILD TAB ===== */}
               {rightTab === 'build' && (
                 <>
@@ -2378,7 +2407,7 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome, i
                           <div className="text-xs mb-1" style={{ color: isMonochrome ? '#666' : '#888' }}>位置</div>
                           <div className="flex gap-1">
                             {['x', 'y', 'z'].map((axis, i) => (
-                              <div key={axis} className="flex-1">
+                              <div key={axis} className="min-w-0 flex-1">
                                 <div className="text-[13px] text-center" style={{ color: axis === 'x' ? '#ef4444' : axis === 'y' ? '#22c55e' : '#3b82f6' }}>{axis.toUpperCase()}</div>
                                 <input
                                   type="number"
@@ -2400,7 +2429,7 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome, i
                           <div className="text-xs mb-1" style={{ color: isMonochrome ? '#666' : '#888' }}>旋转</div>
                           <div className="flex gap-1">
                             {['x', 'y', 'z'].map((axis, i) => (
-                              <div key={axis} className="flex-1">
+                              <div key={axis} className="min-w-0 flex-1">
                                 <div className="text-[13px] text-center" style={{ color: axis === 'x' ? '#ef4444' : axis === 'y' ? '#22c55e' : '#3b82f6' }}>{axis.toUpperCase()}</div>
                                 <input
                                   type="number"
@@ -2422,7 +2451,7 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome, i
                           <div className="text-xs mb-1" style={{ color: isMonochrome ? '#666' : '#888' }}>缩放</div>
                           <div className="flex gap-1">
                             {['x', 'y', 'z'].map((axis, i) => (
-                              <div key={axis} className="flex-1">
+                              <div key={axis} className="min-w-0 flex-1">
                                 <div className="text-[13px] text-center" style={{ color: axis === 'x' ? '#ef4444' : axis === 'y' ? '#22c55e' : '#3b82f6' }}>{axis.toUpperCase()}</div>
                                 <input
                                   type="number"
@@ -2454,7 +2483,7 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome, i
                   {/* Geometry presets */}
                   <div className="rounded-lg p-3" style={{ background: isMonochrome ? '#f9fafb' : '#1a1a1a', border: isMonochrome ? '1px solid #e5e5e5' : '1px solid #d4af3720' }}>
                     <div className="text-sm font-medium mb-2" style={{ color: accent }}>几何体</div>
-                    <div className="grid grid-cols-5 gap-1.5">
+                    <div className="grid grid-cols-3 gap-1.5 sm:grid-cols-5 lg:grid-cols-3 xl:grid-cols-5">
                       {GEOMETRY_PRESETS.map(preset => (
                         <button
                           key={preset.type}
@@ -2616,7 +2645,7 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome, i
                           onClick={() => setStrengthMode(m.key)}
                         >
                           <div className="font-medium">{m.name}</div>
-                          <div className="text-xs" style={{ color: isMonochrome ? '#666' : '#999' }}>{m.desc}</div>
+                          <div className="whitespace-normal text-xs" style={{ color: isMonochrome ? '#666' : '#999' }}>{m.desc}</div>
                         </button>
                       ))}
                     </div>
@@ -2717,7 +2746,7 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome, i
                             <a
                               href={result.url}
                               download={`scene-result-${i + 1}.png`}
-                              className="absolute top-1 right-1 px-1.5 py-0.5 rounded text-xs opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
+                              className="absolute top-1 right-1 flex items-center justify-center px-1.5 py-0.5 rounded text-xs opacity-100 lg:opacity-0 lg:group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity cursor-pointer"
                               style={{ background: isMonochrome ? '#f3f4f6' : '#d4af37cc', color: isMonochrome ? '#1a1a1a' : '#000' }}
                               onClick={e => e.stopPropagation()}
                             >
@@ -2925,7 +2954,6 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome, i
             </div>
           </div>
         </div>
-        )}
       </div>
     </div>,
     document.body

@@ -28,6 +28,24 @@ beforeEach(() => {
   vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
 });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+describe('mobile first-stroke focus', () => {
+  it('keeps first pointer coordinates stable when focusing a partially visible drawing surface', () => {
+    const f = fixture(); render(<SketchToCodePanel session={f.session} />);
+    const surface = screen.getByLabelText('绘图区');
+    let top = 500;
+    vi.spyOn(surface, 'getBoundingClientRect').mockImplementation(() =>
+      ({ left: 20, top, width: 320, height: 240 }) as DOMRect);
+    const originalFocus = surface.focus.bind(surface);
+    vi.spyOn(surface, 'focus').mockImplementation((options?: FocusOptions) => {
+      originalFocus(options);
+      if (!options?.preventScroll) top = 395;
+    });
+    fireEvent.pointerDown(surface, { pointerId: 11, button: 0, clientX: 180, clientY: 560 });
+    fireEvent.pointerUp(surface, { pointerId: 11 });
+    expect(top).toBe(500);
+    expect(f.session.history.present.strokes[0].points).toEqual([{ x: 512, y: 192 }]);
+  });
+});
 describe('sketch drawer behavior', () => {
   it('minimizes and restores the mounted draft without stopping reads or changing drawing settings', () => {
     const f = fixture(), onClose = vi.fn();
