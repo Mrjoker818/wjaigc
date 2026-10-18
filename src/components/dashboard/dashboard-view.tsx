@@ -2346,10 +2346,10 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                   <h1 className={`text-2xl font-bold ${textPrimary}`}>我的项目</h1>
                   <p className={`text-sm mt-1 ${textSecondary}`}>{projects.length} 个项目 · {allImages.length} 张图片</p>
                 </div>
-                 <div className="flex w-full lg:w-auto min-w-0 flex-wrap items-center gap-3">
+                 <div className="flex w-full lg:w-auto min-w-0 flex-wrap items-center gap-2 md:gap-3">
                    <div className="relative w-full sm:w-auto">
                      <Search className={`w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 ${textSecondary}`} />
-                     <input value={searchQuery} onChange={e => setSearchQuery(e.target.value)} placeholder="搜索项目..." className={`pl-9 pr-4 py-2 rounded-xl text-sm ${isDark ? 'bg-white/5 border-white/10 text-white' : 'bg-white border-gray-200'} border focus:outline-none focus:ring-1 ${accentRingClass} w-full sm:w-56`} />
+                     <input value={searchQuery} onChange={e => setSearchQuery(e.target.value)} placeholder="搜索项目..." className={`min-h-11 min-w-11 md:min-h-0 md:min-w-0 pl-9 pr-4 py-2 rounded-xl text-sm ${isDark ? 'bg-white/5 border-white/10 text-white' : 'bg-white border-gray-200'} border focus:outline-none focus:ring-1 ${accentRingClass} w-full sm:w-56`} />
                    </div>
                    {projectManageMode ? (
                      <>
@@ -2366,16 +2366,16 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                        </button>
                      </>
                    ) : (
-                     <button onClick={() => setProjectManageMode(true)} className={`flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-medium border transition-colors ${isDark ? 'bg-white/5 border-white/10 hover:bg-white/10' : 'bg-white border-gray-200 hover:bg-gray-100'}`}>
+                     <button onClick={() => setProjectManageMode(true)} className={`min-h-11 min-w-11 md:min-h-0 md:min-w-0 whitespace-nowrap flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-medium border transition-colors ${isDark ? 'bg-white/5 border-white/10 hover:bg-white/10' : 'bg-white border-gray-200 hover:bg-gray-100'}`}>
                        <CheckSquare className="w-4 h-4" /> 批量管理
                      </button>
                    )}
                    {!projectManageMode && (
                      <>
-                       <button onClick={importProjectInputRef} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-colors cursor-pointer ${isDark ? `bg-white/5 border border-white/10 ${accentClass} hover:bg-white/10` : `bg-gray-100 border border-gray-200 ${isMonochrome ? 'text-[#3b82f6]' : 'text-gray-700'} hover:bg-gray-200`}`}>
+                       <button onClick={importProjectInputRef} className={`min-h-11 min-w-11 md:min-h-0 md:min-w-0 whitespace-nowrap flex items-center gap-2 px-3 md:px-4 py-2 rounded-xl text-sm font-medium transition-colors cursor-pointer ${isDark ? `bg-white/5 border border-white/10 ${accentClass} hover:bg-white/10` : `bg-gray-100 border border-gray-200 ${isMonochrome ? 'text-[#3b82f6]' : 'text-gray-700'} hover:bg-gray-200`}`}>
                          <Upload className="w-4 h-4" /> 导入 .wujie
                        </button>
-                       <button onClick={onNewProject} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium ${accentBgClass} ${accentTextOnBgClass} ${accentHoverBgClass} transition-colors cursor-pointer`}>
+                       <button onClick={onNewProject} className={`min-h-11 min-w-11 md:min-h-0 md:min-w-0 whitespace-nowrap flex items-center gap-2 px-3 md:px-4 py-2 rounded-xl text-sm font-medium ${accentBgClass} ${accentTextOnBgClass} ${accentHoverBgClass} transition-colors cursor-pointer`}>
                          <Plus className="w-4 h-4" /> 新建项目
                        </button>
                      </>
@@ -2385,7 +2385,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
               {/* Filters */}
               <div className="flex gap-2 mt-4">
                 {(['all', 'recent', 'starred'] as const).map(f => (
-                  <button key={f} onClick={() => setProjectFilter(f)} className={`px-3 py-1.5 rounded-lg text-xs font-medium cursor-pointer ${projectFilter === f ? `${accentBgLight} ${accentClass}` : `${textSecondary} ${isDark ? 'hover:bg-white/5' : 'hover:bg-gray-100'}`}`}>
+                  <button key={f} onClick={() => setProjectFilter(f)} className={`min-h-11 min-w-11 md:min-h-0 md:min-w-0 whitespace-nowrap px-3 py-1.5 rounded-lg text-xs font-medium cursor-pointer ${projectFilter === f ? `${accentBgLight} ${accentClass}` : `${textSecondary} ${isDark ? 'hover:bg-white/5' : 'hover:bg-gray-100'}`}`}>
                     {{ all: '全部', recent: '最近', starred: '收藏' }[f]}
                   </button>
                 ))}

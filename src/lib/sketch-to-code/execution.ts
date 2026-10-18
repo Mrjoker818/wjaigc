@@ -194,6 +194,21 @@ function bounded<T>(operation: () => Promise<T>, signal?: AbortSignal, timeoutMs
 function errorCode(value: unknown): string | undefined {
   return value && typeof value === 'object' && 'code' in value && typeof value.code === 'string' ? value.code : undefined;
 }
+const COMPUTE_FAILURE_CODES = new Set([
+  'SKETCH_MODEL_INVALID_JSON', 'SKETCH_ANALYSIS_INVALID', 'SKETCH_UI_INVALID', 'SKETCH_UI_TREE_LIMIT',
+  'SKETCH_UI_TEXT_LIMIT', 'SKETCH_UI_HTML_LIMIT', 'SKETCH_USAGE_INVALID', 'SKETCH_MODEL_TIMEOUT',
+]);
+/** Diagnostics only. Never inspect arbitrary getters, causes, stacks or bodies. */
+function computeFailureReason(error: unknown): string {
+  try {
+    if (error !== null && typeof error === 'object') {
+      const descriptor = Object.getOwnPropertyDescriptor(error, 'message');
+      const message: unknown = descriptor && 'value' in descriptor ? descriptor.value : undefined;
+      if (typeof message === 'string' && message.length <= 64 && COMPUTE_FAILURE_CODES.has(message)) return message;
+    }
+  } catch { /* A hostile descriptor/proxy is not permission to change execution. */ }
+  return 'SKETCH_COMPUTE_ERROR_UNKNOWN';
+}
 function failure(error: unknown, identity: SketchRecoveryIdentity, signal: AbortSignal): SketchExecutionOutcome {
   if (signal.aborted) {
     const timeout = errorCode(signal.reason) === 'TASK_TIMEOUT' || errorCode(signal.reason) === 'SKETCH_EXECUTION_TIMEOUT';
@@ -305,6 +320,7 @@ export async function executeSketchTask(admission: SketchTaskAdmission, context:
     scope = createTaskAbortScope(accepted.id, { signals: [globalDeadline.signal, ...(ctx.signal ? [ctx.signal] : [])] });
     const scopeSignal = scope.signal;
     let draft: Readonly<SketchCodeDraft>;
+    let computePhase: 'analysis' | 'reconstruction' | 'code-worker' = 'code-worker';
     try {
       if (!scopeSignal.aborted) {
         const updated = await bounded(() => storage.updateCloudTask(accepted.id, { progress: 1, label: '草图转代码：执行中',
@@ -314,6 +330,7 @@ export async function executeSketchTask(admission: SketchTaskAdmission, context:
       }
       draft = snapshot(await bounded(() => compute(scopeSignal, async phase => {
         scopeSignal.throwIfAborted();
+        computePhase = phase;
         observe({ event: 'phase-state-start', phase });
         try {
           const current = await read(scopeSignal);
@@ -335,6 +352,8 @@ export async function executeSketchTask(admission: SketchTaskAdmission, context:
         scopeSignal.throwIfAborted();
       }), scopeSignal, COMPUTE_MS, 'SKETCH_EXECUTION_TIMEOUT'));
     } catch (error) {
+      observe({ event: 'compute-error', phase: computePhase, aborted: scopeSignal.aborted,
+        reason: scopeSignal.aborted ? 'SKETCH_COMPUTE_ABORTED' : computeFailureReason(error) });
       return await settleFailure(error);
     }
     if (unsafeReason) return deferred(unsafeReason);

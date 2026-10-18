@@ -8,6 +8,7 @@ import {
   ChevronDown, Clock, Tag, SlidersHorizontal
 } from 'lucide-react';
 import JSZip from 'jszip';
+import { constrainFloatingPanelPosition, getFloatingPanelViewport, subscribeFloatingPanelViewport } from '@/lib/floating-panel-position';
 
 interface CanvasImage {
   id: string;
@@ -64,6 +65,14 @@ export function ProjectDataPanel({
   const [downloading, setDownloading] = useState(false);
   const [sortMenuOpen, setSortMenuOpen] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
+  const [viewport, setViewport] = useState(getFloatingPanelViewport);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const updateViewport = (): void => setViewport(getFloatingPanelViewport());
+    updateViewport();
+    return subscribeFloatingPanelViewport(updateViewport);
+  }, [isOpen]);
 
   // 阻止滚轮事件冒泡到画布
   const handleWheel = useCallback((e: React.WheelEvent) => {
@@ -207,19 +216,27 @@ export function ProjectDataPanel({
   const hoverBg = isMonochrome ? 'hover:bg-gray-100' : 'hover:bg-[#252525]';
   const accentColor = isMonochrome ? '#333' : '#d4af37';
   const inputBg = isMonochrome ? 'bg-gray-100' : 'bg-[#1a1a1a]';
+  const panelWidth = Math.min(420, Math.max(0, viewport.width - 16));
+  const panelHeight = Math.min(viewport.height * 0.85, Math.max(0, viewport.height - 16));
+  const panelPosition = constrainFloatingPanelPosition({
+    x: 64 - viewport.left, y: 64 - viewport.top,
+    viewportWidth: viewport.width, viewportHeight: viewport.height,
+    panelWidth, panelHeight, margin: 8,
+  });
 
   return (
     <div
       ref={panelRef}
       onWheel={handleWheel}
       data-popup="project-data"
-      className={`fixed left-16 top-16 w-[420px] max-h-[85vh] ${bgColor} border ${borderColor} rounded-2xl shadow-2xl z-[200] flex flex-col overflow-hidden transition-all duration-200`}
+      className={`fixed ${bgColor} border ${borderColor} rounded-2xl shadow-2xl z-[200] flex flex-col overflow-hidden [&_button]:min-h-11 [&_button]:min-w-11 [&_button]:shrink-0 [&_button]:whitespace-nowrap [&_input]:min-h-11`}
+      style={{ left: viewport.left + panelPosition.x, top: viewport.top + panelPosition.y, width: panelWidth, maxHeight: panelHeight }}
     >
       {/* Header */}
-      <div className={`flex items-center justify-between px-4 py-3 border-b ${borderColor}`}>
-        <div className="flex items-center gap-2">
-          <FolderOpen className="h-4 w-4" style={{ color: accentColor }} />
-          <span className={`text-sm font-semibold ${textColor}`}>资产库</span>
+      <div className={`flex shrink-0 items-center justify-between gap-2 px-4 py-2 border-b ${borderColor}`}>
+        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+          <FolderOpen className="h-4 w-4 shrink-0" style={{ color: accentColor }} />
+          <span className={`whitespace-nowrap text-sm font-semibold ${textColor}`}>资产库</span>
           <span className={`text-xs ${mutedText}`}>({images.length})</span>
           {unavailableImages.length > 0 && (
             <span className="text-[10px] text-amber-500">{unavailableImages.length} 个媒体需要恢复</span>
@@ -227,28 +244,30 @@ export function ProjectDataPanel({
         </div>
         <button
           onClick={onClose}
-          className={`${mutedText} hover:${textColor} transition-colors`}
+          aria-label="关闭资产库"
+          className={`flex items-center justify-center rounded-lg ${mutedText} hover:${textColor} transition-colors`}
         >
           <X className="h-4 w-4" />
         </button>
       </div>
 
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
       {/* Project Info */}
       <div className={`px-4 py-2.5 border-b ${borderColor}`}>
-        <h3 className={`text-sm font-bold ${textColor} mb-0.5`}>{projectName || '未命名项目'}</h3>
-        <p className={`text-xs ${mutedText}`}>{projectDescription || '暂无简介'}</p>
+        <h3 className={`break-words text-sm font-bold ${textColor} mb-0.5`}>{projectName || '未命名项目'}</h3>
+        <p className={`break-words text-xs ${mutedText}`}>{projectDescription || '暂无简介'}</p>
       </div>
 
       {/* Search & Actions Bar */}
-      <div className={`px-4 py-2.5 border-b ${borderColor} flex items-center gap-2`}>
-        <div className={`flex-1 flex items-center gap-1.5 ${cardBg} rounded-lg px-2.5 py-1.5`}>
+      <div className={`px-4 py-2.5 border-b ${borderColor} flex flex-wrap items-center gap-2`}>
+        <div className={`min-w-0 basis-full sm:basis-0 flex-1 flex items-center gap-1.5 ${cardBg} rounded-lg px-2.5 py-1.5`}>
           <Search className={`h-3 w-3 ${mutedText}`} />
           <input
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="搜索提示词/模型..."
-            className={`flex-1 bg-transparent text-xs ${textColor} outline-none placeholder:${mutedText}`}
+            className={`min-w-0 w-full flex-1 bg-transparent text-xs ${textColor} outline-none placeholder:${mutedText}`}
           />
         </div>
 
@@ -256,14 +275,14 @@ export function ProjectDataPanel({
         <div className="relative">
           <button
             onClick={() => setSortMenuOpen(!sortMenuOpen)}
-            className={`p-1.5 rounded-lg ${cardBg} ${mutedText} hover:${textColor} transition-colors flex items-center gap-1`}
+            className={`p-1.5 rounded-lg ${cardBg} ${mutedText} hover:${textColor} transition-colors flex items-center justify-center gap-1`}
             title="排序"
           >
             <ArrowUpDown className="h-3.5 w-3.5" />
             <ChevronDown className="h-2.5 w-2.5" />
           </button>
           {sortMenuOpen && (
-            <div className={`absolute right-0 top-8 ${bgColor} border ${borderColor} rounded-lg shadow-xl z-10 py-1 min-w-[120px]`}>
+            <div className={`absolute left-0 top-full ${bgColor} border ${borderColor} rounded-lg shadow-xl z-10 py-1 min-w-[120px]`}>
               <button
                 onClick={() => { setSortOrder('newest'); setSortMenuOpen(false); }}
                 className={`w-full text-left px-3 py-1.5 text-xs ${sortOrder === 'newest' ? `text-[${accentColor}]` : mutedText} hover:${hoverBg}`}
@@ -309,7 +328,7 @@ export function ProjectDataPanel({
 
       {/* Batch Actions Bar */}
       {isManageMode && (
-        <div className={`px-4 py-2 border-b ${borderColor} flex items-center justify-between`}>
+        <div className={`px-4 py-2 border-b ${borderColor} flex flex-wrap items-center justify-between gap-2`}>
           <button
             onClick={selectAll}
             className={`flex items-center gap-1.5 text-xs ${mutedText} hover:${textColor} transition-colors`}
@@ -321,7 +340,7 @@ export function ProjectDataPanel({
             )}
             {selectedIds.size === filteredImages.length ? '取消全选' : '全选'}
           </button>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <span className={`text-xs ${mutedText}`}>
               已选 {selectedIds.size}/{filteredImages.length}
             </span>
@@ -349,7 +368,7 @@ export function ProjectDataPanel({
       )}
 
       {/* Content Grid/List */}
-      <div className="flex-1 overflow-y-auto px-3 py-2" style={{ maxHeight: '60vh' }}>
+      <div className="min-w-0 px-3 py-2">
         {filteredImages.length === 0 ? (
           <div className={`text-center py-8 ${mutedText}`}>
             <ImageIcon className="h-8 w-8 mx-auto mb-2 opacity-30" />
@@ -357,7 +376,7 @@ export function ProjectDataPanel({
           </div>
         ) : viewMode === 'grid' ? (
           /* ========== 大图模式 ========== */
-          <div className="grid grid-cols-2 gap-2.5">
+          <div className="grid gap-2.5" style={{ gridTemplateColumns: viewport.width < 640 ? 'minmax(0, 1fr)' : 'repeat(2, minmax(0, 1fr))' }}>
             {filteredImages.map(img => (
               <div
                 key={img.id}
@@ -417,7 +436,7 @@ export function ProjectDataPanel({
                   {/* Model info */}
                   <div className="flex items-center gap-1 mb-1.5 flex-wrap">
                     {img.modelName && (
-                      <span className={`inline-flex items-center gap-0.5 px-1 py-0.5 rounded text-[9px] ${inputBg}`}>
+                      <span className={`inline-flex max-w-full break-all items-center gap-0.5 px-1 py-0.5 rounded text-[9px] ${inputBg}`}>
                         <Tag className="h-2.5 w-2.5" />
                         {img.modelName}
                       </span>
@@ -487,7 +506,7 @@ export function ProjectDataPanel({
                   </p>
                   <div className="flex items-center gap-1.5 mt-1 flex-wrap">
                     {img.modelName && (
-                      <span className={`inline-flex items-center gap-0.5 text-[9px] ${mutedText}`}>
+                      <span className={`inline-flex max-w-full break-all items-center gap-0.5 text-[9px] ${mutedText}`}>
                         <Tag className="h-2.5 w-2.5" />{img.modelName}
                       </span>
                     )}
@@ -505,7 +524,7 @@ export function ProjectDataPanel({
                   </div>
                   {/* List mode action buttons */}
                   {!isManageMode && (
-                    <div className="flex items-center gap-1.5 mt-1.5">
+                    <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
                       <button
                         onClick={(e) => { e.stopPropagation(); onMakeSame?.(img); }}
                         className="flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium transition-colors"
@@ -536,6 +555,7 @@ export function ProjectDataPanel({
             ))}
           </div>
         )}
+      </div>
       </div>
     </div>
   );

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useMemo, useRef, forwardRef, useImperativeHandle, type ReactNode } from 'react';
+import { useState, useEffect, useLayoutEffect, useCallback, useMemo, useRef, forwardRef, useImperativeHandle, type ReactNode } from 'react';
 import * as React from 'react';
 import {
   Play, Video, ImagePlus, Settings2,
@@ -26,6 +26,7 @@ import type { DirectorStyle, VideoReferenceBinding } from '@/lib/video-director/
 import { selectInitialModel } from '@/lib/model-defaults';
 import { useTaskModelCatalog } from '@/hooks/use-task-model-catalog';
 import { taskModelKey } from '@/lib/task-core/model-capability-contract';
+import { constrainFloatingPanelPosition, getCenteredFloatingPanelPosition, getFloatingPanelViewport, subscribeFloatingPanelViewport, type FloatingPanelPosition } from '@/lib/floating-panel-position';
 
 // === 生成历史 ===
 interface VideoHistoryEntry {
@@ -372,6 +373,28 @@ const VideoGenerationPanel = forwardRef<VideoGenerationPanelHandle, VideoGenerat
   const [panelPosition, setPanelPosition] = useState<{ x: number; y: number } | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const dragStartRef = useRef<{ x: number; y: number; panelX: number; panelY: number } | null>(null);
+  const dragCleanupRef = useRef<(() => void) | null>(null);
+  const [panelViewport, setPanelViewport] = useState(getFloatingPanelViewport);
+  const widePanel = panelViewport.width >= 1024;
+  const mediumPanel = panelViewport.width >= 640;
+
+  useEffect(() => {
+    const update = (): void => setPanelViewport(getFloatingPanelViewport());
+    update();
+    return subscribeFloatingPanelViewport(update);
+  }, []);
+  useEffect(() => () => { dragCleanupRef.current?.(); }, []);
+
+  const fitPanelPosition = useCallback((x: number, y: number): FloatingPanelPosition => {
+    const viewport = getFloatingPanelViewport();
+    const rect = panelRef.current?.getBoundingClientRect();
+    const position = constrainFloatingPanelPosition({
+      x: x - viewport.left, y: y - viewport.top,
+      viewportWidth: viewport.width, viewportHeight: viewport.height,
+      panelWidth: rect?.width ?? 0, panelHeight: rect?.height ?? 0, margin: 8,
+    });
+    return { x: position.x + viewport.left, y: position.y + viewport.top };
+  }, []);
 
   useEffect(() => {
     if (!externalPrompt?.trim()) return;
@@ -380,20 +403,25 @@ const VideoGenerationPanel = forwardRef<VideoGenerationPanelHandle, VideoGenerat
     onExternalPromptConsumed?.();
   }, [externalPrompt, externalPromptMode, onExternalPromptConsumed]);
 
-  // 初始居中定位
-  useEffect(() => {
-    if (floating && panelPosition === null && panelRef.current) {
-      const rect = panelRef.current.getBoundingClientRect();
-      setPanelPosition({
-        x: (window.innerWidth - rect.width) / 2,
-        y: (window.innerHeight - rect.height) / 2,
+  // Measure the committed, size-limited DOM before centering or restoring it.
+  useLayoutEffect(() => {
+    if (!floating || !panelRef.current) return;
+    const rect = panelRef.current.getBoundingClientRect();
+    setPanelPosition(previous => {
+      const centered = getCenteredFloatingPanelPosition({
+        viewportWidth: panelViewport.width, viewportHeight: panelViewport.height,
+        panelWidth: rect.width, panelHeight: rect.height, margin: 8,
       });
-    }
-  }, [floating, panelPosition]);
+      const next = fitPanelPosition(previous?.x ?? centered.x + panelViewport.left, previous?.y ?? centered.y + panelViewport.top);
+      return previous?.x === next.x && previous?.y === next.y ? previous : next;
+    });
+  }, [floating, panelMinimized, panelViewport, fitPanelPosition]);
 
   // 拖拽处理
   const handleDragStart = useCallback((e: React.MouseEvent) => {
     if (!floating || !panelRef.current) return;
+    if ((e.target as HTMLElement).closest('button, input, select, textarea, a')) return;
+    dragCleanupRef.current?.();
     e.preventDefault();
     const rect = panelRef.current.getBoundingClientRect();
     dragStartRef.current = {
@@ -406,19 +434,22 @@ const VideoGenerationPanel = forwardRef<VideoGenerationPanelHandle, VideoGenerat
       if (!dragStartRef.current) return;
       const dx = me.clientX - dragStartRef.current.x;
       const dy = me.clientY - dragStartRef.current.y;
-      setPanelPosition({
-        x: dragStartRef.current.panelX + dx,
-        y: dragStartRef.current.panelY + dy,
-      });
+      setPanelPosition(fitPanelPosition(dragStartRef.current.panelX + dx, dragStartRef.current.panelY + dy));
     };
     const handleMouseUp = () => {
       dragStartRef.current = null;
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);
+      window.removeEventListener('blur', handleMouseUp);
+      window.removeEventListener('pointercancel', handleMouseUp);
+      dragCleanupRef.current = null;
     };
     window.addEventListener('mousemove', handleMouseMove);
     window.addEventListener('mouseup', handleMouseUp);
-  }, [floating]);
+    window.addEventListener('blur', handleMouseUp);
+    window.addEventListener('pointercancel', handleMouseUp);
+    dragCleanupRef.current = handleMouseUp;
+  }, [floating, fitPanelPosition]);
 
   // === 多参考图约束系统 ===
   const [typedReferences, setTypedReferences] = useState<TypedReference[]>([]);
@@ -1850,12 +1881,12 @@ Rules:
     : 'flex flex-col min-h-full';
 
   const floatingStyle = floating ? {
-    left: panelPosition ? `${panelPosition.x}px` : '50%',
-    top: panelPosition ? `${panelPosition.y}px` : '50%',
-    transform: panelPosition ? 'none' : 'translate(-50%, -50%)',
-    maxHeight: '88vh',
-    width: 'min(1180px, 94vw)',
-    minWidth: '960px',
+    left: panelPosition?.x ?? panelViewport.left + 8,
+    top: panelPosition?.y ?? panelViewport.top + 8,
+    height: panelMinimized ? undefined : Math.max(0, Math.min(780, panelViewport.height - 16)),
+    maxHeight: Math.max(0, panelViewport.height - 16),
+    width: 'min(1180px, calc(100vw - 16px))',
+    maxWidth: Math.max(0, panelViewport.width - 16),
   } : {};
 
   return (
@@ -1868,25 +1899,25 @@ Rules:
       {/* 浮动模式标题栏 */}
       {floating && (
         <div
-          className={`flex items-center gap-2.5 px-5 py-3 cursor-move select-none flex-shrink-0 ${isMonochrome ? 'bg-[#f9fafb]' : 'bg-gradient-to-b from-[#161616] to-[#0f0f0f]'}`}
+          className={`flex items-center gap-2 ${widePanel ? 'px-5' : 'px-3'} py-2 cursor-move select-none flex-shrink-0 ${isMonochrome ? 'bg-[#f9fafb]' : 'bg-gradient-to-b from-[#161616] to-[#0f0f0f]'}`}
           style={{ borderBottom: `1px solid ${isMonochrome ? '#e5e7eb' : 'rgba(255,255,255,0.06)'}` }}
           onMouseDown={handleDragStart}
         >
-          <GripVertical size={16} style={{ color: isMonochrome ? '#9ca3af' : '#6b7280' }} className="shrink-0" />
+          <GripVertical size={16} style={{ color: isMonochrome ? '#9ca3af' : '#6b7280' }} className={`${widePanel ? 'block' : 'hidden'} shrink-0`} />
           <div
-            className="w-8 h-8 rounded-xl flex items-center justify-center shrink-0 shadow-sm"
+            className={`${mediumPanel ? 'flex' : 'hidden'} w-8 h-8 rounded-xl items-center justify-center shrink-0 shadow-sm`}
             style={{ background: `linear-gradient(135deg, ${accentColor}, ${isMonochrome ? '#2563eb' : '#8b7225'})`, color: isMonochrome ? '#ffffff' : '#0a0a0a' }}
           >
             <Film className="w-4 h-4" />
           </div>
           <div className="flex-1 min-w-0">
             <h1 className="text-[15px] font-semibold leading-tight" style={{ color: textColor }}>视频生成器</h1>
-            <p className="text-[11px] mt-0.5 leading-tight" style={{ color: subTextColor }}>文生视频 · 图生视频 · 首尾帧 · 多镜头 · 视频延长</p>
+            <p className={`${widePanel ? 'block' : 'hidden'} text-[11px] mt-0.5 leading-tight`} style={{ color: subTextColor }}>文生视频 · 图生视频 · 首尾帧 · 多镜头 · 视频延长</p>
           </div>
-          <div className="flex items-center gap-1.5">
+          <div className="flex shrink-0 items-center gap-1.5">
             {isGenerating && (
               <div
-                className="px-2.5 py-1.5 rounded-lg text-[11px] font-medium flex items-center gap-1.5 shadow-sm"
+                className={`${mediumPanel ? 'px-2.5' : 'px-1.5'} py-1.5 rounded-lg text-[11px] font-medium flex shrink-0 whitespace-nowrap items-center gap-1.5 shadow-sm`}
                 style={{ background: accentColor, color: isMonochrome ? '#fff' : '#0a0a0a' }}
               >
                 <div className="w-2 h-2 rounded-full bg-white/90 animate-pulse" />
@@ -1895,7 +1926,7 @@ Rules:
             )}
             <button
               onClick={(e) => { e.stopPropagation(); setPanelMinimized(!panelMinimized); }}
-              className="p-2 rounded-lg transition-all duration-200 hover:scale-105"
+              className="min-w-11 min-h-11 flex items-center justify-center p-2 rounded-lg transition-colors duration-200"
               style={{ color: subTextColor, border: `1px solid ${isMonochrome ? '#e5e7eb' : 'rgba(255,255,255,0.1)'}` }}
               onMouseEnter={e => { e.currentTarget.style.borderColor = accentColor; e.currentTarget.style.color = accentColor; }}
               onMouseLeave={e => { e.currentTarget.style.borderColor = isMonochrome ? '#e5e7eb' : 'rgba(255,255,255,0.1)'; e.currentTarget.style.color = subTextColor; }}
@@ -1905,7 +1936,7 @@ Rules:
             </button>
             <button
               onClick={(e) => { e.stopPropagation(); onClose?.(); }}
-              className="p-2 rounded-lg transition-all duration-200 hover:scale-105"
+              className="min-w-11 min-h-11 flex items-center justify-center p-2 rounded-lg transition-colors duration-200"
               style={{ color: subTextColor, border: `1px solid ${isMonochrome ? '#e5e7eb' : 'rgba(255,255,255,0.1)'}` }}
               onMouseEnter={e => { e.currentTarget.style.borderColor = 'rgba(255,80,80,0.4)'; e.currentTarget.style.color = '#ff5555'; }}
               onMouseLeave={e => { e.currentTarget.style.borderColor = isMonochrome ? '#e5e7eb' : 'rgba(255,255,255,0.1)'; e.currentTarget.style.color = subTextColor; }}
@@ -1932,14 +1963,14 @@ Rules:
         )}
 
         {/* 模式切换 */}
-        <div className={`flex gap-1.5 px-5 py-1 flex-shrink-0 ${isMonochrome ? 'bg-gray-100 rounded-xl mx-5 mt-3 p-1.5' : 'mx-5 mt-3'}`}>
+        <div className={`flex flex-wrap gap-1.5 py-1 flex-shrink-0 ${widePanel ? 'mx-5' : 'mx-3'} mt-3 ${isMonochrome ? 'bg-gray-100 rounded-xl p-1.5' : ''}`}>
           {modeOptions.map(opt => {
             const active = mode === opt.value;
             return (
               <button
                 key={opt.value}
                 onClick={() => { setMode(opt.value); setIsExtending(false); }}
-                className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold transition-all cursor-pointer whitespace-nowrap"
+                className="flex-1 min-w-[120px] min-h-11 flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold transition-all cursor-pointer whitespace-nowrap"
                 style={isMonochrome ? {
                   background: active ? '#2563eb' : '#fff',
                   color: active ? '#fff' : '#6b7280',
@@ -1961,11 +1992,11 @@ Rules:
         {/* 主体区域 —— flex col：上方滚动区（两列布局）+ 下方固定操作栏 */}
         <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
         <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain custom-scrollbar">
-        <div className="flex gap-0 min-h-full">
+        <div className={`flex ${widePanel ? 'flex-row' : 'flex-col'} gap-0 min-h-full`}>
           {/* ============ 左列：风格模板 + 模型选择（340px） ============ */}
           <div
-            className="flex-shrink-0 overflow-y-auto overflow-x-hidden px-4 py-4 scrollbar-thin flex flex-col gap-4"
-            style={{ width: 340, borderRight: `1px solid ${isMonochrome ? '#e5e7eb' : 'rgba(255,255,255,0.06)'}`, scrollbarWidth: 'thin' }}
+            className={`${widePanel ? 'w-[340px] overflow-y-auto' : 'w-full'} min-w-0 flex-shrink-0 overflow-x-hidden px-4 py-4 scrollbar-thin flex flex-col gap-4`}
+            style={{ borderRight: `1px solid ${isMonochrome ? '#e5e7eb' : 'rgba(255,255,255,0.06)'}`, scrollbarWidth: 'thin' }}
           >
             {/* 导演风格选择 */}
             <div>
@@ -2077,8 +2108,8 @@ Rules:
           </div>
 
           {/* ============ 右列：提示词 + 参数（flex-1 自适应，内部纵向分为滚动区 + 底部按钮） ============ */}
-          <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
-            <div className="flex-1 overflow-y-auto overflow-x-hidden px-5 pt-4 pb-2 scrollbar-thin min-h-0" style={{ scrollbarWidth: 'thin' }}>
+          <div className={`${widePanel ? 'w-auto shrink flex-1 overflow-hidden' : 'w-full shrink-0'} flex flex-col min-w-0`}>
+            <div className={`${widePanel ? 'flex-1 overflow-y-auto min-h-0' : ''} overflow-x-hidden px-5 pt-4 pb-2 scrollbar-thin`} style={{ scrollbarWidth: 'thin' }}>
             {/* ======== 视频描述区 ======== */}
             <div className="flex flex-col gap-3 min-w-0">
               <div>
@@ -2357,7 +2388,7 @@ Rules:
             )}
 
             {/* 参数区：网格双列避免挤压 */}
-            <div className="grid grid-cols-2 gap-3">
+            <div className={`grid ${mediumPanel ? 'grid-cols-2' : 'grid-cols-1'} gap-3`}>
               <div>
                 <label className={labelClass}>画面比例</label>
                 <div className="grid grid-cols-3 gap-1">

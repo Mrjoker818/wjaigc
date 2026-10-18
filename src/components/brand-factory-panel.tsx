@@ -1,6 +1,8 @@
 'use client';
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react';
+import { constrainFloatingPanelPosition, getCenteredFloatingPanelPosition, getFloatingPanelViewport,
+  subscribeFloatingPanelViewport, type FloatingPanelPosition, type FloatingPanelViewport } from '@/lib/floating-panel-position';
 import {
   Building2, X, GripVertical, Plus, Trash2, Archive, FolderOpen,
   Upload, Image as ImageIcon, Palette, Sparkles, Layout, FileText,
@@ -429,18 +431,11 @@ interface BrandFactoryPanelProps {
 
 export default function BrandFactoryPanel({ onClose, onAddImages, isMonochrome = false, onOpenLogoSkill }: BrandFactoryPanelProps) {
   // === Panel drag state ===
-  const [panelPos, setPanelPos] = useState({ x: 0, y: 20 });
+  const [panelPos, setPanelPos] = useState<FloatingPanelPosition>({ x: 8, y: 8 });
   const [isDragging, setIsDragging] = useState(false);
   const dragOffset = useRef({ x: 0, y: 0 });
   const panelRef = useRef<HTMLDivElement>(null);
 
-  // 客户端挂载后设置初始居中位置（避免 Hydration 不匹配）
-  useEffect(() => {
-    setPanelPos({
-      x: Math.max(0, (window.innerWidth - 960) / 2),
-      y: Math.max(20, (window.innerHeight - Math.min(window.innerHeight * 0.85, 700)) / 2),
-    });
-  }, []);
 
   // === Core state ===
   const [activeTab, setActiveTab] = useState('projects');
@@ -514,9 +509,46 @@ export default function BrandFactoryPanel({ onClose, onAddImages, isMonochrome =
   const PANEL_W = 900;
   const PANEL_H = 680;
 
+  const [panelViewport, setPanelViewport] = useState<FloatingPanelViewport>({ width: 1056, height: 776, left: 0, top: 0 });
+  const panelWidth = Math.max(0, Math.min(PANEL_W, panelViewport.width - 16));
+  const panelMaxHeight = Math.max(0, Math.min(panelViewport.height - 16,
+    panelViewport.width >= 1024 && panelViewport.height >= 600 ? Math.min(PANEL_H, panelViewport.height * 0.85) : panelViewport.height - 16));
+  const constrainPanelPosition = useCallback((next: FloatingPanelPosition): FloatingPanelPosition => {
+    const view = getFloatingPanelViewport();
+    const box = panelRef.current?.getBoundingClientRect();
+    const bounded = constrainFloatingPanelPosition({ x: next.x - view.left, y: next.y - view.top,
+      viewportWidth: view.width, viewportHeight: view.height,
+      panelWidth: box?.width || Math.min(PANEL_W, Math.max(0, view.width - 16)), panelHeight: box?.height || 60, margin: 8 });
+    return { x: bounded.x + view.left, y: bounded.y + view.top };
+  }, []);
+  useLayoutEffect(() => {
+    const update = (): void => {
+      const next = getFloatingPanelViewport();
+      setPanelViewport(current => current.width === next.width && current.height === next.height
+        && current.left === next.left && current.top === next.top ? current : next);
+    };
+    const view = getFloatingPanelViewport();
+    const box = panelRef.current?.getBoundingClientRect();
+    const centered = getCenteredFloatingPanelPosition({ viewportWidth: view.width, viewportHeight: view.height,
+      panelWidth: Math.min(PANEL_W, Math.max(0, view.width - 16)),
+      panelHeight: box?.height || Math.min(PANEL_H, Math.max(0, view.height - 16)), margin: 8 });
+    setPanelPos({ x: centered.x + view.left, y: centered.y + view.top });
+    update(); return subscribeFloatingPanelViewport(update);
+  }, []);
+  useLayoutEffect(() => {
+    const keepVisible = (): void => setPanelPos(current => {
+      const next = constrainPanelPosition(current); return next.x === current.x && next.y === current.y ? current : next;
+    });
+    keepVisible();
+    if (typeof ResizeObserver === 'undefined' || !panelRef.current) return;
+    const observer = new ResizeObserver(keepVisible); observer.observe(panelRef.current);
+    return () => observer.disconnect();
+  }, [panelViewport, isMinimized, constrainPanelPosition]);
+
   // Drag handlers
   const handleDragStart = useCallback((e: React.MouseEvent) => {
-    if (!panelRef.current) return;
+    if (!panelRef.current || e.button !== 0 || (e.target as HTMLElement).closest('button,input,select,textarea,a')) return;
+    e.preventDefault();
     const rect = panelRef.current.getBoundingClientRect();
     dragOffset.current = { x: e.clientX - rect.left, y: e.clientY - rect.top };
     setIsDragging(true);
@@ -525,22 +557,14 @@ export default function BrandFactoryPanel({ onClose, onAddImages, isMonochrome =
   useEffect(() => {
     if (!isDragging) return;
     const handleMove = (e: MouseEvent) => {
-      setPanelPos({ x: e.clientX - dragOffset.current.x, y: e.clientY - dragOffset.current.y });
+      setPanelPos(constrainPanelPosition({ x: e.clientX - dragOffset.current.x, y: e.clientY - dragOffset.current.y }));
     };
-    const handleUp = () => setIsDragging(false);
+    const handleUp = (): void => { setPanelPos(current => constrainPanelPosition(current)); setIsDragging(false); };
     document.addEventListener('mousemove', handleMove);
     document.addEventListener('mouseup', handleUp);
     return () => { document.removeEventListener('mousemove', handleMove); document.removeEventListener('mouseup', handleUp); };
-  }, [isDragging]);
+  }, [isDragging, constrainPanelPosition]);
 
-  // Center panel on mount
-  useEffect(() => {
-    const maxH = Math.min(window.innerHeight * 0.85, PANEL_H);
-    setPanelPos({
-      x: Math.max(0, (window.innerWidth - PANEL_W) / 2),
-      y: Math.max(0, (window.innerHeight - maxH) / 2),
-    });
-  }, []);
 
   // Load projects
   useEffect(() => { loadProjects(); }, []);
@@ -1339,14 +1363,14 @@ export default function BrandFactoryPanel({ onClose, onAddImages, isMonochrome =
     <div className="space-y-4">
       {noProject && <div className={`${th.textMuted} text-sm text-center py-8`}>请先选择项目</div>}
       {currentProject && (
-        <div className="grid grid-cols-2 gap-4">
-          <div className={`${th.card} p-4 space-y-3`}>
+        <div className="grid min-w-0 grid-cols-1 gap-4 lg:grid-cols-2">
+          <div className={`${th.card} min-w-0 p-4 space-y-3`}>
             <h3 className={th.title + ' text-sm'}>主KV生成</h3>
             <input className={`${th.input} w-full`} placeholder="主题文案" value={kvForm.theme}
               onChange={e => setKvForm(f => ({ ...f, theme: e.target.value }))} />
             <input className={`${th.input} w-full`} placeholder="传播语 / Slogan" value={kvForm.slogan}
               onChange={e => setKvForm(f => ({ ...f, slogan: e.target.value }))} />
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2">
               <select className={th.select} value={kvForm.ratio}
                 onChange={e => setKvForm(f => ({ ...f, ratio: e.target.value }))}>
                 {['16:9', '4:3', '3:4', '1:1', '9:16', '2.35:1'].map(r => <option key={r} value={r} className={th.optionBg}>{r}</option>)}
@@ -1364,7 +1388,7 @@ export default function BrandFactoryPanel({ onClose, onAddImages, isMonochrome =
             {kvImageUrl && (
               <div className="mt-2 rounded-lg overflow-hidden border border-white/[0.06]">
                 <img src={kvImageUrl} alt="KV主视觉" className="w-full h-auto" crossOrigin="anonymous" />
-                <div className="flex gap-1.5 p-1.5">
+                <div className="flex flex-wrap gap-1.5 p-1.5">
                   <button className={`${th.btnGhost} text-[10px] px-2 py-1 border ${th.borderLight}`}
                     onClick={() => {
                       if (onAddImages) {
@@ -1826,8 +1850,9 @@ export default function BrandFactoryPanel({ onClose, onAddImages, isMonochrome =
 
   // ========== MODEL SELECTION PANEL ==========
   const renderModelPanel = () => (
-    <div className={`absolute top-full left-0 right-0 ${th.card} border-t-0 rounded-b-xl p-4 z-10 ${showModelPanel ? '' : 'hidden'}`}>
-      <div className="grid grid-cols-2 gap-4">
+    <div className={`relative min-h-0 shrink-0 overflow-y-auto ${th.card} border-t-0 rounded-b-xl p-3 z-10 ${showModelPanel ? '' : 'hidden'}`}
+      style={{ maxHeight: Math.max(88, Math.min(180, panelMaxHeight - 76)) }}>
+      <div className="grid min-w-0 grid-cols-2 gap-3 [&>div]:min-w-0">
         <div>
           <div className="flex items-center gap-2 mb-2">
             <Cpu className={`w-3.5 h-3.5 ${ac.textAccent}`} />
@@ -1870,49 +1895,49 @@ export default function BrandFactoryPanel({ onClose, onAddImages, isMonochrome =
   return (
     <div
       ref={panelRef}
-      className={`fixed z-[90] ${isDragging ? 'cursor-grabbing' : ''}`}
-      style={{ left: panelPos.x, top: panelPos.y, width: PANEL_W }}
+      className={`fixed z-[90] min-w-0 [&_button]:min-h-11 [&_button]:min-w-11 [&_button]:max-w-full [&_input]:min-h-11 [&_input]:max-w-full [&_select]:min-h-11 [&_select]:max-w-full [&_textarea]:min-h-11 [&_input]:text-base [&_select]:text-base [&_textarea]:text-base lg:[&_input]:text-sm lg:[&_select]:text-sm lg:[&_textarea]:text-sm ${isDragging ? 'cursor-grabbing' : ''}`}
+      style={{ left: panelPos.x, top: panelPos.y, width: panelWidth, maxWidth: 'calc(100vw - 16px)', maxHeight: panelMaxHeight }}
       onMouseDown={e => e.stopPropagation()}
       onPointerDown={e => e.stopPropagation()}
       onWheel={e => e.stopPropagation()}
     >
       <div
         data-floating-panel="true"
-        className={`${th.panel} flex flex-col overflow-hidden ${isDragging ? `ring-2 ${ac.ringAccent30} shadow-[0_0_30px_${ac.accentColorLight}]` : ''}`}
-        style={{ maxHeight: isMinimized ? undefined : '85vh' }}
+        className={`${th.panel} flex min-h-0 flex-col overflow-hidden ${isDragging ? `ring-2 ${ac.ringAccent30} shadow-[0_0_30px_${ac.accentColorLight}]` : ''}`}
+        style={{ maxHeight: isMinimized ? undefined : panelMaxHeight }}
       >
         {/* Header with drag handle */}
-        <div className={`${th.header} flex items-center gap-2 cursor-grab active:cursor-grabbing select-none relative ${isMinimized ? 'rounded-2xl border-b-0' : ''}`}
+        <div className={`${th.header} grid shrink-0 min-w-0 grid-cols-[minmax(0,1fr)_auto_auto_auto] items-center gap-x-2 gap-y-0 lg:flex lg:gap-2 cursor-grab active:cursor-grabbing select-none relative ${isMinimized ? 'rounded-2xl border-b-0' : ''}`}
           onMouseDown={handleDragStart}>
-          <GripVertical className="w-4 h-4 text-gray-500" />
-          <img src="/logo.png" alt="" className="w-4 h-4 object-contain rounded" />
-          <Building2 className={`w-4 h-4 ${ac.textAccent}`} />
-          <span className={th.title + ' text-sm flex-1'}>品牌工厂</span>
-          {currentProject && <span className={`text-[10px] ${ac.textAccent} ${ac.bgAccent10} px-2 py-0.5 rounded`}>{currentProject.brandName}</span>}
+          <GripVertical className="hidden h-4 w-4 shrink-0 text-gray-500 lg:block" />
+          <img src="/logo.png" alt="" className="hidden h-4 w-4 shrink-0 rounded object-contain lg:block" />
+          <Building2 className={`hidden h-4 w-4 shrink-0 lg:block ${ac.textAccent}`} />
+          <span className={th.title + ' col-start-1 row-start-1 min-w-0 truncate whitespace-nowrap text-sm lg:flex-1'}>品牌工厂</span>
+          {currentProject && <span title={currentProject.brandName} className={`col-start-1 row-start-2 min-w-0 max-w-full truncate whitespace-nowrap text-[10px] ${ac.textAccent} ${ac.bgAccent10} px-2 py-0.5 rounded`}>{currentProject.brandName}</span>}
           {/* Model toggle button */}
-          <button className={`${th.btnGhost} flex items-center gap-1 text-[10px] ${showModelPanel ? ac.textAccent : ''}`}
+          <button className={`${th.btnGhost} col-start-2 row-start-1 row-span-2 flex shrink-0 items-center gap-1 whitespace-nowrap text-[10px] ${showModelPanel ? ac.textAccent : ''}`}
             onClick={e => { e.stopPropagation(); setShowModelPanel(!showModelPanel); }}>
             <Cpu className="w-3 h-3" />
             <span>模型</span>
             <ChevronDown className={`w-3 h-3 transition-transform ${showModelPanel ? 'rotate-180' : ''}`} />
           </button>
-          <button className={`${th.btnGhost} p-1`} onClick={() => setIsMinimized(!isMinimized)}><Minus className="w-4 h-4" /></button>
-          <button className={`${th.btnGhost} p-1`} onClick={onClose}><X className="w-4 h-4" /></button>
+          <button type="button" aria-label={isMinimized ? '展开品牌工厂' : '最小化品牌工厂'} className={`${th.btnGhost} col-start-3 row-start-1 row-span-2 grid h-11 w-11 shrink-0 place-items-center p-1`} onClick={() => setIsMinimized(!isMinimized)}><Minus className="w-4 h-4" /></button>
+          <button type="button" aria-label="关闭品牌工厂" className={`${th.btnGhost} col-start-4 row-start-1 row-span-2 grid h-11 w-11 shrink-0 place-items-center p-1`} onClick={onClose}><X className="w-4 h-4" /></button>
         </div>
 
         {/* Model selection dropdown */}
-        {renderModelPanel()}
+        {!isMinimized && renderModelPanel()}
 
         {/* Body: Left sidebar + Right content */}
         {!isMinimized && (
-        <div className="flex flex-1 min-h-0 overflow-hidden">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden lg:flex-row">
           {/* Left sidebar tabs */}
-          <div className={`${th.sidebar} w-[120px] shrink-0 overflow-y-auto py-2 px-1.5 space-y-0.5`} style={{ scrollbarWidth: 'none' }}>
+          <div className={`${th.sidebar} flex w-full shrink-0 gap-1 overflow-x-auto overflow-y-hidden py-2 px-1.5 lg:block lg:w-[120px] lg:overflow-x-hidden lg:overflow-y-auto lg:space-y-0.5`} style={{ scrollbarWidth: 'none' }}>
             {TABS.map(tab => {
               const Icon = tab.icon;
               return (
                 <button key={tab.key}
-                  className={`${th.sidebarItem} ${activeTab === tab.key ? th.sidebarItemActive : th.sidebarItemInactive}`}
+                  className={`${th.sidebarItem} shrink-0 whitespace-nowrap ${activeTab === tab.key ? th.sidebarItemActive : th.sidebarItemInactive}`}
                   onClick={() => setActiveTab(tab.key)}>
                   <Icon className="w-3.5 h-3.5 shrink-0" />
                   <span className="truncate">{tab.label}</span>
@@ -1921,7 +1946,7 @@ export default function BrandFactoryPanel({ onClose, onAddImages, isMonochrome =
             })}
           </div>
           {/* Right content area */}
-          <div className="flex-1 min-w-0 overflow-y-auto p-4" style={{ scrollbarWidth: 'thin' }}>
+          <div className="min-h-0 min-w-0 flex-1 overflow-y-auto p-3 lg:p-4" style={{ scrollbarWidth: 'thin' }}>
             {error && <div className="bg-red-500/10 text-red-400 text-xs p-2 rounded mb-3">{error}</div>}
             {renderTabContent()}
           </div>

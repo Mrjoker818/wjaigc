@@ -1,7 +1,8 @@
 'use client';
 
-import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useCallback, useEffect, useLayoutEffect, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
+import { constrainFloatingPanelPosition, getFloatingPanelViewport, subscribeFloatingPanelViewport, type FloatingPanelPosition } from '@/lib/floating-panel-position';
 import { getModelDisplayName } from '@/lib/model-name-map';
 import { VenueRegionCanvas, type VenueRegion } from '@/components/venue-region-canvas';
 import {
@@ -301,6 +302,35 @@ export default function Display3DPanel({ isMonochrome = false, sourceImage = nul
   const [isDragging, setIsDragging] = useState(false);
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
   const [windowPos, setWindowPos] = useState({ x: 60, y: 60 });
+  const panelRef = useRef<HTMLDivElement>(null);
+  const [panelViewport, setPanelViewport] = useState(getFloatingPanelViewport);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const compact = panelViewport.width < 1024;
+  const mediumPanel = panelViewport.width >= 640;
+  const panelWidth = Math.max(0, panelViewport.width - (compact ? 16 : 80));
+  const panelHeight = Math.max(0, panelViewport.height - (compact ? 16 : 80));
+
+  useEffect(() => {
+    const update = (): void => setPanelViewport(getFloatingPanelViewport());
+    update();
+    return subscribeFloatingPanelViewport(update);
+  }, []);
+  const fitWindowPosition = useCallback((x: number, y: number): FloatingPanelPosition => {
+    const viewport = getFloatingPanelViewport();
+    const rect = panelRef.current?.getBoundingClientRect();
+    const position = constrainFloatingPanelPosition({
+      x: x - viewport.left, y: y - viewport.top,
+      viewportWidth: viewport.width, viewportHeight: viewport.height,
+      panelWidth: rect?.width ?? 0, panelHeight: rect?.height ?? 0, margin: 8,
+    });
+    return { x: position.x + viewport.left, y: position.y + viewport.top };
+  }, []);
+  useLayoutEffect(() => {
+    setWindowPos(previous => {
+      const next = fitWindowPosition(previous.x, previous.y);
+      return previous.x === next.x && previous.y === next.y ? previous : next;
+    });
+  }, [panelViewport, isMinimized, fitWindowPosition]);
 
   // === Sidebar tab ===
   const [sidebarTab, setSidebarTab] = useState<'projects' | 'templates' | 'presets'>('projects');
@@ -473,6 +503,7 @@ export default function Display3DPanel({ isMonochrome = false, sourceImage = nul
 
   // === Drag handlers ===
   const handleDragStart = useCallback((e: React.MouseEvent) => {
+    if ((e.target as HTMLElement).closest('button, input, select, textarea, a')) return;
     e.preventDefault();
     e.stopPropagation();
     setIsDragging(true);
@@ -481,12 +512,17 @@ export default function Display3DPanel({ isMonochrome = false, sourceImage = nul
 
   useEffect(() => {
     if (!isDragging) return;
-    const handleMove = (e: MouseEvent) => setWindowPos({ x: e.clientX - dragOffset.x, y: e.clientY - dragOffset.y });
+    const handleMove = (e: MouseEvent): void => setWindowPos(fitWindowPosition(e.clientX - dragOffset.x, e.clientY - dragOffset.y));
     const handleUp = () => setIsDragging(false);
     window.addEventListener('mousemove', handleMove);
     window.addEventListener('mouseup', handleUp);
-    return () => { window.removeEventListener('mousemove', handleMove); window.removeEventListener('mouseup', handleUp); };
-  }, [isDragging, dragOffset]);
+    window.addEventListener('blur', handleUp);
+    window.addEventListener('pointercancel', handleUp);
+    return () => {
+      window.removeEventListener('mousemove', handleMove); window.removeEventListener('mouseup', handleUp);
+      window.removeEventListener('blur', handleUp); window.removeEventListener('pointercancel', handleUp);
+    };
+  }, [isDragging, dragOffset, fitWindowPosition]);
 
   // === Upload handler ===
   const handleUpload = (type: string) => {
@@ -1119,11 +1155,13 @@ Professional 3D exhibition rendering, photorealistic, high quality, commercial g
       {!isMinimized && <div className="fixed inset-0 bg-black/30 backdrop-blur-sm" onClick={onClose} />}
 
       <div
+        ref={panelRef}
         data-popup
         className="relative flex flex-col rounded-xl overflow-hidden shadow-2xl border"
         style={{
-          width: isMinimized ? 340 : 'calc(100vw - 80px)',
-          height: isMinimized ? 'auto' : 'calc(100vh - 80px)',
+          width: isMinimized ? Math.min(340, panelViewport.width - 16) : panelWidth,
+          height: isMinimized ? 'auto' : panelHeight,
+          maxHeight: Math.max(0, panelViewport.height - 16),
           background: bg,
           borderColor: isMonochrome ? '#e5e5e5' : 'rgba(212,175,55,0.3)',
           ...(isMinimized ? {} : { left: windowPos.x, top: windowPos.y }),
@@ -1135,17 +1173,17 @@ Professional 3D exhibition rendering, photorealistic, high quality, commercial g
         {/* Title bar */}
         <div
           data-panel-header
-          className="flex items-center justify-between px-3 shrink-0 cursor-move select-none"
-          style={{ height: 36, background: isMonochrome ? '#f9fafb' : '#111', borderBottom: isMinimized ? 'none' : (isMonochrome ? '1px solid #e5e5e5' : '1px solid rgba(212,175,55,0.3)') }}
+          className="flex items-center justify-between gap-2 px-3 shrink-0 cursor-move select-none"
+          style={{ minHeight: compact ? 56 : 36, background: isMonochrome ? '#f9fafb' : '#111', borderBottom: isMinimized ? 'none' : (isMonochrome ? '1px solid #e5e5e5' : '1px solid rgba(212,175,55,0.3)') }}
           onMouseDown={handleDragStart}
         >
-          <div className="flex items-center gap-2">
-            <Box size={14} style={{ color: accent }} />
-            <span className="text-sm font-medium" style={{ color: textAccent }}>3D 展陈系统 Pro</span>
+          <div className="flex min-w-0 items-center gap-2">
+            <Box size={14} className={`${mediumPanel ? 'block' : 'hidden'} shrink-0`} style={{ color: accent }} />
+            <span className="text-sm font-medium truncate" style={{ color: textAccent }}>3D 展陈系统 Pro</span>
           </div>
-          <div className="flex items-center gap-1">
+          <div className="flex shrink-0 items-center gap-1">
             <button
-              className={`w-7 h-7 flex items-center justify-center rounded transition-colors ${isMonochrome ? 'hover:bg-gray-200' : 'hover:bg-white/10'}`}
+              className={`${compact ? 'w-11 h-11' : 'w-7 h-7'} flex items-center justify-center rounded transition-colors ${isMonochrome ? 'hover:bg-gray-200' : 'hover:bg-white/10'}`}
               onClick={() => setIsMinimized(!isMinimized)}
               aria-label={isMinimized ? '展开 3D 展陈系统' : '最小化 3D 展陈系统'}
               title={isMinimized ? '展开' : '最小化'}
@@ -1153,7 +1191,7 @@ Professional 3D exhibition rendering, photorealistic, high quality, commercial g
               {isMinimized ? <Maximize2 size={14} style={{ color: textMuted }} /> : <Minus size={14} style={{ color: textMuted }} />}
             </button>
             <button
-              className={`w-7 h-7 flex items-center justify-center rounded transition-colors ${isMonochrome ? 'hover:bg-red-100' : 'hover:bg-red-500/30'}`}
+              className={`${compact ? 'w-11 h-11' : 'w-7 h-7'} flex items-center justify-center rounded transition-colors ${isMonochrome ? 'hover:bg-red-100' : 'hover:bg-red-500/30'}`}
               onClick={onClose}
               aria-label="关闭 3D 展陈系统"
               title="关闭"
@@ -1164,11 +1202,12 @@ Professional 3D exhibition rendering, photorealistic, high quality, commercial g
         </div>
 
         {isMinimized ? null : (
-          <div className="flex flex-1 overflow-hidden">
+          <div className="relative flex flex-1 min-h-0 overflow-hidden">
             {/* LEFT SIDEBAR */}
-            <aside className="w-[240px] shrink-0 border-r flex flex-col overflow-hidden"
+            <aside className={`${compact ? `${sidebarOpen ? 'flex' : 'hidden'} absolute inset-y-0 left-0 z-10` : 'static flex'} w-[240px] max-w-full shrink-0 border-r flex-col overflow-hidden`}
               style={{ background: isMonochrome ? '#f9fafb' : 'rgba(0,0,0,0.4)', borderColor: border }}
             >
+              <button className={`${compact ? 'block' : 'hidden'} min-h-11 px-3 text-left text-xs shrink-0`} style={{ color: textAccent }} onClick={() => setSidebarOpen(false)}>收起项目栏</button>
               <div className="p-3">
                 <button className="w-full rounded-xl py-2.5 text-xs font-bold cursor-pointer transition-all"
                   style={{ background: isMonochrome ? '#3b82f6' : '#d4af37', color: isMonochrome ? '#fff' : '#000' }}>
@@ -1194,19 +1233,22 @@ Professional 3D exhibition rendering, photorealistic, high quality, commercial g
             </aside>
 
             {/* MAIN CONTENT */}
-            <main className="flex flex-1 flex-col overflow-hidden">
+            <main className="flex min-w-0 min-h-0 flex-1 flex-col overflow-hidden">
               {/* Header */}
-              <header className="flex items-center justify-between px-4 shrink-0" style={{ height: 44, borderBottom: `1px solid ${border}` }}>
-                <div className="flex items-center gap-3">
+              <header className={`flex flex-wrap items-center justify-between gap-2 ${compact ? 'px-3' : 'px-4'} py-2 shrink-0`} style={{ minHeight: 44, borderBottom: `1px solid ${border}` }}>
+                <div className={`flex min-w-0 flex-wrap items-center ${compact ? 'gap-2' : 'gap-3'}`}>
+                  <button className={`${compact ? 'block' : 'hidden'} min-h-11 px-2 text-xs`} aria-expanded={sidebarOpen} onClick={() => setSidebarOpen(!sidebarOpen)} style={{ color: textAccent }}>
+                    {sidebarOpen ? '收起项目' : '项目栏'}
+                  </button>
                   <h2 className="text-base font-semibold" style={{ color: textPrimary }}>
                     {appMode === 'display3d' ? '3D 展陈工作台' : '活动现场设计师'}
                   </h2>
                   <span className="text-xs px-2 py-0.5 rounded-full" style={{ background: isMonochrome ? '#dbeafe' : 'rgba(212,175,55,0.15)', color: textAccent }}>Pro</span>
                   {/* Mode switcher */}
-                  <div className="flex rounded-lg overflow-hidden border" style={{ borderColor: border }}>
+                  <div className="flex shrink-0 rounded-lg overflow-hidden border" style={{ borderColor: border }}>
                     <button
                       onClick={() => setAppMode('display3d')}
-                      className="px-3 py-1 text-xs cursor-pointer transition-colors"
+                      className={`${compact ? 'min-h-11' : 'min-h-0'} px-3 py-1 text-xs cursor-pointer transition-colors whitespace-nowrap`}
                       style={{
                         background: appMode === 'display3d' ? (isMonochrome ? '#3b82f6' : '#d4af37') : 'transparent',
                         color: appMode === 'display3d' ? (isMonochrome ? '#fff' : '#000') : textMuted,
@@ -1216,7 +1258,7 @@ Professional 3D exhibition rendering, photorealistic, high quality, commercial g
                     </button>
                     <button
                       onClick={() => setAppMode('activity-venue')}
-                      className="px-3 py-1 text-xs cursor-pointer transition-colors"
+                      className={`${compact ? 'min-h-11' : 'min-h-0'} px-3 py-1 text-xs cursor-pointer transition-colors whitespace-nowrap`}
                       style={{
                         background: appMode === 'activity-venue' ? (isMonochrome ? '#3b82f6' : '#d4af37') : 'transparent',
                         color: appMode === 'activity-venue' ? (isMonochrome ? '#fff' : '#000') : textMuted,
@@ -1236,9 +1278,9 @@ Professional 3D exhibition rendering, photorealistic, high quality, commercial g
               {/* Workspace */}
               {appMode === 'activity-venue' ? (
                 /* ========== 活动现场设计师模式 ========== */
-                <div className="flex flex-1 overflow-hidden p-4 gap-4">
+                <div className={`flex ${compact ? 'flex-col overflow-y-auto p-3' : 'flex-row overflow-hidden p-4'} flex-1 min-h-0 gap-4`}>
                   {/* LEFT: 4-step workflow */}
-                  <div className="w-[380px] shrink-0 overflow-y-auto pr-2 space-y-4" data-toolbar>
+                  <div className={`${compact ? 'w-full' : 'w-[380px] overflow-y-auto pr-2'} min-w-0 shrink-0 space-y-4`} data-toolbar>
                     {/* Step indicator */}
                     <div className={panelCls}>
                       <div className="flex items-center gap-1 mb-3">
@@ -1499,7 +1541,7 @@ Professional 3D exhibition rendering, photorealistic, high quality, commercial g
                   </div>
 
                   {/* RIGHT: Preview */}
-                  <div className="flex flex-1 flex-col overflow-hidden rounded-xl border" style={{ background: bgCard, borderColor: border }}>
+                  <div className={`flex flex-col min-w-0 min-h-[300px] ${compact ? 'shrink-0' : 'shrink flex-1'} overflow-hidden rounded-xl border`} style={{ background: bgCard, borderColor: border }}>
                     {/* Preview tabs */}
                     <div className="flex items-center gap-1 px-3 py-2 shrink-0 border-b" style={{ borderColor: border }}>
                       {(['venue', 'proposals', 'render', 'qc'] as const).map(tab => (
@@ -1708,9 +1750,9 @@ Professional 3D exhibition rendering, photorealistic, high quality, commercial g
                 </div>
               ) : (
                 /* ========== 原有展陈设计模式 ========== */
-                <div className="grid flex-1 grid-cols-[360px_1fr] gap-4 overflow-hidden p-4">
+                <div className={`${compact ? 'flex flex-col overflow-y-auto p-3' : 'grid grid-cols-[360px_minmax(0,1fr)] overflow-hidden p-4'} flex-1 min-h-0 gap-4`}>
                 {/* LEFT: Form */}
-                <div className="overflow-y-auto pr-2 space-y-4" data-toolbar>
+                <div className={`min-w-0 ${compact ? 'shrink-0' : 'shrink overflow-y-auto pr-2'} space-y-4`} data-toolbar>
                   {/* Basic Info: Brand & Product */}
                   <section className={panelCls}>
                     <div className="mb-3 flex items-center gap-2">
@@ -2013,11 +2055,11 @@ Professional 3D exhibition rendering, photorealistic, high quality, commercial g
                 </div>
 
                 {/* RIGHT: Preview + Decomposition */}
-                <div className="flex flex-col gap-3 overflow-hidden">
+                <div className={`flex min-w-0 ${compact ? 'shrink-0' : 'shrink min-h-[360px] overflow-hidden'} flex-col gap-3`}>
                   {/* Preview Stage */}
-                  <section className={`${panelCls} flex-1 flex flex-col overflow-hidden`}>
+                  <section className={`${panelCls} ${compact ? 'flex-none min-h-[360px]' : 'flex-1 overflow-hidden'} flex flex-col`}>
                     {/* Tabs */}
-                    <div className="flex items-center gap-1 mb-3 overflow-x-auto">
+                    <div className="flex shrink-0 items-center gap-1 mb-3 overflow-x-auto">
                       {(['render', 'views', 'decompose', 'dimension', 'material', 'floorplan', 'bom'] as const).map(tab => (
                         <button key={tab} className={`rounded-lg px-2.5 py-1.5 text-[12px] whitespace-nowrap cursor-pointer transition-colors ${activePreviewTab === tab ? (isMonochrome ? 'bg-blue-50 text-blue-700' : 'bg-amber-500/20 text-amber-200') : (isMonochrome ? 'text-gray-500 hover:bg-gray-100' : 'text-white/50 hover:bg-white/5')}`}
                           onClick={() => setActivePreviewTab(tab)}>
@@ -2028,8 +2070,8 @@ Professional 3D exhibition rendering, photorealistic, high quality, commercial g
 
                     {/* Render preview */}
                     {activePreviewTab === 'render' && (
-                      <div className="flex-1 flex gap-3 overflow-hidden">
-                        <div className="flex-1 rounded-xl border flex items-center justify-center relative overflow-hidden"
+                      <div className={`${compact ? 'flex-col' : 'flex-1 min-h-0 flex-row overflow-hidden'} flex gap-3`}>
+                        <div className={`${compact ? 'flex-none' : 'flex-1'} min-w-0 min-h-[200px] rounded-xl border flex items-center justify-center relative overflow-hidden`}
                           style={{ background: isMonochrome ? '#f9fafb' : 'rgba(0,0,0,0.4)', borderColor: border }}>
                           {results.length > 0 ? (
                             <img src={results[0]?.url} className="w-full h-full object-contain" />
@@ -2048,9 +2090,9 @@ Professional 3D exhibition rendering, photorealistic, high quality, commercial g
                           ))}
                         </div>
                         {/* View thumbnails */}
-                        <div className="w-[120px] space-y-1.5 overflow-y-auto">
+                        <div className={`${compact ? 'w-full flex overflow-x-auto' : 'w-[120px] block space-y-1.5 overflow-y-auto'} shrink-0 gap-2`}>
                           {VIEW_OPTIONS.filter(v => viewOptions.includes(v.value)).map((v, i) => (
-                            <button key={v.value} className={`w-full h-[46px] rounded-lg border flex items-center justify-center text-[12px] cursor-pointer ${selectedView === v.value ? (isMonochrome ? 'border-blue-400 bg-blue-50 text-blue-700' : 'border-amber-400 text-amber-200') : (isMonochrome ? 'border-gray-200 text-gray-500' : 'border-white/10 text-white/50')}`}
+                            <button key={v.value} className={`min-w-[100px] ${compact ? '' : 'w-full'} h-[46px] rounded-lg border flex items-center justify-center text-[12px] cursor-pointer ${selectedView === v.value ? (isMonochrome ? 'border-blue-400 bg-blue-50 text-blue-700' : 'border-amber-400 text-amber-200') : (isMonochrome ? 'border-gray-200 text-gray-500 hover:bg-gray-100' : 'border-white/10 text-white/50 hover:bg-white/5')}`}
                               onClick={() => setSelectedView(v.value)}>
                               {v.label}
                             </button>
@@ -2262,7 +2304,7 @@ Professional 3D exhibition rendering, photorealistic, high quality, commercial g
                   </section>
 
                   {/* Bottom decomposition row */}
-                  <div className="grid grid-cols-[1.2fr_0.9fr_0.65fr_0.65fr] gap-2 min-h-[200px]" style={{ maxHeight: '240px' }}>
+                  <div className={`grid ${compact ? `shrink-0 ${mediumPanel ? 'grid-cols-2' : 'grid-cols-1'}` : 'shrink grid-cols-[1.2fr_0.9fr_0.65fr_0.65fr] max-h-[240px]'} gap-2 min-h-[200px]`}>
                     {/* Component list mini */}
                     <section className={`${panelCls} overflow-auto`}>
                       <h3 className="text-[12px] font-semibold mb-2" style={{ color: textPrimary }}>方案拆解 · 构成部件</h3>
@@ -2322,7 +2364,7 @@ Professional 3D exhibition rendering, photorealistic, high quality, commercial g
                   </div>
 
                   {/* Export & action buttons */}
-                  <div className="flex items-center gap-2 shrink-0">
+                  <div className={`flex ${compact ? 'flex-wrap' : 'flex-nowrap'} items-center gap-2 shrink-0 [&>button]:whitespace-nowrap`}>
                     <button
                       className={`rounded-lg border px-3 py-1.5 text-[12px] cursor-pointer disabled:opacity-50 ${isMonochrome ? 'border-blue-300 text-blue-600 hover:bg-blue-50' : 'border-amber-500/40 text-amber-200 hover:bg-amber-500/10'}`}
                       onClick={handleExportPdf}
@@ -2364,8 +2406,8 @@ Professional 3D exhibition rendering, photorealistic, high quality, commercial g
 
             {/* ====== 使用说明弹窗 ====== */}
             {showHelp && (
-              <div className="fixed inset-0 z-[9999] flex items-center justify-center" onClick={() => setShowHelp(false)} style={{ background: 'rgba(0,0,0,0.6)' }}>
-                <div className="w-[520px] max-h-[80vh] overflow-y-auto rounded-2xl p-6 shadow-2xl" onClick={e => e.stopPropagation()} style={{ background: isMonochrome ? '#fff' : '#1a1a1a', border: `1px solid ${isMonochrome ? '#e5e5e5' : 'rgba(255,255,255,0.1)'}` }}>
+              <div className="fixed z-[9999] flex items-center justify-center" onClick={() => setShowHelp(false)} style={{ left: panelViewport.left, top: panelViewport.top, width: panelViewport.width, height: panelViewport.height, background: 'rgba(0,0,0,0.6)' }}>
+                <div className="w-[520px] max-h-[80vh] overflow-y-auto rounded-2xl p-6 shadow-2xl" onClick={e => e.stopPropagation()} style={{ maxWidth: Math.max(0, panelViewport.width - 16), maxHeight: Math.max(0, panelViewport.height - 16), background: isMonochrome ? '#fff' : '#1a1a1a', border: `1px solid ${isMonochrome ? '#e5e5e5' : 'rgba(255,255,255,0.1)'}` }}>
                   <div className="flex items-center justify-between mb-4">
                     <h2 className="text-lg font-bold" style={{ color: textPrimary }}>3D 展陈系统 Pro — 使用说明</h2>
                     <button onClick={() => setShowHelp(false)} className="rounded-lg p-1.5 cursor-pointer" style={{ color: textMuted }}><X size={18} /></button>

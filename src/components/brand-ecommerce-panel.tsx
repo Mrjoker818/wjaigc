@@ -1,6 +1,8 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useLayoutEffect, useCallback, useRef } from 'react';
+import { constrainFloatingPanelPosition, getCenteredFloatingPanelPosition, getFloatingPanelViewport,
+  subscribeFloatingPanelViewport, type FloatingPanelPosition, type FloatingPanelViewport } from '@/lib/floating-panel-position';
 import { X, Minus, ShoppingBag, Loader2, Sparkles, Settings, GripVertical } from 'lucide-react';
 import { BrandTemplateSelector } from './brand-ecommerce/BrandTemplateSelector';
 import { type TemplateFieldValues } from './brand-ecommerce/template-fields';
@@ -173,13 +175,45 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
 
   // ─── Drag state ───────────────────────────────────────────────
   const panelW = 680;
-  const [position, setPosition] = useState(() => {
-    if (typeof window !== 'undefined') {
-      const maxH = Math.min(window.innerHeight * 0.85, 700);
-      return { x: Math.max(0, (window.innerWidth - panelW) / 2), y: Math.max(0, (window.innerHeight - maxH) / 2) };
-    }
-    return { x: 0, y: 0 };
-  });
+  const panelRef = useRef<HTMLDivElement>(null);
+  const [position, setPosition] = useState<FloatingPanelPosition>({ x: 8, y: 8 });
+
+  const [panelViewport, setPanelViewport] = useState<FloatingPanelViewport>({ width: 1056, height: 776, left: 0, top: 0 });
+  const shortPanel = panelViewport.height < 600;
+  const panelWidth = Math.max(0, Math.min(panelW, panelViewport.width - 16));
+  const panelMaxHeight = Math.max(0, Math.min(panelViewport.height - 16,
+    panelViewport.width >= 1024 && panelViewport.height >= 600 ? Math.min(840, panelViewport.height * 0.85) : panelViewport.height - 16));
+  const constrainPanelPosition = useCallback((next: FloatingPanelPosition): FloatingPanelPosition => {
+    const view = getFloatingPanelViewport();
+    const box = panelRef.current?.getBoundingClientRect();
+    const bounded = constrainFloatingPanelPosition({ x: next.x - view.left, y: next.y - view.top,
+      viewportWidth: view.width, viewportHeight: view.height,
+      panelWidth: box?.width || Math.min(panelW, Math.max(0, view.width - 16)), panelHeight: box?.height || 60, margin: 8 });
+    return { x: bounded.x + view.left, y: bounded.y + view.top };
+  }, []);
+  useLayoutEffect(() => {
+    const update = (): void => {
+      const next = getFloatingPanelViewport();
+      setPanelViewport(current => current.width === next.width && current.height === next.height
+        && current.left === next.left && current.top === next.top ? current : next);
+    };
+    const view = getFloatingPanelViewport();
+    const box = panelRef.current?.getBoundingClientRect();
+    const centered = getCenteredFloatingPanelPosition({ viewportWidth: view.width, viewportHeight: view.height,
+      panelWidth: Math.min(panelW, Math.max(0, view.width - 16)),
+      panelHeight: box?.height || Math.min(840, Math.max(0, view.height - 16)), margin: 8 });
+    setPosition({ x: centered.x + view.left, y: centered.y + view.top });
+    update(); return subscribeFloatingPanelViewport(update);
+  }, []);
+  useLayoutEffect(() => {
+    const keepVisible = (): void => setPosition(current => {
+      const next = constrainPanelPosition(current); return next.x === current.x && next.y === current.y ? current : next;
+    });
+    keepVisible();
+    if (typeof ResizeObserver === 'undefined' || !panelRef.current) return;
+    const observer = new ResizeObserver(keepVisible); observer.observe(panelRef.current);
+    return () => observer.disconnect();
+  }, [panelViewport, isMinimized, constrainPanelPosition]);
   const isDragging = useRef(false);
   const [isDraggingState, setIsDraggingState] = useState(false);
   const dragStart = useRef({ x: 0, y: 0 });
@@ -196,12 +230,13 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
     const onMouseMove = (ev: MouseEvent) => {
       if (!isDragging.current) return;
       ev.stopPropagation();
-      setPosition({ x: ev.clientX - dragStart.current.x, y: ev.clientY - dragStart.current.y });
+      setPosition(constrainPanelPosition({ x: ev.clientX - dragStart.current.x, y: ev.clientY - dragStart.current.y }));
     };
     const onMouseUp = (ev: MouseEvent) => {
       ev.stopPropagation();
       isDragging.current = false;
       setIsDraggingState(false);
+      setPosition(current => constrainPanelPosition(current));
       window.removeEventListener('mousemove', onMouseMove);
       window.removeEventListener('mouseup', onMouseUp);
     };
@@ -769,9 +804,10 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
 
   return (
     <div
-      className="fixed z-[150]"
+      ref={panelRef}
+      className="fixed z-[150] min-w-0 [&_button]:min-h-11 [&_button]:min-w-11 [&_button]:max-w-full [&_input]:min-h-11 [&_input]:max-w-full [&_select]:min-h-11 [&_select]:max-w-full [&_textarea]:min-h-11 [&_input]:text-base [&_select]:text-base [&_textarea]:text-base lg:[&_input]:text-sm lg:[&_select]:text-sm lg:[&_textarea]:text-sm"
       data-floating-panel="true"
-      style={{ left: position.x, top: position.y, width: panelW, maxHeight: '85vh' }}
+      style={{ left: position.x, top: position.y, width: panelWidth, maxWidth: 'calc(100vw - 16px)', maxHeight: panelMaxHeight }}
       onClick={e => e.stopPropagation()}
       onPointerDown={e => e.stopPropagation()}
       onMouseDown={e => e.stopPropagation()}
@@ -780,26 +816,26 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
       {/* Panel */}
       <div
         data-floating-panel="true"
-        className="rounded-2xl flex flex-col overflow-hidden"
+        className={`min-h-0 rounded-2xl flex flex-col ${shortPanel ? 'overflow-y-auto' : 'overflow-hidden'}`}
         style={{
           backgroundColor: isMonochrome ? '#fff' : '#1c1c1c',
           border: isDraggingState ? `2px solid ${accentColor}` : `1px solid ${isMonochrome ? '#e5e7eb' : 'rgba(255,255,255,0.1)'}`,
           boxShadow: isDraggingState
             ? (isMonochrome ? '0 0 24px rgba(37,99,235,0.25), 0 25px 50px -12px rgba(0,0,0,0.25)' : '0 0 24px rgba(212,175,55,0.3), 0 25px 50px -12px rgba(0,0,0,0.5)')
             : (isMonochrome ? '0 25px 50px -12px rgba(0,0,0,0.15)' : '0 25px 50px -12px rgba(0,0,0,0.5)'),
-          maxHeight: isMinimized ? undefined : '85vh',
+          maxHeight: isMinimized ? undefined : panelMaxHeight,
         }}
         onClick={e => e.stopPropagation()}
       >
         {/* ── Header ── */}
         <div
-          className={`flex items-center gap-2 px-3 py-2 select-none shrink-0 cursor-grab active:cursor-grabbing ${isMinimized ? 'rounded-2xl' : 'rounded-t-2xl'}`}
-          style={{ borderBottom: isMinimized ? 'none' : `1px solid ${isMonochrome ? 'rgba(0,0,0,0.08)' : 'rgba(255,255,255,0.08)'}` }}
+          className={`flex items-center gap-2 px-3 py-2 select-none shrink-0 cursor-grab active:cursor-grabbing ${shortPanel ? 'sticky top-0 z-[60]' : ''} ${isMinimized ? 'rounded-2xl' : 'rounded-t-2xl'}`}
+          style={{ backgroundColor: isMonochrome ? '#fff' : '#1c1c1c', borderBottom: isMinimized ? 'none' : `1px solid ${isMonochrome ? 'rgba(0,0,0,0.08)' : 'rgba(255,255,255,0.08)'}` }}
           onMouseDown={handlePanelDragStart}
         >
-          <GripVertical size={14} style={{ color: isMonochrome ? 'rgba(0,0,0,0.25)' : 'rgba(255,255,255,0.3)' }} />
-          <ShoppingBag size={15} style={{ color: isMonochrome ? '#6b6b6b' : '#d4af37' }} />
-          <span className="text-base font-semibold flex-1" style={{ color: isMonochrome ? '#6b6b6b' : '#d4af37' }}>
+          <GripVertical size={14} className="hidden shrink-0 lg:block" style={{ color: isMonochrome ? 'rgba(0,0,0,0.25)' : 'rgba(255,255,255,0.3)' }} />
+          <ShoppingBag size={15} className="hidden shrink-0 lg:block" style={{ color: isMonochrome ? '#6b6b6b' : '#d4af37' }} />
+          <span className="min-w-0 flex-1 truncate whitespace-nowrap text-base font-semibold" style={{ color: isMonochrome ? '#6b6b6b' : '#d4af37' }}>
             品牌电商
           </span>
           <BrandAssetManager
@@ -819,12 +855,14 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
             userId="default"
             isMonochrome={isMonochrome}
           />
-          <span className="text-xs px-1.5 py-0.5 rounded" style={{ color: isMonochrome ? 'rgba(0,0,0,0.45)' : 'rgba(255,255,255,0.5)', background: isMonochrome ? 'rgba(0,0,0,0.05)' : 'rgba(255,255,255,0.06)' }}>
+          <span className="hidden shrink-0 whitespace-nowrap rounded px-1.5 py-0.5 text-xs lg:inline-flex" style={{ color: isMonochrome ? 'rgba(0,0,0,0.45)' : 'rgba(255,255,255,0.5)', background: isMonochrome ? 'rgba(0,0,0,0.05)' : 'rgba(255,255,255,0.06)' }}>
             模板批量生成
           </span>
           <button
+            type="button"
+            aria-label={isMinimized ? '展开品牌电商' : '最小化品牌电商'}
             onClick={() => setIsMinimized(!isMinimized)}
-            className="p-1 rounded-md transition-colors cursor-pointer"
+            className="grid h-11 w-11 shrink-0 cursor-pointer place-items-center rounded-md transition-colors"
             style={{ color: isMonochrome ? 'rgba(0,0,0,0.35)' : 'rgba(255,255,255,0.4)' }}
             onMouseEnter={e => (e.currentTarget.style.color = isMonochrome ? '#000' : '#fff')}
             onMouseLeave={e => (e.currentTarget.style.color = isMonochrome ? 'rgba(0,0,0,0.35)' : 'rgba(255,255,255,0.4)')}
@@ -833,8 +871,10 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
             <Minus size={14} />
           </button>
           <button
+            type="button"
+            aria-label="关闭品牌电商"
             onClick={onClose}
-            className="p-1 rounded-md transition-colors cursor-pointer"
+            className="grid h-11 w-11 shrink-0 cursor-pointer place-items-center rounded-md transition-colors"
             style={{ color: isMonochrome ? 'rgba(0,0,0,0.35)' : 'rgba(255,255,255,0.4)' }}
             onMouseEnter={e => (e.currentTarget.style.color = isMonochrome ? '#000' : '#fff')}
             onMouseLeave={e => (e.currentTarget.style.color = isMonochrome ? 'rgba(0,0,0,0.35)' : 'rgba(255,255,255,0.4)')}
@@ -844,14 +884,14 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
         </div>
 
         {/* ── Tab bar ── */}
-        <div className="flex items-center gap-1 px-5 pt-3 pb-0">
+        {!isMinimized && (<div className="flex shrink-0 items-center gap-1 px-3 pt-2 lg:px-5 lg:pt-3">
           {(['template', 'settings', 'results'] as const).map(tab => {
             const active = activeTab === tab;
             return (
               <button
                 key={tab}
                 onClick={() => setActiveTab(tab)}
-                className={`px-3.5 py-2 text-sm font-medium rounded-t-lg transition-colors cursor-pointer ${
+                className={`min-h-11 min-w-0 flex-1 whitespace-nowrap px-2 py-2 text-sm font-medium rounded-t-lg transition-colors cursor-pointer ${
                   active
                     ? isMonochrome ? 'bg-gray-50 text-blue-600 border border-b-0 border-gray-200' : 'bg-[#111] text-[#d4af37] border border-b-0 border-white/[0.08]'
                     : isMonochrome ? 'text-gray-400 hover:text-gray-600' : 'text-[#666] hover:text-[#999]'
@@ -861,11 +901,11 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
               </button>
             );
           })}
-        </div>
+        </div>)}
 
         {/* ── Content ── */}
         {!isMinimized && (<>
-          <div className={`flex-1 overflow-y-auto px-5 py-4 rounded-b-2xl ${bgDeep}`}>
+          <div className={`min-h-0 min-w-0 ${shortPanel ? 'flex-none overflow-visible' : 'flex-1 overflow-y-auto'} px-3 py-3 lg:px-5 lg:py-4 rounded-b-2xl ${bgDeep}`}>
 
           {/* Tab: Template Selection */}
           {activeTab === 'template' && (
@@ -961,17 +1001,17 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
         </div>
 
         {/* ── Footer ── */}
-        <div className={`flex items-center justify-between px-5 py-3.5 border-t ${border} ${bg}`}>
+        <div className={`flex shrink-0 flex-wrap items-center justify-between gap-2 px-3 py-2 lg:px-5 lg:py-3.5 border-t ${border} ${bg}`}>
           <div className="flex items-center gap-2">
             {selectedTemplates.size > 0 && (
-              <span className={`text-sm ${textSub}`}>
+              <span className={`whitespace-nowrap text-sm ${textSub}`}>
                 已选 <span className={accentText}>{selectedTemplates.size}</span> 个模板
               </span>
             )}
             {successResults.length > 0 && (
               <button
                 onClick={() => handleAddToCanvas()}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium ${accent} ${isMonochrome ? 'text-white' : 'text-black'} ${accentHover} transition-colors cursor-pointer`}
+                className={`hidden items-center gap-1.5 whitespace-nowrap px-3 py-1.5 rounded-lg text-sm font-medium lg:flex ${accent} ${isMonochrome ? 'text-white' : 'text-black'} ${accentHover} transition-colors cursor-pointer`}
               >
                 <Sparkles size={12} />
                 添加到画布 ({successResults.length})
@@ -982,7 +1022,7 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
             <button
               onClick={handleGenerate}
               disabled={isGenerating || !selectedTemplates.size || !productDesc.trim() || !selectedModel}
-              className={`flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-semibold transition-all cursor-pointer ${
+              className={`flex min-h-11 items-center justify-center gap-2 whitespace-nowrap px-4 py-2 lg:px-5 rounded-lg text-sm font-semibold transition-all cursor-pointer ${
                 isGenerating || !selectedTemplates.size || !productDesc.trim() || !selectedModel
                   ? isMonochrome ? 'bg-gray-200 text-gray-400 cursor-not-allowed' : 'bg-[#333] text-[#555] cursor-not-allowed'
                   : `${accent} ${isMonochrome ? 'text-white' : 'text-black'} ${accentHover} shadow-lg`

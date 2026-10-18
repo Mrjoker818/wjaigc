@@ -93,6 +93,22 @@ async function expectContentFits(): Promise<void> {
   for (const button of buttons) expect(button.height, 'action text must not wrap into a vertical column').toBeLessThanOrEqual(Math.max(44, button.line + button.padding + 2) + 1);
 }
 
+describe('mobile drawing-first layout dashboard touch', () => {
+  it.each([320, 360, 390])('keeps search and primary actions at least 44px at %ipx', async width => {
+    const view = dashboard();
+    await show(view.container, width, 780);
+    for (const target of [page.getByPlaceholder('搜索项目...'), ...['批量管理', '导入 .wujie', '新建项目', '全部', '最近', '收藏'].map(name => page.getByRole('button', { name, exact: true }))]) {
+      expect(await target.isVisible()).toBe(true);
+      const rect = await target.boundingBox();
+      expect(rect).not.toBeNull();
+      expect(rect!.width).toBeGreaterThanOrEqual(44); expect(rect!.height).toBeGreaterThanOrEqual(44);
+      expect(rect!.x).toBeGreaterThanOrEqual(0); expect(rect!.x + rect!.width).toBeLessThanOrEqual(width);
+      expect(rect!.y + rect!.height).toBeLessThanOrEqual(780);
+    }
+    await expectContentFits();
+  });
+});
+
 describe('dashboard narrow screen regression', () => {
   it.each([[640, 320], [390, 240]])('I1: keeps navigation and close reachable with three recent projects at %ix%i', async (width, height) => {
     manager.getProjects.mockReturnValue(recentProjects);

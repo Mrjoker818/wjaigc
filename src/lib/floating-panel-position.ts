@@ -11,6 +11,35 @@ export interface FloatingPanelPosition {
   y: number;
 }
 
+export interface FloatingPanelViewport {
+  width: number;
+  height: number;
+  left: number;
+  top: number;
+}
+
+export function getFloatingPanelViewport(): FloatingPanelViewport {
+  if (typeof window === 'undefined') return { width: 1056, height: 776, left: 0, top: 0 };
+  const viewport = window.visualViewport;
+  return viewport
+    ? { width: viewport.width, height: viewport.height, left: viewport.offsetLeft, top: viewport.offsetTop }
+    : { width: window.innerWidth, height: window.innerHeight, left: 0, top: 0 };
+}
+
+export function subscribeFloatingPanelViewport(listener: () => void): () => void {
+  if (typeof window === 'undefined') return () => {};
+  const target = window;
+  const viewport = target.visualViewport;
+  target.addEventListener('resize', listener);
+  viewport?.addEventListener('resize', listener);
+  viewport?.addEventListener('scroll', listener);
+  return () => {
+    target.removeEventListener('resize', listener);
+    viewport?.removeEventListener('resize', listener);
+    viewport?.removeEventListener('scroll', listener);
+  };
+}
+
 export interface ConstrainFloatingPanelPositionInput extends FloatingPanelPositionInput {
   x: number;
   y: number;

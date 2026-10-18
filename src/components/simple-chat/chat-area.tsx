@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from "react";
 import { Menu, Paperclip, ArrowUp, Globe, X, Settings, Bot, User as UserIcon, BookOpen, ChevronDown, Copy, RefreshCw, Trash2, Zap, Sun, Moon, FileText, Database, Sparkles, MessageSquarePlus, Minimize2, Maximize2, MoreHorizontal, Telescope, FileCode, GitBranch, Share2, Search, Eye, EyeOff, Image, Download, Send, Shield, ThumbsUp, ThumbsDown, Pencil, PenSquare, Brain, PenLine, ScanSearch, Clock } from "lucide-react";
 import { MarkdownRenderer } from "./markdown-renderer";
 import { ImageLightbox } from "./image-lightbox";
@@ -405,6 +405,16 @@ export default function ChatArea({
   const [historyImageNotice, setHistoryImageNotice] = useState<string | null>(null);
   const [openModelMenu, setOpenModelMenu] = useState<'chat' | 'image' | null>(null);
   const [modelMenuLayout, setModelMenuLayout] = useState<SimpleChatModelMenuLayout | null>(null);
+  const [showChatSettings, setShowChatSettings] = useState(false);
+  const [chatViewport, setChatViewport] = useState(() => ({
+    width: typeof window === 'undefined' ? 1024 : (window.visualViewport?.width ?? window.innerWidth),
+    height: typeof window === 'undefined' ? 768 : (window.visualViewport?.height ?? window.innerHeight),
+    left: 0,
+    top: 0,
+    naturalTop: 0,
+    headerBottom: 0,
+  }));
+  const compactHeader = chatViewport.width < 768 || chatViewport.height <= 430;
 
   const handleChatModelSelect = useCallback((selection: SimpleChatModelSelection) => {
     if (!task) return;
@@ -462,6 +472,88 @@ export default function ChatArea({
   const imageModelMenuRef = useRef<HTMLDivElement>(null);
   const chatModelButtonRef = useRef<HTMLButtonElement>(null);
   const imageModelButtonRef = useRef<HTMLButtonElement>(null);
+  const chatAreaRef = useRef<HTMLDivElement>(null);
+  const chatHeaderRef = useRef<HTMLElement>(null);
+  const chatSettingsRef = useRef<HTMLDivElement>(null);
+  const chatSettingsButtonRef = useRef<HTMLButtonElement>(null);
+  const composerRef = useRef<HTMLDivElement>(null);
+
+  // Geometry only: keep the live conversation above the keyboard without
+  // resizing its Page parent or remounting any of its business controls.
+  const updateChatViewport = useCallback(() => {
+    const viewport = window.visualViewport;
+    const root = chatAreaRef.current;
+    const naturalTop = root
+      ? root.getBoundingClientRect().top - (parseFloat(root.style.marginTop) || 0)
+      : 0;
+    const next = {
+      width: viewport?.width ?? window.innerWidth,
+      height: viewport?.height ?? window.innerHeight,
+      left: viewport?.offsetLeft ?? 0,
+      top: viewport?.offsetTop ?? 0,
+      naturalTop,
+      headerBottom: chatHeaderRef.current?.getBoundingClientRect().bottom ?? naturalTop,
+    };
+    setChatViewport(previous => (
+      previous.width === next.width && previous.height === next.height
+      && previous.left === next.left && previous.top === next.top
+      && previous.naturalTop === next.naturalTop && previous.headerBottom === next.headerBottom
+    ) ? previous : next);
+  }, []);
+
+  useLayoutEffect(() => {
+    updateChatViewport();
+  }, [updateChatViewport, compactHeader, chatViewport.width, chatViewport.height,
+    chatViewport.left, chatViewport.top, project?.id, task?.id]);
+
+  useLayoutEffect(() => {
+    // When a keyboard leaves less room, scroll the existing composer rather
+    // than removing its attachment, textarea, tools or footer controls.
+    if (compactHeader && chatViewport.height < window.innerHeight && composerRef.current) {
+      composerRef.current.scrollTop = composerRef.current.scrollHeight;
+    }
+  }, [compactHeader, chatViewport.width, chatViewport.height, chatViewport.top, chatViewport.headerBottom]);
+
+  useEffect(() => {
+    const viewport = window.visualViewport;
+    window.addEventListener('resize', updateChatViewport);
+    window.addEventListener('scroll', updateChatViewport, true);
+    viewport?.addEventListener('resize', updateChatViewport);
+    viewport?.addEventListener('scroll', updateChatViewport);
+    return () => {
+      window.removeEventListener('resize', updateChatViewport);
+      window.removeEventListener('scroll', updateChatViewport, true);
+      viewport?.removeEventListener('resize', updateChatViewport);
+      viewport?.removeEventListener('scroll', updateChatViewport);
+    };
+  }, [updateChatViewport]);
+
+  useEffect(() => {
+    if (!compactHeader || !showChatSettings) return;
+    const closeOutside = (event: PointerEvent) => {
+      const target = event.target as Node;
+      if (!chatSettingsRef.current?.contains(target) && !chatSettingsButtonRef.current?.contains(target)) {
+        setShowChatSettings(false);
+      }
+    };
+    document.addEventListener('pointerdown', closeOutside);
+    return () => document.removeEventListener('pointerdown', closeOutside);
+  }, [compactHeader, showChatSettings]);
+
+  useEffect(() => {
+    if (!openModelMenu && !showChatSettings) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      if (openModelMenu) {
+        setOpenModelMenu(null);
+      } else {
+        setShowChatSettings(false);
+        chatSettingsButtonRef.current?.focus();
+      }
+    };
+    document.addEventListener('keydown', closeOnEscape);
+    return () => document.removeEventListener('keydown', closeOnEscape);
+  }, [openModelMenu, showChatSettings]);
 
   // Messages: sync from task
   const [messages, setMessages] = useState<SimpleChatMessage[]>(
@@ -628,10 +720,24 @@ export default function ChatArea({
   const updateModelMenuLayout = useCallback((menu: 'chat' | 'image') => {
     const trigger = menu === 'chat' ? chatModelButtonRef.current : imageModelButtonRef.current;
     if (!trigger) return;
-    setModelMenuLayout(resolveSimpleChatModelMenuLayout(
-      trigger.getBoundingClientRect(),
-      { width: window.innerWidth, height: window.innerHeight },
-    ));
+    const viewport = window.visualViewport;
+    const left = viewport?.offsetLeft ?? 0;
+    const top = viewport?.offsetTop ?? 0;
+    const width = viewport?.width ?? window.innerWidth;
+    const height = viewport?.height ?? window.innerHeight;
+    const rect = trigger.getBoundingClientRect();
+    const layout = resolveSimpleChatModelMenuLayout({
+      left: rect.left - left, right: rect.right - left,
+      top: rect.top - top, bottom: rect.bottom - top,
+      width: rect.width, height: rect.height,
+    }, { width, height });
+    const maxHeight = Math.min(layout.maxHeight, Math.max(0, height - 24));
+    setModelMenuLayout({
+      ...layout,
+      left: rect.left + layout.left,
+      top: Math.max(top + 12, Math.min(rect.top + layout.top, top + height - maxHeight - 12)),
+      maxHeight,
+    });
   }, []);
 
   const toggleModelMenu = useCallback((menu: 'chat' | 'image') => {
@@ -648,8 +754,18 @@ export default function ChatArea({
     const update = () => updateModelMenuLayout(openModelMenu);
     update();
     window.addEventListener('resize', update);
-    return () => window.removeEventListener('resize', update);
-  }, [openModelMenu, updateModelMenuLayout]);
+    window.addEventListener('scroll', update, true);
+    const viewport = window.visualViewport;
+    viewport?.addEventListener('resize', update);
+    viewport?.addEventListener('scroll', update);
+    return () => {
+      window.removeEventListener('resize', update);
+      window.removeEventListener('scroll', update, true);
+      viewport?.removeEventListener('resize', update);
+      viewport?.removeEventListener('scroll', update);
+    };
+  }, [openModelMenu, updateModelMenuLayout, chatViewport.width, chatViewport.height,
+    chatViewport.left, chatViewport.top, chatViewport.headerBottom]);
 
   // Fetch image models
   const fetchImageModels = useCallback(async () => {
@@ -2048,33 +2164,50 @@ export default function ChatArea({
     width: `${modelMenuLayout.width}px`,
     maxHeight: `${modelMenuLayout.maxHeight}px`,
   } : undefined;
+  const settingsTop = Math.max(chatViewport.top + 8,
+    Math.min(chatViewport.headerBottom + 4, chatViewport.top + chatViewport.height - 64));
+  const settingsWidth = Math.min(384, Math.max(0, chatViewport.width - 16));
+  const settingsStyle = compactHeader ? {
+    display: showChatSettings ? undefined : 'none',
+    left: chatViewport.left + chatViewport.width - settingsWidth - 8,
+    top: settingsTop,
+    width: settingsWidth,
+    maxHeight: Math.max(0, chatViewport.top + chatViewport.height - settingsTop - 8),
+  } : undefined;
+  const chatVisibleTop = Math.max(chatViewport.top, chatViewport.naturalTop);
+  const chatAvailableHeight = Math.max(0, chatViewport.top + chatViewport.height - chatVisibleTop);
+  const composerMaxHeight = Math.max(44,
+    chatAvailableHeight - Math.max(0, chatViewport.headerBottom - chatVisibleTop) - 45 - 24);
 
   return (
-    <div className="flex-1 min-w-0 flex flex-col h-screen supports-[height:100dvh]:h-dvh min-h-0 bg-background">
+    <div className="flex-1 min-w-0 flex flex-col h-screen supports-[height:100dvh]:h-dvh min-h-0 bg-background isolate"
+      ref={chatAreaRef}
+      style={compactHeader ? {
+        marginTop: Math.max(0, chatViewport.top - chatViewport.naturalTop),
+        maxHeight: chatAvailableHeight,
+      } : undefined}>
       {/* Top Bar */}
-      <header className="relative z-50 flex flex-wrap items-center gap-2 px-3 py-2 border-b border-border bg-background/80 backdrop-blur-sm shrink-0">
-        <button onClick={onToggleSidebar} className="p-2 rounded-lg hover:bg-muted transition-colors" title="切换侧边栏">
+      <header className="relative z-50 flex flex-wrap items-center gap-2 px-3 py-2 border-b border-border bg-background/80 shrink-0 data-[compact=true]:flex-nowrap data-[compact=true]:gap-1 data-[compact=true]:px-2 data-[compact=true]:py-1"
+        ref={chatHeaderRef} data-compact={compactHeader}>
+        <button onClick={onToggleSidebar} className={`p-2 rounded-lg hover:bg-muted transition-colors ${compactHeader ? 'inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center' : ''}`} title="切换侧边栏">
           <Menu className="w-5 h-5 text-muted-foreground" />
         </button>
-        <button onClick={onBackToWorkspace} className="text-xs text-muted-foreground hover:text-foreground transition-colors">
-          <ChevronDown className="w-4 h-4 rotate-90 inline" /> 工作台
-        </button>
-        <div className="flex-1" />
+        <div className="flex-1" style={compactHeader ? { display: 'none' } : undefined} />
         {/* Model Selector */}
-        <div ref={chatModelMenuRef} className="relative">
+        <div ref={chatModelMenuRef} className={`relative ${compactHeader ? 'min-w-0 flex-1' : ''}`}>
           <button
             ref={chatModelButtonRef}
             type="button"
             aria-haspopup="listbox"
             aria-expanded={openModelMenu === 'chat'}
             onClick={() => toggleModelMenu('chat')}
-            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-muted hover:bg-muted/80 transition-colors text-xs cursor-pointer"
+            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-muted hover:bg-muted/80 transition-colors text-xs cursor-pointer ${compactHeader ? 'min-h-11 min-w-11 w-full [&>svg]:shrink-0' : ''}`}
           >
             <Sparkles className="w-3.5 h-3.5 text-yellow-500" />
-            <span className="font-medium max-w-[120px] truncate">{chatModels.find(m => m.providerId === selectedProviderId && m.modelId === selectedModel)?.name || selectedModel || '选择模型'}</span>
+            <span className="font-medium min-w-0 max-w-[120px] truncate">{chatModels.find(m => m.providerId === selectedProviderId && m.modelId === selectedModel)?.name || selectedModel || '选择模型'}</span>
             <ChevronDown className={`w-3 h-3 text-muted-foreground transition-transform ${openModelMenu === 'chat' ? 'rotate-180' : ''}`} />
           </button>
-          <div className={`absolute bg-card border border-border rounded-xl shadow-xl z-[100] overflow-y-auto p-1 transition-opacity ${openModelMenu === 'chat' ? 'opacity-100 visible pointer-events-auto' : 'hidden'}`} style={modelMenuStyle} role="listbox">
+          <div className={`fixed bg-card border border-border rounded-xl shadow-xl z-[100] overflow-y-auto p-1 transition-opacity ${openModelMenu === 'chat' ? 'opacity-100 visible pointer-events-auto' : 'hidden'}`} style={modelMenuStyle} role="listbox">
             {chatModels.map(m => (
               <button key={m.id} type="button" role="option" aria-selected={m.providerId === selectedProviderId && m.modelId === selectedModel} onClick={() => handleChatModelSelect({ modelId: m.modelId, providerId: m.providerId })}
                 className={`w-full text-left px-3 py-2 rounded-lg hover:bg-muted transition-colors cursor-pointer ${m.providerId === selectedProviderId && m.modelId === selectedModel ? 'bg-primary/10' : ''}`}>
@@ -2092,33 +2225,59 @@ export default function ChatArea({
             ))}
           </div>
         </div>
-        <div className="flex flex-wrap items-center gap-1 rounded-lg bg-muted p-0.5" aria-label="推理强度">
+        <button onClick={() => onCreateTask(project.id)}
+          className={`px-2.5 py-1.5 rounded-lg bg-primary/10 hover:bg-primary/20 text-primary text-xs transition-colors whitespace-nowrap ${compactHeader ? 'min-h-11 min-w-11 shrink-0' : 'order-last'}`}>
+          <MessageSquarePlus className="w-3.5 h-3.5 inline mr-1" />新对话
+        </button>
+        {compactHeader && <button ref={chatSettingsButtonRef} type="button" aria-label="更多设置"
+          aria-expanded={showChatSettings}
+          onClick={() => { setShowChatSettings(!showChatSettings); setOpenModelMenu(null); }}
+          className="inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground transition-colors">
+          <MoreHorizontal className="w-5 h-5" />
+        </button>}
+        {/* One live set of secondary controls: inline on desktop, scrollable on mobile. */}
+        <div ref={chatSettingsRef} role={compactHeader ? 'region' : undefined}
+          aria-label={compactHeader ? '聊天设置' : undefined}
+          className={compactHeader ? 'fixed z-[90] flex flex-wrap items-center gap-2 overflow-y-auto overscroll-contain scroll-pt-16 rounded-xl bg-card p-2 shadow-xl [&>button]:inline-flex [&>button]:min-h-11 [&>button]:min-w-11 [&>button]:items-center [&>button]:justify-center [&>button]:scroll-mt-16 [&>button]:whitespace-nowrap' : 'contents'}
+          style={settingsStyle}>
+        {compactHeader && <div className="sticky top-0 z-10 flex w-full items-center justify-between bg-card text-sm font-medium">
+          <span>聊天设置</span>
+          <button type="button" aria-label="关闭设置"
+            onClick={() => { setShowChatSettings(false); setOpenModelMenu(null); chatSettingsButtonRef.current?.focus(); }}
+            className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground transition-colors">
+            <X className="w-4 h-4" />
+          </button>
+        </div>}
+        <button onClick={onBackToWorkspace} className="text-xs text-muted-foreground hover:text-foreground transition-colors">
+          <ChevronDown className="w-4 h-4 rotate-90 inline" /> 工作台
+        </button>
+        <div className={`flex flex-wrap items-center gap-1 rounded-lg bg-muted p-0.5 ${compactHeader ? 'w-full [&>button]:min-h-11 [&>button]:min-w-11 [&>button]:scroll-mt-16' : ''}`} aria-label="推理强度">
           {(['low', 'medium', 'high', 'maximum'] as ReasoningEffort[]).map((effort) => (
             <button key={effort} type="button" onClick={() => setReasoningEffort(effort)} className={`px-2 py-1 rounded-md text-[11px] transition-colors ${reasoningEffort === effort ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'}`} title="推理强度">
               {effort === 'low' ? '轻量' : effort === 'medium' ? '均衡' : effort === 'high' ? '深度' : '极强'}
             </button>
           ))}
         </div>
-        <select value={responseSpeed} onChange={(event) => setResponseSpeed(event.target.value as ResponseSpeed)} className="h-8 rounded-lg border border-border bg-muted px-2 text-xs text-foreground" aria-label="响应速度">
+        <select value={responseSpeed} onChange={(event) => setResponseSpeed(event.target.value as ResponseSpeed)} className={`rounded-lg border border-border bg-muted px-2 text-xs text-foreground ${compactHeader ? 'h-11 w-full scroll-mt-16' : 'h-8'}`} aria-label="响应速度">
           <option value="fast">快速响应</option>
           <option value="balanced">均衡响应</option>
           <option value="quality">质量优先</option>
         </select>
         {/* Image Model Selector */}
-        <div ref={imageModelMenuRef} className="relative">
+        <div ref={imageModelMenuRef} className={`relative ${compactHeader ? 'w-full scroll-mt-16' : ''}`}>
           <button
             ref={imageModelButtonRef}
             type="button"
             aria-haspopup="listbox"
             aria-expanded={openModelMenu === 'image'}
             onClick={() => toggleModelMenu('image')}
-            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-muted hover:bg-muted/80 transition-colors text-xs cursor-pointer"
+            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-muted hover:bg-muted/80 transition-colors text-xs cursor-pointer ${compactHeader ? 'min-h-11 min-w-11 w-full scroll-mt-16 [&>svg]:shrink-0' : ''}`}
           >
             <Image className="w-3.5 h-3.5 text-purple-400" />
             <span className="font-medium max-w-[100px] truncate">{imageModels.find(m => m.providerId === selectedImageProviderId && m.modelId === selectedImageModel)?.name || selectedImageModel || '图像模型'}</span>
             <ChevronDown className={`w-3 h-3 text-muted-foreground transition-transform ${openModelMenu === 'image' ? 'rotate-180' : ''}`} />
           </button>
-          <div className={`absolute bg-card border border-border rounded-xl shadow-xl z-[100] overflow-y-auto p-1 transition-opacity ${openModelMenu === 'image' ? 'opacity-100 visible pointer-events-auto' : 'hidden'}`} style={modelMenuStyle} role="listbox">
+          <div className={`fixed bg-card border border-border rounded-xl shadow-xl z-[100] overflow-y-auto p-1 transition-opacity ${openModelMenu === 'image' ? 'opacity-100 visible pointer-events-auto' : 'hidden'}`} style={modelMenuStyle} role="listbox">
             <div className="px-3 py-1.5 text-[11px] text-muted-foreground/60 font-medium">图像生成模型</div>
             {imageModels.map(m => (
               <button key={m.id} type="button" role="option" aria-selected={m.providerId === selectedImageProviderId && m.modelId === selectedImageModel} onClick={() => handleImageModelSelect({ modelId: m.modelId, providerId: m.providerId })}
@@ -2196,34 +2355,32 @@ export default function ChatArea({
           title="导出分析报告">
           <Download className="w-4 h-4" />
         </button>
-        <button onClick={() => onCreateTask(project.id)}
-          className="px-2.5 py-1.5 rounded-lg bg-primary/10 hover:bg-primary/20 text-primary text-xs transition-colors">
-          <MessageSquarePlus className="w-3.5 h-3.5 inline mr-1" />新对话
-        </button>
+        </div>
       </header>
 
       {/* Agent Bar */}
-      <div className="flex items-center gap-2 px-4 py-1.5 border-b border-border bg-muted/30 shrink-0">
-          <Bot className="w-4 h-4 text-muted-foreground" />
-          <span className="text-xs text-muted-foreground">Agent:</span>
-          {controlNotice && <span className="max-w-[360px] truncate text-[11px] text-muted-foreground" title={controlNotice}>· {controlNotice}</span>}
-          {historyImageNotice && <span className="max-w-[360px] truncate text-[11px] text-muted-foreground" title={historyImageNotice}>· {historyImageNotice}</span>}
+      <div className={`flex min-w-0 items-center gap-2 px-4 border-b border-border bg-muted/30 shrink-0 ${compactHeader ? 'min-h-11 py-0' : 'py-1.5'}`}>
+          <Bot className="w-4 h-4 shrink-0 text-muted-foreground" />
+          <span className="shrink-0 text-xs text-muted-foreground">Agent:</span>
+          {controlNotice && <span className="min-w-0 max-w-[360px] truncate text-[11px] text-muted-foreground" title={controlNotice}>· {controlNotice}</span>}
+          {historyImageNotice && <span className="min-w-0 max-w-[360px] truncate text-[11px] text-muted-foreground" title={historyImageNotice}>· {historyImageNotice}</span>}
           {activeAgent ? (
-            <span className="text-xs font-medium bg-primary/10 text-primary px-2 py-0.5 rounded-full flex items-center gap-1">
-              {activeAgent.emoji || '🤖'} {activeAgent.name}
-              <button onClick={() => onUpdateTask({ ...task, activeAgentId: undefined })} className="ml-1 hover:text-red-500"><X className="w-3 h-3" /></button>
+            <span className="min-w-0 text-xs font-medium bg-primary/10 text-primary px-2 py-0.5 rounded-full flex items-center gap-1">
+              <span className="min-w-0 flex-1 truncate" title={activeAgent.name}>{activeAgent.emoji || '🤖'} {activeAgent.name}</span>
+              <button type="button" aria-label="移除当前 Agent" onClick={() => onUpdateTask({ ...task, activeAgentId: undefined })}
+                className={`ml-1 inline-flex shrink-0 items-center justify-center hover:text-red-500 ${compactHeader ? 'min-h-11 min-w-11' : ''}`}><X className="w-3 h-3" /></button>
             </span>
           ) : (
-            <span className="text-xs text-muted-foreground">未选择</span>
+            <span className="shrink-0 text-xs text-muted-foreground">未选择</span>
           )}
           <div className="flex-1" />
-          <button onClick={() => setShowAgentPanel(!showAgentPanel)} className="text-xs text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1">
+          <button onClick={() => setShowAgentPanel(!showAgentPanel)} className={`text-xs text-muted-foreground hover:text-foreground transition-colors flex shrink-0 items-center justify-center gap-1 ${compactHeader ? 'min-h-11 min-w-11' : ''}`}>
             <Settings className="w-3 h-3" /> 管理
           </button>
       </div>
 
       {/* Messages */}
-      <div className="flex-1 min-h-0 overflow-y-auto px-4 py-6">
+      <div className={`flex-1 min-h-0 overflow-y-auto px-4 ${compactHeader ? 'py-2' : 'py-6'}`}>
         <div className="max-w-3xl mx-auto space-y-6">
           {messages.length === 0 && (
             <div className="text-center py-20 space-y-4">
@@ -2476,7 +2633,8 @@ export default function ChatArea({
       )}
 
       {/* Input */}
-      <div className="shrink-0 min-w-0 px-3 sm:px-4 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-2">
+      <div className={`shrink-0 min-w-0 px-3 sm:px-4 pb-[max(0.75rem,env(safe-area-inset-bottom))] ${compactHeader ? 'pt-1 overflow-y-auto overscroll-contain' : 'pt-2'}`}
+        ref={composerRef} style={compactHeader ? { maxHeight: composerMaxHeight } : undefined}>
         <div className="min-w-0 max-w-3xl mx-auto">
           <div
             className={`relative bg-card border rounded-2xl shadow-sm focus-within:ring-2 focus-within:ring-primary/20 focus-within:border-primary/30 transition-all ${dragOver ? 'border-primary ring-2 ring-primary/30' : 'border-border'}`}
@@ -2530,9 +2688,12 @@ export default function ChatArea({
               placeholder={activeAgent ? `与 ${activeAgent.name} 对话...` : "输入消息，Enter 发送，支持 Ctrl+V 粘贴图片"}
               rows={1}
               className="block w-full min-w-0 bg-transparent px-4 py-3 text-base sm:text-sm leading-relaxed resize-none outline-none placeholder:text-muted-foreground/50 min-h-[80px] sm:min-h-[60px] max-h-[min(200px,30dvh)]"
-              style={{ scrollbarWidth: 'thin' }}
+              style={{ scrollbarWidth: 'thin', ...(compactHeader ? {
+                minHeight: 44, maxHeight: Math.max(44, Math.min(160, chatViewport.height * 0.2)),
+                paddingTop: 8, paddingBottom: 8,
+              } : {}) }}
             />
-            <div className="flex min-w-0 flex-wrap items-center gap-1 px-2 pb-2 [&>button]:inline-flex [&>button]:min-h-11 [&>button]:min-w-11 [&>button]:shrink-0 [&>button]:items-center [&>button]:justify-center">
+            <div className={`flex min-w-0 flex-wrap items-center gap-1 px-2 [&>button]:inline-flex [&>button]:min-h-11 [&>button]:min-w-11 [&>button]:shrink-0 [&>button]:items-center [&>button]:justify-center ${compactHeader ? 'pb-1' : 'pb-2'}`}>
               <button onClick={() => setBrandActive(!brandActive)}
                 className={`p-1.5 rounded-lg transition-colors ${brandActive ? 'bg-amber-500/10 text-amber-500' : 'text-muted-foreground hover:bg-muted'}`}
                 title="品牌DNA注入 - 将品牌规范注入对话上下文">
@@ -2600,8 +2761,8 @@ export default function ChatArea({
                 });
               }} />
           </div>
-          <div className="text-xs text-muted-foreground/50 mt-2 flex min-w-0 flex-wrap items-center justify-center gap-x-3 gap-y-1">
-            <label className="inline-flex w-full min-w-0 items-center gap-2 sm:w-auto">
+          <div className={`text-xs text-muted-foreground/50 flex min-w-0 flex-wrap items-center justify-center gap-x-3 gap-y-1 ${compactHeader ? 'mt-1' : 'mt-2'}`}>
+            <label className={`inline-flex min-w-0 items-center gap-2 ${compactHeader ? 'min-w-[100px] flex-1' : 'w-full sm:w-auto'}`}>
               <span className="shrink-0">目标画布</span>
               <select
                 aria-label="目标画布项目"

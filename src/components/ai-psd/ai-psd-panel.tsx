@@ -8,7 +8,9 @@
  * 主题：黑金配色，与品牌工厂/精修引擎一致
  */
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react';
+import { constrainFloatingPanelPosition, getCenteredFloatingPanelPosition, getFloatingPanelViewport,
+  subscribeFloatingPanelViewport, type FloatingPanelPosition, type FloatingPanelViewport } from '@/lib/floating-panel-position';
 import { useProgressTimer } from '@/hooks/useProgressTimer';
 import {
   X, GripVertical, Layers, Image as ImageIcon, Sparkles, FileImage,
@@ -267,14 +269,7 @@ const thLight = {
 export default function AiPsdPanel({ onClose, onAddImages, isMonochrome = false, sourceImageUrl }: AiPsdPanelProps) {
   const th = isMonochrome ? thLight : thDark;
   // === Panel drag state ===
-  const [panelPos, setPanelPos] = useState(() => {
-    if (typeof window !== 'undefined') {
-      const pw = 880;
-      const ph = Math.min(window.innerHeight * 0.85, 680);
-      return { x: Math.max(0, (window.innerWidth - pw) / 2), y: Math.max(0, (window.innerHeight - ph) / 2) };
-    }
-    return { x: 0, y: 0 };
-  });
+  const [panelPos, setPanelPos] = useState<FloatingPanelPosition>({ x: 8, y: 8 });
   const [isDragging, setIsDragging] = useState(false);
   const dragOffset = useRef({ x: 0, y: 0 });
   const panelRef = useRef<HTMLDivElement>(null);
@@ -355,9 +350,46 @@ export default function AiPsdPanel({ onClose, onAddImages, isMonochrome = false,
   const PANEL_W = 1100;
   const PANEL_H = 720;
 
+  const [panelViewport, setPanelViewport] = useState<FloatingPanelViewport>({ width: 1056, height: 776, left: 0, top: 0 });
+  const panelWidth = Math.max(0, Math.min(PANEL_W, panelViewport.width - 16));
+  const panelMaxHeight = Math.max(0, Math.min(panelViewport.height - 16,
+    panelViewport.width >= 1024 && panelViewport.height >= 600 ? Math.min(PANEL_H, panelViewport.height * 0.85) : panelViewport.height - 16));
+  const constrainPanelPosition = useCallback((next: FloatingPanelPosition): FloatingPanelPosition => {
+    const view = getFloatingPanelViewport();
+    const box = panelRef.current?.getBoundingClientRect();
+    const bounded = constrainFloatingPanelPosition({ x: next.x - view.left, y: next.y - view.top,
+      viewportWidth: view.width, viewportHeight: view.height,
+      panelWidth: box?.width || Math.min(PANEL_W, Math.max(0, view.width - 16)), panelHeight: box?.height || 60, margin: 8 });
+    return { x: bounded.x + view.left, y: bounded.y + view.top };
+  }, []);
+  useLayoutEffect(() => {
+    const update = (): void => {
+      const next = getFloatingPanelViewport();
+      setPanelViewport(current => current.width === next.width && current.height === next.height
+        && current.left === next.left && current.top === next.top ? current : next);
+    };
+    const view = getFloatingPanelViewport();
+    const box = panelRef.current?.getBoundingClientRect();
+    const centered = getCenteredFloatingPanelPosition({ viewportWidth: view.width, viewportHeight: view.height,
+      panelWidth: Math.min(PANEL_W, Math.max(0, view.width - 16)),
+      panelHeight: box?.height || Math.min(PANEL_H, Math.max(0, view.height - 16)), margin: 8 });
+    setPanelPos({ x: centered.x + view.left, y: centered.y + view.top });
+    update(); return subscribeFloatingPanelViewport(update);
+  }, []);
+  useLayoutEffect(() => {
+    const keepVisible = (): void => setPanelPos(current => {
+      const next = constrainPanelPosition(current); return next.x === current.x && next.y === current.y ? current : next;
+    });
+    keepVisible();
+    if (typeof ResizeObserver === 'undefined' || !panelRef.current) return;
+    const observer = new ResizeObserver(keepVisible); observer.observe(panelRef.current);
+    return () => observer.disconnect();
+  }, [panelViewport, isMinimized, constrainPanelPosition]);
+  const shortPanel = panelViewport.height < 600;
+
   // ─── Drag handlers ──────────────────────────────────────────
   const handleDragStart = useCallback((e: React.MouseEvent) => {
-    if (!panelRef.current) return;
+    if (!panelRef.current || (e.target as Element).closest('button, input, textarea, select')) return;
     const rect = panelRef.current.getBoundingClientRect();
     dragOffset.current = { x: e.clientX - rect.left, y: e.clientY - rect.top };
     setIsDragging(true);
@@ -366,22 +398,13 @@ export default function AiPsdPanel({ onClose, onAddImages, isMonochrome = false,
   useEffect(() => {
     if (!isDragging) return;
     const handleMove = (e: MouseEvent) => {
-      setPanelPos({ x: e.clientX - dragOffset.current.x, y: e.clientY - dragOffset.current.y });
+      setPanelPos(constrainPanelPosition({ x: e.clientX - dragOffset.current.x, y: e.clientY - dragOffset.current.y }));
     };
     const handleUp = () => setIsDragging(false);
     document.addEventListener('mousemove', handleMove);
     document.addEventListener('mouseup', handleUp);
     return () => { document.removeEventListener('mousemove', handleMove); document.removeEventListener('mouseup', handleUp); };
-  }, [isDragging]);
-
-  // Center panel on mount
-  useEffect(() => {
-    const maxH = Math.min(window.innerHeight * 0.85, PANEL_H);
-    setPanelPos({
-      x: Math.max(0, (window.innerWidth - PANEL_W) / 2),
-      y: Math.max(0, (window.innerHeight - maxH) / 2),
-    });
-  }, []);
+  }, [isDragging, constrainPanelPosition]);
 
   // ─── Load models from admin system ────────────────────────
   useEffect(() => {
@@ -741,7 +764,7 @@ export default function AiPsdPanel({ onClose, onAddImages, isMonochrome = false,
 
   // ─── Left panel: Parameter area ────────────────────────────
   const renderLeftPanel = () => (
-    <div className="w-[320px] shrink-0 overflow-y-auto p-3 space-y-3" style={{ scrollbarWidth: 'thin' }}>
+    <div className="w-full min-w-0 shrink-0 p-3 space-y-3 lg:w-[320px] lg:overflow-y-auto" style={{ scrollbarWidth: 'thin' }}>
       {/* Generate mode tabs */}
       <div className="flex gap-1">
         {GENERATE_MODES.map(m => {
@@ -1055,7 +1078,7 @@ export default function AiPsdPanel({ onClose, onAddImages, isMonochrome = false,
     // Empty state
     if (isIdle && !taskData) {
       return (
-        <div className="flex-1 min-w-0 flex flex-col items-center justify-center p-6">
+        <div className="min-h-48 shrink-0 lg:flex-1 lg:shrink min-w-0 flex flex-col items-center justify-center p-6">
           <div className={`w-16 h-16 rounded-2xl ${th.bgSubtle} flex items-center justify-center mb-4`}>
             <Layers className="w-8 h-8 text-gray-600" />
           </div>
@@ -1084,7 +1107,7 @@ export default function AiPsdPanel({ onClose, onAddImages, isMonochrome = false,
     // Generating state
     if (isGenerating) {
       return (
-        <div className="flex-1 min-w-0 flex flex-col p-4">
+        <div className="min-h-48 shrink-0 lg:flex-1 lg:shrink min-w-0 flex flex-col p-4">
           {/* Step indicator */}
           <div className="flex items-center gap-2 mb-4">
             {GENERATE_STEPS.map((step, i) => (
@@ -1163,7 +1186,7 @@ export default function AiPsdPanel({ onClose, onAddImages, isMonochrome = false,
     // Completed state
     if (isCompleted) {
       return (
-        <div className="flex-1 min-w-0 flex flex-col p-4">
+        <div className="min-h-48 shrink-0 lg:flex-1 lg:shrink min-w-0 flex flex-col p-4">
           <div className="flex items-center gap-2 mb-3">
             <Check className="w-4 h-4 text-green-400" />
             <span className="text-xs text-green-400">生成完成</span>
@@ -1202,7 +1225,7 @@ export default function AiPsdPanel({ onClose, onAddImages, isMonochrome = false,
     // Failed state
     if (error && !isGenerating) {
       return (
-        <div className="flex-1 min-w-0 flex flex-col items-center justify-center p-6">
+        <div className="min-h-48 shrink-0 lg:flex-1 lg:shrink min-w-0 flex flex-col items-center justify-center p-6">
           <div className="w-12 h-12 rounded-full bg-red-500/10 flex items-center justify-center mb-3">
             <X className="w-6 h-6 text-red-400" />
           </div>
@@ -1218,7 +1241,7 @@ export default function AiPsdPanel({ onClose, onAddImages, isMonochrome = false,
 
   // ─── Right panel: Layer tree / Report ──────────────────────
   const renderRightPanel = () => (
-    <div className="w-[220px] shrink-0 flex flex-col border-l border-white/[0.06] bg-[#141414]">
+    <div className="flex min-h-48 w-full min-w-0 shrink-0 flex-col border-t border-white/[0.06] bg-[#141414] lg:min-h-0 lg:w-[220px] lg:border-l lg:border-t-0">
       {/* Tab switcher */}
       <div className={`flex border-b ${th.borderLight}`}>
         <button className={`flex-1 py-2 text-xs transition-colors ${
@@ -1366,7 +1389,7 @@ export default function AiPsdPanel({ onClose, onAddImages, isMonochrome = false,
 
   // ─── Bottom action bar ─────────────────────────────────────
   const renderBottomBar = () => (
-    <div className={`${th.border} border-t px-4 py-2.5 flex items-center gap-2`}>
+    <div className={`${th.border} shrink-0 border-t px-3 py-2.5 flex flex-wrap items-center gap-2 lg:px-4`}>
       {isIdle && (
         <button className={`${th.btn} flex-1 flex items-center justify-center gap-2`}
           onClick={handleGenerate}
@@ -1440,24 +1463,24 @@ export default function AiPsdPanel({ onClose, onAddImages, isMonochrome = false,
   return (
     <div
       ref={panelRef}
-      className={`fixed z-[90] ${isDragging ? 'cursor-grabbing' : ''}`}
-      style={{ left: panelPos.x, top: panelPos.y, width: PANEL_W }}
+      className={`fixed z-[90] min-w-0 [&_button]:min-h-11 [&_button]:min-w-11 [&_button]:max-w-full [&_button]:whitespace-nowrap [&_input]:min-h-11 [&_input]:max-w-full [&_select]:min-h-11 [&_select]:max-w-full [&_textarea]:min-h-11 [&_input]:text-base [&_select]:text-base [&_textarea]:text-base lg:[&_input]:text-sm lg:[&_select]:text-sm lg:[&_textarea]:text-sm ${isDragging ? 'cursor-grabbing' : ''}`}
+      style={{ left: panelPos.x, top: panelPos.y, width: panelWidth, maxHeight: panelMaxHeight }}
       onMouseDown={e => e.stopPropagation()}
       onPointerDown={e => e.stopPropagation()}
       onWheel={e => e.stopPropagation()}
     >
       <div
         data-floating-panel="true"
-        className={`${th.panel} flex flex-col overflow-hidden ${isDragging ? `ring-2 ${th.accentRing}` : ''}`}
-        style={{ maxHeight: isMinimized ? undefined : '85vh' }}
+        className={`${th.panel} min-h-0 flex flex-col ${shortPanel ? 'overflow-y-auto' : 'overflow-hidden'} ${isDragging ? `ring-2 ${th.accentRing}` : ''}`}
+        style={{ maxHeight: isMinimized ? undefined : panelMaxHeight }}
       >
         {/* Header with drag handle */}
-        <div className={`${th.header} flex items-center gap-2 cursor-grab active:cursor-grabbing select-none ${isMinimized ? 'rounded-2xl border-b-0' : ''}`}
+        <div className={`${th.header} relative flex shrink-0 flex-wrap items-center gap-2 cursor-grab active:cursor-grabbing select-none ${shortPanel ? 'sticky top-0 z-[60]' : ''} ${isMinimized ? 'rounded-2xl border-b-0' : ''}`}
           onMouseDown={handleDragStart}>
-          <GripVertical className="w-4 h-4 text-gray-500" />
-          <Layers className={`w-4 h-4 ${th.accentText}`} />
-          <span className={`${th.title} text-sm flex-1`}>AI PSD 生成器</span>
-          {taskId && <span className={`text-[10px] ${th.accentText} ${th.accentBg10} px-2 py-0.5 rounded font-mono`}>{taskId.slice(0, 12)}</span>}
+          <GripVertical className="hidden w-4 h-4 text-gray-500 lg:block" />
+          <Layers className={`hidden w-4 h-4 lg:block ${th.accentText}`} />
+          <span className={`${th.title} min-w-0 basis-full truncate whitespace-nowrap text-sm lg:basis-auto lg:flex-1`}>AI PSD 生成器</span>
+          {taskId && <span className={`hidden text-[10px] lg:inline-flex ${th.accentText} ${th.accentBg10} px-2 py-0.5 rounded font-mono`}>{taskId.slice(0, 12)}</span>}
           {/* History button */}
           <button className={`${th.btnGhost} flex items-center gap-1 text-[10px] ${showHistory ? th.accentText : ''}`}
             onClick={e => { e.stopPropagation(); setShowHistory(!showHistory); }}>
@@ -1485,9 +1508,9 @@ export default function AiPsdPanel({ onClose, onAddImages, isMonochrome = false,
         )}
 
         {/* Body: Three columns */}
-        <div className="flex flex-1 min-h-0 overflow-hidden">
+        <div className={`flex min-h-0 min-w-0 flex-col lg:flex-row ${shortPanel ? 'flex-none overflow-visible' : 'flex-1 overflow-y-auto lg:overflow-hidden'}`}>
           {/* Left: Parameters */}
-          <div className="overflow-y-auto border-r border-white/[0.06]" style={{ scrollbarWidth: 'thin' }}>
+          <div className="min-w-0 shrink-0 border-b border-white/[0.06] lg:min-h-0 lg:shrink lg:overflow-y-auto lg:border-b-0 lg:border-r" style={{ scrollbarWidth: 'thin' }}>
             {renderLeftPanel()}
           </div>
 

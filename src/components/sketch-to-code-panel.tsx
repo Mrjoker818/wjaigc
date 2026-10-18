@@ -268,6 +268,8 @@ export function SketchToCodePanel({ session: supplied, imageSession, models = []
   const [mode, setMode] = useState<SketchCreationMode>(initialTrace ? 'code' : imageSession ? 'image' : 'code');
   const [closed, setClosed] = useState(false);
   const [minimized, setMinimized] = useState(false);
+  const [brushExpanded, setBrushExpanded] = useState(false);
+  const brushSettingsId = useId();
   const [viewport, setViewport] = useState(sketchViewport);
   const [position, setPosition] = useState(() => {
     const initial = sketchViewport();
@@ -573,18 +575,20 @@ export function SketchToCodePanel({ session: supplied, imageSession, models = []
         onClick={() => { cancelStroke(); setMinimized(value => !value); }}>{minimized ? <Maximize2 aria-hidden="true" className="h-4 w-4" /> : <Minus aria-hidden="true" className="h-4 w-4" />}</button>
       <button className={`${buttonControl} flex h-11 w-11 shrink-0 items-center justify-center p-0`} aria-label={imageSession ? '关闭草图创作' : '关闭草图转代码'} onClick={close}><X aria-hidden="true" className="h-4 w-4" /></button></div>
     <div hidden={minimized} className={`${minimized ? 'hidden' : ''} min-h-0 min-w-0 overflow-y-auto overscroll-contain p-3 sm:p-4`}>
-    {imageSession && <div role="group" aria-label="创作模式" className="mb-3 flex flex-wrap gap-2">{(['image', 'code'] as const).map(value => <button key={value} className={`${buttonControl} min-h-11`} aria-pressed={mode === value} onClick={() => setMode(value)}>{value === 'image' ? '草图生图' : '草图转代码'}<SelectionMark selected={mode === value} /></button>)}</div>}
-    <p className="mb-3 text-sm">{mode === 'image' ? '画出构图，输入创作关键词，选择视觉分析与图像模型。生成图不会替换原始草图。' : '画出页面结构，生成安全静态 HTML。画布卡片是原始草图 PNG，不是页面截图。'}关闭仅停止读取，不取消任务。</p>
+    {imageSession && <div role="group" aria-label="创作模式" className="mb-2 flex flex-wrap gap-2 sm:mb-3">{(['image', 'code'] as const).map(value => <button key={value} className={`${buttonControl} min-h-11`} aria-pressed={mode === value} onClick={() => setMode(value)}>{value === 'image' ? '草图生图' : '草图转代码'}<SelectionMark selected={mode === value} /></button>)}</div>}
+    <p className="mb-2 text-xs sm:mb-3 sm:text-sm"><span className={brushExpanded ? '' : 'hidden sm:inline'}>{mode === 'image' ? '画出构图，输入创作关键词，选择视觉分析与图像模型。生成图不会替换原始草图。' : '画出页面结构，生成安全静态 HTML。画布卡片是原始草图 PNG，不是页面截图。'}</span>关闭仅停止读取，不取消任务。</p>
     {session.client.scope.authority === 'document' && <p role="note" className="mb-3 text-sm">{mode === 'image' ? '协作文档暂不能放置生成图像，仍可受权预览和下载。' : DOCUMENT_PLACEMENT_REASON}</p>}
     {!allowed && <p role="alert" className="mb-3 text-sm">当前项目授权未知或已失效，请恢复项目后操作。</p>}
     {recoveryBlocked && <div role="status" className="mb-3 flex min-w-0 flex-wrap items-center gap-2 text-sm"><span>原任务待核对，暂不能新生成。</span><button className={buttonControl} onClick={() => recoveryPanel.current?.scrollIntoView({ block: 'start' })}>查看原任务</button></div>}
     <div className="grid min-w-0 gap-4 lg:grid-cols-[minmax(0,3fr)_minmax(240px,2fr)]">
       <div className="min-w-0">
-        <div className="mb-3 space-y-2">
+        <div className="mb-2 space-y-2 sm:mb-3">
           <div role="group" aria-label="绘图工具" className="flex flex-wrap gap-2">
           <button className={`${buttonControl} min-h-11`} aria-pressed={tool === 'pen'} onClick={() => setTool('pen')}>画笔<SelectionMark selected={tool === 'pen'} /></button>
           <button className={`${buttonControl} min-h-11`} aria-pressed={tool === 'eraser'} onClick={() => setTool('eraser')}>橡皮擦<SelectionMark selected={tool === 'eraser'} /></button>
+          <button className={`${buttonControl} sm:hidden`} aria-expanded={brushExpanded} aria-controls={brushSettingsId} onClick={() => setBrushExpanded(value => !value)}>画笔设置</button>
           </div>
+          <div id={brushSettingsId} className={`${brushExpanded ? 'block' : 'hidden'} space-y-2 sm:block`}>
           <div role="group" aria-label="画笔颜色" className="flex max-w-[200px] flex-wrap gap-2 sm:max-w-none">
           {SKETCH_COLORS.map(value => <button key={value} className={`${buttonControl} relative h-11 w-11 p-1`} aria-label={`画笔颜色 ${value}`} aria-pressed={color === value} onClick={() => setColor(value)}>
             <span className="block h-5 w-5 rounded border border-gray-400" style={{ backgroundColor: value }} /><SelectionMark selected={color === value} swatch /></button>)}
@@ -592,11 +596,12 @@ export function SketchToCodePanel({ session: supplied, imageSession, models = []
           <div role="group" aria-label="画笔粗细" className="flex flex-wrap gap-2">
           {SKETCH_WIDTHS.map(value => <button key={value} className={`${buttonControl} min-h-11`} aria-label={`画笔粗细 ${value}`} aria-pressed={width === value} onClick={() => setWidth(value)}>{value}px<SelectionMark selected={width === value} /></button>)}
           </div>
+          </div>
         </div>
         <p role="status" aria-label="当前绘图设置" className="mb-2 text-sm">当前：{tool === 'pen' ? '画笔' : '橡皮擦'} · {COLOR_NAMES[color]} · {width}px</p>
         <canvas ref={canvas} aria-label="绘图区" tabIndex={0} width={1024} height={768} className="block h-auto w-full rounded-md bg-white outline-offset-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#d4af37]" style={{ touchAction: 'none' }}
           onPointerDown={event => { event.preventDefault(); if (draft.current) { cancelStroke(); return; } if (event.button !== 0 || session.history.present.strokes.length >= 200) return;
-            event.currentTarget.focus(); draft.current = { pointerId: event.pointerId, stroke: { id: crypto.randomUUID(), tool, color, width, points: [point(event)] } };
+            event.currentTarget.focus({ preventScroll: true }); draft.current = { pointerId: event.pointerId, stroke: { id: crypto.randomUUID(), tool, color, width, points: [point(event)] } };
             try { event.currentTarget.setPointerCapture(event.pointerId); draw(); } catch { cancelStroke(); setMessage('绘图捕获不可用，请重新落笔'); } }}
           onPointerMove={event => { const current = draft.current; if (!current || current.pointerId !== event.pointerId || current.stroke.points.length >= 2048) return;
             draft.current = { ...current, stroke: { ...current.stroke, points: [...current.stroke.points, point(event)] } }; draw(); }}

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
+import { useState, useRef, useCallback, useEffect, useLayoutEffect, useMemo } from 'react';
 import { X, Pencil, Eraser, Trash2, Loader2, Check, Sparkles, History, Image as ImageIcon, ChevronDown, ChevronUp, Plus, Minus, Maximize2, GripVertical, Upload, RefreshCw, FileText } from 'lucide-react';
 import type { CanvasImage } from './infinite-canvas';
 
@@ -71,6 +71,7 @@ const MODEL_HINTS: Record<string, string> = {
 import { getModelDisplayName } from '@/lib/model-name-map';
 import { MODEL_ASPECT_RATIOS, MODEL_QUALITIES, DEFAULT_ASPECT_RATIOS, DEFAULT_QUALITIES, QUALITY_DISPLAY_NAMES, findModelConfig } from '@/lib/canvas-generation-group';
 import { taskEventsClient } from '@/lib/task-events-client';
+import { constrainFloatingPanelPosition, getCenteredFloatingPanelPosition, getFloatingPanelViewport, subscribeFloatingPanelViewport, type FloatingPanelPosition } from '@/lib/floating-panel-position';
 import { getPromptTemplates, searchTemplates, type PromptTemplate } from '@/lib/prompt-templates';
 
 function getModelHint(modelId: string): string {
@@ -545,14 +546,66 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
 
   // 拖拽状态
   const [isDragging, setIsDragging] = useState(false);
-  const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
-  const [position, setPosition] = useState(() => {
-    if (typeof window !== 'undefined') {
-      const maxH = Math.min(window.innerHeight * 0.85, 680);
-      return { x: Math.max(0, (window.innerWidth - 440) / 2), y: Math.max(0, (window.innerHeight - maxH) / 2) };
-    }
-    return { x: 100, y: 100 };
+  const dragCleanupRef = useRef<(() => void) | null>(null);
+  const [panelViewport, setPanelViewport] = useState(getFloatingPanelViewport);
+  const panelWidth = Math.min(440, Math.max(0, panelViewport.width - 16));
+  const panelMaxHeight = Math.max(0, Math.min(panelViewport.height - 16, panelViewport.height * 0.85));
+  const narrowPanel = panelViewport.width < 640;
+  const inlineResults = panelViewport.width < 1024;
+  const hasResults = isResultLoading || resultImages.length > 0;
+  const resultWidth = resultImages.length > 1 ? 440 : 380;
+  const [position, setPosition] = useState<FloatingPanelPosition>(() => {
+    const viewport = getFloatingPanelViewport();
+    const centered = getCenteredFloatingPanelPosition({
+      viewportWidth: viewport.width, viewportHeight: viewport.height,
+      panelWidth: Math.min(440, Math.max(0, viewport.width - 16)),
+      panelHeight: Math.min(viewport.height * 0.85, 680), margin: 8,
+    });
+    return { x: centered.x + viewport.left, y: centered.y + viewport.top };
   });
+
+  useEffect(() => {
+    const update = (): void => setPanelViewport(getFloatingPanelViewport());
+    update();
+    return subscribeFloatingPanelViewport(update);
+  }, []);
+  useEffect(() => () => { dragCleanupRef.current?.(); }, []);
+
+  const fitPanelPosition = useCallback((x: number, y: number): FloatingPanelPosition => {
+    const viewport = getFloatingPanelViewport();
+    const rect = containerRef.current?.getBoundingClientRect();
+    const width = rect?.width ?? Math.min(440, Math.max(0, viewport.width - 16));
+    const next = constrainFloatingPanelPosition({
+      x: x - viewport.left, y: y - viewport.top,
+      viewportWidth: viewport.width, viewportHeight: viewport.height,
+      panelWidth: width + (viewport.width >= 1024 && hasResults && !isMinimized ? 20 + resultWidth : 0),
+      panelHeight: rect?.height ?? 0, margin: 8,
+    });
+    return { x: next.x + viewport.left, y: next.y + viewport.top };
+  }, [hasResults, isMinimized, resultWidth]);
+
+  // A drag can outlive a result-width change; installed listeners must use
+  // the geometry callback from the latest committed layout throughout.
+  const latestFitPanelPositionRef = useRef(fitPanelPosition);
+  useLayoutEffect(() => {
+    latestFitPanelPositionRef.current = fitPanelPosition;
+  }, [fitPanelPosition]);
+
+  // Commit viewport-limited dimensions before measuring/clamping position.
+  // The same visible viewport drives flow layout, size and keyboard offsets.
+  useLayoutEffect(() => {
+    const fit = (): void => {
+      setPosition(previous => {
+        const next = fitPanelPosition(previous.x, previous.y);
+        return next.x === previous.x && next.y === previous.y ? previous : next;
+      });
+    };
+    fit();
+    const observer = new ResizeObserver(fit);
+    if (containerRef.current) observer.observe(containerRef.current);
+    if (resultContainerRef.current) observer.observe(resultContainerRef.current);
+    return () => observer.disconnect();
+  }, [panelViewport, isMinimized, fitPanelPosition]);
 
   // ★ 参考图拖拽排序状态
   const [dragRefIdx, setDragRefIdx] = useState<number | null>(null);
@@ -1497,33 +1550,37 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
     // 只允许从header区域拖拽面板
     const target = e.target as HTMLElement;
     const header = target.closest('[data-panel-header]');
-    if (!header) return;
+    if (!header || target.closest('button, input, select, textarea, a') || e.button !== 0) return;
+    dragCleanupRef.current?.();
     e.preventDefault();
     e.stopPropagation();
+    const rect = containerRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const offset = { x: e.clientX - rect.left, y: e.clientY - rect.top };
     setIsDragging(true);
-    setDragOffset({ x: e.clientX - position.x, y: e.clientY - position.y });
-  }, [position]);
-
-  // 全局鼠标事件：拖动面板时在window上监听，避免鼠标移出header后丢失事件
-  useEffect(() => {
-    if (!isDragging) return;
-    const onMove = (e: MouseEvent) => {
-      e.preventDefault();
-      e.stopPropagation();
-      setPosition({ x: e.clientX - dragOffset.x, y: e.clientY - dragOffset.y });
+    const onMove = (event: MouseEvent): void => {
+      event.preventDefault();
+      event.stopPropagation();
+      setPosition(latestFitPanelPositionRef.current(event.clientX - offset.x, event.clientY - offset.y));
     };
-    const onUp = (e: MouseEvent) => {
-      e.preventDefault();
-      e.stopPropagation();
+    const onUp = (): void => {
+      setPosition(previous => {
+        const next = latestFitPanelPositionRef.current(previous.x, previous.y);
+        return next.x === previous.x && next.y === previous.y ? previous : next;
+      });
       setIsDragging(false);
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+      window.removeEventListener('blur', onUp);
+      window.removeEventListener('pointercancel', onUp);
+      dragCleanupRef.current = null;
     };
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
-    return () => {
-      window.removeEventListener('mousemove', onMove);
-      window.removeEventListener('mouseup', onUp);
-    };
-  }, [isDragging, dragOffset]);
+    window.addEventListener('blur', onUp);
+    window.addEventListener('pointercancel', onUp);
+    dragCleanupRef.current = onUp;
+  }, []);
 
   // SVG连接线计算
   const getLineStart = useCallback(() => {
@@ -1562,12 +1619,12 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
         }`}
       >
         <div className="flex-1 min-w-0">
-          <div className="font-medium flex items-center gap-1.5">
-            {model.apiDisplayName || getModelDisplayName(model.id)}
-            {model.providerName && <span className={`text-[10px] px-1 py-0.5 ${thAccentLight} ${thAccentLightText} rounded`}>{fixProviderName(model.providerName)}</span>}
+          <div className="font-medium flex min-w-0 items-center gap-1.5">
+            <span className="min-w-0 flex-1 truncate">{model.apiDisplayName || getModelDisplayName(model.id)}</span>
+            {model.providerName && <span className={`shrink-0 text-[10px] px-1 py-0.5 ${thAccentLight} ${thAccentLightText} rounded`}>{fixProviderName(model.providerName)}</span>}
             {maskSupported
-              ? <span className="text-[10px] px-1 py-0.5 bg-green-500/20 text-green-400 rounded">支持涂抹</span>
-              : <span className="text-[10px] px-1 py-0.5 bg-orange-500/20 text-orange-400 rounded">仅文字修图</span>
+              ? <span className="shrink-0 text-[10px] px-1 py-0.5 bg-green-500/20 text-green-400 rounded">支持涂抹</span>
+              : <span className="shrink-0 text-[10px] px-1 py-0.5 bg-orange-500/20 text-orange-400 rounded">仅文字修图</span>
             }
           </div>
           <div className={`text-xs ${thTextMuted} truncate`}>{fixProviderName(model.providerName)}{hint ? ` · ${hint}` : ''}</div>
@@ -1622,14 +1679,15 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
       {/* 主编辑器面板 */}
       <div
         ref={containerRef}
-        className={`fixed z-[200] w-[440px] ${isDragging ? '' : thPanel} rounded-xl overflow-hidden`}
+        className={`fixed z-[200] flex min-w-0 flex-col ${isDragging ? '' : thPanel} rounded-xl overflow-hidden`}
         style={{
           left: position.x,
           top: position.y,
-          maxHeight: isMinimized ? undefined : '85vh',
+          width: panelWidth,
+          maxHeight: panelMaxHeight,
           backgroundColor: isMonochrome ? '#fff' : '#1a1a1a',
           border: isDragging
-            ? `2px solid ${isMonochrome ? '#2563eb' : '#d4af37'}`
+            ? `1px solid ${isMonochrome ? '#2563eb' : '#d4af37'}`
             : `1px solid ${isMonochrome ? '#e5e7eb' : 'rgba(255,255,255,0.08)'}`,
           boxShadow: isDragging
             ? (isMonochrome ? '0 0 24px rgba(37,99,235,0.25), 0 25px 50px -12px rgba(0,0,0,0.25)' : '0 0 24px rgba(212,175,55,0.3), 0 25px 50px -12px rgba(0,0,0,0.5)')
@@ -1642,23 +1700,24 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
         {/* Header - 可拖拽 */}
         <div
           data-panel-header
-          className={`flex items-center gap-2 px-3 py-2 cursor-move select-none shrink-0 ${isMinimized ? 'rounded-xl' : ''}`}
+          className={`flex min-w-0 items-center gap-2 px-3 py-2 cursor-move select-none shrink-0 ${isMinimized ? 'rounded-xl' : ''}`}
           style={{ borderBottom: isMinimized ? 'none' : `1px solid ${isMonochrome ? 'rgba(0,0,0,0.08)' : 'rgba(255,255,255,0.08)'}` }}
           onMouseDown={handleDragStart}
         >
-          <GripVertical size={14} style={{ color: isMonochrome ? 'rgba(0,0,0,0.25)' : 'rgba(255,255,255,0.3)' }} />
-          <Pencil size={15} style={{ color: isMonochrome ? '#6b6b6b' : '#d4af37' }} />
-          <span className="text-base font-semibold flex-1" style={{ color: isMonochrome ? '#6b6b6b' : '#d4af37' }}>
+          <GripVertical size={14} className="shrink-0" style={{ color: isMonochrome ? 'rgba(0,0,0,0.25)' : 'rgba(255,255,255,0.3)' }} />
+          <Pencil size={15} className="shrink-0" style={{ color: isMonochrome ? '#6b6b6b' : '#d4af37' }} />
+          <span className="shrink-0 whitespace-nowrap text-base font-semibold" style={{ color: isMonochrome ? '#6b6b6b' : '#d4af37' }}>
             语言修图
           </span>
           {selectedModel && (
-            <span className="text-xs px-1.5 py-0.5 rounded" style={{ color: isMonochrome ? 'rgba(0,0,0,0.45)' : 'rgba(255,255,255,0.5)', background: isMonochrome ? 'rgba(0,0,0,0.05)' : 'rgba(255,255,255,0.06)' }}>
+            <span className="min-w-0 flex-1 truncate text-xs px-1.5 py-0.5 rounded" title={selectedModel} style={{ color: isMonochrome ? 'rgba(0,0,0,0.45)' : 'rgba(255,255,255,0.5)', background: isMonochrome ? 'rgba(0,0,0,0.05)' : 'rgba(255,255,255,0.06)' }}>
               {selectedModel}
             </span>
           )}
           <button
             onClick={() => setIsMinimized(!isMinimized)}
-            className="p-1 rounded-md transition-colors"
+            aria-label={isMinimized ? '展开语言修图' : '最小化语言修图'}
+            className="flex h-11 w-11 shrink-0 items-center justify-center p-1 rounded-md transition-colors"
             style={{ color: isMonochrome ? 'rgba(0,0,0,0.35)' : 'rgba(255,255,255,0.4)' }}
             onMouseEnter={e => (e.currentTarget.style.color = isMonochrome ? '#000' : '#fff')}
             onMouseLeave={e => (e.currentTarget.style.color = isMonochrome ? 'rgba(0,0,0,0.35)' : 'rgba(255,255,255,0.4)')}
@@ -1667,7 +1726,8 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
           </button>
           <button
             onClick={() => { setEditContextHistory([]); setAutoMaskPreview(null); setPendingAutoRegions([]); onClose(); }}
-            className="p-1 rounded-md transition-colors"
+            aria-label="关闭语言修图"
+            className="flex h-11 w-11 shrink-0 items-center justify-center p-1 rounded-md transition-colors"
             style={{ color: isMonochrome ? 'rgba(0,0,0,0.35)' : 'rgba(255,255,255,0.4)' }}
             onMouseEnter={e => (e.currentTarget.style.color = isMonochrome ? '#000' : '#fff')}
             onMouseLeave={e => (e.currentTarget.style.color = isMonochrome ? 'rgba(0,0,0,0.35)' : 'rgba(255,255,255,0.4)')}
@@ -1677,8 +1737,9 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
         </div>
 
         {/* Content */}
-        {!isMinimized && (
-        <div className={`p-4 space-y-3.5 max-h-[calc(85vh-50px)] overflow-y-auto`}>
+        {/* Keep the original canvas mounted when folded so its pixels and
+            undo snapshots survive restore and viewport reflow. */}
+        <div className="min-h-0 min-w-0 overflow-y-auto p-4 space-y-3.5" style={{ display: isMinimized ? 'none' : undefined }}>
           {/* 图片预览区域 - 无图时显示大+号 */}
           {!currentImageUrl ? (
             <div className="relative">
@@ -1977,10 +2038,10 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
           <div className={`border-t ${thBorderLight}`} />
 
           {/* 画笔工具 - 始终显示 */}
-          <div className="flex items-center gap-1.5 px-1">
+          <div className={narrowPanel ? 'grid grid-cols-2 gap-1.5 px-1' : 'flex flex-wrap items-center gap-1.5 px-1'}>
             <button
               onClick={() => currentModelSupportsMask && setTool('brush')}
-              className={`flex items-center gap-1 px-2.5 py-1.5 rounded text-xs font-medium transition-all ${
+              className={`flex min-h-11 min-w-11 items-center justify-center gap-1 whitespace-nowrap px-2.5 py-1.5 rounded text-xs font-medium transition-all ${
                 !currentModelSupportsMask
                   ? isMonochrome ? 'bg-gray-100 text-gray-300 border border-gray-100 cursor-not-allowed' : 'bg-[#1a1a1a] text-gray-600 border border-white/[0.04] cursor-not-allowed'
                   : tool === 'brush'
@@ -1992,7 +2053,7 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
             </button>
             <button
               onClick={() => currentModelSupportsMask && setTool('eraser')}
-              className={`flex items-center gap-1 px-2.5 py-1.5 rounded text-xs font-medium transition-all ${
+              className={`flex min-h-11 min-w-11 items-center justify-center gap-1 whitespace-nowrap px-2.5 py-1.5 rounded text-xs font-medium transition-all ${
                 !currentModelSupportsMask
                   ? isMonochrome ? 'bg-gray-100 text-gray-300 border border-gray-100 cursor-not-allowed' : 'bg-[#1a1a1a] text-gray-600 border border-white/[0.04] cursor-not-allowed'
                   : tool === 'eraser'
@@ -2005,7 +2066,7 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
             <button
               onClick={() => currentModelSupportsMask && undoMask()}
               disabled={!currentModelSupportsMask || maskHistory.length === 0}
-              className={`flex items-center gap-1 px-2.5 py-1.5 rounded text-xs font-medium transition-all ${
+              className={`flex min-h-11 min-w-11 items-center justify-center gap-1 whitespace-nowrap px-2.5 py-1.5 rounded text-xs font-medium transition-all ${
                 !currentModelSupportsMask || maskHistory.length === 0
                   ? isMonochrome ? 'bg-gray-100 text-gray-300 border border-gray-100 cursor-not-allowed' : 'bg-[#1a1a1a] text-gray-600 border border-white/[0.04] cursor-not-allowed'
                   : isMonochrome ? 'bg-gray-100 text-gray-500 hover:text-gray-900 border border-gray-200' : 'bg-[#1a1a1a] text-gray-400 hover:text-white border border-white/[0.08]'
@@ -2015,7 +2076,7 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
             </button>
             <button
               onClick={() => currentModelSupportsMask && clearMask()}
-              className={`flex items-center gap-1 px-2.5 py-1.5 rounded text-xs font-medium transition-all ${
+              className={`flex min-h-11 min-w-11 items-center justify-center gap-1 whitespace-nowrap px-2.5 py-1.5 rounded text-xs font-medium transition-all ${
                 !currentModelSupportsMask
                   ? isMonochrome ? 'bg-gray-100 text-gray-300 border border-gray-100 cursor-not-allowed' : 'bg-[#1a1a1a] text-gray-600 border border-white/[0.04] cursor-not-allowed'
                   : isMonochrome ? 'bg-gray-100 text-gray-500 hover:text-gray-900 border border-gray-200' : 'bg-[#1a1a1a] text-gray-400 hover:text-white border border-white/[0.08]'
@@ -2023,7 +2084,7 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
             >
               <Trash2 className="h-3.5 w-3.5" />清除
             </button>
-            <div className="flex-1" />
+            <div className={narrowPanel ? 'col-span-2 flex items-center justify-end gap-1.5 pt-1' : 'ml-auto flex items-center gap-1.5'}>
             <span className={`text-xs ${thTextMuted}`}>笔触</span>
             <input
               type="range"
@@ -2032,9 +2093,13 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
               value={brushSize}
               onChange={(e) => setBrushSize(Number(e.target.value))}
               disabled={!currentModelSupportsMask}
-              className={`w-16 h-1 rounded appearance-none ${isMonochrome ? 'accent-gray-900' : 'accent-[#d4af37]'} ${!currentModelSupportsMask ? 'opacity-30 cursor-not-allowed' : `cursor-pointer ${isMonochrome ? 'bg-gray-200' : 'bg-[#2a2a2a]'}`}`}
+              style={{ height: 44, background: 'transparent' }}
+              className={`w-16 rounded appearance-none [&::-webkit-slider-runnable-track]:h-1 [&::-webkit-slider-runnable-track]:rounded-[2px] [&::-webkit-slider-thumb]:-mt-1 [&::-moz-range-track]:h-1 [&::-moz-range-track]:rounded-[2px] ${isMonochrome
+                ? 'accent-gray-900 [&::-webkit-slider-runnable-track]:bg-gray-200 [&::-moz-range-track]:bg-gray-200'
+                : 'accent-[#d4af37] [&::-webkit-slider-runnable-track]:bg-[#2a2a2a] [&::-moz-range-track]:bg-[#2a2a2a]'} ${!currentModelSupportsMask ? 'opacity-30 cursor-not-allowed' : 'cursor-pointer'}`}
             />
             <span className={`text-xs font-mono w-5 text-center ${currentModelSupportsMask ? (isMonochrome ? 'text-gray-900' : 'text-[#d4af37]') : (isMonochrome ? 'text-gray-300' : 'text-gray-600')}`}>{brushSize}</span>
+            </div>
           </div>
 
           {/* 分隔线 */}
@@ -2288,9 +2353,9 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
                       }`}
                     >
                       <div className="flex-1 min-w-0">
-                        <div className="font-medium flex items-center gap-1.5">
-                          {model.name}
-                          {model.providerName && <span className="text-[10px] px-1 py-0.5 bg-blue-400/20 text-blue-400 rounded">{fixProviderName(model.providerName)}</span>}
+                        <div className="font-medium flex min-w-0 items-center gap-1.5">
+                          <span className="min-w-0 flex-1 truncate">{model.name}</span>
+                          {model.providerName && <span className="shrink-0 text-[10px] px-1 py-0.5 bg-blue-400/20 text-blue-400 rounded">{fixProviderName(model.providerName)}</span>}
                         </div>
                         <div className={`text-xs ${thTextMuted} truncate`}>{fixProviderName(model.providerName)} · 分析原图+优化指令</div>
                       </div>
@@ -2421,16 +2486,15 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
               </div>
             </div>
           )}
-        </div>
-        )}
-      </div>
-
-      {/* 结果框 - 右侧，SVG线连接 */}
+      {/* One result subtree: visible-viewport mobile flow, desktop side panel. */}
       {(isResultLoading || resultImages.length > 0) && (
         <div
           ref={resultContainerRef}
-          className={`fixed z-[201] ${isMonochrome ? "bg-white border border-gray-200" : "bg-[#1a1a1a] border border-white/[0.08]"} rounded-xl shadow-2xl overflow-hidden`}
-          style={{ left: position.x + 460, top: position.y, maxHeight: '85vh', width: resultImages.length > 1 ? '440px' : '380px' }}
+          className={`${inlineResults ? 'relative w-full min-w-0' : 'fixed z-[201] overflow-y-auto'} ${isMonochrome ? "bg-white border border-gray-200" : "bg-[#1a1a1a] border border-white/[0.08]"} rounded-xl shadow-2xl overflow-x-hidden`}
+          style={inlineResults ? undefined : {
+            left: position.x + panelWidth + 20, top: position.y, width: resultWidth, margin: 0,
+            maxHeight: Math.max(0, Math.min(panelMaxHeight, panelViewport.top + panelViewport.height - 8 - position.y)),
+          }}
           onMouseDown={e => e.stopPropagation()}
           onPointerDown={e => e.stopPropagation()}
           data-popup
@@ -2459,7 +2523,7 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
                     const ratioH = ratioParts[1] || 1;
                     return (
                       <div key={i} className={`relative ${isMonochrome ? "bg-gray-50" : "bg-[#1a1a1a]"} rounded-lg border-2 border-dashed ${isMonochrome ? "border-gray-300" : "border-white/[0.06]"} flex flex-col items-center justify-center overflow-hidden flex-shrink-0`}
-                        style={{ aspectRatio: `${ratioW}/${ratioH}`, width: outputCount > 1 ? '200px' : '320px', maxHeight: '400px' }}
+                        style={{ aspectRatio: `${ratioW}/${ratioH}`, width: outputCount > 1 ? '200px' : '320px', maxWidth: '100%', maxHeight: '400px' }}
                       >
                         <div className="relative w-8 h-8 mb-1">
                           <div className={`absolute inset-0 border-2 ${isMonochrome ? "border-gray-200" : "border-white/[0.06]"} rounded-full`} />
@@ -2620,6 +2684,9 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
           </div>
         </div>
       )}
+
+        </div>
+      </div>
 
       {/* ★ LLM自动区域识别 - 内嵌在结果框底部 */}
       {/* Moved inside the result container below */}

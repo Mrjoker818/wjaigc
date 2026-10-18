@@ -175,6 +175,97 @@ describe('HTTP integration execution projection and phase fences', () => {
   });
 });
 
+describe('compute diagnostics preserve original failure and settlement authority', () => {
+  it.each([
+    ['analysis', 'not-json', 'SKETCH_MODEL_INVALID_JSON'],
+    ['analysis', '{"summary":1,"layout":"PRIVATE_LAYOUT","controls":[],"text":[]}', 'SKETCH_ANALYSIS_INVALID'],
+    ['reconstruction', 'not-json', 'SKETCH_MODEL_INVALID_JSON'],
+    ['reconstruction', '{"type":"script","text":"PRIVATE_MODEL_BODY"}', 'SKETCH_UI_INVALID'],
+  ] as const)('retains the safe %s failure category %s without publishing or retrying', async (phase, content, reason) => {
+    const h = await harness();
+    const method = phase === 'analysis' ? 'analyze' : 'reconstruct';
+    h.generation[method] = async () => content;
+    h.admission.prepared = await prepareSketchCode(input, h.generation, { actorUserId: 'user-a', signal: context().signal });
+    const log = vi.spyOn(console, 'info').mockImplementation(() => {});
+    expect(await executeSketchTask(h.admission, context(), h.dep)).toEqual({ status: 'failed', reason: 'SKETCH_EXECUTION_FAILED' });
+    const rows = log.mock.calls.filter(call => call[0] === '[SketchRuntime]')
+      .map(call => JSON.parse(String(call[1])) as Record<string, unknown>);
+    expect(rows.filter(row => row.event === 'compute-error')).toEqual([
+      expect.objectContaining({ event: 'compute-error', phase, reason, taskId: 'sketch-test',
+        providerId: 'p1', modelId: 'vision-1', aborted: false }),
+    ]);
+    expect(JSON.stringify(rows)).not.toMatch(/PRIVATE_|imageDataUrl|instruction|stack|password/);
+    expect(h.task.creditStatus).toBe('refunded'); expect(h.publications).toEqual([]);
+    expect(h.claims).toHaveLength(1); expect(h.settlements).toHaveLength(1);
+    expect(h.settlements[0]).toMatchObject({ status: 'failed', reason: 'SKETCH_EXECUTION_FAILED', requireActive: true });
+  });
+
+  it('maps arbitrary error text to a fixed unknown category rather than logging a secret-like code', async () => {
+    const h = await harness();
+    h.generation.reconstruct = async () => { throw new Error('SKETCH_PRIVATE_RESPONSE_CREDENTIAL'); };
+    h.admission.prepared = await prepareSketchCode(input, h.generation, { actorUserId: 'user-a', signal: context().signal });
+    const log = vi.spyOn(console, 'info').mockImplementation(() => {});
+    expect(await executeSketchTask(h.admission, context(), h.dep)).toEqual({ status: 'failed', reason: 'SKETCH_EXECUTION_FAILED' });
+    const rows = log.mock.calls.filter(call => call[0] === '[SketchRuntime]')
+      .map(call => JSON.parse(String(call[1])) as Record<string, unknown>);
+    expect(rows.filter(row => row.event === 'compute-error')).toEqual([
+      expect.objectContaining({ phase: 'reconstruction', reason: 'SKETCH_COMPUTE_ERROR_UNKNOWN' }),
+    ]);
+    expect(JSON.stringify(rows)).not.toContain('SKETCH_PRIVATE_RESPONSE_CREDENTIAL');
+    expect(h.publications).toEqual([]); expect(h.settlements).toHaveLength(1);
+  });
+
+  it('a failed diagnostic sink cannot change the original validation failure or add a refund', async () => {
+    const h = await harness();
+    h.generation.reconstruct = async () => '{"type":"script","text":"PRIVATE_MODEL_BODY"}';
+    h.admission.prepared = await prepareSketchCode(input, h.generation, { actorUserId: 'user-a', signal: context().signal });
+    vi.spyOn(console, 'info').mockImplementation(() => { throw new Error('PRIVATE_SINK'); });
+    expect(await executeSketchTask(h.admission, context(), h.dep)).toEqual({ status: 'failed', reason: 'SKETCH_EXECUTION_FAILED' });
+    expect(h.task.creditStatus).toBe('refunded'); expect(h.publications).toEqual([]);
+    expect(h.settlements).toHaveLength(1); expect(h.claims).toHaveLength(1);
+  });
+});
+
+describe('compute diagnostic privacy boundary', () => {
+  it.each(['getter', 'descriptor', 'long'] as const)('does not add private message inspection for %s errors', async kind => {
+    const h = await harness(); let getters = 0, descriptors = 0;
+    const error = new Error(kind === 'long' ? 'PRIVATE_MESSAGE'.repeat(20_000) : 'PRIVATE_MESSAGE');
+    if (kind === 'getter') Object.defineProperty(error, 'message', { get: (): string => { getters++; return 'PRIVATE_MESSAGE'; } });
+    const thrown = kind === 'descriptor' ? new Proxy(error, {
+      getOwnPropertyDescriptor: (): never => { descriptors++; throw new Error('PRIVATE_DESCRIPTOR'); },
+    }) : error;
+    h.generation.reconstruct = async () => { throw thrown; };
+    h.admission.prepared = await prepareSketchCode(input, h.generation, { actorUserId: 'user-a', signal: context().signal });
+    const log = vi.spyOn(console, 'info').mockImplementation(() => {});
+    expect(await executeSketchTask(h.admission, context(), h.dep)).toEqual({ status: 'failed', reason: 'SKETCH_EXECUTION_FAILED' });
+    const rows = log.mock.calls.filter(call => call[0] === '[SketchRuntime]')
+      .map(call => JSON.parse(String(call[1])) as Record<string, unknown>);
+    expect(rows.filter(row => row.event === 'compute-error')).toEqual([
+      expect.objectContaining({ phase: 'reconstruction', reason: 'SKETCH_COMPUTE_ERROR_UNKNOWN' }),
+    ]);
+    // The original terminal classifier reads Error.message once for its timeout
+    // comparison; observability must not add another getter invocation.
+    expect(getters).toBe(kind === 'getter' ? 1 : 0);
+    expect(descriptors).toBe(kind === 'descriptor' ? 1 : 0);
+    expect(JSON.stringify(rows)).not.toMatch(/PRIVATE_|stack|cause/);
+    expect(h.publications).toEqual([]); expect(h.settlements).toHaveLength(1);
+  });
+
+  it('uses code-worker when the original compute wrapper does not forward onPhase', async () => {
+    const h = await harness();
+    h.generation.reconstruct = async () => '{"type":"script","text":"PRIVATE_BODY"}';
+    const log = vi.spyOn(console, 'info').mockImplementation(() => {});
+    expect(await executeSketchTask(h.admission, context(), h.dep)).toEqual({ status: 'failed', reason: 'SKETCH_EXECUTION_FAILED' });
+    const rows = log.mock.calls.filter(call => call[0] === '[SketchRuntime]')
+      .map(call => JSON.parse(String(call[1])) as Record<string, unknown>);
+    expect(rows.filter(row => row.event === 'compute-error')).toEqual([
+      expect.objectContaining({ phase: 'code-worker', reason: 'SKETCH_UI_INVALID' }),
+    ]);
+    expect(JSON.stringify(rows)).not.toMatch(/PRIVATE_/);
+    expect(h.publications).toEqual([]); expect(h.settlements).toHaveLength(1);
+  });
+});
+
 describe('Token fix1 rejection query lifecycle', () => {
   it.each(['type', 'userId', 'projectId', 'providerId', 'model', 'requestDigest', 'idempotencyKey', 'leaseOwner',
     'attemptCount', 'leaseExpiresAt', 'access', 'version', 'route', 'pricing', 'creditCost'])(
