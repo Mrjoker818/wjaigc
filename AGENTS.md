@@ -887,6 +887,28 @@ UPSCALE_TIMEOUT_MS=300000
 - **P2: 诊断日志增强**: 登录失败时记录用户名、IP、productType；认证异常时记录错误堆栈前 3 行；用户未找到时记录可用用户数；密码验证失败时记录 hash/secret 长度（涉及 `src/app/api/auth/login/route.ts`、`src/lib/server-auth.ts`）
 - **P2: 前端错误提示细化**: 区分 401/429/500/503 显示不同错误消息（涉及 `src/components/dashboard/login-panel.tsx`）
 
+### v4.2.4
+
+**PearAPI 供应商按最新官方文档对齐（仅影响 PearAPI，其他供应商零变更）**
+
+文档来源：`https://pearapi.apifox.cn/api-525698885`（生成图片）、`api-525698886`（查询任务）、`schema-321320278`（ImageGenerationRequest）。
+
+- **协议层请求契约（`src/lib/api-compatibility.ts`）**：
+  - `PROFILE_PEARAPI` 增加 `includeDerivedPixelHints: false` —— 官方只接受 `size`(比例|像素|auto) / `aspect_ratio` / `resolution`(0.5k|1k|2k|4k) / `quality`(仅 GPT 系列) / `n` / `response_format` / `task_type` / `image` / `images`，不再发送 `width`/`height`/`size_px` 派生像素
+  - `adjustRequestForProfile` 新增 PearAPI 白名单裁剪：剥离未在契约内的 `seed`/`negative_prompt`（官方明示不透传上游）；`resolution` 统一小写化（官方 enum 小写，大写档位会被上游忽略而静默走默认档）；`quality` 仅 GPT-Image 系列保留
+  - **固定档模型不传 `resolution`**（不传走渠道默认）：`nano-banana`(基础版) / `doubao-seedream-*` 全系 / `grok-imagine*` / `wan2.7-image` / `z-image` / `flux2-klein-*` / `boogu-image-*` / `firered-image-*`
+  - **档位兜底迁移**：非 GPT 模型若把清晰度档位放在 `quality`（画布生成组历史约定、resolution 型模型），迁移为 `resolution` 后再清空 `quality`，避免用户档位被白名单静默丢弃
+- **模型规格与 UI（`src/lib/canvas-generation-group.ts`）**：新增 `isPearProvider()` / `PEAR_IMAGE_MODEL_SPECS` / `findPearModelSpec()` / `toPearResolutionParam()`，PearAPI 下按官方规格驱动前端选项（tiers 首项即官方默认档）：
+  - `gpt-image-2`：默认 2K，tiers 1K/2K/4K，quality `auto|low|medium|high`
+  - `gpt-image-2.5`：默认 1K，tiers 1K/2K/4K，quality 额外支持 `xhigh|max`
+  - `nano-banana-2`：默认 2K，tiers 0.5K/1K/2K/4K；`nano-banana-2-lite`：0.5K/1K；`nano-banana-2.1`：默认 2K（1K/2K/4K）；`nano-banana-pro`：默认 1K（1K/2K/4K）；`nano-banana`：固定档
+  - 新增固定档模型：`doubao-seedream-4-0-250828` / `4-5-251128` / `5-0-260128` / `5-0-pro-260628`（固定 2K）、`grok-imagine-image-2.0`、`wan2.7-image`、`z-image`、`flux2-klein-9b`、`boogu-image-0.1`、`firered-image-edit1.1`
+  - 比例分组按官方：GPT/Grok/Boogu 13 比例（含 5:4/4:5/21:9/9:21，不含 xAI 专有 19.5:9/20:9）；nano-banana 系列 14 比例（含 1:4/4:1/1:8/8:1）；Seedream 系列 8 比例；z-image/FLUX 7 比例
+  - `0.5K` 档位全链路支持（`RESOLUTION_TIER_TO_PIXELS`、`isResolutionTier`、显示名）
+  - `calculateActualPixels` 支持 providerHint：PearAPI 按"长边 = 档位像素（0.5K/1K/2K/4K → 512/1024/2048/4096）"计算，固定档取 2K
+- **前端（`src/components/generation-panel.tsx`）**：`resolution` 参数发送语义修正 —— `both` 型发 resolution state；`resolution` 型（档位存于 quality state）显式映射回 `resolution` 字段，确保 PearAPI nano-banana 2/2-lite/2.1/pro 的档位选择真正下发
+- **测试**：新增 `src/__tests__/lib/pear-model-specs.test.ts`（20 项：档位/比例/默认档/像素换算/白名单/迁移/供应商隔离）；更新 `canvas-generation-group-pear-grok.test.ts`（比例断言改为官方 13 比例）与 `aspect-ratio-pixel-consistency.test.ts`（3:1/1:3 的 64 对齐固有偏差容差分层）
+
 ### v4.2.3
 
 **参考图组/融图组参考图识别一致性修复 — 消除 referenceImages/accessibleReferenceImages 索引错位**

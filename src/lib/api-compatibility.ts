@@ -223,12 +223,16 @@ export const PROFILE_OPENAI: ApiCompatProfile = {
  * - Uses aspect-ratio format (e.g., "16:9", "3:4") instead of pixel sizes
  * - Returns images directly (URL or base64)
  * - Uses /images/generations for both text-to-image and image editing
+ * - Official docs (https://pearapi.apifox.cn/api-525698885): size accepts ratio|pixels|auto,
+ *   resolution accepts 0.5k|1k|2k|4k, quality only for GPT series, n: 1-4.
+ *   Derived pixel hints (width/height/size_px) are NOT part of the contract.
  */
 export const PROFILE_PEARAPI: ApiCompatProfile = {
   id: 'pearapi',
   label: 'PearAPI 兼容 (JSON + /images/edits, 同步返回, 支持所有绘画模型 jimeng/gpt-image/grok等)',
   responseMode: 'direct',
   sizeFormat: 'aspect-ratio',
+  includeDerivedPixelHints: false,
   defaultEndpoint: '/v1/images/generations',
   editEndpoint: '/v1/images/edits',
   editEncoding: 'json-first',
@@ -1139,6 +1143,37 @@ const ASPECT_RATIO_TO_PIXELS: Record<string, string> = {
  * Ref: https://www.volcengine.com/docs/6492/2172373
  * Ref: https://docs.geekai.co/cn/docs/image/bytedance/doubao-seedream-5.0-lite
  */
+
+/** PearAPI nano-banana 系列官方比例（14 种）：https://pearapi.apifox.cn/api-525698885 */
+const PEAR_NANO_BANANA_RATIO_LIST = [
+  '1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3', '5:4', '4:5', '21:9', '1:4', '4:1', '1:8', '8:1',
+];
+
+/**
+ * 按 PearAPI 官方档位规则生成像素表：长边 = 档位像素（0.5k=512 / 1k=1024 / 2k=2048 / 4k=4096），
+ * 短边按比例取整。与官方"传比例时服务端自动换算"的输出尺寸一致。
+ */
+function buildPearPixelTiers(
+  ratios: string[],
+  tiers: string[],
+): Record<string, Record<string, string>> {
+  const tierPixels: Record<string, number> = { '0.5K': 512, '1K': 1024, '2K': 2048, '3K': 3072, '4K': 4096 };
+  const table: Record<string, Record<string, string>> = {};
+  for (const ratio of ratios) {
+    const [rw, rh] = ratio.split(':').map(Number);
+    if (!rw || !rh) continue;
+    table[ratio] = {};
+    for (const tier of tiers) {
+      const longSide = tierPixels[tier];
+      if (!longSide) continue;
+      const w = rw >= rh ? longSide : Math.round(longSide * rw / rh);
+      const h = rw >= rh ? Math.round(longSide * rh / rw) : longSide;
+      table[ratio][tier] = `${w}x${h}`;
+    }
+  }
+  return table;
+}
+
 const MODEL_SPECIFIC_PIXEL_SIZES: Record<string, Record<string, Record<string, string>>> = {
   // Seedream 5.0 Lite — 官方: size="2K"|"3K"
   // Ref: https://www.volcengine.com/docs/6492/2172373
@@ -1524,57 +1559,17 @@ const MODEL_SPECIFIC_PIXEL_SIZES: Record<string, Record<string, Record<string, s
     '2:3': { '1K': '832x1248', '2K': '1664x2496', '4K': '2730x4096' },
     '21:9': { '1K': '1512x648', '2K': '3024x1296', '4K': '4096x1756' },
   },
-  // ========== nano-banana 系列 (PearAPI) ==========
-  // nano-banana: 基础版 (Gemini 2.5 Flash Image)，仅 1K
-  'nano-banana': {
-    '1:1': { '1K': '1024x1024' },
-    '4:3': { '1K': '1024x768' },
-    '3:4': { '1K': '768x1024' },
-    '16:9': { '1K': '1024x576' },
-    '9:16': { '1K': '576x1024' },
-    '3:2': { '1K': '1024x683' },
-    '2:3': { '1K': '683x1024' },
-  },
-  // nano-banana-2: 进阶版 (Gemini 3.1 Flash Image)，支持 1K/2K
-  'nano-banana-2': {
-    '1:1': { '1K': '1024x1024', '2K': '2048x2048' },
-    '4:3': { '1K': '1024x768', '2K': '2048x1536' },
-    '3:4': { '1K': '768x1024', '2K': '1536x2048' },
-    '16:9': { '1K': '1024x576', '2K': '2048x1152' },
-    '9:16': { '1K': '576x1024', '2K': '1152x2048' },
-    '3:2': { '1K': '1024x683', '2K': '2048x1365' },
-    '2:3': { '1K': '683x1024', '2K': '1365x2048' },
-  },
-  // nano-banana-2-4k: 4K版，支持 1K/2K/4K
-  'nano-banana-2-4k': {
-    '1:1': { '1K': '1024x1024', '2K': '2048x2048', '4K': '4096x4096' },
-    '4:3': { '1K': '1024x768', '2K': '2048x1536', '4K': '4096x3072' },
-    '3:4': { '1K': '768x1024', '2K': '1536x2048', '4K': '3072x4096' },
-    '16:9': { '1K': '1024x576', '2K': '2048x1152', '4K': '4096x2304' },
-    '9:16': { '1K': '576x1024', '2K': '1152x2048', '4K': '2304x4096' },
-    '3:2': { '1K': '1024x683', '2K': '2048x1365', '4K': '4096x2730' },
-    '2:3': { '1K': '683x1024', '2K': '1365x2048', '4K': '2730x4096' },
-  },
-  // nano-banana-pro: 专业版 (Gemini 3 Pro Image)，支持 1K/2K
-  'nano-banana-pro': {
-    '1:1': { '1K': '1024x1024', '2K': '2048x2048' },
-    '4:3': { '1K': '1024x768', '2K': '2048x1536' },
-    '3:4': { '1K': '768x1024', '2K': '1536x2048' },
-    '16:9': { '1K': '1024x576', '2K': '2048x1152' },
-    '9:16': { '1K': '576x1024', '2K': '1152x2048' },
-    '3:2': { '1K': '1024x683', '2K': '2048x1365' },
-    '2:3': { '1K': '683x1024', '2K': '1365x2048' },
-  },
-  // nano-banana-pro-4k: 专业4K版，支持 1K/2K/4K
-  'nano-banana-pro-4k': {
-    '1:1': { '1K': '1024x1024', '2K': '2048x2048', '4K': '4096x4096' },
-    '4:3': { '1K': '1024x768', '2K': '2048x1536', '4K': '4096x3072' },
-    '3:4': { '1K': '768x1024', '2K': '1536x2048', '4K': '3072x4096' },
-    '16:9': { '1K': '1024x576', '2K': '2048x1152', '4K': '4096x2304' },
-    '9:16': { '1K': '576x1024', '2K': '1152x2048', '4K': '2304x4096' },
-    '3:2': { '1K': '1024x683', '2K': '2048x1365', '4K': '4096x2730' },
-    '2:3': { '1K': '683x1024', '2K': '1365x2048', '4K': '2730x4096' },
-  },
+  // ========== nano-banana 系列 (PearAPI 官方规格) ==========
+  // 官方规则：传比例时服务端自动换算像素；档位见各模型（0.5K/1K/2K/4K）。
+  // 比例集合 = 官方"常用比例"14 种；像素 = 长边档位 × 比例。
+  'nano-banana': buildPearPixelTiers(PEAR_NANO_BANANA_RATIO_LIST, ['1K']),
+  'nano-banana-2': buildPearPixelTiers(PEAR_NANO_BANANA_RATIO_LIST, ['0.5K', '1K', '2K', '4K']),
+  'nano-banana-2-lite': buildPearPixelTiers(PEAR_NANO_BANANA_RATIO_LIST, ['0.5K', '1K']),
+  'nano-banana-2.1': buildPearPixelTiers(PEAR_NANO_BANANA_RATIO_LIST, ['1K', '2K', '4K']),
+  'nano-banana-pro': buildPearPixelTiers(PEAR_NANO_BANANA_RATIO_LIST, ['1K', '2K', '4K']),
+  // 历史 -4k 后缀键（旧配置兼容，等价于全档位）
+  'nano-banana-2-4k': buildPearPixelTiers(PEAR_NANO_BANANA_RATIO_LIST, ['1K', '2K', '4K']),
+  'nano-banana-pro-4k': buildPearPixelTiers(PEAR_NANO_BANANA_RATIO_LIST, ['1K', '2K', '4K']),
 };
 
 /**
@@ -1970,30 +1965,63 @@ export function adjustRequestForProfile(
     }
   }
 
-  // ★ Pear 网关 Grok Imagine（生成图片）：官方文档仅暴露 aspect_ratio + n +
-  // negative_prompt + seed + image/images + response_format + task_type。
-  // 不暴露 resolution/quality，也不接受通用派生像素提示，故裁剪掉这些字段。
+  // ★ PearAPI 官方契约（https://pearapi.apifox.cn/api-525698885）白名单裁剪：
+  // 官方仅接受 model / prompt / size(比例|像素|auto) / aspect_ratio / resolution(0.5k|1k|2k|4k) /
+  // quality(仅 GPT 系列) / n(1-4) / response_format / task_type / image / images。
+  // width/height/size_px 派生像素提示不在契约内；seed/negative_prompt 不会透传给上游 —— 统一剥离。
+  // resolution 官方 enum 为小写，这里统一小写化，避免大写档位被上游忽略而静默走默认档。
   const dispatchModelId = typeof body.model === 'string' ? (body.model as string) : '';
-  if (profile.id === 'pearapi' && /grok-imagine/i.test(dispatchModelId)) {
-    const grokBody: Record<string, unknown> = {};
-    const grokAllowedFields = [
+  if (profile.id === 'pearapi') {
+    const pearBody: Record<string, unknown> = {};
+    const pearAllowedFields = [
       'model',
       'prompt',
-      'negative_prompt',
       'n',
       'size',
       'aspect_ratio',
+      'resolution',
+      'quality',
       'response_format',
       'task_type',
       'image',
       'images',
-      'seed',
     ] as const;
-    for (const field of grokAllowedFields) {
-      if (body[field] !== undefined) grokBody[field] = body[field];
+    for (const field of pearAllowedFields) {
+      if (body[field] !== undefined) pearBody[field] = body[field];
     }
-    // n 已由 pearapi 分支从 image_count 归一化；这里从 body 取最终值
-    return { body: grokBody, endpoint };
+    if (typeof pearBody.resolution === 'string') {
+      const lowered = pearBody.resolution.trim().toLowerCase();
+      if (['0.5k', '1k', '2k', '3k', '4k'].includes(lowered)) {
+        pearBody.resolution = lowered;
+      } else {
+        delete pearBody.resolution;
+      }
+    }
+    // quality 仅 GPT-Image 系列支持（官方文档明确标注），其它模型不发送；
+    // 但历史 UI 约定把"清晰度档位"存放在 quality 字段（画布生成组、resolution 型模型），
+    // 这里若 quality 是档位形态则迁移到 resolution，避免用户选择的档位被静默丢弃。
+    if (pearBody.quality !== undefined && !/gpt[-_]?image/i.test(dispatchModelId)) {
+      const qualityAsTier = typeof pearBody.quality === 'string' ? pearBody.quality.trim() : '';
+      if (pearBody.resolution === undefined && /^(0\.5k|1k|2k|4k)$/i.test(qualityAsTier)) {
+        pearBody.resolution = qualityAsTier.toLowerCase();
+      }
+      delete pearBody.quality;
+    }
+    // 官方"固定档"模型不接受 resolution（不传走渠道默认）：nano-banana 基础版 / Seedream 全系 /
+    // grok-imagine / wan2.7 / z-image / flux2-klein / boogu / firered。
+    // 注意 nano-banana-2 / -2-lite / -2.1 / -pro 支持档位，不能用前缀匹配。
+    const isPearFixedTierModel = /^nano-banana$/i.test(dispatchModelId)
+      || /^doubao-seedream/i.test(dispatchModelId)
+      || /^grok-imagine/i.test(dispatchModelId)
+      || /^wan2\.7/i.test(dispatchModelId)
+      || /^z-image/i.test(dispatchModelId)
+      || /^flux2-klein/i.test(dispatchModelId)
+      || /^boogu-image/i.test(dispatchModelId)
+      || /^firered-image/i.test(dispatchModelId);
+    if (isPearFixedTierModel) {
+      delete pearBody.resolution;
+    }
+    return { body: pearBody, endpoint };
   }
 
   return { body, endpoint };

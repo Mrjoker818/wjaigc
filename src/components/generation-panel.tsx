@@ -668,7 +668,14 @@ export function GenerationPanel(
             stylePreset,
             outputCount,
             quality,
-            resolution: getModelParamType(pureModelId, selectedProviderHint) === 'both' ? resolution : undefined, // GPT-Image系列分辨率档位
+            // 分辨率档位：'both'（GPT-Image 系列）发 resolution state；'resolution' 型（如 PearAPI nano-banana 2/2-lite/2.1/pro）
+            // 的档位在 UI 存于 quality state，这里显式映射回 resolution 参数，避免被后端"仅 GPT 保留 quality"的白名单丢弃
+            resolution: (() => {
+                const paramType = getModelParamType(pureModelId, selectedProviderHint);
+                if (paramType === 'both') return resolution;
+                if (paramType === 'resolution') return quality;
+                return undefined;
+            })(),
             model: pureModelId,
             providerId: compositeProviderId,
             referenceCategories: Object.fromEntries(

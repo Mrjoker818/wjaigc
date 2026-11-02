@@ -493,6 +493,113 @@ export const MODEL_QUALITIES: Record<string, string[]> = {
     'nano-banana-pro-4k': ['1K', '2K', '4K'],
 };
 
+// ===== PearAPI（api.pearapi.ai）官方图像模型规格 =====
+// 来源：https://pearapi.apifox.cn/api-525698885（生成图片 / 模型清单 / 参数说明 / 常用比例）
+// 与其它供应商隔离：同一模型名在不同网关的档位/比例可能不同（如 doubao-seedream-4-5
+// 在火山直连支持 2K/4K，在 PearAPI 固定 2K），因此这里只在 PearAPI 供应商下生效。
+
+/** 判断是否为 PearAPI 供应商（providerHint 由 providerId + providerName 拼成） */
+export function isPearProvider(providerHint = ''): boolean {
+    return /pear/i.test(providerHint);
+}
+
+/** PearAPI 单个图像模型的官方规格 */
+export interface PearImageModelSpec {
+    /** 清晰度档位（有序，首项 = 官方默认档）；undefined = 固定档模型（不显示档位控件） */
+    tiers?: string[];
+    /** quality 画质档（官方仅 GPT 系列支持） */
+    quality?: string[];
+    /** 可选画面比例（官方"常用比例"分组） */
+    aspectRatios: string[];
+}
+
+/** GPT 系列 / Grok / Boogu 常用比例（官方 13 种） */
+const PEAR_GPT_RATIOS = ['1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3', '5:4', '4:5', '2:1', '1:2', '21:9', '9:21'];
+/** nano-banana 系列常用比例（官方 14 种，含 1:4/4:1/1:8/8:1） */
+const PEAR_NANO_BANANA_RATIOS = ['1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3', '5:4', '4:5', '21:9', '1:4', '4:1', '1:8', '8:1'];
+/** Seedream 系列常用比例（官方 8 种） */
+const PEAR_SEEDREAM_RATIOS = ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3', '21:9'];
+/** z-image / FLUX 系列常用比例（官方 7 种） */
+const PEAR_FLUX_RATIOS = ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3'];
+
+export const PEAR_IMAGE_MODEL_SPECS: Record<string, PearImageModelSpec> = {
+    // ---- OpenAI GPT-Image 系列 ----
+    // gpt-image-2：1K/2K/4K（默认 2K），quality low/medium/high/auto
+    'gpt-image-2': {
+        tiers: ['2K', '1K', '4K'],
+        quality: ['auto', 'low', 'medium', 'high'],
+        aspectRatios: PEAR_GPT_RATIOS,
+    },
+    // gpt-image-2.5：1K/2K/4K（默认 1K），quality 额外支持 xhigh/max
+    'gpt-image-2.5': {
+        tiers: ['1K', '2K', '4K'],
+        quality: ['auto', 'low', 'medium', 'high', 'xhigh', 'max'],
+        aspectRatios: PEAR_GPT_RATIOS,
+    },
+    // ---- Google nano-banana 系列 ----
+    // nano-banana（Gemini 2.5 Flash Image）：固定档
+    'nano-banana': { aspectRatios: PEAR_NANO_BANANA_RATIOS },
+    // nano-banana-2（Gemini 3.1 Flash Image）：0.5K/1K/2K/4K（默认 2K）
+    'nano-banana-2': { tiers: ['2K', '0.5K', '1K', '4K'], aspectRatios: PEAR_NANO_BANANA_RATIOS },
+    // nano-banana-2-lite：0.5K/1K（不传走渠道默认）
+    'nano-banana-2-lite': { tiers: ['0.5K', '1K'], aspectRatios: PEAR_NANO_BANANA_RATIOS },
+    // nano-banana-2.1：1K/2K/4K（默认 2K）
+    'nano-banana-2.1': { tiers: ['2K', '1K', '4K'], aspectRatios: PEAR_NANO_BANANA_RATIOS },
+    // nano-banana-pro（Gemini 3 Pro Image）：1K/2K/4K（默认 1K）
+    'nano-banana-pro': { tiers: ['1K', '2K', '4K'], aspectRatios: PEAR_NANO_BANANA_RATIOS },
+    // ---- 字节 Seedream 系列（PearAPI 固定 2K）----
+    'doubao-seedream-4-0-250828': { aspectRatios: PEAR_SEEDREAM_RATIOS },
+    'doubao-seedream-4-0': { aspectRatios: PEAR_SEEDREAM_RATIOS },
+    'doubao-seedream-4': { aspectRatios: PEAR_SEEDREAM_RATIOS },
+    'doubao-seedream-4-5-251128': { aspectRatios: PEAR_SEEDREAM_RATIOS },
+    'doubao-seedream-4-5': { aspectRatios: PEAR_SEEDREAM_RATIOS },
+    'doubao-seedream-5-0-260128': { aspectRatios: PEAR_SEEDREAM_RATIOS },
+    'doubao-seedream-5-0-pro-260628': { aspectRatios: PEAR_SEEDREAM_RATIOS },
+    'doubao-seedream-5-0-lite': { aspectRatios: PEAR_SEEDREAM_RATIOS },
+    'doubao-seedream-5-0': { aspectRatios: PEAR_SEEDREAM_RATIOS },
+    'doubao-seedream-5.0': { aspectRatios: PEAR_SEEDREAM_RATIOS },
+    'doubao-seedream-5-0-pro': { aspectRatios: PEAR_SEEDREAM_RATIOS },
+    // ---- 其它（固定档）----
+    'grok-imagine-image-2.0': { aspectRatios: PEAR_GPT_RATIOS },
+    'grok-imagine': { aspectRatios: PEAR_GPT_RATIOS },
+    'wan2.7-image': { aspectRatios: PEAR_SEEDREAM_RATIOS },
+    'wan2.7': { aspectRatios: PEAR_SEEDREAM_RATIOS },
+    'z-image': { aspectRatios: PEAR_FLUX_RATIOS },
+    'flux2-klein-9b': { aspectRatios: PEAR_FLUX_RATIOS },
+    'boogu-image-0.1': { aspectRatios: PEAR_GPT_RATIOS },
+    'firered-image-edit1.1': { aspectRatios: PEAR_GPT_RATIOS },
+};
+
+/** 查找 PearAPI 模型官方规格（精确 → 最长包含匹配），未收录返回 undefined */
+export function findPearModelSpec(modelId: string): PearImageModelSpec | undefined {
+    const lowerId = (modelId || '').toLowerCase().trim();
+    if (!lowerId) return undefined;
+    if (PEAR_IMAGE_MODEL_SPECS[lowerId]) return PEAR_IMAGE_MODEL_SPECS[lowerId];
+    // 最长键匹配：如 gpt-image-2-4k → gpt-image-2；doubao-seedream-5.0（别名）→ doubao-seedream-5.0
+    let bestKey = '';
+    for (const key of Object.keys(PEAR_IMAGE_MODEL_SPECS)) {
+        if (lowerId === key || lowerId.startsWith(key) || key.startsWith(lowerId)) {
+            if (key.length > bestKey.length) bestKey = key;
+        }
+    }
+    return bestKey ? PEAR_IMAGE_MODEL_SPECS[bestKey] : undefined;
+}
+
+/** PearAPI 档位 → 官方 resolution 参数值（官方 enum 为小写：0.5k/1k/2k/4k） */
+export function toPearResolutionParam(tier: string): string | undefined {
+    const normalized = (tier || '').trim().toLowerCase();
+    if (['0.5k', '1k', '2k', '4k'].includes(normalized)) return normalized;
+    return undefined;
+}
+
+/** 从模型名后缀提取清晰度档位（PearAPI 官方认可的写法，如 gpt-image-2-4k → 4K） */
+function detectResolutionSuffixTier(modelId: string): string | null {
+    const match = /(?:^|[-_])(0\.5k|1k|2k|3k|4k)(?:[-_]|$)/i.exec(modelId || '');
+    if (!match) return null;
+    const tier = match[1].toUpperCase();
+    return isResolutionTier(tier) ? tier : null;
+}
+
 // ===== 方案A：参数类型分离 =====
 // 将 MODEL_QUALITIES 中的参数按类型拆分，避免概念混淆
 
@@ -535,6 +642,7 @@ export const QUALITY_LEVEL_MODELS = [
 
 /** 分辨率档位到显示名称的映射 */
 export const RESOLUTION_TIER_DISPLAY_NAMES: Record<string, string> = {
+    '0.5K': '0.5K',
     '1K': '1K',
     '2K': '2K',
     '3K': '3K',
@@ -547,6 +655,8 @@ export const QUALITY_LEVEL_DISPLAY_NAMES: Record<string, string> = {
     'low': '低质量',
     'medium': '中等质量',
     'high': '高质量',
+    'xhigh': '极高',
+    'max': '最高',
     'standard': '标准',
     'hd': '高清增强',
     'quality': '高质量',
@@ -569,8 +679,10 @@ export const QUALITY_DISPLAY_NAMES: Record<string, string> = {
     '4K': '4K',
 };
 
-/** 分辨率档位对应的像素长边（用于尺寸计算） */
+/** 分辨率档位对应的像素长边（用于尺寸计算）
+ *  0.5K 为 PearAPI 官方高档位体系（api.pearapi.ai，0.5k/1k/2k/4k） */
 export const RESOLUTION_TIER_TO_PIXELS: Record<string, number> = {
+    '0.5K': 512,
     '1K': 1024,
     '2K': 2048,
     '3K': 3072,
@@ -761,12 +873,48 @@ export function inferModelParamCapability(modelId: string, providerHint = ''): {
         return { type: 'quality', options: ['auto', 'low', 'medium', 'high'], defaultOption: 'auto' };
     }
 
-    // Grok Imagine (xAI)：APIMart 文档暴露 aspect_ratio + resolution(1k/2k) + quality(low|medium)，
-    // 每次一张；Pear 网关按官方文档仅暴露 aspect_ratio 比例，不暴露 resolution/quality
-    if (id.includes('grok-imagine')) {
-        if (/pear/i.test(providerHint)) {
+    // PearAPI（api.pearapi.ai）：严格按官方图像模型清单提供档位与画质选项。
+    // 官方契约：resolution = 0.5k/1k/2k/4k（依模型，可写在模型名后缀）；quality 仅 GPT 系列；
+    // 固定档模型（nano-banana / Seedream 全系 / grok / wan2.7 / z-image / flux2-klein / boogu / firered）不暴露档位。
+    if (isPearProvider(providerHint)) {
+        const spec = findPearModelSpec(modelId);
+        if (spec) {
+            // 官方认可的"清晰度写在模型名后缀"写法（如 gpt-image-2-4k）优先作为默认档
+            const suffixTier = detectResolutionSuffixTier(modelId);
+            const tiers = spec.tiers ? [...spec.tiers] : [];
+            if (suffixTier && (tiers.length > 0 || spec.quality)) {
+                const ordered = [suffixTier, ...tiers.filter(t => t !== suffixTier)];
+                const options = spec.quality ? [...ordered, ...spec.quality] : ordered;
+                return { type: spec.quality ? 'both' : 'resolution', options, defaultOption: suffixTier };
+            }
+            if (tiers.length > 0) {
+                const options = spec.quality ? [...tiers, ...spec.quality] : tiers;
+                return { type: spec.quality ? 'both' : 'resolution', options, defaultOption: tiers[0] };
+            }
+            if (spec.quality && spec.quality.length > 0) {
+                return { type: 'quality', options: [...spec.quality], defaultOption: spec.quality[0] };
+            }
+            // 固定档模型：不暴露档位控件（官方"固定档 / 固定 2K"）
             return { type: 'none', options: [], defaultOption: '' };
         }
+        // 未收录的 PearAPI 模型：GPT 系列按官方契约兜底，其余不猜测档位
+        if (/gpt[-_]?image/i.test(id)) {
+            const isV25 = /2\.5/.test(id);
+            const quality = isV25
+                ? ['auto', 'low', 'medium', 'high', 'xhigh', 'max']
+                : ['auto', 'low', 'medium', 'high'];
+            return {
+                type: 'both',
+                options: ['2K', '1K', '4K', ...quality],
+                defaultOption: isV25 ? '1K' : '2K',
+            };
+        }
+        return { type: 'none', options: [], defaultOption: '' };
+    }
+
+    // Grok Imagine (xAI)：APIMart 文档暴露 aspect_ratio + resolution(1k/2k) + quality(low|medium)，
+    // 每次一张（PearAPI 场景已在上方按官方固定档处理）
+    if (id.includes('grok-imagine')) {
         return { type: 'both', options: ['1K', '2K', 'low', 'medium'], defaultOption: '2K' };
     }
 
@@ -911,9 +1059,9 @@ export function getDefaultParamValue(modelId: string, providerHint = ''): string
     return inferModelParamCapability(modelId, providerHint).defaultOption;
 }
 
-/** 判断值是否是分辨率档位 */
+/** 判断值是否是分辨率档位（0.5K 为 PearAPI 官方高档位） */
 export function isResolutionTier(value: string): boolean {
-    return ['1K', '2K', '3K', '4K'].includes(value);
+    return ['0.5K', '1K', '2K', '3K', '4K'].includes(value);
 }
 
 /** 判断值是否是质量级别 */
@@ -1211,16 +1359,25 @@ export function findModelConfig<T>(map: Record<string, T>, modelId: string): T |
 /** Provider-specific UI rules keep documented parameters selectable and visible. */
 export function getProviderAspectRatios(modelId: string, providerHint = ''): string[] {
     if (is302GptImage(modelId, providerHint)) return ['auto', '1:1', '3:2', '2:3'];
+    // PearAPI：严格按官方"常用比例"分组给出可选比例（不同模型系列比例集合不同）
+    if (isPearProvider(providerHint)) {
+        const spec = findPearModelSpec(modelId);
+        if (spec) return [...spec.aspectRatios];
+        return DEFAULT_ASPECT_RATIOS;
+    }
     const ratios = findModelConfig(MODEL_ASPECT_RATIOS, modelId) || DEFAULT_ASPECT_RATIOS;
     return /4sapi/i.test(providerHint) ? ratios.filter(ratio => ratio !== 'auto') : ratios;
 }
 
-/** 4SAPI maps the UI resolution tier to pixels; other providers use quality previews. */
+/** 像素预览使用的档位值：
+ *  - 4SAPI / PearAPI 用 resolution 档位（官方 resolution 参数决定输出像素）
+ *  - 其它供应商用 quality 预览 */
 export function getProviderPixelSizingOption(
     providerHint: string,
     quality: string,
     resolution: string,
 ): string {
+    if (isPearProvider(providerHint)) return resolution || quality;
     return /4sapi/i.test(providerHint) ? resolution || quality : quality;
 }
 
@@ -1285,12 +1442,30 @@ export function createGroupRefImage(
 }
 
 /** 根据宽高比和模型尺寸配置计算实际像素尺寸
- *  委托给 api-compatibility.ts 的 getModelSpecificPixelSize 确保前后端一致 */
+ *  委托给 api-compatibility.ts 的 getModelSpecificPixelSize 确保前后端一致
+ *  PearAPI 场景按官方 resolution 档位（0.5k/1k/2k/4k）换算，长边 = 档位像素 */
 export function calculateActualPixels(
   aspectRatio: string,
   quality: string = 'standard',
-  modelId?: string
+  modelId?: string,
+  providerHint = ''
 ): string {
+  if (isPearProvider(providerHint)) {
+    const tierKey = (quality || '').toUpperCase();
+    const longSide = RESOLUTION_TIER_TO_PIXELS[tierKey] || RESOLUTION_TIER_TO_PIXELS['2K'];
+    const ratioMatch = /^(\d+(?:\.\d+)?):(\d+(?:\.\d+)?)$/.exec(aspectRatio || '');
+    if (ratioMatch) {
+      const rw = parseFloat(ratioMatch[1]);
+      const rh = parseFloat(ratioMatch[2]);
+      if (rw > 0 && rh > 0) {
+        const w = rw >= rh ? longSide : Math.round(longSide * rw / rh);
+        const h = rw >= rh ? Math.round(longSide * rh / rw) : longSide;
+        return `${w}x${h}`;
+      }
+    }
+    return `${longSide}x${longSide}`;
+  }
+
   // 委托给规范数据源，确保前端显示与后端请求一致
   // 使用后端规范表（api-compatibility.ts）查模型精确像素
   if (modelId) {

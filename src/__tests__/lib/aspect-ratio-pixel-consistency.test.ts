@@ -42,7 +42,11 @@ function assertRatioConsistent(pixelSize: string, ratio: string): void {
   const actual = w / h;
   const expected = RATIO_VALUE[ratio];
   // 3% 容差：覆盖 64 像素对齐取整（如动态计算 9:21 → 896x2048，偏差 ~2.1%）
-  expect(Math.abs(actual - expected) / expected).toBeLessThan(0.03);
+  // 3:1 / 1:3 放宽到 3.5%：动态计算固定长边 2048、短边按 64 对齐取整，
+  // 2048/3 = 682.67 → 最近 64 倍数为 704，固有偏差 3.03%/3.13%（非比例漂移；pear 官方比例清单已不含这两个比例）
+  const [, dw, dh] = ratio.match(/^(\d+):(\d+)$/) ?? [];
+  const extreme = (Number(dw) >= 3 && Number(dh) === 1) || (Number(dw) === 1 && Number(dh) >= 3);
+  expect(Math.abs(actual - expected) / expected).toBeLessThan(extreme ? 0.035 : 0.03);
 }
 
 describe('aspect-ratio → pixel-size consistency', () => {
@@ -88,17 +92,20 @@ describe('aspect-ratio → pixel-size consistency', () => {
 describe('adjustRequestForProfile keeps size ratio and pixel hints consistent', () => {
   // 复现生产故障：PearAPI + gpt-image-2.5-2k + 3:4@2K
   // 修复前：width/height 被重算为 1024x1536（2:3），与 size '3:4' 自相矛盾
-  it('pearapi gpt-image-2.5-2k 3:4@2K derives ratio-consistent pixel hints', () => {
+  // 现行契约（https://pearapi.apifox.cn/api-525698885）：size/aspect_ratio/resolution 才决定输出，
+  // width/height/size_px 不在官方契约内，PearAPI profile 已设为 includeDerivedPixelHints=false。
+  it('pearapi gpt-image-2.5-2k 3:4@2K keeps ratio size and strips derived pixel hints', () => {
     const { body } = adjustRequestForProfile(
       { model: 'gpt-image-2.5-2k', prompt: 'test', n: 1, size: '3:4', resolution: '2K', quality: 'auto' },
       PROFILE_PEARAPI,
       { hasReferenceImages: true },
     );
+    // 官方契约：传比例时服务端自动换算像素，客户端不再附带派生像素提示
     expect(body.size).toBe('3:4');
-    expect(body.width).toBe(2048);
-    expect(body.height).toBe(2731);
-    expect(body.size_px).toBe('2048x2731');
-    assertRatioConsistent(`${body.width}x${body.height}`, '3:4');
+    expect(body.resolution).toBe('2k');
+    expect(body.width).toBeUndefined();
+    expect(body.height).toBeUndefined();
+    expect(body.size_px).toBeUndefined();
   });
 
   it('apimart keeps aspect size only and strips derived pixel hints per its contract', () => {
@@ -114,15 +121,16 @@ describe('adjustRequestForProfile keeps size ratio and pixel hints consistent', 
     expect(body.size_px).toBeUndefined();
   });
 
-  it('nano-banana-2-4k 1:1@4K promotes the pixel hint from the 1K intermediate to 4K', () => {
+  it('nano-banana-2-4k 1:1@4K sends official lowercase resolution without pixel hints', () => {
     const { body } = adjustRequestForProfile(
       { model: 'nano-banana-2-4k', prompt: 'test', n: 1, size: '1:1', resolution: '4K', quality: 'auto' },
       PROFILE_PEARAPI,
       { hasReferenceImages: true },
     );
     expect(body.size).toBe('1:1');
-    expect(body.width).toBe(4096);
-    expect(body.height).toBe(4096);
+    expect(body.resolution).toBe('4k');
+    expect(body.width).toBeUndefined();
+    expect(body.height).toBeUndefined();
   });
 
   it('ratio-consistency invariant holds for all ratios on aspect-ratio profiles at every tier', () => {

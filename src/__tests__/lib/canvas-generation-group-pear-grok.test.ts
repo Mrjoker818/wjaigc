@@ -30,11 +30,10 @@ describe('pear grok-imagine-image-2-2k capability', () => {
     expect(getResolutionTierOptions('grok-imagine-image-2-2k', APIMART_HINT)).toEqual(['1K', '2K']);
   });
   it('surfaces the documented 13 aspect ratios', () => {
+    // PearAPI 官方文档（api-525698885）：GPT / Grok / Boogu 系列统一 13 比例
+    // （含 5:4、4:5、21:9、9:21；不含 xAI 专有的 19.5:9 / 20:9，这些在 PearAPI 网关不支持）
     const ratios = getProviderAspectRatios('grok-imagine-image-2-2k', PEAR_FRONTEND) as string[];
-    for (const r of ['1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3', '2:1', '1:2', '19.5:9', '9:19.5', '20:9', '9:20']) {
-      expect(ratios).toContain(r);
-    }
-    expect(ratios.length).toBeGreaterThanOrEqual(13);
+    expect(ratios).toEqual(['1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3', '5:4', '4:5', '2:1', '1:2', '21:9', '9:21']);
   });
 });
 
