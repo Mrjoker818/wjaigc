@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   adjustRequestForProfile,
   getModelSpecificPixelSize,
+  PROFILE_APIMART,
   PROFILE_PEARAPI,
 } from '@/lib/api-compatibility';
 import {
@@ -53,6 +54,27 @@ describe('PearAPI 供应商识别与模型规格', () => {
   it('official model-name suffix form (gpt-image-2-4k) wins as default tier', () => {
     const cap = inferModelParamCapability('gpt-image-2-4k', PEAR);
     expect(cap.defaultOption).toBe('4K');
+  });
+
+  it('gpt-image-2.5 channel variants (sunburst/flare) inherit the 2.5 spec', () => {
+    for (const id of ['gpt-image-2.5-sunburst', 'gpt-image-2.5-flare']) {
+      const cap = inferModelParamCapability(id, PEAR);
+      expect(cap.type, id).toBe('both');
+      expect(cap.defaultOption, id).toBe('1K');
+      expect(cap.options, id).toEqual(expect.arrayContaining(['1K', '2K', '4K', 'xhigh', 'max']));
+      expect(getProviderAspectRatios(id, PEAR), id).toHaveLength(13);
+      const { body } = adjustRequestForProfile(
+        { model: id, prompt: 'p', size: '3:4', resolution: '2K', quality: 'xhigh', negative_prompt: 'blur', seed: 1 } as unknown as Record<string, unknown>,
+        PROFILE_PEARAPI,
+      );
+      expect(body.resolution, id).toBe('2k');
+      expect(body.quality, id).toBe('xhigh');
+      expect(body.negative_prompt, id).toBeUndefined();
+      expect(body.seed, id).toBeUndefined();
+      // 非 PearAPI 供应商行为不受影响
+      const apimart = adjustRequestForProfile({ model: id, prompt: 'p', size: '16:9', resolution: '2K', quality: 'high' } as unknown as Record<string, unknown>, PROFILE_APIMART);
+      expect(apimart.body.resolution, id).toBe('2K');
+    }
   });
 
   it('nano-banana family tiers follow official docs', () => {
