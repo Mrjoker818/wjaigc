@@ -182,7 +182,8 @@ describe('provider request contracts', () => {
       quality: 'high',
     }, PROFILE_APIMART);
 
-    expect(body).toMatchObject({ size: '16:9', resolution: '2K', quality: 'high' });
+    expect(body).toMatchObject({ size: '16:9', resolution: '2k' });
+    expect(body).not.toHaveProperty('quality');
     expect(body).not.toHaveProperty('width');
     expect(body).not.toHaveProperty('height');
     expect(body).not.toHaveProperty('size_px');

@@ -585,6 +585,107 @@ export function findPearModelSpec(modelId: string): PearImageModelSpec | undefin
     return bestKey ? PEAR_IMAGE_MODEL_SPECS[bestKey] : undefined;
 }
 
+// ===== APIMart（docs.apimart.ai）官方图像模型规格 =====
+// 与其它供应商隔离：同一模型名在 APIMart 的比例、档位和质量集合不同。
+// 已核对：
+// - https://docs.apimart.ai/cn/api-reference/images/gpt-image-2/generation
+// - https://docs.apimart.ai/en/api-reference/images/gpt-image-2/official
+// - https://docs.apimart.ai/en/api-reference/images/gpt-image-1/generation
+// - https://docs.apimart.ai/en/api-reference/images/gpt-4o/generation
+// - https://docs.apimart.ai/cn/api-reference/images/wan2.7-image/generation
+
+/** 判断是否为 APIMart / APIB 供应商（providerHint 由 providerId + providerName 拼成） */
+export function isApimartProvider(providerHint: unknown = ''): boolean {
+    const hint = typeof providerHint === 'string'
+        ? providerHint
+        : JSON.stringify(providerHint ?? '');
+    return /apimart|apib/i.test(hint);
+}
+
+export interface ApimartImageModelSpec {
+    /** 清晰度档位（有序，首项 = 官方默认档）；undefined = 不暴露档位 */
+    tiers?: string[];
+    /** quality 画质档；undefined = 官方未暴露该字段 */
+    quality?: string[];
+    /** 官方可选画面比例 */
+    aspectRatios: string[];
+    /** resolution 官方大小写：GPT 系列小写，万相大写 */
+    resolutionCase?: 'lower' | 'upper';
+    /** 非组图模式的 n 上限 */
+    maxImages?: number;
+}
+
+const APIMART_GPT2_RATIOS = ['auto', '1:1', '3:2', '2:3', '4:3', '3:4', '5:4', '4:5', '16:9', '9:16', '2:1', '1:2', '3:1', '1:3', '21:9', '9:21'];
+const APIMART_GPT1_RATIOS = ['1:1', '3:2', '2:3'];
+const APIMART_GPT4O_RATIOS = ['1:1', '2:3', '3:2'];
+const APIMART_WAN_RATIOS = ['1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3'];
+const APIMART_GROK_RATIOS = ['1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3', '2:1', '1:2', '19.5:9', '9:19.5', '20:9', '9:20'];
+
+export const APIMART_IMAGE_MODEL_SPECS: Record<string, ApimartImageModelSpec> = {
+    // 渠道版只暴露 resolution，中文文档未列出 quality。
+    'gpt-image-2': {
+        tiers: ['1K', '2K', '4K'],
+        aspectRatios: APIMART_GPT2_RATIOS,
+        resolutionCase: 'lower',
+        maxImages: 1,
+    },
+    // 官方渠道同时暴露 resolution 与 quality，n 为 1-4。
+    'gpt-image-2-official': {
+        tiers: ['1K', '2K', '4K'],
+        quality: ['auto', 'low', 'medium', 'high'],
+        aspectRatios: APIMART_GPT2_RATIOS,
+        resolutionCase: 'lower',
+        maxImages: 4,
+    },
+    'gpt-image-1-official': {
+        quality: ['auto', 'low', 'medium', 'high'],
+        aspectRatios: APIMART_GPT1_RATIOS,
+        maxImages: 4,
+    },
+    'gpt-image-1.5-official': {
+        quality: ['auto', 'low', 'medium', 'high'],
+        aspectRatios: APIMART_GPT1_RATIOS,
+        maxImages: 4,
+    },
+    'gpt-4o-image': {
+        aspectRatios: APIMART_GPT4O_RATIOS,
+        maxImages: 4,
+    },
+    'wan2.7-image-pro': {
+        tiers: ['2K', '1K', '4K'],
+        aspectRatios: APIMART_WAN_RATIOS,
+        resolutionCase: 'upper',
+        maxImages: 4,
+    },
+    'wan2.7-image': {
+        tiers: ['2K', '1K'],
+        aspectRatios: APIMART_WAN_RATIOS,
+        resolutionCase: 'upper',
+        maxImages: 4,
+    },
+    'grok-imagine': {
+        tiers: ['1K', '2K'],
+        quality: ['low', 'medium'],
+        aspectRatios: APIMART_GROK_RATIOS,
+        resolutionCase: 'lower',
+        maxImages: 1,
+    },
+};
+
+/** 查找 APIMart 模型官方规格（精确 → 最长前缀），未收录返回 undefined */
+export function findApimartModelSpec(modelId: string): ApimartImageModelSpec | undefined {
+    const lowerId = (modelId || '').toLowerCase().trim();
+    if (!lowerId) return undefined;
+    if (APIMART_IMAGE_MODEL_SPECS[lowerId]) return APIMART_IMAGE_MODEL_SPECS[lowerId];
+    let bestKey = '';
+    for (const key of Object.keys(APIMART_IMAGE_MODEL_SPECS)) {
+        if (lowerId === key || lowerId.startsWith(`${key}-`) || lowerId.startsWith(`${key}_`)) {
+            if (key.length > bestKey.length) bestKey = key;
+        }
+    }
+    return bestKey ? APIMART_IMAGE_MODEL_SPECS[bestKey] : undefined;
+}
+
 /** PearAPI 档位 → 官方 resolution 参数值（官方 enum 为小写：0.5k/1k/2k/4k） */
 export function toPearResolutionParam(tier: string): string | undefined {
     const normalized = (tier || '').trim().toLowerCase();
@@ -910,6 +1011,22 @@ export function inferModelParamCapability(modelId: string, providerHint = ''): {
             };
         }
         return { type: 'none', options: [], defaultOption: '' };
+    }
+
+    // APIMart（docs.apimart.ai）：只对已核对的模型套官方规格，未收录模型保持原有通用推断。
+    if (isApimartProvider(providerHint)) {
+        const spec = findApimartModelSpec(modelId);
+        if (spec) {
+            const tiers = spec.tiers ? [...spec.tiers] : [];
+            if (tiers.length > 0) {
+                const options = spec.quality ? [...tiers, ...spec.quality] : tiers;
+                return { type: spec.quality ? 'both' : 'resolution', options, defaultOption: tiers[0] };
+            }
+            if (spec.quality && spec.quality.length > 0) {
+                return { type: 'quality', options: [...spec.quality], defaultOption: spec.quality[0] };
+            }
+            return { type: 'none', options: [], defaultOption: '' };
+        }
     }
 
     // Grok Imagine (xAI)：APIMart 文档暴露 aspect_ratio + resolution(1k/2k) + quality(low|medium)，
@@ -1364,6 +1481,10 @@ export function getProviderAspectRatios(modelId: string, providerHint = ''): str
         const spec = findPearModelSpec(modelId);
         if (spec) return [...spec.aspectRatios];
         return DEFAULT_ASPECT_RATIOS;
+    }
+    if (isApimartProvider(providerHint)) {
+        const spec = findApimartModelSpec(modelId);
+        if (spec) return [...spec.aspectRatios];
     }
     const ratios = findModelConfig(MODEL_ASPECT_RATIOS, modelId) || DEFAULT_ASPECT_RATIOS;
     return /4sapi/i.test(providerHint) ? ratios.filter(ratio => ratio !== 'auto') : ratios;

@@ -18,8 +18,7 @@
  *   const profile = resolveCompatProfile(provider);
  *   const adjusted = adjustRequestForProfile(rawRequest, profile, { hasImage: true });
  *   const result   = parseResponseForProfile(apiResponse, profile);
- */
-
+ */import { findApimartModelSpec } from './canvas-generation-group';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -1962,6 +1961,23 @@ export function adjustRequestForProfile(
     if (body.image_count !== undefined) {
       body.n = body.image_count;
       delete body.image_count;
+    }
+    // APIMart 官方契约（docs.apimart.ai）：按模型决定 resolution 大小写、quality 是否发送、n 上限。
+    // 未收录模型保持原透传，避免把未核实的模型参数裁掉。
+    const spec = findApimartModelSpec(typeof body.model === 'string' ? body.model : '');
+    if (spec) {
+      const resolution = String(body.resolution || '').toUpperCase();
+      if ((resolution === '1K' || resolution === '2K' || resolution === '4K')
+        && (!spec.tiers || spec.tiers.includes(resolution))) {
+        body.resolution = spec.resolutionCase === 'upper' ? resolution : resolution.toLowerCase();
+      } else {
+        delete body.resolution;
+      }
+      if (!spec.quality) delete body.quality;
+      const imageCount = Number(body.n);
+      if (spec.maxImages && Number.isFinite(imageCount) && imageCount > spec.maxImages) {
+        body.n = spec.maxImages;
+      }
     }
   }
 
