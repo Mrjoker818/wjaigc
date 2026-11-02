@@ -32,6 +32,8 @@ export interface SimpleChatTask {
   updatedAt: number;
 }
 
+import type { WorkPlan } from '@/lib/chatgpt-work-mode';
+
 export interface SimpleChatMessage {
   id: string;
   role: 'user' | 'assistant' | 'system' | 'search';
@@ -39,6 +41,7 @@ export interface SimpleChatMessage {
   images?: string[];
   attachments?: ChatAttachment[];
   artifacts?: ChatArtifact[];
+  workPlan?: WorkPlan;
   model?: string;
   providerId?: string;
   parentMessageId?: string;

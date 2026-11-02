@@ -6,6 +6,7 @@ import { SearchClient, Config, HeaderUtils } from 'coze-coding-dev-sdk';
 import { fetchWithV1Retry, API_TIMEOUTS } from '@/lib/api-helpers';
 import { resolveChatControls } from '@/lib/chat-generation-controls';
 import { getInternalRequestHeaders } from '@/lib/api-auth';
+import { buildWorkModeInstructions, buildWorkPlan, normalizeWorkMode } from '@/lib/chatgpt-work-mode';
 
 const DEFAULT_SYSTEM_PROMPT = `你是无界AI的智能助手。你可以：
 1. 回答用户的各种问题
@@ -25,6 +26,13 @@ interface KnowledgeItem {
 type ChatContentPart =
   | { type: 'text'; text: string }
   | { type: 'image_url'; image_url: { url: string; detail: 'auto' } };
+
+function latestSimpleChatGoal(items: Array<{ role?: string; content?: string }>): string {
+  for (let index = items.length - 1; index >= 0; index -= 1) {
+    if (items[index]?.role === 'user' && items[index]?.content?.trim()) return items[index]?.content?.trim() || '';
+  }
+  return '';
+}
 
 function errorMessage(error: unknown, fallback: string): string {
   return error instanceof Error && error.message ? error.message : fallback;
@@ -47,6 +55,7 @@ export async function POST(request: NextRequest) {
     i2iStrength?: number;
     reasoningEffort?: string;
     responseSpeed?: string;
+    workMode?: 'chat' | 'work';
   };
   const messages = body.messages || [];
   const model = body.model || 'deepseek-v4-flash';
@@ -57,6 +66,8 @@ export async function POST(request: NextRequest) {
   const imageProviderId = body.imageProviderId || providerId;
   const memories = body.memories || [];
   const deepAnalysis = body.deepAnalysis || false;
+  const workMode = normalizeWorkMode(body.workMode);
+  const workPlan = workMode === 'work' ? buildWorkPlan(latestSimpleChatGoal(messages)) : null;
   const i2iStrength = body.i2iStrength || 0.7;
 
   const user = await getSessionUser(request);
@@ -92,6 +103,7 @@ export async function POST(request: NextRequest) {
 
   // 构建增强的 system prompt（指令 + 知识库 + 联网搜索结果）
   let enhancedSystemPrompt = DEFAULT_SYSTEM_PROMPT;
+  if (workPlan) enhancedSystemPrompt += `\n\n${buildWorkModeInstructions(workPlan)}`;
 
   // 用户记忆注入
   if (memories.length > 0) {
@@ -213,6 +225,7 @@ export async function POST(request: NextRequest) {
           notices: chatControls.notices,
           support: chatControls.support,
         });
+        if (workPlan) send({ type: 'work_plan', workPlan });
 
         // 先发送搜索结果（如果有联网搜索）
         if (webSearch) {

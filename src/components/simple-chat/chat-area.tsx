@@ -139,6 +139,7 @@ export default function ChatArea({
   const [isStreaming, setIsStreaming] = useState(false);
   const [uploadedImages, setUploadedImages] = useState<ChatAttachment[]>([]);
   const [webSearch, setWebSearch] = useState(false);
+  const [workModeEnabled, setWorkModeEnabled] = useState(false);
   const [showAgentPanel, setShowAgentPanel] = useState(false);
   const [showSkillPanel, setShowSkillPanel] = useState(false);
   const [showInstructionsPanel, setShowInstructionsPanel] = useState(false);
@@ -689,6 +690,7 @@ export default function ChatArea({
           deepAnalysis: isDeepAnalysis,
           reasoningEffort,
           responseSpeed,
+          workMode: workModeEnabled ? 'work' : 'chat',
         }),
       });
 
@@ -712,6 +714,9 @@ export default function ChatArea({
             if (data === '[DONE]' || data === '') continue;
             try {
               const parsed = JSON.parse(data);
+              if (parsed.type === 'work_plan' && parsed.workPlan) {
+                setMessages(prev => prev.map(item => item.id === aiMsg.id ? { ...item, workPlan: parsed.workPlan } : item));
+              }
               if (parsed.type === 'generation_controls') {
                 const notices = Array.isArray(parsed.notices) ? parsed.notices.filter((notice: unknown): notice is string => typeof notice === 'string') : [];
                 const appliedControls: SimpleChatTask['appliedChatControls'] = {
@@ -1388,7 +1393,19 @@ export default function ChatArea({
                       <div className="w-2 h-2 rounded-full bg-muted-foreground/40 animate-bounce" style={{ animationDelay: '300ms' }} />
                     </div>
                   ) : msg.role === 'assistant' ? (
-                    <MarkdownRenderer content={msg.content} />
+                    <>
+                      {msg.workPlan && (
+                        <div className="mb-3 rounded-lg border border-border bg-muted/40 p-3 text-xs">
+                          <div className="font-medium text-foreground">工作计划 · {msg.workPlan.deliverable}</div>
+                          <ol className="mt-2 space-y-1 text-muted-foreground">
+                            {msg.workPlan.steps.map((step, stepIndex) => (
+                              <li key={step.id}>{stepIndex + 1}. {step.title}{step.approvalRequired ? '（需批准）' : ''}</li>
+                            ))}
+                          </ol>
+                        </div>
+                      )}
+                      <MarkdownRenderer content={msg.content} />
+                    </>
                   ) : editingMessageId === msg.id ? (
                     <div className="space-y-2 min-w-[280px]">
                       <textarea
@@ -1582,6 +1599,11 @@ export default function ChatArea({
                 title="品牌DNA注入 - 将品牌规范注入对话上下文">
                 <Shield className="w-4 h-4" />
               </button>
+              <button onClick={() => setWorkModeEnabled(enabled => !enabled)}
+                className={`px-2 py-1.5 rounded-lg text-xs transition-colors ${workModeEnabled ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-muted'}`}
+                aria-pressed={workModeEnabled}
+                title="工作模式：规划、分步执行并交付完整成果"
+              >工作</button>
               <button onClick={() => setWebSearch(!webSearch)}
                 className={`p-1.5 rounded-lg transition-colors ${webSearch ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-muted'}`}
                 title="联网搜索">

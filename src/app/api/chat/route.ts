@@ -11,6 +11,7 @@ import { CHAT_TOOLS, executeToolCall, parseToolCallsFromStream, ToolCallResult }
 import { normalizeModelForApi } from '@/lib/model-capabilities';
 import { logOperation, logError, startTimer, OP_ACTIONS } from '@/lib/op-log';
 import { resolveChatAgentToolChoice } from '@/lib/chat-agent-tool-choice';
+import { buildWorkModeInstructions, buildWorkPlan, normalizeWorkMode } from '@/lib/chatgpt-work-mode';
 
 export const maxDuration = 120;
 
@@ -106,6 +107,7 @@ export async function POST(request: NextRequest) {
       imageModel = undefined as string | undefined,  // 前端当前选择的图像模型
       imageProviderId = undefined as string | undefined,  // 前端当前选择的图像提供商ID
       isAgentMode = false,  // 是否是Agent模式（Agent模式下放宽意图检测，强制启用工具）
+      workMode: requestedWorkMode = 'chat',
       projectId: requestProjectId = undefined as string | undefined,
       sessionId: requestSessionId = undefined as string | undefined,
       messageId: requestMessageId = undefined as string | undefined,
@@ -113,7 +115,9 @@ export async function POST(request: NextRequest) {
     
     // P2-9: 极度模糊时强制禁用工具，确保LLM只追问不执行
     // Agent模式例外：用户明确希望自动执行，放宽意图检测
-    const effectiveEnableTools = (intentLevel === 'extremely_vague' && !isAgentMode) ? false : enableTools;
+    const workMode = normalizeWorkMode(requestedWorkMode);
+    const workPlan = workMode === 'work' ? buildWorkPlan(latestUserGoal(messages)) : null;
+    const effectiveEnableTools = (intentLevel === 'extremely_vague' && !isAgentMode && workMode !== 'work') ? false : enableTools;
     
     // Filter tools based on agent's allowed tools
     const availableTools = agentTools && agentTools.length > 0
@@ -278,7 +282,7 @@ export async function POST(request: NextRequest) {
     // 直到 LLM 返回纯文本（无 tool_calls）或达到最大循环次数
 
     if (effectiveEnableTools && stream) {
-      return handleAgentStream(fixedMessages, requestModel, chatApiKey, chatBaseUrl, origin, userId, model, providerId, isThinkingModel, availableTools, imageModel, imageProviderId, isAgentMode, taskContext, tokenBillingHooks);
+      return handleAgentStream(withWorkMode(fixedMessages, workPlan), requestModel, chatApiKey, chatBaseUrl, origin, userId, model, providerId, isThinkingModel, availableTools, imageModel, imageProviderId, isAgentMode || workMode === 'work', taskContext, tokenBillingHooks, workPlan);
     }
 
     // Non-stream or non-tool mode: original behavior
@@ -545,6 +549,34 @@ export async function POST(request: NextRequest) {
 
 // ============ Agent Stream Handler ============
 
+function latestUserGoal(messages: Array<{ content?: unknown }>): string {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const content = messages[index]?.content;
+    if (typeof content === 'string' && content.trim()) return content;
+    if (Array.isArray(content)) {
+      const text = content
+        .map(part => part && typeof part === 'object' && 'text' in part ? String(part.text || '') : '')
+        .join('\n')
+        .trim();
+      if (text) return text;
+    }
+  }
+  return '';
+}
+
+function withWorkMode(
+  messages: Array<Record<string, unknown>>,
+  workPlan: ReturnType<typeof buildWorkPlan> | null,
+): Array<Record<string, unknown>> {
+  if (!workPlan) return messages;
+  const instruction = { role: 'system', content: buildWorkModeInstructions(workPlan) };
+  const systemIndex = messages.findIndex(message => message.role === 'system');
+  if (systemIndex === -1) return [instruction, ...messages];
+  const next = [...messages];
+  next.splice(systemIndex + 1, 0, instruction);
+  return next;
+}
+
 async function handleAgentStream(
   fixedMessages: Array<Record<string, unknown>>,
   requestModel: string,
@@ -561,11 +593,15 @@ async function handleAgentStream(
   isAgentMode?: boolean,
   taskContext: ChatTaskContext = {},
   tokenBilling?: TokenBillingHooks,
+  workPlan: ReturnType<typeof buildWorkPlan> | null = null,
 ): Promise<NextResponse> {
   const agentModeEnabled = isAgentMode ?? false; // 捕获isAgentMode到局部变量
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
     async start(controller) {
+      if (workPlan) {
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'work_plan', workPlan })}\n\n`));
+      }
       const currentMessages = [...fixedMessages];
       let iteration = 0;
 

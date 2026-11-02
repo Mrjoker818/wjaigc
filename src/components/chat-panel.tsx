@@ -68,6 +68,7 @@ interface Message {
   suggestions?: NextSuggestion[]; // 建议下一步操作
   isClarifying?: boolean; // 是否为追问消息
   toolExecutions?: ToolExecution[]; // Agent工具执行记录
+  workPlan?: import('@/lib/chatgpt-work-mode').WorkPlan;
 }
 
 interface ToolExecution {
@@ -1229,6 +1230,7 @@ export function ChatPanel({ themeStyle, projectId, onAddToPrompt, onAddImages, c
   const [systemPrompt, setSystemPrompt] = useState('');
   const [isThinkingMode, setIsThinkingMode] = useState(false);
   const [isAgentMode, setIsAgentMode] = useState(false);
+  const [workModeEnabled, setWorkModeEnabled] = useState(false);
   const [agentSteps, setAgentSteps] = useState<Array<{id: string; tool: string; status: 'pending'|'running'|'done'|'error'; result?: string; startTime?: number}>>([]);
   const [isLoading, setIsLoading] = useState(false);
   const thinkingStartTimeRef = useRef<number>(0);
@@ -3991,6 +3993,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
           imageModel,  // 前端当前选择的图像模型
           imageProviderId: imageModelProviderId,  // 前端当前选择的图像提供商ID
           isAgentMode,  // Agent模式标记：放宽意图检测，强制启用工具
+          workMode: workModeEnabled ? 'work' : 'chat',
           projectId,
           sessionId: taskSessionId,
           messageId: assistantMessageId,
@@ -4064,6 +4067,13 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                 const eventType = parsed.type || parsed.event || currentSSEEvent;
                 const toolName = parsed.toolName || parsed.tool_name || parsed.tool;
                 
+                if (eventType === 'work_plan' && parsed.workPlan) {
+                  setMessages(prev => prev.map(msg =>
+                    msg.id === assistantMessageId ? { ...msg, workPlan: parsed.workPlan } : msg
+                  ));
+                  continue;
+                }
+
                 if (eventType === 'error') {
                   const errMsg = parsed.message || 'Agent执行失败';
                   setMessages(prev => prev.map(msg =>
@@ -5286,6 +5296,23 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
               {isAgentMode && <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />}
             </button>
 
+            <button
+              onClick={() => setWorkModeEnabled(enabled => !enabled)}
+              className={`flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium transition-all shrink-0 ${
+                workModeEnabled
+                  ? isGold
+                    ? 'bg-gold/15 text-gold border border-gold/30'
+                    : 'bg-primary/10 text-primary border border-primary/30'
+                  : isGold
+                    ? 'text-gold-muted/50 hover:text-gold-muted border border-transparent'
+                    : 'text-muted-foreground hover:text-foreground border border-transparent'
+              }`}
+              aria-pressed={workModeEnabled}
+              title="工作模式：先规划多步骤任务，再产出完整交付成果；关键操作需批准"
+            >
+              工作
+            </button>
+
             {/* 思考开启按钮 */}
             <div className="flex items-center gap-1 shrink-0">
               <Switch
@@ -5602,6 +5629,16 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                         : 'bg-white text-gray-800 border border-gray-100 shadow-sm'
                   }`}>
                     <div className="text-sm leading-relaxed">
+                      {message.workPlan && (
+                        <div className={`mb-3 rounded-lg border p-3 text-xs ${isGold ? 'border-gold/20 bg-gold/5' : 'border-border bg-muted/40'}`}>
+                          <div className="font-medium">工作计划 · {message.workPlan.deliverable}</div>
+                          <ol className="mt-2 space-y-1 opacity-80">
+                            {message.workPlan.steps.map((step, stepIndex) => (
+                              <li key={step.id}>{stepIndex + 1}. {step.title}{step.approvalRequired ? '（需批准）' : ''}</li>
+                            ))}
+                          </ol>
+                        </div>
+                      )}
                       {message.role === 'assistant'
                         ? <ReactMarkdown
                             remarkPlugins={[remarkGfm]}
