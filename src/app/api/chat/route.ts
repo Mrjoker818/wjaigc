@@ -12,6 +12,7 @@ import { normalizeModelForApi } from '@/lib/model-capabilities';
 import { logOperation, logError, startTimer, OP_ACTIONS } from '@/lib/op-log';
 import { resolveChatAgentToolChoice } from '@/lib/chat-agent-tool-choice';
 import { buildWorkModeInstructions, buildWorkPlan, normalizeWorkMode } from '@/lib/chatgpt-work-mode';
+import { prepareChatVisionMessages } from '@/lib/chat-vision-image';
 
 export const maxDuration = 120;
 
@@ -232,20 +233,9 @@ export async function POST(request: NextRequest) {
       console.log(`[chat] Model normalized: ${baseModel} → ${requestModel}`);
     }
 
-    // Convert relative image URLs to absolute URLs
+    // 服务端读取原图并内联，避免模型访问不到本地地址或只凭提示词猜测画面。
     const origin = request.headers.get('origin') || process.env.COZE_PROJECT_DOMAIN_DEFAULT || '';
-    const fixedMessages = messages.map((msg: { role: string; content: unknown }) => {
-      if (Array.isArray(msg.content)) {
-        const fixedContent = msg.content.map((part: { type?: string; image_url?: { url?: string } }) => {
-          if (part.type === 'image_url' && part.image_url?.url && part.image_url.url.startsWith('/')) {
-            return { ...part, image_url: { ...part.image_url, url: `${origin}${part.image_url.url}` } };
-          }
-          return part;
-        });
-        return { ...msg, content: fixedContent };
-      }
-      return msg;
-    });
+    const fixedMessages = await prepareChatVisionMessages(messages);
 
     // Inject tool-use system prompt when tools are enabled
     if (effectiveEnableTools) {
@@ -260,7 +250,7 @@ export async function POST(request: NextRequest) {
   - 不要只输出文字描述而不调用工具，也不要只调用工具而不输出分析
 - 当用户**要求生成视频**时，同样先输出创作思路，再调用 generate_video 工具。
 - 当用户**要求修改/编辑/修图**现有图片时，先分析图片内容和修改方案，再调用 edit_image 工具。
-- 当用户上传图片并要求分析时，先分析图片内容，然后根据用户意图决定是否调用工具生成相关图片。
+- 当用户上传图片并要求分析时，只能依据消息中的实际图像内容，不要用历史提示词、文件名或画布摘要替代看图。无法读取图片时必须明确说明，不得猜测。
 - 用户要求优化提示词时，输出优化后的提示词分析，**但如果用户明确要求生成图片，必须最终调用 generate_image**。
 - 不要说"我来帮你生成"之类的话然后不调用工具——你必须实际调用工具来完成任务。
 - 调用 generate_image 时，prompt 参数要包含完整详细的中文描述（风格、主体、场景、光线、构图等），不要只传简短关键词。

@@ -1,4 +1,5 @@
 import { calculateActualPixels } from './canvas-generation-group';
+import { prepareVisionImage } from './chat-vision-image';
 import { getInternalRequestHeaders } from './api-auth';
 import { fetchWithV1Retry } from './api-helpers';
 
@@ -743,8 +744,12 @@ async function executeAnalyzeImage(
   context: ToolContext
 ): Promise<ToolCallResult> {
   try {
-    const imageUrl = normalizeImageUrl(args.image_url as string, context.origin);
-    const question = (args.question as string) || '请详细描述这张图片的内容、风格、色彩、构图等信息。';
+    const preparedImage = await prepareVisionImage(args.image_url as string);
+    if (!preparedImage) {
+      return { success: false, error: '图片无法读取', resultText: '无法读取原图，不能根据文件名或提示词猜测画面内容。' };
+    }
+    const imageUrl = preparedImage.url;
+    const question = (args.question as string) || '请严格依据图像像素描述主体、数量、文字、颜色、构图和风格；看不清的内容必须说明不确定。';
 
     // 使用视觉提示词API或直接用聊天模型分析
     const { findProviderForModel: findChatProvider } = await import('@/lib/server-api-config');
@@ -770,7 +775,7 @@ async function executeAnalyzeImage(
             role: 'user',
             content: [
               { type: 'text', text: question },
-              { type: 'image_url', image_url: { url: imageUrl } },
+              { type: 'image_url', image_url: { url: imageUrl, detail: 'high' } },
             ],
           },
         ],

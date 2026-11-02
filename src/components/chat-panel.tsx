@@ -3894,7 +3894,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
         if (msgImages.length > 0) {
           const imageContents = msgImages.map(url => ({
             type: 'image_url' as const,
-            image_url: { url }
+            image_url: { url, detail: 'high' as const }
           }));
           requestMessages.push({
             role: msg.role,
@@ -3963,11 +3963,11 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
 
       // 构建画布摘要：让 LLM 感知当前画布状态
       const canvasSummary = canvasImages && canvasImages.length > 0
-        ? canvasImages.slice(0, 20).map((img: { id?: string; url?: string; prompt?: string; modelName?: string }, i: number) => ({
+        ? canvasImages.slice(0, 20).map((img: { id?: string; prompt?: string; modelName?: string }, i: number) => ({
             id: img.id || `img_${i}`,
-            url: (img.url || '').substring(0, 100),
             prompt: (img.prompt || '').substring(0, 200),
             modelName: img.modelName || undefined,
+            note: '提示词仅供检索，不能替代实际图像内容',
           }))
         : undefined;
 
