@@ -141,6 +141,8 @@ jobs:
           sudo apt-get install -y --no-install-recommends ffmpeg
           ffmpeg -version
           ffprobe -version
+      - name: Install Chromium for Vitest
+        run: pnpm exec playwright install --with-deps chromium
       - name: Prepare isolated Vitest media root
         env:
           WUJIE_DATA_DIR: ${{ runner.temp }}/wujie-bridge-test-ci

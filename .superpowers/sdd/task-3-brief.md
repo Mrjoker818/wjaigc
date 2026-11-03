@@ -1,63 +1,92 @@
-# WJ-STABLE-001 Stage 2 Task 3 Brief
+### Task 3: 增加受限 JSON Skill 输出
 
-## Task 3: 建立 v1/v2/v3 项目读取器与 copy-on-write 迁移
+**Files:**
+- Create: `src/lib/skill-runtime/structured-output.ts`
+- Modify: `src/lib/skill-runtime/types.ts`
+- Modify: `src/lib/skill-runtime/executor.ts`
+- Modify: `src/lib/skill-runtime/service.ts`
+- Modify: `src/lib/skill-runtime/canvas-client.ts`
+- Modify: `src/lib/skill-runtime/workflow-client.ts`
+- Modify: `src/lib/workflow-skill-execution.ts`
+- Modify: `src/lib/skill-runtime/quality-gates.ts`
+- Test: `src/__tests__/lib/skill-runtime-structured-output.test.ts`
+- Test: `src/__tests__/lib/skill-runtime-executor.test.ts`
+- Test: `src/__tests__/lib/workflow-skill-node.test.ts`
+- Test: `src/__tests__/lib/skill-runtime-quality.test.ts`
 
-### Files
+**Interfaces:**
+- Consumes: `PlatformComplianceReportV1` 和原有 text/html 输出。
+- Produces: `SkillStructuredResult`、`parseDurableSkillOutput(value)`、`durableSkillOutputKey(output)`。
 
-- Create: `src/lib/asset-core/project-readers.ts`
-- Create: `src/lib/asset-core/legacy-migration.ts`
-- Create eight anonymized fixtures under `tests/fixtures/projects/`:
-  - `v1-images-alias.json`
-  - `v1-data-url.json`
-  - `v1-blob-url.json`
-  - `v1-source-url-recovery.json`
-  - `v1-video-3d-svg.json`
-  - `v1-processing-matrix.json`
-  - `v1-shared-placement.json`
-  - `v1-corrupt-project.json`
-- Modify: `src/lib/user-types.ts`
-- Test: `src/__tests__/lib/project-readers.test.ts`
-- Test: `tests/integration/stage-2-legacy-migration-postgres.test.ts`
-
-### Interfaces
+- [ ] **Step 1: 写 JSON 输出恢复、去重和恶意输入失败测试**
 
 ```ts
-readProjectSnapshot(raw: unknown): ProjectReadResult;
-migrateLegacyProjectOnWrite(input: LegacyMigrationInput): Promise<MigrationResult>;
-compareLegacyAndAssetProjection(input: ProjectionComparisonInput): ProjectionComparison;
+it('persists and restores a bounded schema-tagged json output', async () => {
+  const result = await executor.execute(runWithResult({
+    structured: { schemaId: 'platform-compliance-report-v1', value: validReport() },
+  }));
+  expect(result.outputs).toContainEqual({
+    stepId: 'audit:a', kind: 'json', schemaId: 'platform-compliance-report-v1',
+    content: canonicalComplianceReportJson(validReport()),
+  });
+});
+
+it('rejects invalid json output before appending tool.completed', async () => {
+  await expect(executor.execute(runWithResult({
+    structured: { schemaId: 'platform-compliance-report-v1', value: wideReport(4097) },
+  }))).rejects.toThrow('REPORT_KEY_LIMIT');
+  expect(events.some(event => event.type === 'tool.completed')).toBe(false);
+});
+
+it('requires the registered compliance report schema at the quality gate', () => {
+  expect(runSkillQualityGates(['structured-report-present'], validStructuredResult, {}))
+    .toEqual([{ id: 'structured-report-present', passed: true }]);
+  expect(runSkillQualityGates(['structured-report-present'], wrongSchemaResult, {})[0]?.passed)
+    .toBe(false);
+});
 ```
 
-`ProjectReadResult` returns `project`, `sourceSchemaVersion`, `writeTargetVersion: 3`, `warnings`, and `unresolvedMedia`, without mutating the input object.
+- [ ] **Step 2: 运行测试并确认 RED**
 
-### Required TDD Sequence
+Run: `pnpm exec vitest run src/__tests__/lib/skill-runtime-structured-output.test.ts src/__tests__/lib/skill-runtime-executor.test.ts src/__tests__/lib/workflow-skill-node.test.ts`
 
-1. Commit eight anonymous, minimal fixtures and write RED tests. Absent `schemaVersion` is v1; `images` aliases project into the read model while the original JSON bytes remain unchanged; v2 uses the transitional reader; v3 uses the unified reader; corrupt input returns a quarantine warning rather than `canvasImages: []`.
-2. Write copy-on-write RED tests. Read-only open creates no graph rows. The first explicit save transactionally creates project/assets/versions/placements. If any media conversion fails, the read pointer does not switch and the project can still reopen through v1.
-3. Run RED:
+Expected: FAIL，当前输出种类只有 `text | html`。
 
-```powershell
-pnpm exec vitest run src/__tests__/lib/project-readers.test.ts tests/integration/stage-2-legacy-migration-postgres.test.ts
+- [ ] **Step 3: 实现通用结构化输出边界**
+
+```ts
+export type DurableSkillOutput =
+  | { stepId: string; kind: 'text' | 'html'; content: string }
+  | { stepId: string; kind: 'json'; schemaId: string; content: string };
+
+export interface SkillStructuredResult {
+  schemaId: string;
+  value: unknown;
+}
+
+export interface SkillStepResult {
+  assetVersionIds: readonly string[];
+  media: readonly SkillResultMedia[];
+  text?: string;
+  html?: string;
+  structured?: SkillStructuredResult;
+}
 ```
 
-4. Implement a side-effect-free reader. Project old `/uploads/` only in the returned read model as `/api/serve-upload/uploads/`. Preserve `sourceUrl`, video/3D/SVG/PSD, processing placeholders, annotations, and group metadata. Classify `data:` as `pending-persist` and invalid `blob:` as `missing`; never delete a placement.
-5. Implement recoverable migration with a per-project checkpoint. Reruns reuse legacy image-ID mappings. Do not download remote URLs during migration and do not merge assets merely because URLs match. After the first successful explicit write, set `schemaVersion=3` and retain the old payload as a read-only audit field.
-6. Run GREEN with the same focused command. All eight fixtures pass and rerunning migration creates no duplicate rows.
-7. Run `pnpm ts-check`, `pnpm lint:build`, full tests, protected/login gates and `pnpm build`. Commit as `feat: add lossless legacy project readers`.
+`structured-output.ts` 仅允许注册的 schema。`platform-compliance-report-v1` 调用 Task 1 的解析器和规范化器；未知 schema、空 schemaId、超限内容均失败。服务端历史读取、Canvas 客户端和 Workflow 客户端必须调用同一解析函数，不能直接类型断言。输出去重键为 `stepId + kind + schemaId`，旧 text/html 顺序不变。
 
-### Checkpoint A Gate
+在 `QUALITY_GATES` 增加通用 `structured-report-present` 门：仅当 `result.structured.schemaId === 'platform-compliance-report-v1'` 且值通过注册 schema 解析时通过；错误 schema 或仅有 text/html 不得通过。
 
-- Checkpoint A requires Tasks 1-3 complete, full tests, login protection, 38 protected functions, and production build.
-- Coze may start only in `legacy` or `shadow`; direct `asset-v3` is forbidden.
-- The externally observed `stable@52f7c60` is not yet accepted as the protected baseline. Local Task 3 may proceed, but no Checkpoint A push/deploy occurs until branch governance is confirmed.
+- [ ] **Step 4: 运行结构化输出与旧输出回归**
 
-### Binding Global Constraints
+Run: `pnpm exec vitest run src/__tests__/lib/skill-runtime-structured-output.test.ts src/__tests__/lib/skill-runtime-executor.test.ts src/__tests__/lib/skill-runtime-storage.test.ts src/__tests__/lib/skill-runtime-quality.test.ts src/__tests__/lib/workflow-skill-node.test.ts src/__tests__/components/skill-run-restore.test.tsx`
 
-- Work only on `codex/wj-stable-s2` in `.worktrees/wj-stable-s2`.
-- Do not touch or push `stable`; do not push `main` before Checkpoint A.
-- Preserve all protected functions and all three workspace entries.
-- Do not refactor the canvas kernel, node editor, Agent, or business tools.
-- Read-only legacy open must have no side effect. Copy-on-write occurs only on explicit write and must roll back completely on failure.
-- Keep URL compatibility fields; URL never proves ownership.
-- Do not delete old JSON, readers, fields, new tables, versions, placements, or physical media.
-- `WUJIE_ASSET_GRAPH_MODE` remains `legacy|shadow|asset-v3`, default `legacy`.
-- Without real PostgreSQL and exact cloud SHA evidence, cloud conclusions remain UNVERIFIED.
+Expected: 全部 PASS，旧 text/html 历史可恢复，JSON 恶意输入全部拒绝。
+
+- [ ] **Step 5: 提交结构化输出**
+
+```bash
+git add src/lib/skill-runtime src/lib/workflow-skill-execution.ts src/__tests__/lib/skill-runtime-structured-output.test.ts src/__tests__/lib/skill-runtime-executor.test.ts src/__tests__/lib/skill-runtime-quality.test.ts src/__tests__/lib/workflow-skill-node.test.ts src/__tests__/components/skill-run-restore.test.tsx
+git commit -m "feat: persist bounded skill json outputs"
+```
+
