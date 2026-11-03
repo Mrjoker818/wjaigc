@@ -9,6 +9,9 @@ import {
 import { enableCollaborativeProject } from '@/lib/collaboration/document-project-bridge';
 import { readDocumentOwnerStatus } from '@/lib/collaboration/document-owner-status';
 import { getSessionUser } from '@/lib/server-auth';
+import { executeDocumentRoute } from '@/lib/collaboration/document-execution-route';
+import { reserveDocumentExecutionActor } from '@/lib/collaboration/document-execution-scope';
+import { assertDocumentTransportAdmission, isDocumentTransportUnavailable } from '@/lib/collaboration/document-transport-gate';
 
 export const dynamic = 'force-dynamic';
 
@@ -26,17 +29,28 @@ function response(data: Record<string, unknown>, status: number): NextResponse {
 }
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
+  return executeDocumentRoute(request, () => read(request), (code, status) => response({ success: false, code }, status));
+}
+async function read(request: NextRequest): Promise<NextResponse> {
   const user = await getSessionUser(request);
   if (!user) return response({ success: false, code: 'AUTHENTICATION_REQUIRED' }, 401);
+  const expectedActorId = request.headers.get('x-wujie-expected-actor-id');
+  if (expectedActorId !== null && expectedActorId !== user.id) {
+    return response({ success: false, code: 'ACTOR_SCOPE_CHANGED' }, 409);
+  }
+  reserveDocumentExecutionActor(user.id);
   const params = request.nextUrl.searchParams;
   const projectId = requestSchema.shape.projectId.safeParse(params.get('projectId'));
   if (params.size !== 1 || !projectId.success) {
     return response({ success: false, code: 'DOCUMENT_REQUEST_INVALID' }, 400);
   }
   try {
+    assertDocumentTransportAdmission();
     const status = await readDocumentOwnerStatus(user.id, projectId.data);
+    assertDocumentTransportAdmission();
     return response({ success: true, ...status }, 200);
   } catch (error) {
+    if (isDocumentTransportUnavailable(error)) throw error;
     if (error instanceof Error && 'code' in error) {
       if (error.code === 'DOCUMENT_FORBIDDEN') return response({ success: false, code: error.code }, 403);
       if (error.code === 'DOCUMENT_AUTHORITY_CONFLICT') return response({ success: false, code: error.code }, 409);

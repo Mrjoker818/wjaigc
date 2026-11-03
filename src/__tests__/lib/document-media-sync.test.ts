@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CanvasImage } from '@/lib/user-types';
 import type { CanvasDocumentProjection, CanvasPlacement } from '@/lib/collaboration/canvas-document';
-import { CanvasDocumentMediaSync, parseDocumentMediaDirectory } from '@/lib/collaboration/document-media-sync';
+import { CanvasDocumentMediaSync, parseDocumentMediaDirectory, readDocumentMediaResponse } from '@/lib/collaboration/document-media-sync';
 
 function placement(version = 'version-p1'): CanvasPlacement {
   return { assetVersionId: version, x: 10, y: 20, width: 80, height: 60, rotation: 0, zIndex: 0 };
@@ -38,6 +38,36 @@ function create(): CanvasDocumentMediaSync {
 describe('document media sequence coordination', () => {
   beforeEach(() => { vi.useFakeTimers(); vi.stubGlobal('fetch', vi.fn()); });
   afterEach(() => { live.splice(0).forEach(sync => sync.stop()); vi.useRealTimers(); vi.unstubAllGlobals(); });
+
+  it('sends the fixed expected actor on the initial directory read and leaves legacy reads unchanged', async () => {
+    vi.mocked(fetch).mockResolvedValue(response(directory()));
+    const signal = new AbortController().signal;
+    expect((await readDocumentMediaResponse('project-a', signal, undefined, 'actor-a')).ok).toBe(true);
+    expect(new Headers(vi.mocked(fetch).mock.calls[0][1]?.headers).get('x-wujie-expected-actor-id')).toBe('actor-a');
+    await readDocumentMediaResponse('project-a', signal);
+    expect(new Headers(vi.mocked(fetch).mock.calls[1][1]?.headers).has('x-wujie-expected-actor-id')).toBe(false);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('keeps the original actor for automatic retries and later explicit refresh after global identity changes', async () => {
+    vi.stubGlobal('currentActor', 'actor-a');
+    const sync = new CanvasDocumentMediaSync('project-a', () => {}, undefined, 'actor-a');
+    live.push(sync);
+    sync.setDocument({ placements: { p1: placement() } }, 2);
+    vi.mocked(fetch).mockResolvedValueOnce(response({}, 503)).mockResolvedValueOnce(response({}, 503))
+      .mockResolvedValue(response(directory(2)));
+    sync.autoRefresh();
+    vi.stubGlobal('currentActor', 'actor-b');
+    await vi.advanceTimersByTimeAsync(1_500);
+    expect(sync.view.complete).toBe(true);
+    expect(fetch).toHaveBeenCalledTimes(3);
+    expect(await sync.refresh({ projectId: 'project-a', documentSequence: 2 })).toHaveLength(1);
+    expect(fetch).toHaveBeenCalledTimes(4);
+    for (const [, init] of vi.mocked(fetch).mock.calls) {
+      expect(new Headers(init?.headers).get('x-wujie-expected-actor-id')).toBe('actor-a');
+    }
+    expect(vi.getTimerCount()).toBe(0);
+  });
 
   it('accepts a ready video without a thumbnail and preserves its playback identity', () => {
     const video: CanvasImage = { ...media('video'), url: '', mediaType: 'video',
@@ -309,6 +339,31 @@ describe('document media sequence coordination', () => {
     expect(vi.getTimerCount()).toBe(0);
     expect(fetch).toHaveBeenCalledTimes(1);
   });
+
+  it.each(['explicit', 'automatic'] as const)(
+    'stops %s refresh on actor mismatch without accepting the other account directory', async mode => {
+      const lost = vi.fn();
+      const sync = new CanvasDocumentMediaSync('project-a', () => {}, lost, 'actor-a'); live.push(sync);
+      sync.acceptDirectory(directory());
+      sync.setDocument({ placements: { p1: placement(), p2: placement('version-p2') } }, 2);
+      vi.mocked(fetch).mockResolvedValue(response({ ...directory(2, [media(), media('p2')]),
+        code: 'ACTOR_SCOPE_CHANGED' }, 409));
+      const rejected = vi.fn();
+      if (mode === 'explicit') void sync.refresh({ projectId: 'project-a', documentSequence: 2 }).catch(rejected);
+      else sync.autoRefresh();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(lost).toHaveBeenCalledTimes(1);
+      if (mode === 'explicit') expect(rejected).toHaveBeenCalledWith(expect.objectContaining({ code: 'DOCUMENT_MEDIA_SYNC_UNAVAILABLE' }));
+      expect(sync.view.images.map(image => image.placementId)).toEqual(['p1']);
+      expect(sync.view.complete).toBe(false);
+      expect(new Headers(vi.mocked(fetch).mock.calls[0][1]?.headers).get('x-wujie-expected-actor-id')).toBe('actor-a');
+      await expect(sync.refresh({ projectId: 'project-a', documentSequence: 2 })).rejects.toMatchObject({ code: 'DOCUMENT_MEDIA_SYNC_CANCELLED' });
+      sync.autoRefresh(true);
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(fetch).toHaveBeenCalledTimes(1);
+      expect(lost).toHaveBeenCalledTimes(1);
+      expect(vi.getTimerCount()).toBe(0);
+    });
 
   it.each([401, 403, 'DOCUMENT_DISABLED', 'DOCUMENT_PROJECT_NOT_ENABLED', 'read-only'])(
     'terminates immediately on access loss %s without reading non-JSON permission bodies', async denial => {

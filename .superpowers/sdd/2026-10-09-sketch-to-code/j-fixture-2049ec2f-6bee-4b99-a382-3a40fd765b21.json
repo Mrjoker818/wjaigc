@@ -1,0 +1,24 @@
+{
+  "kind": "TASK6_EXPLICIT_OWNED_SKETCH_FIXTURE",
+  "sourceRoot": "J:\\无界本地版\\projects\\_stage7-safe-regression-511c1ace8b7aaa1b3ec021f6",
+  "mirrorRoot": "J:\\无界本地版\\projects\\_task6-sketch-20261010-cid56bf0c6",
+  "context": {
+    "path": "J:\\无界本地版\\projects\\_stage7-safe-regression-511c1ace8b7aaa1b3ec021f6\\.superpowers\\sdd\\2026-10-09-sketch-to-code\\j-context-2049ec2f-6bee-4b99-a382-3a40fd765b21.json",
+    "sha256": "90bc740c469c6b61005e9257d85aebf7a011f29838342cb02589750619e39415"
+  },
+  "databaseReady": {
+    "path": "J:\\无界本地版\\projects\\_stage7-safe-regression-511c1ace8b7aaa1b3ec021f6\\.superpowers\\sdd\\2026-10-09-sketch-to-code\\j-ready-2049ec2f-6bee-4b99-a382-3a40fd765b21.json",
+    "sha256": "2d038a34667bfa74e0d7ceb2c9bcbc080798c1e21f3bf90277f6db77542a07f3"
+  },
+  "databaseUrl": "postgresql://wujie_full_341db62fb624f9f63bfe@127.0.0.1:49841/wujie_bridge_test_fullreg_136c2314159689de",
+  "runtimeDatabaseUrl": "postgresql://wujie_full_341db62fb624f9f63bfe@127.0.0.1:49841/wujie_bridge_test_metadata_511c1ace8b7aaa1b3ec021f6",
+  "mediaRoot": "J:\\无界本地版\\projects\\wujie-bridge-test-stage7-511c1ace8b7aaa1b3ec021f6",
+  "mediaProof": {
+    "path": "J:\\无界本地版\\projects\\wujie-bridge-test-stage7-511c1ace8b7aaa1b3ec021f6\\stage7-owned-media.json",
+    "sha256": "0fc8a2d5400ea3b994b48fd8fcd2f6cb12ba15c4c4850e511698789dcbadddcf",
+    "realPath": "J:\\无界本地版\\projects\\wujie-bridge-test-stage7-511c1ace8b7aaa1b3ec021f6"
+  },
+  "stage7Accepted": false,
+  "researchNotStarted": true,
+  "runtimeEndpointMetadataOnly": true
+}

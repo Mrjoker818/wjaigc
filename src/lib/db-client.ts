@@ -6,6 +6,10 @@
 import { Pool, PoolConfig } from 'pg';
 
 const POOL_REGISTRY = Symbol.for('wujie.databasePoolRegistry.v1');
+const DOCUMENT_REQUEST_POOL_SCOPE = Symbol.for('wujie.documentRequestPoolScope.v1');
+type DocumentPoolScopeGlobal = typeof globalThis & {
+  [DOCUMENT_REQUEST_POOL_SCOPE]?: (pool: Pool) => Pool;
+};
 
 interface DatabasePools {
   business?: Pool;
@@ -72,7 +76,11 @@ function createPool(connectionString: string): Pool {
 }
 
 export function getPool(): Pool {
-  return getConfiguredPool('business');
+  const pool = getConfiguredPool('business');
+  const resolve = (globalThis as DocumentPoolScopeGlobal)[DOCUMENT_REQUEST_POOL_SCOPE];
+  if (resolve === undefined) return pool;
+  if (typeof resolve !== 'function') throw new Error('DOCUMENT_EXECUTION_SCOPE_UNAVAILABLE');
+  return resolve(pool);
 }
 
 /** Session-level advisory locks must not consume the business transaction pool. */

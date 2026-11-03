@@ -16,6 +16,8 @@ import { GET } from '@/app/api/collaboration/document-project/route';
 
 describe('collaborative project read route', () => {
   beforeEach(() => {
+    vi.stubEnv('WUJIE_YJS_ENABLED', 'true');
+    vi.stubEnv('WUJIE_YJS_HTTP_ENABLED', 'false');
     mocks.getSessionUser.mockReset().mockResolvedValue({ id: 'editor-a' });
     mocks.readCollaborativeProject.mockReset().mockResolvedValue({
       projectId: 'project-a', ownerId: 'owner-a', sequence: 3,
@@ -31,7 +33,7 @@ describe('collaborative project read route', () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({
       success: true, projectId: 'project-a', ownerId: 'owner-a',
-      sequence: 3, projection: { placements: {} }, readOnly: false,
+      sequence: 3, projection: { placements: {} }, readOnly: false, documentTransport: 'ws',
     });
     expect(mocks.readCollaborativeProject).toHaveBeenCalledWith('editor-a', 'project-a');
   });

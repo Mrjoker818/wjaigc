@@ -6,6 +6,8 @@ const mocks = vi.hoisted(() => ({
   issueDocumentTicket: vi.fn(),
 }));
 
+vi.mock('server-only', () => ({}));
+vi.mock('@/lib/db-client', () => ({ getPool: () => { throw new Error('unexpected database access'); } }));
 vi.mock('@/lib/server-auth', () => ({ getSessionUser: mocks.getSessionUser }));
 vi.mock('@/lib/collaboration/document-tickets', () => ({
   issueDocumentTicket: mocks.issueDocumentTicket,
@@ -28,6 +30,7 @@ describe('/api/collaboration/document-ticket', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.stubEnv('WUJIE_YJS_ENABLED', 'true');
+    vi.stubEnv('WUJIE_YJS_HTTP_ENABLED', 'false');
     mocks.getSessionUser.mockResolvedValue({ id: 'editor-a' });
     mocks.issueDocumentTicket.mockResolvedValue('a'.repeat(43));
   });

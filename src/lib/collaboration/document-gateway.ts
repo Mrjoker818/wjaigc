@@ -17,6 +17,12 @@ import {
   readDocumentUpdatesAfterInTransaction,
 } from './document-store';
 import { consumeDocumentTicket } from './document-tickets';
+import { documentWebSocketEnabled } from './document-transport-mode';
+import {
+  assertDocumentTransportAdmission, documentTransportCanStart,
+  registerDocumentTransportGateway, withDocumentWebSocketAdmission,
+} from './document-transport-gate';
+import { getDocumentExecutionScope } from './document-execution-scope';
 import { getPool } from '@/lib/db-client';
 
 const DOCUMENT_PROTOCOL = 'wujie-document-v1';
@@ -116,11 +122,34 @@ export function createDocumentGateway({
 
   function track(pending: Promise<void>): void {
     operations.add(pending);
-    void pending.finally(() => operations.delete(pending));
+    void pending.then(() => operations.delete(pending), () => operations.delete(pending));
+  }
+
+  function closeForTransportChange(connection: DocumentConnection): boolean {
+    try { if (documentWebSocketEnabled() && documentTransportCanStart('ws')) return false; }
+    catch { /* An incompatible admission registry also closes this writer. */ }
+    if (connection.active) {
+      connection.active = false;
+      connection.socket.close(1012, 'document transport changed');
+    }
+    return true;
+  }
+
+  async function closeDocumentSockets(): Promise<void> {
+    await Promise.all([...connections].map(connection => new Promise<void>((resolve, reject) => {
+      connection.active = false;
+      if (connection.socket.readyState === 3) { resolve(); return; }
+      connection.socket.once('close', () => resolve());
+      try {
+        if (connection.socket.readyState === WebSocket.OPEN) {
+          connection.socket.close(1012, 'document transport changed');
+        }
+      } catch (error) { reject(error); }
+    })));
   }
 
   function send(connection: DocumentConnection, frame: Buffer): void {
-    if (!connection.active || connection.socket.readyState !== WebSocket.OPEN) return;
+    if (!connection.active || closeForTransportChange(connection) || connection.socket.readyState !== WebSocket.OPEN) return;
     if (connection.socket.bufferedAmount + frame.length > maxBufferedBytes) {
       connection.socket.close(1008, 'slow client');
       return;
@@ -129,10 +158,11 @@ export function createDocumentGateway({
   }
 
   async function reconcile(connection: DocumentConnection): Promise<void> {
-    if (!connection.active) return;
+    if (!connection.active || closeForTransportChange(connection)) return;
     await withDocumentEditorRead(
       connection.userId, connection.projectId, connection.grantGeneration,
       async client => {
+        if (!connection.active || closeForTransportChange(connection)) return;
         const updates = await readDocumentUpdatesAfterInTransaction(
           client, connection.projectId, connection.lastSequence,
         );
@@ -148,7 +178,7 @@ export function createDocumentGateway({
   function queue(
     connection: DocumentConnection, operation: () => Promise<void>, retainedBytes = 0,
   ): void {
-    if (!connection.active || connection.socket.readyState !== WebSocket.OPEN) return;
+    if (!connection.active || closeForTransportChange(connection) || connection.socket.readyState !== WebSocket.OPEN) return;
     if (connection.queuedInboundBytes + retainedBytes > maxQueuedBytesPerConnection
         || queuedInboundBytes + retainedBytes > maxQueuedBytesGateway) {
       connection.socket.close(1008, 'inbound budget');
@@ -161,8 +191,14 @@ export function createDocumentGateway({
     connection.pendingOperations += 1;
     connection.queuedInboundBytes += retainedBytes;
     queuedInboundBytes += retainedBytes;
-    const pending = connection.pending.then(operation).catch(error => {
-      if (connection.active) connection.socket.close(
+    const predecessor = connection.pending;
+    const pending = withDocumentWebSocketAdmission('operation', async () => {
+      await predecessor;
+      if (!connection.active || closeForTransportChange(connection)) return;
+      assertDocumentTransportAdmission();
+      await operation();
+    }).catch(error => {
+      if (connection.active && !closeForTransportChange(connection)) connection.socket.close(
         error instanceof DocumentUpdateRejectedError || error instanceof DocumentAssetError
           ? 4400 : error instanceof DocumentAccessError ? 1008 : 1011,
         'document unavailable',
@@ -240,6 +276,10 @@ export function createDocumentGateway({
     return listenerAttempt;
   }
 
+  let unregisterTransport: () => void;
+  try { unregisterTransport = registerDocumentTransportGateway({ closeDocumentSockets }); }
+  catch (error) { webSocketServer.close(() => undefined); throw error; }
+
   const ready = startNotificationListener();
 
   const interval = setInterval(() => {
@@ -250,7 +290,8 @@ export function createDocumentGateway({
   return {
     ready,
     async handleDocumentUpgrade(request, socket, head): Promise<void> {
-      if (isClosing || process.env.WUJIE_YJS_ENABLED !== 'true') {
+      const opening = withDocumentWebSocketAdmission('handshake', async () => {
+      if (isClosing || !documentWebSocketEnabled()) {
         rejectUpgrade(socket, 503, 'Service Unavailable');
         return;
       }
@@ -279,6 +320,12 @@ export function createDocumentGateway({
         rejectUpgrade(socket, 503, 'Service Unavailable');
         return;
       }
+      if (socket.destroyed || socket.closed || !socket.readable || !socket.writable) return;
+      assertDocumentTransportAdmission();
+      if (isClosing || !documentWebSocketEnabled()) {
+        rejectUpgrade(socket, 503, 'Service Unavailable');
+        return;
+      }
       if (!identity) {
         rejectUpgrade(socket, 401, 'Unauthorized');
         return;
@@ -293,7 +340,31 @@ export function createDocumentGateway({
         return;
       }
 
+      await new Promise<void>((resolve, reject) => {
+        let settled = false;
+        const finish = (error?: unknown): void => {
+          if (settled) return;
+          settled = true;
+          socket.removeListener('close', closed);
+          if (error) reject(error); else resolve();
+        };
+        const closed = (): void => finish();
+        socket.once('close', closed);
+        if (socket.destroyed || socket.closed || !socket.readable || !socket.writable) { finish(); return; }
+        try {
       webSocketServer.handleUpgrade(request, socket, head, client => {
+        client.on('error', () => undefined);
+        try {
+          assertDocumentTransportAdmission();
+          const scope = getDocumentExecutionScope();
+          if (!scope) throw new Error('DOCUMENT_EXECUTION_UNAVAILABLE');
+          scope.assertActive();
+        } catch {
+          // A late upgrade still owns this handshake until its socket closes.
+          client.once('close', () => finish());
+          client.close(1012, 'document transport changed');
+          return;
+        }
         const connection: DocumentConnection = {
           socket: client, userId: identity.userId, projectId: identity.projectId,
           grantGeneration: identity.grantGeneration,
@@ -311,7 +382,6 @@ export function createDocumentGateway({
         });
         // ws closes oversized incoming frames with 1009 itself. Terminating
         // here would turn that protocol rejection into an opaque 1006 reset.
-        client.on('error', () => undefined);
 
         queue(connection, async () => {
           await withDocumentEditorRead(
@@ -326,6 +396,7 @@ export function createDocumentGateway({
         });
 
         client.on('message', (data, isBinary) => {
+          if (!connection.active || closeForTransportChange(connection)) return;
           if (!isBinary) { client.close(1003, 'binary frames only'); return; }
           const bytes = Buffer.isBuffer(data) ? data : Buffer.from(data as ArrayBuffer);
           if (bytes.length < 2 || bytes.length > MAX_UPDATE_BYTES + 1
@@ -375,7 +446,13 @@ export function createDocumentGateway({
             }
           }, bytes.length);
         });
+        finish();
       });
+        } catch (error) { finish(error); }
+      });
+      }).catch(() => { rejectUpgrade(socket, 503, 'Service Unavailable'); });
+      track(opening);
+      await opening;
     },
     close(): Promise<void> {
       if (closing) return closing;
@@ -400,6 +477,7 @@ export function createDocumentGateway({
         for (const connection of connections) connection.socket.terminate();
         while (operations.size > 0) await Promise.all([...operations]);
         await new Promise<void>(resolve => webSocketServer.close(() => resolve()));
+        unregisterTransport();
       })();
       return closing;
     },
