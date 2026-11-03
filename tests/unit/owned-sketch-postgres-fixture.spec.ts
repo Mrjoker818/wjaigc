@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { createRequire } from 'node:module';
 import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -20,6 +21,12 @@ vi.mock('@/lib/server-data-root', () => ({
 
 import { readOwnedSketchFixture, assertOwnedSketchSchema, withOwnedSketchPostgres } from '../helpers/owned-sketch-postgres-fixture';
 
+// Resolve through the declared, locked test dependency chain; do not rely on root hoisting.
+const jsdomRequire = createRequire(createRequire(import.meta.url).resolve('jsdom/package.json'));
+const encodingRequire = createRequire(jsdomRequire.resolve('whatwg-encoding/package.json'));
+const { encode } = encodingRequire('iconv-lite') as {
+  encode: (value: string, encoding: string) => Buffer;
+};
 const hash = (bytes: Buffer | string): string => createHash('sha256').update(bytes).digest('hex');
 const aliases = ['DATABASE_URL', 'PGDATABASE_URL', 'POSTGRES_TEST_DATABASE_URL', 'TEST_POSTGRES_URL'] as const;
 const fixtureKeys = [...aliases, 'TASK6_OWNED_FIXTURE_RECEIPT', 'TASK6_OWNED_FIXTURE_SHA256', 'WUJIE_DATA_DIR'] as const;
@@ -67,7 +74,7 @@ function rebindDatabase(testUrl: string, runtimeUrl: string): void {
 
 beforeEach(() => {
   previous = Object.fromEntries(fixtureKeys.map(key => [key, process.env[key]]));
-  container = mkdtempSync(join(tmpdir(), 'owned-sketch-unit-'));
+  container = mkdtempSync(join(tmpdir(), 'owned-sketch-unit-编码-'));
   const projects = join(container, 'projects');
   root = join(projects, '_upstream-wjaigc-restore');
   own = join(root, '.superpowers/sdd/2026-10-09-sketch-to-code');
@@ -82,7 +89,7 @@ beforeEach(() => {
   contextPath = join(own, 'context.json');
   receiptPath = join(own, 'fixture.json');
   const postmasterStartedAt = '2026-10-10T04:55:13.038212+08:00';
-  const dataDirectoryHex = Buffer.from(dataDirectory, 'utf8').toString('hex');
+  const dataDirectoryHex = encode(dataDirectory, 'gb18030').toString('hex');
   ready = { kind: 'TASK6_NEW_EXCLUSIVE_POSTGRESQL_FIXTURE_READY_NOT_PRODUCT_ACCEPTANCE', ready: true,
     databaseUrl: base, runtimeDatabaseUrl: runtime, dataDirectory, oldFixturesUntouched: true, loopbackOnly: true,
     identity: { database: 'wujie_bridge_test_task6_20261010', username: 'task6_owner', serverPort: '49841',
@@ -169,7 +176,7 @@ describe('explicit owned sketch fixture proof', () => {
   it('rejects a fully pinned directory outside the new owned PG cluster', () => {
     const directory = join(root, 'old-business-data'); mkdirSync(directory);
     ready.dataDirectory = directory;
-    Object.assign(ready.identity as Record<string, unknown>, { dataDirectory: directory, dataDirectoryHex: Buffer.from(directory).toString('hex') });
+    Object.assign(ready.identity as Record<string, unknown>, { dataDirectory: directory, dataDirectoryHex: encode(directory, 'gb18030').toString('hex') });
     rebindDatabase(base, String(receipt.runtimeDatabaseUrl)); expect(() => readOwnedSketchFixture()).toThrow();
   });
   it('accepts only the active schema relationship before migrations', () => {
@@ -244,5 +251,27 @@ describe('proof precedes real integration product-module initialization', () => 
     };
     await expect(loaders[name]()).rejects.toThrow('Owned sketch fixture proof required');
     expect(state.productDirectoryCalls).toBe(0); expect(state.statements).toEqual([]);
+  });
+});
+
+describe('non-ASCII owned fixture proof encoding', () => {
+  it('represents the Chinese fixture path using the server GB18030 byte identity', () => {
+    const identity = ready.identity as { dataDirectoryHex: string };
+    expect(String(ready.dataDirectory)).toContain('编码');
+    // Hand-checked GB18030 bytes for 编码, independent of the fixture encoder.
+    expect(identity.dataDirectoryHex).toContain('b1e0c2eb');
+    expect(new TextDecoder('gb18030', { fatal: true }).decode(
+      Buffer.from(identity.dataDirectoryHex, 'hex'),
+    )).toBe(ready.dataDirectory);
+    expect(readOwnedSketchFixture()?.databaseUrl).toBe(base);
+  });
+
+  it('rejects a fully repinned UTF8 path identity before any CONNECT or schema write', () => {
+    (ready.identity as Record<string, unknown>).dataDirectoryHex =
+      Buffer.from(String(ready.dataDirectory), 'utf8').toString('hex');
+    rebindDatabase(base, String(receipt.runtimeDatabaseUrl));
+    expect(() => readOwnedSketchFixture()).toThrow();
+    expect(state.statements).toEqual([]);
+    expect(state.ends).toBe(0);
   });
 });

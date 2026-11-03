@@ -1,3 +1,6 @@
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
+import { observeWorkspaceBindings } from '../helpers/workspace-annotation-bindings';
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -150,7 +153,35 @@ describe('canvas toolbar floating windows', () => {
   });
 
   it('keeps the right panel collapse control inside a narrow viewport', () => {
-    expect(canvasWorkspaceSource).toContain("panelCollapsed ? '20px' : 'min(480px, 100vw)'");
+    // Executable binding and SSR declaration proof only; computed viewport geometry remains separately unverified.
+    const scenarios = [
+      { width: 320, states: [true, false, true] },
+      { width: 375, states: [true, false, true] },
+      { width: 767, states: [true, false, true] },
+      { width: 768, states: [false, true, false] },
+      { width: 1440, states: [false, true, false] },
+      { width: undefined, states: [false, true, false] },
+    ];
+    for (const scenario of scenarios) {
+      const controller = observeWorkspaceBindings({ workspace: canvasWorkspaceSource, canvas: canvasSource }, scenario.width);
+      for (const [index, collapsed] of scenario.states.entries()) {
+        const state = controller.read();
+        expect(state.collapsed).toBe(collapsed);
+        expect(state.canvasCollapsed).toBe(collapsed);
+        expect(state.panelStyle.width).toBe(collapsed ? 44 : 'min(480px, 100vw)');
+        expect(state.buttonProps.style).toMatchObject({ width: 44, minHeight: 44 });
+        expect(state.buttonProps['aria-label']).toBe(collapsed ? '展开面板' : '收起面板');
+        expect(state.buttonProps['aria-expanded']).toBe(!collapsed);
+        expect(state.contentVisible).toBe(!collapsed);
+        expect(state.contentContainer !== null).toBe(index > 0 || !collapsed);
+        const markup = renderToStaticMarkup(createElement('div', { style: state.panelStyle },
+          createElement('button', state.buttonProps), state.contentContainer));
+        expect(markup).toContain(collapsed ? 'width:44px' : 'width:min(480px, 100vw)');
+        expect(markup).toContain(collapsed ? 'aria-label="展开面板"' : 'aria-label="收起面板"');
+        expect(markup).toContain(collapsed ? 'aria-expanded="false"' : 'aria-expanded="true"');
+        if (index < scenario.states.length - 1) controller.clickToggle();
+      }
+    }
   });
 
   it('opens one bottom-toolbar tool at a time and allows Escape to close external editors', () => {

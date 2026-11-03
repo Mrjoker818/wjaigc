@@ -26,6 +26,23 @@ describe('workflow result return to standalone chat', () => {
     expect(parseWorkflowChatReturnIntent(`assetProjectId=x&sourceVersionId=${'v'.repeat(300)}`)).toBeNull();
   });
 
+  it.each([
+    '&projectId=chat-a&projectId=chat-b',
+    '&taskId=task-a&taskId=task-b',
+    '&workflowExecutionId=another-execution',
+    '&sourceVersionId=another-version',
+  ])('rejects ambiguous return parameters before transfer: %s', suffix => {
+    const search = `${buildWorkflowChatReturnIntentUrl(intent).split('?')[1]}${suffix}`;
+    expect(parseWorkflowChatReturnIntent(search)).toBeNull();
+  });
+
+  it('retains compatible empty version aliases and ignores unrelated repeated parameters', () => {
+    const canonical = buildWorkflowChatReturnIntentUrl(intent).split('?')[1];
+    expect(parseWorkflowChatReturnIntent(`${canonical}&sourceVersionId=`)).toEqual(intent);
+    expect(parseWorkflowChatReturnIntent(`${canonical.replace('workflowVersionId=version-1', 'workflowVersionId=')}&sourceVersionId=version-1`)).toEqual(intent);
+    expect(parseWorkflowChatReturnIntent(`${canonical}&unrelated=one&unrelated=two`)).toEqual(intent);
+  });
+
   it('builds one stable chat placement for the active chat project', () => {
     expect(buildWorkflowChatReturnTransfer(intent, 'chat-project-1')).toEqual({
       sourceVersion: 'version-1',

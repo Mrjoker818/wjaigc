@@ -533,7 +533,7 @@ describe('simple-chat request context integration', () => {
     expect(globalThis.fetch).not.toHaveBeenCalledWith('/api/simple-chat/chat', expect.anything());
     expect((screen.getByTitle('Deep Research - 深度研究') as HTMLButtonElement).disabled).toBe(false);
 
-    fireEvent.click(container.querySelector<HTMLButtonElement>('.relative.group button')!);
+    fireEvent.click(screen.getByRole('button', { name: '移除图片：invalid.png' }));
     await waitFor(() => expect(container.querySelectorAll('img')).toHaveLength(0));
     uploadedImage = VALID_IMAGE;
     fireEvent.change(upload!, { target: { files: [new File(['valid'], 'valid.png', { type: 'image/png' })] } });

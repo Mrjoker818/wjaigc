@@ -416,7 +416,7 @@ describe('presence leases on isolated PostgreSQL', () => {
         const listenerPid = async (): Promise<number | undefined> => {
           const result = await query<{ pid: number }>(`
             SELECT pid FROM pg_stat_activity
-             WHERE query = 'LISTEN wujie_presence_changed' AND state = 'idle'
+             WHERE datname = current_database() AND query = 'LISTEN wujie_presence_changed' AND state = 'idle'
                AND pid <> pg_backend_pid()
              ORDER BY pid DESC LIMIT 1
           `);

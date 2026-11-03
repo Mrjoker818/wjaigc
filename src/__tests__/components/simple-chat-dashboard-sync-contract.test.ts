@@ -136,6 +136,59 @@ describe('simple chat dashboard synchronization contract', () => {
     expect(screen.getByText('1 个对话项目')).toBeTruthy();
   });
 
+  it('hides already-loaded projects immediately when the dashboard switches accounts', async () => {
+    const storage = new Map<string, string>();
+    vi.stubGlobal('localStorage', {
+      getItem: (key: string) => storage.get(key) ?? null,
+      setItem: (key: string, value: string) => storage.set(key, value),
+      removeItem: (key: string) => storage.delete(key),
+      clear: () => storage.clear(),
+      key: (index: number) => [...storage.keys()][index] ?? null,
+      get length() { return storage.size; },
+    });
+    let resolveB!: (projects: SimpleChatProject[]) => void;
+    const deferredB = new Promise<SimpleChatProject[]>(resolve => { resolveB = resolve; });
+    vi.spyOn(syncClient, 'loadSimpleChatDashboardProjects').mockImplementation(({ userId }) => (
+      userId === 'user-a' ? Promise.resolve([project('private-project-a')]) : deferredB
+    ));
+    const { default: DashboardView } = await import('@/components/dashboard/dashboard-view');
+    const user = (id: string): User => ({ id, name: id, productType: 'chat', createdAt: 1, updatedAt: 1 });
+    const rendered = render(createElement(DashboardView, {
+      user: user('user-a'), onOpenProject: vi.fn(), onNewProject: vi.fn(),
+    }));
+    expect(await screen.findByText('private-project-a')).toBeTruthy();
+    rendered.rerender(createElement(DashboardView, {
+      user: user('user-b'), onOpenProject: vi.fn(), onNewProject: vi.fn(),
+    }));
+    expect(screen.queryByText('private-project-a')).toBeNull();
+    await act(async () => { resolveB([project('private-project-b')]); });
+    expect(await screen.findByText('private-project-b')).toBeTruthy();
+  });
+
+  it('leaves the chat view when the current user no longer has the chat product', async () => {
+    const storage = new Map<string, string>();
+    vi.stubGlobal('localStorage', {
+      getItem: (key: string) => storage.get(key) ?? null,
+      setItem: (key: string, value: string) => storage.set(key, value),
+      removeItem: (key: string) => storage.delete(key),
+      clear: () => storage.clear(),
+      key: (index: number) => [...storage.keys()][index] ?? null,
+      get length() { return storage.size; },
+    });
+    vi.spyOn(syncClient, 'loadSimpleChatDashboardProjects').mockResolvedValue([project('private-chat-project')]);
+    const { default: DashboardView } = await import('@/components/dashboard/dashboard-view');
+    const user: User = { id: 'user-a', name: 'user-a', productType: 'chat', createdAt: 1, updatedAt: 1 };
+    const props = { onOpenProject: vi.fn(), onNewProject: vi.fn() };
+    const rendered = render(createElement(DashboardView, { ...props, user }));
+    expect(await screen.findByText('private-chat-project')).toBeTruthy();
+    rendered.rerender(createElement(DashboardView, { ...props, user: { ...user, productType: 'canvas' } }));
+    expect(screen.queryByText('private-chat-project')).toBeNull();
+    expect(screen.queryByRole('heading', { name: '智能对话' })).toBeNull();
+    expect(screen.getByRole('button', { name: /我的项目/ })).toBeTruthy();
+    await act(async () => { rendered.rerender(createElement(DashboardView, { ...props, user })); });
+    expect(screen.getByRole('heading', { name: '智能对话' })).toBeTruthy();
+  });
+
   it('loads the chat project badge before a canvas-and-chat user opens the chat tab', async () => {
     const storage = new Map<string, string>();
     vi.stubGlobal('localStorage', {

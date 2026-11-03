@@ -1,0 +1,60 @@
+import React, { useCallback, useState } from 'react';
+import { createRoot } from 'react-dom/client';
+import ChatArea from '@/components/simple-chat/chat-area';
+import { Providers } from '@/app/simple-chat/providers';
+import type { SimpleChatProject, SimpleChatTask } from '@/components/simple-chat/simple-chat-types';
+
+const makeProject = (id: string): SimpleChatProject => {
+  const long: SimpleChatTask = { id: `${id}-long`, projectId:id, name:'长会话', model:'synthetic-model', providerId:'synthetic-provider', createdAt:1,updatedAt:1,
+    messages:Array.from({length:30}, (_,i)=>({id:`${id}-message-${i}`,role:'user' as const,content:`合成消息 ${i}：仅用于检测滚动位置。`.repeat(4),createdAt:i+1})) };
+  return {id,name:`合成项目 ${id}`,createdAt:1,updatedAt:1,agents:[],knowledgeItems:[],tasks:[long,{...long,id:`${id}-empty`,name:'空会话',messages:[]}]};
+};
+const collisionOld=makeProject('synthetic-c');
+collisionOld.tasks=[{...collisionOld.tasks[0],id:'shared-task'}];
+const collisionNew=makeProject('synthetic-d');
+collisionNew.tasks=[{...collisionNew.tasks[1],id:'shared-task',model:'synthetic-model-b'}];
+const missing=makeProject('synthetic-missing');
+missing.tasks=[{...missing.tasks[1],messages:undefined as unknown as SimpleChatTask['messages']}];
+const seeds=[makeProject('synthetic-a'),makeProject('synthetic-b'),collisionOld,collisionNew,missing];
+const user={id:'synthetic-user',name:'合成用户',role:'user' as const,status:'active' as const,productType:'chat' as const,createdAt:1,updatedAt:1};
+const unexpected=()=>{throw Error('UNEXPECTED_CALLBACK');};
+const state={updates:[] as Array<{project:string;task:string;count:number}>,rejected:[] as Array<{project:string;task:string;messageIds:string[]}>,workflowCalls:[] as Array<{project:string;task:string;messageIds:string[];updatesAtStart:number}>,projectUpdates:0,disposed:false};
+let releaseWorkflow!:()=>void;
+const workflowGate=new Promise<void>(resolve=>{releaseWorkflow=resolve;});
+function App(){
+  const [projects,setProjects]=useState(seeds);
+  const [selection,setSelection]=useState({project:'synthetic-a',task:'synthetic-a-long'});
+  const project=projects.find(p=>p.id===selection.project)!;
+  const task=project.tasks.find(t=>t.id===selection.task)!;
+  const updateTask=(next:SimpleChatTask)=>{
+    if(next.id!==task.id || next.projectId!==project.id) throw Error('SYNTHETIC_TASK_IDENTITY_MISMATCH');
+    const original=seeds.find(p=>p.id===project.id)!.tasks.find(t=>t.id===next.id)!;
+    const originalMessages=original.messages || [];
+    if(next.messages.length<originalMessages.length || JSON.stringify(next.messages.slice(0,originalMessages.length))!==JSON.stringify(originalMessages)) {
+      state.rejected.push({project:project.id,task:next.id,messageIds:next.messages.map(m=>m.id)});
+      if((window as unknown as {fixtureIdentityProbe?:boolean}).fixtureIdentityProbe) return;
+      throw Error('SYNTHETIC_TASK_MESSAGES_MISMATCH');
+    }
+    const added=next.messages.slice(originalMessages.length);
+    const isWorkflow=(window as unknown as {fixtureWorkflow?:boolean}).fixtureWorkflow && added.length===1 && added[0].id==='workflow-return:synthetic-placement';
+    if(!isWorkflow && (added.length>2 || added.length>0 && (added[0].role!=='user'||added[0].content!=='合成新消息') || added.length>1 && added[1].role!=='assistant')) {
+      state.rejected.push({project:project.id,task:next.id,messageIds:next.messages.map(m=>m.id)});
+      if((window as unknown as {fixtureIdentityProbe?:boolean}).fixtureIdentityProbe) return;
+      throw Error('SYNTHETIC_TASK_ADDITION_MISMATCH');
+    }
+    state.updates.push({project:project.id,task:next.id,count:next.messages.length});
+    setProjects(prev=>prev.map(p=>p.id===project.id?{...p,tasks:p.tasks.map(t=>t.id===next.id?next:t)}:p));
+  };
+  const persistTask=useCallback(async(next:SimpleChatTask)=>{
+    if(!(window as unknown as {fixtureWorkflow?:boolean}).fixtureWorkflow || next.projectId!=='synthetic-c' || next.id!=='shared-task' || next.messages.length!==31 || next.messages[30].id!=='workflow-return:synthetic-placement') throw Error('UNEXPECTED_PERSIST_TASK');
+    state.workflowCalls.push({project:next.projectId,task:next.id,messageIds:next.messages.map(m=>m.id),updatesAtStart:state.updates.length});
+    setProjects(prev=>prev.map(p=>p.id===next.projectId?{...p,tasks:p.tasks.map(t=>t.id===next.id?next:t)}:p));
+    await workflowGate;
+  },[]);
+  const updateProject=(next:SimpleChatProject)=>{if(next.id!==project.id || JSON.stringify(next.tasks)!==JSON.stringify(project.tasks)) throw Error('SYNTHETIC_PROJECT_IDENTITY_OR_TASKS_MISMATCH');state.projectUpdates++;};
+  const refresh=()=>setProjects(prev=>prev.map(p=>p.id===project.id?{...p,tasks:p.tasks.map(t=>t.id===task.id?{...t,messages:t.messages?[...t.messages]:t.messages}:t)}:p));
+  return <><div style={{position:'fixed',right:0,top:0,zIndex:9999}}><button id="to-a-long" onClick={()=>setSelection({project:'synthetic-a',task:'synthetic-a-long'})}>A长</button><button id="to-a-empty" onClick={()=>setSelection({project:'synthetic-a',task:'synthetic-a-empty'})}>A空</button><button id="to-b-empty" onClick={()=>setSelection({project:'synthetic-b',task:'synthetic-b-empty'})}>B空</button><button id="to-c" onClick={()=>setSelection({project:'synthetic-c',task:'shared-task'})}>C</button><button id="to-d" onClick={()=>setSelection({project:'synthetic-d',task:'shared-task'})}>D</button><button id="to-missing" onClick={()=>setSelection({project:'synthetic-missing',task:'synthetic-missing-empty'})}>缺失</button><button id="refresh" onClick={refresh}>刷新引用</button></div><div className="h-screen flex flex-col min-w-0"><div className="flex min-h-7 shrink-0 items-center justify-end border-b border-border/60 px-3"/><ChatArea user={user} project={project} task={task} onUpdateTask={updateTask} onPersistTask={persistTask} onUpdateProject={updateProject} onCreateTask={unexpected} onSelectTask={unexpected} onUpdateAgent={unexpected} onDeleteAgent={unexpected} onSkillToAgent={unexpected} onLogout={unexpected} onBackToWorkspace={unexpected} sidebarOpen={false} onToggleSidebar={unexpected}/></div></>;
+}
+const root=createRoot(document.getElementById('root')!);
+Object.assign(window,{fixtureState:state,fixtureReleaseWorkflow:releaseWorkflow,fixtureUnmount:()=>{releaseWorkflow();state.disposed=true;root.unmount();}});
+root.render(<Providers><App/></Providers>);

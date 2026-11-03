@@ -86,6 +86,27 @@ describe('POST /api/assets/adopt-canvas-image', () => {
     });
   });
 
+  it('rejects an account change before inspecting or migrating a project', async () => {
+    mocks.getSessionUser.mockResolvedValue({ id: 'account-b', role: 'user' });
+    const response = await POST(new NextRequest('http://localhost/api/assets/adopt-canvas-image', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'x-wujie-expected-actor-id': 'account-a' },
+      body: '{invalid-json',
+    }));
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({ error: 'ACTOR_SCOPE_CHANGED' });
+    expect(mocks.prepareVerifiedLegacyProjectMedia).not.toHaveBeenCalled();
+    expect(mocks.migrateLegacyProjectOnWrite).not.toHaveBeenCalled();
+  });
+
+  it('accepts the expected account when it matches the session', async () => {
+    const response = await POST(new NextRequest('http://localhost/api/assets/adopt-canvas-image', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'x-wujie-expected-actor-id': 'owner-1' },
+      body: JSON.stringify({ projectId: 'project-1', imageId: 'image-1' }),
+    }));
+    expect(response.status).toBe(200);
+    expect(mocks.migrateLegacyProjectOnWrite).toHaveBeenCalledWith(expect.objectContaining({ actorUserId: 'owner-1' }));
+  });
+
   it('rejects unauthenticated, client-owned, and unknown image requests', async () => {
     mocks.getSessionUser.mockResolvedValueOnce(null);
     const unauthenticated = await POST(request({ projectId: 'project-1', imageId: 'image-1' }));

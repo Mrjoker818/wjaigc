@@ -1,4 +1,7 @@
 // @vitest-environment jsdom
+import { beforeEach as beforeBrowserApis, afterEach as afterBrowserApis } from 'vitest';
+import { cleanup as cleanupBrowserApiReact } from '@testing-library/react';
+import { installJsdomMediaQueries, runJsdomFixtureCleanup } from '../helpers/jsdom-browser-apis';
 import React, { useState } from 'react';
 import { act, cleanup, fireEvent, render, waitFor, within } from '@testing-library/react';
 import { Toaster, toast } from 'sonner';
@@ -108,4 +111,16 @@ describe('real canvas original-format video download', () => {
     expect(objectUrls).toBe(0);
     await waitFor(() => expect(view.getByText('视频下载未返回文件，请检查浏览器下载扩展或稍后重试')).toBeTruthy());
   });
+});
+
+// Fixture APIs only; original assertions, timeouts and business inputs stay unchanged.
+let restoreBrowserApis: (() => void) | undefined;
+beforeBrowserApis((): void => {
+  restoreBrowserApis = installJsdomMediaQueries(window, { colorScheme: 'light', reducedMotion: false });
+});
+afterBrowserApis((): void => {
+  runJsdomFixtureCleanup([
+    cleanupBrowserApiReact,
+    (): void => { const restore = restoreBrowserApis; restoreBrowserApis = undefined; restore?.(); },
+  ]);
 });

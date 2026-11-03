@@ -1,7 +1,8 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import { parseUiSource, openingNodes, literalAttr, readUiAttr, uniqueNode, minimumHeightPx } from '../helpers/ui-source-contracts';
 import ts from 'typescript';
 
 const source = readFileSync(resolve(process.cwd(), 'src/components/chat-panel.tsx'), 'utf8');
@@ -35,13 +36,25 @@ describe('Canvas Brief 到视频成片 UI wiring', () => {
     expect(source).toContain('<BriefToVideoResultCard');
   });
 
-  it('loads a video capability catalog and freezes the selected video model for the Skill', () => {
+  it('loads a video capability catalog and freezes the selected video model for the Skill', async () => {
     expect(source).toContain("loadCatalog('video')");
     expect(source).toContain('discoveredVideoModels');
     expect(source).toContain("role === 'video'");
     expect(source).toContain('modelBindings.video =');
     expect(source).toContain('capabilityDescriptors={{ video: selectedVideoDescriptor }}');
     expect(source).toContain('aria-label="video 模型"');
-    expect(source).toMatch(/aria-label="video 模型"[\s\S]*?className="[^"]*min-h-\[44px\][^"]*"/u);
+    const actual = parseUiSource(source);
+    const select = uniqueNode(openingNodes(actual).filter(node =>
+      literalAttr(node, 'aria-label') === 'video 模型'), 'VIDEO_MODEL');
+    // Installed Tailwind output, under an explicit 16px root-font contract.
+    expect(await minimumHeightPx(String(readUiAttr(actual, select, 'className')))).toBe(44);
+    const setVideoModel = vi.fn();
+    expect(readUiAttr(actual, select, 'value', { videoModel: 'vendor::selected' })).toBe('vendor::selected');
+    for (const busy of [false, true]) {
+      expect(readUiAttr(actual, select, 'disabled', { skillRun: { busy } })).toBe(busy);
+    }
+    (readUiAttr(actual, select, 'onChange', { setVideoModel }) as
+      (event: { target: { value: string } }) => void)({ target: { value: 'other-vendor::next' } });
+    expect(setVideoModel).toHaveBeenCalledExactlyOnceWith('other-vendor::next');
   });
 });

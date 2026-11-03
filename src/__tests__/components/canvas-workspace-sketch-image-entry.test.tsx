@@ -1,4 +1,7 @@
 // @vitest-environment jsdom
+import { beforeEach as beforeBrowserApis, afterEach as afterBrowserApis } from 'vitest';
+import { cleanup as cleanupBrowserApiReact } from '@testing-library/react';
+import { installJsdomMediaQueries, runJsdomFixtureCleanup } from '../helpers/jsdom-browser-apis';
 import React from 'react';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
@@ -95,4 +98,16 @@ describe('actual product sketch entry bindings with real InfiniteCanvas and cont
     expect(insert).not.toHaveBeenCalled();
     expect(vi.mocked(fetch).mock.calls.some(([url]) => /sketch-to-|cancel-task/.test(String(url)))).toBe(false);
   });
+});
+
+// Fixture APIs only; original assertions, timeouts and business inputs stay unchanged.
+let restoreBrowserApis: (() => void) | undefined;
+beforeBrowserApis((): void => {
+  restoreBrowserApis = installJsdomMediaQueries(window, { colorScheme: 'light', reducedMotion: false });
+});
+afterBrowserApis((): void => {
+  runJsdomFixtureCleanup([
+    cleanupBrowserApiReact,
+    (): void => { const restore = restoreBrowserApis; restoreBrowserApis = undefined; restore?.(); },
+  ]);
 });

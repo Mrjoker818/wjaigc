@@ -1,4 +1,7 @@
 // @vitest-environment jsdom
+import { beforeEach as beforeBrowserApis, afterEach as afterBrowserApis } from 'vitest';
+import { cleanup as cleanupBrowserApiReact } from '@testing-library/react';
+import { installJsdomElementScroll, installJsdomMediaQueries, runJsdomFixtureCleanup } from '../helpers/jsdom-browser-apis';
 
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -290,4 +293,22 @@ describe('Canvas compliance report projection', () => {
     expect(alert.textContent).toContain('报告加载失败，请重试');
     expect(alert.textContent).not.toContain('reportId');
   });
+});
+
+// Fixture APIs only; original assertions, timeouts and business inputs stay unchanged.
+let restoreBrowserApis: (() => void) | undefined;
+beforeBrowserApis((): void => {
+  const restoreScroll = installJsdomElementScroll(window);
+  try {
+    const restoreMedia = installJsdomMediaQueries(window, { colorScheme: 'light', reducedMotion: false });
+    restoreBrowserApis = (): void => runJsdomFixtureCleanup([restoreMedia, restoreScroll]);
+  } catch (error) {
+    runJsdomFixtureCleanup([(): void => { throw error; }, restoreScroll]);
+  }
+});
+afterBrowserApis((): void => {
+  runJsdomFixtureCleanup([
+    cleanupBrowserApiReact,
+    (): void => { const restore = restoreBrowserApis; restoreBrowserApis = undefined; restore?.(); },
+  ]);
 });

@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
 import { AssetServiceError } from '@/lib/asset-core/service';
+import { transferCanvasSkillAssets } from '@/lib/skill-runtime/canvas-client';
+import { expectedActorHeaders } from '@/lib/expected-actor-header';
 
 const mocks = vi.hoisted(() => ({
   getSessionUser: vi.fn(),
@@ -17,6 +19,7 @@ vi.mock('@/lib/asset-core/service', async (importOriginal) => {
 });
 
 import { POST } from '@/app/api/assets/batch-transfer/route';
+import { POST as POSTActorV2 } from '@/app/api/assets/actor-v2/batch-transfer/route';
 
 function request(body: unknown): NextRequest {
   return new NextRequest('http://localhost/api/assets/batch-transfer', {
@@ -53,6 +56,104 @@ describe('POST /api/assets/batch-transfer', () => {
       placement: { id: `placement-${index}`, entityId: `canvas-skill:run-a:version-${index}`, status: 'active' },
       reused: false,
     })));
+  });
+
+  it('rejects a mismatched expected account before touching assets', async () => {
+    const req = request({ transfers: [transfer(1)] });
+    req.headers.set('x-wujie-expected-actor-id', 'owner-b');
+    const response = await POST(req);
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({ error: 'ACTOR_SCOPE_CHANGED' });
+    expect(mocks.sendVersionsToWorkspace).not.toHaveBeenCalled();
+  });
+
+  it('accepts a matching expected account', async () => {
+    const req = request({ transfers: [transfer(1)] });
+    req.headers.set('x-wujie-expected-actor-id', 'owner-a');
+    expect((await POST(req)).status).toBe(200);
+    expect(mocks.sendVersionsToWorkspace).toHaveBeenCalledOnce();
+  });
+
+  it('rejects the real canvas batch client before reaching storage when the session changes', async () => {
+    mocks.getSessionUser.mockResolvedValue({ id: 'owner-b', role: 'user' });
+    const fetcher: typeof fetch = async (input, init) => {
+      const url = String(input);
+      if (url !== '/api/assets/batch-transfer' && url !== '/api/assets/actor-v2/batch-transfer') {
+        throw new Error(`Unexpected asset endpoint: ${url}`);
+      }
+      const handler = url === '/api/assets/actor-v2/batch-transfer' ? POSTActorV2 : POST;
+      return handler(new NextRequest(`http://localhost${url}`, { ...init, signal: init?.signal ?? undefined }));
+    };
+    await expect(transferCanvasSkillAssets({
+      references: [{ url: '/image-1.png', assetVersionId: 'version-1' }],
+      projectId: 'project-a', expectedActorId: 'owner-a', runId: 'run-a',
+      sourceVersionIds: [], fetcher,
+    })).rejects.toThrow();
+    expect(mocks.sendVersionsToWorkspace).not.toHaveBeenCalled();
+  });
+
+  it('accepts a non-ASCII account ID through the canvas batch client and route', async () => {
+    mocks.getSessionUser.mockResolvedValue({ id: '用户甲', role: 'user' });
+    mocks.sendVersionsToWorkspace.mockResolvedValue([{
+      version: { id: 'version-1', assetId: 'asset-1', file: { url: '/image-1.png' } },
+      placement: { id: 'placement-1', entityId: 'canvas-skill:run-a:version-1', status: 'active' }, reused: false,
+    }]);
+    const fetcher: typeof fetch = async (input, init) => {
+      const url = String(input);
+      if (url !== '/api/assets/batch-transfer' && url !== '/api/assets/actor-v2/batch-transfer') {
+        throw new Error(`Unexpected asset endpoint: ${url}`);
+      }
+      const handler = url === '/api/assets/actor-v2/batch-transfer' ? POSTActorV2 : POST;
+      return handler(new NextRequest(`http://localhost${url}`, { ...init, signal: init?.signal ?? undefined }));
+    };
+    const result = await transferCanvasSkillAssets({
+      references: [{ url: '/image-1.png', assetVersionId: 'version-1' }],
+      projectId: 'project-a', expectedActorId: '用户甲', runId: 'run-a',
+      sourceVersionIds: [], fetcher,
+    });
+    expect(result[0].assetVersionId).toBe('version-1');
+    expect(mocks.sendVersionsToWorkspace).toHaveBeenCalledOnce();
+  });
+
+  it('rejects a different non-ASCII account through the canvas batch client and route', async () => {
+    mocks.getSessionUser.mockResolvedValue({ id: '用户乙', role: 'user' });
+    const fetcher: typeof fetch = async (input, init) => {
+      const url = String(input);
+      if (url !== '/api/assets/batch-transfer' && url !== '/api/assets/actor-v2/batch-transfer') {
+        throw new Error(`Unexpected asset endpoint: ${url}`);
+      }
+      const handler = url === '/api/assets/actor-v2/batch-transfer' ? POSTActorV2 : POST;
+      return handler(new NextRequest(`http://localhost${url}`, { ...init, signal: init?.signal ?? undefined }));
+    };
+    await expect(transferCanvasSkillAssets({
+      references: [{ url: '/image-1.png', assetVersionId: 'version-1' }],
+      projectId: 'project-a', expectedActorId: '用户甲', runId: 'run-a',
+      sourceVersionIds: [], fetcher,
+    })).rejects.toThrow();
+    expect(mocks.sendVersionsToWorkspace).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { 'x-wujie-expected-actor-id': '%E7%94', 'x-wujie-expected-actor-id-encoding': 'percent-utf8' },
+    { 'x-wujie-expected-actor-id': 'owner-a', 'x-wujie-expected-actor-id-encoding': 'unknown' },
+    { 'x-wujie-expected-actor-id-encoding': 'percent-utf8' },
+    { 'x-wujie-expected-actor-id': '', 'x-wujie-expected-actor-id-encoding': 'percent-utf8' },
+  ])('rejects malformed or incomplete encoded account headers', async headers => {
+    const req = request({ transfers: [transfer(1)] });
+    for (const [name, value] of Object.entries(headers)) if (typeof value === 'string') req.headers.set(name, value);
+    expect((await POST(req)).status).toBe(400);
+    expect(mocks.sendVersionsToWorkspace).not.toHaveBeenCalled();
+  });
+
+  it('keeps percent signs literal in a legacy unencoded account header', async () => {
+    mocks.getSessionUser.mockResolvedValue({ id: 'owner%2Fa', role: 'user' });
+    const req = request({ transfers: [transfer(1)] });
+    req.headers.set('x-wujie-expected-actor-id', 'owner%2Fa');
+    expect((await POST(req)).status).toBe(200);
+  });
+
+  it('keeps printable ASCII IDs literal for compatibility with older services', () => {
+    expect(expectedActorHeaders('owner%2Fa')).toEqual({ 'x-wujie-expected-actor-id': 'owner%2Fa' });
   });
 
   it('commits all transfers through one service transaction and returns the complete batch', async () => {

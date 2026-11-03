@@ -168,4 +168,60 @@ describe('real collaboration management controls', () => {
     expect(fetcher.mock.calls.filter(call => call[1]?.method === 'POST')).toHaveLength(0);
     expect(manager.loadProjectsFromServer).not.toHaveBeenCalled();
   });
+
+  it('does not report an empty editor list when the first list read fails', async () => {
+    enabled = true;
+    editors = [];
+    const originalFetch = fetcher.getMockImplementation();
+    if (!originalFetch) throw new Error('missing synthetic fetch');
+    let failList = true;
+    fetcher.mockImplementation(async (input: string, init: RequestInit = {}) => {
+      const url = new URL(input, 'http://localhost');
+      if ((init.method && init.method !== 'GET') || url.origin !== 'http://localhost' ||
+        !['/api/collaboration/document-enable', '/api/collaboration/editors'].includes(url.pathname) ||
+        url.search !== '?projectId=temp') throw new Error('unexpected request');
+      if (url.pathname === '/api/collaboration/editors' && failList) {
+        failList = false;
+        return Response.json({ success: false, code: 'UNAVAILABLE' }, { status: 503 });
+      }
+      return originalFetch(input, init);
+    });
+    render(<ProjectCollaborationDialog {...props} />);
+    expect((await screen.findByRole('alert')).textContent).toContain('操作结果无法确认');
+    expect(screen.queryByText('尚无编辑者')).toBeNull();
+    expect(screen.queryByRole('list', { name: '项目编辑者' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '刷新协作状态' }));
+    expect(await screen.findByText('尚无编辑者')).toBeTruthy();
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+  it('hides the old editor list when a refresh fails and restores it after retry', async () => {
+    enabled = true;
+    const originalFetch = fetcher.getMockImplementation();
+    if (!originalFetch) throw new Error('missing synthetic fetch');
+    let listReads = 0;
+    fetcher.mockImplementation(async (input: string, init: RequestInit = {}) => {
+      const url = new URL(input, 'http://localhost');
+      if ((init.method && init.method !== 'GET') || url.origin !== 'http://localhost' ||
+        !['/api/collaboration/document-enable', '/api/collaboration/editors'].includes(url.pathname) ||
+        url.search !== '?projectId=temp') throw new Error('unexpected request');
+      if (url.pathname === '/api/collaboration/editors' && ++listReads === 2) {
+        return Response.json({ success: false, code: 'UNAVAILABLE' }, { status: 503 });
+      }
+      return originalFetch(input, init);
+    });
+    render(<ProjectCollaborationDialog {...props} />);
+    expect(await screen.findByText('Editor A')).toBeTruthy();
+    fireEvent.change(screen.getByLabelText('登录账号名称'), { target: { value: 'Draft account' } });
+    fireEvent.click(screen.getByRole('button', { name: '刷新协作状态' }));
+    expect((await screen.findByRole('alert')).textContent).toContain('操作结果无法确认');
+    expect(screen.queryByText('Editor A')).toBeNull();
+    expect(screen.queryByRole('button', { name: '撤销 Editor A 的编辑权限' })).toBeNull();
+    expect(screen.queryByText('尚无编辑者')).toBeNull();
+    expect((screen.getByLabelText('登录账号名称') as HTMLInputElement).value).toBe('Draft account');
+    fireEvent.click(screen.getByRole('button', { name: '刷新协作状态' }));
+    expect(await screen.findByText('Editor A')).toBeTruthy();
+    expect((screen.getByLabelText('登录账号名称') as HTMLInputElement).value).toBe('Draft account');
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
 });

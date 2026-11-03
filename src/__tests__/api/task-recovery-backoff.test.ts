@@ -11,7 +11,8 @@ const mocks = vi.hoisted(() => ({
 vi.mock('@/lib/server-auth', () => ({
   getSessionUser: mocks.getSessionUser,
 }));
-vi.mock('@/lib/cloud-task-storage', () => ({
+vi.mock('@/lib/cloud-task-storage', async (importOriginal) => ({
+  CloudTaskAdmissionError: (await importOriginal<typeof import('@/lib/cloud-task-storage')>()).CloudTaskAdmissionError,
   listCloudTasks: mocks.listCloudTasks,
 }));
 
@@ -111,4 +112,17 @@ describe('GET /api/tasks/recover recovery backoff', () => {
     expect(JSON.stringify(body.tasks[0])).not.toContain('must-not-leak');
     expect(JSON.stringify(body.tasks[0])).not.toContain('also-private');
   });
+});
+
+
+it('keeps the real admission constructor and derived error contract under the partial storage mock', async () => {
+  const actual = await vi.importActual<typeof import('@/lib/cloud-task-storage')>('@/lib/cloud-task-storage');
+  const mocked = await import('@/lib/cloud-task-storage');
+  const { SketchAdmissionError } = await import('@/lib/sketch-to-code/admission');
+  expect(mocked.CloudTaskAdmissionError).toBe(actual.CloudTaskAdmissionError);
+  const error = new SketchAdmissionError('SYNTHETIC_PROJECT_DENIED', 403);
+  expect(error).toBeInstanceOf(actual.CloudTaskAdmissionError);
+  expect(error).toBeInstanceOf(Error);
+  expect(error).toMatchObject({ name: 'SketchAdmissionError', code: 'SYNTHETIC_PROJECT_DENIED', status: 403, message: 'SYNTHETIC_PROJECT_DENIED' });
+  expect(new Error('ordinary')).not.toBeInstanceOf(actual.CloudTaskAdmissionError);
 });

@@ -162,6 +162,27 @@ describe('NodeEditor react-flow-v2 integration', () => {
     },
   );
 
+  it('opens annotation for a selected current canvas image node', async () => {
+    const workflow = createEmptyWorkflow('annotation integration');
+    const node = createWorkflowNode('input-image', 40, 60, 'source image');
+    node.id = 'annotation-source';
+    node.config = { ...node.config, imageUrl: '/synthetic.png', sourceImageId: 'canvas-image', sourceVersionId: 'version-1' };
+    workflow.nodes = [node];
+    const { container } = render(
+      <NodeEditor workflow={workflow} userId="integration-user" projectId="integration-project"
+        canvasImages={[{ id: 'canvas-image', url: '/synthetic.png', name: 'source', description: '', versionId: 'version-1' }]}
+        rendererMode="react-flow-v2" />,
+    );
+    const flowNode = await waitFor(() => {
+      const element = container.querySelector<HTMLElement>('.react-flow__node[data-id="annotation-source"]');
+      expect(element).not.toBeNull();
+      return element!;
+    });
+    fireEvent.click(flowNode);
+    fireEvent.click(within(screen.getByRole('toolbar', { name: '工作流工具栏' })).getByRole('button', { name: '批注修改' }));
+    expect(await screen.findByTestId('node-annotation-workspace')).toBeTruthy();
+  });
+
   it('reports the complete authoritative domain independently of viewport-mounted cards', async () => {
     const workflow = workflowFixture();
     workflow.nodes[0]!.id = 'visible-domain-node';

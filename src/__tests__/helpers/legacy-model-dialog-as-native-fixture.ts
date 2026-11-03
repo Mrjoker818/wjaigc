@@ -1,0 +1,676 @@
+// AS actual dialog and real UniversalApiManager; synthetic disabled configuration only.
+import { readFile, mkdir } from 'node:fs/promises';
+
+import { createHash } from 'node:crypto';
+
+import path from 'node:path';
+
+import { compile } from 'tailwindcss';
+
+import { Scanner } from '@tailwindcss/oxide';
+
+import {
+  chromium, type Browser, type BrowserContext, type Page, type Locator,
+  type Request, type Route, type WebSocketRoute,
+} from '@playwright/test';
+
+import {beforeAll,afterAll,expect} from 'vitest';
+
+type Theme = 'gold' | 'mono';
+
+export interface MatrixEntry { theme: Theme; width: number; height: number }
+
+interface Rect { x: number; y: number; width: number; height: number }
+
+export interface UiState {
+  theme: Theme | null; userId: string; toasts: string[]; clipboardWrites:string[]; storageFaults:string[];
+  mounts: number; unmounts: number; mounted: boolean; disposed: boolean;
+}
+
+interface FixtureWindow extends Window {
+  asDashboard: { state: UiState; mount(theme: Theme): void; unmount(): void };
+}
+
+interface Deferred {
+  promise: Promise<void>; resolve(): void; settled: boolean;
+}
+
+export interface Session {
+  context: BrowserContext; page: Page; kind: NativePlan['kind']; plan:NativePlan; step: number; closing: boolean;
+  faults: string[]; blockedHttp: number; blockedWs: number;
+  counts: Map<string, number>; handlers: Set<Promise<void>>;
+  seen: Set<Request>; pending: Set<Request>; completed: Set<Request>; failed: Set<Request>;
+  waiters: Set<() => void>; initialArrived: Deferred; paymentArrived: Deferred; releaseRefresh: Deferred;
+  contextClosed: boolean; pageClosed: boolean; disposePromise?: Promise<void>; wheels: number;
+}
+
+export interface ReadReply {count:number;body:unknown}
+export interface NativePlan {kind:'image'|'chat'|'3d'|'video';steps:readonly Readonly<Record<string,ReadReply>>[]}
+
+interface Geometry {
+  name: string; rect: Rect; clear: boolean; glyphs: boolean; horizontal: boolean;
+  cjkHorizontal: boolean; singleLine: boolean; iconsFit: boolean;
+  iconsSeparate: boolean; fiveHits: boolean; font: number; disabled: boolean;
+  trace: Array<Record<string, unknown>>;
+}
+
+interface ButtonLayout {
+  name: string | undefined; rect: Rect; font: string; selected: string | null; class: string;
+}
+
+export const ORIGIN = 'https://admin-secondary-as-fixture.invalid';
+
+const USER_ID = 'as-admin';
+
+export const MATRIX = [
+  { theme: 'gold', width: 320, height: 640 },
+  { theme: 'gold', width: 640, height: 320 },
+  { theme: 'mono', width: 320, height: 640 },
+  { theme: 'mono', width: 640, height: 320 },
+] as const satisfies readonly MatrixEntry[];
+
+
+
+
+
+
+
+
+
+
+
+export const PROVIDER_NAME="AS合成供应商完整名称ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+export const LONG_MODEL="as-image-ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+const SEED="[{\"id\":\"as-local-provider\",\"name\":\"AS合成供应商完整名称ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789\",\"baseUrl\":\"https://never-contact-as.invalid/v1\",\"apiKey\":\"\",\"isEnabled\":false,\"type\":\"universal\",\"modelType\":\"general\",\"createdAt\":1,\"updatedAt\":1,\"providerPreset\":\"custom\",\"requestStyle\":\"images-generations\",\"selectedModel\":\"as-image-ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789\",\"selectedModels\":[\"as-image-ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789\",\"as-video\"],\"advancedParams\":{\"customHeader\":\"draft-only\",\"taskModelCapabilities\":\"{\\\"version\\\":1,\\\"models\\\":{\\\"as-image-ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789\\\":{\\\"allowedRatios\\\":[\\\"1:1\\\"],\\\"maxOutputs\\\":2},\\\"as-video\\\":{\\\"allowedDurationsSeconds\\\":[5,10],\\\"maxDurationSeconds\\\":10}}}\"},\"isRelay\":true,\"connectionStatus\":\"untested\"}]";
+const ENTRY = "import React from 'react';\nimport {createRoot,type Root} from 'react-dom/client';\nimport {ThirdPartyModelDialog} from '@/components/third-party-model-dialog';\nconst state={theme:null as 'gold'|'mono'|null,userId:'as-admin',toasts:[] as string[],clipboardWrites:[] as string[],storageFaults:[] as string[],mounts:0,unmounts:0,mounted:false,disposed:false};\nconst host=document.getElementById('as-root');if(!host)throw Error('AS_HOST_REQUIRED');let root:Root|undefined;\nconst seed=[{\"id\":\"as-local-provider\",\"name\":\"AS合成供应商完整名称ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789\",\"baseUrl\":\"https://never-contact-as.invalid/v1\",\"apiKey\":\"\",\"isEnabled\":false,\"type\":\"universal\",\"modelType\":\"general\",\"createdAt\":1,\"updatedAt\":1,\"providerPreset\":\"custom\",\"requestStyle\":\"images-generations\",\"selectedModel\":\"as-image-ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789\",\"selectedModels\":[\"as-image-ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789\",\"as-video\"],\"advancedParams\":{\"customHeader\":\"draft-only\",\"taskModelCapabilities\":\"{\\\"version\\\":1,\\\"models\\\":{\\\"as-image-ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789\\\":{\\\"allowedRatios\\\":[\\\"1:1\\\"],\\\"maxOutputs\\\":2},\\\"as-video\\\":{\\\"allowedDurationsSeconds\\\":[5,10],\\\"maxDurationSeconds\\\":10}}}\"},\"isRelay\":true,\"connectionStatus\":\"untested\"}];\nObject.assign(window,{asDashboard:{state,mount(theme:'gold'|'mono',kind:'image'|'chat'|'3d'|'video'):void{\n if(state.mounts||localStorage.length||sessionStorage.length||document.cookie)throw Error('AS_FRESH_CONTEXT');\n const values:Record<string,string>={unbounded_ai_universal_apis:JSON.stringify(seed),unbounded_ai_models_cache:'{}'};\n const denied=(code:string):never=>{state.storageFaults.push(code);throw Error(code);};\n const original=Storage.prototype.setItem;for(const [k,v] of Object.entries(values))original.call(localStorage,k,v);\n Storage.prototype.setItem=function(k:string,v:string):void{if(this!==localStorage||values[k]!==v)return denied('AS_FORBIDDEN_STORAGE_MUTATION');original.call(this,k,v);};\n Storage.prototype.removeItem=function():never{return denied('AS_FORBIDDEN_STORAGE_REMOVE');};Storage.prototype.clear=function():never{return denied('AS_FORBIDDEN_STORAGE_CLEAR');};\n state.theme=theme;document.documentElement.classList.add(theme==='mono'?'theme-monochrome':'theme-gold');root=createRoot(host);state.mounts++;state.mounted=true;\n root.render(<ThirdPartyModelDialog isOpen defaultType={kind} themeStyle={theme==='mono'?'monochrome':'gold'} onClose={()=>{root?.render(null);}}/>);\n},unmount():void{if(state.disposed)return;if(root){root.unmount();state.unmounts++;root=undefined;}state.mounted=false;state.disposed=true;}}});";
+
+let browser: Browser | undefined;
+
+let javascript = '', stylesheet = '', compiledVersion = '';
+
+const inputs = new Map<string, { bytes: Buffer; sha256: string }>();
+
+const sessions = new Set<Session>(), contexts = new Set<BrowserContext>();
+
+function sha256(value: Buffer | string): string { return createHash('sha256').update(value).digest('hex'); }
+
+async function bindBytes(filename: string): Promise<Buffer> {
+  const absolute = path.resolve(filename), bytes = await readFile(absolute), hash = sha256(bytes);
+  const previous = inputs.get(absolute);
+  if (previous && previous.sha256 !== hash) throw Error('AS_INPUT_CHANGED ' + absolute);
+  inputs.set(absolute, { bytes, sha256: hash }); return bytes;
+}
+
+function version(): string {
+  const manifest = [...inputs].map(([filename, value]): [string, string] => [filename, value.sha256])
+    .sort(([a], [b]): number => a.localeCompare(b));
+  return sha256(JSON.stringify(manifest) + '\n' + ENTRY + '\n' + javascript + '\n' + stylesheet);
+}
+
+async function unchangedInputs(): Promise<void> {
+  for (const [filename, value] of inputs) {
+    expect(sha256(await readFile(filename)), 'actual compiled input still current: ' + filename).toBe(value.sha256);
+  }
+  expect(version(), 'actual input bytes, entry, production JS and real compiled CSS bound together').toBe(compiledVersion);
+}
+
+beforeAll(async (): Promise<void> => {
+  if (typeof process.getBuiltinModule !== 'function') throw Error('AS_INSTALLED_NATIVE_LOADER_REQUIRED');
+  const require = process.getBuiltinModule('node:module').createRequire(import.meta.url);
+  const { build } = require('esbuild') as typeof import('esbuild');
+  await bindBytes('tsconfig.json');
+  await bindBytes('src/lib/universal-api-manager.ts');
+  await bindBytes('src/components/generation-panel.tsx');
+  await bindBytes('src/components/chat-panel.tsx');
+  const built = await build({
+    absWorkingDir: process.cwd(), tsconfig: 'tsconfig.json', write: false,
+    bundle: true, metafile: true, platform: 'browser', format: 'iife', target: 'es2022',
+    define: { 'process.env.NODE_ENV': '"production"' },
+    stdin: { contents: ENTRY, resolveDir: process.cwd(), loader: 'tsx', sourcefile: 'as-dashboard-entry.tsx' },
+    plugins: [{ name: 'as-bind-actual-input-bytes', setup(api): void {
+      api.onLoad({ filter: /\.(?:[cm]?[jt]sx?|json)$/ }, async (args): Promise<import('esbuild').OnLoadResult> => {
+        const extension = path.extname(args.path);
+        const loader: import('esbuild').Loader = extension === '.tsx' ? 'tsx' : extension === '.ts' ? 'ts'
+          : extension === '.jsx' ? 'jsx' : extension === '.json' ? 'json' : 'js';
+        return { contents: await bindBytes(args.path), loader };
+      });
+    } }],
+  });
+  if (built.outputFiles.length !== 1 || !built.metafile) throw Error('AS_SINGLE_IN_MEMORY_BUNDLE_REQUIRED');
+  javascript = built.outputFiles[0].text;
+  const filenames = Object.keys(built.metafile.inputs).filter(file => file !== 'as-dashboard-entry.tsx');
+  for (const required of ['src/components/third-party-model-dialog.tsx', 'src/lib/universal-api-manager.ts', 'src/components/dashboard/model-capability-editor.tsx']) {
+    if (!filenames.some((file: string): boolean => path.resolve(file) === path.resolve(required))) throw Error('AS_REAL_INPUT_REQUIRED ' + required);
+  }
+  const scan: Array<{ content: string; extension: string }> = [{ content: ENTRY, extension: 'tsx' }];
+  for (const filename of filenames) {
+    const input = inputs.get(path.resolve(filename)); if (!input) throw Error('AS_UNBOUND_INPUT ' + filename);
+    if (/^src[\\/]/.test(filename) && /\.[jt]sx?$/.test(filename)) {
+      scan.push({ content: input.bytes.toString('utf8'), extension: path.extname(filename).slice(1) });
+    }
+  }
+  const compiler = await compile((await bindBytes('src/app/globals.css')).toString('utf8'), {
+    base: process.cwd(),
+    loadStylesheet: async (id: string, base: string): Promise<{ path: string; base: string; content: string }> => {
+      if (/^(?:https?:|\/\/)/.test(id)) throw Error('AS_NO_REMOTE_STYLESHEETS');
+      const filename = id === 'tailwindcss' ? require.resolve('tailwindcss/index.css')
+        : id === 'tw-animate-css' ? path.resolve('node_modules/tw-animate-css/dist/tw-animate.css')
+        : require.resolve(id.startsWith('.') ? path.resolve(base, id) : id);
+      return { path: filename, base: path.dirname(filename), content: (await bindBytes(filename)).toString('utf8') };
+    },
+  });
+  stylesheet = compiler.build(new Scanner({}).scanFiles(scan));
+  compiledVersion = version(); await unchangedInputs();
+  console.log('AS_COMPILED_PROVENANCE', JSON.stringify({ version: compiledVersion,
+    files: [...inputs].map(([filename, input]): Record<string, unknown> => ({ filename, bytes: input.bytes.length, sha256: input.sha256 })),
+    realManager:true,syntheticDisabledProvider:sha256(SEED),entry: sha256(ENTRY), javascript: sha256(javascript), stylesheet: sha256(stylesheet) }));
+  // Installed Chromium only. Never install/download, launch persistent profiles,
+  // attach to an existing app, load credentials or contact the real application.
+  browser = await chromium.launch({ headless: true });
+}, 30000);
+
+function deferred(): Deferred {
+  let finish: (() => void) | undefined;
+  const value: Deferred = {
+    promise: new Promise<void>((resolve): void => { finish = resolve; }), settled: false,
+    resolve(): void { if (!value.settled) { value.settled = true; finish?.(); } },
+  };
+  return value;
+}
+
+async function bounded<T>(name: string, run: () => Promise<T>): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([run(), new Promise<never>((_resolve, reject): void => {
+      timer = setTimeout((): void => reject(Error('AS_BOUND_EXCEEDED ' + name)), 2500);
+    })]);
+  } finally { if (timer !== undefined) clearTimeout(timer); }
+}
+
+async function paintFrames(page: Page): Promise<void> {
+  await page.evaluate((): Promise<void> => new Promise<void>((resolve): void => {
+    requestAnimationFrame((): void => { requestAnimationFrame((): void => resolve()); });
+  }));
+}
+
+async function track(s: Session, label: string, run: () => Promise<void>): Promise<void> {
+  // Every async event/route operation is owned; rejections enter the final fault
+  // ledger even if the product ignores a rejected fetch or an event is voided.
+  const operation = Promise.resolve().then(run).catch((error: unknown): void => { s.faults.push(label + ' ' + String(error)); });
+  s.handlers.add(operation);
+  try { await operation; } finally { s.handlers.delete(operation); }
+}
+
+async function requestsSettled(s: Session): Promise<void> {
+  let notify: (() => void) | undefined;
+  try {
+    await bounded('all owned native requests finish', (): Promise<void> => new Promise<void>((resolve): void => {
+      notify = (): void => { if (s.pending.size === 0) resolve(); };
+      s.waiters.add(notify); notify();
+    }));
+  } finally { if (notify) s.waiters.delete(notify); }
+}
+
+async function drain(s: Session): Promise<void> {
+  await bounded('owned route and event handlers', async (): Promise<void> => { await Promise.all([...s.handlers]); });
+  await requestsSettled(s);
+  await bounded('final owned handlers', async (): Promise<void> => { await Promise.all([...s.handlers]); });
+  expect(s.pending.size, 'no unfinished native requests').toBe(0);
+  expect(s.handlers.size, 'no unfinished route/event handlers').toBe(0);
+}
+
+export async function ui(s: Session): Promise<UiState> {
+  return await s.page.evaluate((): UiState => {
+    const state = (window as unknown as FixtureWindow).asDashboard.state;
+    return { ...state, toasts: [...state.toasts] };
+  });
+}
+
+async function noCredentialsOrStorage(s: Session): Promise<void> {
+  expect((await ui(s)).storageFaults, 'storage mutation attempts are fatal even if caught').toEqual([]);
+  expect(await s.context.cookies(), 'fresh context never acquires cookies').toEqual([]);
+  expect(await s.page.evaluate((): { local: number; session: number; cookie: string } => ({
+    local: localStorage.length, session: sessionStorage.length, cookie: document.cookie,
+  }))).toEqual({ local: 2, session: 0, cookie: '' });
+  expect(await s.page.evaluate(() => [localStorage.getItem('unbounded_ai_universal_apis'),localStorage.getItem('unbounded_ai_models_cache')])).toEqual([SEED,'{}']);
+}
+
+function expectedCounts(s:Session):Array<[string,number]>{
+ const replies=s.plan.steps[s.step];if(!replies)throw Error('AS_EXACT_STEP_REQUIRED');
+ return [['GET '+ORIGIN+'/',1],['GET '+ORIGIN+'/as.js',1],['GET '+ORIGIN+'/as.css',1],
+ ...Object.entries(replies).map(([url,reply]):[string,number]=>['GET '+ORIGIN+url,reply.count])];
+}
+
+export async function quiet(s: Session): Promise<void> {
+  await paintFrames(s.page); await drain(s); await noCredentialsOrStorage(s);
+  expect((await ui(s)).toasts, 'callback log only; not real Toast acceptance').toEqual([]);
+  expect([...s.counts].sort(([a], [b]): number => a.localeCompare(b))).toEqual(
+    expectedCounts(s).sort(([a], [b]): number => a.localeCompare(b)));
+  expect(s.faults).toEqual([]); expect(s.blockedHttp).toBe(0); expect(s.blockedWs).toBe(0);
+}
+
+async function deny(s: Session, route: Route, detail: string): Promise<void> {
+  s.blockedHttp++; s.faults.push(detail);
+  try { await route.abort('blockedbyclient'); } catch (error) { s.faults.push('AS_ABORT_FAILED ' + String(error)); }
+}
+
+async function dispatch(s: Session, route: Route): Promise<void> {
+  const request = route.request(), key = request.method() + ' ' + request.url();
+  const ordinal = (s.counts.get(key) ?? 0) + 1; s.counts.set(key, ordinal);
+  try {
+    const url = new URL(request.url()), headers = await request.allHeaders();
+    const credentialHeader = Object.keys(headers).some((name: string): boolean => /authorization|cookie|token|secret|key|credential/i.test(name));
+    if (s.closing || url.origin !== ORIGIN || url.username || url.password || url.hash
+      || request.method() !== 'GET' || request.postData() !== null || credentialHeader
+      || request.frame() !== s.page.mainFrame()) throw Error('AS_FORBIDDEN_REQUEST ' + key);
+    const resource = request.resourceType();
+    if (url.pathname === '/' && !url.search && ordinal === 1 && resource === 'document' && request.isNavigationRequest()) {
+      await route.fulfill({ contentType: 'text/html; charset=utf-8', body:
+        '<!doctype html><html lang="zh-CN"><head><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="icon" href="data:,"><link rel="stylesheet" href="/as.css"><script src="/as.js" defer></script></head><body><div id="as-root"></div></body></html>' });
+      return;
+    }
+    if (!url.search && ordinal === 1 && url.pathname === '/as.js' && resource === 'script') {
+      await route.fulfill({ contentType: 'application/javascript; charset=utf-8', body: javascript }); return;
+    }
+    if (!url.search && ordinal === 1 && url.pathname === '/as.css' && resource === 'stylesheet') {
+      await route.fulfill({ contentType: 'text/css; charset=utf-8', body: stylesheet }); return;
+    }
+    if (!['fetch', 'xhr'].includes(resource) || request.isNavigationRequest()) throw Error('AS_UNKNOWN_RESOURCE ' + key);
+    const reply=s.plan.steps[s.step]?.[url.pathname+url.search];
+    if(!reply||ordinal>reply.count)throw Error('AS_UNKNOWN_OR_EXTRA_GET '+key);
+    await route.fulfill({json:reply.body});
+    if(url.pathname==='/api/admin/groups'&&ordinal===1)s.initialArrived.resolve();
+    if(url.pathname==='/api/credits/payment-config'&&ordinal===1)s.paymentArrived.resolve();return;
+  } catch (error) { await deny(s, route, String(error)); }
+}
+
+function watchPage(s: Session, page: Page): void {
+  page.on('pageerror', (error: Error): void => { s.faults.push('AS_PAGE_ERROR ' + error.message); });
+  page.on('console', (message): void => { if (message.type() === 'error') s.faults.push('AS_CONSOLE_ERROR ' + message.text()); });
+  page.on('dialog', (dialog): void => {
+    s.faults.push('AS_UNEXPECTED_DIALOG');
+    void track(s, 'AS_DISMISS_DIALOG', async (): Promise<void> => { await dialog.dismiss(); });
+  });
+  page.on('download', (download): void => {
+    s.faults.push('AS_UNEXPECTED_DOWNLOAD');
+    void track(s, 'AS_CANCEL_DOWNLOAD', async (): Promise<void> => { await download.cancel(); });
+  });
+}
+
+async function open(entry: MatrixEntry, plan: NativePlan): Promise<Session> {
+  await unchangedInputs(); if (!browser) throw Error('AS_BROWSER_REQUIRED');
+  const context = await browser.newContext({
+    viewport: { width: entry.width, height: entry.height }, reducedMotion: 'reduce', colorScheme:entry.theme==='gold'?'dark':'light',
+    locale: 'zh-CN', timezoneId: 'Asia/Shanghai', serviceWorkers: 'block', acceptDownloads: false,
+  });
+  contexts.add(context); let acquired: Session | undefined; let bootstrapClosed = false;
+  context.once('close', (): void => { bootstrapClosed = true; });
+  try {
+    const page = await context.newPage(); page.setDefaultTimeout(1500);
+    const s: Session = {
+      context, page, kind:plan.kind, plan, step: 0, closing: false, faults: [], blockedHttp: 0, blockedWs: 0,
+      counts: new Map(), handlers: new Set(), seen: new Set(), pending: new Set(), completed: new Set(), failed: new Set(),
+      waiters: new Set(), initialArrived: deferred(), paymentArrived: deferred(), releaseRefresh: deferred(),
+      contextClosed: false, pageClosed: false, wheels: 0,
+    };
+    acquired = s; sessions.add(s); watchPage(s, page);
+    context.on('close', (): void => { s.contextClosed = true; });
+    page.on('close', (): void => { s.pageClosed = true; });
+    context.on('request', (request: Request): void => { s.seen.add(request); s.pending.add(request); });
+    context.on('requestfinished', (request: Request): void => {
+      s.pending.delete(request); s.completed.add(request); for (const notify of s.waiters) notify();
+    });
+    context.on('requestfailed', (request: Request): void => {
+      s.pending.delete(request); s.failed.add(request); for (const notify of s.waiters) notify();
+    });
+    context.on('page', (other: Page): void => {
+      if (other === page) return;
+      s.faults.push('AS_UNEXPECTED_PAGE'); watchPage(s, other);
+      void track(s, 'AS_CLOSE_UNEXPECTED_PAGE', async (): Promise<void> => { await other.close(); });
+    });
+    await context.routeWebSocket('**/*', async (socket: WebSocketRoute): Promise<void> => {
+      await track(s, 'AS_WS_HANDLER', async (): Promise<void> => {
+        s.blockedWs++; s.faults.push('AS_FORBIDDEN_WS ' + socket.url());
+        // Never connectToServer: close at the browser transport boundary.
+        await socket.close({ code: 1008, reason: 'AS isolated synthetic fixture' });
+      });
+    });
+    await context.route('**/*', async (route: Route): Promise<void> => {
+      await track(s, 'AS_HTTP_HANDLER', (): Promise<void> => dispatch(s, route));
+    });
+    await page.goto(ORIGIN + '/');
+    await page.evaluate(({theme,kind}):void => (window as unknown as {asDashboard:{mount(theme:Theme,kind:string):void}}).asDashboard.mount(theme,kind), {theme:entry.theme,kind:plan.kind});
+    await page.getByRole('heading', { name: '第三方模型调用', exact:true }).waitFor();
+    await paintFrames(page);
+    expect(await page.locator('html').getAttribute('class')).toBe(entry.theme === 'gold' ? 'theme-gold' : 'theme-monochrome');
+    expect(await page.locator('html').evaluate((element: Element): string => getComputedStyle(element).getPropertyValue('--primary').trim()))
+      .toBe(entry.theme === 'gold' ? '#d4af37' : '#3b82f6');
+    expect(await page.locator('html').evaluate((element: Element): string => getComputedStyle(element).getPropertyValue('--card').trim()))
+      .toBe(entry.theme === 'gold' ? '#1c2333' : '#f8fafc');
+    expect(await page.evaluate((): boolean => matchMedia('(prefers-reduced-motion: reduce)').matches)).toBe(true);
+    expect((await ui(s)).userId).toBe(USER_ID); return s;
+  } catch (error) {
+    console.log('AS_BOOTSTRAP_FAILURE', JSON.stringify({
+      error: error instanceof Error ? {name:error.name,message:error.message,stack:error.stack} : String(error),
+      faults: acquired?.faults ?? [], counts: acquired ? Object.fromEntries(acquired.counts) : {},
+      pending: acquired?.pending.size ?? 0, handlers: acquired?.handlers.size ?? 0,
+    }));
+    try {
+      if (acquired) await dispose(acquired);
+      else {
+        await bounded('bootstrap context close', async (): Promise<void> => {
+          await context.close(); expect(bootstrapClosed).toBe(true); expect(context.pages()).toEqual([]);
+        });
+        contexts.delete(context);
+      }
+    } catch (cleanup) { throw new AggregateError([error, cleanup], 'AS_OPEN_AND_DISPOSAL'); }
+    throw error;
+  }
+}
+
+async function disposeOnce(s: Session): Promise<void> {
+  const errors: unknown[] = [];
+  // Release before waiting or marking the boundary closed. A failed assertion
+  // can never leave the controller's synthetic refresh response suspended.
+  s.releaseRefresh.resolve();
+  try {
+    await bounded('release drain and final mounted paint', async (): Promise<void> => { await drain(s); await paintFrames(s.page); });
+  } catch (error) { errors.push(error); }
+  try {
+    const result = await bounded('real React root unmount', (): Promise<{ state: UiState; empty: boolean }> =>
+      s.page.evaluate((): { state: UiState; empty: boolean } => {
+        const fixture = (window as unknown as FixtureWindow).asDashboard;
+        if (!fixture) throw Error('AS_FIXTURE_NOT_LOADED');
+        fixture.unmount();
+        return { state: { ...fixture.state, toasts: [...fixture.state.toasts] },
+          empty: document.getElementById('as-root')?.childElementCount === 0 };
+      }));
+    expect(result.state.disposed).toBe(true); expect(result.state.mounted).toBe(false);
+    expect(result.state.mounts, 'a successful product scenario mounted one actual React root').toBe(1);
+    expect(result.state.unmounts, 'every mounted React root disposed').toBe(result.state.mounts);
+    expect(result.empty, 'real root DOM removed by React').toBe(true);
+    await bounded('unmounted paint requests and storage closure', async (): Promise<void> => {
+      await paintFrames(s.page); await drain(s); await noCredentialsOrStorage(s);
+    });
+  } catch (error) { errors.push(error); }
+  try { await bounded('final input-byte binding', unchangedInputs); } catch (error) { errors.push(error); }
+  s.closing = true;
+  try { await bounded('context close', (): Promise<void> => s.context.close()); }
+  catch (error) { errors.push(error); }
+  try { await bounded('closed context event/route drain', async (): Promise<void> => { await Promise.all([...s.handlers]); }); }
+  catch (error) { errors.push(error); }
+  try {
+    expect(s.contextClosed, 'native context close event observed').toBe(true);
+    expect(s.pageClosed && s.page.isClosed(), 'native owned page closed').toBe(true);
+    expect(s.context.pages(), 'no open pages in closed context').toEqual([]);
+    expect(s.releaseRefresh.settled, 'owned response release is idempotent and unconditional').toBe(true);
+    expect([...s.counts].sort(([a], [b]): number => a.localeCompare(b))).toEqual(
+      expectedCounts(s).sort(([a], [b]): number => a.localeCompare(b)));
+    const expectedNativeRequests = expectedCounts(s).reduce((n,[,count])=>n+count,0);
+    expect(s.seen.size, 'only exact owned document/assets/GETs observed').toBe(expectedNativeRequests);
+    expect(s.completed.size).toBe(expectedNativeRequests); expect(s.failed.size).toBe(0);
+    expect([...s.seen].every((request: Request): boolean => s.completed.has(request))).toBe(true);
+    expect(s.pending.size).toBe(0); expect(s.handlers.size).toBe(0); expect(s.waiters.size).toBe(0);
+    expect(s.blockedHttp, 'denied HTTP/method/header attempts remain fatal even if product catches them').toBe(0);
+    expect(s.blockedWs, 'denied WS attempts remain fatal').toBe(0);
+    expect(s.faults, 'unexpected pages/downloads/dialogs/errors remain fatal').toEqual([]);
+  } catch (error) { errors.push(error); }
+  if (s.contextClosed) { contexts.delete(s.context); sessions.delete(s); }
+  if (errors.length) throw new AggregateError(errors, 'AS_DISPOSAL');
+}
+
+async function dispose(s: Session): Promise<void> {
+  // Cached promise prevents repeated unmount, route release or close operations.
+  s.disposePromise ??= disposeOnce(s); await s.disposePromise;
+}
+
+let captureIndex = 0;
+
+export async function capture(s: Session, label: string): Promise<void> {
+  const directory = path.resolve('output/playwright/admin-secondary-as-native-20261019', String(process.pid));
+  await mkdir(directory, { recursive: true });
+  const state = await ui(s);
+  const size = s.page.viewportSize();
+  const filename = path.join(directory, `${state.theme}-${size?.width}x${size?.height}-${++captureIndex}-${label}.png`);
+  if (label === 'failure-state') console.log('AS_FAILURE_LAYOUT', JSON.stringify(await s.page.locator('#as-root button').evaluateAll((elements: Element[]): ButtonLayout[] => elements.map((element: Element): ButtonLayout => {
+    const box = element.getBoundingClientRect(), css = getComputedStyle(element);
+    return { name: element.textContent?.trim(), rect: { x: box.x, y: box.y, width: box.width, height: box.height }, font: css.fontSize, selected: element.getAttribute('aria-pressed'), class: element.className };
+  }))));
+  await s.page.screenshot({ path: filename });
+  console.log('AS_CASTURE', JSON.stringify({ path: filename, label, inputVersion: compiledVersion }));
+}
+
+export async function withSession(entry: MatrixEntry, plan: NativePlan, scenario: (s: Session) => Promise<void>): Promise<void> {
+  const s = await open(entry, plan); let original: unknown; let failed = false;
+  try { await quiet(s); await scenario(s); await capture(s, 'end-state'); } catch (error) { original = error; failed = true; try { await capture(s, 'failure-state'); } catch (captureError) { original = new AggregateError([error, captureError], 'AS_FAILURE_AND_CASTURE'); } }
+  try { await dispose(s); }
+  catch (cleanup) { if (failed) throw new AggregateError([original, cleanup], 'AS_SCENARIO_AND_DISPOSAL'); throw cleanup; }
+  if (failed) throw original;
+}
+
+afterAll(async (): Promise<void> => {
+  const errors: unknown[] = [];
+  try {
+    for (const s of [...sessions]) { try { await dispose(s); } catch (error) { errors.push(error); } }
+    for (const context of [...contexts]) {
+      try { await bounded('remaining context close', (): Promise<void> => context.close()); contexts.delete(context); }
+      catch (error) { errors.push(error); }
+    }
+  } finally {
+    const owned = browser;
+    try {
+      if (owned) {
+        await bounded('browser close', (): Promise<void> => owned.close());
+        expect(owned.isConnected(), 'owned installed Chromium disconnected').toBe(false);
+      }
+    } catch (error) { errors.push(error); }
+    finally { browser = undefined; }
+  }
+  if (errors.length) throw new AggregateError(errors, 'AS_FINAL_DISPOSAL');
+}, 15000);
+
+export function main(s: Session): Locator { return s.page.locator('main.dashboard-scrollable'); }
+
+async function rect(locator: Locator): Promise<Rect> {
+  const value = await locator.boundingBox(); if (!value) throw Error('AS_RENDERED_RECT_REQUIRED'); return value;
+}
+
+export async function geometry(locator: Locator): Promise<Geometry> {
+  return await locator.evaluate((element: Element): Geometry => {
+    const r = element.getBoundingClientRect(), own = getComputedStyle(element);
+    const clips = (box: DOMRect, start: Element | null, subject: Element = start ?? element): boolean => {
+      let left = 0, top = 0, right = innerWidth, bottom = innerHeight, opacity = 1;
+      // A viewport-fixed descendant escapes overflow ancestors outside its
+      // containing block. Transformed/contained fixed descendants do not.
+      const outsideFixedBlock = new Set<Element>();
+      let fixed: Element | null = subject;
+      while (fixed && getComputedStyle(fixed).position !== 'fixed') fixed = fixed.parentElement;
+      if (fixed) {
+        for (let ancestor=fixed.parentElement;ancestor;ancestor=ancestor.parentElement) {
+          const css=getComputedStyle(ancestor);
+          if (css.transform !== 'none' || css.perspective !== 'none' || css.filter !== 'none'
+            || (css.backdropFilter && css.backdropFilter !== 'none')
+            || /(?:layout|paint|strict|content)/.test(css.contain)
+            || /(?:transform|perspective|filter)/.test(css.willChange)) break;
+          outsideFixedBlock.add(ancestor);
+        }
+      }
+      for (let ancestor = start; ancestor; ancestor = ancestor.parentElement) {
+        const css = getComputedStyle(ancestor), a = ancestor.getBoundingClientRect(); opacity *= Number(css.opacity);
+        if (css.display === 'none' || css.visibility !== 'visible') return false;
+        if (!outsideFixedBlock.has(ancestor) && /^(auto|scroll|hidden|clip)$/.test(css.overflowX)) {
+          left = Math.max(left, a.left + ancestor.clientLeft); right = Math.min(right, a.left + ancestor.clientLeft + ancestor.clientWidth);
+        }
+        if (!outsideFixedBlock.has(ancestor) && /^(auto|scroll|hidden|clip)$/.test(css.overflowY)) {
+          top = Math.max(top, a.top + ancestor.clientTop); bottom = Math.min(bottom, a.top + ancestor.clientTop + ancestor.clientHeight);
+        }
+      }
+      return opacity > 0 && box.width > 0 && box.height > 0 && box.left >= left - 0.5 && box.right <= right + 0.5
+        && box.top >= top - 0.5 && box.bottom <= bottom + 0.5;
+    };
+    const textBoxes: DOMRect[] = [], cjkLines = new Map<number, number[]>();
+    let glyphs = true, horizontal = own.writingMode === 'horizontal-tb', cjk = 0;
+    if (!element.matches('input,textarea,select')) {
+      const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+      while (walker.nextNode()) {
+        const node = walker.currentNode, value = node.textContent ?? '', parent = node.parentElement;
+        if (!parent || !value.trim()) continue;
+        const textCss = getComputedStyle(parent);
+        horizontal &&= textCss.writingMode === 'horizontal-tb';
+        if (textCss.color === 'rgba(0, 0, 0, 0)' || textCss.color === 'transparent') glyphs = false;
+        for (let index = 0; index < value.length; index++) {
+          if (!value[index].trim()) continue;
+          const range = document.createRange(); range.setStart(node, index); range.setEnd(node, index + 1);
+          const b = range.getBoundingClientRect();
+          if (!clips(b, parent)) glyphs = false;
+          textBoxes.push(b);
+          if (/[\u3400-\u9fff]/.test(value[index])) {
+            cjk++; const line = Math.round(b.top), positions = cjkLines.get(line) ?? [];
+            positions.push(b.left); cjkLines.set(line, positions);
+          }
+        }
+      }
+    }
+    const icons = [...element.querySelectorAll('svg')];
+    const overlap = (a: DOMRect, b: DOMRect): boolean => Math.min(a.right, b.right) - Math.max(a.left, b.left) > 0.5
+      && Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top) > 0.5;
+    const points = [[r.left + r.width / 2, r.top + r.height / 2], [r.left + 8, r.top + r.height / 2],
+      [r.right - 8, r.top + r.height / 2], [r.left + r.width / 2, r.top + 8], [r.left + r.width / 2, r.bottom - 8]];
+    const trace: Array<Record<string, unknown>> = [];
+    for (let ancestor: Element | null = element; ancestor; ancestor = ancestor.parentElement) {
+      const css = getComputedStyle(ancestor), b = ancestor.getBoundingClientRect();
+      trace.push({ tag: ancestor.tagName, class: ancestor.getAttribute('class'),
+        rect: { x: b.x, y: b.y, width: b.width, height: b.height },
+        client: [ancestor.clientWidth, ancestor.clientHeight], scroll: [ancestor.scrollWidth, ancestor.scrollHeight, ancestor.scrollLeft, ancestor.scrollTop],
+        overflow: [css.overflowX, css.overflowY], opacity: css.opacity, visibility: css.visibility, display: css.display });
+    }
+    return {
+      name: element.getAttribute('aria-label') ?? element.textContent?.trim() ?? element.tagName,
+      rect: { x: r.x, y: r.y, width: r.width, height: r.height },
+      clear: Number(own.opacity) > 0 && own.display !== 'none' && own.visibility === 'visible' && clips(r, element.parentElement, element),
+      glyphs, horizontal,
+      cjkHorizontal: cjk <= 1 || [...cjkLines.values()].some((positions: number[]): boolean => positions.some((x: number): boolean => Math.abs(x - positions[0]) > 0.5)),
+      singleLine: new Set(textBoxes.map((b: DOMRect): number => Math.round(b.top))).size <= 1,
+      iconsFit: icons.every((icon: SVGSVGElement): boolean => clips(icon.getBoundingClientRect(), icon)),
+      iconsSeparate: icons.every((icon: SVGSVGElement): boolean => textBoxes.every((b: DOMRect): boolean => !overlap(icon.getBoundingClientRect(), b))),
+      fiveHits: points.every(([x, y]): boolean => { const hit = document.elementFromPoint(x, y); return !!hit && element.contains(hit); }),
+      font: Number.parseFloat(own.fontSize), disabled: element.matches(':disabled'), trace,
+    };
+  });
+}
+
+export async function visible(locator: Locator, oneLine = false): Promise<Geometry> {
+  const value = await geometry(locator), detail = value.name + ' ' + JSON.stringify(value);
+  expect(value.clear, 'whole border box fits viewport/all ancestor clips: ' + detail).toBe(true);
+  expect(value.glyphs, 'actual glyph ranges fit, including hidden/clip boxes: ' + detail).toBe(true);
+  expect(value.horizontal && value.cjkHorizontal, 'actual horizontal prose, not a one-CJK-character column: ' + detail).toBe(true);
+  expect(value.iconsFit && value.iconsSeparate, 'actual icons fit and do not overlap text: ' + detail).toBe(true);
+  if (oneLine) expect(value.singleLine, 'short label or financial number stays on one line: ' + detail).toBe(true);
+  return value;
+}
+
+async function control(locator: Locator, oneLine = true): Promise<void> {
+  const value = await visible(locator, oneLine);
+  if (value.disabled) return;
+  expect(value.rect.width, value.name + ' operative width').toBeGreaterThanOrEqual(44);
+  expect(value.rect.height, value.name + ' operative height').toBeGreaterThanOrEqual(44);
+  expect(value.fiveHits, value.name + ' center/left/right/top/bottom native hit samples').toBe(true);
+  if (await locator.evaluate((element: Element): boolean => element.matches('input,textarea,select'))) {
+    expect(value.font, 'mobile input computed font is at least 16px').toBeGreaterThanOrEqual(16);
+  }
+}
+
+export async function reveal(s: Session, locator: Locator): Promise<void> {
+  // At most ten geometry-directed wheel steps, as in the installed reference.
+  // This is native traversal, not retrying assertions or relaxing tolerances.
+  for (let step = 0; step < 10; step++) {
+    const move = await locator.evaluate((element: Element): { x: number; y: number; delta: number } | null => {
+      const target = element.getBoundingClientRect();
+      for (let ancestor = element.parentElement; ancestor; ancestor = ancestor.parentElement) {
+        const css = getComputedStyle(ancestor), r = ancestor.getBoundingClientRect();
+        if (!/^(auto|scroll)$/.test(css.overflowY) || ancestor.scrollHeight <= ancestor.clientHeight) continue;
+        let left = Math.max(0, r.left + ancestor.clientLeft), right = Math.min(innerWidth, r.left + ancestor.clientLeft + ancestor.clientWidth);
+        let top = Math.max(0, r.top + ancestor.clientTop), bottom = Math.min(innerHeight, r.top + ancestor.clientTop + ancestor.clientHeight);
+        for (let outer = ancestor.parentElement; outer; outer = outer.parentElement) {
+          const style = getComputedStyle(outer), b = outer.getBoundingClientRect();
+          if (/^(auto|scroll|hidden|clip)$/.test(style.overflowX)) {
+            left = Math.max(left, b.left + outer.clientLeft); right = Math.min(right, b.left + outer.clientLeft + outer.clientWidth);
+          }
+          if (/^(auto|scroll|hidden|clip)$/.test(style.overflowY)) {
+            top = Math.max(top, b.top + outer.clientTop); bottom = Math.min(bottom, b.top + outer.clientTop + outer.clientHeight);
+          }
+        }
+        for (const sticky of ancestor.querySelectorAll<HTMLElement>('.sticky')) {
+          if (sticky.contains(element) || getComputedStyle(sticky).position !== 'sticky') continue;
+          const b = sticky.getBoundingClientRect();
+          if (b.top <= top + 0.5 && b.bottom > top && b.bottom < bottom) top = b.bottom;
+          else if (b.bottom >= bottom - 0.5 && b.top > top && b.top < bottom) bottom = b.top;
+        }
+        const delta = target.top < top + 2 ? target.top - top - 8 : target.bottom > bottom - 2 ? target.bottom - bottom + 8 : 0;
+        if (right <= left || bottom <= top || !delta || (delta < 0 && ancestor.scrollTop <= 0)
+          || (delta > 0 && ancestor.scrollTop + ancestor.clientHeight >= ancestor.scrollHeight - 1)) continue;
+        return { x: (left + right) / 2, y: (top + bottom) / 2, delta };
+      }
+      return null;
+    });
+    if (!move) return;
+    await s.page.mouse.move(move.x, move.y); await s.page.mouse.wheel(0, move.delta); s.wheels++;
+    await paintFrames(s.page);
+  }
+  // No DOM scroll, horizontal scroll, forced click or CSS fallback. The next
+  // full geometry/hit assertion must pass with the actual resulting viewport.
+}
+
+export async function readable(s: Session, locator: Locator, oneLine = false): Promise<void> {
+  await reveal(s, locator); await visible(locator, oneLine);
+}
+
+export async function reach(s: Session, locator: Locator, oneLine = true): Promise<void> {
+  await reveal(s, locator); await control(locator, oneLine);
+}
+
+async function assertSafeActivation(locator: Locator): Promise<void> {
+  expect(await locator.count()).toBe(1);
+  const permitted = await locator.evaluate((element: Element): boolean => {
+    if (element instanceof HTMLInputElement) return element.type === 'number' && !element.disabled;
+    if (!(element instanceof HTMLButtonElement) || element.disabled) return false;
+    const text = element.textContent?.trim() ?? '';
+    // Defense in depth: even an accidentally broad caller selector cannot
+    // activate any create-order, confirm-paid, query-order or payment control.
+    const name=element.getAttribute('aria-label')??element.getAttribute('title')??text;
+    return !/创建|保存|测试连接|发现模型|删除配置|启用配置|禁用配置/.test(name);
+  });
+  expect(permitted, 'only pre-order choice/header/filter/input/close native activation allowed').toBe(true);
+}
+
+export async function activate(s: Session, locator: Locator, oneLine = true, alreadyVisible = false): Promise<void> {
+  await assertSafeActivation(locator);
+  if (alreadyVisible) await control(locator, oneLine); else await reach(s, locator, oneLine);
+  const box = await rect(locator); await s.page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+  await paintFrames(s.page);
+}
+
+export async function noHorizontalOverflow(s: Session): Promise<void> {
+  const bad = await s.page.evaluate((): string[] => {
+    const result: string[] = [];
+    for (const selector of ['html', 'body', '#as-root']) {
+      const element = document.querySelector(selector);
+      if (!element || element.scrollWidth > element.clientWidth + 1) result.push(selector + ':horizontal-content');
+    }
+    for (const element of document.querySelectorAll('#as-root *')) {
+      if (!(element instanceof HTMLElement) || element.matches('input,select,textarea')) continue;
+      const r = element.getBoundingClientRect(), css = getComputedStyle(element);
+      if (!r.width || !r.height || css.display === 'none') continue;
+      const localTable = element.closest('[role="region"][aria-label="操作日志列表，可横向滚动"]');
+      if (localTable && localTable !== element) continue;
+      if (r.left < -0.5 || r.right > innerWidth + 0.5) result.push(element.tagName + ':outside-viewport:' + element.className);
+      // Checking scrollWidth even on overflow:hidden/clip rejects a fix which
+      // merely conceals clipped controls, financial values or descriptions.
+      if (!localTable && element.scrollWidth > element.clientWidth + 1) result.push(element.tagName + ':hidden-horizontal-content:' + element.className);
+    }
+    return result;
+  });
+  expect(bad, 'actual layout has no horizontal content concealed by clipping').toEqual([]);
+}
+
+export async function settle(s:Session):Promise<void>{await paintFrames(s.page);await drain(s);await paintFrames(s.page);}

@@ -1,6 +1,6 @@
 // @vitest-environment node
 // Task4 fixture only. Execution requires the controller's image-editor-red admission.
-import { readFile } from 'node:fs/promises';
+import { readFile, mkdir } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
@@ -139,9 +139,9 @@ function expectedSubmission(s: Session): Record<string, unknown> {
     ...(s.plan.references ? { referenceImages: s.plan.references } : {}), editHistory: [], count: s.plan.count,
   };
 }
-async function openSession(): Promise<Session> {
+async function openSession(nativeTouch: boolean = false): Promise<Session> {
   if (!browser) throw new Error('FIXTURE_BROWSER_NOT_INITIALIZED');
-  const context = await browser.newContext({ serviceWorkers: 'block' });
+  const context = await browser.newContext({ serviceWorkers: 'block', ...(nativeTouch ? { hasTouch: true, isMobile: true } : {}) });
   try {
     const page = await context.newPage(); page.setDefaultTimeout(1500);
     let releaseHold: (() => void) | undefined;
@@ -154,6 +154,7 @@ async function openSession(): Promise<Session> {
       released: false, terminalServed: false, mounted: false,
       release(value): void { if (!s.released) { terminal = value; s.released = true; releaseHold?.(); } },
     };
+    if (nativeTouch) await context.routeWebSocket('**/*', socket => { s.faults.push('FIXTURE_TOUCH_UNKNOWN_WS'); socket.close({ code: 1008, reason: 'Offline fixture' }); });
     page.on('pageerror', error => { s.faults.push(`PAGEERROR: ${error.message}`); });
     page.on('request', request => { if (request.resourceType() === 'fetch') s.fetches.add(request); });
     page.on('requestfinished', request => { s.fetches.delete(request); });
@@ -253,8 +254,8 @@ async function dispose(s: Session): Promise<void> {
   }
   if (failures.length) throw new Error(`FIXTURE_CLEANUP_ERROR: ${failures.join('\n')}`);
 }
-async function withSession(run: (session: Session) => Promise<void>): Promise<void> {
-  const s = await openSession(); let failed = false; let failure: unknown; let cleanupFailure: unknown;
+async function withSession(run: (session: Session) => Promise<void>, nativeTouch: boolean = false): Promise<void> {
+  const s = await openSession(nativeTouch); let failed = false; let failure: unknown; let cleanupFailure: unknown;
   try { await run(s); } catch (error) { failed = true; failure = error; }
   try { await dispose(s); } catch (error) { cleanupFailure = error; }
   // Infrastructure always wins over an unrelated product assertion. Never
@@ -795,3 +796,133 @@ describe('mobile image-editor review', () => {
     }
   }
 });
+
+
+// RJ reuses this host and its exact synthetic completion flow. Preparation still
+// uses the established mouse/selectOption/scrollIntoView helpers. Only completed
+// result toggles, horizontal scrolling and confirmation are native-touch proof.
+async function rjCapture(s: Session, theme: Theme, stage: 'selected' | 'failure'): Promise<void> {
+  const directory = path.resolve('output/mobile-ui/language-results-native-20261025', String(process.pid));
+  await mkdir(directory, { recursive: true });
+  const file = path.join(directory, 'rj-' + (theme === 'monochrome' ? 'mono' : 'gold') + '-' + stage + '.png');
+  await s.page.screenshot({ path: file });
+  console.log('RJ_NATIVE_CAPTURE', JSON.stringify({ path: file, theme, stage, physicalAndroid: false, coze: false }));
+}
+async function rjTarget(s: Session, target: Locator, label: string, theme: Theme): Promise<{ x: number; y: number }> {
+  await unique(target);
+  const v = await target.evaluate(el => {
+    const r = el.getBoundingClientRect(); let left = 0, top = 0, right = innerWidth, bottom = innerHeight;
+    for (let parent = el.parentElement; parent; parent = parent.parentElement) {
+      const p = parent.getBoundingClientRect(), style = getComputedStyle(parent);
+      if (/(auto|scroll|hidden|clip)/.test(style.overflowX)) { left = Math.max(left, p.left + parent.clientLeft); right = Math.min(right, p.left + parent.clientLeft + parent.clientWidth); }
+      if (/(auto|scroll|hidden|clip)/.test(style.overflowY)) { top = Math.max(top, p.top + parent.clientTop); bottom = Math.min(bottom, p.top + parent.clientTop + parent.clientHeight); }
+    }
+    const x = r.x + r.width / 2, y = r.y + r.height / 2;
+    return { width: r.width, height: r.height, x, y,
+      visible: r.left >= left - .5 && r.top >= top - .5 && r.right <= right + .5 && r.bottom <= bottom + .5,
+      hit: [[x,y],[r.left+8,y],[r.right-8,y],[x,r.top+8],[x,r.bottom-8]].every(([a,b]) => el.contains(document.elementFromPoint(a,b))) };
+  });
+  console.log('RJ_NATIVE_TARGET', JSON.stringify({ theme, label, ...v }));
+  expect(v.width, label + ' target width').toBeGreaterThanOrEqual(44);
+  expect(v.height, label + ' target height').toBeGreaterThanOrEqual(44);
+  expect(v.visible, label + ' complete visible target').toBe(true);
+  expect(v.hit, label + ' five-point native hit').toBe(true);
+  return { x: v.x, y: v.y };
+}
+async function rjTap(s: Session, target: Locator, label: string, theme: Theme): Promise<void> {
+  const point = await rjTarget(s, target, label, theme);
+  await s.page.touchscreen.tap(point.x, point.y); await settle(s);
+}
+async function rjSwipe(s: Session, row: Locator, direction: 'forward' | 'reverse', theme: Theme): Promise<void> {
+  const b = await rect(row), before = await row.evaluate(el => el.scrollLeft);
+  const data = await row.evaluate(el => ({ client: el.clientWidth, scroll: el.scrollWidth,
+    touchAction: getComputedStyle(el).touchAction, overflowX: getComputedStyle(el).overflowX }));
+  console.log('RJ_NATIVE_SWIPE_BEGIN', JSON.stringify({ theme, direction, before, rect: b, ...data }));
+  expect(data.scroll, 'result row genuinely requires horizontal access').toBeGreaterThan(data.client);
+  const startX = direction === 'forward' ? b.x + b.width - 24 : b.x + 24;
+  const endX = direction === 'forward' ? b.x + 24 : b.x + b.width - 24, y = b.y + b.height / 2;
+  expect(await row.evaluate((el, p) => el.contains(document.elementFromPoint(p.x,p.y)),
+    { x: startX, y }), 'swipe starts in the actual result row').toBe(true);
+  const cdp = await s.context.newCDPSession(s.page); let active = false; let primary: unknown;
+  const cleanup: unknown[] = [], point = (x: number): { x: number; y: number; id: number } => ({ x, y, id: 1 });
+  try {
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [point(startX)] }); active = true;
+    await settle(s);
+    for (const t of [.2,.4,.6,.8,1]) {
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [point(startX + (endX-startX)*t)] }); await settle(s);
+    }
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] }); active = false;
+  } catch (error) { primary = error; }
+  finally {
+    if (active) try { await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] }); } catch (error) { cleanup.push(error); }
+    try { await cdp.detach(); } catch (error) { cleanup.push(error); }
+  }
+  if (cleanup.length) throw new AggregateError([...(primary ? [primary] : []), ...cleanup], 'RJ_TOUCH_CLEANUP_FAILURE');
+  if (primary) throw primary;
+  if (direction === 'forward') await expect.poll(() => row.evaluate(el => el.scrollLeft), { timeout: 1500 }).toBeGreaterThan(before);
+  else await expect.poll(() => row.evaluate(el => el.scrollLeft), { timeout: 1500 }).toBeLessThan(before);
+  await row.evaluate(async el => {
+    let previous = el.scrollLeft, stable = 0;
+    for (let i = 0; i < 90; i++) {
+      await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
+      const next = el.scrollLeft; stable = Math.abs(next-previous) < .01 ? stable+1 : 0; previous = next;
+      if (stable >= 3) return;
+    }
+    throw Error('RJ_NATIVE_SCROLL_NOT_SETTLED');
+  });
+  console.log('RJ_NATIVE_SWIPE', JSON.stringify({ theme, direction, before, after: await row.evaluate(el => el.scrollLeft), ...data, domScrollWrites: false }));
+}
+for (const theme of ['gold', 'monochrome'] as const) {
+  it('RJ language results ' + theme + ' confirms only the touch-selected completed image', async () => {
+    await withSession(async s => {
+      try {
+        await mount(s, theme, 375, 812, true); await bounds(s, 375, 812);
+        await chooseSecond(s, 2); await submit(s); s.release('completed');
+        await s.page.waitForFunction(() => Array.from(document.querySelectorAll<HTMLImageElement>('img'))
+          .filter(image => /^结果 \d+$/.test(image.alt) && image.complete && image.naturalWidth === 64).length === 2);
+        const region = resultRegion(s);
+        // Existing preparation only: this does not claim native vertical reveal.
+        await region.evaluate(el => el.scrollIntoView({ block: 'center', inline: 'nearest' })); await settle(s);
+        await noHorizontalOverflow(s, region);
+        const profile = await s.page.evaluate(() => ({ width: innerWidth, height: innerHeight, touchPoints: navigator.maxTouchPoints,
+          coarse: matchMedia('(pointer: coarse)').matches, noHover: matchMedia('(hover: none)').matches }));
+        console.log('RJ_TOUCH_PROFILE', JSON.stringify({ theme, ...profile, setupUsesEstablishedMouseAndProgrammaticReveal: true }));
+        expect(profile.width).toBe(375); expect(profile.height).toBe(812);
+        expect(profile.touchPoints).toBeGreaterThan(0); expect(profile.coarse).toBe(true); expect(profile.noHover).toBe(true);
+        const all = region.getByRole('button', { name: '全选', exact: true }), count = region.getByText(/^已选 \d+\/2$/);
+        expect(await count.textContent()).toBe('已选 2/2'); await singleLine(all);
+        for (const expected of [0,2,0]) {
+          await rjTap(s, all, 'all-' + expected, theme); expect(await count.textContent()).toBe('已选 ' + expected + '/2');
+        }
+        const secondImage = region.getByRole('img', { name: '结果 2', exact: true }), second = secondImage.locator('..');
+        expect(await secondImage.getAttribute('src')).toBe(s.media.results[1]);
+        const row = second.locator('..'); await rjSwipe(s, row, 'forward', theme);
+        expect(await count.textContent(), 'native scrolling cannot alter selected results').toBe('已选 0/2');
+        for (const expected of [1,0,1]) {
+          await rjTap(s, second, 'second-' + expected, theme); expect(await count.textContent()).toBe('已选 ' + expected + '/2');
+        }
+        const confirm = region.getByRole('button', { name: /^确认使用/ }); await singleLine(confirm);
+        expect(await confirm.textContent()).toMatch(/确认使用\s*\(1\)/); await rjTarget(s, confirm, 'confirm-selected', theme);
+        const before = await s.page.evaluate(() => window.imageEditorFixture.state);
+        expect(before.confirms).toEqual([]); expect(before.closes).toBe(0);
+        await rjCapture(s, theme, 'selected');
+        await rjSwipe(s, row, 'reverse', theme);
+        expect(await count.textContent(), 'selected subset survives reverse native scrolling').toBe('已选 1/2');
+        await rjTap(s, confirm, 'confirm-selected-final', theme);
+        const state = await s.page.evaluate(() => window.imageEditorFixture.state);
+        expect(state.confirms).toEqual([{ url: s.media.results[1], prompt: '离线原图 + ' + PROMPT, aspectRatio: '4:3' }]);
+        expect(state.closes).toBe(1); expect(await resultRegion(s).count()).toBe(0); expect(s.cancels).toEqual([]);
+        expect(s.submissions).toHaveLength(1); expect(s.submissions[0]).toEqual(expectedSubmission(s));
+        await bounds(s, 375, 812);
+        console.log('RJ_RESULTS_COMPLETE', JSON.stringify({ theme, nativeAllToggleBothWays: true, nativeCardToggleBothWays: true,
+          nativeHorizontalRoundTrip: true, exactSecondOnly: true, noEarlyConfirm: true, closeOnce: true,
+          oneSubmission: true, noCancellation: true, nativeCriticalActionsOnly: true, physicalAndroid: false,
+          physicalKeyboard: false, nativeVerticalRevealAccepted: false, wholeImageEditorAccepted: false }));
+      } catch (primary) {
+        console.log('RJ_BODY_FAILURE', JSON.stringify({ theme, error: String(primary), stack: primary instanceof Error ? primary.stack : null }));
+        try { await rjCapture(s, theme, 'failure'); } catch (captureError) { throw new AggregateError([primary, captureError], 'RJ_BODY_AND_CAPTURE_FAILURE'); }
+        throw primary;
+      }
+    }, true);
+  }, 10000);
+}

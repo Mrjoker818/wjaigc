@@ -1,4 +1,7 @@
 // @vitest-environment jsdom
+import { beforeEach as beforeBrowserApis, afterEach as afterBrowserApis } from 'vitest';
+import { cleanup as cleanupBrowserApiReact } from '@testing-library/react';
+import { installJsdomMediaQueries, runJsdomFixtureCleanup } from '../helpers/jsdom-browser-apis';
 import { act, cleanup, fireEvent, render, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { InfiniteCanvas, type CanvasImage } from '@/components/infinite-canvas';
@@ -262,4 +265,16 @@ describe('real canvas context menu viewport containment', () => {
     expect(wheel.defaultPrevented).toBe(false);
     expect(view.container.querySelector('[data-canvas-surface]')!.getAttribute('style')).toBe(before);
   });
+});
+
+// Fixture APIs only; original assertions, timeouts and business inputs stay unchanged.
+let restoreBrowserApis: (() => void) | undefined;
+beforeBrowserApis((): void => {
+  restoreBrowserApis = installJsdomMediaQueries(window, { colorScheme: 'light', reducedMotion: false });
+});
+afterBrowserApis((): void => {
+  runJsdomFixtureCleanup([
+    cleanupBrowserApiReact,
+    (): void => { const restore = restoreBrowserApis; restoreBrowserApis = undefined; restore?.(); },
+  ]);
 });

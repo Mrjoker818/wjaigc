@@ -27,7 +27,7 @@ describe('mobile workspace panel and node controls', () => {
   });
 
   it('opens selected node properties as a closable overlay on narrow viewports', () => {
-    expect(nodeSource).toContain("selectedNode ? 'absolute inset-y-0 right-0 z-50 flex");
+    expect(nodeSource).toContain("selectedNode && !legacyPropertiesDeferred ? 'absolute inset-y-0 right-0 z-50 flex");
     expect(nodeSource).toContain('aria-label="关闭节点属性"');
     expect(nodeSource).toContain('md:relative md:inset-auto md:z-auto md:flex md:w-72');
   });

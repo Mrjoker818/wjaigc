@@ -109,6 +109,61 @@ describe('mobile drawing-first layout dashboard touch', () => {
   });
 });
 
+describe('mobile chat project recovery layout', () => {
+  it.each([[320, 640], [640, 320]])('keeps the retry control readable and reachable at %ix%i', async (width, height) => {
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) =>
+      String(input).includes('chat_simple_projects')
+        ? new Response('{}', { status: 403 })
+        : Response.json({ success: false })));
+    const view = render(<DashboardView user={{ ...user, productType: 'chat' }} onOpenProject={vi.fn()} onNewProject={vi.fn()} />);
+    await screen.findByText('当前账号无法读取对话项目，请检查登录状态后重试。');
+    await show(view.container, width, height);
+    await expectContentFits();
+    const retry = page.getByRole('button', { name: '重试读取' });
+    await retry.scrollIntoViewIfNeeded();
+    const rect = await retry.boundingBox();
+    expect(rect).not.toBeNull();
+    expect(rect!.width).toBeGreaterThanOrEqual(44);
+    expect(rect!.height).toBeGreaterThanOrEqual(44);
+    expect(rect!.x).toBeGreaterThanOrEqual(0);
+    expect(rect!.x + rect!.width).toBeLessThanOrEqual(width);
+    expect(rect!.y).toBeGreaterThanOrEqual(0);
+    expect(rect!.y + rect!.height).toBeLessThanOrEqual(height);
+    expect(await retry.isVisible()).toBe(true);
+    expect(await retry.evaluate(element => {
+      const box = element.getBoundingClientRect();
+      const hit = document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2);
+      return hit === element || (hit !== null && element.contains(hit));
+    })).toBe(true);
+  });
+
+  it.each([[320, 640], [640, 320]])('keeps the slow-read notice and retry control usable at %ix%i', async (width, height) => {
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) =>
+      String(input).includes('chat_simple_projects')
+        ? new Promise<Response>(() => {})
+        : Response.json({ success: false })));
+    const view = render(<DashboardView user={{ ...user, productType: 'chat' }} onOpenProject={vi.fn()} onNewProject={vi.fn()} />);
+    await screen.findByText('读取较慢，仍在进行；完成后会自动显示，也可以重试。', {}, { timeout: 5000 });
+    await show(view.container, width, height);
+    await expectContentFits();
+    const retry = page.getByRole('button', { name: '重试读取' });
+    await retry.scrollIntoViewIfNeeded();
+    const rect = await retry.boundingBox();
+    expect(rect).not.toBeNull();
+    expect(rect!.width).toBeGreaterThanOrEqual(44);
+    expect(rect!.height).toBeGreaterThanOrEqual(44);
+    expect(rect!.x).toBeGreaterThanOrEqual(0);
+    expect(rect!.x + rect!.width).toBeLessThanOrEqual(width);
+    expect(rect!.y).toBeGreaterThanOrEqual(0);
+    expect(rect!.y + rect!.height).toBeLessThanOrEqual(height);
+    expect(await retry.evaluate(element => {
+      const box = element.getBoundingClientRect();
+      const hit = document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2);
+      return hit === element || (hit !== null && element.contains(hit));
+    })).toBe(true);
+  }, 10000);
+});
+
 describe('dashboard narrow screen regression', () => {
   it.each([[640, 320], [390, 240]])('I1: keeps navigation and close reachable with three recent projects at %ix%i', async (width, height) => {
     manager.getProjects.mockReturnValue(recentProjects);
