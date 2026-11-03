@@ -492,17 +492,16 @@ export async function POST(request: NextRequest) {
           } catch { /* best effort */ }
         }
 
-        // 上传到 S3 对象存储（持久化，重部署不丢失）
+        // 对象存储备份不阻塞回传；失败只记日志，后续仍可按 sourceUrl 恢复。
         let s3Key: string | null = null;
         if (isS3Available()) {
-          s3Key = await uploadImageToS3(buffer, filename, contentType);
-          if (s3Key) {
-            console.log(`[save-image] S3 backup: ${s3Key}`);
-          }
+          void uploadImageToS3(buffer, filename, contentType)
+            .then(key => { if (key) console.log(`[save-image] S3 backup: ${key}`); })
+            .catch(err => console.warn('[save-image] S3 backup failed:', err));
         }
 
         // 记录 sourceUrl 映射（用于本地+S3 都丢失时重新下载）
-        await saveImageDataMapping(filename, imageUrl);
+        void saveImageDataMapping(filename, imageUrl).catch(err => console.warn('[save-image] source mapping failed:', err));
 
         return NextResponse.json({
           success: true,

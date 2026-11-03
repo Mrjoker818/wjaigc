@@ -214,7 +214,7 @@ if (typeof setInterval !== 'undefined') {
 // 通用化设计：支持不同提供商的任务状态查询格式
 export async function POST(request: NextRequest) {
   try {
-    const { taskId, model: rawModel, userId: requestUserId, providerId, engine: requestEngine, apiKey: bodyApiKey, apiBaseUrl: bodyApiBaseUrl } = await request.json();
+    const { taskId, model: rawModel, userId: requestUserId, providerId, engine: requestEngine, apiKey: bodyApiKey, apiBaseUrl: bodyApiBaseUrl, quickPoll } = await request.json();
     if (!taskId || typeof taskId !== 'string') {
       return NextResponse.json({
         success: false,
@@ -1884,8 +1884,8 @@ export async function POST(request: NextRequest) {
     // 当任务仍在处理中时，在服务端内快速重试最多10次（间隔1秒）
     // 增加到10次以减少前端轮询往返次数，缓解慢速API和擦除等长时间任务的超时问题
     // 10次 * 1秒 = 最多10秒服务端等待，足够覆盖大多数模型的首轮返回
-    const MAX_QUICK_POLLS = 20;
-    const QUICK_POLL_INTERVAL = 500;
+    const MAX_QUICK_POLLS = quickPoll === true ? 0 : 2;
+    const QUICK_POLL_INTERVAL = 250;
 
     const doSinglePoll = async (): Promise<{ statusResult: Record<string, unknown>; statusResponse: Response } | null> => {
       const ctrl = new AbortController();
@@ -1984,8 +1984,11 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: false, status: 'error', error: '无法获取任务状态', retryable: true }, { status: 200 });
     }
 
-    // ★ 多格式兼容：data 内层 vs 顶层
-    const taskData = (statusResult.data as Record<string, unknown> | undefined) || statusResult;
+    // ★ 多格式兼容：data 内层、data 数组首项 vs 顶层
+    const rawTaskData = statusResult.data;
+    const taskData = (Array.isArray(rawTaskData)
+      ? rawTaskData.find((item): item is Record<string, unknown> => !!item && typeof item === 'object')
+      : rawTaskData as Record<string, unknown> | undefined) || statusResult;
     let taskStatus = taskData?.status as string | undefined;
 
     // 额外检查：data.result.status（部分 API 嵌套更深）

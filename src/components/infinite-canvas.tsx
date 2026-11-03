@@ -5239,15 +5239,8 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
             
             for (const rawUrl of freshUrls) {
               addedUrls.add(rawUrl);
+              const savedUrl = rawUrl;
               try {
-                const saveRes = await fetch('/api/save-image', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ imageUrl: rawUrl }),
-                });
-                const saveData = await saveRes.json();
-                const savedUrl = saveData.url || rawUrl;
-                addedUrls.add(savedUrl);
                 
                 const newImg: CanvasImage = {
                   id: `grp-result-${Date.now()}-${progressiveCount}`,
@@ -5288,8 +5281,13 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                   }
                 };
                 vImg.src = savedUrl;
+                void fetch('/api/save-image', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ imageUrl: rawUrl }),
+                }).catch(err => console.warn('[addProgressiveImages] background save failed:', err));
               } catch (err) {
-                console.warn('[addProgressiveImages] save-image failed:', err);
+                console.warn('[addProgressiveImages] display failed:', err);
               }
             }
           };
@@ -6726,17 +6724,12 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
         ? data.providerName
         : selectedProviderName;
       const persistGeneratedUrl = async (imageUrl: string): Promise<string> => {
-        try {
-          const saveRes = await fetch('/api/save-image', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ imageUrl }),
-          });
-          const saveData = saveRes.ok ? await saveRes.json() : null;
-          return saveData?.success && typeof saveData.url === 'string' ? saveData.url : imageUrl;
-        } catch {
-          return imageUrl;
-        }
+        void fetch('/api/save-image', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ imageUrl }),
+        }).catch(err => console.warn('[canvas-generate] background save failed:', err));
+        return imageUrl;
       };
       const directUrls: string[] = Array.isArray(data.imageUrls) && data.mode === 'direct'
         ? data.imageUrls

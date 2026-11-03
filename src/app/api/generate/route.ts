@@ -838,7 +838,7 @@ export async function POST(request: NextRequest) {
 
             while (bgPollAttempts < bgMaxPollAttempts && pendingSet.size > 0) {
               bgPollAttempts++;
-              await new Promise(r => setTimeout(r, bgPollAttempts <= 3 ? 2000 : 5000));
+              await new Promise(r => setTimeout(r, bgPollAttempts === 1 ? 250 : 1000));
 
               const pendingArr = Array.from(pendingSet);
               const roundResults = await Promise.all(pendingArr.map(async (taskId) => {
