@@ -7830,6 +7830,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
             themeStyle={themeStyle}
           />
           <DocumentStatus
+            exportAvailable={collaborativeCanvas.recoveryExportReady}
             authority={collaborativeCanvas.projectId === currentProject.id
               ? collaborativeCanvas.authority : 'unknown'}
             status={collaborativeCanvas.projectId === currentProject.id

@@ -1,12 +1,15 @@
 'use client';
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type SetStateAction } from 'react';
 import type * as YTypes from 'yjs';
 // 服务端与原生协作入口统一加载 CJS；浏览器由构建配置统一解析。
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const Y: typeof YTypes = require('yjs');
 import { CanvasDocumentMediaSync, CanvasDocumentMediaSyncError, readDocumentMediaResponse } from './document-media-sync';
 import { OwnerDocumentRequestError, readOwnerProjectStatus } from './document-owner-client';
+import { openDocumentHttpConnection, DocumentHttpConnectionError, type DocumentHttpConnection } from './document-http-connection';
+import { acquireDocumentBrowserLease, type DocumentBrowserLease } from './document-browser-lease';
+import { createDocumentHttpBrowserStorage, type DocumentHttpPendingExport } from './document-http-browser-storage';
 
 import {
   applyCanvasImagePatch, createCanvasDocument, readCanvasDocument,
@@ -94,6 +97,7 @@ export interface CollaborativeCanvas extends CollaborativeCanvasState {
   waitForPendingUpdates(): Promise<number>;
   refreshMedia(input: { projectId: string; documentSequence: number; requireDirectorySequence?: boolean }): Promise<CanvasImage[]>;
   recoveryRetryReady: boolean;
+  recoveryExportReady?: boolean;
   applyLocalChange(patch: CanvasImagePatch | CanvasImagePatch[]): void;
   applyLocalGroups(groups: ImageGroupData[], renderedBaseline?: ImageGroupData[]): void;
   applyLocalAnnotations(annotations: CanvasAnnotationV2[], renderedBaseline?: CanvasAnnotationV2[]): void;
@@ -348,6 +352,17 @@ function asRecord(value: unknown): Record<string, unknown> | null {
     ? value as Record<string, unknown> : null;
 }
 
+/** This is only a recovery fence; local storage never grants document authority. */
+function hasDocumentHttpRecords(projectId: string, actorId: string): boolean {
+  const scope = `${encodeURIComponent(actorId)}:${encodeURIComponent(projectId)}`;
+  if (localStorage.getItem(`wujie-canvas-document-http-session-v1:${scope}`) !== null) return true;
+  if (localStorage.getItem(`wujie-canvas-document-http-start-unknown-v1:${scope}`) !== null) return true;
+  const prefix = `wujie-canvas-document-http-journal-v1:${scope}:`;
+  const count = localStorage.length;
+  for (let index = 0; index < count; index++) if (localStorage.key(index)?.startsWith(prefix)) return true;
+  return false;
+}
+
 export function useCollaborativeCanvas(
   projectId: string | null,
   actorId: string | null,
@@ -356,19 +371,39 @@ export function useCollaborativeCanvas(
   const generation = useMemo(() => ({ projectId, actorId, ownerId }), [projectId, actorId, ownerId]);
   const generationRef = useRef<typeof generation | null>(null);
   const legacyAdmissionRef = useRef<CollaborativeCanvasState['authority']>('unknown');
-  const [state, setState] = useState<CollaborativeCanvasState>(INITIAL_STATE);
+  const [scopedState, setScopedState] = useState<{ generation: typeof generation | null; value: CollaborativeCanvasState }>({
+    generation: null, value: INITIAL_STATE,
+  });
+  const state = useMemo(() => scopedState.generation === generation ? scopedState.value : { ...INITIAL_STATE, projectId },
+    [scopedState, generation, projectId]);
   const sessionRef = useRef<CanvasDocumentSession | null>(null);
   const recoveryRef = useRef<ReturnType<CanvasDocumentSession['exportRecoveryCopy']> | null>(null);
+  const httpRecoveryRef = useRef<DocumentHttpPendingExport | null>(null);
+  const recoveryScopeRef = useRef<typeof generation | null>(null);
   const canvasMediaRef = useRef<CanvasImage[]>([]);
   const mediaCompleteRef = useRef(false);
   const stopRef = useRef<(() => void) | null>(null);
   const mediaSyncRef = useRef<CanvasDocumentMediaSync | null>(null);
+  const setState = useCallback((action: SetStateAction<CollaborativeCanvasState>): void => {
+    setScopedState(previous => {
+      // The returned view is scope-bound during render; committed scope owns
+      // later state updates. Abandoned renders never mutate this guard.
+      if (recoveryScopeRef.current !== generation) return previous;
+      const value = previous.generation === generation ? previous.value : { ...INITIAL_STATE, projectId };
+      return { generation, value: typeof action === 'function' ? action(value) : action };
+    });
+  }, [generation, projectId]);
 
   // Commit-time cleanup invalidates old callbacks before any consumer layout
   // effect can launch another operation. Do not activate the new generation
   // here: its session is only installed by the passive connection lifecycle.
-  useLayoutEffect(() => (): void => {
-    if (generationRef.current === generation) generationRef.current = null;
+  useLayoutEffect(() => {
+    recoveryScopeRef.current = generation;
+    recoveryRef.current = null; httpRecoveryRef.current = null;
+    return (): void => {
+      if (generationRef.current === generation) generationRef.current = null;
+      if (recoveryScopeRef.current === generation) recoveryScopeRef.current = null;
+    };
   }, [generation]);
 
   useEffect(() => {
@@ -382,16 +417,46 @@ export function useCollaborativeCanvas(
     let inspecting = false;
     let legacyAuthority = false;
     let ownerDocumentEnabled = false;
+    let documentSeen = false;
     let retry: ReturnType<typeof setTimeout> | null = null;
     let legacyRecheck: ReturnType<typeof setTimeout> | null = null;
     let request: AbortController | null = null;
     let onFocus = (): void => {};
     let mediaSync: CanvasDocumentMediaSync | null = null;
+    let selectedTransport: 'ws' | 'http' | null = null;
+    let lastTransport: 'ws' | 'http' = 'ws';
+    let transportOwnerId: string | null = null;
+    let httpConnection: DocumentHttpConnection | null = null;
+    let wsLease: DocumentBrowserLease | null = null;
+    let wsPendingStore: PendingDocumentUpdateStore | null = null;
     sessionRef.current = null;
     mediaSyncRef.current = null;
     recoveryRef.current = null;
+    httpRecoveryRef.current = null;
     canvasMediaRef.current = [];
     mediaCompleteRef.current = false;
+    const isCurrent = (): boolean => active && !stopped && generationRef.current === generation;
+    const closeWriters = (): Promise<void> => {
+      const session = sessionRef.current;
+      sessionRef.current = null;
+      if (session) {
+        const initialized = session.appliedServerSequence >= 0;
+        session.disconnect();
+        // disconnect captures its in-memory pending frames before destroying the document.
+        if (recoveryScopeRef.current === generation) {
+          try {
+            const copy = session.exportRecoveryCopy();
+            if (initialized) recoveryRef.current = copy;
+            else if (projectId && actorId && copy.pendingFrames.length) {
+              httpRecoveryRef.current = { actorId, projectId, pendingFrames: copy.pendingFrames };
+            }
+          } catch { /* Durable records remain untouched. */ }
+        }
+      }
+      const http = httpConnection; httpConnection = null;
+      const lease = wsLease; wsLease = null; wsPendingStore = null;
+      return Promise.allSettled([http?.close(), lease?.release()]).then(() => undefined);
+    };
     const stop = (): void => {
       active = false;
       stopped = true;
@@ -405,14 +470,7 @@ export function useCollaborativeCanvas(
       mediaSync?.stop();
       if (generationRef.current === generation) generationRef.current = null;
       if (mediaSyncRef.current === mediaSync) mediaSyncRef.current = null;
-      const session = sessionRef.current;
-      session?.disconnect();
-      if (session) {
-        try { recoveryRef.current = session.exportRecoveryCopy(); } catch {
-          // No unconfirmed changes to retain. Durable storage is never removed here.
-        }
-      }
-      sessionRef.current = null;
+      void closeWriters();
       if (stopRef.current === stop) stopRef.current = null;
     };
     stopRef.current = stop;
@@ -425,12 +483,12 @@ export function useCollaborativeCanvas(
     const stopForAccessLoss = (): void => {
       stop();
       setState(previous => ({ ...previous, authority: 'document',
-        status: recoveryRef.current ? 'recovery' : 'unavailable' }));
+        status: recoveryRef.current || httpRecoveryRef.current ? 'recovery' : 'unavailable' }));
     };
 
     const publishMedia = (status: CanvasDocumentStatus, images: Record<string, CanvasPlacement>,
       projection: CanvasDocumentProjection): void => {
-      if (!active) return;
+      if (!isCurrent()) return;
       mediaSync?.setDocument(projection, sessionRef.current?.appliedServerSequence ?? -1);
       const view = mediaSync!.view;
       const currentMedia = view.images;
@@ -445,15 +503,55 @@ export function useCollaborativeCanvas(
       if (!active) return;
       const session = sessionRef.current;
       if (session) publishMedia(session.status, session.images, session.projection);
-    }, stopForAccessLoss);
+    }, stopForAccessLoss, actorId);
 
     const scheduleRetry = (): void => {
       if (!active || stopped || retry) return;
+      if (lastTransport === 'http' && attempts >= 3) return;
       const delay = Math.min(10_000, 500 * 2 ** Math.min(attempts++, 5));
       retry = setTimeout(() => {
         retry = null;
-        void connect();
+        void (selectedTransport === null ? inspect() : connect());
       }, delay);
+    };
+
+    const reportRecovery = (): void => {
+      legacyAuthority = false; legacyAdmissionRef.current = documentSeen ? 'document' : 'unknown';
+      setState(previous => ({ ...previous, projectId,
+        authority: previous.authority === 'document' || documentSeen ? 'document' : 'unknown', status: 'recovery' }));
+    };
+    const preserveBlockedHttp = async (signal: AbortSignal): Promise<void> => {
+      await closeWriters();
+      if (!isCurrent() || signal.aborted) return;
+      // Reading local frames is not authority to send them. Take the same
+      // exclusive lease, preserve raw records and never invent a projection.
+      let lease: DocumentBrowserLease | undefined;
+      try {
+        lease = await acquireDocumentBrowserLease({ actorId, projectId, signal });
+        if (!isCurrent() || signal.aborted) return;
+        const storage = createDocumentHttpBrowserStorage({ actorId, projectId,
+          pendingStore: createBrowserPendingUpdateStore(projectId, actorId),
+          assertLease: () => { lease!.assertOwned(); if (!isCurrent() || signal.aborted) throw new Error('DOCUMENT_SCOPE_CHANGED'); },
+          storage: localStorage });
+        const copy = storage.exportPending();
+        if (copy.pendingFrames.length && isCurrent() && !signal.aborted) httpRecoveryRef.current = copy;
+      } catch { /* Other owner or unreadable storage: do not promise an export. */ }
+      finally { await lease?.release(); }
+      if (isCurrent() && !signal.aborted) reportRecovery();
+    };
+    const createSession = (socket: WebSocket, store: PendingDocumentUpdateStore): CanvasDocumentSession => {
+      if (!isCurrent()) throw new Error('DOCUMENT_SCOPE_CHANGED');
+      const owned: { session: CanvasDocumentSession | null } = { session: null };
+      const session = createCanvasDocumentSession(socket, (status, images, projection) => {
+        if (!isCurrent() || !owned.session || sessionRef.current !== owned.session) return;
+        publishMedia(status, images, projection); mediaSync?.autoRefresh();
+        if (status === 'unavailable') {
+          if (lastTransport === 'http') selectedTransport = null;
+          scheduleRetry();
+        }
+        if (status === 'saved') { attempts = 0; recoveryRef.current = null; httpRecoveryRef.current = null; }
+      }, store, () => { if (isCurrent() && owned.session && sessionRef.current === owned.session) stopForAccessLoss(); });
+      owned.session = session; sessionRef.current = session; return session;
     };
 
     const connect = async (): Promise<void> => {
@@ -461,10 +559,47 @@ export function useCollaborativeCanvas(
       connecting = true;
       const controller = new AbortController();
       request = controller;
+      let unownedSocket: WebSocket | null = null;
       try {
+        if (!isCurrent()) return;
+        if (selectedTransport === 'http') {
+          lastTransport = 'http';
+          if (!transportOwnerId) throw new Error('DOCUMENT_TRANSPORT_INVALID');
+          await closeWriters();
+          if (!isCurrent() || controller.signal.aborted) return;
+          const opened = await openDocumentHttpConnection({
+            actorId, projectId, ownerId: transportOwnerId, signal: controller.signal,
+            assertCurrent: (): void => { if (!isCurrent() || controller.signal.aborted) throw new Error('DOCUMENT_SCOPE_CHANGED'); },
+            createPendingStore: () => createBrowserPendingUpdateStore(projectId, actorId), createSession,
+            onRecovery: (copy): void => {
+              if (!isCurrent() || controller.signal.aborted || copy.actorId !== actorId || copy.projectId !== projectId) return;
+              if (copy.pendingFrames.length) httpRecoveryRef.current = structuredClone(copy);
+            },
+          });
+          if (!isCurrent() || controller.signal.aborted) { await opened.close(); return; }
+          httpConnection = opened;
+          return;
+        }
+        lastTransport = 'ws';
+        if (hasDocumentHttpRecords(projectId, actorId)) { await preserveBlockedHttp(controller.signal); return; }
+        if (!wsPendingStore) {
+          const original = createBrowserPendingUpdateStore(projectId, actorId);
+          if (globalThis.isSecureContext === true && typeof navigator.locks?.request === 'function') {
+            const lease = await acquireDocumentBrowserLease({ actorId, projectId, signal: controller.signal });
+            if (!isCurrent() || controller.signal.aborted) { await lease.release(); return; }
+            wsLease = lease;
+            lease.signal.addEventListener('abort', (): void => {
+              if (isCurrent() && wsLease === lease) { stop(); setState(previous => ({ ...previous, status: recoveryRef.current ? 'recovery' : 'unavailable' })); }
+            }, { once: true });
+            wsPendingStore = createDocumentHttpBrowserStorage({ actorId, projectId, pendingStore: original,
+              assertLease: () => lease.assertOwned(), storage: localStorage }).guardedPendingStore;
+          } else wsPendingStore = original;
+        }
+        wsPendingStore.load();
+        if (hasDocumentHttpRecords(projectId, actorId)) { await preserveBlockedHttp(controller.signal); return; }
         const response = await fetch('/api/collaboration/document-ticket', {
           method: 'POST', credentials: 'include', cache: 'no-store',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', 'x-wujie-expected-actor-id': actorId },
           body: JSON.stringify({ projectId }), signal: controller.signal,
         });
         if (!active || stopped || controller.signal.aborted) return;
@@ -475,9 +610,13 @@ export function useCollaborativeCanvas(
         }
         const payload = asRecord(await response.json());
         if (!active || stopped || controller.signal.aborted) return;
+        if (response.status === 409 && payload?.code === 'ACTOR_SCOPE_CHANGED') { stopForAccessLoss(); return; }
         if (payload?.code === 'DOCUMENT_DISABLED' || payload?.code === 'DOCUMENT_PROJECT_NOT_ENABLED') {
           stopForAccessLoss();
           return;
+        }
+        if (payload?.code === 'DOCUMENT_TRANSPORT_CHANGED') {
+          selectedTransport = null; scheduleRetry(); return;
         }
         if (!response.ok || typeof payload?.ticket !== 'string'
             || !TICKET_PATTERN.test(payload.ticket)) {
@@ -487,29 +626,41 @@ export function useCollaborativeCanvas(
         }
         const url = new URL('/api/collaboration/document', window.location.href);
         url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
-        const pendingStore = createBrowserPendingUpdateStore(projectId, actorId);
-        pendingStore.load();
+        if (hasDocumentHttpRecords(projectId, actorId)) { await preserveBlockedHttp(controller.signal); return; }
         const socket = new WebSocket(url.href, [
           'wujie-document-v1', `wujie-document-ticket.${payload.ticket}`,
         ]);
+        unownedSocket = socket;
+        if (!isCurrent() || controller.signal.aborted) return;
         if (sessionRef.current) {
           sessionRef.current.replaceSocket(socket);
         } else {
-          sessionRef.current = createCanvasDocumentSession(socket, (status, images, projection) => {
-            if (!active) return;
-            publishMedia(status, images, projection);
-            mediaSync?.autoRefresh();
-            if (status === 'unavailable') scheduleRetry();
-            if (status === 'saved') attempts = 0;
-          }, pendingStore, stopForAccessLoss);
+          createSession(socket, wsPendingStore);
         }
+        unownedSocket = null;
+        const owningSession = sessionRef.current;
+        const originalClose = socket.onclose;
+        socket.onclose = (event): void => {
+          const modeChanged = isCurrent() && sessionRef.current === owningSession && event.code === 1012 && event.reason === 'document transport changed';
+          if (modeChanged) selectedTransport = null;
+          originalClose?.call(socket, event);
+          if (modeChanged && isCurrent()) scheduleRetry();
+        };
         setState(previous => ({ ...previous, authority: 'document', status: 'connecting' }));
-      } catch {
+      } catch (error) {
         if (active && !stopped && !controller.signal.aborted) {
+          if (lastTransport === 'ws' && wsLease && !sessionRef.current) {
+            const lease = wsLease; wsLease = null; wsPendingStore = null; await lease.release();
+            if (!isCurrent() || controller.signal.aborted) return;
+          }
+          if (error instanceof DocumentHttpConnectionError && error.code === 'RECOVERY_REQUIRED') { reportRecovery(); return; }
+          if (error instanceof DocumentHttpConnectionError && error.code === 'TRANSPORT_CHANGED') { selectedTransport = null; scheduleRetry(); return; }
+          if (error instanceof DocumentHttpConnectionError && error.code === 'ACCESS_DENIED') { stopForAccessLoss(); return; }
           setState(previous => ({ ...previous, authority: 'document', status: 'unavailable' }));
           scheduleRetry();
         }
       } finally {
+        unownedSocket?.close();
         if (request === controller) request = null;
         connecting = false;
       }
@@ -535,11 +686,11 @@ export function useCollaborativeCanvas(
     onFocus = (): void => {
       if (!active || stopped) return;
       const session = sessionRef.current;
-      if (session && session.appliedServerSequence >= 0) {
+      if (session && session.appliedServerSequence >= 0 && session.status !== 'unavailable') {
         mediaSync?.autoRefresh(true);
         return;
       }
-      if (!legacyAuthority) return;
+      if (!legacyAuthority) { selectedTransport = null; attempts = 0; void inspect(); return; }
       if (legacyRecheck) clearTimeout(legacyRecheck);
       legacyRecheck = null;
       void inspect();
@@ -552,33 +703,42 @@ export function useCollaborativeCanvas(
       request = controller;
       const unavailable = (): void => {
         legacyAuthority = false;
-        legacyAdmissionRef.current = ownerDocumentEnabled ? 'document' : 'unknown';
-        setState({ ...INITIAL_STATE, projectId, authority: ownerDocumentEnabled ? 'document' : 'unknown', status: 'unavailable' });
+        legacyAdmissionRef.current = documentSeen ? 'document' : 'unknown';
+        setState({ ...INITIAL_STATE, projectId, authority: documentSeen ? 'document' : 'unknown', status: 'unavailable' });
       };
       try {
         // The local owner hint only selects a server-authorized read. Editors
         // still use the shared document directory, never the owner-only route.
         if (ownerId === actorId) {
-          const ownerStatus = await readOwnerProjectStatus(projectId, controller.signal);
+          const ownerStatus = await readOwnerProjectStatus(projectId, controller.signal, actorId);
           if (!active || controller.signal.aborted) return;
           if (!ownerStatus.enabled) {
-            if (ownerDocumentEnabled) { unavailable(); return; }
+            if (documentSeen) { await closeWriters(); if (isCurrent()) reportRecovery(); return; }
+            if (hasDocumentHttpRecords(projectId, actorId) || createBrowserPendingUpdateStore(projectId, actorId).load().length > 0) {
+              await preserveBlockedHttp(controller.signal); return;
+            }
             legacyAuthority = true;
             legacyAdmissionRef.current = 'legacy';
             setState({ ...INITIAL_STATE, projectId, authority: 'legacy', status: 'disabled' });
             return;
           }
           ownerDocumentEnabled = true;
+          documentSeen = true;
           legacyAuthority = false;
           legacyAdmissionRef.current = 'document';
           // Even when the global feature is off, an enabled document remains
           // authoritative. Stop legacy writes before awaiting its geometry.
           setState({ ...INITIAL_STATE, projectId, authority: 'document' });
         }
-        const response = await readDocumentMediaResponse(projectId, controller.signal);
+        const response = await readDocumentMediaResponse(projectId, controller.signal, undefined, actorId);
         const payload = asRecord(response.payload);
         if (!active || controller.signal.aborted) return;
+        if (response.status === 409 && payload?.code === 'ACTOR_SCOPE_CHANGED') { stopForAccessLoss(); return; }
         if (!ownerDocumentEnabled && response.status === 409 && payload?.code === 'DOCUMENT_PROJECT_NOT_ENABLED') {
+          if (documentSeen) { await closeWriters(); if (isCurrent()) reportRecovery(); return; }
+          if (hasDocumentHttpRecords(projectId, actorId) || createBrowserPendingUpdateStore(projectId, actorId).load().length > 0) {
+            await preserveBlockedHttp(controller.signal); return;
+          }
           legacyAuthority = true;
           legacyAdmissionRef.current = 'legacy';
           setState({ ...INITIAL_STATE, projectId, authority: 'legacy', status: 'disabled' });
@@ -595,6 +755,7 @@ export function useCollaborativeCanvas(
           return;
         }
         const directory = mediaSync!.acceptDirectory(payload);
+        documentSeen = true;
         legacyAdmissionRef.current = 'document';
         const projection = directory.projection;
         const images = projection.placements;
@@ -610,17 +771,25 @@ export function useCollaborativeCanvas(
           return;
         }
         if (payload.readOnly === true) {
-          setState({ projectId, authority: 'document', status: 'read-only', appliedServerSequence: -1,
+          await closeWriters();
+          if (!isCurrent() || controller.signal.aborted) return;
+          setState({ projectId, authority: 'document', status: recoveryRef.current || httpRecoveryRef.current ? 'recovery' : 'read-only', appliedServerSequence: -1,
             images, canvasImages: projected.images, ...metadata });
           return;
         }
+        if (payload.documentTransport !== undefined && payload.documentTransport !== 'ws' && payload.documentTransport !== 'http') {
+          throw new Error('DOCUMENT_TRANSPORT_INVALID');
+        }
+        selectedTransport = payload.documentTransport === 'http' ? 'http' : 'ws';
+        transportOwnerId = typeof payload.ownerId === 'string' && payload.ownerId.length > 0 && payload.ownerId.length <= 256
+          && payload.ownerId === payload.ownerId.trim() && !/[\u0000-\u001f\u007f]/u.test(payload.ownerId) ? payload.ownerId : null;
         mediaSyncRef.current = mediaSync;
         setState({ projectId, authority: 'document', status: 'connecting', appliedServerSequence: -1,
           images, canvasImages: projected.images, ...metadata });
         await connect();
       } catch (error) {
         if (active && !controller.signal.aborted) {
-          if (error instanceof OwnerDocumentRequestError && error.status === 401) {
+          if (error instanceof OwnerDocumentRequestError && (error.status === 401 || error.code === 'ACTOR_SCOPE_CHANGED')) {
             stopForAccessLoss();
             return;
           }
@@ -638,7 +807,7 @@ export function useCollaborativeCanvas(
     window.addEventListener('focus', onFocus);
     void inspect();
     return stop;
-  }, [projectId, actorId, ownerId, generation]);
+  }, [projectId, actorId, ownerId, generation, setState]);
 
   const isWritable = useCallback((): boolean => {
     const session = sessionRef.current;
@@ -714,27 +883,40 @@ export function useCollaborativeCanvas(
     return requireCurrentSession().redoLocal();
   }, [requireCurrentSession]);
   const retryRecovered = useCallback((): void => {
+    if (generationRef.current !== generation) throw new Error('协作作用域已改变');
     if (!mediaCompleteRef.current) throw new Error('协作媒体投影不完整，不能重试');
     if (!sessionRef.current) throw new Error('协作文档不可重试');
     sessionRef.current.retryRecovered();
-  }, []);
+  }, [generation]);
   const disconnect = useCallback((): void => {
+    if (recoveryScopeRef.current !== generation) return;
     stopRef.current?.();
-    setState(previous => ({ ...previous, status: recoveryRef.current ? 'recovery' : 'unavailable' }));
-  }, []);
+    setState(previous => ({ ...previous, status: recoveryRef.current || httpRecoveryRef.current ? 'recovery' : 'unavailable' }));
+  }, [generation, setState]);
   const exportRecoveryCopy = useCallback((): string => {
-    if (!projectId || !actorId || (state.status !== 'rejected' && state.status !== 'recovery') ||
-        (!sessionRef.current && !recoveryRef.current)) {
+    const currentSession = generationRef.current === generation ? sessionRef.current : null;
+    if (!projectId || !actorId || recoveryScopeRef.current !== generation || (state.status !== 'rejected' && state.status !== 'recovery') ||
+        (!currentSession && !recoveryRef.current && !httpRecoveryRef.current)) {
       throw new Error('当前没有可导出的协作冲突副本');
     }
-    const copy = recoveryRef.current ?? sessionRef.current!.exportRecoveryCopy();
+    const copy = recoveryRef.current ?? (currentSession?.appliedServerSequence !== undefined && currentSession.appliedServerSequence >= 0
+      ? currentSession.exportRecoveryCopy() : undefined);
+    const raw = !copy && currentSession ? currentSession.exportRecoveryCopy() : undefined;
+    const pending = httpRecoveryRef.current ?? (raw ? { actorId, projectId, pendingFrames: raw.pendingFrames } : null);
+    if (!copy && pending) {
+      const local = pending;
+      if (local.actorId !== actorId || local.projectId !== projectId) throw new Error('恢复副本作用域已改变');
+      return JSON.stringify({ schemaVersion: 1, projectId, actorId, capturedAt: new Date().toISOString(),
+        unconfirmedOnly: true, pendingFrames: local.pendingFrames }, null, 2);
+    }
+    if (!copy) throw new Error('当前没有可导出的协作冲突副本');
     return JSON.stringify({
       schemaVersion: 1, projectId, actorId, capturedAt: new Date().toISOString(),
       projection: copy.projection, canvasImages: state.canvasImages,
       groups: state.groups, annotations: state.annotations,
       pendingFrames: copy.pendingFrames,
     }, null, 2);
-  }, [projectId, actorId, state]);
+  }, [projectId, actorId, state, generation]);
   return { ...state,
     // Retained legacy render objects are used by async insertion/persistence
     // guards. Revoke them synchronously; never grant legacy before a render.
@@ -742,7 +924,9 @@ export function useCollaborativeCanvas(
       if (state.authority !== 'legacy') return state.authority;
       return generationRef.current === generation ? legacyAdmissionRef.current : 'unknown';
     },
-    recoveryRetryReady: state.status === 'recovery' && mediaCompleteRef.current,
+    recoveryRetryReady: state.status === 'recovery' && mediaCompleteRef.current && sessionRef.current?.status === 'recovery',
+    recoveryExportReady: recoveryScopeRef.current === generation && (state.status === 'rejected' || state.status === 'recovery') &&
+      !!(recoveryRef.current || httpRecoveryRef.current || (generationRef.current === generation && sessionRef.current)),
     applyLocalChange, applyLocalGroups, applyLocalAnnotations,
     recordMediaHistory, restorePlacementHistoryMetadata, rebindPlacementHistory,
     undoLocal, redoLocal, retryRecovered, exportRecoveryCopy, disconnect, refreshMedia, waitForPendingUpdates, isWritable, isSessionActive };
@@ -810,6 +994,7 @@ export function createCanvasDocumentSession(
   let hasUncertainUpdates = pendingUpdates.length > 0 && !hasRejectedUpdates;
   let lastSequence = -1;
   let lastAckSequence = -1;
+  let ackCleanupFailed = false;
   let replayPendingAfterConnect = false;
   let automaticReplayCount = 0;
   let stagedLocalUpdate: { id: string; frame: Uint8Array; intent: Record<string, unknown> } | null = null;
@@ -1388,9 +1573,10 @@ export function createCanvasDocumentSession(
 
   const attachSocket = (connected: WebSocket): void => {
     socket = connected;
+    ackCleanupFailed = false;
     connected.binaryType = 'arraybuffer';
     connected.onmessage = event => {
-    if (socket !== connected) return;
+    if (socket !== connected || ackCleanupFailed) return;
     if (disconnected || !(event.data instanceof ArrayBuffer) || event.data.byteLength < 9) {
       return;
     }
@@ -1456,13 +1642,28 @@ export function createCanvasDocumentSession(
       publish();
     } else if (bytes[0] === 0x12 && initialized && bytes.length === 9
         && sequence >= lastAckSequence && pendingUpdates.length > 0 && !pendingUpdates[0].rejected) {
-      lastAckSequence = sequence;
-      const acknowledged = pendingUpdates.shift();
-      if (acknowledged?.id) {
-        try { pendingStore?.remove(acknowledged.id); } catch {
-          // A confirmed server update is safe to replay if local cleanup fails.
+      const acknowledged = pendingUpdates[0];
+      if (pendingStore) {
+        try {
+          if (!acknowledged.id) throw new Error('DOCUMENT_PENDING_ID_MISSING');
+          pendingStore.remove(acknowledged.id);
+          if (pendingStore.load().some(update => update.id === acknowledged.id)) {
+            throw new Error('DOCUMENT_PENDING_CLEANUP_UNCONFIRMED');
+          }
+        } catch {
+          // Keep the frame in memory even if remove deleted before throwing.
+          // Reject waiters before an observer can see it as saved; block later
+          // frames on this socket and require recovery on a replacement socket.
+          ackCleanupFailed = true;
+          hasUncertainUpdates = true;
+          status = 'unavailable';
+          publish();
+          try { connected.close(); } catch { /* Already unavailable. */ }
+          return;
         }
       }
+      lastAckSequence = sequence;
+      pendingUpdates.shift();
       // Earlier sent frames may still ACK after a later local failure. Confirm
       // those frames without unlocking rejected/uncertain recovery history.
       status = hasRejectedUpdates ? 'rejected' : hasUncertainUpdates ? 'recovery'

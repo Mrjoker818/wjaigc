@@ -1,4 +1,5 @@
 import 'server-only';
+import { pruneExpiredDocumentExchangeSessions } from './document-exchange-maintenance';
 
 import { createHash, randomBytes } from 'node:crypto';
 
@@ -195,9 +196,14 @@ export function startDocumentTicketMaintenance(intervalMs = 15_000): () => Promi
   let pending: Promise<void> | null = null;
   const timer = setInterval(() => {
     if (pending) return;
-    pending = pruneExpiredDocumentTickets().then(() => undefined).catch(() => {
-      // The next cycle retries after a transient database failure.
-    }).finally(() => { pending = null; });
+    pending = (async () => {
+      try { await pruneExpiredDocumentTickets(); } catch {
+        // The next cycle retries after a transient ticket-maintenance failure.
+      }
+      try { await pruneExpiredDocumentExchangeSessions(); } catch {
+        // The next cycle retries after a transient exchange-maintenance failure.
+      }
+    })().finally(() => { pending = null; });
   }, Number.isFinite(intervalMs) ? Math.max(50, intervalMs) : 15_000);
   timer.unref?.();
   return async (): Promise<void> => {

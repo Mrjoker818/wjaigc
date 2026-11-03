@@ -75,7 +75,7 @@ export function parseDocumentMediaDirectory(value: unknown, projectId: string): 
 
 /** The deadline includes body decoding, and does not rely on fetch honoring abort. */
 export async function readDocumentMediaResponse(projectId: string, signal: AbortSignal,
-  transportSettled: () => void = () => {}): Promise<{
+  transportSettled: () => void = () => {}, expectedActorId?: string): Promise<{
   status: number; ok: boolean; payload: unknown;
 }> {
   const controller = new AbortController();
@@ -92,6 +92,7 @@ export async function readDocumentMediaResponse(projectId: string, signal: Abort
     if (signal.aborted) throw new CanvasDocumentMediaSyncError('CANCELLED');
     const response = await fetch(`/api/collaboration/document-project?projectId=${encodeURIComponent(projectId)}`, {
       credentials: 'include', cache: 'no-store', signal: controller.signal,
+      ...(expectedActorId !== undefined ? { headers: { 'x-wujie-expected-actor-id': expectedActorId } } : {}),
     });
     if (controller.signal.aborted) throw new CanvasDocumentMediaSyncError('CANCELLED');
     // Authorization does not depend on whether an error page is JSON.
@@ -133,7 +134,7 @@ export class CanvasDocumentMediaSync {
   lastError: CanvasDocumentMediaSyncError | null = null;
 
   constructor(private readonly projectId: string, private readonly changed: () => void,
-    private readonly accessLost: () => void = () => {}) {}
+    private readonly accessLost: () => void = () => {}, private readonly expectedActorId?: string) {}
 
   acceptDirectory(value: unknown): MediaDirectory {
     const payload = parseDocumentMediaDirectory(value, this.projectId);
@@ -260,10 +261,11 @@ export class CanvasDocumentMediaSync {
       const transport = this.transport;
       transport.pending = true;
       const response = await readDocumentMediaResponse(this.projectId, batch.controller.signal,
-        () => { transport.pending = false; });
+        () => { transport.pending = false; }, this.expectedActorId);
       const payload = record(response.payload);
       if (this.batch !== batch || this.stopped) return;
-      if (response.status === 401 || response.status === 403 || payload?.code === 'DOCUMENT_DISABLED' ||
+      if (response.status === 401 || response.status === 403 ||
+          (response.status === 409 && payload?.code === 'ACTOR_SCOPE_CHANGED') || payload?.code === 'DOCUMENT_DISABLED' ||
           payload?.code === 'DOCUMENT_PROJECT_NOT_ENABLED' || payload?.readOnly === true) {
         this.stopped = true;
         this.finish(new CanvasDocumentMediaSyncError('UNAVAILABLE'));

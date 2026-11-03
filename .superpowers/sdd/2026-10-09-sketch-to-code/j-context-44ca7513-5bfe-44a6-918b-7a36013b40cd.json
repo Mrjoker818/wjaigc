@@ -1,0 +1,16 @@
+{
+  "kind": "TASK6_ACCEPTED_SOURCE_ISOLATED_CONTEXT",
+  "sourceRoot": "J:\\无界本地版\\projects\\_stage7-safe-regression-511c1ace8b7aaa1b3ec021f6",
+  "mirrorRoot": "J:\\无界本地版\\projects\\_task6-sketch-20261010-cid56bf0c6",
+  "testDatabaseUrl": "postgresql://wujie_full_341db62fb624f9f63bfe@127.0.0.1:49841/wujie_bridge_test_fullreg_136c2314159689de",
+  "runtimeDatabaseUrl": "postgresql://wujie_full_341db62fb624f9f63bfe@127.0.0.1:49841/wujie_bridge_test_metadata_511c1ace8b7aaa1b3ec021f6",
+  "databaseReady": {
+    "path": "J:\\无界本地版\\projects\\_stage7-safe-regression-511c1ace8b7aaa1b3ec021f6\\.superpowers\\sdd\\2026-10-09-sketch-to-code\\j-ready-44ca7513-5bfe-44a6-918b-7a36013b40cd.json",
+    "sha256": "20b675ef375396ebc79e5d4e12b11ebf48bafafd437dcc01c0caa1b48dc3e592"
+  },
+  "task5Accepted": true,
+  "stage7Accepted": false,
+  "researchNotStarted": true,
+  "historicalTask5Only": true,
+  "runtimeEndpointMetadataOnly": true
+}
